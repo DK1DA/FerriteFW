@@ -3,6 +3,20 @@
 version = 4
 
 [[package]]
+name = "keypad"
+version = "0.1.0"
+dependencies = [
+ "uradio-bus",
+]
+
+[[package]]
+name = "st7789"
+version = "0.1.0"
+dependencies = [
+ "uradio-bus",
+]
+
+[[package]]
 name = "uradio-bus"
 version = "0.1.0"
 

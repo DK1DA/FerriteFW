@@ -7,8 +7,8 @@ firmware for the Radtel RT-950 Pro, and usable on anything with the same parts.
 | --- | --- | --- |
 | [`uradio-bus`](crates/bus) | The minimal bus traits the drivers use, and recording mocks for host tests | 0.1 |
 | [`w25q`](crates/w25q) | W25Q SPI NOR flash: read, program, non-blocking erase, write protection by address range | 0.1 |
-| `st7789` | ST7789 display over an 8-bit parallel bus: windows, fills, hardware scroll | planned |
-| `keypad` | Key matrix: scan, debounce, long press | planned |
+| [`st7789`](crates/st7789) | ST7789 display over an 8-bit parallel bus: start-up as awaitable steps, windows, fills, hardware scroll | 0.1 |
+| [`keypad`](crates/keypad) | Key matrix with a ground row and direct keys, debounce, press/long/repeat events, quadrature encoder | 0.1 |
 | `nmea` | GPS sentences: position, time, fix | planned |
 | `si4732` | SI4732 broadcast receiver: FM, AM, SW, SSB (patch from external flash), RDS | planned |
 | `bk4829` | BK4829 transceiver: tuning, modes, squelch, tones, DTMF, FSK modem; transmit behind the `tx` feature | planned |
