@@ -7,7 +7,7 @@
 use ferrite_core::freq::mhz;
 use ferrite_core::msg::Live;
 use ferrite_core::VERSION;
-use ferrite_ui::boot::{self, BootInfo, Check, State, Style};
+use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::fb::FrameBuffer;
 use ferrite_ui::home;
 use ferrite_ui::panel::{H, W};
@@ -45,10 +45,12 @@ fn main() {
     ];
     let info = BootInfo { version: VERSION, callsign: Some("VA7FER"), checks: &checks, tx_armed: false };
     let mut fb = FrameBuffer::new();
-    boot::draw(&mut fb, Style::Logo, &info);
-    save(&fb, "boot-logo", scale);
-    boot::draw(&mut fb, Style::List, &info);
-    save(&fb, "boot-list", scale);
+    boot::draw(&mut fb, &info);
+    save(&fb, "boot", scale);
+    let mut failed = checks;
+    failed[1] = Check { label: "SPI flash", value: "no answer", state: State::Fail };
+    boot::draw(&mut fb, &BootInfo { checks: &failed, ..info });
+    save(&fb, "boot-failed", scale);
 
     let live = Live { freq: mhz(146) + 52_000, rssi: -87, squelch_open: true, chips: 3, ..Default::default() };
     home::draw(&mut fb, &live);

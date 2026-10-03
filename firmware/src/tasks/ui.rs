@@ -12,7 +12,7 @@ use embassy_time::{Duration, Instant, Timer};
 use ferrite_core::chipid;
 use ferrite_core::msg::{Live, RadioCmd, Source};
 use ferrite_core::VERSION;
-use ferrite_ui::boot::{self, BootInfo, Check, State, Style};
+use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::gfx::BG;
 use ferrite_ui::home;
 
@@ -52,7 +52,7 @@ pub async fn task() {
                 _ => State::Pending,
             };
         }
-        boot::draw(&mut lcd, Style::Logo, &BootInfo { version: VERSION, callsign: None, checks: &checks, tx_armed: false });
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: None, checks: &checks, tx_armed: false });
         let done = checks.iter().all(|c| c.state != State::Pending);
         let t = start.elapsed();
         if (done && t >= Duration::from_millis(1500)) || t >= Duration::from_secs(5) {
@@ -64,8 +64,8 @@ pub async fn task() {
         c.state = State::Fail;
     }
     if checks.iter().any(|c| c.state == State::Fail) {
-        // The list stays up until a key.
-        boot::draw(&mut lcd, Style::List, &BootInfo { version: VERSION, callsign: None, checks: &checks, tx_armed: false });
+        // The failed check stays on screen until a key.
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: None, checks: &checks, tx_armed: false });
         while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) {}
     }
 
