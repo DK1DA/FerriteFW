@@ -243,15 +243,25 @@ pub async fn task() {
                 r.tune(freq); // one receiver for now: slot A is the one the chips follow
                 live.send(r.live);
             }
-            // Three slots, watch, scan and the slot settings: milestone 2 (manual chapters 6 and 13).
+            // Three slots, watch, scan, the slot settings and the exclusive modes (scope, tone search, counter, HF,
+            // crossband): milestone 2 and later (manual chapters 6, 13, 14, 19-22).
             Either::First(
                 RadioCmd::TuneSlot { .. }
                 | RadioCmd::SlotParam { .. }
                 | RadioCmd::Active(_)
                 | RadioCmd::Watch(_)
                 | RadioCmd::Scan { .. }
-                | RadioCmd::PauseWatch(_),
+                | RadioCmd::PauseWatch(_)
+                | RadioCmd::ScanSkip { .. }
+                | RadioCmd::ScanZones { .. }
+                | RadioCmd::Sweep { .. }
+                | RadioCmd::ToneSearch { .. }
+                | RadioCmd::Counter(_)
+                | RadioCmd::Hf { .. }
+                | RadioCmd::Crossband(_),
             ) => {}
+            // Transmit code is out of the build until milestone 4: the UI refuses first (RX-only build).
+            Either::First(RadioCmd::Transmit { .. }) => {}
             Either::First(RadioCmd::Shutdown) => {
                 for n in 0..2u8 {
                     if r.chips & 1 << n != 0 {

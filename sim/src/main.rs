@@ -137,9 +137,108 @@ fn main() {
     app.notify(b"VE3KPW-9", b"On my way", false);
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "toast", scale);
-    // A screen not built yet: hold 3 (band scope) opens its placeholder.
+    // A screen not built yet: hold 4 (APRS heard) opens its placeholder.
     run(&mut app, &mut fb, t + 3500, &mut t);
-    press(&mut app, Key::Digit(3), 800, &mut t);
+    press(&mut app, Key::Digit(4), 800, &mut t);
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "coming", scale);
+    press(&mut app, Key::Exit, 100, &mut t);
+
+    // Radio activity (group B). Each from home, the fake radio answering.
+    macro_rules! shot {
+        ($ms:expr, $name:expr) => {
+            run(&mut app, &mut fb, t + $ms, &mut t);
+            save(&fb, $name, scale);
+        };
+    }
+    let home = |app: &mut App, t: &mut u32| press(app, Key::Exit, 800, t);
+    // Transmit: PTT held on A (145.920 after the -600k offset), 2 s in.
+    app.key_down(Key::Ptt, t, &store);
+    shot!(2800, "transmit");
+    app.key_up(Key::Ptt, t, &store);
+    // Refused: 420.500 is outside 70 cm in Canada (the TxRefused mock-up).
+    app.set_vfo(0, 42_050_000);
+    app.key_down(Key::Ptt, t, &store);
+    app.key_up(Key::Ptt, t + 200, &store);
+    shot!(300, "tx-refused");
+    home(&mut app, &mut t);
+    // Emergency: 243.000 with Extend TX on; the first PTT only prompts.
+    app.set_region(Some(ferrite_core::txplan::Region::Canada), true);
+    app.set_vfo_cfg(0, ferrite_app::slot::DEFAULT_CFG); // simplex: the offset would move it off 243.000
+    app.set_vfo(0, 24_300_000);
+    app.key_down(Key::Ptt, t, &store);
+    app.key_up(Key::Ptt, t + 200, &store);
+    shot!(1500, "tx-emergency");
+    home(&mut app, &mut t);
+    app.set_region(Some(ferrite_core::txplan::Region::Canada), false);
+    fake::sample(&mut app, &store);
+    app.set_vfo(0, 14_652_000);
+    run(&mut app, &mut fb, t, &mut t);
+    // Scan: SIDE2 on A, 9 s in (a hit every 7 s).
+    press(&mut app, Key::Side(2), 100, &mut t);
+    shot!(9000, "scan");
+    press(&mut app, Key::Side(2), 100, &mut t);
+    run(&mut app, &mut fb, t, &mut t); // the radio takes the commands (16 queue at most)
+    // Band scope: hold 3, the marker moved onto the strong carrier.
+    press(&mut app, Key::Digit(3), 800, &mut t);
+    run(&mut app, &mut fb, t, &mut t);
+    for _ in 0..13 {
+        press(&mut app, Key::Right, 60, &mut t);
+        run(&mut app, &mut fb, t, &mut t);
+    }
+    shot!(2500, "scope");
+    home(&mut app, &mut t);
+    // Tone search: hold 9, found after 2.5 s.
+    press(&mut app, Key::Digit(9), 800, &mut t);
+    shot!(1000, "tone-search");
+    shot!(2500, "tone-found");
+    home(&mut app, &mut t);
+    // Frequency counter: MENU 0 3 4.
+    app.open(ferrite_app::screens::nav::Dest::Counter);
+    shot!(2500, "counter");
+    home(&mut app, &mut t);
+    // FM broadcast: hold 2.
+    press(&mut app, Key::Digit(2), 800, &mut t);
+    shot!(300, "fm");
+    home(&mut app, &mut t);
+    // HF mode: MENU 0 3 5, the SSB patch loading, then 7.150 AM.
+    app.open(ferrite_app::screens::nav::Dest::HfMode);
+    shot!(900, "hf-loading");
+    shot!(2000, "hf");
+    home(&mut app, &mut t);
+    // Weather radio: hold 7 (Canada).
+    press(&mut app, Key::Digit(7), 800, &mut t);
+    shot!(300, "weather");
+    home(&mut app, &mut t);
+    // The alert, over home.
+    app.notify(b"Severe thunderstorm warning", b"Ottawa \xc2\xb7 Gatineau", true);
+    shot!(300, "alert");
+    home(&mut app, &mut t);
+    // Squelch: SIDE1 held, the knob turned.
+    app.key_down(Key::Side(1), t, &store);
+    app.knob(1, t, &store);
+    shot!(300, "squelch");
+    app.knob(-1, t, &store);
+    app.key_up(Key::Side(1), t, &store);
+    run(&mut app, &mut fb, t + 100, &mut t);
+    // The shortcut map: 4 held past the long press; on release APRS heard opens (a placeholder still).
+    app.key_down(Key::Digit(4), t, &store);
+    shot!(900, "shortcut-map");
+    app.key_up(Key::Digit(4), t, &store);
+    run(&mut app, &mut fb, t + 100, &mut t);
+    home(&mut app, &mut t);
+    run(&mut app, &mut fb, t + 3500, &mut t);
+    // Crossband: start page, then ready, then passing A -> B.
+    app.open(ferrite_app::screens::nav::Dest::Crossband);
+    shot!(300, "xb-start");
+    press(&mut app, Key::Hash, 100, &mut t);
+    shot!(14_000, "xb-ready");
+    shot!(21_000, "xb-passing");
+    home(&mut app, &mut t);
+    // Home's other layouts (MENU 0 7 2).
+    app.set_layout(1);
+    shot!(1500, "home-scope");
+    app.set_layout(2);
+    shot!(20_000, "home-activity");
+    app.set_layout(0);
 }
