@@ -137,4 +137,9 @@ fn main() {
     app.notify(b"VE3KPW-9", b"On my way", false);
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "toast", scale);
+    // A screen not built yet: hold 3 (band scope) opens its placeholder.
+    run(&mut app, &mut fb, t + 3500, &mut t);
+    press(&mut app, Key::Digit(3), 800, &mut t);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "coming", scale);
 }

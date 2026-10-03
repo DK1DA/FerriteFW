@@ -382,6 +382,7 @@ dependencies = [
  "embassy-time",
  "embassy-time-driver",
  "embassy-time-queue-utils",
+ "ferrite-app",
  "ferrite-core",
  "ferrite-ui",
  "keypad",

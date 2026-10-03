@@ -23,6 +23,7 @@ mod hal;
 mod report;
 #[allow(dead_code)]
 mod ring;
+mod store;
 mod tasks;
 
 use core::sync::atomic::{AtomicU32, Ordering::Relaxed};

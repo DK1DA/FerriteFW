@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::chan::{channel, Table};
+use crate::screens::{advanced::Advanced, edit::Edit, quick::Quick, status::Status};
+use crate::slot::{DEFAULT_CFG, Item};
 use ferrite_core::msg::{Device, GpsState, SlotLive};
 use ferrite_ui::fb::FrameBuffer;
 use ferrite_ui::gfx::{BG, BLUE, GREEN};
@@ -151,15 +153,15 @@ fn slot_cycles_and_edit_in_place() {
     t.tap(Key::Slot);
     assert_eq!(t.app.active(), 0);
     t.hold(Key::Slot); // EDIT-1: first setting focused
-    assert_eq!(t.app.screen(), Screen::Edit { cell: 0 });
+    assert_eq!(t.app.screen(), Screen::Edit(Edit { cell: 0 }));
     t.tap(Key::Right);
     t.tap(Key::Right);
     t.tap(Key::Right); // stops at the edge
     t.tap(Key::Down);
-    assert_eq!(t.app.screen(), Screen::Edit { cell: 5 }); // Step
+    assert_eq!(t.app.screen(), Screen::Edit(Edit { cell: 5 })); // Step
     t.tap(Key::Left);
     t.tap(Key::Up);
-    assert_eq!(t.app.screen(), Screen::Edit { cell: 1 }); // Bandwidth
+    assert_eq!(t.app.screen(), Screen::Edit(Edit { cell: 1 })); // Bandwidth
     t.knob(1); // EDIT-3: the knob changes, at once (EDIT-4)
     assert!(!t.app.slot(0).cfg().narrow);
     assert!(t.cmds().contains(&RadioCmd::SlotParam { slot: 0, param: Param::Bandwidth, value: 0 }));
@@ -192,7 +194,7 @@ fn step_is_vfo_only() {
 fn quick_settings() {
     let mut t = T::new();
     t.tap(Key::Menu); // MENU-1
-    assert_eq!(t.app.screen(), Screen::Quick { row: 0 });
+    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 0 }));
     t.tap(Key::Right); // MENU-16: ◀▶ change one step
     assert_eq!(t.app.slot(0).cfg().squelch, 5);
     t.knob(2);
@@ -200,16 +202,16 @@ fn quick_settings() {
     t.tap(Key::Hash); // MENU-18: default
     assert_eq!(t.app.slot(0).cfg().squelch, 4);
     t.tap(Key::Up); // wraps to "0 Advanced"
-    assert_eq!(t.app.screen(), Screen::Quick { row: 9 });
+    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 9 }));
     t.tap(Key::Digit(7)); // MENU-5: digits pick
-    assert_eq!(t.app.screen(), Screen::Quick { row: 6 });
+    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 6 }));
     t.knob(1);
     assert_eq!(t.app.watch(), 2);
     assert!(t.cmds().contains(&RadioCmd::Watch(0b111)));
     t.tap(Key::Digit(0)); // advanced, then BACK returns to quick (MENU-24)
-    assert_eq!(t.app.screen(), Screen::Advanced { row: 0, from_quick: true });
+    assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 0, from_quick: true }));
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Quick { row: 9 });
+    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 9 }));
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
 }
@@ -232,14 +234,14 @@ fn power_capped_on_125m() {
 fn menu_zero_and_status() {
     let mut t = T::new();
     t.hold(Key::Menu); // MENU-2: hold MENU on home
-    assert_eq!(t.app.screen(), Screen::Advanced { row: 0, from_quick: false });
+    assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 0, from_quick: false }));
     t.tap(Key::Digit(0)); // MENU 0 0 (SBAR-13)
-    assert_eq!(t.app.screen(), Screen::Status { row: 0, from_menu: true });
+    assert_eq!(t.app.screen(), Screen::Status(Status { row: 0, from_menu: true }));
     t.tap(Key::Exit);
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
     t.tap(Key::Hash); // HOME-10
-    assert_eq!(t.app.screen(), Screen::Status { row: 0, from_menu: false });
+    assert_eq!(t.app.screen(), Screen::Status(Status { row: 0, from_menu: false }));
     t.hold(Key::Exit); // KEY-5: hold BACK goes home
     assert_eq!(t.app.screen(), Screen::Home);
     t.tap(Key::Menu);
@@ -293,6 +295,90 @@ fn side2_scans_the_active_slot() {
     assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: true }));
 }
 
+/// Chapter 7's hold-digit shortcuts, MENU 0 paths and BACK through them (MENU-24).
+#[test]
+fn shortcuts_and_menu_paths() {
+    use crate::screens::coming::Coming;
+    use crate::screens::nav::Dest;
+    let coming = |dest| Screen::Coming(Coming { dest });
+    let mut t = T::new();
+    for (d, dest) in [(2, Dest::FmBroadcast), (3, Dest::BandScope), (4, Dest::AprsHeard), (7, Dest::Weather), (9, Dest::ToneSearch)] {
+        t.hold(Key::Digit(d));
+        assert_eq!(t.app.screen(), coming(dest), "hold {d}");
+        t.tap(Key::Exit);
+        assert_eq!(t.app.screen(), Screen::Home);
+    }
+    t.hold(Key::Digit(5)); // TX power: low -> mid
+    assert_eq!(t.app.slot(0).cfg().power, 1);
+    t.hold(Key::Digit(6)); // bandwidth: narrow -> wide
+    assert!(!t.app.slot(0).cfg().narrow);
+    t.hold(Key::Digit(8)); // Battery Save 1 -> 2
+    assert!(t.cmds().contains(&RadioCmd::BatterySave(ferrite_core::rxsleep::Level::L2)));
+    t.tap(Key::Digit(4)); // NAV-4: entry
+    assert_eq!(t.app.screen(), coming(Dest::Entry(4)));
+    t.hold(Key::Exit);
+    // MENU 0 9 1 3: the key test, typed straight through (MENU-5)
+    for d in [0, 9, 1, 3] {
+        t.tap(if d == 0 { Key::Menu } else { Key::Digit(d) });
+        if d == 0 {
+            t.tap(Key::Digit(0));
+        }
+    }
+    assert_eq!(t.app.screen(), coming(Dest::KeyTest));
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), coming(Dest::Sub(9, 1)));
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), coming(Dest::Group(9)));
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 8, from_quick: true }), "keeps the place");
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 9 }));
+    t.tap(Key::Digit(4)); // MENU 4, OK: tones
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen(), coming(Dest::Tones));
+    t.wait(MENU_TIMEOUT_MS + 200);
+    assert_eq!(t.app.screen(), Screen::Home);
+}
+
+/// KEY-7: PTT transmits from any screen, going home first; locked too (KEY-14).
+#[test]
+fn ptt_from_any_screen() {
+    use crate::screens::coming::Coming;
+    use crate::screens::nav::Dest;
+    let mut t = T::new();
+    t.tap(Key::Menu);
+    t.hold(Key::Hash);
+    let s = store();
+    t.app.key_down(Key::Ptt, t.t, &s);
+    assert_eq!(t.app.screen(), Screen::Coming(Coming { dest: Dest::Transmit }));
+    t.app.key_up(Key::Ptt, t.t + 300, &s);
+    assert_eq!(t.app.screen(), Screen::Home);
+}
+
+/// Every destination opens and draws (its placeholder until it is built), and BACK leaves it.
+#[test]
+fn every_destination_draws() {
+    use crate::screens::nav::{Dest, ALL, MENU0};
+    let mut t = T::new();
+    let mut fb = FrameBuffer::new();
+    for dest in ALL.into_iter().chain(MENU0.map(|(_, d)| d)) {
+        t.hold(Key::Exit);
+        t.render(&mut fb);
+        t.app.open(dest);
+        t.render(&mut fb);
+        assert!(count_px(&fb, 20, 300, |c| c != BG) > 100, "{dest:?} drew nothing");
+        let mut b = ferrite_ui::text::Buf::<10>::new();
+        t.app.screen().title(&t.app, &mut b);
+        assert!(!b.is_empty(), "{dest:?}: no status bar name");
+        if dest != Dest::Transmit {
+            t.tap(Key::Exit);
+            assert_ne!(t.app.screen(), Screen::Coming(crate::screens::coming::Coming { dest }), "{dest:?}: BACK");
+        }
+    }
+    let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
+    assert_eq!(ids.len(), 66, "one inventory ID per destination (groups and lists share D3)");
+}
+
 fn count_px(fb: &FrameBuffer, y0: i32, y1: i32, f: impl Fn(u16) -> bool) -> usize {
     (y0..y1).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| f(fb.at(x, y))).count()
 }
@@ -317,7 +403,7 @@ fn screens_draw() {
     t.tap(Key::Exit);
     t.tap(Key::Hash);
     t.render(&mut fb);
-    assert!(matches!(t.app.screen(), Screen::Status { .. }));
+    assert!(matches!(t.app.screen(), Screen::Status(_)));
     assert!(count_px(&fb, 20, 38, |c| c == BLUE) > 2000, "first row selected");
 }
 
@@ -374,7 +460,7 @@ fn toasts_replace_the_hint_bar_for_3_s() {
 /// HOME-11: the slots stay stacked A, B, C; SLOT only moves which one is large, in its own place.
 #[test]
 fn slots_stay_in_order() {
-    use crate::view::card;
+    use crate::screens::home::card;
     for active in 0..3u8 {
         let (ya, _) = card(0, active);
         let (yb, _) = card(1, active);
@@ -397,8 +483,8 @@ fn slot_change_leaves_no_trace() {
     // A is large (25..140). After SLOT, B is large: A shrinks to 25..87 and the gap 87..93 must be background.
     t.tap(Key::Slot);
     t.render(&mut fb);
-    let (ya, ha) = crate::view::card(0, 1);
-    let (yb, _) = crate::view::card(1, 1);
+    let (ya, ha) = crate::screens::home::card(0, 1);
+    let (yb, _) = crate::screens::home::card(1, 1);
     for y in ya + ha + 1..yb - 1 {
         for x in 10..230 {
             assert_eq!(fb.at(x, y), BG, "stale pixel at {x},{y} between A and B");
@@ -413,7 +499,15 @@ fn fonts_have_every_character_the_ui_draws() {
     use ferrite_ui::assets::{UI_12, UI_12B};
     let sources = [
         ("lib.rs", include_str!("lib.rs")),
-        ("view.rs", include_str!("view.rs")),
+        ("screens/mod.rs", include_str!("screens/mod.rs")),
+        ("screens/shared.rs", include_str!("screens/shared.rs")),
+        ("screens/nav.rs", include_str!("screens/nav.rs")),
+        ("screens/home.rs", include_str!("screens/home.rs")),
+        ("screens/edit.rs", include_str!("screens/edit.rs")),
+        ("screens/quick.rs", include_str!("screens/quick.rs")),
+        ("screens/advanced.rs", include_str!("screens/advanced.rs")),
+        ("screens/status.rs", include_str!("screens/status.rs")),
+        ("screens/coming.rs", include_str!("screens/coming.rs")),
         ("slot.rs", include_str!("slot.rs")),
         ("chan.rs", include_str!("chan.rs")),
         ("widgets.rs", include_str!("../../ferrite-ui/src/widgets.rs")),

@@ -1,4 +1,4 @@
-//! Input sampler: the knob every millisecond, the keys every 10 ms (debounced, with long press and repeat). It
+//! Input sampler: the knob every millisecond, the keys every 10 ms (debounced; press and release). It
 //! runs on the DSP's interrupt executor so a slow redraw on the thread executor never makes it miss a knob step;
 //! the UI task owns what the keys mean.
 
@@ -31,7 +31,9 @@ pub async fn task() {
         20,
     );
     let ptt = [(KEY_PTT, CODE_PTT_A), (KEY_SIDE1, CODE_PTT_B), (KEY_SIDE2, CODE_PTT_VFO)];
-    let mut keys = Keys::new(2, 60, 10); // 20 ms debounce, long press at 600 ms, repeat every 100 ms
+    // 20 ms debounce; press and release only: long press and repeat are the UI's (ferrite-app's KeyTracker,
+    // KEY-3, KEY-4), which also handles keys held together.
+    let mut keys = Keys::new(2, 0, 0);
     let mut enc = Encoder::new(PER_DETENT);
     enc.update(ENC_A.read(), ENC_B.read());
     let mut ticker = Ticker::every(Duration::from_millis(1));

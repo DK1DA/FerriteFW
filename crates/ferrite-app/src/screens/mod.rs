@@ -1,0 +1,181 @@
+//! # Screens
+//!
+//! One module per screen (or family of screens), plugged into the App through this registry. A screen is a
+//! small `Copy` state struct (its cursor, its page; reset each time it opens) that implements [`View`]: what
+//! its keys, the knob and PTT do, how it times out, how it draws, and what its hint bar says. Everything the
+//! screens share lives on the [`App`] (slots, toast, undo, commands) and in [`shared`] (region dirty-tracking,
+//! status bar, hint bar, list rows, the edit grid, help box).
+//!
+//! ## Adding a screen
+//!
+//! 1. A new file `screens/<name>.rs`: `pub struct Name { .. }` deriving `Clone, Copy, Debug, PartialEq, Eq,
+//!    Hash`, and `impl View for Name`. Only `name`, `key`, `render` and `hints` are required; copy
+//!    [`coming`] or [`status`] as a start.
+//! 2. Here, three lines: `pub mod name;`, a variant `Name(name::Name)` in [`Screen`], and the matching line in
+//!    `each!`.
+//! 3. In [`nav`]: its [`nav::Dest`] arm in [`nav::enter`] (the placeholder used until then), so every way in
+//!    (hold-digit shortcuts, MENU 0 paths, PTT, digits, OK on a row) opens the real screen.
+//!
+//! A screen changes screens by assigning `app.screen` (moving within itself, or to a screen it knows), by
+//! [`App::open`] (anything in the manual, remembered for BACK), or by `app.back()` / `app.go_home()`.
+//! Screens own regions `shared::R_*` while they are up; the content area is cleared and every region forgotten
+//! when the screen's variant changes.
+//!
+//! RAM: the [`Screen`] enum is as large as its largest state, and it is held in the App and in the BACK stack
+//! (five copies), so keep screen state to a few bytes. Lists read their items on demand (channels from the
+//! store, settings from tables), never a copy.
+
+pub mod advanced;
+pub mod coming;
+pub mod edit;
+pub mod home;
+pub mod nav;
+pub mod quick;
+pub(crate) mod shared;
+pub mod status;
+
+use crate::chan::ChannelStore;
+use crate::keys::KeyEvent;
+use crate::App;
+use ferrite_core::msg::{Device, LiveAll, SLOTS};
+use ferrite_ui::gfx::{Gfx as _, BG};
+use ferrite_ui::panel::Panel;
+use ferrite_ui::text::Buf;
+use ferrite_ui::widgets as w;
+pub use shared::{Cx, Hints};
+
+/// Which screen is up, with its state. One variant per screen module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Screen {
+    /// Home (chapter 6): stateless, so a plain variant.
+    Home,
+    Edit(edit::Edit),
+    Quick(quick::Quick),
+    Advanced(advanced::Advanced),
+    Status(status::Status),
+    /// A screen not built yet: its name and "coming" (any [`nav::Dest`] without its own screen).
+    Coming(coming::Coming),
+}
+
+/// Runs `$e` with `$s` bound to the screen's state: the one place that lists every variant.
+macro_rules! each {
+    ($screen:expr, $s:ident => $e:expr) => {
+        match $screen {
+            Screen::Home => {
+                let $s = home::Home;
+                $e
+            }
+            Screen::Edit($s) => $e,
+            Screen::Quick($s) => $e,
+            Screen::Advanced($s) => $e,
+            Screen::Status($s) => $e,
+            Screen::Coming($s) => $e,
+        }
+    };
+}
+
+/// What a screen does. Methods take the state by value (it is a few bytes) and the App; a screen that moves
+/// its cursor writes its new state back to `app.screen`.
+pub trait View: Copy {
+    /// The screen's name: the simulator's title, and the status bar's unless [`View::title`] says otherwise.
+    fn name(self) -> &'static str;
+
+    /// Its mock-up in `docs/img/screens`, for the simulator's overlay (F3).
+    fn mockup(self) -> Option<&'static str> {
+        None
+    }
+
+    /// The status bar's screen name (SBAR): up to 10 characters.
+    fn title(self, _app: &App, b: &mut Buf<10>) {
+        b.set(self.name().as_bytes());
+    }
+
+    /// Idle time after which it goes home: menus use the menu timeout (MENU-28); None stays.
+    fn timeout(self) -> Option<u32> {
+        None
+    }
+
+    /// A short, long or repeat press (after the App's own: hold BACK, hold #, the lock).
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore);
+
+    /// The knob, +1 per click clockwise.
+    fn knob(self, _app: &mut App, _d: i32, _store: &impl ChannelStore) {}
+
+    /// PTT down or up. By default, down transmits from home (KEY-7: from any screen, going home first).
+    fn ptt(self, app: &mut App, down: bool) {
+        if down {
+            nav::transmit(app);
+        }
+    }
+
+    /// Time passed; the Radio task's latest snapshot is in `live`.
+    fn tick(self, _app: &mut App, _live: &LiveAll) {}
+
+    /// Draws what changed (HOME-7): each region through `app.dirty(region, hash)`.
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>);
+
+    /// The hint bar (KEY-9), while no toast covers it.
+    fn hints(self, app: &App) -> Hints;
+}
+
+impl Screen {
+    pub fn name(self) -> &'static str {
+        each!(self, s => s.name())
+    }
+
+    pub fn mockup(self) -> Option<&'static str> {
+        each!(self, s => s.mockup())
+    }
+
+    pub(crate) fn title(self, app: &App, b: &mut Buf<10>) {
+        each!(self, s => s.title(app, b))
+    }
+
+    pub(crate) fn timeout(self) -> Option<u32> {
+        each!(self, s => s.timeout())
+    }
+
+    pub(crate) fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
+        each!(self, s => s.key(app, e, store))
+    }
+
+    pub(crate) fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
+        each!(self, s => s.knob(app, d, store))
+    }
+
+    pub(crate) fn ptt(self, app: &mut App, down: bool) {
+        each!(self, s => s.ptt(app, down))
+    }
+
+    pub(crate) fn tick(self, app: &mut App, live: &LiveAll) {
+        each!(self, s => s.tick(app, live))
+    }
+
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
+        each!(self, s => s.render(app, lcd, cx))
+    }
+
+    pub(crate) fn hints(self, app: &App) -> Hints {
+        each!(self, s => s.hints(app))
+    }
+}
+
+impl App {
+    /// Draws what changed since the last call: the status bar, the screen, then the hint bar or a toast.
+    pub fn render(&mut self, lcd: &mut impl Panel, live: &LiveAll, dev: &Device, store: &impl ChannelStore) {
+        let id = core::mem::discriminant(&self.screen);
+        if self.drawn.screen != Some(id) {
+            lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
+            self.drawn.hash = [0; shared::REGIONS];
+            self.drawn.meter = [None; SLOTS];
+            self.drawn.screen = Some(id);
+        }
+        let sb = self.status_bar(live, dev);
+        if self.drawn.sbar != Some(sb) {
+            sb.draw(lcd, self.drawn.sbar.as_ref());
+            self.drawn.sbar = Some(sb);
+        }
+        self.screen.render(self, lcd, &Cx { live, dev, store });
+        self.render_hint(lcd);
+    }
+}

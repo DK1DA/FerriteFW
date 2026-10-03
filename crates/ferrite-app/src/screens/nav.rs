@@ -1,0 +1,427 @@
+//! # Navigation
+//!
+//! Every screen in the manual has a [`Dest`]: what [`App::open`] takes, from wherever the screen is reached.
+//! [`enter`] turns a destination into a screen; until a screen is built it opens as a placeholder ("<name>:
+//! coming", [`super::coming`]) so its ways in can be tried in the simulator. Building a screen means adding
+//! its arm to [`enter`]; every way in then reaches it.
+//!
+//! The ways in, as the manual has them (IDs in `docs/screens.md`):
+//!
+//! | From | Keys | Goes to |
+//! | --- | --- | --- |
+//! | Home | hold 0-9 ([`hold_digit`], KEY-11) | 0 home channel, 1 watch, 2 FM broadcast, 3 band scope, 4 APRS heard, 5 TX power, 6 bandwidth, 7 weather, 8 Battery Save, 9 tone search |
+//! | Home | a digit (NAV-4, VFO-11) | [`Dest::Entry`] with the digit |
+//! | Home | hold V/M on a VFO (VFO-9) | [`Dest::SaveChannel`] |
+//! | Home | hold SLOT / MENU / hold MENU / # | edit in place / quick / advanced / Status (built) |
+//! | Any screen | PTT down (KEY-7) | home, then [`Dest::Transmit`]; PTT up: home ([`super::View::ptt`]) |
+//! | Quick settings | OK on a row (MENU-17) | [`Dest::Value`] (tones: [`Dest::Tones`]); MENU 8: [`Dest::SaveChannel`] or [`Dest::ChannelEdit`] |
+//! | Edit in place | OK on a cell | [`Dest::Value`] / [`Dest::Tones`] |
+//! | Advanced (MENU 0) | 1-9 or OK | [`Dest::Group`]; inside, digits follow [`MENU0`] (MENU-5) |
+//! | Status page | OK on a row (SBAR-15) | the row's setting or screen |
+//! | [`App::notify`] with an alert | automatic (WX-4) | [`Dest::Alert`] |
+//!
+//! Not wired yet (no event to start them): transmit refused, emergency prompt, PIN at power on, Bluetooth
+//! write approval and progress, power off, empty battery, SSB patch confirm, setup at first boot, the shortcut
+//! map while a digit is held (HOME-8: the shortcut runs at the long press for now), crossband (no menu number
+//! yet).
+
+use super::advanced::{Advanced, GROUPS};
+use super::coming::Coming;
+use super::quick::Quick;
+use super::status::Status;
+use crate::slot::Item;
+use crate::{App, Screen};
+use ferrite_ui::text::Buf;
+use ufmt::uwrite;
+
+/// Where a key can take you: one per screen (or screen family) in the manual. The groups and IDs are those of
+/// `docs/screens.md`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Dest {
+    // ---- A: entry and editing ----
+    /// A1, A2: frequency (VFO) or channel number entry, started by this digit.
+    Entry(u8),
+    /// A4: the channel editor (MENU 8 on a channel).
+    ChannelEdit,
+    /// A5: a setting's bigger editor (MENU-17).
+    Value(Item),
+    /// A6: RX and TX tones.
+    Tones,
+    /// A7: multi-tap text entry (KEY-12).
+    Text,
+    /// A8: latitude, longitude, altitude.
+    PositionEntry,
+    /// A9: save the VFO as a channel (hold V/M, MENU 8 on a VFO).
+    SaveChannel,
+    /// A10: add a repeater (MENU 0 2 2).
+    AddRepeater,
+    /// A11: one range preset.
+    RangePreset,
+    /// A12: one zone's settings.
+    ZoneEdit,
+    /// A13: SAME location codes (MENU 0 3 3 2).
+    LocationCodes,
+    /// A14: DTMF dialer (MENU 0 8 6 1).
+    DtmfDialer,
+    /// A15: DTMF memories (MENU 0 8 6 2).
+    DtmfMemories,
+    /// A16: APRS message compose.
+    Compose,
+    /// A17: PIN entry.
+    Pin,
+    /// A18: confirm a destructive action (MENU-23); MENU 0 9 8 2 reset.
+    Confirm,
+    /// A19: the Extend TX warning.
+    ExtendTx,
+    /// A20-A27: first-run setup, eight pages (MENU 0 9 8 1).
+    Setup,
+
+    // ---- B: radio activity ----
+    /// B4: the shortcut map while a digit is held (HOME-8).
+    ShortcutMap,
+    /// B6: transmitting.
+    Transmit,
+    /// B7: transmit refused, with the fix.
+    TxRefused,
+    /// B8: "Emergency frequency. PTT again to transmit".
+    Emergency,
+    /// B9: the scan screen.
+    Scan,
+    /// B10: band scope (hold 3).
+    BandScope,
+    /// B11: FM broadcast (hold 2).
+    FmBroadcast,
+    /// B12, B13: HF mode (MENU 0 3 5 only).
+    HfMode,
+    /// B14: tone search (hold 9, MENU 0 1 9).
+    ToneSearch,
+    /// B15: frequency counter (MENU 0 3 4).
+    Counter,
+    /// B16: weather radio (hold 7).
+    Weather,
+    /// B17: an alert (SAME, DSC distress, jamming).
+    Alert,
+    /// B18-B20: crossband repeater.
+    Crossband,
+    /// B21: squelch from home (SIDE1 + knob); a toast for now.
+    Squelch,
+
+    // ---- C: lists and data ----
+    /// C1: the event log, the inbox (MENU 0 4 1).
+    EventLog,
+    /// C2: one event.
+    EventDetail,
+    /// C3: APRS heard (hold 4, MENU 0 5 1).
+    AprsHeard,
+    /// C4: one APRS station.
+    AprsStation,
+    /// C5: APRS messages (MENU 0 5 2).
+    AprsMessages,
+    /// C6: one APRS message.
+    AprsMessage,
+    /// C7: sensor reader (MENU 0 4 5).
+    Sensors,
+    /// C8-C10: channel browser (MENU 0 2 1).
+    Browse,
+    /// C11: zones (MENU 0 2 3).
+    Zones,
+    /// C12: range presets (MENU 0 1 7).
+    RangePresets,
+    /// C13: skip list (MENU 0 1 8).
+    SkipList,
+    /// C14: waypoints (MENU 0 6 7).
+    Waypoints,
+    /// C15: go to a waypoint.
+    WaypointGo,
+    /// C16, C17: GPS position and satellites (MENU 0 6 2).
+    GpsPosition,
+    /// C18: HF recent frequencies.
+    HfRecent,
+    /// C19: FM presets (MENU 0 3 1 1).
+    FmPresets,
+
+    // ---- D: system and modes ----
+    /// D1: quick settings (MENU).
+    Quick,
+    /// D2: advanced settings (MENU 0).
+    Advanced,
+    /// D3: a settings group, MENU 0 n.
+    Group(u8),
+    /// D3: a third-level list, MENU 0 n m.
+    Sub(u8, u8),
+    /// D6: the Status page (#, MENU 0 0).
+    Status,
+    /// D7: About, battery, self-test (MENU 0 9 9).
+    About,
+    /// D8: calibration, read only (MENU 0 9 7 1).
+    Calibration,
+    /// D9: key test (MENU 0 9 1 3).
+    KeyTest,
+    /// D10: advanced squelch per band (MENU 0 9 5 1).
+    AdvSquelch,
+    /// D15: SSB patch confirm at boot.
+    SsbConfirm,
+    /// D16: SSB patch (MENU 0 9 6).
+    SsbPatch,
+    /// D17: link status (MENU 0 9 2 3).
+    LinkStatus,
+    /// D18: paired devices (MENU 0 9 2 2).
+    Paired,
+    /// D19: pair Bluetooth.
+    PairBt,
+    /// D20: Bluetooth write approval.
+    WriteApproval,
+    /// D21: link write progress.
+    WriteProgress,
+    /// D22: power off, "Saving...".
+    PowerOff,
+    /// D23: empty battery.
+    EmptyBattery,
+    /// D24: mailbox.
+    Mailbox,
+}
+
+impl Dest {
+    /// OK on a setting: tones have their own picker (A6), everything else the value editor (A5).
+    pub fn value(item: Item) -> Dest {
+        if item == Item::Tones { Dest::Tones } else { Dest::Value(item) }
+    }
+
+    /// Name, manual chapter and inventory ID (`docs/screens.md`).
+    pub fn info(self) -> (&'static str, &'static str, &'static str) {
+        use Dest::*;
+        match self {
+            Entry(_) => ("Direct entry", "9", "A1"),
+            ChannelEdit => ("Channel editor", "10", "A4"),
+            Value(_) => ("Value editor", "11", "A5"),
+            Tones => ("Tone picker", "16", "A6"),
+            Text => ("Text entry", "7", "A7"),
+            PositionEntry => ("Position entry", "28", "A8"),
+            SaveChannel => ("Save as channel", "9", "A9"),
+            AddRepeater => ("Add repeater", "10", "A10"),
+            RangePreset => ("Range preset", "14", "A11"),
+            ZoneEdit => ("Zone editor", "10", "A12"),
+            LocationCodes => ("Location codes", "23", "A13"),
+            DtmfDialer => ("DTMF dialer", "17", "A14"),
+            DtmfMemories => ("DTMF memories", "17", "A15"),
+            Compose => ("Compose message", "25", "A16"),
+            Pin => ("PIN entry", "34", "A17"),
+            Confirm => ("Confirm", "11", "A18"),
+            ExtendTx => ("Extend TX warning", "15", "A19"),
+            Setup => ("Setup", "4", "A20"),
+            ShortcutMap => ("Shortcut map", "7", "B4"),
+            Transmit => ("Transmit", "15", "B6"),
+            TxRefused => ("Transmit refused", "15", "B7"),
+            Emergency => ("Emergency frequency", "15", "B8"),
+            Scan => ("Scan", "14", "B9"),
+            BandScope => ("Band scope", "21", "B10"),
+            FmBroadcast => ("FM broadcast", "20", "B11"),
+            HfMode => ("HF mode", "20a", "B12"),
+            ToneSearch => ("Tone search", "22", "B14"),
+            Counter => ("Frequency counter", "22", "B15"),
+            Weather => ("Weather radio", "23", "B16"),
+            Alert => ("Alert", "23", "B17"),
+            Crossband => ("Crossband repeater", "19", "B18"),
+            Squelch => ("Squelch", "12", "B21"),
+            EventLog => ("Event log", "24", "C1"),
+            EventDetail => ("Event detail", "27", "C2"),
+            AprsHeard => ("APRS heard", "25", "C3"),
+            AprsStation => ("APRS station", "25", "C4"),
+            AprsMessages => ("APRS messages", "25", "C5"),
+            AprsMessage => ("APRS message", "25", "C6"),
+            Sensors => ("Sensor reader", "27", "C7"),
+            Browse => ("Channel browser", "10", "C8"),
+            Zones => ("Zones", "10", "C11"),
+            RangePresets => ("Range presets", "14", "C12"),
+            SkipList => ("Skip list", "14", "C13"),
+            Waypoints => ("Waypoints", "28", "C14"),
+            WaypointGo => ("Go to waypoint", "28", "C15"),
+            GpsPosition => ("GPS position", "28", "C16"),
+            HfRecent => ("HF recent", "20a", "C18"),
+            FmPresets => ("FM presets", "20", "C19"),
+            Quick => ("Quick", "11", "D1"),
+            Advanced => ("Advanced", "11", "D2"),
+            Group(_) => ("Settings group", "11", "D3"),
+            Sub(..) => ("Settings list", "11", "D3"),
+            Status => ("Status", "8", "D6"),
+            About => ("About", "36", "D7"),
+            Calibration => ("Calibration", "35", "D8"),
+            KeyTest => ("Key test", "7", "D9"),
+            AdvSquelch => ("Advanced squelch", "12", "D10"),
+            SsbConfirm => ("SSB patch confirm", "30", "D15"),
+            SsbPatch => ("SSB patch", "20a", "D16"),
+            LinkStatus => ("Link status", "29", "D17"),
+            Paired => ("Paired devices", "29", "D18"),
+            PairBt => ("Pair Bluetooth", "29", "D19"),
+            WriteApproval => ("Write approval", "29", "D20"),
+            WriteProgress => ("Writing", "29", "D21"),
+            PowerOff => ("Power off", "33", "D22"),
+            EmptyBattery => ("Empty battery", "33", "D23"),
+            Mailbox => ("Mailbox", "38", "D24"),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        self.info().0
+    }
+
+    /// The heading a screen shows for itself: the group's name, the menu path, or the setting being edited.
+    pub fn heading(self, b: &mut Buf<32>) {
+        b.clear();
+        match self {
+            Dest::Group(g) => b.set(GROUPS[(g as usize).clamp(1, 9) - 1].0.as_bytes()),
+            Dest::Sub(g, i) => {
+                let _ = uwrite!(b, "MENU 0 {} {}", g, i);
+            }
+            Dest::Value(item) => {
+                b.set(item.name().as_bytes());
+                b.push(b" editor");
+            }
+            _ => b.set(self.name().as_bytes()),
+        }
+    }
+
+    /// The menu path this destination is a list for (a group or a third-level list), if it is one.
+    pub fn menu_path(self, b: &mut [u8; 3]) -> Option<usize> {
+        match self {
+            Dest::Group(g) => {
+                b[0] = g;
+                Some(1)
+            }
+            Dest::Sub(g, i) => {
+                (b[0], b[1]) = (g, i);
+                Some(2)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Every destination once (groups and lists by one example each), for tests and the screen inventory.
+pub const ALL: [Dest; 70] = {
+    use Dest::*;
+    [
+        Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text, PositionEntry, SaveChannel, AddRepeater, RangePreset,
+        ZoneEdit, LocationCodes, DtmfDialer, DtmfMemories, Compose, Pin, Confirm, ExtendTx, Setup, ShortcutMap,
+        Transmit, TxRefused, Emergency, Scan, BandScope, FmBroadcast, HfMode, ToneSearch, Counter, Weather, Alert,
+        Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage, Sensors,
+        Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, FmPresets, Quick,
+        Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
+        LinkStatus, Paired, PairBt, WriteApproval, WriteProgress, PowerOff, EmptyBattery, Mailbox,
+        Group(1), Sub(3, 1), Value(Item::Power),
+    ]
+};
+
+/// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
+/// is a plain value, edited in its group's list.
+pub const MENU0: [(&[u8], Dest); 55] = [
+    (&[1, 2], Dest::Sub(1, 2)),
+    (&[1, 6], Dest::Sub(1, 6)),
+    (&[1, 7], Dest::RangePresets),
+    (&[1, 8], Dest::SkipList),
+    (&[1, 9], Dest::ToneSearch),
+    (&[2, 1], Dest::Browse),
+    (&[2, 2], Dest::AddRepeater),
+    (&[2, 3], Dest::Zones),
+    (&[3, 1], Dest::Sub(3, 1)),
+    (&[3, 1, 1], Dest::FmPresets),
+    (&[3, 2], Dest::Sub(3, 2)),
+    (&[3, 3], Dest::Sub(3, 3)),
+    (&[3, 3, 2], Dest::LocationCodes),
+    (&[3, 4], Dest::Counter),
+    (&[3, 5], Dest::HfMode),
+    (&[4, 1], Dest::EventLog),
+    (&[4, 2], Dest::Sub(4, 2)),
+    (&[4, 3], Dest::Sub(4, 3)),
+    (&[4, 4], Dest::Sub(4, 4)),
+    (&[4, 5], Dest::Sensors),
+    (&[5, 1], Dest::AprsHeard),
+    (&[5, 2], Dest::AprsMessages),
+    (&[5, 4], Dest::Sub(5, 4)),
+    (&[5, 5], Dest::Sub(5, 5)),
+    (&[5, 6], Dest::Sub(5, 6)),
+    (&[5, 7], Dest::Sub(5, 7)),
+    (&[5, 8], Dest::Sub(5, 8)),
+    (&[6, 2], Dest::GpsPosition),
+    (&[6, 7], Dest::Waypoints),
+    (&[6, 9], Dest::PositionEntry),
+    (&[7, 3], Dest::Sub(7, 3)),
+    (&[7, 4], Dest::Sub(7, 4)),
+    (&[7, 5], Dest::Sub(7, 5)),
+    (&[8, 1], Dest::Sub(8, 1)),
+    (&[8, 2], Dest::Sub(8, 2)),
+    (&[8, 5], Dest::Sub(8, 5)),
+    (&[8, 6], Dest::Sub(8, 6)),
+    (&[8, 6, 1], Dest::DtmfDialer),
+    (&[8, 6, 2], Dest::DtmfMemories),
+    (&[8, 7], Dest::Sub(8, 7)),
+    (&[9, 1], Dest::Sub(9, 1)),
+    (&[9, 1, 3], Dest::KeyTest),
+    (&[9, 2], Dest::Sub(9, 2)),
+    (&[9, 2, 2], Dest::Paired),
+    (&[9, 2, 3], Dest::LinkStatus),
+    (&[9, 3], Dest::Sub(9, 3)),
+    (&[9, 5], Dest::Sub(9, 5)),
+    (&[9, 5, 1], Dest::AdvSquelch),
+    (&[9, 6], Dest::SsbPatch),
+    (&[9, 7], Dest::Sub(9, 7)),
+    (&[9, 7, 1], Dest::Calibration),
+    (&[9, 8], Dest::Sub(9, 8)),
+    (&[9, 8, 1], Dest::Setup),
+    (&[9, 8, 2], Dest::Confirm),
+    (&[9, 9], Dest::About),
+];
+
+/// The screen at a MENU 0 path, if the path opens one.
+pub fn menu0(path: &[u8]) -> Option<Dest> {
+    MENU0.iter().find(|(p, _)| *p == path).map(|&(_, d)| d)
+}
+
+/// A destination's screen: built screens by their own arm, the rest as a placeholder. Adding a screen = one
+/// arm here.
+pub fn enter(dest: Dest, _app: &App) -> Screen {
+    match dest {
+        Dest::Quick => Screen::Quick(Quick { row: 0 }),
+        Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
+        Dest::Status => Screen::Status(Status { row: 0, from_menu: false }),
+        _ => Screen::Coming(Coming { dest }),
+    }
+}
+
+/// A digit held on home (KEY-11): the ten fixed shortcuts.
+pub fn hold_digit(app: &mut App, d: u8) {
+    match d {
+        0 => app.show_toast(b"No home channel.", b"Hold SLOT on a channel", false), // CHAN-20 (CHAN-19 with storage)
+        1 => {
+            // WATCH-7
+            let v = if app.watch == 0 { 1 } else { 0 };
+            app.change(Item::Watch, v - app.watch as i32);
+            app.show_toast(b"Watch", if v == 0 { b"off" } else { b"A+B" }, false);
+        }
+        2 => app.open(Dest::FmBroadcast), // BCR-1
+        3 => app.open(Dest::BandScope),   // SCOPE-1
+        4 => app.open(Dest::AprsHeard),
+        5 => cycle(app, Item::Power),
+        6 => cycle(app, Item::Bandwidth),
+        7 => app.open(Dest::Weather), // WX-1: US and Canada only, once the region exists
+        8 => cycle(app, Item::BatterySave),
+        _ => app.open(Dest::ToneSearch), // TSRCH-1
+    }
+}
+
+/// Hold 5, 6, 8: the next value, shown as a toast (or why it can't change).
+fn cycle(app: &mut App, item: Item) {
+    let greyed = app.greyed(item).is_some();
+    app.change(item, 1);
+    if !greyed {
+        let mut b = Buf::<16>::new();
+        app.item_text(item, true, &mut b);
+        app.show_toast(item.name().as_bytes(), b.as_bytes(), false);
+    }
+}
+
+/// PTT down where the screen has no PTT of its own: home, then transmit (KEY-7).
+pub fn transmit(app: &mut App) {
+    app.go_home();
+    app.open(Dest::Transmit);
+}

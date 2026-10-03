@@ -1,22 +1,40 @@
-//! UI: the only task that draws. The boot screen with the self-test as the other tasks report it, then home.
-//! The knob tunes in 12.5 kHz steps (a placeholder for VFO mode with its step setting).
+//! UI: the only task that draws. The boot screen with the self-test as the other tasks report it, then the app
+//! (`ferrite-app`, the same state machine the simulator runs): keys and the knob in, the Radio task's snapshot
+//! in, its commands out to the Radio task, and the screen redrawn where it changed.
 
 use crate::board::BACKLIGHT;
 use crate::chan::{Input, INPUT, LIVE, RADIO};
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
+use crate::store;
 use crate::tasks::{check, CHECK_MCU, CHECK_STATE, FAILED, PASSED};
 use core::sync::atomic::Ordering::Relaxed;
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select3, Either3};
 use embassy_time::{Duration, Instant, Timer};
+use ferrite_app::App;
 use ferrite_core::chipid;
-use ferrite_core::msg::{Live, RadioCmd, Source};
+use ferrite_core::keys;
+use ferrite_core::msg::{Device, Live, LiveAll, SlotLive, Source};
 use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::gfx::BG;
-use ferrite_ui::home;
 
-const STEP: u32 = 1_250; // 12.5 kHz in 10 Hz units
+/// How often the app is ticked: often while a key is held (long presses fire at 700 ms, repeats every 100 ms:
+/// KEY-3, KEY-4), rarely otherwise (toasts, undo, timeouts, the clock), so the MCU sleeps.
+const TICK_HELD_MS: u64 = 20;
+const TICK_IDLE_MS: u64 = 250;
+
+/// The milliseconds the app counts in (wrapping).
+fn now_ms() -> u32 {
+    Instant::now().as_millis() as u32
+}
+
+/// The single receiver's snapshot as slot A's (the Radio task follows slot A until it runs three slots).
+fn slot_a(all: &mut LiveAll, l: &Live) {
+    all.slots[0] = SlotLive { freq: l.freq, rssi: l.rssi, squelch_open: l.squelch_open, ..all.slots[0] };
+    all.rx_asleep = l.rx_asleep;
+    all.chips = l.chips;
+}
 
 #[embassy_executor::task]
 pub async fn task() {
@@ -69,23 +87,44 @@ pub async fn task() {
         while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) {}
     }
 
+    // Hand-off: the whole screen cleared, then the app draws everything once (HOME-2).
+    lcd.0.fill(0, 0, 240, 320, BG);
+    let store = store::channels();
+    let mut app = App::new();
+    app.redraw_all();
+    // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
+    let dev = Device { tx_built: cfg!(feature = "tx"), battery_pct: 100, ..Default::default() };
     let mut live_rx = LIVE.receiver().unwrap();
-    let mut live: Live = live_rx.try_get().unwrap_or_default();
-    home::draw(&mut lcd, &live);
+    let mut live = LiveAll::default();
+    if let Some(l) = live_rx.try_get() {
+        slot_a(&mut live, &l);
+    }
+    // Key codes down (mapped ones only): the app is ticked often while any is held.
+    let mut down = 0u32;
     loop {
-        match select(live_rx.changed(), INPUT.receive()).await {
-            Either::First(l) => {
-                live = l;
-                home::update(&mut lcd, &live);
-            }
-            Either::Second(Input::Knob(d)) => {
-                let f = (live.freq as i32 + d as i32 * STEP as i32) as u32;
-                RADIO.send(RadioCmd::Tune(f)).await;
-            }
-            Either::Second(Input::Key(_)) => {
-                // Menus: milestone 2. A key still wakes the receiver, as on stock.
-                RADIO.send(RadioCmd::Activity).await;
-            }
+        while let Some(c) = app.pop_cmd() {
+            RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
         }
+        app.render(&mut lcd, &live, &dev, &store);
+        let period = if down != 0 { TICK_HELD_MS } else { TICK_IDLE_MS };
+        match select3(live_rx.changed(), INPUT.receive(), Timer::after(Duration::from_millis(period))).await {
+            Either3::First(l) => slot_a(&mut live, &l),
+            Either3::Second(Input::Key(keypad::Event::Press(code))) => {
+                if let Some(k) = keys::key(code) {
+                    down |= 1 << code;
+                    app.key_down(k, now_ms(), &store);
+                }
+            }
+            Either3::Second(Input::Key(keypad::Event::Release(code))) => {
+                if let Some(k) = keys::key(code) {
+                    down &= !(1 << code);
+                    app.key_up(k, now_ms(), &store);
+                }
+            }
+            Either3::Second(Input::Key(_)) => {} // the sampler's own long press and repeat are off
+            Either3::Second(Input::Knob(d)) => app.knob(d, now_ms(), &store),
+            Either3::Third(()) => {}
+        }
+        app.tick(now_ms(), &live, &store);
     }
 }

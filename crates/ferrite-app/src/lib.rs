@@ -8,8 +8,10 @@
 //! No heap and fixed-size state (`size_of::<App>()` is checked by a test). Channels come through
 //! [`chan::ChannelStore`], read on demand.
 //!
-//! Screens: home (watch layout, manual chapter 6), edit in place (hold SLOT), quick settings (MENU), advanced
-//! settings (MENU 0, read-only for now) and the Status page (#). Rules are cited by their manual IDs.
+//! Screens live in [`screens`], one module each, plugged in through one registry ([`screens::Screen`]); how to
+//! add one is in that module's documentation, and how each is reached in [`screens::nav`]. The App itself holds
+//! what every screen shares: the three slots, the radio-wide values, the toast, undo, the key tracker and the
+//! commands for the Radio task. Rules are cited by their manual IDs.
 
 #![no_std]
 
@@ -18,8 +20,8 @@ extern crate std;
 
 pub mod chan;
 pub mod keys;
+pub mod screens;
 pub mod slot;
-mod view;
 
 use chan::{Channel, ChannelStore};
 use ferrite_core::freq::{mhz, Freq10};
@@ -28,9 +30,12 @@ use ferrite_core::msg::{LiveAll, Param, RadioCmd, SLOTS};
 use ferrite_core::rxsleep::Level;
 use ferrite_ui::text::Buf;
 use keys::{KeyEvent, KeyTracker, Press};
-use slot::{band_near, Item, SlotCfg, BANDS, BAND_125M, DEFAULT_CFG, GRID, QUICK, STEPS};
+use screens::nav::Dest;
+use screens::shared::REGIONS;
+use slot::{band_near, Item, SlotCfg, BANDS, BAND_125M, DEFAULT_CFG};
 
 pub use ferrite_ui::panel::Panel;
+pub use screens::Screen;
 
 /// Toasts show for 3 s (HOME-9); undo is offered for 5 s (EDIT-4, MENU-22).
 pub const TOAST_MS: u32 = 3000;
@@ -40,20 +45,6 @@ pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
 /// Watch pause (0 1 2 5, default 1 min).
 pub const PAUSE_S: u16 = 60;
-
-/// Which screen is up, with its cursor.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Screen {
-    Home,
-    /// Hold SLOT: the active slot's settings as a grid; `cell` is the focused one (0-8).
-    Edit { cell: u8 },
-    /// MENU: the nine quick settings and "0 Advanced"; `row` 0-9.
-    Quick { row: u8 },
-    /// MENU 0: nine groups. `from_quick`: BACK returns to quick settings, else home.
-    Advanced { row: u8, from_quick: bool },
-    /// # on home, or MENU 0 0.
-    Status { row: u8, from_menu: bool },
-}
 
 /// One slot: a VFO and a channel position; which one it is on.
 #[derive(Clone, Copy, Debug)]
@@ -158,10 +149,11 @@ impl Outbox {
 
 /// What is on the screen now, so render can skip what hasn't changed.
 pub(crate) struct Drawn {
-    pub screen: Option<u8>,
+    /// Which screen the content area shows (its variant; a screen whose state changes keeps its page).
+    pub screen: Option<core::mem::Discriminant<Screen>>,
     pub sbar: Option<ferrite_ui::widgets::StatusBar>,
     /// One hash per region; 0 = not drawn.
-    pub hash: [u32; view::REGIONS],
+    pub hash: [u32; REGIONS],
     /// Each card's meter: lit segments and whether squelch was open.
     pub meter: [Option<(u8, bool)>; SLOTS],
 }
@@ -190,8 +182,13 @@ pub struct App {
     scan_mask: u8,
     relay_mask: u8,
     out: Outbox,
+    /// Where BACK returns from screens opened with [`App::open`], newest last (MENU-24).
+    back: [Option<Screen>; BACK_DEPTH],
     pub(crate) drawn: Drawn,
 }
+
+/// Screens remembered for BACK: menu, group, item and one more.
+const BACK_DEPTH: usize = 4;
 
 impl App {
     /// Three slots: A on 146.520, B on 443.475, C on 118.950 (the look review's sample), all VFO.
@@ -216,7 +213,8 @@ impl App {
             scan_mask: 0,
             relay_mask: 0,
             out: Outbox { q: [None; 16], head: 0, len: 0 },
-            drawn: Drawn { screen: None, sbar: None, hash: [0; view::REGIONS], meter: [None; SLOTS] },
+            back: [None; BACK_DEPTH],
+            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS] },
         };
         for s in 0..SLOTS as u8 {
             app.send_slot(s);
@@ -280,11 +278,15 @@ impl App {
         self.drawn.sbar = None;
     }
 
-    /// A message, decode or alert arrived: a toast and the inbox count (SBAR-6).
+    /// A message, decode or alert arrived: a toast and the inbox count (SBAR-6); an alert also opens the alert
+    /// screen.
     pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
         self.inbox = self.inbox.saturating_add(1);
         self.alert |= alert;
         self.show_toast(head, body, true);
+        if alert {
+            self.open(Dest::Alert); // WX-4: over any screen
+        }
     }
 
     // ---- inputs ----
@@ -294,10 +296,17 @@ impl App {
         self.keys.down(key, now);
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
+        if key == Key::Ptt {
+            // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there.
+            self.screen.ptt(self, true);
+        }
     }
 
     pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        if key == Key::Ptt {
+            self.screen.ptt(self, false);
+        }
         if let Some(e) = self.keys.up(key, now) {
             self.on_key(e, store);
         }
@@ -311,25 +320,7 @@ impl App {
         if self.locked {
             return self.locked_toast();
         }
-        let d = d as i32;
-        match self.screen {
-            Screen::Home if self.keys.is_held(Key::Side(1)) => self.squelch_step(d),
-            Screen::Home => {
-                let big = self.keys.is_held(Key::Side(2));
-                if big {
-                    self.keys.used(Key::Side(2));
-                }
-                self.step(d, big, store);
-            }
-            Screen::Edit { cell } => self.change(GRID[cell as usize], d),
-            Screen::Quick { row } => self.change(QUICK[row as usize], d),
-            Screen::Advanced { row, from_quick } => {
-                self.screen = Screen::Advanced { row: (row as i32 + d).rem_euclid(9) as u8, from_quick }
-            }
-            Screen::Status { row, from_menu } => {
-                self.screen = Screen::Status { row: (row as i32 + d).rem_euclid(view::STATUS_ROWS) as u8, from_menu }
-            }
-        }
+        self.screen.knob(self, d as i32, store);
     }
 
     /// Time passes: long presses and repeats, toasts, undo, timeouts; and the latest snapshot.
@@ -353,14 +344,10 @@ impl App {
         if self.paused_until.is_some_and(|t| after(now, t)) {
             self.paused_until = None;
         }
-        let idle = now.wrapping_sub(self.last_input);
-        match self.screen {
-            Screen::Edit { .. } if idle >= EDIT_IDLE_MS => self.go_home(),
-            Screen::Quick { .. } | Screen::Advanced { .. } | Screen::Status { .. } if idle >= MENU_TIMEOUT_MS => {
-                self.go_home()
-            }
-            _ => {}
+        if self.screen.timeout().is_some_and(|t| now.wrapping_sub(self.last_input) >= t) {
+            self.go_home();
         }
+        self.screen.tick(self, live);
     }
 
     fn tick_keys(&mut self, now: u32, store: &impl ChannelStore) {
@@ -393,159 +380,42 @@ impl App {
             _ => {}
         }
         if self.locked {
-            // KEY-14: PTT and SIDE1 still work (neither does anything on screen yet).
+            // KEY-14: PTT and SIDE1 still work (PTT through key_down/key_up; SIDE1 does nothing on screen yet).
             if !matches!(e.key, Key::Ptt | Key::Side(1)) {
                 self.locked_toast();
             }
             return;
         }
-        match self.screen {
-            Screen::Home => self.home_key(e, store),
-            Screen::Edit { cell } => self.edit_key(e, cell),
-            Screen::Quick { row } => self.quick_key(e, row),
-            Screen::Advanced { row, from_quick } => self.advanced_key(e, row, from_quick),
-            Screen::Status { row, from_menu } => self.status_key(e, row, from_menu),
-        }
-    }
-
-    fn home_key(&mut self, e: KeyEvent, store: &impl ChannelStore) {
-        use Press::*;
-        let big = self.keys.is_held(Key::Side(2));
-        match (e.key, e.press) {
-            (Key::Up | Key::Down, Short | Repeat) if self.keys.is_held(Key::Side(1)) => {
-                self.squelch_step(if e.key == Key::Up { 1 } else { -1 })
-            }
-            (Key::Up | Key::Down, Short | Repeat) => {
-                if big {
-                    self.keys.used(Key::Side(2));
-                }
-                self.step(if e.key == Key::Up { 1 } else { -1 }, big, store);
-            }
-            (Key::Left | Key::Right, Short | Repeat) => self.group(if e.key == Key::Right { 1 } else { -1 }, store),
-            (Key::Slot, Short) => {
-                // NAV-5
-                self.active = (self.active + 1) % SLOTS as u8;
-                self.out.push(RadioCmd::Active(self.active));
-            }
-            (Key::Slot, Long) => self.screen = Screen::Edit { cell: 0 }, // EDIT-1
-            (Key::VfoMem, Short) => self.toggle_vfo(store),
-            (Key::VfoMem, Long) => {
-                if self.slots[self.active as usize].vfo_mode {
-                    self.show_toast(b"Save as channel", b"comes with storage", false); // VFO-9
-                }
-            }
-            (Key::Hash, Short) => {
-                if self.watched_rx() {
-                    // HOME-10, WATCH-6
-                    self.paused_until = Some(self.now.wrapping_add(PAUSE_S as u32 * 1000));
-                    self.out.push(RadioCmd::PauseWatch(PAUSE_S));
-                    self.show_toast(b"Watch paused", b"for 1 min", false);
-                } else {
-                    self.screen = Screen::Status { row: 0, from_menu: false };
-                }
-            }
-            (Key::Menu, Short) => self.screen = Screen::Quick { row: 0 }, // MENU-1
-            (Key::Menu, Long) => self.screen = Screen::Advanced { row: 0, from_quick: false }, // MENU-2
-            (Key::Side(2), Short) => {
-                let a = self.active;
-                let on = self.scan_mask & 1 << a == 0;
-                self.out.push(RadioCmd::Scan { slot: a, on });
-            }
-            (Key::Star, Long) => self.change(Item::Reverse, 1), // VFO-7: two values, so +1 toggles
-            (Key::Digit(0), Long) => self.show_toast(b"No home channel.", b"Hold SLOT on a channel", false), // CHAN-20
-            (Key::Digit(1), Long) => {
-                // WATCH-7
-                let v = if self.watch == 0 { 1 } else { 0 };
-                self.change(Item::Watch, v - self.watch as i32);
-                self.show_toast(b"Watch", if v == 0 { b"off" } else { b"A+B" }, false);
-            }
-            (Key::Digit(_), Short) => self.show_toast(b"Direct entry", b"comes next", false), // NAV-4
-            (Key::Digit(_), Long) => self.show_toast(b"Shortcuts", b"come next", false), // HOME-8
-            _ => {}
-        }
-    }
-
-    fn edit_key(&mut self, e: KeyEvent, cell: u8) {
-        use Press::*;
-        let (r, c) = (cell / 3, cell % 3);
-        let mv = |r: u8, c: u8| Screen::Edit { cell: r * 3 + c };
-        match (e.key, e.press) {
-            // EDIT-3: arrows pick, the knob changes.
-            (Key::Up, Short | Repeat) => self.screen = mv(r.saturating_sub(1), c),
-            (Key::Down, Short | Repeat) => self.screen = mv((r + 1).min(2), c),
-            (Key::Left, Short | Repeat) => self.screen = mv(r, c.saturating_sub(1)),
-            (Key::Right, Short | Repeat) => self.screen = mv(r, (c + 1).min(2)),
-            (Key::Exit | Key::Slot, Short) => self.go_home(), // EDIT-6
-            (Key::Star, Short) => self.do_undo(),
-            (Key::Hash, Short) => self.reset(GRID[cell as usize]),
-            (Key::Menu, Short) => self.show_toast(GRID[cell as usize].label().as_bytes(), b"list comes next", false),
-            _ => {}
-        }
-    }
-
-    fn quick_key(&mut self, e: KeyEvent, row: u8) {
-        use Press::*;
-        let item = QUICK[row as usize];
-        match (e.key, e.press) {
-            (Key::Up, Short | Repeat) => self.screen = Screen::Quick { row: (row + 9) % 10 },
-            (Key::Down, Short | Repeat) => self.screen = Screen::Quick { row: (row + 1) % 10 },
-            (Key::Left | Key::Right, Short | Repeat) => self.change(item, if e.key == Key::Right { 1 } else { -1 }), // MENU-16
-            (Key::Digit(0), Short) => self.screen = Screen::Advanced { row: 0, from_quick: true },
-            (Key::Digit(d), Short) => self.screen = Screen::Quick { row: d - 1 }, // MENU-5
-            (Key::Menu, Short) => match item {
-                Item::Advanced => self.screen = Screen::Advanced { row: 0, from_quick: true },
-                _ => self.show_toast(item.name().as_bytes(), b"editor comes next", false), // MENU-17
-            },
-            (Key::Hash, Short) => self.reset(item), // MENU-18
-            (Key::Star, Short) => self.do_undo(),   // MENU-22
-            (Key::Exit, Short) => self.go_home(),
-            _ => {}
-        }
-    }
-
-    fn advanced_key(&mut self, e: KeyEvent, row: u8, from_quick: bool) {
-        use Press::*;
-        let open = |app: &mut Self, r: u8| {
-            app.screen = Screen::Advanced { row: r, from_quick };
-            app.show_toast(view::GROUPS[r as usize].0.as_bytes(), b"comes next", false);
-        };
-        match (e.key, e.press) {
-            (Key::Up, Short | Repeat) => self.screen = Screen::Advanced { row: (row + 8) % 9, from_quick },
-            (Key::Down, Short | Repeat) => self.screen = Screen::Advanced { row: (row + 1) % 9, from_quick },
-            (Key::Digit(0), Short) => self.screen = Screen::Status { row: 0, from_menu: true }, // SBAR-13
-            (Key::Digit(d), Short) => open(self, d - 1),
-            (Key::Menu, Short) => open(self, row),
-            (Key::Exit, Short) => {
-                // MENU-24: up one level, keeping the place
-                self.screen = if from_quick { Screen::Quick { row: 9 } } else { Screen::Home };
-            }
-            _ => {}
-        }
-    }
-
-    fn status_key(&mut self, e: KeyEvent, row: u8, from_menu: bool) {
-        use Press::*;
-        let n = view::STATUS_ROWS as u8;
-        match (e.key, e.press) {
-            (Key::Up, Short | Repeat) => self.screen = Screen::Status { row: (row + n - 1) % n, from_menu },
-            (Key::Down, Short | Repeat) => self.screen = Screen::Status { row: (row + 1) % n, from_menu },
-            // SBAR-15: OK on a row opens its setting (those that exist so far).
-            (Key::Menu, Short) => match view::STATUS[row as usize] {
-                "Watch" => self.screen = Screen::Quick { row: 6 },
-                "Battery Save" => self.screen = Screen::Quick { row: 8 },
-                name => self.show_toast(name.as_bytes(), b"setting comes next", false),
-            },
-            (Key::Exit, Short) => {
-                self.screen = if from_menu { Screen::Advanced { row: 0, from_quick: false } } else { Screen::Home }
-            }
-            _ => {}
-        }
+        self.screen.key(self, e, store);
     }
 
     // ---- actions ----
 
+    /// Home, forgetting where BACK would return (HOME-2).
     fn go_home(&mut self) {
         self.screen = Screen::Home;
+        self.back = [None; BACK_DEPTH];
+    }
+
+    /// Opens a screen by where it is in the manual ([`Dest`]), remembering this one for BACK. Screens not built
+    /// yet open as a "coming" placeholder ([`screens::nav::enter`]).
+    pub fn open(&mut self, dest: Dest) {
+        if self.back[BACK_DEPTH - 1].is_some() {
+            self.back.copy_within(1.., 0); // full: the oldest goes
+            self.back[BACK_DEPTH - 1] = None;
+        }
+        if let Some(b) = self.back.iter_mut().find(|b| b.is_none()) {
+            *b = Some(self.screen);
+        }
+        self.screen = screens::nav::enter(dest, self);
+    }
+
+    /// BACK on a screen opened with [`App::open`]: the screen it was opened from, or home (MENU-24).
+    fn back(&mut self) {
+        match self.back.iter_mut().rev().find(|b| b.is_some()).and_then(|b| b.take()) {
+            Some(s) => self.screen = s,
+            None => self.go_home(),
+        }
     }
 
     fn locked_toast(&mut self) {
@@ -563,92 +433,6 @@ impl App {
 
     fn watch_mask(&self) -> u8 {
         [0, 0b011, 0b111][self.watch as usize % 3]
-    }
-
-    /// SIDE1 held + knob or ▲▼: the active slot's squelch, shown as a toast (KEY table, chapter 7). Stops at 0
-    /// and 9 rather than wrapping.
-    fn squelch_step(&mut self, d: i32) {
-        self.keys.used(Key::Side(1));
-        let sq = self.slots[self.active as usize].cfg().squelch as i32;
-        let to = (sq + d).clamp(0, 9);
-        self.change(Item::Squelch, to - sq);
-        self.show_toast(b"Squelch", &[b'0' + to as u8], false);
-    }
-
-    /// Knob or ▲▼ on home: a step in VFO mode (NAV-2), a channel in channel mode (NAV-1); big with SIDE2 (NAV-3).
-    fn step(&mut self, d: i32, big: bool, store: &impl ChannelStore) {
-        let a = self.active as usize;
-        let s = &mut self.slots[a];
-        if s.on_channel() {
-            let n = store.zone_len(s.zone) as i32;
-            if n == 0 {
-                return;
-            }
-            s.pos = (s.pos as i32 + d * if big { 10 } else { 1 }).rem_euclid(n) as u16;
-            s.ch = store.zone_at(s.zone, s.pos);
-            self.send_slot(a as u8);
-        } else {
-            let step = if big { 100_000 } else { STEPS[s.cfg.step as usize % STEPS.len()].0 as i32 };
-            // Plain steps from where it is (146.520 stays on its 5 kHz raster with a 12.5 kHz step); snapping to
-            // the step is for typed entry (VFO-12). Kept inside what the chips tune.
-            let f = (s.vfo as i32 + d * step).clamp(mhz(1) as i32 + 80_000, mhz(999) as i32) as Freq10;
-            s.vfo = f;
-            s.mem[band_near(f)] = f;
-            self.out.push(RadioCmd::TuneSlot { slot: a as u8, freq: f });
-        }
-    }
-
-    /// ◀▶ on home: next band in VFO mode (NAV-2), next zone with channels in channel mode (NAV-1, CHAN-11).
-    fn group(&mut self, d: i32, store: &impl ChannelStore) {
-        let a = self.active as usize;
-        let s = &mut self.slots[a];
-        if s.on_channel() {
-            let zones = store.zones() as i32;
-            let mut z = s.zone as i32;
-            for _ in 0..zones {
-                z = (z + d).rem_euclid(zones);
-                if store.zone_len(z as u8) > 0 {
-                    break;
-                }
-            }
-            if z as u8 != s.zone {
-                (s.zone, s.pos) = (z as u8, 0);
-                s.ch = store.zone_at(s.zone, 0);
-                self.send_slot(a as u8);
-            }
-        } else {
-            let b = band_near(s.vfo);
-            s.mem[b] = s.vfo;
-            let nb = (b as i32 + d).rem_euclid(BANDS.len() as i32) as usize;
-            s.vfo = s.mem[nb];
-            s.cfg.mode = BANDS[nb].mode;
-            s.cfg.step = BANDS[nb].step;
-            if s.cfg.offset != 0 {
-                s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift;
-            }
-            self.send_slot(a as u8);
-        }
-    }
-
-    /// V/M: VFO <-> channel (only with channels stored).
-    fn toggle_vfo(&mut self, store: &impl ChannelStore) {
-        let a = self.active as usize;
-        let s = &mut self.slots[a];
-        if s.vfo_mode {
-            if s.ch.is_none() {
-                match (0..store.zones()).find(|&z| store.zone_len(z) > 0) {
-                    Some(z) => {
-                        (s.zone, s.pos) = (z, 0);
-                        s.ch = store.zone_at(z, 0);
-                    }
-                    None => return self.show_toast(b"No channels yet", b"", false),
-                }
-            }
-            s.vfo_mode = false;
-        } else {
-            s.vfo_mode = true;
-        }
-        self.send_slot(a as u8);
     }
 
     /// The slot's frequency and every setting, to the Radio task.

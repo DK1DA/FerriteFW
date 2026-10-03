@@ -137,27 +137,13 @@ fn key_of(p: Part) -> Key {
     }
 }
 
-/// The mock-up that matches the screen on show.
+/// The mock-up that matches the screen on show (a placeholder has none: the boot one stands in).
 fn mockup_name(s: Option<AppScreen>) -> &'static str {
-    match s {
-        None => "BootA.png",
-        Some(AppScreen::Home) => "HomeA.png",
-        Some(AppScreen::Edit { .. }) => "HomeEdit.png",
-        Some(AppScreen::Quick { .. }) => "MenuQuick.png",
-        Some(AppScreen::Advanced { .. }) => "MenuTop.png",
-        Some(AppScreen::Status { .. }) => "StatusPage.png",
-    }
+    s.map_or(Some("BootA.png"), |s| s.mockup()).unwrap_or("BootA.png")
 }
 
 fn screen_name(s: Option<AppScreen>) -> &'static str {
-    match s {
-        None => "Boot",
-        Some(AppScreen::Home) => "Home",
-        Some(AppScreen::Edit { .. }) => "Edit",
-        Some(AppScreen::Quick { .. }) => "Quick",
-        Some(AppScreen::Advanced { .. }) => "Advanced",
-        Some(AppScreen::Status { .. }) => "Status",
-    }
+    s.map_or("Boot", |s| s.name())
 }
 
 /// A window position to panel (buffer) pixels: minifb fits the buffer into the window, aspect kept, centred.

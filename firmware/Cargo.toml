@@ -19,6 +19,7 @@ tx = ["bk4829/tx"]
 [dependencies]
 ferrite-core.workspace = true
 ferrite-ui.workspace = true
+ferrite-app.workspace = true
 ufmt.workspace = true
 uradio-bus.workspace = true
 bk4829.workspace = true
