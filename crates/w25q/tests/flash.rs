@@ -66,6 +66,7 @@ fn device(chip: Rc<RefCell<Chip>>) -> impl FnMut(&[u8], u8) -> u8 {
 
 const WRITABLE: &[std::ops::Range<u32>] = &[0x02C000..0x090000, 0x200000..0x300000];
 
+#[allow(clippy::type_complexity)] // the mock device is a closure; naming it is not possible here
 fn setup() -> (W25q<MockSpi<impl FnMut(&[u8], u8) -> u8>>, Rc<RefCell<Chip>>, MockDelay) {
     let chip = Rc::new(RefCell::new(Chip { mem: vec![0xFF; 4 << 20], wel: false, busy_reads: 0, stuck: false }));
     let mut delay = MockDelay::default();
