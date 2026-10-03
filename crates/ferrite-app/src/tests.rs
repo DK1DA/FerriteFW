@@ -304,7 +304,7 @@ fn shortcuts_and_menu_paths() {
     let mut t = T::new();
     for (d, dest) in [(2, Dest::FmBroadcast), (3, Dest::BandScope), (4, Dest::AprsHeard), (7, Dest::Weather), (9, Dest::ToneSearch)] {
         t.hold(Key::Digit(d));
-        assert_eq!(t.app.screen(), coming(dest), "hold {d}");
+        assert_eq!(t.app.screen(), crate::screens::nav::enter(dest, &t.app), "hold {d}");
         t.tap(Key::Exit);
         assert_eq!(t.app.screen(), Screen::Home);
     }
@@ -317,18 +317,19 @@ fn shortcuts_and_menu_paths() {
     t.tap(Key::Digit(4)); // NAV-4: entry
     assert_eq!(t.app.screen(), coming(Dest::Entry(4)));
     t.hold(Key::Exit);
-    // MENU 0 9 1 3: the key test, typed straight through (MENU-5)
-    for d in [0, 9, 1, 3] {
+    // MENU 0 9 2 3: link status, typed straight through (MENU-5)
+    use crate::screens::groups::Group;
+    for d in [0, 9, 2, 3] {
         t.tap(if d == 0 { Key::Menu } else { Key::Digit(d) });
         if d == 0 {
             t.tap(Key::Digit(0));
         }
     }
-    assert_eq!(t.app.screen(), coming(Dest::KeyTest));
+    assert!(matches!(t.app.screen(), Screen::Link(_)));
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), coming(Dest::Sub(9, 1)));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 9, sub: 2, row: 2 }), "the list, on its row");
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), coming(Dest::Group(9)));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 9, sub: 0, row: 1 }));
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 8, from_quick: true }), "keeps the place");
     t.tap(Key::Exit);
@@ -508,6 +509,16 @@ fn fonts_have_every_character_the_ui_draws() {
         ("screens/advanced.rs", include_str!("screens/advanced.rs")),
         ("screens/status.rs", include_str!("screens/status.rs")),
         ("screens/coming.rs", include_str!("screens/coming.rs")),
+        ("screens/groups.rs", include_str!("screens/groups.rs")),
+        ("screens/setup.rs", include_str!("screens/setup.rs")),
+        ("screens/pin.rs", include_str!("screens/pin.rs")),
+        ("screens/info.rs", include_str!("screens/info.rs")),
+        ("screens/keytest.rs", include_str!("screens/keytest.rs")),
+        ("screens/link.rs", include_str!("screens/link.rs")),
+        ("screens/fm.rs", include_str!("screens/fm.rs")),
+        ("screens/hf.rs", include_str!("screens/hf.rs")),
+        ("screens/alert.rs", include_str!("screens/alert.rs")),
+        ("settings.rs", include_str!("settings.rs")),
         ("slot.rs", include_str!("slot.rs")),
         ("chan.rs", include_str!("chan.rs")),
         ("widgets.rs", include_str!("../../ferrite-ui/src/widgets.rs")),
@@ -602,3 +613,8 @@ fn literal_scanner() {
     let v = string_literals("let a = \"A\\u{b7}B\"; // \"not this\"\nlet c = '\"'; let d = b\"x\\x18\";");
     assert_eq!(v, ["A\u{b7}B", "x\x18"]);
 }
+
+
+/// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
+#[path = "tests_d.rs"]
+mod d;

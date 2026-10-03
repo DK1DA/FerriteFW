@@ -34,7 +34,7 @@ SLOW = ".slow_rodata"
 FONT_LIST = [  # name, file, px, chars, tabular, use
     ("ui_12", REG, 12, TEXT, False, "status bar, hints, labels, lists, values"),
     ("ui_12b", BOLD, 12, TEXT, False, "emphasis: clock, keys in hints, tags"),
-    ("ui_15b", BOLD, 15, CALL, False, "callsign on the boot screen"),
+    ("ui_15b", BOLD, 15, TEXT, False, "headings: setup pages, alerts; the callsign on the boot screen"),
     ("dig_46", NUM, 46, DIG, True, "active slot frequency"),
     ("dig_28", NUM, 28, DIG, True, "active slot last digits"),
     ("dig_26", NUM, 26, DIG, True, "watched slot frequency"),

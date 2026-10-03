@@ -14,6 +14,7 @@ use std::path::Path;
 
 mod face;
 mod fake;
+mod shots_d;
 mod window;
 
 fn save(fb: &FrameBuffer, name: &str, scale: u32) {
@@ -142,4 +143,5 @@ fn main() {
     press(&mut app, Key::Digit(3), 800, &mut t);
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "coming", scale);
+    shots_d::run(scale);
 }

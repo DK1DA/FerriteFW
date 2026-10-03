@@ -26,7 +26,8 @@ pub(crate) const R_TOP: usize = 14; // menu header / Recent row / edit header
 pub(crate) const R_HELP: usize = 15;
 pub(crate) const R_NOTE: usize = 16;
 pub(crate) const R_LINE: usize = 17; // edit: the other two slots (17-18)
-pub(crate) const REGIONS: usize = 19;
+pub(crate) const R_PAGE: usize = 19; // a screen's page: see App::new_page
+pub(crate) const REGIONS: usize = 20;
 
 /// What a screen draws from besides the App: the Radio task's snapshot, the radio-wide state, the channels.
 pub struct Cx<'a, S: ChannelStore> {
@@ -91,19 +92,32 @@ impl App {
         d
     }
 
+    /// A screen with pages (setup, About): when the page changes, the content area is cleared and every region
+    /// forgotten, as on a screen change. Returns true then.
+    pub(crate) fn new_page(&mut self, lcd: &mut impl Panel, page: u32) -> bool {
+        if !self.dirty(R_PAGE, page | 1) {
+            return false;
+        }
+        lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
+        self.drawn.hash[..R_PAGE].fill(0);
+        true
+    }
+
     pub(crate) fn status_bar(&self, live: &LiveAll, dev: &Device) -> StatusBar {
         let mut name = Buf::<10>::new();
         self.screen.title(self, &mut name);
         // SBAR-16: TW with three slots watched, DW with two, counting the relay rule's drops.
         let m = self.watch_mask() & !self.relay_mask;
         let n = m.count_ones() as u8;
+        // HF-5: in HF mode TW/DW and SCN are absent (everything pauses); SBAR-18: the alerts-paused bell.
+        let hf = super::hf::in_hf(self);
         StatusBar {
             name,
             locked: self.locked,
             // SBAR-11: the bar shows what changes what a key does, so SCN is the active slot scanning; a
             // watched slot's scan shows on its card.
-            scan: live.slots[self.active as usize].scanning,
-            watch: if self.watch == 0 || n < 2 { 0 } else { n },
+            scan: !hf && live.slots[self.active as usize].scanning,
+            watch: if hf || self.watch == 0 || n < 2 { 0 } else { n },
             inbox: self.inbox,
             alert: self.alert,
             clock: dev.clock_min,
@@ -114,6 +128,7 @@ impl App {
             battery_low: dev.battery_low,
             battery_cutoff: dev.battery_cutoff,
             blink_off: dev.battery_cutoff && (self.now / 500) % 2 == 1,
+            alerts_paused: hf && self.set.same_on(),
         }
     }
 
@@ -156,6 +171,16 @@ impl App {
     pub(crate) fn help_box(&mut self, lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) {
         if self.dirty(R_HELP, hash(&(text, path))) {
             w::help_box(lcd, y, h, text, path);
+        }
+    }
+
+    /// A message page (prompts, power off): a centred heading in `c`, an optional second line, wrapped text.
+    pub(crate) fn message(&mut self, lcd: &mut impl Panel, head: &[u8], line: &[u8], text: &[u8], c: u16) {
+        if self.dirty(R_TOP, hash(&(head, line, text))) {
+            use ferrite_ui::assets::{UI_12, UI_15B};
+            w::field(lcd, 10, 220, 60, 86, 80, Align::Center, head, &UI_15B, c, BG);
+            w::field(lcd, 10, 220, 92, 116, 110, Align::Center, line, &UI_15B, TEXT, BG);
+            w::wrap(lcd, 16, 208, 124, 290, 140, 15, text, &UI_12, SUB, BG);
         }
     }
 

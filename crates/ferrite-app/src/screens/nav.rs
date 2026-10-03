@@ -18,12 +18,13 @@
 //! | Edit in place | OK on a cell | [`Dest::Value`] / [`Dest::Tones`] |
 //! | Advanced (MENU 0) | 1-9 or OK | [`Dest::Group`]; inside, digits follow [`MENU0`] (MENU-5) |
 //! | Status page | OK on a row (SBAR-15) | the row's setting or screen |
+//! | Locked, PIN "at power on and unlock" | hold # (KEY-16) | [`Dest::Pin`] |
 //! | [`App::notify`] with an alert | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Not wired yet (no event to start them): transmit refused, emergency prompt, PIN at power on, Bluetooth
-//! write approval and progress, power off, empty battery, SSB patch confirm, setup at first boot, the shortcut
-//! map while a digit is held (HOME-8: the shortcut runs at the long press for now), crossband (no menu number
-//! yet).
+//! Not wired yet (no event to start them): transmit refused, emergency prompt, Bluetooth write approval and
+//! progress (the Link task opens them), power off, empty battery, SSB patch confirm, the shortcut map while a
+//! digit is held (HOME-8: the shortcut runs at the long press for now), crossband (no menu number yet). Setup at
+//! first boot and the PIN at power on have their hooks ([`App::first_boot`], [`App::ask_pin`]).
 
 use super::advanced::{Advanced, GROUPS};
 use super::coming::Coming;
@@ -379,11 +380,38 @@ pub fn menu0(path: &[u8]) -> Option<Dest> {
 
 /// A destination's screen: built screens by their own arm, the rest as a placeholder. Adding a screen = one
 /// arm here.
-pub fn enter(dest: Dest, _app: &App) -> Screen {
+pub fn enter(dest: Dest, app: &App) -> Screen {
+    use super::info::{Info, Page};
+    use super::link::{Link, LinkPage};
     match dest {
         Dest::Quick => Screen::Quick(Quick { row: 0 }),
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
         Dest::Status => Screen::Status(Status { row: 0, from_menu: false }),
+        // D: system and modes
+        Dest::Group(g) => Screen::Group(super::groups::Group { g: g.clamp(1, 9), sub: 0, row: 0 }),
+        Dest::Sub(g, m) => Screen::Group(super::groups::Group { g, sub: m, row: 0 }),
+        Dest::Setup => Screen::Setup(super::setup::Setup::new(false)),
+        Dest::ExtendTx => Screen::ExtendTx(super::setup::ExtendTx),
+        Dest::Pin if app.locked => Screen::Pin(super::pin::Pin::unlock()),
+        Dest::Pin => Screen::Pin(super::pin::Pin::set(app.set.pin_mode.max(1))),
+        Dest::About => Screen::Info(Info { page: Page::About }),
+        Dest::Calibration => Screen::Info(Info { page: Page::Calibration }),
+        Dest::AdvSquelch => Screen::Info(Info { page: Page::AdvSquelch }),
+        Dest::SsbPatch => Screen::Info(Info { page: Page::SsbPatch }),
+        Dest::SsbConfirm => Screen::Info(Info { page: Page::SsbConfirm }),
+        Dest::PairBt => Screen::Info(Info { page: Page::PairBt }),
+        Dest::PowerOff => Screen::Info(Info { page: Page::PowerOff }),
+        Dest::EmptyBattery => Screen::Info(Info { page: Page::EmptyBattery }),
+        Dest::Mailbox => Screen::Info(Info { page: Page::Mailbox }),
+        Dest::KeyTest => Screen::KeyTest(super::keytest::KeyTest::new()),
+        Dest::LinkStatus => Screen::Link(Link::new(LinkPage::Status)),
+        Dest::Paired => Screen::Link(Link::new(LinkPage::Paired)),
+        Dest::WriteApproval => Screen::Link(Link::new(LinkPage::Approve)),
+        Dest::WriteProgress => Screen::Link(Link::new(LinkPage::Progress)),
+        Dest::FmBroadcast => Screen::Fm(super::fm::Fm::new()),
+        Dest::HfMode => Screen::Hf(super::hf::Hf::new()),
+        Dest::HfRecent => Screen::HfRecent(super::hf::HfRecent { row: 0 }),
+        Dest::Alert => Screen::Alert(super::alert::Alert { silenced: false }),
         _ => Screen::Coming(Coming { dest }),
     }
 }

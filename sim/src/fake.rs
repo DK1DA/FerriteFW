@@ -4,7 +4,7 @@
 use ferrite_app::chan::{channel, Channel, Table};
 use ferrite_app::slot::{band_of, BANDS, DCS_FLAG, DEFAULT_CFG};
 use ferrite_core::freq::{mhz, Freq10};
-use ferrite_core::msg::{Device, GpsState, LiveAll, RadioCmd, SlotLive};
+use ferrite_core::msg::{BroadcastLive, CalState, Device, GpsState, LinkLive, LiveAll, RadioCmd, SelfTest, SlotLive};
 
 const fn cfg(tone: u16, offset: i32) -> ferrite_app::slot::SlotCfg {
     let mut c = DEFAULT_CFG;
@@ -130,5 +130,26 @@ pub fn device() -> Device {
         battery_low: false,
         battery_cutoff: false,
         tx_built: false,
+        selftest: SelfTest {
+            idcode: ferrite_core::chipid::EXPECTED_PID,
+            mcu_ok: true,
+            flash_id: 0xEF_4016,
+            flash_mb: 4,
+            cal: CalState::Ok,
+            chips: 3,
+            si4732: true,
+            ssb_patch: true,
+            battery_trim: 0,
+        },
+        bcast: broadcast(),
+        link: LinkLive { cable: true, baud_100: 9216, write_pct: None },
     }
+}
+
+/// The broadcast receiver: a station with RDS (FM broadcast), its SNR also standing in for HF mode's.
+pub fn broadcast() -> BroadcastLive {
+    let mut b = BroadcastLive { rssi: 48, snr: 31, stereo: true, ps: *b"CBC R1  ", rt: [0; 32], patch_pct: 100 };
+    let rt = b"The Current with Matt Galloway";
+    b.rt[..rt.len()].copy_from_slice(rt);
+    b
 }

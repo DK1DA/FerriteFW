@@ -37,6 +37,11 @@ pub enum RadioCmd {
     Scan { slot: u8, on: bool },
     /// Pause watching for this many seconds (WATCH-6).
     PauseWatch(u16),
+    /// HF mode on or off (HF-3, HF-4): on switches the relay once, powers the SI4732 up with the SSB patch and
+    /// pauses watch, scan, decoders, jobs and beacons; off undoes all of it (HF-8).
+    HfMode(bool),
+    /// Tune in HF mode: the receiver follows from frequency and mode (HF-10). Mode as [`Param::Mode`].
+    HfTune { freq: Freq10, mode: u8 },
 }
 
 /// A slot setting carried by [`RadioCmd::SlotParam`]. Values are the UI's indexes, documented per variant.
@@ -205,6 +210,69 @@ pub struct Device {
     pub battery_cutoff: bool,
     /// This build can transmit (`--features tx`).
     pub tx_built: bool,
+    pub selftest: SelfTest,
+    pub bcast: BroadcastLive,
+    pub link: LinkLive,
+}
+
+/// Calibration status from the CAL checks (chapter 35).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CalState {
+    /// Not checked yet.
+    #[default]
+    Unknown,
+    Ok,
+    /// Erased (0xF0E0 = 0xFF): transmit locked (CAL-5).
+    Blank,
+    /// A value fails CAL-6.
+    Invalid,
+    /// The sector's CRC differs from the one stored at install (CAL-7).
+    CrcMismatch,
+}
+
+/// What the self-test found, for About (SELF-5) and the Status page.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SelfTest {
+    /// DEBUG_IDCODE, 0 until read.
+    pub idcode: u32,
+    /// The MCU is the expected part (SELF-1).
+    pub mcu_ok: bool,
+    /// SPI flash JEDEC ID (0 = no answer) and size from it, in MB.
+    pub flash_id: u32,
+    pub flash_mb: u8,
+    pub cal: CalState,
+    /// BK4829s that answered, a bit per chip; the SI4732 answered.
+    pub chips: u8,
+    pub si4732: bool,
+    /// A verified SSB patch is in SPI flash (HF-20).
+    pub ssb_patch: bool,
+    /// Battery reading trim in 10 mV (0 9 7 3).
+    pub battery_trim: i8,
+}
+
+/// The broadcast receiver (SI4732) now: FM broadcast and HF mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BroadcastLive {
+    /// Signal in dBuV and SNR in dB.
+    pub rssi: u8,
+    pub snr: u8,
+    pub stereo: bool,
+    /// RDS station name (8 characters, space padded) and radio text, zero padded.
+    pub ps: [u8; 8],
+    pub rt: [u8; 32],
+    /// SSB patch loading on entering HF mode, 0-100 (HF-3).
+    pub patch_pct: u8,
+}
+
+/// The link (chapter 29): cable, and a write session's progress.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LinkLive {
+    /// The web app is connected over the cable.
+    pub cable: bool,
+    /// The cable's rate in hundreds of baud (1152 = 115200).
+    pub baud_100: u16,
+    /// A write session: percent done (LINK-9).
+    pub write_pct: Option<u8>,
 }
 
 /// GPS, published by the GPS task.

@@ -274,6 +274,69 @@ pub fn envelope(lcd: &mut impl Panel, x: i32, y: i32, c: u16) {
     lcd.line(x + 6, y + 5, x + 10, y + 1, c);
 }
 
+/// A bell, 11 x 11 (alert tone; with `slash`, alerts paused: SBAR-18).
+pub fn bell(lcd: &mut impl Panel, x: i32, y: i32, c: u16, bg: u16, slash: bool) {
+    lcd.fill(x, y, 11, 11, bg);
+    lcd.fill_r(x + 2, y + 1, 7, 8, 3, c);
+    lcd.fill(x + 1, y + 7, 9, 2, c);
+    lcd.fill(x + 4, y + 9, 3, 2, c);
+    lcd.fill_r(x + 4, y + 3, 3, 4, 1, bg);
+    if slash {
+        lcd.line(x, y, x + 10, y + 10, bg);
+        lcd.line(x + 1, y, x + 10, y + 9, c);
+    }
+}
+
+/// A warning triangle, 13 x 12, with its "!" in bg.
+pub fn warn_icon(lcd: &mut impl Panel, x: i32, y: i32, c: u16, bg: u16) {
+    for i in 0..12 {
+        let n = i / 2;
+        lcd.fill(x + 6 - n, y + i, 2 * n + 1, 1, c);
+    }
+    lcd.fill(x + 6, y + 4, 1, 4, bg);
+    lcd.fill(x + 6, y + 9, 1, 2, bg);
+}
+
+/// A progress bar: `pct` of w filled in `c`, the rest LINE.
+pub fn progress(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, pct: u8, c: u16) {
+    let f = w * pct.min(100) as i32 / 100;
+    lcd.fill(x, y, f, h, c);
+    lcd.fill(x + f, y, w - f, h, LINE);
+}
+
+/// Text wrapped on words into lines `step` apart from `baseline`, in the box x..x+w, rows y0..y1; the rest of
+/// the box painted bg. Returns the lines used.
+pub fn wrap(lcd: &mut impl Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i32, step: i32, s: &[u8], f: &Font4, fg: u16, bg: u16) -> i32 {
+    let (mut rest, mut base, mut n) = (s, baseline, 0);
+    let top = baseline - f.ascent as i32;
+    lcd.fill(x, y0, w, top - y0, bg);
+    let mut y = top;
+    while y < y1 {
+        let mut cut = rest.len();
+        if text4_width(rest, f) > w {
+            cut = 0;
+            for (i, &c) in rest.iter().enumerate() {
+                if c == b' ' && text4_width(&rest[..i], f) <= w {
+                    cut = i;
+                }
+            }
+            if cut == 0 {
+                cut = fit(rest, f, w).len();
+            }
+        }
+        let line = &rest[..cut];
+        let bottom = (base - f.ascent as i32 + step).min(y1);
+        field(lcd, x, w, y, bottom, base, Align::Left, line, f, fg, bg);
+        if !line.is_empty() {
+            n += 1;
+        }
+        rest = rest[cut..].strip_prefix(b" ").unwrap_or(&rest[cut..]);
+        y = bottom;
+        base += step;
+    }
+    n
+}
+
 /// A toast in place of the hint bar (HOME-9): bold head, then body.
 pub fn toast(lcd: &mut impl Panel, head: &[u8], body: &[u8], icon: bool) {
     lcd.fill(0, HINT_Y, 240, 1, BLUE);
@@ -418,12 +481,14 @@ pub struct StatusBar {
     pub battery_cutoff: bool,
     /// The cut-off blink's off phase.
     pub blink_off: bool,
+    /// Weather alerts paused (HF mode with SAME on): a slashed bell after the inbox (SBAR-18).
+    pub alerts_paused: bool,
 }
 
 impl StatusBar {
     fn left_eq(&self, o: &Self) -> bool {
-        (self.name, self.locked, self.scan, self.watch, self.inbox, self.alert)
-            == (o.name, o.locked, o.scan, o.watch, o.inbox, o.alert)
+        (self.name, self.locked, self.scan, self.watch, self.inbox, self.alert, self.alerts_paused)
+            == (o.name, o.locked, o.scan, o.watch, o.inbox, o.alert, o.alerts_paused)
     }
 
     fn right_eq(&self, o: &Self) -> bool {
@@ -466,7 +531,8 @@ impl StatusBar {
         let icons = if self.locked { 14 + gap } else { 0 }
             + if self.scan { 21 + gap } else { 0 }
             + if self.watch >= 2 { 14 + gap } else { 0 }
-            + if self.inbox > 0 { 14 + text4_width(count.as_bytes(), &UI_12B) + gap } else { 0 };
+            + if self.inbox > 0 { 14 + text4_width(count.as_bytes(), &UI_12B) + gap } else { 0 }
+            + if self.alerts_paused { 11 + gap } else { 0 };
         let mut x = 8;
         lcd.fill(0, y0, 8, y1, BG);
         if !self.name.is_empty() {
@@ -496,6 +562,13 @@ impl StatusBar {
             let w = text4_width(count.as_bytes(), &UI_12B);
             field(lcd, x, w, y0, y1, base, Align::Left, count.as_bytes(), &UI_12B, if self.alert { RED } else { TEXT }, BG);
             x += w;
+        }
+        if self.alerts_paused {
+            lcd.fill(x, y0, gap, y1, BG);
+            x += gap;
+            lcd.fill(x, y0, 11, y1, BG);
+            bell(lcd, x, 4, SUB, BG, true);
+            x += 11;
         }
         lcd.fill(x, y0, x_end - x, y1, BG);
     }

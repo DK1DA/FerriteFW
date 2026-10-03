@@ -21,6 +21,7 @@ extern crate std;
 pub mod chan;
 pub mod keys;
 pub mod screens;
+pub mod settings;
 pub mod slot;
 
 use chan::{Channel, ChannelStore};
@@ -185,6 +186,12 @@ pub struct App {
     /// Where BACK returns from screens opened with [`App::open`], newest last (MENU-24).
     back: [Option<Screen>; BACK_DEPTH],
     pub(crate) drawn: Drawn,
+    /// Radio-wide settings (setup, the advanced menu's groups).
+    set: settings::Settings,
+    /// The last alert, for the alert screen (WX-5).
+    alert_info: screens::alert::AlertInfo,
+    /// The user's answer to a link write approval, for the Link task.
+    link_answer: Option<screens::link::LinkAnswer>,
 }
 
 /// Screens remembered for BACK: menu, group, item and one more.
@@ -215,6 +222,9 @@ impl App {
             out: Outbox { q: [None; 16], head: 0, len: 0 },
             back: [None; BACK_DEPTH],
             drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS] },
+            set: settings::Settings::DEFAULT,
+            alert_info: screens::alert::AlertInfo::NONE,
+            link_answer: None,
         };
         for s in 0..SLOTS as u8 {
             app.send_slot(s);
@@ -235,6 +245,11 @@ impl App {
 
     pub fn slot(&self, i: u8) -> &Slot {
         &self.slots[i as usize % SLOTS]
+    }
+
+    /// A toast is showing.
+    pub fn toast_up(&self) -> bool {
+        self.toast.is_some()
     }
 
     pub fn locked(&self) -> bool {
@@ -279,14 +294,61 @@ impl App {
     }
 
     /// A message, decode or alert arrived: a toast and the inbox count (SBAR-6); an alert also opens the alert
-    /// screen.
+    /// screen, with `body` as its event and `head` as its originator.
     pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
         self.inbox = self.inbox.saturating_add(1);
         self.alert |= alert;
         self.show_toast(head, body, true);
         if alert {
+            let mut a = screens::alert::AlertInfo::NONE;
+            a.event.set(body);
+            a.from.set(head);
+            self.alert_info = a;
             self.open(Dest::Alert); // WX-4: over any screen
         }
+    }
+
+    /// An alert with everything the decoder knows (WX-5): over any screen, flashing, until OK (WX-4, WX-6).
+    pub fn raise_alert(&mut self, a: &screens::alert::AlertInfo) {
+        self.inbox = self.inbox.saturating_add(1);
+        self.alert = true;
+        self.alert_info = *a;
+        self.open(Dest::Alert);
+    }
+
+    /// First boot (no layout header: BOOT-12): setup runs, and BACK on its first page has nowhere to go.
+    pub fn first_boot(&mut self) {
+        self.go_home();
+        self.screen = Screen::Setup(screens::setup::Setup::new(true));
+    }
+
+    /// At power on, after the self-test: the PIN, if one is set (PIN-1, BOOT-13).
+    pub fn ask_pin(&mut self) {
+        if self.set.pin_len > 0 && self.set.pin_mode > 0 {
+            self.go_home();
+            self.screen = Screen::Pin(screens::pin::Pin::power_on());
+        }
+    }
+
+    /// A matrix code went down or up, mapped to a key or not: the key test shows it (KEY-2). The firmware calls
+    /// this for every code, before [`App::key_down`] / [`App::key_up`] for the mapped ones.
+    pub fn raw_key(&mut self, code: u8, down: bool) {
+        self.screen.raw(self, ferrite_core::keys::key(code), Some(code), down);
+    }
+
+    /// The answer to the last write approval or write session (allowed, refused, cancelled), once.
+    pub fn take_link_answer(&mut self) -> Option<screens::link::LinkAnswer> {
+        self.link_answer.take()
+    }
+
+    /// The callsign, for the boot screen (empty until set).
+    pub fn callsign(&self) -> &[u8] {
+        self.set.callsign.as_bytes()
+    }
+
+    /// The radio-wide settings.
+    pub fn settings(&self) -> &settings::Settings {
+        &self.set
     }
 
     // ---- inputs ----
@@ -296,6 +358,7 @@ impl App {
         self.keys.down(key, now);
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
+        self.screen.raw(self, Some(key), None, true);
         if key == Key::Ptt {
             // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there.
             self.screen.ptt(self, true);
@@ -304,6 +367,7 @@ impl App {
 
     pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        self.screen.raw(self, Some(key), None, false);
         if key == Key::Ptt {
             self.screen.ptt(self, false);
         }
@@ -348,6 +412,7 @@ impl App {
             self.go_home();
         }
         self.screen.tick(self, live);
+        screens::hf::follow(self);
     }
 
     fn tick_keys(&mut self, now: u32, store: &impl ChannelStore) {
@@ -370,9 +435,16 @@ impl App {
 
     fn on_key(&mut self, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
+        if self.screen.modal() {
+            return self.screen.key(self, e, store); // the PIN at power on, power off, a link write
+        }
         // Anywhere: hold BACK goes home (KEY-5); hold # toggles the lock (KEY-13).
         match (e.key, e.press) {
             (Key::Exit, Long) => return self.go_home(),
+            (Key::Hash, Long) if self.locked && self.set.pin_mode == 2 => {
+                // KEY-16: unlocking asks for the PIN
+                return self.open(Dest::Pin);
+            }
             (Key::Hash, Long) => {
                 self.locked = !self.locked;
                 return self.show_toast(if self.locked { b"Keys locked" } else { b"Keys unlocked" }, b"", false);
