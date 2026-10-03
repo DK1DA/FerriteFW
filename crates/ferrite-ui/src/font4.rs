@@ -42,8 +42,62 @@ impl Font4 {
     }
 }
 
+/// A 4-bit mask: rows top to bottom, either two pixels per byte or run-length encoded (`rle`, the format
+/// `tools/mkassets.py` documents: per row, runs of 0, runs of 15 and literal pixels).
 pub struct Mask4 {
     pub w: u8,
     pub h: u8,
+    pub rle: bool,
     pub bits: &'static [u8],
+}
+
+/// A mask's rows, one at a time, top to bottom: no frame buffer, nothing on the heap. Damaged data reads as
+/// empty pixels rather than panicking.
+pub struct MaskRows<'a> {
+    m: &'a Mask4,
+    /// Byte position (RLE) or pixel index (plain).
+    pos: usize,
+}
+
+impl<'a> MaskRows<'a> {
+    pub fn new(m: &'a Mask4) -> Self {
+        MaskRows { m, pos: 0 }
+    }
+
+    /// The next row's pixels (0-15) into out[..w].
+    pub fn next_row(&mut self, out: &mut [u8]) {
+        let w = (self.m.w as usize).min(out.len());
+        let bits = self.m.bits;
+        let nib = |k: usize| bits.get(k >> 1).map_or(0, |&b| if k & 1 == 0 { b >> 4 } else { b & 15 });
+        if !self.m.rle {
+            for (i, px) in out[..w].iter_mut().enumerate() {
+                *px = nib(self.pos + i);
+            }
+            self.pos += self.m.w as usize;
+            return;
+        }
+        let mut x = 0;
+        while x < w {
+            let Some(&t) = bits.get(self.pos) else {
+                out[x..w].fill(0);
+                return;
+            };
+            self.pos += 1;
+            match t >> 6 {
+                0 | 1 => {
+                    let n = ((t & 63) as usize + 1).min(w - x);
+                    out[x..x + n].fill(if t & 0x40 != 0 { 15 } else { 0 });
+                    x += n;
+                }
+                _ => {
+                    let n = (t & 127) as usize + 1;
+                    for i in 0..n.min(w - x) {
+                        out[x + i] = nib(self.pos * 2 + i);
+                    }
+                    self.pos += n.div_ceil(2);
+                    x += n.min(w - x);
+                }
+            }
+        }
+    }
 }

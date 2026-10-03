@@ -1,6 +1,6 @@
 //! Drawing straight to a panel (no frame buffer): fills, frames, 1-bit text, 4-bit anti-aliased text and
 //! masks. Every `Panel` gets these methods. Mirrors fw/drivers/gfx.c.
-use crate::font4::{Font4, Glyph4, Mask4};
+use crate::font4::{Font4, Glyph4, Mask4, MaskRows};
 use crate::panel::{Panel, H, W};
 
 pub const fn rgb565(r: u8, g: u8, b: u8) -> u16 {
@@ -280,7 +280,8 @@ pub trait Gfx: Panel {
         self.text4(x, baseline, s, f, fg, bg)
     }
 
-    /// m1 in c1 over bg, then optionally m2 in c2 over that (the logo is a ring mask plus a windings mask).
+    /// m1 in c1 over bg, then optionally m2 in c2 over that (the logo is a ring mask plus a windings mask, the
+    /// same size). Masks decode a row at a time, plain or run-length encoded, straight into the panel.
     fn mask4(&mut self, x: i32, y: i32, m1: &Mask4, c1: u16, m2: Option<(&Mask4, u16)>, bg: u16) {
         let (w, h) = (m1.w as i32, m1.h as i32);
         let (x0, x1) = (x.max(0), (x + w).min(W));
@@ -292,14 +293,24 @@ pub trait Gfx: Panel {
         for (a, v) in lut.iter_mut().enumerate() {
             *v = blend(bg, c1, a as u8);
         }
+        let (mut r1, mut r2) = (MaskRows::new(m1), m2.map(|(m, c)| (MaskRows::new(m), c)));
+        let (mut a1, mut a2) = ([0u8; 256], [0u8; 256]);
         let mut line = [0u16; W as usize];
         self.window(x0, y0, x1 - 1, y1 - 1);
-        for row in y0..y1 {
+        for row in y..y1 {
+            // rows above the screen are decoded and dropped: runs only go forward
+            r1.next_row(&mut a1);
+            if let Some((r, _)) = &mut r2 {
+                r.next_row(&mut a2);
+            }
+            if row < y0 {
+                continue;
+            }
             for col in x0..x1 {
-                let k = ((row - y) * w + (col - x)) as usize;
-                let mut px = lut[nib(m1.bits, k) as usize];
-                if let Some((m2, c2)) = m2 {
-                    px = blend(px, c2, nib(m2.bits, k));
+                let k = (col - x) as usize;
+                let mut px = lut[a1[k] as usize];
+                if let Some((_, c2)) = r2 {
+                    px = blend(px, c2, a2[k]);
                 }
                 line[(col - x0) as usize] = px;
             }
@@ -406,10 +417,40 @@ mod tests {
         for y in 0..112 {
             for x in 0..112 {
                 let k = (y * 112 + x) as usize;
-                let want = blend(blend(BG, SUB, nib(LOGO112_RING.bits, k)), BLUE, nib(LOGO112_WIND.bits, k));
+                let want = blend(blend(BG, SUB, nib(&LOGO112_RING_RAW, k)), BLUE, nib(&LOGO112_WIND_RAW, k));
                 assert_eq!(fb.at(10 + x, 10 + y), want);
             }
         }
         fb.mask4(W - 10, H - 10, &LOGO112_RING, SUB, None, BG); // mostly off screen: clipped
+        // off the top-left: the rows and columns that show are the right ones
+        fb.mask4(-50, -60, &LOGO112_RING, SUB, None, BG);
+        for (sx, sy) in [(0, 0), (30, 20), (61, 51)] {
+            let k = ((sy + 60) * 112 + sx + 50) as usize;
+            assert_eq!(fb.at(sx, sy), blend(BG, SUB, nib(&LOGO112_RING_RAW, k)));
+        }
+        fb.mask4(100, 100, &ICON_LOCK, TEXT, None, BG); // a plain (not run-length) mask
+        assert_eq!(fb.at(100 + 7, 100 + 10), blend(BG, TEXT, nib(ICON_LOCK.bits, 10 * 14 + 7)));
+    }
+
+    #[test]
+    fn rle_masks_decode_to_the_originals() {
+        for (m, raw) in [(&LOGO112_RING, &LOGO112_RING_RAW[..]), (&LOGO112_WIND, &LOGO112_WIND_RAW[..])] {
+            assert!(m.rle && m.bits.len() * 2 < raw.len(), "compressed");
+            let mut rows = MaskRows::new(m);
+            let mut px = [0u8; 112];
+            for y in 0..m.h as usize {
+                rows.next_row(&mut px);
+                for (x, &p) in px.iter().enumerate() {
+                    assert_eq!(p, nib(raw, y * 112 + x), "pixel {x},{y}");
+                }
+            }
+        }
+        // damaged data: empty pixels, no panic
+        let bad = Mask4 { w: 8, h: 2, rle: true, bits: &[0x87, 0xFF] };
+        let (mut rows, mut px) = (MaskRows::new(&bad), [9u8; 8]);
+        rows.next_row(&mut px);
+        assert_eq!(px, [15, 15, 0, 0, 0, 0, 0, 0]);
+        rows.next_row(&mut px);
+        assert_eq!(px, [0; 8]);
     }
 }

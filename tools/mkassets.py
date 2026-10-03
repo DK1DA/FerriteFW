@@ -41,10 +41,53 @@ FONT_LIST = [  # name, file, px, chars, tabular, use
     ("dig_17", NUM, 17, DIG, True, "watched slot last digits"),
     ("word_40", WORD, 40, WORDMARK, False, "FERRITE wordmark, boot screen"),
 ]
-MASK_LIST = [  # name, size, shape
-    ("logo112_ring", 112, art.toroid_ring), ("logo112_wind", 112, art.toroid_wind),
-    ("icon_lock", 14, art.lock), ("icon_gps", 12, art.gps), ("icon_bt", 11, art.bt),
+MASK_LIST = [  # name, size, shape, run-length encoded
+    ("logo112_ring", 112, art.toroid_ring, True), ("logo112_wind", 112, art.toroid_wind, True),
+    ("icon_lock", 14, art.lock, False), ("icon_gps", 12, art.gps, False), ("icon_bt", 11, art.bt, False),
 ]
+
+
+def rle(a, w, h):
+    """4-bit mask rows as runs (font4.rs decodes it). Each row's runs end at the row's edge, so a row decodes on
+    its own, top to bottom, straight into the panel. Tokens:
+        00nnnnnn  n+1 pixels of 0 (1-64)          01nnnnnn  n+1 pixels of 15 (1-64)
+        1nnnnnnn  n+1 literal pixels (1-128) follow, two per byte, high nibble first
+    The shortest of a few thresholds for "worth a run" wins; the decoder doesn't need to know which."""
+    def enc(zmin, fmin):
+        out = bytearray()
+        for y in range(h):
+            row, i, lit = a[y * w:(y + 1) * w], 0, []
+
+            def flush():
+                while lit:
+                    n = min(len(lit), 128)
+                    chunk = lit[:n]
+                    del lit[:n]
+                    out.append(0x80 | (n - 1))
+                    out.extend(chunk[j] << 4 | (chunk[j + 1] if j + 1 < n else 0) for j in range(0, n, 2))
+            while i < w:
+                v, j = row[i], i
+                while j < w and row[j] == v:
+                    j += 1
+                if (v == 0 and j - i >= zmin) or (v == 15 and j - i >= fmin):
+                    flush()
+                    run = j - i
+                    while run:
+                        n = min(run, 64)
+                        out.append((0x40 if v else 0) | (n - 1))
+                        run -= n
+                    i = j
+                else:
+                    lit.append(v)
+                    i += 1
+            flush()
+        return bytes(out)
+    return min((enc(z, f) for z in range(1, 6) for f in range(1, 8)), key=len)
+
+
+def rust_bytes(name, data, attrs, vis=""):
+    rows = [", ".join(f"0x{b:02X}" for b in data[i:i + 16]) + "," for i in range(0, len(data), 16)]
+    return [*attrs, f"{vis}static {name}: [u8; {len(data)}] = [", *("    " + r for r in rows), "];"]
 
 
 def main():
@@ -54,14 +97,19 @@ def main():
         f = Font(os.path.join(FONTS, ttf), px, chars, tab)
         rs.append(f.rust_source(name, SLOW))
         total += f.size_bytes()
-    for name, size, shape in MASK_LIST:
+    for name, size, shape, packed_rle in MASK_LIST:
         a = art.mask(size, shape)
-        packed = bytes(a[i] << 4 | (a[i + 1] if i + 1 < len(a) else 0) for i in range(0, len(a), 2))
-        rows = [", ".join(f"0x{b:02X}" for b in packed[i:i + 16]) + "," for i in range(0, len(packed), 16)]
-        rs += [f'#[cfg_attr(target_os = "none", link_section = "{SLOW}")]',
-               f"static {name.upper()}_BITS: [u8; {len(packed)}] = [", *("    " + r for r in rows), "];",
-               f"pub static {name.upper()}: Mask4 = Mask4 {{ w: {size}, h: {size}, bits: &{name.upper()}_BITS }};", ""]
-        total += len(packed)
+        up = name.upper()
+        raw = bytes(a[i] << 4 | (a[i + 1] if i + 1 < len(a) else 0) for i in range(0, len(a), 2))
+        data = rle(a, size, size) if packed_rle else raw
+        rs += rust_bytes(f"{up}_BITS", data, [f'#[cfg_attr(target_os = "none", link_section = "{SLOW}")]'])
+        rs.append(f"pub static {up}: Mask4 = Mask4 {{ w: {size}, h: {size}, rle: {str(packed_rle).lower()}, "
+                  f"bits: &{up}_BITS }};")
+        if packed_rle:
+            # the uncompressed mask, for the test that checks the decoder (not in the firmware)
+            rs += rust_bytes(f"{up}_RAW", raw, ["#[cfg(test)]"], "pub ")
+        rs.append("")
+        total += len(data)
     open(OUT, "w").write("\n".join(rs))
     print(f"{os.path.relpath(OUT)}: {len(FONT_LIST)} fonts, {len(MASK_LIST)} masks, about {total / 1024:.1f} KB of data")
 
