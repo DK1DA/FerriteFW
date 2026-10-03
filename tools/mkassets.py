@@ -17,7 +17,8 @@ FONTS = os.path.join(HERE, "..", "fonts")
 OUT = os.path.join(HERE, "..", "crates", "ferrite-ui", "src", "assets.rs")
 DIG = " -.0123456789"
 REG, BOLD = "JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf"
-NUM = "BarlowSemiCondensed-SemiBold.ttf"
+NUM = "FerriteMonoTight-Bold.ttf"  # JetBrains Mono Bold, white space squeezed (tools/tighten.py)
+WORD = "BarlowSemiCondensed-SemiBold.ttf"
 
 FONT_LIST = [  # name, file, px, chars, tabular, latin1, use
     ("ui_12", REG, 12, None, False, True, "status bar, hints, labels"),
@@ -28,8 +29,8 @@ FONT_LIST = [  # name, file, px, chars, tabular, latin1, use
     ("dig_28", NUM, 28, DIG, True, False, "slot A last digits"),
     ("dig_26", NUM, 26, DIG, True, False, "slot B frequency"),
     ("dig_17", NUM, 17, DIG, True, False, "slot B last digits"),
-    ("word_26", NUM, 26, " EFIRT", False, False, "FERRITE wordmark, boot list header"),
-    ("word_40", NUM, 40, " EFIRT", False, False, "FERRITE wordmark, boot logo screen"),
+    ("word_26", WORD, 26, " EFIRT", False, False, "FERRITE wordmark, boot list header"),
+    ("word_40", WORD, 40, " EFIRT", False, False, "FERRITE wordmark, boot logo screen"),
 ]
 MASK_LIST = [  # name, size, shape
     ("logo40_ring", 40, art.toroid_ring), ("logo40_wind", 40, art.toroid_wind),
