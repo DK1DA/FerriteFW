@@ -27,7 +27,7 @@ Ferrite replaces the RT-950 Pro's stock firmware with one that is open, receive-
 | [`crates/ferrite-ui`](crates/ferrite-ui) | Screens and the 4-bit drawing layer; draws to the panel or, on the PC, to a frame buffer |
 | [`sim/`](sim) | Renders the screens on the PC with the firmware's own drawing code |
 | [`tools/`](tools) | Font and logo generators, `btf.py` (packing for the stock bootloader), `flash.py` |
-| [`assets/logo/`](assets/logo) | The logo: the toroid mark, lockups for dark and light backgrounds, the social preview |
+| [`assets/logo/`](assets/logo) | The logo: the toroid mark, lockups for dark and light backgrounds, the app icon (`ferrite-icon.svg`, a simplified one for 16-48 px, PNGs 16-1024 and `favicon.ico`), the social preview |
 | [`fonts/`](fonts) | Atkinson Hyperlegible and Barlow Semi Condensed (OFL; licences beside them) |
 
 The chip drivers and the digital modes are separate libraries, pinned by commit in `Cargo.toml`:

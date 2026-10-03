@@ -2,10 +2,11 @@
 draws too): the mark and a lockup with the FERRITE wordmark (Barlow Semi Condensed SemiBold, as outlines so it
 renders without the font) for dark and light backgrounds, and the 1280 x 640 social preview.
 
-    python3 tools/mklogo.py && rsvg-convert assets/logo/social-preview.svg -o assets/logo/social-preview.png
+    python3 tools/mklogo.py && tools/mkicons.sh
 
 Needs fontTools.
 """
+import math
 import os
 import re
 from fontTools.ttLib import TTFont
@@ -62,3 +63,30 @@ body = (mark(c, x0, 170, ms)
         + f'<path transform="translate({x0 + 120 * ms + 36} {327})" d="{d1}" fill="{c["text"]}"/>'
         + f'<path transform="translate({(1280 - w2) / 2} {470})" d="{d2}" fill="{c["sub"]}"/>')
 open(f"{out}/social-preview.svg", "w").write(svg(1280, 640, body, c["bg"]))
+
+
+# Icons: the mark on a rounded square of the dark background. The full mark for large sizes; a simplified one
+# (7 thicker windings, a thicker ring) for 16-48 px, where 14 thin windings blur together.
+def windings(n, w, r0, r1):
+    """n windings over 270 degrees with the gap at the bottom, as the master mark (inner radius 24, outer 52)."""
+    out = []
+    for k in range(n):
+        a = math.radians(225 - 270 * k / (n - 1))
+        x0, y0 = 60 + r0 * math.cos(a), 60 - r0 * math.sin(a)
+        x1, y1 = 60 + r1 * math.cos(a), 60 - r1 * math.sin(a)
+        out.append(f'<line x1="{x0:.1f}" y1="{y0:.1f}" x2="{x1:.1f}" y2="{y1:.1f}"/>')
+    return f'<g stroke="{DARK["wind"]}" stroke-width="{w}" stroke-linecap="round">{"".join(out)}</g>'
+
+
+def icon(mark_body, pad):
+    s = (512 - 2 * pad) / 120
+    return svg(512, 512, f'<rect width="512" height="512" rx="112" fill="{DARK["bg"]}"/>'
+               f'<g transform="translate({pad} {pad}) scale({s:.4f})">{mark_body}</g>')
+
+
+full = (f'<circle cx="60" cy="60" r="38" fill="none" stroke="{DARK["ring"]}" stroke-width="16"/>'
+        f'<g stroke="{DARK["wind"]}" stroke-width="5" stroke-linecap="round">{"".join(LINES)}</g>')
+small = (f'<circle cx="60" cy="60" r="36" fill="none" stroke="{DARK["ring"]}" stroke-width="22"/>'
+         + windings(7, 10, 26, 54))
+open(f"{out}/ferrite-icon.svg", "w").write(icon(full, 56))
+open(f"{out}/ferrite-icon-small.svg", "w").write(icon(small, 40))
