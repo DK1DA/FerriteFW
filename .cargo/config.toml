@@ -11,6 +11,8 @@ fw = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf"
 fw-clippy = ["clippy", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core"]
 # Screens rendered on the PC: target/sim/*.png
 sim = ["run", "-p", "ferrite-sim", "--"]
+# The interactive simulator: a window driven by the keyboard and a fake radio
+simw = ["run", "-p", "ferrite-sim", "--", "--window"]
 
 [net]
 # uradio and udigimodes are private for now: let git (and its credential helper) fetch them.
