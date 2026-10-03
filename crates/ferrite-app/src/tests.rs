@@ -21,6 +21,16 @@ fn store() -> Table<'static> {
     Table { zones: &ZONES, channels: &CHANNELS }
 }
 
+/// Fresh settings for one test's App (the firmware keeps them in a static; a test leaks a few hundred bytes).
+pub(crate) fn set() -> &'static mut crate::settings::Settings {
+    std::boxed::Box::leak(std::boxed::Box::new(crate::settings::Settings::DEFAULT))
+}
+
+/// A fresh last-alert record for one test's App.
+pub(crate) fn alert() -> &'static mut crate::screens::alert::AlertInfo {
+    std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE))
+}
+
 /// An app, a clock and a quiet radio.
 struct T {
     app: App,
@@ -30,7 +40,7 @@ struct T {
 
 impl T {
     fn new() -> Self {
-        let mut app = App::new();
+        let mut app = App::new(crate::tests::set(), crate::tests::alert());
         while app.pop_cmd().is_some() {}
         T { app, t: 1000, live: LiveAll::default() }
     }
@@ -298,13 +308,10 @@ fn side2_scans_the_active_slot() {
 /// Chapter 7's hold-digit shortcuts, MENU 0 paths and BACK through them (MENU-24).
 #[test]
 fn shortcuts_and_menu_paths() {
-    use crate::screens::coming::Coming;
-    use crate::screens::nav::Dest;
-    let coming = |dest| Screen::Coming(Coming { dest });
     let mut t = T::new();
-    for (d, dest) in [(2, Dest::FmBroadcast), (3, Dest::BandScope), (4, Dest::AprsHeard), (7, Dest::Weather), (9, Dest::ToneSearch)] {
+    for (d, name) in [(2, "FM broadcast"), (3, "Scope"), (4, "APRS heard"), (7, "Weather radio"), (9, "Tone search")] {
         t.hold(Key::Digit(d));
-        assert_eq!(t.app.screen(), coming(dest), "hold {d}");
+        assert_eq!(t.app.screen().name(), name, "hold {d}");
         t.tap(Key::Exit);
         assert_eq!(t.app.screen(), Screen::Home);
     }
@@ -315,27 +322,28 @@ fn shortcuts_and_menu_paths() {
     t.hold(Key::Digit(8)); // Battery Save 1 -> 2
     assert!(t.cmds().contains(&RadioCmd::BatterySave(ferrite_core::rxsleep::Level::L2)));
     t.tap(Key::Digit(4)); // NAV-4: entry
-    assert_eq!(t.app.screen(), coming(Dest::Entry(4)));
+    assert!(matches!(t.app.screen(), Screen::Entry(_)));
     t.hold(Key::Exit);
-    // MENU 0 9 1 3: the key test, typed straight through (MENU-5)
-    for d in [0, 9, 1, 3] {
+    // MENU 0 9 2 3: link status, typed straight through (MENU-5)
+    use crate::screens::groups::Group;
+    for d in [0, 9, 2, 3] {
         t.tap(if d == 0 { Key::Menu } else { Key::Digit(d) });
         if d == 0 {
             t.tap(Key::Digit(0));
         }
     }
-    assert_eq!(t.app.screen(), coming(Dest::KeyTest));
+    assert!(matches!(t.app.screen(), Screen::Link(_)));
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), coming(Dest::Sub(9, 1)));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 9, sub: 2, row: 2 }), "the list, on its row");
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), coming(Dest::Group(9)));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 9, sub: 0, row: 1 }));
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 8, from_quick: true }), "keeps the place");
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 9 }));
     t.tap(Key::Digit(4)); // MENU 4, OK: tones
     t.tap(Key::Menu);
-    assert_eq!(t.app.screen(), coming(Dest::Tones));
+    assert!(matches!(t.app.screen(), Screen::Tones(_)));
     t.wait(MENU_TIMEOUT_MS + 200);
     assert_eq!(t.app.screen(), Screen::Home);
 }
@@ -343,14 +351,14 @@ fn shortcuts_and_menu_paths() {
 /// KEY-7: PTT transmits from any screen, going home first; locked too (KEY-14).
 #[test]
 fn ptt_from_any_screen() {
-    use crate::screens::coming::Coming;
-    use crate::screens::nav::Dest;
     let mut t = T::new();
+    t.app.radio.tx_built = true;
+    t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
     t.tap(Key::Menu);
     t.hold(Key::Hash);
     let s = store();
     t.app.key_down(Key::Ptt, t.t, &s);
-    assert_eq!(t.app.screen(), Screen::Coming(Coming { dest: Dest::Transmit }));
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)));
     t.app.key_up(Key::Ptt, t.t + 300, &s);
     assert_eq!(t.app.screen(), Screen::Home);
 }
@@ -378,6 +386,8 @@ fn every_destination_draws() {
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
     assert_eq!(ids.len(), 66, "one inventory ID per destination (groups and lists share D3)");
 }
+
+mod group_a;
 
 fn count_px(fb: &FrameBuffer, y0: i32, y1: i32, f: impl Fn(u16) -> bool) -> usize {
     (y0..y1).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| f(fb.at(x, y))).count()
@@ -508,6 +518,30 @@ fn fonts_have_every_character_the_ui_draws() {
         ("screens/advanced.rs", include_str!("screens/advanced.rs")),
         ("screens/status.rs", include_str!("screens/status.rs")),
         ("screens/coming.rs", include_str!("screens/coming.rs")),
+        // group C: lists and data
+        ("screens/lists.rs", include_str!("screens/lists.rs")),
+        ("screens/log.rs", include_str!("screens/log.rs")),
+        ("screens/opts.rs", include_str!("screens/opts.rs")),
+        ("screens/aprs.rs", include_str!("screens/aprs.rs")),
+        ("screens/msgs.rs", include_str!("screens/msgs.rs")),
+        ("screens/gps.rs", include_str!("screens/gps.rs")),
+        ("screens/browse.rs", include_str!("screens/browse.rs")),
+        ("screens/zones.rs", include_str!("screens/zones.rs")),
+        ("screens/scanlists.rs", include_str!("screens/scanlists.rs")),
+        ("screens/recall.rs", include_str!("screens/recall.rs")),
+        ("screens/sensors.rs", include_str!("screens/sensors.rs")),
+        ("data.rs", include_str!("data.rs")),
+        ("sample.rs", include_str!("sample.rs")),
+        ("screens/groups.rs", include_str!("screens/groups.rs")),
+        ("screens/setup.rs", include_str!("screens/setup.rs")),
+        ("screens/pin.rs", include_str!("screens/pin.rs")),
+        ("screens/info.rs", include_str!("screens/info.rs")),
+        ("screens/keytest.rs", include_str!("screens/keytest.rs")),
+        ("screens/link.rs", include_str!("screens/link.rs")),
+        ("screens/fm.rs", include_str!("screens/fm.rs")),
+        ("screens/hf.rs", include_str!("screens/hf.rs")),
+        ("screens/alert.rs", include_str!("screens/alert.rs")),
+        ("settings.rs", include_str!("settings.rs")),
         ("slot.rs", include_str!("slot.rs")),
         ("chan.rs", include_str!("chan.rs")),
         ("widgets.rs", include_str!("../../ferrite-ui/src/widgets.rs")),
@@ -602,3 +636,11 @@ fn literal_scanner() {
     let v = string_literals("let a = \"A\\u{b7}B\"; // \"not this\"\nlet c = '\"'; let d = b\"x\\x18\";");
     assert_eq!(v, ["A\u{b7}B", "x\x18"]);
 }
+
+/// Group B: transmit, scan, scope, tone search, counter, FM, HF, weather, alert, crossband, layouts.
+mod radio_activity;
+
+/// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
+#[path = "tests_d.rs"]
+mod d;
+

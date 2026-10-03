@@ -19,7 +19,7 @@
 
 use crate::face::{Face, Part};
 use crate::fake::{self, FakeRadio};
-use ferrite_app::{App, Screen as AppScreen};
+use ferrite_app::Screen as AppScreen;
 use ferrite_core::freq;
 use ferrite_core::keys::Key;
 use ferrite_core::msg::GpsState;
@@ -67,6 +67,7 @@ keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits
       or click the radio's keys (hold the mouse for long presses; hold SIDE1 + wheel = squelch)
       hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
       M message · N alert · F5 GPS · F6 Bluetooth · F7 battery
+      X crossband repeater (no menu number yet) · L home layout · B a beacon (automatic transmit)
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
 
 fn map_key(k: K) -> Option<Key> {
@@ -173,8 +174,8 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
     let store = fake::store();
     let mut radio = FakeRadio::new();
     let mut dev = fake::device();
-    let mut app = App::new();
-    fake::sample(&mut app, &store); // B on "Club repeater", as in the mock-up
+    let mut app = fake::app();
+    fake::sample(&mut app, &store, &mut radio); // B on "Club repeater", as in the mock-up
     let mut booting = true;
     boot::draw(&mut lcd, &info);
 
@@ -200,6 +201,7 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
     let mut out = vec![0u32; ww * wh];
     let mut shot = 0;
     let mut battery = 0;
+    let mut layout = 0;
     // Parts held by the keyboard and by the mouse; the knob half last clicked and until when it shows; PTT.
     let mut kb_held: Vec<usize> = Vec::new();
     let mut mouse: Option<usize> = None;
@@ -226,6 +228,15 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
                 }
                 K::M if !booting => app.notify(b"VE3KPW-9", b"On my way", false),
                 K::N if !booting => app.notify(b"SAME", b"Tornado warning", true),
+                K::X if !booting => app.open(ferrite_app::screens::nav::Dest::Crossband),
+                K::L if !booting => {
+                    layout = (layout + 1) % 3;
+                    app.set_layout(layout);
+                }
+                K::B if !booting => {
+                    let a = app.active();
+                    ferrite_app::screens::transmit::auto_tx(&mut app, a, b"Beacon");
+                }
                 K::F5 => {
                     dev.gps = match dev.gps {
                         GpsState::Off => GpsState::Searching,
@@ -324,12 +335,18 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
             while let Some(c) = app.pop_cmd() {
                 radio.cmd(c);
             }
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
+            }
             radio.step(now as f32 / 1000.0, app.active());
             let clock = fake::device().clock_min;
             dev.clock_min = clock;
             app.tick(now, &radio.live, &store);
             while let Some(c) = app.pop_cmd() {
                 radio.cmd(c);
+            }
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
             }
             app.render(&mut lcd, &radio.live, &dev, &store);
         }

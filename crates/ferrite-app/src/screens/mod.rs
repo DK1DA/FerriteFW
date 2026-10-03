@@ -3,8 +3,14 @@
 //! One module per screen (or family of screens), plugged into the App through this registry. A screen is a
 //! small `Copy` state struct (its cursor, its page; reset each time it opens) that implements [`View`]: what
 //! its keys, the knob and PTT do, how it times out, how it draws, and what its hint bar says. Everything the
-//! screens share lives on the [`App`] (slots, toast, undo, commands) and in [`shared`] (region dirty-tracking,
-//! status bar, hint bar, list rows, the edit grid, help box).
+//! screens share lives on the [`App`] (slots, toast, undo, commands), in [`crate::settings`] (radio-wide
+//! settings, outside the App) and in [`shared`] (region dirty-tracking, pages, status bar, hint bar, list rows,
+//! the edit grid, help box), with [`lists`] (group C's list pages), [`forms`] (group A's fields and pickers)
+//! and [`parts`] (group B's meters and strips) for families of screens.
+//!
+//! One key is MENU and OK: on every screen a short press is OK (the screen's main action) and holding it opens
+//! that screen's options (MENU-25); home is the exception the manual makes (MENU: quick settings, hold:
+//! advanced).
 //!
 //! ## Adding a screen
 //!
@@ -22,17 +28,57 @@
 //! when the screen's variant changes.
 //!
 //! RAM: the [`Screen`] enum is as large as its largest state, and it is held in the App and in the BACK stack
-//! (five copies), so keep screen state to a few bytes. Lists read their items on demand (channels from the
+//! (five copies), so keep screen state to a few bytes (8 is the aim; the forms that hold a draft, Save and
+//! Tones, are 12-16 for now). Lists read their items on demand (channels from the
 //! store, settings from tables), never a copy.
 
+pub mod activity;
 pub mod advanced;
+pub mod alert;
+pub mod aprs;
+pub mod browse;
+pub mod chedit;
 pub mod coming;
+pub mod confirm;
 pub mod edit;
+pub mod entry;
+pub mod fm;
+pub(crate) mod forms;
+pub mod gps;
+pub mod groups;
+pub mod hf;
 pub mod home;
+pub mod info;
+pub mod keytest;
+pub mod layouts;
+pub mod link;
+pub(crate) mod lists;
+pub mod log;
+pub mod msgs;
 pub mod nav;
+pub mod opts;
+pub mod parts;
+pub mod pin;
+pub mod probe;
 pub mod quick;
+pub mod recall;
+pub mod save;
+pub mod scan;
+pub mod scanlists;
+pub mod scope;
+pub mod sensors;
+pub mod setup;
 pub(crate) mod shared;
+pub mod shortcut;
+pub mod squelch;
 pub mod status;
+pub mod text;
+pub mod tones;
+pub mod transmit;
+pub mod value;
+pub mod weather;
+pub mod xb;
+pub mod zones;
 
 use crate::chan::ChannelStore;
 use crate::keys::KeyEvent;
@@ -53,8 +99,49 @@ pub enum Screen {
     Quick(quick::Quick),
     Advanced(advanced::Advanced),
     Status(status::Status),
+    Entry(entry::Entry),
+    ChEdit(chedit::ChEdit),
+    Value(value::Value),
+    Tones(tones::Tones),
+    Text(text::Text),
+    Save(save::Save),
+    Confirm(confirm::Confirm),
+    Shortcut(shortcut::Shortcut),
+    // Group B, radio activity.
+    Transmit(transmit::Transmit),
+    TxRefused(transmit::TxRefused),
+    Emergency(transmit::Emergency),
+    Scan(scan::Scan),
+    Scope(scope::Scope),
+    ToneSearch(probe::ToneSearch),
+    Counter(probe::Counter),
+    Weather(weather::Weather),
+    Crossband(xb::Crossband),
+    Squelch(squelch::Squelch),
+    Group(groups::Group),
+    Setup(setup::Setup),
+    ExtendTx(setup::ExtendTx),
+    Pin(pin::Pin),
+    Info(info::Info),
+    KeyTest(keytest::KeyTest),
+    Link(link::Link),
+    Fm(fm::Fm),
+    Hf(hf::Hf),
+    Alert(alert::Alert),
     /// A screen not built yet: its name and "coming" (any [`nav::Dest`] without its own screen).
     Coming(coming::Coming),
+    // Group C: lists and data
+    Log(log::Log),
+    Options(opts::Options),
+    Aprs(aprs::Aprs),
+    Msgs(msgs::Msgs),
+    Compose(msgs::Compose),
+    Gps(gps::Gps),
+    Browse(browse::Browse),
+    Zones(zones::Zones),
+    ScanLists(scanlists::ScanLists),
+    Recall(recall::Recall),
+    Sensors(sensors::Sensors),
 }
 
 /// Runs `$e` with `$s` bound to the screen's state: the one place that lists every variant.
@@ -69,7 +156,46 @@ macro_rules! each {
             Screen::Quick($s) => $e,
             Screen::Advanced($s) => $e,
             Screen::Status($s) => $e,
+            Screen::Entry($s) => $e,
+            Screen::ChEdit($s) => $e,
+            Screen::Value($s) => $e,
+            Screen::Tones($s) => $e,
+            Screen::Text($s) => $e,
+            Screen::Save($s) => $e,
+            Screen::Confirm($s) => $e,
+            Screen::Shortcut($s) => $e,
+            Screen::Transmit($s) => $e,
+            Screen::TxRefused($s) => $e,
+            Screen::Emergency($s) => $e,
+            Screen::Scan($s) => $e,
+            Screen::Scope($s) => $e,
+            Screen::ToneSearch($s) => $e,
+            Screen::Counter($s) => $e,
+            Screen::Weather($s) => $e,
+            Screen::Crossband($s) => $e,
+            Screen::Squelch($s) => $e,
+            Screen::Group($s) => $e,
+            Screen::Setup($s) => $e,
+            Screen::ExtendTx($s) => $e,
+            Screen::Pin($s) => $e,
+            Screen::Info($s) => $e,
+            Screen::KeyTest($s) => $e,
+            Screen::Link($s) => $e,
+            Screen::Fm($s) => $e,
+            Screen::Hf($s) => $e,
+            Screen::Alert($s) => $e,
             Screen::Coming($s) => $e,
+            Screen::Log($s) => $e,
+            Screen::Options($s) => $e,
+            Screen::Aprs($s) => $e,
+            Screen::Msgs($s) => $e,
+            Screen::Compose($s) => $e,
+            Screen::Gps($s) => $e,
+            Screen::Browse($s) => $e,
+            Screen::Zones($s) => $e,
+            Screen::ScanLists($s) => $e,
+            Screen::Recall($s) => $e,
+            Screen::Sensors($s) => $e,
         }
     };
 }
@@ -94,6 +220,21 @@ pub trait View: Copy {
     fn timeout(self) -> Option<u32> {
         None
     }
+
+    /// False for a screen that draws its own top bar instead of the status bar (setup).
+    fn bar(self) -> bool {
+        true
+    }
+
+    /// True while nothing else may happen: hold BACK and hold # come to the screen as keys, and it never times
+    /// out (the PIN at power on, power off, a link write).
+    fn modal(self) -> bool {
+        false
+    }
+
+    /// A key went down or up, before any press is decided; `code` is the matrix code when the firmware knows it
+    /// ([`App::raw_key`]). Only the key test listens.
+    fn raw(self, _app: &mut App, _key: Option<ferrite_core::keys::Key>, _code: Option<u8>, _down: bool) {}
 
     /// A short, long or repeat press (after the App's own: hold BACK, hold #, the lock).
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore);
@@ -139,6 +280,18 @@ impl Screen {
         each!(self, s => s.key(app, e, store))
     }
 
+    pub(crate) fn bar(self) -> bool {
+        each!(self, s => s.bar())
+    }
+
+    pub(crate) fn modal(self) -> bool {
+        each!(self, s => s.modal())
+    }
+
+    pub(crate) fn raw(self, app: &mut App, key: Option<ferrite_core::keys::Key>, code: Option<u8>, down: bool) {
+        each!(self, s => s.raw(app, key, code, down))
+    }
+
     pub(crate) fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
         each!(self, s => s.knob(app, d, store))
     }
@@ -170,10 +323,15 @@ impl App {
             self.drawn.meter = [None; SLOTS];
             self.drawn.screen = Some(id);
         }
-        let sb = self.status_bar(live, dev);
-        if self.drawn.sbar != Some(sb) {
-            sb.draw(lcd, self.drawn.sbar.as_ref());
-            self.drawn.sbar = Some(sb);
+        self.note_device(dev);
+        if self.screen.bar() {
+            let sb = self.status_bar(live, dev);
+            if self.drawn.sbar != Some(sb) {
+                sb.draw(lcd, self.drawn.sbar.as_ref());
+                self.drawn.sbar = Some(sb);
+            }
+        } else {
+            self.drawn.sbar = None; // the screen draws its own; the status bar comes back whole
         }
         self.screen.render(self, lcd, &Cx { live, dev, store });
         self.render_hint(lcd);

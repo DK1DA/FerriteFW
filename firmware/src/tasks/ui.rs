@@ -90,7 +90,13 @@ pub async fn task() {
     // Hand-off: the whole screen cleared, then the app draws everything once (HOME-2).
     lcd.0.fill(0, 0, 240, 320, BG);
     let store = store::channels();
-    let mut app = App::new();
+    let mut app = App::new(store::settings(), store::last_alert());
+    // After the self-test: setup on first boot (BOOT-12), else the PIN if one is set (BOOT-13).
+    if store::first_boot() {
+        app.first_boot();
+    } else {
+        app.ask_pin();
+    }
     app.redraw_all();
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
     let dev = Device { tx_built: cfg!(feature = "tx"), battery_pct: 100, ..Default::default() };
@@ -105,17 +111,22 @@ pub async fn task() {
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
         }
+        // Channel writes (save as channel, the channel editor): dropped until the Storage task keeps channels
+        // in SPI flash; the table in MCU flash can't change.
+        while app.pop_write().is_some() {}
         app.render(&mut lcd, &live, &dev, &store);
         let period = if down != 0 { TICK_HELD_MS } else { TICK_IDLE_MS };
         match select3(live_rx.changed(), INPUT.receive(), Timer::after(Duration::from_millis(period))).await {
             Either3::First(l) => slot_a(&mut live, &l),
             Either3::Second(Input::Key(keypad::Event::Press(code))) => {
+                app.raw_key(code, true); // every code, mapped or not: the key test names them (KEY-2)
                 if let Some(k) = keys::key(code) {
                     down |= 1 << code;
                     app.key_down(k, now_ms(), &store);
                 }
             }
             Either3::Second(Input::Key(keypad::Event::Release(code))) => {
+                app.raw_key(code, false);
                 if let Some(k) = keys::key(code) {
                     down &= !(1 << code);
                     app.key_up(k, now_ms(), &store);

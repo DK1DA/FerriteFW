@@ -2,8 +2,9 @@
 //!
 //! The UI state machine, the same on the radio and in the simulator. In: key down/up ([`App::key_down`],
 //! [`App::key_up`]), knob steps ([`App::knob`]), the time ([`App::tick`]) and the Radio task's snapshot of the
-//! three slots ([`LiveAll`]). Out: commands for the Radio task ([`App::pop_cmd`]) and the screen, drawn through
-//! any [`Panel`] by [`App::render`], which redraws only what changed (HOME-7).
+//! three slots ([`LiveAll`]). Out: commands for the Radio task ([`App::pop_cmd`]), channel writes for the store's
+//! owner ([`App::pop_write`]) and the screen, drawn through any [`Panel`] by [`App::render`], which redraws only
+//! what changed (HOME-7).
 //!
 //! No heap and fixed-size state (`size_of::<App>()` is checked by a test). Channels come through
 //! [`chan::ChannelStore`], read on demand.
@@ -18,12 +19,38 @@
 #[cfg(test)]
 extern crate std;
 
+/// A string literal kept with the fonts in the slow flash section on the radio (`.slow_rodata`, placed after all
+/// code and other constants: `firmware/memory.x`), for long tables of text read a row at a time (the menu's
+/// items and help lines), so they don't take the zero-wait flash the code needs. On the PC an ordinary static.
+macro_rules! slow {
+    ($s:literal) => {{
+        const B: &[u8] = $s.as_bytes();
+        #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
+        static S: [u8; B.len()] = {
+            let mut a = [0u8; B.len()];
+            let mut i = 0;
+            while i < B.len() {
+                a[i] = B[i];
+                i += 1;
+            }
+            a
+        };
+        // SAFETY: the bytes are a string literal's, so UTF-8.
+        unsafe { core::str::from_utf8_unchecked(&S) }
+    }};
+}
+
 pub mod chan;
+pub mod data;
 pub mod keys;
+pub mod sample;
 pub mod screens;
+pub mod settings;
 pub mod slot;
 
-use chan::{Channel, ChannelStore};
+use chan::{ChanWrite, Channel, ChannelStore};
+use screens::alert::AlertInfo;
+use settings::Settings;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
 use ferrite_core::msg::{LiveAll, Param, RadioCmd, SLOTS};
@@ -114,16 +141,36 @@ struct Toast {
 struct Undo {
     slot: u8,
     cfg: SlotCfg,
+    /// The channel's own fields as they were, when the slot is on one (its zone, number, frequency and flags
+    /// are edited too; a name is kept or dropped in the text entry).
+    ch: Option<ChUndo>,
+    home: Option<u16>,
     watch: u8,
     bsave: u8,
     until: u32,
 }
 
-/// Commands waiting for the Radio task.
+#[derive(Clone, Copy)]
+struct ChUndo {
+    num: u16,
+    zone: u8,
+    flags: u8,
+    rx: Freq10,
+}
+
+/// Commands waiting for the Radio task: single commands in a ring, and whole slots to send, which are made
+/// from the slot when popped. A slot's frequency and nine settings are ten commands; sending a slot again
+/// before it has gone out costs nothing, so start-up (three slots) and fast channel stepping never overflow
+/// the ring.
 struct Outbox {
     q: [Option<RadioCmd>; 16],
     head: u8,
     len: u8,
+    /// Slots whose full state is still to send, a bit each.
+    sync: u8,
+    /// The slot being sent and its next item (0 the frequency, 1-9 [`slot::params`]).
+    cur: u8,
+    step: u8,
 }
 
 impl Outbox {
@@ -134,6 +181,14 @@ impl Outbox {
         let i = (self.head as usize + self.len as usize) % self.q.len();
         self.q[i] = Some(c);
         self.len += 1;
+    }
+
+    /// The whole slot goes out (again, from the start if it is being sent).
+    fn sync(&mut self, slot: u8) {
+        self.sync |= 1 << slot;
+        if self.cur == slot {
+            self.step = 0;
+        }
     }
 
     fn pop(&mut self) -> Option<RadioCmd> {
@@ -182,17 +237,36 @@ pub struct App {
     scan_mask: u8,
     relay_mask: u8,
     out: Outbox,
+    /// The channel write for the store's owner ([`App::pop_write`]): one, as every input makes at most one and
+    /// the owner drains after every input.
+    write: Option<ChanWrite>,
+    /// The text being typed (A7): a channel name, a callsign; shared by the text entry and the forms that
+    /// open it, as only one text is edited at a time.
+    text: Buf<16>,
     /// Where BACK returns from screens opened with [`App::open`], newest last (MENU-24).
     back: [Option<Screen>; BACK_DEPTH],
     pub(crate) drawn: Drawn,
+    /// Radio activity: transmit, the exclusive modes, scan hits, region ([`screens::activity`]).
+    pub(crate) radio: screens::activity::RadioUi,
+    /// Radio-wide settings: not the App's, only borrowed ([`settings`]).
+    set: &'static mut Settings,
+    /// The last alert, for the alert screen (WX-5): kept outside the App too, as it outlives the screen.
+    pub(crate) alert_info: &'static mut AlertInfo,
+    /// The user's answer to a link write approval, for the Link task.
+    link_answer: Option<screens::link::LinkAnswer>,
 }
 
 /// Screens remembered for BACK: menu, group, item and one more.
 const BACK_DEPTH: usize = 4;
 
+/// [`Outbox::cur`] with no slot being sent.
+const NO_SLOT: u8 = 0xFF;
+
 impl App {
-    /// Three slots: A on 146.520, B on 443.475, C on 118.950 (the look review's sample), all VFO.
-    pub fn new() -> Self {
+    /// Three slots: A on 146.520, B on 443.475, C on 118.950 (the look review's sample), all VFO. The settings
+    /// (stored, or [`Settings::DEFAULT`] on a first boot) and the last alert record ([`AlertInfo::NONE`]) are
+    /// the caller's, borrowed for the App's lifetime: the App holds only UI state.
+    pub fn new(set: &'static mut Settings, alert: &'static mut AlertInfo) -> Self {
         let mut app = App {
             screen: Screen::Home,
             slots: [Slot::new(mhz(146) + 52_000), Slot::new(mhz(443) + 47_500), Slot::new(mhz(118) + 95_000)],
@@ -212,9 +286,15 @@ impl App {
             rx_mask: 0,
             scan_mask: 0,
             relay_mask: 0,
-            out: Outbox { q: [None; 16], head: 0, len: 0 },
+            out: Outbox { q: [None; 16], head: 0, len: 0, sync: 0, cur: NO_SLOT, step: 0 },
+            write: None,
+            text: Buf::new(),
             back: [None; BACK_DEPTH],
             drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS] },
+            radio: screens::activity::RadioUi::new(),
+            set,
+            alert_info: alert,
+            link_answer: None,
         };
         for s in 0..SLOTS as u8 {
             app.send_slot(s);
@@ -237,6 +317,11 @@ impl App {
         &self.slots[i as usize % SLOTS]
     }
 
+    /// A toast is showing.
+    pub fn toast_up(&self) -> bool {
+        self.toast.is_some()
+    }
+
     pub fn locked(&self) -> bool {
         self.locked
     }
@@ -246,9 +331,59 @@ impl App {
         self.watch
     }
 
-    /// The next command for the Radio task.
+    /// The next command for the Radio task: single commands first, then whole slots, made from the slot now
+    /// (so they always carry its latest state).
     pub fn pop_cmd(&mut self) -> Option<RadioCmd> {
-        self.out.pop()
+        if let Some(c) = self.out.pop() {
+            return Some(c);
+        }
+        if self.out.sync == 0 {
+            return None;
+        }
+        if self.out.cur == NO_SLOT {
+            (self.out.cur, self.out.step) = (self.out.sync.trailing_zeros() as u8, 0);
+        }
+        let slot = self.out.cur;
+        let s = &self.slots[slot as usize];
+        let c = match self.out.step {
+            0 => RadioCmd::TuneSlot { slot, freq: s.freq() },
+            k => {
+                let (param, value) = slot::params(s.cfg())[k as usize - 1];
+                let value = if param == Param::Power && self.capped(slot) { 0 } else { value };
+                RadioCmd::SlotParam { slot, param, value }
+            }
+        };
+        self.out.step += 1;
+        if self.out.step as usize > slot::params(&DEFAULT_CFG).len() {
+            self.out.sync &= !(1 << slot);
+            self.out.cur = NO_SLOT;
+        }
+        Some(c)
+    }
+
+    /// The next channel write for the store's owner (the Storage task; the simulator's store). Drained, like
+    /// [`App::pop_cmd`], after every input.
+    pub fn pop_write(&mut self) -> Option<ChanWrite> {
+        self.write.take()
+    }
+
+    /// Queues a write; a later write of the same channel replaces it (keeping where it came from).
+    pub(crate) fn write(&mut self, w: ChanWrite) {
+        if let (Some(ChanWrite::Put { ch: c, from: f }), ChanWrite::Put { ch, from }) = (self.write, w) {
+            if c.num == ch.num || Some(c.num) == from {
+                self.write = Some(ChanWrite::Put { ch, from: f.or(from).filter(|&n| n != ch.num) });
+                return;
+            }
+        }
+        debug_assert!(self.write.is_none(), "one channel write per input: {:?} then {:?}", self.write, w);
+        self.write = Some(w);
+    }
+
+    /// The channel the active slot is on was changed (a setting, its zone, number, name): save it (EDIT-4).
+    pub(crate) fn save_channel(&mut self, slot: u8, from: Option<u16>) {
+        if let Some(ch) = self.slots[slot as usize].ch.filter(|_| self.slots[slot as usize].on_channel()) {
+            self.write(ChanWrite::Put { ch, from });
+        }
     }
 
     /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
@@ -279,14 +414,67 @@ impl App {
     }
 
     /// A message, decode or alert arrived: a toast and the inbox count (SBAR-6); an alert also opens the alert
-    /// screen.
+    /// screen, with `body` as its event and `head` as its originator.
     pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
         self.inbox = self.inbox.saturating_add(1);
         self.alert |= alert;
         self.show_toast(head, body, true);
         if alert {
+            let mut a = screens::alert::AlertInfo::NONE;
+            a.event.set(body);
+            a.from.set(head);
+            *self.alert_info = a;
             self.open(Dest::Alert); // WX-4: over any screen
         }
+    }
+
+    /// An alert with everything the decoder knows (WX-5): over any screen, flashing, until OK (WX-4, WX-6).
+    pub fn raise_alert(&mut self, a: &screens::alert::AlertInfo) {
+        self.inbox = self.inbox.saturating_add(1);
+        self.alert = true;
+        *self.alert_info = *a;
+        self.open(Dest::Alert);
+    }
+
+    /// First boot (no layout header: BOOT-12): setup runs, and BACK on its first page has nowhere to go.
+    pub fn first_boot(&mut self) {
+        self.go_home();
+        self.screen = Screen::Setup(screens::setup::Setup::new(true));
+    }
+
+    /// At power on, after the self-test: the PIN, if one is set (PIN-1, BOOT-13).
+    pub fn ask_pin(&mut self) {
+        if self.set.pin_len > 0 && self.set.pin_mode > 0 {
+            self.go_home();
+            self.screen = Screen::Pin(screens::pin::Pin::power_on());
+        }
+    }
+
+    /// A matrix code went down or up, mapped to a key or not: the key test shows it (KEY-2). The firmware calls
+    /// this for every code, before [`App::key_down`] / [`App::key_up`] for the mapped ones.
+    pub fn raw_key(&mut self, code: u8, down: bool) {
+        self.screen.raw(self, ferrite_core::keys::key(code), Some(code), down);
+    }
+
+    /// The answer to the last write approval or write session (allowed, refused, cancelled), once.
+    pub fn take_link_answer(&mut self) -> Option<screens::link::LinkAnswer> {
+        self.link_answer.take()
+    }
+
+    /// The callsign, for the boot screen (empty until set).
+    pub fn callsign(&self) -> &[u8] {
+        self.set.callsign.as_bytes()
+    }
+
+    /// The radio-wide settings.
+    pub fn settings(&self) -> &Settings {
+        self.set
+    }
+
+    /// The radio-wide settings, to change from outside (the simulator's sample, tests; the link once it
+    /// writes them). The radio state that follows from them is sent again.
+    pub fn settings_mut(&mut self) -> &mut Settings {
+        self.set
     }
 
     // ---- inputs ----
@@ -296,6 +484,7 @@ impl App {
         self.keys.down(key, now);
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
+        self.screen.raw(self, Some(key), None, true);
         if key == Key::Ptt {
             // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there.
             self.screen.ptt(self, true);
@@ -304,11 +493,16 @@ impl App {
 
     pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        self.screen.raw(self, Some(key), None, false);
         if key == Key::Ptt {
             self.screen.ptt(self, false);
+            self.ptt_released(); // TX-25: whatever the screen did, PTT up unkeys
         }
-        if let Some(e) = self.keys.up(key, now) {
-            self.on_key(e, store);
+        match self.keys.release(key, now) {
+            Some(e) if e.press == Press::Short => self.on_key(e, store),
+            // The release after a long press: only the screen hears it (the shortcut map runs its shortcut).
+            Some(e) if !self.locked => self.screen.key(self, e, store),
+            _ => {}
         }
     }
 
@@ -347,7 +541,11 @@ impl App {
         if self.screen.timeout().is_some_and(|t| now.wrapping_sub(self.last_input) >= t) {
             self.go_home();
         }
+        self.radio_tick(live);
         self.screen.tick(self, live);
+        if self.screen == Screen::Home {
+            self.home_stops_modes(); // however the screen went home
+        }
     }
 
     fn tick_keys(&mut self, now: u32, store: &impl ChannelStore) {
@@ -370,9 +568,16 @@ impl App {
 
     fn on_key(&mut self, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
+        if self.screen.modal() {
+            return self.screen.key(self, e, store); // the PIN at power on, power off, a link write
+        }
         // Anywhere: hold BACK goes home (KEY-5); hold # toggles the lock (KEY-13).
         match (e.key, e.press) {
             (Key::Exit, Long) => return self.go_home(),
+            (Key::Hash, Long) if self.locked && self.set.pin_mode == 2 => {
+                // KEY-16: unlocking asks for the PIN
+                return self.open(Dest::Pin);
+            }
             (Key::Hash, Long) => {
                 self.locked = !self.locked;
                 return self.show_toast(if self.locked { b"Keys locked" } else { b"Keys unlocked" }, b"", false);
@@ -393,6 +598,7 @@ impl App {
 
     /// Home, forgetting where BACK would return (HOME-2).
     fn go_home(&mut self) {
+        self.stop_mode(); // a scope, search or repeater stops with its screen
         self.screen = Screen::Home;
         self.back = [None; BACK_DEPTH];
     }
@@ -400,21 +606,26 @@ impl App {
     /// Opens a screen by where it is in the manual ([`Dest`]), remembering this one for BACK. Screens not built
     /// yet open as a "coming" placeholder ([`screens::nav::enter`]).
     pub fn open(&mut self, dest: Dest) {
+        self.push_back();
+        self.screen = screens::nav::enter(dest, self);
+    }
+
+    /// Remembers the screen up now for BACK (MENU-24); full, the oldest goes.
+    pub(crate) fn push_back(&mut self) {
         if self.back[BACK_DEPTH - 1].is_some() {
-            self.back.copy_within(1.., 0); // full: the oldest goes
+            self.back.copy_within(1.., 0);
             self.back[BACK_DEPTH - 1] = None;
         }
         if let Some(b) = self.back.iter_mut().find(|b| b.is_none()) {
             *b = Some(self.screen);
         }
-        self.screen = screens::nav::enter(dest, self);
     }
 
     /// BACK on a screen opened with [`App::open`]: the screen it was opened from, or home (MENU-24).
     fn back(&mut self) {
         match self.back.iter_mut().rev().find(|b| b.is_some()).and_then(|b| b.take()) {
-            Some(s) => self.screen = s,
-            None => self.go_home(),
+            Some(s) if s != Screen::Home => self.screen = s,
+            _ => self.go_home(), // home by BACK too stops what the screens started
         }
     }
 
@@ -435,14 +646,9 @@ impl App {
         [0, 0b011, 0b111][self.watch as usize % 3]
     }
 
-    /// The slot's frequency and every setting, to the Radio task.
+    /// The slot's frequency and every setting, to the Radio task (made when popped: [`App::pop_cmd`]).
     fn send_slot(&mut self, slot: u8) {
-        let s = self.slots[slot as usize];
-        self.out.push(RadioCmd::TuneSlot { slot, freq: s.freq() });
-        for (param, value) in slot::params(s.cfg()) {
-            let value = if param == Param::Power && self.capped(slot) { 0 } else { value };
-            self.out.push(RadioCmd::SlotParam { slot, param, value });
-        }
+        self.out.sync(slot);
     }
 
     /// 1.25 m: transmit power fixed at 0.25 W (the Radio task enforces it too).
@@ -472,13 +678,7 @@ impl App {
             return;
         }
         let a = self.active;
-        if self.undo.is_none() {
-            let cfg = *self.slots[a as usize].cfg();
-            self.undo = Some(Undo { slot: a, cfg, watch: self.watch, bsave: self.bsave, until: 0 });
-        }
-        if let Some(u) = &mut self.undo {
-            u.until = self.now.wrapping_add(UNDO_MS);
-        }
+        self.keep_undo();
         match item {
             Item::Watch => {
                 self.watch = (self.watch as i32 + d).rem_euclid(3) as u8;
@@ -495,6 +695,7 @@ impl App {
                 if let Some((param, value)) = item.set(c, v, shift) {
                     self.out.push(RadioCmd::SlotParam { slot: a, param, value });
                 }
+                self.save_channel(a, None);
             }
         }
         if self.recent[0] != Some(item) {
@@ -518,9 +719,35 @@ impl App {
         self.change(item, def - cur);
     }
 
+    /// Remembers the active slot's state before a change, for "* Undo" (EDIT-4, MENU-22): the first change
+    /// of a run keeps it, every change restarts the 5 s.
+    pub(crate) fn keep_undo(&mut self) {
+        let a = self.active;
+        if self.undo.is_none() {
+            let s = &self.slots[a as usize];
+            let ch = s.ch.filter(|_| s.on_channel()).map(|c| ChUndo { num: c.num, zone: c.zone, flags: c.flags, rx: c.rx });
+            self.undo = Some(Undo { slot: a, cfg: *s.cfg(), ch, home: self.set.home_ch, watch: self.watch, bsave: self.bsave, until: 0 });
+        }
+        if let Some(u) = &mut self.undo {
+            u.until = self.now.wrapping_add(UNDO_MS);
+        }
+    }
+
     fn do_undo(&mut self) {
         if let Some(u) = self.undo.take() {
-            *self.slots[u.slot as usize].cfg_mut() = u.cfg;
+            let s = &mut self.slots[u.slot as usize];
+            match u.ch {
+                Some(old) if s.on_channel() => {
+                    let from = s.ch.map(|c| c.num).filter(|&n| n != old.num);
+                    if let Some(c) = &mut s.ch {
+                        (c.num, c.zone, c.flags, c.rx, c.cfg) = (old.num, old.zone, old.flags, old.rx, u.cfg);
+                        s.zone = old.zone;
+                    }
+                    self.set.home_ch = u.home;
+                    self.save_channel(u.slot, from);
+                }
+                _ => *s.cfg_mut() = u.cfg,
+            }
             self.send_slot(u.slot);
             if u.watch != self.watch {
                 self.watch = u.watch;

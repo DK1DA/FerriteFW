@@ -1,6 +1,6 @@
 //! Edit in place (hold SLOT; manual chapters 6 and 9, EDIT-1 to EDIT-7; HomeEdit mock-up): the active slot's
-//! settings as a 3 x 3 grid, arrows pick, the knob changes at once. The channel version (zone, name, frequency
-//! and 12 settings: HomeEditCh) is still to come.
+//! settings as a 3 x 3 grid, arrows pick, the knob changes at once. On a channel, hold SLOT opens the channel
+//! version instead ([`super::chedit`]: zone, name, frequency and 12 settings).
 
 use super::nav::Dest;
 use super::shared::*;
@@ -76,7 +76,8 @@ impl View for Edit {
             w::tag(lcd, 232, 25, b"EDIT", BLUE, BG); // EDIT-1
         }
         let f = app.shown_freq(a, live);
-        if app.dirty(R_FREQ, hash(&f)) {
+        // R_FREQ is grid cell 6's region (R_ROW + 6): the frequency uses R_SUB.
+        if app.dirty(R_SUB, hash(&f)) {
             w::freq(lcd, 7, 232, 76, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
         }
         let cfg = *app.slots[a as usize].cfg();
@@ -108,30 +109,7 @@ impl View for Edit {
                 None => w::key_line(lcd, 7, 233, 202, "Hold 0", "jumps to the home channel", BG),
             }
         }
-        // The other two slots, one line each.
-        for (k, s) in [(a + 1) % 3, (a + 2) % 3].into_iter().enumerate() {
-            let mut t = Buf::<48>::new();
-            t.push(w::freq3(app.shown_freq(s, live)).as_bytes());
-            let sl = &app.slots[s as usize];
-            let lv = &live.slots[s as usize];
-            if lv.scanning {
-                let _ = uwrite!(t, " \u{b7} {} \u{b7} {} hits", crate::slot::band_name(lv.freq), lv.hits);
-            } else {
-                if let Some(c) = sl.ch.filter(|_| sl.on_channel()) {
-                    t.push(" \u{b7} ".as_bytes());
-                    t.push(c.name());
-                }
-                let (st, _) = app.state(s, live);
-                t.push(" \u{b7} ".as_bytes());
-                t.push(st.as_bytes());
-            }
-            if app.dirty(R_LINE + k, hash(&(s, t))) {
-                let y = 268 + k as i32 * 17;
-                w::badge(lcd, 7, y, s, false, BG);
-                w::field(lcd, 21, 4, y - 1, y + 16, y + 11, Align::Left, b"", &UI_12, SUB, BG);
-                w::field(lcd, 25, 211, y - 1, y + 16, y + 11, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
-            }
-        }
+        other_slots(app, lcd, live);
     }
 
     fn hints(self, app: &App) -> Hints {
@@ -141,6 +119,35 @@ impl View for Edit {
             Hints::new(&[("Knob", "Change"), ("*", "Undo"), ("BACK", "Done")])
         } else {
             Hints::new(&[(ARROWS_4, "Pick"), ("Knob", "Change"), ("BACK", "Done")])
+        }
+    }
+}
+
+/// The other two slots under an editor, one line each (HomeEdit, HomeEditCh).
+pub(crate) fn other_slots(app: &mut App, lcd: &mut impl Panel, live: &ferrite_core::msg::LiveAll) {
+    let a = app.active;
+    // The other two slots, one line each.
+    for (k, s) in [(a + 1) % 3, (a + 2) % 3].into_iter().enumerate() {
+        let mut t = Buf::<48>::new();
+        t.push(w::freq3(app.shown_freq(s, live)).as_bytes());
+        let sl = &app.slots[s as usize];
+        let lv = &live.slots[s as usize];
+        if lv.scanning {
+            let _ = uwrite!(t, " \u{b7} {} \u{b7} {} hits", crate::slot::band_name(lv.freq), lv.hits);
+        } else {
+            if let Some(c) = sl.ch.filter(|_| sl.on_channel()) {
+                t.push(" \u{b7} ".as_bytes());
+                t.push(c.name());
+            }
+            let (st, _) = app.state(s, live);
+            t.push(" \u{b7} ".as_bytes());
+            t.push(st.as_bytes());
+        }
+        if app.dirty(R_LINE + k, hash(&(s, t))) {
+            let y = 268 + k as i32 * 17;
+            w::badge(lcd, 7, y, s, false, BG);
+            w::field(lcd, 21, 4, y - 1, y + 16, y + 11, Align::Left, b"", &UI_12, SUB, BG);
+            w::field(lcd, 25, 211, y - 1, y + 16, y + 11, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
         }
     }
 }

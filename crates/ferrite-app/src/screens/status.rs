@@ -25,7 +25,7 @@ pub struct Status {
 }
 
 /// The Status page's rows (SBAR-14).
-pub(crate) const STATUS: [&str; 13] = [
+pub(crate) const STATUS: [&str; 14] = [
     "Transmit",
     "Region",
     "Extend TX",
@@ -39,6 +39,7 @@ pub(crate) const STATUS: [&str; 13] = [
     "Bluetooth",
     "Battery",
     "Key lock",
+    "Weather alerts",
 ];
 const ROWS: u8 = STATUS.len() as u8;
 
@@ -69,6 +70,7 @@ impl View for Status {
                 "GPS" => app.open(Dest::GpsPosition),
                 "Bluetooth" => app.open(Dest::Sub(9, 2)),
                 "Region" => app.open(Dest::Group(9)),
+                "Weather alerts" => app.open(Dest::Sub(3, 3)),
                 "Extend TX" | "Transmit" => app.open(Dest::Group(8)),
                 name => app.show_toast(name.as_bytes(), b"setting comes next", false),
             },
@@ -85,20 +87,23 @@ impl View for Status {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let (live, dev) = (cx.live, cx.dev);
+        let hf = super::hf::in_hf(app);
         for (i, label) in STATUS.iter().enumerate() {
             let mut v = Buf::<28>::new();
             let mut c = TEXT;
             match i {
                 0 => {
-                    // SBAR-14: why transmit is locked, if it is.
-                    if dev.tx_built {
-                        (v, c) = (Buf::from(b"Ready"), GREEN);
-                    } else {
-                        (v, c) = (Buf::from(b"RX-only build"), AMBER);
+                    // SBAR-14: why transmit is locked, if it is (BOOT-11).
+                    match super::info::tx_lock(dev) {
+                        None => (v, c) = (Buf::from(b"Ready"), GREEN),
+                        Some(why) => (v, c) = (Buf::from(why.as_bytes()), AMBER),
                     }
                 }
-                1 => v.set(b"Not set"),
-                2 | 6 | 7 => v.set(if i == 6 { b"None".as_slice() } else { b"Off" }),
+                1 => v.set(app.set.region_name().as_bytes()),
+                2 => v.set(if app.set.extend_tx { b"On".as_slice() } else { b"Off" }),
+                // HF-6: everything else pauses in HF mode.
+                4..=7 if hf => (v, c) = (Buf::from(b"Paused: HF mode"), AMBER),
+                6 | 7 => v.set(if i == 6 { b"None".as_slice() } else { b"Off" }),
                 3 => {
                     if app.inbox == 0 {
                         v.set(b"Empty");
@@ -145,7 +150,19 @@ impl View for Status {
                         c = AMBER;
                     }
                 }
-                _ => v.set(if app.locked { b"On".as_slice() } else { b"Off" }),
+                12 => v.set(if app.locked { b"On".as_slice() } else { b"Off" }),
+                _ => {
+                    // SBAR-18: paused in HF mode; WX-3: US and Canada only.
+                    if !app.set.wx_region() {
+                        (v, c) = (Buf::from(b"Not in region"), SUB);
+                    } else if !app.set.same {
+                        v.set(b"Off");
+                    } else if hf {
+                        (v, c) = (Buf::from(b"Paused: HF mode"), AMBER);
+                    } else {
+                        v.set(b"On");
+                    }
+                }
             }
             app.kv_row(lcd, i, 20 + 18 * i as i32, 18, label.as_bytes(), v.as_bytes(), c, i as u8 == self.row);
         }

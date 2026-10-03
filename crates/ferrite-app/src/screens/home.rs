@@ -1,8 +1,8 @@
 //! Home, watch layout (manual chapter 6; HomeA mock-up): the slots stacked A, B, C, the active one large.
 //! Tuning, bands and zones, SLOT, V/M, scan, squelch and the hold-digit shortcuts ([`super::nav::hold_digit`]).
-//! The other two layouts (single + scope, watch + activity: HOME-3) are still to come.
+//! The other two layouts (single + scope, watch + activity: HOME-3) are drawn by [`super::layouts`].
 
-use super::nav::{self, Dest};
+use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
@@ -54,7 +54,7 @@ impl View for Home {
         let big = app.keys.is_held(Key::Side(2));
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) if app.keys.is_held(Key::Side(1)) => {
-                squelch_step(app, if e.key == Key::Up { 1 } else { -1 })
+                super::squelch::step(app, if e.key == Key::Up { 1 } else { -1 })
             }
             (Key::Up | Key::Down, Short | Repeat) => {
                 if big {
@@ -68,6 +68,7 @@ impl View for Home {
                 app.active = (app.active + 1) % SLOTS as u8;
                 app.out.push(RadioCmd::Active(app.active));
             }
+            (Key::Slot, Long) if app.slots[app.active as usize].on_channel() => app.screen = Screen::ChEdit(super::chedit::ChEdit { cell: 0 }), // EDIT-2
             (Key::Slot, Long) => app.screen = Screen::Edit(super::edit::Edit { cell: 0 }), // EDIT-1
             (Key::VfoMem, Short) => toggle_vfo(app, store),
             (Key::VfoMem, Long) => {
@@ -87,22 +88,18 @@ impl View for Home {
             }
             (Key::Menu, Short) => app.screen = Screen::Quick(super::quick::Quick { row: 0 }), // MENU-1
             (Key::Menu, Long) => app.screen = Screen::Advanced(super::advanced::Advanced { row: 0, from_quick: false }), // MENU-2
-            (Key::Side(2), Short) => {
-                // SCAN-1: the scan shows on the card for now (the scan screen is still to come)
-                let a = app.active;
-                let on = app.scan_mask & 1 << a == 0;
-                app.out.push(RadioCmd::Scan { slot: a, on });
-            }
+            (Key::Side(2), Short) => super::scan::side2(app), // SCAN-1
             (Key::Star, Long) => app.change(Item::Reverse, 1), // VFO-7: two values, so +1 toggles
             (Key::Digit(d), Short) => app.open(Dest::Entry(d)), // NAV-4, VFO-11
-            (Key::Digit(d), Long) => nav::hold_digit(app, d),  // KEY-11
+            // HOME-8: the shortcut map while the digit is held; the shortcut runs on release (KEY-11).
+            (Key::Digit(d), Long) => super::nav::hold_digit(app, d),
             _ => {}
         }
     }
 
     fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
         if app.keys.is_held(Key::Side(1)) {
-            return squelch_step(app, d);
+            return super::squelch::step(app, d);
         }
         let big = app.keys.is_held(Key::Side(2));
         if big {
@@ -111,7 +108,17 @@ impl View for Home {
         step(app, d, big, store);
     }
 
+    fn tick(self, app: &mut App, _: &ferrite_core::msg::LiveAll) {
+        super::layouts::tick(app);
+    }
+
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
+        // HOME-3: the other two layouts draw differently; the keys are the same.
+        match app.set.layout {
+            1 => return super::layouts::single(app, lcd, cx),
+            2 => return super::layouts::activity(app, lcd, cx),
+            _ => {}
+        }
         let live = cx.live;
         // The large card moved (SLOT): the gaps between cards moved too, so clear the whole card area and draw
         // every card again; otherwise slivers of the old large card stay behind (HOME-11).
@@ -241,16 +248,6 @@ impl View for Home {
         let mid = if app.watched_rx() { ("#", "Pause") } else { ("OK", "Quick") };
         Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, (ARROWS_LR, group)])
     }
-}
-
-/// SIDE1 held + knob or ▲▼: the active slot's squelch, shown as a toast (KEY table, chapter 7). Stops at 0
-/// and 9 rather than wrapping.
-fn squelch_step(app: &mut App, d: i32) {
-    app.keys.used(Key::Side(1));
-    let sq = app.slots[app.active as usize].cfg().squelch as i32;
-    let to = (sq + d).clamp(0, 9);
-    app.change(Item::Squelch, to - sq);
-    app.show_toast(b"Squelch", &[b'0' + to as u8], false);
 }
 
 /// Knob or ▲▼ on home: a step in VFO mode (NAV-2), a channel in channel mode (NAV-1); big with SIDE2 (NAV-3).

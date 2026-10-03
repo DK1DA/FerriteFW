@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(text4_width("\u{20AC}".as_bytes(), &UI_12), text4_width(b"?", &UI_12)); // euro sign: as '?'
         // the cut fonts: ASCII and the middle dot by direct index or search; anything else is missing
         assert!(UI_12.has(' ') && UI_12.has('~') && UI_12.has('\u{b7}') && !UI_12.has('\u{e9}') && !UI_12.has('\u{20AC}'));
-        assert!(UI_15B.has('W') && UI_15B.has('/') && !UI_15B.has('w'), "callsign font: capitals only");
+        assert!(UI_15B.has('W') && UI_15B.has('/') && UI_15B.has('w') && !UI_15B.has('\u{e9}'), "headings font: the text set");
         assert!(DIG_46.has('7') && !DIG_46.has('A'));
         assert_eq!(text4_width("\u{e9}t\u{e9}".as_bytes(), &UI_12), 3 * text4_width(b"?", &UI_12)); // 2-byte UTF-8
         assert_eq!(text4_width(b"\xC3", &UI_12), text4_width(b"?", &UI_12)); // a cut sequence

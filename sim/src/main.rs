@@ -14,6 +14,7 @@ use std::path::Path;
 
 mod face;
 mod fake;
+mod shots_d;
 mod window;
 
 fn save(fb: &FrameBuffer, name: &str, scale: u32) {
@@ -87,13 +88,16 @@ fn main() {
     let mut dev = fake::device();
     dev.clock_min = Some(14 * 60 + 32);
     dev.utc = false;
-    let mut app = App::new();
-    fake::sample(&mut app, &store);
+    let mut app = fake::app();
+    fake::sample(&mut app, &store, &mut radio);
     let mut t = 0u32;
     let mut run = |app: &mut App, fb: &mut FrameBuffer, until: u32, t: &mut u32| {
         while *t <= until {
             while let Some(c) = app.pop_cmd() {
                 radio.cmd(c);
+            }
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
             }
             radio.step(*t as f32 / 1000.0, app.active());
             app.tick(*t, &radio.live, &store);
@@ -137,9 +141,195 @@ fn main() {
     app.notify(b"VE3KPW-9", b"On my way", false);
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "toast", scale);
-    // A screen not built yet: hold 3 (band scope) opens its placeholder.
+    // A screen not built yet: hold 4 (APRS heard) opens its placeholder.
     run(&mut app, &mut fb, t + 3500, &mut t);
-    press(&mut app, Key::Digit(3), 800, &mut t);
+    press(&mut app, Key::Digit(4), 800, &mut t);
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "coming", scale);
+
+    // Group A, entry and editing: each screen as it first shows, with a little typed.
+    let tap = |app: &mut App, t: &mut u32, keys: &[Key]| {
+        for &k in keys {
+            press(app, k, 100, t);
+            *t += 150;
+        }
+    };
+    use Key::{Digit as D, Down, Exit, Menu, Right, Slot, Star, VfoMem};
+    press(&mut app, Exit, 800, &mut t);
+    tap(&mut app, &mut t, &[D(1), D(4), D(6), D(9), D(4)]); // NAV-4: frequency entry
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "entry-freq", scale);
+    press(&mut app, Exit, 800, &mut t);
+    app.key_down(D(5), t, &store); // HOME-8: the map while 5 is held
+    run(&mut app, &mut fb, t + 800, &mut t);
+    save(&fb, "shortcut-map", scale);
+    tap(&mut app, &mut t, &[Exit]);
+    app.key_up(D(5), t, &store);
+    tap(&mut app, &mut t, &[Menu, Menu]); // MENU 1, OK: the squelch editor (MenuEdit)
+    run(&mut app, &mut fb, t + 3000, &mut t);
+    save(&fb, "value-squelch", scale);
+    tap(&mut app, &mut t, &[Exit, D(5), Menu]); // MENU 5, OK: offset as a list
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "value-offset", scale);
+    tap(&mut app, &mut t, &[Exit, D(4), Menu]); // MENU 4, OK: the tone picker
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "tones", scale);
+    press(&mut app, Exit, 800, &mut t);
+    press(&mut app, VfoMem, 800, &mut t); // hold V/M: save as channel
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "save-channel", scale);
+    tap(&mut app, &mut t, &[Down, Down, Menu, D(4), D(4)]); // its name: text entry, "H"
+    t += 1100;
+    tap(&mut app, &mut t, &[Star, D(4), D(4), D(4), D(5), D(5), D(5)]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "text", scale);
+    press(&mut app, Exit, 800, &mut t);
+    press(&mut app, Menu, 800, &mut t); // MENU 0 2 2: add repeater
+    tap(&mut app, &mut t, &[D(2), D(2)]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "add-repeater", scale);
+    press(&mut app, Exit, 800, &mut t);
+    tap(&mut app, &mut t, &[Slot, D(1), D(5)]); // B is on a channel: channel entry
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "entry-channel", scale);
+    press(&mut app, Exit, 800, &mut t);
+    press(&mut app, Slot, 800, &mut t); // hold SLOT on a channel: the channel editor (HomeEditCh)
+    tap(&mut app, &mut t, &[Down, Down, Down, Right, Right]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "home-edit-ch", scale);
+    tap(&mut app, &mut t, &[Exit, Slot, Slot]);
+    press(&mut app, Menu, 800, &mut t); // MENU 0 9 8 2: reset asks first
+    tap(&mut app, &mut t, &[D(9), D(8), D(2)]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "confirm", scale);
+    press(&mut app, Exit, 800, &mut t);
+    // Setup, the PIN and the Extend TX warning are group D's ([`shots_d`]).
+
+    // Radio activity (group B). Each from home, the fake radio answering.
+    macro_rules! shot {
+        ($ms:expr, $name:expr) => {
+            run(&mut app, &mut fb, t + $ms, &mut t);
+            save(&fb, $name, scale);
+        };
+    }
+    let home = |app: &mut App, t: &mut u32| press(app, Key::Exit, 800, t);
+    // Transmit: PTT held on A (145.920 after the -600k offset), 2 s in.
+    app.key_down(Key::Ptt, t, &store);
+    shot!(2800, "transmit");
+    app.key_up(Key::Ptt, t, &store);
+    // Refused: 420.500 is outside 70 cm in Canada (the TxRefused mock-up).
+    app.set_vfo(0, 42_050_000);
+    app.key_down(Key::Ptt, t, &store);
+    app.key_up(Key::Ptt, t + 200, &store);
+    shot!(300, "tx-refused");
+    home(&mut app, &mut t);
+    // Emergency: 243.000 with Extend TX on; the first PTT only prompts.
+    app.set_region(Some(ferrite_core::txplan::Region::Canada), true);
+    app.set_vfo_cfg(0, ferrite_app::slot::DEFAULT_CFG); // simplex: the offset would move it off 243.000
+    app.set_vfo(0, 24_300_000);
+    app.key_down(Key::Ptt, t, &store);
+    app.key_up(Key::Ptt, t + 200, &store);
+    shot!(1500, "tx-emergency");
+    home(&mut app, &mut t);
+    app.set_region(Some(ferrite_core::txplan::Region::Canada), false);
+    fake::sample_app(&mut app, &store);
+    app.set_vfo(0, 14_652_000);
+    run(&mut app, &mut fb, t, &mut t);
+    // Scan: SIDE2 on A, 9 s in (a hit every 7 s).
+    press(&mut app, Key::Side(2), 100, &mut t);
+    shot!(9000, "scan");
+    press(&mut app, Key::Side(2), 100, &mut t);
+    run(&mut app, &mut fb, t, &mut t); // the radio takes the commands (16 queue at most)
+    // Band scope: hold 3, the marker moved onto the strong carrier.
+    press(&mut app, Key::Digit(3), 800, &mut t);
+    run(&mut app, &mut fb, t, &mut t);
+    for _ in 0..13 {
+        press(&mut app, Key::Right, 60, &mut t);
+        run(&mut app, &mut fb, t, &mut t);
+    }
+    shot!(2500, "scope");
+    home(&mut app, &mut t);
+    // Tone search: hold 9, found after 2.5 s.
+    press(&mut app, Key::Digit(9), 800, &mut t);
+    shot!(1000, "tone-search");
+    shot!(2500, "tone-found");
+    home(&mut app, &mut t);
+    // Frequency counter: MENU 0 3 4.
+    app.open(ferrite_app::screens::nav::Dest::Counter);
+    shot!(2500, "counter");
+    home(&mut app, &mut t);
+    // FM broadcast and HF mode: group D's shots.
+    // Weather radio: hold 7 (Canada).
+    press(&mut app, Key::Digit(7), 800, &mut t);
+    shot!(300, "weather");
+    home(&mut app, &mut t);
+    // The alert: group D's shot, as in the mock-up.
+    // Squelch: SIDE1 held, the knob turned.
+    app.key_down(Key::Side(1), t, &store);
+    app.knob(1, t, &store);
+    shot!(300, "squelch");
+    app.knob(-1, t, &store);
+    app.key_up(Key::Side(1), t, &store);
+    run(&mut app, &mut fb, t + 100, &mut t);
+    // The shortcut map: group A's shot.
+    run(&mut app, &mut fb, t + 3500, &mut t);
+    // Crossband: start page, then ready, then passing A -> B.
+    app.open(ferrite_app::screens::nav::Dest::Crossband);
+    shot!(300, "xb-start");
+    press(&mut app, Key::Hash, 100, &mut t);
+    shot!(14_000, "xb-ready");
+    shot!(21_000, "xb-passing");
+    home(&mut app, &mut t);
+    // Home's other layouts (MENU 0 7 2).
+    app.set_layout(1);
+    shot!(1500, "home-scope");
+    app.set_layout(2);
+    shot!(20_000, "home-activity");
+    app.set_layout(0);
+    // Group C, lists and data: each opened as its way in does, keys pressed, the page saved.
+    use ferrite_app::screens::nav::Dest;
+    type Shot<'a> = (&'a str, Dest, &'a [(Key, u32)]);
+    let shots: &[Shot] = &[
+        ("event-log", Dest::EventLog, &[(Key::Down, 100)]),
+        ("event-detail", Dest::EventLog, &[(Key::Down, 100), (Key::Down, 100), (Key::Menu, 100)]),
+        ("event-detail-pager", Dest::EventLog, &[(Key::Down, 100), (Key::Menu, 100)]),
+        ("event-log-options", Dest::EventLog, &[(Key::Menu, 800)]),
+        ("aprs-heard", Dest::AprsHeard, &[]),
+        ("aprs-station", Dest::AprsHeard, &[(Key::Menu, 100)]),
+        ("aprs-messages", Dest::AprsMessages, &[]),
+        ("aprs-message", Dest::AprsMessages, &[(Key::Menu, 100)]),
+        ("aprs-compose", Dest::AprsMessages, &[(Key::Menu, 100), (Key::Menu, 100), (Key::Star, 100), (Key::Digit(2), 100), (Key::Digit(2), 100), (Key::Star, 100), (Key::Star, 100), (Key::Digit(3), 100), (Key::Digit(3), 100), (Key::Hash, 100), (Key::Digit(8), 100), (Key::Digit(4), 100), (Key::Digit(4), 100), (Key::Digit(3), 100), (Key::Digit(3), 100), (Key::Digit(7), 100), (Key::Digit(7), 100), (Key::Digit(7), 100), (Key::Digit(3), 100), (Key::Digit(3), 100), (Key::Hash, 100), (Key::Digit(2), 100), (Key::Digit(8), 100), (Key::Hash, 100), (Key::Star, 100), (Key::Star, 100), (Key::Digit(5), 100)]),
+        ("sensors", Dest::Sensors, &[]),
+        ("browse", Dest::Browse, &[(Key::Down, 100)]),
+        ("browse-zone", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100)]),
+        ("browse-all", Dest::Browse, &[(Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Menu, 100)]),
+        ("browse-nearby", Dest::Browse, &[(Key::Up, 100), (Key::Menu, 100)]),
+        ("browse-recent", Dest::Browse, &[(Key::Up, 100), (Key::Up, 100), (Key::Menu, 100)]),
+        ("browse-actions", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Menu, 100)]),
+        ("browse-delete", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Up, 100), (Key::Menu, 100)]),
+        ("zones", Dest::Zones, &[(Key::Down, 100)]),
+        ("zone-edit", Dest::Zones, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Down, 100), (Key::Down, 100), (Key::Down, 100)]),
+        ("zone-delete", Dest::Zones, &[(Key::Down, 100), (Key::Down, 100), (Key::Star, 100)]),
+        ("range-presets", Dest::RangePresets, &[(Key::Down, 100)]),
+        ("range-preset", Dest::RangePresets, &[(Key::Down, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Down, 100)]),
+        ("skip-list", Dest::SkipList, &[]),
+        ("hf-recent", Dest::HfRecent, &[]),
+        ("fm-presets", Dest::FmPresets, &[(Key::Down, 100)]),
+        ("gps-position", Dest::GpsPosition, &[]),
+        ("gps-satellites", Dest::GpsPosition, &[(Key::Right, 100)]),
+        ("waypoints", Dest::Waypoints, &[(Key::Down, 100)]),
+        ("waypoint-go", Dest::Waypoints, &[(Key::Down, 100), (Key::Menu, 100)]),
+    ];
+    for &(name, dest, keys) in shots {
+        press(&mut app, Key::Exit, 800, &mut t); // home
+        run(&mut app, &mut fb, t + 3500, &mut t); // toasts gone
+        app.open(dest);
+        for &(k, hold) in keys {
+            press(&mut app, k, hold, &mut t);
+            t += 150;
+        }
+        run(&mut app, &mut fb, t, &mut t);
+        save(&fb, name, scale);
+    }
+    shots_d::run(scale);
 }

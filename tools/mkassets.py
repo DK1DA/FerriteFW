@@ -22,7 +22,7 @@ WORD = "BarlowSemiCondensed-SemiBold.ttf"
 # Character sets: English only, and only what the UI draws. A string with a character outside its font's set
 # fails ferrite-ui's and ferrite-app's tests (they check every string literal), so add it here and regenerate.
 ASCII = "".join(chr(c) for c in range(0x20, 0x7F))
-TEXT = ASCII + "\u00b7"  # the middle dot separates values ("VFO · VHF"); arrows and marks are drawn shapes
+TEXT = ASCII + "\u00b7\u00b0"  # the middle dot separates values ("VFO · VHF"), the degree sign bearings ("NE 48°"); arrows and marks are drawn shapes
 CALL = " #*-/?0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00b7"  # callsigns on the boot screen; the sim's key legends
 DIG = " -.0123456789"  # frequencies
 WORDMARK = " EFIRT"
@@ -34,7 +34,7 @@ SLOW = ".slow_rodata"
 FONT_LIST = [  # name, file, px, chars, tabular, use
     ("ui_12", REG, 12, TEXT, False, "status bar, hints, labels, lists, values"),
     ("ui_12b", BOLD, 12, TEXT, False, "emphasis: clock, keys in hints, tags"),
-    ("ui_15b", BOLD, 15, CALL, False, "callsign on the boot screen"),
+    ("ui_15b", BOLD, 15, TEXT, False, "headings: setup pages, alerts; the callsign on the boot screen"),
     ("dig_46", NUM, 46, DIG, True, "active slot frequency"),
     ("dig_28", NUM, 28, DIG, True, "active slot last digits"),
     ("dig_26", NUM, 26, DIG, True, "watched slot frequency"),

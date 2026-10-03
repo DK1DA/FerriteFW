@@ -9,26 +9,30 @@
 //!
 //! | From | Keys | Goes to |
 //! | --- | --- | --- |
-//! | Home | hold 0-9 ([`hold_digit`], KEY-11) | 0 home channel, 1 watch, 2 FM broadcast, 3 band scope, 4 APRS heard, 5 TX power, 6 bandwidth, 7 weather, 8 Battery Save, 9 tone search |
+//! | Home | hold 0-9 ([`hold_digit`]: the shortcut map, HOME-8; the release runs [`shortcut`], KEY-11) | 0 home channel, 1 watch, 2 FM broadcast, 3 band scope, 4 APRS heard, 5 TX power, 6 bandwidth, 7 weather, 8 Battery Save, 9 tone search |
 //! | Home | a digit (NAV-4, VFO-11) | [`Dest::Entry`] with the digit |
 //! | Home | hold V/M on a VFO (VFO-9) | [`Dest::SaveChannel`] |
-//! | Home | hold SLOT / MENU / hold MENU / # | edit in place / quick / advanced / Status (built) |
-//! | Any screen | PTT down (KEY-7) | home, then [`Dest::Transmit`]; PTT up: home ([`super::View::ptt`]) |
+//! | Home | hold SLOT / MENU / hold MENU / # | edit in place (on a channel: [`Dest::ChannelEdit`]) / quick / advanced / Status |
+//! | Home | SIDE2 (SCAN-1) / SIDE1 + knob (SQL-10) | [`Dest::Scan`] / [`Dest::Squelch`] |
+//! | Any screen | PTT down (KEY-7) | home, then [`Dest::Transmit`], or [`Dest::TxRefused`] (TX-20) or [`Dest::Emergency`] (TX-3); PTT up: home ([`super::View::ptt`]) |
 //! | Quick settings | OK on a row (MENU-17) | [`Dest::Value`] (tones: [`Dest::Tones`]); MENU 8: [`Dest::SaveChannel`] or [`Dest::ChannelEdit`] |
 //! | Edit in place | OK on a cell | [`Dest::Value`] / [`Dest::Tones`] |
 //! | Advanced (MENU 0) | 1-9 or OK | [`Dest::Group`]; inside, digits follow [`MENU0`] (MENU-5) |
+//! | A list or mode screen | hold MENU (MENU-25) | that screen's options (D4) |
 //! | Status page | OK on a row (SBAR-15) | the row's setting or screen |
-//! | [`App::notify`] with an alert | automatic (WX-4) | [`Dest::Alert`] |
+//! | Locked, PIN "at power on and unlock" | hold # (KEY-16) | [`Dest::Pin`] |
+//! | Power on | the firmware: [`App::first_boot`] / [`App::ask_pin`] | [`Dest::Setup`] (BOOT-12) / [`Dest::Pin`] (BOOT-13) |
+//! | [`App::notify`], [`App::raise_alert`] | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Not wired yet (no event to start them): transmit refused, emergency prompt, PIN at power on, Bluetooth
-//! write approval and progress, power off, empty battery, SSB patch confirm, setup at first boot, the shortcut
-//! map while a digit is held (HOME-8: the shortcut runs at the long press for now), crossband (no menu number
-//! yet).
+//! Not wired yet (no event or menu number to start them): Bluetooth write approval and progress (the Link
+//! task opens them), power off, empty battery, SSB patch confirm, mailbox, crossband (no menu number yet).
+//! Still placeholders: position entry (A8), location codes (A13), the DTMF dialer and memories (A14, A15).
 
 use super::advanced::{Advanced, GROUPS};
 use super::coming::Coming;
 use super::quick::Quick;
 use super::status::Status;
+use crate::chan::ChannelStore;
 use crate::slot::Item;
 use crate::{App, Screen};
 use ferrite_ui::text::Buf;
@@ -379,19 +383,96 @@ pub fn menu0(path: &[u8]) -> Option<Dest> {
 
 /// A destination's screen: built screens by their own arm, the rest as a placeholder. Adding a screen = one
 /// arm here.
-pub fn enter(dest: Dest, _app: &App) -> Screen {
+pub fn enter(dest: Dest, app: &mut App) -> Screen {
+    use super::*;
+    let a = app.active;
+    let on_ch = app.slots[a as usize].on_channel();
+    use super::info::{Info, Page};
+    use super::link::{Link, LinkPage};
     match dest {
+        Dest::Entry(d) => Screen::Entry(entry::Entry::new(if on_ch { entry::EntryFor::Channel } else { entry::EntryFor::Vfo }, Some(d))),
+        Dest::ChannelEdit if on_ch => Screen::ChEdit(chedit::ChEdit { cell: 0 }),
+        Dest::ChannelEdit | Dest::SaveChannel => Screen::Save(save::Save::new(false)),
+        Dest::AddRepeater => Screen::Save(save::Save::new(true)),
+        Dest::Value(item) => Screen::Value(value::Value::new(item, app)),
+        Dest::Tones => Screen::Tones(tones::Tones::new(app)),
+        Dest::Text => Screen::Text(text::Text::new(text::TextFor::Callsign)),
+        Dest::Confirm => Screen::Confirm(confirm::Confirm { ask: confirm::Ask::Reset { channels: false } }),
+        Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut { digit: 0 }),
         Dest::Quick => Screen::Quick(Quick { row: 0 }),
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
         Dest::Status => Screen::Status(Status { row: 0, from_menu: false }),
+        // Group B, radio activity.
+        Dest::Transmit => Screen::Transmit(transmit::Transmit { slot: a }),
+        Dest::TxRefused => {
+            let why = transmit::refusal(app, a).unwrap_or(ferrite_core::txplan::Refusal::OutOfBand);
+            Screen::TxRefused(transmit::TxRefused { why, slot: a })
+        }
+        Dest::Emergency => Screen::Emergency(transmit::Emergency { slot: a }),
+        Dest::Scan => Screen::Scan(scan::Scan { slot: a }),
+        Dest::BandScope => scope::open(app),
+        Dest::ToneSearch => probe::open_tone(app),
+        Dest::Counter => probe::open_counter(app),
+        Dest::Weather => weather::open(app).unwrap_or(app.screen),
+        Dest::Crossband => Screen::Crossband(xb::Crossband { cell: 0 }),
+        Dest::Squelch => Screen::Squelch(squelch::Squelch),
+        // Group C: lists and data
+        Dest::EventLog => Screen::Log(super::log::Log::new()),
+        Dest::EventDetail => Screen::Log(super::log::Log { detail: true, ..super::log::Log::new() }),
+        Dest::AprsHeard => Screen::Aprs(super::aprs::Aprs { cur: Default::default(), station: false }),
+        Dest::AprsStation => Screen::Aprs(super::aprs::Aprs { cur: Default::default(), station: true }),
+        Dest::AprsMessages => Screen::Msgs(super::msgs::Msgs { cur: Default::default(), open: false }),
+        Dest::AprsMessage => Screen::Msgs(super::msgs::Msgs { cur: Default::default(), open: true }),
+        Dest::Compose => Screen::Compose(super::msgs::Compose::new()),
+        Dest::GpsPosition => Screen::Gps(super::gps::Gps::new(super::gps::Page::Position)),
+        Dest::Waypoints => Screen::Gps(super::gps::Gps::new(super::gps::Page::Waypoints)),
+        Dest::WaypointGo => Screen::Gps(super::gps::Gps::new(super::gps::Page::Go)),
+        Dest::Browse => Screen::Browse(super::browse::Browse::new()),
+        Dest::Zones => Screen::Zones(super::zones::Zones::new()),
+        Dest::ZoneEdit => Screen::Zones(super::zones::Zones { mode: 2, ..super::zones::Zones::new() }),
+        Dest::RangePresets => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Presets(false))),
+        Dest::RangePreset => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Edit(0))),
+        Dest::SkipList => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Skips)),
+        Dest::HfRecent => Screen::Recall(super::recall::Recall { fm: false, cur: Default::default() }),
+        Dest::FmPresets => Screen::Recall(super::recall::Recall { fm: true, cur: Default::default() }),
+        Dest::Sensors => Screen::Sensors(super::sensors::Sensors { cur: Default::default() }),
+        // D: system and modes
+        Dest::Group(g) => Screen::Group(super::groups::Group { g: g.clamp(1, 9), sub: 0, row: 0 }),
+        Dest::Sub(g, m) => Screen::Group(super::groups::Group { g, sub: m, row: 0 }),
+        Dest::Setup => Screen::Setup(super::setup::Setup::new(false)),
+        Dest::ExtendTx => Screen::ExtendTx(super::setup::ExtendTx),
+        Dest::Pin if app.locked => Screen::Pin(super::pin::Pin::unlock()),
+        Dest::Pin => Screen::Pin(super::pin::Pin::set(app.set.pin_mode.max(1))),
+        Dest::About => Screen::Info(Info { page: Page::About }),
+        Dest::Calibration => Screen::Info(Info { page: Page::Calibration }),
+        Dest::AdvSquelch => Screen::Info(Info { page: Page::AdvSquelch }),
+        Dest::SsbPatch => Screen::Info(Info { page: Page::SsbPatch }),
+        Dest::SsbConfirm => Screen::Info(Info { page: Page::SsbConfirm }),
+        Dest::PairBt => Screen::Info(Info { page: Page::PairBt }),
+        Dest::PowerOff => Screen::Info(Info { page: Page::PowerOff }),
+        Dest::EmptyBattery => Screen::Info(Info { page: Page::EmptyBattery }),
+        Dest::Mailbox => Screen::Info(Info { page: Page::Mailbox }),
+        Dest::KeyTest => Screen::KeyTest(super::keytest::KeyTest::new()),
+        Dest::LinkStatus => Screen::Link(Link::new(LinkPage::Status)),
+        Dest::Paired => Screen::Link(Link::new(LinkPage::Paired)),
+        Dest::WriteApproval => Screen::Link(Link::new(LinkPage::Approve)),
+        Dest::WriteProgress => Screen::Link(Link::new(LinkPage::Progress)),
+        Dest::FmBroadcast => fm::open(app),
+        Dest::HfMode => hf::open(app),
+        Dest::Alert => Screen::Alert(super::alert::Alert { silenced: false }),
         _ => Screen::Coming(Coming { dest }),
     }
 }
 
-/// A digit held on home (KEY-11): the ten fixed shortcuts.
+/// A digit held on home: the shortcut map, which runs the shortcut when the digit comes up (HOME-8).
 pub fn hold_digit(app: &mut App, d: u8) {
+    app.screen = Screen::Shortcut(super::shortcut::Shortcut { digit: d });
+}
+
+/// The ten fixed shortcuts (KEY-11), run when the held digit is released.
+pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
     match d {
-        0 => app.show_toast(b"No home channel.", b"Hold SLOT on a channel", false), // CHAN-20 (CHAN-19 with storage)
+        0 => home_channel(app, store),
         1 => {
             // WATCH-7
             let v = if app.watch == 0 { 1 } else { 0 };
@@ -403,9 +484,27 @@ pub fn hold_digit(app: &mut App, d: u8) {
         4 => app.open(Dest::AprsHeard),
         5 => cycle(app, Item::Power),
         6 => cycle(app, Item::Bandwidth),
-        7 => app.open(Dest::Weather), // WX-1: US and Canada only, once the region exists
+        7 => {
+            // WX-1: US and Canada only (and until a region is set); elsewhere hold 7 does nothing.
+            if app.set.wx_allowed() {
+                app.open(Dest::Weather);
+            }
+        }
         8 => cycle(app, Item::BatterySave),
         _ => app.open(Dest::ToneSearch), // TSRCH-1
+    }
+}
+
+/// Hold 0: the active slot to the home channel, in channel mode, from VFO or any zone (CHAN-19, CHAN-20).
+fn home_channel(app: &mut App, store: &impl ChannelStore) {
+    match app.set.home_ch.and_then(|n| store.by_num(n)) {
+        Some((c, pos)) => {
+            let a = app.active as usize;
+            let s = &mut app.slots[a];
+            (s.zone, s.pos, s.ch, s.vfo_mode) = (c.zone, pos, Some(c), false);
+            app.send_slot(a as u8);
+        }
+        None => app.show_toast(b"No home channel.", b"Hold SLOT on a channel", false),
     }
 }
 
@@ -420,8 +519,7 @@ fn cycle(app: &mut App, item: Item) {
     }
 }
 
-/// PTT down where the screen has no PTT of its own: home, then transmit (KEY-7).
+/// PTT down where the screen has no PTT of its own: home, then transmit on the active slot (KEY-7, TX-20).
 pub fn transmit(app: &mut App) {
-    app.go_home();
-    app.open(Dest::Transmit);
+    super::transmit::ptt(app, app.active);
 }
