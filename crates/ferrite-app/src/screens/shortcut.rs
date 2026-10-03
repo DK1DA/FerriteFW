@@ -87,7 +87,8 @@ impl View for Shortcut {
                 8 => app.item_text(Item::BatterySave, true, &mut v),
                 _ => {}
             }
-            let r = Row { num: Some(d as u8), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: d as u8 == self.digit, grey: false };
+            let grey = d == 7 && !app.set.wx_allowed(); // WX-1: hold 7 does nothing outside the US and Canada
+            let r = Row { num: Some(d as u8), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: d as u8 == self.digit, grey };
             app.list_row(lcd, d, 44 + 25 * d as i32, 25, &r);
         }
     }

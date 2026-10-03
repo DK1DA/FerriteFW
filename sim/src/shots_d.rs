@@ -190,7 +190,7 @@ pub fn run(scale: u32) {
     // FM broadcast (hold 2) and its options.
     s.press(D(2), 800);
     s.save("fm");
-    s.press(Key::Menu, 80);
+    s.press(Key::Menu, 800);
     s.save("fm-menu");
     s.home();
 
@@ -203,12 +203,12 @@ pub fn run(scale: u32) {
     s.run(10_500);
     s.press(Key::Up, 80);
     s.save("hf");
-    s.press(Key::Menu, 80);
+    s.press(Key::Menu, 800);
     s.save("hf-menu");
     s.press(Key::Exit, 80);
     s.press(Key::Hash, 80); // the recent list (C18): group C's shot is "hf-recent"
     s.press(Key::Exit, 80);
-    s.press(Key::Menu, 80);
+    s.press(Key::Menu, 800);
     s.keys(&[D(0), D(0)]); // the full menu from HF options, then Status: HF keeps running underneath
     s.save("status-hf");
     s.home();

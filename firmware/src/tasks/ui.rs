@@ -90,7 +90,7 @@ pub async fn task() {
     // Hand-off: the whole screen cleared, then the app draws everything once (HOME-2).
     lcd.0.fill(0, 0, 240, 320, BG);
     let store = store::channels();
-    let mut app = App::new();
+    let mut app = App::new(store::settings(), store::last_alert());
     // After the self-test: setup on first boot (BOOT-12), else the PIN if one is set (BOOT-13).
     if store::first_boot() {
         app.first_boot();

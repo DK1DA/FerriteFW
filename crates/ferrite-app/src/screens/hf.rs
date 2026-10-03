@@ -6,8 +6,8 @@
 //! and with the alerts-paused bell when SAME is on (HF-5, SBAR-18).
 //!
 //! Keys (HF-12, HF-13): knob or ▲▼ tune by the step (SIDE2 + knob: 1 MHz), ◀▶ band, * mode (a point while
-//! typing), digits a frequency (kHz, or MHz with a point; OK enters), # the recent list, MENU the options, BACK
-//! home. SLOT, V/M and SIDE2 alone do nothing here. PTT transmits on the HF frequency without going home
+//! typing), digits a frequency (kHz, or MHz with a point; OK enters), # the recent list, hold MENU the options,
+//! BACK home. SLOT, V/M and SIDE2 alone do nothing here. PTT transmits on the HF frequency without going home
 //! (HF-23), and refuses on the SI4732's frequencies and modes (HF-24).
 
 use super::activity::Mode;
@@ -399,7 +399,7 @@ impl View for Hf {
                 Hf { n: 1, point: 0, ..self }.put(app);
             }
             (Key::Hash, Short) => app.open(Dest::HfRecent),
-            (Key::Menu, Short) => Hf { menu: true, row: 0, ..self }.put(app),
+            (Key::Menu, Long) => Hf { menu: true, row: 0, ..self }.put(app), // MENU-25: hold, this screen's options
             (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves HF mode", false), // HF-13
             (Key::Exit, Short) => app.go_home(), // HF-4
             _ => {}
@@ -566,7 +566,7 @@ impl View for Hf {
         } else if self.n > 0 {
             Hints::new(&[("*", "Point"), ("OK", "Go"), ("BACK", "Cancel")])
         } else {
-            Hints::new(&[("*", "Mode"), ("#", "Recent"), ("MENU", "Options")])
+            Hints::new(&[("*", "Mode"), ("#", "Recent"), ("Hold MENU", "Options")])
         }
     }
 }

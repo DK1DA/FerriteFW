@@ -1,9 +1,9 @@
 //! FM broadcast (B11; hold 2 on home; manual chapter 20, BCR-1 to BCR-17): the SI4732 on 64-108 MHz with the
 //! RDS station name and text, signal and SNR, and whether radio monitor is watching the slots (BCR-4).
 //!
-//! Keys (the manual leaves them open; these follow HF mode's): the knob or ▲▼ tune by the step, ◀▶ seek,
-//! MENU opens this screen's options (step, AGC, radio monitor, presets; 0 the full menu: BCR-3, MENU-25), BACK
-//! leaves, PTT leaves and transmits from home (BCR-16). The broadcast is an exclusive mode
+//! Keys (the manual leaves them open; these follow HF mode's): the knob or ▲▼ tune by the step, ◀▶ seek, OK
+//! the presets, hold MENU this screen's options (step, AGC, radio monitor, presets; 0 the full menu: BCR-3,
+//! MENU-25), BACK leaves, PTT leaves and transmits from home (BCR-16). The broadcast is an exclusive mode
 //! ([`super::activity::Mode::Fm`]): it stops when the screen goes home, by any route.
 
 use super::groups::agc_text;
@@ -102,7 +102,8 @@ impl View for Fm {
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => Fm::tune(app, if e.key == Key::Up { 1 } else { -1 }),
             (Key::Left | Key::Right, Short) => app.out.push(RadioCmd::Broadcast(BroadcastCmd::Seek { up: e.key == Key::Right })),
-            (Key::Menu, Short) => app.screen = Screen::Fm(Fm { menu: true, row: 0 }),
+            (Key::Menu, Short) => app.open(Dest::FmPresets), // OK: pick a station
+            (Key::Menu, Long) => app.screen = Screen::Fm(Fm { menu: true, row: 0 }), // MENU-25: hold, the options
             (Key::Exit, Short) => app.back(),
             _ => {}
         }
@@ -213,7 +214,7 @@ impl View for Fm {
         if self.menu {
             Hints::new(&[("Knob", "Change"), ("0", "Full menu"), ("BACK", "Back")])
         } else {
-            Hints::new(&[("Knob", "Tune"), (ARROWS_LR, "Seek"), ("MENU", "Options")])
+            Hints::new(&[(ARROWS_LR, "Seek"), ("OK", "Presets"), ("Hold MENU", "Options")])
         }
     }
 }

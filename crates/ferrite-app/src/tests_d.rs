@@ -184,7 +184,7 @@ fn fm_broadcast() {
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_110))));
     t.knob(1);
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_120))));
-    t.tap(Key::Menu); // its options; 0 the full menu keeps the broadcast
+    t.hold(Key::Menu); // its options; 0 the full menu keeps the broadcast
     t.tap(Key::Digit(0));
     assert!(matches!(t.app.screen(), Screen::Advanced(_)));
     assert!(!t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));

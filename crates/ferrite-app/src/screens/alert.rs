@@ -79,9 +79,9 @@ impl View for Alert {
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
         match (e.key, e.press) {
-            // WX-7: OK silences. MENU and OK are one key: once silenced, it opens the event log.
+            // WX-7: OK silences; MENU (one key with OK: held) opens the event log, as OK does once silenced.
             (Key::Menu, Press::Short) if !self.silenced => app.screen = Screen::Alert(Alert { silenced: true }),
-            (Key::Menu, Press::Short) => {
+            (Key::Menu, Press::Short | Press::Long) => {
                 app.go_home();
                 app.open(Dest::EventLog);
             }
@@ -140,9 +140,9 @@ impl View for Alert {
 
     fn hints(self, _: &App) -> Hints {
         if self.silenced {
-            Hints::new(&[("MENU", "Log"), ("BACK", "Home")])
+            Hints::new(&[("OK", "Log"), ("BACK", "Home")])
         } else {
-            Hints::new(&[("OK", "Silence"), ("MENU", "Log"), ("BACK", "Home")])
+            Hints::new(&[("OK", "Silence"), ("Hold MENU", "Log"), ("BACK", "Home")])
         }
     }
 }

@@ -18,6 +18,17 @@ pub fn first_boot() -> bool {
     false
 }
 
+/// The radio-wide settings the UI borrows for good (`App::new`). Until the Storage task reads the settings
+/// struct (0x02D000) and HF mode's sector (0x084000), every boot starts from the defaults (BOOT-12). Once only.
+pub fn settings() -> &'static mut ferrite_app::settings::Settings {
+    cortex_m::singleton!(: ferrite_app::settings::Settings = ferrite_app::settings::Settings::DEFAULT).unwrap()
+}
+
+/// The last alert, for the alert screen (WX-5): the App's too, kept outside it. Once only.
+pub fn last_alert() -> &'static mut ferrite_app::screens::alert::AlertInfo {
+    cortex_m::singleton!(: ferrite_app::screens::alert::AlertInfo = ferrite_app::screens::alert::AlertInfo::NONE).unwrap()
+}
+
 /// The store the UI task reads from.
 pub fn channels() -> Table<'static> {
     Table { zones: &ZONES, channels: &CHANNELS }

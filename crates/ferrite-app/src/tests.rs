@@ -308,9 +308,6 @@ fn side2_scans_the_active_slot() {
 /// Chapter 7's hold-digit shortcuts, MENU 0 paths and BACK through them (MENU-24).
 #[test]
 fn shortcuts_and_menu_paths() {
-    use crate::screens::coming::Coming;
-    use crate::screens::nav::Dest;
-    let coming = |dest| Screen::Coming(Coming { dest });
     let mut t = T::new();
     for (d, name) in [(2, "FM broadcast"), (3, "Scope"), (4, "APRS heard"), (7, "Weather radio"), (9, "Tone search")] {
         t.hold(Key::Digit(d));
