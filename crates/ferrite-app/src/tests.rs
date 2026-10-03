@@ -272,6 +272,21 @@ fn key_lock() {
 }
 
 #[test]
+fn side1_and_knob_set_squelch() {
+    let mut t = T::new();
+    let (s, f) = (store(), t.freq());
+    t.app.key_down(Key::Side(1), t.t, &s);
+    t.knob(2);
+    t.app.key_down(Key::Up, t.t, &s);
+    t.app.key_up(Key::Up, t.t + 100, &s);
+    t.knob(20);
+    assert_eq!(t.app.slot(0).cfg().squelch, 9, "4 + 2 + 1, then stops at 9");
+    assert_eq!(t.freq(), f, "no tuning while SIDE1 is held");
+    t.app.key_up(Key::Side(1), t.t + 200, &s);
+    assert!(t.cmds().contains(&RadioCmd::SlotParam { slot: 0, param: Param::Squelch, value: 9 }));
+}
+
+#[test]
 fn side2_scans_the_active_slot() {
     let mut t = T::new();
     t.tap(Key::Side(2));

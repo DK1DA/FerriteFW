@@ -313,6 +313,7 @@ impl App {
         }
         let d = d as i32;
         match self.screen {
+            Screen::Home if self.keys.is_held(Key::Side(1)) => self.squelch_step(d),
             Screen::Home => {
                 let big = self.keys.is_held(Key::Side(2));
                 if big {
@@ -411,6 +412,9 @@ impl App {
         use Press::*;
         let big = self.keys.is_held(Key::Side(2));
         match (e.key, e.press) {
+            (Key::Up | Key::Down, Short | Repeat) if self.keys.is_held(Key::Side(1)) => {
+                self.squelch_step(if e.key == Key::Up { 1 } else { -1 })
+            }
             (Key::Up | Key::Down, Short | Repeat) => {
                 if big {
                     self.keys.used(Key::Side(2));
@@ -559,6 +563,16 @@ impl App {
 
     fn watch_mask(&self) -> u8 {
         [0, 0b011, 0b111][self.watch as usize % 3]
+    }
+
+    /// SIDE1 held + knob or ▲▼: the active slot's squelch, shown as a toast (KEY table, chapter 7). Stops at 0
+    /// and 9 rather than wrapping.
+    fn squelch_step(&mut self, d: i32) {
+        self.keys.used(Key::Side(1));
+        let sq = self.slots[self.active as usize].cfg().squelch as i32;
+        let to = (sq + d).clamp(0, 9);
+        self.change(Item::Squelch, to - sq);
+        self.show_toast(b"Squelch", &[b'0' + to as u8], false);
     }
 
     /// Knob or ▲▼ on home: a step in VFO mode (NAV-2), a channel in channel mode (NAV-1); big with SIDE2 (NAV-3).

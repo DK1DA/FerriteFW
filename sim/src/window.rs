@@ -7,11 +7,17 @@
 //! - F3 blends the current screen's mock-up (`docs/img/screens/*.png`) over it;
 //! - the title shows the pixels pushed by the last redraw and, with `--bus-mbps`, the time it would take on the
 //!   radio's display bus;
-//! - F12 saves a screenshot to `target/sim/`.
+//! - F12 saves a screenshot of the whole window to `target/sim/`.
+//!
+//! The front panel ([`crate::face`]) is clickable: mouse down and up are key down and up, so holds and long
+//! presses work; the channel knob steps on a click (upper half up, lower half down) or the wheel. Pressed keys
+//! light up whichever way they were pressed. The indicator is green while the active slot receives and red while
+//! a PTT is held (a fake transmit: the app has no transmit yet).
 //!
 //! Stand-ins for what the radio would report: M a message arrives, N an alert, F5 GPS off/searching/fix,
 //! F6 Bluetooth, F7 battery normal/low/cut-off.
 
+use crate::face::{Face, Part};
 use crate::fake::{self, FakeRadio};
 use ferrite_app::{App, Screen as AppScreen};
 use ferrite_core::freq;
@@ -21,7 +27,7 @@ use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::fb::FrameBuffer;
 use ferrite_ui::panel::{Panel, H, W};
-use minifb::{Key as K, KeyRepeat, Window, WindowOptions};
+use minifb::{Key as K, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -57,7 +63,8 @@ struct Flash {
 
 const KEYMAP: &str = "\
 keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits · , = * · . = #
-      S = SLOT · V = V/M · Q = SIDE1 · W = SIDE2 · Space = PTT · [ ] or mouse wheel = knob
+      S = SLOT · V = V/M · Q = SIDE1 · W = SIDE2 · Space = PTT A · [ ] or mouse wheel = knob
+      or click the radio's keys (hold the mouse for long presses; hold SIDE1 + wheel = squelch)
       hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
       M message · N alert · F5 GPS · F6 Bluetooth · F7 battery
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
@@ -110,7 +117,7 @@ fn load_mockup(path: &Path) -> Option<Vec<u32>> {
     Some(out)
 }
 
-fn rgb565_to_rgb(c: u16) -> u32 {
+pub(crate) fn rgb565_to_rgb(c: u16) -> u32 {
     let r = ((c >> 11) & 31) as u32 * 255 / 31;
     let g = ((c >> 5) & 63) as u32 * 255 / 63;
     let b = (c & 31) as u32 * 255 / 31;
@@ -120,6 +127,14 @@ fn rgb565_to_rgb(c: u16) -> u32 {
 fn blend(a: u32, b: u32) -> u32 {
     let ch = |s: u32| ((a >> s & 255) + (b >> s & 255)) / 2;
     ch(16) << 16 | ch(8) << 8 | ch(0)
+}
+
+/// The key a front-panel part sends.
+fn key_of(p: Part) -> Key {
+    match p {
+        Part::Key(k) => k,
+        _ => Key::Ptt,
+    }
 }
 
 /// The mock-up that matches the screen on show.
@@ -166,7 +181,8 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
     let mut booting = true;
     boot::draw(&mut lcd, &info);
 
-    let (ww, wh) = (W as usize * scale, H as usize * scale);
+    let face = Face::new(scale);
+    let (ww, wh) = (face.w, face.h);
     let mut win = Window::new("Ferrite sim", ww, wh, WindowOptions::default()).expect("open window");
     win.set_target_fps(60);
     println!("{KEYMAP}");
@@ -181,6 +197,11 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
     let mut out = vec![0u32; ww * wh];
     let mut shot = 0;
     let mut battery = 0;
+    // Parts held by the keyboard and by the mouse; the knob half last clicked and until when it shows; PTT.
+    let mut kb_held: Vec<usize> = Vec::new();
+    let mut mouse: Option<usize> = None;
+    let mut knob_flash: (i8, u32) = (0, 0);
+    let mut tx: Option<u8> = None;
 
     while win.is_open() && !(win.is_key_down(K::LeftCtrl) && win.is_key_down(K::Q)) {
         lcd.rects.clear();
@@ -197,7 +218,7 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
                 K::F3 => overlay = !overlay,
                 K::F12 => {
                     let p: PathBuf = repo.join(format!("target/sim/shot-{shot}.png"));
-                    crate::save_fb(&lcd.fb, &p, 2);
+                    crate::save_rgb(&out, ww, wh, &p);
                     shot += 1;
                 }
                 K::M if !booting => app.notify(b"VE3KPW-9", b"On my way", false),
@@ -218,6 +239,10 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
                 _ => {
                     if let Some(key) = map_key(k) {
                         last_key = format!("{key:?}");
+                        kb_held.extend(face.find(key));
+                        if key == Key::Ptt {
+                            tx = Some(0);
+                        }
                         if !booting {
                             app.key_down(key, now, &store);
                         }
@@ -226,8 +251,53 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
             }
         }
         for k in win.get_keys_released() {
-            if let (Some(key), false) = (map_key(k), booting) {
-                app.key_up(key, now, &store);
+            if let Some(key) = map_key(k) {
+                if let Some(i) = face.find(key) {
+                    kb_held.retain(|&h| h != i);
+                }
+                if key == Key::Ptt {
+                    tx = None;
+                }
+                if !booting {
+                    app.key_up(key, now, &store);
+                }
+            }
+        }
+        // The mouse on the front panel: down and up are the key's down and up.
+        let down = win.get_mouse_down(MouseButton::Left);
+        let pos = win.get_mouse_pos(MouseMode::Discard).map(|(x, y)| (x as i32, y as i32));
+        if down && mouse.is_none() {
+            if let Some(i) = pos.and_then(|(x, y)| face.hit(x, y)) {
+                let h = face.hits[i];
+                match h.part {
+                    Part::Knob => {
+                        let d = if pos.unwrap().1 < h.y + h.h / 2 { 1 } else { -1 };
+                        knob_flash = (d, now + 150);
+                        if !booting {
+                            app.knob(d, now, &store);
+                        }
+                    }
+                    Part::Key(_) | Part::Ptt(_) => {
+                        if let Part::Ptt(n) = h.part {
+                            tx = Some(n);
+                        }
+                        let key = key_of(h.part);
+                        last_key = format!("{key:?} (mouse)");
+                        if !booting {
+                            app.key_down(key, now, &store);
+                        }
+                        mouse = Some(i);
+                    }
+                }
+            }
+        } else if !down {
+            if let Some(i) = mouse.take() {
+                if let Part::Ptt(_) = face.hits[i].part {
+                    tx = None;
+                }
+                if !booting {
+                    app.key_up(key_of(face.hits[i].part), now, &store);
+                }
             }
         }
         // The knob: [ and ] (with the PC's auto-repeat), or the mouse wheel.
@@ -275,36 +345,36 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
             None
         };
 
-        // Compose: frame buffer, optional mock-up overlay, optional redraw outlines, scaled up.
-        for y in 0..H {
-            for x in 0..W {
-                let mut c = rgb565_to_rgb(lcd.fb.at(x, y));
-                if let Some(m) = mockup {
-                    c = blend(c, m[(y * W + x) as usize]);
-                }
-                if show_flash
-                    && flashes.iter().any(|f| {
-                        let (x0, y0, x1, y1) = f.rect;
-                        (x == x0 || x == x1) && (y0..=y1).contains(&y) || (y == y0 || y == y1) && (x0..=x1).contains(&x)
-                    })
-                {
-                    c = 0xFF00FF;
-                }
-                for dy in 0..scale {
-                    let row = (y as usize * scale + dy) * ww;
-                    for dx in 0..scale {
-                        out[row + x as usize * scale + dx] = c;
-                    }
-                }
+        // Compose: the front panel, then the screen: frame buffer, optional mock-up overlay, optional redraw
+        // outlines, scaled up.
+        let mut pressed = kb_held.clone();
+        pressed.extend(mouse);
+        let knob = if now < knob_flash.1 { knob_flash.0 } else { 0 };
+        let rx = !booting && radio.live.slots[app.active() as usize].squelch_open;
+        face.draw(&mut out, &pressed, knob, rx, tx.is_some(), scale);
+        face.put_screen(&mut out, scale, |x, y| {
+            let mut c = rgb565_to_rgb(lcd.fb.at(x, y));
+            if let Some(m) = mockup {
+                c = blend(c, m[(y * W + x) as usize]);
             }
-        }
+            if show_flash
+                && flashes.iter().any(|f| {
+                    let (x0, y0, x1, y1) = f.rect;
+                    (x == x0 || x == x1) && (y0..=y1).contains(&y) || (y == y0 || y == y1) && (x0..=x1).contains(&x)
+                })
+            {
+                c = 0xFF00FF;
+            }
+            c
+        });
         win.update_with_buffer(&out, ww, wh).expect("draw");
 
         let bus = bus_mbps.map(|m| format!(" ≈ {:.1} ms", last_px as f64 * 2.0 / (m * 1e6) * 1e3)).unwrap_or_default();
         let a = app.active();
         win.set_title(&format!(
-            "Ferrite sim · {} · key {last_key} · {} {} · last redraw {last_px} px{bus}{}{}{}",
+            "Ferrite sim · {} · key {last_key} · {}{} {} · last redraw {last_px} px{bus}{}{}{}",
             screen_name(screen),
+            tx.map(|n| format!("TX {} · ", ["A", "B", "C"][n as usize])).unwrap_or_default(),
             ["A", "B", "C"][a as usize],
             freq_text(app.slot(a).freq()),
             if app.locked() { " · locked" } else { "" },

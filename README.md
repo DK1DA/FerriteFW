@@ -26,7 +26,7 @@ Ferrite replaces the RT-950 Pro's stock firmware with one that is open, RF-aware
 | [`crates/ferrite-core`](crates/ferrite-core) | Plain logic, tested on the PC: task messages, frequencies, keys, the SPI flash map and its protected ranges, the decoder slot |
 | [`crates/ferrite-ui`](crates/ferrite-ui) | The 4-bit drawing layer and the widgets the screens are made of; draws to the panel or, on the PC, to a frame buffer |
 | [`crates/ferrite-app`](crates/ferrite-app) | The UI state machine: keys, knob, time and the radio's snapshot in; radio commands and redraws (only what changed) out. Home, edit in place, quick settings, advanced settings, Status page |
-| [`sim/`](sim) | The screens on the PC with the firmware's own code: PNGs (`cargo sim`), or an interactive window with a fake three-slot radio (`cargo simw`) |
+| [`sim/`](sim) | The screens on the PC with the firmware's own code: PNGs (`cargo sim`), or an interactive window with the radio's clickable front panel and a fake three-slot radio (`cargo simw`) |
 | [`tools/`](tools) | Font and logo generators, `btf.py` (packing for the stock bootloader), `flash.py` |
 | [`assets/logo/`](assets/logo) | The logo: the toroid mark, lockups for dark and light backgrounds, the app icon (`ferrite-icon.svg`, a simplified one for 16-48 px, PNGs 16-1024 and `favicon.ico`), the social preview |
 | [`fonts/`](fonts) | Atkinson Hyperlegible and Barlow Semi Condensed (OFL; licences beside them) |
