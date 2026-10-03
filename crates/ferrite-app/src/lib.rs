@@ -19,7 +19,9 @@
 extern crate std;
 
 pub mod chan;
+pub mod data;
 pub mod keys;
+pub mod sample;
 pub mod screens;
 pub mod slot;
 

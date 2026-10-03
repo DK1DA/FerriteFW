@@ -2,6 +2,7 @@
 //! flash records on demand through the zone index (CHAN-7, CHAN-9); the simulator and tests supply a few in RAM.
 //! The UI keeps only the current zone, position and a copy of the channel each slot is on.
 
+use crate::data::{Data, NoData, Pos};
 use crate::slot::SlotCfg;
 use ferrite_core::freq::Freq10;
 
@@ -18,6 +19,8 @@ pub struct Channel {
     /// Name: 16 bytes stored, 12 shown on home (CHAN-5); unused bytes are 0.
     pub name: [u8; 16],
     pub cfg: SlotCfg,
+    /// Left out of every scan (CHAN-4, SCAN-9).
+    pub skip: bool,
 }
 
 impl Channel {
@@ -39,6 +42,35 @@ pub trait ChannelStore {
     fn zone_at(&self, zone: u8, i: u16) -> Option<Channel>;
     /// Channels stored in all.
     fn count(&self) -> u16;
+
+    /// The i-th stored channel in number order, zoned or not: the browser's "All" view (CHAN-14). The default
+    /// walks the zones; a store with records by number reads one directly.
+    fn by_number(&self, i: u16) -> Option<Channel> {
+        let mut found: Option<Channel> = None;
+        for _ in 0..=i {
+            let last = found.map(|c| c.num);
+            found = None;
+            for z in (0..self.zones()).chain([NO_ZONE]) {
+                for c in (0..self.zone_len(z)).filter_map(|k| self.zone_at(z, k)) {
+                    if last.is_none_or(|l| c.num > l) && found.is_none_or(|f| c.num < f.num) {
+                        found = Some(c);
+                    }
+                }
+            }
+            found?;
+        }
+        found
+    }
+
+    /// A channel's position, if it has one (CHAN-2, CHAN-15).
+    fn position(&self, _num: u16) -> Option<Pos> {
+        None
+    }
+
+    /// The other records the screens list (event log, APRS, GPS, scan lists): see [`crate::data`].
+    fn data(&self) -> &dyn Data {
+        &NoData
+    }
 }
 
 /// A store with nothing in it.
@@ -84,6 +116,10 @@ impl ChannelStore for Table<'_> {
     fn count(&self) -> u16 {
         self.channels.len() as u16
     }
+    fn by_number(&self, i: u16) -> Option<Channel> {
+        // A table is in number order.
+        self.channels.get(i as usize).copied()
+    }
 }
 
 /// A channel record from its parts (for tables).
@@ -95,5 +131,5 @@ pub const fn channel(num: u16, zone: u8, rx: Freq10, name: &str, cfg: SlotCfg) -
         n[i] = b[i];
         i += 1;
     }
-    Channel { num, zone, rx, name: n, cfg }
+    Channel { num, zone, rx, name: n, cfg, skip: false }
 }

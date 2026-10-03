@@ -1,8 +1,8 @@
-//! The simulator's stand-ins: a fake three-slot radio that obeys the app's commands, a few channels, and the
-//! radio-wide state for the status bar.
+//! The simulator's stand-ins: a fake three-slot radio that obeys the app's commands, the sample records
+//! (channels, event log, APRS, GPS: `ferrite_app::sample`), and the radio-wide state for the status bar.
 
-use ferrite_app::chan::{channel, Channel, Table};
-use ferrite_app::slot::{band_of, BANDS, DCS_FLAG, DEFAULT_CFG};
+use ferrite_app::sample::Sample;
+use ferrite_app::slot::{band_of, BANDS, DEFAULT_CFG};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::{Device, GpsState, LiveAll, RadioCmd, SlotLive};
 
@@ -13,33 +13,16 @@ const fn cfg(tone: u16, offset: i32) -> ferrite_app::slot::SlotCfg {
     c
 }
 
-const AIR: ferrite_app::slot::SlotCfg = {
-    let mut c = DEFAULT_CFG;
-    c.mode = 2;
-    c
-};
-
-pub const ZONES: [&[u8]; 4] = [b"Local", b"Repeaters", b"Empty", b"Air"];
-pub static CHANNELS: [Channel; 8] = [
-    channel(0, 0, mhz(146) + 52_000, "Calling 2 m", DEFAULT_CFG),
-    channel(1, 0, mhz(446), "Calling 70 cm", DEFAULT_CFG),
-    channel(2, 0, mhz(147) + 55_500, "Simplex B", DEFAULT_CFG),
-    channel(9, 1, mhz(146) + 94_000, "North hill", cfg(1000, -60_000)),
-    channel(11, 1, mhz(443) + 47_500, "Club repeater", cfg(1000, 500_000)),
-    channel(14, 1, mhz(444) + 20_000, "Downtown DCS", cfg(DCS_FLAG | 0o023, 500_000)),
-    channel(30, 3, mhz(121) + 50_000, "Guard", AIR),
-    channel(31, 3, mhz(119) + 10_000, "Tower", AIR),
-];
-
 /// The look review's sample: A a VFO with tone and shift, B on "Club repeater", watch A+B+C.
-pub fn sample(app: &mut ferrite_app::App, store: &Table) {
+pub fn sample(app: &mut ferrite_app::App, store: &Sample) {
     app.set_vfo_cfg(0, cfg(1000, -60_000));
     app.set_channel(1, 1, 1, store);
     app.set_watch(2);
 }
 
-pub fn store() -> Table<'static> {
-    Table { zones: &ZONES, channels: &CHANNELS }
+/// Channels in zones, an event log, APRS, GPS, waypoints and the scan lists: [`Sample`].
+pub fn store() -> Sample {
+    Sample::new()
 }
 
 /// Three slots: A has a signal 3 s in every 10, B one for 2 s in every 25 (a watched slot opening), C scans.

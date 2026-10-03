@@ -304,7 +304,7 @@ fn shortcuts_and_menu_paths() {
     let mut t = T::new();
     for (d, dest) in [(2, Dest::FmBroadcast), (3, Dest::BandScope), (4, Dest::AprsHeard), (7, Dest::Weather), (9, Dest::ToneSearch)] {
         t.hold(Key::Digit(d));
-        assert_eq!(t.app.screen(), coming(dest), "hold {d}");
+        assert_eq!(t.app.screen().name(), dest.name(), "hold {d}"); // its screen, or its placeholder
         t.tap(Key::Exit);
         assert_eq!(t.app.screen(), Screen::Home);
     }
@@ -508,6 +508,20 @@ fn fonts_have_every_character_the_ui_draws() {
         ("screens/advanced.rs", include_str!("screens/advanced.rs")),
         ("screens/status.rs", include_str!("screens/status.rs")),
         ("screens/coming.rs", include_str!("screens/coming.rs")),
+        // group C: lists and data
+        ("screens/lists.rs", include_str!("screens/lists.rs")),
+        ("screens/log.rs", include_str!("screens/log.rs")),
+        ("screens/opts.rs", include_str!("screens/opts.rs")),
+        ("screens/aprs.rs", include_str!("screens/aprs.rs")),
+        ("screens/msgs.rs", include_str!("screens/msgs.rs")),
+        ("screens/gps.rs", include_str!("screens/gps.rs")),
+        ("screens/browse.rs", include_str!("screens/browse.rs")),
+        ("screens/zones.rs", include_str!("screens/zones.rs")),
+        ("screens/scanlists.rs", include_str!("screens/scanlists.rs")),
+        ("screens/recall.rs", include_str!("screens/recall.rs")),
+        ("screens/sensors.rs", include_str!("screens/sensors.rs")),
+        ("data.rs", include_str!("data.rs")),
+        ("sample.rs", include_str!("sample.rs")),
         ("slot.rs", include_str!("slot.rs")),
         ("chan.rs", include_str!("chan.rs")),
         ("widgets.rs", include_str!("../../ferrite-ui/src/widgets.rs")),

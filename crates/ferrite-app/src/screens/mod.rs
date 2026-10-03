@@ -26,13 +26,24 @@
 //! store, settings from tables), never a copy.
 
 pub mod advanced;
+pub mod aprs;
+pub mod browse;
 pub mod coming;
 pub mod edit;
+pub mod gps;
 pub mod home;
+pub(crate) mod lists;
+pub mod log;
+pub mod msgs;
 pub mod nav;
+pub mod opts;
 pub mod quick;
+pub mod recall;
+pub mod scanlists;
+pub mod sensors;
 pub(crate) mod shared;
 pub mod status;
+pub mod zones;
 
 use crate::chan::ChannelStore;
 use crate::keys::KeyEvent;
@@ -55,6 +66,18 @@ pub enum Screen {
     Status(status::Status),
     /// A screen not built yet: its name and "coming" (any [`nav::Dest`] without its own screen).
     Coming(coming::Coming),
+    // Group C: lists and data
+    Log(log::Log),
+    Options(opts::Options),
+    Aprs(aprs::Aprs),
+    Msgs(msgs::Msgs),
+    Compose(msgs::Compose),
+    Gps(gps::Gps),
+    Browse(browse::Browse),
+    Zones(zones::Zones),
+    ScanLists(scanlists::ScanLists),
+    Recall(recall::Recall),
+    Sensors(sensors::Sensors),
 }
 
 /// Runs `$e` with `$s` bound to the screen's state: the one place that lists every variant.
@@ -70,6 +93,17 @@ macro_rules! each {
             Screen::Advanced($s) => $e,
             Screen::Status($s) => $e,
             Screen::Coming($s) => $e,
+            Screen::Log($s) => $e,
+            Screen::Options($s) => $e,
+            Screen::Aprs($s) => $e,
+            Screen::Msgs($s) => $e,
+            Screen::Compose($s) => $e,
+            Screen::Gps($s) => $e,
+            Screen::Browse($s) => $e,
+            Screen::Zones($s) => $e,
+            Screen::ScanLists($s) => $e,
+            Screen::Recall($s) => $e,
+            Screen::Sensors($s) => $e,
         }
     };
 }

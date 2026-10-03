@@ -142,4 +142,50 @@ fn main() {
     press(&mut app, Key::Digit(3), 800, &mut t);
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "coming", scale);
+
+    // Group C, lists and data: each opened as its way in does, keys pressed, the page saved.
+    use ferrite_app::screens::nav::Dest;
+    type Shot<'a> = (&'a str, Dest, &'a [(Key, u32)]);
+    let shots: &[Shot] = &[
+        ("event-log", Dest::EventLog, &[(Key::Down, 100)]),
+        ("event-detail", Dest::EventLog, &[(Key::Down, 100), (Key::Down, 100), (Key::Menu, 100)]),
+        ("event-detail-pager", Dest::EventLog, &[(Key::Down, 100), (Key::Menu, 100)]),
+        ("event-log-options", Dest::EventLog, &[(Key::Menu, 800)]),
+        ("aprs-heard", Dest::AprsHeard, &[]),
+        ("aprs-station", Dest::AprsHeard, &[(Key::Menu, 100)]),
+        ("aprs-messages", Dest::AprsMessages, &[]),
+        ("aprs-message", Dest::AprsMessages, &[(Key::Menu, 100)]),
+        ("aprs-compose", Dest::AprsMessages, &[(Key::Menu, 100), (Key::Menu, 100), (Key::Star, 100), (Key::Digit(2), 100), (Key::Digit(2), 100), (Key::Star, 100), (Key::Star, 100), (Key::Digit(3), 100), (Key::Digit(3), 100), (Key::Hash, 100), (Key::Digit(8), 100), (Key::Digit(4), 100), (Key::Digit(4), 100), (Key::Digit(3), 100), (Key::Digit(3), 100), (Key::Digit(7), 100), (Key::Digit(7), 100), (Key::Digit(7), 100), (Key::Digit(3), 100), (Key::Digit(3), 100), (Key::Hash, 100), (Key::Digit(2), 100), (Key::Digit(8), 100), (Key::Hash, 100), (Key::Star, 100), (Key::Star, 100), (Key::Digit(5), 100)]),
+        ("sensors", Dest::Sensors, &[]),
+        ("browse", Dest::Browse, &[(Key::Down, 100)]),
+        ("browse-zone", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100)]),
+        ("browse-all", Dest::Browse, &[(Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Menu, 100)]),
+        ("browse-nearby", Dest::Browse, &[(Key::Up, 100), (Key::Menu, 100)]),
+        ("browse-recent", Dest::Browse, &[(Key::Up, 100), (Key::Up, 100), (Key::Menu, 100)]),
+        ("browse-actions", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Menu, 100)]),
+        ("browse-delete", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Up, 100), (Key::Menu, 100)]),
+        ("zones", Dest::Zones, &[(Key::Down, 100)]),
+        ("zone-edit", Dest::Zones, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Down, 100), (Key::Down, 100), (Key::Down, 100)]),
+        ("zone-delete", Dest::Zones, &[(Key::Down, 100), (Key::Down, 100), (Key::Star, 100)]),
+        ("range-presets", Dest::RangePresets, &[(Key::Down, 100)]),
+        ("range-preset", Dest::RangePresets, &[(Key::Down, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Down, 100)]),
+        ("skip-list", Dest::SkipList, &[]),
+        ("hf-recent", Dest::HfRecent, &[]),
+        ("fm-presets", Dest::FmPresets, &[(Key::Down, 100)]),
+        ("gps-position", Dest::GpsPosition, &[]),
+        ("gps-satellites", Dest::GpsPosition, &[(Key::Right, 100)]),
+        ("waypoints", Dest::Waypoints, &[(Key::Down, 100)]),
+        ("waypoint-go", Dest::Waypoints, &[(Key::Down, 100), (Key::Menu, 100)]),
+    ];
+    for &(name, dest, keys) in shots {
+        press(&mut app, Key::Exit, 800, &mut t); // home
+        run(&mut app, &mut fb, t + 3500, &mut t); // toasts gone
+        app.open(dest);
+        for &(k, hold) in keys {
+            press(&mut app, k, hold, &mut t);
+            t += 150;
+        }
+        run(&mut app, &mut fb, t, &mut t);
+        save(&fb, name, scale);
+    }
 }
