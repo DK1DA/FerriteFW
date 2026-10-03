@@ -105,6 +105,9 @@ pub async fn task() {
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
         }
+        // Channel writes (save as channel, the channel editor): dropped until the Storage task keeps channels
+        // in SPI flash; the table in MCU flash can't change.
+        while app.pop_write().is_some() {}
         app.render(&mut lcd, &live, &dev, &store);
         let period = if down != 0 { TICK_HELD_MS } else { TICK_IDLE_MS };
         match select3(live_rx.changed(), INPUT.receive(), Timer::after(Duration::from_millis(period))).await {

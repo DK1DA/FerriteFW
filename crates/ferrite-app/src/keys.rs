@@ -21,6 +21,9 @@ pub enum Press {
     Short,
     Long,
     Repeat,
+    /// The release after a long press (not after a repeat): only the screen hears it, so the shortcut map can
+    /// run its shortcut when the digit comes up (HOME-8).
+    LongUp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,8 +36,10 @@ pub struct KeyEvent {
 struct Held {
     key: Key,
     since: u32,
-    /// A long press or repeat has fired: the release does nothing.
+    /// A long press or repeat has fired, or the key was used as a modifier: the release does nothing.
     fired: bool,
+    /// The long press fired (not a modifier use).
+    long: bool,
     /// When the next repeat is due.
     next: u32,
 }
@@ -58,15 +63,24 @@ impl KeyTracker {
             return; // the PC's auto-repeat, or a bounce: one press
         }
         if let Some(slot) = self.held.iter_mut().find(|h| h.is_none()) {
-            *slot = Some(Held { key, since: now, fired: false, next: now.wrapping_add(REPEAT_AFTER_MS) });
+            *slot = Some(Held { key, since: now, fired: false, long: false, next: now.wrapping_add(REPEAT_AFTER_MS) });
         }
     }
 
     /// The short press, if this release makes one.
     pub fn up(&mut self, key: Key, now: u32) -> Option<KeyEvent> {
+        self.release(key, now).filter(|e| e.press == Press::Short)
+    }
+
+    /// The short press, or [`Press::LongUp`] after a long press (a modifier's release gives neither).
+    pub fn release(&mut self, key: Key, now: u32) -> Option<KeyEvent> {
         let slot = self.held.iter_mut().find(|h| h.is_some_and(|h| h.key == key))?;
         let h = slot.take()?;
-        (!h.fired && now.wrapping_sub(h.since) < SHORT_MS).then_some(KeyEvent { key, press: Press::Short })
+        if h.fired {
+            (h.long && !repeats(key)).then_some(KeyEvent { key, press: Press::LongUp })
+        } else {
+            (now.wrapping_sub(h.since) < SHORT_MS).then_some(KeyEvent { key, press: Press::Short })
+        }
     }
 
     /// Long presses and repeats that are due by `now`, oldest first.
@@ -80,6 +94,7 @@ impl KeyTracker {
                 }
             } else if !h.fired && now.wrapping_sub(h.since) >= LONG_MS {
                 h.fired = true;
+                h.long = true;
                 out(KeyEvent { key: h.key, press: Press::Long });
             }
         }
@@ -134,6 +149,20 @@ mod tests {
         assert_eq!(run(&mut t, 700, 700), [KeyEvent { key: Key::Slot, press: Press::Long }]);
         assert!(run(&mut t, 710, 3000).is_empty(), "once");
         assert_eq!(t.up(Key::Slot, 3000), None, "the release after a long press does nothing");
+    }
+
+    #[test]
+    fn release_after_long_is_long_up() {
+        let mut t = KeyTracker::new();
+        t.down(Key::Digit(5), 0);
+        run(&mut t, 0, 800);
+        assert_eq!(t.release(Key::Digit(5), 800), Some(KeyEvent { key: Key::Digit(5), press: Press::LongUp }));
+        t.down(Key::Side(2), 1000);
+        t.used(Key::Side(2));
+        assert_eq!(t.release(Key::Side(2), 1100), None, "a modifier's release is nothing");
+        t.down(Key::Up, 2000);
+        run(&mut t, 2000, 2600);
+        assert_eq!(t.release(Key::Up, 2600), None, "nor after repeats");
     }
 
     #[test]

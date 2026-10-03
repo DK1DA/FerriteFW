@@ -26,13 +26,25 @@
 //! store, settings from tables), never a copy.
 
 pub mod advanced;
+pub mod chedit;
 pub mod coming;
+pub mod confirm;
 pub mod edit;
+pub mod entry;
+pub mod extend;
+pub(crate) mod forms;
 pub mod home;
 pub mod nav;
+pub mod pin;
 pub mod quick;
+pub mod save;
+pub mod setup;
 pub(crate) mod shared;
+pub mod shortcut;
 pub mod status;
+pub mod text;
+pub mod tones;
+pub mod value;
 
 use crate::chan::ChannelStore;
 use crate::keys::KeyEvent;
@@ -53,6 +65,17 @@ pub enum Screen {
     Quick(quick::Quick),
     Advanced(advanced::Advanced),
     Status(status::Status),
+    Entry(entry::Entry),
+    ChEdit(chedit::ChEdit),
+    Value(value::Value),
+    Tones(tones::Tones),
+    Text(text::Text),
+    Save(save::Save),
+    Confirm(confirm::Confirm),
+    ExtendTx(extend::ExtendTx),
+    Pin(pin::Pin),
+    Setup(setup::Setup),
+    Shortcut(shortcut::Shortcut),
     /// A screen not built yet: its name and "coming" (any [`nav::Dest`] without its own screen).
     Coming(coming::Coming),
 }
@@ -69,6 +92,17 @@ macro_rules! each {
             Screen::Quick($s) => $e,
             Screen::Advanced($s) => $e,
             Screen::Status($s) => $e,
+            Screen::Entry($s) => $e,
+            Screen::ChEdit($s) => $e,
+            Screen::Value($s) => $e,
+            Screen::Tones($s) => $e,
+            Screen::Text($s) => $e,
+            Screen::Save($s) => $e,
+            Screen::Confirm($s) => $e,
+            Screen::ExtendTx($s) => $e,
+            Screen::Pin($s) => $e,
+            Screen::Setup($s) => $e,
+            Screen::Shortcut($s) => $e,
             Screen::Coming($s) => $e,
         }
     };

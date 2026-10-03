@@ -18,12 +18,44 @@ pub struct Channel {
     /// Name: 16 bytes stored, 12 shown on home (CHAN-5); unused bytes are 0.
     pub name: [u8; 16],
     pub cfg: SlotCfg,
+    /// [`FLAG_SKIP`], [`FLAG_APRS`], [`FLAG_RX_ONLY`] (CHAN-4).
+    pub flags: u8,
+}
+
+/// Channel flags (CHAN-4): skipped by scans, APRS on this channel, never transmits.
+pub const FLAG_SKIP: u8 = 1;
+pub const FLAG_APRS: u8 = 2;
+pub const FLAG_RX_ONLY: u8 = 4;
+
+/// Channel numbers 0-999 (shown 1-1000).
+pub const MAX_CHANNELS: u16 = 1000;
+
+/// A change to the stored channels, for whoever owns them (the Storage task; the simulator's RAM store),
+/// from [`crate::App::pop_write`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChanWrite {
+    /// Write this channel at its number; `from` is the number it had when it was renumbered (that record is
+    /// removed), None when it stays or is new.
+    Put { ch: Channel, from: Option<u16> },
+    /// Remove a channel (CHAN-13, from the browser).
+    Delete(u16),
+    /// Remove a zone: its channels move to no zone and stay in All (CHAN-12).
+    DeleteZone(u8),
+    /// Every channel (settings reset, its second confirm: PIN-6).
+    EraseAll,
 }
 
 impl Channel {
     pub fn name(&self) -> &[u8] {
         let n = self.name.iter().position(|&c| c == 0).unwrap_or(16);
         &self.name[..n]
+    }
+
+    /// A new name: up to 16 bytes, the rest zeroed.
+    pub fn set_name(&mut self, s: &[u8]) {
+        self.name = [0; 16];
+        let n = s.len().min(16);
+        self.name[..n].copy_from_slice(&s[..n]);
     }
 }
 
@@ -39,6 +71,26 @@ pub trait ChannelStore {
     fn zone_at(&self, zone: u8, i: u16) -> Option<Channel>;
     /// Channels stored in all.
     fn count(&self) -> u16;
+
+    /// The channel with this number and its position in its zone (channel entry, the home channel). The
+    /// firmware's store reads it straight from its record; this default walks the zones.
+    fn by_num(&self, num: u16) -> Option<(Channel, u16)> {
+        let zones = (0..self.zones()).chain(core::iter::once(NO_ZONE));
+        for z in zones {
+            for i in 0..self.zone_len(z) {
+                match self.zone_at(z, i) {
+                    Some(c) if c.num == num => return Some((c, i)),
+                    _ => {}
+                }
+            }
+        }
+        None
+    }
+
+    /// The first unused number from `from` on, wrapping (save as channel), if any is free.
+    fn free_num(&self, from: u16) -> Option<u16> {
+        (0..MAX_CHANNELS).map(|k| (from + k) % MAX_CHANNELS).find(|&n| self.by_num(n).is_none())
+    }
 }
 
 /// A store with nothing in it.
@@ -95,5 +147,5 @@ pub const fn channel(num: u16, zone: u8, rx: Freq10, name: &str, cfg: SlotCfg) -
         n[i] = b[i];
         i += 1;
     }
-    Channel { num, zone, rx, name: n, cfg }
+    Channel { num, zone, rx, name: n, cfg, flags: 0 }
 }
