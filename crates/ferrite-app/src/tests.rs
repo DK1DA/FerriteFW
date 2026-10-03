@@ -315,7 +315,7 @@ fn shortcuts_and_menu_paths() {
     t.hold(Key::Digit(8)); // Battery Save 1 -> 2
     assert!(t.cmds().contains(&RadioCmd::BatterySave(ferrite_core::rxsleep::Level::L2)));
     t.tap(Key::Digit(4)); // NAV-4: entry
-    assert_eq!(t.app.screen(), coming(Dest::Entry(4)));
+    assert!(matches!(t.app.screen(), Screen::Entry(_)));
     t.hold(Key::Exit);
     // MENU 0 9 1 3: the key test, typed straight through (MENU-5)
     for d in [0, 9, 1, 3] {
@@ -335,7 +335,7 @@ fn shortcuts_and_menu_paths() {
     assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 9 }));
     t.tap(Key::Digit(4)); // MENU 4, OK: tones
     t.tap(Key::Menu);
-    assert_eq!(t.app.screen(), coming(Dest::Tones));
+    assert!(matches!(t.app.screen(), Screen::Tones(_)));
     t.wait(MENU_TIMEOUT_MS + 200);
     assert_eq!(t.app.screen(), Screen::Home);
 }
@@ -378,6 +378,8 @@ fn every_destination_draws() {
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
     assert_eq!(ids.len(), 66, "one inventory ID per destination (groups and lists share D3)");
 }
+
+mod group_a;
 
 fn count_px(fb: &FrameBuffer, y0: i32, y1: i32, f: impl Fn(u16) -> bool) -> usize {
     (y0..y1).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| f(fb.at(x, y))).count()

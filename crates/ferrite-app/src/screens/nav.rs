@@ -9,7 +9,7 @@
 //!
 //! | From | Keys | Goes to |
 //! | --- | --- | --- |
-//! | Home | hold 0-9 ([`hold_digit`], KEY-11) | 0 home channel, 1 watch, 2 FM broadcast, 3 band scope, 4 APRS heard, 5 TX power, 6 bandwidth, 7 weather, 8 Battery Save, 9 tone search |
+//! | Home | hold 0-9 ([`hold_digit`]: the shortcut map, HOME-8; the release runs [`shortcut`], KEY-11) | 0 home channel, 1 watch, 2 FM broadcast, 3 band scope, 4 APRS heard, 5 TX power, 6 bandwidth, 7 weather, 8 Battery Save, 9 tone search |
 //! | Home | a digit (NAV-4, VFO-11) | [`Dest::Entry`] with the digit |
 //! | Home | hold V/M on a VFO (VFO-9) | [`Dest::SaveChannel`] |
 //! | Home | hold SLOT / MENU / hold MENU / # | edit in place / quick / advanced / Status (built) |
@@ -20,15 +20,16 @@
 //! | Status page | OK on a row (SBAR-15) | the row's setting or screen |
 //! | [`App::notify`] with an alert | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Not wired yet (no event to start them): transmit refused, emergency prompt, PIN at power on, Bluetooth
-//! write approval and progress, power off, empty battery, SSB patch confirm, setup at first boot, the shortcut
-//! map while a digit is held (HOME-8: the shortcut runs at the long press for now), crossband (no menu number
-//! yet).
+//! Not wired yet (no event to start them): transmit refused, emergency prompt, Bluetooth write approval and
+//! progress, power off, empty battery, SSB patch confirm, crossband (no menu number yet). PIN at power on and
+//! setup at first boot start from [`App::start_pin`] and [`App::start_setup`], which the firmware calls once
+//! settings are stored.
 
 use super::advanced::{Advanced, GROUPS};
 use super::coming::Coming;
 use super::quick::Quick;
 use super::status::Status;
+use crate::chan::ChannelStore;
 use crate::slot::Item;
 use crate::{App, Screen};
 use ferrite_ui::text::Buf;
@@ -379,8 +380,22 @@ pub fn menu0(path: &[u8]) -> Option<Dest> {
 
 /// A destination's screen: built screens by their own arm, the rest as a placeholder. Adding a screen = one
 /// arm here.
-pub fn enter(dest: Dest, _app: &App) -> Screen {
+pub fn enter(dest: Dest, app: &App) -> Screen {
+    use super::*;
+    let on_ch = app.slots[app.active as usize].on_channel();
     match dest {
+        Dest::Entry(d) => Screen::Entry(entry::Entry::new(if on_ch { entry::EntryFor::Channel } else { entry::EntryFor::Vfo }, Some(d))),
+        Dest::ChannelEdit if on_ch => Screen::ChEdit(chedit::ChEdit { cell: 0 }),
+        Dest::ChannelEdit | Dest::SaveChannel => Screen::Save(save::Save::new(false)),
+        Dest::AddRepeater => Screen::Save(save::Save::new(true)),
+        Dest::Value(item) => Screen::Value(value::Value::new(item, app)),
+        Dest::Tones => Screen::Tones(tones::Tones::new(app)),
+        Dest::Text => Screen::Text(text::Text::new(text::TextFor::Callsign)),
+        Dest::Confirm => Screen::Confirm(confirm::Confirm { ask: confirm::Ask::Reset { channels: false } }),
+        Dest::ExtendTx => Screen::ExtendTx(extend::ExtendTx),
+        Dest::Pin => Screen::Pin(pin::Pin::new(!app.locked)),
+        Dest::Setup => Screen::Setup(setup::Setup::new()),
+        Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut { digit: 0 }),
         Dest::Quick => Screen::Quick(Quick { row: 0 }),
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
         Dest::Status => Screen::Status(Status { row: 0, from_menu: false }),
@@ -388,10 +403,15 @@ pub fn enter(dest: Dest, _app: &App) -> Screen {
     }
 }
 
-/// A digit held on home (KEY-11): the ten fixed shortcuts.
+/// A digit held on home: the shortcut map, which runs the shortcut when the digit comes up (HOME-8).
 pub fn hold_digit(app: &mut App, d: u8) {
+    app.screen = Screen::Shortcut(super::shortcut::Shortcut { digit: d });
+}
+
+/// The ten fixed shortcuts (KEY-11), run when the held digit is released.
+pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
     match d {
-        0 => app.show_toast(b"No home channel.", b"Hold SLOT on a channel", false), // CHAN-20 (CHAN-19 with storage)
+        0 => home_channel(app, store),
         1 => {
             // WATCH-7
             let v = if app.watch == 0 { 1 } else { 0 };
@@ -406,6 +426,19 @@ pub fn hold_digit(app: &mut App, d: u8) {
         7 => app.open(Dest::Weather), // WX-1: US and Canada only, once the region exists
         8 => cycle(app, Item::BatterySave),
         _ => app.open(Dest::ToneSearch), // TSRCH-1
+    }
+}
+
+/// Hold 0: the active slot to the home channel, in channel mode, from VFO or any zone (CHAN-19, CHAN-20).
+fn home_channel(app: &mut App, store: &impl ChannelStore) {
+    match app.prefs.home_ch.and_then(|n| store.by_num(n)) {
+        Some((c, pos)) => {
+            let a = app.active as usize;
+            let s = &mut app.slots[a];
+            (s.zone, s.pos, s.ch, s.vfo_mode) = (c.zone, pos, Some(c), false);
+            app.send_slot(a as u8);
+        }
+        None => app.show_toast(b"No home channel.", b"Hold SLOT on a channel", false),
     }
 }
 

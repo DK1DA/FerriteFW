@@ -1,7 +1,8 @@
 //! The simulator's stand-ins: a fake three-slot radio that obeys the app's commands, a few channels, and the
 //! radio-wide state for the status bar.
 
-use ferrite_app::chan::{channel, Channel, Table};
+use ferrite_app::chan::{channel, ChanWrite, Channel, ChannelStore, NO_ZONE};
+use std::cell::RefCell;
 use ferrite_app::slot::{band_of, BANDS, DCS_FLAG, DEFAULT_CFG};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::{Device, GpsState, LiveAll, RadioCmd, SlotLive};
@@ -31,15 +32,64 @@ pub static CHANNELS: [Channel; 8] = [
     channel(31, 3, mhz(119) + 10_000, "Tower", AIR),
 ];
 
-/// The look review's sample: A a VFO with tone and shift, B on "Club repeater", watch A+B+C.
-pub fn sample(app: &mut ferrite_app::App, store: &Table) {
+/// The look review's sample: A a VFO with tone and shift, B on "Club repeater", C scanning airband, watch
+/// A+B+C. The app's start-up commands go to the radio first (they tune C, which would stop its scan).
+pub fn sample(app: &mut ferrite_app::App, store: &impl ChannelStore, radio: &mut FakeRadio) {
     app.set_vfo_cfg(0, cfg(1000, -60_000));
     app.set_channel(1, 1, 1, store);
     app.set_watch(2);
+    while let Some(c) = app.pop_cmd() {
+        radio.cmd(c);
+    }
+    radio.cmd(RadioCmd::Scan { slot: 2, on: true });
+    radio.live.slots[2].hits = 3;
 }
 
-pub fn store() -> Table<'static> {
-    Table { zones: &ZONES, channels: &CHANNELS }
+pub fn store() -> RamStore {
+    let mut v = CHANNELS.to_vec();
+    v.sort_by_key(|c| c.num);
+    RamStore { zones: &ZONES, channels: RefCell::new(v) }
+}
+
+/// The simulator's channels: the sample table, kept in RAM so the app's writes ([`ChanWrite`]) take effect, as
+/// the Storage task's will in SPI flash.
+pub struct RamStore {
+    zones: &'static [&'static [u8]],
+    channels: RefCell<Vec<Channel>>,
+}
+
+impl RamStore {
+    pub fn apply(&self, w: ChanWrite) {
+        let mut v = self.channels.borrow_mut();
+        match w {
+            ChanWrite::Put { ch, from } => {
+                v.retain(|c| c.num != ch.num && Some(c.num) != from);
+                v.push(ch);
+                v.sort_by_key(|c| c.num);
+            }
+            ChanWrite::Delete(n) => v.retain(|c| c.num != n),
+            ChanWrite::DeleteZone(z) => v.iter_mut().filter(|c| c.zone == z).for_each(|c| c.zone = NO_ZONE),
+            ChanWrite::EraseAll => v.clear(),
+        }
+    }
+}
+
+impl ChannelStore for RamStore {
+    fn zones(&self) -> u8 {
+        self.zones.len() as u8
+    }
+    fn zone_name(&self, zone: u8) -> Option<&[u8]> {
+        self.zones.get(zone as usize).copied()
+    }
+    fn zone_len(&self, zone: u8) -> u16 {
+        self.channels.borrow().iter().filter(|c| c.zone == zone).count() as u16
+    }
+    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
+        self.channels.borrow().iter().filter(|c| c.zone == zone).nth(i as usize).copied()
+    }
+    fn count(&self) -> u16 {
+        self.channels.borrow().len() as u16
+    }
 }
 
 /// Three slots: A has a signal 3 s in every 10, B one for 2 s in every 25 (a watched slot opening), C scans.

@@ -174,7 +174,7 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
     let mut radio = FakeRadio::new();
     let mut dev = fake::device();
     let mut app = App::new();
-    fake::sample(&mut app, &store); // B on "Club repeater", as in the mock-up
+    fake::sample(&mut app, &store, &mut radio); // B on "Club repeater", as in the mock-up
     let mut booting = true;
     boot::draw(&mut lcd, &info);
 
@@ -324,12 +324,18 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
             while let Some(c) = app.pop_cmd() {
                 radio.cmd(c);
             }
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
+            }
             radio.step(now as f32 / 1000.0, app.active());
             let clock = fake::device().clock_min;
             dev.clock_min = clock;
             app.tick(now, &radio.live, &store);
             while let Some(c) = app.pop_cmd() {
                 radio.cmd(c);
+            }
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
             }
             app.render(&mut lcd, &radio.live, &dev, &store);
         }

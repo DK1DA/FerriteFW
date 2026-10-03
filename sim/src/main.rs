@@ -88,12 +88,15 @@ fn main() {
     dev.clock_min = Some(14 * 60 + 32);
     dev.utc = false;
     let mut app = App::new();
-    fake::sample(&mut app, &store);
+    fake::sample(&mut app, &store, &mut radio);
     let mut t = 0u32;
     let mut run = |app: &mut App, fb: &mut FrameBuffer, until: u32, t: &mut u32| {
         while *t <= until {
             while let Some(c) = app.pop_cmd() {
                 radio.cmd(c);
+            }
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
             }
             radio.step(*t as f32 / 1000.0, app.active());
             app.tick(*t, &radio.live, &store);
@@ -142,4 +145,86 @@ fn main() {
     press(&mut app, Key::Digit(3), 800, &mut t);
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "coming", scale);
+
+    // Group A, entry and editing: each screen as it first shows, with a little typed.
+    let tap = |app: &mut App, t: &mut u32, keys: &[Key]| {
+        for &k in keys {
+            press(app, k, 100, t);
+            *t += 150;
+        }
+    };
+    use Key::{Digit as D, Down, Exit, Menu, Right, Slot, Star, VfoMem};
+    press(&mut app, Exit, 800, &mut t);
+    tap(&mut app, &mut t, &[D(1), D(4), D(6), D(9), D(4)]); // NAV-4: frequency entry
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "entry-freq", scale);
+    press(&mut app, Exit, 800, &mut t);
+    app.key_down(D(5), t, &store); // HOME-8: the map while 5 is held
+    run(&mut app, &mut fb, t + 800, &mut t);
+    save(&fb, "shortcut-map", scale);
+    tap(&mut app, &mut t, &[Exit]);
+    app.key_up(D(5), t, &store);
+    tap(&mut app, &mut t, &[Menu, Menu]); // MENU 1, OK: the squelch editor (MenuEdit)
+    run(&mut app, &mut fb, t + 3000, &mut t);
+    save(&fb, "value-squelch", scale);
+    tap(&mut app, &mut t, &[Exit, D(5), Menu]); // MENU 5, OK: offset as a list
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "value-offset", scale);
+    tap(&mut app, &mut t, &[Exit, D(4), Menu]); // MENU 4, OK: the tone picker
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "tones", scale);
+    press(&mut app, Exit, 800, &mut t);
+    press(&mut app, VfoMem, 800, &mut t); // hold V/M: save as channel
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "save-channel", scale);
+    tap(&mut app, &mut t, &[Down, Down, Menu, D(4), D(4)]); // its name: text entry, "H"
+    t += 1100;
+    tap(&mut app, &mut t, &[Star, D(4), D(4), D(4), D(5), D(5), D(5)]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "text", scale);
+    press(&mut app, Exit, 800, &mut t);
+    press(&mut app, Menu, 800, &mut t); // MENU 0 2 2: add repeater
+    tap(&mut app, &mut t, &[D(2), D(2)]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "add-repeater", scale);
+    press(&mut app, Exit, 800, &mut t);
+    tap(&mut app, &mut t, &[Slot, D(1), D(5)]); // B is on a channel: channel entry
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "entry-channel", scale);
+    press(&mut app, Exit, 800, &mut t);
+    press(&mut app, Slot, 800, &mut t); // hold SLOT on a channel: the channel editor (HomeEditCh)
+    tap(&mut app, &mut t, &[Down, Down, Down, Right, Right]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "home-edit-ch", scale);
+    tap(&mut app, &mut t, &[Exit, Slot, Slot]);
+    press(&mut app, Menu, 800, &mut t); // MENU 0 9 8 2: reset asks first
+    tap(&mut app, &mut t, &[D(9), D(8), D(2)]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "confirm", scale);
+    press(&mut app, Exit, 800, &mut t);
+    app.open(ferrite_app::screens::nav::Dest::ExtendTx);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "extend-tx", scale);
+    press(&mut app, Exit, 800, &mut t);
+    // Setup, every page; the callsign as in the mock-up.
+    let mut p = *app.prefs();
+    p.callsign[..6].copy_from_slice(b"VA7FER");
+    app.set_prefs(p);
+    app.start_setup();
+    for (i, name) in ["setup-1-welcome", "setup-2-call", "setup-3-region", "setup-4-owner", "setup-5-time", "setup-6-look", "setup-7-bsave", "setup-8-summary"].iter().enumerate() {
+        if i == 2 {
+            tap(&mut app, &mut t, &[Down]); // Canada, as in the mock-up
+        }
+        run(&mut app, &mut fb, t, &mut t);
+        save(&fb, name, scale);
+        tap(&mut app, &mut t, &[Menu]);
+    }
+    // PIN at power on, two digits typed.
+    let mut p = *app.prefs();
+    (p.pin, p.pin_len, p.pin_mode) = ([1, 2, 3, 4, 0, 0], 4, 1);
+    app.set_prefs(p);
+    app.start_pin();
+    tap(&mut app, &mut t, &[D(1), D(2)]);
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "pin", scale);
 }
