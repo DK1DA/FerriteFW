@@ -23,6 +23,8 @@ pub struct Check {
 
 pub struct BootInfo<'a> {
     pub version: &'a str,
+    /// The owner's callsign, shown on the logo screen; None until one is set.
+    pub callsign: Option<&'a str>,
     pub checks: &'a [Check],
     pub tx_armed: bool,
 }
@@ -70,14 +72,17 @@ fn draw_list(lcd: &mut impl Panel, b: &BootInfo) {
 }
 
 fn draw_logo(lcd: &mut impl Panel, b: &BootInfo) {
-    lcd.mask4(64, 40, &LOGO112_RING, SUB, Some((&LOGO112_WIND, BLUE)), BG);
-    lcd.text4_aligned(120, 206, Align::Center, b"FERRITE", &WORD_40, TEXT, BG);
-    lcd.text4_aligned(120, 228, Align::Center, b.version.as_bytes(), &UI_12, SUB, BG);
+    lcd.mask4(64, 28, &LOGO112_RING, SUB, Some((&LOGO112_WIND, BLUE)), BG);
+    lcd.text4_aligned(120, 188, Align::Center, b"FERRITE", &WORD_40, TEXT, BG);
+    lcd.text4_aligned(120, 209, Align::Center, b.version.as_bytes(), &UI_12, SUB, BG);
+    if let Some(call) = b.callsign {
+        lcd.text4_aligned(120, 243, Align::Center, call.as_bytes(), &UI_15B, TEXT, BG);
+    }
     let n = b.checks.len() as i32;
     let done = b.checks.iter().filter(|c| c.state != State::Pending).count() as i32;
     let bar = if n > 0 { done * 120 / n } else { 120 };
-    lcd.fill(60, 262, bar, 4, BLUE);
-    lcd.fill(60 + bar, 262, 120 - bar, 4, LINE);
+    lcd.fill(60, 264, bar, 4, BLUE);
+    lcd.fill(60 + bar, 264, 120 - bar, 4, LINE);
     let mut line = Buf::<31>::new();
     let text: &[u8] = if done < n {
         v!(line, "Self-test {} of {}", done, n)
