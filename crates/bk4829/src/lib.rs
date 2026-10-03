@@ -126,6 +126,11 @@ const DTMF_COEFS: [u16; 16] = [
 
 /// REG_30 values stock uses: receive (VCO calibration, receive chain, AF DAC, PLL, receive DSP).
 const POWER_RX: u16 = 0xBFF1;
+
+/// REG_37: everything on (stock's start-up and wake value), and the sleep value (enables in bits 4:0 and the DSP
+/// enable, bit 15, cleared; the LDO selections kept).
+const LDO_ON: u16 = 0x9D1F;
+const LDO_SLEEP: u16 = 0x1D00;
 const POWER_AF_ONLY: u16 = 0x0200;
 
 /// Channel bandwidth.
@@ -304,6 +309,20 @@ impl<B: Bus> Bk4829<B> {
     /// Everything in REG_30 off: no receive, no transmit.
     pub fn off(&mut self) {
         self.write(reg::POWER, 0);
+    }
+
+    /// Deep sleep, about 30 uA (Beken's figure, against 49 mA receiving): everything in REG_30 off, then REG_37 with
+    /// the crystal, band-gap, LDO and DSP enables cleared. Registers are kept. Stock's Battery Save writes exactly
+    /// this, to both chips at once.
+    pub fn sleep(&mut self) {
+        self.write(reg::POWER, 0);
+        self.write(reg::LDO, LDO_SLEEP);
+    }
+
+    /// Out of [`Bk4829::sleep`]: LDOs, crystal, band-gap and DSP back on (stock's start-up value). Then
+    /// [`Bk4829::rx_on`] to receive, as stock does straight after, with no wait between.
+    pub fn wake(&mut self) {
+        self.write(reg::LDO, LDO_ON);
     }
 
     pub fn bandwidth(&mut self, bw: Bandwidth) {

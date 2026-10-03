@@ -170,6 +170,18 @@ fn fsk_receive_matches_stock() {
     assert_eq!(bk4829::tone_word(1200), 0x3065, "1200 Hz x 10.32444: stock's tone 2 word");
 }
 
+#[test]
+fn sleep_and_wake_are_stocks() {
+    // Stock's Battery Save (0x0801CC9E / 0x0801CCD0): REG_30 0 then REG_37 0x1D00; back with REG_37 0x9D1F, then
+    // the receive sequence.
+    let mut r = Regs::new();
+    let mut bk = Bk4829::new(&mut r);
+    bk.sleep();
+    bk.wake();
+    bk.rx_on();
+    assert_eq!(r.writes, [(0x30, 0), (0x37, 0x1D00), (0x37, 0x9D1F), (0x30, 0x0200), (0x30, 0xBFF1)]);
+}
+
 /// Everything a receive-only build has, called in turn: REG_30 never gets a transmit bit (PA gain, MIC ADC,
 /// transmit DSP), REG_51 never its transmit enable, REG_36 (PA) never written.
 #[test]
@@ -196,6 +208,8 @@ fn receive_never_keys() {
     bk.fsk_read();
     bk.fsk_off();
     bk.interrupts_enable(0xFFFF);
+    bk.sleep();
+    bk.wake();
     bk.off();
     for &(reg, v) in &r.writes {
         match reg {
