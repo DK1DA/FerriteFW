@@ -386,3 +386,22 @@ fn slots_stay_in_order() {
     }
     assert_eq!(card(1, 1), (93, 115));
 }
+
+/// HOME-11: after SLOT moves the large card, nothing of the old large card is left in the new gaps.
+#[test]
+fn slot_change_leaves_no_trace() {
+    let mut t = T::new();
+    let mut fb = FrameBuffer::new();
+    t.render(&mut fb);
+    t.render(&mut fb);
+    // A is large (25..140). After SLOT, B is large: A shrinks to 25..87 and the gap 87..93 must be background.
+    t.tap(Key::Slot);
+    t.render(&mut fb);
+    let (ya, ha) = crate::view::card(0, 1);
+    let (yb, _) = crate::view::card(1, 1);
+    for y in ya + ha + 1..yb - 1 {
+        for x in 10..230 {
+            assert_eq!(fb.at(x, y), BG, "stale pixel at {x},{y} between A and B");
+        }
+    }
+}

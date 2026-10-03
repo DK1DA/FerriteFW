@@ -198,7 +198,10 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
     let (vw, vh) = ((ww as f32 * fit).round() as usize, (wh as f32 * fit).round() as usize);
     let opts = WindowOptions { resize: true, scale_mode: ScaleMode::AspectRatioStretch, ..WindowOptions::default() };
     let mut win = Window::new("Ferrite sim", vw, vh, opts).expect("open window");
-    win.set_target_fps(60);
+    // Input is polled every ~2 ms so a quick trackpad tap (down and up inside one 16 ms frame) is never missed;
+    // the window is redrawn at 60 Hz.
+    win.set_target_fps(0);
+    let mut last_present = Instant::now() - Duration::from_secs(1);
     println!("{KEYMAP}");
 
     let start = Instant::now();
@@ -350,6 +353,13 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
         let t = Instant::now();
         flashes.extend(lcd.rects.iter().map(|&rect| Flash { rect, at: t }));
         flashes.retain(|f| f.at.elapsed() < Duration::from_millis(250));
+
+        if last_present.elapsed() < Duration::from_millis(16) {
+            win.update();
+            std::thread::sleep(Duration::from_millis(2));
+            continue;
+        }
+        last_present = Instant::now();
 
         let screen = (!booting).then(|| app.screen());
         let mockup = if overlay {

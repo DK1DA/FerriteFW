@@ -210,6 +210,13 @@ impl App {
     }
 
     fn render_home(&mut self, lcd: &mut impl Panel, live: &LiveAll) {
+        // The large card moved (SLOT): the gaps between cards moved too, so clear the whole card area and draw
+        // every card again; otherwise slivers of the old large card stay behind (HOME-11).
+        if self.dirty(R_NOTE, hash(&self.active)) {
+            lcd.fill(0, 21, 240, 279, BG);
+            self.drawn.hash[R_FRAME..=R_SUB + 2].fill(0);
+            self.drawn.meter = [None; SLOTS];
+        }
         for s in 0..SLOTS as u8 {
             // Fixed order A, B, C: the card's region index is its slot.
             let p = s as usize;
