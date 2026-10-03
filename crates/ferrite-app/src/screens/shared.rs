@@ -96,13 +96,16 @@ impl App {
         self.screen.title(self, &mut name);
         // SBAR-16: TW with three slots watched, DW with two, counting the relay rule's drops.
         let m = self.watch_mask() & !self.relay_mask;
-        let n = m.count_ones() as u8;
+        // HF-5: no TW/DW or SCN in HF mode (everything else pauses there).
+        // TX-34: watching pauses while transmitting, so no TW/DW then either.
+        let hf = self.radio.mode == super::activity::Mode::Hf || self.radio.keyed.is_some();
+        let n = if hf { 0 } else { m.count_ones() as u8 };
         StatusBar {
             name,
             locked: self.locked,
             // SBAR-11: the bar shows what changes what a key does, so SCN is the active slot scanning; a
             // watched slot's scan shows on its card.
-            scan: live.slots[self.active as usize].scanning,
+            scan: live.slots[self.active as usize].scanning && !hf,
             watch: if self.watch == 0 || n < 2 { 0 } else { n },
             inbox: self.inbox,
             alert: self.alert,

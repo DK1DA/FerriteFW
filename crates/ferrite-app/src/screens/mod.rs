@@ -25,6 +25,7 @@
 //! (five copies), so keep screen state to a few bytes. Lists read their items on demand (channels from the
 //! store, settings from tables), never a copy.
 
+pub mod activity;
 pub mod advanced;
 pub mod chedit;
 pub mod coming;
@@ -33,7 +34,10 @@ pub mod edit;
 pub mod entry;
 pub mod extend;
 pub(crate) mod forms;
+pub mod fm;
+pub mod hf;
 pub mod home;
+pub mod layouts;
 pub mod nav;
 pub mod pin;
 pub mod quick;
@@ -45,6 +49,14 @@ pub mod status;
 pub mod text;
 pub mod tones;
 pub mod value;
+pub mod parts;
+pub mod probe;
+pub mod scan;
+pub mod scope;
+pub mod squelch;
+pub mod transmit;
+pub mod weather;
+pub mod xb;
 
 use crate::chan::ChannelStore;
 use crate::keys::KeyEvent;
@@ -76,6 +88,20 @@ pub enum Screen {
     Pin(pin::Pin),
     Setup(setup::Setup),
     Shortcut(shortcut::Shortcut),
+    // Group B, radio activity.
+    Transmit(transmit::Transmit),
+    TxRefused(transmit::TxRefused),
+    Emergency(transmit::Emergency),
+    Scan(scan::Scan),
+    Scope(scope::Scope),
+    ToneSearch(probe::ToneSearch),
+    Counter(probe::Counter),
+    Fm(fm::Fm),
+    Hf(hf::Hf),
+    Weather(weather::Weather),
+    Alert(weather::Alert),
+    Crossband(xb::Crossband),
+    Squelch(squelch::Squelch),
     /// A screen not built yet: its name and "coming" (any [`nav::Dest`] without its own screen).
     Coming(coming::Coming),
 }
@@ -103,6 +129,19 @@ macro_rules! each {
             Screen::Pin($s) => $e,
             Screen::Setup($s) => $e,
             Screen::Shortcut($s) => $e,
+            Screen::Transmit($s) => $e,
+            Screen::TxRefused($s) => $e,
+            Screen::Emergency($s) => $e,
+            Screen::Scan($s) => $e,
+            Screen::Scope($s) => $e,
+            Screen::ToneSearch($s) => $e,
+            Screen::Counter($s) => $e,
+            Screen::Fm($s) => $e,
+            Screen::Hf($s) => $e,
+            Screen::Weather($s) => $e,
+            Screen::Alert($s) => $e,
+            Screen::Crossband($s) => $e,
+            Screen::Squelch($s) => $e,
             Screen::Coming($s) => $e,
         }
     };
@@ -204,6 +243,7 @@ impl App {
             self.drawn.meter = [None; SLOTS];
             self.drawn.screen = Some(id);
         }
+        self.note_device(dev);
         let sb = self.status_bar(live, dev);
         if self.drawn.sbar != Some(sb) {
             sb.draw(lcd, self.drawn.sbar.as_ref());

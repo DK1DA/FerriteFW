@@ -1,0 +1,336 @@
+//! Tone search and the frequency counter (manual chapter 22; no mock-ups). Both run on the Radio task and
+//! report through `ModeLive::Probe`.
+//!
+//! Tone search (hold 9, MENU 0 1 9): the active slot's frequency and signal, the tone found or "searching"
+//! with the time, the last hits (TSRCH-2). OK sets the RX tone, then asks before setting TX too (TSRCH-4); on a
+//! channel the tone is loaded into the slot, not saved to the channel (TSRCH-9). BACK leaves the tones as they
+//! were (TSRCH-5).
+//!
+//! Counter (MENU 0 3 4): the strongest nearby transmitter's frequency and level, a hold, the last hits
+//! (TSRCH-6); OK copies the frequency to the active slot's VFO (TSRCH-7). It only receives (TSRCH-8).
+
+use super::activity::{mmss, Hit, Mode, HITS};
+use super::scan::ago;
+use super::shared::*;
+use super::{Cx, Hints, View};
+use crate::chan::ChannelStore;
+use crate::keys::{KeyEvent, Press};
+use crate::slot::tone_text;
+use crate::{App, Screen};
+use ferrite_core::keys::Key;
+use ferrite_core::msg::{LiveAll, ModeLive, Param, RadioCmd};
+use ferrite_ui::assets::*;
+use ferrite_ui::gfx::*;
+use ferrite_ui::panel::Panel;
+use ferrite_ui::text::Buf;
+use ferrite_ui::widgets as w;
+use ufmt::uwrite;
+
+/// The slot card both screens open with: letter, VFO/channel and band, S-meter text; the frequency.
+fn slot_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8) {
+    let lv = live.slots[s as usize];
+    let mut head = Buf::<32>::new();
+    app.head_text(s, live, &mut head);
+    let st = w::s_text(lv.rssi);
+    let (y, h) = (25, 70);
+    if app.dirty(1, 1) {
+        lcd.fill(6, y, 228, h, BG);
+        lcd.fill_r(6, y, 228, h, 6, SURFACE);
+        lcd.frame_r(6, y, 228, h, 6, BLUE);
+    }
+    if app.dirty(2, hash(&(head, st, lv.squelch_open))) {
+        w::badge(lcd, 14, y + 8, s, true, SURFACE);
+        w::field(lcd, 34, 140, y + 7, y + 24, y + 20, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
+        let c = if lv.squelch_open { GREEN } else { DIM };
+        w::field(lcd, 174, 52, y + 7, y + 24, y + 20, Align::Right, st.as_bytes(), &UI_12B, c, SURFACE);
+    }
+    let f = app.slot(s).freq();
+    if app.dirty(3, hash(&f)) {
+        w::freq(lcd, 15, 226, y + 60, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+    }
+}
+
+/// "100.0" or "023" (digits for the digit font) and what it is ("CTCSS, Hz", "DCS, normal").
+fn tone_parts(t: u16, d: &mut Buf<16>, kind: &mut Buf<16>) {
+    d.clear();
+    if t & crate::slot::DCS_FLAG == 0 {
+        let _ = uwrite!(d, "{}.{}", t / 10, t % 10);
+        kind.set(b"CTCSS, Hz");
+    } else {
+        let c = t & 0x1FF;
+        let _ = uwrite!(d, "{}{}{}", c >> 6, (c >> 3) & 7, c & 7);
+        kind.set(if t & crate::slot::DCS_INV != 0 { b"DCS, inverted" } else { b"DCS, normal" });
+    }
+}
+
+/// The last-hits list at y: when, what (by `what`), level.
+fn hit_rows(app: &mut App, lcd: &mut impl Panel, y: i32, region: usize, what: impl Fn(&Hit, &mut Buf<32>)) {
+    if app.dirty(region, 1) {
+        w::field(lcd, 8, 224, y, y + 16, y + 12, Align::Left, b"Last hits", &UI_12B, SUB, BG);
+    }
+    for i in 0..HITS {
+        let hit = app.radio.hits[i];
+        let (mut a, mut t, mut sig) = (Buf::<16>::new(), Buf::<32>::new(), Buf::<4>::new());
+        if hit.what != 0 {
+            ago(hit.age_ms(app.now), &mut a);
+            what(&hit, &mut t);
+            sig = w::s_text(hit.rssi());
+        } else if i == 0 {
+            t.set(b"None yet");
+        }
+        let ry = y + 18 + 18 * i as i32;
+        if app.dirty(region + 1 + i, hash(&(a, t, sig))) {
+            w::field(lcd, 8, 52, ry, ry + 18, ry + 13, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 60, 140, ry, ry + 18, ry + 13, Align::Left, t.as_bytes(), &UI_12, TEXT, BG);
+            w::field(lcd, 200, 32, ry, ry + 18, ry + 13, Align::Right, sig.as_bytes(), &UI_12B, GREEN, BG);
+        }
+    }
+}
+
+// ---- Tone search ----
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ToneSearch {
+    pub slot: u8,
+    /// The RX tone is set and the screen asks about TX (TSRCH-4).
+    pub ask_tx: bool,
+}
+
+/// Hold 9 or MENU 0 1 9 (TSRCH-1): search on the active slot.
+pub fn open_tone(app: &mut App) -> Screen {
+    let slot = app.active;
+    app.start_mode(Mode::Tone);
+    app.out.push(RadioCmd::ToneSearch { slot, on: true });
+    app.radio.t0 = app.now;
+    app.radio.clear_hits();
+    Screen::ToneSearch(ToneSearch { slot, ask_tx: false })
+}
+
+fn found(live: &LiveAll) -> u16 {
+    match live.mode {
+        ModeLive::Probe { tone, .. } => tone,
+        _ => 0,
+    }
+}
+
+fn set_tone(app: &mut App, slot: u8, t: u16, tx: bool) {
+    let c = app.slots[slot as usize].cfg_mut();
+    if tx {
+        c.tx_tone = t;
+    } else {
+        c.rx_tone = t;
+    }
+    let param = if tx { Param::TxTone } else { Param::RxTone };
+    app.out.push(RadioCmd::SlotParam { slot, param, value: t as i32 });
+}
+
+impl View for ToneSearch {
+    fn name(self) -> &'static str {
+        "Tone search"
+    }
+
+    fn title(self, _: &App, b: &mut Buf<10>) {
+        b.set(b"Tone srch");
+    }
+
+    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+        let t = app.radio.hits[0].what as u16;
+        match (e.key, e.press, self.ask_tx) {
+            (Key::Menu, Press::Short, false) if t != 0 => {
+                set_tone(app, self.slot, t, false);
+                app.screen = Screen::ToneSearch(ToneSearch { ask_tx: true, ..self });
+            }
+            (Key::Menu, Press::Short, true) => {
+                set_tone(app, self.slot, t, true);
+                done(app, self.slot, b"RX and TX tone set");
+            }
+            (Key::Exit, Press::Short, true) => done(app, self.slot, b"RX tone set"),
+            (Key::Exit, Press::Short, false) => {
+                app.stop_mode(); // TSRCH-5: tones unchanged
+                app.back();
+            }
+            _ => {}
+        }
+    }
+
+    fn tick(self, app: &mut App, live: &LiveAll) {
+        let t = found(live);
+        if t != 0 && !self.ask_tx {
+            let rssi = live.slots[self.slot as usize].rssi;
+            app.radio.push_hit(Hit::new(t as u32, app.now, rssi));
+        }
+    }
+
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
+        slot_card(app, lcd, cx.live, self.slot);
+        // The result, or "searching" and the time (TSRCH-2).
+        let t = if self.ask_tx { app.radio.hits[0].what as u16 } else { found(cx.live) };
+        let secs = app.now.wrapping_sub(app.radio.t0) / 1000;
+        let (mut d, mut kind) = (Buf::<16>::new(), Buf::<16>::new());
+        if t != 0 {
+            tone_parts(t, &mut d, &mut kind);
+        } else {
+            kind.set(b"Searching ");
+            let mut m = Buf::<16>::new();
+            mmss(secs, &mut m);
+            kind.push(m.as_bytes());
+        }
+        if app.dirty(4, hash(&(d, kind))) {
+            lcd.fill(0, 100, 240, 60, BG);
+            if t != 0 {
+                w::field(lcd, 8, 224, 102, 118, 114, Align::Left, b"Found", &UI_12, SUB, BG);
+                lcd.text4_rows(8, 152, d.as_bytes(), &DIG_46, GREEN, BG, 118, 154);
+                let x = 8 + text4_width(d.as_bytes(), &DIG_46) + 8;
+                w::field(lcd, x, 232 - x, 138, 155, 151, Align::Left, kind.as_bytes(), &UI_12, SUB, BG);
+            } else {
+                w::field(lcd, 8, 224, 120, 140, 134, Align::Left, kind.as_bytes(), &UI_12B, AMBER, BG);
+                w::field(lcd, 8, 224, 140, 156, 152, Align::Left, b"Listening for CTCSS and DCS", &UI_12, SUB, BG);
+            }
+        }
+        // The slot's tones now; while asking, the question.
+        let c = *app.slot(self.slot).cfg();
+        let (mut rx, mut tx) = (Buf::<16>::new(), Buf::<16>::new());
+        tone_text(c.rx_tone, &mut rx);
+        tone_text(c.tx_tone, &mut tx);
+        let mut now = Buf::<40>::new();
+        if self.ask_tx {
+            now.set(b"RX tone set. Set the TX tone too?");
+        } else {
+            let _ = uwrite!(now, "Now: RX {} \u{b7} TX {}", or_none(&rx), or_none(&tx));
+        }
+        if app.dirty(5, hash(&now)) {
+            let c = if self.ask_tx { AMBER } else { SUB };
+            w::field(lcd, 8, 224, 162, 180, 175, Align::Left, now.as_bytes(), &UI_12, c, BG);
+            lcd.fill(0, 184, 240, 1, LINE);
+        }
+        hit_rows(app, lcd, 190, 6, |h, b| {
+            let mut t = Buf::<16>::new();
+            tone_text(h.what as u16, &mut t);
+            b.set(t.as_bytes());
+        });
+        if app.slot(self.slot).on_channel() && app.dirty(11, 1) {
+            w::field(lcd, 8, 224, 266, 284, 279, Align::Left, b"On a channel: loaded, not saved", &UI_12, DIM, BG);
+        }
+    }
+
+    fn hints(self, app: &App) -> Hints {
+        if self.ask_tx {
+            Hints::new(&[("OK", "TX too"), ("BACK", "RX only")])
+        } else if app.radio.hits[0].what != 0 {
+            Hints::new(&[("OK", "Apply"), ("BACK", "Cancel")])
+        } else {
+            Hints::new(&[("BACK", "Cancel")])
+        }
+    }
+}
+
+fn or_none(b: &Buf<16>) -> &str {
+    if b.is_empty() { "none" } else { core::str::from_utf8(b.as_bytes()).unwrap_or("") }
+}
+
+/// Tones applied: home, with what happened (TSRCH-9: a channel's record is left alone).
+fn done(app: &mut App, slot: u8, what: &[u8]) {
+    let ch = app.slot(slot).on_channel();
+    app.stop_mode();
+    app.go_home();
+    app.show_toast(what, if ch { b"loaded, not saved" } else { b"" }, false);
+}
+
+// ---- Counter ----
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Counter {
+    /// The reading is held: new signals go to the list only.
+    pub hold: bool,
+}
+
+/// MENU 0 3 4 (TSRCH-6).
+pub fn open_counter(app: &mut App) -> Screen {
+    app.start_mode(Mode::Counter);
+    app.out.push(RadioCmd::Counter(true));
+    app.radio.clear_hits();
+    Screen::Counter(Counter { hold: false })
+}
+
+impl View for Counter {
+    fn name(self) -> &'static str {
+        "Frequency counter"
+    }
+
+    fn title(self, _: &App, b: &mut Buf<10>) {
+        b.set(b"Counter");
+    }
+
+    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+        match (e.key, e.press) {
+            (Key::Hash, Press::Short) => app.screen = Screen::Counter(Counter { hold: !self.hold }),
+            (Key::Menu, Press::Short) => {
+                // TSRCH-7: to the active slot's VFO.
+                let f = app.radio.hits[0].what;
+                if f == 0 {
+                    return app.show_toast(b"Nothing heard yet", b"", false);
+                }
+                let a = app.active as usize;
+                app.slots[a].vfo = f;
+                app.slots[a].vfo_mode = true;
+                app.stop_mode();
+                app.go_home();
+                app.send_slot(a as u8);
+                let fq = w::freq3(f);
+                app.show_toast(b"VFO set", fq.as_bytes(), false);
+            }
+            (Key::Exit, Press::Short) => {
+                app.stop_mode();
+                app.back();
+            }
+            _ => {}
+        }
+    }
+
+    fn tick(self, app: &mut App, live: &LiveAll) {
+        if let ModeLive::Probe { freq, rssi, .. } = live.mode {
+            if freq != 0 && !self.hold {
+                app.radio.push_hit(Hit::new(freq, app.now, rssi));
+            }
+        }
+    }
+
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
+        let (f, rssi, live) = match cx.live.mode {
+            ModeLive::Probe { freq, rssi, .. } if freq != 0 => (freq, rssi, true),
+            _ => (app.radio.hits[0].what, app.radio.hits[0].rssi(), false),
+        };
+        let (f, rssi) = if self.hold { (app.radio.hits[0].what, app.radio.hits[0].rssi()) } else { (f, rssi) };
+        if app.dirty(1, hash(&self.hold)) {
+            w::field(lcd, 8, 170, 22, 40, 35, Align::Left, b"Strongest nearby signal", &UI_12, SUB, BG);
+            lcd.fill(178, 22, 62, 18, BG);
+            if self.hold {
+                w::tag(lcd, 232, 23, b"HOLD", AMBER, BG);
+            }
+        }
+        if app.dirty(2, hash(&f)) {
+            lcd.fill(0, 42, 240, 52, BG);
+            if f == 0 {
+                w::field(lcd, 8, 224, 56, 76, 70, Align::Left, b"Listening...", &UI_12B, AMBER, BG);
+            } else {
+                w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, if live || self.hold { TEXT } else { SUB }, SUB, BG);
+            }
+        }
+        let lit = if f == 0 { 0 } else { w::meter_level(rssi) };
+        if app.dirty(3, hash(&lit)) {
+            w::meter(lcd, 8, 104, None, lit, if live { GREEN } else { DIM }, BG);
+            let st = if f == 0 { Buf::new() } else { w::s_text(rssi) };
+            w::field(lcd, 208, 24, 98, 116, 112, Align::Right, st.as_bytes(), &UI_12B, TEXT, BG);
+        }
+        if app.dirty(4, 1) {
+            w::field(lcd, 8, 224, 122, 140, 135, Align::Left, b"Key the other radio close by.", &UI_12, SUB, BG);
+            w::field(lcd, 8, 224, 140, 158, 153, Align::Left, b"Receive only: never transmits.", &UI_12, DIM, BG);
+            lcd.fill(0, 164, 240, 1, LINE);
+        }
+        hit_rows(app, lcd, 170, 5, |h, b| b.set(w::freq3(h.what).as_bytes()));
+    }
+
+    fn hints(self, _: &App) -> Hints {
+        Hints::new(&[("OK", "To VFO"), ("#", if self.hold { "Release" } else { "Hold" }), ("BACK", "Back")])
+    }
+}

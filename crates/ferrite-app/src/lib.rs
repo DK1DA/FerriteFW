@@ -224,6 +224,8 @@ pub struct App {
     /// Where BACK returns from screens opened with [`App::open`], newest last (MENU-24).
     back: [Option<Screen>; BACK_DEPTH],
     pub(crate) drawn: Drawn,
+    /// Radio activity: transmit, the exclusive modes, scan hits, region ([`screens::activity`]).
+    pub(crate) radio: screens::activity::RadioUi,
 }
 
 /// Screens remembered for BACK: menu, group, item and one more.
@@ -260,6 +262,7 @@ impl App {
             text: Buf::new(),
             back: [None; BACK_DEPTH],
             drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS] },
+            radio: screens::activity::RadioUi::new(),
         };
         for s in 0..SLOTS as u8 {
             app.send_slot(s);
@@ -403,6 +406,7 @@ impl App {
         self.alert |= alert;
         self.show_toast(head, body, true);
         if alert {
+            self.radio.alert.set(head, body, self.now);
             self.open(Dest::Alert); // WX-4: over any screen
         }
     }
@@ -424,6 +428,7 @@ impl App {
         self.tick_keys(now, store);
         if key == Key::Ptt {
             self.screen.ptt(self, false);
+            self.ptt_released(); // TX-25: whatever the screen did, PTT up unkeys
         }
         match self.keys.release(key, now) {
             Some(e) if e.press == Press::Short => self.on_key(e, store),
@@ -468,6 +473,7 @@ impl App {
         if self.screen.timeout().is_some_and(|t| now.wrapping_sub(self.last_input) >= t) {
             self.go_home();
         }
+        self.radio_tick(live);
         self.screen.tick(self, live);
     }
 
@@ -518,6 +524,7 @@ impl App {
 
     /// Home, forgetting where BACK would return (HOME-2).
     fn go_home(&mut self) {
+        self.stop_mode(); // a scope, search or repeater stops with its screen
         self.screen = Screen::Home;
         self.back = [None; BACK_DEPTH];
     }

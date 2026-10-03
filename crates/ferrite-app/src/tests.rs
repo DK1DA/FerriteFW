@@ -302,9 +302,9 @@ fn shortcuts_and_menu_paths() {
     use crate::screens::nav::Dest;
     let coming = |dest| Screen::Coming(Coming { dest });
     let mut t = T::new();
-    for (d, dest) in [(2, Dest::FmBroadcast), (3, Dest::BandScope), (4, Dest::AprsHeard), (7, Dest::Weather), (9, Dest::ToneSearch)] {
+    for (d, name) in [(2, "FM broadcast"), (3, "Scope"), (4, "APRS heard"), (7, "Weather radio"), (9, "Tone search")] {
         t.hold(Key::Digit(d));
-        assert_eq!(t.app.screen(), coming(dest), "hold {d}");
+        assert_eq!(t.app.screen().name(), name, "hold {d}");
         t.tap(Key::Exit);
         assert_eq!(t.app.screen(), Screen::Home);
     }
@@ -343,14 +343,14 @@ fn shortcuts_and_menu_paths() {
 /// KEY-7: PTT transmits from any screen, going home first; locked too (KEY-14).
 #[test]
 fn ptt_from_any_screen() {
-    use crate::screens::coming::Coming;
-    use crate::screens::nav::Dest;
     let mut t = T::new();
+    t.app.radio.tx_built = true;
+    t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
     t.tap(Key::Menu);
     t.hold(Key::Hash);
     let s = store();
     t.app.key_down(Key::Ptt, t.t, &s);
-    assert_eq!(t.app.screen(), Screen::Coming(Coming { dest: Dest::Transmit }));
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)));
     t.app.key_up(Key::Ptt, t.t + 300, &s);
     assert_eq!(t.app.screen(), Screen::Home);
 }
@@ -604,3 +604,6 @@ fn literal_scanner() {
     let v = string_literals("let a = \"A\\u{b7}B\"; // \"not this\"\nlet c = '\"'; let d = b\"x\\x18\";");
     assert_eq!(v, ["A\u{b7}B", "x\x18"]);
 }
+
+/// Group B: transmit, scan, scope, tone search, counter, FM, HF, weather, alert, crossband, layouts.
+mod radio_activity;

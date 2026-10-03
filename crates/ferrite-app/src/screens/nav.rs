@@ -24,6 +24,11 @@
 //! progress, power off, empty battery, SSB patch confirm, crossband (no menu number yet). PIN at power on and
 //! setup at first boot start from [`App::start_pin`] and [`App::start_setup`], which the firmware calls once
 //! settings are stored.
+//! | Home | SIDE2 (SCAN-1) / hold a digit (HOME-8) / SIDE1 + knob (SQL-10) | [`Dest::Scan`] / [`Dest::ShortcutMap`], the shortcut on release / [`Dest::Squelch`] |
+//! | PTT | refused (TX-20) / emergency frequency (TX-3) | [`Dest::TxRefused`] / [`Dest::Emergency`] |
+//!
+//! Not wired yet (no event to start them): PIN at power on, Bluetooth write approval and progress, power off,
+//! empty battery, SSB patch confirm, setup at first boot, crossband (no menu number yet).
 
 use super::advanced::{Advanced, GROUPS};
 use super::coming::Coming;
@@ -380,9 +385,10 @@ pub fn menu0(path: &[u8]) -> Option<Dest> {
 
 /// A destination's screen: built screens by their own arm, the rest as a placeholder. Adding a screen = one
 /// arm here.
-pub fn enter(dest: Dest, app: &App) -> Screen {
+pub fn enter(dest: Dest, app: &mut App) -> Screen {
     use super::*;
-    let on_ch = app.slots[app.active as usize].on_channel();
+    let a = app.active;
+    let on_ch = app.slots[a as usize].on_channel();
     match dest {
         Dest::Entry(d) => Screen::Entry(entry::Entry::new(if on_ch { entry::EntryFor::Channel } else { entry::EntryFor::Vfo }, Some(d))),
         Dest::ChannelEdit if on_ch => Screen::ChEdit(chedit::ChEdit { cell: 0 }),
@@ -399,6 +405,23 @@ pub fn enter(dest: Dest, app: &App) -> Screen {
         Dest::Quick => Screen::Quick(Quick { row: 0 }),
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
         Dest::Status => Screen::Status(Status { row: 0, from_menu: false }),
+        // Group B, radio activity.
+        Dest::Transmit => Screen::Transmit(transmit::Transmit { slot: a }),
+        Dest::TxRefused => {
+            let why = transmit::refusal(app, a).unwrap_or(ferrite_core::txplan::Refusal::OutOfBand);
+            Screen::TxRefused(transmit::TxRefused { why, slot: a })
+        }
+        Dest::Emergency => Screen::Emergency(transmit::Emergency { slot: a }),
+        Dest::Scan => Screen::Scan(scan::Scan { slot: a }),
+        Dest::BandScope => scope::open(app),
+        Dest::ToneSearch => probe::open_tone(app),
+        Dest::Counter => probe::open_counter(app),
+        Dest::FmBroadcast => fm::open(app),
+        Dest::HfMode => hf::open(app),
+        Dest::Weather => weather::open(app).unwrap_or(app.screen),
+        Dest::Alert => Screen::Alert(weather::Alert),
+        Dest::Crossband => Screen::Crossband(xb::Crossband { cell: 0 }),
+        Dest::Squelch => Screen::Squelch(squelch::Squelch),
         _ => Screen::Coming(Coming { dest }),
     }
 }
@@ -423,7 +446,12 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
         4 => app.open(Dest::AprsHeard),
         5 => cycle(app, Item::Power),
         6 => cycle(app, Item::Bandwidth),
-        7 => app.open(Dest::Weather), // WX-1: US and Canada only, once the region exists
+        7 => {
+            // WX-1: US and Canada only (and until a region is set); elsewhere hold 7 does nothing.
+            if app.radio.region.is_none_or(|r| r.has_weather()) {
+                app.open(Dest::Weather);
+            }
+        }
         8 => cycle(app, Item::BatterySave),
         _ => app.open(Dest::ToneSearch), // TSRCH-1
     }
@@ -453,8 +481,7 @@ fn cycle(app: &mut App, item: Item) {
     }
 }
 
-/// PTT down where the screen has no PTT of its own: home, then transmit (KEY-7).
+/// PTT down where the screen has no PTT of its own: home, then transmit on the active slot (KEY-7, TX-20).
 pub fn transmit(app: &mut App) {
-    app.go_home();
-    app.open(Dest::Transmit);
+    super::transmit::ptt(app, app.active);
 }
