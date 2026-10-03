@@ -7,13 +7,13 @@
 
 <p align="center"><b>Open firmware for the Radtel RT-950 Pro</b>, in Rust on Embassy.</p>
 
-Ferrite replaces the RT-950 Pro's stock firmware with one that is open, receive-first and RF-aware. Planned:
+Ferrite replaces the RT-950 Pro's stock firmware with one that is open, RF-aware and transmits and receives on every band the radio is built for. Planned:
 
-- Daily use as good as stock: three watch slots, scanning, APRS, GPS, the broadcast receiver.
+- Daily use as good as stock: FM voice transmit on every band and power level, repeaters and tones, three watch slots, scanning, APRS, GPS, the broadcast receiver.
 - Decoders on the radio itself: POCSAG, SAME, DSC, AIS, FT8 and WSPR.
 - A documented link protocol for its own web app.
 - Real battery life.
-- Transmit fenced in by the firmware itself.
+- Transmit with its safety checks in the firmware itself: armed flag, calibrated band limits and power, timeout.
 
 > **Status: scaffold.** The start-up, the six tasks and the chip drivers are wired together, and the image builds,
 > but it has not run on a radio yet. Milestone 1 (bring-up, receive only) starts here.
@@ -68,8 +68,8 @@ $BIN/llvm-objcopy -O binary target/thumbv7em-none-eabihf/release/ferrite target/
 python3 tools/btf.py pack target/ferrite.bin target/ferrite.btf
 ```
 
-`cargo fw --features tx` adds transmit. Without that feature, the build contains no transmit code at all. It
-stays off until milestone 4.
+Transmit is built in milestone 4, after receive is proven on the radio. Until then it sits behind a feature: `cargo fw --features tx`
+adds it, and without the feature the build contains no transmit code at all, so bring-up builds cannot key the radio.
 
 uradio and udigimodes are private for now. Cargo fetches them with git, so your git credentials must reach them.
 CI uses a `DEPS_TOKEN` secret for this.
