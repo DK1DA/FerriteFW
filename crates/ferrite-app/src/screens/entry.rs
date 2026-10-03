@@ -10,7 +10,6 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::{ChannelStore, MAX_CHANNELS, NO_ZONE};
 use crate::keys::{KeyEvent, Press};
-use crate::prefs::tx_check;
 use crate::slot::{band_name, band_of, band_near, chan_label, BANDS, STEPS};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::freq::{mhz, Freq10};
@@ -126,6 +125,22 @@ fn snap(app: &App, to: EntryFor, f: Freq10) -> Freq10 {
 }
 
 /// Why a frequency can't be tuned here, if it can't.
+/// Whether transmit is allowed at f, and the reason either way (VFO-12; the rules are chapter 15's,
+/// [`ferrite_core::txplan`]). Display only: the Radio task decides when it keys.
+fn tx_text(app: &App, f: Freq10, tx_built: bool) -> Result<&'static str, &'static str> {
+    let r = app.set.tx_region();
+    if !tx_built {
+        return Err("RX-only build");
+    }
+    match ferrite_core::txplan::check(f, r, app.set.extend_tx) {
+        Ok(()) if crate::slot::band_of(f) == Some(crate::slot::BAND_125M) => Ok("Allowed, 0.25 W"),
+        Ok(()) if ferrite_core::txplan::check(f, r, false).is_err() => Ok("Extend TX"),
+        Ok(()) => Ok("Allowed"),
+        Err(_) if app.set.region().is_none() => Err("Region not set"),
+        Err(_) => Err("Not amateur"),
+    }
+}
+
 fn refuse(f: Freq10) -> Option<&'static str> {
     if f < LO {
         Some("Below 18 MHz: HF mode (MENU 0 3 5)") // VFO-14
@@ -212,7 +227,7 @@ impl View for Entry {
                         rows[3].1.set(b"-");
                         (rows[3].2, note) = (AMBER, why.as_bytes());
                     }
-                    None => match tx_check(&app.prefs, sf, cx.dev.tx_built) {
+                    None => match tx_text(app, sf, cx.dev.tx_built) {
                         Ok(t) => (rows[3].1, rows[3].2) = (Buf::from(t.as_bytes()), GREEN),
                         Err(t) => (rows[3].1, rows[3].2) = (Buf::from(t.as_bytes()), AMBER),
                     },

@@ -18,7 +18,7 @@ pub const CODE_PTT_VFO: u8 = 26; // PE6, likely the side connector's PTT
 pub const CODES: usize = 27;
 
 /// What a key means to the UI: the same key means the same thing on every screen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Key {
     /// MENU/OK.
     Menu,

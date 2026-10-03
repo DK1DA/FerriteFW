@@ -23,7 +23,7 @@ struct T {
 
 impl T {
     fn new() -> Self {
-        let mut app = App::new();
+        let mut app = App::new(crate::tests::set(), crate::tests::alert());
         while app.pop_cmd().is_some() {}
         T { app, t: 1000, s: Sample::new(), fb: FrameBuffer::new() }
     }

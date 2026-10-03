@@ -73,7 +73,7 @@ impl View for Shortcut {
         for (d, name) in SHORTCUTS.iter().enumerate() {
             let mut v = Buf::<16>::new();
             match d {
-                0 => match app.prefs.home_ch {
+                0 => match app.set.home_ch {
                     Some(n) => {
                         let mut l = Buf::<32>::new();
                         chan_label(n, &mut l);

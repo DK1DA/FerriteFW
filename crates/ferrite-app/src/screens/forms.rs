@@ -92,15 +92,6 @@ pub(crate) fn field_box(lcd: &mut impl Panel, x: i32, y: i32, w_: i32, h: i32, l
     lcd.frame_r(x, y, w_, h, 4, border);
 }
 
-/// Progress: `n` dashes ending at x_right, the first `done` blue (setup's page marker).
-pub(crate) fn dashes(lcd: &mut impl Panel, x_right: i32, y: i32, n: i32, done: i32) {
-    let x0 = x_right - n * 10 + 2;
-    lcd.fill(x0, y, n * 10, 3, BG);
-    for i in 0..n {
-        lcd.fill_r(x0 + i * 10, y, 8, 3, 1, if i < done { BLUE } else { LINE });
-    }
-}
-
 /// A picker column: the value list around the current one, `rows` tall, the current in the middle and
 /// filled blue (the bigger editor, the tone picker). `text(i, buf)` writes value i; `n` values, wrapping.
 pub(crate) fn picker(lcd: &mut impl Panel, x: i32, y: i32, w_: i32, rows: i32, rh: i32, cur: i32, n: i32, text: impl Fn(i32, &mut Buf<16>), bg: u16) {

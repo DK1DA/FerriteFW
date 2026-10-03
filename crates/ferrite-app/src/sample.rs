@@ -6,6 +6,7 @@
 
 use crate::chan::{channel, ChanWrite, Channel, ChannelStore, FLAG_SKIP, NO_ZONE};
 use crate::data::*;
+use crate::settings::Settings;
 use crate::slot::{SlotCfg, DCS_FLAG, DEFAULT_CFG};
 use core::cell::Cell;
 use ferrite_core::freq::{mhz, Freq10};
@@ -159,7 +160,20 @@ const SKIPS: [Freq10; 3] = [mhz(146) + 94_000, mhz(147) + 15_000, mhz(145) + 29_
 
 const FM: [(u16, &str); 7] = [(8850, "CBC 1"), (9150, "CBC 2"), (9390, "CHEZ"), (10030, "MAJIC"), (10530, "KISS"), (10610, ""), (8930, "CKCU")];
 
-const HF: [(Freq10, u8); 6] = [(707_400, 1), (1_407_400, 1), (376_000, 2), (1_013_600, 1), (703_000, 3), (607_000, 0)];
+/// HF recent, newest first: frequency and mode (as `Param::Mode`: 2 AM, 3 USB, 4 LSB, 5 CW).
+const HF: [(Freq10, u8); 6] = [(707_400, 3), (1_407_400, 3), (376_000, 4), (1_013_600, 3), (703_000, 5), (607_000, 2)];
+
+/// The sample radio's settings: the look review's callsign, Canada (as the mock-ups have it), HF recent.
+pub fn settings() -> Settings {
+    let mut s = Settings::DEFAULT;
+    s.set_callsign(b"VA7FER");
+    s.set_region(Some(ferrite_core::txplan::Region::Canada));
+    s.setup_done = true;
+    for (r, &(f, m)) in s.hf.recent.iter_mut().zip(&HF) {
+        *r = f | (m as u32) << 28;
+    }
+    s
+}
 
 /// The sample radio's records. Cells hold what requests change.
 pub struct Sample {
@@ -178,7 +192,6 @@ pub struct Sample {
     wp_saved: Cell<Option<u16>>,
     skips_gone: Cell<u32>,
     heard_cleared: Cell<bool>,
-    hf_cleared: Cell<bool>,
     version: Cell<u32>,
     /// None: no fix (GPS searching).
     pub fix: Cell<Option<Fix>>,
@@ -209,7 +222,6 @@ impl Sample {
             wp_saved: Cell::new(None),
             skips_gone: Cell::new(0),
             heard_cleared: Cell::new(false),
-            hf_cleared: Cell::new(false),
             version: Cell::new(1),
             fix: Cell::new(Some(Fix { pos: HERE, three_d: true, alt_m: 74, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 9, age_s: 1, utc_s: 18 * 3600 + 32 * 60 + 5 })),
             call: Cell::new(Some(txt("VA7FER-9"))),
@@ -419,15 +431,6 @@ impl Data for Sample {
     fn fm_preset(&self, i: u8) -> Option<FmPreset> {
         FM.get(i as usize).map(|&(freq, n)| FmPreset { freq, name: txt(n) })
     }
-    fn hf_recent(&self) -> u8 {
-        if self.hf_cleared.get() { 0 } else { HF.len() as u8 }
-    }
-    fn hf(&self, i: u8) -> Option<HfEntry> {
-        if i >= self.hf_recent() {
-            return None;
-        }
-        HF.get(i as usize).map(|&(freq, mode)| HfEntry { freq, mode })
-    }
 
     fn request(&self, op: Op) -> bool {
         let edit = |num: u16, f: &dyn Fn(&mut Channel)| match self.slot_of(num) {
@@ -550,10 +553,6 @@ impl Data for Sample {
             Op::BeaconNow => self.call.get().is_some(),
             Op::ClearHeard => {
                 self.heard_cleared.set(true);
-                true
-            }
-            Op::ClearHf => {
-                self.hf_cleared.set(true);
                 true
             }
         };

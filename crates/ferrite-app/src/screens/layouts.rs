@@ -24,7 +24,7 @@ pub const STRIP_STEP: u16 = 400;
 
 /// Home's tick: the single + scope layout keeps a narrow sweep running around the active frequency.
 pub fn tick(app: &mut App) {
-    if app.radio.layout != 1 || !matches!(app.radio.mode, Mode::Off | Mode::Strip) {
+    if app.set.layout != 1 || !matches!(app.radio.mode, Mode::Off | Mode::Strip) {
         return;
     }
     let f = app.slot(app.active).freq();

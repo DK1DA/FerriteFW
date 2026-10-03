@@ -240,16 +240,6 @@ pub struct FmPreset {
     pub name: Buf<8>,
 }
 
-/// An HF recent-list entry (HF-28).
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct HfEntry {
-    pub freq: Freq10,
-    /// 0 AM, 1 USB, 2 LSB, 3 CW.
-    pub mode: u8,
-}
-
-pub const HF_MODES: [&str; 4] = ["AM", "USB", "LSB", "CW"];
-
 /// Requests to the record's owner. `request` answers false when refused (no such record, queue full).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -281,7 +271,6 @@ pub enum Op {
     MessageRead(u16),
     BeaconNow,
     ClearHeard,
-    ClearHf,
 }
 
 /// The records, read one at a time. Every method has a default (nothing there), so an owner that doesn't
@@ -375,12 +364,6 @@ pub trait Data {
         0
     }
     fn fm_preset(&self, _i: u8) -> Option<FmPreset> {
-        None
-    }
-    fn hf_recent(&self) -> u8 {
-        0
-    }
-    fn hf(&self, _i: u8) -> Option<HfEntry> {
         None
     }
 

@@ -262,6 +262,8 @@ pub async fn task() {
             ) => {}
             // Transmit code is out of the build until milestone 4: the UI refuses first (RX-only build).
             Either::First(RadioCmd::Transmit { .. }) => {}
+            // HF mode: milestone 2e (manual chapter 20a).
+            Either::First(RadioCmd::HfMode(_) | RadioCmd::HfTune { .. }) => {}
             Either::First(RadioCmd::Shutdown) => {
                 for n in 0..2u8 {
                     if r.chips & 1 << n != 0 {

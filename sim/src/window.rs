@@ -19,7 +19,7 @@
 
 use crate::face::{Face, Part};
 use crate::fake::{self, FakeRadio};
-use ferrite_app::{App, Screen as AppScreen};
+use ferrite_app::Screen as AppScreen;
 use ferrite_core::freq;
 use ferrite_core::keys::Key;
 use ferrite_core::msg::GpsState;
@@ -174,7 +174,7 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
     let store = fake::store();
     let mut radio = FakeRadio::new();
     let mut dev = fake::device();
-    let mut app = App::new();
+    let mut app = fake::app();
     fake::sample(&mut app, &store, &mut radio); // B on "Club repeater", as in the mock-up
     let mut booting = true;
     boot::draw(&mut lcd, &info);

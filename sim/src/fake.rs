@@ -7,6 +7,7 @@ use ferrite_app::slot::{band_of, BANDS, DEFAULT_CFG};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::{BroadcastCmd, Device, GpsState, LiveAll, ModeLive, RadioCmd, SlotLive, TxLive, XbLive, SCOPE_BARS, XB_COLS};
 use ferrite_core::txplan::Region;
+use ferrite_core::msg::{CalState, LinkLive, SelfTest};
 
 const fn cfg(tone: u16, offset: i32) -> ferrite_app::slot::SlotCfg {
     let mut c = DEFAULT_CFG;
@@ -31,8 +32,15 @@ pub fn sample_app(app: &mut ferrite_app::App, store: &impl ChannelStore) {
     app.set_vfo_cfg(0, cfg(1000, -60_000));
     app.set_channel(1, 1, 1, store);
     app.set_watch(2);
-    app.set_region(Some(Region::Canada), false); // as the mock-ups have it, with a callsign
-    app.set_callsign(b"VA3ABC");
+    app.set_region(Some(Region::Canada), false); // as the mock-ups have it
+}
+
+/// An app on the sample settings ([`ferrite_app::sample::settings`]: callsign, Canada, HF recent), kept for
+/// the program's life as the firmware keeps its own.
+pub fn app() -> ferrite_app::App {
+    let set = Box::leak(Box::new(ferrite_app::sample::settings()));
+    let alert = Box::leak(Box::new(ferrite_app::screens::alert::AlertInfo::NONE));
+    ferrite_app::App::new(set, alert)
 }
 
 /// Channels in zones, an event log, APRS, GPS, waypoints and the scan lists: [`Sample`].
@@ -178,7 +186,7 @@ impl FakeRadio {
             }
             Fake::Hf { t0, freq, mode } => {
                 let p = ((t - t0) / 2.0 * 100.0) as u32;
-                let si4732 = freq < mhz(18) || matches!(mode, 1..=3);
+                let si4732 = freq < mhz(18) || matches!(mode, 3..=5); // USB, LSB, CW as Param::Mode
                 ModeLive::Hf { freq, rssi: -95 + ((t * 1.3).sin() * 8.0) as i16, snr: 12, si4732, loading: if p > 100 { 255 } else { p as u8 } }
             }
             Fake::Xb { t0 } => ModeLive::Xb(xb(t - t0)),
@@ -279,5 +287,17 @@ pub fn device() -> Device {
         battery_low: false,
         battery_cutoff: false,
         tx_built: true, // the fake radio transmits (into nothing)
+        selftest: SelfTest {
+            idcode: ferrite_core::chipid::EXPECTED_PID,
+            mcu_ok: true,
+            flash_id: 0xEF_4016,
+            flash_mb: 4,
+            cal: CalState::Ok,
+            chips: 3,
+            si4732: true,
+            ssb_patch: true,
+            battery_trim: 0,
+        },
+        link: LinkLive { cable: true, baud_100: 9216, write_pct: None },
     }
 }

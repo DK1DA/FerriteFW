@@ -27,6 +27,7 @@
 
 pub mod activity;
 pub mod advanced;
+pub mod alert;
 pub mod aprs;
 pub mod browse;
 pub mod chedit;
@@ -34,13 +35,16 @@ pub mod coming;
 pub mod confirm;
 pub mod edit;
 pub mod entry;
-pub mod extend;
 pub mod fm;
 pub(crate) mod forms;
 pub mod gps;
+pub mod groups;
 pub mod hf;
 pub mod home;
+pub mod info;
+pub mod keytest;
 pub mod layouts;
+pub mod link;
 pub(crate) mod lists;
 pub mod log;
 pub mod msgs;
@@ -95,9 +99,6 @@ pub enum Screen {
     Text(text::Text),
     Save(save::Save),
     Confirm(confirm::Confirm),
-    ExtendTx(extend::ExtendTx),
-    Pin(pin::Pin),
-    Setup(setup::Setup),
     Shortcut(shortcut::Shortcut),
     // Group B, radio activity.
     Transmit(transmit::Transmit),
@@ -107,12 +108,19 @@ pub enum Screen {
     Scope(scope::Scope),
     ToneSearch(probe::ToneSearch),
     Counter(probe::Counter),
-    Fm(fm::Fm),
-    Hf(hf::Hf),
     Weather(weather::Weather),
-    Alert(weather::Alert),
     Crossband(xb::Crossband),
     Squelch(squelch::Squelch),
+    Group(groups::Group),
+    Setup(setup::Setup),
+    ExtendTx(setup::ExtendTx),
+    Pin(pin::Pin),
+    Info(info::Info),
+    KeyTest(keytest::KeyTest),
+    Link(link::Link),
+    Fm(fm::Fm),
+    Hf(hf::Hf),
+    Alert(alert::Alert),
     /// A screen not built yet: its name and "coming" (any [`nav::Dest`] without its own screen).
     Coming(coming::Coming),
     // Group C: lists and data
@@ -148,9 +156,6 @@ macro_rules! each {
             Screen::Text($s) => $e,
             Screen::Save($s) => $e,
             Screen::Confirm($s) => $e,
-            Screen::ExtendTx($s) => $e,
-            Screen::Pin($s) => $e,
-            Screen::Setup($s) => $e,
             Screen::Shortcut($s) => $e,
             Screen::Transmit($s) => $e,
             Screen::TxRefused($s) => $e,
@@ -159,12 +164,19 @@ macro_rules! each {
             Screen::Scope($s) => $e,
             Screen::ToneSearch($s) => $e,
             Screen::Counter($s) => $e,
-            Screen::Fm($s) => $e,
-            Screen::Hf($s) => $e,
             Screen::Weather($s) => $e,
-            Screen::Alert($s) => $e,
             Screen::Crossband($s) => $e,
             Screen::Squelch($s) => $e,
+            Screen::Group($s) => $e,
+            Screen::Setup($s) => $e,
+            Screen::ExtendTx($s) => $e,
+            Screen::Pin($s) => $e,
+            Screen::Info($s) => $e,
+            Screen::KeyTest($s) => $e,
+            Screen::Link($s) => $e,
+            Screen::Fm($s) => $e,
+            Screen::Hf($s) => $e,
+            Screen::Alert($s) => $e,
             Screen::Coming($s) => $e,
             Screen::Log($s) => $e,
             Screen::Options($s) => $e,
@@ -201,6 +213,21 @@ pub trait View: Copy {
     fn timeout(self) -> Option<u32> {
         None
     }
+
+    /// False for a screen that draws its own top bar instead of the status bar (setup).
+    fn bar(self) -> bool {
+        true
+    }
+
+    /// True while nothing else may happen: hold BACK and hold # come to the screen as keys, and it never times
+    /// out (the PIN at power on, power off, a link write).
+    fn modal(self) -> bool {
+        false
+    }
+
+    /// A key went down or up, before any press is decided; `code` is the matrix code when the firmware knows it
+    /// ([`App::raw_key`]). Only the key test listens.
+    fn raw(self, _app: &mut App, _key: Option<ferrite_core::keys::Key>, _code: Option<u8>, _down: bool) {}
 
     /// A short, long or repeat press (after the App's own: hold BACK, hold #, the lock).
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore);
@@ -246,6 +273,18 @@ impl Screen {
         each!(self, s => s.key(app, e, store))
     }
 
+    pub(crate) fn bar(self) -> bool {
+        each!(self, s => s.bar())
+    }
+
+    pub(crate) fn modal(self) -> bool {
+        each!(self, s => s.modal())
+    }
+
+    pub(crate) fn raw(self, app: &mut App, key: Option<ferrite_core::keys::Key>, code: Option<u8>, down: bool) {
+        each!(self, s => s.raw(app, key, code, down))
+    }
+
     pub(crate) fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
         each!(self, s => s.knob(app, d, store))
     }
@@ -278,10 +317,14 @@ impl App {
             self.drawn.screen = Some(id);
         }
         self.note_device(dev);
-        let sb = self.status_bar(live, dev);
-        if self.drawn.sbar != Some(sb) {
-            sb.draw(lcd, self.drawn.sbar.as_ref());
-            self.drawn.sbar = Some(sb);
+        if self.screen.bar() {
+            let sb = self.status_bar(live, dev);
+            if self.drawn.sbar != Some(sb) {
+                sb.draw(lcd, self.drawn.sbar.as_ref());
+                self.drawn.sbar = Some(sb);
+            }
+        } else {
+            self.drawn.sbar = None; // the screen draws its own; the status bar comes back whole
         }
         self.screen.render(self, lcd, &Cx { live, dev, store });
         self.render_hint(lcd);

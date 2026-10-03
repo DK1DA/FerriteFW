@@ -85,8 +85,8 @@ pub(crate) fn edit(app: &mut App, f: impl FnOnce(&mut Channel)) {
     if c == old {
         return;
     }
-    if app.prefs.home_ch == Some(old.num) {
-        app.prefs.home_ch = Some(c.num); // CHAN-18: renumbering carries it
+    if app.set.home_ch == Some(old.num) {
+        app.set.home_ch = Some(c.num); // CHAN-18: renumbering carries it
     }
     let s = &mut app.slots[a as usize];
     (s.ch, s.zone) = (Some(c), c.zone);
@@ -205,7 +205,7 @@ impl View for ChEdit {
             _ => match self.at() {
                 Some(Cell::It(i)) => app.change(i, d),
                 Some(Cell::Flag(bit, _)) => edit(app, |c| c.flags ^= bit),
-                Some(Cell::Home) => set_home(app, app.prefs.home_ch != Some(ch.num)),
+                Some(Cell::Home) => set_home(app, app.set.home_ch != Some(ch.num)),
                 Some(Cell::Number) => {
                     // The next free number that way (EDIT-5: renumbering moves the channel).
                     let free = (1..MAX_CHANNELS as i32)
@@ -245,7 +245,7 @@ impl View for ChEdit {
             w::freq(lcd, 7, 232, 102, ch.rx, &DIG_46, &DIG_28, TEXT, SUB, BG);
             lcd.fill(7, 104, 225, 2, if cell == FREQ { BLUE } else { BG });
         }
-        let home = app.prefs.home_ch == Some(ch.num);
+        let home = app.set.home_ch == Some(ch.num);
         for (i, c) in CELLS.into_iter().enumerate() {
             let mut v = Buf::<16>::new();
             let mut grey = false;
@@ -314,9 +314,9 @@ impl ChEdit {
 /// Home on or off for the active slot's channel: one home channel per radio (CHAN-17, CHAN-18).
 fn set_home(app: &mut App, on: bool) {
     let Some(ch) = app.slots[app.active as usize].ch else { return };
-    let is = app.prefs.home_ch == Some(ch.num);
+    let is = app.set.home_ch == Some(ch.num);
     if on != is {
         app.keep_undo();
-        app.prefs.home_ch = if on { Some(ch.num) } else { None };
+        app.set.home_ch = if on { Some(ch.num) } else { None };
     }
 }

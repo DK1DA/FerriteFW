@@ -9,7 +9,6 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::{ChanWrite, ChannelStore, NO_ZONE};
 use crate::keys::{KeyEvent, Press};
-use crate::prefs::DEFAULT_PREFS;
 use crate::slot::{chan_label, tone_text};
 use crate::{App, Screen, Slot, MENU_TIMEOUT_MS};
 use ferrite_core::keys::Key;
@@ -102,8 +101,8 @@ impl View for Confirm {
                             app.send_slot(s as u8);
                         }
                     }
-                    if app.prefs.home_ch == Some(num) {
-                        app.prefs.home_ch = None; // CHAN-18
+                    if app.set.home_ch == Some(num) {
+                        app.set.home_ch = None; // CHAN-18
                     }
                     let mut l = Buf::<32>::new();
                     chan_label(num, &mut l);
@@ -188,9 +187,9 @@ impl View for Confirm {
 }
 
 /// Every setting back to its default, the PIN with them (PIN-4); channels, calibration and the SSB patch are
-/// not touched here (PIN-8).
+/// not touched here (PIN-8). Setup has run, so it isn't asked again.
 pub(crate) fn reset_settings(app: &mut App) {
-    app.prefs = DEFAULT_PREFS;
+    *app.set = crate::settings::Settings { setup_done: app.set.setup_done, ..crate::settings::Settings::DEFAULT };
     app.watch = 1;
     app.bsave = 1;
     app.recent = [None; 3];

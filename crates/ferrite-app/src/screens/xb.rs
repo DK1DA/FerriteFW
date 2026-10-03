@@ -66,7 +66,7 @@ fn step_in(list: &[u8], v: u8, d: i32) -> u8 {
 
 /// The knob on a cell.
 fn change(app: &mut App, cell: u8, d: i32) {
-    let c = &mut app.radio.xb;
+    let c = &mut app.set.xb;
     match cell {
         0 | 1 => {
             // Each side's slot; never both on the same one.
@@ -100,7 +100,7 @@ enum Check {
 
 /// XB-2's checks, in order, with their text; the first failure is why # refuses.
 fn checks(app: &App, batt: u8, out: &mut [(Check, Buf<40>); 4]) -> Option<usize> {
-    let c = app.radio.xb;
+    let c = app.set.xb;
     let (f1, f2) = (app.slot(c.side1).freq(), app.slot(c.side2).freq());
     let (chip1, chip2) = (band(f1).1, band(f2).1);
     let mut fail = None;
@@ -125,7 +125,7 @@ fn checks(app: &App, batt: u8, out: &mut [(Check, Buf<40>); 4]) -> Option<usize>
     }
     let tx = |s: u8| {
         let f = super::transmit::tx_freq(app, s);
-        app.radio.tx_built && txplan::check(f, app.radio.region(), app.radio.extend_tx).is_ok()
+        app.radio.tx_built && txplan::check(f, app.set.tx_region(), app.set.extend_tx).is_ok()
     };
     let sq0 = app.slot(c.side1).cfg().squelch == 0 || app.slot(c.side2).cfg().squelch == 0;
     if !tx(c.side1) || !tx(c.side2) {
@@ -140,12 +140,12 @@ fn checks(app: &App, batt: u8, out: &mut [(Check, Buf<40>); 4]) -> Option<usize>
     }
     if c.flags & XbCfg::ID == 0 {
         put(2, Check::Ok, b"ID off", &mut fail);
-    } else if app.radio.callsign().is_empty() {
+    } else if app.set.callsign.as_bytes().is_empty() {
         put(2, Check::Fail, b"ID needs a callsign (setup)", &mut fail);
     } else {
         b.clear();
         b.push(b"ID as ");
-        b.push(app.radio.callsign());
+        b.push(app.set.callsign.as_bytes());
         put(2, Check::Ok, b.as_bytes(), &mut fail);
     }
     // A rough figure: about 4 h on a full battery at low, 2.5 h at mid.
@@ -259,7 +259,7 @@ fn start(app: &mut App) {
         return app.show_toast(b"Can't start:", out[i].1.as_bytes(), false);
     }
     app.start_mode(Mode::Xb);
-    app.out.push(RadioCmd::Crossband(Some(app.radio.xb)));
+    app.out.push(RadioCmd::Crossband(Some(app.set.xb)));
 }
 
 /// A side's card: letter, band, "Side n"; frequency; tone; a last line. `border` marks focus or direction.
@@ -285,7 +285,7 @@ fn side_card(app: &App, lcd: &mut impl Panel, x: i32, y: i32, slot: u8, side: u8
 }
 
 fn render_start(s: Crossband, app: &mut App, lcd: &mut impl Panel, batt: u8) {
-    let c = app.radio.xb;
+    let c = app.set.xb;
     if app.dirty(1, 1) {
         w::field(lcd, 8, 160, 21, 39, 34, Align::Left, b"Crossband repeater", &UI_12B, TEXT, BG);
         w::field(lcd, 168, 64, 21, 39, 34, Align::Right, b"Transmit", &UI_12, SUB, BG);
@@ -346,7 +346,7 @@ fn render_start(s: Crossband, app: &mut App, lcd: &mut impl Panel, batt: u8) {
 }
 
 fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
-    let c = app.radio.xb;
+    let c = app.set.xb;
     let passing = matches!(x.state, 1 | 2);
     let (inp, outp) = if x.state == 2 { (c.side2, c.side1) } else { (c.side1, c.side2) };
     // The state line: READY listening both and the run time, or PASSING A → B and the pass time.

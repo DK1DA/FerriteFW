@@ -32,7 +32,7 @@ impl T {
 /// frequency and settings, and the active slot, watch and Battery Save, must all reach the Radio task.
 #[test]
 fn start_up_sends_every_slot_whole() {
-    let mut app = App::new();
+    let mut app = App::new(crate::tests::set(), crate::tests::alert());
     let mut v = Vec::new();
     while let Some(c) = app.pop_cmd() {
         v.push(c);
@@ -128,10 +128,10 @@ fn channel_editor() {
     // Home (EDIT-5, CHAN-18), then undo puts the number back and Home off.
     t.tap(Key::Right);
     t.knob(1);
-    assert_eq!(t.app.prefs().home_ch, Some(2));
+    assert_eq!(t.app.settings().home_ch, Some(2));
     t.tap(Key::Star);
     assert_eq!(t.app.slot(0).ch.unwrap().num, 0);
-    assert_eq!(t.app.prefs().home_ch, None);
+    assert_eq!(t.app.settings().home_ch, None);
     assert!(matches!(t.writes()[..], [ChanWrite::Put { ch, from: Some(2) }] if ch.num == 0));
     // A flag: Skip.
     t.tap(Key::Up);
@@ -147,9 +147,7 @@ fn channel_editor() {
     assert!(!t.app.slot(0).cfg().narrow);
     assert!(matches!(t.writes()[..], [ChanWrite::Put { ch, .. }] if !ch.cfg.narrow));
     // Home on, leave, go to the VFO; hold 0 brings the home channel back (CHAN-19).
-    let mut p = *t.app.prefs();
-    p.home_ch = Some(10);
-    t.app.set_prefs(p);
+    t.app.settings_mut().home_ch = Some(10);
     t.tap(Key::Exit);
     t.tap(Key::VfoMem);
     assert!(!t.app.slot(0).on_channel());
@@ -316,80 +314,30 @@ fn confirm_reset() {
 #[test]
 fn pin_at_unlock() {
     let mut t = T::new();
-    let mut p = *t.app.prefs();
-    (p.pin, p.pin_len, p.pin_mode) = ([1, 2, 3, 4, 0, 0], 4, 2);
-    t.app.set_prefs(p);
+    let p = t.app.settings_mut();
+    (p.pin, p.pin_len, p.pin_mode) = (1234, 4, 2);
     t.hold(Key::Hash);
     assert!(t.app.locked());
     t.hold(Key::Hash);
-    assert!(matches!(t.app.screen(), Screen::Pin(_)));
-    t.hold(Key::Exit); // hold BACK doesn't get past it
     assert!(matches!(t.app.screen(), Screen::Pin(_)));
     for _ in 0..3 {
         t.digits("0000");
+        t.tap(Key::Menu);
     }
     t.digits("1234"); // waiting: ignored
+    t.tap(Key::Menu);
     assert!(t.app.locked());
     t.wait(30_100);
     t.digits("1234");
+    t.tap(Key::Menu);
     assert!(!t.app.locked());
     assert_eq!(t.app.screen(), Screen::Home);
     // At power on, PTT does nothing until it is right.
-    t.app.start_pin();
+    t.app.ask_pin();
     let s = store();
     t.app.key_down(Key::Ptt, t.t, &s);
     assert!(matches!(t.app.screen(), Screen::Pin(_)));
     t.app.key_up(Key::Ptt, t.t + 100, &s);
-}
-
-/// SETUP-1 to SETUP-12: OK through every page gives a working radio; callsign in capitals; # skips.
-#[test]
-fn setup_pages() {
-    let mut t = T::new();
-    t.app.start_setup();
-    assert!(matches!(t.app.screen(), Screen::Setup(s) if s.page == 0));
-    t.tap(Key::Menu);
-    t.digits("8882"); // V, A (the 2 key after a pause would be a new letter)
-    t.wait(1100);
-    t.tap(Key::Star);
-    t.digits("7");
-    assert_eq!(t.app.prefs().callsign(), b"VA7");
-    t.tap(Key::Exit); // deletes while there is text
-    assert_eq!(t.app.prefs().callsign(), b"VA");
-    t.tap(Key::Menu);
-    t.tap(Key::Down); // Canada
-    let mut fb = FrameBuffer::new();
-    t.render(&mut fb);
-    for _ in 2..8 {
-        t.tap(Key::Menu);
-        t.render(&mut fb);
-    }
-    assert_eq!(t.app.screen(), Screen::Home);
-    assert_eq!(t.app.prefs().region_name(), "Canada");
-    t.app.start_setup();
-    t.tap(Key::Hash);
-    assert_eq!(t.app.screen(), Screen::Home, "# skips the rest");
-}
-
-/// SETUP-8, TX-2: Extend TX shows its warning the first time it is turned on.
-#[test]
-fn extend_tx_warns_once() {
-    let mut t = T::new();
-    t.app.start_setup();
-    t.tap(Key::Menu);
-    t.tap(Key::Menu); // region page
-    for _ in 0..8 {
-        t.tap(Key::Down);
-    }
-    t.knob(1);
-    assert!(matches!(t.app.screen(), Screen::ExtendTx(_)));
-    t.tap(Key::Menu);
-    assert!(t.app.prefs().extend_tx);
-    assert!(matches!(t.app.screen(), Screen::Setup(s) if s.page == 2));
-    t.knob(1);
-    assert!(!t.app.prefs().extend_tx, "off never asks");
-    t.knob(1);
-    assert!(t.app.prefs().extend_tx, "shown once");
 }
 
 /// HOME-8: holding a digit shows the map; the release runs the shortcut; BACK cancels.
@@ -416,7 +364,6 @@ fn shortcut_map() {
 fn group_a_strings_are_in_the_fonts() {
     use ferrite_ui::assets::{UI_12, UI_12B};
     let sources = [
-        include_str!("../prefs.rs"),
         include_str!("../screens/forms.rs"),
         include_str!("../screens/entry.rs"),
         include_str!("../screens/chedit.rs"),
@@ -425,9 +372,6 @@ fn group_a_strings_are_in_the_fonts() {
         include_str!("../screens/text.rs"),
         include_str!("../screens/save.rs"),
         include_str!("../screens/confirm.rs"),
-        include_str!("../screens/extend.rs"),
-        include_str!("../screens/pin.rs"),
-        include_str!("../screens/setup.rs"),
         include_str!("../screens/shortcut.rs"),
     ];
     let mut n = 0;
@@ -439,7 +383,7 @@ fn group_a_strings_are_in_the_fonts() {
             }
         }
     }
-    assert!(n > 3000, "{n}");
+    assert!(n > 2000, "{n}");
     let _ = STEPS;
 }
 

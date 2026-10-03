@@ -14,6 +14,7 @@ use std::path::Path;
 
 mod face;
 mod fake;
+mod shots_d;
 mod window;
 
 fn save(fb: &FrameBuffer, name: &str, scale: u32) {
@@ -87,7 +88,7 @@ fn main() {
     let mut dev = fake::device();
     dev.clock_min = Some(14 * 60 + 32);
     dev.utc = false;
-    let mut app = App::new();
+    let mut app = fake::app();
     fake::sample(&mut app, &store, &mut radio);
     let mut t = 0u32;
     let mut run = |app: &mut App, fb: &mut FrameBuffer, until: u32, t: &mut u32| {
@@ -202,32 +203,7 @@ fn main() {
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "confirm", scale);
     press(&mut app, Exit, 800, &mut t);
-    app.open(ferrite_app::screens::nav::Dest::ExtendTx);
-    run(&mut app, &mut fb, t, &mut t);
-    save(&fb, "extend-tx", scale);
-    press(&mut app, Exit, 800, &mut t);
-    // Setup, every page; the callsign as in the mock-up.
-    let mut p = *app.prefs();
-    p.callsign[..6].copy_from_slice(b"VA7FER");
-    app.set_prefs(p);
-    app.start_setup();
-    for (i, name) in ["setup-1-welcome", "setup-2-call", "setup-3-region", "setup-4-owner", "setup-5-time", "setup-6-look", "setup-7-bsave", "setup-8-summary"].iter().enumerate() {
-        if i == 2 {
-            tap(&mut app, &mut t, &[Down]); // Canada, as in the mock-up
-        }
-        run(&mut app, &mut fb, t, &mut t);
-        save(&fb, name, scale);
-        tap(&mut app, &mut t, &[Menu]);
-    }
-    // PIN at power on, two digits typed.
-    let mut p = *app.prefs();
-    (p.pin, p.pin_len, p.pin_mode) = ([1, 2, 3, 4, 0, 0], 4, 1);
-    app.set_prefs(p);
-    app.start_pin();
-    tap(&mut app, &mut t, &[D(1), D(2)]);
-    run(&mut app, &mut fb, t, &mut t);
-    save(&fb, "pin", scale);
-    press(&mut app, Key::Exit, 100, &mut t);
+    // Setup, the PIN and the Extend TX warning are group D's ([`shots_d`]).
 
     // Radio activity (group B). Each from home, the fake radio answering.
     macro_rules! shot {
@@ -282,23 +258,12 @@ fn main() {
     app.open(ferrite_app::screens::nav::Dest::Counter);
     shot!(2500, "counter");
     home(&mut app, &mut t);
-    // FM broadcast: hold 2.
-    press(&mut app, Key::Digit(2), 800, &mut t);
-    shot!(300, "fm");
-    home(&mut app, &mut t);
-    // HF mode: MENU 0 3 5, the SSB patch loading, then 7.150 AM.
-    app.open(ferrite_app::screens::nav::Dest::HfMode);
-    shot!(900, "hf-loading");
-    shot!(2000, "hf");
-    home(&mut app, &mut t);
+    // FM broadcast and HF mode: group D's shots.
     // Weather radio: hold 7 (Canada).
     press(&mut app, Key::Digit(7), 800, &mut t);
     shot!(300, "weather");
     home(&mut app, &mut t);
-    // The alert, over home.
-    app.notify(b"Severe thunderstorm warning", b"Ottawa \xc2\xb7 Gatineau", true);
-    shot!(300, "alert");
-    home(&mut app, &mut t);
+    // The alert: group D's shot, as in the mock-up.
     // Squelch: SIDE1 held, the knob turned.
     app.key_down(Key::Side(1), t, &store);
     app.knob(1, t, &store);
@@ -306,12 +271,7 @@ fn main() {
     app.knob(-1, t, &store);
     app.key_up(Key::Side(1), t, &store);
     run(&mut app, &mut fb, t + 100, &mut t);
-    // The shortcut map: 4 held past the long press; on release APRS heard opens (a placeholder still).
-    app.key_down(Key::Digit(4), t, &store);
-    shot!(900, "shortcut-map");
-    app.key_up(Key::Digit(4), t, &store);
-    run(&mut app, &mut fb, t + 100, &mut t);
-    home(&mut app, &mut t);
+    // The shortcut map: group A's shot.
     run(&mut app, &mut fb, t + 3500, &mut t);
     // Crossband: start page, then ready, then passing A -> B.
     app.open(ferrite_app::screens::nav::Dest::Crossband);
@@ -371,4 +331,5 @@ fn main() {
         run(&mut app, &mut fb, t, &mut t);
         save(&fb, name, scale);
     }
+    shots_d::run(scale);
 }

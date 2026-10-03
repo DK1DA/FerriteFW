@@ -1,9 +1,8 @@
-//! PIN entry (at power on with a PIN set, and at unlock when chosen; manual chapters 34, 5 and 7, PIN-1 to
-//! PIN-3, BOOT-13, KEY-16): masked digits, attempts left, and after three wrong entries a 30 s wait. Nothing
-//! else works until it is right; at unlock, BACK leaves the keys locked. The settings-reset hint is always
-//! shown (PIN-2).
+//! PIN entry (A17; manual chapter 34, PIN-1 to PIN-3, BOOT-13, KEY-16): masked digits, attempts left, the
+//! settings-reset hint, and a 30 s wait after three misses. Three uses: at power on ([`App::ask_pin`]; nothing
+//! else works until it's right, hold BACK included), at unlock (hold # while locked, with "at power on and
+//! unlock"), and setting a new PIN (MENU 0 9 3 1), where the digits show as typed.
 
-use super::forms::para;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
@@ -17,29 +16,109 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
-/// Three wrong entries, then a wait (PIN-3).
-pub const TRIES: u8 = 3;
-pub const WAIT_MS: u32 = 30_000;
+/// Misses before the wait, and the wait (PIN-3).
+const TRIES: u8 = 3;
+const WAIT_S: u16 = 30;
+/// PIN length (0 9 3 1: 4-6 digits).
+const MIN: u8 = 4;
+const MAX: u8 = 6;
+
+/// What the PIN is asked for.
+const POWER_ON: u8 = 0;
+const UNLOCK: u8 = 1;
+const SET: u8 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Pin {
-    /// Asked at power on (nothing to go back to), not at unlock.
-    pub boot: bool,
-    pub typed: [u8; 6],
-    pub n: u8,
-    pub misses: u8,
-    /// While waiting after three misses: when the wait ends (0: no wait).
-    pub wait_until: u32,
+    /// The digits typed, packed two to a byte, and how many.
+    digits: [u8; 3],
+    n: u8,
+    /// POWER_ON, UNLOCK, or SET + the PIN mode to switch on.
+    purpose: u8,
 }
 
 impl Pin {
-    pub fn new(boot: bool) -> Self {
-        Pin { boot, typed: [0; 6], n: 0, misses: 0, wait_until: 0 }
+    pub fn power_on() -> Self {
+        Pin { digits: [0; 3], n: 0, purpose: POWER_ON }
     }
 
-    fn waiting(self, now: u32) -> Option<u32> {
-        let r = self.wait_until.wrapping_sub(now) as i32;
-        (self.wait_until != 0 && r > 0).then_some(r as u32)
+    pub fn unlock() -> Self {
+        Pin { purpose: UNLOCK, ..Pin::power_on() }
+    }
+
+    /// Setting a new PIN, then turning on PIN mode `mode` (PIN_MODES).
+    pub fn set(mode: u8) -> Self {
+        Pin { purpose: SET + mode, ..Pin::power_on() }
+    }
+
+    /// Asked at power on: nothing else is usable until it's right (PIN-1).
+    pub fn blocks(self) -> bool {
+        self.purpose == POWER_ON
+    }
+
+    fn secs(app: &App) -> u16 {
+        (app.now / 1000) as u16
+    }
+
+    /// Seconds still to wait (PIN-3).
+    fn waiting(self, app: &App) -> u16 {
+        if app.set.pin_wait == 0 {
+            return 0;
+        }
+        let left = app.set.pin_wait.wrapping_sub(Pin::secs(app)) as i16;
+        left.max(0) as u16
+    }
+
+    fn digit(self, i: usize) -> u8 {
+        self.digits[i / 2] >> (4 * (i % 2)) & 15
+    }
+
+    /// The digits typed as a number.
+    fn value(self) -> u32 {
+        (0..self.n as usize).fold(0, |v, i| v * 10 + self.digit(i) as u32)
+    }
+
+    fn typed(mut self, d: u8) -> Self {
+        let i = self.n as usize;
+        self.digits[i / 2] = self.digits[i / 2] & !(15 << (4 * (i % 2))) | d << (4 * (i % 2));
+        self.n += 1;
+        self
+    }
+
+    fn put(self, app: &mut App) {
+        app.screen = Screen::Pin(self);
+    }
+
+    fn submit(self, app: &mut App) {
+        if self.n < MIN {
+            return app.show_toast(b"PIN", b"4 to 6 digits", false);
+        }
+        if self.purpose >= SET {
+            let s = &mut app.set;
+            (s.pin, s.pin_len, s.pin_mode) = (self.value(), self.n, self.purpose - SET);
+            app.back();
+            return app.show_toast(b"PIN set", b"", false);
+        }
+        if self.value() == app.set.pin && self.n == app.set.pin_len {
+            app.set.pin_misses = 0;
+            if self.purpose == UNLOCK {
+                app.locked = false;
+                app.back();
+                app.show_toast(b"Keys unlocked", b"", false);
+            } else {
+                app.go_home();
+            }
+            return;
+        }
+        let now = Pin::secs(app);
+        let s = &mut app.set;
+        s.pin_misses += 1;
+        if s.pin_misses >= TRIES {
+            s.pin_misses = 0;
+            s.pin_wait = now.wrapping_add(WAIT_S).max(1);
+        }
+        Pin { n: 0, ..self }.put(app);
+        app.show_toast(b"Wrong PIN", b"", false);
     }
 }
 
@@ -52,91 +131,86 @@ impl View for Pin {
         b.set(b"PIN");
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
-        let mut s = self;
-        if s.waiting(app.now).is_some() {
-            return;
-        }
-        let len = app.prefs.pin_len.clamp(1, 6);
-        match (e.key, e.press) {
-            (Key::Digit(d), Press::Short) if s.n < len => {
-                s.typed[s.n as usize] = d;
-                s.n += 1;
-            }
-            (Key::Exit, Press::Short) if s.n > 0 => s.n -= 1,
-            (Key::Exit, Press::Short) if !s.boot => return app.back(), // still locked
-            _ => return,
-        }
-        if s.n == len {
-            if s.typed[..len as usize] == app.prefs.pin[..len as usize] {
-                if !s.boot {
-                    app.locked = false;
-                    app.show_toast(b"Keys unlocked", b"", false);
-                }
-                return app.go_home();
-            }
-            s.n = 0;
-            s.misses += 1;
-            if s.misses.is_multiple_of(TRIES) {
-                s.wait_until = app.now.wrapping_add(WAIT_MS).max(1); // PIN-3
-            }
-        }
-        app.screen = Screen::Pin(s);
+    /// At power on and at unlock every key is the PIN's (PIN-1; the keys are locked otherwise, KEY-16).
+    fn modal(self) -> bool {
+        self.purpose < SET
     }
 
-    /// PIN-1: before anything else is usable, PTT included at power on.
+    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+        if e.press != Press::Short {
+            return;
+        }
+        let wait = self.waiting(app);
+        match e.key {
+            Key::Digit(d) if wait == 0 && self.n < MAX => self.typed(d).put(app),
+            Key::Left => Pin { n: self.n.saturating_sub(1), ..self }.put(app),
+            Key::Menu if wait == 0 => self.submit(app),
+            Key::Exit if self.blocks() => Pin { n: self.n.saturating_sub(1), ..self }.put(app),
+            Key::Exit => app.back(),
+            _ => {}
+        }
+    }
+
     fn ptt(self, app: &mut App, down: bool) {
-        if down && !self.boot {
+        // At power on PTT waits for the PIN too (PIN-1); otherwise PTT works as always (KEY-14).
+        if down && !self.blocks() {
             super::nav::transmit(app);
         }
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
-        let len = app.prefs.pin_len.clamp(1, 6) as i32;
-        let wait = self.waiting(app.now).map(|ms| ms.div_ceil(1000));
-        if app.dirty(R_TOP, hash(&self.boot)) {
-            lcd.fill(0, 21, 240, 279, BG);
-            w::field(lcd, 8, 224, 50, 70, 65, Align::Center, b"Enter your PIN", &UI_12B, TEXT, BG);
-            para(lcd, 16, 220, 208, 4, 17, b"Forgotten it? Hold MENU while switching on: a settings reset clears the PIN and keeps your channels.", &UI_12, SUB, BG);
+        let set = self.purpose >= SET;
+        let head: &[u8] = if set { b"New PIN" } else { b"Enter PIN" };
+        if app.dirty(R_TOP, hash(&head)) {
+            w::field(lcd, 10, 220, 40, 66, 60, Align::Center, head, &UI_15B, TEXT, BG);
+            let t: &[u8] = if set { b"4 to 6 digits." } else { b"This radio has a PIN." };
+            w::field(lcd, 10, 220, 70, 88, 84, Align::Center, t, &UI_12, SUB, BG);
         }
-        if app.dirty(R_FREQ, hash(&(self.n, len))) {
-            let x0 = 120 - (len * 28 - 12) / 2;
-            lcd.fill(0, 96, 240, 20, BG);
-            for i in 0..len {
-                let x = x0 + i * 28;
-                if i < self.n as i32 {
-                    lcd.fill_r(x, 98, 16, 16, 8, TEXT); // PIN-2: masked
-                } else {
-                    lcd.fill_r(x, 98, 16, 16, 8, SUB);
-                    lcd.fill_r(x + 2, 100, 12, 12, 6, BG);
+        // Six boxes: a dot per digit typed (PIN-2), the digit itself when setting.
+        let n = self.n;
+        if app.dirty(R_ROW, hash(&(n, self.value(), set))) {
+            let mut digits = [0u8; 6];
+            for (i, d) in digits.iter_mut().enumerate().take(n as usize) {
+                *d = b'0' + self.digit(i);
+            }
+            for i in 0..MAX as i32 {
+                let (bx, filled) = (36 + 29 * i, i < n as i32);
+                lcd.fill(bx, 110, 24, 32, BG);
+                lcd.frame_r(bx, 110, 24, 32, 4, if i == n as i32 { BLUE } else { LINE });
+                if filled && set {
+                    lcd.text4_aligned(bx + 12, 132, Align::Center, &digits[i as usize..i as usize + 1], &UI_15B, TEXT, BG);
+                } else if filled {
+                    lcd.fill_r(bx + 8, 122, 8, 8, 4, TEXT);
                 }
             }
         }
-        let mut t = Buf::<40>::new();
-        let mut col = SUB;
-        match wait {
-            Some(s) => {
-                let _ = uwrite!(t, "Three wrong entries. Wait {} s", s);
-                col = AMBER;
-            }
-            None if self.misses > 0 => {
-                let _ = uwrite!(t, "Wrong PIN. {} attempts left", TRIES - self.misses % TRIES);
-                col = AMBER;
-            }
-            None => {
-                let _ = uwrite!(t, "{} digits", len);
+        let wait = self.waiting(app);
+        let mut line = Buf::<32>::new();
+        let mut c = SUB;
+        if wait > 0 {
+            let _ = uwrite!(line, "Wait {} s", wait);
+            c = AMBER;
+        } else if !set {
+            let left = TRIES - app.set.pin_misses;
+            let _ = uwrite!(line, "{} attempt{} left", left, if left == 1 { "" } else { "s" });
+            if left < TRIES {
+                c = AMBER;
             }
         }
-        if app.dirty(R_NOTE, hash(&(t, col))) {
-            w::field(lcd, 8, 224, 136, 154, 150, Align::Center, t.as_bytes(), &UI_12, col, BG);
+        if app.dirty(R_NOTE, hash(&(line, c))) {
+            w::field(lcd, 10, 220, 156, 174, 170, Align::Center, line.as_bytes(), &UI_12, c, BG);
+        }
+        if !set && app.dirty(R_HELP, 1) {
+            w::wrap(lcd, 16, 208, 200, 260, 214, 15, b"Forgot it? Hold MENU while switching on: a settings reset clears the PIN.", &UI_12, SUB, BG);
         }
     }
 
     fn hints(self, _: &App) -> Hints {
-        if self.boot {
-            Hints::new(&[("0-9", "PIN"), ("BACK", "Delete")])
+        let ok = if self.purpose >= SET { "Save" } else { "Unlock" };
+        if self.blocks() {
+            Hints::new(&[("0-9", "Type"), ("OK", ok), ("BACK", "Delete")])
         } else {
-            Hints::new(&[("0-9", "PIN"), ("BACK", "Cancel")])
+            Hints::new(&[("0-9", "Type"), ("OK", ok), ("BACK", "Cancel")])
         }
     }
 }

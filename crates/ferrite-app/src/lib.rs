@@ -22,13 +22,14 @@ extern crate std;
 pub mod chan;
 pub mod data;
 pub mod keys;
-pub mod prefs;
 pub mod sample;
 pub mod screens;
+pub mod settings;
 pub mod slot;
 
 use chan::{ChanWrite, Channel, ChannelStore};
-use prefs::{Prefs, DEFAULT_PREFS};
+use screens::alert::AlertInfo;
+use settings::Settings;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
 use ferrite_core::msg::{LiveAll, Param, RadioCmd, SLOTS};
@@ -218,8 +219,6 @@ pub struct App {
     /// The channel write for the store's owner ([`App::pop_write`]): one, as every input makes at most one and
     /// the owner drains after every input.
     write: Option<ChanWrite>,
-    /// Radio-wide settings (callsign, region, PIN, home channel...).
-    prefs: Prefs,
     /// The text being typed (A7): a channel name, a callsign; shared by the text entry and the forms that
     /// open it, as only one text is edited at a time.
     text: Buf<16>,
@@ -228,6 +227,12 @@ pub struct App {
     pub(crate) drawn: Drawn,
     /// Radio activity: transmit, the exclusive modes, scan hits, region ([`screens::activity`]).
     pub(crate) radio: screens::activity::RadioUi,
+    /// Radio-wide settings: not the App's, only borrowed ([`settings`]).
+    set: &'static mut Settings,
+    /// The last alert, for the alert screen (WX-5): kept outside the App too, as it outlives the screen.
+    pub(crate) alert_info: &'static mut AlertInfo,
+    /// The user's answer to a link write approval, for the Link task.
+    link_answer: Option<screens::link::LinkAnswer>,
 }
 
 /// Screens remembered for BACK: menu, group, item and one more.
@@ -237,8 +242,10 @@ const BACK_DEPTH: usize = 4;
 const NO_SLOT: u8 = 0xFF;
 
 impl App {
-    /// Three slots: A on 146.520, B on 443.475, C on 118.950 (the look review's sample), all VFO.
-    pub fn new() -> Self {
+    /// Three slots: A on 146.520, B on 443.475, C on 118.950 (the look review's sample), all VFO. The settings
+    /// (stored, or [`Settings::DEFAULT`] on a first boot) and the last alert record ([`AlertInfo::NONE`]) are
+    /// the caller's, borrowed for the App's lifetime: the App holds only UI state.
+    pub fn new(set: &'static mut Settings, alert: &'static mut AlertInfo) -> Self {
         let mut app = App {
             screen: Screen::Home,
             slots: [Slot::new(mhz(146) + 52_000), Slot::new(mhz(443) + 47_500), Slot::new(mhz(118) + 95_000)],
@@ -260,11 +267,13 @@ impl App {
             relay_mask: 0,
             out: Outbox { q: [None; 16], head: 0, len: 0, sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
-            prefs: DEFAULT_PREFS,
             text: Buf::new(),
             back: [None; BACK_DEPTH],
             drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS] },
             radio: screens::activity::RadioUi::new(),
+            set,
+            alert_info: alert,
+            link_answer: None,
         };
         for s in 0..SLOTS as u8 {
             app.send_slot(s);
@@ -285,6 +294,11 @@ impl App {
 
     pub fn slot(&self, i: u8) -> &Slot {
         &self.slots[i as usize % SLOTS]
+    }
+
+    /// A toast is showing.
+    pub fn toast_up(&self) -> bool {
+        self.toast.is_some()
     }
 
     pub fn locked(&self) -> bool {
@@ -351,29 +365,6 @@ impl App {
         }
     }
 
-    pub fn prefs(&self) -> &Prefs {
-        &self.prefs
-    }
-
-    /// Settings as stored (the firmware's settings, the simulator's sample, tests).
-    pub fn set_prefs(&mut self, p: Prefs) {
-        self.prefs = p;
-    }
-
-    /// First boot (SETUP-1): setup runs before anything else.
-    pub fn start_setup(&mut self) {
-        self.go_home();
-        self.open(Dest::Setup);
-    }
-
-    /// Power on with a PIN set (PIN-1): it is asked before anything else.
-    pub fn start_pin(&mut self) {
-        if self.prefs.pin_len > 0 && self.prefs.pin_mode > 0 {
-            self.go_home();
-            self.open(Dest::Pin);
-        }
-    }
-
     /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
     pub fn set_channel(&mut self, slot: u8, zone: u8, pos: u16, store: &impl ChannelStore) {
         let s = &mut self.slots[slot as usize % SLOTS];
@@ -402,15 +393,67 @@ impl App {
     }
 
     /// A message, decode or alert arrived: a toast and the inbox count (SBAR-6); an alert also opens the alert
-    /// screen.
+    /// screen, with `body` as its event and `head` as its originator.
     pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
         self.inbox = self.inbox.saturating_add(1);
         self.alert |= alert;
         self.show_toast(head, body, true);
         if alert {
-            self.radio.alert.set(head, body, self.now);
+            let mut a = screens::alert::AlertInfo::NONE;
+            a.event.set(body);
+            a.from.set(head);
+            *self.alert_info = a;
             self.open(Dest::Alert); // WX-4: over any screen
         }
+    }
+
+    /// An alert with everything the decoder knows (WX-5): over any screen, flashing, until OK (WX-4, WX-6).
+    pub fn raise_alert(&mut self, a: &screens::alert::AlertInfo) {
+        self.inbox = self.inbox.saturating_add(1);
+        self.alert = true;
+        *self.alert_info = *a;
+        self.open(Dest::Alert);
+    }
+
+    /// First boot (no layout header: BOOT-12): setup runs, and BACK on its first page has nowhere to go.
+    pub fn first_boot(&mut self) {
+        self.go_home();
+        self.screen = Screen::Setup(screens::setup::Setup::new(true));
+    }
+
+    /// At power on, after the self-test: the PIN, if one is set (PIN-1, BOOT-13).
+    pub fn ask_pin(&mut self) {
+        if self.set.pin_len > 0 && self.set.pin_mode > 0 {
+            self.go_home();
+            self.screen = Screen::Pin(screens::pin::Pin::power_on());
+        }
+    }
+
+    /// A matrix code went down or up, mapped to a key or not: the key test shows it (KEY-2). The firmware calls
+    /// this for every code, before [`App::key_down`] / [`App::key_up`] for the mapped ones.
+    pub fn raw_key(&mut self, code: u8, down: bool) {
+        self.screen.raw(self, ferrite_core::keys::key(code), Some(code), down);
+    }
+
+    /// The answer to the last write approval or write session (allowed, refused, cancelled), once.
+    pub fn take_link_answer(&mut self) -> Option<screens::link::LinkAnswer> {
+        self.link_answer.take()
+    }
+
+    /// The callsign, for the boot screen (empty until set).
+    pub fn callsign(&self) -> &[u8] {
+        self.set.callsign.as_bytes()
+    }
+
+    /// The radio-wide settings.
+    pub fn settings(&self) -> &Settings {
+        self.set
+    }
+
+    /// The radio-wide settings, to change from outside (the simulator's sample, tests; the link once it
+    /// writes them). The radio state that follows from them is sent again.
+    pub fn settings_mut(&mut self) -> &mut Settings {
+        self.set
     }
 
     // ---- inputs ----
@@ -420,6 +463,7 @@ impl App {
         self.keys.down(key, now);
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
+        self.screen.raw(self, Some(key), None, true);
         if key == Key::Ptt {
             // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there.
             self.screen.ptt(self, true);
@@ -428,6 +472,7 @@ impl App {
 
     pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        self.screen.raw(self, Some(key), None, false);
         if key == Key::Ptt {
             self.screen.ptt(self, false);
             self.ptt_released(); // TX-25: whatever the screen did, PTT up unkeys
@@ -477,6 +522,9 @@ impl App {
         }
         self.radio_tick(live);
         self.screen.tick(self, live);
+        if self.screen == Screen::Home {
+            self.home_stops_modes(); // however the screen went home
+        }
     }
 
     fn tick_keys(&mut self, now: u32, store: &impl ChannelStore) {
@@ -499,13 +547,16 @@ impl App {
 
     fn on_key(&mut self, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
-        if matches!(self.screen, Screen::Pin(_)) {
-            return self.screen.key(self, e, store); // PIN-1: nothing else until it is right
+        if self.screen.modal() {
+            return self.screen.key(self, e, store); // the PIN at power on, power off, a link write
         }
         // Anywhere: hold BACK goes home (KEY-5); hold # toggles the lock (KEY-13).
         match (e.key, e.press) {
             (Key::Exit, Long) => return self.go_home(),
-            (Key::Hash, Long) if self.locked && self.prefs.pin_at_unlock() => return self.open(Dest::Pin), // KEY-16
+            (Key::Hash, Long) if self.locked && self.set.pin_mode == 2 => {
+                // KEY-16: unlocking asks for the PIN
+                return self.open(Dest::Pin);
+            }
             (Key::Hash, Long) => {
                 self.locked = !self.locked;
                 return self.show_toast(if self.locked { b"Keys locked" } else { b"Keys unlocked" }, b"", false);
@@ -534,21 +585,26 @@ impl App {
     /// Opens a screen by where it is in the manual ([`Dest`]), remembering this one for BACK. Screens not built
     /// yet open as a "coming" placeholder ([`screens::nav::enter`]).
     pub fn open(&mut self, dest: Dest) {
+        self.push_back();
+        self.screen = screens::nav::enter(dest, self);
+    }
+
+    /// Remembers the screen up now for BACK (MENU-24); full, the oldest goes.
+    pub(crate) fn push_back(&mut self) {
         if self.back[BACK_DEPTH - 1].is_some() {
-            self.back.copy_within(1.., 0); // full: the oldest goes
+            self.back.copy_within(1.., 0);
             self.back[BACK_DEPTH - 1] = None;
         }
         if let Some(b) = self.back.iter_mut().find(|b| b.is_none()) {
             *b = Some(self.screen);
         }
-        self.screen = screens::nav::enter(dest, self);
     }
 
     /// BACK on a screen opened with [`App::open`]: the screen it was opened from, or home (MENU-24).
     fn back(&mut self) {
         match self.back.iter_mut().rev().find(|b| b.is_some()).and_then(|b| b.take()) {
-            Some(s) => self.screen = s,
-            None => self.go_home(),
+            Some(s) if s != Screen::Home => self.screen = s,
+            _ => self.go_home(), // home by BACK too stops what the screens started
         }
     }
 
@@ -649,7 +705,7 @@ impl App {
         if self.undo.is_none() {
             let s = &self.slots[a as usize];
             let ch = s.ch.filter(|_| s.on_channel()).map(|c| ChUndo { num: c.num, zone: c.zone, flags: c.flags, rx: c.rx });
-            self.undo = Some(Undo { slot: a, cfg: *s.cfg(), ch, home: self.prefs.home_ch, watch: self.watch, bsave: self.bsave, until: 0 });
+            self.undo = Some(Undo { slot: a, cfg: *s.cfg(), ch, home: self.set.home_ch, watch: self.watch, bsave: self.bsave, until: 0 });
         }
         if let Some(u) = &mut self.undo {
             u.until = self.now.wrapping_add(UNDO_MS);
@@ -666,7 +722,7 @@ impl App {
                         (c.num, c.zone, c.flags, c.rx, c.cfg) = (old.num, old.zone, old.flags, old.rx, u.cfg);
                         s.zone = old.zone;
                     }
-                    self.prefs.home_ch = u.home;
+                    self.set.home_ch = u.home;
                     self.save_channel(u.slot, from);
                 }
                 _ => *s.cfg_mut() = u.cfg,

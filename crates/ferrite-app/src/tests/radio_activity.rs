@@ -325,8 +325,8 @@ fn hf_mode() {
     assert!(matches!(t.app.screen(), Screen::Hf(_)), "BACK returns to HF mode");
     ptt(&mut t, false);
     // 10 m FM on chip 1 transmits from HF mode, without going home (HF-23).
-    t.app.radio.hf = mhz(29) + 60_000;
-    t.app.radio.hf_mode = 4;
+    t.app.set.hf.freq = mhz(29) + 60_000;
+    t.app.set.hf.mode = crate::screens::hf::FM;
     ptt(&mut t, true);
     assert!(matches!(t.app.screen(), Screen::Transmit(_)), "{:?}", t.app.screen());
     assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 3, on: true }));
@@ -344,7 +344,7 @@ fn fm_broadcast() {
     t.hold(Key::Digit(2));
     assert!(matches!(t.app.screen(), Screen::Fm(_)));
     t.knob(1);
-    assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(9_820))));
+    assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_120))));
     t.tap(Key::Exit);
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
 }
@@ -371,9 +371,9 @@ fn alert_screen() {
     t.tap(Key::Menu);
     t.app.notify(b"Tornado warning", b"Ottawa", true);
     assert!(matches!(t.app.screen(), Screen::Alert(_)));
-    assert!(!t.app.radio.alert.silenced);
+    assert!(matches!(t.app.screen(), Screen::Alert(a) if !a.silenced));
     t.tap(Key::Menu);
-    assert!(t.app.radio.alert.silenced);
+    assert!(matches!(t.app.screen(), Screen::Alert(a) if a.silenced));
     assert!(matches!(t.app.screen(), Screen::Alert(_)));
     t.tap(Key::Menu);
     assert_eq!(t.app.screen().name(), "Event log");
@@ -398,7 +398,7 @@ fn crossband_repeater() {
     t.knob(-1); // back to A
     t.tap(Key::Hash);
     assert_eq!(t.app.radio.mode, Mode::Xb, "{:?}", t.app.toast.map(|x| std::string::String::from_utf8_lossy(x.body.as_bytes()).into_owned()));
-    assert!(t.cmds().contains(&RadioCmd::Crossband(Some(t.app.radio.xb))));
+    assert!(t.cmds().contains(&RadioCmd::Crossband(Some(t.app.set.xb))));
     ptt(&mut t, true);
     assert_eq!(refused(&t), Some(Refusal::Crossband), "XB-14");
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));

@@ -114,7 +114,7 @@ impl View for Home {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         // HOME-3: the other two layouts draw differently; the keys are the same.
-        match app.radio.layout {
+        match app.set.layout {
             1 => return super::layouts::single(app, lcd, cx),
             2 => return super::layouts::activity(app, lcd, cx),
             _ => {}

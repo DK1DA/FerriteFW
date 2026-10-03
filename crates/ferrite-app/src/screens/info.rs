@@ -1,0 +1,358 @@
+//! The system's read-only pages, one module because they are one pattern (a title, label + value rows, a note
+//! at the foot): About and its self-test detail (D7; chapter 36, SELF-5 to SELF-7), calibration (D8; CAL-5 to
+//! CAL-7), advanced squelch (D10; SQL-1, SQL-2: read only for now), SSB patch status (D16; HF-20, SELF-6), the
+//! SSB patch confirm at boot (D15; INST-12), pair Bluetooth (D19), power off (D22; PWR-17), empty battery
+//! (D23; PWR-16) and the mailbox (D24; chapter 38, no menu number yet).
+//!
+//! Each page is data in [`PAGES`]: its rows name a value function, so adding a row is one line.
+
+use super::groups::cal_text;
+use super::shared::*;
+use super::{Cx, Hints, View};
+use crate::chan::ChannelStore;
+use crate::keys::{KeyEvent, Press};
+use crate::{App, Screen};
+use ferrite_core::keys::Key;
+use ferrite_core::msg::{CalState, Device};
+use ferrite_core::VERSION;
+use ferrite_ui::assets::*;
+use ferrite_ui::gfx::*;
+use ferrite_ui::panel::Panel;
+use ferrite_ui::text::{Buf, Zero};
+use ferrite_ui::widgets as w;
+use ufmt::uwrite;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Page {
+    About,
+    Checks,
+    Calibration,
+    AdvSquelch,
+    SsbPatch,
+    SsbConfirm,
+    PairBt,
+    PowerOff,
+    EmptyBattery,
+    Mailbox,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Info {
+    pub page: Page,
+}
+
+/// A row's value: written into the buffer, its colour returned.
+type Value = fn(&App, &Device, &mut Buf<28>) -> u16;
+type InfoRow = (&'static str, Value);
+
+/// A page: status-bar name, rows, the note at the foot, hints.
+struct PageDef {
+    title: &'static str,
+    rows: &'static [InfoRow],
+    note: &'static str,
+    hints: &'static [(&'static str, &'static str)],
+}
+
+fn fixed(b: &mut Buf<28>, s: &str, c: u16) -> u16 {
+    b.set(s.as_bytes());
+    c
+}
+
+/// Why transmit is locked, if it is (BOOT-11, SELF-2).
+pub(crate) fn tx_lock(dev: &Device) -> Option<&'static str> {
+    let t = &dev.selftest;
+    if !dev.tx_built {
+        Some("RX-only build")
+    } else if !t.mcu_ok {
+        Some("Locked: MCU check")
+    } else if t.cal != CalState::Ok {
+        Some("Locked: calibration")
+    } else if dev.battery_cutoff {
+        Some("Battery too low")
+    } else {
+        None
+    }
+}
+
+/// The self-test's checks: name and result (None = not run).
+fn checks(dev: &Device) -> [(&'static str, Option<bool>); 6] {
+    let t = &dev.selftest;
+    let read = |v: u32, ok: bool| (v != 0).then_some(ok);
+    [
+        ("MCU", read(t.idcode, t.mcu_ok)),
+        ("SPI flash", read(t.flash_id, t.flash_mb > 0)),
+        ("BK4829 VHF", Some(t.chips & 1 != 0)),
+        ("BK4829 UHF", Some(t.chips & 2 != 0)),
+        ("SI4732", Some(t.si4732)),
+        ("Calibration", (t.cal != CalState::Unknown).then_some(t.cal == CalState::Ok)),
+    ]
+}
+
+fn check_row(i: usize, d: &Device, b: &mut Buf<28>) -> u16 {
+    match checks(d)[i].1 {
+        Some(true) => fixed(b, "OK", GREEN),
+        Some(false) => fixed(b, "Failed", RED),
+        None => fixed(b, "Not run", SUB),
+    }
+}
+
+fn volts(b: &mut Buf<28>, mv: u16) {
+    let _ = uwrite!(b, "{}.{} V", mv / 1000, Zero((mv % 1000 / 10) as u32, 2));
+}
+
+const ABOUT: [InfoRow; 10] = [
+    ("Version", |_, _, b| fixed(b, VERSION, TEXT)),
+    ("Build", |_, d, b| fixed(b, if d.tx_built { "Transmit" } else { "Receive only" }, TEXT)),
+    ("MCU", |_, d, b| {
+        let t = &d.selftest;
+        match (t.idcode, t.mcu_ok) {
+            (0, _) => fixed(b, "Not read", SUB),
+            (_, true) => fixed(b, "AT32F403A", TEXT),
+            (id, false) => {
+                let _ = uwrite!(b, "Unknown {:08X}", id);
+                RED
+            }
+        }
+    }),
+    ("SPI flash", |_, d, b| {
+        let t = &d.selftest;
+        if t.flash_id == 0 {
+            return fixed(b, "No answer", RED);
+        }
+        let _ = uwrite!(b, "{} MB \u{b7} {:06X}", t.flash_mb, t.flash_id);
+        TEXT
+    }),
+    ("Calibration", |_, d, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { TEXT } else { AMBER })),
+    ("Transmit", |_, d, b| match tx_lock(d) {
+        None => fixed(b, "Ready", GREEN),
+        Some(why) => fixed(b, why, AMBER),
+    }),
+    ("Self-test", |_, d, b| {
+        let c = checks(d);
+        let ok = c.iter().filter(|x| x.1 == Some(true)).count();
+        let failed = c.iter().any(|x| x.1 == Some(false));
+        let _ = uwrite!(b, "{} of {} passed", ok, c.len());
+        if failed { RED } else { TEXT }
+    }),
+    ("Battery", |_, d, b| {
+        volts(b, d.battery_mv);
+        let t = d.selftest.battery_trim as i32;
+        let _ = uwrite!(b, " \u{b7} trim {}{}.{}", if t < 0 { "-" } else { "+" }, t.abs() / 100, Zero(t.unsigned_abs() % 100, 2));
+        TEXT
+    }),
+    ("Uptime", |a, _, b| {
+        let m = a.now / 60_000;
+        let _ = uwrite!(b, "{} h {} min", m / 60, m % 60);
+        TEXT
+    }),
+    ("SSB patch", |_, d, b| if d.selftest.ssb_patch { fixed(b, "Installed", TEXT) } else { fixed(b, "Not installed", SUB) }),
+];
+
+const CHECKS: [InfoRow; 6] = [
+    ("MCU", |_, d, b| check_row(0, d, b)),
+    ("SPI flash", |_, d, b| check_row(1, d, b)),
+    ("BK4829 VHF", |_, d, b| check_row(2, d, b)),
+    ("BK4829 UHF", |_, d, b| check_row(3, d, b)),
+    ("SI4732", |_, d, b| check_row(4, d, b)),
+    ("Calibration", |_, d, b| check_row(5, d, b)),
+];
+
+/// CAL-6's checks, all from one result until the checks report one by one.
+fn cal_part(d: &Device, b: &mut Buf<28>) -> u16 {
+    match d.selftest.cal {
+        CalState::Ok => fixed(b, "OK", GREEN),
+        CalState::Unknown => fixed(b, "Not checked", SUB),
+        CalState::Blank => fixed(b, "Blank", AMBER),
+        _ => fixed(b, "See status", AMBER),
+    }
+}
+
+const CALIBRATION: [InfoRow; 7] = [
+    ("Status", |_, d, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { GREEN } else { AMBER })),
+    ("Programmed", |_, d, b| cal_part(d, b)),
+    ("PA tables", |_, d, b| cal_part(d, b)),
+    ("TX windows", |_, d, b| cal_part(d, b)),
+    ("Crystal trim", |_, d, b| cal_part(d, b)),
+    ("CRC at install", |_, d, b| match d.selftest.cal {
+        CalState::CrcMismatch => fixed(b, "Changed", RED),
+        CalState::Unknown => fixed(b, "Not checked", SUB),
+        _ => fixed(b, "Matches", GREEN),
+    }),
+    ("User trims", |_, _, b| fixed(b, "MENU 0 9 7", SUB)),
+];
+
+const ADV_SQUELCH: [InfoRow; 7] = [
+    ("2 m", |_, _, b| fixed(b, "Calibration table", SUB)),
+    ("1.25 m", |_, _, b| fixed(b, "Calibration table", SUB)),
+    ("70 cm", |_, _, b| fixed(b, "Calibration table", SUB)),
+    ("Airband", |_, _, b| fixed(b, "Calibration table", SUB)),
+    ("Marine", |_, _, b| fixed(b, "Calibration table", SUB)),
+    ("Squelch tail", |_, _, b| fixed(b, "150 ms", TEXT)),
+    ("Levels", |_, _, b| fixed(b, "0-9 per slot", TEXT)),
+];
+
+const SSB_PATCH: [InfoRow; 5] = [
+    ("State", |_, d, b| if d.selftest.ssb_patch { fixed(b, "Verified", GREEN) } else { fixed(b, "Not installed", AMBER) }),
+    ("Stored at", |_, _, b| fixed(b, "SPI 0x06B000", TEXT)),
+    ("Size", |_, _, b| fixed(b, "1,979 x 8 bytes", TEXT)),
+    ("Loads", |_, _, b| fixed(b, "Entering HF mode", TEXT)),
+    ("Source", |_, _, b| fixed(b, "Your stock .BTF", TEXT)),
+];
+
+const MAILBOX: [InfoRow; 4] = [
+    ("Mailbox", |_, _, b| fixed(b, "Off", TEXT)),
+    ("SSID", |a, _, b| {
+        if a.set.callsign.is_empty() {
+            return fixed(b, "Needs a callsign", AMBER);
+        }
+        b.set(a.set.callsign.as_bytes());
+        b.push(b"-1");
+        TEXT
+    }),
+    ("Bulletins", |_, _, b| fixed(b, "On", TEXT)),
+    ("Messages", |_, _, b| fixed(b, "None", SUB)),
+];
+
+const NONE: [InfoRow; 0] = [];
+const BACK_ONLY: [(&str, &str); 1] = [("BACK", "Back")];
+
+fn def(p: Page) -> PageDef {
+    match p {
+        Page::About => PageDef {
+            title: "About",
+            rows: &ABOUT,
+            note: "Updating: hold the bottom two side buttons while switching on for the stock bootloader, then use the web flasher.",
+            hints: &[(ARROWS_LR, "Self-test"), ("BACK", "Back")],
+        },
+        Page::Checks => PageDef {
+            title: "Self-test",
+            rows: &CHECKS,
+            note: "A failed check never stops receive. Transmit needs the MCU and calibration checks to pass.",
+            hints: &[(ARROWS_LR, "About"), ("BACK", "Back")],
+        },
+        Page::Calibration => PageDef {
+            title: "Calibrate",
+            rows: &CALIBRATION,
+            note: "Read only: Ferrite never writes the factory calibration. A failed check locks transmit on every band.",
+            hints: &BACK_ONLY,
+        },
+        Page::AdvSquelch => PageDef {
+            title: "Squelch",
+            rows: &ADV_SQUELCH,
+            note: "Noise open, ceiling, RSSI open, glitch and hysteresis per band come from the calibration. Editing comes later.",
+            hints: &BACK_ONLY,
+        },
+        Page::SsbPatch => PageDef {
+            title: "SSB patch",
+            rows: &SSB_PATCH,
+            note: "Import it from your own stock firmware with the flasher (--ssb-from) or the web app. Without it HF mode has AM only.",
+            hints: &BACK_ONLY,
+        },
+        Page::SsbConfirm => PageDef {
+            title: "SSB patch",
+            rows: &NONE,
+            note: "",
+            hints: &[("OK", "Use it"), ("BACK", "Not now")],
+        },
+        Page::PairBt => PageDef {
+            title: "Pair BT",
+            rows: &NONE,
+            note: "",
+            hints: &BACK_ONLY,
+        },
+        Page::PowerOff | Page::EmptyBattery => PageDef { title: "Power", rows: &NONE, note: "", hints: &[] },
+        Page::Mailbox => PageDef {
+            title: "Mailbox",
+            rows: &MAILBOX,
+            note: "Callers connect to your callsign-SSID at 1200 baud to leave and read mail. Settings come with the packet station.",
+            hints: &BACK_ONLY,
+        },
+    }
+}
+
+/// Pages that are a message, not rows: heading, text lines, colour.
+fn message(p: Page, dev: &Device, b: &mut Buf<28>) -> Option<(&'static str, &'static str, u16)> {
+    Some(match p {
+        Page::SsbConfirm => (
+            "Unknown SSB patch",
+            "The patch in flash doesn't match a known stock version. Use it for USB, LSB and CW? You can change this in MENU 0 9 6.",
+            AMBER,
+        ),
+        Page::PairBt => (
+            "Pair Bluetooth",
+            "Turn Bluetooth on (MENU 0 9 2 1), then pick the radio in the web app. Its first write asks here; after that the device is trusted until you forget it (MENU 0 9 2 2).",
+            TEXT,
+        ),
+        Page::PowerOff => ("Saving...", "Finishing writes, then off.", TEXT),
+        Page::EmptyBattery => {
+            volts(b, dev.battery_mv);
+            ("Battery empty", "Switching off safely.", RED)
+        }
+        _ => return None,
+    })
+}
+
+impl View for Info {
+    fn name(self) -> &'static str {
+        def(self.page).title
+    }
+
+    fn modal(self) -> bool {
+        matches!(self.page, Page::PowerOff | Page::EmptyBattery)
+    }
+
+    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+        if e.press != Press::Short || self.modal() {
+            return;
+        }
+        match (self.page, e.key) {
+            (Page::About, Key::Left | Key::Right) => app.screen = Screen::Info(Info { page: Page::Checks }),
+            (Page::Checks, Key::Left | Key::Right) => app.screen = Screen::Info(Info { page: Page::About }),
+            (Page::SsbConfirm, Key::Menu) => {
+                app.back();
+                app.show_toast(b"SSB patch", b"in use", false);
+            }
+            (_, Key::Exit) => app.back(),
+            _ => {}
+        }
+    }
+
+    fn ptt(self, app: &mut App, down: bool) {
+        if down && !self.modal() {
+            super::nav::transmit(app);
+        }
+    }
+
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
+        let d = def(self.page);
+        app.new_page(lcd, hash(&self.page));
+        let mut b = Buf::<28>::new();
+        if let Some((head, text, c)) = message(self.page, cx.dev, &mut b) {
+            app.message(lcd, head.as_bytes(), b.as_bytes(), text.as_bytes(), c);
+            if self.page == Page::PowerOff {
+                // A bar that moves while writes finish (PWR-17).
+                let pct = ((app.now / 40) % 100) as u8;
+                if app.dirty(R_NOTE, hash(&pct)) {
+                    w::progress(lcd, 60, 240, 120, 4, pct, BLUE);
+                }
+            }
+            return;
+        }
+        for (i, (label, f)) in d.rows.iter().enumerate() {
+            b.clear();
+            let c = f(app, cx.dev, &mut b);
+            app.kv_row(lcd, i, 22 + 20 * i as i32, 20, label.as_bytes(), b.as_bytes(), c, false);
+        }
+        if !d.note.is_empty() && app.dirty(R_HELP, hash(&self.page)) {
+            let y = 30 + 20 * d.rows.len() as i32;
+            let h = (292 - y).min(110);
+            lcd.fill(0, y - 6, 240, 300 - y + 6, BG);
+            lcd.fill_r(8, y, 224, h, 4, SURFACE);
+            w::wrap(lcd, 16, 208, y + 3, y + h - 3, y + 16, 15, d.note.as_bytes(), &UI_12, TEXT, SURFACE);
+        }
+    }
+
+    fn hints(self, _: &App) -> Hints {
+        Hints::new(def(self.page).hints)
+    }
+}

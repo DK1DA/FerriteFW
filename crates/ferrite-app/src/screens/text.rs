@@ -27,9 +27,6 @@ pub enum TextFor {
     SaveName,
     /// 0 8 7 1 (SETUP-12).
     Callsign,
-    /// Setup's owner card, name and contact (SETUP-11).
-    OwnerName,
-    OwnerContact,
 }
 
 impl TextFor {
@@ -37,8 +34,6 @@ impl TextFor {
         match self {
             TextFor::ChannelName | TextFor::SaveName => "Channel name",
             TextFor::Callsign => "Callsign",
-            TextFor::OwnerName => "Owner's name",
-            TextFor::OwnerContact => "Owner's contact",
         }
     }
 
@@ -195,20 +190,7 @@ fn keep(to: TextFor, app: &mut App) {
     match to {
         TextFor::ChannelName => super::chedit::edit(app, |c| c.set_name(t.as_bytes())),
         TextFor::SaveName => {}
-        TextFor::Callsign => {
-            app.prefs.callsign = [0; 10];
-            for (d, s) in app.prefs.callsign.iter_mut().zip(t.as_bytes()) {
-                *d = s.to_ascii_uppercase(); // SETUP-12
-            }
-        }
-        TextFor::OwnerName => copy(&mut app.prefs.owner_name, t.as_bytes()),
-        TextFor::OwnerContact => copy(&mut app.prefs.owner_contact, t.as_bytes()),
+        TextFor::Callsign => app.set.set_callsign(t.as_bytes()), // SETUP-12
     }
     app.back();
-}
-
-fn copy(d: &mut [u8; 16], s: &[u8]) {
-    *d = [0; 16];
-    let n = s.len().min(16);
-    d[..n].copy_from_slice(&s[..n]);
 }

@@ -38,7 +38,7 @@ pub const HF_SLOT: u8 = 3;
 /// The frequency a slot transmits on: the offset applied unless reversed (TX-6 checks this one).
 pub fn tx_freq(app: &App, slot: u8) -> Freq10 {
     if slot == HF_SLOT {
-        return app.radio.hf;
+        return app.set.hf.freq;
     }
     let s = app.slot(slot);
     let c = s.cfg();
@@ -60,7 +60,7 @@ pub fn refusal(app: &App, slot: u8) -> Option<Refusal> {
     if app.radio.batt_cut {
         return Some(Refusal::Battery);
     }
-    if let Err(r) = txplan::check(tx_freq(app, slot), app.radio.region(), app.radio.extend_tx) {
+    if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
         return Some(r);
     }
     // TX-21: carrier busy lockout refuses while the squelch is open (wrong tone needs the tone detector).
@@ -114,7 +114,7 @@ pub fn auto_tx(app: &mut App, slot: u8, what: &[u8]) -> bool {
     let f = tx_freq(app, slot);
     let why: &[u8] = if txplan::emergency(f) {
         b"emergency frequency"
-    } else if app.radio.callsign().is_empty() {
+    } else if app.set.callsign.as_bytes().is_empty() {
         b"no callsign set"
     } else if let Some(r) = refusal(app, slot) {
         short(r).as_bytes()
@@ -148,7 +148,7 @@ pub fn short(r: Refusal) -> &'static str {
 /// The screen and menu path that fix a refusal (TX-20), if one does.
 fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
     match r {
-        Refusal::OutOfBand if app.radio.region.is_none() => Some(("MENU 0 9 4", "Region", Dest::Group(9))),
+        Refusal::OutOfBand if app.set.region().is_none() => Some(("MENU 0 9 4", "Region", Dest::Group(9))),
         Refusal::OutOfBand => Some(("MENU 0 8 9", "Extend TX", Dest::Group(8))),
         Refusal::NotCalibrated => Some(("MENU 0 9 7 1", "Calibration", Dest::Calibration)),
         Refusal::RxOnlyChannel => Some(("MENU 8", "Channel editor", Dest::ChannelEdit)),
@@ -258,7 +258,7 @@ impl View for Transmit {
         // Mode, the tone sent (red), the power level name (TX-12).
         let (mut m, mut tone) = (Buf::<16>::new(), Buf::<16>::new());
         if hf {
-            m.set(super::hf::MODES[app.radio.hf_mode as usize % super::hf::MODES.len()].as_bytes());
+            m.set(super::hf::mode_name(app.set.hf.mode).as_bytes());
         } else {
             let c = app.slot(s).cfg();
             mode_chip(c, &mut m);
@@ -392,13 +392,13 @@ impl View for TxRefused {
         let fq = w::freq3(f);
         match self.why {
             Refusal::OutOfBand => {
-                let b = txplan::nearest(f, app.radio.region());
-                let _ = uwrite!(a, "{} MHz is outside the {} band in {} (", txt(fq.as_bytes()), b.name, app.radio.region().name());
+                let b = txplan::nearest(f, app.set.tx_region());
+                let _ = uwrite!(a, "{} MHz is outside the {} band in {} (", txt(fq.as_bytes()), b.name, app.set.tx_region().name());
                 mhz_text(b.lo, &mut a);
                 a.push(b"-");
                 mhz_text(b.hi, &mut a);
                 a.push(b").");
-                more = if app.radio.region.is_none() {
+                more = if app.set.region().is_none() {
                     b"Region isn't set. To set it:"
                 } else {
                     b"To allow any band the radio is calibrated for:"

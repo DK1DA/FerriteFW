@@ -12,6 +12,12 @@ static CHANNELS: [Channel; 2] = [
     channel(1, 0, mhz(446), "Calling 70 cm", DEFAULT_CFG),
 ];
 
+/// First boot: the layout header (0x02C000) is missing, so setup runs (BOOT-12, SETUP-1). The Storage task
+/// doesn't read the header yet, so this says no; until it does, setup runs from MENU 0 9 8 1.
+pub fn first_boot() -> bool {
+    false
+}
+
 /// The store the UI task reads from.
 pub fn channels() -> Table<'static> {
     Table { zones: &ZONES, channels: &CHANNELS }

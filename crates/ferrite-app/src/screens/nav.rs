@@ -18,6 +18,7 @@
 //! | Edit in place | OK on a cell | [`Dest::Value`] / [`Dest::Tones`] |
 //! | Advanced (MENU 0) | 1-9 or OK | [`Dest::Group`]; inside, digits follow [`MENU0`] (MENU-5) |
 //! | Status page | OK on a row (SBAR-15) | the row's setting or screen |
+//! | Locked, PIN "at power on and unlock" | hold # (KEY-16) | [`Dest::Pin`] |
 //! | [`App::notify`] with an alert | automatic (WX-4) | [`Dest::Alert`] |
 //!
 //! Not wired yet (no event to start them): transmit refused, emergency prompt, Bluetooth write approval and
@@ -29,6 +30,9 @@
 //!
 //! Not wired yet (no event to start them): PIN at power on, Bluetooth write approval and progress, power off,
 //! empty battery, SSB patch confirm, setup at first boot, crossband (no menu number yet).
+//! progress (the Link task opens them), power off, empty battery, SSB patch confirm, the shortcut map while a
+//! digit is held (HOME-8: the shortcut runs at the long press for now), crossband (no menu number yet). Setup at
+//! first boot and the PIN at power on have their hooks ([`App::first_boot`], [`App::ask_pin`]).
 
 use super::advanced::{Advanced, GROUPS};
 use super::coming::Coming;
@@ -389,6 +393,8 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
     use super::*;
     let a = app.active;
     let on_ch = app.slots[a as usize].on_channel();
+    use super::info::{Info, Page};
+    use super::link::{Link, LinkPage};
     match dest {
         Dest::Entry(d) => Screen::Entry(entry::Entry::new(if on_ch { entry::EntryFor::Channel } else { entry::EntryFor::Vfo }, Some(d))),
         Dest::ChannelEdit if on_ch => Screen::ChEdit(chedit::ChEdit { cell: 0 }),
@@ -398,9 +404,6 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::Tones => Screen::Tones(tones::Tones::new(app)),
         Dest::Text => Screen::Text(text::Text::new(text::TextFor::Callsign)),
         Dest::Confirm => Screen::Confirm(confirm::Confirm { ask: confirm::Ask::Reset { channels: false } }),
-        Dest::ExtendTx => Screen::ExtendTx(extend::ExtendTx),
-        Dest::Pin => Screen::Pin(pin::Pin::new(!app.locked)),
-        Dest::Setup => Screen::Setup(setup::Setup::new()),
         Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut { digit: 0 }),
         Dest::Quick => Screen::Quick(Quick { row: 0 }),
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
@@ -416,10 +419,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::BandScope => scope::open(app),
         Dest::ToneSearch => probe::open_tone(app),
         Dest::Counter => probe::open_counter(app),
-        Dest::FmBroadcast => fm::open(app),
-        Dest::HfMode => hf::open(app),
         Dest::Weather => weather::open(app).unwrap_or(app.screen),
-        Dest::Alert => Screen::Alert(weather::Alert),
         Dest::Crossband => Screen::Crossband(xb::Crossband { cell: 0 }),
         Dest::Squelch => Screen::Squelch(squelch::Squelch),
         // Group C: lists and data
@@ -442,6 +442,30 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::HfRecent => Screen::Recall(super::recall::Recall { fm: false, cur: Default::default() }),
         Dest::FmPresets => Screen::Recall(super::recall::Recall { fm: true, cur: Default::default() }),
         Dest::Sensors => Screen::Sensors(super::sensors::Sensors { cur: Default::default() }),
+        // D: system and modes
+        Dest::Group(g) => Screen::Group(super::groups::Group { g: g.clamp(1, 9), sub: 0, row: 0 }),
+        Dest::Sub(g, m) => Screen::Group(super::groups::Group { g, sub: m, row: 0 }),
+        Dest::Setup => Screen::Setup(super::setup::Setup::new(false)),
+        Dest::ExtendTx => Screen::ExtendTx(super::setup::ExtendTx),
+        Dest::Pin if app.locked => Screen::Pin(super::pin::Pin::unlock()),
+        Dest::Pin => Screen::Pin(super::pin::Pin::set(app.set.pin_mode.max(1))),
+        Dest::About => Screen::Info(Info { page: Page::About }),
+        Dest::Calibration => Screen::Info(Info { page: Page::Calibration }),
+        Dest::AdvSquelch => Screen::Info(Info { page: Page::AdvSquelch }),
+        Dest::SsbPatch => Screen::Info(Info { page: Page::SsbPatch }),
+        Dest::SsbConfirm => Screen::Info(Info { page: Page::SsbConfirm }),
+        Dest::PairBt => Screen::Info(Info { page: Page::PairBt }),
+        Dest::PowerOff => Screen::Info(Info { page: Page::PowerOff }),
+        Dest::EmptyBattery => Screen::Info(Info { page: Page::EmptyBattery }),
+        Dest::Mailbox => Screen::Info(Info { page: Page::Mailbox }),
+        Dest::KeyTest => Screen::KeyTest(super::keytest::KeyTest::new()),
+        Dest::LinkStatus => Screen::Link(Link::new(LinkPage::Status)),
+        Dest::Paired => Screen::Link(Link::new(LinkPage::Paired)),
+        Dest::WriteApproval => Screen::Link(Link::new(LinkPage::Approve)),
+        Dest::WriteProgress => Screen::Link(Link::new(LinkPage::Progress)),
+        Dest::FmBroadcast => fm::open(app),
+        Dest::HfMode => hf::open(app),
+        Dest::Alert => Screen::Alert(super::alert::Alert { silenced: false }),
         _ => Screen::Coming(Coming { dest }),
     }
 }
@@ -468,7 +492,7 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
         6 => cycle(app, Item::Bandwidth),
         7 => {
             // WX-1: US and Canada only (and until a region is set); elsewhere hold 7 does nothing.
-            if app.radio.region.is_none_or(|r| r.has_weather()) {
+            if app.set.wx_allowed() {
                 app.open(Dest::Weather);
             }
         }
@@ -479,7 +503,7 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
 
 /// Hold 0: the active slot to the home channel, in channel mode, from VFO or any zone (CHAN-19, CHAN-20).
 fn home_channel(app: &mut App, store: &impl ChannelStore) {
-    match app.prefs.home_ch.and_then(|n| store.by_num(n)) {
+    match app.set.home_ch.and_then(|n| store.by_num(n)) {
         Some((c, pos)) => {
             let a = app.active as usize;
             let s = &mut app.slots[a];

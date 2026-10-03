@@ -17,9 +17,8 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
-/// Regions of their own: the page (a screen showing a different page of itself clears the content) and the
-/// gate (nothing read from the store while the page shows the same thing).
-pub(crate) const R_PAGE: usize = 18;
+/// A region of their own: the gate (nothing read from the store while the page shows the same thing). The page
+/// is [`App::page`].
 pub(crate) const R_GATE: usize = 17;
 
 /// The list header's line (count at the left, what the list is at the right), y 20-40.
@@ -35,32 +34,10 @@ pub(crate) const ROWS1: u16 = 9;
 pub(crate) const ROWS1_FULL: u16 = 11;
 
 impl App {
-    /// A new page of a screen (or the first): clears the content area and forgets every region but the hint
-    /// bar, so everything draws again. True when it did.
-    pub(crate) fn page<K: Hash>(&mut self, lcd: &mut impl Panel, key: K) -> bool {
-        if !self.dirty(R_PAGE, hash(&key)) {
-            return false;
-        }
-        lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
-        for (r, h) in self.drawn.hash.iter_mut().enumerate() {
-            if r != R_HINT && r != R_PAGE {
-                *h = 0;
-            }
-        }
-        true
-    }
-
     /// Opens a screen that has no [`super::nav::Dest`] of its own (a screen's options, a page reached only
     /// from another), remembering this one for BACK as [`App::open`] does.
     pub(crate) fn open_screen(&mut self, s: crate::Screen) {
-        if self.back[self.back.len() - 1].is_some() {
-            self.back.copy_within(1.., 0);
-            let n = self.back.len();
-            self.back[n - 1] = None;
-        }
-        if let Some(b) = self.back.iter_mut().find(|b| b.is_none()) {
-            *b = Some(self.screen);
-        }
+        self.push_back();
         self.screen = s;
     }
 
