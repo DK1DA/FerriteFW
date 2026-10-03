@@ -27,36 +27,47 @@
 
 pub mod activity;
 pub mod advanced;
+pub mod aprs;
+pub mod browse;
 pub mod chedit;
 pub mod coming;
 pub mod confirm;
 pub mod edit;
 pub mod entry;
 pub mod extend;
-pub(crate) mod forms;
 pub mod fm;
+pub(crate) mod forms;
+pub mod gps;
 pub mod hf;
 pub mod home;
 pub mod layouts;
+pub(crate) mod lists;
+pub mod log;
+pub mod msgs;
 pub mod nav;
+pub mod opts;
+pub mod parts;
 pub mod pin;
+pub mod probe;
 pub mod quick;
+pub mod recall;
 pub mod save;
+pub mod scan;
+pub mod scanlists;
+pub mod scope;
+pub mod sensors;
 pub mod setup;
 pub(crate) mod shared;
 pub mod shortcut;
+pub mod squelch;
 pub mod status;
 pub mod text;
 pub mod tones;
-pub mod value;
-pub mod parts;
-pub mod probe;
-pub mod scan;
-pub mod scope;
-pub mod squelch;
 pub mod transmit;
+pub mod value;
 pub mod weather;
 pub mod xb;
+pub mod zones;
 
 use crate::chan::ChannelStore;
 use crate::keys::KeyEvent;
@@ -104,6 +115,18 @@ pub enum Screen {
     Squelch(squelch::Squelch),
     /// A screen not built yet: its name and "coming" (any [`nav::Dest`] without its own screen).
     Coming(coming::Coming),
+    // Group C: lists and data
+    Log(log::Log),
+    Options(opts::Options),
+    Aprs(aprs::Aprs),
+    Msgs(msgs::Msgs),
+    Compose(msgs::Compose),
+    Gps(gps::Gps),
+    Browse(browse::Browse),
+    Zones(zones::Zones),
+    ScanLists(scanlists::ScanLists),
+    Recall(recall::Recall),
+    Sensors(sensors::Sensors),
 }
 
 /// Runs `$e` with `$s` bound to the screen's state: the one place that lists every variant.
@@ -143,6 +166,17 @@ macro_rules! each {
             Screen::Crossband($s) => $e,
             Screen::Squelch($s) => $e,
             Screen::Coming($s) => $e,
+            Screen::Log($s) => $e,
+            Screen::Options($s) => $e,
+            Screen::Aprs($s) => $e,
+            Screen::Msgs($s) => $e,
+            Screen::Compose($s) => $e,
+            Screen::Gps($s) => $e,
+            Screen::Browse($s) => $e,
+            Screen::Zones($s) => $e,
+            Screen::ScanLists($s) => $e,
+            Screen::Recall($s) => $e,
+            Screen::Sensors($s) => $e,
         }
     };
 }

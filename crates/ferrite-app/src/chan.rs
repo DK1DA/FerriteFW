@@ -2,6 +2,7 @@
 //! flash records on demand through the zone index (CHAN-7, CHAN-9); the simulator and tests supply a few in RAM.
 //! The UI keeps only the current zone, position and a copy of the channel each slot is on.
 
+use crate::data::{Data, NoData, Pos};
 use crate::slot::SlotCfg;
 use ferrite_core::freq::Freq10;
 
@@ -51,6 +52,11 @@ impl Channel {
         &self.name[..n]
     }
 
+    /// Left out of every scan (CHAN-4, SCAN-9).
+    pub fn skip(&self) -> bool {
+        self.flags & FLAG_SKIP != 0
+    }
+
     /// A new name: up to 16 bytes, the rest zeroed.
     pub fn set_name(&mut self, s: &[u8]) {
         self.name = [0; 16];
@@ -90,6 +96,35 @@ pub trait ChannelStore {
     /// The first unused number from `from` on, wrapping (save as channel), if any is free.
     fn free_num(&self, from: u16) -> Option<u16> {
         (0..MAX_CHANNELS).map(|k| (from + k) % MAX_CHANNELS).find(|&n| self.by_num(n).is_none())
+    }
+
+    /// The i-th stored channel in number order, zoned or not: the browser's "All" view (CHAN-14). The default
+    /// walks the zones; a store with records by number reads one directly.
+    fn by_number(&self, i: u16) -> Option<Channel> {
+        let mut found: Option<Channel> = None;
+        for _ in 0..=i {
+            let last = found.map(|c| c.num);
+            found = None;
+            for z in (0..self.zones()).chain([NO_ZONE]) {
+                for c in (0..self.zone_len(z)).filter_map(|k| self.zone_at(z, k)) {
+                    if last.is_none_or(|l| c.num > l) && found.is_none_or(|f| c.num < f.num) {
+                        found = Some(c);
+                    }
+                }
+            }
+            found?;
+        }
+        found
+    }
+
+    /// A channel's position, if it has one (CHAN-2, CHAN-15).
+    fn position(&self, _num: u16) -> Option<Pos> {
+        None
+    }
+
+    /// The other records the screens list (event log, APRS, GPS, scan lists): see [`crate::data`].
+    fn data(&self) -> &dyn Data {
+        &NoData
     }
 }
 
@@ -135,6 +170,10 @@ impl ChannelStore for Table<'_> {
     }
     fn count(&self) -> u16 {
         self.channels.len() as u16
+    }
+    fn by_number(&self, i: u16) -> Option<Channel> {
+        // A table is in number order.
+        self.channels.get(i as usize).copied()
     }
 }
 

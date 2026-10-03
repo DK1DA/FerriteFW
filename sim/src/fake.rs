@@ -1,9 +1,9 @@
-//! The simulator's stand-ins: a fake three-slot radio that obeys the app's commands, a few channels, and the
-//! radio-wide state for the status bar.
+//! The simulator's stand-ins: a fake three-slot radio that obeys the app's commands, the sample records
+//! (channels, event log, APRS, GPS: `ferrite_app::sample`), and the radio-wide state for the status bar.
 
-use ferrite_app::chan::{channel, ChanWrite, Channel, ChannelStore, NO_ZONE};
-use std::cell::RefCell;
-use ferrite_app::slot::{band_of, BANDS, DCS_FLAG, DEFAULT_CFG};
+use ferrite_app::chan::ChannelStore;
+use ferrite_app::sample::Sample;
+use ferrite_app::slot::{band_of, BANDS, DEFAULT_CFG};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::{BroadcastCmd, Device, GpsState, LiveAll, ModeLive, RadioCmd, SlotLive, TxLive, XbLive, SCOPE_BARS, XB_COLS};
 use ferrite_core::txplan::Region;
@@ -14,24 +14,6 @@ const fn cfg(tone: u16, offset: i32) -> ferrite_app::slot::SlotCfg {
     c.offset = offset;
     c
 }
-
-const AIR: ferrite_app::slot::SlotCfg = {
-    let mut c = DEFAULT_CFG;
-    c.mode = 2;
-    c
-};
-
-pub const ZONES: [&[u8]; 4] = [b"Local", b"Repeaters", b"Empty", b"Air"];
-pub static CHANNELS: [Channel; 8] = [
-    channel(0, 0, mhz(146) + 52_000, "Calling 2 m", DEFAULT_CFG),
-    channel(1, 0, mhz(446), "Calling 70 cm", DEFAULT_CFG),
-    channel(2, 0, mhz(147) + 55_500, "Simplex B", DEFAULT_CFG),
-    channel(9, 1, mhz(146) + 94_000, "North hill", cfg(1000, -60_000)),
-    channel(11, 1, mhz(443) + 47_500, "Club repeater", cfg(1000, 500_000)),
-    channel(14, 1, mhz(444) + 20_000, "Downtown DCS", cfg(DCS_FLAG | 0o023, 500_000)),
-    channel(30, 3, mhz(121) + 50_000, "Guard", AIR),
-    channel(31, 3, mhz(119) + 10_000, "Tower", AIR),
-];
 
 /// The look review's sample: A a VFO with tone and shift, B on "Club repeater", C scanning airband, watch
 /// A+B+C. The app's start-up commands go to the radio first (they tune C, which would stop its scan).
@@ -53,51 +35,9 @@ pub fn sample_app(app: &mut ferrite_app::App, store: &impl ChannelStore) {
     app.set_callsign(b"VA3ABC");
 }
 
-pub fn store() -> RamStore {
-    let mut v = CHANNELS.to_vec();
-    v.sort_by_key(|c| c.num);
-    RamStore { zones: &ZONES, channels: RefCell::new(v) }
-}
-
-/// The simulator's channels: the sample table, kept in RAM so the app's writes ([`ChanWrite`]) take effect, as
-/// the Storage task's will in SPI flash.
-pub struct RamStore {
-    zones: &'static [&'static [u8]],
-    channels: RefCell<Vec<Channel>>,
-}
-
-impl RamStore {
-    pub fn apply(&self, w: ChanWrite) {
-        let mut v = self.channels.borrow_mut();
-        match w {
-            ChanWrite::Put { ch, from } => {
-                v.retain(|c| c.num != ch.num && Some(c.num) != from);
-                v.push(ch);
-                v.sort_by_key(|c| c.num);
-            }
-            ChanWrite::Delete(n) => v.retain(|c| c.num != n),
-            ChanWrite::DeleteZone(z) => v.iter_mut().filter(|c| c.zone == z).for_each(|c| c.zone = NO_ZONE),
-            ChanWrite::EraseAll => v.clear(),
-        }
-    }
-}
-
-impl ChannelStore for RamStore {
-    fn zones(&self) -> u8 {
-        self.zones.len() as u8
-    }
-    fn zone_name(&self, zone: u8) -> Option<&[u8]> {
-        self.zones.get(zone as usize).copied()
-    }
-    fn zone_len(&self, zone: u8) -> u16 {
-        self.channels.borrow().iter().filter(|c| c.zone == zone).count() as u16
-    }
-    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
-        self.channels.borrow().iter().filter(|c| c.zone == zone).nth(i as usize).copied()
-    }
-    fn count(&self) -> u16 {
-        self.channels.borrow().len() as u16
-    }
+/// Channels in zones, an event log, APRS, GPS, waypoints and the scan lists: [`Sample`].
+pub fn store() -> Sample {
+    Sample::new()
 }
 
 /// What the fake radio's exclusive mode is doing.
