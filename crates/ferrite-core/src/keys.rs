@@ -1,8 +1,9 @@
 //! Keys. The matrix and direct keys use stock's key codes 0-21 (`analysis/keypad.md`), scanned by uradio's
 //! `keypad` crate with the tables below; the side inputs get codes 24 up.
 //!
-//! Which physical key each matrix code is still needs the radio (the key test). Until then only the inputs whose
-//! role is known map to a [`Key`].
+//! The 20 matrix codes are the digit pad (12), the navigation pad (UP, DOWN, LEFT, RIGHT, MENU/OK, BACK) and the
+//! dedicated SLOT (A/B/C) and V/M keys. Which code is which still needs the radio (the key test); until then only
+//! the inputs whose role is known map to a [`Key`].
 
 /// Stock's code table (0x0802F706 in V0.27). The ground row: keys from the sense lines straight to ground.
 pub const GROUND_ROW: [u8; 4] = [10, 14, 18, 13];
@@ -19,10 +20,18 @@ pub const CODES: usize = 27;
 /// What a key means to the UI: the same key means the same thing on every screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
+    /// MENU/OK.
     Menu,
+    /// BACK.
     Exit,
     Up,
     Down,
+    Left,
+    Right,
+    /// The dedicated A/B/C key: next slot.
+    Slot,
+    /// The dedicated VFO/memory key.
+    VfoMem,
     Digit(u8),
     Star,
     Hash,
