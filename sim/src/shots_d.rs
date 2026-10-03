@@ -87,7 +87,9 @@ pub fn run(scale: u32) {
     let mut s = Shot { app, dev, radio, t: 0, scale, fb: FrameBuffer::new() };
     s.run(500);
 
-    // Setup, from the first-boot hook (BOOT-12), with the mock-ups' answers.
+    // Setup, from the first-boot hook (BOOT-12), with the mock-ups' answers: from nothing set.
+    s.app.settings_mut().callsign = ferrite_app::settings::Text::EMPTY;
+    s.app.settings_mut().set_region(None);
     s.app.first_boot();
     s.save("setup-1-welcome");
     s.press(Key::Menu, 80);

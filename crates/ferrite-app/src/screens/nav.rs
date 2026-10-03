@@ -12,27 +12,21 @@
 //! | Home | hold 0-9 ([`hold_digit`]: the shortcut map, HOME-8; the release runs [`shortcut`], KEY-11) | 0 home channel, 1 watch, 2 FM broadcast, 3 band scope, 4 APRS heard, 5 TX power, 6 bandwidth, 7 weather, 8 Battery Save, 9 tone search |
 //! | Home | a digit (NAV-4, VFO-11) | [`Dest::Entry`] with the digit |
 //! | Home | hold V/M on a VFO (VFO-9) | [`Dest::SaveChannel`] |
-//! | Home | hold SLOT / MENU / hold MENU / # | edit in place / quick / advanced / Status (built) |
-//! | Any screen | PTT down (KEY-7) | home, then [`Dest::Transmit`]; PTT up: home ([`super::View::ptt`]) |
+//! | Home | hold SLOT / MENU / hold MENU / # | edit in place (on a channel: [`Dest::ChannelEdit`]) / quick / advanced / Status |
+//! | Home | SIDE2 (SCAN-1) / SIDE1 + knob (SQL-10) | [`Dest::Scan`] / [`Dest::Squelch`] |
+//! | Any screen | PTT down (KEY-7) | home, then [`Dest::Transmit`], or [`Dest::TxRefused`] (TX-20) or [`Dest::Emergency`] (TX-3); PTT up: home ([`super::View::ptt`]) |
 //! | Quick settings | OK on a row (MENU-17) | [`Dest::Value`] (tones: [`Dest::Tones`]); MENU 8: [`Dest::SaveChannel`] or [`Dest::ChannelEdit`] |
 //! | Edit in place | OK on a cell | [`Dest::Value`] / [`Dest::Tones`] |
 //! | Advanced (MENU 0) | 1-9 or OK | [`Dest::Group`]; inside, digits follow [`MENU0`] (MENU-5) |
+//! | A list or mode screen | hold MENU (MENU-25) | that screen's options (D4) |
 //! | Status page | OK on a row (SBAR-15) | the row's setting or screen |
 //! | Locked, PIN "at power on and unlock" | hold # (KEY-16) | [`Dest::Pin`] |
-//! | [`App::notify`] with an alert | automatic (WX-4) | [`Dest::Alert`] |
+//! | Power on | the firmware: [`App::first_boot`] / [`App::ask_pin`] | [`Dest::Setup`] (BOOT-12) / [`Dest::Pin`] (BOOT-13) |
+//! | [`App::notify`], [`App::raise_alert`] | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Not wired yet (no event to start them): transmit refused, emergency prompt, Bluetooth write approval and
-//! progress, power off, empty battery, SSB patch confirm, crossband (no menu number yet). PIN at power on and
-//! setup at first boot start from [`App::start_pin`] and [`App::start_setup`], which the firmware calls once
-//! settings are stored.
-//! | Home | SIDE2 (SCAN-1) / hold a digit (HOME-8) / SIDE1 + knob (SQL-10) | [`Dest::Scan`] / [`Dest::ShortcutMap`], the shortcut on release / [`Dest::Squelch`] |
-//! | PTT | refused (TX-20) / emergency frequency (TX-3) | [`Dest::TxRefused`] / [`Dest::Emergency`] |
-//!
-//! Not wired yet (no event to start them): PIN at power on, Bluetooth write approval and progress, power off,
-//! empty battery, SSB patch confirm, setup at first boot, crossband (no menu number yet).
-//! progress (the Link task opens them), power off, empty battery, SSB patch confirm, the shortcut map while a
-//! digit is held (HOME-8: the shortcut runs at the long press for now), crossband (no menu number yet). Setup at
-//! first boot and the PIN at power on have their hooks ([`App::first_boot`], [`App::ask_pin`]).
+//! Not wired yet (no event or menu number to start them): Bluetooth write approval and progress (the Link
+//! task opens them), power off, empty battery, SSB patch confirm, mailbox, crossband (no menu number yet).
+//! Still placeholders: position entry (A8), location codes (A13), the DTMF dialer and memories (A14, A15).
 
 use super::advanced::{Advanced, GROUPS};
 use super::coming::Coming;

@@ -3,8 +3,14 @@
 //! One module per screen (or family of screens), plugged into the App through this registry. A screen is a
 //! small `Copy` state struct (its cursor, its page; reset each time it opens) that implements [`View`]: what
 //! its keys, the knob and PTT do, how it times out, how it draws, and what its hint bar says. Everything the
-//! screens share lives on the [`App`] (slots, toast, undo, commands) and in [`shared`] (region dirty-tracking,
-//! status bar, hint bar, list rows, the edit grid, help box).
+//! screens share lives on the [`App`] (slots, toast, undo, commands), in [`crate::settings`] (radio-wide
+//! settings, outside the App) and in [`shared`] (region dirty-tracking, pages, status bar, hint bar, list rows,
+//! the edit grid, help box), with [`lists`] (group C's list pages), [`forms`] (group A's fields and pickers)
+//! and [`parts`] (group B's meters and strips) for families of screens.
+//!
+//! One key is MENU and OK: on every screen a short press is OK (the screen's main action) and holding it opens
+//! that screen's options (MENU-25); home is the exception the manual makes (MENU: quick settings, hold:
+//! advanced).
 //!
 //! ## Adding a screen
 //!
@@ -22,7 +28,8 @@
 //! when the screen's variant changes.
 //!
 //! RAM: the [`Screen`] enum is as large as its largest state, and it is held in the App and in the BACK stack
-//! (five copies), so keep screen state to a few bytes. Lists read their items on demand (channels from the
+//! (five copies), so keep screen state to a few bytes (8 is the aim; the forms that hold a draft, Save and
+//! Tones, are 12-16 for now). Lists read their items on demand (channels from the
 //! store, settings from tables), never a copy.
 
 pub mod activity;

@@ -267,7 +267,7 @@ pub struct Hf {
     /// The options page and its row.
     pub menu: bool,
     pub row: u8,
-    /// Typing a frequency ([`HfMem::entry`]): how many digits, and the digits after the point + 1 (0: no point).
+    /// Typing a frequency (`RadioUi::hf_entry`): how many digits, and the digits after the point + 1 (0: no point).
     pub n: u8,
     pub point: u8,
 }

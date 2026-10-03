@@ -60,7 +60,7 @@ const PAGES: [(&str, &str, Ask); 8] = [
     ("Look", "What home shows, and the colours.", Ask::Look),
     (
         "Battery Save",
-        "The receivers sleep in short cycles while nothing is heard. Higher levels last longer but hear a signal later.",
+        "The receivers sleep between checks: deeper lasts longer, but hears a call later.",
         Ask::BatterySave,
     ),
     ("All set", "", Ask::Summary),
@@ -328,7 +328,7 @@ impl View for Setup {
         if app.dirty(R_TOP, hash(&page)) {
             w::field(lcd, 10, 220, 24, 50, 45, Align::Left, head.as_bytes(), &UI_15B, TEXT, BG);
             if !text.is_empty() {
-                w::wrap(lcd, 10, 220, 50, if ask == Ask::Nothing { 200 } else { 94 }, 63, 13, text.as_bytes(), &UI_12, SUB, BG);
+                w::wrap(lcd, 10, 220, 50, if ask == Ask::Nothing { 200 } else { 94 }, 63, 15, text.as_bytes(), &UI_12, SUB, BG);
             }
         }
         match ask {
@@ -364,7 +364,7 @@ impl View for Setup {
                     lcd.fill_r(4, 228, 232, 20, 3, bg);
                     w::field(lcd, 10, 120, 229, 247, 242, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
                     w::field(lcd, 130, 100, 229, 247, 242, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
-                    w::wrap(lcd, 10, 220, 249, 299, 262, 13, b"On: transmit wherever the radio can, not only amateur bands. Shows a warning first.", &UI_12, SUB, BG);
+                    w::wrap(lcd, 10, 220, 249, 299, 262, 15, b"On: transmit wherever the radio can, not only amateur bands. Shows a warning first.", &UI_12, SUB, BG);
                 }
             }
             Ask::Owner => {
@@ -461,7 +461,7 @@ impl View for Setup {
                 }
                 note.push(b"Add channels with hold V/M on a VFO, or load them with the web app. Run setup again: MENU 0 9 8 1.");
                 if app.dirty(R_HELP, hash(&note)) {
-                    w::wrap(lcd, 10, 220, 222, 299, 236, 13, note.as_bytes(), &UI_12, SUB, BG);
+                    w::wrap(lcd, 10, 220, 222, 299, 236, 15, note.as_bytes(), &UI_12, SUB, BG);
                 }
             }
         }
