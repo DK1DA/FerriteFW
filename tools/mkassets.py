@@ -16,7 +16,7 @@ from fontgen import Font  # noqa: E402
 FONTS = os.path.join(HERE, "..", "fonts")
 OUT = os.path.join(HERE, "..", "crates", "ferrite-ui", "src", "assets.rs")
 DIG = " -.0123456789"
-REG, BOLD = "AtkinsonHyperlegible-Regular.ttf", "AtkinsonHyperlegible-Bold.ttf"
+REG, BOLD = "JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf"
 NUM = "BarlowSemiCondensed-SemiBold.ttf"
 
 FONT_LIST = [  # name, file, px, chars, tabular, latin1, use

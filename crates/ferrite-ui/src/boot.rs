@@ -63,10 +63,10 @@ fn draw_list(lcd: &mut impl Panel, b: &BootInfo) {
         lcd.text4_aligned(232, y + 15, Align::Right, c.value.as_bytes(), &UI_15, vc, BG);
     }
     if !b.tx_armed {
-        lcd.frame_r(8, 258, 224, 26, 4, AMBER);
-        lcd.mask4(14, 264, &ICON_LOCK, AMBER, None, BG);
-        let x = lcd.text4(34, 276, b"Transmit not armed", &UI_15, TEXT, BG);
-        lcd.text4(34 + x + 5, 276, b"(Menu 11 1)", &UI_12, SUB, BG);
+        lcd.frame_r(8, 250, 224, 44, 4, AMBER);
+        lcd.mask4(14, 258, &ICON_LOCK, AMBER, None, BG);
+        lcd.text4(34, 270, b"Transmit not armed", &UI_15, TEXT, BG);
+        lcd.text4(34, 287, b"MENU 0 8 1 1 to arm", &UI_12, SUB, BG);
     }
     hint(lcd, "Any key", "skip");
 }
