@@ -405,3 +405,106 @@ fn slot_change_leaves_no_trace() {
         }
     }
 }
+
+/// Every character in every string literal of the UI's sources is in the text fonts: a font is cut to its
+/// character set (tools/mkassets.py), and a missing character would silently draw as '?'.
+#[test]
+fn fonts_have_every_character_the_ui_draws() {
+    use ferrite_ui::assets::{UI_12, UI_12B};
+    let sources = [
+        ("lib.rs", include_str!("lib.rs")),
+        ("view.rs", include_str!("view.rs")),
+        ("slot.rs", include_str!("slot.rs")),
+        ("chan.rs", include_str!("chan.rs")),
+        ("widgets.rs", include_str!("../../ferrite-ui/src/widgets.rs")),
+        ("boot.rs", include_str!("../../ferrite-ui/src/boot.rs")),
+        ("home.rs", include_str!("../../ferrite-ui/src/home.rs")),
+    ];
+    let mut checked = 0;
+    for (file, src) in sources {
+        for s in string_literals(src) {
+            for c in s.chars().filter(|c| !('\x18'..='\x1b').contains(c) && *c != '\n') {
+                assert!(UI_12.has(c) && UI_12B.has(c), "{file}: {c:?} (U+{:04X}) in {s:?} is not in the text fonts", c as u32);
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 2000, "the scan found only {checked} characters");
+    for c in "0123456789.- ".chars() {
+        for f in [&ferrite_ui::assets::DIG_46, &ferrite_ui::assets::DIG_28, &ferrite_ui::assets::DIG_26, &ferrite_ui::assets::DIG_17] {
+            assert!(f.has(c), "digit fonts lack {c:?}");
+        }
+    }
+}
+
+/// The string literals of a Rust source, escapes decoded; comments and char literals skipped.
+fn string_literals(src: &str) -> Vec<std::string::String> {
+    let b: Vec<char> = src.chars().collect();
+    let (mut out, mut i) = (Vec::new(), 0);
+    while i < b.len() {
+        match b[i] {
+            '/' if b.get(i + 1) == Some(&'/') => {
+                while i < b.len() && b[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '\'' => {
+                // a char literal ('x', '\n', '\u{b7}') or a lifetime
+                if b.get(i + 1) == Some(&'\\') {
+                    i += 2;
+                    while i < b.len() && b[i] != '\'' {
+                        i += 1;
+                    }
+                    i += 1;
+                } else if b.get(i + 2) == Some(&'\'') {
+                    i += 3;
+                } else {
+                    i += 1;
+                }
+            }
+            '"' => {
+                let mut s = std::string::String::new();
+                i += 1;
+                while i < b.len() && b[i] != '"' {
+                    if b[i] == '\\' {
+                        i += 1;
+                        match b[i] {
+                            'n' => s.push('\n'),
+                            't' | '0' | 'r' => {}
+                            'x' => {
+                                let v = u32::from_str_radix(&b[i + 1..i + 3].iter().collect::<std::string::String>(), 16).unwrap();
+                                s.push(char::from_u32(v).unwrap());
+                                i += 2;
+                            }
+                            'u' => {
+                                let end = i + b[i..].iter().position(|&c| c == '}').unwrap();
+                                let hex: std::string::String = b[i + 2..end].iter().collect();
+                                s.push(char::from_u32(u32::from_str_radix(&hex, 16).unwrap()).unwrap());
+                                i = end;
+                            }
+                            '\n' => {
+                                while b.get(i + 1).is_some_and(|c| c.is_whitespace()) {
+                                    i += 1;
+                                }
+                            }
+                            c => s.push(c),
+                        }
+                    } else {
+                        s.push(b[i]);
+                    }
+                    i += 1;
+                }
+                out.push(s);
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+#[test]
+fn literal_scanner() {
+    let v = string_literals("let a = \"A\\u{b7}B\"; // \"not this\"\nlet c = '\"'; let d = b\"x\\x18\";");
+    assert_eq!(v, ["A\u{b7}B", "x\x18"]);
+}

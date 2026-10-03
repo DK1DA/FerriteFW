@@ -93,16 +93,31 @@ class Font:
             recs.append((off, w, h, x, y, adv))
         return first, recs, bytes(bits)
 
-    def rust_source(self, name):
-        first, recs, bits = self.tables()
+    def rust_source(self, name, section=None):
+        """Rust statics: the sorted code points, a glyph record per code point, the 4-bit pixels.
+        `section`: a linker section for the data on the radio (host builds ignore it)."""
+        codes = sorted(self.glyphs, key=ord)
+        bits, recs = bytearray(), []
+        for ch in codes:
+            adv, x, y, a, w, h = self.glyphs[ch]
+            off = len(bits)
+            for i in range(0, len(a), 2):
+                bits.append(a[i] << 4 | (a[i + 1] if i + 1 < len(a) else 0))
+            recs.append((off, w, h, x, y, adv))
+        assert len(bits) < 65536, f"{name}: glyph offsets must fit u16"
+        assert max(ord(c) for c in codes) < 65536, f"{name}: code points must fit u16"
         up = name.upper()
+        attr = [f'#[cfg_attr(target_os = "none", link_section = "{section}")]'] if section else []
         rows = [", ".join(f"0x{b:02X}" for b in bits[i:i + 16]) + "," for i in range(0, len(bits), 16)]
-        g = [f"    Glyph4 {{ off: {o}, w: {w}, h: {h}, x: {x}, y: {y}, adv: {a} }}," for o, w, h, x, y, a in recs]
-        return "\n".join([f"// {name}: {self.ttf.split('/')[-1]}, {self.px} px",
-                          f"static {up}_BITS: [u8; {len(bits)}] = [", *("    " + r for r in rows), "];",
-                          f"static {up}_GLYPHS: [Glyph4; {len(recs)}] = [", *g, "];",
+        g = [f"    Glyph4 {{ off: {o}, w: {w}, h: {h}, x: {x}, y: {y}, adv: {a} }}, // {ch!r}"
+             for (o, w, h, x, y, a), ch in zip(recs, codes)]
+        cp = [", ".join(f"0x{ord(c):02X}" for c in codes[i:i + 16]) + "," for i in range(0, len(codes), 16)]
+        return "\n".join([f"// {name}: {self.ttf.split('/')[-1]}, {self.px} px, {len(codes)} characters",
+                          *attr, f"static {up}_BITS: [u8; {len(bits)}] = [", *("    " + r for r in rows), "];",
+                          *attr, f"static {up}_GLYPHS: [Glyph4; {len(recs)}] = [", *g, "];",
+                          *attr, f"static {up}_CODES: [u16; {len(codes)}] = [", *("    " + r for r in cp), "];",
                           f"pub static {up}: Font4 = Font4 {{ line_h: {self.ascent + self.descent}, ascent: {self.ascent}, "
-                          f"first: {first}, glyphs: &{up}_GLYPHS, bits: &{up}_BITS }};", ""])
+                          f"codes: &{up}_CODES, glyphs: &{up}_GLYPHS, bits: &{up}_BITS }};", ""])
 
 
 def rgb565(c):

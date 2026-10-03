@@ -303,7 +303,7 @@ impl Canvas<'_> {
         let base = y + f.ascent as i32;
         for ch in s.chars() {
             let code = ch as u32;
-            let Some(g) = code.checked_sub(f.first as u32).and_then(|i| f.glyphs.get(i as usize)) else { continue };
+            let Some(g) = f.glyph(code) else { continue };
             for gy in 0..g.h as i32 {
                 for gx in 0..g.w as i32 {
                     let k = (gy * g.w as i32 + gx) as usize;

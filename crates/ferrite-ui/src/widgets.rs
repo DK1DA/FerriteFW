@@ -148,7 +148,7 @@ pub fn freq(
 
 /// Height of a digit above the baseline.
 pub fn digit_h(f: &Font4) -> i32 {
-    f.glyphs.get((b'0' - f.first) as usize).map_or(f.ascent as i32, |g| -(g.y as i32))
+    f.glyph('0' as u32).map_or(f.ascent as i32, |g| -(g.y as i32))
 }
 
 /// "146.520" (three decimals), for compact lines.
