@@ -29,15 +29,15 @@ pub struct Advanced {
 
 /// Advanced settings groups (MENU 0 1-9) and their help lines.
 pub(crate) const GROUPS: [(&str, &str); 9] = [
-    ("Watch and scan", "Watch, background jobs, scan, tone search."),
-    ("Channels", "Browse channels and zones, add a repeater."),
-    ("Listen", "Broadcast radio, band scope, weather alerts."),
-    ("Decoders", "Event log, POCSAG, DSC, AIS, DTMF, popups."),
-    ("APRS", "Heard, messages, beacons, your station."),
-    ("GPS and time", "GPS, position, units, time zone, clock."),
-    ("Display, sound, power", "Theme, layout, backlight, sounds, power."),
-    ("Transmit", "Timeout, VOX, mic gain, DTMF, callsign, ID."),
-    ("System", "Keys, links, PIN, region, receiver, reset."),
+    (slow!("Watch and scan"), slow!("Watch, background jobs, scan, tone search.")),
+    (slow!("Channels"), slow!("Browse channels and zones, add a repeater.")),
+    (slow!("Listen"), slow!("Broadcast radio, band scope, weather alerts.")),
+    (slow!("Decoders"), slow!("Event log, POCSAG, DSC, AIS, DTMF, popups.")),
+    (slow!("APRS"), slow!("Heard, messages, beacons, your station.")),
+    (slow!("GPS and time"), slow!("GPS, position, units, time zone, clock.")),
+    (slow!("Display, sound, power"), slow!("Theme, layout, backlight, sounds, power.")),
+    (slow!("Transmit"), slow!("Timeout, VOX, mic gain, DTMF, callsign, ID.")),
+    (slow!("System"), slow!("Keys, links, PIN, region, receiver, reset.")),
 ];
 
 impl View for Advanced {

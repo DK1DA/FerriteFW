@@ -19,6 +19,27 @@
 #[cfg(test)]
 extern crate std;
 
+/// A string literal kept with the fonts in the slow flash section on the radio (`.slow_rodata`, placed after all
+/// code and other constants: `firmware/memory.x`), for long tables of text read a row at a time (the menu's
+/// items and help lines), so they don't take the zero-wait flash the code needs. On the PC an ordinary static.
+macro_rules! slow {
+    ($s:literal) => {{
+        const B: &[u8] = $s.as_bytes();
+        #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
+        static S: [u8; B.len()] = {
+            let mut a = [0u8; B.len()];
+            let mut i = 0;
+            while i < B.len() {
+                a[i] = B[i];
+                i += 1;
+            }
+            a
+        };
+        // SAFETY: the bytes are a string literal's, so UTF-8.
+        unsafe { core::str::from_utf8_unchecked(&S) }
+    }};
+}
+
 pub mod chan;
 pub mod data;
 pub mod keys;

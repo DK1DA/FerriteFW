@@ -219,20 +219,20 @@ struct Same<'a> {
 
 /// SAME event codes the detail names; others show their code.
 const SAME_EVENTS: [(&[u8], &str); 14] = [
-    (b"TOR", "Tornado Warning"),
-    (b"TOA", "Tornado Watch"),
-    (b"SVR", "Severe Thunderstorm Warning"),
-    (b"SVA", "Severe Thunderstorm Watch"),
-    (b"FFW", "Flash Flood Warning"),
-    (b"FLW", "Flood Warning"),
-    (b"WSW", "Winter Storm Warning"),
-    (b"BZW", "Blizzard Warning"),
-    (b"HUW", "Hurricane Warning"),
-    (b"SPS", "Special Weather Statement"),
-    (b"EAN", "Emergency Action Notification"),
-    (b"CEM", "Civil Emergency Message"),
-    (b"RWT", "Required Weekly Test"),
-    (b"RMT", "Required Monthly Test"),
+    (b"TOR", slow!("Tornado Warning")),
+    (b"TOA", slow!("Tornado Watch")),
+    (b"SVR", slow!("Severe Thunderstorm Warning")),
+    (b"SVA", slow!("Severe Thunderstorm Watch")),
+    (b"FFW", slow!("Flash Flood Warning")),
+    (b"FLW", slow!("Flood Warning")),
+    (b"WSW", slow!("Winter Storm Warning")),
+    (b"BZW", slow!("Blizzard Warning")),
+    (b"HUW", slow!("Hurricane Warning")),
+    (b"SPS", slow!("Special Weather Statement")),
+    (b"EAN", slow!("Emergency Action Notification")),
+    (b"CEM", slow!("Civil Emergency Message")),
+    (b"RWT", slow!("Required Weekly Test")),
+    (b"RMT", slow!("Required Monthly Test")),
 ];
 
 fn same(h: &[u8]) -> Same<'_> {

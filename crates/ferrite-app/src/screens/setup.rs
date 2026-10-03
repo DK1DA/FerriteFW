@@ -41,29 +41,29 @@ enum Ask {
 /// The eight pages: heading, text, what they ask (SETUP-2).
 const PAGES: [(&str, &str, Ask); 8] = [
     (
-        "Welcome to Ferrite",
-        "A few questions, one per page. Each has a default, so OK on every page gives a working radio. OK goes on, BACK goes back, # skips the rest.",
+        slow!("Welcome to Ferrite"),
+        slow!("A few questions, one per page. Each has a default, so OK on every page gives a working radio. OK goes on, BACK goes back, # skips the rest."),
         Ask::Nothing,
     ),
     (
-        "Your callsign",
-        "For APRS, CW ID and the power-on message. May be left empty (MENU 0 8 7 1).",
+        slow!("Your callsign"),
+        slow!("For APRS, CW ID and the power-on message. May be left empty (MENU 0 8 7 1)."),
         Ask::Callsign,
     ),
-    ("Region", "Sets your amateur transmit bands, and defaults like wide FM and weather alerts.", Ask::Region),
+    (slow!("Region"), slow!("Sets your amateur transmit bands, and defaults like wide FM and weather alerts."), Ask::Region),
     (
-        "Owner card",
-        "Optional. Shown at power on if chosen (MENU 0 7 3 3); later, edit it in the web app.",
+        slow!("Owner card"),
+        slow!("Optional. Shown at power on if chosen (MENU 0 7 3 3); later, edit it in the web app."),
         Ask::Owner,
     ),
-    ("Time", "Time zone, clock and units. The GPS sets the time once it has a fix.", Ask::Time),
-    ("Look", "What home shows, and the colours.", Ask::Look),
+    (slow!("Time"), slow!("Time zone, clock and units. The GPS sets the time once it has a fix."), Ask::Time),
+    (slow!("Look"), slow!("What home shows, and the colours."), Ask::Look),
     (
-        "Battery Save",
-        "The receivers sleep between checks: deeper lasts longer, but hears a call later.",
+        slow!("Battery Save"),
+        slow!("The receivers sleep between checks: deeper lasts longer, but hears a call later."),
         Ask::BatterySave,
     ),
-    ("All set", "", Ask::Summary),
+    (slow!("All set"), slow!(""), Ask::Summary),
 ];
 const LAST: u8 = PAGES.len() as u8 - 1;
 
@@ -71,10 +71,10 @@ const LAST: u8 = PAGES.len() as u8 - 1;
 const REGION_ROWS: u8 = 5;
 /// Battery Save levels and their trade-off (chapter 33's table).
 const SAVE: [(&str, &str, &str); 4] = [
-    ("Off", "always on", "Receivers always on: hears everything, shortest battery life."),
-    ("Level 1", "38 % on", "On 300 ms, off 500 ms: a signal can be heard up to 0.5 s late."),
-    ("Level 2", "20 % on", "On 180 ms, off 700 ms: a signal can be heard up to 0.7 s late."),
-    ("Level 3", "18 % on", "On 180 ms, off 800 ms: a signal can be heard up to 0.8 s late."),
+    (slow!("Off"), slow!("always on"), slow!("Receivers always on: hears everything, shortest battery life.")),
+    (slow!("Level 1"), slow!("38 % on"), slow!("On 300 ms, off 500 ms: a signal can be heard up to 0.5 s late.")),
+    (slow!("Level 2"), slow!("20 % on"), slow!("On 180 ms, off 700 ms: a signal can be heard up to 0.7 s late.")),
+    (slow!("Level 3"), slow!("18 % on"), slow!("On 180 ms, off 800 ms: a signal can be heard up to 0.8 s late.")),
 ];
 /// Owner card fields.
 const OWNER: [&str; 3] = ["Name", "Phone", "E-mail"];
@@ -538,10 +538,10 @@ pub struct ExtendTx;
 
 /// The warning's lines: text and colour.
 const WARNING: [(&str, u16); 4] = [
-    ("Transmit wherever the radio can, not only on your region's amateur bands.", TEXT),
-    ("This may be illegal where you are, and it can interfere with services people rely on.", AMBER),
-    ("You are responsible for every transmission.", TEXT),
-    ("Emergency frequencies still ask for a second PTT; 1.25 m stays at 0.25 W.", SUB),
+    (slow!("Transmit wherever the radio can, not only on your region's amateur bands."), TEXT),
+    (slow!("This may be illegal where you are, and it can interfere with services people rely on."), AMBER),
+    (slow!("You are responsible for every transmission."), TEXT),
+    (slow!("Emergency frequencies still ask for a second PTT; 1.25 m stays at 0.25 W."), SUB),
 ];
 
 impl View for ExtendTx {
