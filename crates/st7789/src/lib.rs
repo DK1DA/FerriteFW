@@ -155,6 +155,11 @@ impl<B: Bus8080> St7789<B> {
         }
     }
 
+    /// `count` pixels of one colour for the window (a drawing layer's runs of background).
+    pub fn repeat(&mut self, color: u16, count: u32) {
+        self.bus.repeat(color, count);
+    }
+
     /// Fills a rectangle with one colour.
     pub fn fill(&mut self, x: u16, y: u16, w: u16, h: u16, color: u16) {
         let n = self.window(x, y, w, h);
