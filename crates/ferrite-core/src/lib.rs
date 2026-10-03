@@ -16,6 +16,7 @@ pub mod freq;
 pub mod keys;
 pub mod layout;
 pub mod msg;
+pub mod rxsleep;
 
 /// Shown on the boot screen and in the link's hello.
 pub const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));

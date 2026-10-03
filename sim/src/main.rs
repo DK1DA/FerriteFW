@@ -50,7 +50,7 @@ fn main() {
     boot::draw(&mut fb, Style::List, &info);
     save(&fb, "boot-list", scale);
 
-    let live = Live { freq: mhz(146) + 52_000, rssi: -87, squelch_open: true, chips: 3 };
+    let live = Live { freq: mhz(146) + 52_000, rssi: -87, squelch_open: true, chips: 3, ..Default::default() };
     home::draw(&mut fb, &live);
     save(&fb, "home", scale);
 }

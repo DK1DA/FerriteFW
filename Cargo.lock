@@ -41,7 +41,7 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 [[package]]
 name = "bk4829"
 version = "0.1.0"
-source = "git+https://github.com/infamy/uradio?rev=d3b00caa76203711b50a25928e68b4278b1c67cd#d3b00caa76203711b50a25928e68b4278b1c67cd"
+source = "git+https://github.com/infamy/uradio?rev=452c942bf63621a8fd96a9279996a3298b218cd3#452c942bf63621a8fd96a9279996a3298b218cd3"
 dependencies = [
  "uradio-bus",
 ]
@@ -448,7 +448,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "keypad"
 version = "0.1.0"
-source = "git+https://github.com/infamy/uradio?rev=d3b00caa76203711b50a25928e68b4278b1c67cd#d3b00caa76203711b50a25928e68b4278b1c67cd"
+source = "git+https://github.com/infamy/uradio?rev=452c942bf63621a8fd96a9279996a3298b218cd3#452c942bf63621a8fd96a9279996a3298b218cd3"
 dependencies = [
  "uradio-bus",
 ]
@@ -543,7 +543,7 @@ checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
 [[package]]
 name = "nmea"
 version = "0.1.0"
-source = "git+https://github.com/infamy/uradio?rev=d3b00caa76203711b50a25928e68b4278b1c67cd#d3b00caa76203711b50a25928e68b4278b1c67cd"
+source = "git+https://github.com/infamy/uradio?rev=452c942bf63621a8fd96a9279996a3298b218cd3#452c942bf63621a8fd96a9279996a3298b218cd3"
 
 [[package]]
 name = "nu-ansi-term"
@@ -668,7 +668,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 [[package]]
 name = "si4732"
 version = "0.1.0"
-source = "git+https://github.com/infamy/uradio?rev=d3b00caa76203711b50a25928e68b4278b1c67cd#d3b00caa76203711b50a25928e68b4278b1c67cd"
+source = "git+https://github.com/infamy/uradio?rev=452c942bf63621a8fd96a9279996a3298b218cd3#452c942bf63621a8fd96a9279996a3298b218cd3"
 dependencies = [
  "uradio-bus",
 ]
@@ -688,7 +688,7 @@ checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 [[package]]
 name = "st7789"
 version = "0.1.0"
-source = "git+https://github.com/infamy/uradio?rev=d3b00caa76203711b50a25928e68b4278b1c67cd#d3b00caa76203711b50a25928e68b4278b1c67cd"
+source = "git+https://github.com/infamy/uradio?rev=452c942bf63621a8fd96a9279996a3298b218cd3#452c942bf63621a8fd96a9279996a3298b218cd3"
 dependencies = [
  "uradio-bus",
 ]
@@ -870,7 +870,7 @@ source = "git+https://github.com/infamy/udigimodes?rev=d364f194a866158bd110c1693
 [[package]]
 name = "uradio-bus"
 version = "0.1.0"
-source = "git+https://github.com/infamy/uradio?rev=d3b00caa76203711b50a25928e68b4278b1c67cd#d3b00caa76203711b50a25928e68b4278b1c67cd"
+source = "git+https://github.com/infamy/uradio?rev=452c942bf63621a8fd96a9279996a3298b218cd3#452c942bf63621a8fd96a9279996a3298b218cd3"
 
 [[package]]
 name = "valuable"
@@ -902,7 +902,7 @@ dependencies = [
 [[package]]
 name = "w25q"
 version = "0.1.0"
-source = "git+https://github.com/infamy/uradio?rev=d3b00caa76203711b50a25928e68b4278b1c67cd#d3b00caa76203711b50a25928e68b4278b1c67cd"
+source = "git+https://github.com/infamy/uradio?rev=452c942bf63621a8fd96a9279996a3298b218cd3#452c942bf63621a8fd96a9279996a3298b218cd3"
 dependencies = [
  "uradio-bus",
 ]

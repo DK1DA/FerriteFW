@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn draws() {
         let mut fb = FrameBuffer::new();
-        draw(&mut fb, &Live { freq: freq::mhz(146) + 52_000, rssi: -90, squelch_open: true, chips: 3 });
+        draw(&mut fb, &Live { freq: freq::mhz(146) + 52_000, rssi: -90, squelch_open: true, chips: 3, ..Default::default() });
         // Something was drawn in the frequency area and the meter is green up to -90 dBm.
         assert!((60..120).any(|y| (0..240).any(|x| fb.at(x, y) != BG)));
         assert_eq!(fb.at(8 + meter_px(-90) - 1, 164), GREEN);

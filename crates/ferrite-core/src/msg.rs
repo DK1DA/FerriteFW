@@ -17,6 +17,10 @@ pub enum RadioCmd {
     Tune(Freq10),
     /// Squelch level 0-9.
     Squelch(u8),
+    /// Battery Save: the receiver sleep cycle.
+    BatterySave(crate::rxsleep::Level),
+    /// A key or knob: counts as activity for receiver sleep.
+    Activity,
     /// Broadcast receiver: FM in 10 kHz units, AM in kHz.
     Broadcast(BroadcastCmd),
     /// Everything off but the MCU (power switch).
@@ -99,6 +103,8 @@ pub struct Live {
     /// dBm.
     pub rssi: i16,
     pub squelch_open: bool,
+    /// The receiver is in its sleep phase (Battery Save).
+    pub rx_asleep: bool,
     /// Chips that answered with their ID at start-up (bit per chip).
     pub chips: u8,
 }

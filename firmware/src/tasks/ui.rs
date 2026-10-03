@@ -82,7 +82,10 @@ pub async fn task() {
                 let f = (live.freq as i32 + d as i32 * STEP as i32) as u32;
                 RADIO.send(RadioCmd::Tune(f)).await;
             }
-            Either::Second(Input::Key(_)) => {} // menus: milestone 2
+            Either::Second(Input::Key(_)) => {
+                // Menus: milestone 2. A key still wakes the receiver, as on stock.
+                RADIO.send(RadioCmd::Activity).await;
+            }
         }
     }
 }

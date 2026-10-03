@@ -1,6 +1,9 @@
 //! Radio: the only task that touches the BK4829s and their bus, the SI4732, the RF path pins and the PA. Runs on
 //! the highest-priority interrupt executor.
 //!
+//! Battery Save (`ferrite_core::rxsleep`) cycles the active BK4829 between deep sleep and receive; the other chip
+//! sleeps whenever it is not the one in use.
+//!
 //! This build receives only: the bk4829 crate's transmit methods do not exist without the `tx` feature, and no
 //! transmit path pin is ever raised here.
 
@@ -13,15 +16,20 @@ use crate::tasks::{check, CHECK_BK0, CHECK_BK1};
 use bk4829::wire::ThreeWire;
 use bk4829::{AfOut, Bandwidth, Bk4829};
 use embassy_futures::select::{select, Either};
-use embassy_time::Timer;
+use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, Band, Freq10};
 use ferrite_core::msg::{BroadcastCmd, Live, RadioCmd, Source};
+use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use si4732::{Mode as SiMode, Si4732, Sideband};
 
 type Wire = ThreeWire<Out, Io, BusyDelay>;
 
 /// Start-up frequency until settings exist: 2 m calling.
 const DEFAULT: Freq10 = freq::mhz(146) + 52_000;
+/// Battery Save until settings exist.
+const DEFAULT_SAVE: Level = Level::L1;
+/// Signal meter and squelch poll while the receiver is awake.
+const POLL_MS: u64 = 50;
 
 /// Receive path for a band: RF_PINS index (0 VHF RX, 2 UHF RX, 4 HF RX). The 200-300 MHz band's path is not
 /// known yet; it uses the VHF front end, as chip 0 does.
@@ -54,6 +62,11 @@ struct Radio {
     cs: [Out; 2],
     chips: u8,
     live: Live,
+    save: RxSleep,
+}
+
+fn now_ms() -> u64 {
+    Instant::now().as_millis()
 }
 
 impl Radio {
@@ -66,18 +79,47 @@ impl Radio {
         if self.chips & 1 << n == 0 {
             return;
         }
-        // The other chip stops receiving (the background receiver comes later).
+        // The other chip sleeps (the background receiver comes later).
         let other = n ^ 1;
         if self.chips & 1 << other != 0 {
-            self.chip(other).off();
+            self.chip(other).sleep();
         }
         select_rx_path(band);
         let mut bk = self.chip(n);
+        bk.wake();
         bk.set_freq(f * 10);
         bk.bandwidth(Bandwidth::Wide);
         bk.af_out(AfOut::Normal);
         bk.rx_on();
         self.live.freq = f;
+        self.live.rx_asleep = false;
+        self.save.activity(now_ms());
+    }
+
+    /// Battery Save's phase change on the active chip.
+    fn apply(&mut self, a: Action) {
+        let (band, n) = freq::band(self.live.freq);
+        if self.chips & 1 << n == 0 {
+            return;
+        }
+        match a {
+            Action::None => return,
+            Action::Sleep => {
+                speaker(false);
+                self.live.squelch_open = false;
+                self.chip(n).sleep();
+                for p in RF_PINS {
+                    p.write(false);
+                }
+            }
+            Action::Wake => {
+                let mut bk = self.chip(n);
+                bk.wake();
+                bk.rx_on();
+                select_rx_path(band);
+            }
+        }
+        self.live.rx_asleep = self.save.asleep();
     }
 
     /// RSSI and squelch from the active chip; true if anything changed.
@@ -91,6 +133,8 @@ impl Radio {
         let changed = rssi != self.live.rssi || open != self.live.squelch_open;
         if open != self.live.squelch_open {
             speaker(open);
+            // Opening and closing both count as activity: the receiver stays fully on for the hold time after.
+            self.save.activity(now_ms());
         }
         self.live.rssi = rssi;
         self.live.squelch_open = open;
@@ -154,6 +198,7 @@ pub async fn task() {
         cs: [Out(BK_CS[0]), Out(BK_CS[1])],
         chips: 0,
         live: Live::default(),
+        save: RxSleep::new(DEFAULT_SAVE, now_ms()),
     };
     // Each chip: find the read alignment from its ID, then stock's start-up.
     for n in 0..2u8 {
@@ -170,9 +215,24 @@ pub async fn task() {
     live.send(r.live);
 
     loop {
-        match select(RADIO.receive(), Timer::after_millis(50)).await {
+        // Wake for the next command, the next Battery Save phase change, or (awake) the next meter poll.
+        let mut at = r.save.deadline();
+        if !r.save.asleep() {
+            at = at.min(now_ms() + POLL_MS);
+        }
+        match select(RADIO.receive(), Timer::at(Instant::from_millis(at))).await {
             Either::First(RadioCmd::Tune(f)) => {
                 r.tune(f);
+                live.send(r.live);
+            }
+            Either::First(RadioCmd::BatterySave(level)) => {
+                let a = r.save.set_level(level, now_ms());
+                r.apply(a);
+                live.send(r.live);
+            }
+            Either::First(RadioCmd::Activity) => {
+                let a = r.save.activity(now_ms());
+                r.apply(a);
                 live.send(r.live);
             }
             Either::First(RadioCmd::Squelch(_)) => {} // the advanced squelch: milestone 2
@@ -182,7 +242,7 @@ pub async fn task() {
             Either::First(RadioCmd::Shutdown) => {
                 for n in 0..2u8 {
                     if r.chips & 1 << n != 0 {
-                        r.chip(n).off();
+                        r.chip(n).sleep();
                     }
                 }
                 let _ = broadcast(&mut r.si, BroadcastCmd::Off).await;
@@ -192,7 +252,12 @@ pub async fn task() {
                 }
             }
             Either::Second(()) => {
-                if r.poll() {
+                let mut changed = !r.save.asleep() && r.poll();
+                // Busy: the squelch is open (decoders, scan and transmit join this as they arrive).
+                let a = r.save.tick(now_ms(), r.live.squelch_open);
+                changed |= a != Action::None;
+                r.apply(a);
+                if changed {
                     live.send(r.live);
                 }
             }
