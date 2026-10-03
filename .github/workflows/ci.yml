@@ -1,5 +1,8 @@
 name: ci
-on: [push, pull_request]
+# Paused: uradio and udigimodes are private, and the DEPS_TOKEN secret that reads them is not set up yet.
+# To turn CI back on, add the secret and restore the triggers:
+#   on: [push, pull_request]
+on: workflow_dispatch
 jobs:
   build:
     runs-on: ubuntu-latest
