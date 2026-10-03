@@ -1,0 +1,15 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99
+        with:
+          components: clippy
+          targets: thumbv7em-none-eabihf
+      - run: cargo test --workspace --all-features
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # Every driver must build for the radio's Cortex-M4F without std.
+      - run: cargo build --release --target thumbv7em-none-eabihf --workspace --exclude uradio-bus && cargo build --release --target thumbv7em-none-eabihf -p uradio-bus
