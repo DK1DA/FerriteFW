@@ -2,8 +2,9 @@
 //!
 //! The UI state machine, the same on the radio and in the simulator. In: key down/up ([`App::key_down`],
 //! [`App::key_up`]), knob steps ([`App::knob`]), the time ([`App::tick`]) and the Radio task's snapshot of the
-//! three slots ([`LiveAll`]). Out: commands for the Radio task ([`App::pop_cmd`]) and the screen, drawn through
-//! any [`Panel`] by [`App::render`], which redraws only what changed (HOME-7).
+//! three slots ([`LiveAll`]). Out: commands for the Radio task ([`App::pop_cmd`]), channel writes for the store's
+//! owner ([`App::pop_write`]) and the screen, drawn through any [`Panel`] by [`App::render`], which redraws only
+//! what changed (HOME-7).
 //!
 //! No heap and fixed-size state (`size_of::<App>()` is checked by a test). Channels come through
 //! [`chan::ChannelStore`], read on demand.
