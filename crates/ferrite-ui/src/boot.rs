@@ -35,7 +35,13 @@ pub fn draw(lcd: &mut impl Panel, b: &BootInfo) {
     lcd.text4_aligned(120, 188, Align::Center, b"FERRITE", &WORD_40, TEXT, BG);
     lcd.text4_aligned(120, 209, Align::Center, b.version.as_bytes(), &UI_12, SUB, BG);
     if let Some(call) = b.callsign {
-        lcd.text4_aligned(120, 243, Align::Center, call.as_bytes(), &UI_15B, TEXT, BG);
+        // Callsigns are shown in capitals (SETUP-12); UI_15B carries no lower case.
+        let mut up = [0u8; 16];
+        let n = call.len().min(up.len());
+        for (d, s) in up.iter_mut().zip(call.as_bytes()) {
+            *d = s.to_ascii_uppercase();
+        }
+        lcd.text4_aligned(120, 243, Align::Center, &up[..n], &UI_15B, TEXT, BG);
     }
     let n = b.checks.len() as i32;
     let done = b.checks.iter().filter(|c| c.state != State::Pending).count() as i32;
