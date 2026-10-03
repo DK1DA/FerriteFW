@@ -56,5 +56,11 @@ pub trait InPin {
     fn is_high(&mut self) -> bool;
 }
 
+/// A pin that is driven or read in turn (a half-duplex data line, such as the BK4829's SDATA).
+pub trait IoPin: OutPin + InPin {
+    /// true = drive it (push-pull), false = release it (input with pull-up).
+    fn drive(&mut self, on: bool);
+}
+
 #[cfg(feature = "mock")]
 pub mod mock;

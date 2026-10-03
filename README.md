@@ -10,8 +10,8 @@ firmware for the Radtel RT-950 Pro, and usable on anything with the same parts.
 | [`st7789`](crates/st7789) | ST7789 display over an 8-bit parallel bus: start-up as awaitable steps, windows, fills, hardware scroll | 0.1 |
 | [`keypad`](crates/keypad) | Key matrix with a ground row and direct keys, debounce, press/long/repeat events, quadrature encoder | 0.1 |
 | [`nmea`](crates/nmea) | GPS sentences (GGA, RMC, GSV, any talker): position, time, speed, course, satellites; about 300 bytes | 0.1 |
-| `si4732` | SI4732 broadcast receiver: FM, AM, SW, SSB (patch from external flash), RDS | 0.1 |
-| `bk4829` | BK4829 transceiver: tuning, modes, squelch, tones, DTMF, FSK modem; transmit behind the `tx` feature | planned |
+| [`si4732`](crates/si4732) | SI4732 broadcast receiver: FM, AM, SW, SSB (patch from external flash), RDS | 0.1 |
+| [`bk4829`](crates/bk4829) | BK4829 transceiver: 3-wire bus (read alignment detected), stock's start-up, tuning, squelch, CTCSS/DCS, DTMF, FSK modem; transmit only with the `tx` feature | 0.1 |
 
 Every crate follows the same rules:
 
