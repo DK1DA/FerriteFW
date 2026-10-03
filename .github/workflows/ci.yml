@@ -1,0 +1,22 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # uradio and udigimodes are private: a token with read access to both (repository secret DEPS_TOKEN).
+      - run: git config --global url."https://x-access-token:${{ secrets.DEPS_TOKEN }}@github.com/".insteadOf "https://github.com/"
+      # rust-toolchain.toml picks the pinned nightly and its components.
+      - run: rustup show active-toolchain || rustup toolchain install
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo fw-clippy -- -D warnings
+      - run: cargo fw --features tx
+      - run: cargo fw  # last, so the size below is the receive-only image's
+      - name: Size, and no core::fmt in the image
+        run: |
+          BIN=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
+          ELF=target/thumbv7em-none-eabihf/release/ferrite
+          $BIN/llvm-size $ELF | tee -a $GITHUB_STEP_SUMMARY
+          ! $BIN/llvm-nm $ELF | grep -q 'core..fmt'

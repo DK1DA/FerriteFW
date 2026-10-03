@@ -1,0 +1,17 @@
+# The radio: every size option (nightly, pinned in rust-toolchain.toml): core rebuilt at opt-level z, no panic
+# location strings, panics as a trap (HardFault -> safe state), identical-code folding. Only the radio target
+# gets these, so the host crates build and test with plain `cargo test`.
+[target.thumbv7em-none-eabihf]
+rustflags = ["-C", "link-arg=-Tlink.x", "-C", "target-cpu=cortex-m4", "-Zlocation-detail=none",
+             "-Zunstable-options", "-Cpanic=immediate-abort", "-C", "link-arg=--icf=all"]
+
+[alias]
+# The firmware image: target/thumbv7em-none-eabihf/release/ferrite
+fw = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core"]
+fw-clippy = ["clippy", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core"]
+# Screens rendered on the PC: target/sim/*.png
+sim = ["run", "-p", "ferrite-sim", "--"]
+
+[net]
+# uradio and udigimodes are private for now: let git (and its credential helper) fetch them.
+git-fetch-with-cli = true

@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = ["crates/ferrite-core", "crates/ferrite-ui", "firmware", "sim"]
+# Plain `cargo test` / `cargo clippy` cover what runs on the PC; the firmware builds with `cargo fw` (radio only).
+default-members = ["crates/ferrite-core", "crates/ferrite-ui", "sim"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/infamy/ferrite"
+publish = false
+
+[workspace.dependencies]
+ferrite-core = { path = "crates/ferrite-core" }
+ferrite-ui = { path = "crates/ferrite-ui" }
+ufmt = "0.2"
+embassy-sync = "0.8"
+
+# Chip drivers and digital modes: our own libraries, pinned to a commit.
+uradio-bus = { git = "https://github.com/infamy/uradio", rev = "" }
+bk4829 = { git = "https://github.com/infamy/uradio", rev = "" }
+si4732 = { git = "https://github.com/infamy/uradio", rev = "" }
+st7789 = { git = "https://github.com/infamy/uradio", rev = "" }
+w25q = { git = "https://github.com/infamy/uradio", rev = "" }
+keypad = { git = "https://github.com/infamy/uradio", rev = "" }
+nmea = { git = "https://github.com/infamy/uradio", rev = "" }
+uafsk = { git = "https://github.com/infamy/udigimodes", rev = "" }
+upocsag = { git = "https://github.com/infamy/udigimodes", rev = "" }
+udsc = { git = "https://github.com/infamy/udigimodes", rev = "" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"       # the radio target's rustflags add -Cpanic=immediate-abort after this, which wins
+debug = true          # symbols only; not in the flashed image
+
+[profile.test]
+opt-level = 1
+
+[workspace.lints.clippy]
+# The drawing calls take position, text, font and two colours; register constants spell out bit 0 shifts; the
+# fault paths halt in an empty loop on purpose (interrupts off, safe state set).
+too_many_arguments = "allow"
+new_without_default = "allow"
+identity_op = "allow"
+empty_loop = "allow"

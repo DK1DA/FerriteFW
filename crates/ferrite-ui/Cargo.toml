@@ -1,0 +1,18 @@
+[package]
+name = "ferrite-ui"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Ferrite's screens and drawing layer: 4-bit anti-aliased text and masks straight to any Panel (the ST7789, or a frame buffer on the PC)"
+
+[features]
+# The PC frame buffer (`fb`), for the simulator and snapshot tests.
+std = []
+
+[dependencies]
+ufmt.workspace = true
+ferrite-core.workspace = true
+
+[lints]
+workspace = true
