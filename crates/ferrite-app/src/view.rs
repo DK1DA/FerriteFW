@@ -29,8 +29,18 @@ const R_NOTE: usize = 16;
 const R_LINE: usize = 17; // edit: the other two slots (17-18)
 pub(crate) const REGIONS: usize = 19;
 
-/// Home, watch layout: the active slot large at the top, the other two as cards (y, height).
-const CARDS: [(i32, i32); 3] = [(25, 115), (146, 62), (214, 62)];
+/// Home, watch layout: the slots always stacked A, B, C; the active one is the large card, in its own place.
+const CARD_TOP: i32 = 25;
+const CARD_BIG: i32 = 115;
+const CARD_SMALL: i32 = 62;
+const CARD_GAP: i32 = 6;
+
+/// Card position (y, height) of slot `s` when `active` is the large one (HOME-11).
+pub(crate) fn card(s: u8, active: u8) -> (i32, i32) {
+    let h = |i: u8| if i == active { CARD_BIG } else { CARD_SMALL };
+    let y = CARD_TOP + (0..s).map(|i| h(i) + CARD_GAP).sum::<i32>();
+    (y, h(s))
+}
 
 /// Advanced settings groups (MENU 0 1-9) and their help lines.
 pub(crate) const GROUPS: [(&str, &str); 9] = [
@@ -160,13 +170,6 @@ impl App {
 
     // ---- home ----
 
-    /// Card order: the active slot first, the others in letter order.
-    fn order(&self) -> [u8; SLOTS] {
-        let a = self.active;
-        let (b, c) = ((a + 1) % 3, (a + 2) % 3);
-        [a, b.min(c), b.max(c)]
-    }
-
     fn head_text(&self, s: u8, live: &LiveAll, b: &mut Buf<32>) {
         let sl = &self.slots[s as usize];
         let lv = &live.slots[s as usize];
@@ -207,13 +210,15 @@ impl App {
     }
 
     fn render_home(&mut self, lcd: &mut impl Panel, live: &LiveAll) {
-        for (p, s) in self.order().into_iter().enumerate() {
-            let (y, h) = CARDS[p];
-            let big = p == 0;
+        for s in 0..SLOTS as u8 {
+            // Fixed order A, B, C: the card's region index is its slot.
+            let p = s as usize;
+            let (y, h) = card(s, self.active);
+            let big = s == self.active;
             let lv = live.slots[s as usize];
             let (state, sc) = self.state(s, live);
             let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
-            if self.dirty(R_FRAME + p, hash(&(s, border))) {
+            if self.dirty(R_FRAME + p, hash(&(s, y, h, border))) {
                 lcd.fill(6, y, 228, h, BG);
                 lcd.fill_r(6, y, 228, h, 6, SURFACE);
                 lcd.frame_r(6, y, 228, h, 6, border);

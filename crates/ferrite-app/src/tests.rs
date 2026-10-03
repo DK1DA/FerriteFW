@@ -370,3 +370,19 @@ fn toasts_replace_the_hint_bar_for_3_s() {
     t.render(&mut fb);
     assert_ne!(fb.at(120, 300), BLUE, "hint bar back");
 }
+
+/// HOME-11: the slots stay stacked A, B, C; SLOT only moves which one is large, in its own place.
+#[test]
+fn slots_stay_in_order() {
+    use crate::view::card;
+    for active in 0..3u8 {
+        let (ya, _) = card(0, active);
+        let (yb, _) = card(1, active);
+        let (yc, hc) = card(2, active);
+        assert!(ya < yb && yb < yc, "A above B above C");
+        assert_eq!(ya, 25);
+        assert!(yc + hc <= 296, "fits above the hint bar");
+        assert_eq!(card(active, active).1, 115);
+    }
+    assert_eq!(card(1, 1), (93, 115));
+}
