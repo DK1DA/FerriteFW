@@ -52,7 +52,7 @@ pub async fn task() {
                 _ => State::Pending,
             };
         }
-        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: None, checks: &checks, tx_armed: false });
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: None, checks: &checks });
         let done = checks.iter().all(|c| c.state != State::Pending);
         let t = start.elapsed();
         if (done && t >= Duration::from_millis(1500)) || t >= Duration::from_secs(5) {
@@ -65,7 +65,7 @@ pub async fn task() {
     }
     if checks.iter().any(|c| c.state == State::Fail) {
         // The failed check stays on screen until a key.
-        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: None, checks: &checks, tx_armed: false });
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: None, checks: &checks });
         while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) {}
     }
 

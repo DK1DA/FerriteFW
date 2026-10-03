@@ -1,7 +1,7 @@
 //! The boot screen: logo, wordmark, version, callsign, and the self-test as a bar and one status line. A failed
 //! check shows on the same screen, in red, naming the check; the radio then waits for a key.
 use crate::assets::*;
-use crate::gfx::{Align, Gfx, AMBER, BG, BLUE, LINE, RED, SUB, TEXT};
+use crate::gfx::{Align, Gfx, BG, BLUE, LINE, RED, SUB, TEXT};
 use crate::panel::Panel;
 use crate::text::Buf;
 use crate::v;
@@ -26,7 +26,6 @@ pub struct BootInfo<'a> {
     /// The owner's callsign, shown on the logo screen; None until one is set.
     pub callsign: Option<&'a str>,
     pub checks: &'a [Check],
-    pub tx_armed: bool,
 }
 
 /// Full screen.
@@ -49,10 +48,8 @@ pub fn draw(lcd: &mut impl Panel, b: &BootInfo) {
         (v!(line, "{}: {}", c.label, if c.value.is_empty() { "failed" } else { c.value }), RED)
     } else if done < n {
         (v!(line, "Self-test {} of {}", done, n), SUB)
-    } else if b.tx_armed {
-        (b"Ready", SUB)
     } else {
-        ("Ready · transmit not armed".as_bytes(), AMBER)
+        (b"Ready", SUB)
     };
     lcd.fill(0, 276, 240, 44, BG);
     lcd.text4_aligned(120, 290, Align::Center, text, &UI_12, col, BG);

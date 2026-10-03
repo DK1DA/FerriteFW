@@ -43,7 +43,7 @@ fn main() {
         Check { label: "BK4829 UHF", value: "0x4829", state: State::Ok },
         Check { label: "SI4732", value: "", state: State::Pending },
     ];
-    let info = BootInfo { version: VERSION, callsign: Some("VA7FER"), checks: &checks, tx_armed: false };
+    let info = BootInfo { version: VERSION, callsign: Some("VA7FER"), checks: &checks };
     let mut fb = FrameBuffer::new();
     boot::draw(&mut fb, &info);
     save(&fb, "boot", scale);

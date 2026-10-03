@@ -13,7 +13,7 @@ Ferrite replaces the RT-950 Pro's stock firmware with one that is open, RF-aware
 - Decoders on the radio itself: POCSAG, SAME, DSC, AIS, FT8 and WSPR.
 - A documented link protocol for its own web app.
 - Real battery life.
-- Transmit with its safety checks in the firmware itself: armed flag, calibrated band limits and power, timeout.
+- Transmit with its safety checks in the firmware itself: calibrated band limits and power, timeout, battery cut-off.
 
 > **Status: scaffold.** The start-up, the six tasks and the chip drivers are wired together, and the image builds,
 > but it has not run on a radio yet. Milestone 1 (bring-up, receive only) starts here.
