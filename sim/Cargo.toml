@@ -8,6 +8,7 @@ description = "Ferrite's screens on the PC with the firmware's own drawing code:
 
 [dependencies]
 ferrite-core.workspace = true
+ferrite-app.workspace = true
 ferrite-ui = { workspace = true, features = ["std"] }
 png = "0.17"
 minifb = "0.27"

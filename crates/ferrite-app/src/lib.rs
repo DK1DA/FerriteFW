@@ -1,0 +1,779 @@
+//! # ferrite-app
+//!
+//! The UI state machine, the same on the radio and in the simulator. In: key down/up ([`App::key_down`],
+//! [`App::key_up`]), knob steps ([`App::knob`]), the time ([`App::tick`]) and the Radio task's snapshot of the
+//! three slots ([`LiveAll`]). Out: commands for the Radio task ([`App::pop_cmd`]) and the screen, drawn through
+//! any [`Panel`] by [`App::render`], which redraws only what changed (HOME-7).
+//!
+//! No heap and fixed-size state (`size_of::<App>()` is checked by a test). Channels come through
+//! [`chan::ChannelStore`], read on demand.
+//!
+//! Screens: home (watch layout, manual chapter 6), edit in place (hold SLOT), quick settings (MENU), advanced
+//! settings (MENU 0, read-only for now) and the Status page (#). Rules are cited by their manual IDs.
+
+#![no_std]
+
+#[cfg(test)]
+extern crate std;
+
+pub mod chan;
+pub mod keys;
+pub mod slot;
+mod view;
+
+use chan::{Channel, ChannelStore};
+use ferrite_core::freq::{mhz, Freq10};
+use ferrite_core::keys::Key;
+use ferrite_core::msg::{LiveAll, Param, RadioCmd, SLOTS};
+use ferrite_core::rxsleep::Level;
+use ferrite_ui::text::Buf;
+use keys::{KeyEvent, KeyTracker, Press};
+use slot::{band_near, Item, SlotCfg, BANDS, BAND_125M, DEFAULT_CFG, GRID, QUICK, STEPS};
+
+pub use ferrite_ui::panel::Panel;
+
+/// Toasts show for 3 s (HOME-9); undo is offered for 5 s (EDIT-4, MENU-22).
+pub const TOAST_MS: u32 = 3000;
+pub const UNDO_MS: u32 = 5000;
+/// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
+pub const EDIT_IDLE_MS: u32 = 8000;
+pub const MENU_TIMEOUT_MS: u32 = 30_000;
+/// Watch pause (0 1 2 5, default 1 min).
+pub const PAUSE_S: u16 = 60;
+
+/// Which screen is up, with its cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Screen {
+    Home,
+    /// Hold SLOT: the active slot's settings as a grid; `cell` is the focused one (0-8).
+    Edit { cell: u8 },
+    /// MENU: the nine quick settings and "0 Advanced"; `row` 0-9.
+    Quick { row: u8 },
+    /// MENU 0: nine groups. `from_quick`: BACK returns to quick settings, else home.
+    Advanced { row: u8, from_quick: bool },
+    /// # on home, or MENU 0 0.
+    Status { row: u8, from_menu: bool },
+}
+
+/// One slot: a VFO and a channel position; which one it is on.
+#[derive(Clone, Copy, Debug)]
+pub struct Slot {
+    pub vfo_mode: bool,
+    pub vfo: Freq10,
+    /// The VFO's settings.
+    pub cfg: SlotCfg,
+    /// The VFO's last frequency on each band (VFO-1).
+    pub mem: [Freq10; BANDS.len()],
+    pub zone: u8,
+    /// Position in the zone.
+    pub pos: u16,
+    /// A copy of the channel it is on, edits included.
+    pub ch: Option<Channel>,
+}
+
+impl Slot {
+    fn new(f: Freq10) -> Self {
+        let mut mem = [0; BANDS.len()];
+        for (m, b) in mem.iter_mut().zip(&BANDS) {
+            *m = b.start;
+        }
+        let mut cfg = DEFAULT_CFG;
+        let b = &BANDS[band_near(f)];
+        cfg.mode = b.mode;
+        cfg.step = b.step;
+        Slot { vfo_mode: true, vfo: f, cfg, mem, zone: 0, pos: 0, ch: None }
+    }
+
+    pub fn on_channel(&self) -> bool {
+        !self.vfo_mode && self.ch.is_some()
+    }
+
+    pub fn freq(&self) -> Freq10 {
+        match self.ch {
+            Some(c) if !self.vfo_mode => c.rx,
+            _ => self.vfo,
+        }
+    }
+
+    pub fn cfg(&self) -> &SlotCfg {
+        match &self.ch {
+            Some(c) if !self.vfo_mode => &c.cfg,
+            _ => &self.cfg,
+        }
+    }
+
+    fn cfg_mut(&mut self) -> &mut SlotCfg {
+        match &mut self.ch {
+            Some(c) if !self.vfo_mode => &mut c.cfg,
+            _ => &mut self.cfg,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Toast {
+    head: Buf<20>,
+    body: Buf<28>,
+    icon: bool,
+    until: u32,
+}
+
+/// What a change replaced, for "* Undo".
+#[derive(Clone, Copy)]
+struct Undo {
+    slot: u8,
+    cfg: SlotCfg,
+    watch: u8,
+    bsave: u8,
+    until: u32,
+}
+
+/// Commands waiting for the Radio task.
+struct Outbox {
+    q: [Option<RadioCmd>; 16],
+    head: u8,
+    len: u8,
+}
+
+impl Outbox {
+    fn push(&mut self, c: RadioCmd) {
+        if self.len as usize == self.q.len() {
+            self.pop(); // full: the oldest goes (the caller drains after every input, so this is a backstop)
+        }
+        let i = (self.head as usize + self.len as usize) % self.q.len();
+        self.q[i] = Some(c);
+        self.len += 1;
+    }
+
+    fn pop(&mut self) -> Option<RadioCmd> {
+        if self.len == 0 {
+            return None;
+        }
+        let c = self.q[self.head as usize].take();
+        self.head = ((self.head as usize + 1) % self.q.len()) as u8;
+        self.len -= 1;
+        c
+    }
+}
+
+/// What is on the screen now, so render can skip what hasn't changed.
+pub(crate) struct Drawn {
+    pub screen: Option<u8>,
+    pub sbar: Option<ferrite_ui::widgets::StatusBar>,
+    /// One hash per region; 0 = not drawn.
+    pub hash: [u32; view::REGIONS],
+    /// Each card's meter: lit segments and whether squelch was open.
+    pub meter: [Option<(u8, bool)>; SLOTS],
+}
+
+pub struct App {
+    screen: Screen,
+    slots: [Slot; SLOTS],
+    active: u8,
+    /// Index into Watch's values: off, A+B, A+B+C.
+    watch: u8,
+    /// Battery Save: 0 off, 1-3.
+    bsave: u8,
+    locked: bool,
+    inbox: u8,
+    alert: bool,
+    toast: Option<Toast>,
+    undo: Option<Undo>,
+    /// The last settings changed, newest first (MENU-8).
+    recent: [Option<Item>; 3],
+    keys: KeyTracker,
+    now: u32,
+    last_input: u32,
+    paused_until: Option<u32>,
+    /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
+    rx_mask: u8,
+    scan_mask: u8,
+    relay_mask: u8,
+    out: Outbox,
+    pub(crate) drawn: Drawn,
+}
+
+impl App {
+    /// Three slots: A on 146.520, B on 443.475, C on 118.950 (the look review's sample), all VFO.
+    pub fn new() -> Self {
+        let mut app = App {
+            screen: Screen::Home,
+            slots: [Slot::new(mhz(146) + 52_000), Slot::new(mhz(443) + 47_500), Slot::new(mhz(118) + 95_000)],
+            active: 0,
+            watch: 1,
+            bsave: 1,
+            locked: false,
+            inbox: 0,
+            alert: false,
+            toast: None,
+            undo: None,
+            recent: [None; 3],
+            keys: KeyTracker::new(),
+            now: 0,
+            last_input: 0,
+            paused_until: None,
+            rx_mask: 0,
+            scan_mask: 0,
+            relay_mask: 0,
+            out: Outbox { q: [None; 16], head: 0, len: 0 },
+            drawn: Drawn { screen: None, sbar: None, hash: [0; view::REGIONS], meter: [None; SLOTS] },
+        };
+        for s in 0..SLOTS as u8 {
+            app.send_slot(s);
+        }
+        app.out.push(RadioCmd::Active(0));
+        app.out.push(RadioCmd::Watch(app.watch_mask()));
+        app.out.push(RadioCmd::BatterySave(level(app.bsave)));
+        app
+    }
+
+    pub fn screen(&self) -> Screen {
+        self.screen
+    }
+
+    pub fn active(&self) -> u8 {
+        self.active
+    }
+
+    pub fn slot(&self, i: u8) -> &Slot {
+        &self.slots[i as usize % SLOTS]
+    }
+
+    pub fn locked(&self) -> bool {
+        self.locked
+    }
+
+    /// Off, A+B, A+B+C.
+    pub fn watch(&self) -> u8 {
+        self.watch
+    }
+
+    /// The next command for the Radio task.
+    pub fn pop_cmd(&mut self) -> Option<RadioCmd> {
+        self.out.pop()
+    }
+
+    /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
+    pub fn set_channel(&mut self, slot: u8, zone: u8, pos: u16, store: &impl ChannelStore) {
+        let s = &mut self.slots[slot as usize % SLOTS];
+        if let Some(c) = store.zone_at(zone, pos) {
+            (s.zone, s.pos, s.ch, s.vfo_mode) = (zone, pos, Some(c), false);
+            self.send_slot(slot);
+        }
+    }
+
+    /// Watch: 0 off, 1 A+B, 2 A+B+C (setup, or the simulator's sample).
+    pub fn set_watch(&mut self, v: u8) {
+        self.watch = v % 3;
+        self.out.push(RadioCmd::Watch(self.watch_mask()));
+    }
+
+    /// A slot's VFO settings (setup, or the simulator's sample).
+    pub fn set_vfo_cfg(&mut self, slot: u8, cfg: SlotCfg) {
+        self.slots[slot as usize % SLOTS].cfg = cfg;
+        self.send_slot(slot % SLOTS as u8);
+    }
+
+    /// Everything is drawn again on the next render.
+    pub fn redraw_all(&mut self) {
+        self.drawn.screen = None;
+        self.drawn.sbar = None;
+    }
+
+    /// A message, decode or alert arrived: a toast and the inbox count (SBAR-6).
+    pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
+        self.inbox = self.inbox.saturating_add(1);
+        self.alert |= alert;
+        self.show_toast(head, body, true);
+    }
+
+    // ---- inputs ----
+
+    pub fn key_down(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
+        self.tick_keys(now, store);
+        self.keys.down(key, now);
+        self.last_input = now;
+        self.out.push(RadioCmd::Activity);
+    }
+
+    pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
+        self.tick_keys(now, store);
+        if let Some(e) = self.keys.up(key, now) {
+            self.on_key(e, store);
+        }
+    }
+
+    /// Knob: +1 per click clockwise.
+    pub fn knob(&mut self, d: i8, now: u32, store: &impl ChannelStore) {
+        self.tick_keys(now, store);
+        self.last_input = now;
+        self.out.push(RadioCmd::Activity);
+        if self.locked {
+            return self.locked_toast();
+        }
+        let d = d as i32;
+        match self.screen {
+            Screen::Home => {
+                let big = self.keys.is_held(Key::Side(2));
+                if big {
+                    self.keys.used(Key::Side(2));
+                }
+                self.step(d, big, store);
+            }
+            Screen::Edit { cell } => self.change(GRID[cell as usize], d),
+            Screen::Quick { row } => self.change(QUICK[row as usize], d),
+            Screen::Advanced { row, from_quick } => {
+                self.screen = Screen::Advanced { row: (row as i32 + d).rem_euclid(9) as u8, from_quick }
+            }
+            Screen::Status { row, from_menu } => {
+                self.screen = Screen::Status { row: (row as i32 + d).rem_euclid(view::STATUS_ROWS) as u8, from_menu }
+            }
+        }
+    }
+
+    /// Time passes: long presses and repeats, toasts, undo, timeouts; and the latest snapshot.
+    pub fn tick(&mut self, now: u32, live: &LiveAll, store: &impl ChannelStore) {
+        self.tick_keys(now, store);
+        let mut rx = 0;
+        let mut scan = 0;
+        let mut relay = 0;
+        for (i, s) in live.slots.iter().enumerate() {
+            rx |= (s.squelch_open as u8) << i;
+            scan |= (s.scanning as u8) << i;
+            relay |= (s.relay as u8) << i;
+        }
+        (self.rx_mask, self.scan_mask, self.relay_mask) = (rx, scan, relay);
+        if self.toast.is_some_and(|t| after(now, t.until)) {
+            self.toast = None;
+        }
+        if self.undo.is_some_and(|u| after(now, u.until)) {
+            self.undo = None;
+        }
+        if self.paused_until.is_some_and(|t| after(now, t)) {
+            self.paused_until = None;
+        }
+        let idle = now.wrapping_sub(self.last_input);
+        match self.screen {
+            Screen::Edit { .. } if idle >= EDIT_IDLE_MS => self.go_home(),
+            Screen::Quick { .. } | Screen::Advanced { .. } | Screen::Status { .. } if idle >= MENU_TIMEOUT_MS => {
+                self.go_home()
+            }
+            _ => {}
+        }
+    }
+
+    fn tick_keys(&mut self, now: u32, store: &impl ChannelStore) {
+        self.now = now;
+        let mut evs = [None; 8];
+        let mut n = 0;
+        self.keys.tick(now, |e| {
+            if n < evs.len() {
+                evs[n] = Some(e);
+                n += 1;
+            }
+        });
+        for e in evs.into_iter().flatten() {
+            self.last_input = now;
+            self.on_key(e, store);
+        }
+    }
+
+    // ---- what keys do ----
+
+    fn on_key(&mut self, e: KeyEvent, store: &impl ChannelStore) {
+        use Press::*;
+        // Anywhere: hold BACK goes home (KEY-5); hold # toggles the lock (KEY-13).
+        match (e.key, e.press) {
+            (Key::Exit, Long) => return self.go_home(),
+            (Key::Hash, Long) => {
+                self.locked = !self.locked;
+                return self.show_toast(if self.locked { b"Keys locked" } else { b"Keys unlocked" }, b"", false);
+            }
+            _ => {}
+        }
+        if self.locked {
+            // KEY-14: PTT and SIDE1 still work (neither does anything on screen yet).
+            if !matches!(e.key, Key::Ptt | Key::Side(1)) {
+                self.locked_toast();
+            }
+            return;
+        }
+        match self.screen {
+            Screen::Home => self.home_key(e, store),
+            Screen::Edit { cell } => self.edit_key(e, cell),
+            Screen::Quick { row } => self.quick_key(e, row),
+            Screen::Advanced { row, from_quick } => self.advanced_key(e, row, from_quick),
+            Screen::Status { row, from_menu } => self.status_key(e, row, from_menu),
+        }
+    }
+
+    fn home_key(&mut self, e: KeyEvent, store: &impl ChannelStore) {
+        use Press::*;
+        let big = self.keys.is_held(Key::Side(2));
+        match (e.key, e.press) {
+            (Key::Up | Key::Down, Short | Repeat) => {
+                if big {
+                    self.keys.used(Key::Side(2));
+                }
+                self.step(if e.key == Key::Up { 1 } else { -1 }, big, store);
+            }
+            (Key::Left | Key::Right, Short | Repeat) => self.group(if e.key == Key::Right { 1 } else { -1 }, store),
+            (Key::Slot, Short) => {
+                // NAV-5
+                self.active = (self.active + 1) % SLOTS as u8;
+                self.out.push(RadioCmd::Active(self.active));
+            }
+            (Key::Slot, Long) => self.screen = Screen::Edit { cell: 0 }, // EDIT-1
+            (Key::VfoMem, Short) => self.toggle_vfo(store),
+            (Key::VfoMem, Long) => {
+                if self.slots[self.active as usize].vfo_mode {
+                    self.show_toast(b"Save as channel", b"comes with storage", false); // VFO-9
+                }
+            }
+            (Key::Hash, Short) => {
+                if self.watched_rx() {
+                    // HOME-10, WATCH-6
+                    self.paused_until = Some(self.now.wrapping_add(PAUSE_S as u32 * 1000));
+                    self.out.push(RadioCmd::PauseWatch(PAUSE_S));
+                    self.show_toast(b"Watch paused", b"for 1 min", false);
+                } else {
+                    self.screen = Screen::Status { row: 0, from_menu: false };
+                }
+            }
+            (Key::Menu, Short) => self.screen = Screen::Quick { row: 0 }, // MENU-1
+            (Key::Menu, Long) => self.screen = Screen::Advanced { row: 0, from_quick: false }, // MENU-2
+            (Key::Side(2), Short) => {
+                let a = self.active;
+                let on = self.scan_mask & 1 << a == 0;
+                self.out.push(RadioCmd::Scan { slot: a, on });
+            }
+            (Key::Star, Long) => self.change(Item::Reverse, 1), // VFO-7: two values, so +1 toggles
+            (Key::Digit(0), Long) => self.show_toast(b"No home channel.", b"Hold SLOT on a channel", false), // CHAN-20
+            (Key::Digit(1), Long) => {
+                // WATCH-7
+                let v = if self.watch == 0 { 1 } else { 0 };
+                self.change(Item::Watch, v - self.watch as i32);
+                self.show_toast(b"Watch", if v == 0 { b"off" } else { b"A+B" }, false);
+            }
+            (Key::Digit(_), Short) => self.show_toast(b"Direct entry", b"comes next", false), // NAV-4
+            (Key::Digit(_), Long) => self.show_toast(b"Shortcuts", b"come next", false), // HOME-8
+            _ => {}
+        }
+    }
+
+    fn edit_key(&mut self, e: KeyEvent, cell: u8) {
+        use Press::*;
+        let (r, c) = (cell / 3, cell % 3);
+        let mv = |r: u8, c: u8| Screen::Edit { cell: r * 3 + c };
+        match (e.key, e.press) {
+            // EDIT-3: arrows pick, the knob changes.
+            (Key::Up, Short | Repeat) => self.screen = mv(r.saturating_sub(1), c),
+            (Key::Down, Short | Repeat) => self.screen = mv((r + 1).min(2), c),
+            (Key::Left, Short | Repeat) => self.screen = mv(r, c.saturating_sub(1)),
+            (Key::Right, Short | Repeat) => self.screen = mv(r, (c + 1).min(2)),
+            (Key::Exit | Key::Slot, Short) => self.go_home(), // EDIT-6
+            (Key::Star, Short) => self.do_undo(),
+            (Key::Hash, Short) => self.reset(GRID[cell as usize]),
+            (Key::Menu, Short) => self.show_toast(GRID[cell as usize].label().as_bytes(), b"list comes next", false),
+            _ => {}
+        }
+    }
+
+    fn quick_key(&mut self, e: KeyEvent, row: u8) {
+        use Press::*;
+        let item = QUICK[row as usize];
+        match (e.key, e.press) {
+            (Key::Up, Short | Repeat) => self.screen = Screen::Quick { row: (row + 9) % 10 },
+            (Key::Down, Short | Repeat) => self.screen = Screen::Quick { row: (row + 1) % 10 },
+            (Key::Left | Key::Right, Short | Repeat) => self.change(item, if e.key == Key::Right { 1 } else { -1 }), // MENU-16
+            (Key::Digit(0), Short) => self.screen = Screen::Advanced { row: 0, from_quick: true },
+            (Key::Digit(d), Short) => self.screen = Screen::Quick { row: d - 1 }, // MENU-5
+            (Key::Menu, Short) => match item {
+                Item::Advanced => self.screen = Screen::Advanced { row: 0, from_quick: true },
+                _ => self.show_toast(item.name().as_bytes(), b"editor comes next", false), // MENU-17
+            },
+            (Key::Hash, Short) => self.reset(item), // MENU-18
+            (Key::Star, Short) => self.do_undo(),   // MENU-22
+            (Key::Exit, Short) => self.go_home(),
+            _ => {}
+        }
+    }
+
+    fn advanced_key(&mut self, e: KeyEvent, row: u8, from_quick: bool) {
+        use Press::*;
+        let open = |app: &mut Self, r: u8| {
+            app.screen = Screen::Advanced { row: r, from_quick };
+            app.show_toast(view::GROUPS[r as usize].0.as_bytes(), b"comes next", false);
+        };
+        match (e.key, e.press) {
+            (Key::Up, Short | Repeat) => self.screen = Screen::Advanced { row: (row + 8) % 9, from_quick },
+            (Key::Down, Short | Repeat) => self.screen = Screen::Advanced { row: (row + 1) % 9, from_quick },
+            (Key::Digit(0), Short) => self.screen = Screen::Status { row: 0, from_menu: true }, // SBAR-13
+            (Key::Digit(d), Short) => open(self, d - 1),
+            (Key::Menu, Short) => open(self, row),
+            (Key::Exit, Short) => {
+                // MENU-24: up one level, keeping the place
+                self.screen = if from_quick { Screen::Quick { row: 9 } } else { Screen::Home };
+            }
+            _ => {}
+        }
+    }
+
+    fn status_key(&mut self, e: KeyEvent, row: u8, from_menu: bool) {
+        use Press::*;
+        let n = view::STATUS_ROWS as u8;
+        match (e.key, e.press) {
+            (Key::Up, Short | Repeat) => self.screen = Screen::Status { row: (row + n - 1) % n, from_menu },
+            (Key::Down, Short | Repeat) => self.screen = Screen::Status { row: (row + 1) % n, from_menu },
+            // SBAR-15: OK on a row opens its setting (those that exist so far).
+            (Key::Menu, Short) => match view::STATUS[row as usize] {
+                "Watch" => self.screen = Screen::Quick { row: 6 },
+                "Battery Save" => self.screen = Screen::Quick { row: 8 },
+                name => self.show_toast(name.as_bytes(), b"setting comes next", false),
+            },
+            (Key::Exit, Short) => {
+                self.screen = if from_menu { Screen::Advanced { row: 0, from_quick: false } } else { Screen::Home }
+            }
+            _ => {}
+        }
+    }
+
+    // ---- actions ----
+
+    fn go_home(&mut self) {
+        self.screen = Screen::Home;
+    }
+
+    fn locked_toast(&mut self) {
+        self.show_toast(b"Locked:", b"hold # to unlock", false); // KEY-14
+    }
+
+    fn show_toast(&mut self, head: &[u8], body: &[u8], icon: bool) {
+        self.toast = Some(Toast { head: Buf::from(head), body: Buf::from(body), icon, until: self.now.wrapping_add(TOAST_MS) });
+    }
+
+    /// A watched slot (not the active one) is receiving.
+    fn watched_rx(&self) -> bool {
+        self.rx_mask & self.watch_mask() & !(1 << self.active) & !self.relay_mask != 0
+    }
+
+    fn watch_mask(&self) -> u8 {
+        [0, 0b011, 0b111][self.watch as usize % 3]
+    }
+
+    /// Knob or ▲▼ on home: a step in VFO mode (NAV-2), a channel in channel mode (NAV-1); big with SIDE2 (NAV-3).
+    fn step(&mut self, d: i32, big: bool, store: &impl ChannelStore) {
+        let a = self.active as usize;
+        let s = &mut self.slots[a];
+        if s.on_channel() {
+            let n = store.zone_len(s.zone) as i32;
+            if n == 0 {
+                return;
+            }
+            s.pos = (s.pos as i32 + d * if big { 10 } else { 1 }).rem_euclid(n) as u16;
+            s.ch = store.zone_at(s.zone, s.pos);
+            self.send_slot(a as u8);
+        } else {
+            let step = if big { 100_000 } else { STEPS[s.cfg.step as usize % STEPS.len()].0 as i32 };
+            // Plain steps from where it is (146.520 stays on its 5 kHz raster with a 12.5 kHz step); snapping to
+            // the step is for typed entry (VFO-12). Kept inside what the chips tune.
+            let f = (s.vfo as i32 + d * step).clamp(mhz(1) as i32 + 80_000, mhz(999) as i32) as Freq10;
+            s.vfo = f;
+            s.mem[band_near(f)] = f;
+            self.out.push(RadioCmd::TuneSlot { slot: a as u8, freq: f });
+        }
+    }
+
+    /// ◀▶ on home: next band in VFO mode (NAV-2), next zone with channels in channel mode (NAV-1, CHAN-11).
+    fn group(&mut self, d: i32, store: &impl ChannelStore) {
+        let a = self.active as usize;
+        let s = &mut self.slots[a];
+        if s.on_channel() {
+            let zones = store.zones() as i32;
+            let mut z = s.zone as i32;
+            for _ in 0..zones {
+                z = (z + d).rem_euclid(zones);
+                if store.zone_len(z as u8) > 0 {
+                    break;
+                }
+            }
+            if z as u8 != s.zone {
+                (s.zone, s.pos) = (z as u8, 0);
+                s.ch = store.zone_at(s.zone, 0);
+                self.send_slot(a as u8);
+            }
+        } else {
+            let b = band_near(s.vfo);
+            s.mem[b] = s.vfo;
+            let nb = (b as i32 + d).rem_euclid(BANDS.len() as i32) as usize;
+            s.vfo = s.mem[nb];
+            s.cfg.mode = BANDS[nb].mode;
+            s.cfg.step = BANDS[nb].step;
+            if s.cfg.offset != 0 {
+                s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift;
+            }
+            self.send_slot(a as u8);
+        }
+    }
+
+    /// V/M: VFO <-> channel (only with channels stored).
+    fn toggle_vfo(&mut self, store: &impl ChannelStore) {
+        let a = self.active as usize;
+        let s = &mut self.slots[a];
+        if s.vfo_mode {
+            if s.ch.is_none() {
+                match (0..store.zones()).find(|&z| store.zone_len(z) > 0) {
+                    Some(z) => {
+                        (s.zone, s.pos) = (z, 0);
+                        s.ch = store.zone_at(z, 0);
+                    }
+                    None => return self.show_toast(b"No channels yet", b"", false),
+                }
+            }
+            s.vfo_mode = false;
+        } else {
+            s.vfo_mode = true;
+        }
+        self.send_slot(a as u8);
+    }
+
+    /// The slot's frequency and every setting, to the Radio task.
+    fn send_slot(&mut self, slot: u8) {
+        let s = self.slots[slot as usize];
+        self.out.push(RadioCmd::TuneSlot { slot, freq: s.freq() });
+        for (param, value) in slot::params(s.cfg()) {
+            let value = if param == Param::Power && self.capped(slot) { 0 } else { value };
+            self.out.push(RadioCmd::SlotParam { slot, param, value });
+        }
+    }
+
+    /// 1.25 m: transmit power fixed at 0.25 W (the Radio task enforces it too).
+    fn capped(&self, slot: u8) -> bool {
+        slot::band_of(self.slots[slot as usize].freq()) == Some(BAND_125M)
+    }
+
+    /// Why an item can't be changed on the active slot right now (MENU-14, EDIT-7), if it can't.
+    pub fn greyed(&self, item: Item) -> Option<&'static str> {
+        let s = &self.slots[self.active as usize];
+        match item {
+            Item::Step if s.on_channel() => Some("VFO only"), // VFO-8
+            Item::Power if self.capped(self.active) => Some("Fixed at 0.25 W on 1.25 m"),
+            _ => None,
+        }
+    }
+
+    /// The knob or ◀▶ on a setting: change it live (MENU-16, MENU-19), remember it for undo and Recent.
+    fn change(&mut self, item: Item, d: i32) {
+        if d == 0 || self.greyed(item).is_some() {
+            if let Some(why) = self.greyed(item) {
+                self.show_toast(item.label().as_bytes(), why.as_bytes(), false);
+            }
+            return;
+        }
+        if matches!(item, Item::Channel | Item::Advanced) {
+            return;
+        }
+        let a = self.active;
+        if self.undo.is_none() {
+            let cfg = *self.slots[a as usize].cfg();
+            self.undo = Some(Undo { slot: a, cfg, watch: self.watch, bsave: self.bsave, until: 0 });
+        }
+        if let Some(u) = &mut self.undo {
+            u.until = self.now.wrapping_add(UNDO_MS);
+        }
+        match item {
+            Item::Watch => {
+                self.watch = (self.watch as i32 + d).rem_euclid(3) as u8;
+                self.out.push(RadioCmd::Watch(self.watch_mask()));
+            }
+            Item::BatterySave => {
+                self.bsave = (self.bsave as i32 + d).rem_euclid(4) as u8;
+                self.out.push(RadioCmd::BatterySave(level(self.bsave)));
+            }
+            _ => {
+                let shift = BANDS[band_near(self.slots[a as usize].freq())].shift;
+                let c = self.slots[a as usize].cfg_mut();
+                let v = item.get(c).0 + d;
+                if let Some((param, value)) = item.set(c, v, shift) {
+                    self.out.push(RadioCmd::SlotParam { slot: a, param, value });
+                }
+            }
+        }
+        if self.recent[0] != Some(item) {
+            let keep = self.recent.iter().position(|&r| r == Some(item)).unwrap_or(self.recent.len() - 1);
+            self.recent.copy_within(0..keep, 1);
+            self.recent[0] = Some(item);
+        }
+    }
+
+    /// # on a setting: back to its default (MENU-18).
+    fn reset(&mut self, item: Item) {
+        let cur = match item {
+            Item::Watch => self.watch as i32,
+            Item::BatterySave => self.bsave as i32,
+            _ => item.get(self.slots[self.active as usize].cfg()).0,
+        };
+        let def = match item {
+            Item::Watch | Item::BatterySave => 1,
+            _ => item.default_of(),
+        };
+        self.change(item, def - cur);
+    }
+
+    fn do_undo(&mut self) {
+        if let Some(u) = self.undo.take() {
+            *self.slots[u.slot as usize].cfg_mut() = u.cfg;
+            self.send_slot(u.slot);
+            if u.watch != self.watch {
+                self.watch = u.watch;
+                self.out.push(RadioCmd::Watch(self.watch_mask()));
+            }
+            if u.bsave != self.bsave {
+                self.bsave = u.bsave;
+                self.out.push(RadioCmd::BatterySave(level(self.bsave)));
+            }
+            self.show_toast(b"Undone", b"", false);
+        }
+    }
+
+    /// Value text for quick rows that aren't slot settings.
+    fn item_text(&self, item: Item, long: bool, b: &mut Buf<16>) {
+        let s = &self.slots[self.active as usize];
+        match item {
+            Item::Watch => b.set(["Off", "A+B", "A+B+C"][self.watch as usize % 3].as_bytes()),
+            Item::BatterySave => {
+                b.clear();
+                if self.bsave == 0 {
+                    b.set(b"Off");
+                } else {
+                    let _ = ufmt::uwrite!(b, "Level {}", self.bsave);
+                }
+            }
+            Item::Channel => b.set(if s.on_channel() { b"Edit" } else { b"Save as channel" }),
+            Item::Advanced => b.set(b">"),
+            Item::Power if self.capped(self.active) => b.set(b"0.25 W"),
+            _ => item.text(s.cfg(), long, b),
+        }
+    }
+
+    fn is_default(&self, item: Item) -> bool {
+        match item {
+            Item::Watch => self.watch == 1,
+            Item::BatterySave => self.bsave == 1,
+            Item::Channel | Item::Advanced => true,
+            _ => item.get(self.slots[self.active as usize].cfg()).0 == item.default_of(),
+        }
+    }
+}
+
+fn level(b: u8) -> Level {
+    [Level::Off, Level::L1, Level::L2, Level::L3][b as usize % 4]
+}
+
+/// `now` has reached `t` (wrapping ms).
+fn after(now: u32, t: u32) -> bool {
+    now.wrapping_sub(t) as i32 >= 0
+}
+
+#[cfg(test)]
+mod tests;

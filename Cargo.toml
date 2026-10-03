@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/ferrite-core", "crates/ferrite-ui", "firmware", "sim"]
+members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "firmware", "sim"]
 # Plain `cargo test` / `cargo clippy` cover what runs on the PC; the firmware builds with `cargo fw` (radio only).
-default-members = ["crates/ferrite-core", "crates/ferrite-ui", "sim"]
+default-members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "sim"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ publish = false
 [workspace.dependencies]
 ferrite-core = { path = "crates/ferrite-core" }
 ferrite-ui = { path = "crates/ferrite-ui" }
+ferrite-app = { path = "crates/ferrite-app" }
 ufmt = "0.2"
 embassy-sync = "0.8"
 

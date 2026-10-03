@@ -21,6 +21,7 @@ pub mod gfx;
 pub mod home;
 pub mod panel;
 pub mod text;
+pub mod widgets;
 
 #[cfg(any(test, feature = "std"))]
 pub mod fb;

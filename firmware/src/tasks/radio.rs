@@ -239,6 +239,19 @@ pub async fn task() {
             Either::First(RadioCmd::Broadcast(b)) => {
                 let _ = broadcast(&mut r.si, b).await; // errors: the UI shows no station (reporting: next)
             }
+            Either::First(RadioCmd::TuneSlot { slot: 0, freq }) => {
+                r.tune(freq); // one receiver for now: slot A is the one the chips follow
+                live.send(r.live);
+            }
+            // Three slots, watch, scan and the slot settings: milestone 2 (manual chapters 6 and 13).
+            Either::First(
+                RadioCmd::TuneSlot { .. }
+                | RadioCmd::SlotParam { .. }
+                | RadioCmd::Active(_)
+                | RadioCmd::Watch(_)
+                | RadioCmd::Scan { .. }
+                | RadioCmd::PauseWatch(_),
+            ) => {}
             Either::First(RadioCmd::Shutdown) => {
                 for n in 0..2u8 {
                     if r.chips & 1 << n != 0 {

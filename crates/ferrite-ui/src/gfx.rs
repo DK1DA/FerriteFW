@@ -19,6 +19,14 @@ pub const BLUE_FG: u16 = rgb565(0x08, 0x12, 0x1F);
 pub const GREEN: u16 = rgb565(0x7C, 0xE3, 0x8B);
 pub const AMBER: u16 = rgb565(0xF5, 0xC5, 0x42);
 pub const RED: u16 = rgb565(0xE5, 0x48, 0x4D);
+/// Slot C's letter (slot A is BLUE, B is AMBER).
+pub const VIOLET: u16 = rgb565(0xB5, 0x9C, 0xFF);
+/// The focused edit cell's fill.
+pub const FOCUS: u16 = rgb565(0x0F, 0x1B, 0x2A);
+/// A toast's fill.
+pub const TOAST: u16 = rgb565(0x1B, 0x2A, 0x3D);
+/// Greyed text: a setting that doesn't apply here.
+pub const DIM: u16 = rgb565(0x5A, 0x61, 0x6B);
 pub const WHITE: u16 = 0xFFFF;
 pub const BLACK: u16 = 0x0000;
 
@@ -144,6 +152,58 @@ pub trait Gfx: Panel {
         }
     }
 
+    /// Filled rectangle with rounded corners (radius r).
+    fn fill_r(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, c: u16) {
+        let r = r.min(w / 2).min(h / 2).max(0);
+        for dy in 0..r {
+            // the circle's half-width at the middle of row dy, in half pixels: (2u)^2 <= (2r)^2 - (2r - 2dy - 1)^2
+            let v = 2 * (r - dy) - 1;
+            let mut u = 0;
+            while 4 * (u + 1) * (u + 1) <= 4 * r * r - v * v {
+                u += 1;
+            }
+            let i = r - u;
+            self.fill(x + i, y + dy, w - 2 * i, 1, c);
+            self.fill(x + i, y + h - 1 - dy, w - 2 * i, 1, c);
+        }
+        self.fill(x, y + r, w, h - 2 * r, c);
+    }
+
+    /// A filled triangle pointing up, down, left or right (dir 0-3), centred in a size x size box.
+    fn tri(&mut self, x: i32, y: i32, size: i32, dir: u8, c: u16) {
+        let h = size / 2 + 1; // height; the base is 2h - 1 wide
+        let o = (size - h) / 2;
+        for i in 0..h {
+            let n = if dir == 0 || dir == 2 { i } else { h - 1 - i }; // half-width of this row or column
+            match dir {
+                0 | 1 => self.fill(x + h - 1 - n, y + o + i, 2 * n + 1, 1, c),
+                _ => self.fill(x + o + i, y + h - 1 - n, 1, 2 * n + 1, c),
+            }
+        }
+    }
+
+    /// 1 px line (icons: the envelope's flap).
+    fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: u16) {
+        let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
+        let (sx, sy) = (if x0 < x1 { 1 } else { -1 }, if y0 < y1 { 1 } else { -1 });
+        let (mut x, mut y, mut err) = (x0, y0, dx + dy);
+        loop {
+            self.fill(x, y, 1, 1, c);
+            if x == x1 && y == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
     /// 1-bit text, top-left at x, y. Characters that would not fit on the panel are skipped. Returns the width.
     fn text(&mut self, x: i32, y: i32, s: &[u8], f: &Font1, fg: u16, bg: u16) -> i32 {
         let (w, h, bpr) = (f.w as i32, f.h as i32, f.bytes_per_row());
@@ -177,6 +237,13 @@ pub trait Gfx: Panel {
     /// 4-bit text (UTF-8; Latin-1 draws, the rest shows '?'). x is the pen start, baseline the baseline.
     /// Paints the whole line box, ink blended over bg, so redrawing a value needs no clear. Returns the advance.
     fn text4(&mut self, x: i32, baseline: i32, s: &[u8], f: &Font4, fg: u16, bg: u16) -> i32 {
+        let top = baseline - f.ascent as i32;
+        self.text4_rows(x, baseline, s, f, fg, bg, top, top + f.line_h as i32)
+    }
+
+    /// [`Gfx::text4`] painting only the rows of the line box inside `y0..y1`: a big font's box can overlap its
+    /// neighbours.
+    fn text4_rows(&mut self, x: i32, baseline: i32, s: &[u8], f: &Font4, fg: u16, bg: u16, y0: i32, y1: i32) -> i32 {
         let mut lut = [0u16; 16];
         for (a, v) in lut.iter_mut().enumerate() {
             *v = blend(bg, fg, a as u8);
@@ -184,7 +251,7 @@ pub trait Gfx: Panel {
         let w = text4_width(s, f);
         let top = baseline - f.ascent as i32;
         let (x0, x1) = (x.max(0), (x + w).min(W));
-        let (y0, y1) = (top.max(0), (top + f.line_h as i32).min(H));
+        let (y0, y1) = (y0.max(top).max(0), y1.min(top + f.line_h as i32).min(H));
         if x1 <= x0 || y1 <= y0 {
             return w;
         }

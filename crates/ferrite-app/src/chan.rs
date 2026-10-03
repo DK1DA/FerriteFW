@@ -1,0 +1,99 @@
+//! Channels as the UI sees them: a small record and a store to read them from. The firmware's store reads SPI
+//! flash records on demand through the zone index (CHAN-7, CHAN-9); the simulator and tests supply a few in RAM.
+//! The UI keeps only the current zone, position and a copy of the channel each slot is on.
+
+use crate::slot::SlotCfg;
+use ferrite_core::freq::Freq10;
+
+/// Zone numbers 0-254; this one means "no zone".
+pub const NO_ZONE: u8 = 255;
+
+/// One channel: what home and edit-in-place show of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Channel {
+    /// 0-999, shown as 1-1000 ("CH 012" is number 11).
+    pub num: u16,
+    pub zone: u8,
+    pub rx: Freq10,
+    /// Name: 16 bytes stored, 12 shown on home (CHAN-5); unused bytes are 0.
+    pub name: [u8; 16],
+    pub cfg: SlotCfg,
+}
+
+impl Channel {
+    pub fn name(&self) -> &[u8] {
+        let n = self.name.iter().position(|&c| c == 0).unwrap_or(16);
+        &self.name[..n]
+    }
+}
+
+/// Where channels come from. Zone order is channel number (CHAN-10).
+pub trait ChannelStore {
+    /// How many zones exist (zone numbers 0..zones()).
+    fn zones(&self) -> u8;
+    /// A zone's name, None if it doesn't exist.
+    fn zone_name(&self, zone: u8) -> Option<&[u8]>;
+    /// How many channels a zone holds.
+    fn zone_len(&self, zone: u8) -> u16;
+    /// The i-th channel of a zone, by number.
+    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel>;
+    /// Channels stored in all.
+    fn count(&self) -> u16;
+}
+
+/// A store with nothing in it.
+pub struct NoChannels;
+
+impl ChannelStore for NoChannels {
+    fn zones(&self) -> u8 {
+        0
+    }
+    fn zone_name(&self, _: u8) -> Option<&[u8]> {
+        None
+    }
+    fn zone_len(&self, _: u8) -> u16 {
+        0
+    }
+    fn zone_at(&self, _: u8, _: u16) -> Option<Channel> {
+        None
+    }
+    fn count(&self) -> u16 {
+        0
+    }
+}
+
+/// A fixed table of channels with zones by name: the simulator's and the tests' store.
+pub struct Table<'a> {
+    pub zones: &'a [&'a [u8]],
+    pub channels: &'a [Channel],
+}
+
+impl ChannelStore for Table<'_> {
+    fn zones(&self) -> u8 {
+        self.zones.len() as u8
+    }
+    fn zone_name(&self, zone: u8) -> Option<&[u8]> {
+        self.zones.get(zone as usize).copied()
+    }
+    fn zone_len(&self, zone: u8) -> u16 {
+        self.channels.iter().filter(|c| c.zone == zone).count() as u16
+    }
+    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
+        self.channels.iter().filter(|c| c.zone == zone).nth(i as usize).copied()
+    }
+    fn count(&self) -> u16 {
+        self.channels.len() as u16
+    }
+}
+
+/// A channel record from its parts (for tables).
+pub const fn channel(num: u16, zone: u8, rx: Freq10, name: &str, cfg: SlotCfg) -> Channel {
+    let mut n = [0u8; 16];
+    let b = name.as_bytes();
+    let mut i = 0;
+    while i < b.len() && i < 16 {
+        n[i] = b[i];
+        i += 1;
+    }
+    Channel { num, zone, rx, name: n, cfg }
+}

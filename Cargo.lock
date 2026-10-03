@@ -394,6 +394,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrite-app"
+version = "0.1.0"
+dependencies = [
+ "ferrite-core",
+ "ferrite-ui",
+ "ufmt",
+]
+
+[[package]]
 name = "ferrite-core"
 version = "0.1.0"
 dependencies = [
@@ -406,6 +415,7 @@ dependencies = [
 name = "ferrite-sim"
 version = "0.1.0"
 dependencies = [
+ "ferrite-app",
  "ferrite-core",
  "ferrite-ui",
  "minifb",

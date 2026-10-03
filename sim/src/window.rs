@@ -1,22 +1,28 @@
-//! The interactive simulator: a window running the firmware's own screens, driven by the PC keyboard and a fake
-//! radio. Every pixel comes from `ferrite-ui` through [`Panel`], exactly as on the radio.
+//! The interactive simulator: a window running the firmware's own UI (`ferrite-app` drawing through
+//! `ferrite-ui`), driven by the PC keyboard and a fake three-slot radio. Every pixel comes through [`Panel`],
+//! exactly as on the radio.
 //!
 //! Tools for checking the drawing code against the look review:
 //! - F2 flashes each region as it is redrawn (only what changed should flash, HOME-7);
-//! - F3 blends the matching mock-up (`docs/img/screens/*.png`) over the screen;
+//! - F3 blends the current screen's mock-up (`docs/img/screens/*.png`) over it;
 //! - the title shows the pixels pushed by the last redraw and, with `--bus-mbps`, the time it would take on the
 //!   radio's display bus;
 //! - F12 saves a screenshot to `target/sim/`.
+//!
+//! Stand-ins for what the radio would report: M a message arrives, N an alert, F5 GPS off/searching/fix,
+//! F6 Bluetooth, F7 battery normal/low/cut-off.
 
-use ferrite_core::freq::{self, mhz};
+use crate::fake::{self, FakeRadio};
+use ferrite_app::{App, Screen as AppScreen};
+use ferrite_core::freq;
 use ferrite_core::keys::Key;
-use ferrite_core::msg::Live;
+use ferrite_core::msg::GpsState;
 use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::fb::FrameBuffer;
-use ferrite_ui::home;
 use ferrite_ui::panel::{Panel, H, W};
 use minifb::{Key as K, KeyRepeat, Window, WindowOptions};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -42,11 +48,6 @@ impl Panel for Counting {
     }
 }
 
-#[derive(PartialEq)]
-enum Screen {
-    Boot(Instant),
-    Home,
-}
 
 /// A recent redraw region, shown for a moment with F2 on.
 struct Flash {
@@ -56,7 +57,9 @@ struct Flash {
 
 const KEYMAP: &str = "\
 keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits · , = * · . = #
-      S = SLOT · V = V/M · Q = SIDE1 · W = SIDE2 · Space = PTT
+      S = SLOT · V = V/M · Q = SIDE1 · W = SIDE2 · Space = PTT · [ ] or mouse wheel = knob
+      hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
+      M message · N alert · F5 GPS · F6 Bluetooth · F7 battery
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
 
 fn map_key(k: K) -> Option<Key> {
@@ -119,11 +122,27 @@ fn blend(a: u32, b: u32) -> u32 {
     ch(16) << 16 | ch(8) << 8 | ch(0)
 }
 
-/// The fake radio: a signal opens squelch for 3 s every 10 s, with a wandering level.
-fn fake_radio(live: &mut Live, t: f32) {
-    let open = (t % 10.0) > 6.0 && (t % 10.0) < 9.0;
-    live.squelch_open = open;
-    live.rssi = if open { -85 + ((t * 1.7).sin() * 6.0) as i16 } else { -121 + ((t * 0.9).sin() * 2.0) as i16 };
+/// The mock-up that matches the screen on show.
+fn mockup_name(s: Option<AppScreen>) -> &'static str {
+    match s {
+        None => "BootA.png",
+        Some(AppScreen::Home) => "HomeA.png",
+        Some(AppScreen::Edit { .. }) => "HomeEdit.png",
+        Some(AppScreen::Quick { .. }) => "MenuQuick.png",
+        Some(AppScreen::Advanced { .. }) => "MenuTop.png",
+        Some(AppScreen::Status { .. }) => "StatusPage.png",
+    }
+}
+
+fn screen_name(s: Option<AppScreen>) -> &'static str {
+    match s {
+        None => "Boot",
+        Some(AppScreen::Home) => "Home",
+        Some(AppScreen::Edit { .. }) => "Edit",
+        Some(AppScreen::Quick { .. }) => "Quick",
+        Some(AppScreen::Advanced { .. }) => "Advanced",
+        Some(AppScreen::Status { .. }) => "Status",
+    }
 }
 
 pub fn run(scale: usize, bus_mbps: Option<f64>) {
@@ -139,8 +158,12 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
     let info = BootInfo { version: VERSION, callsign: Some("VA3ABC"), checks: &checks };
 
     let mut lcd = Counting { fb: FrameBuffer::new(), rects: Vec::new(), pixels: 0 };
-    let mut live = Live { freq: mhz(146) + 52_000, rssi: -121, chips: 3, ..Default::default() };
-    let mut screen = Screen::Boot(Instant::now());
+    let store = fake::store();
+    let mut radio = FakeRadio::new();
+    let mut dev = fake::device();
+    let mut app = App::new();
+    fake::sample(&mut app, &store); // B on "Club repeater", as in the mock-up
+    let mut booting = true;
     boot::draw(&mut lcd, &info);
 
     let (ww, wh) = (W as usize * scale, H as usize * scale);
@@ -149,29 +172,26 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
     println!("{KEYMAP}");
 
     let start = Instant::now();
+    let ms = || start.elapsed().as_millis() as u32;
     let mut flashes: Vec<Flash> = Vec::new();
     let (mut show_flash, mut overlay) = (false, false);
-    let mut mockup: Option<Vec<u32>> = None;
+    let mut mockups: HashMap<&str, Option<Vec<u32>>> = HashMap::new();
     let mut last_key = String::from("-");
     let mut last_px: u64 = lcd.pixels;
     let mut out = vec![0u32; ww * wh];
     let mut shot = 0;
+    let mut battery = 0;
 
     while win.is_open() && !(win.is_key_down(K::LeftCtrl) && win.is_key_down(K::Q)) {
         lcd.rects.clear();
         lcd.pixels = 0;
-
-        // Screens: boot for 2 s, then home.
-        if let Screen::Boot(t0) = screen {
-            if t0.elapsed() > Duration::from_millis(2000) {
-                screen = Screen::Home;
-                home::draw(&mut lcd, &live);
-                mockup = load_mockup(&shots.join("HomeA.png"));
-            }
+        let now = ms();
+        if booting && now > 2000 {
+            booting = false;
         }
 
-        // Keys
-        for k in win.get_keys_pressed(KeyRepeat::Yes) {
+        // Keys: down and up go to the app, which makes short, long and repeat presses of them (KEY-3, KEY-4).
+        for k in win.get_keys_pressed(KeyRepeat::No) {
             match k {
                 K::F2 => show_flash = !show_flash,
                 K::F3 => overlay = !overlay,
@@ -180,44 +200,87 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
                     crate::save_fb(&lcd.fb, &p, 2);
                     shot += 1;
                 }
+                K::M if !booting => app.notify(b"VE3KPW-9", b"On my way", false),
+                K::N if !booting => app.notify(b"SAME", b"Tornado warning", true),
+                K::F5 => {
+                    dev.gps = match dev.gps {
+                        GpsState::Off => GpsState::Searching,
+                        GpsState::Searching => GpsState::Fix,
+                        GpsState::Fix => GpsState::Off,
+                    }
+                }
+                K::F6 => dev.bt = !dev.bt,
+                K::F7 => {
+                    battery = (battery + 1) % 3;
+                    (dev.battery_low, dev.battery_cutoff, dev.battery_pct, dev.battery_mv) =
+                        [(false, false, 82, 7900), (true, false, 15, 7000), (true, true, 3, 6600)][battery];
+                }
                 _ => {
                     if let Some(key) = map_key(k) {
                         last_key = format!("{key:?}");
-                        if screen == Screen::Home {
-                            match key {
-                                Key::Up => live.freq += 1_250,
-                                Key::Down => live.freq -= 1_250,
-                                _ => {}
-                            }
+                        if !booting {
+                            app.key_down(key, now, &store);
                         }
                     }
                 }
             }
         }
-
-        // Fake radio, then redraw only what changed.
-        if screen == Screen::Home {
-            let before = live;
-            fake_radio(&mut live, start.elapsed().as_secs_f32());
-            if live != before {
-                home::update(&mut lcd, &live);
+        for k in win.get_keys_released() {
+            if let (Some(key), false) = (map_key(k), booting) {
+                app.key_up(key, now, &store);
             }
+        }
+        // The knob: [ and ] (with the PC's auto-repeat), or the mouse wheel.
+        if !booting {
+            for k in win.get_keys_pressed(KeyRepeat::Yes) {
+                match k {
+                    K::LeftBracket => app.knob(-1, now, &store),
+                    K::RightBracket => app.knob(1, now, &store),
+                    _ => {}
+                }
+            }
+            if let Some((_, dy)) = win.get_scroll_wheel() {
+                if dy.abs() >= 1.0 {
+                    app.knob(if dy > 0.0 { 1 } else { -1 }, now, &store);
+                }
+            }
+        }
+
+        // The fake radio follows the app's commands, then the app redraws what changed.
+        if !booting {
+            while let Some(c) = app.pop_cmd() {
+                radio.cmd(c);
+            }
+            radio.step(now as f32 / 1000.0, app.active());
+            let clock = fake::device().clock_min;
+            dev.clock_min = clock;
+            app.tick(now, &radio.live, &store);
+            while let Some(c) = app.pop_cmd() {
+                radio.cmd(c);
+            }
+            app.render(&mut lcd, &radio.live, &dev, &store);
         }
         if lcd.pixels > 0 {
             last_px = lcd.pixels;
         }
-        let now = Instant::now();
-        flashes.extend(lcd.rects.iter().map(|&rect| Flash { rect, at: now }));
+        let t = Instant::now();
+        flashes.extend(lcd.rects.iter().map(|&rect| Flash { rect, at: t }));
         flashes.retain(|f| f.at.elapsed() < Duration::from_millis(250));
+
+        let screen = (!booting).then(|| app.screen());
+        let mockup = if overlay {
+            let name = mockup_name(screen);
+            mockups.entry(name).or_insert_with(|| load_mockup(&shots.join(name))).as_ref()
+        } else {
+            None
+        };
 
         // Compose: frame buffer, optional mock-up overlay, optional redraw outlines, scaled up.
         for y in 0..H {
             for x in 0..W {
                 let mut c = rgb565_to_rgb(lcd.fb.at(x, y));
-                if overlay {
-                    if let Some(m) = &mockup {
-                        c = blend(c, m[(y * W + x) as usize]);
-                    }
+                if let Some(m) = mockup {
+                    c = blend(c, m[(y * W + x) as usize]);
                 }
                 if show_flash
                     && flashes.iter().any(|f| {
@@ -238,10 +301,13 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
         win.update_with_buffer(&out, ww, wh).expect("draw");
 
         let bus = bus_mbps.map(|m| format!(" ≈ {:.1} ms", last_px as f64 * 2.0 / (m * 1e6) * 1e3)).unwrap_or_default();
-        let name = if screen == Screen::Home { "Home" } else { "Boot" };
+        let a = app.active();
         win.set_title(&format!(
-            "Ferrite sim · {name} · key {last_key} · {} · last redraw {last_px} px{bus}{}{}",
-            freq_text(live.freq),
+            "Ferrite sim · {} · key {last_key} · {} {} · last redraw {last_px} px{bus}{}{}{}",
+            screen_name(screen),
+            ["A", "B", "C"][a as usize],
+            freq_text(app.slot(a).freq()),
+            if app.locked() { " · locked" } else { "" },
             if show_flash { " · F2" } else { "" },
             if overlay { " · F3 mock-up" } else { "" }
         ));

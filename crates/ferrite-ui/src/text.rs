@@ -43,6 +43,35 @@ impl<const N: usize> Buf<N> {
     }
 }
 
+impl<const N: usize> PartialEq for Buf<N> {
+    fn eq(&self, o: &Self) -> bool {
+        self.as_bytes() == o.as_bytes()
+    }
+}
+
+impl<const N: usize> Eq for Buf<N> {}
+
+impl<const N: usize> core::hash::Hash for Buf<N> {
+    fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
+        self.as_bytes().hash(h);
+    }
+}
+
+impl<const N: usize> Default for Buf<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const N: usize> Buf<N> {
+    /// A buffer holding s (cut off at N).
+    pub fn from(s: &[u8]) -> Self {
+        let mut b = Self::new();
+        b.push(s);
+        b
+    }
+}
+
 impl<const N: usize> uWrite for Buf<N> {
     type Error = Infallible;
     fn write_str(&mut self, s: &str) -> Result<(), Infallible> {
