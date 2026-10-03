@@ -2,3 +2,4 @@
 *.bin
 *.btf
 .DS_Store
+__pycache__/
