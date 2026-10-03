@@ -27,7 +27,7 @@ use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::fb::FrameBuffer;
 use ferrite_ui::panel::{Panel, H, W};
-use minifb::{Key as K, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
+use minifb::{Key as K, KeyRepeat, MouseButton, MouseMode, ScaleMode, Window, WindowOptions};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -160,7 +160,18 @@ fn screen_name(s: Option<AppScreen>) -> &'static str {
     }
 }
 
-pub fn run(scale: usize, bus_mbps: Option<f64>) {
+/// A window position to panel (buffer) pixels: minifb fits the buffer into the window, aspect kept, centred.
+pub(crate) fn to_panel(m: (f32, f32), win: (usize, usize), buf: (usize, usize)) -> (i32, i32) {
+    let (ww, wh, bw, bh) = (win.0 as f32, win.1 as f32, buf.0 as f32, buf.1 as f32);
+    let k = (ww / bw).min(wh / bh);
+    let (ox, oy) = ((ww - bw * k) / 2.0, (wh - bh * k) / 2.0);
+    (((m.0 - ox) / k).floor() as i32, ((m.1 - oy) / k).floor() as i32)
+}
+
+/// `window_scale` is the window's size relative to the radio's 240 x 320 (1.5 by default). The panel is rendered at a
+/// whole scale (2, or more above 2) and minifb fits it to the window, which can be resized freely.
+pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
+    let scale = (window_scale.ceil() as usize).max(2);
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let shots = repo.join("../docs/img/screens");
     let checks = [
@@ -183,7 +194,10 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
 
     let face = Face::new(scale);
     let (ww, wh) = (face.w, face.h);
-    let mut win = Window::new("Ferrite sim", ww, wh, WindowOptions::default()).expect("open window");
+    let fit = window_scale / scale as f32;
+    let (vw, vh) = ((ww as f32 * fit).round() as usize, (wh as f32 * fit).round() as usize);
+    let opts = WindowOptions { resize: true, scale_mode: ScaleMode::AspectRatioStretch, ..WindowOptions::default() };
+    let mut win = Window::new("Ferrite sim", vw, vh, opts).expect("open window");
     win.set_target_fps(60);
     println!("{KEYMAP}");
 
@@ -265,7 +279,7 @@ pub fn run(scale: usize, bus_mbps: Option<f64>) {
         }
         // The mouse on the front panel: down and up are the key's down and up.
         let down = win.get_mouse_down(MouseButton::Left);
-        let pos = win.get_mouse_pos(MouseMode::Discard).map(|(x, y)| (x as i32, y as i32));
+        let pos = win.get_unscaled_mouse_pos(MouseMode::Pass).map(|m| to_panel(m, win.get_size(), (ww, wh)));
         if down && mouse.is_none() {
             if let Some(i) = pos.and_then(|(x, y)| face.hit(x, y)) {
                 let h = face.hits[i];

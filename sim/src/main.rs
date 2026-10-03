@@ -55,12 +55,15 @@ pub(crate) fn save_fb(fb: &FrameBuffer, path: &Path, scale: u32) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let scale = args.iter().position(|a| a == "--scale").and_then(|i| args.get(i + 1)?.parse().ok()).unwrap_or(1);
+    let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1));
     if args.iter().any(|a| a == "--window") {
-        let bus = args.iter().position(|a| a == "--bus-mbps").and_then(|i| args.get(i + 1)?.parse().ok());
-        window::run(if scale > 1 { scale as usize } else { 2 }, bus);
+        // The window: any scale, fractional too (default 1.5, about 680 px tall); resizable afterwards.
+        let scale = arg("--scale").and_then(|s| s.parse::<f32>().ok()).filter(|&s| s > 0.0).unwrap_or(1.5);
+        let bus = arg("--bus-mbps").and_then(|s| s.parse().ok());
+        window::run(scale, bus);
         return;
     }
+    let scale = arg("--scale").and_then(|s| s.parse().ok()).unwrap_or(1);
 
     let checks = [
         Check { label: "MCU", value: "AT32F403A", state: State::Ok },

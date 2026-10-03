@@ -57,7 +57,7 @@ The toolchain is a pinned nightly (`rust-toolchain.toml`); rustup installs it on
 ```sh
 cargo test                      # logic and screens on the PC
 cargo sim                       # screens to target/sim/*.png
-cargo simw                      # the interactive simulator (keys are printed at start)
+cargo simw                      # the interactive simulator (keys are printed at start; resizable, --scale 2 for bigger)
 cargo fw                        # the image: target/thumbv7em-none-eabihf/release/ferrite
 cargo fw-clippy -- -D warnings
 ```
