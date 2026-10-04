@@ -113,7 +113,8 @@ fn card(lcd: &mut impl Panel, b: &BootInfo, o: &Owner, done: i32, n: i32) {
     // The bottom line: wordmark and version, the self-test on the right (the version gives way); the bar.
     let x = 12 + lcd.text4(12, 277, b"FERRITE", &UI_12B, TEXT, BG);
     let mut line = Buf::<31>::new();
-    let status: &[u8] = if done < n { v!(line, "Self-test {} of {}", done, n) } else { b"Ready" };
+    // Short form on the card: the bar shows progress, so "3/5" is enough.
+    let status: &[u8] = if done < n { v!(line, "{}/{}", done, n) } else { b"Ready" };
     let right = 228 - crate::gfx::text4_width(status, &UI_12);
     lcd.text4(x + 6, 277, fit(b.version.as_bytes(), &UI_12, right - x - 8), &UI_12, SUB, BG);
     lcd.text4(right, 277, status, &UI_12, SUB, BG);
