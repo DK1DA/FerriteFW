@@ -34,6 +34,11 @@ pub struct Aprs {
 const ALL: fn(u16) -> bool = |_| true;
 
 impl View for Aprs {
+    fn options(self, app: &mut App) -> bool {
+        app.open_screen(Of::Heard.screen());
+        true
+    }
+
     fn name(self) -> &'static str {
         if self.station { "APRS station" } else { "APRS heard" }
     }
@@ -62,7 +67,6 @@ impl View for Aprs {
                     app.open(Dest::Compose);
                 }
             }
-            (Key::Menu, Long) => app.open_screen(Of::Heard.screen()),
             (Key::Hash, Short) if self.station => match st {
                 Some(s) if s.pos.is_some() && d.request(Op::SaveStation(self.cur.sel)) => app.show_toast(s.call.as_bytes(), b"saved as a waypoint", false),
                 Some(s) if s.pos.is_none() => app.show_toast(s.call.as_bytes(), b"has no position", false),

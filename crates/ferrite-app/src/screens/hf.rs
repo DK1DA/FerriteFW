@@ -312,6 +312,15 @@ impl Hf {
 }
 
 impl View for Hf {
+    /// MENU-25: the options page, drawn in the shared options style (not while the patch loads or a frequency
+    /// is being typed).
+    fn options(self, app: &mut App) -> bool {
+        if self.loaded && self.n == 0 {
+            Hf { menu: true, row: 0, ..self }.put(app);
+        }
+        true
+    }
+
     fn name(self) -> &'static str {
         "HF mode"
     }
@@ -400,7 +409,6 @@ impl View for Hf {
                 Hf { n: 1, point: 0, ..self }.put(app);
             }
             (Key::Hash, Short) => app.open(Dest::HfRecent),
-            (Key::Menu, Long) => Hf { menu: true, row: 0, ..self }.put(app), // MENU-25: hold, this screen's options
             (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves HF mode", false), // HF-13
             (Key::Exit, Short) => {
                 app.stop_mode(); // HF-4: BACK leaves HF mode, one level back

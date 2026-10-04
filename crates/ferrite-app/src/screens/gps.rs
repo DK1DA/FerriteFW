@@ -45,6 +45,11 @@ impl Gps {
 const ALL: fn(u16) -> bool = |_| true;
 
 impl View for Gps {
+    fn options(self, app: &mut App) -> bool {
+        app.open_screen(if matches!(self.page, Page::Waypoints | Page::Go) { Of::Waypoints } else { Of::Gps }.screen());
+        true
+    }
+
     fn name(self) -> &'static str {
         match self.page {
             Page::Position => "GPS position",
@@ -81,8 +86,6 @@ impl View for Gps {
                     app.show_toast(b"No GPS fix", b"can't mark here", false);
                 }
             }
-            (Key::Menu, Long, Page::Waypoints | Page::Go) => app.open_screen(Of::Waypoints.screen()),
-            (Key::Menu, Long, _) => app.open_screen(Of::Gps.screen()),
             (Key::Exit, Short, Page::Go) => app.screen = to(Page::Waypoints),
             (Key::Exit, Short, _) => app.back(),
             _ => {}

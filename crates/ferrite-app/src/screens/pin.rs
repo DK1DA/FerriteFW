@@ -123,6 +123,10 @@ impl Pin {
 }
 
 impl View for Pin {
+    fn own_hold_menu(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "PIN entry"
     }

@@ -569,3 +569,40 @@ fn rename_goes_to_its_own_record() {
     assert_eq!(t.name(), "Range preset");
     assert!(call(&t) == before);
 }
+
+/// MENU-25: hold MENU is the screen's options on every screen that has them, in the one options style (0 the
+/// full menu there too); a screen without options says so in a toast and stays.
+#[test]
+fn hold_menu_is_options_everywhere() {
+    use crate::screens::opts::Of;
+    let mut t = T::new();
+    for (d, of) in [(Dest::EventLog, Of::Log), (Dest::AprsHeard, Of::Heard), (Dest::AprsMessages, Of::Messages), (Dest::GpsPosition, Of::Gps), (Dest::Waypoints, Of::Waypoints), (Dest::BandScope, Of::Scope)] {
+        t.open(d);
+        let under = t.app.screen();
+        t.hold(Key::Menu);
+        assert!(matches!(t.app.screen(), Screen::Options(o) if o.of == of), "{d:?}: {}", t.name());
+        t.tap(Key::Digit(0)); // MENU-25: the full menu
+        assert!(matches!(t.app.screen(), Screen::Advanced(_)), "{d:?}: 0 opens the full menu");
+        t.tap(Key::Exit);
+        assert!(matches!(t.app.screen(), Screen::Options(_)));
+        t.tap(Key::Exit);
+        assert_eq!(t.app.screen(), under, "BACK returns to the screen");
+        t.hold(Key::Exit);
+    }
+    t.open(Dest::FmBroadcast); // its own page, drawn in the same style
+    t.hold(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu));
+    t.hold(Key::Exit);
+    for d in [Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Sensors, Dest::Quick, Dest::Status] {
+        t.open(d);
+        let s = t.app.screen();
+        t.hold(Key::Menu);
+        assert_eq!(t.app.screen(), s, "{d:?}: no options, stays");
+        assert!(t.app.toast_up(), "{d:?}: says so");
+        t.wait(3100);
+        t.hold(Key::Exit);
+    }
+    // Home keeps its own: hold MENU is advanced settings (MENU-2).
+    t.hold(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Advanced(_)));
+}

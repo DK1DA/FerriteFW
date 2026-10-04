@@ -69,6 +69,10 @@ fn hhmm(b: &mut Buf<28>, m: u16) {
 }
 
 impl View for Alert {
+    fn own_hold_menu(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Alert"
     }

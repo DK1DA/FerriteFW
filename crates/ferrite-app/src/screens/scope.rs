@@ -7,7 +7,6 @@
 //! (The ST7789 hardware scroll is the radio's later refinement.)
 
 use super::activity::Mode;
-use super::nav::Dest;
 use super::parts;
 use super::shared::*;
 use super::{Cx, Hints, View};
@@ -85,6 +84,11 @@ pub fn peaks(bars: &[u8; SCOPE_BARS]) -> [Option<u8>; 3] {
 }
 
 impl View for Scope {
+    fn options(self, app: &mut App) -> bool {
+        app.open_screen(super::opts::Of::Scope.screen());
+        true
+    }
+
     fn name(self) -> &'static str {
         "Scope"
     }
@@ -113,7 +117,6 @@ impl View for Scope {
                 let fq = w::freq3(f);
                 app.show_toast(b"Tuned", fq.as_bytes(), false);
             }
-            (Key::Menu, Long) => app.open(Dest::Sub(3, 2)), // the scope options
             (Key::Exit, Short) => {
                 app.stop_mode();
                 app.back();

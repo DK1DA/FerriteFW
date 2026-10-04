@@ -597,6 +597,13 @@ impl App {
             }
             return;
         }
+        // MENU-25: hold MENU is this screen's options, on every screen the same way.
+        if (e.key, e.press) == (Key::Menu, Long) && !self.screen.own_hold_menu() {
+            if !self.screen.options(self) {
+                self.show_toast(b"No options here", b"", false);
+            }
+            return;
+        }
         self.screen.key(self, e, store);
     }
 

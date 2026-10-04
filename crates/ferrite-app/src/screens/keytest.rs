@@ -112,6 +112,10 @@ impl KeyTest {
 }
 
 impl View for KeyTest {
+    fn own_hold_menu(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Key test"
     }

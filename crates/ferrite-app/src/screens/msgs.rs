@@ -69,6 +69,11 @@ fn compose(app: &mut App, store: &impl ChannelStore, to: &[u8]) {
 }
 
 impl View for Msgs {
+    fn options(self, app: &mut App) -> bool {
+        app.open_screen(Of::Messages.screen());
+        true
+    }
+
     fn name(self) -> &'static str {
         if self.open { "APRS message" } else { "APRS messages" }
     }
@@ -93,7 +98,6 @@ impl View for Msgs {
                 }
             }
             (Key::Hash, Short) if !self.open => compose(app, store, b""),
-            (Key::Menu, Long) => app.open_screen(Of::Messages.screen()),
             (Key::Exit, Short) if self.open => app.screen = Screen::Msgs(Msgs { open: false, ..self }),
             (Key::Exit, Short) => app.back(),
             _ => {}

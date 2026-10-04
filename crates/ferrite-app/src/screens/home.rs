@@ -37,6 +37,10 @@ pub(crate) fn card(s: u8, active: u8) -> (i32, i32) {
 }
 
 impl View for Home {
+    fn own_hold_menu(self) -> bool {
+        true // MENU-2: advanced settings
+    }
+
     fn name(self) -> &'static str {
         "Home"
     }

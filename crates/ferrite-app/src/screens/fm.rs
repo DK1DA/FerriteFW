@@ -21,7 +21,7 @@ use ferrite_ui::assets::*;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
-use ferrite_ui::widgets::{self as w, Row};
+use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
 /// FM tunes 64-108 MHz (BCR-17), in 10 kHz.
@@ -75,6 +75,12 @@ impl Fm {
 }
 
 impl View for Fm {
+    /// MENU-25: the options page, drawn in the shared options style.
+    fn options(self, app: &mut App) -> bool {
+        app.screen = Screen::Fm(Fm { menu: true, row: 0 });
+        true
+    }
+
     fn name(self) -> &'static str {
         "FM broadcast"
     }
@@ -103,7 +109,6 @@ impl View for Fm {
             (Key::Up | Key::Down, Short | Repeat) => Fm::tune(app, if e.key == Key::Up { 1 } else { -1 }),
             (Key::Left | Key::Right, Short) => app.out.push(RadioCmd::Broadcast(BroadcastCmd::Seek { up: e.key == Key::Right })),
             (Key::Menu, Short) => app.open(Dest::FmPresets), // OK: pick a station
-            (Key::Menu, Long) => app.screen = Screen::Fm(Fm { menu: true, row: 0 }), // MENU-25: hold, the options
             (Key::Exit, Short) => app.back(),
             _ => {}
         }
@@ -142,13 +147,9 @@ impl View for Fm {
             agc_text(s.fm_agc, &mut vals[1]);
             vals[2].set(ON_OFF[s.fm_monitor as usize].as_bytes());
             vals[3].set(b">");
-            for (i, ((name, _), v)) in OPTIONS.iter().zip(&vals).enumerate() {
-                let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: i as u8 == self.row, grey: false };
-                app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
-            }
-            let r = Row { num: Some(0), name: b"Full menu", value: b">", dot: false, selected: false, grey: false };
-            app.list_row(lcd, 4, 23 + 22 * 4, 22, &r);
-            app.help_box(lcd, 140, 46, OPTIONS[self.row as usize % 4].1.as_bytes(), b"FM MENU");
+            // The shared options style (MENU-25).
+            super::opts::options_page(app, lcd, OPTIONS.iter().zip(&vals).map(|((name, _), v)| (name.as_bytes(), v.as_bytes())), self.row);
+            app.help_box(lcd, super::opts::OPTS_HELP_Y, 46, OPTIONS[self.row as usize % 4].1.as_bytes(), b"FM MENU");
             return;
         }
         let (ps, rt, rssi, snr, stereo) = match cx.live.mode {

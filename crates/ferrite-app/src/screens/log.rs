@@ -44,6 +44,11 @@ fn keep<'a>(store: &'a impl ChannelStore, src: Option<Src>) -> impl Fn(u16) -> b
 }
 
 impl View for Log {
+    fn options(self, app: &mut App) -> bool {
+        app.open_screen(Of::Log.screen());
+        true
+    }
+
     fn name(self) -> &'static str {
         if self.detail { "Event detail" } else { "Event log" }
     }
@@ -71,7 +76,6 @@ impl View for Log {
                 app.inbox = app.inbox.saturating_sub(sel.is_some_and(|e| e.unread) as u8);
                 app.screen = Screen::Log(Log { detail: true, ..self });
             }
-            (Key::Menu, Long) => app.open_screen(Of::Log.screen()),
             // INBOX-10: Go
             (Key::Hash, Short) => match sel {
                 Some(e) if e.freq != 0 => app.go_freq(e.freq),

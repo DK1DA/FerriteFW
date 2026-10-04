@@ -237,7 +237,20 @@ pub trait View: Copy {
     /// ([`App::raw_key`]). Only the key test listens.
     fn raw(self, _app: &mut App, _key: Option<ferrite_core::keys::Key>, _code: Option<u8>, _down: bool) {}
 
-    /// A short, long or repeat press (after the App's own: hold BACK, hold #, the lock).
+    /// Hold MENU (MENU-25): open this screen's options (the shared options page, [`opts`], or the screen's own
+    /// options page drawn the same way) and return true; false when it has none, and a toast says "No options
+    /// here". Called by the App, so every screen answers hold MENU the same way.
+    fn options(self, _app: &mut App) -> bool {
+        false
+    }
+
+    /// Hold MENU is this screen's own key, and comes to [`View::key`]: home (advanced settings, MENU-2), the
+    /// alert (the log), the key test (a key under test), PIN entry (OK however long it is held).
+    fn own_hold_menu(self) -> bool {
+        false
+    }
+
+    /// A short, long or repeat press (after the App's own: hold BACK, hold #, the lock, hold MENU).
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore);
 
     /// The knob, +1 per click clockwise.
@@ -279,6 +292,14 @@ impl Screen {
 
     pub(crate) fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         each!(self, s => s.key(app, e, store))
+    }
+
+    pub(crate) fn options(self, app: &mut App) -> bool {
+        each!(self, s => s.options(app))
+    }
+
+    pub(crate) fn own_hold_menu(self) -> bool {
+        each!(self, s => s.own_hold_menu())
     }
 
     pub(crate) fn bar(self) -> bool {
