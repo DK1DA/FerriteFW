@@ -39,7 +39,7 @@ fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
 
 slow_table! {
     /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
-    ROWS: [(&str, Val<()>); 14] = [
+    ROWS: [(&str, Val<()>); 15] = [
         // SBAR-14: why transmit is locked, if it is (BOOT-11).
         (slow!("Transmit"), |c, b| match super::info::tx_lock(c.dev) {
             None => {
@@ -143,11 +143,13 @@ slow_table! {
                 on_off(b, true)
             }
         }),
+        // Chapter 38: the packet mailbox (no menu number: it is reached from here).
+        (slow!("Mailbox"), |_, b| on_off(b, false)),
     ];
 }
 
 slow_table! {
-    GO: [Go; 14] = [
+    GO: [Go; 15] = [
         Go::Open(Dest::Group(8)),
         Go::Open(Dest::Group(9)),
         Go::Open(Dest::Group(8)),
@@ -162,6 +164,7 @@ slow_table! {
         Go::Later,
         Go::Later,
         Go::Open(Dest::Sub(3, 3)),
+        Go::Open(Dest::Mailbox),
     ];
 }
 

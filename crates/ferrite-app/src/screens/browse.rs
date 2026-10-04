@@ -51,7 +51,6 @@ pub enum Mode {
     List,
     /// The actions menu, its row.
     Actions(u8),
-    Confirm,
     /// Picking a zone to move to (NO_ZONE: none).
     Move(u8),
     /// Picking a new number: it is kept in `cur.top` meanwhile (the list isn't shown), so the state stays
@@ -229,19 +228,11 @@ impl View for Browse {
                         app.show_toast(c.name(), if c.skip() { b"back in scans" } else { b"skipped in scans" }, false);
                         s.mode = Mode::List;
                     }
-                    _ => s.mode = Mode::Confirm,
+                    _ => {
+                        // CHAN-13, MENU-23: the shared confirm asks; BACK there returns to Delete.
+                        return super::confirm::ask(app, super::confirm::Ask::DeleteChannel(c.num));
+                    }
                 }
-            }
-            (Key::Menu, Short, Mode::Confirm) => {
-                let Some(c) = ch else { return };
-                if store.data().request(Op::DeleteChannel(c.num)) {
-                    let mut l = Buf::<32>::new();
-                    chan_label(c.num, &mut l);
-                    app.show_toast(b"Deleted", l.as_bytes(), false);
-                }
-                let v = view_of(store, &s);
-                s.mode = Mode::List;
-                s.cur = Cursor { sel: self.cur.sel.min(v.n().saturating_sub(1)), ..self.cur }.shown(v.n(), ROWS2, &|i| v.keep(i));
             }
             (Key::Menu, Short, Mode::Move(z)) => {
                 let Some(c) = ch else { return };
@@ -292,7 +283,6 @@ impl View for Browse {
                 s.cur = self.cur.step(d, v.n(), ROWS2, &|i| v.keep(i));
             }
             Mode::Actions(a) => s.mode = Mode::Actions((a as i32 + d).rem_euclid(ACTIONS.len() as i32) as u8),
-            Mode::Confirm => {}
             Mode::Move(z) => {
                 // the zones that exist, then "none"
                 let n = store.zones() as i32 + 1;
@@ -313,7 +303,7 @@ impl View for Browse {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let store = cx.store;
         let data = store.data();
-        let list = matches!(self.mode, Mode::List | Mode::Confirm);
+        let list = self.mode == Mode::List;
         app.page(lcd, (self.view != PICKER, list));
         if !app.gate((self, data.version(), data.fix().map(|f| f.pos))) {
             return;
@@ -399,15 +389,7 @@ impl View for Browse {
             };
             app.empty(lcd, a, b);
         }
-        if self.mode == Mode::Confirm {
-            if let Some(c) = ch {
-                let mut q = Buf::<32>::new();
-                q.push(b"Delete ");
-                chan_label(c.num, &mut q);
-                q.push(b"?");
-                app.confirm_box(lcd, q.as_bytes(), c.name());
-            }
-        } else if app.drawn.hash[R_HELP] != 0 {
+        if app.drawn.hash[R_HELP] != 0 {
             // the box is gone: everything under it again
             app.drawn.hash[R_HELP] = 0;
             app.drawn.hash[R_PAGE] = 0;
@@ -419,7 +401,6 @@ impl View for Browse {
             (PICKER, _) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")]),
             (_, Mode::List) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Actions"), ("BACK", "Views")]),
             (_, Mode::Actions(_)) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Do it"), ("BACK", "List")]),
-            (_, Mode::Confirm) => Hints::new(&[("OK", "Delete"), ("BACK", "Keep")]),
             (_, Mode::Move(_)) => Hints::new(&[("Knob", "Zone"), ("OK", "Move"), ("BACK", "Cancel")]),
             (_, Mode::Renumber) => Hints::new(&[("Knob", "Number"), (ARROWS_LR, "10"), ("OK", "Set")]),
         }
@@ -514,4 +495,11 @@ fn actions(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, b: Br
         _ => b"Knob steps 1, left and right 10; OK sets it",
     };
     app.help_box(lcd, 300 - 38, 34, help, b"");
+}
+
+/// After the shared confirm deleted a channel: the list again, its cursor on a channel that still exists.
+pub(crate) fn after_delete(b: Browse, store: &impl ChannelStore) -> Browse {
+    let v = view_of(store, &b);
+    let cur = Cursor { sel: b.cur.sel.min(v.n().saturating_sub(1)), ..b.cur }.shown(v.n(), ROWS2, &|i| v.keep(i));
+    Browse { mode: Mode::List, cur, ..b }
 }

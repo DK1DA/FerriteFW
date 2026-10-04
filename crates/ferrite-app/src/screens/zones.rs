@@ -19,7 +19,7 @@ use ufmt::uwrite;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Zones {
     pub cur: Cursor,
-    /// 0 the list, 1 the list asking before a delete, 2 + row: the zone editor (A12). One byte keeps the
+    /// 0 the list (1 unused: deleting asks with the shared confirm), 2 + row: the zone editor (A12). One byte keeps the
     /// state six bytes.
     pub mode: u8,
 }
@@ -34,9 +34,6 @@ impl Zones {
         self.mode.checked_sub(2)
     }
 
-    pub fn confirm(self) -> bool {
-        self.mode == 1
-    }
 }
 
 /// The editor's rows: label and help (layout as data; values from [`value`]).
@@ -137,7 +134,7 @@ impl View for Zones {
         let z = self.cur.sel as u8;
         let d = store.data();
         match (e.key, e.press, self.edit()) {
-            (Key::Up | Key::Down, Short | Repeat, _) if !self.confirm() => {
+            (Key::Up | Key::Down, Short | Repeat, _) => {
                 let dir = if e.key == Key::Up { -1 } else { 1 };
                 match self.edit() {
                     Some(r) => s.mode = 2 + (r as i32 + dir).rem_euclid(ROWS.len() as i32) as u8,
@@ -145,14 +142,6 @@ impl View for Zones {
                 }
             }
             (Key::Left | Key::Right, Short | Repeat, Some(_)) => return self.knob(app, if e.key == Key::Right { 1 } else { -1 }, store),
-            (Key::Menu, Short, None) if self.confirm() => {
-                let name = Buf::<16>::from(store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes());
-                if d.request(Op::DeleteZone(z)) {
-                    app.show_toast(b"Zone deleted", name.as_bytes(), false);
-                }
-                s.mode = 0;
-                s.cur = Cursor::first(store.zones() as u16, &keep(store));
-            }
             (Key::Menu, Short, None) if store.zone_name(z).is_some() => s.mode = 2,
             (Key::Menu, Short, Some(0)) => return super::text::open(app, super::text::TextFor::Zone(z), store), // rename (A7)
             (Key::Hash, Short, None) => {
@@ -164,7 +153,8 @@ impl View for Zones {
                     app.show_toast(b"No room", b"255 zones at most", false);
                 }
             }
-            (Key::Star, Short, None) if store.zone_name(z).is_some() => s.mode = 1,
+            // CHAN-12, MENU-23: the shared confirm asks.
+            (Key::Star, Short, None) if store.zone_name(z).is_some() => return super::confirm::ask(app, super::confirm::Ask::DeleteZone(z)),
             (Key::Hash, Short, Some(r)) => {
                 // MENU-18: back to the default
                 let mut c = d.zone_cfg(z);
@@ -180,7 +170,6 @@ impl View for Zones {
                 }
                 d.request(Op::Zone(z, c));
             }
-            (Key::Exit, Short, _) if self.confirm() => s.mode = 0,
             (Key::Exit, Short, Some(_)) => s.mode = 0,
             (Key::Exit, Short, None) => return app.back(),
             _ => return,
@@ -197,15 +186,14 @@ impl View for Zones {
                 store.data().request(Op::Zone(z, c));
             }
             Some(_) => {}
-            None if !self.confirm() => app.screen = Screen::Zones(Zones { cur: self.cur.step(d, store.zones() as u16, ROWS1, &keep(store)), ..self }),
-            None => {}
+            None => app.screen = Screen::Zones(Zones { cur: self.cur.step(d, store.zones() as u16, ROWS1, &keep(store)), ..self }),
         }
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let store = cx.store;
         let data = store.data();
-        app.page(lcd, (self.edit().is_some(), self.confirm()));
+        app.page(lcd, self.edit().is_some());
         if !app.gate((self, data.version())) {
             return;
         }
@@ -239,24 +227,18 @@ impl View for Zones {
             app.row1(lcd, row, store.zone_name(i as u8).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes(), v.as_bytes(), false, i == self.cur.sel, store.zone_len(i as u8) == 0);
         });
         app.rows_end(lcd, rows, ROWS1, ROW1_H);
-        if self.confirm() {
-            let mut q = Buf::<32>::new();
-            q.push(b"Delete zone ");
-            q.push(store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes());
-            q.push(b"?");
-            let mut m = Buf::<40>::new();
-            let _ = uwrite!(m, "{} channels go to no zone", store.zone_len(z));
-            app.confirm_box(lcd, q.as_bytes(), m.as_bytes());
-        } else {
-            app.help_box(lcd, 300 - 38, 34, b"OK edits its scan options and priorities", b"MENU 0 2 3");
-        }
+        app.help_box(lcd, 300 - 38, 34, b"OK edits its scan options and priorities", b"MENU 0 2 3");
     }
 
     fn hints(self, _: &App) -> Hints {
-        match (self.edit(), self.confirm()) {
-            (_, true) => Hints::new(&[("OK", "Delete"), ("BACK", "Keep")]),
-            (Some(_), _) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("#", "Reset")]),
-            (None, _) => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
+        match self.edit() {
+            Some(_) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("#", "Reset")]),
+            None => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
         }
     }
+}
+
+/// After the shared confirm deleted a zone: the list again from its first zone.
+pub(crate) fn after_delete(store: &impl ChannelStore) -> Zones {
+    Zones { mode: 0, cur: Cursor::first(store.zones() as u16, &keep(store)) }
 }

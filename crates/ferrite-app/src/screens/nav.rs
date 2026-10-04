@@ -25,8 +25,10 @@
 //! | Power on | the firmware: [`App::first_boot`] / [`App::ask_pin`] | [`Dest::Setup`] (BOOT-12) / [`Dest::Pin`] (BOOT-13) |
 //! | [`App::notify`], [`App::raise_alert`] | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Crossband is MENU 0 3 6 (Listen). Not wired yet (no event to start them): Bluetooth write approval and
-//! progress (the Link task opens them), power off, empty battery, SSB patch confirm, mailbox.
+//! Crossband is MENU 0 3 6 (Listen); the mailbox is the Status page's last row. The screens an event opens
+//! have App hooks the firmware (and the simulator's keys) call: [`App::power_off`], [`App::battery_empty`],
+//! [`App::ssb_patch_found`], [`App::link_write_request`], [`App::link_write_progress`] and
+//! [`App::link_write_done`], [`App::same_alert`].
 //! Still placeholders: position entry (A8), location codes (A13), the DTMF dialer and memories (A14, A15).
 
 use super::advanced::{Advanced, GROUPS};
@@ -432,7 +434,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::Browse => Screen::Browse(super::browse::Browse::new()),
         Dest::Zones => Screen::Zones(super::zones::Zones::new()),
         Dest::ZoneEdit => Screen::Zones(super::zones::Zones { mode: 2, ..super::zones::Zones::new() }),
-        Dest::RangePresets => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Presets(false))),
+        Dest::RangePresets => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Presets)),
         Dest::RangePreset => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Edit(0))),
         Dest::SkipList => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Skips)),
         Dest::HfRecent => Screen::Recall(super::recall::Recall { fm: false, cur: Default::default() }),

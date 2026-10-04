@@ -362,3 +362,40 @@ fn crossband_from_the_menu() {
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Group(g) if g.g == 3), "BACK: the Listen list");
 }
+
+/// The screens an event opens, through the App hooks the firmware calls: power off and empty battery (modal:
+/// keys and hold BACK do nothing), the unknown SSB patch, a write approval then its progress, and the mailbox
+/// from the Status page.
+#[test]
+fn event_hooks_open_their_screens() {
+    use crate::screens::info::{Info, Page};
+    use crate::screens::link::{LinkAnswer, LinkPage};
+    let mut t = T::new();
+    t.tap(Key::Menu); // quick settings under the next ones
+    t.app.ssb_patch_found();
+    assert_eq!(t.app.screen(), Screen::Info(Info { page: Page::SsbConfirm }));
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Quick(_)), "OK uses it and returns");
+    t.app.link_write_request();
+    assert!(matches!(t.app.screen(), Screen::Link(l) if l.page == LinkPage::Approve));
+    t.tap(Key::Menu);
+    assert_eq!(t.app.take_link_answer(), Some(LinkAnswer::Allowed));
+    t.app.link_write_progress();
+    assert!(matches!(t.app.screen(), Screen::Link(l) if l.page == LinkPage::Progress));
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Link(_)), "keys ignored while writing (LINK-9)");
+    t.app.link_write_done();
+    assert!(matches!(t.app.screen(), Screen::Quick(_)));
+    // The mailbox: the Status page's last row.
+    t.hold(Key::Exit);
+    t.tap(Key::Hash);
+    t.tap(Key::Up); // wraps to the last row
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen(), Screen::Info(Info { page: Page::Mailbox }));
+    t.app.battery_empty();
+    assert_eq!(t.app.screen(), Screen::Info(Info { page: Page::EmptyBattery }));
+    t.app.power_off();
+    t.hold(Key::Exit);
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen(), Screen::Info(Info { page: Page::PowerOff }), "modal to the end");
+}

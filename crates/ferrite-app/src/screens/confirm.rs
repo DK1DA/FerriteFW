@@ -8,6 +8,7 @@ use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::{ChanWrite, ChannelStore, NO_ZONE};
+use crate::data::Op;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{chan_label, tone_text};
 use crate::{App, Screen, Slot, MENU_TIMEOUT_MS};
@@ -28,6 +29,8 @@ pub enum Ask {
     DeleteChannel(u16),
     /// Delete a zone (CHAN-12).
     DeleteZone(u8),
+    /// Delete a range preset, by index (MENU 0 1 7).
+    DeletePreset(u8),
     /// Tone search found a tone: set it as the TX tone too (TSRCH-4).
     ToneTx(u16),
 }
@@ -60,6 +63,7 @@ fn words(ask: Ask) -> (&'static str, &'static str, &'static str, &'static str) {
         ),
         Ask::DeleteChannel(_) => ("Delete this channel?", "", "Every other channel, and the zone it was in.", "Delete"),
         Ask::DeleteZone(_) => ("Delete this zone?", "", "Its channels: they move to no zone and stay in All.", "Delete"),
+        Ask::DeletePreset(_) => ("Delete this range?", "Its skipped frequencies too.", "Every other range preset, and the channels.", "Delete"),
         Ask::ToneTx(_) => ("Set the TX tone too?", "", "The RX tone is already set. BACK leaves TX as it is.", "Set"),
     }
 }
@@ -93,7 +97,9 @@ impl View for Confirm {
                     app.go_home();
                 }
                 Ask::DeleteChannel(num) => {
-                    app.write(ChanWrite::Delete(num));
+                    if !store.data().request(Op::DeleteChannel(num)) {
+                        app.write(ChanWrite::Delete(num)); // a store whose records have no Data owner yet
+                    }
                     for s in 0..SLOTS {
                         if app.slots[s].ch.is_some_and(|c| c.num == num) {
                             let sl = &mut app.slots[s];
@@ -108,17 +114,37 @@ impl View for Confirm {
                     chan_label(num, &mut l);
                     app.show_toast(l.as_bytes(), b"deleted", false);
                     app.back();
+                    if let Screen::Browse(b) = app.screen {
+                        app.screen = Screen::Browse(super::browse::after_delete(b, store));
+                    }
                 }
                 Ask::DeleteZone(z) => {
-                    app.write(ChanWrite::DeleteZone(z));
+                    let name = store.zone_label(z, b"Zone", b"Zone");
+                    if !store.data().request(Op::DeleteZone(z)) {
+                        app.write(ChanWrite::DeleteZone(z));
+                    }
                     for s in app.slots.iter_mut().filter(|s| s.zone == z) {
                         s.zone = NO_ZONE;
                         if let Some(c) = &mut s.ch {
                             c.zone = NO_ZONE;
                         }
                     }
-                    app.show_toast(store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"Zone")).as_bytes(), b"deleted", false);
+                    app.show_toast(name.as_bytes(), b"deleted", false);
                     app.back();
+                    if let Screen::Zones(_) = app.screen {
+                        app.screen = Screen::Zones(super::zones::after_delete(store));
+                    }
+                }
+                Ask::DeletePreset(i) => {
+                    let d = store.data();
+                    let name = d.preset(i).map(|p| p.name);
+                    if d.request(Op::DeletePreset(i)) {
+                        app.show_toast(b"Deleted", name.as_ref().map_or(b"".as_slice(), |n| n.as_bytes()), false);
+                    }
+                    app.back();
+                    if let Screen::ScanLists(s) = app.screen {
+                        app.screen = Screen::ScanLists(super::scanlists::ScanLists { cur: Default::default(), ..s });
+                    }
                 }
                 Ask::ToneTx(t) => {
                     super::tones::set(app, false, t);
@@ -146,7 +172,11 @@ impl View for Confirm {
                     what.push(w::freq3(c.rx).as_bytes());
                 }
             }
-            Ask::DeleteZone(z) => what.set(cx.store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"?")).as_bytes()),
+            Ask::DeleteZone(z) => {
+                what.set(cx.store.zone_label(z, b"?", b"?").as_bytes());
+                let _ = ufmt::uwrite!(what, " \u{b7} {} channels", cx.store.zone_len(z));
+            }
+            Ask::DeletePreset(i) => what.set(cx.store.data().preset(i).map_or(Buf::<12>::new(), |p| p.name).as_bytes()),
             Ask::ToneTx(t) => {
                 let mut b = Buf::<16>::new();
                 tone_text(t, &mut b);

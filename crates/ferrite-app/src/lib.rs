@@ -493,6 +493,51 @@ impl App {
         }
     }
 
+    // ---- events the firmware (and the simulator) report: each opens its screen ----
+
+    /// The volume knob turned to off (the power switch, PWR-17): "Saving...", modal, while the writes finish;
+    /// then the firmware cuts the power. Nothing else happens on screen after this.
+    pub fn power_off(&mut self) {
+        self.go_home();
+        self.screen = Screen::Info(screens::info::Info { page: screens::info::Page::PowerOff });
+    }
+
+    /// The battery reached empty (PWR-16): the empty-battery screen, modal, before the firmware switches off.
+    pub fn battery_empty(&mut self) {
+        self.go_home();
+        self.screen = Screen::Info(screens::info::Info { page: screens::info::Page::EmptyBattery });
+    }
+
+    /// At boot, an SSB patch in flash that matches no known stock version (D15): ask whether to use it,
+    /// over whatever is up (after the PIN, if any).
+    pub fn ssb_patch_found(&mut self) {
+        self.open(Dest::SsbConfirm);
+    }
+
+    /// The Link task: the first write from a device not approved yet (LINK-7, SAFE-6). The answer comes back
+    /// through [`App::take_link_answer`].
+    pub fn link_write_request(&mut self) {
+        if !matches!(self.screen, Screen::Link(l) if l.page == screens::link::LinkPage::Approve) {
+            self.open(Dest::WriteApproval);
+        }
+    }
+
+    /// The Link task: a write session is running (LINK-9): its progress screen (the percentage is the
+    /// Device's `link.write_pct`), keys ignored but BACK, which cancels.
+    pub fn link_write_progress(&mut self) {
+        if !matches!(self.screen, Screen::Link(l) if l.page == screens::link::LinkPage::Progress) {
+            self.open(Dest::WriteProgress);
+        }
+    }
+
+    /// The Link task: the write session ended: back to where it was.
+    pub fn link_write_done(&mut self) {
+        if matches!(self.screen, Screen::Link(l) if l.page == screens::link::LinkPage::Progress) {
+            self.back();
+            self.show_toast(b"Write done", b"", false);
+        }
+    }
+
     /// A matrix code went down or up, mapped to a key or not: the key test shows it (KEY-2). The firmware calls
     /// this for every code, before [`App::key_down`] / [`App::key_up`] for the mapped ones.
     pub fn raw_key(&mut self, code: u8, down: bool) {

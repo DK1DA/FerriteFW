@@ -18,8 +18,8 @@ use ufmt::uwrite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Page {
-    /// The presets; true while asking before a delete.
-    Presets(bool),
+    /// The presets (deleting one asks with the shared confirm).
+    Presets,
     /// One preset's editor, its row.
     Edit(u8),
     Skips,
@@ -34,10 +34,6 @@ pub struct ScanLists {
 impl ScanLists {
     pub fn new(page: Page) -> Self {
         ScanLists { page, cur: Cursor::default() }
-    }
-
-    fn confirm(self) -> bool {
-        self.page == Page::Presets(true)
     }
 }
 
@@ -80,7 +76,7 @@ fn crosses_relay(p: &RangePreset) -> bool {
 impl View for ScanLists {
     fn name(self) -> &'static str {
         match self.page {
-            Page::Presets(_) => "Range presets",
+            Page::Presets => "Range presets",
             Page::Edit(_) => "Range preset",
             Page::Skips => "Skip list",
         }
@@ -88,7 +84,7 @@ impl View for ScanLists {
 
     fn title(self, _: &App, b: &mut Buf<10>) {
         b.set(match self.page {
-            Page::Presets(_) => b"Ranges".as_slice(),
+            Page::Presets => b"Ranges".as_slice(),
             Page::Edit(_) => b"Range",
             Page::Skips => b"Skips",
         });
@@ -110,22 +106,13 @@ impl View for ScanLists {
             (Key::Up | Key::Down, Short | Repeat, Page::Edit(r)) => {
                 s.page = Page::Edit((r as i32 + if e.key == Key::Up { -1 } else { 1 }).rem_euclid(ROWS.len() as i32) as u8);
             }
-            (Key::Up | Key::Down, Short | Repeat, _) if !self.confirm() => s.cur = self.cur.step(if e.key == Key::Up { -1 } else { 1 }, n, ROWS2, &ALL),
+            (Key::Up | Key::Down, Short | Repeat, _) => s.cur = self.cur.step(if e.key == Key::Up { -1 } else { 1 }, n, ROWS2, &ALL),
             (Key::Left | Key::Right, Short | Repeat, Page::Edit(r)) => {
                 let big = matches!(r, 1 | 2);
                 return self.knob(app, if e.key == Key::Right { 1 } else { -1 } * if big { 10 } else { 1 }, store);
             }
-            (Key::Menu, Short, Page::Presets(_)) if self.confirm() => {
-                if let Some(p) = d.preset(self.cur.sel as u8) {
-                    if d.request(Op::DeletePreset(self.cur.sel as u8)) {
-                        app.show_toast(b"Deleted", p.name.as_bytes(), false);
-                    }
-                }
-                s.page = Page::Presets(false);
-                s.cur = Cursor::default();
-            }
-            (Key::Menu, Short, Page::Presets(_)) if n > 0 => s.page = Page::Edit(0),
-            (Key::Hash, Short, Page::Presets(_)) => {
+            (Key::Menu, Short, Page::Presets) if n > 0 => s.page = Page::Edit(0),
+            (Key::Hash, Short, Page::Presets) => {
                 if d.presets() < PRESETS_MAX && d.request(Op::NewPreset) {
                     let n = d.presets() as u16;
                     s.cur = Cursor { sel: n - 1, top: self.cur.top }.shown(n, ROWS2, &ALL);
@@ -134,7 +121,8 @@ impl View for ScanLists {
                     app.show_toast(b"16 presets", b"delete one first", false);
                 }
             }
-            (Key::Star, Short, Page::Presets(_)) if n > 0 => s.page = Page::Presets(true),
+            // MENU-23: the shared confirm asks.
+            (Key::Star, Short, Page::Presets) if n > 0 => return super::confirm::ask(app, super::confirm::Ask::DeletePreset(self.cur.sel as u8)),
             (Key::Menu, Short, Page::Edit(0)) => return super::text::open(app, super::text::TextFor::Preset(self.cur.sel as u8), store),
             // C13: OK lets one back in, # clears them all (RAM only, this scan: no confirm).
             (Key::Menu, Short, Page::Skips) if n > 0 => {
@@ -146,8 +134,7 @@ impl View for ScanLists {
                 app.show_toast(b"Skip list", b"cleared", false);
                 s.cur = Cursor::default();
             }
-            (Key::Exit, Short, _) if self.confirm() => s.page = Page::Presets(false),
-            (Key::Exit, Short, Page::Edit(_)) => s.page = Page::Presets(false),
+            (Key::Exit, Short, Page::Edit(_)) => s.page = Page::Presets,
             (Key::Exit, Short, _) => return app.back(),
             _ => return,
         }
@@ -171,7 +158,7 @@ impl View for ScanLists {
                 }
                 data.request(Op::Preset(i, p));
             }
-            Page::Presets(_) if !self.confirm() => {
+            Page::Presets => {
                 let cur = self.cur.step(d, data.presets() as u16, ROWS2, &ALL);
                 app.screen = Screen::ScanLists(ScanLists { cur, ..self });
             }
@@ -179,19 +166,18 @@ impl View for ScanLists {
                 let cur = self.cur.step(d, data.skips(), ROWS2, &ALL);
                 app.screen = Screen::ScanLists(ScanLists { cur, ..self });
             }
-            _ => {}
         }
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let store = cx.store;
         let data = store.data();
-        app.page(lcd, (matches!(self.page, Page::Edit(_)), self.page == Page::Skips, self.confirm()));
+        app.page(lcd, (matches!(self.page, Page::Edit(_)), self.page == Page::Skips));
         if !app.gate((self, data.version())) {
             return;
         }
         match self.page {
-            Page::Presets(_) => {
+            Page::Presets => {
                 let n = data.presets() as u16;
                 let mut l = Buf::<24>::new();
                 let _ = uwrite!(l, "{} of {} presets", n, PRESETS_MAX);
@@ -213,15 +199,6 @@ impl View for ScanLists {
                 app.rows_end(lcd, rows, ROWS2, ROW2_H);
                 if n == 0 {
                     app.empty(lcd, b"No range presets", b"# makes one");
-                }
-                if self.confirm() {
-                    if let Some(p) = data.preset(self.cur.sel as u8) {
-                        let mut q = Buf::<32>::new();
-                        q.push(b"Delete ");
-                        q.push(p.name.as_bytes());
-                        q.push(b"?");
-                        app.confirm_box(lcd, q.as_bytes(), b"And its skipped frequencies");
-                    }
                 }
             }
             Page::Edit(row) => {
@@ -294,11 +271,10 @@ impl View for ScanLists {
     }
 
     fn hints(self, _: &App) -> Hints {
-        match (self.page, self.confirm()) {
-            (_, true) => Hints::new(&[("OK", "Delete"), ("BACK", "Keep")]),
-            (Page::Presets(_), _) => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
-            (Page::Edit(_), _) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("BACK", "Done")]),
-            (Page::Skips, _) => Hints::new(&[("OK", "Unskip"), ("#", "Clear all"), ("BACK", "Back")]),
+        match self.page {
+            Page::Presets => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
+            Page::Edit(_) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("BACK", "Done")]),
+            Page::Skips => Hints::new(&[("OK", "Unskip"), ("#", "Clear all"), ("BACK", "Back")]),
         }
     }
 }

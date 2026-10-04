@@ -15,7 +15,9 @@
 //! a PTT is held (a fake transmit: the app has no transmit yet).
 //!
 //! Stand-ins for what the radio would report: M a message arrives, N an alert, F5 GPS off/searching/fix,
-//! F6 Bluetooth, F7 battery normal/low/cut-off.
+//! F6 Bluetooth, F7 battery normal/low/cut-off, F8 the power switch, F9 an empty battery, F10 an unknown SSB
+//! patch at boot, F11 a write from a new Bluetooth device (allowed, it runs a fake write session). Each calls
+//! the App hook the firmware calls.
 
 use crate::face::{Face, Part};
 use crate::fake::{self, FakeRadio};
@@ -66,8 +68,9 @@ keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits
       S = SLOT · V = V/M · Q = SIDE1 · W = SIDE2 · Space = PTT A · [ ] or mouse wheel = knob
       or click the radio's keys (hold the mouse for long presses; hold SIDE1 + wheel = squelch)
       hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
-      M message · N alert · F5 GPS · F6 Bluetooth · F7 battery
-      X crossband repeater (no menu number yet) · L home layout · B a beacon (automatic transmit)
+      M message · N alert · F5 GPS · F6 Bluetooth · F7 battery · F8 power off · F9 empty battery
+      F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 6)
+      L home layout · B a beacon (automatic transmit)
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
 
 fn map_key(k: K) -> Option<Key> {
@@ -251,6 +254,10 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
                     }
                 }
                 K::F6 => dev.bt = !dev.bt,
+                K::F8 if !booting => app.power_off(),
+                K::F9 if !booting => app.battery_empty(),
+                K::F10 if !booting => app.ssb_patch_found(),
+                K::F11 if !booting => app.link_write_request(),
                 K::F7 => {
                     battery = (battery + 1) % 3;
                     (dev.battery_low, dev.battery_cutoff, dev.battery_pct, dev.battery_mv) =
@@ -347,6 +354,23 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
             radio.step(now as f32 / 1000.0, app.active());
             if let Some(a) = radio.take_same() {
                 app.same_alert(&a.header, a.slot, a.freq); // WX-4: the decoder's alert, over any screen
+            }
+            // The fake link: an allowed write runs a session, 2 % a frame, then ends.
+            match app.take_link_answer() {
+                Some(ferrite_app::screens::link::LinkAnswer::Allowed) => {
+                    dev.link.write_pct = Some(0);
+                    app.link_write_progress();
+                }
+                Some(_) => dev.link.write_pct = None,
+                None => {}
+            }
+            if let Some(p) = dev.link.write_pct {
+                if p >= 100 {
+                    dev.link.write_pct = None;
+                    app.link_write_done();
+                } else {
+                    dev.link.write_pct = Some(p + 2);
+                }
             }
             let clock = fake::device().clock_min;
             dev.clock_min = clock;

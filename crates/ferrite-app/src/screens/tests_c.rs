@@ -194,7 +194,7 @@ fn browser_deletes_only_after_asking() {
     t.tap(Key::Up); // Delete (the last)
     t.tap(Key::Menu);
     let n = t.s.count();
-    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.mode == crate::screens::browse::Mode::Confirm));
+    assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == crate::screens::confirm::Ask::DeleteChannel(11)), "the shared confirm (MENU-23)");
     t.tap(Key::Exit);
     assert_eq!(t.s.count(), n, "BACK keeps it");
     assert!(matches!(t.app.screen(), Screen::Browse(b) if b.mode == crate::screens::browse::Mode::Actions(6)), "back on Delete");
