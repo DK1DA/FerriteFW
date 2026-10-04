@@ -3,7 +3,8 @@
 //! screen, the four side buttons on the left. Drawn in window pixels into the window's buffer only; the
 //! screen itself stays the firmware's own 240 x 320 pixels, scaled.
 //!
-//! Geometry is laid out for scale 2 (a 616 x 900 window) and multiplied by scale / 2.
+//! Geometry is laid out for scale 2 (a 630 x 1012 window) and multiplied by scale / 2. The keys are drawn larger
+//! than the radio's, relative to the screen, so they are easy to click at 1x.
 
 use ferrite_core::keys::Key;
 use ferrite_ui::assets::{UI_12, UI_12B, UI_15B};
@@ -62,32 +63,32 @@ pub struct Face {
 impl Face {
     /// The panel's size at a scale, without drawing it.
     pub fn size(scale: usize) -> (usize, usize) {
-        (616 * scale / 2, 900 * scale / 2)
+        (630 * scale / 2, 1012 * scale / 2)
     }
 
     pub fn new(scale: usize) -> Self {
         let u = |v: i32| v * scale as i32 / 2;
         let (w, h) = Self::size(scale);
-        let (sx, sy) = (u(98), u(56));
+        let (sx, sy) = (u(112), u(56));
         let sw = 240 * scale as i32; // the screen: 480 x 640 at scale 2
         let k = |part, x, y, w, h, label, small| Hit { part, x: u(x), y: u(y), w: u(w), h: u(h), label, small };
         let mut hits = vec![
             // Side buttons, top to bottom (stock's names small).
-            k(Part::Ptt(0), 8, 190, 62, 120, "PTT A", ""),
-            k(Part::Ptt(1), 8, 326, 62, 58, "PTT B", ""),
-            k(Part::Key(Key::Side(1)), 8, 398, 62, 50, "SIDE1", "PTT C"),
-            k(Part::Key(Key::Side(2)), 8, 462, 62, 50, "SIDE2", "Side 2"),
+            k(Part::Ptt(0), 6, 190, 78, 120, "PTT A", ""),
+            k(Part::Ptt(1), 6, 326, 78, 58, "PTT B", ""),
+            k(Part::Key(Key::Side(1)), 6, 398, 78, 64, "SIDE1", "PTT C"),
+            k(Part::Key(Key::Side(2)), 6, 476, 78, 64, "SIDE2", "Side 2"),
             // The channel knob (the encoder).
-            k(Part::Knob, 214, 2, 64, 44, "", ""),
+            k(Part::Knob, 228, 2, 64, 44, "", ""),
             // Function keys.
-            k(Part::Key(Key::Menu), 98, 712, 86, 26, "OK", "MENU"),
-            k(Part::Key(Key::Slot), 98, 742, 86, 26, "A\u{b7}B\u{b7}C", "SLOT"),
-            k(Part::Key(Key::Up), 298, 712, 80, 20, "", ""),
-            k(Part::Key(Key::Down), 298, 750, 80, 20, "", ""),
-            k(Part::Key(Key::Left), 254, 718, 42, 46, "", ""),
-            k(Part::Key(Key::Right), 380, 718, 42, 46, "", ""),
-            k(Part::Key(Key::Exit), 492, 712, 86, 26, "BACK", ""),
-            k(Part::Key(Key::VfoMem), 492, 742, 86, 26, "V/M", ""),
+            k(Part::Key(Key::Menu), 112, 712, 86, 40, "OK", "MENU"),
+            k(Part::Key(Key::Slot), 112, 758, 86, 40, "A\u{b7}B\u{b7}C", "SLOT"),
+            k(Part::Key(Key::Up), 312, 712, 80, 32, "", ""),
+            k(Part::Key(Key::Down), 312, 766, 80, 32, "", ""),
+            k(Part::Key(Key::Left), 268, 722, 42, 66, "", ""),
+            k(Part::Key(Key::Right), 394, 722, 42, 66, "", ""),
+            k(Part::Key(Key::Exit), 506, 712, 86, 40, "BACK", ""),
+            k(Part::Key(Key::VfoMem), 506, 758, 86, 40, "V/M", ""),
         ];
         let digits: [(Key, &str, &str); 12] = [
             (Key::Digit(1), "1", "!<"),
@@ -105,9 +106,9 @@ impl Face {
         ];
         for (i, (key, label, small)) in digits.into_iter().enumerate() {
             let (c, r) = (i as i32 % 3, i as i32 / 3);
-            hits.push(k(Part::Key(key), 98 + c * 165, 780 + r * 29, 150, 25, label, small));
+            hits.push(k(Part::Key(key), 112 + c * 165, 810 + r * 50, 150, 44, label, small));
         }
-        let mut f = Face { w, h, sx: sx as usize, sy: sy as usize, hits, led: (u(366), u(40)), base: vec![0; w * h] };
+        let mut f = Face { w, h, sx: sx as usize, sy: sy as usize, hits, led: (u(380), u(40)), base: vec![0; w * h] };
         f.draw_base(scale, sw);
         f
     }
@@ -119,20 +120,20 @@ impl Face {
         let mut c = Canvas { px: &mut base, w, h };
         c.fill(0, 0, w, h, 0x0E0F12);
         // Antenna (right of the knobs) and the knobs on the top edge.
-        c.rrect(u(400), 0, u(30), u(46), u(4), 0x15171A);
+        c.rrect(u(414), 0, u(30), u(46), u(4), 0x15171A);
         for i in 0..6 {
-            c.fill(u(398), u(22 + i * 4), u(34), u(2), 0x26292E);
+            c.fill(u(412), u(22 + i * 4), u(34), u(2), 0x26292E);
         }
-        c.rrect(u(120), u(10), u(56), u(36), u(8), KNOB);
+        c.rrect(u(134), u(10), u(56), u(36), u(8), KNOB);
         for i in 0..6 {
-            c.fill(u(126 + i * 9), u(14), u(3), u(30), RIDGE);
+            c.fill(u(140 + i * 9), u(14), u(3), u(30), RIDGE);
         }
-        c.text(u(100), u(20), "VOL", &UI_12, SMALL, Align::Center);
+        c.text(u(134) - 4 - width("VOL", &UI_12), u(20), "VOL", &UI_12, SMALL, Align::Left);
         // Body and the screen's bezel.
-        c.rrect(u(76), u(42), u(530), h - u(46), u(28), BODY);
+        c.rrect(u(90), u(42), u(530), h - u(46), u(28), BODY);
         c.rrect(self.sx as i32 - u(10), self.sy as i32 - u(10), sw + u(20), 320 * scale as i32 + u(20), u(10), BEZEL);
         // The d-pad's surround.
-        c.rrect(u(250), u(708), u(176), u(66), u(12), 0x23272D);
+        c.rrect(u(264), u(708), u(176), u(94), u(12), 0x23272D);
         let hits = self.hits.clone();
         for hit in &hits {
             draw_hit(&mut c, hit, false, scale);
@@ -224,17 +225,22 @@ fn draw_hit(c: &mut Canvas, h: &Hit, pressed: bool, scale: usize) {
             let big = if scale >= 2 { &UI_15B } else { &UI_12B };
             if side {
                 // Ferrite's role, stock's name under it.
-                let y = h.y + h.h / 2 - if h.small.is_empty() { 8 } else { 14 };
+                let fits = !h.small.is_empty() && width(h.small, &UI_12) <= h.w - 4 && h.h >= 32;
+                let y = h.y + h.h / 2 - if fits { 15 } else { 8 };
                 c.text(cx, y, h.label, &UI_12B, fg, Align::Center);
-                c.text(cx, y + 16, h.small, &UI_12, sub, Align::Center);
+                if fits {
+                    c.text(cx, y + 15, h.small, &UI_12, sub, Align::Center);
+                }
             } else if h.label.len() == 1 || h.label == "A\u{b7}B\u{b7}C" || matches!(h.label, "OK" | "BACK" | "V/M") {
                 // Main legend, then the small one to its right.
                 let lw = width(h.label, big);
-                let sw = if h.small.is_empty() { 0 } else { width(h.small, &UI_12) + 6 };
+                // the small legend only where it fits (at 1x the keys are narrow)
+                let small = if lw + width(h.small, &UI_12) + 6 <= h.w - 8 { h.small } else { "" };
+                let sw = if small.is_empty() { 0 } else { width(small, &UI_12) + 6 };
                 let x0 = cx - (lw + sw) / 2;
                 let y = h.y + (h.h - big.line_h as i32) / 2;
                 c.text(x0, y, h.label, big, fg, Align::Left);
-                match h.small {
+                match small {
                     "_" => {
                         // the space bar mark
                         let (x, y) = (x0 + lw + 6, h.y + h.h / 2 + 3);
@@ -356,7 +362,7 @@ mod tests {
     #[test]
     fn fits_a_laptop_and_parts_dont_overlap() {
         let f = Face::new(2);
-        assert!(f.h <= 900, "{} px tall", f.h);
+        assert!(f.h <= 1012, "{} px tall", f.h);
         let screen = (f.sx as i32, f.sy as i32, 480, 640);
         for (i, a) in f.hits.iter().enumerate() {
             assert!(a.x >= 0 && a.y >= 0 && a.x + a.w <= f.w as i32 && a.y + a.h <= f.h as i32, "{:?} off the window", a.part);
@@ -368,5 +374,18 @@ mod tests {
         }
         assert_eq!(f.find(Key::Ptt(0)).map(|i| f.hits[i].part), Some(Part::Ptt(0)));
         assert!(f.find(Key::Digit(0)).is_some() && f.find(Key::Side(2)).is_some());
+    }
+
+    /// `cargo test -p ferrite-sim face_png -- --ignored`: the bare front panel at 1x and 2x, for a look.
+    #[test]
+    #[ignore]
+    fn face_png() {
+        for scale in [1, 2] {
+            let f = Face::new(scale);
+            let mut out = vec![0u32; f.w * f.h];
+            f.draw(&mut out, &[], 0, false, false, scale);
+            let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../target/sim/face-{scale}x.png"));
+            crate::save_rgb(&out, f.w, f.h, &p);
+        }
     }
 }
