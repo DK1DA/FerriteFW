@@ -117,7 +117,7 @@ impl View for Confirm {
                             c.zone = NO_ZONE;
                         }
                     }
-                    app.show_toast(store.zone_name(z).unwrap_or(b"Zone"), b"deleted", false);
+                    app.show_toast(store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"Zone")).as_bytes(), b"deleted", false);
                     app.back();
                 }
                 Ask::ToneTx(t) => {
@@ -149,7 +149,7 @@ impl View for Confirm {
                     what.push(w::freq3(c.rx).as_bytes());
                 }
             }
-            Ask::DeleteZone(z) => what.set(cx.store.zone_name(z).unwrap_or(b"?")),
+            Ask::DeleteZone(z) => what.set(cx.store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"?")).as_bytes()),
             Ask::ToneTx(t) => {
                 let mut b = Buf::<16>::new();
                 tone_text(t, &mut b);

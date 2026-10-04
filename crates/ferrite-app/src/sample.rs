@@ -4,7 +4,7 @@
 //! implement ([`ChannelStore`], [`Data`]); requests ([`Op`]) change them, so deleting, skipping or marking
 //! shows on screen. Host memory only: nothing here is linked into the firmware (it doesn't use it).
 
-use crate::chan::{channel, ChanWrite, Channel, ChannelStore, FLAG_SKIP, NO_ZONE};
+use crate::chan::{channel, ChanWrite, Channel, ChannelStore, Name, FLAG_SKIP, NO_ZONE};
 use crate::data::*;
 use crate::settings::Settings;
 use crate::slot::{SlotCfg, DCS_FLAG, DEFAULT_CFG};
@@ -181,6 +181,7 @@ pub struct Sample {
     chans: [Cell<Option<Channel>>; CHANNELS.len() + 16],
     zones: Cell<u8>,
     zone_cfg: [Cell<ZoneCfg>; 8],
+    zone_names: [Cell<Name>; 8],
     presets: [Cell<Option<RangePreset>>; 16],
     events_read: Cell<u32>,
     events_cleared: Cell<bool>,
@@ -209,6 +210,7 @@ impl Sample {
             chans: core::array::from_fn(|i| Cell::new(CHANNELS.get(i).copied())),
             zones: Cell::new(ZONES_AT_START as u8),
             zone_cfg: core::array::from_fn(|z| Cell::new(zc(z))),
+            zone_names: core::array::from_fn(|z| Cell::new(Name::from(ZONES[z]))),
             presets: core::array::from_fn(|i| {
                 Cell::new(PRESETS.get(i).map(|&(n, start, end, step, mode, narrow, skips)| RangePreset { name: txt(n), start, end, step, mode, narrow, skips }))
             }),
@@ -296,8 +298,8 @@ impl ChannelStore for Sample {
     fn zones(&self) -> u8 {
         self.zones.get()
     }
-    fn zone_name(&self, zone: u8) -> Option<&[u8]> {
-        (zone < self.zones.get()).then(|| ZONES[zone as usize])
+    fn zone_name(&self, zone: u8) -> Option<Name> {
+        (zone < self.zones.get()).then(|| self.zone_names[zone as usize].get())
     }
     fn zone_len(&self, zone: u8) -> u16 {
         self.live().filter(|c| c.zone == zone).count() as u16
@@ -478,6 +480,7 @@ impl Data for Sample {
                 true
             }
             Op::Zone(z, cfg) => self.zone_cfg.get(z as usize).map(|c| c.set(cfg)).is_some(),
+            Op::RenameZone(z, name) => (z < self.zones.get()).then(|| self.zone_names[z as usize].set(name)).is_some(),
             Op::Preset(i, p) => match self.presets.iter().filter(|p| p.get().is_some()).nth(i as usize) {
                 Some(c) => {
                     c.set(Some(p));

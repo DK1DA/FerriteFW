@@ -10,7 +10,7 @@ use super::entry::{Entry, EntryFor};
 use super::forms::para;
 use super::nav::Dest;
 use super::shared::*;
-use super::text::{Text, TextFor};
+use super::text::TextFor;
 use super::{Cx, Hints, View};
 use crate::chan::{ChanWrite, Channel, ChannelStore, MAX_CHANNELS, NO_ZONE};
 use crate::keys::{KeyEvent, Press};
@@ -155,9 +155,7 @@ impl View for Save {
             },
             (Key::Menu, Short) => match s.at() {
                 F::Name => {
-                    app.open(Dest::Text);
-                    app.screen = Screen::Text(Text::new(TextFor::SaveName));
-                    return;
+                    return super::text::open(app, TextFor::SaveName, store);
                 }
                 F::Freq => {
                     app.open(Dest::Entry(0));
@@ -204,7 +202,7 @@ impl View for Save {
                 F::Name => v.set(if app.text.is_empty() { b"(none)" } else { app.text.as_bytes() }),
                 F::Number if s.num < MAX_CHANNELS => chan_label(s.num, &mut v),
                 F::Number => v.set(b"none free"),
-                F::Zone => v.set(if s.zone == NO_ZONE { b"None" } else { cx.store.zone_name(s.zone).unwrap_or(b"?") }),
+                F::Zone => v.set(cx.store.zone_label(s.zone, b"None", b"?").as_bytes()),
                 F::Save => v.set(b">"),
             }
             let row = Row { num: None, name: r.label().as_bytes(), value: v.as_bytes(), dot: false, selected: i as u8 == s.row, grey: false };
@@ -299,8 +297,8 @@ fn save(s: Save, app: &mut App, store: &impl ChannelStore) {
     let mut l = Buf::<32>::new();
     l.push(b"Saved as ");
     chan_label(s.num, &mut l);
-    let z: &[u8] = if s.zone == NO_ZONE { b"no zone" } else { store.zone_name(s.zone).unwrap_or(b"") };
-    app.show_toast(l.as_bytes(), z, false);
+    let z = store.zone_label(s.zone, b"no zone", b"");
+    app.show_toast(l.as_bytes(), z.as_bytes(), false);
     if s.repeater {
         app.slots[a].vfo_mode = false;
         app.send_slot(a as u8);

@@ -51,8 +51,8 @@ pub enum Dest {
     Value(Item),
     /// A6: RX and TX tones.
     Tones,
-    /// A7: multi-tap text entry (KEY-12).
-    Text,
+    /// A7: multi-tap text entry (KEY-12), for one target: where OK writes the text.
+    Text(super::text::TextFor),
     /// A8: latitude, longitude, altitude.
     PositionEntry,
     /// A9: save the VFO as a channel (hold V/M, MENU 8 on a VFO).
@@ -199,7 +199,7 @@ impl Dest {
             ChannelEdit => ("Channel editor", "10", "A4"),
             Value(_) => ("Value editor", "11", "A5"),
             Tones => ("Tone picker", "16", "A6"),
-            Text => ("Text entry", "7", "A7"),
+            Text(_) => ("Text entry", "7", "A7"),
             PositionEntry => ("Position entry", "28", "A8"),
             SaveChannel => ("Save as channel", "9", "A9"),
             AddRepeater => ("Add repeater", "10", "A10"),
@@ -305,7 +305,7 @@ impl Dest {
 pub const ALL: [Dest; 70] = {
     use Dest::*;
     [
-        Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text, PositionEntry, SaveChannel, AddRepeater, RangePreset,
+        Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
         ZoneEdit, LocationCodes, DtmfDialer, DtmfMemories, Compose, Pin, Confirm, ExtendTx, Setup, ShortcutMap,
         Transmit, TxRefused, Emergency, Scan, BandScope, FmBroadcast, HfMode, ToneSearch, Counter, Weather, Alert,
         Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage, Sensors,
@@ -396,7 +396,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::AddRepeater => Screen::Save(save::Save::new(true)),
         Dest::Value(item) => Screen::Value(value::Value::new(item, app)),
         Dest::Tones => Screen::Tones(tones::Tones::new(app)),
-        Dest::Text => Screen::Text(text::Text::new(text::TextFor::Callsign)),
+        Dest::Text(to) => Screen::Text(text::Text::new(to)),
         Dest::Confirm => Screen::Confirm(confirm::Confirm { ask: confirm::Ask::Reset { channels: false } }),
         Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut { digit: 0 }),
         Dest::Quick => Screen::Quick(Quick { row: 0 }),

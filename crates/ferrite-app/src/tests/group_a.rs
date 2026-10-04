@@ -230,6 +230,35 @@ fn text_entry_names_a_channel() {
     assert_eq!(t.app.screen(), Screen::ChEdit(ChEdit { cell: 1 }));
     assert_eq!(t.app.slot(0).ch.unwrap().name(), b"Hi ");
     assert!(matches!(t.writes()[..], [ChanWrite::Put { ch, from: None }] if ch.name() == b"Hi "));
+    assert!(t.app.callsign().is_empty(), "a channel name is never the callsign");
+}
+
+/// Text entry for the callsign (Dest::Text(Callsign)) sets only the callsign; for Save as channel's name, the
+/// form's draft only (nothing written until Save).
+#[test]
+fn text_entry_callsign_and_save_name() {
+    use crate::screens::text::TextFor;
+    let mut t = T::new();
+    t.app.open(Dest::Text(TextFor::Callsign));
+    t.digits("2"); // A
+    t.tap(Key::Star); // digits
+    t.digits("7");
+    t.tap(Key::Menu);
+    assert_eq!(t.app.callsign(), b"A7");
+    assert!(t.writes().is_empty());
+    // Save as channel: the name stays in the form until it saves.
+    t.hold(Key::VfoMem);
+    assert!(matches!(t.app.screen(), Screen::Save(_)));
+    t.tap(Key::Down);
+    t.tap(Key::Down); // Name
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Text(x) if x.to == TextFor::SaveName));
+    t.digits("33"); // E
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Save(_)));
+    assert_eq!(t.app.text.as_bytes(), b"E");
+    assert!(t.writes().is_empty());
+    assert_eq!(t.app.callsign(), b"A7", "the callsign is untouched");
 }
 
 /// VFO-9, CHAN-22: hold V/M saves the VFO as a channel at the first free number; below 64 MHz it can't.
@@ -393,7 +422,7 @@ fn group_a_screens_draw() {
     let mut t = T::new();
     let mut fb = FrameBuffer::new();
     t.tap(Key::VfoMem);
-    for dest in [Dest::Entry(1), Dest::ChannelEdit, Dest::Value(Item::Squelch), Dest::Value(Item::Step), Dest::Tones, Dest::Text, Dest::SaveChannel, Dest::AddRepeater, Dest::Confirm, Dest::ExtendTx, Dest::Pin, Dest::Setup] {
+    for dest in [Dest::Entry(1), Dest::ChannelEdit, Dest::Value(Item::Squelch), Dest::Value(Item::Step), Dest::Tones, Dest::Text(crate::screens::text::TextFor::Callsign), Dest::SaveChannel, Dest::AddRepeater, Dest::Confirm, Dest::ExtendTx, Dest::Pin, Dest::Setup] {
         t.app.open(dest);
         t.render(&mut fb);
         assert!(count_px(&fb, 21, 299, |c| c != BG) > 400, "{dest:?}");

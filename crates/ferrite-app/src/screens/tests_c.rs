@@ -73,6 +73,23 @@ impl T {
         self.app.screen().name()
     }
 
+    /// In text entry: clears the text and types "AB" (multi-tap 2, pause, 22), then OK.
+    fn type_ab(&mut self) {
+        assert!(matches!(self.app.screen(), Screen::Text(_)), "{}", self.name());
+        while !self.app.text.is_empty() {
+            self.tap(Key::Exit);
+        }
+        self.tap(Key::Digit(2));
+        self.wait(1100);
+        self.tap(Key::Digit(2));
+        self.tap(Key::Digit(2));
+        assert_eq!(self.app.text.as_bytes(), b"AB");
+        self.tap(Key::Menu);
+        while let Some(w) = self.app.pop_write() {
+            self.s.apply(w);
+        }
+    }
+
     fn cmds(&mut self) -> Vec<RadioCmd> {
         let mut v = Vec::new();
         while let Some(c) = self.app.pop_cmd() {
@@ -487,4 +504,47 @@ fn states_are_small() {
     for (name, n) in sizes {
         assert!(n <= 8, "{name}: {n} bytes");
     }
+}
+
+/// Text entry writes to the record it was opened for, never the callsign: a channel renamed in the browser,
+/// a zone in the zone editor, a range preset in its editor; each returns to the screen that asked.
+#[test]
+fn rename_goes_to_its_own_record() {
+    let call = |t: &T| t.app.settings().callsign;
+    // A channel, from the browser's actions (Rename is the second).
+    let mut t = T::new();
+    let before = call(&t);
+    t.open(Dest::Browse);
+    t.tap(Key::Menu); // Local
+    let num = t.s.zone_at(0, 0).unwrap().num;
+    t.tap(Key::Menu); // its actions
+    t.tap(Key::Down);
+    t.tap(Key::Menu); // Rename
+    assert_eq!(t.app.text.as_bytes(), t.s.zone_at(0, 0).unwrap().name(), "starts from the channel's name");
+    t.type_ab();
+    assert_eq!(t.s.by_num(num).unwrap().0.name(), b"AB");
+    assert_eq!(t.name(), "Channel browser");
+    assert!(call(&t) == before, "the callsign is untouched");
+    // A zone, from the zone editor's first row.
+    t.open(Dest::Zones);
+    t.tap(Key::Down); // Repeaters
+    t.tap(Key::Menu); // its editor, Name row
+    t.tap(Key::Menu);
+    assert_eq!(t.app.text.as_bytes(), b"Repeaters");
+    t.type_ab();
+    assert_eq!(t.s.zone_name(1).unwrap().as_bytes(), b"AB");
+    assert_eq!(t.s.zone_name(0).unwrap().as_bytes(), b"Local", "only that zone");
+    assert_eq!(t.name(), "Zone editor");
+    assert!(call(&t) == before);
+    // A range preset, from its editor's Name row.
+    t.open(Dest::RangePresets);
+    t.tap(Key::Down); // the second preset
+    t.tap(Key::Menu);
+    let other = t.s.preset(0).unwrap().name;
+    t.tap(Key::Menu); // Name
+    t.type_ab();
+    assert_eq!(t.s.preset(1).unwrap().name.as_bytes(), b"AB");
+    assert!(t.s.preset(0).unwrap().name == other, "only that preset");
+    assert_eq!(t.name(), "Range preset");
+    assert!(call(&t) == before);
 }

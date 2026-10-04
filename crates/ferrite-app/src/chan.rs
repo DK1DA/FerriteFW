@@ -6,6 +6,9 @@ use crate::data::{Data, NoData, Pos};
 use crate::slot::SlotCfg;
 use ferrite_core::freq::Freq10;
 
+/// A zone's (or channel's) name: 16 bytes at most (CHAN-5).
+pub type Name = ferrite_ui::text::Buf<16>;
+
 /// Zone numbers 0-254; this one means "no zone".
 pub const NO_ZONE: u8 = 255;
 
@@ -69,8 +72,16 @@ impl Channel {
 pub trait ChannelStore {
     /// How many zones exist (zone numbers 0..zones()).
     fn zones(&self) -> u8;
-    /// A zone's name, None if it doesn't exist.
-    fn zone_name(&self, zone: u8) -> Option<&[u8]>;
+    /// A zone's name, None if it doesn't exist. By value: the firmware's store reads it from SPI flash.
+    fn zone_name(&self, zone: u8) -> Option<Name>;
+    /// A zone's name for display: `none` for no zone, `missing` when it doesn't exist.
+    fn zone_label(&self, zone: u8, none: &[u8], missing: &[u8]) -> Name {
+        match self.zone_name(zone) {
+            _ if zone == NO_ZONE => Name::from(none),
+            Some(n) => n,
+            None => Name::from(missing),
+        }
+    }
     /// How many channels a zone holds.
     fn zone_len(&self, zone: u8) -> u16;
     /// The i-th channel of a zone, by number.
@@ -135,7 +146,7 @@ impl ChannelStore for NoChannels {
     fn zones(&self) -> u8 {
         0
     }
-    fn zone_name(&self, _: u8) -> Option<&[u8]> {
+    fn zone_name(&self, _: u8) -> Option<Name> {
         None
     }
     fn zone_len(&self, _: u8) -> u16 {
@@ -159,8 +170,8 @@ impl ChannelStore for Table<'_> {
     fn zones(&self) -> u8 {
         self.zones.len() as u8
     }
-    fn zone_name(&self, zone: u8) -> Option<&[u8]> {
-        self.zones.get(zone as usize).copied()
+    fn zone_name(&self, zone: u8) -> Option<Name> {
+        self.zones.get(zone as usize).map(|z| Name::from(z))
     }
     fn zone_len(&self, zone: u8) -> u16 {
         self.channels.iter().filter(|c| c.zone == zone).count() as u16

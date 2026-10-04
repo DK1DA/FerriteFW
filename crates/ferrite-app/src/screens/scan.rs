@@ -138,7 +138,7 @@ impl View for Scan {
         let mut pos = Buf::<28>::new();
         if sl.on_channel() {
             target.push(b"Zone ");
-            target.push(cx.store.zone_name(sl.zone).unwrap_or(b"?"));
+            target.push(cx.store.zone_name(sl.zone).unwrap_or_else(|| crate::chan::Name::from(b"?")).as_bytes());
             let z = app.radio.zones;
             if z != 0 {
                 for d in (0..10).filter(|d| z & 1 << d != 0) {

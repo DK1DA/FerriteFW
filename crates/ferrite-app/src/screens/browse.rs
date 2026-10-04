@@ -214,7 +214,7 @@ impl View for Browse {
                         copy_to_slot(app, store, &c);
                         return app.open(Dest::ChannelEdit);
                     }
-                    1 => return app.open(Dest::Text),
+                    1 => return super::text::open(app, super::text::TextFor::Channel(c.num), store),
                     2 => s.mode = Mode::Move(c.zone),
                     3 => (s.mode, s.cur.top) = (Mode::Renumber, c.num),
                     4 => {
@@ -427,10 +427,7 @@ impl View for Browse {
 }
 
 fn zone_name(store: &impl ChannelStore, z: u8) -> Buf<16> {
-    match store.zone_name(z) {
-        Some(n) if z != NO_ZONE => Buf::from(n),
-        _ => Buf::from(b"No zone"),
-    }
+    store.zone_label(z, b"No zone", b"No zone")
 }
 
 /// The active slot onto the channel, at its place in its zone.

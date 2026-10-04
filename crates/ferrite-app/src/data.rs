@@ -256,6 +256,8 @@ pub enum Op {
     /// CHAN-12: its channels go to no zone.
     DeleteZone(u8),
     Zone(u8, ZoneCfg),
+    /// A zone's new name (from text entry).
+    RenameZone(u8, crate::chan::Name),
     Preset(u8, RangePreset),
     NewPreset,
     DeletePreset(u8),

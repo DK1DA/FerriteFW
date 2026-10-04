@@ -10,7 +10,7 @@ use super::entry::{Entry, EntryFor};
 use super::forms::field_box;
 use super::nav::Dest;
 use super::shared::*;
-use super::text::{Text, TextFor};
+use super::text::TextFor;
 use super::{Cx, Hints, View};
 use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
 use crate::keys::{KeyEvent, Press};
@@ -163,11 +163,7 @@ impl View for ChEdit {
             },
             (Key::Menu, Short) => match cell {
                 NAME => {
-                    let name = app.slots[app.active as usize].ch.map_or([0; 16], |c| c.name);
-                    let n = name.iter().position(|&c| c == 0).unwrap_or(16);
-                    app.text.set(&name[..n]);
-                    app.open(Dest::Text);
-                    app.screen = Screen::Text(Text::new(TextFor::ChannelName));
+                    super::text::open(app, TextFor::ChannelName, store);
                 }
                 FREQ => {
                     app.open(Dest::Entry(0));
@@ -226,7 +222,8 @@ impl View for ChEdit {
         let Some(ch) = app.slots[a as usize].ch else { return };
         let cell = self.cell;
         // Top line: letter, number, the zone box, EDIT.
-        let zone: &[u8] = if ch.zone == NO_ZONE { b"None" } else { cx.store.zone_name(ch.zone).unwrap_or(b"?") };
+        let zone = cx.store.zone_label(ch.zone, b"None", b"?");
+        let zone = zone.as_bytes();
         if app.dirty(R_TOP, hash(&(a, ch.num, zone, cell == ZONE))) {
             w::badge(lcd, 7, 26, a, true, BG);
             let mut l = Buf::<32>::new();

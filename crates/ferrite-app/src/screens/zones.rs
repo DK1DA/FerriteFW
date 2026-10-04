@@ -4,7 +4,6 @@
 //! makes a new zone, * deletes one after asking (CHAN-12: its channels go to no zone and stay in All).
 
 use super::lists::*;
-use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
@@ -65,7 +64,7 @@ fn value(store: &impl ChannelStore, z: u8, c: &ZoneCfg, row: usize, b: &mut Buf<
     b.clear();
     let _ = match row {
         0 => {
-            b.set(store.zone_name(z).unwrap_or(b""));
+            b.set(store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes());
             Ok(())
         }
         1 => uwrite!(b, "{}", on(c.scan_all)),
@@ -147,7 +146,7 @@ impl View for Zones {
             }
             (Key::Left | Key::Right, Short | Repeat, Some(_)) => return self.knob(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Menu, Short, None) if self.confirm() => {
-                let name = Buf::<16>::from(store.zone_name(z).unwrap_or(b""));
+                let name = Buf::<16>::from(store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes());
                 if d.request(Op::DeleteZone(z)) {
                     app.show_toast(b"Zone deleted", name.as_bytes(), false);
                 }
@@ -155,12 +154,12 @@ impl View for Zones {
                 s.cur = Cursor::first(store.zones() as u16, &keep(store));
             }
             (Key::Menu, Short, None) if store.zone_name(z).is_some() => s.mode = 2,
-            (Key::Menu, Short, Some(0)) => return app.open(Dest::Text), // rename: text entry (A7)
+            (Key::Menu, Short, Some(0)) => return super::text::open(app, super::text::TextFor::Zone(z), store), // rename (A7)
             (Key::Hash, Short, None) => {
                 if d.request(Op::NewZone) {
                     let n = store.zones() as u16;
                     s.cur = Cursor { sel: n - 1, top: self.cur.top }.shown(n, ROWS1, &keep(store));
-                    app.show_toast(b"New zone", store.zone_name((n - 1) as u8).unwrap_or(b""), false);
+                    app.show_toast(b"New zone", store.zone_name((n - 1) as u8).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes(), false);
                 } else {
                     app.show_toast(b"No room", b"255 zones at most", false);
                 }
@@ -215,7 +214,7 @@ impl View for Zones {
             let c = data.zone_cfg(z);
             let mut r = Buf::<16>::new();
             let _ = uwrite!(r, "{} channels", store.zone_len(z));
-            app.list_head(lcd, store.zone_name(z).unwrap_or(b""), r.as_bytes());
+            app.list_head(lcd, store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes(), r.as_bytes());
             for (i, (label, _)) in ROWS.iter().enumerate() {
                 let mut v = Buf::<24>::new();
                 value(store, z, &c, i, &mut v);
@@ -237,13 +236,13 @@ impl View for Zones {
             let c = data.zone_cfg(i as u8);
             let mut v = Buf::<16>::new();
             let _ = uwrite!(v, "{}{}{} ch", if c.scan_all { "scan \u{b7} " } else { "" }, if c.shown { "" } else { "hidden \u{b7} " }, store.zone_len(i as u8));
-            app.row1(lcd, row, store.zone_name(i as u8).unwrap_or(b""), v.as_bytes(), false, i == self.cur.sel, store.zone_len(i as u8) == 0);
+            app.row1(lcd, row, store.zone_name(i as u8).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes(), v.as_bytes(), false, i == self.cur.sel, store.zone_len(i as u8) == 0);
         });
         app.rows_end(lcd, rows, ROWS1, ROW1_H);
         if self.confirm() {
             let mut q = Buf::<32>::new();
             q.push(b"Delete zone ");
-            q.push(store.zone_name(z).unwrap_or(b""));
+            q.push(store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes());
             q.push(b"?");
             let mut m = Buf::<40>::new();
             let _ = uwrite!(m, "{} channels go to no zone", store.zone_len(z));

@@ -8,7 +8,7 @@
 use super::forms::para;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::{ChannelStore, MAX_CHANNELS, NO_ZONE};
+use crate::chan::{ChannelStore, MAX_CHANNELS};
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{band_name, band_of, band_near, chan_label, BANDS, STEPS};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
@@ -243,7 +243,7 @@ impl View for Entry {
                 Some((c, _)) => {
                     rows[1].1.set(if c.name().is_empty() { b"(no name)" } else { c.name() });
                     rows[2].0 = b"Zone";
-                    rows[2].1.set(if c.zone == NO_ZONE { b"None" } else { cx.store.zone_name(c.zone).unwrap_or(b"?") });
+                    rows[2].1.set(cx.store.zone_label(c.zone, b"None", b"?").as_bytes());
                     rows[3].0 = b"Frequency";
                     rows[3].1.set(w::freq3(c.rx).as_bytes());
                 }

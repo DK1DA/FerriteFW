@@ -18,13 +18,19 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
-/// Whose text it is.
+/// Whose text it is: where OK writes it. Every caller names its own target ([`super::nav::Dest::Text`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextFor {
-    /// The channel being edited (A4).
+    /// The channel the active slot is on, in the channel editor (A4).
     ChannelName,
+    /// A stored channel by number: rename from the channel browser (C8).
+    Channel(u16),
     /// The new channel in Save as channel or Add repeater (A9, A10): the form reads the buffer.
     SaveName,
+    /// A zone by number: rename in the zone editor (A12).
+    Zone(u8),
+    /// A range preset by index: its name in the preset editor (A11).
+    Preset(u8),
     /// 0 8 7 1 (SETUP-12).
     Callsign,
 }
@@ -32,13 +38,32 @@ pub enum TextFor {
 impl TextFor {
     fn label(self) -> &'static str {
         match self {
-            TextFor::ChannelName | TextFor::SaveName => "Channel name",
+            TextFor::ChannelName | TextFor::Channel(_) | TextFor::SaveName => "Channel name",
+            TextFor::Zone(_) => "Zone name",
+            TextFor::Preset(_) => "Range name",
             TextFor::Callsign => "Callsign",
         }
     }
 
     pub fn max(self) -> usize {
-        if self == TextFor::Callsign { 10 } else { 16 }
+        match self {
+            TextFor::Callsign => 10,
+            TextFor::Preset(_) => 12,
+            _ => 16,
+        }
+    }
+
+    /// What the text starts as: the name or callsign being changed (SaveName: the form's own, already there).
+    pub(crate) fn current(self, app: &App, store: &impl ChannelStore) -> Buf<16> {
+        let s = &app.slots[app.active as usize];
+        match self {
+            TextFor::ChannelName => s.ch.map_or(Buf::new(), |c| Buf::from(c.name())),
+            TextFor::Channel(n) => store.by_num(n).map_or(Buf::new(), |(c, _)| Buf::from(c.name())),
+            TextFor::SaveName => app.text,
+            TextFor::Zone(z) => store.zone_name(z).unwrap_or_default(),
+            TextFor::Preset(i) => store.data().preset(i).map_or(Buf::new(), |p| Buf::from(p.name.as_bytes())),
+            TextFor::Callsign => Buf::from(app.set.callsign.as_bytes()),
+        }
     }
 
     fn callsign(self) -> bool {
@@ -78,6 +103,12 @@ impl Text {
             (false, m) => (m + 1) % 4,
         }
     }
+}
+
+/// Opens text entry for `to`, starting from its current text, remembering the screen that asked for BACK.
+pub(crate) fn open(app: &mut App, to: TextFor, store: &impl ChannelStore) {
+    app.text = to.current(app, store);
+    app.open(super::nav::Dest::Text(to));
 }
 
 /// The characters key d types in a mode.
@@ -121,7 +152,7 @@ impl View for Text {
         Some(MENU_TIMEOUT_MS)
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         let mut s = self;
         let max = self.to.max();
         match (e.key, e.press) {
@@ -144,7 +175,7 @@ impl View for Text {
                 delete(&mut app.text);
                 s.last = 0;
             }
-            (Key::Menu, Press::Short) => return keep(self.to, app),
+            (Key::Menu, Press::Short) => return keep(self.to, app, store),
             _ => return,
         }
         app.screen = Screen::Text(s);
@@ -184,12 +215,34 @@ impl View for Text {
     }
 }
 
-/// OK: the text goes where it was typed for, and the screen that asked comes back.
-fn keep(to: TextFor, app: &mut App) {
+/// OK: the text goes to the record it was typed for, and the screen that asked comes back.
+fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
     let t = app.text;
     match to {
         TextFor::ChannelName => super::chedit::edit(app, |c| c.set_name(t.as_bytes())),
+        TextFor::Channel(n) => {
+            if let Some((mut c, _)) = store.by_num(n) {
+                c.set_name(t.as_bytes());
+                app.write(crate::chan::ChanWrite::Put { ch: c, from: None });
+                // A slot on that channel shows the new name too.
+                for s in app.slots.iter_mut().filter(|s| s.ch.is_some_and(|c| c.num == n)) {
+                    if let Some(sc) = &mut s.ch {
+                        sc.set_name(t.as_bytes());
+                    }
+                }
+            }
+        }
         TextFor::SaveName => {}
+        TextFor::Zone(z) => {
+            store.data().request(crate::data::Op::RenameZone(z, t));
+        }
+        TextFor::Preset(i) => {
+            let d = store.data();
+            if let Some(mut p) = d.preset(i) {
+                p.name = Buf::from(t.as_bytes());
+                d.request(crate::data::Op::Preset(i, p));
+            }
+        }
         TextFor::Callsign => app.set.set_callsign(t.as_bytes()), // SETUP-12
     }
     app.back();

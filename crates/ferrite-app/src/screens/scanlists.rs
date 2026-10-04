@@ -3,7 +3,6 @@
 //! 8; SCAN-11; C13), which live in the Radio task's RAM for this scan only.
 
 use super::lists::*;
-use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
@@ -136,7 +135,7 @@ impl View for ScanLists {
                 }
             }
             (Key::Star, Short, Page::Presets(_)) if n > 0 => s.page = Page::Presets(true),
-            (Key::Menu, Short, Page::Edit(0)) => return app.open(Dest::Text),
+            (Key::Menu, Short, Page::Edit(0)) => return super::text::open(app, super::text::TextFor::Preset(self.cur.sel as u8), store),
             // C13: OK lets one back in, # clears them all (RAM only, this scan: no confirm).
             (Key::Menu, Short, Page::Skips) if n > 0 => {
                 d.request(Op::Unskip(self.cur.sel));
