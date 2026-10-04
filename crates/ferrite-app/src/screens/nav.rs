@@ -9,7 +9,7 @@
 //!
 //! | From | Keys | Goes to |
 //! | --- | --- | --- |
-//! | Home | hold 0-9 ([`hold_digit`]: the shortcut map, HOME-8; the release runs [`shortcut`], KEY-11) | 0 home channel, 1 watch, 2 FM broadcast, 3 band scope, 4 APRS heard, 5 TX power, 6 bandwidth, 7 weather, 8 Battery Save, 9 tone search |
+//! | Home | hold 0-9 ([`hold_digit`]: the shortcut map, HOME-8; the release runs [`shortcut`], KEY-11) | 0 home channel, 1 band scope, 2 TX power, 3 squelch, 4 watch, 5 tones, 6 step, 7 shift, 8 offset, 9 zones |
 //! | Home | a digit (NAV-4, VFO-11) | [`Dest::Entry`] with the digit |
 //! | Home | hold V/M on a VFO (VFO-9) | [`Dest::SaveChannel`] |
 //! | Home | hold SLOT / MENU / hold MENU / # | edit in place (on a channel: [`Dest::ChannelEdit`]) / quick / advanced / Status |
@@ -94,17 +94,17 @@ pub enum Dest {
     Emergency,
     /// B9: the scan screen.
     Scan,
-    /// B10: band scope (hold 3).
+    /// B10: band scope (hold 1, MENU 0 3 2 6).
     BandScope,
-    /// B11: FM broadcast (hold 2).
+    /// B11: FM broadcast (MENU 0 3 1 6).
     FmBroadcast,
     /// B12, B13: HF mode (MENU 0 3 5 only).
     HfMode,
-    /// B14: tone search (hold 9, MENU 0 3 7).
+    /// B14: tone search (MENU 0 3 7).
     ToneSearch,
     /// B15: frequency counter (MENU 0 3 4).
     Counter,
-    /// B16: weather radio (hold 7).
+    /// B16: weather radio (MENU 0 3 3 5).
     Weather,
     /// B17: an alert (SAME, DSC distress, jamming).
     Alert,
@@ -118,7 +118,7 @@ pub enum Dest {
     EventLog,
     /// C2: one event.
     EventDetail,
-    /// C3: APRS heard (hold 4, MENU 0 5 1).
+    /// C3: APRS heard (MENU 0 5 1).
     AprsHeard,
     /// C4: one APRS station.
     AprsStation,
@@ -321,7 +321,7 @@ pub const ALL: [Dest; 70] = {
 
 /// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 56] = [
+pub const MENU0: [(&[u8], Dest); 59] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -331,9 +331,12 @@ pub const MENU0: [(&[u8], Dest); 56] = [
     (&[2, 3], Dest::Zones),
     (&[3, 1], Dest::Sub(3, 1)),
     (&[3, 1, 1], Dest::FmPresets),
+    (&[3, 1, 6], Dest::FmBroadcast),
     (&[3, 2], Dest::Sub(3, 2)),
+    (&[3, 2, 6], Dest::BandScope),
     (&[3, 3], Dest::Sub(3, 3)),
     (&[3, 3, 2], Dest::LocationCodes),
+    (&[3, 3, 5], Dest::Weather),
     (&[3, 4], Dest::Counter),
     (&[3, 5], Dest::HfMode),
     (&[3, 6], Dest::Crossband),
@@ -473,29 +476,37 @@ pub fn hold_digit(app: &mut App, d: u8) {
     app.screen = Screen::Shortcut(super::shortcut::Shortcut { digit: d });
 }
 
-/// The ten fixed shortcuts (KEY-11), run when the held digit is released.
+/// The ten fixed shortcuts (KEY-11), run when the held digit is released. 2-9 follow stock's factory defaults
+/// (TX power, squelch, dual standby, CTCSS/DCS, step, shift direction, offset, zone); 0 and 1 are Ferrite's.
 pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
+    let on_ch = app.slot(app.active).on_channel();
     match d {
         0 => home_channel(app, store),
-        1 => {
+        1 => app.open(Dest::BandScope), // SCOPE-1
+        2 => cycle(app, Item::Power),
+        3 => app.open(Dest::Value(Item::Squelch)),
+        4 => {
             // WATCH-7
             let v = if app.watch == 0 { 1 } else { 0 };
             app.change(Item::Watch, v - app.watch as i32);
             app.show_toast(b"Watch", if v == 0 { b"off" } else { b"A+B" }, false);
         }
-        2 => app.open(Dest::FmBroadcast), // BCR-1
-        3 => app.open(Dest::BandScope),   // SCOPE-1
-        4 => app.open(Dest::AprsHeard),
-        5 => cycle(app, Item::Power),
-        6 => cycle(app, Item::Bandwidth),
-        7 => {
-            // WX-1: US and Canada only (and until a region is set); elsewhere hold 7 does nothing.
-            if app.set.wx_allowed() {
-                app.open(Dest::Weather);
-            }
-        }
-        8 => cycle(app, Item::BatterySave),
-        _ => app.open(Dest::ToneSearch), // TSRCH-1
+        5 => app.open(Dest::Tones),
+        6 => cycle(app, Item::Step), // VFO only (VFO-8): on a channel the toast says so
+        // Shift and offset: on a VFO, cycle the shift / open the offset; on a channel, its editor at that cell.
+        7 if on_ch => offset_cell(app), // Dest::ChannelEdit
+        7 => cycle(app, Item::Offset),
+        8 if on_ch => offset_cell(app), // Dest::ChannelEdit
+        8 => app.open(Dest::Value(Item::Offset)),
+        _ => app.open(Dest::Zones),
+    }
+}
+
+/// Hold 7 or 8 on a channel: the channel editor at its Offset cell (KEY-11).
+fn offset_cell(app: &mut App) {
+    app.open(Dest::ChannelEdit);
+    if let Screen::ChEdit(e) = &mut app.screen {
+        e.cell = super::chedit::OFFSET_CELL;
     }
 }
 
@@ -512,7 +523,7 @@ fn home_channel(app: &mut App, store: &impl ChannelStore) {
     }
 }
 
-/// Hold 5, 6, 8: the next value, shown as a toast (or why it can't change).
+/// Hold 2, 6, 7: the next value, shown as a toast (or why it can't change).
 fn cycle(app: &mut App, item: Item) {
     let greyed = app.greyed(item).is_some();
     app.change(item, 1);

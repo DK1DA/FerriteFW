@@ -1,4 +1,4 @@
-//! APRS heard (hold 4, MENU 0 5 1; manual chapter 25, APRS-3 to APRS-5; AprsHeard mock-up) and one station
+//! APRS heard (MENU 0 5 1; manual chapter 25, APRS-3 to APRS-5; AprsHeard mock-up) and one station
 //! (OK on a station; AprsStation mock-up): C3, C4. The heard list lives in the APRS task's RAM (APRS-4) and
 //! is read a row at a time. Distances and bearings are from the GPS fix; a station without a position shows
 //! "no position" and a dash (APRS-5).

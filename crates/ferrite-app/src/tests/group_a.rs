@@ -375,18 +375,18 @@ fn pin_at_unlock() {
 fn shortcut_map() {
     let mut t = T::new();
     let s = store();
-    t.app.key_down(Key::Digit(5), t.t, &s);
+    t.app.key_down(Key::Digit(2), t.t, &s);
     t.wait(800);
     assert!(matches!(t.app.screen(), Screen::Shortcut(_)));
     assert_eq!(t.app.slot(0).cfg().power, 0, "nothing yet");
-    t.app.key_up(Key::Digit(5), t.t, &s);
+    t.app.key_up(Key::Digit(2), t.t, &s);
     assert_eq!(t.app.screen(), Screen::Home);
     assert_eq!(t.app.slot(0).cfg().power, 1, "run at the release");
-    t.app.key_down(Key::Digit(6), t.t, &s);
+    t.app.key_down(Key::Digit(7), t.t, &s);
     t.wait(800);
     t.tap(Key::Exit);
-    t.app.key_up(Key::Digit(6), t.t, &s);
-    assert!(t.app.slot(0).cfg().narrow, "cancelled");
+    t.app.key_up(Key::Digit(7), t.t, &s);
+    assert_eq!(t.app.slot(0).cfg().offset, 0, "cancelled");
 }
 
 /// Every string the group's screens draw is in the fonts (as `fonts_have_every_character_the_ui_draws`).

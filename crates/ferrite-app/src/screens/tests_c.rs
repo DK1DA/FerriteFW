@@ -100,7 +100,7 @@ impl T {
 #[test]
 fn aprs_heard_in_and_out() {
     let mut t = T::new();
-    t.hold(Key::Digit(4)); // hold 4 on home
+    t.open(Dest::AprsHeard); // MENU 0 5 1
     assert_eq!(t.name(), "APRS heard");
     t.tap(Key::Down);
     t.tap(Key::Menu);
@@ -430,7 +430,7 @@ fn fm_preset_tunes_the_broadcast_receiver() {
 #[test]
 fn fm_preset_returns_to_the_same_fm_screen() {
     let mut t = T::new();
-    t.hold(Key::Digit(2)); // BCR-1
+    t.open(Dest::FmBroadcast); // BCR-1
     assert_eq!(t.name(), "FM broadcast");
     for options in [false, true] {
         if options {

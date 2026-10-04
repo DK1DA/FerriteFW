@@ -197,11 +197,11 @@ fn scan_screen() {
     assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: false }));
 }
 
-/// SCOPE-1, SCOPE-3: hold 3; the knob moves the centre; OK tunes to the marker; leaving stops the sweep.
+/// SCOPE-1, SCOPE-3: hold 1; the knob moves the centre; OK tunes to the marker; leaving stops the sweep.
 #[test]
 fn band_scope() {
     let mut t = T::new();
-    t.hold(Key::Digit(3));
+    t.hold(Key::Digit(1));
     assert!(matches!(t.app.screen(), Screen::Scope(_)));
     let f = t.freq();
     assert!(t.cmds().contains(&RadioCmd::Sweep { centre: f, step: 2500, on: true }));
@@ -212,7 +212,7 @@ fn band_scope() {
     assert_eq!(t.app.screen(), Screen::Home);
     assert_eq!(t.freq(), f + 5000 + 2500, "tuned to the marker");
     assert!(t.cmds().contains(&RadioCmd::Sweep { centre: 0, step: 0, on: false }));
-    t.hold(Key::Digit(3));
+    t.hold(Key::Digit(1));
     t.cmds();
     t.tap(Key::Exit);
     assert!(t.cmds().contains(&RadioCmd::Sweep { centre: 0, step: 0, on: false }));
@@ -222,13 +222,13 @@ fn band_scope() {
 #[test]
 fn tone_search() {
     let mut t = T::new();
-    t.hold(Key::Digit(9));
+    t.open(Dest::ToneSearch);
     assert!(matches!(t.app.screen(), Screen::ToneSearch(_)));
     assert!(t.cmds().contains(&RadioCmd::ToneSearch { slot: 0, on: true }));
     t.tap(Key::Exit); // nothing found: BACK leaves
     assert_eq!(t.app.screen(), Screen::Home);
     assert!(t.cmds().contains(&RadioCmd::ToneSearch { slot: 0, on: false }));
-    t.hold(Key::Digit(9));
+    t.open(Dest::ToneSearch);
     t.live.mode = ModeLive::Probe { freq: 0, rssi: -80, tone: 1000 };
     t.wait(100);
     t.tap(Key::Menu);
@@ -239,7 +239,7 @@ fn tone_search() {
     assert_eq!(t.app.screen(), Screen::Home);
     // BACK at the question: RX only.
     t.live.mode = ModeLive::Probe { freq: 0, rssi: -80, tone: 885 };
-    t.hold(Key::Digit(9));
+    t.open(Dest::ToneSearch);
     t.wait(100);
     t.tap(Key::Menu);
     t.tap(Key::Exit);
@@ -253,7 +253,7 @@ fn tone_search_on_a_channel_is_not_saved() {
     t.tap(Key::VfoMem);
     assert!(t.app.slot(0).on_channel());
     t.live.mode = ModeLive::Probe { freq: 0, rssi: -80, tone: 1000 };
-    t.hold(Key::Digit(9));
+    t.open(Dest::ToneSearch);
     t.wait(100);
     t.tap(Key::Menu);
     t.tap(Key::Exit);
@@ -282,11 +282,11 @@ fn frequency_counter() {
 fn shortcut_map_while_a_digit_is_held() {
     let mut t = T::new();
     let s = store();
-    t.app.key_down(Key::Digit(5), t.t, &s);
+    t.app.key_down(Key::Digit(2), t.t, &s);
     t.wait(800);
     assert!(matches!(t.app.screen(), Screen::Shortcut(_)));
     assert_eq!(t.app.slot(0).cfg().power, 0, "not yet");
-    t.app.key_up(Key::Digit(5), t.t, &s);
+    t.app.key_up(Key::Digit(2), t.t, &s);
     t.wait(100);
     assert_eq!(t.app.screen(), Screen::Home);
     assert_eq!(t.app.slot(0).cfg().power, 1, "TX power cycled on release");
@@ -337,11 +337,11 @@ fn hf_mode() {
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: false, .. })));
 }
 
-/// BCR-1: hold 2; the knob tunes; BACK turns it off.
+/// BCR-1: MENU 0 3 1 6; the knob tunes; BACK turns it off.
 #[test]
 fn fm_broadcast() {
     let mut t = T::new();
-    t.hold(Key::Digit(2));
+    t.open(Dest::FmBroadcast);
     assert!(matches!(t.app.screen(), Screen::Fm(_)));
     t.knob(1);
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_120))));
@@ -349,15 +349,21 @@ fn fm_broadcast() {
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
 }
 
-/// WX-1: hold 7 opens weather radio in the US and Canada only; leaving restores the slot.
+/// WX-1: weather radio (MENU 0 3 3 5) in the US and Canada only; leaving restores the slot.
 #[test]
 fn weather_radio_by_region() {
     let mut t = T::new();
     t.app.set_region(Some(Region::Uk), false);
-    t.hold(Key::Digit(7));
-    assert_eq!(t.app.screen(), Screen::Home, "nothing outside the US and Canada");
+    for d in [0, 3, 3, 5] {
+        t.tap(if d == 0 { Key::Menu } else { Key::Digit(d) });
+        if d == 0 {
+            t.tap(Key::Digit(0));
+        }
+    }
+    assert!(!matches!(t.app.screen(), Screen::Weather(_)), "greyed outside the US and Canada");
+    t.hold(Key::Exit);
     t.app.set_region(Some(Region::Canada), false);
-    t.hold(Key::Digit(7));
+    t.open(Dest::Weather);
     assert!(matches!(t.app.screen(), Screen::Weather(_)));
     assert!(t.cmds().contains(&RadioCmd::TuneSlot { slot: 0, freq: mhz(162) + 55_000 }));
     t.tap(Key::Exit);
@@ -616,4 +622,35 @@ fn transmit_keeps_slot_order() {
     assert_eq!(place(HF_SLOT, HF_SLOT), (25, 164));
     assert_eq!(place(HF_SLOT, 0), (195, 23));
     assert!(place(2, 2).0 + 164 <= 300 && place(HF_SLOT, 2).0 + 23 <= 300);
+}
+
+/// KEY-11: hold 7 and 8 on a channel open its editor at the Offset cell; on a VFO 7 cycles the shift.
+#[test]
+fn shift_and_offset_on_a_channel_open_the_editor() {
+    let mut t = T::new();
+    for d in [7, 8] {
+        t.tap(Key::VfoMem);
+        assert!(t.app.slot(0).on_channel());
+        t.hold(Key::Digit(d));
+        match t.app.screen() {
+            Screen::ChEdit(e) => assert_eq!(e.cell, crate::screens::chedit::OFFSET_CELL, "hold {d}"),
+            s => panic!("hold {d}: {}", s.name()),
+        }
+        t.hold(Key::Exit);
+        t.tap(Key::VfoMem);
+        assert!(!t.app.slot(0).on_channel());
+    }
+    t.hold(Key::Digit(8));
+    assert!(matches!(t.app.screen(), Screen::Value(v) if v.item == Item::Offset), "VFO: the offset editor");
+}
+
+/// KEY-11: hold 6 (step) on a channel changes nothing and says why (VFO-8).
+#[test]
+fn step_on_a_channel_is_vfo_only() {
+    let mut t = T::new();
+    t.tap(Key::VfoMem);
+    let step = t.app.slot(0).cfg().step;
+    t.hold(Key::Digit(6));
+    assert_eq!(t.app.slot(0).cfg().step, step);
+    assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"VFO only"));
 }

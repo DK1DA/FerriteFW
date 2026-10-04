@@ -261,12 +261,12 @@ impl Item {
     pub fn help(self, vfo: bool) -> &'static str {
         match self {
             Item::Squelch => "Audio opens above this level. Home: SIDE1 + knob.",
-            Item::Power => "Transmit power on this slot. Home: hold 5.",
-            Item::Bandwidth => "Filter width for RX and TX. Home: hold 6.",
+            Item::Power => "Transmit power on this slot. Home: hold 2.",
+            Item::Bandwidth => "Filter width for RX and TX.",
             Item::Tones => "CTCSS or DCS sent with TX. OK: RX and TX apart.",
-            Item::Offset => "Repeater shift: simplex, + or -.",
-            Item::Step => "How far the knob and arrows tune a VFO.",
-            Item::Watch => "Listen on two or three slots. Home: hold 1.",
+            Item::Offset => "Repeater shift: simplex, + or -. Home: hold 7.",
+            Item::Step => "How far a VFO tunes. Home: hold 6.",
+            Item::Watch => "Listen on two or three slots. Home: hold 4.",
             Item::Channel if vfo => "Save this VFO as a channel. Home: hold V/M.",
             Item::Channel => "Edit this channel: name, zone, number, flags.",
             Item::BatterySave => "Receiver sleep: deeper saves more, hears later.",

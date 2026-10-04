@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::screens::groups::Group;
+use crate::screens::nav::Dest;
 use crate::screens::hf::Hf;
 use crate::screens::setup::Setup;
 use ferrite_core::msg::BroadcastCmd;
@@ -175,11 +176,11 @@ fn key_test() {
     assert_eq!(t.app.screen(), Screen::Home, "hold BACK leaves");
 }
 
-/// BCR-1, BCR-16: hold 2 starts FM broadcast on the SI4732; tuning sends it; leaving (BACK or PTT) stops it.
+/// BCR-1, BCR-16: MENU 0 3 1 6 starts FM broadcast on the SI4732; tuning sends it; leaving (BACK or PTT) stops it.
 #[test]
 fn fm_broadcast() {
     let mut t = T::new();
-    t.hold(Key::Digit(2));
+    t.open(Dest::FmBroadcast);
     assert!(matches!(t.app.screen(), Screen::Fm(_)));
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_110))));
     t.knob(1);
@@ -193,7 +194,7 @@ fn fm_broadcast() {
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
-    t.hold(Key::Digit(2));
+    t.open(Dest::FmBroadcast);
     t.cmds();
     let s = store();
     t.app.key_down(Key::PTT, t.t, &s);

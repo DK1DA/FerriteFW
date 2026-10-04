@@ -26,15 +26,15 @@ pub struct Shortcut {
 /// The ten shortcuts (KEY-11), by digit.
 pub(crate) const SHORTCUTS: [&str; 10] = [
     "Home channel",
-    "Watch on/off",
-    "FM broadcast",
     "Band scope",
-    "APRS heard",
     "TX power",
-    "Bandwidth",
-    "Weather radio",
-    "Battery Save",
-    "Tone search",
+    "Squelch",
+    "Watch on/off",
+    "Tones",
+    "Step",
+    "Shift",
+    "Offset",
+    "Zones",
 ];
 
 impl View for Shortcut {
@@ -81,13 +81,20 @@ impl View for Shortcut {
                     }
                     None => v.set(b"none set"),
                 },
-                1 => app.item_text(Item::Watch, true, &mut v),
-                5 => app.item_text(Item::Power, true, &mut v),
-                6 => app.item_text(Item::Bandwidth, true, &mut v),
-                8 => app.item_text(Item::BatterySave, true, &mut v),
+                2 => app.item_text(Item::Power, true, &mut v),
+                3 => app.item_text(Item::Squelch, true, &mut v),
+                4 => app.item_text(Item::Watch, true, &mut v),
+                5 => app.item_text(Item::Tones, true, &mut v),
+                6 => app.item_text(Item::Step, true, &mut v),
+                7 => v.set(match app.slot(app.active()).cfg().offset.signum() {
+                    1 => b"+",
+                    -1 => b"-",
+                    _ => b"Simplex",
+                }),
+                8 => app.item_text(Item::Offset, true, &mut v),
                 _ => {}
             }
-            let grey = d == 7 && !app.set.wx_allowed(); // WX-1: hold 7 does nothing outside the US and Canada
+            let grey = d == 6 && app.greyed(Item::Step).is_some(); // VFO-8: step is VFO only
             let r = Row { num: Some(d as u8), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: d as u8 == self.digit, grey };
             app.list_row(lcd, d, 44 + 25 * d as i32, 25, &r);
         }

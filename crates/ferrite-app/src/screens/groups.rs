@@ -146,6 +146,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("AGC"), slow!("Auto"), slow!("Gain control.")),
         (slow!("Radio monitor"), slow!("On"), slow!("A slot opening interrupts the broadcast.")),
         (slow!("Sleep timer"), slow!("Off"), slow!("End the broadcast after a time.")),
+        (slow!("Open FM broadcast"), slow!(""), slow!("Listen now.")),
     ]),
     ((3, 2), &[
         (slow!("Span"), slow!("+/-1 MHz"), slow!("How wide the scope looks.")),
@@ -153,12 +154,14 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Sweep speed"), slow!("Normal"), slow!("Faster sweeps miss less.")),
         (slow!("Trigger level"), slow!("Off"), slow!("Mark signals above this.")),
         (slow!("Waterfall row"), slow!("Off"), slow!("History under the scope.")),
+        (slow!("Open band scope"), slow!(""), slow!("Sweep around the active slot. Home: hold 1.")),
     ]),
     ((3, 3), &[
         (slow!("SAME"), slow!("On"), slow!("Decode weather alerts.")),
         (slow!("Location codes"), slow!("None"), slow!("Up to 8 FIPS or CLC codes.")),
         (slow!("Alert tone"), slow!("On"), slow!("Sound the alert tone.")),
         (slow!("Channel"), slow!("Auto"), slow!("The weather channel to watch.")),
+        (slow!("Open weather radio"), slow!(""), slow!("Listen to the weather channel.")),
     ]),
     ((4, 2), &[
         (slow!("Frequency"), slow!("439.9875"), slow!("The pager channel.")),

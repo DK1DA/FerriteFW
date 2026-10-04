@@ -66,6 +66,13 @@ impl T {
         self.press(k, 800);
     }
 
+    /// Open a screen from home, as its menu path or a shortcut would.
+    fn open(&mut self, d: crate::screens::nav::Dest) {
+        self.app.open(d);
+        self.t += 50;
+        self.app.tick(self.t, &self.live, &store());
+    }
+
     fn knob(&mut self, d: i8) {
         self.app.knob(d, self.t, &store());
     }
@@ -312,18 +319,23 @@ fn side2_scans_the_active_slot() {
 #[test]
 fn shortcuts_and_menu_paths() {
     let mut t = T::new();
-    for (d, name) in [(2, "FM broadcast"), (3, "Scope"), (4, "APRS heard"), (7, "Weather radio"), (9, "Tone search")] {
+    // KEY-11: 1 opens the scope, 3/5/8 their editors, 9 the zones; BACK comes home.
+    for (d, name) in [(1, "Scope"), (3, "Value editor"), (5, "Tone picker"), (8, "Value editor"), (9, "Zones")] {
         t.hold(Key::Digit(d));
         assert_eq!(t.app.screen().name(), name, "hold {d}");
         t.tap(Key::Exit);
         assert_eq!(t.app.screen(), Screen::Home);
     }
-    t.hold(Key::Digit(5)); // TX power: low -> mid
+    t.hold(Key::Digit(2)); // TX power: low -> mid
     assert_eq!(t.app.slot(0).cfg().power, 1);
-    t.hold(Key::Digit(6)); // bandwidth: narrow -> wide
-    assert!(!t.app.slot(0).cfg().narrow);
-    t.hold(Key::Digit(8)); // Battery Save 1 -> 2
-    assert!(t.cmds().contains(&RadioCmd::BatterySave(ferrite_core::rxsleep::Level::L2)));
+    let step = t.app.slot(0).cfg().step;
+    t.hold(Key::Digit(6)); // step: the next one
+    assert_ne!(t.app.slot(0).cfg().step, step);
+    t.hold(Key::Digit(7)); // shift: simplex -> +
+    assert!(t.app.slot(0).cfg().offset > 0);
+    let w = t.app.watch;
+    t.hold(Key::Digit(4)); // watch on/off
+    assert_ne!(t.app.watch, w);
     t.tap(Key::Digit(4)); // NAV-4: entry
     assert!(matches!(t.app.screen(), Screen::Entry(_)));
     t.hold(Key::Exit);

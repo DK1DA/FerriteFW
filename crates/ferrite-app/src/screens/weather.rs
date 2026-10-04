@@ -1,6 +1,6 @@
 //! Weather radio (manual chapter 23). The alert screen is [`super::alert`].
 //!
-//! Weather radio (hold 7; US and Canada only, WX-1): the manual doesn't define this screen. Here it lists the
+//! Weather radio (MENU 0 3 3 5; US and Canada only, WX-1): the manual doesn't define this screen. Here it lists the
 //! seven weather channels (162.400-162.550 MHz, WX-2) and listens on the highlighted one with the active slot
 //! until the screen is left; OK keeps it as the slot's VFO. Below, the SAME state and the last alert.
 
@@ -36,7 +36,7 @@ pub struct Weather {
     pub ch: u8,
 }
 
-/// Hold 7 (WX-1): nothing outside the US and Canada once a region is set.
+/// MENU 0 3 3 5 (WX-1): greyed outside the US and Canada once a region is set.
 pub fn open(app: &mut App) -> Option<Screen> {
     if !app.set.wx_allowed() {
         return None;

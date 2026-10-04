@@ -43,7 +43,7 @@ pub struct Scope {
     pub step: u8,
 }
 
-/// Hold 3 on home (SCOPE-1): the scope around the active slot's frequency.
+/// Hold 1 on home, MENU 0 3 2 6 (SCOPE-1): the scope around the active slot's frequency.
 pub fn open(app: &mut App) -> Screen {
     let f = app.slot(app.active).freq();
     app.radio.centre = f;

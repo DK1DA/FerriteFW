@@ -1,4 +1,4 @@
-//! FM broadcast (B11; hold 2 on home; manual chapter 20, BCR-1 to BCR-17): the SI4732 on 64-108 MHz with the
+//! FM broadcast (B11; MENU 0 3 1 6; manual chapter 20, BCR-1 to BCR-17): the SI4732 on 64-108 MHz with the
 //! RDS station name and text, signal and SNR, and whether radio monitor is watching the slots (BCR-4).
 //!
 //! Keys (the manual leaves them open; these follow HF mode's): the knob or ▲▼ tune by the step, ◀▶ seek, OK
@@ -43,7 +43,7 @@ pub struct Fm {
     pub row: u8,
 }
 
-/// Hold 2 (BCR-1): the broadcast starts on the last station.
+/// MENU 0 3 1 6 (BCR-1): the broadcast starts on the last station.
 pub fn open(app: &mut App) -> Screen {
     app.start_mode(Mode::Fm);
     app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(app.set.fm_freq)));

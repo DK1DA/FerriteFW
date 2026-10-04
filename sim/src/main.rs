@@ -149,9 +149,9 @@ fn main() {
     app.notify(b"VE3KPW-9", b"On my way", false);
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "toast", scale);
-    // A screen not built yet: hold 4 (APRS heard) opens its placeholder.
+    // A screen not built yet: the DTMF dialer (MENU 0 8 6 1) opens its placeholder.
     run(&mut app, &mut fb, t + 3500, &mut t);
-    press(&mut app, Key::Digit(4), 800, &mut t);
+    app.open(ferrite_app::screens::nav::Dest::DtmfDialer);
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "coming", scale);
 
@@ -249,8 +249,8 @@ fn main() {
     shot!(9000, "scan");
     press(&mut app, Key::Side(2), 100, &mut t);
     run(&mut app, &mut fb, t, &mut t); // the radio takes the commands (16 queue at most)
-    // Band scope: hold 3, the marker moved onto the strong carrier.
-    press(&mut app, Key::Digit(3), 800, &mut t);
+    // Band scope: hold 1, the marker moved onto the strong carrier.
+    press(&mut app, Key::Digit(1), 800, &mut t);
     run(&mut app, &mut fb, t, &mut t);
     for _ in 0..13 {
         press(&mut app, Key::Right, 60, &mut t);
@@ -258,8 +258,8 @@ fn main() {
     }
     shot!(2500, "scope");
     home(&mut app, &mut t);
-    // Tone search: hold 9, found after 2.5 s.
-    press(&mut app, Key::Digit(9), 800, &mut t);
+    // Tone search: MENU 0 3 7, found after 2.5 s.
+    app.open(ferrite_app::screens::nav::Dest::ToneSearch);
     shot!(1000, "tone-search");
     shot!(2500, "tone-found");
     home(&mut app, &mut t);
@@ -268,8 +268,8 @@ fn main() {
     shot!(2500, "counter");
     home(&mut app, &mut t);
     // FM broadcast and HF mode: group D's shots.
-    // Weather radio: hold 7 (Canada).
-    press(&mut app, Key::Digit(7), 800, &mut t);
+    // Weather radio: MENU 0 3 3 5 (Canada).
+    app.open(ferrite_app::screens::nav::Dest::Weather);
     shot!(300, "weather");
     home(&mut app, &mut t);
     // The alert: group D's shot, as in the mock-up.
