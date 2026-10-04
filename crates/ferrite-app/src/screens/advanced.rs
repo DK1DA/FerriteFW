@@ -170,6 +170,6 @@ impl View for Advanced {
     }
 
     fn hints(self, _: &App) -> Hints {
-        Hints::new(&[(ARROWS_UD, "Move"), ("1-9", "Jump"), ("OK", "Open"), ("BACK", "Back")])
+        Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")]) // digits jump: the rows show them
     }
 }

@@ -164,7 +164,7 @@ impl View for Log {
         if self.detail {
             Hints::new(&[(ARROWS_UD, "Next"), ("#", "Go"), ("BACK", "List")])
         } else {
-            Hints::new(&[("OK", "Open"), ("#", "Go"), (ARROWS_LR, "Source"), ("BACK", "Back")])
+            Hints::new(&[("OK", "Open"), ("#", "Go"), (ARROWS_LR, "Source")])
         }
     }
 }

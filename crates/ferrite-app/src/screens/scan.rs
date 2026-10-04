@@ -206,7 +206,7 @@ impl View for Scan {
 
     fn hints(self, app: &App) -> Hints {
         if app.slot(self.slot).on_channel() {
-            Hints::new(&[("*", "Skip"), ("0-9", "Zones"), ("SIDE2", "Stop"), ("BACK", "Back")])
+            Hints::new(&[("*", "Skip"), ("0-9", "Zones"), ("SIDE2", "Stop")])
         } else {
             Hints::new(&[("*", "Skip"), ("SIDE2", "Stop"), ("BACK", "Back")])
         }

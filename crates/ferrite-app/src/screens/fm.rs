@@ -215,7 +215,7 @@ impl View for Fm {
         if self.menu {
             Hints::new(&[("Knob", "Change"), ("0", "Full menu"), ("BACK", "Back")])
         } else {
-            Hints::new(&[(ARROWS_LR, "Seek"), ("OK", "Presets"), ("Hold MENU", "Options")])
+            Hints::new(&[(ARROWS_LR, "Seek"), ("OK", "Presets"), ("BACK", "Back")]) // hold MENU: options, as everywhere
         }
     }
 }

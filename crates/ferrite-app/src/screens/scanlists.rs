@@ -296,7 +296,7 @@ impl View for ScanLists {
     fn hints(self, _: &App) -> Hints {
         match (self.page, self.confirm()) {
             (_, true) => Hints::new(&[("OK", "Delete"), ("BACK", "Keep")]),
-            (Page::Presets(_), _) => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete"), ("BACK", "Back")]),
+            (Page::Presets(_), _) => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
             (Page::Edit(_), _) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("BACK", "Done")]),
             (Page::Skips, _) => Hints::new(&[("OK", "Unskip"), ("#", "Clear all"), ("BACK", "Back")]),
         }

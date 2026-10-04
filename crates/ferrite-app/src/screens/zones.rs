@@ -256,7 +256,7 @@ impl View for Zones {
         match (self.edit(), self.confirm()) {
             (_, true) => Hints::new(&[("OK", "Delete"), ("BACK", "Keep")]),
             (Some(_), _) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("#", "Reset")]),
-            (None, _) => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete"), ("BACK", "Back")]),
+            (None, _) => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
         }
     }
 }

@@ -9,9 +9,7 @@ use crate::screens::Screen;
 use crate::App;
 use ferrite_core::keys::Key;
 use ferrite_core::msg::{Device, GpsState, LiveAll, RadioCmd};
-use ferrite_ui::assets::{UI_12, UI_12B};
 use ferrite_ui::fb::FrameBuffer;
-use ferrite_ui::gfx::text4_width;
 use std::vec::Vec;
 
 struct T {
@@ -464,20 +462,60 @@ fn ptt_and_hold_back_from_every_list() {
 }
 
 /// The hint bar's pairs fit across the screen (KEY-9), on every page of every group C screen.
+/// KEY-9: the hint bar of the screen up now has at most three pairs and fits the 224 px between the margins.
+fn hint_fits(t: &mut T) {
+    if let Some(why) = hint_overflow(t) {
+        panic!("{why}");
+    }
+}
+
+fn hint_overflow(t: &mut T) -> Option<std::string::String> {
+    let h = t.app.screen().hints(&t.app);
+    let items = h.as_slice();
+    let total = ferrite_ui::widgets::hint_width(&mut t.fb, items);
+    (items.len() > ferrite_ui::widgets::HINT_MAX || total > 224).then(|| std::format!("{}: {} hints, {} px: {:?}", t.name(), items.len(), total, items))
+}
+
+/// KEY-9: every screen's hint bar, rendered, fits: each destination in the manual, opened from home, and the
+/// sub-pages and modes the walks below reach.
+#[test]
+fn every_hint_bar_fits() {
+    let mut bad = std::collections::BTreeSet::new();
+    let mut hint_fits = |t: &mut T| {
+        if let Some(why) = hint_overflow(t) {
+            bad.insert(why);
+        }
+    };
+    for d in crate::screens::nav::ALL.iter().chain(crate::screens::nav::MENU0.iter().map(|(_, d)| d)) {
+        let mut t = T::new();
+        hint_fits(&mut t);
+        t.open(*d);
+        hint_fits(&mut t);
+        for k in [Key::Down, Key::Menu] {
+            if t.app.screen().modal() {
+                break;
+            }
+            t.tap(k);
+            t.wait(3100); // past any toast: the hint bar shows again
+            hint_fits(&mut t);
+        }
+    }
+    // Option pages and the lock.
+    let mut t = T::new();
+    for d in [Dest::FmBroadcast, Dest::HfMode, Dest::EventLog] {
+        t.open(d);
+        t.wait(3000);
+        t.hold(Key::Menu);
+        hint_fits(&mut t);
+        t.hold(Key::Exit);
+    }
+    assert!(bad.is_empty(), "hint bars that overflow:\n{}", bad.into_iter().collect::<Vec<_>>().join("\n"));
+}
+
 #[test]
 fn hints_fit() {
-    let width = |key: &str, label: &str| {
-        let arrows = key.bytes().filter(|c| (0x18..=0x1b).contains(c)).count() as i32;
-        let text: Vec<u8> = key.bytes().filter(|c| !(0x18..=0x1b).contains(c)).collect();
-        text4_width(&text, &UI_12B) + 7 * arrows + if label.is_empty() { 0 } else { 4 + text4_width(label.as_bytes(), &UI_12) }
-    };
     let mut t = T::new();
-    let check = |t: &mut T| {
-        let h = t.app.screen().hints(&t.app);
-        let items = h.as_slice();
-        let total: i32 = items.iter().map(|(k, l)| width(k, l)).sum::<i32>() + 8 * (items.len() as i32 - 1);
-        assert!(total <= 224, "{}: hints {} px wide: {:?}", t.name(), total, items.iter().map(|i| i.1).collect::<Vec<_>>());
-    };
+    let check = |t: &mut T| hint_fits(t);
     let walks: &[(Dest, &[(Key, u32)])] = &[
         (Dest::EventLog, &[(Key::Menu, 100), (Key::Exit, 100), (Key::Menu, 800), (Key::Down, 100), (Key::Menu, 100)]),
         (Dest::AprsHeard, &[(Key::Menu, 100), (Key::Menu, 800)]),

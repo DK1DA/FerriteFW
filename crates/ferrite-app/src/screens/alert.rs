@@ -146,7 +146,7 @@ impl View for Alert {
         if self.silenced {
             Hints::new(&[("OK", "Log"), ("BACK", "Back")])
         } else {
-            Hints::new(&[("OK", "Silence"), ("Hold MENU", "Log"), ("BACK", "Back")])
+            Hints::new(&[("OK", "Silence"), ("BACK", "Back")]) // silenced, OK opens the log
         }
     }
 }

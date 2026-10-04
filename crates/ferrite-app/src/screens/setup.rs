@@ -480,7 +480,7 @@ impl View for Setup {
         } else if self.page == LAST {
             Hints::new(&[("OK", "Start"), ("BACK", "Previous")])
         } else {
-            Hints::new(&[("OK", "Next"), ("BACK", "Previous"), ("#", "Skip setup")])
+            Hints::new(&[("OK", "Next"), ("BACK", "Previous"), ("#", "Skip")])
         }
     }
 }

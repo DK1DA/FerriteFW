@@ -249,15 +249,26 @@ pub fn key_line(lcd: &mut impl Panel, x: i32, x_end: i32, baseline: i32, key: &s
     lcd.fill(x + w, baseline - 13, x_end - x - w, 17, bg);
 }
 
-/// The hint bar (KEY-9): up to four key + label pairs, the first at the left margin, the last at the right,
-/// the rest spaced evenly between.
+/// The hint bar holds at most this many key + label pairs (KEY-9): more overflow 240 px in the 12 px font.
+pub const HINT_MAX: usize = 3;
+
+/// The hint bar's width for these pairs, with the smallest gap (8 px) between them; it fits when this is at
+/// most 224 (8 px margins).
+pub fn hint_width(lcd: &mut impl Panel, items: &[(&str, &str)]) -> i32 {
+    let n = items.len().min(HINT_MAX);
+    let w: i32 = items[..n].iter().map(|(k, l)| key_label(lcd, 0, 0, k, l, BG, false)).sum();
+    w + 8 * (n as i32 - 1).max(0)
+}
+
+/// The hint bar (KEY-9): up to [`HINT_MAX`] key + label pairs, the first at the left margin, the last at the
+/// right, the one between centred in the gap.
 pub fn hint_bar(lcd: &mut impl Panel, items: &[(&str, &str)]) {
     let base = HINT_Y + 15; // text rows HINT_Y + 2 .. HINT_Y + 19
     lcd.fill(0, HINT_Y, 240, 1, LINE);
     lcd.fill(0, HINT_Y + 1, 240, 1, BG);
     lcd.fill(0, HINT_Y + 19, 240, 1, BG);
-    let n = items.len().min(4);
-    let mut w = [0i32; 4];
+    let n = items.len().min(HINT_MAX);
+    let mut w = [0i32; HINT_MAX];
     for i in 0..n {
         w[i] = key_label(lcd, 0, base, items[i].0, items[i].1, BG, false);
     }

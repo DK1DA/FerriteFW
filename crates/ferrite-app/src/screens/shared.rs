@@ -36,17 +36,20 @@ pub struct Cx<'a, S: ChannelStore> {
     pub store: &'a S,
 }
 
-/// The hint bar's key + label pairs (KEY-9): up to four.
+/// The hint bar's key + label pairs (KEY-9): at most three ([`w::HINT_MAX`]; four overflow 240 px at 12 px).
+/// One rule: a screen lists its three most important, in the order they show; what it leaves out first is the
+/// universal (BACK Back, which every screen has), then the least used of its own keys.
 #[derive(Clone, Copy, Debug)]
 pub struct Hints {
-    items: [(&'static str, &'static str); 4],
+    items: [(&'static str, &'static str); w::HINT_MAX],
     n: u8,
 }
 
 impl Hints {
     pub const fn new(items: &[(&'static str, &'static str)]) -> Self {
-        let mut h = Hints { items: [("", ""); 4], n: 0 };
-        while (h.n as usize) < items.len() && (h.n as usize) < 4 {
+        assert!(items.len() <= w::HINT_MAX, "at most three hints (KEY-9)");
+        let mut h = Hints { items: [("", ""); w::HINT_MAX], n: 0 };
+        while (h.n as usize) < items.len() && (h.n as usize) < w::HINT_MAX {
             h.items[h.n as usize] = items[h.n as usize];
             h.n += 1;
         }
