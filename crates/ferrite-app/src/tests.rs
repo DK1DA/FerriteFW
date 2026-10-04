@@ -704,3 +704,27 @@ fn back_is_one_level_hold_back_is_home() {
     t.hold(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
 }
+
+/// CHAN-23, VFO-4: a channel's or home VFO's mode is FM, NFM or AM; USB, LSB and CW are HF mode's only.
+#[test]
+fn slot_modes_are_fm_nfm_am() {
+    let mut c = DEFAULT_CFG;
+    let mut seen = [false; 6];
+    for _ in 0..7 {
+        let v = Item::Mode.get(&c).0 + 1;
+        Item::Mode.set(&mut c, v, 0);
+        seen[c.mode as usize] = true;
+    }
+    assert_eq!(seen, [true, true, true, false, false, false]);
+    let mut t = T::new();
+    for on_channel in [false, true] {
+        if on_channel {
+            t.tap(Key::VfoMem);
+            assert!(t.app.slot(0).on_channel());
+        }
+        for d in [1, 1, 1, 1, -1, -1, -1, -1] {
+            t.app.change(Item::Mode, d);
+            assert!(t.app.slot(0).cfg().mode < 3, "mode {} on {}", t.app.slot(0).cfg().mode, if on_channel { "a channel" } else { "the VFO" });
+        }
+    }
+}

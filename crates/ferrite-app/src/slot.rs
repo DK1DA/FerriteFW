@@ -38,6 +38,8 @@ impl Default for SlotCfg {
 }
 
 pub const MODES: [&str; 6] = ["FM", "NFM", "AM", "USB", "LSB", "CW"];
+/// Channels and home VFOs use the first three: FM, NFM, AM (CHAN-23, VFO-4). USB, LSB and CW are HF mode's.
+pub const SLOT_MODES: usize = 3;
 
 /// Steps in 10 Hz units and their names (MENU 6).
 pub const STEPS: [(u32, &str); 14] = [
@@ -269,7 +271,7 @@ impl Item {
             Item::Channel => "Edit this channel: name, zone, number, flags.",
             Item::BatterySave => "Receiver sleep: deeper saves more, hears later.",
             Item::Advanced => "Everything else, in nine groups.",
-            Item::Mode => "FM, NFM, AM; USB, LSB and CW on HF.",
+            Item::Mode => "FM, NFM, AM. USB, LSB and CW: HF mode only.",
             Item::BusyLock => "Refuse transmit while the channel is busy.",
             Item::Reverse => "Listen on the repeater's input. Home: hold *.",
         }
@@ -284,7 +286,7 @@ impl Item {
             Item::Tones => (tone_index(c.tx_tone), TONES),
             Item::Offset => ((c.offset.signum() + 3) % 3, 3), // simplex, +, -
             Item::Step => (c.step as i32, STEPS.len() as i32),
-            Item::Mode => (c.mode as i32, MODES.len() as i32),
+            Item::Mode => (c.mode as i32, SLOT_MODES as i32),
             Item::BusyLock => (c.busy as i32, 3),
             Item::Reverse => (c.reverse as i32, 2),
             _ => (0, 1),
