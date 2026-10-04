@@ -1,8 +1,8 @@
 //! The boot screen: logo, wordmark, version, callsign, and the self-test as a bar and one status line (BOOT-9).
 //! A failed check shows on the same screen, in red, naming the check; the radio then waits for a key (BOOT-10).
 //! With the boot screen set to the owner card (MENU 0 7 3 3, SETUP-11), the card fills the screen instead and
-//! the logo, version and self-test shrink to its bottom line (BootC mock-up); a failed check still shows the
-//! logo screen, as the failure matters more.
+//! the wordmark, version and self-test shrink to its bottom line (BootC mock-up, less its small logo); a failed
+//! check still shows the logo screen, as the failure matters more.
 use crate::assets::*;
 use crate::gfx::{Align, Gfx, BG, BLUE, LINE, RED, SUB, TEXT};
 use crate::panel::Panel;
@@ -100,24 +100,23 @@ fn card(lcd: &mut impl Panel, b: &BootInfo, o: &Owner, done: i32, n: i32) {
         let k = upper(call, &mut up);
         lcd.text4(12, 70, fit(&up[..k], &CALL_35, COL), &CALL_35, TEXT, BG);
     }
-    lcd.text4(12, 94, fit(o.name, &UI_14, COL), &UI_14, TEXT, BG);
+    lcd.text4(12, 93, fit(o.name, &UI_12B, COL), &UI_12B, TEXT, BG);
     if !o.phone.is_empty() || !o.email.is_empty() {
         lcd.fill(12, 113, COL, 1, LINE);
         lcd.text4(12, 137, b"IF FOUND, PLEASE CONTACT", &UI_12, SUB, BG);
         let mut y = 155;
         for line in [o.phone, o.email].into_iter().filter(|l| !l.is_empty()) {
-            lcd.text4(12, y, fit(line, &UI_14, COL), &UI_14, TEXT, BG);
-            y += 18;
+            lcd.text4(12, y, fit(line, &UI_12B, COL), &UI_12B, TEXT, BG);
+            y += 17;
         }
     }
-    // The bottom line: logo, wordmark, version; the self-test on the right; the bar under them.
-    lcd.mask4(13, 262, &LOGO20_RING, SUB, Some((&LOGO20_WIND, BLUE)), BG);
-    let x = 40 + lcd.text4(40, 278, b"FERRITE", &WORD_14, TEXT, BG);
+    // The bottom line: wordmark and version, the self-test on the right (the version gives way); the bar.
+    let x = 12 + lcd.text4(12, 277, b"FERRITE", &UI_12B, TEXT, BG);
     let mut line = Buf::<31>::new();
     let status: &[u8] = if done < n { v!(line, "Self-test {} of {}", done, n) } else { b"Ready" };
-    let right = 228 - crate::gfx::text4_width(status, &UI_9);
-    lcd.text4(x + 7, 277, fit(b.version.as_bytes(), &UI_9, right - x - 13), &UI_9, SUB, BG);
-    lcd.text4(right, 277, status, &UI_9, SUB, BG);
+    let right = 228 - crate::gfx::text4_width(status, &UI_12);
+    lcd.text4(x + 6, 277, fit(b.version.as_bytes(), &UI_12, right - x - 8), &UI_12, SUB, BG);
+    lcd.text4(right, 277, status, &UI_12, SUB, BG);
     let bar = if n > 0 { done * COL / n } else { COL };
     lcd.fill(12, 289, bar, 3, BLUE);
     lcd.fill(12 + bar, 289, COL - bar, 3, LINE);

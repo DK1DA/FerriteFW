@@ -16,7 +16,6 @@ from fontgen import Font  # noqa: E402
 FONTS = os.path.join(HERE, "..", "fonts")
 OUT = os.path.join(HERE, "..", "crates", "ferrite-ui", "src", "assets.rs")
 REG, BOLD = "JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf"
-MED = "JetBrainsMono-Medium.ttf"
 NUM = "FerriteMonoTight-Bold.ttf"  # JetBrains Mono Bold, white space squeezed (tools/tighten.py)
 WORD = "BarlowSemiCondensed-SemiBold.ttf"
 
@@ -35,8 +34,6 @@ SLOW = ".slow_rodata"
 FONT_LIST = [  # name, file, px, chars, tabular, use
     ("ui_12", REG, 12, TEXT, False, "status bar, hints, labels, lists, values"),
     ("ui_12b", BOLD, 12, TEXT, False, "emphasis: clock, keys in hints, tags"),
-    ("ui_9", REG, 9, TEXT, False, "the owner card's bottom line: version, self-test"),
-    ("ui_14", MED, 14, TEXT, False, "the owner card's name, phone and e-mail"),
     ("ui_15b", BOLD, 15, TEXT, False, "headings: setup pages, alerts; the callsign on the boot screen"),
     ("call_35", BOLD, 35, CALL, False, "the callsign on the owner card (10 characters fit)"),
     ("dig_46", NUM, 46, DIG, True, "active slot frequency"),
@@ -44,11 +41,9 @@ FONT_LIST = [  # name, file, px, chars, tabular, use
     ("dig_26", NUM, 26, DIG, True, "watched slot frequency"),
     ("dig_17", NUM, 17, DIG, True, "watched slot last digits"),
     ("word_40", WORD, 40, WORDMARK, False, "FERRITE wordmark, boot screen"),
-    ("word_14", WORD, 14, WORDMARK, False, "FERRITE wordmark, the owner card's bottom line"),
 ]
 MASK_LIST = [  # name, size, shape, run-length encoded
     ("logo112_ring", 112, art.toroid_ring, True), ("logo112_wind", 112, art.toroid_wind, True),
-    ("logo20_ring", 20, art.toroid_ring, False), ("logo20_wind", 20, art.toroid_wind, False),
     ("icon_lock", 14, art.lock, False), ("icon_gps", 12, art.gps, False), ("icon_bt", 11, art.bt, False),
 ]
 
