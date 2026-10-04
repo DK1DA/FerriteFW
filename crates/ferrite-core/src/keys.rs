@@ -35,17 +35,26 @@ pub enum Key {
     Digit(u8),
     Star,
     Hash,
-    /// PTT A, B or the connector's: transmit is the Radio task's call (and needs the tx build).
-    Ptt,
+    /// PTT, with the slot it keys: 0 = PTT A, 1 = PTT B, 2 = PTT C, [`PTT_ACTIVE`] = the side connector's
+    /// (the active slot). Transmit is the Radio task's call (and needs the tx build).
+    Ptt(u8),
     Side(u8),
+}
+
+/// `Key::Ptt` slot for the side connector's PTT: the active slot (KEY-7).
+pub const PTT_ACTIVE: u8 = 0xFF;
+
+impl Key {
+    /// The side connector's PTT: transmits on the active slot.
+    pub const PTT: Key = Key::Ptt(PTT_ACTIVE);
 }
 
 /// Key code to meaning. The matrix entries are filled in from the key test on the radio.
 pub const MAP: [Option<Key>; CODES] = {
     let mut m = [None; CODES];
-    m[CODE_PTT_A as usize] = Some(Key::Ptt);
-    m[CODE_PTT_B as usize] = Some(Key::Ptt);
-    m[CODE_PTT_VFO as usize] = Some(Key::Ptt);
+    m[CODE_PTT_A as usize] = Some(Key::Ptt(0));
+    m[CODE_PTT_B as usize] = Some(Key::Ptt(1));
+    m[CODE_PTT_VFO as usize] = Some(Key::PTT);
     m
 };
 
@@ -65,7 +74,8 @@ mod tests {
             seen |= 1 << c;
         }
         assert_eq!(seen, 0x003F_FFFF, "codes 0-21");
-        assert_eq!(key(CODE_PTT_B), Some(Key::Ptt));
+        assert_eq!(key(CODE_PTT_A), Some(Key::Ptt(0)));
+        assert_eq!(key(CODE_PTT_B), Some(Key::Ptt(1)), "PTT B keys slot B");
         assert_eq!(key(99), None);
     }
 }

@@ -85,7 +85,7 @@ fn map_key(k: K) -> Option<Key> {
         K::V => Key::VfoMem,
         K::Q => Key::Side(1),
         K::W => Key::Side(2),
-        K::Space => Key::Ptt,
+        K::Space => Key::Ptt(0),
         K::Comma => Key::Star,
         K::Period => Key::Hash,
         K::Key0 | K::NumPad0 => Key::Digit(0),
@@ -137,7 +137,8 @@ fn blend(a: u32, b: u32) -> u32 {
 fn key_of(p: Part) -> Key {
     match p {
         Part::Key(k) => k,
-        _ => Key::Ptt,
+        Part::Ptt(n) => Key::Ptt(n),
+        _ => Key::PTT,
     }
 }
 
@@ -276,7 +277,7 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>, owner_card: bool) {
                     if let Some(key) = map_key(k) {
                         last_key = format!("{key:?}");
                         kb_held.extend(face.find(key));
-                        if key == Key::Ptt {
+                        if matches!(key, Key::Ptt(_)) {
                             tx = Some(0);
                         }
                         if !booting {
@@ -291,7 +292,7 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>, owner_card: bool) {
                 if let Some(i) = face.find(key) {
                     kb_held.retain(|&h| h != i);
                 }
-                if key == Key::Ptt {
+                if matches!(key, Key::Ptt(_)) {
                     tx = None;
                 }
                 if !booting {

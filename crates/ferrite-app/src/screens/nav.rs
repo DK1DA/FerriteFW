@@ -525,5 +525,7 @@ fn cycle(app: &mut App, item: Item) {
 
 /// PTT down where the screen has no PTT of its own: home, then transmit on the active slot (KEY-7, TX-20).
 pub fn transmit(app: &mut App) {
-    super::transmit::ptt(app, app.active);
+    // PTT A/B/C key their own slot; the side connector's (PTT_ACTIVE) keys the active one (KEY-7).
+    let slot = if (app.ptt_slot as usize) < crate::SLOTS { app.ptt_slot } else { app.active };
+    super::transmit::ptt(app, slot);
 }

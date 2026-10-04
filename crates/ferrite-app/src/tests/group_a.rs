@@ -365,9 +365,9 @@ fn pin_at_unlock() {
     // At power on, PTT does nothing until it is right.
     t.app.ask_pin();
     let s = store();
-    t.app.key_down(Key::Ptt, t.t, &s);
+    t.app.key_down(Key::PTT, t.t, &s);
     assert!(matches!(t.app.screen(), Screen::Pin(_)));
-    t.app.key_up(Key::Ptt, t.t + 100, &s);
+    t.app.key_up(Key::PTT, t.t + 100, &s);
 }
 
 /// HOME-8: holding a digit shows the map; the release runs the shortcut; BACK cancels.

@@ -53,7 +53,7 @@ const MAP: [(&str, Option<Key>); 24] = [
     ("MENU", Some(Key::Menu)), ("\x18", Some(Key::Up)), ("BACK", Some(Key::Exit)),
     ("\x1b", Some(Key::Left)), ("\x19", Some(Key::Down)), ("\x1a", Some(Key::Right)),
     ("SLOT", Some(Key::Slot)), ("V/M", Some(Key::VfoMem)), ("Knob", None),
-    ("PTT", Some(Key::Ptt)), ("S1", Some(Key::Side(1))), ("S2", Some(Key::Side(2))),
+    ("PTT", Some(Key::Ptt(0))), ("S1", Some(Key::Side(1))), ("S2", Some(Key::Side(2))),
     ("1", Some(Key::Digit(1))), ("2", Some(Key::Digit(2))), ("3", Some(Key::Digit(3))),
     ("4", Some(Key::Digit(4))), ("5", Some(Key::Digit(5))), ("6", Some(Key::Digit(6))),
     ("7", Some(Key::Digit(7))), ("8", Some(Key::Digit(8))), ("9", Some(Key::Digit(9))),
@@ -80,7 +80,7 @@ fn key_name(key: Key, b: &mut Buf<16>) {
         }
         Key::Star => b.set(b"*"),
         Key::Hash => b.set(b"#"),
-        Key::Ptt => b.set(b"PTT"),
+        Key::Ptt(_) => b.set(b"PTT"),
         Key::Side(n) => {
             let _ = uwrite!(b, "SIDE{}", n);
         }
@@ -147,7 +147,7 @@ impl View for KeyTest {
 
     fn ptt(self, app: &mut App, down: bool) {
         // Tested, not transmitted: the key test is where PTT's code is found.
-        self.raw(app, Some(Key::Ptt), None, down);
+        self.raw(app, Some(Key::PTT), None, down);
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {

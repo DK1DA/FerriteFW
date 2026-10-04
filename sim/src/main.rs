@@ -222,13 +222,13 @@ fn main() {
     }
     let home = |app: &mut App, t: &mut u32| press(app, Key::Exit, 800, t);
     // Transmit: PTT held on A (145.920 after the -600k offset), 2 s in.
-    app.key_down(Key::Ptt, t, &store);
+    app.key_down(Key::PTT, t, &store);
     shot!(2800, "transmit");
-    app.key_up(Key::Ptt, t, &store);
+    app.key_up(Key::PTT, t, &store);
     // Refused: 420.500 is outside 70 cm in Canada (the TxRefused mock-up).
     app.set_vfo(0, 42_050_000);
-    app.key_down(Key::Ptt, t, &store);
-    app.key_up(Key::Ptt, t + 200, &store);
+    app.key_down(Key::PTT, t, &store);
+    app.key_up(Key::PTT, t + 200, &store);
     shot!(300, "tx-refused");
     home(&mut app, &mut t);
     // Emergency: 406.025 (EPIRB) with Extend TX on; the first PTT only prompts. (243.000 is on the 1.25 m PA
@@ -236,8 +236,8 @@ fn main() {
     app.set_region(Some(ferrite_core::txplan::Region::Canada), true);
     app.set_vfo_cfg(0, ferrite_app::slot::DEFAULT_CFG); // simplex: the offset would move it off 406.025
     app.set_vfo(0, 40_602_500);
-    app.key_down(Key::Ptt, t, &store);
-    app.key_up(Key::Ptt, t + 200, &store);
+    app.key_down(Key::PTT, t, &store);
+    app.key_up(Key::PTT, t + 200, &store);
     shot!(1500, "tx-emergency");
     home(&mut app, &mut t);
     app.set_region(Some(ferrite_core::txplan::Region::Canada), false);

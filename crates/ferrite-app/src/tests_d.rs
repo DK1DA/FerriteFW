@@ -133,8 +133,8 @@ fn pin_at_power_on() {
     t.hold(Key::Exit);
     assert_eq!(t.app.screen(), pin, "hold BACK doesn't skip the PIN");
     let s = store();
-    t.app.key_down(Key::Ptt, t.t, &s);
-    t.app.key_up(Key::Ptt, t.t + 100, &s);
+    t.app.key_down(Key::PTT, t.t, &s);
+    t.app.key_up(Key::PTT, t.t + 100, &s);
     assert!(matches!(t.app.screen(), Screen::Pin(_)), "nor does PTT");
     for _ in 0..3 {
         for d in [9, 9, 9, 9] {
@@ -165,8 +165,8 @@ fn key_test() {
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::KeyTest(_)), "short BACK is tested");
     let s = store();
-    t.app.key_down(Key::Ptt, t.t, &s);
-    t.app.key_up(Key::Ptt, t.t + 100, &s);
+    t.app.key_down(Key::PTT, t.t, &s);
+    t.app.key_up(Key::PTT, t.t + 100, &s);
     assert!(matches!(t.app.screen(), Screen::KeyTest(_)), "PTT is tested, not transmitted");
     t.app.raw_key(14, true); // an unmapped matrix code
     let mut fb = FrameBuffer::new();
@@ -196,7 +196,7 @@ fn fm_broadcast() {
     t.hold(Key::Digit(2));
     t.cmds();
     let s = store();
-    t.app.key_down(Key::Ptt, t.t, &s);
+    t.app.key_down(Key::PTT, t.t, &s);
     let c = t.cmds();
     let off = c.iter().position(|c| *c == RadioCmd::Broadcast(BroadcastCmd::Off));
     assert!(off.is_some(), "PTT stops the broadcast first (BCR-16): {c:?}");
@@ -221,8 +221,8 @@ fn hf_mode() {
     t.tap(Key::Slot);
     assert_eq!(toast_head(&t), "Not in HF mode");
     let s = store();
-    t.app.key_down(Key::Ptt, t.t, &s);
-    t.app.key_up(Key::Ptt, t.t + 50, &s);
+    t.app.key_down(Key::PTT, t.t, &s);
+    t.app.key_up(Key::PTT, t.t + 50, &s);
     assert_eq!(t.app.screen().name(), "Transmit refused", "9.58 MHz AM is the SI4732's (HF-24)");
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Hf(_)));

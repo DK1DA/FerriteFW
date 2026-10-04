@@ -455,9 +455,9 @@ fn ptt_and_hold_back_from_every_list() {
         t.hold(Key::Exit);
         assert!(matches!(t.app.screen(), Screen::Home), "{d:?}: hold BACK goes home");
         t.open(d);
-        t.app.key_down(Key::Ptt, t.t, &t.s);
+        t.app.key_down(Key::PTT, t.t, &t.s);
         assert!(t.name().starts_with("Transmit"), "{d:?}: PTT transmits (or says why not) from any screen (KEY-7)");
-        t.app.key_up(Key::Ptt, t.t + 100, &t.s);
+        t.app.key_up(Key::PTT, t.t + 100, &t.s);
     }
 }
 

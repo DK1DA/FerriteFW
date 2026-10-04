@@ -23,9 +23,9 @@ fn tune(t: &mut T, f: Freq10) {
 fn ptt(t: &mut T, down: bool) {
     let s = store();
     if down {
-        t.app.key_down(Key::Ptt, t.t, &s);
+        t.app.key_down(Key::PTT, t.t, &s);
     } else {
-        t.app.key_up(Key::Ptt, t.t, &s);
+        t.app.key_up(Key::PTT, t.t, &s);
     }
     t.t += 50;
     t.app.tick(t.t, &t.live, &s);
@@ -582,4 +582,22 @@ fn busy_lockout_carrier_and_wrong_tone() {
     ptt(&mut t, true);
     assert_eq!(refused(&t), Some(Refusal::Busy));
     ptt(&mut t, false);
+}
+
+/// KEY-7: PTT B transmits on slot B even when A is the active slot; the connector's PTT keys the active slot.
+#[test]
+fn ptt_b_keys_slot_b() {
+    let mut t = ready();
+    t.app.slots[1].vfo = 14_652_000;
+    t.app.slots[1].vfo_mode = true;
+    assert_eq!(t.app.active(), 0);
+    let s = store();
+    t.app.key_down(Key::Ptt(1), t.t, &s);
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 1, on: true }), "PTT B keys slot B");
+    t.app.key_up(Key::Ptt(1), t.t + 100, &s);
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 1, on: false }));
+    // The side connector's PTT keys the active slot (A).
+    t.app.key_down(Key::PTT, t.t + 200, &s);
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: true }));
+    t.app.key_up(Key::PTT, t.t + 300, &s);
 }

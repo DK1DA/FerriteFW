@@ -360,9 +360,9 @@ fn ptt_from_any_screen() {
     t.tap(Key::Menu);
     t.hold(Key::Hash);
     let s = store();
-    t.app.key_down(Key::Ptt, t.t, &s);
+    t.app.key_down(Key::PTT, t.t, &s);
     assert!(matches!(t.app.screen(), Screen::Transmit(_)));
-    t.app.key_up(Key::Ptt, t.t + 300, &s);
+    t.app.key_up(Key::PTT, t.t + 300, &s);
     assert_eq!(t.app.screen(), Screen::Home);
 }
 

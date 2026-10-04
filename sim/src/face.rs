@@ -24,7 +24,7 @@ const RIDGE: u32 = 0x23272D;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Part {
     Key(Key),
-    /// PTT A or B: transmit on that slot (Key::Ptt to the app).
+    /// PTT A or B: transmit on that slot (`Key::Ptt(n)` to the app).
     Ptt(u8),
     /// The channel knob: upper half +1, lower half -1.
     Knob,
@@ -183,7 +183,7 @@ impl Face {
     pub fn find(&self, key: Key) -> Option<usize> {
         self.hits.iter().position(|h| match h.part {
             Part::Key(k) => k == key,
-            Part::Ptt(0) => key == Key::Ptt,
+            Part::Ptt(n) => key == Key::Ptt(n),
             _ => false,
         })
     }
@@ -359,7 +359,7 @@ mod tests {
                 assert!(!over(b.x, b.y, b.w, b.h), "{:?} overlaps {:?}", a.part, b.part);
             }
         }
-        assert_eq!(f.find(Key::Ptt).map(|i| f.hits[i].part), Some(Part::Ptt(0)));
+        assert_eq!(f.find(Key::Ptt(0)).map(|i| f.hits[i].part), Some(Part::Ptt(0)));
         assert!(f.find(Key::Digit(0)).is_some() && f.find(Key::Side(2)).is_some());
     }
 }

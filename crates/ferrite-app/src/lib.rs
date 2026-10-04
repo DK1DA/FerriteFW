@@ -217,6 +217,8 @@ pub struct App {
     screen: Screen,
     slots: [Slot; SLOTS],
     active: u8,
+    /// The slot the PTT being pressed keys (`Key::Ptt`); `PTT_ACTIVE` for the side connector's.
+    pub(crate) ptt_slot: u8,
     /// Index into Watch's values: off, A+B, A+B+C.
     watch: u8,
     /// Battery Save: 0 off, 1-3.
@@ -273,6 +275,7 @@ impl App {
             screen: Screen::Home,
             slots: [Slot::new(mhz(146) + 52_000), Slot::new(mhz(443) + 47_500), Slot::new(mhz(118) + 95_000)],
             active: 0,
+            ptt_slot: ferrite_core::keys::PTT_ACTIVE,
             watch: 1,
             bsave: 1,
             locked: false,
@@ -586,8 +589,10 @@ impl App {
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
         self.screen.raw(self, Some(key), None, true);
-        if key == Key::Ptt {
-            // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there.
+        if let Key::Ptt(slot) = key {
+            // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there. PTT A, B and
+            // C key their own slot; the side connector's keys the active slot.
+            self.ptt_slot = slot;
             self.screen.ptt(self, true);
         }
     }
@@ -595,7 +600,7 @@ impl App {
     pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
         self.screen.raw(self, Some(key), None, false);
-        if key == Key::Ptt {
+        if matches!(key, Key::Ptt(_)) {
             self.screen.ptt(self, false);
             self.ptt_released(); // TX-25: whatever the screen did, PTT up unkeys
         }
@@ -690,7 +695,7 @@ impl App {
         }
         if self.locked {
             // KEY-14: PTT and SIDE1 still work (PTT through key_down/key_up; SIDE1 does nothing on screen yet).
-            if !matches!(e.key, Key::Ptt | Key::Side(1)) {
+            if !matches!(e.key, Key::Ptt(_) | Key::Side(1)) {
                 self.locked_toast();
             }
             return;
