@@ -108,7 +108,10 @@ pub(crate) fn key<C>(app: &mut App, t: &Table<C>, row: u8, e: KeyEvent) -> Act {
         (Key::Menu, Short) => {
             match t.go[row as usize] {
                 Go::Open(d) => app.open(d),
-                Go::Quick(row) => app.screen = Screen::Quick(super::quick::Quick { row }),
+                Go::Quick(row) => {
+                    app.push_back(); // BACK returns to the table
+                    app.screen = Screen::Quick(super::quick::Quick { row });
+                }
                 Go::Later => app.show_toast(t.rows[row as usize].0.as_bytes(), b"setting comes next", false),
             }
             Act::Opened

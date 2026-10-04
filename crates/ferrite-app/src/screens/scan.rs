@@ -1,8 +1,8 @@
 //! The scan screen (manual chapter 14, SCAN-1 to SCAN-15; no mock-up): SIDE2 on home starts a scan on the
 //! active slot and opens this screen. It shows the target, the resume rule, where the scan is, the hits (when,
 //! what, how strong) and the skip count (SCAN-7). \* skips the current hit for this scan (SCAN-11, KEY-18),
-//! digits add or remove zones 0-9 from the set (SCAN-3), SIDE2 stops (SCAN-1), BACK goes home with the scan
-//! still running (it shows on the card).
+//! digits add or remove zones 0-9 from the set (SCAN-3), SIDE2 stops (SCAN-1), BACK goes back (home: SIDE2
+//! starts it there) with the scan still running (it shows on the card).
 
 use super::activity::Hit;
 use super::shared::*;
@@ -71,7 +71,7 @@ impl View for Scan {
                 b.push(if app.radio.zones & 1 << d != 0 { b"added" } else { b"removed" });
                 app.show_toast(b.as_bytes(), b"", false);
             }
-            (Key::Exit, Press::Short) => app.go_home(),
+            (Key::Exit, Press::Short) => app.back(), // the scan keeps running
             _ => {}
         }
     }
@@ -206,9 +206,9 @@ impl View for Scan {
 
     fn hints(self, app: &App) -> Hints {
         if app.slot(self.slot).on_channel() {
-            Hints::new(&[("*", "Skip"), ("0-9", "Zones"), ("SIDE2", "Stop"), ("BACK", "Home")])
+            Hints::new(&[("*", "Skip"), ("0-9", "Zones"), ("SIDE2", "Stop"), ("BACK", "Back")])
         } else {
-            Hints::new(&[("*", "Skip"), ("SIDE2", "Stop"), ("BACK", "Home")])
+            Hints::new(&[("*", "Skip"), ("SIDE2", "Stop"), ("BACK", "Back")])
         }
     }
 }

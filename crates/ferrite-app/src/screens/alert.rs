@@ -85,7 +85,7 @@ impl View for Alert {
                 app.go_home();
                 app.open(Dest::EventLog);
             }
-            (Key::Exit, Press::Short) => app.go_home(),
+            (Key::Exit, Press::Short) => app.back(), // KEY-5: back one level, to the screen it came over
             _ => {}
         }
     }
@@ -140,9 +140,9 @@ impl View for Alert {
 
     fn hints(self, _: &App) -> Hints {
         if self.silenced {
-            Hints::new(&[("OK", "Log"), ("BACK", "Home")])
+            Hints::new(&[("OK", "Log"), ("BACK", "Back")])
         } else {
-            Hints::new(&[("OK", "Silence"), ("Hold MENU", "Log"), ("BACK", "Home")])
+            Hints::new(&[("OK", "Silence"), ("Hold MENU", "Log"), ("BACK", "Back")])
         }
     }
 }

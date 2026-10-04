@@ -218,10 +218,10 @@ fn quick_settings() {
     t.knob(1);
     assert_eq!(t.app.watch(), 2);
     assert!(t.cmds().contains(&RadioCmd::Watch(0b111)));
-    t.tap(Key::Digit(0)); // advanced, then BACK returns to quick (MENU-24)
+    t.tap(Key::Digit(0)); // advanced, then BACK returns to quick where it was (MENU-24)
     assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 0, from_quick: true }));
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 9 }));
+    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 6 }));
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
 }
@@ -340,7 +340,7 @@ fn shortcuts_and_menu_paths() {
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 8, from_quick: true }), "keeps the place");
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 9 }));
+    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 0 }));
     t.tap(Key::Digit(4)); // MENU 4, OK: tones
     t.tap(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Tones(_)));
@@ -644,3 +644,63 @@ mod radio_activity;
 #[path = "tests_d.rs"]
 mod d;
 
+
+/// One BACK rule everywhere (KEY-5, MENU-24): short BACK goes back one level, to the screen this one was opened
+/// from; hold BACK goes home from anywhere. Paths that used to jump home: the Status page's Watch row (quick
+/// settings), edit in place and the channel editor, scan, an alert, the shortcut map.
+#[test]
+fn back_is_one_level_hold_back_is_home() {
+    let mut t = T::new();
+    // Status page -> Watch (quick settings) -> BACK -> Status -> BACK -> home
+    t.tap(Key::Hash);
+    assert!(matches!(t.app.screen(), Screen::Status(_)));
+    for _ in 0..5 {
+        t.tap(Key::Down); // Watch
+    }
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 6 }));
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Status(s) if s.row == 5), "back to the Status page, on its row");
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
+    // MENU 0 0 (Status from advanced) -> BACK -> advanced -> BACK -> home
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(0));
+    assert!(matches!(t.app.screen(), Screen::Status(_)));
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Advanced(_)));
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
+    // Quick -> value editor -> BACK -> quick; edit in place -> BACK -> home
+    t.tap(Key::Menu);
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Value(_)));
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Quick(_)));
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
+    t.hold(Key::Slot);
+    assert!(matches!(t.app.screen(), Screen::Edit(_)));
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
+    // The channel editor from quick settings (MENU 8) -> BACK -> quick
+    t.tap(Key::VfoMem);
+    t.tap(Key::Menu);
+    t.tap(Key::Digit(8));
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::ChEdit(_)));
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Quick(_)), "the editor goes back to quick settings");
+    // Hold BACK: home from three levels down.
+    t.tap(Key::Digit(0));
+    t.tap(Key::Digit(9));
+    assert!(matches!(t.app.screen(), Screen::Group(_)));
+    t.hold(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
+    // The key test is left with hold BACK; a short BACK is a key it shows.
+    t.app.open(crate::screens::nav::Dest::KeyTest);
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::KeyTest(_)), "short BACK is tested, not obeyed");
+    t.hold(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home);
+}

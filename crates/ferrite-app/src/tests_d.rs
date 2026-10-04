@@ -241,7 +241,7 @@ fn hf_mode() {
     assert_eq!(t.app.set.hf.freq, 958_900);
     t.cmds();
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Home);
+    assert!(matches!(t.app.screen(), Screen::Group(g) if g.g == 3), "BACK: one level, to the menu it came from");
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: false, .. })), "leaving resumes everything (HF-4)");
 }
 
@@ -265,7 +265,10 @@ fn alert_screen() {
     assert_eq!(t.app.screen().name(), "Event log");
     t.app.notify(b"SAME", b"Tornado warning", true);
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Home);
+    assert_eq!(t.app.screen().name(), "Event log", "BACK: one level, to the screen it came over");
+    t.app.notify(b"SAME", b"Tornado warning", true);
+    t.hold(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home, "hold BACK: home");
 }
 
 /// MENU-12 to MENU-18 on a group: the knob changes a wired value live, # resets it, greyed items say why;

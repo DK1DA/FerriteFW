@@ -100,6 +100,13 @@ pub struct Setup {
     tap_at: u8,
 }
 
+/// The callsign: setup's callsign page on its own (SETUP-5: the same setting; MENU 0 8 7 1, and the fix for a
+/// transmit refused for no callsign). OK and BACK return to the screen it was opened from.
+pub(crate) fn callsign(app: &mut App) {
+    app.open(super::nav::Dest::Setup);
+    app.screen = Screen::Setup(Setup::single(1));
+}
+
 impl Setup {
     /// From the start (MENU 0 9 8 1).
     pub fn new(first: bool) -> Self {

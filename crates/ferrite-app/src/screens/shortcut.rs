@@ -53,7 +53,7 @@ impl View for Shortcut {
                 app.go_home();
                 nav::shortcut(app, d, store);
             }
-            (Key::Exit, Press::Short) => app.go_home(),
+            (Key::Exit, Press::Short) => app.back(),
             _ => {}
         }
     }

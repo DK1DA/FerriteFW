@@ -7,7 +7,7 @@
 //!
 //! Keys (HF-12, HF-13): knob or ▲▼ tune by the step (SIDE2 + knob: 1 MHz), ◀▶ band, * mode (a point while
 //! typing), digits a frequency (kHz, or MHz with a point; OK enters), # the recent list, hold MENU the options,
-//! BACK home. SLOT, V/M and SIDE2 alone do nothing here. PTT transmits on the HF frequency without going home
+//! BACK leaves HF mode, one level back. SLOT, V/M and SIDE2 alone do nothing here. PTT transmits on the HF frequency without going home
 //! (HF-23), and refuses on the SI4732's frequencies and modes (HF-24).
 
 use super::activity::Mode;
@@ -324,7 +324,8 @@ impl View for Hf {
         use Press::*;
         if !self.loaded {
             if (e.key, e.press) == (Key::Exit, Short) {
-                app.go_home(); // HF-3: BACK during the load cancels and goes home
+                app.stop_mode(); // HF-3: BACK during the load cancels, one level back
+                app.back();
             }
             return;
         }
@@ -401,7 +402,10 @@ impl View for Hf {
             (Key::Hash, Short) => app.open(Dest::HfRecent),
             (Key::Menu, Long) => Hf { menu: true, row: 0, ..self }.put(app), // MENU-25: hold, this screen's options
             (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves HF mode", false), // HF-13
-            (Key::Exit, Short) => app.go_home(), // HF-4
+            (Key::Exit, Short) => {
+                app.stop_mode(); // HF-4: BACK leaves HF mode, one level back
+                app.back();
+            }
             _ => {}
         }
     }

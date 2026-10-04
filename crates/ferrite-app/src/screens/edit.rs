@@ -51,7 +51,7 @@ impl View for Edit {
             (Key::Down, Short | Repeat) => app.screen = mv((r + 1).min(2), c),
             (Key::Left, Short | Repeat) => app.screen = mv(r, c.saturating_sub(1)),
             (Key::Right, Short | Repeat) => app.screen = mv(r, (c + 1).min(2)),
-            (Key::Exit | Key::Slot, Short) => app.go_home(), // EDIT-6
+            (Key::Exit | Key::Slot, Short) => app.back(), // EDIT-6: leaves the edit, one level back
             (Key::Star, Short) => app.do_undo(),
             (Key::Hash, Short) => app.reset(GRID[cell as usize]),
             // OK on a cell: its bigger editor (MENU-17).

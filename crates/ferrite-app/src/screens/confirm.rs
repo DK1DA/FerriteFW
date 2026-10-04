@@ -125,10 +125,7 @@ impl View for Confirm {
                     app.back();
                 }
             },
-            (Key::Exit, Press::Short) => match self.ask {
-                Ask::Reset { channels: true } => app.go_home(),
-                _ => app.back(),
-            },
+            (Key::Exit, Press::Short) => app.back(),
             _ => {}
         }
     }

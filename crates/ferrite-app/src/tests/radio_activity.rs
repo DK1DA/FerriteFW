@@ -333,7 +333,7 @@ fn hf_mode() {
     ptt(&mut t, false);
     assert!(matches!(t.app.screen(), Screen::Hf(_)), "release: back to HF mode");
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Home);
+    assert!(matches!(t.app.screen(), Screen::Group(_)), "BACK: one level, to the menu");
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: false, .. })));
 }
 
@@ -490,4 +490,17 @@ fn fonts_cover_group_b() {
             }
         }
     }
+}
+
+/// A transmit refused for no callsign: OK opens just the callsign page (not the whole setup), and leaving it
+/// returns to where the refusal came over.
+#[test]
+fn no_callsign_fix_is_the_callsign_page() {
+    use crate::screens::setup::Setup;
+    let mut t = ready();
+    crate::screens::transmit::refuse(&mut t.app, 0, Refusal::NoCallsign);
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen(), Screen::Setup(Setup::single(1)), "the callsign page alone");
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home, "back where it was");
 }

@@ -44,10 +44,10 @@ impl View for Quick {
             (Key::Up, Short | Repeat) => app.screen = Screen::Quick(Quick { row: (row + 9) % 10 }),
             (Key::Down, Short | Repeat) => app.screen = Screen::Quick(Quick { row: (row + 1) % 10 }),
             (Key::Left | Key::Right, Short | Repeat) => app.change(item, if e.key == Key::Right { 1 } else { -1 }), // MENU-16
-            (Key::Digit(0), Short) => app.screen = Screen::Advanced(Advanced { row: 0, from_quick: true }),
+            (Key::Digit(0), Short) => to_advanced(app),
             (Key::Digit(d), Short) => app.screen = Screen::Quick(Quick { row: d - 1 }), // MENU-5
             (Key::Menu, Short) => match item {
-                Item::Advanced => app.screen = Screen::Advanced(Advanced { row: 0, from_quick: true }),
+                Item::Advanced => to_advanced(app),
                 // MENU 8: save the VFO as a channel, or edit the channel.
                 Item::Channel if app.slots[app.active as usize].on_channel() => app.open(Dest::ChannelEdit),
                 Item::Channel => app.open(Dest::SaveChannel),
@@ -55,7 +55,7 @@ impl View for Quick {
             },
             (Key::Hash, Short) => app.reset(item), // MENU-18
             (Key::Star, Short) => app.do_undo(),   // MENU-22
-            (Key::Exit, Short) => app.go_home(),
+            (Key::Exit, Short) => app.back(),
             _ => {}
         }
     }
@@ -111,11 +111,17 @@ impl View for Quick {
 
     fn hints(self, app: &App) -> Hints {
         if app.undo.is_some() {
-            Hints::new(&[("Knob", "Change"), ("*", "Undo"), ("BACK", "Home")])
+            Hints::new(&[("Knob", "Change"), ("*", "Undo"), ("BACK", "Back")])
         } else if self.row == 9 {
-            Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Home")])
+            Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")])
         } else {
-            Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("BACK", "Home")])
+            Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("BACK", "Back")])
         }
     }
+}
+
+/// MENU 0 from quick settings: advanced settings, one level down (BACK returns here, MENU-24).
+fn to_advanced(app: &mut App) {
+    app.push_back();
+    app.screen = Screen::Advanced(Advanced { row: 0, from_quick: true });
 }

@@ -8,7 +8,7 @@
 //! resets (MENU-18), BACK goes up keeping the place (MENU-24).
 
 use super::nav::{self, Dest};
-use super::setup::{ExtendTx, Setup};
+use super::setup::ExtendTx;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
@@ -625,9 +625,7 @@ impl Group {
         }
         match p {
             [8, 7, 1] => {
-                // The callsign: setup's callsign page on its own (SETUP-5: the same setting).
-                app.open(Dest::Setup);
-                app.screen = Screen::Setup(Setup::single(1));
+                super::setup::callsign(app);
             }
             [8, 9] if ok => set_extend(app, !app.set.extend_tx),
             [5, 3] if ok => app.show_toast(b"Beacon", b"APRS comes in milestone 5", false),

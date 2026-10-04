@@ -19,7 +19,7 @@ use ufmt::uwrite;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Status {
     pub row: u8,
-    /// Opened from advanced settings (MENU 0 0): BACK returns there, else home.
+    /// Opened from advanced settings (MENU 0 0; BACK returns there by the BACK stack).
     pub from_menu: bool,
 }
 
@@ -185,9 +185,7 @@ impl View for Status {
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
         match table::key(app, &PAGE, self.row, e) {
             Act::Move(row) => app.screen = Screen::Status(Status { row, ..self }),
-            Act::Back => {
-                app.screen = if self.from_menu { Screen::Advanced(super::advanced::Advanced { row: 0, from_quick: false }) } else { Screen::Home }
-            }
+            Act::Back => app.back(),
             Act::Opened | Act::None => {}
         }
     }

@@ -15,6 +15,7 @@
 //! | Home | hold SLOT / MENU / hold MENU / # | edit in place (on a channel: [`Dest::ChannelEdit`]) / quick / advanced / Status |
 //! | Home | SIDE2 (SCAN-1) / SIDE1 + knob (SQL-10) | [`Dest::Scan`] / [`Dest::Squelch`] |
 //! | Any screen | PTT down (KEY-7) | home, then [`Dest::Transmit`], or [`Dest::TxRefused`] (TX-20) or [`Dest::Emergency`] (TX-3); PTT up: home ([`super::View::ptt`]) |
+//! | Any screen | BACK / hold BACK (KEY-5, MENU-24) | back one level, to the screen it was opened from / home (not the modal ones: PIN at power on, link write, power off) |
 //! | Quick settings | OK on a row (MENU-17) | [`Dest::Value`] (tones: [`Dest::Tones`]); MENU 8: [`Dest::SaveChannel`] or [`Dest::ChannelEdit`] |
 //! | Edit in place | OK on a cell | [`Dest::Value`] / [`Dest::Tones`] |
 //! | Advanced (MENU 0) | 1-9 or OK | [`Dest::Group`]; inside, digits follow [`MENU0`] (MENU-5) |

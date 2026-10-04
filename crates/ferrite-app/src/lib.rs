@@ -571,7 +571,8 @@ impl App {
         if self.screen.modal() {
             return self.screen.key(self, e, store); // the PIN at power on, power off, a link write
         }
-        // Anywhere: hold BACK goes home (KEY-5); hold # toggles the lock (KEY-13).
+        // One BACK rule (KEY-5): short BACK is the screen's, and goes back one level ([`App::back`]); hold BACK
+        // goes home from anywhere but the modal screens. Hold # toggles the lock (KEY-13).
         match (e.key, e.press) {
             (Key::Exit, Long) => return self.go_home(),
             (Key::Hash, Long) if self.locked && self.set.pin_mode == 2 => {
@@ -621,7 +622,9 @@ impl App {
         }
     }
 
-    /// BACK on a screen opened with [`App::open`]: the screen it was opened from, or home (MENU-24).
+    /// Short BACK, on every screen (KEY-5, MENU-24): back one level, to the screen this one was opened from
+    /// ([`App::open`] or [`App::push_back`] remembered it), or home when it was opened from home. Screens with
+    /// steps of their own (an edit, a sub-page, typed digits) take one step back first.
     fn back(&mut self) {
         match self.back.iter_mut().rev().find(|b| b.is_some()).and_then(|b| b.take()) {
             Some(s) if s != Screen::Home => self.screen = s,

@@ -149,7 +149,7 @@ impl View for ChEdit {
             }
             (Key::Left, Short | Repeat) if cell >= GRID0 && col > 0 => app.screen = to(cell - 1),
             (Key::Right, Short | Repeat) if cell >= GRID0 && col < 2 => app.screen = to(cell + 1),
-            (Key::Exit | Key::Slot, Short) => app.go_home(), // EDIT-6
+            (Key::Exit | Key::Slot, Short) => app.back(), // EDIT-6: leaves the edit, one level back
             (Key::Star, Short) => {
                 app.do_undo();
                 place(app, store);

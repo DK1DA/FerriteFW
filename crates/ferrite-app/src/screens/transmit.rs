@@ -155,7 +155,7 @@ fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
         Refusal::Busy => Some(("MENU 0 8 8", "Busy lockout", Dest::Group(8))),
         Refusal::Battery => Some(("#", "Status page", Dest::Status)),
         Refusal::Locked | Refusal::RxOnlyBuild => Some(("MENU 0 9 9", "About", Dest::About)),
-        Refusal::NoCallsign => Some(("MENU 0 9 8 1", "Setup", Dest::Setup)),
+        Refusal::NoCallsign => Some(("MENU 0 8 7 1", "Callsign", Dest::Setup)),
         Refusal::InProgress | Refusal::ReceiveOnlyHere | Refusal::Crossband => None,
     }
 }
@@ -360,9 +360,17 @@ impl View for TxRefused {
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
         match (e.key, e.press) {
             (Key::Menu, Press::Short) => {
-                if let Some((_, _, d)) = fix(app, self.why) {
-                    app.screen = Screen::Home;
-                    app.open(d);
+                // The fix replaces this screen: its BACK returns to where the refusal came over.
+                match fix(app, self.why) {
+                    Some(_) if self.why == Refusal::NoCallsign => {
+                        app.back();
+                        super::setup::callsign(app); // just the callsign page
+                    }
+                    Some((_, _, d)) => {
+                        app.back();
+                        app.open(d);
+                    }
+                    None => {}
                 }
             }
             (Key::Exit, Press::Short) => app.back(),
@@ -421,7 +429,7 @@ impl View for TxRefused {
             Refusal::InProgress => a.set(b"Another transmission is in progress."),
             Refusal::NoCallsign => {
                 a.set(b"Automatic transmit needs a callsign.");
-                more = b"Set it in setup:";
+                more = b"OK sets it, on its own page:";
             }
             Refusal::RxOnlyBuild => {
                 a.set(b"This build of Ferrite has no transmit code.");
@@ -487,7 +495,7 @@ impl View for Emergency {
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
         if (e.key, e.press) == (Key::Exit, Press::Short) {
-            app.go_home();
+            app.back();
         }
     }
 

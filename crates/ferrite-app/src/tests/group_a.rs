@@ -329,7 +329,8 @@ fn confirm_reset() {
     assert_eq!(t.app.slot(0).cfg().squelch, 4, "settings back to default");
     assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == Ask::Reset { channels: true }));
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Home);
+    assert!(matches!(t.app.screen(), Screen::Group(_)), "BACK: one level, to the menu the reset came from");
+    t.hold(Key::Exit);
     assert!(t.writes().is_empty(), "channels kept");
     // A channel delete names it and clears it from the slot.
     t.tap(Key::VfoMem);

@@ -23,7 +23,7 @@ use ufmt::uwrite;
 pub struct Advanced {
     /// The highlighted group, 0-8 (MENU 0 1 to MENU 0 9).
     pub row: u8,
-    /// Opened from quick settings: BACK returns there (MENU-24), else home.
+    /// Opened from quick settings (BACK returns there by the BACK stack, like everywhere: MENU-24).
     pub from_quick: bool,
 }
 
@@ -64,13 +64,14 @@ impl View for Advanced {
         match (e.key, e.press) {
             (Key::Up, Short | Repeat) => app.screen = Screen::Advanced(Advanced { row: (row + 8) % 9, from_quick }),
             (Key::Down, Short | Repeat) => app.screen = Screen::Advanced(Advanced { row: (row + 1) % 9, from_quick }),
-            (Key::Digit(0), Short) => app.screen = Screen::Status(Status { row: 0, from_menu: true }), // SBAR-13
+            (Key::Digit(0), Short) => {
+                // SBAR-13: the Status page, one level down
+                app.push_back();
+                app.screen = Screen::Status(Status { row: 0, from_menu: true });
+            }
             (Key::Digit(d), Short) => open(app, d - 1),
             (Key::Menu, Short) => open(app, row),
-            (Key::Exit, Short) => {
-                // MENU-24: up one level, keeping the place
-                app.screen = if from_quick { Screen::Quick(super::quick::Quick { row: 9 }) } else { Screen::Home };
-            }
+            (Key::Exit, Short) => app.back(), // MENU-24: up one level
             _ => {}
         }
     }
