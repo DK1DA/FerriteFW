@@ -108,7 +108,7 @@ const G8: [Entry; 9] = [
     (slow!("Extend TX"), slow!("Off"), slow!("Transmit beyond the amateur bands.")),
 ];
 const G9: [Entry; 9] = [
-    (slow!("Keys"), slow!("No auto lock"), slow!("Auto lock, lock covers, key test.")),
+    (slow!("Keys"), slow!("No auto lock"), slow!("Auto lock, lock covers, key test, shortcuts.")),
     (slow!("Connections"), slow!("BT off"), slow!("Bluetooth, paired devices, link.")),
     (slow!("PIN and lock"), slow!("Off"), slow!("PIN, channel-only mode.")),
     (slow!("Region"), slow!("Not set"), slow!("Your amateur bands and defaults.")),
@@ -236,6 +236,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Auto lock"), slow!("Off"), slow!("Lock the keys after a time.")),
         (slow!("Lock covers"), slow!("Keys"), slow!("Keys, or keys and PTT.")),
         (slow!("Key test"), slow!(""), slow!("Each key's code, name and press.")),
+        (slow!("Shortcuts"), slow!(""), slow!("What holding each digit on home does.")),
     ]),
     ((9, 2), &[
         (slow!("Bluetooth"), slow!("Off"), slow!("The Bluetooth link to the web app.")),

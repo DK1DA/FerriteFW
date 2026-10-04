@@ -277,19 +277,21 @@ fn frequency_counter() {
     assert!(t.cmds().contains(&RadioCmd::Counter(false)), "TSRCH-8: it only ever received");
 }
 
-/// HOME-8: the map shows while the digit is held; the shortcut runs on release.
+/// HOME-8: hold 0 puts the active slot on the home channel at the long press; the toast names the channel.
 #[test]
-fn shortcut_map_while_a_digit_is_held() {
+fn hold_0_home_channel_toast() {
     let mut t = T::new();
     let s = store();
-    t.app.key_down(Key::Digit(2), t.t, &s);
+    let n = s.by_number(0).expect("a channel").num;
+    t.app.set.home_ch = Some(n);
+    t.app.key_down(Key::Digit(0), t.t, &s);
     t.wait(800);
-    assert!(matches!(t.app.screen(), Screen::Shortcut(_)));
-    assert_eq!(t.app.slot(0).cfg().power, 0, "not yet");
-    t.app.key_up(Key::Digit(2), t.t, &s);
-    t.wait(100);
     assert_eq!(t.app.screen(), Screen::Home);
-    assert_eq!(t.app.slot(0).cfg().power, 1, "TX power cycled on release");
+    assert!(t.app.slot(0).on_channel());
+    let toast = t.app.toast.expect("a toast");
+    assert_eq!(toast.head.as_bytes(), b"Home channel");
+    assert!(!toast.body.is_empty());
+    t.app.key_up(Key::Digit(0), t.t, &s);
 }
 
 /// SQL-10: SIDE1 + knob shows the squelch screen while SIDE1 is held.

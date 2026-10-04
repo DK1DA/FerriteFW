@@ -9,7 +9,7 @@
 //!
 //! | From | Keys | Goes to |
 //! | --- | --- | --- |
-//! | Home | hold 0-9 ([`hold_digit`]: the shortcut map, HOME-8; the release runs [`shortcut`], KEY-11) | 0 home channel, 1 band scope, 2 TX power, 3 squelch, 4 watch, 5 tones, 6 step, 7 shift, 8 offset, 9 zones |
+//! | Home | hold 0-9 ([`hold_digit`]: runs [`shortcut`] at the long press, a toast names it, HOME-8, KEY-11) | 0 home channel, 1 band scope, 2 TX power, 3 squelch, 4 watch, 5 tones, 6 step, 7 shift, 8 offset, 9 zones |
 //! | Home | a digit (NAV-4, VFO-11) | [`Dest::Entry`] with the digit |
 //! | Home | hold V/M on a VFO (VFO-9) | [`Dest::SaveChannel`] |
 //! | Home | hold SLOT / MENU / hold MENU / # | edit in place (on a channel: [`Dest::ChannelEdit`]) / quick / advanced / Status |
@@ -321,7 +321,7 @@ pub const ALL: [Dest; 70] = {
 
 /// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 59] = [
+pub const MENU0: [(&[u8], Dest); 60] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -368,6 +368,7 @@ pub const MENU0: [(&[u8], Dest); 59] = [
     (&[8, 7], Dest::Sub(8, 7)),
     (&[9, 1], Dest::Sub(9, 1)),
     (&[9, 1, 3], Dest::KeyTest),
+    (&[9, 1, 4], Dest::ShortcutMap),
     (&[9, 2], Dest::Sub(9, 2)),
     (&[9, 2, 2], Dest::Paired),
     (&[9, 2, 3], Dest::LinkStatus),
@@ -405,7 +406,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::Tones => Screen::Tones(tones::Tones::new(app)),
         Dest::Text(to) => Screen::Text(text::Text::new(to)),
         Dest::Confirm => Screen::Confirm(confirm::Confirm { ask: confirm::Ask::Reset { channels: false }, boot: false }),
-        Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut { digit: 0 }),
+        Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut),
         Dest::Quick => Screen::Quick(Quick { row: 0 }),
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
         Dest::Status => Screen::Status(Status { row: 0, from_menu: false }),
@@ -471,12 +472,20 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
     }
 }
 
-/// A digit held on home: the shortcut map, which runs the shortcut when the digit comes up (HOME-8).
-pub fn hold_digit(app: &mut App, d: u8) {
-    app.screen = Screen::Shortcut(super::shortcut::Shortcut { digit: d });
+/// A digit held on home: the shortcut runs at the long press, while still held; the release does nothing (HOME-8,
+/// KEY-3). No page during the hold: a toast names what ran.
+pub fn hold_digit(app: &mut App, d: u8, store: &impl ChannelStore) {
+    let before = app.screen;
+    shortcut(app, d, store);
+    // A shortcut that opens a screen: a toast names it ("Band scope  hold 1"). Toggles and errors toast their own.
+    if app.screen != before {
+        let mut b = Buf::<8>::new();
+        let _ = uwrite!(b, "hold {}", d);
+        app.show_toast(super::shortcut::SHORTCUTS[d as usize % 10].as_bytes(), b.as_bytes(), false);
+    }
 }
 
-/// The ten fixed shortcuts (KEY-11), run when the held digit is released. 2-9 follow stock's factory defaults
+/// The ten fixed shortcuts (KEY-11), run at the long press. 2-9 follow stock's factory defaults
 /// (TX power, squelch, dual standby, CTCSS/DCS, step, shift direction, offset, zone); 0 and 1 are Ferrite's.
 pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
     let on_ch = app.slot(app.active).on_channel();
@@ -518,6 +527,9 @@ fn home_channel(app: &mut App, store: &impl ChannelStore) {
             let s = &mut app.slots[a];
             (s.zone, s.pos, s.ch, s.vfo_mode) = (c.zone, pos, Some(c), false);
             app.send_slot(a as u8);
+            let mut l = Buf::<32>::new();
+            crate::slot::chan_label(c.num, &mut l);
+            app.show_toast(b"Home channel", l.as_bytes(), false);
         }
         None => app.show_toast(b"No home channel.", b"Hold SLOT on a channel", false),
     }

@@ -370,23 +370,60 @@ fn pin_at_unlock() {
     t.app.key_up(Key::PTT, t.t + 100, &s);
 }
 
-/// HOME-8: holding a digit shows the map; the release runs the shortcut; BACK cancels.
+/// HOME-8: holding a digit runs its shortcut at the long press, while held, with a toast; the release does
+/// nothing. The map is a reference page at MENU 0 9 1 4.
 #[test]
 fn shortcut_map() {
     let mut t = T::new();
     let s = store();
     t.app.key_down(Key::Digit(2), t.t, &s);
     t.wait(800);
-    assert!(matches!(t.app.screen(), Screen::Shortcut(_)));
-    assert_eq!(t.app.slot(0).cfg().power, 0, "nothing yet");
+    assert_eq!(t.app.screen(), Screen::Home, "no page during the hold");
+    assert_eq!(t.app.slot(0).cfg().power, 1, "run at the long press");
+    assert_eq!(t.app.toast.map(|x| x.head).as_ref().map(|b| b.as_bytes()), Some(&b"TX power"[..]));
     t.app.key_up(Key::Digit(2), t.t, &s);
-    assert_eq!(t.app.screen(), Screen::Home);
-    assert_eq!(t.app.slot(0).cfg().power, 1, "run at the release");
-    t.app.key_down(Key::Digit(7), t.t, &s);
+    assert_eq!(t.app.slot(0).cfg().power, 1, "the release does nothing");
+    // A screen-opening shortcut names itself.
+    t.app.key_down(Key::Digit(1), t.t, &s);
     t.wait(800);
+    assert!(matches!(t.app.screen(), Screen::Scope(_)), "{:?}", t.app.screen());
+    let toast = t.app.toast.expect("a toast");
+    assert_eq!((toast.head.as_bytes(), toast.body.as_bytes()), (&b"Band scope"[..], &b"hold 1"[..]));
+    t.app.key_up(Key::Digit(1), t.t, &s);
+    assert!(matches!(t.app.screen(), Screen::Scope(_)), "the release stays");
+    // The reference page.
+    t.app.go_home();
+    t.app.open(crate::screens::nav::menu0(&[9, 1, 4]).expect("0 9 1 4"));
+    assert!(matches!(t.app.screen(), Screen::Shortcut(_)));
     t.tap(Key::Exit);
-    t.app.key_up(Key::Digit(7), t.t, &s);
-    assert_eq!(t.app.slot(0).cfg().offset, 0, "cancelled");
+    assert_eq!(t.app.screen(), Screen::Home);
+}
+
+/// The digit's release after a shortcut opened a screen doesn't reach that screen: hold 3 opens the squelch
+/// editor and the release leaves the level as it was.
+#[test]
+fn shortcut_release_does_not_leak() {
+    let mut t = T::new();
+    let s = store();
+    let sq = t.app.slot(0).cfg().squelch;
+    t.app.key_down(Key::Digit(3), t.t, &s);
+    t.wait(800);
+    assert!(matches!(t.app.screen(), Screen::Value(_)), "{:?}", t.app.screen());
+    t.app.key_up(Key::Digit(3), t.t, &s);
+    t.wait(100);
+    assert!(matches!(t.app.screen(), Screen::Value(_)));
+    assert_eq!(t.app.slot(0).cfg().squelch, sq, "the release typed nothing");
+    // Hold 5: tones; hold 9: zones; hold 8 on a VFO: the offset editor. Each stays open after the release.
+    for d in [5, 9, 8] {
+        t.app.go_home();
+        t.app.key_down(Key::Digit(d), t.t, &s);
+        t.wait(800);
+        let open = t.app.screen();
+        assert_ne!(open, Screen::Home, "hold {d}");
+        t.app.key_up(Key::Digit(d), t.t, &s);
+        t.wait(100);
+        assert_eq!(t.app.screen(), open, "hold {d}: the release leaves it");
+    }
 }
 
 /// Every string the group's screens draw is in the fonts (as `fonts_have_every_character_the_ui_draws`).
