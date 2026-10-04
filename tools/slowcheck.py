@@ -62,7 +62,8 @@ def main(elf):
         for i in range(0, size - 3, 4):
             v = struct.unpack_from("<I", data, off + i)[0]
             if v & 1 and lo <= v & ~1 < hi:
-                ptrs.add(owner(a + i))
+                # Unnamed constants (jump tables) take the name of the symbol before them: show the target too.
+                ptrs.add(f"{name} 0x{a + i:08x} (after {owner(a + i)[:60]}) -> {owner(v & ~1)[:80]}")
     cur = None
     for l in dis.splitlines():  # literal pools in fast code
         m = re.match(r"^([0-9a-f]+) <(.*)>:", l)
@@ -71,8 +72,10 @@ def main(elf):
             continue
         m = re.search(r"\.word\s+0x([0-9a-f]+)", l)
         if cur and m and int(m.group(1), 16) & 1 and lo <= (int(m.group(1), 16) & ~1) < hi:
-            ptrs.add(cur)
-    print("fast data holding pointers into .slow_text:", sorted(ptrs) or "none")
+            ptrs.add(f"literal in {cur[:80]} -> {owner(int(m.group(1), 16) & ~1)[:80]}")
+    print("fast data holding pointers into .slow_text:", "none" if not ptrs else "")
+    for p in sorted(ptrs):
+        print("   ", p)
 
     vt_addr, vt_off, vt_size = sec[".vector_table"]
     names = {a: f for f, a in start.items()}
