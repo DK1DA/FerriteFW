@@ -1,0 +1,556 @@
+//! The interactive simulator without a window: the firmware's own UI (`ferrite-app` drawing through
+//! `ferrite-ui`), a fake three-slot radio and the radio's front panel ([`crate::face`]), driven by key, mouse and
+//! event calls and stepped by the caller's clock. The desktop window (`cargo simw`, minifb) and the web page
+//! (`sim-web`, wasm) are thin shells over it.
+//!
+//! Time is the caller's: [`SimCore::step`] takes milliseconds since start. The status bar clock comes from
+//! [`SimCore::set_clock`] (UTC seconds), which the desktop sets from the PC and the page from the browser.
+
+use crate::face::{Face, Part};
+use crate::fake::{self, FakeRadio};
+use ferrite_app::sample::Sample;
+use ferrite_app::screens::nav::{self, Dest};
+use ferrite_app::{App, Screen as AppScreen};
+use ferrite_core::freq;
+use ferrite_core::keys::Key;
+use ferrite_core::msg::{Device, GpsState};
+use ferrite_core::VERSION;
+use ferrite_ui::boot::{self, BootInfo, Check, State};
+use ferrite_ui::fb::FrameBuffer;
+use ferrite_ui::gfx::Gfx;
+use ferrite_ui::panel::{Panel, H, W};
+
+/// The PC keyboard map, as the desktop window has it (the web page uses the same keys).
+pub const KEYMAP: &str = "\
+keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits · , = * · . = #
+      S = SLOT · V = V/M · Q = SIDE1 · W = SIDE2 · Space = PTT A · [ ] or mouse wheel = knob
+      or click the radio's keys (hold the mouse for long presses; hold SIDE1 + wheel = squelch)
+      hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
+      M message · N alert · F5 GPS · F6 Bluetooth · F7 battery · F8 power off (or click VOL: the power switch) · F9 empty battery
+      F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 6)
+      L home layout · B a beacon (automatic transmit) · hold Enter while booting: the settings reset
+      F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
+
+/// The largest whole scale offered.
+pub const MAX_SCALE: usize = 6;
+
+/// How long the boot screen shows (ms), and how long "Saving..." shows before the radio goes dark.
+const BOOT_MS: u32 = 2000;
+const SAVE_MS: u32 = 1500;
+
+/// The frame buffer, plus a record of what each redraw touched.
+struct Counting {
+    fb: FrameBuffer,
+    rects: Vec<(i32, i32, i32, i32)>,
+    pixels: u64,
+}
+
+impl Panel for Counting {
+    fn window(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
+        self.rects.push((x0, y0, x1, y1));
+        self.fb.window(x0, y0, x1, y1);
+    }
+    fn push(&mut self, color: u16, count: u32) {
+        self.pixels += count as u64;
+        self.fb.push(color, count);
+    }
+    fn push_buf(&mut self, px: &[u16]) {
+        self.pixels += px.len() as u64;
+        self.fb.push_buf(px);
+    }
+}
+
+/// What the radio (or the world) would report, as the simulator's event keys send it. Each calls the App hook the
+/// firmware calls.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Event {
+    /// M: an APRS message arrives.
+    Message,
+    /// N: the fake decoder's SAME warning, as if heard on slot C.
+    Alert,
+    /// F5: GPS off, searching, fix.
+    Gps,
+    /// F6: Bluetooth on/off.
+    Bluetooth,
+    /// F7: battery normal, low, cut-off.
+    Battery,
+    /// F8, or a click on VOL: the power switch (off: "Saving...", then dark; on: a fresh boot).
+    PowerSwitch,
+    /// F9: an empty battery.
+    EmptyBattery,
+    /// F10: an unknown SSB patch at boot.
+    SsbPatch,
+    /// F11: a write from a new Bluetooth device.
+    LinkWrite,
+    /// X: the crossband repeater.
+    Crossband,
+    /// L: the next home layout.
+    Layout,
+    /// B: a beacon (an automatic transmit).
+    Beacon,
+}
+
+/// A recent redraw region and when it was drawn (ms), for the redraw flash.
+struct Flash {
+    rect: (i32, i32, i32, i32),
+    at: u32,
+}
+
+/// The boot checks the simulator shows: all passed.
+const CHECKS: [Check; 5] = [
+    Check { label: "MCU", value: "AT32F403A", state: State::Ok },
+    Check { label: "SPI flash", value: "4 MB", state: State::Ok },
+    Check { label: "BK4829 VHF", value: "0x4829", state: State::Ok },
+    Check { label: "BK4829 UHF", value: "0x4829", state: State::Ok },
+    Check { label: "SI4732", value: "", state: State::Ok },
+];
+
+pub struct SimCore {
+    app: App,
+    store: Sample,
+    radio: FakeRadio,
+    dev: Device,
+    lcd: Counting,
+    face: Face,
+    scale: usize,
+    out: Vec<u32>,
+    now: u32,
+    /// UTC seconds at `now` = 0, for the status bar clock.
+    clock0: u64,
+    // The power switch: booting until `boot_end`; `off_at` while the app saves before going dark.
+    booting: bool,
+    boot_end: u32,
+    off_at: Option<u32>,
+    off: bool,
+    // Parts held by the keyboard and by the mouse; the knob half last clicked and until when it shows; PTT.
+    kb_held: Vec<usize>,
+    mouse: Option<usize>,
+    knob_flash: (i8, u32),
+    tx: Option<u8>,
+    battery: usize,
+    layout: u8,
+    last_key: String,
+    last_px: u64,
+    flashes: Vec<Flash>,
+}
+
+/// A window position to panel (buffer) pixels: the panel sits 1:1 in the middle of the window.
+pub fn to_panel(m: (f32, f32), win: (usize, usize), buf: (usize, usize)) -> (i32, i32) {
+    let (ox, oy) = ((win.0 as f32 - buf.0 as f32) / 2.0, (win.1 as f32 - buf.1 as f32) / 2.0);
+    ((m.0 - ox).floor() as i32, (m.1 - oy).floor() as i32)
+}
+
+/// The largest whole scale whose panel fits the window; 1 if none does. `sizes[i]` is the panel at scale i + 1.
+pub fn fit_scale(win: (usize, usize), sizes: &[(usize, usize)]) -> usize {
+    sizes.iter().rposition(|&(w, h)| w <= win.0 && h <= win.1).map_or(1, |i| i + 1)
+}
+
+/// RGB565 to 0xRRGGBB.
+pub fn rgb565_to_rgb(c: u16) -> u32 {
+    let r = ((c >> 11) & 31) as u32 * 255 / 31;
+    let g = ((c >> 5) & 63) as u32 * 255 / 63;
+    let b = (c & 31) as u32 * 255 / 31;
+    r << 16 | g << 8 | b
+}
+
+fn blend(a: u32, b: u32) -> u32 {
+    let ch = |s: u32| ((a >> s & 255) + (b >> s & 255)) / 2;
+    ch(16) << 16 | ch(8) << 8 | ch(0)
+}
+
+/// The key a front-panel part sends.
+fn key_of(p: Part) -> Key {
+    match p {
+        Part::Key(k) => k,
+        Part::Ptt(n) => Key::Ptt(n),
+        _ => Key::PTT,
+    }
+}
+
+fn freq_text(f: freq::Freq10) -> String {
+    let mut b = [0u8; 16];
+    let n = freq::format(f, &mut b);
+    String::from_utf8_lossy(&b[..n]).into_owned()
+}
+
+/// The screens [`SimCore::jump`] offers: home, then every destination in the manual's inventory.
+pub fn jump_names() -> impl Iterator<Item = String> {
+    core::iter::once(String::from("Home")).chain(nav::ALL.iter().map(|d| {
+        let (name, _, id) = d.info();
+        format!("{id} {name}")
+    }))
+}
+
+impl SimCore {
+    /// A radio switched on now (the boot screen), the panel at a whole `scale`; `owner_card` boots with the
+    /// sample owner card (MENU 0 7 3 3).
+    pub fn new(scale: usize, owner_card: bool) -> Self {
+        let scale = scale.clamp(1, MAX_SCALE);
+        let store = fake::store();
+        let mut radio = FakeRadio::new();
+        let mut app = fake::app();
+        fake::sample(&mut app, &store, &mut radio); // B on "Club repeater", as in the mock-up
+        if owner_card {
+            ferrite_app::sample::owner_card(app.settings_mut());
+        }
+        let face = Face::new(scale);
+        let out = vec![0u32; face.w * face.h];
+        let mut s = SimCore {
+            app,
+            store,
+            radio,
+            dev: fake::device_at(0),
+            lcd: Counting { fb: FrameBuffer::new(), rects: Vec::new(), pixels: 0 },
+            face,
+            scale,
+            out,
+            now: 0,
+            clock0: 0,
+            booting: true,
+            boot_end: BOOT_MS,
+            off_at: None,
+            off: false,
+            kb_held: Vec::new(),
+            mouse: None,
+            knob_flash: (0, 0),
+            tx: None,
+            battery: 0,
+            layout: 0,
+            last_key: String::from("-"),
+            last_px: 0,
+            flashes: Vec::new(),
+        };
+        s.draw_boot();
+        s.last_px = s.lcd.pixels;
+        s
+    }
+
+    /// The boot screen from the app's settings, as the firmware draws it: the owner card if 0 7 3 3 says so.
+    fn draw_boot(&mut self) {
+        let set = *self.app.settings();
+        boot::draw(&mut self.lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &CHECKS });
+    }
+
+    /// The status bar clock: `utc_secs` is UTC now (seconds since 1970).
+    pub fn set_clock(&mut self, utc_secs: u64) {
+        self.clock0 = utc_secs.saturating_sub(self.now as u64 / 1000);
+    }
+
+    pub fn scale(&self) -> usize {
+        self.scale
+    }
+
+    /// The panel's size in pixels at the current scale.
+    pub fn size(&self) -> (usize, usize) {
+        (self.face.w, self.face.h)
+    }
+
+    /// The screen's top-left inside the panel, in panel pixels.
+    pub fn screen_origin(&self) -> (usize, usize) {
+        (self.face.sx, self.face.sy)
+    }
+
+    /// A new whole scale (1 to [`MAX_SCALE`]); held parts are forgotten.
+    pub fn set_scale(&mut self, scale: usize) {
+        let scale = scale.clamp(1, MAX_SCALE);
+        if scale != self.scale {
+            self.scale = scale;
+            self.face = Face::new(scale);
+            self.out = vec![0u32; self.face.w * self.face.h];
+            self.kb_held.clear();
+            self.mouse = None;
+        }
+    }
+
+    fn live(&self) -> bool {
+        !self.booting
+    }
+
+    /// Whether MENU is held, by key or mouse.
+    fn menu_held(&self) -> bool {
+        self.face.find(Key::Menu).is_some_and(|i| self.kb_held.contains(&i) || self.mouse == Some(i))
+    }
+
+    /// Advance to `now_ms` (since start): boot and power-off timing, the fake radio following the app's commands,
+    /// the app's tick and redraw.
+    pub fn step(&mut self, now_ms: u32) {
+        self.now = now_ms;
+        let now = now_ms;
+        self.lcd.rects.clear();
+        self.lcd.pixels = 0;
+        if self.off_at.is_some_and(|t| now >= t) {
+            // Saved: the radio is off and the screen dark until the switch is turned on again.
+            (self.off_at, self.off, self.booting) = (None, true, true);
+            self.lcd.fill(0, 0, W, H, 0);
+        }
+        if self.booting && !self.off && now > self.boot_end {
+            self.booting = false;
+            // MENU held through the boot screen: the settings reset (PIN-6, BOOT-14), as the firmware does.
+            if self.menu_held() {
+                self.app.power_on_reset();
+            }
+        }
+        if self.live() {
+            let (app, radio, store, dev) = (&mut self.app, &mut self.radio, &self.store, &mut self.dev);
+            while let Some(c) = app.pop_cmd() {
+                radio.cmd(c);
+            }
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
+            }
+            radio.step(now as f32 / 1000.0, app.active());
+            if let Some(a) = radio.take_same() {
+                app.same_alert(&a.header, a.slot, a.freq); // WX-4: the decoder's alert, over any screen
+            }
+            // The fake link: an allowed write runs a session, 2 % a step, then ends.
+            match app.take_link_answer() {
+                Some(ferrite_app::screens::link::LinkAnswer::Allowed) => {
+                    dev.link.write_pct = Some(0);
+                    app.link_write_progress();
+                }
+                Some(_) => dev.link.write_pct = None,
+                None => {}
+            }
+            if let Some(p) = dev.link.write_pct {
+                if p >= 100 {
+                    dev.link.write_pct = None;
+                    app.link_write_done();
+                } else {
+                    dev.link.write_pct = Some(p + 2);
+                }
+            }
+            let secs = self.clock0 + now as u64 / 1000;
+            dev.clock_min = Some(((secs % 86_400) / 60) as u16);
+            app.tick(now, &radio.live, store);
+            while let Some(c) = app.pop_cmd() {
+                radio.cmd(c);
+            }
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
+            }
+            app.render(&mut self.lcd, &radio.live, dev, store);
+        }
+        if self.lcd.pixels > 0 {
+            self.last_px = self.lcd.pixels;
+        }
+        self.flashes.extend(self.lcd.rects.iter().map(|&rect| Flash { rect, at: now }));
+        self.flashes.retain(|f| now.wrapping_sub(f.at) < 250);
+    }
+
+    /// The whole panel as 0xRRGGBB pixels, `size()` wide and tall: the front panel, then the screen scaled up,
+    /// with an optional mock-up blended over it (240 x 320 RGB) and optional redraw outlines.
+    pub fn compose(&mut self, show_flash: bool, mockup: Option<&[u32]>) -> &[u32] {
+        let mut pressed = self.kb_held.clone();
+        pressed.extend(self.mouse);
+        let knob = if self.now < self.knob_flash.1 { self.knob_flash.0 } else { 0 };
+        let rx = self.live() && self.radio.live.slots[self.app.active() as usize].squelch_open;
+        let (face, lcd, flashes, scale) = (&self.face, &self.lcd, &self.flashes, self.scale);
+        face.draw(&mut self.out, &pressed, knob, rx, self.tx.is_some(), scale);
+        face.put_screen(&mut self.out, scale, |x, y| {
+            let mut c = rgb565_to_rgb(lcd.fb.at(x, y));
+            if let Some(m) = mockup {
+                c = blend(c, m[(y * W + x) as usize]);
+            }
+            if show_flash
+                && flashes.iter().any(|f| {
+                    let (x0, y0, x1, y1) = f.rect;
+                    (x == x0 || x == x1) && (y0..=y1).contains(&y) || (y == y0 || y == y1) && (x0..=x1).contains(&x)
+                })
+            {
+                c = 0xFF00FF;
+            }
+            c
+        });
+        &self.out
+    }
+
+    /// A logical key down or up, from the keyboard (or the page's key buttons): lights its part on the panel.
+    pub fn key(&mut self, key: Key, down: bool) {
+        let part = self.face.find(key);
+        if down {
+            self.last_key = format!("{key:?}");
+            if let Some(i) = part {
+                if !self.kb_held.contains(&i) {
+                    self.kb_held.push(i);
+                }
+            }
+            if let Key::Ptt(n) = key {
+                self.tx = Some(if n < 3 { n } else { 0 });
+            }
+            if self.live() {
+                self.app.key_down(key, self.now, &self.store);
+            }
+        } else {
+            if let Some(i) = part {
+                self.kb_held.retain(|&h| h != i);
+            }
+            if matches!(key, Key::Ptt(_)) {
+                self.tx = None;
+            }
+            if self.live() {
+                self.app.key_up(key, self.now, &self.store);
+            }
+        }
+    }
+
+    /// The channel knob: one step down (-1) or up (+1).
+    pub fn knob(&mut self, d: i8) {
+        self.knob_flash = (d, self.now + 150);
+        if self.live() {
+            self.app.knob(d, self.now, &self.store);
+        }
+    }
+
+    /// The mouse at panel pixel (x, y), button `down` or not. Down on a key is its key down until the button comes
+    /// up; down on the knob steps it by half; down on VOL flips the power switch.
+    pub fn mouse(&mut self, x: i32, y: i32, down: bool) {
+        if down && self.mouse.is_none() {
+            let Some(i) = self.face.hit(x, y) else { return };
+            let h = self.face.hits[i];
+            match h.part {
+                Part::Power => self.power_switch(),
+                Part::Knob => self.knob(if x < h.x + h.w / 2 { -1 } else { 1 }),
+                Part::Key(_) | Part::Ptt(_) => {
+                    if let Part::Ptt(n) = h.part {
+                        self.tx = Some(n);
+                    }
+                    let key = key_of(h.part);
+                    self.last_key = format!("{key:?} (mouse)");
+                    if self.live() {
+                        self.app.key_down(key, self.now, &self.store);
+                    }
+                    self.mouse = Some(i);
+                }
+            }
+        } else if !down {
+            if let Some(i) = self.mouse.take() {
+                if let Part::Ptt(_) = self.face.hits[i].part {
+                    self.tx = None;
+                }
+                if self.live() {
+                    self.app.key_up(key_of(self.face.hits[i].part), self.now, &self.store);
+                }
+            }
+        }
+    }
+
+    /// The power switch on the volume knob (PE0): off saves ("Saving...", PWR-17) then goes dark; on is a fresh
+    /// boot.
+    fn power_switch(&mut self) {
+        if self.off {
+            // On: RAM is gone, so the app starts again; settings survive, as in flash.
+            let set = *self.app.settings();
+            (self.app, self.radio) = (fake::app(), FakeRadio::new());
+            fake::sample(&mut self.app, &self.store, &mut self.radio);
+            *self.app.settings_mut() = set;
+            (self.off, self.boot_end) = (false, self.now + BOOT_MS);
+            self.draw_boot();
+            self.last_key = String::from("power on");
+        } else if self.booting {
+            (self.off, self.booting) = (true, true);
+            self.lcd.fill(0, 0, W, H, 0);
+            self.last_key = String::from("power off");
+        } else if self.off_at.is_none() {
+            self.app.power_off();
+            self.off_at = Some(self.now + SAVE_MS);
+            self.last_key = String::from("power off");
+        }
+    }
+
+    /// One of the simulator's stand-ins for what the radio would report (most are ignored while booting or off).
+    pub fn event(&mut self, e: Event) {
+        let live = self.live();
+        let app = &mut self.app;
+        match e {
+            Event::Message if live => app.notify(b"VE3KPW-9", b"On my way", false),
+            Event::Alert if live => {
+                // The fake decoder's SAME warning now, as if heard on slot C (it also comes by itself 8 s after a
+                // slot settles on a weather channel).
+                if let Some(h) = ferrite_core::same::parse(fake::SAME_HEADER) {
+                    app.same_alert(&h, 2, 16_255_000);
+                }
+            }
+            Event::Crossband if live => app.open(Dest::Crossband),
+            Event::Layout if live => {
+                self.layout = (self.layout + 1) % 3;
+                app.set_layout(self.layout);
+            }
+            Event::Beacon if live => {
+                let a = app.active();
+                ferrite_app::screens::transmit::auto_tx(app, a, b"Beacon");
+            }
+            Event::Gps => {
+                self.dev.gps = match self.dev.gps {
+                    GpsState::Off => GpsState::Searching,
+                    GpsState::Searching => GpsState::Fix,
+                    GpsState::Fix => GpsState::Off,
+                }
+            }
+            Event::Bluetooth => self.dev.bt = !self.dev.bt,
+            Event::Battery => {
+                self.battery = (self.battery + 1) % 3;
+                let d = &mut self.dev;
+                (d.battery_low, d.battery_cutoff, d.battery_pct, d.battery_mv) =
+                    [(false, false, 82, 7900), (true, false, 15, 7000), (true, true, 3, 6600)][self.battery];
+            }
+            Event::PowerSwitch => self.power_switch(),
+            Event::EmptyBattery if live => app.battery_empty(),
+            Event::SsbPatch if live => app.ssb_patch_found(),
+            Event::LinkWrite if live => app.link_write_request(),
+            _ => {}
+        }
+    }
+
+    /// Opens screen `i` of [`jump_names`] (0 = home), from home, so BACK returns there.
+    pub fn jump(&mut self, i: usize) {
+        if !self.live() {
+            return;
+        }
+        self.app.go_home();
+        if let Some(&d) = i.checked_sub(1).and_then(|i| nav::ALL.get(i)) {
+            self.app.open(d);
+        }
+    }
+
+    fn screen(&self) -> Option<AppScreen> {
+        self.live().then(|| self.app.screen())
+    }
+
+    /// The screen on show: "Boot" while booting, "Off" while off.
+    pub fn screen_name(&self) -> &'static str {
+        if self.off {
+            return "Off";
+        }
+        self.screen().map_or("Boot", |s| s.name())
+    }
+
+    /// The look-review mock-up for the screen on show (a placeholder has none: the boot one stands in).
+    pub fn mockup_name(&self) -> &'static str {
+        self.screen().map_or(Some("BootA.png"), |s| s.mockup()).unwrap_or("BootA.png")
+    }
+
+    /// One line of state: screen, last key, TX, the active slot and frequency, lock, the last redraw's pixels.
+    pub fn status(&self) -> String {
+        let a = self.app.active();
+        format!(
+            "{} · key {} · {}{} {} · last redraw {} px{}",
+            self.screen_name(),
+            self.last_key,
+            self.tx.map(|n| format!("TX {} · ", ["A", "B", "C"][n as usize % 3])).unwrap_or_default(),
+            ["A", "B", "C"][a as usize],
+            freq_text(self.app.slot(a).freq()),
+            self.last_px,
+            if self.app.locked() { " · locked" } else { "" },
+        )
+    }
+
+    /// Pixels pushed by the last redraw that drew anything.
+    pub fn last_px(&self) -> u64 {
+        self.last_px
+    }
+
+    /// Booting or off: the app is not running.
+    pub fn booting(&self) -> bool {
+        self.booting
+    }
+}

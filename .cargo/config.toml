@@ -13,6 +13,8 @@ fw-clippy = ["clippy", "--release", "-p", "ferrite", "--target", "thumbv7em-none
 sim = ["run", "-p", "ferrite-sim", "--"]
 # The interactive simulator: a window driven by the keyboard and a fake radio
 simw = ["run", "-p", "ferrite-sim", "--", "--window"]
+# The web simulator: target/wasm32-unknown-unknown/wasm/ferrite_sim_web.wasm (sim-web/README.md)
+simweb = ["build", "-p", "ferrite-sim-web", "--target", "wasm32-unknown-unknown", "--profile", "wasm"]
 
 [net]
 # uradio and udigimodes are private for now: let git (and its credential helper) fetch them.

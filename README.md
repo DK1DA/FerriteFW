@@ -27,6 +27,7 @@ Ferrite replaces the RT-950 Pro's stock firmware with one that is open, RF-aware
 | [`crates/ferrite-ui`](crates/ferrite-ui) | The 4-bit drawing layer and the widgets the screens are made of; draws to the panel or, on the PC, to a frame buffer |
 | [`crates/ferrite-app`](crates/ferrite-app) | The UI state machine, run by the firmware's UI task and the simulator: keys, knob, time and the radio's snapshot in; radio commands and redraws (only what changed) out. One module per screen in `src/screens/` (how to add one: `screens/mod.rs`; how each is reached: `screens/nav.rs`; the work list: `docs/screens.md`). Built: home, edit in place, quick settings, advanced settings, Status page; every other screen opens as a placeholder |
 | [`sim/`](sim) | The screens on the PC with the firmware's own code: PNGs (`cargo sim`), or an interactive window with the radio's clickable front panel and a fake three-slot radio (`cargo simw`) |
+| [`sim-web/`](sim-web) | The same interactive simulator as wasm for a web page (`cargo simweb`; API in its README) |
 | [`tools/`](tools) | Font and logo generators, `btf.py` (packing for the stock bootloader), `flash.py`, `slowcheck.py` (fast/slow flash split check) |
 | [`assets/logo/`](assets/logo) | The logo: the toroid mark, lockups for dark and light backgrounds, the app icon (`ferrite-icon.svg`, a simplified one for 16-48 px, PNGs 16-1024 and `favicon.ico`), the social preview |
 | [`fonts/`](fonts) | Atkinson Hyperlegible and Barlow Semi Condensed (OFL; licences beside them) |
@@ -58,6 +59,7 @@ The toolchain is a pinned nightly (`rust-toolchain.toml`); rustup installs it on
 cargo test                      # logic and screens on the PC
 cargo sim                       # screens to target/sim/*.png
 cargo simw                      # the interactive simulator (keys are printed at start; resizing snaps to whole scales; --scale 2 for bigger)
+cargo simweb                    # the simulator as wasm: target/wasm32-unknown-unknown/wasm/ferrite_sim_web.wasm
 cargo fw                        # the image: target/thumbv7em-none-eabihf/release/ferrite
 cargo fw-clippy -- -D warnings
 ```

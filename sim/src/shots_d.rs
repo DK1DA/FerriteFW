@@ -2,7 +2,7 @@
 //! warning, the PIN, About and its pages, the key test, the link screens, FM broadcast, HF mode, the alert and
 //! the menu's groups. Each is reached the way the radio reaches it (keys, or the hook the firmware calls).
 
-use crate::fake;
+use ferrite_sim::fake;
 use ferrite_app::screens::alert::AlertInfo;
 use ferrite_app::screens::nav::Dest;
 use ferrite_app::App;

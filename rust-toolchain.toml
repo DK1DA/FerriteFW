@@ -3,5 +3,5 @@
 [toolchain]
 channel = "nightly-2026-10-01"
 components = ["rust-src", "llvm-tools", "clippy"]
-targets = ["thumbv7em-none-eabihf"]
+targets = ["thumbv7em-none-eabihf", "wasm32-unknown-unknown"]
 profile = "minimal"

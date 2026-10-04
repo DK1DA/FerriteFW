@@ -424,6 +424,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrite-sim-web"
+version = "0.1.0"
+dependencies = [
+ "ferrite-core",
+ "ferrite-sim",
+]
+
+[[package]]
 name = "ferrite-ui"
 version = "0.1.0"
 dependencies = [

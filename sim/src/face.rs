@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn mouse_maps_back_through_the_centred_panel() {
-        use crate::window::{fit_scale, to_panel};
+        use crate::simcore::{fit_scale, to_panel};
         let buf = (616, 900);
         assert_eq!(to_panel((0.0, 0.0), buf, buf), (0, 0));
         assert_eq!(to_panel((308.0, 450.0), buf, buf), (308, 450));

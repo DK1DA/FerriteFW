@@ -304,8 +304,13 @@ fn xb(s: f32) -> XbLive {
 }
 
 /// GPS fix with 9 satellites, 7.9 V; the clock from the PC's UTC time.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn device() -> Device {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    device_at(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()))
+}
+
+/// [`device`] with the clock at `secs` UTC (seconds since 1970).
+pub fn device_at(secs: u64) -> Device {
     Device {
         clock_min: Some(((secs % 86_400) / 60) as u16),
         utc: true,

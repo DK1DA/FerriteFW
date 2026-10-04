@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "firmware", "sim"]
+members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "firmware", "sim", "sim-web"]
 # Plain `cargo test` / `cargo clippy` cover what runs on the PC; the firmware builds with `cargo fw` (radio only).
 default-members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "sim"]
 
@@ -35,6 +35,12 @@ lto = true
 codegen-units = 1
 panic = "abort"       # the radio target's rustflags add -Cpanic=immediate-abort after this, which wins
 debug = true          # symbols only; not in the flashed image
+
+# The web simulator (`cargo simweb`): release without debug info, stripped.
+[profile.wasm]
+inherits = "release"
+debug = false
+strip = true
 
 [profile.test]
 opt-level = 1

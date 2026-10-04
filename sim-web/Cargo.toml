@@ -1,0 +1,17 @@
+[package]
+name = "ferrite-sim-web"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The simulator for the browser: SimCore behind a plain C ABI for a wasm page (no wasm-bindgen)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ferrite-core.workspace = true
+ferrite-sim = { path = "../sim" }
+
+[lints]
+workspace = true

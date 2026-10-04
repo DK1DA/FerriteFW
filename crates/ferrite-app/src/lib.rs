@@ -713,7 +713,7 @@ impl App {
     // ---- actions ----
 
     /// Home, forgetting where BACK would return (HOME-2).
-    fn go_home(&mut self) {
+    pub fn go_home(&mut self) {
         self.stop_mode(); // a scope, search or repeater stops with its screen
         self.screen = Screen::Home;
         self.back = [None; BACK_DEPTH];

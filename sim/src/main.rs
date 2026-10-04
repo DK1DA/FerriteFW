@@ -12,26 +12,14 @@ use ferrite_ui::fb::FrameBuffer;
 use ferrite_ui::panel::{H, W};
 use std::path::Path;
 
-mod face;
-mod fake;
+use ferrite_sim::fake;
+
 mod shots_d;
 mod window;
 
 fn save(fb: &FrameBuffer, name: &str, scale: u32) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/sim");
     save_fb(fb, &dir.join(format!("{name}.png")), scale);
-}
-
-/// An RGB image (0xRRGGBB per pixel) as a PNG.
-pub(crate) fn save_rgb(px: &[u32], w: usize, h: usize, path: &Path) {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).unwrap();
-    }
-    let out: Vec<u8> = px.iter().flat_map(|&c| [(c >> 16) as u8, (c >> 8) as u8, c as u8]).collect();
-    let mut enc = png::Encoder::new(std::fs::File::create(path).unwrap(), w as u32, h as u32);
-    enc.set_color(png::ColorType::Rgb);
-    enc.write_header().unwrap().write_image_data(&out).unwrap();
-    println!("{}", path.display());
 }
 
 /// The frame buffer as a PNG, scaled up by a whole number.
@@ -122,12 +110,12 @@ fn main() {
     run(&mut app, &mut fb, 7000, &mut t); // slot A receiving (6-9 s of every 10)
     save(&fb, "home", scale);
     // The whole radio, as the window shows it: the front panel around the screen, SIDE1 held, A receiving.
-    let face = face::Face::new(2);
+    let face = ferrite_sim::face::Face::new(2);
     let mut px = vec![0u32; face.w * face.h];
     let side1 = face.find(Key::Side(1)).into_iter().collect::<Vec<_>>();
     face.draw(&mut px, &side1, 0, true, false, 2);
-    face.put_screen(&mut px, 2, |x, y| window::rgb565_to_rgb(fb.at(x, y)));
-    save_rgb(&px, face.w, face.h, &Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/sim/radio.png"));
+    face.put_screen(&mut px, 2, |x, y| ferrite_sim::simcore::rgb565_to_rgb(fb.at(x, y)));
+    ferrite_sim::save_rgb(&px, face.w, face.h, &Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/sim/radio.png"));
     press(&mut app, Key::Slot, 800, &mut t); // hold SLOT: edit in place
     press(&mut app, Key::Right, 100, &mut t);
     press(&mut app, Key::Right, 100, &mut t);
