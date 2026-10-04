@@ -215,6 +215,7 @@ impl FakeRadio {
                 }
             };
             s.squelch_open = open && heard;
+            s.tone_heard = s.squelch_open; // the sample's stations use the slot's own tone
             s.rssi = if s.squelch_open { level as i16 } else { -121 + ((t * 0.9 + i as f32).sin() * 2.0) as i16 };
         }
     }

@@ -234,6 +234,8 @@ pub struct App {
     paused_until: Option<u32>,
     /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
     rx_mask: u8,
+    /// Slots whose own RX tone is heard on the carrier (busy lockout "wrong tone").
+    tone_mask: u8,
     scan_mask: u8,
     relay_mask: u8,
     out: Outbox,
@@ -284,6 +286,7 @@ impl App {
             last_input: 0,
             paused_until: None,
             rx_mask: 0,
+            tone_mask: 0,
             scan_mask: 0,
             relay_mask: 0,
             out: Outbox { q: [None; 16], head: 0, len: 0, sync: 0, cur: NO_SLOT, step: 0 },
@@ -521,14 +524,16 @@ impl App {
     pub fn tick(&mut self, now: u32, live: &LiveAll, store: &impl ChannelStore) {
         self.tick_keys(now, store);
         let mut rx = 0;
+        let mut tone = 0;
         let mut scan = 0;
         let mut relay = 0;
         for (i, s) in live.slots.iter().enumerate() {
             rx |= (s.squelch_open as u8) << i;
+            tone |= (s.tone_heard as u8) << i;
             scan |= (s.scanning as u8) << i;
             relay |= (s.relay as u8) << i;
         }
-        (self.rx_mask, self.scan_mask, self.relay_mask) = (rx, scan, relay);
+        (self.rx_mask, self.tone_mask, self.scan_mask, self.relay_mask) = (rx, tone, scan, relay);
         if self.toast.is_some_and(|t| after(now, t.until)) {
             self.toast = None;
         }

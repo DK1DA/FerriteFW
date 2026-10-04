@@ -554,3 +554,32 @@ fn rx_only_channel_refuses() {
     assert!(matches!(t.app.screen(), Screen::Transmit(_)), "RX only off: transmits");
     ptt(&mut t, false);
 }
+
+/// TX-21: busy lockout. Carrier refuses while the squelch is open; wrong tone refuses only while it is open
+/// with another tone (the slot's RX tone not heard); off never refuses.
+#[test]
+fn busy_lockout_carrier_and_wrong_tone() {
+    let mut t = ready();
+    let mut cfg = DEFAULT_CFG;
+    cfg.rx_tone = 885;
+    t.live.slots[0].squelch_open = true;
+    for (busy, tone_heard, refuses) in [(0, false, false), (1, true, true), (1, false, true), (2, false, true), (2, true, false)] {
+        cfg.busy = busy;
+        t.app.set_vfo_cfg(0, cfg);
+        t.live.slots[0].tone_heard = tone_heard;
+        t.wait(100);
+        ptt(&mut t, true);
+        assert_eq!(refused(&t) == Some(Refusal::Busy), refuses, "busy {busy}, own tone heard {tone_heard}");
+        ptt(&mut t, false);
+        t.hold(Key::Exit);
+    }
+    // Wrong tone with no RX tone set: any carrier is another group's.
+    cfg.rx_tone = 0;
+    cfg.busy = 2;
+    t.app.set_vfo_cfg(0, cfg);
+    t.live.slots[0].tone_heard = false;
+    t.wait(100);
+    ptt(&mut t, true);
+    assert_eq!(refused(&t), Some(Refusal::Busy));
+    ptt(&mut t, false);
+}

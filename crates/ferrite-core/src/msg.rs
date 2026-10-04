@@ -195,7 +195,10 @@ pub struct SlotLive {
     pub freq: Freq10,
     /// dBm.
     pub rssi: i16,
+    /// A carrier above the squelch (the BK4829's RSSI and noise squelch), whatever tone it carries.
     pub squelch_open: bool,
+    /// The slot's own RX tone (CTCSS or DCS) is decoded on that carrier (busy lockout "wrong tone", TX-21).
+    pub tone_heard: bool,
     pub scanning: bool,
     /// Scan hits so far, and the last one.
     pub hits: u8,
