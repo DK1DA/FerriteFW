@@ -45,7 +45,7 @@ fn step(app: &App, row: u8, d: i32) -> u8 {
 pub(crate) const GROUPS: [(&str, &str); 9] = [
     (slow!("Watch and scan"), slow!("Watch, background jobs, scan, tone search.")),
     (slow!("Channels"), slow!("Browse channels and zones, add a repeater.")),
-    (slow!("Listen"), slow!("Broadcast radio, band scope, weather alerts.")),
+    (slow!("Listen"), slow!("Broadcast, scope, weather alerts, crossband.")),
     (slow!("Decoders"), slow!("Event log, POCSAG, DSC, AIS, DTMF, popups.")),
     (slow!("APRS"), slow!("Heard, messages, beacons, your station.")),
     (slow!("GPS and time"), slow!("GPS, position, units, time zone, clock.")),

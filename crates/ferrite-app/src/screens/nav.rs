@@ -25,8 +25,8 @@
 //! | Power on | the firmware: [`App::first_boot`] / [`App::ask_pin`] | [`Dest::Setup`] (BOOT-12) / [`Dest::Pin`] (BOOT-13) |
 //! | [`App::notify`], [`App::raise_alert`] | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Not wired yet (no event or menu number to start them): Bluetooth write approval and progress (the Link
-//! task opens them), power off, empty battery, SSB patch confirm, mailbox, crossband (no menu number yet).
+//! Crossband is MENU 0 3 6 (Listen). Not wired yet (no event to start them): Bluetooth write approval and
+//! progress (the Link task opens them), power off, empty battery, SSB patch confirm, mailbox.
 //! Still placeholders: position entry (A8), location codes (A13), the DTMF dialer and memories (A14, A15).
 
 use super::advanced::{Advanced, GROUPS};
@@ -106,7 +106,7 @@ pub enum Dest {
     Weather,
     /// B17: an alert (SAME, DSC distress, jamming).
     Alert,
-    /// B18-B20: crossband repeater.
+    /// B18-B20: crossband repeater (MENU 0 3 6).
     Crossband,
     /// B21: squelch from home (SIDE1 + knob); a toast for now.
     Squelch,
@@ -319,7 +319,7 @@ pub const ALL: [Dest; 70] = {
 
 /// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 55] = [
+pub const MENU0: [(&[u8], Dest); 56] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -335,6 +335,7 @@ pub const MENU0: [(&[u8], Dest); 55] = [
     (&[3, 3, 2], Dest::LocationCodes),
     (&[3, 4], Dest::Counter),
     (&[3, 5], Dest::HfMode),
+    (&[3, 6], Dest::Crossband),
     (&[4, 1], Dest::EventLog),
     (&[4, 2], Dest::Sub(4, 2)),
     (&[4, 3], Dest::Sub(4, 3)),

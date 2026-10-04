@@ -352,3 +352,13 @@ fn same_header_raises_the_alert() {
     t.app.settings_mut().same = false;
     assert!(!t.app.same_alert(&h, 2, 16_255_000));
 }
+
+/// Crossband has its menu number: MENU 0 3 6 (Listen) opens the crossband repeater.
+#[test]
+fn crossband_from_the_menu() {
+    let mut t = T::new();
+    menu0(&mut t, &[3, 6]);
+    assert!(matches!(t.app.screen(), Screen::Crossband(_)), "{}", t.app.screen().name());
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Group(g) if g.g == 3), "BACK: the Listen list");
+}

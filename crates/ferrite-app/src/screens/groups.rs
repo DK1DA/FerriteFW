@@ -45,12 +45,13 @@ const G2: [Entry; 5] = [
     (slow!("Nearby"), slow!("Off"), slow!("Sort channels by distance.")),
     (slow!("Channel display"), slow!("Name"), slow!("Name, number or frequency on home.")),
 ];
-const G3: [Entry; 5] = [
+const G3: [Entry; 6] = [
     (slow!("FM broadcast"), slow!("Monitor on"), slow!("Presets, step, AGC, monitor, sleep.")),
     (slow!("Band scope"), slow!("+/-1 MHz"), slow!("Span, step, speed, trigger, waterfall.")),
     (slow!("Weather alerts"), slow!("On"), slow!("SAME, location codes, tone, channel.")),
     (slow!("Frequency counter"), slow!(""), slow!("Find a nearby transmitter's frequency.")),
     (slow!("HF mode"), slow!(""), slow!("Below 64 MHz. Everything else pauses.")),
+    (slow!("Crossband repeater"), slow!(""), slow!("Repeat one slot's band on another's.")),
 ];
 const G4: [Entry; 8] = [
     (slow!("Event log"), slow!(""), slow!("Every decode and alert: the inbox.")),
