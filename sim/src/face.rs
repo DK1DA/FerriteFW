@@ -27,7 +27,7 @@ pub enum Part {
     Key(Key),
     /// PTT A or B: transmit on that slot (`Key::Ptt(n)` to the app).
     Ptt(u8),
-    /// The channel knob: upper half +1, lower half -1.
+    /// The channel knob: left half -1, right half +1.
     Knob,
 }
 
@@ -79,7 +79,7 @@ impl Face {
             k(Part::Key(Key::Side(1)), 6, 398, 78, 64, "SIDE1", "PTT C"),
             k(Part::Key(Key::Side(2)), 6, 476, 78, 64, "SIDE2", "Side 2"),
             // The channel knob (the encoder).
-            k(Part::Knob, 228, 2, 64, 44, "", ""),
+            k(Part::Knob, 214, 2, 128, 44, "", ""),
             // Function keys.
             k(Part::Key(Key::Menu), 112, 712, 86, 40, "OK", "MENU"),
             k(Part::Key(Key::Slot), 112, 758, 86, 40, "A\u{b7}B\u{b7}C", "SLOT"),
@@ -128,7 +128,7 @@ impl Face {
         for i in 0..6 {
             c.fill(u(140 + i * 9), u(14), u(3), u(30), RIDGE);
         }
-        c.text(u(134) - 4 - width("VOL", &UI_12), u(20), "VOL", &UI_12, SMALL, Align::Left);
+        c.text(u(134) - 4 - width("VOL", &UI_12), u(42) - UI_12.line_h as i32 - 2, "VOL", &UI_12, SMALL, Align::Left);
         // Body and the screen's bezel.
         c.rrect(u(90), u(42), u(530), h - u(46), u(28), BODY);
         c.rrect(self.sx as i32 - u(10), self.sy as i32 - u(10), sw + u(20), 320 * scale as i32 + u(20), u(10), BEZEL);
@@ -152,9 +152,9 @@ impl Face {
         if knob != 0 {
             if let Some(k) = self.hits.iter().find(|h| h.part == Part::Knob) {
                 let mut half = *k;
-                half.h /= 2;
-                if knob < 0 {
-                    half.y += half.h;
+                half.w /= 2;
+                if knob > 0 {
+                    half.x += half.w;
                 }
                 c.rrect(half.x + 2, half.y + 2, half.w - 4, half.h - 4, 4, 0x3A5A80);
             }
@@ -202,11 +202,15 @@ fn draw_hit(c: &mut Canvas, h: &Hit, pressed: bool, scale: usize) {
     match h.part {
         Part::Knob => {
             c.rrect(h.x, h.y + u(4), h.w, h.h - u(4), u(10), KNOB);
-            for i in 0..7 {
+            for i in 0..(h.w - u(12)) / u(9) + 1 {
                 c.fill(h.x + u(6 + i * 9), h.y + u(8), u(3), h.h - u(12), RIDGE);
             }
-            c.tri(cx, h.y + u(10), u(5), 0, SMALL);
-            c.tri(cx, h.y + h.h - u(10), u(5), 1, SMALL);
+            // left steps down, right steps up
+            let cy = h.y + u(4) + (h.h - u(4)) / 2;
+            c.rrect(h.x + u(6), cy - u(12), u(30), u(24), u(6), KNOB);
+            c.rrect(h.x + h.w - u(36), cy - u(12), u(30), u(24), u(6), KNOB);
+            c.tri(h.x + u(21), cy, u(12), 2, LABEL);
+            c.tri(h.x + h.w - u(21), cy, u(12), 3, LABEL);
         }
         Part::Key(k @ (Key::Up | Key::Down | Key::Left | Key::Right)) => {
             c.rrect(h.x, h.y, h.w, h.h, u(6), if pressed { PRESSED } else { 0x2C3139 });

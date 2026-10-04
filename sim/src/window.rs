@@ -10,7 +10,7 @@
 //! - F12 saves a screenshot of the whole window to `target/sim/`.
 //!
 //! The front panel ([`crate::face`]) is clickable: mouse down and up are key down and up, so holds and long
-//! presses work; the channel knob steps on a click (upper half up, lower half down) or the wheel. Pressed keys
+//! presses work; the channel knob steps on a click (left half down, right half up) or the wheel. Pressed keys
 //! light up whichever way they were pressed. The indicator is green while the active slot receives and red while
 //! a PTT is held (a fake transmit: the app has no transmit yet).
 //!
@@ -314,7 +314,7 @@ pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool) {
                 let h = face.hits[i];
                 match h.part {
                     Part::Knob => {
-                        let d = if pos.unwrap().1 < h.y + h.h / 2 { 1 } else { -1 };
+                        let d = if pos.unwrap().0 < h.x + h.w / 2 { -1 } else { 1 };
                         knob_flash = (d, now + 150);
                         if !booting {
                             app.knob(d, now, &store);
