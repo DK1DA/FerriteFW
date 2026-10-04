@@ -2,14 +2,13 @@
 //! row per radio-wide state; OK on a row opens its setting.
 
 use super::nav::Dest;
-use super::quick::Quick;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
-use crate::keys::{KeyEvent, Press};
+use super::table::{self, slow_table, Act, Ctx, Go, Table, Val};
+use crate::keys::KeyEvent;
 use crate::slot::{band_name, Item};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
-use ferrite_core::keys::Key;
 use ferrite_core::msg::GpsState;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
@@ -24,24 +23,151 @@ pub struct Status {
     pub from_menu: bool,
 }
 
-/// The Status page's rows (SBAR-14).
-pub(crate) const STATUS: [&str; 14] = [
-    "Transmit",
-    "Region",
-    "Extend TX",
-    "Inbox",
-    "Scan",
-    "Watch",
-    "Jobs",
-    "Beacon",
-    "Battery Save",
-    "GPS",
-    "Bluetooth",
-    "Battery",
-    "Key lock",
-    "Weather alerts",
-];
-const ROWS: u8 = STATUS.len() as u8;
+/// HF-6: everything else pauses in HF mode.
+fn paused(c: &Ctx<()>, b: &mut Buf<40>) -> bool {
+    let hf = super::hf::in_hf(c.app);
+    if hf {
+        b.set(b"Paused: HF mode");
+    }
+    hf
+}
+
+fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
+    b.set(if on { b"On".as_slice() } else { b"Off" });
+    TEXT
+}
+
+slow_table! {
+    /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
+    ROWS: [(&str, Val<()>); 14] = [
+        // SBAR-14: why transmit is locked, if it is (BOOT-11).
+        (slow!("Transmit"), |c, b| match super::info::tx_lock(c.dev) {
+            None => {
+                b.set(b"Ready");
+                GREEN
+            }
+            Some(why) => {
+                b.set(why.as_bytes());
+                AMBER
+            }
+        }),
+        (slow!("Region"), |c, b| {
+            b.set(c.app.set.region_name().as_bytes());
+            TEXT
+        }),
+        (slow!("Extend TX"), |c, b| on_off(b, c.app.set.extend_tx)),
+        (slow!("Inbox"), |c, b| {
+            if c.app.inbox == 0 {
+                b.set(b"Empty");
+            } else {
+                let _ = uwrite!(b, "{} unread", c.app.inbox);
+            }
+            TEXT
+        }),
+        (slow!("Scan"), |c, b| {
+            if paused(c, b) {
+                return AMBER;
+            }
+            for (s, l) in c.live.slots.iter().enumerate().filter(|(_, l)| l.scanning) {
+                if !b.is_empty() {
+                    b.push(b", ");
+                }
+                let _ = uwrite!(b, "{}: {}", w::LETTERS[s] as char, band_name(l.freq));
+            }
+            if b.is_empty() {
+                b.set(b"Off");
+            }
+            TEXT
+        }),
+        (slow!("Watch"), |c, b| {
+            if paused(c, b) {
+                return AMBER;
+            }
+            b.set(WATCH_TEXT[c.app.watch as usize % 3].as_bytes());
+            if c.app.paused_until.is_some() {
+                b.push(" \u{b7} paused".as_bytes());
+            }
+            TEXT
+        }),
+        (slow!("Jobs"), |c, b| {
+            if paused(c, b) {
+                return AMBER;
+            }
+            b.set(b"None");
+            TEXT
+        }),
+        (slow!("Beacon"), |c, b| if paused(c, b) { AMBER } else { on_off(b, false) }),
+        (slow!("Battery Save"), |c, b| {
+            let mut t = Buf::<16>::new();
+            c.app.item_text(Item::BatterySave, true, &mut t);
+            b.set(t.as_bytes());
+            TEXT
+        }),
+        (slow!("GPS"), |c, b| {
+            match c.dev.gps {
+                GpsState::Off => b.set(b"Off"),
+                GpsState::Searching => b.set(b"Searching"),
+                GpsState::Fix => {
+                    let _ = uwrite!(b, "Fix \u{b7} {} sats", c.dev.sats);
+                }
+            }
+            TEXT
+        }),
+        (slow!("Bluetooth"), |c, b| {
+            b.set(if c.dev.bt { b"Connected".as_slice() } else { b"Off" });
+            TEXT
+        }),
+        (slow!("Battery"), |c, b| {
+            let d = c.dev;
+            let mv = d.battery_mv as u32;
+            let _ = uwrite!(b, "{}.{} V \u{b7} {}%", mv / 1000, mv % 1000 / 100, d.battery_pct);
+            if d.battery_cutoff {
+                RED
+            } else if d.battery_low {
+                AMBER
+            } else {
+                TEXT
+            }
+        }),
+        (slow!("Key lock"), |c, b| on_off(b, c.app.locked)),
+        // SBAR-18: paused in HF mode; WX-3: US and Canada only.
+        (slow!("Weather alerts"), |c, b| {
+            if !c.app.set.wx_region() {
+                b.set(b"Not in region");
+                SUB
+            } else if !c.app.set.same {
+                on_off(b, false)
+            } else if paused(c, b) {
+                AMBER
+            } else {
+                on_off(b, true)
+            }
+        }),
+    ];
+}
+
+slow_table! {
+    GO: [Go; 14] = [
+        Go::Open(Dest::Group(8)),
+        Go::Open(Dest::Group(9)),
+        Go::Open(Dest::Group(8)),
+        Go::Open(Dest::EventLog),
+        Go::Later,
+        Go::Quick(6),
+        Go::Later,
+        Go::Later,
+        Go::Quick(8),
+        Go::Open(Dest::GpsPosition),
+        Go::Open(Dest::Sub(9, 2)),
+        Go::Later,
+        Go::Later,
+        Go::Open(Dest::Sub(3, 3)),
+    ];
+}
+
+slow_table! {
+    PAGE: Table<()> = Table { rows: &ROWS, go: &GO, y: 20, h: 18, style: w::KV_STATUS };
+}
 
 impl View for Status {
     fn name(self) -> &'static str {
@@ -57,115 +183,21 @@ impl View for Status {
     }
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
-        use Press::*;
-        let Status { row, from_menu } = self;
-        match (e.key, e.press) {
-            (Key::Up, Short | Repeat) => app.screen = Screen::Status(Status { row: (row + ROWS - 1) % ROWS, from_menu }),
-            (Key::Down, Short | Repeat) => app.screen = Screen::Status(Status { row: (row + 1) % ROWS, from_menu }),
-            // SBAR-15: OK on a row opens its setting.
-            (Key::Menu, Short) => match STATUS[row as usize] {
-                "Watch" => app.screen = Screen::Quick(Quick { row: 6 }),
-                "Battery Save" => app.screen = Screen::Quick(Quick { row: 8 }),
-                "Inbox" => app.open(Dest::EventLog),
-                "GPS" => app.open(Dest::GpsPosition),
-                "Bluetooth" => app.open(Dest::Sub(9, 2)),
-                "Region" => app.open(Dest::Group(9)),
-                "Weather alerts" => app.open(Dest::Sub(3, 3)),
-                "Extend TX" | "Transmit" => app.open(Dest::Group(8)),
-                name => app.show_toast(name.as_bytes(), b"setting comes next", false),
-            },
-            (Key::Exit, Short) => {
-                app.screen = if from_menu { Screen::Advanced(super::advanced::Advanced { row: 0, from_quick: false }) } else { Screen::Home }
+        match table::key(app, &PAGE, self.row, e) {
+            Act::Move(row) => app.screen = Screen::Status(Status { row, ..self }),
+            Act::Back => {
+                app.screen = if self.from_menu { Screen::Advanced(super::advanced::Advanced { row: 0, from_quick: false }) } else { Screen::Home }
             }
-            _ => {}
+            Act::Opened | Act::None => {}
         }
     }
 
     fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
-        app.screen = Screen::Status(Status { row: (self.row as i32 + d).rem_euclid(ROWS as i32) as u8, ..self });
+        app.screen = Screen::Status(Status { row: table::knob(&PAGE, self.row, d), ..self });
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        let (live, dev) = (cx.live, cx.dev);
-        let hf = super::hf::in_hf(app);
-        for (i, label) in STATUS.iter().enumerate() {
-            let mut v = Buf::<28>::new();
-            let mut c = TEXT;
-            match i {
-                0 => {
-                    // SBAR-14: why transmit is locked, if it is (BOOT-11).
-                    match super::info::tx_lock(dev) {
-                        None => (v, c) = (Buf::from(b"Ready"), GREEN),
-                        Some(why) => (v, c) = (Buf::from(why.as_bytes()), AMBER),
-                    }
-                }
-                1 => v.set(app.set.region_name().as_bytes()),
-                2 => v.set(if app.set.extend_tx { b"On".as_slice() } else { b"Off" }),
-                // HF-6: everything else pauses in HF mode.
-                4..=7 if hf => (v, c) = (Buf::from(b"Paused: HF mode"), AMBER),
-                6 | 7 => v.set(if i == 6 { b"None".as_slice() } else { b"Off" }),
-                3 => {
-                    if app.inbox == 0 {
-                        v.set(b"Empty");
-                    } else {
-                        let _ = uwrite!(v, "{} unread", app.inbox);
-                    }
-                }
-                4 => {
-                    for (s, l) in live.slots.iter().enumerate().filter(|(_, l)| l.scanning) {
-                        if !v.is_empty() {
-                            v.push(b", ");
-                        }
-                        let _ = uwrite!(v, "{}: {}", w::LETTERS[s] as char, band_name(l.freq));
-                    }
-                    if v.is_empty() {
-                        v.set(b"Off");
-                    }
-                }
-                5 => {
-                    v.set(WATCH_TEXT[app.watch as usize % 3].as_bytes());
-                    if app.paused_until.is_some() {
-                        v.push(" \u{b7} paused".as_bytes());
-                    }
-                }
-                8 => {
-                    let mut b = Buf::<16>::new();
-                    app.item_text(Item::BatterySave, true, &mut b);
-                    v.set(b.as_bytes());
-                }
-                9 => match dev.gps {
-                    GpsState::Off => v.set(b"Off"),
-                    GpsState::Searching => v.set(b"Searching"),
-                    GpsState::Fix => {
-                        let _ = uwrite!(v, "Fix \u{b7} {} sats", dev.sats);
-                    }
-                },
-                10 => v.set(if dev.bt { b"Connected".as_slice() } else { b"Off" }),
-                11 => {
-                    let mv = dev.battery_mv as u32;
-                    let _ = uwrite!(v, "{}.{} V \u{b7} {}%", mv / 1000, mv % 1000 / 100, dev.battery_pct);
-                    if dev.battery_cutoff {
-                        c = RED;
-                    } else if dev.battery_low {
-                        c = AMBER;
-                    }
-                }
-                12 => v.set(if app.locked { b"On".as_slice() } else { b"Off" }),
-                _ => {
-                    // SBAR-18: paused in HF mode; WX-3: US and Canada only.
-                    if !app.set.wx_region() {
-                        (v, c) = (Buf::from(b"Not in region"), SUB);
-                    } else if !app.set.same {
-                        v.set(b"Off");
-                    } else if hf {
-                        (v, c) = (Buf::from(b"Paused: HF mode"), AMBER);
-                    } else {
-                        v.set(b"On");
-                    }
-                }
-            }
-            app.kv_row(lcd, i, 20 + 18 * i as i32, 18, label.as_bytes(), v.as_bytes(), c, i as u8 == self.row);
-        }
+        app.table(lcd, &PAGE, cx.live, cx.dev, &(), Some(self.row));
     }
 
     fn hints(self, _: &App) -> Hints {

@@ -391,17 +391,65 @@ pub fn list_row(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
     lcd.fill(232, y, 8, h, bg);
 }
 
-/// A Status-page row: label at the left, value at the right in `vc`, a line under it.
-pub fn kv_row(lcd: &mut impl Panel, y: i32, h: i32, label: &[u8], value: &[u8], vc: u16, selected: bool) {
+/// How a label + value row is laid out. One drawer ([`kv`]) for every "label: value" row: the Status page and
+/// the system pages ([`KV_STATUS`]), detail pages ([`KV_DETAIL`]) and a pair on a card ([`KV_PAIR`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KvStyle {
+    /// Where the value starts; it runs to x = 232.
+    pub vx: i16,
+    /// The value against x = 232 instead of at vx.
+    pub right: bool,
+    /// The baseline below the row's top; 0 centres it in the row.
+    pub base: i8,
+    /// A LINE under the row, in its last pixel row.
+    pub line: bool,
+    /// A value too wide for one line goes on to a second (the row is then 36 px tall, else 19).
+    pub wrap: bool,
+}
+
+/// The Status page: value at the right, a line under each row.
+pub const KV_STATUS: KvStyle = KvStyle { vx: 108, right: true, base: 0, line: true, wrap: false };
+/// A detail page (the AprsStation mock-up): value from x = 68, on two lines when it needs them.
+pub const KV_DETAIL: KvStyle = KvStyle { vx: 68, right: false, base: 13, line: true, wrap: true };
+/// A pair on a card ("Last alert   14:28"): no line, 17 px.
+pub const KV_PAIR: KvStyle = KvStyle { vx: 90, right: false, base: 13, line: false, wrap: false };
+
+/// A row's height: `h`, or for a wrapping style 19 px, 36 for a value on two lines.
+pub fn kv_h(st: &KvStyle, value: &[u8], h: i32) -> i32 {
+    if !st.wrap {
+        h
+    } else if text4_width(value, &UI_12) <= 232 - st.vx as i32 {
+        19
+    } else {
+        36
+    }
+}
+
+/// A label + value row from y, `h` tall ([`kv_h`]): the label in SUB at x = 8, the value in `vc`; all white on
+/// blue when selected. Paints the whole row.
+pub fn kv(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], value: &[u8], vc: u16, selected: bool) {
     let bg = if selected { BLUE } else { BG };
     let (lc, vc) = if selected { (BLUE_FG, BLUE_FG) } else { (SUB, vc) };
-    let base = y + h / 2 + 5;
-    lcd.fill(0, y, 8, h - 1, bg);
-    let lw = field(lcd, 8, 100, y, y + h - 1, base, Align::Left, label, &UI_12, lc, bg);
-    let _ = lw;
-    field(lcd, 108, 124, y, y + h - 1, base, Align::Right, value, &UI_12, vc, bg);
-    lcd.fill(232, y, 8, h - 1, bg);
-    lcd.fill(0, y + h - 1, 240, 1, LINE);
+    let (vx, vw) = (st.vx as i32, 232 - st.vx as i32);
+    let y1 = y + h - st.line as i32;
+    let base = y + if st.base == 0 { h / 2 + 5 } else { st.base as i32 };
+    lcd.fill(0, y, 240, y1 - y, bg);
+    lcd.text4_rows(8, base, label, &UI_12, lc, bg, y, y1);
+    let mut v = fit(value, &UI_12, vw);
+    if st.wrap && v.len() < value.len() {
+        // the second line from the last space, comma or dash past half way
+        let cut = match v.iter().rposition(|&ch| ch == b' ' || ch == b',' || ch == b'-') {
+            Some(p) if p > v.len() / 2 => p + 1,
+            _ => v.len(),
+        };
+        lcd.text4_rows(vx, base + 17, fit(value[cut..].trim_ascii_start(), &UI_12, vw), &UI_12, vc, bg, y, y1);
+        v = &value[..cut];
+    }
+    let x = if st.right { 232 - text4_width(v, &UI_12) } else { vx };
+    lcd.text4_rows(x, base, v, &UI_12, vc, bg, y, y1);
+    if st.line {
+        lcd.fill(0, y1, 240, 1, LINE);
+    }
 }
 
 /// The help line at the foot of a menu (MENU-15): a rounded box, the text wrapped on words, then the path.
@@ -679,7 +727,7 @@ mod tests {
         hint_bar(&mut fb, &[(UP, ""), ("Knob", "Change")]);
         toast(&mut fb, b"VE3KPW-9", b"On my way", true);
         list_row(&mut fb, 41, 22, &Row { num: Some(1), name: b"Squelch", value: b"4", dot: true, selected: true, grey: false });
-        kv_row(&mut fb, 20, 18, b"Transmit", b"Ready", GREEN, false);
+        kv(&mut fb, 20, 18, &KV_STATUS, b"Transmit", b"Ready", GREEN, false);
         help_box(&mut fb, 265, 33, b"Audio opens above this level. Home: SIDE1 + knob.", b"MENU 1");
         edit_cell(&mut fb, 161, 85, 72, 31, b"Tone", b"T 100.0", true, false);
         badge(&mut fb, 14, 33, 2, false, SURFACE);

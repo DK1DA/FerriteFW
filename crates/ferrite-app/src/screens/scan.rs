@@ -171,7 +171,7 @@ impl View for Scan {
             (b"Skips", skips.as_bytes()),
         ];
         for (i, (l, v)) in rows.iter().enumerate() {
-            app.kv_row(lcd, 4 + i, 122 + 18 * i as i32, 18, l, v, TEXT, false);
+            app.kv(lcd, 4 + i, 122 + 18 * i as i32, 18, &w::KV_STATUS, l, v, TEXT, false);
         }
         // The last hits: how long ago, what, how strong.
         if app.dirty(10, 1) {

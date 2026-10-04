@@ -5,8 +5,8 @@
 //! its keys, the knob and PTT do, how it times out, how it draws, and what its hint bar says. Everything the
 //! screens share lives on the [`App`] (slots, toast, undo, commands), in [`crate::settings`] (radio-wide
 //! settings, outside the App) and in [`shared`] (region dirty-tracking, pages, status bar, hint bar, list rows,
-//! the edit grid, help box), with [`lists`] (group C's list pages), [`forms`] (group A's fields and pickers)
-//! and [`parts`] (group B's meters and strips) for families of screens.
+//! the edit grid, help box), with [`lists`] (group C's list pages), [`forms`] (group A's fields and pickers),
+//! [`parts`] (group B's meters and strips) and [`table`] (label + value pages as data) for families of screens.
 //!
 //! One key is MENU and OK: on every screen a short press is OK (the screen's main action) and holding it opens
 //! that screen's options (MENU-25); home is the exception the manual makes (MENU: quick settings, hold:
@@ -72,6 +72,7 @@ pub(crate) mod shared;
 pub mod shortcut;
 pub mod squelch;
 pub mod status;
+pub(crate) mod table;
 pub mod text;
 pub mod tones;
 pub mod transmit;

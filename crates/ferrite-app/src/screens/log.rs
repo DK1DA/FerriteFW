@@ -362,7 +362,7 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
     let mut y = 58;
     for (i, (label, v)) in rows.iter().enumerate().take(n) {
         let c = if i == 0 && is_distress(e) { RED } else { TEXT };
-        y = app.detail(lcd, i, y, label.as_bytes(), v.as_bytes(), c);
+        y = app.kv(lcd, i, y, 0, &w::KV_DETAIL, label.as_bytes(), v.as_bytes(), c, false);
     }
     // The message itself, wrapped, under the rows.
     let y = y + 6;

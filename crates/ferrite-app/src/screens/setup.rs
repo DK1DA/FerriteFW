@@ -452,7 +452,7 @@ impl View for Setup {
                 ];
                 for (i, (l, v)) in rows.iter().enumerate() {
                     let c = if i == 6 && n == 0 { SUB } else { TEXT };
-                    app.kv_row(lcd, i, 53 + 24 * i as i32, 24, l.as_bytes(), v, c, false);
+                    app.kv(lcd, i, 53 + 24 * i as i32, 24, &w::KV_STATUS, l.as_bytes(), v, c, false);
                 }
                 // SETUP-10: the transmit state, no channels yet and how to add them.
                 let mut note = Buf::<160>::new();

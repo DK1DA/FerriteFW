@@ -1,5 +1,5 @@
 //! Drawing pieces the radio-activity screens share and `ferrite_ui::widgets` doesn't have yet: a progress bar,
-//! a short segmented meter, wrapped text, label + value lines, a dialog box, a framed card, a tick and an
+//! a short segmented meter, wrapped text, a dialog box, a framed card, a tick and an
 //! arrow (marks are drawn shapes: the fonts are cut to text). Candidates for the display library; each paints
 //! its whole box, so it can be redrawn alone.
 
@@ -72,12 +72,6 @@ pub fn lines(s: &[u8], f: &Font4, wd: i32, max: i32) -> i32 {
         n += 1;
     }
     n
-}
-
-/// "Issued   14:28": a SUB label at x, the value at vx, one 17 px row.
-pub fn kv(lcd: &mut impl Panel, x: i32, vx: i32, x_end: i32, base: i32, label: &[u8], value: &[u8], vc: u16, bg: u16) {
-    w::field(lcd, x, vx - x, base - 13, base + 4, base, Align::Left, label, &UI_12, SUB, bg);
-    w::field(lcd, vx, x_end - vx, base - 13, base + 4, base, Align::Left, value, &UI_12, vc, bg);
 }
 
 /// A card: SURFACE, rounded, a 1 px border.

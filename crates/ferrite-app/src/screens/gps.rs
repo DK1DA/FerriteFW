@@ -6,13 +6,14 @@
 use super::lists::*;
 use super::opts::Of;
 use super::shared::*;
+use super::table::{slow_table, Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::data::{Data, Fix, Op, WpSrc};
 use crate::keys::{KeyEvent, Press};
 use crate::{App, Screen};
 use ferrite_core::keys::Key;
-use ferrite_core::msg::GpsState;
+use ferrite_core::msg::{Device, GpsState, LiveAll};
 use ferrite_ui::assets::*;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
@@ -103,7 +104,7 @@ impl View for Gps {
             return;
         }
         match self.page {
-            Page::Position => position(app, lcd, data, fix, cx.dev.gps),
+            Page::Position => position(app, lcd, data, fix, cx.live, cx.dev),
             Page::Satellites => satellites(app, lcd, data, fix),
             Page::Waypoints => waypoints(app, lcd, data, fix, self.cur),
             Page::Go => go(app, lcd, data, fix, self.cur.sel),
@@ -121,7 +122,8 @@ impl View for Gps {
 }
 
 /// C16: the fix.
-fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, gps: GpsState) {
+fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, live: &LiveAll, dev: &Device) {
+    let gps = dev.gps;
     let seen = data.sats();
     let mut l = Buf::<32>::new();
     let state: &[u8] = match (gps, fix) {
@@ -135,29 +137,63 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
         app.empty(lcd, if gps == GpsState::Off { b"GPS is off" } else { b"No fix yet" }, if gps == GpsState::Off { b"MENU 0 6 1 turns it on" } else { b"Left or right: the satellites" });
         return;
     };
-    let mut rows: [(&str, Buf<32>); 8] = Default::default();
-    let mut b = Buf::<32>::new();
-    rows[0] = ("HDOP", Buf::from(ferrite_ui::v!(b, "{}.{}", f.hdop_x10 / 10, f.hdop_x10 % 10)));
-    rows[1] = ("Fix age", Buf::from(ferrite_ui::v!(b, "{} s", f.age_s)));
-    pos_text(f.pos, &mut b);
-    rows[2] = ("Position", b);
-    let g = grid(f.pos);
-    rows[3] = ("Grid", Buf::from(&g));
-    rows[4] = ("Altitude", Buf::from(ferrite_ui::v!(b, "{} m", f.alt_m)));
-    rows[5] = ("Speed", Buf::from(ferrite_ui::v!(b, "{} km/h", f.speed_kmh)));
-    rows[6] = ("Heading", Buf::from(if f.speed_kmh == 0 { b"- (stopped)".as_slice() } else { ferrite_ui::v!(b, "{} {}\u{b0}", compass_name(f.heading), f.heading) }));
-    let t = f.utc_s;
-    rows[7] = ("UTC", Buf::from(ferrite_ui::v!(b, "{}{}:{}{}:{}{} Z", z(t / 3600), t / 3600, z(t / 60 % 60), t / 60 % 60, z(t % 60), t % 60)));
-    let mut y = LIST_Y + 4;
-    for (i, (label, v)) in rows.iter().enumerate() {
-        y = app.detail(lcd, i, y, label.as_bytes(), v.as_bytes(), TEXT);
-    }
+    app.table(lcd, &POSITION, live, dev, &f, None);
     // GPS-2: a stale fix says so
     let stale = f.age_s > 10;
     if app.dirty(R_NOTE, hash(&stale)) {
         let msg: &[u8] = if stale { b"Fix is old: position may be stale" } else { b"" };
         w::field(lcd, 8, 224, 230, 248, 243, Align::Left, msg, &UI_12, AMBER, BG);
     }
+}
+
+fn text(b: &mut Buf<40>, s: &[u8]) -> u16 {
+    b.set(s);
+    TEXT
+}
+
+slow_table! {
+    /// C16's rows.
+    ROWS: [(&str, Val<Fix>); 8] = [
+        (slow!("HDOP"), |c, b| {
+            let _ = uwrite!(b, "{}.{}", c.x.hdop_x10 / 10, c.x.hdop_x10 % 10);
+            TEXT
+        }),
+        (slow!("Fix age"), |c, b| {
+            let _ = uwrite!(b, "{} s", c.x.age_s);
+            TEXT
+        }),
+        (slow!("Position"), |c, b| {
+            let mut p = Buf::<32>::new();
+            pos_text(c.x.pos, &mut p);
+            text(b, p.as_bytes())
+        }),
+        (slow!("Grid"), |c, b| text(b, &grid(c.x.pos))),
+        (slow!("Altitude"), |c, b| {
+            let _ = uwrite!(b, "{} m", c.x.alt_m);
+            TEXT
+        }),
+        (slow!("Speed"), |c, b| {
+            let _ = uwrite!(b, "{} km/h", c.x.speed_kmh);
+            TEXT
+        }),
+        (slow!("Heading"), |c, b| {
+            let f = c.x;
+            if f.speed_kmh == 0 {
+                return text(b, b"- (stopped)");
+            }
+            let _ = uwrite!(b, "{} {}\u{b0}", compass_name(f.heading), f.heading);
+            TEXT
+        }),
+        (slow!("UTC"), |c, b| {
+            let t = c.x.utc_s;
+            let _ = uwrite!(b, "{}{}:{}{}:{}{} Z", z(t / 3600), t / 3600, z(t / 60 % 60), t / 60 % 60, z(t % 60), t % 60);
+            TEXT
+        }),
+    ];
+}
+
+slow_table! {
+    POSITION: Table<Fix> = Table { rows: &ROWS, go: &[], y: (LIST_Y + 4) as i16, h: 0, style: w::KV_DETAIL };
 }
 
 /// "0" before a single digit.

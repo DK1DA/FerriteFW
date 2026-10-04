@@ -159,13 +159,6 @@ impl App {
         }
     }
 
-    /// Label + value row `i` (region R_ROW + i), as on the Status page.
-    pub(crate) fn kv_row(&mut self, lcd: &mut impl Panel, i: usize, y: i32, h: i32, label: &[u8], value: &[u8], c: u16, sel: bool) {
-        if self.dirty(R_ROW + i, hash(&(label, value, c, sel))) {
-            w::kv_row(lcd, y, h, label, value, c, sel);
-        }
-    }
-
     /// Edit grid cell `i` (region R_ROW + i): label over value, focused or greyed (EDIT-3, EDIT-7).
     pub(crate) fn grid_cell(&mut self, lcd: &mut impl Panel, i: usize, x: i32, y: i32, w_: i32, h: i32, label: &[u8], value: &[u8], focused: bool, grey: bool) {
         if self.dirty(R_ROW + i, hash(&(label, value, focused, grey))) {

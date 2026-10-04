@@ -5,7 +5,6 @@
 //! until the screen is left; OK keeps it as the slot's VFO. Below, the SAME state and the last alert.
 
 use super::activity::Mode;
-use super::parts;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
@@ -125,8 +124,8 @@ impl View for Weather {
         }
         if app.dirty(10, hash(&last)) {
             lcd.fill(0, 200, 240, 1, LINE);
-            parts::kv(lcd, 8, 90, 232, 220, b"SAME alerts", b"On, every area", TEXT, BG);
-            parts::kv(lcd, 8, 90, 232, 238, b"Last alert", last.as_bytes(), TEXT, BG);
+            w::kv(lcd, 207, 17, &w::KV_PAIR, b"SAME alerts", b"On, every area", TEXT, false);
+            w::kv(lcd, 225, 17, &w::KV_PAIR, b"Last alert", last.as_bytes(), TEXT, false);
             w::field(lcd, 8, 224, 246, 264, 259, Align::Left, b"Location codes: MENU 0 3 3 2", &UI_12, DIM, BG);
         }
     }

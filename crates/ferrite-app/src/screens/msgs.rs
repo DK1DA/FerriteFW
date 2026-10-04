@@ -131,8 +131,8 @@ impl View for Msgs {
                     row2(lcd, 22, &top);
                 }
                 let mut b = Buf::<40>::new();
-                let y = app.detail(lcd, 0, 58, b"Time", ferrite_ui::v!(b, "{} \u{b7} {} ago", Txt(time.as_bytes()), Txt(age.as_bytes())), TEXT);
-                app.detail(lcd, 1, y, b"State", if st.is_empty() { b"read" } else { st.as_bytes() }, c);
+                let y = app.kv(lcd, 0, 58, 0, &w::KV_DETAIL, b"Time", ferrite_ui::v!(b, "{} \u{b7} {} ago", Txt(time.as_bytes()), Txt(age.as_bytes())), TEXT, false);
+                app.kv(lcd, 1, y, 0, &w::KV_DETAIL, b"State", if st.is_empty() { b"read" } else { st.as_bytes() }, c, false);
                 if app.dirty(R_NOTE, hash(&m.text)) {
                     lcd.fill(0, 100, 240, 196, BG);
                     wrap(lcd, 8, 104, 224, 296, m.text.as_bytes(), TEXT);

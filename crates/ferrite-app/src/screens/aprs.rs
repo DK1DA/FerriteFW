@@ -9,6 +9,7 @@ use super::lists::*;
 use super::nav::Dest;
 use super::opts::Of;
 use super::shared::*;
+use super::table::{slow_table, Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::data::{Data, Draft, Op, Station};
@@ -18,7 +19,9 @@ use ferrite_core::keys::Key;
 use ferrite_ui::assets::*;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
+use ferrite_core::msg::{Device, LiveAll};
 use ferrite_ui::text::Buf;
+use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -85,7 +88,7 @@ impl View for Aprs {
         }
         if self.station {
             match data.station(self.cur.sel) {
-                Some(s) => station(app, lcd, &s, data),
+                Some(s) => station(app, lcd, &s, data, cx.live, cx.dev),
                 None => app.empty(lcd, b"No such station", b"The heard list changed"),
             }
             return;
@@ -151,8 +154,78 @@ impl View for Aprs {
     }
 }
 
+fn text(b: &mut Buf<40>, s: &[u8]) -> u16 {
+    b.set(s);
+    TEXT
+}
+
+slow_table! {
+    /// C4's rows.
+    ROWS: [(&str, Val<Station>); 7] = [
+        (slow!("Position"), |c, b| match c.x.pos {
+            Some(p) => {
+                let mut pb = Buf::<32>::new();
+                pos_text(p, &mut pb);
+                text(b, pb.as_bytes())
+            }
+            None => text(b, b"none"),
+        }),
+        (slow!("Course"), |c, b| match c.x.course {
+            Some((d, v)) => {
+                let _ = uwrite!(b, "{}\u{b0} \u{b7} {} km/h", d, v);
+                TEXT
+            }
+            None => text(b, b"-"),
+        }),
+        (slow!("Altitude"), |c, b| match c.x.alt_m {
+            Some(a) => {
+                let _ = uwrite!(b, "{} m", a);
+                TEXT
+            }
+            None => text(b, b"-"),
+        }),
+        (slow!("Path"), |c, b| {
+            let s = c.x;
+            if s.via.is_empty() {
+                return text(b, b"direct");
+            }
+            for (k, hop) in s.via.as_bytes().split(|&ch| ch == b',').enumerate() {
+                if k > 0 {
+                    b.push(b", ");
+                }
+                b.push(hop);
+            }
+            TEXT
+        }),
+        (slow!("Heard"), |c, b| {
+            let s = c.x;
+            let mut age = Buf::<12>::new();
+            age_text(s.ago_s, &mut age);
+            let _ = uwrite!(b, "{} ago \u{b7} {} {}", Txt(age.as_bytes()), s.times, if s.times == 1 { "time" } else { "times" });
+            TEXT
+        }),
+        (slow!("Comment"), |c, b| text(b, if c.x.comment.is_empty() { b"-".as_slice() } else { c.x.comment.as_bytes() })),
+        (slow!("Message"), |c, b| {
+            let s = c.x;
+            if s.msg.is_empty() {
+                return text(b, b"-");
+            }
+            let mut clock = Buf::<12>::new();
+            if let Some(m) = s.msg_min {
+                clock_text(Some(m), 0, &mut clock);
+            }
+            let _ = uwrite!(b, "\"{}\" {}", Txt(s.msg.as_bytes()), Txt(clock.as_bytes()));
+            TEXT
+        }),
+    ];
+}
+
+slow_table! {
+    STATION: Table<Station> = Table { rows: &ROWS, go: &[], y: 122, h: 0, style: w::KV_DETAIL };
+}
+
 /// C4: one station.
-fn station(app: &mut App, lcd: &mut impl Panel, s: &Station, data: &dyn Data) {
+fn station(app: &mut App, lcd: &mut impl Panel, s: &Station, data: &dyn Data, live: &LiveAll, dev: &Device) {
     let fix = data.fix();
     let where_ = match (s.pos, fix) {
         (Some(p), Some(f)) => Some(dist_bearing(f.pos, p)),
@@ -188,53 +261,7 @@ fn station(app: &mut App, lcd: &mut impl Panel, s: &Station, data: &dyn Data) {
     if app.dirty(R_NOTE, hash(&where_.map(|w| w.1))) {
         compass(lcd, 194, 71, 33, where_.map(|w| w.1));
     }
-    let mut rows: [(&str, Buf<40>); 7] = Default::default();
-    let mut b = Buf::<40>::new();
-    match s.pos {
-        Some(p) => {
-            let mut pb = Buf::<32>::new();
-            pos_text(p, &mut pb);
-            rows[0] = ("Position", Buf::from(pb.as_bytes()));
-        }
-        None => rows[0] = ("Position", Buf::from(b"none")),
-    }
-    rows[1] = ("Course", Buf::from(match s.course {
-        Some((c, v)) => ferrite_ui::v!(b, "{}\u{b0} \u{b7} {} km/h", c, v),
-        None => b"-",
-    }));
-    rows[2] = ("Altitude", Buf::from(match s.alt_m {
-        Some(a) => ferrite_ui::v!(b, "{} m", a),
-        None => b"-",
-    }));
-    rows[3] = ("Path", Buf::new());
-    if s.via.is_empty() {
-        rows[3].1.set(b"direct");
-    } else {
-        for (k, hop) in s.via.as_bytes().split(|&c| c == b',').enumerate() {
-            if k > 0 {
-                rows[3].1.push(b", ");
-            }
-            rows[3].1.push(hop);
-        }
-    }
-    let mut age = Buf::<12>::new();
-    age_text(s.ago_s, &mut age);
-    rows[4] = ("Heard", Buf::from(ferrite_ui::v!(b, "{} ago \u{b7} {} {}", Txt(age.as_bytes()), s.times, if s.times == 1 { "time" } else { "times" })));
-    rows[5] = ("Comment", Buf::from(if s.comment.is_empty() { b"-".as_slice() } else { s.comment.as_bytes() }));
-    rows[6] = ("Message", Buf::new());
-    if s.msg.is_empty() {
-        rows[6].1.set(b"-");
-    } else {
-        let mut clock = Buf::<12>::new();
-        if let Some(m) = s.msg_min {
-            clock_text(Some(m), 0, &mut clock);
-        }
-        let _ = uwrite!(rows[6].1, "\"{}\" {}", Txt(s.msg.as_bytes()), Txt(clock.as_bytes()));
-    }
-    let mut y = 122;
-    for (i, (label, v)) in rows.iter().enumerate() {
-        y = app.detail(lcd, i, y, label.as_bytes(), v.as_bytes(), TEXT);
-    }
+    app.table(lcd, &STATION, live, dev, s, None);
     if app.dirty(R_HELP, 1) {
         lcd.fill(0, 122, 240, 1, LINE);
     }

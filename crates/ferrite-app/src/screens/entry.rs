@@ -253,7 +253,7 @@ impl View for Entry {
             note = b"Channels are 1 to 1000";
         }
         for (i, (label, v, c)) in rows.iter().enumerate() {
-            app.kv_row(lcd, i, 116 + 22 * i as i32, 22, label, v.as_bytes(), *c, false);
+            app.kv(lcd, i, 116 + 22 * i as i32, 22, &w::KV_STATUS, label, v.as_bytes(), *c, false);
         }
         if app.dirty(R_NOTE, hash(&note)) {
             para(lcd, 8, 210, 224, 2, 17, note, &UI_12, AMBER, BG);

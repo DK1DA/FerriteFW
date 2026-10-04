@@ -5,13 +5,13 @@
 
 use super::nav::Dest;
 use super::shared::*;
+use super::table::{slow_table, Ctx, Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
 use crate::settings::ON_OFF;
 use crate::{App, Screen};
 use ferrite_core::keys::Key;
-use ferrite_core::msg::Device;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
@@ -40,48 +40,52 @@ pub enum LinkAnswer {
     Cancelled,
 }
 
-type StatusRow = (&'static str, fn(&App, &Device, &mut Buf<28>) -> u16);
-
-const STATUS: [StatusRow; 6] = [
-    ("Bluetooth", |a, d, b| {
-        if d.bt {
-            b.set(b"Connected");
-            BLUE
-        } else {
-            b.set(if a.set.bt { b"On, waiting".as_slice() } else { b"Off" });
-            TEXT
-        }
-    }),
-    ("Cable", |_, d, b| {
-        if !d.link.cable {
-            b.set(b"Not connected");
-            return SUB;
-        }
-        let _ = uwrite!(b, "{} baud", d.link.baud_100 as u32 * 100);
-        TEXT
-    }),
-    ("Writes", |_, d, b| {
-        match d.link.write_pct {
-            Some(p) => {
-                let _ = uwrite!(b, "Writing, {} %", p);
+slow_table! {
+    ROWS: [(&str, Val<()>); 6] = [
+        (slow!("Bluetooth"), |Ctx { app: a, dev: d, .. }, b| {
+            if d.bt {
+                b.set(b"Connected");
+                BLUE
+            } else {
+                b.set(if a.set.bt { b"On, waiting".as_slice() } else { b"Off" });
+                TEXT
             }
-            None => b.set(b"Idle"),
-        }
-        TEXT
-    }),
-    ("Cable writes", |_, _, b| {
-        b.set(b"Trusted");
-        TEXT
-    }),
-    ("BT writes", |_, _, b| {
-        b.set(b"Ask once");
-        TEXT
-    }),
-    ("Debug console", |_, _, b| {
-        b.set(ON_OFF[0].as_bytes());
-        TEXT
-    }),
-];
+        }),
+        (slow!("Cable"), |Ctx { dev: d, .. }, b| {
+            if !d.link.cable {
+                b.set(b"Not connected");
+                return SUB;
+            }
+            let _ = uwrite!(b, "{} baud", d.link.baud_100 as u32 * 100);
+            TEXT
+        }),
+        (slow!("Writes"), |Ctx { dev: d, .. }, b| {
+            match d.link.write_pct {
+                Some(p) => {
+                    let _ = uwrite!(b, "Writing, {} %", p);
+                }
+                None => b.set(b"Idle"),
+            }
+            TEXT
+        }),
+        (slow!("Cable writes"), |_, b| {
+            b.set(b"Trusted");
+            TEXT
+        }),
+        (slow!("BT writes"), |_, b| {
+            b.set(b"Ask once");
+            TEXT
+        }),
+        (slow!("Debug console"), |_, b| {
+            b.set(ON_OFF[0].as_bytes());
+            TEXT
+        }),
+    ];
+}
+
+slow_table! {
+    STATUS: Table<()> = Table { rows: &ROWS, go: &[], y: 22, h: 20, style: w::KV_STATUS };
+}
 
 impl Link {
     pub fn new(page: LinkPage) -> Self {
@@ -151,12 +155,7 @@ impl View for Link {
         let dev = cx.dev;
         match self.page {
             LinkPage::Status => {
-                let mut b = Buf::<28>::new();
-                for (i, (label, f)) in STATUS.iter().enumerate() {
-                    b.clear();
-                    let c = f(app, dev, &mut b);
-                    app.kv_row(lcd, i, 22 + 20 * i as i32, 20, label.as_bytes(), b.as_bytes(), c, false);
-                }
+                app.table(lcd, &STATUS, cx.live, dev, &(), None);
                 app.help_box(lcd, 160, 48, b"The web app connects by cable or Bluetooth.", b"");
             }
             LinkPage::Paired => {

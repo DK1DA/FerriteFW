@@ -1,6 +1,6 @@
 //! What the list and data screens (group C: event log, APRS, GPS, waypoints, channel browser, zones, scan
 //! lists) share: walking a list read on demand, the list page (header, rows, empty text), two-line rows,
-//! detail rows, the confirm box, the compass, and the numbers they show (distance, bearing, age, position,
+//! the confirm box, the compass, and the numbers they show (distance, bearing, age, position,
 //! grid square), in integer maths (no float on the radio).
 //!
 //! Lists never copy their items: the state is a selected index and the top row's, items are read from the
@@ -251,16 +251,6 @@ impl App {
         }
     }
 
-    /// Label + value row `i` of a detail page (the AprsStation mock-up): label at the left in grey, the value
-    /// from x = 68 (on two lines when it needs them), a line under it. Returns where the next row starts.
-    pub(crate) fn detail(&mut self, lcd: &mut impl Panel, i: usize, y: i32, label: &[u8], value: &[u8], c: u16) -> i32 {
-        let h = detail_h(value);
-        if self.dirty(R_ROW + i, hash(&(label, value, c, y))) {
-            detail_row(lcd, y, h, label, value, c);
-        }
-        y + h
-    }
-
     /// The box asking before a destructive action (MENU-23): what goes, and the keys.
     pub(crate) fn confirm_box(&mut self, lcd: &mut impl Panel, what: &[u8], name: &[u8]) {
         if self.dirty(R_HELP, hash(&(what, name))) {
@@ -272,31 +262,6 @@ impl App {
             w::field(lcd, 24, 192, y + 62, y + 80, y + 76, Align::Center, "OK confirms \u{b7} BACK keeps it".as_bytes(), &UI_12, SUB, SURFACE);
         }
     }
-}
-
-pub(crate) const VALUE_X: i32 = 68;
-
-const VALUE_W: i32 = 232 - VALUE_X;
-
-/// A detail row's height: 19 px, or 36 for a value on two lines.
-pub(crate) fn detail_h(value: &[u8]) -> i32 {
-    if text4_width(value, &UI_12) <= VALUE_W { 19 } else { 36 }
-}
-
-pub(crate) fn detail_row(lcd: &mut impl Panel, y: i32, h: i32, label: &[u8], value: &[u8], c: u16) {
-    lcd.fill(0, y, 240, h - 1, BG);
-    lcd.text4_rows(8, y + 13, label, &UI_12, SUB, BG, y, y + h - 1);
-    let mut cut = value.len();
-    if h > 19 {
-        let fit = w::fit(value, &UI_12, VALUE_W).len();
-        cut = match value[..fit].iter().rposition(|&ch| ch == b' ' || ch == b',' || ch == b'-') {
-            Some(p) if p > fit / 2 => p + 1,
-            _ => fit,
-        };
-        lcd.text4_rows(VALUE_X, y + 30, w::fit(value[cut..].trim_ascii_start(), &UI_12, VALUE_W), &UI_12, c, BG, y, y + h - 1);
-    }
-    lcd.text4_rows(VALUE_X, y + 13, &value[..cut], &UI_12, c, BG, y, y + h - 1);
-    lcd.fill(0, y + h - 1, 240, 1, LINE);
 }
 
 pub(crate) fn head(lcd: &mut impl Panel, left: &[u8], right: &[u8]) {
