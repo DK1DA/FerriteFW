@@ -73,7 +73,7 @@ fn main() {
         Check { label: "BK4829 UHF", value: "0x4829", state: State::Ok },
         Check { label: "SI4732", value: "", state: State::Pending },
     ];
-    let info = BootInfo { version: VERSION, callsign: Some("VA7FER"), checks: &checks };
+    let info = BootInfo { version: VERSION, callsign: Some(b"VA7FER"), owner: None, checks: &checks };
     let mut fb = FrameBuffer::new();
     boot::draw(&mut fb, &info);
     save(&fb, "boot", scale);
@@ -81,6 +81,14 @@ fn main() {
     failed[1] = Check { label: "SPI flash", value: "no answer", state: State::Fail };
     boot::draw(&mut fb, &BootInfo { checks: &failed, ..info });
     save(&fb, "boot-failed", scale);
+    // The owner card (MENU 0 7 3 3, BootC mock-up): the sample settings with the sample card on them.
+    let mut set = ferrite_app::sample::settings();
+    ferrite_app::sample::owner_card(&mut set);
+    let mut running = checks;
+    running[0..3].iter_mut().for_each(|c| c.state = State::Ok);
+    (running[3].state, running[4].state) = (State::Pending, State::Pending);
+    boot::draw(&mut fb, &BootInfo { callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &running, ..info });
+    save(&fb, "boot-owner", scale);
 
     // The app, as in the window: keys pressed at simulated times, the fake radio stepped to match.
     let store = fake::store();

@@ -11,6 +11,7 @@
 use crate::screens::hf::HfMem;
 use ferrite_core::msg::XbCfg;
 use ferrite_core::txplan::Region;
+use ferrite_ui::boot::Owner;
 use ferrite_ui::text::Buf;
 use ufmt::uwrite;
 
@@ -90,6 +91,8 @@ pub const LAYOUTS: [&str; 3] = ["Watch", "Single + scope", "Watch + activity"];
 pub const THEMES: [&str; 3] = ["Dark", "Daylight", "Night red"];
 pub const PIN_MODES: [&str; 3] = ["Off", "At power on", "Power on + unlock"];
 pub const ON_OFF: [&str; 2] = ["Off", "On"];
+/// Boot screen (0 7 3 3).
+pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
 /// FM broadcast step (0 3 1 2) in 10 kHz units, and its names.
 pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "200 kHz")];
 
@@ -97,8 +100,11 @@ pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "20
 pub struct Settings {
     /// 0 8 7 1, capitals (SETUP-12).
     pub callsign: Text<10>,
-    /// The owner card (SETUP-11): name, phone, e-mail. Entered on the radio only in setup.
+    /// The owner card (SETUP-11): name, phone, e-mail. Entered on the radio only in setup page 4, then edited
+    /// in the web app only; shown at boot when [`Settings::boot_card`] is on.
     pub owner: [Text<20>; 3],
+    /// 0 7 3 3: the boot screen is the owner card (BOOT_SCREENS[1]), not the logo.
+    pub boot_card: bool,
     /// 0 9 4: 0 = not chosen yet, else REGION_LIST[n - 1].
     pub region: u8,
     /// 0 8 9, and whether its warning has been shown (shown once: SETUP-8).
@@ -142,6 +148,7 @@ impl Settings {
     pub const DEFAULT: Settings = Settings {
         callsign: Text::EMPTY,
         owner: [Text::EMPTY; 3],
+        boot_card: false,
         region: 0,
         extend_tx: false,
         extend_warned: false,
@@ -206,6 +213,19 @@ impl Settings {
         for &b in c {
             self.callsign.push(b.to_ascii_uppercase());
         }
+    }
+
+    /// The boot screen's callsign (BOOT-9): None until one is set.
+    pub fn boot_callsign(&self) -> Option<&[u8]> {
+        (!self.callsign.is_empty()).then(|| self.callsign.as_bytes())
+    }
+
+    /// The owner card for the boot screen: Some when 0 7 3 3 is "Owner card" and the card has something on it
+    /// (a callsign, name, phone or e-mail); else None, and the boot screen shows the logo.
+    pub fn boot_owner(&self) -> Option<Owner<'_>> {
+        let [name, phone, email] = &self.owner;
+        let any = !self.callsign.is_empty() || self.owner.iter().any(|t| !t.is_empty());
+        (self.boot_card && any).then(|| Owner { name: name.as_bytes(), phone: phone.as_bytes(), email: email.as_bytes() })
     }
 
     /// SAME alerts are on: the setting, in a region that has them.

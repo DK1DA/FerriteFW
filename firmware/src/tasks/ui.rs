@@ -9,7 +9,7 @@ use crate::hal::gpio::Mode;
 use crate::store;
 use crate::tasks::{check, CHECK_MCU, CHECK_STATE, FAILED, PASSED};
 use core::sync::atomic::Ordering::Relaxed;
-use embassy_futures::select::{select4, Either4};
+use embassy_futures::select::{select, select4, Either, Either4};
 use embassy_time::{Duration, Instant, Timer};
 use ferrite_app::App;
 use ferrite_core::chipid;
@@ -36,6 +36,15 @@ fn slot_a(all: &mut LiveAll, l: &Live) {
     all.chips = l.chips;
 }
 
+/// MENU pressed or released: whether it is held, for the settings reset at power on (BOOT-14).
+fn menu_state(i: &Input, held: &mut bool) {
+    if let Input::Key(keypad::Event::Press(c) | keypad::Event::Release(c)) = *i {
+        if keys::key(c) == Some(ferrite_core::keys::Key::Menu) {
+            *held = matches!(i, Input::Key(keypad::Event::Press(_)));
+        }
+    }
+}
+
 #[embassy_executor::task]
 pub async fn task() {
     let mut lcd = Screen::new();
@@ -59,8 +68,16 @@ pub async fn task() {
         Check { label: "BK4829 VHF", value: "", state: State::Pending },
         Check { label: "BK4829 UHF", value: "", state: State::Pending },
     ];
-    // The logo for at least 1.5 s, until every check has reported (at most 5 s: a check still pending then
-    // counts as failed).
+    // The settings, borrowed here for the boot screen (callsign, owner card: BOOT-9, MENU 0 7 3 3) and then
+    // handed to the app. Until the Storage task reads the settings struct (0x02D000) they are the defaults, so
+    // the boot screen is the logo; once it does, store::settings() returns the stored ones and nothing here
+    // changes. The read must finish before this point (it is one 4 KB sector).
+    let set = store::settings();
+    let card = set.boot_owner().is_some();
+    // The logo for at least 1.5 s (the owner card 4 s; any key skips it), until every check has reported (at
+    // most 5 s: a check still pending then counts as failed).
+    let least = Duration::from_millis(if card { 4000 } else { 1500 });
+    let (mut menu_held, mut skip) = (false, false);
     let start = Instant::now();
     loop {
         for (c, s) in checks.iter_mut().zip(&CHECK_STATE) {
@@ -70,38 +87,41 @@ pub async fn task() {
                 _ => State::Pending,
             };
         }
-        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: None, checks: &checks });
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &checks });
         let done = checks.iter().all(|c| c.state != State::Pending);
         let t = start.elapsed();
-        if (done && t >= Duration::from_millis(1500)) || t >= Duration::from_secs(5) {
+        if (done && (t >= least || skip)) || t >= Duration::from_secs(5) {
             break;
         }
-        Timer::after_millis(100).await;
+        if card {
+            // Keys while the card shows: any press skips the rest of it; MENU's state still counts (BOOT-14).
+            if let Either::First(i) = select(INPUT.receive(), Timer::after_millis(100)).await {
+                skip |= matches!(i, Input::Key(keypad::Event::Press(_)));
+                menu_state(&i, &mut menu_held);
+            }
+        } else {
+            Timer::after_millis(100).await;
+        }
     }
     for c in checks.iter_mut().filter(|c| c.state == State::Pending) {
         c.state = State::Fail;
     }
     if checks.iter().any(|c| c.state == State::Fail) {
         // The failed check stays on screen until a key.
-        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: None, checks: &checks });
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: None, checks: &checks });
         while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) {}
     }
 
     // Keys pressed during the boot screen: only whether MENU is still held counts (BOOT-14); the rest are
     // dropped, as a PTT held at power on is (KEY-8).
-    let mut menu_held = false;
     while let Ok(i) = INPUT.try_receive() {
-        if let Input::Key(keypad::Event::Press(c) | keypad::Event::Release(c)) = i {
-            if keys::key(c) == Some(ferrite_core::keys::Key::Menu) {
-                menu_held = matches!(i, Input::Key(keypad::Event::Press(_)));
-            }
-        }
+        menu_state(&i, &mut menu_held);
     }
 
     // Hand-off: the whole screen cleared, then the app draws everything once (HOME-2).
     lcd.0.fill(0, 0, 240, 320, BG);
     let store = store::channels();
-    let mut app = App::new(store::settings(), store::last_alert());
+    let mut app = App::new(set, store::last_alert());
     // After the self-test: setup on first boot (BOOT-12); MENU held: the settings reset (PIN-6, BOOT-14), which
     // asks before the PIN; else the PIN if one is set (BOOT-13).
     if store::first_boot() {

@@ -332,6 +332,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &LAYOUTS, s.layout);
             s.layout != 0
         }
+        [7, 3, 3] => {
+            pick(b, &BOOT_SCREENS, s.boot_card as u8);
+            s.boot_card
+        }
         [7, 7] => {
             let mut t = Buf::<16>::new();
             app.item_text(Item::BatterySave, true, &mut t);
@@ -448,6 +452,7 @@ fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         }
         [7, 1] => s.theme = cycle(s.theme, d, THEMES.len()),
         [7, 2] => s.layout = cycle(s.layout, d, LAYOUTS.len()),
+        [7, 3, 3] => s.boot_card = !s.boot_card,
         [9, 4] => s.region = cycle(s.region.max(1) - 1, d, REGION_LIST.len()) + 1,
         [3, 1, 2] => s.fm_step = cycle(s.fm_step, d, FM_STEPS.len()),
         [3, 1, 3] => s.fm_agc = cycle(s.fm_agc, d, 11),
@@ -494,6 +499,7 @@ fn reset(app: &mut App, p: &[u8]) {
         [6, 6] => (s.clock, s.clock_gps) = (d.clock, d.clock_gps),
         [7, 1] => s.theme = d.theme,
         [7, 2] => s.layout = d.layout,
+        [7, 3, 3] => s.boot_card = d.boot_card,
         [8, 9] => s.extend_tx = false,
         [3, 1, 2] => s.fm_step = d.fm_step,
         [3, 1, 3] => s.fm_agc = d.fm_agc,

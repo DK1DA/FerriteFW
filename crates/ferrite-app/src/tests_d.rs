@@ -458,3 +458,86 @@ fn power_on_reset_before_the_pin() {
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
 }
+
+/// SETUP-11: setup page 4 writes the owner card (lower case, digits, '@' by multi-tap: KEY-12); MENU 0 7 3 3
+/// turns the boot screen to it (D13), and back to the logo with #.
+#[test]
+fn owner_card_from_setup_to_boot() {
+    use ferrite_ui::boot::{self, BootInfo};
+    let mut t = T::new();
+    t.app.set.set_callsign(b"va7fer");
+    menu0(&mut t, &[9, 8, 1]);
+    for _ in 0..3 {
+        t.tap(Key::Menu); // callsign, region, owner card
+    }
+    assert!(matches!(t.app.screen(), Screen::Setup(Setup { page: 3, .. })), "page 4: the owner card");
+    t.tap(Key::Star); // abc
+    t.tap(Key::Digit(2));
+    t.wait(1100);
+    t.tap(Key::Digit(2));
+    t.tap(Key::Digit(2));
+    t.tap(Key::Down);
+    t.tap(Key::Star); // 123
+    for d in [5, 5, 5] {
+        t.tap(Key::Digit(d));
+    }
+    t.tap(Key::Down);
+    t.tap(Key::Star); // ABC
+    for _ in 0..4 {
+        t.tap(Key::Digit(1)); // . - / @
+    }
+    let o = t.app.settings().owner;
+    assert_eq!((o[0].as_bytes(), o[1].as_bytes(), o[2].as_bytes()), (&b"ab"[..], &b"555"[..], &b"@"[..]));
+    assert!(t.app.settings().boot_owner().is_none(), "the logo until 0 7 3 3 says otherwise");
+    t.tap(Key::Hash); // skip the rest of setup
+    t.tap(Key::Menu);
+
+    // 0 7 3 3 toggles the boot screen; the boot screen follows.
+    menu0(&mut t, &[7, 3]);
+    t.tap(Key::Down);
+    t.tap(Key::Down);
+    t.knob(1);
+    assert!(t.app.settings().boot_card);
+    let mut b = Buf::<24>::new();
+    assert_eq!(crate::screens::groups::wired(&t.app, &Device::default(), &[7, 3, 3], &mut b), Some(true));
+    assert_eq!(b.as_bytes(), b"Owner card");
+    let draw = |s: &crate::settings::Settings| {
+        let mut fb = FrameBuffer::new();
+        boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), owner: s.boot_owner(), checks: &[] });
+        fb
+    };
+    let fb = draw(t.app.settings());
+    assert!(count_px(&fb, 22, 34, |c| c != BG) > 100, "the card's first line");
+    assert!(count_px(&fb, 40, 72, |c| c != BG) > 500, "the callsign, large");
+    t.tap(Key::Hash);
+    assert!(!t.app.settings().boot_card, "# resets to the logo");
+    let fb = draw(t.app.settings());
+    assert_eq!(count_px(&fb, 22, 34, |c| c != BG), 0, "the logo screen: nothing at the top");
+    assert!(count_px(&fb, 40, 120, |c| c != BG) > 2000, "the logo");
+}
+
+/// D13: the owner card is user data. Fields as long as Settings holds, in characters the fonts lack, stay in
+/// their 12..228 column; a failed check shows the logo screen instead (BOOT-10).
+#[test]
+fn owner_card_clips_and_yields_to_a_failure() {
+    use ferrite_ui::boot::{self, BootInfo, Check, State};
+    let mut s = crate::settings::Settings::DEFAULT;
+    crate::sample::owner_card(&mut s);
+    s.set_callsign(b"WWWWWWWWWWWW"); // more than Text<10> holds: cut at 10
+    s.owner[0].set("\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}".as_bytes()); // 20 bytes: 10 '?'
+    s.owner[1].set(&[0xFF; 20]);
+    s.owner[2].set(b"MMMMMMMMMMMMMMMMMMMMMMMMMM");
+    let ok = [Check { label: "MCU", value: "", state: State::Ok }];
+    let mut fb = FrameBuffer::new();
+    fb.px.fill(0x1234);
+    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), owner: s.boot_owner(), checks: &ok });
+    for y in 0..280 {
+        for x in (0..12).chain(229..240) {
+            assert_eq!(fb.at(x, y), BG, "ink outside the column at {x},{y}");
+        }
+    }
+    assert!(count_px(&fb, 80, 96, |c| c != BG) > 100, "the unknown characters drew as '?'");
+    let fail = [Check { label: "MCU", value: "", state: State::Fail }];
+    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), owner: s.boot_owner(), checks: &fail });
+    assert_eq!(count_px(&fb, 22, 34, |c| c != BG), 0, "a failure: the logo screen, not the card");
+}

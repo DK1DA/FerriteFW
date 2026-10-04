@@ -171,7 +171,6 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
         Check { label: "BK4829 UHF", value: "0x4829", state: State::Ok },
         Check { label: "SI4732", value: "", state: State::Ok },
     ];
-    let info = BootInfo { version: VERSION, callsign: Some("VA3ABC"), checks: &checks };
 
     let mut lcd = Counting { fb: FrameBuffer::new(), rects: Vec::new(), pixels: 0 };
     let store = fake::store();
@@ -180,7 +179,9 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
     let mut app = fake::app();
     fake::sample(&mut app, &store, &mut radio); // B on "Club repeater", as in the mock-up
     let mut booting = true;
-    boot::draw(&mut lcd, &info);
+    // The boot screen from the app's settings, as the firmware draws it: the owner card if 0 7 3 3 says so.
+    let set = app.settings();
+    boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &checks });
 
     let face = Face::new(scale);
     let (ww, wh) = (face.w, face.h);

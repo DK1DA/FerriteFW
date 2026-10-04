@@ -175,6 +175,14 @@ pub fn settings() -> Settings {
     s
 }
 
+/// The sample owner card (SETUP-11), shown at boot (0 7 3 3): the sim's boot-owner shot and tests.
+pub fn owner_card(s: &mut Settings) {
+    s.owner[0].set(b"Sam Fernandez");
+    s.owner[1].set(b"+1 604 555 0142");
+    s.owner[2].set(b"va7fer@example.org");
+    s.boot_card = true;
+}
+
 /// The sample radio's records. Cells hold what requests change.
 pub struct Sample {
     /// The sample channels, then room for the ones the app saves.
