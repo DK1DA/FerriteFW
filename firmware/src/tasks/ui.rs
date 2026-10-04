@@ -87,13 +87,27 @@ pub async fn task() {
         while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) {}
     }
 
+    // Keys pressed during the boot screen: only whether MENU is still held counts (BOOT-14); the rest are
+    // dropped, as a PTT held at power on is (KEY-8).
+    let mut menu_held = false;
+    while let Ok(i) = INPUT.try_receive() {
+        if let Input::Key(keypad::Event::Press(c) | keypad::Event::Release(c)) = i {
+            if keys::key(c) == Some(ferrite_core::keys::Key::Menu) {
+                menu_held = matches!(i, Input::Key(keypad::Event::Press(_)));
+            }
+        }
+    }
+
     // Hand-off: the whole screen cleared, then the app draws everything once (HOME-2).
     lcd.0.fill(0, 0, 240, 320, BG);
     let store = store::channels();
     let mut app = App::new(store::settings(), store::last_alert());
-    // After the self-test: setup on first boot (BOOT-12), else the PIN if one is set (BOOT-13).
+    // After the self-test: setup on first boot (BOOT-12); MENU held: the settings reset (PIN-6, BOOT-14), which
+    // asks before the PIN; else the PIN if one is set (BOOT-13).
     if store::first_boot() {
         app.first_boot();
+    } else if menu_held {
+        app.power_on_reset();
     } else {
         app.ask_pin();
     }

@@ -70,7 +70,7 @@ keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits
       hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
       M message · N alert · F5 GPS · F6 Bluetooth · F7 battery · F8 power off · F9 empty battery
       F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 6)
-      L home layout · B a beacon (automatic transmit)
+      L home layout · B a beacon (automatic transmit) · hold Enter while booting: the settings reset
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
 
 fn map_key(k: K) -> Option<Key> {
@@ -217,6 +217,10 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
         let now = ms();
         if booting && now > 2000 {
             booting = false;
+            // MENU (Enter) held through the boot screen: the settings reset (PIN-6, BOOT-14), as the firmware does.
+            if win.is_key_down(K::Enter) {
+                app.power_on_reset();
+            }
         }
 
         // Keys: down and up go to the app, which makes short, long and repeat presses of them (KEY-3, KEY-4).

@@ -38,12 +38,15 @@ pub enum Ask {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Confirm {
     pub ask: Ask,
+    /// The settings reset asked at power on (hold MENU, PIN-6, BOOT-14): modal, so hold BACK, PTT and the menu
+    /// timeout can't skip past a PIN; BACK on its first question goes on to the PIN (if one is set).
+    pub boot: bool,
 }
 
 /// Opens the confirm for `ask`, remembering the screen it came from for BACK.
 pub fn ask(app: &mut App, ask: Ask) {
     app.open(Dest::Confirm);
-    app.screen = Screen::Confirm(Confirm { ask });
+    app.screen = Screen::Confirm(Confirm { ask, boot: false });
 }
 
 /// Title, what goes, what stays (PIN-7: what will be cleared and what is kept).
@@ -74,7 +77,18 @@ impl View for Confirm {
     }
 
     fn timeout(self) -> Option<u32> {
-        Some(MENU_TIMEOUT_MS)
+        (!self.boot).then_some(MENU_TIMEOUT_MS)
+    }
+
+    fn modal(self) -> bool {
+        self.boot
+    }
+
+    fn ptt(self, app: &mut App, down: bool) {
+        // At power on PTT waits, as it does for the PIN (PIN-1).
+        if down && !self.boot {
+            super::nav::transmit(app);
+        }
     }
 
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
@@ -83,7 +97,10 @@ impl View for Confirm {
                 Ask::Reset { channels: false } => {
                     reset_settings(app);
                     app.show_toast(b"Settings reset", b"", false);
-                    app.screen = Screen::Confirm(Confirm { ask: Ask::Reset { channels: true } });
+                    if self.boot {
+                        app.back = [None; crate::BACK_DEPTH]; // the PIN it guarded is gone with the settings
+                    }
+                    app.screen = Screen::Confirm(Confirm { ask: Ask::Reset { channels: true }, ..self });
                 }
                 Ask::Reset { channels: true } => {
                     app.write(ChanWrite::EraseAll);

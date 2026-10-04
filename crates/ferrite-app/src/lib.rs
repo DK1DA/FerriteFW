@@ -259,7 +259,7 @@ pub struct App {
 }
 
 /// Screens remembered for BACK: menu, group, item and one more.
-const BACK_DEPTH: usize = 4;
+pub(crate) const BACK_DEPTH: usize = 4;
 
 /// [`Outbox::cur`] with no slot being sent.
 const NO_SLOT: u8 = 0xFF;
@@ -536,6 +536,19 @@ impl App {
             self.back();
             self.show_toast(b"Write done", b"", false);
         }
+    }
+
+    /// MENU held at power on (PIN-6, BOOT-14), after the self-test: the settings reset, asked twice (settings,
+    /// then channels too). It clears the PIN, so it comes before it; BACK on its first question goes on to the
+    /// PIN if one is set (else home). Calibration, stock data and the SSB patch are never touched.
+    pub fn power_on_reset(&mut self) {
+        self.go_home();
+        if self.set.pin_len > 0 && self.set.pin_mode > 0 {
+            self.screen = Screen::Pin(screens::pin::Pin::power_on());
+            self.push_back();
+        }
+        let ask = screens::confirm::Ask::Reset { channels: false };
+        self.screen = Screen::Confirm(screens::confirm::Confirm { ask, boot: true });
     }
 
     /// A matrix code went down or up, mapped to a key or not: the key test shows it (KEY-2). The firmware calls
