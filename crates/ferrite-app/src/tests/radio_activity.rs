@@ -120,7 +120,7 @@ fn rx_only_build_and_battery_refuse() {
 fn radio_refusal_shows() {
     let mut t = ready();
     ptt(&mut t, true);
-    t.live.tx = ferrite_core::msg::TxLive { keyed: false, slot: 0, drive: 0, refused: Some(Refusal::Locked) };
+    t.live.tx = ferrite_core::msg::TxLive { keyed: false, slot: 0, mic: 0, refused: Some(Refusal::Locked) };
     t.wait(100);
     assert_eq!(refused(&t), Some(Refusal::Locked));
 }

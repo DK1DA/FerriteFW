@@ -112,7 +112,7 @@ impl FakeRadio {
                 }
             }
             RadioCmd::Watch(m) => self.watch = m,
-            RadioCmd::Transmit { slot, on } => self.live.tx = TxLive { keyed: on, slot, drive: 0, refused: None },
+            RadioCmd::Transmit { slot, on } => self.live.tx = TxLive { keyed: on, slot, mic: 0, refused: None },
             RadioCmd::ScanSkip { slot } => {
                 let s = &mut self.live.slots[slot as usize % 3];
                 s.skips = s.skips.saturating_add(1);
@@ -219,9 +219,9 @@ impl FakeRadio {
             }
             Fake::Xb { t0 } => ModeLive::Xb(xb(t - t0)),
         };
-        // Transmit: the PA ramps to its calibrated drive.
+        // Transmit: speech, the mic level wandering 30-85%.
         if self.live.tx.keyed {
-            self.live.tx.drive = (self.live.tx.drive + 3).min(45);
+            self.live.tx.mic = (58.0 + (t * 5.1).sin() * 18.0 + (t * 13.7).sin() * 9.0) as u8;
         }
     }
 

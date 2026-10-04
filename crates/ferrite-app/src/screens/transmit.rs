@@ -290,15 +290,13 @@ impl View for Transmit {
             }
             w::chip(lcd, x, y + 89, pw.as_bytes(), if pw.len() > 4 { AMBER } else { TEXT }, SURFACE);
         }
-        // PA drive in %, never watts (TX-12).
-        let drive = if live.tx.keyed && live.tx.slot == s { live.tx.drive } else { 0 };
-        if app.dirty(6, hash(&drive)) {
-            w::field(lcd, 15, 40, y + 110, y + 127, y + 123, Align::Left, b"Drive", &UI_12, SUB, SURFACE);
-            let lit = ((drive as u32 * 13 + 50) / 100) as u8;
-            parts::segs(lcd, 56, y + 115, 13, lit, 8, 10, 8, RED, SURFACE);
-            let mut d = Buf::<8>::new();
-            let _ = uwrite!(d, "{}%", drive);
-            w::field(lcd, 186, 40, y + 110, y + 127, y + 123, Align::Right, d.as_bytes(), &UI_12B, TEXT, SURFACE);
+        // Mic level (TX-12): how hard you are modulating; amber near full deviation. No power or drive
+        // readout: the radio cannot measure output, and drive only ever reads ~100%.
+        let mic = if live.tx.keyed && live.tx.slot == s { live.tx.mic } else { 0 };
+        if app.dirty(6, hash(&mic)) {
+            w::field(lcd, 15, 40, y + 110, y + 127, y + 123, Align::Left, b"Mic", &UI_12, SUB, SURFACE);
+            let lit = ((mic as u32 * 13 + 50) / 100) as u8;
+            parts::segs(lcd, 56, y + 115, 13, lit, 8, 10, 8, if mic >= 90 { AMBER } else { GREEN }, SURFACE);
         }
         // Timeout: the bar fills to the limit; amber from the pre-alert (TX-30).
         if app.dirty(7, hash(&secs)) {

@@ -236,8 +236,8 @@ pub struct TxLive {
     pub keyed: bool,
     /// Which slot (3 = HF mode).
     pub slot: u8,
-    /// PA drive, % of the calibrated level (TX-12: never watts).
-    pub drive: u8,
+    /// Mic level, % of full deviation, from the TX chip's audio amplitude (TX-12).
+    pub mic: u8,
     /// The Radio task refused the last key-up (its own checks: calibration, read-back, battery).
     pub refused: Option<crate::txplan::Refusal>,
 }
