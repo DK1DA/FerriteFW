@@ -58,8 +58,8 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1));
     if args.iter().any(|a| a == "--window") {
-        // The window: any scale, fractional too (default 1.5, about 680 px tall); resizable afterwards.
-        let scale = arg("--scale").and_then(|s| s.parse::<f32>().ok()).filter(|&s| s > 0.0).unwrap_or(1.5);
+        // The window: a whole scale (default 1); resizing snaps to whole scales.
+        let scale = arg("--scale").and_then(|s| s.parse::<usize>().ok()).unwrap_or(1);
         let bus = arg("--bus-mbps").and_then(|s| s.parse().ok());
         window::run(scale, bus, args.iter().any(|a| a == "--owner-card"));
         return;

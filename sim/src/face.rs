@@ -60,9 +60,14 @@ pub struct Face {
 }
 
 impl Face {
+    /// The panel's size at a scale, without drawing it.
+    pub fn size(scale: usize) -> (usize, usize) {
+        (616 * scale / 2, 900 * scale / 2)
+    }
+
     pub fn new(scale: usize) -> Self {
         let u = |v: i32| v * scale as i32 / 2;
-        let (w, h) = (u(616) as usize, u(900) as usize);
+        let (w, h) = Self::size(scale);
         let (sx, sy) = (u(98), u(56));
         let sw = 240 * scale as i32; // the screen: 480 x 640 at scale 2
         let k = |part, x, y, w, h, label, small| Hit { part, x: u(x), y: u(y), w: u(w), h: u(h), label, small };
@@ -334,16 +339,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mouse_maps_back_through_the_aspect_fit() {
-        use crate::window::to_panel;
+    fn mouse_maps_back_through_the_centred_panel() {
+        use crate::window::{fit_scale, to_panel};
         let buf = (616, 900);
-        assert_eq!(to_panel((0.0, 0.0), (462, 675), buf), (0, 0)); // 0.75 x, no bars
-        assert_eq!(to_panel((231.0, 337.5), (462, 675), buf), (308, 450));
-        // a window wider than the panel: bars left and right
+        assert_eq!(to_panel((0.0, 0.0), buf, buf), (0, 0));
+        assert_eq!(to_panel((308.0, 450.0), buf, buf), (308, 450));
+        // a bigger window: the panel centred, 1:1
         assert_eq!(to_panel((100.0 + 308.0, 450.0), (816, 900), buf), (308, 450));
-        assert!(to_panel((50.0, 10.0), (816, 900), buf).0 < 0, "in the bar: outside the panel");
-        // taller: bars top and bottom
-        assert_eq!(to_panel((308.0, 150.0 + 450.0), (616, 1200), buf), (308, 450));
+        assert!(to_panel((50.0, 10.0), (816, 900), buf).0 < 0, "in the margin: outside the panel");
+        let sizes = [(308, 450), (616, 900), (924, 1350)];
+        assert_eq!(fit_scale((700, 1000), &sizes), 2);
+        assert_eq!(fit_scale((616, 899), &sizes), 1);
+        assert_eq!(fit_scale((100, 100), &sizes), 1);
     }
 
     #[test]

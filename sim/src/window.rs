@@ -153,16 +153,22 @@ fn screen_name(s: Option<AppScreen>) -> &'static str {
 
 /// A window position to panel (buffer) pixels: minifb fits the buffer into the window, aspect kept, centred.
 pub(crate) fn to_panel(m: (f32, f32), win: (usize, usize), buf: (usize, usize)) -> (i32, i32) {
-    let (ww, wh, bw, bh) = (win.0 as f32, win.1 as f32, buf.0 as f32, buf.1 as f32);
-    let k = (ww / bw).min(wh / bh);
-    let (ox, oy) = ((ww - bw * k) / 2.0, (wh - bh * k) / 2.0);
-    (((m.0 - ox) / k).floor() as i32, ((m.1 - oy) / k).floor() as i32)
+    // The panel sits 1:1 in the middle of the window (ScaleMode::Center).
+    let (ox, oy) = ((win.0 as f32 - buf.0 as f32) / 2.0, (win.1 as f32 - buf.1 as f32) / 2.0);
+    ((m.0 - ox).floor() as i32, (m.1 - oy).floor() as i32)
 }
 
-/// `window_scale` is the window's size relative to the radio's 240 x 320 (1.5 by default). The panel is rendered at a
-/// whole scale (2, or more above 2) and minifb fits it to the window, which can be resized freely.
-pub fn run(window_scale: f32, bus_mbps: Option<f64>, owner_card: bool) {
-    let scale = (window_scale.ceil() as usize).max(2);
+/// The largest whole scale whose panel fits the window; 1 if none does. `sizes[i]` is the panel at scale i + 1.
+pub(crate) fn fit_scale(win: (usize, usize), sizes: &[(usize, usize)]) -> usize {
+    sizes.iter().rposition(|&(w, h)| w <= win.0 && h <= win.1).map_or(1, |i| i + 1)
+}
+
+/// `scale` is a whole number (1 by default): every LCD pixel becomes scale x scale window pixels, never a fraction,
+/// so text looks as it will on the radio. Resizing the window snaps to the largest whole scale that fits.
+const MAX_SCALE: usize = 6;
+
+pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool) {
+    let mut scale = scale.clamp(1, MAX_SCALE);
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let shots = repo.join("../docs/img/screens");
     let checks = [
@@ -188,12 +194,11 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>, owner_card: bool) {
     let set = app.settings();
     boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &checks });
 
-    let face = Face::new(scale);
-    let (ww, wh) = (face.w, face.h);
-    let fit = window_scale / scale as f32;
-    let (vw, vh) = ((ww as f32 * fit).round() as usize, (wh as f32 * fit).round() as usize);
-    let opts = WindowOptions { resize: true, scale_mode: ScaleMode::AspectRatioStretch, ..WindowOptions::default() };
-    let mut win = Window::new("Ferrite sim", vw, vh, opts).expect("open window");
+    let sizes: Vec<(usize, usize)> = (1..=MAX_SCALE).map(Face::size).collect();
+    let mut face = Face::new(scale);
+    let (mut ww, mut wh) = (face.w, face.h);
+    let opts = WindowOptions { resize: true, scale_mode: ScaleMode::Center, ..WindowOptions::default() };
+    let mut win = Window::new("Ferrite sim", ww, wh, opts).expect("open window");
     // Input is polled every ~2 ms so a quick trackpad tap (down and up inside one 16 ms frame) is never missed;
     // the window is redrawn at 60 Hz.
     win.set_target_fps(0);
@@ -208,6 +213,7 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>, owner_card: bool) {
     let mut last_key = String::from("-");
     let mut last_px: u64 = lcd.pixels;
     let mut out = vec![0u32; ww * wh];
+    let mut size = win.get_size();
     let mut shot = 0;
     let mut battery = 0;
     let mut layout = 0;
@@ -414,6 +420,18 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>, owner_card: bool) {
         } else {
             None
         };
+
+        // A resized window: snap to the largest whole scale that fits.
+        if win.get_size() != size {
+            size = win.get_size();
+            let s = fit_scale(size, &sizes);
+            if s != scale {
+                scale = s;
+                face = Face::new(scale);
+                (ww, wh) = (face.w, face.h);
+                out = vec![0u32; ww * wh];
+            }
+        }
 
         // Compose: the front panel, then the screen: frame buffer, optional mock-up overlay, optional redraw
         // outlines, scaled up.
