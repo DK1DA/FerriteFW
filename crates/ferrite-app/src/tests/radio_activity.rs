@@ -601,3 +601,19 @@ fn ptt_b_keys_slot_b() {
     assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: true }));
     t.app.key_up(Key::PTT, t.t + 300, &s);
 }
+
+#[test]
+fn transmit_keeps_slot_order() {
+    use crate::screens::transmit::{place, HF_SLOT};
+    // PTT B: A stays on top as a row, B grows in the middle, C below it.
+    assert_eq!(place(1, 0), (25, 23));
+    assert_eq!(place(1, 1), (54, 164));
+    assert_eq!(place(1, 2), (224, 23));
+    // PTT A: the card on top; PTT C: the card at the bottom.
+    assert_eq!(place(0, 0), (25, 164));
+    assert_eq!(place(2, 2), (83, 164));
+    // HF mode: its card on top, A, B, C below.
+    assert_eq!(place(HF_SLOT, HF_SLOT), (25, 164));
+    assert_eq!(place(HF_SLOT, 0), (195, 23));
+    assert!(place(2, 2).0 + 164 <= 300 && place(HF_SLOT, 2).0 + 23 <= 300);
+}

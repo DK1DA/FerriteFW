@@ -232,7 +232,7 @@ impl View for Transmit {
         let s = self.slot;
         let hf = s == super::transmit::HF_SLOT;
         let secs = if app.radio.keyed.is_some() { app.now.wrapping_sub(app.radio.t0) / 1000 } else { 0 };
-        let (y, h) = (25, 164);
+        let (y, h) = place(s, s);
         if app.dirty(1, 1) {
             parts::card(lcd, 6, y, 228, h, RED);
             lcd.fill_r(7, y + 1, 226, 20, 5, RED);
@@ -317,14 +317,13 @@ impl View for Transmit {
             let c = if cx.dev.battery_low { AMBER } else { SUB };
             w::field(lcd, 15, 211, y + 144, y + 161, y + 157, Align::Left, b.as_bytes(), &UI_12, c, SURFACE);
         }
-        // The other slots: watched ones pause while transmitting (TX-34).
-        let others = (0..SLOTS as u8).filter(|&o| o != s).count() as i32;
+        // The other slots, one row each in their fixed places: watched ones pause while transmitting (TX-34).
         if app.dirty(9, hash(&(s, app.watch))) {
-            let (by, bh) = (y + h + 6, 18 * others + 5);
-            lcd.fill(6, by, 228, bh, BG);
-            lcd.frame_r(6, by, 228, bh, 6, LINE);
-            for (i, o) in (0..SLOTS as u8).filter(|&o| o != s).enumerate() {
-                let ry = by + 3 + 18 * i as i32;
+            for o in (0..SLOTS as u8).filter(|&o| o != s) {
+                let (by, bh) = place(s, o);
+                lcd.fill(6, by, 228, bh, BG);
+                lcd.frame_r(6, by, 228, bh, 6, LINE);
+                let ry = by + 3;
                 w::badge(lcd, 12, ry + 2, o, false, BG);
                 let sl = app.slot(o);
                 let mut t = Buf::<40>::new();
@@ -347,6 +346,22 @@ impl View for Transmit {
     fn hints(self, _: &App) -> Hints {
         Hints::new(&[("PTT", "Release to stop")])
     }
+}
+
+const TOP: i32 = 25;
+const CARD_H: i32 = 164;
+const ROW_H: i32 = 23;
+const GAP: i32 = 6;
+
+/// Where slot `o` sits while slot `s` transmits: A, B, C keep their order (HOME-11) and the keyed slot's card
+/// grows in its own place. HF mode's card is not a slot, so it goes on top with A, B, C below.
+pub(crate) fn place(s: u8, o: u8) -> (i32, i32) {
+    let h = |i: u8| if i == s { CARD_H } else { ROW_H };
+    if o == HF_SLOT {
+        return (TOP, CARD_H);
+    }
+    let top = if s == HF_SLOT { TOP + CARD_H + GAP } else { TOP };
+    (top + (0..o).map(|i| h(i) + GAP).sum::<i32>(), h(o))
 }
 
 // ---- Refused ----
