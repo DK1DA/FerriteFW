@@ -175,19 +175,20 @@ impl View for Home {
                 if app.dirty(R_FREQ + p, hash(&f)) {
                     w::freq(lcd, 15, 226, y + 64, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
                 }
-                // Chips: mode, tone, offset, power when not default (HOME-4), reverse.
+                // Chips: mode, tone, offset, reverse, power always (HOME-4); a row too long drops from the end, so power
+                // gives way before REV.
                 let (mut m, mut t, mut o, mut pw) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
                 mode_chip(&cfg, &mut m);
                 tone_text(cfg.tx_tone, &mut t);
                 offset_text(cfg.offset, false, &mut o);
                 if app.capped(s) {
                     pw.set(b"0.25 W");
-                } else if cfg.power != 0 {
-                    pw.set([b"MID".as_slice(), b"HIGH"][cfg.power as usize - 1]);
+                } else {
+                    pw.set([b"LOW".as_slice(), b"MID", b"HIGH"][cfg.power as usize % 3]);
                 }
                 let rev: &[u8] = if cfg.reverse { b"REV" } else { b"" };
                 if app.dirty(R_INFO + p, hash(&(m, t, o, pw, rev))) {
-                    w::chips(lcd, 15, y + 72, 211, &[m.as_bytes(), t.as_bytes(), o.as_bytes(), pw.as_bytes(), rev], SURFACE);
+                    w::chips(lcd, 15, y + 72, 211, &[m.as_bytes(), t.as_bytes(), o.as_bytes(), rev, pw.as_bytes()], SURFACE);
                 }
                 // S-meter: only the segments that changed (HOME-6, HOME-7).
                 let lit = w::meter_level(lv.rssi);
