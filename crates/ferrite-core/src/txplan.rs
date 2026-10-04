@@ -116,9 +116,11 @@ pub fn is_125m(f: Freq10) -> bool {
     (mhz(200)..mhz(300)).contains(&f)
 }
 
-/// TX-10: transmit at f is held back until the 1.25 m ceiling is measured.
+/// TX-10: transmit in the 1.25 m amateur band (219-225 MHz, which covers every region's plan) is held back until
+/// the ceiling is measured. The 0.25 W cap (TX-9) still covers the whole 200-300 MHz PA path, so 243.0 MHz stays
+/// possible with the emergency double PTT (TX-3), capped (user decision Oct 3, 2026).
 pub fn locked_125m(f: Freq10) -> bool {
-    !CAP_125M_MEASURED && is_125m(f)
+    !CAP_125M_MEASURED && (mhz(219)..mhz(225)).contains(&f)
 }
 
 /// Where transmit may go: the region's bands (or, with Extend TX, any band the hardware covers) and the HF
@@ -162,6 +164,8 @@ mod tests {
     fn unmeasured_125m_is_locked() {
         assert!(locked_125m(mhz(223) + 50_000));
         assert!(!locked_125m(mhz(146) + 52_000) && !locked_125m(mhz(446)));
+        assert!(!locked_125m(mhz(243)), "243.0 MHz: emergency double PTT, capped, not locked");
+        assert!(is_125m(mhz(243)), "but the 0.25 W cap still applies there");
     }
 
     #[test]
