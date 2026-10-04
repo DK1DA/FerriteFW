@@ -1,5 +1,5 @@
 //! GPS and waypoints (manual chapter 28, GPS-2, GPS-10 to GPS-12): the position page (MENU 0 6 2; fix,
-//! satellites, HDOP, fix age, position, grid square, altitude, speed, heading, UTC) and its satellites page
+//! satellites, accuracy (from HDOP), fix age, position, grid square, altitude, speed, heading, UTC) and its satellites page
 //! (C16, C17); the waypoint list with distance and bearing from the fix (MENU 0 6 7, C14) and going to one,
 //! with the compass (C15). # marks a waypoint here on every page; hold MENU for the options.
 
@@ -157,8 +157,10 @@ fn text(b: &mut Buf<40>, s: &[u8]) -> u16 {
 slow_table! {
     /// C16's rows.
     ROWS: [(&str, Val<Fix>); 8] = [
-        (slow!("HDOP"), |c, b| {
-            let _ = uwrite!(b, "{}.{}", c.x.hdop_x10 / 10, c.x.hdop_x10 % 10);
+        // GPS-2: estimated accuracy, HDOP x 5 m (a typical receiver's range error), not the raw HDOP.
+        (slow!("Accuracy"), |c, b| {
+            let m = (c.x.hdop_x10 as u32 * 5 + 5) / 10;
+            let _ = uwrite!(b, "\u{b1}{} m", m.max(1));
             TEXT
         }),
         (slow!("Fix age"), |c, b| {

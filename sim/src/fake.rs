@@ -298,7 +298,7 @@ fn xb(s: f32) -> XbLive {
         duty: if state != 0 { 34 } else { 8 },
         next_id_s: 240 - (s as u16 % 240),
         rssi: -79,
-        drive: if state != 0 { 30 } else { 0 },
+        reduced: false,
         strip,
     }
 }

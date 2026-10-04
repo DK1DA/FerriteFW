@@ -354,9 +354,9 @@ impl View for Setup {
                 let (region, ext, row) = (app.set.region, app.set.extend_tx, self.row);
                 for i in 0..REGION_ROWS {
                     let (name, range) = if i == REGION_ROWS - 1 {
-                        if region >= REGION_ROWS { (REGION_LIST[region as usize - 1].0, "knob: more") } else { ("Other ...", "") }
+                        if region >= REGION_ROWS { (REGION_LIST[region as usize - 1], "knob: more") } else { ("Other ...", "") }
                     } else {
-                        REGION_LIST[i as usize]
+                        (REGION_LIST[i as usize], "")
                     };
                     let chosen = row == i;
                     if app.dirty(R_ROW + i as usize, hash(&(name, chosen))) {

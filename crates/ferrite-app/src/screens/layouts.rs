@@ -183,7 +183,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         let mut b = Buf::<16>::new();
         if lv.scanning {
             sub.push(crate::slot::MODES[cfg.mode as usize % 6].as_bytes());
-            if lv.hits > 0 {
+            if lv.hits > 0 && lv.last_hit != f {
                 sub.push(" \u{b7} last ".as_bytes());
                 sub.push(w::freq3(lv.last_hit).as_bytes());
             }
@@ -197,7 +197,6 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             sub.push(" \u{b7} ".as_bytes());
             sub.push(b.as_bytes());
         }
-        sub.push(" \u{b7} last 60 s".as_bytes());
         if app.dirty(R_SUB + p, hash(&sub)) {
             w::field(lcd, 15, 211, y + 46, y + 61, y + 58, Align::Left, sub.as_bytes(), &UI_12, SUB, SURFACE);
         }

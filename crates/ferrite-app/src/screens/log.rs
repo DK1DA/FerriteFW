@@ -309,19 +309,21 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
             body = e.text.as_bytes();
         }
         Src::Pocsag => {
-            add("Capcode", ferrite_ui::v!(b, "{}", e.id));
             add("Baud", ferrite_ui::v!(b, "{}", e.x));
             add("Function", ferrite_ui::v!(b, "{} ({})", e.y, (b'A' + (e.y as u8 & 3)) as char));
             body = e.text.as_bytes();
         }
         Src::Same => {
             let s = same(e.text.as_bytes());
-            add("Event", s.event.as_bytes());
+            // The title holds the event; repeat it in full only when the title had to cut it.
+            if text4_width(s.event.as_bytes(), &UI_12B) > 124 {
+                add("Event", s.event.as_bytes());
+            }
             add("Areas", ferrite_ui::v!(b, "{} and {} more", Txt(s.first_area), s.areas.saturating_sub(1)));
             add("For", s.purge.as_bytes());
             add("Issued", s.issued.as_bytes());
             add("From", ferrite_ui::v!(b, "{} {}", s.org, Txt(s.sender)));
-            body = e.text.as_bytes();
+            // The raw ZCZC header is not shown: every field of it is in the rows above.
         }
         Src::Dsc => {
             add("Category", ["Routine", "Safety", "Urgency", "Distress"][e.x as usize & 3].as_bytes());
@@ -362,7 +364,7 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
     let mut f = Buf::<16>::new();
     mhz_text(e.freq, &mut f);
     add("Freq", f.as_bytes());
-    add("Time", ferrite_ui::v!(b, "{} \u{b7} {} ago", Txt(time.as_bytes()), Txt(age.as_bytes())));
+    add("Heard", ferrite_ui::v!(b, "{} ago", Txt(age.as_bytes()))); // the clock time is in the header
     let mut y = 58;
     for (i, (label, v)) in rows.iter().enumerate().take(n) {
         let c = if i == 0 && is_distress(e) { RED } else { TEXT };

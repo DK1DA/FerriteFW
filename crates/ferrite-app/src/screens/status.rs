@@ -119,8 +119,7 @@ slow_table! {
         }),
         (slow!("Battery"), |c, b| {
             let d = c.dev;
-            let mv = d.battery_mv as u32;
-            let _ = uwrite!(b, "{}.{} V \u{b7} {}%", mv / 1000, mv % 1000 / 100, d.battery_pct);
+            let _ = uwrite!(b, "{}%", d.battery_pct); // volts are on About
             if d.battery_cutoff {
                 RED
             } else if d.battery_low {

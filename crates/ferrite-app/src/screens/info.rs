@@ -101,9 +101,8 @@ fn volts(b: &mut Buf<40>, mv: u16) {
 }
 
 slow_table! {
-    ABOUT: [InfoRow; 10] = [
+    ABOUT: [InfoRow; 9] = [
         (slow!("Version"), |_, b| fixed(b, VERSION, TEXT)),
-        (slow!("Build"), |Ctx { dev: d, .. }, b| fixed(b, if d.tx_built { slow!("Transmit") } else { slow!("Receive only") }, TEXT)),
         (slow!("MCU"), |Ctx { dev: d, .. }, b| {
             let t = &d.selftest;
             match (t.idcode, t.mcu_ok) {
@@ -136,9 +135,7 @@ slow_table! {
             if failed { RED } else { TEXT }
         }),
         (slow!("Battery"), |Ctx { dev: d, .. }, b| {
-            volts(b, d.battery_mv);
-            let t = d.selftest.battery_trim as i32;
-            let _ = uwrite!(b, " \u{b7} trim {}{}.{}", if t < 0 { slow!("-") } else { slow!("+") }, t.abs() / 100, Zero(t.unsigned_abs() % 100, 2));
+            volts(b, d.battery_mv); // the trim is on Calibration and trims
             TEXT
         }),
         (slow!("Uptime"), |Ctx { app: a, .. }, b| {
@@ -161,23 +158,9 @@ slow_table! {
     ];
 }
 
-/// CAL-6's checks, all from one result until the checks report one by one.
-fn cal_part(d: &Device, b: &mut Buf<40>) -> u16 {
-    match d.selftest.cal {
-        CalState::Ok => fixed(b, "OK", GREEN),
-        CalState::Unknown => fixed(b, "Not checked", SUB),
-        CalState::Blank => fixed(b, "Blank", AMBER),
-        _ => fixed(b, "See status", AMBER),
-    }
-}
-
 slow_table! {
-    CALIBRATION: [InfoRow; 7] = [
+    CALIBRATION: [InfoRow; 3] = [
         (slow!("Status"), |Ctx { dev: d, .. }, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { GREEN } else { AMBER })),
-        (slow!("Programmed"), |Ctx { dev: d, .. }, b| cal_part(d, b)),
-        (slow!("PA tables"), |Ctx { dev: d, .. }, b| cal_part(d, b)),
-        (slow!("TX windows"), |Ctx { dev: d, .. }, b| cal_part(d, b)),
-        (slow!("Crystal trim"), |Ctx { dev: d, .. }, b| cal_part(d, b)),
         (slow!("CRC at install"), |Ctx { dev: d, .. }, b| match d.selftest.cal {
             CalState::CrcMismatch => fixed(b, slow!("Changed"), RED),
             CalState::Unknown => fixed(b, slow!("Not checked"), SUB),
@@ -188,22 +171,16 @@ slow_table! {
 }
 
 slow_table! {
-    ADV_SQUELCH: [InfoRow; 7] = [
-        (slow!("2 m"), |_, b| fixed(b, slow!("Calibration table"), SUB)),
-        (slow!("1.25 m"), |_, b| fixed(b, slow!("Calibration table"), SUB)),
-        (slow!("70 cm"), |_, b| fixed(b, slow!("Calibration table"), SUB)),
-        (slow!("Airband"), |_, b| fixed(b, slow!("Calibration table"), SUB)),
-        (slow!("Marine"), |_, b| fixed(b, slow!("Calibration table"), SUB)),
+    ADV_SQUELCH: [InfoRow; 3] = [
+        (slow!("Thresholds"), |_, b| fixed(b, slow!("From calibration"), SUB)),
         (slow!("Squelch tail"), |_, b| fixed(b, slow!("150 ms"), TEXT)),
         (slow!("Levels"), |_, b| fixed(b, slow!("0-9 per slot"), TEXT)),
     ];
 }
 
 slow_table! {
-    SSB_PATCH: [InfoRow; 5] = [
+    SSB_PATCH: [InfoRow; 3] = [
         (slow!("State"), |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, slow!("Verified"), GREEN) } else { fixed(b, slow!("Not installed"), AMBER) }),
-        (slow!("Stored at"), |_, b| fixed(b, slow!("SPI 0x06B000"), TEXT)),
-        (slow!("Size"), |_, b| fixed(b, slow!("1,979 x 8 bytes"), TEXT)),
         (slow!("Loads"), |_, b| fixed(b, slow!("Entering HF mode"), TEXT)),
         (slow!("Source"), |_, b| fixed(b, slow!("Your stock .BTF"), TEXT)),
     ];

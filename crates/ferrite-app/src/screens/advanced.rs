@@ -43,9 +43,9 @@ fn step(app: &App, row: u8, d: i32) -> u8 {
 
 /// Advanced settings groups (MENU 0 1-9) and their help lines.
 pub(crate) const GROUPS: [(&str, &str); 9] = [
-    (slow!("Watch and scan"), slow!("Watch, background jobs, scan, tone search.")),
+    (slow!("Watch and scan"), slow!("Watch, background jobs, scan, skip list.")),
     (slow!("Channels"), slow!("Browse channels and zones, add a repeater.")),
-    (slow!("Listen"), slow!("Broadcast, scope, weather alerts, crossband.")),
+    (slow!("Tools"), slow!("Crossband, counter, tone search, HF, FM.")),
     (slow!("Decoders"), slow!("Event log, POCSAG, DSC, AIS, DTMF, popups.")),
     (slow!("APRS"), slow!("Heard, messages, beacons, your station.")),
     (slow!("GPS and time"), slow!("GPS, position, units, time zone, clock.")),

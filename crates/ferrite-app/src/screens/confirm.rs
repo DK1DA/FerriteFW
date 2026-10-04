@@ -185,8 +185,13 @@ impl View for Confirm {
                 if let Some((c, _)) = cx.store.by_num(n) {
                     what.push(" \u{b7} ".as_bytes());
                     what.push(c.name());
-                    what.push(" \u{b7} ".as_bytes());
-                    what.push(w::freq3(c.rx).as_bytes());
+                    // The frequency only when it fits whole: a cut-off number is worse than none.
+                    let mut full = what;
+                    full.push(" \u{b7} ".as_bytes());
+                    full.push(w::freq3(c.rx).as_bytes());
+                    if ferrite_ui::gfx::text4_width(full.as_bytes(), &UI_12B) <= 208 {
+                        what = full;
+                    }
                 }
             }
             Ask::DeleteZone(z) => {

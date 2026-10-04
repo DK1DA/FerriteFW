@@ -174,15 +174,30 @@ impl View for Fm {
             let x2 = x + lcd.text4_rows(x, 96, t.as_bytes(), &DIG_46, TEXT, BG, 48, 100);
             lcd.text4(x2 + 6, 96, b"MHz", &UI_12B, SUB, BG);
         }
-        // RDS: the station name and radio text (BCR-2).
+        // RDS: the station name and radio text (BCR-2), and the preset this frequency is stored in. Without
+        // RDS, no empty box: one quiet line.
         let ps = trim(&ps);
         let rt = trim(&rt);
-        if app.dirty(R_INFO, hash(&(ps, rt))) {
+        let data = cx.store.data();
+        let mut pre = Buf::<24>::new();
+        if let Some(i) = (0..super::recall::FM_PLACES as u8).find(|&i| data.fm_preset(i).is_some_and(|p| p.freq == f)) {
+            let _ = uwrite!(pre, "Preset {}", i + 1);
+            if let Some(p) = data.fm_preset(i).filter(|p| !p.name.is_empty()) {
+                pre.push(" \u{b7} ".as_bytes());
+                pre.push(p.name.as_bytes());
+            }
+        }
+        if app.dirty(R_INFO, hash(&(ps, rt, pre))) {
             lcd.fill(0, 108, 240, 80, BG);
-            lcd.fill_r(8, 110, 224, 74, 4, SURFACE);
-            let name: &[u8] = if ps.is_empty() { b"No RDS" } else { ps };
-            w::field(lcd, 16, 208, 114, 136, 132, Align::Left, name, &UI_15B, if ps.is_empty() { SUB } else { TEXT }, SURFACE);
-            w::wrap(lcd, 16, 208, 138, 182, 152, 15, rt, &UI_12, SUB, SURFACE);
+            if ps.is_empty() && rt.is_empty() {
+                w::field(lcd, 16, 208, 114, 136, 132, Align::Center, pre.as_bytes(), &UI_15B, TEXT, BG);
+                w::field(lcd, 16, 208, 138, 156, 152, Align::Center, b"No RDS", &UI_12, DIM, BG);
+            } else {
+                lcd.fill_r(8, 110, 224, 74, 4, SURFACE);
+                w::field(lcd, 16, 208, 114, 136, 132, Align::Left, ps, &UI_15B, TEXT, SURFACE);
+                w::wrap(lcd, 16, 208, 138, 166, 152, 15, rt, &UI_12, SUB, SURFACE);
+                w::field(lcd, 16, 208, 166, 182, 178, Align::Left, pre.as_bytes(), &UI_12, DIM, SURFACE);
+            }
         }
         // Signal and SNR.
         let lit = (rssi as u32 * w::METER_SEGS as u32 / 70).min(w::METER_SEGS as u32) as u8;

@@ -41,7 +41,7 @@ pub enum LinkAnswer {
 }
 
 slow_table! {
-    ROWS: [(&str, Val<()>); 6] = [
+    ROWS: [(&str, Val<()>); 5] = [
         (slow!("Bluetooth"), |Ctx { app: a, dev: d, .. }, b| {
             if d.bt {
                 b.set(b"Connected");
@@ -56,8 +56,8 @@ slow_table! {
                 b.set(b"Not connected");
                 return SUB;
             }
-            let _ = uwrite!(b, "{} baud", d.link.baud_100 as u32 * 100);
-            TEXT
+            b.set(b"Connected"); // always trusted for writes (LINK-7)
+            BLUE
         }),
         (slow!("Writes"), |Ctx { dev: d, .. }, b| {
             match d.link.write_pct {
@@ -66,10 +66,6 @@ slow_table! {
                 }
                 None => b.set(b"Idle"),
             }
-            TEXT
-        }),
-        (slow!("Cable writes"), |_, b| {
-            b.set(b"Trusted");
             TEXT
         }),
         (slow!("BT writes"), |_, b| {

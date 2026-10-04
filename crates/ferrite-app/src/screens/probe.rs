@@ -1,7 +1,7 @@
 //! Tone search and the frequency counter (manual chapter 22; no mock-ups). Both run on the Radio task and
 //! report through `ModeLive::Probe`.
 //!
-//! Tone search (hold 9, MENU 0 1 9): the active slot's frequency and signal, the tone found or "searching"
+//! Tone search (hold 9, MENU 0 3 7): the active slot's frequency and signal, the tone found or "searching"
 //! with the time, the last hits (TSRCH-2). OK sets the RX tone, then asks before setting TX too (TSRCH-4); on a
 //! channel the tone is loaded into the slot, not saved to the channel (TSRCH-9). BACK leaves the tones as they
 //! were (TSRCH-5).
@@ -96,7 +96,7 @@ pub struct ToneSearch {
     pub ask_tx: bool,
 }
 
-/// Hold 9 or MENU 0 1 9 (TSRCH-1): search on the active slot.
+/// Hold 9 or MENU 0 3 7 (TSRCH-1): search on the active slot.
 pub fn open_tone(app: &mut App) -> Screen {
     let slot = app.active;
     app.start_mode(Mode::Tone);
@@ -203,11 +203,14 @@ impl View for ToneSearch {
             w::field(lcd, 8, 224, 162, 180, 175, Align::Left, now.as_bytes(), &UI_12, c, BG);
             lcd.fill(0, 184, 240, 1, LINE);
         }
-        hit_rows(app, lcd, 190, 6, |h, b| {
-            let mut t = Buf::<16>::new();
-            tone_text(h.what as u16, &mut t);
-            b.set(t.as_bytes());
-        });
+        // Last hits only once two different tones were heard: one would repeat the result above.
+        if app.radio.hits[1].what != 0 {
+            hit_rows(app, lcd, 190, 6, |h, b| {
+                let mut t = Buf::<16>::new();
+                tone_text(h.what as u16, &mut t);
+                b.set(t.as_bytes());
+            });
+        }
         if app.slot(self.slot).on_channel() && app.dirty(11, 1) {
             w::field(lcd, 8, 224, 266, 284, 279, Align::Left, b"On a channel: loaded, not saved", &UI_12, DIM, BG);
         }
@@ -232,7 +235,7 @@ fn or_none(b: &Buf<16>) -> &str {
 fn done(app: &mut App, slot: u8, what: &[u8]) {
     let ch = app.slot(slot).on_channel();
     app.stop_mode();
-    app.back(); // one level back (KEY-5): home from hold 9, the menu from MENU 0 1 9
+    app.back(); // one level back (KEY-5): home from hold 9, the menu from MENU 0 3 7
     app.show_toast(what, if ch { b"loaded, not saved" } else { b"" }, false);
 }
 

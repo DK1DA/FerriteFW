@@ -27,7 +27,7 @@ use ufmt::uwrite;
 /// One item: name, value shown until it is wired (a list shows a summary), help line.
 pub(crate) type Entry = (&'static str, &'static str, &'static str);
 
-const G1: [Entry; 9] = [
+const G1: [Entry; 8] = [
     (slow!("Watch"), slow!("A+B"), slow!("Which slots are heard besides the active one.")),
     (slow!("Watch behaviour"), slow!("Heard"), slow!("Audio, follow, TX slot, pause time.")),
     (slow!("Background job"), slow!("Off"), slow!("A zone scan or decoder on a watched slot.")),
@@ -36,7 +36,6 @@ const G1: [Entry; 9] = [
     (slow!("Scan options"), slow!("Up, 1 s"), slow!("Direction, dwell, smart scan, priority.")),
     (slow!("Range presets"), slow!("4 presets"), slow!("Named ranges to scan.")),
     (slow!("Skip list"), slow!("Empty"), slow!("Frequencies * skipped in this scan.")),
-    (slow!("Tone search"), slow!(""), slow!("Find the CTCSS or DCS in use.")),
 ];
 const G2: [Entry; 5] = [
     (slow!("Browse"), slow!(""), slow!("Zones, all channels, nearby, recent.")),
@@ -45,13 +44,14 @@ const G2: [Entry; 5] = [
     (slow!("Nearby"), slow!("Off"), slow!("Sort channels by distance.")),
     (slow!("Channel display"), slow!("Name"), slow!("Name, number or frequency on home.")),
 ];
-const G3: [Entry; 6] = [
+const G3: [Entry; 7] = [
     (slow!("FM broadcast"), slow!("Monitor on"), slow!("Presets, step, AGC, monitor, sleep.")),
     (slow!("Band scope"), slow!("+/-1 MHz"), slow!("Span, step, speed, trigger, waterfall.")),
     (slow!("Weather alerts"), slow!("On"), slow!("SAME, location codes, tone, channel.")),
     (slow!("Frequency counter"), slow!(""), slow!("Find a nearby transmitter's frequency.")),
     (slow!("HF mode"), slow!(""), slow!("Below 64 MHz. Everything else pauses.")),
     (slow!("Crossband repeater"), slow!(""), slow!("Repeat one slot's band on another's.")),
+    (slow!("Tone search"), slow!(""), slow!("Find the CTCSS or DCS in use.")),
 ];
 const G4: [Entry; 8] = [
     (slow!("Event log"), slow!(""), slow!("Every decode and alert: the inbox.")),
@@ -122,7 +122,7 @@ const G9: [Entry; 9] = [
 /// The nine groups' items (MENU 0 1 to MENU 0 9).
 pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7, &G8, &G9];
 /// Short names for the status bar (up to 10 characters).
-const SHORT: [&str; 9] = ["Scan", "Channels", "Listen", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
+const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
 pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [

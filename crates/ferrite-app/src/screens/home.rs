@@ -219,7 +219,7 @@ impl View for Home {
                 let mut b = Buf::<16>::new();
                 if lv.scanning {
                     sub.push(slot::MODES[cfg.mode as usize % 6].as_bytes());
-                    if lv.hits > 0 {
+                    if lv.hits > 0 && lv.last_hit != f {
                         sub.push(" \u{b7} last ".as_bytes());
                         sub.push(w::freq3(lv.last_hit).as_bytes());
                     }

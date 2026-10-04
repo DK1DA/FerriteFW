@@ -119,7 +119,10 @@ impl App {
         // HF-5: in HF mode TW/DW and SCN are absent (everything pauses); SBAR-18: the alerts-paused bell.
         // TX-34: watching pauses while transmitting, so no TW/DW then either.
         let hf = super::hf::in_hf(self);
-        let n = if hf || self.radio.keyed.is_some() { 0 } else { m.count_ones() as u8 };
+        // SBAR-16: only where watch matters (home, the Status page, Watch and scan settings); elsewhere it
+        // cost the screen name its room.
+        let here = matches!(self.screen, crate::Screen::Home | crate::Screen::Status(_) | crate::Screen::Group(super::groups::Group { g: 1, .. }));
+        let n = if hf || self.radio.keyed.is_some() || !here { 0 } else { m.count_ones() as u8 };
         StatusBar {
             name,
             locked: self.locked,

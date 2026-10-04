@@ -222,7 +222,9 @@ fn channel_on(store: &impl ChannelStore, zone: u8, f: u32) -> Option<crate::chan
 pub fn ago(ms: u32, b: &mut Buf<16>) {
     let s = ms / 1000;
     b.clear();
-    if s < 60 {
+    if s == 0 {
+        b.set(b"now"); // "0 s" reads like a fault
+    } else if s < 60 {
         let _ = uwrite!(b, "{} s", s);
     } else if s < 3600 {
         let _ = uwrite!(b, "{} min", s / 60);

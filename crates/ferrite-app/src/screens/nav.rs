@@ -25,7 +25,7 @@
 //! | Power on | the firmware: [`App::first_boot`] / [`App::ask_pin`] | [`Dest::Setup`] (BOOT-12) / [`Dest::Pin`] (BOOT-13) |
 //! | [`App::notify`], [`App::raise_alert`] | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Crossband is MENU 0 3 6 (Listen); the mailbox is the Status page's last row. The screens an event opens
+//! Crossband is MENU 0 3 6 (Tools); the mailbox is the Status page's last row. The screens an event opens
 //! have App hooks the firmware (and the simulator's keys) call: [`App::power_off`], [`App::battery_empty`],
 //! [`App::ssb_patch_found`], [`App::link_write_request`], [`App::link_write_progress`] and
 //! [`App::link_write_done`], [`App::same_alert`].
@@ -100,7 +100,7 @@ pub enum Dest {
     FmBroadcast,
     /// B12, B13: HF mode (MENU 0 3 5 only).
     HfMode,
-    /// B14: tone search (hold 9, MENU 0 1 9).
+    /// B14: tone search (hold 9, MENU 0 3 7).
     ToneSearch,
     /// B15: frequency counter (MENU 0 3 4).
     Counter,
@@ -326,7 +326,6 @@ pub const MENU0: [(&[u8], Dest); 56] = [
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
     (&[1, 8], Dest::SkipList),
-    (&[1, 9], Dest::ToneSearch),
     (&[2, 1], Dest::Browse),
     (&[2, 2], Dest::AddRepeater),
     (&[2, 3], Dest::Zones),
@@ -338,6 +337,7 @@ pub const MENU0: [(&[u8], Dest); 56] = [
     (&[3, 4], Dest::Counter),
     (&[3, 5], Dest::HfMode),
     (&[3, 6], Dest::Crossband),
+    (&[3, 7], Dest::ToneSearch),
     (&[4, 1], Dest::EventLog),
     (&[4, 2], Dest::Sub(4, 2)),
     (&[4, 3], Dest::Sub(4, 3)),

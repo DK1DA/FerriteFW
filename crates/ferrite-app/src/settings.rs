@@ -65,17 +65,9 @@ impl<const N: usize> Text<N> {
     }
 }
 
-/// Regions (0 9 4): name, and the 1.25 m transmit range the setup list shows.
-pub const REGION_LIST: [(&str, &str); 8] = [
-    ("United States", "222-225"),
-    ("Canada", "219-225"),
-    ("United Kingdom", ""),
-    ("Europe", ""),
-    ("Australia", ""),
-    ("New Zealand", ""),
-    ("Japan", ""),
-    ("Other", ""),
-];
+/// Regions (0 9 4).
+pub const REGION_LIST: [&str; 8] =
+    ["United States", "Canada", "United Kingdom", "Europe", "Australia", "New Zealand", "Japan", "Other"];
 
 /// Time zones (0 6 5), in quarter hours: UTC-12 to +14 with the 30 and 45 minute offsets in use.
 pub const TIME_ZONES: [i8; 38] = [
@@ -178,7 +170,7 @@ impl Settings {
     /// The region's name, or "Not set".
     pub fn region_name(&self) -> &'static str {
         match self.region {
-            1..=8 => REGION_LIST[self.region as usize - 1].0,
+            1..=8 => REGION_LIST[self.region as usize - 1],
             _ => "Not set",
         }
     }

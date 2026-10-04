@@ -353,14 +353,14 @@ fn same_header_raises_the_alert() {
     assert!(!t.app.same_alert(&h, 2, 16_255_000));
 }
 
-/// Crossband has its menu number: MENU 0 3 6 (Listen) opens the crossband repeater.
+/// Crossband has its menu number: MENU 0 3 6 (Tools) opens the crossband repeater.
 #[test]
 fn crossband_from_the_menu() {
     let mut t = T::new();
     menu0(&mut t, &[3, 6]);
     assert!(matches!(t.app.screen(), Screen::Crossband(_)), "{}", t.app.screen().name());
     t.tap(Key::Exit);
-    assert!(matches!(t.app.screen(), Screen::Group(g) if g.g == 3), "BACK: the Listen list");
+    assert!(matches!(t.app.screen(), Screen::Group(g) if g.g == 3), "BACK: the Tools list");
 }
 
 /// The screens an event opens, through the App hooks the firmware calls: power off and empty battery (modal:

@@ -134,9 +134,9 @@ impl View for Scope {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let step = STEPS[self.step as usize % STEPS.len()];
-        let (centre, bars, sweeps, rate) = match cx.live.mode {
-            ModeLive::Scope { centre, bars, sweeps, rate } => (centre, bars, sweeps, rate),
-            _ => (app.radio.centre, [0; SCOPE_BARS], 0, 0),
+        let (centre, bars, sweeps) = match cx.live.mode {
+            ModeLive::Scope { centre, bars, sweeps, .. } => (centre, bars, sweeps),
+            _ => (app.radio.centre, [0; SCOPE_BARS], 0),
         };
         // Header: band, centre.
         if app.dirty(1, hash(&centre)) {
@@ -224,14 +224,13 @@ impl View for Scope {
         if app.dirty(12, hash(&p)) {
             w::field(lcd, 15, 211, 230, 247, 243, Align::Left, p.as_bytes(), &UI_12, SUB, SURFACE);
         }
-        // Span, step, sweep rate (SCOPE-2).
+        // Span and step (SCOPE-2).
         let mut f = Buf::<40>::new();
         let span = step as u32 * SCOPE_BARS as u32;
         f.push(b"Span ");
         khz(span, &mut f);
         f.push(" \u{b7} step ".as_bytes());
         khz(step as u32, &mut f);
-        let _ = uwrite!(f, " \u{b7} {}/s", rate);
         if app.dirty(13, hash(&f)) {
             w::field(lcd, 8, 224, 256, 273, 269, Align::Left, f.as_bytes(), &UI_12, SUB, BG);
         }

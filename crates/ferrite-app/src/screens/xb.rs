@@ -377,14 +377,14 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
         }
         w::field(lcd, 180, 48, 27, 45, 41, Align::Right, t.as_bytes(), &UI_12, TEXT, fill);
     }
-    // The sides: IN (S-meter) and OUT (PA drive) while passing; the tone each needs while ready.
+    // The sides: IN (S-meter) and OUT (its power level, or "Power reduced") while passing; what opens each
+    // while ready. No drive meter: it only ever reads full (TX-12).
     let lit_in = (w::meter_level(x.rssi) as u32 * 8 / 20) as u8;
-    let lit_out = ((x.drive as u32 * 8 + 50) / 100) as u8;
     for side in 0..2u8 {
         let slot = if side == 0 { c.side1 } else { c.side2 };
         let is_in = passing && slot == inp;
         let is_out = passing && slot == outp;
-        let key = (x.state, slot, if is_in { lit_in } else if is_out { lit_out } else { 0 });
+        let key = (x.state, slot, if is_in { lit_in } else { 0 }, is_out && x.reduced);
         if !app.dirty(2 + side as usize, hash(&key)) {
             continue;
         }
@@ -398,13 +398,17 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
         };
         let mut last = Buf::<16>::new();
         if !passing {
-            let mut tn = Buf::<16>::new();
-            tone_text(app.slot(slot).cfg().rx_tone.max(app.slot(slot).cfg().tx_tone), &mut tn);
-            if c.flags & XbCfg::TONE_GATE != 0 && !tn.is_empty() {
+            // What opens this side: its receive tone (named only when it differs from the TX tone above).
+            let cfg = app.slot(slot).cfg();
+            if c.flags & XbCfg::TONE_GATE == 0 || cfg.rx_tone == 0 {
+                last.set(b"on carrier");
+            } else if cfg.rx_tone == cfg.tx_tone {
+                last.set(b"on its tone");
+            } else {
+                let mut tn = Buf::<16>::new();
+                tone_text(cfg.rx_tone, &mut tn);
                 last.push(b"needs ");
                 last.push(tn.as_bytes());
-            } else {
-                last.set(b"carrier");
             }
         }
         side_card(app, lcd, px, 53, slot, side, border, tag, last.as_bytes(), SURFACE);
@@ -413,8 +417,18 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
             lcd.text4_rows(px + 6, base, b"S", &UI_12, SUB, SURFACE, ly, ly + 12);
             parts::segs(lcd, px + 18, ly + 3, 8, lit_in, 6, 8, 6, GREEN, SURFACE);
         } else if is_out {
-            lcd.text4_rows(px + 6, base, b"Po", &UI_12, SUB, SURFACE, ly, ly + 12);
-            parts::segs(lcd, px + 24, ly + 3, 8, lit_out, 6, 8, 6, RED, SURFACE);
+            let mut p = Buf::<16>::new();
+            let col = if x.reduced {
+                p.set(b"Power reduced");
+                AMBER
+            } else {
+                p.set(b"TX ");
+                let mut l = Buf::<16>::new();
+                grid_value(&c, 0, &mut l);
+                p.push(l.as_bytes());
+                SUB
+            };
+            lcd.text4_rows(px + 6, base, p.as_bytes(), &UI_12, col, SURFACE, ly, ly + 12);
         }
     }
     if app.dirty(4, hash(&(passing, x.state == 2))) {
@@ -434,7 +448,10 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
     } else if x.last_dir != 0 {
         let mut a = Buf::<16>::new();
         super::scan::ago(x.idle_s as u32 * 1000, &mut a);
-        let _ = uwrite!(line, ", {} ago, ", super::activity::txt(a.as_bytes()));
+        if a.as_bytes() != b"now" {
+            a.push(b" ago");
+        }
+        let _ = uwrite!(line, ", {}, ", super::activity::txt(a.as_bytes()));
         // (the direction is drawn before it)
         mmss(x.pass_s as u32, &mut line);
     } else {
@@ -456,7 +473,7 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
         }
     }
     strip(app, lcd, 6, x, c.side1, c.side2, passing);
-    // Four cells: passes, duty, next ID, speaker (ready); duty, next ID, hang, speaker (passing).
+    // Four cells: passes, duty, next ID, last pass (ready); duty, next ID, passes, hang (passing).
     let mut v = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
     let _ = uwrite!(v[0], "{} \u{b7} {} min", x.passes, x.busy_s / 60);
     let _ = uwrite!(v[1], "{}% of {}%", x.duty, DUTY_LIMIT);
@@ -466,12 +483,20 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
         v[2].set(b"Off");
     }
     grid_value(&c, 2, &mut v[3]);
-    let mut spk = Buf::<16>::new();
-    grid_value(&c, 5, &mut spk);
-    let cells: [(&[u8], &[u8]); 4] = if passing {
-        [(b"Duty, 10 min", v[1].as_bytes()), (b"Next ID", v[2].as_bytes()), (b"Hang", v[3].as_bytes()), (b"Speaker", spk.as_bytes())]
+    // Ready: how long since the last pass; the speaker setting stays on the start screen.
+    let mut since = Buf::<16>::new();
+    if x.last_dir != 0 {
+        super::scan::ago(x.idle_s as u32 * 1000, &mut since);
+        if since.as_bytes() != b"now" {
+            since.push(b" ago");
+        }
     } else {
-        [(b"Passes", v[0].as_bytes()), (b"Duty, 10 min", v[1].as_bytes()), (b"Next ID", v[2].as_bytes()), (b"Speaker", spk.as_bytes())]
+        since.set(b"none yet");
+    }
+    let cells: [(&[u8], &[u8]); 4] = if passing {
+        [(b"Duty, 10 min", v[1].as_bytes()), (b"Next ID", v[2].as_bytes()), (b"Passes", v[0].as_bytes()), (b"Hang", v[3].as_bytes())]
+    } else {
+        [(b"Passes", v[0].as_bytes()), (b"Duty, 10 min", v[1].as_bytes()), (b"Next ID", v[2].as_bytes()), (b"Last pass", since.as_bytes())]
     };
     for (i, (l, val)) in cells.iter().enumerate() {
         let (col, row) = (i as i32 % 2, i as i32 / 2);

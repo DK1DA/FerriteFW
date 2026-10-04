@@ -284,16 +284,17 @@ pub struct XbLive {
     pub duty: u8,
     /// Seconds to the next CW ID.
     pub next_id_s: u16,
-    /// Receive level on the input side (dBm) and PA drive (%) on the output side.
+    /// Receive level on the input side (dBm).
     pub rssi: i16,
-    pub drive: u8,
+    /// The output side's power is cut back (battery, heat): shown instead of the level (TX-12).
+    pub reduced: bool,
     /// Seconds passed per column, oldest first: positive side 1 -> 2, negative 2 -> 1.
     pub strip: [i8; XB_COLS],
 }
 
 impl Default for XbLive {
     fn default() -> Self {
-        XbLive { state: 0, run_s: 0, pass_s: 0, idle_s: 0, last_dir: 0, passes: 0, busy_s: 0, duty: 0, next_id_s: 0, rssi: -127, drive: 0, strip: [0; XB_COLS] }
+        XbLive { state: 0, run_s: 0, pass_s: 0, idle_s: 0, last_dir: 0, passes: 0, busy_s: 0, duty: 0, next_id_s: 0, rssi: -127, reduced: false, strip: [0; XB_COLS] }
     }
 }
 
