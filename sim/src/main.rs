@@ -61,7 +61,7 @@ fn main() {
         // The window: any scale, fractional too (default 1.5, about 680 px tall); resizable afterwards.
         let scale = arg("--scale").and_then(|s| s.parse::<f32>().ok()).filter(|&s| s > 0.0).unwrap_or(1.5);
         let bus = arg("--bus-mbps").and_then(|s| s.parse().ok());
-        window::run(scale, bus);
+        window::run(scale, bus, args.iter().any(|a| a == "--owner-card"));
         return;
     }
     let scale = arg("--scale").and_then(|s| s.parse().ok()).unwrap_or(1);

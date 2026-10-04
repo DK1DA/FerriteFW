@@ -160,7 +160,7 @@ pub(crate) fn to_panel(m: (f32, f32), win: (usize, usize), buf: (usize, usize)) 
 
 /// `window_scale` is the window's size relative to the radio's 240 x 320 (1.5 by default). The panel is rendered at a
 /// whole scale (2, or more above 2) and minifb fits it to the window, which can be resized freely.
-pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
+pub fn run(window_scale: f32, bus_mbps: Option<f64>, owner_card: bool) {
     let scale = (window_scale.ceil() as usize).max(2);
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let shots = repo.join("../docs/img/screens");
@@ -178,6 +178,10 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
     let mut dev = fake::device();
     let mut app = fake::app();
     fake::sample(&mut app, &store, &mut radio); // B on "Club repeater", as in the mock-up
+    if owner_card {
+        // `--owner-card`: boot with the sample owner card (MENU 0 7 3 3 = Owner card).
+        ferrite_app::sample::owner_card(app.settings_mut());
+    }
     let mut booting = true;
     // The boot screen from the app's settings, as the firmware draws it: the owner card if 0 7 3 3 says so.
     let set = app.settings();
