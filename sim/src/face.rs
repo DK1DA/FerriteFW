@@ -29,6 +29,8 @@ pub enum Part {
     Ptt(u8),
     /// The channel knob: left half -1, right half +1.
     Knob,
+    /// The volume knob's power switch (PE0): a click turns the radio off or on.
+    Power,
 }
 
 #[derive(Clone, Copy)]
@@ -80,6 +82,8 @@ impl Face {
             k(Part::Key(Key::Side(2)), 6, 476, 78, 64, "SIDE2", "Side 2"),
             // The channel knob (the encoder).
             k(Part::Knob, 214, 2, 128, 44, "", ""),
+            // The volume knob: only its power switch reaches the MCU.
+            k(Part::Power, 134, 6, 56, 40, "", ""),
             // Function keys.
             k(Part::Key(Key::Menu), 112, 712, 86, 40, "OK", "MENU"),
             k(Part::Key(Key::Slot), 112, 758, 86, 40, "A\u{b7}B\u{b7}C", "SLOT"),
@@ -123,10 +127,6 @@ impl Face {
         c.rrect(u(414), 0, u(30), u(46), u(4), 0x15171A);
         for i in 0..6 {
             c.fill(u(412), u(22 + i * 4), u(34), u(2), 0x26292E);
-        }
-        c.rrect(u(134), u(10), u(56), u(36), u(8), KNOB);
-        for i in 0..6 {
-            c.fill(u(140 + i * 9), u(14), u(3), u(30), RIDGE);
         }
         c.text(u(134) - 4 - width("VOL", &UI_12), u(42) - UI_12.line_h as i32 - 2, "VOL", &UI_12, SMALL, Align::Left);
         // Body and the screen's bezel.
@@ -200,6 +200,12 @@ fn draw_hit(c: &mut Canvas, h: &Hit, pressed: bool, scale: usize) {
     let (fill, fg, sub) = if pressed { (PRESSED, PRESSED_FG, PRESSED_FG) } else { (KEY, LABEL, SMALL) };
     let cx = h.x + h.w / 2;
     match h.part {
+        Part::Power => {
+            c.rrect(h.x, h.y + u(4), h.w, h.h - u(4), u(8), if pressed { PRESSED } else { KNOB });
+            for i in 0..6 {
+                c.fill(h.x + u(6 + i * 9), h.y + u(8), u(3), h.h - u(12), if pressed { PRESSED_FG } else { RIDGE });
+            }
+        }
         Part::Knob => {
             c.rrect(h.x, h.y + u(4), h.w, h.h - u(4), u(10), KNOB);
             for i in 0..(h.w - u(12)) / u(9) + 1 {

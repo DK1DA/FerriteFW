@@ -28,6 +28,7 @@ use ferrite_core::msg::GpsState;
 use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::fb::FrameBuffer;
+use ferrite_ui::gfx::Gfx;
 use ferrite_ui::panel::{Panel, H, W};
 use minifb::{Key as K, KeyRepeat, MouseButton, MouseMode, ScaleMode, Window, WindowOptions};
 use std::collections::HashMap;
@@ -68,7 +69,7 @@ keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits
       S = SLOT · V = V/M · Q = SIDE1 · W = SIDE2 · Space = PTT A · [ ] or mouse wheel = knob
       or click the radio's keys (hold the mouse for long presses; hold SIDE1 + wheel = squelch)
       hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
-      M message · N alert · F5 GPS · F6 Bluetooth · F7 battery · F8 power off · F9 empty battery
+      M message · N alert · F5 GPS · F6 Bluetooth · F7 battery · F8 power off (or click VOL: the power switch) · F9 empty battery
       F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 6)
       L home layout · B a beacon (automatic transmit) · hold Enter while booting: the settings reset
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
@@ -190,6 +191,8 @@ pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool) {
         ferrite_app::sample::owner_card(app.settings_mut());
     }
     let mut booting = true;
+    // The power switch on the volume knob: booting until `boot_end`; `off_at` while the app saves before going dark.
+    let (mut boot_end, mut off_at, mut off): (u32, Option<u32>, bool) = (2000, None, false);
     // The boot screen from the app's settings, as the firmware draws it: the owner card if 0 7 3 3 says so.
     let set = app.settings();
     boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &checks });
@@ -227,7 +230,12 @@ pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool) {
         lcd.rects.clear();
         lcd.pixels = 0;
         let now = ms();
-        if booting && now > 2000 {
+        if off_at.is_some_and(|t| now >= t) {
+            // Saved: the radio is off and the screen dark until the switch is turned on again.
+            (off_at, off, booting) = (None, true, true);
+            lcd.fill(0, 0, W, H, 0);
+        }
+        if booting && !off && now > boot_end {
             booting = false;
             // MENU (Enter) held through the boot screen: the settings reset (PIN-6, BOOT-14), as the firmware does.
             if win.is_key_down(K::Enter) {
@@ -313,6 +321,28 @@ pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool) {
             if let Some(i) = pos.and_then(|(x, y)| face.hit(x, y)) {
                 let h = face.hits[i];
                 match h.part {
+                    Part::Power if off => {
+                        // On: a fresh boot. RAM is gone, so the app starts again; settings survive, as in flash.
+                        let set = *app.settings();
+                        (app, radio) = (fake::app(), FakeRadio::new());
+                        fake::sample(&mut app, &store, &mut radio);
+                        *app.settings_mut() = set;
+                        (off, boot_end) = (false, now + 2000);
+                        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &checks });
+                        last_key = String::from("power on (mouse)");
+                    }
+                    Part::Power if booting => {
+                        (off, booting) = (true, true);
+                        lcd.fill(0, 0, W, H, 0);
+                        last_key = String::from("power off (mouse)");
+                    }
+                    Part::Power => {
+                        if off_at.is_none() {
+                            app.power_off(); // PWR-17: "Saving...", then off
+                            off_at = Some(now + 1500);
+                            last_key = String::from("power off (mouse)");
+                        }
+                    }
                     Part::Knob => {
                         let d = if pos.unwrap().0 < h.x + h.w / 2 { -1 } else { 1 };
                         knob_flash = (d, now + 150);
