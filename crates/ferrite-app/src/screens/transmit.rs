@@ -63,6 +63,9 @@ pub fn refusal(app: &App, slot: u8) -> Option<Refusal> {
     if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
         return Some(r);
     }
+    if txplan::locked_125m(tx_freq(app, slot)) {
+        return Some(Refusal::Unmeasured125); // TX-10: safety, until the bench measures the 0.25 W ceiling
+    }
     // TX-21: carrier busy lockout refuses while the squelch is open (wrong tone needs the tone detector).
     if slot < SLOTS as u8 && app.slot(slot).cfg().busy == 1 && app.rx_mask & 1 << slot != 0 {
         return Some(Refusal::Busy);
@@ -142,6 +145,7 @@ pub fn short(r: Refusal) -> &'static str {
         Refusal::RxOnlyBuild => "receive-only build",
         Refusal::ReceiveOnlyHere => "receive only here",
         Refusal::Crossband => "repeater running",
+        Refusal::Unmeasured125 => "1.25 m locked",
     }
 }
 
@@ -156,7 +160,7 @@ fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
         Refusal::Battery => Some(("#", "Status page", Dest::Status)),
         Refusal::Locked | Refusal::RxOnlyBuild => Some(("MENU 0 9 9", "About", Dest::About)),
         Refusal::NoCallsign => Some(("MENU 0 8 7 1", "Callsign", Dest::Setup)),
-        Refusal::InProgress | Refusal::ReceiveOnlyHere | Refusal::Crossband => None,
+        Refusal::InProgress | Refusal::ReceiveOnlyHere | Refusal::Crossband | Refusal::Unmeasured125 => None,
     }
 }
 
@@ -439,6 +443,10 @@ impl View for TxRefused {
                 a.set(b"Receive only here: below 18 MHz, USB, LSB and CW are on the SI4732.");
             }
             Refusal::Crossband => a.set(b"The crossband repeater is running. BACK on its screen stops it."),
+            Refusal::Unmeasured125 => {
+                a.set(b"1.25 m transmit is locked until its 0.25 W limit is measured on the bench.");
+                more = b"Receive works as usual. (TX-10)";
+            }
         }
         // The dialog sized to its text: title, the reason, what fixes it, the path.
         let n = parts::lines(a.as_bytes(), &UI_12, 204, 4);

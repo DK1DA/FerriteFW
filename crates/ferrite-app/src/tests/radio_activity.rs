@@ -141,7 +141,7 @@ fn timeout_unkeys() {
 fn emergency_frequency_needs_ptt_twice() {
     let mut t = ready();
     t.app.set_region(Some(Region::Us), true);
-    tune(&mut t, mhz(243));
+    tune(&mut t, mhz(406) + 2_500); // EPIRB (243.0 is on the 1.25 m PA path, locked by TX-10 for now)
     ptt(&mut t, true);
     assert!(matches!(t.app.screen(), Screen::Emergency(_)));
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
@@ -503,4 +503,24 @@ fn no_callsign_fix_is_the_callsign_page() {
     assert_eq!(t.app.screen(), Screen::Setup(Setup::single(1)), "the callsign page alone");
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home, "back where it was");
+}
+
+/// TX-10 (safety): 1.25 m never keys until its 0.25 W ceiling is measured; PTT shows why. Receive is unaffected.
+#[test]
+fn unmeasured_125m_refuses() {
+    let mut t = ready();
+    tune(&mut t, mhz(223) + 50_000);
+    t.cmds();
+    ptt(&mut t, true);
+    assert_eq!(refused(&t), Some(Refusal::Unmeasured125));
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "never keyed");
+    ptt(&mut t, false);
+    // An automatic transmission is refused there too.
+    assert!(!crate::screens::transmit::auto_tx(&mut t.app, 0, b"Beacon"));
+    // 2 m still transmits.
+    t.hold(Key::Exit);
+    tune(&mut t, mhz(146) + 52_000);
+    ptt(&mut t, true);
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)));
+    ptt(&mut t, false);
 }

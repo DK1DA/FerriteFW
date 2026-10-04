@@ -102,6 +102,23 @@ pub enum Refusal {
     ReceiveOnlyHere,
     /// The crossband repeater is running (XB-14).
     Crossband,
+    /// 1.25 m before its 0.25 W ceiling is measured on the bench (TX-10).
+    Unmeasured125,
+}
+
+/// TX-10: 1.25 m transmits only once the PA drive ceiling that holds it to 0.25 W (TX-9) has been measured into
+/// a dummy load. Until then this stays false and every transmission there is refused, by the UI and (once
+/// transmit is built) the Radio task alike. Set it in the same change that adds the measured ceiling.
+pub const CAP_125M_MEASURED: bool = false;
+
+/// The 1.25 m band as TX-9 draws it for the cap: 200-300 MHz.
+pub fn is_125m(f: Freq10) -> bool {
+    (mhz(200)..mhz(300)).contains(&f)
+}
+
+/// TX-10: transmit at f is held back until the 1.25 m ceiling is measured.
+pub fn locked_125m(f: Freq10) -> bool {
+    !CAP_125M_MEASURED && is_125m(f)
 }
 
 /// Where transmit may go: the region's bands (or, with Extend TX, any band the hardware covers) and the HF
@@ -139,6 +156,12 @@ mod tests {
         assert_eq!(check(mhz(52), Region::Us, true), Err(Refusal::NotCalibrated), "6 m locked");
         assert_eq!(check(mhz(162) + 55_000, Region::Us, true), Ok(()));
         assert_eq!(nearest(mhz(420) + 50_000, Region::Canada).name, "70 cm");
+    }
+
+    #[test]
+    fn unmeasured_125m_is_locked() {
+        assert!(locked_125m(mhz(223) + 50_000));
+        assert!(!locked_125m(mhz(146) + 52_000) && !locked_125m(mhz(446)));
     }
 
     #[test]

@@ -223,10 +223,11 @@ fn main() {
     app.key_up(Key::Ptt, t + 200, &store);
     shot!(300, "tx-refused");
     home(&mut app, &mut t);
-    // Emergency: 243.000 with Extend TX on; the first PTT only prompts.
+    // Emergency: 406.025 (EPIRB) with Extend TX on; the first PTT only prompts. (243.000 is on the 1.25 m PA
+    // path, which TX-10 keeps locked until its ceiling is measured.)
     app.set_region(Some(ferrite_core::txplan::Region::Canada), true);
-    app.set_vfo_cfg(0, ferrite_app::slot::DEFAULT_CFG); // simplex: the offset would move it off 243.000
-    app.set_vfo(0, 24_300_000);
+    app.set_vfo_cfg(0, ferrite_app::slot::DEFAULT_CFG); // simplex: the offset would move it off 406.025
+    app.set_vfo(0, 40_602_500);
     app.key_down(Key::Ptt, t, &store);
     app.key_up(Key::Ptt, t + 200, &store);
     shot!(1500, "tx-emergency");

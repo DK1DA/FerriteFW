@@ -133,6 +133,7 @@ fn tx_text(app: &App, f: Freq10, tx_built: bool) -> Result<&'static str, &'stati
         return Err("RX-only build");
     }
     match ferrite_core::txplan::check(f, r, app.set.extend_tx) {
+        Ok(()) if ferrite_core::txplan::locked_125m(f) => Err("Locked until measured"), // TX-10
         Ok(()) if crate::slot::band_of(f) == Some(crate::slot::BAND_125M) => Ok("Allowed, 0.25 W"),
         Ok(()) if ferrite_core::txplan::check(f, r, false).is_err() => Ok("Extend TX"),
         Ok(()) => Ok("Allowed"),
