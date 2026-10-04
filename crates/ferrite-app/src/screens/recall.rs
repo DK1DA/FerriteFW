@@ -58,8 +58,13 @@ impl View for Recall {
                 app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(p.freq)));
                 let mut f = Buf::<16>::new();
                 fm_text(p.freq, &mut f);
+                // Back to the FM screen it was picked from (replaced, not opened again: one BACK leaves FM);
+                // picked from the menu (MENU 0 3 1 1), FM opens over the menu.
                 app.back();
-                app.open(Dest::FmBroadcast);
+                match app.screen {
+                    Screen::Fm(f) => app.screen = Screen::Fm(super::fm::Fm { menu: false, ..f }),
+                    _ => app.open(Dest::FmBroadcast),
+                }
                 app.show_toast(f.as_bytes(), p.name.as_bytes(), false);
             }
             (Key::Menu, Short) => {

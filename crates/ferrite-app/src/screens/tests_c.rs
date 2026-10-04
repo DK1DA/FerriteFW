@@ -428,6 +428,27 @@ fn fm_preset_tunes_the_broadcast_receiver() {
     assert_eq!(t.name(), "FM broadcast");
 }
 
+/// Picking a preset from the FM screen returns to that FM screen: one BACK leaves FM broadcast.
+#[test]
+fn fm_preset_returns_to_the_same_fm_screen() {
+    let mut t = T::new();
+    t.hold(Key::Digit(2)); // BCR-1
+    assert_eq!(t.name(), "FM broadcast");
+    for options in [false, true] {
+        if options {
+            t.hold(Key::Menu); // the FM options: Presets is the fourth row
+            t.tap(Key::Digit(4));
+        }
+        t.tap(Key::Menu);
+        assert_eq!(t.name(), "FM presets");
+        t.tap(Key::Down);
+        t.tap(Key::Menu);
+        assert!(matches!(t.app.screen(), Screen::Fm(f) if !f.menu));
+    }
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Home), "one BACK leaves FM: {}", t.name());
+}
+
 #[test]
 fn ptt_and_hold_back_from_every_list() {
     for d in [Dest::EventLog, Dest::AprsHeard, Dest::AprsMessages, Dest::Compose, Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Waypoints, Dest::GpsPosition, Dest::HfRecent, Dest::FmPresets, Dest::Sensors] {
