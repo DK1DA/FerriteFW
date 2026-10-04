@@ -202,3 +202,28 @@ impl View for Status {
         Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrite_core::msg::{Device, LiveAll};
+    use ferrite_core::txplan::Region;
+
+    fn region_row(app: &App) -> Buf<40> {
+        let mut b = Buf::new();
+        let (live, dev) = (LiveAll::default(), Device::default());
+        (ROWS[1].1)(&Ctx { app, live: &live, dev: &dev, x: &() }, &mut b);
+        b
+    }
+
+    /// The Region row is the one radio-wide setting (setup, MENU 0 9 4), never a copy of its own.
+    #[test]
+    fn region_row_reads_the_settings() {
+        let mut app = App::new(crate::tests::set(), crate::tests::alert());
+        assert_eq!(ROWS[1].0, "Region");
+        assert_eq!(region_row(&app).as_bytes(), b"Not set");
+        app.settings_mut().set_region(Some(Region::Uk));
+        assert_eq!(region_row(&app).as_bytes(), app.settings().region_name().as_bytes());
+        assert_ne!(region_row(&app).as_bytes(), b"Not set");
+    }
+}
