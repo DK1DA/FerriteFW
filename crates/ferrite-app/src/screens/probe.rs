@@ -232,7 +232,7 @@ fn or_none(b: &Buf<16>) -> &str {
 fn done(app: &mut App, slot: u8, what: &[u8]) {
     let ch = app.slot(slot).on_channel();
     app.stop_mode();
-    app.go_home();
+    app.back(); // one level back (KEY-5): home from hold 9, the menu from MENU 0 1 9
     app.show_toast(what, if ch { b"loaded, not saved" } else { b"" }, false);
 }
 
