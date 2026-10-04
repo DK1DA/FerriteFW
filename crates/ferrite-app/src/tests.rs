@@ -101,6 +101,9 @@ fn ram_is_small() {
     let n = core::mem::size_of::<App>();
     std::println!("App: {n} bytes");
     assert!(n <= 1024, "App is {n} bytes");
+    let s = core::mem::size_of::<crate::settings::Settings>();
+    std::println!("Settings: {s} bytes");
+    assert!(s <= 512, "Settings is {s} bytes");
 }
 
 #[test]

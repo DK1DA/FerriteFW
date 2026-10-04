@@ -399,3 +399,33 @@ fn event_hooks_open_their_screens() {
     t.tap(Key::Menu);
     assert_eq!(t.app.screen(), Screen::Info(Info { page: Page::PowerOff }), "modal to the end");
 }
+
+/// HF-27: each HF band keeps its own VFO (frequency, mode, step, bandwidth, fine tune) in the settings' HF
+/// memory; a band never visited starts at its start.
+#[test]
+fn hf_bands_remember_their_vfo() {
+    let mut t = T::new();
+    menu0(&mut t, &[3, 5]); // 31 m, 9.580 MHz AM
+    let start = t.app.set.hf.freq;
+    t.tap(Key::Up);
+    t.tap(Key::Up);
+    t.app.set.hf.step = 3;
+    t.app.set.hf.bw = 2;
+    let (f31, s31) = (t.app.set.hf.freq, t.app.set.hf.step);
+    assert_ne!(f31, start);
+    t.tap(Key::Right); // 30 m: first visit, its start
+    assert_eq!(t.app.set.hf.freq, 1_013_600);
+    t.tap(Key::Up);
+    let f30 = t.app.set.hf.freq;
+    t.tap(Key::Left); // back to 31 m: as it was left
+    let h = t.app.set.hf;
+    assert_eq!((h.freq, h.step, h.bw), (f31, s31, 2));
+    t.tap(Key::Right); // and 30 m as it was left
+    assert_eq!(t.app.set.hf.freq, f30);
+    // In the settings: the band VFOs survive leaving HF mode.
+    t.tap(Key::Exit);
+    menu0(&mut t, &[3, 5]);
+    assert_eq!(t.app.set.hf.freq, f30);
+    t.tap(Key::Left);
+    assert_eq!(t.app.set.hf.freq, f31);
+}

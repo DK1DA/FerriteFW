@@ -113,6 +113,10 @@ pub struct HfMem {
     pub bfo: i16,
     /// Last 10 frequencies used, newest first: frequency | mode << 28 (0 = empty).
     pub recent: [u32; RECENT],
+    /// HF-27: each band's own VFO, as it was left: frequency (23 bits, 10 Hz) | mode << 23 | step << 26 |
+    /// bandwidth << 28; 0 = never visited (the band's start). Its fine tune in 25 Hz units beside it.
+    pub bands: [u32; BANDS.len()],
+    pub band_bfo: [i8; BANDS.len()],
 }
 
 impl HfMem {
@@ -125,7 +129,23 @@ impl HfMem {
         lna: false,
         bfo: 0,
         recent: [0; RECENT],
+        bands: [0; BANDS.len()],
+        band_bfo: [0; BANDS.len()],
     };
+
+    /// HF-27: keeps this VFO as its band's (when it is in one).
+    fn keep_band(&mut self) {
+        if let Some(b) = self.band() {
+            self.bands[b] = self.freq | (self.mode as u32 & 7) << 23 | (self.step as u32 & 3) << 26 | (self.bw as u32 & 3) << 28;
+            self.band_bfo[b] = (self.bfo / BFO_STEP) as i8;
+        }
+    }
+
+    /// HF-27: the band's VFO as it was left, or None the first time.
+    fn band_vfo(&self, b: usize) -> Option<(Freq10, u8, u8, u8, i16)> {
+        let v = self.bands[b];
+        (v != 0).then(|| (v & 0x7F_FFFF, (v >> 23 & 7) as u8, (v >> 26 & 3) as u8, (v >> 28 & 3) as u8, self.band_bfo[b] as i16 * BFO_STEP))
+    }
 
     fn ssb(&self) -> bool {
         matches!(self.mode, USB | LSB | CW)
@@ -221,7 +241,16 @@ fn send(app: &mut App) {
 }
 
 fn tune_to(app: &mut App, f: Freq10, mode: Option<u8>) {
+    tune_vfo(app, f, mode, None)
+}
+
+/// [`tune_to`], with a band's remembered step, bandwidth and fine tune (HF-27).
+fn tune_vfo(app: &mut App, f: Freq10, mode: Option<u8>, rest: Option<(u8, u8, i16)>) {
     let h = &mut app.set.hf;
+    h.keep_band(); // HF-27: the band being left keeps this VFO
+    if let Some((step, bw, bfo)) = rest {
+        (h.step, h.bw, h.bfo) = (step, bw, bfo);
+    }
     h.freq = f.clamp(BOTTOM, TOP - 1);
     if let Some(m) = mode {
         h.mode = m;
@@ -392,7 +421,11 @@ impl View for Hf {
                     (None, true) => BANDS.iter().position(|b| b.1 > h.freq).unwrap_or(0),
                     (None, false) => BANDS.iter().rposition(|b| b.2 < h.freq).unwrap_or(BANDS.len() - 1),
                 };
-                tune_to(app, BANDS[b].3, Some(BANDS[b].4));
+                // HF-27: the band's own VFO as it was left; its start the first time.
+                match app.set.hf.band_vfo(b) {
+                    Some((f, m, step, bw, bfo)) => tune_vfo(app, f, Some(m), Some((step, bw, bfo))),
+                    None => tune_to(app, BANDS[b].3, Some(BANDS[b].4)),
+                }
             }
             (Key::Star, Short) => {
                 // the next mode this frequency allows
