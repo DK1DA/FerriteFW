@@ -473,7 +473,7 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
         }
     }
     strip(app, lcd, 6, x, c.side1, c.side2, passing);
-    // Four cells: passes, duty, next ID, last pass (ready); duty, next ID, passes, hang (passing).
+    // Four cells, each always in its place (XB-17): passes, duty, next ID, last pass ("now" while passing).
     let mut v = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
     let _ = uwrite!(v[0], "{} \u{b7} {} min", x.passes, x.busy_s / 60);
     let _ = uwrite!(v[1], "{}% of {}%", x.duty, DUTY_LIMIT);
@@ -482,23 +482,19 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
     } else {
         v[2].set(b"Off");
     }
-    grid_value(&c, 2, &mut v[3]);
-    // Ready: how long since the last pass; the speaker setting stays on the start screen.
-    let mut since = Buf::<16>::new();
-    if x.last_dir != 0 {
-        super::scan::ago(x.idle_s as u32 * 1000, &mut since);
-        if since.as_bytes() != b"now" {
-            since.push(b" ago");
+    if passing {
+        v[3].set(b"now");
+    } else if x.last_dir != 0 {
+        super::scan::ago(x.idle_s as u32 * 1000, &mut v[3]);
+        if v[3].as_bytes() != b"now" {
+            v[3].push(b" ago");
         }
     } else {
-        since.set(b"none yet");
+        v[3].set(b"none yet");
     }
-    let cells: [(&[u8], &[u8]); 4] = if passing {
-        [(b"Duty, 10 min", v[1].as_bytes()), (b"Next ID", v[2].as_bytes()), (b"Passes", v[0].as_bytes()), (b"Hang", v[3].as_bytes())]
-    } else {
-        [(b"Passes", v[0].as_bytes()), (b"Duty, 10 min", v[1].as_bytes()), (b"Next ID", v[2].as_bytes()), (b"Last pass", since.as_bytes())]
-    };
-    for (i, (l, val)) in cells.iter().enumerate() {
+    let labels: [&[u8]; 4] = [b"Passes", b"Duty, 10 min", b"Next ID", b"Last pass"];
+    let cells = labels.iter().zip(v.iter().map(|b| b.as_bytes()));
+    for (i, (l, val)) in cells.enumerate() {
         let (col, row) = (i as i32 % 2, i as i32 / 2);
         app.grid_cell(lcd, 7 + i, 6 + col * 116, 210 + row * 34, 112, 30, l, val, false, false);
     }
@@ -516,7 +512,8 @@ fn dir_label(lcd: &mut impl Panel, x: i32, base: i32, from: u8, to: u8, c: u16, 
     px - x
 }
 
-/// The last 30 minutes (XB-16): side 1 → 2 above the line, 2 → 1 below, the current pass red.
+/// The last 30 minutes (XB-16): side 1 → 2 above the line, 2 → 1 below, each in the colour of the slot it was heard
+/// on; the current pass red.
 fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, x: &XbLive, s1: u8, s2: u8, passing: bool) {
     if !app.dirty(region, hash(&(x.strip, passing, s1, s2))) {
         return;
@@ -538,9 +535,9 @@ fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, x: &XbLive, s1: u8,
         let bh = (v.unsigned_abs() as i32 * 14 / 30).clamp(3, 14);
         let now = i == XB_COLS - 1 && passing;
         if v > 0 {
-            lcd.fill(bx, mid - bh, 3, bh, if now { RED } else { GREEN });
+            lcd.fill(bx, mid - bh, 3, bh, if now { RED } else { w::slot_colour(s1) });
         } else {
-            lcd.fill(bx, mid + 1, 3, bh, if now { RED } else { AMBER });
+            lcd.fill(bx, mid + 1, 3, bh, if now { RED } else { w::slot_colour(s2) });
         }
     }
 }
