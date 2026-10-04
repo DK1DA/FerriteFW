@@ -439,6 +439,46 @@ impl App {
         self.open(Dest::Alert);
     }
 
+    /// A SAME header decoded on a slot (WX-4, WX-5): the alert screen over any screen, with its event, areas,
+    /// issue and expiry (local time), originator, slot and frequency. Tests (RWT, RMT) only toast and count in
+    /// the inbox. Nothing happens with SAME alerts off or outside the US and Canada (WX-3). Returns whether the
+    /// full-screen alert went up. The decoder (DSP task) hands headers to the UI task, which calls this.
+    pub fn same_alert(&mut self, h: &ferrite_core::same::SameHeader, slot: u8, freq: Freq10) -> bool {
+        use ferrite_core::same;
+        if !self.set.same_on() {
+            return false;
+        }
+        let mut name = Buf::<30>::new();
+        match same::event_name(&h.event) {
+            Some(n) => name.set(n.as_bytes()),
+            None => {
+                name.set(b"Alert ");
+                name.push(&h.event);
+            }
+        }
+        if same::is_test(&h.event) {
+            self.inbox = self.inbox.saturating_add(1);
+            self.show_toast(b"SAME test", name.as_bytes(), true);
+            return false;
+        }
+        let mut a = AlertInfo::NONE;
+        a.event.set(name.as_bytes());
+        let mut areas = Buf::<20>::new();
+        let _ = ufmt::uwrite!(areas, "{}", ferrite_ui::text::Zero(h.areas[0], 6));
+        if h.n_areas > 1 {
+            let _ = ufmt::uwrite!(areas, " +{}", h.n_areas - 1);
+        }
+        a.areas.set(areas.as_bytes());
+        let sender = h.sender.iter().rposition(|&c| c != b' ').map_or(&h.sender[..0], |n| &h.sender[..=n]);
+        a.from.set(if sender.is_empty() { same::org_name(&h.org).as_bytes() } else { sender });
+        let tz = settings::TIME_ZONES[self.set.tz as usize % settings::TIME_ZONES.len()] as i32 * 15;
+        a.issued = (h.issued_min as i32 + tz).rem_euclid(1440) as u16;
+        a.until = (a.issued as u32 + h.purge_min as u32).rem_euclid(1440) as u16;
+        (a.slot, a.freq) = (slot, freq);
+        self.raise_alert(&a);
+        true
+    }
+
     /// First boot (no layout header: BOOT-12): setup runs, and BACK on its first page has nowhere to go.
     pub fn first_boot(&mut self) {
         self.go_home();

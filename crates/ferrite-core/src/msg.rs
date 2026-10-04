@@ -118,6 +118,15 @@ pub enum StorageCmd {
     Log(Event),
 }
 
+/// A SAME header the decoder heard (DSP task to the UI task, which raises the alert: WX-4, WX-5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SameDecoded {
+    pub header: crate::same::SameHeader,
+    /// The slot and frequency it was heard on.
+    pub slot: u8,
+    pub freq: Freq10,
+}
+
 /// To the DSP task: which decoder runs in the shared slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DspCmd {

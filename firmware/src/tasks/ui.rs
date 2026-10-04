@@ -3,13 +3,13 @@
 //! in, its commands out to the Radio task, and the screen redrawn where it changed.
 
 use crate::board::BACKLIGHT;
-use crate::chan::{Input, INPUT, LIVE, RADIO};
+use crate::chan::{Input, ALERTS, INPUT, LIVE, RADIO};
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
 use crate::store;
 use crate::tasks::{check, CHECK_MCU, CHECK_STATE, FAILED, PASSED};
 use core::sync::atomic::Ordering::Relaxed;
-use embassy_futures::select::{select3, Either3};
+use embassy_futures::select::{select4, Either4};
 use embassy_time::{Duration, Instant, Timer};
 use ferrite_app::App;
 use ferrite_core::chipid;
@@ -116,25 +116,29 @@ pub async fn task() {
         while app.pop_write().is_some() {}
         app.render(&mut lcd, &live, &dev, &store);
         let period = if down != 0 { TICK_HELD_MS } else { TICK_IDLE_MS };
-        match select3(live_rx.changed(), INPUT.receive(), Timer::after(Duration::from_millis(period))).await {
-            Either3::First(l) => slot_a(&mut live, &l),
-            Either3::Second(Input::Key(keypad::Event::Press(code))) => {
+        match select4(live_rx.changed(), INPUT.receive(), Timer::after(Duration::from_millis(period)), ALERTS.receive()).await {
+            Either4::First(l) => slot_a(&mut live, &l),
+            // WX-4: a decoded SAME header opens the alert over any screen.
+            Either4::Fourth(a) => {
+                app.same_alert(&a.header, a.slot, a.freq);
+            }
+            Either4::Second(Input::Key(keypad::Event::Press(code))) => {
                 app.raw_key(code, true); // every code, mapped or not: the key test names them (KEY-2)
                 if let Some(k) = keys::key(code) {
                     down |= 1 << code;
                     app.key_down(k, now_ms(), &store);
                 }
             }
-            Either3::Second(Input::Key(keypad::Event::Release(code))) => {
+            Either4::Second(Input::Key(keypad::Event::Release(code))) => {
                 app.raw_key(code, false);
                 if let Some(k) = keys::key(code) {
                     down &= !(1 << code);
                     app.key_up(k, now_ms(), &store);
                 }
             }
-            Either3::Second(Input::Key(_)) => {} // the sampler's own long press and repeat are off
-            Either3::Second(Input::Knob(d)) => app.knob(d, now_ms(), &store),
-            Either3::Third(()) => {}
+            Either4::Second(Input::Key(_)) => {} // the sampler's own long press and repeat are off
+            Either4::Second(Input::Knob(d)) => app.knob(d, now_ms(), &store),
+            Either4::Third(()) => {}
         }
         app.tick(now_ms(), &live, &store);
     }

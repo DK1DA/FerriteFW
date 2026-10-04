@@ -318,3 +318,37 @@ fn link_prompts() {
     t.tap(Key::Exit);
     assert_eq!(t.app.take_link_answer(), Some(LinkAnswer::Cancelled));
 }
+
+/// WX-4, WX-5: a decoded SAME header raises the alert with its structured fields; tests only toast; outside the
+/// US and Canada, or with SAME off, nothing happens (WX-3).
+#[test]
+fn same_header_raises_the_alert() {
+    use ferrite_core::same::parse;
+    use ferrite_core::txplan::Region;
+    let h = parse(b"ZCZC-WXR-SVR-024031-024033+0045-2761828-KLWX/NWS-").unwrap();
+    let mut t = T::new();
+    t.app.settings_mut().set_region(Some(Region::Uk));
+    assert!(!t.app.same_alert(&h, 2, 16_255_000), "no SAME in the UK");
+    t.app.settings_mut().set_region(Some(Region::Us));
+    let utc = crate::settings::TIME_ZONES.iter().position(|&q| q == 0).unwrap() as u8;
+    t.app.settings_mut().tz = utc;
+    t.tap(Key::Menu); // under it: quick settings
+    assert!(t.app.same_alert(&h, 2, 16_255_000));
+    assert!(matches!(t.app.screen(), Screen::Alert(_)));
+    let a = *t.app.alert_info;
+    assert_eq!(a.event.as_bytes(), b"Severe thunderstorm warning");
+    assert_eq!(a.areas.as_bytes(), b"024031 +1");
+    assert_eq!(a.from.as_bytes(), b"KLWX/NWS");
+    assert_eq!((a.issued, a.until), (18 * 60 + 28, 19 * 60 + 13));
+    assert_eq!((a.slot, a.freq), (2, 16_255_000));
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Quick(_)), "BACK: to the screen it came over");
+    // A weekly test: logged and toasted, no full screen.
+    t.hold(Key::Exit);
+    assert!(!t.app.same_alert(&parse(b"ZCZC-WXR-RWT-024031+0015-2761200-KLWX/NWS-").unwrap(), 0, 16_240_000));
+    assert_eq!(t.app.screen(), Screen::Home);
+    assert!(t.app.toast_up());
+    // SAME off (MENU 0 3 3 1): nothing.
+    t.app.settings_mut().same = false;
+    assert!(!t.app.same_alert(&h, 2, 16_255_000));
+}

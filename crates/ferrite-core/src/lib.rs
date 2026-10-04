@@ -17,6 +17,7 @@ pub mod keys;
 pub mod layout;
 pub mod msg;
 pub mod rxsleep;
+pub mod same;
 pub mod txplan;
 
 /// Shown on the boot screen and in the link's hello.

@@ -227,7 +227,13 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
                     shot += 1;
                 }
                 K::M if !booting => app.notify(b"VE3KPW-9", b"On my way", false),
-                K::N if !booting => app.notify(b"SAME", b"Tornado warning", true),
+                K::N if !booting => {
+                    // The fake decoder's SAME warning now, as if heard on slot C (it also comes by itself 8 s
+                    // after a slot settles on a weather channel).
+                    if let Some(h) = ferrite_core::same::parse(fake::SAME_HEADER) {
+                        app.same_alert(&h, 2, 16_255_000);
+                    }
+                }
                 K::X if !booting => app.open(ferrite_app::screens::nav::Dest::Crossband),
                 K::L if !booting => {
                     layout = (layout + 1) % 3;
@@ -339,6 +345,9 @@ pub fn run(window_scale: f32, bus_mbps: Option<f64>) {
                 store.apply(w);
             }
             radio.step(now as f32 / 1000.0, app.active());
+            if let Some(a) = radio.take_same() {
+                app.same_alert(&a.header, a.slot, a.freq); // WX-4: the decoder's alert, over any screen
+            }
             let clock = fake::device().clock_min;
             dev.clock_min = clock;
             app.tick(now, &radio.live, &store);

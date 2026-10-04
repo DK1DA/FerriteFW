@@ -7,7 +7,7 @@ use ferrite_app::slot::{band_of, BANDS, DEFAULT_CFG};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::{BroadcastCmd, Device, GpsState, LiveAll, ModeLive, RadioCmd, SlotLive, TxLive, XbLive, SCOPE_BARS, XB_COLS};
 use ferrite_core::txplan::Region;
-use ferrite_core::msg::{CalState, LinkLive, SelfTest};
+use ferrite_core::msg::{CalState, LinkLive, SameDecoded, SelfTest};
 
 const fn cfg(tone: u16, offset: i32) -> ferrite_app::slot::SlotCfg {
     let mut c = DEFAULT_CFG;
@@ -79,7 +79,13 @@ pub struct FakeRadio {
     mode: Fake,
     fm: u16,
     now: f32,
+    /// A slot on a NOAA / Weatheradio channel since this time (s): the fake decoder hears a SAME warning there.
+    wx_since: Option<f32>,
+    same: Option<SameDecoded>,
 }
+
+/// The fake decoder's warning, heard 8 s after a slot settles on a weather channel (162.400-162.550 MHz).
+pub const SAME_HEADER: &[u8] = b"ZCZC-WXR-SVR-024031-024033+0045-2761828-KLWX/NWS-";
 
 impl FakeRadio {
     pub fn new() -> Self {
@@ -87,7 +93,7 @@ impl FakeRadio {
         live.slots[0] = SlotLive { freq: mhz(146) + 52_000, rssi: -121, ..Default::default() };
         live.slots[1] = SlotLive { freq: mhz(443) + 47_500, rssi: -121, ..Default::default() };
         live.slots[2] = SlotLive { freq: mhz(118) + 95_000, rssi: -121, scanning: true, hits: 3, last_hit: mhz(121) + 50_000, ..Default::default() };
-        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, fm: 9_810, now: 0.0 }
+        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, fm: 9_810, now: 0.0, wx_since: None, same: None }
     }
 
     pub fn cmd(&mut self, c: RadioCmd) {
@@ -135,6 +141,28 @@ impl FakeRadio {
                 self.set(if on { Fake::Hf { t0, freq, mode } } else { Fake::Off })
             }
             RadioCmd::Crossband(c) => self.set(if c.is_some() { Fake::Xb { t0: self.now } } else { Fake::Off }),
+            _ => {}
+        }
+    }
+
+    /// A SAME header the fake decoder heard since the last call, for the app's `same_alert` (the firmware's
+    /// UI task gets the same from the DSP task over a channel).
+    pub fn take_same(&mut self) -> Option<SameDecoded> {
+        self.same.take()
+    }
+
+    /// While a slot sits on a weather channel, a warning comes 8 s in (once per visit).
+    fn same_step(&mut self, t: f32) {
+        let wx = self.live.slots.iter().position(|s| (mhz(162) + 40_000..=mhz(162) + 55_000).contains(&s.freq));
+        match (wx, self.wx_since) {
+            (Some(_), None) => self.wx_since = Some(t),
+            (Some(i), Some(t0)) if t - t0 >= 8.0 && t0 >= 0.0 => {
+                if let Some(header) = ferrite_core::same::parse(SAME_HEADER) {
+                    self.same = Some(SameDecoded { header, slot: i as u8, freq: self.live.slots[i].freq });
+                }
+                self.wx_since = Some(-1.0); // heard; not again until the slot leaves
+            }
+            (None, _) => self.wx_since = None,
             _ => {}
         }
     }
@@ -201,6 +229,7 @@ impl FakeRadio {
     pub fn step(&mut self, t: f32, active: u8) {
         let dt = t - self.last_step;
         self.last_step = t;
+        self.same_step(t);
         self.now = t;
         self.mode_step(t);
         for (i, s) in self.live.slots.iter_mut().enumerate() {
