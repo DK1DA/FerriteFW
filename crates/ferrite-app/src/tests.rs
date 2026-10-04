@@ -728,3 +728,34 @@ fn slot_modes_are_fm_nfm_am() {
         }
     }
 }
+
+/// MENU-8: the Recent row on advanced settings can be selected; ◀▶ pick a recent setting and OK opens its
+/// editor, BACK returns to the row.
+#[test]
+fn recent_row_is_selectable() {
+    let mut t = T::new();
+    t.hold(Key::Menu);
+    t.tap(Key::Up);
+    assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 8, from_quick: false }), "nothing recent: wraps to the groups");
+    t.hold(Key::Exit);
+    t.tap(Key::Menu); // quick: squelch, then power
+    t.knob(1);
+    t.tap(Key::Digit(5));
+    t.knob(1);
+    t.hold(Key::Exit);
+    t.hold(Key::Menu);
+    t.tap(Key::Up);
+    let recent = crate::screens::advanced::RECENT;
+    assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: recent, from_quick: false }));
+    t.tap(Key::Right);
+    assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: recent + 1, from_quick: false }));
+    t.tap(Key::Menu);
+    let second = t.app.recent[1].unwrap();
+    assert!(matches!(t.app.screen(), Screen::Value(v) if v.item == second), "{:?}", t.app.screen());
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: recent + 1, from_quick: false }));
+    t.tap(Key::Down);
+    assert_eq!(t.app.screen(), Screen::Advanced(Advanced { row: 0, from_quick: false }));
+    let mut fb = FrameBuffer::new();
+    t.render(&mut fb);
+}

@@ -107,12 +107,21 @@ pub fn chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], fg: u16, bg: u16) ->
 
 /// A row of chips in the box x..x+w, y..y+17.
 pub fn chips(lcd: &mut impl Panel, x: i32, y: i32, w: i32, items: &[&[u8]], bg: u16) {
+    chips_sel(lcd, x, y, w, items, None, bg)
+}
+
+/// [`chips`] with one of them selected (accent text and outline): a row of choices such as MENU's Recent.
+pub fn chips_sel(lcd: &mut impl Panel, x: i32, y: i32, w: i32, items: &[&[u8]], sel: Option<usize>, bg: u16) {
     let mut cx = x;
-    for s in items.iter().filter(|s| !s.is_empty()) {
+    for (i, s) in items.iter().enumerate().filter(|(_, s)| !s.is_empty()) {
         if cx + text4_width(s, &UI_12) + 10 > x + w {
             break;
         }
-        cx += chip(lcd, cx, y, s, TEXT, bg) + 4;
+        let cw = chip(lcd, cx, y, s, if sel == Some(i) { BLUE } else { TEXT }, bg);
+        if sel == Some(i) {
+            lcd.frame_r(cx, y, cw, 17, 3, BLUE);
+        }
+        cx += cw + 4;
     }
     lcd.fill(cx, y, x + w - cx, 17, bg);
 }

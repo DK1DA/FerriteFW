@@ -1,6 +1,7 @@
 //! Advanced settings (MENU 0, or hold MENU on home; manual chapter 11, MENU-2, MENU-8; MenuTop mock-up): the
 //! Recent row and the nine groups, each with a summary value. A digit or OK opens a group ([`Dest::Group`]);
-//! 0 opens the Status page (SBAR-13).
+//! 0 opens the Status page (SBAR-13). The Recent row is selectable like the groups (above group 1, once
+//! something was changed): ◀▶ pick one of its settings, OK opens that setting's editor (MENU-8, MENU-17).
 
 use super::nav::Dest;
 use super::shared::*;
@@ -21,10 +22,23 @@ use ufmt::uwrite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Advanced {
-    /// The highlighted group, 0-8 (MENU 0 1 to MENU 0 9).
+    /// The highlighted group, 0-8 (MENU 0 1 to MENU 0 9); [`RECENT`] + i: the Recent row, its i-th setting.
     pub row: u8,
     /// Opened from quick settings (BACK returns there by the BACK stack, like everywhere: MENU-24).
     pub from_quick: bool,
+}
+
+/// `row` from here on: the Recent row, with its selected setting.
+pub const RECENT: u8 = 9;
+
+/// The next row up or down: Recent (when it has anything) sits above group 1, and the list wraps.
+fn step(app: &App, row: u8, d: i32) -> u8 {
+    let has = app.recent[0].is_some() as i32;
+    let n = 9 + has;
+    // Positions: 0 Recent (if any), then the groups.
+    let pos = if row >= RECENT { 0 } else { row as i32 + has };
+    let p = (pos + d).rem_euclid(n);
+    if has == 1 && p == 0 { RECENT } else { (p - has) as u8 }
 }
 
 /// Advanced settings groups (MENU 0 1-9) and their help lines.
@@ -62,8 +76,19 @@ impl View for Advanced {
             app.open(Dest::Group(r + 1));
         };
         match (e.key, e.press) {
-            (Key::Up, Short | Repeat) => app.screen = Screen::Advanced(Advanced { row: (row + 8) % 9, from_quick }),
-            (Key::Down, Short | Repeat) => app.screen = Screen::Advanced(Advanced { row: (row + 1) % 9, from_quick }),
+            (Key::Up, Short | Repeat) => app.screen = Screen::Advanced(Advanced { row: step(app, row, -1), from_quick }),
+            (Key::Down, Short | Repeat) => app.screen = Screen::Advanced(Advanced { row: step(app, row, 1), from_quick }),
+            (Key::Left | Key::Right, Short | Repeat) if row >= RECENT => {
+                // MENU-8: pick one of the recent settings
+                let n = app.recent.iter().flatten().count().max(1) as i32;
+                let i = (row - RECENT) as i32 + if e.key == Key::Right { 1 } else { -1 };
+                app.screen = Screen::Advanced(Advanced { row: RECENT + i.rem_euclid(n) as u8, from_quick });
+            }
+            (Key::Menu, Short) if row >= RECENT => {
+                if let Some(item) = app.recent[(row - RECENT) as usize % 3] {
+                    app.open(Dest::value(item)); // MENU-17: its editor; BACK returns here
+                }
+            }
             (Key::Digit(0), Short) => {
                 // SBAR-13: the Status page, one level down
                 app.push_back();
@@ -77,21 +102,22 @@ impl View for Advanced {
     }
 
     fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
-        app.screen = Screen::Advanced(Advanced { row: (self.row as i32 + d).rem_euclid(9) as u8, ..self });
+        app.screen = Screen::Advanced(Advanced { row: step(app, self.row, d), ..self });
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let (row, dev) = (self.row, cx.dev);
         let recent = app.recent;
-        if app.dirty(R_TOP, hash(&recent)) {
+        let sel = (row >= RECENT).then(|| (row - RECENT) as usize);
+        if app.dirty(R_TOP, hash(&(recent, sel))) {
             w::field(lcd, 0, 54, 21, 40, 35, Align::Left, b"", &UI_12, SUB, BG);
-            w::field(lcd, 8, 46, 21, 40, 35, Align::Left, b"Recent", &UI_12, SUB, BG);
+            w::field(lcd, 8, 46, 21, 40, 35, Align::Left, b"Recent", &UI_12, if sel.is_some() { BLUE } else { SUB }, BG);
             let names: [&[u8]; 3] = recent.map(|r| r.map_or(b"".as_slice(), |i| i.label().as_bytes()));
             if names[0].is_empty() {
                 w::field(lcd, 54, 178, 21, 40, 35, Align::Left, b"nothing yet", &UI_12, DIM, BG);
             } else {
                 lcd.fill(54, 21, 178, 1, BG);
-                w::chips(lcd, 54, 22, 178, &names, BG);
+                w::chips_sel(lcd, 54, 22, 178, &names, sel, BG);
                 lcd.fill(54, 39, 178, 1, BG);
             }
         }
@@ -127,8 +153,20 @@ impl View for Advanced {
             app.list_row(lcd, i, 41 + 22 * i as i32, 22, &r);
         }
         let mut p = Buf::<16>::new();
-        let _ = uwrite!(p, "MENU 0 {}", row + 1);
-        app.help_box(lcd, 242, 34, GROUPS[row as usize].1.as_bytes(), p.as_bytes());
+        match recent[sel.unwrap_or(0)].filter(|_| sel.is_some()) {
+            Some(item) => {
+                let mut t = Buf::<48>::new();
+                t.set(b"Changed lately. OK opens ");
+                t.push(item.name().as_bytes());
+                t.push(b"; arrows pick another.");
+                p.set(b"Recent");
+                app.help_box(lcd, 242, 34, t.as_bytes(), p.as_bytes());
+            }
+            None => {
+                let _ = uwrite!(p, "MENU 0 {}", row.min(8) + 1);
+                app.help_box(lcd, 242, 34, GROUPS[row.min(8) as usize].1.as_bytes(), p.as_bytes());
+            }
+        }
     }
 
     fn hints(self, _: &App) -> Hints {
