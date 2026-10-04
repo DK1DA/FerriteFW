@@ -524,3 +524,33 @@ fn unmeasured_125m_refuses() {
     assert!(matches!(t.app.screen(), Screen::Transmit(_)));
     ptt(&mut t, false);
 }
+
+/// CHAN-4 (safety): a channel with "RX only" on (the channel editor's cell) refuses PTT and automatic
+/// transmissions with the reason; the fix opens the channel editor. Off again, it transmits.
+#[test]
+fn rx_only_channel_refuses() {
+    use crate::screens::chedit::ChEdit;
+    let mut t = ready();
+    t.tap(Key::VfoMem); // channel mode: Calling, 146.520
+    assert!(t.app.slot(0).on_channel());
+    t.app.open(Dest::ChannelEdit);
+    t.app.screen = Screen::ChEdit(ChEdit { cell: 3 + 9 }); // RX only
+    t.knob(1);
+    assert!(t.app.slot(0).ch.unwrap().flags & crate::chan::FLAG_RX_ONLY != 0, "the editor sets it");
+    assert!(matches!(t.app.pop_write(), Some(crate::chan::ChanWrite::Put { ch, .. }) if ch.flags & crate::chan::FLAG_RX_ONLY != 0), "and saves it");
+    t.hold(Key::Exit);
+    t.cmds();
+    ptt(&mut t, true);
+    assert_eq!(refused(&t), Some(Refusal::RxOnlyChannel));
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "never keyed");
+    ptt(&mut t, false);
+    assert!(!crate::screens::transmit::auto_tx(&mut t.app, 0, b"Beacon"));
+    t.tap(Key::Menu); // the fix: the channel editor
+    assert!(matches!(t.app.screen(), Screen::ChEdit(_)));
+    t.app.screen = Screen::ChEdit(ChEdit { cell: 3 + 9 });
+    t.knob(1);
+    t.hold(Key::Exit);
+    ptt(&mut t, true);
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)), "RX only off: transmits");
+    ptt(&mut t, false);
+}

@@ -60,6 +60,10 @@ pub fn refusal(app: &App, slot: u8) -> Option<Refusal> {
     if app.radio.batt_cut {
         return Some(Refusal::Battery);
     }
+    // CHAN-4 (safety): a receive-only channel never transmits.
+    if slot < SLOTS as u8 && app.slot(slot).on_channel() && app.slot(slot).ch.is_some_and(|c| c.flags & crate::chan::FLAG_RX_ONLY != 0) {
+        return Some(Refusal::RxOnlyChannel);
+    }
     if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
         return Some(r);
     }
