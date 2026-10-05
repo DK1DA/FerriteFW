@@ -520,7 +520,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
                 app.open(Dest::Pin); // a PIN first (PIN-1): the PIN screen sets it, then the lock
                 app.screen = Screen::Pin(super::pin::Pin::set(m));
             } else if m == 0 && s.pin_mode != 0 {
-                app.open(Dest::Pin); // turning the lock off: the PIN first (PIN-4)
+                app.open(Dest::Pin); // turning the lock off: the PIN first (PIN-10)
                 app.screen = Screen::Pin(super::pin::Pin::off());
             } else {
                 s.pin_mode = m;
