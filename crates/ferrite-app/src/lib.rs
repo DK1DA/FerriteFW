@@ -43,6 +43,7 @@ macro_rules! slow {
 pub mod chan;
 pub mod data;
 pub mod keys;
+pub mod persist;
 pub mod sample;
 pub mod screens;
 pub mod settings;

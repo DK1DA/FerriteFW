@@ -69,7 +69,7 @@ fn main() {
         let scale = arg("--scale").and_then(|s| s.parse::<usize>().ok()).unwrap_or(1);
         let bus = arg("--bus-mbps").and_then(|s| s.parse().ok());
         let tcp = arg("--term-tcp").and_then(|s| s.parse::<u16>().ok());
-        window::run(scale, bus, args.iter().any(|a| a == "--owner-card"), tcp);
+        window::run(scale, bus, args.iter().any(|a| a == "--owner-card"), tcp, args.iter().any(|a| a == "--fresh"));
         return;
     }
     let scale = arg("--scale").and_then(|s| s.parse().ok()).unwrap_or(1);

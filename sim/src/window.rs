@@ -22,7 +22,7 @@
 //! the App hook the firmware calls.
 
 use ferrite_sim::face::Face;
-use ferrite_sim::simcore::{fit_scale, to_panel, Event, SimCore, KEYMAP, MAX_SCALE};
+use ferrite_sim::simcore::{fit_scale, to_panel, Event, SimCore, Stored, KEYMAP, MAX_SCALE};
 use ferrite_ui::panel::{H, W};
 use minifb::{Key as K, KeyRepeat, MouseButton, MouseMode, ScaleMode, Window, WindowOptions};
 use std::collections::HashMap;
@@ -99,10 +99,26 @@ fn load_mockup(path: &Path) -> Option<Vec<u32>> {
 
 /// `scale` is a whole number (1 by default): every LCD pixel becomes scale x scale window pixels, never a fraction,
 /// so text looks as it will on the radio. Resizing the window snaps to the largest whole scale that fits.
-pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool, term_tcp: Option<u16>) {
+///
+/// The flash is kept in `target/sim/flash.bin` between runs (no file: the sample data; `fresh`: blank, so setup
+/// runs), written about a second after it changes and at quit.
+pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool, term_tcp: Option<u16>, fresh: bool) {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let shots = repo.join("../docs/img/screens");
-    let mut sim = SimCore::new(scale, owner_card);
+    let image_path = repo.join("target/sim/flash.bin");
+    let flash = match std::fs::read(&image_path) {
+        _ if fresh => Stored::Blank,
+        Ok(img) => Stored::Image(img),
+        Err(_) => Stored::Sample,
+    };
+    println!("Flash: {} ({})", image_path.display(), if fresh { "blank: setup runs" } else { "kept between runs; --fresh for a blank one" });
+    let mut sim = SimCore::with_flash(scale, owner_card, flash);
+    let save_image = |sim: &SimCore| {
+        let _ = std::fs::create_dir_all(image_path.parent().unwrap());
+        let _ = std::fs::write(&image_path, sim.flash_image());
+    };
+    save_image(&sim);
+    let mut changed_at: Option<Instant> = None;
     let utc = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     sim.set_clock(utc);
 
@@ -213,5 +229,15 @@ pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool, term_tcp: Opti
         );
         win.update_with_buffer(sim.compose(show_flash, mockup), ww, wh).expect("draw");
         win.set_title(&title);
+        // The flash image to disk a second after the last change.
+        if sim.flash_changed() {
+            changed_at = Some(Instant::now());
+        }
+        if changed_at.is_some_and(|t| t.elapsed() > Duration::from_secs(1)) {
+            save_image(&sim);
+            changed_at = None;
+        }
     }
+    sim.flush();
+    save_image(&sim);
 }

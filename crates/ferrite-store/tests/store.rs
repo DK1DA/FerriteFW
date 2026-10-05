@@ -1,0 +1,348 @@
+//! The store on the simulated flash: round trips, first boot, a damaged header, and thousands of power cuts at
+//! random points of settings writes, channel, zone and preset changes, and of the recovery after them. After
+//! every cut the store must mount, and every setting, channel, zone and preset must read either as it was
+//! before the interrupted change or as it would be after it, never anything else; the zone index must agree with
+//! the channels.
+
+use ferrite_app::chan::{channel, ChanWrite, Channel, ChannelStore, Name, MAX_CHANNELS, NO_ZONE};
+use ferrite_app::data::{Data, NoData, Op, RangePreset, ZoneCfg};
+use ferrite_app::screens::alert::AlertInfo;
+use ferrite_app::settings::Settings;
+use ferrite_app::slot::DEFAULT_CFG;
+use ferrite_app::App;
+use ferrite_store::sim::SimFlash;
+use ferrite_store::store::Mounted;
+use ferrite_store::FlashStore;
+use ferrite_ui::text::Buf;
+
+type Store = FlashStore<SimFlash, NoData>;
+
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n.max(1)
+    }
+}
+
+fn app() -> App {
+    let set: &'static mut Settings = Box::leak(Box::new(Settings::DEFAULT));
+    let alert: &'static mut AlertInfo = Box::leak(Box::new(AlertInfo::NONE));
+    App::new(set, alert)
+}
+
+fn mount(f: SimFlash) -> Store {
+    FlashStore::mount(f, NoData)
+}
+
+fn unmount(s: Store) -> SimFlash {
+    s.into_parts().0
+}
+
+fn settings_of(s: &Store) -> Option<Settings> {
+    let mut set = Settings::DEFAULT;
+    s.load_settings(&mut set).then_some(set)
+}
+
+/// Everything the store holds that a change can touch.
+#[derive(Clone, PartialEq)]
+struct Snap {
+    chans: Vec<Option<Channel>>,
+    zones: Vec<Option<(Name, ZoneCfg)>>,
+    presets: Vec<RangePreset>,
+}
+
+fn snap(s: &Store) -> Snap {
+    let chans = (0..MAX_CHANNELS).map(|n| s.by_num(n).map(|x| x.0)).collect();
+    let zones = (0..s.zones()).map(|z| s.zone_name(z).map(|n| (n, s.zone_cfg(z)))).collect();
+    let presets = (0..s.presets()).filter_map(|i| s.preset(i)).collect();
+    Snap { chans, zones, presets }
+}
+
+/// The zone index agrees with the records.
+fn index_agrees(s: &Store) {
+    let mut seen = 0u16;
+    for z in (0..s.zones()).chain([NO_ZONE]) {
+        let mut last: Option<u16> = None;
+        for i in 0..s.zone_len(z) {
+            let c = s.zone_at(z, i).expect("indexed channel exists");
+            assert_eq!(c.zone, z, "channel {} indexed in zone {z}", c.num);
+            assert!(last.is_none_or(|l| c.num > l), "zone {z} in number order");
+            last = Some(c.num);
+            assert_eq!(s.by_num(c.num).map(|x| x.1), Some(i), "position of {}", c.num);
+            seen += 1;
+        }
+    }
+    let real = (0..MAX_CHANNELS).filter(|&n| s.by_num(n).is_some()).count() as u16;
+    assert_eq!(seen, real, "index covers every channel");
+    assert_eq!(s.count(), real);
+    for i in 0..real {
+        assert!(s.by_number(i).is_some());
+    }
+    assert!(s.by_number(real).is_none());
+}
+
+fn cfg_with(tone: u16, off: i32) -> ferrite_app::slot::SlotCfg {
+    let mut c = DEFAULT_CFG;
+    c.tx_tone = tone;
+    c.offset = off;
+    c
+}
+
+/// A store with a few zones, channels and a preset, settings saved once.
+fn seeded() -> SimFlash {
+    let s = mount(SimFlash::new());
+    assert_eq!(s.mounted(), Mounted::FirstBoot);
+    let zc = ZoneCfg { scan_all: true, shown: true, ..ZoneCfg::default() };
+    for n in [&b"Local"[..], b"Repeaters", b"Air"] {
+        assert!(s.add_zone(n, &zc));
+    }
+    for (i, num) in [0u16, 1, 2, 9, 11, 14, 63, 64, 65, 130, 999].iter().enumerate() {
+        let c = channel(*num, (i % 4) as u8 % 3, 14_400_000 + i as u32 * 2500, "Chan", cfg_with(1000, if i % 2 == 0 { 60_000 } else { 0 }));
+        assert!(s.put_with_position(c, None));
+    }
+    assert!(s.finish_batch());
+    assert!(s.add_preset(&RangePreset { name: Buf::from(b"Air"), start: 11_800_000, end: 13_700_000, step: 10, mode: 2, narrow: false, skips: 0 }));
+    let a = app();
+    assert!(s.save(&a));
+    unmount(s)
+}
+
+#[test]
+fn round_trip_and_first_boot() {
+    let f = seeded();
+    let s = mount(f);
+    assert_eq!(s.mounted(), Mounted::Ok);
+    assert_eq!(s.zones(), 3);
+    assert_eq!(s.zone_name(1).unwrap().as_bytes(), b"Repeaters");
+    assert_eq!(s.count(), 11);
+    assert_eq!(s.presets(), 1);
+    index_agrees(&s);
+    // Settings and slots.
+    let mut a = app();
+    a.settings_mut().set_callsign(b"ve3abc");
+    a.settings_mut().home_ch = Some(11);
+    a.set_watch(2);
+    a.set_channel(1, 1, 0, &s);
+    assert!(s.save(&a));
+    let s = mount(unmount(s));
+    let mut set = Settings::DEFAULT;
+    assert!(s.load_settings(&mut set));
+    assert_eq!(set.callsign.as_bytes(), b"VE3ABC");
+    assert_eq!(set.home_ch, Some(11));
+    let mut b = app();
+    assert!(s.restore(&mut b));
+    assert_eq!(b.slot(1).ch.map(|c| c.num), a.slot(1).ch.map(|c| c.num));
+    // The save timer: nothing to save right after restoring, a save 2 s after a change.
+    assert!(!s.autosave(0, &b));
+    b.set_watch(0);
+    assert!(!s.autosave(100, &b));
+    assert!(!s.autosave(2000, &b));
+    assert!(s.autosave(2100, &b));
+    assert!(!s.flush(&b));
+}
+
+#[test]
+fn a_damaged_header_keeps_the_data_and_garbage_formats() {
+    let mut f = seeded();
+    let h = ferrite_core::layout::LAYOUT_HEADER.start as usize;
+    f.mem[h + 1] ^= 0x40;
+    let s = mount(f);
+    assert_eq!(s.mounted(), Mounted::Ok, "settings still there");
+    assert_eq!(s.count(), 11, "channels kept");
+    // A chip full of noise: formatted, first boot, empty.
+    let mut f = SimFlash::new();
+    let mut r = Rng(7);
+    for b in f.mem.iter_mut() {
+        *b = r.next() as u8;
+    }
+    let s = mount(f);
+    assert_eq!(s.mounted(), Mounted::FirstBoot);
+    assert_eq!(s.count(), 0);
+    assert_eq!(s.zones(), 0);
+    index_agrees(&s);
+}
+
+/// Runs `op` on a copy to count its flash operations, then on `f` with the power cut at a random one of them,
+/// then mounts again (sometimes cutting that too) and returns the store and what it was before and after.
+fn cut_during(f: SimFlash, r: &mut Rng, op: &dyn Fn(&Store)) -> (Store, Snap, Snap) {
+    let s = mount(f.clone());
+    let before = snap(&s);
+    let n0 = s.nor().ops;
+    op(&s);
+    let ops = s.nor().ops - n0;
+    let after = snap(&s);
+    let s = mount(f);
+    if ops > 0 {
+        let mut nor = s.nor();
+        nor.cut_at = Some(nor.ops + 1 + r.below(ops));
+        nor.seed(r.next());
+    }
+    op(&s);
+    let mut f = unmount(s);
+    f.power_on();
+    if r.below(4) == 0 {
+        // The power goes again while the store recovers.
+        f.cut_at = Some(f.ops + 1 + r.below(20_000));
+        f.seed(r.next());
+        f = unmount(mount(f));
+        f.power_on();
+    }
+    (mount(f), before, after)
+}
+
+#[test]
+fn power_cuts_during_settings_writes() {
+    let mut r = Rng(0x5EED_0001);
+    let mut f = seeded();
+    let mut a = app();
+    let mut cur = settings_of(&mount(f.clone())).unwrap();
+    let (mut old, mut new) = (0, 0);
+    for i in 0..3000u32 {
+        a.settings_mut().pin = i;
+        a.settings_mut().fm_freq = (i % 2000) as u16;
+        a.settings_mut().set_callsign(if i % 3 == 0 { b"VE3ABC" } else { b"VA3XYZ9" });
+        let next = *a.settings();
+        let (s, _, _) = cut_during(f, &mut r, &|s| {
+            s.save(&a);
+        });
+        let got = settings_of(&s).expect("settings survive");
+        assert!(got == cur || got == next, "iteration {i}: neither old nor new (pin {})", got.pin);
+        assert_eq!(s.mounted(), Mounted::Ok);
+        if got == next && got != cur {
+            new += 1;
+        } else {
+            old += 1;
+        }
+        cur = got;
+        // Half the time the next save gets through, so the journal holds good records, fills its sectors and
+        // moves between them.
+        if r.below(2) == 0 {
+            assert!(s.save(&a));
+            cur = next;
+            assert!(settings_of(&s) == Some(cur));
+        }
+        f = unmount(s);
+    }
+    // A cut anywhere in the record leaves it torn (the CRC is its last bytes), so nearly every cut reads as
+    // before; a cut on the very last byte can still complete it.
+    eprintln!("settings: {old} cuts left the old record, {new} the new one");
+    assert_eq!(old + new, 3000);
+}
+
+#[test]
+fn power_cuts_during_channel_zone_and_preset_changes() {
+    let mut r = Rng(0xC0FF_EE01);
+    let mut f = seeded();
+    let (mut changed, mut old, mut new, mut ops_total) = (0, 0, 0, 0u64);
+    for i in 0..2500u32 {
+        let pick = r.below(9);
+        let num = [0u16, 1, 2, 9, 11, 14, 63, 64, 65, 130, 999, 5, 300][r.below(13) as usize];
+        let to = r.below(MAX_CHANNELS as u64) as u16;
+        let z = r.below(4) as u8;
+        let freq = 14_400_000 + r.below(400) as u32 * 1250;
+        let op = move |s: &Store| {
+            match pick {
+                0 | 1 => {
+                    let mut c = s.by_num(num).map(|x| x.0).unwrap_or_else(|| channel(num, NO_ZONE, freq, "New", DEFAULT_CFG));
+                    c.rx = freq;
+                    c.set_name(b"Edited");
+                    s.apply(ChanWrite::Put { ch: c, from: None });
+                }
+                2 => {
+                    s.apply(ChanWrite::Delete(num));
+                }
+                3 => {
+                    s.request(Op::Renumber(num, to));
+                }
+                4 => {
+                    s.request(Op::Move(num, if z == 3 { NO_ZONE } else { z }));
+                }
+                5 => {
+                    s.request(Op::RenameZone(z.min(2), Name::from(b"Renamed")));
+                }
+                6 => {
+                    if r_zone_delete(i) {
+                        s.request(Op::DeleteZone(z.min(2)));
+                    } else {
+                        s.request(Op::NewZone);
+                    }
+                }
+                7 => {
+                    let p = RangePreset { name: Buf::from(b"P"), start: freq, end: freq + 100_000, step: 3, mode: 0, narrow: true, skips: 1 };
+                    if s.presets() > 0 && i % 2 == 0 {
+                        s.request(Op::Preset(0, p));
+                    } else if s.presets() < 3 {
+                        s.request(Op::NewPreset);
+                    } else {
+                        s.request(Op::DeletePreset(1));
+                    }
+                }
+                _ => {
+                    s.request(Op::Skip(num, i % 2 == 0));
+                }
+            }
+        };
+        let (s, before, after) = cut_during(f, &mut r, &op);
+        assert_eq!(s.mounted(), Mounted::Ok, "iteration {i}");
+        ops_total += s.nor().ops;
+        let now = snap(&s);
+        if before != after {
+            changed += 1;
+            if now == after {
+                new += 1;
+            } else if now == before {
+                old += 1;
+            }
+        }
+        for n in 0..MAX_CHANNELS as usize {
+            assert!(
+                now.chans[n] == before.chans[n] || now.chans[n] == after.chans[n],
+                "iteration {i} (op {pick}): channel {n} is {:?}, was {:?}, would be {:?}",
+                now.chans[n],
+                before.chans[n],
+                after.chans[n]
+            );
+        }
+        for (zi, z) in now.zones.iter().enumerate() {
+            let ok = before.zones.get(zi) == Some(z) || after.zones.get(zi) == Some(z);
+            assert!(ok, "iteration {i}: zone {zi}");
+        }
+        assert!(now.presets == before.presets || now.presets == after.presets, "iteration {i}: presets");
+        index_agrees(&s);
+        f = unmount(s);
+    }
+    eprintln!("changes: {changed} of 2500 ops changed something; after the cut {old} read as before, {new} as after; {ops_total} flash ops");
+    assert!(changed > 1500 && old > 300 && new > 300, "cuts landed on both sides");
+}
+
+fn r_zone_delete(i: u32) -> bool {
+    i.is_multiple_of(3)
+}
+
+#[test]
+fn settings_reset_erases_every_channel() {
+    let s = mount(seeded());
+    assert!(s.apply(ChanWrite::EraseAll));
+    assert_eq!(s.count(), 0);
+    let s = mount(unmount(s));
+    assert_eq!(s.count(), 0);
+    assert!(s.by_num(11).is_none());
+    index_agrees(&s);
+}
+
+#[test]
+fn renumber_carries_the_position() {
+    let s = mount(seeded());
+    let c = s.by_num(11).unwrap().0;
+    assert!(s.put_with_position(c, Some(ferrite_app::data::Pos { lat: 45, lon: -75 })));
+    assert!(s.request(Op::Renumber(11, 500)));
+    assert!(s.by_num(11).is_none());
+    assert_eq!(s.position(500), Some(ferrite_app::data::Pos { lat: 45, lon: -75 }));
+    let _ = s.version();
+}

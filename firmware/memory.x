@@ -47,6 +47,7 @@ SECTIONS
     __sslow_text = .;
     *(.text.*11ferrite_app*);
     *(.text.*10ferrite_ui*);
+    *(.text.*13ferrite_store*);
     *(.text.*7ferrite5tasks2ui*);
     . = ALIGN(4);
     __eslow_text = .;

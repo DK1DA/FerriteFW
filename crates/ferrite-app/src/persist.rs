@@ -1,0 +1,263 @@
+//! What survives a power cycle, as bytes: the radio-wide settings and the slots (frequencies, VFO settings, the
+//! channel each is on, watch and Battery Save). Each type writes its fields in a fixed order, little-endian, so
+//! the format doesn't depend on the compiler's struct layout; a reader that runs out of bytes leaves the rest at
+//! their current values (the defaults), so a record from an older firmware that had fewer fields still loads
+//! (a version change migrates what it can). Values are not trusted: everything that indexes a table is taken
+//! modulo or checked where it is used, as for a fresh setting.
+//!
+//! The storage crate streams these through its own sink and source, so no buffer of the whole record exists.
+
+use crate::chan::ChannelStore;
+use crate::screens::hf::HfMem;
+use crate::settings::{Settings, Text};
+use crate::slot::SlotCfg;
+use crate::{App, SLOTS};
+use ferrite_core::msg::{RadioCmd, XbCfg};
+
+/// Where bytes go (a CRC, a flash page buffer, a test vector).
+pub trait Sink {
+    fn put(&mut self, b: &[u8]);
+}
+
+/// Where bytes come from. `take` fills `out` and returns true, or returns false (and leaves `out`) when fewer
+/// bytes are left.
+pub trait Source {
+    fn take(&mut self, out: &mut [u8]) -> bool;
+}
+
+/// A type that saves and loads itself, field by field.
+pub trait Persist {
+    fn save(&self, s: &mut dyn Sink);
+    fn load(&mut self, r: &mut dyn Source);
+}
+
+macro_rules! int {
+    ($($t:ty),*) => {$(
+        impl Persist for $t {
+            fn save(&self, s: &mut dyn Sink) {
+                s.put(&self.to_le_bytes());
+            }
+            fn load(&mut self, r: &mut dyn Source) {
+                let mut b = [0u8; core::mem::size_of::<$t>()];
+                if r.take(&mut b) {
+                    *self = <$t>::from_le_bytes(b);
+                }
+            }
+        }
+    )*};
+}
+int!(u8, i8, u16, i16, u32, i32);
+
+impl Persist for bool {
+    fn save(&self, s: &mut dyn Sink) {
+        s.put(&[*self as u8]);
+    }
+    fn load(&mut self, r: &mut dyn Source) {
+        let mut b = [0u8];
+        if r.take(&mut b) {
+            *self = b[0] != 0;
+        }
+    }
+}
+
+/// A channel number or none: 0xFFFF is none.
+impl Persist for Option<u16> {
+    fn save(&self, s: &mut dyn Sink) {
+        self.unwrap_or(0xFFFF).save(s);
+    }
+    fn load(&mut self, r: &mut dyn Source) {
+        let mut v = self.unwrap_or(0xFFFF);
+        v.load(r);
+        *self = (v != 0xFFFF).then_some(v);
+    }
+}
+
+impl<T: Persist, const N: usize> Persist for [T; N] {
+    fn save(&self, s: &mut dyn Sink) {
+        self.iter().for_each(|x| x.save(s));
+    }
+    fn load(&mut self, r: &mut dyn Source) {
+        self.iter_mut().for_each(|x| x.load(r));
+    }
+}
+
+impl<const N: usize> Persist for Text<N> {
+    fn save(&self, s: &mut dyn Sink) {
+        s.put(&self.0);
+    }
+    fn load(&mut self, r: &mut dyn Source) {
+        let mut b = [0u8; N];
+        if r.take(&mut b) {
+            self.0 = b;
+        }
+    }
+}
+
+/// `persist!(Type { field, ... })`: saves and loads the fields in this order. New fields go at the end only.
+macro_rules! persist {
+    ($t:ty { $($f:ident),* $(,)? }) => {
+        impl Persist for $t {
+            fn save(&self, s: &mut dyn Sink) {
+                $(self.$f.save(s);)*
+            }
+            fn load(&mut self, r: &mut dyn Source) {
+                $(self.$f.load(r);)*
+            }
+        }
+    };
+}
+
+persist!(XbCfg { side1, side2, power, timeout_10s, hang_ds, flags });
+persist!(HfMem { freq, mode, step, bw, agc, lna, bfo, recent, bands, band_bfo });
+persist!(SlotCfg { mode, narrow, rx_tone, tx_tone, offset, power, step, squelch, busy, reverse });
+persist!(Settings {
+    callsign, owner, boot_card, region, extend_tx, extend_warned, tz, clock, clock_gps, units, layout, theme,
+    pin_mode, pin, pin_len, pin_misses, pin_wait, bt, same, fm_freq, fm_step, fm_agc, fm_monitor, setup_done,
+    home_ch, xb, hf,
+});
+
+/// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
+pub const STATE_VERSION: u8 = 1;
+
+impl App {
+    /// The App's part of what survives a power cycle: the active slot, watch, Battery Save and each slot (VFO or
+    /// channel mode, its VFO, the VFO's settings and band memories, its zone and position, the channel it is
+    /// on). The radio-wide [`Settings`] are saved apart, as the boot screen needs them before the App exists.
+    pub fn save_state(&self, s: &mut dyn Sink) {
+        STATE_VERSION.save(s);
+        (SLOTS as u8).save(s);
+        self.active.save(s);
+        self.watch.save(s);
+        self.bsave.save(s);
+        for sl in &self.slots {
+            sl.vfo_mode.save(s);
+            sl.vfo.save(s);
+            sl.cfg.save(s);
+            sl.mem.save(s);
+            sl.zone.save(s);
+            sl.pos.save(s);
+            sl.ch.map(|c| c.num).save(s);
+        }
+    }
+
+    /// The saved state back, at power on before the first draw. A slot on a channel reads that channel from the
+    /// store again (edits not saved to it are gone, as on the radio); a channel that no longer exists leaves the
+    /// slot on its VFO. Then the radio gets every slot again.
+    pub fn restore_state(&mut self, r: &mut dyn Source, store: &impl ChannelStore) {
+        let (mut ver, mut n) = (0u8, 0u8);
+        ver.load(r);
+        n.load(r);
+        if ver != STATE_VERSION || n as usize != SLOTS {
+            return;
+        }
+        self.active.load(r);
+        self.active %= SLOTS as u8;
+        self.watch.load(r);
+        self.watch %= 3;
+        self.bsave.load(r);
+        self.bsave %= 4;
+        for sl in &mut self.slots {
+            sl.vfo_mode.load(r);
+            sl.vfo.load(r);
+            sl.cfg.load(r);
+            sl.mem.load(r);
+            sl.zone.load(r);
+            sl.pos.load(r);
+            let mut num: Option<u16> = None;
+            num.load(r);
+            sl.ch = None;
+            if let Some((c, pos)) = num.and_then(|n| store.by_num(n)) {
+                (sl.ch, sl.zone, sl.pos) = (Some(c), c.zone, pos);
+            } else {
+                sl.vfo_mode = true;
+            }
+        }
+        for s in 0..SLOTS as u8 {
+            self.send_slot(s);
+        }
+        self.out.push(RadioCmd::Active(self.active));
+        self.out.push(RadioCmd::Watch(self.watch_mask()));
+        self.out.push(RadioCmd::BatterySave(crate::level(self.bsave)));
+    }
+}
+
+/// A byte slice as a [`Source`] (tests, the simulator).
+pub struct SliceSource<'a>(pub &'a [u8]);
+
+impl Source for SliceSource<'_> {
+    fn take(&mut self, out: &mut [u8]) -> bool {
+        if self.0.len() < out.len() {
+            return false;
+        }
+        let (a, b) = self.0.split_at(out.len());
+        out.copy_from_slice(a);
+        self.0 = b;
+        true
+    }
+}
+
+/// Counts what is saved (sizing a record before writing it).
+pub struct Count(pub usize);
+
+impl Sink for Count {
+    fn put(&mut self, b: &[u8]) {
+        self.0 += b.len();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sample::Sample;
+
+    struct Vec2(std::vec::Vec<u8>);
+    impl Sink for Vec2 {
+        fn put(&mut self, b: &[u8]) {
+            self.0.extend_from_slice(b);
+        }
+    }
+
+    #[test]
+    fn settings_round_trip_and_short_records_keep_defaults() {
+        let mut a = crate::sample::settings();
+        a.set_callsign(b"ve3abc");
+        a.home_ch = Some(11);
+        a.hf.bfo = -120;
+        let mut v = Vec2(std::vec::Vec::new());
+        a.save(&mut v);
+        let mut b = Settings::DEFAULT;
+        b.load(&mut SliceSource(&v.0));
+        assert_eq!(a, b);
+        // An older, shorter record: what it has loads, the rest stays default.
+        let mut c = Settings::DEFAULT;
+        c.load(&mut SliceSource(&v.0[..10]));
+        assert_eq!(c.callsign, a.callsign);
+        assert_eq!(c.hf, Settings::DEFAULT.hf);
+    }
+
+    #[test]
+    fn app_state_round_trip() {
+        let store = Sample::new();
+        let leak = || -> &'static mut Settings { std::boxed::Box::leak(std::boxed::Box::new(Settings::DEFAULT)) };
+        let alert = || std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
+        let mut a = App::new(leak(), alert());
+        a.set_channel(1, 1, 1, &store);
+        a.set_watch(2);
+        a.slots[0].vfo = 14_652_000;
+        a.active = 2;
+        let mut v = Vec2(std::vec::Vec::new());
+        a.save_state(&mut v);
+        let mut b = App::new(leak(), alert());
+        b.restore_state(&mut SliceSource(&v.0), &store);
+        assert_eq!(b.active, 2);
+        assert_eq!(b.watch, 2);
+        assert_eq!(b.slots[0].vfo, 14_652_000);
+        assert_eq!(b.slots[1].ch.map(|c| c.num), a.slots[1].ch.map(|c| c.num));
+        assert!(!b.slots[1].vfo_mode);
+        // A record of another format leaves everything as it was.
+        let mut c = App::new(leak(), alert());
+        v.0[0] = 99;
+        c.restore_state(&mut SliceSource(&v.0), &store);
+        assert_eq!(c.active, 0);
+    }
+}

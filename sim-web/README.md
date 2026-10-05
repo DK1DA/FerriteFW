@@ -46,6 +46,11 @@ Mouse and key calls take effect at the time of the last `frame`.
 | `screen_name() -> ptr` | The screen on show; "Boot" while booting, "Off" while off. |
 | `mockup_name() -> ptr` | Its look-review mock-up, a file in `docs/img/screens/` (480 × 640). |
 | `status_text() -> ptr` | One line: screen · last key · TX · active slot and frequency · last redraw px · locked. |
+| `init_blank(scale: u32)` | Switches the radio on with a blank flash, as after installing: setup runs. |
+| `flash_stage(len: u32) -> ptr` | Room for a saved flash image before `init`: copy the image there, then call `init`, which boots from it (no image staged: the sample data). |
+| `flash_changed() -> u32` | 1 when the flash changed since the last call: time to save the image. |
+| `flash_image() -> ptr`, `flash_len() -> u32` | The flash image to keep (settings, slots, channels, zones, range presets): 303,104 bytes, 0x02C000–0x075FFF of the chip. Valid until the next call. |
+| `flush()` | Saves settings and slots now if they changed (call on `pagehide`); otherwise they save 2 s after the last change. |
 | `keymap() -> ptr` | The desktop simulator's keyboard map, as text. |
 | `term_in(len: u32) -> ptr` | Room for `len` typed bytes for the terminal; write them there, then call `term_feed(len)`. |
 | `term_feed(len: u32)` | Those bytes go to the terminal as typed on the cable (Enter starts it: TERM-2). Ignored while booting or off. |
@@ -104,3 +109,22 @@ x.term_size(term.cols, term.rows);
 ```
 
 Press Enter in the pane to start it. Power-cycling the radio (event 5) closes it; Enter opens it again.
+
+## Keeping the flash
+
+The radio's settings, slots, channels, zones and range presets live in a simulated SPI flash through the
+firmware's own store (`ferrite-store`), so they survive the power switch (VOL). To keep them across page loads,
+save the image when `flash_changed()` says so and stage it before `init`:
+
+```js
+// load
+const saved = await idbGet('flash');               // Uint8Array or undefined
+if (saved) new Uint8Array(x.memory.buffer, x.flash_stage(saved.length), saved.length).set(saved);
+x.init(scale, 0);                                  // no image staged: the sample data
+// every second or so
+if (x.flash_changed()) { const p = x.flash_image(); idbPut('flash', new Uint8Array(x.memory.buffer, p, x.flash_len()).slice()); }
+addEventListener('pagehide', () => { x.flush(); /* then save the image as above */ });
+```
+
+`init_blank(scale)` starts from an erased flash (setup); `init` with nothing staged writes the look review's
+sample data to a blank flash.

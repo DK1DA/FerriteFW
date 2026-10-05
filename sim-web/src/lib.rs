@@ -5,7 +5,7 @@
 //! One simulator per instance; every call before [`init`] does nothing (getters return 0).
 
 use ferrite_core::keys::Key;
-use ferrite_sim::simcore::{jump_names, Event, SimCore, KEYMAP};
+use ferrite_sim::simcore::{jump_names, Event, SimCore, Stored, KEYMAP};
 use std::cell::RefCell;
 
 struct Web {
@@ -17,10 +17,14 @@ struct Web {
     flash: bool,
     /// Bytes the page typed into the terminal, written here by the page before [`term_feed`].
     term_in: Vec<u8>,
+    /// The last flash image [`flash_image`] returned.
+    image: Vec<u8>,
 }
 
 thread_local! {
     static WEB: RefCell<Option<Web>> = const { RefCell::new(None) };
+    /// A saved flash image the page puts here (through [`flash_stage`]) before [`init`].
+    static STAGE: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
 fn with<R: Default>(f: impl FnOnce(&mut Web) -> R) -> R {
@@ -65,12 +69,65 @@ fn event_of(id: u32) -> Option<Event> {
         .copied()
 }
 
+fn start(sim: SimCore) {
+    WEB.with(|w| *w.borrow_mut() = Some(Web { sim, rgba: Vec::new(), text: Vec::new(), flash: false, term_in: Vec::new(), image: Vec::new() }));
+}
+
 /// Switches the radio on: the boot screen, the panel at whole `scale` (1-6); `owner_card` != 0 boots with the
-/// sample owner card. Calling it again starts over.
+/// sample owner card. The flash holds the image staged with [`flash_stage`] (taken; none: the sample data).
+/// Calling it again starts over.
 #[no_mangle]
 pub extern "C" fn init(scale: u32, owner_card: u32) {
-    let sim = SimCore::new(scale as usize, owner_card != 0);
-    WEB.with(|w| *w.borrow_mut() = Some(Web { sim, rgba: Vec::new(), text: Vec::new(), flash: false, term_in: Vec::new() }));
+    let img = STAGE.with(|s| core::mem::take(&mut *s.borrow_mut()));
+    let stored = if img.is_empty() { Stored::Sample } else { Stored::Image(img) };
+    start(SimCore::with_flash(scale as usize, owner_card != 0, stored));
+}
+
+/// Switches the radio on with a blank flash, as after installing: setup runs (BOOT-12).
+#[no_mangle]
+pub extern "C" fn init_blank(scale: u32) {
+    STAGE.with(|s| s.borrow_mut().clear());
+    start(SimCore::with_flash(scale as usize, false, Stored::Blank));
+}
+
+/// Room for a saved flash image of `len` bytes: returns its address; the page copies the image there, then calls
+/// [`init`].
+#[no_mangle]
+pub extern "C" fn flash_stage(len: u32) -> usize {
+    STAGE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.clear();
+        s.resize(len as usize, 0xFF);
+        s.as_ptr() as usize
+    })
+}
+
+/// 1 when the flash changed since the last call: time to save [`flash_image`].
+#[no_mangle]
+pub extern "C" fn flash_changed() -> u32 {
+    with(|w| w.sim.flash_changed() as u32)
+}
+
+/// The flash image to keep (settings, slots, channels, zones, presets): its address; [`flash_len`] bytes, valid
+/// until the next call.
+#[no_mangle]
+pub extern "C" fn flash_image() -> usize {
+    with(|w| {
+        w.image = w.sim.flash_image();
+        w.image.as_ptr() as usize
+    })
+}
+
+/// The length of [`flash_image`]'s image (always the same, 303,104 bytes).
+#[no_mangle]
+pub extern "C" fn flash_len() -> u32 {
+    with(|w| w.image.len() as u32)
+}
+
+/// Saves settings and slots now, if they changed (the page is being hidden or closed).
+#[no_mangle]
+pub extern "C" fn flush() {
+    with(|w| w.sim.flush())
 }
 
 /// The status bar clock: UTC now, seconds since 1970 (`Date.now() / 1000`).

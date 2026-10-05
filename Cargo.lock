@@ -384,6 +384,7 @@ dependencies = [
  "embassy-time-queue-utils",
  "ferrite-app",
  "ferrite-core",
+ "ferrite-store",
  "ferrite-ui",
  "keypad",
  "nmea",
@@ -418,6 +419,7 @@ version = "0.1.0"
 dependencies = [
  "ferrite-app",
  "ferrite-core",
+ "ferrite-store",
  "ferrite-ui",
  "libc",
  "minifb",
@@ -430,6 +432,15 @@ version = "0.1.0"
 dependencies = [
  "ferrite-core",
  "ferrite-sim",
+]
+
+[[package]]
+name = "ferrite-store"
+version = "0.1.0"
+dependencies = [
+ "ferrite-app",
+ "ferrite-core",
+ "ferrite-ui",
 ]
 
 [[package]]

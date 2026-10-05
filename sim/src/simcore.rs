@@ -5,10 +5,20 @@
 //!
 //! Time is the caller's: [`SimCore::step`] takes milliseconds since start. The status bar clock comes from
 //! [`SimCore::set_clock`] (UTC seconds), which the desktop sets from the PC and the page from the browser.
+//!
+//! Channels, zones, range presets, settings and slots live in a simulated SPI flash through the firmware's own
+//! store (`ferrite-store`), so they survive the power switch; the caller keeps the flash image between runs
+//! ([`SimCore::flash_image`]: the desktop in `target/sim/flash.bin`, the page in the browser).
 
 use crate::face::{Face, Part};
 use crate::fake::{self, FakeRadio};
+use ferrite_app::chan::ChannelStore;
+use ferrite_app::data::Data;
 use ferrite_app::sample::Sample;
+use ferrite_app::settings::Settings;
+use ferrite_core::layout::{LAYOUT_HEADER, SWAP};
+use ferrite_store::sim::SimFlash;
+use ferrite_store::FlashStore;
 use ferrite_app::screens::nav::{self, Dest};
 use ferrite_app::{App, Screen as AppScreen};
 use ferrite_core::freq;
@@ -106,9 +116,24 @@ const CHECKS: [Check; 5] = [
     Check { label: "SI4732", value: "", state: State::Ok },
 ];
 
+/// The simulated flash's saved part: from the layout header to the end of the swap sectors.
+pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..SWAP.end;
+
+/// What the flash holds at power on.
+pub enum Stored {
+    /// The look review's sample: zones, channels, presets and settings written to a blank flash.
+    Sample,
+    /// A saved image ([`SimCore::flash_image`]); an empty one gives a blank flash (setup).
+    Image(Vec<u8>),
+    /// Blank, as after installing: setup runs (BOOT-12).
+    Blank,
+}
+
+type Store = FlashStore<SimFlash, Sample>;
+
 pub struct SimCore {
     app: App,
-    store: Sample,
+    store: Store,
     radio: FakeRadio,
     dev: Device,
     lcd: Counting,
@@ -201,16 +226,29 @@ pub fn jump_names() -> impl Iterator<Item = String> {
 }
 
 impl SimCore {
-    /// A radio switched on now (the boot screen), the panel at a whole `scale`; `owner_card` boots with the
-    /// sample owner card (MENU 0 7 3 3).
+    /// A radio switched on now (the boot screen), the panel at a whole `scale`, on the sample data; `owner_card`
+    /// boots with the sample owner card (MENU 0 7 3 3).
     pub fn new(scale: usize, owner_card: bool) -> Self {
+        Self::with_flash(scale, owner_card, Stored::Sample)
+    }
+
+    /// A radio switched on now with the flash holding `stored` (see [`Stored`]).
+    pub fn with_flash(scale: usize, owner_card: bool, stored: Stored) -> Self {
         let scale = scale.clamp(1, MAX_SCALE);
-        let store = fake::store();
+        let nor = match &stored {
+            Stored::Image(img) if !img.is_empty() => SimFlash::with_image(FLASH_IMAGE.start, img),
+            _ => SimFlash::new(),
+        };
+        let store = FlashStore::mount(nor, Sample::new());
+        if matches!(stored, Stored::Sample) && store.first_boot() {
+            seed(&store);
+        }
         let mut radio = FakeRadio::new();
-        let mut app = fake::app();
-        fake::sample(&mut app, &store, &mut radio); // B on "Club repeater", as in the mock-up
-        if owner_card {
-            ferrite_app::sample::owner_card(app.settings_mut());
+        let app = power_on(&store, &mut radio);
+        if matches!(stored, Stored::Sample) {
+            // The mock-ups' C: scanning airband, a few hits in.
+            radio.cmd(ferrite_core::msg::RadioCmd::Scan { slot: 2, on: true });
+            radio.live.slots[2].hits = 3;
         }
         let face = Face::new(scale);
         let out = vec![0u32; face.w * face.h];
@@ -241,9 +279,30 @@ impl SimCore {
             term: Term::new(),
             term_out: Vec::new(),
         };
+        if owner_card {
+            ferrite_app::sample::owner_card(s.app.settings_mut());
+        }
         s.draw_boot();
         s.last_px = s.lcd.pixels;
         s
+    }
+
+    /// The saved part of the flash ([`FLASH_IMAGE`]), for the caller to keep.
+    pub fn flash_image(&self) -> Vec<u8> {
+        let r = FLASH_IMAGE.start as usize..FLASH_IMAGE.end as usize;
+        self.store.nor().mem[r].to_vec()
+    }
+
+    /// The flash changed since the last call (time to save the image).
+    pub fn flash_changed(&mut self) -> bool {
+        core::mem::take(&mut self.store.nor().dirty)
+    }
+
+    /// Settings and slots saved now (the caller is about to quit).
+    pub fn flush(&mut self) {
+        if !self.booting {
+            self.store.flush(&self.app);
+        }
     }
 
     /// The boot screen from the app's settings, as the firmware draws it: the owner card if 0 7 3 3 says so.
@@ -306,9 +365,14 @@ impl SimCore {
         }
         if self.booting && !self.off && now > self.boot_end {
             self.booting = false;
-            // MENU held through the boot screen: the settings reset (PIN-6, BOOT-14), as the firmware does.
-            if self.menu_held() {
+            // As the firmware does: setup on a first boot (BOOT-12); MENU held through the boot screen: the
+            // settings reset (PIN-6, BOOT-14); else the PIN if one is set.
+            if self.store.first_boot() {
+                self.app.first_boot();
+            } else if self.menu_held() {
                 self.app.power_on_reset();
+            } else {
+                self.app.ask_pin();
             }
         }
         if self.live() {
@@ -349,6 +413,7 @@ impl SimCore {
             while let Some(w) = app.pop_write() {
                 store.apply(w);
             }
+            store.autosave(now, app);
             app.render(&mut self.lcd, &radio.live, dev, store);
             self.term.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out));
         }
@@ -494,11 +559,11 @@ impl SimCore {
     /// boot.
     fn power_switch(&mut self) {
         if self.off {
-            // On: RAM is gone, so the app starts again; settings survive, as in flash.
-            let set = *self.app.settings();
-            (self.app, self.radio) = (fake::app(), FakeRadio::new());
-            fake::sample(&mut self.app, &self.store, &mut self.radio);
-            *self.app.settings_mut() = set;
+            // On: RAM is gone, so the app starts again from what the flash kept.
+            let flash = std::mem::replace(&mut self.store, FlashStore::mount(SimFlash::new(), Sample::new())).into_parts().0;
+            self.store = FlashStore::mount(flash, Sample::new());
+            self.radio = FakeRadio::new();
+            self.app = power_on(&self.store, &mut self.radio);
             (self.off, self.boot_end) = (false, self.now + BOOT_MS);
             self.term = Term::new(); // the cable starts over too: Enter opens the terminal again
             self.term_out.clear();
@@ -509,7 +574,9 @@ impl SimCore {
             self.lcd.fill(0, 0, W, H, 0);
             self.last_key = String::from("power off");
         } else if self.off_at.is_none() {
+            // PWR-17: "Saving...", the pending writes, then off.
             self.app.power_off();
+            self.store.flush(&self.app);
             self.off_at = Some(self.now + SAVE_MS);
             self.last_key = String::from("power off");
         }
@@ -610,5 +677,88 @@ impl SimCore {
     /// Booting or off: the app is not running.
     pub fn booting(&self) -> bool {
         self.booting
+    }
+}
+
+/// The settings from the flash (the defaults on a first boot), kept for the program's life as the firmware keeps
+/// its own; the App on them with its slots restored, and its start-up commands sent to the fake radio.
+fn power_on(store: &Store, radio: &mut FakeRadio) -> App {
+    let set: &'static mut Settings = Box::leak(Box::new(Settings::DEFAULT));
+    store.load_settings(set);
+    let alert = Box::leak(Box::new(ferrite_app::screens::alert::AlertInfo::NONE));
+    let mut app = App::new(set, alert);
+    store.restore(&mut app);
+    while let Some(c) = app.pop_cmd() {
+        radio.cmd(c);
+    }
+    app
+}
+
+/// The look review's sample written to a blank flash: its zones, channels (with positions) and range presets,
+/// then the sample settings and slots (B on "Club repeater", C scanning airband, watch A+B+C).
+fn seed(store: &Store) {
+    let sample = Sample::new();
+    for z in 0..sample.zones() {
+        let name = sample.zone_name(z).unwrap_or_default();
+        store.add_zone(name.as_bytes(), &sample.zone_cfg(z));
+    }
+    for i in 0..sample.count() {
+        if let Some(c) = sample.by_number(i) {
+            store.put_with_position(c, sample.position(c.num));
+        }
+    }
+    store.finish_batch();
+    for i in 0..sample.presets() {
+        if let Some(p) = sample.preset(i) {
+            store.add_preset(&p);
+        }
+    }
+    let mut radio = FakeRadio::new();
+    let mut app = fake::app();
+    fake::sample(&mut app, store, &mut radio);
+    store.save(&app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(s: &mut SimCore, from: u32, to: u32) {
+        for t in (from..=to).step_by(20) {
+            s.step(t);
+        }
+    }
+
+    #[test]
+    fn the_flash_keeps_settings_through_the_power_switch_and_the_image() {
+        let mut s = SimCore::new(1, false);
+        run(&mut s, 0, 2500);
+        assert_eq!(s.screen_name(), "Home");
+        assert!(s.store.count() > 10, "the sample's channels are in the flash");
+        s.event(Event::Layout);
+        run(&mut s, 2520, 5000); // saved 2 s after the change
+        let layout = s.app.settings().layout;
+        assert_eq!(layout, 1);
+        s.event(Event::PowerSwitch);
+        run(&mut s, 5020, 7000);
+        assert_eq!(s.screen_name(), "Off");
+        s.event(Event::PowerSwitch);
+        run(&mut s, 7020, 9500);
+        assert_eq!(s.screen_name(), "Home");
+        assert_eq!(s.app.settings().layout, layout, "kept through the power switch");
+        assert_eq!(s.app.slot(1).ch.map(|c| c.num), Some(11), "B still on Club repeater");
+        // The image, as the desktop and the page keep it.
+        let img = s.flash_image();
+        let mut t = SimCore::with_flash(1, false, Stored::Image(img));
+        run(&mut t, 0, 2500);
+        assert_eq!(t.app.settings().layout, layout);
+    }
+
+    #[test]
+    fn a_blank_flash_runs_setup() {
+        let mut s = SimCore::with_flash(1, false, Stored::Blank);
+        run(&mut s, 0, 2500);
+        assert!(matches!(s.app.screen(), AppScreen::Setup(_)), "{}", s.screen_name());
+        assert_eq!(s.store.count(), 0);
     }
 }

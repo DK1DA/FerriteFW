@@ -1,25 +1,62 @@
-//! The channels the UI reads ([`ChannelStore`]). Until the Storage task keeps channel records in SPI flash
-//! (CHAN-7, CHAN-9), a fixed table in MCU flash: the two calling channels, so V/M and channel mode work on the
-//! radio. Nothing here is ever written.
+//! The SPI-flash store (ferrite-store) on the radio's W25Q: the channels, zones and range presets the UI reads,
+//! and the settings and slots it saves (roadmap 1d). The UI task owns it: it mounts it before the boot screen
+//! (the callsign and owner card are in the settings), reads channel records on demand, applies the app's
+//! channel writes and saves the settings 2 s after a change and at power off.
+//!
+//! The w25q driver is given only the ranges Ferrite may write (ferrite_core::layout::WRITABLE), so calibration,
+//! stock's data and the bootloader's update area are refused below everything else.
+//!
+//! For now a sector erase waits in place (up to 400 ms, usually about 50): a channel edit can hold the UI that
+//! long. Polling the erase from a timer is the follow-up once the event log needs the flash too.
 
-use ferrite_app::chan::{channel, Channel, Table};
-use ferrite_app::slot::DEFAULT_CFG;
-use ferrite_core::freq::mhz;
+use crate::bus::{BusyDelay, Flash};
+use ferrite_app::data::NoData;
+use ferrite_core::layout::WRITABLE;
+use ferrite_store::{FlashStore, Nor, NorError};
+use w25q::W25q;
 
-static ZONES: [&[u8]; 1] = [b"Calling"];
-static CHANNELS: [Channel; 2] = [
-    channel(0, 0, mhz(146) + 52_000, "Calling 2 m", DEFAULT_CFG),
-    channel(1, 0, mhz(446), "Calling 70 cm", DEFAULT_CFG),
-];
-
-/// First boot: the layout header (0x02C000) is missing, so setup runs (BOOT-12, SETUP-1). The Storage task
-/// doesn't read the header yet, so this says no; until it does, setup runs from MENU 0 9 8 1.
-pub fn first_boot() -> bool {
-    false
+/// The W25Q, or nothing when it didn't answer at power on (then nothing is stored this power-on).
+pub enum Spi {
+    Chip(W25q<Flash>),
+    Missing,
 }
 
-/// The radio-wide settings the UI borrows for good (`App::new`). Until the Storage task reads the settings
-/// struct (0x02D000) and HF mode's sector (0x084000), every boot starts from the defaults (BOOT-12). Once only.
+impl Nor for Spi {
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> ferrite_store::Result {
+        match self {
+            Spi::Chip(f) => f.read(addr, buf).map_err(|_| NorError),
+            Spi::Missing => Err(NorError),
+        }
+    }
+    fn program(&mut self, addr: u32, data: &[u8]) -> ferrite_store::Result {
+        match self {
+            Spi::Chip(f) => f.program(addr, data, &mut BusyDelay).map_err(|_| NorError),
+            Spi::Missing => Err(NorError),
+        }
+    }
+    fn erase(&mut self, addr: u32) -> ferrite_store::Result {
+        match self {
+            Spi::Chip(f) => f.erase(addr, &mut BusyDelay).map_err(|_| NorError),
+            Spi::Missing => Err(NorError),
+        }
+    }
+}
+
+pub type Store = FlashStore<Spi, NoData>;
+
+/// Starts the flash and mounts the store: whether the chip answered (the self-test's SPI flash check), and the
+/// store.
+pub fn mount() -> (bool, Store) {
+    let spi = match W25q::new(Flash::new(), &mut BusyDelay, &WRITABLE) {
+        Ok(f) => Spi::Chip(f),
+        Err(_) => Spi::Missing,
+    };
+    let ok = matches!(spi, Spi::Chip(_));
+    (ok, FlashStore::mount(spi, NoData))
+}
+
+/// The radio-wide settings the UI borrows for good (`App::new`): the defaults, then what the store holds
+/// ([`ferrite_store::FlashStore::load_settings`]). Once only.
 pub fn settings() -> &'static mut ferrite_app::settings::Settings {
     cortex_m::singleton!(: ferrite_app::settings::Settings = ferrite_app::settings::Settings::DEFAULT).unwrap()
 }
@@ -27,9 +64,4 @@ pub fn settings() -> &'static mut ferrite_app::settings::Settings {
 /// The last alert, for the alert screen (WX-5): the App's too, kept outside it. Once only.
 pub fn last_alert() -> &'static mut ferrite_app::screens::alert::AlertInfo {
     cortex_m::singleton!(: ferrite_app::screens::alert::AlertInfo = ferrite_app::screens::alert::AlertInfo::NONE).unwrap()
-}
-
-/// The store the UI task reads from.
-pub fn channels() -> Table<'static> {
-    Table { zones: &ZONES, channels: &CHANNELS }
 }

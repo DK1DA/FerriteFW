@@ -1,0 +1,23 @@
+[package]
+name = "ferrite-store"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Ferrite's SPI-flash store: journalled settings, channel records, zones, range presets and the zone index, safe against a power cut at any byte"
+
+[features]
+# The simulated NOR flash (with power cuts): the simulator and the tests. The firmware turns it off.
+default = ["std"]
+std = []
+
+[dependencies]
+ferrite-core.workspace = true
+ferrite-app.workspace = true
+ferrite-ui.workspace = true
+
+[dev-dependencies]
+ferrite-ui = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

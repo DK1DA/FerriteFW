@@ -2,12 +2,12 @@
 //! (`ferrite-app`, the same state machine the simulator runs): keys and the knob in, the Radio task's snapshot
 //! in, its commands out to the Radio task, and the screen redrawn where it changed.
 
-use crate::board::BACKLIGHT;
+use crate::board::{BACKLIGHT, POWER_HOLD, POWER_SW};
 use crate::chan::{Input, ALERTS, INPUT, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
 use crate::store;
-use crate::tasks::{check, CHECK_MCU, CHECK_STATE, FAILED, PASSED};
+use crate::tasks::{check, CHECK_FLASH, CHECK_MCU, CHECK_STATE, FAILED, PASSED};
 use core::sync::atomic::Ordering::Relaxed;
 use embassy_futures::select::{select, select4, Either, Either4};
 use embassy_time::{Duration, Instant, Timer};
@@ -15,7 +15,7 @@ use ferrite_app::term::{Sink, Term};
 use ferrite_app::App;
 use ferrite_core::chipid;
 use ferrite_core::keys;
-use ferrite_core::msg::{Device, Live, LiveAll, SlotLive, Source};
+use ferrite_core::msg::{Device, Live, LiveAll, RadioCmd, SlotLive, Source};
 use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::gfx::BG;
@@ -83,11 +83,12 @@ pub async fn task() {
         Check { label: "BK4829 VHF", value: "", state: State::Pending },
         Check { label: "BK4829 UHF", value: "", state: State::Pending },
     ];
-    // The settings, borrowed here for the boot screen (callsign, owner card: BOOT-9, MENU 0 7 3 3) and then
-    // handed to the app. Until the Storage task reads the settings struct (0x02D000) they are the defaults, so
-    // the boot screen is the logo; once it does, store::settings() returns the stored ones and nothing here
-    // changes. The read must finish before this point (it is one 4 KB sector).
+    // The store: mounted before the boot screen, as the settings (callsign, owner card: BOOT-9, MENU 0 7 3 3)
+    // are in it. A first boot formats the chip here (about a second, once).
+    let (flash_ok, store) = store::mount();
+    check(Source::Storage, CHECK_FLASH, flash_ok);
     let set = store::settings();
+    store.load_settings(set);
     let card = set.boot_owner().is_some();
     // The logo for at least 1.5 s (the owner card 4 s; any key skips it), until every check has reported (at
     // most 5 s: a check still pending then counts as failed).
@@ -135,11 +136,12 @@ pub async fn task() {
 
     // Hand-off: the whole screen cleared, then the app draws everything once (HOME-2).
     lcd.0.fill(0, 0, 240, 320, BG);
-    let store = store::channels();
     let mut app = App::new(set, store::last_alert());
+    // The slots as they were saved (frequencies, VFO settings, the channel each is on, watch, Battery Save).
+    store.restore(&mut app);
     // After the self-test: setup on first boot (BOOT-12); MENU held: the settings reset (PIN-6, BOOT-14), which
     // asks before the PIN; else the PIN if one is set (BOOT-13).
-    if store::first_boot() {
+    if store.first_boot() {
         app.first_boot();
     } else if menu_held {
         app.power_on_reset();
@@ -167,9 +169,27 @@ pub async fn task() {
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
         }
-        // Channel writes (save as channel, the channel editor): dropped until the Storage task keeps channels
-        // in SPI flash; the table in MCU flash can't change.
-        while app.pop_write().is_some() {}
+        // Channel writes (save as channel, the channel editor, the browser) to the flash; the settings and slots
+        // 2 s after their last change.
+        while let Some(w) = app.pop_write() {
+            store.apply(w);
+        }
+        store.autosave(now_ms(), &app);
+        // PWR-17: the power switch off (PE0 high, twice 50 ms apart): "Saving...", the radio off, the pending
+        // writes, then the power hold released; if the switch is back on by then, a reset, as stock does.
+        if POWER_SW.read() {
+            Timer::after_millis(50).await;
+            if POWER_SW.read() {
+                app.power_off();
+                app.render(&mut lcd, &live, &dev, &store);
+                RADIO.send(RadioCmd::Shutdown).await;
+                store.flush(&app);
+                Timer::after_millis(100).await;
+                POWER_HOLD.write(false);
+                Timer::after_millis(500).await;
+                cortex_m::peripheral::SCB::sys_reset();
+            }
+        }
         app.render(&mut lcd, &live, &dev, &store);
         let period = if down != 0 || term.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
