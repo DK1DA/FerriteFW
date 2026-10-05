@@ -110,7 +110,7 @@ const G8: [Entry; 9] = [
 const G9: [Entry; 9] = [
     (slow!("Keys"), slow!("No auto lock"), slow!("Auto lock, lock covers, key test, shortcuts.")),
     (slow!("Connections"), slow!("BT off"), slow!("Bluetooth, paired devices, link.")),
-    (slow!("PIN and lock"), slow!("Off"), slow!("PIN, channel-only mode.")),
+    (slow!("PIN and lock"), slow!("Off"), slow!("PIN lock, channel-only mode, PIN.")),
     (slow!("Region"), slow!("Not set"), slow!("Your amateur bands and defaults.")),
     (slow!("Receiver"), slow!("Tail 150 ms"), slow!("Advanced squelch, tail, discriminator.")),
     (slow!("SSB patch"), slow!(""), slow!("USB, LSB and CW in HF mode.")),
@@ -245,7 +245,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Debug console"), slow!("Off"), slow!("Off, cable or Bluetooth.")),
         (slow!("Cable port"), slow!("Auto"), slow!("Link, terminal or KISS.")),
     ]),
-    ((9, 3), &[(slow!("PIN"), slow!("Off"), slow!("Ask for a PIN at power on.")), (slow!("Channel-only mode"), slow!("Off"), slow!("Hide VFO and editing."))]),
+    ((9, 3), &[(slow!("PIN lock"), slow!("Off"), slow!("Ask for the PIN at power on, or unlock too.")), (slow!("Channel-only mode"), slow!("Off"), slow!("Hide VFO and editing.")), (slow!("Change PIN"), slow!("None"), slow!("Type a new PIN; the old one first."))]),
     ((9, 5), &[
         (slow!("Advanced squelch"), slow!(""), slow!("Thresholds per band.")),
         (slow!("Squelch tail"), slow!("150 ms"), slow!("Audio after the signal drops.")),
@@ -311,9 +311,30 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &WATCH_TEXT, app.watch);
             app.watch != 1
         }
+        [6, 3] => {
+            pick(b, &COORD_FORMATS, s.coord_fmt);
+            s.coord_fmt != Settings::DEFAULT.coord_fmt
+        }
         [6, 4] => {
             pick(b, &UNITS, s.units);
             s.units != 0
+        }
+        [6, 9] => {
+            if s.fixed_on {
+                b.set(&super::lists::grid(s.fixed));
+            } else {
+                b.set(b"None");
+            }
+            s.fixed_on
+        }
+        [3, 3, 2] => {
+            let n = s.same_codes.iter().filter(|&&c| c != 0).count();
+            if n == 0 {
+                b.set(b"None");
+            } else {
+                let _ = ufmt::uwrite!(b, "{} code{}", n, if n == 1 { "" } else { "s" });
+            }
+            n != 0
         }
         [6, 5] => {
             let mut t = Buf::<16>::new();
@@ -407,6 +428,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &PIN_MODES, s.pin_mode);
             s.pin_mode != 0
         }
+        [9, 3, 3] => {
+            b.set(if s.pin_len > 0 { b"Set" } else { b"None" });
+            s.pin_len > 0
+        }
         [9, 7, 1] => {
             b.set(cal_text(dev.selftest.cal).as_bytes());
             false
@@ -470,6 +495,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
     match p {
         [1, 1] => app.change(Item::Watch, d),
         [7, 7] => app.change(Item::BatterySave, d),
+        [6, 3] => s.coord_fmt = cycle(s.coord_fmt, d, COORD_FORMATS.len()),
         [6, 4] => s.units = cycle(s.units, d, UNITS.len()),
         [6, 5] => s.tz = cycle(s.tz, d, TIME_ZONES.len()),
         [6, 6] => {
@@ -491,13 +517,13 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [9, 3] | [9, 3, 1] => {
             let m = cycle(s.pin_mode, d, PIN_MODES.len());
             if m != 0 && s.pin_len == 0 {
-                app.open(Dest::Pin); // a PIN first (PIN-1): the PIN screen sets it, then the mode
+                app.open(Dest::Pin); // a PIN first (PIN-1): the PIN screen sets it, then the lock
                 app.screen = Screen::Pin(super::pin::Pin::set(m));
+            } else if m == 0 && s.pin_mode != 0 {
+                app.open(Dest::Pin); // turning the lock off: the PIN first (PIN-4)
+                app.screen = Screen::Pin(super::pin::Pin::off());
             } else {
                 s.pin_mode = m;
-                if m == 0 {
-                    s.pin_len = 0;
-                }
             }
         }
         _ => return false,
@@ -522,6 +548,8 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
     match p {
         [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
         [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
+        [6, 3] => s.coord_fmt = d.coord_fmt,
+        [6, 9] => s.fixed_on = false,
         [6, 4] => s.units = d.units,
         [6, 5] => s.tz = d.tz,
         [6, 6] => (s.clock, s.clock_gps) = (d.clock, d.clock_gps),

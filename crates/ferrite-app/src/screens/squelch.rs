@@ -6,7 +6,6 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::Item;
 use crate::{App, Screen};
 use ferrite_core::keys::Key;
 use ferrite_core::msg::LiveAll;
@@ -23,9 +22,7 @@ pub struct Squelch;
 /// SIDE1 held + knob or ▲▼: one level up or down (stops at 0 and 9), and this screen while SIDE1 is held.
 pub fn step(app: &mut App, d: i32) {
     app.keys.used(Key::Side(1));
-    let sq = app.slot(app.active).cfg().squelch as i32;
-    let to = (sq + d).clamp(0, 9);
-    app.change(Item::Squelch, to - sq);
+    app.step_squelch(d);
     if !matches!(app.screen, Screen::Squelch(_)) {
         app.screen = Screen::Squelch(Squelch);
     }
@@ -54,7 +51,7 @@ impl View for Squelch {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let a = app.active;
-        let sq = app.slot(a).cfg().squelch;
+        let sq = app.sq_level(a);
         let lv = cx.live.slots[a as usize];
         if app.dirty(1, hash(&(a, sq))) {
             w::badge(lcd, 8, 30, a, true, BG);

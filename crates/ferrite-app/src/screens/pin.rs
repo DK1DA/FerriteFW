@@ -1,7 +1,8 @@
 //! PIN entry (A17; manual chapter 34, PIN-1 to PIN-3, BOOT-13, KEY-16): masked digits, attempts left, the
-//! settings-reset hint, and a 30 s wait after three misses. Three uses: at power on ([`App::ask_pin`]; nothing
-//! else works until it's right, hold BACK included), at unlock (hold # while locked, with "at power on and
-//! unlock"), and setting a new PIN (MENU 0 9 3 1), where the digits show as typed.
+//! settings-reset hint, and a 30 s wait after three misses. Uses: at power on ([`App::ask_pin`]; nothing else
+//! works until it's right, hold BACK included), at unlock (hold # while locked, with "at power on and unlock"),
+//! turning PIN lock off (0 9 3 1: the PIN first), and setting a PIN (0 9 3 3 Change PIN, or choosing a lock with
+//! none set): the old PIN first if there is one, then the new one twice, its digits shown as typed.
 
 use super::shared::*;
 use super::{Cx, Hints, View};
@@ -26,29 +27,58 @@ const MAX: u8 = 6;
 /// What the PIN is asked for.
 const POWER_ON: u8 = 0;
 const UNLOCK: u8 = 1;
-const SET: u8 = 2;
+/// The PIN, then PIN lock off.
+const OFF: u8 = 2;
+/// The old PIN, then a new one.
+const CHANGE: u8 = 3;
+/// A new PIN, then PIN lock mode `purpose - SET`.
+const SET: u8 = 4;
+/// The new PIN again (`purpose - AGAIN` = the mode); `first` holds the first entry.
+const AGAIN: u8 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Pin {
     /// The digits typed, packed two to a byte, and how many.
     digits: [u8; 3],
     n: u8,
-    /// POWER_ON, UNLOCK, or SET + the PIN mode to switch on.
+    /// POWER_ON, UNLOCK, OFF, CHANGE, SET + mode or AGAIN + mode.
     purpose: u8,
+    /// The first entry of a new PIN, packed the same way, and its length.
+    first: [u8; 3],
+    first_n: u8,
 }
 
 impl Pin {
     pub fn power_on() -> Self {
-        Pin { digits: [0; 3], n: 0, purpose: POWER_ON }
+        Pin { digits: [0; 3], n: 0, purpose: POWER_ON, first: [0; 3], first_n: 0 }
     }
 
     pub fn unlock() -> Self {
         Pin { purpose: UNLOCK, ..Pin::power_on() }
     }
 
-    /// Setting a new PIN, then turning on PIN mode `mode` (PIN_MODES).
+    /// Setting a new PIN, then PIN lock mode `mode` (PIN_MODES).
     pub fn set(mode: u8) -> Self {
         Pin { purpose: SET + mode, ..Pin::power_on() }
+    }
+
+    /// 0 9 3 3 Change PIN: the old one first when there is one.
+    pub fn change(app: &App) -> Self {
+        if app.set.pin_len > 0 {
+            Pin { purpose: CHANGE, ..Pin::power_on() }
+        } else {
+            Pin::set(app.set.pin_mode)
+        }
+    }
+
+    /// Turning PIN lock off: the PIN first.
+    pub fn off() -> Self {
+        Pin { purpose: OFF, ..Pin::power_on() }
+    }
+
+    /// A new PIN being typed (first or again): its digits show.
+    fn new_pin(self) -> bool {
+        self.purpose >= SET
     }
 
     /// Asked at power on: nothing else is usable until it's right (PIN-1).
@@ -93,20 +123,37 @@ impl Pin {
         if self.n < MIN {
             return app.show_toast(b"PIN", b"4 to 6 digits", false);
         }
-        if self.purpose >= SET {
+        if self.purpose >= AGAIN {
+            // The second entry must match the first.
+            let first = Pin { digits: self.first, n: self.first_n, ..self };
+            if first.value() != self.value() || self.first_n != self.n {
+                Pin::set(self.purpose - AGAIN).put(app);
+                return app.show_toast(b"PINs differ", b"type the new PIN again", false);
+            }
             let s = &mut app.set;
-            (s.pin, s.pin_len, s.pin_mode) = (self.value(), self.n, self.purpose - SET);
+            (s.pin, s.pin_len, s.pin_mode) = (self.value(), self.n, self.purpose - AGAIN);
             app.back();
             return app.show_toast(b"PIN set", b"", false);
         }
+        if self.purpose >= SET {
+            let again = Pin { digits: [0; 3], n: 0, purpose: self.purpose - SET + AGAIN, first: self.digits, first_n: self.n };
+            return again.put(app);
+        }
         if self.value() == app.set.pin && self.n == app.set.pin_len {
             app.set.pin_misses = 0;
-            if self.purpose == UNLOCK {
-                app.locked = false;
-                app.back();
-                app.show_toast(b"Keys unlocked", b"", false);
-            } else {
-                app.go_home();
+            match self.purpose {
+                UNLOCK => {
+                    app.locked = false;
+                    app.back();
+                    app.show_toast(b"Keys unlocked", b"", false);
+                }
+                OFF => {
+                    app.set.pin_mode = 0;
+                    app.back();
+                    app.show_toast(b"PIN lock off", b"", false);
+                }
+                CHANGE => Pin::set(app.set.pin_mode).put(app),
+                _ => app.go_home(),
             }
             return;
         }
@@ -137,7 +184,7 @@ impl View for Pin {
 
     /// At power on and at unlock every key is the PIN's (PIN-1; the keys are locked otherwise, KEY-16).
     fn modal(self) -> bool {
-        self.purpose < SET
+        self.purpose <= UNLOCK
     }
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
@@ -163,11 +210,15 @@ impl View for Pin {
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
-        let set = self.purpose >= SET;
-        let head: &[u8] = if set { b"New PIN" } else { b"Enter PIN" };
+        let set = self.new_pin();
+        let (head, t): (&[u8], &[u8]) = match self.purpose {
+            AGAIN.. => (b"New PIN again", b"The same digits once more."),
+            SET.. => (b"New PIN", b"4 to 6 digits."),
+            CHANGE | OFF => (b"Current PIN", b"The PIN set on this radio."),
+            _ => (b"Enter PIN", b"This radio has a PIN."),
+        };
         if app.dirty(R_TOP, hash(&head)) {
             w::field(lcd, 10, 220, 40, 66, 60, Align::Center, head, &UI_15B, TEXT, BG);
-            let t: &[u8] = if set { b"4 to 6 digits." } else { b"This radio has a PIN." };
             w::field(lcd, 10, 220, 70, 88, 84, Align::Center, t, &UI_12, SUB, BG);
         }
         // Six boxes: a dot per digit typed (PIN-2), the digit itself when setting.
@@ -210,7 +261,12 @@ impl View for Pin {
     }
 
     fn hints(self, _: &App) -> Hints {
-        let ok = if self.purpose >= SET { "Save" } else { "Unlock" };
+        let ok = match self.purpose {
+            AGAIN.. => "Save",
+            SET.. | CHANGE => "Next",
+            OFF => "Turn off",
+            _ => "Unlock",
+        };
         if self.blocks() {
             Hints::new(&[("0-9", "Type"), ("OK", ok), ("BACK", "Delete")])
         } else {

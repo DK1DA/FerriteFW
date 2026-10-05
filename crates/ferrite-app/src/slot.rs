@@ -16,20 +16,54 @@ pub struct SlotCfg {
     /// Tone words (CHAN-3): CTCSS in 0.1 Hz; bit 15 DCS, bit 14 inverted, the code in octal; 0 = none.
     pub rx_tone: u16,
     pub tx_tone: u16,
-    /// Transmit offset, 10 Hz units, signed; 0 = simplex.
+    /// Transmit offset, 10 Hz units, signed; 0 = simplex. With [`SlotCfg::split`]: the TX frequency itself.
     pub offset: i32,
     /// 0 low, 1 mid, 2 high.
     pub power: u8,
     /// Index into [`STEPS`].
     pub step: u8,
+    /// Level 0-9; on a channel also [`SQ_GLOBAL`]: the slot's own level (SQL-6).
     pub squelch: u8,
     /// 0 off, 1 carrier, 2 wrong tone.
     pub busy: u8,
     pub reverse: bool,
+    /// Split (MENU 5, the 4th offset choice): transmit on the absolute frequency in `offset`, whatever RX is
+    /// tuned to. Fits the struct's padding: no bigger.
+    pub split: bool,
 }
 
-pub const DEFAULT_CFG: SlotCfg =
-    SlotCfg { mode: 0, narrow: true, rx_tone: 0, tx_tone: 0, offset: 0, power: 0, step: STEP_12K5, squelch: 4, busy: 0, reverse: false };
+impl SlotCfg {
+    /// The frequency this config transmits on with RX at `rx`: the split TX, or RX plus the shift; reverse
+    /// swaps the two (TX-6 checks this one).
+    pub fn tx_of(&self, rx: Freq10) -> Freq10 {
+        let tx = if self.split { self.offset.max(0) as i64 } else { rx as i64 + self.offset as i64 };
+        (if self.reverse { rx as i64 } else { tx }).max(0) as Freq10
+    }
+
+    /// The frequency it listens on with RX tuned to `rx`: reverse listens on the TX side.
+    pub fn rx_of(&self, rx: Freq10) -> Freq10 {
+        if self.reverse {
+            let tx = if self.split { self.offset.max(0) as i64 } else { rx as i64 + self.offset as i64 };
+            tx.max(0) as Freq10
+        } else {
+            rx
+        }
+    }
+}
+
+pub const DEFAULT_CFG: SlotCfg = SlotCfg {
+    mode: 0,
+    narrow: true,
+    rx_tone: 0,
+    tx_tone: 0,
+    offset: 0,
+    power: 0,
+    step: STEP_12K5,
+    squelch: 4,
+    busy: 0,
+    reverse: false,
+    split: false,
+};
 
 impl Default for SlotCfg {
     fn default() -> Self {
@@ -59,6 +93,8 @@ pub const STEPS: [(u32, &str); 14] = [
     (10000, "100 kHz"),
 ];
 pub const STEP_12K5: u8 = 10;
+/// A channel's squelch "Global": it uses the slot's level (the VFO's), not its own (SQL-6, CHAN-14).
+pub const SQ_GLOBAL: u8 = 10;
 const STEP_25K: u8 = 11;
 
 /// The 50 standard CTCSS tones, 0.1 Hz.
@@ -115,6 +151,26 @@ pub fn tone_text(t: u16, b: &mut Buf<16>) {
         let c = t & 0x1FF;
         let _ = uwrite!(b, "D{}{}{}{}", c >> 6, (c >> 3) & 7, c & 7, if t & DCS_INV != 0 { "I" } else { "N" });
     }
+}
+
+/// The shift as text: [`offset_text`], or for split "SPLIT" (short) / "Split 146.520" (long).
+pub fn shift_text(c: &SlotCfg, long: bool, b: &mut Buf<16>) {
+    if c.split {
+        b.set(if long { b"Split " } else { b"SPLIT" });
+        if long {
+            b.push(mhz3(c.offset.max(0) as Freq10).as_bytes());
+        }
+    } else {
+        offset_text(c.offset, long, b);
+    }
+}
+
+/// "146.520": MHz with three decimals.
+pub fn mhz3(f: Freq10) -> Buf<12> {
+    let mut b = Buf::<12>::new();
+    let khz = f / 100;
+    let _ = uwrite!(b, "{}.{}", khz / 1000, Zero(khz % 1000, 3));
+    b
 }
 
 /// "-600k", "+5M", "+1.6M" (short), or "-600 kHz", "+5 MHz" (long); "" for simplex.
@@ -264,7 +320,7 @@ impl Item {
             Item::Power => "Transmit power on this slot. Home: hold 2.",
             Item::Bandwidth => "Filter width for RX and TX.",
             Item::Tones => "CTCSS or DCS sent with TX. OK: RX and TX apart.",
-            Item::Offset => "Repeater shift: simplex, + or -. Home: hold 7.",
+            Item::Offset => "Simplex, + or -, or Split: a TX freq. Hold 7.",
             Item::Step => "How far a VFO tunes. Home: hold 6.",
             Item::Watch => "Listen on two or three slots. Home: hold 4.",
             Item::Channel if vfo => "Save this VFO as a channel. Home: hold V/M.",
@@ -280,11 +336,12 @@ impl Item {
     /// The setting's own value on a slot's config, as an index the knob steps through, and how many there are.
     pub fn get(self, c: &SlotCfg) -> (i32, i32) {
         match self {
-            Item::Squelch => (c.squelch as i32, 10),
+            // Global, then levels 0-9; a VFO skips Global ([`crate::App`]'s change).
+            Item::Squelch => (if c.squelch >= SQ_GLOBAL { 0 } else { c.squelch as i32 + 1 }, 11),
             Item::Power => (c.power as i32, 3),
             Item::Bandwidth => (c.narrow as i32, 2),
             Item::Tones => (tone_index(c.tx_tone), TONES),
-            Item::Offset => ((c.offset.signum() + 3) % 3, 3), // simplex, +, -
+            Item::Offset => (if c.split { 3 } else { (c.offset.signum() + 3) % 3 }, 4), // simplex, +, -, split
             Item::Step => (c.step as i32, STEPS.len() as i32),
             Item::Mode => (c.mode as i32, SLOT_MODES as i32),
             Item::BusyLock => (c.busy as i32, 3),
@@ -299,8 +356,8 @@ impl Item {
         let v = v.rem_euclid(n);
         Some(match self {
             Item::Squelch => {
-                c.squelch = v as u8;
-                (Param::Squelch, v)
+                c.squelch = if v == 0 { SQ_GLOBAL } else { v as u8 - 1 };
+                (Param::Squelch, c.squelch as i32) // SQ_GLOBAL: the App sends the slot's level
             }
             Item::Power => {
                 c.power = v as u8;
@@ -314,9 +371,11 @@ impl Item {
                 c.tx_tone = tone_at(v);
                 (Param::TxTone, c.tx_tone as i32)
             }
+            // Split needs a TX frequency: the App asks for it (frequency entry) and sets it with `set_split`.
+            Item::Offset if v == 3 => return None,
             Item::Offset => {
                 let shift = if shift == 0 { 60_000 } else { shift };
-                c.offset = [0, shift, -shift][v as usize];
+                (c.offset, c.split) = ([0, shift, -shift][v as usize], false);
                 (Param::Offset, c.offset)
             }
             Item::Step => {
@@ -348,6 +407,7 @@ impl Item {
     pub fn text(self, c: &SlotCfg, long: bool, b: &mut Buf<16>) {
         b.clear();
         match self {
+            Item::Squelch if c.squelch >= SQ_GLOBAL => b.set(b"Global"),
             Item::Squelch => {
                 let _ = uwrite!(b, "{}", c.squelch);
             }
@@ -360,7 +420,7 @@ impl Item {
                 }
             }
             Item::Offset => {
-                offset_text(c.offset, long, b);
+                shift_text(c, long, b);
                 if b.is_empty() {
                     b.set(b"Simplex");
                 }
@@ -389,7 +449,7 @@ impl Item {
 }
 
 /// Every radio parameter of a config, for when a slot moves to another channel.
-pub fn params(c: &SlotCfg) -> [(Param, i32); 9] {
+pub fn params(c: &SlotCfg) -> [(Param, i32); 10] {
     [
         (Param::Mode, c.mode as i32),
         (Param::Bandwidth, c.narrow as i32),
@@ -400,6 +460,7 @@ pub fn params(c: &SlotCfg) -> [(Param, i32); 9] {
         (Param::Power, c.power as i32),
         (Param::BusyLock, c.busy as i32),
         (Param::Reverse, c.reverse as i32),
+        (Param::Split, if c.split { c.offset } else { 0 }),
     ]
 }
 
@@ -484,8 +545,10 @@ mod tests {
         let mut c = DEFAULT_CFG;
         assert_eq!(Item::Offset.set(&mut c, 2, 60_000), Some((Param::Offset, -60_000)));
         assert_eq!(Item::Offset.get(&c).0, 2);
-        Item::Squelch.set(&mut c, 10, 0);
-        assert_eq!(c.squelch, 0, "wraps");
+        Item::Squelch.set(&mut c, 11, 0);
+        assert_eq!(c.squelch, SQ_GLOBAL, "wraps to Global");
+        Item::Squelch.set(&mut c, 1, 0);
+        assert_eq!(c.squelch, 0);
         for it in GRID {
             assert_eq!(it.get(&DEFAULT_CFG).0, it.default_of());
         }

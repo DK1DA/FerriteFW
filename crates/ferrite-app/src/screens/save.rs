@@ -14,7 +14,7 @@ use super::text::TextFor;
 use super::{Cx, Hints, View};
 use crate::chan::{ChanWrite, Channel, ChannelStore, MAX_CHANNELS, NO_ZONE};
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{band_near, chan_label, offset_text, tone_at, tone_index, tone_text, BANDS, DEFAULT_CFG, STEPS};
+use crate::slot::{band_near, chan_label, offset_text, tone_at, tone_index, tone_text, SlotCfg, BANDS, DEFAULT_CFG, SQ_GLOBAL, STEPS};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
@@ -288,6 +288,7 @@ fn save(s: Save, app: &mut App, store: &impl ChannelStore) {
     } else {
         app.slots[a].cfg
     };
+    let cfg = SlotCfg { squelch: SQ_GLOBAL, ..cfg }; // a new channel follows the slot's level (CHAN-14)
     let mut ch = Channel { num: s.num, zone: s.zone, rx: f, name: [0; 16], cfg, flags: 0 };
     ch.set_name(app.text.as_bytes());
     app.write(ChanWrite::Put { ch, from: None });

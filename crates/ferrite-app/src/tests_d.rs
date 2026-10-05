@@ -121,12 +121,14 @@ fn extend_tx_warns_once() {
 fn pin_at_power_on() {
     let mut t = T::new();
     menu0(&mut t, &[9, 3]);
-    t.knob(1); // PIN: at power on -> asks for a new PIN first
+    t.knob(1); // PIN lock: at power on -> asks for a new PIN first, twice
     assert!(matches!(t.app.screen(), Screen::Pin(_)));
-    for d in [1, 2, 3, 4] {
-        t.tap(Key::Digit(d));
+    for _ in 0..2 {
+        for d in [1, 2, 3, 4] {
+            t.tap(Key::Digit(d));
+        }
+        t.tap(Key::Menu);
     }
-    t.tap(Key::Menu);
     assert_eq!(t.app.settings().pin_mode, 1);
     assert_eq!(t.app.settings().pin_len, 4);
     t.app.ask_pin();
@@ -541,4 +543,43 @@ fn owner_card_clips_and_yields_to_a_failure() {
     let fail = [Check { label: "MCU", value: "", state: State::Fail }];
     boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), owner: s.boot_owner(), checks: &fail });
     assert_eq!(count_px(&fb, 22, 34, |c| c != BG), 0, "a failure: the logo screen, not the card");
+}
+
+/// PIN-4: 0 9 3 3 Change PIN asks for the old PIN, then the new one twice (a mismatch starts the new one again);
+/// turning PIN lock off asks for the PIN.
+#[test]
+fn pin_change_and_off() {
+    let mut t = T::new();
+    let typ = |t: &mut T, ds: &[u8]| {
+        for &d in ds {
+            t.tap(Key::Digit(d));
+        }
+        t.tap(Key::Menu);
+    };
+    menu0(&mut t, &[9, 3]);
+    t.knob(1);
+    typ(&mut t, &[1, 2, 3, 4]);
+    typ(&mut t, &[1, 2, 3, 4]);
+    assert_eq!((t.app.settings().pin, t.app.settings().pin_mode), (1234, 1));
+    // Change PIN: wrong old PIN is refused.
+    t.app.go_home();
+    t.app.open(crate::screens::nav::menu0(&[9, 3, 3]).expect("0 9 3 3"));
+    typ(&mut t, &[5, 5, 5, 5]);
+    assert_eq!(toast_head(&t), "Wrong PIN");
+    typ(&mut t, &[1, 2, 3, 4]);
+    typ(&mut t, &[4, 3, 2, 1]);
+    typ(&mut t, &[4, 3, 2, 9]); // differs
+    assert_eq!(toast_head(&t), "PINs differ");
+    assert_eq!(t.app.settings().pin, 1234, "unchanged so far");
+    typ(&mut t, &[4, 3, 2, 1]);
+    typ(&mut t, &[4, 3, 2, 1]);
+    assert_eq!((t.app.settings().pin, t.app.settings().pin_mode), (4321, 1), "the lock mode stays");
+    // Lock off: the PIN first.
+    t.app.go_home();
+    menu0(&mut t, &[9, 3]);
+    t.knob(-1);
+    assert!(matches!(t.app.screen(), Screen::Pin(_)));
+    assert_eq!(t.app.settings().pin_mode, 1, "not off until the PIN is right");
+    typ(&mut t, &[4, 3, 2, 1]);
+    assert_eq!(t.app.settings().pin_mode, 0);
 }

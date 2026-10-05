@@ -61,7 +61,7 @@ use ferrite_ui::text::Buf;
 use keys::{KeyEvent, KeyTracker, Press};
 use screens::nav::Dest;
 use screens::shared::REGIONS;
-use slot::{band_near, Item, SlotCfg, BANDS, BAND_125M, DEFAULT_CFG};
+use slot::{band_near, Item, SlotCfg, BANDS, BAND_125M, DEFAULT_CFG, SQ_GLOBAL};
 
 pub use ferrite_ui::panel::Panel;
 pub use screens::Screen;
@@ -364,6 +364,7 @@ impl App {
             k => {
                 let (param, value) = slot::params(s.cfg())[k as usize - 1];
                 let value = if param == Param::Power && self.capped(slot) { 0 } else { value };
+                let value = if param == Param::Squelch { self.sq_level(slot) as i32 } else { value };
                 RadioCmd::SlotParam { slot, param, value }
             }
         };
@@ -834,9 +835,21 @@ impl App {
         self.out.sync(slot);
     }
 
-    /// 1.25 m: transmit power fixed at 0.25 W (the Radio task enforces it too).
+    /// 1.25 m: transmit power fixed at 0.25 W (the Radio task enforces it too). By the band it transmits on:
+    /// a split's TX band, not RX's.
     fn capped(&self, slot: u8) -> bool {
-        slot::band_of(self.slots[slot as usize].freq()) == Some(BAND_125M)
+        let s = &self.slots[slot as usize];
+        slot::band_of(s.cfg().tx_of(s.freq())) == Some(BAND_125M)
+    }
+
+    /// Split on the active slot: transmit on `tx` whatever RX is tuned to (MENU 5's 4th choice).
+    pub(crate) fn set_split(&mut self, tx: Freq10) {
+        let a = self.active;
+        self.keep_undo();
+        let c = self.slots[a as usize].cfg_mut();
+        (c.split, c.offset) = (true, tx as i32);
+        self.out.push(RadioCmd::SlotParam { slot: a, param: Param::Split, value: tx as i32 });
+        self.save_channel(a, None);
     }
 
     /// Why an item can't be changed on the active slot right now (MENU-14, EDIT-7), if it can't.
@@ -872,11 +885,28 @@ impl App {
                 self.out.push(RadioCmd::BatterySave(level(self.bsave)));
             }
             _ => {
-                let shift = BANDS[band_near(self.slots[a as usize].freq())].shift;
+                let rx = self.slots[a as usize].freq();
+                let shift = BANDS[band_near(rx)].shift;
+                let on_ch = self.slots[a as usize].on_channel();
                 let c = self.slots[a as usize].cfg_mut();
-                let v = item.get(c).0 + d;
+                let mut v = item.get(c).0 + d;
+                if item == Item::Squelch && !on_ch && v.rem_euclid(11) == 0 {
+                    v += d.signum(); // a VFO has no "Global": it is the slot's level (SQL-6)
+                }
+                if item == Item::Offset && v.rem_euclid(4) == 3 {
+                    // Split needs its TX frequency: entry, prefilled with today's TX; BACK keeps the old shift.
+                    let tx = c.tx_of(rx);
+                    self.open(Dest::Entry(0));
+                    self.screen = Screen::Entry(screens::entry::Entry::with_freq(screens::entry::EntryFor::SplitTx, tx));
+                    return;
+                }
+                let was_split = c.split;
                 if let Some((param, value)) = item.set(c, v, shift) {
+                    let value = if param == Param::Squelch { self.sq_level(a) as i32 } else { value };
                     self.out.push(RadioCmd::SlotParam { slot: a, param, value });
+                    if was_split && param == Param::Offset {
+                        self.out.push(RadioCmd::SlotParam { slot: a, param: Param::Split, value: 0 });
+                    }
                 }
                 self.save_channel(a, None);
             }
@@ -897,9 +927,38 @@ impl App {
         };
         let def = match item {
             Item::Watch | Item::BatterySave => 1,
+            Item::Squelch if self.slots[self.active as usize].on_channel() => 0, // a channel's default: Global
             _ => item.default_of(),
         };
         self.change(item, def - cur);
+    }
+
+    /// The squelch level slot `s` listens with: its own, or the slot's (VFO) level when its channel says Global
+    /// (SQL-6).
+    pub fn sq_level(&self, s: u8) -> u8 {
+        let slot = &self.slots[s as usize];
+        match slot.cfg().squelch {
+            SQ_GLOBAL.. => slot.cfg.squelch.min(9),
+            l => l,
+        }
+    }
+
+    /// SIDE1 + knob / ▲▼: the live level one step up or down, stopping at 0 and 9 (SQL-3). A channel on Global
+    /// moves the slot's level and stays Global.
+    pub(crate) fn step_squelch(&mut self, d: i32) {
+        let a = self.active;
+        let cur = self.sq_level(a) as i32;
+        let to = (cur + d).clamp(0, 9);
+        if to == cur {
+            return;
+        }
+        if self.slots[a as usize].cfg().squelch >= SQ_GLOBAL {
+            self.keep_undo();
+            self.slots[a as usize].cfg.squelch = to as u8;
+            self.out.push(RadioCmd::SlotParam { slot: a, param: Param::Squelch, value: to });
+        } else {
+            self.change(Item::Squelch, to - cur);
+        }
     }
 
     /// Remembers the active slot's state before a change, for "* Undo" (EDIT-4, MENU-22): the first change
@@ -960,6 +1019,12 @@ impl App {
             Item::Channel => b.set(if s.on_channel() { b"Edit" } else { b"Save as channel" }),
             Item::Advanced => b.set(b">"),
             Item::Power if self.capped(self.active) => b.set(b"0.25 W"),
+            // A channel on Global: the level in use; "Global (4)" where there is room.
+            Item::Squelch if s.cfg().squelch >= SQ_GLOBAL => {
+                b.clear();
+                let l = self.sq_level(self.active);
+                let _ = if long { ufmt::uwrite!(b, "Global ({})", l) } else { ufmt::uwrite!(b, "{}", l) };
+            }
             _ => item.text(s.cfg(), long, b),
         }
     }
@@ -969,6 +1034,9 @@ impl App {
             Item::Watch => self.watch == 1,
             Item::BatterySave => self.bsave == 1,
             Item::Channel | Item::Advanced => true,
+            Item::Squelch if self.slots[self.active as usize].on_channel() => {
+                self.slots[self.active as usize].cfg().squelch >= SQ_GLOBAL
+            }
             _ => item.get(self.slots[self.active as usize].cfg()).0 == item.default_of(),
         }
     }

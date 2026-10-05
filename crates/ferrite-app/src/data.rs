@@ -240,6 +240,61 @@ pub struct FmPreset {
     pub name: Buf<8>,
 }
 
+/// A DTMF memory (0 8 6 2, chapter 17): up to 16 symbols as nibbles, 0-9, A-D (10-13), * (14), # (15).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Dtmf {
+    pub len: u8,
+    pub d: [u8; 8],
+}
+
+/// DTMF memories: 16 of up to 16 symbols (0 8 6 2).
+pub const DTMF_MEMS: u8 = 16;
+/// The DTMF symbols by nibble.
+pub const DTMF_CHARS: &[u8; 16] = b"0123456789ABCD*#";
+
+impl Dtmf {
+    pub const MAX: u8 = 16;
+
+    pub fn get(&self, i: u8) -> u8 {
+        self.d[i as usize / 2] >> (4 * (i % 2)) & 15
+    }
+
+    /// Appends a symbol (a nibble); false when full.
+    pub fn push(&mut self, n: u8) -> bool {
+        if self.len >= Self::MAX {
+            return false;
+        }
+        let i = self.len as usize;
+        self.d[i / 2] = self.d[i / 2] & !(15 << (4 * (i % 2))) | (n & 15) << (4 * (i % 2));
+        self.len += 1;
+        true
+    }
+
+    pub fn pop(&mut self) {
+        self.len = self.len.saturating_sub(1);
+    }
+
+    /// As text ("*79#").
+    pub fn text(&self, b: &mut Buf<16>) {
+        b.clear();
+        for i in 0..self.len {
+            b.push(&[DTMF_CHARS[self.get(i) as usize]]);
+        }
+    }
+
+    /// From text: 0-9, A-D (either case), * and #; anything else refuses it.
+    pub fn parse(s: &[u8]) -> Option<Dtmf> {
+        let mut d = Dtmf::default();
+        for c in s {
+            let n = DTMF_CHARS.iter().position(|x| *x == c.to_ascii_uppercase())?;
+            if !d.push(n as u8) {
+                return None;
+            }
+        }
+        Some(d)
+    }
+}
+
 /// Requests to the record's owner. `request` answers false when refused (no such record, queue full).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -277,6 +332,8 @@ pub enum Op {
     MessageRead(u16),
     BeaconNow,
     ClearHeard,
+    /// DTMF memory i (0-15): set, or cleared with None.
+    Dtmf(u8, Option<Dtmf>),
 }
 
 /// The records, read one at a time. Every method has a default (nothing there), so an owner that doesn't
@@ -364,6 +421,11 @@ pub trait Data {
     }
     fn zone_cfg(&self, _zone: u8) -> ZoneCfg {
         ZoneCfg { shown: true, ..ZoneCfg::default() }
+    }
+
+    /// DTMF memory i (0-15), None when empty.
+    fn dtmf(&self, _i: u8) -> Option<Dtmf> {
+        None
     }
 
     fn fm_presets(&self) -> u8 {

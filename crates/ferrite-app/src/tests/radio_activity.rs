@@ -656,3 +656,109 @@ fn step_on_a_channel_is_vfo_only() {
     assert_eq!(t.app.slot(0).cfg().step, step);
     assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"VFO only"));
 }
+
+/// CHAN-14 / SQL-6: a channel's squelch is Global (the slot's level) or its own 0-9; live changes on a Global
+/// channel move the slot's level and leave the channel Global.
+#[test]
+fn squelch_global_on_a_channel() {
+    use crate::slot::SQ_GLOBAL;
+    let mut t = ready();
+    let s = store();
+    // Slot B is on a channel; make its squelch Global and the slot's own level 6.
+    t.app.slots[1].cfg.squelch = 6;
+    let cfg = crate::slot::SlotCfg { squelch: SQ_GLOBAL, ..crate::slot::DEFAULT_CFG };
+    t.app.slots[1].ch = Some(crate::chan::channel(11, 0, 44_347_500, "Club repeater", cfg));
+    t.app.slots[1].vfo_mode = false;
+    t.app.active = 1;
+    assert!(t.app.slots[1].on_channel());
+    assert_eq!(t.app.sq_level(1), 6, "Global uses the slot's level");
+    let mut b = ferrite_ui::text::Buf::<16>::new();
+    t.app.item_text(Item::Squelch, true, &mut b);
+    assert_eq!(b.as_bytes(), b"Global (6)");
+    t.app.step_squelch(1);
+    assert_eq!(t.app.sq_level(1), 7);
+    assert_eq!(t.app.slot(1).cfg().squelch, SQ_GLOBAL, "still Global");
+    assert!(t.cmds().contains(&RadioCmd::SlotParam { slot: 1, param: Param::Squelch, value: 7 }));
+    // The channel editor's knob: Global -> 0 (its own level), and # back to Global.
+    t.app.change(Item::Squelch, 1);
+    assert_eq!(t.app.slot(1).cfg().squelch, 0);
+    t.app.reset(Item::Squelch);
+    assert_eq!(t.app.slot(1).cfg().squelch, SQ_GLOBAL);
+    // A VFO never takes Global: the knob steps past it.
+    t.app.active = 0;
+    t.app.slots[0].cfg.squelch = 9;
+    t.app.change(Item::Squelch, 1);
+    assert_eq!(t.app.slot(0).cfg().squelch, 0, "9 wraps to 0, not Global");
+    let _ = &s;
+}
+
+/// MENU 5's 4th choice, Split: choosing it asks for the TX frequency (BACK keeps the old shift); RX retunes
+/// leave TX where it is; reverse swaps; the TX checks and the power cap go by the TX band.
+#[test]
+fn split_tx() {
+    use crate::screens::entry::EntryFor;
+    let mut t = ready();
+    tune(&mut t, 44_600_000); // RX 446.000 (70 cm)
+    // Offset from simplex: +, -, then Split opens entry; BACK leaves the shift as it was.
+    t.app.change(Item::Offset, 3);
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::SplitTx), "{:?}", t.app.screen());
+    let clear = |t: &mut T| {
+        while matches!(t.app.screen(), Screen::Entry(e) if e.n > 0) {
+            t.tap(Key::Exit); // BACK deletes the prefilled digits
+        }
+    };
+    clear(&mut t);
+    t.tap(Key::Exit); // and with none left, leaves
+    assert!(!matches!(t.app.screen(), Screen::Entry(_)));
+    assert!(!t.app.slot(0).cfg().split, "BACK keeps the old shift");
+    // Again, typing 146.52.
+    t.app.go_home();
+    t.app.change(Item::Offset, 3 - Item::Offset.get(t.app.slot(0).cfg()).0);
+    clear(&mut t);
+    for d in [1, 4, 6, 5, 2] {
+        t.tap(Key::Digit(d));
+    }
+    t.tap(Key::Menu);
+    let c = *t.app.slot(0).cfg();
+    assert!(c.split);
+    assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 0), 14_652_000);
+    assert!(t.cmds().contains(&RadioCmd::SlotParam { slot: 0, param: Param::Split, value: 14_652_000 }));
+    // RX retune: TX stays.
+    tune(&mut t, 44_610_000);
+    assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 0), 14_652_000);
+    // TX goes by its own band: 2 m is allowed in the US with no 1.25 m cap.
+    assert_eq!(super::super::screens::transmit::refusal(&t.app, 0), None);
+    assert!(!t.app.capped(0));
+    // A split TX on 1.25 m (223.5) is capped even though RX is on 2 m.
+    tune(&mut t, 14_652_000);
+    t.app.slots[0].cfg.offset = 22_350_000;
+    assert!(t.app.capped(0), "the cap follows the TX band");
+    // Reverse: transmit on RX, listen on the split TX.
+    t.app.slots[0].cfg.reverse = true;
+    assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 0), 14_652_000);
+    assert_eq!(t.app.slot(0).cfg().rx_of(14_652_000), 22_350_000);
+    t.app.slots[0].cfg.reverse = false;
+    // Hold 7 cycles simplex, +, - only: from split it goes to simplex, never back to split.
+    t.app.slots[0].cfg.offset = 14_652_000;
+    crate::screens::nav::shortcut(&mut t.app, 7, &store());
+    assert!(!t.app.slot(0).cfg().split);
+    for _ in 0..4 {
+        crate::screens::nav::shortcut(&mut t.app, 7, &store());
+        assert!(!t.app.slot(0).cfg().split, "hold 7 never picks split");
+    }
+}
+
+/// A channel keeps a split through the store's record, and saving it from the slot keeps it.
+#[test]
+fn split_on_a_channel() {
+    let mut t = ready();
+    let cfg = crate::slot::SlotCfg { split: true, offset: 14_652_000, ..crate::slot::DEFAULT_CFG };
+    t.app.slots[1].ch = Some(crate::chan::channel(20, 0, 44_600_000, "Cross", cfg));
+    t.app.slots[1].vfo_mode = false;
+    assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 1), 14_652_000);
+    let mut b = ferrite_ui::text::Buf::<16>::new();
+    crate::slot::shift_text(t.app.slot(1).cfg(), false, &mut b);
+    assert_eq!(b.as_bytes(), b"SPLIT");
+    crate::slot::shift_text(t.app.slot(1).cfg(), true, &mut b);
+    assert_eq!(b.as_bytes(), b"Split 146.520");
+}

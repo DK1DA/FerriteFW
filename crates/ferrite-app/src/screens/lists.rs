@@ -50,7 +50,7 @@ impl App {
         if band_near(s.vfo) != b || !s.vfo_mode {
             s.cfg.mode = BANDS[b].mode;
             s.cfg.step = BANDS[b].step;
-            s.cfg.offset = 0;
+            (s.cfg.offset, s.cfg.split) = (0, false);
         }
         (s.vfo_mode, s.vfo, s.mem[b]) = (true, f, f);
         self.send_slot(a as u8);

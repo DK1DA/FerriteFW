@@ -40,6 +40,7 @@ pub mod browse;
 pub mod chedit;
 pub mod coming;
 pub mod confirm;
+pub mod dtmf;
 pub mod edit;
 pub mod entry;
 pub mod fm;
@@ -57,12 +58,14 @@ pub mod log;
 pub mod msgs;
 pub mod nav;
 pub mod opts;
+pub mod posentry;
 pub mod parts;
 pub mod pin;
 pub mod probe;
 pub mod quick;
 pub mod recall;
 pub mod save;
+pub mod samecodes;
 pub mod scan;
 pub mod scanlists;
 pub mod scope;
@@ -143,6 +146,9 @@ pub enum Screen {
     ScanLists(scanlists::ScanLists),
     Recall(recall::Recall),
     Sensors(sensors::Sensors),
+    PosEntry(posentry::PosEntry),
+    SameCodes(samecodes::SameCodes),
+    Dtmf(dtmf::DtmfPad),
 }
 
 /// Runs `$e` with `$s` bound to the screen's state: the one place that lists every variant.
@@ -197,6 +203,9 @@ macro_rules! each {
             Screen::ScanLists($s) => $e,
             Screen::Recall($s) => $e,
             Screen::Sensors($s) => $e,
+            Screen::PosEntry($s) => $e,
+            Screen::SameCodes($s) => $e,
+            Screen::Dtmf($s) => $e,
         }
     };
 }

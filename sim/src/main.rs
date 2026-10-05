@@ -157,11 +157,7 @@ fn main() {
     app.notify(b"VE3KPW-9", b"On my way", false);
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "toast", scale);
-    // A screen not built yet: the DTMF dialer (MENU 0 8 6 1) opens its placeholder.
-    run(&mut app, &mut fb, t + 3500, &mut t);
-    app.open(ferrite_app::screens::nav::Dest::DtmfDialer);
-    run(&mut app, &mut fb, t, &mut t);
-    save(&fb, "coming", scale);
+    run(&mut app, &mut fb, t + 3500, &mut t); // the toast times out
 
     // Group A, entry and editing: each screen as it first shows, with a little typed.
     let tap = |app: &mut App, t: &mut u32, keys: &[Key]| {

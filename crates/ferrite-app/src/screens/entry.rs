@@ -31,6 +31,8 @@ pub enum EntryFor {
     ChannelFreq,
     /// Add repeater's frequency (A10).
     Repeater,
+    /// Split's TX frequency on the active slot (MENU 5's 4th choice): kept as typed; BACK keeps the old shift.
+    SplitTx,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -50,6 +52,40 @@ impl Entry {
         let mut e = Entry { to, buf: [0; 9], n: 0 };
         if let Some(d) = first {
             e.push(b'0' + d);
+        }
+        e
+    }
+
+    /// Prefilled with a frequency ("146.52"; trailing zeros after the point dropped), to edit or keep with OK.
+    pub fn with_freq(to: EntryFor, f: Freq10) -> Self {
+        let mut e = Entry { to, buf: [0; 9], n: 0 };
+        let (int, mut frac, mut k) = (f / 100_000, f % 100_000, 5);
+        while k > 1 && frac % 10 == 0 {
+            frac /= 10;
+            k -= 1;
+        }
+        let mut idig = [0u8; 4];
+        let mut m = 0;
+        let mut v = int;
+        loop {
+            idig[m] = b'0' + (v % 10) as u8;
+            m += 1;
+            v /= 10;
+            if v == 0 || m == idig.len() {
+                break;
+            }
+        }
+        for i in (0..m).rev() {
+            e.push(idig[i]);
+        }
+        e.push(b'.'); // after three digits the point is already there: a second one is ignored
+        let mut digits = [0u8; 5];
+        for i in (0..k).rev() {
+            digits[i] = b'0' + (frac % 10) as u8;
+            frac /= 10;
+        }
+        for &c in &digits[..k] {
+            e.push(c);
         }
         e
     }
@@ -197,6 +233,7 @@ impl View for Entry {
                 EntryFor::Channel => b"Channel number",
                 EntryFor::ChannelFreq => b"Channel frequency, MHz",
                 EntryFor::Repeater => b"Repeater output, MHz",
+                EntryFor::SplitTx => b"Split: TX frequency, MHz",
             };
             w::field(lcd, 28, 204, 24, 41, 37, Align::Left, what, &UI_12, SUB, BG);
             let font = if text4_width(self.typed(), &DIG_46) <= 200 { &DIG_46 } else { &DIG_28 };
@@ -263,6 +300,7 @@ impl View for Entry {
         match self.to {
             EntryFor::Vfo => tip.set(b"After three digits the point comes by itself; * types it (52*525)."),
             EntryFor::Channel => tip.set(b"Type the channel number, then OK."),
+            EntryFor::SplitTx => tip.set(b"Transmit here whatever RX is on. OK keeps it; BACK keeps the old shift."),
             _ => tip.set(b"* is the point. OK keeps it, BACK deletes."),
         }
         if app.dirty(R_HELP, hash(&tip)) {
@@ -315,7 +353,7 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
                 // A new band: its mode and step, and the offset's direction kept with its amount (NAV-2).
                 s.cfg.mode = BANDS[new].mode;
                 s.cfg.step = BANDS[new].step;
-                if s.cfg.offset != 0 {
+                if s.cfg.offset != 0 && !s.cfg.split {
                     s.cfg.offset = s.cfg.offset.signum() * BANDS[new].shift;
                 }
             }
@@ -336,6 +374,10 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
                 s.set_freq(f);
                 app.screen = Screen::Save(s);
             }
+        }
+        EntryFor::SplitTx => {
+            app.set_split(f);
+            app.back();
         }
         EntryFor::Channel => {}
     }

@@ -321,7 +321,7 @@ pub const ALL: [Dest; 70] = {
 
 /// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 60] = [
+pub const MENU0: [(&[u8], Dest); 61] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -369,6 +369,7 @@ pub const MENU0: [(&[u8], Dest); 60] = [
     (&[9, 1], Dest::Sub(9, 1)),
     (&[9, 1, 3], Dest::KeyTest),
     (&[9, 1, 4], Dest::ShortcutMap),
+    (&[9, 3, 3], Dest::Pin),
     (&[9, 2], Dest::Sub(9, 2)),
     (&[9, 2, 2], Dest::Paired),
     (&[9, 2, 3], Dest::LinkStatus),
@@ -450,7 +451,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::Setup => Screen::Setup(super::setup::Setup::new(false)),
         Dest::ExtendTx => Screen::ExtendTx(super::setup::ExtendTx),
         Dest::Pin if app.locked => Screen::Pin(super::pin::Pin::unlock()),
-        Dest::Pin => Screen::Pin(super::pin::Pin::set(app.set.pin_mode.max(1))),
+        Dest::Pin => Screen::Pin(super::pin::Pin::change(app)), // 0 9 3 3 Change PIN
         Dest::About => Screen::Info(Info { page: Page::About }),
         Dest::Calibration => Screen::Info(Info { page: Page::Calibration }),
         Dest::AdvSquelch => Screen::Info(Info { page: Page::AdvSquelch }),
@@ -461,6 +462,10 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::EmptyBattery => Screen::Info(Info { page: Page::EmptyBattery }),
         Dest::Mailbox => Screen::Info(Info { page: Page::Mailbox }),
         Dest::KeyTest => Screen::KeyTest(super::keytest::KeyTest::new()),
+        Dest::PositionEntry => Screen::PosEntry(super::posentry::PosEntry::new()),
+        Dest::LocationCodes => Screen::SameCodes(super::samecodes::SameCodes::new()),
+        Dest::DtmfDialer => Screen::Dtmf(super::dtmf::DtmfPad::dialer()),
+        Dest::DtmfMemories => Screen::Dtmf(super::dtmf::DtmfPad::memories()),
         Dest::LinkStatus => Screen::Link(Link::new(LinkPage::Status)),
         Dest::Paired => Screen::Link(Link::new(LinkPage::Paired)),
         Dest::WriteApproval => Screen::Link(Link::new(LinkPage::Approve)),
@@ -468,6 +473,8 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::FmBroadcast => fm::open(app),
         Dest::HfMode => hf::open(app),
         Dest::Alert => Screen::Alert(super::alert::Alert { silenced: false }),
+        // Every destination has its own screen now; a new one shows the placeholder until it is built.
+        #[allow(unreachable_patterns)]
         _ => Screen::Coming(Coming { dest }),
     }
 }
@@ -505,7 +512,15 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
         6 => cycle(app, Item::Step), // VFO only (VFO-8): on a channel the toast says so
         // Shift and offset: on a VFO, cycle the shift / open the offset; on a channel, its editor at that cell.
         7 if on_ch => offset_cell(app), // Dest::ChannelEdit
-        7 => cycle(app, Item::Offset),
+        7 => {
+            // Simplex, +, - only: split needs a TX frequency (MENU 5)
+            let cur = Item::Offset.get(app.slot(app.active).cfg()).0;
+            let to = if cur >= 2 { 0 } else { cur + 1 };
+            app.change(Item::Offset, to - cur);
+            let mut b = Buf::<16>::new();
+            app.item_text(Item::Offset, true, &mut b);
+            app.show_toast(b"Shift", b.as_bytes(), false);
+        }
         8 if on_ch => offset_cell(app), // Dest::ChannelEdit
         8 => app.open(Dest::Value(Item::Offset)),
         _ => app.open(Dest::Zones),

@@ -127,7 +127,7 @@ fn checks(app: &App, batt: u8, out: &mut [(Check, Buf<40>); 4]) -> Option<usize>
         let f = super::transmit::tx_freq(app, s);
         app.radio.tx_built && txplan::check(f, app.set.tx_region(), app.set.extend_tx).is_ok()
     };
-    let sq0 = app.slot(c.side1).cfg().squelch == 0 || app.slot(c.side2).cfg().squelch == 0;
+    let sq0 = app.sq_level(c.side1) == 0 || app.sq_level(c.side2) == 0;
     if !tx(c.side1) || !tx(c.side2) {
         let which = if !tx(c.side1) { 1 } else { 2 };
         b.clear();

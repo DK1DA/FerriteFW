@@ -139,7 +139,20 @@ pub struct Settings {
     pub xb: XbCfg,
     /// HF mode's VFO, options and recent list (HF-27 to HF-29): its own SPI sector.
     pub hf: HfMem,
+    /// 0 6 3: how positions are written, an index into [`COORD_FORMATS`].
+    pub coord_fmt: u8,
+    /// 0 6 9: the fixed position (degrees x 1e7) and altitude in metres, used with no fix (GPS-3); off = none.
+    pub fixed_on: bool,
+    pub fixed: crate::data::Pos,
+    pub fixed_alt: i16,
+    /// 0 3 3 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
+    pub same_codes: [u32; SAME_CODES],
 }
+
+/// 0 6 3's values.
+pub const COORD_FORMATS: [&str; 4] = ["Degrees", "Deg, min", "Deg, min, sec", "Grid square"];
+/// Up to 8 SAME location codes (WX-10).
+pub const SAME_CODES: usize = 8;
 
 impl Settings {
     pub const DEFAULT: Settings = Settings {
@@ -171,6 +184,11 @@ impl Settings {
         home_ch: None,
         xb: XbCfg::DEFAULT,
         hf: HfMem::DEFAULT,
+        coord_fmt: 1,
+        fixed_on: false,
+        fixed: crate::data::Pos { lat: 0, lon: 0 },
+        fixed_alt: 0,
+        same_codes: [0; SAME_CODES],
     };
 
     /// The region's name, or "Not set".

@@ -68,6 +68,7 @@ impl View for Shortcut {
                 4 => app.item_text(Item::Watch, true, &mut v),
                 5 => app.item_text(Item::Tones, true, &mut v),
                 6 => app.item_text(Item::Step, true, &mut v),
+                7 if app.slot(app.active()).cfg().split => v.set(b"Split"),
                 7 => v.set(match app.slot(app.active()).cfg().offset.signum() {
                     1 => b"+",
                     -1 => b"-",

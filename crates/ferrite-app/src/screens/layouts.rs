@@ -10,7 +10,7 @@ use super::scope;
 use super::shared::*;
 use super::Cx;
 use crate::chan::ChannelStore;
-use crate::slot::{band_name, mode_chip, offset_text, tone_text, Item, STEPS};
+use crate::slot::{band_name, mode_chip, shift_text, tone_text, Item, STEPS};
 use crate::App;
 use ferrite_core::msg::{LiveAll, ModeLive, RadioCmd, SCOPE_BARS, SLOTS};
 use ferrite_ui::assets::*;
@@ -74,7 +74,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         }
         None => v[3].set(st.as_bytes()),
     }
-    offset_text(cfg.offset, false, &mut v[4]);
+    shift_text(&cfg, false, &mut v[4]);
     if v[4].is_empty() {
         v[4].set(b"Simplex");
     }

@@ -181,6 +181,25 @@ pub fn run(scale: u32) {
     s.dev.battery_mv = mv;
     leave(&mut s);
 
+    // A8, A13, A14, A15: the fixed position (a latitude half typed), SAME location codes (one being typed),
+    // the DTMF dialer with digits, and the memories.
+    s.home();
+    s.menu0(&[6, 9]);
+    s.keys(&[D(4), D(5), D(2), D(5)]);
+    s.save("position-entry");
+    s.home();
+    s.menu0(&[3, 3, 2]);
+    s.keys(&[Key::Down, Key::Menu, D(0), D(5), D(3)]);
+    s.save("location-codes");
+    s.home();
+    s.menu0(&[8, 6, 1]);
+    s.keys(&[D(1), D(2), D(3), Key::Hash]);
+    s.save("dtmf-dialer");
+    s.home();
+    s.menu0(&[8, 6, 2]);
+    s.save("dtmf-memories");
+    s.home();
+
     // The key test after a few keys; MENU 0 9 1 3.
     s.menu0(&[9, 1, 3]);
     s.keys(&[Key::Up, D(5), Key::Exit]);

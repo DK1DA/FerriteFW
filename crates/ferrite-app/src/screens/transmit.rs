@@ -41,9 +41,7 @@ pub fn tx_freq(app: &App, slot: u8) -> Freq10 {
         return app.set.hf.freq;
     }
     let s = app.slot(slot);
-    let c = s.cfg();
-    let f = s.freq() as i64;
-    (if c.reverse { f } else { f + c.offset as i64 }).max(0) as Freq10
+    s.cfg().tx_of(s.freq())
 }
 
 /// Why this slot can't transmit now, by the checks the UI can make.
@@ -246,7 +244,7 @@ impl View for Transmit {
         }
         // Slot, VFO/channel and band; what it receives on.
         let f = tx_freq(app, s);
-        let rx = if hf { f } else { app.slot(s).freq() };
+        let rx = if hf { f } else { app.slot(s).cfg().rx_of(app.slot(s).freq()) }; // reverse listens on the TX side
         let mut head = Buf::<32>::new();
         if hf {
             head.set(b"HF mode");

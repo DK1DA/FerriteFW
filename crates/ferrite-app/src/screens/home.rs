@@ -7,7 +7,7 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{self, band_near, mode_chip, offset_text, tone_text, Item, BANDS, STEPS};
+use crate::slot::{self, band_near, mode_chip, shift_text, tone_text, Item, BANDS, STEPS};
 use crate::{App, Screen, PAUSE_S};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
@@ -180,7 +180,7 @@ impl View for Home {
                 let (mut m, mut t, mut o, mut pw) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
                 mode_chip(&cfg, &mut m);
                 tone_text(cfg.tx_tone, &mut t);
-                offset_text(cfg.offset, false, &mut o);
+                shift_text(&cfg, false, &mut o); // "SPLIT" for a split
                 if app.capped(s) {
                     pw.set(b"0.25 W");
                 } else {
@@ -232,7 +232,7 @@ impl View for Home {
                         sub.push(" \u{b7} ".as_bytes());
                         sub.push(b.as_bytes());
                     }
-                    offset_text(cfg.offset, false, &mut b);
+                    shift_text(&cfg, false, &mut b);
                     if !b.is_empty() {
                         sub.push(" \u{b7} ".as_bytes());
                         sub.push(b.as_bytes());
@@ -303,8 +303,8 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
         s.vfo = s.mem[nb];
         s.cfg.mode = BANDS[nb].mode;
         s.cfg.step = BANDS[nb].step;
-        if s.cfg.offset != 0 {
-            s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift;
+        if s.cfg.offset != 0 && !s.cfg.split {
+            s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift; // a split's TX stays where it is
         }
         app.send_slot(a as u8);
     }

@@ -191,6 +191,7 @@ pub struct Sample {
     zone_cfg: [Cell<ZoneCfg>; 8],
     zone_names: [Cell<Name>; 8],
     presets: [Cell<Option<RangePreset>>; 16],
+    dtmf: [Cell<Option<Dtmf>>; DTMF_MEMS as usize],
     events_read: Cell<u32>,
     events_cleared: Cell<bool>,
     msgs_read: Cell<u32>,
@@ -222,6 +223,8 @@ impl Sample {
             presets: core::array::from_fn(|i| {
                 Cell::new(PRESETS.get(i).map(|&(n, start, end, step, mode, narrow, skips)| RangePreset { name: txt(n), start, end, step, mode, narrow, skips }))
             }),
+            // Two DTMF memories (chapter 17): a repeater's autopatch and a link code.
+            dtmf: core::array::from_fn(|i| Cell::new([Dtmf::parse(b"*79"), Dtmf::parse(b"12345#")].get(i).copied().flatten())),
             events_read: Cell::new(0),
             events_cleared: Cell::new(false),
             msgs_read: Cell::new(0),
@@ -435,6 +438,10 @@ impl Data for Sample {
         self.zone_cfg.get(zone as usize).map_or_else(ZoneCfg::default, |c| c.get())
     }
 
+    fn dtmf(&self, i: u8) -> Option<Dtmf> {
+        self.dtmf.get(i as usize)?.get()
+    }
+
     fn fm_presets(&self) -> u8 {
         FM.len() as u8
     }
@@ -496,6 +503,7 @@ impl Data for Sample {
                 }
                 None => false,
             },
+            Op::Dtmf(i, d) => self.dtmf.get(i as usize).map(|c| c.set(d)).is_some(),
             Op::NewPreset => match self.presets.iter().find(|p| p.get().is_none()) {
                 Some(c) => {
                     c.set(Some(RangePreset { name: txt("New range"), start: mhz(144), end: mhz(148), step: 10, mode: 0, narrow: true, skips: 0 }));

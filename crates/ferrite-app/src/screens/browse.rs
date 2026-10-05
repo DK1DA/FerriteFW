@@ -13,7 +13,7 @@ use super::{Cx, Hints, View};
 use crate::chan::{Channel, ChannelStore, NO_ZONE};
 use crate::data::Op;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{chan_label, offset_text, tone_text, MODES};
+use crate::slot::{chan_label, shift_text, tone_text, MODES};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
@@ -360,7 +360,7 @@ impl View for Browse {
                 if !t.is_empty() {
                     let _ = uwrite!(sub, " \u{b7} {}", Txt(t.as_bytes()));
                 }
-                offset_text(c.cfg.offset, false, &mut t);
+                shift_text(&c.cfg, false, &mut t);
                 if !t.is_empty() {
                     let _ = uwrite!(sub, " {}", Txt(t.as_bytes()));
                 }

@@ -107,13 +107,43 @@ macro_rules! persist {
     };
 }
 
+persist!(crate::data::Pos { lat, lon });
 persist!(XbCfg { side1, side2, power, timeout_10s, hang_ds, flags });
 persist!(HfMem { freq, mode, step, bw, agc, lna, bfo, recent, bands, band_bfo });
-persist!(SlotCfg { mode, narrow, rx_tone, tx_tone, offset, power, step, squelch, busy, reverse });
+/// A slot's settings. Split rides in the reverse byte (bit 0 reverse, bit 1 split) so the record keeps its
+/// length and older records (0 or 1 there) read as not split.
+impl Persist for SlotCfg {
+    fn save(&self, s: &mut dyn Sink) {
+        self.mode.save(s);
+        self.narrow.save(s);
+        self.rx_tone.save(s);
+        self.tx_tone.save(s);
+        self.offset.save(s);
+        self.power.save(s);
+        self.step.save(s);
+        self.squelch.save(s);
+        self.busy.save(s);
+        (self.reverse as u8 | (self.split as u8) << 1).save(s);
+    }
+    fn load(&mut self, r: &mut dyn Source) {
+        self.mode.load(r);
+        self.narrow.load(r);
+        self.rx_tone.load(r);
+        self.tx_tone.load(r);
+        self.offset.load(r);
+        self.power.load(r);
+        self.step.load(r);
+        self.squelch.load(r);
+        self.busy.load(r);
+        let mut f = self.reverse as u8 | (self.split as u8) << 1;
+        f.load(r);
+        (self.reverse, self.split) = (f & 1 != 0, f & 2 != 0);
+    }
+}
 persist!(Settings {
     callsign, owner, boot_card, region, extend_tx, extend_warned, tz, clock, clock_gps, units, layout, theme,
     pin_mode, pin, pin_len, pin_misses, pin_wait, bt, same, fm_freq, fm_step, fm_agc, fm_monitor, setup_done,
-    home_ch, xb, hf,
+    home_ch, xb, hf, cable_port, coord_fmt, fixed_on, fixed, fixed_alt, same_codes,
 });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
@@ -233,6 +263,18 @@ mod tests {
         c.load(&mut SliceSource(&v.0[..10]));
         assert_eq!(c.callsign, a.callsign);
         assert_eq!(c.hf, Settings::DEFAULT.hf);
+    }
+
+    /// Settings and slots must fit the store's 512-byte record (ferrite-store `settings::MAX_PAYLOAD`).
+    #[test]
+    fn record_fits_the_store() {
+        let leak = || -> &'static mut Settings { std::boxed::Box::leak(std::boxed::Box::new(Settings::DEFAULT)) };
+        let alert = || std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
+        let a = App::new(leak(), alert());
+        let mut c = Count(0);
+        Settings::DEFAULT.save(&mut c);
+        a.save_state(&mut c);
+        assert!(c.0 <= 512, "{} bytes", c.0);
     }
 
     #[test]

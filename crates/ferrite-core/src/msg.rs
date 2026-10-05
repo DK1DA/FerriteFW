@@ -101,6 +101,8 @@ pub enum Param {
     BusyLock,
     /// 0 off, 1 on.
     Reverse,
+    /// Split: the absolute TX frequency (10 Hz units); 0 = not split, TX is RX plus Offset.
+    Split,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

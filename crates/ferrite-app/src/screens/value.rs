@@ -87,7 +87,7 @@ impl View for Value {
         let item = self.item;
         match (e.key, e.press) {
             (Key::Left | Key::Right, Short | Repeat) => app.change(item, if e.key == Key::Right { 1 } else { -1 }), // MENU-16
-            (Key::Digit(d), Short) if item == Item::Squelch => app.change(item, d as i32 - cur(app, item).0), // MENU-17
+            (Key::Digit(d), Short) if item == Item::Squelch => app.change(item, d as i32 + 1 - cur(app, item).0), // MENU-17: level d (index d + 1)
             (Key::Hash, Short) => app.reset(item), // MENU-18
             (Key::Star, Short) => app.do_undo(),   // MENU-22
             (Key::Menu, Short) => app.back(),      // MENU-20: OK keeps
@@ -166,7 +166,8 @@ impl View for Value {
             lcd.tri(120 + ax, y0 + 14, 12, 3, SUB);
         }
         if item == Item::Squelch {
-            self.squelch(app, lcd, cx, v);
+            let l = app.sq_level(a) as i32; // Global shows the slot's level it uses
+            self.squelch(app, lcd, cx, l);
         } else if app.dirty(R_SUB, hash(&(v, n, grey))) {
             let y = BOX_Y + 74;
             match grey {
