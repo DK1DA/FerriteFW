@@ -376,8 +376,10 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
             }
         }
         EntryFor::SplitTx => {
-            app.set_split(f);
-            app.back();
+            // TX-37: refused when it needs the other relay state; entry stays open to type another
+            if app.set_split(f) {
+                app.back();
+            }
         }
         EntryFor::Channel => {}
     }

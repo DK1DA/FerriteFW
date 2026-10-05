@@ -254,6 +254,17 @@ fn main() {
     app.key_up(Key::PTT, t + 200, &store);
     shot!(300, "tx-refused");
     home(&mut app, &mut t);
+    // Split: RX 446.000, TX 146.520 (cross-band, same relay state: allowed) shows SPLIT on home.
+    let split = ferrite_app::slot::SlotCfg { split: true, offset: 14_652_000, ..ferrite_app::slot::DEFAULT_CFG };
+    app.set_vfo_cfg(0, split);
+    app.set_vfo(0, 44_600_000);
+    shot!(300, "home-split");
+    // TX-37: RX retuned to 50.125 under the split: TX would need the other relay state, so PTT refuses.
+    app.set_vfo(0, 5_012_500);
+    app.key_down(Key::PTT, t, &store);
+    app.key_up(Key::PTT, t + 200, &store);
+    shot!(300, "tx-refused-relay");
+    home(&mut app, &mut t);
     // Emergency: 406.025 (EPIRB) with Extend TX on; the first PTT only prompts. (243.000 is on the 1.25 m PA
     // path, which TX-10 keeps locked until its ceiling is measured.)
     app.set_region(Some(ferrite_core::txplan::Region::Canada), true);

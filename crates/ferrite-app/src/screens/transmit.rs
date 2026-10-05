@@ -13,7 +13,7 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{band_name, mode_chip, tone_text};
+use crate::slot::{band_name, mode_chip, tone_text, Item};
 use crate::{App, Screen};
 use ferrite_core::freq::Freq10;
 use ferrite_core::keys::Key;
@@ -67,6 +67,14 @@ pub fn refusal(app: &App, slot: u8) -> Option<Refusal> {
     }
     if txplan::locked_125m(tx_freq(app, slot)) {
         return Some(Refusal::Unmeasured125); // TX-10: safety, until the bench measures the 0.25 W ceiling
+    }
+    // TX-37: the band relay never switches at key-up. A split (or a VFO retuned under one) whose TX needs the
+    // other relay state from RX is refused here, as a backstop to the check when it is set.
+    if slot < SLOTS as u8 {
+        let s = app.slot(slot);
+        if !txplan::relay_ok(s.cfg().rx_of(s.freq()), tx_freq(app, slot)) {
+            return Some(Refusal::RelayMismatch);
+        }
     }
     // TX-21: busy lockout. Carrier: refuse while the squelch is open. Wrong tone: refuse while it is open with a
     // tone other than the slot's RX tone (with no RX tone set, any carrier is another group's).
@@ -153,6 +161,7 @@ pub fn short(r: Refusal) -> &'static str {
         Refusal::ReceiveOnlyHere => "receive only here",
         Refusal::Crossband => "repeater running",
         Refusal::Unmeasured125 => "1.25 m locked",
+        Refusal::RelayMismatch => "TX needs the HF relay",
     }
 }
 
@@ -167,6 +176,7 @@ fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
         Refusal::Battery => Some(("#", "Status page", Dest::Status)),
         Refusal::Locked | Refusal::RxOnlyBuild => Some(("MENU 0 9 9", "About", Dest::About)),
         Refusal::NoCallsign => Some(("MENU 0 8 7 1", "Callsign", Dest::Setup)),
+        Refusal::RelayMismatch => Some(("MENU 5", "Offset", Dest::Value(Item::Offset))),
         Refusal::InProgress | Refusal::ReceiveOnlyHere | Refusal::Crossband | Refusal::Unmeasured125 => None,
     }
 }
@@ -467,6 +477,10 @@ impl View for TxRefused {
             Refusal::Unmeasured125 => {
                 a.set(b"1.25 m transmit is locked until its 0.25 W limit is measured on the bench.");
                 more = b"Receive works as usual. (TX-10)";
+            }
+            Refusal::RelayMismatch => {
+                a.set(b"Split TX needs the HF relay: not allowed with this RX frequency.");
+                more = b"Keep RX and TX on the same side of 64 MHz.";
             }
         }
         // The dialog sized to its text: title, the reason, what fixes it, the path.

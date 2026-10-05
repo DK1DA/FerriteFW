@@ -26,6 +26,11 @@ pub fn band(f: Freq10) -> (Band, u8) {
     }
 }
 
+/// Whether `f` needs the band relay (PC4) switched to the HF path: chip 1 below 64 MHz ([`band`]'s HF).
+pub fn needs_relay(f: Freq10) -> bool {
+    band(f).0 == Band::Hf
+}
+
 /// Digits of v, at least `width` of them, into buf from pos; keeps one byte spare like the C version
 /// (which NUL-terminates), so it truncates the same way.
 fn put_uint(buf: &mut [u8], mut pos: usize, mut v: u32, width: usize) -> usize {

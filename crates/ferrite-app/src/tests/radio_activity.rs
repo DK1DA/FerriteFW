@@ -762,3 +762,53 @@ fn split_on_a_channel() {
     crate::slot::shift_text(t.app.slot(1).cfg(), true, &mut b);
     assert_eq!(b.as_bytes(), b"Split 146.520");
 }
+
+/// TX-37: a split or shift whose TX needs the band relay in the other state from RX is refused when it is set,
+/// and (a VFO retuned under a split) at PTT. A cross-band pair on the same side of 64 MHz is fine.
+#[test]
+fn split_across_the_relay() {
+    use crate::screens::transmit::refusal;
+    let mut t = ready();
+    // RX 446.000 / TX 146.520: chip 1 RX, chip 0 TX, no relay: allowed.
+    tune(&mut t, mhz(446));
+    assert!(t.app.set_split(mhz(146) + 52_000));
+    assert_eq!(refusal(&t.app, 0), None);
+    // RX 146.520 / TX 50.125: refused when set, the shift is kept as it was, the toast says why.
+    t.app.slots[0].cfg = crate::slot::DEFAULT_CFG;
+    tune(&mut t, mhz(146) + 52_000);
+    assert!(!t.app.set_split(mhz(50) + 12_500));
+    assert!(!t.app.slot(0).cfg().split, "not kept");
+    assert_eq!(t.app.toast.map(|x| x.head).as_ref().map(|b| b.as_bytes()), Some(&b"Split TX needs relay"[..]));
+    // RX 28.400 / TX 146.520: refused too.
+    tune(&mut t, mhz(28) + 40_000);
+    assert!(!t.app.set_split(mhz(146) + 52_000));
+    // Through the entry: OK on a refused frequency keeps the entry open to type another.
+    t.app.change(Item::Offset, 3 - Item::Offset.get(t.app.slot(0).cfg()).0);
+    assert!(matches!(t.app.screen(), Screen::Entry(_)));
+    while matches!(t.app.screen(), Screen::Entry(e) if e.n > 0) {
+        t.tap(Key::Exit);
+    }
+    for d in [1, 4, 6, 5, 2] {
+        t.tap(Key::Digit(d));
+    }
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Entry(_)), "still open: {:?}", t.app.screen());
+    assert!(!t.app.slot(0).cfg().split);
+    t.app.go_home();
+    // A VFO retuned under an allowed split into a crossing pair: PTT refuses, with the reason.
+    t.app.slots[0].cfg = crate::slot::DEFAULT_CFG;
+    tune(&mut t, mhz(446));
+    assert!(t.app.set_split(mhz(146) + 52_000));
+    tune(&mut t, mhz(50) + 12_500);
+    t.cmds();
+    ptt(&mut t, true);
+    assert_eq!(refused(&t), Some(Refusal::RelayMismatch));
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "never keyed");
+    ptt(&mut t, false);
+    // A + shift across 64 MHz (RX 63.900, 6 m's 500 kHz) isn't kept.
+    t.app.go_home();
+    t.app.slots[0].cfg = crate::slot::DEFAULT_CFG;
+    tune(&mut t, mhz(63) + 90_000);
+    t.app.change(Item::Offset, 1);
+    assert_eq!(t.app.slot(0).cfg().offset, 0, "still simplex");
+}

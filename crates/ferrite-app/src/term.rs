@@ -809,6 +809,9 @@ impl Term {
                 _ => return self.say(slow!("RX: a frequency from 64 to 1000 MHz, e.g. 146.52").as_bytes(), true),
             },
             F::Tx => match parse_mhz(s) {
+                Some(f) if !ferrite_core::txplan::relay_ok(n.rx, f) => {
+                    return self.say(slow!("Split TX needs the HF relay: not allowed with this RX frequency").as_bytes(), true); // TX-37
+                }
                 Some(f) if (mhz(64)..mhz(1000)).contains(&f) => (n.cfg.split, n.cfg.offset) = (true, f as i32),
                 _ => return self.say(slow!("TX: a frequency from 64 to 1000 MHz, e.g. 146.52").as_bytes(), true),
             },

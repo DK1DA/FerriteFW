@@ -842,14 +842,26 @@ impl App {
         slot::band_of(s.cfg().tx_of(s.freq())) == Some(BAND_125M)
     }
 
-    /// Split on the active slot: transmit on `tx` whatever RX is tuned to (MENU 5's 4th choice).
-    pub(crate) fn set_split(&mut self, tx: Freq10) {
+    /// Split on the active slot: transmit on `tx` whatever RX is tuned to (MENU 5's 4th choice). Refused (false,
+    /// with a toast) when TX needs the band relay in the other state from RX (TX-37).
+    pub(crate) fn set_split(&mut self, tx: Freq10) -> bool {
         let a = self.active;
+        let s = &self.slots[a as usize];
+        if !ferrite_core::txplan::relay_ok(s.cfg().rx_of(s.freq()), tx) {
+            self.relay_toast();
+            return false;
+        }
         self.keep_undo();
         let c = self.slots[a as usize].cfg_mut();
         (c.split, c.offset) = (true, tx as i32);
         self.out.push(RadioCmd::SlotParam { slot: a, param: Param::Split, value: tx as i32 });
         self.save_channel(a, None);
+        true
+    }
+
+    /// TX-37's refusal when a shift or split is set (the full sentence is on the TX refused screen).
+    fn relay_toast(&mut self) {
+        self.show_toast(b"Split TX needs relay", b"not with this RX frequency", false);
     }
 
     /// Why an item can't be changed on the active slot right now (MENU-14, EDIT-7), if it can't.
@@ -900,8 +912,13 @@ impl App {
                     self.screen = Screen::Entry(screens::entry::Entry::with_freq(screens::entry::EntryFor::SplitTx, tx));
                     return;
                 }
-                let was_split = c.split;
+                let (was_split, old) = (c.split, *c);
                 if let Some((param, value)) = item.set(c, v, shift) {
+                    if item == Item::Offset && !ferrite_core::txplan::relay_ok(c.rx_of(rx), c.tx_of(rx)) {
+                        *c = old; // TX-37: a shift that crosses the relay boundary isn't kept
+                        self.relay_toast();
+                        return;
+                    }
                     let value = if param == Param::Squelch { self.sq_level(a) as i32 } else { value };
                     self.out.push(RadioCmd::SlotParam { slot: a, param, value });
                     if was_split && param == Param::Offset {

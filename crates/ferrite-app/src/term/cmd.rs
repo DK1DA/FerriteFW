@@ -530,6 +530,9 @@ fn check(c: &Channel) -> Result<(), Msg> {
     if c.cfg.split && c.cfg.offset <= 0 {
         return Err(msg!("offset=split needs its TX frequency: tx=146.52"));
     }
+    if !ferrite_core::txplan::relay_ok(c.cfg.rx_of(c.rx), c.cfg.tx_of(c.rx)) {
+        return Err(msg!("Split TX needs the HF relay: not allowed with this RX frequency")); // TX-37
+    }
     let tx = c.cfg.tx_of(c.rx) as i64;
     if !(mhz(64) as i64..mhz(1000) as i64).contains(&tx) {
         return Err(msg!("offset: the TX frequency would be outside 64 to 1000 MHz"));

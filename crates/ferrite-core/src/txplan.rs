@@ -104,6 +104,14 @@ pub enum Refusal {
     Crossband,
     /// 1.25 m before its 0.25 W ceiling is measured on the bench (TX-10).
     Unmeasured125,
+    /// The TX frequency needs the band relay in the other state from RX (a split or shift across 64 MHz): the
+    /// relay is never switched at key-up (TX-37, as nicFW refuses it).
+    RelayMismatch,
+}
+
+/// TX-37: a pair is allowed only when RX and TX need the band relay in the same state.
+pub fn relay_ok(rx: Freq10, tx: Freq10) -> bool {
+    crate::freq::needs_relay(rx) == crate::freq::needs_relay(tx)
 }
 
 /// TX-10: 1.25 m transmits only once the PA drive ceiling that holds it to 0.25 W (TX-9) has been measured into
@@ -175,5 +183,13 @@ mod tests {
         assert!(emergency(mhz(406) + 5_000));
         assert!(!emergency(mhz(121) + 60_000));
         assert!(!emergency(mhz(146) + 52_000));
+    }
+
+    #[test]
+    fn relay_pairs() {
+        assert!(relay_ok(mhz(446), mhz(146) + 52_000), "cross-band, same relay state");
+        assert!(!relay_ok(mhz(146) + 52_000, mhz(50) + 12_500), "2 m RX, 6 m TX");
+        assert!(!relay_ok(mhz(28) + 40_000, mhz(146) + 52_000), "10 m RX, 2 m TX");
+        assert!(relay_ok(mhz(28) + 40_000, mhz(29) + 60_000));
     }
 }

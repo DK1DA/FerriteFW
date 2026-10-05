@@ -978,3 +978,18 @@ fn editor_split() {
     assert_eq!(c.cfg.offset, 14_439_000);
     assert!(r.vt.has("Split 144.390") && r.vt.has("144.39000 MHz, split"), "{}", r.vt.text());
 }
+
+/// TX-37 from the cable: a channel line whose split TX needs the other relay state is refused, typed or loaded.
+#[test]
+fn split_across_the_relay_refused() {
+    let mut r = Rig::main();
+    r.cmd("ch 320 \"Cross\" 446.0 offset=split tx=146.52");
+    assert!(r.store.by_num(319).expect("allowed: same relay state").0.cfg.split);
+    r.cmd("ch 321 \"Six\" 146.52 offset=split tx=50.125");
+    assert!(r.bottom().contains("Split TX needs the HF relay"), "{}", r.bottom());
+    assert!(r.store.by_num(320).is_none());
+    r.load("ch 322 \"Ok\" 146.55\nch 323 \"Bad\" 146.52 offset=split tx=50.125\nend");
+    let raw = r.raw();
+    assert!(raw.contains("line 2: Split TX needs the HF relay: not allowed with this RX frequency"), "{raw}");
+    assert!(r.store.by_num(321).is_some() && r.store.by_num(322).is_none());
+}
