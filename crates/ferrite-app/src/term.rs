@@ -1396,23 +1396,23 @@ fn slot_line<O: Out, S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W<O>) {
             let mut v = Buf::<32>::new();
             let _ = uwrite!(v, "CH {} ", Zero(c.num as u32 + 1, 3));
             let n = c.name();
-            v.push(&n[..n.len().min(14)]);
+            v.push(&n[..n.len().min(14)]); // "CH 012 " + 14 leaves a space before column 27
             w.s(v.as_bytes());
         }
         None => w.s(b"VFO"),
     }
-    w.at(25);
+    w.at(27);
     let f = if l.scanning { l.freq } else { s.freq() };
     w.s(mhz5(f).as_bytes());
-    w.at(37);
+    w.at(39);
     let mut v = Buf::<16>::new();
     mode_chip(s.cfg(), &mut v);
     w.s(v.as_bytes());
-    w.at(44);
+    w.at(46);
     v.clear();
     tone_text(s.cfg().tx_tone, &mut v);
     w.s(v.as_bytes());
-    w.at(55);
+    w.at(57);
     if l.squelch_open {
         w.s(b"RX ");
         w.s(w::s_text(l.rssi).as_bytes());
@@ -1422,7 +1422,7 @@ fn slot_line<O: Out, S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W<O>) {
         w.s(b"idle");
     }
     if i == cx.app.active() {
-        w.at(66);
+        w.at(68);
         w.s(b"active");
     }
 }
