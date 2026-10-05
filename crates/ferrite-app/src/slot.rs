@@ -153,13 +153,12 @@ pub fn tone_text(t: u16, b: &mut Buf<16>) {
     }
 }
 
-/// The shift as text: [`offset_text`], or for split "SPLIT" (short) / "Split 146.520" (long).
+/// The shift as text: [`offset_text`], or for split the TX frequency itself: "TX 146.520" (short, the cards and
+/// lists) / "Split 146.520" (long, the editors).
 pub fn shift_text(c: &SlotCfg, long: bool, b: &mut Buf<16>) {
     if c.split {
-        b.set(if long { b"Split " } else { b"SPLIT" });
-        if long {
-            b.push(mhz3(c.offset.max(0) as Freq10).as_bytes());
-        }
+        b.set(if long { b"Split " } else { b"TX " });
+        b.push(mhz3(c.offset.max(0) as Freq10).as_bytes());
     } else {
         offset_text(c.offset, long, b);
     }

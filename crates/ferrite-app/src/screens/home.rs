@@ -180,7 +180,7 @@ impl View for Home {
                 let (mut m, mut t, mut o, mut pw) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
                 mode_chip(&cfg, &mut m);
                 tone_text(cfg.tx_tone, &mut t);
-                shift_text(&cfg, false, &mut o); // "SPLIT" for a split
+                shift_text(&cfg, false, &mut o); // "TX 146.520" for a split
                 if app.capped(s) {
                     pw.set(b"0.25 W");
                 } else {

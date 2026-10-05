@@ -758,7 +758,7 @@ fn split_on_a_channel() {
     assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 1), 14_652_000);
     let mut b = ferrite_ui::text::Buf::<16>::new();
     crate::slot::shift_text(t.app.slot(1).cfg(), false, &mut b);
-    assert_eq!(b.as_bytes(), b"SPLIT");
+    assert_eq!(b.as_bytes(), b"TX 146.520");
     crate::slot::shift_text(t.app.slot(1).cfg(), true, &mut b);
     assert_eq!(b.as_bytes(), b"Split 146.520");
 }
