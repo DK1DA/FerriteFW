@@ -311,6 +311,7 @@ impl SimCore {
     /// The boot screen from the app's settings, as the firmware draws it: the owner card if 0 7 3 3 says so.
     fn draw_boot(&mut self) {
         let set = *self.app.settings();
+        ferrite_ui::theme::set(set.theme); // the boot screen in the saved theme (0 7 1)
         boot::draw(&mut self.lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &CHECKS });
     }
 

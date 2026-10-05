@@ -375,4 +375,80 @@ fn main() {
         save(&fb, name, scale);
     }
     shots_d::run(scale);
+    themed(scale);
+}
+
+/// A few screens in night red and daylight (0 7 1): boot, home, quick settings, transmit, refused, scope and the
+/// shortcut popup, as `<name>-night.png` / `<name>-day.png`.
+fn themed(scale: u32) {
+    let checks = [
+        Check { label: "MCU", value: "AT32F403A", state: State::Ok },
+        Check { label: "SPI flash", value: "4 MB", state: State::Ok },
+        Check { label: "BK4829 VHF", value: "0x4829", state: State::Ok },
+        Check { label: "BK4829 UHF", value: "0x4829", state: State::Ok },
+        Check { label: "SI4732", value: "", state: State::Pending },
+    ];
+    for (theme, suffix) in [(ferrite_ui::theme::NIGHT_RED, "night"), (ferrite_ui::theme::DAYLIGHT, "day")] {
+        let name = |n: &str| format!("{n}-{suffix}");
+        let mut fb = FrameBuffer::new();
+        ferrite_ui::theme::set(theme);
+        boot::draw(&mut fb, &BootInfo { version: VERSION, callsign: Some(b"VA7FER"), owner: None, checks: &checks });
+        save(&fb, &name("boot"), scale);
+        let store = fake::store();
+        let mut radio = fake::FakeRadio::new();
+        let mut dev = fake::device();
+        dev.clock_min = Some(14 * 60 + 32);
+        dev.utc = false;
+        let mut app = fake::app();
+        fake::sample(&mut app, &store, &mut radio);
+        app.settings_mut().theme = theme;
+        let mut t = 0u32;
+        let mut run = |app: &mut App, fb: &mut FrameBuffer, until: u32, t: &mut u32| {
+            while *t <= until {
+                while let Some(c) = app.pop_cmd() {
+                    radio.cmd(c);
+                }
+                while let Some(w) = app.pop_write() {
+                    store.apply(w);
+                }
+                radio.step(*t as f32 / 1000.0, app.active());
+                app.tick(*t, &radio.live, &store);
+                app.render(fb, &radio.live, &dev, &store);
+                *t += 20;
+            }
+        };
+        let press = |app: &mut App, key: Key, hold: u32, t: &mut u32| {
+            app.key_down(key, *t, &store);
+            *t += hold;
+            app.tick(*t, &Default::default(), &store);
+            app.key_up(key, *t, &store);
+        };
+        run(&mut app, &mut fb, 7000, &mut t);
+        save(&fb, &name("home"), scale);
+        press(&mut app, Key::Menu, 100, &mut t);
+        run(&mut app, &mut fb, t, &mut t);
+        save(&fb, &name("menu-quick"), scale);
+        press(&mut app, Key::Exit, 800, &mut t);
+        app.key_down(Key::PTT, t, &store);
+        run(&mut app, &mut fb, t + 2800, &mut t);
+        save(&fb, &name("transmit"), scale);
+        app.key_up(Key::PTT, t, &store);
+        app.set_vfo(0, 42_050_000);
+        app.key_down(Key::PTT, t, &store);
+        app.key_up(Key::PTT, t + 200, &store);
+        run(&mut app, &mut fb, t + 300, &mut t);
+        save(&fb, &name("tx-refused"), scale);
+        press(&mut app, Key::Exit, 800, &mut t);
+        app.set_vfo(0, 14_652_000);
+        run(&mut app, &mut fb, t + 3500, &mut t);
+        press(&mut app, Key::Digit(1), 800, &mut t);
+        run(&mut app, &mut fb, t + 2500, &mut t);
+        save(&fb, &name("scope"), scale);
+        press(&mut app, Key::Exit, 800, &mut t);
+        run(&mut app, &mut fb, t + 3500, &mut t);
+        press(&mut app, Key::Digit(2), 800, &mut t);
+        run(&mut app, &mut fb, t + 100, &mut t);
+        save(&fb, &name("popup"), scale);
+    }
+    ferrite_ui::theme::set(ferrite_ui::theme::DARK);
 }

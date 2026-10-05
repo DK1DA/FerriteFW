@@ -116,7 +116,7 @@ pub trait Gfx: Panel {
             return;
         }
         self.window(x, y, x + w - 1, y + h - 1);
-        self.push(c, (w * h) as u32);
+        self.push(crate::theme::map(c), (w * h) as u32); // every shape draws through here: themed once
     }
 
     /// 1 px outline.
@@ -217,6 +217,8 @@ pub trait Gfx: Panel {
     /// [`Gfx::text4`] painting only the rows of the line box inside `y0..y1`: a big font's box can overlap its
     /// neighbours.
     fn text4_rows(&mut self, x: i32, baseline: i32, s: &[u8], f: &Font4, fg: u16, bg: u16, y0: i32, y1: i32) -> i32 {
+        // themed before blending, so the anti-aliasing runs between the colours actually shown
+        let (fg, bg) = (crate::theme::map(fg), crate::theme::map(bg));
         let mut lut = [0u16; 16];
         for (a, v) in lut.iter_mut().enumerate() {
             *v = blend(bg, fg, a as u8);
@@ -289,6 +291,7 @@ pub trait Gfx: Panel {
         if x1 <= x0 || y1 <= y0 {
             return;
         }
+        let (c1, bg, m2) = (crate::theme::map(c1), crate::theme::map(bg), m2.map(|(m, c)| (m, crate::theme::map(c))));
         let mut lut = [0u16; 16];
         for (a, v) in lut.iter_mut().enumerate() {
             *v = blend(bg, c1, a as u8);

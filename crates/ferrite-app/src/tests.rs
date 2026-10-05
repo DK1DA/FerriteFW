@@ -774,3 +774,24 @@ fn recent_row_is_selectable() {
     let mut fb = FrameBuffer::new();
     t.render(&mut fb);
 }
+
+/// 0 7 1: changing the theme redraws everything at once in the new colours (DISP-9); night red has no green or
+/// blue anywhere on the screen.
+#[test]
+fn theme_change_redraws_everything() {
+    let mut t = T::new();
+    let mut fb = FrameBuffer::new();
+    t.render(&mut fb);
+    assert_eq!(fb.at(120, 310), BG, "dark: the hint bar's ground");
+    t.app.settings_mut().theme = ferrite_ui::theme::NIGHT_RED;
+    t.render(&mut fb);
+    for (x, y) in [(5, 5), (120, 150), (120, 310), (60, 60)] {
+        assert_eq!(fb.at(x, y) & 0x07FF, 0, "({x}, {y}) is red only");
+    }
+    t.app.settings_mut().theme = ferrite_ui::theme::DAYLIGHT;
+    t.render(&mut fb);
+    assert_eq!(fb.at(120, 310), ferrite_ui::gfx::WHITE, "daylight: white ground");
+    t.app.settings_mut().theme = ferrite_ui::theme::DARK;
+    t.render(&mut fb);
+    assert_eq!(fb.at(120, 310), BG);
+}

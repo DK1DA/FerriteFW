@@ -95,6 +95,7 @@ pub async fn task() {
     // most 5 s: a check still pending then counts as failed).
     let least = Duration::from_millis(if card { 4000 } else { 1500 });
     let (mut menu_held, mut skip) = (false, false);
+    ferrite_ui::theme::set(set.theme); // the boot screen in the saved theme (0 7 1)
     let start = Instant::now();
     loop {
         for (c, s) in checks.iter_mut().zip(&CHECK_STATE) {

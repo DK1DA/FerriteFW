@@ -347,6 +347,12 @@ impl Screen {
 impl App {
     /// Draws what changed since the last call: the status bar, the screen, then the hint bar or a toast.
     pub fn render(&mut self, lcd: &mut impl Panel, live: &LiveAll, dev: &Device, store: &impl ChannelStore) {
+        if ferrite_ui::theme::get() != self.set.theme {
+            // 0 7 1 changed (or the settings were loaded): everything again, in the new colours.
+            ferrite_ui::theme::set(self.set.theme);
+            self.drawn.screen = None;
+            self.drawn.sbar = None;
+        }
         let id = core::mem::discriminant(&self.screen);
         if self.drawn.screen != Some(id) {
             lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
