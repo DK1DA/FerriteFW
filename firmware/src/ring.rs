@@ -58,6 +58,11 @@ impl<'a> Ring<'a> {
         self.tail.store(self.head.load(Acquire), Release);
     }
 
+    /// Producer side: bytes that can be put without one being dropped.
+    pub fn room(&self) -> u16 {
+        self.mask - self.count()
+    }
+
     pub fn dropped(&self) -> u32 {
         self.dropped.load(Relaxed)
     }

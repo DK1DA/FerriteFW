@@ -15,6 +15,8 @@ struct Web {
     /// The last string a getter returned (UTF-8), `text_len()` bytes.
     text: Vec<u8>,
     flash: bool,
+    /// Bytes the page typed into the terminal, written here by the page before [`term_feed`].
+    term_in: Vec<u8>,
 }
 
 thread_local! {
@@ -68,7 +70,7 @@ fn event_of(id: u32) -> Option<Event> {
 #[no_mangle]
 pub extern "C" fn init(scale: u32, owner_card: u32) {
     let sim = SimCore::new(scale as usize, owner_card != 0);
-    WEB.with(|w| *w.borrow_mut() = Some(Web { sim, rgba: Vec::new(), text: Vec::new(), flash: false }));
+    WEB.with(|w| *w.borrow_mut() = Some(Web { sim, rgba: Vec::new(), text: Vec::new(), flash: false, term_in: Vec::new() }));
 }
 
 /// The status bar clock: UTC now, seconds since 1970 (`Date.now() / 1000`).
@@ -218,4 +220,46 @@ pub extern "C" fn keymap() -> usize {
 #[no_mangle]
 pub extern "C" fn text_len() -> u32 {
     with(|w| w.text.len() as u32)
+}
+
+// ---- The terminal over the cable (manual chapter 37) ----
+
+/// Room for `len` typed bytes: the page writes them at the returned address, then calls [`term_feed`] with the
+/// same length. Valid until the next call.
+#[no_mangle]
+pub extern "C" fn term_in(len: u32) -> usize {
+    with(|w| {
+        w.term_in.resize(len as usize, 0);
+        w.term_in.as_mut_ptr() as usize
+    })
+}
+
+/// The `len` bytes written at [`term_in`] go to the terminal, as typed on the cable (Enter starts it).
+#[no_mangle]
+pub extern "C" fn term_feed(len: u32) {
+    with(|w| {
+        let n = (len as usize).min(w.term_in.len());
+        let b = core::mem::take(&mut w.term_in);
+        w.sim.term_feed(&b[..n]);
+        w.term_in = b;
+    })
+}
+
+/// What the terminal drew since the last call (VT100 bytes, ASCII), taken: address, length [`text_len`]. Call it
+/// after `frame` and after `term_feed`, and write the bytes to the terminal pane.
+#[no_mangle]
+pub extern "C" fn term_read() -> usize {
+    with(|w| {
+        let out = w.sim.term_take();
+        w.text.clear();
+        w.text.extend_from_slice(&out);
+        w.text.as_ptr() as usize
+    })
+}
+
+/// The pane's size in characters; 80 x 24 at least (TERM-15). The pane can also answer the terminal's own size
+/// question (ESC [ 6 n) as any terminal does.
+#[no_mangle]
+pub extern "C" fn term_size(cols: u32, rows: u32) {
+    with(|w| w.sim.term_size(cols.min(u16::MAX as u32) as u16, rows.min(u16::MAX as u32) as u16))
 }

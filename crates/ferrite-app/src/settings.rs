@@ -85,6 +85,9 @@ pub const PIN_MODES: [&str; 3] = ["Off", "At power on", "Power on + unlock"];
 pub const ON_OFF: [&str; 2] = ["Off", "On"];
 /// Boot screen (0 7 3 3).
 pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
+/// The cable port (0 9 2 5, TERM-2): auto picks from the first bytes; the others force one.
+pub const CABLE_PORTS: [&str; 4] = ["Auto", "Link", "Terminal", "KISS"];
+
 /// FM broadcast step (0 3 1 2) in 10 kHz units, and its names.
 pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "200 kHz")];
 
@@ -119,6 +122,8 @@ pub struct Settings {
     pub pin_wait: u16,
     /// 0 9 2 1.
     pub bt: bool,
+    /// 0 9 2 5: what the cable carries, an index into [`CABLE_PORTS`] (TERM-2).
+    pub cable_port: u8,
     /// 0 3 3 1 (US and Canada only).
     pub same: bool,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
@@ -156,6 +161,7 @@ impl Settings {
         pin_misses: 0,
         pin_wait: 0,
         bt: false,
+        cable_port: 0,
         same: true,
         fm_freq: 10_110,
         fm_step: 1,

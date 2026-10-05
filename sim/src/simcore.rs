@@ -17,6 +17,7 @@ use ferrite_core::msg::{Device, GpsState};
 use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::fb::FrameBuffer;
+use ferrite_app::term::{Sink, Term};
 use ferrite_ui::gfx::Gfx;
 use ferrite_ui::panel::{Panel, H, W};
 
@@ -132,6 +133,24 @@ pub struct SimCore {
     last_key: String,
     last_px: u64,
     flashes: Vec<Flash>,
+    /// The terminal over the cable (manual chapter 37), and what it has drawn that the cable hasn't taken.
+    term: Term,
+    term_out: Vec<u8>,
+}
+
+/// The terminal's bytes waiting for the cable: room up to [`TERM_BUF`].
+struct TermBuf<'a>(&'a mut Vec<u8>);
+
+/// How much drawn output the simulator holds for a slow reader (about two full 80 x 24 screens).
+pub const TERM_BUF: usize = 8192;
+
+impl Sink for TermBuf<'_> {
+    fn room(&self) -> usize {
+        TERM_BUF.saturating_sub(self.0.len())
+    }
+    fn put(&mut self, b: &[u8]) {
+        self.0.extend_from_slice(b);
+    }
 }
 
 /// A window position to panel (buffer) pixels: the panel sits 1:1 in the middle of the window.
@@ -219,6 +238,8 @@ impl SimCore {
             last_key: String::from("-"),
             last_px: 0,
             flashes: Vec::new(),
+            term: Term::new(),
+            term_out: Vec::new(),
         };
         s.draw_boot();
         s.last_px = s.lcd.pixels;
@@ -329,6 +350,7 @@ impl SimCore {
                 store.apply(w);
             }
             app.render(&mut self.lcd, &radio.live, dev, store);
+            self.term.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out));
         }
         if self.lcd.pixels > 0 {
             self.last_px = self.lcd.pixels;
@@ -434,6 +456,40 @@ impl SimCore {
         }
     }
 
+    /// Bytes from the terminal program on the cable (ignored while booting or off).
+    pub fn term_feed(&mut self, bytes: &[u8]) {
+        if !self.live() {
+            return;
+        }
+        for &b in bytes {
+            self.term.feed(&mut self.app, b, self.now, &self.store);
+            while let Some(w) = self.app.pop_write() {
+                self.store.apply(w); // one channel write per key
+            }
+        }
+        self.term.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out));
+    }
+
+    /// What the terminal drew since the last call, for the cable.
+    pub fn term_take(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.term_out)
+    }
+
+    /// The pending output, without taking it (the web page reads it in place).
+    pub fn term_pending(&self) -> &[u8] {
+        &self.term_out
+    }
+
+    /// Drops what [`SimCore::term_pending`] showed.
+    pub fn term_clear(&mut self) {
+        self.term_out.clear();
+    }
+
+    /// The terminal's size from outside (the web page's pane); a terminal program answers the size question itself.
+    pub fn term_size(&mut self, cols: u16, rows: u16) {
+        self.term.set_size(cols, rows);
+    }
+
     /// The power switch on the volume knob (PE0): off saves ("Saving...", PWR-17) then goes dark; on is a fresh
     /// boot.
     fn power_switch(&mut self) {
@@ -444,6 +500,8 @@ impl SimCore {
             fake::sample(&mut self.app, &self.store, &mut self.radio);
             *self.app.settings_mut() = set;
             (self.off, self.boot_end) = (false, self.now + BOOT_MS);
+            self.term = Term::new(); // the cable starts over too: Enter opens the terminal again
+            self.term_out.clear();
             self.draw_boot();
             self.last_key = String::from("power on");
         } else if self.booting {

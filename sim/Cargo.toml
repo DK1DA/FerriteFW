@@ -23,6 +23,8 @@ ferrite-ui = { workspace = true, features = ["std"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 png = "0.17"
 minifb = "0.27"
+# The terminal's cable: a pseudo-terminal (openpty).
+libc = "0.2"
 
 [lints]
 workspace = true

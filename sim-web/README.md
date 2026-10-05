@@ -47,6 +47,10 @@ Mouse and key calls take effect at the time of the last `frame`.
 | `mockup_name() -> ptr` | Its look-review mock-up, a file in `docs/img/screens/` (480 × 640). |
 | `status_text() -> ptr` | One line: screen · last key · TX · active slot and frequency · last redraw px · locked. |
 | `keymap() -> ptr` | The desktop simulator's keyboard map, as text. |
+| `term_in(len: u32) -> ptr` | Room for `len` typed bytes for the terminal; write them there, then call `term_feed(len)`. |
+| `term_feed(len: u32)` | Those bytes go to the terminal as typed on the cable (Enter starts it: TERM-2). Ignored while booting or off. |
+| `term_read() -> ptr` | What the terminal drew since the last call, taken: VT100 bytes (ASCII), length `text_len()`. Call it after `frame` and `term_feed` and write it to the pane. |
+| `term_size(cols: u32, rows: u32)` | The pane's size in characters (80 x 24 at least, up to 200 x 64). The terminal also asks with ESC [ 6 n; a pane that answers (xterm.js does) sets it the same way. |
 | `text_len() -> u32` | Length in bytes (UTF-8) of the string the last string getter returned. |
 
 ## Key codes
@@ -86,3 +90,17 @@ V = V/M, Q = SIDE1, W = SIDE2, Space = PTT A, `[` `]` = knob.
 | 11 | A beacon, an automatic transmit (B) |
 
 Events 0, 1 and 6–11 are ignored while booting or off.
+
+## The terminal
+
+The radio's terminal (manual chapter 37) over a pretend cable, for a terminal pane such as xterm.js:
+
+```js
+const enc = new TextEncoder();
+term.onData(d => { const b = enc.encode(d); new Uint8Array(x.memory.buffer, x.term_in(b.length), b.length).set(b); x.term_feed(b.length); });
+// after each frame():
+const out = str(x.term_read()); if (out) term.write(out);
+x.term_size(term.cols, term.rows);
+```
+
+Press Enter in the pane to start it. Power-cycling the radio (event 5) closes it; Enter opens it again.

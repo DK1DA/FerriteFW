@@ -48,7 +48,7 @@ announce what happened on one event bus (`firmware/src/chan.rs`, types in `ferri
 | DSP | interrupt, below Radio | The decoder slot, audio in (ADC1) and out (DAC1); the input sampler runs here too |
 | UI | thread | Display, backlight, what the keys and knob mean |
 | Storage | thread | SPI flash (writes only inside `layout::WRITABLE`) |
-| Link | thread | Programming cable (and later Bluetooth) |
+| Link | thread | Programming cable: the terminal (chapter 37) for now; the link protocol and KISS later |
 | GPS | thread | USART3, position and time |
 
 ## Building
@@ -63,6 +63,11 @@ cargo simweb                    # the simulator as wasm: target/wasm32-unknown-u
 cargo fw                        # the image: target/thumbv7em-none-eabihf/release/ferrite
 cargo fw-clippy -- -D warnings
 ```
+
+**The terminal** (manual chapter 37) runs in the simulator too: `cargo simw` opens a pseudo-terminal as the
+radio's cable and prints how to connect, for example `screen /dev/ttys006 115200`; press Enter in it. Where there
+is no pseudo-terminal, `cargo simw -- --term-tcp 7300`, then `stty raw -echo; nc 127.0.0.1 7300; stty sane`.
+`cargo run -p ferrite-sim -- --term-headless 60` runs the radio and its cable with no window (for scripts).
 
 To pack the image for the stock bootloader:
 

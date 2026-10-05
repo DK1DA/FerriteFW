@@ -99,7 +99,7 @@ fn load_mockup(path: &Path) -> Option<Vec<u32>> {
 
 /// `scale` is a whole number (1 by default): every LCD pixel becomes scale x scale window pixels, never a fraction,
 /// so text looks as it will on the radio. Resizing the window snaps to the largest whole scale that fits.
-pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool) {
+pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool, term_tcp: Option<u16>) {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let shots = repo.join("../docs/img/screens");
     let mut sim = SimCore::new(scale, owner_card);
@@ -115,6 +115,15 @@ pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool) {
     win.set_target_fps(0);
     let mut last_present = Instant::now() - Duration::from_secs(1);
     println!("{KEYMAP}");
+    // The programming cable for the terminal (chapter 37): a pseudo-terminal, or TCP with --term-tcp PORT.
+    let mut cable = match term_tcp {
+        Some(p) => crate::termport::Port::tcp(p),
+        None => crate::termport::Port::pty(),
+    };
+    match &cable {
+        Ok(c) => println!("{}", c.describe()),
+        Err(e) => println!("Terminal: no cable ({e}); try --term-tcp 7300"),
+    }
 
     let start = Instant::now();
     let ms = || start.elapsed().as_millis() as u32;
@@ -171,6 +180,9 @@ pub fn run(scale: usize, bus_mbps: Option<f64>, owner_card: bool) {
             }
         }
         sim.step(now);
+        if let Ok(c) = &mut cable {
+            c.pump(&mut sim);
+        }
 
         if last_present.elapsed() < Duration::from_millis(16) {
             win.update();

@@ -294,7 +294,7 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 }
 
 /// Why an item can't be used here, if it can't (MENU-14).
-fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
+pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [3, 3, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
         [5, 3] if app.set.callsign.is_empty() => Some("needs callsign"),  // SETUP-9
@@ -386,6 +386,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.bt as u8);
             s.bt
         }
+        [9, 2, 5] => {
+            pick(b, &CABLE_PORTS, s.cable_port);
+            s.cable_port != 0
+        }
         [9, 2] => {
             b.set(if dev.bt { b"BT connected".as_slice() } else if s.bt { b"BT on" } else { b"BT off" });
             s.bt
@@ -442,7 +446,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 }
 
 /// The knob or ◀▶ on a wired setting (MENU-16); false if it isn't changeable here.
-fn change(app: &mut App, p: &[u8], d: i32) -> bool {
+pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
     let s = &mut app.set;
     match p {
         [1, 1] => app.change(Item::Watch, d),
@@ -463,6 +467,7 @@ fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [3, 1, 4] => s.fm_monitor = !s.fm_monitor,
         [3, 3, 1] => s.same = !s.same,
         [9, 2, 1] => s.bt = !s.bt,
+        [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
         [8, 9] => set_extend(app, !app.set.extend_tx),
         [9, 3] | [9, 3, 1] => {
             let m = cycle(s.pin_mode, d, PIN_MODES.len());
@@ -492,7 +497,7 @@ pub(crate) fn set_extend(app: &mut App, on: bool) {
 }
 
 /// # on a wired setting: its default (MENU-18).
-fn reset(app: &mut App, p: &[u8]) {
+pub(crate) fn reset(app: &mut App, p: &[u8]) {
     let d = Settings::DEFAULT;
     let s = &mut app.set;
     match p {
@@ -510,6 +515,7 @@ fn reset(app: &mut App, p: &[u8]) {
         [3, 1, 4] => s.fm_monitor = d.fm_monitor,
         [3, 3, 1] => s.same = d.same,
         [9, 2, 1] => s.bt = d.bt,
+        [9, 2, 5] => s.cable_port = d.cable_port,
         _ => {}
     }
 }

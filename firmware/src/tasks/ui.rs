@@ -3,7 +3,7 @@
 //! in, its commands out to the Radio task, and the screen redrawn where it changed.
 
 use crate::board::BACKLIGHT;
-use crate::chan::{Input, ALERTS, INPUT, LIVE, RADIO};
+use crate::chan::{Input, ALERTS, INPUT, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
 use crate::store;
@@ -11,6 +11,7 @@ use crate::tasks::{check, CHECK_MCU, CHECK_STATE, FAILED, PASSED};
 use core::sync::atomic::Ordering::Relaxed;
 use embassy_futures::select::{select, select4, Either, Either4};
 use embassy_time::{Duration, Instant, Timer};
+use ferrite_app::term::{Sink, Term};
 use ferrite_app::App;
 use ferrite_core::chipid;
 use ferrite_core::keys;
@@ -23,6 +24,20 @@ use ferrite_ui::gfx::BG;
 /// KEY-3, KEY-4), rarely otherwise (toasts, undo, timeouts, the clock), so the MCU sleeps.
 const TICK_HELD_MS: u64 = 20;
 const TICK_IDLE_MS: u64 = 250;
+
+/// The terminal's output: the cable's transmit ring, emptied by the Link task.
+struct Cable;
+
+impl Sink for Cable {
+    fn room(&self) -> usize {
+        TERM_OUT.room() as usize
+    }
+    fn put(&mut self, b: &[u8]) {
+        for &c in b {
+            TERM_OUT.put(c);
+        }
+    }
+}
 
 /// The milliseconds the app counts in (wrapping).
 fn now_ms() -> u32 {
@@ -141,7 +156,14 @@ pub async fn task() {
     }
     // Key codes down (mapped ones only): the app is ticked often while any is held.
     let mut down = 0u32;
+    // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
+    let mut term = Term::new();
     loop {
+        while let Some(b) = TERM_IN.get() {
+            term.feed(&mut app, b, now_ms(), &store);
+            while app.pop_write().is_some() {} // dropped until the Storage task keeps channels (see below)
+        }
+        term.poll(&mut app, &store, &dev, &live, now_ms(), &mut Cable);
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
         }
@@ -149,8 +171,9 @@ pub async fn task() {
         // in SPI flash; the table in MCU flash can't change.
         while app.pop_write().is_some() {}
         app.render(&mut lcd, &live, &dev, &store);
-        let period = if down != 0 { TICK_HELD_MS } else { TICK_IDLE_MS };
-        match select4(live_rx.changed(), INPUT.receive(), Timer::after(Duration::from_millis(period)), ALERTS.receive()).await {
+        let period = if down != 0 || term.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
+        let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
+        match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {
             Either4::First(l) => slot_a(&mut live, &l),
             // WX-4: a decoded SAME header opens the alert over any screen.
             Either4::Fourth(a) => {
@@ -172,7 +195,7 @@ pub async fn task() {
             }
             Either4::Second(Input::Key(_)) => {} // the sampler's own long press and repeat are off
             Either4::Second(Input::Knob(d)) => app.knob(d, now_ms(), &store),
-            Either4::Third(()) => {}
+            Either4::Third(_) => {} // the tick, or bytes for the terminal
         }
         app.tick(now_ms(), &live, &store);
     }

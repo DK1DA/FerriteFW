@@ -4,7 +4,10 @@
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as M;
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
+use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
+use crate::ring::Ring;
+use core::sync::atomic::AtomicU8;
 use ferrite_core::msg::{DspCmd, Event, Live, Position, RadioCmd, SameDecoded, StorageCmd};
 
 pub static RADIO: Channel<M, RadioCmd, 8> = Channel::new();
@@ -29,3 +32,12 @@ pub static ALERTS: Channel<M, SameDecoded, 2> = Channel::new();
 
 pub static LIVE: Watch<M, Live, 2> = Watch::new();
 pub static POSITION: Watch<M, Position, 2> = Watch::new();
+
+/// The terminal over the cable (manual chapter 37): the Link task moves the cable's bytes into `TERM_IN` and
+/// signals `TERM_WAKE`; the UI task, which owns the App the terminal reads and edits, feeds them to it and puts
+/// what it draws in `TERM_OUT`, which the Link task sends. 64 B in (typed keys), 1 KB out (a few rows).
+static TERM_IN_BUF: [AtomicU8; 64] = [const { AtomicU8::new(0) }; 64];
+static TERM_OUT_BUF: [AtomicU8; 1024] = [const { AtomicU8::new(0) }; 1024];
+pub static TERM_IN: Ring<'static> = Ring::new(&TERM_IN_BUF);
+pub static TERM_OUT: Ring<'static> = Ring::new(&TERM_OUT_BUF);
+pub static TERM_WAKE: Signal<M, ()> = Signal::new();

@@ -47,6 +47,7 @@ pub mod sample;
 pub mod screens;
 pub mod settings;
 pub mod slot;
+pub mod term;
 
 use chan::{ChanWrite, Channel, ChannelStore};
 use screens::alert::AlertInfo;
@@ -389,6 +390,22 @@ impl App {
         }
         debug_assert!(self.write.is_none(), "one channel write per input: {:?} then {:?}", self.write, w);
         self.write = Some(w);
+    }
+
+    /// A channel changed outside the radio's own editor (the terminal: TERM-9): saved as an edit there is, and
+    /// every slot on it follows at once.
+    pub(crate) fn put_channel(&mut self, c: chan::Channel) {
+        self.write(ChanWrite::Put { ch: c, from: None });
+        for i in 0..SLOTS {
+            let s = &mut self.slots[i];
+            if s.ch.is_some_and(|o| o.num == c.num) {
+                let moved = s.ch.is_some_and(|o| o.rx != c.rx || o.cfg != c.cfg);
+                (s.ch, s.zone) = (Some(c), c.zone);
+                if moved && s.on_channel() {
+                    self.send_slot(i as u8);
+                }
+            }
+        }
     }
 
     /// The channel the active slot is on was changed (a setting, its zone, number, name): save it (EDIT-4).

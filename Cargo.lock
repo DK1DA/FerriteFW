@@ -419,6 +419,7 @@ dependencies = [
  "ferrite-app",
  "ferrite-core",
  "ferrite-ui",
+ "libc",
  "minifb",
  "png",
 ]

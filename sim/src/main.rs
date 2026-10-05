@@ -15,6 +15,7 @@ use std::path::Path;
 use ferrite_sim::fake;
 
 mod shots_d;
+mod termport;
 mod window;
 
 fn save(fb: &FrameBuffer, name: &str, scale: u32) {
@@ -45,11 +46,30 @@ pub(crate) fn save_fb(fb: &FrameBuffer, path: &Path, scale: u32) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1));
+    if let Some(secs) = arg("--term-headless").and_then(|s| s.parse::<u64>().ok()) {
+        // No window: the radio and its cable only, for scripted terminal checks (`--term-tcp PORT` for TCP).
+        let tcp = arg("--term-tcp").and_then(|s| s.parse::<u16>().ok());
+        let mut sim = ferrite_sim::simcore::SimCore::new(1, false);
+        let mut cable = match tcp {
+            Some(p) => termport::Port::tcp(p),
+            None => termport::Port::pty(),
+        }
+        .expect("a cable");
+        println!("{}", cable.describe());
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < secs {
+            sim.step(start.elapsed().as_millis() as u32);
+            cable.pump(&mut sim);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--window") {
         // The window: a whole scale (default 1); resizing snaps to whole scales.
         let scale = arg("--scale").and_then(|s| s.parse::<usize>().ok()).unwrap_or(1);
         let bus = arg("--bus-mbps").and_then(|s| s.parse().ok());
-        window::run(scale, bus, args.iter().any(|a| a == "--owner-card"));
+        let tcp = arg("--term-tcp").and_then(|s| s.parse::<u16>().ok());
+        window::run(scale, bus, args.iter().any(|a| a == "--owner-card"), tcp);
         return;
     }
     let scale = arg("--scale").and_then(|s| s.parse().ok()).unwrap_or(1);
