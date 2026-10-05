@@ -1,5 +1,6 @@
 //! Channels as the UI sees them: a small record and a store to read them from. The firmware's store reads SPI
-//! flash records on demand through the zone index (CHAN-7, CHAN-9); the simulator and tests supply a few in RAM.
+//! flash records on demand at their fixed addresses, listed through its zone map (CHAN-7, CHAN-9); the
+//! simulator and tests supply a few in RAM.
 //! The UI keeps only the current zone, position and a copy of the channel each slot is on.
 
 use crate::data::{Data, NoData, Pos};

@@ -1,32 +1,34 @@
-//! Ferrite's SPI-flash store (roadmap 1d; `docs/firmware-design.md`, "SPI flash layout" and "Records").
+//! Ferrite's SPI-flash store (roadmap 1d; `docs/firmware-design.md`, "SPI flash layout" and "Records"): a plain
+//! fixed memory map, no file system.
 //!
-//! - [`journal`]: the settings and the slots, one record appended per save in a pair of sectors, the newest
-//!   valid one winning; a full sector is never erased while it holds the newest record.
-//! - [`swap`]: rewriting a sector (a changed or deleted channel, zone or range preset) through a copy and a log,
-//!   so a power cut leaves either the old sector or the new one.
-//! - [`records`]: the 64-byte channel record, the 32-byte zone record and the 224-byte range preset.
-//! - [`index`]: the zone index, rebuilt from the channel records whenever they change (and at mount, when it
-//!   doesn't match them).
+//! - The layout header: magic and layout version (a blank or foreign chip is formatted: first boot).
+//! - [`settings`]: the settings and slots, two fixed copies (A/B); a save overwrites the older one.
+//! - [`records`]: channel n, zone z and range preset p each at a fixed address, erased = empty.
+//! - [`scratch`]: changing a record that is already written rewrites its 4 KB sector through one scratch
+//!   sector, so a power cut leaves the old sector or the new one.
 //! - [`store`]: [`FlashStore`], the UI's [`ferrite_app::chan::ChannelStore`] and [`ferrite_app::data::Data`]
-//!   on top of all that, plus the 2-second save timer.
+//!   on top, the 2-second save timer, and on the radio the queue the Storage task works through.
 //!
-//! Everything goes through the [`Nor`] trait: the radio's W25Q driver and the simulator's [`sim::SimFlash`]
-//! (which can cut the power at any byte). Nothing here writes outside [`ferrite_core::layout::WRITABLE`]: the
-//! driver refuses it, and the simulated flash panics on it.
+//! Everything goes through the [`Nor`] trait: the radio's W25Q and the simulator's [`sim::SimFlash`] (which can
+//! cut the power at any byte). Programs and erases only start an operation; the store waits for it with
+//! [`Nor::pause`], so on the radio the UI keeps running while a sector erases. Nothing here writes outside
+//! [`ferrite_core::layout::WRITABLE`]: the radio's driver refuses it, and the simulated flash panics on it.
 //!
-//! RAM: no copy of the channels. Channel records are read on demand (64 B); a zone costs a few bytes of index
-//! reads. The only buffers are a 256-byte page on the stack while copying and, while the index is rebuilt, a
-//! 1 KB zone table on the stack.
+//! RAM: no copy of the channels; one zone byte per channel number (1,000 B) for the lists, built at mount.
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub mod index;
-pub mod journal;
+pub mod io;
 pub mod records;
+pub mod scratch;
+pub mod settings;
 pub mod store;
-pub mod swap;
 
 #[cfg(feature = "std")]
 pub mod sim;
+
+use core::future::Future;
+use core::pin::pin;
+use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 pub use store::FlashStore;
 
@@ -42,28 +44,38 @@ pub struct NorError;
 pub type Result<T = ()> = core::result::Result<T, NorError>;
 
 /// NOR flash: erased bytes read 0xFF, a program only turns bits from 1 to 0, an erase sets a whole 4 KB sector
-/// back to 0xFF.
+/// back to 0xFF. A program or an erase is started and runs on in the chip; [`Nor::busy`] says when it is done.
+#[allow(async_fn_in_trait)] // used inside one executor; no Send bound wanted
 pub trait Nor {
+    /// Reads at `addr`. On the radio a read during a program or erase suspends it, reads, and resumes it.
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result;
-    /// Programs `data` at `addr`; the caller has made sure the bytes are erased.
-    fn program(&mut self, addr: u32, data: &[u8]) -> Result;
-    /// Erases the sector at `addr` (a multiple of [`SECTOR`]).
-    fn erase(&mut self, addr: u32) -> Result;
+    /// Starts programming `data` (within one [`PAGE`]) at `addr`; the bytes are erased.
+    fn start_program(&mut self, addr: u32, data: &[u8]) -> Result;
+    /// Starts erasing the sector at `addr` (a multiple of [`SECTOR`]).
+    fn start_erase(&mut self, addr: u32) -> Result;
+    /// A program or erase is still running.
+    fn busy(&mut self) -> Result<bool>;
+    /// Waits a little while the chip is busy: a timer on the radio, so the other tasks run.
+    async fn pause();
 }
 
-/// Whether `len` bytes at `addr` are all erased.
-pub fn blank(nor: &mut impl Nor, addr: u32, len: u32) -> Result<bool> {
-    let mut buf = [0u8; 64];
-    let mut a = addr;
-    while a < addr + len {
-        let n = (addr + len - a).min(64) as usize;
-        nor.read(a, &mut buf[..n])?;
-        if buf[..n].iter().any(|&b| b != 0xFF) {
-            return Ok(false);
-        }
-        a += n as u32;
+/// Runs a store future to its end without an executor: the simulator and the tests, where the simulated flash
+/// is never busy, so nothing waits. Not for the radio, whose flash futures wait on timers.
+pub fn block<F: Future>(f: F) -> F::Output {
+    fn clone(_: *const ()) -> RawWaker {
+        RawWaker::new(core::ptr::null(), &VTABLE)
     }
-    Ok(true)
+    fn noop(_: *const ()) {}
+    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+    // SAFETY: the vtable's functions do nothing and never touch the (null) data pointer.
+    let waker = unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE)) };
+    let mut cx = Context::from_waker(&waker);
+    let mut f = pin!(f);
+    loop {
+        if let Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
 }
 
 /// CRC-32 (IEEE 802.3, reflected), fed in pieces.
@@ -113,18 +125,12 @@ pub fn crc16(data: &[u8]) -> u16 {
     c
 }
 
-/// CRC-32 of `len` bytes of flash at `addr`.
-pub fn crc_of(nor: &mut impl Nor, addr: u32, len: u32) -> Result<u32> {
-    let mut buf = [0u8; 64];
-    let mut c = Crc32::new();
-    let mut a = addr;
-    while a < addr + len {
-        let n = (addr + len - a).min(64) as usize;
-        nor.read(a, &mut buf[..n])?;
-        c.update(&buf[..n]);
-        a += n as u32;
-    }
-    Ok(c.get())
+fn u16_at(b: &[u8], i: usize) -> u16 {
+    u16::from_le_bytes([b[i], b[i + 1]])
+}
+
+fn u32_at(b: &[u8], i: usize) -> u32 {
+    u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
 }
 
 #[cfg(test)]

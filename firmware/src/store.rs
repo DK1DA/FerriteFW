@@ -1,58 +1,176 @@
 //! The SPI-flash store (ferrite-store) on the radio's W25Q: the channels, zones and range presets the UI reads,
-//! and the settings and slots it saves (roadmap 1d). The UI task owns it: it mounts it before the boot screen
-//! (the callsign and owner card are in the settings), reads channel records on demand, applies the app's
-//! channel writes and saves the settings 2 s after a change and at power off.
+//! and the settings and slots it saves (roadmap 1d).
 //!
-//! The w25q driver is given only the ranges Ferrite may write (ferrite_core::layout::WRITABLE), so calibration,
-//! stock's data and the bootloader's update area are refused below everything else.
+//! Who does what:
+//! - The UI task makes the store, mounts it before the boot screen (the callsign and owner card are in the
+//!   settings) and reads records on demand, straight from the chip (short reads, about 0.1 ms each).
+//! - Every write goes to the store's queue; the Storage task carries it out. Programs and erases are started
+//!   and then waited for on a timer, so the UI runs meanwhile and never waits for an erase.
+//! - A UI read while the chip is busy suspends the program or erase (W25Q Erase/Program Suspend, 0x75), reads,
+//!   and resumes it (0x7A). The store keeps reads away from the bytes being changed ([`ferrite_store::io`]).
 //!
-//! For now a sector erase waits in place (up to 400 ms, usually about 50): a channel edit can hold the UI that
-//! long. Polling the erase from a timer is the follow-up once the event log needs the flash too.
+//! The driver here writes only inside ferrite_core::layout::WRITABLE, so calibration, stock's data and the
+//! bootloader's update area are refused below everything else. The chip is set up and identified by uradio's
+//! `w25q` driver, then driven directly for the suspend, which that driver doesn't have.
 
 use crate::bus::{BusyDelay, Flash};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::once_lock::OnceLock;
+use embassy_sync::signal::Signal;
+use embassy_time::Timer;
 use ferrite_app::data::NoData;
 use ferrite_core::layout::WRITABLE;
-use ferrite_store::{FlashStore, Nor, NorError};
+use ferrite_store::{FlashStore, Nor, NorError, PAGE, SECTOR};
+use uradio_bus::{Delay, Spi};
 use w25q::W25q;
 
-/// The W25Q, or nothing when it didn't answer at power on (then nothing is stored this power-on).
-pub enum Spi {
-    Chip(W25q<Flash>),
-    Missing,
+const READ: u8 = 0x03;
+const PAGE_PROGRAM: u8 = 0x02;
+const SECTOR_ERASE: u8 = 0x20;
+const WRITE_ENABLE: u8 = 0x06;
+const READ_STATUS1: u8 = 0x05;
+const READ_STATUS2: u8 = 0x35;
+const SUSPEND: u8 = 0x75;
+const RESUME: u8 = 0x7A;
+/// Status 2, bit 7: a program or erase is suspended.
+const SUS: u8 = 0x80;
+/// tSUS: the longest a suspend takes, and the least time between a resume and the next suspend.
+const T_SUS_US: u32 = 20;
+
+/// The W25Q (None when it didn't answer at power on: nothing is stored this power-on).
+pub struct Chip {
+    spi: Option<Flash>,
+    size: u32,
+    /// A program or erase was started and hasn't been seen to finish.
+    active: bool,
 }
 
-impl Nor for Spi {
+impl Chip {
+    fn command(spi: &mut Flash, op: u8) {
+        spi.select(true);
+        spi.transfer(op);
+        spi.select(false);
+    }
+
+    fn command_addr(spi: &mut Flash, op: u8, addr: u32) {
+        spi.write(&[op, (addr >> 16) as u8, (addr >> 8) as u8, addr as u8]);
+    }
+
+    fn status(spi: &mut Flash, op: u8) -> u8 {
+        spi.select(true);
+        spi.transfer(op);
+        let s = spi.transfer(0);
+        spi.select(false);
+        s
+    }
+
+    fn writable(addr: u32, len: u32) -> bool {
+        WRITABLE.iter().any(|r| r.start <= addr && addr + len <= r.end)
+    }
+
+    fn start(&mut self, op: u8, addr: u32, data: &[u8]) -> ferrite_store::Result {
+        let spi = self.spi.as_mut().ok_or(NorError)?;
+        Self::command(spi, WRITE_ENABLE);
+        spi.select(true);
+        Self::command_addr(spi, op, addr);
+        spi.write(data);
+        spi.select(false);
+        self.active = true;
+        Ok(())
+    }
+}
+
+impl Nor for Chip {
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> ferrite_store::Result {
-        match self {
-            Spi::Chip(f) => f.read(addr, buf).map_err(|_| NorError),
-            Spi::Missing => Err(NorError),
+        if addr.checked_add(buf.len() as u32).is_none_or(|e| e > self.size) {
+            return Err(NorError);
         }
+        let active = self.active;
+        let spi = self.spi.as_mut().ok_or(NorError)?;
+        // A program or erase running: suspend it for the read (its own bytes are never read meanwhile).
+        let suspended = active && Self::status(spi, READ_STATUS1) & 1 != 0 && {
+            Self::command(spi, SUSPEND);
+            let mut t = 0;
+            while Self::status(spi, READ_STATUS2) & SUS == 0 && Self::status(spi, READ_STATUS1) & 1 != 0 && t < 4 * T_SUS_US {
+                BusyDelay.delay_us(2);
+                t += 2;
+            }
+            Self::status(spi, READ_STATUS2) & SUS != 0
+        };
+        spi.select(true);
+        Self::command_addr(spi, READ, addr);
+        spi.read(buf);
+        spi.select(false);
+        if suspended {
+            Self::command(spi, RESUME);
+            BusyDelay.delay_us(T_SUS_US);
+        }
+        Ok(())
     }
-    fn program(&mut self, addr: u32, data: &[u8]) -> ferrite_store::Result {
-        match self {
-            Spi::Chip(f) => f.program(addr, data, &mut BusyDelay).map_err(|_| NorError),
-            Spi::Missing => Err(NorError),
+
+    fn start_program(&mut self, addr: u32, data: &[u8]) -> ferrite_store::Result {
+        let len = data.len() as u32;
+        if len == 0 || len > PAGE || addr / PAGE != (addr + len - 1) / PAGE || !Self::writable(addr, len) {
+            return Err(NorError);
         }
+        self.start(PAGE_PROGRAM, addr, data)
     }
-    fn erase(&mut self, addr: u32) -> ferrite_store::Result {
-        match self {
-            Spi::Chip(f) => f.erase(addr, &mut BusyDelay).map_err(|_| NorError),
-            Spi::Missing => Err(NorError),
+
+    fn start_erase(&mut self, addr: u32) -> ferrite_store::Result {
+        if !addr.is_multiple_of(SECTOR) || !Self::writable(addr, SECTOR) {
+            return Err(NorError);
         }
+        self.start(SECTOR_ERASE, addr, &[])
+    }
+
+    fn busy(&mut self) -> ferrite_store::Result<bool> {
+        let spi = self.spi.as_mut().ok_or(NorError)?;
+        let busy = Self::status(spi, READ_STATUS1) & 1 != 0;
+        self.active &= busy;
+        Ok(busy)
+    }
+
+    async fn pause() {
+        Timer::after_millis(1).await;
     }
 }
 
-pub type Store = FlashStore<Spi, NoData>;
+pub type Store = FlashStore<Chip, NoData>;
 
-/// Starts the flash and mounts the store: whether the chip answered (the self-test's SPI flash check), and the
-/// store.
-pub fn mount() -> (bool, Store) {
-    let spi = match W25q::new(Flash::new(), &mut BusyDelay, &WRITABLE) {
-        Ok(f) => Spi::Chip(f),
-        Err(_) => Spi::Missing,
+/// The store for the UI and Storage tasks.
+pub struct Shared(pub &'static Store);
+// SAFETY: the store is touched only by the UI and Storage tasks, which both run on the thread-mode executor:
+// one at a time, switching only at an await, and the store holds no borrow across an await.
+unsafe impl Sync for Shared {}
+unsafe impl Send for Shared {}
+
+/// Set once the UI task has made the store; the Storage task waits for it.
+pub static STORE: OnceLock<Shared> = OnceLock::new();
+/// Writes are queued: the Storage task has work.
+pub static WAKE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+/// Starts the flash and makes the store (not mounted yet: the caller awaits `mount_async`); whether the chip
+/// answered (the self-test's SPI flash check).
+pub fn make() -> (bool, &'static Store) {
+    let (spi, size) = match W25q::new(Flash::new(), &mut BusyDelay, &WRITABLE) {
+        Ok(f) => {
+            let size = f.size();
+            (Some(f.release()), size)
+        }
+        Err(_) => (None, 0),
     };
-    let ok = matches!(spi, Spi::Chip(_));
-    (ok, FlashStore::mount(spi, NoData))
+    let ok = spi.is_some();
+    let store: &'static Store = cortex_m::singleton!(: Store = FlashStore::new(Chip { spi, size, active: false }, NoData)).unwrap();
+    store.set_deferred(true);
+    let _ = STORE.init(Shared(store));
+    (ok, store)
+}
+
+/// Tells the Storage task about queued writes.
+pub fn wake(store: &Store) {
+    if store.has_jobs() {
+        WAKE.signal(());
+    }
 }
 
 /// The radio-wide settings the UI borrows for good (`App::new`): the defaults, then what the store holds

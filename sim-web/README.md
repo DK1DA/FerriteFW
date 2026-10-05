@@ -49,7 +49,7 @@ Mouse and key calls take effect at the time of the last `frame`.
 | `init_blank(scale: u32)` | Switches the radio on with a blank flash, as after installing: setup runs. |
 | `flash_stage(len: u32) -> ptr` | Room for a saved flash image before `init`: copy the image there, then call `init`, which boots from it (no image staged: the sample data). |
 | `flash_changed() -> u32` | 1 when the flash changed since the last call: time to save the image. |
-| `flash_image() -> ptr`, `flash_len() -> u32` | The flash image to keep (settings, slots, channels, zones, range presets): 303,104 bytes, 0x02C000–0x075FFF of the chip. Valid until the next call. |
+| `flash_image() -> ptr`, `flash_len() -> u32` | The flash image to keep (settings, slots, channels, zones, range presets): 94,208 bytes, 0x02C000–0x042FFF of the chip; an image from another layout (the earlier 303,104-byte one) boots as a blank chip, into setup. Valid until the next call. |
 | `flush()` | Saves settings and slots now if they changed (call on `pagehide`); otherwise they save 2 s after the last change. |
 | `keymap() -> ptr` | The desktop simulator's keyboard map, as text. |
 | `term_in(len: u32) -> ptr` | Room for `len` typed bytes for the terminal; write them there, then call `term_feed(len)`. |

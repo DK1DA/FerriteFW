@@ -16,7 +16,7 @@ use ferrite_app::chan::ChannelStore;
 use ferrite_app::data::Data;
 use ferrite_app::sample::Sample;
 use ferrite_app::settings::Settings;
-use ferrite_core::layout::{LAYOUT_HEADER, SWAP};
+use ferrite_core::layout::{LAYOUT_HEADER, SCRATCH};
 use ferrite_store::sim::SimFlash;
 use ferrite_store::FlashStore;
 use ferrite_app::screens::nav::{self, Dest};
@@ -116,8 +116,8 @@ const CHECKS: [Check; 5] = [
     Check { label: "SI4732", value: "", state: State::Ok },
 ];
 
-/// The simulated flash's saved part: from the layout header to the end of the swap sectors.
-pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..SWAP.end;
+/// The simulated flash's saved part: from the layout header to the end of the scratch sector.
+pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..SCRATCH.end;
 
 /// What the flash holds at power on.
 pub enum Stored {
@@ -707,7 +707,6 @@ fn seed(store: &Store) {
             store.put_with_position(c, sample.position(c.num));
         }
     }
-    store.finish_batch();
     for i in 0..sample.presets() {
         if let Some(p) = sample.preset(i) {
             store.add_preset(&p);

@@ -1,14 +1,15 @@
-//! The fixed-size records (`docs/firmware-design.md`, "Records"): channels (64 B), zones (32 B) and range
-//! presets (224 B). Each carries a CRC; an erased or torn record reads as empty. Fields the UI doesn't model yet
-//! (a channel's position, coverage, service type, PTT ID option; a preset's skip list) are kept as they were
-//! when a record is rewritten.
+//! The fixed-size records at fixed addresses (`docs/firmware-design.md`, "Records"): channel n, zone z and range
+//! preset p each have one place, computed from the number. Channels are 64 B (63 per sector), zones 32 B (127
+//! per sector), presets 224 B (16 in one sector); the last bytes of every sector stay free, for the scratch
+//! copy's footer ([`crate::scratch`]). Each record carries a CRC; an erased or torn record reads as empty.
+//! Fields the UI doesn't model yet (a channel's position, coverage, service type, PTT ID option; a preset's skip
+//! list) are kept as they were when a record is rewritten.
 
-use crate::crc16;
-use core::ops::Range;
+use crate::{crc16, u16_at, u32_at, SECTOR};
 use ferrite_app::chan::{Channel, Name, NO_ZONE};
 use ferrite_app::data::{Pos, RangePreset, ZoneCfg};
 use ferrite_app::slot::{band_near, SlotCfg, BANDS, DEFAULT_CFG};
-use ferrite_core::layout::{CHANNELS, ZONES};
+use ferrite_core::layout::{CHANNELS, PRESETS, ZONES};
 use ferrite_ui::text::Buf;
 
 // ---- channels ----
@@ -24,16 +25,13 @@ const REVERSE: u16 = 1 << 9;
 const HAS_POS: u16 = 1 << 7;
 pub const NO_POS: i32 = 0x7FFF_FFFF;
 
+/// Channels in one sector.
+pub const CH_PER_SECTOR: u32 = 63;
+
+/// Channel `num`'s record: sector num / 63, slot num % 63.
 pub fn ch_addr(num: u16) -> u32 {
-    CHANNELS.start + num as u32 * CH_LEN as u32
-}
-
-fn u16_at(b: &[u8], i: usize) -> u16 {
-    u16::from_le_bytes([b[i], b[i + 1]])
-}
-
-fn u32_at(b: &[u8], i: usize) -> u32 {
-    u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
+    let n = num as u32;
+    CHANNELS.start + n / CH_PER_SECTOR * SECTOR + n % CH_PER_SECTOR * CH_LEN as u32
 }
 
 /// Whether a record holds a channel: a good CRC and an RX frequency.
@@ -132,17 +130,16 @@ pub fn ch_with_position(b: &[u8; CH_LEN], p: Pos) -> [u8; CH_LEN] {
 // ---- zones ----
 
 pub const ZONE_LEN: usize = 32;
-/// The zone records: two sectors at the start of the zones region (255 × 32 B).
-pub const ZONE_RECS: Range<u32> = ZONES.start..ZONES.start + 8192;
-/// The range presets: one sector (16 × 224 B).
-pub const PRESETS: Range<u32> = ZONES.start + 8192..ZONES.start + 12288;
-/// The zone index: one sector.
-pub const INDEX: Range<u32> = ZONES.start + 12288..ZONES.end;
-/// Zones 0-254 (255 is "no zone").
-pub const MAX_ZONES: u8 = NO_ZONE;
+/// Zones in one sector.
+pub const ZONES_PER_SECTOR: u32 = 127;
+/// Zones 0-253: two sectors of 127 (255 is "no zone").
+pub const MAX_ZONES: u8 = 254;
+const _: () = assert!(MAX_ZONES < NO_ZONE);
 
+/// Zone `z`'s record: sector z / 127, slot z % 127.
 pub fn zone_addr(z: u8) -> u32 {
-    ZONE_RECS.start + z as u32 * ZONE_LEN as u32
+    let z = z as u32;
+    ZONES.start + z / ZONES_PER_SECTOR * SECTOR + z % ZONES_PER_SECTOR * ZONE_LEN as u32
 }
 
 /// Name (16) · flags: scan all, shown, by distance (1) · resume (1) · dwell (1) · smart (1) · priority channels

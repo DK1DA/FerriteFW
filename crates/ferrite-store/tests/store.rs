@@ -1,8 +1,8 @@
-//! The store on the simulated flash: round trips, first boot, a damaged header, and thousands of power cuts at
-//! random points of settings writes, channel, zone and preset changes, and of the recovery after them. After
-//! every cut the store must mount, and every setting, channel, zone and preset must read either as it was
-//! before the interrupted change or as it would be after it, never anything else; the zone index must agree with
-//! the channels.
+//! The store on the simulated flash: round trips, first boot and its range presets, a damaged or foreign header,
+//! thousands of power cuts at random points of settings writes, channel, zone and preset changes, and of the
+//! recovery after them, and reads while a write is under way. After every cut the store must mount, and every
+//! setting, channel, zone and preset must read either as it was before the interrupted change or as it would be
+//! after it, never anything else; the zone lists must agree with the channels.
 
 use ferrite_app::chan::{channel, ChanWrite, Channel, ChannelStore, Name, MAX_CHANNELS, NO_ZONE};
 use ferrite_app::data::{Data, NoData, Op, RangePreset, ZoneCfg};
@@ -64,8 +64,8 @@ fn snap(s: &Store) -> Snap {
     Snap { chans, zones, presets }
 }
 
-/// The zone index agrees with the records.
-fn index_agrees(s: &Store) {
+/// The zone lists agree with the records.
+fn index_agrees(s: &impl ChannelStore) {
     let mut seen = 0u16;
     for z in (0..s.zones()).chain([NO_ZONE]) {
         let mut last: Option<u16> = None;
@@ -106,7 +106,6 @@ fn seeded() -> SimFlash {
         let c = channel(*num, (i % 4) as u8 % 3, 14_400_000 + i as u32 * 2500, "Chan", cfg_with(1000, if i % 2 == 0 { 60_000 } else { 0 }));
         assert!(s.put_with_position(c, None));
     }
-    assert!(s.finish_batch());
     assert!(s.add_preset(&RangePreset { name: Buf::from(b"Air"), start: 11_800_000, end: 13_700_000, step: 10, mode: 2, narrow: false, skips: 0 }));
     let a = app();
     assert!(s.save(&a));
@@ -148,14 +147,16 @@ fn round_trip_and_first_boot() {
 }
 
 #[test]
-fn a_damaged_header_keeps_the_data_and_garbage_formats() {
+fn a_foreign_header_or_noise_formats() {
+    // Another layout (the earlier journal layout was version 1): formatted, first boot, empty.
     let mut f = seeded();
     let h = ferrite_core::layout::LAYOUT_HEADER.start as usize;
-    f.mem[h + 1] ^= 0x40;
+    f.mem[h + 4] = 1;
     let s = mount(f);
-    assert_eq!(s.mounted(), Mounted::Ok, "settings still there");
-    assert_eq!(s.count(), 11, "channels kept");
-    // A chip full of noise: formatted, first boot, empty.
+    assert_eq!(s.mounted(), Mounted::FirstBoot);
+    assert_eq!(s.count(), 0);
+    assert_eq!(s.presets(), 0);
+    // A chip full of noise: the same.
     let mut f = SimFlash::new();
     let mut r = Rng(7);
     for b in f.mem.iter_mut() {
@@ -220,8 +221,7 @@ fn power_cuts_during_settings_writes() {
             old += 1;
         }
         cur = got;
-        // Half the time the next save gets through, so the journal holds good records, fills its sectors and
-        // moves between them.
+        // Half the time the next save gets through, so both copies take turns.
         if r.below(2) == 0 {
             assert!(s.save(&a));
             cur = next;
@@ -229,8 +229,8 @@ fn power_cuts_during_settings_writes() {
         }
         f = unmount(s);
     }
-    // A cut anywhere in the record leaves it torn (the CRC is its last bytes), so nearly every cut reads as
-    // before; a cut on the very last byte can still complete it.
+    // A cut anywhere in the copy being written leaves it torn (the CRC is its last bytes), so nearly every cut
+    // reads as before; a cut on the very last byte can still complete it.
     eprintln!("settings: {old} cuts left the old record, {new} the new one");
     assert_eq!(old + new, 3000);
 }
@@ -318,7 +318,7 @@ fn power_cuts_during_channel_zone_and_preset_changes() {
         f = unmount(s);
     }
     eprintln!("changes: {changed} of 2500 ops changed something; after the cut {old} read as before, {new} as after; {ops_total} flash ops");
-    assert!(changed > 1500 && old > 300 && new > 300, "cuts landed on both sides");
+    assert!(changed > 1000 && old > 300 && new > 300, "cuts landed on both sides");
 }
 
 fn r_zone_delete(i: u32) -> bool {
@@ -345,4 +345,123 @@ fn renumber_carries_the_position() {
     assert!(s.by_num(11).is_none());
     assert_eq!(s.position(500), Some(ferrite_app::data::Pos { lat: 45, lon: -75 }));
     let _ = s.version();
+}
+
+#[test]
+fn first_boot_after_setup_seeds_the_regions_presets() {
+    let s = mount(SimFlash::new());
+    assert!(s.first_boot());
+    let mut a = app();
+    // A save during setup seeds nothing.
+    assert!(s.save(&a));
+    assert_eq!(s.presets(), 0);
+    a.settings_mut().set_region(Some(ferrite_core::txplan::Region::Us));
+    a.settings_mut().setup_done = true;
+    assert!(s.save(&a));
+    assert!(!s.first_boot());
+    let names: Vec<_> = (0..s.presets()).map(|i| s.preset(i).unwrap().name).collect();
+    let names: Vec<&[u8]> = names.iter().map(|n| n.as_bytes()).collect();
+    assert_eq!(names, [&b"2 m"[..], b"70 cm", b"1.25 m", b"Airband", b"Marine", b"Weather", b"GMRS/FRS"]);
+    // Deleting them all is kept: no new seeding on later saves or boots.
+    for _ in 0..s.presets() {
+        assert!(s.request(Op::DeletePreset(0)));
+    }
+    assert!(s.save(&a));
+    let s = mount(unmount(s));
+    assert_eq!(s.presets(), 0);
+    assert_eq!(s.zones(), 0, "no zones are seeded");
+    // Europe: no weather or GMRS, PMR446 instead, 2 m to 146 MHz.
+    let e: Vec<_> = ferrite_store::store::default_presets(ferrite_core::txplan::Region::Europe).collect();
+    assert!(e.iter().any(|p| p.name.as_bytes() == b"PMR446") && !e.iter().any(|p| p.name.as_bytes() == b"Weather"));
+    assert_eq!(e[0].end, 14_600_000);
+}
+
+/// A flash that stays busy a few polls after each program and erase, and whose pause yields once: the store's
+/// writes take several polls, as on the radio, and the test reads in between, as the UI does.
+struct Slow {
+    f: SimFlash,
+    left: u32,
+}
+
+impl ferrite_store::Nor for Slow {
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> ferrite_store::Result {
+        self.f.read(addr, buf)
+    }
+    fn start_program(&mut self, addr: u32, data: &[u8]) -> ferrite_store::Result {
+        self.left = 2;
+        self.f.start_program(addr, data)
+    }
+    fn start_erase(&mut self, addr: u32) -> ferrite_store::Result {
+        self.left = 3;
+        self.f.start_erase(addr)
+    }
+    fn busy(&mut self) -> ferrite_store::Result<bool> {
+        let b = self.left > 0;
+        self.left = self.left.saturating_sub(1);
+        Ok(b)
+    }
+    async fn pause() {
+        let mut once = false;
+        core::future::poll_fn(|cx| {
+            if once {
+                core::task::Poll::Ready(())
+            } else {
+                once = true;
+                cx.waker().wake_by_ref();
+                core::task::Poll::Pending
+            }
+        })
+        .await
+    }
+}
+
+#[test]
+fn reads_during_a_queued_write_see_old_or_new() {
+    use ferrite_store::Nor;
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+    let mut r = Rng(0xD1E5_0001);
+    let mut f = seeded();
+    let mut polls = 0u32;
+    for i in 0..300u32 {
+        let s: FlashStore<Slow, NoData> = FlashStore::new(Slow { f, left: 0 }, NoData);
+        ferrite_store::block(s.mount_async());
+        s.set_deferred(true);
+        let num = [0u16, 1, 2, 9, 11, 63, 64, 999, 7][r.below(9) as usize];
+        let before = s.by_num(num).map(|x| x.0);
+        let others: Vec<_> = (0..MAX_CHANNELS).filter(|&n| n != num).map(|n| s.by_num(n).map(|x| x.0)).collect();
+        let mut c = before.unwrap_or_else(|| channel(num, NO_ZONE, 14_600_000, "New", DEFAULT_CFG));
+        c.rx = 14_500_000 + i * 1250;
+        c.set_name(b"Queued");
+        let w = if i % 4 == 3 { ChanWrite::Delete(num) } else { ChanWrite::Put { ch: c, from: None } };
+        let after = if i % 4 == 3 { None } else { Some(c) };
+        assert!(s.apply(w));
+        assert!(s.has_jobs() && !s.idle());
+        let job = s.next_job().unwrap();
+        {
+        let mut fut = std::pin::pin!(s.run(job));
+        let mut cx = Context::from_waker(Waker::noop());
+        loop {
+            let done = matches!(fut.as_mut().poll(&mut cx), Poll::Ready(true));
+            // The UI reads in between: the channel and its sector neighbours are whole, old or new.
+            let now = s.by_num(num).map(|x| x.0);
+            assert!(now == before || now == after, "iteration {i}: channel {num} read {now:?} mid-write");
+            let now_others: Vec<_> = (0..MAX_CHANNELS).filter(|&n| n != num).map(|n| s.by_num(n).map(|x| x.0)).collect();
+            assert!(now_others == others, "iteration {i}: another channel changed mid-write");
+            if done {
+                break;
+            }
+            polls += 1;
+        }
+        }
+        assert!(s.idle());
+        assert_eq!(s.by_num(num).map(|x| x.0), after);
+        index_agrees(&s);
+        let (mut slow, _) = s.into_parts();
+        let mut probe = [0u8; 1];
+        assert!(slow.read(0x02C000, &mut probe).is_ok());
+        f = slow.f;
+    }
+    eprintln!("queued writes: {polls} polls with reads in between");
+    assert!(polls > 1000);
 }

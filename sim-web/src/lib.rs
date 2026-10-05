@@ -118,7 +118,7 @@ pub extern "C" fn flash_image() -> usize {
     })
 }
 
-/// The length of [`flash_image`]'s image (always the same, 303,104 bytes).
+/// The length of [`flash_image`]'s image (always the same, 94,208 bytes).
 #[no_mangle]
 pub extern "C" fn flash_len() -> u32 {
     with(|w| w.image.len() as u32)

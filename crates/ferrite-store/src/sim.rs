@@ -1,5 +1,6 @@
-//! A simulated NOR flash (the first 512 KB of the radio's 4 MB) for the simulator and the tests: erased bytes are 0xFF, a program only clears
-//! bits, an erase sets a 4 KB sector. It can cut the power at any point: after a set number of operations (each
+//! A simulated NOR flash (the first 512 KB of the radio's 4 MB) for the simulator and the tests: erased bytes
+//! are 0xFF, a program only clears bits, an erase sets a 4 KB sector. Programs and erases finish as they start,
+//! so the store never waits on it. It can cut the power at any point: after a set number of operations (each
 //! programmed byte and each erase counts one) the operation in progress is left half done, the worst way NOR
 //! leaves it, and every call fails until [`SimFlash::power_on`]. Writing outside
 //! [`ferrite_core::layout::WRITABLE`] panics: calibration and the update area must never be touched.
@@ -7,7 +8,7 @@
 use crate::{Nor, NorError, Result, SECTOR};
 use ferrite_core::layout::WRITABLE;
 
-/// The first 512 KB of the 4 MB chip: everything Ferrite stores is below 0x076000 (reads beyond are out of
+/// The first 512 KB of the 4 MB chip: everything Ferrite stores is below 0x074000 (reads beyond are out of
 /// range here).
 pub const SIZE: usize = 512 << 10;
 
@@ -92,10 +93,11 @@ impl Nor for SimFlash {
         Ok(())
     }
 
-    fn program(&mut self, addr: u32, data: &[u8]) -> Result {
+    fn start_program(&mut self, addr: u32, data: &[u8]) -> Result {
         if self.dead {
             return Err(NorError);
         }
+        assert!(addr / crate::PAGE == (addr + data.len() as u32 - 1) / crate::PAGE, "program at {addr:#x} crosses a page");
         Self::writable(addr, data.len() as u32);
         self.dirty = true;
         for (i, &d) in data.iter().enumerate() {
@@ -113,7 +115,7 @@ impl Nor for SimFlash {
         Ok(())
     }
 
-    fn erase(&mut self, addr: u32) -> Result {
+    fn start_erase(&mut self, addr: u32) -> Result {
         if self.dead {
             return Err(NorError);
         }
@@ -132,4 +134,10 @@ impl Nor for SimFlash {
         self.mem[a..a + SECTOR as usize].fill(0xFF);
         Ok(())
     }
+
+    fn busy(&mut self) -> Result<bool> {
+        if self.dead { Err(NorError) } else { Ok(false) }
+    }
+
+    async fn pause() {}
 }

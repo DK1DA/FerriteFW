@@ -84,8 +84,9 @@ pub async fn task() {
         Check { label: "BK4829 UHF", value: "", state: State::Pending },
     ];
     // The store: mounted before the boot screen, as the settings (callsign, owner card: BOOT-9, MENU 0 7 3 3)
-    // are in it. A first boot formats the chip here (about a second, once).
-    let (flash_ok, store) = store::mount();
+    // are in it. A first boot formats the chip here (about a second, once). Its writes go to the Storage task.
+    let (flash_ok, store) = store::make();
+    store.mount_async().await;
     check(Source::Storage, CHECK_FLASH, flash_ok);
     let set = store::settings();
     store.load_settings(set);
@@ -162,35 +163,43 @@ pub async fn task() {
     let mut term = Term::new();
     loop {
         while let Some(b) = TERM_IN.get() {
-            term.feed(&mut app, b, now_ms(), &store);
-            while app.pop_write().is_some() {} // dropped until the Storage task keeps channels (see below)
+            term.feed(&mut app, b, now_ms(), store);
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
+            }
         }
-        term.poll(&mut app, &store, &dev, &live, now_ms(), &mut Cable);
+        term.poll(&mut app, store, &dev, &live, now_ms(), &mut Cable);
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
         }
-        // Channel writes (save as channel, the channel editor, the browser) to the flash; the settings and slots
-        // 2 s after their last change.
+        // Channel writes (save as channel, the channel editor, the browser) and the settings and slots (2 s after
+        // their last change) queue for the Storage task.
         while let Some(w) = app.pop_write() {
             store.apply(w);
         }
         store.autosave(now_ms(), &app);
+        store::wake(store);
         // PWR-17: the power switch off (PE0 high, twice 50 ms apart): "Saving...", the radio off, the pending
         // writes, then the power hold released; if the switch is back on by then, a reset, as stock does.
         if POWER_SW.read() {
             Timer::after_millis(50).await;
             if POWER_SW.read() {
                 app.power_off();
-                app.render(&mut lcd, &live, &dev, &store);
+                app.render(&mut lcd, &live, &dev, store);
                 RADIO.send(RadioCmd::Shutdown).await;
+                // Everything queued, then the settings, written before the power goes (at most 3 s).
                 store.flush(&app);
-                Timer::after_millis(100).await;
+                store::wake(store);
+                let t = Instant::now();
+                while !store.idle() && t.elapsed() < Duration::from_secs(3) {
+                    Timer::after_millis(10).await;
+                }
                 POWER_HOLD.write(false);
                 Timer::after_millis(500).await;
                 cortex_m::peripheral::SCB::sys_reset();
             }
         }
-        app.render(&mut lcd, &live, &dev, &store);
+        app.render(&mut lcd, &live, &dev, store);
         let period = if down != 0 || term.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {
@@ -203,20 +212,20 @@ pub async fn task() {
                 app.raw_key(code, true); // every code, mapped or not: the key test names them (KEY-2)
                 if let Some(k) = keys::key(code) {
                     down |= 1 << code;
-                    app.key_down(k, now_ms(), &store);
+                    app.key_down(k, now_ms(), store);
                 }
             }
             Either4::Second(Input::Key(keypad::Event::Release(code))) => {
                 app.raw_key(code, false);
                 if let Some(k) = keys::key(code) {
                     down &= !(1 << code);
-                    app.key_up(k, now_ms(), &store);
+                    app.key_up(k, now_ms(), store);
                 }
             }
             Either4::Second(Input::Key(_)) => {} // the sampler's own long press and repeat are off
-            Either4::Second(Input::Knob(d)) => app.knob(d, now_ms(), &store),
+            Either4::Second(Input::Knob(d)) => app.knob(d, now_ms(), store),
             Either4::Third(_) => {} // the tick, or bytes for the terminal
         }
-        app.tick(now_ms(), &live, &store);
+        app.tick(now_ms(), &live, store);
     }
 }
