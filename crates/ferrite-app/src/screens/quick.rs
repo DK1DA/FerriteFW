@@ -43,7 +43,6 @@ impl View for Quick {
         match (e.key, e.press) {
             (Key::Up, Short | Repeat) => app.screen = Screen::Quick(Quick { row: (row + 9) % 10 }),
             (Key::Down, Short | Repeat) => app.screen = Screen::Quick(Quick { row: (row + 1) % 10 }),
-            (Key::Left | Key::Right, Short | Repeat) => app.change(item, if e.key == Key::Right { 1 } else { -1 }), // MENU-16
             (Key::Digit(0), Short) => to_advanced(app),
             (Key::Digit(d), Short) => app.screen = Screen::Quick(Quick { row: d - 1 }), // MENU-5
             (Key::Menu, Short) => match item {

@@ -112,6 +112,11 @@ impl KeyTest {
 }
 
 impl View for KeyTest {
+    /// KEY-19: every key is under test.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn own_hold_menu(self) -> bool {
         true
     }

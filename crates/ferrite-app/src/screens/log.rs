@@ -44,6 +44,11 @@ fn keep<'a>(store: &'a impl ChannelStore, src: Option<Src>) -> impl Fn(u16) -> b
 }
 
 impl View for Log {
+    /// KEY-19: ◀▶ filter by source (INBOX-9); in a detail they are the knob.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn options(self, app: &mut App) -> bool {
         app.open_screen(Of::Log.screen());
         true
@@ -71,6 +76,7 @@ impl View for Log {
                 let s = Log { filter, ..self };
                 app.screen = Screen::Log(Log { cur: Cursor::first(n, &keep(store, s.src())), ..s });
             }
+            (Key::Left | Key::Right, Short | Repeat) => self.knob(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Menu, Short) if !self.detail && sel.is_some() => {
                 d.request(Op::Read(self.cur.sel));
                 app.inbox = app.inbox.saturating_sub(sel.is_some_and(|e| e.unread) as u8);

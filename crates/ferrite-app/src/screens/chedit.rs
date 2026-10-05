@@ -108,6 +108,11 @@ fn place(app: &mut App, store: &impl ChannelStore) {
 }
 
 impl View for ChEdit {
+    /// KEY-19: ◀▶ move across the edit grid; elsewhere they are the knob.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Channel editor"
     }
@@ -151,6 +156,7 @@ impl View for ChEdit {
             }
             (Key::Left, Short | Repeat) if cell >= GRID0 && col > 0 => app.screen = to(cell - 1),
             (Key::Right, Short | Repeat) if cell >= GRID0 && col < 2 => app.screen = to(cell + 1),
+            (Key::Left | Key::Right, Short | Repeat) if cell < GRID0 => self.knob(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Exit | Key::Slot, Short) => app.back(), // EDIT-6: leaves the edit, one level back
             (Key::Star, Short) => {
                 app.do_undo();

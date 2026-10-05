@@ -37,6 +37,11 @@ pub(crate) fn card(s: u8, active: u8) -> (i32, i32) {
 }
 
 impl View for Home {
+    /// KEY-19: ◀▶ step the band or zone (NAV-2).
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn own_hold_menu(self) -> bool {
         true // MENU-2: advanced settings
     }

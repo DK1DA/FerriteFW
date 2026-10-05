@@ -259,6 +259,11 @@ pub trait View: Copy {
         false
     }
 
+    /// ◀▶ have a job of their own here (KEY-19); otherwise they are the knob, ◀ = -1, ▶ = +1.
+    fn own_arrows(self) -> bool {
+        false
+    }
+
     /// A short, long or repeat press (after the App's own: hold BACK, hold #, the lock, hold MENU).
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore);
 
@@ -309,6 +314,10 @@ impl Screen {
 
     pub(crate) fn own_hold_menu(self) -> bool {
         each!(self, s => s.own_hold_menu())
+    }
+
+    pub(crate) fn own_arrows(self) -> bool {
+        each!(self, s => s.own_arrows())
     }
 
     pub(crate) fn bar(self) -> bool {

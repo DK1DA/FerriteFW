@@ -123,10 +123,6 @@ impl View for Tones {
                 s.row ^= 1;
                 s.nt = 0;
             }
-            (Key::Left | Key::Right, Short | Repeat) => {
-                let t = get(app, rx);
-                set(app, rx, tone_at(tone_index(t) + if e.key == Key::Right { 1 } else { -1 }));
-            }
             (Key::Digit(d), Short) => {
                 if s.nt >= 4 || app.now.wrapping_sub(s.at) > TYPE_MS {
                     (s.typed, s.nt) = (0, 0);

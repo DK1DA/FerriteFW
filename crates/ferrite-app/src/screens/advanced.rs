@@ -55,6 +55,11 @@ pub(crate) const GROUPS: [(&str, &str); 9] = [
 ];
 
 impl View for Advanced {
+    /// KEY-19: ◀▶ pick a Recent setting (MENU-8); elsewhere they are the knob.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Advanced"
     }
@@ -67,7 +72,7 @@ impl View for Advanced {
         Some(MENU_TIMEOUT_MS)
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let Advanced { row, from_quick } = self;
         // The group's row stays highlighted, so BACK from the group lands on it (MENU-24).
@@ -84,6 +89,7 @@ impl View for Advanced {
                 let i = (row - RECENT) as i32 + if e.key == Key::Right { 1 } else { -1 };
                 app.screen = Screen::Advanced(Advanced { row: RECENT + i.rem_euclid(n) as u8, from_quick });
             }
+            (Key::Left | Key::Right, Short | Repeat) => self.knob(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Menu, Short) if row >= RECENT => {
                 if let Some(item) = app.recent[(row - RECENT) as usize % 3] {
                     app.open(Dest::value(item)); // MENU-17: its editor; BACK returns here

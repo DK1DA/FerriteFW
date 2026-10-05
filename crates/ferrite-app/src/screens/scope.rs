@@ -84,6 +84,11 @@ pub fn peaks(bars: &[u8; SCOPE_BARS]) -> [Option<u8>; 3] {
 }
 
 impl View for Scope {
+    /// KEY-19: ◀▶ move the marker; the knob moves the centre.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn options(self, app: &mut App) -> bool {
         app.open_screen(super::opts::Of::Scope.screen());
         true

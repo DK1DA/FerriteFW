@@ -598,7 +598,6 @@ impl View for Group {
         match (e.key, e.press) {
             (Key::Up, Short | Repeat) => self.set_row(app, (self.row + n - 1) % n),
             (Key::Down, Short | Repeat) => self.set_row(app, (self.row + 1) % n),
-            (Key::Left | Key::Right, Short | Repeat) => self.turn(app, if e.key == Key::Right { 1 } else { -1 }),
             (Key::Digit(d), Short) if d >= 1 && d <= n => {
                 self.set_row(app, d - 1);
                 let g = Group { row: d - 1, ..self };

@@ -45,6 +45,11 @@ impl Gps {
 const ALL: fn(u16) -> bool = |_| true;
 
 impl View for Gps {
+    /// KEY-19: ◀▶ switch position and satellites; elsewhere they are the knob.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn options(self, app: &mut App) -> bool {
         app.open_screen(if matches!(self.page, Page::Waypoints | Page::Go) { Of::Waypoints } else { Of::Gps }.screen());
         true
@@ -75,6 +80,7 @@ impl View for Gps {
         match (e.key, e.press, self.page) {
             (Key::Left | Key::Right, Short, Page::Position) => app.screen = to(Page::Satellites),
             (Key::Left | Key::Right, Short, Page::Satellites) => app.screen = to(Page::Position),
+            (Key::Left | Key::Right, Short | Repeat, _) => self.knob(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Up | Key::Down, Short | Repeat, Page::Waypoints | Page::Go) => self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
             (Key::Menu, Short, Page::Waypoints) if d.waypoints() > 0 => app.screen = to(Page::Go),
             (Key::Menu, Short, Page::Position | Page::Satellites) => app.screen = to(if self.page == Page::Position { Page::Satellites } else { Page::Position }),

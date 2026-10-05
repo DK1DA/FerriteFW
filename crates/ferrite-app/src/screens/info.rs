@@ -282,6 +282,11 @@ fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'static str, &'st
 }
 
 impl View for Info {
+    /// KEY-19: ◀▶ switch About and the self-test.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         def(self.page).title
     }

@@ -174,6 +174,11 @@ fn picker_keep(store: &impl ChannelStore, i: u16) -> bool {
 }
 
 impl View for Browse {
+    /// KEY-19: renumbering steps 10 with ◀▶; otherwise they are the knob.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Channel browser"
     }
@@ -193,7 +198,7 @@ impl View for Browse {
         let ch = if self.view == PICKER { None } else { v.at(self.cur.sel) };
         match (e.key, e.press, self.mode) {
             (Key::Up | Key::Down, Short | Repeat, _) => return self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
-            (Key::Left | Key::Right, Short | Repeat, Mode::Move(_) | Mode::Renumber) => {
+            (Key::Left | Key::Right, Short | Repeat, _) => {
                 let d = if e.key == Key::Right { 1 } else { -1 };
                 return self.knob(app, if self.mode == Mode::Renumber { d * 10 } else { d }, store);
             }

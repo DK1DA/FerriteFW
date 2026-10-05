@@ -75,6 +75,11 @@ impl Fm {
 }
 
 impl View for Fm {
+    /// KEY-19: ◀▶ seek (and change the option on its menu).
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     /// MENU-25: the options page, drawn in the shared options style.
     fn options(self, app: &mut App) -> bool {
         app.screen = Screen::Fm(Fm { menu: true, row: 0 });

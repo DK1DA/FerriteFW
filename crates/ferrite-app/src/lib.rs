@@ -767,6 +767,10 @@ impl App {
             }
             return;
         }
+        // KEY-19: ◀▶ are the knob, unless the screen gives them a job of its own.
+        if matches!((e.key, e.press), (Key::Left | Key::Right, Short | Repeat)) && !self.screen.own_arrows() {
+            return self.screen.knob(self, if e.key == Key::Right { 1 } else { -1 }, store);
+        }
         self.screen.key(self, e, store);
     }
 

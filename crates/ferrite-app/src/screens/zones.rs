@@ -141,7 +141,6 @@ impl View for Zones {
                     None => s.cur = self.cur.step(dir, store.zones() as u16, ROWS1, &keep(store)),
                 }
             }
-            (Key::Left | Key::Right, Short | Repeat, Some(_)) => return self.knob(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Menu, Short, None) if store.zone_name(z).is_some() => s.mode = 2,
             (Key::Menu, Short, Some(0)) => return super::text::open(app, super::text::TextFor::Zone(z), store), // rename (A7)
             (Key::Hash, Short, None) => {

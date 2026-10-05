@@ -162,6 +162,11 @@ fn running(app: &App) -> bool {
 }
 
 impl View for Crossband {
+    /// KEY-19: ◀▶▲▼ move between the start screen's cells.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Crossband repeater"
     }

@@ -795,3 +795,44 @@ fn theme_change_redraws_everything() {
     t.render(&mut fb);
     assert_eq!(fb.at(120, 310), BG);
 }
+
+/// KEY-19: ◀▶ do what the knob does on screens that don't give them a job of their own; the ones that do keep it.
+#[test]
+fn arrows_are_the_knob() {
+    use crate::screens::nav::Dest;
+    use crate::slot::Item;
+    let dests = [
+        Dest::Quick,
+        Dest::Value(Item::Squelch),
+        Dest::Group(7),
+        Dest::Group(1),
+        Dest::Sub(9, 1),
+        Dest::Status,
+        Dest::AprsHeard,
+        Dest::Sensors,
+    ];
+    for d in dests {
+        for (key, step) in [(Key::Right, 1i8), (Key::Left, -1)] {
+            let (mut a, mut b) = (T::new(), T::new());
+            a.open(d);
+            b.open(d);
+            a.tap(key);
+            b.knob(step);
+            b.wait(150);
+            assert_eq!(a.app.screen(), b.app.screen(), "{d:?} {key:?}");
+            assert!(a.app.settings() == b.app.settings(), "{d:?} {key:?}: settings differ");
+            assert_eq!(a.app.slot(0).cfg().squelch, b.app.slot(0).cfg().squelch, "{d:?} {key:?}");
+        }
+    }
+    // And they do something: ▶ in the squelch editor raises the level, as the knob does.
+    let mut a = T::new();
+    let before = a.app.slot(0).cfg().squelch;
+    a.open(Dest::Value(Item::Squelch));
+    a.tap(Key::Right);
+    assert_ne!(a.app.slot(0).cfg().squelch, before);
+    // Home keeps ◀▶ for bands: ▶ is not the knob there.
+    let (mut a, mut b) = (T::new(), T::new());
+    a.tap(Key::Right);
+    b.knob(1);
+    assert_ne!(a.app.slot(0).freq(), b.app.slot(0).freq(), "home: ◀▶ step the band, the knob the frequency");
+}

@@ -170,6 +170,11 @@ impl Pin {
 }
 
 impl View for Pin {
+    /// KEY-19: ◀ deletes a digit.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn own_hold_menu(self) -> bool {
         true
     }

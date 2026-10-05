@@ -246,6 +246,11 @@ impl Setup {
 }
 
 impl View for Setup {
+    /// KEY-19: ◀ deletes in text; otherwise ◀▶ are the knob.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Setup"
     }

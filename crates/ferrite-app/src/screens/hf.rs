@@ -341,6 +341,11 @@ impl Hf {
 }
 
 impl View for Hf {
+    /// KEY-19: ◀▶ step the HF band (and the option on its menu).
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     /// MENU-25: the options page, drawn in the shared options style (not while the patch loads or a frequency
     /// is being typed).
     fn options(self, app: &mut App) -> bool {

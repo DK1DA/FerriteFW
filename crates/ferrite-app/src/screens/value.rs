@@ -86,7 +86,6 @@ impl View for Value {
         use Press::*;
         let item = self.item;
         match (e.key, e.press) {
-            (Key::Left | Key::Right, Short | Repeat) => app.change(item, if e.key == Key::Right { 1 } else { -1 }), // MENU-16
             (Key::Digit(d), Short) if item == Item::Squelch => app.change(item, d as i32 + 1 - cur(app, item).0), // MENU-17: level d (index d + 1)
             (Key::Hash, Short) => app.reset(item), // MENU-18
             (Key::Star, Short) => app.do_undo(),   // MENU-22

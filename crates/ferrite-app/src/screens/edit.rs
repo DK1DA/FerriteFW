@@ -24,6 +24,11 @@ pub struct Edit {
 }
 
 impl View for Edit {
+    /// KEY-19: ◀▶ move across the edit grid; the knob changes the cell.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         "Edit"
     }

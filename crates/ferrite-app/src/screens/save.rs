@@ -146,7 +146,6 @@ impl View for Save {
         match (e.key, e.press) {
             (Key::Up, Short | Repeat) => s.row = (s.row + n - 1) % n,
             (Key::Down, Short | Repeat) => s.row = (s.row + 1) % n,
-            (Key::Left | Key::Right, Short | Repeat) => s = change(s, app, store, if e.key == Key::Right { 1 } else { -1 }),
             (Key::Hash, Short) => match s.at() {
                 F::Shift => s.offset = auto_shift(s.freq),
                 F::Tone => s.tone = 0,

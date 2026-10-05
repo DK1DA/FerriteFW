@@ -74,6 +74,11 @@ fn crosses_relay(p: &RangePreset) -> bool {
 }
 
 impl View for ScanLists {
+    /// KEY-19: ◀▶ step a range edge by 1 MHz; otherwise they are the knob.
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn name(self) -> &'static str {
         match self.page {
             Page::Presets => "Range presets",
@@ -107,8 +112,8 @@ impl View for ScanLists {
                 s.page = Page::Edit((r as i32 + if e.key == Key::Up { -1 } else { 1 }).rem_euclid(ROWS.len() as i32) as u8);
             }
             (Key::Up | Key::Down, Short | Repeat, _) => s.cur = self.cur.step(if e.key == Key::Up { -1 } else { 1 }, n, ROWS2, &ALL),
-            (Key::Left | Key::Right, Short | Repeat, Page::Edit(r)) => {
-                let big = matches!(r, 1 | 2);
+            (Key::Left | Key::Right, Short | Repeat, page) => {
+                let big = matches!(page, Page::Edit(1 | 2));
                 return self.knob(app, if e.key == Key::Right { 1 } else { -1 } * if big { 10 } else { 1 }, store);
             }
             (Key::Menu, Short, Page::Presets) if n > 0 => s.page = Page::Edit(0),
