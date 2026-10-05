@@ -9,7 +9,7 @@ use super::{blocked, mhz5, parse_mhz};
 use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
 use crate::data::{Op, RangePreset, ZoneCfg};
 use crate::screens::groups::{self, SETTABLE, SUBS};
-use crate::slot::{band_of, BAND_125M, CTCSS, DCS, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, STEPS, STEP_12K5};
+use crate::slot::{band_of, BAND_125M, CTCSS, DCS, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
 use crate::App;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::Device;
@@ -313,8 +313,8 @@ const POWERS: [&str; 3] = ["low", "mid", "high"];
 const BUSY: [&str; 3] = ["off", "carrier", "tone"];
 const BW: [&str; 2] = ["wide", "narrow"];
 /// Channel fields by name, in the order a `ch` line writes them.
-const FIELDS: [&str; 17] =
-    ["name", "rx", "offset", "mode", "bw", "tone", "rxtone", "txtone", "power", "zone", "step", "squelch", "busy", "reverse", "skip", "aprs", "rxonly"];
+const FIELDS: [&str; 18] =
+    ["name", "rx", "offset", "mode", "bw", "tone", "rxtone", "txtone", "power", "zone", "step", "squelch", "busy", "reverse", "skip", "aprs", "rxonly", "tx"];
 
 // ---- Channels ----
 
@@ -326,8 +326,14 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     quoted(c.name(), out);
     out.push(b" ");
     out.push(mhz5(c.rx).as_bytes());
-    out.push(b" offset=");
-    offset_word(g.offset, out);
+    if g.split {
+        // Split: TX is a frequency of its own (MENU 5's 4th choice)
+        out.push(b" offset=split tx=");
+        out.push(mhz5(g.offset.max(0) as Freq10).as_bytes());
+    } else {
+        out.push(b" offset=");
+        offset_word(g.offset, out);
+    }
     out.push(b" mode=");
     out.push(MODES[g.mode as usize % MODES.len()].as_bytes());
     out.push(if g.narrow { b" bw=narrow" } else { b" bw=wide" });
@@ -349,7 +355,9 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
         out.push(b" step=");
         step_word(g.step, out);
     }
-    if g.squelch != DEFAULT_CFG.squelch {
+    if g.squelch >= SQ_GLOBAL {
+        out.push(b" squelch=global");
+    } else if g.squelch != DEFAULT_CFG.squelch {
         let _ = uwrite!(out, " squelch={}", g.squelch);
     }
     if g.busy != 0 {
@@ -406,7 +414,14 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
             c.set_name(n.as_bytes());
         }
         1 => c.rx = freq(v, "rx")?,
-        2 => g.offset = offset(v)?,
+        // "split" keeps the TX frequency a tx= field gives (before or after it on the line)
+        2 if same(v, b"split") => {
+            if !g.split {
+                (g.split, g.offset) = (true, 0); // the TX comes from tx=, before or after it on the line
+            }
+        }
+        2 => (g.offset, g.split) = (offset(v)?, false),
+        17 => (g.split, g.offset) = (true, freq(v, "tx")? as i32),
         3 => g.mode = pick(v, &MODES[..SLOT_MODES], "mode")?,
         4 => g.narrow = pick(v, &BW, "bw")? == 1,
         5 => (g.tx_tone, g.rx_tone) = {
@@ -428,9 +443,10 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
             }
         }
         10 => g.step = step(v)?,
+        11 if same(v, b"global") => g.squelch = SQ_GLOBAL,
         11 => match number(v) {
             Some(n) if n <= 9 => g.squelch = n as u8,
-            _ => return Err(msg!("squelch: 0 to 9")),
+            _ => return Err(msg!("squelch: global, or 0 to 9")),
         },
         _ => g.busy = pick(v, &BUSY, "busy")?,
     }
@@ -442,11 +458,14 @@ fn check(c: &Channel) -> Result<(), Msg> {
     if !(mhz(64)..mhz(1000)).contains(&c.rx) {
         return Err(msg!("{}", slow!("rx: a channel is from 64 to 1000 MHz")));
     }
-    let tx = c.rx as i64 + c.cfg.offset as i64;
+    if c.cfg.split && c.cfg.offset <= 0 {
+        return Err(msg!("{}", slow!("offset=split needs its TX frequency: tx=146.52")));
+    }
+    let tx = c.cfg.tx_of(c.rx) as i64;
     if !(mhz(64) as i64..mhz(1000) as i64).contains(&tx) {
         return Err(msg!("{}", slow!("offset: the TX frequency would be outside 64 to 1000 MHz")));
     }
-    if band_of(c.rx) == Some(BAND_125M) && c.cfg.power != 0 {
+    if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) && c.cfg.power != 0 { // the cap goes by the TX band
         return Err(msg!("{}", slow!("power: fixed at 0.25 W on 1.25 m; use power=low")));
     }
     Ok(())
@@ -973,7 +992,7 @@ const HELP: [&str; 15] = [
     slow!("  set 0 7 1 Dark         a setting, by its number in the radio's menu"),
     slow!("  get 0 7 1   get        one setting; every setting not at its default"),
     slow!("  ch 12                  channel 12, as its ch line"),
-    slow!("  ch 12 power high       one field: name rx offset mode bw tone rxtone txtone"),
+    slow!("  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone"),
     slow!("                         power zone step squelch busy reverse skip aprs rxonly"),
     slow!("  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel"),
     slow!("  ch 12 delete           delete channel 12"),

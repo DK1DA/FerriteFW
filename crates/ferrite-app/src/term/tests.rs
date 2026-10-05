@@ -398,8 +398,8 @@ fn channels_list_and_edit() {
     r.send(b"\r");
     assert_eq!(r.term.page(), Page::Edit);
     assert!(r.vt.has(&std::format!("Channels > {} ", first.num + 1)));
-    for _ in 0..7 {
-        r.send(b"\x1b[B"); // down to Power
+    for _ in 0..8 {
+        r.send(b"\x1b[B"); // down to Power (past Offset and TX)
     }
     assert_eq!(FIELDS[r.term.field as usize], F::It(Item::Power));
     r.send(b"\x1b[C");
@@ -453,12 +453,13 @@ fn the_radio_follows_an_edit() {
     }
     while r.app.pop_cmd().is_some() {}
     r.send(b"1\r");
-    for _ in 0..8 {
+    for _ in 0..9 {
         r.send(b"\x1b[B"); // Squelch
     }
     assert_eq!(FIELDS[r.term.field as usize], F::It(Item::Squelch));
     r.send(b"\x1b[C");
-    assert_eq!(r.app.slot(0).cfg().squelch, (first.cfg.squelch + 1) % 10, "the slot's copy follows");
+    let next = if first.cfg.squelch >= 9 { crate::slot::SQ_GLOBAL } else { first.cfg.squelch + 1 }; // 9, then Global
+    assert_eq!(r.app.slot(0).cfg().squelch, next, "the slot's copy follows");
 }
 
 /// Zones: every channel, each zone, no zone; Enter lists that zone's channels and Esc comes back.
@@ -851,7 +852,10 @@ fn dump_load_1000_channels() {
             squelch: (n % 10) as u8,
             busy: (n % 3) as u8,
             reverse: n % 5 == 0,
+            // every 7th a split (odd: RX on one band, TX on another)
+            split: n % 7 == 3,
         };
+        let cfg = if cfg.split { SlotCfg { offset: mhz(146) as i32 + (n as i32 % 40) * 1250, power: 0, ..cfg } } else { cfg };
         let mut c = Channel { num: n, zone: if n % 31 == 30 { NO_ZONE } else { (n % 31) as u8 }, rx, name: [0; 16], cfg, flags: (n % 8) as u8 & (FLAG_SKIP | FLAG_APRS | FLAG_RX_ONLY) };
         let mut name = Buf::<16>::new();
         let _ = uwrite!(name, "{}{}", if n % 9 == 0 { "q\"\\ " } else { "Ch " }, n);
@@ -924,3 +928,53 @@ fn load_waits_for_the_store() {
     assert!(r.raw().contains("Done: 1 lines read, 1 applied, 0 refused."));
 }
 
+
+/// Split from the command line and the dump: offset=split with tx= (either order), the TX band's power cap,
+/// squelch=global, and a ch line that loads back the same.
+#[test]
+fn command_split_and_global() {
+    let mut r = Rig::main();
+    r.cmd("ch 310 \"Cross\" 446.0 tx=146.52 offset=split squelch=global");
+    let c = r.store.by_num(309).expect("made").0;
+    assert!(c.cfg.split);
+    assert_eq!((c.cfg.offset, c.cfg.squelch), (14_652_000, crate::slot::SQ_GLOBAL));
+    r.cmd("ch 311 \"Cross2\" 446.0 offset=split tx=146.52");
+    assert!(r.store.by_num(310).expect("either order").0.cfg.split);
+    r.cmd("ch 312 \"NoTx\" 446.0 offset=split");
+    assert!(r.bottom().contains("needs its TX frequency"), "{}", r.bottom());
+    assert!(r.store.by_num(311).is_none());
+    // TX on 1.25 m: power is capped by the TX band even with RX on 70 cm.
+    r.cmd("ch 313 \"Odd\" 446.0 tx=223.5 power=high");
+    assert!(r.bottom().contains("fixed at 0.25 W"), "{}", r.bottom());
+    // The ch line, and back.
+    r.cmd("ch 310");
+    assert!(r.raw().contains("ch 310 \"Cross\" 446.00000 offset=split tx=146.52000 mode=FM bw=narrow"), "{}", r.raw());
+    assert!(r.raw().contains("squelch=global"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("ch 310 offset=+5");
+    let c = r.store.by_num(309).unwrap().0;
+    assert!(!c.cfg.split && c.cfg.offset == 500_000, "a shift ends the split");
+}
+
+/// The channel editor: Offset stepped onto Split moves to the TX row to type the frequency.
+#[test]
+fn editor_split() {
+    let mut r = Rig::main();
+    let first = r.store.by_number(0).unwrap();
+    r.send(b"1");
+    r.send(b"\x1b[H");
+    r.send(b"\r");
+    let off = FIELDS.iter().position(|f| *f == F::It(Item::Offset)).unwrap();
+    for _ in 0..off {
+        r.send(b"\x1b[B");
+    }
+    // Simplex -> Split is one step left (the 4th choice wraps).
+    r.send(b"\x1b[D");
+    assert_eq!(FIELDS[r.term.field as usize], F::Tx, "typing the TX now");
+    r.send(b"144.39\r");
+    r.poll();
+    let c = r.store.by_num(first.num).unwrap().0;
+    assert!(c.cfg.split, "{:?}", c.cfg);
+    assert_eq!(c.cfg.offset, 14_439_000);
+    assert!(r.vt.has("Split 144.390") && r.vt.has("144.39000 MHz, split"), "{}", r.vt.text());
+}

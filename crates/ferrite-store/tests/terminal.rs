@@ -74,10 +74,14 @@ fn source() -> (App, Store) {
             offset: [0, 60_000, -500_000][n as usize % 3],
             power: (n % 3) as u8,
             step: (n % 14) as u8,
-            squelch: (n % 10) as u8,
+            // levels 0-9 and Global
+            squelch: (n % 11) as u8,
             busy: (n % 3) as u8,
             reverse: n % 5 == 0,
+            split: n % 7 == 3,
         };
+        // a split: TX on 70 cm while RX is on 2 m, low power (the 1.25 m cap goes by TX)
+        let cfg = if cfg.split { SlotCfg { offset: mhz(446) as i32 + (n as i32 % 16) * 1250, ..cfg } } else { cfg };
         let mut c = Channel { num: n * 3, zone: if n % 21 == 20 { NO_ZONE } else { (n % 21) as u8 }, rx: mhz(144) + (k * 1250) % 400_000, name: [0; 16], cfg, flags: (n % 8) as u8 };
         c.set_name(format!("{}\"{}", if n % 7 == 0 { "q\\" } else { "C" }, n).as_bytes());
         assert!(s.apply(ChanWrite::Put { ch: c, from: None }));

@@ -126,12 +126,14 @@ enum F {
     Name,
     Zone,
     Rx,
+    /// Split's TX frequency (typed; ◀▶ steps it while split).
+    Tx,
     It(Item),
     Flag(u8, &'static str),
     Home,
 }
 
-const FIELDS: [F; 14] = [
+const FIELDS: [F; 15] = [
     F::Name,
     F::Zone,
     F::Rx,
@@ -139,6 +141,7 @@ const FIELDS: [F; 14] = [
     F::It(Item::Bandwidth),
     F::It(Item::Tones),
     F::It(Item::Offset),
+    F::Tx,
     F::It(Item::Power),
     F::It(Item::Squelch),
     F::It(Item::BusyLock),
@@ -711,7 +714,7 @@ impl Term {
             K::Ch(b'#') => self.default(app, c, f),
             K::Enter => match f {
                 F::Name => self.line = Some(Buf::from(c.name())),
-                F::Rx => self.line = Some(Buf::new()),
+                F::Rx | F::Tx => self.line = Some(Buf::new()),
                 _ => self.change(app, c, f, 1, store),
             },
             K::Esc => {
@@ -737,7 +740,18 @@ impl Term {
                 let step = STEPS[BANDS[band_near(c.rx)].step as usize].0 as i32;
                 n.rx = (c.rx as i32 + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1) as Freq10; // CHAN-22
             }
-            F::It(Item::Power) if band_of(c.rx) == Some(BAND_125M) => {
+            F::Tx if c.cfg.split => {
+                let step = STEPS[BANDS[band_near(c.cfg.offset.max(0) as Freq10)].step as usize].0 as i32;
+                n.cfg.offset = (c.cfg.offset + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1);
+            }
+            F::Tx => return self.say(slow!("TX: Enter types a TX frequency (split)").as_bytes(), false),
+            F::It(Item::Offset) if (Item::Offset.get(&c.cfg).0 + d).rem_euclid(4) == 3 => {
+                // Split needs its frequency: the TX row, typing
+                self.field = FIELDS.iter().position(|x| *x == F::Tx).unwrap_or(0) as u8;
+                self.line = Some(Buf::new());
+                return self.say(slow!("Split: type the TX frequency, then Enter").as_bytes(), false);
+            }
+            F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => {
                 return self.say(slow!("Power: fixed at 0.25 W on 1.25 m").as_bytes(), true); // TX-9, TERM-7
             }
             F::It(Item::Power) if c.flags & FLAG_RX_ONLY != 0 => {
@@ -762,7 +776,7 @@ impl Term {
     fn default(&mut self, app: &mut App, c: Channel, f: F) {
         let mut n = c;
         match f {
-            F::It(Item::Power) if band_of(c.rx) == Some(BAND_125M) => return,
+            F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => return,
             F::It(it) => {
                 let shift = BANDS[band_near(c.rx)].shift;
                 it.set(&mut n.cfg, it.default_of(), shift);
@@ -793,6 +807,10 @@ impl Term {
             F::Rx => match parse_mhz(s) {
                 Some(f) if (mhz(64)..mhz(1000)).contains(&f) => n.rx = f, // CHAN-22
                 _ => return self.say(slow!("RX: a frequency from 64 to 1000 MHz, e.g. 146.52").as_bytes(), true),
+            },
+            F::Tx => match parse_mhz(s) {
+                Some(f) if (mhz(64)..mhz(1000)).contains(&f) => (n.cfg.split, n.cfg.offset) = (true, f as i32),
+                _ => return self.say(slow!("TX: a frequency from 64 to 1000 MHz, e.g. 146.52").as_bytes(), true),
             },
             _ => return,
         }
@@ -1337,6 +1355,7 @@ impl Term {
                     F::Name => "Name",
                     F::Zone => "Zone",
                     F::Rx => "RX",
+                    F::Tx => "TX",
                     F::It(it) => it.name(),
                     F::Flag(_, l) => l,
                     F::Home => "Home",
@@ -1358,7 +1377,11 @@ impl Term {
                         w.s(mhz5(c.rx).as_bytes());
                         w.s(b" MHz");
                     }
-                    (F::It(Item::Power), _) if band_of(c.rx) == Some(BAND_125M) => w.s(b"0.25 W"),
+                    (F::Tx, _) => {
+                        w.s(mhz5(c.cfg.tx_of(c.rx)).as_bytes());
+                        w.s(if c.cfg.split { b" MHz, split" } else { b" MHz" });
+                    }
+                    (F::It(Item::Power), _) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => w.s(b"0.25 W"),
                     (F::It(it), _) => {
                         let mut v = Buf::<16>::new();
                         it.text(&c.cfg, true, &mut v);
@@ -1374,6 +1397,7 @@ impl Term {
                     w.s(match f {
                         F::Name => "Enter types it",
                         F::Rx => "<- -> step, Enter types it",
+                        F::Tx => "Enter types it (split)",
                         _ => "<- -> change",
                     }
                     .as_bytes());
@@ -1387,6 +1411,10 @@ impl Term {
                     } else {
                         w.s(self.note.as_bytes());
                     }
+                } else if c.cfg.split {
+                    w.s(b"Split: TX ");
+                    w.s(mhz5(c.cfg.offset.max(0) as Freq10).as_bytes());
+                    w.s(slow!(" MHz, whatever RX is. Saved as you go.").as_bytes());
                 } else if c.cfg.offset != 0 {
                     let tx = (c.rx as i64 + c.cfg.offset as i64).max(0) as Freq10;
                     w.s(b"TX ");
