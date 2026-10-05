@@ -1074,7 +1074,7 @@ impl Term {
         (self.con, self.clen) = (Con::Done, 0);
     }
 
-    fn row<O: Out, S: ChannelStore>(&self, r: u8, cx: &Cx<S>, w: &mut W<O>) {
+    fn row<S: ChannelStore>(&self, r: u8, cx: &Cx<S>, w: &mut W) {
         if r == 0 {
             return self.top(cx, w);
         }
@@ -1107,7 +1107,7 @@ impl Term {
     }
 
     /// The top line (TERM-11): firmware, callsign and model; the link in the middle; the clock at the right.
-    fn top<O: Out, S: ChannelStore>(&self, cx: &Cx<S>, w: &mut W<O>) {
+    fn top<S: ChannelStore>(&self, cx: &Cx<S>, w: &mut W) {
         w.rev();
         w.s(b" Ferrite ");
         w.s(version());
@@ -1132,7 +1132,7 @@ impl Term {
     }
 
     /// The bottom line: the keys for this page (TERM-11).
-    fn hints<O: Out>(&self, w: &mut W<O>) {
+    fn hints(&self, w: &mut W) {
         if self.cmd {
             // The command line: its tail, when it is wider than the row.
             let n = self.clen as usize;
@@ -1179,7 +1179,7 @@ impl Term {
         w.fill();
     }
 
-    fn help_row<O: Out>(&self, b: u8, w: &mut W<O>) {
+    fn help_row(&self, b: u8, w: &mut W) {
         let lines: &[&str] = match self.page {
             Page::Main => &HELP_MAIN,
             Page::Channels => &HELP_CHANNELS,
@@ -1197,7 +1197,7 @@ impl Term {
         }
     }
 
-    fn main_row<O: Out, S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W<O>) {
+    fn main_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
         match b {
             1 => {
                 w.s(b" ");
@@ -1218,10 +1218,12 @@ impl Term {
                 let mut v = Buf::<48>::new();
                 match i {
                     0 => {
-                        let _ = uwrite!(v, "{} used of 1000", cx.store.count());
+                        v.push(digits(cx.store.count() as u32, &mut [0; 10]));
+                        v.push(b" used of 1000");
                     }
                     1 => {
-                        let _ = uwrite!(v, "{} zones", cx.store.zones());
+                        v.push(digits(cx.store.zones() as u32, &mut [0; 10]));
+                        v.push(b" zones");
                     }
                     2 => v.set(slow!("same numbers as MENU 0 on the radio").as_bytes()),
                     3 => v.set(slow!("the event log and live activity").as_bytes()),
@@ -1255,7 +1257,7 @@ impl Term {
         }
     }
 
-    fn chan_row<O: Out, S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W<O>) {
+    fn chan_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
         let st = cx.store;
         let body = self.rows - 2;
         match b {
@@ -1265,9 +1267,10 @@ impl Term {
                 w.s(b"   zone ");
                 let name = zone_name(self.zone, st);
                 w.bold(name.as_bytes());
-                let mut v = Buf::<32>::new();
-                let _ = uwrite!(v, " ({})   all {}", list_len(self.zone, st), st.count());
-                w.s(v.as_bytes());
+                w.s(b" (");
+                w.n(list_len(self.zone, st) as u32);
+                w.s(b")   all ");
+                w.n(st.count() as u32);
             }
             2 => {
                 w.bold(b" ");
@@ -1288,10 +1291,11 @@ impl Term {
                 if sel {
                     w.rev();
                 }
+                let mut d = [0; 10];
+                let num = digits(c.num as u32 + 1, &mut d);
+                w.at(4u16.saturating_sub(num.len() as u16));
+                w.s(num);
                 let mut v = Buf::<16>::new();
-                let _ = uwrite!(v, "{}", c.num as u32 + 1);
-                w.at(4u16.saturating_sub(v.len() as u16));
-                w.s(v.as_bytes());
                 w.at(6);
                 w.s(c.name());
                 w.at(23);
@@ -1320,9 +1324,9 @@ impl Term {
             }
             _ if b == body - 2 => {
                 if let Some(c) = chan_at(self.zone, self.chan_sel, st) {
-                    let mut v = Buf::<80>::new();
-                    let _ = uwrite!(v, "  Channel {} \u{b7} ", c.num as u32 + 1);
-                    w.s(v.as_bytes());
+                    w.s(b"  Channel ");
+                    w.n(c.num as u32 + 1);
+                    w.s(b" . ");
                     w.s(zone_name(c.zone, st).as_bytes());
                     if cx.app.set.home_ch == Some(c.num) {
                         w.s(b" \xb7 home channel");
@@ -1333,14 +1337,16 @@ impl Term {
         }
     }
 
-    fn edit_row<O: Out, S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W<O>) {
+    fn edit_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
         let Some(c) = self.edit else { return };
         let body = self.rows - 2;
         match b {
             0 => {
                 w.s(b" ");
                 let mut v = Buf::<40>::new();
-                let _ = uwrite!(v, "Channels > {} ", c.num as u32 + 1);
+                v.push(b"Channels > ");
+                v.push(digits(c.num as u32 + 1, &mut [0; 10]));
+                v.push(b" ");
                 v.push(c.name());
                 w.bold(v.as_bytes());
                 w.s(b"   zone ");
@@ -1428,16 +1434,16 @@ impl Term {
         }
     }
 
-    fn zones_row<O: Out, S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W<O>) {
+    fn zones_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
         let st = cx.store;
         let n = st.zones() as u16 + 2;
         match b {
             0 => {
                 w.s(b" ");
                 w.bold(b"Zones");
-                let mut v = Buf::<24>::new();
-                let _ = uwrite!(v, "   {} zones", st.zones());
-                w.s(v.as_bytes());
+                w.s(b"   ");
+                w.n(st.zones() as u32);
+                w.s(b" zones");
             }
             _ if b >= 2 && ((b - 2) as u16) < n.min(self.page_rows() + 2) => {
                 let i = (b - 2) as u16 + self.zone_sel.saturating_sub(self.page_rows() + 1);
@@ -1452,9 +1458,8 @@ impl Term {
                 w.at(3);
                 w.s(zone_name(z, st).as_bytes());
                 w.at(26);
-                let mut v = Buf::<16>::new();
-                let _ = uwrite!(v, "{} channels", list_len(z, st));
-                w.s(v.as_bytes());
+                w.n(list_len(z, st) as u32);
+                w.s(b" channels");
                 if sel {
                     w.fill();
                 }
@@ -1463,7 +1468,7 @@ impl Term {
         }
     }
 
-    fn set_row<O: Out, S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W<O>) {
+    fn set_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
         let app = cx.app;
         if self.g == 0 {
             match b {
@@ -1529,7 +1534,8 @@ impl Term {
                     None => {
                         match &p[..pl] {
                             [2, 1] => {
-                                let _ = uwrite!(v, "{} channels", cx.store.count());
+                                v.push(digits(cx.store.count() as u32, &mut [0; 10]));
+                                v.push(b" channels");
                             }
                             _ => v.set(e.1.as_bytes()),
                         }
@@ -1559,7 +1565,8 @@ impl Term {
                 let mut t = Buf::<40>::new();
                 t.push(b"  Path on the radio: MENU 0");
                 for x in &p[..pl] {
-                    let _ = uwrite!(t, " {}", x);
+                    t.push(b" ");
+                    t.push(digits(*x as u32, &mut [0; 10]));
                 }
                 w.s(t.as_bytes());
             }
@@ -1575,7 +1582,7 @@ impl Term {
         }
     }
 
-    fn monitor_row<O: Out, S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W<O>) {
+    fn monitor_row<S: ChannelStore>(&self, b: u8, cx: &Cx<S>, w: &mut W) {
         let body = self.rows - 2;
         if b == 0 {
             w.s(b" ");
@@ -1630,7 +1637,7 @@ impl Term {
 // ---- Rows shared by pages ----
 
 /// The banner (TERM-20): firmware and version, callsign and link, how to start. No ASCII art.
-fn splash<O: Out, S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W<O>) {
+fn splash<S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W) {
     match b {
         3 => {
             w.at(2);
@@ -1654,7 +1661,7 @@ fn splash<O: Out, S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W<O>) {
     }
 }
 
-fn about<O: Out, S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W<O>) {
+fn about<S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W) {
     let d = cx.dev;
     match b {
         1 => {
@@ -1684,16 +1691,18 @@ fn about<O: Out, S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W<O>) {
         }
         13 => {
             w.at(2);
-            let mut v = Buf::<40>::new();
-            let _ = uwrite!(v, "Channels      {} of 1000, {} zones", cx.store.count(), cx.store.zones());
-            w.s(v.as_bytes());
+            w.s(b"Channels      ");
+            w.n(cx.store.count() as u32);
+            w.s(b" of 1000, ");
+            w.n(cx.store.zones() as u32);
+            w.s(b" zones");
         }
         _ => {}
     }
 }
 
 /// "A  VFO  146.520 00  FM-N  T 100.0   RX S7   active".
-fn slot_line<O: Out, S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W<O>) {
+fn slot_line<S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W) {
     let s = cx.app.slot(i);
     let l = cx.live.slots[i as usize];
     w.at(2);
@@ -1735,15 +1744,15 @@ fn slot_line<O: Out, S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W<O>) {
     }
 }
 
-fn item<O: Out>(it: Item, c: &Channel, w: &mut W<O>) {
+fn item(it: Item, c: &Channel, w: &mut W) {
     let mut v = Buf::<16>::new();
     it.text(&c.cfg, false, &mut v);
     w.s(v.as_bytes());
 }
 
-fn flags<O: Out>(c: &Channel, app: &App, w: &mut W<O>) {
+fn flags(c: &Channel, app: &App, w: &mut W) {
     let mut first = true;
-    let mut f = |w: &mut W<O>, s: &[u8]| {
+    let mut f = |w: &mut W, s: &[u8]| {
         if !first {
             w.s(b" ");
         }
@@ -1880,16 +1889,30 @@ impl<T: Sink> Out for SinkOut<'_, T> {
     }
 }
 
+/// `n` in decimal, written into the end of `d`: one formatter for every number the terminal shows.
+#[inline(never)]
+pub(crate) fn digits(mut n: u32, d: &mut [u8; 10]) -> &[u8] {
+    let mut i = d.len();
+    loop {
+        i -= 1;
+        d[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            return &d[i..];
+        }
+    }
+}
+
 /// One row: text clipped to the width, columns counted (attributes take none), reverse video and bold only
 /// (TERM-1: plain VT100).
-struct W<'a, O: Out> {
-    o: &'a mut O,
+struct W<'a> {
+    o: &'a mut dyn Out,
     col: u16,
     cols: u16,
     rev: bool,
 }
 
-impl<O: Out> W<'_, O> {
+impl W<'_> {
     /// Text, printable ASCII; anything else shows as `?` ("·" as a dot).
     fn s(&mut self, b: &[u8]) {
         let mut i = 0;
@@ -1905,6 +1928,11 @@ impl<O: Out> W<'_, O> {
             self.col += 1;
             i += skip;
         }
+    }
+
+    /// A number in decimal.
+    fn n(&mut self, n: u32) {
+        self.s(digits(n, &mut [0; 10]));
     }
 
     fn digit(&mut self, d: u8) {

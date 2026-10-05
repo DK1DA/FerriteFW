@@ -24,12 +24,79 @@ pub type Line = Buf<256>;
 /// A command's answer, or why it was refused.
 pub type Msg = Buf<96>;
 
+/// A message from its template (in slow flash) and arguments: every answer and refusal goes through the one
+/// [`fmt`], so a call site is a pointer and its arguments rather than its own formatting code.
 macro_rules! msg {
-    ($($t:tt)*) => {{
-        let mut m = Msg::new();
-        let _ = uwrite!(m, $($t)*);
-        m
-    }};
+    ($t:literal) => {
+        fmt(slow!($t), &[])
+    };
+    ($t:literal, $($a:expr),+ $(,)?) => {
+        fmt(slow!($t), &[$(Arg::from($a)),+])
+    };
+}
+
+/// A message's argument: a number, text as written, or bytes from the user (non-printing ones shown as `?`).
+#[derive(Clone, Copy)]
+pub(crate) enum Arg<'a> {
+    N(u32),
+    S(&'a str),
+    B(&'a [u8]),
+}
+
+macro_rules! arg_num {
+    ($($t:ty),*) => {$(
+        impl From<$t> for Arg<'_> {
+            fn from(n: $t) -> Self {
+                Arg::N(n as u32)
+            }
+        }
+    )*};
+}
+arg_num!(u8, u16, u32, usize);
+
+impl<'a> From<&'a str> for Arg<'a> {
+    fn from(s: &'a str) -> Self {
+        Arg::S(s)
+    }
+}
+
+impl<'a> From<Bytes<'a>> for Arg<'a> {
+    fn from(b: Bytes<'a>) -> Self {
+        Arg::B(b.0)
+    }
+}
+
+/// `pre`, then `n` in decimal.
+fn num(out: &mut Line, pre: &[u8], n: u32) {
+    out.push(pre);
+    out.push(super::digits(n, &mut [0; 10]));
+}
+
+/// Fills each `{}` in `t` with the next argument.
+#[inline(never)]
+fn fmt(t: &str, args: &[Arg]) -> Msg {
+    let mut m = Msg::new();
+    let (t, mut k, mut i) = (t.as_bytes(), 0, 0);
+    while i < t.len() {
+        if t[i] == b'{' && t.get(i + 1) == Some(&b'}') {
+            match args.get(k) {
+                Some(Arg::N(n)) => m.push(super::digits(*n, &mut [0; 10])),
+                Some(Arg::S(s)) => m.push(s.as_bytes()),
+                Some(Arg::B(b)) => {
+                    for &c in *b {
+                        m.push(&[if (0x20..0x7F).contains(&c) { c } else { b'?' }]);
+                    }
+                }
+                None => {}
+            }
+            k += 1;
+            i += 2;
+        } else {
+            m.push(&t[i..i + 1]);
+            i += 1;
+        }
+    }
+    m
 }
 
 /// What a line did.
@@ -94,7 +161,7 @@ impl<'a> Toks<'a> {
                 j += if s[j] == b'\\' { 2 } else { 1 };
             }
             if j >= s.len() {
-                return Err(msg!("{}", slow!("a name has no closing quote: end it with \"")));
+                return Err(msg!("a name has no closing quote: end it with \""));
             }
             self.i = j + 1;
             return Ok(Some(Tok::Quoted(&s[start..j])));
@@ -219,10 +286,11 @@ fn tone_word(t: u16, out: &mut Line) {
     if t == 0 {
         out.push(b"off");
     } else if t & DCS_FLAG == 0 {
-        let _ = uwrite!(out, "{}.{}", t / 10, t % 10);
+        num(out, b"", t as u32 / 10);
+        num(out, b".", t as u32 % 10);
     } else {
         let c = t & 0x1FF;
-        let _ = uwrite!(out, "D{}{}{}{}", c >> 6, (c >> 3) & 7, c & 7, if t & DCS_INV != 0 { "I" } else { "N" });
+        out.push(&[b'D', b'0' + (c >> 6) as u8, b'0' + ((c >> 3) & 7) as u8, b'0' + (c & 7) as u8, if t & DCS_INV != 0 { b'I' } else { b'N' }]);
     }
 }
 
@@ -278,7 +346,7 @@ fn offset(w: &[u8]) -> Result<i32, Msg> {
     };
     match parse_mhz(m) {
         Some(f) if m.iter().all(|c| c.is_ascii_digit() || *c == b'.') && f < mhz(100) => Ok(if neg { -(f as i32) } else { f as i32 }),
-        _ => Err(msg!("{}", slow!("offset: simplex, or MHz with a sign, e.g. +5 or -0.6"))),
+        _ => Err(msg!("offset: simplex, or MHz with a sign, e.g. +5 or -0.6")),
     }
 }
 
@@ -290,7 +358,7 @@ fn step_word(s: u8, out: &mut Line) {
 }
 
 fn step(w: &[u8]) -> Result<u8, Msg> {
-    STEPS.iter().position(|s| same(w, s.1.as_bytes())).map(|i| i as u8).ok_or_else(|| msg!("{}", slow!("step: one of the radio's steps, e.g. 12.5kHz or 25kHz")))
+    STEPS.iter().position(|s| same(w, s.1.as_bytes())).map(|i| i as u8).ok_or_else(|| msg!("step: one of the radio's steps, e.g. 12.5kHz or 25kHz"))
 }
 
 fn pick(w: &[u8], list: &[&str], what: &str) -> Result<u8, Msg> {
@@ -322,7 +390,8 @@ const FIELDS: [&str; 18] =
 /// defaults. Every field `load` reads back is here, so a dump and a load give the same channel.
 fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     let g = &c.cfg;
-    let _ = uwrite!(out, "ch {} ", c.num as u32 + 1);
+    num(out, b"ch ", c.num as u32 + 1);
+    out.push(b" ");
     quoted(c.name(), out);
     out.push(b" ");
     out.push(mhz5(c.rx).as_bytes());
@@ -349,7 +418,7 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     out.push(b" power=");
     out.push(POWERS[g.power as usize % 3].as_bytes());
     if c.zone != NO_ZONE && c.zone < st.zones() {
-        let _ = uwrite!(out, " zone={}", c.zone as u32 + 1);
+        num(out, b" zone=", c.zone as u32 + 1);
     }
     if g.step != DEFAULT_CFG.step {
         out.push(b" step=");
@@ -358,7 +427,7 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     if g.squelch >= SQ_GLOBAL {
         out.push(b" squelch=global");
     } else if g.squelch != DEFAULT_CFG.squelch {
-        let _ = uwrite!(out, " squelch={}", g.squelch);
+        num(out, b" squelch=", g.squelch as u32);
     }
     if g.busy != 0 {
         out.push(b" busy=");
@@ -456,17 +525,17 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
 /// What the radio's channel editor would refuse (CHAN-22, TX-9, TERM-7).
 fn check(c: &Channel) -> Result<(), Msg> {
     if !(mhz(64)..mhz(1000)).contains(&c.rx) {
-        return Err(msg!("{}", slow!("rx: a channel is from 64 to 1000 MHz")));
+        return Err(msg!("rx: a channel is from 64 to 1000 MHz"));
     }
     if c.cfg.split && c.cfg.offset <= 0 {
-        return Err(msg!("{}", slow!("offset=split needs its TX frequency: tx=146.52")));
+        return Err(msg!("offset=split needs its TX frequency: tx=146.52"));
     }
     let tx = c.cfg.tx_of(c.rx) as i64;
     if !(mhz(64) as i64..mhz(1000) as i64).contains(&tx) {
-        return Err(msg!("{}", slow!("offset: the TX frequency would be outside 64 to 1000 MHz")));
+        return Err(msg!("offset: the TX frequency would be outside 64 to 1000 MHz"));
     }
     if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) && c.cfg.power != 0 { // the cap goes by the TX band
-        return Err(msg!("{}", slow!("power: fixed at 0.25 W on 1.25 m; use power=low")));
+        return Err(msg!("power: fixed at 0.25 W on 1.25 m; use power=low"));
     }
     Ok(())
 }
@@ -518,7 +587,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                 None => (w, t.next()?),
             };
             if band_of(c.rx) == Some(BAND_125M) && same(key, b"power") {
-                return Err(msg!("{}", slow!("power: fixed at 0.25 W on 1.25 m")));
+                return Err(msg!("power: fixed at 0.25 W on 1.25 m"));
             }
             field(&mut c, key, v, st)?;
             if t.next()?.is_some() {
@@ -539,7 +608,8 @@ fn resume_word(r: u8, out: &mut Line) {
         11 => out.push(b"carrier"),
         12 => out.push(b"stop"),
         s => {
-            let _ = uwrite!(out, "{}s", s);
+            num(out, b"", s as u32);
+            out.push(b"s");
         }
     }
 }
@@ -553,75 +623,102 @@ fn secs(w: &[u8], max: u32, what: &str) -> Result<u8, Msg> {
 
 fn zone_line<S: ChannelStore>(z: u8, st: &S, out: &mut Line) {
     let c = st.data().zone_cfg(z);
-    let _ = uwrite!(out, "zone {} ", z as u32 + 1);
+    num(out, b"zone ", z as u32 + 1);
+    out.push(b" ");
     quoted(st.zone_label(z, b"", b"").as_bytes(), out);
     let o = |b: bool| if b { "on" } else { "off" };
-    let _ = uwrite!(out, " scan={} shown={} distance={} resume=", o(c.scan_all), o(c.shown), o(c.by_distance));
+    for (k, b) in [(" scan=", c.scan_all), (" shown=", c.shown), (" distance=", c.by_distance)] {
+        out.push(k.as_bytes());
+        out.push(o(b).as_bytes());
+    }
+    out.push(b" resume=");
     resume_word(c.resume, out);
     out.push(b" dwell=");
     if c.dwell == 255 {
         out.push(b"radio");
     } else {
-        let _ = uwrite!(out, "{}s", c.dwell);
+        num(out, b"", c.dwell as u32);
+        out.push(b"s");
     }
-    let _ = uwrite!(out, " smart={}", o(c.smart));
+    out.push(b" smart=");
+    out.push(o(c.smart).as_bytes());
     for (i, p) in c.pri.iter().enumerate() {
         if let Some(n) = p {
-            let _ = uwrite!(out, " pri{}={}", i + 1, *n as u32 + 1);
+            num(out, b" pri", i as u32 + 1);
+            num(out, b"=", *n as u32 + 1);
         }
     }
 }
 
+/// A `key=value` field: the key and the value.
+type Kv<'a> = (&'a [u8], &'a [u8]);
+
+/// The next `key=value` after a zone's or preset's name; `what` names the line ("zone"), `eg` an example field.
+fn kv<'a>(t: &mut Toks<'a>, what: &str, eg: &str) -> Result<Option<Kv<'a>>, Msg> {
+    match t.next()? {
+        None => Ok(None),
+        Some(Tok::Quoted(_)) => Err(msg!("{}: one name per {}", what, what)),
+        Some(Tok::Word(w)) => {
+            let e = w.iter().position(|&b| b == b'=').ok_or_else(|| msg!("{}: fields are key=value, e.g. {}", what, eg))?;
+            Ok(Some((&w[..e], &w[e + 1..])))
+        }
+    }
+}
+
+/// Zones and presets are numbered in order: `n` (0-based) may replace one up to `have`, or add the next.
+fn in_order(what: &str, n: u8, have: u8) -> Result<(), Msg> {
+    if n > have {
+        return Err(msg!("{} {}: {}s are made in order; the radio has {}, so the next is {} {}", what, n as u32 + 1, what, have, what, have as u32 + 1));
+    }
+    Ok(())
+}
+
+/// Hands a zone or preset to the store, unless it is already what the store holds.
+fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u8, same_as_stored: bool, op: Op) -> Result<Done, Msg> {
+    if same_as_stored {
+        return Ok(Done::Said(msg!("{} {} unchanged", cap, n as u32 + 1)));
+    }
+    if !st.data().request(op) {
+        return Err(msg!("{} {}: the radio couldn't take it now (full, or busy writing); try again", what, n as u32 + 1));
+    }
+    Ok(Done::Said(msg!("{} {} saved", cap, n as u32 + 1)))
+}
+
+const ZONE_KEYS: [&str; 8] = ["scan", "shown", "distance", "smart", "resume", "dwell", "pri1", "pri2"];
+
 fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let z = index(t.word("zone: which zone, e.g. zone 2 \"Repeaters\"")?, 254, "zone")? as u8;
     let have = st.zones();
-    if z > have {
-        return Err(msg!("zone {}: zones are made in order; the radio has {}, so the next is zone {}", z as u32 + 1, have, have as u32 + 1));
-    }
+    in_order("zone", z, have)?;
     let Some(Tok::Quoted(q)) = t.next()? else {
         return Err(msg!("zone {}: its name in quotes, e.g. zone {} \"Repeaters\"", z as u32 + 1, z as u32 + 1));
     };
     let name: Name = unquote(q, "name")?;
     let mut c = if z < have { st.data().zone_cfg(z) } else { ZoneCfg { shown: true, dwell: 255, ..ZoneCfg::default() } };
-    while let Some(tok) = t.next()? {
-        let Tok::Word(w) = tok else { return Err(msg!("zone: one name per zone")) };
-        let e = w.iter().position(|&b| b == b'=').ok_or_else(|| msg!("zone: fields are key=value, e.g. scan=on"))?;
-        let (k, v) = (&w[..e], &w[e + 1..]);
-        if same(k, b"scan") {
-            c.scan_all = on_off(v, "scan")?;
-        } else if same(k, b"shown") {
-            c.shown = on_off(v, "shown")?;
-        } else if same(k, b"distance") {
-            c.by_distance = on_off(v, "distance")?;
-        } else if same(k, b"smart") {
-            c.smart = on_off(v, "smart")?;
-        } else if same(k, b"resume") {
-            c.resume = match v {
-                _ if same(v, b"radio") => 0,
-                _ if same(v, b"carrier") => 11,
-                _ if same(v, b"stop") => 12,
-                _ => secs(v, 10, "resume").map_err(|_| msg!("resume: radio, 1s to 10s, carrier or stop"))?,
-            };
-        } else if same(k, b"dwell") {
-            c.dwell = if same(v, b"radio") { 255 } else { secs(v, 254, "dwell")? };
-        } else if same(k, b"pri1") || same(k, b"pri2") {
-            let i = (k[3] - b'1') as usize;
-            c.pri[i] = if same(v, b"none") { None } else { Some(index(v, MAX_CHANNELS as u32, "pri")? as u16) };
-        } else {
-            return Err(msg!("zone: no field {}; they are scan, shown, distance, resume, dwell, smart, pri1, pri2", Bytes(k)));
+    while let Some((k, v)) = kv(t, "zone", "scan=on")? {
+        let i = ZONE_KEYS.iter().position(|f| same(k, f.as_bytes()));
+        let i = i.ok_or_else(|| msg!("zone: no field {}; they are scan, shown, distance, resume, dwell, smart, pri1, pri2", Bytes(k)))?;
+        match i {
+            0..=3 => *[&mut c.scan_all, &mut c.shown, &mut c.by_distance, &mut c.smart][i] = on_off(v, ZONE_KEYS[i])?,
+            4 => {
+                c.resume = match v {
+                    _ if same(v, b"radio") => 0,
+                    _ if same(v, b"carrier") => 11,
+                    _ if same(v, b"stop") => 12,
+                    _ => secs(v, 10, "resume").map_err(|_| msg!("resume: radio, 1s to 10s, carrier or stop"))?,
+                }
+            }
+            5 => c.dwell = if same(v, b"radio") { 255 } else { secs(v, 254, "dwell")? },
+            _ => c.pri[i - 6] = if same(v, b"none") { None } else { Some(index(v, MAX_CHANNELS as u32, "pri")? as u16) },
         }
     }
-    if z < have && st.zone_name(z) == Some(name) && st.data().zone_cfg(z) == c {
-        return Ok(Done::Said(msg!("Zone {} unchanged", z as u32 + 1)));
-    }
-    if !st.data().request(Op::PutZone(z, name, c)) {
-        return Err(msg!("zone {}: the radio couldn't take it now (full, or busy writing); try again", z as u32 + 1));
-    }
-    Ok(Done::Said(msg!("Zone {} saved", z as u32 + 1)))
+    let stored = z < have && st.zone_name(z) == Some(name) && st.data().zone_cfg(z) == c;
+    put(st, "Zone", "zone", z, stored, Op::PutZone(z, name, c))
 }
 
 fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
-    let _ = uwrite!(out, "preset {} ", i as u32 + 1);
+    num(out, b"preset ", i as u32 + 1);
+    out.push(b" ");
     quoted(p.name.as_bytes(), out);
     out.push(b" ");
     out.push(mhz5(p.start).as_bytes());
@@ -637,9 +734,7 @@ fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
 fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let d = st.data();
     let i = index(t.word("preset: which one, e.g. preset 1 \"2 m\" 144 148")?, 16, "preset")? as u8;
-    if i > d.presets() {
-        return Err(msg!("preset {}: presets are made in order; the radio has {}, so the next is preset {}", i as u32 + 1, d.presets(), d.presets() as u32 + 1));
-    }
+    in_order("preset", i, d.presets())?;
     let Some(Tok::Quoted(q)) = t.next()? else { return Err(msg!("preset: its name in quotes, then start and end in MHz")) };
     let name: Buf<12> = unquote(q, "name")?;
     let start = freq(t.word("preset: the start in MHz after the name")?, "start")?;
@@ -648,10 +743,7 @@ fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
         return Err(msg!("preset: the end must be above the start"));
     }
     let mut p = RangePreset { name, start, end, step: STEP_12K5, mode: 0, narrow: true, skips: 0 };
-    while let Some(tok) = t.next()? {
-        let Tok::Word(w) = tok else { return Err(msg!("preset: one name per preset")) };
-        let e = w.iter().position(|&b| b == b'=').ok_or_else(|| msg!("preset: fields are key=value, e.g. step=25kHz"))?;
-        let (k, v) = (&w[..e], &w[e + 1..]);
+    while let Some((k, v)) = kv(t, "preset", "step=25kHz")? {
         if same(k, b"step") {
             p.step = step(v)?;
         } else if same(k, b"mode") {
@@ -662,20 +754,15 @@ fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
             return Err(msg!("preset: no field {}; they are step, mode, bw", Bytes(k)));
         }
     }
-    if d.preset(i).is_some_and(|o| RangePreset { skips: o.skips, ..p } == o) {
-        return Ok(Done::Said(msg!("Preset {} unchanged", i as u32 + 1)));
-    }
-    if !d.request(Op::PutPreset(i, p)) {
-        return Err(msg!("preset {}: the radio couldn't take it now (full, or busy writing); try again", i as u32 + 1));
-    }
-    Ok(Done::Said(msg!("Preset {} saved", i as u32 + 1)))
+    let stored = d.preset(i).is_some_and(|o| RangePreset { skips: o.skips, ..p } == o);
+    put(st, "Preset", "preset", i, stored, Op::PutPreset(i, p))
 }
 
 // ---- Settings ----
 
 /// The menu number after MENU (TERM-6): "0", the group, the item, and the third level where the item has one.
 fn path(t: &mut Toks) -> Result<([u8; 3], usize), Msg> {
-    let usage = || msg!("{}", slow!("a menu number from MENU, e.g. 0 7 1 (Theme)"));
+    let usage = || msg!("a menu number from MENU, e.g. 0 7 1 (Theme)");
     if t.word("")
         .ok()
         .filter(|w| *w == b"0")
@@ -709,10 +796,11 @@ fn path_name(p: &[u8]) -> &'static str {
 }
 
 /// "0 7 1 Theme".
-fn path_text(p: &[u8], out: &mut impl ufmt::uWrite) {
-    let _ = uwrite!(out, "0");
+fn path_text<const N: usize>(p: &[u8], out: &mut Buf<N>) {
+    out.push(b"0");
     for x in p {
-        let _ = uwrite!(out, " {}", x);
+        out.push(b" ");
+        out.push(super::digits(*x as u32, &mut [0; 10]));
     }
 }
 
@@ -923,7 +1011,8 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 }
             }
             4 if i == 0 => {
-                let _ = uwrite!(out, "# Channels ({} of 1000)", st.count());
+                num(out, b"# Channels (", st.count() as u32);
+                out.push(b" of 1000)");
                 return true;
             }
             4 if i <= st.count() => {
@@ -934,7 +1023,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
             }
             5 if i == 0 => {
                 if let Some(h) = app.set.home_ch.filter(|&h| st.by_num(h).is_some()) {
-                    let _ = uwrite!(out, "home {}", h as u32 + 1);
+                    num(out, b"home ", h as u32 + 1);
                     return true;
                 }
             }
