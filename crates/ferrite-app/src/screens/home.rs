@@ -95,7 +95,7 @@ impl View for Home {
             (Key::Side(2), Short) => super::scan::side2(app), // SCAN-1
             (Key::Star, Long) => app.change(Item::Reverse, 1), // VFO-7: two values, so +1 toggles
             (Key::Digit(d), Short) => app.open(Dest::Entry(d)), // NAV-4, VFO-11
-            // HOME-8: the shortcut runs at the long press, a toast names it (KEY-11).
+            // HOME-8: the shortcut runs at the long press, a popup names it (KEY-11).
             (Key::Digit(d), Long) => super::nav::hold_digit(app, d, store),
             _ => {}
         }
