@@ -358,6 +358,23 @@ pub fn wrap(lcd: &mut impl Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i3
 }
 
 /// A toast in place of the hint bar (HOME-9): bold head, then body.
+/// The largest box [`popup`] draws (x, y, w, h), for clearing it.
+pub const POPUP_BOX: (i32, i32, i32, i32) = (24, 128, 192, 64);
+
+/// A hold-digit shortcut's popup in the middle of the content area (HOME-8): what ran, and under it the new
+/// value when it has one.
+pub fn popup(lcd: &mut impl Panel, head: &[u8], body: &[u8]) {
+    let (x, _, w, _) = POPUP_BOX;
+    let (y, h) = if body.is_empty() { (138, 44) } else { (128, 64) };
+    lcd.fill_r(x, y, w, h, 8, BLUE);
+    lcd.fill_r(x + 1, y + 1, w - 2, h - 2, 7, TOAST);
+    let hb = if body.is_empty() { y + 28 } else { y + 26 };
+    lcd.text4_aligned(120, hb, Align::Center, fit(head, &UI_15B, w - 16), &UI_15B, TEXT, TOAST);
+    if !body.is_empty() {
+        lcd.text4_aligned(120, y + 50, Align::Center, fit(body, &UI_12, w - 16), &UI_12, TEXT, TOAST);
+    }
+}
+
 pub fn toast(lcd: &mut impl Panel, head: &[u8], body: &[u8], icon: bool) {
     lcd.fill(0, HINT_Y, 240, 1, BLUE);
     lcd.fill(0, HINT_Y + 1, 240, 19, TOAST);

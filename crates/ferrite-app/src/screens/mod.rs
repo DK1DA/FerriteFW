@@ -355,7 +355,19 @@ impl App {
         } else {
             self.drawn.sbar = None; // the screen draws its own; the status bar comes back whole
         }
+        if self.drawn.popup_gone {
+            // The popup went: clear its box and let every region draw again over it.
+            let (x, y, w_, h) = w::POPUP_BOX;
+            lcd.fill(x, y, w_, h, BG);
+            self.drawn.hash = [0; shared::REGIONS];
+            self.drawn.meter = [None; SLOTS];
+            self.drawn.popup_gone = false;
+        }
         self.screen.render(self, lcd, &Cx { live, dev, store });
         self.render_hint(lcd);
+        // A shortcut's popup sits over the screen: drawn after it every time, as the screen may have drawn under it.
+        if let Some(t) = self.toast.filter(|t| t.center) {
+            w::popup(lcd, t.head.as_bytes(), t.body.as_bytes());
+        }
     }
 }

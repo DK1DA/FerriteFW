@@ -66,6 +66,8 @@ pub use screens::Screen;
 
 /// Toasts show for 3 s (HOME-9); undo is offered for 5 s (EDIT-4, MENU-22).
 pub const TOAST_MS: u32 = 3000;
+/// A hold-digit shortcut's popup (HOME-8).
+pub const POPUP_MS: u32 = 1200;
 pub const UNDO_MS: u32 = 5000;
 /// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
 pub const EDIT_IDLE_MS: u32 = 8000;
@@ -133,6 +135,8 @@ struct Toast {
     head: Buf<20>,
     body: Buf<28>,
     icon: bool,
+    /// A shortcut's popup in the middle of the screen (HOME-8), not over the hint bar.
+    center: bool,
     until: u32,
 }
 
@@ -211,6 +215,8 @@ pub(crate) struct Drawn {
     pub hash: [u32; REGIONS],
     /// Each card's meter: lit segments and whether squelch was open.
     pub meter: [Option<(u8, bool)>; SLOTS],
+    /// A popup just went: clear its box and redraw the screen's regions under it.
+    pub popup_gone: bool,
 }
 
 pub struct App {
@@ -296,7 +302,7 @@ impl App {
             write: None,
             text: Buf::new(),
             back: [None; BACK_DEPTH],
-            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS] },
+            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], popup_gone: false },
             radio: screens::activity::RadioUi::new(),
             set,
             alert_info: alert,
@@ -637,8 +643,9 @@ impl App {
             relay |= (s.relay as u8) << i;
         }
         (self.rx_mask, self.tone_mask, self.scan_mask, self.relay_mask) = (rx, tone, scan, relay);
-        if self.toast.is_some_and(|t| after(now, t.until)) {
+        if let Some(t) = self.toast.filter(|t| after(now, t.until)) {
             self.toast = None;
+            self.drawn.popup_gone |= t.center;
         }
         if self.undo.is_some_and(|u| after(now, u.until)) {
             self.undo = None;
@@ -752,7 +759,13 @@ impl App {
     }
 
     fn show_toast(&mut self, head: &[u8], body: &[u8], icon: bool) {
-        self.toast = Some(Toast { head: Buf::from(head), body: Buf::from(body), icon, until: self.now.wrapping_add(TOAST_MS) });
+        self.toast = Some(Toast { head: Buf::from(head), body: Buf::from(body), icon, center: false, until: self.now.wrapping_add(TOAST_MS) });
+    }
+
+    /// A hold-digit shortcut's popup in the middle of the screen: what ran, and its new value if it has one (HOME-8).
+    pub(crate) fn show_popup(&mut self, head: &[u8], body: &[u8]) {
+        self.drawn.popup_gone |= self.toast.is_some_and(|t| t.center);
+        self.toast = Some(Toast { head: Buf::from(head), body: Buf::from(body), icon: false, center: true, until: self.now.wrapping_add(POPUP_MS) });
     }
 
     /// A watched slot (not the active one) is receiving.

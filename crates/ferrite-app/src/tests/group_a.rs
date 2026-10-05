@@ -370,8 +370,8 @@ fn pin_at_unlock() {
     t.app.key_up(Key::PTT, t.t + 100, &s);
 }
 
-/// HOME-8: holding a digit runs its shortcut at the long press, while held, with a toast; the release does
-/// nothing. The map is a reference page at MENU 0 9 1 4.
+/// HOME-8: holding a digit runs its shortcut at the long press, while held, with a popup in the middle; the
+/// release does nothing. The map is a reference page at MENU 0 9 1 4.
 #[test]
 fn shortcut_map() {
     let mut t = T::new();
@@ -380,15 +380,21 @@ fn shortcut_map() {
     t.wait(800);
     assert_eq!(t.app.screen(), Screen::Home, "no page during the hold");
     assert_eq!(t.app.slot(0).cfg().power, 1, "run at the long press");
-    assert_eq!(t.app.toast.map(|x| x.head).as_ref().map(|b| b.as_bytes()), Some(&b"TX power"[..]));
+    let toast = t.app.toast.expect("a popup");
+    assert!(toast.center, "in the middle, not over the hint bar");
+    assert_eq!((toast.head.as_bytes(), toast.body.as_bytes()), (&b"TX power"[..], &b"Mid"[..]));
     t.app.key_up(Key::Digit(2), t.t, &s);
     assert_eq!(t.app.slot(0).cfg().power, 1, "the release does nothing");
     // A screen-opening shortcut names itself.
     t.app.key_down(Key::Digit(1), t.t, &s);
     t.wait(800);
     assert!(matches!(t.app.screen(), Screen::Scope(_)), "{:?}", t.app.screen());
-    let toast = t.app.toast.expect("a toast");
-    assert_eq!((toast.head.as_bytes(), toast.body.as_bytes()), (&b"Band scope"[..], &b"hold 1"[..]));
+    let toast = t.app.toast.expect("a popup");
+    assert!(toast.center);
+    assert_eq!((toast.head.as_bytes(), toast.body.as_bytes()), (&b"Band scope"[..], &b""[..]), "just the name");
+    // It goes after POPUP_MS.
+    t.wait(crate::POPUP_MS);
+    assert!(t.app.toast.is_none());
     t.app.key_up(Key::Digit(1), t.t, &s);
     assert!(matches!(t.app.screen(), Screen::Scope(_)), "the release stays");
     // The reference page.

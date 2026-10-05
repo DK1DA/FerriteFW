@@ -144,9 +144,9 @@ impl App {
         }
     }
 
-    /// The hint bar, or the toast over it (HOME-9).
+    /// The hint bar, or the toast over it (HOME-9); a shortcut's popup leaves the hint bar alone.
     pub(crate) fn render_hint(&mut self, lcd: &mut impl Panel) {
-        if let Some(t) = self.toast {
+        if let Some(t) = self.toast.filter(|t| !t.center) {
             if self.dirty(R_HINT, hash(&(1u8, t.head, t.body, t.icon))) {
                 w::toast(lcd, t.head.as_bytes(), t.body.as_bytes(), t.icon);
             }

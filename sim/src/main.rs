@@ -156,13 +156,26 @@ fn main() {
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "entry-freq", scale);
     press(&mut app, Exit, 800, &mut t);
-    app.key_down(D(5), t, &store); // HOME-8: hold 5 opens tones at the long press, a toast names it
+    app.key_down(D(5), t, &store); // HOME-8: hold 5 opens tones at the long press, a popup names it
     run(&mut app, &mut fb, t + 800, &mut t);
     app.key_up(D(5), t, &store);
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "hold-toast", scale);
     tap(&mut app, &mut t, &[Exit]);
     run(&mut app, &mut fb, t + 3000, &mut t); // the toast times out
+    app.key_down(D(2), t, &store); // hold 2 on home: TX power steps, the popup shows the new level
+    run(&mut app, &mut fb, t + 800, &mut t);
+    app.key_up(D(2), t, &store);
+    run(&mut app, &mut fb, t + 100, &mut t);
+    save(&fb, "hold-popup-power", scale);
+    app.key_down(D(2), t, &store); // and back to Low (2 more steps), then let the popup go
+    run(&mut app, &mut fb, t + 800, &mut t);
+    app.key_up(D(2), t, &store);
+    app.key_down(D(2), t, &store);
+    run(&mut app, &mut fb, t + 800, &mut t);
+    app.key_up(D(2), t, &store);
+    run(&mut app, &mut fb, t + 1500, &mut t);
+    save(&fb, "hold-popup-gone", scale);
     app.open(ferrite_app::screens::nav::Dest::ShortcutMap); // the reference page, MENU 0 9 1 4
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "shortcut-map", scale);

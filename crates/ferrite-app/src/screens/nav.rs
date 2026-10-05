@@ -475,13 +475,14 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
 /// A digit held on home: the shortcut runs at the long press, while still held; the release does nothing (HOME-8,
 /// KEY-3). No page during the hold: a toast names what ran.
 pub fn hold_digit(app: &mut App, d: u8, store: &impl ChannelStore) {
-    let before = app.screen;
+    let (before, prev) = (app.screen, app.toast.map(|t| t.until));
     shortcut(app, d, store);
-    // A shortcut that opens a screen: a toast names it ("Band scope  hold 1"). Toggles and errors toast their own.
-    if app.screen != before {
-        let mut b = Buf::<8>::new();
-        let _ = uwrite!(b, "hold {}", d);
-        app.show_toast(super::shortcut::SHORTCUTS[d as usize % 10].as_bytes(), b.as_bytes(), false);
+    // A popup in the middle names what ran: a toggle's own toast (with its new value) or an error moves there;
+    // a shortcut that opens a screen gets just its name.
+    match app.toast.filter(|t| !t.center && Some(t.until) != prev) {
+        Some(t) => app.show_popup(t.head.as_bytes(), t.body.as_bytes()),
+        None if app.screen != before => app.show_popup(super::shortcut::SHORTCUTS[d as usize % 10].as_bytes(), b""),
+        None => {}
     }
 }
 
