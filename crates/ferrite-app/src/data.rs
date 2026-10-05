@@ -260,6 +260,10 @@ pub enum Op {
     RenameZone(u8, crate::chan::Name),
     Preset(u8, RangePreset),
     NewPreset,
+    /// A zone written whole, created when it is the next one (the terminal's `zone` command and `load`, TERM-13).
+    PutZone(u8, crate::chan::Name, ZoneCfg),
+    /// A range preset written whole, created when it is the next one (TERM-13); its skips are kept.
+    PutPreset(u8, RangePreset),
     DeletePreset(u8),
     ClearSkips,
     Unskip(u16),
@@ -371,6 +375,12 @@ pub trait Data {
 
     /// A change, to the record's owner.
     fn request(&self, _op: Op) -> bool {
+        false
+    }
+
+    /// Writes are still queued or running (the Storage task): what the store answers may not include them yet.
+    /// The terminal's `load` waits for this before each line (TERM-13).
+    fn busy(&self) -> bool {
         false
     }
 }

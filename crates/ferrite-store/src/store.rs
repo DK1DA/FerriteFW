@@ -608,6 +608,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::DeleteZone(z) | Op::Zone(z, _) | Op::RenameZone(z, _) => z < self.zones.get(),
             Op::Preset(i, _) | Op::DeletePreset(i) => self.preset_slot(i).is_some(),
             Op::NewPreset => self.presets() < MAX_PRESETS,
+            // The next one is created: a zone up to the last, a preset while there is room.
+            Op::PutZone(z, ..) => z < MAX_ZONES && z <= self.zones.get(),
+            Op::PutPreset(i, _) => self.preset_slot(i).is_some() || (i == self.presets() && self.presets() < MAX_PRESETS),
             _ => return None,
         })
     }
@@ -656,6 +659,15 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::DeletePreset(i) => match self.preset_slot(i) {
                 Some(k) => self.clear(preset_addr(k), PRESET_LEN as u32).await,
                 None => Err(NorError),
+            },
+            Op::PutZone(z, name, cfg) if z == self.zones.get() => self.new_zone(name.as_bytes(), &cfg).await,
+            Op::PutZone(z, name, cfg) => self.write_zone(z, name.as_bytes(), &cfg).await,
+            Op::PutPreset(i, p) => match self.preset_slot(i) {
+                Some(k) => {
+                    let skips = self.read_preset(k).map_or(0, |o| o.skips);
+                    self.put_rec(preset_addr(k), &preset_encode(&RangePreset { skips, ..p })).await
+                }
+                None => self.new_preset(&RangePreset { skips: 0, ..p }).await,
             },
             _ => Ok(()),
         }
@@ -887,6 +899,10 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
     fn fm_preset(&self, i: u8) -> Option<FmPreset> {
         self.extra.fm_preset(i)
+    }
+
+    fn busy(&self) -> bool {
+        !self.idle()
     }
 
     fn request(&self, op: Op) -> bool {

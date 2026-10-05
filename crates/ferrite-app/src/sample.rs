@@ -504,6 +504,34 @@ impl Data for Sample {
                 None => false,
             },
             Op::DeletePreset(i) => self.presets.iter().filter(|p| p.get().is_some()).nth(i as usize).map(|c| c.set(None)).is_some(),
+            Op::PutZone(z, name, cfg) => {
+                let n = self.zones.get();
+                if z > n || z as usize >= ZONES.len() {
+                    return false;
+                }
+                if z == n {
+                    self.zones.set(n + 1);
+                }
+                self.zone_names[z as usize].set(name);
+                self.zone_cfg[z as usize].set(cfg);
+                true
+            }
+            Op::PutPreset(i, p) => {
+                let used = self.presets.iter().filter(|p| p.get().is_some()).count();
+                let cell = match self.presets.iter().filter(|p| p.get().is_some()).nth(i as usize) {
+                    Some(c) => Some(c),
+                    None if i as usize == used => self.presets.iter().find(|p| p.get().is_none()),
+                    None => None,
+                };
+                match cell {
+                    Some(c) => {
+                        let skips = c.get().map_or(0, |o| o.skips);
+                        c.set(Some(RangePreset { skips, ..p }));
+                        true
+                    }
+                    None => false,
+                }
+            }
             Op::ClearSkips => {
                 self.skips_gone.set(u32::MAX);
                 true

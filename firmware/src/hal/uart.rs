@@ -78,6 +78,11 @@ pub fn getc(id: usize) -> Option<u8> {
     RX[id].get()
 }
 
+/// Bytes received and not yet taken (the cable's flow control watches it).
+pub fn rx_count(id: usize) -> u16 {
+    RX[id].count()
+}
+
 pub fn stats(id: usize) -> UartStats {
     UartStats {
         rx_bytes: RX_BYTES[id].load(Relaxed),

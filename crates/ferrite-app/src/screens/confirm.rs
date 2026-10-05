@@ -103,30 +103,12 @@ impl View for Confirm {
                     app.screen = Screen::Confirm(Confirm { ask: Ask::Reset { channels: true }, ..self });
                 }
                 Ask::Reset { channels: true } => {
-                    app.write(ChanWrite::EraseAll);
-                    for s in app.slots.iter_mut() {
-                        (s.ch, s.vfo_mode, s.zone, s.pos) = (None, true, 0, 0);
-                    }
-                    for s in 0..SLOTS as u8 {
-                        app.send_slot(s);
-                    }
+                    app.erase_channels();
                     app.show_toast(b"Channels deleted", b"", false);
                     app.go_home();
                 }
                 Ask::DeleteChannel(num) => {
-                    if !store.data().request(Op::DeleteChannel(num)) {
-                        app.write(ChanWrite::Delete(num)); // a store whose records have no Data owner yet
-                    }
-                    for s in 0..SLOTS {
-                        if app.slots[s].ch.is_some_and(|c| c.num == num) {
-                            let sl = &mut app.slots[s];
-                            (sl.ch, sl.vfo_mode) = (None, true);
-                            app.send_slot(s as u8);
-                        }
-                    }
-                    if app.set.home_ch == Some(num) {
-                        app.set.home_ch = None; // CHAN-18
-                    }
+                    app.delete_channel(num, store); // slots to VFO, no longer home (CHAN-18)
                     let mut l = Buf::<32>::new();
                     chan_label(num, &mut l);
                     app.show_toast(l.as_bytes(), b"deleted", false);

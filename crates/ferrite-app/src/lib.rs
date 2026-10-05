@@ -409,6 +409,40 @@ impl App {
         }
     }
 
+    /// A channel write is waiting for [`App::pop_write`] (the terminal runs its next line only after it).
+    pub fn write_pending(&self) -> bool {
+        self.write.is_some()
+    }
+
+    /// Deletes a channel (CHAN-13): slots on it go to VFO, and it stops being the home channel (CHAN-18).
+    pub(crate) fn delete_channel(&mut self, num: u16, store: &impl chan::ChannelStore) {
+        if !store.data().request(data::Op::DeleteChannel(num)) {
+            self.write(ChanWrite::Delete(num)); // a store whose records have no Data owner yet
+        }
+        for s in 0..SLOTS {
+            if self.slots[s].ch.is_some_and(|c| c.num == num) {
+                let sl = &mut self.slots[s];
+                (sl.ch, sl.vfo_mode) = (None, true);
+                self.send_slot(s as u8);
+            }
+        }
+        if self.set.home_ch == Some(num) {
+            self.set.home_ch = None;
+        }
+    }
+
+    /// Deletes every channel (the reset's second step, PIN-6; the terminal's `clear channels`): every slot to VFO.
+    pub(crate) fn erase_channels(&mut self) {
+        self.write(ChanWrite::EraseAll);
+        for s in self.slots.iter_mut() {
+            (s.ch, s.vfo_mode, s.zone, s.pos) = (None, true, 0, 0);
+        }
+        for s in 0..SLOTS as u8 {
+            self.send_slot(s);
+        }
+        self.set.home_ch = None;
+    }
+
     /// The channel the active slot is on was changed (a setting, its zone, number, name): save it (EDIT-4).
     pub(crate) fn save_channel(&mut self, slot: u8, from: Option<u16>) {
         if let Some(ch) = self.slots[slot as usize].ch.filter(|_| self.slots[slot as usize].on_channel()) {

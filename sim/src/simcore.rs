@@ -27,7 +27,7 @@ use ferrite_core::msg::{Device, GpsState};
 use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::fb::FrameBuffer;
-use ferrite_app::term::{Sink, Term};
+use ferrite_app::term::{cmd, Sink, Term};
 use ferrite_ui::gfx::Gfx;
 use ferrite_ui::panel::{Panel, H, W};
 
@@ -161,6 +161,8 @@ pub struct SimCore {
     /// The terminal over the cable (manual chapter 37), and what it has drawn that the cable hasn't taken.
     term: Term,
     term_out: Vec<u8>,
+    /// Bytes from the cable the terminal hasn't taken yet: a line waits while the one before it runs (TERM-13).
+    term_in: std::collections::VecDeque<u8>,
 }
 
 /// The terminal's bytes waiting for the cable: room up to [`TERM_BUF`].
@@ -278,6 +280,7 @@ impl SimCore {
             flashes: Vec::new(),
             term: Term::new(),
             term_out: Vec::new(),
+            term_in: std::collections::VecDeque::new(),
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -416,6 +419,12 @@ impl SimCore {
             store.autosave(now, app);
             app.render(&mut self.lcd, &radio.live, dev, store);
             self.term.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out));
+            while let Some(w) = app.pop_write() {
+                store.apply(w);
+            }
+        }
+        if self.live() && (!self.term_in.is_empty() || self.term.busy()) {
+            self.term_pump(); // a load or a dump goes on between frames
         }
         if self.lcd.pixels > 0 {
             self.last_px = self.lcd.pixels;
@@ -526,13 +535,76 @@ impl SimCore {
         if !self.live() {
             return;
         }
-        for &b in bytes {
-            self.term.feed(&mut self.app, b, self.now, &self.store);
+        self.term_in.extend(bytes);
+        self.term_pump();
+    }
+
+    /// Feeds the waiting bytes while the terminal takes them, running each whole line as it comes (a load runs
+    /// line by line); stops when the output is full or after a few hundred lines, to go on next frame.
+    fn term_pump(&mut self) {
+        for _ in 0..400 {
+            while self.term.ready() {
+                let Some(b) = self.term_in.pop_front() else { break };
+                self.term.feed(&mut self.app, b, self.now, &self.store);
+                while let Some(w) = self.app.pop_write() {
+                    self.store.apply(w); // one channel write per key
+                }
+            }
+            self.term.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out));
             while let Some(w) = self.app.pop_write() {
-                self.store.apply(w); // one channel write per key
+                self.store.apply(w);
+            }
+            if self.term_in.is_empty() && self.term.ready() || self.term_out.len() >= TERM_BUF / 2 {
+                break;
             }
         }
-        self.term.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out));
+    }
+
+    /// Everything as the terminal's `dump` writes it (TERM-13): text, one command per line, ending with `end`.
+    pub fn dump_text(&self) -> Vec<u8> {
+        let (mut p, mut l, mut v) = (cmd::DumpPos::default(), cmd::Line::new(), Vec::new());
+        while cmd::dump_line(&self.app, &self.store, &self.dev, &mut p, &mut l) {
+            v.extend_from_slice(l.as_bytes());
+            v.push(b'\n');
+        }
+        v
+    }
+
+    /// A dump read back as the terminal's `load` reads it, line by line up to `end` (TERM-13): what each refused
+    /// line was refused for, then the count.
+    pub fn load_text(&mut self, text: &[u8]) -> String {
+        let (mut n, mut ok, mut bad, mut report) = (0u32, 0u32, 0u32, String::new());
+        if !self.live() {
+            return String::from("The radio is off or starting: switch it on first.\n");
+        }
+        for line in text.split(|&b| b == b'\n') {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if line.iter().filter(|b| !b.is_ascii_whitespace()).eq(b"end".iter()) {
+                break;
+            }
+            n += 1;
+            let r = if line.len() > cmd::LINE_MAX {
+                Err(cmd::Msg::from(b"too long: 255 characters at most"))
+            } else {
+                cmd::run(&mut self.app, &self.store, &self.dev, line, true)
+            };
+            match r {
+                Ok(cmd::Done::Nothing) => {}
+                Ok(_) => ok += 1,
+                Err(m) => {
+                    bad += 1;
+                    report.push_str(&format!("line {n}: {}\n", String::from_utf8_lossy(m.as_bytes())));
+                }
+            }
+            while let Some(w) = self.app.pop_write() {
+                self.store.apply(w);
+            }
+            while let Some(c) = self.app.pop_cmd() {
+                self.radio.cmd(c);
+            }
+        }
+        report.push_str(&format!("{n} lines read: {ok} applied, {bad} refused.\n"));
+        report
     }
 
     /// What the terminal drew since the last call, for the cable.
@@ -567,6 +639,7 @@ impl SimCore {
             (self.off, self.boot_end) = (false, self.now + BOOT_MS);
             self.term = Term::new(); // the cable starts over too: Enter opens the terminal again
             self.term_out.clear();
+            self.term_in.clear();
             self.draw_boot();
             self.last_key = String::from("power on");
         } else if self.booting {

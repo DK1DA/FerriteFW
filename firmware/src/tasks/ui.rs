@@ -162,7 +162,9 @@ pub async fn task() {
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
     let mut term = Term::new();
     loop {
-        while let Some(b) = TERM_IN.get() {
+        // A whole line waits until the store has caught up (TERM-13): the bytes after it stay in the ring.
+        while term.ready() {
+            let Some(b) = TERM_IN.get() else { break };
             term.feed(&mut app, b, now_ms(), store);
             while let Some(w) = app.pop_write() {
                 store.apply(w);

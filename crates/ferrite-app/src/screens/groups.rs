@@ -445,6 +445,25 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
     (v as i32 + d).rem_euclid(n as i32) as u8
 }
 
+/// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
+/// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
+pub(crate) const SETTABLE: [&[u8]; 14] = [
+    &[1, 1],
+    &[3, 1, 2],
+    &[3, 1, 3],
+    &[3, 1, 4],
+    &[3, 3, 1],
+    &[6, 4],
+    &[6, 5],
+    &[6, 6],
+    &[7, 1],
+    &[7, 2],
+    &[7, 3, 3],
+    &[7, 7],
+    &[9, 2, 1],
+    &[9, 2, 5],
+];
+
 /// The knob or ◀▶ on a wired setting (MENU-16); false if it isn't changeable here.
 pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
     let s = &mut app.set;

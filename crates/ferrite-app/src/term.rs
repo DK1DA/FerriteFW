@@ -9,8 +9,9 @@
 //! [`Term::feed`], rows out through [`Term::poll`] while the [`Sink`] has room; a row that doesn't fit waits for
 //! the next poll.
 //!
-//! Slice 1 (Oct 4, 2026): no command line, dump/load, marking or colour yet (TERM-12, 13, 14, 18). Channels are
-//! edited field by field; the number can't be changed here yet.
+//! Slice 1 (Oct 4, 2026): the pages. Slice 2: the command line (`:`, TERM-12) and dump/load (TERM-13), in
+//! [`cmd`]; a command that answers in several lines (a dump, a load's report, help) uses the console, which
+//! streams lines and then waits for Enter. Not yet: marking or colour (TERM-14, 18).
 
 use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE};
 use crate::screens::advanced::GROUPS;
@@ -24,6 +25,8 @@ use ferrite_core::VERSION;
 use ferrite_ui::text::{Buf, Zero};
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
+
+pub mod cmd;
 
 /// Where the terminal's output goes: the cable's transmit buffer.
 pub trait Sink {
@@ -90,6 +93,33 @@ enum Seq {
     Ss3,
 }
 
+/// The console (several lines of answer: a dump, a load, help) instead of the pages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Con {
+    Off,
+    /// Clear the screen first.
+    Start(Body),
+    Run(Body),
+    /// Esc or Ctrl-C: say so, then wait.
+    Stop,
+    /// Over: Enter or Esc goes back to the page.
+    Done,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Body {
+    List(cmd::List, u16),
+    Dump(cmd::DumpPos),
+    /// Lines read, applied and refused; `end` 1 when it ended, 2 when it was stopped.
+    Load { line: u16, ok: u16, bad: u16, end: u8 },
+}
+
+fn cmd_trim(s: &[u8]) -> &[u8] {
+    let a = s.iter().position(|c| *c != b' ').unwrap_or(s.len());
+    let b = s.iter().rposition(|c| *c != b' ').map_or(a, |k| k + 1);
+    &s[a..b]
+}
+
 /// The channel editor's fields, in order (the radio's editor: EDIT-2, CHAN-4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum F {
@@ -135,8 +165,14 @@ const MAIN: [(&str, Page); 7] = [
 const H_TYPE: [(&str, &str); 3] = [(slow!("Enter"), slow!("Save")), (slow!("Backspace"), slow!("Delete")), (slow!("Esc"), slow!("Cancel"))];
 const H_HELP: [(&str, &str); 1] = [(slow!("Esc"), slow!("Close help"))];
 const H_SPLASH: [(&str, &str); 3] = [(slow!("Enter"), slow!("Menu")), (slow!("?"), slow!("Help")), (slow!("Ctrl-C"), slow!("Leave"))];
-const H_MAIN: [(&str, &str); 5] =
-    [(slow!("Up/Dn"), slow!("Move")), (slow!("Enter"), slow!("Open")), (slow!("1-7"), slow!("Jump")), (slow!("?"), slow!("Help")), (slow!("Ctrl-C"), slow!("Leave"))];
+const H_MAIN: [(&str, &str); 6] = [
+    (slow!("Up/Dn"), slow!("Move")),
+    (slow!("Enter"), slow!("Open")),
+    (slow!("1-7"), slow!("Jump")),
+    (slow!(":"), slow!("Command")),
+    (slow!("?"), slow!("Help")),
+    (slow!("Ctrl-C"), slow!("Leave")),
+];
 const H_CHANNELS: [(&str, &str); 5] =
     [(slow!("Up/Dn"), slow!("Move")), (slow!("PgUp/PgDn"), slow!("Page")), (slow!("Enter"), slow!("Edit")), (slow!("Z"), slow!("Zone")), (slow!("Esc"), slow!("Back"))];
 const H_EDIT: [(&str, &str); 5] =
@@ -152,8 +188,9 @@ const H_SETTINGS: [(&str, &str); 6] = [
 ];
 const H_BACK: [(&str, &str); 1] = [(slow!("Esc"), slow!("Back"))];
 
-const HELP_MAIN: [&str; 2] = [
+const HELP_MAIN: [&str; 3] = [
     slow!("Arrows move, Enter opens, a digit jumps (the same numbers as the radio's menu)."),
+    slow!(": opens the command line on any page; :help lists the commands, :dump and :load back up."),
     slow!("Ctrl-L redraws the screen, Ctrl-C leaves the terminal."),
 ];
 const HELP_CHANNELS: [&str; 2] = [
@@ -195,8 +232,23 @@ pub struct Term {
     /// A value being typed (the name, a frequency), when Some.
     line: Option<Buf<24>>,
     /// The note under the page: what a change did or why it was refused.
-    note: Buf<64>,
+    note: cmd::Msg,
     warn: bool,
+    /// The note is a command's answer: the bottom row shows it until the next key.
+    bnote: bool,
+    /// The command line (`:`, TERM-12) and `load`'s line (TERM-13) share one buffer; `clast` is the last
+    /// command's length while it is still there (Up brings it back).
+    cbuf: [u8; cmd::LINE_MAX],
+    clen: u8,
+    clast: u8,
+    /// The command line is open on the bottom row.
+    cmd: bool,
+    /// A whole line waits in the buffer for the next poll to run it (after the store has caught up).
+    pending: bool,
+    /// A load's line was longer than the buffer; the line before was ended by CR (its LF is no new line).
+    long: bool,
+    cr: bool,
+    con: Con,
     cols: u8,
     rows: u8,
     /// Rows to check, and the hash of what each row last sent (0 = never sent).
@@ -237,6 +289,15 @@ impl Term {
             line: None,
             note: Buf::new(),
             warn: false,
+            bnote: false,
+            cbuf: [0; cmd::LINE_MAX],
+            clen: 0,
+            clast: 0,
+            cmd: false,
+            pending: false,
+            long: false,
+            cr: false,
+            con: Con::Off,
             cols: MIN_COLS,
             rows: MIN_ROWS,
             dirty: 0,
@@ -268,9 +329,16 @@ impl Term {
         self.redraw();
     }
 
-    /// Rows are still waiting for room in the sink: poll again soon.
+    /// Rows are still waiting for room in the sink, a line waits to run, or the console is streaming: poll
+    /// again soon.
     pub fn busy(&self) -> bool {
-        self.page != Page::Off && (self.dirty != 0 || self.clear || self.bye)
+        self.page != Page::Off && (self.dirty != 0 || self.clear || self.bye || self.pending || matches!(self.con, Con::Start(_) | Con::Run(_)))
+    }
+
+    /// It takes another byte now. False while a whole line waits to run (a load waits for the store between
+    /// lines): leave the bytes where they are, the cable's flow control holds the sender (TERM-4, TERM-13).
+    pub fn ready(&self) -> bool {
+        !self.pending
     }
 
     /// Everything again: clear the screen, forget what each row showed (Ctrl-L, TERM-16).
@@ -296,12 +364,12 @@ impl Term {
         self.help = false;
         self.line = None;
         self.note.clear();
-        self.warn = false;
+        (self.warn, self.bnote) = (false, false);
     }
 
     fn say(&mut self, s: &[u8], warn: bool) {
         self.note.set(s);
-        self.warn = warn;
+        (self.warn, self.bnote) = (warn, false);
     }
 
     // ---- Input ----
@@ -321,6 +389,9 @@ impl Term {
                 self.start();
             }
             return;
+        }
+        if let Con::Run(Body::Load { .. }) = self.con {
+            return self.load_byte(b);
         }
         let k = match (self.esc, b) {
             (Seq::None, 0x1B) => {
@@ -403,8 +474,80 @@ impl Term {
         self.key(app, k, store);
     }
 
+    /// A byte of a load (TERM-13): lines, not keys. Ctrl-C stops, Ctrl-D or a line `end` finishes.
+    fn load_byte(&mut self, b: u8) {
+        let Con::Run(Body::Load { line, ok, bad, .. }) = self.con else { return };
+        let end = |t: &mut Term, how: u8| t.con = Con::Run(Body::Load { line, ok, bad, end: how });
+        let was_cr = core::mem::replace(&mut self.cr, b == b'\r');
+        match b {
+            0x03 => end(self, 2),
+            0x04 => end(self, 1),
+            b'\n' if was_cr => {}
+            b'\r' | b'\n' => {
+                if cmd_trim(&self.cbuf[..self.clen as usize]) == b"end" {
+                    self.clen = 0;
+                    end(self, 1);
+                } else {
+                    self.pending = true;
+                }
+            }
+            b'\t' | 0x20..=0x7E => {
+                if (self.clen as usize) < cmd::LINE_MAX {
+                    self.cbuf[self.clen as usize] = if b == b'\t' { b' ' } else { b };
+                    self.clen += 1;
+                } else {
+                    self.long = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Keys on the console: Enter or Esc leaves it when it is done; Esc or Ctrl-C stops a list or dump.
+    fn con_key(&mut self, k: K) {
+        match (self.con, k) {
+            (Con::Done, K::Enter | K::Esc | K::CtrlC) => {
+                self.con = Con::Off;
+                self.redraw();
+            }
+            (Con::Start(_) | Con::Run(_), K::Esc | K::CtrlC) => self.con = Con::Stop,
+            (_, K::CtrlL) => {}
+            _ => {}
+        }
+    }
+
+    /// Keys on the command line.
+    fn cmd_key(&mut self, k: K) {
+        match k {
+            K::Enter => {
+                self.cmd = false;
+                if self.clen > 0 {
+                    (self.pending, self.clast) = (true, self.clen);
+                }
+            }
+            K::Esc => self.cmd = false,
+            K::Bs => self.clen = self.clen.saturating_sub(1),
+            K::Up if self.clen == 0 => self.clen = self.clast,
+            K::Ch(c) if (self.clen as usize) < cmd::LINE_MAX => {
+                if self.clen < self.clast {
+                    self.clast = 0; // typing over the last command: Up has nothing to bring back
+                }
+                self.cbuf[self.clen as usize] = c;
+                self.clen += 1;
+            }
+            _ => {}
+        }
+    }
+
     fn key<S: ChannelStore>(&mut self, app: &mut App, k: K, store: &S) {
         self.all_dirty();
+        if self.con != Con::Off {
+            return self.con_key(k);
+        }
+        self.bnote = false;
+        if self.cmd && k != K::CtrlC {
+            return self.cmd_key(k);
+        }
         match k {
             K::CtrlC => {
                 self.bye = true;
@@ -442,6 +585,10 @@ impl Term {
         }
         if matches!(k, K::Ch(b'?') | K::Pf(1)) {
             self.help = true;
+            return;
+        }
+        if k == K::Ch(b':') && self.page != Page::Off {
+            (self.cmd, self.clen) = (true, 0);
             return;
         }
         match self.page {
@@ -765,12 +912,20 @@ impl Term {
             out.put(b"\x1b7\x1b[999;999H\x1b[6n\x1b8");
             self.ask_size = false;
         }
-        if self.clear {
+        if self.clear && self.con == Con::Off {
             if out.room() < 16 {
                 return;
             }
             out.put(b"\x1b[0m\x1b[2J");
             self.clear = false;
+        }
+        // A whole line: run it once the store has taken the last one's writes (TERM-13 never drops a line).
+        if self.pending && !app.write_pending() && !store.data().busy() && out.room() >= 2 * ROW_MAX {
+            self.pending = false;
+            self.exec(app, store, dev, out);
+        }
+        if self.con != Con::Off {
+            return self.console(app, store, dev, out);
         }
         let cx = Cx { app, store, dev, live };
         for r in 0..self.rows {
@@ -794,6 +949,111 @@ impl Term {
             }
             self.dirty &= !(1 << r);
         }
+    }
+
+    /// Runs the line in the buffer: a typed command, or a load's next line (its result and the count go out).
+    fn exec<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, out: &mut impl Sink) {
+        let n = self.clen as usize;
+        self.clen = if self.con == Con::Off { self.clen } else { 0 };
+        if let Con::Run(Body::Load { mut line, mut ok, mut bad, end }) = self.con {
+            line += 1;
+            let r = if core::mem::take(&mut self.long) {
+                Err(cmd::Msg::from(slow!("too long: 255 characters at most").as_bytes()))
+            } else {
+                cmd::run(app, store, dev, &self.cbuf[..n], true)
+            };
+            match r {
+                Ok(cmd::Done::Nothing) => {}
+                Ok(_) => ok += 1,
+                Err(m) => {
+                    bad += 1;
+                    let mut l = cmd::Line::new();
+                    let _ = uwrite!(l, "\r\x1b[K  line {}: ", line);
+                    l.push(m.as_bytes());
+                    out.put(l.as_bytes());
+                    out.put(b"\r\n");
+                }
+            }
+            self.con = Con::Run(Body::Load { line, ok, bad, end });
+            let mut l = Buf::<64>::new();
+            let _ = uwrite!(l, "\r\x1b[K  {} lines read: {} applied, {} refused", line, ok, bad);
+            out.put(l.as_bytes());
+            return;
+        }
+        let (m, warn) = match cmd::run(app, store, dev, &self.cbuf[..n], false) {
+            Ok(cmd::Done::Nothing) => return,
+            Ok(cmd::Done::Said(m)) => (m, false),
+            Ok(cmd::Done::List(l)) => return self.con = Con::Start(Body::List(l, 0)),
+            Ok(cmd::Done::Dump) => return self.con = Con::Start(Body::Dump(cmd::DumpPos::default())),
+            Ok(cmd::Done::Load) => {
+                // The buffer takes the load's lines from here: the command that started it is gone.
+                (self.clen, self.clast, self.cr, self.long) = (0, 0, false, false);
+                return self.con = Con::Start(Body::Load { line: 0, ok: 0, bad: 0, end: 0 });
+            }
+            Err(m) => (m, true),
+        };
+        (self.note, self.warn, self.bnote) = (m, warn, true);
+        self.all_dirty();
+    }
+
+    /// The console: a clear screen, then lines while the sink has room; then "Enter returns".
+    fn console<S: ChannelStore>(&mut self, app: &App, store: &S, dev: &Device, out: &mut impl Sink) {
+        const LINE_ROOM: usize = 300;
+        match self.con {
+            Con::Off | Con::Done => {}
+            Con::Start(b) => {
+                if out.room() < LINE_ROOM {
+                    return;
+                }
+                out.put(b"\x1b[0m\x1b[2J\x1b[H");
+                if let Body::Load { .. } = b {
+                    out.put(slow!("Load: send the dump now (paste it, or your terminal's send-file). Each line is checked\r\nas the radio checks it; a line that fails is skipped and named. It ends at the line\r\n\"end\" or Ctrl-D; Ctrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n").as_bytes());
+                }
+                self.con = Con::Run(b);
+                self.console(app, store, dev, out);
+            }
+            Con::Run(Body::Load { line, ok, bad, end }) => {
+                if end != 0 && !self.pending && out.room() >= LINE_ROOM {
+                    let mut l = cmd::Line::new();
+                    let how = if end == 2 { "Stopped" } else { "Done" };
+                    let _ = uwrite!(l, "\r\x1b[K  {}: {} lines read, {} applied, {} refused.\r\n", how, line, ok, bad);
+                    out.put(l.as_bytes());
+                    self.done(out);
+                }
+            }
+            Con::Run(mut b) => {
+                while out.room() >= LINE_ROOM {
+                    let mut l = cmd::Line::new();
+                    let more = match &mut b {
+                        Body::List(what, i) => {
+                            let m = cmd::list_line(app, store, dev, *what, *i, &mut l);
+                            *i += 1;
+                            m
+                        }
+                        Body::Dump(p) => cmd::dump_line(app, store, dev, p, &mut l),
+                        Body::Load { .. } => false,
+                    };
+                    if !more {
+                        return self.done(out);
+                    }
+                    out.put(l.as_bytes());
+                    out.put(b"\r\n");
+                }
+                self.con = Con::Run(b);
+            }
+            Con::Stop => {
+                if out.room() >= LINE_ROOM {
+                    out.put(slow!("\r\n  Stopped.\r\n").as_bytes());
+                    self.pending = false;
+                    self.done(out);
+                }
+            }
+        }
+    }
+
+    fn done(&mut self, out: &mut impl Sink) {
+        out.put(slow!("\r\n  Enter or Esc returns to the menu.").as_bytes());
+        (self.con, self.clen) = (Con::Done, 0);
     }
 
     fn row<O: Out, S: ChannelStore>(&self, r: u8, cx: &Cx<S>, w: &mut W<O>) {
@@ -855,6 +1115,26 @@ impl Term {
 
     /// The bottom line: the keys for this page (TERM-11).
     fn hints<O: Out>(&self, w: &mut W<O>) {
+        if self.cmd {
+            // The command line: its tail, when it is wider than the row.
+            let n = self.clen as usize;
+            let keep = (self.cols as usize).saturating_sub(4);
+            w.s(b" :");
+            w.s(&self.cbuf[n.saturating_sub(keep)..n]);
+            w.s(b"_");
+            return;
+        }
+        if self.bnote {
+            w.rev();
+            w.s(b" ");
+            if self.warn {
+                w.bold(self.note.as_bytes());
+            } else {
+                w.s(self.note.as_bytes());
+            }
+            w.fill();
+            return;
+        }
         let keys: &[(&str, &str)] = if self.line.is_some() {
             &H_TYPE
         } else if self.help {
@@ -1101,7 +1381,7 @@ impl Term {
             }
             _ if b == body - 2 => {
                 w.s(b"  ");
-                if !self.note.is_empty() {
+                if !self.note.is_empty() && !self.bnote {
                     if self.warn {
                         w.bold(self.note.as_bytes());
                     } else {
@@ -1255,7 +1535,7 @@ impl Term {
                 }
                 w.s(t.as_bytes());
             }
-            _ if b == n + 6 && !self.note.is_empty() => {
+            _ if b == n + 6 && !self.note.is_empty() && !self.bnote => {
                 w.s(b"  ");
                 if self.warn {
                     w.bold(self.note.as_bytes());

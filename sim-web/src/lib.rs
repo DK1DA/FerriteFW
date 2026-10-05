@@ -320,3 +320,37 @@ pub extern "C" fn term_read() -> usize {
 pub extern "C" fn term_size(cols: u32, rows: u32) {
     with(|w| w.sim.term_size(cols.min(u16::MAX as u32) as u16, rows.min(u16::MAX as u32) as u16))
 }
+
+// ---- Dump and load as files (manual chapter 37, TERM-13) ----
+
+/// Everything as the terminal's `dump` writes it, for the page to keep or offer (a page can't download through a
+/// link: it shows the text, or keeps it in its own storage): a string address, `text_len()` bytes.
+#[no_mangle]
+pub extern "C" fn dump() -> usize {
+    with(|w| {
+        let d = w.sim.dump_text();
+        w.text = d;
+        w.text.as_ptr() as usize
+    })
+}
+
+/// Room for a dump of `len` bytes the page read from a file: write it at the returned address, then call
+/// [`load`] with the same length. Valid until the next call.
+#[no_mangle]
+pub extern "C" fn load_in(len: u32) -> usize {
+    term_in(len)
+}
+
+/// The `len` bytes written at [`load_in`] read back as the terminal's `load` reads them, line by line up to
+/// `end`; the report (refused lines and the count) as a string address, `text_len()` bytes.
+#[no_mangle]
+pub extern "C" fn load(len: u32) -> usize {
+    with(|w| {
+        let n = (len as usize).min(w.term_in.len());
+        let b = core::mem::take(&mut w.term_in);
+        let r = w.sim.load_text(&b[..n]);
+        w.term_in = b;
+        text(w, &r)
+    })
+}
+

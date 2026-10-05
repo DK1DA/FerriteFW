@@ -12,18 +12,35 @@ const BAUD: u32 = 115_200;
 /// Bytes sent per turn: transmit is polled (87 us a byte), so a turn stays under 3 ms and the other tasks on
 /// this executor keep running (TERM-4).
 const CHUNK: usize = 32;
+/// Software flow control for a terminal program sending a file (the terminal's `load`, TERM-13): XOFF once this
+/// many bytes wait (the receive ring holds 256, so a slow sender still fits), XON again when it has drained.
+const XOFF_AT: u16 = 160;
+const XON_AT: u16 = 32;
+const XOFF: u8 = 0x13;
+const XON: u8 = 0x11;
 
 #[embassy_executor::task]
 pub async fn task() {
     uart::init(UART_CPS, BAUD);
+    let mut held = false;
     loop {
+        // Only what the terminal's ring has room for: the rest waits in the receive ring, never dropped.
         let mut got = false;
-        while let Some(c) = uart::getc(UART_CPS) {
+        while TERM_IN.room() > 0 {
+            let Some(c) = uart::getc(UART_CPS) else { break };
             TERM_IN.put(c);
             got = true;
         }
         if got {
             TERM_WAKE.signal(());
+        }
+        let waiting = uart::rx_count(UART_CPS) + TERM_IN.count();
+        if !held && waiting >= XOFF_AT {
+            uart::write(UART_CPS, &[XOFF]);
+            held = true;
+        } else if held && waiting <= XON_AT {
+            uart::write(UART_CPS, &[XON]);
+            held = false;
         }
         let mut buf = [0u8; CHUNK];
         let mut n = 0;

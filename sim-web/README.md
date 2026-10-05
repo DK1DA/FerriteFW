@@ -56,6 +56,9 @@ Mouse and key calls take effect at the time of the last `frame`.
 | `term_feed(len: u32)` | Those bytes go to the terminal as typed on the cable (Enter starts it: TERM-2). Ignored while booting or off. |
 | `term_read() -> ptr` | What the terminal drew since the last call, taken: VT100 bytes (ASCII), length `text_len()`. Call it after `frame` and `term_feed` and write it to the pane. |
 | `term_size(cols: u32, rows: u32)` | The pane's size in characters (80 x 24 at least, up to 200 x 64). The terminal also asks with ESC [ 6 n; a pane that answers (xterm.js does) sets it the same way. |
+| `dump() -> ptr` | Everything as the terminal's `:dump` writes it (manual ch 37, TERM-13): text, one command per line, ending with `end`; `text_len()` bytes. |
+| `load_in(len: u32) -> ptr` | Room for a dump of `len` bytes the page read from a file: write it there, then call `load(len)`. |
+| `load(len: u32) -> ptr` | Reads those bytes back as `:load` does, line by line up to `end`; the report (each refused line and why, then the count) as a string, `text_len()` bytes. |
 | `text_len() -> u32` | Length in bytes (UTF-8) of the string the last string getter returned. |
 
 ## Key codes
@@ -102,13 +105,29 @@ The radio's terminal (manual chapter 37) over a pretend cable, for a terminal pa
 
 ```js
 const enc = new TextEncoder();
-term.onData(d => { const b = enc.encode(d); new Uint8Array(x.memory.buffer, x.term_in(b.length), b.length).set(b); x.term_feed(b.length); });
+// Call term_in first, then read memory.buffer: the call can grow memory and detach an older view.
+term.onData(d => { const b = enc.encode(d); const p = x.term_in(b.length); new Uint8Array(x.memory.buffer, p, b.length).set(b); x.term_feed(b.length); });
 // after each frame():
 const out = str(x.term_read()); if (out) term.write(out);
 x.term_size(term.cols, term.rows);
 ```
 
 Press Enter in the pane to start it. Power-cycling the radio (event 5) closes it; Enter opens it again.
+
+## Dump and load as files
+
+The terminal's `:dump` and `:load` work in the pane as on a cable. For a page that keeps or offers the dump
+itself, `dump()` returns the same text and `load_in`/`load` read one back (an artifact page cannot download a
+file through a link: show the text for copying, or keep it in the page's own storage; a file input can read one
+in). Region and callsign are set on the radio during setup and only noted in a dump, so load into a radio that
+has been set up: before setup, settings that depend on the region (SAME) are refused.
+
+```js
+const d = str(x.dump());                                   // the dump as text
+const b = new TextEncoder().encode(fileText);
+const p = x.load_in(b.length); new Uint8Array(x.memory.buffer, p, b.length).set(b);
+console.log(str(x.load(b.length)));                        // "54 lines read: 54 applied, 0 refused."
+```
 
 ## Keeping the flash
 

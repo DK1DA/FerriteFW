@@ -142,9 +142,20 @@ impl Sink for Vt {
     }
 }
 
-struct Rig {
+/// A store the rig can hand channel writes to.
+trait Apply {
+    fn apply(&self, w: ChanWrite);
+}
+
+impl Apply for Sample {
+    fn apply(&self, w: ChanWrite) {
+        Sample::apply(self, w);
+    }
+}
+
+struct Rig<S = Sample> {
     app: App,
-    store: Sample,
+    store: S,
     term: Term,
     vt: Vt,
     dev: Device,
@@ -152,16 +163,34 @@ struct Rig {
     now: u32,
 }
 
-impl Rig {
+impl Rig<Sample> {
     fn new() -> Self {
+        Rig::with(Sample::new())
+    }
+
+    /// Started and on the main menu.
+    fn main() -> Self {
+        let mut r = Rig::new();
+        r.send(b"\r\r");
+        assert_eq!(r.term.page(), Page::Main);
+        r
+    }
+}
+
+impl<S: ChannelStore + Apply> Rig<S> {
+    fn with(store: S) -> Self {
         let mut app = App::new(crate::tests::set(), crate::tests::alert());
         while app.pop_cmd().is_some() {}
         let dev = Device { battery_mv: 7900, clock_min: Some(14 * 60 + 32), ..Default::default() };
-        Rig { app, store: Sample::new(), term: Term::new(), vt: Vt::new(80, 24), dev, live: LiveAll::default(), now: 1000 }
+        Rig { app, store, term: Term::new(), vt: Vt::new(80, 24), dev, live: LiveAll::default(), now: 1000 }
     }
 
     fn send(&mut self, b: &[u8]) {
         for &c in b {
+            // A whole line waits for the next poll to run it (TERM-13): the cable holds the rest meanwhile.
+            while !self.term.ready() {
+                self.poll();
+            }
             self.term.feed(&mut self.app, c, self.now, &self.store);
             while let Some(w) = self.app.pop_write() {
                 self.store.apply(w);
@@ -173,15 +202,54 @@ impl Rig {
     fn poll(&mut self) {
         self.now += 100;
         self.term.poll(&mut self.app, &self.store, &self.dev, &self.live, self.now, &mut self.vt);
+        while let Some(w) = self.app.pop_write() {
+            self.store.apply(w);
+        }
+        while self.app.pop_cmd().is_some() {}
     }
 
-    /// Started and on the main menu.
-    fn main() -> Self {
-        let mut r = Rig::new();
-        r.send(b"\r\r");
-        assert_eq!(r.term.page(), Page::Main);
-        r
+    /// A command typed after `:`, run.
+    fn cmd(&mut self, c: &str) {
+        self.send(b":");
+        self.send(c.as_bytes());
+        self.send(b"\r");
+        self.poll();
+        self.poll();
     }
+
+    fn bottom(&self) -> String {
+        self.vt.line(self.vt.rows - 1)
+    }
+
+    /// Everything after the console started (the raw bytes as text).
+    fn raw(&self) -> String {
+        String::from_utf8_lossy(&self.vt.raw).into()
+    }
+
+    /// `:load`, the text line by line (CR LF), then polls until the console is done.
+    fn load(&mut self, text: &str) {
+        self.cmd("load");
+        assert!(matches!(self.term.con, Con::Run(Body::Load { .. })), "{:?}", self.term.con);
+        for l in text.lines() {
+            self.send(l.as_bytes());
+            self.send(b"\r\n");
+        }
+        for _ in 0..8 {
+            self.poll();
+        }
+        assert!(matches!(self.term.con, Con::Done | Con::Off), "the load ended: {:?}", self.term.con);
+    }
+}
+
+/// The dump as lines.
+fn dump<S: ChannelStore>(app: &App, st: &S, dev: &Device) -> Vec<String> {
+    let mut p = cmd::DumpPos::default();
+    let mut l = cmd::Line::new();
+    let mut v = Vec::new();
+    while cmd::dump_line(app, st, dev, &mut p, &mut l) {
+        v.push(String::from_utf8_lossy(l.as_bytes()).into());
+    }
+    v
 }
 
 /// TERM-2: in auto nothing answers until a typed Enter; then the banner (TERM-20) under the top line (TERM-11).
@@ -481,10 +549,378 @@ fn frequencies() {
     assert_eq!(mhz5(44_347_500).as_bytes(), b"443.47500");
 }
 
-/// The state is small: no screen buffer (TERM-19).
+/// The state is small: no screen buffer (TERM-19); the command line's 255-byte buffer (TERM-12) on top.
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
     std::eprintln!("Term is {n} bytes");
-    assert!(n <= 512, "Term is {n} bytes");
+    assert!(n <= 512 + 256, "Term is {n} bytes");
 }
+
+// ---- The command line and dump/load (TERM-12, TERM-13) ----
+
+use crate::chan::{ChanWrite, Name, FLAG_APRS, FLAG_RX_ONLY, FLAG_SKIP};
+use crate::data::{Data, Op, RangePreset, ZoneCfg};
+use crate::slot::{SlotCfg, CTCSS, DCS, DCS_FLAG, DCS_INV, DEFAULT_CFG};
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+
+/// A blank radio's store: what a load fills in.
+#[derive(Default)]
+struct Blank {
+    chans: RefCell<BTreeMap<u16, Channel>>,
+    zones: RefCell<Vec<(Name, ZoneCfg)>>,
+    presets: RefCell<Vec<RangePreset>>,
+    busy: Cell<bool>,
+}
+
+impl Apply for Blank {
+    fn apply(&self, w: ChanWrite) {
+        let mut c = self.chans.borrow_mut();
+        match w {
+            ChanWrite::Put { ch, from } => {
+                if let Some(f) = from {
+                    c.remove(&f);
+                }
+                c.insert(ch.num, ch);
+            }
+            ChanWrite::Delete(n) => {
+                c.remove(&n);
+            }
+            ChanWrite::DeleteZone(z) => c.values_mut().filter(|x| x.zone == z).for_each(|x| x.zone = NO_ZONE),
+            ChanWrite::EraseAll => c.clear(),
+        }
+    }
+}
+
+impl ChannelStore for Blank {
+    fn zones(&self) -> u8 {
+        self.zones.borrow().len() as u8
+    }
+    fn zone_name(&self, zone: u8) -> Option<Name> {
+        self.zones.borrow().get(zone as usize).map(|z| z.0)
+    }
+    fn zone_len(&self, zone: u8) -> u16 {
+        self.chans.borrow().values().filter(|c| c.zone == zone).count() as u16
+    }
+    fn zone_at(&self, zone: u8, i: u16) -> Option<Channel> {
+        self.chans.borrow().values().filter(|c| c.zone == zone).nth(i as usize).copied()
+    }
+    fn count(&self) -> u16 {
+        self.chans.borrow().len() as u16
+    }
+    fn by_num(&self, num: u16) -> Option<(Channel, u16)> {
+        let c = *self.chans.borrow().get(&num)?;
+        let pos = self.chans.borrow().values().filter(|x| x.zone == c.zone && x.num < num).count() as u16;
+        Some((c, pos))
+    }
+    fn by_number(&self, i: u16) -> Option<Channel> {
+        self.chans.borrow().values().nth(i as usize).copied()
+    }
+    fn data(&self) -> &dyn Data {
+        self
+    }
+}
+
+impl Data for Blank {
+    fn presets(&self) -> u8 {
+        self.presets.borrow().len() as u8
+    }
+    fn preset(&self, i: u8) -> Option<RangePreset> {
+        self.presets.borrow().get(i as usize).copied()
+    }
+    fn zone_cfg(&self, zone: u8) -> ZoneCfg {
+        self.zones.borrow().get(zone as usize).map_or(ZoneCfg { shown: true, ..ZoneCfg::default() }, |z| z.1)
+    }
+    fn request(&self, op: Op) -> bool {
+        match op {
+            Op::PutZone(z, name, cfg) => {
+                let mut zs = self.zones.borrow_mut();
+                match (z as usize).cmp(&zs.len()) {
+                    core::cmp::Ordering::Less => zs[z as usize] = (name, cfg),
+                    core::cmp::Ordering::Equal if zs.len() < 254 => zs.push((name, cfg)),
+                    _ => return false,
+                }
+                true
+            }
+            Op::PutPreset(i, p) => {
+                let mut ps = self.presets.borrow_mut();
+                let n = ps.len();
+                if let Some(o) = ps.get_mut(i as usize) {
+                    *o = RangePreset { skips: o.skips, ..p };
+                } else if i as usize == n && n < 16 {
+                    ps.push(RangePreset { skips: 0, ..p });
+                } else {
+                    return false;
+                }
+                true
+            }
+            Op::DeleteChannel(n) => self.chans.borrow_mut().remove(&n).is_some(),
+            _ => false,
+        }
+    }
+    fn busy(&self) -> bool {
+        self.busy.get()
+    }
+}
+
+/// TERM-12: `:` opens the command line on the bottom row; set and get use the menu's numbers and values.
+#[test]
+fn command_line_set_and_get() {
+    let mut r = Rig::main();
+    r.send(b":set 0 7");
+    assert!(r.bottom().starts_with(" :set 0 7_"), "{}", r.bottom());
+    r.send(b" 1 night red\r");
+    r.poll();
+    assert_eq!(r.app.set.theme, 2, "set by the value the radio shows, any case");
+    assert!(r.bottom().contains("0 7 1 Theme: Night red"), "{}", r.bottom());
+    r.cmd("get 0 7 1");
+    assert!(r.bottom().contains("Theme: Night red (not the default)"), "{}", r.bottom());
+    // Up brings the last command back; Esc closes the line without running it.
+    r.send(b":\x1b[A");
+    assert!(r.bottom().contains(":get 0 7 1_"), "{}", r.bottom());
+    r.send(b"\x1b");
+    r.now += 100;
+    r.poll();
+    assert!(!r.term.cmd);
+    // Third-level numbers and values with spaces.
+    r.cmd("set 0 3 1 2 200 kHz");
+    assert_eq!(r.app.set.fm_step, 2);
+    r.cmd("set 0 1 1 off");
+    assert_eq!(r.app.watch, 0);
+}
+
+/// Every refusal says what was wrong and how to put it right; nothing changes.
+#[test]
+fn command_errors() {
+    let mut r = Rig::main();
+    let theme = r.app.set.theme;
+    for (c, says) in [
+        ("set 0 7 1 purple", "Theme: one of Dark, Daylight, Night red"),
+        ("set 0 7 1", "set needs a value"),
+        ("set 7 1 Dark", "a menu number from MENU"),
+        ("set 0 1 2 1 Heard", "can't be set yet"),
+        ("set 0 9 4 EU", "changes only on the radio"),
+        ("set 0 9 3 1 Off", "changes only on the radio"),
+        ("frob", "frob: no such command"),
+        ("ch 999 power high", "ch 999: no such channel"),
+        ("ch 12 power ultra", "power: low, mid, high"),
+        ("ch 12 tone 101.0", "101.0 Hz is not a standard CTCSS tone"),
+        ("ch 12 tone D024N", "D024 is not a standard DCS code"),
+        ("ch 12 rx 30", "rx: a channel is from 64 to 1000 MHz"),
+        ("ch 12 zone 9", "zone 9 doesn't exist"),
+        ("ch 12 \"Name", "no closing quote"),
+        ("ch 1001", "ch: a number from 1 to 1000"),
+        ("zone 9 \"Far\"", "the radio has 6, so the next is zone 7"),
+        ("clear channels 3", "type: clear channels 21"),
+    ] {
+        r.cmd(c);
+        assert!(r.bottom().contains(says), "{c}: {}", r.bottom());
+        assert!(r.term.warn, "{c}: shown as a refusal");
+    }
+    assert_eq!(r.app.set.theme, theme);
+    assert_eq!(r.store.count(), 21);
+}
+
+/// `ch`: one field at a time, a whole channel, show, delete; the 1.25 m cap holds (TERM-7).
+#[test]
+fn command_channels() {
+    let mut r = Rig::main();
+    r.cmd("ch 12 power high");
+    assert_eq!(r.store.by_num(11).unwrap().0.cfg.power, 2);
+    r.cmd("ch 12 tone=D023I");
+    let c = r.store.by_num(11).unwrap().0;
+    assert_eq!((c.cfg.tx_tone, c.cfg.rx_tone), (DCS_FLAG | DCS_INV | 0o023, DCS_FLAG | DCS_INV | 0o023));
+    r.cmd("ch 12 name \"Club \\\"north\\\"\"");
+    assert_eq!(r.store.by_num(11).unwrap().0.name(), b"Club \"north\"");
+    r.cmd("ch 300 \"Test\" 146.6 offset=-0.6 tone=100.0 power=mid zone=1 skip squelch=6");
+    let t = r.store.by_num(299).expect("made").0;
+    assert_eq!((t.rx, t.cfg.offset, t.cfg.tx_tone, t.cfg.power, t.zone, t.flags & FLAG_SKIP, t.cfg.squelch), (14_660_000, -60_000, 1000, 1, 0, FLAG_SKIP, 6));
+    r.cmd("ch 301 \"Two20\" 223.5 power=high");
+    assert!(r.bottom().contains("fixed at 0.25 W on 1.25 m"), "{}", r.bottom());
+    assert!(r.store.by_num(300).is_none(), "refused whole");
+    r.cmd("ch 301 \"Two20\" 223.5");
+    r.cmd("ch 301 power mid");
+    assert!(r.bottom().contains("fixed at 0.25 W"), "{}", r.bottom());
+    // Show: the console, then Enter goes back to the page.
+    r.cmd("ch 300");
+    assert!(r.raw().contains("ch 300 \"Test\" 146.60000 offset=-0.60000 mode=FM bw=narrow tone=100.0 power=mid zone=1 squelch=6 skip"), "{}", r.raw());
+    r.send(b"\r");
+    assert_eq!(r.term.con, Con::Off);
+    assert!(r.vt.has("Ferrite terminal"), "the page again");
+    r.cmd("ch 300 delete");
+    assert!(r.store.by_num(299).is_none());
+    // Clearing every channel needs their count typed.
+    let n = r.store.count();
+    r.cmd(&std::format!("clear channels {n}"));
+    assert_eq!(r.store.count(), 0);
+}
+
+/// Help and the changed settings on the console.
+#[test]
+fn command_lists() {
+    let mut r = Rig::main();
+    r.cmd("help");
+    assert!(r.raw().contains("Commands: type : then one of these"));
+    assert!(r.raw().contains("Enter or Esc returns to the menu."));
+    r.send(b"\x1b");
+    r.now += 100;
+    r.poll();
+    assert_eq!(r.term.con, Con::Off);
+    r.cmd("set 0 7 1 Daylight");
+    r.cmd("get");
+    assert!(r.raw().contains("set 0 7 1 Daylight"), "{}", r.raw());
+}
+
+/// TERM-13: the dump starts with its version, has every section, and ends with `end`.
+#[test]
+fn dump_format() {
+    let r = Rig::main();
+    let d = dump(&r.app, &r.store, &r.dev);
+    assert_eq!(d[0], "# Ferrite dump v1, firmware 0.1.0");
+    for l in [
+        "set 0 7 1 Dark                    # Theme",
+        "set 0 6 6 24 h, GPS               # Clock",
+        "zone 2 \"Repeaters\" scan=on shown=on distance=off resume=radio dwell=radio smart=off pri1=12",
+        "preset 3 \"Airband\" 118.00000 137.00000 step=25kHz mode=AM bw=wide",
+        "ch 12 \"Club repeater\" 443.47500 offset=+5.00000 mode=FM bw=narrow txtone=100.0 rxtone=off power=low zone=2",
+        "ch 63 \"FRS 1\" 462.56250 offset=simplex mode=FM bw=narrow tone=off power=low",
+    ] {
+        assert!(d.iter().any(|x| x == l), "missing: {l}");
+    }
+    assert_eq!(d.last().map(String::as_str), Some("end"));
+    assert!(d.iter().all(|l| l.len() < 200));
+    // The console streams it, the same lines.
+    let mut r = Rig::main();
+    r.cmd("dump");
+    for _ in 0..4 {
+        r.poll();
+    }
+    let raw = r.raw();
+    for l in &d {
+        assert!(raw.contains(&std::format!("{l}\r\n")), "streamed: {l}");
+    }
+}
+
+/// TERM-13: dump, load on a blank radio, dump again: the same text.
+#[test]
+fn dump_load_round_trip() {
+    let a = Rig::main();
+    let text = dump(&a.app, &a.store, &a.dev).join("\n");
+    let mut b = Rig::with(Blank::default());
+    b.app.set.theme = 1; // a setting the dump puts back
+    b.send(b"\r\r");
+    b.load(&text);
+    assert!(b.raw().contains(" 0 refused."), "{}", b.raw());
+    assert_eq!(dump(&b.app, &b.store, &b.dev), dump(&a.app, &a.store, &a.dev));
+}
+
+/// A full radio: 1000 channels with every field in use, 30 zones, 16 presets; round trip through the terminal.
+#[test]
+fn dump_load_1000_channels() {
+    let full = Blank::default();
+    for z in 0..30u8 {
+        let mut n = Name::new();
+        let _ = uwrite!(n, "Zone \"{}\\", z);
+        let cfg = ZoneCfg { scan_all: z % 2 == 0, shown: z % 3 != 0, by_distance: z % 5 == 0, resume: z % 13, dwell: if z % 4 == 0 { 255 } else { z }, smart: z % 7 == 0, pri: [Some(z as u16 * 3), if z % 2 == 1 { Some(999) } else { None }] };
+        assert!(full.request(Op::PutZone(z, n, cfg)));
+    }
+    for i in 0..16u8 {
+        let p = RangePreset { name: Buf::from(&b"Range 1234567"[..12 - (i as usize % 3)]), start: mhz(140) + i as u32 * 1_000_000, end: mhz(150) + i as u32 * 1_000_000, step: i % 14, mode: i % 3, narrow: i % 2 == 0, skips: 0 };
+        assert!(full.request(Op::PutPreset(i, p)));
+    }
+    let bases = [mhz(144), mhz(430), mhz(156), mhz(118), mhz(222)];
+    for n in 0..1000u16 {
+        let k = n as u32;
+        let rx = bases[n as usize % 5] + (k * 1250) % 300_000;
+        let tone = |m: u32| match m % 4 {
+            0 => 0,
+            1 => CTCSS[(m % 50) as usize],
+            2 => DCS_FLAG | DCS[(m % 104) as usize],
+            _ => DCS_FLAG | DCS_INV | DCS[(m * 7 % 104) as usize],
+        };
+        let off = [0, 60_000, -60_000, 500_000, -500_000, 160_000][n as usize % 6];
+        let cfg = SlotCfg {
+            mode: (n % 3) as u8,
+            narrow: n % 2 == 0,
+            rx_tone: tone(k / 3),
+            tx_tone: tone(k / 2),
+            offset: off,
+            power: if bases[n as usize % 5] == mhz(222) { 0 } else { (n % 3) as u8 },
+            step: (n % 14) as u8,
+            squelch: (n % 10) as u8,
+            busy: (n % 3) as u8,
+            reverse: n % 5 == 0,
+        };
+        let mut c = Channel { num: n, zone: if n % 31 == 30 { NO_ZONE } else { (n % 31) as u8 }, rx, name: [0; 16], cfg, flags: (n % 8) as u8 & (FLAG_SKIP | FLAG_APRS | FLAG_RX_ONLY) };
+        let mut name = Buf::<16>::new();
+        let _ = uwrite!(name, "{}{}", if n % 9 == 0 { "q\"\\ " } else { "Ch " }, n);
+        c.set_name(name.as_bytes());
+        full.apply(ChanWrite::Put { ch: c, from: None });
+    }
+    let a = Rig::with(full);
+    a.app.set.theme = 2;
+    a.app.set.home_ch = Some(500);
+    let d = dump(&a.app, &a.store, &a.dev);
+    assert_eq!(d.iter().filter(|l| l.starts_with("ch ")).count(), 1000);
+    let mut b = Rig::with(Blank::default());
+    b.send(b"\r\r");
+    b.vt.room = usize::MAX / 2;
+    b.load(&d.join("\n"));
+    assert!(b.raw().contains(" 0 refused."), "{}", &b.raw()[b.raw().len().saturating_sub(400)..]);
+    assert_eq!(dump(&b.app, &b.store, &b.dev), d);
+    assert_eq!(DEFAULT_CFG.squelch, 4);
+}
+
+/// TERM-13: a bad line is named and skipped whole; the rest goes in; region and the 1.25 m cap hold (TERM-7).
+#[test]
+fn load_reports_bad_lines() {
+    let mut r = Rig::main();
+    let long = "a".repeat(300);
+    let text = std::format!(
+        "# a note\n\nset 0 7 1 Daylight\nset 0 9 4 EU\nch 5 \"X\" 146.5 tone=999\nch 6 \"Six\" 223.5 power=high\nch 7 \"Seven\" 146.55 bogus=1\nzone 9 \"Far\"\ndump\n{long}\nch 8 \"Eight\" 146.56 power=high\nend\nch 9 \"after the end\" 146.57"
+    );
+    r.load(&text);
+    let raw = r.raw();
+    for l in [
+        "line 4: Region changes only on the radio",
+        "line 5: tone: 999.0 Hz is not a standard CTCSS tone",
+        "line 6: power: fixed at 0.25 W on 1.25 m",
+        "line 7: bogus: no such field",
+        "line 8: zone 9: zones are made in order",
+        "line 9: dump can't be in a load",
+        "line 10: too long",
+        "Done: 11 lines read, 2 applied, 7 refused.",
+    ] {
+        assert!(raw.contains(l), "{l}\n{raw}");
+    }
+    assert_eq!(r.app.set.theme, 1);
+    assert!(r.store.by_num(4).is_none() && r.store.by_num(5).is_none() && r.store.by_num(6).is_none());
+    assert_eq!(r.store.by_num(7).unwrap().0.cfg.power, 2);
+    assert!(r.store.by_num(8).is_none(), "nothing after end");
+    assert_eq!(r.app.set.region, crate::tests::set().region);
+}
+
+/// A load waits for the store before each line (TERM-13): the cable is held, nothing is lost.
+#[test]
+fn load_waits_for_the_store() {
+    let mut r = Rig::with(Blank::default());
+    r.send(b"\r\r");
+    r.cmd("load");
+    r.store.busy.set(true);
+    r.send(b"ch 1 \"One\" 146.52\r");
+    for _ in 0..5 {
+        r.poll();
+    }
+    assert!(!r.term.ready(), "the line waits");
+    assert_eq!(r.store.count(), 0);
+    r.store.busy.set(false);
+    r.poll();
+    assert!(r.term.ready());
+    assert_eq!(r.store.count(), 1);
+    r.send(b"\x04");
+    r.poll();
+    assert_eq!(r.term.con, Con::Done);
+    assert!(r.raw().contains("Done: 1 lines read, 1 applied, 0 refused."));
+}
+
