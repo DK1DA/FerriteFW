@@ -61,9 +61,11 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         if name.is_empty() {
             w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
         } else {
-            let n = w::fit(name.as_bytes(), &NAME_22, 224);
-            w::field(lcd, 8, 224, 44, 72, 66, Align::Left, n, &NAME_22, TEXT, BG);
-            w::freq(lcd, 8, 232, 90, f, &DIG_17, &DIG_17, SUB, SUB, BG);
+            // 26 px when the whole name fits, else 22 px (HOME-4a).
+            let nb = name.as_bytes();
+            let (font, base) = if text4_width(nb, &NAME_26) <= 224 { (&NAME_26, 70) } else { (&NAME_22, 68) };
+            w::field(lcd, 8, 224, 43, 76, base, Align::Left, w::fit(nb, font, 224), font, TEXT, BG);
+            w::freq(lcd, 8, 232, 92, f, &DIG_17, &DIG_17, SUB, SUB, BG);
         }
     }
     // The settings, label over value (HOME-4): mode, tone, power; step, offset, squelch.
@@ -134,8 +136,8 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let y = 256 + 21 * i as i32;
         if app.dirty(11 + i, hash(&(o, t, st))) {
             w::badge(lcd, 8, y + 2, o, false, BG);
-            w::field(lcd, 28, 150, y, y + 18, y + 14, Align::Left, t.as_bytes(), &UI_12, TEXT, BG);
-            w::field(lcd, 178, 54, y, y + 18, y + 14, Align::Right, st.as_bytes(), &UI_12, c, BG);
+            w::field(lcd, 28, 140, y, y + 18, y + 14, Align::Left, t.as_bytes(), &UI_12, TEXT, BG);
+            w::field(lcd, 168, 64, y, y + 18, y + 14, Align::Right, st.as_bytes(), &UI_12, c, BG); // "scanning" whole
         }
     }
 }
@@ -182,8 +184,9 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             if name.is_empty() {
                 w::freq(lcd, 15, 140, y + 44, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
             } else {
-                let n = w::fit(name.as_bytes(), &UI_15B, 140);
-                w::field(lcd, 15, 140, y + 25, y + 46, y + 42, Align::Left, n, &UI_15B, TEXT, SURFACE);
+                let nb = name.as_bytes();
+                let font = if text4_width(nb, &NAME_22) <= 150 { &NAME_22 } else { &UI_15B };
+                w::field(lcd, 15, 150, y + 22, y + 46, y + 42, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
             }
         }
         let sl = *app.slot(s);
@@ -194,30 +197,28 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             right.set(w::freq3(f).as_bytes());
         }
         if app.dirty(R_INFO + p, hash(&right)) {
-            let (x, c, fo) = if name.is_empty() { (140, TEXT, &UI_12B) } else { (155, SUB, &UI_12) };
+            let (x, c, fo) = if name.is_empty() { (140, TEXT, &UI_12B) } else { (170, SUB, &UI_12) };
             w::field(lcd, x, 226 - x, y + 26, y + 44, y + 42, Align::Right, right.as_bytes(), fo, c, SURFACE);
         }
         let cfg = *sl.cfg();
-        let mut sub = Buf::<40>::new();
-        let mut b = Buf::<16>::new();
+        // The value line in fixed columns (HOME-4): mode, tone, power pinned right; a scan's mode and last hit.
+        let mut cols = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
         if lv.scanning {
-            sub.push(crate::slot::MODES[cfg.mode as usize % 6].as_bytes());
+            cols[0].set(crate::slot::MODES[cfg.mode as usize % 6].as_bytes());
             if lv.hits > 0 && lv.last_hit != f {
-                sub.push(" \u{b7} last ".as_bytes());
-                sub.push(w::freq3(lv.last_hit).as_bytes());
+                cols[1].set(b"last ");
+                cols[1].push(w::freq3(lv.last_hit).as_bytes());
             }
         } else {
-            mode_chip(&cfg, &mut b);
-            sub.push(b.as_bytes());
-            tone_text(cfg.tx_tone, &mut b);
-            if b.is_empty() {
-                b.set(super::transmit::power_name(app, s).as_bytes());
-            }
-            sub.push(" \u{b7} ".as_bytes());
-            sub.push(b.as_bytes());
+            mode_chip(&cfg, &mut cols[0]);
+            tone_text(cfg.tx_tone, &mut cols[1]);
+            cols[2].set(super::transmit::power_name(app, s).as_bytes());
         }
-        if app.dirty(R_SUB + p, hash(&sub)) {
-            w::field(lcd, 15, 211, y + 46, y + 61, y + 58, Align::Left, sub.as_bytes(), &UI_12, SUB, SURFACE);
+        if app.dirty(R_SUB + p, hash(&cols)) {
+            lcd.fill(15, y + 46, 211, 15, SURFACE);
+            w::field(lcd, 15, 36, y + 46, y + 61, y + 58, Align::Left, cols[0].as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 51, 120, y + 46, y + 61, y + 58, Align::Left, cols[1].as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 156, 70, y + 46, y + 61, y + 58, Align::Right, cols[2].as_bytes(), &UI_12, SUB, SURFACE);
         }
         // The last minute: a bar per 1.2 s bucket heard, newest at the right, on a dotted baseline.
         let act = app.radio.act[p];

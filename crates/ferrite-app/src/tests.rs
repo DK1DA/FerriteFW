@@ -836,3 +836,41 @@ fn arrows_are_the_knob() {
     b.knob(1);
     assert_ne!(a.app.slot(0).freq(), b.app.slot(0).freq(), "home: ◀▶ step the band, the knob the frequency");
 }
+
+/// HOME-4: the big card's chips sit in fixed slots. Turning the tone off empties its slot and leaves every pixel of
+/// the mode, shift and power slots as it was; a shorter shift leaves nothing behind.
+#[test]
+fn chip_slots_never_move() {
+    use ferrite_ui::gfx::SURFACE;
+    use ferrite_ui::widgets::{SLOT_MODE, SLOT_POWER, SLOT_SHIFT, SLOT_TONE};
+    let mut t = T::new();
+    let base = crate::slot::SlotCfg { tx_tone: 1000, offset: -60_000, ..DEFAULT_CFG };
+    t.app.set_vfo(0, 14_652_000);
+    t.app.set_vfo_cfg(0, base);
+    let mut fb = FrameBuffer::new();
+    t.render(&mut fb);
+    let (y, _) = crate::screens::home::card(0, 0);
+    let cy = y + 76;
+    let grab = |fb: &FrameBuffer, (x, w): (i32, i32)| (x..x + w).flat_map(|x| (cy..cy + 17).map(move |y| (x, y))).map(|(x, y)| fb.at(x, y)).collect::<Vec<_>>();
+    let (mode, shift, power) = (grab(&fb, SLOT_MODE), grab(&fb, SLOT_SHIFT), grab(&fb, SLOT_POWER));
+    assert!(grab(&fb, SLOT_TONE).iter().any(|&c| c != SURFACE), "a tone shows");
+    // Tone off: its slot is blank, the others untouched.
+    t.app.set_vfo_cfg(0, crate::slot::SlotCfg { tx_tone: 0, ..base });
+    t.render(&mut fb);
+    assert!(grab(&fb, SLOT_TONE).iter().all(|&c| c == SURFACE), "the tone slot is empty");
+    assert_eq!(grab(&fb, SLOT_MODE), mode);
+    assert_eq!(grab(&fb, SLOT_SHIFT), shift);
+    assert_eq!(grab(&fb, SLOT_POWER), power, "power never moves");
+    // Simplex: the shift slot empties too; power still where it was.
+    t.app.set_vfo_cfg(0, crate::slot::SlotCfg { tx_tone: 0, offset: 0, ..base });
+    t.render(&mut fb);
+    assert!(grab(&fb, SLOT_SHIFT).iter().all(|&c| c == SURFACE));
+    assert_eq!(grab(&fb, SLOT_POWER), power);
+    // The widest text each slot shows fits it.
+    use ferrite_ui::assets::UI_12;
+    use ferrite_ui::gfx::text4_width;
+    for (s, (_, w)) in [("FM-N", SLOT_MODE), ("T 254.1", SLOT_TONE), ("R-12.5M", SLOT_SHIFT), ("R SPLIT", SLOT_SHIFT), ("0.25 W", SLOT_POWER)] {
+        assert!(text4_width(s.as_bytes(), &UI_12) <= w - 4, "{s} fits its slot");
+    }
+    assert!(SLOT_POWER.0 + SLOT_POWER.1 == 226 && SLOT_SHIFT.0 + SLOT_SHIFT.1 < SLOT_POWER.0);
+}

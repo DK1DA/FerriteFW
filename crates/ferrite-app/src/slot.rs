@@ -164,6 +164,23 @@ pub fn shift_text(c: &SlotCfg, long: bool, b: &mut Buf<16>) {
     }
 }
 
+/// The shift for the big card's fixed shift slot (HOME-4): "+600k", "-5M", "SPLIT" (the card's header shows the
+/// split's TX frequency), with "R" in front while reversed ("R+600k", "R SPLIT"); empty for simplex. At most 7
+/// characters, the slot's width.
+pub fn shift_chip(c: &SlotCfg, b: &mut Buf<16>) {
+    let mut o = Buf::<16>::new();
+    if c.split {
+        o.set(b"SPLIT");
+    } else {
+        offset_text(c.offset, false, &mut o);
+    }
+    b.clear();
+    if c.reverse && !o.is_empty() {
+        b.push(if c.split { b"R " } else { b"R" });
+    }
+    b.push(o.as_bytes());
+}
+
 /// "146.520": MHz with three decimals.
 pub fn mhz3(f: Freq10) -> Buf<12> {
     let mut b = Buf::<12>::new();

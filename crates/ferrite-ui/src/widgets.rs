@@ -105,6 +105,26 @@ pub fn chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], fg: u16, bg: u16) ->
     w
 }
 
+/// The big card's chip row in fixed slots (HOME-4): mode, tone, shift and power each keep their own x and width, so
+/// a value coming or going never moves its neighbours; power is pinned to the right edge. Widths fit the widest
+/// text each can show in UI_12 (7 px a character, 4 px padding each side): "FM-N", "T 254.1", "R-12.5M" (a
+/// reversed shift) and "0.25 W". x..x+w, all inside 15..226.
+pub const SLOT_MODE: (i32, i32) = (15, 36);
+pub const SLOT_TONE: (i32, i32) = (54, 57);
+pub const SLOT_SHIFT: (i32, i32) = (114, 57);
+pub const SLOT_POWER: (i32, i32) = (176, 50);
+
+/// A chip in a fixed slot (x, w) at y..y+17: the slot is cleared first, then a chip of the slot's full width when
+/// `s` isn't empty, so a shorter value never leaves pixels behind.
+pub fn chip_slot(lcd: &mut impl Panel, slot: (i32, i32), y: i32, s: &[u8], fg: u16, frame: u16, bg: u16) {
+    let (x, w) = slot;
+    lcd.fill(x, y, w, 17, bg);
+    if !s.is_empty() {
+        field(lcd, x + 1, w - 2, y + 1, y + 16, y + 13, Align::Center, fit(s, &UI_12, w - 4), &UI_12, fg, bg);
+        lcd.frame_r(x, y, w, 17, 3, frame);
+    }
+}
+
 /// A row of chips in the box x..x+w, y..y+17.
 pub fn chips(lcd: &mut impl Panel, x: i32, y: i32, w: i32, items: &[&[u8]], bg: u16) {
     chips_sel(lcd, x, y, w, items, None, bg)

@@ -36,6 +36,7 @@ FONT_LIST = [  # name, file, px, chars, tabular, use
     ("ui_12b", BOLD, 12, TEXT, False, "emphasis: clock, keys in hints, tags"),
     ("ui_15b", BOLD, 15, TEXT, False, "headings: setup pages, alerts; the callsign on the boot screen"),
     ("call_35", BOLD, 35, CALL, False, "the callsign on the owner card (10 characters fit)"),
+    ("name_26", BOLD, 26, TEXT, False, "channel names on the large home card when they fit (13 characters)"),
     ("name_22", BOLD, 22, TEXT, False, "channel names on the home cards (16 characters fit the large card)"),
     ("dig_46", NUM, 46, DIG, True, "active slot frequency"),
     ("dig_28", NUM, 28, DIG, True, "active slot last digits"),

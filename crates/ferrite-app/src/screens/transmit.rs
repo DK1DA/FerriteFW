@@ -296,16 +296,15 @@ impl View for Transmit {
         }
         let pw = power_name(app, s);
         if app.dirty(5, hash(&(m, tone, pw))) {
-            lcd.fill(15, y + 89, 211, 17, SURFACE);
-            let mut x = 15 + w::chip(lcd, 15, y + 89, m.as_bytes(), TEXT, SURFACE) + 4;
-            if !tone.is_empty() {
-                tone.push(b" sent");
-                let tw = text4_width(tone.as_bytes(), &UI_12) + 10;
-                w::field(lcd, x, tw, y + 89, y + 106, y + 102, Align::Center, tone.as_bytes(), &UI_12, RED, SURFACE);
-                lcd.frame_r(x, y + 89, tw, 17, 3, RED);
-                x += tw + 4;
-            }
-            w::chip(lcd, x, y + 89, pw.as_bytes(), if pw.len() > 4 { AMBER } else { TEXT }, SURFACE);
+            // Fixed slots (HOME-4): the tone being sent is the red chip; power is pinned right, wide enough for
+            // "0.25 W cap".
+            let cy = y + 89;
+            w::chip_slot(lcd, w::SLOT_MODE, cy, m.as_bytes(), TEXT, LINE, SURFACE);
+            w::chip_slot(lcd, w::SLOT_TONE, cy, tone.as_bytes(), RED, RED, SURFACE);
+            lcd.fill(w::SLOT_TONE.0 + w::SLOT_TONE.1, cy, 136 - w::SLOT_TONE.0 - w::SLOT_TONE.1, 17, SURFACE);
+            lcd.fill(136, cy, 90, 17, SURFACE);
+            let pwd = text4_width(pw.as_bytes(), &UI_12) + 10;
+            w::chip_slot(lcd, (226 - pwd, pwd), cy, pw.as_bytes(), if pw.len() > 4 { AMBER } else { TEXT }, LINE, SURFACE);
         }
         // Mic level (TX-12): how hard you are modulating; amber near full deviation. No power or drive
         // readout: the radio cannot measure output, and drive only ever reads ~100%.

@@ -254,7 +254,41 @@ fn main() {
     app.key_up(Key::PTT, t + 200, &store);
     shot!(300, "tx-refused");
     home(&mut app, &mut t);
-    // Split: RX 446.000, TX 146.520 (cross-band, same relay state: allowed) shows SPLIT on home.
+    // HOME-4: the chip row in fixed slots. Card A in four states side by side (chips-stable.png): tone off,
+    // simplex, then DCS, reversed and High. Mode, tone, shift and power keep their places.
+    {
+        use ferrite_app::slot::{SlotCfg, DCS_FLAG};
+        let base = *app.slot(0).cfg();
+        let states = [
+            base,
+            SlotCfg { tx_tone: 0, ..base },
+            SlotCfg { tx_tone: 0, offset: 0, ..base },
+            SlotCfg { tx_tone: DCS_FLAG | 0o023, reverse: true, power: 2, ..base },
+        ];
+        let (cw, ch) = (W as usize, 148usize);
+        let mut strip = vec![0u8; cw * 4 * ch * 3];
+        app.set_vfo(0, 14_652_000);
+        for (k, c) in states.iter().enumerate() {
+            app.set_vfo_cfg(0, *c);
+            run(&mut app, &mut fb, t + 300, &mut t);
+            let rgb = fb.rgb();
+            for y in 0..ch {
+                for x in 0..cw {
+                    let i = (y * cw + x) * 3;
+                    let o = (y * cw * 4 + k * cw + x) * 3;
+                    strip[o..o + 3].copy_from_slice(&rgb[i..i + 3]);
+                }
+            }
+        }
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/sim/chips-stable.png");
+        let mut enc = png::Encoder::new(std::fs::File::create(&path).unwrap(), (cw * 4) as u32, ch as u32);
+        enc.set_color(png::ColorType::Rgb);
+        enc.write_header().unwrap().write_image_data(&strip).unwrap();
+        println!("{}", path.display());
+        app.set_vfo_cfg(0, base);
+    }
+    // Split: RX 446.000, TX 146.520 (cross-band, same relay state: allowed): SPLIT in its slot, the TX frequency
+    // in the header.
     let split = ferrite_app::slot::SlotCfg { split: true, offset: 14_652_000, ..ferrite_app::slot::DEFAULT_CFG };
     app.set_vfo_cfg(0, split);
     app.set_vfo(0, 44_600_000);
