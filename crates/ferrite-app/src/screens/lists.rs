@@ -41,15 +41,29 @@ impl App {
         self.screen = s;
     }
 
+    /// The region changed (setup, 0 9 4): a VFO on 2 m or 1.25 m still on a region default step takes the new
+    /// region's (VFO-18). A step the user picked is left alone.
+    pub(crate) fn region_steps(&mut self) {
+        use crate::slot::{band_near, band_step, BAND_125M, BAND_VHF, BANDS, STEP_5K};
+        let region = self.set.region();
+        for s in self.slots.iter_mut() {
+            let b = band_near(s.vfo);
+            if matches!(b, BAND_VHF | BAND_125M) && (s.cfg.step == BANDS[b].step || s.cfg.step == STEP_5K) {
+                s.cfg.step = band_step(b, region);
+            }
+        }
+    }
+
     /// "Go" (INBOX-10, MENU-26): the active slot to a VFO on that frequency, then home.
     pub(crate) fn go_freq(&mut self, f: ferrite_core::freq::Freq10) {
-        use crate::slot::{band_near, BANDS};
+        use crate::slot::{band_near, band_step, BANDS};
         let a = self.active as usize;
+        let region = self.set.region();
         let s = &mut self.slots[a];
         let b = band_near(f);
         if band_near(s.vfo) != b || !s.vfo_mode {
             s.cfg.mode = BANDS[b].mode;
-            s.cfg.step = BANDS[b].step;
+            s.cfg.step = band_step(b, region);
             (s.cfg.offset, s.cfg.split) = (0, false);
         }
         (s.vfo_mode, s.vfo, s.mem[b]) = (true, f, f);

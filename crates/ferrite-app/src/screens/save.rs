@@ -238,7 +238,7 @@ impl View for Save {
 fn change(mut s: Save, app: &App, store: &impl ChannelStore, d: i32) -> Save {
     match s.at() {
         F::Freq => {
-            let step = STEPS[BANDS[band_near(s.freq)].step as usize].0 as i32;
+            let step = STEPS[crate::slot::band_step(band_near(s.freq), app.set.region()) as usize].0 as i32;
             s.set_freq((s.freq as i32 + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1) as Freq10);
         }
         F::Shift => {

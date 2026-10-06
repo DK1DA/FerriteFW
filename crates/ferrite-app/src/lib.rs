@@ -310,6 +310,7 @@ impl App {
             alert_info: alert,
             link_answer: None,
         };
+        app.region_steps(); // VFO-18: the region's step on 2 m and 1.25 m (saved slots bring their own)
         for s in 0..SLOTS as u8 {
             app.send_slot(s);
         }

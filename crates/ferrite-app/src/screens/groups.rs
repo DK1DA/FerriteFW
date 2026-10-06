@@ -506,7 +506,10 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [7, 1] => s.theme = cycle(s.theme, d, THEMES.len()),
         [7, 2] => s.layout = cycle(s.layout, d, LAYOUTS.len()),
         [7, 3, 3] => s.boot_card = !s.boot_card,
-        [9, 4] => s.region = cycle(s.region.max(1) - 1, d, REGION_LIST.len()) + 1,
+        [9, 4] => {
+            s.region = cycle(s.region.max(1) - 1, d, REGION_LIST.len()) + 1;
+            app.region_steps(); // VFO-18
+        }
         [3, 1, 2] => s.fm_step = cycle(s.fm_step, d, FM_STEPS.len()),
         [3, 1, 3] => s.fm_agc = cycle(s.fm_agc, d, 11),
         [3, 1, 4] => s.fm_monitor = !s.fm_monitor,

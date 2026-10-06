@@ -157,6 +157,7 @@ impl Setup {
 
     fn finish(self, app: &mut App) {
         app.set.setup_done = true;
+        app.region_steps(); // VFO-18: 5 kHz on 2 m in the US and Canada
         if self.flags & SINGLE != 0 {
             app.back();
         } else {

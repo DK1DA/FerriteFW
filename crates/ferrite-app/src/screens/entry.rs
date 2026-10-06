@@ -190,7 +190,7 @@ fn snap(app: &App, to: EntryFor, f: Freq10) -> Freq10 {
 fn step_at(app: &App, f: Freq10) -> Freq10 {
     let s = &app.slots[app.active as usize];
     match band_of(f) {
-        Some(b) if band_of(s.vfo) != Some(b) => STEPS[BANDS[b].step as usize].0,
+        Some(b) if band_of(s.vfo) != Some(b) => STEPS[crate::slot::band_step(b, app.set.region()) as usize].0,
         _ => STEPS[s.cfg.step as usize % STEPS.len()].0,
     }
 }
@@ -307,7 +307,7 @@ impl View for Entry {
                 rows[1].1.set(&fb[..n]);
                 rows[2].0 = b"Step";
                 let st = match band_of(sf) {
-                    Some(b) if band_of(app.slots[a as usize].vfo) != Some(b) => BANDS[b].step,
+                    Some(b) if band_of(app.slots[a as usize].vfo) != Some(b) => crate::slot::band_step(b, app.set.region()),
                     _ => app.slots[a as usize].cfg.step,
                 };
                 rows[2].1.set(STEPS[st as usize % STEPS.len()].1.as_bytes());
@@ -398,13 +398,14 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
     match e.to {
         EntryFor::Vfo => {
             let a = app.active as usize;
+            let region = app.set.region();
             let s = &mut app.slots[a];
             let (old, new) = (band_near(s.vfo), band_near(f));
             s.mem[old] = s.vfo;
             if old != new {
                 // A new band: its mode and step, and the offset's direction kept with its amount (NAV-2).
                 s.cfg.mode = BANDS[new].mode;
-                s.cfg.step = BANDS[new].step;
+                s.cfg.step = crate::slot::band_step(new, region);
                 if s.cfg.offset != 0 && !s.cfg.split {
                     s.cfg.offset = s.cfg.offset.signum() * BANDS[new].shift;
                 }

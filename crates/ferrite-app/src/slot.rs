@@ -93,6 +93,7 @@ pub const STEPS: [(u32, &str); 14] = [
     (10000, "100 kHz"),
 ];
 pub const STEP_12K5: u8 = 10;
+pub const STEP_5K: u8 = 6;
 /// A channel's squelch "Global": it uses the slot's level (the VFO's), not its own (SQL-6, CHAN-14).
 pub const SQ_GLOBAL: u8 = 10;
 const STEP_25K: u8 = 11;
@@ -234,6 +235,17 @@ pub const BANDS: [BandDef; 7] = [
     BandDef { name: "UHF", lo: mhz(400), hi: mhz(520), start: mhz(446), mode: 0, step: STEP_12K5, shift: 500_000 },
 ];
 pub const BAND_125M: usize = 5;
+pub const BAND_VHF: usize = 3;
+
+/// A band's default step in a region (VFO-18): 2 m and 1.25 m in the US and Canada take 5 kHz, as their 15 and
+/// 20 kHz channel plans (146.520, 146.940, 147.225) need; elsewhere the band's own (12.5 kHz on 2 m, IARU R1).
+pub fn band_step(b: usize, r: Option<ferrite_core::txplan::Region>) -> u8 {
+    use ferrite_core::txplan::Region::{Canada, Us};
+    match b {
+        BAND_VHF | BAND_125M if matches!(r, Some(Us | Canada)) => STEP_5K,
+        _ => BANDS[b].step,
+    }
+}
 
 /// The band a frequency is in, or None between bands.
 pub fn band_of(f: Freq10) -> Option<usize> {

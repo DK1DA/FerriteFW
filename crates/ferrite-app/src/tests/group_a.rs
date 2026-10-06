@@ -500,3 +500,27 @@ fn whole_frequency_goes_in_without_ok() {
     assert_eq!(t.app.screen(), Screen::Home);
     assert_eq!(t.app.slots[0].vfo, 14_651_250);
 }
+
+/// VFO-18: 2 m and 1.25 m default to 5 kHz in the US and Canada (15/20 kHz channel plans), 12.5 kHz elsewhere;
+/// a step the user picked is kept when the region changes.
+#[test]
+fn region_steps_on_2m() {
+    use crate::slot::{band_step, BAND_125M, BAND_VHF, STEP_12K5, STEP_5K};
+    use ferrite_core::txplan::Region;
+    assert_eq!(band_step(BAND_VHF, Some(Region::Us)), STEP_5K);
+    assert_eq!(band_step(BAND_125M, Some(Region::Canada)), STEP_5K);
+    assert_eq!(band_step(BAND_VHF, Some(Region::Uk)), STEP_12K5);
+    assert_eq!(band_step(BAND_VHF, None), STEP_12K5);
+    let mut t = T::new();
+    t.app.settings_mut().set_region(Some(Region::Us));
+    t.app.slots[0].vfo_mode = true;
+    t.app.slots[0].vfo = 14_652_000;
+    t.app.region_steps();
+    assert_eq!(t.app.slots[0].cfg.step, STEP_5K, "US: 5 kHz");
+    t.digits("146940");
+    assert_eq!(t.app.slots[0].vfo, 14_694_000, "146.940 lands exactly");
+    t.app.slots[0].cfg.step = crate::slot::STEPS.iter().position(|s| s.0 == 2500).unwrap() as u8; // the user's 25 kHz
+    t.app.settings_mut().set_region(Some(Region::Europe));
+    t.app.region_steps();
+    assert_eq!(t.app.slots[0].cfg.step as usize, crate::slot::STEPS.iter().position(|s| s.0 == 2500).unwrap(), "kept");
+}

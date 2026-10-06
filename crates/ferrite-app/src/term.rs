@@ -737,11 +737,11 @@ impl Term {
                 n.zone = if k == z - 1 { NO_ZONE } else { k as u8 };
             }
             F::Rx => {
-                let step = STEPS[BANDS[band_near(c.rx)].step as usize].0 as i32;
+                let step = STEPS[crate::slot::band_step(band_near(c.rx), app.set.region()) as usize].0 as i32;
                 n.rx = (c.rx as i32 + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1) as Freq10; // CHAN-22
             }
             F::Tx if c.cfg.split => {
-                let step = STEPS[BANDS[band_near(c.cfg.offset.max(0) as Freq10)].step as usize].0 as i32;
+                let step = STEPS[crate::slot::band_step(band_near(c.cfg.offset.max(0) as Freq10), app.set.region()) as usize].0 as i32;
                 n.cfg.offset = (c.cfg.offset + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1);
             }
             F::Tx => return self.say(slow!("TX: Enter types a TX frequency (split)").as_bytes(), false),

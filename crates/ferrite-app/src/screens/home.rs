@@ -321,6 +321,7 @@ fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) {
 /// ◀▶ on home: next band in VFO mode (NAV-2), next zone with channels in channel mode (NAV-1, CHAN-11).
 fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
     let a = app.active as usize;
+    let region = app.set.region();
     let s = &mut app.slots[a];
     if s.on_channel() {
         let zones = store.zones() as i32;
@@ -342,7 +343,7 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
         let nb = (b as i32 + d).rem_euclid(BANDS.len() as i32) as usize;
         s.vfo = s.mem[nb];
         s.cfg.mode = BANDS[nb].mode;
-        s.cfg.step = BANDS[nb].step;
+        s.cfg.step = crate::slot::band_step(nb, region);
         if s.cfg.offset != 0 && !s.cfg.split {
             s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift; // a split's TX stays where it is
         }

@@ -14,7 +14,7 @@ use super::text::TextFor;
 use super::{Cx, Hints, View};
 use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{chan_label, Item, BANDS, STEPS, band_near};
+use crate::slot::{chan_label, Item, STEPS, band_near};
 use crate::{App, Screen, EDIT_IDLE_MS};
 use ferrite_core::freq::mhz;
 use ferrite_core::keys::Key;
@@ -201,8 +201,7 @@ impl View for ChEdit {
             }
             NAME => {}
             FREQ => {
-                let b = &BANDS[band_near(ch.rx)];
-                let step = STEPS[b.step as usize].0 as i32;
+                let step = STEPS[crate::slot::band_step(band_near(ch.rx), app.set.region()) as usize].0 as i32;
                 let f = (ch.rx as i32 + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1) as u32; // CHAN-22
                 edit(app, |c| c.rx = f);
             }
