@@ -90,7 +90,7 @@ const G7: [Entry; 9] = [
     (slow!("Home layout"), slow!("Watch"), slow!("What home shows.")),
     (slow!("Display"), slow!("Icon + %"), slow!("Battery, power-on message, boot, S-meter.")),
     (slow!("Backlight"), slow!("15 s"), slow!("Timeout, brightness, wake.")),
-    (slow!("Sounds"), slow!("Beep on"), slow!("Key beep, volume, roger beep, alerts.")),
+    (slow!("Sounds"), slow!("Beep on"), slow!("Key beep, volume, alert tones.")),
     (slow!("LEDs"), slow!("RX and TX"), slow!("When the LEDs light.")),
     (slow!("Battery Save"), slow!("Level 1"), slow!("Receiver sleep: longer life, slower.")),
     (slow!("Auto power off"), slow!("Off"), slow!("Off after a time without key or signal.")),
@@ -101,7 +101,7 @@ const G8: [Entry; 9] = [
     (slow!("VOX"), slow!("Off"), slow!("Voice-operated transmit.")),
     (slow!("Mic gain"), slow!("5"), slow!("Microphone level, 1-9.")),
     (slow!("Tone burst"), slow!("1750 Hz"), slow!("PTT + SIDE2 sends it.")),
-    (slow!("Tail elimination"), slow!("Off"), slow!("Squelch tail: mode, phase, delay.")),
+    (slow!("Tail elimination"), slow!("Off"), slow!("Squelch tail, end tone (roger beep).")),
     (slow!("DTMF"), slow!("100 ms"), slow!("Dialer, memories, timing, PTT ID.")),
     (slow!("Callsign and ID"), slow!("Empty"), slow!("Your callsign, and CW ID.")),
     (slow!("Busy lockout default"), slow!("Off"), slow!("For new channels and the VFO.")),
@@ -214,7 +214,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
     ((7, 5), &[
         (slow!("Key beep"), slow!("On"), slow!("Beep on key presses.")),
         (slow!("Beep volume"), slow!("3"), slow!("1-5.")),
-        (slow!("Roger beep"), slow!("Off"), slow!("Beep or MDC1200 at unkey.")),
         (slow!("Alert tones"), slow!("On"), slow!("Tones for alerts.")),
     ]),
     ((8, 1), &[(slow!("TX timeout"), slow!("120 s"), slow!("Transmit stops after this.")), (slow!("Pre-alert"), slow!("10 s"), slow!("Warning before the timeout."))]),
@@ -223,6 +222,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Mode"), slow!("Off"), slow!("Receive, transmit or both.")),
         (slow!("Phase"), slow!("55 Hz"), slow!("55 Hz or a phase shift.")),
         (slow!("Repeater tail delay"), slow!("0 s"), slow!("Wait for the repeater tail.")),
+        (slow!("End tone"), slow!("Off"), slow!("A short tone as you let go of PTT.")),
     ]),
     ((8, 6), &[
         (slow!("Dialer"), slow!(""), slow!("Type and send DTMF.")),
