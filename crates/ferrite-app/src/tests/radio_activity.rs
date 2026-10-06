@@ -699,8 +699,18 @@ fn split_tx() {
     use crate::screens::entry::EntryFor;
     let mut t = ready();
     tune(&mut t, 44_600_000); // RX 446.000 (70 cm)
-    // Offset from simplex: +, -, then Split opens entry; BACK leaves the shift as it was.
+    // Turning onto Split (VFO-16) keeps today's TX and stays where it is; turning on leaves it again.
     t.app.change(Item::Offset, 3);
+    assert_eq!(t.app.screen(), Screen::Home, "no entry from the knob");
+    assert!(t.app.slot(0).cfg().split);
+    assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 0), 44_600_000, "today's TX: simplex, so RX");
+    t.app.change(Item::Offset, 1);
+    assert!(!t.app.slot(0).cfg().split, "on past Split: simplex");
+    // OK on Split in the value editor: TX frequency entry, prefilled; BACK there keeps the split as it was.
+    t.app.open(crate::screens::nav::Dest::Value(Item::Offset));
+    t.knob(-1);
+    assert!(matches!(t.app.screen(), Screen::Value(_)), "{:?}", t.app.screen());
+    t.tap(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::SplitTx), "{:?}", t.app.screen());
     let clear = |t: &mut T| {
         while matches!(t.app.screen(), Screen::Entry(e) if e.n > 0) {
@@ -708,12 +718,11 @@ fn split_tx() {
         }
     };
     clear(&mut t);
-    t.tap(Key::Exit); // and with none left, leaves
-    assert!(!matches!(t.app.screen(), Screen::Entry(_)));
-    assert!(!t.app.slot(0).cfg().split, "BACK keeps the old shift");
+    t.tap(Key::Exit); // and with none left, leaves: back to the value editor
+    assert!(matches!(t.app.screen(), Screen::Value(_)), "{:?}", t.app.screen());
+    assert!(t.app.slot(0).cfg().split, "BACK keeps the split");
     // Again, typing 146.52.
-    t.app.go_home();
-    t.app.change(Item::Offset, 3 - Item::Offset.get(t.app.slot(0).cfg()).0);
+    t.tap(Key::Menu);
     clear(&mut t);
     for d in [1, 4, 6, 5, 2] {
         t.tap(Key::Digit(d));
@@ -783,7 +792,10 @@ fn split_across_the_relay() {
     tune(&mut t, mhz(28) + 40_000);
     assert!(!t.app.set_split(mhz(146) + 52_000));
     // Through the entry: OK on a refused frequency keeps the entry open to type another.
-    t.app.change(Item::Offset, 3 - Item::Offset.get(t.app.slot(0).cfg()).0);
+    t.app.change(Item::Offset, 3 - Item::Offset.get(t.app.slot(0).cfg()).0); // Split, TX = RX 28.400: allowed
+    assert!(t.app.slot(0).cfg().split);
+    t.app.open(crate::screens::nav::Dest::Value(Item::Offset));
+    t.tap(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Entry(_)));
     while matches!(t.app.screen(), Screen::Entry(e) if e.n > 0) {
         t.tap(Key::Exit);
@@ -793,7 +805,7 @@ fn split_across_the_relay() {
     }
     t.tap(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Entry(_)), "still open: {:?}", t.app.screen());
-    assert!(!t.app.slot(0).cfg().split);
+    assert_eq!(t.app.slot(0).cfg().offset, (mhz(28) + 40_000) as i32, "the split keeps its old TX");
     t.app.go_home();
     // A VFO retuned under an allowed split into a crossing pair: PTT refuses, with the reason.
     t.app.slots[0].cfg = crate::slot::DEFAULT_CFG;
@@ -833,4 +845,33 @@ fn channel_mode_leads_with_the_name() {
     t.app.set_channel_rec(1, crate::chan::channel(11, 0, 44_347_500, "Club repeater", cfg));
     t.live.slots[1].scanning = true;
     assert!(t.app.chan_name(1, &t.live).is_empty(), "a scan shows its frequency");
+}
+
+/// The user's path (Oct 5, 2026): hold SLOT on a VFO, the shift cell, OK, the knob onto Split: the value
+/// editor stays (no jump into frequency entry), the knob goes on to Simplex and back, and OK on Split opens
+/// the TX frequency entry.
+#[test]
+fn split_in_the_value_editor() {
+    use crate::screens::entry::EntryFor;
+    let mut t = ready();
+    tune(&mut t, 44_600_000);
+    t.hold(Key::Slot);
+    assert!(matches!(t.app.screen(), Screen::Edit(_)), "{:?}", t.app.screen());
+    // The shift cell: Mode, Bandwidth, Tones on the top row, the shift first on the next.
+    t.tap(Key::Down);
+    assert_eq!(t.app.screen(), Screen::Edit(crate::screens::edit::Edit { cell: 3 }));
+    assert_eq!(crate::slot::GRID[3], Item::Offset);
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Value(_)), "{:?}", t.app.screen());
+    for _ in 0..3 {
+        t.knob(1); // simplex -> + -> - -> Split
+    }
+    assert!(t.app.slot(0).cfg().split);
+    assert!(matches!(t.app.screen(), Screen::Value(_)), "the knob on Split stays in the editor: {:?}", t.app.screen());
+    t.knob(1);
+    assert!(!t.app.slot(0).cfg().split, "on to Simplex");
+    t.knob(-1);
+    assert!(t.app.slot(0).cfg().split);
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::SplitTx), "{:?}", t.app.screen());
 }

@@ -66,10 +66,10 @@ fn frequency_entry() {
     assert_eq!(t.app.screen(), Screen::Home);
     assert_eq!(t.freq(), mhz(147) + 22_500);
     assert!(t.cmds().contains(&RadioCmd::TuneSlot { slot: 0, freq: mhz(147) + 22_500 }));
-    // UHF, typed with the point by itself, snapped to 12.5 kHz
+    // UHF, typed with the point by itself; OK takes it exactly as typed, off the step (VFO-12)
     t.digits("44612");
     t.tap(Key::Menu);
-    assert_eq!(t.freq(), mhz(446) + 12_500);
+    assert_eq!(t.freq(), mhz(446) + 12_000);
     assert_eq!(slot::band_name(t.freq()), "UHF");
     // BACK deletes, then leaves
     t.digits("12");
@@ -475,30 +475,40 @@ fn group_a_screens_draw() {
     }
 }
 
-/// VFO-17: a whole frequency goes in without OK, once no further digit could change where it snaps; a
-/// leading 0 is a MHz digit (0 7 8 0 0 0 = 78.000 MHz).
+/// VFO-12, VFO-17: what's typed is tuned exactly; a whole frequency goes in without OK once three decimals sit
+/// on the step's grid (or five are typed); a leading 0 is a MHz digit (0 7 8 0 0 0 = 78.000 MHz).
 #[test]
 fn whole_frequency_goes_in_without_ok() {
+    let step = |hz10: u32| crate::slot::STEPS.iter().position(|s| s.0 == hz10).unwrap() as u8;
     let mut t = T::new();
     t.app.slots[0].vfo_mode = true;
-    t.app.slots[0].cfg.step = crate::slot::STEPS.iter().position(|s| s.0 == 500).unwrap() as u8; // 5 kHz
-    t.digits("146520");
-    assert_eq!(t.app.screen(), Screen::Home, "146.520 on a 5 kHz step: in");
-    assert_eq!(t.app.slots[0].vfo, 14_652_000);
+    t.app.slots[0].cfg.step = step(500); // 5 kHz (US 2 m)
+    t.digits("146940");
+    assert_eq!(t.app.screen(), Screen::Home, "146.940 on a 5 kHz step: in");
+    assert_eq!(t.app.slots[0].vfo, 14_694_000);
     t.digits("078000");
     assert_eq!(t.app.screen(), Screen::Home, "a leading 0: 78.000 MHz");
     assert_eq!(t.app.slots[0].vfo, 7_800_000);
-    // 6.25 kHz: 146.512 can only snap to 146.5125: in. 146.515 could still be 146.5125 or 146.51875: wait.
-    t.app.slots[0].cfg.step = crate::slot::STEPS.iter().position(|s| s.0 == 625).unwrap() as u8;
-    t.digits("146512");
+    // 12.5 kHz: 145.500 is on the grid; 145.512 waits, and 5 more makes 145.5125.
+    t.digits("145500");
+    t.app.slots[0].cfg.step = step(1250); // tuning to 2 m took the band's step; set the one under test
+    t.digits("145500");
     assert_eq!(t.app.screen(), Screen::Home);
-    assert_eq!(t.app.slots[0].vfo, 14_651_250);
-    t.app.slots[0].cfg.step = crate::slot::STEPS.iter().position(|s| s.0 == 625).unwrap() as u8; // tuning to 2 m took the band's step
-    t.digits("146515");
-    assert!(matches!(t.app.screen(), Screen::Entry(_)), "between two steps: wait for a digit");
-    t.digits("0");
+    assert_eq!(t.app.slots[0].vfo, 14_550_000);
+    t.digits("145512");
+    assert!(matches!(t.app.screen(), Screen::Entry(_)), "off the grid: wait for a digit");
+    t.digits("5");
     assert_eq!(t.app.screen(), Screen::Home);
-    assert_eq!(t.app.slots[0].vfo, 14_651_250);
+    assert_eq!(t.app.slots[0].vfo, 14_551_250);
+    // 146.520 at 12.5 kHz waits; OK takes it exactly, never snapped to 146.525.
+    t.digits("146520");
+    assert!(matches!(t.app.screen(), Screen::Entry(_)));
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen(), Screen::Home);
+    assert_eq!(t.app.slots[0].vfo, 14_652_000);
+    // Five decimals always go in, as typed.
+    t.digits("14652025");
+    assert_eq!(t.app.slots[0].vfo, 14_652_025);
 }
 
 /// VFO-18: 2 m and 1.25 m default to 5 kHz in the US and Canada (15/20 kHz channel plans), 12.5 kHz elsewhere;

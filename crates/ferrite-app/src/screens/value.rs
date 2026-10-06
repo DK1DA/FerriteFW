@@ -89,7 +89,13 @@ impl View for Value {
             (Key::Digit(d), Short) if item == Item::Squelch => app.change(item, d as i32 + 1 - cur(app, item).0), // MENU-17: level d (index d + 1)
             (Key::Hash, Short) => app.reset(item), // MENU-18
             (Key::Star, Short) => app.do_undo(),   // MENU-22
-            (Key::Menu, Short) => app.back(),      // MENU-20: OK keeps
+            // VFO-16: OK on Split sets its TX frequency (entry, prefilled); entry's OK or BACK returns here.
+            (Key::Menu, Short) if item == Item::Offset && app.slot(app.active).cfg().split => {
+                let tx = app.slot(app.active).cfg().offset.max(0) as ferrite_core::freq::Freq10;
+                app.open(super::nav::Dest::Entry(0));
+                app.screen = crate::Screen::Entry(super::entry::Entry::with_freq(super::entry::EntryFor::SplitTx, tx));
+            }
+            (Key::Menu, Short) => app.back(), // MENU-20: OK keeps
             (Key::Exit, Short) => {
                 // MENU-20: BACK restores the old value
                 let now = cur(app, item).0;

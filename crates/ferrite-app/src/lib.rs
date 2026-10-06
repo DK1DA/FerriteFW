@@ -911,10 +911,12 @@ impl App {
                     v += d.signum(); // a VFO has no "Global": it is the slot's level (SQL-6)
                 }
                 if item == Item::Offset && v.rem_euclid(4) == 3 {
-                    // Split needs its TX frequency: entry, prefilled with today's TX; BACK keeps the old shift.
-                    let tx = c.tx_of(rx);
-                    self.open(Dest::Entry(0));
-                    self.screen = Screen::Entry(screens::entry::Entry::with_freq(screens::entry::EntryFor::SplitTx, tx));
+                    // Turning onto Split keeps today's TX as the split's; OK on it sets another (VFO-16), so the
+                    // knob can go on past it.
+                    let tx = if c.split { c.offset.max(0) as Freq10 } else { (rx as i64 + c.offset as i64).max(0) as Freq10 };
+                    if self.set_split(tx) {
+                        self.show_toast(b"Split:", b"OK sets the TX frequency", false);
+                    }
                     return;
                 }
                 let (was_split, old) = (c.split, *c);

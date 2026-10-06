@@ -140,24 +140,15 @@ impl Entry {
         Some(mhz(int) + frac)
     }
 
-    /// A whole frequency is typed, so it goes in without OK (VFO-17): from three decimals (kHz) on, once no
-    /// further digit could change where it snaps on the step (all five typed always is). Returns that
-    /// frequency. A leading 0 counts as a MHz digit, so 0 7 8 0 0 0 is 78.000 MHz.
+    /// A whole frequency is typed, so it goes in without OK (VFO-17): from three decimals (kHz) on, once it is on
+    /// the step's grid, and always at five. Returns it, exactly as typed (VFO-12). A leading 0 counts as a MHz
+    /// digit, so 0 7 8 0 0 0 is 78.000 MHz.
     fn complete(&self, app: &App) -> Option<Freq10> {
         let t = self.typed();
         let p = t.iter().position(|&c| c == b'.').filter(|_| self.freq_mode())?;
-        let decimals = (t.len() - p - 1) as u32;
-        let lo = self.freq()?;
-        if decimals >= 5 {
-            return Some(lo);
-        }
-        if decimals < 3 {
-            return None;
-        }
-        let hi = lo + 10u32.pow(5 - decimals) - 1; // the same digits, every one still to come a 9
-        let step = step_at(app, lo);
-        let snap = |f: Freq10| (f + step / 2) / step * step;
-        (snap(lo) == snap(hi)).then(|| snap(lo))
+        let decimals = t.len() - p - 1;
+        let f = self.freq()?;
+        (decimals >= 5 || decimals >= 3 && f % step_at(app, f) == 0).then_some(f)
     }
 
     /// The entry holding exactly f (5 decimals), so OK's path commits it.
@@ -174,16 +165,6 @@ impl Entry {
         let v = self.typed().iter().fold(0u32, |a, &c| a * 10 + (c - b'0') as u32);
         (v >= 1 && v <= MAX_CHANNELS as u32).then(|| v as u16 - 1)
     }
-}
-
-/// The step a frequency snaps to: its band's own step on another band, else the slot's (VFO-12). A typed
-/// channel or repeater frequency is kept as typed.
-fn snap(app: &App, to: EntryFor, f: Freq10) -> Freq10 {
-    if to != EntryFor::Vfo {
-        return f;
-    }
-    let step = step_at(app, f);
-    (f + step / 2) / step * step
 }
 
 /// The step at f: its band's own on another band, else the active slot's (VFO-12).
@@ -298,28 +279,23 @@ impl View for Entry {
         let mut note: &[u8] = b"";
         if self.freq_mode() {
             if let Some(f) = self.freq() {
-                let sf = snap(app, self.to, f);
+                // VFO-12: tuned exactly as typed; the step row says whether it sits on the step's grid.
                 rows[0].0 = b"Band";
-                rows[0].1.set(band_name(sf).as_bytes());
-                rows[1].0 = b"Tunes to";
-                let mut fb = [0u8; 16];
-                let n = ferrite_core::freq::format(sf, &mut fb);
-                rows[1].1.set(&fb[..n]);
-                rows[2].0 = b"Step";
-                let st = match band_of(sf) {
-                    Some(b) if band_of(app.slots[a as usize].vfo) != Some(b) => crate::slot::band_step(b, app.set.region()),
-                    _ => app.slots[a as usize].cfg.step,
-                };
-                rows[2].1.set(STEPS[st as usize % STEPS.len()].1.as_bytes());
-                rows[3].0 = b"Transmit";
-                match refuse(sf) {
+                rows[0].1.set(band_name(f).as_bytes());
+                rows[1].0 = b"Step";
+                let step = step_at(app, f);
+                let name = STEPS.iter().find(|s| s.0 == step).map_or("", |s| s.1);
+                rows[1].1.set(name.as_bytes());
+                rows[1].1.push(if f % step == 0 { b", on it" } else { b", off it" });
+                rows[2].0 = b"Transmit";
+                match refuse(f) {
                     Some(why) => {
-                        rows[3].1.set(b"-");
-                        (rows[3].2, note) = (AMBER, why.as_bytes());
+                        rows[2].1.set(b"-");
+                        (rows[2].2, note) = (AMBER, why.as_bytes());
                     }
-                    None => match tx_text(app, sf, cx.dev.tx_built) {
-                        Ok(t) => (rows[3].1, rows[3].2) = (Buf::from(t.as_bytes()), GREEN),
-                        Err(t) => (rows[3].1, rows[3].2) = (Buf::from(t.as_bytes()), AMBER),
+                    None => match tx_text(app, f, cx.dev.tx_built) {
+                        Ok(t) => (rows[2].1, rows[2].2) = (Buf::from(t.as_bytes()), GREEN),
+                        Err(t) => (rows[2].1, rows[2].2) = (Buf::from(t.as_bytes()), AMBER),
                     },
                 }
             }
@@ -391,7 +367,6 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
         return;
     }
     let Some(f) = e.freq() else { return };
-    let f = snap(app, e.to, f);
     if let Some(why) = refuse(f) {
         return app.show_toast(why.as_bytes(), b"", false);
     }
