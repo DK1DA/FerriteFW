@@ -176,9 +176,19 @@ impl View for Home {
             }
             let f = app.shown_freq(s, live);
             let cfg = *app.slots[s as usize].cfg();
+            // Channel mode puts the name first, the frequency small under it (HOME-4); a VFO, a scan or a channel
+            // without a name shows the frequency large.
+            let name = app.chan_name(s, live);
             if big {
-                if app.dirty(R_FREQ + p, hash(&f)) {
-                    w::freq(lcd, 15, 226, y + 64, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+                if app.dirty(R_FREQ + p, hash(&(f, name))) {
+                    lcd.fill(15, y + 25, 211, 47, SURFACE);
+                    if name.is_empty() {
+                        w::freq(lcd, 15, 226, y + 64, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+                    } else {
+                        let n = w::fit(name.as_bytes(), &NAME_22, 211);
+                        w::field(lcd, 15, 211, y + 26, y + 54, y + 48, Align::Left, n, &NAME_22, TEXT, SURFACE);
+                        w::freq(lcd, 15, 226, y + 69, f, &DIG_17, &DIG_17, SUB, SUB, SURFACE);
+                    }
                 }
                 // Chips: mode, tone, offset, reverse, power always (HOME-4); a row too long drops from the end, so power
                 // gives way before REV.
@@ -208,18 +218,26 @@ impl View for Home {
                     w::field(lcd, 212, 21, y + 94, y + 111, y + 108, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
                 }
             } else {
-                if app.dirty(R_FREQ + p, hash(&f)) {
-                    w::freq(lcd, 15, 130, y + 42, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+                // Left: the name (channel) or the frequency; right: the frequency small (channel) or the scan's hits.
+                if app.dirty(R_FREQ + p, hash(&(f, name))) {
+                    lcd.fill(15, y + 22, 211, 24, SURFACE);
+                    app.drawn.hash[R_INFO + p] = 0; // the right-hand text shares the row
+                    if name.is_empty() {
+                        w::freq(lcd, 15, 130, y + 42, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+                    } else {
+                        let n = w::fit(name.as_bytes(), &UI_15B, 140);
+                        w::field(lcd, 15, 140, y + 24, y + 45, y + 41, Align::Left, n, &UI_15B, TEXT, SURFACE);
+                    }
                 }
-                let sl = &app.slots[s as usize];
-                let mut name = Buf::<16>::new();
+                let mut right = Buf::<16>::new();
                 if lv.scanning {
-                    let _ = uwrite!(name, "{} hits", lv.hits);
-                } else if let Some(c) = sl.ch.filter(|_| sl.on_channel()) {
-                    name.set(c.name()); // as much as fits (CHAN-5 says 12; the mock-up shows 13)
+                    let _ = uwrite!(right, "{} hits", lv.hits);
+                } else if !name.is_empty() {
+                    right.set(w::freq3(f).as_bytes());
                 }
-                if app.dirty(R_INFO + p, hash(&name)) {
-                    w::field(lcd, 130, 96, y + 26, y + 44, y + 42, Align::Right, name.as_bytes(), &UI_12, TEXT, SURFACE);
+                if app.dirty(R_INFO + p, hash(&right)) {
+                    let (x, c) = if name.is_empty() { (130, TEXT) } else { (155, SUB) };
+                    w::field(lcd, x, 226 - x, y + 26, y + 44, y + 42, Align::Right, right.as_bytes(), &UI_12, c, SURFACE);
                 }
                 let mut sub = Buf::<32>::new();
                 let mut b = Buf::<16>::new();

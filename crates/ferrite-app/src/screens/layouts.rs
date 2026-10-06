@@ -54,8 +54,17 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
             w::field(lcd, 166, 66, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
         }
     }
-    if app.dirty(2, hash(&f)) {
-        w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
+    // Channel mode: the name large, the frequency small under it (HOME-4).
+    let name = app.chan_name(a, live);
+    if app.dirty(2, hash(&(f, name))) {
+        lcd.fill(8, 42, 224, 52, BG);
+        if name.is_empty() {
+            w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
+        } else {
+            let n = w::fit(name.as_bytes(), &NAME_22, 224);
+            w::field(lcd, 8, 224, 44, 72, 66, Align::Left, n, &NAME_22, TEXT, BG);
+            w::freq(lcd, 8, 232, 90, f, &DIG_17, &DIG_17, SUB, SUB, BG);
+        }
     }
     // The settings, label over value (HOME-4): mode, tone, power; step, offset, squelch.
     let cfg = *app.slot(a).cfg();
@@ -165,18 +174,28 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             w::field(lcd, 154, 72, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);
         }
         let f = app.shown_freq(s, live);
-        if app.dirty(R_FREQ + p, hash(&f)) {
-            w::freq(lcd, 15, 140, y + 44, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+        // Channel mode: the name at the left, the frequency small at the right (HOME-4).
+        let name = app.chan_name(s, live);
+        if app.dirty(R_FREQ + p, hash(&(f, name))) {
+            lcd.fill(15, y + 22, 211, 24, SURFACE);
+            app.drawn.hash[R_INFO + p] = 0;
+            if name.is_empty() {
+                w::freq(lcd, 15, 140, y + 44, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+            } else {
+                let n = w::fit(name.as_bytes(), &UI_15B, 140);
+                w::field(lcd, 15, 140, y + 25, y + 46, y + 42, Align::Left, n, &UI_15B, TEXT, SURFACE);
+            }
         }
         let sl = *app.slot(s);
-        let mut name = Buf::<16>::new();
+        let mut right = Buf::<16>::new();
         if lv.scanning {
-            let _ = ufmt::uwrite!(name, "{} hits", lv.hits);
-        } else if let Some(c) = sl.ch.filter(|_| sl.on_channel()) {
-            name.set(c.name());
+            let _ = ufmt::uwrite!(right, "{} hits", lv.hits);
+        } else if !name.is_empty() {
+            right.set(w::freq3(f).as_bytes());
         }
-        if app.dirty(R_INFO + p, hash(&name)) {
-            w::field(lcd, 140, 86, y + 26, y + 44, y + 42, Align::Right, name.as_bytes(), &UI_12B, TEXT, SURFACE);
+        if app.dirty(R_INFO + p, hash(&right)) {
+            let (x, c, fo) = if name.is_empty() { (140, TEXT, &UI_12B) } else { (155, SUB, &UI_12) };
+            w::field(lcd, x, 226 - x, y + 26, y + 44, y + 42, Align::Right, right.as_bytes(), fo, c, SURFACE);
         }
         let cfg = *sl.cfg();
         let mut sub = Buf::<40>::new();

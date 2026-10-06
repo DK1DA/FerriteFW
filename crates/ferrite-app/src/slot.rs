@@ -471,9 +471,14 @@ pub fn mode_chip(c: &SlotCfg, b: &mut Buf<16>) {
     }
 }
 
-/// "CH 012".
+/// "CH 012": menus, lists and editors.
 pub fn chan_label(num: u16, b: &mut Buf<32>) {
     let _ = uwrite!(b, "CH {}", Zero(num as u32 + 1, 3));
+}
+
+/// "012": the slot cards' header, where the name beside it already says it is a channel (HOME-4).
+pub fn chan_num(num: u16, b: &mut Buf<32>) {
+    let _ = uwrite!(b, "{}", Zero(num as u32 + 1, 3));
 }
 
 #[cfg(test)]

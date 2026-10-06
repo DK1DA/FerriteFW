@@ -5,7 +5,7 @@
 //! mock-ups (`docs/img/screens`).
 
 use crate::chan::ChannelStore;
-use crate::slot::{band_name, chan_label};
+use crate::slot::band_name;
 use crate::App;
 use core::hash::{Hash, Hasher};
 use ferrite_core::msg::{Device, LiveAll};
@@ -199,12 +199,25 @@ impl App {
         if lv.scanning {
             b.push(b"SCAN");
         } else if sl.on_channel() {
-            chan_label(sl.ch.map_or(0, |c| c.num), b);
+            crate::slot::chan_num(sl.ch.map_or(0, |c| c.num), b);
         } else {
             b.push(b"VFO");
         }
         b.push(" \u{b7} ".as_bytes());
         b.push(band_name(self.shown_freq(s, live)).as_bytes());
+    }
+
+    /// A channel slot's name, the cards' main line in channel mode (HOME-4); empty for a VFO, a scan or a
+    /// channel without a name, which show their frequency large instead.
+    pub(crate) fn chan_name(&self, s: u8, live: &LiveAll) -> Buf<16> {
+        let sl = &self.slots[s as usize];
+        let mut n = Buf::<16>::new();
+        if !live.slots[s as usize].scanning {
+            if let Some(c) = sl.ch.filter(|_| sl.on_channel()) {
+                n.set(c.name());
+            }
+        }
+        n
     }
 
     /// The slot's frequency, or the scan's current step while it scans.

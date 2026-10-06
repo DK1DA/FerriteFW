@@ -812,3 +812,25 @@ fn split_across_the_relay() {
     t.app.change(Item::Offset, 1);
     assert_eq!(t.app.slot(0).cfg().offset, 0, "still simplex");
 }
+
+/// HOME-4: channel mode leads with the name; the header carries the short number ("012 · UHF"), and a VFO, a scan
+/// or a channel with no name has no name line (its frequency stays large).
+#[test]
+fn channel_mode_leads_with_the_name() {
+    let mut t = ready();
+    let cfg = crate::slot::DEFAULT_CFG;
+    t.app.set_channel_rec(1, crate::chan::channel(11, 0, 44_347_500, "Club repeater", cfg));
+    let mut h = ferrite_ui::text::Buf::<32>::new();
+    t.app.head_text(1, &t.live, &mut h);
+    assert_eq!(h.as_bytes(), "012 \u{b7} UHF".as_bytes());
+    assert_eq!(t.app.chan_name(1, &t.live).as_bytes(), b"Club repeater");
+    t.app.set_channel_rec(1, crate::chan::channel(11, 0, 44_347_500, "", cfg));
+    assert!(t.app.chan_name(1, &t.live).is_empty(), "no name: the frequency stays large");
+    t.app.set_vfo(1, 14_652_000);
+    assert!(t.app.chan_name(1, &t.live).is_empty());
+    t.app.head_text(1, &t.live, &mut h);
+    assert_eq!(h.as_bytes(), "VFO \u{b7} VHF".as_bytes());
+    t.app.set_channel_rec(1, crate::chan::channel(11, 0, 44_347_500, "Club repeater", cfg));
+    t.live.slots[1].scanning = true;
+    assert!(t.app.chan_name(1, &t.live).is_empty(), "a scan shows its frequency");
+}

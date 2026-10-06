@@ -130,6 +130,13 @@ impl App {
         self.send_slot(slot % SLOTS as u8);
     }
 
+    /// Put a slot on a channel that may not be in the store (the simulator's samples: a 16-character name, no name).
+    pub fn set_channel_rec(&mut self, slot: u8, c: crate::chan::Channel) {
+        let s = &mut self.slots[slot as usize % SLOTS];
+        (s.zone, s.ch, s.vfo_mode) = (c.zone, Some(c), false);
+        self.send_slot(slot % SLOTS as u8);
+    }
+
     /// The callsign (setup page 2): crossband ID and automatic transmit need one.
     pub fn set_callsign(&mut self, c: &[u8]) {
         self.set.set_callsign(c);

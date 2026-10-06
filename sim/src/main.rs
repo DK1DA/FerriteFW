@@ -329,6 +329,28 @@ fn main() {
     app.set_layout(2);
     shot!(20_000, "home-activity");
     app.set_layout(0);
+    // Channel mode puts the name first (HOME-4): B (CH 012 Club repeater) active in each layout, PTT B, then a
+    // 16-character name and a channel without one.
+    press(&mut app, Key::Slot, 100, &mut t);
+    shot!(300, "home-ch");
+    app.set_layout(1);
+    shot!(1500, "home-scope-ch");
+    app.set_layout(2);
+    shot!(1500, "home-activity-ch");
+    app.set_layout(0);
+    app.key_down(Key::Ptt(1), t, &store);
+    shot!(1500, "transmit-ch");
+    app.key_up(Key::Ptt(1), t, &store);
+    home(&mut app, &mut t);
+    let cfg = ferrite_app::slot::DEFAULT_CFG;
+    app.set_channel_rec(1, ferrite_app::chan::channel(140, 1, 14_694_000, "Mount Seymour RP", cfg));
+    shot!(300, "home-ch-long");
+    app.set_channel_rec(1, ferrite_app::chan::channel(141, 1, 14_652_000, "", cfg));
+    shot!(300, "home-ch-noname");
+    fake::sample_app(&mut app, &store);
+    press(&mut app, Key::Slot, 100, &mut t);
+    press(&mut app, Key::Slot, 100, &mut t);
+    run(&mut app, &mut fb, t, &mut t);
     // Group C, lists and data: each opened as its way in does, keys pressed, the page saved.
     use ferrite_app::screens::nav::Dest;
     type Shot<'a> = (&'a str, Dest, &'a [(Key, u32)]);

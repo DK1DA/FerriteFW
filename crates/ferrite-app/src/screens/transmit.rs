@@ -260,6 +260,15 @@ impl View for Transmit {
             head.set(b"HF mode");
         } else {
             app.head_text(s, live, &mut head);
+            // On a channel: its name in place of the band, "012 Club repeater" (HOME-4's short number).
+            let name = app.chan_name(s, live);
+            if !name.is_empty() {
+                let sl = app.slot(s);
+                head.clear();
+                crate::slot::chan_num(sl.ch.map_or(0, |c| c.num), &mut head);
+                head.push(b" ");
+                head.push(name.as_bytes());
+            }
         }
         let mut r = Buf::<16>::new();
         r.push(b"RX ");
@@ -270,7 +279,7 @@ impl View for Transmit {
             } else {
                 w::badge(lcd, 15, y + 26, s, true, SURFACE);
             }
-            w::field(lcd, 35, 110, y + 24, y + 42, y + 38, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 35, 110, y + 24, y + 42, y + 38, Align::Left, w::fit(head.as_bytes(), &UI_12, 108), &UI_12, SUB, SURFACE);
             w::field(lcd, 145, 80, y + 24, y + 42, y + 38, Align::Right, r.as_bytes(), &UI_12, SUB, SURFACE);
         }
         if app.dirty(4, hash(&f)) {
