@@ -19,6 +19,7 @@ use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
+use ufmt::uwrite;
 
 /// What the typed value is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -139,6 +140,35 @@ impl Entry {
         Some(mhz(int) + frac)
     }
 
+    /// A whole frequency is typed, so it goes in without OK (VFO-17): from three decimals (kHz) on, once no
+    /// further digit could change where it snaps on the step (all five typed always is). Returns that
+    /// frequency. A leading 0 counts as a MHz digit, so 0 7 8 0 0 0 is 78.000 MHz.
+    fn complete(&self, app: &App) -> Option<Freq10> {
+        let t = self.typed();
+        let p = t.iter().position(|&c| c == b'.').filter(|_| self.freq_mode())?;
+        let decimals = (t.len() - p - 1) as u32;
+        let lo = self.freq()?;
+        if decimals >= 5 {
+            return Some(lo);
+        }
+        if decimals < 3 {
+            return None;
+        }
+        let hi = lo + 10u32.pow(5 - decimals) - 1; // the same digits, every one still to come a 9
+        let step = step_at(app, lo);
+        let snap = |f: Freq10| (f + step / 2) / step * step;
+        (snap(lo) == snap(hi)).then(|| snap(lo))
+    }
+
+    /// The entry holding exactly f (5 decimals), so OK's path commits it.
+    fn set_freq(&mut self, f: Freq10) {
+        let mut b = Buf::<12>::new();
+        let _ = uwrite!(b, "{}.{}", f / 100_000, ferrite_ui::text::Zero(f % 100_000, 5));
+        let n = b.as_bytes().len().min(self.buf.len());
+        self.buf[..n].copy_from_slice(&b.as_bytes()[..n]);
+        self.n = n as u8;
+    }
+
     /// The typed channel number (0-999, typed as 1-1000).
     pub fn number(&self) -> Option<u16> {
         let v = self.typed().iter().fold(0u32, |a, &c| a * 10 + (c - b'0') as u32);
@@ -152,12 +182,17 @@ fn snap(app: &App, to: EntryFor, f: Freq10) -> Freq10 {
     if to != EntryFor::Vfo {
         return f;
     }
+    let step = step_at(app, f);
+    (f + step / 2) / step * step
+}
+
+/// The step at f: its band's own on another band, else the active slot's (VFO-12).
+fn step_at(app: &App, f: Freq10) -> Freq10 {
     let s = &app.slots[app.active as usize];
-    let step = match band_of(f) {
+    match band_of(f) {
         Some(b) if band_of(s.vfo) != Some(b) => STEPS[BANDS[b].step as usize].0,
         _ => STEPS[s.cfg.step as usize % STEPS.len()].0,
-    };
-    (f + step / 2) / step * step
+    }
 }
 
 /// Why a frequency can't be tuned here, if it can't.
@@ -207,7 +242,15 @@ impl View for Entry {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         let mut s = self;
         match (e.key, e.press) {
-            (Key::Digit(d), Press::Short) => s.push(b'0' + d),
+            (Key::Digit(d), Press::Short) => {
+                s.push(b'0' + d);
+                if let Some(f) = s.complete(app) {
+                    app.screen = Screen::Entry(s); // a refusal leaves the digits on show
+                    let mut whole = s;
+                    whole.set_freq(f);
+                    return commit(whole, app, store);
+                }
+            }
             (Key::Star, Press::Short) => s.push(b'.'),
             (Key::Exit, Press::Short) if s.n == 0 => return app.back(),
             (Key::Exit, Press::Short) => {
@@ -236,8 +279,17 @@ impl View for Entry {
                 EntryFor::SplitTx => b"Split: TX frequency, MHz",
             };
             w::field(lcd, 28, 204, 24, 41, 37, Align::Left, what, &UI_12, SUB, BG);
-            let font = if text4_width(self.typed(), &DIG_46) <= 200 { &DIG_46 } else { &DIG_28 };
-            let x = 8 + lcd.text4_rows(8, 96, self.typed(), font, TEXT, BG, 48, 100);
+            // As home shows a frequency: MHz and three decimals big, the 10 Hz digits small, so the size never
+            // changes while typing (a digit lands in the size it will have on the card).
+            let t = self.typed();
+            let cut = match t.iter().position(|&c| c == b'.') {
+                Some(p) if self.freq_mode() => t.len().min(p + 4),
+                _ => t.len(),
+            };
+            let mut x = 8 + lcd.text4_rows(8, 96, &t[..cut], &DIG_46, TEXT, BG, 48, 100);
+            if cut < t.len() {
+                x += lcd.text4_rows(x, 96, &t[cut..], &DIG_28, TEXT, BG, 48, 100);
+            }
             lcd.fill(x + 3, 92, 16, 4, BLUE);
             lcd.fill(0, 112, 240, 1, LINE);
         }

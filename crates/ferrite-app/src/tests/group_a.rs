@@ -62,9 +62,7 @@ fn start_up_sends_every_slot_whole() {
 #[test]
 fn frequency_entry() {
     let mut t = T::new();
-    t.digits("147225");
-    assert!(matches!(t.app.screen(), Screen::Entry(_)));
-    t.tap(Key::Menu);
+    t.digits("147225"); // a whole frequency: in without OK (VFO-17)
     assert_eq!(t.app.screen(), Screen::Home);
     assert_eq!(t.freq(), mhz(147) + 22_500);
     assert!(t.cmds().contains(&RadioCmd::TuneSlot { slot: 0, freq: mhz(147) + 22_500 }));
@@ -87,8 +85,10 @@ fn frequency_entry() {
     assert_eq!(t.freq(), f);
     t.hold(Key::Exit);
     // 6 m with the point typed
-    t.digits("52*525");
-    t.tap(Key::Menu);
+    t.digits("52*525"); // whole on its step: in without OK
+    if matches!(t.app.screen(), Screen::Entry(_)) {
+        t.tap(Key::Menu);
+    }
     assert_eq!(t.freq(), mhz(52) + 52_500);
 }
 
@@ -473,4 +473,30 @@ fn group_a_screens_draw() {
         t.app.go_home();
         t.render(&mut fb);
     }
+}
+
+/// VFO-17: a whole frequency goes in without OK, once no further digit could change where it snaps; a
+/// leading 0 is a MHz digit (0 7 8 0 0 0 = 78.000 MHz).
+#[test]
+fn whole_frequency_goes_in_without_ok() {
+    let mut t = T::new();
+    t.app.slots[0].vfo_mode = true;
+    t.app.slots[0].cfg.step = crate::slot::STEPS.iter().position(|s| s.0 == 500).unwrap() as u8; // 5 kHz
+    t.digits("146520");
+    assert_eq!(t.app.screen(), Screen::Home, "146.520 on a 5 kHz step: in");
+    assert_eq!(t.app.slots[0].vfo, 14_652_000);
+    t.digits("078000");
+    assert_eq!(t.app.screen(), Screen::Home, "a leading 0: 78.000 MHz");
+    assert_eq!(t.app.slots[0].vfo, 7_800_000);
+    // 6.25 kHz: 146.512 can only snap to 146.5125: in. 146.515 could still be 146.5125 or 146.51875: wait.
+    t.app.slots[0].cfg.step = crate::slot::STEPS.iter().position(|s| s.0 == 625).unwrap() as u8;
+    t.digits("146512");
+    assert_eq!(t.app.screen(), Screen::Home);
+    assert_eq!(t.app.slots[0].vfo, 14_651_250);
+    t.app.slots[0].cfg.step = crate::slot::STEPS.iter().position(|s| s.0 == 625).unwrap() as u8; // tuning to 2 m took the band's step
+    t.digits("146515");
+    assert!(matches!(t.app.screen(), Screen::Entry(_)), "between two steps: wait for a digit");
+    t.digits("0");
+    assert_eq!(t.app.screen(), Screen::Home);
+    assert_eq!(t.app.slots[0].vfo, 14_651_250);
 }

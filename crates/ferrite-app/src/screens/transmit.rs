@@ -189,10 +189,10 @@ pub struct Transmit {
     pub slot: u8,
 }
 
-/// The level name (TX-12): LOW, MID, HIGH; "0.25 W cap" on 1.25 m.
+/// The level name (TX-12): LOW, MID, HIGH; "0.25 W" on 1.25 m, the capped power itself.
 pub fn power_name(app: &App, slot: u8) -> &'static str {
     if slot < SLOTS as u8 && app.capped(slot) {
-        return "0.25 W cap";
+        return "0.25 W";
     }
     let p = if slot < SLOTS as u8 { app.slot(slot).cfg().power } else { 0 };
     ["LOW", "MID", "HIGH"][p as usize % 3]
@@ -297,7 +297,7 @@ impl View for Transmit {
         let pw = power_name(app, s);
         if app.dirty(5, hash(&(m, tone, pw))) {
             // Fixed slots (HOME-4): the tone being sent is the red chip; power is pinned right, wide enough for
-            // "0.25 W cap".
+            // "0.25 W".
             let cy = y + 89;
             w::chip_slot(lcd, w::SLOT_MODE, cy, m.as_bytes(), TEXT, LINE, SURFACE);
             w::chip_slot(lcd, w::SLOT_TONE, cy, tone.as_bytes(), RED, RED, SURFACE);

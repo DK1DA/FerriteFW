@@ -177,7 +177,7 @@ fn power_level_names() {
     let mut t = ready();
     assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "LOW");
     tune(&mut t, mhz(223) + 50_000);
-    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "0.25 W cap");
+    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "0.25 W");
 }
 
 /// SCAN-1, SCAN-11: SIDE2 starts and shows the scan; * skips a hit; SIDE2 stops.
