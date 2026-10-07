@@ -20,7 +20,7 @@ pub struct Channel {
     pub num: u16,
     pub zone: u8,
     pub rx: Freq10,
-    /// Name: 16 bytes stored, 12 shown on home (CHAN-5); unused bytes are 0.
+    /// Name: 16 bytes, all shown on home (CHAN-5, HOME-4a); unused bytes are 0.
     pub name: [u8; 16],
     pub cfg: SlotCfg,
     /// [`FLAG_SKIP`], [`FLAG_APRS`], [`FLAG_RX_ONLY`] (CHAN-4).
@@ -145,9 +145,63 @@ pub trait ChannelStore {
         None
     }
 
+    /// Recent (CHAN-25): the number of the r-th channel used, newest first; a store without the list has none.
+    fn recent(&self, _r: u16) -> Option<u16> {
+        None
+    }
+
+    /// A channel was used: tuned to, transmitted on, or heard (it moves to the front of Recent).
+    fn used(&self, _num: u16) {}
+
+    /// The active slot is on this channel: used once when it changes to it, not every time it is looked at.
+    fn tuned(&self, _num: u16) {}
+
     /// The other records the screens list (event log, APRS, GPS, scan lists): see [`crate::data`].
     fn data(&self) -> &dyn Data {
         &NoData
+    }
+}
+
+/// The channels used most recently (CHAN-25), newest first, without duplicates: 10 numbers, kept in RAM by the
+/// store that owns the channels (not saved: a power cycle starts it again), and the active slot's channel last
+/// put there, so tuning to one counts once.
+pub struct RecentList([core::cell::Cell<u16>; RECENT_MAX], core::cell::Cell<u16>);
+
+/// How many channels Recent holds.
+pub const RECENT_MAX: usize = 10;
+
+impl RecentList {
+    pub const fn new() -> Self {
+        RecentList([const { core::cell::Cell::new(u16::MAX) }; RECENT_MAX], core::cell::Cell::new(u16::MAX))
+    }
+
+    pub fn get(&self, r: u16) -> Option<u16> {
+        self.0.get(r as usize).map(|c| c.get()).filter(|&n| n != u16::MAX)
+    }
+
+    /// `num` to the front; the others move down, its older place (or the oldest) drops out.
+    pub fn touch(&self, num: u16) {
+        if self.0[0].get() == num {
+            return;
+        }
+        let at = self.0.iter().position(|c| c.get() == num).unwrap_or(RECENT_MAX - 1);
+        for i in (1..=at).rev() {
+            self.0[i].set(self.0[i - 1].get());
+        }
+        self.0[0].set(num);
+    }
+
+    /// The active slot is on `num`: to the front if it wasn't the last channel tuned.
+    pub fn tuned(&self, num: u16) {
+        if self.1.replace(num) != num {
+            self.touch(num);
+        }
+    }
+}
+
+impl Default for RecentList {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

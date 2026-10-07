@@ -26,6 +26,15 @@ pub fn band(f: Freq10) -> (Band, u8) {
     }
 }
 
+/// What the BK4829s receive (datasheet: 18-580 and 760-1160 MHz), up to what frequency entry takes (three MHz
+/// digits): home VFOs and channels. Below 18 MHz is HF mode's, on the SI4732 (VFO-14).
+pub const RX_RANGES: [(Freq10, Freq10); 2] = [(mhz(18), mhz(580)), (mhz(760), mhz(1000))];
+
+/// Whether a chip can receive `f` ([`RX_RANGES`]).
+pub fn receivable(f: Freq10) -> bool {
+    RX_RANGES.iter().any(|&(lo, hi)| f >= lo && f < hi)
+}
+
 /// Whether `f` needs the band relay (PC4) switched to the HF path: chip 1 below 64 MHz ([`band`]'s HF).
 pub fn needs_relay(f: Freq10) -> bool {
     band(f).0 == Band::Hf

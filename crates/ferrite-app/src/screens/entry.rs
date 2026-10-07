@@ -196,11 +196,13 @@ fn tx_text(app: &App, f: Freq10, tx_built: bool) -> Result<&'static str, &'stati
     }
 }
 
+/// Why a frequency can't be tuned, as "head: body" (the toast splits it): below 18 MHz is HF mode's (VFO-14);
+/// anything else no chip receives names the ranges that are (VFO-21).
 fn refuse(f: Freq10) -> Option<&'static str> {
     if f < LO {
         Some("Below 18 MHz: HF mode (MENU 0 3 4)") // VFO-14
-    } else if f > HI {
-        Some("Above what the radio receives")
+    } else if f > HI || !ferrite_core::freq::receivable(f) {
+        Some("Can't tune: 18-580, 760-1000 MHz")
     } else {
         None
     }
@@ -371,7 +373,9 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
     }
     let Some(f) = e.freq() else { return };
     if let Some(why) = refuse(f) {
-        return app.show_toast(why.as_bytes(), b"", false);
+        // VFO-21: the entry stays open with its digits, so they can be fixed
+        let (head, body) = why.split_once(": ").unwrap_or((why, ""));
+        return app.show_toast(head.as_bytes(), body.as_bytes(), false);
     }
     match e.to {
         EntryFor::Vfo => {

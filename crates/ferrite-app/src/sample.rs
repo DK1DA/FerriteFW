@@ -191,6 +191,8 @@ pub fn owner_card(s: &mut Settings) {
 pub struct Sample {
     /// The sample channels, then room for the ones the app saves.
     chans: [Cell<Option<Channel>>; CHANNELS.len() + 16],
+    /// Recent (CHAN-25).
+    recent: crate::chan::RecentList,
     zones: Cell<u8>,
     zone_cfg: [Cell<ZoneCfg>; 8],
     zone_names: [Cell<Name>; 8],
@@ -225,6 +227,7 @@ impl Sample {
         let zc = |z: usize| ZoneCfg { scan_all: z == 1, shown: z != 5, resume: if z == 3 { 11 } else { 0 }, dwell: 255, pri: [if z == 1 { Some(11) } else { None }, None], ..ZoneCfg::default() };
         Sample {
             chans: core::array::from_fn(|i| Cell::new(CHANNELS.get(i).copied())),
+            recent: crate::chan::RecentList::new(),
             zones: Cell::new(ZONES_AT_START as u8),
             zone_cfg: core::array::from_fn(|z| Cell::new(zc(z))),
             zone_names: core::array::from_fn(|z| Cell::new(Name::from(ZONES[z]))),
@@ -327,6 +330,15 @@ impl Sample {
 }
 
 impl ChannelStore for Sample {
+    fn recent(&self, r: u16) -> Option<u16> {
+        self.recent.get(r)
+    }
+    fn used(&self, num: u16) {
+        self.recent.touch(num);
+    }
+    fn tuned(&self, num: u16) {
+        self.recent.tuned(num);
+    }
     fn zones(&self) -> u8 {
         self.zones.get()
     }

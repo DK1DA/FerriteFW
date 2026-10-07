@@ -162,6 +162,12 @@ impl View for ScanLists {
                     }
                     _ => return,
                 }
+                // SCAN-14: a span across the band relay's edges (18 and 64 MHz) can't be scanned; refused here, when
+                // the edge is set, not at scan time (decided Oct 7, 2026). The editor stays open.
+                if let Some(&e) = [mhz(18), mhz(64)].iter().find(|&&e| p.start < e && p.end > e) {
+                    let head: &[u8] = if e == mhz(18) { b"Can't span 18 MHz" } else { b"Can't span 64 MHz" };
+                    return app.show_toast(head, b"one side only", false);
+                }
                 data.request(Op::Preset(i, p));
             }
             Page::Presets => {

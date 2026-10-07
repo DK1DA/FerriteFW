@@ -175,6 +175,11 @@ fn main() {
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "entry-freq", scale);
     press(&mut app, Exit, 800, &mut t);
+    tap(&mut app, &mut t, &[D(6), D(5), D(0), D(0), D(0), D(0)]); // VFO-21: 650 MHz is refused, the entry stays
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "entry-refused", scale);
+    press(&mut app, Exit, 800, &mut t);
+    run(&mut app, &mut fb, t + 3500, &mut t);
     app.key_down(D(5), t, &store); // HOME-8: hold 5 opens tones at the long press, a popup names it
     run(&mut app, &mut fb, t + 800, &mut t);
     app.key_up(D(5), t, &store);
@@ -408,6 +413,7 @@ fn main() {
         ("event-log-options", Dest::EventLog, &[(Key::Menu, 800)]),
         ("aprs-heard", Dest::AprsHeard, &[]),
         ("aprs-station", Dest::AprsHeard, &[(Key::Menu, 100)]),
+        ("aprs-station-waypoint", Dest::AprsHeard, &[(Key::Menu, 100), (Key::Hash, 100)]),
         ("aprs-messages", Dest::AprsMessages, &[]),
         ("aprs-message", Dest::AprsMessages, &[(Key::Menu, 100)]),
         // Predictive compose (TEXT-2 to TEXT-6): the quick list on an empty message, a word with its candidates
@@ -448,6 +454,18 @@ fn main() {
         run(&mut app, &mut fb, t, &mut t);
         save(&fb, name, scale);
     }
+    // SCAN-14: the range preset editor refuses a span across 64 MHz (144-148 MHz, Start turned down to 54).
+    press(&mut app, Key::Exit, 800, &mut t);
+    run(&mut app, &mut fb, t + 3500, &mut t);
+    app.open(Dest::RangePresets);
+    press(&mut app, Key::Menu, 100, &mut t);
+    press(&mut app, Key::Down, 100, &mut t);
+    for _ in 0..9 {
+        app.knob(-100, t, &store);
+        t += 50;
+    }
+    run(&mut app, &mut fb, t, &mut t);
+    save(&fb, "range-preset-refused", scale);
     // GPS while moving (GPS-17, GPS-19): 46 km/h on a course of 120 degrees; the go-to dial turns course up.
     if let Some(f) = store.fix.get() {
         store.fix.set(Some(ferrite_app::data::Fix { speed_kmh: 46, heading: 120, ..f }));

@@ -568,3 +568,17 @@ fn mode_carries_the_bandwidth() {
     assert!(cmds.contains(&RadioCmd::SlotParam { slot: 0, param: Param::Mode, value: m as i32 }), "{cmds:?}");
     assert!(cmds.contains(&RadioCmd::SlotParam { slot: 0, param: Param::Bandwidth, value: (m == 1) as i32 }), "{cmds:?}");
 }
+
+/// VFO-21: a frequency no chip receives (580-760 MHz, or above 1000) is refused with the ranges named, and the
+/// entry stays open with its digits (decided Oct 7, 2026).
+#[test]
+fn unreceivable_frequency_is_refused() {
+    let mut t = T::new();
+    t.app.slots[0].vfo_mode = true;
+    let before = t.app.slots[0].vfo;
+    t.digits("650000");
+    assert!(matches!(t.app.screen(), Screen::Entry(_)), "the entry stays: {:?}", t.app.screen());
+    assert_eq!(t.app.slots[0].vfo, before, "nothing tuned");
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Can't tune" && x.body.as_bytes() == b"18-580, 760-1000 MHz"));
+    assert!(ferrite_core::freq::receivable(ferrite_core::freq::mhz(446)) && !ferrite_core::freq::receivable(ferrite_core::freq::mhz(700)));
+}

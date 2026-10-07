@@ -31,9 +31,8 @@ const V_RECENT: u8 = 6;
 const V_NEARBY: u8 = 7;
 /// The band views' edges (CHAN-14: "2 m, 70 cm, air, marine").
 const BAND_VIEWS: [(Freq10, Freq10); 4] = [(mhz(144), mhz(148)), (mhz(420), mhz(450)), (mhz(108), mhz(137)), (mhz(156), mhz(163))];
-/// Recent: up to ten channels, from the newest 64 events.
-const RECENT_MAX: u16 = 10;
-const RECENT_EVENTS: u16 = 64;
+/// Recent: up to ten channels (CHAN-25).
+const RECENT_MAX: u16 = crate::chan::RECENT_MAX as u16;
 
 /// The row actions (C10), in order.
 const ACTIONS: [(&str, &str); 8] = [
@@ -115,32 +114,12 @@ impl<S: ChannelStore> ViewOf<'_, S> {
         }
     }
 
-    /// The channel on a frequency, if one is stored.
-    fn on(&self, f: Freq10) -> Option<Channel> {
-        (0..self.store.count()).filter_map(|i| self.store.by_number(i)).find(|c| c.rx == f)
+
+    /// Recent (CHAN-25): the r-th channel used, newest first, from the store's list; a deleted one is skipped.
+    fn recent(&self, r: u16) -> Option<Channel> {
+        (0..RECENT_MAX).filter_map(|k| self.store.recent(k)).filter_map(|n| self.store.get(n)).nth(r as usize)
     }
 
-    /// Recent: the r-th distinct channel heard in the event log, newest first.
-    fn recent(&self, r: u16) -> Option<Channel> {
-        let d = self.store.data();
-        let mut k = 0;
-        let mut last: [u16; RECENT_MAX as usize] = [u16::MAX; RECENT_MAX as usize];
-        for i in 0..d.events().min(RECENT_EVENTS) {
-            let Some(c) = d.event(i).and_then(|e| self.on(e.freq)) else { continue };
-            if last[..k as usize].contains(&c.num) {
-                continue;
-            }
-            if k == r {
-                return Some(c);
-            }
-            last[k as usize] = c.num;
-            k += 1;
-            if k == RECENT_MAX {
-                break;
-            }
-        }
-        None
-    }
 
     /// Nearby: the r-th nearest channel with a position, and its distance and bearing (CHAN-15). Each step
     /// finds the next by (distance, number), so nothing is sorted in RAM.
@@ -407,7 +386,7 @@ impl View for Browse {
             let (a, b): (&[u8], &[u8]) = match view {
                 V_NEARBY if data.fix().is_none() => (b"Needs a GPS fix", b"Nearby sorts by distance from it"),
                 V_NEARBY => (b"No channels with a position", b"The web app imports them"),
-                V_RECENT => (b"Nothing recent", b"Channels heard in the event log"),
+                V_RECENT => (b"Nothing recent", b"Channels you tune to, use or hear"),
                 _ => (b"No channels here", b"Hold V/M on a VFO to save one"),
             };
             app.empty(lcd, a, b);

@@ -797,6 +797,19 @@ impl App {
             relay |= (s.relay as u8) << i;
             self.scan_hit[i] = if s.scanning && (s.squelch_open || s.last_hit != 0 && s.freq == s.last_hit) { s.freq } else { 0 };
         }
+        // CHAN-25: Recent gets a channel when you tune to it (the active slot's), transmit on it, or a slot on it
+        // opens squelch.
+        let opened = rx & !self.rx_mask;
+        for i in 0..SLOTS {
+            let sl = &self.slots[i];
+            let Some(c) = sl.ch.filter(|_| sl.on_channel()) else { continue };
+            if i == self.active as usize {
+                store.tuned(c.num);
+            }
+            if opened & 1 << i != 0 || self.radio.keyed == Some(i as u8) && store.recent(0) != Some(c.num) {
+                store.used(c.num);
+            }
+        }
         (self.rx_mask, self.tone_mask, self.scan_mask, self.relay_mask) = (rx, tone, scan, relay);
         if let Some(t) = self.toast.filter(|t| after(now, t.until)) {
             self.toast = None;

@@ -76,6 +76,8 @@ pub struct FlashStore<N: Nor, D: Data> {
     zones: Cell<u8>,
     /// Each channel number's zone, or [`EMPTY`].
     zmap: [Cell<u8>; MAX_CHANNELS as usize],
+    /// Recent (CHAN-25): 10 channel numbers in RAM, not saved.
+    recent: ferrite_app::chan::RecentList,
     ver: Cell<u32>,
     mounted: Cell<Mounted>,
     /// The save timer: CRC of the state last saved, of the state last seen, and when that changed.
@@ -101,6 +103,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             extra,
             zones: Cell::new(0),
             zmap: core::array::from_fn(|_| Cell::new(EMPTY)),
+            recent: ferrite_app::chan::RecentList::new(),
             ver: Cell::new(0),
             mounted: Cell::new(Mounted::Failed),
             saved: Cell::new(0),
@@ -825,6 +828,18 @@ impl Source for Limit<'_> {
 }
 
 impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
+    fn recent(&self, r: u16) -> Option<u16> {
+        self.recent.get(r)
+    }
+
+    fn used(&self, num: u16) {
+        self.recent.touch(num);
+    }
+
+    fn tuned(&self, num: u16) {
+        self.recent.tuned(num);
+    }
+
     fn zones(&self) -> u8 {
         self.zones.get()
     }

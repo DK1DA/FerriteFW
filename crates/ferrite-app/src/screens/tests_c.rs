@@ -819,3 +819,48 @@ fn quick_messages_edited() {
     t.tap(Key::Hash);
     assert!(t.s.quick(0).is_none());
 }
+
+/// SCAN-14: the range preset editor refuses an edge that would make the span cross 64 MHz (the band relay),
+/// keeping the editor open and the preset as it was (decided Oct 7, 2026).
+#[test]
+fn preset_span_across_64_mhz_refused() {
+    let mut t = T::new();
+    t.open(Dest::RangePresets);
+    t.tap(Key::Menu); // the first preset, 144-148 MHz
+    t.tap(Key::Down); // Start
+    // 10 MHz a step: 134, 124 ... 64 are fine (64 is the edge itself), 54 would cross it
+    for _ in 0..9 {
+        t.app.knob(-100, t.t, &t.s);
+    }
+    assert_eq!(t.s.preset(0).unwrap().start, ferrite_core::freq::mhz(64), "stopped at the edge");
+    assert!(t.app.toast_up(), "says why");
+    assert_eq!(t.name(), "Range preset", "the editor stays open");
+}
+
+/// CHAN-25: Recent gets a channel when you tune to it, transmit on it, or a slot on it opens squelch; newest first,
+/// no duplicates, at most 10 (decided Oct 7, 2026).
+#[test]
+fn recent_channels() {
+    let mut t = T::new();
+    let (a, b) = (t.s.by_number(0).unwrap(), t.s.by_number(1).unwrap());
+    let put = |t: &mut T, slot: usize, c: crate::chan::Channel| {
+        let s = &mut t.app.slots[slot];
+        (s.ch, s.vfo_mode) = (Some(c), false);
+    };
+    put(&mut t, 0, a); // the active slot tuned to a channel
+    t.wait(100);
+    assert_eq!(t.s.recent(0), Some(a.num));
+    put(&mut t, 1, b); // B on another channel opens squelch
+    let mut live = LiveAll::default();
+    live.slots[1].squelch_open = true;
+    t.app.tick(t.t + 100, &live, &t.s);
+    assert_eq!((t.s.recent(0), t.s.recent(1)), (Some(b.num), Some(a.num)), "heard: to the front");
+    t.app.tick(t.t + 200, &live, &t.s);
+    assert_eq!(t.s.recent(2), None, "still open: counted once, no duplicate");
+    for n in 0..12u16 {
+        t.s.used(100 + n);
+    }
+    assert_eq!(t.s.recent(0), Some(111));
+    assert_eq!(t.s.recent(9), Some(102), "ten kept");
+    assert_eq!(t.s.recent(10), None);
+}
