@@ -82,6 +82,9 @@ pub struct FakeRadio {
     scope_cfg: (u8, u8),
     /// The two BK4829s' registers, for the terminal's `bk` (TERM-21).
     bk: [[u16; 128]; 2],
+    /// Scanning slots going down (a bit per slot, SCAN-16), and until when (s) each stays off the hit it left.
+    scan_down: u8,
+    scan_quiet: [f32; 3],
     fm: u16,
     now: f32,
     /// A slot on a NOAA / Weatheradio channel since this time (s): the fake decoder hears a SAME warning there.
@@ -98,7 +101,7 @@ impl FakeRadio {
         live.slots[0] = SlotLive { freq: mhz(146) + 52_000, rssi: -121, ..Default::default() };
         live.slots[1] = SlotLive { freq: mhz(443) + 47_500, rssi: -121, ..Default::default() };
         live.slots[2] = SlotLive { freq: mhz(118) + 95_000, rssi: -121, scanning: true, hits: 3, last_hit: mhz(121) + 50_000, ..Default::default() };
-        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), bk: fake_bk(), fm: 9_810, now: 0.0, wx_since: None, same: None }
+        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), bk: fake_bk(), scan_down: 0, scan_quiet: [0.0; 3], fm: 9_810, now: 0.0, wx_since: None, same: None }
     }
 
     pub fn cmd(&mut self, c: RadioCmd) {
@@ -121,6 +124,13 @@ impl FakeRadio {
             RadioCmd::ScanSkip { slot } => {
                 let s = &mut self.live.slots[slot as usize % 3];
                 s.skips = s.skips.saturating_add(1);
+                self.leave_hit(slot);
+            }
+            RadioCmd::ScanDir { slot, up, resume } => {
+                self.scan_down = self.scan_down & !(1 << slot) | (!up as u8) << slot;
+                if resume {
+                    self.leave_hit(slot);
+                }
             }
             RadioCmd::ScopeCfg { bars, dwell } => self.scope_cfg = (bars, dwell),
             RadioCmd::Sweep { centre, step, on } => {
@@ -251,6 +261,12 @@ impl FakeRadio {
         }
     }
 
+    /// Off the hit now: quiet until the hit window ends (the scan steps on meanwhile).
+    fn leave_hit(&mut self, slot: u8) {
+        let t = self.now;
+        self.scan_quiet[slot as usize % 3] = t - t % 7.0 + 2.0;
+    }
+
     /// Advance to t seconds; `active` is always heard.
     pub fn step(&mut self, t: f32, active: u8) {
         let dt = t - self.last_step;
@@ -261,7 +277,7 @@ impl FakeRadio {
         for (i, s) in self.live.slots.iter_mut().enumerate() {
             let heard = i as u8 == active || self.watch & 1 << i != 0;
             let (open, level) = if s.scanning {
-                scan(s, t, dt)
+                scan(s, t, dt, self.scan_down & 1 << i != 0, t < self.scan_quiet[i])
             } else {
                 match i {
                     0 => ((t % 10.0) > 6.0 && (t % 10.0) < 9.0, -85.0 + (t * 1.7).sin() * 6.0),
@@ -277,10 +293,10 @@ impl FakeRadio {
 }
 
 /// Scanning: a step every 0.1 s across the slot's band, stopping 2 s on a hit every 7 s.
-fn scan(s: &mut SlotLive, t: f32, dt: f32) -> (bool, f32) {
+fn scan(s: &mut SlotLive, t: f32, dt: f32, down: bool, quiet: bool) -> (bool, f32) {
     let b = &BANDS[band_of(s.freq).unwrap_or(2)];
     let phase = t % 7.0;
-    if phase < 2.0 {
+    if phase < 2.0 && !quiet {
         if (t - dt) % 7.0 >= 2.0 {
             s.hits = s.hits.saturating_add(1);
             s.last_hit = s.freq;
@@ -289,7 +305,13 @@ fn scan(s: &mut SlotLive, t: f32, dt: f32) -> (bool, f32) {
     }
     if dt > 0.0 && (t * 10.0) as u32 != ((t - dt) * 10.0) as u32 {
         let step: Freq10 = 2_500;
-        s.freq = if s.freq + step >= b.hi { b.lo } else { s.freq + step };
+        s.freq = if down {
+            if s.freq <= b.lo + step { b.hi - step } else { s.freq - step }
+        } else if s.freq + step >= b.hi {
+            b.lo
+        } else {
+            s.freq + step
+        };
     }
     (false, 0.0)
 }

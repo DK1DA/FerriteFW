@@ -44,6 +44,8 @@ pub enum RadioCmd {
     ScanSkip { slot: u8 },
     /// Scanning: the zone set, zones 0-15 by bit (SCAN-3; 0 = the current zone only).
     ScanZones { slot: u8, zones: u16 },
+    /// Scanning: go on up or down from here (SCAN-16); `resume` leaves the hit it is stopped on at once.
+    ScanDir { slot: u8, up: bool, resume: bool },
     /// Band scope sweep around a centre at a step (10 Hz units), with the last [`RadioCmd::ScopeCfg`]; off when
     /// `on` is false (SCOPE-4). The active slot's chip sweeps with its audio off.
     Sweep { centre: Freq10, step: u16, on: bool },

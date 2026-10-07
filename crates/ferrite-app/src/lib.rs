@@ -250,6 +250,9 @@ pub struct App {
     tone_mask: u8,
     scan_mask: u8,
     relay_mask: u8,
+    /// Where each scanning slot is stopped on a hit (squelch open, or still on its last hit in the resume wait);
+    /// 0 when it isn't. PTT transmits there (SCAN-19).
+    scan_hit: [Freq10; SLOTS],
     out: Outbox,
     /// The channel write for the store's owner ([`App::pop_write`]): one, as every input makes at most one and
     /// the owner drains after every input.
@@ -302,6 +305,7 @@ impl App {
             tone_mask: 0,
             scan_mask: 0,
             relay_mask: 0,
+            scan_hit: [0; SLOTS],
             out: Outbox { q: [None; 16], head: 0, len: 0, sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
             text: Buf::new(),
@@ -467,6 +471,33 @@ impl App {
         if let Some(ch) = self.slots[slot as usize].ch.filter(|_| self.slots[slot as usize].on_channel()) {
             self.write(ChanWrite::Put { ch, from });
         }
+    }
+
+    /// SCAN-19: PTT on a scanning slot ends the scan; stopped on a hit, the slot moves there (its channel, or its
+    /// VFO), so the transmission goes out on the hit; otherwise on the frequency the scan started from.
+    fn scan_ptt(&mut self, slot: u8, store: &impl ChannelStore) {
+        if self.scan_mask & 1 << slot == 0 {
+            return;
+        }
+        self.out.push(RadioCmd::Scan { slot, on: false });
+        self.scan_mask &= !(1 << slot);
+        let f = core::mem::take(&mut self.scan_hit[slot as usize]);
+        let s = self.slots[slot as usize];
+        if f == 0 || s.on_channel() && s.ch.is_some_and(|c| c.rx == f) {
+            return;
+        }
+        if s.on_channel() {
+            // the slot's zone first, then the zones added to the scan (SCAN-3)
+            let zones = core::iter::once(s.zone).chain((0..10u8).filter(|z| self.radio.zones & 1 << z != 0));
+            for z in zones {
+                if let Some(pos) = (0..store.zone_len(z)).find(|&i| store.zone_at(z, i).is_some_and(|c| c.rx == f)) {
+                    return self.set_channel(slot, z, pos, store);
+                }
+            }
+            return;
+        }
+        self.slots[slot as usize].vfo = f;
+        self.send_slot(slot);
     }
 
     /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
@@ -670,6 +701,8 @@ impl App {
             // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there. PTT A, B and
             // C key their own slot; the side connector's keys the active slot.
             self.ptt_slot = slot;
+            let s = if (slot as usize) < SLOTS { slot } else { self.active };
+            self.scan_ptt(s, store);
             self.screen.ptt(self, true);
         }
     }
@@ -712,6 +745,7 @@ impl App {
             tone |= (s.tone_heard as u8) << i;
             scan |= (s.scanning as u8) << i;
             relay |= (s.relay as u8) << i;
+            self.scan_hit[i] = if s.scanning && (s.squelch_open || s.last_hit != 0 && s.freq == s.last_hit) { s.freq } else { 0 };
         }
         (self.rx_mask, self.tone_mask, self.scan_mask, self.relay_mask) = (rx, tone, scan, relay);
         if let Some(t) = self.toast.filter(|t| after(now, t.until)) {

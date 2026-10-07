@@ -1,13 +1,14 @@
 //! The scan screen (manual chapter 14, SCAN-1 to SCAN-15; no mock-up): SIDE2 on home starts a scan on the
 //! active slot and opens this screen. It shows the target, the resume rule, where the scan is, the hits (when,
 //! what, how strong) and the skip count (SCAN-7). \* skips the current hit for this scan (SCAN-11, KEY-18),
-//! digits add or remove zones 0-9 from the set (SCAN-3), SIDE2 stops (SCAN-1), BACK goes back (home: SIDE2
-//! starts it there) with the scan still running (it shows on the card).
+//! ▲▼ set the direction and leave a hit (SCAN-16), # skips a channel for good (SCAN-17), digits add or remove
+//! zones 0-9 from the set (SCAN-3), SIDE2 stops (SCAN-1), BACK goes back (home: SIDE2 starts it there) with the
+//! scan still running (it shows on the card).
 
 use super::activity::Hit;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::ChannelStore;
+use crate::chan::{ChannelStore, FLAG_SKIP};
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{band_name, chan_label, BANDS, band_near};
 use crate::App;
@@ -46,7 +47,11 @@ impl View for Scan {
         "Scan"
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+    fn own_arrows(self) -> bool {
+        true
+    }
+
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         let s = self.slot;
         match (e.key, e.press) {
             (Key::Side(2), Press::Short) => {
@@ -71,6 +76,13 @@ impl View for Scan {
                 b.push(if app.radio.zones & 1 << d != 0 { b"added" } else { b"removed" });
                 app.show_toast(b.as_bytes(), b"", false);
             }
+            (Key::Up | Key::Down, Press::Short) => {
+                // SCAN-16: the direction from here on; stopped on a hit, leave it now.
+                let (up, resume) = (e.key == Key::Up, app.scan_hit[s as usize] != 0);
+                app.out.push(RadioCmd::ScanDir { slot: s, up, resume });
+                app.show_toast(if resume { b"Skipped" } else { b"Scanning" }, if up { b"up" } else { b"down" }, false);
+            }
+            (Key::Hash, Press::Short) => lasting_skip(app, s, store),
             (Key::Exit, Press::Short) => app.back(), // the scan keeps running
             _ => {}
         }
@@ -205,12 +217,40 @@ impl View for Scan {
     }
 
     fn hints(self, app: &App) -> Hints {
-        if app.slot(self.slot).on_channel() {
-            Hints::new(&[("*", "Skip"), ("0-9", "Zones"), ("SIDE2", "Stop")])
+        if app.scan_hit[self.slot as usize] != 0 && app.slot(self.slot).on_channel() {
+            Hints::new(&[("*", "Skip"), ("#", "Skip always"), (ARROWS_UD, "Go on")])
+        } else if app.scan_hit[self.slot as usize] != 0 {
+            Hints::new(&[("*", "Skip"), (ARROWS_UD, "Go on"), ("SIDE2", "Stop")])
+        } else if app.slot(self.slot).on_channel() {
+            Hints::new(&[(ARROWS_UD, "Direction"), ("0-9", "Zones"), ("SIDE2", "Stop")])
         } else {
-            Hints::new(&[("*", "Skip"), ("SIDE2", "Stop"), ("BACK", "Back")])
+            Hints::new(&[(ARROWS_UD, "Direction"), ("SIDE2", "Stop"), ("BACK", "Back")])
         }
     }
+}
+
+/// SCAN-17: # on a hit sets the channel's Skip flag (CHAN-4), so no scan stops there again, and the scan goes
+/// on. A band scan has no list to keep it in: \* still skips it for this scan.
+fn lasting_skip(app: &mut App, s: u8, store: &impl ChannelStore) {
+    let f = app.scan_hit[s as usize];
+    if f == 0 {
+        return app.show_toast(b"Nothing to skip", b"", false);
+    }
+    let sl = *app.slot(s);
+    if !sl.on_channel() {
+        return app.show_toast(b"No skip list here", b"band scan: * skips it once", false);
+    }
+    let zones = core::iter::once(sl.zone).chain((0..10u8).filter(|z| app.radio.zones & 1 << z != 0));
+    let Some(mut c) = zones.filter_map(|z| channel_on(store, z, f)).next() else {
+        return app.show_toast(b"Nothing to skip", b"", false);
+    };
+    c.flags |= FLAG_SKIP;
+    app.put_channel(c);
+    app.out.push(RadioCmd::ScanSkip { slot: s });
+    let mut b = Buf::<32>::new();
+    chan_label(c.num, &mut b);
+    b.push(b" skipped");
+    app.show_toast(b.as_bytes(), b"for every scan", false);
 }
 
 /// The zone's channel on this frequency, if any.

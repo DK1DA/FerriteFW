@@ -197,6 +197,76 @@ fn scan_screen() {
     assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: false }));
 }
 
+/// SCAN-16: ▲▼ set the direction; stopped on a hit they leave it at once.
+#[test]
+fn scan_direction() {
+    let mut t = T::new();
+    t.tap(Key::Side(2));
+    t.live.slots[0] = SlotLive { freq: mhz(146) + 50_000, scanning: true, ..Default::default() };
+    t.wait(100);
+    t.cmds();
+    t.tap(Key::Down);
+    assert!(t.cmds().contains(&RadioCmd::ScanDir { slot: 0, up: false, resume: false }));
+    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, squelch_open: true, rssi: -80, ..Default::default() };
+    t.wait(100);
+    t.tap(Key::Up);
+    assert!(t.cmds().contains(&RadioCmd::ScanDir { slot: 0, up: true, resume: true }));
+    assert_eq!(t.freq(), mhz(146) + 52_000, "the arrows don't tune the slot while it scans");
+}
+
+/// SCAN-17: # on a channel scan's hit sets that channel's Skip flag for good and goes on; a band scan says why
+/// it can't.
+#[test]
+fn scan_skip_for_good() {
+    let mut t = T::new();
+    let st = store();
+    let z = (0..16).find(|&z| st.zone_len(z) > 1).unwrap();
+    t.app.set_channel(0, z, 0, &st);
+    let c = st.zone_at(z, 1).unwrap();
+    t.tap(Key::Side(2));
+    t.live.slots[0] = SlotLive { freq: c.rx, scanning: true, squelch_open: true, rssi: -80, ..Default::default() };
+    t.wait(100);
+    t.cmds();
+    t.tap(Key::Hash);
+    match t.app.pop_write() {
+        Some(ChanWrite::Put { ch, .. }) => assert!(ch.num == c.num && ch.flags & crate::chan::FLAG_SKIP != 0, "{ch:?}"),
+        w => panic!("{w:?}"),
+    }
+    assert!(t.cmds().contains(&RadioCmd::ScanSkip { slot: 0 }));
+    // A band scan (VFO) keeps no list.
+    let mut t = T::new();
+    t.tap(Key::Side(2));
+    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, squelch_open: true, ..Default::default() };
+    t.wait(100);
+    t.tap(Key::Hash);
+    assert!(t.app.pop_write().is_none());
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"No skip list here"));
+}
+
+/// SCAN-19: PTT while stopped on a hit ends the scan and transmits there; not on a hit, on the slot's own
+/// frequency.
+#[test]
+fn ptt_while_scanning() {
+    let mut t = ready();
+    let f0 = t.freq();
+    t.tap(Key::Side(2));
+    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, squelch_open: true, rssi: -80, ..Default::default() };
+    t.wait(100);
+    t.cmds();
+    ptt(&mut t, true);
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::Scan { slot: 0, on: false }), "{c:?}");
+    assert!(c.iter().any(|c| matches!(c, RadioCmd::Transmit { slot: 0, on: true })), "{c:?}");
+    assert_eq!(t.freq(), mhz(146) + 94_000, "on the hit");
+    ptt(&mut t, false);
+    let mut t = ready();
+    t.tap(Key::Side(2));
+    t.live.slots[0] = SlotLive { freq: mhz(147), scanning: true, ..Default::default() };
+    t.wait(100);
+    ptt(&mut t, true);
+    assert_eq!(t.freq(), f0, "not on a hit: where the scan started");
+}
+
 /// SCOPE-1, SCOPE-3: hold 1; the knob moves the centre; OK tunes to the marker; leaving stops the sweep.
 #[test]
 fn band_scope() {

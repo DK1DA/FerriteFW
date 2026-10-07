@@ -292,6 +292,7 @@ pub async fn task() {
                 | RadioCmd::PauseWatch(_)
                 | RadioCmd::ScanSkip { .. }
                 | RadioCmd::ScanZones { .. }
+                | RadioCmd::ScanDir { .. }
                 | RadioCmd::Sweep { .. }
                 | RadioCmd::ScopeCfg { .. }
                 | RadioCmd::ScopeListen { .. }
