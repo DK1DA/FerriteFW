@@ -67,6 +67,10 @@ pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
     if slot < SLOTS as u8 && !app.aprs_slot(slot) && app.slot(slot).on_channel() && app.slot(slot).ch.is_some_and(|c| c.flags & crate::chan::FLAG_RX_ONLY != 0) {
         return Some(Refusal::RxOnlyChannel);
     }
+    // TX-20: the BK4829 has no AM modulator.
+    if slot < SLOTS as u8 && app.tuned_cfg(slot).mode == 2 {
+        return Some(Refusal::AmRxOnly);
+    }
     if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
         return Some(r);
     }
@@ -162,6 +166,10 @@ pub fn short(r: Refusal) -> &'static str {
         Refusal::Crossband => "repeater running",
         Refusal::Unmeasured125 => "1.25 m locked",
         Refusal::RelayMismatch => "TX needs the HF relay",
+        Refusal::AmRxOnly => "AM is receive only",
+        Refusal::Emergency => "emergency: PTT twice",
+        Refusal::ReleasePtt => "release PTT first",
+        Refusal::Hot => "transmitter cooling",
     }
 }
 
@@ -177,7 +185,14 @@ fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
         Refusal::Locked | Refusal::RxOnlyBuild => Some(("MENU 0 9 9", "About", Dest::About)),
         Refusal::NoCallsign => Some(("MENU 0 8 7 1", "Callsign", Dest::Setup)),
         Refusal::RelayMismatch => Some(("MENU 5", "Offset", Dest::Value(Item::Offset))),
-        Refusal::InProgress | Refusal::ReceiveOnlyHere | Refusal::Crossband | Refusal::Unmeasured125 => None,
+        Refusal::AmRxOnly => Some(("MENU 3", "Mode", Dest::Value(Item::Mode))),
+        Refusal::InProgress
+        | Refusal::ReceiveOnlyHere
+        | Refusal::Crossband
+        | Refusal::Unmeasured125
+        | Refusal::Emergency
+        | Refusal::ReleasePtt
+        | Refusal::Hot => None,
     }
 }
 
@@ -505,6 +520,13 @@ impl View for TxRefused {
             Refusal::RelayMismatch => {
                 a.set(b"Split TX needs the HF relay: not allowed with this RX frequency.");
                 more = b"Keep RX and TX on the same side of 64 MHz.";
+            }
+            Refusal::AmRxOnly => a.set(b"AM is receive only: the radio has no AM modulator."),
+            Refusal::Emergency => a.set(b"An emergency frequency: only a person pressing PTT twice transmits here."),
+            Refusal::ReleasePtt => a.set(b"The timeout ended the last transmission. Release PTT, then press it again."),
+            Refusal::Hot => {
+                a.set(b"The transmitter is cooling after a long time keyed.");
+                more = b"It transmits again in a few minutes. (TX-31)";
             }
         }
         // The dialog sized to its text: title, the reason, what fixes it, the path.

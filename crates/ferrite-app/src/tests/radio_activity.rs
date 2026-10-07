@@ -581,6 +581,20 @@ fn unmeasured_125m_refuses() {
     ptt(&mut t, false);
 }
 
+/// TX-20: a slot in AM refuses PTT ("AM is receive only": no AM modulator); the fix is MENU 3, Mode.
+#[test]
+fn am_is_receive_only() {
+    let mut t = ready();
+    let mut cfg = DEFAULT_CFG;
+    cfg.mode = 2;
+    t.app.set_vfo_cfg(0, cfg);
+    t.cmds();
+    ptt(&mut t, true);
+    assert_eq!(refused(&t), Some(Refusal::AmRxOnly));
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "never keyed");
+    ptt(&mut t, false);
+}
+
 /// CHAN-4 (safety): a channel with "RX only" on (the channel editor's cell) refuses PTT and automatic
 /// transmissions with the reason; the fix opens the channel editor. Off again, it transmits.
 #[test]

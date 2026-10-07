@@ -17,9 +17,13 @@ pub mod keys;
 pub mod layout;
 pub mod link;
 pub mod msg;
+pub mod path;
 pub mod rxsleep;
 pub mod same;
+pub mod scan;
 pub mod txplan;
+pub mod txseq;
+pub mod watch;
 
 /// Shown on the boot screen and in the link's hello.
 pub const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));

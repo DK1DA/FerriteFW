@@ -107,6 +107,14 @@ pub enum Refusal {
     /// The TX frequency needs the band relay in the other state from RX (a split or shift across 64 MHz): the
     /// relay is never switched at key-up (TX-37, as nicFW refuses it).
     RelayMismatch,
+    /// The slot is in AM: the BK4829 has no AM modulator (TX-20).
+    AmRxOnly,
+    /// An emergency frequency without a person's second PTT (TX-3, TX-35).
+    Emergency,
+    /// The timeout ended the last transmission and PTT is still held (TX-30).
+    ReleasePtt,
+    /// The duty limit: the transmitter is cooling (TX-31).
+    Hot,
 }
 
 /// TX-37: a pair is allowed only when RX and TX need the band relay in the same state.
