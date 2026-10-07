@@ -317,6 +317,7 @@ fn zone_editor_changes_live_and_resets() {
 fn compose_needs_a_callsign() {
     let mut t = T::new();
     t.s.call.set(None);
+    t.app.set.predictive = false; // multi-tap (TEXT-10: hold * switches)
     t.open(Dest::AprsMessages);
     t.tap(Key::Menu); // the newest: from VE3KPW-9
     assert_eq!(t.name(), "APRS message");
@@ -561,7 +562,9 @@ fn states_are_small() {
     ];
     std::println!("Screen {} bytes; {sizes:?}", size_of::<Screen>());
     for (name, n) in sizes {
-        assert!(n <= 8, "{name}: {n} bytes");
+        // compose keeps multi-tap timing and predictive entry's pick, case, mark and quick list (TEXT-2): 12
+        // bytes, still inside the 16 of a Screen
+        assert!(n <= if name == "compose" { 12 } else { 8 }, "{name}: {n} bytes");
     }
 }
 
@@ -643,4 +646,145 @@ fn hold_menu_is_options_everywhere() {
     // Home keeps its own: hold MENU is advanced settings (MENU-2).
     t.hold(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Advanced(_)));
+}
+
+// ---- predictive text (TEXT-1 to TEXT-11) ----
+
+/// Compose on a draft to VE3KPW-9: the cursor starts on the text.
+fn compose_to(t: &mut T) {
+    use crate::data::{Draft, Op};
+    let mut to = ferrite_ui::text::Buf::<9>::new();
+    to.set(b"VE3KPW-9");
+    t.s.request(Op::Draft(Draft { to, ..Draft::default() }));
+    t.open(Dest::Compose);
+    assert_eq!(t.name(), "Compose message");
+}
+
+fn keys(t: &mut T, w: &str) {
+    for c in w.bytes() {
+        let k = crate::words::key_of(c) - b'0';
+        t.tap(Key::Digit(k));
+    }
+}
+
+fn text(t: &T) -> std::string::String {
+    std::string::String::from_utf8(t.s.draft().text.as_bytes().to_vec()).unwrap()
+}
+
+/// TEXT-2: one press a letter; the knob moves through words with the same keys; # takes it with a space;
+/// a message starts with a capital (TEXT-2's case).
+#[test]
+fn predictive_words() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    keys(&mut t, "home");
+    t.draw();
+    assert_eq!(text(&t), "", "the word in progress isn't in the draft yet");
+    t.app.knob(2, t.t, &t.s); // good, GD (its short form), home
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "Home ");
+    keys(&mut t, "my");
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "Home my ");
+}
+
+/// TEXT-4: a short form follows its word; Q-codes go in in capitals.
+#[test]
+fn predictive_short_forms() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    keys(&mut t, "received");
+    t.app.knob(1, t.t, &t.s);
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "QSL ");
+    keys(&mut t, "qth");
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "QSL QTH ");
+}
+
+/// TEXT-3: keys that spell nothing aren't guessed; BACK takes the keys back one by one.
+#[test]
+fn predictive_no_word() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    for _ in 0..5 {
+        t.tap(Key::Digit(9));
+    }
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "");
+    assert!(t.app.text.as_bytes() == b"99999", "the keys stay");
+    for _ in 0..5 {
+        t.tap(Key::Exit);
+    }
+    assert!(t.app.text.is_empty());
+    assert_eq!(t.name(), "Compose message");
+}
+
+/// TEXT-2: 1 after a word is a full stop, again the next mark; hold a digit types it; hold * switches to
+/// multi-tap (TEXT-10, kept as a setting).
+#[test]
+fn predictive_marks_digits_and_switch() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    keys(&mut t, "ok");
+    t.tap(Key::Digit(1));
+    assert_eq!(text(&t), "Ok.");
+    t.tap(Key::Digit(1));
+    assert_eq!(text(&t), "Ok,");
+    t.tap(Key::Hash);
+    t.hold(Key::Digit(7));
+    t.hold(Key::Digit(3));
+    assert_eq!(text(&t), "Ok, 73");
+    t.hold(Key::Star);
+    assert!(!t.app.set.predictive);
+    t.tap(Key::Digit(4));
+    assert_eq!(text(&t), "Ok, 73g", "multi-tap now");
+}
+
+/// TEXT-5: 67 characters at most.
+#[test]
+fn predictive_limit() {
+    use crate::data::Op;
+    let mut t = T::new();
+    compose_to(&mut t);
+    let mut d = t.s.draft();
+    d.text.set(&[b'x'; 65]);
+    t.s.request(Op::Draft(d));
+    keys(&mut t, "ok");
+    t.tap(Key::Digit(6)); // a third key would pass 67
+    assert_eq!(t.app.text.as_bytes(), b"65");
+    t.tap(Key::Hash);
+    assert_eq!(text(&t).len(), 67);
+}
+
+/// TEXT-6: an empty message offers the quick messages; OK puts one in, OK again sends.
+#[test]
+fn quick_messages_on_an_empty_message() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    t.app.knob(2, t.t, &t.s);
+    t.tap(Key::Menu);
+    assert_eq!(text(&t), "On my way");
+    t.tap(Key::Menu);
+    assert_ne!(t.name(), "Compose message", "sent");
+    assert_eq!(t.s.message(0).unwrap().text.as_bytes(), b"On my way");
+}
+
+/// TEXT-7: the quick messages are edited from the Messages options; # puts the factory text back.
+#[test]
+fn quick_messages_edited() {
+    let mut t = T::new();
+    t.open(Dest::QuickMessages);
+    assert_eq!(t.name(), "Quick messages");
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "Quick message");
+    t.tap(Key::Exit);
+    t.tap(Key::Exit); // "73" deleted
+    keys(&mut t, "home");
+    t.tap(Key::Hash);
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "Quick messages");
+    assert_eq!(t.s.quick(0).unwrap().as_bytes(), b"Good ");
+    t.tap(Key::Hash);
+    assert!(t.s.quick(0).is_none());
 }

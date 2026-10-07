@@ -145,7 +145,7 @@ persist!(Settings {
     pin_mode, pin, pin_len, pin_misses, pin_wait, bt, same, fm_freq, fm_step, fm_agc, fm_monitor, setup_done,
     home_ch, xb, hf, cable_port, coord_fmt, fixed_on, fixed, fixed_alt, same_codes, scope_bars, scope_step,
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
-    aprs_mode,
+    aprs_mode, predictive,
 });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.

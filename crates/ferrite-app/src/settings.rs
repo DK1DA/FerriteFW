@@ -161,6 +161,8 @@ pub struct Settings {
     pub term_colour: bool,
     /// 0 5 3: APRS mode, slot C as the APRS slot (APRS-15 – APRS-22; the takeover itself comes in milestone 5).
     pub aprs_mode: bool,
+    /// Message text is typed predictively (TEXT-10); hold \* switches, and the choice is kept for the next one.
+    pub predictive: bool,
 }
 
 /// 0 3 2 1's values (SCOPE-9).
@@ -217,6 +219,7 @@ impl Settings {
         scope_mode: 0,
         term_colour: false,
         aprs_mode: false,
+        predictive: true,
     };
 
     /// The region's name, or "Not set".

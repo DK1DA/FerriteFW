@@ -399,7 +399,7 @@ fn every_destination_draws() {
         }
     }
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
-    assert_eq!(ids.len(), 66, "one inventory ID per destination (groups and lists share D3)");
+    assert_eq!(ids.len(), 67, "one inventory ID per destination (groups and lists share D3)");
 }
 
 mod group_a;

@@ -48,6 +48,7 @@ pub mod sample;
 pub mod screens;
 pub mod settings;
 pub mod slot;
+pub mod words;
 pub mod term;
 
 use chan::{ChanWrite, Channel, ChannelStore};

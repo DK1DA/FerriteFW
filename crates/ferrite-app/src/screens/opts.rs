@@ -56,8 +56,9 @@ const HEARD: [Opt; 4] = [
     ("Clear the heard list", Act::Confirm(Op::ClearHeard), "Stations come back as they are heard"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
 ];
-const MESSAGES: [Opt; 2] = [
+const MESSAGES: [Opt; 3] = [
     ("Write a message", Act::Open(Dest::Compose), "Recipient, then the text"),
+    ("Quick messages", Act::Open(Dest::QuickMessages), "The nine shown on an empty message"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
 ];
 const GPS: [Opt; 3] = [

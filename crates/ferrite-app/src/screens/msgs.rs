@@ -191,23 +191,41 @@ impl View for Msgs {
 // ---- compose (A16) ----
 
 /// Multi-tap letters per digit (KEY-12); 1 has the punctuation.
-const TAPS: [&[u8]; 10] = [b" 0", b".,?!-/@'1", b"abc2", b"def3", b"ghi4", b"jkl5", b"mno6", b"pqrs7", b"tuv8", b"wxyz9"];
+const TAPS: [&[u8]; 10] = [b" 0", slow!(".,?!-/@'1").as_bytes(), b"abc2", b"def3", b"ghi4", b"jkl5", b"mno6", b"pqrs7", b"tuv8", b"wxyz9"];
 /// The same key again within this many ms changes the last letter instead of adding one.
 pub const TAP_MS: u32 = 1000;
 /// APRS limits: an addressee of 9, a message of 67 characters.
 const TO_MAX: usize = 9;
 const TEXT_MAX: usize = 67;
+/// Predictive: what 1 cycles through after a word (TEXT-2).
+const PUNCT: &[u8] = b".,?!'/-";
+/// The case of the next predicted word (TEXT-2): Capital, CAPS, lower.
+const PCASES: [&str; 3] = ["Abc", "ABC", "abc"];
+/// Compose's text is the draft's, unless a quick message is being edited (TEXT-7).
+const DRAFT: u8 = 255;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Compose {
     /// 0 the recipient, 1 the text.
     pub field: u8,
-    /// 0 lower case, 1 capitals, 2 digits (* cycles).
+    /// Multi-tap: 0 lower case, 1 capitals, 2 digits (* cycles).
     pub case: u8,
     /// The last multi-tap key (its digit + 1, 0 none), how often it was tapped, and when (ms / 64).
     pub key: u8,
     pub taps: u8,
     pub at: u16,
+    /// Predictive (TEXT-2): the candidate picked for the keys typed (the matches best first, each followed by
+    /// its short form), the case of the next word (index into [`PCASES`]), the punctuation mark + 1 when 1 was
+    /// the last key, and the quick message highlighted on an empty message (TEXT-6). The keys typed for the
+    /// word in progress are the App's text buffer, as digits.
+    pub pick: u8,
+    pub pcase: u8,
+    pub punct: u8,
+    pub quick: u8,
+    /// [`DRAFT`], or the quick message being edited (TEXT-7).
+    pub edit: u8,
+    /// The quick list is on screen (set when drawn: the hint bar has no store to ask).
+    pub list: bool,
 }
 
 /// Not decided yet: the first key or draw puts the cursor on the text when the draft has a recipient.
@@ -215,36 +233,277 @@ const UNSET: u8 = 255;
 
 impl Compose {
     pub fn new() -> Self {
-        Compose { field: UNSET, case: 0, key: 0, taps: 0, at: 0 }
+        Compose { field: UNSET, case: 0, key: 0, taps: 0, at: 0, pick: 0, pcase: 0, punct: 0, quick: 0, edit: DRAFT, list: false }
+    }
+
+    /// Quick message `i` in the editor (TEXT-7).
+    pub fn quick_edit(i: u8) -> Self {
+        Compose { field: 1, edit: i, ..Compose::new() }
     }
 
     fn resolved(self, store: &impl ChannelStore) -> Self {
         if self.field != UNSET {
             return self;
         }
-        let to_set = !store.data().draft().to.is_empty();
-        Compose { field: to_set as u8, case: if to_set { 0 } else { 1 }, ..self }
+        let d = store.data().draft();
+        let to_set = !d.to.is_empty();
+        // a message already begun goes on in lower case; a new one (or after . ? !) starts with a capital
+        Compose { field: to_set as u8, case: if to_set { 0 } else { 1 }, pcase: next_case(d.text.as_bytes(), 2), ..self }
+    }
+
+    fn quick_edit_on(self) -> bool {
+        (self.edit as usize) < crate::words::QUICK
+    }
+}
+
+/// Quick message `i` (TEXT-7): the owner's, kept with the APRS store, or the factory text.
+pub(crate) fn quick_text(store: &impl ChannelStore, i: usize) -> Buf<67> {
+    store.data().quick(i).unwrap_or_else(|| Buf::from(crate::words::quick(i)))
+}
+
+/// The text being composed: the draft's, or the quick message being edited.
+fn text_of(store: &impl ChannelStore, s: Compose) -> Buf<67> {
+    if s.quick_edit_on() { quick_text(store, s.edit as usize) } else { store.data().draft().text }
+}
+
+fn put_text(store: &impl ChannelStore, s: Compose, t: Buf<67>) {
+    let data = store.data();
+    if s.quick_edit_on() {
+        data.request(Op::Quick(s.edit, Some(t)));
+    } else {
+        data.request(Op::Draft(Draft { text: t, ..data.draft() }));
+    }
+}
+
+/// Candidate `i` for `keys` (TEXT-2, TEXT-4): the dictionary's matches best first, each followed by its short
+/// form when it has one; whether it is shown in capitals.
+fn candidate(keys: &[u8], i: usize) -> Option<(Buf<16>, bool)> {
+    let mut k = 0;
+    for n in 0.. {
+        let w = crate::words::nth(keys, n)?;
+        if k == i {
+            return Some((w.text, w.caps));
+        }
+        k += 1;
+        if let Some(s) = crate::words::short(w.text.as_bytes()) {
+            if k == i {
+                return Some((Buf::from(s), true));
+            }
+            k += 1;
+        }
+    }
+    None
+}
+
+fn candidates(keys: &[u8]) -> usize {
+    (0..).take_while(|&i| candidate(keys, i).is_some()).count()
+}
+
+/// A word as it goes in: capitals for Q-codes and shorthand, else the case chosen (Capital, CAPS, lower).
+fn cased(w: &[u8], caps: bool, pcase: u8) -> Buf<16> {
+    let mut b = Buf::<16>::from(w);
+    let mut t = [0u8; 16];
+    for (i, (o, &c)) in t.iter_mut().zip(b.as_bytes()).enumerate() {
+        *o = if caps || pcase == 1 || (pcase == 0 && i == 0) { c.to_ascii_uppercase() } else { c };
+    }
+    let n = b.len();
+    b.set(&t[..n]);
+    b
+}
+
+/// What the word in progress shows as: the picked candidate, or the keys as digits when nothing matches.
+fn pending(keys: &[u8], s: Compose) -> (Buf<16>, bool) {
+    match candidate(keys, s.pick as usize) {
+        Some((w, caps)) => (cased(w.as_bytes(), caps, s.pcase), true),
+        None => (Buf::from(keys), false),
+    }
+}
+
+/// After a word or a mark: the next word's case. Capital starts a message and follows . ? !; CAPS stays.
+fn next_case(t: &[u8], pcase: u8) -> u8 {
+    let end = t.iter().rev().find(|&&c| c != b' ');
+    match (pcase, end) {
+        (1, _) => 1,
+        (_, None | Some(b'.' | b'?' | b'!')) => 0,
+        _ => 2,
+    }
+}
+
+/// The 67-character limit (TEXT-5): why, in a toast. (The short beep waits for a way from the App to the DSP
+/// task's beep.)
+fn refuse_full(app: &mut App) {
+    app.show_toast(slow!("67 characters").as_bytes(), slow!("the APRS limit").as_bytes(), false);
+}
+
+/// The word in progress goes into the text (no space); false when it can't (no word, or no room).
+fn accept(app: &mut App, s: &mut Compose, t: &mut Buf<67>) -> bool {
+    if app.text.is_empty() {
+        return true;
+    }
+    let keys = app.text;
+    let (w, ok) = pending(keys.as_bytes(), *s);
+    if !ok {
+        app.show_toast(b"No word", slow!("hold * to spell it").as_bytes(), false); // TEXT-3
+        return false;
+    }
+    if t.len() + w.len() > TEXT_MAX {
+        refuse_full(app);
+        return false;
+    }
+    t.push(w.as_bytes());
+    app.text.clear();
+    s.pick = 0;
+    s.pcase = next_case(t.as_bytes(), if s.pcase == 0 { 2 } else { s.pcase });
+    true
+}
+
+impl Compose {
+    /// Predictive keys on the message text (TEXT-2 to TEXT-6). True when the key was taken.
+    fn pred_key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) -> bool {
+        use Press::*;
+        let mut s = self;
+        let mut t = text_of(store, s);
+        let keys = app.text;
+        let quick_list = t.is_empty() && keys.is_empty() && !s.quick_edit_on();
+        match (e.key, e.press) {
+            (Key::Digit(d @ 2..=9), Short) => {
+                if t.len() + keys.len() + 1 > TEXT_MAX || keys.len() >= crate::words::WORD_MAX {
+                    refuse_full(app);
+                    return true;
+                }
+                app.text.push(&[b'0' + d]);
+                s.pick = 0;
+                s.punct = 0;
+            }
+            // hold a digit: the digit itself (73, 146.52)
+            (Key::Digit(d), Long) => {
+                if !accept(app, &mut s, &mut t) {
+                    return true;
+                }
+                if t.len() + 1 > TEXT_MAX {
+                    refuse_full(app);
+                    return true;
+                }
+                t.push(&[b'0' + d]);
+                s.punct = 0;
+            }
+            // 1: punctuation after a word, again for the next mark
+            (Key::Digit(1), Short) => {
+                if s.punct > 0 && keys.is_empty() {
+                    let i = s.punct as usize % PUNCT.len();
+                    pop(&mut t);
+                    t.push(&PUNCT[i..i + 1]);
+                    s.punct = i as u8 + 1;
+                } else {
+                    if !accept(app, &mut s, &mut t) {
+                        return true;
+                    }
+                    if t.len() + 1 > TEXT_MAX {
+                        refuse_full(app);
+                        return true;
+                    }
+                    t.push(&PUNCT[..1]);
+                    s.punct = 1;
+                }
+                s.pcase = next_case(t.as_bytes(), s.pcase);
+            }
+            // # (and 0): the word, then a space
+            (Key::Hash | Key::Digit(0), Short) => {
+                if !accept(app, &mut s, &mut t) {
+                    return true;
+                }
+                if !t.is_empty() && t.len() < TEXT_MAX {
+                    t.push(b" ");
+                }
+                s.punct = 0;
+                s.pcase = next_case(t.as_bytes(), s.pcase);
+            }
+            (Key::Star, Short) => s.pcase = (s.pcase + 1) % 3,
+            (Key::Up | Key::Down, Short | Repeat) if !keys.is_empty() || quick_list => {
+                let d = if e.key == Key::Up { -1 } else { 1 };
+                return self.pred_knob(app, d, store);
+            }
+            (Key::Exit, Short) if !keys.is_empty() => {
+                let mut k = keys;
+                pop(&mut k);
+                app.text = k;
+                s.pick = 0;
+            }
+            (Key::Menu, Short) if quick_list => {
+                // TEXT-6: the quick message goes in; OK again sends
+                t = quick_text(store, s.quick as usize);
+                s.pcase = next_case(t.as_bytes(), 2);
+            }
+            (Key::Menu, Short) if !keys.is_empty() => {
+                if !accept(app, &mut s, &mut t) {
+                    return true;
+                }
+                put_text(store, s, t);
+                app.screen = Screen::Compose(s);
+                return false; // OK goes on to send (or keep the quick message)
+            }
+            _ => return false,
+        }
+        put_text(store, s, t);
+        app.screen = Screen::Compose(s);
+        true
+    }
+
+    /// The knob or ▲▼ in predictive entry: through the candidates, or the quick list (TEXT-2, TEXT-6).
+    fn pred_knob(self, app: &mut App, d: i32, store: &impl ChannelStore) -> bool {
+        let keys = app.text;
+        if !keys.is_empty() {
+            let n = candidates(keys.as_bytes()).max(1) as i32;
+            let pick = (self.pick as i32 + d).rem_euclid(n) as u8;
+            app.screen = Screen::Compose(Compose { pick, ..self });
+            return true;
+        }
+        if text_of(store, self).is_empty() && !self.quick_edit_on() {
+            let quick = (self.quick as i32 + d).rem_euclid(crate::words::QUICK as i32) as u8;
+            app.screen = Screen::Compose(Compose { quick, ..self });
+            return true;
+        }
+        false
     }
 }
 
 impl View for Compose {
     fn name(self) -> &'static str {
-        "Compose message"
+        if self.quick_edit_on() { "Quick message" } else { "Compose message" }
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(b"Compose");
+        b.set(if self.quick_edit_on() { b"Quick" } else { b"Compose" });
     }
 
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
+        let mut s = self.resolved(store);
+        // TEXT-10: hold * switches predictive and multi-tap for message text; the choice is kept.
+        if s.field == 1 && (e.key, e.press) == (Key::Star, Long) {
+            let mut t = text_of(store, s);
+            if app.set.predictive && !accept(app, &mut s, &mut t) {
+                app.text.clear();
+            }
+            put_text(store, s, t);
+            app.set.predictive = !app.set.predictive;
+            app.text.clear();
+            app.show_toast(if app.set.predictive { slow!("Predictive").as_bytes() } else { slow!("Multi-tap").as_bytes() }, slow!("hold * to switch").as_bytes(), false);
+            app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
+            return;
+        }
+        if s.field == 1 && app.set.predictive && s.pred_key(app, e, store) {
+            return;
+        }
+        if let Screen::Compose(c) = app.screen {
+            s = c.resolved(store); // pred_key may have stored the accepted word
+        }
         let data = store.data();
         let mut d = data.draft();
-        let mut s = self.resolved(store);
         let now = (app.now / 64) as u16;
         let to = s.field == 0;
         // the field being typed in, as one buffer
-        let mut cur: Buf<67> = if to { Buf::from(d.to.as_bytes()) } else { d.text };
+        let mut cur: Buf<67> = if to { Buf::from(d.to.as_bytes()) } else { text_of(store, s) };
         let max = if to { TO_MAX } else { TEXT_MAX };
         match (e.key, e.press) {
             (Key::Digit(k), Short) => {
@@ -265,6 +524,8 @@ impl View for Compose {
                     cur.push(&[ch(s.taps)]);
                 } else if cur.len() < max {
                     cur.push(&[ch(s.taps)]);
+                } else if !to {
+                    refuse_full(app);
                 }
                 s.key = k + 1;
                 s.at = now;
@@ -280,7 +541,7 @@ impl View for Compose {
             (Key::Exit, Short) => {
                 if !cur.is_empty() {
                     pop(&mut cur);
-                } else if to {
+                } else if to || s.quick_edit_on() {
                     return app.back(); // the draft stays with the APRS task
                 } else {
                     s.field = 0;
@@ -288,7 +549,7 @@ impl View for Compose {
                 }
                 s.key = 0;
             }
-            (Key::Down | Key::Up, Short) => {
+            (Key::Down | Key::Up, Short) if !s.quick_edit_on() => {
                 s.field ^= 1;
                 s.key = 0;
                 s.case = if s.field == 0 { 1 } else { 0 };
@@ -298,19 +559,24 @@ impl View for Compose {
                 s.key = 0;
                 s.case = 0;
             }
+            (Key::Menu, Short) if s.quick_edit_on() => {
+                app.back();
+                return app.show_toast(slow!("Quick message").as_bytes(), b"kept", false);
+            }
             (Key::Menu, Short) => {
                 // APRS-8: nothing sends without a callsign.
                 if data.callsign().is_none() {
-                    return app.show_toast(b"Set a callsign first", b"MENU 0 8 7 1", false);
+                    return app.show_toast(slow!("Set a callsign first").as_bytes(), slow!("MENU 0 8 7 1").as_bytes(), false);
                 }
-                if d.to.is_empty() || d.text.is_empty() {
-                    return app.show_toast(b"Nothing to send", if d.to.is_empty() { b"add a recipient" } else { b"write a message" }, false);
+                let text = text_of(store, s);
+                if d.to.is_empty() || text.is_empty() {
+                    return app.show_toast(slow!("Nothing to send").as_bytes(), if d.to.is_empty() { slow!("add a recipient").as_bytes() } else { slow!("write a message").as_bytes() }, false);
                 }
                 if data.request(Op::Send) {
                     app.back();
-                    app.show_toast(b"Message queued", d.to.as_bytes(), false);
+                    app.show_toast(slow!("Message queued").as_bytes(), d.to.as_bytes(), false);
                 } else {
-                    app.show_toast(b"Not sent", b"try again", false);
+                    app.show_toast(slow!("Not sent").as_bytes(), slow!("try again").as_bytes(), false);
                 }
                 return;
             }
@@ -318,11 +584,18 @@ impl View for Compose {
         }
         if to {
             d.to.set(cur.as_bytes());
+            data.request(Op::Draft(d));
         } else {
-            d.text = cur;
+            put_text(store, s, cur);
         }
-        data.request(Op::Draft(d));
         app.screen = Screen::Compose(s);
+    }
+
+    fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
+        let s = self.resolved(store);
+        if s.field == 1 && app.set.predictive {
+            s.pred_knob(app, d, store);
+        }
     }
 
     fn tick(self, app: &mut App, _: &LiveAll) {
@@ -340,55 +613,142 @@ impl View for Compose {
             return me.render(app, lcd, cx);
         }
         app.page(lcd, 0u8);
-        let pending = self.key != 0;
-        // the recipient
-        if app.dirty(R_TOP, hash(&(d.to, self.field, pending && self.field == 0))) {
-            field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending && self.field == 0, b"callsign-SSID");
+        let pred = app.set.predictive;
+        let keys = app.text;
+        let text = text_of(cx.store, self);
+        let (word, matched) = if pred && !keys.is_empty() { pending(keys.as_bytes(), self) } else { (Buf::new(), true) };
+        let quick_list = pred && self.field == 1 && text.is_empty() && keys.is_empty() && !self.quick_edit_on();
+        if quick_list != self.list {
+            app.screen = Screen::Compose(Compose { list: quick_list, ..self });
         }
-        if app.dirty(R_ROW, hash(&(d.text, self.field, pending && self.field == 1))) {
+        let pending_tap = self.key != 0;
+        // the recipient, or which quick message this is
+        if app.dirty(R_TOP, hash(&(d.to, self.field, pending_tap && self.field == 0, self.edit))) {
+            if self.quick_edit_on() {
+                lcd.fill(0, 24, 240, 60, BG);
+                let mut b = Buf::<40>::new();
+                let _ = uwrite!(b, "Quick message {}", self.edit + 1);
+                lcd.text4(8, 36, b.as_bytes(), &UI_12B, TEXT, BG);
+                lcd.text4(8, 56, slow!("# in the list: the factory text again").as_bytes(), &UI_12, SUB, BG);
+            } else {
+                field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending_tap && self.field == 0, slow!("callsign-SSID").as_bytes());
+            }
+        }
+        if app.dirty(R_ROW, hash(&(text, word, self.field, pending_tap && self.field == 1, quick_list, quick_list.then_some(self.quick)))) {
             let (y, h) = (86, 120);
             lcd.fill(0, y, 240, h + 24, BG);
-            lcd.text4(8, y + 12, b"Message", &UI_12, SUB, BG);
+            lcd.text4(8, y + 12, if quick_list { slow!("Quick messages").as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
             let mut c = Buf::<12>::new();
-            let _ = uwrite!(c, "{}/{}", d.text.len(), TEXT_MAX);
+            let _ = uwrite!(c, "{}/{}", text.len() + word.len(), TEXT_MAX); // TEXT-5
             let cw = text4_width(c.as_bytes(), &UI_12);
             lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
             let focus = self.field == 1;
-            lcd.fill_r(8, y + 18, 224, h, 2, if focus { FOCUS } else { SURFACE });
+            let bg = if focus { FOCUS } else { SURFACE };
+            lcd.fill_r(8, y + 18, 224, h, 2, bg);
             lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
-            let lines = wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, d.text.as_bytes(), if focus { FOCUS } else { SURFACE });
-            if focus {
-                caret(lcd, d.text.as_bytes(), 14, y + 22, 212, lines, pending);
+            if quick_list {
+                quick_rows(cx.store, lcd, y + 20, self.quick as usize, bg);
+            } else {
+                let mut all = Buf::<84>::from(text.as_bytes());
+                all.push(word.as_bytes());
+                let lines = wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, all.as_bytes(), bg);
+                if focus {
+                    let under = if !word.is_empty() { text4_width(word.as_bytes(), &UI_12) } else if pending_tap { 7 } else { 0 };
+                    caret(lcd, all.as_bytes(), 14, y + 22, 212, lines, under, if matched { BLUE } else { AMBER });
+                }
             }
         }
-        let case = ["abc", "ABC", "123"][self.case as usize % 3];
-        if app.dirty(R_NOTE, hash(&(case, cx.store.data().callsign()))) {
+        let callsign = cx.store.data().callsign();
+        let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list);
+        if app.dirty(R_NOTE, hash(&strip)) {
             let y = 236;
             lcd.fill(0, y, 240, 60, BG);
-            let mut b = Buf::<40>::new();
-            let _ = uwrite!(b, "Typing: {}", case);
-            lcd.text4(8, y + 13, b.as_bytes(), &UI_12, SUB, BG);
-            match cx.store.data().callsign() {
-                Some(c) => {
+            if pred && self.field == 1 && !keys.is_empty() {
+                candidate_strip(lcd, y + 2, keys.as_bytes(), self);
+            } else {
+                let mut b = Buf::<40>::new();
+                if pred && self.field == 1 {
+                    let _ = uwrite!(b, "Words: {}", PCASES[self.pcase as usize % 3]);
+                } else {
+                    let _ = uwrite!(b, "Typing: {}", ["abc", "ABC", "123"][self.case as usize % 3]);
+                }
+                lcd.text4(8, y + 13, b.as_bytes(), &UI_12, SUB, BG);
+            }
+            match callsign {
+                Some(c) if !self.quick_edit_on() => {
                     let mut f = Buf::<40>::new();
                     let _ = uwrite!(f, "From {}", Txt(c.as_bytes()));
-                    lcd.text4(8, y + 31, f.as_bytes(), &UI_12, SUB, BG);
+                    lcd.text4(8, y + 37, f.as_bytes(), &UI_12, SUB, BG);
                 }
-                None => {
-                    lcd.text4(8, y + 31, b"No callsign: set one to send", &UI_12, AMBER, BG);
+                None if !self.quick_edit_on() => {
+                    lcd.text4(8, y + 37, slow!("No callsign: set one to send").as_bytes(), &UI_12, AMBER, BG);
                 }
+                _ => {}
             }
-            lcd.text4(8, y + 49, b"1 . , ? !   0 space   # space", &UI_12, DIM, BG);
+            let help: &[u8] = if pred && self.field == 1 { slow!("1 marks   hold a digit: digit").as_bytes() } else { slow!("1 . , ? !   0 space   # space").as_bytes() };
+            lcd.text4(8, y + 55, help, &UI_12, DIM, BG);
         }
     }
 
-    fn hints(self, _: &App) -> Hints {
+    fn hints(self, app: &App) -> Hints {
+        let pred = app.set.predictive && self.field == 1;
         if self.field == 0 {
             Hints::new(&[("OK", "Next"), ("*", "Case"), ("BACK", "Delete")])
+        } else if pred && !app.text.is_empty() {
+            Hints::new(&[("Knob", "Word"), ("#", "Space"), ("Hold *", "Spell")]) // TEXT-11
+        } else if pred && self.list {
+            Hints::new(&[("Knob", "Pick"), ("OK", "Insert"), ("BACK", "To")]) // TEXT-6
+        } else if self.quick_edit_on() {
+            Hints::new(&[("OK", "Keep"), ("Hold *", if pred { "Spell" } else { "Words" }), ("BACK", "Delete")])
+        } else if pred {
+            Hints::new(&[("OK", "Send"), ("#", "Space"), ("Hold *", "Spell")])
         } else {
-            Hints::new(&[("OK", "Send"), ("*", "Case"), ("BACK", "Delete")])
+            Hints::new(&[("OK", "Send"), ("*", "Case"), ("Hold *", "Words")])
         }
     }
+}
+
+/// The quick messages on an empty message (TEXT-6): the highlighted one in blue, scrolled to keep it in view.
+fn quick_rows(store: &impl ChannelStore, lcd: &mut impl Panel, y: i32, sel: usize, bg: u16) {
+    const VIS: usize = 6;
+    let top = sel.saturating_sub(VIS - 1).min(crate::words::QUICK - VIS);
+    for (k, i) in (top..crate::words::QUICK).take(VIS).enumerate() {
+        let ry = y + 2 + k as i32 * 19;
+        let on = i == sel;
+        let (fg, rb) = if on { (BLUE_FG, BLUE) } else { (TEXT, bg) };
+        if on {
+            lcd.fill_r(10, ry, 220, 19, 1, BLUE);
+        }
+        let mut n = Buf::<4>::new();
+        let _ = uwrite!(n, "{}", i + 1);
+        lcd.text4(16, ry + 14, n.as_bytes(), &UI_12, if on { BLUE_FG } else { SUB }, rb);
+        lcd.text4(32, ry + 14, w::fit(quick_text(store, i).as_bytes(), &UI_12, 192), &UI_12, fg, rb);
+    }
+}
+
+/// The candidate strip (TEXT-11): three at a time, the picked one selected, and where it is in the list; or
+/// "no word" (TEXT-3).
+fn candidate_strip(lcd: &mut impl Panel, y: i32, keys: &[u8], s: Compose) {
+    let n = candidates(keys);
+    if n == 0 {
+        lcd.text4(8, y + 11, slow!("No word: hold * to spell it").as_bytes(), &UI_12, AMBER, BG);
+        return;
+    }
+    let from = s.pick as usize / 3 * 3;
+    let mut words = [Buf::<16>::new(); 3];
+    let mut k = 0;
+    for (i, w) in words.iter_mut().enumerate() {
+        if let Some((c, caps)) = candidate(keys, from + i) {
+            *w = cased(c.as_bytes(), caps, s.pcase);
+            k += 1;
+        }
+    }
+    let items: [&[u8]; 3] = [words[0].as_bytes(), words[1].as_bytes(), words[2].as_bytes()];
+    w::chips_sel(lcd, 8, y, 184, &items[..k], Some(s.pick as usize - from), BG);
+    let mut c = Buf::<12>::new();
+    let _ = uwrite!(c, "{}/{}", s.pick as usize + 1, n);
+    let cw = text4_width(c.as_bytes(), &UI_12);
+    lcd.text4(232 - cw, y + 13, c.as_bytes(), &UI_12, SUB, BG);
 }
 
 fn pop<const N: usize>(b: &mut Buf<N>) {
@@ -447,8 +807,9 @@ fn cut_line(s: &[u8], w_: i32) -> usize {
     }
 }
 
-/// The caret after the text (an underline under a letter still being tapped).
-fn caret(lcd: &mut impl Panel, text: &[u8], x: i32, y: i32, w_: i32, lines: i32, pending: bool) {
+/// The caret after the text: an underline under the last `under` pixels (a letter still being tapped, or the
+/// predicted word in progress), else a bar.
+fn caret(lcd: &mut impl Panel, text: &[u8], x: i32, y: i32, w_: i32, lines: i32, under: i32, c: u16) {
     // the last line's text
     let mut rest = text;
     let mut last: &[u8] = b"";
@@ -460,9 +821,77 @@ fn caret(lcd: &mut impl Panel, text: &[u8], x: i32, y: i32, w_: i32, lines: i32,
     let line = (lines - 1).max(0);
     let lw = text4_width(last, &UI_12);
     let base = y + 13 + line * 17;
-    if pending && !last.is_empty() {
-        lcd.fill(x + lw - 7, base + 2, 7, 2, BLUE);
+    if under > 0 && !last.is_empty() {
+        lcd.fill(x + lw - under.min(lw), base + 2, under.min(lw), 2, c);
     } else {
         lcd.fill(x + lw + 1, base - 12, 1, 15, BLUE);
+    }
+}
+
+// ---- quick messages (TEXT-7) ----
+
+/// The nine quick messages, from the Messages screen's options: OK edits one, # puts the factory text back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct QuickMsgs {
+    pub cur: Cursor,
+}
+
+impl View for QuickMsgs {
+    fn name(self) -> &'static str {
+        "Quick messages"
+    }
+
+    fn title(self, _: &App, b: &mut Buf<10>) {
+        b.set(b"Quick");
+    }
+
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
+        use Press::*;
+        let i = self.cur.sel as usize;
+        match (e.key, e.press) {
+            (Key::Up | Key::Down, Short | Repeat) => self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
+            (Key::Menu, Short) => {
+                app.text.clear();
+                app.open_screen(Screen::Compose(Compose::quick_edit(i as u8)));
+            }
+            (Key::Hash, Short) => {
+                store.data().request(Op::Quick(i as u8, None));
+                app.show_toast(slow!("Factory text").as_bytes(), crate::words::quick(i), false);
+            }
+            (Key::Exit, Short) => app.back(),
+            _ => {}
+        }
+    }
+
+    fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
+        let cur = self.cur.step(d, crate::words::QUICK as u16, ROWS2, &ALL);
+        app.screen = Screen::QuickMsgs(QuickMsgs { cur });
+    }
+
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
+        app.page(lcd, 0u8);
+        if !app.gate((self, cx.store.data().version())) {
+            return;
+        }
+        app.list_head(lcd, slow!("Shown on an empty message").as_bytes(), b"");
+        let rows = self.cur.rows(crate::words::QUICK as u16, ROWS2, &ALL, |r, i| {
+            let mut n = Buf::<4>::new();
+            let _ = uwrite!(n, "{}", i + 1);
+            let own = cx.store.data().quick(i as usize).is_some();
+            let q = quick_text(cx.store, i as usize);
+            let r2 = Row2 {
+                tag: n.as_bytes(),
+                title: q.as_bytes(),
+                sub: if own { b"yours" } else { b"factory" },
+                selected: i == self.cur.sel,
+                ..Row2::default()
+            };
+            app.row2(lcd, r, &r2);
+        });
+        app.rows_end(lcd, rows, ROWS2, ROW2_H);
+    }
+
+    fn hints(self, _: &App) -> Hints {
+        Hints::new(&[("OK", "Edit"), ("#", "Factory"), ("BACK", "Back")])
     }
 }

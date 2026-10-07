@@ -3,3 +3,4 @@
 *.btf
 .DS_Store
 __pycache__/
+!assets/words/dict.bin

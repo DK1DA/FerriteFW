@@ -197,6 +197,7 @@ pub struct Sample {
     msgs_read: Cell<u32>,
     sent: Cell<Option<Message>>,
     draft: Cell<Draft>,
+    quick: Cell<[Option<Buf<67>>; crate::words::QUICK]>,
     wp_gone: Cell<u32>,
     wp_marked: Cell<u8>,
     wp_saved: Cell<Option<u16>>,
@@ -230,6 +231,7 @@ impl Sample {
             msgs_read: Cell::new(0),
             sent: Cell::new(None),
             draft: Cell::new(Draft::default()),
+            quick: Cell::new([None; crate::words::QUICK]),
             wp_gone: Cell::new(0),
             wp_marked: Cell::new(0),
             wp_saved: Cell::new(None),
@@ -377,6 +379,9 @@ impl Data for Sample {
     }
     fn draft(&self) -> Draft {
         self.draft.get()
+    }
+    fn quick(&self, i: usize) -> Option<Buf<67>> {
+        self.quick.get().get(i).copied().flatten()
     }
 
     fn waypoints(&self) -> u16 {
@@ -580,6 +585,17 @@ impl Data for Sample {
             Op::Draft(d) => {
                 self.draft.set(d);
                 true
+            }
+            Op::Quick(i, t) => {
+                let mut q = self.quick.get();
+                match q.get_mut(i as usize) {
+                    Some(s) => {
+                        *s = t;
+                        self.quick.set(q);
+                        true
+                    }
+                    None => false,
+                }
             }
             Op::Send => {
                 let d = self.draft.get();

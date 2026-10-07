@@ -327,6 +327,8 @@ pub enum Op {
     SaveStation(u16),
     DeleteWaypoint(u16),
     Draft(Draft),
+    /// Quick message i as the owner wrote it (TEXT-7); None puts the factory text back.
+    Quick(u8, Option<Buf<67>>),
     /// Send the draft (APRS-7, APRS-8).
     Send,
     MessageRead(u16),
@@ -376,6 +378,10 @@ pub trait Data {
     }
     fn draft(&self) -> Draft {
         Draft::default()
+    }
+    /// Quick message i as the owner wrote it (TEXT-7), kept with the APRS store; None: the factory text.
+    fn quick(&self, _i: usize) -> Option<Buf<67>> {
+        None
     }
 
     fn waypoints(&self) -> u16 {
