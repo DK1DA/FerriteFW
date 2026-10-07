@@ -15,6 +15,9 @@ pub const RF_PINS: [Pin; 7] = [
     pin(GPIOE, 14), // HF TX
     pin(GPIOA, 5),  // PA drive
 ];
+/// The band relay (Omron G6K): energised for chip 1's HF path below 64 MHz. Only the Radio task's path machine
+/// (ferrite_core::path) moves it.
+pub const RELAY: Pin = pin(GPIOC, 4);
 pub const BK_CS: [Pin; 2] = [pin(GPIOE, 8), pin(GPIOE, 15)]; // BK4829 #0 (VHF), #1 (UHF/HF)
 pub const BK_SCK: Pin = pin(GPIOE, 10);
 pub const BK_SDA: Pin = pin(GPIOE, 11);
@@ -70,7 +73,7 @@ pub const ENC_A: Pin = pin(GPIOB, 4);
 pub const ENC_B: Pin = pin(GPIOB, 5);
 
 const SAFE_LOW: [Pin; 9] = [
-    pin(GPIOC, 4),
+    RELAY,
     pin(GPIOA, 7),
     pin(GPIOC, 5),
     pin(GPIOE, 9),

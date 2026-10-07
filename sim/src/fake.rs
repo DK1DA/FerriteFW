@@ -1,10 +1,17 @@
 //! The simulator's stand-ins: a fake three-slot radio that obeys the app's commands, the sample records
 //! (channels, event log, APRS, GPS: `ferrite_app::sample`), and the radio-wide state for the status bar.
+//!
+//! The fake radio runs the firmware's own engines (ferrite_core's `watch`, `scan`, `txseq` and `path`): only the
+//! carriers are made up, so watch turns, scan stops and transmit refusals look as they will on the radio.
 
 use ferrite_app::chan::ChannelStore;
 use ferrite_app::sample::Sample;
 use ferrite_app::slot::{band_of, BANDS, DEFAULT_CFG};
 use ferrite_core::freq::{mhz, Freq10};
+use ferrite_core::path::{Cause, Path, Rx, Sel, Steps};
+use ferrite_core::scan::{Range, Resume, Scan};
+use ferrite_core::txseq::{self, Kind, Req, TxSeq};
+use ferrite_core::watch::{self, Watch};
 use ferrite_core::msg::{BroadcastCmd, Device, GpsState, LiveAll, ModeLive, RadioCmd, SlotLive, TxLive, XbLive, SCOPE_BARS, XB_COLS};
 use ferrite_core::txplan::Region;
 use ferrite_core::msg::{CalState, LinkLive, SameDecoded, SelfTest};
@@ -76,15 +83,20 @@ const STATIONS: [(u16, &str, &str); 4] = [
 pub struct FakeRadio {
     pub live: LiveAll,
     watch: u8,
+    /// The engines, as the Radio task runs them.
+    watcher: Watch,
+    scans: [Scan; 3],
+    seq: TxSeq,
+    path: Path,
+    /// The slot each chip listened to on the last step.
+    on_chip: [Option<u8>; 2],
+    active: u8,
     last_step: f32,
     mode: Fake,
     /// The scope's bars and dwell ([`RadioCmd::ScopeCfg`]).
     scope_cfg: (u8, u8),
     /// The two BK4829s' registers, for the terminal's `bk` (TERM-21).
     bk: [[u16; 128]; 2],
-    /// Scanning slots going down (a bit per slot, SCAN-16), and until when (s) each stays off the hit it left.
-    scan_down: u8,
-    scan_quiet: [f32; 3],
     /// Slots with monitor latched: squelch held open.
     monitor: u8,
     fm: u16,
@@ -105,7 +117,74 @@ impl FakeRadio {
         live.slots[0] = SlotLive { freq: mhz(146) + 52_000, rssi: -121, ..Default::default() };
         live.slots[1] = SlotLive { freq: mhz(443) + 47_500, rssi: -121, ..Default::default() };
         live.slots[2] = SlotLive { freq: mhz(118) + 95_000, rssi: -121, scanning: true, hits: 3, last_hit: mhz(121) + 50_000, ..Default::default() };
-        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), bk: fake_bk(), scan_down: 0, scan_quiet: [0.0; 3], monitor: 0, fm: 9_810, now: 0.0, wx_since: None, same: None, burst: None }
+        let mut scans = [Scan::new(); 3];
+        for sc in &mut scans {
+            sc.resume = Resume::Time(2);
+        }
+        scans[2].start(scan_pos(live.slots[2].freq), 0);
+        let mut path = Path::new();
+        path.rx(Rx::Bk(Sel::rx(live.slots[0].freq)), Cause::ActiveSlot, 0, &mut Steps::default()).ok();
+        FakeRadio {
+            live,
+            watch: 0b111,
+            watcher: Watch::new(),
+            scans,
+            seq: TxSeq::new(),
+            path,
+            on_chip: [None; 2],
+            active: 0,
+            last_step: 0.0,
+            mode: Fake::Off,
+            scope_cfg: (60, 10),
+            bk: fake_bk(),
+            monitor: 0,
+            fm: 9_810,
+            now: 0.0,
+            wx_since: None,
+            same: None,
+            burst: None,
+        }
+    }
+
+    fn ms(&self) -> u32 {
+        (self.now * 1000.0) as u32
+    }
+
+    /// The active slot's receive path (the relay follows it, WATCH-10).
+    fn rx_path(&mut self) {
+        let f = self.live.slots[self.active as usize % 3].freq;
+        let now = self.ms();
+        self.path.rx(Rx::Bk(Sel::rx(f)), Cause::ActiveSlot, now, &mut Steps::default()).ok();
+    }
+
+    /// Key up through the sequencer (TX-17): the app has checked already, so the fake keys wherever the
+    /// hardware could (Extend TX, calibrated), with the sequencer's own refusals (the relay, the duty limit).
+    fn key(&mut self, slot: u8, kind: Kind) {
+        let f = match self.mode {
+            Fake::Hf { freq, .. } if slot == 3 => freq,
+            _ => self.live.slots[slot as usize % 3].freq,
+        };
+        let req = Req {
+            tx: f,
+            rx: f,
+            kind,
+            person: kind == Kind::Voice,
+            confirmed: true,
+            am: false,
+            region: Region::Us,
+            extend: true,
+            cal_ok: true,
+            batt_ok: true,
+        };
+        let now = self.ms();
+        let r = self.seq.key(&req, &mut self.path, now, &mut Steps::default());
+        self.live.tx = TxLive { keyed: r.is_ok(), slot, mic: 0, refused: r.err() };
+    }
+
+    fn unkey(&mut self) {
+        let now = self.ms();
+        self.seq.release(&TX_CFG, &mut self.path, now, &mut Steps::default());
+        self.live.tx.keyed = false;
     }
 
     pub fn cmd(&mut self, c: RadioCmd) {
@@ -114,28 +193,46 @@ impl FakeRadio {
                 let s = &mut self.live.slots[slot as usize % 3];
                 s.freq = freq;
                 s.scanning = false;
+                self.scans[slot as usize % 3].stop();
+                self.rx_path();
+            }
+            RadioCmd::Active(a) => {
+                self.active = a % 3;
+                self.rx_path();
             }
             RadioCmd::Scan { slot, on } => {
-                let s = &mut self.live.slots[slot as usize % 3];
+                let now = self.ms();
+                let i = slot as usize % 3;
+                let s = &mut self.live.slots[i];
                 s.scanning = on;
                 if on {
                     s.hits = 0;
                     s.skips = 0;
+                    self.scans[i].start(scan_pos(s.freq), now);
+                } else {
+                    self.scans[i].stop();
                 }
             }
             RadioCmd::Watch(m) => self.watch = m,
-            RadioCmd::Transmit { slot, on } => self.live.tx = TxLive { keyed: on, slot, mic: 0, refused: None },
+            RadioCmd::PauseWatch(secs) => {
+                let now = self.ms();
+                self.watcher.pause(now, secs);
+            }
+            RadioCmd::Transmit { slot, on: true } => self.key(slot, Kind::Voice),
+            RadioCmd::Transmit { on: false, .. } => self.unkey(),
             RadioCmd::ScanSkip { slot } => {
-                let s = &mut self.live.slots[slot as usize % 3];
-                s.skips = s.skips.saturating_add(1);
-                self.leave_hit(slot);
+                let now = self.ms();
+                let i = slot as usize % 3;
+                let o = self.scans[i].skip_once(&scan_range(self.live.slots[i].freq), now);
+                self.scan_out(i, o);
             }
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
-            RadioCmd::ScanDir { slot, up, resume } => {
-                self.scan_down = self.scan_down & !(1 << slot) | (!up as u8) << slot;
-                if resume {
-                    self.leave_hit(slot);
-                }
+            RadioCmd::ScanDir { slot, up, .. } => {
+                // SCAN-16: on a hit (or in its resume wait) the engine leaves it at once.
+                let now = self.ms();
+                let i = slot as usize % 3;
+                let o = self.scans[i].dir(up, &scan_range(self.live.slots[i].freq), now);
+                self.scan_out(i, o);
             }
             RadioCmd::ScopeCfg { bars, dwell } => self.scope_cfg = (bars, dwell),
             RadioCmd::Sweep { centre, step, on } => {
@@ -266,71 +363,108 @@ impl FakeRadio {
         }
     }
 
-    /// Off the hit now: quiet until the hit window ends (the scan steps on meanwhile).
-    fn leave_hit(&mut self, slot: u8) {
-        let t = self.now;
-        self.scan_quiet[slot as usize % 3] = t - t % 7.0 + 2.0;
+    /// A scan engine's answer: the step it tuned, a hit, the end.
+    fn scan_out(&mut self, i: usize, o: ferrite_core::scan::Out) {
+        let s = &mut self.live.slots[i];
+        if let Some(f) = o.tune {
+            s.freq = f;
+        }
+        if o.hit.is_some() {
+            s.hits = s.hits.saturating_add(1);
+            s.last_hit = s.freq;
+        }
+        s.skips = self.scans[i].skips.max(s.skips);
+        if o.ended {
+            s.scanning = false;
+        }
     }
 
     /// Advance to t seconds; `active` is always heard.
     /// An APRS packet (beacon, message, ack) on `slot`: keyed for 0.4 s, as the APRS task's transmit is.
     pub fn burst(&mut self, slot: u8) {
         if !self.live.tx.keyed {
-            self.live.tx = TxLive { keyed: true, slot, mic: 0, refused: None };
-            self.burst = Some((slot, self.now + 0.4));
+            self.key(slot, Kind::Data);
+            if self.live.tx.keyed {
+                self.burst = Some((slot, self.now + 0.4));
+            }
         }
     }
 
     pub fn step(&mut self, t: f32, active: u8) {
-        let dt = t - self.last_step;
         self.last_step = t;
         self.same_step(t);
         self.now = t;
+        let now = self.ms();
+        if active % 3 != self.active {
+            self.active = active % 3;
+            self.rx_path();
+        }
         if self.burst.is_some_and(|(_, end)| t >= end) {
             self.burst = None;
+            self.unkey();
+        }
+        // The sequencer's timeout and duty limit (the app keeps its own timeout screen).
+        if self.seq.tick(&TX_CFG, true, &mut self.path, now, &mut Steps::default()).is_some_and(|e| e != txseq::Event::PreAlert) {
             self.live.tx.keyed = false;
         }
         self.mode_step(t);
+        // Carriers where each slot is tuned now.
+        let carrier = |i: usize, s: &SlotLive| -> (bool, f32) {
+            if s.scanning {
+                return (scan_carrier(s.freq), -79.0 + (t * 3.1).sin() * 5.0);
+            }
+            match i {
+                0 => ((t % 10.0) > 6.0 && (t % 10.0) < 9.0, -85.0 + (t * 1.7).sin() * 6.0),
+                1 => ((t % 25.0) > 20.0 && (t % 25.0) < 22.0, -97.0 + (t * 2.3).sin() * 4.0),
+                _ => (false, 0.0),
+            }
+        };
+        // Watch (WATCH-2): each chip's squelch for the slot it was on, then the engine's next turn.
+        let sq = self.on_chip.map(|o| o.is_some_and(|i| carrier(i as usize, &self.live.slots[i as usize]).0));
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: 0, follow: watch::Follow::Off };
+        let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
+        // Scans step only while their slot has a chip.
+        for i in 0..3 {
+            if self.live.slots[i].scanning && out.chip.contains(&Some(i as u8)) {
+                let open = self.on_chip.contains(&Some(i as u8)) && carrier(i, &self.live.slots[i]).0;
+                let o = self.scans[i].tick(&scan_range(self.live.slots[i].freq), now, open);
+                self.scan_out(i, o);
+            }
+        }
+        self.on_chip = out.chip;
+        let relay = |f: Freq10| Sel::rx(f).relay();
+        let active_relay = relay(self.live.slots[self.active as usize].freq);
         for (i, s) in self.live.slots.iter_mut().enumerate() {
-            let heard = i as u8 == active || self.watch & 1 << i != 0;
-            let (open, level) = if s.scanning {
-                scan(s, t, dt, self.scan_down & 1 << i != 0, t < self.scan_quiet[i])
-            } else {
-                match i {
-                    0 => ((t % 10.0) > 6.0 && (t % 10.0) < 9.0, -85.0 + (t * 1.7).sin() * 6.0),
-                    1 => ((t % 25.0) > 20.0 && (t % 25.0) < 22.0, -97.0 + (t * 2.3).sin() * 4.0),
-                    _ => (false, 0.0),
-                }
-            };
-            s.squelch_open = open && heard || self.monitor & 1 << i != 0;
+            let (_, level) = carrier(i, s);
+            s.squelch_open = self.watcher.open(i as u8) || self.monitor & 1 << i != 0;
             s.tone_heard = s.squelch_open; // the sample's stations use the slot's own tone
             s.rssi = if s.squelch_open { level as i16 } else { -121 + ((t * 0.9 + i as f32).sin() * 2.0) as i16 };
+            s.relay = out.cancelled && self.watch & 1 << i != 0 && relay(s.freq) != active_relay; // WATCH-11
         }
     }
 }
 
-/// Scanning: a step every 0.1 s across the slot's band, stopping 2 s on a hit every 7 s.
-fn scan(s: &mut SlotLive, t: f32, dt: f32, down: bool, quiet: bool) -> (bool, f32) {
-    let b = &BANDS[band_of(s.freq).unwrap_or(2)];
-    let phase = t % 7.0;
-    if phase < 2.0 && !quiet {
-        if (t - dt) % 7.0 >= 2.0 {
-            s.hits = s.hits.saturating_add(1);
-            s.last_hit = s.freq;
-        }
-        return (true, -79.0 + (t * 3.1).sin() * 5.0);
-    }
-    if dt > 0.0 && (t * 10.0) as u32 != ((t - dt) * 10.0) as u32 {
-        let step: Freq10 = 2_500;
-        s.freq = if down {
-            if s.freq <= b.lo + step { b.hi - step } else { s.freq - step }
-        } else if s.freq + step >= b.hi {
-            b.lo
-        } else {
-            s.freq + step
-        };
-    }
-    (false, 0.0)
+/// The fake's transmit settings: the longest timeout (the app shows its own).
+const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 600, prealert_s: 0, end_tone: false, cw_id: false, tail: false };
+
+/// The step the fake scans at.
+const SCAN_STEP: Freq10 = 2_500;
+
+/// A scanning slot's range: its band at 2.5 kHz.
+fn scan_range(f: Freq10) -> Range<'static> {
+    let b = &BANDS[band_of(f).unwrap_or(2)];
+    Range { lo: b.lo, hi: b.hi - SCAN_STEP, step: SCAN_STEP, skipped: &[] }
+}
+
+/// Where `f` is in its scan range.
+fn scan_pos(f: Freq10) -> u16 {
+    let r = scan_range(f);
+    (f.saturating_sub(r.lo) / SCAN_STEP) as u16
+}
+
+/// Scanned carriers: one every 40 steps of a band (a stop every few seconds of scanning).
+fn scan_carrier(f: Freq10) -> bool {
+    scan_pos(f) % 40 == 20
 }
 
 /// The crossband repeater, `s` seconds after it started (shown as 1 h 12 m in): a pass side 1 -> 2 every
