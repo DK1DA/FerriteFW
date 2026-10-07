@@ -149,10 +149,10 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Open FM broadcast"), slow!(""), slow!("Listen now.")),
     ]),
     ((3, 2), &[
-        (slow!("Span"), slow!("+/-1 MHz"), slow!("How wide the scope looks.")),
+        (slow!("Bars"), slow!("60"), slow!("Bars across; span is bars x step.")),
         (slow!("Step"), slow!("25 kHz"), slow!("Distance between bars.")),
-        (slow!("Sweep speed"), slow!("Normal"), slow!("Faster sweeps miss less.")),
-        (slow!("Trigger level"), slow!("Off"), slow!("Mark signals above this.")),
+        (slow!("Sweep speed"), slow!("1 ms"), slow!("Time on each point.")),
+        (slow!("Trigger"), slow!("Off"), slow!("Over the line: monitor or log.")),
         (slow!("Waterfall row"), slow!("Off"), slow!("History under the scope.")),
         (slow!("Open band scope"), slow!(""), slow!("Sweep around the active slot. Home: hold 1.")),
     ]),
