@@ -80,11 +80,13 @@ pub fn field(
 pub fn badge(lcd: &mut impl Panel, x: i32, y: i32, slot: u8, filled: bool, bg: u16) {
     let c = slot_colour(slot);
     let (fg, back) = if filled { (BLUE_FG, c) } else { (c, bg) };
+    // 13 x 13: the 9 px letter sits 1 px from the top and bottom inside, 3 px from the sides (an even box
+    // can't centre an odd letter). The 14 px clear wipes a box drawn at the old size.
     lcd.fill(x, y, 14, 14, bg);
-    lcd.fill_r(x, y, 14, 14, 1, back);
-    lcd.text4_rows(x + 4, y + 11, &[LETTERS[slot as usize % 3]], &UI_12B, fg, back, y + 1, y + 13);
+    lcd.fill_r(x, y, 13, 13, 1, back);
+    lcd.text4_rows(x + 4, y + 11, &[LETTERS[slot as usize % 3]], &UI_12B, fg, back, y + 1, y + 12);
     if !filled {
-        lcd.frame_r(x, y, 14, 14, 1, c);
+        lcd.frame_r(x, y, 13, 13, 1, c);
     }
 }
 
