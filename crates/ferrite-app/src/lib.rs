@@ -78,7 +78,7 @@ pub const UNDO_MS: u32 = 5000;
 /// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
 pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
-/// Watch pause (0 1 2 5, default 1 min).
+/// Watch pause (0 1 2 4, default 1 min).
 pub const PAUSE_S: u16 = 60;
 /// After a transmission, watch waits this long with the active slot quiet, or until a key (WATCH-16; nicFW's 30 s).
 pub const TX_PAUSE_S: u16 = 30;

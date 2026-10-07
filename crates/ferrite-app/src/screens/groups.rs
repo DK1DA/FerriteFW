@@ -130,7 +130,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Watched audio"), slow!("Heard"), slow!("Heard, muted, per slot.")),
         (slow!("Follow"), slow!("Off"), slow!("The active slot follows a watched one.")),
         (slow!("Follow return"), slow!("Switch back"), slow!("Stay, or switch back after.")),
-        (slow!("TX on"), slow!("Active slot"), slow!("PTT keys the active or last heard.")),
         (slow!("Pause time"), slow!("1 min"), slow!("# on home pauses watch this long.")),
     ]),
     ((1, 6), &[
@@ -166,7 +165,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
     ((4, 9), &[
         (slow!("SAME"), slow!("On"), slow!("Decode weather alerts.")),
         (slow!("Location codes"), slow!("None"), slow!("Up to 8 FIPS or CLC codes.")),
-        (slow!("Alert tone"), slow!("On"), slow!("Sound the alert tone.")),
         (slow!("Channel"), slow!("Auto"), slow!("The weather channel to watch.")),
     ]),
     ((5, 4), &[
