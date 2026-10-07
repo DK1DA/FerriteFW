@@ -1961,7 +1961,7 @@ fn parse_mhz(s: &[u8]) -> Option<Freq10> {
 
 /// "12 s ago", "3 min ago", "2 h ago".
 fn ago(s: u32, b: &mut Buf<16>) {
-    let _ = match s {
+    match s {
         0..=59 => put!(b, "{} s ago", s),
         60..=3599 => put!(b, "{} min ago", s / 60),
         _ => put!(b, "{} h ago", s / 3600),
