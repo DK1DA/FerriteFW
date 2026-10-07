@@ -51,8 +51,9 @@ pub enum RadioCmd {
     /// The frequency counter (TSRCH-6).
     Counter(bool),
     /// HF mode: enter on a frequency and mode (as [`Param::Mode`]), retune, or leave (HF-3, HF-4). Entering
-    /// switches the relay once, powers the SI4732 up with the SSB patch and pauses watch, scan, decoders, jobs
-    /// and beacons; leaving undoes all of it (HF-8). The receiver follows from frequency and mode (HF-10).
+    /// powers the SI4732 up with the SSB patch and pauses watch, scan, decoders, jobs and beacons; leaving undoes
+    /// all of it (HF-8). The receiver follows from frequency and mode (HF-10), and the relay from the receiver:
+    /// energised for chip 1, released for the SI4732 (HF-11).
     Hf { freq: Freq10, mode: u8, on: bool },
     /// The crossband repeater: start with these settings, or stop (XB-14).
     Crossband(Option<XbCfg>),
