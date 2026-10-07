@@ -83,7 +83,8 @@ The bring-up build (`cargo fw-bringup`, feature `bringup`) never writes or erase
 the store; a key pressed during the boot screen opens the key test; the cable prints a plain log at 115200 (boot
 report, raw key codes, the knob, the receiver, a fault's address) until a byte arrives. `flash.py` refuses a
 Ferrite image without a whole-chip backup taken with the hwtest image, and refuses a backup holding a pending
-update. The day-one order is `../docs/bringup.md`.
+update. The day-one order is `../docs/bringup.md`; debugging on the radio (cable log, the terminal's `:mem`, `:gpio`,
+`:bk`, `:si`, fault addresses, `tools/bkcheck.py --diff`) is `../docs/debugging.md`.
 
 Transmit is built in milestone 4, after receive is proven on the radio. Until then it sits behind a feature: `cargo fw --features tx`
 adds it, and without the feature the build contains no transmit code at all, so bring-up builds cannot key the radio.

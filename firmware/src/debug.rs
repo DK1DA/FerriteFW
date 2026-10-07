@@ -30,9 +30,11 @@ const BLOCKS: [u32; 44] = [
 
 /// The Cortex-M system control space (SysTick, NVIC, SCB), word reads only.
 const SCS: Range<u32> = 0xE000_E000..0xE000_F000;
+/// DBGMCU: the MCU ID code and debug freeze bits, word reads only.
+const DBGMCU: Range<u32> = 0xE004_2000..0xE004_2008;
 
 fn word_ok(a: u32) -> bool {
-    BLOCKS.iter().any(|&b| (b..b + 0x400).contains(&a)) || SCS.contains(&a)
+    BLOCKS.iter().any(|&b| (b..b + 0x400).contains(&a)) || SCS.contains(&a) || DBGMCU.contains(&a)
 }
 
 /// Answers a `mem` or `mem32` request, or says why not.

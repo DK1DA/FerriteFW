@@ -312,7 +312,12 @@ fn log_input(i: &Input) {
 /// Bring-up log: the receiver's snapshot.
 fn log_live(l: &Live) {
     bringup::linef(|b| {
-        let _ = ufmt::uwrite!(b, "rx {}.{} MHz  rssi {} dBm  squelch {}  chips ", l.freq / 100_000, l.freq % 100_000, l.rssi, if l.squelch_open { "open" } else { "closed" });
+        let f = l.freq % 100_000;
+        let _ = ufmt::uwrite!(b, "rx {}.", l.freq / 100_000);
+        for d in [10_000, 1_000, 100, 10, 1] {
+            b.push(&[b'0' + (f / d % 10) as u8]); // five decimals, zeros kept: 146.05200
+        }
+        let _ = ufmt::uwrite!(b, " MHz  rssi {} dBm  squelch {}  chips ", l.rssi, if l.squelch_open { "open" } else { "closed" });
         bringup::hex(b, l.chips as u32);
         if l.rx_asleep {
             b.push(b"  asleep");
