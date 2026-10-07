@@ -15,6 +15,7 @@
 #![no_main]
 
 mod board;
+mod bringup;
 mod bus;
 mod chan;
 mod display;
@@ -116,8 +117,8 @@ extern "C" fn dsp_irq() {
 
 // With panic=immediate-abort a panic is an undefined instruction, so it arrives here as a HardFault.
 #[exception]
-unsafe fn HardFault(_: &ExceptionFrame) -> ! {
-    board::fault()
+unsafe fn HardFault(ef: &ExceptionFrame) -> ! {
+    board::fault_at(Some(ef.pc()))
 }
 
 #[exception]

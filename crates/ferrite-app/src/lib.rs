@@ -816,6 +816,11 @@ impl App {
         self.show_toast(b"Locked:", b"hold # to unlock", false); // KEY-14
     }
 
+    /// A toast from outside the app (the firmware's bring-up notice at boot).
+    pub fn notice(&mut self, head: &[u8], body: &[u8]) {
+        self.show_toast(head, body, false);
+    }
+
     fn show_toast(&mut self, head: &[u8], body: &[u8], icon: bool) {
         self.toast = Some(Toast { head: Buf::from(head), body: Buf::from(body), icon, center: false, until: self.now.wrapping_add(TOAST_MS) });
     }

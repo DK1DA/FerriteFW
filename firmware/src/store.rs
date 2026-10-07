@@ -19,6 +19,7 @@ use embassy_sync::once_lock::OnceLock;
 use embassy_sync::signal::Signal;
 use embassy_time::Timer;
 use ferrite_app::data::NoData;
+#[cfg(not(feature = "bringup"))]
 use ferrite_core::layout::WRITABLE;
 use ferrite_store::{FlashStore, Nor, NorError, PAGE, SECTOR};
 use uradio_bus::{Delay, Spi};
@@ -36,6 +37,12 @@ const RESUME: u8 = 0x7A;
 const SUS: u8 = 0x80;
 /// tSUS: the longest a suspend takes, and the least time between a resume and the next suspend.
 const T_SUS_US: u32 = 20;
+
+/// Where writes may go: ferrite_core::layout::WRITABLE, or nowhere in the bring-up build.
+#[cfg(not(feature = "bringup"))]
+const WRITE_OK: &[core::ops::Range<u32>] = &WRITABLE;
+#[cfg(feature = "bringup")]
+const WRITE_OK: &[core::ops::Range<u32>] = &[];
 
 /// The W25Q (None when it didn't answer at power on: nothing is stored this power-on).
 pub struct Chip {
@@ -65,10 +72,14 @@ impl Chip {
     }
 
     fn writable(addr: u32, len: u32) -> bool {
-        WRITABLE.iter().any(|r| r.start <= addr && addr + len <= r.end)
+        WRITE_OK.iter().any(|r| r.start <= addr && addr + len <= r.end)
     }
 
     fn start(&mut self, op: u8, addr: u32, data: &[u8]) -> ferrite_store::Result {
+        // The bring-up build never programs or erases, whatever asks (the store isn't even mounted there).
+        if cfg!(feature = "bringup") {
+            return Err(NorError);
+        }
         let spi = self.spi.as_mut().ok_or(NorError)?;
         Self::command(spi, WRITE_ENABLE);
         spi.select(true);
@@ -149,21 +160,21 @@ pub static STORE: OnceLock<Shared> = OnceLock::new();
 /// Writes are queued: the Storage task has work.
 pub static WAKE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
-/// Starts the flash and makes the store (not mounted yet: the caller awaits `mount_async`); whether the chip
-/// answered (the self-test's SPI flash check).
-pub fn make() -> (bool, &'static Store) {
-    let (spi, size) = match W25q::new(Flash::new(), &mut BusyDelay, &WRITABLE) {
-        Ok(f) => {
-            let size = f.size();
-            (Some(f.release()), size)
+/// Starts the flash and makes the store (not mounted yet: the caller awaits `mount_async`); the chip's JEDEC ID
+/// and size, or None when it didn't answer (the self-test's SPI flash check).
+pub fn make() -> (Option<(u32, u32)>, &'static Store) {
+    let (spi, id) = match W25q::new(Flash::new(), &mut BusyDelay, WRITE_OK) {
+        Ok(mut f) => {
+            let id = (f.jedec_id(), f.size());
+            (Some(f.release()), Some(id))
         }
-        Err(_) => (None, 0),
+        Err(_) => (None, None),
     };
-    let ok = spi.is_some();
+    let size = id.map_or(0, |i| i.1);
     let store: &'static Store = cortex_m::singleton!(: Store = FlashStore::new(Chip { spi, size, active: false }, NoData)).unwrap();
     store.set_deferred(true);
     let _ = STORE.init(Shared(store));
-    (ok, store)
+    (id, store)
 }
 
 /// Tells the Storage task about queued writes.

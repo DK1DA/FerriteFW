@@ -5,6 +5,13 @@
     python3 tools/flash.py /dev/tty.usbserial-XXXX build/target/hwtest.btf
     python3 tools/flash.py /dev/tty.usbserial-XXXX build/target/hwtest.bin     # packed on the fly
     python3 tools/flash.py --dry-run - stock.BTF                               # checks only, no radio
+    python3 tools/flash.py PORT target/ferrite.btf --backup flash.bin         # Ferrite: needs the backup
+
+Ferrite images (they contain "Ferrite terminal") are refused without --backup: the whole SPI flash read with
+the hwtest image (tools/flashdump.py, in ../fw). The backup must look like this radio's chip (2, 4 or 8 MB,
+calibration present at 0xF000), and it must not hold a pending phone/Bluetooth update (magic 0xA55A at
+0x300000): the bootloader would flash that over Ferrite at the next power-on (roadmap 1b). Ferrite never
+writes the update area, not even to clear it, so restore stock and update it the normal way first.
 
 Getting into the bootloader needs nothing from the running firmware: at every power-on the
 bootloader listens about 200 ms for a probe packet before starting the app. This script floods
@@ -102,12 +109,42 @@ def command(port, cmd, seq=0, data=b"", timeout=2.0, tries=3):
     return None
 
 
+FERRITE_MARK = b"Ferrite terminal"
+CAL, SECTOR, UPDATE_AREA = 0xF000, 0x1000, 0x300000
+
+
+def check_backup(path):
+    """Problems with a whole-chip backup (empty list: fine), and a line describing it."""
+    import hashlib
+    import zlib
+    try:
+        b = open(path, "rb").read()
+    except OSError as e:
+        return [f"can't read the backup: {e}"], ""
+    errs = []
+    if len(b) not in (2 << 20, 4 << 20, 8 << 20):
+        errs.append(f"{path} is {len(b)} bytes: a whole-chip backup is 2, 4 or 8 MB (flashdump.py without --cal)")
+    cal = b[CAL:CAL + SECTOR]
+    if len(cal) < SECTOR or cal.count(0xFF) == SECTOR or cal.count(0) == SECTOR:
+        errs.append("the calibration sector (0xF000) in the backup is blank: not a backup of a working radio")
+    hdr = b[UPDATE_AREA:UPDATE_AREA + 2]
+    if hdr in (b"\x5a\xa5", b"\xa5\x5a"):
+        errs.append("the backup holds a pending update (0xA55A at 0x300000): the bootloader would flash it over "
+                    "Ferrite at the next power-on. Restore stock, let it finish or clear that update the stock "
+                    "way, take a new backup, then install")
+    desc = (f"backup {path}: {len(b) >> 20} MB, sha256 {hashlib.sha256(b).hexdigest()[:16]}, "
+            f"calibration crc32 {zlib.crc32(cal):08X}")
+    return errs, desc
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("port", help="serial port of the programming cable ('-' with --dry-run)")
     ap.add_argument("file", help=".btf to send, or a raw .bin to pack first")
     ap.add_argument("--wait", type=float, default=30, help="seconds to wait for the bootloader")
     ap.add_argument("--dry-run", action="store_true", help="check the file and stop")
+    ap.add_argument("--backup", metavar="FLASH.BIN",
+                    help="the whole-SPI-flash backup taken with the hwtest image (required for Ferrite images)")
     ap.add_argument("--ssb-from", metavar="STOCK.BTF",
                     help="bundle the SI4732 SSB patch from your own stock firmware file (Ferrite images only)")
     a = ap.parse_args()
@@ -116,6 +153,17 @@ def main():
     is_btf = a.file.upper().endswith(".BTF")
     img = btf.unpack(data)[0] if is_btf else data
     errs = btf.check_image(img, btf.BOOT_MAX if is_btf else btf.APP_MAX)
+    if FERRITE_MARK in img:
+        if a.backup:
+            berrs, desc = check_backup(a.backup)
+            errs += berrs
+            if desc:
+                print(desc)
+        elif not a.dry_run:
+            errs.append("a Ferrite image needs --backup: first read the whole SPI flash with the hwtest image "
+                        "(fw/tools/flashdump.py PORT flash.bin), keep it safe, and pass it here")
+        else:
+            print("note: flashing this Ferrite image will need --backup FLASH.BIN")
     if errs:
         sys.exit("refusing to flash:\n  " + "\n  ".join(errs))
     if a.ssb_from:

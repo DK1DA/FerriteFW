@@ -65,7 +65,7 @@ fn cell(key: Key) -> Option<usize> {
 }
 
 /// The key's name as the manual writes it.
-fn key_name(key: Key, b: &mut Buf<16>) {
+pub fn key_name(key: Key, b: &mut Buf<16>) {
     match key {
         Key::Menu => b.set(b"MENU/OK"),
         Key::Exit => b.set(b"BACK"),

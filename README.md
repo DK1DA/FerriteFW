@@ -71,13 +71,19 @@ radio's cable and prints how to connect, for example `screen /dev/ttys006 115200
 is no pseudo-terminal, `cargo simw -- --term-tcp 7300`, then `stty raw -echo; nc 127.0.0.1 7300; stty sane`.
 `cargo run -p ferrite-sim -- --term-headless 60` runs the radio and its cable with no window (for scripts).
 
-To pack the image for the stock bootloader:
+To pack the image for the stock bootloader (build, slow-flash check, pack, dry run):
 
 ```sh
-BIN=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
-$BIN/llvm-objcopy -O binary target/thumbv7em-none-eabihf/release/ferrite target/ferrite.bin
-python3 tools/btf.py pack target/ferrite.bin target/ferrite.btf
+tools/mkbtf.sh            # target/ferrite.btf
+tools/mkbtf.sh bringup    # target/ferrite-bringup.btf: the first builds on a radio
+python3 tools/flash.py PORT target/ferrite-bringup.btf --backup flash.bin
 ```
+
+The bring-up build (`cargo fw-bringup`, feature `bringup`) never writes or erases the SPI flash and doesn't mount
+the store; a key pressed during the boot screen opens the key test; the cable prints a plain log at 115200 (boot
+report, raw key codes, the knob, the receiver, a fault's address) until a byte arrives. `flash.py` refuses a
+Ferrite image without a whole-chip backup taken with the hwtest image, and refuses a backup holding a pending
+update. The day-one order is `../docs/bringup.md`.
 
 Transmit is built in milestone 4, after receive is proven on the radio. Until then it sits behind a feature: `cargo fw --features tx`
 adds it, and without the feature the build contains no transmit code at all, so bring-up builds cannot key the radio.

@@ -138,8 +138,15 @@ pub fn init() {
 /// Any fault, stray interrupt or panic: interrupts off first so nothing else runs, then the safe state,
 /// red LED on, stop.
 pub fn fault() -> ! {
+    fault_at(None)
+}
+
+/// [`fault`], with the faulting address when known (a HardFault's stacked PC): the bring-up build prints it on
+/// the cable after the safe state and the LED.
+pub fn fault_at(pc: Option<u32>) -> ! {
     cortex_m::interrupt::disable();
     safe_state();
     LED_RED.output(LED_ACTIVE_HIGH, Mode::OutPp);
+    crate::bringup::fault(pc);
     loop {}
 }

@@ -9,6 +9,8 @@ rustflags = ["-C", "link-arg=-Tlink.x", "-C", "target-cpu=cortex-m4", "-Zlocatio
 # The firmware image: target/thumbv7em-none-eabihf/release/ferrite
 fw = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core"]
 fw-clippy = ["clippy", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core"]
+# The bring-up image: no SPI flash writes, key test on a held key, a log on the cable (firmware/Cargo.toml)
+fw-bringup = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "--features", "bringup"]
 # Screens rendered on the PC: target/sim/*.png
 sim = ["run", "-p", "ferrite-sim", "--"]
 # The interactive simulator: a window driven by the keyboard and a fake radio

@@ -3,6 +3,7 @@
 //! in, its commands out to the Radio task, and the screen redrawn where it changed.
 
 use crate::board::{BACKLIGHT, POWER_HOLD, POWER_SW};
+use crate::bringup;
 use crate::chan::{Input, ALERTS, INPUT, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
@@ -85,9 +86,13 @@ pub async fn task() {
     ];
     // The store: mounted before the boot screen, as the settings (callsign, owner card: BOOT-9, MENU 0 7 3 3)
     // are in it. A first boot formats the chip here (about a second, once). Its writes go to the Storage task.
-    let (flash_ok, store) = store::make();
-    store.mount_async().await;
-    check(Source::Storage, CHECK_FLASH, flash_ok);
+    // The bring-up build never mounts it: nothing on the chip is taken as ours or written, and the settings
+    // are the defaults, in RAM for this power-on.
+    let (flash, store) = store::make();
+    if !cfg!(feature = "bringup") {
+        store.mount_async().await;
+    }
+    check(Source::Storage, CHECK_FLASH, flash.is_some());
     let set = store::settings();
     store.load_settings(set);
     let card = set.boot_owner().is_some();
@@ -95,6 +100,8 @@ pub async fn task() {
     // most 5 s: a check still pending then counts as failed).
     let least = Duration::from_millis(if card { 4000 } else { 1500 });
     let (mut menu_held, mut skip) = (false, false);
+    // Bring-up: a key pressed during the boot screen opens the key test (the key map isn't trusted yet).
+    let mut key_seen = false;
     ferrite_ui::theme::set(set.theme); // the boot screen in the saved theme (0 7 1)
     let start = Instant::now();
     loop {
@@ -111,10 +118,12 @@ pub async fn task() {
         if (done && (t >= least || skip)) || t >= Duration::from_secs(5) {
             break;
         }
-        if card {
+        if card || cfg!(feature = "bringup") {
             // Keys while the card shows: any press skips the rest of it; MENU's state still counts (BOOT-14).
             if let Either::First(i) = select(INPUT.receive(), Timer::after_millis(100)).await {
-                skip |= matches!(i, Input::Key(keypad::Event::Press(_)));
+                skip |= card && matches!(i, Input::Key(keypad::Event::Press(_)));
+                key_seen |= matches!(i, Input::Key(keypad::Event::Press(_)));
+                log_input(&i);
                 menu_state(&i, &mut menu_held);
             }
         } else {
@@ -133,8 +142,11 @@ pub async fn task() {
     // Keys pressed during the boot screen: only whether MENU is still held counts (BOOT-14); the rest are
     // dropped, as a PTT held at power on is (KEY-8).
     while let Ok(i) = INPUT.try_receive() {
+        key_seen |= matches!(i, Input::Key(keypad::Event::Press(_)));
+        log_input(&i);
         menu_state(&i, &mut menu_held);
     }
+    boot_report(flash, &checks, key_seen);
 
     // Hand-off: the whole screen cleared, then the app draws everything once (HOME-2).
     lcd.0.fill(0, 0, 240, 320, BG);
@@ -143,7 +155,13 @@ pub async fn task() {
     store.restore(&mut app);
     // After the self-test: setup on first boot (BOOT-12); MENU held: the settings reset (PIN-6, BOOT-14), which
     // asks before the PIN; else the PIN if one is set (BOOT-13).
-    if store.first_boot() {
+    if cfg!(feature = "bringup") {
+        // No setup, reset or PIN: nothing is stored. A key at boot: straight to the key test (hold BACK leaves).
+        if key_seen {
+            app.open(ferrite_app::screens::nav::Dest::KeyTest);
+        }
+        app.notice(b"Bring-up build", b"nothing is saved");
+    } else if store.first_boot() {
         app.first_boot();
     } else if menu_held {
         app.power_on_reset();
@@ -162,16 +180,34 @@ pub async fn task() {
     let mut down = 0u32;
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
     let mut term = Term::new();
+    // Bring-up: the receiver on the cable log once a second while it changes.
+    let mut logged = (Live::default(), Instant::now());
     loop {
+        // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
+        if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
+            bringup::line(b"log off: the terminal has the cable");
+            bringup::ON.store(false, Relaxed);
+        }
+        if bringup::ON.load(Relaxed) && logged.1.elapsed() >= Duration::from_secs(1) {
+            if let Some(l) = live_rx.try_get() {
+                if l != logged.0 {
+                    log_live(&l);
+                    logged.0 = l;
+                }
+            }
+            logged.1 = Instant::now();
+        }
         // A whole line waits until the store has caught up (TERM-13): the bytes after it stay in the ring.
-        while term.ready() {
+        while !bringup::ON.load(Relaxed) && term.ready() {
             let Some(b) = TERM_IN.get() else { break };
             term.feed(&mut app, b, now_ms(), store);
             while let Some(w) = app.pop_write() {
                 store.apply(w);
             }
         }
-        term.poll(&mut app, store, &dev, &live, now_ms(), &mut Cable);
+        if !bringup::ON.load(Relaxed) {
+            term.poll(&mut app, store, &dev, &live, now_ms(), &mut Cable);
+        }
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
         }
@@ -212,6 +248,7 @@ pub async fn task() {
                 app.same_alert(&a.header, a.slot, a.freq);
             }
             Either4::Second(Input::Key(keypad::Event::Press(code))) => {
+                log_input(&Input::Key(keypad::Event::Press(code)));
                 app.raw_key(code, true); // every code, mapped or not: the key test names them (KEY-2)
                 if let Some(k) = keys::key(code) {
                     down |= 1 << code;
@@ -219,6 +256,7 @@ pub async fn task() {
                 }
             }
             Either4::Second(Input::Key(keypad::Event::Release(code))) => {
+                log_input(&Input::Key(keypad::Event::Release(code)));
                 app.raw_key(code, false);
                 if let Some(k) = keys::key(code) {
                     down &= !(1 << code);
@@ -226,9 +264,80 @@ pub async fn task() {
                 }
             }
             Either4::Second(Input::Key(_)) => {} // the sampler's own long press and repeat are off
-            Either4::Second(Input::Knob(d)) => app.knob(d, now_ms(), store),
+            Either4::Second(Input::Knob(d)) => {
+                log_input(&Input::Knob(d));
+                app.knob(d, now_ms(), store)
+            }
             Either4::Third(_) => {} // the tick, or bytes for the terminal
         }
         app.tick(now_ms(), &live, store);
     }
+}
+
+/// Bring-up log: a key code down or up (with the key it maps to, if any), or a knob step.
+fn log_input(i: &Input) {
+    bringup::linef(|b| match *i {
+        Input::Key(keypad::Event::Press(c) | keypad::Event::Release(c)) => {
+            let down = matches!(i, Input::Key(keypad::Event::Press(_)));
+            let _ = ufmt::uwrite!(b, "key {} {}", c, if down { "down" } else { "up" });
+            match keys::key(c) {
+                Some(k) => {
+                    let mut n = ferrite_ui::text::Buf::<16>::new();
+                    ferrite_app::screens::keytest::key_name(k, &mut n);
+                    b.push(b" = ");
+                    b.push(n.as_bytes());
+                }
+                None => b.push(b" (not mapped)"),
+            }
+        }
+        Input::Knob(d) => {
+            let _ = ufmt::uwrite!(b, "knob {}", d);
+        }
+        Input::Key(_) => b.push(b"key event"),
+    });
+}
+
+/// Bring-up log: the receiver's snapshot.
+fn log_live(l: &Live) {
+    bringup::linef(|b| {
+        let _ = ufmt::uwrite!(b, "rx {}.{} MHz  rssi {} dBm  squelch {}  chips ", l.freq / 100_000, l.freq % 100_000, l.rssi, if l.squelch_open { "open" } else { "closed" });
+        bringup::hex(b, l.chips as u32);
+        if l.rx_asleep {
+            b.push(b"  asleep");
+        }
+    });
+}
+
+/// Bring-up log: what the boot found.
+fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
+    bringup::linef(|b| {
+        let _ = ufmt::uwrite!(b, "Ferrite {} bring-up build: nothing is written to the SPI flash", VERSION);
+    });
+    bringup::linef(|b| {
+        b.push(b"MCU idcode ");
+        bringup::hex(b, crate::hal::sys::idcode());
+        b.push(b" (expected ");
+        bringup::hex(b, chipid::EXPECTED_PID);
+        b.push(b")");
+    });
+    bringup::linef(|b| match flash {
+        Some((id, size)) => {
+            b.push(b"SPI flash JEDEC ");
+            bringup::hex(b, id);
+            let _ = ufmt::uwrite!(b, ", {} KB", size / 1024);
+        }
+        None => b.push(b"SPI flash: no answer"),
+    });
+    for c in checks {
+        bringup::linef(|b| {
+            b.push(c.label.as_bytes());
+            b.push(match c.state {
+                State::Ok => b": ok",
+                State::Fail => b": FAILED",
+                State::Pending | State::Off => b": no report",
+            });
+        });
+    }
+    bringup::line(if key_seen { b"key at boot: opening the key test (hold BACK leaves)" } else { b"no key at boot" });
+    bringup::line(b"keys, knob and receiver follow; send any byte for the terminal");
 }
