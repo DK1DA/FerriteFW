@@ -24,7 +24,19 @@ use ferrite_core::msg::{Device, GpsState, LiveAll, SLOTS};
 use ferrite_core::VERSION;
 use ferrite_ui::text::{Buf, Zero};
 use ferrite_ui::widgets as w;
-use ufmt::uwrite;
+
+/// Text from a template (in slow flash) and its arguments into a buffer, through the terminal's one formatter
+/// ([`cmd::fmt_into`]): no `uwrite!` expansion per call site.
+macro_rules! put {
+    ($o:expr, $t:literal) => {{
+        use $crate::term::cmd::Fmt as _;
+        $o.fill(slow!($t), &[])
+    }};
+    ($o:expr, $t:literal, $($a:expr),+ $(,)?) => {{
+        use $crate::term::cmd::Fmt as _;
+        $o.fill(slow!($t), &[$($crate::term::cmd::Arg::from($a)),+])
+    }};
+}
 
 pub mod cmd;
 pub mod debug;
@@ -1059,7 +1071,7 @@ impl Term {
                     return;
                 }
                 let mut p = Buf::<12>::new();
-                let _ = uwrite!(p, "\x1b[{};1H", r as u16 + 1);
+                put!(p, "\x1b[{};1H", r as u16 + 1);
                 out.put(p.as_bytes());
                 let mut s = SinkOut(out);
                 self.row(r, &cx, &mut W { o: &mut s, col: 0, cols: self.cols as u16, rev: false, colour });
@@ -1087,7 +1099,7 @@ impl Term {
                 Err(m) => {
                     bad += 1;
                     let mut l = cmd::Line::new();
-                    let _ = uwrite!(l, "\r\x1b[K  line {}: ", line);
+                    put!(l, "\r\x1b[K  line {}: ", line);
                     l.push(m.as_bytes());
                     out.put(l.as_bytes());
                     out.put(b"\r\n");
@@ -1095,7 +1107,7 @@ impl Term {
             }
             self.con = Con::Run(Body::Load { line, ok, bad, end });
             let mut l = Buf::<64>::new();
-            let _ = uwrite!(l, "\r\x1b[K  {} lines read: {} applied, {} refused", line, ok, bad);
+            put!(l, "\r\x1b[K  {} lines read: {} applied, {} refused", line, ok, bad);
             out.put(l.as_bytes());
             return;
         }
@@ -1136,7 +1148,7 @@ impl Term {
                 if end != 0 && !self.pending && out.room() >= LINE_ROOM {
                     let mut l = cmd::Line::new();
                     let how = if end == 2 { "Stopped" } else { "Done" };
-                    let _ = uwrite!(l, "\r\x1b[K  {}: {} lines read, {} applied, {} refused.\r\n", how, line, ok, bad);
+                    put!(l, "\r\x1b[K  {}: {} lines read, {} applied, {} refused.\r\n", how, line, ok, bad);
                     out.put(l.as_bytes());
                     self.done(out);
                 }
@@ -1229,7 +1241,7 @@ impl Term {
         let mut t = Buf::<8>::new();
         match cx.dev.clock_min {
             Some(m) => {
-                let _ = uwrite!(t, "{}:{}", Zero(m as u32 / 60 % 24, 2), Zero(m as u32 % 60, 2));
+                put!(t, "{}:{}", Zero(m as u32 / 60 % 24, 2), Zero(m as u32 % 60, 2));
             }
             None => t.set(b"--:--"),
         }
@@ -1355,8 +1367,8 @@ impl Term {
                     GpsState::Searching => "GPS searching",
                     GpsState::Fix => "GPS fix",
                 };
-                let _ = uwrite!(v, "Battery {}.{} V   {}   Bluetooth {}   Battery Save ", d.battery_mv / 1000, d.battery_mv % 1000 / 100, gps, if d.bt { "on" } else { "off" });
-                let _ = uwrite!(v, "{}", cx.app.bsave);
+                put!(v, "Battery {}.{} V   {}   Bluetooth {}   Battery Save ", d.battery_mv / 1000, d.battery_mv % 1000 / 100, gps, if d.bt { "on" } else { "off" });
+                put!(v, "{}", cx.app.bsave);
                 w.at(2);
                 w.s(v.as_bytes());
             }
@@ -1633,10 +1645,10 @@ impl Term {
             0 => {
                 w.s(b" ");
                 let mut t = Buf::<64>::new();
-                let _ = uwrite!(t, "Settings > 0 {} ", self.g);
+                put!(t, "Settings > 0 {} ", self.g);
                 t.push(GROUPS[(self.g as usize).clamp(1, 9) - 1].0.as_bytes());
                 if self.sub != 0 {
-                    let _ = uwrite!(t, " > {} ", self.sub);
+                    put!(t, " > {} ", self.sub);
                     t.push(groups::items(self.g, 0).get(self.sub as usize - 1).map_or("", |e| e.0).as_bytes());
                 }
                 w.bold(t.as_bytes());
@@ -1840,7 +1852,7 @@ fn slot_line<S: ChannelStore>(i: u8, cx: &Cx<S>, w: &mut W) {
     match s.ch.filter(|_| s.on_channel()) {
         Some(c) => {
             let mut v = Buf::<32>::new();
-            let _ = uwrite!(v, "CH {} ", Zero(c.num as u32 + 1, 3));
+            put!(v, "CH {} ", Zero(c.num as u32 + 1, 3));
             let n = c.name();
             v.push(&n[..n.len().min(14)]); // "CH 012 " + 14 leaves a space before column 27
             w.s(v.as_bytes());
@@ -1918,7 +1930,7 @@ fn version() -> &'static [u8] {
 /// "146.52000": MHz with five decimals (10 Hz steps), as the channel list shows it.
 fn mhz5(f: Freq10) -> Buf<12> {
     let mut b = Buf::new();
-    let _ = uwrite!(b, "{}.{}", f / 100_000, Zero(f % 100_000, 5));
+    put!(b, "{}.{}", f / 100_000, Zero(f % 100_000, 5));
     b
 }
 
@@ -1950,9 +1962,9 @@ fn parse_mhz(s: &[u8]) -> Option<Freq10> {
 /// "12 s ago", "3 min ago", "2 h ago".
 fn ago(s: u32, b: &mut Buf<16>) {
     let _ = match s {
-        0..=59 => uwrite!(b, "{} s ago", s),
-        60..=3599 => uwrite!(b, "{} min ago", s / 60),
-        _ => uwrite!(b, "{} h ago", s / 3600),
+        0..=59 => put!(b, "{} s ago", s),
+        60..=3599 => put!(b, "{} min ago", s / 60),
+        _ => put!(b, "{} h ago", s / 3600),
     };
 }
 

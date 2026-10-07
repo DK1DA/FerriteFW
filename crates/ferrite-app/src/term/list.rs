@@ -14,7 +14,6 @@ use crate::App;
 use core::cmp::Ordering;
 use ferrite_core::freq::mhz;
 use ferrite_ui::text::{Buf, Bytes};
-use ufmt::uwrite;
 
 /// The sortable columns, as the list shows them (TERM-14): 0 is the store's own number order.
 pub(super) const SORTS: [&str; 8] = [slow!("number"), slow!("name"), slow!("RX"), slow!("TX"), slow!("mode"), slow!("tone"), slow!("power"), slow!("flags")];
@@ -387,10 +386,10 @@ impl Term {
         let (n, one) = self.targets(st);
         let what = |out: &mut Msg| match one {
             Some(c) => {
-                let _ = uwrite!(out, "channel {}", c as u32 + 1);
+                put!(out, "channel {}", c as u32 + 1);
             }
             None => {
-                let _ = uwrite!(out, "{} marked channels", n);
+                put!(out, "{} marked channels", n);
             }
         };
         match self.ask {
@@ -495,7 +494,7 @@ impl Term {
             }
         }
         let mut m = Msg::new();
-        let _ = uwrite!(m, "No channel here matches \"{}\"", Bytes(t.as_bytes()));
+        put!(m, "No channel here matches \"{}\"", Bytes(t.as_bytes()));
         self.tell(m.as_bytes(), true);
     }
 
@@ -512,7 +511,7 @@ impl Term {
         self.vis_ok = false;
         self.go(Page::Edit);
         let mut m = Msg::new();
-        let _ = uwrite!(m, "New channel {}: Enter types its name", num as u32 + 1);
+        put!(m, "New channel {}: Enter types its name", num as u32 + 1);
         self.say(m.as_bytes(), false);
     }
 
@@ -527,7 +526,7 @@ impl Term {
         // TERM-17: not a channel open in the radio's editor.
         if let Some(r) = radio_channel(app).filter(|&r| single == Some(r) || single.is_none() && self.marked(r)) {
             let mut m = Msg::new();
-            let _ = uwrite!(m, "Channel {} is open in the radio's editor: close it there first", r as u32 + 1);
+            put!(m, "Channel {} is open in the radio's editor: close it there first", r as u32 + 1);
             return self.tell(m.as_bytes(), true);
         }
         if let Op::Renumber(from) = op {
@@ -555,7 +554,7 @@ impl Term {
     fn renumber_check<S: ChannelStore>(&self, from: u16, total: u16, single: Option<u16>, st: &S) -> Result<(), Msg> {
         if from + total > MAX_CHANNELS {
             let mut m = Msg::new();
-            let _ = uwrite!(m, "{} channels from {} would pass 1000", total, from as u32 + 1);
+            put!(m, "{} channels from {} would pass 1000", total, from as u32 + 1);
             return Err(m);
         }
         let mut n = single.or_else(|| self.next_mark(0));
@@ -564,7 +563,7 @@ impl Term {
             let moving = |y: u16| single == Some(y) || single.is_none() && self.marked(y);
             if t != x && st.get(t).is_some() && !moving(t) {
                 let mut m = Msg::new();
-                let _ = uwrite!(m, "Number {} is taken by a channel that isn't moving", t as u32 + 1);
+                put!(m, "Number {} is taken by a channel that isn't moving", t as u32 + 1);
                 return Err(m);
             }
             n = if single.is_some() { None } else { self.next_mark(x + 1) };
@@ -620,7 +619,7 @@ impl Term {
                 }
                 None => {
                     let mut m = Msg::new();
-                    let _ = uwrite!(m, "No free numbers left: copied {} of {}", b.done, b.total);
+                    put!(m, "No free numbers left: copied {} of {}", b.done, b.total);
                     self.bulk = None;
                     self.marks = [0; MARK_BYTES];
                     self.vis_ok = false;
@@ -632,7 +631,7 @@ impl Term {
         b.done += 1;
         self.bulk = Some(b);
         let mut m = Msg::new();
-        let _ = uwrite!(m, "{} of {}...", b.done, b.total);
+        put!(m, "{} of {}...", b.done, b.total);
         self.tell(m.as_bytes(), false);
     }
 
@@ -647,7 +646,7 @@ impl Term {
             Op::Renumber(_) => "renumbered",
         };
         let mut m = Msg::new();
-        let _ = uwrite!(m, "{} {} {}", b.total, if b.total == 1 { "channel" } else { "channels" }, what);
+        put!(m, "{} {} {}", b.total, if b.total == 1 { "channel" } else { "channels" }, what);
         self.tell(m.as_bytes(), false);
     }
 }

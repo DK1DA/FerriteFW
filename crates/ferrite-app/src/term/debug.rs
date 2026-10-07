@@ -7,7 +7,6 @@
 
 use super::cmd::Line;
 use ferrite_core::msg::{DebugAns, DebugReq, DEBUG_MEM};
-use ufmt::uwrite;
 
 /// GPIO port A's input data register; ports B to E follow every 0x400, the output register 4 bytes after.
 pub const GPIOA_IDR: u32 = 0x4001_0808;
@@ -139,7 +138,7 @@ impl Job {
             (Kind::Gpio, DebugAns::Mem { data, .. }) => {
                 let word = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
                 let (idr, odr) = (word(0) as u16, word(4) as u16);
-                let _ = uwrite!(out, "  P{}  in ", (b'A' + self.done as u8) as char);
+                put!(out, "  P{}  in ", ["A", "B", "C", "D", "E"][self.done as usize % 5]);
                 bits16(idr, out);
                 out.push(b"   out ");
                 bits16(odr, out);
@@ -148,7 +147,7 @@ impl Job {
                 Step::Line
             }
             (Kind::BkRead { .. }, DebugAns::Reg { chip, reg, val }) => {
-                let _ = uwrite!(out, "  bk{} REG_", chip);
+                put!(out, "  bk{} REG_", chip);
                 hex(reg as u32, 2, out);
                 out.push(b" = 0x");
                 hex(val as u32, 4, out);
@@ -158,7 +157,7 @@ impl Job {
                 Step::Line
             }
             (Kind::BkWrite { val, .. }, DebugAns::Reg { chip, reg, val: back }) => {
-                let _ = uwrite!(out, "  bk{} REG_", chip);
+                put!(out, "  bk{} REG_", chip);
                 hex(reg as u32, 2, out);
                 out.push(b" <- 0x");
                 hex(val as u32, 4, out);
@@ -177,7 +176,7 @@ impl Job {
                 if !self.done.is_multiple_of(8) {
                     return Step::Wait;
                 }
-                let _ = uwrite!(out, "  bk{} ", chip);
+                put!(out, "  bk{} ", chip);
                 hex(self.done as u32 - 8, 2, out);
                 out.push(b":");
                 for v in self.acc {

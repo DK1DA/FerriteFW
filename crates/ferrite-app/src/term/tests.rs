@@ -1,5 +1,6 @@
 //! The terminal against a small VT100 model: what a terminal would show after the bytes it was sent.
 
+use ufmt::uwrite;
 use super::*;
 use crate::sample::Sample;
 use std::string::String;

@@ -15,7 +15,6 @@ use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::Device;
 use ferrite_core::VERSION;
 use ferrite_ui::text::{Buf, Bytes};
-use ufmt::uwrite;
 
 /// The longest line read (TERM-12, TERM-13: a 256-byte line buffer).
 pub const LINE_MAX: usize = 255;
@@ -39,9 +38,37 @@ macro_rules! msg {
 #[derive(Clone, Copy)]
 pub(crate) enum Arg<'a> {
     N(u32),
+    /// A number zero-padded to this many digits (`Zero`).
+    Z(u32, u8),
     S(&'a str),
     B(&'a [u8]),
 }
+
+impl From<ferrite_ui::text::Zero> for Arg<'_> {
+    fn from(z: ferrite_ui::text::Zero) -> Self {
+        Arg::Z(z.0, z.1 as u8)
+    }
+}
+
+/// Where formatted text goes: any buffer (a line, a message, a status field).
+pub(crate) trait Out {
+    fn put(&mut self, b: &[u8]);
+}
+
+impl<const N: usize> Out for Buf<N> {
+    fn put(&mut self, b: &[u8]) {
+        self.push(b);
+    }
+}
+
+/// `put!`'s entry: a method, so a call site can name an owned buffer or a `&mut` one alike.
+pub(crate) trait Fmt: Out + Sized {
+    fn fill(&mut self, t: &str, args: &[Arg]) {
+        fmt_into(self, t, args)
+    }
+}
+
+impl<T: Out> Fmt for T {}
 
 macro_rules! arg_num {
     ($($t:ty),*) => {$(
@@ -72,19 +99,33 @@ fn num(out: &mut Line, pre: &[u8], n: u32) {
     out.push(super::digits(n, &mut [0; 10]));
 }
 
-/// Fills each `{}` in `t` with the next argument.
-#[inline(never)]
+/// Fills each `{}` in `t` with the next argument, into a message.
 fn fmt(t: &str, args: &[Arg]) -> Msg {
     let mut m = Msg::new();
+    fmt_into(&mut m, t, args);
+    m
+}
+
+/// Fills each `{}` in `t` with the next argument, into `m`: the one formatter of the terminal, so a call site
+/// ([`msg!`], `put!`) is a template pointer and its arguments rather than formatting code of its own.
+#[inline(never)]
+pub(crate) fn fmt_into(m: &mut dyn Out, t: &str, args: &[Arg]) {
     let (t, mut k, mut i) = (t.as_bytes(), 0, 0);
     while i < t.len() {
         if t[i] == b'{' && t.get(i + 1) == Some(&b'}') {
             match args.get(k) {
-                Some(Arg::N(n)) => m.push(super::digits(*n, &mut [0; 10])),
-                Some(Arg::S(s)) => m.push(s.as_bytes()),
+                Some(Arg::N(n)) => m.put(super::digits(*n, &mut [0; 10])),
+                Some(Arg::Z(n, w)) => {
+                    let d = super::digits(*n, &mut [0; 10]).len();
+                    for _ in d..*w as usize {
+                        m.put(b"0");
+                    }
+                    m.put(super::digits(*n, &mut [0; 10]));
+                }
+                Some(Arg::S(s)) => m.put(s.as_bytes()),
                 Some(Arg::B(b)) => {
                     for &c in *b {
-                        m.push(&[if (0x20..0x7F).contains(&c) { c } else { b'?' }]);
+                        m.put(&[if (0x20..0x7F).contains(&c) { c } else { b'?' }]);
                     }
                 }
                 None => {}
@@ -92,11 +133,12 @@ fn fmt(t: &str, args: &[Arg]) -> Msg {
             k += 1;
             i += 2;
         } else {
-            m.push(&t[i..i + 1]);
-            i += 1;
+            // a run of plain text in one call
+            let j = t[i + 1..].iter().position(|&c| c == b'{').map_or(t.len(), |p| i + 1 + p);
+            m.put(&t[i..j]);
+            i = j;
         }
     }
-    m
 }
 
 /// What a line did.
@@ -856,7 +898,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         if same(v.as_bytes(), want) {
             let mut m = Msg::new();
             path_text(p, &mut m);
-            let _ = uwrite!(m, " {}: {}", name, Bytes(v.as_bytes()));
+            put!(m, " {}: {}", name, Bytes(v.as_bytes()));
             return Ok(Done::Said(m));
         }
         if k > 0 {
@@ -882,7 +924,7 @@ fn get(app: &App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     let changed = value(app, dev, p, &mut v);
     let mut m = Msg::new();
     path_text(p, &mut m);
-    let _ = uwrite!(m, " {}: {}", path_name(p), Bytes(v.as_bytes()));
+    put!(m, " {}: {}", path_name(p), Bytes(v.as_bytes()));
     if changed {
         m.push(b" (not the default)");
     }
@@ -1075,7 +1117,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
         p.i += 1;
         match p.sec {
             0 if i == 0 => {
-                let _ = uwrite!(out, "# Ferrite dump v1, firmware {}", VERSION.strip_prefix('v').unwrap_or(VERSION));
+                put!(out, "# Ferrite dump v1, firmware {}", VERSION.strip_prefix('v').unwrap_or(VERSION));
                 return true;
             }
             0 if (i as usize) <= HEAD.len() => {
@@ -1090,12 +1132,12 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 }
             }
             1 if i as usize == SETTABLE.len() => {
-                let _ = uwrite!(out, "# 0 9 4 Region: {} (changes only on the radio)", app.set.region_name());
+                put!(out, "# 0 9 4 Region: {} (changes only on the radio)", app.set.region_name());
                 return true;
             }
             1 if i as usize == SETTABLE.len() + 1 => {
                 if let Some(c) = app.set.boot_callsign() {
-                    let _ = uwrite!(out, "# 0 8 7 Callsign: {} (set on the radio)", Bytes(c));
+                    put!(out, "# 0 8 7 Callsign: {} (set on the radio)", Bytes(c));
                     return true;
                 }
             }
