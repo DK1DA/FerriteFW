@@ -66,7 +66,7 @@ const G4: [Entry; 8] = [
 const G5: [Entry; 9] = [
     (slow!("Heard"), slow!(""), slow!("Stations heard, nearest first.")),
     (slow!("Messages"), slow!(""), slow!("Messages sent to you and by you.")),
-    (slow!("Beacon now"), slow!(""), slow!("Send one position beacon.")),
+    (slow!("APRS mode"), slow!("Off"), slow!("Slot C becomes the APRS slot.")),
     (slow!("My station"), slow!("SSID 9"), slow!("SSID, symbol, comment, position.")),
     (slow!("Beacon"), slow!("Off"), slow!("When to beacon: manual, timed, smart.")),
     (slow!("Path"), slow!("WIDE1-1,WIDE2-1"), slow!("The digipeater path.")),
@@ -183,6 +183,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Mode"), slow!("Off"), slow!("Manual, timed, distance or smart.")),
         (slow!("Smart settings"), slow!("Standard"), slow!("Rates, speeds, turn angle.")),
         (slow!("After voice TX"), slow!("Off"), slow!("Beacon after you talk.")),
+        (slow!("Power"), slow!("Low"), slow!("Beacon and message power.")),
     ]),
     ((5, 6), &[(slow!("Preset"), slow!("WIDE1-1,WIDE2-1"), slow!("The usual paths.")), (slow!("Custom path"), slow!("Empty"), slow!("Your own path."))]),
     ((5, 7), &[
@@ -298,7 +299,6 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [3, 3, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
-        [5, 3] if app.set.callsign.is_empty() => Some("needs callsign"),  // SETUP-9
         _ => None,
     }
 }
@@ -417,6 +417,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &SCOPE_TRIGGERS, s.scope_trig);
             s.scope_trig != 0
         }
+        [5, 3] => {
+            pick(b, &ON_OFF, s.aprs_mode as u8);
+            s.aprs_mode
+        }
         [3, 2, 5] => {
             pick(b, &ON_OFF, s.scope_wf as u8);
             s.scope_wf
@@ -498,7 +502,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 20] = [
+pub(crate) const SETTABLE: [&[u8]; 21] = [
     &[1, 1],
     &[3, 1, 2],
     &[3, 1, 3],
@@ -509,6 +513,7 @@ pub(crate) const SETTABLE: [&[u8]; 20] = [
     &[3, 2, 4],
     &[3, 2, 5],
     &[3, 3, 1],
+    &[5, 3],
     &[6, 4],
     &[6, 5],
     &[6, 6],
@@ -550,6 +555,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [3, 2, 3] => s.scope_dwell = (s.scope_dwell.clamp(1, 40) as i32 + d).clamp(1, 40) as u8,
         [3, 2, 4] => s.scope_trig = cycle(s.scope_trig, d, SCOPE_TRIGGERS.len()),
         [3, 2, 5] => s.scope_wf = !s.scope_wf,
+        [5, 3] => s.aprs_mode = !s.aprs_mode, // APRS-15: the slot C takeover comes in milestone 5
         [3, 3, 1] => s.same = !s.same,
         [9, 2, 1] => s.bt = !s.bt,
         [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
@@ -606,6 +612,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [3, 2, 3] => s.scope_dwell = d.scope_dwell,
         [3, 2, 4] => s.scope_trig = d.scope_trig,
         [3, 2, 5] => s.scope_wf = d.scope_wf,
+        [5, 3] => s.aprs_mode = d.aprs_mode,
         [3, 3, 1] => s.same = d.same,
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,
@@ -738,7 +745,6 @@ impl Group {
                 super::setup::callsign(app);
             }
             [8, 9] if ok => set_extend(app, !app.set.extend_tx),
-            [5, 3] if ok => app.show_toast(b"Beacon", b"APRS comes in milestone 5", false),
             _ => {
                 if let Some(d) = nav::menu0(p) {
                     app.open(d);

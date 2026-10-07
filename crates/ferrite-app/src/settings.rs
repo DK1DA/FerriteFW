@@ -159,6 +159,8 @@ pub struct Settings {
     pub scope_mode: u8,
     /// 0 9 2 6: the cable terminal in ANSI colour (TERM-18); off, reverse video and bold only.
     pub term_colour: bool,
+    /// 0 5 3: APRS mode, slot C as the APRS slot (APRS-15 – APRS-22; the takeover itself comes in milestone 5).
+    pub aprs_mode: bool,
 }
 
 /// 0 3 2 1's values (SCOPE-9).
@@ -214,6 +216,7 @@ impl Settings {
         scope_wf: false,
         scope_mode: 0,
         term_colour: false,
+        aprs_mode: false,
     };
 
     /// The region's name, or "Not set".
