@@ -44,7 +44,7 @@ keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
 
 /// The largest whole scale offered.
-pub const MAX_SCALE: usize = 6;
+pub const MAX_SCALE: usize = 2;
 
 /// How long the boot screen shows (ms), and how long "Saving..." shows before the radio goes dark.
 const BOOT_MS: u32 = 2000;
