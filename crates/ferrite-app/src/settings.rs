@@ -163,6 +163,8 @@ pub struct Settings {
     pub aprs_mode: bool,
     /// Message text is typed predictively (TEXT-10); hold \* switches, and the choice is kept for the next one.
     pub predictive: bool,
+    /// Approval tokens of Bluetooth devices allowed to write (LINK-7), newest first; all zero is none.
+    pub link_tokens: [[u8; 8]; crate::link::TOKENS],
 }
 
 /// 0 3 2 1's values (SCOPE-9).
@@ -220,6 +222,7 @@ impl Settings {
         term_colour: false,
         aprs_mode: false,
         predictive: true,
+        link_tokens: [[0; 8]; crate::link::TOKENS],
     };
 
     /// The region's name, or "Not set".

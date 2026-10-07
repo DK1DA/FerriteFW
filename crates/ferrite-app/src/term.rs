@@ -40,7 +40,7 @@ macro_rules! put {
 
 pub mod cmd;
 pub mod debug;
-mod list;
+pub(crate) mod list;
 
 /// Where the terminal's output goes: the cable's transmit buffer.
 pub trait Sink {

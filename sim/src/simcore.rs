@@ -14,6 +14,7 @@ use crate::face::{Face, Part};
 use crate::fake::{self, FakeRadio};
 use ferrite_app::chan::ChannelStore;
 use ferrite_app::data::Data;
+use ferrite_app::link::{self, Route, Session};
 use ferrite_app::sample::Sample;
 use ferrite_app::settings::Settings;
 use ferrite_core::layout::{LAYOUT_HEADER, SCRATCH};
@@ -163,6 +164,8 @@ pub struct SimCore {
     term_out: Vec<u8>,
     /// Bytes from the cable the terminal hasn't taken yet: a line waits while the one before it runs (TERM-13).
     term_in: std::collections::VecDeque<u8>,
+    /// The link protocol on the same cable (manual chapter 29; TERM-2 routes the bytes): trusted, as the cable is.
+    link: Session,
 }
 
 /// The terminal's bytes waiting for the cable: room up to [`TERM_BUF`].
@@ -281,6 +284,11 @@ impl SimCore {
             term: Term::new(),
             term_out: Vec::new(),
             term_in: std::collections::VecDeque::new(),
+            link: {
+                let mut l = Session::new(true);
+                l.set_max_baud(921_600); // a pseudo-terminal has no rate
+                l
+            },
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -423,11 +431,16 @@ impl SimCore {
             if let Some(r) = self.term.debug_req() {
                 self.term.debug_answer(radio.debug(r)); // TERM-21: the fake radio answers at once
             }
+            self.link.poll(app, store, now, &mut TermBuf(&mut self.term_out));
+            let _ = self.link.take_baud(); // a pseudo-terminal keeps no rate
+            if let Some(p) = self.link.progress() {
+                dev.link.write_pct = Some(p);
+            }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
             }
         }
-        if self.live() && (!self.term_in.is_empty() || self.term.busy()) {
+        if self.live() && (!self.term_in.is_empty() || self.term.busy() || !self.link.ready()) {
             self.term_pump(); // a load or a dump goes on between frames
         }
         if self.lcd.pixels > 0 {
@@ -547,13 +560,18 @@ impl SimCore {
     /// line by line); stops when the output is full or after a few hundred lines, to go on next frame.
     fn term_pump(&mut self) {
         for _ in 0..400 {
-            while self.term.ready() {
+            while self.term.ready() && self.link.ready() {
                 let Some(b) = self.term_in.pop_front() else { break };
-                self.term.feed(&mut self.app, b, self.now, &self.store);
+                match link::route(self.app.settings().cable_port, self.link.active(self.now), b) {
+                    Route::Link => self.link.feed(b, self.now),
+                    Route::Term => self.term.feed(&mut self.app, b, self.now, &self.store),
+                    Route::Drop => {}
+                }
                 while let Some(w) = self.app.pop_write() {
                     self.store.apply(w); // one channel write per key
                 }
             }
+            self.link.poll(&mut self.app, &self.store, self.now, &mut TermBuf(&mut self.term_out));
             self.term.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out));
             if let Some(r) = self.term.debug_req() {
                 self.term.debug_answer(self.radio.debug(r));
@@ -561,7 +579,7 @@ impl SimCore {
             while let Some(w) = self.app.pop_write() {
                 self.store.apply(w);
             }
-            if self.term_in.is_empty() && self.term.ready() || self.term_out.len() >= TERM_BUF / 2 {
+            if self.term_in.is_empty() && self.term.ready() && self.link.ready() || self.term_out.len() >= TERM_BUF / 2 {
                 break;
             }
         }
@@ -645,6 +663,8 @@ impl SimCore {
             self.app = power_on(&self.store, &mut self.radio);
             (self.off, self.boot_end) = (false, self.now + BOOT_MS);
             self.term = Term::new(); // the cable starts over too: Enter opens the terminal again
+            self.link = Session::new(true);
+            self.link.set_max_baud(921_600);
             self.term_out.clear();
             self.term_in.clear();
             self.draw_boot();

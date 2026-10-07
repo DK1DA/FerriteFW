@@ -567,7 +567,7 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
 }
 
 /// What the radio's channel editor would refuse (CHAN-22, TX-9, TERM-7).
-fn check(c: &Channel) -> Result<(), Msg> {
+pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
     if !(mhz(64)..mhz(1000)).contains(&c.rx) {
         return Err(msg!("rx: a channel is from 64 to 1000 MHz"));
     }

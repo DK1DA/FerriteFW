@@ -146,6 +146,7 @@ persist!(Settings {
     home_ch, xb, hf, cable_port, coord_fmt, fixed_on, fixed, fixed_alt, same_codes, scope_bars, scope_step,
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
+    link_tokens,
 });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.

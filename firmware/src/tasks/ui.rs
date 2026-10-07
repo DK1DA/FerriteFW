@@ -4,7 +4,7 @@
 
 use crate::board::{BACKLIGHT, POWER_HOLD, POWER_SW};
 use crate::bringup;
-use crate::chan::{Input, ALERTS, DEBUG_ANS, DEBUG_REQ, INPUT, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
+use crate::chan::{Input, ALERTS, CABLE_BAUD, DEBUG_ANS, DEBUG_REQ, INPUT, LINK_BAUD, LINK_HELLOS, LINK_ON, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
 use crate::store;
@@ -170,7 +170,7 @@ pub async fn task() {
     }
     app.redraw_all();
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
-    let dev = Device { tx_built: cfg!(feature = "tx"), battery_pct: 100, ..Default::default() };
+    let mut dev = Device { tx_built: cfg!(feature = "tx"), battery_pct: 100, ..Default::default() };
     let mut live_rx = LIVE.receiver().unwrap();
     let mut live = LiveAll::default();
     if let Some(l) = live_rx.try_get() {
@@ -180,6 +180,10 @@ pub async fn task() {
     let mut down = 0u32;
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
     let mut term = Term::new();
+    // The link protocol on the same cable (chapter 29), trusted as the cable is (LINK-7); TERM-2 routes the bytes.
+    let mut link = ferrite_app::link::Session::new(true);
+    let fastest = ferrite_core::link::RATES.iter().copied().filter(|&r| crate::hal::uart::rate_ok(crate::report::UART_CPS, r)).max();
+    link.set_max_baud(fastest.unwrap_or(115_200));
     // Bring-up: the receiver on the cable log once a second while it changes.
     let mut logged = (Live::default(), Instant::now());
     loop {
@@ -198,9 +202,13 @@ pub async fn task() {
             logged.1 = Instant::now();
         }
         // A whole line waits until the store has caught up (TERM-13): the bytes after it stay in the ring.
-        while !bringup::ON.load(Relaxed) && term.ready() {
+        while !bringup::ON.load(Relaxed) && term.ready() && link.ready() {
             let Some(b) = TERM_IN.get() else { break };
-            term.feed(&mut app, b, now_ms(), store);
+            match ferrite_app::link::route(app.settings().cable_port, link.active(now_ms()), b) {
+                ferrite_app::link::Route::Link => link.feed(b, now_ms()),
+                ferrite_app::link::Route::Term => term.feed(&mut app, b, now_ms(), store),
+                ferrite_app::link::Route::Drop => {} // KISS has the cable (chapter 26)
+            }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
             }
@@ -211,6 +219,18 @@ pub async fn task() {
                 term.debug_answer(a);
             }
             term.poll(&mut app, store, &dev, &live, now_ms(), &mut Cable);
+            // The link: one waiting request answered when the cable and the store have room (LINK-1).
+            link.poll(&mut app, store, now_ms(), &mut Cable);
+            if let Some(r) = link.take_baud() {
+                LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)
+            }
+            LINK_HELLOS.store(link.hellos(), Relaxed);
+            LINK_ON.store(link.active(now_ms()), Relaxed);
+            dev.link = ferrite_core::msg::LinkLive {
+                cable: link.active(now_ms()),
+                baud_100: (CABLE_BAUD.load(Relaxed) / 100) as u16,
+                write_pct: link.progress(),
+            };
             if let Some(r) = term.debug_req() {
                 match r {
                     ferrite_core::msg::DebugReq::Mem { .. } => term.debug_answer(crate::debug::mem(r)),
@@ -251,7 +271,7 @@ pub async fn task() {
             }
         }
         app.render(&mut lcd, &live, &dev, store);
-        let period = if down != 0 || term.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
+        let period = if down != 0 || term.busy() || !link.ready() { TICK_HELD_MS } else { TICK_IDLE_MS };
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {
             Either4::First(l) => slot_a(&mut live, &l),

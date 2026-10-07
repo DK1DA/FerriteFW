@@ -7,7 +7,7 @@ use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use crate::ring::Ring;
-use core::sync::atomic::AtomicU8;
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU8};
 use ferrite_core::msg::{DebugAns, DebugReq, DspCmd, Event, Live, Position, RadioCmd, SameDecoded, StorageCmd};
 
 pub static RADIO: Channel<M, RadioCmd, 8> = Channel::new();
@@ -44,3 +44,12 @@ static TERM_OUT_BUF: [AtomicU8; 1024] = [const { AtomicU8::new(0) }; 1024];
 pub static TERM_IN: Ring<'static> = Ring::new(&TERM_IN_BUF);
 pub static TERM_OUT: Ring<'static> = Ring::new(&TERM_OUT_BUF);
 pub static TERM_WAKE: Signal<M, ()> = Signal::new();
+
+/// The link protocol on the cable (manual chapter 29), between the UI task (which runs the session next to the
+/// App, as it runs the terminal) and the Link task (which owns UART4): a rate agreed by `BAUD`, to switch to once
+/// the answer has gone; the `HELLO`s seen, the proof the new rate works (LINK-11); the rate now; and whether the
+/// link holds the port (no XON/XOFF in its binary frames then).
+pub static LINK_BAUD: Signal<M, u32> = Signal::new();
+pub static LINK_HELLOS: AtomicU16 = AtomicU16::new(0);
+pub static CABLE_BAUD: AtomicU32 = AtomicU32::new(115_200);
+pub static LINK_ON: AtomicBool = AtomicBool::new(false);

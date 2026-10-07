@@ -102,7 +102,7 @@ fn matches(c: &Channel, t: &[u8]) -> bool {
 
 /// The channel open in one of the radio's editors (TERM-17): the active slot's channel while its channel
 /// editor, or an editor opened from it, is on the radio's screen.
-pub(super) fn radio_channel(app: &App) -> Option<u16> {
+pub(crate) fn radio_channel(app: &App) -> Option<u16> {
     let from_editor = app.back.iter().flatten().any(|s| matches!(s, Screen::ChEdit(_)));
     let open = match app.screen {
         Screen::ChEdit(_) => true,

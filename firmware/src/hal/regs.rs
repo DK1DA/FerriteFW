@@ -54,6 +54,7 @@ pub const USART_DT: u32 = 0x04;
 pub const USART_BAUDR: u32 = 0x08;
 pub const USART_CTRL1: u32 = 0x0C;
 pub const USART_STS_TDBE: u32 = 1 << 7; // transmit data buffer empty
+pub const USART_STS_TDC: u32 = 1 << 6; // transmit data complete: the last stop bit has gone
 pub const USART_STS_RDBF: u32 = 1 << 5; // receive data buffer full
 pub const USART_STS_ERR: u32 = (1 << 3) | (1 << 2) | (1 << 1); // overrun, noise, framing
 pub const USART_CTRL1_UEN: u32 = 1 << 13;

@@ -52,6 +52,21 @@ pub fn init(id: usize, baud: u32) {
     irq::enable(u.irq, PRIO);
 }
 
+/// Whether this port reaches `baud` within 2 % from its bus clock (the divisor is 16 at least).
+pub fn rate_ok(id: usize, baud: u32) -> bool {
+    let clk = if HW[id].apb2 { clock::APB2_HZ } else { clock::APB1_HZ };
+    let div = (clk + baud / 2) / baud;
+    div >= 16 && (clk / div).abs_diff(baud) * 50 <= baud
+}
+
+/// Until the last byte written has left the pin (before a rate change).
+pub fn flush(id: usize) {
+    let base = HW[id].base;
+    if rd(base + USART_CTRL1) & USART_CTRL1_UEN != 0 {
+        while rd(base + USART_STS) & USART_STS_TDC == 0 {}
+    }
+}
+
 /// Off, TX pin back to an input so a powered-down module is not fed.
 pub fn deinit(id: usize) {
     let u = &HW[id];

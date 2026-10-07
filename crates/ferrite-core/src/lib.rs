@@ -15,6 +15,7 @@ pub mod decoders;
 pub mod freq;
 pub mod keys;
 pub mod layout;
+pub mod link;
 pub mod msg;
 pub mod rxsleep;
 pub mod same;
