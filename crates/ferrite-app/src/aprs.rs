@@ -216,6 +216,12 @@ impl App {
         true
     }
 
+    /// The reset: APRS settings back to their defaults (the store's went with [`crate::data::Op::Wipe`]).
+    pub(crate) fn reset_aprs(&mut self) {
+        (self.aprs, self.aprs_st) = (AprsCfg::DEFAULT, LOADED);
+        self.send_slot(APRS_SLOT);
+    }
+
     /// Every tick: the APRS settings from their owner once, and written back after a change.
     pub(crate) fn aprs_tick(&mut self, data: &dyn Data) {
         if self.aprs_st & LOADED == 0 {

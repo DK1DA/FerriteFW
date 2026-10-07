@@ -103,6 +103,12 @@ impl View for Home {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let big = app.keys.is_held(Key::Side(2));
+        // PIN-5: channel-only mode: no V/M, editing, settings or MENU 0.
+        if matches!((e.key, e.press), (Key::VfoMem, _) | (Key::Slot | Key::Menu, Long) | (Key::Menu | Key::Star, Short) | (Key::Star, Long))
+            && app.chan_only_refuse()
+        {
+            return;
+        }
         // APRS-19: the APRS slot can be looked at, not changed; APRS-17: hold MENU on it is its options.
         if app.aprs_slot(app.active) {
             match (e.key, e.press) {
@@ -418,7 +424,8 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
         s.mem[b] = s.vfo;
         let nb = (b as i32 + d).rem_euclid(BANDS.len() as i32) as usize;
         s.vfo = s.mem[nb];
-        s.cfg.mode = BANDS[nb].mode;
+        s.cfg.mode = crate::slot::band_mode(nb, region);
+        s.cfg.narrow = s.cfg.mode == 1;
         s.cfg.step = crate::slot::band_step(nb, region);
         if s.cfg.offset != 0 && !s.cfg.split {
             s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift; // a split's TX stays where it is

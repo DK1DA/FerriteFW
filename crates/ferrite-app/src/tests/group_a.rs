@@ -316,7 +316,8 @@ fn add_repeater() {
     assert_eq!((c.rx, c.cfg.offset, c.cfg.tx_tone), (mhz(146) + 94_000, -60_000, 1000));
 }
 
-/// MENU-23, PIN-6, PIN-7: reset asks, then asks again for the channels; BACK keeps them.
+/// MENU-23, BOOT-14, PIN-7: the reset says what goes, OK, then hold # for 3 s; BACK steps back; everything
+/// goes and setup runs again.
 #[test]
 fn confirm_reset() {
     let mut t = T::new();
@@ -325,14 +326,25 @@ fn confirm_reset() {
     t.tap(Key::Exit);
     t.hold(Key::Menu);
     t.digits("982");
-    assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == Ask::Reset { channels: false }));
-    t.tap(Key::Menu);
-    assert_eq!(t.app.slot(0).cfg().squelch, 4, "settings back to default");
-    assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == Ask::Reset { channels: true }));
+    assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == Ask::Reset { armed: false }));
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Group(_)), "BACK: one level, to the menu the reset came from");
-    t.hold(Key::Exit);
-    assert!(t.writes().is_empty(), "channels kept");
+    t.digits("2");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == Ask::Reset { armed: true }));
+    t.press(Key::Hash, 2000);
+    assert!(matches!(t.app.screen(), Screen::Confirm(_)), "2 s isn't enough");
+    assert!(!t.app.locked(), "hold # here is the reset's, not the key lock");
+    assert_eq!(t.app.slot(0).cfg().squelch, 5);
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == Ask::Reset { armed: false }), "BACK: the first step");
+    t.tap(Key::Menu);
+    t.press(Key::Hash, 3200);
+    assert_eq!(t.app.slot(0).cfg().squelch, 4, "settings back to default");
+    assert!(matches!(t.app.screen(), Screen::Setup(_)), "setup runs again");
+    assert!(!t.app.set.setup_done);
+    assert_eq!(t.writes(), [ChanWrite::EraseAll], "a store without a data owner: its channels");
+    t.app.go_home();
     // A channel delete names it and clears it from the slot.
     t.tap(Key::VfoMem);
     crate::screens::confirm::ask(&mut t.app, Ask::DeleteChannel(0));

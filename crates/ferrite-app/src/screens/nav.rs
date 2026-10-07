@@ -405,7 +405,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::Value(item) => Screen::Value(value::Value::new(item, app)),
         Dest::Tones => Screen::Tones(tones::Tones::new(app)),
         Dest::Text(to) => Screen::Text(text::Text::new(to)),
-        Dest::Confirm => Screen::Confirm(confirm::Confirm { ask: confirm::Ask::Reset { channels: false }, boot: false }),
+        Dest::Confirm => Screen::Confirm(confirm::Confirm { ask: confirm::Ask::Reset { armed: false }, boot: false, since: 0 }),
         Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut),
         Dest::Quick => Screen::Quick(Quick { row: 0 }),
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),

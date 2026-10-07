@@ -1,5 +1,5 @@
 //! PIN entry (A17; manual chapter 34, PIN-1 to PIN-3, BOOT-13, KEY-16): masked digits, attempts left, the
-//! settings-reset hint, and a 30 s wait after three misses. Uses: at power on ([`App::ask_pin`]; nothing else
+//! reset hint, and a 30 s wait after three misses. Uses: at power on ([`App::ask_pin`]; nothing else
 //! works until it's right, hold BACK included), at unlock (hold # while locked, with "at power on and unlock"),
 //! turning PIN lock off (0 9 3 1: the PIN first), and setting a PIN (0 9 3 3 Change PIN, or choosing a lock with
 //! none set): the old PIN first if there is one, then the new one twice, its digits shown as typed.
@@ -31,6 +31,8 @@ const UNLOCK: u8 = 1;
 const OFF: u8 = 2;
 /// The old PIN, then a new one.
 const CHANGE: u8 = 3;
+/// The PIN, then channel-only mode off (PIN-5).
+const LEAVE: u8 = 7;
 /// A new PIN, then PIN lock mode `purpose - SET`.
 const SET: u8 = 4;
 /// The new PIN again (`purpose - AGAIN` = the mode); `first` holds the first entry.
@@ -76,9 +78,14 @@ impl Pin {
         Pin { purpose: OFF, ..Pin::power_on() }
     }
 
+    /// Leaving channel-only mode: the PIN first (PIN-5).
+    pub fn leave() -> Self {
+        Pin { purpose: LEAVE, ..Pin::power_on() }
+    }
+
     /// A new PIN being typed (first or again): its digits show.
     fn new_pin(self) -> bool {
-        self.purpose >= SET
+        self.purpose >= SET && self.purpose != LEAVE
     }
 
     /// Asked at power on: nothing else is usable until it's right (PIN-1).
@@ -135,7 +142,7 @@ impl Pin {
             app.back();
             return app.show_toast(b"PIN set", b"", false);
         }
-        if self.purpose >= SET {
+        if self.purpose >= SET && self.purpose != LEAVE {
             let again = Pin { digits: [0; 3], n: 0, purpose: self.purpose - SET + AGAIN, first: self.digits, first_n: self.n };
             return again.put(app);
         }
@@ -153,6 +160,11 @@ impl Pin {
                     app.show_toast(b"PIN lock off", b"", false);
                 }
                 CHANGE => Pin::set(app.set.pin_mode).put(app),
+                LEAVE => {
+                    app.set.chan_only = false;
+                    app.back();
+                    app.show_toast(b"Channel-only mode", b"off", false);
+                }
                 _ => app.go_home(),
             }
             return;
@@ -166,6 +178,41 @@ impl Pin {
         }
         Pin { n: 0, ..self }.put(app);
         app.show_toast(b"Wrong PIN", b"", false);
+    }
+}
+
+impl App {
+    /// 0 9 3 2 on (PIN-5): slots with a channel go to it; V/M, MENU 0 and editing are refused until hold #.
+    pub(crate) fn set_chan_only(&mut self) {
+        self.set.chan_only = true;
+        for s in 0..crate::SLOTS {
+            let sl = &mut self.slots[s];
+            if sl.vfo_mode && sl.ch.is_some() {
+                sl.vfo_mode = false;
+                self.send_slot(s as u8);
+            }
+        }
+        self.go_home();
+        self.show_toast(b"Channel-only mode", b"hold # to leave", false);
+    }
+
+    /// PIN-5: hold # leaves channel-only mode (the PIN first when one is set); it isn't the key lock there.
+    pub(crate) fn leave_chan_only(&mut self) {
+        if self.set.pin_len > 0 {
+            self.open(super::nav::Dest::Pin);
+            self.screen = Screen::Pin(Pin::leave());
+        } else {
+            self.set.chan_only = false;
+            self.show_toast(b"Channel-only mode", b"off", false);
+        }
+    }
+
+    /// PIN-5: in channel-only mode this is refused, with a toast. True when refused.
+    pub(crate) fn chan_only_refuse(&mut self) -> bool {
+        if self.set.chan_only {
+            self.show_toast(b"Channel-only mode:", b"hold # to leave", false);
+        }
+        self.set.chan_only
     }
 }
 
@@ -261,7 +308,7 @@ impl View for Pin {
             w::field(lcd, 10, 220, 156, 174, 170, Align::Center, line.as_bytes(), &UI_12, c, BG);
         }
         if !set && app.dirty(R_HELP, 1) {
-            w::wrap(lcd, 16, 208, 200, 260, 214, 15, b"Forgot it? Hold MENU while switching on: a settings reset clears the PIN.", &UI_12, SUB, BG);
+            w::wrap(lcd, 16, 208, 200, 260, 214, 15, b"Forgot it? Hold MENU while switching on: the reset clears the PIN and everything else.", &UI_12, SUB, BG);
         }
     }
 

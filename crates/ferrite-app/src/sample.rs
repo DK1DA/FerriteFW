@@ -199,6 +199,8 @@ pub struct Sample {
     events_read: Cell<u32>,
     events_cleared: Cell<bool>,
     msgs_read: Cell<u32>,
+    /// The reset (Op::Wipe) took the sample messages.
+    msgs_gone: Cell<bool>,
     /// The APRS task's live side: heard, messages with their tries, beacons.
     aprs: aprs::AprsSim,
     draft: Cell<Draft>,
@@ -234,6 +236,7 @@ impl Sample {
             events_read: Cell::new(0),
             events_cleared: Cell::new(false),
             msgs_read: Cell::new(0),
+            msgs_gone: Cell::new(false),
             aprs: aprs::AprsSim::new(),
             draft: Cell::new(Draft::default()),
             quick: Cell::new([None; crate::words::QUICK]),
@@ -384,14 +387,14 @@ impl Data for Sample {
     }
 
     fn messages(&self) -> u16 {
-        MESSAGES.len() as u16 + self.sent_n()
+        (if self.msgs_gone.get() { 0 } else { MESSAGES.len() as u16 }) + self.sent_n()
     }
     fn message(&self, i: u16) -> Option<Message> {
         if i < self.sent_n() {
             return self.aprs.message(i);
         }
         let k = i - self.sent_n();
-        let &(inbound, peer, text, ago_s, state) = MESSAGES.get(k as usize)?;
+        let &(inbound, peer, text, ago_s, state) = MESSAGES.get(k as usize).filter(|_| !self.msgs_gone.get())?;
         let ago_s = ago_s + self.aprs.now_s();
         let state = if state == MsgState::Unread && self.msgs_read.get() & 1 << k != 0 { MsgState::Read } else { state };
         Some(Message { inbound, peer: txt(peer), text: txt(text), ago_s, state })
@@ -652,6 +655,20 @@ impl Data for Sample {
             Op::ClearHeard => {
                 self.heard_cleared.set(true);
                 self.aprs.clear_heard();
+                true
+            }
+            Op::Wipe => {
+                self.chans.iter().for_each(|c| c.set(None));
+                self.zones.set(0);
+                self.presets.iter().for_each(|p| p.set(None));
+                self.dtmf.iter().for_each(|d| d.set(None));
+                self.events_cleared.set(true);
+                self.heard_cleared.set(true);
+                self.msgs_gone.set(true);
+                self.wp_gone.set(u32::MAX);
+                self.quick.set([None; crate::words::QUICK]);
+                self.draft.set(Draft::default());
+                self.aprs.clear();
                 true
             }
             Op::AprsCfg(c) => {

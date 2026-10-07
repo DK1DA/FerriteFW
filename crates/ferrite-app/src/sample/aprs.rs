@@ -151,6 +151,13 @@ impl AprsSim {
         })
     }
 
+    /// The reset: messages, the heard list and the APRS settings go.
+    pub fn clear(&self) {
+        self.live.iter().for_each(|c| c.set(None));
+        self.clear_heard();
+        self.cfg.set(AprsCfg::DEFAULT);
+    }
+
     pub fn clear_heard(&self) {
         self.heard_gone.set(self.heard.get());
     }

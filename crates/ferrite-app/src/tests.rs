@@ -666,6 +666,7 @@ fn literal_scanner() {
 mod radio_activity;
 mod lights;
 mod aprs;
+mod d64;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]

@@ -360,6 +360,10 @@ pub enum Op {
     MessageRead(u16),
     BeaconNow,
     ClearHeard,
+    /// The reset (BOOT-14): everything the owner keeps goes (channels, zones, presets, DTMF memories, messages,
+    /// the event log, waypoints, trims); never calibration or the SSB patch. A store with records starts over as
+    /// on a first boot, so setup seeds it again.
+    Wipe,
     /// The APRS settings changed (written back by the App: [`crate::App::aprs_cfg`]).
     AprsCfg(AprsCfg),
     /// DTMF memory i (0-15): set, or cleared with None.

@@ -1,7 +1,8 @@
 //! Confirm, shared by every destructive action (manual chapters 11, 10, 34 and 22; MENU-23, CHAN-12, CHAN-13,
-//! PIN-6, PIN-7, TSRCH-4): it names what goes and what is kept; OK confirms, BACK cancels. A settings reset
-//! (MENU 0 9 8 2) asks twice: settings first, then whether the channels go too (PIN-6). Other screens ask with
-//! [`ask`] (the browser's delete, the zones list, tone search's "TX too?").
+//! PIN-6, PIN-7, TSRCH-4): it names what goes and what is kept; OK confirms, BACK cancels. The reset (MENU 0 9 8
+//! 2, or MENU held at power on: BOOT-14, PIN-6) is one, with the same deliberate steps both ways: what goes, OK,
+//! then hold # for 3 s. Other screens ask with [`ask`] (the browser's delete, the zones list, tone search's "TX
+//! too?").
 
 use super::forms::para;
 use super::nav::Dest;
@@ -23,8 +24,8 @@ use ferrite_ui::widgets as w;
 /// What is being confirmed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ask {
-    /// Settings reset; then, on its second page, the channels too (PIN-6).
-    Reset { channels: bool },
+    /// The reset (BOOT-14): what goes, then (armed) hold # for 3 s.
+    Reset { armed: bool },
     /// Delete a channel, by number (CHAN-13).
     DeleteChannel(u16),
     /// Delete a zone (CHAN-12).
@@ -41,28 +42,27 @@ pub struct Confirm {
     /// The settings reset asked at power on (hold MENU, PIN-6, BOOT-14): modal, so hold BACK, PTT and the menu
     /// timeout can't skip past a PIN; BACK on its first question goes on to the PIN (if one is set).
     pub boot: bool,
+    /// When # went down on the armed reset (ms; 0 while it isn't held).
+    pub since: u32,
 }
+
+/// The reset happens after # is held this long (BOOT-14).
+pub const RESET_HOLD_MS: u32 = 3000;
 
 /// Opens the confirm for `ask`, remembering the screen it came from for BACK.
 pub fn ask(app: &mut App, ask: Ask) {
     app.open(Dest::Confirm);
-    app.screen = Screen::Confirm(Confirm { ask, boot: false });
+    app.screen = Screen::Confirm(Confirm { ask, boot: false, since: 0 });
 }
 
 /// Title, what goes, what stays (PIN-7: what will be cleared and what is kept).
 fn words(ask: Ask) -> (&'static str, &'static str, &'static str, &'static str) {
     match ask {
-        Ask::Reset { channels: false } => (
-            "Reset settings?",
-            "Every setting back to its default: callsign, region, PIN, sounds, display, home channel.",
-            "Channels and zones, calibration, the SSB patch, the bootloader.",
+        Ask::Reset { armed } => (
+            if armed { "Hold # for 3 s to reset" } else { "Reset the radio?" },
+            "Every setting and the PIN, channels, zones, range presets, the home channel, messages, the event log, waypoints. Setup runs again.",
+            "Calibration, the SSB patch, the bootloader.",
             "Reset",
-        ),
-        Ask::Reset { channels: true } => (
-            "Delete the channels too?",
-            "Every channel and zone.",
-            "Calibration, the SSB patch, the bootloader. BACK keeps the channels.",
-            "Delete",
         ),
         Ask::DeleteChannel(_) => ("Delete this channel?", "", "Every other channel, and the zone it was in.", "Delete"),
         Ask::DeleteZone(_) => ("Delete this zone?", "", "Its channels: they move to no zone and stay in All.", "Delete"),
@@ -94,19 +94,8 @@ impl View for Confirm {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         match (e.key, e.press) {
             (Key::Menu, Press::Short) => match self.ask {
-                Ask::Reset { channels: false } => {
-                    reset_settings(app);
-                    app.show_toast(b"Settings reset", b"", false);
-                    if self.boot {
-                        app.back = [None; crate::BACK_DEPTH]; // the PIN it guarded is gone with the settings
-                    }
-                    app.screen = Screen::Confirm(Confirm { ask: Ask::Reset { channels: true }, ..self });
-                }
-                Ask::Reset { channels: true } => {
-                    app.erase_channels();
-                    app.show_toast(b"Channels deleted", b"", false);
-                    app.go_home();
-                }
+                Ask::Reset { armed: false } => app.screen = Screen::Confirm(Confirm { ask: Ask::Reset { armed: true }, ..self }),
+                Ask::Reset { armed: true } => {}
                 Ask::DeleteChannel(num) => {
                     app.delete_channel(num, store); // slots to VFO, no longer home (CHAN-18)
                     let mut l = Buf::<32>::new();
@@ -150,13 +139,33 @@ impl View for Confirm {
                     app.back();
                 }
             },
+            (Key::Exit, Press::Short) if self.ask == (Ask::Reset { armed: true }) => {
+                app.screen = Screen::Confirm(Confirm { ask: Ask::Reset { armed: false }, since: 0, ..self })
+            }
             (Key::Exit, Press::Short) => app.back(),
             _ => {}
         }
     }
 
+    /// The armed reset counts # held from its key down, not from the long press.
+    fn raw(self, app: &mut App, key: Option<Key>, _: Option<u8>, down: bool) {
+        if self.ask == (Ask::Reset { armed: true }) && key == Some(Key::Hash) {
+            app.screen = Screen::Confirm(Confirm { since: if down { app.now.max(1) } else { 0 }, ..self });
+        }
+    }
+
+    fn tick(self, app: &mut App, _: &ferrite_core::msg::LiveAll) {
+        if self.since != 0 && app.now.wrapping_sub(self.since) >= RESET_HOLD_MS {
+            app.screen = Screen::Confirm(Confirm { since: 0, ..self });
+            app.want_reset = true; // done in App::tick, which has the store
+        }
+    }
+
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        let (title, goes, kept, _) = words(self.ask);
+        let (mut title, goes, kept, _) = words(self.ask);
+        if self.since != 0 {
+            title = ["Resetting in 3 s", "Resetting in 2 s", "Resetting in 1 s"][(app.now.wrapping_sub(self.since) / 1000).min(2) as usize];
+        }
         // What it names: the channel, the zone, the tone.
         let mut what = Buf::<40>::new();
         match self.ask {
@@ -188,7 +197,7 @@ impl View for Confirm {
             }
             Ask::Reset { .. } => {}
         }
-        if app.dirty(R_TOP, hash(&(self.ask, what))) {
+        if app.dirty(R_TOP, hash(&(self.ask, what, title))) {
             lcd.fill(0, 21, 240, 279, BG);
             let col = if matches!(self.ask, Ask::ToneTx(_)) { TEXT } else { AMBER };
             w::field(lcd, 12, 216, 36, 54, 50, Align::Left, title.as_bytes(), &UI_12B, col, BG);
@@ -210,15 +219,36 @@ impl View for Confirm {
 
     fn hints(self, _: &App) -> Hints {
         match words(self.ask).3 {
-            "Reset" => Hints::new(&[("OK", "Reset"), ("BACK", "Cancel")]),
+            "Reset" if self.ask == (Ask::Reset { armed: true }) => Hints::new(&[("Hold #", "Reset"), ("BACK", "Cancel")]),
+            "Reset" => Hints::new(&[("OK", "Next"), ("BACK", "Cancel")]),
             "Set" => Hints::new(&[("OK", "Set"), ("BACK", "Cancel")]),
             _ => Hints::new(&[("OK", "Delete"), ("BACK", "Cancel")]),
         }
     }
 }
 
+/// The reset (BOOT-14): every setting and the PIN, the slots to VFO, and everything the stores keep
+/// ([`Op::Wipe`]); calibration and the SSB patch are never touched. Setup runs again, as on a new radio.
+pub(crate) fn reset_all(app: &mut App, store: &impl ChannelStore) {
+    reset_settings(app);
+    app.set.setup_done = false;
+    if !store.data().request(Op::Wipe) {
+        app.write(ChanWrite::EraseAll); // a store without a data owner yet: its channels at least
+    }
+    for s in app.slots.iter_mut() {
+        (s.ch, s.vfo_mode, s.zone, s.pos) = (None, true, 0, 0);
+    }
+    for s in 0..SLOTS as u8 {
+        app.send_slot(s);
+    }
+    (app.inbox, app.alert) = (0, false);
+    app.reset_aprs();
+    app.first_boot();
+    app.show_toast(b"Reset done", b"", false);
+}
+
 /// Every setting back to its default, the PIN with them (PIN-4); channels, calibration and the SSB patch are
-/// not touched here (PIN-8). Setup has run, so it isn't asked again.
+/// not touched here (PIN-8).
 pub(crate) fn reset_settings(app: &mut App) {
     *app.set = crate::settings::Settings { setup_done: app.set.setup_done, ..crate::settings::Settings::DEFAULT };
     app.watch = 1;

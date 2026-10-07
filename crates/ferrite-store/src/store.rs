@@ -26,7 +26,7 @@ use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
 use ferrite_core::freq::{mhz, Freq10};
-use ferrite_core::layout::{CHANNELS, LAYOUT_HEADER, PRESETS, SCRATCH, SETTINGS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, EVENT_LOG, LAYOUT_HEADER, PRESETS, SCRATCH, SETTINGS, TRIMS, WAYPOINTS, ZONES};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
 
@@ -382,6 +382,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                         let _ = self.put_rec(preset_addr(k as u8), &preset_encode(&p)).await;
                     }
                 }
+                if r.has_weather() && self.count() == 0 {
+                    let _ = self.seed_wx().await; // WX-1, at setup in the US and Canada
+                }
                 self.mounted.set(Mounted::Ok);
             }
         }
@@ -541,6 +544,48 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         Ok(())
     }
 
+    /// The reset (BOOT-14, [`Op::Wipe`]): every record area erased but the settings (the App saves its defaults)
+    /// and never the SSB patch or calibration; then a first boot again, so setup's save seeds presets and the WX
+    /// zone as on a new radio.
+    async fn wipe(&self) -> Result {
+        for z in &self.zmap {
+            z.set(EMPTY);
+        }
+        self.zones.set(0);
+        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS] {
+            for s in r.step_by(SECTOR as usize) {
+                if !self.f.blank(s, SECTOR)? {
+                    self.f.erase_blanked(s).await?;
+                }
+            }
+        }
+        self.mounted.set(Mounted::FirstBoot);
+        Ok(())
+    }
+
+    /// WX-1: in the US and Canada, the seven weather channels (162.400-162.550 MHz, receive only, wide FM) as a
+    /// "Weather" zone after the others, numbered after the highest channel there is.
+    async fn seed_wx(&self) -> Result {
+        let z = self.zones.get();
+        self.new_zone(b"Weather", &ZoneCfg { shown: true, dwell: 255, ..ZoneCfg::default() }).await?;
+        let first = (0..MAX_CHANNELS).rev().find(|&n| self.zmap[n as usize].get() != EMPTY).map_or(0, |n| n + 1);
+        let cfg = ferrite_app::slot::SlotCfg { mode: 0, narrow: false, step: ferrite_app::slot::BANDS[4].step, ..ferrite_app::slot::DEFAULT_CFG };
+        for k in 0..7u16 {
+            let num = first + k;
+            if num >= MAX_CHANNELS {
+                break;
+            }
+            let rec = {
+                let mut c = ferrite_app::chan::channel(num, z, mhz(162) + 40_000 + k as Freq10 * 2_500, "", cfg);
+                c.set_name(&[b'W', b'X', b'1' + k as u8]);
+                c.flags |= ferrite_app::chan::FLAG_RX_ONLY;
+                ch_encode(&c, &[0xFF; CH_LEN])
+            };
+            self.write_ch(num, &rec).await?;
+        }
+        Ok(())
+    }
+
     /// CHAN-12: the zone's channels go to no zone (they stay in All); the last zone's record goes, an earlier
     /// one stays as an empty zone (zone numbers don't move).
     async fn delete_zone(&self, z: u8) -> Result {
@@ -612,6 +657,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::PutZone(z, ..) => z < MAX_ZONES && z <= self.zones.get(),
             Op::PutPreset(i, _) => self.preset_slot(i).is_some() || (i == self.presets() && self.presets() < MAX_PRESETS),
             Op::Dtmf(i, _) => i < DTMF_MEMS,
+            Op::Wipe => true,
             _ => return None,
         })
     }
@@ -625,6 +671,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         };
         match op {
             Op::DeleteChannel(n) => self.delete(n).await,
+            Op::Wipe => self.wipe().await,
             Op::Skip(n, on) => edit(n, &|c| c.flags = if on { c.flags | ferrite_app::chan::FLAG_SKIP } else { c.flags & !ferrite_app::chan::FLAG_SKIP }).await,
             Op::Hide(n, on) => edit(n, &|c| c.flags = if on { c.flags | ferrite_app::chan::FLAG_HIDDEN } else { c.flags & !ferrite_app::chan::FLAG_HIDDEN }).await,
             Op::Move(n, z) => edit(n, &|c| c.zone = z).await,
@@ -931,6 +978,9 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
 
     fn request(&self, op: Op) -> bool {
+        if op == Op::Wipe {
+            self.extra.request(op); // its records go too
+        }
         match self.accepts(&op) {
             Some(ok) => self.ok() && ok && self.submit(Job::Op(op)),
             None => self.extra.request(op),

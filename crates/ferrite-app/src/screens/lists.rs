@@ -42,27 +42,40 @@ impl App {
     }
 
     /// The region changed (setup, 0 9 4): a VFO on 2 m or 1.25 m still on a region default step takes the new
-    /// region's (VFO-18). A step the user picked is left alone.
+    /// region's (VFO-18), and a VFO in FM or NFM on an FM band the region's mode (SETUP-7). A step the user picked
+    /// is left alone.
     pub(crate) fn region_steps(&mut self) {
         use crate::slot::{band_near, band_step, BAND_125M, BAND_VHF, BANDS, STEP_5K};
         let region = self.set.region();
-        for s in self.slots.iter_mut() {
+        for i in 0..self.slots.len() {
+            let s = &mut self.slots[i];
+            let was = s.cfg;
             let b = band_near(s.vfo);
             if matches!(b, BAND_VHF | BAND_125M) && (s.cfg.step == BANDS[b].step || s.cfg.step == STEP_5K) {
                 s.cfg.step = band_step(b, region);
+            }
+            // SETUP-7: a VFO still on its band's FM default follows the region's (wide or NFM)
+            if BANDS[b].mode == 0 && s.cfg.mode <= 1 {
+                s.cfg.mode = crate::slot::band_mode(b, region);
+                s.cfg.narrow = s.cfg.mode == 1;
+                s.cfg.narrow = s.cfg.mode == 1;
+            }
+            if s.cfg != was && s.vfo_mode {
+                self.send_slot(i as u8);
             }
         }
     }
 
     /// "Go" (INBOX-10, MENU-26): the active slot to a VFO on that frequency, then home.
     pub(crate) fn go_freq(&mut self, f: ferrite_core::freq::Freq10) {
-        use crate::slot::{band_near, band_step, BANDS};
+        use crate::slot::{band_near, band_step};
         let a = self.active as usize;
         let region = self.set.region();
         let s = &mut self.slots[a];
         let b = band_near(f);
         if band_near(s.vfo) != b || !s.vfo_mode {
-            s.cfg.mode = BANDS[b].mode;
+            s.cfg.mode = crate::slot::band_mode(b, region);
+                s.cfg.narrow = s.cfg.mode == 1;
             s.cfg.step = band_step(b, region);
             (s.cfg.offset, s.cfg.split) = (0, false);
         }

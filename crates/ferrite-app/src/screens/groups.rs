@@ -264,7 +264,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
     ]),
     ((9, 8), &[
         (slow!("Run setup again"), slow!(""), slow!("The first-boot questions.")),
-        (slow!("Reset settings"), slow!(""), slow!("Settings, or channels too.")),
+        (slow!("Reset"), slow!(""), slow!("Everything but calibration.")),
     ]),
 ];
 
@@ -503,6 +503,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.push(b"-9");
             false
         }
+        [9, 3, 2] => {
+            pick(b, &ON_OFF, s.chan_only as u8);
+            s.chan_only
+        }
         [9, 3] | [9, 3, 1] => {
             pick(b, &PIN_MODES, s.pin_mode);
             s.pin_mode != 0
@@ -648,6 +652,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [9, 1, 1] => s.auto_lock = cycle(s.auto_lock, d, AUTO_LOCK_TIMES.len()), // KEY-20
         [8, 6, 6] => s.dtmf_sidetone = !s.dtmf_sidetone,
         [8, 9] => set_extend(app, !app.set.extend_tx),
+        [9, 3, 2] if !s.chan_only => app.set_chan_only(), // PIN-5: leaving is hold #
         [9, 3] | [9, 3, 1] => {
             let m = cycle(s.pin_mode, d, PIN_MODES.len());
             if m != 0 && s.pin_len == 0 {

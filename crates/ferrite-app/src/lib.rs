@@ -253,6 +253,8 @@ pub struct App {
     /// The APRS settings from the APRS store ([`aprs`]), and whether they were loaded and need writing back.
     aprs: aprs::AprsCfg,
     aprs_st: u8,
+    /// The armed reset's # was held 3 s ([`screens::confirm`]): done at the next tick, which has the store.
+    want_reset: bool,
     /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
     rx_mask: u8,
     /// Slots whose own RX tone is heard on the carrier (busy lockout "wrong tone").
@@ -316,6 +318,7 @@ impl App {
             lit: 0,
             aprs: aprs::AprsCfg::DEFAULT,
             aprs_st: 0,
+            want_reset: false,
             rx_mask: 0,
             tone_mask: 0,
             scan_mask: 0,
@@ -673,8 +676,8 @@ impl App {
             self.screen = Screen::Pin(screens::pin::Pin::power_on());
             self.push_back();
         }
-        let ask = screens::confirm::Ask::Reset { channels: false };
-        self.screen = Screen::Confirm(screens::confirm::Confirm { ask, boot: true });
+        let ask = screens::confirm::Ask::Reset { armed: false };
+        self.screen = Screen::Confirm(screens::confirm::Confirm { ask, boot: true, since: 0 });
     }
 
     /// A matrix code went down or up, mapped to a key or not: the key test shows it (KEY-2). The firmware calls
@@ -800,6 +803,9 @@ impl App {
         self.aprs_tick(store.data());
         self.radio_tick(live);
         self.screen.tick(self, live);
+        if core::mem::take(&mut self.want_reset) {
+            screens::confirm::reset_all(self, store);
+        }
         if self.screen == Screen::Home {
             self.home_stops_modes(); // however the screen went home
         }
@@ -835,6 +841,9 @@ impl App {
         // goes home from anywhere but the modal screens. Hold # toggles the lock (KEY-13).
         match (e.key, e.press) {
             (Key::Exit, Long) => return self.go_home(),
+            // BOOT-14: the armed reset's hold # is the reset's, not the key lock
+            (Key::Hash, Long) if matches!(self.screen, Screen::Confirm(c) if c.ask == screens::confirm::Ask::Reset { armed: true }) => return,
+            (Key::Hash, Long) if self.set.chan_only => return self.leave_chan_only(), // PIN-5
             (Key::Hash, Long) if self.locked && self.set.pin_mode == 2 => {
                 // KEY-16: unlocking asks for the PIN
                 return self.open(Dest::Pin);
@@ -878,6 +887,12 @@ impl App {
     /// Opens a screen by where it is in the manual ([`Dest`]), remembering this one for BACK. Screens not built
     /// yet open as a "coming" placeholder ([`screens::nav::enter`]).
     pub fn open(&mut self, dest: Dest) {
+        // PIN-5: channel-only mode has no MENU 0 and no editing
+        if matches!(dest, Dest::Advanced | Dest::Group(_) | Dest::Sub(..) | Dest::ChannelEdit | Dest::SaveChannel | Dest::AddRepeater | Dest::Quick)
+            && self.chan_only_refuse()
+        {
+            return;
+        }
         self.push_back();
         self.screen = screens::nav::enter(dest, self);
     }

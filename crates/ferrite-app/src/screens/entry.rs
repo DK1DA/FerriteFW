@@ -382,7 +382,8 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
             s.mem[old] = s.vfo;
             if old != new {
                 // A new band: its mode and step, and the offset's direction kept with its amount (NAV-2).
-                s.cfg.mode = BANDS[new].mode;
+                s.cfg.mode = crate::slot::band_mode(new, region);
+                s.cfg.narrow = s.cfg.mode == 1;
                 s.cfg.step = crate::slot::band_step(new, region);
                 if s.cfg.offset != 0 && !s.cfg.split {
                     s.cfg.offset = s.cfg.offset.signum() * BANDS[new].shift;

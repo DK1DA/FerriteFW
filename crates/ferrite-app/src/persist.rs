@@ -95,6 +95,28 @@ impl<const N: usize> Persist for Text<N> {
 
 /// `persist!(Type { field, ... })`: saves and loads the fields in this order. New fields go at the end only.
 macro_rules! persist {
+    // Booleans after the fields share one byte, bit 0 first: a record from before a flag joined reads the old
+    // byte (one bool, 0 or 1) as the first flag, and the rest keep their defaults.
+    ($t:ty { $($f:ident),* $(,)? } bits { $($b:ident),* $(,)? }) => {
+        impl Persist for $t {
+            fn save(&self, s: &mut dyn Sink) {
+                $(self.$f.save(s);)*
+                let mut v = 0u8;
+                let mut _i = 0;
+                $(v |= (self.$b as u8) << _i; _i += 1;)*
+                v.save(s);
+            }
+            fn load(&mut self, r: &mut dyn Source) {
+                $(self.$f.load(r);)*
+                let mut v = 0u8;
+                let mut _i = 0;
+                $(v |= (self.$b as u8) << _i; _i += 1;)*
+                v.load(r);
+                let mut _i = 0;
+                $(self.$b = v >> _i & 1 != 0; _i += 1;)*
+            }
+        }
+    };
     ($t:ty { $($f:ident),* $(,)? }) => {
         impl Persist for $t {
             fn save(&self, s: &mut dyn Sink) {
@@ -147,8 +169,8 @@ persist!(Settings {
     home_ch, xb, hf, cable_port, coord_fmt, fixed_on, fixed, fixed_alt, same_codes, scope_bars, scope_step,
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
-    link_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone, show_hidden,
-});
+    link_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
+} bits { show_hidden, chan_only });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;

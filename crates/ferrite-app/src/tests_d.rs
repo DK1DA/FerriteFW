@@ -439,7 +439,7 @@ fn hf_bands_remember_their_vfo() {
     assert_eq!(t.app.set.hf.freq, f31);
 }
 
-/// PIN-6, BOOT-14: MENU held at power on asks the settings reset (twice) before the PIN, which it clears. The
+/// PIN-6, BOOT-14: MENU held at power on is the reset, before the PIN, which it clears. The
 /// questions can't be skipped past the PIN: hold BACK, PTT and the menu timeout do nothing; BACK on the first
 /// goes on to the PIN.
 #[test]
@@ -449,20 +449,21 @@ fn power_on_reset_before_the_pin() {
     t.app.set.pin_len = 4;
     t.app.set.pin_mode = 1;
     t.app.power_on_reset();
-    assert_eq!(t.app.screen(), Screen::Confirm(Confirm { ask: Ask::Reset { channels: false }, boot: true }));
+    assert_eq!(t.app.screen(), Screen::Confirm(Confirm { ask: Ask::Reset { armed: false }, boot: true, since: 0 }));
     t.hold(Key::Exit);
     t.wait(31_000);
     assert!(matches!(t.app.screen(), Screen::Confirm(_)), "hold BACK and the timeout can't skip the PIN");
     t.wake();
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Pin(_)), "BACK: the PIN, as at any power on");
-    // Again, and reset: the PIN is gone, the second question asks about the channels, BACK keeps them.
+    // Again, and reset: the same steps as from the menu; the PIN is gone and setup runs.
     t.app.power_on_reset();
     t.tap(Key::Menu);
+    assert_eq!(t.app.set.pin_len, 4, "not before hold #");
+    t.press(Key::Hash, 3200);
     assert_eq!(t.app.set.pin_len, 0, "the reset clears the PIN");
-    assert_eq!(t.app.screen(), Screen::Confirm(Confirm { ask: Ask::Reset { channels: true }, boot: true }));
-    t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Home, "no PIN to go back to");
+    assert!(matches!(t.app.screen(), Screen::Setup(_)));
+    t.app.go_home();
     // Without a PIN, BACK on the first question is home.
     t.app.power_on_reset();
     t.tap(Key::Exit);

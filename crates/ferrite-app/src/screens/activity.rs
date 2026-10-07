@@ -118,6 +118,7 @@ impl App {
     pub fn set_region(&mut self, r: Option<Region>, extend_tx: bool) {
         self.set.set_region(r);
         self.set.extend_tx = extend_tx;
+        self.region_steps();
     }
 
     /// Put a slot on its VFO at a frequency (the simulator's samples).

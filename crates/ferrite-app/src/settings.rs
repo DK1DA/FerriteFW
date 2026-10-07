@@ -181,6 +181,8 @@ pub struct Settings {
     pub arrival_tone: bool,
     /// The channel lists show hidden channels too (their options).
     pub show_hidden: bool,
+    /// 0 9 3 2: channel-only mode (PIN-5): no V/M, MENU 0 or editing; hold # leaves it.
+    pub chan_only: bool,
 }
 
 /// 0 7 4 1's values, seconds (0 never).
@@ -259,6 +261,7 @@ impl Settings {
         dtmf_sidetone: true,
         arrival_tone: true,
         show_hidden: false,
+        chan_only: false,
     };
 
     /// The region's name, or "Not set".

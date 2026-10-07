@@ -259,6 +259,16 @@ pub const BANDS: [BandDef; 7] = [
 pub const BAND_125M: usize = 5;
 pub const BAND_VHF: usize = 3;
 
+/// A band's default mode in a region (SETUP-7): its FM is wide FM in the Americas, Australia and New Zealand,
+/// NFM in the UK, Europe, Japan and Other; AM bands stay AM. No region chosen yet: wide.
+pub fn band_mode(b: usize, r: Option<ferrite_core::txplan::Region>) -> u8 {
+    use ferrite_core::txplan::Region::{Europe, Japan, Other, Uk};
+    match BANDS[b].mode {
+        0 if matches!(r, Some(Uk | Europe | Japan | Other)) => 1,
+        m => m,
+    }
+}
+
 /// A band's default step in a region (VFO-18): 2 m and 1.25 m in the US and Canada take 5 kHz, as their 15 and
 /// 20 kHz channel plans (146.520, 146.940, 147.225) need; elsewhere the band's own (12.5 kHz on 2 m, IARU R1).
 pub fn band_step(b: usize, r: Option<ferrite_core::txplan::Region>) -> u8 {

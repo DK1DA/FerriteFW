@@ -336,6 +336,28 @@ fn settings_reset_erases_every_channel() {
     index_agrees(&s);
 }
 
+/// BOOT-14: the reset wipes every record area but the settings and calibration, and is a first boot again: the
+/// next save after setup seeds as on a new radio. Outside the US and Canada no WX zone.
+#[test]
+fn reset_wipes_and_seeds_again() {
+    let s = mount(seeded());
+    assert!(s.count() > 0 && s.zones() > 0 && s.presets() > 0);
+    let cal = s.nor().mem[0xF000..0x10000].to_vec();
+    assert!(s.request(Op::Wipe));
+    assert_eq!((s.count(), s.zones(), s.presets()), (0, 0, 0));
+    assert!(s.first_boot());
+    assert_eq!(s.nor().mem[0xF000..0x10000], cal[..], "calibration untouched");
+    let mut a = app();
+    a.settings_mut().set_region(Some(ferrite_core::txplan::Region::Uk));
+    a.settings_mut().setup_done = true;
+    assert!(s.save(&a));
+    assert!(s.presets() > 0);
+    assert_eq!(s.zones(), 0, "no WX zone in the UK");
+    let s = mount(unmount(s));
+    assert_eq!(s.count(), 0);
+    index_agrees(&s);
+}
+
 #[test]
 fn renumber_carries_the_position() {
     let s = mount(seeded());
@@ -369,7 +391,14 @@ fn first_boot_after_setup_seeds_the_regions_presets() {
     assert!(s.save(&a));
     let s = mount(unmount(s));
     assert_eq!(s.presets(), 0);
-    assert_eq!(s.zones(), 0, "no zones are seeded");
+    // WX-1: the US and Canada get the weather channels as a "Weather" zone, receive only.
+    assert_eq!(s.zones(), 1);
+    assert_eq!(s.zone_name(0).unwrap().as_bytes(), b"Weather");
+    assert_eq!(s.zone_len(0), 7);
+    let wx: Vec<_> = (0..7).map(|i| s.zone_at(0, i).unwrap()).collect();
+    assert_eq!(wx.iter().map(|c| c.rx).collect::<Vec<_>>(), (0..7).map(|k| 16_240_000 + k * 2_500).collect::<Vec<_>>());
+    assert!(wx.iter().all(|c| c.flags & ferrite_app::chan::FLAG_RX_ONLY != 0 && c.cfg.mode == 0));
+    assert_eq!(wx[0].name(), b"WX1");
     // Europe: no weather or GMRS, PMR446 instead, 2 m to 146 MHz.
     let e: Vec<_> = ferrite_store::store::default_presets(ferrite_core::txplan::Region::Europe).collect();
     assert!(e.iter().any(|p| p.name.as_bytes() == b"PMR446") && !e.iter().any(|p| p.name.as_bytes() == b"Weather"));

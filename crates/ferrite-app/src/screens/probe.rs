@@ -3,7 +3,7 @@
 //!
 //! Tone search (MENU 0 3 7): the active slot's frequency and signal, the tone found or "searching"
 //! with the time, the last hits (TSRCH-2). OK sets the RX tone, then asks before setting TX too (TSRCH-4); on a
-//! channel the tone is loaded into the slot, not saved to the channel (TSRCH-9). BACK leaves the tones as they
+//! channel the tone is loaded into the slot, not saved to the channel, and # saves it there (TSRCH-9). BACK leaves the tones as they
 //! were (TSRCH-5).
 //!
 //! Counter (MENU 0 3 4): the strongest nearby transmitter's frequency and level, a hold, the last hits
@@ -145,6 +145,16 @@ impl View for ToneSearch {
                 done(app, self.slot, b"RX and TX tone set");
             }
             (Key::Exit, Press::Short, true) => done(app, self.slot, b"RX tone set"),
+            // TSRCH-9: on a channel # saves the found tone into its record (with TX too if just set).
+            (Key::Hash, Press::Short, _) if t != 0 && app.slot(self.slot).on_channel() => {
+                if !self.ask_tx {
+                    set_tone(app, self.slot, t, false);
+                }
+                app.save_channel(self.slot, None);
+                app.stop_mode();
+                app.back();
+                app.show_toast(b"Tone saved", b"in the channel", false);
+            }
             (Key::Exit, Press::Short, false) => {
                 app.stop_mode(); // TSRCH-5: tones unchanged
                 app.back();
@@ -212,13 +222,18 @@ impl View for ToneSearch {
             });
         }
         if app.slot(self.slot).on_channel() && app.dirty(11, 1) {
-            w::field(lcd, 8, 224, 266, 284, 279, Align::Left, b"On a channel: loaded, not saved", &UI_12, DIM, BG);
+            w::field(lcd, 8, 224, 266, 284, 279, Align::Left, b"On a channel: OK loads, # saves", &UI_12, DIM, BG);
         }
     }
 
     fn hints(self, app: &App) -> Hints {
-        if self.ask_tx {
+        let ch = app.slot(self.slot).on_channel();
+        if self.ask_tx && ch {
+            Hints::new(&[("OK", "TX too"), ("#", "Save"), ("BACK", "RX only")])
+        } else if self.ask_tx {
             Hints::new(&[("OK", "TX too"), ("BACK", "RX only")])
+        } else if app.radio.hits[0].what != 0 && ch {
+            Hints::new(&[("OK", "Apply"), ("#", "Save"), ("BACK", "Cancel")])
         } else if app.radio.hits[0].what != 0 {
             Hints::new(&[("OK", "Apply"), ("BACK", "Cancel")])
         } else {
