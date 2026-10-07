@@ -191,6 +191,13 @@ impl App {
     pub(crate) fn ptt_released(&mut self) {
         if let Some(slot) = self.radio.keyed.take() {
             self.out.push(RadioCmd::Transmit { slot, on: false });
+            // WATCH-16: watch waits 30 s of quiet (or a key) so the reply on this slot isn't missed; a longer #
+            // pause (WATCH-6) is left as it is.
+            let until = self.now.wrapping_add(crate::TX_PAUSE_S as u32 * 1000);
+            if self.tx_pause || self.paused_until.is_none_or(|t| crate::after(until, t)) {
+                (self.paused_until, self.tx_pause) = (Some(until), true);
+                self.out.push(RadioCmd::PauseWatch(crate::TX_PAUSE_S));
+            }
         }
     }
 

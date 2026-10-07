@@ -499,6 +499,10 @@ pub fn hold_digit(app: &mut App, d: u8, store: &impl ChannelStore) {
 /// (TX power, squelch, dual standby, CTCSS/DCS, step, shift direction, offset, zone); 0 and 1 are Ferrite's.
 pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
     let on_ch = app.slot(app.active).on_channel();
+    // Channel-only mode (PIN-5): shortcuts that change a value are refused; those that open a view still work.
+    if app.set.chan_only && matches!(d, 0 | 2..=8) {
+        return app.show_toast(b"Channel-only mode", b"hold # to leave it", false);
+    }
     match d {
         0 => home_channel(app, store),
         1 => app.open(Dest::BandScope), // SCOPE-1

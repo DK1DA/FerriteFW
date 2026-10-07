@@ -1014,3 +1014,32 @@ fn burst_and_dtmf_while_keyed() {
     t.tap(Key::Digit(5));
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Dtmf { .. })), "not keyed: no DTMF");
 }
+
+/// WATCH-16: unkeying pauses watch for 30 s of quiet (nicFW's MultiWatch does the same); a key press ends the
+/// pause; a longer # pause isn't shortened.
+#[test]
+fn watch_waits_after_transmit() {
+    let mut t = ready();
+    ptt(&mut t, true);
+    t.cmds();
+    ptt(&mut t, false);
+    assert!(t.cmds().contains(&RadioCmd::PauseWatch(crate::TX_PAUSE_S)));
+    t.tap(Key::Up);
+    assert!(t.cmds().contains(&RadioCmd::PauseWatch(0)), "a key resumes watch");
+    t.tap(Key::Up);
+    assert!(!t.cmds().contains(&RadioCmd::PauseWatch(0)), "only once");
+}
+
+/// PIN-5: in channel-only mode, hold digits that change a value are refused; those that open a view work.
+#[test]
+fn channel_only_refuses_value_shortcuts() {
+    let mut t = T::new();
+    t.app.set.chan_only = true;
+    let before = *t.app.slot(t.app.active()).cfg();
+    t.hold(Key::Digit(2)); // power
+    assert_eq!(*t.app.slot(t.app.active()).cfg(), before, "power unchanged");
+    t.hold(Key::Digit(4)); // watch
+    assert_eq!(t.app.watch, 1, "watch unchanged");
+    t.hold(Key::Digit(1)); // band scope: a view
+    assert!(matches!(t.app.screen(), Screen::Scope(_)));
+}

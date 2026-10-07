@@ -35,7 +35,7 @@ pub enum RadioCmd {
     Watch(u8),
     /// Start or stop scanning in a slot.
     Scan { slot: u8, on: bool },
-    /// Pause watching for this many seconds (WATCH-6).
+    /// Pause watching for this many seconds (WATCH-6, WATCH-16); 0 resumes it now.
     PauseWatch(u16),
     /// Key or unkey a slot (3 = the HF mode frequency), after the UI's checks; the Radio task checks again
     /// (TX-17) and answers in [`LiveAll::tx`].

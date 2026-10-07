@@ -80,6 +80,8 @@ pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
 /// Watch pause (0 1 2 5, default 1 min).
 pub const PAUSE_S: u16 = 60;
+/// After a transmission, watch waits this long with the active slot quiet, or until a key (WATCH-16; nicFW's 30 s).
+pub const TX_PAUSE_S: u16 = 30;
 
 /// One slot: a VFO and a channel position; which one it is on.
 #[derive(Clone, Copy, Debug)]
@@ -246,6 +248,9 @@ pub struct App {
     now: u32,
     last_input: u32,
     paused_until: Option<u32>,
+    /// The pause is the one after a transmission (WATCH-16): a key press ends it, a signal on the active slot
+    /// extends it. The # pause (WATCH-6) is neither.
+    tx_pause: bool,
     /// The last activity for the backlight and auto power off: keys, PTT, a slot receiving ([`lights`]).
     seen: u32,
     /// [`lights`]'s flags: dark, warned of auto off, power off wanted, the waking key swallowed.
@@ -314,6 +319,7 @@ impl App {
             now: 0,
             last_input: 0,
             paused_until: None,
+            tx_pause: false,
             seen: 0,
             lit: 0,
             aprs: aprs::AprsCfg::DEFAULT,
@@ -720,6 +726,11 @@ impl App {
         self.keys.down(key, now);
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
+        if self.tx_pause && !matches!(key, Key::Ptt(_)) {
+            // WATCH-16: a key press ends the pause after a transmission
+            (self.paused_until, self.tx_pause) = (None, false);
+            self.out.push(RadioCmd::PauseWatch(0));
+        }
         self.screen.raw(self, Some(key), None, true);
         if let Key::Ptt(slot) = key {
             // APRS-18: in compose any PTT sends; PTT C in APRS mode opens compose from any screen. Neither keys voice.
@@ -795,7 +806,12 @@ impl App {
             self.undo = None;
         }
         if self.paused_until.is_some_and(|t| after(now, t)) {
-            self.paused_until = None;
+            (self.paused_until, self.tx_pause) = (None, false);
+        }
+        // WATCH-16: after a transmission, 30 s of quiet on the active slot before watch resumes.
+        if self.tx_pause && self.rx_mask & 1 << self.active != 0 && self.paused_until.is_some_and(|t| t.wrapping_sub(now) < (TX_PAUSE_S as u32 - 5) * 1000) {
+            self.paused_until = Some(now.wrapping_add(TX_PAUSE_S as u32 * 1000));
+            self.out.push(RadioCmd::PauseWatch(TX_PAUSE_S));
         }
         if self.screen.timeout().is_some_and(|t| now.wrapping_sub(self.last_input) >= t) {
             self.go_home();
@@ -1190,7 +1206,7 @@ fn level(b: u8) -> Level {
 }
 
 /// `now` has reached `t` (wrapping ms).
-fn after(now: u32, t: u32) -> bool {
+pub(crate) fn after(now: u32, t: u32) -> bool {
     now.wrapping_sub(t) as i32 >= 0
 }
 
