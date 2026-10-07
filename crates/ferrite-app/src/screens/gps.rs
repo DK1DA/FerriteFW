@@ -261,8 +261,11 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
     }
     let stale = fix.is_some_and(|f| f.age_s > 10);
     if app.dirty(R_TOP, hash(&(l.as_bytes(), age.as_bytes(), stale))) {
-        head(lcd, l.as_bytes(), b"");
-        w::field(lcd, 180, 52, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Right, age.as_bytes(), &UI_12, if stale { AMBER } else { SUB }, BG);
+        // the age gets just its own width at the right, and the status text is fitted to what is left, so
+        // neither clears part of the other ("±5 m" lost its m)
+        let aw = text4_width(age.as_bytes(), &UI_12);
+        head(lcd, w::fit(l.as_bytes(), &UI_12, 232 - aw - 16 - 8), b"");
+        w::field(lcd, 232 - aw, aw, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Right, age.as_bytes(), &UI_12, if stale { AMBER } else { SUB }, BG);
     }
     // Between a fix and none, the page's layout changes: clear it and redraw every part.
     if app.dirty(R_HELP, hash(&fix.is_some())) {
@@ -337,9 +340,10 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
                 dist_u(m, units, &mut d);
                 let _ = uwrite!(d, " {}", compass_name(deg));
                 let dw = text4_width(d.as_bytes(), &UI_12B);
-                lcd.text4_rows(14, y + 37, w::fit(wp.name.as_bytes(), &UI_15B, 184 - dw), &UI_15B, TEXT, BG, y + 19, y + 46);
-                lcd.text4_rows(204 - dw, y + 37, d.as_bytes(), &UI_12B, TEXT, BG, y + 19, y + 46);
-                arrow(lcd, 219, y + 30, 10, deg as i32, BLUE, BG);
+                // the arrow keeps 6 px from the frame, the distance 8 px from the arrow
+                lcd.text4_rows(14, y + 37, w::fit(wp.name.as_bytes(), &UI_15B, 176 - dw), &UI_15B, TEXT, BG, y + 19, y + 46);
+                lcd.text4_rows(196 - dw, y + 37, d.as_bytes(), &UI_12B, TEXT, BG, y + 19, y + 46);
+                arrow(lcd, 215, y + 30, 10, deg as i32, BLUE, BG);
             }
             None => {
                 lcd.text4_rows(14, y + 37, b"None: # marks one here", &UI_12, DIM, BG, y + 19, y + 46);
@@ -402,7 +406,10 @@ fn satellites(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<
             }
             let mut p = Buf::<4>::new();
             let _ = uwrite!(p, "{}", s.prn);
-            lcd.text4(x + 6, y + 4, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
+            // to the right of the dot, unless that would cross the horizon ring (or the E): then to its left
+            let pw = text4_width(p.as_bytes(), &UI_12);
+            let lx = if x + 6 + pw > cx + rr - 12 { x - 6 - pw } else { x + 6 };
+            lcd.text4(lx, y + 4, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
         }
     }
     // The signal bars (dB-Hz; 50 fills them).
@@ -467,12 +474,14 @@ fn waypoints(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<F
 /// The go-to dial (GPS-19): a ring with N; course up while moving (the ring turns so the direction of travel is
 /// up and N moves round it, a tick marks "ahead"), north up when stopped; the arrow points to the waypoint.
 fn dial(lcd: &mut impl Panel, cx: i32, cy: i32, r: i32, course: Option<u16>, bearing: Option<u16>) {
-    lcd.fill(cx - r - 1, cy - r - 9, 2 * r + 3, 2 * r + 11, BG);
+    lcd.fill(cx - r - 7, cy - r - 9, 2 * r + 15, 2 * r + 17, BG);
     ring(lcd, cx, cy, r, 2, LINE);
     let up = course.unwrap_or(0) as i32;
     let a = (360 - up) * 10; // where north sits, clockwise from up
-    let (nx, ny) = (cx + (r - 13) * sin10(a) / 4096, cy - (r - 13) * cos10(a) / 4096);
-    lcd.text4(nx - 4, ny + 5, b"N", &UI_12B, if course.is_some() { AMBER } else { SUB }, BG);
+    // N sits on the ring, like a compass bezel: a gap is cleared in the ring behind it
+    let (nx, ny) = (cx + r * sin10(a) / 4096, cy - r * cos10(a) / 4096);
+    lcd.fill(nx - 6, ny - 7, 13, 14, BG);
+    lcd.text4(nx - 3, ny + 5, b"N", &UI_12B, if course.is_some() { AMBER } else { SUB }, BG);
     if course.is_some() {
         lcd.tri(cx - 4, cy - r - 9, 9, 1, TEXT); // ahead
     }
@@ -496,9 +505,16 @@ fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i:
     if app.dirty(R_TOP, hash(&(wp, where_))) {
         lcd.fill(0, 20, 240, 50, BG);
         lcd.text4(8, 42, wp.name.as_bytes(), &UI_12B, TEXT, BG);
-        let mut b = Buf::<32>::new();
-        pos_text(wp.pos, &mut b);
-        lcd.text4(8, 60, b.as_bytes(), &UI_12, SUB, BG);
+        // the position page's coordinate format (deg-min under a grid square), not the lists' compact one
+        let fmt = if app.set.coord_fmt == 3 { 1 } else { app.set.coord_fmt };
+        let (mut la, mut lo) = (Buf::<24>::new(), Buf::<24>::new());
+        coord(wp.pos.lat, "N", "S", fmt, &mut la);
+        coord(wp.pos.lon, "E", "W", fmt, &mut lo);
+        let mut b = Buf::<48>::new();
+        b.push(la.as_bytes());
+        b.push(b"  ");
+        b.push(lo.as_bytes());
+        lcd.text4(8, 60, w::fit(b.as_bytes(), &UI_12, 224), &UI_12, SUB, BG);
     }
     if app.dirty(R_NOTE, hash(&(where_, course))) {
         dial(lcd, 120, 142, 58, course.map(|c| c.0), where_.map(|w| w.1));
