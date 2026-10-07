@@ -92,6 +92,8 @@ pub struct FakeRadio {
     /// A slot on a NOAA / Weatheradio channel since this time (s): the fake decoder hears a SAME warning there.
     wx_since: Option<f32>,
     same: Option<SameDecoded>,
+    /// An APRS packet going out on this slot until this time (s): the TX LED and keyed state for a moment.
+    burst: Option<(u8, f32)>,
 }
 
 /// The fake decoder's warning, heard 8 s after a slot settles on a weather channel (162.400-162.550 MHz).
@@ -103,7 +105,7 @@ impl FakeRadio {
         live.slots[0] = SlotLive { freq: mhz(146) + 52_000, rssi: -121, ..Default::default() };
         live.slots[1] = SlotLive { freq: mhz(443) + 47_500, rssi: -121, ..Default::default() };
         live.slots[2] = SlotLive { freq: mhz(118) + 95_000, rssi: -121, scanning: true, hits: 3, last_hit: mhz(121) + 50_000, ..Default::default() };
-        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), bk: fake_bk(), scan_down: 0, scan_quiet: [0.0; 3], monitor: 0, fm: 9_810, now: 0.0, wx_since: None, same: None }
+        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), bk: fake_bk(), scan_down: 0, scan_quiet: [0.0; 3], monitor: 0, fm: 9_810, now: 0.0, wx_since: None, same: None, burst: None }
     }
 
     pub fn cmd(&mut self, c: RadioCmd) {
@@ -271,11 +273,23 @@ impl FakeRadio {
     }
 
     /// Advance to t seconds; `active` is always heard.
+    /// An APRS packet (beacon, message, ack) on `slot`: keyed for 0.4 s, as the APRS task's transmit is.
+    pub fn burst(&mut self, slot: u8) {
+        if !self.live.tx.keyed {
+            self.live.tx = TxLive { keyed: true, slot, mic: 0, refused: None };
+            self.burst = Some((slot, self.now + 0.4));
+        }
+    }
+
     pub fn step(&mut self, t: f32, active: u8) {
         let dt = t - self.last_step;
         self.last_step = t;
         self.same_step(t);
         self.now = t;
+        if self.burst.is_some_and(|(_, end)| t >= end) {
+            self.burst = None;
+            self.live.tx.keyed = false;
+        }
         self.mode_step(t);
         for (i, s) in self.live.slots.iter_mut().enumerate() {
             let heard = i as u8 == active || self.watch & 1 << i != 0;

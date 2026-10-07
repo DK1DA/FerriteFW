@@ -40,6 +40,7 @@ macro_rules! slow {
     }};
 }
 
+pub mod aprs;
 pub mod chan;
 pub mod data;
 pub mod keys;
@@ -249,6 +250,9 @@ pub struct App {
     seen: u32,
     /// [`lights`]'s flags: dark, warned of auto off, power off wanted, the waking key swallowed.
     lit: u8,
+    /// The APRS settings from the APRS store ([`aprs`]), and whether they were loaded and need writing back.
+    aprs: aprs::AprsCfg,
+    aprs_st: u8,
     /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
     rx_mask: u8,
     /// Slots whose own RX tone is heard on the carrier (busy lockout "wrong tone").
@@ -310,6 +314,8 @@ impl App {
             paused_until: None,
             seen: 0,
             lit: 0,
+            aprs: aprs::AprsCfg::DEFAULT,
+            aprs_st: 0,
             rx_mask: 0,
             tone_mask: 0,
             scan_mask: 0,
@@ -375,11 +381,10 @@ impl App {
             (self.out.cur, self.out.step) = (self.out.sync.trailing_zeros() as u8, 0);
         }
         let slot = self.out.cur;
-        let s = &self.slots[slot as usize];
         let c = match self.out.step {
-            0 => RadioCmd::TuneSlot { slot, freq: s.freq() },
+            0 => RadioCmd::TuneSlot { slot, freq: self.tuned_freq(slot) },
             k => {
-                let (param, value) = slot::params(s.cfg())[k as usize - 1];
+                let (param, value) = slot::params(&self.tuned_cfg(slot))[k as usize - 1];
                 let value = if param == Param::Power && self.capped(slot) { 0 } else { value };
                 let value = if param == Param::Squelch { self.sq_level(slot) as i32 } else { value };
                 RadioCmd::SlotParam { slot, param, value }
@@ -714,6 +719,13 @@ impl App {
         self.out.push(RadioCmd::Activity);
         self.screen.raw(self, Some(key), None, true);
         if let Key::Ptt(slot) = key {
+            // APRS-18: in compose any PTT sends; PTT C in APRS mode opens compose from any screen. Neither keys voice.
+            if matches!(self.screen, Screen::Compose(c) if !c.quick_edit_on()) {
+                return screens::msgs::send(self, store);
+            }
+            if self.aprs_slot(slot) {
+                return self.open(Dest::Compose);
+            }
             // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there. PTT A, B and
             // C key their own slot; the side connector's keys the active slot.
             self.ptt_slot = slot;
@@ -785,6 +797,7 @@ impl App {
         if self.screen.timeout().is_some_and(|t| now.wrapping_sub(self.last_input) >= t) {
             self.go_home();
         }
+        self.aprs_tick(store.data());
         self.radio_tick(live);
         self.screen.tick(self, live);
         if self.screen == Screen::Home {
@@ -914,8 +927,9 @@ impl App {
         self.rx_mask & self.watch_mask() & !(1 << self.active) & !self.relay_mask != 0
     }
 
+    /// The watched slots: Watch's, and C while APRS mode has it (APRS-16).
     fn watch_mask(&self) -> u8 {
-        [0, 0b011, 0b111][self.watch as usize % 3]
+        [0, 0b011, 0b111][self.watch as usize % 3] | (self.set.aprs_mode as u8) << aprs::APRS_SLOT
     }
 
     /// The slot's frequency and every setting, to the Radio task (made when popped: [`App::pop_cmd`]).
@@ -926,8 +940,7 @@ impl App {
     /// 1.25 m: transmit power fixed at 0.25 W (the Radio task enforces it too). By the band it transmits on:
     /// a split's TX band, not RX's.
     fn capped(&self, slot: u8) -> bool {
-        let s = &self.slots[slot as usize];
-        slot::band_of(s.cfg().tx_of(s.freq())) == Some(BAND_125M)
+        slot::band_of(self.tuned_cfg(slot).tx_of(self.tuned_freq(slot))) == Some(BAND_125M)
     }
 
     /// Split on the active slot: transmit on `tx` whatever RX is tuned to (MENU 5's 4th choice). Refused (false,
@@ -956,6 +969,9 @@ impl App {
     pub fn greyed(&self, item: Item) -> Option<&'static str> {
         let s = &self.slots[self.active as usize];
         match item {
+            // APRS-19: nothing on the APRS slot changes
+            Item::Watch | Item::BatterySave | Item::Channel | Item::Advanced => None,
+            _ if self.aprs_slot(self.active) => Some("APRS mode: MENU 0 5 3"),
             Item::Step if s.on_channel() => Some("VFO only"), // VFO-8
             Item::Power if self.capped(self.active) => Some("Fixed at 0.25 W on 1.25 m"),
             _ => None,

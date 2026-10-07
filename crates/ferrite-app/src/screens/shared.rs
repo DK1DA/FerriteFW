@@ -196,7 +196,9 @@ impl App {
         let sl = &self.slots[s as usize];
         let lv = &live.slots[s as usize];
         b.clear();
-        if lv.scanning {
+        if self.aprs_slot(s) {
+            b.push(b"APRS"); // APRS-17
+        } else if lv.scanning {
             b.push(b"SCAN");
         } else if sl.on_channel() {
             crate::slot::chan_num(sl.ch.map_or(0, |c| c.num), b);
@@ -212,7 +214,7 @@ impl App {
     pub(crate) fn chan_name(&self, s: u8, live: &LiveAll) -> Buf<16> {
         let sl = &self.slots[s as usize];
         let mut n = Buf::<16>::new();
-        if !live.slots[s as usize].scanning {
+        if !live.slots[s as usize].scanning && !self.aprs_slot(s) {
             if let Some(c) = sl.ch.filter(|_| sl.on_channel()) {
                 n.set(c.name());
             }
@@ -223,7 +225,7 @@ impl App {
     /// The slot's frequency, or the scan's current step while it scans.
     pub(crate) fn shown_freq(&self, s: u8, live: &LiveAll) -> u32 {
         let lv = &live.slots[s as usize];
-        if lv.scanning { lv.freq } else { self.slots[s as usize].freq() }
+        if lv.scanning { lv.freq } else { self.tuned_freq(s) }
     }
 
     /// The slot's state word and colour on a card: RX, relay, off (not watched), scanning, idle.

@@ -854,8 +854,11 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     fn callsign(&self) -> Option<Buf<10>> {
         self.extra.callsign()
     }
-    fn aprs_freq(&self) -> Freq10 {
-        self.extra.aprs_freq()
+    fn aprs_cfg(&self) -> AprsCfg {
+        self.extra.aprs_cfg()
+    }
+    fn beacon(&self) -> Beacon {
+        self.extra.beacon()
     }
     fn messages(&self) -> u16 {
         self.extra.messages()
@@ -865,6 +868,9 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
     fn draft(&self) -> Draft {
         self.extra.draft()
+    }
+    fn quick(&self, i: usize) -> Option<Buf<67>> {
+        self.extra.quick(i)
     }
     fn waypoints(&self) -> u16 {
         self.extra.waypoints()

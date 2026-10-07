@@ -14,6 +14,7 @@ use std::path::Path;
 
 use ferrite_sim::fake;
 
+mod shots_aprs;
 mod shots_d;
 mod termport;
 mod window;
@@ -447,7 +448,24 @@ fn main() {
         run(&mut app, &mut fb, t, &mut t);
         save(&fb, name, scale);
     }
+    // GPS while moving (GPS-17, GPS-19): 46 km/h on a course of 120 degrees; the go-to dial turns course up.
+    if let Some(f) = store.fix.get() {
+        store.fix.set(Some(ferrite_app::data::Fix { speed_kmh: 46, heading: 120, ..f }));
+        for &(name, dest, keys) in &[("gps-position-moving", Dest::GpsPosition, &[][..]), ("waypoint-go-moving", Dest::Waypoints, &[(Key::Down, 100), (Key::Menu, 100)][..])] {
+            press(&mut app, Key::Exit, 800, &mut t);
+            run(&mut app, &mut fb, t + 3500, &mut t);
+            app.open(dest);
+            for &(k, hold) in keys {
+                press(&mut app, k, hold, &mut t);
+                t += 150;
+            }
+            run(&mut app, &mut fb, t, &mut t);
+            save(&fb, name, scale);
+        }
+        store.fix.set(Some(f));
+    }
     shots_d::run(scale);
+    shots_aprs::run(scale);
     themed(scale);
 }
 

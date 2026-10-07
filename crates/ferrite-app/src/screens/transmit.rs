@@ -40,8 +40,7 @@ pub fn tx_freq(app: &App, slot: u8) -> Freq10 {
     if slot == HF_SLOT {
         return app.set.hf.freq;
     }
-    let s = app.slot(slot);
-    s.cfg().tx_of(s.freq())
+    app.tuned_cfg(slot).tx_of(app.tuned_freq(slot)) // the APRS frequency on the APRS slot (APRS-20)
 }
 
 /// Why this slot can't transmit now, by the checks the UI can make. An automatic transmission (a beacon, KISS)
@@ -65,7 +64,7 @@ pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
         return Some(Refusal::Battery);
     }
     // CHAN-4 (safety): a receive-only channel never transmits.
-    if slot < SLOTS as u8 && app.slot(slot).on_channel() && app.slot(slot).ch.is_some_and(|c| c.flags & crate::chan::FLAG_RX_ONLY != 0) {
+    if slot < SLOTS as u8 && !app.aprs_slot(slot) && app.slot(slot).on_channel() && app.slot(slot).ch.is_some_and(|c| c.flags & crate::chan::FLAG_RX_ONLY != 0) {
         return Some(Refusal::RxOnlyChannel);
     }
     if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
@@ -76,16 +75,13 @@ pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
     }
     // TX-37: the band relay never switches at key-up. A split (or a VFO retuned under one) whose TX needs the
     // other relay state from RX is refused here, as a backstop to the check when it is set.
-    if slot < SLOTS as u8 {
-        let s = app.slot(slot);
-        if !txplan::relay_ok(s.cfg().rx_of(s.freq()), tx_freq(app, slot)) {
-            return Some(Refusal::RelayMismatch);
-        }
+    if slot < SLOTS as u8 && !txplan::relay_ok(app.tuned_cfg(slot).rx_of(app.tuned_freq(slot)), tx_freq(app, slot)) {
+        return Some(Refusal::RelayMismatch);
     }
     // TX-21: busy lockout. Carrier: refuse while the squelch is open. Wrong tone: refuse while it is open with a
     // tone other than the slot's RX tone (with no RX tone set, any carrier is another group's).
     if slot < SLOTS as u8 && app.rx_mask & 1 << slot != 0 {
-        let c = app.slot(slot).cfg();
+        let c = app.tuned_cfg(slot);
         let other_tone = c.heard_tone() == 0 || app.tone_mask & 1 << slot == 0;
         if c.busy == 1 || c.busy == 2 && other_tone {
             return Some(Refusal::Busy);

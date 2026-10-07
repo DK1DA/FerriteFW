@@ -6,6 +6,7 @@ use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
+use crate::data::Data;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{self, band_near, mode_chip, shift_chip, shift_text, tone_text, Item, BANDS, STEPS};
 use crate::{App, Screen, PAUSE_S};
@@ -36,6 +37,47 @@ pub(crate) fn card(s: u8, active: u8) -> (i32, i32) {
     (y, h(s))
 }
 
+/// APRS-17: slot C in APRS mode is the APRS card: the frequency, stations heard, the last station or message and
+/// the beacon ("beacon waiting: HF" while the relay is the other way, APRS-20). Below the header, which says APRS.
+fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32, big: bool) {
+    let p = s as usize;
+    let f = app.aprs_freq();
+    let mut heard = Buf::<16>::new();
+    let _ = uwrite!(heard, "{} heard", data.stations());
+    let mut last = Buf::<80>::new();
+    crate::aprs::last_text(data, &mut last);
+    let mut beacon = Buf::<28>::new();
+    app.beacon_text(data, &mut beacon);
+    let waiting = data.beacon().waiting;
+    app.drawn.meter[p] = None;
+    if big {
+        if app.dirty(R_FREQ + p, hash(&(f, 1u8))) {
+            lcd.fill(15, y + 25, 211, 49, SURFACE);
+            w::freq(lcd, 15, 226, y + 64, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+        }
+        if app.dirty(R_INFO + p, hash(&last)) {
+            w::field(lcd, 15, 211, y + 74, y + 92, y + 88, Align::Left, w::fit(last.as_bytes(), &UI_12, 211), &UI_12, TEXT, SURFACE);
+        }
+        if app.dirty(R_SUB + p, hash(&(&beacon, &heard, waiting))) {
+            lcd.fill(14, y + 93, 212, 20, SURFACE);
+            let c = if waiting { AMBER } else { SUB };
+            w::field(lcd, 15, 140, y + 94, y + 111, y + 108, Align::Left, beacon.as_bytes(), &UI_12, c, SURFACE);
+            w::field(lcd, 155, 71, y + 94, y + 111, y + 108, Align::Right, heard.as_bytes(), &UI_12B, TEXT, SURFACE);
+        }
+    } else {
+        if app.dirty(R_FREQ + p, hash(&(f, &heard, 1u8))) {
+            lcd.fill(15, y + 22, 211, 24, SURFACE);
+            w::freq(lcd, 15, 130, y + 42, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+            w::field(lcd, 130, 96, y + 26, y + 44, y + 42, Align::Right, heard.as_bytes(), &UI_12, TEXT, SURFACE);
+        }
+        let (line, c) = if waiting { (beacon.as_bytes(), AMBER) } else { (last.as_bytes(), SUB) };
+        if app.dirty(R_SUB + p, hash(&(line, c))) {
+            lcd.fill(15, y + 46, 211, 15, SURFACE);
+            w::field(lcd, 15, 211, y + 46, y + 60, y + 56, Align::Left, w::fit(line, &UI_12, 211), &UI_12, c, SURFACE);
+        }
+    }
+}
+
 impl View for Home {
     /// KEY-19: ◀▶ step the band or zone (NAV-2).
     fn own_arrows(self) -> bool {
@@ -61,6 +103,21 @@ impl View for Home {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let big = app.keys.is_held(Key::Side(2));
+        // APRS-19: the APRS slot can be looked at, not changed; APRS-17: hold MENU on it is its options.
+        if app.aprs_slot(app.active) {
+            match (e.key, e.press) {
+                (Key::Menu, Long) => return app.open_screen(super::opts::Of::AprsCard.screen()),
+                // the shortcuts that don't touch the slot (scope, watch) still run
+                (Key::Digit(1 | 4), Long) => {}
+                (Key::Up | Key::Down | Key::Left | Key::Right, Short | Repeat)
+                | (Key::Slot | Key::VfoMem | Key::Digit(_), Long)
+                | (Key::VfoMem | Key::Side(2) | Key::Digit(_), Short) => {
+                    app.aprs_refuse(app.active);
+                    return;
+                }
+                _ => {}
+            }
+        }
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) if app.keys.is_held(Key::Side(1)) => {
                 super::squelch::step(app, if e.key == Key::Up { 1 } else { -1 })
@@ -115,6 +172,9 @@ impl View for Home {
     }
 
     fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
+        if app.aprs_refuse(app.active) {
+            return; // APRS-19
+        }
         if app.keys.is_held(Key::Side(1)) {
             return super::squelch::step(app, d);
         }
@@ -152,7 +212,8 @@ impl View for Home {
             let lv = live.slots[s as usize];
             let (state, sc) = app.state(s, live);
             let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
-            if app.dirty(R_FRAME + p, hash(&(s, y, h, border))) {
+            let aprs = app.aprs_slot(s);
+            if app.dirty(R_FRAME + p, hash(&(s, y, h, border, aprs))) {
                 lcd.fill(6, y, 228, h, BG);
                 lcd.fill_r(6, y, 228, h, 3, SURFACE);
                 lcd.frame_r(6, y, 228, h, 3, border);
@@ -191,6 +252,10 @@ impl View for Home {
                     let f = if state == "RX" { &UI_12B } else { &UI_12 };
                     w::field(lcd, 154, 72, hy, hy + 17, hb, Align::Right, state.as_bytes(), f, sc, SURFACE);
                 }
+            }
+            if aprs {
+                aprs_card(app, lcd, cx.store.data(), s, y, big);
+                continue;
             }
             let f = app.shown_freq(s, live);
             // Channel mode puts the name first, the frequency small under it (HOME-4); a VFO, a scan or a channel
@@ -299,6 +364,9 @@ impl View for Home {
         }
         let group = if app.slots[app.active as usize].on_channel() { "Zone" } else { "Band" };
         let mid = if app.watched_rx() { ("#", "Pause") } else { ("OK", "Quick") };
+        if app.aprs_slot(app.active) {
+            return Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, ("Hold MENU", "APRS")]); // APRS-17
+        }
         Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, (ARROWS_LR, group)])
     }
 }

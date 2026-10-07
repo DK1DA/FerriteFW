@@ -665,6 +665,7 @@ fn literal_scanner() {
 /// Group B: transmit, scan, scope, tone search, counter, FM, HF, weather, alert, crossband, layouts.
 mod radio_activity;
 mod lights;
+mod aprs;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]

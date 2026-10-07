@@ -10,6 +10,7 @@
 //! The screens reach these through [`crate::chan::ChannelStore::data`]; a store without them returns
 //! [`NoData`], and every list shows empty. [`crate::sample::Sample`] fills them for the simulator and tests.
 
+pub use crate::aprs::AprsCfg;
 use ferrite_core::freq::Freq10;
 use ferrite_ui::text::Buf;
 
@@ -129,6 +130,15 @@ pub struct Message {
     pub state: MsgState,
 }
 
+/// The beacon, as the APRS task has it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Beacon {
+    /// One is due but needs the band relay in the other state (APRS-20): it waits for the active slot.
+    pub waiting: bool,
+    /// Seconds to the next timed beacon.
+    pub next_s: Option<u32>,
+}
+
 /// The message being written: it lives with the APRS task's outgoing message (which holds it for retries),
 /// so the App keeps no text buffer of its own.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -197,6 +207,10 @@ pub struct Sat {
     pub used: bool,
     /// GPS or BeiDou (the ATGM336H tracks both).
     pub beidou: bool,
+    /// Elevation in degrees (0 horizon, 90 overhead) and azimuth in degrees from north, from GSV; for the sky
+    /// plot (GPS-18).
+    pub elev: u8,
+    pub azim: u16,
 }
 
 /// A scan range preset (MENU 0 1 7; SCAN-4, SCAN-10).
@@ -346,6 +360,8 @@ pub enum Op {
     MessageRead(u16),
     BeaconNow,
     ClearHeard,
+    /// The APRS settings changed (written back by the App: [`crate::App::aprs_cfg`]).
+    AprsCfg(AprsCfg),
     /// DTMF memory i (0-15): set, or cleared with None.
     Dtmf(u8, Option<Dtmf>),
 }
@@ -376,9 +392,13 @@ pub trait Data {
     fn callsign(&self) -> Option<Buf<10>> {
         None
     }
-    /// The APRS frequency (0 5 7 1).
-    fn aprs_freq(&self) -> Freq10 {
-        14_439_000
+    /// The APRS settings kept with the APRS store (0 5 5 1, 0 5 5 4, 0 5 7 1).
+    fn aprs_cfg(&self) -> AprsCfg {
+        AprsCfg::DEFAULT
+    }
+    /// The beacon's state, for the APRS card (APRS-17, APRS-20).
+    fn beacon(&self) -> Beacon {
+        Beacon::default()
     }
 
     /// APRS messages, newest first, inbox and sent together.

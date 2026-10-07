@@ -425,6 +425,18 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.aprs_mode as u8);
             s.aprs_mode
         }
+        [5, 5, 1] => {
+            app.beacon_mode_text(b);
+            app.aprs_cfg().beacon != 0
+        }
+        [5, 5, 4] => {
+            pick(b, &crate::aprs::POWERS, app.aprs_cfg().power);
+            app.aprs_cfg().power != 0
+        }
+        [5, 7, 1] => {
+            b.set(crate::slot::mhz3(app.aprs_freq()).as_bytes());
+            app.aprs_cfg().f5k != 0
+        }
         [3, 2, 5] => {
             pick(b, &ON_OFF, s.scope_wf as u8);
             s.scope_wf
@@ -555,7 +567,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 28] = [
+pub(crate) const SETTABLE: [&[u8]; 30] = [
     &[1, 1],
     &[3, 1, 2],
     &[3, 1, 3],
@@ -567,6 +579,8 @@ pub(crate) const SETTABLE: [&[u8]; 28] = [
     &[3, 2, 5],
     &[3, 3, 1],
     &[5, 3],
+    &[5, 5, 1],
+    &[5, 5, 4],
     &[6, 4],
     &[6, 5],
     &[6, 6],
@@ -615,7 +629,13 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [3, 2, 3] => s.scope_dwell = (s.scope_dwell.clamp(1, 40) as i32 + d).clamp(1, 40) as u8,
         [3, 2, 4] => s.scope_trig = cycle(s.scope_trig, d, SCOPE_TRIGGERS.len()),
         [3, 2, 5] => s.scope_wf = !s.scope_wf,
-        [5, 3] => s.aprs_mode = !s.aprs_mode, // APRS-15: the slot C takeover comes in milestone 5
+        [5, 3] => {
+            let on = !app.set.aprs_mode;
+            app.set_aprs_mode(on); // APRS-15
+        }
+        [5, 5, 1] => app.step_beacon(d),
+        [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
+        [5, 7, 1] => app.step_aprs_freq(d),
         [3, 3, 1] => s.same = !s.same,
         [9, 2, 1] => s.bt = !s.bt,
         [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
@@ -679,7 +699,10 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [3, 2, 3] => s.scope_dwell = d.scope_dwell,
         [3, 2, 4] => s.scope_trig = d.scope_trig,
         [3, 2, 5] => s.scope_wf = d.scope_wf,
-        [5, 3] => s.aprs_mode = d.aprs_mode,
+        [5, 3] if s.aprs_mode != d.aprs_mode => app.set_aprs_mode(d.aprs_mode),
+        [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
+        [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
+        [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
         [3, 3, 1] => s.same = d.same,
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,

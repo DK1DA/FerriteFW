@@ -154,6 +154,8 @@ pub struct SimCore {
     kb_held: Vec<usize>,
     mouse: Option<usize>,
     knob_flash: (i8, u32),
+    /// The second the APRS task last ran.
+    aprs_s: u32,
     tx: Option<u8>,
     battery: usize,
     layout: u8,
@@ -276,6 +278,7 @@ impl SimCore {
             kb_held: Vec::new(),
             mouse: None,
             knob_flash: (0, 0),
+            aprs_s: u32::MAX,
             tx: None,
             battery: 0,
             layout: 0,
@@ -415,6 +418,20 @@ impl SimCore {
                     app.link_write_done();
                 } else {
                     dev.link.write_pct = Some(p + 2);
+                }
+            }
+            // The APRS task, once a second (APRS-15 to APRS-20): arrivals notify, packets key C for a moment.
+            if now / 1000 != self.aprs_s {
+                self.aprs_s = now / 1000;
+                let relay_ok = ferrite_core::txplan::relay_ok(app.tuned_freq(app.active()), app.aprs_freq());
+                let n = store.extra.aprs_tick(self.aprs_s, app.aprs_on(), relay_ok);
+                if let Some((from, text)) = n.inbound {
+                    app.notify(from.as_bytes(), text.as_bytes(), false); // APRS-6
+                }
+                if let Some(what) = n.tx {
+                    if ferrite_app::screens::transmit::auto_tx(app, 2, what.as_bytes()) {
+                        radio.burst(2);
+                    }
                 }
             }
             let secs = self.clock0 + now as u64 / 1000;

@@ -9,6 +9,9 @@ use crate::data::*;
 use crate::settings::Settings;
 use crate::slot::{SlotCfg, DCS_FLAG, DEFAULT_CFG};
 use core::cell::Cell;
+
+mod aprs;
+pub use aprs::AprsNews;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_ui::text::Buf;
 
@@ -134,19 +137,20 @@ const SENSORS: [(&str, u32, &str, i16, u32, u32); 5] = [
 ];
 
 // prn, snr, used, BeiDou
-const SATS: [(u8, u8, bool, bool); 12] = [
-    (2, 41, true, false),
-    (5, 38, true, false),
-    (6, 22, false, false),
-    (12, 44, true, false),
-    (13, 35, true, false),
-    (15, 18, false, false),
-    (19, 40, true, false),
-    (24, 29, true, false),
-    (25, 33, true, false),
-    (8, 36, true, true),
-    (11, 27, true, true),
-    (14, 12, false, true),
+/// PRN, signal (dB-Hz), used, BeiDou, elevation, azimuth.
+const SATS: [(u8, u8, bool, bool, u8, u16); 12] = [
+    (2, 41, true, false, 62, 48),
+    (5, 38, true, false, 41, 300),
+    (6, 22, false, false, 9, 205),
+    (12, 44, true, false, 78, 140),
+    (13, 35, true, false, 33, 92),
+    (15, 18, false, false, 6, 330),
+    (19, 40, true, false, 55, 230),
+    (24, 29, true, false, 21, 12),
+    (25, 33, true, false, 27, 165),
+    (8, 36, true, true, 47, 260),
+    (11, 27, true, true, 18, 120),
+    (14, 12, false, true, 4, 60),
 ];
 
 const PRESETS: [(&str, Freq10, Freq10, u8, u8, bool, u8); 4] = [
@@ -195,7 +199,8 @@ pub struct Sample {
     events_read: Cell<u32>,
     events_cleared: Cell<bool>,
     msgs_read: Cell<u32>,
-    sent: Cell<Option<Message>>,
+    /// The APRS task's live side: heard, messages with their tries, beacons.
+    aprs: aprs::AprsSim,
     draft: Cell<Draft>,
     quick: Cell<[Option<Buf<67>>; crate::words::QUICK]>,
     wp_gone: Cell<u32>,
@@ -229,7 +234,7 @@ impl Sample {
             events_read: Cell::new(0),
             events_cleared: Cell::new(false),
             msgs_read: Cell::new(0),
-            sent: Cell::new(None),
+            aprs: aprs::AprsSim::new(),
             draft: Cell::new(Draft::default()),
             quick: Cell::new([None; crate::words::QUICK]),
             wp_gone: Cell::new(0),
@@ -303,7 +308,18 @@ impl Sample {
     }
 
     fn sent_n(&self) -> u16 {
-        self.sent.get().is_some() as u16
+        self.aprs.live_n()
+    }
+
+    /// A second of the simulated APRS task ([`aprs`]): APRS mode on or off, and whether C can transmit with the
+    /// band relay where the active slot holds it. The caller notifies the arrivals and shows the transmissions.
+    pub fn aprs_tick(&self, now_s: u32, on: bool, relay_ok: bool) -> AprsNews {
+        let known = |c: &[u8]| STATIONS.iter().any(|s| s.0.as_bytes() == c) || self.aprs.heard(c);
+        let n = self.aprs.tick(now_s, on, relay_ok, &known);
+        if n.changed {
+            self.bump();
+        }
+        n
     }
 }
 
@@ -352,13 +368,15 @@ impl Data for Sample {
     }
 
     fn stations(&self) -> u16 {
-        if self.heard_cleared.get() { 0 } else { STATIONS.len() as u16 }
+        self.aprs.stations() + if self.heard_cleared.get() { 0 } else { STATIONS.len() as u16 }
     }
     fn station(&self, i: u16) -> Option<Station> {
         if i >= self.stations() {
             return None;
         }
-        let (call, sym, pos, ago_s, via, course, alt_m, times, comment, msg, msg_min) = STATIONS[i as usize];
+        let Some(k) = i.checked_sub(self.aprs.stations()) else { return self.aprs.station(i) };
+        let (call, sym, pos, ago_s, via, course, alt_m, times, comment, msg, msg_min) = STATIONS[k as usize];
+        let ago_s = ago_s + self.aprs.now_s();
         Some(Station { call: txt(call), sym, pos, ago_s, via: txt(via), course, alt_m, times, comment: txt(comment), msg: txt(msg), msg_min })
     }
     fn callsign(&self) -> Option<Buf<10>> {
@@ -370,10 +388,11 @@ impl Data for Sample {
     }
     fn message(&self, i: u16) -> Option<Message> {
         if i < self.sent_n() {
-            return self.sent.get();
+            return self.aprs.message(i);
         }
         let k = i - self.sent_n();
         let &(inbound, peer, text, ago_s, state) = MESSAGES.get(k as usize)?;
+        let ago_s = ago_s + self.aprs.now_s();
         let state = if state == MsgState::Unread && self.msgs_read.get() & 1 << k != 0 { MsgState::Read } else { state };
         Some(Message { inbound, peer: txt(peer), text: txt(text), ago_s, state })
     }
@@ -382,6 +401,12 @@ impl Data for Sample {
     }
     fn quick(&self, i: usize) -> Option<Buf<67>> {
         self.quick.get().get(i).copied().flatten()
+    }
+    fn aprs_cfg(&self) -> AprsCfg {
+        self.aprs.cfg.get()
+    }
+    fn beacon(&self) -> Beacon {
+        self.aprs.beacon()
     }
 
     fn waypoints(&self) -> u16 {
@@ -423,8 +448,8 @@ impl Data for Sample {
         SATS.len() as u8
     }
     fn sat(&self, i: u8) -> Option<Sat> {
-        let &(prn, snr, used, beidou) = SATS.get(i as usize)?;
-        Some(Sat { prn, snr, used, beidou })
+        let &(prn, snr, used, beidou, elev, azim) = SATS.get(i as usize)?;
+        Some(Sat { prn, snr, used, beidou, elev, azim })
     }
 
     fn presets(&self) -> u8 {
@@ -602,7 +627,7 @@ impl Data for Sample {
                 let d = self.draft.get();
                 let ok = self.call.get().is_some() && !d.to.is_empty() && !d.text.is_empty(); // APRS-8
                 if ok {
-                    self.sent.set(Some(Message { inbound: false, peer: Buf::from(d.to.as_bytes()), text: d.text, ago_s: 0, state: MsgState::Pending }));
+                    self.aprs.send(d.to.as_bytes(), d.text);
                     self.draft.set(Draft::default());
                 }
                 ok
@@ -612,11 +637,25 @@ impl Data for Sample {
                     self.msgs_read.set(self.msgs_read.get() | 1 << k);
                     true
                 }
-                None => true,
+                None => {
+                    self.aprs.read(i);
+                    true
+                }
             },
-            Op::BeaconNow => self.call.get().is_some(),
+            Op::BeaconNow => {
+                let ok = self.call.get().is_some(); // APRS-8
+                if ok {
+                    self.aprs.beacon_now();
+                }
+                ok
+            }
             Op::ClearHeard => {
                 self.heard_cleared.set(true);
+                self.aprs.clear_heard();
+                true
+            }
+            Op::AprsCfg(c) => {
+                self.aprs.cfg.set(c);
                 true
             }
         };

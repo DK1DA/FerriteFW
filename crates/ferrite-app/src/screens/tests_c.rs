@@ -480,7 +480,8 @@ fn fm_preset_returns_to_the_same_fm_screen() {
 
 #[test]
 fn ptt_and_hold_back_from_every_list() {
-    for d in [Dest::EventLog, Dest::AprsHeard, Dest::AprsMessages, Dest::Compose, Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Waypoints, Dest::GpsPosition, Dest::HfRecent, Dest::FmPresets, Dest::Sensors] {
+    // Compose is the exception: PTT sends the message there (APRS-18; tests/aprs.rs).
+    for d in [Dest::EventLog, Dest::AprsHeard, Dest::AprsMessages, Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Waypoints, Dest::GpsPosition, Dest::HfRecent, Dest::FmPresets, Dest::Sensors] {
         let mut t = T::new();
         t.open(d);
         t.hold(Key::Exit);

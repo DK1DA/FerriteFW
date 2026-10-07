@@ -103,7 +103,7 @@ impl View for Aprs {
         let _ = uwrite!(l, "{} heard", n);
         let mut r = Buf::<32>::new();
         let mut f = Buf::<16>::new();
-        mhz_text(data.aprs_freq(), &mut f);
+        mhz_text(app.aprs_freq(), &mut f);
         let _ = uwrite!(r, "newest first \u{b7} {}", Txt(f.as_bytes()));
         app.list_head(lcd, l.as_bytes(), r.as_bytes());
         let rows = self.cur.rows(n, ROWS2, &ALL, |row, i| {

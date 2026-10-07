@@ -28,6 +28,8 @@ pub enum Of {
     Scope,
     /// The channel browser: show hidden channels (decision 63).
     Channels,
+    /// Home's APRS card (APRS-17).
+    AprsCard,
 }
 
 impl Of {
@@ -44,6 +46,8 @@ enum Act {
     Open(Dest),
     /// Show hidden channels in the lists, or not (a setting, kept).
     ShowHidden,
+    /// Beacons off, or on again in their mode (APRS-17).
+    Beacon,
 }
 
 type Opt = (&'static str, Act, &'static str);
@@ -54,8 +58,9 @@ const LOG: [Opt; 3] = [
     ("Clear the log", Act::Confirm(Op::ClearLog), "Every event goes, unread ones too"),
     ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DSC, AIS, sensors, popups"),
 ];
-const HEARD: [Opt; 4] = [
+const HEARD: [Opt; 5] = [
     ("Beacon now", Act::Do(Op::BeaconNow), "Sends your position once (needs a callsign)"),
+    ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 5 1)"),
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
     ("Clear the heard list", Act::Confirm(Op::ClearHeard), "Stations come back as they are heard"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
@@ -71,6 +76,12 @@ const GPS: [Opt; 3] = [
     ("GPS settings", Act::Open(Dest::Group(6)), "On or off, format, units, time zone"),
 ];
 const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, step, speed, trigger, waterfall")];
+const APRS_CARD: [Opt; 4] = [
+    ("Beacon now", Act::Do(Op::BeaconNow), "Sends your position once (needs a callsign)"),
+    ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 5 1)"),
+    ("Heard list", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
+    ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
+];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
 const WAYPOINTS: [Opt; 2] = [
     ("Mark here", Act::Do(Op::MarkHere), "A waypoint at this fix"),
@@ -86,6 +97,7 @@ fn rows(of: Of) -> &'static [Opt] {
         Of::Waypoints => &WAYPOINTS,
         Of::Scope => &SCOPE,
         Of::Channels => &CHANNELS,
+        Of::AprsCard => &APRS_CARD,
     }
 }
 
@@ -99,6 +111,7 @@ fn title(of: Of) -> &'static [u8] {
         Of::Waypoints => b"Waypoints",
         Of::Scope => b"Scope",
         Of::Channels => b"Channels",
+        Of::AprsCard => b"APRS slot",
     }
 }
 
@@ -150,6 +163,10 @@ impl View for Options {
                 Act::Open(d) => {
                     app.back();
                     app.open(d);
+                }
+                Act::Beacon => {
+                    app.back();
+                    app.toggle_beacon();
                 }
                 Act::ShowHidden => {
                     app.set.show_hidden = !app.set.show_hidden;

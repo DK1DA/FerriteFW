@@ -251,7 +251,7 @@ impl Compose {
         Compose { field: to_set as u8, case: if to_set { 0 } else { 1 }, pcase: next_case(d.text.as_bytes(), 2), ..self }
     }
 
-    fn quick_edit_on(self) -> bool {
+    pub(crate) fn quick_edit_on(self) -> bool {
         (self.edit as usize) < crate::words::QUICK
     }
 }
@@ -467,6 +467,37 @@ impl Compose {
     }
 }
 
+/// OK on the text, or PTT in compose (APRS-18): the message goes to the APRS task's queue, a word being
+/// predicted taken as it stands.
+pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
+    let Screen::Compose(c) = app.screen else { return };
+    let mut s = c.resolved(store);
+    if s.field == 1 && app.set.predictive && !app.text.is_empty() {
+        let mut t = text_of(store, s);
+        if !accept(app, &mut s, &mut t) {
+            return; // it said why
+        }
+        put_text(store, s, t);
+        app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
+    }
+    let data = store.data();
+    let d = data.draft();
+    // APRS-8: nothing sends without a callsign.
+    if data.callsign().is_none() {
+        return app.show_toast(slow!("Set a callsign first").as_bytes(), slow!("MENU 0 8 7 1").as_bytes(), false);
+    }
+    let text = text_of(store, s);
+    if d.to.is_empty() || text.is_empty() {
+        return app.show_toast(slow!("Nothing to send").as_bytes(), if d.to.is_empty() { slow!("add a recipient").as_bytes() } else { slow!("write a message").as_bytes() }, false);
+    }
+    if data.request(Op::Send) {
+        app.back();
+        app.show_toast(slow!("Message queued").as_bytes(), d.to.as_bytes(), false);
+    } else {
+        app.show_toast(slow!("Not sent").as_bytes(), slow!("try again").as_bytes(), false);
+    }
+}
+
 impl View for Compose {
     fn name(self) -> &'static str {
         if self.quick_edit_on() { "Quick message" } else { "Compose message" }
@@ -563,23 +594,7 @@ impl View for Compose {
                 app.back();
                 return app.show_toast(slow!("Quick message").as_bytes(), b"kept", false);
             }
-            (Key::Menu, Short) => {
-                // APRS-8: nothing sends without a callsign.
-                if data.callsign().is_none() {
-                    return app.show_toast(slow!("Set a callsign first").as_bytes(), slow!("MENU 0 8 7 1").as_bytes(), false);
-                }
-                let text = text_of(store, s);
-                if d.to.is_empty() || text.is_empty() {
-                    return app.show_toast(slow!("Nothing to send").as_bytes(), if d.to.is_empty() { slow!("add a recipient").as_bytes() } else { slow!("write a message").as_bytes() }, false);
-                }
-                if data.request(Op::Send) {
-                    app.back();
-                    app.show_toast(slow!("Message queued").as_bytes(), d.to.as_bytes(), false);
-                } else {
-                    app.show_toast(slow!("Not sent").as_bytes(), slow!("try again").as_bytes(), false);
-                }
-                return;
-            }
+            (Key::Menu, Short) => return send(app, store),
             _ => return,
         }
         if to {
