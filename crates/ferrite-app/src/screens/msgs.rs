@@ -354,8 +354,8 @@ impl View for Compose {
             let cw = text4_width(c.as_bytes(), &UI_12);
             lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
             let focus = self.field == 1;
-            lcd.fill_r(8, y + 18, 224, h, 4, if focus { FOCUS } else { SURFACE });
-            lcd.frame_r(8, y + 18, 224, h, 4, if focus { BLUE } else { LINE });
+            lcd.fill_r(8, y + 18, 224, h, 2, if focus { FOCUS } else { SURFACE });
+            lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
             let lines = wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, d.text.as_bytes(), if focus { FOCUS } else { SURFACE });
             if focus {
                 caret(lcd, d.text.as_bytes(), 14, y + 22, 212, lines, pending);
@@ -401,8 +401,8 @@ fn field_box(lcd: &mut impl Panel, y: i32, h: i32, label: &[u8], v: &[u8], focus
     lcd.fill(0, y, 240, h + 26, BG);
     lcd.text4(8, y + 12, label, &UI_12, SUB, BG);
     let bg = if focus { FOCUS } else { SURFACE };
-    lcd.fill_r(8, y + 18, 224, h, 4, bg);
-    lcd.frame_r(8, y + 18, 224, h, 4, if focus { BLUE } else { LINE });
+    lcd.fill_r(8, y + 18, 224, h, 2, bg);
+    lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
     let base = y + 18 + h / 2 + 6;
     if v.is_empty() {
         lcd.text4(16, base, empty, &UI_12, DIM, bg);

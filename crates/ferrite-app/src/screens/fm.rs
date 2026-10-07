@@ -198,7 +198,7 @@ impl View for Fm {
                 w::field(lcd, 16, 208, 114, 136, 132, Align::Center, pre.as_bytes(), &UI_15B, TEXT, BG);
                 w::field(lcd, 16, 208, 138, 156, 152, Align::Center, b"No RDS", &UI_12, DIM, BG);
             } else {
-                lcd.fill_r(8, 110, 224, 74, 4, SURFACE);
+                lcd.fill_r(8, 110, 224, 74, 2, SURFACE);
                 w::field(lcd, 16, 208, 114, 136, 132, Align::Left, ps, &UI_15B, TEXT, SURFACE);
                 w::wrap(lcd, 16, 208, 138, 166, 152, 15, rt, &UI_12, SUB, SURFACE);
                 w::field(lcd, 16, 208, 166, 182, 178, Align::Left, pre.as_bytes(), &UI_12, DIM, SURFACE);

@@ -99,11 +99,11 @@ impl View for Alert {
         let on = self.silenced || (app.now / FLASH_MS).is_multiple_of(2);
         if app.dirty(R_FRAME, hash(&on)) {
             let c = if on { RED } else { ALERT_BG };
-            lcd.frame_r(4, 24, 232, 272, 6, c);
-            lcd.frame_r(5, 25, 230, 270, 5, c);
+            lcd.frame_r(4, 24, 232, 272, 3, c);
+            lcd.frame_r(5, 25, 230, 270, 2, c);
         }
         if app.dirty(R_TOP, hash(&(a.kind, a.event, a.areas))) {
-            lcd.fill_r(6, 26, 228, 268, 4, ALERT_BG);
+            lcd.fill_r(6, 26, 228, 268, 2, ALERT_BG);
             w::warn_icon(lcd, 16, 34, RED, ALERT_BG);
             lcd.text4(34, 45, KINDS[a.kind as usize % 3].as_bytes(), &UI_12B, RED, ALERT_BG);
             let ev: &[u8] = if a.event.is_empty() { b"Alert" } else { a.event.as_bytes() };

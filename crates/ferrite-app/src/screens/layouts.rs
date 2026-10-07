@@ -31,6 +31,7 @@ pub fn tick(app: &mut App) {
     if app.radio.mode != Mode::Strip || app.radio.centre != f {
         app.radio.mode = Mode::Strip;
         app.radio.centre = f;
+        app.out.push(RadioCmd::ScopeCfg { bars: scope::STRIP_BARS as u8, dwell: 10 });
         app.out.push(RadioCmd::Sweep { centre: f, step: STRIP_STEP, on: true });
     }
 }
@@ -121,7 +122,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         ModeLive::Scope { centre, bars, .. } => (centre, bars),
         _ => (f, [0; SCOPE_BARS]),
     };
-    scope::strip(app, lcd, 10, 200, 34, centre, STRIP_STEP, &bars);
+    scope::strip(app, lcd, 10, 200, 34, centre, STRIP_STEP, &bars[..scope::STRIP_BARS]);
     // The other slots, a line each.
     for (i, o) in (0..SLOTS as u8).filter(|&o| o != a).enumerate() {
         let (st, c) = app.state(o, live);
@@ -154,8 +155,8 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         let border = if active { BLUE } else if state == "RX" { GREEN } else { LINE };
         if app.dirty(R_FRAME + p, hash(&(s, border))) {
             lcd.fill(6, y, 228, h, BG);
-            lcd.fill_r(6, y, 228, h, 6, SURFACE);
-            lcd.frame_r(6, y, 228, h, 6, border);
+            lcd.fill_r(6, y, 228, h, 3, SURFACE);
+            lcd.frame_r(6, y, 228, h, 3, border);
             for r in [R_HEAD, R_FREQ, R_INFO, R_SUB] {
                 app.drawn.hash[r + p] = 0;
             }

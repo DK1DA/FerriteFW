@@ -177,7 +177,7 @@ impl View for DtmfPad {
         app.list_head(lcd, head.as_bytes(), right.as_bytes());
         if app.dirty(R_NOTE, hash(&t)) {
             lcd.fill(8, 60, 224, 60, BG);
-            lcd.frame_r(8, 60, 224, 60, 6, if t.is_empty() { LINE } else { BLUE });
+            lcd.frame_r(8, 60, 224, 60, 3, if t.is_empty() { LINE } else { BLUE });
             let s: &[u8] = if t.is_empty() { b"type the digits" } else { t.as_bytes() };
             let (f, c) = if t.is_empty() { (&UI_12, DIM) } else { (&UI_15B, TEXT) };
             w::field(lcd, 12, 216, 70, 110, 96, Align::Center, s, f, c, BG);

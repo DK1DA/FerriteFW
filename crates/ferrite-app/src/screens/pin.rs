@@ -236,7 +236,7 @@ impl View for Pin {
             for i in 0..MAX as i32 {
                 let (bx, filled) = (36 + 29 * i, i < n as i32);
                 lcd.fill(bx, 110, 24, 32, BG);
-                lcd.frame_r(bx, 110, 24, 32, 4, if i == n as i32 { BLUE } else { LINE });
+                lcd.frame_r(bx, 110, 24, 32, 2, if i == n as i32 { BLUE } else { LINE });
                 if filled && set {
                     lcd.text4_aligned(bx + 12, 132, Align::Center, &digits[i as usize..i as usize + 1], &UI_15B, TEXT, BG);
                 } else if filled {

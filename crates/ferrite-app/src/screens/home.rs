@@ -146,8 +146,8 @@ impl View for Home {
             let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
             if app.dirty(R_FRAME + p, hash(&(s, y, h, border))) {
                 lcd.fill(6, y, 228, h, BG);
-                lcd.fill_r(6, y, 228, h, 6, SURFACE);
-                lcd.frame_r(6, y, 228, h, 6, border);
+                lcd.fill_r(6, y, 228, h, 3, SURFACE);
+                lcd.frame_r(6, y, 228, h, 3, border);
                 for r in [R_HEAD, R_FREQ, R_INFO, R_SUB] {
                     app.drawn.hash[r + p] = 0;
                 }

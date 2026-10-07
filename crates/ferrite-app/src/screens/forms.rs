@@ -74,7 +74,7 @@ pub(crate) fn field_box(lcd: &mut impl Panel, x: i32, y: i32, w_: i32, h: i32, l
     let (bg, border) = if focused { (FOCUS, BLUE) } else { (BG, LINE) };
     let lc = if focused { BLUE } else { SUB };
     lcd.fill(x, y, w_, h, BG);
-    lcd.fill_r(x, y, w_, h, 4, bg);
+    lcd.fill_r(x, y, w_, h, 2, bg);
     let two = h >= 36 && !label.is_empty();
     let (vx, vb) = if two {
         lcd.text4_rows(x + 8, y + 15, label, &UI_12, lc, bg, y + 2, y + 18);
@@ -89,7 +89,7 @@ pub(crate) fn field_box(lcd: &mut impl Panel, x: i32, y: i32, w_: i32, h: i32, l
     if cursor {
         lcd.fill(vx + vw + 1, vb - 12, 7, 15, TEXT);
     }
-    lcd.frame_r(x, y, w_, h, 4, border);
+    lcd.frame_r(x, y, w_, h, 2, border);
 }
 
 /// A picker column: the value list around the current one, `rows` tall, the current in the middle and
@@ -109,7 +109,7 @@ pub(crate) fn picker(lcd: &mut impl Panel, x: i32, y: i32, w_: i32, rows: i32, r
         let base = ry + rh / 2 + 5;
         if k == 0 {
             lcd.fill(x, ry, w_, rh, bg);
-            lcd.fill_r(x, ry, w_, rh, 3, BLUE);
+            lcd.fill_r(x, ry, w_, rh, 1, BLUE);
             w::field(lcd, x + 8, w_ - 16, ry + 1, ry + rh - 1, base, Align::Center, b.as_bytes(), &UI_12B, BLUE_FG, BLUE);
         } else {
             let c = if k.abs() == 1 { TEXT } else { DIM };
@@ -125,7 +125,7 @@ pub(crate) fn keypad(lcd: &mut impl Panel, y: i32, legend: impl Fn(u8) -> &'stat
     for (i, &k) in ORDER.iter().enumerate() {
         let (cx, cy) = (8 + (i as i32 % 3) * 76, y + (i as i32 / 3) * 24);
         lcd.fill(cx, cy, 72, 22, BG);
-        lcd.frame_r(cx, cy, 72, 22, 3, LINE);
+        lcd.frame_r(cx, cy, 72, 22, 1, LINE);
         let (key, text): (&[u8], &[u8]) = match k {
             10 => (b"*", star),
             11 => (b"#", hash_),

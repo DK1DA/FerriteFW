@@ -147,7 +147,22 @@ pub struct Settings {
     pub fixed_alt: i16,
     /// 0 3 3 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
     pub same_codes: [u32; SAME_CODES],
+    /// Band scope (0 3 2): bars (an index into [`SCOPE_BAR_COUNTS`]), step (into the tuning step list), dwell
+    /// per point in 0.1 ms (1-40), trigger action ([`SCOPE_TRIGGERS`]), the trigger line (0 none, 1-9: hold a
+    /// digit on the scope), the waterfall row, and the scope's mode (FM, NFM, AM: \* on the scope).
+    pub scope_bars: u8,
+    pub scope_step: u8,
+    pub scope_dwell: u8,
+    pub scope_trig: u8,
+    pub scope_line: u8,
+    pub scope_wf: bool,
+    pub scope_mode: u8,
 }
+
+/// 0 3 2 1's values (SCOPE-9).
+pub const SCOPE_BAR_COUNTS: [u8; 4] = [30, 60, 120, 240];
+/// 0 3 2 4's values (SCOPE-10).
+pub const SCOPE_TRIGGERS: [&str; 3] = ["Off", "Monitor", "Log"];
 
 /// 0 6 3's values.
 pub const COORD_FORMATS: [&str; 4] = ["Degrees", "Deg, min", "Deg, min, sec", "Grid square"];
@@ -189,6 +204,13 @@ impl Settings {
         fixed: crate::data::Pos { lat: 0, lon: 0 },
         fixed_alt: 0,
         same_codes: [0; SAME_CODES],
+        scope_bars: 1,
+        scope_step: 11, // 25 kHz
+        scope_dwell: 10,
+        scope_trig: 0,
+        scope_line: 0,
+        scope_wf: false,
+        scope_mode: 0,
     };
 
     /// The region's name, or "Not set".

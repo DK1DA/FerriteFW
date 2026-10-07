@@ -255,6 +255,8 @@ pub async fn task() {
                 | RadioCmd::ScanSkip { .. }
                 | RadioCmd::ScanZones { .. }
                 | RadioCmd::Sweep { .. }
+                | RadioCmd::ScopeCfg { .. }
+                | RadioCmd::ScopeListen { .. }
                 | RadioCmd::ToneSearch { .. }
                 | RadioCmd::Counter(_)
                 | RadioCmd::Hf { .. }

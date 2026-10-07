@@ -81,10 +81,10 @@ pub fn badge(lcd: &mut impl Panel, x: i32, y: i32, slot: u8, filled: bool, bg: u
     let c = slot_colour(slot);
     let (fg, back) = if filled { (BLUE_FG, c) } else { (c, bg) };
     lcd.fill(x, y, 14, 14, bg);
-    lcd.fill_r(x, y, 14, 14, 3, back);
+    lcd.fill_r(x, y, 14, 14, 1, back);
     lcd.text4_rows(x + 4, y + 11, &[LETTERS[slot as usize % 3]], &UI_12B, fg, back, y + 1, y + 13);
     if !filled {
-        lcd.frame_r(x, y, 14, 14, 3, c);
+        lcd.frame_r(x, y, 14, 14, 1, c);
     }
 }
 
@@ -93,7 +93,7 @@ pub fn tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16, bg: u16
     let w = text4_width(s, &UI_12B) + 10;
     let x = x_right - w;
     field(lcd, x, w, y, y + 16, y + 12, Align::Center, s, &UI_12B, c, bg);
-    lcd.frame_r(x, y, w, 16, 3, c);
+    lcd.frame_r(x, y, w, 16, 1, c);
     w
 }
 
@@ -101,7 +101,7 @@ pub fn tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16, bg: u16
 pub fn chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], fg: u16, bg: u16) -> i32 {
     let w = text4_width(s, &UI_12) + 10;
     field(lcd, x, w, y, y + 17, y + 13, Align::Center, s, &UI_12, fg, bg);
-    lcd.frame_r(x, y, w, 17, 3, LINE);
+    lcd.frame_r(x, y, w, 17, 1, LINE);
     w
 }
 
@@ -121,7 +121,7 @@ pub fn chip_slot(lcd: &mut impl Panel, slot: (i32, i32), y: i32, s: &[u8], fg: u
     lcd.fill(x, y, w, 17, bg);
     if !s.is_empty() {
         field(lcd, x + 1, w - 2, y + 1, y + 16, y + 13, Align::Center, fit(s, &UI_12, w - 4), &UI_12, fg, bg);
-        lcd.frame_r(x, y, w, 17, 3, frame);
+        lcd.frame_r(x, y, w, 17, 1, frame);
     }
 }
 
@@ -139,7 +139,7 @@ pub fn chips_sel(lcd: &mut impl Panel, x: i32, y: i32, w: i32, items: &[&[u8]], 
         }
         let cw = chip(lcd, cx, y, s, if sel == Some(i) { BLUE } else { TEXT }, bg);
         if sel == Some(i) {
-            lcd.frame_r(cx, y, cw, 17, 3, BLUE);
+            lcd.frame_r(cx, y, cw, 17, 1, BLUE);
         }
         cx += cw + 4;
     }
@@ -219,7 +219,7 @@ pub fn meter_level(dbm: i16) -> u8 {
 pub fn s_text(dbm: i16) -> Buf<4> {
     let mut b = Buf::new();
     let d = dbm as i32;
-    if d <= -73 {
+    if d < -63 {
         let s = ((d + 127).max(0) / 6).min(9);
         let _ = ufmt::uwrite!(b, "S{}", s);
     } else {
@@ -386,8 +386,8 @@ pub const POPUP_BOX: (i32, i32, i32, i32) = (24, 128, 192, 64);
 pub fn popup(lcd: &mut impl Panel, head: &[u8], body: &[u8]) {
     let (x, _, w, _) = POPUP_BOX;
     let (y, h) = if body.is_empty() { (138, 44) } else { (128, 64) };
-    lcd.fill_r(x, y, w, h, 8, BLUE);
-    lcd.fill_r(x + 1, y + 1, w - 2, h - 2, 7, TOAST);
+    lcd.fill_r(x, y, w, h, 4, BLUE);
+    lcd.fill_r(x + 1, y + 1, w - 2, h - 2, 3, TOAST);
     let hb = if body.is_empty() { y + 28 } else { y + 26 };
     lcd.text4_aligned(120, hb, Align::Center, fit(head, &UI_15B, w - 16), &UI_15B, TEXT, TOAST);
     if !body.is_empty() {
@@ -512,7 +512,7 @@ pub fn kv(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], valu
 /// The help line at the foot of a menu (MENU-15): a rounded box, the text wrapped on words, then the path.
 pub fn help_box(lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) {
     lcd.fill(0, y, 240, h, BG);
-    lcd.fill_r(8, y, 224, h, 4, SURFACE);
+    lcd.fill_r(8, y, 224, h, 2, SURFACE);
     let max = 208;
     let (mut line, mut rest) = (0, text);
     while !rest.is_empty() && line < 2 {
@@ -554,7 +554,7 @@ pub fn edit_cell(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, label: &[
     }
     let v = fit(value, &UI_12, w - 10);
     lcd.text4_rows(x + 6, y + 26, v, &UI_12, if grey { DIM } else { TEXT }, bg, y + 15, y + h - 1);
-    lcd.frame_r(x, y, w, h, 3, border);
+    lcd.frame_r(x, y, w, h, 1, border);
 }
 
 /// The knob mark: a small ring, open at the top right, with a tick (the knob changes this).
@@ -684,7 +684,7 @@ impl StatusBar {
         let c = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { SUB };
         let fillc = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { GREEN };
         if !(self.battery_cutoff && self.blink_off) {
-            lcd.frame_r(212, 5, 17, 10, 2, c);
+            lcd.frame_r(212, 5, 17, 10, 1, c);
             lcd.fill(229, 8, 2, 4, c);
             let bars = if self.battery_cutoff { 1 } else { self.battery.clamp(1, 4) as i32 };
             lcd.fill(214, 7, bars * 13 / 4, 6, fillc);

@@ -46,7 +46,7 @@ const G2: [Entry; 5] = [
 ];
 const G3: [Entry; 7] = [
     (slow!("FM broadcast"), slow!("Monitor on"), slow!("Presets, step, AGC, monitor, sleep.")),
-    (slow!("Band scope"), slow!("+/-1 MHz"), slow!("Span, step, speed, trigger, waterfall.")),
+    (slow!("Band scope"), slow!("60 bars"), slow!("Bars, step, speed, trigger, waterfall.")),
     (slow!("Weather alerts"), slow!("On"), slow!("SAME, location codes, tone, channel.")),
     (slow!("Frequency counter"), slow!(""), slow!("Find a nearby transmitter's frequency.")),
     (slow!("HF mode"), slow!(""), slow!("Below 64 MHz. Everything else pauses.")),
@@ -399,6 +399,27 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.fm_monitor as u8);
             !s.fm_monitor
         }
+        [3, 2, 1] => {
+            let _ = uwrite!(b, "{}", SCOPE_BAR_COUNTS[s.scope_bars as usize % 4]);
+            s.scope_bars != 1
+        }
+        [3, 2, 2] => {
+            b.set(crate::slot::STEPS[s.scope_step as usize % crate::slot::STEPS.len()].1.as_bytes());
+            s.scope_step != 11
+        }
+        [3, 2, 3] => {
+            let d = s.scope_dwell.clamp(1, 40);
+            let _ = uwrite!(b, "{}.{} ms", d / 10, d % 10);
+            s.scope_dwell != 10
+        }
+        [3, 2, 4] => {
+            pick(b, &SCOPE_TRIGGERS, s.scope_trig);
+            s.scope_trig != 0
+        }
+        [3, 2, 5] => {
+            pick(b, &ON_OFF, s.scope_wf as u8);
+            s.scope_wf
+        }
         [3, 3, 1] => {
             pick(b, &ON_OFF, s.same as u8);
             !s.same
@@ -472,11 +493,16 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 14] = [
+pub(crate) const SETTABLE: [&[u8]; 19] = [
     &[1, 1],
     &[3, 1, 2],
     &[3, 1, 3],
     &[3, 1, 4],
+    &[3, 2, 1],
+    &[3, 2, 2],
+    &[3, 2, 3],
+    &[3, 2, 4],
+    &[3, 2, 5],
     &[3, 3, 1],
     &[6, 4],
     &[6, 5],
@@ -513,6 +539,11 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [3, 1, 2] => s.fm_step = cycle(s.fm_step, d, FM_STEPS.len()),
         [3, 1, 3] => s.fm_agc = cycle(s.fm_agc, d, 11),
         [3, 1, 4] => s.fm_monitor = !s.fm_monitor,
+        [3, 2, 1] => s.scope_bars = cycle(s.scope_bars, d, SCOPE_BAR_COUNTS.len()),
+        [3, 2, 2] => s.scope_step = cycle(s.scope_step, d, crate::slot::STEPS.len()),
+        [3, 2, 3] => s.scope_dwell = (s.scope_dwell.clamp(1, 40) as i32 + d).clamp(1, 40) as u8,
+        [3, 2, 4] => s.scope_trig = cycle(s.scope_trig, d, SCOPE_TRIGGERS.len()),
+        [3, 2, 5] => s.scope_wf = !s.scope_wf,
         [3, 3, 1] => s.same = !s.same,
         [9, 2, 1] => s.bt = !s.bt,
         [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
@@ -563,6 +594,11 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [3, 1, 2] => s.fm_step = d.fm_step,
         [3, 1, 3] => s.fm_agc = d.fm_agc,
         [3, 1, 4] => s.fm_monitor = d.fm_monitor,
+        [3, 2, 1] => s.scope_bars = d.scope_bars,
+        [3, 2, 2] => s.scope_step = d.scope_step,
+        [3, 2, 3] => s.scope_dwell = d.scope_dwell,
+        [3, 2, 4] => s.scope_trig = d.scope_trig,
+        [3, 2, 5] => s.scope_wf = d.scope_wf,
         [3, 3, 1] => s.same = d.same,
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,

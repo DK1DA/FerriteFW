@@ -77,14 +77,14 @@ pub fn lines(s: &[u8], f: &Font4, wd: i32, max: i32) -> i32 {
 /// A card: SURFACE, rounded, a 1 px border.
 pub fn card(lcd: &mut impl Panel, x: i32, y: i32, wd: i32, h: i32, border: u16) {
     lcd.fill(x, y, wd, h, BG);
-    lcd.fill_r(x, y, wd, h, 6, SURFACE);
-    lcd.frame_r(x, y, wd, h, 6, border);
+    lcd.fill_r(x, y, wd, h, 3, SURFACE);
+    lcd.frame_r(x, y, wd, h, 3, border);
 }
 
 /// A dialog: a card with a coloured title band ("Can't transmit"). The body is the caller's, on SURFACE.
 pub fn dialog(lcd: &mut impl Panel, y: i32, h: i32, title: &[u8], c: u16) {
     card(lcd, 10, y, 220, h, c);
-    lcd.fill_r(11, y + 1, 218, 24, 5, c);
+    lcd.fill_r(11, y + 1, 218, 24, 2, c);
     lcd.fill(11, y + 14, 218, 11, c);
     lcd.text4_rows(19, y + 18, title, &UI_12B, WHITE, c, y + 2, y + 25);
 }
@@ -93,7 +93,7 @@ pub fn dialog(lcd: &mut impl Panel, y: i32, h: i32, title: &[u8], c: u16) {
 pub fn path_chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], bg: u16) -> i32 {
     let wd = text4_width(s, &UI_12B) + 12;
     w::field(lcd, x, wd, y, y + 18, y + 13, Align::Center, s, &UI_12B, BLUE, bg);
-    lcd.frame_r(x, y, wd, 18, 3, BLUE);
+    lcd.frame_r(x, y, wd, 18, 1, BLUE);
     wd
 }
 

@@ -34,6 +34,8 @@ pub enum EntryFor {
     Repeater,
     /// Split's TX frequency on the active slot (MENU 5's 4th choice): kept as typed; BACK keeps the old shift.
     SplitTx,
+    /// The band scope's centre (SCOPE-3).
+    ScopeCentre,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -258,6 +260,7 @@ impl View for Entry {
                 EntryFor::ChannelFreq => b"Channel frequency, MHz",
                 EntryFor::Repeater => b"Repeater output, MHz",
                 EntryFor::SplitTx => b"Split: TX frequency, MHz",
+                EntryFor::ScopeCentre => b"Scope centre, MHz",
             };
             w::field(lcd, 28, 204, 24, 41, 37, Align::Left, what, &UI_12, SUB, BG);
             // As home shows a frequency: MHz and three decimals big, the 10 Hz digits small, so the size never
@@ -407,6 +410,13 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
             // TX-37: refused when it needs the other relay state; entry stays open to type another
             if app.set_split(f) {
                 app.back();
+            }
+        }
+        EntryFor::ScopeCentre => {
+            app.back();
+            if let Screen::Scope(s) = app.screen {
+                app.radio.centre = f;
+                app.screen = super::scope::recentre(app, s, f);
             }
         }
         EntryFor::Channel => {}

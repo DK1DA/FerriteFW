@@ -44,8 +44,15 @@ pub enum RadioCmd {
     ScanSkip { slot: u8 },
     /// Scanning: the zone set, zones 0-15 by bit (SCAN-3; 0 = the current zone only).
     ScanZones { slot: u8, zones: u16 },
-    /// Band scope sweep around a centre at a step (10 Hz units / 25); off when `on` is false (SCOPE-4).
+    /// Band scope sweep around a centre at a step (10 Hz units), with the last [`RadioCmd::ScopeCfg`]; off when
+    /// `on` is false (SCOPE-4). The active slot's chip sweeps with its audio off.
     Sweep { centre: Freq10, step: u16, on: bool },
+    /// The band scope's points per sweep and dwell per point in 0.1 ms (SCOPE-9, 0 3 2 3); sent before a sweep.
+    /// Apart from [`RadioCmd::Sweep`] so a command stays 8 bytes.
+    ScopeCfg { bars: u8, dwell: u8 },
+    /// Band scope: listen on a frequency with the scope's mode (0 FM, 1 NFM, 2 AM), the path set first
+    /// (SCOPE-11); `freq` 0 goes back to sweeping.
+    ScopeListen { freq: Freq10, mode: u8 },
     /// Tone search on a slot (TSRCH-1).
     ToneSearch { slot: u8, on: bool },
     /// The frequency counter (TSRCH-6).
@@ -245,8 +252,8 @@ pub struct TxLive {
     pub refused: Option<crate::txplan::Refusal>,
 }
 
-/// Bars in a band scope sweep: 4 px each across 224 px.
-pub const SCOPE_BARS: usize = 56;
+/// The most bars in a band scope sweep (SCOPE-9: 30, 60, 120 or 240 across 240 px).
+pub const SCOPE_BARS: usize = 240;
 /// Crossband activity: 60 columns of 30 s, the last 30 minutes (XB-16).
 pub const XB_COLS: usize = 60;
 
@@ -255,9 +262,10 @@ pub const XB_COLS: usize = 60;
 pub enum ModeLive {
     #[default]
     Off,
-    /// Band scope: one level per step (0 = blank: not swept or needs the other relay state, SCOPE-5), else
-    /// dBm + 160.
-    Scope { centre: Freq10, bars: [u8; SCOPE_BARS], sweeps: u8, rate: u8 },
+    /// Band scope: one level per step for the first `n` bars (0 = blank: not swept, or it needs the other chip
+    /// or relay state, SCOPE-5), else dBm + 160, averaged with the last sweep (SCOPE-4). While listening,
+    /// `listen` is the frequency and `open` its squelch; the bars hold still.
+    Scope { centre: Freq10, bars: [u8; SCOPE_BARS], n: u8, sweeps: u8, listen: Freq10, open: bool },
     /// Tone search: the tone word found (0 = searching); counter: the strongest frequency (0 = none) and level.
     Probe { freq: Freq10, rssi: i16, tone: u16 },
     /// FM broadcast: frequency (10 kHz), RDS station name and text, level (dBuV) and SNR (dB).
@@ -408,7 +416,8 @@ mod tests {
         assert!(core::mem::size_of::<Event>() <= 16);
         assert!(core::mem::size_of::<RadioCmd>() <= 8);
         // The snapshot isn't queued (one copy in the watch, the Radio task's and the UI's); the exclusive
-        // modes share one slot in it, the largest being the crossband activity strip.
-        assert!(core::mem::size_of::<LiveAll>() <= 160);
+        // modes share one slot in it, the largest being the band scope's 240 bars (SCOPE-9: 308 bytes, about
+        // 0.45 KB more over the three copies than with 56 bars; accepted Oct 6, 2026).
+        assert!(core::mem::size_of::<LiveAll>() <= 320);
     }
 }

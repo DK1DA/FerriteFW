@@ -52,7 +52,8 @@ pub fn store() -> Sample {
 #[derive(Clone, Copy, PartialEq)]
 enum Fake {
     Off,
-    Scope { centre: Freq10, step: u16, t0: f32 },
+    /// The band scope: listening on `listen` (0 = sweeping) since `tl`, the bars held still meanwhile.
+    Scope { centre: Freq10, step: u16, n: u8, dwell: u8, t0: f32, listen: Freq10, tl: f32 },
     Tone { t0: f32 },
     Counter { t0: f32 },
     Fm,
@@ -77,6 +78,8 @@ pub struct FakeRadio {
     watch: u8,
     last_step: f32,
     mode: Fake,
+    /// The scope's bars and dwell ([`RadioCmd::ScopeCfg`]).
+    scope_cfg: (u8, u8),
     fm: u16,
     now: f32,
     /// A slot on a NOAA / Weatheradio channel since this time (s): the fake decoder hears a SAME warning there.
@@ -93,7 +96,7 @@ impl FakeRadio {
         live.slots[0] = SlotLive { freq: mhz(146) + 52_000, rssi: -121, ..Default::default() };
         live.slots[1] = SlotLive { freq: mhz(443) + 47_500, rssi: -121, ..Default::default() };
         live.slots[2] = SlotLive { freq: mhz(118) + 95_000, rssi: -121, scanning: true, hits: 3, last_hit: mhz(121) + 50_000, ..Default::default() };
-        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, fm: 9_810, now: 0.0, wx_since: None, same: None }
+        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), fm: 9_810, now: 0.0, wx_since: None, same: None }
     }
 
     pub fn cmd(&mut self, c: RadioCmd) {
@@ -117,7 +120,16 @@ impl FakeRadio {
                 let s = &mut self.live.slots[slot as usize % 3];
                 s.skips = s.skips.saturating_add(1);
             }
-            RadioCmd::Sweep { centre, step, on } => self.set(if on { Fake::Scope { centre, step, t0: self.now } } else { Fake::Off }),
+            RadioCmd::ScopeCfg { bars, dwell } => self.scope_cfg = (bars, dwell),
+            RadioCmd::Sweep { centre, step, on } => {
+                let (n, dwell) = self.scope_cfg;
+                self.set(if on { Fake::Scope { centre, step, n, dwell, t0: self.now, listen: 0, tl: 0.0 } } else { Fake::Off })
+            }
+            RadioCmd::ScopeListen { freq, .. } => {
+                if let Fake::Scope { listen, tl, .. } = &mut self.mode {
+                    (*listen, *tl) = (freq, self.now);
+                }
+            }
             RadioCmd::ToneSearch { on, .. } => self.set(if on { Fake::Tone { t0: self.now } } else { Fake::Off }),
             RadioCmd::Counter(on) => self.set(if on { Fake::Counter { t0: self.now } } else { Fake::Off }),
             RadioCmd::Broadcast(BroadcastCmd::Fm(f)) => {
@@ -179,20 +191,32 @@ impl FakeRadio {
         let noise = |x: f32| -122.0 + (x * 12.9).sin() * 3.0 + (x * 3.3).cos() * 2.0;
         self.live.mode = match self.mode {
             Fake::Off => ModeLive::Off,
-            Fake::Scope { centre, step, t0 } => {
+            Fake::Scope { centre, step, n, dwell, t0, listen, tl } => {
+                // Which chip (and relay state) a frequency needs: HF on chip 1 with the relay, VHF chip 0, UHF
+                // chip 1; points needing another than the centre's are blank (SCOPE-5).
+                let chip = |f: Freq10| if f < mhz(18) { 3 } else if f < mhz(64) { 2 } else if f < mhz(300) { 0 } else { 1 };
+                let tt = if listen != 0 { tl } else { t };
+                let n = (n as usize).clamp(1, SCOPE_BARS);
                 let mut bars = [0u8; SCOPE_BARS];
-                for (i, b) in bars.iter_mut().enumerate() {
-                    let f = centre as f32 + (i as f32 - SCOPE_BARS as f32 / 2.0) * step as f32;
-                    let mut lv = noise(f / 1000.0 + t * 0.7);
+                for (i, b) in bars[..n].iter_mut().enumerate() {
+                    let fi = centre as i64 + (i as i64 - n as i64 / 2) * step as i64;
+                    if fi <= 0 || chip(fi as Freq10) != chip(centre) {
+                        continue;
+                    }
+                    let f = fi as f32;
+                    let mut lv = noise(f / 1000.0 + tt * 0.7);
                     for (cf, l) in CARRIERS {
                         let d = (f - cf as f32).abs() / step.max(1) as f32;
                         if d < 1.5 {
-                            lv = lv.max(l - d * 14.0 + (t * 2.1 + cf as f32).sin() * 3.0);
+                            lv = lv.max(l - d * 14.0 + (tt * 2.1 + cf as f32).sin() * 3.0);
                         }
                     }
                     *b = (lv + 160.0).clamp(1.0, 255.0) as u8;
                 }
-                ModeLive::Scope { centre, bars, sweeps: ((t - t0) * 3.0) as u8, rate: 3 }
+                // Sweeps a second: n points at the dwell plus about 0.3 ms each to retune.
+                let rate = 1000.0 / (n as f32 * (dwell.max(1) as f32 / 10.0 + 0.3)).max(50.0);
+                let open = listen != 0 && CARRIERS.iter().any(|&(cf, _)| (cf as i64 - listen as i64).abs() < 1_250);
+                ModeLive::Scope { centre, bars, n: n as u8, sweeps: ((tt - t0) * rate) as u8, listen, open }
             }
             Fake::Tone { t0 } => ModeLive::Probe { freq: 0, rssi: -84, tone: if t - t0 > 2.5 { 1000 } else { 0 } },
             Fake::Counter { t0 } => {

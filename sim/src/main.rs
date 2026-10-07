@@ -317,14 +317,23 @@ fn main() {
     shot!(9000, "scan");
     press(&mut app, Key::Side(2), 100, &mut t);
     run(&mut app, &mut fb, t, &mut t); // the radio takes the commands (16 queue at most)
-    // Band scope: hold 1, the marker moved onto the strong carrier.
+    // Band scope: hold 1 with the waterfall row on, the trigger line at 3 (hold 3), the marker moved onto the
+    // strong carrier; then SIDE1 listens to it.
+    app.settings_mut().scope_wf = true;
     press(&mut app, Key::Digit(1), 800, &mut t);
+    run(&mut app, &mut fb, t, &mut t);
+    press(&mut app, Key::Digit(3), 800, &mut t);
     run(&mut app, &mut fb, t, &mut t);
     for _ in 0..13 {
         press(&mut app, Key::Right, 60, &mut t);
         run(&mut app, &mut fb, t, &mut t);
     }
     shot!(2500, "scope");
+    press(&mut app, Key::Side(1), 100, &mut t);
+    shot!(800, "scope-listen");
+    press(&mut app, Key::Side(1), 100, &mut t);
+    app.settings_mut().scope_wf = false;
+    app.settings_mut().scope_line = 0;
     home(&mut app, &mut t);
     // Tone search: MENU 0 3 7, found after 2.5 s.
     app.open(ferrite_app::screens::nav::Dest::ToneSearch);

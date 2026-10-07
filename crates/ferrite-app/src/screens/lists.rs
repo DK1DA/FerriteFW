@@ -190,7 +190,7 @@ pub(crate) fn row2(lcd: &mut impl Panel, y: i32, r: &Row2) {
     if !r.tag.is_empty() {
         let tw = text4_width(r.tag, &UI_12) + 8;
         lcd.text4_rows(x + 4, y + 16, r.tag, &UI_12, sub, bg, y + 3, y + 19);
-        lcd.frame_r(x, y + 4, tw, 16, 3, if r.selected { BLUE_FG } else { DIM });
+        lcd.frame_r(x, y + 4, tw, 16, 1, if r.selected { BLUE_FG } else { DIM });
         x += if r.tag_w > 0 { r.tag_w as i32 } else { TAG_W }.max(tw + 4);
     }
     // right side of line 1: arrow, value
@@ -269,8 +269,8 @@ impl App {
     pub(crate) fn confirm_box(&mut self, lcd: &mut impl Panel, what: &[u8], name: &[u8]) {
         if self.dirty(R_HELP, hash(&(what, name))) {
             let (y, h) = (104, 92);
-            lcd.fill_r(16, y, 208, h, 6, SURFACE);
-            lcd.frame_r(16, y, 208, h, 6, RED);
+            lcd.fill_r(16, y, 208, h, 3, SURFACE);
+            lcd.frame_r(16, y, 208, h, 3, RED);
             w::field(lcd, 24, 192, y + 12, y + 30, y + 26, Align::Center, what, &UI_12B, TEXT, SURFACE);
             w::field(lcd, 24, 192, y + 34, y + 52, y + 48, Align::Center, name, &UI_12, TEXT, SURFACE);
             w::field(lcd, 24, 192, y + 62, y + 80, y + 76, Align::Center, "OK confirms \u{b7} BACK keeps it".as_bytes(), &UI_12, SUB, SURFACE);

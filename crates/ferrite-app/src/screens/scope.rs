@@ -1,22 +1,25 @@
-//! Band scope (manual chapter 21, SCOPE-1 to SCOPE-7; Scope mock-up): signal strength across a span around a
-//! centre, swept by the Radio task. ◀▶ move the marker, the knob moves the centre, OK tunes the active slot
-//! to the marker and goes home, MENU opens the scope options (MENU 0 3 2).
+//! Band scope (manual chapter 21, SCOPE-1 to SCOPE-13; Scope mock-up), after nicFW's: a muted sweep on the
+//! active slot's chip, bars above the noise floor, centre on the strongest, listen to the marker or the
+//! strongest, and a trigger line that listens or logs. ◀▶ move the marker, the knob moves the centre, digits
+//! type it, OK tunes the active slot to the marker, MENU opens the scope options (MENU 0 3 2).
 //!
-//! Bars are redrawn a group at a time when their levels change (SCOPE-7). The waterfall keeps no history in
+//! Bars are redrawn 40 px at a time when their levels change (SCOPE-7). The waterfall keeps no history in
 //! RAM (SCOPE-6): each sweep paints one row into a 12-row band that wraps, a dark line marking the newest.
 //! (The ST7789 hardware scroll is the radio's later refinement.)
 
 use super::activity::Mode;
+use super::entry::{Entry, EntryFor};
 use super::parts;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::band_name;
+use crate::settings::{SCOPE_BAR_COUNTS, SCOPE_TRIGGERS};
+use crate::slot::{band_name, MODES, STEPS};
 use crate::{App, Screen};
 use ferrite_core::freq::Freq10;
 use ferrite_core::keys::Key;
-use ferrite_core::msg::{ModeLive, RadioCmd, SCOPE_BARS};
+use ferrite_core::msg::{LiveAll, ModeLive, RadioCmd, SCOPE_BARS};
 use ferrite_ui::assets::*;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
@@ -24,63 +27,129 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
-/// Scope steps (MENU 0 3 2 2), 10 Hz units; the default is 25 kHz.
-pub const STEPS: [u16; 5] = [625, 1250, 2500, 5000, 10_000];
-pub const STEP_DEFAULT: u8 = 2;
-const MID: i32 = SCOPE_BARS as i32 / 2;
-/// Bars: x = X0 + 4 i, 3 px wide; the area's rows.
-const X0: i32 = 8;
-const TOP: i32 = 46;
-const BASE: i32 = 148;
-/// Waterfall rows.
-const WF_Y: i32 = 168;
+/// The graph's rows: bars stand on BASE.
+const TOP: i32 = 50;
+const BASE: i32 = 162;
+const H: i32 = BASE - TOP;
+/// Bars are drawn this many pixels per dB above the floor (SCOPE-8).
+const PX_PER_DB: i32 = 2;
+/// Bars redraw in six 40 px groups (SCOPE-7).
+const GROUPS: usize = 6;
+/// Waterfall rows, the marker box, the info line.
+const WF_Y: i32 = 184;
 const WF_ROWS: i32 = 12;
+const BOX_Y: i32 = 224;
+const INFO_Y: i32 = 272;
+/// A trigger listen that hears nothing within this gives up and sweeps again (SCOPE-10).
+const TRIGGER_WAIT_MS: u32 = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Scope {
-    /// Bar index, 0-55; the centre is 28.
+    /// Bar index; the centre is n / 2.
     pub marker: u8,
-    pub step: u8,
+    /// 0 sweeping; 1 the marker, 2 the strongest (SIDE1, SIDE2), 3 the trigger (SCOPE-10).
+    pub listen: u8,
+    /// The bar being listened to (the centre doesn't move while listening).
+    pub at: u8,
+    /// The last sweep's strongest bar (255 none), sweeps in a row with it over the trigger line, the last sweep
+    /// counted, and whether a trigger listen has heard its squelch open (it ends when it closes) and since when
+    /// (app time in 16 ms).
+    pub peak: u8,
+    pub run: u8,
+    pub seen: u8,
+    pub heard: bool,
+    pub since: u16,
+}
+
+/// Bars in a sweep (0 3 2 1, SCOPE-9).
+pub fn bars_n(app: &App) -> usize {
+    SCOPE_BAR_COUNTS[app.set.scope_bars as usize % SCOPE_BAR_COUNTS.len()] as usize
+}
+
+/// The step between bars (0 3 2 2), 10 Hz units.
+pub fn step_of(app: &App) -> u16 {
+    STEPS[app.set.scope_step as usize % STEPS.len()].0 as u16
 }
 
 /// Hold 1 on home, MENU 0 3 2 6 (SCOPE-1): the scope around the active slot's frequency.
 pub fn open(app: &mut App) -> Screen {
     let f = app.slot(app.active).freq();
     app.radio.centre = f;
-    let s = Scope { marker: MID as u8, step: STEP_DEFAULT };
-    sweep(app, f, s.step);
-    Screen::Scope(s)
+    sweep(app, f);
+    Screen::Scope(Scope { marker: (bars_n(app) / 2) as u8, listen: 0, at: 0, peak: 255, run: 0, seen: 0, heard: false, since: 0 })
 }
 
-fn sweep(app: &mut App, centre: Freq10, step: u8) {
+fn sweep(app: &mut App, centre: Freq10) {
     app.start_mode(Mode::Scope);
-    app.out.push(RadioCmd::Sweep { centre, step: STEPS[step as usize % STEPS.len()], on: true });
+    let (step, bars, dwell) = (step_of(app), bars_n(app) as u8, app.set.scope_dwell.clamp(1, 40));
+    app.out.push(RadioCmd::ScopeCfg { bars, dwell });
+    app.out.push(RadioCmd::Sweep { centre, step, on: true });
 }
 
-/// The frequency of bar i.
-pub fn bar_freq(centre: Freq10, step: u16, i: i32) -> Freq10 {
-    (centre as i64 + (i - MID) as i64 * step as i64).max(0) as Freq10
+/// The frequency of bar i of n.
+pub fn bar_freq(centre: Freq10, step: u16, n: usize, i: i32) -> Freq10 {
+    (centre as i64 + (i - n as i32 / 2) as i64 * step as i64).max(0) as Freq10
 }
 
-/// The three strongest local peaks, strongest first (bar indexes).
-pub fn peaks(bars: &[u8; SCOPE_BARS]) -> [Option<u8>; 3] {
-    let mut p = [None; 3];
-    for i in 0..SCOPE_BARS {
-        let v = bars[i];
-        let l = if i > 0 { bars[i - 1] } else { 0 };
-        let r = if i + 1 < SCOPE_BARS { bars[i + 1] } else { 0 };
-        if v == 0 || v < l || v < r || parts::level_h(v, 90) < 25 {
+/// The noise floor (the lowest level swept) and the strongest bar (SCOPE-4, SCOPE-8).
+pub fn floor_peak(bars: &[u8]) -> (u8, Option<u8>) {
+    let mut floor = 255;
+    let mut pk: Option<u8> = None;
+    for (i, &v) in bars.iter().enumerate() {
+        if v == 0 {
             continue;
         }
-        for k in 0..3 {
-            if p[k].is_none_or(|j: u8| bars[j as usize] < v) {
-                p.copy_within(k..2, k + 1);
-                p[k] = Some(i as u8);
-                break;
-            }
+        floor = floor.min(v);
+        if pk.is_none_or(|p| bars[p as usize] < v) {
+            pk = Some(i as u8);
         }
     }
-    p
+    (if pk.is_some() { floor } else { 0 }, pk)
+}
+
+/// A bar's height above the floor (SCOPE-8); 0 for a blank one.
+pub fn bar_h(v: u8, floor: u8) -> i32 {
+    if v == 0 {
+        0
+    } else {
+        (v.saturating_sub(floor) as i32 * PX_PER_DB).clamp(1, H)
+    }
+}
+
+/// The trigger line's height above the base: 1-9 in tenths of the graph, 0 none.
+pub fn line_h(line: u8) -> i32 {
+    line.min(9) as i32 * H / 10
+}
+
+fn listen(app: &mut App, f: Freq10) {
+    app.out.push(RadioCmd::ScopeListen { freq: f, mode: app.set.scope_mode % 3 });
+}
+
+/// The active slot's VFO on f (OK, PTT while listening).
+fn tune(app: &mut App, f: Freq10) {
+    let a = app.active as usize;
+    app.slots[a].vfo = f;
+    app.slots[a].vfo_mode = true;
+}
+
+/// A typed centre (SCOPE-3): sweep around it, the marker in the middle.
+pub fn recentre(app: &mut App, s: Scope, f: Freq10) -> Screen {
+    if s.listen != 0 {
+        listen(app, 0);
+    }
+    sweep(app, f);
+    Screen::Scope(Scope { marker: (bars_n(app) / 2) as u8, peak: 255, ..s.sweeping() })
+}
+
+impl Scope {
+    /// The frequency being listened to.
+    fn freq(self, app: &App) -> Freq10 {
+        bar_freq(app.radio.centre, step_of(app), bars_n(app), self.at as i32)
+    }
+
+    fn sweeping(self) -> Self {
+        Scope { listen: 0, at: 0, run: 0, heard: false, ..self }
+    }
 }
 
 impl View for Scope {
@@ -104,23 +173,64 @@ impl View for Scope {
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
         use Press::*;
-        let step = STEPS[self.step as usize % STEPS.len()];
+        let (n, step, centre) = (bars_n(app), step_of(app), app.radio.centre);
+        let m = (self.marker as usize).min(n - 1);
         match (e.key, e.press) {
             (Key::Left | Key::Right, Short | Repeat) => {
                 let d = if e.key == Key::Right { 1 } else { -1 };
-                let m = (self.marker as i32 + d).clamp(0, SCOPE_BARS as i32 - 1) as u8;
+                let m = (m as i32 + d).clamp(0, n as i32 - 1) as u8;
                 app.screen = Screen::Scope(Scope { marker: m, ..self });
             }
             (Key::Menu, Short) => {
                 // SCOPE-3: OK (Go) tunes the active slot's VFO to the marker.
-                let f = bar_freq(app.radio.centre, step, self.marker as i32);
-                let a = app.active as usize;
-                app.slots[a].vfo = f;
-                app.slots[a].vfo_mode = true;
+                let f = bar_freq(centre, step, n, m as i32);
+                tune(app, f);
                 app.go_home();
-                app.send_slot(a as u8);
+                app.send_slot(app.active);
                 let fq = w::freq3(f);
                 app.show_toast(b"Tuned", fq.as_bytes(), false);
+            }
+            (Key::Hash, Short) => {
+                // Centre on the strongest.
+                if self.peak != 255 {
+                    let c = bar_freq(centre, step, n, self.peak as i32);
+                    app.radio.centre = c;
+                    if self.listen != 0 {
+                        listen(app, 0);
+                    }
+                    sweep(app, c);
+                    app.screen = Screen::Scope(Scope { marker: (n / 2) as u8, peak: 255, ..self.sweeping() });
+                }
+            }
+            (Key::Side(k @ (1 | 2)), Short) => {
+                let which = k;
+                if self.listen == which {
+                    listen(app, 0);
+                    app.screen = Screen::Scope(self.sweeping());
+                } else {
+                    let i = if which == 1 { Some(m as u8) } else { (self.peak != 255).then_some(self.peak) };
+                    if let Some(i) = i {
+                        listen(app, bar_freq(centre, step, n, i as i32));
+                        app.screen = Screen::Scope(Scope { listen: which, at: i, run: 0, ..self });
+                    }
+                }
+            }
+            (Key::Star, Short) => {
+                app.set.scope_mode = (app.set.scope_mode + 1) % 3;
+                if self.listen != 0 {
+                    listen(app, self.freq(app));
+                }
+                app.show_toast(b"Mode", MODES[app.set.scope_mode as usize].as_bytes(), false);
+            }
+            (Key::Digit(d), Long) => {
+                // The trigger line: 1 low to 9 high, 0 clears it (SCOPE-3).
+                app.set.scope_line = d;
+                app.screen = Screen::Scope(Scope { run: 0, ..self });
+            }
+            (Key::Digit(d), Short) => app.open_screen(Screen::Entry(Entry::new(EntryFor::ScopeCentre, Some(d)))),
+            (Key::Exit, Short) if self.listen != 0 => {
+                listen(app, 0);
+                app.screen = Screen::Scope(self.sweeping());
             }
             (Key::Exit, Short) => {
                 app.stop_mode();
@@ -131,118 +241,213 @@ impl View for Scope {
     }
 
     fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
-        let step = STEPS[self.step as usize % STEPS.len()];
-        let c = bar_freq(app.radio.centre, step, MID + d);
+        let (n, step) = (bars_n(app), step_of(app));
+        let c = bar_freq(app.radio.centre, step, n, n as i32 / 2 + d);
         app.radio.centre = c;
-        sweep(app, c, self.step);
+        if self.listen != 0 {
+            listen(app, 0);
+            app.screen = Screen::Scope(self.sweeping());
+        }
+        sweep(app, c);
+    }
+
+    /// SCOPE-12: PTT transmits only while listening, on the frequency being listened to.
+    fn ptt(self, app: &mut App, down: bool) {
+        if !down {
+            return;
+        }
+        if self.listen != 0 {
+            tune(app, self.freq(app));
+            app.stop_mode();
+            app.send_slot(app.active);
+            super::nav::transmit(app);
+        } else {
+            app.show_toast(b"Listen to a signal first", b"SIDE1 listens to the marker", false);
+        }
+    }
+
+    /// The trigger (SCOPE-10): after 3 sweeps in a row with the strongest bar over the line, listen to it (until
+    /// its squelch closes) or log it.
+    fn tick(self, app: &mut App, live: &LiveAll) {
+        let ModeLive::Scope { centre, bars, n, sweeps, open, .. } = live.mode else { return };
+        let n = (n as usize).clamp(1, SCOPE_BARS);
+        let (floor, pk) = floor_peak(&bars[..n]);
+        let mut s = Scope { peak: pk.unwrap_or(255), ..self };
+        if s.listen == 3 {
+            if open {
+                s.heard = true;
+            } else if s.heard || ((app.now >> 4) as u16).wrapping_sub(s.since) as u32 * 16 > TRIGGER_WAIT_MS {
+                listen(app, 0);
+                s = s.sweeping();
+            }
+        } else if s.listen == 0 && sweeps != s.seen {
+            s.seen = sweeps;
+            let (trig, line) = (app.set.scope_trig, app.set.scope_line);
+            let over = pk.filter(|&p| line != 0 && bar_h(bars[p as usize], floor) >= line_h(line));
+            s.run = if over.is_some() { s.run.saturating_add(1) } else { 0 };
+            if let (Some(p), 3) = (over.filter(|_| trig != 0), s.run) {
+                let f = bar_freq(centre, step_of(app), n, p as i32);
+                if trig == 1 {
+                    listen(app, f);
+                    s = Scope { listen: 3, at: p, heard: false, since: (app.now >> 4) as u16, ..s };
+                } else {
+                    // Log: the event log's store isn't built yet; until then the toast is the record.
+                    app.show_toast(b"Over the line", w::freq3(f).as_bytes(), false);
+                }
+            }
+        }
+        if s != self && app.screen == Screen::Scope(self) {
+            app.screen = Screen::Scope(s);
+        }
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        let step = STEPS[self.step as usize % STEPS.len()];
-        let (centre, bars, sweeps) = match cx.live.mode {
-            ModeLive::Scope { centre, bars, sweeps, .. } => (centre, bars, sweeps),
-            _ => (app.radio.centre, [0; SCOPE_BARS], 0),
+        let step = step_of(app);
+        let (centre, bars, n, sweeps, open) = match cx.live.mode {
+            ModeLive::Scope { centre, bars, n, sweeps, open, .. } => (centre, bars, (n as usize).clamp(1, SCOPE_BARS), sweeps, open),
+            _ => (app.radio.centre, [0; SCOPE_BARS], bars_n(app), 0, false),
         };
-        // Header: band, centre.
-        if app.dirty(1, hash(&centre)) {
+        let bw = (240 / n as i32).max(1);
+        let (floor, pk) = floor_peak(&bars[..n]);
+        let line = app.set.scope_line;
+        // Header: band, centre; the MHz labels under the graph (SCOPE-2).
+        if app.dirty(1, hash(&(centre, n, step))) {
             w::field(lcd, 8, 80, 21, 39, 34, Align::Left, band_name(centre).as_bytes(), &UI_12, SUB, BG);
             let fq = w::freq3(centre);
             let fw = text4_width(fq.as_bytes(), &UI_12B);
             w::field(lcd, 88, 144 - fw - 4, 21, 39, 34, Align::Right, b"centre", &UI_12, SUB, BG);
             w::field(lcd, 232 - fw, fw, 21, 39, 34, Align::Left, fq.as_bytes(), &UI_12B, TEXT, BG);
             lcd.fill(0, 40, 240, 1, LINE);
-            // Scale: the edges and the centre.
-            let lo = w::freq3(bar_freq(centre, step, 0));
-            let hi = w::freq3(bar_freq(centre, step, SCOPE_BARS as i32 - 1));
+            let lo = w::freq3(bar_freq(centre, step, n, 0));
+            let hi = w::freq3(bar_freq(centre, step, n, n as i32 - 1));
             lcd.fill(0, BASE, 240, 1, LINE);
-            w::field(lcd, 8, 70, 150, 166, 162, Align::Left, lo.as_bytes(), &UI_12, SUB, BG);
-            w::field(lcd, 78, 84, 150, 166, 162, Align::Center, fq.as_bytes(), &UI_12, BLUE, BG);
-            w::field(lcd, 162, 70, 150, 166, 162, Align::Right, hi.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 4, 74, BASE + 2, BASE + 18, BASE + 14, Align::Left, lo.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 78, 84, BASE + 2, BASE + 18, BASE + 14, Align::Center, fq.as_bytes(), &UI_12, BLUE, BG);
+            w::field(lcd, 162, 74, BASE + 2, BASE + 18, BASE + 14, Align::Right, hi.as_bytes(), &UI_12, SUB, BG);
         }
-        // Bars, eight at a time (SCOPE-7): centre line blue, peaks green, the marker amber with its mark.
-        let pk = peaks(&bars);
-        let m = self.marker as usize;
-        for g in 0..SCOPE_BARS / 8 {
-            let r = &bars[g * 8..g * 8 + 8];
-            let has_m = (g * 8..g * 8 + 8).contains(&m);
-            let pks = pk.map(|p| p.filter(|&i| i as usize / 8 == g));
-            if !app.dirty(2 + g, hash(&(r, has_m.then_some(m), pks))) {
+        // Bars, 40 px at a time (SCOPE-7): blank bars grey, the centre line blue, the marker amber, the bar being
+        // listened to green, bars over the trigger red (SCOPE-8), the trigger line dashed red.
+        let m = (self.marker as usize).min(n - 1);
+        let heard = match self.listen {
+            0 => None,
+            _ => Some(self.at as i32),
+        };
+        let per = (40 / bw) as usize;
+        let lh = line_h(line);
+        for g in 0..GROUPS {
+            let (a, b) = (g * per, ((g + 1) * per).min(n));
+            if a >= n {
+                break;
+            }
+            let r = &bars[a..b];
+            let has_m = (a..b).contains(&m).then_some(m);
+            let has_l = heard.filter(|&i| (a as i32..b as i32).contains(&i));
+            if !app.dirty(2 + g, hash(&(r, floor, line, has_m, has_l, n))) {
                 continue;
             }
-            let x = X0 + g as i32 * 32;
-            lcd.fill(x, TOP - 8, 32, BASE - TOP + 8, BG);
+            let x0 = g as i32 * 40;
+            lcd.fill(x0, TOP - 8, 40, H + 8, BG);
             for (k, &v) in r.iter().enumerate() {
-                let i = g * 8 + k;
-                let bx = x + k as i32 * 4;
-                if i as i32 == MID {
-                    lcd.fill(bx + 1, TOP, 1, BASE - TOP, BLUE);
+                let i = a + k;
+                let bx = x0 + k as i32 * bw;
+                if v == 0 {
+                    lcd.fill(bx, TOP, bw, H, SURFACE); // SCOPE-5: the other chip or relay state
+                    continue;
                 }
-                let h = parts::level_h(v, BASE - TOP);
+                if i == n / 2 {
+                    lcd.fill(bx + bw / 2, TOP, 1, H, BLUE);
+                }
+                let h = bar_h(v, floor);
                 let c = if i == m {
                     AMBER
-                } else if pk.contains(&Some(i as u8)) {
+                } else if has_l == Some(i as i32) {
                     GREEN
+                } else if lh > 0 && h >= lh {
+                    RED
                 } else {
                     rgb565(0x4D, 0x80, 0xC0)
                 };
-                if h > 0 {
-                    lcd.fill(bx, BASE - h, 3, h, c);
-                }
-                if i == m {
-                    lcd.tri(bx - 2, TOP - 8, 7, 1, AMBER);
+                lcd.fill(bx, BASE - h, if bw >= 4 { bw - 1 } else { bw }, h, c);
+            }
+            if let Some(i) = has_m {
+                let cx = x0 + (i - a) as i32 * bw + bw / 2;
+                lcd.tri((cx - 3).clamp(x0, x0 + 33), TOP - 8, 7, 1, AMBER);
+            }
+            if lh > 0 {
+                let mut x = x0;
+                while x < x0 + 40 {
+                    lcd.fill(x, BASE - lh, 3, 1, RED);
+                    x += 5;
                 }
             }
         }
-        // Waterfall: one row per sweep, wrapping; the next row's place shows dark.
-        if app.dirty(10, hash(&sweeps)) {
-            let row = (sweeps as i32) % WF_ROWS;
-            let y = WF_Y + row * 3;
-            for (i, &v) in bars.iter().enumerate() {
-                lcd.fill(X0 + i as i32 * 4, y, 4, 3, heat(v));
+        // Waterfall (0 3 2 5): one row per sweep, wrapping; the next row's place shows dark.
+        let wf = app.set.scope_wf;
+        if app.dirty(10, hash(&(wf, wf.then_some(sweeps)))) {
+            if wf {
+                let row = (sweeps as i32) % WF_ROWS;
+                let y = WF_Y + row * 3;
+                for (i, &v) in bars[..n].iter().enumerate() {
+                    lcd.fill(i as i32 * bw, y, bw, 3, heat(v));
+                }
+                let ny = WF_Y + ((row + 1) % WF_ROWS) * 3;
+                lcd.fill(0, ny, 240, 3, BG);
+            } else {
+                lcd.fill(0, WF_Y, 240, WF_ROWS * 3, BG);
             }
-            let ny = WF_Y + ((row + 1) % WF_ROWS) * 3;
-            lcd.fill(X0, ny, 224, 3, BG);
         }
-        // The marker readout: frequency and level, then the peaks.
-        let mf = bar_freq(centre, step, m as i32);
-        let lv = bars[m];
+        // The marker box: the marker (or what is being listened to) and its level; the strongest under it.
+        let (label, lab_c, f, lv) = match self.listen {
+            0 => (&b"Marker"[..], AMBER, bar_freq(centre, step, n, m as i32), bars[m]),
+            _ => (&b"Listen"[..], GREEN, self.freq(app), heard.filter(|&i| (0..n as i32).contains(&i)).map_or(0, |i| bars[i as usize])),
+        };
         let st = if lv == 0 { Buf::from(b"-") } else { w::s_text(lv as i16 - 160) };
-        if app.dirty(11, hash(&(mf, st.as_bytes()))) {
-            let y = 208;
+        if app.dirty(11, hash(&(label, f, st.as_bytes()))) {
+            let y = BOX_Y;
             lcd.fill(6, y, 228, 44, BG);
-            lcd.fill_r(6, y, 228, 44, 6, SURFACE);
-            lcd.frame_r(6, y, 228, 44, 6, AMBER);
-            lcd.text4_rows(15, y + 20, b"Marker", &UI_12, AMBER, SURFACE, y + 4, y + 24);
-            w::freq(lcd, 66, 180, y + 21, mf, &DIG_17, &DIG_17, TEXT, SUB, SURFACE);
+            lcd.fill_r(6, y, 228, 44, 3, SURFACE);
+            lcd.frame_r(6, y, 228, 44, 3, lab_c);
+            lcd.text4_rows(15, y + 20, label, &UI_12, lab_c, SURFACE, y + 4, y + 24);
+            w::freq(lcd, 66, 180, y + 21, f, &DIG_17, &DIG_17, TEXT, SUB, SURFACE);
             w::field(lcd, 180, 46, y + 4, y + 24, y + 20, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
             app.drawn.hash[12] = 0;
         }
         let mut p = Buf::<40>::new();
-        p.push(b"Peaks");
-        for i in pk.iter().flatten() {
-            p.push(b" ");
-            p.push(w::freq3(bar_freq(centre, step, *i as i32)).as_bytes());
-        }
-        if pk[0].is_none() {
-            p.push(b" none");
+        if self.listen != 0 {
+            p.push(if open { b"Signal" } else { b"Quiet " });
+            p.push(" \u{b7} PTT talks here".as_bytes());
+        } else {
+            p.push(b"Strongest ");
+            match pk {
+                Some(i) => p.push(w::freq3(bar_freq(centre, step, n, i as i32)).as_bytes()),
+                None => p.push(b"none"),
+            }
         }
         if app.dirty(12, hash(&p)) {
-            w::field(lcd, 15, 211, 230, 247, 243, Align::Left, p.as_bytes(), &UI_12, SUB, SURFACE);
+            w::field(lcd, 15, 211, BOX_Y + 22, BOX_Y + 39, BOX_Y + 35, Align::Left, p.as_bytes(), &UI_12, SUB, SURFACE);
         }
-        // Span and step (SCOPE-2).
-        let mut f = Buf::<40>::new();
-        let span = step as u32 * SCOPE_BARS as u32;
-        f.push(b"Span ");
-        khz(span, &mut f);
-        f.push(" \u{b7} step ".as_bytes());
-        khz(step as u32, &mut f);
-        if app.dirty(13, hash(&f)) {
-            w::field(lcd, 8, 224, 256, 273, 269, Align::Left, f.as_bytes(), &UI_12, SUB, BG);
+        // Bars, step, speed, trigger (SCOPE-2).
+        let mut t = Buf::<40>::new();
+        let d = app.set.scope_dwell.clamp(1, 40);
+        let _ = uwrite!(t, "{} bars \u{b7} ", n);
+        khz(step as u32, &mut t);
+        let _ = uwrite!(t, " \u{b7} {}.{} ms", d / 10, d % 10);
+        if app.set.scope_trig != 0 {
+            t.push(" \u{b7} ".as_bytes());
+            t.push(SCOPE_TRIGGERS[app.set.scope_trig as usize % 3].as_bytes());
+        }
+        if app.dirty(13, hash(&t)) {
+            w::field(lcd, 8, 224, INFO_Y, INFO_Y + 17, INFO_Y + 13, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
         }
     }
 
     fn hints(self, _: &App) -> Hints {
-        Hints::new(&[(ARROWS_LR, "Marker"), ("Knob", "Centre"), ("OK", "Go")])
+        match self.listen {
+            0 => Hints::new(&[(ARROWS_LR, "Marker"), ("SIDE1", "Listen"), ("OK", "Go")]),
+            1 => Hints::new(&[("PTT", "Talk"), ("SIDE1", "Stop"), ("OK", "Go")]),
+            2 => Hints::new(&[("PTT", "Talk"), ("SIDE2", "Stop"), ("OK", "Go")]),
+            _ => Hints::new(&[("PTT", "Talk"), ("BACK", "Stop"), ("OK", "Go")]),
+        }
     }
 }
 
@@ -275,8 +480,13 @@ pub fn heat(v: u8) -> u16 {
     }
 }
 
+/// The home strip's bars (single + scope): 4 px each across 224 px.
+pub const STRIP_BARS: usize = 56;
+const X0: i32 = 8;
+const MID: i32 = STRIP_BARS as i32 / 2;
+
 /// The small scope under the active slot (home, single + scope; HOME-3): bars, the centre in blue, the edges.
-pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32, centre: Freq10, step: u16, bars: &[u8; SCOPE_BARS]) {
+pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32, centre: Freq10, step: u16, bars: &[u8]) {
     if !app.dirty(region, hash(&(bars, centre))) {
         return;
     }

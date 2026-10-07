@@ -194,7 +194,7 @@ impl View for Confirm {
             w::field(lcd, 12, 216, 36, 54, 50, Align::Left, title.as_bytes(), &UI_12B, col, BG);
             let mut y = 64;
             if !what.is_empty() {
-                lcd.fill_r(8, y, 224, 30, 4, SURFACE);
+                lcd.fill_r(8, y, 224, 30, 2, SURFACE);
                 w::field(lcd, 16, 208, y + 6, y + 24, y + 20, Align::Left, what.as_bytes(), &UI_12B, TEXT, SURFACE);
                 y += 40;
             }

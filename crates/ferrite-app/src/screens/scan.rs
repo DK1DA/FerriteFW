@@ -98,8 +98,8 @@ impl View for Scan {
         };
         if app.dirty(1, hash(&(state == "RX"))) {
             lcd.fill(6, y, 228, h, BG);
-            lcd.fill_r(6, y, 228, h, 6, SURFACE);
-            lcd.frame_r(6, y, 228, h, 6, if state == "RX" { GREEN } else { BLUE });
+            lcd.fill_r(6, y, 228, h, 3, SURFACE);
+            lcd.frame_r(6, y, 228, h, 3, if state == "RX" { GREEN } else { BLUE });
             app.drawn.hash[2..5].fill(0);
         }
         let mut head = Buf::<32>::new();

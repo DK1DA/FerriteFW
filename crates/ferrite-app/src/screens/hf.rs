@@ -597,7 +597,7 @@ impl View for Hf {
         let patch = app.radio.ssb_patch;
         if app.dirty(R_HELP, hash(&(tx, patch))) {
             lcd.fill(0, 204, 240, 96, BG);
-            lcd.fill_r(8, 206, 224, 76, 4, SURFACE);
+            lcd.fill_r(8, 206, 224, 76, 2, SURFACE);
             let mut t = Buf::<140>::new();
             t.push(b"Paused: watch, scan, APRS, decoders, jobs and beacons. ");
             t.push(if tx { b"PTT transmits here on chip 1.".as_slice() } else { b"Receive only here." });

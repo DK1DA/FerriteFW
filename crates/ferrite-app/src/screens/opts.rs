@@ -65,7 +65,7 @@ const GPS: [Opt; 3] = [
     ("Waypoints", Act::Open(Dest::Waypoints), "Distance and bearing to each"),
     ("GPS settings", Act::Open(Dest::Group(6)), "On or off, format, units, time zone"),
 ];
-const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Span, step, speed, threshold, peak hold")];
+const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, step, speed, trigger, waterfall")];
 const WAYPOINTS: [Opt; 2] = [
     ("Mark here", Act::Do(Op::MarkHere), "A waypoint at this fix"),
     ("GPS position", Act::Open(Dest::GpsPosition), "Fix, satellites, grid square"),

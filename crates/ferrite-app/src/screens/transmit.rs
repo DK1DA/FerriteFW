@@ -243,7 +243,7 @@ impl View for Transmit {
         let (y, h) = place(s, s);
         if app.dirty(1, 1) {
             parts::card(lcd, 6, y, 228, h, RED);
-            lcd.fill_r(7, y + 1, 226, 20, 5, RED);
+            lcd.fill_r(7, y + 1, 226, 20, 2, RED);
             lcd.fill(7, y + 12, 226, 9, RED);
             lcd.text4_rows(15, y + 15, b"TRANSMIT", &UI_12B, WHITE, RED, y + 2, y + 20);
         }
@@ -336,7 +336,7 @@ impl View for Transmit {
             for o in (0..SLOTS as u8).filter(|&o| o != s) {
                 let (by, bh) = place(s, o);
                 lcd.fill(6, by, 228, bh, BG);
-                lcd.frame_r(6, by, 228, bh, 6, LINE);
+                lcd.frame_r(6, by, 228, bh, 3, LINE);
                 let ry = by + 3;
                 w::badge(lcd, 12, ry + 2, o, false, BG);
                 let sl = app.slot(o);

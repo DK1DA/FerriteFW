@@ -140,7 +140,7 @@ impl View for Value {
         });
         if app.dirty(R_NOTE, hash(&(item, def))) {
             lcd.fill(0, 41, 240, BOX_H + 6, BG);
-            lcd.frame_r(6, BOX_Y, 228, BOX_H, 6, BLUE);
+            lcd.frame_r(6, BOX_Y, 228, BOX_H, 3, BLUE);
             let mut h = Buf::<24>::new();
             if let Some(i) = qi {
                 let _ = uwrite!(h, "{} ", (i + 1) % 10);
@@ -219,7 +219,7 @@ impl Value {
         if app.dirty(R_SUB, hash(&v)) {
             for i in 0..10 {
                 let x = 15 + i * 22;
-                lcd.fill_r(x, y, 14, 5, 2, if i <= v { BLUE } else { LINE });
+                lcd.fill_r(x, y, 14, 5, 1, if i <= v { BLUE } else { LINE });
                 w::field(lcd, x - 4, 22, y + 7, y + 22, y + 19, Align::Center, &[b'0' + i as u8], &UI_12, SUB, BG);
             }
             w::field(lcd, 15, 200, y + 23, y + 40, y + 36, Align::Left, b"Signal now", &UI_12, SUB, BG);
@@ -232,9 +232,9 @@ impl Value {
         if app.dirty(R_INFO, hash(&(level, open, st))) {
             let by = y + 42;
             lcd.fill(12, by - 2, 216, 14, BG);
-            lcd.fill_r(15, by, 210, 10, 2, LINE);
+            lcd.fill_r(15, by, 210, 10, 1, LINE);
             if level > 3 {
-                lcd.fill_r(15, by, level, 10, 2, SUB);
+                lcd.fill_r(15, by, level, 10, 1, SUB);
             }
             lcd.fill(open, by - 2, 2, 14, BLUE);
             let mut t = Buf::<48>::new();

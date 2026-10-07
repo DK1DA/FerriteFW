@@ -212,8 +212,8 @@ fn draw_key(lcd: &mut impl Panel, i: usize, label: &str, seen: bool, lit: bool) 
     let y = 96 + 30 * row as i32;
     let (bg, edge, fg) = if lit { (BLUE, BLUE, BLUE_FG) } else if seen { (BG, GREEN, TEXT) } else { (BG, LINE, SUB) };
     lcd.fill(x, y, 34, 26, BG);
-    lcd.fill_r(x, y, 34, 26, 3, bg);
-    lcd.frame_r(x, y, 34, 26, 3, edge);
+    lcd.fill_r(x, y, 34, 26, 1, bg);
+    lcd.frame_r(x, y, 34, 26, 1, edge);
     let b = label.as_bytes();
     if b.len() == 1 && (0x18..=0x1b).contains(&b[0]) {
         lcd.tri(x + 13, y + 9, 8, [0, 1, 3, 2][(b[0] - 0x18) as usize], fg);

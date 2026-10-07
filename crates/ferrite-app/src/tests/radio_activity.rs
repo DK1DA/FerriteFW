@@ -875,3 +875,75 @@ fn split_in_the_value_editor() {
     t.tap(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::SplitTx), "{:?}", t.app.screen());
 }
+
+/// A scope report: `peak` dB over a -120 dBm floor on bar `at`, sweep number `sweeps`.
+fn scope_live(t: &mut T, centre: Freq10, at: usize, peak: u8, sweeps: u8, open: bool, listen: Freq10) {
+    let mut bars = [0u8; ferrite_core::msg::SCOPE_BARS];
+    for b in bars[..60].iter_mut() {
+        *b = 40;
+    }
+    bars[at] = 40 + peak;
+    t.live.mode = ferrite_core::msg::ModeLive::Scope { centre, bars, n: 60, sweeps, listen, open };
+    t.wait(100);
+}
+
+/// SCOPE-3, SCOPE-12: SIDE1 listens to the marker and PTT then transmits there; PTT while sweeping doesn't.
+#[test]
+fn scope_listen_and_talk() {
+    let mut t = ready();
+    t.hold(Key::Digit(1));
+    let f = t.freq();
+    t.cmds();
+    ptt(&mut t, true);
+    assert!(matches!(t.app.screen(), Screen::Scope(_)), "PTT while sweeping stays");
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
+    ptt(&mut t, false);
+    t.tap(Key::Right);
+    t.tap(Key::Side(1));
+    assert!(t.cmds().contains(&RadioCmd::ScopeListen { freq: f + 2500, mode: 0 }));
+    ptt(&mut t, true);
+    assert_eq!(t.freq(), f + 2500, "the slot is on the listened frequency");
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
+}
+
+/// SCOPE-10: Monitor listens to the strongest after 3 sweeps over the line, and sweeps again once it closes.
+#[test]
+fn scope_trigger_monitors() {
+    let mut t = T::new();
+    t.app.set.scope_trig = 1;
+    t.hold(Key::Digit(1));
+    let c = t.freq();
+    t.hold(Key::Digit(3)); // the line at 3/10 of the graph: 33 px, 17 dB
+    t.cmds();
+    for k in 1..=2 {
+        scope_live(&mut t, c, 40, 30, k, false, 0);
+    }
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::ScopeListen { .. })), "not before the third sweep");
+    scope_live(&mut t, c, 40, 30, 3, false, 0);
+    let f = c + 10 * 2500;
+    assert!(t.cmds().contains(&RadioCmd::ScopeListen { freq: f, mode: 0 }));
+    scope_live(&mut t, c, 40, 30, 3, true, f);
+    scope_live(&mut t, c, 40, 30, 3, false, f);
+    assert!(t.cmds().contains(&RadioCmd::ScopeListen { freq: 0, mode: 0 }), "squelch closed: sweep again");
+}
+
+/// SCOPE-3: # centres on the strongest; a typed centre sweeps there.
+#[test]
+fn scope_centre_on_strongest_and_typed() {
+    let mut t = T::new();
+    t.hold(Key::Digit(1));
+    let c = t.freq();
+    scope_live(&mut t, c, 10, 30, 1, false, 0);
+    t.cmds();
+    t.tap(Key::Hash);
+    let s = c - 20 * 2500;
+    assert!(t.cmds().contains(&RadioCmd::Sweep { centre: s, step: 2500, on: true }));
+    for k in [Key::Digit(4), Key::Digit(4), Key::Digit(6), Key::Star, Key::Digit(0), Key::Digit(0), Key::Digit(0)] {
+        t.tap(k);
+    }
+    if matches!(t.app.screen(), Screen::Entry(_)) {
+        t.tap(Key::Menu);
+    }
+    assert!(matches!(t.app.screen(), Screen::Scope(_)), "{:?}", t.app.screen());
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Sweep { centre: 44_600_000, on: true, .. })));
+}

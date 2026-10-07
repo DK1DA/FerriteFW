@@ -271,8 +271,8 @@ fn start(app: &mut App) {
 fn side_card(app: &App, lcd: &mut impl Panel, x: i32, y: i32, slot: u8, side: u8, border: u16, tag: (&[u8], u16), last: &[u8], fill: u16) {
     let (wd, h) = (104, 70);
     lcd.fill(x, y, wd, h, BG);
-    lcd.fill_r(x, y, wd, h, 6, fill);
-    lcd.frame_r(x, y, wd, h, 6, border);
+    lcd.fill_r(x, y, wd, h, 3, fill);
+    lcd.frame_r(x, y, wd, h, 3, border);
     let f = app.slot(slot).freq();
     w::badge(lcd, x + 6, y + 7, slot, true, fill);
     lcd.text4_rows(x + 24, y + 18, band_name(f).as_bytes(), &UI_12, SUB, fill, y + 4, y + 22);
@@ -328,7 +328,7 @@ fn render_start(s: Crossband, app: &mut App, lcd: &mut impl Panel, batt: u8) {
     let fail = checks(app, batt, &mut out);
     if app.dirty(10, hash(&out)) {
         lcd.fill(6, 187, 228, 74, BG);
-        lcd.fill_r(6, 187, 228, 74, 6, SURFACE);
+        lcd.fill_r(6, 187, 228, 74, 3, SURFACE);
         for (i, (k, t)) in out.iter().enumerate() {
             let y = 190 + 17 * i as i32;
             match k {
@@ -345,7 +345,7 @@ fn render_start(s: Crossband, app: &mut App, lcd: &mut impl Panel, batt: u8) {
         }
         let (bg, fg, t): (u16, u16, &[u8]) = if fail.is_some() { (LINE, SUB, b"Can't start yet") } else { (GREEN, BLUE_FG, b"# Start") };
         lcd.fill(6, 266, 228, 24, BG);
-        lcd.fill_r(6, 266, 228, 24, 5, bg);
+        lcd.fill_r(6, 266, 228, 24, 2, bg);
         w::field(lcd, 16, 208, 268, 288, 283, Align::Center, t, &UI_12B, fg, bg);
     }
 }
@@ -365,8 +365,8 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
     if app.dirty(1, hash(&(x.state, t))) {
         let (border, fill) = if passing { (GREEN, rgb565(0x10, 0x22, 0x16)) } else { (LINE, SURFACE) };
         lcd.fill(6, 25, 228, 22, BG);
-        lcd.fill_r(6, 25, 228, 22, 5, fill);
-        lcd.frame_r(6, 25, 228, 22, 5, border);
+        lcd.fill_r(6, 25, 228, 22, 2, fill);
+        lcd.frame_r(6, 25, 228, 22, 2, border);
         parts::dot(lcd, 14, 32, 7, if passing { RED } else { GREEN }, fill);
         if passing {
             let wd = lcd.text4_rows(26, 41, b"PASSING ", &UI_12B, GREEN, fill, 27, 46);
@@ -525,7 +525,7 @@ fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, x: &XbLive, s1: u8,
     }
     let (y, h) = (146, 60);
     lcd.fill(6, y, 228, h, BG);
-    lcd.fill_r(6, y, 228, h, 6, SURFACE);
+    lcd.fill_r(6, y, 228, h, 3, SURFACE);
     dir_label(lcd, 12, y + 13, s1, s2, SUB, SURFACE);
     w::field(lcd, 150, 78, y + 2, y + 16, y + 13, Align::Right, b"Last 30 min", &UI_12, SUB, SURFACE);
     dir_label(lcd, 12, y + h - 4, s2, s1, SUB, SURFACE);

@@ -374,7 +374,7 @@ impl View for Setup {
                     let sel = row == REGION_ROWS;
                     let bg = if sel { FOCUS } else { BG };
                     lcd.fill(0, 227, 240, 22, BG);
-                    lcd.fill_r(4, 228, 232, 20, 3, bg);
+                    lcd.fill_r(4, 228, 232, 20, 1, bg);
                     w::field(lcd, 10, 120, 229, 247, 242, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
                     w::field(lcd, 130, 100, 229, 247, 242, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
                     w::wrap(lcd, 10, 220, 249, 299, 262, 15, b"On: transmit wherever the radio can, not only amateur bands. Shows a warning first.", &UI_12, SUB, BG);
@@ -495,8 +495,8 @@ impl View for Setup {
 fn choice(lcd: &mut impl Panel, y: i32, h: i32, name: &[u8], note: &[u8], sel: bool) {
     let (bg, edge) = if sel { (FOCUS, BLUE) } else { (BG, LINE) };
     lcd.fill(0, y - 2, 240, h + 4, BG);
-    lcd.fill_r(10, y, 220, h, 3, bg);
-    lcd.frame_r(10, y, 220, h, 3, edge);
+    lcd.fill_r(10, y, 220, h, 1, bg);
+    lcd.frame_r(10, y, 220, h, 1, edge);
     let base = y + h / 2 + 5;
     w::field(lcd, 17, 120, y + 2, y + h - 2, base, Align::Left, name, &UI_12, TEXT, bg);
     w::field(lcd, 137, 86, y + 2, y + h - 2, base, Align::Right, note, &UI_12, SUB, bg);
@@ -506,7 +506,7 @@ fn choice(lcd: &mut impl Panel, y: i32, h: i32, name: &[u8], note: &[u8], sel: b
 fn text_box(lcd: &mut impl Panel, y: i32, h: i32, label: &[u8], text: &[u8], focused: bool, big: bool) {
     let edge = if focused { BLUE } else { LINE };
     lcd.fill(0, y - 1, 240, h + 2, BG);
-    lcd.frame_r(10, y, 220, h, 4, edge);
+    lcd.frame_r(10, y, 220, h, 2, edge);
     lcd.text4_rows(18, y + 14, label, &UI_12, SUB, BG, y + 1, y + 18);
     let (f, base) = if big { (&UI_15B, y + 37) } else { (&UI_12, y + 30) };
     let tw = lcd.text4_rows(18, base, w::fit(text, f, 196), f, TEXT, BG, y + 18, y + h - 1);
@@ -520,7 +520,7 @@ fn text_box(lcd: &mut impl Panel, y: i32, h: i32, label: &[u8], text: &[u8], foc
 fn preview(lcd: &mut impl Panel, x: i32, y: i32, which: u8, chosen: bool, focus: bool) {
     let edge = if chosen { if focus { BLUE } else { SUB } } else { LINE };
     lcd.fill(x, y, 68, 90, BG);
-    lcd.frame_r(x, y, 68, 90, 4, edge);
+    lcd.frame_r(x, y, 68, 90, 2, edge);
     let cards: &[(i32, i32)] = match which {
         0 => &[(6, 36), (45, 18), (66, 18)],
         1 => &[(6, 36)],

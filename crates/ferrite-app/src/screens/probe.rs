@@ -35,8 +35,8 @@ fn slot_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8) {
     let (y, h) = (25, 70);
     if app.dirty(1, 1) {
         lcd.fill(6, y, 228, h, BG);
-        lcd.fill_r(6, y, 228, h, 6, SURFACE);
-        lcd.frame_r(6, y, 228, h, 6, BLUE);
+        lcd.fill_r(6, y, 228, h, 3, SURFACE);
+        lcd.frame_r(6, y, 228, h, 3, BLUE);
     }
     if app.dirty(2, hash(&(head, st, lv.squelch_open))) {
         w::badge(lcd, 14, y + 8, s, true, SURFACE);

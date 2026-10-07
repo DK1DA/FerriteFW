@@ -61,7 +61,7 @@ impl View for Squelch {
             // 0-9: the level's segments.
             for i in 0..10 {
                 let c = if i < sq { BLUE } else { LINE };
-                lcd.fill_r(20 + i as i32 * 20, 122, 16, 10, 2, c);
+                lcd.fill_r(20 + i as i32 * 20, 122, 16, 10, 1, c);
             }
             w::field(lcd, 8, 30, 136, 152, 148, Align::Left, b"open", &UI_12, SUB, BG);
             w::field(lcd, 172, 60, 136, 152, 148, Align::Right, b"tight", &UI_12, SUB, BG);

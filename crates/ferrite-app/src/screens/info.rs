@@ -337,7 +337,7 @@ impl View for Info {
             let y = 30 + 20 * d.rows.len() as i32;
             let h = (292 - y).min(110);
             lcd.fill(0, y - 6, 240, 300 - y + 6, BG);
-            lcd.fill_r(8, y, 224, h, 4, SURFACE);
+            lcd.fill_r(8, y, 224, h, 2, SURFACE);
             w::wrap(lcd, 16, 208, y + 3, y + h - 3, y + 16, 15, d.note.as_bytes(), &UI_12, TEXT, SURFACE);
         }
     }

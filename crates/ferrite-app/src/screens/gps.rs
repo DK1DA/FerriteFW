@@ -236,7 +236,7 @@ fn satellites(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<
         let mut v = Buf::<4>::new();
         let _ = uwrite!(v, "{}", s.snr);
         w::field(lcd, x, bw, base - h - 17, base - h - 2, base - h - 4, Align::Center, v.as_bytes(), &UI_12, SUB, BG);
-        lcd.fill_r(x + 2, base - h, bw - 4, h, 2, match (s.used, s.beidou) {
+        lcd.fill_r(x + 2, base - h, bw - 4, h, 1, match (s.used, s.beidou) {
             (false, _) => DIM,
             (true, false) => BLUE,
             (true, true) => VIOLET,
