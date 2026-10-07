@@ -28,6 +28,7 @@ use ufmt::uwrite;
 
 pub mod cmd;
 pub mod debug;
+mod list;
 
 /// Where the terminal's output goes: the cable's transmit buffer.
 pub trait Sink {
@@ -179,8 +180,15 @@ const H_MAIN: [(&str, &str); 6] = [
     (slow!("?"), slow!("Help")),
     (slow!("Ctrl-C"), slow!("Leave")),
 ];
-const H_CHANNELS: [(&str, &str); 5] =
-    [(slow!("Up/Dn"), slow!("Move")), (slow!("PgUp/PgDn"), slow!("Page")), (slow!("Enter"), slow!("Edit")), (slow!("Z"), slow!("Zone")), (slow!("Esc"), slow!("Back"))];
+const H_CHANNELS: [(&str, &str); 7] = [
+    (slow!("Enter"), slow!("Edit")),
+    (slow!("N"), slow!("New")),
+    (slow!("D"), slow!("Delete")),
+    (slow!("M"), slow!("Move")),
+    (slow!("/"), slow!("Find")),
+    (slow!("Z"), slow!("Zone")),
+    (slow!("Esc"), slow!("Back")),
+];
 const H_EDIT: [(&str, &str); 5] =
     [(slow!("Up/Dn"), slow!("Field")), (slow!("<- ->"), slow!("Change")), (slow!("Enter"), slow!("Type")), (slow!("#"), slow!("Default")), (slow!("Esc"), slow!("Back"))];
 const H_ZONES: [(&str, &str); 3] = [(slow!("Up/Dn"), slow!("Move")), (slow!("Enter"), slow!("Channels")), (slow!("Esc"), slow!("Back"))];
@@ -199,9 +207,14 @@ const HELP_MAIN: [&str; 3] = [
     slow!(": opens the command line on any page; :help lists the commands, :dump and :load back up."),
     slow!("Ctrl-L redraws the screen, Ctrl-C leaves the terminal."),
 ];
-const HELP_CHANNELS: [&str; 2] = [
+const HELP_CHANNELS: [&str; 7] = [
     slow!("Up/Dn move, PgUp/PgDn page, Home/End jump to the ends, Enter edits a channel."),
-    slow!("Z shows the next zone, then channels with no zone, then all channels."),
+    slow!("Z shows the next zone, then channels with no zone, then all channels. S sorts by the next column."),
+    slow!("/ finds a name or frequency (Enter alone finds the same again). N makes a new channel."),
+    slow!("Space marks a channel (*), A marks the whole list, U clears the marks."),
+    slow!("D deletes, M moves to a zone, C copies to free numbers, R renumbers: the marked channels,"),
+    slow!("or the selected one when none are marked. Delete asks first. Esc stops a change part way."),
+    slow!("A channel open in the radio's own editor isn't changed here: the radio's copy shows."),
 ];
 const HELP_EDIT: [&str; 3] = [
     slow!("<- -> change a field at once: it saves as on the radio, and the radio's screen follows."),
@@ -269,6 +282,21 @@ pub struct Term {
     last: u32,
     /// The time of the last poll (ms): debug answers time out against it.
     now: u32,
+    /// The channel list's tools (TERM-14, `list`): the sort column (0: number order), marks (a bit per channel
+    /// number), a sorted page (channel numbers, its row count, whether it is current, the list's length when it
+    /// was filled), the selected row in it and its first channel, what is being asked, the last thing found,
+    /// and a change to several channels in progress.
+    sort: u8,
+    marks: [u8; list::MARK_BYTES],
+    vis: [u16; list::VIS],
+    vis_n: u8,
+    vis_ok: bool,
+    vis_len: u16,
+    srow: u8,
+    first: u16,
+    ask: list::Ask,
+    find: Buf<16>,
+    bulk: Option<list::Bulk>,
 }
 
 impl Default for Term {
@@ -318,6 +346,17 @@ impl Term {
             nn: 0,
             last: 0,
             now: 0,
+            sort: 0,
+            marks: [0; list::MARK_BYTES],
+            vis: [0; list::VIS],
+            vis_n: 0,
+            vis_ok: false,
+            vis_len: 0,
+            srow: 0,
+            first: list::START,
+            ask: list::Ask::None,
+            find: Buf::new(),
+            bulk: None,
         }
     }
 
@@ -341,7 +380,7 @@ impl Term {
     /// Rows are still waiting for room in the sink, a line waits to run, or the console is streaming: poll
     /// again soon.
     pub fn busy(&self) -> bool {
-        self.page != Page::Off && (self.dirty != 0 || self.clear || self.bye || self.pending || matches!(self.con, Con::Start(_) | Con::Run(_)))
+        self.page != Page::Off && (self.dirty != 0 || self.clear || self.bye || self.pending || self.bulk.is_some() || matches!(self.con, Con::Start(_) | Con::Run(_)))
     }
 
     /// It takes another byte now. False while a whole line waits to run (a load waits for the store between
@@ -570,9 +609,13 @@ impl Term {
             match k {
                 K::Enter => {
                     self.line = None;
-                    self.commit(app, l.as_bytes());
+                    if self.ask == list::Ask::None {
+                        self.commit(app, l.as_bytes());
+                    } else {
+                        self.answer(app, l.as_bytes(), store);
+                    }
                 }
-                K::Esc => self.line = None,
+                K::Esc => (self.line, self.ask) = (None, list::Ask::None),
                 K::Bs => {
                     let n = l.len().saturating_sub(1);
                     let t = Buf::<24>::from(&l.as_bytes()[..n]);
@@ -629,7 +672,8 @@ impl Term {
                     K::End => self.zone_sel = n - 1,
                     K::Enter => {
                         self.zone = zone_of(self.zone_sel, store);
-                        (self.chan_sel, self.chan_top, self.from_zones) = (0, 0, true);
+                        self.from_zones = true;
+                        self.list_reset();
                         self.go(Page::Channels);
                     }
                     K::Esc => self.go(Page::Main),
@@ -648,7 +692,10 @@ impl Term {
     fn open_main(&mut self) {
         let p = MAIN[self.main_sel as usize % MAIN.len()].1;
         match p {
-            Page::Channels => (self.zone, self.chan_sel, self.chan_top, self.from_zones) = (ALL, 0, 0, false),
+            Page::Channels => {
+                (self.zone, self.from_zones) = (ALL, false);
+                self.list_reset();
+            }
             Page::Settings => (self.g, self.sub, self.set_sel) = (0, 0, 0),
             _ => {}
         }
@@ -660,7 +707,10 @@ impl Term {
         (self.rows as u16).saturating_sub(8).max(1)
     }
 
-    fn channels_key<S: ChannelStore>(&mut self, _app: &mut App, k: K, store: &S) {
+    fn channels_key<S: ChannelStore>(&mut self, app: &mut App, k: K, store: &S) {
+        if self.list_key(app, k, store) {
+            return;
+        }
         let n = list_len(self.zone, store);
         let pg = self.page_rows();
         let last = n.saturating_sub(1);
@@ -681,10 +731,10 @@ impl Term {
                     x if x + 1 < z => x + 1,
                     _ => NO_ZONE,
                 };
-                (self.chan_sel, self.chan_top) = (0, 0);
+                self.list_reset();
             }
             K::Enter => {
-                if let Some(c) = chan_at(self.zone, self.chan_sel, store) {
+                if let Some(c) = self.selected(store) {
                     (self.edit, self.field) = (Some(c), 0);
                     self.go(Page::Edit);
                 }
@@ -701,6 +751,9 @@ impl Term {
     }
 
     fn line_max(&self) -> usize {
+        if self.ask != list::Ask::None {
+            return 16;
+        }
         match FIELDS[self.field as usize % FIELDS.len()] {
             F::Name => 16,
             _ => 10,
@@ -827,6 +880,10 @@ impl Term {
     }
 
     fn save(&mut self, app: &mut App, n: Channel) {
+        if list::radio_channel(app) == Some(n.num) {
+            // TERM-17: the radio's editor has it; its copy wins and shows here.
+            return self.say(slow!("Open in the radio's editor: showing its copy; change it there or close it").as_bytes(), true);
+        }
         if Some(n) != self.edit {
             app.put_channel(n);
             self.edit = Some(n);
@@ -893,6 +950,9 @@ impl Term {
 
     fn settings_change(&mut self, app: &mut App, d: i32) {
         let (p, pl) = self.path(self.set_sel);
+        if list::radio_setting(app) == Some((p, pl)) {
+            return self.say(slow!("Open on the radio's menu: change it there, or move off it").as_bytes(), true); // TERM-17
+        }
         let p = &p[..pl];
         if blocked(p) {
             return self.say(slow!("Change this one on the radio: it needs its own screen there").as_bytes(), true);
@@ -909,7 +969,6 @@ impl Term {
 
     // ---- Output ----
 
-    /// Sends what changed while the sink has room: the goodbye, a clear, then each row whose text changed.
     /// A debug command's next request for the firmware (TERM-21), once: memory is read by the caller, the
     /// BK4829 and SI4732 requests go to the Radio task. Answer with [`Term::debug_answer`].
     pub fn debug_req(&mut self) -> Option<ferrite_core::msg::DebugReq> {
@@ -926,6 +985,7 @@ impl Term {
         }
     }
 
+    /// Sends what changed while the sink has room: the goodbye, a clear, then each row whose text changed.
     pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, now: u32, out: &mut impl Sink) {
         self.now = now;
         if self.esc == Seq::Started && now.wrapping_sub(self.esc_at) >= ESC_MS {
@@ -963,6 +1023,20 @@ impl Term {
             out.put(b"\x1b[0m\x1b[2J");
             self.clear = false;
         }
+        // Several channels changing (TERM-14): one write each time the store has taken the last.
+        if self.bulk.is_some() && !app.write_pending() && !store.data().busy() {
+            self.bulk_step(app, store);
+            if self.bulk.is_none() {
+                self.chan_sel = self.chan_sel.min(list_len(self.zone, store).saturating_sub(1));
+            }
+        }
+        if self.page == Page::Channels && self.sort != 0 && (!self.vis_ok || self.vis_len != list_len(self.zone, store)) {
+            self.fill(store);
+        }
+        // TERM-17: a channel open in the radio's editor shows the radio's copy.
+        if let Some(c) = self.edit.filter(|c| self.page == Page::Edit && list::radio_channel(app) == Some(c.num)) {
+            self.edit = store.get(c.num).or(Some(c));
+        }
         // A whole line: run it once the store has taken the last one's writes (TERM-13 never drops a line).
         if self.pending && !app.write_pending() && !store.data().busy() && out.room() >= 2 * ROW_MAX {
             self.pending = false;
@@ -977,7 +1051,8 @@ impl Term {
                 continue;
             }
             let mut h = Hash(0x811C_9DC5);
-            self.row(r, &cx, &mut W { o: &mut h, col: 0, cols: self.cols as u16, rev: false });
+            let colour = app.set.term_colour; // TERM-18, 0 9 2 6
+            self.row(r, &cx, &mut W { o: &mut h, col: 0, cols: self.cols as u16, rev: false, colour });
             let h = h.0 | 1;
             if h != self.hash[r as usize] {
                 if out.room() < ROW_MAX {
@@ -987,7 +1062,7 @@ impl Term {
                 let _ = uwrite!(p, "\x1b[{};1H", r as u16 + 1);
                 out.put(p.as_bytes());
                 let mut s = SinkOut(out);
-                self.row(r, &cx, &mut W { o: &mut s, col: 0, cols: self.cols as u16, rev: false });
+                self.row(r, &cx, &mut W { o: &mut s, col: 0, cols: self.cols as u16, rev: false, colour });
                 out.put(b"\x1b[0m\x1b[K");
                 self.hash[r as usize] = h;
             }
@@ -1178,7 +1253,7 @@ impl Term {
             w.rev();
             w.s(b" ");
             if self.warn {
-                w.bold(self.note.as_bytes());
+                w.warn(self.note.as_bytes());
             } else {
                 w.s(self.note.as_bytes());
             }
@@ -1303,6 +1378,14 @@ impl Term {
                 w.n(list_len(self.zone, st) as u32);
                 w.s(b")   all ");
                 w.n(st.count() as u32);
+                w.s(b"   sort: ");
+                w.s(list::SORTS[self.sort as usize % list::SORTS.len()].as_bytes());
+                let m = self.marks_n();
+                if m > 0 {
+                    w.s(b"   ");
+                    w.n(m as u32);
+                    w.s(b" marked");
+                }
             }
             2 => {
                 w.bold(b" ");
@@ -1312,14 +1395,14 @@ impl Term {
                 }
             }
             _ if b >= 3 && (b as u16) < 3 + self.page_rows() => {
-                let i = self.chan_top + (b as u16 - 3);
-                let Some(c) = chan_at(self.zone, i, st) else {
-                    if i == 0 {
+                let i = b as u16 - 3;
+                let Some(c) = self.row_chan(i, st) else {
+                    if i == 0 && list_len(self.zone, st) == 0 {
                         w.s(slow!("  No channels here.").as_bytes());
                     }
                     return;
                 };
-                let sel = i == self.chan_sel;
+                let sel = self.row_selected(i);
                 if sel {
                     w.rev();
                 }
@@ -1327,6 +1410,9 @@ impl Term {
                 let num = digits(c.num as u32 + 1, &mut d);
                 w.at(4u16.saturating_sub(num.len() as u16));
                 w.s(num);
+                if self.marked(c.num) {
+                    w.s(b"*"); // TERM-14: marked
+                }
                 let mut v = Buf::<16>::new();
                 w.at(6);
                 w.s(c.name());
@@ -1354,8 +1440,19 @@ impl Term {
                     w.fill();
                 }
             }
+            _ if b == body - 2 && (self.ask != list::Ask::None) => {
+                // The question being asked, and what is typed (TERM-14).
+                let mut q = cmd::Msg::new();
+                self.ask_text(st, &mut q);
+                w.s(b"  ");
+                w.warn(q.as_bytes());
+                if let Some(l) = self.line {
+                    w.s(l.as_bytes());
+                    w.s(b"_");
+                }
+            }
             _ if b == body - 2 => {
-                if let Some(c) = chan_at(self.zone, self.chan_sel, st) {
+                if let Some(c) = self.selected(st) {
                     w.s(b"  Channel ");
                     w.n(c.num as u32 + 1);
                     w.s(b" . ");
@@ -1445,7 +1542,7 @@ impl Term {
                 w.s(b"  ");
                 if !self.note.is_empty() && !self.bnote {
                     if self.warn {
-                        w.bold(self.note.as_bytes());
+                        w.warn(self.note.as_bytes());
                     } else {
                         w.s(self.note.as_bytes());
                     }
@@ -1605,7 +1702,7 @@ impl Term {
             _ if b == n + 6 && !self.note.is_empty() && !self.bnote => {
                 w.s(b"  ");
                 if self.warn {
-                    w.bold(self.note.as_bytes());
+                    w.warn(self.note.as_bytes());
                 } else {
                     w.s(self.note.as_bytes());
                 }
@@ -1936,12 +2033,14 @@ pub(crate) fn digits(mut n: u32, d: &mut [u8; 10]) -> &[u8] {
 }
 
 /// One row: text clipped to the width, columns counted (attributes take none), reverse video and bold only
-/// (TERM-1: plain VT100).
+/// (TERM-1: plain VT100); with `colour` (TERM-18, setting 0 9 2 6), ANSI colours in their place: the top line
+/// and the selection white on blue, headings cyan, warnings yellow.
 struct W<'a> {
     o: &'a mut dyn Out,
     col: u16,
     cols: u16,
     rev: bool,
+    colour: bool,
 }
 
 impl W<'_> {
@@ -1985,8 +2084,27 @@ impl W<'_> {
     }
 
     fn rev(&mut self) {
-        self.o.out(b"\x1b[7m");
+        self.o.out(if self.colour { b"\x1b[0;97;44m" } else { b"\x1b[7m" });
         self.rev = true;
+    }
+
+    /// What the attributes go back to after bold or a warning.
+    fn back(&mut self) {
+        self.o.out(match (self.rev, self.colour) {
+            (true, true) => b"\x1b[0;97;44m",
+            (true, false) => b"\x1b[0m\x1b[7m",
+            (false, _) => b"\x1b[0m",
+        });
+    }
+
+    /// A warning: bold, or yellow in colour.
+    fn warn(&mut self, b: &[u8]) {
+        if !self.colour {
+            return self.bold(b);
+        }
+        self.o.out(if self.rev { b"\x1b[1;93;44m" } else { b"\x1b[1;33m" });
+        self.s(b);
+        self.back();
     }
 
     fn plain(&mut self) {
@@ -1995,10 +2113,14 @@ impl W<'_> {
     }
 
     fn bold(&mut self, b: &[u8]) {
-        self.o.out(b"\x1b[1m");
+        self.o.out(match (self.rev, self.colour) {
+            (true, true) => b"\x1b[1;97;44m",
+            (false, true) => b"\x1b[1;36m",
+            _ => b"\x1b[1m",
+        });
         self.s(b);
-        // VT100 has no "bold off": all off, then reverse again if it was on.
-        self.o.out(if self.rev { b"\x1b[0m\x1b[7m" } else { b"\x1b[0m" });
+        // VT100 has no "bold off": all off, then reverse (or the colours) again if it was on.
+        self.back();
     }
 }
 

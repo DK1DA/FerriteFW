@@ -244,6 +244,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Link status"), slow!(""), slow!("Cable and Bluetooth now.")),
         (slow!("Debug console"), slow!("Off"), slow!("Off, cable or Bluetooth.")),
         (slow!("Cable port"), slow!("Auto"), slow!("Link, terminal or KISS.")),
+        (slow!("Terminal colour"), slow!("Off"), slow!("ANSI colour on the cable terminal.")),
     ]),
     ((9, 3), &[(slow!("PIN lock"), slow!("Off"), slow!("Ask for the PIN at power on, or unlock too.")), (slow!("Channel-only mode"), slow!("Off"), slow!("Hide VFO and editing.")), (slow!("Change PIN"), slow!("None"), slow!("Type a new PIN; the old one first."))]),
     ((9, 5), &[
@@ -420,6 +421,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.scope_wf as u8);
             s.scope_wf
         }
+        [9, 2, 6] => {
+            pick(b, &ON_OFF, s.term_colour as u8);
+            s.term_colour
+        }
         [3, 3, 1] => {
             pick(b, &ON_OFF, s.same as u8);
             !s.same
@@ -493,7 +498,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 19] = [
+pub(crate) const SETTABLE: [&[u8]; 20] = [
     &[1, 1],
     &[3, 1, 2],
     &[3, 1, 3],
@@ -513,6 +518,7 @@ pub(crate) const SETTABLE: [&[u8]; 19] = [
     &[7, 7],
     &[9, 2, 1],
     &[9, 2, 5],
+    &[9, 2, 6],
 ];
 
 /// The knob or ◀▶ on a wired setting (MENU-16); false if it isn't changeable here.
@@ -547,6 +553,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [3, 3, 1] => s.same = !s.same,
         [9, 2, 1] => s.bt = !s.bt,
         [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
+        [9, 2, 6] => s.term_colour = !s.term_colour,
         [8, 9] => set_extend(app, !app.set.extend_tx),
         [9, 3] | [9, 3, 1] => {
             let m = cycle(s.pin_mode, d, PIN_MODES.len());
@@ -602,6 +609,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [3, 3, 1] => s.same = d.same,
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,
+        [9, 2, 6] => s.term_colour = d.term_colour,
         _ => {}
     }
 }

@@ -105,6 +105,12 @@ pub trait ChannelStore {
         None
     }
 
+    /// The channel with this number, if it exists: the terminal's sorted list reads every channel by number for
+    /// each row it fills (TERM-14), so a store with records by number answers without the zone position.
+    fn get(&self, num: u16) -> Option<Channel> {
+        self.by_num(num).map(|(c, _)| c)
+    }
+
     /// The first unused number from `from` on, wrapping (save as channel), if any is free.
     fn free_num(&self, from: u16) -> Option<u16> {
         (0..MAX_CHANNELS).map(|k| (from + k) % MAX_CHANNELS).find(|&n| self.by_num(n).is_none())

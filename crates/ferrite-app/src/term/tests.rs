@@ -550,13 +550,15 @@ fn frequencies() {
     assert_eq!(mhz5(44_347_500).as_bytes(), b"443.47500");
 }
 
-/// The state is small: no screen buffer (TERM-19); the command line's 255-byte buffer (TERM-12) and a debug
-/// command's one answer (64 bytes of memory at most, TERM-22: about 100 bytes, Oct 6, 2026) on top.
+/// The state is small: no screen buffer (TERM-19); the command line's 255-byte buffer (TERM-12), a debug
+/// command's one answer (64 bytes of memory at most, TERM-22: about 100 bytes) and the channel list's tools
+/// (TERM-14: marks, a bit per channel, 125 bytes; a sorted page of up to 56 channel numbers, 112 bytes;
+/// Oct 6, 2026) on top.
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
     std::eprintln!("Term is {n} bytes");
-    assert!(n <= 512 + 256 + 112, "Term is {n} bytes");
+    assert!(n <= 512 + 256 + 112 + 304, "Term is {n} bytes");
 }
 
 // ---- The command line and dump/load (TERM-12, TERM-13) ----
@@ -1145,4 +1147,216 @@ fn debug_no_answer_and_stop() {
     r.poll();
     assert!(!r.raw().contains("REG_30 ="), "stopped: {}", r.raw());
     assert!(matches!(r.term.con, Con::Done | Con::Off), "{:?}", r.term.con);
+}
+
+// ---- The channel list's tools (TERM-14), the radio's editor (TERM-17), colour (TERM-18) ----
+
+impl Rig<Sample> {
+    /// The channel list, every channel.
+    fn list() -> Self {
+        let mut r = Rig::main();
+        r.send(b"1");
+        assert_eq!(r.term.page(), Page::Channels);
+        r
+    }
+
+    /// Polls until a change to several channels is done.
+    fn settle(&mut self) {
+        for _ in 0..200 {
+            if self.term.bulk.is_none() {
+                break;
+            }
+            self.poll();
+        }
+        assert!(self.term.bulk.is_none(), "the change finished");
+        self.poll();
+    }
+
+    fn nums(&self) -> Vec<u16> {
+        (0..crate::chan::MAX_CHANNELS).filter(|&n| self.store.get(n).is_some()).collect()
+    }
+}
+
+/// TERM-14: S sorts by the next column, the header says which; the page follows the order.
+#[test]
+fn list_sorts_by_column() {
+    let mut r = Rig::list();
+    assert!(r.vt.has("sort: number"), "{}", r.vt.text());
+    r.send(b"s");
+    assert!(r.vt.has("sort: name"), "{}", r.vt.text());
+    let mut names: Vec<Vec<u8>> = r.nums().iter().map(|&n| r.store.get(n).unwrap().name().to_ascii_lowercase()).collect();
+    names.sort();
+    let first = r.term.selected(&r.store).unwrap();
+    assert_eq!(first.name().to_ascii_lowercase(), names[0], "the first row is the first name");
+    // Down then End then Home move through the sorted list.
+    r.send(b"\x1b[B");
+    assert_eq!(r.term.selected(&r.store).unwrap().name().to_ascii_lowercase(), names[1]);
+    r.send(b"\x1b[F");
+    assert_eq!(r.term.selected(&r.store).unwrap().name().to_ascii_lowercase(), *names.last().unwrap());
+    r.send(b"\x1b[H");
+    assert_eq!(r.term.selected(&r.store).unwrap().name().to_ascii_lowercase(), names[0]);
+    // RX: by frequency.
+    r.send(b"s");
+    assert!(r.vt.has("sort: RX"));
+    let low = r.nums().iter().map(|&n| r.store.get(n).unwrap().rx).min().unwrap();
+    assert_eq!(r.term.selected(&r.store).unwrap().rx, low);
+}
+
+/// TERM-14: / finds part of a name or a frequency, from the row after the selection; Enter alone finds the
+/// same again; no match says so.
+#[test]
+fn list_finds() {
+    let mut r = Rig::list();
+    let target = r.store.get(*r.nums().last().unwrap()).unwrap();
+    let part = std::str::from_utf8(&target.name()[..3]).unwrap().to_lowercase();
+    r.send(b"/");
+    assert!(r.vt.has("Find (name or MHz"), "{}", r.vt.text());
+    r.send(part.as_bytes());
+    r.send(b"\r");
+    assert!(r.term.selected(&r.store).unwrap().name().to_ascii_lowercase().windows(3).any(|w| w == part.as_bytes()));
+    r.send(b"/");
+    r.send(b"zzqq\r");
+    assert!(r.bottom().contains("No channel here matches \"zzqq\""), "{}", r.bottom());
+    // A frequency's start.
+    let f = mhz5(target.rx);
+    r.send(b"/");
+    r.send(&f.as_bytes()[..7]);
+    r.send(b"\r");
+    assert!(mhz5(r.term.selected(&r.store).unwrap().rx).as_bytes().starts_with(&f.as_bytes()[..7]));
+}
+
+/// TERM-14: Space marks (and moves down), the header counts them; D asks with the count, n keeps, y deletes
+/// them one write at a time.
+#[test]
+fn list_marks_and_deletes() {
+    let mut r = Rig::list();
+    let before = r.nums();
+    r.send(b"  ");
+    assert!(r.vt.has("2 marked"), "{}", r.vt.text());
+    assert!(r.term.marked(before[0]) && r.term.marked(before[1]));
+    assert_eq!(r.term.selected(&r.store).unwrap().num, before[2], "Space moves down");
+    r.send(b"d");
+    assert!(r.vt.has("Delete 2 marked channels? y deletes"), "{}", r.vt.text());
+    r.send(b"n");
+    assert!(r.bottom().contains("Nothing deleted"));
+    assert_eq!(r.nums(), before);
+    r.send(b"d");
+    r.send(b"y");
+    r.settle();
+    assert_eq!(r.nums(), before[2..].to_vec(), "the two marked ones are gone");
+    assert!(r.bottom().contains("2 channels deleted"), "{}", r.bottom());
+    assert_eq!(r.term.marks_n(), 0);
+}
+
+/// TERM-14: M moves the selected channel to a zone (by number or name, or none); C copies it to the first
+/// free number.
+#[test]
+fn list_moves_and_copies() {
+    let mut r = Rig::list();
+    let c = r.term.selected(&r.store).unwrap();
+    r.send(b"m");
+    r.send(b"none\r");
+    r.settle();
+    assert_eq!(r.store.get(c.num).unwrap().zone, NO_ZONE);
+    let z1 = r.store.zone_name(0).unwrap();
+    r.send(b"m");
+    r.send(z1.as_bytes());
+    r.send(b"\r");
+    r.settle();
+    assert_eq!(r.store.get(c.num).unwrap().zone, 0, "by name");
+    let free = r.store.free_num(0).unwrap();
+    r.send(b"c\r");
+    r.settle();
+    let copy = r.store.get(free).expect("copied to the first free number");
+    assert_eq!((copy.rx, copy.name()), (c.rx, c.name()));
+    assert!(r.bottom().contains("1 channel copied"), "{}", r.bottom());
+}
+
+/// TERM-14: R renumbers the marked channels from a number, in their order, even over their own old numbers;
+/// a number held by a channel that isn't moving is refused.
+#[test]
+fn list_renumbers() {
+    let mut r = Rig::list();
+    let before = r.nums();
+    let (a, b) = (before[0], before[1]);
+    let (ca, cb) = (r.store.get(a).unwrap(), r.store.get(b).unwrap());
+    // Onto a channel that isn't moving: refused.
+    r.send(b" ");
+    r.send(b"r");
+    r.send(std::format!("{}\r", before[2] + 1).as_bytes());
+    assert!(r.bottom().contains("is taken by a channel that isn't moving"), "{}", r.bottom());
+    // Both, to the first free numbers after the last channel.
+    r.send(b" ");
+    let to = before.last().unwrap() + 1;
+    r.send(b"r");
+    r.send(std::format!("{}\r", to + 1).as_bytes());
+    r.settle();
+    assert_eq!(r.store.get(to).unwrap().name(), ca.name());
+    assert_eq!(r.store.get(to + 1).unwrap().name(), cb.name());
+    assert!(r.store.get(a).is_none() && r.store.get(b).is_none());
+    // Shift the two up by one: each lands where the other was (the order makes it safe).
+    r.send(b"\x1b[F");
+    r.send(b"\x1b[A ");
+    r.send(b" ");
+    assert_eq!(r.term.marks_n(), 2);
+    r.send(b"r");
+    r.send(std::format!("{}\r", to + 2).as_bytes());
+    r.settle();
+    assert_eq!(r.store.get(to + 1).unwrap().name(), ca.name());
+    assert_eq!(r.store.get(to + 2).unwrap().name(), cb.name());
+}
+
+/// TERM-14: N makes a channel at the first free number and opens its editor.
+#[test]
+fn list_new_channel() {
+    let mut r = Rig::list();
+    let free = r.store.free_num(0).unwrap();
+    let n = r.store.count();
+    r.send(b"n");
+    assert_eq!(r.term.page(), Page::Edit);
+    assert_eq!(r.store.count(), n + 1);
+    assert_eq!(r.term.edit.unwrap().num, free);
+    assert!(r.bottom().contains("New channel") || r.vt.has("New channel"), "{}", r.vt.text());
+}
+
+/// TERM-17: a channel open in the radio's editor isn't changed from the terminal (the editor, `ch`, a bulk
+/// change); a setting highlighted in the radio's menu isn't either.
+#[test]
+fn radio_editor_wins() {
+    let mut r = Rig::list();
+    let c = r.term.selected(&r.store).unwrap();
+    let (z, pos) = (0..r.store.zones()).chain([NO_ZONE]).find_map(|z| (0..r.store.zone_len(z)).find(|&i| r.store.zone_at(z, i).unwrap().num == c.num).map(|i| (z, i))).unwrap();
+    r.app.set_channel(r.app.active, z, pos, &r.store);
+    r.app.screen = crate::Screen::ChEdit(crate::screens::chedit::ChEdit { cell: 0 });
+    r.send(b"\r");
+    for _ in 0..8 {
+        r.send(b"\x1b[B");
+    }
+    r.send(b"\x1b[C");
+    assert_eq!(r.store.get(c.num).unwrap(), c, "not written");
+    assert!(r.vt.has("Open in the radio's editor"), "{}", r.vt.text());
+    r.send(b"\x1b");
+    r.cmd(&std::format!("ch {} power high", c.num + 1));
+    assert!(r.bottom().contains("open in the radio's editor"), "{}", r.bottom());
+    r.send(b"d");
+    r.send(b"y");
+    assert!(r.bottom().contains("open in the radio's editor"), "{}", r.bottom());
+    assert!(r.store.get(c.num).is_some());
+    // A setting: 0 7 1 highlighted in the radio's menu.
+    r.app.screen = crate::Screen::Group(crate::screens::groups::Group { g: 7, sub: 0, row: 0 });
+    r.cmd("set 0 7 1 Daylight");
+    assert!(r.bottom().contains("open on the radio's menu"), "{}", r.bottom());
+}
+
+/// TERM-18: colour is off by default (reverse video and bold only); 0 9 2 6 turns it on.
+#[test]
+fn colour_is_optional() {
+    let mut r = Rig::main();
+    assert!(!r.raw().contains("\x1b[0;97;44m"));
+    r.cmd("set 0 9 2 6 On");
+    assert!(r.app.set.term_colour);
+    r.send(b"\x0c");
+    r.poll();
+    assert!(r.raw().contains("\x1b[0;97;44m"), "the top line in white on blue");
+    assert!(r.raw().contains("\x1b[1;36m"), "headings in cyan");
 }

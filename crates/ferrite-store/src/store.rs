@@ -813,6 +813,13 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
         (0..MAX_CHANNELS).map(|k| (from + k) % MAX_CHANNELS).find(|&n| self.zmap[n as usize].get() == EMPTY)
     }
 
+    fn get(&self, num: u16) -> Option<Channel> {
+        if self.zmap.get(num as usize)?.get() == EMPTY {
+            return None;
+        }
+        ch_decode(num, &self.read_ch(num))
+    }
+
     fn by_number(&self, i: u16) -> Option<Channel> {
         let num = self.nth_num(i, |z| z != EMPTY)?;
         ch_decode(num, &self.read_ch(num))

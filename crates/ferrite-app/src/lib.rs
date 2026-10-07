@@ -411,6 +411,21 @@ impl App {
         }
     }
 
+    /// A channel given another number by the terminal (TERM-14): the record moves, and slots on it and the home
+    /// channel go with it (CHAN-18), as the radio's editor does (EDIT-5).
+    pub(crate) fn renumber_channel(&mut self, c: chan::Channel, to: u16) {
+        let n = chan::Channel { num: to, ..c };
+        self.write(ChanWrite::Put { ch: n, from: Some(c.num) });
+        for s in self.slots.iter_mut() {
+            if s.ch.is_some_and(|o| o.num == c.num) {
+                s.ch = Some(n);
+            }
+        }
+        if self.set.home_ch == Some(c.num) {
+            self.set.home_ch = Some(to);
+        }
+    }
+
     /// A channel write is waiting for [`App::pop_write`] (the terminal runs its next line only after it).
     pub fn write_pending(&self) -> bool {
         self.write.is_some()

@@ -561,6 +561,9 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
     let num = index(t.word("ch: which channel, e.g. ch 12")?, MAX_CHANNELS as u32, "ch")? as u16;
     let old = st.by_num(num).map(|x| x.0);
     let missing = || msg!("ch {}: no such channel; make it with ch {} \"Name\" 146.52", num as u32 + 1, num as u32 + 1);
+    if t.clone().next()?.is_some() && super::list::radio_channel(app) == Some(num) {
+        return Err(msg!("Channel {} is open in the radio's editor: change it there or close it", num as u32 + 1)); // TERM-17
+    }
     match t.next()? {
         None => old.map(|_| Done::List(List::Show(num))).ok_or_else(missing),
         // A whole channel: name, RX, then fields; the rest at their defaults.
@@ -830,6 +833,9 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     let name = path_name(p);
     if blocked(p) {
         return Err(msg!("{} changes only on the radio, on its own screen there", name));
+    }
+    if super::list::radio_setting(app).is_some_and(|(q, ql)| &q[..ql] == p) {
+        return Err(msg!("{} is open on the radio's menu: change it there, or move off it", name)); // TERM-17
     }
     if let Some(why) = groups::greyed(app, p) {
         return Err(msg!("{}: {}", name, why));
