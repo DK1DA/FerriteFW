@@ -49,8 +49,8 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         app.head_text(a, live, &mut h);
         w::field(lcd, 26, 140, 22, 40, 36, Align::Left, h.as_bytes(), &UI_12, SUB, BG);
         lcd.fill(166, 22, 74, 20, BG);
-        if state == "RX" {
-            w::tag(lcd, 232, 24, b"RX", GREEN, BG);
+        if state == "RX" || state == "MON" {
+            w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
         } else if state != "idle" {
             w::field(lcd, 166, 66, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
         }

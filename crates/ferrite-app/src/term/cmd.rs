@@ -449,7 +449,6 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     }
     out.push(b" mode=");
     out.push(MODES[g.mode as usize % MODES.len()].as_bytes());
-    out.push(if g.narrow { b" bw=narrow" } else { b" bw=wide" });
     if g.rx_tone == g.tx_tone {
         out.push(b" tone=");
         tone_word(g.tx_tone, out);
@@ -535,8 +534,18 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
         }
         2 => (g.offset, g.split) = (offset(v)?, false),
         17 => (g.split, g.offset) = (true, freq(v, "tx")? as i32),
-        3 => g.mode = pick(v, &MODES[..SLOT_MODES], "mode")?,
-        4 => g.narrow = pick(v, &BW, "bw")? == 1,
+        3 => {
+            g.mode = pick(v, &MODES[..SLOT_MODES], "mode")?;
+            g.narrow = g.mode == 1; // VFO-20
+        }
+        // bw= from older dumps: FM and NFM follow it; AM stays AM (VFO-20)
+        4 => {
+            let narrow = pick(v, &BW, "bw")? == 1;
+            if g.mode < 2 {
+                g.mode = narrow as u8;
+            }
+            g.narrow = g.mode == 1;
+        }
         5 => (g.tx_tone, g.rx_tone) = {
             let t = tone(v, "tone")?;
             (t, t)
@@ -778,7 +787,6 @@ fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
     step_word(p.step, out);
     out.push(b" mode=");
     out.push(MODES[p.mode as usize % MODES.len()].as_bytes());
-    out.push(if p.narrow { b" bw=narrow" } else { b" bw=wide" });
 }
 
 fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
@@ -792,14 +800,20 @@ fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     if end <= start {
         return Err(msg!("preset: the end must be above the start"));
     }
-    let mut p = RangePreset { name, start, end, step: STEP_12K5, mode: 0, narrow: true, skips: 0 };
+    let mut p = RangePreset { name, start, end, step: STEP_12K5, mode: 1, narrow: true, skips: 0 };
     while let Some((k, v)) = kv(t, "preset", "step=25kHz")? {
         if same(k, b"step") {
             p.step = step(v)?;
         } else if same(k, b"mode") {
             p.mode = pick(v, &MODES[..SLOT_MODES], "mode")?;
+            p.narrow = p.mode == 1; // VFO-20
         } else if same(k, b"bw") {
-            p.narrow = pick(v, &BW, "bw")? == 1;
+            // older dumps: FM and NFM follow it
+            let narrow = pick(v, &BW, "bw")? == 1;
+            if p.mode < 2 {
+                p.mode = narrow as u8;
+            }
+            p.narrow = p.mode == 1;
         } else {
             return Err(msg!("preset: no field {}; they are step, mode, bw", Bytes(k)));
         }

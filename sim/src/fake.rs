@@ -85,6 +85,8 @@ pub struct FakeRadio {
     /// Scanning slots going down (a bit per slot, SCAN-16), and until when (s) each stays off the hit it left.
     scan_down: u8,
     scan_quiet: [f32; 3],
+    /// Slots with monitor latched: squelch held open.
+    monitor: u8,
     fm: u16,
     now: f32,
     /// A slot on a NOAA / Weatheradio channel since this time (s): the fake decoder hears a SAME warning there.
@@ -101,7 +103,7 @@ impl FakeRadio {
         live.slots[0] = SlotLive { freq: mhz(146) + 52_000, rssi: -121, ..Default::default() };
         live.slots[1] = SlotLive { freq: mhz(443) + 47_500, rssi: -121, ..Default::default() };
         live.slots[2] = SlotLive { freq: mhz(118) + 95_000, rssi: -121, scanning: true, hits: 3, last_hit: mhz(121) + 50_000, ..Default::default() };
-        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), bk: fake_bk(), scan_down: 0, scan_quiet: [0.0; 3], fm: 9_810, now: 0.0, wx_since: None, same: None }
+        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), bk: fake_bk(), scan_down: 0, scan_quiet: [0.0; 3], monitor: 0, fm: 9_810, now: 0.0, wx_since: None, same: None }
     }
 
     pub fn cmd(&mut self, c: RadioCmd) {
@@ -126,6 +128,7 @@ impl FakeRadio {
                 s.skips = s.skips.saturating_add(1);
                 self.leave_hit(slot);
             }
+            RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
             RadioCmd::ScanDir { slot, up, resume } => {
                 self.scan_down = self.scan_down & !(1 << slot) | (!up as u8) << slot;
                 if resume {
@@ -285,7 +288,7 @@ impl FakeRadio {
                     _ => (false, 0.0),
                 }
             };
-            s.squelch_open = open && heard;
+            s.squelch_open = open && heard || self.monitor & 1 << i != 0;
             s.tone_heard = s.squelch_open; // the sample's stations use the slot's own tone
             s.rssi = if s.squelch_open { level as i16 } else { -121 + ((t * 0.9 + i as f32).sin() * 2.0) as i16 };
         }

@@ -478,11 +478,11 @@ fn crossband_repeater() {
     assert_eq!(t.app.radio.mode, Mode::Xb, "{:?}", t.app.toast.map(|x| std::string::String::from_utf8_lossy(x.body.as_bytes()).into_owned()));
     assert!(t.cmds().contains(&RadioCmd::Crossband(Some(t.app.set.xb))));
     ptt(&mut t, true);
-    assert_eq!(refused(&t), Some(Refusal::Crossband), "XB-14");
-    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "XB-14: local PTT talks");
+    assert_eq!(t.app.radio.mode, Mode::Xb, "the repeater keeps running");
     ptt(&mut t, false);
-    t.tap(Key::Exit);
-    assert!(matches!(t.app.screen(), Screen::Crossband(_)), "back to the running repeater");
+    t.wait(5200);
+    assert!(matches!(t.app.screen(), Screen::Crossband(_)), "back to the running repeater: {:?}", t.app.screen());
     assert_eq!(t.app.radio.mode, Mode::Xb);
     t.live.mode = ModeLive::Xb(XbLive { state: 1, pass_s: 12, ..Default::default() });
     let mut fb = FrameBuffer::new();
@@ -1016,4 +1016,23 @@ fn scope_centre_on_strongest_and_typed() {
     }
     assert!(matches!(t.app.screen(), Screen::Scope(_)), "{:?}", t.app.screen());
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Sweep { centre: 44_600_000, on: true, .. })));
+}
+
+/// TONE-13, DTMF-7: while keyed, SIDE2 sends the tone burst as long as it is held, and the digits send DTMF live.
+#[test]
+fn burst_and_dtmf_while_keyed() {
+    let mut t = ready();
+    ptt(&mut t, true);
+    t.cmds();
+    t.tap(Key::Side(2));
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::ToneBurst { on: true }) && c.contains(&RadioCmd::ToneBurst { on: false }), "{c:?}");
+    t.tap(Key::Digit(5));
+    t.tap(Key::Hash);
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::Dtmf { key: b'5', on: true }) && c.contains(&RadioCmd::Dtmf { key: b'#', on: false }), "{c:?}");
+    ptt(&mut t, false);
+    t.cmds();
+    t.tap(Key::Digit(5));
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Dtmf { .. })), "not keyed: no DTMF");
 }

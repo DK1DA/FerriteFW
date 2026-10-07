@@ -44,6 +44,12 @@ pub enum RadioCmd {
     ScanSkip { slot: u8 },
     /// Scanning: the zone set, zones 0-15 by bit (SCAN-3; 0 = the current zone only).
     ScanZones { slot: u8, zones: u16 },
+    /// While keyed: the tone burst (PTT + SIDE2) for as long as SIDE2 is held (TONE-13).
+    ToneBurst { on: bool },
+    /// While keyed: a DTMF digit ('0'-'9', '*', '#') sent live for as long as its key is held (DTMF-7).
+    Dtmf { key: u8, on: bool },
+    /// Monitor latched on a slot: squelch held open until turned off (SIDE1 tap, SQL-2; shown MON on its card).
+    Monitor { slot: u8, on: bool },
     /// Scanning: go on up or down from here (SCAN-16); `resume` leaves the hit it is stopped on at once.
     ScanDir { slot: u8, up: bool, resume: bool },
     /// Band scope sweep around a centre at a step (10 Hz units), with the last [`RadioCmd::ScopeCfg`]; off when

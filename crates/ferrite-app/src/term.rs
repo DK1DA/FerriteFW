@@ -154,7 +154,7 @@ const FIELDS: [F; 15] = [
     F::Zone,
     F::Rx,
     F::It(Item::Mode),
-    F::It(Item::Bandwidth),
+    F::It(Item::RxTone),
     F::It(Item::Tones),
     F::It(Item::Offset),
     F::Tx,

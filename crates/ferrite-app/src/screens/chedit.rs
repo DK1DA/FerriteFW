@@ -43,7 +43,7 @@ enum Cell {
 /// The twelve settings (EDIT-2; chapter 10's list), row by row.
 const CELLS: [Cell; 12] = [
     Cell::It(Item::Mode),
-    Cell::It(Item::Bandwidth),
+    Cell::It(Item::RxTone),
     Cell::It(Item::Tones),
     Cell::It(Item::Offset),
     Cell::It(Item::Power),

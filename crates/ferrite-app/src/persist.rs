@@ -138,6 +138,7 @@ impl Persist for SlotCfg {
         let mut f = self.reverse as u8 | (self.split as u8) << 1;
         f.load(r);
         (self.reverse, self.split) = (f & 1 != 0, f & 2 != 0);
+        self.fold_bw(); // VFO-20: a saved FM + narrow reads as NFM
     }
 }
 persist!(Settings {

@@ -98,6 +98,14 @@ impl View for Home {
             (Key::Menu, Short) => app.screen = Screen::Quick(super::quick::Quick { row: 0 }), // MENU-1
             (Key::Menu, Long) => app.screen = Screen::Advanced(super::advanced::Advanced { row: 0, from_quick: false }), // MENU-2
             (Key::Side(2), Short) => super::scan::side2(app), // SCAN-1
+            (Key::Side(1), Short) => {
+                // A tap latches monitor on the active slot until tapped again; its card says MON.
+                let a = app.active;
+                app.monitor ^= 1 << a;
+                let on = app.monitor & 1 << a != 0;
+                app.out.push(RadioCmd::Monitor { slot: a, on });
+                app.show_toast(b"Monitor", if on { b"on: tap SIDE1 again" } else { b"off" }, false);
+            }
             (Key::Star, Long) => app.change(Item::Reverse, 1), // VFO-7: two values, so +1 toggles
             (Key::Digit(d), Short) => app.open(Dest::Entry(d)), // NAV-4, VFO-11
             // HOME-8: the shortcut runs at the long press, a popup names it (KEY-11).
@@ -174,8 +182,8 @@ impl View for Home {
                 w::field(lcd, 34, 120, hy, hy + 17, hb, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
                 if big {
                     lcd.fill(154, y + 6, 74, 18, SURFACE);
-                    if state == "RX" {
-                        w::tag(lcd, 226, y + 7, b"RX", GREEN, SURFACE);
+                    if state == "RX" || state == "MON" {
+                        w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
                     } else if state != "idle" {
                         w::field(lcd, 154, 72, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
                     }
@@ -205,7 +213,7 @@ impl View for Home {
                 // absent value leaves its slot empty; nothing moves.
                 let (mut m, mut t, mut o, mut pw) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
                 mode_chip(&cfg, &mut m);
-                tone_text(cfg.tx_tone, &mut t);
+                tone_text(cfg.sent_tone(), &mut t);
                 shift_chip(&cfg, &mut o);
                 if app.capped(s) {
                     pw.set(b"0.25 W");
@@ -269,7 +277,7 @@ impl View for Home {
                     }
                 } else {
                     mode_chip(&cfg, &mut cols[0]);
-                    tone_text(cfg.tx_tone, &mut cols[1]);
+                    tone_text(cfg.sent_tone(), &mut cols[1]);
                     shift_text(&cfg, false, &mut cols[2]); // "TX 146.520" for a split
                 }
                 if app.dirty(R_SUB + p, hash(&(lv.scanning, &cols))) {

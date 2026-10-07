@@ -749,7 +749,7 @@ fn command_channels() {
     assert!(r.bottom().contains("fixed at 0.25 W"), "{}", r.bottom());
     // Show: the console, then Enter goes back to the page.
     r.cmd("ch 300");
-    assert!(r.raw().contains("ch 300 \"Test\" 146.60000 offset=-0.60000 mode=FM bw=narrow tone=100.0 power=mid zone=1 squelch=6 skip"), "{}", r.raw());
+    assert!(r.raw().contains("ch 300 \"Test\" 146.60000 offset=-0.60000 mode=NFM tone=100.0 power=mid zone=1 squelch=6 skip"), "{}", r.raw());
     r.send(b"\r");
     assert_eq!(r.term.con, Con::Off);
     assert!(r.vt.has("Ferrite terminal"), "the page again");
@@ -787,9 +787,9 @@ fn dump_format() {
         "set 0 7 1 Dark                    # Theme",
         "set 0 6 6 24 h, GPS               # Clock",
         "zone 2 \"Repeaters\" scan=on shown=on distance=off resume=radio dwell=radio smart=off pri1=12",
-        "preset 3 \"Airband\" 118.00000 137.00000 step=25kHz mode=AM bw=wide",
-        "ch 12 \"Club repeater\" 443.47500 offset=+5.00000 mode=FM bw=narrow txtone=100.0 rxtone=off power=low zone=2",
-        "ch 63 \"FRS 1\" 462.56250 offset=simplex mode=FM bw=narrow tone=off power=low",
+        "preset 3 \"Airband\" 118.00000 137.00000 step=25kHz mode=AM",
+        "ch 12 \"Club repeater\" 443.47500 offset=+5.00000 mode=NFM txtone=100.0 rxtone=off power=low zone=2",
+        "ch 63 \"FRS 1\" 462.56250 offset=simplex mode=NFM tone=off power=low",
     ] {
         assert!(d.iter().any(|x| x == l), "missing: {l}");
     }
@@ -952,7 +952,7 @@ fn command_split_and_global() {
     assert!(r.bottom().contains("fixed at 0.25 W"), "{}", r.bottom());
     // The ch line, and back.
     r.cmd("ch 310");
-    assert!(r.raw().contains("ch 310 \"Cross\" 446.00000 offset=split tx=146.52000 mode=FM bw=narrow"), "{}", r.raw());
+    assert!(r.raw().contains("ch 310 \"Cross\" 446.00000 offset=split tx=146.52000 mode=NFM"), "{}", r.raw());
     assert!(r.raw().contains("squelch=global"), "{}", r.raw());
     r.send(b"\r");
     r.cmd("ch 310 offset=+5");

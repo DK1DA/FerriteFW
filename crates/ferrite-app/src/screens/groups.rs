@@ -88,7 +88,7 @@ const G6: [Entry; 9] = [
 const G7: [Entry; 9] = [
     (slow!("Theme"), slow!("Dark"), slow!("Dark, daylight or night red.")),
     (slow!("Home layout"), slow!("Watch"), slow!("What home shows.")),
-    (slow!("Display"), slow!("Icon + %"), slow!("Battery, power-on message, boot, S-meter.")),
+    (slow!("Display"), slow!("Bars"), slow!("S-meter, power-on message, boot screen.")),
     (slow!("Backlight"), slow!("15 s"), slow!("Timeout, brightness, wake.")),
     (slow!("Sounds"), slow!("Beep on"), slow!("Key beep, volume, alert tones.")),
     (slow!("LEDs"), slow!("RX and TX"), slow!("When the LEDs light.")),
@@ -201,10 +201,10 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Wait"), slow!("0 s"), slow!("Delay before relaying.")),
     ]),
     ((7, 3), &[
-        (slow!("Battery as"), slow!("Icon + %"), slow!("Icon, percent or volts.")),
+        // 1 was "Battery as": the bar shows an icon only, % and volts on Status (SBAR-19); S-meter took its row
+        (slow!("S-meter"), slow!("Bars"), slow!("Bars or dBm.")),
         (slow!("Power-on message"), slow!("Callsign"), slow!("Off, callsign or text.")),
         (slow!("Boot screen"), slow!("Logo"), slow!("Logo, or the owner card.")),
-        (slow!("S-meter"), slow!("Bars"), slow!("Bars or dBm.")),
     ]),
     ((7, 4), &[
         (slow!("Timeout"), slow!("15 s"), slow!("Backlight off after this.")),

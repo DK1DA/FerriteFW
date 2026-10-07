@@ -18,15 +18,25 @@ pub const CHECK_MCU: u8 = 0;
 pub const CHECK_FLASH: u8 = 1;
 pub const CHECK_BK0: u8 = 2;
 pub const CHECK_BK1: u8 = 3;
-pub const CHECKS: usize = 4;
+pub const CHECK_SI: u8 = 4;
+pub const CHECK_CAL: u8 = 5;
+/// Six, as the boot screen lists them (decided Oct 6, 2026): MCU, SPI flash, both BK4829s, SI4732, calibration.
+pub const CHECKS: usize = 6;
 
 pub const PENDING: u8 = 0;
 pub const PASSED: u8 = 1;
 pub const FAILED: u8 = 2;
+/// Not tested at boot (the SI4732 stays in reset until FM broadcast or HF mode starts it): shown greyed.
+pub const UNTESTED: u8 = 3;
 
 /// Each check's state. A static rather than only an event, so a result reported before the UI subscribes is
 /// not lost.
 pub static CHECK_STATE: [AtomicU8; CHECKS] = [const { AtomicU8::new(PENDING) }; CHECKS];
+
+/// A check the boot doesn't run: the boot screen shows it greyed, not failed.
+pub fn untested(index: u8) {
+    CHECK_STATE[index as usize].store(UNTESTED, Relaxed);
+}
 
 /// A boot check result: kept for the boot screen and announced on the event bus (for the log and the link).
 pub fn check(source: Source, index: u8, ok: bool) {

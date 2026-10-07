@@ -232,6 +232,8 @@ impl App {
         let watched = s == self.active || self.watch_mask() & 1 << s != 0;
         if lv.relay {
             ("relay", AMBER)
+        } else if self.monitor & 1 << s != 0 {
+            ("MON", AMBER) // a latched monitor: squelch held open (decided Oct 6, 2026)
         } else if !watched {
             ("off", DIM)
         } else if lv.squelch_open {

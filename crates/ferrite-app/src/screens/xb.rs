@@ -2,7 +2,7 @@
 //! screen in three states: the start page (each side's slot, the settings grid, the pre-flight checks: XB-2),
 //! then, once # starts it, ready (listening both) and passing (one direction, its timeout), both with the last
 //! 30 minutes of activity (XB-16). BACK stops (XB-14), and so does leaving by any route (hold BACK, a
-//! timeout). Local PTT doesn't transmit while it runs (XB-14). No menu number yet: "Advanced › Transmit ›
+//! timeout). Local PTT transmits on its own slot and the repeater carries on after (XB-14); each side is simplex (XB-18). No menu number yet: "Advanced › Transmit ›
 //! Crossband" is full (`Dest::Crossband`).
 
 use super::activity::{mmss, Mode};
@@ -123,10 +123,12 @@ fn checks(app: &App, batt: u8, out: &mut [(Check, Buf<40>); 4]) -> Option<usize>
         b.push(b"two chips");
         put(0, Check::Ok, b.as_bytes(), &mut fail);
     }
+    // Simplex only (XB-18): each side transmits on its own receive frequency, never through a shift or split.
     let tx = |s: u8| {
-        let f = super::transmit::tx_freq(app, s);
+        let f = app.slot(s).freq();
         app.radio.tx_built && txplan::check(f, app.set.tx_region(), app.set.extend_tx).is_ok()
     };
+    let shifted = [c.side1, c.side2].iter().any(|&s| app.slot(s).cfg().offset != 0 || app.slot(s).cfg().split);
     let sq0 = app.sq_level(c.side1) == 0 || app.sq_level(c.side2) == 0;
     if !tx(c.side1) || !tx(c.side2) {
         let which = if !tx(c.side1) { 1 } else { 2 };
@@ -135,6 +137,8 @@ fn checks(app: &App, batt: u8, out: &mut [(Check, Buf<40>); 4]) -> Option<usize>
         put(1, Check::Fail, b.as_bytes(), &mut fail);
     } else if sq0 {
         put(1, Check::Fail, b"Squelch is 0 on a side", &mut fail);
+    } else if shifted {
+        put(1, Check::Warn, b"Simplex: shifts are ignored", &mut fail);
     } else {
         put(1, Check::Ok, b"Transmit allowed on both", &mut fail);
     }
@@ -223,10 +227,11 @@ impl View for Crossband {
         }
     }
 
-    /// XB-14: local PTT doesn't transmit while it runs.
+    /// XB-14: local PTT transmits on the slot it belongs to (PTT A/B/C), interrupting a pass; the Radio task
+    /// holds the repeater meanwhile and it carries on after, back on this screen.
     fn ptt(self, app: &mut App, down: bool) {
         if down {
-            super::transmit::ptt(app, app.active);
+            super::nav::transmit(app);
         }
     }
 

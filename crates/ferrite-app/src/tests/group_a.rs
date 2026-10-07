@@ -141,11 +141,12 @@ fn channel_editor() {
     assert_ne!(t.app.slot(0).ch.unwrap().flags & FLAG_SKIP, 0);
     // A setting saves the channel too (EDIT-4).
     t.tap(Key::Up);
-    t.tap(Key::Up); // Bandwidth
+    t.tap(Key::Up); // RX tone
     t.writes();
+    let rx0 = t.app.slot(0).cfg().rx_tone;
     t.knob(1);
-    assert!(!t.app.slot(0).cfg().narrow);
-    assert!(matches!(t.writes()[..], [ChanWrite::Put { ch, .. }] if !ch.cfg.narrow));
+    assert_ne!(t.app.slot(0).cfg().rx_tone, rx0);
+    assert!(matches!(t.writes()[..], [ChanWrite::Put { ch, .. }] if ch.cfg.rx_tone != rx0));
     // Home on, leave, go to the VFO; hold 0 brings the home channel back (CHAN-19).
     t.app.settings_mut().home_ch = Some(10);
     t.tap(Key::Exit);
@@ -533,4 +534,24 @@ fn region_steps_on_2m() {
     t.app.settings_mut().set_region(Some(Region::Europe));
     t.app.region_steps();
     assert_eq!(t.app.slots[0].cfg.step as usize, crate::slot::STEPS.iter().position(|s| s.0 == 2500).unwrap(), "kept");
+}
+
+/// VFO-20: the mode is the bandwidth. A saved FM + narrow reads as NFM; changing the mode sends the bandwidth
+/// with it; quick settings row 3 is Mode.
+#[test]
+fn mode_carries_the_bandwidth() {
+    let mut c = crate::slot::DEFAULT_CFG;
+    (c.mode, c.narrow) = (0, true);
+    c.fold_bw();
+    assert_eq!((c.mode, c.narrow), (1, true), "FM + narrow is NFM");
+    (c.mode, c.narrow) = (2, true);
+    c.fold_bw();
+    assert_eq!((c.mode, c.narrow), (2, false), "AM keeps the wide filter");
+    assert_eq!(crate::slot::QUICK[2], Item::Mode);
+    let mut t = T::new();
+    t.app.change(Item::Mode, -1);
+    let m = t.app.slot(0).cfg().mode;
+    let cmds = t.cmds();
+    assert!(cmds.contains(&RadioCmd::SlotParam { slot: 0, param: Param::Mode, value: m as i32 }), "{cmds:?}");
+    assert!(cmds.contains(&RadioCmd::SlotParam { slot: 0, param: Param::Bandwidth, value: (m == 1) as i32 }), "{cmds:?}");
 }

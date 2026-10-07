@@ -10,8 +10,9 @@ use ufmt::uwrite;
 /// One slot's settings: a VFO's, or a copy of the channel it is on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SlotCfg {
-    /// Index into [`MODES`].
+    /// Index into [`MODES`]: FM (wide), NFM (narrow) or AM; the mode is the bandwidth too (VFO-20).
     pub mode: u8,
+    /// Narrow filter: follows the mode ([`SlotCfg::fold_bw`]); kept for the record's byte and the radio.
     pub narrow: bool,
     /// Tone words (CHAN-3): CTCSS in 0.1 Hz; bit 15 DCS, bit 14 inverted, the code in octal; 0 = none.
     pub rx_tone: u16,
@@ -33,11 +34,32 @@ pub struct SlotCfg {
 }
 
 impl SlotCfg {
+    /// VFO-20: the mode carries the bandwidth. A record or saved state from before has FM with its narrow flag
+    /// set for narrow FM: that reads as NFM. Afterwards narrow means NFM; AM keeps the wide filter.
+    pub fn fold_bw(&mut self) {
+        if self.mode == 0 && self.narrow {
+            self.mode = 1;
+        }
+        self.narrow = self.mode == 1;
+    }
+
     /// The frequency this config transmits on with RX at `rx`: the split TX, or RX plus the shift; reverse
     /// swaps the two (TX-6 checks this one).
     pub fn tx_of(&self, rx: Freq10) -> Freq10 {
         let tx = if self.split { self.offset.max(0) as i64 } else { rx as i64 + self.offset as i64 };
         (if self.reverse { rx as i64 } else { tx }).max(0) as Freq10
+    }
+
+    /// The tone it sends: reverse swaps the tones with the frequencies (VFO-7: listening on the input you hear
+    /// the users' tone, and transmitting on the output you send the repeater's). The Radio task does the same
+    /// swap with the raw tones and the Reverse parameter.
+    pub fn sent_tone(&self) -> u16 {
+        if self.reverse { self.rx_tone } else { self.tx_tone }
+    }
+
+    /// The tone it listens for (CTCSS/DCS decode), reverse swapping as above.
+    pub fn heard_tone(&self) -> u16 {
+        if self.reverse { self.tx_tone } else { self.rx_tone }
     }
 
     /// The frequency it listens on with RX tuned to `rx`: reverse listens on the TX side.
@@ -52,7 +74,7 @@ impl SlotCfg {
 }
 
 pub const DEFAULT_CFG: SlotCfg = SlotCfg {
-    mode: 0,
+    mode: 1, // NFM (VFO-20)
     narrow: true,
     rx_tone: 0,
     tx_tone: 0,
@@ -272,7 +294,8 @@ pub fn band_name(f: Freq10) -> &'static str {
 pub enum Item {
     Squelch,
     Power,
-    Bandwidth,
+    /// The tone that opens squelch (CTCSS or DCS decode); Tones is the one sent.
+    RxTone,
     Tones,
     Offset,
     Step,
@@ -289,7 +312,7 @@ pub enum Item {
 pub const QUICK: [Item; 10] = [
     Item::Squelch,
     Item::Power,
-    Item::Bandwidth,
+    Item::Mode,
     Item::Tones,
     Item::Offset,
     Item::Step,
@@ -302,7 +325,7 @@ pub const QUICK: [Item; 10] = [
 /// The edit-in-place grid for a VFO, row by row (EDIT-2, HomeEdit mock-up).
 pub const GRID: [Item; 9] = [
     Item::Mode,
-    Item::Bandwidth,
+    Item::RxTone,
     Item::Tones,
     Item::Offset,
     Item::Power,
@@ -318,7 +341,7 @@ impl Item {
         match self {
             Item::Squelch => "Squelch",
             Item::Power => "TX power",
-            Item::Bandwidth => "Bandwidth",
+            Item::RxTone => "RX tone",
             Item::Tones => "Tones",
             Item::Offset => "Offset",
             Item::Step => "Step",
@@ -346,7 +369,7 @@ impl Item {
         match self {
             Item::Squelch => "Audio opens above this level. Home: SIDE1 + knob.",
             Item::Power => "Transmit power on this slot. Home: hold 2.",
-            Item::Bandwidth => "Filter width for RX and TX.",
+            Item::RxTone => "The tone that opens squelch. Off: any carrier.",
             Item::Tones => "CTCSS or DCS sent with TX. OK: RX and TX apart.",
             Item::Offset => "Simplex, + or -, or Split: a TX freq. Hold 7.",
             Item::Step => "How far a VFO tunes. Home: hold 6.",
@@ -355,7 +378,7 @@ impl Item {
             Item::Channel => "Edit this channel: name, zone, number, flags.",
             Item::BatterySave => "Receiver sleep: deeper saves more, hears later.",
             Item::Advanced => "Everything else, in nine groups.",
-            Item::Mode => "FM, NFM, AM. USB, LSB and CW: HF mode only.",
+            Item::Mode => "FM wide, NFM narrow, AM. USB, LSB, CW: HF mode.",
             Item::BusyLock => "Refuse transmit while the channel is busy.",
             Item::Reverse => "Listen on the repeater's input. Home: hold *.",
         }
@@ -367,7 +390,7 @@ impl Item {
             // Global, then levels 0-9; a VFO skips Global ([`crate::App`]'s change).
             Item::Squelch => (if c.squelch >= SQ_GLOBAL { 0 } else { c.squelch as i32 + 1 }, 11),
             Item::Power => (c.power as i32, 3),
-            Item::Bandwidth => (c.narrow as i32, 2),
+            Item::RxTone => (tone_index(c.rx_tone), TONES),
             Item::Tones => (tone_index(c.tx_tone), TONES),
             Item::Offset => (if c.split { 3 } else { (c.offset.signum() + 3) % 3 }, 4), // simplex, +, -, split
             Item::Step => (c.step as i32, STEPS.len() as i32),
@@ -391,9 +414,9 @@ impl Item {
                 c.power = v as u8;
                 (Param::Power, v)
             }
-            Item::Bandwidth => {
-                c.narrow = v == 1;
-                (Param::Bandwidth, v)
+            Item::RxTone => {
+                c.rx_tone = tone_at(v);
+                (Param::RxTone, c.rx_tone as i32)
             }
             Item::Tones => {
                 c.tx_tone = tone_at(v);
@@ -412,6 +435,7 @@ impl Item {
             }
             Item::Mode => {
                 c.mode = v as u8;
+                c.narrow = v == 1; // VFO-20: the App sends the bandwidth with it
                 (Param::Mode, v)
             }
             Item::BusyLock => {
@@ -436,11 +460,17 @@ impl Item {
         b.clear();
         match self {
             Item::Squelch if c.squelch >= SQ_GLOBAL => b.set(b"Global"),
+            Item::Squelch if c.squelch == 0 && long => b.set(b"0 (open)"), // SQL: level 0 is squelch off
             Item::Squelch => {
                 let _ = uwrite!(b, "{}", c.squelch);
             }
             Item::Power => b.set(["Low", "Mid", "High"][c.power as usize % 3].as_bytes()),
-            Item::Bandwidth => b.set(if c.narrow { b"Narrow" } else { b"Wide" }),
+            Item::RxTone => {
+                tone_text(c.rx_tone, b);
+                if b.is_empty() {
+                    b.set(b"Off");
+                }
+            }
             Item::Tones => {
                 tone_text(c.tx_tone, b);
                 if b.is_empty() {
@@ -492,12 +522,9 @@ pub fn params(c: &SlotCfg) -> [(Param, i32); 10] {
     ]
 }
 
-/// The mode chip: "FM-N" for narrow FM, else the mode.
+/// The mode chip: "FM-N" for NFM (the home cards' long-standing look), else the mode.
 pub fn mode_chip(c: &SlotCfg, b: &mut Buf<16>) {
-    b.set(MODES[c.mode as usize % MODES.len()].as_bytes());
-    if c.mode == 0 && c.narrow {
-        b.push(b"-N");
-    }
+    b.set(if c.mode == 1 { b"FM-N" } else { MODES[c.mode as usize % MODES.len()].as_bytes() });
 }
 
 /// "CH 012": menus, lists and editors.

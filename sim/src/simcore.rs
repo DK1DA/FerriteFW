@@ -109,12 +109,13 @@ struct Flash {
 }
 
 /// The boot checks the simulator shows: all passed.
-const CHECKS: [Check; 5] = [
+const CHECKS: [Check; 6] = [
     Check { label: "MCU", value: "AT32F403A", state: State::Ok },
     Check { label: "SPI flash", value: "4 MB", state: State::Ok },
     Check { label: "BK4829 VHF", value: "0x4829", state: State::Ok },
     Check { label: "BK4829 UHF", value: "0x4829", state: State::Ok },
-    Check { label: "SI4732", value: "", state: State::Ok },
+    Check { label: "SI4732", value: "not tested", state: State::Off },
+    Check { label: "Calibration", value: "", state: State::Ok },
 ];
 
 /// The simulated flash's saved part: from the layout header to the end of the scratch sector.

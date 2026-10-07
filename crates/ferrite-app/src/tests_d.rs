@@ -54,7 +54,12 @@ fn setup_runs_and_writes_settings() {
     t.tap(Key::Digit(7));
     t.tap(Key::Digit(7));
     t.tap(Key::Menu); // page 3: region
+    assert_eq!(t.app.settings().region_name(), "Not set", "nothing is chosen for you (SETUP-3)");
     t.tap(Key::Down); // Canada
+    assert_eq!(t.app.settings().region_name(), "Not set", "moving doesn't choose");
+    t.tap(Key::Menu); // OK chooses it and goes on
+    assert_eq!(t.app.settings().region_name(), "Canada");
+    t.tap(Key::Exit); // back to the region page, Canada kept
     assert_eq!(t.app.settings().region_name(), "Canada");
     t.tap(Key::Exit); // BACK: previous page keeps the answers
     assert!(matches!(t.app.screen(), Screen::Setup(Setup { page: 1, .. })));

@@ -41,13 +41,12 @@ const ALL: fn(u16) -> bool = |_| true;
 pub const PRESETS_MAX: u8 = 16;
 
 /// The editor's rows and their help.
-const ROWS: [(&str, &str); 7] = [
+const ROWS: [(&str, &str); 6] = [
     ("Name", "Up to 12 characters"),
     ("Start", "Knob 100 kHz, left and right 1 MHz"),
     ("End", "Knob 100 kHz, left and right 1 MHz"),
     ("Step", "The scan's step through the range"),
-    ("Mode", "FM, NFM or AM"),
-    ("Bandwidth", "Narrow or wide"),
+    ("Mode", "FM wide, NFM narrow or AM (VFO-20)"),
     ("Skips", "Never stopped on (up to 48); * on a hit adds"),
 ];
 
@@ -157,8 +156,10 @@ impl View for ScanLists {
                     1 => p.start = (p.start as i32 + d * khz100).clamp(mhz(18) as i32, p.end as i32 - khz100) as Freq10,
                     2 => p.end = (p.end as i32 + d * khz100).clamp(p.start as i32 + khz100, mhz(999) as i32) as Freq10,
                     3 => p.step = (p.step as i32 + d).rem_euclid(STEPS.len() as i32) as u8,
-                    4 => p.mode = (p.mode as i32 + d).rem_euclid(3) as u8, // FM, NFM, AM (CHAN-23)
-                    5 => p.narrow = !p.narrow,
+                    4 => {
+                        p.mode = (p.mode as i32 + d).rem_euclid(3) as u8; // FM, NFM, AM (CHAN-23)
+                        p.narrow = p.mode == 1; // VFO-20
+                    }
                     _ => return,
                 }
                 data.request(Op::Preset(i, p));
@@ -225,12 +226,11 @@ impl View for ScanLists {
                         }
                         3 => v.set(STEPS[p.step as usize % STEPS.len()].1.as_bytes()),
                         4 => v.set(MODES[p.mode as usize % MODES.len()].as_bytes()),
-                        5 => v.set(if p.narrow { b"Narrow" } else { b"Wide" }),
                         _ => {
                             let _ = uwrite!(v, "{} of 48", p.skips);
                         }
                     }
-                    app.row1(lcd, i, label.as_bytes(), v.as_bytes(), false, i as u8 == row, i == 6);
+                    app.row1(lcd, i, label.as_bytes(), v.as_bytes(), false, i as u8 == row, i == 5);
                 }
                 // The help, or why this range won't scan (SCAN-14).
                 let text: &[u8] = if crosses_relay(&p) {

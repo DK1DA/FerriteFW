@@ -214,6 +214,16 @@ pub struct RangePreset {
     pub skips: u8,
 }
 
+impl RangePreset {
+    /// VFO-20: the mode carries the bandwidth; FM with narrow from before reads as NFM.
+    pub fn fold_bw(&mut self) {
+        if self.mode == 0 && self.narrow {
+            self.mode = 1;
+        }
+        self.narrow = self.mode == 1;
+    }
+}
+
 /// A zone's own settings (CHAN-6).
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct ZoneCfg {

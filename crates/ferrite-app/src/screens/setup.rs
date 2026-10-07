@@ -50,7 +50,7 @@ const PAGES: [(&str, &str, Ask); 8] = [
         slow!("For APRS, CW ID and the power-on message. May be left empty (MENU 0 8 7 1)."),
         Ask::Callsign,
     ),
-    (slow!("Region"), slow!("Sets your amateur transmit bands, and defaults like wide FM and weather alerts."), Ask::Region),
+    (slow!("Region"), slow!("Where you may transmit, and defaults like weather alerts."), Ask::Region),
     (
         slow!("Owner card"),
         slow!("Optional. Shown at power on if chosen (MENU 0 7 3 3); later, edit it in the web app."),
@@ -67,8 +67,9 @@ const PAGES: [(&str, &str, Ask); 8] = [
 ];
 const LAST: u8 = PAGES.len() as u8 - 1;
 
-/// The region page's choices: four regions, then "Other ..." holding the rest (the mock-up's five rows).
-const REGION_ROWS: u8 = 5;
+/// The region page's choices: all eight regions on one screen, none chosen until OK on one (decided Oct 6, 2026;
+/// the mock-up's "Other ..." row is gone). Extend TX is the row after them.
+const REGION_ROWS: u8 = REGION_LIST.len() as u8;
 /// Battery Save levels and their trade-off (chapter 33's table).
 const SAVE: [(&str, &str, &str); 4] = [
     (slow!("Off"), slow!("always on"), slow!("Receivers always on: hears everything, shortest battery life.")),
@@ -141,7 +142,7 @@ impl Setup {
     /// The row a page opens on: the current value.
     fn first_row(app: &App, page: u8) -> u8 {
         match PAGES[page as usize].2 {
-            Ask::Region => app.set.region.clamp(1, REGION_ROWS) - 1,
+            Ask::Region => app.set.region.saturating_sub(1).min(REGION_ROWS - 1),
             Ask::BatterySave => app.bsave,
             _ => 0,
         }
@@ -149,9 +150,6 @@ impl Setup {
 
     fn go(self, app: &mut App, page: u8) {
         let row = Setup::first_row(app, page);
-        if PAGES[page as usize].2 == Ask::Region && app.set.region == 0 {
-            app.set.region = 1; // the pre-selected region is the answer if OK is pressed (SETUP-3)
-        }
         self.with(app, |s| (s.page, s.row, s.tap_key, s.flags) = (page, row, 0, s.flags & (FIRST | SINGLE)));
     }
 
@@ -216,15 +214,10 @@ impl Setup {
         let cyc = |v: u8, n: usize| (v as i32 + d).rem_euclid(n as i32) as u8;
         let s = &mut app.set;
         match self.ask() {
-            Ask::Region if self.row < REGION_ROWS - 1 => {
+            // The knob moves through the regions; OK chooses (nothing is chosen for you).
+            Ask::Region if self.row < REGION_ROWS => {
                 let r = cyc(self.row, REGION_ROWS as usize);
-                s.region = r + 1;
                 self.with(app, |st| st.row = r);
-            }
-            Ask::Region if self.row == REGION_ROWS - 1 => {
-                // "Other ...": Australia, New Zealand, Japan, Other.
-                let i = s.region.max(REGION_ROWS) - REGION_ROWS;
-                s.region = REGION_ROWS + cyc(i, REGION_LIST.len() - REGION_ROWS as usize + 1);
             }
             Ask::Region => set_extend(app, !app.set.extend_tx),
             Ask::Time => match self.row {
@@ -279,12 +272,8 @@ impl View for Setup {
                 let n = self.rows();
                 let row = if e.key == Key::Up { (self.row + n - 1) % n } else { (self.row + 1) % n };
                 self.with(app, |s| (s.row, s.tap_key) = (row, 0));
-                // The region rows: the highlighted one is the answer (SetupRegion).
-                match (ask, row) {
-                    (Ask::Region, r) if r < REGION_ROWS - 1 => app.set.region = r + 1,
-                    (Ask::Region, r) if r == REGION_ROWS - 1 => app.set.region = app.set.region.max(REGION_ROWS),
-                    (Ask::BatterySave, r) => app.change(Item::BatterySave, r as i32 - app.bsave as i32),
-                    _ => {}
+                if let (Ask::BatterySave, r) = (ask, row) {
+                    app.change(Item::BatterySave, r as i32 - app.bsave as i32);
                 }
             }
             (Key::Left, Short | Repeat) if text => self.delete(app),
@@ -300,6 +289,16 @@ impl View for Setup {
                     _ => 0,
                 };
                 self.with(app, |s| (s.flags, s.tap_key) = (s.flags & (FIRST | SINGLE) | next, 0));
+            }
+            // OK on a region chooses it and goes on: no region is chosen for you (SETUP-3).
+            (Key::Menu, Short) if ask == Ask::Region && self.row < REGION_ROWS => {
+                app.set.region = self.row + 1;
+                app.region_steps(); // VFO-18
+                if single {
+                    self.finish(app);
+                } else {
+                    self.go(app, self.page + 1);
+                }
             }
             (Key::Menu, Short) if single => self.finish(app),
             (Key::Menu, Short) if ask == Ask::Region && self.row == REGION_ROWS => self.turn(app, 1),
@@ -359,25 +358,22 @@ impl View for Setup {
             Ask::Region => {
                 let (region, ext, row) = (app.set.region, app.set.extend_tx, self.row);
                 for i in 0..REGION_ROWS {
-                    let (name, range) = if i == REGION_ROWS - 1 {
-                        if region >= REGION_ROWS { (REGION_LIST[region as usize - 1], "knob: more") } else { ("Other ...", "") }
-                    } else {
-                        (REGION_LIST[i as usize], "")
-                    };
-                    let chosen = row == i;
-                    if app.dirty(R_ROW + i as usize, hash(&(name, chosen))) {
-                        choice(lcd, 98 + 26 * i as i32, 23, name.as_bytes(), range.as_bytes(), chosen); // odd: DISP-19
+                    let name = REGION_LIST[i as usize];
+                    let note = if region == i + 1 { "chosen" } else { "" };
+                    let focused = row == i;
+                    if app.dirty(R_ROW + i as usize, hash(&(focused, region == i + 1))) {
+                        choice(lcd, 94 + 19 * i as i32, 17, name.as_bytes(), note.as_bytes(), focused); // 17: odd, DISP-20
                     }
                 }
-                if app.dirty(R_ROW + 6, hash(&(ext, row == REGION_ROWS))) {
-                    lcd.fill(10, 226, 220, 1, LINE);
+                if app.dirty(R_ROW + REGION_ROWS as usize, hash(&(ext, row == REGION_ROWS))) {
+                    lcd.fill(10, 246, 220, 1, LINE);
                     let sel = row == REGION_ROWS;
                     let bg = if sel { FOCUS } else { BG };
-                    lcd.fill(0, 227, 240, 22, BG);
-                    lcd.fill_r(4, 228, 232, 21, 1, bg);
-                    w::field(lcd, 10, 120, 229, 247, 242, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
-                    w::field(lcd, 130, 100, 229, 247, 242, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
-                    w::wrap(lcd, 10, 220, 249, 299, 262, 15, b"On: transmit wherever the radio can, not only amateur bands. Shows a warning first.", &UI_12, SUB, BG);
+                    lcd.fill(0, 247, 240, 23, BG);
+                    lcd.fill_r(4, 248, 232, 21, 1, bg);
+                    w::field(lcd, 10, 120, 249, 267, 262, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
+                    w::field(lcd, 130, 100, 249, 267, 262, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
+                    w::wrap(lcd, 10, 220, 270, 300, 283, 15, b"On: transmit wherever the radio can, not only amateur bands. Warns first.", &UI_12, SUB, BG);
                 }
             }
             Ask::Owner => {

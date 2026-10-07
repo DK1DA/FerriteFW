@@ -53,6 +53,7 @@ pub fn ch_decode(num: u16, b: &[u8; CH_LEN]) -> Option<Channel> {
     let mut cfg: SlotCfg = DEFAULT_CFG;
     cfg.mode = b[8];
     cfg.narrow = b[9] != 0;
+    cfg.fold_bw(); // VFO-20: FM + narrow from before reads as NFM
     cfg.power = b[10].saturating_sub(1);
     cfg.step = match b[11] {
         0 => BANDS[band_near(rx)].step,
@@ -216,7 +217,7 @@ pub fn preset_decode(b: &[u8]) -> Option<RangePreset> {
         return None;
     }
     let n = b[..16].iter().position(|&c| c == 0).unwrap_or(16).min(12);
-    Some(RangePreset {
+    let mut p = RangePreset {
         name: Buf::from(&b[..n]),
         start: u32_at(b, 16),
         end: u32_at(b, 20),
@@ -224,7 +225,9 @@ pub fn preset_decode(b: &[u8]) -> Option<RangePreset> {
         mode: b[25],
         narrow: b[26] != 0,
         skips: b[28],
-    })
+    };
+    p.fold_bw(); // VFO-20
+    Some(p)
 }
 
 /// The first 32 bytes of a preset record (the skip list after them is left as it is).

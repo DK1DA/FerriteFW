@@ -238,6 +238,8 @@ pub async fn task() {
         check(Source::Radio, if n == 0 { CHECK_BK0 } else { CHECK_BK1 }, found);
     }
     r.live.chips = r.chips;
+    // The SI4732 is held in reset (PA6) until FM broadcast or HF mode powers it: not tested at boot.
+    crate::tasks::untested(crate::tasks::CHECK_SI);
     r.tune(DEFAULT);
     let live = LIVE.sender();
     live.send(r.live);
@@ -293,6 +295,9 @@ pub async fn task() {
                 | RadioCmd::ScanSkip { .. }
                 | RadioCmd::ScanZones { .. }
                 | RadioCmd::ScanDir { .. }
+                | RadioCmd::Monitor { .. }
+                | RadioCmd::ToneBurst { .. }
+                | RadioCmd::Dtmf { .. }
                 | RadioCmd::Sweep { .. }
                 | RadioCmd::ScopeCfg { .. }
                 | RadioCmd::ScopeListen { .. }

@@ -79,7 +79,8 @@ fn main() {
         Check { label: "SPI flash", value: "4 MB", state: State::Ok },
         Check { label: "BK4829 VHF", value: "0x4829", state: State::Ok },
         Check { label: "BK4829 UHF", value: "0x4829", state: State::Ok },
-        Check { label: "SI4732", value: "", state: State::Pending },
+        Check { label: "SI4732", value: "not tested", state: State::Off },
+        Check { label: "Calibration", value: "", state: State::Pending },
     ];
     let info = BootInfo { version: VERSION, callsign: Some(b"VA7FER"), owner: None, checks: &checks };
     let mut fb = FrameBuffer::new();
@@ -312,6 +313,11 @@ fn main() {
     fake::sample_app(&mut app, &store);
     app.set_vfo(0, 14_652_000);
     run(&mut app, &mut fb, t, &mut t);
+    // Monitor latched on A (SIDE1 tap): MON on its card (SQL-12); tapped again to end it.
+    press(&mut app, Key::Side(1), 100, &mut t);
+    shot!(600, "home-monitor");
+    press(&mut app, Key::Side(1), 100, &mut t);
+    run(&mut app, &mut fb, t, &mut t);
     // Scan: SIDE2 on A, 9 s in (a hit every 7 s).
     press(&mut app, Key::Side(2), 100, &mut t);
     shot!(9000, "scan");
@@ -456,7 +462,8 @@ fn themed(scale: u32) {
         Check { label: "SPI flash", value: "4 MB", state: State::Ok },
         Check { label: "BK4829 VHF", value: "0x4829", state: State::Ok },
         Check { label: "BK4829 UHF", value: "0x4829", state: State::Ok },
-        Check { label: "SI4732", value: "", state: State::Pending },
+        Check { label: "SI4732", value: "not tested", state: State::Off },
+        Check { label: "Calibration", value: "", state: State::Pending },
     ];
     for (theme, suffix) in [(ferrite_ui::theme::NIGHT_RED, "night"), (ferrite_ui::theme::DAYLIGHT, "day")] {
         let name = |n: &str| format!("{n}-{suffix}");

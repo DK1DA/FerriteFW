@@ -44,11 +44,17 @@ pub fn tx_freq(app: &App, slot: u8) -> Freq10 {
     s.cfg().tx_of(s.freq())
 }
 
-/// Why this slot can't transmit now, by the checks the UI can make.
+/// Why this slot can't transmit now, by the checks the UI can make. An automatic transmission (a beacon, KISS)
+/// is also refused while the crossband repeater runs; a person's PTT isn't ([`ptt_refusal`], XB-14).
 pub fn refusal(app: &App, slot: u8) -> Option<Refusal> {
     if app.radio.mode == super::activity::Mode::Xb {
         return Some(Refusal::Crossband);
     }
+    ptt_refusal(app, slot)
+}
+
+/// [`refusal`] for PTT: the same checks, but a running crossband repeater doesn't refuse it.
+pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
     if app.radio.keyed.is_some() {
         return Some(Refusal::InProgress);
     }
@@ -80,7 +86,7 @@ pub fn refusal(app: &App, slot: u8) -> Option<Refusal> {
     // tone other than the slot's RX tone (with no RX tone set, any carrier is another group's).
     if slot < SLOTS as u8 && app.rx_mask & 1 << slot != 0 {
         let c = app.slot(slot).cfg();
-        let other_tone = c.rx_tone == 0 || app.tone_mask & 1 << slot == 0;
+        let other_tone = c.heard_tone() == 0 || app.tone_mask & 1 << slot == 0;
         if c.busy == 1 || c.busy == 2 && other_tone {
             return Some(Refusal::Busy);
         }
@@ -90,12 +96,10 @@ pub fn refusal(app: &App, slot: u8) -> Option<Refusal> {
 
 /// PTT down for a slot (KEY-7): home first, then refuse, prompt (emergency) or key.
 pub fn ptt(app: &mut App, slot: u8) {
-    if app.radio.mode == super::activity::Mode::Xb {
-        // XB-14: local PTT doesn't transmit while the repeater runs; its screen stays.
-        return refuse(app, slot, Refusal::Crossband);
-    }
-    app.go_home();
-    if let Some(r) = refusal(app, slot) {
+    if app.radio.mode != super::activity::Mode::Xb {
+        app.go_home();
+    } // XB-14: while the repeater runs, PTT transmits on its own slot and the repeater carries on after
+    if let Some(r) = ptt_refusal(app, slot) {
         return refuse(app, slot, r);
     }
     if txplan::emergency(tx_freq(app, slot)) {
@@ -108,7 +112,7 @@ pub fn ptt(app: &mut App, slot: u8) {
 
 /// Key up (after the checks, or the emergency prompt's second PTT): the Transmit screen over where it was.
 pub fn key(app: &mut App, slot: u8) {
-    if let Some(r) = refusal(app, slot) {
+    if let Some(r) = ptt_refusal(app, slot) {
         return refuse(app, slot, r);
     }
     app.radio.keyed = Some(slot);
@@ -214,6 +218,22 @@ impl View for Transmit {
     /// TX-22: while keyed, no key does anything (hold BACK still goes home, and PTT up unkeys).
     fn key(self, _: &mut App, _: KeyEvent, _: &impl ChannelStore) {}
 
+    /// While keyed: SIDE2 sends the tone burst for as long as it is held (TONE-13), and the digits, \* and #
+    /// send DTMF live for as long as each is held (DTMF-7). The tones themselves are the Radio task's
+    /// (milestone 4).
+    fn raw(self, app: &mut App, key: Option<Key>, _: Option<u8>, down: bool) {
+        if app.radio.keyed.is_none() {
+            return;
+        }
+        match key {
+            Some(Key::Side(2)) => app.out.push(RadioCmd::ToneBurst { on: down }),
+            Some(Key::Digit(d)) => app.out.push(RadioCmd::Dtmf { key: b'0' + d, on: down }),
+            Some(Key::Star) => app.out.push(RadioCmd::Dtmf { key: b'*', on: down }),
+            Some(Key::Hash) => app.out.push(RadioCmd::Dtmf { key: b'#', on: down }),
+            _ => {}
+        }
+    }
+
     fn ptt(self, app: &mut App, down: bool) {
         if !down {
             app.back(); // home, or HF mode it was keyed from
@@ -292,7 +312,7 @@ impl View for Transmit {
         } else {
             let c = app.slot(s).cfg();
             mode_chip(c, &mut m);
-            tone_text(c.tx_tone, &mut tone);
+            tone_text(c.sent_tone(), &mut tone);
         }
         let pw = power_name(app, s);
         if app.dirty(5, hash(&(m, tone, pw))) {

@@ -8,7 +8,7 @@ use crate::chan::{Input, ALERTS, CABLE_BAUD, DEBUG_ANS, DEBUG_REQ, INPUT, LINK_B
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
 use crate::store;
-use crate::tasks::{check, CHECK_FLASH, CHECK_MCU, CHECK_STATE, FAILED, PASSED};
+use crate::tasks::{check, CHECK_CAL, CHECK_FLASH, CHECK_MCU, CHECK_STATE, FAILED, PASSED, UNTESTED};
 use core::sync::atomic::Ordering::Relaxed;
 use embassy_futures::select::{select, select4, Either, Either4};
 use embassy_time::{Duration, Instant, Timer};
@@ -83,6 +83,8 @@ pub async fn task() {
         Check { label: "SPI flash", value: "", state: State::Pending },
         Check { label: "BK4829 VHF", value: "", state: State::Pending },
         Check { label: "BK4829 UHF", value: "", state: State::Pending },
+        Check { label: "SI4732", value: "not tested", state: State::Pending },
+        Check { label: "Calibration", value: "", state: State::Pending },
     ];
     // The store: mounted before the boot screen, as the settings (callsign, owner card: BOOT-9, MENU 0 7 3 3)
     // are in it. A first boot formats the chip here (about a second, once). Its writes go to the Storage task.
@@ -93,6 +95,13 @@ pub async fn task() {
         store.mount_async().await;
     }
     check(Source::Storage, CHECK_FLASH, flash.is_some());
+    // Calibration present: the factory sector isn't blank (read only, CAL-1). Its CRC check comes with 1b.
+    let mut cal = [0u8; 32];
+    let cal_ok = flash.is_some()
+        && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut cal).is_ok()
+        && cal.iter().any(|&b| b != 0xFF)
+        && cal.iter().any(|&b| b != 0);
+    check(Source::Storage, CHECK_CAL, cal_ok);
     let set = store::settings();
     store.load_settings(set);
     let card = set.boot_owner().is_some();
@@ -109,6 +118,7 @@ pub async fn task() {
             c.state = match s.load(Relaxed) {
                 PASSED => State::Ok,
                 FAILED => State::Fail,
+                UNTESTED => State::Off,
                 _ => State::Pending,
             };
         }
@@ -371,7 +381,8 @@ fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
             b.push(match c.state {
                 State::Ok => b": ok",
                 State::Fail => b": FAILED",
-                State::Pending | State::Off => b": no report",
+                State::Off => b": not tested at boot",
+                State::Pending => b": no report",
             });
         });
     }

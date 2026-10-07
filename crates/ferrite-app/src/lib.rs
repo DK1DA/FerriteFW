@@ -253,6 +253,8 @@ pub struct App {
     /// Where each scanning slot is stopped on a hit (squelch open, or still on its last hit in the resume wait);
     /// 0 when it isn't. PTT transmits there (SCAN-19).
     scan_hit: [Freq10; SLOTS],
+    /// Slots with monitor latched (SIDE1 tap): MON on the card.
+    pub(crate) monitor: u8,
     out: Outbox,
     /// The channel write for the store's owner ([`App::pop_write`]): one, as every input makes at most one and
     /// the owner drains after every input.
@@ -306,6 +308,7 @@ impl App {
             scan_mask: 0,
             relay_mask: 0,
             scan_hit: [0; SLOTS],
+            monitor: 0,
             out: Outbox { q: [None; 16], head: 0, len: 0, sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
             text: Buf::new(),
@@ -977,6 +980,7 @@ impl App {
                 }
                 let (was_split, old) = (c.split, *c);
                 if let Some((param, value)) = item.set(c, v, shift) {
+                    let narrow = c.narrow;
                     if item == Item::Offset && !ferrite_core::txplan::relay_ok(c.rx_of(rx), c.tx_of(rx)) {
                         *c = old; // TX-37: a shift that crosses the relay boundary isn't kept
                         self.relay_toast();
@@ -984,6 +988,10 @@ impl App {
                     }
                     let value = if param == Param::Squelch { self.sq_level(a) as i32 } else { value };
                     self.out.push(RadioCmd::SlotParam { slot: a, param, value });
+                    if param == Param::Mode {
+                        // VFO-20: the mode is the bandwidth too
+                        self.out.push(RadioCmd::SlotParam { slot: a, param: Param::Bandwidth, value: narrow as i32 });
+                    }
                     if was_split && param == Param::Offset {
                         self.out.push(RadioCmd::SlotParam { slot: a, param: Param::Split, value: 0 });
                     }

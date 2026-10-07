@@ -181,12 +181,14 @@ fn slot_cycles_and_edit_in_place() {
     assert_eq!(t.app.screen(), Screen::Edit(Edit { cell: 5 })); // Step
     t.tap(Key::Left);
     t.tap(Key::Up);
-    assert_eq!(t.app.screen(), Screen::Edit(Edit { cell: 1 })); // Bandwidth
+    assert_eq!(t.app.screen(), Screen::Edit(Edit { cell: 1 })); // RX tone
+    let rx0 = t.app.slot(0).cfg().rx_tone;
     t.knob(1); // EDIT-3: the knob changes, at once (EDIT-4)
-    assert!(!t.app.slot(0).cfg().narrow);
-    assert!(t.cmds().contains(&RadioCmd::SlotParam { slot: 0, param: Param::Bandwidth, value: 0 }));
+    let rx1 = t.app.slot(0).cfg().rx_tone;
+    assert_ne!(rx1, rx0);
+    assert!(t.cmds().contains(&RadioCmd::SlotParam { slot: 0, param: Param::RxTone, value: rx1 as i32 }));
     t.tap(Key::Star); // undo within 5 s
-    assert!(t.app.slot(0).cfg().narrow);
+    assert_eq!(t.app.slot(0).cfg().rx_tone, rx0);
     t.tap(Key::Slot); // EDIT-6: SLOT leaves
     assert_eq!(t.app.screen(), Screen::Home);
     assert_eq!(t.app.active(), 0, "leaving edit doesn't switch slots");
