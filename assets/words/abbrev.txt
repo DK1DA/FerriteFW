@@ -1,0 +1,35 @@
+# Short forms offered as a second candidate after a word (APRS messages hold 67 characters).
+# word<TAB>short form. Standard amateur and APRS usage only.
+received	qsl
+thanks	tnx
+thank you	tu
+weather	wx
+repeater	rpt
+location	qth
+frequency	freq
+message	msg
+please	pse
+are	r
+you	u
+your	ur
+see you later	cul
+best regards	73
+before	b4
+about	abt
+again	agn
+sorry	sri
+number	nr
+here	hr
+have	hv
+good	gd
+good morning	gm
+good afternoon	ga
+good evening	ge
+good night	gn
+signal	sig
+power	pwr
+antenna	ant
+worked	wkd
+copy	cpy
+and	es
+how	hw

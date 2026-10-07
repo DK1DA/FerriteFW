@@ -1,0 +1,11 @@
+# Quick messages: the defaults offered before typing (digits 1-9 on an empty message). Editable from the
+# web app and the terminal; these are only the factory set.
+73
+QSL, thanks
+On my way
+Call me
+Where are you?
+QRT for now
+Yes
+No
+Are you on the repeater?
