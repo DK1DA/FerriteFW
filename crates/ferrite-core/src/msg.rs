@@ -252,6 +252,50 @@ pub struct TxLive {
     pub refused: Option<crate::txplan::Refusal>,
 }
 
+/// The terminal's debug commands (TERM-21 to TERM-24): what the firmware is asked. Memory is read where the
+/// terminal runs; BK4829 and SI4732 requests go to the Radio task, which owns the chips. Not queued with
+/// [`RadioCmd`]: an SI4732 command doesn't fit its 8 bytes, and these go one at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugReq {
+    /// `n` bytes (at most [`DEBUG_MEM`]) of MCU memory from `addr`; `words`: 32-bit reads (peripherals).
+    Mem { addr: u32, n: u8, words: bool },
+    /// A BK4829 register (chip 0 VHF, 1 UHF/HF).
+    BkRead { chip: u8, reg: u8 },
+    /// Write a BK4829 register, then read it back. Transmit and PA bits are refused (TERM-23).
+    BkWrite { chip: u8, reg: u8, val: u16 },
+    /// An SI4732 command: its first `n` bytes, and `reply` bytes back (the status byte first).
+    Si { cmd: [u8; 8], n: u8, reply: u8 },
+}
+
+/// The most memory one [`DebugReq::Mem`] reads.
+pub const DEBUG_MEM: usize = 64;
+
+/// The answer to a [`DebugReq`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugAns {
+    Mem { addr: u32, data: [u8; DEBUG_MEM], n: u8 },
+    Reg { chip: u8, reg: u8, val: u16 },
+    Si { data: [u8; 16], n: u8 },
+    /// Not done, and why.
+    Refused(&'static str),
+}
+
+/// BK4829 REG_30 bits that turn on the transmitter: Tx DSP Enable (1) and PA Gain Enable (3), from the
+/// register table (`datasheets/md/bk4829_registers_table`).
+pub const BK_REG30_TX_BITS: u16 = 1 << 1 | 1 << 3;
+
+/// Why a terminal write to a BK4829 register is refused, in every build (TERM-23): transmit goes only through
+/// the Radio task's own checks, and the chip's GPIO outputs (REG_33, REG_34) are wired to who knows what on
+/// this board until the bench says (on the UV-K5 they switch the RF path).
+pub fn bk_write_refused(reg: u8, val: u16) -> Option<&'static str> {
+    match reg {
+        0x30 if val & BK_REG30_TX_BITS != 0 => Some("REG_30 Tx DSP and PA Gain bits are never set from the terminal"),
+        0x33 | 0x34 => Some("REG_33 and REG_34 drive the chip's GPIO pins: unknown wiring, not written from the terminal"),
+        0x80.. => Some("BK4829 registers are 0x00 to 0x7F"),
+        _ => None,
+    }
+}
+
 /// The most bars in a band scope sweep (SCOPE-9: 30, 60, 120 or 240 across 240 px).
 pub const SCOPE_BARS: usize = 240;
 /// Crossband activity: 60 columns of 30 s, the last 30 minutes (XB-16).
@@ -419,5 +463,23 @@ mod tests {
         // modes share one slot in it, the largest being the band scope's 240 bars (SCOPE-9: 308 bytes, about
         // 0.45 KB more over the three copies than with 56 bars; accepted Oct 6, 2026).
         assert!(core::mem::size_of::<LiveAll>() <= 320);
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    /// TERM-23: the transmit and PA bits of REG_30, and the GPIO registers, are never written from the terminal.
+    #[test]
+    fn bk_writes_refused() {
+        assert!(bk_write_refused(0x30, 0xBFF1).is_none(), "stock's receive value");
+        assert!(bk_write_refused(0x30, 0xC1FE).is_some(), "stock's transmit value");
+        assert!(bk_write_refused(0x30, 1 << 3).is_some());
+        assert!(bk_write_refused(0x30, 1 << 1).is_some());
+        assert!(bk_write_refused(0x33, 0xFF00).is_some());
+        assert!(bk_write_refused(0x34, 0).is_some());
+        assert!(bk_write_refused(0x80, 0).is_some());
+        assert!(bk_write_refused(0x47, 0x6142).is_none());
     }
 }

@@ -4,7 +4,7 @@
 
 use crate::board::{BACKLIGHT, POWER_HOLD, POWER_SW};
 use crate::bringup;
-use crate::chan::{Input, ALERTS, INPUT, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
+use crate::chan::{Input, ALERTS, DEBUG_ANS, DEBUG_REQ, INPUT, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
 use crate::store;
@@ -206,7 +206,19 @@ pub async fn task() {
             }
         }
         if !bringup::ON.load(Relaxed) {
+            // Debug commands (TERM-21): memory here, registers by the Radio task (it signals TERM_WAKE).
+            if let Ok(a) = DEBUG_ANS.try_receive() {
+                term.debug_answer(a);
+            }
             term.poll(&mut app, store, &dev, &live, now_ms(), &mut Cable);
+            if let Some(r) = term.debug_req() {
+                match r {
+                    ferrite_core::msg::DebugReq::Mem { .. } => term.debug_answer(crate::debug::mem(r)),
+                    _ if DEBUG_REQ.try_send(r).is_err() => term.debug_answer(ferrite_core::msg::DebugAns::Refused("the Radio task is busy")),
+                    _ => {}
+                }
+                TERM_WAKE.signal(()); // print the answer, or wait for it, on the next turn
+            }
         }
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet

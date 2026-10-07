@@ -10,15 +10,15 @@
 use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RF_PINS, SI4732_ADDR, SI_RST, SI_SCL, SI_SDA};
 use crate::bus::{BusyDelay, Io, Out, SiBus};
 use crate::hal::i2c::I2c;
-use crate::chan::{LIVE, RADIO};
+use crate::chan::{DEBUG_ANS, DEBUG_REQ, LIVE, RADIO, TERM_WAKE};
 use crate::hal::gpio::Mode;
 use crate::tasks::{check, CHECK_BK0, CHECK_BK1};
 use bk4829::wire::ThreeWire;
 use bk4829::{AfOut, Bandwidth, Bk4829};
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select3, Either, Either3};
 use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, Band, Freq10};
-use ferrite_core::msg::{BroadcastCmd, Live, RadioCmd, Source};
+use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Live, RadioCmd, Source};
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use si4732::{Mode as SiMode, Si4732, Sideband};
 
@@ -70,6 +70,34 @@ fn now_ms() -> u64 {
 }
 
 impl Radio {
+    /// The terminal's debug requests (TERM-21 to TERM-24): registers read and written as asked, but never a
+    /// transmit or PA bit, nor the chip's GPIO outputs (`bk_write_refused`, checked here as well as in the
+    /// terminal). Memory requests are the UI task's.
+    fn debug(&mut self, d: DebugReq) -> DebugAns {
+        match d {
+            DebugReq::BkRead { chip, .. } | DebugReq::BkWrite { chip, .. } if chip > 1 || self.chips & 1 << chip == 0 => {
+                DebugAns::Refused("that BK4829 didn't answer at start-up")
+            }
+            DebugReq::BkRead { chip, reg } if reg < 0x80 => DebugAns::Reg { chip, reg, val: self.chip(chip).read(reg) },
+            DebugReq::BkWrite { chip, reg, val } => {
+                if let Some(why) = bk_write_refused(reg, val) {
+                    return DebugAns::Refused(why);
+                }
+                self.chip(chip).write(reg, val);
+                DebugAns::Reg { chip, reg, val: self.chip(chip).read(reg) }
+            }
+            DebugReq::Si { cmd, n, reply } => {
+                let (n, rn) = ((n as usize).min(8), (reply as usize).clamp(1, 16));
+                let mut data = [0u8; 16];
+                match self.si.command(&cmd[..n], &mut data[..rn], &mut BusyDelay) {
+                    Ok(()) => DebugAns::Si { data, n: rn as u8 },
+                    Err(_) => DebugAns::Refused("the SI4732 didn't answer: it is held in reset until FM broadcast or HF mode starts it"),
+                }
+            }
+            _ => DebugAns::Refused("not a Radio task request"),
+        }
+    }
+
     fn chip(&mut self, n: u8) -> Bk4829<bk4829::wire::Chip<'_, Out, Io, BusyDelay, Out>> {
         Bk4829::new(self.wire.chip(&mut self.cs[n as usize]))
     }
@@ -220,7 +248,17 @@ pub async fn task() {
         if !r.save.asleep() {
             at = at.min(now_ms() + POLL_MS);
         }
-        match select(RADIO.receive(), Timer::at(Instant::from_millis(at))).await {
+        let cmd = match select3(RADIO.receive(), Timer::at(Instant::from_millis(at)), DEBUG_REQ.receive()).await {
+            Either3::First(c) => Either::First(c),
+            Either3::Second(t) => Either::Second(t),
+            Either3::Third(d) => {
+                let a = r.debug(d);
+                DEBUG_ANS.send(a).await;
+                TERM_WAKE.signal(()); // the UI task runs the terminal
+                continue;
+            }
+        };
+        match cmd {
             Either::First(RadioCmd::Tune(f)) => {
                 r.tune(f);
                 live.send(r.live);

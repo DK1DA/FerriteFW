@@ -80,6 +80,8 @@ pub struct FakeRadio {
     mode: Fake,
     /// The scope's bars and dwell ([`RadioCmd::ScopeCfg`]).
     scope_cfg: (u8, u8),
+    /// The two BK4829s' registers, for the terminal's `bk` (TERM-21).
+    bk: [[u16; 128]; 2],
     fm: u16,
     now: f32,
     /// A slot on a NOAA / Weatheradio channel since this time (s): the fake decoder hears a SAME warning there.
@@ -96,7 +98,7 @@ impl FakeRadio {
         live.slots[0] = SlotLive { freq: mhz(146) + 52_000, rssi: -121, ..Default::default() };
         live.slots[1] = SlotLive { freq: mhz(443) + 47_500, rssi: -121, ..Default::default() };
         live.slots[2] = SlotLive { freq: mhz(118) + 95_000, rssi: -121, scanning: true, hits: 3, last_hit: mhz(121) + 50_000, ..Default::default() };
-        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), fm: 9_810, now: 0.0, wx_since: None, same: None }
+        FakeRadio { live, watch: 0b111, last_step: 0.0, mode: Fake::Off, scope_cfg: (60, 10), bk: fake_bk(), fm: 9_810, now: 0.0, wx_since: None, same: None }
     }
 
     pub fn cmd(&mut self, c: RadioCmd) {
@@ -358,5 +360,54 @@ pub fn device_at(secs: u64) -> Device {
             battery_trim: 0,
         },
         link: LinkLive { cable: true, baud_100: 9216, write_pct: None },
+    }
+}
+
+
+/// The fake BK4829s' registers: the ID in REG_00 and stock's receive-mode REG_30, the rest 0.
+fn fake_bk() -> [[u16; 128]; 2] {
+    let mut r = [[0u16; 128]; 2];
+    for c in r.iter_mut() {
+        c[0x00] = 0x4829;
+        c[0x30] = 0xBFF1;
+        c[0x47] = 0x6142;
+    }
+    r
+}
+
+impl FakeRadio {
+    /// The terminal's debug requests (TERM-21), answered with made-up memory: flash and RAM read as the low byte
+    /// of each address, peripherals as 0, the GPIO input registers as a pattern; BK4829 registers from the fake
+    /// register file (the same refusals as the radio); the SI4732 answers its status byte 0x80 and zeros.
+    pub fn debug(&mut self, r: ferrite_core::msg::DebugReq) -> ferrite_core::msg::DebugAns {
+        use ferrite_core::msg::{bk_write_refused, DebugAns, DebugReq, DEBUG_MEM};
+        match r {
+            DebugReq::Mem { addr, n, words } => {
+                let mut data = [0u8; DEBUG_MEM];
+                let n = (n as usize).min(DEBUG_MEM);
+                let periph = (0x4000_0000..0x4003_0000).contains(&addr) || addr >= 0xE000_0000;
+                if periph && !words {
+                    return DebugAns::Refused("peripheral registers: use mem32 (word reads)");
+                }
+                for (i, b) in data[..n].iter_mut().enumerate() {
+                    let a = addr + i as u32;
+                    *b = if (0x4001_0808..0x4001_1C00).contains(&(a & !3)) && (a & 0x3FF) == 0x008 { 0xA5 } else if periph { 0 } else { a as u8 };
+                }
+                DebugAns::Mem { addr, data, n: n as u8 }
+            }
+            DebugReq::BkRead { chip, reg } => DebugAns::Reg { chip, reg, val: self.bk[chip as usize % 2][reg as usize % 128] },
+            DebugReq::BkWrite { chip, reg, val } => {
+                if let Some(why) = bk_write_refused(reg, val) {
+                    return DebugAns::Refused(why);
+                }
+                self.bk[chip as usize % 2][reg as usize % 128] = val;
+                DebugAns::Reg { chip, reg, val }
+            }
+            DebugReq::Si { reply, .. } => {
+                let mut data = [0u8; 16];
+                data[0] = 0x80;
+                DebugAns::Si { data, n: reply.clamp(1, 16) }
+            }
+        }
     }
 }

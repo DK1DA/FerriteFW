@@ -27,6 +27,7 @@ use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
 pub mod cmd;
+pub mod debug;
 
 /// Where the terminal's output goes: the cable's transmit buffer.
 pub trait Sink {
@@ -112,6 +113,8 @@ enum Body {
     Dump(cmd::DumpPos),
     /// Lines read, applied and refused; `end` 1 when it ended, 2 when it was stopped.
     Load { line: u16, ok: u16, bad: u16, end: u8 },
+    /// A debug command waiting on, or printing, the firmware's answers (TERM-21).
+    Debug(debug::Job),
 }
 
 fn cmd_trim(s: &[u8]) -> &[u8] {
@@ -264,6 +267,8 @@ pub struct Term {
     num: [u16; 2],
     nn: u8,
     last: u32,
+    /// The time of the last poll (ms): debug answers time out against it.
+    now: u32,
 }
 
 impl Default for Term {
@@ -312,6 +317,7 @@ impl Term {
             num: [0; 2],
             nn: 0,
             last: 0,
+            now: 0,
         }
     }
 
@@ -904,7 +910,24 @@ impl Term {
     // ---- Output ----
 
     /// Sends what changed while the sink has room: the goodbye, a clear, then each row whose text changed.
+    /// A debug command's next request for the firmware (TERM-21), once: memory is read by the caller, the
+    /// BK4829 and SI4732 requests go to the Radio task. Answer with [`Term::debug_answer`].
+    pub fn debug_req(&mut self) -> Option<ferrite_core::msg::DebugReq> {
+        match &mut self.con {
+            Con::Run(Body::Debug(j)) => j.request(self.now),
+            _ => None,
+        }
+    }
+
+    /// The firmware's answer to the last [`Term::debug_req`]; ignored once the command has been stopped.
+    pub fn debug_answer(&mut self, a: ferrite_core::msg::DebugAns) {
+        if let Con::Run(Body::Debug(j)) = &mut self.con {
+            j.answer(a);
+        }
+    }
+
     pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, now: u32, out: &mut impl Sink) {
+        self.now = now;
         if self.esc == Seq::Started && now.wrapping_sub(self.esc_at) >= ESC_MS {
             self.esc = Seq::None;
             self.key(app, K::Esc, store);
@@ -1006,6 +1029,7 @@ impl Term {
             Ok(cmd::Done::Said(m)) => (m, false),
             Ok(cmd::Done::List(l)) => return self.con = Con::Start(Body::List(l, 0)),
             Ok(cmd::Done::Dump) => return self.con = Con::Start(Body::Dump(cmd::DumpPos::default())),
+            Ok(cmd::Done::Debug(j)) => return self.con = Con::Start(Body::Debug(j)),
             Ok(cmd::Done::Load) => {
                 // The buffer takes the load's lines from here: the command that started it is gone.
                 (self.clen, self.clast, self.cr, self.long) = (0, 0, false, false);
@@ -1053,6 +1077,11 @@ impl Term {
                         }
                         Body::Dump(p) => cmd::dump_line(app, store, dev, p, &mut l),
                         Body::Load { .. } => false,
+                        Body::Debug(j) => match j.line(self.now, &mut l) {
+                            debug::Step::Line => true,
+                            debug::Step::Wait => break,
+                            debug::Step::Over => false,
+                        },
                     };
                     if !more {
                         return self.done(out);

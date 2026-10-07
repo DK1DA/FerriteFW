@@ -18,6 +18,7 @@ mod board;
 mod bringup;
 mod bus;
 mod chan;
+mod debug;
 mod display;
 #[allow(dead_code)] // the prototype's HAL, carried over whole; not every part has a user yet
 mod hal;

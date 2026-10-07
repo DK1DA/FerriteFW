@@ -109,6 +109,8 @@ pub enum Done {
     List(List),
     Dump,
     Load,
+    /// A debug command: its lines come from the firmware's answers (TERM-21).
+    Debug(super::debug::Job),
 }
 
 /// What the console lists.
@@ -929,6 +931,10 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"get") => get(app, dev, &mut t),
         _ if same(c, b"help") || c == b"?" => Ok(Done::List(List::Help)),
         _ if same(c, b"dump") => Ok(Done::Dump),
+        _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
+        _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
+        _ if same(c, b"bk") => bk(&mut t),
+        _ if same(c, b"si") => si(&mut t),
         _ if same(c, b"load") => Ok(Done::Load),
         _ if same(c, b"clear") => {
             if !same(t.word("clear channels N: deletes every channel")?, b"channels") {
@@ -946,6 +952,98 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         }
         _ => Err(msg!("{}: no such command; help lists them", Bytes(c))),
     }
+}
+
+// ---- Debug (TERM-21 to TERM-24) ----
+
+use super::debug::{Job, Kind, BK_REGS, MEM_MAX};
+
+/// Hex, with or without 0x, up to 8 digits.
+fn hexnum(w: &[u8]) -> Option<u32> {
+    let w = w.strip_prefix(b"0x").or_else(|| w.strip_prefix(b"0X")).unwrap_or(w);
+    if w.is_empty() || w.len() > 8 {
+        return None;
+    }
+    w.iter().try_fold(0u32, |n, &c| Some(n << 4 | (c as char).to_digit(16)?))
+}
+
+fn hex_word(t: &mut Toks, what: &str) -> Result<u32, Msg> {
+    hexnum(t.word(what)?).ok_or_else(|| msg!("{}", what))
+}
+
+fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
+    let usage = if words { "mem32 ADDR [WORDS]: hex address, word-aligned; up to 256 words" } else { "mem ADDR [LEN]: hex address, up to 1024 bytes" };
+    let addr = hex_word(t, usage)?;
+    let n = match t.next()? {
+        Some(Tok::Word(w)) => number(w).ok_or_else(|| msg!("{}", usage))?,
+        _ => 16,
+    };
+    let len = if words { n * 4 } else { n };
+    if n == 0 || len > MEM_MAX as u32 || (words && !addr.is_multiple_of(4)) {
+        return Err(msg!("{}", usage));
+    }
+    Ok(Done::Debug(Job::new(Kind::Mem { addr, len: len as u16, words })))
+}
+
+fn bk(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value";
+    let chip = match t.word(USAGE)? {
+        b"0" => 0,
+        b"1" => 1,
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    let w = t.word(USAGE)?;
+    if same(w, b"dump") {
+        return Ok(Done::Debug(Job::new(Kind::BkDump { chip })));
+    }
+    let reg = hexnum(w).filter(|r| *r < BK_REGS as u32).ok_or_else(|| msg!("{}", USAGE))? as u8;
+    match t.next()? {
+        None => Ok(Done::Debug(Job::new(Kind::BkRead { chip, reg }))),
+        Some(Tok::Word(v)) => {
+            let val = hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| msg!("{}", USAGE))? as u16;
+            if let Some(why) = ferrite_core::msg::bk_write_refused(reg, val) {
+                return Err(msg!("refused: {}", why));
+            }
+            Ok(Done::Debug(Job::new(Kind::BkWrite { chip, reg, val })))
+        }
+        _ => Err(msg!("{}", USAGE)),
+    }
+}
+
+fn si(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "si BYTES... [reply N], si prop P [V]: hex; the reply starts with the status byte";
+    let mut cmd = [0u8; 8];
+    let (mut n, mut reply) = (0usize, 8u32);
+    if let Some(Tok::Word(w)) = t.clone().next()? {
+        if same(w, b"prop") {
+            t.next()?;
+            let p = hex_word(t, USAGE)?.min(0xFFFF);
+            return Ok(Done::Debug(Job::new(match t.next()? {
+                None => Kind::Si { cmd: [0x13, 0, (p >> 8) as u8, p as u8, 0, 0, 0, 0], n: 4, reply: 4 },
+                Some(Tok::Word(v)) => {
+                    let v = hexnum(v).filter(|v| *v <= 0xFFFF).ok_or_else(|| msg!("{}", USAGE))?;
+                    Kind::Si { cmd: [0x12, 0, (p >> 8) as u8, p as u8, (v >> 8) as u8, v as u8, 0, 0], n: 6, reply: 1 }
+                }
+                _ => return Err(msg!("{}", USAGE)),
+            })));
+        }
+    }
+    while let Some(tok) = t.next()? {
+        let Tok::Word(w) = tok else { return Err(msg!("{}", USAGE)) };
+        if same(w, b"reply") {
+            reply = t.next()?.and_then(|k| if let Tok::Word(w) = k { number(w) } else { None }).filter(|r| (1..=16).contains(r)).ok_or_else(|| msg!("reply: 1 to 16 bytes"))?;
+            break;
+        }
+        if n == cmd.len() {
+            return Err(msg!("si: at most 8 command bytes"));
+        }
+        cmd[n] = hexnum(w).filter(|b| *b <= 0xFF).ok_or_else(|| msg!("{}", USAGE))? as u8;
+        n += 1;
+    }
+    if n == 0 {
+        return Err(msg!("{}", USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::Si { cmd, n: n as u8, reply: reply as u8 })))
 }
 
 // ---- Dump ----
@@ -1078,7 +1176,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 15] = [
+const HELP: [&str; 24] = [
     slow!("Commands: type : then one of these, and Enter. A dump is made of the same lines."),
     "",
     slow!("  set 0 7 1 Dark         a setting, by its number in the radio's menu"),
@@ -1094,4 +1192,13 @@ const HELP: [&str; 15] = [
     slow!("  dump                   everything, as these lines; save it with your terminal's log"),
     slow!("  load                   read a dump back: send the file, it ends at the line end"),
     slow!("  clear channels N       delete every channel (N: how many there are)"),
+    "",
+    slow!("Debug (hex addresses, registers and values; Esc stops):"),
+    slow!("  mem 20000000 64        bytes of MCU memory (flash, RAM)"),
+    slow!("  mem32 40010808 4       32-bit words: use this for peripheral registers"),
+    slow!("  gpio                   ports A to E: input and output bits, 15 to 0"),
+    slow!("  bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)"),
+    slow!("  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)"),
+    slow!("  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property"),
+    slow!("  The radio's own logic may rewrite a register you set (a tune, Battery Save)."),
 ];

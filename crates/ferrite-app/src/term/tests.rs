@@ -550,12 +550,13 @@ fn frequencies() {
     assert_eq!(mhz5(44_347_500).as_bytes(), b"443.47500");
 }
 
-/// The state is small: no screen buffer (TERM-19); the command line's 255-byte buffer (TERM-12) on top.
+/// The state is small: no screen buffer (TERM-19); the command line's 255-byte buffer (TERM-12) and a debug
+/// command's one answer (64 bytes of memory at most, TERM-22: about 100 bytes, Oct 6, 2026) on top.
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
     std::eprintln!("Term is {n} bytes");
-    assert!(n <= 512 + 256, "Term is {n} bytes");
+    assert!(n <= 512 + 256 + 112, "Term is {n} bytes");
 }
 
 // ---- The command line and dump/load (TERM-12, TERM-13) ----
@@ -992,4 +993,156 @@ fn split_across_the_relay_refused() {
     let raw = r.raw();
     assert!(raw.contains("line 2: Split TX needs the HF relay: not allowed with this RX frequency"), "{raw}");
     assert!(r.store.by_num(321).is_some() && r.store.by_num(322).is_none());
+}
+
+// ---- Debug commands (TERM-21 to TERM-24) ----
+
+use ferrite_core::msg::{DebugAns, DebugReq, DEBUG_MEM};
+
+impl Rig<Sample> {
+    /// Polls, answering each debug request with `f`; every request seen, in order.
+    fn serve(&mut self, polls: usize, mut f: impl FnMut(DebugReq) -> DebugAns) -> Vec<DebugReq> {
+        let mut seen = Vec::new();
+        for _ in 0..polls {
+            if let Some(r) = self.term.debug_req() {
+                seen.push(r);
+                self.term.debug_answer(f(r));
+            }
+            self.poll();
+        }
+        seen
+    }
+}
+
+/// A made-up register file: each register reads as its number twice (REG_30 = 0x3030).
+fn regs(r: DebugReq) -> DebugAns {
+    match r {
+        DebugReq::BkRead { chip, reg } => DebugAns::Reg { chip, reg, val: reg as u16 * 0x101 },
+        DebugReq::BkWrite { chip, reg, val } => DebugAns::Reg { chip, reg, val },
+        DebugReq::Mem { addr, n, .. } => {
+            let mut data = [0u8; DEBUG_MEM];
+            for (i, b) in data.iter_mut().enumerate() {
+                *b = (addr as usize + i) as u8;
+            }
+            DebugAns::Mem { addr, data, n }
+        }
+        DebugReq::Si { reply, .. } => {
+            let mut data = [0u8; 16];
+            data[0] = 0x80;
+            DebugAns::Si { data, n: reply }
+        }
+    }
+}
+
+/// TERM-23: a register read and a write print their value and bits; the read-back is shown.
+#[test]
+fn debug_bk_read_and_write() {
+    let mut r = Rig::main();
+    r.cmd("bk 0 30");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BkRead { chip: 0, reg: 0x30 }]);
+    assert!(r.raw().contains("bk0 REG_30 = 0x3030   0011 0000 0011 0000"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bk 1 0x47 6142");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BkWrite { chip: 1, reg: 0x47, val: 0x6142 }]);
+    assert!(r.raw().contains("bk1 REG_47 <- 0x6142, reads back 0x6142"), "{}", r.raw());
+}
+
+/// TERM-23: transmit and PA bits, and the GPIO registers, are refused before anything is asked.
+#[test]
+fn debug_bk_refuses_tx_and_gpio() {
+    let mut r = Rig::main();
+    r.cmd("bk 0 30 BFF9");
+    assert!(r.bottom().contains("refused: REG_30 Tx DSP and PA Gain"), "{}", r.bottom());
+    assert_eq!(r.term.debug_req(), None);
+    r.cmd("bk 1 33 0000");
+    assert!(r.bottom().contains("REG_33 and REG_34"), "{}", r.bottom());
+    r.cmd("bk 0 30 BFF1");
+    assert_eq!(r.serve(2, regs), vec![DebugReq::BkWrite { chip: 0, reg: 0x30, val: 0xBFF1 }], "receive bits are fine");
+    r.send(b"\r");
+    r.cmd("bk 2 30");
+    assert!(r.bottom().contains("bk CHIP REG"), "{}", r.bottom());
+    r.cmd("bk 0 80");
+    assert!(r.bottom().contains("bk CHIP REG"), "{}", r.bottom());
+}
+
+/// TERM-23: `bk N dump` reads all 128 registers, one request at a time, eight to a line.
+#[test]
+fn debug_bk_dump() {
+    let mut r = Rig::main();
+    r.cmd("bk 1 dump");
+    let seen = r.serve(200, regs);
+    assert_eq!(seen.len(), 128);
+    assert_eq!(seen[127], DebugReq::BkRead { chip: 1, reg: 0x7F });
+    let raw = r.raw();
+    assert!(raw.contains("bk1 00: 0000 0101 0202 0303 0404 0505 0606 0707"), "{raw}");
+    assert!(raw.contains("bk1 78: 7878 7979 7A7A 7B7B 7C7C 7D7D 7E7E 7F7F"), "{raw}");
+    assert!(raw.contains("Enter or Esc returns"), "{raw}");
+}
+
+/// TERM-22: memory in 64-byte requests, 16 bytes a line with their characters; words for peripherals.
+#[test]
+fn debug_mem() {
+    let mut r = Rig::main();
+    r.cmd("mem 20000000 100");
+    let seen = r.serve(20, regs);
+    assert_eq!(seen, vec![DebugReq::Mem { addr: 0x2000_0000, n: 64, words: false }, DebugReq::Mem { addr: 0x2000_0040, n: 36, words: false }]);
+    let raw = r.raw();
+    assert!(raw.contains("20000000  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  |................|"), "{raw}");
+    assert!(raw.contains("20000060  60 61 62 63"), "{raw}");
+    assert!(!raw.contains("20000070"), "100 bytes end at 0x63: {raw}");
+    r.send(b"\r");
+    r.cmd("mem32 40010808 2");
+    assert_eq!(r.serve(6, regs), vec![DebugReq::Mem { addr: 0x4001_0808, n: 8, words: true }]);
+    assert!(r.raw().contains("40010808  0B0A0908 0F0E0D0C"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("mem32 40010809");
+    assert!(r.bottom().contains("word-aligned"), "{}", r.bottom());
+}
+
+/// TERM-22: `gpio` reads each port's input and output registers, A to E.
+#[test]
+fn debug_gpio() {
+    let mut r = Rig::main();
+    r.cmd("gpio");
+    let seen = r.serve(20, regs);
+    assert_eq!(seen.len(), 5);
+    assert_eq!(seen[4], DebugReq::Mem { addr: 0x4001_1808, n: 8, words: true });
+    assert!(r.raw().contains("PA  in 0000 1001 0000 1000   out 0000 1101 0000 1100"), "{}", r.raw());
+    assert!(r.raw().contains("  PE  in "), "{}", r.raw());
+}
+
+/// TERM-24: SI4732 commands and properties go as typed; the reply starts with the status byte.
+#[test]
+fn debug_si() {
+    let mut r = Rig::main();
+    r.cmd("si prop 4001");
+    let seen = r.serve(4, regs);
+    assert!(matches!(seen[0], DebugReq::Si { cmd: [0x13, 0, 0x40, 0x01, ..], n: 4, reply: 4 }), "{seen:?}");
+    assert!(r.raw().contains("si 13 00 40 01 -> 80 00 00 00"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("si 10 00 reply 9");
+    assert!(matches!(r.serve(4, regs)[0], DebugReq::Si { cmd: [0x10, 0, ..], n: 2, reply: 9 }));
+}
+
+/// TERM-21: no answer in 2 s ends the command; Esc stops one, and a late answer is dropped.
+#[test]
+fn debug_no_answer_and_stop() {
+    let mut r = Rig::main();
+    r.cmd("bk 0 30");
+    assert!(r.term.debug_req().is_some());
+    for _ in 0..25 {
+        r.poll();
+    }
+    assert!(r.raw().contains("no answer"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bk 0 30");
+    assert!(r.term.debug_req().is_some());
+    r.send(b"\x1b");
+    for _ in 0..3 {
+        r.poll();
+    }
+    r.term.debug_answer(DebugAns::Reg { chip: 0, reg: 0x30, val: 1 });
+    r.poll();
+    assert!(!r.raw().contains("REG_30 ="), "stopped: {}", r.raw());
+    assert!(matches!(r.term.con, Con::Done | Con::Off), "{:?}", r.term.con);
 }

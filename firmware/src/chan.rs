@@ -8,11 +8,14 @@ use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use crate::ring::Ring;
 use core::sync::atomic::AtomicU8;
-use ferrite_core::msg::{DspCmd, Event, Live, Position, RadioCmd, SameDecoded, StorageCmd};
+use ferrite_core::msg::{DebugAns, DebugReq, DspCmd, Event, Live, Position, RadioCmd, SameDecoded, StorageCmd};
 
 pub static RADIO: Channel<M, RadioCmd, 8> = Channel::new();
 pub static STORAGE: Channel<M, StorageCmd, 8> = Channel::new();
 pub static DSP: Channel<M, DspCmd, 4> = Channel::new();
+/// The terminal's BK4829 and SI4732 debug requests to the Radio task, and its answers (TERM-21): one at a time.
+pub static DEBUG_REQ: Channel<M, DebugReq, 1> = Channel::new();
+pub static DEBUG_ANS: Channel<M, DebugAns, 1> = Channel::new();
 
 /// Keys and the knob, from the input sampler to the UI.
 #[derive(Clone, Copy)]

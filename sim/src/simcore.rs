@@ -420,6 +420,9 @@ impl SimCore {
             store.autosave(now, app);
             app.render(&mut self.lcd, &radio.live, dev, store);
             self.term.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out));
+            if let Some(r) = self.term.debug_req() {
+                self.term.debug_answer(radio.debug(r)); // TERM-21: the fake radio answers at once
+            }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
             }
@@ -552,6 +555,9 @@ impl SimCore {
                 }
             }
             self.term.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out));
+            if let Some(r) = self.term.debug_req() {
+                self.term.debug_answer(self.radio.debug(r));
+            }
             while let Some(w) = self.app.pop_write() {
                 self.store.apply(w);
             }
