@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the predictive-text dictionary (T9) for the SPI flash from assets/words/.
+"""Build the predictive-text dictionary (T9) for the firmware image from assets/words/.
 
     python3 tools/mkwords.py --scowl PATH [--big] [--min-count 2] [--out target/words]
 
@@ -21,7 +21,7 @@ Output:
   <out>.bin  the packed dictionary (format below);
   a report: words, bytes, and how often each core/ham word is the first candidate for its keys.
 
-Packed format (little-endian), read a bucket at a time from SPI flash:
+Packed format (little-endian), linked into the firmware's slow flash and read in place (manual TEXT-8):
   0   "FT9D", version u8, reserved u8, word count u16
   8   bucket table: for each two-digit prefix 22..99 (64 buckets, first-key-major), u32 offset, u16 entries;
       single-letter words live in bucket "d0" entries 64..71 (keys 2-9)
