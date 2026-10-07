@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Build the predictive-text dictionary (T9) for the SPI flash from assets/words/.
 
-    python3 tools/mkwords.py [--scowl PATH] [--out target/words]
+    python3 tools/mkwords.py --scowl PATH [--big] [--min-count 2] [--out target/words]
 
 Ranking, best first:
   1. core.txt, in its order (the words people use most in short messages);
   2. ham.txt, in its order;
-  3. aprs_counts.txt (word<TAB>count from real APRS messages, tools/aprs_corpus.py), by count;
-  4. SCOWL's most common band (level 35), shorter words first. Needs --scowl pointing at SCOWL's
-     data/scowl-pre.txt (github.com/en-wl/wordlist, MIT-like licence; its notice ships as words-licence.txt).
+  3. aprs_counts.txt (word<TAB>count from real APRS messages, tools/aprs_corpus.py), by count: only words seen
+     at least --min-count times that are ordinary English (SCOWL level 50 or below) or on our own lists, which
+     keeps software banners out ("uptime", "python");
+  4. with --big only: SCOWL's most common band (level 35), shorter words first (about 39,000 words, 172 KB).
+--scowl points at SCOWL's data/scowl-pre.txt (github.com/en-wl/wordlist, MIT-like licence; its notice ships as
+words-licence.txt). The default build is the small one: our lists plus what people actually type.
 
 Words are letters (and an apostrophe) only: digits are typed as digits (hold a key), so "73" or "2m" are quick
 messages and short forms, not dictionary entries.
@@ -56,8 +59,9 @@ def keyseq(w):
     return "".join(KEYS[c] for c in w)
 
 
-def scowl35(path):
-    words = []
+def scowl_levels(path):
+    """Each word's most common SCOWL level."""
+    lev = {}
     for line in open(path, encoding="utf-8"):
         if not line.strip() or line.startswith("#"):
             continue
@@ -65,14 +69,16 @@ def scowl35(path):
         if not m:
             continue
         levs = [int(x) for x in re.findall(r"(?:^|\s)(\d+)(?=\s|$)", m.group(1))]
-        if not levs or min(levs) > 35:
+        if not levs:
             continue
         forms = [m.group(2)] + ([w.strip().split()[0] for w in re.split(r"[,|]", m.group(3)) if w.strip()] if m.group(3) else [])
-        words += [f for f in forms if re.fullmatch(r"[a-z]+", f)]
-    return words
+        for f in forms:
+            if re.fullmatch(r"[a-z]+", f):
+                lev[f] = min(lev.get(f, 99), min(levs))
+    return lev
 
 
-def ranked(scowl_path):
+def ranked(scowl_path, big, min_count):
     rank = {}                                   # word -> score (higher better)
     def add(w, score):
         w = w.lower()
@@ -83,14 +89,17 @@ def ranked(scowl_path):
         add(w, 4_000_000 - i)
     for i, w in enumerate(plain(os.path.join(WORDS, "ham.txt"))):
         add(w, 3_000_000 - i)
+    lev = scowl_levels(scowl_path)
     counts = os.path.join(WORDS, "aprs_counts.txt")
     if os.path.exists(counts):
         for l in plain(counts):
             w, c = l.split("\t")
-            add(w, 2_000_000 + int(c))
-    if scowl_path:
-        for w in scowl35(scowl_path):
-            add(w, 1_000_000 - len(w) * 1000)
+            if int(c) >= min_count and len(w) > 1 and (lev.get(w, 99) <= 50 or w in rank):
+                add(w, 2_000_000 + int(c))
+    if big:
+        for w, l in lev.items():
+            if l <= 35:
+                add(w, 1_000_000 - len(w) * 1000)
     order = sorted(rank, key=lambda w: -rank[w])
     return order, core
 
@@ -146,10 +155,12 @@ def first_rate(words, order, r8):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scowl", help="SCOWL data/scowl-pre.txt (adds its common words as the last tier)")
+    ap.add_argument("--scowl", required=True, help="SCOWL data/scowl-pre.txt (the English check; with --big, the last tier)")
+    ap.add_argument("--big", action="store_true", help="add SCOWL's common band, about 39,000 words")
+    ap.add_argument("--min-count", type=int, default=2, help="times a word must be seen in real messages")
     ap.add_argument("--out", default=os.path.join(HERE, "..", "target", "words"))
     a = ap.parse_args()
-    order, core = ranked(a.scowl)
+    order, core = ranked(a.scowl, a.big, a.min_count)
     blob, r8 = pack(order)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     open(a.out + ".bin", "wb").write(blob)
