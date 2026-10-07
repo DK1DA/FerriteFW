@@ -366,7 +366,7 @@ impl View for Setup {
                     };
                     let chosen = row == i;
                     if app.dirty(R_ROW + i as usize, hash(&(name, chosen))) {
-                        choice(lcd, 98 + 26 * i as i32, 22, name.as_bytes(), range.as_bytes(), chosen);
+                        choice(lcd, 98 + 26 * i as i32, 23, name.as_bytes(), range.as_bytes(), chosen); // odd: DISP-19
                     }
                 }
                 if app.dirty(R_ROW + 6, hash(&(ext, row == REGION_ROWS))) {
@@ -374,7 +374,7 @@ impl View for Setup {
                     let sel = row == REGION_ROWS;
                     let bg = if sel { FOCUS } else { BG };
                     lcd.fill(0, 227, 240, 22, BG);
-                    lcd.fill_r(4, 228, 232, 20, 1, bg);
+                    lcd.fill_r(4, 228, 232, 21, 1, bg);
                     w::field(lcd, 10, 120, 229, 247, 242, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
                     w::field(lcd, 130, 100, 229, 247, 242, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
                     w::wrap(lcd, 10, 220, 249, 299, 262, 15, b"On: transmit wherever the radio can, not only amateur bands. Shows a warning first.", &UI_12, SUB, BG);

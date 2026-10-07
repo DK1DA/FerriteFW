@@ -211,13 +211,14 @@ fn draw_key(lcd: &mut impl Panel, i: usize, label: &str, seen: bool, lit: bool) 
     let x = if i < 12 { 8 } else { 126 } + 36 * col as i32;
     let y = 96 + 30 * row as i32;
     let (bg, edge, fg) = if lit { (BLUE, BLUE, BLUE_FG) } else if seen { (BG, GREEN, TEXT) } else { (BG, LINE, SUB) };
+    // 25 px tall: the 9 px label and the arrows centre (DISP-19)
     lcd.fill(x, y, 34, 26, BG);
-    lcd.fill_r(x, y, 34, 26, 1, bg);
-    lcd.frame_r(x, y, 34, 26, 1, edge);
+    lcd.fill_r(x, y, 34, 25, 1, bg);
+    lcd.frame_r(x, y, 34, 25, 1, edge);
     let b = label.as_bytes();
     if b.len() == 1 && (0x18..=0x1b).contains(&b[0]) {
         lcd.tri(x + 13, y + 9, 8, [0, 1, 3, 2][(b[0] - 0x18) as usize], fg);
     } else {
-        lcd.text4_aligned(x + 17, y + 18, Align::Center, b, &UI_12, fg, bg);
+        lcd.text4_aligned(x + 17, y + 17, Align::Center, b, &UI_12, fg, bg);
     }
 }

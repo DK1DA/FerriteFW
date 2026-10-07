@@ -162,8 +162,9 @@ impl View for Tones {
             if app.dirty(R_ROW + i, hash(&(t, f))) {
                 let y = 46 + i as i32 * 36;
                 let (bg, border) = if f { (FOCUS, BLUE) } else { (BG, LINE) };
-                lcd.fill(6, y, 228, 32, BG);
-                lcd.fill_r(6, y, 228, 32, 2, bg);
+                // 33 px: the 9 px capitals centre (DISP-19)
+                lcd.fill(6, y, 228, 33, BG);
+                lcd.fill_r(6, y, 228, 33, 2, bg);
                 let mut b = Buf::<16>::new();
                 text(t, &mut b);
                 w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
@@ -172,7 +173,7 @@ impl View for Tones {
                 if f {
                     w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
                 }
-                lcd.frame_r(6, y, 228, 32, 2, border);
+                lcd.frame_r(6, y, 228, 33, 2, border);
             }
         }
         let t = if self.row == 0 { rx } else { tx };

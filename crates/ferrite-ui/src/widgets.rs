@@ -64,7 +64,12 @@ pub fn field(
     let tx = match align {
         Align::Left => x,
         Align::Right => x + w - tw,
-        Align::Center => x + (w - tw) / 2,
+        // the ink in the middle (an odd leftover pixel goes on the left, where the glyphs' anti-aliasing is
+        // lighter), kept inside the box
+        Align::Center => match text4_ink(s, f) {
+            Some((l, r)) => (x + (w - (r - l) + 1) / 2 - l).clamp(x, (x + w - tw).max(x)),
+            None => x + (w - tw) / 2,
+        },
     };
     lcd.fill(x, y0, tx - x, y1 - y0, bg);
     lcd.text4_rows(tx, baseline, s, f, fg, bg, y0, y1);
@@ -93,10 +98,12 @@ pub fn badge(lcd: &mut impl Panel, x: i32, y: i32, slot: u8, filled: bool, bg: u
 
 /// An outlined tag ("RX", "EDIT") ending at x_right; returns its width.
 pub fn tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16, bg: u16) -> i32 {
+    // 15 px tall so the 9 px capitals sit 2 px from the top and bottom inside (DISP-19)
     let w = text4_width(s, &UI_12B) + 10;
     let x = x_right - w;
-    field(lcd, x, w, y, y + 16, y + 12, Align::Center, s, &UI_12B, c, bg);
-    lcd.frame_r(x, y, w, 16, 1, c);
+    lcd.fill(x, y + 15, w, 1, bg);
+    field(lcd, x, w, y, y + 15, y + 12, Align::Center, s, &UI_12B, c, bg);
+    lcd.frame_r(x, y, w, 15, 1, c);
     w
 }
 
@@ -551,12 +558,15 @@ pub fn help_box(lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) 
 pub fn edit_cell(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, label: &[u8], value: &[u8], focused: bool, grey: bool) {
     let (bg, border, lc) = if focused { (FOCUS, BLUE, BLUE) } else { (BG, LINE, SUB) };
     lcd.fill(x, y, w, h, bg);
-    let lw = lcd.text4_rows(x + 6, y + 12, label, &UI_12, lc, bg, y + 1, y + 15);
+    // the two lines are laid out for 29 px; a taller cell moves them down to keep them centred
+    let (y0, y) = (y, y + (h - 29) / 2);
+    let lw = lcd.text4_rows(x + 6, y + 12, label, &UI_12, lc, bg, y0 + 1, y + 15);
     if focused && lw + 14 < w - 6 {
         knob_mark(lcd, x + 6 + lw + 4, y + 4, BLUE, bg);
     }
     let v = fit(value, &UI_12, w - 10);
-    lcd.text4_rows(x + 6, y + 26, v, &UI_12, if grey { DIM } else { TEXT }, bg, y + 15, y + h - 1);
+    lcd.text4_rows(x + 6, y + 26, v, &UI_12, if grey { DIM } else { TEXT }, bg, y + 15, y0 + h - 1);
+    let y = y0;
     lcd.frame_r(x, y, w, h, 1, border);
 }
 

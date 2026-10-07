@@ -91,9 +91,11 @@ pub fn dialog(lcd: &mut impl Panel, y: i32, h: i32, title: &[u8], c: u16) {
 
 /// A key chip like the hint bar's ("MENU 0 8 9"), blue outlined; returns its width.
 pub fn path_chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], bg: u16) -> i32 {
+    // 17 px tall like the chips, so the 9 px capitals centre (DISP-19)
     let wd = text4_width(s, &UI_12B) + 12;
-    w::field(lcd, x, wd, y, y + 18, y + 13, Align::Center, s, &UI_12B, BLUE, bg);
-    lcd.frame_r(x, y, wd, 18, 1, BLUE);
+    lcd.fill(x, y + 17, wd, 1, bg);
+    w::field(lcd, x, wd, y, y + 17, y + 13, Align::Center, s, &UI_12B, BLUE, bg);
+    lcd.frame_r(x, y, wd, 17, 1, BLUE);
     wd
 }
 

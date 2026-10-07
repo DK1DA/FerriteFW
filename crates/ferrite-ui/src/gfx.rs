@@ -100,6 +100,31 @@ pub fn text4_width(s: &[u8], f: &Font4) -> i32 {
     Chars(s).map(|c| glyph4(f, c).adv as i32).sum()
 }
 
+/// A glyph's first and last columns with any ink (the fonts store whole cells, blank columns included).
+fn glyph_cols(f: &Font4, g: &Glyph4) -> Option<(i32, i32)> {
+    let bits = &f.bits[g.off as usize..];
+    let (w, h) = (g.w as usize, g.h as usize);
+    let lit = |i: usize| (0..h).any(|y| nib(bits, y * w + i) != 0);
+    let l = (0..w).find(|&i| lit(i))?;
+    let r = (0..w).rev().find(|&i| lit(i))?;
+    Some((l as i32, r as i32 + 1))
+}
+
+/// Where the drawn pixels of s start and end, from the pen position: centring on these puts the ink in the
+/// middle, where centring on advances leaves a label a pixel or two off (DISP-19).
+pub fn text4_ink(s: &[u8], f: &Font4) -> Option<(i32, i32)> {
+    let (mut pen, mut ink) = (0, None::<(i32, i32)>);
+    for c in Chars(s) {
+        let g = glyph4(f, c);
+        if let Some((a, b)) = glyph_cols(f, g) {
+            let (l, r) = (pen + g.x as i32 + a, pen + g.x as i32 + b);
+            ink = Some(ink.map_or((l, r), |(x, y)| (x.min(l), y.max(r))));
+        }
+        pen += g.adv as i32;
+    }
+    ink
+}
+
 pub trait Gfx: Panel {
     fn fill(&mut self, mut x: i32, mut y: i32, mut w: i32, mut h: i32, c: u16) {
         if x < 0 {
@@ -266,18 +291,7 @@ pub trait Gfx: Panel {
         let x = match align {
             Align::Left => x,
             Align::Right => x - w,
-            Align::Center => {
-                let (mut pen, mut ink) = (0, None::<(i32, i32)>);
-                for c in Chars(s) {
-                    let g = glyph4(f, c);
-                    if g.w != 0 {
-                        let (l, r) = (pen + g.x as i32, pen + g.x as i32 + g.w as i32);
-                        ink = Some(ink.map_or((l, r), |(a, b)| (a.min(l), b.max(r))));
-                    }
-                    pen += g.adv as i32;
-                }
-                x - ink.map_or(w / 2, |(l, r)| (l + r) / 2)
-            }
+            Align::Center => x - text4_ink(s, f).map_or(w / 2, |(l, r)| (l + r) / 2),
         };
         self.text4(x, baseline, s, f, fg, bg)
     }
