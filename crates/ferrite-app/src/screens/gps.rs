@@ -6,14 +6,13 @@
 use super::lists::*;
 use super::opts::Of;
 use super::shared::*;
-use super::table::{slow_table, Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::data::{Data, Fix, Op, WpSrc};
 use crate::keys::{KeyEvent, Press};
 use crate::{App, Screen};
 use ferrite_core::keys::Key;
-use ferrite_core::msg::{Device, GpsState, LiveAll};
+use ferrite_core::msg::{Device, GpsState};
 use ferrite_ui::assets::*;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
@@ -109,11 +108,12 @@ impl View for Gps {
         let data = cx.store.data();
         app.page(lcd, self.page);
         let fix = data.fix().filter(|_| cx.dev.gps == GpsState::Fix);
-        if !app.gate((self, data.version(), cx.dev.gps as u8, cx.dev.clock_min, fix)) {
+        let set = (app.set.units, app.set.coord_fmt, app.set.tz, app.set.clock);
+        if !app.gate((self, data.version(), cx.dev.gps as u8, cx.dev.clock_min, fix, set)) {
             return;
         }
         match self.page {
-            Page::Position => position(app, lcd, data, fix, cx.live, cx.dev),
+            Page::Position => position(app, lcd, data, fix, cx.dev),
             Page::Satellites => satellites(app, lcd, data, fix),
             Page::Waypoints => waypoints(app, lcd, data, fix, self.cur),
             Page::Go => go(app, lcd, data, fix, self.cur.sel),
@@ -130,81 +130,82 @@ impl View for Gps {
     }
 }
 
-/// C16: the fix.
-fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, live: &LiveAll, dev: &Device) {
-    let gps = dev.gps;
-    let seen = data.sats();
-    let mut l = Buf::<32>::new();
-    let state: &[u8] = match (gps, fix) {
-        (GpsState::Off, _) => b"GPS off",
-        (_, None) => b"Searching",
-        (_, Some(f)) => ferrite_ui::v!(l, "{} fix \u{b7} {} of {} satellites", if f.three_d { "3D" } else { "2D" }, f.used, seen),
-    };
-    let state = Buf::<32>::from(state);
-    app.list_head(lcd, state.as_bytes(), b"");
-    let Some(f) = fix else {
-        app.empty(lcd, if gps == GpsState::Off { b"GPS is off" } else { b"No fix yet" }, if gps == GpsState::Off { b"MENU 0 6 1 turns it on" } else { b"Left or right: the satellites" });
-        return;
-    };
-    app.table(lcd, &POSITION, live, dev, &f, None);
-    // GPS-2: a stale fix says so
-    let stale = f.age_s > 10;
-    if app.dirty(R_NOTE, hash(&stale)) {
-        let msg: &[u8] = if stale { b"Fix is old: position may be stale" } else { b"" };
-        w::field(lcd, 8, 224, 230, 248, 243, Align::Left, msg, &UI_12, AMBER, BG);
-    }
-}
+// ---- units and formats (GPS-16) ----
 
-fn text(b: &mut Buf<40>, s: &[u8]) -> u16 {
-    b.set(s);
-    TEXT
-}
-
-slow_table! {
-    /// C16's rows.
-    ROWS: [(&str, Val<Fix>); 8] = [
-        // GPS-2: estimated accuracy, HDOP x 5 m (a typical receiver's range error), not the raw HDOP.
-        (slow!("Accuracy"), |c, b| {
-            let m = (c.x.hdop_x10 as u32 * 5 + 5) / 10;
-            let _ = uwrite!(b, "\u{b1}{} m", m.max(1));
-            TEXT
-        }),
-        (slow!("Fix age"), |c, b| {
-            let _ = uwrite!(b, "{} s", c.x.age_s);
-            TEXT
-        }),
-        (slow!("Position"), |c, b| {
-            let mut p = Buf::<32>::new();
-            pos_text(c.x.pos, &mut p);
-            text(b, p.as_bytes())
-        }),
-        (slow!("Grid"), |c, b| text(b, &grid(c.x.pos))),
-        (slow!("Altitude"), |c, b| {
-            let _ = uwrite!(b, "{} m", c.x.alt_m);
-            TEXT
-        }),
-        (slow!("Speed"), |c, b| {
-            let _ = uwrite!(b, "{} km/h", c.x.speed_kmh);
-            TEXT
-        }),
-        (slow!("Heading"), |c, b| {
-            let f = c.x;
-            if f.speed_kmh == 0 {
-                return text(b, b"- (stopped)");
+/// A distance in the units of 0 6 4: metric "850 m", "4.2 km"; imperial "300 ft", "2.6 mi"; nautical "1.84 nmi".
+pub(crate) fn dist_u(m: u32, units: u8, b: &mut Buf<16>) {
+    b.clear();
+    let _ = match units {
+        1 => {
+            let ft = m as u64 * 3281 / 1000;
+            let tenths = m as u64 * 10 / 1609;
+            match tenths {
+                0 => uwrite!(b, "{} ft", ft as u32),
+                1..=99 => uwrite!(b, "{}.{} mi", (tenths / 10) as u32, (tenths % 10) as u32),
+                _ => uwrite!(b, "{} mi", ((tenths + 5) / 10) as u32),
             }
-            let _ = uwrite!(b, "{} {}\u{b0}", compass_name(f.heading), f.heading);
-            TEXT
-        }),
-        (slow!("UTC"), |c, b| {
-            let t = c.x.utc_s;
-            let _ = uwrite!(b, "{}{}:{}{}:{}{} Z", z(t / 3600), t / 3600, z(t / 60 % 60), t / 60 % 60, z(t % 60), t % 60);
-            TEXT
-        }),
-    ];
+        }
+        2 => {
+            let h = m as u64 * 100 / 1852; // hundredths of a nautical mile
+            if h < 1000 { uwrite!(b, "{}.{}{} nmi", (h / 100) as u32, (h / 10 % 10) as u32, (h % 10) as u32) } else { uwrite!(b, "{} nmi", ((h + 50) / 100) as u32) }
+        }
+        _ => match m {
+            0..=999 => uwrite!(b, "{} m", m),
+            1000..=9_949 => uwrite!(b, "{}.{} km", (m + 50) / 1000, (m + 50) % 1000 / 100),
+            _ => uwrite!(b, "{} km", (m + 500) / 1000),
+        },
+    };
 }
 
-slow_table! {
-    POSITION: Table<Fix> = Table { rows: &ROWS, go: &[], y: (LIST_Y + 4) as i16, h: 0, style: w::KV_DETAIL };
+/// A speed in the units of 0 6 4: km/h, mph or kn.
+fn speed_u(kmh: u16, units: u8, b: &mut Buf<40>) {
+    let _ = match units {
+        1 => uwrite!(b, "{} mph", (kmh as u32 * 621 + 500) / 1000),
+        2 => uwrite!(b, "{} kn", (kmh as u32 * 540 + 500) / 1000),
+        _ => uwrite!(b, "{} km/h", kmh),
+    };
+}
+
+/// An altitude: feet in imperial, metres otherwise.
+fn alt_u(m: i32, units: u8, b: &mut Buf<40>) {
+    let _ = if units == 1 { uwrite!(b, "{} ft", m * 3281 / 1000) } else { uwrite!(b, "{} m", m) };
+}
+
+/// One coordinate in the 0 6 3 format: "45.42150° N", "45°25.290' N", "45°25'17.4\" N".
+fn coord(v: i32, pos: &str, neg: &str, fmt: u8, b: &mut Buf<24>) {
+    b.clear();
+    let a = (v as i64).unsigned_abs();
+    let deg = (a / 10_000_000) as u32;
+    let h = if v >= 0 { pos } else { neg };
+    let _ = match fmt {
+        0 => {
+            let f = (a % 10_000_000 / 100) as u32; // 5 decimals
+            uwrite!(b, "{}.{}{}\u{b0} {}", deg, Z5(f), f, h)
+        }
+        2 => {
+            let ds = (a % 10_000_000) * 36_000 / 10_000_000; // tenths of a second
+            let (mi, se) = ((ds / 600) as u32, (ds % 600) as u32);
+            uwrite!(b, "{}\u{b0}{}{}'{}{}.{}\" {}", deg, z(mi), mi, z(se / 10), se / 10, se % 10, h)
+        }
+        _ => {
+            let mm = (a % 10_000_000) * 60_000 / 10_000_000; // thousandths of a minute
+            let (mi, f) = ((mm / 1000) as u32, (mm % 1000) as u32);
+            uwrite!(b, "{}\u{b0}{}{}.{}{}{}' {}", deg, z(mi), mi, f / 100, f / 10 % 10, f % 10, h)
+        }
+    };
+}
+
+/// Zeros in front of a five-digit fraction.
+struct Z5(u32);
+impl ufmt::uDisplay for Z5 {
+    fn fmt<W: ufmt::uWrite + ?Sized>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error> {
+        let mut d = 10_000;
+        while d > 1 && self.0 < d {
+            f.write_str("0")?;
+            d /= 10;
+        }
+        Ok(())
+    }
 }
 
 /// "0" before a single digit.
@@ -212,30 +213,209 @@ fn z(v: u32) -> &'static str {
     if v < 10 { "0" } else { "" }
 }
 
-/// C17: each satellite's signal as a bar, used ones blue.
+/// A time of day from seconds: "14:32", or "2:32 pm" with the 12 h clock.
+fn hhmm(t: u32, h12: bool, b: &mut Buf<40>) {
+    let (h, m) = (t / 3600 % 24, t / 60 % 60);
+    let _ = if h12 { uwrite!(b, "{}:{}{} {}", (h + 11) % 12 + 1, z(m), m, if h < 12 { "am" } else { "pm" }) } else { uwrite!(b, "{}{}:{}{}", z(h), h, z(m), m) };
+}
+
+/// GPS-17: below this, the GPS course is noise (no magnetic compass), so it reads "stopped".
+const MOVING_KMH: u16 = 3;
+
+// ---- the position page (C16, GPS-15) ----
+
+/// Tiles: two columns of three, 112 x 41.
+const TILE_W: i32 = 112;
+const TILE_H: i32 = 41;
+const TILE_Y: i32 = 108;
+const TILE_DY: i32 = 45;
+const NEAR_Y: i32 = 246;
+
+/// A labelled value in a box: the label small, the value in 15 px bold.
+fn tile(lcd: &mut impl Panel, k: i32, label: &[u8], value: &[u8], c: u16) {
+    let (x, y) = (if k % 2 == 0 { 6 } else { 122 }, TILE_Y + k / 2 * TILE_DY);
+    lcd.fill(x, y, TILE_W, TILE_H, BG);
+    lcd.text4_rows(x + 8, y + 15, label, &UI_12, SUB, BG, y + 1, y + 18);
+    lcd.text4_rows(x + 8, y + 35, w::fit(value, &UI_15B, TILE_W - 14), &UI_15B, c, BG, y + 18, y + TILE_H - 1);
+    lcd.frame_r(x, y, TILE_W, TILE_H, 2, LINE);
+}
+
+/// C16: the fix at a glance.
+fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, dev: &Device) {
+    let gps = dev.gps;
+    let seen = data.sats();
+    let (units, fmt, h12) = (app.set.units, app.set.coord_fmt, app.set.clock == 1);
+    // Status line (GPS-15): fix, satellites, accuracy; the fix's age at the right, amber once stale (GPS-2).
+    let mut l = Buf::<40>::new();
+    let mut age = Buf::<12>::new();
+    match (gps, fix) {
+        (GpsState::Off, _) => l.set(b"GPS off"),
+        (_, None) => {
+            let _ = uwrite!(l, "Searching \u{b7} {} in view", seen);
+        }
+        (_, Some(f)) => {
+            let m = ((f.hdop_x10 as u32 * 5 + 5) / 10).max(1);
+            let _ = uwrite!(l, "{} fix \u{b7} {}/{} sats \u{b7} \u{b1}{} m", if f.three_d { "3D" } else { "2D" }, f.used, seen, m);
+            let _ = uwrite!(age, "{} s", f.age_s);
+        }
+    }
+    let stale = fix.is_some_and(|f| f.age_s > 10);
+    if app.dirty(R_TOP, hash(&(l.as_bytes(), age.as_bytes(), stale))) {
+        head(lcd, l.as_bytes(), b"");
+        w::field(lcd, 180, 52, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Right, age.as_bytes(), &UI_12, if stale { AMBER } else { SUB }, BG);
+    }
+    // Between a fix and none, the page's layout changes: clear it and redraw every part.
+    if app.dirty(R_HELP, hash(&fix.is_some())) {
+        lcd.fill(0, HEAD_Y + 21, 240, 298 - HEAD_Y - 21, BG);
+        app.drawn.hash[R_ROW..R_ROW + 8].fill(0);
+        app.drawn.hash[R_NOTE] = 0;
+    }
+    let Some(f) = fix else {
+        app.empty(lcd, if gps == GpsState::Off { b"GPS is off" } else { b"No fix yet" }, if gps == GpsState::Off { b"MENU 0 6 1 turns it on" } else { b"Left or right: the satellites" });
+        return;
+    };
+    // The position, large (GPS-15): latitude and longitude in the 0 6 3 format; as a grid square, the square
+    // large and the coordinates small under it.
+    if app.dirty(R_ROW, hash(&(f.pos, fmt))) {
+        lcd.fill(0, 42, 240, 64, BG);
+        let (mut la, mut lo) = (Buf::<24>::new(), Buf::<24>::new());
+        if fmt == 3 {
+            coord(f.pos.lat, "N", "S", 1, &mut la);
+            coord(f.pos.lon, "E", "W", 1, &mut lo);
+            lcd.text4(10, 72, &grid(f.pos), &NAME_26, TEXT, BG);
+            let mut both = Buf::<48>::new();
+            both.push(la.as_bytes());
+            both.push(b"  ");
+            both.push(lo.as_bytes());
+            lcd.text4_rows(10, 98, w::fit(both.as_bytes(), &UI_12, 222), &UI_12, SUB, BG, 84, 104);
+        } else {
+            coord(f.pos.lat, "N", "S", fmt, &mut la);
+            coord(f.pos.lon, "E", "W", fmt, &mut lo);
+            lcd.text4_rows(10, 67, w::fit(la.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 42, 74);
+            lcd.text4_rows(10, 97, w::fit(lo.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 74, 106);
+        }
+    }
+    // Six tiles (GPS-15, GPS-16, GPS-17).
+    let moving = f.speed_kmh >= MOVING_KMH;
+    let clock = dev.clock_min;
+    let tiles: [(&[u8], u8); 6] = [(b"Grid", 0), (b"Altitude", 1), (b"Speed", 2), (b"Course", 3), (b"Local time", 4), (b"UTC", 5)];
+    for (k, (label, what)) in tiles.into_iter().enumerate() {
+        let mut v = Buf::<40>::new();
+        match what {
+            0 => v.set(&grid(f.pos)),
+            1 => alt_u(f.alt_m, units, &mut v),
+            2 => speed_u(f.speed_kmh, units, &mut v),
+            3 if !moving => v.set(b"stopped"),
+            3 => {
+                let _ = uwrite!(v, "{} {}\u{b0}", compass_name(f.heading), f.heading);
+            }
+            // the radio's clock, as the status bar shows it (GPS-7: local time from GPS and the time zone)
+            4 => match clock {
+                Some(m) => hhmm(m as u32 * 60, h12, &mut v),
+                None => v.set(b"--:--"),
+            },
+            _ => {
+                hhmm(f.utc_s, false, &mut v);
+                v.push(b" Z");
+            }
+        }
+        if app.dirty(R_ROW + 1 + k, hash(&(v.as_bytes(), k))) {
+            tile(lcd, k as i32, label, v.as_bytes(), if what == 3 && !moving { SUB } else { TEXT });
+        }
+    }
+    // The nearest waypoint (GPS-15): name, distance and bearing, a small arrow.
+    let n = data.waypoints();
+    let near = (0..n).filter_map(|i| data.waypoint(i)).map(|wp| (dist_bearing(f.pos, wp.pos), wp)).min_by_key(|((m, _), _)| *m);
+    let key = near.map(|((m, d), wp)| (m, d, wp.name));
+    if app.dirty(R_NOTE, hash(&(key, units))) {
+        let y = NEAR_Y;
+        lcd.fill(6, y, 228, 47, BG);
+        lcd.text4_rows(14, y + 15, b"Nearest waypoint", &UI_12, SUB, BG, y + 1, y + 18);
+        match near {
+            Some(((m, deg), wp)) => {
+                let mut d = Buf::<16>::new();
+                dist_u(m, units, &mut d);
+                let _ = uwrite!(d, " {}", compass_name(deg));
+                let dw = text4_width(d.as_bytes(), &UI_12B);
+                lcd.text4_rows(14, y + 37, w::fit(wp.name.as_bytes(), &UI_15B, 184 - dw), &UI_15B, TEXT, BG, y + 19, y + 46);
+                lcd.text4_rows(204 - dw, y + 37, d.as_bytes(), &UI_12B, TEXT, BG, y + 19, y + 46);
+                arrow(lcd, 219, y + 30, 10, deg as i32, BLUE, BG);
+            }
+            None => {
+                lcd.text4_rows(14, y + 37, b"None: # marks one here", &UI_12, DIM, BG, y + 19, y + 46);
+            }
+        }
+        lcd.frame_r(6, y, 228, 47, 2, LINE);
+    }
+}
+
+// ---- the satellites page (C17, GPS-18) ----
+
+/// The sky plot's centre and radius (the horizon); rings at 30 and 60 degrees of elevation.
+const SKY: (i32, i32, i32) = (120, 117, 70);
+
+/// C17: where the satellites are (a sky plot, north up) and how strong (bars), used ones coloured.
 fn satellites(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>) {
-    let n = data.sats().min(14);
+    let n = data.sats().min(12);
     let mut l = Buf::<32>::new();
     let used = (0..n).filter(|&i| data.sat(i).is_some_and(|s| s.used)).count();
     let _ = uwrite!(l, "{} in view \u{b7} {} used", n, used);
-    app.list_head(lcd, l.as_bytes(), if fix.is_some() { b"dB-Hz" } else { b"no fix" });
+    let mut r = Buf::<16>::new();
+    match fix {
+        Some(f) => {
+            let _ = uwrite!(r, "\u{b1}{} m", ((f.hdop_x10 as u32 * 5 + 5) / 10).max(1));
+        }
+        None => r.set(b"no fix"),
+    }
+    app.list_head(lcd, l.as_bytes(), r.as_bytes());
     if n == 0 {
         app.empty(lcd, b"No satellites in view", b"");
         return;
     }
-    let (top, base) = (60, 250); // bar area; 50 dB-Hz fills it
+    // The sky plot.
+    let sky = (0..n).filter_map(|i| data.sat(i)).fold(0u32, |h, s| h.wrapping_mul(31).wrapping_add(s.prn as u32 * 7 + s.elev as u32 * 3 + s.azim as u32 + s.used as u32));
+    if app.dirty(R_ROW, sky) {
+        let (cx, cy, rr) = SKY;
+        lcd.fill(0, cy - rr - 4, 240, 2 * rr + 9, BG);
+        ring(lcd, cx, cy, rr, 1, LINE);
+        ring(lcd, cx, cy, rr * 2 / 3, 1, LINE);
+        ring(lcd, cx, cy, rr / 3, 1, LINE);
+        lcd.fill(cx - rr, cy, 2 * rr + 1, 1, LINE);
+        lcd.fill(cx, cy - rr, 1, 2 * rr + 1, LINE);
+        for (t, x, y) in [(b"N", cx - 3, cy - rr + 14), (b"S", cx - 3, cy + rr - 4), (b"E", cx + rr - 11, cy + 5), (b"W", cx - rr + 4, cy + 5)] {
+            lcd.text4(x, y, t, &UI_12, SUB, BG);
+        }
+        for i in 0..n {
+            let Some(s) = data.sat(i) else { continue };
+            let d = rr * (90 - s.elev.min(90) as i32) / 90;
+            let a = s.azim as i32 * 10;
+            let (x, y) = (cx + d * sin10(a) / 4096, cy - d * cos10(a) / 4096);
+            let c = match (s.used, s.beidou) {
+                (false, _) => DIM,
+                (true, false) => BLUE,
+                (true, true) => VIOLET,
+            };
+            if s.used {
+                lcd.fill_r(x - 4, y - 4, 9, 9, 4, c);
+            } else {
+                ring(lcd, x, y, 4, 1, c);
+            }
+            let mut p = Buf::<4>::new();
+            let _ = uwrite!(p, "{}", s.prn);
+            lcd.text4(x + 6, y + 4, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
+        }
+    }
+    // The signal bars (dB-Hz; 50 fills them).
+    let (top, base) = (204, 254);
     let bw = 224 / n as i32;
     for i in 0..n {
         let Some(s) = data.sat(i) else { continue };
-        if !app.dirty(R_ROW + i as usize, hash(&(s, bw))) {
+        if !app.dirty(R_ROW + 1 + i as usize, hash(&(s.prn, s.snr, s.used, s.beidou, bw))) {
             continue;
         }
         let x = 8 + i as i32 * bw;
         let h = (s.snr.min(50) as i32 * (base - top) / 50).max(2);
-        lcd.fill(x, top - 18, bw, base - top + 40, BG);
-        let mut v = Buf::<4>::new();
-        let _ = uwrite!(v, "{}", s.snr);
-        w::field(lcd, x, bw, base - h - 17, base - h - 2, base - h - 4, Align::Center, v.as_bytes(), &UI_12, SUB, BG);
+        lcd.fill(x, top, bw, base - top + 21, BG);
         lcd.fill_r(x + 2, base - h, bw - 4, h, 1, match (s.used, s.beidou) {
             (false, _) => DIM,
             (true, false) => BLUE,
@@ -243,10 +423,10 @@ fn satellites(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<
         });
         let mut p = Buf::<4>::new();
         let _ = uwrite!(p, "{}", s.prn);
-        w::field(lcd, x, bw, base + 4, base + 20, base + 16, Align::Center, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
+        w::field(lcd, x, bw, base + 3, base + 20, base + 16, Align::Center, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
     }
     if app.dirty(R_NOTE, 1) {
-        w::field(lcd, 8, 224, 276, 294, 289, Align::Left, b"Used: blue GPS, violet BeiDou", &UI_12, DIM, BG);
+        w::field(lcd, 8, 224, 278, 296, 291, Align::Left, b"Used: blue GPS, violet BeiDou", &UI_12, DIM, BG);
     }
 }
 
@@ -264,13 +444,14 @@ fn waypoints(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<F
     let mut l = Buf::<24>::new();
     let _ = uwrite!(l, "{} {}", n, if n == 1 { "waypoint" } else { "waypoints" });
     app.list_head(lcd, l.as_bytes(), if fix.is_some() { b"from here" } else { b"no GPS fix" });
+    let units = app.set.units;
     let rows = cur.rows(n, ROWS2, &ALL, |row, i| {
         if let Some(wp) = data.waypoint(i) {
-            let (mut d, mut p) = (Buf::<12>::new(), Buf::<32>::new());
+            let (mut d, mut p) = (Buf::<16>::new(), Buf::<32>::new());
             pos_text(wp.pos, &mut p);
             let arrow = fix.map(|f| {
                 let (m, deg) = dist_bearing(f.pos, wp.pos);
-                dist_text(m, &mut d);
+                dist_u(m, units, &mut d);
                 Some(deg)
             });
             let r = Row2 { tag: src_name(wp.src), title: wp.name.as_bytes(), right: d.as_bytes(), arrow, sub: p.as_bytes(), selected: i == cur.sel, ..Row2::default() };
@@ -283,40 +464,134 @@ fn waypoints(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<F
     }
 }
 
-/// C15: one waypoint, its distance big and the compass (GPS-11).
+/// The go-to dial (GPS-19): a ring with N; course up while moving (the ring turns so the direction of travel is
+/// up and N moves round it, a tick marks "ahead"), north up when stopped; the arrow points to the waypoint.
+fn dial(lcd: &mut impl Panel, cx: i32, cy: i32, r: i32, course: Option<u16>, bearing: Option<u16>) {
+    lcd.fill(cx - r - 1, cy - r - 9, 2 * r + 3, 2 * r + 11, BG);
+    ring(lcd, cx, cy, r, 2, LINE);
+    let up = course.unwrap_or(0) as i32;
+    let a = (360 - up) * 10; // where north sits, clockwise from up
+    let (nx, ny) = (cx + (r - 13) * sin10(a) / 4096, cy - (r - 13) * cos10(a) / 4096);
+    lcd.text4(nx - 4, ny + 5, b"N", &UI_12B, if course.is_some() { AMBER } else { SUB }, BG);
+    if course.is_some() {
+        lcd.tri(cx - 4, cy - r - 9, 9, 1, TEXT); // ahead
+    }
+    match bearing {
+        Some(b) => {
+            arrow(lcd, cx, cy, r / 2, (b as i32 - up).rem_euclid(360), BLUE, BG);
+            lcd.fill_r(cx - 2, cy - 2, 5, 5, 2, TEXT);
+        }
+        None => lcd.fill(cx - 6, cy, 13, 2, SUB),
+    }
+}
+
+/// C15: one waypoint: the dial, its distance big, the bearing and, while moving, the time to get there.
 fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i: u16) {
     let Some(wp) = data.waypoint(i) else {
         return app.empty(lcd, b"No such waypoint", b"MENU 0 6 7 lists them");
     };
+    let units = app.set.units;
     let where_ = fix.map(|f| dist_bearing(f.pos, wp.pos));
+    let course = fix.filter(|f| f.speed_kmh >= MOVING_KMH).map(|f| (f.heading, f.speed_kmh));
     if app.dirty(R_TOP, hash(&(wp, where_))) {
-        lcd.fill(0, 20, 240, 60, BG);
+        lcd.fill(0, 20, 240, 50, BG);
         lcd.text4(8, 42, wp.name.as_bytes(), &UI_12B, TEXT, BG);
         let mut b = Buf::<32>::new();
         pos_text(wp.pos, &mut b);
         lcd.text4(8, 60, b.as_bytes(), &UI_12, SUB, BG);
     }
-    if app.dirty(R_NOTE, hash(&where_)) {
-        compass(lcd, 120, 150, 58, where_.map(|w| w.1));
+    if app.dirty(R_NOTE, hash(&(where_, course))) {
+        dial(lcd, 120, 142, 58, course.map(|c| c.0), where_.map(|w| w.1));
+        let mut t = Buf::<40>::new();
+        match course {
+            Some((_, kmh)) => {
+                t.push("Course up \u{b7} ".as_bytes());
+                speed_u(kmh, units, &mut t);
+            }
+            None => t.set(b"North up"),
+        }
+        w::field(lcd, 8, 224, 204, 221, 217, Align::Center, t.as_bytes(), &UI_12, SUB, BG);
     }
-    if app.dirty(R_HELP, hash(&where_)) {
-        lcd.fill(0, 214, 240, 84, BG);
+    if app.dirty(R_HELP, hash(&(where_, course, units))) {
+        lcd.fill(0, 222, 240, 76, BG);
         match where_ {
             Some((m, deg)) => {
-                let mut d = Buf::<12>::new();
-                dist_text(m, &mut d);
+                let mut d = Buf::<16>::new();
+                dist_u(m, units, &mut d);
                 let (num, unit) = d.as_bytes().split_at(d.as_bytes().iter().position(|&c| c == b' ').unwrap_or(d.len()));
                 let wn = text4_width(num, &DIG_46) + 4 + text4_width(unit.trim_ascii_start(), &UI_12B);
                 let x = 120 - wn / 2;
-                let x2 = x + lcd.text4(x, 262, num, &DIG_46, TEXT, BG);
-                lcd.text4(x2 + 4, 262, unit.trim_ascii_start(), &UI_12B, TEXT, BG);
-                let mut b = Buf::<16>::new();
+                let x2 = x + lcd.text4(x, 270, num, &DIG_46, TEXT, BG);
+                lcd.text4(x2 + 4, 270, unit.trim_ascii_start(), &UI_12B, TEXT, BG);
+                let mut b = Buf::<40>::new();
                 let _ = uwrite!(b, "{} {}\u{b0}", compass_name(deg), deg);
-                w::field(lcd, 8, 224, 270, 290, 285, Align::Center, b.as_bytes(), &UI_12B, TEXT, BG);
+                if let Some((_, kmh)) = course {
+                    // ETA at the present speed
+                    let s = m as u64 * 36 / (kmh as u64 * 10).max(1);
+                    let _ = if s < 3600 { uwrite!(b, " \u{b7} ETA {} min", (s / 60).max(1) as u32) } else { uwrite!(b, " \u{b7} ETA {} h {}", (s / 3600) as u32, (s / 60 % 60) as u32) };
+                }
+                w::field(lcd, 8, 224, 277, 296, 292, Align::Center, b.as_bytes(), &UI_12B, TEXT, BG);
             }
             None => {
                 w::field(lcd, 8, 224, 240, 260, 255, Align::Center, b"No GPS fix: no distance", &UI_12, SUB, BG);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    extern crate std;
+
+    fn d(m: u32, u: u8) -> std::string::String {
+        let mut b = Buf::<16>::new();
+        dist_u(m, u, &mut b);
+        std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap()
+    }
+
+    /// GPS-16: distances in the units of 0 6 4.
+    #[test]
+    fn distances_follow_units() {
+        assert_eq!(d(599, 0), "599 m");
+        assert_eq!(d(3_300, 0), "3.3 km");
+        assert_eq!(d(25_400, 0), "25 km");
+        assert_eq!(d(100, 1), "328 ft");
+        assert_eq!(d(3_300, 1), "2.0 mi");
+        assert_eq!(d(40_000, 1), "25 mi");
+        assert_eq!(d(3_300, 2), "1.78 nmi");
+        assert_eq!(d(40_000, 2), "22 nmi");
+    }
+
+    /// GPS-16: speed and altitude in the chosen units.
+    #[test]
+    fn speed_and_altitude() {
+        let s = |k, u| {
+            let mut b = Buf::<40>::new();
+            speed_u(k, u, &mut b);
+            std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap()
+        };
+        assert_eq!(s(46, 0), "46 km/h");
+        assert_eq!(s(46, 1), "29 mph");
+        assert_eq!(s(46, 2), "25 kn");
+        let mut b = Buf::<40>::new();
+        alt_u(74, 1, &mut b);
+        assert_eq!(b.as_bytes(), b"242 ft");
+    }
+
+    /// GPS-15: the coordinate formats of 0 6 3.
+    #[test]
+    fn coordinate_formats() {
+        let c = |v, f| {
+            let mut b = Buf::<24>::new();
+            coord(v, "N", "S", f, &mut b);
+            std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap()
+        };
+        let lat = 454_215_000; // 45.4215 degrees
+        assert_eq!(c(lat, 0), "45.42150\u{b0} N");
+        assert_eq!(c(lat, 1), "45\u{b0}25.290' N");
+        assert_eq!(c(lat, 2), "45\u{b0}25'17.4\" N");
+        assert_eq!(c(-lat, 1), "45\u{b0}25.290' S");
+        assert_eq!(c(10_000_000 + 500_000, 1), "1\u{b0}03.000' N");
     }
 }
