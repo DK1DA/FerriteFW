@@ -481,6 +481,7 @@ impl Data for Sample {
             }
             Op::DeleteChannel(n) => self.slot_of(n).map(|c| c.set(None)).is_some(),
             Op::Skip(n, on) => edit(n, &|c| c.flags = if on { c.flags | FLAG_SKIP } else { c.flags & !FLAG_SKIP }),
+            Op::Hide(n, on) => edit(n, &|c| c.flags = if on { c.flags | crate::chan::FLAG_HIDDEN } else { c.flags & !crate::chan::FLAG_HIDDEN }),
             Op::Move(n, z) => edit(n, &|c| c.zone = z),
             Op::Renumber(n, to) => self.slot_of(to).is_none() && edit(n, &|c| c.num = to),
             Op::NewZone => {

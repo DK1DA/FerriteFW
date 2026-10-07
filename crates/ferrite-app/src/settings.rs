@@ -165,7 +165,35 @@ pub struct Settings {
     pub predictive: bool,
     /// Approval tokens of Bluetooth devices allowed to write (LINK-7), newest first; all zero is none.
     pub link_tokens: [[u8; 8]; crate::link::TOKENS],
+    /// 0 7 4 1: the screen goes dark after this ([`BACKLIGHT_TIMES`] index; 0 never).
+    pub backlight: u8,
+    /// 0 7 4 5: the keypad light ([`KEYPAD_LIGHTS`]).
+    pub keypad_light: u8,
+    /// 0 7 6: what the LEDs show ([`LED_MODES`]).
+    pub leds: u8,
+    /// 0 7 8: auto power off ([`AUTO_OFF_TIMES`] index; 0 off).
+    pub auto_off: u8,
+    /// 0 9 1 1: auto key lock (KEY-20, [`AUTO_LOCK_TIMES`] index; 0 off).
+    pub auto_lock: u8,
+    /// 0 8 6 6: hear the DTMF digits sent, at beep volume.
+    pub dtmf_sidetone: bool,
+    /// 0 7 5 4: a tone on arriving at a waypoint.
+    pub arrival_tone: bool,
+    /// The channel lists show hidden channels too (their options).
+    pub show_hidden: bool,
 }
+
+/// 0 7 4 1's values, seconds (0 never).
+pub const BACKLIGHT_TIMES: [u16; 6] = [0, 5, 10, 15, 30, 60];
+/// 0 7 4 5's values.
+pub const KEYPAD_LIGHTS: [&str; 4] = ["Off", "With screen", "On key press", "Always"];
+/// 0 7 6's values: the heartbeat is the dark-screen flash in the battery's colour.
+pub const LED_MODES: [&str; 3] = ["Off", "Receive and transmit", "Receive, transmit and heartbeat"];
+/// 0 7 8's values, minutes (0 off).
+pub const AUTO_OFF_TIMES: [u16; 5] = [0, 30, 60, 120, 240];
+/// 0 9 1 1's values, seconds (0 off).
+pub const AUTO_LOCK_TIMES: [u16; 5] = [0, 30, 60, 120, 300];
+
 
 /// 0 3 2 1's values (SCOPE-9).
 pub const SCOPE_BAR_COUNTS: [u8; 4] = [30, 60, 120, 240];
@@ -223,6 +251,14 @@ impl Settings {
         aprs_mode: false,
         predictive: true,
         link_tokens: [[0; 8]; crate::link::TOKENS],
+        backlight: 3,
+        keypad_light: 1,
+        leds: 2,
+        auto_off: 0,
+        auto_lock: 0,
+        dtmf_sidetone: true,
+        arrival_tone: true,
+        show_hidden: false,
     };
 
     /// The region's name, or "Not set".

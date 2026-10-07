@@ -421,27 +421,6 @@ fn fm_broadcast() {
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
 }
 
-/// WX-1: weather radio (MENU 0 3 3 5) in the US and Canada only; leaving restores the slot.
-#[test]
-fn weather_radio_by_region() {
-    let mut t = T::new();
-    t.app.set_region(Some(Region::Uk), false);
-    for d in [0, 3, 3, 5] {
-        t.tap(if d == 0 { Key::Menu } else { Key::Digit(d) });
-        if d == 0 {
-            t.tap(Key::Digit(0));
-        }
-    }
-    assert!(!matches!(t.app.screen(), Screen::Weather(_)), "greyed outside the US and Canada");
-    t.hold(Key::Exit);
-    t.app.set_region(Some(Region::Canada), false);
-    t.open(Dest::Weather);
-    assert!(matches!(t.app.screen(), Screen::Weather(_)));
-    assert!(t.cmds().contains(&RadioCmd::TuneSlot { slot: 0, freq: mhz(162) + 55_000 }));
-    t.tap(Key::Exit);
-    assert!(t.cmds().contains(&RadioCmd::TuneSlot { slot: 0, freq: mhz(146) + 52_000 }), "the slot's own frequency");
-}
-
 /// WX-4, WX-6, WX-7: an alert opens over any screen; OK silences, then opens the log; BACK home.
 #[test]
 fn alert_screen() {
@@ -532,7 +511,7 @@ fn radio_screens_draw() {
     let mut t = ready();
     let mut fb = FrameBuffer::new();
     t.app.notify(b"Severe thunderstorm warning", b"Ottawa, Gatineau", true);
-    for d in [Dest::Transmit, Dest::TxRefused, Dest::Emergency, Dest::Scan, Dest::BandScope, Dest::ToneSearch, Dest::Counter, Dest::FmBroadcast, Dest::HfMode, Dest::Weather, Dest::Alert, Dest::Crossband, Dest::Squelch, Dest::ShortcutMap] {
+    for d in [Dest::Transmit, Dest::TxRefused, Dest::Emergency, Dest::Scan, Dest::BandScope, Dest::ToneSearch, Dest::Counter, Dest::FmBroadcast, Dest::HfMode, Dest::Alert, Dest::Crossband, Dest::Squelch, Dest::ShortcutMap] {
         t.hold(Key::Exit);
         t.render(&mut fb);
         t.app.open(d);
@@ -554,7 +533,6 @@ fn fonts_cover_group_b() {
         include_str!("../screens/probe.rs"),
         include_str!("../screens/fm.rs"),
         include_str!("../screens/hf.rs"),
-        include_str!("../screens/weather.rs"),
         include_str!("../screens/xb.rs"),
         include_str!("../screens/squelch.rs"),
         include_str!("../screens/shortcut.rs"),

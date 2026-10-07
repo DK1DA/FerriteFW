@@ -31,6 +31,11 @@ pub struct Channel {
 pub const FLAG_SKIP: u8 = 1;
 pub const FLAG_APRS: u8 = 2;
 pub const FLAG_RX_ONLY: u8 = 4;
+/// Left out of the channel lists unless "show hidden" is on (their options); still reachable by number and
+/// scanned (decision 63).
+pub const FLAG_HIDDEN: u8 = 0x40;
+/// Checked during any scan at the priority interval, besides the zone's priority channels (decision 63).
+pub const FLAG_PRIORITY: u8 = 0x80;
 
 /// Channel numbers 0-999 (shown 1-1000).
 pub const MAX_CHANNELS: u16 = 1000;

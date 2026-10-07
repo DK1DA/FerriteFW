@@ -159,12 +159,13 @@ impl Face {
                 c.rrect(half.x + 2, half.y + 2, half.w - 4, half.h - 4, 4, 0x3A5A80);
             }
         }
-        // The indicator: one window, red (TX) and green (RX) dies as in stock (PC13, PC14).
+        // The indicator: one window, red and green dies as in stock (PC13, PC14), lit as the app says (both: the
+        // heartbeat's yellow).
         let u = |v: i32| v * scale as i32 / 2;
         let (lx, ly) = self.led;
         c.rrect(lx, ly - u(4), u(30), u(10), u(5), 0x08090B);
         c.rrect(lx + u(3), ly - u(2), u(11), u(6), u(3), if tx { 0xFF3B30 } else { 0x3A1A1A });
-        c.rrect(lx + u(16), ly - u(2), u(11), u(6), u(3), if rx && !tx { 0x5CFF6E } else { 0x16301A });
+        c.rrect(lx + u(16), ly - u(2), u(11), u(6), u(3), if rx { 0x5CFF6E } else { 0x16301A });
     }
 
     /// The screen into the panel at (sx, sy), scaled; `px(x, y)` gives each screen pixel as RGB.

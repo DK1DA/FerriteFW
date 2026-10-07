@@ -6,7 +6,7 @@
 //! Nothing is buffered whole: [`dump_line`] makes one line at a time from where [`DumpPos`] says it is.
 
 use super::{blocked, mhz5, parse_mhz};
-use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
 use crate::data::{Op, RangePreset, ZoneCfg};
 use crate::screens::groups::{self, SETTABLE, SUBS};
 use crate::slot::{band_of, BAND_125M, CTCSS, DCS, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
@@ -425,8 +425,10 @@ const POWERS: [&str; 3] = ["low", "mid", "high"];
 const BUSY: [&str; 3] = ["off", "carrier", "tone"];
 const BW: [&str; 2] = ["wide", "narrow"];
 /// Channel fields by name, in the order a `ch` line writes them.
-const FIELDS: [&str; 18] =
-    ["name", "rx", "offset", "mode", "bw", "tone", "rxtone", "txtone", "power", "zone", "step", "squelch", "busy", "reverse", "skip", "aprs", "rxonly", "tx"];
+const FIELDS: [&str; 20] = [
+    "name", "rx", "offset", "mode", "bw", "tone", "rxtone", "txtone", "power", "zone", "step", "squelch", "busy", "reverse", "skip", "aprs", "rxonly", "tx", "hidden",
+    "priority",
+];
 
 // ---- Channels ----
 
@@ -476,7 +478,14 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
         out.push(b" busy=");
         out.push(BUSY[g.busy as usize % 3].as_bytes());
     }
-    for (on, w) in [(g.reverse, "reverse"), (c.flags & FLAG_SKIP != 0, "skip"), (c.flags & FLAG_APRS != 0, "aprs"), (c.flags & FLAG_RX_ONLY != 0, "rxonly")] {
+    for (on, w) in [
+        (g.reverse, "reverse"),
+        (c.flags & FLAG_SKIP != 0, "skip"),
+        (c.flags & FLAG_APRS != 0, "aprs"),
+        (c.flags & FLAG_RX_ONLY != 0, "rxonly"),
+        (c.flags & FLAG_HIDDEN != 0, "hidden"),
+        (c.flags & FLAG_PRIORITY != 0, "priority"),
+    ] {
         if on {
             out.push(b" ");
             out.push(w.as_bytes());
@@ -508,6 +517,8 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
         14 => return flag(c, FLAG_SKIP, v, "skip"),
         15 => return flag(c, FLAG_APRS, v, "aprs"),
         16 => return flag(c, FLAG_RX_ONLY, v, "rxonly"),
+        18 => return flag(c, FLAG_HIDDEN, v, "hidden"),
+        19 => return flag(c, FLAG_PRIORITY, v, "priority"),
         _ => {}
     }
     let v = match v {
@@ -1245,7 +1256,7 @@ const HELP: [&str; 24] = [
     slow!("  get 0 7 1   get        one setting; every setting not at its default"),
     slow!("  ch 12                  channel 12, as its ch line"),
     slow!("  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone"),
-    slow!("                         power zone step squelch busy reverse skip aprs rxonly"),
+    slow!("                         power zone step squelch busy reverse skip aprs rxonly hidden priority"),
     slow!("  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel"),
     slow!("  ch 12 delete           delete channel 12"),
     slow!("  zone 2 \"Repeaters\"     a zone (made in order); fields scan shown resume ..."),

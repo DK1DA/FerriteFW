@@ -82,6 +82,7 @@ pub fn run(scale: u32) {
     dev.clock_min = Some(14 * 60 + 32);
     dev.utc = false;
     let mut app = fake::app();
+    app.settings_mut().backlight = 0; // shots: the screen never goes dark (lights tested in ferrite-app)
     let mut radio = fake::FakeRadio::new();
     fake::sample(&mut app, &store, &mut radio);
     let mut s = Shot { app, dev, radio, t: 0, scale, fb: FrameBuffer::new() };

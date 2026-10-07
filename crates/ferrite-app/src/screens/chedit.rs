@@ -12,7 +12,7 @@ use super::nav::Dest;
 use super::shared::*;
 use super::text::TextFor;
 use super::{Cx, Hints, View};
-use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{chan_label, Item, STEPS, band_near};
 use crate::{App, Screen, EDIT_IDLE_MS};
@@ -36,6 +36,8 @@ pub struct ChEdit {
 enum Cell {
     It(Item),
     Flag(u8, &'static str),
+    /// In scans, skipped, or priority (decision 63): Skip and Priority exclude each other.
+    Scan,
     Number,
     Home,
 }
@@ -49,7 +51,7 @@ const CELLS: [Cell; 12] = [
     Cell::It(Item::Power),
     Cell::It(Item::Squelch),
     Cell::It(Item::BusyLock),
-    Cell::Flag(FLAG_SKIP, "Skip"),
+    Cell::Scan,
     Cell::Flag(FLAG_APRS, "APRS"),
     Cell::Flag(FLAG_RX_ONLY, "RX only"),
     Cell::Number,
@@ -71,6 +73,7 @@ impl Cell {
         match self {
             Cell::It(i) => i.label(),
             Cell::Flag(_, l) => l,
+            Cell::Scan => "Scan",
             Cell::Number => "Number",
             Cell::Home => "Home",
         }
@@ -166,6 +169,7 @@ impl View for ChEdit {
                 // MENU-18: back to the default
                 Some(Cell::It(i)) => app.reset(i),
                 Some(Cell::Flag(bit, _)) => edit(app, |c| c.flags &= !bit),
+                Some(Cell::Scan) => edit(app, |c| c.flags &= !(FLAG_SKIP | FLAG_PRIORITY)),
                 Some(Cell::Home) => set_home(app, false),
                 _ => {}
             },
@@ -208,6 +212,12 @@ impl View for ChEdit {
             _ => match self.at() {
                 Some(Cell::It(i)) => app.change(i, d),
                 Some(Cell::Flag(bit, _)) => edit(app, |c| c.flags ^= bit),
+                Some(Cell::Scan) => edit(app, |c| {
+                    // In scans -> Skip -> Priority, and back the other way.
+                    let i = if c.flags & FLAG_PRIORITY != 0 { 2 } else { (c.flags & FLAG_SKIP != 0) as i32 };
+                    let n = (i + d).rem_euclid(3);
+                    c.flags = (c.flags & !(FLAG_SKIP | FLAG_PRIORITY)) | [0, FLAG_SKIP, FLAG_PRIORITY][n as usize];
+                }),
                 Some(Cell::Home) => set_home(app, app.set.home_ch != Some(ch.num)),
                 Some(Cell::Number) => {
                     // The next free number that way (EDIT-5: renumbering moves the channel).
@@ -260,6 +270,13 @@ impl View for ChEdit {
                     grey = app.greyed(it).is_some();
                 }
                 Cell::Flag(bit, _) => v.set(if ch.flags & bit != 0 { b"On" } else { b"Off" }),
+                Cell::Scan => v.set(if ch.flags & FLAG_PRIORITY != 0 {
+                    b"Priority".as_slice()
+                } else if ch.flags & FLAG_SKIP != 0 {
+                    b"Skip"
+                } else {
+                    b"In scans"
+                }),
                 Cell::Number => {
                     let _ = uwrite!(v, "{}", Zero(ch.num as u32 + 1, 3));
                 }

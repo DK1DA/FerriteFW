@@ -13,7 +13,7 @@
 //! [`cmd`]; a command that answers in several lines (a dump, a load's report, help) uses the console, which
 //! streams lines and then waits for Enter. Not yet: marking or colour (TERM-14, 18).
 
-use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE};
 use crate::screens::advanced::GROUPS;
 use crate::screens::groups::{self, SUBS};
 use crate::settings::CABLE_PORTS;
@@ -149,7 +149,7 @@ enum F {
     Home,
 }
 
-const FIELDS: [F; 15] = [
+const FIELDS: [F; 17] = [
     F::Name,
     F::Zone,
     F::Rx,
@@ -164,6 +164,8 @@ const FIELDS: [F; 15] = [
     F::Flag(FLAG_SKIP, "Skip"),
     F::Flag(FLAG_APRS, "APRS"),
     F::Flag(FLAG_RX_ONLY, "RX only"),
+    F::Flag(FLAG_HIDDEN, "Hidden"),
+    F::Flag(FLAG_PRIORITY, "Priority"),
     F::Home,
 ];
 
@@ -1911,6 +1913,12 @@ fn flags(c: &Channel, app: &App, w: &mut W) {
     }
     if c.flags & FLAG_RX_ONLY != 0 {
         f(w, b"RX");
+    }
+    if c.flags & FLAG_HIDDEN != 0 {
+        f(w, b"hidden");
+    }
+    if c.flags & FLAG_PRIORITY != 0 {
+        f(w, b"prio");
     }
 }
 

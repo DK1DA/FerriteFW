@@ -315,6 +315,8 @@ pub enum Op {
     /// Channels by number (CHAN-13: deleting happens only in the browser).
     DeleteChannel(u16),
     Skip(u16, bool),
+    /// Hidden from the channel lists, or shown again (decision 63).
+    Hide(u16, bool),
     Move(u16, u8),
     Renumber(u16, u16),
     NewZone,

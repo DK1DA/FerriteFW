@@ -22,6 +22,8 @@ const CH_VERSION: u8 = 1;
 /// transmit frequency itself, not RX plus a shift: CHAN-2); 8 and 11-15 are kept as they were. A record from
 /// before split has bit 10 clear and reads as a shift, as it always did.
 const UI_FLAGS: u16 = 0x0067;
+/// The UI's priority flag (`FLAG_PRIORITY`, 0x80 in `Channel::flags`) lives in record bit 8.
+const PRIORITY: u16 = 1 << 8;
 const BUSY_SHIFT: u16 = 3;
 const REVERSE: u16 = 1 << 9;
 const SPLIT: u16 = 1 << 10;
@@ -79,7 +81,8 @@ pub fn ch_decode(num: u16, b: &[u8; CH_LEN]) -> Option<Channel> {
     };
     let mut name = [0u8; 16];
     name.copy_from_slice(&b[32..48]);
-    Some(Channel { num, zone: b[18], rx, name, cfg, flags: (flags & UI_FLAGS) as u8 })
+    let ui = (flags & UI_FLAGS) as u8 | if flags & PRIORITY != 0 { ferrite_app::chan::FLAG_PRIORITY } else { 0 };
+    Some(Channel { num, zone: b[18], rx, name, cfg, flags: ui })
 }
 
 /// The record for `ch`, keeping what the UI doesn't model from `old` (the record it replaces, or the one it
@@ -113,8 +116,9 @@ pub fn ch_encode(ch: &Channel, old: &[u8; CH_LEN]) -> [u8; CH_LEN] {
     b[12..14].copy_from_slice(&c.rx_tone.to_le_bytes());
     b[14..16].copy_from_slice(&c.tx_tone.to_le_bytes());
     let old_flags = if keep { u16_at(old, 16) } else { 0 };
-    let flags = (old_flags & !(UI_FLAGS | 3 << BUSY_SHIFT | REVERSE | SPLIT))
+    let flags = (old_flags & !(UI_FLAGS | 3 << BUSY_SHIFT | REVERSE | SPLIT | PRIORITY))
         | (ch.flags as u16 & UI_FLAGS)
+        | if ch.flags & ferrite_app::chan::FLAG_PRIORITY != 0 { PRIORITY } else { 0 }
         | ((c.busy as u16 & 3) << BUSY_SHIFT)
         | if c.reverse { REVERSE } else { 0 }
         | if c.split { SPLIT } else { 0 };
@@ -322,6 +326,20 @@ mod tests {
         t[40] ^= 1;
         assert_eq!(ch_decode(11, &t), None);
         assert_eq!(ch_decode(0, &[0xFF; CH_LEN]), None);
+    }
+
+    /// Decision 63: Hidden (UI bit 6, record bit 6) and Priority (UI bit 7, record bit 8) survive a round trip;
+    /// record bit 7 stays "has position".
+    #[test]
+    fn hidden_and_priority_round_trip() {
+        use ferrite_app::chan::{FLAG_HIDDEN, FLAG_PRIORITY, FLAG_SKIP};
+        let c = Channel { num: 3, zone: 0, rx: 14_652_000, name: [0; 16], cfg: DEFAULT_CFG, flags: FLAG_HIDDEN | FLAG_PRIORITY };
+        let r = ch_encode(&c, &[0xFF; CH_LEN]);
+        assert_eq!(u16_at(&r, 16) & (1 << 8), 1 << 8);
+        assert_eq!(u16_at(&r, 16) & (1 << 7), 0, "a new record has no position");
+        assert_eq!(ch_decode(3, &r).unwrap().flags, FLAG_HIDDEN | FLAG_PRIORITY);
+        let c2 = Channel { flags: FLAG_SKIP, ..c };
+        assert_eq!(ch_decode(3, &ch_encode(&c2, &r)).unwrap().flags, FLAG_SKIP, "cleared again");
     }
 
     #[test]

@@ -64,6 +64,9 @@ macro_rules! slow_table {
 }
 pub(crate) use slow_table;
 
+/// Where a scrolling table's rows end (the hint bar starts below).
+const TABLE_END: i32 = 298;
+
 impl App {
     /// Label + value row `i` (region R_ROW + i) from y, drawn when what it shows changed. Returns where the next
     /// row starts.
@@ -79,10 +82,19 @@ impl App {
     pub(crate) fn table<C>(&mut self, lcd: &mut impl Panel, t: &Table<C>, live: &LiveAll, dev: &Device, x: &C, sel: Option<u8>) -> i32 {
         let mut b = Buf::<40>::new();
         let mut y = t.y as i32;
-        for (i, (label, f)) in t.rows.iter().enumerate() {
+        // A table with a selection scrolls to keep it in view when its rows don't all fit above the hint bar.
+        let n = t.rows.len();
+        // (h 0: rows size themselves, and such a table doesn't scroll)
+        let fit = if t.h == 0 { n } else { ((TABLE_END - t.y as i32) / t.h as i32).max(1) as usize };
+        let top = match sel {
+            Some(s) if n > fit => (s as usize + 1).saturating_sub(fit).min(n - fit),
+            _ => 0,
+        };
+        let shown = if sel.is_some() { fit.min(n) } else { n };
+        for (i, (label, f)) in t.rows.iter().enumerate().skip(top).take(shown) {
             b.clear();
             let c = f(&Ctx { app: self, live, dev, x }, &mut b);
-            y = self.kv(lcd, i, y, t.h as i32, &t.style, label.as_bytes(), b.as_bytes(), c, sel == Some(i as u8));
+            y = self.kv(lcd, i - top, y, t.h as i32, &t.style, label.as_bytes(), b.as_bytes(), c, sel == Some(i as u8));
         }
         y
     }

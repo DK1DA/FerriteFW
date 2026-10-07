@@ -39,7 +39,7 @@ fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
 
 slow_table! {
     /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
-    ROWS: [(&str, Val<()>); 15] = [
+    ROWS: [(&str, Val<()>); 18] = [
         // SBAR-14: why transmit is locked, if it is (BOOT-11).
         (slow!("Transmit"), |c, b| match super::info::tx_lock(c.dev) {
             None => {
@@ -68,11 +68,17 @@ slow_table! {
             if paused(c, b) {
                 return AMBER;
             }
+            // Decision 63: where each scan is now.
             for (s, l) in c.live.slots.iter().enumerate().filter(|(_, l)| l.scanning) {
                 if !b.is_empty() {
                     b.push(b", ");
                 }
-                let _ = uwrite!(b, "{}: {}", w::LETTERS[s] as char, band_name(l.freq));
+                let _ = uwrite!(b, "{}: ", w::LETTERS[s] as char);
+                b.push(w::freq3(l.freq).as_bytes());
+                if c.live.slots.iter().filter(|l| l.scanning).count() == 1 {
+                    b.push(" \u{b7} ".as_bytes());
+                    b.push(band_name(l.freq).as_bytes());
+                }
             }
             if b.is_empty() {
                 b.set(b"Off");
@@ -113,6 +119,27 @@ slow_table! {
             }
             TEXT
         }),
+        // Decision 63: the broadcast receiver's state.
+        (slow!("Broadcast"), |c, b| {
+            match c.app.radio.mode {
+                super::activity::Mode::Fm => {
+                    let f = c.app.set.fm_freq as u32;
+                    let _ = uwrite!(b, "FM {}.{}", f / 100, f % 100 / 10);
+                }
+                super::activity::Mode::Hf => b.set(b"HF mode"),
+                _ => b.set(b"Off"),
+            }
+            TEXT
+        }),
+        // Decision 63: where the clock comes from.
+        (slow!("Clock"), |c, b| {
+            match c.dev.clock_min {
+                None => b.set(b"Not set"),
+                Some(_) if c.app.set.clock_gps && c.dev.gps == GpsState::Fix => b.set(b"From GPS"),
+                Some(_) => b.set(b"Set by hand"),
+            }
+            TEXT
+        }),
         (slow!("Bluetooth"), |c, b| {
             b.set(if c.dev.bt { b"Connected".as_slice() } else { b"Off" });
             TEXT
@@ -127,6 +154,11 @@ slow_table! {
             } else {
                 TEXT
             }
+        }),
+        // Decision 63: the battery's warning and cut-off levels (from the bench: open point, chapter 33).
+        (slow!("Battery levels"), |_, b| {
+            b.set(b"Not measured yet");
+            SUB
         }),
         (slow!("Key lock"), |c, b| on_off(b, c.app.locked)),
         // SBAR-18: paused in HF mode; WX-3: US and Canada only.
@@ -148,7 +180,7 @@ slow_table! {
 }
 
 slow_table! {
-    GO: [Go; 15] = [
+    GO: [Go; 18] = [
         Go::Open(Dest::Group(8)),
         Go::Open(Dest::Group(9)),
         Go::Open(Dest::Group(8)),
@@ -159,7 +191,10 @@ slow_table! {
         Go::Later,
         Go::Quick(8),
         Go::Open(Dest::GpsPosition),
+        Go::Open(Dest::FmBroadcast),
+        Go::Open(Dest::Group(6)),
         Go::Open(Dest::Sub(9, 2)),
+        Go::Later,
         Go::Later,
         Go::Later,
         Go::Open(Dest::Sub(3, 3)),

@@ -80,7 +80,6 @@ pub mod text;
 pub mod tones;
 pub mod transmit;
 pub mod value;
-pub mod weather;
 pub mod xb;
 pub mod zones;
 
@@ -119,7 +118,6 @@ pub enum Screen {
     Scope(scope::Scope),
     ToneSearch(probe::ToneSearch),
     Counter(probe::Counter),
-    Weather(weather::Weather),
     Crossband(xb::Crossband),
     Squelch(squelch::Squelch),
     Group(groups::Group),
@@ -179,7 +177,6 @@ macro_rules! each {
             Screen::Scope($s) => $e,
             Screen::ToneSearch($s) => $e,
             Screen::Counter($s) => $e,
-            Screen::Weather($s) => $e,
             Screen::Crossband($s) => $e,
             Screen::Squelch($s) => $e,
             Screen::Group($s) => $e,

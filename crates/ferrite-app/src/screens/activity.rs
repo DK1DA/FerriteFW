@@ -22,8 +22,6 @@ pub enum Mode {
     Fm,
     Hf,
     Xb,
-    /// Weather radio: the active slot is on a weather channel until the screen is left.
-    Weather,
 }
 
 /// One remembered hit: what (a frequency, or a tone word), when (s, wrapping), how strong (dBm).
@@ -177,7 +175,6 @@ impl App {
             Mode::Fm => self.out.push(RadioCmd::Broadcast(BroadcastCmd::Off)),
             Mode::Hf => self.out.push(RadioCmd::Hf { freq: self.set.hf.freq, mode: self.set.hf.mode, on: false }),
             Mode::Xb => self.out.push(RadioCmd::Crossband(None)),
-            Mode::Weather => self.send_slot(a), // back to the slot's own frequency
         }
     }
 

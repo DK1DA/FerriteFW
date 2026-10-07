@@ -106,6 +106,7 @@ fn main() {
     dev.clock_min = Some(14 * 60 + 32);
     dev.utc = false;
     let mut app = fake::app();
+    app.settings_mut().backlight = 0; // shots: the screen never goes dark (lights tested in ferrite-app)
     fake::sample(&mut app, &store, &mut radio);
     let mut t = 0u32;
     let mut run = |app: &mut App, fb: &mut FrameBuffer, until: u32, t: &mut u32| {
@@ -351,10 +352,6 @@ fn main() {
     shot!(2500, "counter");
     home(&mut app, &mut t);
     // FM broadcast and HF mode: group D's shots.
-    // Weather radio: MENU 0 3 3 5 (Canada).
-    app.open(ferrite_app::screens::nav::Dest::Weather);
-    shot!(300, "weather");
-    home(&mut app, &mut t);
     // The alert: group D's shot, as in the mock-up.
     // Squelch: SIDE1 held, the knob turned.
     app.key_down(Key::Side(1), t, &store);
@@ -477,6 +474,7 @@ fn themed(scale: u32) {
         dev.clock_min = Some(14 * 60 + 32);
         dev.utc = false;
         let mut app = fake::app();
+        app.settings_mut().backlight = 0; // shots: the screen never goes dark (lights tested in ferrite-app)
         fake::sample(&mut app, &store, &mut radio);
         app.settings_mut().theme = theme;
         let mut t = 0u32;

@@ -157,6 +157,7 @@ fn pin_at_power_on() {
     t.tap(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Pin(_)), "waiting 30 s");
     t.wait(30_500);
+    t.wake();
     for d in [1, 2, 3, 4] {
         t.tap(Key::Digit(d));
     }
@@ -452,6 +453,7 @@ fn power_on_reset_before_the_pin() {
     t.hold(Key::Exit);
     t.wait(31_000);
     assert!(matches!(t.app.screen(), Screen::Confirm(_)), "hold BACK and the timeout can't skip the PIN");
+    t.wake();
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Pin(_)), "BACK: the PIN, as at any power on");
     // Again, and reset: the PIN is gone, the second question asks about the channels, BACK keeps them.

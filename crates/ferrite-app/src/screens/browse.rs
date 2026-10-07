@@ -10,7 +10,7 @@ use super::lists::*;
 use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::{Channel, ChannelStore, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, FLAG_HIDDEN, NO_ZONE};
 use crate::data::Op;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{chan_label, shift_text, tone_text, MODES};
@@ -36,13 +36,14 @@ const RECENT_MAX: u16 = 10;
 const RECENT_EVENTS: u16 = 64;
 
 /// The row actions (C10), in order.
-const ACTIONS: [(&str, &str); 7] = [
+const ACTIONS: [(&str, &str); 8] = [
     ("Edit", "Its settings, in place on the active slot"),
     ("Rename", "Up to 16 characters"),
     ("Move", "To another zone, or none"),
     ("Renumber", "Changes its place in its zone"),
     ("Copy to slot", "The active slot goes to this channel"),
     ("Skip", "Left out of every scan"),
+    ("Hide", "Out of the lists; still there by number"),
     ("Delete", "Asks first"),
 ];
 
@@ -78,6 +79,8 @@ struct ViewOf<'a, S: ChannelStore> {
     store: &'a S,
     view: u8,
     zone: u8,
+    /// Hidden channels are listed too (the list's options; decision 63).
+    hidden: bool,
 }
 
 impl<S: ChannelStore> ViewOf<'_, S> {
@@ -92,13 +95,15 @@ impl<S: ChannelStore> ViewOf<'_, S> {
     }
 
     fn keep(&self, i: u16) -> bool {
-        match self.view {
+        let band = match self.view {
             2..=5 => {
                 let (lo, hi) = BAND_VIEWS[self.view as usize - 2];
                 self.store.by_number(i).is_some_and(|c| c.rx >= lo && c.rx < hi)
             }
             _ => true,
-        }
+        };
+        // A hidden channel is left out of the lists unless they show hidden ones; Recent lists what was used.
+        band && (self.hidden || self.view == V_RECENT || !self.at(i).is_some_and(|c| c.flags & FLAG_HIDDEN != 0))
     }
 
     fn at(&self, i: u16) -> Option<Channel> {
@@ -160,8 +165,8 @@ impl<S: ChannelStore> ViewOf<'_, S> {
     }
 }
 
-fn view_of<'a, S: ChannelStore>(store: &'a S, b: &Browse) -> ViewOf<'a, S> {
-    ViewOf { store, view: b.view, zone: b.zone }
+fn view_of<'a, S: ChannelStore>(store: &'a S, b: &Browse, hidden: bool) -> ViewOf<'a, S> {
+    ViewOf { store, view: b.view, zone: b.zone, hidden }
 }
 
 /// The picker's rows: the zones that exist, then the views.
@@ -176,6 +181,12 @@ fn picker_keep(store: &impl ChannelStore, i: u16) -> bool {
 impl View for Browse {
     /// KEY-19: renumbering steps 10 with ◀▶; otherwise they are the knob.
     fn own_arrows(self) -> bool {
+        true
+    }
+
+    /// Hold MENU: the list's options (show hidden channels).
+    fn options(self, app: &mut App) -> bool {
+        app.open_screen(super::opts::Of::Channels.screen());
         true
     }
 
@@ -194,7 +205,7 @@ impl View for Browse {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let mut s = self;
-        let v = view_of(store, &self);
+        let v = view_of(store, &self, app.set.show_hidden);
         let ch = if self.view == PICKER { None } else { v.at(self.cur.sel) };
         match (e.key, e.press, self.mode) {
             (Key::Up | Key::Down, Short | Repeat, _) => return self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
@@ -207,7 +218,7 @@ impl View for Browse {
                 let z = store.zones() as u16;
                 let i = self.cur.sel;
                 (s.view, s.zone) = if i < z { (0, i as u8) } else { (1 + (i - z) as u8, 0) };
-                let v = view_of(store, &s);
+                let v = view_of(store, &s, app.set.show_hidden);
                 s.cur = Cursor::first(v.n(), &|i| v.keep(i));
             }
             (Key::Menu, Short, Mode::List) if ch.is_some() => s.mode = Mode::Actions(0),
@@ -231,6 +242,13 @@ impl View for Browse {
                     5 => {
                         store.data().request(Op::Skip(c.num, !c.skip()));
                         app.show_toast(c.name(), if c.skip() { b"back in scans" } else { b"skipped in scans" }, false);
+                        s.mode = Mode::List;
+                    }
+                    6 => {
+                        // Decision 63: hidden from the lists, unless they show hidden ones.
+                        let hide = c.flags & FLAG_HIDDEN == 0;
+                        store.data().request(Op::Hide(c.num, hide));
+                        app.show_toast(c.name(), if hide { b"hidden from the lists" } else { b"shown in the lists" }, false);
                         s.mode = Mode::List;
                     }
                     _ => {
@@ -284,7 +302,7 @@ impl View for Browse {
         match self.mode {
             Mode::List if self.view == PICKER => s.cur = self.cur.step(d, picker_n(store), ROWS1, &|i| picker_keep(store, i)),
             Mode::List => {
-                let v = view_of(store, &self);
+                let v = view_of(store, &self, app.set.show_hidden);
                 s.cur = self.cur.step(d, v.n(), ROWS2, &|i| v.keep(i));
             }
             Mode::Actions(a) => s.mode = Mode::Actions((a as i32 + d).rem_euclid(ACTIONS.len() as i32) as u8),
@@ -317,7 +335,7 @@ impl View for Browse {
             return picker(app, lcd, store, self.cur);
         }
         let view = self.view;
-        let v = view_of(store, &self);
+        let v = view_of(store, &self, app.set.show_hidden);
         let n = v.n();
         let ch = v.at(self.cur.sel);
         if !list {
@@ -325,7 +343,7 @@ impl View for Browse {
         }
         let mut name = Buf::<20>::new();
         name.set(if view == 0 { zone_name(store, self.zone) } else { Buf::from(VIEWS[view as usize - 1].as_bytes()) }.as_bytes());
-        let shown = if (2..=5).contains(&view) { (0..n).filter(|&i| v.keep(i)).count() } else { n as usize };
+        let shown = if (2..=5).contains(&view) || !v.hidden { (0..n).filter(|&i| v.keep(i)).count() } else { n as usize };
         let mut r = Buf::<24>::new();
         match view {
             V_NEARBY => r.set(b"nearest first"),
@@ -436,7 +454,7 @@ fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: C
             zone_name(store, i as u8)
         } else {
             let k = (i - z) as u8 + 1;
-            let vw = ViewOf { store, view: k, zone: 0 };
+            let vw = ViewOf { store, view: k, zone: 0, hidden: true };
             match k {
                 V_ALL => {
                     let _ = uwrite!(v, "{}", store.count());
@@ -503,8 +521,8 @@ fn actions(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, b: Br
 }
 
 /// After the shared confirm deleted a channel: the list again, its cursor on a channel that still exists.
-pub(crate) fn after_delete(b: Browse, store: &impl ChannelStore) -> Browse {
-    let v = view_of(store, &b);
+pub(crate) fn after_delete(b: Browse, store: &impl ChannelStore, hidden: bool) -> Browse {
+    let v = view_of(store, &b, hidden);
     let cur = Cursor { sel: b.cur.sel.min(v.n().saturating_sub(1)), ..b.cur }.shown(v.n(), ROWS2, &|i| v.keep(i));
     Browse { mode: Mode::List, cur, ..b }
 }

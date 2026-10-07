@@ -359,6 +359,7 @@ fn pin_at_unlock() {
     t.tap(Key::Menu);
     assert!(t.app.locked());
     t.wait(30_100);
+    t.wake();
     t.digits("1234");
     t.tap(Key::Menu);
     assert!(!t.app.locked());

@@ -43,6 +43,7 @@ macro_rules! slow {
 pub mod chan;
 pub mod data;
 pub mod keys;
+pub mod lights;
 pub mod link;
 pub mod persist;
 pub mod sample;
@@ -244,6 +245,10 @@ pub struct App {
     now: u32,
     last_input: u32,
     paused_until: Option<u32>,
+    /// The last activity for the backlight and auto power off: keys, PTT, a slot receiving ([`lights`]).
+    seen: u32,
+    /// [`lights`]'s flags: dark, warned of auto off, power off wanted, the waking key swallowed.
+    lit: u8,
     /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
     rx_mask: u8,
     /// Slots whose own RX tone is heard on the carrier (busy lockout "wrong tone").
@@ -303,6 +308,8 @@ impl App {
             now: 0,
             last_input: 0,
             paused_until: None,
+            seen: 0,
+            lit: 0,
             rx_mask: 0,
             tone_mask: 0,
             scan_mask: 0,
@@ -696,6 +703,12 @@ impl App {
 
     pub fn key_down(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        // A dark screen: the key only wakes it, and its release and holds are ignored; PTT acts at once.
+        if self.wake(now) && !matches!(key, Key::Ptt(_)) {
+            self.swallow(true);
+            self.keys.down(key, now);
+            return;
+        }
         self.keys.down(key, now);
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
@@ -712,6 +725,10 @@ impl App {
 
     pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        if !matches!(key, Key::Ptt(_)) && self.swallow(false) {
+            self.keys.release(key, now);
+            return;
+        }
         self.screen.raw(self, Some(key), None, false);
         if matches!(key, Key::Ptt(_)) {
             self.screen.ptt(self, false);
@@ -728,6 +745,9 @@ impl App {
     /// Knob: +1 per click clockwise.
     pub fn knob(&mut self, d: i8, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        if self.wake(now) {
+            return;
+        }
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
         if self.locked {
@@ -739,6 +759,7 @@ impl App {
     /// Time passes: long presses and repeats, toasts, undo, timeouts; and the latest snapshot.
     pub fn tick(&mut self, now: u32, live: &LiveAll, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        self.lights_tick(now, live);
         let mut rx = 0;
         let mut tone = 0;
         let mut scan = 0;
@@ -781,6 +802,9 @@ impl App {
                 n += 1;
             }
         });
+        if self.swallowing() {
+            return; // the key that woke the screen: no long press or repeat either
+        }
         for e in evs.into_iter().flatten() {
             self.last_input = now;
             self.on_key(e, store);

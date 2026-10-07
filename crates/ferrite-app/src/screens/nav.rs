@@ -106,8 +106,6 @@ pub enum Dest {
     ToneSearch,
     /// B15: frequency counter (MENU 0 3 4).
     Counter,
-    /// B16: weather radio (MENU 0 3 3 5).
-    Weather,
     /// B17: an alert (SAME, DSC distress, jamming).
     Alert,
     /// B18-B20: crossband repeater (MENU 0 3 6).
@@ -229,7 +227,6 @@ impl Dest {
             HfMode => ("HF mode", "20a", "B12"),
             ToneSearch => ("Tone search", "22", "B14"),
             Counter => ("Frequency counter", "22", "B15"),
-            Weather => ("Weather radio", "23", "B16"),
             Alert => ("Alert", "23", "B17"),
             Crossband => ("Crossband repeater", "19", "B18"),
             Squelch => ("Squelch", "12", "B21"),
@@ -308,12 +305,12 @@ impl Dest {
 }
 
 /// Every destination once (groups and lists by one example each), for tests and the screen inventory.
-pub const ALL: [Dest; 71] = {
+pub const ALL: [Dest; 70] = {
     use Dest::*;
     [
         Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
         ZoneEdit, LocationCodes, DtmfDialer, DtmfMemories, Compose, QuickMessages, Pin, Confirm, ExtendTx, Setup, ShortcutMap,
-        Transmit, TxRefused, Emergency, Scan, BandScope, FmBroadcast, HfMode, ToneSearch, Counter, Weather, Alert,
+        Transmit, TxRefused, Emergency, Scan, BandScope, FmBroadcast, HfMode, ToneSearch, Counter, Alert,
         Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage, Sensors,
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, FmPresets, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
@@ -324,7 +321,7 @@ pub const ALL: [Dest; 71] = {
 
 /// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 61] = [
+pub const MENU0: [(&[u8], Dest); 60] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -339,7 +336,6 @@ pub const MENU0: [(&[u8], Dest); 61] = [
     (&[3, 2, 6], Dest::BandScope),
     (&[3, 3], Dest::Sub(3, 3)),
     (&[3, 3, 2], Dest::LocationCodes),
-    (&[3, 3, 5], Dest::Weather),
     (&[3, 4], Dest::Counter),
     (&[3, 5], Dest::HfMode),
     (&[3, 6], Dest::Crossband),
@@ -425,7 +421,6 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::BandScope => scope::open(app),
         Dest::ToneSearch => probe::open_tone(app),
         Dest::Counter => probe::open_counter(app),
-        Dest::Weather => weather::open(app).unwrap_or(app.screen),
         Dest::Crossband => Screen::Crossband(xb::Crossband { cell: 0 }),
         Dest::Squelch => Screen::Squelch(squelch::Squelch),
         // Group C: lists and data

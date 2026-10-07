@@ -91,7 +91,7 @@ const G7: [Entry; 9] = [
     (slow!("Display"), slow!("Bars"), slow!("S-meter, power-on message, boot screen.")),
     (slow!("Backlight"), slow!("15 s"), slow!("Timeout, brightness, wake.")),
     (slow!("Sounds"), slow!("Beep on"), slow!("Key beep, volume, alert tones.")),
-    (slow!("LEDs"), slow!("RX and TX"), slow!("When the LEDs light.")),
+    (slow!("LEDs"), slow!("Receive, transmit and heartbeat"), slow!("And a flash while the screen is dark.")),
     (slow!("Battery Save"), slow!("Level 1"), slow!("Receiver sleep: longer life, slower.")),
     (slow!("Auto power off"), slow!("Off"), slow!("Off after a time without key or signal.")),
     (slow!("Menu timeout"), slow!("30 s"), slow!("An idle menu returns home.")),
@@ -161,7 +161,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Location codes"), slow!("None"), slow!("Up to 8 FIPS or CLC codes.")),
         (slow!("Alert tone"), slow!("On"), slow!("Sound the alert tone.")),
         (slow!("Channel"), slow!("Auto"), slow!("The weather channel to watch.")),
-        (slow!("Open weather radio"), slow!(""), slow!("Listen to the weather channel.")),
     ]),
     ((4, 2), &[
         (slow!("Frequency"), slow!("439.9875"), slow!("The pager channel.")),
@@ -211,18 +210,21 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Brightness"), slow!("7"), slow!("1-10.")),
         (slow!("On transmit"), slow!("On"), slow!("Light up while transmitting.")),
         (slow!("Wake screen on"), slow!("Keys, receive"), slow!("What wakes the screen.")),
+        (slow!("Keypad light"), slow!("With screen"), slow!("Off, with the screen, on key press, always.")),
     ]),
     ((7, 5), &[
         (slow!("Key beep"), slow!("On"), slow!("Beep on key presses.")),
         (slow!("Beep volume"), slow!("3"), slow!("1-5.")),
         (slow!("Alert tones"), slow!("On"), slow!("Tones for alerts.")),
+        (slow!("Arrival tone"), slow!("On"), slow!("A tone on reaching a waypoint.")),
     ]),
     ((8, 1), &[(slow!("TX timeout"), slow!("120 s"), slow!("Transmit stops after this.")), (slow!("Pre-alert"), slow!("10 s"), slow!("Warning before the timeout."))]),
     ((8, 2), &[(slow!("VOX"), slow!("Off"), slow!("Transmit when you talk.")), (slow!("Level"), slow!("5"), slow!("1-9.")), (slow!("Delay"), slow!("1 s"), slow!("Hang time after speech."))]),
     ((8, 5), &[
         (slow!("Mode"), slow!("Off"), slow!("Receive, transmit or both.")),
         (slow!("Phase"), slow!("55 Hz"), slow!("55 Hz or a phase shift.")),
-        (slow!("Repeater tail delay"), slow!("0 s"), slow!("Wait for the repeater tail.")),
+        // 3 was "Repeater tail delay", dropped (decision 63); the number stays empty so End tone keeps 0 8 5 4.
+        (slow!("-"), slow!(""), slow!("Not used.")),
         (slow!("End tone"), slow!("Off"), slow!("A short tone as you let go of PTT.")),
     ]),
     ((8, 6), &[
@@ -231,6 +233,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("On and off time"), slow!("100 ms"), slow!("DTMF tone timing.")),
         (slow!("PTT ID on VFOs"), slow!("Off"), slow!("Send the ID code at PTT.")),
         (slow!("ID code"), slow!("Empty"), slow!("The radio's DTMF ID.")),
+        (slow!("Sidetone"), slow!("On"), slow!("Hear the digits you send.")),
     ]),
     ((8, 7), &[(slow!("Callsign"), slow!("Empty"), slow!("For APRS, CW ID, power-on message.")), (slow!("CW ID"), slow!("Off"), slow!("Send your callsign in CW."))]),
     ((9, 1), &[
@@ -299,6 +302,7 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [3, 3, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
+        [8, 5, 3] => Some("not used"),
         _ => None,
     }
 }
@@ -429,6 +433,39 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.term_colour as u8);
             s.term_colour
         }
+        [7, 4] | [7, 4, 1] => {
+            secs(b, BACKLIGHT_TIMES[s.backlight as usize % BACKLIGHT_TIMES.len()] as u32, "Never");
+            s.backlight != Settings::DEFAULT.backlight
+        }
+        [7, 4, 5] => {
+            pick(b, &KEYPAD_LIGHTS, s.keypad_light);
+            s.keypad_light != Settings::DEFAULT.keypad_light
+        }
+        [7, 5, 4] => {
+            pick(b, &ON_OFF, s.arrival_tone as u8);
+            !s.arrival_tone
+        }
+        [7, 6] => {
+            pick(b, &LED_MODES, s.leds);
+            s.leds != Settings::DEFAULT.leds
+        }
+        [7, 8] => {
+            secs(b, AUTO_OFF_TIMES[s.auto_off as usize % AUTO_OFF_TIMES.len()] as u32 * 60, "Off");
+            s.auto_off != 0
+        }
+        [9, 1] | [9, 1, 1] => {
+            let t = AUTO_LOCK_TIMES[s.auto_lock as usize % AUTO_LOCK_TIMES.len()] as u32;
+            if p.len() == 2 && t == 0 {
+                b.set(b"No auto lock");
+            } else {
+                secs(b, t, "Off");
+            }
+            s.auto_lock != 0
+        }
+        [8, 6, 6] => {
+            pick(b, &ON_OFF, s.dtmf_sidetone as u8);
+            !s.dtmf_sidetone
+        }
         [3, 3, 1] => {
             pick(b, &ON_OFF, s.same as u8);
             !s.same
@@ -496,13 +533,29 @@ pub(crate) fn cal_text(c: CalState) -> &'static str {
     }
 }
 
+/// "15 s", "2 min", "1 h", or `zero` for 0.
+fn secs(b: &mut Buf<24>, t: u32, zero: &str) {
+    match t {
+        0 => b.set(zero.as_bytes()),
+        1..=59 => {
+            let _ = uwrite!(b, "{} s", t);
+        }
+        60..=3599 => {
+            let _ = uwrite!(b, "{} min", t / 60);
+        }
+        _ => {
+            let _ = uwrite!(b, "{} h", t / 3600);
+        }
+    }
+}
+
 fn cycle(v: u8, d: i32, n: usize) -> u8 {
     (v as i32 + d).rem_euclid(n as i32) as u8
 }
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 21] = [
+pub(crate) const SETTABLE: [&[u8]; 28] = [
     &[1, 1],
     &[3, 1, 2],
     &[3, 1, 3],
@@ -520,7 +573,14 @@ pub(crate) const SETTABLE: [&[u8]; 21] = [
     &[7, 1],
     &[7, 2],
     &[7, 3, 3],
+    &[7, 4, 1],
+    &[7, 4, 5],
+    &[7, 5, 4],
+    &[7, 6],
     &[7, 7],
+    &[7, 8],
+    &[8, 6, 6],
+    &[9, 1, 1],
     &[9, 2, 1],
     &[9, 2, 5],
     &[9, 2, 6],
@@ -560,6 +620,13 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [9, 2, 1] => s.bt = !s.bt,
         [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
         [9, 2, 6] => s.term_colour = !s.term_colour,
+        [7, 4, 1] => s.backlight = cycle(s.backlight, d, BACKLIGHT_TIMES.len()),
+        [7, 4, 5] => s.keypad_light = cycle(s.keypad_light, d, KEYPAD_LIGHTS.len()),
+        [7, 5, 4] => s.arrival_tone = !s.arrival_tone,
+        [7, 6] => s.leds = cycle(s.leds, d, LED_MODES.len()),
+        [7, 8] => s.auto_off = cycle(s.auto_off, d, AUTO_OFF_TIMES.len()),
+        [9, 1, 1] => s.auto_lock = cycle(s.auto_lock, d, AUTO_LOCK_TIMES.len()), // KEY-20
+        [8, 6, 6] => s.dtmf_sidetone = !s.dtmf_sidetone,
         [8, 9] => set_extend(app, !app.set.extend_tx),
         [9, 3] | [9, 3, 1] => {
             let m = cycle(s.pin_mode, d, PIN_MODES.len());
@@ -617,6 +684,13 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,
         [9, 2, 6] => s.term_colour = d.term_colour,
+        [7, 4, 1] => s.backlight = d.backlight,
+        [7, 4, 5] => s.keypad_light = d.keypad_light,
+        [7, 5, 4] => s.arrival_tone = d.arrival_tone,
+        [7, 6] => s.leds = d.leds,
+        [7, 8] => s.auto_off = d.auto_off,
+        [9, 1, 1] => s.auto_lock = d.auto_lock,
+        [8, 6, 6] => s.dtmf_sidetone = d.dtmf_sidetone,
         _ => {}
     }
 }

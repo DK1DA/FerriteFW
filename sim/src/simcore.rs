@@ -457,11 +457,17 @@ impl SimCore {
         let mut pressed = self.kb_held.clone();
         pressed.extend(self.mouse);
         let knob = if self.now < self.knob_flash.1 { self.knob_flash.0 } else { 0 };
-        let rx = self.live() && self.radio.live.slots[self.app.active() as usize].squelch_open;
+        // The LEDs as the firmware drives them (decision 63: RX, TX and the dark-screen heartbeat).
+        let leds = if self.live() { self.app.leds(&self.radio.live, &self.dev) } else { Default::default() };
+        // A dark screen (backlight off) shows dimmed, so the sim stays readable.
+        let dark = self.live() && self.app.dark();
         let (face, lcd, flashes, scale) = (&self.face, &self.lcd, &self.flashes, self.scale);
-        face.draw(&mut self.out, &pressed, knob, rx, self.tx.is_some(), scale);
+        face.draw(&mut self.out, &pressed, knob, leds.green, leds.red, scale);
         face.put_screen(&mut self.out, scale, |x, y| {
             let mut c = rgb565_to_rgb(lcd.fb.at(x, y));
+            if dark {
+                c = (c >> 2) & 0x3F3F3F;
+            }
             if let Some(m) = mockup {
                 c = blend(c, m[(y * W + x) as usize]);
             }

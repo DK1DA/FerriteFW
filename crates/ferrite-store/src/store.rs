@@ -602,7 +602,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     fn accepts(&self, op: &Op) -> Option<bool> {
         let exists = |n: u16| n < MAX_CHANNELS && ch_valid(&self.read_ch(n));
         Some(match *op {
-            Op::DeleteChannel(n) | Op::Skip(n, _) | Op::Move(n, _) => exists(n),
+            Op::DeleteChannel(n) | Op::Skip(n, _) | Op::Hide(n, _) | Op::Move(n, _) => exists(n),
             Op::Renumber(n, to) => to < MAX_CHANNELS && !exists(to) && exists(n),
             Op::NewZone => self.zones.get() < MAX_ZONES,
             Op::DeleteZone(z) | Op::Zone(z, _) | Op::RenameZone(z, _) => z < self.zones.get(),
@@ -626,6 +626,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         match op {
             Op::DeleteChannel(n) => self.delete(n).await,
             Op::Skip(n, on) => edit(n, &|c| c.flags = if on { c.flags | ferrite_app::chan::FLAG_SKIP } else { c.flags & !ferrite_app::chan::FLAG_SKIP }).await,
+            Op::Hide(n, on) => edit(n, &|c| c.flags = if on { c.flags | ferrite_app::chan::FLAG_HIDDEN } else { c.flags & !ferrite_app::chan::FLAG_HIDDEN }).await,
             Op::Move(n, z) => edit(n, &|c| c.zone = z).await,
             Op::Renumber(n, to) => {
                 if ch_valid(&self.raw_ch(to)?) {

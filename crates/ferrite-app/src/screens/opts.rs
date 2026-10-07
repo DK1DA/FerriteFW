@@ -26,6 +26,8 @@ pub enum Of {
     Waypoints,
     /// The band scope (SCOPE): its settings list.
     Scope,
+    /// The channel browser: show hidden channels (decision 63).
+    Channels,
 }
 
 impl Of {
@@ -40,6 +42,8 @@ enum Act {
     /// Asks first (MENU-23).
     Confirm(Op),
     Open(Dest),
+    /// Show hidden channels in the lists, or not (a setting, kept).
+    ShowHidden,
 }
 
 type Opt = (&'static str, Act, &'static str);
@@ -67,6 +71,7 @@ const GPS: [Opt; 3] = [
     ("GPS settings", Act::Open(Dest::Group(6)), "On or off, format, units, time zone"),
 ];
 const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, step, speed, trigger, waterfall")];
+const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
 const WAYPOINTS: [Opt; 2] = [
     ("Mark here", Act::Do(Op::MarkHere), "A waypoint at this fix"),
     ("GPS position", Act::Open(Dest::GpsPosition), "Fix, satellites, grid square"),
@@ -80,6 +85,7 @@ fn rows(of: Of) -> &'static [Opt] {
         Of::Gps => &GPS,
         Of::Waypoints => &WAYPOINTS,
         Of::Scope => &SCOPE,
+        Of::Channels => &CHANNELS,
     }
 }
 
@@ -92,6 +98,7 @@ fn title(of: Of) -> &'static [u8] {
         Of::Gps => b"GPS position",
         Of::Waypoints => b"Waypoints",
         Of::Scope => b"Scope",
+        Of::Channels => b"Channels",
     }
 }
 
@@ -143,6 +150,12 @@ impl View for Options {
                 Act::Open(d) => {
                     app.back();
                     app.open(d);
+                }
+                Act::ShowHidden => {
+                    app.set.show_hidden = !app.set.show_hidden;
+                    app.back();
+                    let on: &[u8] = if app.set.show_hidden { b"shown" } else { b"left out" };
+                    app.show_toast(b"Hidden channels", on, false);
                 }
             },
             (Key::Exit, Short) if self.confirm => app.screen = Screen::Options(Options { confirm: false, ..self }),

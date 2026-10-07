@@ -2,7 +2,7 @@
 //! (`ferrite-app`, the same state machine the simulator runs): keys and the knob in, the Radio task's snapshot
 //! in, its commands out to the Radio task, and the screen redrawn where it changed.
 
-use crate::board::{BACKLIGHT, POWER_HOLD, POWER_SW};
+use crate::board::{BACKLIGHT, KEYPAD_LIGHT, LED_ACTIVE_HIGH, LED_GREEN, LED_RED, POWER_HOLD, POWER_SW, SCREEN_LIGHT};
 use crate::bringup;
 use crate::chan::{Input, ALERTS, CABLE_BAUD, DEBUG_ANS, DEBUG_REQ, INPUT, LINK_BAUD, LINK_HELLOS, LINK_ON, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::display::Screen;
@@ -262,9 +262,13 @@ pub async fn task() {
         store::wake(store);
         // PWR-17: the power switch off (PE0 high, twice 50 ms apart): "Saving...", the radio off, the pending
         // writes, then the power hold released; if the switch is back on by then, a reset, as stock does.
-        if POWER_SW.read() {
-            Timer::after_millis(50).await;
-            if POWER_SW.read() {
+        // Auto power off (0 7 8) runs out like the switch going off.
+        let auto_off = app.take_power_off();
+        if POWER_SW.read() || auto_off {
+            if !auto_off {
+                Timer::after_millis(50).await;
+            }
+            if auto_off || POWER_SW.read() {
                 app.power_off();
                 app.render(&mut lcd, &live, &dev, store);
                 RADIO.send(RadioCmd::Shutdown).await;
@@ -277,11 +281,30 @@ pub async fn task() {
                 }
                 POWER_HOLD.write(false);
                 Timer::after_millis(500).await;
+                if auto_off && !POWER_SW.read() {
+                    // Still powered: the switch is on, and only it cuts the power. Standby until a key: the
+                    // chips are off (Shutdown above), the screen, keypad light and LEDs too; then start again.
+                    for p in BACKLIGHT {
+                        p.write(false);
+                    }
+                    LED_RED.write(!LED_ACTIVE_HIGH);
+                    LED_GREEN.write(!LED_ACTIVE_HIGH);
+                    while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) && !POWER_SW.read() {}
+                }
                 cortex_m::peripheral::SCB::sys_reset();
             }
         }
         app.render(&mut lcd, &live, &dev, store);
-        let period = if down != 0 || term.busy() || !link.ready() { TICK_HELD_MS } else { TICK_IDLE_MS };
+        // The lights (decision 63): screen and keypad, and the LEDs with their next change.
+        SCREEN_LIGHT.write(!app.dark());
+        KEYPAD_LIGHT.write(app.keypad_lit());
+        let leds = app.leds(&live, &dev);
+        LED_RED.write(leds.red == LED_ACTIVE_HIGH);
+        LED_GREEN.write(leds.green == LED_ACTIVE_HIGH);
+        let mut period = if down != 0 || term.busy() || !link.ready() { TICK_HELD_MS } else { TICK_IDLE_MS };
+        if leds.next_ms != 0 {
+            period = period.min(leds.next_ms as u64);
+        }
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {
             Either4::First(l) => slot_a(&mut live, &l),

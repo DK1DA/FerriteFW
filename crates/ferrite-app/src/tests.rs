@@ -85,6 +85,14 @@ impl T {
         }
     }
 
+    /// A key press that only lights a dark screen (decision 63: the waking press does nothing else).
+    fn wake(&mut self) {
+        if self.app.dark() {
+            self.tap(Key::Exit);
+            assert!(!self.app.dark());
+        }
+    }
+
     fn cmds(&mut self) -> Vec<RadioCmd> {
         let mut v = Vec::new();
         while let Some(c) = self.app.pop_cmd() {
@@ -401,7 +409,7 @@ fn every_destination_draws() {
         }
     }
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
-    assert_eq!(ids.len(), 67, "one inventory ID per destination (groups and lists share D3)");
+    assert_eq!(ids.len(), 66, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63)");
 }
 
 mod group_a;
@@ -656,6 +664,7 @@ fn literal_scanner() {
 
 /// Group B: transmit, scan, scope, tone search, counter, FM, HF, weather, alert, crossband, layouts.
 mod radio_activity;
+mod lights;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]

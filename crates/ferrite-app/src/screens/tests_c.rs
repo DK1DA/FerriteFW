@@ -182,6 +182,36 @@ fn log_options_clear_after_asking() {
 }
 
 /// CHAN-13, MENU-23: deleting a channel asks first and names it; BACK keeps it.
+/// Decision 63: Hide leaves a channel out of the lists; the list's options show hidden ones again.
+#[test]
+fn browser_hides_channels() {
+    let sel = |t: &T| match t.app.screen() {
+        Screen::Browse(b) => b.cur.sel,
+        s => panic!("{s:?}"),
+    };
+    let mut t = T::new();
+    t.open(Dest::Browse);
+    t.tap(Key::Down); // Repeaters
+    t.tap(Key::Menu);
+    t.tap(Key::Down); // Club repeater
+    assert_eq!(sel(&t), 1);
+    t.tap(Key::Menu); // actions
+    for _ in 0..6 {
+        t.tap(Key::Down); // Hide
+    }
+    t.tap(Key::Menu);
+    assert!(t.s.by_num(11).is_some_and(|(c, _)| c.flags & crate::chan::FLAG_HIDDEN != 0), "stored hidden");
+    t.tap(Key::Up);
+    assert_eq!(sel(&t), 0);
+    t.tap(Key::Down);
+    assert_eq!(sel(&t), 2, "out of the list: Down steps over it");
+    t.hold(Key::Menu); // the list's options
+    t.tap(Key::Menu); // Show hidden channels
+    assert!(t.app.set.show_hidden);
+    t.tap(Key::Up);
+    assert_eq!(sel(&t), 1, "shown again");
+}
+
 #[test]
 fn browser_deletes_only_after_asking() {
     let mut t = T::new();
@@ -197,7 +227,7 @@ fn browser_deletes_only_after_asking() {
     assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == crate::screens::confirm::Ask::DeleteChannel(11)), "the shared confirm (MENU-23)");
     t.tap(Key::Exit);
     assert_eq!(t.s.count(), n, "BACK keeps it");
-    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.mode == crate::screens::browse::Mode::Actions(6)), "back on Delete");
+    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.mode == crate::screens::browse::Mode::Actions(7)), "back on Delete");
     t.tap(Key::Menu);
     assert_eq!(t.s.count(), n, "OK on Delete only asks");
     t.tap(Key::Menu);
@@ -617,7 +647,7 @@ fn rename_goes_to_its_own_record() {
 fn hold_menu_is_options_everywhere() {
     use crate::screens::opts::Of;
     let mut t = T::new();
-    for (d, of) in [(Dest::EventLog, Of::Log), (Dest::AprsHeard, Of::Heard), (Dest::AprsMessages, Of::Messages), (Dest::GpsPosition, Of::Gps), (Dest::Waypoints, Of::Waypoints), (Dest::BandScope, Of::Scope)] {
+    for (d, of) in [(Dest::EventLog, Of::Log), (Dest::AprsHeard, Of::Heard), (Dest::AprsMessages, Of::Messages), (Dest::GpsPosition, Of::Gps), (Dest::Waypoints, Of::Waypoints), (Dest::BandScope, Of::Scope), (Dest::Browse, Of::Channels)] {
         t.open(d);
         let under = t.app.screen();
         t.hold(Key::Menu);
@@ -634,7 +664,7 @@ fn hold_menu_is_options_everywhere() {
     t.hold(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu));
     t.hold(Key::Exit);
-    for d in [Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Sensors, Dest::Quick, Dest::Status] {
+    for d in [Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Sensors, Dest::Quick, Dest::Status] {
         t.open(d);
         let s = t.app.screen();
         t.hold(Key::Menu);
