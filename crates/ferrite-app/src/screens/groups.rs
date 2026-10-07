@@ -44,16 +44,15 @@ const G2: [Entry; 5] = [
     (slow!("Nearby"), slow!("Off"), slow!("Sort channels by distance.")),
     (slow!("Channel display"), slow!("Name"), slow!("Name, number or frequency on home.")),
 ];
-const G3: [Entry; 7] = [
+const G3: [Entry; 6] = [
     (slow!("FM broadcast"), slow!("Monitor on"), slow!("Presets, step, AGC, monitor, sleep.")),
     (slow!("Band scope"), slow!("60 bars"), slow!("Bars, step, speed, trigger, waterfall.")),
-    (slow!("Weather alerts"), slow!("On"), slow!("SAME, location codes, tone, channel.")),
     (slow!("Frequency counter"), slow!(""), slow!("Find a nearby transmitter's frequency.")),
     (slow!("HF mode"), slow!(""), slow!("Below 64 MHz. Everything else pauses.")),
     (slow!("Crossband repeater"), slow!(""), slow!("Repeat one slot's band on another's.")),
     (slow!("Tone search"), slow!(""), slow!("Find the CTCSS or DCS in use.")),
 ];
-const G4: [Entry; 8] = [
+const G4: [Entry; 9] = [
     (slow!("Event log"), slow!(""), slow!("Every decode and alert: the inbox.")),
     (slow!("POCSAG"), slow!("439.9875"), slow!("Pager frequency, baud, capcodes.")),
     (slow!("DSC"), slow!("Off"), slow!("Marine distress calls, receive only.")),
@@ -62,6 +61,7 @@ const G4: [Entry; 8] = [
     (slow!("Selcall, MDC1200"), slow!("Off"), slow!("Decode selcall and MDC1200 IDs.")),
     (slow!("DTMF decode"), slow!("Off"), slow!("Show and log DTMF sequences.")),
     (slow!("Popups"), slow!("On"), slow!("A 3 s toast for each decode.")),
+    (slow!("Weather alerts"), slow!("On"), slow!("SAME, location codes, tone, channel.")),
 ];
 const G5: [Entry; 9] = [
     (slow!("Heard"), slow!(""), slow!("Stations heard, nearest first.")),
@@ -108,7 +108,7 @@ const G8: [Entry; 9] = [
     (slow!("Extend TX"), slow!("Off"), slow!("Transmit beyond the amateur bands.")),
 ];
 const G9: [Entry; 9] = [
-    (slow!("Keys"), slow!("No auto lock"), slow!("Auto lock, lock covers, key test, shortcuts.")),
+    (slow!("Keys and lock"), slow!("No auto lock"), slow!("Auto lock, lock covers, key test, shortcuts.")),
     (slow!("Connections"), slow!("BT off"), slow!("Bluetooth, paired devices, link.")),
     (slow!("PIN and lock"), slow!("Off"), slow!("PIN lock, channel-only mode, PIN.")),
     (slow!("Region"), slow!("Not set"), slow!("Your amateur bands and defaults.")),
@@ -156,12 +156,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Waterfall row"), slow!("Off"), slow!("History under the scope.")),
         (slow!("Open band scope"), slow!(""), slow!("Sweep around the active slot. Home: hold 1.")),
     ]),
-    ((3, 3), &[
-        (slow!("SAME"), slow!("On"), slow!("Decode weather alerts.")),
-        (slow!("Location codes"), slow!("None"), slow!("Up to 8 FIPS or CLC codes.")),
-        (slow!("Alert tone"), slow!("On"), slow!("Sound the alert tone.")),
-        (slow!("Channel"), slow!("Auto"), slow!("The weather channel to watch.")),
-    ]),
     ((4, 2), &[
         (slow!("Frequency"), slow!("439.9875"), slow!("The pager channel.")),
         (slow!("Baud"), slow!("1200"), slow!("512, 1200 or 2400.")),
@@ -169,6 +163,12 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
     ]),
     ((4, 3), &[(slow!("DSC"), slow!("Off"), slow!("Decode DSC on channel 70.")), (slow!("Own MMSI"), slow!("None"), slow!("Your MMSI, receive only."))]),
     ((4, 4), &[(slow!("AIS"), slow!("Off"), slow!("Decode AIS.")), (slow!("Range filter"), slow!("Off"), slow!("Only ships this close."))]),
+    ((4, 9), &[
+        (slow!("SAME"), slow!("On"), slow!("Decode weather alerts.")),
+        (slow!("Location codes"), slow!("None"), slow!("Up to 8 FIPS or CLC codes.")),
+        (slow!("Alert tone"), slow!("On"), slow!("Sound the alert tone.")),
+        (slow!("Channel"), slow!("Auto"), slow!("The weather channel to watch.")),
+    ]),
     ((5, 4), &[
         (slow!("SSID"), slow!("9"), slow!("0-15 after your callsign.")),
         (slow!("Symbol"), slow!("Car"), slow!("Your map symbol.")),
@@ -301,7 +301,7 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 /// Why an item can't be used here, if it can't (MENU-14).
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
-        [3, 3, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
+        [4, 9, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
         [8, 5, 3] => Some("not used"),
         _ => None,
     }
@@ -332,7 +332,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             }
             s.fixed_on
         }
-        [3, 3, 2] => {
+        [4, 9, 2] => {
             let n = s.same_codes.iter().filter(|&&c| c != 0).count();
             if n == 0 {
                 b.set(b"None");
@@ -478,7 +478,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.dtmf_sidetone as u8);
             !s.dtmf_sidetone
         }
-        [3, 3, 1] => {
+        [4, 9, 1] => {
             pick(b, &ON_OFF, s.same as u8);
             !s.same
         }
@@ -581,7 +581,7 @@ pub(crate) const SETTABLE: [&[u8]; 30] = [
     &[3, 2, 3],
     &[3, 2, 4],
     &[3, 2, 5],
-    &[3, 3, 1],
+    &[4, 9, 1],
     &[5, 3],
     &[5, 5, 1],
     &[5, 5, 4],
@@ -640,7 +640,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [5, 5, 1] => app.step_beacon(d),
         [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
         [5, 7, 1] => app.step_aprs_freq(d),
-        [3, 3, 1] => s.same = !s.same,
+        [4, 9, 1] => s.same = !s.same,
         [9, 2, 1] => s.bt = !s.bt,
         [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
         [9, 2, 6] => s.term_colour = !s.term_colour,
@@ -708,7 +708,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
         [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
         [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
-        [3, 3, 1] => s.same = d.same,
+        [4, 9, 1] => s.same = d.same,
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,
         [9, 2, 6] => s.term_colour = d.term_colour,

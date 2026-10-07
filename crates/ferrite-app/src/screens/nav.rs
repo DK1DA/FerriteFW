@@ -25,7 +25,7 @@
 //! | Power on | the firmware: [`App::first_boot`] / [`App::ask_pin`] | [`Dest::Setup`] (BOOT-12) / [`Dest::Pin`] (BOOT-13) |
 //! | [`App::notify`], [`App::raise_alert`] | automatic (WX-4) | [`Dest::Alert`] |
 //!
-//! Crossband is MENU 0 3 6 (Tools); the mailbox is the Status page's last row. The screens an event opens
+//! Crossband is MENU 0 3 5 (Tools); the mailbox is the Status page's last row. The screens an event opens
 //! have App hooks the firmware (and the simulator's keys) call: [`App::power_off`], [`App::battery_empty`],
 //! [`App::ssb_patch_found`], [`App::link_write_request`], [`App::link_write_progress`] and
 //! [`App::link_write_done`], [`App::same_alert`].
@@ -66,7 +66,7 @@ pub enum Dest {
     RangePreset,
     /// A12: one zone's settings.
     ZoneEdit,
-    /// A13: SAME location codes (MENU 0 3 3 2).
+    /// A13: SAME location codes (MENU 0 4 9 2).
     LocationCodes,
     /// A14: DTMF dialer (MENU 0 8 6 1).
     DtmfDialer,
@@ -100,15 +100,15 @@ pub enum Dest {
     BandScope,
     /// B11: FM broadcast (MENU 0 3 1 6).
     FmBroadcast,
-    /// B12, B13: HF mode (MENU 0 3 5 only).
+    /// B12, B13: HF mode (MENU 0 3 4 only).
     HfMode,
-    /// B14: tone search (MENU 0 3 7).
+    /// B14: tone search (MENU 0 3 6).
     ToneSearch,
-    /// B15: frequency counter (MENU 0 3 4).
+    /// B15: frequency counter (MENU 0 3 3).
     Counter,
     /// B17: an alert (SAME, DSC distress, jamming).
     Alert,
-    /// B18-B20: crossband repeater (MENU 0 3 6).
+    /// B18-B20: crossband repeater (MENU 0 3 5).
     Crossband,
     /// B21: squelch from home (SIDE1 + knob); a toast for now.
     Squelch,
@@ -334,17 +334,17 @@ pub const MENU0: [(&[u8], Dest); 60] = [
     (&[3, 1, 6], Dest::FmBroadcast),
     (&[3, 2], Dest::Sub(3, 2)),
     (&[3, 2, 6], Dest::BandScope),
-    (&[3, 3], Dest::Sub(3, 3)),
-    (&[3, 3, 2], Dest::LocationCodes),
-    (&[3, 4], Dest::Counter),
-    (&[3, 5], Dest::HfMode),
-    (&[3, 6], Dest::Crossband),
-    (&[3, 7], Dest::ToneSearch),
+    (&[3, 3], Dest::Counter),
+    (&[3, 4], Dest::HfMode),
+    (&[3, 5], Dest::Crossband),
+    (&[3, 6], Dest::ToneSearch),
     (&[4, 1], Dest::EventLog),
     (&[4, 2], Dest::Sub(4, 2)),
     (&[4, 3], Dest::Sub(4, 3)),
     (&[4, 4], Dest::Sub(4, 4)),
     (&[4, 5], Dest::Sensors),
+    (&[4, 9], Dest::Sub(4, 9)),
+    (&[4, 9, 2], Dest::LocationCodes),
     (&[5, 1], Dest::AprsHeard),
     (&[5, 2], Dest::AprsMessages),
     (&[5, 4], Dest::Sub(5, 4)),

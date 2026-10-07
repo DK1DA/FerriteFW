@@ -1,4 +1,4 @@
-//! HF mode (B12, B13; MENU 0 3 5 only; manual chapter 20a, HF-1 to HF-30) and its recent list (C18, # in HF
+//! HF mode (B12, B13; MENU 0 3 4 only; manual chapter 20a, HF-1 to HF-30) and its recent list (C18, # in HF
 //! mode; HF-28). Everything below 64 MHz on one screen: the SI4732 (AM; USB, LSB and CW with the SSB patch) and
 //! BK4829 chip 1 through the relay (18-64 MHz, FM and AM). While it is open, or under the screen in view (its
 //! options, the full menu from it), everything else pauses (HF-6): [`open`] starts the exclusive mode
@@ -203,7 +203,7 @@ pub(crate) fn in_hf(app: &App) -> bool {
     app.radio.mode == Mode::Hf
 }
 
-/// MENU 0 3 5 (HF-1): HF mode starts, everything else pauses; refused while transmitting or repeating (HF-2).
+/// MENU 0 3 4 (HF-1): HF mode starts, everything else pauses; refused while transmitting or repeating (HF-2).
 pub fn open(app: &mut App) -> Screen {
     if app.radio.keyed.is_some() || app.radio.mode == Mode::Xb {
         app.show_toast(b"HF mode", if app.radio.mode == Mode::Xb { b"stop the repeater first" } else { b"not while transmitting" }, false);

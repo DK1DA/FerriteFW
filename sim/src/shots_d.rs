@@ -189,7 +189,7 @@ pub fn run(scale: u32) {
     s.keys(&[D(4), D(5), D(2), D(5)]);
     s.save("position-entry");
     s.home();
-    s.menu0(&[3, 3, 2]);
+    s.menu0(&[4, 9, 2]);
     s.keys(&[Key::Down, Key::Menu, D(0), D(5), D(3)]);
     s.save("location-codes");
     s.home();
@@ -217,7 +217,7 @@ pub fn run(scale: u32) {
     s.home();
 
     // HF mode: the patch loading, the screen, its options, the recent list; and the Status page meanwhile.
-    s.menu0(&[3, 5]);
+    s.menu0(&[3, 4]);
     s.run(700); // the fake radio streams the patch in about 2 s
     s.save("hf-loading");
     s.run(2000);

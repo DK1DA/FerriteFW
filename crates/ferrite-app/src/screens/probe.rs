@@ -1,12 +1,12 @@
 //! Tone search and the frequency counter (manual chapter 22; no mock-ups). Both run on the Radio task and
 //! report through `ModeLive::Probe`.
 //!
-//! Tone search (MENU 0 3 7): the active slot's frequency and signal, the tone found or "searching"
+//! Tone search (MENU 0 3 6): the active slot's frequency and signal, the tone found or "searching"
 //! with the time, the last hits (TSRCH-2). OK sets the RX tone, then asks before setting TX too (TSRCH-4); on a
 //! channel the tone is loaded into the slot, not saved to the channel, and # saves it there (TSRCH-9). BACK leaves the tones as they
 //! were (TSRCH-5).
 //!
-//! Counter (MENU 0 3 4): the strongest nearby transmitter's frequency and level, a hold, the last hits
+//! Counter (MENU 0 3 3): the strongest nearby transmitter's frequency and level, a hold, the last hits
 //! (TSRCH-6); OK copies the frequency to the active slot's VFO (TSRCH-7). It only receives (TSRCH-8).
 
 use super::activity::{mmss, Hit, Mode, HITS};
@@ -96,7 +96,7 @@ pub struct ToneSearch {
     pub ask_tx: bool,
 }
 
-/// MENU 0 3 7 (TSRCH-1): search on the active slot.
+/// MENU 0 3 6 (TSRCH-1): search on the active slot.
 pub fn open_tone(app: &mut App) -> Screen {
     let slot = app.active;
     app.start_mode(Mode::Tone);
@@ -250,7 +250,7 @@ fn or_none(b: &Buf<16>) -> &str {
 fn done(app: &mut App, slot: u8, what: &[u8]) {
     let ch = app.slot(slot).on_channel();
     app.stop_mode();
-    app.back(); // one level back (KEY-5): the menu from MENU 0 3 7
+    app.back(); // one level back (KEY-5): the menu from MENU 0 3 6
     app.show_toast(what, if ch { b"loaded, not saved" } else { b"" }, false);
 }
 
@@ -262,7 +262,7 @@ pub struct Counter {
     pub hold: bool,
 }
 
-/// MENU 0 3 4 (TSRCH-6).
+/// MENU 0 3 3 (TSRCH-6).
 pub fn open_counter(app: &mut App) -> Screen {
     app.start_mode(Mode::Counter);
     app.out.push(RadioCmd::Counter(true));

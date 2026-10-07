@@ -45,8 +45,8 @@ fn step(app: &App, row: u8, d: i32) -> u8 {
 pub(crate) const GROUPS: [(&str, &str); 9] = [
     (slow!("Watch and scan"), slow!("Watch, background jobs, scan, skip list.")),
     (slow!("Channels"), slow!("Browse channels and zones, add a repeater.")),
-    (slow!("Tools"), slow!("Crossband, counter, tone search, HF, FM.")),
-    (slow!("Decoders"), slow!("Event log, POCSAG, DSC, AIS, DTMF, popups.")),
+    (slow!("Tools"), slow!("FM, scope, counter, HF, crossband, tones.")),
+    (slow!("Decoders and alerts"), slow!("Event log, pagers, DSC, AIS, weather alerts.")),
     (slow!("APRS"), slow!("Heard, messages, beacons, your station.")),
     (slow!("GPS and time"), slow!("GPS, position, units, time zone, clock.")),
     (slow!("Display, sound, power"), slow!("Theme, layout, backlight, sounds, power.")),
@@ -139,7 +139,7 @@ impl View for Advanced {
                 1 => {
                     let _ = uwrite!(v, "{} used", cx.store.count());
                 }
-                3 => v.set(b"None running"),
+                3 => v.set(b"Off"), // no decoder running (a short word: the name is long)
                 4 if app.inbox > 0 => {
                     let _ = uwrite!(v, "{} new", app.inbox);
                 }

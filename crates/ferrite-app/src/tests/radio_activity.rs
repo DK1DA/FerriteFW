@@ -332,11 +332,11 @@ fn tone_search_on_a_channel_is_not_saved() {
     assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"loaded, not saved"));
 }
 
-/// TSRCH-6, TSRCH-7: MENU 0 3 4; OK copies to the VFO.
+/// TSRCH-6, TSRCH-7: MENU 0 3 3; OK copies to the VFO.
 #[test]
 fn frequency_counter() {
     let mut t = T::new();
-    menu0(&mut t, &[3, 4]);
+    menu0(&mut t, &[3, 3]);
     assert!(matches!(t.app.screen(), Screen::Counter(_)));
     assert!(t.cmds().contains(&RadioCmd::Counter(true)));
     t.live.mode = ModeLive::Probe { freq: mhz(147) + 15_000, rssi: -40, tone: 0 };
@@ -383,7 +383,7 @@ fn squelch_screen_while_side1_is_held() {
 fn hf_mode() {
     let mut t = ready();
     t.app.set_region(Some(Region::Us), false);
-    menu0(&mut t, &[3, 5]);
+    menu0(&mut t, &[3, 4]);
     assert!(matches!(t.app.screen(), Screen::Hf(_)));
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: true, .. })));
     let mut fb = FrameBuffer::new();

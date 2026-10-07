@@ -343,12 +343,12 @@ fn main() {
     app.settings_mut().scope_wf = false;
     app.settings_mut().scope_line = 0;
     home(&mut app, &mut t);
-    // Tone search: MENU 0 3 7, found after 2.5 s.
+    // Tone search: MENU 0 3 6, found after 2.5 s.
     app.open(ferrite_app::screens::nav::Dest::ToneSearch);
     shot!(1000, "tone-search");
     shot!(2500, "tone-found");
     home(&mut app, &mut t);
-    // Frequency counter: MENU 0 3 4.
+    // Frequency counter: MENU 0 3 3.
     app.open(ferrite_app::screens::nav::Dest::Counter);
     shot!(2500, "counter");
     home(&mut app, &mut t);

@@ -1,4 +1,4 @@
-//! SAME location codes (A13; manual chapter 23, WX-10; MENU 0 3 3 2): up to 8 six-digit codes, FIPS in the
+//! SAME location codes (A13; manual chapter 23, WX-10; MENU 0 4 9 2): up to 8 six-digit codes, FIPS in the
 //! US and CLC in Canada. A warning shows when any of its areas is in the list; with none, every warning shows.
 //! OK edits the selected place (digits type, OK keeps six digits, BACK deletes one, then cancels); * clears
 //! it. US and Canada only: elsewhere the screen says so (and the menu item is hidden, WX-3).
@@ -131,7 +131,7 @@ impl View for SameCodes {
         } else {
             b"A warning shows when one of its areas is here."
         };
-        app.help_box(lcd, 300 - 38, 34, help, b"MENU 0 3 3 2");
+        app.help_box(lcd, 300 - 38, 34, help, b"MENU 0 4 9 2");
     }
 
     fn hints(self, _: &App) -> Hints {

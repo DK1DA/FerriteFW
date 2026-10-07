@@ -211,13 +211,13 @@ fn fm_broadcast() {
     assert!(off.is_some(), "PTT stops the broadcast first (BCR-16): {c:?}");
 }
 
-/// HF-1 to HF-8, HF-13, HF-24, HF-28, SBAR-18: MENU 0 3 5 enters HF mode; the status bar says HF without
+/// HF-1 to HF-8, HF-13, HF-24, HF-28, SBAR-18: MENU 0 3 4 enters HF mode; the status bar says HF without
 /// TW/DW; everything pauses until BACK; PTT refuses on the SI4732; a frequency held 10 s joins the recent list.
 #[test]
 fn hf_mode() {
     let mut t = T::new();
     t.app.set.region = 1; // US: SAME on
-    menu0(&mut t, &[3, 5]);
+    menu0(&mut t, &[3, 4]);
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: true, .. })));
     let mut fb = FrameBuffer::new();
     t.render(&mut fb);
@@ -291,12 +291,12 @@ fn groups_change_values() {
     assert_eq!(t.app.settings().theme, 1);
     t.tap(Key::Hash);
     assert_eq!(t.app.settings().theme, 0);
-    menu0(&mut t, &[3, 3]);
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 3, sub: 0, row: 2 }), "greyed: not opened");
+    menu0(&mut t, &[4, 9]);
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 4, sub: 0, row: 8 }), "greyed: not opened");
     assert_eq!(toast_head(&t), "Weather alerts");
     t.app.set.region = 2; // Canada
-    t.tap(Key::Digit(3));
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 3, sub: 3, row: 0 }));
+    t.tap(Key::Digit(9));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 4, sub: 9, row: 0 }));
     // every group and list draws
     let mut fb = FrameBuffer::new();
     for (g, n) in crate::screens::groups::GROUP_ITEMS.iter().enumerate() {
@@ -357,16 +357,16 @@ fn same_header_raises_the_alert() {
     assert!(!t.app.same_alert(&parse(b"ZCZC-WXR-RWT-024031+0015-2761200-KLWX/NWS-").unwrap(), 0, 16_240_000));
     assert_eq!(t.app.screen(), Screen::Home);
     assert!(t.app.toast_up());
-    // SAME off (MENU 0 3 3 1): nothing.
+    // SAME off (MENU 0 4 9 1): nothing.
     t.app.settings_mut().same = false;
     assert!(!t.app.same_alert(&h, 2, 16_255_000));
 }
 
-/// Crossband has its menu number: MENU 0 3 6 (Tools) opens the crossband repeater.
+/// Crossband has its menu number: MENU 0 3 5 (Tools) opens the crossband repeater.
 #[test]
 fn crossband_from_the_menu() {
     let mut t = T::new();
-    menu0(&mut t, &[3, 6]);
+    menu0(&mut t, &[3, 5]);
     assert!(matches!(t.app.screen(), Screen::Crossband(_)), "{}", t.app.screen().name());
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Group(g) if g.g == 3), "BACK: the Tools list");
@@ -414,7 +414,7 @@ fn event_hooks_open_their_screens() {
 #[test]
 fn hf_bands_remember_their_vfo() {
     let mut t = T::new();
-    menu0(&mut t, &[3, 5]); // 31 m, 9.580 MHz AM
+    menu0(&mut t, &[3, 4]); // 31 m, 9.580 MHz AM
     let start = t.app.set.hf.freq;
     t.tap(Key::Up);
     t.tap(Key::Up);
@@ -433,7 +433,7 @@ fn hf_bands_remember_their_vfo() {
     assert_eq!(t.app.set.hf.freq, f30);
     // In the settings: the band VFOs survive leaving HF mode.
     t.tap(Key::Exit);
-    menu0(&mut t, &[3, 5]);
+    menu0(&mut t, &[3, 4]);
     assert_eq!(t.app.set.hf.freq, f30);
     t.tap(Key::Left);
     assert_eq!(t.app.set.hf.freq, f31);

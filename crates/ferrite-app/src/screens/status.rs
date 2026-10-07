@@ -197,7 +197,7 @@ slow_table! {
         Go::Later,
         Go::Later,
         Go::Later,
-        Go::Open(Dest::Sub(3, 3)),
+        Go::Open(Dest::Sub(4, 9)),
         Go::Open(Dest::Mailbox),
     ];
 }

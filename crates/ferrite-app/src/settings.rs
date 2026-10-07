@@ -124,7 +124,7 @@ pub struct Settings {
     pub bt: bool,
     /// 0 9 2 5: what the cable carries, an index into [`CABLE_PORTS`] (TERM-2).
     pub cable_port: u8,
-    /// 0 3 3 1 (US and Canada only).
+    /// 0 4 9 1 (US and Canada only).
     pub same: bool,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
     pub fm_freq: u16,
@@ -145,7 +145,7 @@ pub struct Settings {
     pub fixed_on: bool,
     pub fixed: crate::data::Pos,
     pub fixed_alt: i16,
-    /// 0 3 3 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
+    /// 0 4 9 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
     pub same_codes: [u32; SAME_CODES],
     /// Band scope (0 3 2): bars (an index into [`SCOPE_BAR_COUNTS`]), step (into the tuning step list), dwell
     /// per point in 0.1 ms (1-40), trigger action ([`SCOPE_TRIGGERS`]), the trigger line (0 none, 1-9: hold a

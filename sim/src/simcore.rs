@@ -39,7 +39,7 @@ keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits
       or click the radio's keys (hold the mouse for long presses; hold SIDE1 + wheel = squelch)
       hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
       M message · N alert · F5 GPS · F6 Bluetooth · F7 battery · F8 power off (or click VOL: the power switch) · F9 empty battery
-      F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 6)
+      F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 5)
       L home layout · B a beacon (automatic transmit) · hold Enter while booting: the settings reset
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
 

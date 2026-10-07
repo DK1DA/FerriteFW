@@ -198,7 +198,7 @@ fn tx_text(app: &App, f: Freq10, tx_built: bool) -> Result<&'static str, &'stati
 
 fn refuse(f: Freq10) -> Option<&'static str> {
     if f < LO {
-        Some("Below 18 MHz: HF mode (MENU 0 3 5)") // VFO-14
+        Some("Below 18 MHz: HF mode (MENU 0 3 4)") // VFO-14
     } else if f > HI {
         Some("Above what the radio receives")
     } else {
