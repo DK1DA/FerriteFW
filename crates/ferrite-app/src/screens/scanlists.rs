@@ -155,7 +155,7 @@ impl View for ScanLists {
                 let khz100: i32 = 10_000; // 100 kHz in 10 Hz units
                 match r {
                     1 => p.start = (p.start as i32 + d * khz100).clamp(mhz(18) as i32, p.end as i32 - khz100) as Freq10,
-                    2 => p.end = (p.end as i32 + d * khz100).clamp(p.start as i32 + khz100, mhz(999) as i32) as Freq10,
+                    2 => p.end = (p.end as i32 + d * khz100).clamp(p.start as i32 + khz100, mhz(1300) as i32) as Freq10,
                     3 => p.step = (p.step as i32 + d).rem_euclid(STEPS.len() as i32) as u8,
                     4 => {
                         p.mode = (p.mode as i32 + d).rem_euclid(3) as u8; // FM, NFM, AM (CHAN-23)
