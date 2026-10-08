@@ -104,6 +104,8 @@ pub async fn task() {
     check(Source::Storage, CHECK_CAL, cal_ok);
     let set = store::settings();
     store.load_settings(set);
+    // D13: the owner card instead of the logo when 0 7 3 3 picks it and the card has something on it (BOOT-9).
+    // The bring-up build never mounts the store, so its settings are the defaults: always the logo there.
     let card = set.boot_owner().is_some();
     // The logo for at least 1.5 s (the owner card 4 s; any key skips it), until every check has reported (at
     // most 5 s: a check still pending then counts as failed).
