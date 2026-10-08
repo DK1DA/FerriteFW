@@ -606,6 +606,11 @@ impl App {
         self.open_alert();
     }
 
+    /// The inbox count at power on: the unread events the log kept (INBOX-3, INBOX-7).
+    pub fn set_inbox(&mut self, unread: u16) {
+        self.inbox = unread.min(255) as u8;
+    }
+
     /// A SAME header decoded on a slot (WX-4, WX-5): the alert screen over any screen, with its event, areas,
     /// issue and expiry (local time), originator, slot and frequency. Tests (RWT, RMT) only toast and count in
     /// the inbox. Nothing happens with SAME alerts off or outside the US and Canada (WX-3). Returns whether the

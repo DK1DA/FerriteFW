@@ -50,6 +50,16 @@ pub struct AprsNews {
     pub tx: Option<&'static str>,
     /// Anything the lists show changed.
     pub changed: bool,
+    /// Our messages that moved on (tried again, acked, failed), for the store that keeps them.
+    pub states: [Option<(Buf<10>, Buf<67>, MsgState)>; 3],
+}
+
+impl AprsNews {
+    fn state(&mut self, m: &Message) {
+        if let Some(s) = self.states.iter_mut().find(|s| s.is_none()) {
+            *s = Some((m.peer, m.text, m.state));
+        }
+    }
 }
 
 pub(super) struct AprsSim {
@@ -218,6 +228,7 @@ impl AprsSim {
                 continue;
             }
             c.set(Some(l));
+            news.state(&l.msg);
             news.changed = true;
         }
         // one transmission a tick, on C's frequency: the relay must already be where C needs it (APRS-20)
@@ -245,6 +256,7 @@ impl AprsSim {
                 l.ack_s = Some(now_s + ACK_AFTER_S);
             }
             c.set(Some(l));
+            news.state(&l.msg);
             if l.tries > 1 {
                 self.last_auto.set(Some(now_s));
             }

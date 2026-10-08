@@ -13,11 +13,11 @@
 use crate::face::{Face, Part};
 use crate::fake::{self, FakeRadio};
 use ferrite_app::chan::ChannelStore;
-use ferrite_app::data::Data;
+use ferrite_app::data::{Data, MsgState, Src};
 use ferrite_app::link::{self, Route, Session};
 use ferrite_app::sample::Sample;
 use ferrite_app::settings::Settings;
-use ferrite_core::layout::{LAYOUT_HEADER, SCRATCH};
+use ferrite_core::layout::{LAYOUT_HEADER, WAYPOINTS};
 use ferrite_store::sim::SimFlash;
 use ferrite_store::FlashStore;
 use ferrite_app::screens::nav::{self, Dest};
@@ -118,8 +118,9 @@ const CHECKS: [Check; 6] = [
     Check { label: "Calibration", value: "", state: State::Ok },
 ];
 
-/// The simulated flash's saved part: from the layout header to the end of the scratch sector.
-pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..SCRATCH.end;
+/// The simulated flash's saved part: from the layout header to the end of the waypoints (the event log, APRS
+/// messages and waypoints included).
+pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..WAYPOINTS.end;
 
 /// What the flash holds at power on.
 pub enum Stored {
@@ -330,6 +331,7 @@ impl SimCore {
     /// The status bar clock: `utc_secs` is UTC now (seconds since 1970).
     pub fn set_clock(&mut self, utc_secs: u64) {
         self.clock0 = utc_secs.saturating_sub(self.now as u64 / 1000);
+        self.store.set_time(utc_secs as u32); // the log's and messages' times in UTC from now
     }
 
     pub fn scale(&self) -> usize {
@@ -402,6 +404,8 @@ impl SimCore {
             radio.step(now as f32 / 1000.0, app.active());
             if let Some(a) = radio.take_same() {
                 app.same_alert(&a.header, a.slot, a.freq); // WX-4: the decoder's alert, over any screen
+                let name = ferrite_core::same::event_name(&a.header.event).unwrap_or("Alert");
+                store.log(&log_event(Src::Same, a.slot, a.freq, name.as_bytes(), &a.header.event)); // INBOX-6
             }
             // The fake link: an allowed write runs a session, 2 % a step, then ends.
             match app.take_link_answer() {
@@ -427,6 +431,11 @@ impl SimCore {
                 let n = store.extra.aprs_tick(self.aprs_s, app.aprs_on(), relay_ok);
                 if let Some((from, text)) = n.inbound {
                     app.notify(from.as_bytes(), text.as_bytes(), false); // APRS-6
+                    store.message_in(true, from.as_bytes(), text.as_bytes(), 0);
+                    store.log(&log_event(Src::Aprs, 2, app.aprs_freq(), from.as_bytes(), text.as_bytes())); // INBOX-6
+                }
+                for (peer, text, st) in n.states.into_iter().flatten() {
+                    store.message_state(peer.as_bytes(), text.as_bytes(), st);
                 }
                 if let Some(what) = n.tx {
                     if ferrite_app::screens::transmit::auto_tx(app, 2, what.as_bytes()) {
@@ -818,6 +827,12 @@ fn power_on(store: &Store, radio: &mut FakeRadio) -> App {
     app
 }
 
+/// An event for the log, heard now.
+fn log_event(src: Src, slot: u8, freq: freq::Freq10, name: &[u8], text: &[u8]) -> ferrite_app::data::Event {
+    use ferrite_ui::text::Buf;
+    ferrite_app::data::Event { src, ago_s: 0, freq, slot, unread: true, id: 0, x: 0, y: 0, pos: None, name: Buf::from(name), text: Buf::from(text) }
+}
+
 /// The look review's sample written to a blank flash: its zones, channels (with positions) and range presets,
 /// then the sample settings and slots (B on "Club repeater", C scanning airband, watch A+B+C).
 fn seed(store: &Store) {
@@ -834,6 +849,36 @@ fn seed(store: &Store) {
     for i in 0..sample.presets() {
         if let Some(p) = sample.preset(i) {
             store.add_preset(&p);
+        }
+    }
+    // The event log, messages and waypoints, oldest first, each as old as the sample says.
+    for i in (0..sample.events()).rev() {
+        if let Some(e) = sample.event(i) {
+            store.log(&e);
+        }
+    }
+    for i in (0..sample.messages()).rev() {
+        if let Some(m) = sample.message(i) {
+            store.message_in(m.inbound, m.peer.as_bytes(), m.text.as_bytes(), m.ago_s);
+            match m.state {
+                MsgState::Read => {
+                    store.request(ferrite_app::data::Op::MessageRead(0));
+                }
+                MsgState::Unread | MsgState::Pending => {}
+                s => {
+                    if let MsgState::Retrying(n) = s {
+                        for k in 1..n {
+                            store.message_state(m.peer.as_bytes(), m.text.as_bytes(), if k == 1 { MsgState::Pending } else { MsgState::Retrying(k) });
+                        }
+                    }
+                    store.message_state(m.peer.as_bytes(), m.text.as_bytes(), s);
+                }
+            }
+        }
+    }
+    for i in (0..sample.waypoints()).rev() {
+        if let Some(w) = sample.waypoint(i) {
+            store.add_waypoint(&w);
         }
     }
     let mut radio = FakeRadio::new();

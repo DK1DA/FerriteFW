@@ -12,7 +12,7 @@
 
 use crate::io::Flash;
 use crate::{crc16, u16_at, u32_at, Crc32, Nor, Result, PAGE, SECTOR};
-use ferrite_core::layout::{CHANNELS, PRESETS, SCRATCH, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, EVENT_LOG, PRESETS, SCRATCH, WAYPOINTS, ZONES};
 
 /// The content a sector can hold; the footer sits after it in the scratch sector.
 pub const FOOTER_AT: u32 = SECTOR - 32;
@@ -24,15 +24,18 @@ pub async fn rewrite<N: Nor>(f: &Flash<N>, target: u32, edit: &dyn Fn(u32, &mut 
         f.erase(SCRATCH.start).await?;
     }
     let mut crc = Crc32::new();
-    let mut buf = [0u8; PAGE as usize];
-    let mut off = 0;
-    while off < FOOTER_AT {
-        let n = (FOOTER_AT - off).min(PAGE) as usize;
-        f.raw_read(target + off, &mut buf[..n])?;
-        edit(off, &mut buf[..n]);
-        crc.update(&buf[..n]);
-        f.program(SCRATCH.start + off, &buf[..n]).await?;
-        off += n as u32;
+    {
+        // The page buffer ends with this block, so it isn't kept while the copy back (with its own) runs.
+        let mut buf = [0u8; PAGE as usize];
+        let mut off = 0;
+        while off < FOOTER_AT {
+            let n = (FOOTER_AT - off).min(PAGE) as usize;
+            f.raw_read(target + off, &mut buf[..n])?;
+            edit(off, &mut buf[..n]);
+            crc.update(&buf[..n]);
+            f.program(SCRATCH.start + off, &buf[..n]).await?;
+            off += n as u32;
+        }
     }
     let mut foot = [0u8; 14];
     foot[..4].copy_from_slice(&MAGIC.to_le_bytes());
@@ -56,7 +59,7 @@ async fn copy_back<N: Nor>(f: &Flash<N>, target: u32) -> Result {
 
 /// A sector the scratch copy may go to.
 fn data_sector(t: u32) -> bool {
-    t.is_multiple_of(SECTOR) && [CHANNELS, ZONES, PRESETS].iter().any(|r| r.contains(&t))
+    t.is_multiple_of(SECTOR) && [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, WAYPOINTS].iter().any(|r| r.contains(&t))
 }
 
 /// Finishes a rewrite a power cut stopped (before anything else is read), and leaves the scratch sector erased.

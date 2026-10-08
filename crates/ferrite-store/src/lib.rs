@@ -18,6 +18,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod io;
+pub mod logs;
 pub mod records;
 pub mod scratch;
 pub mod settings;

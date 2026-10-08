@@ -23,11 +23,11 @@ pub struct Saved {
     pub count: u32,
 }
 
-fn read_copy<N: Nor>(f: &Flash<N>, base: u32) -> Result<Option<Saved>> {
+fn read_copy<N: Nor>(f: &Flash<N>, base: u32, max: usize) -> Result<Option<Saved>> {
     let mut h = [0u8; HEAD as usize];
     f.raw_read(base, &mut h)?;
     let len = u16_at(&h, 2) as u32;
-    if u16_at(&h, 0) != MAGIC || len as usize > MAX_PAYLOAD {
+    if u16_at(&h, 0) != MAGIC || len as usize > max {
         return Ok(None);
     }
     let mut c = [0u8; 4];
@@ -37,8 +37,13 @@ fn read_copy<N: Nor>(f: &Flash<N>, base: u32) -> Result<Option<Saved>> {
 
 /// The newer valid copy.
 pub fn latest<N: Nor>(f: &Flash<N>) -> Result<Option<Saved>> {
-    let a = read_copy(f, COPIES[0])?;
-    let b = read_copy(f, COPIES[1])?;
+    latest_of(f, COPIES, MAX_PAYLOAD)
+}
+
+/// The newer valid copy of a record kept the same way in `copies` (the APRS settings use it too).
+pub fn latest_of<N: Nor>(f: &Flash<N>, copies: [u32; 2], max: usize) -> Result<Option<Saved>> {
+    let a = read_copy(f, copies[0], max)?;
+    let b = read_copy(f, copies[1], max)?;
     Ok(match (a, b) {
         (Some(a), Some(b)) => Some(if b.count > a.count { b } else { a }),
         (a, b) => a.or(b),
@@ -47,10 +52,15 @@ pub fn latest<N: Nor>(f: &Flash<N>) -> Result<Option<Saved>> {
 
 /// Writes `payload` over the older copy.
 pub async fn save<N: Nor>(f: &Flash<N>, payload: &[u8]) -> Result {
-    let cur = latest(f)?;
+    save_to(f, COPIES, payload).await
+}
+
+/// Writes `payload` over the older of `copies`.
+pub async fn save_to<N: Nor>(f: &Flash<N>, copies: [u32; 2], payload: &[u8]) -> Result {
+    let cur = latest_of(f, copies, payload.len().max(MAX_PAYLOAD))?;
     let base = match cur {
-        Some(c) if c.at - HEAD == COPIES[0] => COPIES[1],
-        _ => COPIES[0],
+        Some(c) if c.at - HEAD == copies[0] => copies[1],
+        _ => copies[0],
     };
     let count = cur.map_or(1, |c| c.count.wrapping_add(1));
     let mut h = [0u8; HEAD as usize];

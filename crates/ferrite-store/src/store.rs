@@ -12,13 +12,17 @@
 //! [`FlashStore::run`]); erases wait on a timer there, so the UI never waits for the flash. A queued change
 //! shows in the lists once it is written (well under a second); the slots hold their own copy meanwhile.
 //!
-//! The records the UI doesn't keep in flash yet (event log, APRS, GPS, waypoints, scan skips, FM
-//! presets) come from `extra`: nothing on the radio for now, the sample data in the simulator.
+//! The event log, the APRS messages, the APRS settings and quick messages, and the waypoints are kept here
+//! too ([`crate::logs`]); the message being written stays in RAM. What other tasks keep in their RAM (APRS
+//! heard, the beacon's state, the GPS fix and satellites, this scan's skips) and the FM presets come from
+//! `extra`: nothing on the radio for now, the sample data in the simulator.
 
 use crate::io::Flash;
+use crate::logs::{self, Ring, Waypoints};
 use crate::records::*;
 use crate::settings::{self, FlashSource, MAX_PAYLOAD};
 use crate::{block, scratch, Crc32, Nor, NorError, Result, SECTOR};
+use ferrite_app::aprs::AprsCfg;
 use core::cell::{Cell, RefCell};
 use ferrite_app::chan::{ChanWrite, Channel, ChannelStore, Name, MAX_CHANNELS, NO_ZONE};
 use ferrite_app::data::*;
@@ -69,7 +73,27 @@ pub enum Job {
     /// The settings and slots in the save buffer: `len` bytes whose state CRC is `crc`; `seed` the region whose
     /// range presets a first boot gets.
     Save { crc: u32, len: u16, seed: Option<Region> },
+    /// An event for the log ([`logs::event_job`]), stamped when it is written.
+    Log([u8; logs::EVENT_JOB]),
+    /// An APRS message: one for us (unread), or ours (pending).
+    Msg { inbound: bool, peer: Buf<10>, text: Buf<67>, ago_s: u32 },
+    /// Our message to `peer` with `text` moved on (tried again, acked, failed).
+    MsgState { peer: Buf<10>, text: Buf<67>, state: MsgState },
+    /// Event (`log`) or message `seq` read.
+    Read { log: bool, seq: u32 },
+    Waypoint(Waypoint),
+    DeleteWaypoint(Waypoint),
+    /// The APRS settings (kept in RAM since their last change) and the quick messages.
+    AprsSave,
 }
+
+/// The APRS record: the settings (4) and the quick messages, each a length (0xFF: the factory text) and 67 bytes.
+const QUICK_LEN: usize = 68;
+const APRS_PAYLOAD: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
+const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
+/// The store's clock starts here when nothing is stored and no clock is set: about UTC when Ferrite was written
+/// (Sep 2026), so a GPS fix later moves it by a plausible amount rather than decades.
+const TIME0: u32 = 1_790_000_000;
 
 pub struct FlashStore<N: Nor, D: Data> {
     f: Flash<N>,
@@ -95,6 +119,17 @@ pub struct FlashStore<N: Nor, D: Data> {
     /// The settings and slots being saved, and whether a save is under way (the UI leaves the buffer alone).
     save_buf: RefCell<[u8; MAX_PAYLOAD]>,
     saving: Cell<bool>,
+    events: Ring,
+    msgs: Ring,
+    wps: Waypoints,
+    /// The APRS settings, and when they last changed while not yet written (saved like the settings).
+    aprs: Cell<AprsCfg>,
+    aprs_changed: Cell<Option<u32>>,
+    /// The message being written (APRS-7): RAM only, as it changes with every key.
+    draft: Cell<Draft>,
+    /// The store's clock: seconds at uptime 0, and the uptime the UI last gave.
+    time0: Cell<u32>,
+    now_ms: Cell<u32>,
 }
 
 impl<N: Nor, D: Data> FlashStore<N, D> {
@@ -118,6 +153,14 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             running: Cell::new(false),
             save_buf: RefCell::new([0; MAX_PAYLOAD]),
             saving: Cell::new(false),
+            events: Ring::new(EVENT_LOG.start, EVENT_LOG.end, logs::EVENT_END),
+            msgs: Ring::new(APRS.start + 2 * SECTOR, APRS.end, logs::MSG_END),
+            wps: Waypoints::new(WAYPOINTS.start),
+            aprs: Cell::new(AprsCfg::DEFAULT),
+            aprs_changed: Cell::new(None),
+            draft: Cell::new(Draft::default()),
+            time0: Cell::new(TIME0),
+            now_ms: Cell::new(0),
         }
     }
 
@@ -140,20 +183,35 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if !self.header_ok()? {
             self.format().await?;
         }
-        let mut b = [0u8; CH_LEN];
-        for num in 0..MAX_CHANNELS {
-            self.f.raw_read(ch_addr(num), &mut b)?;
-            self.zmap[num as usize].set(if ch_valid(&b) { zkey(b[18]) } else { EMPTY });
-        }
-        let mut n = 0;
-        let mut z = [0u8; ZONE_LEN];
-        for k in 0..MAX_ZONES {
-            self.f.raw_read(zone_addr(k), &mut z)?;
-            if zone_decode(&z).is_some() {
-                n = k + 1;
+        {
+            // In a block: the buffers aren't kept across the waits below (they would grow the UI task).
+            let mut b = [0u8; CH_LEN];
+            for num in 0..MAX_CHANNELS {
+                self.f.raw_read(ch_addr(num), &mut b)?;
+                self.zmap[num as usize].set(if ch_valid(&b) { zkey(b[18]) } else { EMPTY });
             }
+            let mut n = 0;
+            let mut z = [0u8; ZONE_LEN];
+            for k in 0..MAX_ZONES {
+                self.f.raw_read(zone_addr(k), &mut z)?;
+                if zone_decode(&z).is_some() {
+                    n = k + 1;
+                }
+            }
+            self.zones.set(n);
         }
-        self.zones.set(n);
+        self.events.mount(&self.f).await?;
+        self.msgs.mount(&self.f).await?;
+        self.wps.mount(&self.f).await?;
+        let t = [self.events.newest_time(&self.f), self.msgs.newest_time(&self.f)].into_iter().flatten().max();
+        self.time0.set(t.map_or(TIME0, |t| t.saturating_add(1)).max(TIME0));
+        if let Some(c) = settings::latest_of(&self.f, APRS_COPIES, APRS_PAYLOAD)? {
+            let mut b = [0u8; 4];
+            self.f.raw_read(c.at, &mut b)?;
+            let cfg = AprsCfg { f5k: crate::u16_at(&b, 0), beacon: b[2], power: b[3].min(2) };
+            self.aprs.set(cfg);
+            self.extra.request(Op::AprsCfg(cfg)); // the APRS task's copy
+        }
         Ok(if settings::latest(&self.f)?.is_none() { Mounted::FirstBoot } else { Mounted::Ok })
     }
 
@@ -167,7 +225,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// A blank or foreign chip: every area erased, then the header (a cut before it formats again next time).
     async fn format(&self) -> Result {
-        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SCRATCH] {
+        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SCRATCH, APRS, EVENT_LOG, WAYPOINTS] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase(s).await?;
@@ -260,6 +318,22 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Job::Write(w) => self.apply_async(w).await.is_ok(),
             Job::Op(op) => self.perform(op).await.is_ok(),
             Job::Save { crc, len, seed } => self.save_async(crc, len as usize, seed).await,
+            Job::Log(j) => {
+                let mut r = logs::event_rec(&j, self.now_s());
+                self.events.append(&self.f, &mut r).await.is_ok()
+            }
+            Job::Msg { inbound, peer, text, ago_s } => {
+                let mut r = logs::msg_rec(inbound, &peer, &text, self.now_s().saturating_sub(ago_s));
+                self.msgs.append(&self.f, &mut r).await.is_ok()
+            }
+            Job::MsgState { peer, text, state } => self.msg_state_async(peer, text, state).await.is_ok(),
+            Job::Read { log, seq } => {
+                let ring = if log { &self.events } else { &self.msgs };
+                ring.mark(&self.f, seq, 10, 0).await.is_ok()
+            }
+            Job::Waypoint(w) => self.wps.add(&self.f, &w).await.unwrap_or(false),
+            Job::DeleteWaypoint(w) => self.wps.delete(&self.f, &w).await.unwrap_or(false),
+            Job::AprsSave => self.aprs_save(None).await.is_ok(),
         };
         self.bump();
         self.running.set(false);
@@ -305,6 +379,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if found {
             app.restore_state(&mut ferrite_app::persist::SliceSource(&buf[..len]), self);
         }
+        app.set_inbox((0..self.events.len()).filter(|&i| self.event(i).is_some_and(|e| e.unread)).count() as u16);
         self.mark_saved(app);
         found
     }
@@ -332,6 +407,10 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// Call often (every UI loop): saves the settings and slots once they have stayed unchanged for
     /// [`SAVE_DELAY_MS`] since their last change. Returns true when it wrote (or queued the write).
     pub fn autosave(&self, now: u32, app: &App) -> bool {
+        self.now_ms.set(now);
+        if self.aprs_changed.get().is_some_and(|t| now.wrapping_sub(t) >= SAVE_DELAY_MS) && self.ok() && self.submit(Job::AprsSave) {
+            self.aprs_changed.set(None);
+        }
         let c = state_crc(app);
         if c != self.seen.get() {
             self.seen.set(c);
@@ -345,6 +424,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// Saves now if anything changed since the last save (power off: PWR-17; empty battery: PWR-16).
     pub fn flush(&self, app: &App) -> bool {
+        if self.aprs_changed.get().is_some() && self.ok() && self.submit(Job::AprsSave) {
+            self.aprs_changed.set(None);
+        }
         let c = state_crc(app);
         self.seen.set(c);
         c != self.saved.get() && self.save(app)
@@ -564,6 +646,12 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 }
             }
         }
+        self.events.forget();
+        self.msgs.forget();
+        self.wps.forget();
+        self.aprs.set(AprsCfg::DEFAULT);
+        self.aprs_changed.set(None);
+        self.draft.set(Draft::default());
         self.mounted.set(Mounted::FirstBoot);
         Ok(())
     }
@@ -662,7 +750,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::PutZone(z, ..) => z < MAX_ZONES && z <= self.zones.get(),
             Op::PutPreset(i, _) => self.preset_slot(i).is_some() || (i == self.presets() && self.presets() < MAX_PRESETS),
             Op::Dtmf(i, _) | Op::DtmfName(i, _) => i < DTMF_MEMS,
-            Op::Wipe => true,
+            Op::Wipe | Op::ReadAll | Op::ClearLog => true,
+            Op::Quick(i, _) => (i as usize) < ferrite_app::words::QUICK,
             _ => return None,
         })
     }
@@ -730,8 +819,163 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             }
             Op::DtmfName(i, n) if n.is_empty() => self.clear(dtmf_name_addr(i), DTMF_NAME_LEN as u32).await,
             Op::DtmfName(i, n) => self.put_rec(dtmf_name_addr(i), &dtmf_name_encode(n.as_bytes())).await,
+            Op::ReadAll => {
+                for i in 0..self.events.len() {
+                    if let Some(seq) = self.events.seq(i) {
+                        self.events.mark(&self.f, seq, 10, 0).await?;
+                    }
+                }
+                Ok(())
+            }
+            Op::ClearLog => self.events.clear(&self.f).await,
+            Op::Quick(i, t) => self.aprs_save(Some((i, t))).await,
             _ => Ok(()),
         }
+    }
+}
+
+impl<N: Nor, D: Data> FlashStore<N, D> {
+    // ---- the event log, messages, waypoints and APRS settings ([`crate::logs`]) ----
+
+    /// The store's clock, in seconds ([`crate::logs`]).
+    pub fn now_s(&self) -> u32 {
+        self.time0.get().wrapping_add(self.now_ms.get() / 1000)
+    }
+
+    /// The clock is known (GPS, or set by hand): `secs` UTC now. Records stored from now on are stamped in UTC.
+    pub fn set_time(&self, secs: u32) {
+        self.time0.set(secs.wrapping_sub(self.now_ms.get() / 1000));
+        self.bump();
+    }
+
+    /// An event for the log (INBOX-6): a decoder's, an alert, a message. On the radio it is queued and stamped
+    /// when written; at once (the simulator, the tests) its `ago_s` dates it back from now (the sample's).
+    pub fn log(&self, e: &Event) -> bool {
+        let j = logs::event_job(e);
+        if !self.ok() {
+            return false;
+        }
+        if self.deferred.get() {
+            return self.submit(Job::Log(j));
+        }
+        let mut r = logs::event_rec(&j, self.now_s().saturating_sub(e.ago_s));
+        let ok = block(self.events.append(&self.f, &mut r)).is_ok();
+        self.bump();
+        ok
+    }
+
+    /// An APRS message: for us (`inbound`, unread) or ours (pending, the APRS task tries it); `ago_s` dates it
+    /// back from now (the simulator's sample).
+    pub fn message_in(&self, inbound: bool, peer: &[u8], text: &[u8], ago_s: u32) -> bool {
+        self.ok() && self.submit(Job::Msg { inbound, peer: Buf::from(peer), text: Buf::from(text), ago_s })
+    }
+
+    /// A waypoint (the simulator's sample; the link's `WAYPOINT` later, GPS-13).
+    pub fn add_waypoint(&self, w: &Waypoint) -> bool {
+        self.ok() && self.wps.len() < logs::WP_MAX && self.submit(Job::Waypoint(*w))
+    }
+
+    /// Our message to `peer` with `text` moved on (the APRS task: tried again, acked, failed).
+    pub fn message_state(&self, peer: &[u8], text: &[u8], state: MsgState) -> bool {
+        self.ok() && self.submit(Job::MsgState { peer: Buf::from(peer), text: Buf::from(text), state })
+    }
+
+    async fn msg_state_async(&self, peer: Buf<10>, text: Buf<67>, state: MsgState) -> Result {
+        let Some((at, v)) = logs::msg_state_byte(state) else { return Ok(()) };
+        for i in 0..self.msgs.len() {
+            if let (Some(seq), Some(b)) = (self.msgs.seq(i), self.msgs.read(&self.f, i)) {
+                if logs::msg_open(&b, &peer, &text) {
+                    return self.msgs.mark(&self.f, seq, at, v).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes the APRS record: the settings from RAM, the quick messages as stored, quick message `q` changed.
+    async fn aprs_save(&self, q: Option<(u8, Option<Buf<67>>)>) -> Result {
+        let mut p = [0xFFu8; APRS_PAYLOAD];
+        let c = self.aprs.get();
+        p[..2].copy_from_slice(&c.f5k.to_le_bytes());
+        (p[2], p[3]) = (c.beacon, c.power);
+        for i in 0..ferrite_app::words::QUICK {
+            let t = match q {
+                Some((k, t)) if k as usize == i => t,
+                _ => self.quick(i),
+            };
+            if let Some(t) = t {
+                let o = 4 + i * QUICK_LEN;
+                p[o] = t.len() as u8;
+                p[o + 1..o + 1 + t.len()].copy_from_slice(t.as_bytes());
+            }
+        }
+        settings::save_to(&self.f, APRS_COPIES, &p).await
+    }
+
+    /// The requests this store answers from its own records (None: the others, below).
+    fn request_kept(&self, op: Op) -> Option<bool> {
+        if !self.ok() {
+            return None;
+        }
+        Some(match op {
+            Op::Read(i) => match self.events.seq(i) {
+                Some(seq) => self.submit(Job::Read { log: true, seq }),
+                None => false,
+            },
+            Op::MessageRead(i) => match self.msgs.seq(i) {
+                Some(seq) => self.submit(Job::Read { log: false, seq }),
+                None => false,
+            },
+            Op::Draft(d) => {
+                self.draft.set(d);
+                true
+            }
+            Op::Send => {
+                let d = self.draft.get();
+                // APRS-8: a callsign to send as, someone to send to, something to say.
+                let ok = self.extra.callsign().is_some() && !d.to.is_empty() && !d.text.is_empty();
+                if ok && self.message_in(false, d.to.as_bytes(), d.text.as_bytes(), 0) {
+                    // The APRS task tries it (the simulator's sends it from its own copy of the draft).
+                    self.extra.request(Op::Draft(d));
+                    self.extra.request(Op::Send);
+                    self.draft.set(Draft::default());
+                    true
+                } else {
+                    false
+                }
+            }
+            Op::AprsCfg(c) => {
+                if c != self.aprs.get() {
+                    self.aprs.set(c);
+                    self.aprs_changed.set(Some(self.now_ms.get()));
+                }
+                self.extra.request(op);
+                true
+            }
+            Op::MarkHere => match self.extra.fix() {
+                Some(f) if self.wps.len() < logs::WP_MAX => {
+                    let mut name = Buf::<16>::from(b"Marked ");
+                    let n = self.wps.len() + 1;
+                    for d in [n / 100, n / 10 % 10, n % 10].into_iter().skip_while(|&d| d == 0) {
+                        name.push(&[b'0' + d as u8]);
+                    }
+                    self.submit(Job::Waypoint(Waypoint { name, pos: f.pos, src: WpSrc::Marked }))
+                }
+                _ => false,
+            },
+            Op::SaveStation(i) => match self.extra.station(i) {
+                Some(Station { call, pos: Some(pos), .. }) if self.wps.len() < logs::WP_MAX => {
+                    self.submit(Job::Waypoint(Waypoint { name: Buf::from(call.as_bytes()), pos, src: WpSrc::Aprs }))
+                }
+                _ => false,
+            },
+            Op::AddWaypoint(pos, name) => self.wps.len() < logs::WP_MAX && self.submit(Job::Waypoint(Waypoint { name, pos, src: WpSrc::Grid })),
+            Op::DeleteWaypoint(i) => match self.wps.get(&self.f, i) {
+                Some(w) => self.submit(Job::DeleteWaypoint(w)),
+                None => false,
+            },
+            _ => return None,
+        })
     }
 }
 
@@ -910,10 +1154,10 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
         self.ver.get().wrapping_add(self.extra.version())
     }
     fn events(&self) -> u16 {
-        self.extra.events()
+        self.events.len()
     }
     fn event(&self, i: u16) -> Option<Event> {
-        self.extra.event(i)
+        self.events.read(&self.f, i).map(|b| logs::event_decode(&b, self.now_s()))
     }
     fn stations(&self) -> u16 {
         self.extra.stations()
@@ -925,28 +1169,34 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
         self.extra.callsign()
     }
     fn aprs_cfg(&self) -> AprsCfg {
-        self.extra.aprs_cfg()
+        self.aprs.get()
     }
     fn beacon(&self) -> Beacon {
         self.extra.beacon()
     }
     fn messages(&self) -> u16 {
-        self.extra.messages()
+        self.msgs.len()
     }
     fn message(&self, i: u16) -> Option<Message> {
-        self.extra.message(i)
+        self.msgs.read(&self.f, i).map(|b| logs::msg_decode(&b, self.now_s()))
     }
     fn draft(&self) -> Draft {
-        self.extra.draft()
+        self.draft.get()
     }
     fn quick(&self, i: usize) -> Option<Buf<67>> {
-        self.extra.quick(i)
+        if i >= ferrite_app::words::QUICK || !self.ok() {
+            return None;
+        }
+        let c = settings::latest_of(&self.f, APRS_COPIES, APRS_PAYLOAD).ok()??;
+        let mut b = [0u8; QUICK_LEN];
+        self.f.read(c.at + 4 + (i * QUICK_LEN) as u32, &mut b).ok()?;
+        (b[0] != 0xFF).then(|| Buf::from(&b[1..1 + (b[0] as usize).min(67)]))
     }
     fn waypoints(&self) -> u16 {
-        self.extra.waypoints()
+        self.wps.len()
     }
     fn waypoint(&self, i: u16) -> Option<Waypoint> {
-        self.extra.waypoint(i)
+        self.wps.get(&self.f, i)
     }
     fn fix(&self) -> Option<Fix> {
         self.extra.fix()
@@ -1001,6 +1251,12 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     fn request(&self, op: Op) -> bool {
         if op == Op::Wipe {
             self.extra.request(op); // its records go too
+        }
+        if let Some(ok) = self.request_kept(op) {
+            if ok {
+                self.bump();
+            }
+            return ok;
         }
         match self.accepts(&op) {
             Some(ok) => self.ok() && ok && self.submit(Job::Op(op)),
