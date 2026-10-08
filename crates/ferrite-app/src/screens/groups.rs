@@ -1,6 +1,6 @@
 //! A settings group (MENU 0 n) and a third-level list (MENU 0 n m): one list widget for both (manual chapter
 //! 11, MENU-3 to MENU-24; MenuGroup mock-up). The lists are data: [`GROUP_ITEMS`] and [`SUBS`] hold every item
-//! of `docs/settings.md` with its value and help line; [`wired`] gives the live value of the settings that exist
+//! of the manual's Appendix A with its value and help line; [`wired`] gives the live value of the settings that exist
 //! so far, and [`change`] changes them. The rest show their default, read only, until their feature lands.
 //!
 //! Keys: ▲▼ move, the knob or ◀▶ change the highlighted value (MENU-16), OK opens a screen or list, a digit

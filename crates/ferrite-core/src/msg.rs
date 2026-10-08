@@ -1,4 +1,4 @@
-//! What the six tasks say to each other (`docs/firmware-design.md`, "Messaging"). Each piece of hardware has one
+//! What the six tasks say to each other (`docs/firmware-design.md`, "Messages"). Each piece of hardware has one
 //! owning task; others send it a command on its channel, and owners announce what happened as [`Event`]s on one
 //! bus. Live values the UI draws every frame ([`Live`]) are published as a snapshot, never queued.
 //!

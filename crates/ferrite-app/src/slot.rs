@@ -1,6 +1,6 @@
-//! A slot's settings and the values they take (manual chapters 9 and 11, `docs/settings.md`): the nine quick
-//! settings, the edit-in-place grid, their names, help lines, value texts and defaults. Until the generated
-//! settings table exists, the names and numbers here are copied from `settings.md`.
+//! A slot's settings and the values they take (manual chapters 9 and 11, Appendix A): the nine quick
+//! settings, the edit-in-place grid, their names, help lines, value texts and defaults, matching the manual's
+//! Appendix A.
 
 use ferrite_ui::text::{Buf, Zero};
 use ferrite_core::freq::{mhz, Freq10};

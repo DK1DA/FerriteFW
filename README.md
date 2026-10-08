@@ -102,4 +102,4 @@ CI uses a `DEPS_TOKEN` secret for this.
 
 ## Licence
 
-To be decided before the first public release.
+GPL-3.0 (decided Oct 6, 2026; manual chapter 1). The licence file is added with the first public release (roadmap 7c).

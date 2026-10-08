@@ -1,5 +1,5 @@
 //! The home screen, first cut: status bar, the frequency, a signal meter, the hint bar. The look review's layout
-//! (three slots, `docs/firmware-design.md`, "Screens") replaces it; this one proves the path from the Radio
+//! (three slots, manual chapter 6) replaces it; this one proves the path from the Radio
 //! task's [`Live`] snapshot to the panel.
 
 use crate::assets::*;

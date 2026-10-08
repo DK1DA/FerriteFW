@@ -317,7 +317,7 @@ pub const ALL: [Dest; 69] = {
     ]
 };
 
-/// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
+/// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
 pub const MENU0: [(&[u8], Dest); 60] = [
     (&[1, 2], Dest::Sub(1, 2)),
