@@ -8,6 +8,8 @@ pub mod clock;
 pub mod gpio;
 pub mod i2c;
 pub mod irq;
+#[cfg(feature = "tx")]
+pub mod pa;
 mod regs;
 pub mod spi;
 pub mod sys;

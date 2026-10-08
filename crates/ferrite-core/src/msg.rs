@@ -46,6 +46,10 @@ pub enum RadioCmd {
     /// Key or unkey a slot (3 = the HF mode frequency), after the UI's checks; the Radio task checks again
     /// (TX-17) and answers in [`LiveAll::tx`].
     Transmit { slot: u8, on: bool },
+    /// Sent just before each [`RadioCmd::Transmit`] key-up: the frequency the UI checked (offset, split and
+    /// reverse applied), the region (an index into `txplan::Region::ALL`) and Extend TX, for the Radio task's own
+    /// checks (TX-17). Apart from `Transmit` so a command stays 8 bytes.
+    TxPlan { tx: Freq10, region: u8, extend: bool },
     /// Scanning: skip the current hit for the rest of this scan (SCAN-11).
     ScanSkip { slot: u8 },
     /// Scanning: the zone set, zones 0-15 by bit (SCAN-3; 0 = the current zone only).

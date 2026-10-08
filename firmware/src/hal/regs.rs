@@ -116,6 +116,11 @@ pub const DAC_CTRL_TEN1: u32 = 1 << 2;
 pub const DAC_CTRL_TSEL1_TMR6: u32 = 0 << 3;
 pub const DAC_CTRL_WAVE1_TRIANGLE: u32 = 2 << 6;
 pub const DAC_CTRL_CH2_MASK: u32 = 0xFFFF_0000;
+/// Channel 2 (PA drive) enable and its 8-bit right-aligned data, as stock writes it (DHR8R2, `analysis/calibration.md`).
+#[cfg(feature = "tx")]
+pub const DAC_CTRL_EN2: u32 = 1 << 16;
+#[cfg(feature = "tx")]
+pub const DAC_DHR8R2: u32 = DAC + 0x1C;
 
 // Timers (STM32F1 TIM layout): TMR3 general purpose, TMR6 / TMR7 basic, TMR8 advanced
 pub const TMR3: u32 = 0x4000_0400;

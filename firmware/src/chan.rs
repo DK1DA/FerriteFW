@@ -35,6 +35,12 @@ pub static ALERTS: Channel<M, SameDecoded, 2> = Channel::new();
 
 /// The Radio task's snapshot of all three slots (one copy, 308 B: the UI keeps its own).
 pub static LIVE: Watch<M, LiveAll, 2> = Watch::new();
+
+/// The `tx` build: the factory calibration's transmit side, read once at boot by the UI task (which mounts the
+/// SPI flash) for the Radio task: the PA curves (None when blank or implausible: transmit locked, CAL-5, CAL-6)
+/// and the battery gauge (PWR-20).
+#[cfg(feature = "tx")]
+pub static TX_CAL: Signal<M, (Option<ferrite_core::txcal::TxCal>, ferrite_core::txcal::Gauge)> = Signal::new();
 pub static POSITION: Watch<M, Position, 2> = Watch::new();
 
 /// The terminal over the cable (manual chapter 37): the Link task moves the cable's bytes into `TERM_IN` and

@@ -18,8 +18,12 @@
 //! The bring-up build logs every relay move and path select on the cable (plain byte lines: this task runs from
 //! the fast flash and never calls the UI's text code).
 //!
-//! This build receives only: the bk4829 crate's transmit methods do not exist without the `tx` feature, and no
-//! transmit path pin is ever raised here (only a key-up plans one, and nothing here asks for a key-up).
+//! Transmit is only in the `tx` build (milestone 4): without it the bk4829 crate's transmit methods don't exist,
+//! the transmit command does nothing and no transmit path pin or PA drive is ever raised (only a key-up plans
+//! one, and only the `tx` build asks for a key-up). With it, every key-up goes through the sequencer
+//! (`ferrite_core::txseq`, TX-17) with its own checks (region, calibration, battery, duty, PTT seen released
+//! since boot), then the path machine's TX-23 order: PA 0, paths clear, the TX path, the chip to transmit with
+//! its read-back (TX-7), the PA ramp to the calibrated level (`ferrite_core::txcal`, stock's lookup).
 
 use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
 use crate::bus::{BusyDelay, Io, Out, SiBus};
@@ -38,6 +42,13 @@ use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use ferrite_core::scan::{self, Check, Range, Resume, Scan};
 use ferrite_core::watch::{self, Hop, Watch};
 use si4732::{Mode as SiMode, Si4732, Sideband};
+#[cfg(feature = "tx")]
+use ferrite_core::{
+    msg::TxLive,
+    txcal::{Gauge, TxCal},
+    txplan::{Refusal, Region},
+    txseq::{self, Kind as TxKind, Req, TxSeq},
+};
 
 type Wire = ThreeWire<Out, Io, BusyDelay>;
 
@@ -57,6 +68,14 @@ const FAST_MARGIN_DB: i16 = 10;
 const SCAN_RESUME: Resume = Resume::Time(5);
 /// The HF mode's internal slot index (the chips' `tuned` entry for it).
 const HF_SLOT: u8 = 3;
+/// The sequencer's settings in the `tx` build: the timeout a little after the UI's own 120 s (the UI unkeys
+/// first; this is the backstop), no pre-alert (the UI shows it). End tone, CW ID and tail elimination wait for
+/// the tone generator (TONE-8, VOX-12, TONE-9): not sent yet.
+#[cfg(feature = "tx")]
+const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone: false, cw_id: false, tail: false };
+/// REG_30 read back after the key-up write (TX-7): stock's transmit value with the microphone.
+#[cfg(feature = "tx")]
+const REG30_TX_MIC: u16 = 0xC1FE;
 
 /// Speaker amplifier and the shared audio stage (both roles likely, from stock).
 fn speaker(on: bool) {
@@ -76,10 +95,12 @@ struct SlotRx {
     clar: i16,
     /// Squelch 0-9; 0 is open (SQL: always heard, like monitor).
     sq: u8,
+    /// AM (Param::Mode 2): receive only (TX-20).
+    am: bool,
 }
 
 impl SlotRx {
-    const DEFAULT: SlotRx = SlotRx { freq: DEFAULT, narrow: false, rx_tone: 0, clar: 0, sq: 3 };
+    const DEFAULT: SlotRx = SlotRx { freq: DEFAULT, narrow: false, rx_tone: 0, clar: 0, sq: 3, am: false };
 
     /// Where the chip tunes: the frequency moved by the clarifier (10 Hz units).
     fn rx_freq(&self) -> Freq10 {
@@ -129,6 +150,29 @@ struct Radio {
     scan_tx: bool,
     tone_level: u8,
     hf: Option<HfOn>,
+    #[cfg(feature = "tx")]
+    tx: Tx,
+}
+
+/// The `tx` build's transmit state.
+#[cfg(feature = "tx")]
+struct Tx {
+    seq: TxSeq,
+    /// From the UI task once it has read the calibration (`TX_CAL`); None until then, or when blank.
+    cal: Option<TxCal>,
+    gauge: Gauge,
+    /// Each slot's transmit tone word and power level (index 3: HF mode's).
+    tone: [u16; 4],
+    power: [u8; 4],
+    /// The UI's [`RadioCmd::TxPlan`] for the next key-up.
+    plan: Option<(Freq10, Region, bool)>,
+    /// TX-42: every PTT input has read released since boot.
+    ptt_ok: bool,
+    /// The calibrated PA drive for the key-up being run (`Act::PaRamp`).
+    pa: u8,
+    /// The read-back failed during a key-up (TX-7): the plan stops and the safe state follows.
+    fault: bool,
+    adc: bool,
 }
 
 fn now_ms() -> u64 {
@@ -207,7 +251,12 @@ impl Radio {
                         log(b"path select ", s as u32);
                     }
                 }
-                Act::PaZero => RF_PINS[6].write(false),
+                Act::PaZero => {
+                    #[cfg(feature = "tx")]
+                    crate::hal::pa::zero();
+                    #[cfg(not(feature = "tx"))]
+                    RF_PINS[6].write(false);
+                }
                 Act::Relay(on) => {
                     if on != RELAY.read() {
                         log(b"relay ", on as u32);
@@ -231,7 +280,35 @@ impl Radio {
                     }
                 }
                 Act::Wait(ms) => Timer::after_millis(ms as u64).await,
+                #[cfg(feature = "tx")]
+                Act::ChipTx(n) => {
+                    if !self.key_chip(n) {
+                        self.tx.fault = true;
+                        log(b"tx read-back failed, chip ", n as u32);
+                        break; // no PA ramp: the caller puts the safe state next
+                    }
+                }
+                #[cfg(feature = "tx")]
+                Act::ChipRx(n) => {
+                    if self.has(n) {
+                        self.chip(n).tx_off();
+                    }
+                }
+                #[cfg(feature = "tx")]
+                Act::PaRamp => {
+                    // TX-23's ramp: the calibrated level in four steps over 4 ms.
+                    let v = self.tx.pa as u32;
+                    for k in 1..=4u32 {
+                        crate::hal::pa::set((v * k / 4) as u8);
+                        Timer::after_millis(1).await;
+                    }
+                    log(b"tx pa ", v);
+                }
+                // End tone, CW ID, tail elimination: TX_CFG never asks for them yet.
+                #[cfg(feature = "tx")]
+                Act::EndTone | Act::CwId | Act::TailElim => {}
                 // Transmit steps: only a key-up plans them, and this build never asks for one.
+                #[cfg(not(feature = "tx"))]
                 Act::ChipTx(_) | Act::ChipRx(_) | Act::PaRamp | Act::EndTone | Act::CwId | Act::TailElim => {}
             }
         }
@@ -303,7 +380,7 @@ impl Radio {
     /// Something running that keeps the engines ticking fast: a slot sharing the chips, or a scan.
     fn busy(&self) -> bool {
         let set = self.watch_set | 1 << self.active;
-        set.count_ones() > 1 || self.scans.iter().any(|s| s.running())
+        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some()
     }
 
     /// The engines' tick: each listening chip's squelch, the watch turn, the scans, the chips and the path, and
@@ -317,6 +394,12 @@ impl Radio {
             return;
         }
         let now = now_ms() as u32;
+        // Keyed: the chips and paths are the transmission's (TX-29); only the sequencer's timeout, duty limit
+        // and battery under load run.
+        #[cfg(feature = "tx")]
+        if self.path.keyed().is_some() {
+            return self.tx_tick(now).await;
+        }
         let listening = self.hop.chip();
         // 1. What each chip heard for the slot it was on: the carrier squelch (watch) and the tone (audio); for a
         // scan's fast step, the RSSI over the floor (SCAN-21).
@@ -491,13 +574,19 @@ impl Radio {
     fn param(&mut self, slot: u8, param: Param, value: i32) {
         let Some(s) = self.slots.get_mut(slot as usize) else { return };
         match param {
-            Param::Mode => s.narrow = value == 1,
+            Param::Mode => (s.narrow, s.am) = (value == 1, value == 2),
             Param::Bandwidth => s.narrow = value == 1,
             Param::Squelch => s.sq = value.clamp(0, 9) as u8,
             Param::RxTone => s.rx_tone = value as u16,
             Param::Clarifier => s.clar = value.clamp(-2_500, 2_500) as i16,
-            // The transmit side: the `tx` build's.
-            Param::TxTone | Param::Offset | Param::Power | Param::BusyLock | Param::Reverse | Param::Split => return,
+            #[cfg(feature = "tx")]
+            Param::TxTone => return self.tx.tone[slot as usize % 4] = value as u16,
+            #[cfg(feature = "tx")]
+            Param::Power => return self.tx.power[slot as usize % 4] = value.clamp(0, 2) as u8,
+            #[cfg(not(feature = "tx"))]
+            Param::TxTone | Param::Power => return,
+            // The transmit frequency comes with each key-up (RadioCmd::TxPlan); busy lockout is the UI's (TX-21).
+            Param::Offset | Param::BusyLock | Param::Reverse | Param::Split => return,
         }
         self.retune(slot);
     }
@@ -624,6 +713,8 @@ pub async fn task() {
         scan_tx: false,
         tone_level: 1,
         hf: None,
+        #[cfg(feature = "tx")]
+        tx: Tx { seq: TxSeq::new(), cal: None, gauge: Gauge::default(), tone: [0; 4], power: [0; 4], plan: None, ptt_ok: false, pa: 0, fault: false, adc: false },
     };
     // Start from the safe state: every path low, the relay released (board start-up set them low already).
     let mut s = Steps::default();
@@ -759,8 +850,161 @@ impl Radio {
             | RadioCmd::ScopeListen { .. }
             | RadioCmd::ToneSearch { .. }
             | RadioCmd::Crossband(_) => {}
+            #[cfg(feature = "tx")]
+            RadioCmd::TxPlan { tx, region, extend } => {
+                self.tx.plan = Some((tx, Region::ALL.get(region as usize).copied().unwrap_or(Region::Other), extend));
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::Transmit { slot, on } => self.transmit(slot, on).await,
             // Transmit code is out of this build: the UI refuses first (RX-only build).
-            RadioCmd::Transmit { .. } | RadioCmd::Tune(_) => {}
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::Transmit { .. } | RadioCmd::TxPlan { .. } => {}
+            RadioCmd::Tune(_) => {}
         }
+    }
+}
+
+/// The `tx` build's transmit side (manual chapter 15).
+#[cfg(feature = "tx")]
+impl Radio {
+    /// TX-42: every PTT input (PTT A PE3, PTT B PE2, the connector's PE6; low when pressed) has read released
+    /// since boot.
+    fn ptt_seen_released(&mut self) -> bool {
+        use crate::board::{KEY_PTT, KEY_SIDE1, KEY_SIDE2};
+        if !self.tx.ptt_ok && KEY_PTT.read() && KEY_SIDE1.read() && KEY_SIDE2.read() {
+            self.tx.ptt_ok = true;
+            log(b"ptt released since boot", 0);
+        }
+        self.tx.ptt_ok
+    }
+
+    /// The battery for transmit (PWR-20): the PA1 reading against the calibration's gauge.
+    fn battery_ok(&mut self) -> bool {
+        use crate::hal::adc;
+        if !self.tx.adc {
+            adc::init();
+            self.tx.adc = true;
+        }
+        self.tx.gauge.tx_ok(adc::read(adc::CH_PA1))
+    }
+
+    /// `Act::ChipTx`: the chip already holds the TX frequency and tone; key it with the microphone, read REG_30
+    /// back (TX-7), and stock's REG_36 for the level ({0x7F, 0x57, 0x57}[level], `analysis/calibration.md`).
+    fn key_chip(&mut self, n: u8) -> bool {
+        if !self.has(n) {
+            return false;
+        }
+        let high = self.tx.power[self.live.tx.slot as usize % 4] == 2;
+        let mut bk = self.chip(n);
+        bk.tx_on(bk4829::tx::Source::Mic);
+        if bk.read(0x30) != REG30_TX_MIC {
+            return false;
+        }
+        bk.write(0x36, if high { 0x7F } else { 0x57 });
+        true
+    }
+
+    /// Key up or unkey a slot (3 = HF mode's frequency).
+    async fn transmit(&mut self, slot: u8, on: bool) {
+        let now = now_ms() as u32;
+        let mut st = Steps::default();
+        if !on {
+            self.tx.seq.release(&TX_CFG, &mut self.path, now, &mut st);
+            self.run(&st).await;
+            self.unkeyed();
+            return;
+        }
+        if let Some(c) = crate::chan::TX_CAL.try_take() {
+            (self.tx.cal, self.tx.gauge) = c;
+        }
+        let Some((f, region, extend)) = self.tx.plan.take() else {
+            return self.refuse(slot, Refusal::Locked);
+        };
+        if !self.ptt_seen_released() {
+            return self.refuse(slot, Refusal::ReleasePtt);
+        }
+        let s = slot as usize % 4;
+        let rx = if slot < SLOTS as u8 { self.slots[s].freq } else { f };
+        let req = Req {
+            tx: f,
+            rx,
+            kind: TxKind::Voice,
+            person: true,
+            confirmed: true, // the UI asked for the emergency prompt's second PTT before this (TX-3)
+            am: slot < SLOTS as u8 && self.slots[s].am,
+            region,
+            extend,
+            cal_ok: self.tx.cal.is_some(),
+            batt_ok: self.battery_ok(),
+            power: self.tx.power[s],
+        };
+        if let Err(r) = self.tx.seq.check(&req, &self.path, now) {
+            return self.refuse(slot, r);
+        }
+        // The chip for the TX frequency: tuned there with the slot's tone, before the plan keys it.
+        let n = Sel::tx(f).chip();
+        if !self.has(n) {
+            return self.refuse(slot, Refusal::Locked);
+        }
+        speaker(false);
+        self.tuned[n as usize] = Some((slot, f)); // not the receive frequency: retuned after the unkey
+        let tone = self.tx.tone[s];
+        let mut bk = self.chip(n);
+        bk.wake();
+        bk.af_out(AfOut::Mute);
+        bk.set_freq(f * 10);
+        match tone {
+            0 => bk.subtone_off(),
+            t if t & 0x8000 != 0 => bk.dcs_tx(t & 0x3FFF, t & 0x4000 != 0),
+            t => bk.ctcss_tx(t),
+        }
+        self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, req.power));
+        self.tx.fault = false;
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None };
+        let r = self.tx.seq.key(&req, &mut self.path, now, &mut st);
+        if let Err(r) = r {
+            self.unkeyed();
+            return self.refuse(slot, r);
+        }
+        log(b"tx key khz ", f / 100);
+        self.run(&st).await;
+        if self.tx.fault {
+            let mut st = Steps::default();
+            self.tx.seq.safe(&mut self.path, now_ms() as u32, &mut st);
+            self.run(&st).await;
+            self.unkeyed();
+            return self.refuse(slot, Refusal::Locked);
+        }
+        self.live.tx.keyed = true;
+    }
+
+    /// While keyed: the sequencer's own unkeys (timeout backstop, duty limit, battery under load).
+    async fn tx_tick(&mut self, now: u32) {
+        let batt = self.battery_ok();
+        let mut st = Steps::default();
+        if let Some(e) = self.tx.seq.tick(&TX_CFG, batt, &mut self.path, now, &mut st) {
+            self.run(&st).await;
+            if e != txseq::Event::PreAlert {
+                log(b"tx unkeyed by the sequencer ", e as u32);
+                self.unkeyed();
+                self.live.tx.refused = Some(match e {
+                    txseq::Event::Hot => Refusal::Hot,
+                    txseq::Event::Battery => Refusal::Battery,
+                    _ => Refusal::ReleasePtt,
+                });
+            }
+        }
+    }
+
+    /// After any unkey: the chips back to their slots on the next tick, the UI told.
+    fn unkeyed(&mut self) {
+        self.tuned = [None; 2];
+        self.live.tx.keyed = false;
+        log(b"tx unkey", 0);
+    }
+
+    fn refuse(&mut self, slot: u8, why: Refusal) {
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why) };
+        log(b"tx refused ", why as u32);
     }
 }

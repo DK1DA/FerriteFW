@@ -95,6 +95,14 @@ pub async fn task() {
         && cal.iter().any(|&b| b != 0xFF)
         && cal.iter().any(|&b| b != 0);
     check(Source::Storage, CHECK_CAL, cal_ok);
+    // The `tx` build: the PA curves and battery gauge for the Radio task (read only, chapter 35).
+    #[cfg(feature = "tx")]
+    {
+        use ferrite_core::txcal::{Gauge, TxCal, READ_LEN};
+        let mut b = [0xFFu8; READ_LEN];
+        let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
+        crate::chan::TX_CAL.signal((if read && cal_ok { TxCal::parse(&b) } else { None }, Gauge::parse(&b)));
+    }
     let set = store::settings();
     store.load_settings(set);
     // D13: the owner card instead of the logo when 0 7 3 3 picks it and the card has something on it (BOOT-9).
