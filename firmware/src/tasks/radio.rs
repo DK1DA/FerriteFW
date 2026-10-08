@@ -10,7 +10,7 @@
 //! This build receives only: the bk4829 crate's transmit methods do not exist without the `tx` feature, and no
 //! transmit path pin is ever raised here (only a key-up plans one, and nothing here asks for a key-up).
 
-use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, RF_PINS, SI4732_ADDR, SI_RST, SI_SCL, SI_SDA};
+use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
 use crate::bus::{BusyDelay, Io, Out, SiBus};
 use crate::hal::i2c::I2c;
 use crate::chan::{DEBUG_ANS, DEBUG_REQ, EVENTS, LIVE, RADIO, TERM_WAKE};
@@ -53,6 +53,8 @@ struct Radio {
     /// The path machine muted the receiver (around a relay move or while keyed): the squelch doesn't open the
     /// speaker meanwhile.
     muted: bool,
+    /// The SI4732 has had the antenna since boot: leaving it sets stock's radio state, PA7 = 1, PC5 = 0 (BCR-20).
+    si_used: bool,
 }
 
 fn now_ms() -> u64 {
@@ -99,7 +101,16 @@ impl Radio {
                 Act::Sel(s, on) => RF_PINS[s as usize].write(on),
                 Act::PaZero => RF_PINS[6].write(false),
                 Act::Relay(on) => RELAY.write(on),
-                Act::SiInput(_) => {} // PA7/PC5 stay low until the bench says which state is which
+                // BCR-20, stock's states: the mode's own state is set when the SI4732 is started (`si_input`);
+                // away from it, 1/0 once it has been used, as stock leaves broadcast. Boot and the safe state
+                // before any broadcast keep stock's 0/0.
+                Act::SiInput(true) => self.si_used = true,
+                Act::SiInput(false) => {
+                    if self.si_used {
+                        SI_IN[0].write(true);
+                        SI_IN[1].write(false);
+                    }
+                }
                 Act::Mute(m) => {
                     self.muted = m;
                     speaker(!m && self.live.squelch_open);
@@ -193,9 +204,16 @@ impl Radio {
     }
 }
 
+/// The SI4732's input path for its mode, as stock (BCR-20, `analysis/audio_path.md` §2): FM broadcast PA7 = PC5 = 0,
+/// AM (and SW, SSB, CW) PA7 = PC5 = 1, the LNA path.
+fn si_input(mode: SiMode) {
+    let am = mode != SiMode::Fm;
+    SI_IN[0].write(am);
+    SI_IN[1].write(am);
+}
+
 /// The broadcast receiver: powered up in the mode asked for (reset pulse, power-up, crystal settling), then
-/// tuned by polling. FM in 10 kHz units, AM in kHz. Which antenna path PA7/PC5 select is still a bench
-/// question, so both stay low. SSB (patch from SPI flash) comes with the link's patch import.
+/// tuned by polling. FM in 10 kHz units, AM in kHz. PA7/PC5 take stock's state for the mode (BCR-20). SSB (patch from SPI flash) comes with the link's patch import.
 async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<(), si4732::Error> {
     let d = &mut BusyDelay;
     let (mode, freq) = match cmd {
@@ -216,6 +234,7 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<(), si47
         if si.mode().is_some() {
             si.power_down(d)?;
         }
+        si_input(mode);
         SI_RST.write(false);
         Timer::after_millis(10).await;
         SI_RST.write(true);
@@ -252,6 +271,7 @@ pub async fn task() {
         save: RxSleep::new(DEFAULT_SAVE, now_ms()),
         path: Path::new(),
         muted: false,
+        si_used: false,
     };
     // Start from the safe state: every path low, the relay released (board start-up set them low already).
     let mut s = Steps::default();

@@ -37,6 +37,9 @@ pub const SI_SCL: Pin = pin(GPIOB, 6);
 pub const SI_SDA: Pin = pin(GPIOB, 7);
 pub const SI4732_ADDR: u8 = 0x11;
 pub const SI_RST: Pin = pin(GPIOA, 6); // SI4732 reset, active low: stock holds it low from boot (pin_audit.md)
+/// The SI4732's antenna input path, PA7 and PC5 (manual BCR-20): stock's states are FM broadcast 0/0, AM/SW/SSB 1/1,
+/// back to the BK4829 radio 1/0; boot leaves both low. What each state selects is still a bench question.
+pub const SI_IN: [Pin; 2] = [pin(GPIOA, 7), pin(GPIOC, 5)];
 
 // GPS on USART3 (PB10 TX, PB11 RX); Bluetooth module on USART1 (PA9 TX, PA10 RX)
 pub const GPS_PWR_N: Pin = pin(GPIOA, 8); // low = GPS powered
@@ -74,8 +77,8 @@ pub const ENC_B: Pin = pin(GPIOB, 5);
 
 const SAFE_LOW: [Pin; 9] = [
     RELAY,
-    pin(GPIOA, 7),
-    pin(GPIOC, 5),
+    SI_IN[0],
+    SI_IN[1],
     pin(GPIOE, 9),
     pin(GPIOC, 12),
     pin(GPIOC, 9),

@@ -320,7 +320,7 @@ fn main() {
     fake::sample_app(&mut app, &store);
     app.set_vfo(0, 14_652_000);
     run(&mut app, &mut fb, t, &mut t);
-    // Monitor latched on A (SIDE1 tap): MON on its card (SQL-12); tapped again to end it.
+    // Monitor latched on A (SIDE1 tap): MON on its card (SQL-14); tapped again to end it.
     press(&mut app, Key::Side(1), 100, &mut t);
     shot!(600, "home-monitor");
     press(&mut app, Key::Side(1), 100, &mut t);
