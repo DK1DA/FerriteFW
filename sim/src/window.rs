@@ -74,6 +74,7 @@ fn map_event(k: K) -> Option<Event> {
         K::X => Event::Crossband,
         K::L => Event::Layout,
         K::B => Event::Beacon,
+        K::D => Event::ScreenOff,
         _ => return None,
     })
 }

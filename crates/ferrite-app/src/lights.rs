@@ -122,6 +122,15 @@ impl App {
         self.lit & SWALLOW != 0
     }
 
+    /// The backlight time runs out now, as if no key had been pressed for it (the simulators' "Screen off"
+    /// button, to see the dark-screen heartbeat). Nothing when the backlight is set to stay on.
+    pub fn backlight_out(&mut self) {
+        let bl = BACKLIGHT_TIMES[self.set.backlight as usize % BACKLIGHT_TIMES.len()] as u32 * 1000;
+        if bl != 0 {
+            self.seen = self.now.wrapping_sub(bl);
+        }
+    }
+
     /// Time passed: receiving keeps the screen and the radio awake; the backlight, auto lock and auto off.
     pub(crate) fn lights_tick(&mut self, now: u32, live: &LiveAll) {
         if live.tx.keyed || live.slots.iter().any(|s| s.squelch_open) {

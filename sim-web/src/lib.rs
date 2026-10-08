@@ -64,7 +64,7 @@ fn key_of(code: u32) -> Option<Key> {
 
 fn event_of(id: u32) -> Option<Event> {
     use Event::*;
-    [Message, Alert, Gps, Bluetooth, Battery, PowerSwitch, EmptyBattery, SsbPatch, LinkWrite, Crossband, Layout, Beacon]
+    [Message, Alert, Gps, Bluetooth, Battery, PowerSwitch, EmptyBattery, SsbPatch, LinkWrite, Crossband, Layout, Beacon, ScreenOff]
         .get(id as usize)
         .copied()
 }

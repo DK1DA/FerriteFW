@@ -100,6 +100,8 @@ pub enum Event {
     Layout,
     /// B: a beacon (an automatic transmit).
     Beacon,
+    /// D: the backlight time runs out now (to see the dark-screen heartbeat, e.g. after M).
+    ScreenOff,
 }
 
 /// A recent redraw region and when it was drawn (ms), for the redraw flash.
@@ -744,6 +746,7 @@ impl SimCore {
                     GpsState::Fix => GpsState::Off,
                 }
             }
+            Event::ScreenOff if live => app.backlight_out(),
             Event::Bluetooth => self.dev.bt = !self.dev.bt,
             Event::Battery => {
                 self.battery = (self.battery + 1) % 3;
