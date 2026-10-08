@@ -91,6 +91,8 @@ pub struct FakeRadio {
     /// The engines, as the Radio task runs them.
     watcher: Watch,
     scans: [Scan; 3],
+    /// Channel scans: the sets the UI sends and the frequencies it answers with, as the Radio task keeps them.
+    chans: ferrite_core::scan::ChanScans,
     seq: TxSeq,
     path: Path,
     /// The slot each chip listened to on the last step.
@@ -138,6 +140,7 @@ impl FakeRadio {
             watch: 0b111,
             watcher: Watch::new(),
             scans,
+            chans: ferrite_core::scan::ChanScans::new(),
             seq: TxSeq::new(),
             path,
             on_chip: [None; 2],
@@ -199,11 +202,21 @@ impl FakeRadio {
     }
 
     pub fn cmd(&mut self, c: RadioCmd) {
+        // Channel scans (SCAN-3, SCAN-12, SCAN-22, SCAN-24): the set, the start, the frequencies asked for.
+        let now = self.ms();
+        if let Some((i, f)) = self.chans.cmd(&c, &mut self.scans, now) {
+            self.live.slots[i].freq = f;
+        }
         match c {
+            RadioCmd::ScanChans { slot, .. } => {
+                let s = &mut self.live.slots[slot as usize % 3];
+                (s.scanning, s.hits, s.skips) = (true, 0, 0);
+            }
             RadioCmd::TuneSlot { slot, freq } => {
                 let s = &mut self.live.slots[slot as usize % 3];
                 s.freq = freq;
                 s.scanning = false;
+                self.chans.off(slot as usize);
                 self.scans[slot as usize % 3].stop();
                 self.rx_path();
             }
@@ -216,6 +229,7 @@ impl FakeRadio {
                 let i = slot as usize % 3;
                 let s = &mut self.live.slots[i];
                 s.scanning = on;
+                self.chans.off(i); // a band scan, or stopped
                 if on {
                     s.hits = 0;
                     s.skips = 0;
@@ -237,7 +251,11 @@ impl FakeRadio {
             RadioCmd::ScanSkip { slot } => {
                 let now = self.ms();
                 let i = slot as usize % 3;
-                let o = self.scans[i].skip_once(&scan_range(self.live.slots[i].freq), now);
+                let o = if self.chans.is_on(i) {
+                    self.chans.skip_once(i, &mut self.scans[i], now)
+                } else {
+                    self.scans[i].skip_once(&scan_range(self.live.slots[i].freq), now)
+                };
                 self.scan_out(i, o);
             }
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
@@ -245,7 +263,11 @@ impl FakeRadio {
                 // SCAN-16: on a hit (or in its resume wait) the engine leaves it at once.
                 let now = self.ms();
                 let i = slot as usize % 3;
-                let o = self.scans[i].dir(up, &scan_range(self.live.slots[i].freq), now);
+                let o = if self.chans.is_on(i) {
+                    self.chans.dir(i, &mut self.scans[i], up, now)
+                } else {
+                    self.scans[i].dir(up, &scan_range(self.live.slots[i].freq), now)
+                };
                 self.scan_out(i, o);
             }
             RadioCmd::ScopeCfg { bars, dwell } => self.scope_cfg = (bars, dwell),
@@ -397,6 +419,7 @@ impl FakeRadio {
         s.skips = self.scans[i].skips.max(s.skips);
         if o.ended {
             s.scanning = false;
+            self.chans.off(i);
         }
     }
 
@@ -452,10 +475,15 @@ impl FakeRadio {
         for i in 0..3 {
             if self.live.slots[i].scanning && out.chip.contains(&Some(i as u8)) {
                 let open = self.on_chip.contains(&Some(i as u8)) && carrier(i, &self.live.slots[i]).0;
-                let o = self.scans[i].tick(&scan_range(self.live.slots[i].freq), now, open);
+                let o = if self.chans.is_on(i) {
+                    self.chans.tick(i, &mut self.scans[i], now, open)
+                } else {
+                    self.scans[i].tick(&scan_range(self.live.slots[i].freq), now, open)
+                };
                 self.scan_out(i, o);
             }
         }
+        self.live.set_want(self.chans.want(&self.scans));
         self.on_chip = out.chip;
         let relay = |f: Freq10| Sel::rx(f).relay();
         let active_relay = relay(self.live.slots[self.active as usize].freq);

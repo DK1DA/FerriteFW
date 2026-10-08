@@ -48,7 +48,7 @@ pub const FLAG_HIDDEN: u8 = 0x40;
 pub const FLAG_PRIORITY: u8 = 0x80;
 
 /// Channel numbers 0-999 (shown 1-1000).
-pub const MAX_CHANNELS: u16 = 1000;
+pub const MAX_CHANNELS: u16 = ferrite_core::scan::MAX_CHANNELS;
 
 /// A change to the stored channels, for whoever owns them (the Storage task; the simulator's RAM store),
 /// from [`crate::App::pop_write`].
@@ -125,6 +125,12 @@ pub trait ChannelStore {
             }
         }
         None
+    }
+
+    /// The zone of channel `n` (NO_ZONE for none), None when there is no such channel: a channel scan's set
+    /// ([`crate::chanscan`]) asks this of every number. The firmware's store answers from its zone map in RAM.
+    fn zone_of(&self, n: u16) -> Option<u8> {
+        self.get(n).map(|c| c.zone)
     }
 
     /// The channel with this number, if it exists: the terminal's sorted list reads every channel by number for

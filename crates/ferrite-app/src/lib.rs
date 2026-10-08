@@ -42,6 +42,7 @@ macro_rules! slow {
 
 pub mod aprs;
 pub mod chan;
+pub mod chanscan;
 pub mod data;
 pub mod keys;
 pub mod lights;
@@ -823,6 +824,9 @@ impl App {
     /// Time passes: long presses and repeats, toasts, undo, timeouts; and the latest snapshot.
     pub fn tick(&mut self, now: u32, live: &LiveAll, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        // Channel scans in the Radio task: their set going out, and the frequencies it asks for.
+        chanscan::feed(self, store);
+        chanscan::answer(self, live, store);
         self.lights_tick(now, live);
         let mut rx = 0;
         let mut scan = 0;

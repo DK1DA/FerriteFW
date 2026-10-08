@@ -938,4 +938,36 @@ mod tests {
         assert!(matches!(s.app.screen(), AppScreen::Setup(_)), "{}", s.screen_name());
         assert_eq!(s.store.count(), 0);
     }
+
+    /// A zone scan on a channel slot runs in the (fake) Radio task from the set the UI streams over and the
+    /// frequencies it answers for: it visits the zone's channels and nothing else (SCAN-3, decision 86).
+    #[test]
+    fn a_zone_scan_walks_the_zone_in_the_radio() {
+        let mut s = SimCore::new(1, false);
+        run(&mut s, 0, 2500);
+        let mut t = 2520;
+        while s.app.active() != 1 {
+            s.key(ferrite_core::keys::Key::Slot, true);
+            s.key(ferrite_core::keys::Key::Slot, false);
+            run(&mut s, t, t + 100);
+            t += 120;
+        }
+        let zone = s.app.slot(1).zone;
+        let zone_freqs: std::vec::Vec<u32> = (0..s.store.zone_len(zone)).filter_map(|i| s.store.zone_at(zone, i)).filter(|c| !c.skip() && !c.is_hf()).map(|c| c.rx).collect();
+        s.key(ferrite_core::keys::Key::Side(2), true);
+        s.key(ferrite_core::keys::Key::Side(2), false);
+        let mut seen = std::vec::Vec::new();
+        for k in 0..400 {
+            s.step(t + k * 20);
+            let f = s.radio.live.slots[1].freq;
+            if !seen.contains(&f) {
+                seen.push(f);
+            }
+        }
+        assert!(s.radio.live.slots[1].scanning, "still scanning");
+        assert!(seen.len() >= 2.min(zone_freqs.len()), "moved through the zone: {seen:?}");
+        for f in &seen {
+            assert!(zone_freqs.contains(f), "{f} is not one of the zone's channels {zone_freqs:?}");
+        }
+    }
 }

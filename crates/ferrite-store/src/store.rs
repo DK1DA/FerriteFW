@@ -1128,6 +1128,10 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
         (0..MAX_CHANNELS).map(|k| (from + k) % MAX_CHANNELS).find(|&n| self.zmap[n as usize].get() == EMPTY)
     }
 
+    fn zone_of(&self, n: u16) -> Option<u8> {
+        self.zmap.get(n as usize).map(Cell::get).filter(|&z| z != EMPTY)
+    }
+
     fn get(&self, num: u16) -> Option<Channel> {
         if self.zmap.get(num as usize)?.get() == EMPTY {
             return None;

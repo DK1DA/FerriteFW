@@ -24,9 +24,6 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
-/// Resume rule (MENU 0 1 5, default after 5 s) until the settings store holds it.
-pub const RESUME: &str = "After 5 s";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Scan {
     pub slot: u8,
@@ -35,17 +32,24 @@ pub struct Scan {
     pub sel: u8,
 }
 
-/// SIDE2 on home (SCAN-1): start a scan on the active slot and show it, or stop the one running.
+/// SIDE2 on home (SCAN-1): start a scan on the active slot and show it, or stop the one running. A slot on a
+/// channel scans its zone (and the zones added with digits) in the Radio task, which asks for the channels'
+/// frequencies as it goes ([`crate::chanscan`]); a VFO scans its band, with the radio's resume rule.
 pub fn side2(app: &mut App) {
     let a = app.active;
     if app.scan_mask & 1 << a != 0 {
         app.out.push(RadioCmd::Scan { slot: a, on: false });
         return;
     }
-    app.out.push(RadioCmd::Scan { slot: a, on: true });
     app.radio.clear_hits();
     app.radio.hits_seen = 0;
     app.radio.zones = 0;
+    if app.slot(a).on_channel() {
+        crate::chanscan::start(app, a);
+    } else {
+        app.out.push(RadioCmd::ScanResume { slot: a, code: crate::chanscan::preset_resume(app, 0) });
+        app.out.push(RadioCmd::Scan { slot: a, on: true });
+    }
     app.screen = crate::Screen::Scan(Scan { slot: a, list: false, sel: 0 });
 }
 
@@ -129,7 +133,7 @@ impl View for Scan {
             (Key::Digit(d), Press::Short) if app.slot(s).on_channel() => {
                 // SCAN-3: zones by number join or leave the set (0-9 here).
                 app.radio.zones ^= 1 << d;
-                app.out.push(RadioCmd::ScanZones { slot: s, zones: app.radio.zones });
+                crate::chanscan::start(app, s); // the new set, the scan going on from here
                 let mut b = Buf::<28>::new();
                 let _ = uwrite!(b, "Zone {} ", d);
                 b.push(if app.radio.zones & 1 << d != 0 { b"added" } else { b"removed" });
@@ -243,9 +247,13 @@ impl View for Scan {
         let _ = uwrite!(hits, "{}", lv.hits);
         let mut skips = Buf::<28>::new();
         let _ = uwrite!(skips, "{}", lv.skips);
+        // SCAN-5: the zone's own rule over the radio's (0 1 5)
+        let own = if sl.on_channel() && sl.zone != crate::chan::NO_ZONE { cx.store.data().zone_cfg(sl.zone).resume } else { 0 };
+        let mut resume = Buf::<24>::new();
+        super::groups::resume_text(&mut resume, ferrite_core::scan::Resume::code_over(own, app.set.scan_resume));
         let rows: [(&[u8], &[u8]); 5] = [
             (b"Target", target.as_bytes()),
-            (b"Resume", RESUME.as_bytes()),
+            (b"Resume", resume.as_bytes()),
             (b"Position", pos.as_bytes()),
             (b"Hits", hits.as_bytes()),
             (b"Skips", skips.as_bytes()),

@@ -524,6 +524,18 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.scan_tx as u8);
             s.scan_tx
         }
+        [1, 5] => {
+            resume_text(b, s.scan_resume);
+            s.scan_resume != Settings::DEFAULT.scan_resume
+        }
+        [1, 6, 5] => {
+            if s.scan_prio == 0 {
+                b.set(b"Off");
+            } else {
+                let _ = uwrite!(b, "Every {} s", s.scan_prio);
+            }
+            s.scan_prio != Settings::DEFAULT.scan_prio
+        }
         [8, 4, 2] => {
             pick(b, &crate::settings::TONE_LEVELS, s.tone_level);
             s.tone_level != 1
@@ -590,15 +602,28 @@ fn secs(b: &mut Buf<24>, t: u32, zero: &str) {
     }
 }
 
+/// A resume rule's text (SCAN-5): "5 s", "Carrier drop", "Stop on hit".
+pub(crate) fn resume_text(b: &mut Buf<24>, code: u8) {
+    match code {
+        11 => b.set(b"Carrier drop"),
+        12 => b.set(b"Stop on hit"),
+        c => {
+            let _ = uwrite!(b, "{} s", c.clamp(1, 10));
+        }
+    }
+}
+
 fn cycle(v: u8, d: i32, n: usize) -> u8 {
     (v as i32 + d).rem_euclid(n as i32) as u8
 }
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 33] = [
+pub(crate) const SETTABLE: [&[u8]; 35] = [
     &[1, 1],
+    &[1, 5],
     &[1, 6, 3],
+    &[1, 6, 5],
     &[3, 1, 2],
     &[3, 1, 3],
     &[3, 1, 4],
@@ -641,6 +666,9 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             s.scan_tx = !s.scan_tx;
             app.out.push(RadioCmd::ScanTx(app.set.scan_tx));
         }
+        // 1-10 s, carrier drop, stop on hit (SCAN-5); the next scan takes it
+        [1, 5] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
+        [1, 6, 5] => s.scan_prio = cycle(s.scan_prio, d, 6),
         [8, 4, 2] => {
             s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
             app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
@@ -728,6 +756,8 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
             s.scan_tx = d.scan_tx;
             app.out.push(RadioCmd::ScanTx(d.scan_tx));
         }
+        [1, 5] => s.scan_resume = d.scan_resume,
+        [1, 6, 5] => s.scan_prio = d.scan_prio,
         [8, 4, 2] => {
             s.tone_level = d.tone_level;
             app.out.push(RadioCmd::ToneLevel(d.tone_level));

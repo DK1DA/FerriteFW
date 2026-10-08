@@ -52,8 +52,22 @@ pub enum RadioCmd {
     TxPlan { tx: Freq10, region: u8, extend: bool },
     /// Scanning: skip the current hit for the rest of this scan (SCAN-11).
     ScanSkip { slot: u8 },
-    /// Scanning: the zone set, zones 0-15 by bit (SCAN-3; 0 = the current zone only).
-    ScanZones { slot: u8, zones: u16 },
+    /// A channel scan's stops: bytes `chunk * 5..` of the slot's bitmap, a bit per channel number
+    /// ([`crate::scan::ChanSet`]). Sent before [`RadioCmd::ScanChans`], and again when the set changes mid-scan.
+    ScanSet { slot: u8, chunk: u8, bits: [u8; crate::scan::SET_CHUNK] },
+    /// A channel scan's priority channel `k` (SCAN-12; 0xFFFF none).
+    ScanPrio { slot: u8, k: u8, num: u16 },
+    /// Start a channel scan on the slot at channel `from`, with the set just sent; `prio_s`: the priority look's
+    /// interval in seconds (0 1 6 5; 0 off).
+    ScanChans { slot: u8, from: u16, prio_s: u8 },
+    /// The resume rule for the slot's next scan (SCAN-5, SCAN-24), as [`crate::scan::Resume::from_code`]:
+    /// already the zone's or the preset's own, or the radio's (0 1 5).
+    ScanResume { slot: u8, code: u8 },
+    /// The answer to [`LiveAll::want`]: channel `num`'s receive frequency (0: there is no such channel now).
+    ScanEntry { num: u16, rx: Freq10 },
+    /// Channel `num`'s transmit frequency when it has a shift or split, after its [`RadioCmd::ScanEntry`]
+    /// (SCAN-22, only while 0 1 6 3 is on).
+    ScanEntryTx { num: u16, tx: Freq10 },
     /// While keyed: the tone burst (PTT + SIDE2) for as long as SIDE2 is held (TONE-13).
     ToneBurst { on: bool },
     /// While keyed: a DTMF digit ('0'-'9', '*', '#', 'A'-'D') sent live for as long as its key is held (DTMF-7,
@@ -263,6 +277,9 @@ pub struct LiveAll {
     pub tx: TxLive,
     /// The one exclusive mode running, if any: scope, tone search, counter, FM broadcast, HF, crossband.
     pub mode: ModeLive,
+    /// A channel scan needs a channel's frequencies ([`crate::scan::want`]): its number plus 1, 0 for none (so
+    /// the default is none); the UI answers with [`RadioCmd::ScanEntry`]. Read it with [`LiveAll::wanted`].
+    pub want: u16,
 }
 
 /// Transmit now (TX-22).
@@ -379,6 +396,15 @@ impl Default for XbLive {
 }
 
 impl LiveAll {
+    /// The channel a channel scan asks for, if any ([`LiveAll::want`]).
+    pub fn wanted(&self) -> Option<u16> {
+        self.want.checked_sub(1)
+    }
+
+    pub fn set_want(&mut self, n: Option<u16>) {
+        self.want = n.map_or(0, |n| n + 1);
+    }
+
     /// One slot as the single-receiver [`Live`].
     pub fn live(&self, slot: usize) -> Live {
         let s = self.slots[slot % SLOTS];

@@ -6,9 +6,9 @@
 //!   paused or cancelled (WATCH-6, WATCH-11, WATCH-16). The active slot never changes here (WATCH-5).
 //! - [`Hop`] moves the one receive path select between the two chips while both have a slot, as stock's dual
 //!   watch hops: a chip without its band's front end is taken as hearing nothing (to confirm on the bench).
-//! - [`Scan`] walks a slot's band (a range at its step, the fast pass of SCAN-21) while the slot has a chip;
-//!   channel, zone and preset lists need the UI's lists handed over (not yet: the band scan meanwhile, as the
-//!   simulators' fake radio scans).
+//! - [`Scan`] walks a slot's band (a range at its step, the fast pass of SCAN-21) while the slot has a chip,
+//!   or its channels: a channel scan (zone, zone set) from the set the UI sends, asking the UI for the
+//!   frequencies a few stops ahead ([`scan::ChanScans`], shared with the simulators' fake radio).
 //! - Battery Save (`ferrite_core::rxsleep`) sleeps both chips together (WATCH-8, as stock's dual watch).
 //!
 //! Every path select, the PA drive and the band relay change through the path machine (`ferrite_core::path`,
@@ -39,7 +39,7 @@ use ferrite_core::freq::{self, mhz, Freq10};
 use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, Source, SLOTS};
 use ferrite_core::path::{Act, Cause, Path, Rx, Sel, Steps};
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
-use ferrite_core::scan::{self, Check, Range, Resume, Scan};
+use ferrite_core::scan::{self, Check, Range, Scan};
 use ferrite_core::tonegen;
 use ferrite_core::watch::{self, Hop, Watch};
 use si4732::{Mode as SiMode, Si4732, Sideband};
@@ -65,8 +65,6 @@ const TICK_MS: u64 = 10;
 /// The fast pass (SCAN-21) counts a step as "over the floor" this far above the chip's noise floor (to confirm
 /// on the bench).
 const FAST_MARGIN_DB: i16 = 10;
-/// A scan's resume until the UI hands over the scan settings (0 1 5, SCAN-24): the engine's default.
-const SCAN_RESUME: Resume = Resume::Time(5);
 /// The HF mode's internal slot index (the chips' `tuned` entry for it).
 const HF_SLOT: u8 = 3;
 /// The sequencer's settings in the `tx` build: the timeout a little after the UI's own 120 s (the UI unkeys
@@ -140,6 +138,9 @@ struct Radio {
     hop: Hop,
     scans: [Scan; SLOTS],
     ranges: [Range<'static>; SLOTS],
+    /// Channel scans: each slot's set of channel numbers and the frequencies asked for (SCAN-3, SCAN-12,
+    /// SCAN-22; decision 86).
+    chans: scan::ChanScans,
     /// What each chip is tuned to now: the slot and its receive frequency; None asleep.
     tuned: [Option<(u8, Freq10)>; 2],
     /// Each chip's noise floor (dBm), a slow average of its RSSI with the squelch closed (the fast pass's
@@ -480,7 +481,14 @@ impl Radio {
             if !self.scans[i].running() || !self.tuned.iter().any(|t| t.is_some_and(|(s, _)| s as usize == i)) {
                 continue;
             }
-            let o = self.scans[i].tick(&self.ranges[i], now, scan_open[i]);
+            let o = if self.chans.is_on(i) {
+                self.chans.tick(i, &mut self.scans[i], now, scan_open[i])
+            } else {
+                self.scans[i].tick(&self.ranges[i], now, scan_open[i])
+            };
+            if o.ended {
+                self.chans.off(i);
+            }
             let sl = &mut self.live.slots[i];
             if let Some(f) = o.tune {
                 self.slots[i].freq = f;
@@ -495,6 +503,8 @@ impl Radio {
                 sl.scanning = false;
             }
         }
+        // The channel the channel scans need next, for the UI to answer (LiveAll::want).
+        self.live.set_want(self.chans.want(&self.scans));
         // 4. The chips: each on the slot the engine names (or asleep), the path on the one listening now.
         for n in 0..2u8 {
             let want = out.chip[n as usize].map(|s| (s, self.slots[s as usize].rx_freq()));
@@ -654,12 +664,13 @@ impl Radio {
             let r = scan::band_range(self.slots[i].freq);
             self.ranges[i] = r;
             let sc = &mut self.scans[i];
-            (sc.fast, sc.resume) = (true, SCAN_RESUME);
+            sc.fast = true; // the resume rule is the last ScanResume's (SCAN-5, SCAN-24)
             sc.start(scan::range_pos(&r, self.slots[i].freq), now_ms() as u32);
             log(b"scan start slot ", i as u32);
         } else {
             self.scans[i].stop();
         }
+        self.chans.off(i); // a band scan, or none
     }
 
     /// A scan's answer to ▲▼ or \*: the step it tuned, the end.
@@ -672,6 +683,7 @@ impl Radio {
         sl.skips = self.scans[i].skips.max(sl.skips);
         if o.ended {
             sl.scanning = false;
+            self.chans.off(i);
         }
     }
 
@@ -850,6 +862,7 @@ pub async fn task() {
         hop: Hop::new(),
         scans: [Scan::new(); SLOTS],
         ranges: [scan::band_range(DEFAULT); SLOTS],
+        chans: scan::ChanScans::new(),
         tuned: [None; 2],
         floor: [-125; 2],
         monitor: 0,
@@ -932,11 +945,28 @@ impl Radio {
         let now = now_ms() as u32;
         // The single-receiver command is the active slot's tune.
         let c = if let RadioCmd::Tune(freq) = c { RadioCmd::TuneSlot { slot: self.active, freq } } else { c };
+        // Channel scans: the set, priorities, resume rule, start, and the frequencies the UI answers with; one
+        // a stopped scan waited for is tuned now.
+        if let Some((i, f)) = self.chans.cmd(&c, &mut self.scans, now) {
+            self.slots[i].freq = f;
+            self.live.slots[i].freq = f;
+        }
         match c {
+            RadioCmd::ScanChans { slot, .. } => {
+                let sl = &mut self.live.slots[slot as usize % SLOTS];
+                (sl.scanning, sl.hits, sl.skips) = (true, 0, 0);
+                log(b"scan start (channels) slot ", slot as u32);
+            }
+            RadioCmd::ScanSet { .. }
+            | RadioCmd::ScanPrio { .. }
+            | RadioCmd::ScanResume { .. }
+            | RadioCmd::ScanEntry { .. }
+            | RadioCmd::ScanEntryTx { .. } => {}
             RadioCmd::TuneSlot { slot, freq } => {
                 let i = slot as usize % SLOTS;
                 (self.slots[i].freq, self.slots[i].clar) = (freq, 0); // VFO-22: a retune clears the clarifier
                 self.scans[i].stop();
+                self.chans.off(i);
                 let sl = &mut self.live.slots[i];
                 (sl.freq, sl.scanning) = (freq, false);
                 if slot == self.active && self.hf.is_none() {
@@ -958,12 +988,20 @@ impl Radio {
             RadioCmd::Scan { slot, on } => self.scan(slot, on),
             RadioCmd::ScanSkip { slot } => {
                 let i = slot as usize % SLOTS;
-                let o = self.scans[i].skip_once(&self.ranges[i], now);
+                let o = if self.chans.is_on(i) {
+                    self.chans.skip_once(i, &mut self.scans[i], now)
+                } else {
+                    self.scans[i].skip_once(&self.ranges[i], now)
+                };
                 self.scan_out(i, o);
             }
             RadioCmd::ScanDir { slot, up, .. } => {
                 let i = slot as usize % SLOTS;
-                let o = self.scans[i].dir(up, &self.ranges[i], now);
+                let o = if self.chans.is_on(i) {
+                    self.chans.dir(i, &mut self.scans[i], up, now)
+                } else {
+                    self.scans[i].dir(up, &self.ranges[i], now)
+                };
                 self.scan_out(i, o);
             }
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
@@ -1002,11 +1040,9 @@ impl Radio {
             // Without the `tx` build nothing is keyed, so there is nothing to send them on.
             #[cfg(not(feature = "tx"))]
             RadioCmd::ToneBurst { .. } | RadioCmd::Dtmf { .. } => {}
-            // Not on the radio yet, each waiting on something named in the manual's Status lines:
-            // - the zone set (SCAN-3) and channel lists: the UI's lists handed to the Radio task;
-            // - band scope, tone search, crossband (chapters 21, 22, 19): their own exclusive modes, after 2d.
-            RadioCmd::ScanZones { .. }
-            | RadioCmd::Sweep { .. }
+            // Not on the radio yet, each waiting on something named in the manual's Status lines: band scope,
+            // tone search, crossband (chapters 21, 22, 19): their own exclusive modes, after 2d.
+            RadioCmd::Sweep { .. }
             | RadioCmd::ScopeCfg { .. }
             | RadioCmd::ScopeListen { .. }
             | RadioCmd::ToneSearch { .. }

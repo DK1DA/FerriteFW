@@ -200,6 +200,11 @@ pub struct Settings {
     pub scan_tx: bool,
     /// 0 8 4 2: the CTCSS/DCS level sent, around the calibration's ([`TONE_LEVELS`]; TONE-16).
     pub tone_level: u8,
+    /// 0 1 5: the radio's resume rule (SCAN-5), as `scan::Resume::from_code`: 1-10 s, 11 carrier drop, 12 stop
+    /// on hit. Zones and range presets can have their own.
+    pub scan_resume: u8,
+    /// 0 1 6 5: the priority check's interval, seconds; 0 off (SCAN-12).
+    pub scan_prio: u8,
 }
 
 /// 0 8 4 2's values (TONE-16).
@@ -288,6 +293,8 @@ impl Settings {
         spare_flag2: false,
         scan_tx: false,
         tone_level: 1,
+        scan_resume: 5,
+        scan_prio: 2,
     };
 
     /// The region's name, or "Not set".

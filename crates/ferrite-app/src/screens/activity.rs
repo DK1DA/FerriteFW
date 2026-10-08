@@ -86,6 +86,10 @@ pub struct RadioUi {
     /// A seek (hold 3 or 1) is running: the receiver's frequency is taken as it lands.
     pub hf_seeking: bool,
     pub hf_entry: u32,
+    /// A channel scan's set still going out to the Radio task ([`crate::chanscan`]).
+    pub feed: Option<crate::chanscan::Feed>,
+    /// The Radio task's last ask for a channel's frequencies, answered ([`ferrite_core::msg::LiveAll::want`]).
+    pub want_seen: u16,
 }
 
 impl RadioUi {
@@ -107,6 +111,8 @@ impl RadioUi {
             hf_counted: false,
             hf_seeking: false,
             hf_entry: 0,
+            feed: None,
+            want_seen: 0,
         }
     }
 
