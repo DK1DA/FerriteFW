@@ -82,7 +82,7 @@ fn source() -> (App, Store) {
         };
         // a split: TX on 70 cm while RX is on 2 m, low power (the 1.25 m cap goes by TX)
         let cfg = if cfg.split { SlotCfg { offset: mhz(446) as i32 + (n as i32 % 16) * 1250, ..cfg } } else { cfg };
-        let mut c = Channel { num: n * 3, zone: if n % 21 == 20 { NO_ZONE } else { (n % 21) as u8 }, rx: mhz(144) + (k * 1250) % 400_000, name: [0; 16], cfg, flags: (n % 8) as u8 };
+        let mut c = Channel { num: n * 3, zone: if n % 21 == 20 { NO_ZONE } else { (n % 21) as u8 }, rx: mhz(144) + (k * 1250) % 400_000, name: [0; 16], cfg, flags: (n % 8) as u8, tones: 0 };
         c.set_name(format!("{}\"{}", if n % 7 == 0 { "q\\" } else { "C" }, n).as_bytes());
         assert!(s.apply(ChanWrite::Put { ch: c, from: None }));
     }

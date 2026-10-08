@@ -503,6 +503,7 @@ fn channel_save(c: &Channel, s: &mut dyn PSink) {
     s.put(&c.name);
     c.cfg.save(s);
     c.flags.save(s);
+    c.tones.save(s); // decision 86: end tone and tail; a writer from before it leaves it off (Global)
 }
 
 fn zone_save(name: &[u8], c: &ZoneCfg, s: &mut dyn PSink) {
@@ -592,7 +593,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             Status::Ok
         }
         what::CHANNEL if idx < MAX_CHANNELS => {
-            let mut c = Channel { num: idx, zone: NO_ZONE, rx: 0, name: [0; 16], cfg: SlotCfg::default(), flags: 0 };
+            let mut c = Channel { num: idx, zone: NO_ZONE, rx: 0, name: [0; 16], cfg: SlotCfg::default(), flags: 0, tones: 0 };
             let mut r = Rd { b: rec, n: 0 };
             let mut num = 0u16;
             num.load(&mut r);
@@ -604,6 +605,10 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             }
             c.cfg.load(&mut r);
             c.flags.load(&mut r);
+            if r.n < rec.len() {
+                c.tones.load(&mut r); // decision 86; absent from an older writer: Global
+                c.tones = c.end_tone() | c.tail() << 3;
+            }
             if r.n != rec.len() {
                 return Status::BadArg;
             }

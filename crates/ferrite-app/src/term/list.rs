@@ -505,7 +505,7 @@ impl Term {
         let s = &app.slots[app.active as usize];
         let rx = s.freq().clamp(mhz(64), mhz(1300) - 1); // CHAN-22
         let zone = if self.zone == super::ALL { NO_ZONE } else { self.zone };
-        let c = Channel { num, zone, rx, name: [0; 16], cfg: *s.cfg(), flags: 0 };
+        let c = Channel { num, zone, rx, name: [0; 16], cfg: *s.cfg(), flags: 0, tones: 0 };
         app.put_channel(c);
         (self.edit, self.field) = (Some(c), 0);
         self.vis_ok = false;

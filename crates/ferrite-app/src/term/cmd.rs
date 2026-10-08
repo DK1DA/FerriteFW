@@ -425,10 +425,13 @@ const POWERS: [&str; 3] = ["low", "mid", "high"];
 const BUSY: [&str; 2] = ["off", "on"];
 const BW: [&str; 2] = ["wide", "narrow"];
 /// Channel fields by name, in the order a `ch` line writes them.
-const FIELDS: [&str; 20] = [
+const FIELDS: [&str; 22] = [
     "name", "rx", "offset", "mode", "bw", "tone", "rxtone", "txtone", "power", "zone", "step", "squelch", "busy", "reverse", "skip", "aprs", "rxonly", "tx", "hidden",
-    "priority",
+    "priority", "endtone", "tail",
 ];
+/// A channel's end tone and tail words (crate::chan::END_TONES, TAILS; decision 86).
+const END_WORDS: [&str; 7] = ["global", "off", "beep", "up", "down", "chirp", "quindar"];
+const TAIL_WORDS: [&str; 3] = ["global", "off", "on"];
 
 // ---- Channels ----
 
@@ -477,6 +480,14 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     if g.busy != 0 {
         out.push(b" busy=");
         out.push(BUSY[g.busy.min(1) as usize].as_bytes());
+    }
+    if c.end_tone() != 0 {
+        out.push(b" endtone=");
+        out.push(END_WORDS[c.end_tone() as usize].as_bytes());
+    }
+    if c.tail() != 0 {
+        out.push(b" tail=");
+        out.push(TAIL_WORDS[c.tail() as usize].as_bytes());
     }
     for (on, w) in [
         (g.reverse, "reverse"),
@@ -581,6 +592,8 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
             Some(n) if n <= 9 => g.squelch = n as u8,
             _ => return Err(msg!("squelch: global, or 0 to 9")),
         },
+        20 => c.set_end_tone(pick(v, &END_WORDS, "endtone")?),
+        21 => c.set_tail(pick(v, &TAIL_WORDS, "tail")?),
         _ => g.busy = pick(v, &BUSY, "busy")?,
     }
     Ok(())
@@ -645,7 +658,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
         Some(Tok::Quoted(q)) => {
             let name: Buf<16> = unquote(q, "name")?;
             let rx = freq(t.word("ch: the RX frequency after the name, e.g. ch 12 \"Name\" 146.52")?, "rx")?;
-            let mut c = Channel { num, zone: NO_ZONE, rx, name: [0; 16], cfg: DEFAULT_CFG, flags: 0 };
+            let mut c = Channel { num, zone: NO_ZONE, rx, name: [0; 16], cfg: DEFAULT_CFG, flags: 0, tones: 0 };
             c.set_name(name.as_bytes());
             while let Some(tok) = t.next()? {
                 let Tok::Word(w) = tok else { return Err(msg!("ch: a name in quotes goes right after the number")) };

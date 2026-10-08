@@ -86,6 +86,12 @@ pub const TRIES: u8 = 5;
 pub const RETRY_S: [u16; 4] = [30, 60, 120, 240];
 pub const LAST_WAIT_S: u16 = 240;
 
+/// The longest APRS information field taken or sent (decision 86): AX.25's 256 bytes, nothing valid cut. The
+/// buffers that hold a frame are already this size: `uafsk`'s HDLC frame (330 bytes: 10 addresses, control,
+/// PID, 256 bytes of information, the FCS) and `uaprs`'s KISS decoder (330), so it costs no RAM; a longer frame
+/// is dropped as invalid.
+pub const INFO_MAX: usize = 256;
+
 /// After try `n` (1-5): seconds until the next try, or (after the fifth) until it is marked failed.
 pub fn retry_wait(n: u8) -> u16 {
     RETRY_S.get((n as usize).wrapping_sub(1)).copied().unwrap_or(LAST_WAIT_S)

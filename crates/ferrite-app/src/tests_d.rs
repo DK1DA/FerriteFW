@@ -619,3 +619,38 @@ fn pin_change_and_off() {
     typ(&mut t, &[4, 3, 2, 1]);
     assert_eq!(t.app.settings().pin_mode, 0);
 }
+
+/// Decision 86: on a channel the tone picker goes on to the channel's end tone and tail; the knob sets them, the
+/// channel is saved with them, \* undoes, and # is Global.
+#[test]
+fn channel_end_tone_and_tail() {
+    let mut t = T::new();
+    let st = store();
+    let z = (0..16).find(|&z| st.zone_at(z, 0).is_some_and(|c| !c.is_hf())).unwrap();
+    t.app.set_channel(0, z, 0, &st);
+    assert!(t.app.slot(0).on_channel());
+    let _ = t.cmds();
+    t.open(Dest::Tones);
+    assert!(matches!(t.app.screen(), Screen::Tones(_)));
+    t.tap(Key::Down); // from TX (row 1) to the end tone
+    t.knob(6);
+    let c = t.app.slot(0).ch.unwrap();
+    assert_eq!(c.end_tone(), 6, "Quindar");
+    assert!(matches!(t.app.pop_write(), Some(crate::chan::ChanWrite::Put { ch, .. }) if ch.end_tone() == 6), "saved");
+    t.tap(Key::Down);
+    t.knob(2);
+    assert_eq!(t.app.slot(0).ch.unwrap().tail(), 2, "On");
+    t.tap(Key::Hash);
+    assert_eq!(t.app.slot(0).ch.unwrap().tail(), 0, "# is Global");
+    t.knob(1);
+    t.tap(Key::Star);
+    let c = t.app.slot(0).ch.unwrap();
+    assert_eq!((c.end_tone(), c.tail()), (0, 0), "undo: as before the edits (MENU-19)");
+    // a VFO has only the tones' page
+    t.hold(Key::Exit);
+    t.app.set_vfo(0, 14_652_000);
+    t.open(Dest::Tones);
+    t.tap(Key::Down);
+    t.tap(Key::Down);
+    assert!(matches!(t.app.screen(), Screen::Tones(s) if s.row < 2));
+}

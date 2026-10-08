@@ -82,7 +82,11 @@ pub fn ch_decode(num: u16, b: &[u8; CH_LEN]) -> Option<Channel> {
     let mut name = [0u8; 16];
     name.copy_from_slice(&b[32..48]);
     let ui = (flags & UI_FLAGS) as u8 | if flags & PRIORITY != 0 { ferrite_app::chan::FLAG_PRIORITY } else { 0 };
-    Some(Channel { num, zone: b[18], rx, name, cfg, flags: ui })
+    // Byte 31 (decision 86): end tone bits 0-2, tail bits 3-4; 0 (every record before it) is Global for both,
+    // and so is a value out of range.
+    let mut c = Channel { num, zone: b[18], rx, name, cfg, flags: ui, tones: b[31] & 0x1F };
+    c.tones = c.end_tone() | c.tail() << 3;
+    Some(c)
 }
 
 /// The record for `ch`, keeping what the UI doesn't model from `old` (the record it replaces, or the one it
@@ -125,6 +129,7 @@ pub fn ch_encode(ch: &Channel, old: &[u8; CH_LEN]) -> [u8; CH_LEN] {
     b[16..18].copy_from_slice(&flags.to_le_bytes());
     b[18] = ch.zone;
     b[19] = if c.squelch >= SQ_GLOBAL { 0 } else { c.squelch + 1 };
+    b[31] = ch.end_tone() | ch.tail() << 3;
     b[32..48].copy_from_slice(&ch.name);
     b[60] = CH_VERSION;
     b[61] = 0xFF;
@@ -358,7 +363,7 @@ mod tests {
     #[test]
     fn hidden_and_priority_round_trip() {
         use ferrite_app::chan::{FLAG_HIDDEN, FLAG_PRIORITY, FLAG_SKIP};
-        let c = Channel { num: 3, zone: 0, rx: 14_652_000, name: [0; 16], cfg: DEFAULT_CFG, flags: FLAG_HIDDEN | FLAG_PRIORITY };
+        let c = Channel { num: 3, zone: 0, rx: 14_652_000, name: [0; 16], cfg: DEFAULT_CFG, flags: FLAG_HIDDEN | FLAG_PRIORITY, tones: 0 };
         let r = ch_encode(&c, &[0xFF; CH_LEN]);
         assert_eq!(u16_at(&r, 16) & (1 << 8), 1 << 8);
         assert_eq!(u16_at(&r, 16) & (1 << 7), 0, "a new record has no position");
@@ -386,5 +391,26 @@ mod tests {
         assert!(dtmf_name_addr(DTMF_MEMS - 1) + DTMF_NAME_LEN as u32 <= PRESETS.end - 32);
         assert_eq!(dtmf_name_decode(&dtmf_name_encode(b"Link on")).unwrap().as_bytes(), b"Link on");
         assert!(dtmf_name_decode(&[0xFF; DTMF_NAME_LEN]).is_none());
+    }
+
+    /// Decision 86: end tone and tail in byte 31 round trip; an older record (0 there) and a value out of range
+    /// read as Global.
+    #[test]
+    fn end_tone_and_tail_in_byte_31() {
+        let mut c = Channel { num: 4, zone: 0, rx: 14_652_000, name: [0; 16], cfg: DEFAULT_CFG, flags: 0, tones: 0 };
+        c.set_end_tone(6);
+        c.set_tail(2);
+        let b = ch_encode(&c, &[0xFF; CH_LEN]);
+        let d = ch_decode(4, &b).unwrap();
+        assert_eq!((d.end_tone(), d.tail()), (6, 2));
+        let mut old = b;
+        old[31] = 0;
+        let crc = crc16(&old[..62]);
+        old[62..64].copy_from_slice(&crc.to_le_bytes());
+        assert_eq!(ch_decode(4, &old).map(|c| (c.end_tone(), c.tail())), Some((0, 0)), "older record: Global");
+        old[31] = 7 | 3 << 3;
+        let crc = crc16(&old[..62]);
+        old[62..64].copy_from_slice(&crc.to_le_bytes());
+        assert_eq!(ch_decode(4, &old).map(|c| (c.end_tone(), c.tail())), Some((0, 0)), "out of range: Global");
     }
 }

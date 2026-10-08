@@ -318,7 +318,7 @@ fn save(s: Save, app: &mut App, store: &impl ChannelStore) {
         Kind::Vfo => app.slots[a].cfg,
     };
     let cfg = SlotCfg { squelch: SQ_GLOBAL, ..cfg }; // a new channel follows the slot's level (CHAN-14)
-    let mut ch = Channel { num: s.num, zone: s.zone, rx: f, name: [0; 16], cfg, flags: 0 };
+    let mut ch = Channel { num: s.num, zone: s.zone, rx: f, name: [0; 16], cfg, flags: 0, tones: 0 };
     ch.set_name(app.text.as_bytes());
     app.write(ChanWrite::Put { ch, from: None });
     if s.kind == Kind::Hf {

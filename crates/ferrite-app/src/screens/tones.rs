@@ -4,11 +4,14 @@
 //! a tone (885 is 88.5 Hz, 1000 is 100.0 Hz) or, on a DCS code, the code in octal; # turns it off; OK keeps;
 //! BACK puts both back (MENU-20). Typed tones need not be on the lists (TONE-15, as nicFW): any CTCSS from
 //! 60.0 to 260.0 Hz and any DCS code D000-D777.
+//!
+//! On a channel, ▲▼ go on to a second page: the channel's end tone and tail elimination (TONE-10, TONE-17;
+//! decision 86), each Global (the radio's, 0 8 5) or its own. The channel editor's grid has no room for them.
 
 use super::forms::picker;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::ChannelStore;
+use crate::chan::{ChannelStore, END_TONES, TAILS};
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{tone_at, tone_custom, tone_index, tone_text, CTCSS, DCS_FLAG, DCS_INV};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
@@ -24,8 +27,9 @@ use ferrite_ui::widgets as w;
 pub struct Tones {
     /// 0 RX, 1 TX.
     pub row: u8,
-    /// Both tones when it opened (BACK restores them).
+    /// Both tones when it opened, and a channel's end tone and tail byte (BACK restores them).
     pub old: (u16, u16),
+    pub old_ch: u8,
     /// Digits typed so far and when the last came (a pause of [`TYPE_MS`] starts again).
     pub typed: u16,
     pub nt: u8,
@@ -38,9 +42,32 @@ const ALL: i32 = 1 + 50 + 104 + 104;
 
 impl Tones {
     pub fn new(app: &App) -> Self {
-        let c = app.slots[app.active as usize].cfg();
-        Tones { row: 1, old: (c.rx_tone, c.tx_tone), typed: 0, nt: 0, at: 0 }
+        let sl = &app.slots[app.active as usize];
+        let c = sl.cfg();
+        let old_ch = sl.ch.filter(|_| sl.on_channel()).map_or(0, |c| c.tones);
+        Tones { row: 1, old: (c.rx_tone, c.tx_tone), old_ch, typed: 0, nt: 0, at: 0 }
     }
+}
+
+/// The active slot's channel, when it is on one (the second page's).
+fn channel(app: &App) -> Option<crate::chan::Channel> {
+    let sl = &app.slots[app.active as usize];
+    sl.ch.filter(|_| sl.on_channel())
+}
+
+/// Rows: RX and TX tone, and on a channel its end tone and tail.
+fn rows(app: &App) -> u8 {
+    if channel(app).is_some() { 4 } else { 2 }
+}
+
+/// The second page's value (row 2 end tone, row 3 tail) and how many there are.
+fn ch_value(app: &App, row: u8) -> (u8, usize) {
+    let c = channel(app).unwrap_or(crate::chan::channel(0, 0, 0, "", crate::slot::DEFAULT_CFG));
+    if row == 2 { (c.end_tone(), END_TONES.len()) } else { (c.tail(), TAILS.len()) }
+}
+
+fn set_ch(app: &mut App, row: u8, v: u8) {
+    super::chedit::edit(app, |c| if row == 2 { c.set_end_tone(v) } else { c.set_tail(v) });
 }
 
 fn get(app: &App, rx: bool) -> u16 {
@@ -129,12 +156,14 @@ impl View for Tones {
         use Press::*;
         let mut s = self;
         let rx = self.row == 0;
+        let n = rows(app);
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => {
-                s.row ^= 1;
+                s.row = (s.row % n + if e.key == Key::Down { 1 } else { n - 1 }) % n;
                 s.nt = 0;
             }
-            (Key::Digit(d), Short) => {
+            (Key::Hash, Short) if self.row >= 2 => set_ch(app, self.row, 0), // Global
+            (Key::Digit(d), Short) if self.row < 2 => {
                 if s.nt >= 4 || app.now.wrapping_sub(s.at) > TYPE_MS {
                     (s.typed, s.nt) = (0, 0);
                 }
@@ -151,6 +180,9 @@ impl View for Tones {
             (Key::Exit, Short) => {
                 set(app, true, self.old.0);
                 set(app, false, self.old.1);
+                if channel(app).is_some_and(|c| c.tones != self.old_ch) {
+                    super::chedit::edit(app, |c| c.tones = self.old_ch);
+                }
                 app.undo = None;
                 return app.back();
             }
@@ -160,6 +192,10 @@ impl View for Tones {
     }
 
     fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
+        if self.row >= 2 {
+            let (v, n) = ch_value(app, self.row);
+            return set_ch(app, self.row, (v as i32 + d).rem_euclid(n as i32) as u8);
+        }
         let rx = self.row == 0;
         let t = get(app, rx);
         // A custom tone sits after the standard one below it (tone_index): down steps to that one, not past it.
@@ -170,9 +206,13 @@ impl View for Tones {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         app.editor_head(lcd, cx);
         let (rx, tx) = (get(app, true), get(app, false));
+        let page = self.row / 2;
+        if page == 1 {
+            return self.render_ch(app, lcd, cx);
+        }
         for (i, (label, t)) in [("RX tone", rx), ("TX tone", tx)].into_iter().enumerate() {
             let f = self.row as usize == i;
-            if app.dirty(R_ROW + i, hash(&(t, f))) {
+            if app.dirty(R_ROW + i, hash(&(page, t, f))) {
                 let y = 46 + i as i32 * 36;
                 let (bg, border) = if f { (FOCUS, BLUE) } else { (BG, LINE) };
                 // 33 px: the 9 px capitals centre (DISP-19)
@@ -190,7 +230,7 @@ impl View for Tones {
             }
         }
         let t = if self.row == 0 { rx } else { tx };
-        if app.dirty(R_SUB, hash(&t)) {
+        if app.dirty(R_SUB, hash(&(page, t))) {
             picker(lcd, 40, 122, 160, 5, 18, tone_index(t), ALL, |i, b| text(tone_at(i), b), BG);
         }
         let mut typed = Buf::<32>::new();
@@ -201,14 +241,49 @@ impl View for Tones {
             let s: &[u8] = if typed.is_empty() { b"885 is 88.5 Hz; any 60-260 Hz" } else { typed.as_bytes() };
             w::field(lcd, 8, 224, 216, 233, 229, Align::Center, s, &UI_12, if typed.is_empty() { DIM } else { TEXT }, BG);
         }
-        app.help_box(lcd, 250, 46, b"RX and TX are set apart: any cross mode is a pair.", b"MENU 4");
+        let help: &[u8] = if rows(app) == 4 { b"RX and TX apart; further down, end tone and tail." } else { b"RX and TX are set apart: any cross mode is a pair." };
+        app.help_box(lcd, 250, 46, help, b"MENU 4");
     }
 
     fn hints(self, app: &App) -> Hints {
+        let rows = if self.row < 2 && rows(app) == 2 { "RX/TX" } else { "Row" };
         if app.undo.is_some() {
-            Hints::new(&[(ARROWS_UD, "RX/TX"), ("*", "Undo"), ("OK", "Keep")])
+            Hints::new(&[(ARROWS_UD, rows), ("*", "Undo"), ("OK", "Keep")])
         } else {
-            Hints::new(&[(ARROWS_UD, "RX/TX"), ("Knob", "Change"), ("OK", "Keep")])
+            Hints::new(&[(ARROWS_UD, rows), ("Knob", "Change"), ("OK", "Keep")])
         }
+    }
+}
+
+impl Tones {
+    /// The second page (on a channel): its end tone and tail elimination, Global or its own (decision 86).
+    fn render_ch(self, app: &mut App, lcd: &mut impl Panel, _cx: &Cx<impl ChannelStore>) {
+        for (i, row) in [2u8, 3].into_iter().enumerate() {
+            let f = self.row == row;
+            let (v, _) = ch_value(app, row);
+            let label = if row == 2 { "End tone" } else { "Tail" };
+            let name = if row == 2 { END_TONES[v as usize] } else { TAILS[v as usize] };
+            if app.dirty(R_ROW + i, hash(&(1u8, v, f))) {
+                let y = 46 + i as i32 * 36;
+                let (bg, border) = if f { (FOCUS, BLUE) } else { (BG, LINE) };
+                lcd.fill(6, y, 228, 33, BG);
+                lcd.fill_r(6, y, 228, 33, 2, bg);
+                w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
+                w::field(lcd, 84, 150, y + 2, y + 30, y + 21, Align::Left, name.as_bytes(), &UI_12B, TEXT, bg);
+                if f {
+                    w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
+                }
+                lcd.frame_r(6, y, 228, 33, 2, border);
+            }
+        }
+        let (v, n) = ch_value(app, self.row);
+        let end = self.row == 2;
+        if app.dirty(R_SUB, hash(&(1u8, self.row, v))) {
+            picker(lcd, 40, 122, 160, 5, 18, v as i32, n as i32, |i, b| b.set(if end { END_TONES[i as usize] } else { TAILS[i as usize] }.as_bytes()), BG);
+        }
+        if app.dirty(R_NOTE, hash(&1u8)) {
+            w::field(lcd, 8, 224, 216, 233, 229, Align::Center, b"Global: the radio's, MENU 0 8 5", &UI_12, DIM, BG);
+        }
+        app.help_box(lcd, 250, 46, b"This channel's end tone and tail elimination.", b"MENU 4");
     }
 }

@@ -35,7 +35,15 @@ pub struct Channel {
     pub cfg: SlotCfg,
     /// [`FLAG_SKIP`], [`FLAG_APRS`], [`FLAG_RX_ONLY`] (CHAN-4).
     pub flags: u8,
+    /// This channel's end tone and tail elimination over the radio's (TONE-10, TONE-17; decision 86): bits 0-2
+    /// the end tone ([`END_TONES`]), bits 3-4 tail elimination ([`TAILS`]); 0 = Global for both. Record byte 31.
+    pub tones: u8,
 }
+
+/// A channel's end tone choices (TONE-10): Global follows 0 8 5 4, the rest are its own.
+pub const END_TONES: [&str; 7] = ["Global", "Off", "Beep", "Two-tone up", "Two-tone down", "Chirp", "Quindar"];
+/// A channel's tail elimination (TONE-17): Global follows 0 8 5 1, Off never, On as 0 8 5 1's phase.
+pub const TAILS: [&str; 3] = ["Global", "Off", "On"];
 
 /// Channel flags (CHAN-4): skipped by scans, APRS on this channel, never transmits.
 pub const FLAG_SKIP: u8 = 1;
@@ -81,6 +89,24 @@ impl Channel {
     /// Left out of every scan (CHAN-4, SCAN-9).
     pub fn skip(&self) -> bool {
         self.flags & FLAG_SKIP != 0
+    }
+
+    /// The end tone ([`END_TONES`] index; 0 Global): out of range reads as Global.
+    pub fn end_tone(&self) -> u8 {
+        Some(self.tones & 7).filter(|&v| (v as usize) < END_TONES.len()).unwrap_or(0)
+    }
+
+    /// Tail elimination ([`TAILS`] index; 0 Global): out of range reads as Global.
+    pub fn tail(&self) -> u8 {
+        Some(self.tones >> 3 & 3).filter(|&v| (v as usize) < TAILS.len()).unwrap_or(0)
+    }
+
+    pub fn set_end_tone(&mut self, v: u8) {
+        self.tones = self.tones & !7 | v.min(END_TONES.len() as u8 - 1);
+    }
+
+    pub fn set_tail(&mut self, v: u8) {
+        self.tones = self.tones & !0x18 | v.min(TAILS.len() as u8 - 1) << 3;
     }
 
     /// A new name: up to 16 bytes, the rest zeroed.
@@ -286,5 +312,5 @@ pub const fn channel(num: u16, zone: u8, rx: Freq10, name: &str, cfg: SlotCfg) -
         n[i] = b[i];
         i += 1;
     }
-    Channel { num, zone, rx, name: n, cfg, flags: 0 }
+    Channel { num, zone, rx, name: n, cfg, flags: 0, tones: 0 }
 }

@@ -117,8 +117,10 @@ fn ram_is_small() {
     std::println!("App: {n} bytes");
     // 1024 until Oct 7, 2026: the scan hit list (SCAN-23: 16 hits of 8 bytes, 13 more than the probes' 3, +112)
     // and the slots' clarifier (VFO-22, +8 with padding) took it to 1136; channel scans in the Radio task
-    // (the set being sent, 4 bytes, and the last ask answered, 2: +8 with padding) to 1144
-    assert!(n <= 1144, "App is {n} bytes");
+    // (the set being sent, 4 bytes, and the last ask answered, 2: +8 with padding) to 1144; a channel's end tone
+    // and tail (decision 86: one byte, but Channel goes from 40 to 44 bytes with its alignment, and the App holds a
+    // Channel in each slot and in the queued write, plus the byte in undo) to 1176
+    assert!(n <= 1176, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

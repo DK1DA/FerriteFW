@@ -171,6 +171,8 @@ struct Undo {
 
 #[derive(Clone, Copy)]
 struct ChUndo {
+    /// The number (0-999, 10 bits) and, above it, the end tone and tail byte (5 bits, decision 86): one u16
+    /// keeps the undo record 8 bytes.
     num: u16,
     zone: u8,
     flags: u8,
@@ -1211,7 +1213,7 @@ impl App {
         let a = self.active;
         if self.undo.is_none() {
             let s = &self.slots[a as usize];
-            let ch = s.ch.filter(|_| s.on_channel()).map(|c| ChUndo { num: c.num, zone: c.zone, flags: c.flags, rx: c.rx });
+            let ch = s.ch.filter(|_| s.on_channel()).map(|c| ChUndo { num: c.num | (c.tones as u16) << 10, zone: c.zone, flags: c.flags, rx: c.rx });
             self.undo = Some(Undo { slot: a, cfg: *s.cfg(), ch, home: self.set.home_ch, watch: self.watch, bsave: self.bsave, until: 0 });
         }
         if let Some(u) = &mut self.undo {
@@ -1224,9 +1226,9 @@ impl App {
             let s = &mut self.slots[u.slot as usize];
             match u.ch {
                 Some(old) if s.on_channel() => {
-                    let from = s.ch.map(|c| c.num).filter(|&n| n != old.num);
+                    let from = s.ch.map(|c| c.num).filter(|&n| n != old.num & 0x3FF);
                     if let Some(c) = &mut s.ch {
-                        (c.num, c.zone, c.flags, c.rx, c.cfg) = (old.num, old.zone, old.flags, old.rx, u.cfg);
+                        (c.num, c.zone, c.flags, c.tones, c.rx, c.cfg) = (old.num & 0x3FF, old.zone, old.flags, (old.num >> 10) as u8, old.rx, u.cfg);
                         s.zone = old.zone;
                     }
                     self.set.home_ch = u.home;
