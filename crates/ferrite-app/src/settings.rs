@@ -85,8 +85,6 @@ pub const LAYOUTS: [&str; 3] = ["Watch", "Single + scope", "Watch + activity"];
 pub const THEMES: [&str; 3] = ["Dark", "Daylight", "Night red"];
 pub const PIN_MODES: [&str; 3] = ["Off", "At power on", "Power on + unlock"];
 pub const ON_OFF: [&str; 2] = ["Off", "On"];
-/// Follow return (0 1 2 3, WATCH-5).
-pub const FOLLOW_RETURNS: [&str; 2] = ["Stay", "Switch back"];
 /// Power-on message (0 7 3 2): what the logo screen shows under the version (BOOT-9).
 pub const POWER_ON: [&str; 3] = ["Off", "Callsign", "Text"];
 /// Boot screen (0 7 3 3).
@@ -192,10 +190,11 @@ pub struct Settings {
     pub show_hidden: bool,
     /// 0 9 3 2: channel-only mode (PIN-5): no V/M, MENU 0 or editing; hold # leaves it.
     pub chan_only: bool,
-    /// 0 1 2 2: the active slot follows a watched slot that is heard (WATCH-5).
-    pub follow: bool,
-    /// 0 1 2 3: and switches back once it has been closed for 2 s.
-    pub follow_back: bool,
+    /// Spare: was Follow (0 1 2 2), dropped in decision 81. Always false; kept so the saved flag bits after
+    /// it keep their places.
+    pub spare_flag1: bool,
+    /// Spare: was Follow return (0 1 2 3), dropped in decision 81.
+    pub spare_flag2: bool,
     /// 0 1 6 3: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
     /// split (SCAN-22).
     pub scan_tx: bool,
@@ -285,8 +284,8 @@ impl Settings {
         arrival_tone: true,
         show_hidden: false,
         chan_only: false,
-        follow: true,
-        follow_back: true,
+        spare_flag1: false,
+        spare_flag2: false,
         scan_tx: false,
         tone_level: 1,
     };

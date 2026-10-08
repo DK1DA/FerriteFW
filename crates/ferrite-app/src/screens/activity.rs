@@ -86,8 +86,6 @@ pub struct RadioUi {
     /// A seek (hold 3 or 1) is running: the receiver's frequency is taken as it lands.
     pub hf_seeking: bool,
     pub hf_entry: u32,
-    /// The last [`ferrite_core::msg::FollowLive::n`] acted on.
-    pub follow_n: u8,
 }
 
 impl RadioUi {
@@ -109,7 +107,6 @@ impl RadioUi {
             hf_counted: false,
             hf_seeking: false,
             hf_entry: 0,
-            follow_n: 0,
         }
     }
 
@@ -244,17 +241,6 @@ impl App {
         }
         if live.tx.keyed {
             self.radio.act[(live.tx.slot as usize).min(SLOTS - 1)] |= 1;
-        }
-        // WATCH-5: the watch engine follows a heard slot, or goes back; the home screen shows it active. Only on
-        // home (a screen open edits the active slot: it doesn't change under it), and not to a scan's stop.
-        let f = live.follow;
-        if f.n != self.radio.follow_n {
-            self.radio.follow_n = f.n;
-            let s = f.slot as usize;
-            if self.set.follow && s < SLOTS && f.slot != self.active && !live.slots[s].scanning && self.screen == crate::Screen::Home {
-                self.active = f.slot;
-                self.out.push(RadioCmd::Active(f.slot));
-            }
         }
     }
 }

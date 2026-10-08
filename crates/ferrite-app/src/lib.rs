@@ -81,7 +81,7 @@ const REFUSED_MS: u16 = 80;
 /// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
 pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
-/// Watch pause (0 1 2 4, default 1 min).
+/// Watch pause (0 1 2 2, default 1 min).
 pub const PAUSE_S: u16 = 60;
 /// After a transmission, watch waits this long with the active slot quiet, or until a key (WATCH-16; nicFW's 30 s).
 pub const TX_PAUSE_S: u16 = 30;
@@ -1015,16 +1015,9 @@ impl App {
         [0, 0b011, 0b111][self.watch as usize % 3] | (self.set.aprs_mode as u8) << aprs::APRS_SLOT
     }
 
-    /// The radio-wide settings the Radio task keeps: follow and follow return (0 1 2 2, 0 1 2 3) to the watch
-    /// engine (WATCH-5), scan inputs (0 1 6 3, SCAN-22) and the subtone level (0 8 4 2, TONE-16).
+    /// The radio-wide settings the Radio task keeps: scan inputs (0 1 6 3, SCAN-22) and the subtone level
+    /// (0 8 4 2, TONE-16).
     pub(crate) fn send_radio_settings(&mut self) {
-        use ferrite_core::watch::Follow;
-        let f = match (self.set.follow, self.set.follow_back) {
-            (false, _) => Follow::Off,
-            (true, false) => Follow::On,
-            (true, true) => Follow::Return,
-        };
-        self.out.push(RadioCmd::Follow(f));
         self.out.push(RadioCmd::ScanTx(self.set.scan_tx));
         self.out.push(RadioCmd::ToneLevel(self.set.tone_level));
     }

@@ -334,7 +334,6 @@ pub async fn task() {
             }
             // Three slots, watch, scan, the slot settings and the exclusive modes (scope, tone search, counter, HF
             // mode: milestone 2e, chapter 20a; crossband): milestone 2 and later (manual chapters 6, 13, 14, 19-22).
-            // Follow (WATCH-5) waits for the watch engine here (2d), which then fills `LiveAll::follow`.
             Either::First(
                 RadioCmd::TuneSlot { .. }
                 | RadioCmd::SlotParam { .. }
@@ -345,7 +344,6 @@ pub async fn task() {
                 | RadioCmd::ToneLevel(_)
                 | RadioCmd::Beep { .. }
                 | RadioCmd::PauseWatch(_)
-                | RadioCmd::Follow(_)
                 | RadioCmd::ScanSkip { .. }
                 | RadioCmd::ScanZones { .. }
                 | RadioCmd::ScanDir { .. }

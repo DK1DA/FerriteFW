@@ -12,7 +12,7 @@ use ferrite_core::path::{Cause, Path, Rx, Sel, Steps};
 use ferrite_core::scan::{Range, Resume, Scan};
 use ferrite_core::txseq::{self, Kind, Req, TxSeq};
 use ferrite_core::watch::{self, Watch};
-use ferrite_core::msg::{BroadcastCmd, Device, GpsState, FollowLive, LiveAll, ModeLive, RadioCmd, SlotLive, TxLive, XbLive, SCOPE_BARS, XB_COLS};
+use ferrite_core::msg::{BroadcastCmd, Device, GpsState, LiveAll, ModeLive, RadioCmd, SlotLive, TxLive, XbLive, SCOPE_BARS, XB_COLS};
 use ferrite_core::txplan::Region;
 use ferrite_core::msg::{CalState, LinkLive, SameDecoded, SelfTest};
 
@@ -86,7 +86,6 @@ const STATIONS: [(u16, &str, &str); 4] = [
 pub struct FakeRadio {
     pub live: LiveAll,
     watch: u8,
-    follow: watch::Follow,
     /// The engines, as the Radio task runs them.
     watcher: Watch,
     scans: [Scan; 3],
@@ -134,7 +133,6 @@ impl FakeRadio {
         FakeRadio {
             live,
             watch: 0b111,
-            follow: watch::Follow::Return,
             watcher: Watch::new(),
             scans,
             seq: TxSeq::new(),
@@ -226,7 +224,6 @@ impl FakeRadio {
                 }
             }
             RadioCmd::Watch(m) => self.watch = m,
-            RadioCmd::Follow(f) => self.follow = f,
             RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::Power, value } => self.power[slot as usize % 4] = value.clamp(0, 2) as u8,
             RadioCmd::PauseWatch(secs) => {
                 let now = self.ms();
@@ -442,11 +439,8 @@ impl FakeRadio {
         };
         // Watch (WATCH-2): each chip's squelch for the slot it was on, then the engine's next turn.
         let sq = self.on_chip.map(|o| o.is_some_and(|i| carrier(i as usize, &self.live.slots[i as usize]).0));
-        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: 0, follow: self.follow };
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: 0 };
         let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
-        if let Some(s) = out.follow {
-            self.live.follow = FollowLive { n: self.live.follow.n.wrapping_add(1), slot: s };
-        }
         // Scans step only while their slot has a chip.
         for i in 0..3 {
             if self.live.slots[i].scanning && out.chip.contains(&Some(i as u8)) {

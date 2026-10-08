@@ -28,7 +28,7 @@ impl T {
     }
 }
 
-/// The old start-up queued 33 commands (now 36) into a 16-place ring and the first went missing: every slot's
+/// The old start-up queued 33 commands (now 38) into a 16-place ring and the first went missing: every slot's
 /// frequency and settings, and the active slot, watch and Battery Save, must all reach the Radio task.
 #[test]
 fn start_up_sends_every_slot_whole() {
@@ -44,10 +44,9 @@ fn start_up_sends_every_slot_whole() {
         }
     }
     assert!(v.contains(&RadioCmd::Active(0)) && v.contains(&RadioCmd::Watch(0b011)));
-    assert!(v.contains(&RadioCmd::Follow(ferrite_core::watch::Follow::Return)), "WATCH-5's defaults");
     assert!(v.iter().any(|c| matches!(c, RadioCmd::BatterySave(_))));
     assert!(v.contains(&RadioCmd::ScanTx(false)) && v.contains(&RadioCmd::ToneLevel(1)), "SCAN-22, TONE-16 defaults");
-    assert_eq!(v.len(), 6 + 3 * 11); // per slot: tune and ten parameters (split included)
+    assert_eq!(v.len(), 5 + 3 * 11); // per slot: tune and ten parameters (split included)
     // Stepping through channels faster than the commands drain: the slot goes out once, as it is now.
     let mut t = T::new();
     t.tap(Key::VfoMem);

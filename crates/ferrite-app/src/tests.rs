@@ -415,7 +415,7 @@ fn every_destination_draws() {
 }
 
 mod group_a;
-mod follow;
+mod watch_heard;
 
 fn count_px(fb: &FrameBuffer, y0: i32, y1: i32, f: impl Fn(u16) -> bool) -> usize {
     (y0..y1).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| f(fb.at(x, y))).count()

@@ -29,7 +29,7 @@ pub(crate) type Entry = (&'static str, &'static str, &'static str);
 
 const G1: [Entry; 8] = [
     (slow!("Watch"), slow!("A+B"), slow!("Which slots are heard besides the active one.")),
-    (slow!("Watch behaviour"), slow!("Heard"), slow!("Audio, follow, TX slot, pause time.")),
+    (slow!("Watch behaviour"), slow!("Heard"), slow!("Watched audio and pause time.")),
     (slow!("Background job"), slow!("Off"), slow!("A zone scan or decoder on a watched slot.")),
     (slow!("Scan target"), slow!("Current zone"), slow!("What SIDE2 scans.")),
     (slow!("Resume"), slow!("5 s"), slow!("When a stopped scan moves on.")),
@@ -131,8 +131,6 @@ const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS"
 pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ((1, 2), &[
         (slow!("Watched audio"), slow!("Heard"), slow!("Heard, muted, per slot.")),
-        (slow!("Follow"), slow!("On"), slow!("The active slot follows a watched one.")),
-        (slow!("Follow return"), slow!("Switch back"), slow!("Stay, or switch back after.")),
         (slow!("Pause time"), slow!("1 min"), slow!("# on home pauses watch this long.")),
     ]),
     ((1, 6), &[
@@ -522,14 +520,6 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.push(b"-9");
             false
         }
-        [1, 2, 2] => {
-            pick(b, &ON_OFF, s.follow as u8);
-            !s.follow
-        }
-        [1, 2, 3] => {
-            pick(b, &FOLLOW_RETURNS, s.follow_back as u8);
-            !s.follow_back
-        }
         [1, 6, 3] => {
             pick(b, &ON_OFF, s.scan_tx as u8);
             s.scan_tx
@@ -606,10 +596,8 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 35] = [
+pub(crate) const SETTABLE: [&[u8]; 33] = [
     &[1, 1],
-    &[1, 2, 2],
-    &[1, 2, 3],
     &[1, 6, 3],
     &[3, 1, 2],
     &[3, 1, 3],
@@ -649,14 +637,6 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
     let s = &mut app.set;
     match p {
         [1, 1] => app.change(Item::Watch, d),
-        [1, 2, 2] => {
-            s.follow = !s.follow;
-            app.send_radio_settings();
-        }
-        [1, 2, 3] => {
-            s.follow_back = !s.follow_back;
-            app.send_radio_settings();
-        }
         [1, 6, 3] => {
             s.scan_tx = !s.scan_tx;
             app.out.push(RadioCmd::ScanTx(app.set.scan_tx));
@@ -744,14 +724,6 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
     match p {
         [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
         [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
-        [1, 2, 2] => {
-            s.follow = d.follow;
-            app.send_radio_settings();
-        }
-        [1, 2, 3] => {
-            s.follow_back = d.follow_back;
-            app.send_radio_settings();
-        }
         [1, 6, 3] => {
             s.scan_tx = d.scan_tx;
             app.out.push(RadioCmd::ScanTx(d.scan_tx));

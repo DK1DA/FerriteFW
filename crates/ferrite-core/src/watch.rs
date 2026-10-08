@@ -6,8 +6,8 @@
 //!   [`WATCHED_DWELL_MS`] on each watched one; a slot with its squelch open keeps the chip, and for
 //!   [`HOLD_MS`] after it closes (the reply after the squelch tail).
 //! - Audio: the active slot's first; a watched slot only while the active one is closed, unless muted (WATCH-3).
-//! - Follow (WATCH-5): on, a watched slot that is heard becomes active; return, back to the first slot after
-//!   it has been closed for [`HOLD_MS`].
+//! - The active slot never changes here: a watched slot that is heard plays and shows RX, and only the user
+//!   changes the active slot (WATCH-5; Follow was dropped, decision 81).
 //! - Paused (WATCH-6, WATCH-16, TX-34): while keyed and until [`Watch::pause`]'s time, only the active slot.
 //! - Cancelled (WATCH-11): when the watch set needs more than one relay state, only the active slot.
 //!
@@ -22,17 +22,8 @@ pub const ACTIVE_DWELL_MS: u32 = 150;
 /// How long a watched slot keeps a shared chip per turn: enough for the squelch to open on a carrier (stock
 /// hops about every 70 ms; to confirm on the bench).
 pub const WATCHED_DWELL_MS: u32 = 70;
-/// A slot that closes keeps its chip (and a followed slot stays active) this long.
+/// A slot that closes keeps its chip this long (the reply after the squelch tail).
 pub const HOLD_MS: u32 = 2_000;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Follow {
-    #[default]
-    Off,
-    On,
-    /// On, then back after the squelch tail.
-    Return,
-}
 
 /// What the engine is told each tick.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,7 +35,6 @@ pub struct Cfg {
     pub freq: [Freq10; SLOTS],
     /// Watched slots not heard (still highlighted).
     pub muted: u8,
-    pub follow: Follow,
 }
 
 /// What to do now.
@@ -54,8 +44,6 @@ pub struct Out {
     pub chip: [Option<u8>; 2],
     /// Whose audio is on the speaker.
     pub audio: Option<u8>,
-    /// Follow: make this slot active.
-    pub follow: Option<u8>,
     /// WATCH-11: the set needs both relay states; only the active slot is listened to.
     pub cancelled: bool,
     /// Paused (keyed or [`Watch::pause`]).
@@ -73,8 +61,6 @@ pub struct Watch {
     /// Closed within [`HOLD_MS`], a bit per slot.
     recent: u8,
     pause_until: Option<u32>,
-    /// Follow return: the slot to go back to.
-    home: Option<u8>,
 }
 
 fn after(now: u32, t: u32) -> bool {
@@ -83,7 +69,7 @@ fn after(now: u32, t: u32) -> bool {
 
 impl Watch {
     pub const fn new() -> Self {
-        Watch { on: [None; 2], since: [0; 2], open: 0, closed_at: [0; SLOTS], recent: 0, pause_until: None, home: None }
+        Watch { on: [None; 2], since: [0; 2], open: 0, closed_at: [0; SLOTS], recent: 0, pause_until: None }
     }
 
     /// Pause for `secs` (WATCH-6, WATCH-16); 0 resumes now.
@@ -153,25 +139,6 @@ impl Watch {
         } else {
             (0..SLOTS as u8).find(|&s| s != active && self.open(s) && c.muted & 1 << s == 0)
         };
-        if self.home == Some(active) {
-            self.home = None; // back already (or the UI never followed): nothing to return to
-        }
-        match (c.follow, out.audio) {
-            (Follow::Off, _) => self.home = None,
-            (f, Some(s)) if s != active => {
-                if f == Follow::Return && self.home.is_none() {
-                    self.home = Some(active);
-                }
-                out.follow = Some(s);
-            }
-            (Follow::Return, None) => {
-                if let Some(h) = self.home.filter(|&h| h != active && self.recent & 1 << active == 0) {
-                    out.follow = Some(h);
-                    self.home = None;
-                }
-            }
-            _ => {}
-        }
         out
     }
 }
@@ -183,7 +150,7 @@ mod tests {
 
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {
-        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, follow: Follow::Off }
+        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0 }
     }
 
     #[test]
@@ -246,38 +213,16 @@ mod tests {
         assert!(!o.cancelled && o.chip[1] == Some(2), "resumes once the set agrees");
     }
 
+    /// WATCH-5 (decision 81): a watched slot that is heard plays while the active one is closed; the engine
+    /// never asks for another active slot (it has no such output), and B's audio stops when A opens.
     #[test]
-    fn follow_and_return() {
+    fn heard_slot_plays_active_stays() {
         let mut w = Watch::new();
-        let c = Cfg { follow: Follow::Return, ..cfg() };
+        let c = cfg();
         w.tick(0, &c, [false; 2], false);
         let o = w.tick(100, &c, [false, true], false);
-        assert_eq!(o.follow, Some(1));
-        let c1 = Cfg { active: 1, ..c };
-        assert_eq!(w.tick(200, &c1, [false, true], false).follow, None);
-        assert_eq!(w.tick(300, &c1, [false, false], false).follow, None, "within the hold");
-        assert_eq!(w.tick(2_299, &c1, [false, false], false).follow, None);
-        assert_eq!(w.tick(2_300, &c1, [false, false], false).follow, Some(0), "back after the tail");
-        // Not followed (the UI on another screen): no return left over for when B is chosen later.
-        let mut w = Watch::new();
-        let c = Cfg { follow: Follow::Return, ..cfg() };
-        w.tick(0, &c, [false; 2], false);
-        assert_eq!(w.tick(100, &c, [false, true], false).follow, Some(1));
-        w.tick(200, &c, [false, false], false);
-        w.tick(3_000, &c, [false, false], false);
-        assert_eq!(w.tick(3_100, &Cfg { active: 1, ..c }, [false, false], false).follow, None, "B by hand stays");
-        // On: follows, never returns.
-        let mut w = Watch::new();
-        let c = Cfg { follow: Follow::On, ..cfg() };
-        w.tick(0, &c, [false; 2], false);
-        assert_eq!(w.tick(100, &c, [false, true], false).follow, Some(1));
-        let c1 = Cfg { active: 1, ..c };
-        w.tick(200, &c1, [false, true], false);
-        assert_eq!(w.tick(300, &c1, [false, false], false).follow, None);
-        assert_eq!(w.tick(10_000, &c1, [false, false], false).follow, None, "stays");
-        let mut w = Watch::new();
-        let c = Cfg { follow: Follow::Off, ..cfg() };
-        w.tick(0, &c, [false; 2], false);
-        assert_eq!(w.tick(100, &c, [false, true], false).follow, None);
+        assert_eq!((o.chip[1], o.audio), (Some(1), Some(1)));
+        let o = w.tick(200, &c, [true, true], false);
+        assert_eq!(o.audio, Some(0), "the active slot's audio first (WATCH-3)");
     }
 }
