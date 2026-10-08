@@ -72,6 +72,9 @@ enum Fake {
 const CARRIERS: [(Freq10, f32); 5] =
     [(mhz(146) + 83_500, -60.0), (mhz(146) + 61_000, -88.0), (mhz(146) + 88_000, -92.0), (mhz(146) + 52_000, -100.0), (mhz(443) + 47_500, -80.0)];
 /// FM stations for seek: frequency (10 kHz), RDS name and text.
+/// AM broadcasters an HF seek stops on (10 Hz units): LW, MW and shortwave.
+const HF_STATIONS: [Freq10; 9] = [19_800, 90_900, 108_900, 502_500, 607_000, 733_500, 958_000, 1_173_500, 1_540_000];
+
 const STATIONS: [(u16, &str, &str); 4] = [
     (8_890, "CBC R2", "Tempo with Julie Nesrallah"),
     (9_150, "CBC R1", "Ottawa Morning: traffic and weather on the hour"),
@@ -273,6 +276,13 @@ impl FakeRadio {
                     _ => self.now,
                 };
                 self.set(if on { Fake::Hf { t0, freq, mode } } else { Fake::Off })
+            }
+            RadioCmd::HfSeek { up } => {
+                if let Fake::Hf { freq, .. } = &mut self.mode {
+                    let f = *freq;
+                    let next = if up { HF_STATIONS.iter().find(|&&s| s > f) } else { HF_STATIONS.iter().rev().find(|&&s| s < f) };
+                    *freq = *next.unwrap_or(if up { &HF_STATIONS[0] } else { &HF_STATIONS[HF_STATIONS.len() - 1] });
+                }
             }
             RadioCmd::Crossband(c) => self.set(if c.is_some() { Fake::Xb { t0: self.now } } else { Fake::Off }),
             _ => {}

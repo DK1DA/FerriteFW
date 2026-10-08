@@ -64,6 +64,8 @@ pub struct Session {
     /// The fastest rate this port's UART reaches within 2 % (LINK-11), and a rate agreed, for the caller.
     max_baud: u32,
     baud: Option<u32>,
+    /// `REBOOT` was accepted: the caller restarts once the answer has gone (LINK-24).
+    reboot: bool,
     hellos: u16,
     seed: u32,
 }
@@ -91,6 +93,7 @@ impl Session {
             cancelled: false,
             max_baud: 115_200,
             baud: None,
+            reboot: false,
             hellos: 0,
             seed: 0x9E37_79B9,
         }
@@ -141,6 +144,11 @@ impl Session {
     /// arrives at the new rate within 1 s ([`Session::hellos`] counts them).
     pub fn take_baud(&mut self) -> Option<u32> {
         self.baud.take()
+    }
+
+    /// `REBOOT` was accepted, once: save, quiet the radio and reset after this answer has gone (LINK-24).
+    pub fn take_reboot(&mut self) -> bool {
+        core::mem::take(&mut self.reboot)
     }
 
     /// `HELLO`s handled so far.
@@ -228,6 +236,13 @@ impl Session {
                 }
                 None => Status::BadArg,
             },
+            // LINK-24: no prompt (it isn't a write); an unapproved Bluetooth device is refused.
+            msg::REBOOT if !(self.trusted || self.approved) => Status::NotApproved,
+            msg::REBOOT if app.radio.keyed.is_some() => Status::Busy,
+            msg::REBOOT => {
+                self.reboot = true;
+                Status::Ok
+            }
             _ => Status::UnknownType,
         };
         let _ = now;

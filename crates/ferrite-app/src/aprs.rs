@@ -23,6 +23,10 @@ use ufmt::uwrite;
 /// The slot APRS mode takes.
 pub const APRS_SLOT: u8 = 2;
 
+/// APRS-4: the heard list holds this many stations, in the APRS task's RAM only (never flash: it changes every
+/// few minutes on a busy frequency). The oldest heard goes when a new one comes; power off empties it.
+pub const HEARD_MAX: u16 = 20;
+
 /// The APRS settings kept with the APRS store (0 5 5 1, 0 5 5 4, 0 5 7 1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AprsCfg {

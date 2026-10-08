@@ -15,8 +15,8 @@ writes the update area, not even to clear it, so restore stock and update it the
 
 Getting into the bootloader needs nothing from the running firmware: at every power-on the
 bootloader listens about 200 ms for a probe packet before starting the app. This script floods
-probes and, to make the radio restart, sends `reboot` (our images' console) and the stock
-PROGRAMBT9000U / UPDATE sequence. If neither works, power-cycle the radio while it waits.
+probes and, to make the radio restart, sends Ferrite's link REBOOT (LINK-24), `reboot` (hwtest's console)
+and the stock PROGRAMBT9000U / UPDATE sequence. If neither works, power-cycle the radio while it waits.
 Holding the bottom two side buttons at power-on (inputs PA12 and PE5) also enters the bootloader.
 
 Protocol (from the bootloader code; ../analysis/bootloader.md): frames are
@@ -75,10 +75,34 @@ def read_reply(port, timeout):
     return None
 
 
+def ferrite_reboot():
+    """Ferrite's link REBOOT request (manual Appendix G, LINK-24): a 0x00 to claim the cable for the link, then
+    COBS(type 0x21, seq 1, CRC-16/CCITT-FALSE little-endian) and its 0x00."""
+    body = bytes([0x21, 1])
+    c = 0xFFFF
+    for x in body:
+        c ^= x << 8
+        for _ in range(8):
+            c = (c << 1) ^ 0x1021 if c & 0x8000 else c << 1
+            c &= 0xFFFF
+    raw = body + struct.pack("<H", c)
+    out, block = bytearray(), bytearray()
+    for x in raw:                                           # COBS; no frame here reaches 254 bytes
+        if x == 0:
+            out += bytes([len(block) + 1]) + block
+            block = bytearray()
+        else:
+            block.append(x)
+    out += bytes([len(block) + 1]) + block
+    return b"\x00" + bytes(out) + b"\x00"
+
+
 def enter_bootloader(port, wait):
     probe = frame(CMD_PROBE)
     port.reset_input_buffer()
-    port.write(b"\r\nreboot\r\n")                         # our images
+    port.write(ferrite_reboot())                            # Ferrite: saves, goes quiet, resets
+    time.sleep(0.1)
+    port.write(b"\r\nreboot\r\n")                         # hwtest
     t0, nudged = time.monotonic(), False
     print(f"waiting up to {wait} s for the bootloader (power-cycle the radio if it does not restart)...")
     while time.monotonic() - t0 < wait:

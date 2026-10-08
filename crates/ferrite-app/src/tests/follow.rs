@@ -158,11 +158,42 @@ fn follow_settings_round_trip() {
     }
     // A record from before the follow bits: its last byte had show_hidden and chan_only only.
     let mut v = save(&crate::settings::Settings::DEFAULT);
+    v.truncate(v.len() - 17); // before the power-on message's two fields, which follow the flags
     *v.last_mut().unwrap() = 0b11;
     let c = load(&v);
     assert_eq!((c.show_hidden, c.chan_only, c.follow, c.follow_back), (true, true, true, true), "the defaults");
     // And from before that byte at all.
     let c = load(&v[..v.len() - 1]);
     assert!(c.follow && c.follow_back);
-    assert!(save(&crate::settings::Settings::DEFAULT).len() <= 512);
+    let n = save(&crate::settings::Settings::DEFAULT).len();
+    assert!(n <= crate::link::RECORD_MAX, "the link writes the settings as one record: {n} bytes");
+}
+
+/// Power-on message (0 7 3 2): mode and text round trip after the flag byte; a record without them keeps the
+/// default (callsign); the boot line follows the mode (BOOT-9).
+#[test]
+fn power_on_message_round_trip_and_boot_line() {
+    struct V(Vec<u8>);
+    impl Sink for V {
+        fn put(&mut self, b: &[u8]) {
+            self.0.extend_from_slice(b);
+        }
+    }
+    let mut a = crate::settings::Settings { pon: 2, follow: false, ..crate::settings::Settings::DEFAULT };
+    a.set_callsign(b"va7fer");
+    b"Hello there".iter().for_each(|&c| _ = a.pon_text.push(c));
+    let mut v = V(Vec::new());
+    a.save(&mut v);
+    let mut b = crate::settings::Settings::DEFAULT;
+    b.load(&mut SliceSource(&v.0));
+    assert_eq!((b.pon, b.pon_text, b.follow), (2, a.pon_text, false));
+    assert_eq!(b.boot_line(), Some(b"Hello there".as_slice()));
+    let mut c = crate::settings::Settings::DEFAULT;
+    c.load(&mut SliceSource(&v.0[..v.0.len() - 17]));
+    assert_eq!((c.pon, c.follow), (1, false), "an older record: callsign, its flags kept");
+    assert_eq!(c.boot_line(), Some(b"VA7FER".as_slice()));
+    c.pon = 0;
+    assert_eq!(c.boot_line(), None, "off");
+    c.pon = 2;
+    assert_eq!(c.boot_line(), None, "text, but none written");
 }

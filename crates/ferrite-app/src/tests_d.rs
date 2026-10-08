@@ -254,6 +254,34 @@ fn hf_mode() {
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: false, .. })), "leaving resumes everything (HF-4)");
 }
 
+/// HF-31: hold 3 seeks up and hold 1 down with the SI4732's seek, in AM below 30 MHz; the landing is kept.
+#[test]
+fn hf_seek() {
+    use ferrite_core::msg::ModeLive;
+    let seeks = |t: &mut T| t.cmds().into_iter().filter(|c| matches!(c, RadioCmd::HfSeek { .. })).collect::<Vec<_>>();
+    let mut t = T::new();
+    menu0(&mut t, &[3, 4]);
+    seeks(&mut t);
+    let start = t.app.set.hf.freq;
+    t.hold(Key::Digit(3));
+    assert_eq!(seeks(&mut t), [RadioCmd::HfSeek { up: true }]);
+    assert!(matches!(t.app.screen(), Screen::Hf(Hf { n: 0, .. })), "a hold types no digit");
+    t.live.mode = ModeLive::Hf { freq: 1_173_500, rssi: -70, snr: 20, si4732: true, loading: 255 };
+    t.wait(200);
+    assert_eq!(t.app.set.hf.freq, 1_173_500, "the station it stopped on (from {start})");
+    t.live.mode = ModeLive::Hf { freq: 958_000, rssi: -70, snr: 20, si4732: true, loading: 255 };
+    t.wait(200);
+    assert_eq!(t.app.set.hf.freq, 1_173_500, "no seek running: the screen's own frequency stands");
+    t.hold(Key::Digit(1));
+    assert_eq!(seeks(&mut t), [RadioCmd::HfSeek { up: false }]);
+    t.wait(200);
+    assert_eq!(t.app.set.hf.freq, 958_000);
+    t.app.set.hf.mode = 3; // USB
+    t.hold(Key::Digit(3));
+    assert!(seeks(&mut t).is_empty(), "no seek in SSB");
+    assert_eq!(toast_head(&t), "Seek");
+}
+
 /// WX-4 to WX-7: an alert opens over any screen; OK silences, then opens the event log; BACK goes home.
 #[test]
 fn alert_screen() {
@@ -514,7 +542,7 @@ fn owner_card_from_setup_to_boot() {
     assert_eq!(b.as_bytes(), b"Owner card");
     let draw = |s: &crate::settings::Settings| {
         let mut fb = FrameBuffer::new();
-        boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), owner: s.boot_owner(), checks: &[] });
+        boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &[] });
         fb
     };
     let fb = draw(t.app.settings());
@@ -541,7 +569,7 @@ fn owner_card_clips_and_yields_to_a_failure() {
     let ok = [Check { label: "MCU", value: "", state: State::Ok }];
     let mut fb = FrameBuffer::new();
     fb.px.fill(0x1234);
-    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), owner: s.boot_owner(), checks: &ok });
+    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &ok });
     for y in 0..280 {
         for x in (0..12).chain(229..240) {
             assert_eq!(fb.at(x, y), BG, "ink outside the column at {x},{y}");
@@ -549,7 +577,7 @@ fn owner_card_clips_and_yields_to_a_failure() {
     }
     assert!(count_px(&fb, 80, 96, |c| c != BG) > 100, "the unknown characters drew as '?'");
     let fail = [Check { label: "MCU", value: "", state: State::Fail }];
-    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), owner: s.boot_owner(), checks: &fail });
+    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &fail });
     assert_eq!(count_px(&fb, 22, 34, |c| c != BG), 0, "a failure: the logo screen, not the card");
 }
 

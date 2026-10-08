@@ -383,7 +383,8 @@ impl Data for Sample {
     }
 
     fn stations(&self) -> u16 {
-        self.aprs.stations() + if self.heard_cleared.get() { 0 } else { STATIONS.len() as u16 }
+        let n = self.aprs.stations() + if self.heard_cleared.get() { 0 } else { STATIONS.len() as u16 };
+        n.min(crate::aprs::HEARD_MAX)
     }
     fn station(&self, i: u16) -> Option<Station> {
         if i >= self.stations() {

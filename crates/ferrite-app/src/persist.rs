@@ -98,7 +98,8 @@ macro_rules! persist {
     // Booleans after the fields share one byte, bit 0 first, each stored as "differs from the type's DEFAULT": a
     // record from before a flag joined reads the old byte (one bool, 0 or 1) as the first flag, and the flags it
     // didn't have read 0, their defaults.
-    ($t:ty { $($f:ident),* $(,)? } bits { $($b:ident),* $(,)? }) => {
+    // Fields in `then` come after the flag byte, so an older record's flag byte stays where it was.
+    ($t:ty { $($f:ident),* $(,)? } bits { $($b:ident),* $(,)? } $(then { $($g:ident),* $(,)? })?) => {
         impl Persist for $t {
             fn save(&self, s: &mut dyn Sink) {
                 $(self.$f.save(s);)*
@@ -107,6 +108,7 @@ macro_rules! persist {
                 let mut _i = 0;
                 $(v |= ((self.$b != d.$b) as u8) << _i; _i += 1;)*
                 v.save(s);
+                $($(self.$g.save(s);)*)?
             }
             fn load(&mut self, r: &mut dyn Source) {
                 $(self.$f.load(r);)*
@@ -117,6 +119,7 @@ macro_rules! persist {
                 v.load(r);
                 let mut _i = 0;
                 $(self.$b = d.$b ^ (v >> _i & 1 != 0); _i += 1;)*
+                $($(self.$g.load(r);)*)?
             }
         }
     };
@@ -173,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     link_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, follow, follow_back });
+} bits { show_hidden, chan_only, follow, follow_back } then { pon, pon_text });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -295,16 +298,17 @@ mod tests {
         assert_eq!(c.hf, Settings::DEFAULT.hf);
     }
 
-    /// Settings and slots must fit the store's 512-byte record (ferrite-store `settings::MAX_PAYLOAD`).
+    /// The settings' length, the settings and the slots must fit the store's 532-byte record (ferrite-store
+    /// `settings::MAX_PAYLOAD`).
     #[test]
     fn record_fits_the_store() {
         let leak = || -> &'static mut Settings { std::boxed::Box::leak(std::boxed::Box::new(Settings::DEFAULT)) };
         let alert = || std::boxed::Box::leak(std::boxed::Box::new(crate::screens::alert::AlertInfo::NONE));
         let a = App::new(leak(), alert());
-        let mut c = Count(0);
+        let mut c = Count(2);
         Settings::DEFAULT.save(&mut c);
         a.save_state(&mut c);
-        assert!(c.0 <= 512, "{} bytes", c.0);
+        assert!(c.0 <= 532, "{} bytes", c.0);
     }
 
     #[test]

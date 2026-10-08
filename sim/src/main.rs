@@ -83,7 +83,7 @@ fn main() {
         Check { label: "SI4732", value: "not tested", state: State::Off },
         Check { label: "Calibration", value: "", state: State::Pending },
     ];
-    let info = BootInfo { version: VERSION, callsign: Some(b"VA7FER"), owner: None, checks: &checks };
+    let info = BootInfo { version: VERSION, callsign: Some(b"VA7FER"), line: Some(b"VA7FER"), owner: None, checks: &checks };
     let mut fb = FrameBuffer::new();
     boot::draw(&mut fb, &info);
     save(&fb, "boot", scale);
@@ -97,7 +97,7 @@ fn main() {
     let mut running = checks;
     running[0..3].iter_mut().for_each(|c| c.state = State::Ok);
     (running[3].state, running[4].state) = (State::Pending, State::Pending);
-    boot::draw(&mut fb, &BootInfo { callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &running, ..info });
+    boot::draw(&mut fb, &BootInfo { callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &running, ..info });
     save(&fb, "boot-owner", scale);
 
     // The app, as in the window: keys pressed at simulated times, the fake radio stepped to match.
@@ -502,7 +502,7 @@ fn themed(scale: u32) {
         let name = |n: &str| format!("{n}-{suffix}");
         let mut fb = FrameBuffer::new();
         ferrite_ui::theme::set(theme);
-        boot::draw(&mut fb, &BootInfo { version: VERSION, callsign: Some(b"VA7FER"), owner: None, checks: &checks });
+        boot::draw(&mut fb, &BootInfo { version: VERSION, callsign: Some(b"VA7FER"), line: Some(b"VA7FER"), owner: None, checks: &checks });
         save(&fb, &name("boot"), scale);
         let store = fake::store();
         let mut radio = fake::FakeRadio::new();

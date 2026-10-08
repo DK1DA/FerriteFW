@@ -234,6 +234,20 @@ fn loading(live: &LiveAll) -> u8 {
     }
 }
 
+/// A seek that has found nothing by this gives up (the receiver stays where it stopped).
+const SEEK_MS: u32 = 15_000;
+
+/// HF-31: seek is the SI4732's, in AM: below 30 MHz, not in SSB or CW (the patch has no seek).
+fn seek(app: &mut App, up: bool) {
+    let h = app.set.hf;
+    if h.mode != AM || h.freq >= mhz(30) {
+        return app.show_toast(b"Seek", b"AM below 30 MHz only", false);
+    }
+    app.radio.hf_seeking = true;
+    app.radio.hf_tuned_at = app.now;
+    app.out.push(RadioCmd::HfSeek { up });
+}
+
 fn send(app: &mut App) {
     (app.radio.hf_tuned_at, app.radio.hf_counted) = (app.now, false);
     let h = &app.set.hf;
@@ -446,6 +460,8 @@ impl View for Hf {
                 app.radio.hf_entry = d as u32;
                 Hf { n: 1, point: 0, ..self }.put(app);
             }
+            // HF-31: hold 3 seeks up, hold 1 down (nicFW's tuner keys), with the SI4732's own seek.
+            (Key::Digit(d @ (1 | 3)), Long) => seek(app, d == 3),
             (Key::Hash, Short) => app.open(Dest::HfRecent),
             (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves HF mode", false), // HF-13
             (Key::Exit, Short) => {
@@ -480,6 +496,18 @@ impl View for Hf {
     }
 
     fn tick(self, app: &mut App, live: &LiveAll) {
+        if app.radio.hf_seeking {
+            // The seek's landing: the frequency is kept, and its band VFO and recent list follow as for tuning.
+            if let ModeLive::Hf { freq, .. } = live.mode {
+                if freq != 0 && freq != app.set.hf.freq {
+                    app.set.hf.freq = freq;
+                    (app.radio.hf_seeking, app.radio.hf_tuned_at, app.radio.hf_counted) = (false, app.now, false);
+                }
+            }
+            if app.now.wrapping_sub(app.radio.hf_tuned_at) >= SEEK_MS {
+                app.radio.hf_seeking = false;
+            }
+        }
         if !self.loaded && !(app.radio.ssb_patch && loading(live) < 100) {
             Hf { loaded: true, ..self }.put(app);
             app.radio.hf_tuned_at = app.now;

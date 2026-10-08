@@ -1,8 +1,7 @@
 //! Key presses from key down/up and time (manual chapter 7):
 //!
-//! - **KEY-3** a short press fires on release, under 500 ms; a long press fires while held, at 700 ms, and the
-//!   release after it does nothing. A release between 500 and 700 ms does nothing either (an open point in the
-//!   manual).
+//! - **KEY-3** a short press fires on release, under 700 ms; a long press fires while held, at 700 ms, and the
+//!   release after it does nothing. There is no gap between the two (decided Oct 7, 2026).
 //! - **KEY-4** the four arrows repeat at 10 per second after 400 ms held; once one has repeated, its release does
 //!   nothing. Arrows have no long press.
 //!
@@ -11,7 +10,8 @@
 
 use ferrite_core::keys::Key;
 
-pub const SHORT_MS: u32 = 500;
+/// A release before this is a short press; the long press fires at the same moment (KEY-3: no gap).
+pub const SHORT_MS: u32 = LONG_MS;
 pub const LONG_MS: u32 = 700;
 pub const REPEAT_AFTER_MS: u32 = 400;
 pub const REPEAT_MS: u32 = 100;
@@ -132,13 +132,14 @@ mod tests {
     }
 
     #[test]
-    fn short_fires_on_release_under_500() {
+    fn short_fires_on_release_under_700() {
         let mut t = KeyTracker::new();
         t.down(Key::Menu, 0);
-        assert!(run(&mut t, 0, 490).is_empty(), "nothing while held");
-        assert_eq!(t.up(Key::Menu, 499), Some(KeyEvent { key: Key::Menu, press: Press::Short }));
+        assert!(run(&mut t, 0, 690).is_empty(), "nothing while held");
+        assert_eq!(t.up(Key::Menu, 699), Some(KeyEvent { key: Key::Menu, press: Press::Short }));
         t.down(Key::Menu, 1000);
-        assert_eq!(t.up(Key::Menu, 1500), None, "500 ms is no longer short");
+        run(&mut t, 1000, 1700);
+        assert_eq!(t.up(Key::Menu, 1700), None, "700 ms is a long press, not short");
     }
 
     #[test]
@@ -166,11 +167,13 @@ mod tests {
     }
 
     #[test]
-    fn between_500_and_700_nothing() {
+    fn no_gap_between_short_and_long() {
         let mut t = KeyTracker::new();
         t.down(Key::Hash, 0);
         assert!(run(&mut t, 0, 600).is_empty());
-        assert_eq!(t.up(Key::Hash, 600), None);
+        assert_eq!(t.up(Key::Hash, 600), Some(KeyEvent { key: Key::Hash, press: Press::Short }), "600 ms is short");
+        t.down(Key::Hash, 1000);
+        assert_eq!(run(&mut t, 1000, 1700), [KeyEvent { key: Key::Hash, press: Press::Long }]);
     }
 
     #[test]

@@ -335,6 +335,7 @@ pub async fn task() {
                 | RadioCmd::ToneSearch { .. }
                 | RadioCmd::Counter(_)
                 | RadioCmd::Hf { .. }
+                | RadioCmd::HfSeek { .. }
                 | RadioCmd::Crossband(_),
             ) => {}
             // Transmit code is out of the build until milestone 4: the UI refuses first (RX-only build).

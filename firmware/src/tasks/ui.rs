@@ -122,7 +122,7 @@ pub async fn task() {
                 _ => State::Pending,
             };
         }
-        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: set.boot_owner(), checks: &checks });
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &checks });
         let done = checks.iter().all(|c| c.state != State::Pending);
         let t = start.elapsed();
         if (done && (t >= least || skip)) || t >= Duration::from_secs(5) {
@@ -145,7 +145,7 @@ pub async fn task() {
     }
     if checks.iter().any(|c| c.state == State::Fail) {
         // The failed check stays on screen until a key.
-        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), owner: None, checks: &checks });
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: None, checks: &checks });
         while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) {}
     }
 
@@ -233,6 +233,19 @@ pub async fn task() {
             link.poll(&mut app, store, now_ms(), &mut Cable);
             if let Some(r) = link.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)
+            }
+            if link.take_reboot() {
+                // LINK-24: the radio quiet, everything written (at most 3 s), the answer out, then a system
+                // reset: the stock bootloader listens for the updater first, as after hwtest's `reboot`.
+                RADIO.send(RadioCmd::Shutdown).await;
+                store.flush(&app);
+                store::wake(store);
+                let t = Instant::now();
+                while !store.idle() && t.elapsed() < Duration::from_secs(3) {
+                    Timer::after_millis(10).await;
+                }
+                Timer::after_millis(50).await; // the answer's bytes leave the UART
+                cortex_m::peripheral::SCB::sys_reset();
             }
             LINK_HELLOS.store(link.hellos(), Relaxed);
             LINK_ON.store(link.active(now_ms()), Relaxed);

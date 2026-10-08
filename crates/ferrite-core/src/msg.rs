@@ -72,6 +72,9 @@ pub enum RadioCmd {
     /// all of it (HF-8). The receiver follows from frequency and mode (HF-10), and the relay from the receiver:
     /// energised for chip 1, released for the SI4732 (HF-11).
     Hf { freq: Freq10, mode: u8, on: bool },
+    /// HF mode: the SI4732's own seek, up or down from the frequency it is on (AM, below 30 MHz; HF-31). The
+    /// frequency it stops on comes back in [`ModeLive::Hf`].
+    HfSeek { up: bool },
     /// The crossband repeater: start with these settings, or stop (XB-14).
     Crossband(Option<XbCfg>),
 }

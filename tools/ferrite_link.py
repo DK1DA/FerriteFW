@@ -11,6 +11,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT write-channel 12 --name "Club rpt" [--rx 146.94]
     python3 tools/ferrite_link.py PORT delete-channel 12
     python3 tools/ferrite_link.py PORT baud 230400
+    python3 tools/ferrite_link.py PORT reboot                     # into the bootloader, for flash.py
 
 PORT is a serial device (the programming cable, 115200 8N1), or tcp:HOST:PORT for the simulator:
 `cargo run -p ferrite-sim -- --term-headless 120 --term-tcp 7300`, then `tcp:127.0.0.1:7300`.
@@ -25,7 +26,7 @@ import sys
 import time
 
 PROTOCOL = 1
-HELLO, INFO, TOKEN, READ, WRITE, DELETE, BEGIN, END, BAUD = 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13, 0x14, 0x20
+HELLO, INFO, TOKEN, READ, WRITE, DELETE, BEGIN, END, BAUD, REBOOT = 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13, 0x14, 0x20, 0x21
 SETTINGS, CHANNEL, ZONE, PRESET = 1, 2, 3, 4
 STATUS = ["ok", "bad frame", "unknown type", "bad argument", "refused", "not approved", "pending (asking on the radio)",
           "busy", "not found", "invalid", "cancelled"]
@@ -226,6 +227,9 @@ def main():
         link.p.baud(rate)
         link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + b"ferrite_link.py")  # within 1 s, or the radio goes back
         print(f"now at {rate}")
+    elif a.cmd == "reboot":
+        link.ok(REBOOT)  # LINK-24: answered, then the radio saves, goes quiet and resets into the bootloader
+        print("restarting: the bootloader listens about 200 ms (run flash.py now, or it starts Ferrite again)")
     else:
         sys.exit(f"unknown command {a.cmd}; see --help")
 

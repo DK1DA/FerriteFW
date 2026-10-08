@@ -33,6 +33,8 @@ pub enum TextFor {
     Preset(u8),
     /// 0 8 7 1 (SETUP-12).
     Callsign,
+    /// 0 7 3 2's text, the boot screen's line (BOOT-9).
+    PowerOn,
 }
 
 impl TextFor {
@@ -42,6 +44,7 @@ impl TextFor {
             TextFor::Zone(_) => "Zone name",
             TextFor::Preset(_) => "Range name",
             TextFor::Callsign => "Callsign",
+            TextFor::PowerOn => "Power-on message",
         }
     }
 
@@ -63,6 +66,7 @@ impl TextFor {
             TextFor::Zone(z) => store.zone_name(z).unwrap_or_default(),
             TextFor::Preset(i) => store.data().preset(i).map_or(Buf::new(), |p| Buf::from(p.name.as_bytes())),
             TextFor::Callsign => Buf::from(app.set.callsign.as_bytes()),
+            TextFor::PowerOn => Buf::from(app.set.pon_text.as_bytes()),
         }
     }
 
@@ -244,6 +248,10 @@ fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
             }
         }
         TextFor::Callsign => app.set.set_callsign(t.as_bytes()), // SETUP-12
+        TextFor::PowerOn => {
+            app.set.pon_text = crate::settings::Text::EMPTY;
+            t.as_bytes().iter().for_each(|&c| _ = app.set.pon_text.push(c));
+        }
     }
     app.back();
 }

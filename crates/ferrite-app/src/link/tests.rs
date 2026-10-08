@@ -263,6 +263,24 @@ fn baud_within_the_uart() {
     assert_eq!(pc.link.take_baud(), None);
 }
 
+/// LINK-24: REBOOT on the cable is answered, then handed to the caller once; never while transmitting; a
+/// Bluetooth device needs its approval first (no prompt).
+#[test]
+fn reboot_to_the_bootloader() {
+    let mut pc = Pc::new(true);
+    pc.app.radio.keyed = Some(0);
+    assert_eq!(pc.ask(msg::REBOOT, &[]).0, Status::Busy as u8, "not while transmitting");
+    assert!(!pc.link.take_reboot());
+    pc.app.radio.keyed = None;
+    assert_eq!(pc.ask(msg::REBOOT, &[]).0, 0);
+    assert!(pc.link.take_reboot());
+    assert!(!pc.link.take_reboot(), "once");
+    let mut bt = Pc::new(false);
+    assert_eq!(bt.ask(msg::REBOOT, &[]).0, Status::NotApproved as u8);
+    assert!(!bt.link.take_reboot());
+    assert!(!matches!(bt.app.screen(), Screen::Link(_)), "no approval prompt for a restart");
+}
+
 /// TERM-2: the cable port setting and the first bytes decide.
 #[test]
 fn cable_routing() {

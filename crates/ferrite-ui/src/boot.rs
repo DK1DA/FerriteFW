@@ -36,8 +36,10 @@ pub struct Owner<'a> {
 
 pub struct BootInfo<'a> {
     pub version: &'a str,
-    /// The owner's callsign, shown on the logo screen and the owner card; None until one is set.
+    /// The owner's callsign, on the owner card; None until one is set.
     pub callsign: Option<&'a [u8]>,
+    /// The logo screen's line under the version: Power-on message (0 7 3 2) gives the callsign, a text or None.
+    pub line: Option<&'a [u8]>,
     /// The owner card, when the boot screen is set to it (MENU 0 7 3 3); None: the logo.
     pub owner: Option<Owner<'a>>,
     pub checks: &'a [Check],
@@ -67,10 +69,8 @@ pub fn draw(lcd: &mut impl Panel, b: &BootInfo) {
     lcd.mask4(64, 28, &LOGO112_RING, SUB, Some((&LOGO112_WIND, BLUE)), BG);
     lcd.text4_aligned(120, 188, Align::Center, b"FERRITE", &WORD_40, TEXT, BG);
     lcd.text4_aligned(120, 209, Align::Center, b.version.as_bytes(), &UI_12, SUB, BG);
-    if let Some(call) = b.callsign {
-        let mut up = [0u8; 16];
-        let k = upper(call, &mut up);
-        lcd.text4_aligned(120, 243, Align::Center, fit(&up[..k], &UI_15B, COL), &UI_15B, TEXT, BG);
+    if let Some(l) = b.line {
+        lcd.text4_aligned(120, 243, Align::Center, fit(l, &UI_15B, COL), &UI_15B, TEXT, BG);
     }
     let bar = if n > 0 { done * 120 / n } else { 120 };
     lcd.fill(60, 264, bar, 4, if failed.is_some() { RED } else { BLUE });

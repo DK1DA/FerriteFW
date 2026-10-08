@@ -37,6 +37,10 @@ pub mod msg {
     pub const END: u8 = 0x14;
     /// Propose a faster cable rate (LINK-11).
     pub const BAUD: u8 = 0x20;
+    /// Restart into the bootloader, for a firmware update (LINK-24): the cable, or an approved Bluetooth
+    /// device; refused while transmitting. The answer goes out first, then the radio saves, goes quiet and
+    /// resets.
+    pub const REBOOT: u8 = 0x21;
 }
 
 /// What a `READ`, `WRITE` or `DELETE` is about.

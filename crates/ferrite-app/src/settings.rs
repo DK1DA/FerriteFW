@@ -74,8 +74,10 @@ pub const TIME_ZONES: [i8; 38] = [
     -48, -44, -40, -38, -36, -32, -28, -24, -20, -16, -14, -12, -8, -4, 0, 4, 8, 12, 14, 16, 18, 20, 22, 23, 24,
     26, 28, 32, 35, 36, 38, 40, 42, 44, 48, 51, 52, 56,
 ];
-/// UTC-8 (settings.md).
-pub const TZ_DEFAULT: u8 = 5;
+/// UTC until you set it (decided Oct 7, 2026): GPS gives UTC only, so no zone is guessed.
+pub const TZ_DEFAULT: u8 = 14;
+
+const _: () = assert!(TIME_ZONES[TZ_DEFAULT as usize] == 0);
 
 pub const CLOCKS: [&str; 2] = ["24 h", "12 h"];
 pub const UNITS: [&str; 3] = ["Metric", "Imperial", "Nautical"];
@@ -85,6 +87,8 @@ pub const PIN_MODES: [&str; 3] = ["Off", "At power on", "Power on + unlock"];
 pub const ON_OFF: [&str; 2] = ["Off", "On"];
 /// Follow return (0 1 2 3, WATCH-5).
 pub const FOLLOW_RETURNS: [&str; 2] = ["Stay", "Switch back"];
+/// Power-on message (0 7 3 2): what the logo screen shows under the version (BOOT-9).
+pub const POWER_ON: [&str; 3] = ["Off", "Callsign", "Text"];
 /// Boot screen (0 7 3 3).
 pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
 /// The cable port (0 9 2 5, TERM-2): auto picks from the first bytes; the others force one.
@@ -102,6 +106,9 @@ pub struct Settings {
     pub owner: [Text<20>; 3],
     /// 0 7 3 3: the boot screen is the owner card (BOOT_SCREENS[1]), not the logo.
     pub boot_card: bool,
+    /// 0 7 3 2: the boot screen's line under the logo, an index into [`POWER_ON`] (BOOT-9), and its text.
+    pub pon: u8,
+    pub pon_text: Text<16>,
     /// 0 9 4: 0 = not chosen yet, else REGION_LIST[n - 1].
     pub region: u8,
     /// 0 8 9, and whether its warning has been shown (shown once: SETUP-8).
@@ -218,6 +225,8 @@ impl Settings {
         callsign: Text::EMPTY,
         owner: [Text::EMPTY; 3],
         boot_card: false,
+        pon: 1,
+        pon_text: Text::EMPTY,
         region: 0,
         extend_tx: false,
         extend_warned: false,
@@ -315,6 +324,17 @@ impl Settings {
     /// The boot screen's callsign (BOOT-9): None until one is set.
     pub fn boot_callsign(&self) -> Option<&[u8]> {
         (!self.callsign.is_empty()).then(|| self.callsign.as_bytes())
+    }
+
+    /// The logo screen's line (BOOT-9), as Power-on message (0 7 3 2) says: the callsign, the text, or
+    /// nothing (also when the one picked is empty).
+    pub fn boot_line(&self) -> Option<&[u8]> {
+        let t = match self.pon {
+            1 => &self.callsign.as_bytes(),
+            2 => &self.pon_text.as_bytes(),
+            _ => return None,
+        };
+        (!t.is_empty()).then_some(*t)
     }
 
     /// The owner card for the boot screen: Some when 0 7 3 3 is "Owner card" and the card has something on it

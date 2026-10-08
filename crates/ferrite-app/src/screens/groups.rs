@@ -79,7 +79,7 @@ const G6: [Entry; 9] = [
     (slow!("Position"), slow!(""), slow!("Fix, satellites, position, grid.")),
     (slow!("Coordinate format"), slow!("Deg, min"), slow!("How positions are written.")),
     (slow!("Units"), slow!("Metric"), slow!("Distance, altitude and speed units.")),
-    (slow!("Time zone"), slow!("UTC-8"), slow!("The clock's offset from UTC.")),
+    (slow!("Time zone"), slow!("UTC"), slow!("The clock's offset from UTC.")),
     (slow!("Clock"), slow!("24 h"), slow!("12 or 24 h, and set from GPS.")),
     (slow!("Waypoints"), slow!(""), slow!("Marked places; go to one.")),
     (slow!("GPS during RX/TX"), slow!("Always on"), slow!("Turn the GPS off around signals.")),
@@ -217,7 +217,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Arrival tone"), slow!("On"), slow!("A tone on reaching a waypoint.")),
     ]),
     ((8, 1), &[(slow!("TX timeout"), slow!("120 s"), slow!("Transmit stops after this.")), (slow!("Pre-alert"), slow!("10 s"), slow!("Warning before the timeout."))]),
-    ((8, 2), &[(slow!("VOX"), slow!("Off"), slow!("Transmit when you talk.")), (slow!("Level"), slow!("5"), slow!("1-9.")), (slow!("Delay"), slow!("1 s"), slow!("Hang time after speech."))]),
+    ((8, 2), &[(slow!("VOX"), slow!("Off"), slow!("Transmit when you talk.")), (slow!("Level"), slow!("5"), slow!("1-9; keys the active slot.")), (slow!("Tail"), slow!("2 s"), slow!("Hang time after speech."))]),
     ((8, 5), &[
         (slow!("Mode"), slow!("Off"), slow!("Receive, transmit or both.")),
         (slow!("Phase"), slow!("55 Hz"), slow!("55 Hz or a phase shift.")),
@@ -228,10 +228,11 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
     ((8, 6), &[
         (slow!("Dialer"), slow!(""), slow!("Type and send DTMF.")),
         (slow!("Memories"), slow!(""), slow!("16 stored sequences.")),
-        (slow!("On and off time"), slow!("100 ms"), slow!("DTMF tone timing.")),
+        (slow!("Speed"), slow!("100 ms"), slow!("Each tone and each gap.")),
         (slow!("PTT ID on VFOs"), slow!("Off"), slow!("Send the ID code at PTT.")),
         (slow!("ID code"), slow!("Empty"), slow!("The radio's DTMF ID.")),
         (slow!("Sidetone"), slow!("On"), slow!("Hear the digits you send.")),
+        (slow!("First digit delay"), slow!("300 ms"), slow!("Wait after key-up so a repeater opens.")),
     ]),
     ((8, 7), &[(slow!("Callsign"), slow!("Empty"), slow!("For APRS, CW ID, power-on message.")), (slow!("CW ID"), slow!("Off"), slow!("Send your callsign in CW."))]),
     ((9, 1), &[
@@ -359,6 +360,13 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
         [7, 2] => {
             pick(b, &LAYOUTS, s.layout);
             s.layout != 0
+        }
+        [7, 3, 2] => {
+            pick(b, &POWER_ON, s.pon);
+            if s.pon == 2 && !s.pon_text.is_empty() {
+                b.set(s.pon_text.as_bytes());
+            }
+            s.pon != 1
         }
         [7, 3, 3] => {
             pick(b, &BOOT_SCREENS, s.boot_card as u8);
@@ -577,7 +585,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 32] = [
+pub(crate) const SETTABLE: [&[u8]; 33] = [
     &[1, 1],
     &[1, 2, 2],
     &[1, 2, 3],
@@ -598,6 +606,7 @@ pub(crate) const SETTABLE: [&[u8]; 32] = [
     &[6, 6],
     &[7, 1],
     &[7, 2],
+    &[7, 3, 2],
     &[7, 3, 3],
     &[7, 4, 1],
     &[7, 4, 5],
@@ -636,6 +645,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         }
         [7, 1] => s.theme = cycle(s.theme, d, THEMES.len()),
         [7, 2] => s.layout = cycle(s.layout, d, LAYOUTS.len()),
+        [7, 3, 2] => s.pon = cycle(s.pon, d, POWER_ON.len()),
         [7, 3, 3] => s.boot_card = !s.boot_card,
         [9, 4] => {
             s.region = cycle(s.region.max(1) - 1, d, REGION_LIST.len()) + 1;
@@ -718,6 +728,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [6, 6] => (s.clock, s.clock_gps) = (d.clock, d.clock_gps),
         [7, 1] => s.theme = d.theme,
         [7, 2] => s.layout = d.layout,
+        [7, 3, 2] => s.pon = d.pon,
         [7, 3, 3] => s.boot_card = d.boot_card,
         [8, 9] => s.extend_tx = false,
         [3, 1, 2] => s.fm_step = d.fm_step,
@@ -869,6 +880,11 @@ impl Group {
         match p {
             [8, 7, 1] => {
                 super::setup::callsign(app);
+            }
+            // OK on Text edits it (16 characters); the knob still picks off, callsign or text.
+            [7, 3, 2] if ok && app.set.pon == 2 => {
+                app.text = Buf::from(app.set.pon_text.as_bytes());
+                app.open(Dest::Text(super::text::TextFor::PowerOn));
             }
             [8, 9] if ok => set_extend(app, !app.set.extend_tx),
             _ => {

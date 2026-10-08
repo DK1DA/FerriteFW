@@ -102,7 +102,8 @@ fn packed_flags_round_trip() {
     let mut b = crate::settings::Settings::DEFAULT;
     b.load(&mut R(&v.0));
     assert_eq!((b.show_hidden, b.chan_only), (false, true));
-    *v.0.last_mut().unwrap() = 1; // a record from before: the show-hidden bool
+    v.0.truncate(v.0.len() - 17); // a record from before the power-on message (pon, pon_text) ...
+    *v.0.last_mut().unwrap() = 1; // ... and before the flags: the show-hidden bool
     let mut c = crate::settings::Settings::DEFAULT;
     c.load(&mut R(&v.0));
     assert_eq!((c.show_hidden, c.chan_only), (true, false));

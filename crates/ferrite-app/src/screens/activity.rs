@@ -75,6 +75,8 @@ pub struct RadioUi {
     /// frequency being typed, as a number (the screen state holds its length and point).
     pub hf_tuned_at: u32,
     pub hf_counted: bool,
+    /// A seek (hold 3 or 1) is running: the receiver's frequency is taken as it lands.
+    pub hf_seeking: bool,
     pub hf_entry: u32,
     /// The last [`ferrite_core::msg::FollowLive::n`] acted on.
     pub follow_n: u8,
@@ -96,6 +98,7 @@ impl RadioUi {
             act_bucket: 0,
             hf_tuned_at: 0,
             hf_counted: false,
+            hf_seeking: false,
             hf_entry: 0,
             follow_n: 0,
         }

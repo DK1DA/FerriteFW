@@ -11,8 +11,8 @@ use ferrite_core::layout::SETTINGS;
 
 const MAGIC: u16 = 0x4153; // "SA"
 const HEAD: u32 = 8;
-/// The largest payload (the settings and slots are about 450 bytes).
-pub const MAX_PAYLOAD: usize = 512;
+/// The largest payload: the settings' length (2), the settings and the slots, 529 bytes now.
+pub const MAX_PAYLOAD: usize = 532;
 const COPIES: [u32; 2] = [SETTINGS.start, SETTINGS.start + crate::SECTOR];
 
 /// The copy in use: where its payload is, how long it is, its counter.
