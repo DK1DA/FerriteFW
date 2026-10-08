@@ -106,9 +106,10 @@ pub fn run(scale: u32) {
     s.save("aprsmode-card-menu");
     s.press(Key::Exit, 80);
 
-    // PTT C: compose; PTT sends. One to a station heard (acked on its second try), one to nobody (retrying).
+    // PTT A with C (the APRS slot) active: compose; PTT sends. One to a station heard (acked on its second
+    // try), one to nobody (retrying).
     for (to, text) in [("VE3KPW-9", "On my way, 10 min"), ("VE3ZZZ", "Are you QRV?")] {
-        s.press(Key::Ptt(2), 80);
+        s.press(Key::Ptt(0), 80);
         let d = Draft { to: Buf::from(to.as_bytes()), text: Buf::from(text.as_bytes()) };
         s.store.request(Op::Draft(d));
         s.run(200);

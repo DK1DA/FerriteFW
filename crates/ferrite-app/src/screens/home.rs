@@ -104,7 +104,10 @@ impl View for Home {
         use Press::*;
         let big = app.keys.is_held(Key::Side(2));
         // PIN-5: channel-only mode: no V/M, editing, settings or MENU 0.
-        if matches!((e.key, e.press), (Key::VfoMem, _) | (Key::Slot | Key::Menu, Long) | (Key::Menu | Key::Star, Short) | (Key::Star, Long))
+        if matches!(
+            (e.key, e.press),
+            (Key::VfoMem, _) | (Key::Slot | Key::Menu, Long) | (Key::Menu | Key::Star, Short) | (Key::Star, Long) | (Key::Side(2), LongUp)
+        )
             && app.chan_only_refuse()
         {
             return;
@@ -168,6 +171,9 @@ impl View for Home {
             (Key::Menu, Short) => app.screen = Screen::Quick(super::quick::Quick { row: 0 }), // MENU-1
             (Key::Menu, Long) => app.screen = Screen::Advanced(super::advanced::Advanced { row: 0, from_quick: false }), // MENU-2
             (Key::Side(2), Short) => super::scan::side2(app), // SCAN-1
+            // KEY-22: SIDE2 held alone opens the frequency counter when it comes up; SIDE2 + knob or ▲▼ (big
+            // steps) never does, whenever the knob turns.
+            (Key::Side(2), LongUp) => app.open(Dest::Counter),
             (Key::Side(1), Short) => {
                 // A tap latches monitor on the active slot until tapped again; its card says MON.
                 let a = app.active;

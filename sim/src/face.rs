@@ -25,7 +25,7 @@ const RIDGE: u32 = 0x23272D;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Part {
     Key(Key),
-    /// PTT A or B: transmit on that slot (`Key::Ptt(n)` to the app).
+    /// PTT A (the active slot) or PTT B (slot B): `Key::Ptt(n)` to the app (KEY-7).
     Ptt(u8),
     /// The channel knob: left half -1, right half +1.
     Knob,
@@ -78,8 +78,8 @@ impl Face {
             // Side buttons, top to bottom (stock's names small).
             k(Part::Ptt(0), 6, 190, 78, 120, "PTT A", ""),
             k(Part::Ptt(1), 6, 326, 78, 58, "PTT B", ""),
-            k(Part::Key(Key::Side(1)), 6, 398, 78, 64, "SIDE1", "PTT C"),
-            k(Part::Key(Key::Side(2)), 6, 476, 78, 64, "SIDE2", "Side 2"),
+            k(Part::Key(Key::Side(1)), 6, 398, 78, 64, "SIDE1", "PF1"),
+            k(Part::Key(Key::Side(2)), 6, 476, 78, 64, "SIDE2", "PF2"),
             // The channel knob (the encoder).
             k(Part::Knob, 214, 2, 128, 44, "", ""),
             // The volume knob: only its power switch reaches the MCU.

@@ -198,7 +198,7 @@ def main():
     elif a.cmd == "write-settings":
         rec = open(a.args[0], "rb").read()
         link.write(SETTINGS, 0, rec)
-        print(f"{len(rec)} bytes written (region, Extend TX, callsign, PIN and cable port keep the radio's)")
+        print(f"{len(rec)} bytes written (region, Extend TX, PIN and cable port keep the radio's)")
     elif a.cmd == "read-channel":
         n = int(a.args[0]) - 1
         rec = link.read(CHANNEL, n)

@@ -482,10 +482,12 @@ fn settings_record(app: &App, w: &mut Window) -> usize {
     w.n
 }
 
-/// Settings the link never changes (LINK-5): the region, Extend TX, the callsign, the PIN, setup, the cable
-/// port (the link would lose its own port) and the tokens. A written record keeps the radio's.
+/// Settings the link never changes (LINK-5): the region, Extend TX, the PIN, setup, the cable port (the link
+/// would lose its own port) and the tokens. A written record keeps the radio's. The callsign is written, in
+/// capitals as on the radio (LINK-26, decision 77: the write approval is enough, as nicFW's RMS writes it).
 fn keep_protected(new: &mut Settings, old: &Settings) {
-    new.callsign = old.callsign;
+    let call = new.callsign;
+    new.set_callsign(call.as_bytes());
     new.region = old.region;
     (new.extend_tx, new.extend_warned) = (old.extend_tx, old.extend_warned);
     (new.pin_mode, new.pin, new.pin_len, new.pin_misses, new.pin_wait) = (old.pin_mode, old.pin, old.pin_len, old.pin_misses, old.pin_wait);

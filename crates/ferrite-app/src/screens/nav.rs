@@ -319,7 +319,7 @@ pub const ALL: [Dest; 69] = {
 
 /// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 59] = [
+pub const MENU0: [(&[u8], Dest); 60] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -349,6 +349,7 @@ pub const MENU0: [(&[u8], Dest); 59] = [
     (&[5, 6], Dest::Sub(5, 6)),
     (&[5, 7], Dest::Sub(5, 7)),
     (&[5, 8], Dest::Sub(5, 8)),
+    (&[5, 9], Dest::Sub(5, 9)),
     (&[6, 2], Dest::GpsPosition),
     (&[6, 7], Dest::Waypoints),
     (&[6, 9], Dest::PositionEntry),
@@ -567,7 +568,6 @@ fn cycle(app: &mut App, item: Item) {
 
 /// PTT down where the screen has no PTT of its own: home, then transmit on the active slot (KEY-7, TX-20).
 pub fn transmit(app: &mut App) {
-    // PTT A/B/C key their own slot; the side connector's (PTT_ACTIVE) keys the active one (KEY-7).
-    let slot = if (app.ptt_slot as usize) < crate::SLOTS { app.ptt_slot } else { app.active };
-    super::transmit::ptt(app, slot);
+    // The slot the PTT keys was settled at key down (App::ptt_target, KEY-7).
+    super::transmit::ptt(app, app.ptt_slot);
 }

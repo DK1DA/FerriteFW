@@ -238,7 +238,7 @@ pub struct App {
     screen: Screen,
     slots: [Slot; SLOTS],
     active: u8,
-    /// The slot the PTT being pressed keys (`Key::Ptt`); `PTT_ACTIVE` for the side connector's.
+    /// The slot the PTT being pressed keys ([`App::ptt_target`]).
     pub(crate) ptt_slot: u8,
     /// Index into Watch's values: off, A+B, A+B+C.
     watch: u8,
@@ -313,7 +313,7 @@ impl App {
             screen: Screen::Home,
             slots: [Slot::new(mhz(146) + 52_000), Slot::new(mhz(443) + 47_500), Slot::new(mhz(118) + 95_000)],
             active: 0,
-            ptt_slot: ferrite_core::keys::PTT_ACTIVE,
+            ptt_slot: 0,
             watch: 1,
             bsave: 1,
             locked: false,
@@ -506,6 +506,11 @@ impl App {
 
     /// SCAN-19: PTT on a scanning slot ends the scan; stopped on a hit, the slot moves there (its channel, or its
     /// VFO), so the transmission goes out on the hit; otherwise on the frequency the scan started from.
+    /// The slot a PTT keys (KEY-7): PTT B keys slot B; PTT A and the side connector's key the active slot.
+    pub(crate) fn ptt_target(&self, k: u8) -> u8 {
+        if k == ferrite_core::keys::PTT_B { 1 } else { self.active }
+    }
+
     fn scan_ptt(&mut self, slot: u8, store: &impl ChannelStore) {
         if self.scan_mask & 1 << slot == 0 {
             return;
@@ -756,18 +761,19 @@ impl App {
             self.out.push(RadioCmd::PauseWatch(0));
         }
         self.screen.raw(self, Some(key), None, true);
-        if let Key::Ptt(slot) = key {
-            // APRS-18: in compose any PTT sends; PTT C in APRS mode opens compose from any screen. Neither keys voice.
+        if let Key::Ptt(k) = key {
+            // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there. PTT B keys
+            // slot B; PTT A and the side connector's key the active slot (decision 77, as nicFW).
+            let s = self.ptt_target(k);
+            // APRS-18: in compose any PTT sends; a PTT that would key the APRS slot opens compose from any screen.
+            // Neither keys voice.
             if matches!(self.screen, Screen::Compose(c) if !c.quick_edit_on()) {
                 return screens::msgs::send(self, store);
             }
-            if self.aprs_slot(slot) {
+            if self.aprs_slot(s) {
                 return self.open(Dest::Compose);
             }
-            // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there. PTT A, B and
-            // C key their own slot; the side connector's keys the active slot.
-            self.ptt_slot = slot;
-            let s = if (slot as usize) < SLOTS { slot } else { self.active };
+            self.ptt_slot = s;
             self.scan_ptt(s, store);
             self.screen.ptt(self, true);
         }

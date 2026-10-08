@@ -179,7 +179,7 @@ fn only_records_are_written() {
 }
 
 /// LINK-5, LINK-7: the settings read without the PIN or tokens, write back in parts, and the protected ones
-/// (region, Extend TX, callsign, PIN, cable port) keep the radio's values.
+/// (region, Extend TX, PIN, cable port) keep the radio's values; the callsign is written, in capitals (LINK-26).
 #[test]
 fn settings_round_trip_keeps_protected() {
     let mut pc = Pc::new(true);
@@ -195,6 +195,10 @@ fn settings_round_trip_keeps_protected() {
     s.region = 3;
     s.extend_tx = true;
     s.cable_port = 2;
+    s.callsign = crate::settings::Text::EMPTY;
+    for &b in b"va7fer" {
+        s.callsign.push(b);
+    }
     let mut out = std::vec![0u8; RECORD_MAX];
     let mut w = Window { b: &mut out, from: 0, n: 0 };
     s.save(&mut w);
@@ -202,6 +206,7 @@ fn settings_round_trip_keeps_protected() {
     let region = pc.app.set.region;
     assert_eq!(pc.write(what::SETTINGS, 0, &out[..n], 100).0, 0);
     assert_eq!(pc.app.set.theme, 2, "changed");
+    assert_eq!(pc.app.set.callsign.as_bytes(), b"VA7FER", "the callsign is written, in capitals (LINK-26)");
     assert_eq!((pc.app.set.region, pc.app.set.extend_tx, pc.app.set.cable_port), (region, false, 0), "kept");
     assert_eq!((pc.app.set.pin, pc.app.set.link_tokens[0]), (1234, [9; 8]), "kept, not zeroed by the masked read");
 }

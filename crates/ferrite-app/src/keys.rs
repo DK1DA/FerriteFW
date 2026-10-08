@@ -100,10 +100,12 @@ impl KeyTracker {
         }
     }
 
-    /// The held key was used as a modifier (SIDE2 + knob): its release is not a short press.
+    /// The held key was used as a modifier (SIDE2 + knob): its release is neither a short press nor the release
+    /// after a long press, even when the long press already fired (KEY-22: hold SIDE2 alone is the counter).
     pub fn used(&mut self, key: Key) {
         for h in self.held.iter_mut().flatten().filter(|h| h.key == key) {
             h.fired = true;
+            h.long = false;
         }
     }
 
@@ -164,6 +166,11 @@ mod tests {
         t.down(Key::Up, 2000);
         run(&mut t, 2000, 2600);
         assert_eq!(t.release(Key::Up, 2600), None, "nor after repeats");
+        // KEY-22: SIDE2 held past 700 ms and then used with the knob: its release is nothing either.
+        t.down(Key::Side(2), 3000);
+        run(&mut t, 3000, 3800);
+        t.used(Key::Side(2));
+        assert_eq!(t.release(Key::Side(2), 3900), None, "a modifier after its long press");
     }
 
     #[test]

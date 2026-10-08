@@ -227,8 +227,8 @@ impl View for Crossband {
         }
     }
 
-    /// XB-14: local PTT transmits on the slot it belongs to (PTT A/B/C), interrupting a pass; the Radio task
-    /// holds the repeater meanwhile and it carries on after, back on this screen.
+    /// XB-14: local PTT transmits on the slot it keys (KEY-7: PTT B slot B, PTT A the active slot), interrupting a
+    /// pass; the Radio task holds the repeater meanwhile and it carries on after, back on this screen.
     fn ptt(self, app: &mut App, down: bool) {
         if down {
             super::nav::transmit(app);

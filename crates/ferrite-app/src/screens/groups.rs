@@ -74,7 +74,8 @@ const G5: [Entry; 9] = [
     (slow!("Path"), slow!("WIDE1-1,WIDE2-1"), slow!("The digipeater path.")),
     (slow!("Radio"), slow!("144.390"), slow!("APRS frequency, delays, levels.")),
     (slow!("Digipeat"), slow!("Off"), slow!("Relay others' packets.")),
-    (slow!("KISS TNC"), slow!("Off"), slow!("Raw KISS on the cable or Bluetooth.")),
+    // 9 was KISS TNC alone; now the packet group (decision 77): KISS TNC moved to 0 5 9 1, the mailbox beside it.
+    (slow!("Packet"), slow!(""), slow!("KISS TNC and the mailbox.")),
 ];
 const G6: [Entry; 9] = [
     (slow!("GPS"), slow!("On"), slow!("The GPS receiver.")),
@@ -127,7 +128,7 @@ pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 28] = [
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ((1, 2), &[
         (slow!("Watched audio"), slow!("Heard"), slow!("Heard, muted, per slot.")),
         (slow!("Follow"), slow!("On"), slow!("The active slot follows a watched one.")),
@@ -198,6 +199,13 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 28] = [
         (slow!("Digipeat"), slow!("Off"), slow!("Relay others' packets.")),
         (slow!("Aliases"), slow!("WIDE1-1"), slow!("The aliases relayed.")),
         (slow!("Wait"), slow!("0 s"), slow!("Delay before relaying.")),
+    ]),
+    ((5, 9), &[
+        (slow!("KISS TNC"), slow!("Off"), slow!("Raw KISS on the cable or Bluetooth.")),
+        (slow!("Mailbox"), slow!("Off"), slow!("Answer packet connects to your SSID.")),
+        (slow!("Mailbox SSID"), slow!("1"), slow!("The SSID callers connect to.")),
+        (slow!("Mailbox frequency"), slow!("None"), slow!("Where the mailbox listens.")),
+        (slow!("Bulletins"), slow!("On"), slow!("Callers may post bulletins.")),
     ]),
     ((7, 3), &[
         // 1 was "Battery as": the bar shows an icon only, % and volts on Status (SBAR-19); S-meter took its row

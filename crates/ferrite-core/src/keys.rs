@@ -3,7 +3,7 @@
 //!
 //! The 20 matrix codes are the digit pad (12), the navigation pad (UP, DOWN, LEFT, RIGHT, MENU/OK, BACK) and the
 //! dedicated SLOT (A/B/C) and V/M keys. Which code is which still needs the radio (the key test); until then only
-//! the inputs whose role is known map to a [`Key`].
+//! the inputs whose role is known map to a [`Key`]: the PTTs and the side keys PF1/PF2.
 
 /// Stock's code table (0x0802F706 in V0.27). The ground row: keys from the sense lines straight to ground.
 pub const GROUND_ROW: [u8; 4] = [10, 14, 18, 13];
@@ -35,13 +35,19 @@ pub enum Key {
     Digit(u8),
     Star,
     Hash,
-    /// PTT, with the slot it keys: 0 = PTT A, 1 = PTT B, 2 = PTT C, [`PTT_ACTIVE`] = the side connector's
-    /// (the active slot). Transmit is the Radio task's call (and needs the tx build).
+    /// PTT: [`PTT_A`] and [`PTT_ACTIVE`] (the side connector's) key the active slot, [`PTT_B`] keys slot B
+    /// (KEY-7, decision 77: there is no PTT C). Transmit is the Radio task's call (and needs the tx build).
     Ptt(u8),
+    /// The side keys: 1 = SIDE1 (PF1, PE5: monitor, squelch, clarifier), 2 = SIDE2 (PF2, PA12: scan, big steps,
+    /// held alone the frequency counter).
     Side(u8),
 }
 
-/// `Key::Ptt` slot for the side connector's PTT: the active slot (KEY-7).
+/// `Key::Ptt` for PTT A (PE3): keys the active slot, as nicFW's PTT does (KEY-7).
+pub const PTT_A: u8 = 0;
+/// `Key::Ptt` for PTT B (PE2): keys slot B (KEY-7).
+pub const PTT_B: u8 = 1;
+/// `Key::Ptt` for the side connector's PTT: the active slot (KEY-7).
 pub const PTT_ACTIVE: u8 = 0xFF;
 
 impl Key {
@@ -52,8 +58,12 @@ impl Key {
 /// Key code to meaning. The matrix entries are filled in from the key test on the radio.
 pub const MAP: [Option<Key>; CODES] = {
     let mut m = [None; CODES];
-    m[CODE_PTT_A as usize] = Some(Key::Ptt(0));
-    m[CODE_PTT_B as usize] = Some(Key::Ptt(1));
+    // PF1 and PF2, stock's codes 0 and 1 (`analysis/keypad.md`): SIDE1 and SIDE2 (decision 77; stock's PF1 is
+    // PTT C, nicFW's S1-S3 are PE2, PE5 and PA12).
+    m[0] = Some(Key::Side(1));
+    m[1] = Some(Key::Side(2));
+    m[CODE_PTT_A as usize] = Some(Key::Ptt(PTT_A));
+    m[CODE_PTT_B as usize] = Some(Key::Ptt(PTT_B));
     m[CODE_PTT_VFO as usize] = Some(Key::PTT);
     m
 };
@@ -76,6 +86,7 @@ mod tests {
         assert_eq!(seen, 0x003F_FFFF, "codes 0-21");
         assert_eq!(key(CODE_PTT_A), Some(Key::Ptt(0)));
         assert_eq!(key(CODE_PTT_B), Some(Key::Ptt(1)), "PTT B keys slot B");
+        assert_eq!((key(0), key(1)), (Some(Key::Side(1)), Some(Key::Side(2))), "PF1 = SIDE1, PF2 = SIDE2");
         assert_eq!(key(99), None);
     }
 }

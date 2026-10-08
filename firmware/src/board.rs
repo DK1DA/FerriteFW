@@ -67,8 +67,8 @@ pub const KEY_SENSE: [Pin; 4] = [pin(GPIOD, 7), pin(GPIOD, 6), pin(GPIOD, 5), pi
 pub const KEY_DIRECT0: Pin = pin(GPIOE, 5); // key code 0
 pub const KEY_DIRECT1: Pin = pin(GPIOA, 12); // key code 1
 // Stock keys the transmitter from PE3 (PTT A), PE2 (PTT B) and PE6 (PTT on the current VFO, likely the side
-// connector's pin 9), and from PE5 when that key is set to PTT C. Any TX code must unkey only when all are
-// released. This image never transmits; it only reports them.
+// connector's pin 9), and from PE5 when that key is set to PTT C. Ferrite has no PTT C: PE5 (PF1) is SIDE1 and
+// PA12 (PF2) SIDE2 (decision 77). Any TX code must unkey only when all PTTs are released.
 pub const KEY_PTT: Pin = pin(GPIOE, 3); // PTT A
 pub const KEY_SIDE1: Pin = pin(GPIOE, 2); // PTT B
 pub const KEY_SIDE2: Pin = pin(GPIOE, 6); // PTT, current VFO (connector PTT, L)

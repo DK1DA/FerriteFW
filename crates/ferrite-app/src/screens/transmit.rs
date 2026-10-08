@@ -232,7 +232,10 @@ impl View for Transmit {
             return;
         }
         match key {
-            Some(Key::Side(2)) => app.out.push(RadioCmd::ToneBurst { on: down }),
+            Some(Key::Side(2)) => {
+                app.keys.used(Key::Side(2)); // a tone burst, not the counter (KEY-22)
+                app.out.push(RadioCmd::ToneBurst { on: down })
+            }
             Some(Key::Digit(d)) => app.out.push(RadioCmd::Dtmf { key: b'0' + d, on: down }),
             Some(Key::Star) => app.out.push(RadioCmd::Dtmf { key: b'*', on: down }),
             Some(Key::Hash) => app.out.push(RadioCmd::Dtmf { key: b'#', on: down }),

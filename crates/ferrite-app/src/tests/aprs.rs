@@ -133,14 +133,16 @@ fn aprs_slot_is_locked() {
     assert!(a.cmds().iter().any(|c| matches!(c, RadioCmd::TuneSlot { slot: 2, .. })));
 }
 
-/// APRS-18: PTT C opens compose from any screen without keying; in compose PTT sends.
+/// APRS-18: with the APRS slot (C) active, PTT A opens compose from any screen without keying; in compose PTT
+/// sends. PTT B keys B as ever.
 #[test]
-fn ptt_c_composes_and_ptt_sends() {
+fn ptt_on_aprs_slot_composes_and_ptt_sends() {
     let mut a = A::new();
     a.mode(true);
+    a.app.active = 2;
     a.app.open(crate::screens::nav::Dest::AprsHeard);
     a.cmds();
-    a.press(Key::Ptt(2), 100);
+    a.press(Key::Ptt(0), 100);
     assert!(matches!(a.app.screen(), Screen::Compose(_)), "{}", a.app.screen().name());
     assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "no voice");
     a.s.request(Op::Draft(Draft { to: Buf::from(b"VE3KPW-9".as_slice()), text: Buf::from(b"On my way".as_slice()) }));
@@ -150,12 +152,15 @@ fn ptt_c_composes_and_ptt_sends() {
     assert!(a.s.message(0).is_some_and(|m| !m.inbound && m.state == MsgState::Pending));
     assert!(!matches!(a.app.screen(), Screen::Compose(_)));
     assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
-    // Without APRS mode PTT C keys C as before.
-    a.mode(false);
+    // The connector's PTT on the APRS slot composes too; PTT B never reaches C.
     a.press(Key::Exit, 800);
-    a.app.key_down(Key::Ptt(2), a.t, &a.s);
+    a.press(Key::PTT, 100);
+    assert!(matches!(a.app.screen(), Screen::Compose(_)));
+    a.press(Key::Exit, 100);
+    a.press(Key::Exit, 800);
+    a.app.key_down(Key::Ptt(1), a.t, &a.s);
     assert!(!matches!(a.app.screen(), Screen::Compose(_)));
-    a.app.key_up(Key::Ptt(2), a.t + 100, &a.s);
+    a.app.key_up(Key::Ptt(1), a.t + 100, &a.s);
 }
 
 /// Beacon mode, power and on/off (0 5 5 1, 0 5 5 4, APRS-17).

@@ -717,6 +717,43 @@ fn ptt_b_keys_slot_b() {
     t.app.key_up(Key::PTT, t.t + 300, &s);
 }
 
+/// KEY-7 (decision 77): PTT A keys the active slot, as nicFW's PTT does; there is no PTT C.
+#[test]
+fn ptt_a_keys_the_active_slot() {
+    let mut t = ready();
+    t.app.slots[2] = t.app.slots[0]; // slot C's sample VFO is airband AM, which never transmits
+    t.app.slots[2].vfo = 44_600_000;
+    t.app.slots[2].vfo_mode = true;
+    t.app.active = 2;
+    let s = store();
+    t.app.key_down(Key::Ptt(0), t.t, &s);
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::Transmit { slot: 2, on: true }), "PTT A keys the active slot: {} {c:?}", t.app.screen().name());
+    t.app.key_up(Key::Ptt(0), t.t + 100, &s);
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 2, on: false }));
+}
+
+/// KEY-22: SIDE2 held alone opens the frequency counter when it comes up; SIDE2 + knob is big steps, never the
+/// counter, even when the knob turns after 700 ms.
+#[test]
+fn side2_held_alone_is_the_counter() {
+    let mut t = ready();
+    let s = store();
+    let t0 = t.t;
+    t.app.key_down(Key::Side(2), t0, &s);
+    t.app.tick(t0 + 800, &t.live, &s);
+    t.app.key_up(Key::Side(2), t0 + 900, &s);
+    assert!(matches!(t.app.screen(), Screen::Counter(_)), "{}", t.app.screen().name());
+    t.app.key_down(Key::Exit, t0 + 1000, &s);
+    t.app.key_up(Key::Exit, t0 + 1050, &s);
+    assert!(matches!(t.app.screen(), Screen::Home), "{}", t.app.screen().name());
+    t.app.key_down(Key::Side(2), t0 + 2000, &s);
+    t.app.tick(t0 + 2800, &t.live, &s);
+    t.app.knob(1, t0 + 2900, &s);
+    t.app.key_up(Key::Side(2), t0 + 3000, &s);
+    assert!(matches!(t.app.screen(), Screen::Home), "{}", t.app.screen().name());
+}
+
 #[test]
 fn transmit_keeps_slot_order() {
     use crate::screens::transmit::{place, HF_SLOT};
@@ -724,7 +761,7 @@ fn transmit_keeps_slot_order() {
     assert_eq!(place(1, 0), (25, 23));
     assert_eq!(place(1, 1), (54, 164));
     assert_eq!(place(1, 2), (224, 23));
-    // PTT A: the card on top; PTT C: the card at the bottom.
+    // Slot A keyed: the card on top; slot C keyed: the card at the bottom.
     assert_eq!(place(0, 0), (25, 164));
     assert_eq!(place(2, 2), (83, 164));
     // HF mode: its card on top, A, B, C below.
