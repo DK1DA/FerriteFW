@@ -495,6 +495,30 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.dtmf_sidetone as u8);
             !s.dtmf_sidetone
         }
+        [8, 5, 1] => {
+            pick(b, &TAIL_MODES, s.tail_mode);
+            s.tail_mode != 0
+        }
+        [8, 5, 2] => {
+            pick(b, &TAIL_PHASES, s.tail_phase);
+            s.tail_phase != 0
+        }
+        [8, 5, 4] => {
+            pick(b, &END_TONE_NAMES, s.end_tone);
+            s.end_tone != 0
+        }
+        [8, 6, 3] => {
+            let _ = uwrite!(b, "{} ms", s.dtmf_ms.clamp(50, 200));
+            s.dtmf_ms != Settings::DEFAULT.dtmf_ms
+        }
+        [8, 6, 7] => {
+            let _ = uwrite!(b, "{} ms", s.dtmf_delay.min(100) as u32 * 10);
+            s.dtmf_delay != Settings::DEFAULT.dtmf_delay
+        }
+        [8, 7, 2] => {
+            pick(b, &CW_ID_MODES, s.cw_id);
+            s.cw_id != 0
+        }
         [4, 9, 1] => {
             pick(b, &ON_OFF, s.same as u8);
             !s.same
@@ -619,7 +643,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 35] = [
+pub(crate) const SETTABLE: [&[u8]; 41] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -650,7 +674,13 @@ pub(crate) const SETTABLE: [&[u8]; 35] = [
     &[7, 7],
     &[7, 8],
     &[8, 4, 2],
+    &[8, 5, 1],
+    &[8, 5, 2],
+    &[8, 5, 4],
+    &[8, 6, 3],
     &[8, 6, 6],
+    &[8, 6, 7],
+    &[8, 7, 2],
     &[9, 1, 1],
     &[9, 2, 1],
     &[9, 2, 5],
@@ -715,7 +745,38 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [7, 6] => s.leds = cycle(s.leds, d, LED_MODES.len()),
         [7, 8] => s.auto_off = cycle(s.auto_off, d, AUTO_OFF_TIMES.len()),
         [9, 1, 1] => s.auto_lock = cycle(s.auto_lock, d, AUTO_LOCK_TIMES.len()), // KEY-20
-        [8, 6, 6] => s.dtmf_sidetone = !s.dtmf_sidetone,
+        [8, 6, 6] => {
+            s.dtmf_sidetone = !s.dtmf_sidetone;
+            app.send_tx_tones();
+        }
+        [8, 5, 1] => {
+            s.tail_mode = cycle(s.tail_mode, d, TAIL_MODES.len());
+            app.send_slot_tones();
+        }
+        [8, 5, 2] => {
+            s.tail_phase = cycle(s.tail_phase, d, TAIL_PHASES.len());
+            app.send_tx_tones();
+        }
+        [8, 5, 4] => {
+            s.end_tone = cycle(s.end_tone, d, END_TONE_NAMES.len());
+            app.send_slot_tones();
+        }
+        // 50-200 ms in 10 ms steps (DTMF-3)
+        [8, 6, 3] => {
+            s.dtmf_ms = (s.dtmf_ms.clamp(50, 200) as i32 + d * 10).clamp(50, 200) as u8;
+            app.send_tx_tones();
+        }
+        // 0-1000 ms in 50 ms steps (DTMF-3)
+        [8, 6, 7] => {
+            s.dtmf_delay = (s.dtmf_delay.min(100) as i32 + d * 5).clamp(0, 100) as u8;
+            app.send_tx_tones();
+        }
+        // VOX-10: CW ID needs a callsign
+        [8, 7, 2] if s.callsign.as_bytes().is_empty() => app.show_toast(b"CW ID", b"set a callsign first", false),
+        [8, 7, 2] => {
+            s.cw_id = cycle(s.cw_id, d, CW_ID_MODES.len());
+            app.send_tx_tones();
+        }
         [8, 9] => set_extend(app, !app.set.extend_tx),
         [9, 3, 2] if !s.chan_only => app.set_chan_only(), // PIN-5: leaving is hold #
         [9, 3] | [9, 3, 1] => {
@@ -794,7 +855,24 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [7, 6] => s.leds = d.leds,
         [7, 8] => s.auto_off = d.auto_off,
         [9, 1, 1] => s.auto_lock = d.auto_lock,
-        [8, 6, 6] => s.dtmf_sidetone = d.dtmf_sidetone,
+        [8, 6, 6] | [8, 5, 2] | [8, 6, 3] | [8, 6, 7] | [8, 7, 2] => {
+            match p {
+                [8, 6, 6] => s.dtmf_sidetone = d.dtmf_sidetone,
+                [8, 5, 2] => s.tail_phase = d.tail_phase,
+                [8, 6, 3] => s.dtmf_ms = d.dtmf_ms,
+                [8, 6, 7] => s.dtmf_delay = d.dtmf_delay,
+                _ => s.cw_id = d.cw_id,
+            }
+            app.send_tx_tones();
+        }
+        [8, 5, 1] | [8, 5, 4] => {
+            if p == [8, 5, 1] {
+                s.tail_mode = d.tail_mode;
+            } else {
+                s.end_tone = d.end_tone;
+            }
+            app.send_slot_tones();
+        }
         _ => {}
     }
 }

@@ -456,10 +456,16 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         ok
     }
 
+    // The save buffer's borrow is held across the flash writes on purpose: the only other borrow is
+    // `FlashStore::save`'s, which returns before borrowing while `saving` is set (until this ends).
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn save_async(&self, crc: u32, len: usize, seed: Option<Region>) -> bool {
-        let mut buf = [0u8; MAX_PAYLOAD];
-        buf[..len].copy_from_slice(&self.save_buf.borrow()[..len]);
-        let ok = settings::save(&self.f, &buf[..len]).await.is_ok();
+        // Straight from the save buffer, no second copy: the UI leaves it alone while `saving` is set
+        // ([`FlashStore::save`] returns at once), so the borrow held across the writes is the only one.
+        let ok = {
+            let buf = self.save_buf.borrow();
+            settings::save(&self.f, &buf[..len]).await.is_ok()
+        };
         if ok {
             self.saved.set(crc);
             if let Some(r) = seed.filter(|_| self.first_boot()) {

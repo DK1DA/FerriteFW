@@ -21,7 +21,7 @@ use ferrite_core::link::{self as wire, msg, what, Status, MAX_PAYLOAD, MAX_WIRE,
 use ferrite_core::VERSION;
 use ferrite_ui::text::Buf;
 
-/// The longest record a `WRITE` assembles: the settings, which the store keeps in 512 bytes too (a test checks
+/// The longest record a `WRITE` assembles: the settings alone (the store's 1 KB record adds the slots; a test checks
 /// their real length against it).
 pub const RECORD_MAX: usize = 512;
 /// A port stays in link mode this long after its last frame (TERM-2), then the first bytes decide again.

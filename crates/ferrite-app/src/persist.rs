@@ -176,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     link_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, spare_flag1, spare_flag2, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio });
+} bits { show_hidden, chan_only, spare_flag1, spare_flag2, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(c.hf, Settings::DEFAULT.hf);
     }
 
-    /// The settings' length, the settings and the slots must fit the store's 532-byte record (ferrite-store
+    /// The settings' length, the settings and the slots must fit the store's 1 KB record (ferrite-store
     /// `settings::MAX_PAYLOAD`).
     #[test]
     fn record_fits_the_store() {
@@ -308,7 +308,7 @@ mod tests {
         let mut c = Count(2);
         Settings::DEFAULT.save(&mut c);
         a.save_state(&mut c);
-        assert!(c.0 <= 532, "{} bytes", c.0);
+        assert!(c.0 <= 1024, "{} bytes", c.0);
     }
 
     #[test]

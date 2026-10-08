@@ -189,7 +189,7 @@ struct Outbox {
     len: u8,
     /// Slots whose full state is still to send, a bit each.
     sync: u8,
-    /// The slot being sent and its next item (0 the frequency, 1-9 [`slot::params`]).
+    /// The slot being sent and its next item (0 the frequency, then [`slot::params`], then the end tone and tail).
     cur: u8,
     step: u8,
 }
@@ -405,6 +405,15 @@ impl App {
         let slot = self.out.cur;
         let c = match self.out.step {
             0 => RadioCmd::TuneSlot { slot, freq: self.tuned_freq(slot) },
+            // After the slot's settings: its end tone and tail (the channel's over the radio's).
+            k if k as usize > slot::params(&DEFAULT_CFG).len() => {
+                let (end, tail) = self.slot_tones(slot);
+                if k as usize == slot::params(&DEFAULT_CFG).len() + 1 {
+                    RadioCmd::SlotParam { slot, param: Param::EndTone, value: end as i32 }
+                } else {
+                    RadioCmd::SlotParam { slot, param: Param::Tail, value: tail as i32 }
+                }
+            }
             k => {
                 let (param, value) = slot::params(&self.tuned_cfg(slot))[k as usize - 1];
                 let value = if param == Param::Power && self.capped(slot) { 0 } else { value };
@@ -413,7 +422,7 @@ impl App {
             }
         };
         self.out.step += 1;
-        if self.out.step as usize > slot::params(&DEFAULT_CFG).len() {
+        if self.out.step as usize > slot::params(&DEFAULT_CFG).len() + 2 {
             self.out.sync &= !(1 << slot);
             self.out.cur = NO_SLOT;
         }
@@ -1031,6 +1040,52 @@ impl App {
     pub(crate) fn send_radio_settings(&mut self) {
         self.out.push(RadioCmd::ScanTx(self.set.scan_tx));
         self.out.push(RadioCmd::ToneLevel(self.set.tone_level));
+        self.send_tx_tones();
+    }
+
+    /// The Transmit group's tone settings to the Radio task (TONE-5 to TONE-10, VOX-12, DTMF-3, DTMF-8): the
+    /// radio-wide ones and the callsign for CW ID (each slot's end tone and tail go with the slot).
+    pub(crate) fn send_tx_tones(&mut self) {
+        let s = &self.set;
+        self.out.push(RadioCmd::TxTones { phase: s.tail_phase % 4, cw: s.cw_id % 3, sidetone: s.dtmf_sidetone });
+        let call = s.callsign.as_bytes();
+        for chunk in 0..2u8 {
+            let mut text = [0u8; 5];
+            for (k, t) in text.iter_mut().enumerate() {
+                *t = call.get(chunk as usize * 5 + k).copied().unwrap_or(0);
+            }
+            self.out.push(RadioCmd::CwCall { chunk, text });
+        }
+        self.out.push(RadioCmd::DtmfTiming { ms: s.dtmf_ms.clamp(50, 200), delay_10ms: s.dtmf_delay.min(100) });
+    }
+
+    /// Each slot's end tone and tail again (0 8 5 1 or 0 8 5 4 changed, or a channel's own; a slot's full sync
+    /// carries them too).
+    pub(crate) fn send_slot_tones(&mut self) {
+        for slot in 0..SLOTS as u8 {
+            let (end, tail) = self.slot_tones(slot);
+            self.out.push(RadioCmd::SlotParam { slot, param: Param::EndTone, value: end as i32 });
+            self.out.push(RadioCmd::SlotParam { slot, param: Param::Tail, value: tail as i32 });
+        }
+    }
+
+    /// A slot's end tone (an index into `tonegen::END_TONES`, 0 off) and tail elimination (bit 0 receive, bit 1
+    /// transmit), its channel's own over the radio's (TONE-7, TONE-10, decision 86); none on the APRS slot.
+    pub(crate) fn slot_tones(&self, slot: u8) -> (u8, u8) {
+        if self.aprs_slot(slot) {
+            return (0, 0);
+        }
+        let ch = self.slots[slot as usize % SLOTS].ch.filter(|_| !self.slots[slot as usize % SLOTS].vfo_mode);
+        let end = match ch.map_or(0, |c| c.end_tone()) {
+            0 => self.set.end_tone % 6,
+            e => e - 1, // Off, then the presets in 0 8 5 4's order
+        };
+        let tail = match ch.map_or(0, |c| c.tail()) {
+            0 => self.set.tail_mode & 3,
+            1 => 0,
+            _ => 3,
+        };
+        (end, tail)
     }
 
     /// The slot's frequency and every setting, to the Radio task (made when popped: [`App::pop_cmd`]).

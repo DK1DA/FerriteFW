@@ -101,6 +101,34 @@ pub fn dtmf_symbol(key: u8) -> Option<char> {
     }
 }
 
+/// Tail elimination (TONE-5): how long the carrier stays up with it, as stock (0x08024DCC keeps the TX 400 ms).
+pub const TAIL_MS: u16 = 400;
+
+/// Which tail elimination a transmission ends with (TONE-5): stock's 55 Hz tone with no sub-tone (0x0801D078), the
+/// CTCSS phase shift on a CTCSS transmission when 0 8 5 2 picks one, the 134.4 Hz turn-off code on DCS.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TailKind {
+    Tone55,
+    /// REG_52's bits 14:13: 0 the DCS turn-off code, 1-3 the CTCSS phase shift of 120°, 180°, 240°.
+    Shift(u8),
+}
+
+/// The tail for a transmission with this tone word (CHAN-3: bit 15 DCS) and 0 8 5 2's choice (0 55 Hz, 1-3 the
+/// phase shifts): the phase is for CTCSS only.
+pub fn tail_kind(tx_tone: u16, phase: u8) -> TailKind {
+    match tx_tone {
+        0 => TailKind::Tone55,
+        t if t & 0x8000 != 0 => TailKind::Shift(0),
+        _ if phase == 0 || phase > 3 => TailKind::Tone55,
+        _ => TailKind::Shift(phase),
+    }
+}
+
+/// DTMF-3: a sequence's length, ms: the first digit delay, then each digit on for `ms` and off for the same.
+pub fn dtmf_seq_ms(digits: usize, ms: u16, delay_ms: u16) -> u32 {
+    delay_ms as u32 + digits as u32 * 2 * ms as u32
+}
+
 /// A local beep's length, clamped: the Radio task waits through it.
 pub const BEEP_MAX_MS: u16 = 1_000;
 
@@ -188,5 +216,14 @@ mod tests {
         assert_eq!(mic_percent(0), 0);
         assert_eq!(mic_percent(80 << 4), 50);
         assert_eq!(mic_percent(0xFFF), 100);
+    }
+
+    #[test]
+    fn tails_and_dtmf_timing() {
+        assert_eq!(tail_kind(0, 2), TailKind::Tone55, "no sub-tone: 55 Hz whatever the phase");
+        assert_eq!(tail_kind(885, 0), TailKind::Tone55);
+        assert_eq!(tail_kind(885, 2), TailKind::Shift(2), "CTCSS: the phase shift");
+        assert_eq!(tail_kind(0x8000 | 0o23, 2), TailKind::Shift(0), "DCS: the turn-off code, phase or not");
+        assert_eq!(dtmf_seq_ms(4, 100, 300), 1100);
     }
 }

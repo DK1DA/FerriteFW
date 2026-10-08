@@ -28,7 +28,7 @@ impl T {
     }
 }
 
-/// The old start-up queued 33 commands (now 38) into a 16-place ring and the first went missing: every slot's
+/// The old start-up queued 33 commands (now 48) into a 16-place ring and the first went missing: every slot's
 /// frequency and settings, and the active slot, watch and Battery Save, must all reach the Radio task.
 #[test]
 fn start_up_sends_every_slot_whole() {
@@ -46,7 +46,14 @@ fn start_up_sends_every_slot_whole() {
     assert!(v.contains(&RadioCmd::Active(0)) && v.contains(&RadioCmd::Watch(0b011)));
     assert!(v.iter().any(|c| matches!(c, RadioCmd::BatterySave(_))));
     assert!(v.contains(&RadioCmd::ScanTx(false)) && v.contains(&RadioCmd::ToneLevel(1)), "SCAN-22, TONE-16 defaults");
-    assert_eq!(v.len(), 5 + 3 * 11); // per slot: tune and ten parameters (split included)
+    assert!(v.contains(&RadioCmd::TxTones { phase: 0, cw: 0, sidetone: true }), "the Transmit group's tones");
+    for s in 0..3u8 {
+        assert!(v.contains(&RadioCmd::SlotParam { slot: s, param: Param::EndTone, value: 0 }), "slot {s} end tone");
+        assert!(v.contains(&RadioCmd::SlotParam { slot: s, param: Param::Tail, value: 0 }), "slot {s} tail");
+    }
+    // Five radio-wide, the tones' four (TxTones, the callsign's two chunks, DTMF timing); per slot: tune, ten
+    // parameters (split included), end tone and tail.
+    assert_eq!(v.len(), 9 + 3 * 13);
     // Stepping through channels faster than the commands drain: the slot goes out once, as it is now.
     let mut t = T::new();
     t.tap(Key::VfoMem);

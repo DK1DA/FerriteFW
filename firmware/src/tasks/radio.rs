@@ -68,11 +68,10 @@ const FAST_MARGIN_DB: i16 = 10;
 /// The HF mode's internal slot index (the chips' `tuned` entry for it).
 const HF_SLOT: u8 = 3;
 /// The sequencer's settings in the `tx` build: the timeout a little after the UI's own 120 s (the UI unkeys
-/// first; this is the backstop), no pre-alert (the UI shows it). End tone, CW ID and tail elimination wait for
-/// their settings from the UI (0 8 5 4, 0 8 7 2: menu rows only so far); the Radio task can play them
-/// (`Radio::end_tone`, `Radio::cw_id`) once those arrive. Tail elimination waits for its own subtone work (TONE-9).
+/// first; this is the backstop), no pre-alert (the UI shows it). End tone, CW ID and tail elimination follow
+/// what the UI sends ([`RadioCmd::TxTones`], [`Param::EndTone`], [`Param::Tail`]): see `Radio::tx_cfg`.
 #[cfg(feature = "tx")]
-const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone: false, cw_id: false, tail: false };
+const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone: false, cw_id: false, cw_each: false, tail: false };
 /// REG_30 read back after the key-up write (TX-7): stock's transmit value with the microphone.
 #[cfg(feature = "tx")]
 const REG30_TX_MIC: u16 = 0xC1FE;
@@ -97,10 +96,12 @@ struct SlotRx {
     sq: u8,
     /// AM (Param::Mode 2): receive only (TX-20).
     am: bool,
+    /// Tail elimination on receive (TONE-6, [`Param::Tail`] bit 0): with no receive tone, the 55 Hz tail mutes.
+    rx_tail: bool,
 }
 
 impl SlotRx {
-    const DEFAULT: SlotRx = SlotRx { freq: DEFAULT, narrow: false, rx_tone: 0, clar: 0, sq: 3, am: false };
+    const DEFAULT: SlotRx = SlotRx { freq: DEFAULT, narrow: false, rx_tone: 0, clar: 0, sq: 3, am: false, rx_tail: false };
 
     /// Where the chip tunes: the frequency moved by the clarifier (10 Hz units).
     fn rx_freq(&self) -> Freq10 {
@@ -193,11 +194,23 @@ struct Tx {
     /// The read-back failed during a key-up (TX-7): the plan stops and the safe state follows.
     fault: bool,
     adc: bool,
-    /// The end tone (0 8 5 4, TONE-10: index into `tonegen::END_TONES`, 0 off) and the CW ID text (0 8 7 1 / 0 8 7 2;
-    /// empty = off): from the UI once those settings exist, off until then.
-    end_tone: u8,
+    /// Each slot's end tone (TONE-10: an index into `tonegen::END_TONES`, 0 off) and transmit tail elimination
+    /// (TONE-5), the channel's over the radio's as the UI resolved them; the slot keyed now (index 3: HF mode).
+    end: [u8; 4],
+    tail: [bool; 4],
+    slot: u8,
+    /// 0 8 5 2's phase (0 55 Hz, 1-3 the CTCSS phase shifts), 0 8 7 2's CW ID (0 off, 1 every 10 min, 2 on unkey)
+    /// with the callsign (0 8 7 1; empty: no ID, VOX-10), 0 8 6 6's DTMF sidetone (DTMF-8).
+    phase: u8,
+    cw: u8,
     cw_call: [u8; 10],
     cw_len: u8,
+    sidetone: bool,
+    /// DTMF-3: each digit's on and off time (ms) and the first digit delay (10 ms); a dialled sequence, and whether
+    /// this transmission is one (no end tone or CW ID after it: TONE-11).
+    dtmf: (u8, u8),
+    digits: [u8; 16],
+    dialled: bool,
 }
 
 fn now_ms() -> u64 {
@@ -329,11 +342,12 @@ impl Radio {
                     }
                     log(b"tx pa ", v);
                 }
-                // TONE-8 order at unkey, still keyed: end tone, CW ID when due (the sequencer plans them only when
-                // their settings are on), tail elimination (not yet: TONE-9's subtone work).
+                // TONE-8 order at unkey, still keyed: end tone, CW ID when due, tail elimination (the sequencer
+                // plans each only when its setting is on).
                 #[cfg(feature = "tx")]
                 Act::EndTone => {
-                    let t = tonegen::END_TONES.get(self.tx.end_tone as usize).copied().unwrap_or(&[]);
+                    let e = self.tx.end[self.tx.slot as usize % 4];
+                    let t = tonegen::END_TONES.get(e as usize).copied().unwrap_or(&[]);
                     self.play_keyed(t.iter().copied()).await;
                 }
                 #[cfg(feature = "tx")]
@@ -343,7 +357,7 @@ impl Radio {
                     self.play_keyed(cw.map(|(on, ms)| (if on { tonegen::CW_HZ } else { 0 }, ms))).await;
                 }
                 #[cfg(feature = "tx")]
-                Act::TailElim => {}
+                Act::TailElim => self.tail_elim().await,
                 // Transmit steps: only a key-up plans them, and this build never asks for one.
                 #[cfg(not(feature = "tx"))]
                 Act::ChipTx(_) | Act::ChipRx(_) | Act::PaRamp | Act::EndTone | Act::CwId | Act::TailElim => {}
@@ -390,6 +404,11 @@ impl Radio {
         bk.bandwidth(if slot.narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
         bk.demod(if slot.am { Demod::Am } else { Demod::Fm }); // stock's modes 6 and 7 (VFO-20: AM keeps wide)
         match slot.rx_tone {
+            // TONE-6: no tone to lose, so the detector listens for the 55 Hz tail instead (stock: REG_07 0x21CD).
+            0 if slot.rx_tail => {
+                bk.ctcss_rx(550);
+                bk.tail_detect();
+            }
             0 => bk.subtone_off(),
             t if t & 0x8000 != 0 => bk.dcs_rx(t & 0x3FFF, t & 0x4000 != 0),
             t => bk.ctcss_rx(t),
@@ -464,7 +483,10 @@ impl Radio {
                 *fl += (rssi - *fl) / 8; // a slow average of the quiet RSSI
             }
             sq[n as usize] = open;
-            toned[n as usize] = open && (self.slots[s as usize].rx_tone == 0 || st.ctcss || st.cdcss);
+            // A tone channel goes quiet when its tone stops (the tail's phase shift or turn-off code ends it, TONE-6);
+            // with no tone and receive tail on, the 55 Hz tail mutes.
+            let sl = self.slots[s as usize];
+            toned[n as usize] = open && if sl.rx_tone == 0 { !(sl.rx_tail && st.tail) } else { st.ctcss || st.cdcss };
             let sl = &mut self.live.slots[s as usize];
             sl.rssi = rssi;
             scan_open[s as usize] = match self.scans[s as usize].check() {
@@ -637,8 +659,17 @@ impl Radio {
             Param::TxTone => return self.tx.tone[slot as usize % 4] = value as u16,
             #[cfg(feature = "tx")]
             Param::Power => return self.tx.power[slot as usize % 4] = value.clamp(0, 2) as u8,
+            #[cfg(feature = "tx")]
+            Param::EndTone => return self.tx.end[slot as usize % 4] = (value as u8).min(tonegen::END_TONES.len() as u8 - 1),
+            Param::Tail => {
+                s.rx_tail = value & 1 != 0;
+                #[cfg(feature = "tx")]
+                {
+                    self.tx.tail[slot as usize % 4] = value & 2 != 0;
+                }
+            }
             #[cfg(not(feature = "tx"))]
-            Param::TxTone | Param::Power => return,
+            Param::TxTone | Param::Power | Param::EndTone => return,
             // The transmit frequency comes with each key-up (RadioCmd::TxPlan); busy lockout is the UI's (TX-21).
             Param::Offset | Param::BusyLock | Param::Reverse | Param::Split => return,
         }
@@ -882,9 +913,17 @@ pub async fn task() {
             pa: 0,
             fault: false,
             adc: false,
-            end_tone: 0,
+            end: [0; 4],
+            tail: [false; 4],
+            slot: 0,
+            phase: 0,
+            cw: 0,
             cw_call: [0; 10],
             cw_len: 0,
+            sidetone: true,
+            dtmf: (100, 30),
+            digits: [0; 16],
+            dialled: false,
         },
     };
     // Start from the safe state: every path low, the relay released (board start-up set them low already).
@@ -1040,6 +1079,31 @@ impl Radio {
             // Without the `tx` build nothing is keyed, so there is nothing to send them on.
             #[cfg(not(feature = "tx"))]
             RadioCmd::ToneBurst { .. } | RadioCmd::Dtmf { .. } => {}
+            #[cfg(feature = "tx")]
+            RadioCmd::TxTones { phase, cw, sidetone } => (self.tx.phase, self.tx.cw, self.tx.sidetone) = (phase.min(3), cw.min(2), sidetone),
+            #[cfg(feature = "tx")]
+            RadioCmd::CwCall { chunk, text } => {
+                let at = (chunk as usize).min(1) * 5;
+                self.tx.cw_call[at..at + 5].copy_from_slice(&text);
+                self.tx.cw_len = self.tx.cw_call.iter().position(|&c| c == 0).unwrap_or(10) as u8;
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::DtmfTiming { ms, delay_10ms } => self.tx.dtmf = (ms.clamp(50, 200), delay_10ms.min(100)),
+            #[cfg(feature = "tx")]
+            RadioCmd::DtmfSeq { chunk, keys } => {
+                let at = (chunk as usize).min(3) * 5;
+                let n = (16 - at).min(5);
+                self.tx.digits[at..at + n].copy_from_slice(&keys[..n]);
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::DtmfSend { len } => self.dial(len).await,
+            // Nothing transmits in this build.
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::TxTones { .. }
+            | RadioCmd::CwCall { .. }
+            | RadioCmd::DtmfTiming { .. }
+            | RadioCmd::DtmfSeq { .. }
+            | RadioCmd::DtmfSend { .. } => {}
             // Not on the radio yet, each waiting on something named in the manual's Status lines: band scope,
             // tone search, crossband (chapters 21, 22, 19): their own exclusive modes, after 2d.
             RadioCmd::Sweep { .. }
@@ -1158,7 +1222,8 @@ impl Radio {
         }
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, req.power));
         self.tx.fault = false;
-        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None };
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent };
+        (self.tx.slot, self.tx.dialled) = (slot, false);
         let r = self.tx.seq.key(&req, &mut self.path, now, &mut st);
         if let Err(r) = r {
             self.unkeyed();
@@ -1197,15 +1262,67 @@ impl Radio {
         }
     }
 
-    /// The sequencer's settings: the end tone and CW ID follow what the UI has sent (off until those settings
-    /// exist).
+    /// The sequencer's settings from what the UI has sent: the keyed slot's end tone and tail, CW ID with a
+    /// callsign (VOX-10); none of the end tone or ID after a dialled sequence (TONE-11).
     fn tx_cfg(&self) -> txseq::Cfg {
-        txseq::Cfg { end_tone: self.tx.end_tone != 0, cw_id: self.tx.cw_len != 0, ..TX_CFG }
+        let s = self.tx.slot as usize % 4;
+        let voice = !self.tx.dialled;
+        txseq::Cfg {
+            end_tone: voice && self.tx.end[s] != 0,
+            cw_id: voice && self.tx.cw != 0 && self.tx.cw_len != 0,
+            cw_each: self.tx.cw == 2,
+            tail: self.tx.tail[s],
+            ..TX_CFG
+        }
+    }
+
+    /// TONE-5: the tail at unkey, still keyed, for stock's 400 ms: the 55 Hz tone with no sub-tone, the phase
+    /// shift (0 8 5 2) on CTCSS, the 134.4 Hz turn-off code on DCS. The 55 Hz tone at the driver's sub-tone gain
+    /// (74, as its CTCSS) where stock takes the calibration's byte (0xF210 byte 1): to confirm on the bench.
+    async fn tail_elim(&mut self) {
+        use bk4829::tx::Tail;
+        let Some(n) = self.path.keyed().map(|s| s.chip()).filter(|&n| self.has(n)) else { return };
+        let kind = match tonegen::tail_kind(self.tx.tone[self.tx.slot as usize % 4], self.tx.phase) {
+            tonegen::TailKind::Tone55 => Tail::Tone55 { dev: 74 },
+            tonegen::TailKind::Shift(p) => Tail::Shift { phase: p },
+        };
+        self.chip(n).tail_tx(Some(kind));
+        Timer::after_millis(tonegen::TAIL_MS as u64).await;
+        self.chip(n).tail_tx(None);
+        log(b"tx tail", 0);
+    }
+
+    /// DTMF-1, DTMF-3: the dialled sequence on the transmission just keyed: the first digit delay, then each
+    /// symbol on and off for the speed; then the UI is told and unkeys. The Radio task waits through it (at most
+    /// 1 s + 16 x 400 ms).
+    async fn dial(&mut self, len: u8) {
+        if self.path.keyed().is_none() {
+            return;
+        }
+        self.tx.dialled = true;
+        let (ms, delay) = (self.tx.dtmf.0 as u64, self.tx.dtmf.1 as u64 * 10);
+        Timer::after_millis(delay).await;
+        for k in 0..(len as usize).min(16) {
+            if self.path.keyed().is_none() {
+                return; // cut off (timeout, battery)
+            }
+            if let Some(c) = tonegen::dtmf_symbol(self.tx.digits[k]) {
+                self.keyed_tone(None, Some(c));
+                Timer::after_millis(ms).await;
+            }
+            if let Some(n) = self.path.keyed().map(|s| s.chip()).filter(|&n| self.has(n)) {
+                self.chip(n).tone_tx(0);
+            }
+            Timer::after_millis(ms).await;
+        }
+        self.keyed_tone(None, None);
+        self.live.tx.dtmf_sent = self.live.tx.dtmf_sent.wrapping_add(1);
+        log(b"tx dtmf sent ", len as u32);
     }
 
     /// While keyed (TONE-13, DTMF-7, DTMF-11): the tone burst or a DTMF symbol on the keyed chip, as stock sends any
     /// internal tone: the generator set, REG_30 to tone transmit (mode 4, 0xC3FA: the microphone off) and the
-    /// sidetone heard (DTMF-8's default; the setting itself isn't sent to the radio yet); both None goes back to
+    /// sidetone heard (DTMF-8, for DTMF as 0 8 6 6 says); both None goes back to
     /// the microphone (0xC1FE).
     fn keyed_tone(&mut self, hz: Option<u16>, dtmf: Option<char>) {
         use bk4829::tx::Source as TxSource;
@@ -1214,6 +1331,7 @@ impl Radio {
         if !self.has(n) {
             return;
         }
+        let heard = dtmf.is_none() || self.tx.sidetone; // DTMF-8's setting; the burst is always heard
         let mut bk = self.chip(n);
         let sending = match (hz, dtmf) {
             (Some(hz), _) => {
@@ -1225,7 +1343,7 @@ impl Radio {
         };
         if sending {
             bk.tx_on(TxSource::Tones);
-            bk.sidetone(true);
+            bk.sidetone(heard);
         } else {
             bk.tone_tx(0);
             bk.sidetone(false);
@@ -1234,7 +1352,7 @@ impl Radio {
                 log(b"tx mic read-back failed, chip ", n as u32);
             }
         }
-        speaker(sending);
+        speaker(sending && heard);
     }
 
     /// A tone sequence on the keyed chip, still keyed (TONE-8: end tone, CW ID): tone transmit with the microphone
@@ -1258,7 +1376,7 @@ impl Radio {
     }
 
     fn refuse(&mut self, slot: u8, why: Refusal) {
-        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why) };
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why), dtmf_sent: self.live.tx.dtmf_sent };
         log(b"tx refused ", why as u32);
     }
 }

@@ -2,9 +2,9 @@
 //! 16 symbols).
 //!
 //! Dialer: 0-9 type, * and # type themselves, holding 1-4 types A-D (a 12-key pad has no A-D keys); BACK
-//! deletes, then leaves; OK sends on the active slot through the transmit checks (DTMF-1). Sending itself comes
-//! with DTMF transmit (roadmap 4d): with every check passed the dialer says so; a receive-only build shows the
-//! refusal. Hold MENU keeps the digits as a memory (the first empty one).
+//! deletes, then leaves; OK sends on the active slot through the transmit checks (DTMF-1): keyed like PTT, the
+//! digits at DTMF-3's speed after the first digit delay, then unkeyed; a receive-only build shows the refusal.
+//! Hold MENU keeps the digits as a memory (the first empty one).
 //!
 //! Memories: OK opens one in the dialer, to send or edit it (hold MENU there writes it back; an empty one is
 //! typed the same way); * clears one; # names one (up to 10 characters, DTMF-12: "Link on", "IRLP 3500").
@@ -52,13 +52,9 @@ fn send(app: &mut App, d: &Dtmf) {
     if d.len == 0 {
         return app.show_toast(b"DTMF", b"type digits first", false);
     }
-    let slot = app.active;
-    if let Some(r) = super::transmit::refusal(app, slot) {
-        return super::transmit::refuse(app, slot, r);
-    }
     let mut t = Buf::<16>::new();
     d.text(&mut t);
-    app.show_toast(t.as_bytes(), b"sending comes in 4d", false);
+    super::transmit::dial(app, app.active, t.as_bytes());
 }
 
 /// Keeps the dialer's digits in memory `i`, or the first empty one.

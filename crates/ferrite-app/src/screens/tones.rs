@@ -68,6 +68,7 @@ fn ch_value(app: &App, row: u8) -> (u8, usize) {
 
 fn set_ch(app: &mut App, row: u8, v: u8) {
     super::chedit::edit(app, |c| if row == 2 { c.set_end_tone(v) } else { c.set_tail(v) });
+    app.send_slot_tones(); // the Radio task sends what this channel now says (TONE-7, TONE-10)
 }
 
 fn get(app: &App, rx: bool) -> u16 {

@@ -105,6 +105,37 @@ pub fn ptt(app: &mut App, slot: u8) {
     key(app, slot);
 }
 
+/// The dialer's Send (DTMF-1): the transmit checks, then the sequence to the Radio task, keyed like PTT; the
+/// Radio task waits the first digit delay, sends each digit (DTMF-3) and says so, and the Transmit screen unkeys.
+/// Not on an emergency frequency (its second-PTT prompt is for a person talking). True when it keyed.
+pub fn dial(app: &mut App, slot: u8, keys: &[u8]) -> bool {
+    if let Some(r) = ptt_refusal(app, slot) {
+        refuse(app, slot, r);
+        return false;
+    }
+    if txplan::emergency(tx_freq(app, slot)) {
+        app.show_toast(b"DTMF not sent:", b"emergency frequency", false);
+        return false;
+    }
+    let n = keys.len().min(16);
+    for chunk in 0..n.div_ceil(5) as u8 {
+        let mut k = [0u8; 5];
+        for (j, b) in k.iter_mut().enumerate() {
+            *b = keys.get(chunk as usize * 5 + j).copied().filter(|_| chunk as usize * 5 + j < n).unwrap_or(0);
+        }
+        app.out.push(RadioCmd::DtmfSeq { chunk, keys: k });
+    }
+    key(app, slot);
+    if app.radio.keyed != Some(slot) {
+        return false;
+    }
+    app.out.push(RadioCmd::DtmfSend { len: n as u8 });
+    if let Screen::Transmit(t) = &mut app.screen {
+        t.dial = true;
+    }
+    true
+}
+
 /// Key up (after the checks, or the emergency prompt's second PTT): the Transmit screen over where it was.
 pub fn key(app: &mut App, slot: u8) {
     if let Some(r) = ptt_refusal(app, slot) {
@@ -199,6 +230,8 @@ fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
 pub struct Transmit {
     /// The slot keyed (3 = HF mode).
     pub slot: u8,
+    /// A dialled sequence is being sent (DTMF-1): the transmission ends by itself when the Radio task has sent it.
+    pub dial: bool,
 }
 
 /// The level name (TX-12): LOW, MID, HIGH; "0.25 W" on 1.25 m, the capped power itself.
@@ -256,6 +289,12 @@ impl View for Transmit {
     }
 
     fn tick(self, app: &mut App, live: &LiveAll) {
+        // DTMF-1: the dialled digits are out; unkey, back to the dialer.
+        if self.dial && app.radio.keyed.is_some() && live.tx.dtmf_sent != app.radio.dtmf_seen {
+            app.ptt_released();
+            app.back();
+            return;
+        }
         // The Radio task refused (its own checks: calibration, read-back, battery under load).
         if let Some(r) = live.tx.refused.filter(|_| live.tx.slot == self.slot && app.radio.keyed.is_some()) {
             app.radio.keyed = None;

@@ -409,7 +409,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
         Dest::Status => Screen::Status(Status { row: 0, from_menu: false }),
         // Group B, radio activity.
-        Dest::Transmit => Screen::Transmit(transmit::Transmit { slot: a }),
+        Dest::Transmit => Screen::Transmit(transmit::Transmit { slot: a, dial: false }),
         Dest::TxRefused => {
             let why = transmit::refusal(app, a).unwrap_or(ferrite_core::txplan::Refusal::OutOfBand);
             Screen::TxRefused(transmit::TxRefused { why, slot: a })

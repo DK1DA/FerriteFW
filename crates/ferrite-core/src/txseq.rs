@@ -52,13 +52,15 @@ pub struct Cfg {
     pub end_tone: bool,
     /// CW ID every 10 min (VOX-12).
     pub cw_id: bool,
+    /// CW ID at every unkey instead (0 8 7 2's "on unkey"; VOX-12).
+    pub cw_each: bool,
     /// Tail elimination: a DCS turn-off code or the 55 Hz phase (TONE-9).
     pub tail: bool,
 }
 
 impl Default for Cfg {
     fn default() -> Self {
-        Cfg { timeout_s: 180, prealert_s: 10, end_tone: false, cw_id: false, tail: false }
+        Cfg { timeout_s: 180, prealert_s: 10, end_tone: false, cw_id: false, cw_each: false, tail: false }
     }
 }
 
@@ -173,7 +175,7 @@ impl TxSeq {
         if voice && cfg.end_tone {
             out.push(Act::EndTone);
         }
-        if voice && cfg.cw_id && self.last_id.is_none_or(|t| now.wrapping_sub(t) >= CW_ID_MS) {
+        if voice && cfg.cw_id && (cfg.cw_each || self.last_id.is_none_or(|t| now.wrapping_sub(t) >= CW_ID_MS)) {
             out.push(Act::CwId);
             self.last_id = Some(now);
         }
@@ -285,6 +287,12 @@ mod tests {
         let mut s = Steps::default();
         t.release(&cfg, &mut p, 65_000, &mut s);
         assert_eq!(s.as_slice()[..3], [Act::EndTone, Act::TailElim, Act::PaZero]);
+        // "On unkey": the ID every time.
+        let each = Cfg { cw_each: true, ..cfg };
+        t.key(&r, &mut p, 70_000, &mut Steps::default()).unwrap();
+        let mut s = Steps::default();
+        t.release(&each, &mut p, 75_000, &mut s);
+        assert_eq!(s.as_slice()[..3], [Act::EndTone, Act::CwId, Act::TailElim]);
         // Ten minutes after the last ID, data: no end tone, no ID.
         t.key(&Req { kind: Kind::Data, ..r }, &mut p, 700_000, &mut Steps::default()).unwrap();
         let mut s = Steps::default();

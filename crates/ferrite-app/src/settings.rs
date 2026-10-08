@@ -205,7 +205,28 @@ pub struct Settings {
     pub scan_resume: u8,
     /// 0 1 6 5: the priority check's interval, seconds; 0 off (SCAN-12).
     pub scan_prio: u8,
+    /// 0 8 5 1: tail elimination ([`TAIL_MODES`]: off, receive, transmit, both, as bits: 1 receive, 2 transmit).
+    pub tail_mode: u8,
+    /// 0 8 5 2: its phase ([`TAIL_PHASES`]: 55 Hz, 120°, 180°, 240°; the phases on CTCSS only, TONE-5).
+    pub tail_phase: u8,
+    /// 0 8 5 4: the end tone ([`END_TONE_NAMES`]; 0 off), a channel's own over it (TONE-10).
+    pub end_tone: u8,
+    /// 0 8 6 3: DTMF speed, ms each tone and each gap (50-200, DTMF-3).
+    pub dtmf_ms: u8,
+    /// 0 8 6 7: DTMF first digit delay in 10 ms (0-100: 0-1000 ms, DTMF-3).
+    pub dtmf_delay: u8,
+    /// 0 8 7 2: CW ID ([`CW_ID_MODES`]: off, every 10 min, on unkey; VOX-12).
+    pub cw_id: u8,
 }
+
+/// 0 8 5 1's values: bit 0 receive, bit 1 transmit.
+pub const TAIL_MODES: [&str; 4] = ["Off", "Receive", "Transmit", "Both"];
+/// 0 8 5 2's values (TONE-5).
+pub const TAIL_PHASES: [&str; 4] = ["55 Hz", "120\u{b0}", "180\u{b0}", "240\u{b0}"];
+/// 0 8 5 4's values (TONE-10), as `tonegen::END_TONES`.
+pub const END_TONE_NAMES: [&str; 6] = ["Off", "Beep", "Two-tone up", "Two-tone down", "Chirp", "Quindar"];
+/// 0 8 7 2's values (VOX-12).
+pub const CW_ID_MODES: [&str; 3] = ["Off", "Every 10 min", "On unkey"];
 
 /// 0 8 4 2's values (TONE-16).
 pub const TONE_LEVELS: [&str; 3] = ["Low", "Normal", "High"];
@@ -295,6 +316,12 @@ impl Settings {
         tone_level: 1,
         scan_resume: 5,
         scan_prio: 2,
+        tail_mode: 0,
+        tail_phase: 0,
+        end_tone: 0,
+        dtmf_ms: 100,
+        dtmf_delay: 30,
+        cw_id: 0,
     };
 
     /// The region's name, or "Not set".

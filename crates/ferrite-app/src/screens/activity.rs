@@ -90,6 +90,9 @@ pub struct RadioUi {
     pub feed: Option<crate::chanscan::Feed>,
     /// The Radio task's last ask for a channel's frequencies, answered ([`ferrite_core::msg::LiveAll::want`]).
     pub want_seen: u16,
+    /// The Radio task's count of dialled sequences sent ([`ferrite_core::msg::TxLive::dtmf_sent`]) as last seen
+    /// unkeyed: a dialled transmission ends when it moves (DTMF-1).
+    pub dtmf_seen: u8,
 }
 
 impl RadioUi {
@@ -104,6 +107,7 @@ impl RadioUi {
             centre: 0,
             hits: [Hit { what: 0, at_s: 0, dbm: 0, n: 0 }; HIT_LIST],
             hits_seen: 0,
+            dtmf_seen: 0,
             zones: 0,
             act: [0; SLOTS],
             act_bucket: 0,
@@ -168,6 +172,7 @@ impl App {
     /// The callsign (setup page 2): crossband ID and automatic transmit need one.
     pub fn set_callsign(&mut self, c: &[u8]) {
         self.set.set_callsign(c);
+        self.send_tx_tones(); // CW ID sends it (VOX-12)
     }
 
     /// Home layout (MENU 0 7 2): 0 watch, 1 single + scope, 2 watch + activity (HOME-3).
@@ -232,6 +237,9 @@ impl App {
 
     /// Every tick: each slot's activity for the watch + activity layout.
     pub(crate) fn radio_tick(&mut self, live: &LiveAll) {
+        if self.radio.keyed.is_none() {
+            self.radio.dtmf_seen = live.tx.dtmf_sent;
+        }
         let b = (self.now / ACT_MS) as u16;
         let shift = b.wrapping_sub(self.radio.act_bucket).min(32) as u32;
         if shift > 0 {

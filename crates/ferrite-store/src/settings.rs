@@ -11,8 +11,11 @@ use ferrite_core::layout::SETTINGS;
 
 const MAGIC: u16 = 0x4153; // "SA"
 const HEAD: u32 = 8;
-/// The largest payload: the settings' length (2), the settings and the slots, 529 bytes now.
-pub const MAX_PAYLOAD: usize = 532;
+/// The largest payload: the settings' length (2), the settings and the slots (538 bytes now). 1 KB of each 4 KB
+/// copy's sector, so settings can grow for a long while; the RAM it costs is the store's one save buffer (the
+/// Storage task writes straight from it). A record over 532 bytes is refused by firmware from before Oct 7, 2026,
+/// which then starts from defaults: a downgrade only.
+pub const MAX_PAYLOAD: usize = 1024;
 const COPIES: [u32; 2] = [SETTINGS.start, SETTINGS.start + crate::SECTOR];
 
 /// The copy in use: where its payload is, how long it is, its counter.

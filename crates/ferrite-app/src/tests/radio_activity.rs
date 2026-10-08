@@ -120,7 +120,7 @@ fn rx_only_build_and_battery_refuse() {
 fn radio_refusal_shows() {
     let mut t = ready();
     ptt(&mut t, true);
-    t.live.tx = ferrite_core::msg::TxLive { keyed: false, slot: 0, mic: 0, refused: Some(Refusal::Locked) };
+    t.live.tx = ferrite_core::msg::TxLive { keyed: false, slot: 0, mic: 0, refused: Some(Refusal::Locked), dtmf_sent: 0 };
     t.wait(100);
     assert_eq!(refused(&t), Some(Refusal::Locked));
 }
@@ -1166,4 +1166,61 @@ fn alert_during_crossband_is_a_banner() {
     assert_ne!(t.app.radio.mode, Mode::Xb);
     t.wait(100);
     assert!(matches!(t.app.screen(), Screen::Alert(_)), "opens once the repeater stops: {:?}", t.app.screen());
+}
+
+/// DTMF-1, DTMF-3: the dialer's Send keys like PTT, hands the digits to the Radio task, and unkeys once the Radio
+/// task says they are out; the Transmit group's settings reach the Radio task when they change.
+#[test]
+fn dialer_sends_then_unkeys() {
+    let mut t = ready();
+    menu0(&mut t, &[8, 6, 1]);
+    for d in [1, 2, 3] {
+        t.tap(Key::Digit(d));
+    }
+    t.cmds();
+    t.tap(Key::Menu); // Send
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::DtmfSeq { chunk: 0, keys: [b'1', b'2', b'3', 0, 0] }), "{c:?}");
+    assert!(c.contains(&RadioCmd::Transmit { slot: 0, on: true }) && c.contains(&RadioCmd::DtmfSend { len: 3 }), "{c:?}");
+    assert!(matches!(t.app.screen(), Screen::Transmit(x) if x.dial));
+    // Not yet out: still keyed.
+    t.wait(500);
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)));
+    t.live.tx.dtmf_sent = t.live.tx.dtmf_sent.wrapping_add(1);
+    t.wait(50);
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }), "unkeyed when the digits are out");
+    assert!(!matches!(t.app.screen(), Screen::Transmit(_)), "back to the dialer");
+}
+
+/// TONE-5 to TONE-10, VOX-10, VOX-12, DTMF-3, DTMF-8: the Transmit group's settings go to the Radio task as they
+/// change; CW ID needs a callsign; a channel's own end tone and tail win over the radio's.
+#[test]
+fn transmit_tones_reach_the_radio() {
+    let mut t = ready();
+    t.app.set.callsign = crate::settings::Text::EMPTY;
+    menu0(&mut t, &[8, 7, 2]);
+    t.cmds();
+    t.app.knob(1, t.t, &store());
+    assert_eq!(t.app.set.cw_id, 0, "VOX-10: no callsign, no CW ID");
+    t.app.set_callsign(b"va7fer");
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::CwCall { chunk: 0, text: *b"VA7FE" }) && c.contains(&RadioCmd::CwCall { chunk: 1, text: [b'R', 0, 0, 0, 0] }), "{c:?}");
+    t.app.knob(1, t.t, &store());
+    assert_eq!(t.app.set.cw_id, 1);
+    assert!(t.cmds().contains(&RadioCmd::TxTones { phase: 0, cw: 1, sidetone: true }));
+    // 0 8 5 4: every slot's end tone follows (Beep = END_TONES[1]).
+    t.app.set.end_tone = 1;
+    t.app.send_slot_tones();
+    let c = t.cmds();
+    for s in 0..3u8 {
+        assert!(c.contains(&RadioCmd::SlotParam { slot: s, param: Param::EndTone, value: 1 }), "slot {s}: {c:?}");
+    }
+    // A channel's own: Off (1) wins over the radio's Beep; tail On (2) is both directions.
+    let mut ch = crate::chan::channel(5, 0, mhz(146) + 52_000, "Own", crate::slot::DEFAULT_CFG);
+    ch.set_end_tone(1);
+    ch.set_tail(2);
+    t.app.set_channel_rec(0, ch);
+    assert_eq!(t.app.slot_tones(0), (0, 3));
+    t.app.set.tail_mode = 2; // transmit only
+    assert_eq!(t.app.slot_tones(1), (1, 2), "a VFO follows the radio's");
 }

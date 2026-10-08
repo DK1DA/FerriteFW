@@ -102,7 +102,7 @@ fn packed_flags_round_trip() {
     let mut b = crate::settings::Settings::DEFAULT;
     b.load(&mut R(&v.0));
     assert_eq!((b.show_hidden, b.chan_only), (false, true));
-    v.0.truncate(v.0.len() - 20); // a record from before the power-on message (pon, pon_text), the subtone level and the scan resume and priority check ...
+    v.0.truncate(v.0.len() - 26); // a record from before the power-on message (pon, pon_text), the subtone level, the scan resume and priority check and the Transmit group's tones ...
     *v.0.last_mut().unwrap() = 1; // ... and before the flags: the show-hidden bool
     let mut c = crate::settings::Settings::DEFAULT;
     c.load(&mut R(&v.0));

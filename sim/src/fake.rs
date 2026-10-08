@@ -115,6 +115,10 @@ pub struct FakeRadio {
     same: Option<SameDecoded>,
     /// An APRS packet going out on this slot until this time (s): the TX LED and keyed state for a moment.
     burst: Option<(u8, f32)>,
+    /// DTMF-3's timing ([`RadioCmd::DtmfTiming`]: ms, delay in 10 ms) and a dialled sequence being sent until this
+    /// time (s), as the Radio task plays it.
+    dtmf: (u8, u8),
+    dialling: Option<f32>,
 }
 
 /// The fake decoder's warning, heard 8 s after a slot settles on a weather channel (162.400-162.550 MHz).
@@ -156,6 +160,8 @@ impl FakeRadio {
             wx_since: None,
             same: None,
             burst: None,
+            dtmf: (100, 30),
+            dialling: None,
         }
     }
 
@@ -192,7 +198,7 @@ impl FakeRadio {
         };
         let now = self.ms();
         let r = self.seq.key(&req, &mut self.path, now, &mut Steps::default());
-        self.live.tx = TxLive { keyed: r.is_ok(), slot, mic: 0, refused: r.err() };
+        self.live.tx = TxLive { keyed: r.is_ok(), slot, mic: 0, refused: r.err(), dtmf_sent: self.live.tx.dtmf_sent };
     }
 
     fn unkey(&mut self) {
@@ -310,6 +316,11 @@ impl FakeRadio {
                 }
             }
             RadioCmd::Crossband(c) => self.set(if c.is_some() { Fake::Xb { t0: self.now } } else { Fake::Off }),
+            RadioCmd::DtmfTiming { ms, delay_10ms } => self.dtmf = (ms, delay_10ms),
+            RadioCmd::DtmfSend { len } if self.live.tx.keyed => {
+                let ms = ferrite_core::tonegen::dtmf_seq_ms(len as usize, self.dtmf.0 as u16, self.dtmf.1 as u16 * 10);
+                self.dialling = Some(self.now + ms as f32 / 1000.0);
+            }
             _ => {}
         }
     }
@@ -447,6 +458,11 @@ impl FakeRadio {
             self.burst = None;
             self.unkey();
         }
+        // DTMF-1: the dialled sequence is out; the UI unkeys.
+        if self.dialling.is_some_and(|end| t >= end) {
+            self.dialling = None;
+            self.live.tx.dtmf_sent = self.live.tx.dtmf_sent.wrapping_add(1);
+        }
         // The sequencer's timeout and duty limit (the app keeps its own timeout screen).
         if self.seq.tick(&TX_CFG, true, &mut self.path, now, &mut Steps::default()).is_some_and(|e| e != txseq::Event::PreAlert) {
             self.live.tx.keyed = false;
@@ -497,7 +513,7 @@ impl FakeRadio {
 }
 
 /// The fake's transmit settings: the longest timeout (the app shows its own).
-const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 600, prealert_s: 0, end_tone: false, cw_id: false, tail: false };
+const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 600, prealert_s: 0, end_tone: false, cw_id: false, cw_each: false, tail: false };
 
 /// The step the fake scans at.
 const SCAN_STEP: Freq10 = 2_500;

@@ -290,7 +290,10 @@ fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
                 d.request(crate::data::Op::Preset(i, p));
             }
         }
-        TextFor::Callsign => app.set.set_callsign(t.as_bytes()), // SETUP-12
+        TextFor::Callsign => {
+            app.set.set_callsign(t.as_bytes()); // SETUP-12
+            app.send_tx_tones(); // CW ID sends it (VOX-12)
+        }
         TextFor::PowerOn => {
             app.set.pon_text = crate::settings::Text::EMPTY;
             t.as_bytes().iter().for_each(|&c| _ = app.set.pon_text.push(c));

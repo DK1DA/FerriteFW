@@ -103,6 +103,21 @@ pub enum RadioCmd {
     Beep { hz: u16, ms: u16 },
     /// The crossband repeater: start with these settings, or stop (XB-14).
     Crossband(Option<XbCfg>),
+    /// The Transmit group's radio-wide tone settings (sent at start-up and when one changes): 0 8 5 2's tail
+    /// phase (0 55 Hz, 1-3 120°/180°/240°), 0 8 7 2's CW ID (0 off, 1 every 10 min, 2 on unkey) and 0 8 6 6's
+    /// DTMF sidetone. A slot's end tone and tail come with it ([`Param::EndTone`], [`Param::Tail`]).
+    TxTones { phase: u8, cw: u8, sidetone: bool },
+    /// The callsign for CW ID, 5 bytes a chunk (chunk 0: bytes 0-4, 1: 5-9; 0 pads the end). Sent with
+    /// [`RadioCmd::TxTones`].
+    CwCall { chunk: u8, text: [u8; 5] },
+    /// DTMF-3: each digit on and off for `ms`; a sequence starts `delay_10ms` x 10 ms after key-up.
+    DtmfTiming { ms: u8, delay_10ms: u8 },
+    /// A dialled sequence (DTMF-1), 5 symbols a chunk (bytes as [`RadioCmd::Dtmf`]'s `key`), sent before
+    /// [`RadioCmd::DtmfSend`].
+    DtmfSeq { chunk: u8, keys: [u8; 5] },
+    /// Send the first `len` symbols of the sequence on the transmission just keyed (DTMF-3's timing), then say so
+    /// in [`TxLive::dtmf_sent`]; the UI unkeys. The key-up is a data one: no end tone or CW ID after it (TONE-11).
+    DtmfSend { len: u8 },
 }
 
 /// The crossband repeater's settings (manual chapter 19): small enough to ride in a [`RadioCmd`].
@@ -152,6 +167,12 @@ pub enum Param {
     Split,
     /// The clarifier: a receive-only offset in Hz, -2500 to 2500 (VFO-22); never moves the transmit frequency.
     Clarifier,
+    /// The end tone this slot sends (TONE-10, the channel's over 0 8 5 4 already resolved): an index into
+    /// `tonegen::END_TONES`, 0 off.
+    EndTone,
+    /// Tail elimination on this slot (TONE-5 to TONE-7, the channel's over 0 8 5 1 already resolved): bit 0 on
+    /// receive, bit 1 on transmit.
+    Tail,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -292,6 +313,8 @@ pub struct TxLive {
     pub mic: u8,
     /// The Radio task refused the last key-up (its own checks: calibration, read-back, battery).
     pub refused: Option<crate::txplan::Refusal>,
+    /// Counts each dialled sequence sent to the end ([`RadioCmd::DtmfSend`]): the UI unkeys when it moves.
+    pub dtmf_sent: u8,
 }
 
 /// The terminal's debug commands (TERM-21 to TERM-24): what the firmware is asked. Memory is read where the
