@@ -95,6 +95,8 @@ pub struct FakeRadio {
     mode: Fake,
     /// The scope's bars and dwell ([`RadioCmd::ScopeCfg`]).
     scope_cfg: (u8, u8),
+    /// Each slot's power level (0 Low, 1 Mid, 2 High; 3 = HF mode), for the duty limit's weighting (TX-38).
+    power: [u8; 4],
     /// The two BK4829s' registers, for the terminal's `bk` (TERM-21).
     bk: [[u16; 128]; 2],
     /// Slots with monitor latched: squelch held open.
@@ -136,6 +138,7 @@ impl FakeRadio {
             last_step: 0.0,
             mode: Fake::Off,
             scope_cfg: (60, 10),
+            power: [2; 4],
             bk: fake_bk(),
             monitor: 0,
             fm: 9_810,
@@ -175,6 +178,7 @@ impl FakeRadio {
             extend: true,
             cal_ok: true,
             batt_ok: true,
+            power: self.power[slot as usize % 4],
         };
         let now = self.ms();
         let r = self.seq.key(&req, &mut self.path, now, &mut Steps::default());
@@ -214,6 +218,7 @@ impl FakeRadio {
                 }
             }
             RadioCmd::Watch(m) => self.watch = m,
+            RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::Power, value } => self.power[slot as usize % 4] = value.clamp(0, 2) as u8,
             RadioCmd::PauseWatch(secs) => {
                 let now = self.ms();
                 self.watcher.pause(now, secs);

@@ -131,6 +131,7 @@ fn random_sequences_keep_the_rules() {
                         extend: rng.next(2) == 0,
                         cal_ok: rng.next(20) != 0,
                         batt_ok: rng.next(20) != 0,
+                        power: rng.next(3) as u8,
                     };
                     let relay = path.relay();
                     if seq.key(&r, &mut path, now, &mut s).is_ok() {

@@ -38,6 +38,8 @@ pub struct Req {
     pub cal_ok: bool,
     /// The battery is above the cut-off.
     pub batt_ok: bool,
+    /// The power level: 0 Low, 1 Mid, 2 High; it sets how fast the duty bucket fills (TX-38).
+    pub power: u8,
 }
 
 /// The sequencer's settings, from the slot and the Transmit group.
@@ -62,10 +64,14 @@ impl Default for Cfg {
 
 /// VOX-12: the ID goes at the next unkey once this long has passed since the last one.
 pub const CW_ID_MS: u32 = 10 * 60_000;
-/// TX-31's duty limit (TX-38), a leaky bucket (to confirm on the bench): keyed time fills it, idle time drains it at a
-/// quarter of the rate, and a full bucket unkeys and refuses until it is half empty.
+/// TX-31's duty limit (TX-38), a leaky bucket (to confirm on the bench): keyed time fills it, weighted by the power
+/// level (High heats the PA most), idle time drains it at a quarter of High's rate, and a full bucket unkeys and
+/// refuses until it is half empty.
 pub const DUTY_FULL_MS: u32 = 120_000;
 pub const DUTY_DRAIN_DIV: u32 = 4;
+/// How fast keyed time fills the bucket per power level, in quarters: Low 1/4, Mid 1/2, High 1 (decided Oct 7,
+/// 2026; weights to confirm on the bench). Continuous transmit from cold: High 2 min, Mid 4 min, Low 8 min.
+pub const DUTY_WEIGHT: [u32; 3] = [1, 2, 4];
 
 /// Why the sequencer unkeyed by itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,11 +98,13 @@ pub struct TxSeq {
     duty: u32,
     duty_at: u32,
     hot: bool,
+    /// The keyed power level's fill weight (DUTY_WEIGHT).
+    weight: u8,
 }
 
 impl TxSeq {
     pub const fn new() -> Self {
-        TxSeq { since: None, alerted: false, held: false, last_id: None, duty: 0, duty_at: 0, hot: false }
+        TxSeq { since: None, alerted: false, held: false, last_id: None, duty: 0, duty_at: 0, hot: false, weight: 4 }
     }
 
     pub fn keyed(&self) -> bool {
@@ -145,6 +153,7 @@ impl TxSeq {
             Blocked::NeedsRelay | Blocked::TooOften => Refusal::RelayMismatch,
         })?;
         self.since = Some((now, r.kind));
+        self.weight = DUTY_WEIGHT[r.power.min(2) as usize] as u8;
         self.alerted = false;
         Ok(())
     }
@@ -185,7 +194,11 @@ impl TxSeq {
     fn heat(&mut self, now: u32) {
         let dt = now.wrapping_sub(self.duty_at);
         self.duty_at = now;
-        self.duty = if self.since.is_some() { self.duty.saturating_add(dt) } else { self.duty.saturating_sub(dt / DUTY_DRAIN_DIV) };
+        self.duty = if self.since.is_some() {
+            self.duty.saturating_add(dt * self.weight as u32 / 4)
+        } else {
+            self.duty.saturating_sub(dt / DUTY_DRAIN_DIV)
+        };
         if self.duty >= DUTY_FULL_MS {
             self.hot = true;
         } else if self.duty <= DUTY_FULL_MS / 2 {
@@ -226,7 +239,7 @@ mod tests {
     use crate::path::{Cause, Rx};
 
     fn req(tx: Freq10) -> Req {
-        Req { tx, rx: tx, kind: Kind::Voice, person: true, confirmed: false, am: false, region: Region::Us, extend: false, cal_ok: true, batt_ok: true }
+        Req { tx, rx: tx, kind: Kind::Voice, person: true, confirmed: false, am: false, region: Region::Us, extend: false, cal_ok: true, batt_ok: true, power: 2 }
     }
 
     fn rx_on(f: Freq10) -> Path {
@@ -324,5 +337,19 @@ mod tests {
         // Half empty: 60 s drained at a quarter rate is 240 s.
         let cool = DUTY_FULL_MS + DUTY_FULL_MS / 2 * DUTY_DRAIN_DIV;
         assert_eq!(t.key(&r, &mut p, cool, &mut Steps::default()), Ok(()));
+    }
+
+    /// TX-38: the power level weights the duty bucket: Low lasts four times as long as High from cold.
+    #[test]
+    fn duty_by_power() {
+        let cfg = Cfg { timeout_s: 600, prealert_s: 0, ..Cfg::default() };
+        for (power, full) in [(2u8, DUTY_FULL_MS), (1, DUTY_FULL_MS * 2), (0, DUTY_FULL_MS * 4)] {
+            let mut t = TxSeq::new();
+            let mut p = rx_on(mhz(446));
+            let r = Req { power, ..req(mhz(446)) };
+            t.key(&r, &mut p, 0, &mut Steps::default()).unwrap();
+            assert_eq!(t.tick(&cfg, true, &mut p, full - 4, &mut Steps::default()), None, "power {power}");
+            assert_eq!(t.tick(&cfg, true, &mut p, full, &mut Steps::default()), Some(Event::Hot), "power {power}");
+        }
     }
 }
