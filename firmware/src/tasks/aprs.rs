@@ -14,16 +14,14 @@
 //! setting (0 5 8 is display-only: off, APRS-12).
 
 use super::dsp::{Frame, AFSK_DONE, AFSK_TX, APRS_RX};
-use crate::chan::{DSP, POSITION};
+use crate::chan::DSP;
 use crate::store::Store;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as M;
-use embassy_sync::watch::Receiver;
 use ferrite_app::aprs_live::uaprs::kiss;
 use ferrite_app::aprs_live::FRAME_MAX;
 use ferrite_app::data::{Data, Event, Src};
 use ferrite_app::screens::transmit;
 use ferrite_app::App;
-use ferrite_core::msg::{DecoderKind, DspCmd, GpsFix, LiveAll};
+use ferrite_core::msg::{DecoderKind, DspCmd, LiveAll};
 use ferrite_core::txplan;
 use ferrite_ui::text::Buf;
 
@@ -51,7 +49,6 @@ pub struct Aprs {
     tx: Tx,
     /// The frame being sent.
     frame: Frame,
-    gps: Option<Receiver<'static, M, GpsFix, 3>>,
     /// The KISS TNC (chapter 26): the cable's bytes in, the app's settings, a frame waiting to go, and its
     /// channel access.
     kiss: kiss::Decoder,
@@ -64,7 +61,7 @@ pub struct Aprs {
 impl Aprs {
     pub fn new() -> Self {
         let params = kiss::Params { tx_delay: TXDELAY_10MS, ..kiss::Params::default() };
-        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, b: [0; FRAME_MAX] }, gps: POSITION.receiver(), kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), seed: 0x2545_F491 }
+        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), seed: 0x2545_F491 }
     }
 
     /// A byte from the cable while KISS has it (TERM-2's route).
@@ -96,9 +93,6 @@ impl Aprs {
     pub fn poll(&mut self, app: &mut App, store: &Store, live: &LiveAll, now_ms: u32) {
         let extra = &store.extra;
         extra.set_callsign(app.callsign());
-        if let Some(g) = self.gps.as_mut().and_then(|r| r.try_changed()) {
-            extra.set_gps(&g, now_ms);
-        }
         let kiss_on = app.settings().cable_port == PORT_KISS;
         let on = app.aprs_on();
         let decode = on || kiss_on;
