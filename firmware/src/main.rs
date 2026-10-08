@@ -85,6 +85,8 @@ static __INTERRUPTS: [Vector; 96] = {
     v[hal::irq::USART1 as usize] = usart1;
     v[hal::irq::USART3 as usize] = usart3;
     v[hal::irq::UART4 as usize] = uart4;
+    v[hal::audio::IRQ_ADC_DMA as usize] = adc_dma;
+    v[hal::audio::IRQ_DAC_DMA as usize] = dac_dma;
     v
 };
 
@@ -102,6 +104,12 @@ extern "C" fn usart3() {
 }
 extern "C" fn uart4() {
     hal::uart::isr(UART_CPS)
+}
+extern "C" fn adc_dma() {
+    hal::audio::adc_isr()
+}
+extern "C" fn dac_dma() {
+    hal::audio::dac_isr()
 }
 
 static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();

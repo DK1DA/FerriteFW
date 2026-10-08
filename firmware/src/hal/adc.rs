@@ -9,8 +9,20 @@ pub const CH_PA2: u32 = 2;
 pub const CH_TEMP: u32 = 16;
 pub const CH_VREF: u32 = 17;
 
-/// PA0-PA2 analog, sensor on, calibrated.
+/// ADC1 is set up (once, by whichever task needs it first: the Radio task's battery read, the DSP task's capture).
+static READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// PA0-PA2 analog, sensor on, calibrated; once (later calls return at once). Interrupts are off for its
+/// ~150 us, so two tasks can't set it up at the same time.
 pub fn init() {
+    cortex_m::interrupt::free(|_| {
+        if !READY.swap(true, core::sync::atomic::Ordering::Relaxed) {
+            init_once();
+        }
+    })
+}
+
+fn init_once() {
     for n in 0..3 {
         pin(GPIOA, n).config(Mode::Analog);
     }
@@ -28,17 +40,10 @@ pub fn init() {
     while rd(ADC_CTRL2) & ADC_CTRL2_ADCAL != 0 {}
 }
 
-/// One conversion, 12 bits, ~65 us; 0 if the ADC does not answer within 1 s.
+/// One conversion, 12 bits, ~65 us; 0 if the ADC does not answer within 1 s. Through the preempted group, so it
+/// works the same while the audio capture owns the ordinary group (`super::audio`).
 pub fn read(ch: u32) -> u16 {
-    wr(ADC_OSQ3, ch & 0x1F);
-    modify(ADC_CTRL2, 0, ADC_CTRL2_OCSWTRG);
-    let start = time::cycles();
-    while rd(ADC_STS) & ADC_STS_OCCE == 0 {
-        if time::cycles().wrapping_sub(start) > 8_000_000 {
-            return 0;
-        }
-    }
-    (rd(ADC_ODT) & 0xFFF) as u16
+    super::audio::read_preempted(ch)
 }
 
 /// Mean of n conversions.

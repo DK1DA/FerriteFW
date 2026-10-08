@@ -83,3 +83,38 @@ fn wa8lmf_through_the_radio_path() {
         println!("RESULT ferrite.{track}.peak{peak}.frames {frames}");
     }
 }
+
+/// What the radio sends, heard back through what it receives: a beacon built by the APRS task, modulated as the
+/// DSP task plays it (TX delay's flags, 48 kHz DAC codes), taken as ADC counts through `Decim` and the decoder
+/// slot, and read by a second APRS task's heard list.
+#[test]
+fn loopback_beacon_through_dac_and_adc() {
+    use ferrite_app::aprs::AprsCfg;
+    use ferrite_app::aprs_live::FRAME_MAX;
+    use ferrite_app::data::{Fix, Pos};
+    use ferrite_core::audio::{afsk_tx, to_dac, uafsk};
+    let tx = AprsLive::new();
+    tx.beacon_now();
+    let fix = Fix { pos: Pos { lat: 454_252_000, lon: -756_901_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 8, age_s: 0, utc_s: 0 };
+    let mut out = [0u8; FRAME_MAX];
+    let t = tx.tick(0, true, true, b"VE3XYZ-7", Some(fix), &AprsCfg::DEFAULT, &mut out);
+    assert_eq!(t.what, "Beacon");
+    // DAC codes as the ADC would read them back (12 bits both ways), with the line's DC bias.
+    let adc: Vec<u16> = uafsk::Modulator::new(&out[..t.len], afsk_tx(300)).map(to_dac).chain(std::iter::repeat_n(2048, 4800)).collect();
+    let (mut dec, mut d, rx) = (Decim::new(), Box::new(Decoder::afsk()), AprsLive::new());
+    let mut got = Vec::new();
+    for block in adc.chunks(ferrite_core::audio::BLOCK_IN) {
+        let mut s = Vec::new();
+        dec.block(block, |x| s.push(x));
+        d.push(&s, |f| {
+            if let Found::Frame(b) = f {
+                got.push(b.to_vec());
+            }
+        });
+    }
+    assert_eq!(got, vec![out[..t.len].to_vec()], "the frame comes back intact");
+    rx.receive(&got[0], 1, b"N0CALL", false);
+    let st = rx.station(0).unwrap();
+    assert_eq!(st.call.as_bytes(), b"VE3XYZ-7");
+    assert!(st.pos.is_some());
+}

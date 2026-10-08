@@ -254,6 +254,8 @@ impl FakeRadio {
             }
             RadioCmd::Transmit { slot, on: true } => self.key(slot, Kind::Voice),
             RadioCmd::Transmit { on: false, .. } => self.unkey(),
+            RadioCmd::TransmitData { slot, on: true, .. } => self.key(slot, Kind::Data),
+            RadioCmd::TransmitData { on: false, .. } => self.unkey(),
             RadioCmd::ScanSkip { slot } => {
                 let now = self.ms();
                 let i = slot as usize % 3;

@@ -4,6 +4,7 @@
 use core::ptr::{read_volatile, write_volatile};
 
 pub mod adc;
+pub mod audio;
 pub mod clock;
 pub mod gpio;
 pub mod i2c;

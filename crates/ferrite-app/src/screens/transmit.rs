@@ -178,6 +178,33 @@ pub fn auto_tx(app: &mut App, slot: u8, what: &[u8]) -> bool {
     false
 }
 
+/// APRS-7, APRS-20: a data transmission on `slot` (the APRS task's frame): an automatic one's checks (TX-35,
+/// [`auto_tx`]), then the plan and the data key-up at `power` (0 5 5 4). No screen opens (the card shows it).
+/// True when it was asked for; the Radio task may still refuse ([`ferrite_core::msg::TxLive`]), and the caller
+/// unkeys with [`data_unkey`] once the frame is out.
+pub fn data_key(app: &mut App, slot: u8, power: u8, what: &[u8]) -> bool {
+    if !auto_tx(app, slot, what) {
+        return false;
+    }
+    let region = txplan::Region::ALL.iter().position(|&r| r == app.set.tx_region()).unwrap_or(0) as u8;
+    app.out.push(RadioCmd::TxPlan { tx: tx_freq(app, slot), region, extend: app.set.extend_tx });
+    app.out.push(RadioCmd::TransmitData { slot, power, on: true });
+    true
+}
+
+/// An automatic transmission that couldn't be built, in a toast: e.g. a beacon with no position.
+pub fn not_sent(app: &mut App, what: &[u8], why: &[u8]) {
+    let mut h = Buf::<20>::new();
+    h.push(what);
+    h.push(b" not sent:");
+    app.show_toast(h.as_bytes(), why, false);
+}
+
+/// The data transmission's end (after [`data_key`]).
+pub fn data_unkey(app: &mut App, slot: u8) {
+    app.out.push(RadioCmd::TransmitData { slot, power: 0, on: false });
+}
+
 /// A refusal in a few words (toasts).
 pub fn short(r: Refusal) -> &'static str {
     match r {

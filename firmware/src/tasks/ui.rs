@@ -201,6 +201,8 @@ pub async fn task() {
     link.set_max_baud(fastest.unwrap_or(115_200));
     // Bring-up: the receiver on the cable log once a second while it changes.
     let mut logged = (LiveAll::default(), Instant::now());
+    // The APRS task (chapter 25): it feeds the App and the store, so it runs here.
+    let mut aprs = super::aprs::Aprs::new();
     loop {
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
@@ -222,7 +224,7 @@ pub async fn task() {
             match ferrite_app::link::route(app.settings().cable_port, link.active(now_ms()), b) {
                 ferrite_app::link::Route::Link => link.feed(b, now_ms()),
                 ferrite_app::link::Route::Term => term.feed(&mut app, b, now_ms(), store),
-                ferrite_app::link::Route::Drop => {} // KISS has the cable (chapter 26)
+                ferrite_app::link::Route::Drop => aprs.kiss_in(b), // KISS has the cable (chapter 26)
             }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
@@ -267,6 +269,9 @@ pub async fn task() {
                 }
                 TERM_WAKE.signal(()); // print the answer, or wait for it, on the next turn
             }
+        }
+        if !bringup::ON.load(Relaxed) {
+            aprs.poll(&mut app, store, &live, now_ms());
         }
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
@@ -323,6 +328,9 @@ pub async fn task() {
         let mut period = if down != 0 || term.busy() || !link.ready() { TICK_HELD_MS } else { TICK_IDLE_MS };
         if leds.next_ms != 0 {
             period = period.min(leds.next_ms as u64);
+        }
+        if aprs.busy() {
+            period = period.min(20); // keying or playing an APRS frame: its unkey on time
         }
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {

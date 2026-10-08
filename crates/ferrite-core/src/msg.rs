@@ -46,6 +46,10 @@ pub enum RadioCmd {
     /// Key or unkey a slot (3 = the HF mode frequency), after the UI's checks; the Radio task checks again
     /// (TX-17) and answers in [`LiveAll::tx`].
     Transmit { slot: u8, on: bool },
+    /// A data key-up or unkey (APRS beacons, messages, acks, digipeats: APRS-7, APRS-20): as [`RadioCmd::Transmit`]
+    /// after the UI's checks, at `power` (0 low, 1 mid, 2 high: 0 5 5 4, default low), with no end tone or CW ID
+    /// after it (TONE-11). The DSP task plays the frame once it is keyed. Preceded by [`RadioCmd::TxPlan`].
+    TransmitData { slot: u8, power: u8, on: bool },
     /// Sent just before each [`RadioCmd::Transmit`] key-up: the frequency the UI checked (offset, split and
     /// reverse applied), the region (an index into `txplan::Region::ALL`) and Extend TX, for the Radio task's own
     /// checks (TX-17). Apart from `Transmit` so a command stays 8 bytes.

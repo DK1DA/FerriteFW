@@ -187,6 +187,9 @@ struct Tx {
     power: [u8; 4],
     /// The UI's [`RadioCmd::TxPlan`] for the next key-up.
     plan: Option<(Freq10, Region, bool)>,
+    /// The key-up now is a data one ([`RadioCmd::TransmitData`]: APRS) at this power level: no end tone or CW ID
+    /// after it (TONE-11), the APRS power (0 5 5 4) instead of the slot's.
+    data: Option<u8>,
     /// TX-42: every PTT input has read released since boot.
     ptt_ok: bool,
     /// The calibrated PA drive for the key-up being run (`Act::PaRamp`).
@@ -909,6 +912,7 @@ pub async fn task() {
             tone: [0; 4],
             power: [0; 4],
             plan: None,
+            data: None,
             ptt_ok: false,
             pa: 0,
             fault: false,
@@ -1120,10 +1124,12 @@ impl Radio {
                 self.tx.plan = Some((tx, Region::ALL.get(region as usize).copied().unwrap_or(Region::Other), extend));
             }
             #[cfg(feature = "tx")]
-            RadioCmd::Transmit { slot, on } => self.transmit(slot, on).await,
+            RadioCmd::Transmit { slot, on } => self.transmit(slot, on, None).await,
+            #[cfg(feature = "tx")]
+            RadioCmd::TransmitData { slot, power, on } => self.transmit(slot, on, Some(power)).await,
             // Transmit code is out of this build: the UI refuses first (RX-only build).
             #[cfg(not(feature = "tx"))]
-            RadioCmd::Transmit { .. } | RadioCmd::TxPlan { .. } => {}
+            RadioCmd::Transmit { .. } | RadioCmd::TransmitData { .. } | RadioCmd::TxPlan { .. } => {}
             RadioCmd::Tune(_) => {}
         }
     }
@@ -1159,7 +1165,7 @@ impl Radio {
         if !self.has(n) {
             return false;
         }
-        let high = self.tx.power[self.live.tx.slot as usize % 4] == 2;
+        let high = self.tx.data.unwrap_or(self.tx.power[self.live.tx.slot as usize % 4]) == 2;
         let mut bk = self.chip(n);
         bk.tx_on(bk4829::tx::Source::Mic);
         if bk.read(0x30) != REG30_TX_MIC {
@@ -1169,8 +1175,8 @@ impl Radio {
         true
     }
 
-    /// Key up or unkey a slot (3 = HF mode's frequency).
-    async fn transmit(&mut self, slot: u8, on: bool) {
+    /// Key up or unkey a slot (3 = HF mode's frequency); `data`: a data key-up at that power level (APRS).
+    async fn transmit(&mut self, slot: u8, on: bool, data: Option<u8>) {
         let now = now_ms() as u32;
         let mut st = Steps::default();
         if !on {
@@ -1191,18 +1197,19 @@ impl Radio {
         }
         let s = slot as usize % 4;
         let rx = if slot < SLOTS as u8 { self.slots[s].freq } else { f };
+        self.tx.data = data;
         let req = Req {
             tx: f,
             rx,
-            kind: TxKind::Voice,
-            person: true,
+            kind: if data.is_some() { TxKind::Data } else { TxKind::Voice },
+            person: data.is_none(),
             confirmed: true, // the UI asked for the emergency prompt's second PTT before this (TX-3)
             am: slot < SLOTS as u8 && self.slots[s].am,
             region,
             extend,
             cal_ok: self.tx.cal.is_some(),
             batt_ok: self.battery_ok(),
-            power: self.tx.power[s],
+            power: data.unwrap_or(self.tx.power[s]).min(2),
         };
         if let Err(r) = self.tx.seq.check(&req, &self.path, now) {
             return self.refuse(slot, r);

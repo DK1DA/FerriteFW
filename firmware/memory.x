@@ -49,6 +49,10 @@ SECTIONS
     *(.text.*10ferrite_ui*);
     *(.text.*13ferrite_store*);
     *(.text.*7ferrite5tasks2ui*);
+    /* The APRS task (run by the UI task) and the APRS library it parses and builds frames with; the modem
+     * (uafsk) stays fast: the DSP task runs it. */
+    *(.text.*7ferrite5tasks4aprs*);
+    *(.text.*5uaprs*);
     . = ALIGN(4);
     __eslow_text = .;
   } > FLASH

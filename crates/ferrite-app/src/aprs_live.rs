@@ -11,6 +11,8 @@ use crate::aprs::{beacon_due, retry_wait, AprsCfg, LastBeacon, HEARD_MAX, INFO_M
 use crate::data::{Beacon, Fix, MsgState, Pos, Station, Sym};
 use core::cell::Cell;
 use ferrite_ui::text::Buf;
+/// The APRS library, for the firmware's KISS TNC (chapter 26).
+pub use uaprs;
 use uaprs::ax25::{Address, Frame};
 use uaprs::parse::{self, MessageKind, Packet};
 
