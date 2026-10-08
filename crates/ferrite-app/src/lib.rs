@@ -41,6 +41,7 @@ macro_rules! slow {
 }
 
 pub mod aprs;
+pub mod aprs_live;
 pub mod chan;
 pub mod chanscan;
 pub mod data;
@@ -48,6 +49,7 @@ pub mod keys;
 pub mod lights;
 pub mod link;
 pub mod persist;
+pub mod radio_data;
 pub mod sample;
 pub mod screens;
 pub mod settings;

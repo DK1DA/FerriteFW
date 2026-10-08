@@ -10,6 +10,7 @@
 #[cfg(test)]
 extern crate std;
 
+pub mod audio;
 pub mod chipid;
 pub mod decoders;
 pub mod freq;
