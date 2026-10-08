@@ -31,13 +31,16 @@ pub enum Src {
     Ais,
     Dtmf,
     Selcall,
+    /// Arriving at a waypoint (GPS-12): the waypoint's name, and "Arrived, N m" as the text.
+    Gps,
 }
 
 impl Src {
-    pub const ALL: [Src; 7] = [Src::Aprs, Src::Pocsag, Src::Same, Src::Dsc, Src::Ais, Src::Dtmf, Src::Selcall];
+    /// In the order the log stores them (a record's source byte): new sources go at the end.
+    pub const ALL: [Src; 8] = [Src::Aprs, Src::Pocsag, Src::Same, Src::Dsc, Src::Ais, Src::Dtmf, Src::Selcall, Src::Gps];
 
     pub fn name(self) -> &'static str {
-        ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall"][self as usize]
+        ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"][self as usize]
     }
 }
 

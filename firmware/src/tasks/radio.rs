@@ -968,6 +968,10 @@ pub async fn task() {
             }
         }
         let snap = r.live;
+        // The GPS task's view (GPS-4, GPS-22): keyed, and any slot receiving.
+        let rx = snap.slots.iter().any(|s| s.squelch_open);
+        let rf = if snap.tx.keyed { crate::chan::RF_BUSY_KEYED } else { 0 } | if rx { crate::chan::RF_BUSY_RX } else { 0 };
+        crate::chan::RF_STATE.store(rf, core::sync::atomic::Ordering::Relaxed);
         live.send_if_modified(|v| {
             let changed = *v != Some(snap);
             if changed {

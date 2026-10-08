@@ -326,6 +326,14 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &WATCH_TEXT, app.watch);
             app.watch != 1
         }
+        [6, 1] => {
+            pick(b, &ON_OFF, s.gps_on as u8);
+            !s.gps_on
+        }
+        [6, 8] => {
+            pick(b, &GPS_RXTX, s.gps_rxtx);
+            s.gps_rxtx != 0
+        }
         [6, 3] => {
             pick(b, &COORD_FORMATS, s.coord_fmt);
             s.coord_fmt != Settings::DEFAULT.coord_fmt
@@ -643,7 +651,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 41] = [
+pub(crate) const SETTABLE: [&[u8]; 43] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -660,9 +668,11 @@ pub(crate) const SETTABLE: [&[u8]; 41] = [
     &[5, 3],
     &[5, 5, 1],
     &[5, 5, 4],
+    &[6, 1],
     &[6, 4],
     &[6, 5],
     &[6, 6],
+    &[6, 8],
     &[7, 1],
     &[7, 2],
     &[7, 3, 2],
@@ -704,6 +714,8 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
         }
         [7, 7] => app.change(Item::BatterySave, d),
+        [6, 1] => s.gps_on = !s.gps_on,
+        [6, 8] => s.gps_rxtx = cycle(s.gps_rxtx, d, GPS_RXTX.len()),
         [6, 3] => s.coord_fmt = cycle(s.coord_fmt, d, COORD_FORMATS.len()),
         [6, 4] => s.units = cycle(s.units, d, UNITS.len()),
         [6, 5] => s.tz = cycle(s.tz, d, TIME_ZONES.len()),
@@ -823,6 +835,8 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
             s.tone_level = d.tone_level;
             app.out.push(RadioCmd::ToneLevel(d.tone_level));
         }
+        [6, 1] => s.gps_on = d.gps_on,
+        [6, 8] => s.gps_rxtx = d.gps_rxtx,
         [6, 3] => s.coord_fmt = d.coord_fmt,
         [6, 9] => s.fixed_on = false,
         [6, 4] => s.units = d.units,

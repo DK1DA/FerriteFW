@@ -14,6 +14,7 @@ pub mod audio;
 pub mod chipid;
 pub mod decoders;
 pub mod freq;
+pub mod gps;
 pub mod keys;
 pub mod layout;
 pub mod link;

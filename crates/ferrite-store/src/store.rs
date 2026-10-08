@@ -958,7 +958,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 self.extra.request(op);
                 true
             }
-            Op::MarkHere => match self.extra.fix() {
+            // GPS-10: at a fix, never at the fixed position standing in for one (GPS-3).
+            Op::MarkHere => match self.extra.fix().filter(|f| f.age_s != ferrite_app::gpsdata::FIXED_AGE) {
                 Some(f) if self.wps.len() < logs::WP_MAX => {
                     let mut name = Buf::<16>::from(b"Marked ");
                     let n = self.wps.len() + 1;

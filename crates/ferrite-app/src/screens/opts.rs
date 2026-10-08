@@ -50,6 +50,8 @@ enum Act {
     Beacon,
     /// A waypoint typed as a grid square (GPS-21): text entry.
     Grid,
+    /// The arrival alarm's next radius (GPS-12, 0 6 7): off, 50 m ... 1 km.
+    Arrival,
 }
 
 type Opt = (&'static str, Act, &'static str);
@@ -85,9 +87,10 @@ const APRS_CARD: [Opt; 4] = [
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
 ];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
-const WAYPOINTS: [Opt; 3] = [
+const WAYPOINTS: [Opt; 4] = [
     ("Mark here", Act::Do(Op::MarkHere), "A waypoint at this fix"),
     ("Add a grid square", Act::Grid, "A waypoint at a square's centre: FN31pr"),
+    ("Arrival alarm", Act::Arrival, "Off, 50 m to 1 km from the one you go to"),
     ("GPS position", Act::Open(Dest::GpsPosition), "Fix, satellites, grid square"),
 ];
 
@@ -174,6 +177,21 @@ impl View for Options {
                 Act::Grid => {
                     app.back();
                     super::text::open(app, super::text::TextFor::GridWaypoint, store);
+                }
+                Act::Arrival => {
+                    let n = crate::settings::ARRIVAL_M.len() as u8;
+                    app.set.arrival = (app.set.arrival + 1) % n;
+                    app.back();
+                    let m = crate::settings::ARRIVAL_M[app.set.arrival as usize];
+                    let mut v = Buf::<12>::new();
+                    match m {
+                        0 => v.set(b"off"),
+                        1000 => v.set(b"1 km"),
+                        _ => {
+                            let _ = ufmt::uwrite!(v, "{} m", m);
+                        }
+                    }
+                    app.show_toast(b"Arrival alarm", v.as_bytes(), false);
                 }
                 Act::ShowHidden => {
                     app.set.show_hidden = !app.set.show_hidden;

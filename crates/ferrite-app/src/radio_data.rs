@@ -1,11 +1,13 @@
 //! The records the radio's flash store doesn't keep itself (its `extra`, [`crate::data::Data`]): the APRS task's
 //! heard list, beacon and messages being tried ([`AprsLive`]), the callsign the APRS task sends as (APRS-8: the
-//! UI task copies it from the settings), and the GPS's latest fix (the GPS task's, through the UI task). The
-//! simulators use their sample data instead.
+//! UI task copies it from the settings), and the GPS (the GPS task's fix and satellites through the UI task,
+//! kept in [`GpsData`]: the fix's age, the fixed position without one, GPS-2, GPS-3). The simulators use their
+//! sample data instead.
 
 use crate::aprs::AprsCfg;
 use crate::aprs_live::AprsLive;
-use crate::data::{Beacon, Data, Draft, Fix, Op, Pos, Station};
+use crate::data::{Beacon, Data, Draft, Fix, Op, Pos, Sat, Station};
+use crate::gpsdata::GpsData;
 use core::cell::Cell;
 use ferrite_core::msg::GpsFix;
 use ferrite_ui::text::Buf;
@@ -14,7 +16,8 @@ pub struct RadioData {
     pub aprs: AprsLive,
     cfg: Cell<AprsCfg>,
     callsign: Cell<Buf<10>>,
-    fix: Cell<Option<Fix>>,
+    /// The GPS as the screens read it: the UI task feeds it the GPS task's watches.
+    pub gps: GpsData,
     draft: Cell<Draft>,
     ver: Cell<u32>,
 }
@@ -31,7 +34,7 @@ impl RadioData {
             aprs: AprsLive::new(),
             cfg: Cell::new(AprsCfg::DEFAULT),
             callsign: Cell::new(Buf::new()),
-            fix: Cell::new(None),
+            gps: GpsData::new(),
             draft: Cell::new(Draft { to: Buf::new(), text: Buf::new() }),
             ver: Cell::new(0),
         }
@@ -48,7 +51,8 @@ impl RadioData {
     /// The GPS task's latest report (`chan::POSITION`), read at `now_ms` on the same clock: the fix the beacons
     /// and "mark here" use, or None with the GPS off or no fix.
     pub fn set_gps(&self, g: &GpsFix, now_ms: u32) {
-        self.fix.set(fix_of(g, now_ms));
+        self.gps.set_fix(*g);
+        self.gps.tick(now_ms);
     }
 
     pub fn cfg(&self) -> AprsCfg {
@@ -63,7 +67,7 @@ impl RadioData {
 
 impl Data for RadioData {
     fn version(&self) -> u32 {
-        self.ver.get()
+        self.ver.get().wrapping_add(self.gps.version())
     }
 
     fn stations(&self) -> u16 {
@@ -91,7 +95,15 @@ impl Data for RadioData {
     }
 
     fn fix(&self) -> Option<Fix> {
-        self.fix.get()
+        self.gps.fix()
+    }
+
+    fn sats(&self) -> u8 {
+        self.gps.sats()
+    }
+
+    fn sat(&self, i: u8) -> Option<Sat> {
+        self.gps.sat(i)
     }
 
     fn request(&self, op: Op) -> bool {

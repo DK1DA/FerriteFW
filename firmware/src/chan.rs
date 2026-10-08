@@ -45,6 +45,12 @@ pub static TX_CAL: Signal<M, (Option<ferrite_core::txcal::TxCal>, ferrite_core::
 /// satellites in view for the UI's sky plot. The GPS task sends both.
 pub static POSITION: Watch<M, GpsFix, 3> = Watch::new();
 pub static SKY: Watch<M, GpsSky, 1> = Watch::new();
+/// What the GPS should do (0 6 1, 0 6 8), from the UI when the settings change.
+pub static GPS_CFG: Signal<M, ferrite_app::gpsdata::GpsCfg> = Signal::new();
+/// What the radio is doing, for the GPS task (GPS-4, GPS-22): set by the Radio task with each snapshot.
+pub static RF_STATE: AtomicU8 = AtomicU8::new(0);
+pub const RF_BUSY_KEYED: u8 = 1;
+pub const RF_BUSY_RX: u8 = 2;
 
 /// The terminal over the cable (manual chapter 37): the Link task moves the cable's bytes into `TERM_IN` and
 /// signals `TERM_WAKE`; the UI task, which owns the App the terminal reads and edits, feeds them to it and puts

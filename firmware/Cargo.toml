@@ -33,7 +33,6 @@ si4732.workspace = true
 st7789.workspace = true
 w25q.workspace = true
 keypad.workspace = true
-nmea.workspace = true
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = { version = "0.7.5", features = ["set-sp", "set-vtor", "device"] }
 critical-section = "1.2"

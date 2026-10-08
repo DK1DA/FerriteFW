@@ -45,6 +45,7 @@ pub mod aprs_live;
 pub mod chan;
 pub mod chanscan;
 pub mod data;
+pub mod gpsdata;
 pub mod keys;
 pub mod lights;
 pub mod link;

@@ -18,7 +18,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::signal::Signal;
 use embassy_time::Timer;
-use ferrite_app::data::NoData;
+use ferrite_app::radio_data::RadioData;
 #[cfg(not(feature = "bringup"))]
 use ferrite_core::layout::WRITABLE;
 use ferrite_store::{FlashStore, Nor, NorError, PAGE, SECTOR};
@@ -146,7 +146,9 @@ impl Nor for Chip {
     }
 }
 
-pub type Store = FlashStore<Chip, NoData>;
+/// The records the store doesn't hold itself come from `extra` (`ferrite_app::radio_data`): the APRS task's
+/// heard list and messages, the callsign, and the GPS.
+pub type Store = FlashStore<Chip, RadioData>;
 
 /// The store for the UI and Storage tasks.
 pub struct Shared(pub &'static Store);
@@ -171,7 +173,7 @@ pub fn make() -> (Option<(u32, u32)>, &'static Store) {
         Err(_) => (None, None),
     };
     let size = id.map_or(0, |i| i.1);
-    let store: &'static Store = cortex_m::singleton!(: Store = FlashStore::new(Chip { spi, size, active: false }, NoData)).unwrap();
+    let store: &'static Store = cortex_m::singleton!(: Store = FlashStore::new(Chip { spi, size, active: false }, RadioData::new())).unwrap();
     store.set_deferred(true);
     let _ = STORE.init(Shared(store));
     (id, store)

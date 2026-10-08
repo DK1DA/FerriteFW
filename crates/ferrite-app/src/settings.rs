@@ -217,7 +217,18 @@ pub struct Settings {
     pub dtmf_delay: u8,
     /// 0 8 7 2: CW ID ([`CW_ID_MODES`]: off, every 10 min, on unkey; VOX-12).
     pub cw_id: u8,
+    /// 0 6 1: the GPS receiver on (GPS-1).
+    pub gps_on: bool,
+    /// 0 6 8: GPS during RX/TX ([`GPS_RXTX`]: bit 0 off while receiving, bit 1 off while transmitting; GPS-4).
+    pub gps_rxtx: u8,
+    /// 0 6 7's arrival alarm: an index into [`ARRIVAL_M`] (0 off; GPS-12).
+    pub arrival: u8,
 }
+
+/// 0 6 8's values (GPS-4, GPS-14).
+pub const GPS_RXTX: [&str; 4] = ["Always on", "Off on receive", "Off on transmit", "Off on both"];
+/// The arrival alarm's radii in metres (0 6 7, GPS-12): off, then 50 m to 1 km.
+pub const ARRIVAL_M: [u16; 6] = [0, 50, 100, 200, 500, 1000];
 
 /// 0 8 5 1's values: bit 0 receive, bit 1 transmit.
 pub const TAIL_MODES: [&str; 4] = ["Off", "Receive", "Transmit", "Both"];
@@ -322,6 +333,9 @@ impl Settings {
         dtmf_ms: 100,
         dtmf_delay: 30,
         cw_id: 0,
+        gps_on: true,
+        gps_rxtx: 0,
+        arrival: 0,
     };
 
     /// The region's name, or "Not set".

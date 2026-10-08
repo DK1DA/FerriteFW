@@ -189,6 +189,8 @@ pub async fn task() {
     if let Some(l) = live_rx.try_get() {
         live = l;
     }
+    // GPS (roadmap 5a): the fix into the store's GPS data, the status bar's GPS and clock, the arrival alarm.
+    let mut gps = crate::tasks::gps::GpsUi::new();
     // Key codes down (mapped ones only): the app is ticked often while any is held.
     let mut down = 0u32;
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
@@ -310,6 +312,7 @@ pub async fn task() {
                 cortex_m::peripheral::SCB::sys_reset();
             }
         }
+        gps.step(&mut app, store, &mut dev);
         app.render(&mut lcd, &live, &dev, store);
         // The lights (decision 63): screen and keypad, and the LEDs with their next change.
         SCREEN_LIGHT.write(!app.dark());

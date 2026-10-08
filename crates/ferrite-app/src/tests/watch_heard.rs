@@ -94,7 +94,7 @@ fn flags_round_trip_around_the_spare_bits() {
     }
     // A record saved with Follow's bits set (Follow off, a change from its old default): ignored.
     let mut v = save(&crate::settings::Settings { scan_tx: !d.scan_tx, ..d });
-    let i = v.len() - 26 - 1; // the flag byte, before the power-on message, subtone level, scan resume and priority check and the Transmit group's tones (6)
+    let i = v.len() - 29 - 1; // the flag byte, before the power-on message, subtone level, scan resume and priority check, the Transmit group's tones (6) and the GPS settings (3)
     v[i] |= 0b1100;
     let b = load(&v);
     assert_eq!(b.scan_tx, !d.scan_tx, "scan inputs kept its bit");
@@ -125,7 +125,7 @@ fn power_on_message_round_trip_and_boot_line() {
     assert_eq!((b.pon, b.pon_text, b.chan_only), (2, a.pon_text, true));
     assert_eq!(b.boot_line(), Some(b"Hello there".as_slice()));
     let mut c = crate::settings::Settings::DEFAULT;
-    c.load(&mut SliceSource(&v.0[..v.0.len() - 26]));
+    c.load(&mut SliceSource(&v.0[..v.0.len() - 29]));
     assert_eq!((c.pon, c.chan_only), (1, true), "an older record: callsign, its flags kept");
     assert_eq!(c.boot_line(), Some(b"VA7FER".as_slice()));
     c.pon = 0;

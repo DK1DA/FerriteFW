@@ -387,7 +387,6 @@ dependencies = [
  "ferrite-store",
  "ferrite-ui",
  "keypad",
- "nmea",
  "si4732",
  "st7789",
  "ufmt",
@@ -806,11 +805,6 @@ dependencies = [
  "libc",
  "memoffset",
 ]
-
-[[package]]
-name = "nmea"
-version = "0.1.0"
-source = "git+https://github.com/infamy/uradio?rev=dcae31aecfdd3431e21ea59e88f678fd1159d346#dcae31aecfdd3431e21ea59e88f678fd1159d346"
 
 [[package]]
 name = "nu-ansi-term"

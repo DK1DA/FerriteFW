@@ -25,7 +25,6 @@ si4732 = { git = "https://github.com/infamy/uradio", rev = "" }
 st7789 = { git = "https://github.com/infamy/uradio", rev = "" }
 w25q = { git = "https://github.com/infamy/uradio", rev = "" }
 keypad = { git = "https://github.com/infamy/uradio", rev = "" }
-nmea = { git = "https://github.com/infamy/uradio", rev = "" }
 uafsk = { git = "https://github.com/infamy/udigimodes", rev = "" }
 upocsag = { git = "https://github.com/infamy/udigimodes", rev = "" }
 udsc = { git = "https://github.com/infamy/udigimodes", rev = "" }

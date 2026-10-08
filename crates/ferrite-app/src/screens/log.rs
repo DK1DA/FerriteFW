@@ -183,7 +183,7 @@ fn is_distress(e: &Event) -> bool {
 fn title(e: &Event, b: &mut Buf<24>) {
     b.clear();
     match e.src {
-        Src::Aprs | Src::Ais => b.push(e.name.as_bytes()),
+        Src::Aprs | Src::Ais | Src::Gps => b.push(e.name.as_bytes()),
         Src::Pocsag => {
             let _ = uwrite!(b, "Capcode {}", e.id);
         }
@@ -350,6 +350,10 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
             add("Unit", ferrite_ui::v!(b, "{}", e.id));
             add("Sent", e.text.as_bytes());
         }
+        Src::Gps => {
+            add("Waypoint", e.name.as_bytes());
+            add("Arrival", e.text.as_bytes());
+        }
     }
     if let Some(p) = e.pos {
         let mut pb = Buf::<32>::new();
@@ -362,9 +366,12 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
             add("Distance", ferrite_ui::v!(b, "{} {} {}\u{b0}", Txt(d.as_bytes()), compass_name(deg), deg));
         }
     }
-    let mut f = Buf::<16>::new();
-    mhz_text(e.freq, &mut f);
-    add("Freq", f.as_bytes());
+    if e.freq != 0 {
+        // a waypoint arrival has no frequency
+        let mut f = Buf::<16>::new();
+        mhz_text(e.freq, &mut f);
+        add("Freq", f.as_bytes());
+    }
     add("Heard", ferrite_ui::v!(b, "{} ago", Txt(age.as_bytes()))); // the clock time is in the header
     let mut y = 58;
     for (i, (label, v)) in rows.iter().enumerate().take(n) {
@@ -390,6 +397,7 @@ impl Event {
             Src::Ais => b"AIS position",
             Src::Dtmf => b"DTMF sequence",
             Src::Selcall => b"Selcall",
+            Src::Gps => b"Waypoint arrival",
         }
     }
 }
