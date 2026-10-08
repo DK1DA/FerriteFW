@@ -35,6 +35,12 @@ pub enum RadioCmd {
     Watch(u8),
     /// Start or stop scanning in a slot.
     Scan { slot: u8, on: bool },
+    /// Channel scans also listen on each channel's transmit frequency when it has a shift or split (SCAN-22,
+    /// 0 1 6 3; sent at start-up and when it changes).
+    ScanTx(bool),
+    /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 4 2; sent at start-up and when
+    /// it changes).
+    ToneLevel(u8),
     /// Pause watching for this many seconds (WATCH-6, WATCH-16); 0 resumes it now.
     PauseWatch(u16),
     /// Follow and follow return (WATCH-5): what the watch engine does when a watched slot is heard.
@@ -48,7 +54,8 @@ pub enum RadioCmd {
     ScanZones { slot: u8, zones: u16 },
     /// While keyed: the tone burst (PTT + SIDE2) for as long as SIDE2 is held (TONE-13).
     ToneBurst { on: bool },
-    /// While keyed: a DTMF digit ('0'-'9', '*', '#') sent live for as long as its key is held (DTMF-7).
+    /// While keyed: a DTMF digit ('0'-'9', '*', '#', 'A'-'D') sent live for as long as its key is held (DTMF-7,
+    /// DTMF-11).
     Dtmf { key: u8, on: bool },
     /// Monitor latched on a slot: squelch held open until turned off (SIDE1 tap, SQL-2; shown MON on its card).
     Monitor { slot: u8, on: bool },
@@ -124,6 +131,8 @@ pub enum Param {
     Reverse,
     /// Split: the absolute TX frequency (10 Hz units); 0 = not split, TX is RX plus Offset.
     Split,
+    /// The clarifier: a receive-only offset in Hz, -2500 to 2500 (VFO-22); never moves the transmit frequency.
+    Clarifier,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

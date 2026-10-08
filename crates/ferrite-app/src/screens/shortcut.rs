@@ -1,6 +1,7 @@
-//! The shortcut map (MENU 0 9 1 4; manual chapter 7, HOME-8, KEY-11): a reference page listing the ten hold-digit
-//! shortcuts with what each would do now. Holding a digit on home runs its shortcut at once
-//! ([`super::nav::hold_digit`]); this page is only for looking them up.
+//! The shortcut map (MENU 0 9 1 4; manual chapter 7, HOME-8, KEY-11, KEY-21): the ten hold-digit shortcuts
+//! with what each would do now. Holding a digit on home runs its shortcut at once ([`super::nav::hold_digit`]);
+//! here ▲▼ (or the knob, or a digit) pick one and OK runs it on home, as nicFW's function menu does, while the
+//! help line names the digit to hold next time.
 
 use super::shared::*;
 use super::{Cx, Hints, View};
@@ -16,7 +17,9 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets::{self as w, Row};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Shortcut;
+pub struct Shortcut {
+    pub sel: u8,
+}
 
 /// The ten shortcuts (KEY-11), by digit.
 pub(crate) const SHORTCUTS: [&str; 10] = [
@@ -41,10 +44,23 @@ impl View for Shortcut {
         b.set(b"Shortcuts");
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
-        if (e.key, e.press) == (Key::Exit, Press::Short) {
-            app.back();
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
+        match (e.key, e.press) {
+            (Key::Exit, Press::Short) => app.back(),
+            (Key::Up | Key::Down, Press::Short | Press::Repeat) => self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
+            (Key::Digit(d), Press::Short) => app.screen = crate::Screen::Shortcut(Shortcut { sel: d }),
+            // KEY-21: OK runs it from home, as holding the digit there would
+            (Key::Menu, Press::Short) => {
+                app.go_home();
+                super::nav::hold_digit(app, self.sel, store);
+            }
+            _ => {}
         }
+    }
+
+    fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
+        let sel = (self.sel as i32 + d).rem_euclid(SHORTCUTS.len() as i32) as u8;
+        app.screen = crate::Screen::Shortcut(Shortcut { sel });
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
@@ -78,12 +94,16 @@ impl View for Shortcut {
                 _ => {}
             }
             let grey = d == 6 && app.greyed(Item::Step).is_some(); // VFO-8: step is VFO only
-            let r = Row { num: Some(d as u8), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: false, grey };
-            app.list_row(lcd, d, 44 + 25 * d as i32, 25, &r);
+            let r = Row { num: Some(d as u8), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: d == self.sel as usize, grey };
+            app.list_row(lcd, d, 44 + 22 * d as i32, 22, &r);
         }
+        let mut path = Buf::<16>::new();
+        path.push(b"Hold ");
+        path.push(&[b'0' + self.sel % 10]);
+        app.help_box(lcd, 268, 28, b"OK runs it. On home:", path.as_bytes());
     }
 
     fn hints(self, _: &App) -> Hints {
-        Hints::new(&[])
+        Hints::new(&[(ARROWS_UD, "Pick"), ("OK", "Run"), ("BACK", "Back")])
     }
 }

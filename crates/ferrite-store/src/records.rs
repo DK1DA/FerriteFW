@@ -166,8 +166,8 @@ pub fn zone_addr(z: u8) -> u32 {
     ZONES.start + z / ZONES_PER_SECTOR * SECTOR + z % ZONES_PER_SECTOR * ZONE_LEN as u32
 }
 
-/// Name (16) · flags: scan all, shown, by distance (1) · resume (1) · dwell (1) · smart (1) · priority channels
-/// (2 + 2, 0xFFFF none) · reserved (6) · CRC-16 (2).
+/// Name (16) · flags: scan all, shown, by distance (1) · resume (1) · dwell (1) · reserved, 0 (1; it was smart scan,
+/// now the range scans' hit list, SCAN-23) · priority channels (2 + 2, 0xFFFF none) · reserved (6) · CRC-16 (2).
 pub fn zone_decode(b: &[u8; ZONE_LEN]) -> Option<(Name, ZoneCfg)> {
     if crc16(&b[..30]) != u16_at(b, 30) || b[..30] == [0xFF; 30] {
         return None;
@@ -180,7 +180,6 @@ pub fn zone_decode(b: &[u8; ZONE_LEN]) -> Option<(Name, ZoneCfg)> {
         by_distance: b[16] & 4 != 0,
         resume: b[17],
         dwell: b[18],
-        smart: b[19] != 0,
         pri: [pri(20), pri(22)],
     };
     Some((Name::from(&b[..n]), cfg))
@@ -194,7 +193,7 @@ pub fn zone_encode(name: &[u8], cfg: &ZoneCfg) -> [u8; ZONE_LEN] {
     b[16] = cfg.scan_all as u8 | (cfg.shown as u8) << 1 | (cfg.by_distance as u8) << 2;
     b[17] = cfg.resume;
     b[18] = cfg.dwell;
-    b[19] = cfg.smart as u8;
+    b[19] = 0;
     b[20..22].copy_from_slice(&cfg.pri[0].unwrap_or(0xFFFF).to_le_bytes());
     b[22..24].copy_from_slice(&cfg.pri[1].unwrap_or(0xFFFF).to_le_bytes());
     let crc = crc16(&b[..30]);
@@ -203,7 +202,7 @@ pub fn zone_encode(name: &[u8], cfg: &ZoneCfg) -> [u8; ZONE_LEN] {
 }
 
 /// A new zone's settings: in "scan all", shown in ◀▶, the radio's resume and dwell.
-pub const NEW_ZONE: ZoneCfg = ZoneCfg { scan_all: true, shown: true, by_distance: false, resume: 0, dwell: 255, smart: false, pri: [None, None] };
+pub const NEW_ZONE: ZoneCfg = ZoneCfg { scan_all: true, shown: true, by_distance: false, resume: 0, dwell: 255, pri: [None, None] };
 
 // ---- range presets ----
 
@@ -269,6 +268,31 @@ pub fn dtmf_decode(b: &[u8]) -> Option<Dtmf> {
     let mut d = [0u8; 8];
     d.copy_from_slice(&b[1..9]);
     Some(Dtmf { len: b[0], d })
+}
+
+/// The memories' names (DTMF-12): 16 records of 12 B after the memories (0x041F00-0x041FBF): name, zero-padded
+/// (10) · CRC-16 (2).
+pub const DTMF_NAME_LEN: usize = 12;
+
+pub fn dtmf_name_addr(i: u8) -> u32 {
+    dtmf_addr(0) + DTMF_MEMS as u32 * DTMF_LEN as u32 + (i % DTMF_MEMS) as u32 * DTMF_NAME_LEN as u32
+}
+
+pub fn dtmf_name_decode(b: &[u8]) -> Option<Buf<10>> {
+    if b[..10] == [0xFF; 10] || crc16(&b[..10]) != u16_at(b, 10) {
+        return None;
+    }
+    let n = b[..10].iter().position(|&c| c == 0).unwrap_or(10);
+    Some(Buf::from(&b[..n]))
+}
+
+pub fn dtmf_name_encode(name: &[u8]) -> [u8; DTMF_NAME_LEN] {
+    let mut b = [0u8; DTMF_NAME_LEN];
+    let n = name.len().min(10);
+    b[..n].copy_from_slice(&name[..n]);
+    let crc = crc16(&b[..10]);
+    b[10..12].copy_from_slice(&crc.to_le_bytes());
+    b
 }
 
 pub fn dtmf_encode(m: &Dtmf) -> [u8; DTMF_LEN] {
@@ -344,7 +368,7 @@ mod tests {
 
     #[test]
     fn zones_and_presets_round_trip() {
-        let cfg = ZoneCfg { scan_all: true, shown: false, by_distance: true, resume: 11, dwell: 3, smart: true, pri: [Some(9), None] };
+        let cfg = ZoneCfg { scan_all: true, shown: false, by_distance: true, resume: 11, dwell: 3, pri: [Some(9), None] };
         let z = zone_encode(b"Repeaters", &cfg);
         assert!(zone_decode(&z) == Some((Name::from(b"Repeaters"), cfg)));
         assert!(zone_decode(&[0xFF; ZONE_LEN]).is_none());
@@ -358,5 +382,8 @@ mod tests {
         assert_eq!(dtmf_decode(&dtmf_encode(&m)), Some(m));
         assert!(dtmf_decode(&[0xFF; DTMF_LEN]).is_none());
         assert!(dtmf_addr(DTMF_MEMS - 1) + DTMF_LEN as u32 <= PRESETS.end - 32);
+        assert!(dtmf_name_addr(DTMF_MEMS - 1) + DTMF_NAME_LEN as u32 <= PRESETS.end - 32);
+        assert_eq!(dtmf_name_decode(&dtmf_name_encode(b"Link on")).unwrap().as_bytes(), b"Link on");
+        assert!(dtmf_name_decode(&[0xFF; DTMF_NAME_LEN]).is_none());
     }
 }

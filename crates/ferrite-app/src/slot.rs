@@ -142,16 +142,23 @@ pub const DCS_INV: u16 = 1 << 14;
 /// Off, 50 CTCSS, 104 DCS normal, 104 DCS inverted.
 const TONES: i32 = 1 + 50 + 104 + 104;
 
-/// Tone word to its place in the knob's order (Off, CTCSS, DCS N, DCS I).
+/// Tone word to its place in the knob's order (Off, CTCSS, DCS N, DCS I). A tone typed off the lists (TONE-15)
+/// sits after the last standard one below it: [`tone_at`] gives that one back, so the knob steps from there.
 pub fn tone_index(t: u16) -> i32 {
     if t == 0 {
         0
     } else if t & DCS_FLAG == 0 {
-        CTCSS.iter().position(|&c| c == t).map_or(0, |i| 1 + i as i32)
+        CTCSS.iter().position(|&c| c == t).map_or_else(|| CTCSS.iter().filter(|&&c| c < t).count().max(1) as i32, |i| 1 + i as i32)
     } else {
-        let i = DCS.iter().position(|&c| c == t & 0x1FF).map_or(0, |i| i as i32);
+        let c = t & 0x1FF;
+        let i = DCS.iter().position(|&d| d == c).map_or_else(|| DCS.iter().filter(|&&d| d < c).count().saturating_sub(1) as i32, |i| i as i32);
         51 + i + if t & DCS_INV != 0 { 104 } else { 0 }
     }
+}
+
+/// A tone word on neither list: typed (TONE-15), or read from a channel another radio wrote.
+pub fn tone_custom(t: u16) -> bool {
+    t != 0 && tone_at(tone_index(t)) != t
 }
 
 pub fn tone_at(i: i32) -> u16 {

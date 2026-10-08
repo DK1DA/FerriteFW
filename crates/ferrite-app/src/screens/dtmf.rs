@@ -7,7 +7,8 @@
 //! refusal. Hold MENU keeps the digits as a memory (the first empty one).
 //!
 //! Memories: OK opens one in the dialer, to send or edit it (hold MENU there writes it back; an empty one is
-//! typed the same way); * clears one.
+//! typed the same way); * clears one; # names one (up to 10 characters, DTMF-12: "Link on", "IRLP 3500").
+//! nicFW has 99 named presets; 16 named ones cover a radio's links and controllers.
 
 use super::shared::*;
 use super::{Cx, Hints, View};
@@ -111,6 +112,10 @@ impl View for DtmfPad {
                     data.request(Op::Dtmf(s.cur, None));
                     app.show_toast(b"DTMF memory", b"cleared", false);
                 }
+                (Key::Hash, Short) if data.dtmf(s.cur).is_some() => {
+                    return super::text::open(app, super::text::TextFor::DtmfName(s.cur), store);
+                }
+                (Key::Hash, Short) => return app.show_toast(b"Empty memory", b"type its digits first", false),
                 (Key::Exit, Short) => return app.back(),
                 _ => return,
             }
@@ -151,8 +156,9 @@ impl View for DtmfPad {
             let top = self.cur.saturating_sub(8);
             for k in 0..9u8 {
                 let i = top + k;
-                let mut name = Buf::<8>::new();
-                let _ = uwrite!(name, "{}", i + 1);
+                let mut name = Buf::<16>::new();
+                let _ = uwrite!(name, "{} ", i + 1);
+                name.push(data.dtmf_name(i).as_bytes());
                 let mut v = Buf::<16>::new();
                 match data.dtmf(i) {
                     Some(m) => m.text(&mut v),
@@ -160,7 +166,7 @@ impl View for DtmfPad {
                 }
                 app.row1(lcd, k as usize, name.as_bytes(), v.as_bytes(), false, i == self.cur, false);
             }
-            app.help_box(lcd, 300 - 38, 34, b"OK opens one in the dialer; * clears it.", b"MENU 0 8 6 2");
+            app.help_box(lcd, 300 - 38, 34, b"OK opens one; # names it; * clears it.", b"MENU 0 8 6 2");
             return;
         }
         // Dialer: what's typed, large; the slot it goes out on; how A-D are typed.
@@ -168,7 +174,8 @@ impl View for DtmfPad {
         self.digits.text(&mut t);
         let mut head = Buf::<24>::new();
         if self.cur != NONE {
-            let _ = uwrite!(head, "Memory {}", self.cur + 1);
+            let _ = uwrite!(head, "Memory {} ", self.cur + 1);
+            head.push(cx.store.data().dtmf_name(self.cur).as_bytes());
         } else {
             head.set(b"Dialer");
         }
@@ -194,7 +201,7 @@ impl View for DtmfPad {
 
     fn hints(self, _: &App) -> Hints {
         if self.list {
-            Hints::new(&[("OK", "Open"), ("*", "Clear"), ("BACK", "Back")])
+            Hints::new(&[("OK", "Open"), ("#", "Name"), ("*", "Clear")])
         } else {
             Hints::new(&[("0-9 * #", "Type"), ("OK", "Send"), ("BACK", "Delete")])
         }

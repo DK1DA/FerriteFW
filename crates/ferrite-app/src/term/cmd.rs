@@ -9,7 +9,8 @@ use super::{blocked, mhz5, parse_mhz};
 use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
 use crate::data::{Op, RangePreset, ZoneCfg};
 use crate::screens::groups::{self, SETTABLE, SUBS};
-use crate::slot::{band_of, BAND_125M, CTCSS, DCS, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
+use crate::screens::tones::{CTCSS_MAX, CTCSS_MIN};
+use crate::slot::{band_of, BAND_125M, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
 use crate::App;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::Device;
@@ -352,10 +353,8 @@ fn tone(w: &[u8], what: &str) -> Result<u16, Msg> {
         if code.len() != 3 || !code.iter().all(|c| (b'0'..=b'7').contains(c)) {
             return Err(bad());
         }
+        // TONE-15: any code D000-D777, standard or not.
         let c = code.iter().fold(0u16, |n, &k| n * 8 + (k - b'0') as u16);
-        if !DCS.contains(&c) {
-            return Err(msg!("{}: D{} is not a standard DCS code", what, Bytes(code)));
-        }
         return Ok(DCS_FLAG | if inv { DCS_INV } else { 0 } | c);
     }
     let t = match parse_mhz(w.strip_prefix(b"T").unwrap_or(w)) {
@@ -363,9 +362,10 @@ fn tone(w: &[u8], what: &str) -> Result<u16, Msg> {
         Some(f) if f % 10_000 == 0 => f / 10_000,
         _ => return Err(bad()),
     };
-    match CTCSS.iter().find(|&&c| c as u32 == t) {
-        Some(&c) => Ok(c),
-        None => Err(msg!("{}: {}.{} Hz is not a standard CTCSS tone", what, t / 10, t % 10)),
+    // TONE-15: any tone from 60.0 to 260.0 Hz, standard or not.
+    match u16::try_from(t).ok().filter(|t| (CTCSS_MIN..=CTCSS_MAX).contains(t)) {
+        Some(c) => Ok(c),
+        None => Err(msg!("{}: {}.{} Hz is outside 60.0 to 260.0 Hz", what, t / 10, t % 10)),
     }
 }
 
@@ -710,8 +710,6 @@ fn zone_line<S: ChannelStore>(z: u8, st: &S, out: &mut Line) {
         num(out, b"", c.dwell as u32);
         out.push(b"s");
     }
-    out.push(b" smart=");
-    out.push(o(c.smart).as_bytes());
     for (i, p) in c.pri.iter().enumerate() {
         if let Some(n) = p {
             num(out, b" pri", i as u32 + 1);
@@ -754,7 +752,7 @@ fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u8, same_as_stored: bo
     Ok(Done::Said(msg!("{} {} saved", cap, n as u32 + 1)))
 }
 
-const ZONE_KEYS: [&str; 8] = ["scan", "shown", "distance", "smart", "resume", "dwell", "pri1", "pri2"];
+const ZONE_KEYS: [&str; 7] = ["scan", "shown", "distance", "resume", "dwell", "pri1", "pri2"];
 
 fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let z = index(t.word("zone: which zone, e.g. zone 2 \"Repeaters\"")?, 254, "zone")? as u8;
@@ -767,10 +765,10 @@ fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let mut c = if z < have { st.data().zone_cfg(z) } else { ZoneCfg { shown: true, dwell: 255, ..ZoneCfg::default() } };
     while let Some((k, v)) = kv(t, "zone", "scan=on")? {
         let i = ZONE_KEYS.iter().position(|f| same(k, f.as_bytes()));
-        let i = i.ok_or_else(|| msg!("zone: no field {}; they are scan, shown, distance, resume, dwell, smart, pri1, pri2", Bytes(k)))?;
+        let i = i.ok_or_else(|| msg!("zone: no field {}; they are scan, shown, distance, resume, dwell, pri1, pri2", Bytes(k)))?;
         match i {
-            0..=3 => *[&mut c.scan_all, &mut c.shown, &mut c.by_distance, &mut c.smart][i] = on_off(v, ZONE_KEYS[i])?,
-            4 => {
+            0..=2 => *[&mut c.scan_all, &mut c.shown, &mut c.by_distance][i] = on_off(v, ZONE_KEYS[i])?,
+            3 => {
                 c.resume = match v {
                     _ if same(v, b"radio") => 0,
                     _ if same(v, b"carrier") => 11,
@@ -778,8 +776,8 @@ fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
                     _ => secs(v, 10, "resume").map_err(|_| msg!("resume: radio, 1s to 10s, carrier or stop"))?,
                 }
             }
-            5 => c.dwell = if same(v, b"radio") { 255 } else { secs(v, 254, "dwell")? },
-            _ => c.pri[i - 6] = if same(v, b"none") { None } else { Some(index(v, MAX_CHANNELS as u32, "pri")? as u16) },
+            4 => c.dwell = if same(v, b"radio") { 255 } else { secs(v, 254, "dwell")? },
+            _ => c.pri[i - 5] = if same(v, b"none") { None } else { Some(index(v, MAX_CHANNELS as u32, "pri")? as u16) },
         }
     }
     let stored = z < have && st.zone_name(z) == Some(name) && st.data().zone_cfg(z) == c;

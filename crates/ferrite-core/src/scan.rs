@@ -4,12 +4,20 @@
 //! interval (SCAN-12), turned by ▲▼ (SCAN-16) and ended by PTT (SCAN-19). The Radio task tunes the frequency
 //! it names and reports the squelch back on the next [`Scan::tick`].
 //!
+//! Range scans take a fast pass (SCAN-21): each step reads the RSSI only for [`FAST_STEP_MS`], and a step over
+//! the floor is held for a full squelch check before it counts as a hit. [`Scan::check`] tells the Radio task
+//! which of the two its `open` answers. [`WithTx`] adds a channel's transmit frequency after its receive one
+//! (SCAN-22).
+//!
 //! Timings without a rule of their own are written into the manual as "to confirm on the bench" (SCAN-20).
 
 use crate::freq::Freq10;
 
 /// How long each step listens before going on (to confirm on the bench).
 pub const STEP_MS: u32 = 50;
+/// A range scan's fast pass: how long each step reads the RSSI before going on (to confirm on the bench; the
+/// target is at least nicFW's 30 steps a second, SCAN-21).
+pub const FAST_STEP_MS: u32 = 15;
 /// After the carrier drops on a hit, it waits this long before going on (to confirm on the bench).
 pub const RESUME_WAIT_MS: u32 = 2_000;
 /// How long a priority look listens on each priority channel.
@@ -29,6 +37,33 @@ pub trait List {
     /// The `k`th priority position (SCAN-12), None past the last.
     fn priority(&self, _k: u8) -> Option<u16> {
         None
+    }
+    /// The transmit frequency at `i` when it differs from the receive one (a shift or split), for [`WithTx`].
+    fn tx_at(&self, _i: u16) -> Option<Freq10> {
+        None
+    }
+}
+
+/// SCAN-22: a list with each channel's transmit frequency after its receive one, for channels with a shift or
+/// split (the others' odd positions are never stopped on). Positions are doubled: channel `i` is `2 * i`.
+#[derive(Clone, Copy, Debug)]
+pub struct WithTx<L>(pub L);
+
+impl<L: List> List for WithTx<L> {
+    fn len(&self) -> u16 {
+        self.0.len().saturating_mul(2)
+    }
+
+    fn at(&self, i: u16) -> Option<Freq10> {
+        if i.is_multiple_of(2) {
+            self.0.at(i / 2)
+        } else {
+            self.0.at(i / 2).and(self.0.tx_at(i / 2)).filter(|&t| Some(t) != self.0.at(i / 2))
+        }
+    }
+
+    fn priority(&self, k: u8) -> Option<u16> {
+        self.0.priority(k).map(|p| p * 2)
     }
 }
 
@@ -68,8 +103,19 @@ enum St {
     Off,
     /// Listening at `pos` since.
     Step(u32),
+    /// The fast pass found the RSSI over the floor at `pos` since: listening with the squelch to confirm.
+    Confirm(u32),
     /// On a hit at `pos` since; the carrier dropped at the second, if it has.
     Hit(u32, Option<u32>),
+}
+
+/// What [`Scan::tick`]'s `open` should answer for the step tuned now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Check {
+    /// The RSSI is over the noise floor (the fast pass: no squelch wait).
+    Rssi,
+    /// The squelch is open (a carrier, SQL-1).
+    Squelch,
 }
 
 /// What to do now.
@@ -101,6 +147,8 @@ pub struct Scan {
     /// Nuisance skips this scan (SCAN-7's count).
     pub skips: u8,
     pub hits: u8,
+    /// A range scan: steps take the fast pass (SCAN-21).
+    pub fast: bool,
 }
 
 impl Default for Scan {
@@ -124,6 +172,7 @@ impl Scan {
             nn: 0,
             skips: 0,
             hits: 0,
+            fast: false,
         }
     }
 
@@ -142,8 +191,17 @@ impl Scan {
 
     /// Start at position `from` (the slot's channel or frequency, already tuned): it listens there a step first.
     pub fn start(&mut self, from: u16, now: u32) {
-        *self = Scan { resume: self.resume, prio_ms: self.prio_ms, up: self.up, ..Scan::new() };
+        *self = Scan { resume: self.resume, prio_ms: self.prio_ms, up: self.up, fast: self.fast, ..Scan::new() };
         (self.pos, self.start, self.st, self.prio_at) = (from, from, St::Step(now), now);
+    }
+
+    /// What `open` answers on the next tick: the RSSI on a fast step, the squelch otherwise.
+    pub fn check(&self) -> Check {
+        if self.fast && self.look.is_none() && matches!(self.st, St::Step(_)) {
+            Check::Rssi
+        } else {
+            Check::Squelch
+        }
     }
 
     pub fn stop(&mut self) {
@@ -243,7 +301,7 @@ impl Scan {
                 None => {
                     self.look = None;
                     out.tune = l.at(self.pos);
-                    if let St::Step(_) = self.st {
+                    if let St::Step(_) | St::Confirm(_) = self.st {
                         self.st = St::Step(now);
                     }
                 }
@@ -252,7 +310,13 @@ impl Scan {
         }
         match self.st {
             St::Off => {}
-            St::Step(since) if open && now.wrapping_sub(since) >= STEP_MS / 2 => {
+            St::Step(_) if self.fast && open => self.st = St::Confirm(now),
+            St::Step(since) if self.fast => {
+                if now.wrapping_sub(since) >= FAST_STEP_MS {
+                    self.leave(l, now, &mut out);
+                }
+            }
+            St::Step(since) | St::Confirm(since) if open && now.wrapping_sub(since) >= STEP_MS / 2 => {
                 self.hits = self.hits.saturating_add(1);
                 out.hit = Some(self.pos);
                 if self.resume == Resume::Never {
@@ -262,7 +326,7 @@ impl Scan {
                 }
                 self.st = St::Hit(now, None);
             }
-            St::Step(since) => {
+            St::Step(since) | St::Confirm(since) => {
                 if now.wrapping_sub(since) >= STEP_MS {
                     self.leave(l, now, &mut out);
                 }
@@ -406,6 +470,67 @@ mod tests {
         s.start(1, 0);
         walk(&mut s, &Chans, 0, 100, |_| false);
         assert_eq!(s.ptt(), 1);
+    }
+
+    #[test]
+    fn fast_pass_confirms_with_the_squelch() {
+        let skipped = [];
+        let r = Range { lo: mhz(146), hi: mhz(147), step: 1_250, skipped: &skipped };
+        let mut s = Scan { fast: true, resume: Resume::Drop, ..Scan::new() };
+        s.start(0, 0);
+        // An empty band: one step per FAST_STEP_MS (about 3x the 50 ms dwell).
+        let mut t = 0;
+        let mut steps = 0;
+        while t < 1_000 {
+            assert_eq!(s.check(), Check::Rssi);
+            steps += s.tick(&r, t, false).tune.is_some() as u32;
+            t += 5;
+        }
+        assert!(steps >= 1_000 / FAST_STEP_MS - 2, "{steps} steps a second");
+        // Noise over the floor at 30 but no carrier: held for the squelch check, then on.
+        let p = s.pos();
+        s.tick(&r, t, true);
+        assert_eq!((s.check(), s.pos()), (Check::Squelch, p));
+        let t2 = walk(&mut s, &r, t + 5, t + STEP_MS + 10, |_| false);
+        assert!(s.pos() != p && !s.on_hit() && s.hits == 0, "a false alarm costs one full step");
+        // A real carrier: the RSSI, then the squelch, then a hit.
+        let target = (s.pos() + 3) % r.len();
+        walk(&mut s, &r, t2, t2 + 400, |q| q == target);
+        assert!(s.on_hit() && s.pos() == target && s.hits == 1);
+        assert_eq!(s.check(), Check::Squelch);
+    }
+
+    /// Ten channels, each with a 600 kHz shift but 4 (simplex).
+    struct Shifted;
+    impl List for Shifted {
+        fn len(&self) -> u16 {
+            10
+        }
+        fn at(&self, i: u16) -> Option<Freq10> {
+            Chans.at(i)
+        }
+        fn priority(&self, k: u8) -> Option<u16> {
+            Chans.priority(k)
+        }
+        fn tx_at(&self, i: u16) -> Option<Freq10> {
+            Chans.at(i).map(|f| if i == 4 { f } else { f + 60_000 })
+        }
+    }
+
+    #[test]
+    fn with_tx_adds_the_inputs() {
+        let l = WithTx(Shifted);
+        assert_eq!(l.len(), 20);
+        assert_eq!(l.at(4), Shifted.at(2));
+        assert_eq!(l.at(5), Shifted.at(2).map(|f| f + 60_000), "channel 2's input");
+        assert_eq!(l.at(9), None, "4 is simplex: nothing more to hear");
+        assert_eq!((l.at(6), l.at(7)), (None, None), "3 is flagged Skip: neither side");
+        assert_eq!(l.priority(0), Some(14));
+        // A scan stops on an input.
+        let mut s = Scan::new();
+        s.start(0, 0);
+        walk(&mut s, &l, 0, 600, |p| p == 5);
+        assert!(s.on_hit() && s.pos() == 5);
     }
 
     #[test]

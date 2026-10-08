@@ -196,7 +196,15 @@ pub struct Settings {
     pub follow: bool,
     /// 0 1 2 3: and switches back once it has been closed for 2 s.
     pub follow_back: bool,
+    /// 0 1 6 3: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
+    /// split (SCAN-22).
+    pub scan_tx: bool,
+    /// 0 8 4 2: the CTCSS/DCS level sent, around the calibration's ([`TONE_LEVELS`]; TONE-16).
+    pub tone_level: u8,
 }
+
+/// 0 8 4 2's values (TONE-16).
+pub const TONE_LEVELS: [&str; 3] = ["Low", "Normal", "High"];
 
 /// 0 7 4 1's values, seconds (0 never).
 pub const BACKLIGHT_TIMES: [u16; 6] = [0, 5, 10, 15, 30, 60];
@@ -279,6 +287,8 @@ impl Settings {
         chan_only: false,
         follow: true,
         follow_back: true,
+        scan_tx: false,
+        tone_level: 1,
     };
 
     /// The region's name, or "Not set".

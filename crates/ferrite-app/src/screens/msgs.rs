@@ -226,6 +226,9 @@ pub struct Compose {
     pub edit: u8,
     /// The quick list is on screen (set when drawn: the hint bar has no store to ask).
     pub list: bool,
+    /// The cursor (TEXT-12): how many characters of the message are after it; 0 at the end. Kept as the count
+    /// after it, it stays put while the text before it changes.
+    pub tail: u8,
 }
 
 /// Not decided yet: the first key or draw puts the cursor on the text when the draft has a recipient.
@@ -233,7 +236,7 @@ const UNSET: u8 = 255;
 
 impl Compose {
     pub fn new() -> Self {
-        Compose { field: UNSET, case: 0, key: 0, taps: 0, at: 0, pick: 0, pcase: 0, punct: 0, quick: 0, edit: DRAFT, list: false }
+        Compose { field: UNSET, case: 0, key: 0, taps: 0, at: 0, pick: 0, pcase: 0, punct: 0, quick: 0, edit: DRAFT, list: false, tail: 0 }
     }
 
     /// Quick message `i` in the editor (TEXT-7).
@@ -262,11 +265,21 @@ pub(crate) fn quick_text(store: &impl ChannelStore, i: usize) -> Buf<67> {
 }
 
 /// The text being composed: the draft's, or the quick message being edited.
-fn text_of(store: &impl ChannelStore, s: Compose) -> Buf<67> {
+fn full_of(store: &impl ChannelStore, s: Compose) -> Buf<67> {
     if s.quick_edit_on() { quick_text(store, s.edit as usize) } else { store.data().draft().text }
 }
 
-fn put_text(store: &impl ChannelStore, s: Compose, t: Buf<67>) {
+/// The text before the cursor (TEXT-12): what typing and deleting work on.
+fn text_of(store: &impl ChannelStore, s: Compose) -> Buf<67> {
+    let t = full_of(store, s);
+    Buf::from(&t.as_bytes()[..t.len() - (s.tail as usize).min(t.len())])
+}
+
+/// The text before the cursor back in, with what was after the cursor after it.
+fn put_text(store: &impl ChannelStore, s: Compose, head: Buf<67>) {
+    let full = full_of(store, s);
+    let mut t = head;
+    t.push(&full.as_bytes()[full.len() - (s.tail as usize).min(full.len())..]);
     let data = store.data();
     if s.quick_edit_on() {
         data.request(Op::Quick(s.edit, Some(t)));
@@ -335,6 +348,11 @@ fn refuse_full(app: &mut App) {
     app.show_toast(slow!("67 characters").as_bytes(), slow!("the APRS limit").as_bytes(), false);
 }
 
+/// Room before the cursor: the 67 characters less what is after it.
+fn room(s: Compose) -> usize {
+    TEXT_MAX.saturating_sub(s.tail as usize)
+}
+
 /// The word in progress goes into the text (no space); false when it can't (no word, or no room).
 fn accept(app: &mut App, s: &mut Compose, t: &mut Buf<67>) -> bool {
     if app.text.is_empty() {
@@ -346,7 +364,7 @@ fn accept(app: &mut App, s: &mut Compose, t: &mut Buf<67>) -> bool {
         app.show_toast(b"No word", slow!("hold * to spell it").as_bytes(), false); // TEXT-3
         return false;
     }
-    if t.len() + w.len() > TEXT_MAX {
+    if t.len() + w.len() > room(*s) {
         refuse_full(app);
         return false;
     }
@@ -364,10 +382,10 @@ impl Compose {
         let mut s = self;
         let mut t = text_of(store, s);
         let keys = app.text;
-        let quick_list = t.is_empty() && keys.is_empty() && !s.quick_edit_on();
+        let quick_list = t.is_empty() && s.tail == 0 && keys.is_empty() && !s.quick_edit_on();
         match (e.key, e.press) {
             (Key::Digit(d @ 2..=9), Short) => {
-                if t.len() + keys.len() + 1 > TEXT_MAX || keys.len() >= crate::words::WORD_MAX {
+                if t.len() + keys.len() + 1 > room(s) || keys.len() >= crate::words::WORD_MAX {
                     refuse_full(app);
                     return true;
                 }
@@ -380,7 +398,7 @@ impl Compose {
                 if !accept(app, &mut s, &mut t) {
                     return true;
                 }
-                if t.len() + 1 > TEXT_MAX {
+                if t.len() + 1 > room(s) {
                     refuse_full(app);
                     return true;
                 }
@@ -398,7 +416,7 @@ impl Compose {
                     if !accept(app, &mut s, &mut t) {
                         return true;
                     }
-                    if t.len() + 1 > TEXT_MAX {
+                    if t.len() + 1 > room(s) {
                         refuse_full(app);
                         return true;
                     }
@@ -412,7 +430,7 @@ impl Compose {
                 if !accept(app, &mut s, &mut t) {
                     return true;
                 }
-                if !t.is_empty() && t.len() < TEXT_MAX {
+                if !t.is_empty() && t.len() < room(s) {
                     t.push(b" ");
                 }
                 s.punct = 0;
@@ -458,7 +476,7 @@ impl Compose {
             app.screen = Screen::Compose(Compose { pick, ..self });
             return true;
         }
-        if text_of(store, self).is_empty() && !self.quick_edit_on() {
+        if full_of(store, self).is_empty() && !self.quick_edit_on() {
             let quick = (self.quick as i32 + d).rem_euclid(crate::words::QUICK as i32) as u8;
             app.screen = Screen::Compose(Compose { quick, ..self });
             return true;
@@ -486,7 +504,7 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     if data.callsign().is_none() {
         return app.show_toast(slow!("Set a callsign first").as_bytes(), slow!("MENU 0 8 7 1").as_bytes(), false);
     }
-    let text = text_of(store, s);
+    let text = full_of(store, s);
     if d.to.is_empty() || text.is_empty() {
         return app.show_toast(slow!("Nothing to send").as_bytes(), if d.to.is_empty() { slow!("add a recipient").as_bytes() } else { slow!("write a message").as_bytes() }, false);
     }
@@ -501,6 +519,11 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
 impl View for Compose {
     fn name(self) -> &'static str {
         if self.quick_edit_on() { "Quick message" } else { "Compose message" }
+    }
+
+    /// ◀▶ move the cursor in the message (TEXT-12); ▲▼ and the knob stay on the words.
+    fn own_arrows(self) -> bool {
+        true
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
@@ -523,6 +546,18 @@ impl View for Compose {
             app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
             return;
         }
+        // TEXT-12: ◀▶ move the cursor in the message; a word being predicted goes in first.
+        if s.field == 1 && matches!((e.key, e.press), (Key::Left | Key::Right, Short | Repeat)) {
+            let mut t = text_of(store, s);
+            if app.set.predictive && !accept(app, &mut s, &mut t) {
+                return;
+            }
+            put_text(store, s, t);
+            let n = full_of(store, s).len() as u8;
+            s.tail = if e.key == Key::Left { (s.tail + 1).min(n) } else { s.tail.saturating_sub(1) };
+            app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
+            return;
+        }
         if s.field == 1 && app.set.predictive && s.pred_key(app, e, store) {
             return;
         }
@@ -535,7 +570,7 @@ impl View for Compose {
         let to = s.field == 0;
         // the field being typed in, as one buffer
         let mut cur: Buf<67> = if to { Buf::from(d.to.as_bytes()) } else { text_of(store, s) };
-        let max = if to { TO_MAX } else { TEXT_MAX };
+        let max = if to { TO_MAX } else { room(s) };
         match (e.key, e.press) {
             (Key::Digit(k), Short) => {
                 let set = TAPS[k as usize];
@@ -572,6 +607,8 @@ impl View for Compose {
             (Key::Exit, Short) => {
                 if !cur.is_empty() {
                     pop(&mut cur);
+                } else if !to && s.tail > 0 {
+                    // at the start with text after the cursor: nothing before it to delete
                 } else if to || s.quick_edit_on() {
                     return app.back(); // the draft stays with the APRS task
                 } else {
@@ -582,12 +619,12 @@ impl View for Compose {
             }
             (Key::Down | Key::Up, Short) if !s.quick_edit_on() => {
                 s.field ^= 1;
-                s.key = 0;
+                (s.key, s.tail) = (0, 0);
                 s.case = if s.field == 0 { 1 } else { 0 };
             }
             (Key::Menu, Short) if to => {
                 s.field = 1;
-                s.key = 0;
+                (s.key, s.tail) = (0, 0);
                 s.case = 0;
             }
             (Key::Menu, Short) if s.quick_edit_on() => {
@@ -631,8 +668,9 @@ impl View for Compose {
         let pred = app.set.predictive;
         let keys = app.text;
         let text = text_of(cx.store, self);
+        let full = full_of(cx.store, self);
         let (word, matched) = if pred && !keys.is_empty() { pending(keys.as_bytes(), self) } else { (Buf::new(), true) };
-        let quick_list = pred && self.field == 1 && text.is_empty() && keys.is_empty() && !self.quick_edit_on();
+        let quick_list = pred && self.field == 1 && full.is_empty() && keys.is_empty() && !self.quick_edit_on();
         if quick_list != self.list {
             app.screen = Screen::Compose(Compose { list: quick_list, ..self });
         }
@@ -649,12 +687,12 @@ impl View for Compose {
                 field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending_tap && self.field == 0, slow!("callsign-SSID").as_bytes());
             }
         }
-        if app.dirty(R_ROW, hash(&(text, word, self.field, pending_tap && self.field == 1, quick_list, quick_list.then_some(self.quick)))) {
+        if app.dirty(R_ROW, hash(&(full, self.tail, word, self.field, pending_tap && self.field == 1, quick_list, quick_list.then_some(self.quick)))) {
             let (y, h) = (86, 120);
             lcd.fill(0, y, 240, h + 24, BG);
             lcd.text4(8, y + 12, if quick_list { slow!("Quick messages").as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
             let mut c = Buf::<12>::new();
-            let _ = uwrite!(c, "{}/{}", text.len() + word.len(), TEXT_MAX); // TEXT-5
+            let _ = uwrite!(c, "{}/{}", full.len() + word.len(), TEXT_MAX); // TEXT-5
             let cw = text4_width(c.as_bytes(), &UI_12);
             lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
             let focus = self.field == 1;
@@ -666,10 +704,12 @@ impl View for Compose {
             } else {
                 let mut all = Buf::<84>::from(text.as_bytes());
                 all.push(word.as_bytes());
-                let lines = wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, all.as_bytes(), bg);
+                let at = all.len();
+                all.push(&full.as_bytes()[text.len().min(full.len())..]);
+                wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, all.as_bytes(), bg);
                 if focus {
                     let under = if !word.is_empty() { text4_width(word.as_bytes(), &UI_12) } else if pending_tap { 7 } else { 0 };
-                    caret(lcd, all.as_bytes(), 14, y + 22, 212, lines, under, if matched { BLUE } else { AMBER });
+                    caret(lcd, all.as_bytes(), at, 14, y + 22, 212, under, if matched { BLUE } else { AMBER });
                 }
             }
         }
@@ -822,18 +862,20 @@ fn cut_line(s: &[u8], w_: i32) -> usize {
     }
 }
 
-/// The caret after the text: an underline under the last `under` pixels (a letter still being tapped, or the
-/// predicted word in progress), else a bar.
-fn caret(lcd: &mut impl Panel, text: &[u8], x: i32, y: i32, w_: i32, lines: i32, under: i32, c: u16) {
-    // the last line's text
-    let mut rest = text;
+/// The caret at `at` in the wrapped text (TEXT-12; the end when nothing is after the cursor): an underline under
+/// the `under` pixels before it (a letter still being tapped, or the predicted word in progress), else a bar.
+fn caret(lcd: &mut impl Panel, text: &[u8], at: usize, x: i32, y: i32, w_: i32, under: i32, c: u16) {
+    // the line the cursor is on, and its text up to the cursor
+    let (mut rest, mut start, mut line) = (text, 0, 0);
     let mut last: &[u8] = b"";
     while !rest.is_empty() {
         let cut = cut_line(rest, w_);
-        last = &rest[..cut];
-        rest = &rest[cut..];
+        last = &text[start..at.clamp(start, start + cut)];
+        if at < start + cut || rest.len() == cut {
+            break;
+        }
+        (rest, start, line) = (&rest[cut..], start + cut, line + 1);
     }
-    let line = (lines - 1).max(0);
     let lw = text4_width(last, &UI_12);
     let base = y + 13 + line * 17;
     if under > 0 && !last.is_empty() {

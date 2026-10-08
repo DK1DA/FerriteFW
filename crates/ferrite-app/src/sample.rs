@@ -198,6 +198,7 @@ pub struct Sample {
     zone_names: [Cell<Name>; 8],
     presets: [Cell<Option<RangePreset>>; 16],
     dtmf: [Cell<Option<Dtmf>>; DTMF_MEMS as usize],
+    dtmf_names: [Cell<Buf<10>>; DTMF_MEMS as usize],
     events_read: Cell<u32>,
     events_cleared: Cell<bool>,
     msgs_read: Cell<u32>,
@@ -236,6 +237,7 @@ impl Sample {
             }),
             // Two DTMF memories (chapter 17): a repeater's autopatch and a link code.
             dtmf: core::array::from_fn(|i| Cell::new([Dtmf::parse(b"*79"), Dtmf::parse(b"12345#")].get(i).copied().flatten())),
+            dtmf_names: core::array::from_fn(|i| Cell::new(Buf::from(if i == 0 { &b"Link on"[..] } else { b"" }))),
             events_read: Cell::new(0),
             events_cleared: Cell::new(false),
             msgs_read: Cell::new(0),
@@ -487,6 +489,9 @@ impl Data for Sample {
     fn dtmf(&self, i: u8) -> Option<Dtmf> {
         self.dtmf.get(i as usize)?.get()
     }
+    fn dtmf_name(&self, i: u8) -> Buf<10> {
+        self.dtmf_names.get(i as usize).map_or(Buf::new(), |c| c.get())
+    }
 
     fn fm_presets(&self) -> u8 {
         FM.len() as u8
@@ -550,7 +555,15 @@ impl Data for Sample {
                 }
                 None => false,
             },
-            Op::Dtmf(i, d) => self.dtmf.get(i as usize).map(|c| c.set(d)).is_some(),
+            Op::Dtmf(i, d) => {
+                if d.is_none() {
+                    if let Some(c) = self.dtmf_names.get(i as usize) {
+                        c.set(Buf::new());
+                    }
+                }
+                self.dtmf.get(i as usize).map(|c| c.set(d)).is_some()
+            }
+            Op::DtmfName(i, n) => self.dtmf_names.get(i as usize).map(|c| c.set(n)).is_some(),
             Op::NewPreset => match self.presets.iter().find(|p| p.get().is_none()) {
                 Some(c) => {
                     c.set(Some(RangePreset { name: txt("New range"), start: mhz(144), end: mhz(148), step: 10, mode: 0, narrow: true, skips: 0 }));
@@ -675,6 +688,7 @@ impl Data for Sample {
                 self.zones.set(0);
                 self.presets.iter().for_each(|p| p.set(None));
                 self.dtmf.iter().for_each(|d| d.set(None));
+                self.dtmf_names.iter().for_each(|d| d.set(Buf::new()));
                 self.events_cleared.set(true);
                 self.heard_cleared.set(true);
                 self.msgs_gone.set(true);

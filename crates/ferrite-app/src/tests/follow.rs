@@ -56,7 +56,7 @@ fn setup(follow: bool, back: bool) -> (T, Radio) {
     let mut t = T::new();
     (t.app.set.follow, t.app.set.follow_back) = (follow, back);
     t.app.out.push(RadioCmd::Watch(t.app.watch_mask()));
-    t.app.send_follow();
+    t.app.send_radio_settings();
     let mut r = Radio::new();
     r.run(&mut t, 500, 0);
     assert_eq!(t.app.active(), 0);
@@ -80,7 +80,8 @@ fn defaults_follow_and_switch_back() {
     assert!(t.cmds().contains(&RadioCmd::Follow(Follow::Off)));
     crate::screens::groups::reset(&mut t.app, &[1, 2, 2]);
     crate::screens::groups::reset(&mut t.app, &[1, 2, 3]);
-    assert!(t.cmds().ends_with(&[RadioCmd::Follow(Follow::On), RadioCmd::Follow(Follow::Return)]));
+    let follows: Vec<_> = t.cmds().into_iter().filter(|c| matches!(c, RadioCmd::Follow(_))).collect();
+    assert!(follows.ends_with(&[RadioCmd::Follow(Follow::On), RadioCmd::Follow(Follow::Return)]));
 }
 
 #[test]
@@ -158,7 +159,7 @@ fn follow_settings_round_trip() {
     }
     // A record from before the follow bits: its last byte had show_hidden and chan_only only.
     let mut v = save(&crate::settings::Settings::DEFAULT);
-    v.truncate(v.len() - 17); // before the power-on message's two fields, which follow the flags
+    v.truncate(v.len() - 18); // before the power-on message and subtone level, which follow the flags
     *v.last_mut().unwrap() = 0b11;
     let c = load(&v);
     assert_eq!((c.show_hidden, c.chan_only, c.follow, c.follow_back), (true, true, true, true), "the defaults");
@@ -189,7 +190,7 @@ fn power_on_message_round_trip_and_boot_line() {
     assert_eq!((b.pon, b.pon_text, b.follow), (2, a.pon_text, false));
     assert_eq!(b.boot_line(), Some(b"Hello there".as_slice()));
     let mut c = crate::settings::Settings::DEFAULT;
-    c.load(&mut SliceSource(&v.0[..v.0.len() - 17]));
+    c.load(&mut SliceSource(&v.0[..v.0.len() - 18]));
     assert_eq!((c.pon, c.follow), (1, false), "an older record: callsign, its flags kept");
     assert_eq!(c.boot_line(), Some(b"VA7FER".as_slice()));
     c.pon = 0;

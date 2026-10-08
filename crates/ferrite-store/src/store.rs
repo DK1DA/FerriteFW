@@ -659,7 +659,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             // The next one is created: a zone up to the last, a preset while there is room.
             Op::PutZone(z, ..) => z < MAX_ZONES && z <= self.zones.get(),
             Op::PutPreset(i, _) => self.preset_slot(i).is_some() || (i == self.presets() && self.presets() < MAX_PRESETS),
-            Op::Dtmf(i, _) => i < DTMF_MEMS,
+            Op::Dtmf(i, _) | Op::DtmfName(i, _) => i < DTMF_MEMS,
             Op::Wipe => true,
             _ => return None,
         })
@@ -722,7 +722,12 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 None => self.new_preset(&RangePreset { skips: 0, ..p }).await,
             },
             Op::Dtmf(i, Some(m)) => self.put_rec(dtmf_addr(i), &dtmf_encode(&m)).await,
-            Op::Dtmf(i, None) => self.clear(dtmf_addr(i), DTMF_LEN as u32).await,
+            Op::Dtmf(i, None) => {
+                self.clear(dtmf_addr(i), DTMF_LEN as u32).await?;
+                self.clear(dtmf_name_addr(i), DTMF_NAME_LEN as u32).await
+            }
+            Op::DtmfName(i, n) if n.is_empty() => self.clear(dtmf_name_addr(i), DTMF_NAME_LEN as u32).await,
+            Op::DtmfName(i, n) => self.put_rec(dtmf_name_addr(i), &dtmf_name_encode(n.as_bytes())).await,
             _ => Ok(()),
         }
     }
@@ -980,6 +985,13 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
         let mut b = [0xFFu8; DTMF_LEN];
         self.f.read(dtmf_addr(i), &mut b).ok()?;
         dtmf_decode(&b)
+    }
+    fn dtmf_name(&self, i: u8) -> Buf<10> {
+        let mut b = [0xFFu8; DTMF_NAME_LEN];
+        if !self.ok() || i >= DTMF_MEMS || self.f.read(dtmf_name_addr(i), &mut b).is_err() {
+            return Buf::new();
+        }
+        dtmf_name_decode(&b).unwrap_or_default()
     }
     fn fm_presets(&self) -> u8 {
         self.extra.fm_presets()

@@ -126,6 +126,7 @@ impl FakeRadio {
         let mut scans = [Scan::new(); 3];
         for sc in &mut scans {
             sc.resume = Resume::Time(2);
+            sc.fast = true;
         }
         scans[2].start(scan_pos(live.slots[2].freq), 0);
         let mut path = Path::new();
@@ -217,6 +218,8 @@ impl FakeRadio {
                 if on {
                     s.hits = 0;
                     s.skips = 0;
+                    // The fake scans its band (a range): the fast pass (SCAN-21).
+                    self.scans[i].fast = true;
                     self.scans[i].start(scan_pos(s.freq), now);
                 } else {
                     self.scans[i].stop();

@@ -46,7 +46,8 @@ fn start_up_sends_every_slot_whole() {
     assert!(v.contains(&RadioCmd::Active(0)) && v.contains(&RadioCmd::Watch(0b011)));
     assert!(v.contains(&RadioCmd::Follow(ferrite_core::watch::Follow::Return)), "WATCH-5's defaults");
     assert!(v.iter().any(|c| matches!(c, RadioCmd::BatterySave(_))));
-    assert_eq!(v.len(), 4 + 3 * 11); // per slot: tune and ten parameters (split included)
+    assert!(v.contains(&RadioCmd::ScanTx(false)) && v.contains(&RadioCmd::ToneLevel(1)), "SCAN-22, TONE-16 defaults");
+    assert_eq!(v.len(), 6 + 3 * 11); // per slot: tune and ten parameters (split included)
     // Stepping through channels faster than the commands drain: the slot goes out once, as it is now.
     let mut t = T::new();
     t.tap(Key::VfoMem);
@@ -205,6 +206,31 @@ fn tone_picker() {
     assert_eq!(t.app.slot(0).cfg().rx_tone, DCS_FLAG | 0o754);
     t.tap(Key::Exit);
     assert_eq!((t.app.slot(0).cfg().rx_tone, t.app.slot(0).cfg().tx_tone), (0, 0), "BACK restores both");
+}
+
+/// TONE-15: typed tones off the lists, as nicFW: any CTCSS 60.0-260.0 Hz, any DCS code; the knob steps on from
+/// the standard ones beside it.
+#[test]
+fn custom_tones() {
+    let mut t = T::new();
+    t.tap(Key::Menu);
+    t.tap(Key::Digit(4));
+    t.tap(Key::Menu);
+    t.digits("1234");
+    assert_eq!(t.app.slot(0).cfg().tx_tone, 1234, "123.4 Hz");
+    t.knob(1);
+    assert_eq!(t.app.slot(0).cfg().tx_tone, 1273, "up: the next standard tone");
+    t.wait(2000);
+    t.digits("1234");
+    t.knob(-1);
+    assert_eq!(t.app.slot(0).cfg().tx_tone, 1230, "down: the standard tone below");
+    t.wait(2000);
+    t.digits("2700");
+    assert_ne!(t.app.slot(0).cfg().tx_tone, 2700, "above 260.0 Hz: no");
+    t.knob(100); // into the DCS codes
+    t.wait(2000);
+    t.digits("024");
+    assert_eq!(t.app.slot(0).cfg().tx_tone & !crate::slot::DCS_INV, DCS_FLAG | 0o024, "D024 is not standard, but taken");
 }
 
 /// KEY-12: multi-tap, case, space, delete; OK names the channel.
@@ -418,6 +444,15 @@ fn shortcut_map() {
     assert!(matches!(t.app.screen(), Screen::Shortcut(_)));
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
+    // KEY-21: OK runs the row from home (nicFW's function menu): 5 opens the tone picker, with its popup.
+    t.app.open(crate::screens::nav::menu0(&[9, 1, 4]).expect("0 9 1 4"));
+    t.tap(Key::Down);
+    t.tap(Key::Digit(5));
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Tones(_)), "{:?}", t.app.screen());
+    assert_eq!(t.app.toast.expect("a popup").head.as_bytes(), b"Tones");
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home, "BACK from it goes home, where it ran");
 }
 
 /// The digit's release after a shortcut opened a screen doesn't reach that screen: hold 3 opens the squelch
@@ -582,4 +617,55 @@ fn unreceivable_frequency_is_refused() {
     assert_eq!(t.app.slots[0].vfo, before, "nothing tuned");
     assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Can't tune" && x.body.as_bytes() == b"18-580, 760-1000 MHz"));
     assert!(ferrite_core::freq::receivable(ferrite_core::freq::mhz(446)) && !ferrite_core::freq::receivable(ferrite_core::freq::mhz(700)));
+}
+
+/// VFO-23: hold V/M on a channel copies it to the slot's VFO (nicFW's "Chan 2 VFO"); the channel is untouched.
+#[test]
+fn hold_vm_copies_channel_to_vfo() {
+    let mut t = T::new();
+    t.tap(Key::VfoMem);
+    assert!(t.app.slot(0).on_channel());
+    let ch = t.app.slot(0).ch.unwrap();
+    t.cmds();
+    t.hold(Key::VfoMem);
+    let s = t.app.slot(0);
+    assert!(s.vfo_mode && s.vfo == ch.rx, "on the VFO at the channel's frequency");
+    assert_eq!((s.cfg.offset, s.cfg.tx_tone, s.cfg.mode), (ch.cfg.offset, ch.cfg.tx_tone, ch.cfg.mode));
+    assert!(t.cmds().contains(&RadioCmd::TuneSlot { slot: 0, freq: ch.rx }));
+    t.tap(Key::VfoMem);
+    assert_eq!(t.app.slot(0).ch.unwrap().rx, ch.rx, "V/M goes back to the same channel");
+}
+
+/// TEXT-12: ◀▶ move the cursor in a name; letters, spaces and BACK work at it; OK keeps the whole name.
+#[test]
+fn text_cursor_edits_a_name() {
+    let mut t = T::new();
+    t.tap(Key::VfoMem);
+    t.hold(Key::Slot);
+    t.tap(Key::Down); // Name
+    t.tap(Key::Menu);
+    while !t.app.text.is_empty() {
+        t.tap(Key::Exit);
+    }
+    t.digits("2"); // A
+    t.wait(1100);
+    t.digits("222"); // C
+    assert_eq!(t.app.text.as_bytes(), b"AC");
+    t.tap(Key::Left);
+    t.digits("22"); // B, before C
+    assert_eq!(t.app.text.as_bytes(), b"ABC");
+    t.tap(Key::Hash);
+    assert_eq!(t.app.text.as_bytes(), b"AB C");
+    t.tap(Key::Exit);
+    t.tap(Key::Exit);
+    assert_eq!(t.app.text.as_bytes(), b"AC", "BACK deletes before the cursor");
+    t.tap(Key::Left);
+    t.tap(Key::Left);
+    t.tap(Key::Exit);
+    assert_eq!(t.app.text.as_bytes(), b"AC", "nothing before the cursor: no delete, no leaving");
+    assert!(matches!(t.app.screen(), Screen::Text(_)));
+    t.tap(Key::Right);
+    t.tap(Key::Right);
+    t.digits("3"); // D at the end
+    assert_eq!(t.app.text.as_bytes(), b"ACD");
 }

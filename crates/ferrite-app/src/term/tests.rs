@@ -710,8 +710,8 @@ fn command_errors() {
         ("frob", "frob: no such command"),
         ("ch 999 power high", "ch 999: no such channel"),
         ("ch 12 power ultra", "power: low, mid, high"),
-        ("ch 12 tone 101.0", "101.0 Hz is not a standard CTCSS tone"),
-        ("ch 12 tone D024N", "D024 is not a standard DCS code"),
+        ("ch 12 tone 300.0", "300.0 Hz is outside 60.0 to 260.0 Hz"),
+        ("ch 12 tone D028N", "a DCS code (D023N, D023I)"),
         ("ch 12 rx 30", "rx: a channel is from 64 to 1000 MHz"),
         ("ch 12 zone 9", "zone 9 doesn't exist"),
         ("ch 12 \"Name", "no closing quote"),
@@ -786,7 +786,7 @@ fn dump_format() {
     for l in [
         "set 0 7 1 Dark                    # Theme",
         "set 0 6 6 24 h, GPS               # Clock",
-        "zone 2 \"Repeaters\" scan=on shown=on distance=off resume=radio dwell=radio smart=off pri1=12",
+        "zone 2 \"Repeaters\" scan=on shown=on distance=off resume=radio dwell=radio pri1=12",
         "preset 3 \"Airband\" 118.00000 137.00000 step=25kHz mode=AM",
         "ch 12 \"Club repeater\" 443.47500 offset=+5.00000 mode=NFM txtone=100.0 rxtone=off power=low zone=2",
         "ch 63 \"FRS 1\" 462.56250 offset=simplex mode=NFM tone=off power=low",
@@ -827,7 +827,7 @@ fn dump_load_1000_channels() {
     for z in 0..30u8 {
         let mut n = Name::new();
         let _ = uwrite!(n, "Zone \"{}\\", z);
-        let cfg = ZoneCfg { scan_all: z % 2 == 0, shown: z % 3 != 0, by_distance: z % 5 == 0, resume: z % 13, dwell: if z % 4 == 0 { 255 } else { z }, smart: z % 7 == 0, pri: [Some(z as u16 * 3), if z % 2 == 1 { Some(999) } else { None }] };
+        let cfg = ZoneCfg { scan_all: z % 2 == 0, shown: z % 3 != 0, by_distance: z % 5 == 0, resume: z % 13, dwell: if z % 4 == 0 { 255 } else { z }, pri: [Some(z as u16 * 3), if z % 2 == 1 { Some(999) } else { None }] };
         assert!(full.request(Op::PutZone(z, n, cfg)));
     }
     for i in 0..16u8 {
@@ -892,7 +892,7 @@ fn load_reports_bad_lines() {
     let raw = r.raw();
     for l in [
         "line 4: Region changes only on the radio",
-        "line 5: tone: 999.0 Hz is not a standard CTCSS tone",
+        "line 5: tone: 999.0 Hz is outside 60.0 to 260.0 Hz",
         "line 6: power: fixed at 0.25 W on 1.25 m",
         "line 7: bogus: no such field",
         "line 8: zone 9: zones are made in order",

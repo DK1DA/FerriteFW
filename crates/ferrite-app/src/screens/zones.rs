@@ -1,5 +1,5 @@
 //! Zones (MENU 0 2 3; manual chapters 10 and 14, CHAN-6, CHAN-11, CHAN-12; C11) and one zone's settings
-//! (A12): name, in "scan all", shown in ◀▶ on home, sort by distance, resume, dwell, smart scan, priority 1
+//! (A12): name, in "scan all", shown in ◀▶ on home, sort by distance, resume, dwell, priority 1
 //! and 2. The knob or ◀▶ change a setting at once (MENU-16, MENU-19); # resets it (MENU-18). # on the list
 //! makes a new zone, * deletes one after asking (CHAN-12: its channels go to no zone and stay in All).
 
@@ -37,20 +37,19 @@ impl Zones {
 }
 
 /// The editor's rows: label and help (layout as data; values from [`value`]).
-const ROWS: [(&str, &str); 9] = [
+const ROWS: [(&str, &str); 8] = [
     ("Name", "Up to 16 characters"),
     ("Scan all", "In the set \"zones in scan all\" scans"),
     ("Shown on home", "Home's left and right stop on it (CHAN-11)"),
     ("Sort by distance", "Nearest channel first, with a GPS fix"),
     ("Resume", "After a hit; the radio's rule unless set"),
     ("Dwell", "Wait before resuming"),
-    ("Smart scan", "Checks busy channels more often"),
     ("Priority 1", "Checked during scans (SCAN-12)"),
     ("Priority 2", "Checked during scans (SCAN-12)"),
 ];
 
 /// The defaults, for the dot (MENU-12) and # (MENU-18).
-const DEFAULT: ZoneCfg = ZoneCfg { scan_all: false, shown: true, by_distance: false, resume: 0, dwell: 255, smart: false, pri: [None, None] };
+const DEFAULT: ZoneCfg = ZoneCfg { scan_all: false, shown: true, by_distance: false, resume: 0, dwell: 255, pri: [None, None] };
 
 fn keep(store: &impl ChannelStore) -> impl Fn(u16) -> bool + '_ {
     |i| store.zone_name(i as u8).is_some()
@@ -77,8 +76,7 @@ fn value(store: &impl ChannelStore, z: u8, c: &ZoneCfg, row: usize, b: &mut Buf<
             255 => uwrite!(b, "Radio's"),
             s => uwrite!(b, "{} s", s),
         },
-        6 => uwrite!(b, "{}", on(c.smart)),
-        _ => match c.pri[row - 7].and_then(|n| (0..store.zone_len(z)).filter_map(|i| store.zone_at(z, i)).find(|ch| ch.num == n)) {
+        _ => match c.pri[row - 6].and_then(|n| (0..store.zone_len(z)).filter_map(|i| store.zone_at(z, i)).find(|ch| ch.num == n)) {
             Some(ch) => {
                 let mut l = Buf::<32>::new();
                 chan_label(ch.num, &mut l);
@@ -103,13 +101,12 @@ fn change(store: &impl ChannelStore, z: u8, c: &mut ZoneCfg, row: usize, d: i32)
             let i = (if c.dwell == 255 { 0 } else { c.dwell as i32 + 1 } + d).rem_euclid(7);
             c.dwell = if i == 0 { 255 } else { i as u8 - 1 };
         }
-        6 => c.smart = !c.smart,
-        7 | 8 => {
+        6 | 7 => {
             // None, then the zone's channels in order
             let n = store.zone_len(z) as i32;
-            let at = c.pri[row - 7].and_then(|num| (0..store.zone_len(z)).position(|i| store.zone_at(z, i).is_some_and(|ch| ch.num == num)));
+            let at = c.pri[row - 6].and_then(|num| (0..store.zone_len(z)).position(|i| store.zone_at(z, i).is_some_and(|ch| ch.num == num)));
             let i = (at.map_or(-1, |p| p as i32) + d + 1).rem_euclid(n + 1) - 1;
-            c.pri[row - 7] = if i < 0 { None } else { store.zone_at(z, i as u16).map(|ch| ch.num) };
+            c.pri[row - 6] = if i < 0 { None } else { store.zone_at(z, i as u16).map(|ch| ch.num) };
         }
         _ => {}
     }
@@ -163,8 +160,7 @@ impl View for Zones {
                     3 => c.by_distance = DEFAULT.by_distance,
                     4 => c.resume = DEFAULT.resume,
                     5 => c.dwell = DEFAULT.dwell,
-                    6 => c.smart = DEFAULT.smart,
-                    7 | 8 => c.pri[r as usize - 7] = None,
+                    6 | 7 => c.pri[r as usize - 6] = None,
                     _ => {}
                 }
                 d.request(Op::Zone(z, c));

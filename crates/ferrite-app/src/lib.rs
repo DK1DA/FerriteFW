@@ -347,7 +347,7 @@ impl App {
         }
         app.out.push(RadioCmd::Active(0));
         app.out.push(RadioCmd::Watch(app.watch_mask()));
-        app.send_follow();
+        app.send_radio_settings();
         app.out.push(RadioCmd::BatterySave(level(app.bsave)));
         app
     }
@@ -977,8 +977,9 @@ impl App {
         [0, 0b011, 0b111][self.watch as usize % 3] | (self.set.aprs_mode as u8) << aprs::APRS_SLOT
     }
 
-    /// Follow and follow return (0 1 2 2, 0 1 2 3) to the watch engine (WATCH-5).
-    pub(crate) fn send_follow(&mut self) {
+    /// The radio-wide settings the Radio task keeps: follow and follow return (0 1 2 2, 0 1 2 3) to the watch
+    /// engine (WATCH-5), scan inputs (0 1 6 3, SCAN-22) and the subtone level (0 8 4 2, TONE-16).
+    pub(crate) fn send_radio_settings(&mut self) {
         use ferrite_core::watch::Follow;
         let f = match (self.set.follow, self.set.follow_back) {
             (false, _) => Follow::Off,
@@ -986,6 +987,8 @@ impl App {
             (true, true) => Follow::Return,
         };
         self.out.push(RadioCmd::Follow(f));
+        self.out.push(RadioCmd::ScanTx(self.set.scan_tx));
+        self.out.push(RadioCmd::ToneLevel(self.set.tone_level));
     }
 
     /// The slot's frequency and every setting, to the Radio task (made when popped: [`App::pop_cmd`]).

@@ -230,8 +230,8 @@ impl View for Transmit {
     fn key(self, _: &mut App, _: KeyEvent, _: &impl ChannelStore) {}
 
     /// While keyed: SIDE2 sends the tone burst for as long as it is held (TONE-13), and the digits, \* and #
-    /// send DTMF live for as long as each is held (DTMF-7). The tones themselves are the Radio task's
-    /// (milestone 4).
+    /// send DTMF live for as long as each is held (DTMF-7), with A-D on MENU, ▲, ▼ and BACK (DTMF-11, as nicFW
+    /// puts them on its four non-digit keys). The tones themselves are the Radio task's (milestone 4).
     fn raw(self, app: &mut App, key: Option<Key>, _: Option<u8>, down: bool) {
         if app.radio.keyed.is_none() {
             return;
@@ -241,6 +241,10 @@ impl View for Transmit {
             Some(Key::Digit(d)) => app.out.push(RadioCmd::Dtmf { key: b'0' + d, on: down }),
             Some(Key::Star) => app.out.push(RadioCmd::Dtmf { key: b'*', on: down }),
             Some(Key::Hash) => app.out.push(RadioCmd::Dtmf { key: b'#', on: down }),
+            Some(Key::Menu) => app.out.push(RadioCmd::Dtmf { key: b'A', on: down }),
+            Some(Key::Up) => app.out.push(RadioCmd::Dtmf { key: b'B', on: down }),
+            Some(Key::Down) => app.out.push(RadioCmd::Dtmf { key: b'C', on: down }),
+            Some(Key::Exit) => app.out.push(RadioCmd::Dtmf { key: b'D', on: down }),
             _ => {}
         }
     }

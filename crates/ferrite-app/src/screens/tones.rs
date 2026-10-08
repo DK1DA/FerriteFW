@@ -2,14 +2,15 @@
 //! TX tones apart, each off, one of the 50 CTCSS tones, or one of the 104 DCS codes normal or inverted, so
 //! every cross mode is just a pair. ▲▼ pick RX or TX; the knob or ◀▶ step through the list, live; digits type
 //! a tone (885 is 88.5 Hz, 1000 is 100.0 Hz) or, on a DCS code, the code in octal; # turns it off; OK keeps;
-//! BACK puts both back (MENU-20).
+//! BACK puts both back (MENU-20). Typed tones need not be on the lists (TONE-15, as nicFW): any CTCSS from
+//! 60.0 to 260.0 Hz and any DCS code D000-D777.
 
 use super::forms::picker;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{tone_at, tone_index, tone_text, CTCSS, DCS, DCS_FLAG, DCS_INV};
+use crate::slot::{tone_at, tone_custom, tone_index, tone_text, CTCSS, DCS_FLAG, DCS_INV};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::keys::Key;
 use ferrite_core::msg::{Param, RadioCmd};
@@ -65,11 +66,13 @@ pub(crate) fn set(app: &mut App, rx: bool, t: u16) {
     app.save_channel(a, None);
 }
 
-/// "CTCSS", "DCS normal", "DCS inverted", "Off".
+/// "CTCSS", "DCS normal", "DCS inverted", "Off"; "Custom ..." off the lists (TONE-15).
 fn kind(t: u16) -> &'static str {
     match t {
         0 => "",
+        _ if t & DCS_FLAG == 0 && tone_custom(t) => "CTCSS custom",
         _ if t & DCS_FLAG == 0 => "CTCSS",
+        _ if tone_custom(t) => "DCS custom",
         _ if t & DCS_INV == 0 => "DCS normal",
         _ => "DCS inverted",
     }
@@ -82,22 +85,30 @@ fn text(t: u16, b: &mut Buf<16>) {
     }
 }
 
-/// Typed digits to a tone: CTCSS in tenths ("885", "1000") or whole hertz ("100"); on a DCS code, its octal
-/// digits.
-fn typed_tone(v: u16, dcs: Option<u16>) -> Option<u16> {
+/// The lowest and highest CTCSS a typed tone may be, 0.1 Hz (TONE-15).
+pub const CTCSS_MIN: u16 = 600;
+pub const CTCSS_MAX: u16 = 2600;
+
+/// Typed digits to a tone: CTCSS in tenths ("885", "1000") or whole hertz ("100"), a standard tone first, then
+/// any tone from 60.0 to 260.0 Hz (TONE-15); on a DCS code, its octal digits, any code D000-D777.
+pub fn typed_tone(v: u16, dcs: Option<u16>) -> Option<u16> {
     match dcs {
         Some(inv) => {
             let (mut code, mut x, mut k) = (0u16, v, 1u16);
             while x > 0 {
-                if x % 10 > 7 {
+                if x % 10 > 7 || k > 64 {
                     return None;
                 }
                 code += (x % 10) * k;
                 (x, k) = (x / 10, k * 8);
             }
-            DCS.contains(&code).then_some(DCS_FLAG | inv | code)
+            Some(DCS_FLAG | inv | code)
         }
-        None => CTCSS.iter().copied().find(|&c| c == v).or_else(|| CTCSS.iter().copied().find(|&c| c == v.saturating_mul(10))),
+        None => {
+            let ok = |c: u16| (CTCSS_MIN..=CTCSS_MAX).contains(&c).then_some(c);
+            let whole = v.checked_mul(10);
+            CTCSS.iter().copied().find(|&c| c == v || Some(c) == whole).or_else(|| ok(v)).or_else(|| whole.and_then(ok))
+        }
     }
 }
 
@@ -151,7 +162,9 @@ impl View for Tones {
     fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
         let rx = self.row == 0;
         let t = get(app, rx);
-        set(app, rx, tone_at(tone_index(t) + d));
+        // A custom tone sits after the standard one below it (tone_index): down steps to that one, not past it.
+        let i = tone_index(t) + if tone_custom(t) && d < 0 { 1 } else { 0 };
+        set(app, rx, tone_at(i + d));
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
@@ -185,7 +198,7 @@ impl View for Tones {
             let _ = ufmt::uwrite!(typed, "Typed {}", self.typed);
         }
         if app.dirty(R_NOTE, hash(&typed)) {
-            let s: &[u8] = if typed.is_empty() { b"Digits type it: 885 is 88.5 Hz" } else { typed.as_bytes() };
+            let s: &[u8] = if typed.is_empty() { b"885 is 88.5 Hz; any 60-260 Hz" } else { typed.as_bytes() };
             w::field(lcd, 8, 224, 216, 233, 229, Align::Center, s, &UI_12, if typed.is_empty() { DIM } else { TEXT }, BG);
         }
         app.help_box(lcd, 250, 46, b"RX and TX are set apart: any cross mode is a pair.", b"MENU 4");

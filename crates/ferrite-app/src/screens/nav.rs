@@ -406,7 +406,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::Tones => Screen::Tones(tones::Tones::new(app)),
         Dest::Text(to) => Screen::Text(text::Text::new(to)),
         Dest::Confirm => Screen::Confirm(confirm::Confirm { ask: confirm::Ask::Reset { armed: false }, boot: false, since: 0 }),
-        Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut),
+        Dest::ShortcutMap => Screen::Shortcut(shortcut::Shortcut { sel: 0 }),
         Dest::Quick => Screen::Quick(Quick { row: 0 }),
         Dest::Advanced => Screen::Advanced(Advanced { row: 0, from_quick: false }),
         Dest::Status => Screen::Status(Status { row: 0, from_menu: false }),
@@ -417,7 +417,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
             Screen::TxRefused(transmit::TxRefused { why, slot: a })
         }
         Dest::Emergency => Screen::Emergency(transmit::Emergency { slot: a }),
-        Dest::Scan => Screen::Scan(scan::Scan { slot: a }),
+        Dest::Scan => Screen::Scan(scan::Scan { slot: a, list: false, sel: 0 }),
         Dest::BandScope => scope::open(app),
         Dest::ToneSearch => probe::open_tone(app),
         Dest::Counter => probe::open_counter(app),

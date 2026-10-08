@@ -250,7 +250,6 @@ pub struct ZoneCfg {
     pub resume: u8,
     /// Dwell before resuming, s; 255 the radio's.
     pub dwell: u8,
-    pub smart: bool,
     /// Priority channels by number.
     pub pri: [Option<u16>; 2],
 }
@@ -366,8 +365,10 @@ pub enum Op {
     Wipe,
     /// The APRS settings changed (written back by the App: [`crate::App::aprs_cfg`]).
     AprsCfg(AprsCfg),
-    /// DTMF memory i (0-15): set, or cleared with None.
+    /// DTMF memory i (0-15): set, or cleared with None (its name goes with it).
     Dtmf(u8, Option<Dtmf>),
+    /// DTMF memory i's name, up to 10 characters (DTMF-12); empty clears it.
+    DtmfName(u8, Buf<10>),
 }
 
 /// The records, read one at a time. Every method has a default (nothing there), so an owner that doesn't
@@ -468,6 +469,10 @@ pub trait Data {
     /// DTMF memory i (0-15), None when empty.
     fn dtmf(&self, _i: u8) -> Option<Dtmf> {
         None
+    }
+    /// DTMF memory i's name (DTMF-12), empty when it has none.
+    fn dtmf_name(&self, _i: u8) -> Buf<10> {
+        Buf::new()
     }
 
     fn fm_presets(&self) -> u8 {

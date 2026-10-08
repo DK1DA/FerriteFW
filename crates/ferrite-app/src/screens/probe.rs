@@ -167,7 +167,7 @@ impl View for ToneSearch {
         let t = found(live);
         if t != 0 && !self.ask_tx {
             let rssi = live.slots[self.slot as usize].rssi;
-            app.radio.push_hit(Hit::new(t as u32, app.now, rssi));
+            app.radio.push_hit(Hit::new(t as u32, app.now, rssi), false);
         }
     }
 
@@ -308,7 +308,7 @@ impl View for Counter {
     fn tick(self, app: &mut App, live: &LiveAll) {
         if let ModeLive::Probe { freq, rssi, .. } = live.mode {
             if freq != 0 && !self.hold {
-                app.radio.push_hit(Hit::new(freq, app.now, rssi));
+                app.radio.push_hit(Hit::new(freq, app.now, rssi), false);
             }
         }
     }

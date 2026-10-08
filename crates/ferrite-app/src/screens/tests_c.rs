@@ -332,7 +332,7 @@ fn zone_editor_changes_live_and_resets() {
     assert!(t.s.zone_cfg(0).scan_all, "the knob changes it at once (MENU-16)");
     t.tap(Key::Hash);
     assert!(!t.s.zone_cfg(0).scan_all, "# resets it (MENU-18)");
-    for _ in 0..6 {
+    for _ in 0..5 {
         t.tap(Key::Down);
     }
     t.tap(Key::Right); // Priority 1: the zone's first channel
@@ -593,9 +593,9 @@ fn states_are_small() {
     ];
     std::println!("Screen {} bytes; {sizes:?}", size_of::<Screen>());
     for (name, n) in sizes {
-        // compose keeps multi-tap timing and predictive entry's pick, case, mark and quick list (TEXT-2): 12
-        // bytes, still inside the 16 of a Screen
-        assert!(n <= if name == "compose" { 12 } else { 8 }, "{name}: {n} bytes");
+        // compose keeps multi-tap timing, predictive entry's pick, case, mark and quick list (TEXT-2) and the
+        // cursor (TEXT-12): 14 bytes, still inside the 16 of a Screen
+        assert!(n <= if name == "compose" { 14 } else { 8 }, "{name}: {n} bytes");
     }
 }
 
@@ -717,6 +717,45 @@ fn predictive_words() {
     keys(&mut t, "my");
     t.tap(Key::Hash);
     assert_eq!(text(&t), "Home my ");
+}
+
+/// TEXT-12: ◀▶ move the cursor; words, marks and deletes go in at it; a word being predicted goes in before
+/// the cursor moves; ▲▼ still pick words.
+#[test]
+fn cursor_edits_mid_text() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    keys(&mut t, "home");
+    t.app.knob(2, t.t, &t.s);
+    t.tap(Key::Hash);
+    keys(&mut t, "my");
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "Home my ");
+    for _ in 0..3 {
+        t.tap(Key::Left);
+    }
+    // before "my ": digits (hold) and a space go in there
+    t.hold(Key::Digit(7));
+    t.hold(Key::Digit(3));
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "Home 73 my ");
+    t.tap(Key::Exit); // BACK deletes before the cursor
+    assert_eq!(text(&t), "Home 73my ");
+    // a word in progress goes in before the cursor moves
+    keys(&mut t, "my");
+    t.tap(Key::Right);
+    assert_eq!(text(&t), "Home 73mymy ");
+    for _ in 0..20 {
+        t.tap(Key::Right);
+    }
+    t.hold(Key::Digit(5));
+    assert_eq!(text(&t), "Home 73mymy 5", "back at the end");
+    // the start: BACK has nothing before the cursor and doesn't leave
+    for _ in 0..30 {
+        t.tap(Key::Left);
+    }
+    t.tap(Key::Exit);
+    assert_eq!((text(&t).as_str(), t.name()), ("Home 73mymy 5", "Compose message"));
 }
 
 /// TEXT-4: a short form follows its word; Q-codes go in in capitals.
@@ -863,4 +902,26 @@ fn recent_channels() {
     assert_eq!(t.s.recent(0), Some(111));
     assert_eq!(t.s.recent(9), Some(102), "ten kept");
     assert_eq!(t.s.recent(10), None);
+}
+
+/// DTMF-12: # names a DTMF memory (up to 10 characters); clearing the memory clears its name.
+#[test]
+fn dtmf_memory_names() {
+    use crate::data::Data;
+    let mut t = T::new();
+    t.open(Dest::DtmfMemories);
+    assert_eq!(t.s.dtmf_name(0).as_bytes(), b"Link on");
+    t.tap(Key::Down);
+    t.tap(Key::Hash);
+    assert_eq!(t.name(), "Text entry");
+    t.tap(Key::Digit(4));
+    t.tap(Key::Digit(4));
+    t.tap(Key::Digit(4)); // I
+    t.tap(Key::Menu);
+    assert_eq!(t.s.dtmf_name(1).as_bytes(), b"I");
+    assert_eq!(t.name(), "DTMF memories", "back to the list");
+    t.tap(Key::Star);
+    assert!(t.s.dtmf(1).is_none() && t.s.dtmf_name(1).is_empty(), "the name goes with the memory");
+    t.tap(Key::Hash);
+    assert_eq!(t.name(), "DTMF memories", "an empty memory has nothing to name");
 }

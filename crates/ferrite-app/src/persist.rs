@@ -176,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     link_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, follow, follow_back } then { pon, pon_text });
+} bits { show_hidden, chan_only, follow, follow_back, scan_tx } then { pon, pon_text, tone_level });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -239,7 +239,7 @@ impl App {
         }
         self.out.push(RadioCmd::Active(self.active));
         self.out.push(RadioCmd::Watch(self.watch_mask()));
-        self.send_follow();
+        self.send_radio_settings();
         self.out.push(RadioCmd::BatterySave(crate::level(self.bsave)));
     }
 }

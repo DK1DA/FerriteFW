@@ -2,7 +2,8 @@
 //! digits and symbols, # is a space, BACK deletes (with nothing left it leaves), OK keeps. The text being typed
 //! is the App's one text buffer; the screen that opened it reads it back (the save form's name) or OK hands it
 //! over (a channel's name, the callsign). A key tapped again within a second steps through its letters.
-//! Callsigns are capitals and digits only, and * switches letters and digits (the SetupCall mock-up).
+//! Callsigns are capitals and digits only, and * switches letters and digits (the SetupCall mock-up). ◀▶ move
+//! the cursor (TEXT-12): typing, spaces and BACK work at it.
 
 use super::forms::{field_box, keypad, para};
 use super::shared::*;
@@ -35,6 +36,8 @@ pub enum TextFor {
     Callsign,
     /// 0 7 3 2's text, the boot screen's line (BOOT-9).
     PowerOn,
+    /// A DTMF memory's name (DTMF-12).
+    DtmfName(u8),
 }
 
 impl TextFor {
@@ -45,6 +48,7 @@ impl TextFor {
             TextFor::Preset(_) => "Range name",
             TextFor::Callsign => "Callsign",
             TextFor::PowerOn => "Power-on message",
+            TextFor::DtmfName(_) => "DTMF memory name",
         }
     }
 
@@ -52,6 +56,7 @@ impl TextFor {
         match self {
             TextFor::Callsign => 10,
             TextFor::Preset(_) => 12,
+            TextFor::DtmfName(_) => 10,
             _ => 16,
         }
     }
@@ -67,6 +72,7 @@ impl TextFor {
             TextFor::Preset(i) => store.data().preset(i).map_or(Buf::new(), |p| Buf::from(p.name.as_bytes())),
             TextFor::Callsign => Buf::from(app.set.callsign.as_bytes()),
             TextFor::PowerOn => Buf::from(app.set.pon_text.as_bytes()),
+            TextFor::DtmfName(i) => Buf::from(store.data().dtmf_name(i).as_bytes()),
         }
     }
 
@@ -91,12 +97,14 @@ pub struct Text {
     pub mode: u8,
     /// Multi-tap: the last digit key + 1 (0 none) and when it was tapped.
     pub last: u8,
+    /// The cursor (TEXT-12): how many characters are after it; 0 at the end.
+    pub tail: u8,
     pub at: u32,
 }
 
 impl Text {
     pub fn new(to: TextFor) -> Self {
-        Text { to, mode: 0, last: 0, at: 0 }
+        Text { to, mode: 0, last: 0, tail: 0, at: 0 }
     }
 
     /// The mode * goes to: KEY-12's case and symbols; a callsign has capitals and digits only (SETUP-12).
@@ -156,10 +164,27 @@ impl View for Text {
         Some(MENU_TIMEOUT_MS)
     }
 
+    fn own_arrows(self) -> bool {
+        true
+    }
+
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         let mut s = self;
-        let max = self.to.max();
+        // TEXT-12: the keys work on the text before the cursor; what is after it is put back after.
+        let n = app.text.len();
+        let k = (s.tail as usize).min(n);
+        let after = Buf::<16>::from(&app.text.as_bytes()[n - k..]);
+        app.text = Buf::from(&app.text.as_bytes()[..n - k]);
+        let max = self.to.max() - k;
         match (e.key, e.press) {
+            (Key::Left, Press::Short | Press::Repeat) => {
+                s.tail = (k + !app.text.is_empty() as usize) as u8;
+                s.last = 0;
+            }
+            (Key::Right, Press::Short | Press::Repeat) => {
+                s.tail = k.saturating_sub(1) as u8;
+                s.last = 0;
+            }
             (Key::Digit(d), Press::Short) => {
                 (s.last, s.at) = tap(&mut app.text, max, s.mode, d, s.last, s.at, app.now);
             }
@@ -174,22 +199,32 @@ impl View for Text {
                 }
                 s.last = 0;
             }
-            (Key::Exit, Press::Short) if app.text.is_empty() => return app.back(),
+            (Key::Exit, Press::Short) if app.text.is_empty() && after.is_empty() => return app.back(),
             (Key::Exit, Press::Short) => {
-                delete(&mut app.text);
+                delete(&mut app.text); // at the start, nothing before the cursor to delete
                 s.last = 0;
             }
-            (Key::Menu, Press::Short) => return keep(self.to, app, store),
-            _ => return,
+            (Key::Menu, Press::Short) => {
+                app.text.push(after.as_bytes());
+                return keep(self.to, app, store);
+            }
+            _ => {}
         }
+        app.text.push(after.as_bytes());
         app.screen = Screen::Text(s);
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
         let t = app.text;
-        if app.dirty(R_TOP, hash(&(self.to, t, self.mode))) {
+        if app.dirty(R_TOP, hash(&(self.to, t, self.mode, self.tail))) {
             w::field(lcd, 8, 224, 24, 41, 37, Align::Left, self.to.label().as_bytes(), &UI_12B, TEXT, BG);
-            field_box(lcd, 8, 44, 224, 30, b"", t.as_bytes(), true, true);
+            field_box(lcd, 8, 44, 224, 30, b"", t.as_bytes(), true, self.tail == 0);
+            if self.tail > 0 {
+                // TEXT-12: the cursor inside the text, where field_box draws it (8 px in, baseline 64)
+                let k = t.len() - (self.tail as usize).min(t.len());
+                let x = 16 + text4_width(&t.as_bytes()[..k], &UI_12B);
+                lcd.fill(x, 64 - 12, 2, 15, TEXT);
+            }
             let mut c = Buf::<16>::new();
             let _ = uwrite!(c, "{}/{}", t.len(), self.to.max());
             w::field(lcd, 8, 100, 78, 95, 91, Align::Left, c.as_bytes(), &UI_12, SUB, BG);
@@ -251,6 +286,9 @@ fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
         TextFor::PowerOn => {
             app.set.pon_text = crate::settings::Text::EMPTY;
             t.as_bytes().iter().for_each(|&c| _ = app.set.pon_text.push(c));
+        }
+        TextFor::DtmfName(i) => {
+            store.data().request(crate::data::Op::DtmfName(i, Buf::from(t.as_bytes())));
         }
     }
     app.back();

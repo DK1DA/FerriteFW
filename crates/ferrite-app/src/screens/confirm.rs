@@ -264,6 +264,6 @@ pub(crate) fn reset_settings(app: &mut App) {
         app.send_slot(s);
     }
     app.out.push(RadioCmd::Watch(app.watch_mask()));
-    app.send_follow();
+    app.send_radio_settings();
     app.out.push(RadioCmd::BatterySave(crate::level(app.bsave)));
 }

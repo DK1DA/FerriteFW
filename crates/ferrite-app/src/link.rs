@@ -512,7 +512,7 @@ fn zone_save(name: &[u8], c: &ZoneCfg, s: &mut dyn PSink) {
     }
     c.resume.save(s);
     c.dwell.save(s);
-    c.smart.save(s);
+    0u8.save(s); // reserved: it was smart scan (SCAN-23)
     c.pri.save(s);
 }
 
@@ -585,7 +585,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             new.load(&mut Rd { b: rec, n: 0 });
             keep_protected(&mut new, &old);
             *app.set = new;
-            app.send_follow();
+            app.send_radio_settings();
             Status::Ok
         }
         what::CHANNEL if idx < MAX_CHANNELS => {
@@ -635,7 +635,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             }
             c.resume.load(&mut r);
             c.dwell.load(&mut r);
-            c.smart.load(&mut r);
+            0u8.load(&mut r); // reserved
             c.pri.load(&mut r);
             let Some(nm) = name_of::<16>(&name).filter(|n| !n.as_bytes().is_empty()) else { return invalid(o, slow!("name: 1 to 16 printable characters").as_bytes()) };
             if c.resume > 12 {

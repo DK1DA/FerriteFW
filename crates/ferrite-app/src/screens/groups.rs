@@ -17,7 +17,7 @@ use crate::settings::*;
 use crate::slot::Item;
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::keys::Key;
-use ferrite_core::msg::{CalState, Device};
+use ferrite_core::msg::{CalState, Device, RadioCmd};
 use ferrite_core::VERSION;
 use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
@@ -33,7 +33,7 @@ const G1: [Entry; 8] = [
     (slow!("Background job"), slow!("Off"), slow!("A zone scan or decoder on a watched slot.")),
     (slow!("Scan target"), slow!("Current zone"), slow!("What SIDE2 scans.")),
     (slow!("Resume"), slow!("5 s"), slow!("When a stopped scan moves on.")),
-    (slow!("Scan options"), slow!("Up, 1 s"), slow!("Direction, dwell, smart scan, priority.")),
+    (slow!("Scan options"), slow!("Up, 1 s"), slow!("Direction, dwell, priority, inputs.")),
     (slow!("Range presets"), slow!("4 presets"), slow!("Named ranges to scan.")),
     (slow!("Skip list"), slow!("Empty"), slow!("Frequencies * skipped in this scan.")),
 ];
@@ -100,7 +100,7 @@ const G8: [Entry; 9] = [
     (slow!("Timeout"), slow!("120 s"), slow!("Transmit timeout and its pre-alert.")),
     (slow!("VOX"), slow!("Off"), slow!("Voice-operated transmit.")),
     (slow!("Mic gain"), slow!("5"), slow!("Microphone level, 1-9.")),
-    (slow!("Tone burst"), slow!("1750 Hz"), slow!("PTT + SIDE2 sends it.")),
+    (slow!("Tones sent"), slow!("1750 Hz"), slow!("Tone burst, subtone level.")),
     (slow!("Tail elimination"), slow!("Off"), slow!("Squelch tail, end tone (roger beep).")),
     (slow!("DTMF"), slow!("100 ms"), slow!("Dialer, memories, timing, PTT ID.")),
     (slow!("Callsign and ID"), slow!("Empty"), slow!("Your callsign, and CW ID.")),
@@ -125,7 +125,7 @@ pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 28] = [
     ((1, 2), &[
         (slow!("Watched audio"), slow!("Heard"), slow!("Heard, muted, per slot.")),
         (slow!("Follow"), slow!("On"), slow!("The active slot follows a watched one.")),
@@ -135,7 +135,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
     ((1, 6), &[
         (slow!("Direction"), slow!("Up"), slow!("Scan up or down.")),
         (slow!("Dwell"), slow!("1 s"), slow!("Wait before resuming.")),
-        (slow!("Smart scan"), slow!("Off"), slow!("Skip what's always busy.")),
+        (slow!("Scan inputs"), slow!("Off"), slow!("Also a channel's TX frequency.")),
         (slow!("Return to"), slow!("Start"), slow!("Where a stopped scan returns.")),
         (slow!("Priority check"), slow!("Every 2 s"), slow!("Look at the priority channels.")),
     ]),
@@ -218,6 +218,10 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
     ]),
     ((8, 1), &[(slow!("TX timeout"), slow!("120 s"), slow!("Transmit stops after this.")), (slow!("Pre-alert"), slow!("10 s"), slow!("Warning before the timeout."))]),
     ((8, 2), &[(slow!("VOX"), slow!("Off"), slow!("Transmit when you talk.")), (slow!("Level"), slow!("5"), slow!("1-9; keys the active slot.")), (slow!("Tail"), slow!("2 s"), slow!("Hang time after speech."))]),
+    ((8, 4), &[
+        (slow!("Tone burst"), slow!("1750 Hz"), slow!("PTT + SIDE2 sends it.")),
+        (slow!("Subtone level"), slow!("Normal"), slow!("CTCSS/DCS strength: raise for a deaf repeater.")),
+    ]),
     ((8, 5), &[
         (slow!("Mode"), slow!("Off"), slow!("Receive, transmit or both.")),
         (slow!("Phase"), slow!("55 Hz"), slow!("55 Hz or a phase shift.")),
@@ -259,7 +263,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
         (slow!("Calibration"), slow!(""), slow!("The factory calibration, read only.")),
         (slow!("Crystal trim"), slow!("0 ppm"), slow!("Centre a known signal.")),
         (slow!("Battery reading trim"), slow!("+0.00 V"), slow!("Match the reading to a meter.")),
-        (slow!("Speaker level trim"), slow!("0"), slow!("Not defined yet.")),
     ]),
     ((9, 8), &[
         (slow!("Run setup again"), slow!(""), slow!("The first-boot questions.")),
@@ -517,6 +520,14 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &FOLLOW_RETURNS, s.follow_back as u8);
             !s.follow_back
         }
+        [1, 6, 3] => {
+            pick(b, &ON_OFF, s.scan_tx as u8);
+            s.scan_tx
+        }
+        [8, 4, 2] => {
+            pick(b, &crate::settings::TONE_LEVELS, s.tone_level);
+            s.tone_level != 1
+        }
         [9, 3, 2] => {
             pick(b, &ON_OFF, s.chan_only as u8);
             s.chan_only
@@ -585,10 +596,11 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 33] = [
+pub(crate) const SETTABLE: [&[u8]; 35] = [
     &[1, 1],
     &[1, 2, 2],
     &[1, 2, 3],
+    &[1, 6, 3],
     &[3, 1, 2],
     &[3, 1, 3],
     &[3, 1, 4],
@@ -614,6 +626,7 @@ pub(crate) const SETTABLE: [&[u8]; 33] = [
     &[7, 6],
     &[7, 7],
     &[7, 8],
+    &[8, 4, 2],
     &[8, 6, 6],
     &[9, 1, 1],
     &[9, 2, 1],
@@ -628,11 +641,19 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [1, 1] => app.change(Item::Watch, d),
         [1, 2, 2] => {
             s.follow = !s.follow;
-            app.send_follow();
+            app.send_radio_settings();
         }
         [1, 2, 3] => {
             s.follow_back = !s.follow_back;
-            app.send_follow();
+            app.send_radio_settings();
+        }
+        [1, 6, 3] => {
+            s.scan_tx = !s.scan_tx;
+            app.out.push(RadioCmd::ScanTx(app.set.scan_tx));
+        }
+        [8, 4, 2] => {
+            s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
+            app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
         }
         [7, 7] => app.change(Item::BatterySave, d),
         [6, 3] => s.coord_fmt = cycle(s.coord_fmt, d, COORD_FORMATS.len()),
@@ -715,11 +736,19 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
         [1, 2, 2] => {
             s.follow = d.follow;
-            app.send_follow();
+            app.send_radio_settings();
         }
         [1, 2, 3] => {
             s.follow_back = d.follow_back;
-            app.send_follow();
+            app.send_radio_settings();
+        }
+        [1, 6, 3] => {
+            s.scan_tx = d.scan_tx;
+            app.out.push(RadioCmd::ScanTx(d.scan_tx));
+        }
+        [8, 4, 2] => {
+            s.tone_level = d.tone_level;
+            app.out.push(RadioCmd::ToneLevel(d.tone_level));
         }
         [6, 3] => s.coord_fmt = d.coord_fmt,
         [6, 9] => s.fixed_on = false,

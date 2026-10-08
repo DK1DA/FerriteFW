@@ -321,6 +321,8 @@ pub async fn task() {
                 | RadioCmd::Active(_)
                 | RadioCmd::Watch(_)
                 | RadioCmd::Scan { .. }
+                | RadioCmd::ScanTx(_)
+                | RadioCmd::ToneLevel(_)
                 | RadioCmd::PauseWatch(_)
                 | RadioCmd::Follow(_)
                 | RadioCmd::ScanSkip { .. }

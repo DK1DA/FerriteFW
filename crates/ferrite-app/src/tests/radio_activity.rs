@@ -197,6 +197,39 @@ fn scan_screen() {
     assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: false }));
 }
 
+/// SCAN-23 (nicFW's smart scan list): a frequency scan counts each stop; OK lists the hits; OK there tunes the
+/// VFO, hold V/M saves it.
+#[test]
+fn scan_hit_list() {
+    let mut t = T::new();
+    t.tap(Key::Side(2));
+    let (a, b) = (mhz(146) + 94_000, mhz(147) + 30_000);
+    for (n, f) in [(1, a), (2, b), (3, a), (4, a)] {
+        t.live.slots[0] = SlotLive { freq: f, last_hit: f, scanning: true, squelch_open: true, rssi: -80, hits: n, ..Default::default() };
+        t.wait(100);
+        t.live.slots[0].squelch_open = false;
+        t.wait(100);
+    }
+    let h = t.app.radio.hits;
+    assert_eq!((h[0].what, h[0].n, h[1].what, h[1].n, h[2].what), (a, 3, b, 1, 0), "a stopped it three times");
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Scan(s) if s.list));
+    t.tap(Key::Down);
+    t.cmds();
+    t.tap(Key::Menu);
+    assert_eq!((t.app.screen(), t.freq()), (Screen::Home, b), "OK: the VFO on the second hit");
+    assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: false }));
+    // hold V/M on a hit: the save form
+    t.live.slots[0] = SlotLive { freq: b, ..Default::default() };
+    t.wait(100);
+    t.tap(Key::Side(2));
+    t.live.slots[0] = SlotLive { freq: a, last_hit: a, scanning: true, hits: 1, ..Default::default() };
+    t.wait(100);
+    t.tap(Key::Menu);
+    t.hold(Key::VfoMem);
+    assert_eq!((t.app.screen().name(), t.freq()), ("Save as channel", a));
+}
+
 /// SCAN-16: ▲▼ set the direction; stopped on a hit they leave it at once.
 #[test]
 fn scan_direction() {
@@ -1023,6 +1056,13 @@ fn burst_and_dtmf_while_keyed() {
     t.tap(Key::Hash);
     let c = t.cmds();
     assert!(c.contains(&RadioCmd::Dtmf { key: b'5', on: true }) && c.contains(&RadioCmd::Dtmf { key: b'#', on: false }), "{c:?}");
+    // DTMF-11: A-D on MENU, ▲, ▼, BACK, and still keyed after.
+    for (k, d) in [(Key::Menu, b'A'), (Key::Up, b'B'), (Key::Down, b'C'), (Key::Exit, b'D')] {
+        t.tap(k);
+        let c = t.cmds();
+        assert!(c.contains(&RadioCmd::Dtmf { key: d, on: true }) && c.contains(&RadioCmd::Dtmf { key: d, on: false }), "{c:?}");
+    }
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)), "{:?}", t.app.screen());
     ptt(&mut t, false);
     t.cmds();
     t.tap(Key::Digit(5));

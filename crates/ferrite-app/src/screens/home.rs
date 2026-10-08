@@ -145,7 +145,9 @@ impl View for Home {
             (Key::VfoMem, Short) => toggle_vfo(app, store),
             (Key::VfoMem, Long) => {
                 if app.slots[app.active as usize].vfo_mode {
-                    app.open(Dest::SaveChannel); // VFO-9; on a channel it does nothing
+                    app.open(Dest::SaveChannel); // VFO-9
+                } else {
+                    copy_to_vfo(app); // VFO-23
                 }
             }
             (Key::Hash, Short) => {
@@ -435,6 +437,21 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
 }
 
 /// V/M: VFO <-> channel (only with channels stored).
+/// VFO-23 (nicFW's "Chan 2 VFO"): hold V/M on a channel puts the slot's VFO on it, frequency and settings
+/// (shift or split, tones, mode, power, step, busy lock), and switches to the VFO. The channel is untouched.
+fn copy_to_vfo(app: &mut App) {
+    let a = app.active as usize;
+    let s = &mut app.slots[a];
+    let Some(c) = s.ch.filter(|_| !s.vfo_mode) else { return };
+    let mut cfg = c.cfg;
+    if cfg.squelch == crate::slot::SQ_GLOBAL {
+        cfg.squelch = s.cfg.squelch; // "Global" means the VFO's own level (SQL-6)
+    }
+    (s.vfo, s.cfg, s.vfo_mode) = (c.rx, cfg, true);
+    app.send_slot(a as u8);
+    app.show_toast(b"Copied to VFO", b"V/M goes back to the channel", false);
+}
+
 fn toggle_vfo(app: &mut App, store: &impl ChannelStore) {
     let a = app.active as usize;
     let s = &mut app.slots[a];
