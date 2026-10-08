@@ -57,7 +57,9 @@ const G4: [Entry; 9] = [
     (slow!("POCSAG"), slow!("439.9875"), slow!("Pager frequency, baud, capcodes.")),
     (slow!("DSC"), slow!("Off"), slow!("Marine distress calls, receive only.")),
     (slow!("AIS"), slow!("Off"), slow!("Ships near you.")),
-    (slow!("Sensor reader"), slow!(""), slow!("433 MHz sensors and the jamming alarm.")),
+    // 5 was "Sensor reader" (with the jamming alarm), dropped (decision 75); the number stays empty so the
+    // rest of the group keeps its paths.
+    (slow!("-"), slow!(""), slow!("Not used.")),
     (slow!("Selcall, MDC1200"), slow!("Off"), slow!("Decode selcall and MDC1200 IDs.")),
     (slow!("DTMF decode"), slow!("Off"), slow!("Show and log DTMF sequences.")),
     (slow!("Popups"), slow!("On"), slow!("A 3 s toast for each decode.")),
@@ -161,7 +163,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 28] = [
         (slow!("Capcode filter"), slow!("None"), slow!("Only these capcodes.")),
     ]),
     ((4, 3), &[(slow!("DSC"), slow!("Off"), slow!("Decode DSC on channel 70.")), (slow!("Own MMSI"), slow!("None"), slow!("Your MMSI, receive only."))]),
-    ((4, 4), &[(slow!("AIS"), slow!("Off"), slow!("Decode AIS.")), (slow!("Range filter"), slow!("Off"), slow!("Only ships this close."))]),
+    ((4, 4), &[(slow!("AIS"), slow!("Off"), slow!("161.975 and 162.025, in turn.")), (slow!("Range filter"), slow!("25 nm"), slow!("Off, 5, 10, 25, 50 nm; needs a fix."))]),
     ((4, 9), &[
         (slow!("SAME"), slow!("On"), slow!("Decode weather alerts.")),
         (slow!("Location codes"), slow!("None"), slow!("Up to 8 FIPS or CLC codes.")),
@@ -304,7 +306,7 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [4, 9, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
-        [8, 5, 3] => Some("not used"),
+        [4, 5] | [8, 5, 3] => Some("not used"),
         _ => None,
     }
 }

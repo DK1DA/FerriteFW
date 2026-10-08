@@ -697,6 +697,16 @@ fn resume_word(r: u8, out: &mut Line) {
     }
 }
 
+/// The other way: "radio" (or "global") is 0.
+fn resume_val(v: &[u8]) -> Result<u8, Msg> {
+    Ok(match v {
+        _ if same(v, b"radio") || same(v, b"global") => 0,
+        _ if same(v, b"carrier") => 11,
+        _ if same(v, b"stop") => 12,
+        _ => secs(v, 10, "resume").map_err(|_| msg!("resume: radio, 1s to 10s, carrier or stop"))?,
+    })
+}
+
 fn secs(w: &[u8], max: u32, what: &str) -> Result<u8, Msg> {
     match number(w.strip_suffix(b"s").unwrap_or(w)) {
         Some(n) if (1..=max).contains(&n) => Ok(n as u8),
@@ -782,12 +792,7 @@ fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
         match i {
             0..=2 => *[&mut c.scan_all, &mut c.shown, &mut c.by_distance][i] = on_off(v, ZONE_KEYS[i])?,
             3 => {
-                c.resume = match v {
-                    _ if same(v, b"radio") => 0,
-                    _ if same(v, b"carrier") => 11,
-                    _ if same(v, b"stop") => 12,
-                    _ => secs(v, 10, "resume").map_err(|_| msg!("resume: radio, 1s to 10s, carrier or stop"))?,
-                }
+                c.resume = resume_val(v)?;
             }
             4 => c.dwell = if same(v, b"radio") { 255 } else { secs(v, 254, "dwell")? },
             _ => c.pri[i - 5] = if same(v, b"none") { None } else { Some(index(v, MAX_CHANNELS as u32, "pri")? as u16) },
@@ -809,6 +814,10 @@ fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
     step_word(p.step, out);
     out.push(b" mode=");
     out.push(MODES[p.mode as usize % MODES.len()].as_bytes());
+    if p.resume != 0 {
+        out.push(b" resume=");
+        resume_word(p.resume, out);
+    }
 }
 
 fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
@@ -822,7 +831,7 @@ fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
     if end <= start {
         return Err(msg!("preset: the end must be above the start"));
     }
-    let mut p = RangePreset { name, start, end, step: STEP_12K5, mode: 1, narrow: true, skips: 0 };
+    let mut p = RangePreset { name, start, end, step: STEP_12K5, mode: 1, narrow: true, skips: 0, resume: 0 };
     while let Some((k, v)) = kv(t, "preset", "step=25kHz")? {
         if same(k, b"step") {
             p.step = step(v)?;
@@ -836,8 +845,10 @@ fn preset<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
                 p.mode = narrow as u8;
             }
             p.narrow = p.mode == 1;
+        } else if same(k, b"resume") {
+            p.resume = resume_val(v)?;
         } else {
-            return Err(msg!("preset: no field {}; they are step, mode, bw", Bytes(k)));
+            return Err(msg!("preset: no field {}; they are step, mode, bw, resume", Bytes(k)));
         }
     }
     let stored = d.preset(i).is_some_and(|o| RangePreset { skips: o.skips, ..p } == o);

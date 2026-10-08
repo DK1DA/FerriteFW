@@ -58,7 +58,7 @@ type Opt = (&'static str, Act, &'static str);
 const LOG: [Opt; 3] = [
     ("Mark all read", Act::Do(Op::ReadAll), "Clears the inbox count"),
     ("Clear the log", Act::Confirm(Op::ClearLog), "Every event goes, unread ones too"),
-    ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DSC, AIS, sensors, popups"),
+    ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DSC, AIS, popups"),
 ];
 const HEARD: [Opt; 5] = [
     ("Beacon now", Act::Do(Op::BeaconNow), "Sends your position once (needs a callsign)"),

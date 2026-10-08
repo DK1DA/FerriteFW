@@ -526,6 +526,7 @@ fn preset_save(p: &RangePreset, s: &mut dyn PSink) {
     p.step.save(s);
     p.mode.save(s);
     p.narrow.save(s);
+    p.resume.save(s); // SCAN-24; a record without it reads as Global
 }
 
 /// A name from a fixed field: up to the first 0, printable ASCII only.
@@ -650,12 +651,16 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
                 return Status::BadArg;
             }
             let Some(nm) = name_of::<12>(&name) else { return invalid(o, slow!("name: printable ASCII only").as_bytes()) };
-            let mut p = RangePreset { name: nm, start: 0, end: 0, step: 0, mode: 0, narrow: true, skips: 0 };
+            let mut p = RangePreset { name: nm, start: 0, end: 0, step: 0, mode: 0, narrow: true, skips: 0, resume: 0 };
             p.start.load(&mut r);
             p.end.load(&mut r);
             p.step.load(&mut r);
             p.mode.load(&mut r);
             p.narrow.load(&mut r);
+            p.resume.load(&mut r);
+            if p.resume > 12 {
+                return invalid(o, slow!("resume out of range").as_bytes());
+            }
             if !(mhz(18)..=mhz(1300)).contains(&p.start) || p.end <= p.start || p.end > mhz(1300) {
                 return invalid(o, slow!("start and end: 18 to 1300 MHz, end above start").as_bytes());
             }

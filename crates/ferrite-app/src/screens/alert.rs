@@ -1,5 +1,5 @@
-//! The alert (B17; manual chapters 23 and 24, WX-4 to WX-9; Alert mock-up): a SAME warning (also DSC distress
-//! and the jamming alarm) over any screen, with a flashing border and the tone until OK (WX-6). It shows the
+//! The alert (B17; manual chapters 23 and 24, WX-4 to WX-9; Alert mock-up): a SAME warning (also DSC distress)
+//! over any screen, with a flashing border and the tone until OK (WX-6). It shows the
 //! event, the areas, issue and expiry with minutes left, the originator, and the slot and frequency it was
 //! heard on (WX-5). The decoders raise it with [`App::raise_alert`].
 

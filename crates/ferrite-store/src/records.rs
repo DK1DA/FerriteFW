@@ -228,6 +228,7 @@ pub fn preset_decode(b: &[u8]) -> Option<RangePreset> {
         mode: b[25],
         narrow: b[26] != 0,
         skips: b[28],
+        resume: if b[27] <= 12 { b[27] } else { 0 }, // SCAN-24: 0 Global
     };
     p.fold_bw(); // VFO-20
     Some(p)
@@ -243,7 +244,7 @@ pub fn preset_encode(p: &RangePreset) -> [u8; 32] {
     b[24] = p.step;
     b[25] = p.mode;
     b[26] = p.narrow as u8;
-    b[27] = 0;
+    b[27] = p.resume;
     b[28] = p.skips;
     b[29] = 0xFF;
     let crc = crc16(&b[..30]);
@@ -372,7 +373,7 @@ mod tests {
         let z = zone_encode(b"Repeaters", &cfg);
         assert!(zone_decode(&z) == Some((Name::from(b"Repeaters"), cfg)));
         assert!(zone_decode(&[0xFF; ZONE_LEN]).is_none());
-        let p = RangePreset { name: Buf::from(b"Airband"), start: 11_800_000, end: 13_700_000, step: 10, mode: 2, narrow: false, skips: 3 };
+        let p = RangePreset { name: Buf::from(b"Airband"), start: 11_800_000, end: 13_700_000, step: 10, mode: 2, narrow: false, skips: 3, resume: 11 };
         let mut rec = [0xFFu8; PRESET_LEN];
         rec[..32].copy_from_slice(&preset_encode(&p));
         assert!(preset_decode(&rec) == Some(p));

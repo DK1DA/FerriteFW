@@ -411,7 +411,7 @@ fn every_destination_draws() {
         }
     }
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
-    assert_eq!(ids.len(), 66, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63)");
+    assert_eq!(ids.len(), 65, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75)");
 }
 
 mod group_a;
@@ -557,7 +557,6 @@ fn fonts_have_every_character_the_ui_draws() {
         ("screens/zones.rs", include_str!("screens/zones.rs")),
         ("screens/scanlists.rs", include_str!("screens/scanlists.rs")),
         ("screens/recall.rs", include_str!("screens/recall.rs")),
-        ("screens/sensors.rs", include_str!("screens/sensors.rs")),
         ("data.rs", include_str!("data.rs")),
         ("sample.rs", include_str!("sample.rs")),
         ("screens/groups.rs", include_str!("screens/groups.rs")),
@@ -827,7 +826,6 @@ fn arrows_are_the_knob() {
         Dest::Sub(9, 1),
         Dest::Status,
         Dest::AprsHeard,
-        Dest::Sensors,
     ];
     for d in dests {
         for (key, step) in [(Key::Right, 1i8), (Key::Left, -1)] {

@@ -1,7 +1,7 @@
 //! # Records
 //!
 //! What the list screens read besides channels: the event log, APRS (heard, messages, the message being
-//! written), GPS (fix, satellites, waypoints), the sensor reader, the scan lists (range presets, this scan's
+//! written), GPS (fix, satellites, waypoints), the scan lists (range presets, this scan's
 //! skips, zone options), FM presets and HF recent. Each comes from the task that owns it (the Storage task for
 //! flash records, the APRS and GPS tasks for what lives in their RAM) and is read on demand, one record at a
 //! time, newest first where that applies: the App never holds a copy (CHAN-9, APRS-4, INBOX-6). Changes go
@@ -31,14 +31,13 @@ pub enum Src {
     Ais,
     Dtmf,
     Selcall,
-    Sensor,
 }
 
 impl Src {
-    pub const ALL: [Src; 8] = [Src::Aprs, Src::Pocsag, Src::Same, Src::Dsc, Src::Ais, Src::Dtmf, Src::Selcall, Src::Sensor];
+    pub const ALL: [Src; 7] = [Src::Aprs, Src::Pocsag, Src::Same, Src::Dsc, Src::Ais, Src::Dtmf, Src::Selcall];
 
     pub fn name(self) -> &'static str {
-        ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "Sensor"][self as usize]
+        ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall"][self as usize]
     }
 }
 
@@ -54,7 +53,6 @@ impl Src {
 /// | AIS | MMSI | course (degrees), speed (0.1 kn) | vessel | |
 /// | DTMF | | | | the sequence |
 /// | Selcall | unit ID | | format | what it sent |
-/// | Sensor | device ID | | model | the reading |
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Event {
     pub src: Src,
@@ -164,27 +162,6 @@ pub struct Waypoint {
     pub src: WpSrc,
 }
 
-/// A device the sensor reader heard (DEC-11).
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Sensor {
-    pub model: Buf<16>,
-    pub id: u32,
-    pub value: Buf<24>,
-    pub rssi: i16,
-    pub first_ago_s: u32,
-    pub last_ago_s: u32,
-}
-
-/// The sensor reader's noise floor against its baseline (DEC-12).
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Noise {
-    pub floor: i16,
-    pub baseline: i16,
-    /// Jamming alarm threshold in dB, 0 = off.
-    pub alarm_db: u8,
-    pub jamming: bool,
-}
-
 /// The latest fix (GPS-2): consumers see its age.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Fix {
@@ -228,6 +205,8 @@ pub struct RangePreset {
     pub narrow: bool,
     /// Frequencies never stopped on (up to 48).
     pub skips: u8,
+    /// 0 Global (0 1 5's rule), 1-10 s, 11 carrier drop, 12 stop on hit (SCAN-5, SCAN-24).
+    pub resume: u8,
 }
 
 impl RangePreset {
@@ -429,16 +408,6 @@ pub trait Data {
         0
     }
     fn waypoint(&self, _i: u16) -> Option<Waypoint> {
-        None
-    }
-
-    fn sensors(&self) -> u16 {
-        0
-    }
-    fn sensor(&self, _i: u16) -> Option<Sensor> {
-        None
-    }
-    fn noise(&self) -> Option<Noise> {
         None
     }
 

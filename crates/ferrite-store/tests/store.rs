@@ -106,7 +106,7 @@ fn seeded() -> SimFlash {
         let c = channel(*num, (i % 4) as u8 % 3, 14_400_000 + i as u32 * 2500, "Chan", cfg_with(1000, if i % 2 == 0 { 60_000 } else { 0 }));
         assert!(s.put_with_position(c, None));
     }
-    assert!(s.add_preset(&RangePreset { name: Buf::from(b"Air"), start: 11_800_000, end: 13_700_000, step: 10, mode: 2, narrow: false, skips: 0 }));
+    assert!(s.add_preset(&RangePreset { name: Buf::from(b"Air"), start: 11_800_000, end: 13_700_000, step: 10, mode: 2, narrow: false, skips: 0, resume: 0 }));
     let a = app();
     assert!(s.save(&a));
     unmount(s)
@@ -274,7 +274,7 @@ fn power_cuts_during_channel_zone_and_preset_changes() {
                     }
                 }
                 7 => {
-                    let p = RangePreset { name: Buf::from(b"P"), start: freq, end: freq + 100_000, step: 3, mode: 0, narrow: true, skips: 1 };
+                    let p = RangePreset { name: Buf::from(b"P"), start: freq, end: freq + 100_000, step: 3, mode: 0, narrow: true, skips: 1, resume: 0 };
                     if s.presets() > 0 && i % 2 == 0 {
                         s.request(Op::Preset(0, p));
                     } else if s.presets() < 3 {

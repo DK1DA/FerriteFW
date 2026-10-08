@@ -183,7 +183,7 @@ fn is_distress(e: &Event) -> bool {
 fn title(e: &Event, b: &mut Buf<24>) {
     b.clear();
     match e.src {
-        Src::Aprs | Src::Ais | Src::Sensor => b.push(e.name.as_bytes()),
+        Src::Aprs | Src::Ais => b.push(e.name.as_bytes()),
         Src::Pocsag => {
             let _ = uwrite!(b, "Capcode {}", e.id);
         }
@@ -350,11 +350,6 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
             add("Unit", ferrite_ui::v!(b, "{}", e.id));
             add("Sent", e.text.as_bytes());
         }
-        Src::Sensor => {
-            add("Device", e.name.as_bytes());
-            add("ID", ferrite_ui::v!(b, "{}", e.id));
-            add("Reading", e.text.as_bytes());
-        }
     }
     if let Some(p) = e.pos {
         let mut pb = Buf::<32>::new();
@@ -395,7 +390,6 @@ impl Event {
             Src::Ais => b"AIS position",
             Src::Dtmf => b"DTMF sequence",
             Src::Selcall => b"Selcall",
-            Src::Sensor => b"Sensor reading",
         }
     }
 }

@@ -55,7 +55,7 @@ fn source() -> (App, Store) {
         assert!(s.request(Op::PutZone(z, n, cfg)));
     }
     for i in 0..10u8 {
-        let p = RangePreset { name: Buf::from(b"Range"), start: mhz(140) + i as u32 * 100_000, end: mhz(150), step: i, mode: i % 3, narrow: i % 2 == 0, skips: 0 };
+        let p = RangePreset { name: Buf::from(b"Range"), start: mhz(140) + i as u32 * 100_000, end: mhz(150), step: i, mode: i % 3, narrow: i % 2 == 0, skips: 0, resume: i % 13 };
         assert!(s.request(Op::PutPreset(i, p)));
     }
     for n in 0..300u16 {

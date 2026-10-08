@@ -1,5 +1,5 @@
 //! A radio's worth of sample records: channels in zones (some with positions), an event log, APRS stations
-//! and messages, a GPS fix with satellites, waypoints, sensors, range presets, FM presets and HF recent, all
+//! and messages, a GPS fix with satellites, waypoints, range presets, FM presets and HF recent, all
 //! around Ottawa. The simulator and the host tests read them through the same traits the firmware's stores
 //! implement ([`ChannelStore`], [`Data`]); requests ([`Op`]) change them, so deleting, skipping or marking
 //! shows on screen. Host memory only: nothing here is linked into the firmware (it doesn't use it).
@@ -102,12 +102,12 @@ const EVENTS: [EventRow; 12] = [
     (Src::Dsc, 1500, mhz(156) + 52_500, 2, false, 316_001_234, 0, 0, at(454_692_773, -756_789_607), "", "Routine call, ch 68"),
     (Src::Ais, 1860, mhz(161) + 97_500, 2, false, 316_123_456, 245, 72, at(454_692_773, -756_789_607), "OTTAWA PRINCESS", ""),
     (Src::Dtmf, 2400, mhz(146) + 52_000, 0, false, 0, 0, 0, None, "", "*1234#"),
-    (Src::Sensor, 2820, mhz(433) + 92_000, 2, false, 2741, 0, 0, None, "Acurite 5n1", "21.4 C, 45 % RH"),
+    (Src::Pocsag, 2820, mhz(439) + 98_750, 2, false, 1_234_571, 1200, 0, None, "", "MEETING MOVED TO 1930"),
     (Src::Selcall, 3120, mhz(155) + 22_000, 1, false, 1201, 0, 0, None, "MDC1200", "PTT ID"),
     (Src::Aprs, 4800, mhz(144) + 39_000, 2, false, 0, 0, 0, None, "VA3RTX", "Net at 8 tonight?"),
     (Src::Pocsag, 9000, mhz(439) + 98_750, 2, false, 1_234_570, 512, 0, None, "", "TEST PAGE 0900"),
     (Src::Dsc, 14_400, mhz(156) + 52_500, 2, false, 3_160_099, 3, 0, at(453_100_000, -755_200_000), "", "Distress: flooding"),
-    (Src::Sensor, 21_600, mhz(433) + 92_000, 2, false, 58, 0, 0, None, "LaCrosse TX141", "18.9 C"),
+    (Src::Ais, 21_600, mhz(162) + 2_500, 2, false, 316_004_321, 90, 105, at(453_100_000, -755_200_000), "ALGOMA DISCOVERY", ""),
 ];
 
 // inbound, peer, text, age s, state
@@ -126,14 +126,6 @@ const WAYPOINTS: [(&str, Pos, WpSrc); 5] = [
     ("Trailhead P2", Pos { lat: 455_076_150, lon: -758_001_499 }, WpSrc::Marked),
     ("VE3RSB-1", Pos { lat: 456_158_696, lon: -755_964_076 }, WpSrc::Aprs),
     ("Pink Lake", Pos { lat: 455_015_396, lon: -758_947_145 }, WpSrc::Marked),
-];
-
-const SENSORS: [(&str, u32, &str, i16, u32, u32); 5] = [
-    ("Acurite 5n1", 2741, "21.4 C 45 %", -71, 9000, 40),
-    ("LaCrosse TX141", 58, "18.9 C", -88, 21_600, 95),
-    ("TPMS", 0x001F_2E33, "232 kPa", -94, 600, 300),
-    ("Oregon THGR122", 0xA3, "22.1 C 38 %", -83, 7200, 610),
-    ("Door contact", 0x51_7C, "closed", -79, 30_000, 2900),
 ];
 
 // prn, snr, used, BeiDou
@@ -235,7 +227,9 @@ impl Sample {
             zone_cfg: core::array::from_fn(|z| Cell::new(zc(z))),
             zone_names: core::array::from_fn(|z| Cell::new(Name::from(ZONES[z]))),
             presets: core::array::from_fn(|i| {
-                Cell::new(PRESETS.get(i).map(|&(n, start, end, step, mode, narrow, skips)| RangePreset { name: txt(n), start, end, step, mode, narrow, skips }))
+                Cell::new(PRESETS.get(i).map(|&(n, start, end, step, mode, narrow, skips)| RangePreset { name: txt(n), start, end, step, mode, narrow, skips,
+                    // Airband resumes when the carrier drops (SCAN-24); the rest follow 0 1 5.
+                    resume: if n == "Airband" { 11 } else { 0 } }))
             }),
             // Two DTMF memories (chapter 17): a repeater's autopatch and a link code.
             dtmf: core::array::from_fn(|i| Cell::new([Dtmf::parse(b"*79"), Dtmf::parse(b"12345#")].get(i).copied().flatten())),
@@ -458,17 +452,6 @@ impl Data for Sample {
         Some(Waypoint { name: txt(n), pos, src })
     }
 
-    fn sensors(&self) -> u16 {
-        SENSORS.len() as u16
-    }
-    fn sensor(&self, i: u16) -> Option<Sensor> {
-        let &(m, id, v, rssi, first, last) = SENSORS.get(i as usize)?;
-        Some(Sensor { model: txt(m), id, value: txt(v), rssi, first_ago_s: first, last_ago_s: last })
-    }
-    fn noise(&self) -> Option<Noise> {
-        Some(Noise { floor: -112, baseline: -115, alarm_db: 10, jamming: false })
-    }
-
     fn fix(&self) -> Option<Fix> {
         self.fix.get()
     }
@@ -576,7 +559,7 @@ impl Data for Sample {
             Op::DtmfName(i, n) => self.dtmf_names.get(i as usize).map(|c| c.set(n)).is_some(),
             Op::NewPreset => match self.presets.iter().find(|p| p.get().is_none()) {
                 Some(c) => {
-                    c.set(Some(RangePreset { name: txt("New range"), start: mhz(144), end: mhz(148), step: 10, mode: 0, narrow: true, skips: 0 }));
+                    c.set(Some(RangePreset { name: txt("New range"), start: mhz(144), end: mhz(148), step: 10, mode: 0, narrow: true, skips: 0, resume: 0 }));
                     true
                 }
                 None => false,

@@ -12,7 +12,7 @@
 //! [`FlashStore::run`]); erases wait on a timer there, so the UI never waits for the flash. A queued change
 //! shows in the lists once it is written (well under a second); the slots hold their own copy meanwhile.
 //!
-//! The records the UI doesn't keep in flash yet (event log, APRS, GPS, waypoints, sensors, scan skips, FM
+//! The records the UI doesn't keep in flash yet (event log, APRS, GPS, waypoints, scan skips, FM
 //! presets) come from `extra`: nothing on the radio for now, the sample data in the simulator.
 
 use crate::io::Flash;
@@ -707,7 +707,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 None => Err(NorError),
             },
             Op::NewPreset => {
-                self.new_preset(&RangePreset { name: Buf::from(b"New range"), start: mhz(144), end: mhz(148), step: 10, mode: 0, narrow: true, skips: 0 })
+                self.new_preset(&RangePreset { name: Buf::from(b"New range"), start: mhz(144), end: mhz(148), step: 10, mode: 0, narrow: true, skips: 0, resume: 0 })
                     .await
             }
             Op::DeletePreset(i) => match self.preset_slot(i) {
@@ -768,6 +768,7 @@ pub fn default_presets(r: Region) -> impl Iterator<Item = RangePreset> {
         mode,
         narrow,
         skips: 0,
+        resume: 0,
     })
 }
 
@@ -946,15 +947,6 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
     fn waypoint(&self, i: u16) -> Option<Waypoint> {
         self.extra.waypoint(i)
-    }
-    fn sensors(&self) -> u16 {
-        self.extra.sensors()
-    }
-    fn sensor(&self, i: u16) -> Option<Sensor> {
-        self.extra.sensor(i)
-    }
-    fn noise(&self) -> Option<Noise> {
-        self.extra.noise()
     }
     fn fix(&self) -> Option<Fix> {
         self.extra.fix()

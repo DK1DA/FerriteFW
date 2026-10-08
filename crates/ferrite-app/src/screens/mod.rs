@@ -69,7 +69,6 @@ pub mod samecodes;
 pub mod scan;
 pub mod scanlists;
 pub mod scope;
-pub mod sensors;
 pub mod setup;
 pub(crate) mod shared;
 pub mod shortcut;
@@ -144,7 +143,6 @@ pub enum Screen {
     Zones(zones::Zones),
     ScanLists(scanlists::ScanLists),
     Recall(recall::Recall),
-    Sensors(sensors::Sensors),
     PosEntry(posentry::PosEntry),
     SameCodes(samecodes::SameCodes),
     Dtmf(dtmf::DtmfPad),
@@ -201,7 +199,6 @@ macro_rules! each {
             Screen::Zones($s) => $e,
             Screen::ScanLists($s) => $e,
             Screen::Recall($s) => $e,
-            Screen::Sensors($s) => $e,
             Screen::PosEntry($s) => $e,
             Screen::SameCodes($s) => $e,
             Screen::Dtmf($s) => $e,

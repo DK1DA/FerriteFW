@@ -170,7 +170,7 @@ impl Cursor {
     }
 }
 
-/// A two-line row (APRS heard, events, messages, waypoints, sensors): an outlined tag, a title (callsigns in
+/// A two-line row (APRS heard, events, messages, waypoints): an outlined tag, a title (callsigns in
 /// the bigger bold font), a right-hand value and an arrow on the first line; a sub line under it; a dot for
 /// unread.
 #[derive(Clone, Copy, Hash, Default)]
@@ -190,7 +190,7 @@ pub struct Row2<'a> {
     pub selected: bool,
 }
 
-/// The tag column: wide enough for "iGate", "Pager" and "Sensor".
+/// The tag column: wide enough for "iGate", "Pager" and "Selcall".
 pub(crate) const TAG_W: i32 = 46;
 
 pub(crate) fn row2(lcd: &mut impl Panel, y: i32, r: &Row2) {

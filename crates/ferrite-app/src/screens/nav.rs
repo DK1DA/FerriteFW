@@ -106,7 +106,7 @@ pub enum Dest {
     ToneSearch,
     /// B15: frequency counter (MENU 0 3 3).
     Counter,
-    /// B17: an alert (SAME, DSC distress, jamming).
+    /// B17: an alert (SAME, DSC distress).
     Alert,
     /// B18-B20: crossband repeater (MENU 0 3 5).
     Crossband,
@@ -127,7 +127,6 @@ pub enum Dest {
     /// C6: one APRS message.
     AprsMessage,
     /// C7: sensor reader (MENU 0 4 5).
-    Sensors,
     /// C8-C10: channel browser (MENU 0 2 1).
     Browse,
     /// C11: zones (MENU 0 2 3).
@@ -236,7 +235,6 @@ impl Dest {
             AprsStation => ("APRS station", "25", "C4"),
             AprsMessages => ("APRS messages", "25", "C5"),
             AprsMessage => ("APRS message", "25", "C6"),
-            Sensors => ("Sensor reader", "27", "C7"),
             Browse => ("Channel browser", "10", "C8"),
             Zones => ("Zones", "10", "C11"),
             RangePresets => ("Range presets", "14", "C12"),
@@ -305,13 +303,13 @@ impl Dest {
 }
 
 /// Every destination once (groups and lists by one example each), for tests and the screen inventory.
-pub const ALL: [Dest; 70] = {
+pub const ALL: [Dest; 69] = {
     use Dest::*;
     [
         Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
         ZoneEdit, LocationCodes, DtmfDialer, DtmfMemories, Compose, QuickMessages, Pin, Confirm, ExtendTx, Setup, ShortcutMap,
         Transmit, TxRefused, Emergency, Scan, BandScope, FmBroadcast, HfMode, ToneSearch, Counter, Alert,
-        Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage, Sensors,
+        Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage,
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, FmPresets, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
         LinkStatus, Paired, PairBt, WriteApproval, WriteProgress, PowerOff, EmptyBattery, Mailbox,
@@ -321,7 +319,7 @@ pub const ALL: [Dest; 70] = {
 
 /// MENU 0 paths that open a screen or a third-level list (Appendix A; `docs/settings.md`). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 60] = [
+pub const MENU0: [(&[u8], Dest); 59] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -342,7 +340,6 @@ pub const MENU0: [(&[u8], Dest); 60] = [
     (&[4, 2], Dest::Sub(4, 2)),
     (&[4, 3], Dest::Sub(4, 3)),
     (&[4, 4], Dest::Sub(4, 4)),
-    (&[4, 5], Dest::Sensors),
     (&[4, 9], Dest::Sub(4, 9)),
     (&[4, 9, 2], Dest::LocationCodes),
     (&[5, 1], Dest::AprsHeard),
@@ -446,7 +443,6 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::SkipList => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Skips)),
         Dest::HfRecent => Screen::Recall(super::recall::Recall { fm: false, cur: Default::default() }),
         Dest::FmPresets => Screen::Recall(super::recall::Recall { fm: true, cur: Default::default() }),
-        Dest::Sensors => Screen::Sensors(super::sensors::Sensors { cur: Default::default() }),
         // D: system and modes
         Dest::Group(g) => Screen::Group(super::groups::Group { g: g.clamp(1, 9), sub: 0, row: 0 }),
         Dest::Sub(g, m) => Screen::Group(super::groups::Group { g, sub: m, row: 0 }),

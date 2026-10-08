@@ -41,12 +41,13 @@ const ALL: fn(u16) -> bool = |_| true;
 pub const PRESETS_MAX: u8 = 16;
 
 /// The editor's rows and their help.
-const ROWS: [(&str, &str); 6] = [
+const ROWS: [(&str, &str); 7] = [
     ("Name", "Up to 12 characters"),
     ("Start", "Knob 100 kHz, left and right 1 MHz"),
     ("End", "Knob 100 kHz, left and right 1 MHz"),
     ("Step", "The scan's step through the range"),
     ("Mode", "FM wide, NFM narrow or AM (VFO-20)"),
+    ("Resume", "Global follows MENU 0 1 5; or this range's own"),
     ("Skips", "Never stopped on (up to 48); * on a hit adds"),
 ];
 
@@ -160,6 +161,7 @@ impl View for ScanLists {
                         p.mode = (p.mode as i32 + d).rem_euclid(3) as u8; // FM, NFM, AM (CHAN-23)
                         p.narrow = p.mode == 1; // VFO-20
                     }
+                    5 => p.resume = (p.resume as i32 + d).rem_euclid(13) as u8, // SCAN-24
                     _ => return,
                 }
                 // SCAN-14: a span across the band relay's edges (18 and 64 MHz) can't be scanned; refused here, when
@@ -232,11 +234,19 @@ impl View for ScanLists {
                         }
                         3 => v.set(STEPS[p.step as usize % STEPS.len()].1.as_bytes()),
                         4 => v.set(MODES[p.mode as usize % MODES.len()].as_bytes()),
+                        5 => {
+                            let _ = match p.resume {
+                                0 => uwrite!(v, "Global"),
+                                11 => uwrite!(v, "Carrier drop"),
+                                12 => uwrite!(v, "Stop on hit"),
+                                s => uwrite!(v, "After {} s", s),
+                            };
+                        }
                         _ => {
                             let _ = uwrite!(v, "{} of 48", p.skips);
                         }
                     }
-                    app.row1(lcd, i, label.as_bytes(), v.as_bytes(), false, i as u8 == row, i == 5);
+                    app.row1(lcd, i, label.as_bytes(), v.as_bytes(), false, i as u8 == row, i == 6);
                 }
                 // The help, or why this range won't scan (SCAN-14).
                 let text: &[u8] = if crosses_relay(&p) {

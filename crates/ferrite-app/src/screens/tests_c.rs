@@ -115,7 +115,7 @@ fn aprs_heard_in_and_out() {
 #[test]
 fn menu_paths_reach_the_lists() {
     // MENU 0 5 2 from home: advanced, group 5, then 2 (MENU-5)
-    for (path, name) in [([5, 2], "APRS messages"), ([4, 1], "Event log"), ([2, 1], "Channel browser"), ([2, 3], "Zones"), ([1, 7], "Range presets"), ([1, 8], "Skip list"), ([6, 2], "GPS position"), ([6, 7], "Waypoints"), ([4, 5], "Sensor reader"), ([5, 1], "APRS heard")] {
+    for (path, name) in [([5, 2], "APRS messages"), ([4, 1], "Event log"), ([2, 1], "Channel browser"), ([2, 3], "Zones"), ([1, 7], "Range presets"), ([1, 8], "Skip list"), ([6, 2], "GPS position"), ([6, 7], "Waypoints"), ([5, 1], "APRS heard")] {
         let mut t = T::new();
         t.hold(Key::Menu);
         t.tap(Key::Digit(path[0]));
@@ -481,7 +481,7 @@ fn fm_preset_returns_to_the_same_fm_screen() {
 #[test]
 fn ptt_and_hold_back_from_every_list() {
     // Compose is the exception: PTT sends the message there (APRS-18; tests/aprs.rs).
-    for d in [Dest::EventLog, Dest::AprsHeard, Dest::AprsMessages, Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Waypoints, Dest::GpsPosition, Dest::HfRecent, Dest::FmPresets, Dest::Sensors] {
+    for d in [Dest::EventLog, Dest::AprsHeard, Dest::AprsMessages, Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Waypoints, Dest::GpsPosition, Dest::HfRecent, Dest::FmPresets] {
         let mut t = T::new();
         t.open(d);
         t.hold(Key::Exit);
@@ -560,7 +560,6 @@ fn hints_fit() {
         (Dest::Waypoints, &[(Key::Menu, 100)]),
         (Dest::HfRecent, &[]),
         (Dest::FmPresets, &[]),
-        (Dest::Sensors, &[]),
     ];
     for &(d, keys) in walks {
         t.open(d);
@@ -588,7 +587,6 @@ fn states_are_small() {
         ("zones", size_of::<zones::Zones>()),
         ("scanlists", size_of::<scanlists::ScanLists>()),
         ("recall", size_of::<recall::Recall>()),
-        ("sensors", size_of::<sensors::Sensors>()),
         ("options", size_of::<opts::Options>()),
     ];
     std::println!("Screen {} bytes; {sizes:?}", size_of::<Screen>());
@@ -665,7 +663,7 @@ fn hold_menu_is_options_everywhere() {
     t.hold(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu));
     t.hold(Key::Exit);
-    for d in [Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Sensors, Dest::Quick, Dest::Status] {
+    for d in [Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Quick, Dest::Status] {
         t.open(d);
         let s = t.app.screen();
         t.hold(Key::Menu);

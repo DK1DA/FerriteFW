@@ -422,7 +422,6 @@ fn main() {
         ("aprs-compose", Dest::AprsMessages, &[(Key::Menu, 100), (Key::Menu, 100), (Key::Digit(6), 100), (Key::Digit(6), 100), (Key::Hash, 100), (Key::Digit(6), 100), (Key::Digit(9), 100), (Key::Hash, 100), (Key::Digit(9), 100), (Key::Digit(2), 100), (Key::Digit(9), 100), (Key::Hash, 100), (Key::Digit(4), 100), (Key::Digit(6), 100), (Key::Digit(6), 100), (Key::Digit(3), 100), (Key::Down, 100), (Key::Down, 100)]),
         ("aprs-compose-short", Dest::AprsMessages, &[(Key::Menu, 100), (Key::Menu, 100), (Key::Digit(7), 100), (Key::Digit(3), 100), (Key::Digit(2), 100), (Key::Digit(3), 100), (Key::Digit(4), 100), (Key::Digit(8), 100), (Key::Digit(3), 100), (Key::Digit(3), 100), (Key::Down, 100)]),
         ("quick-messages", Dest::QuickMessages, &[(Key::Down, 100), (Key::Down, 100)]),
-        ("sensors", Dest::Sensors, &[]),
         ("browse", Dest::Browse, &[(Key::Down, 100)]),
         ("browse-zone", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100)]),
         ("browse-all", Dest::Browse, &[(Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Menu, 100)]),

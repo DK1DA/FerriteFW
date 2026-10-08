@@ -789,7 +789,7 @@ fn dump_format() {
         "set 0 7 1 Dark                    # Theme",
         "set 0 6 6 24 h, GPS               # Clock",
         "zone 2 \"Repeaters\" scan=on shown=on distance=off resume=radio dwell=radio pri1=12",
-        "preset 3 \"Airband\" 118.00000 137.00000 step=25kHz mode=AM",
+        "preset 3 \"Airband\" 118.00000 137.00000 step=25kHz mode=AM resume=carrier",
         "ch 12 \"Club repeater\" 443.47500 offset=+5.00000 mode=NFM txtone=100.0 rxtone=off power=low zone=2",
         "ch 63 \"FRS 1\" 462.56250 offset=simplex mode=NFM tone=off power=low",
     ] {
@@ -833,7 +833,7 @@ fn dump_load_1000_channels() {
         assert!(full.request(Op::PutZone(z, n, cfg)));
     }
     for i in 0..16u8 {
-        let p = RangePreset { name: Buf::from(&b"Range 1234567"[..12 - (i as usize % 3)]), start: mhz(140) + i as u32 * 1_000_000, end: mhz(150) + i as u32 * 1_000_000, step: i % 14, mode: i % 3, narrow: i % 2 == 0, skips: 0 };
+        let p = RangePreset { name: Buf::from(&b"Range 1234567"[..12 - (i as usize % 3)]), start: mhz(140) + i as u32 * 1_000_000, end: mhz(150) + i as u32 * 1_000_000, step: i % 14, mode: i % 3, narrow: i % 2 == 0, skips: 0, resume: i % 13 };
         assert!(full.request(Op::PutPreset(i, p)));
     }
     let bases = [mhz(144), mhz(430), mhz(156), mhz(118), mhz(222)];
