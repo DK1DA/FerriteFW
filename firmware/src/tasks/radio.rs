@@ -32,7 +32,7 @@ use crate::hal::gpio::Mode;
 use crate::hal::i2c::I2c;
 use crate::tasks::{check, CHECK_BK0, CHECK_BK1};
 use bk4829::wire::ThreeWire;
-use bk4829::{AfOut, Bandwidth, Bk4829};
+use bk4829::{AfOut, Bandwidth, Bk4829, Demod};
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, mhz, Freq10};
@@ -40,6 +40,7 @@ use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Even
 use ferrite_core::path::{Act, Cause, Path, Rx, Sel, Steps};
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use ferrite_core::scan::{self, Check, Range, Resume, Scan};
+use ferrite_core::tonegen;
 use ferrite_core::watch::{self, Hop, Watch};
 use si4732::{Mode as SiMode, Si4732, Sideband};
 #[cfg(feature = "tx")]
@@ -70,7 +71,8 @@ const SCAN_RESUME: Resume = Resume::Time(5);
 const HF_SLOT: u8 = 3;
 /// The sequencer's settings in the `tx` build: the timeout a little after the UI's own 120 s (the UI unkeys
 /// first; this is the backstop), no pre-alert (the UI shows it). End tone, CW ID and tail elimination wait for
-/// the tone generator (TONE-8, VOX-12, TONE-9): not sent yet.
+/// their settings from the UI (0 8 5 4, 0 8 7 2: menu rows only so far); the Radio task can play them
+/// (`Radio::end_tone`, `Radio::cw_id`) once those arrive. Tail elimination waits for its own subtone work (TONE-9).
 #[cfg(feature = "tx")]
 const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone: false, cw_id: false, tail: false };
 /// REG_30 read back after the key-up write (TX-7): stock's transmit value with the microphone.
@@ -150,9 +152,26 @@ struct Radio {
     scan_tx: bool,
     tone_level: u8,
     hf: Option<HfOn>,
+    /// The frequency counter (TSRCH-10), while on.
+    counter: Option<Counter>,
     #[cfg(feature = "tx")]
     tx: Tx,
 }
+
+/// The frequency counter: which chip measures now, when its scan started, and its last reading (stock keeps a
+/// reading only when the next one agrees, `tonegen::counter_agree`).
+#[derive(Clone, Copy)]
+struct Counter {
+    chip: u8,
+    since: u32,
+    last: Option<Freq10>,
+}
+
+/// A chip gives up measuring after this long with no carrier, and the other chip takes a turn (stock's scan time
+/// is 0.8 s per reading).
+const COUNTER_TURN_MS: u32 = 2_000;
+/// Where each chip sits while counting: its band's middle, for the front end the path selects.
+const COUNTER_TUNE: [Freq10; 2] = [mhz(146), mhz(446)];
 
 /// The `tx` build's transmit state.
 #[cfg(feature = "tx")]
@@ -173,6 +192,11 @@ struct Tx {
     /// The read-back failed during a key-up (TX-7): the plan stops and the safe state follows.
     fault: bool,
     adc: bool,
+    /// The end tone (0 8 5 4, TONE-10: index into `tonegen::END_TONES`, 0 off) and the CW ID text (0 8 7 1 / 0 8 7 2;
+    /// empty = off): from the UI once those settings exist, off until then.
+    end_tone: u8,
+    cw_call: [u8; 10],
+    cw_len: u8,
 }
 
 fn now_ms() -> u64 {
@@ -304,9 +328,21 @@ impl Radio {
                     }
                     log(b"tx pa ", v);
                 }
-                // End tone, CW ID, tail elimination: TX_CFG never asks for them yet.
+                // TONE-8 order at unkey, still keyed: end tone, CW ID when due (the sequencer plans them only when
+                // their settings are on), tail elimination (not yet: TONE-9's subtone work).
                 #[cfg(feature = "tx")]
-                Act::EndTone | Act::CwId | Act::TailElim => {}
+                Act::EndTone => {
+                    let t = tonegen::END_TONES.get(self.tx.end_tone as usize).copied().unwrap_or(&[]);
+                    self.play_keyed(t.iter().copied()).await;
+                }
+                #[cfg(feature = "tx")]
+                Act::CwId => {
+                    let (call, len) = (self.tx.cw_call, self.tx.cw_len as usize);
+                    let cw = tonegen::Cw::new(&call[..len.min(10)], tonegen::CW_WPM);
+                    self.play_keyed(cw.map(|(on, ms)| (if on { tonegen::CW_HZ } else { 0 }, ms))).await;
+                }
+                #[cfg(feature = "tx")]
+                Act::TailElim => {}
                 // Transmit steps: only a key-up plans them, and this build never asks for one.
                 #[cfg(not(feature = "tx"))]
                 Act::ChipTx(_) | Act::ChipRx(_) | Act::PaRamp | Act::EndTone | Act::CwId | Act::TailElim => {}
@@ -342,11 +378,16 @@ impl Radio {
             self.chip(n).sleep();
             return;
         };
-        let slot = if s < SLOTS as u8 { self.slots[s as usize] } else { SlotRx { freq: f, ..SlotRx::DEFAULT } };
+        let slot = match s {
+            s if s < SLOTS as u8 => self.slots[s as usize],
+            // HF mode on chip 1 (18-64 MHz): AM is the mode's own (Param::Mode 2); FM otherwise.
+            _ => SlotRx { freq: f, am: self.hf.is_some_and(|h| h.mode == 2), ..SlotRx::DEFAULT },
+        };
         let mut bk = self.chip(n);
         bk.wake();
         bk.set_freq(f * 10);
         bk.bandwidth(if slot.narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
+        bk.demod(if slot.am { Demod::Am } else { Demod::Fm }); // stock's modes 6 and 7 (VFO-20: AM keeps wide)
         match slot.rx_tone {
             0 => bk.subtone_off(),
             t if t & 0x8000 != 0 => bk.dcs_rx(t & 0x3FFF, t & 0x4000 != 0),
@@ -380,7 +421,7 @@ impl Radio {
     /// Something running that keeps the engines ticking fast: a slot sharing the chips, or a scan.
     fn busy(&self) -> bool {
         let set = self.watch_set | 1 << self.active;
-        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some()
+        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some()
     }
 
     /// The engines' tick: each listening chip's squelch, the watch turn, the scans, the chips and the path, and
@@ -394,6 +435,9 @@ impl Radio {
             return;
         }
         let now = now_ms() as u32;
+        if self.counter.is_some() {
+            return self.counter_tick(now).await;
+        }
         // Keyed: the chips and paths are the transmission's (TX-29); only the sequencer's timeout, duty limit
         // and battery under load run.
         #[cfg(feature = "tx")]
@@ -630,7 +674,106 @@ impl Radio {
             sl.scanning = false;
         }
     }
+
+    /// SND-11: a local beep from a BK4829's tone generator, as stock does it (0x0801EB8C, 0x0801EB4C): the chip
+    /// leaves receive for the beep (REG_30 0x0302: no PLL, no PA) and comes back. It takes the chip that disturbs
+    /// least: one nobody is hearing, a sleeping one before a listening one; a heard chip only if both are heard.
+    /// Never while keyed. The task waits through it (at most `tonegen::BEEP_MAX_MS`).
+    async fn beep(&mut self, hz: u16, ms: u16) {
+        if self.path.keyed().is_some() || hz == 0 {
+            return;
+        }
+        let heard = |r: &Radio, n: u8| match r.tuned[n as usize] {
+            Some((s, _)) if (s as usize) < SLOTS => r.live.slots[s as usize].squelch_open,
+            Some(_) => true, // HF mode's or the counter's chip: always in use
+            None => false,
+        };
+        let Some(n) = (0..2u8).filter(|&n| self.has(n)).min_by_key(|&n| (heard(self, n), self.tuned[n as usize].is_some()))
+        else {
+            return;
+        };
+        let asleep = self.tuned[n as usize].is_none();
+        let mut bk = self.chip(n);
+        if asleep {
+            bk.wake();
+        }
+        let gain = bk.beep_on(hz as u32);
+        speaker(true);
+        Timer::after_millis(ms.min(tonegen::BEEP_MAX_MS) as u64).await;
+        let mut bk = self.chip(n);
+        bk.beep_off(gain);
+        if asleep {
+            bk.sleep();
+        } else {
+            bk.rx_on(); // the audio decision unmutes it on the next tick, if it is heard
+        }
+        speaker(false);
+        log(b"beep hz ", hz as u32);
+    }
+
+    /// The frequency counter on or off (TSRCH-10): an exclusive mode like HF mode; watch and scans pause.
+    fn counter(&mut self, on: bool) {
+        for n in 0..2u8 {
+            if self.has(n) {
+                self.chip(n).freq_scan(false);
+            }
+        }
+        self.tuned = [None; 2]; // the counter, or the engines afterwards, tune them again
+        let first = (0..2u8).find(|&n| self.has(n)).unwrap_or(0);
+        self.counter = on.then_some(Counter { chip: first, since: 0, last: None });
+        self.live.mode = if on { ModeLive::Probe { freq: 0, rssi: -127, tone: 0 } } else { ModeLive::Off };
+        speaker(false);
+        log(b"counter ", on as u32);
+    }
+
+    /// The counter's tick: one chip measures with the BK4829's frequency scan (stock's counter, 0x08021BC4), the
+    /// other sleeps; a reading counts when the next one agrees within 500 Hz (`tonegen::counter_agree`). After
+    /// `COUNTER_TURN_MS` with nothing, the other chip takes a turn. Each chip's path is asked for with
+    /// `Cause::Auto`: the relay never moves (SAFE-20), so a chip whose band would need it just isn't used.
+    async fn counter_tick(&mut self, now: u32) {
+        let Some(mut c) = self.counter else { return };
+        let n = c.chip;
+        let f = COUNTER_TUNE[n as usize];
+        if self.tuned[n as usize].is_none() {
+            self.tune_chip(1 - n, None);
+            self.tune_chip(n, Some((COUNTER_SLOT, f)));
+            self.select_rx(f, Cause::Auto).await;
+            if self.path.rx_now() == Rx::Bk(Sel::rx(f)) {
+                self.chip(n).freq_scan(true);
+            }
+            (c.since, c.last) = (now, None);
+        } else {
+            let mut bk = self.chip(n);
+            if let Some(hz) = bk.freq_scan_result() {
+                bk.freq_scan(false);
+                let got = hz / 10;
+                let rssi = bk.rssi_dbm();
+                if tonegen::counter_chip(got) == Some(n) {
+                    if let Some(freq) = c.last.and_then(|l| tonegen::counter_agree(l, got)) {
+                        self.live.mode = ModeLive::Probe { freq, rssi, tone: 0 };
+                        log(b"counter khz ", freq / 100);
+                    }
+                    c.last = Some(got);
+                }
+                self.chip(n).freq_scan(true);
+                c.since = now;
+            } else if now.wrapping_sub(c.since) > COUNTER_TURN_MS {
+                bk.freq_scan(false);
+                self.live.mode = ModeLive::Probe { freq: 0, rssi: -127, tone: 0 };
+                let other = 1 - n;
+                if self.has(other) {
+                    self.tune_chip(n, None);
+                    c.chip = other;
+                }
+                self.tuned[c.chip as usize] = None; // starts its scan on the next tick
+            }
+        }
+        self.counter = Some(c);
+    }
 }
+
+/// The counter's own index in [`Radio::tuned`] (after the three slots and HF mode's).
+const COUNTER_SLOT: u8 = 4;
 
 /// The SI4732's input path for its mode, as stock (BCR-20, `analysis/audio_path.md` §2): FM broadcast PA7 = PC5 = 0,
 /// AM (and SW, SSB, CW) PA7 = PC5 = 1, the LNA path.
@@ -713,8 +856,23 @@ pub async fn task() {
         scan_tx: false,
         tone_level: 1,
         hf: None,
+        counter: None,
         #[cfg(feature = "tx")]
-        tx: Tx { seq: TxSeq::new(), cal: None, gauge: Gauge::default(), tone: [0; 4], power: [0; 4], plan: None, ptt_ok: false, pa: 0, fault: false, adc: false },
+        tx: Tx {
+            seq: TxSeq::new(),
+            cal: None,
+            gauge: Gauge::default(),
+            tone: [0; 4],
+            power: [0; 4],
+            plan: None,
+            ptt_ok: false,
+            pa: 0,
+            fault: false,
+            adc: false,
+            end_tone: 0,
+            cw_call: [0; 10],
+            cw_len: 0,
+        },
     };
     // Start from the safe state: every path low, the relay released (board start-up set them low already).
     let mut s = Steps::default();
@@ -835,16 +993,19 @@ impl Radio {
                 self.run(&s).await;
                 speaker(false);
             }
+            RadioCmd::Counter(on) => self.counter(on),
+            RadioCmd::Beep { hz, ms } => self.beep(hz, ms).await,
+            #[cfg(feature = "tx")]
+            RadioCmd::ToneBurst { on } => self.keyed_tone(if on { Some(1750) } else { None }, None),
+            #[cfg(feature = "tx")]
+            RadioCmd::Dtmf { key, on } => self.keyed_tone(None, if on { tonegen::dtmf_symbol(key) } else { None }),
+            // Without the `tx` build nothing is keyed, so there is nothing to send them on.
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::ToneBurst { .. } | RadioCmd::Dtmf { .. } => {}
             // Not on the radio yet, each waiting on something named in the manual's Status lines:
             // - the zone set (SCAN-3) and channel lists: the UI's lists handed to the Radio task;
-            // - the frequency counter (TSRCH-10): the BK4829's frequency-scan registers in the bk4829 crate;
-            // - the beep (SND-11), tone burst, live DTMF: the tone generator, with the `tx` build;
             // - band scope, tone search, crossband (chapters 21, 22, 19): their own exclusive modes, after 2d.
             RadioCmd::ScanZones { .. }
-            | RadioCmd::Counter(_)
-            | RadioCmd::Beep { .. }
-            | RadioCmd::ToneBurst { .. }
-            | RadioCmd::Dtmf { .. }
             | RadioCmd::Sweep { .. }
             | RadioCmd::ScopeCfg { .. }
             | RadioCmd::ScopeListen { .. }
@@ -909,7 +1070,8 @@ impl Radio {
         let now = now_ms() as u32;
         let mut st = Steps::default();
         if !on {
-            self.tx.seq.release(&TX_CFG, &mut self.path, now, &mut st);
+            let cfg = self.tx_cfg();
+            self.tx.seq.release(&cfg, &mut self.path, now, &mut st);
             self.run(&st).await;
             self.unkeyed();
             return;
@@ -981,8 +1143,11 @@ impl Radio {
     /// While keyed: the sequencer's own unkeys (timeout backstop, duty limit, battery under load).
     async fn tx_tick(&mut self, now: u32) {
         let batt = self.battery_ok();
+        // TX-12's mic meter: PA0, the mic-level tap stock's VOX reads (decision 76).
+        self.live.tx.mic = tonegen::mic_percent(crate::hal::adc::read(crate::hal::adc::CH_PA0));
         let mut st = Steps::default();
-        if let Some(e) = self.tx.seq.tick(&TX_CFG, batt, &mut self.path, now, &mut st) {
+        let cfg = self.tx_cfg();
+        if let Some(e) = self.tx.seq.tick(&cfg, batt, &mut self.path, now, &mut st) {
             self.run(&st).await;
             if e != txseq::Event::PreAlert {
                 log(b"tx unkeyed by the sequencer ", e as u32);
@@ -994,6 +1159,59 @@ impl Radio {
                 });
             }
         }
+    }
+
+    /// The sequencer's settings: the end tone and CW ID follow what the UI has sent (off until those settings
+    /// exist).
+    fn tx_cfg(&self) -> txseq::Cfg {
+        txseq::Cfg { end_tone: self.tx.end_tone != 0, cw_id: self.tx.cw_len != 0, ..TX_CFG }
+    }
+
+    /// While keyed (TONE-13, DTMF-7, DTMF-11): the tone burst or a DTMF symbol on the keyed chip, as stock sends any
+    /// internal tone: the generator set, REG_30 to tone transmit (mode 4, 0xC3FA: the microphone off) and the
+    /// sidetone heard (DTMF-8's default; the setting itself isn't sent to the radio yet); both None goes back to
+    /// the microphone (0xC1FE).
+    fn keyed_tone(&mut self, hz: Option<u16>, dtmf: Option<char>) {
+        use bk4829::tx::Source as TxSource;
+        let Some(sel) = self.path.keyed() else { return };
+        let n = sel.chip();
+        if !self.has(n) {
+            return;
+        }
+        let mut bk = self.chip(n);
+        let sending = match (hz, dtmf) {
+            (Some(hz), _) => {
+                bk.tone_tx(hz as u32);
+                true
+            }
+            (None, Some(d)) => bk.dtmf_tx(d),
+            (None, None) => false,
+        };
+        if sending {
+            bk.tx_on(TxSource::Tones);
+            bk.sidetone(true);
+        } else {
+            bk.tone_tx(0);
+            bk.sidetone(false);
+            bk.tx_on(TxSource::Mic);
+            if bk.read(0x30) != REG30_TX_MIC {
+                log(b"tx mic read-back failed, chip ", n as u32);
+            }
+        }
+        speaker(sending);
+    }
+
+    /// A tone sequence on the keyed chip, still keyed (TONE-8: end tone, CW ID): tone transmit with the microphone
+    /// off, each step's tone (0 = silence) for its time.
+    async fn play_keyed(&mut self, steps: impl Iterator<Item = tonegen::Step>) {
+        use bk4829::tx::Source as TxSource;
+        let Some(n) = self.path.keyed().map(|s| s.chip()).filter(|&n| self.has(n)) else { return };
+        self.chip(n).tx_on(TxSource::Tones);
+        for (hz, ms) in steps {
+            self.chip(n).tone_tx(hz as u32);
+            Timer::after_millis(ms as u64).await;
+        }
+        self.chip(n).tone_tx(0);
     }
 
     /// After any unkey: the chips back to their slots on the next tick, the UI told.

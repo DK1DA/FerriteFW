@@ -21,6 +21,7 @@ pub mod path;
 pub mod rxsleep;
 pub mod same;
 pub mod scan;
+pub mod tonegen;
 pub mod txcal;
 pub mod txplan;
 pub mod txseq;
