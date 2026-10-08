@@ -318,6 +318,27 @@ mod tx {
         assert_eq!(r.regs[0x71], 18068, "1750 Hz x 10.32444");
     }
 
+    /// Tail elimination as stock sends it (0x0801D078): the 55 Hz tone with no sub-tone, REG_52's shift with one;
+    /// ending it leaves REG_52's other bits as they were.
+    #[test]
+    fn tail_matches_stock() {
+        use bk4829::tx::Tail;
+        let mut r = Regs::new();
+        r.regs[0x52] = 0x0292;
+        let mut bk = Bk4829::new(&mut r);
+        bk.tail_tx(Some(Tail::Tone55 { dev: 0x46 }));
+        assert_eq!((r.regs[0x51], r.regs[0x07], r.regs[0x52]), (0x9046, 0x0471, 0x0292), "nicFW's and stock's 55 Hz");
+        let mut bk = Bk4829::new(&mut r);
+        bk.tail_tx(Some(Tail::Shift { phase: 2 }));
+        assert_eq!(r.regs[0x52], 0x8000 | 2 << 13 | 0x0292, "180 degrees");
+        let mut bk = Bk4829::new(&mut r);
+        bk.tail_tx(Some(Tail::Shift { phase: 0 }));
+        assert_eq!(r.regs[0x52], 0x8292, "DCS: the 134.4 Hz turn-off code");
+        let mut bk = Bk4829::new(&mut r);
+        bk.tail_tx(None);
+        assert_eq!((r.regs[0x51], r.regs[0x52]), (0, 0x0292));
+    }
+
     /// Stock's transmitted tones: a single tone at gain 0x3C (REG_70 0xBC00), a DTMF pair at 0x45 each (0xC5C5),
     /// the sidetone on AF route 3.
     #[test]

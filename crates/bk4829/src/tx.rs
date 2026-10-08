@@ -20,6 +20,17 @@ pub const DTMF_GAIN: u8 = 0x45;
 /// REG_47 for the sidetone while tones are sent: stock's AF route 3 (the generator to the speaker).
 const AF_OUT_SIDETONE: u16 = 0x6342;
 
+/// Tail elimination's signal (TONE-5), as stock sends it at unkey (0x0801D078).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tail {
+    /// No sub-tone on the transmission: the 55 Hz tail tone from the CTCSS generator, at deviation `dev`
+    /// (stock: REG_51 0x9000 | calibration byte 1, REG_07 0x0471).
+    Tone55 { dev: u8 },
+    /// A CTCSS or DCS transmission: REG_52 bit 15, with bits 14:13 the CTCSS phase shift (1 = 120°, 2 = 180°,
+    /// 3 = 240°) or 0, the 134.4 Hz turn-off code a DCS transmission needs.
+    Shift { phase: u8 },
+}
+
 /// What modulates the carrier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -72,6 +83,24 @@ impl<B: Bus> Bk4829<B> {
         self.dcs_rx(code, inverted);
         let v = self.read(reg::SUBTONE);
         self.write(reg::SUBTONE, v | 0x8000);
+    }
+
+    /// Tail elimination while still keyed (stock 0x0801D078), held until `None` ends it; stock keeps the carrier
+    /// up 400 ms with it.
+    pub fn tail_tx(&mut self, t: Option<Tail>) {
+        let low = self.read(reg::CTCSS_THRESH) & 0x1FFF;
+        match t {
+            Some(Tail::Tone55 { dev }) => {
+                self.write(reg::SUBTONE, 0x9000 | (dev as u16 & 0x7F));
+                self.write(reg::CTC, 0x0471);
+                self.write(reg::CTCSS_THRESH, low);
+            }
+            Some(Tail::Shift { phase }) => self.write(reg::CTCSS_THRESH, low | 0x8000 | (phase as u16 & 3) << 13),
+            None => {
+                self.write(reg::SUBTONE, 0);
+                self.write(reg::CTCSS_THRESH, low);
+            }
+        }
     }
 
     /// One or two tones (Hz; 0 = off) from the tone generators, with gains 0-127: a 1750 Hz burst, a DTMF pair.
