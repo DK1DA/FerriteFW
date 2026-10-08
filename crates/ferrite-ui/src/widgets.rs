@@ -519,6 +519,20 @@ pub fn kv(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], valu
     }
 }
 
+/// DISP-24: the scroll cue at the right edge of a list or table with more rows than fit: a 3 px track (LINE)
+/// from `y` for `h`, and a thumb (SUB) for the page, placed at the first shown row's share of all `n` rows (at
+/// least 12 px tall); 1 px corners (DISP-19). x 236-238, right of the values (they end at 232).
+pub const CUE_X: i32 = 236;
+pub fn scroll_cue(lcd: &mut impl Panel, y: i32, h: i32, top: u32, shown: u32, n: u32) {
+    let n = n.max(1);
+    lcd.fill_r(CUE_X, y, 3, h, 1, LINE);
+    let th = (h as u32 * shown.min(n) / n).max(12).min(h as u32) as i32;
+    let room = (h - th).max(0) as u32;
+    let span = n.saturating_sub(shown).max(1);
+    let ty = y + (room * top.min(span) / span) as i32;
+    lcd.fill_r(CUE_X, ty, 3, th, 1, SUB);
+}
+
 /// The help line at the foot of a menu (MENU-15): a rounded box, the text wrapped on words, then the path.
 pub fn help_box(lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) {
     lcd.fill(0, y, 240, h, BG);

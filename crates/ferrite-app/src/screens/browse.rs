@@ -382,6 +382,7 @@ impl View for Browse {
             }
         });
         app.rows_end(lcd, rows, ROWS2, ROW2_H);
+        app.list_cue(lcd, self.cur, n, ROWS2, ROW2_H, rows, &|i| v.keep(i));
         if rows == 0 {
             let (a, b): (&[u8], &[u8]) = match view {
                 V_NEARBY if data.fix().is_none() => (b"Needs a GPS fix", b"Nearby sorts by distance from it"),
@@ -448,6 +449,7 @@ fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: C
         app.row1(lcd, row, name.as_bytes(), v.as_bytes(), false, i == cur.sel, false);
     });
     app.rows_end(lcd, rows, ROWS1, ROW1_H);
+    app.list_cue(lcd, cur, picker_n(store), ROWS1, ROW1_H, rows, &|i| picker_keep(store, i));
     let help: &[u8] = if cur.sel < z { b"A zone's channels, by number" } else {
         match (cur.sel - z) as u8 + 1 {
             V_ALL => b"Every channel, zoned or not",

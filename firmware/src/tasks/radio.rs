@@ -120,6 +120,8 @@ struct HfOn {
 }
 
 struct Radio {
+    /// The MCU temperature (SBAR-20): when it was last read, and its smoothed tenths.
+    temp: (Option<u32>, Option<i16>),
     si: Si4732<SiBus>,
     wire: Wire,
     cs: [Out; 2],
@@ -537,7 +539,25 @@ impl Radio {
 
     /// The engines' tick: each listening chip's squelch, the watch turn, the scans, the chips and the path, and
     /// the audio.
+    /// SBAR-20: the MCU's die temperature every 10 s, for the Status page (informational; read here because the
+    /// Radio task owns the ADC's software reads).
+    fn mcu_temp(&mut self) {
+        use crate::hal::adc;
+        let now = now_ms() as u32;
+        if self.temp.0.is_some_and(|t| now.wrapping_sub(t) < 10_000) {
+            return;
+        }
+        self.temp.0 = Some(now);
+        adc::init();
+        if let Some(c10) = ferrite_core::mcutemp::temp_c10(adc::read_avg(adc::CH_TEMP, 4), adc::read_avg(adc::CH_VREF, 4)) {
+            let s = ferrite_core::mcutemp::smooth(self.temp.1, c10);
+            self.temp.1 = Some(s);
+            crate::chan::MCU_TEMP.store(s, core::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     async fn tick(&mut self) {
+        self.mcu_temp();
         if self.hf.is_some() {
             self.hf_poll();
             return;
@@ -976,6 +996,7 @@ pub async fn task() {
         chips: 0,
         live: LiveAll::default(),
         save: RxSleep::new(DEFAULT_SAVE, now_ms()),
+        temp: (None, None),
         path: Path::new(),
         muted: false,
         si_used: false,

@@ -613,6 +613,7 @@ pub fn device_at(secs: u64) -> Device {
         battery_pct: 82,
         battery_low: false,
         battery_cutoff: false,
+        mcu_temp: Some(31),
         tx_built: true, // the fake radio transmits (into nothing)
         selftest: SelfTest {
             idcode: ferrite_core::chipid::EXPECTED_PID,

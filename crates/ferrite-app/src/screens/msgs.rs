@@ -174,6 +174,7 @@ impl View for Msgs {
             }
         });
         app.rows_end(lcd, rows, ROWS2, ROW2_H);
+        app.list_cue(lcd, self.cur, n, ROWS2, ROW2_H, rows, &ALL);
         if n == 0 {
             app.empty(lcd, b"No messages", b"# writes one");
         }
@@ -953,6 +954,7 @@ impl View for QuickMsgs {
             app.row2(lcd, r, &r2);
         });
         app.rows_end(lcd, rows, ROWS2, ROW2_H);
+        app.list_cue(lcd, self.cur, crate::words::QUICK as u16, ROWS2, ROW2_H, rows, &ALL);
     }
 
     fn hints(self, _: &App) -> Hints {

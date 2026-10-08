@@ -222,6 +222,7 @@ impl View for Zones {
             app.row1(lcd, row, store.zone_name(i as u8).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes(), v.as_bytes(), false, i == self.cur.sel, store.zone_len(i as u8) == 0);
         });
         app.rows_end(lcd, rows, ROWS1, ROW1_H);
+        app.list_cue(lcd, self.cur, n, ROWS1, ROW1_H, rows, &keep(store));
         app.help_box(lcd, 300 - 38, 34, b"OK edits its scan options and priorities", b"MENU 0 2 3");
     }
 

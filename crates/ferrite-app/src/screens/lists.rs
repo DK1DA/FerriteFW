@@ -155,6 +155,30 @@ impl Cursor {
         Cursor { sel, top }
     }
 
+    /// DISP-24: whether there are shown items above the page or below its `rows` (a full page of `vis`).
+    /// Cheap for a dense filter: each side stops at the first kept item found.
+    pub fn more(self, n: u16, vis: u16, rows: usize, keep: &impl Fn(u16) -> bool) -> bool {
+        if (0..self.top.min(n)).any(keep) {
+            return true;
+        }
+        if rows < vis as usize {
+            return false;
+        }
+        // the last index on the page, then any kept one after it
+        let mut seen = 0;
+        let mut i = self.top;
+        while i < n {
+            if keep(i) {
+                seen += 1;
+                if seen == rows {
+                    break;
+                }
+            }
+            i += 1;
+        }
+        Self::next(i, 1, n, keep).is_some()
+    }
+
     /// The indexes on the page, top first, through `f(row, index)`.
     pub fn rows(self, n: u16, vis: u16, keep: &impl Fn(u16) -> bool, mut f: impl FnMut(usize, u16)) -> usize {
         let mut row = 0;
@@ -264,6 +288,14 @@ impl App {
                 lcd.fill(0, LIST_Y + i as i32 * h, 240, h, BG);
             }
         }
+    }
+
+    /// DISP-24: the scroll cue beside a list page drawn by [`Cursor::rows`] (`rows` of `vis`, `h` each, from
+    /// [`LIST_Y`]); the thumb's place is the top index's share of `n` (for a filtered list, of the whole store).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn list_cue(&mut self, lcd: &mut impl Panel, cur: Cursor, n: u16, vis: u16, h: i32, rows: usize, keep: &impl Fn(u16) -> bool) {
+        let more = cur.more(n, vis, rows, keep);
+        self.scroll_cue(lcd, (0, vis as usize), LIST_Y, vis as i32 * h, more, cur.top as u32, vis as u32, n as u32);
     }
 
     /// The list header: a count or title at the left, what the list holds at the right, a line under it.
@@ -556,6 +588,20 @@ pub fn mhz_text(f: u32, b: &mut Buf<16>) {
 
 #[cfg(test)]
 mod tests {
+    /// DISP-24: more above or below, with and without a filter.
+    #[test]
+    fn more_rows() {
+        use super::Cursor;
+        let all = |_: u16| true;
+        assert!(Cursor::first(20, &all).more(20, 8, 8, &all), "20 rows, 8 shown");
+        assert!(!Cursor::first(5, &all).more(5, 8, 5, &all), "all fit");
+        let even = |i: u16| i.is_multiple_of(2);
+        assert!(Cursor { sel: 14, top: 14 }.more(20, 3, 3, &even), "rows above");
+        let c = Cursor { sel: 0, top: 0 };
+        assert!(!c.more(6, 3, 3, &even), "0, 2, 4 fill the page and nothing follows");
+        assert!(c.more(8, 3, 3, &even), "6 follows");
+    }
+
     use super::*;
     use crate::sample::HERE;
 

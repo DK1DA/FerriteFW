@@ -471,6 +471,8 @@ pub struct Device {
     /// Below the warning level / at the transmit cut-off.
     pub battery_low: bool,
     pub battery_cutoff: bool,
+    /// The MCU's die temperature in whole °C (chapter 8, [`crate::mcutemp`]); None until read.
+    pub mcu_temp: Option<i8>,
     /// This build can transmit (`--features tx`).
     pub tx_built: bool,
     pub selftest: SelfTest,

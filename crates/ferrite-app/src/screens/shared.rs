@@ -27,7 +27,8 @@ pub(crate) const R_HELP: usize = 15;
 pub(crate) const R_NOTE: usize = 16;
 pub(crate) const R_LINE: usize = 17; // edit: the other two slots (17-18)
 pub(crate) const R_PAGE: usize = 19; // a screen's page: see App::new_page
-pub(crate) const REGIONS: usize = 20;
+pub(crate) const R_SCROLL: usize = 20; // the scroll cue (DISP-24)
+pub(crate) const REGIONS: usize = 21;
 
 /// What a screen draws from besides the App: the Radio task's snapshot, the radio-wide state, the channels.
 pub struct Cx<'a, S: ChannelStore> {
@@ -93,6 +94,23 @@ impl App {
         let d = self.drawn.hash[r] != h;
         self.drawn.hash[r] = h;
         d
+    }
+
+    /// DISP-24: the scroll cue beside rows `R_ROW + from ..+ count`, drawn from `y` for `h` when there are rows
+    /// above or below the page (`top` of `n`, `shown` on it); redrawn whenever those rows redraw (they paint
+    /// full width) or the page moves, and cleared once a list no longer scrolls.
+    pub(crate) fn scroll_cue(&mut self, lcd: &mut impl Panel, rows: (usize, usize), y: i32, h: i32, more: bool, top: u32, shown: u32, n: u32) {
+        let under = hash(&&self.drawn.hash[R_ROW + rows.0..(R_ROW + rows.0 + rows.1).min(R_PAGE)]);
+        let prev = self.drawn.hash[R_SCROLL];
+        // bit 0: the cue is on the screen
+        if !self.dirty(R_SCROLL, (hash(&(under, y, h, more, top, shown, n)) & !1) | more as u32) {
+            return;
+        }
+        if more {
+            w::scroll_cue(lcd, y, h, top, shown, n);
+        } else if prev & 1 != 0 {
+            lcd.fill(w::CUE_X, y, 3, h, BG);
+        }
     }
 
     /// A screen with pages (setup, About, a list and its detail): when the page changes, the content area is

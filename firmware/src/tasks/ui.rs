@@ -261,6 +261,9 @@ pub async fn task() {
                 Timer::after_millis(50).await; // the answer's bytes leave the UART
                 cortex_m::peripheral::SCB::sys_reset();
             }
+            // SBAR-20: the Radio task's MCU temperature reading, in whole degrees.
+            let t = crate::chan::MCU_TEMP.load(Relaxed);
+            dev.mcu_temp = (t != i16::MIN).then(|| ferrite_core::mcutemp::whole(t));
             LINK_HELLOS.store(ports.link.hellos(), Relaxed);
             LINK_ON.store(ports.link_on(Port::Cable, now_ms()), Relaxed);
             BT_LINK_ON.store(ports.link_on(Port::Bt, now_ms()), Relaxed);

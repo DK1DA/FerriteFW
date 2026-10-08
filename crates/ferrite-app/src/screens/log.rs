@@ -159,6 +159,7 @@ impl View for Log {
             }
         });
         app.rows_end(lcd, rows, ROWS2, ROW2_H);
+        app.list_cue(lcd, self.cur, n, ROWS2, ROW2_H, rows, &k);
         if rows == 0 {
             app.empty(lcd, b"Nothing logged", if self.filter == 0 { b"Decodes and alerts land here" } else { b"Left and right: other sources" });
         } else {

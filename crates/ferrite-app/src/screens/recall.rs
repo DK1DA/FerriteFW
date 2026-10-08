@@ -131,6 +131,7 @@ impl View for Recall {
             app.row1(lcd, row, name.as_bytes(), v.as_bytes(), false, i == self.cur.sel, grey);
         });
         app.rows_end(lcd, rows, ROWS1_FULL, ROW1_H);
+        app.list_cue(lcd, self.cur, count, ROWS1_FULL, ROW1_H, rows, &ALL);
         if count == 0 {
             app.empty(lcd, b"Nothing yet", b"10 s on a frequency adds it");
         }

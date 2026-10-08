@@ -147,6 +147,7 @@ impl View for Aprs {
             }
         });
         app.rows_end(lcd, rows, ROWS2, ROW2_H);
+        app.list_cue(lcd, self.cur, n, ROWS2, ROW2_H, rows, &ALL);
         if n == 0 {
             app.empty(lcd, b"No stations heard yet", b"APRS listens on the APRS frequency");
         }

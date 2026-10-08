@@ -467,6 +467,7 @@ fn waypoints(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<F
         }
     });
     app.rows_end(lcd, rows, ROWS2, ROW2_H);
+    app.list_cue(lcd, cur, n, ROWS2, ROW2_H, rows, &ALL);
     if n == 0 {
         app.empty(lcd, b"No waypoints", b"# marks one here");
     }

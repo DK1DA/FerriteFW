@@ -39,7 +39,7 @@ fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
 
 slow_table! {
     /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
-    ROWS: [(&str, Val<()>); 18] = [
+    ROWS: [(&str, Val<()>); 19] = [
         // SBAR-14: why transmit is locked, if it is (BOOT-11).
         (slow!("Transmit"), |c, b| match super::info::tx_lock(c.dev) {
             None => {
@@ -160,6 +160,21 @@ slow_table! {
             b.set(b"Not measured yet");
             SUB
         }),
+        // SBAR-20: the MCU's die temperature (informational: not the PA's), in 0 6 4's units.
+        (slow!("MCU temperature"), |c, b| match c.dev.mcu_temp {
+            None => {
+                b.set(b"Not read yet");
+                SUB
+            }
+            Some(t) if c.app.set.units == 1 => {
+                let _ = uwrite!(b, "{}\u{b0}F", t as i32 * 9 / 5 + 32);
+                TEXT
+            }
+            Some(t) => {
+                let _ = uwrite!(b, "{}\u{b0}C", t);
+                TEXT
+            }
+        }),
         (slow!("Key lock"), |c, b| on_off(b, c.app.locked)),
         // SBAR-18: paused in HF mode; WX-3: US and Canada only.
         (slow!("Weather alerts"), |c, b| {
@@ -180,7 +195,7 @@ slow_table! {
 }
 
 slow_table! {
-    GO: [Go; 18] = [
+    GO: [Go; 19] = [
         Go::Open(Dest::Group(8)),
         Go::Open(Dest::Group(9)),
         Go::Open(Dest::Group(8)),
@@ -196,6 +211,7 @@ slow_table! {
         Go::Open(Dest::Sub(9, 2)),
         Go::Later,
         Go::Later,
+        Go::Later, // MCU temperature: nothing to set
         Go::Later,
         Go::Open(Dest::Sub(4, 9)),
         Go::Open(Dest::Mailbox),

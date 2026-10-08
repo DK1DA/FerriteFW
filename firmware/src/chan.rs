@@ -7,7 +7,7 @@ use embassy_sync::pubsub::PubSubChannel;
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use crate::ring::Ring;
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU8};
+use core::sync::atomic::{AtomicBool, AtomicI16, AtomicU16, AtomicU32, AtomicU8};
 use ferrite_core::msg::{DebugAns, DebugReq, DspCmd, Event, GpsFix, GpsSky, LiveAll, RadioCmd, SameDecoded, StorageCmd};
 
 pub static RADIO: Channel<M, RadioCmd, 8> = Channel::new();
@@ -50,6 +50,9 @@ pub static GPS_CFG: Signal<M, ferrite_app::gpsdata::GpsCfg> = Signal::new();
 /// What the radio is doing, for the GPS task (GPS-4, GPS-22): set by the Radio task with each snapshot.
 pub static RF_STATE: AtomicU8 = AtomicU8::new(0);
 pub const RF_BUSY_KEYED: u8 = 1;
+/// The MCU's die temperature in tenths of a degree C (chapter 8, SBAR-20), smoothed; `i16::MIN` until read. The
+/// Radio task reads it with its other ADC reads (the preempted group isn't shared between tasks); the UI shows it.
+pub static MCU_TEMP: AtomicI16 = AtomicI16::new(i16::MIN);
 pub const RF_BUSY_RX: u8 = 2;
 
 /// The terminal over the cable (manual chapter 37): the Link task moves the cable's bytes into `TERM_IN` and

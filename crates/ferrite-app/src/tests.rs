@@ -121,8 +121,8 @@ fn ram_is_small() {
     // and tail (decision 86: one byte, but Channel goes from 40 to 44 bytes with its alignment, and the App holds a
     // Channel in each slot and in the queued write, plus the byte in undo) to 1176; the APRS settings' path,
     // digipeater and beacon after voice (APRS-26, APRS-27: 3 bytes in the App's AprsCfg, 4 to 7, +8 with padding)
-    // to 1184
-    assert!(n <= 1184, "App is {n} bytes");
+    // to 1184; the scroll cue's redraw region (DISP-24: one more 4-byte hash, +8 with padding) to 1192
+    assert!(n <= 1192, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

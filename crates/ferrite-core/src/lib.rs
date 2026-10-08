@@ -18,6 +18,7 @@ pub mod gps;
 pub mod keys;
 pub mod layout;
 pub mod link;
+pub mod mcutemp;
 pub mod msg;
 pub mod path;
 pub mod rxsleep;
