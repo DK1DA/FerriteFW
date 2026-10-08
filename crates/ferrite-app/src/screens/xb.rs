@@ -161,7 +161,7 @@ fn checks(app: &App, batt: u8, out: &mut [(Check, Buf<40>); 4]) -> Option<usize>
     fail
 }
 
-fn running(app: &App) -> bool {
+pub(crate) fn running(app: &App) -> bool {
     app.radio.mode == Mode::Xb
 }
 

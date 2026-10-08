@@ -1097,3 +1097,24 @@ fn channel_only_refuses_value_shortcuts() {
     t.hold(Key::Digit(1)); // band scope: a view
     assert!(matches!(t.app.screen(), Screen::Scope(_)));
 }
+
+/// XB-19: an alert while the repeater runs is a banner, the repeater keeps running, and the alert screen opens
+/// once it stops.
+#[test]
+fn alert_during_crossband_is_a_banner() {
+    let mut t = ready();
+    xb_ready(&mut t);
+    t.tap(Key::Hash);
+    assert_eq!(t.app.radio.mode, Mode::Xb);
+    t.app.notify(b"SAME", b"Tornado warning", true);
+    assert!(matches!(t.app.screen(), Screen::Crossband(_)), "no full-screen takeover");
+    assert_eq!(t.app.radio.mode, Mode::Xb, "the repeater keeps running");
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"ALERT" && x.body.as_bytes() == b"Tornado warning"));
+    t.wait(5000);
+    assert!(matches!(t.app.screen(), Screen::Crossband(_)), "still waiting while it runs");
+    t.app.radio.tx_built = true;
+    t.tap(Key::Exit);
+    assert_ne!(t.app.radio.mode, Mode::Xb);
+    t.wait(100);
+    assert!(matches!(t.app.screen(), Screen::Alert(_)), "opens once the repeater stops: {:?}", t.app.screen());
+}

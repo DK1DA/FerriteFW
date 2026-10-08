@@ -399,6 +399,7 @@ fn first_boot_after_setup_seeds_the_regions_presets() {
     assert_eq!(wx.iter().map(|c| c.rx).collect::<Vec<_>>(), (0..7).map(|k| 16_240_000 + k * 2_500).collect::<Vec<_>>());
     assert!(wx.iter().all(|c| c.flags & ferrite_app::chan::FLAG_RX_ONLY != 0 && c.cfg.mode == 0));
     assert_eq!(wx[0].name(), b"WX1");
+    assert_eq!(wx.iter().map(|c| c.num).collect::<Vec<_>>(), (990..997).collect::<Vec<_>>(), "channels 991-997 as shown");
     // Europe: no weather or GMRS, PMR446 instead, 2 m to 146 MHz.
     let e: Vec<_> = ferrite_store::store::default_presets(ferrite_core::txplan::Region::Europe).collect();
     assert!(e.iter().any(|p| p.name.as_bytes() == b"PMR446") && !e.iter().any(|p| p.name.as_bytes() == b"Weather"));

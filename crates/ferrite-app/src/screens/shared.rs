@@ -131,7 +131,7 @@ impl App {
             scan: !hf && live.slots[self.active as usize].scanning,
             watch: if self.watch == 0 || n < 2 { 0 } else { n },
             inbox: self.inbox,
-            alert: self.alert,
+            alert: self.alert & crate::ALERT_UNREAD != 0,
             clock: dev.clock_min,
             utc: dev.utc,
             gps: dev.gps,

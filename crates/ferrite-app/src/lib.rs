@@ -230,6 +230,10 @@ pub(crate) struct Drawn {
     pub popup_gone: bool,
 }
 
+/// [`App::alert`]'s bits.
+pub(crate) const ALERT_UNREAD: u8 = 1;
+const ALERT_WAIT: u8 = 2;
+
 pub struct App {
     screen: Screen,
     slots: [Slot; SLOTS],
@@ -242,7 +246,9 @@ pub struct App {
     bsave: u8,
     locked: bool,
     inbox: u8,
-    alert: bool,
+    /// An unread alert (the bar's alert mark); [`ALERT_WAIT`]: one came in while the crossband repeater ran,
+    /// shown as a banner, and its screen opens when the repeater stops (XB-19).
+    alert: u8,
     toast: Option<Toast>,
     undo: Option<Undo>,
     /// The last settings changed, newest first (MENU-8).
@@ -314,7 +320,7 @@ impl App {
             bsave: 1,
             locked: false,
             inbox: 0,
-            alert: false,
+            alert: 0,
             toast: None,
             undo: None,
             recent: [None; 3],
@@ -563,23 +569,36 @@ impl App {
     /// screen, with `body` as its event and `head` as its originator.
     pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
         self.inbox = self.inbox.saturating_add(1);
-        self.alert |= alert;
+        self.alert |= alert as u8 * ALERT_UNREAD;
         self.show_toast(head, body, true);
         if alert {
             let mut a = screens::alert::AlertInfo::NONE;
             a.event.set(body);
             a.from.set(head);
             *self.alert_info = a;
-            self.open(Dest::Alert); // WX-4: over any screen
+            self.open_alert(); // WX-4: over any screen
+        }
+    }
+
+    /// The alert screen over any screen (WX-4), except while the crossband repeater runs: then a banner, and the
+    /// screen once the repeater stops; the repeater keeps running (XB-19).
+    fn open_alert(&mut self) {
+        if screens::xb::running(self) {
+            self.alert |= ALERT_WAIT;
+            let event = self.alert_info.event;
+            self.show_toast(b"ALERT", event.as_bytes(), true);
+        } else {
+            self.alert &= !ALERT_WAIT;
+            self.open(Dest::Alert);
         }
     }
 
     /// An alert with everything the decoder knows (WX-5): over any screen, flashing, until OK (WX-4, WX-6).
     pub fn raise_alert(&mut self, a: &screens::alert::AlertInfo) {
         self.inbox = self.inbox.saturating_add(1);
-        self.alert = true;
+        self.alert |= ALERT_UNREAD;
         *self.alert_info = *a;
-        self.open(Dest::Alert);
+        self.open_alert();
     }
 
     /// A SAME header decoded on a slot (WX-4, WX-5): the alert screen over any screen, with its event, areas,
@@ -822,6 +841,9 @@ impl App {
         if let Some(t) = self.toast.filter(|t| after(now, t.until)) {
             self.toast = None;
             self.drawn.popup_gone |= t.center;
+        }
+        if self.alert & ALERT_WAIT != 0 && !screens::xb::running(self) && self.radio.keyed.is_none() {
+            self.open_alert();
         }
         if self.undo.is_some_and(|u| after(now, u.until)) {
             self.undo = None;

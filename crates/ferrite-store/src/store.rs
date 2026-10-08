@@ -44,6 +44,8 @@ pub const SAVE_DELAY_MS: u32 = 2000;
 
 /// The zone map's mark for a number with no channel (zones are 0-253, 255 is "no zone").
 const EMPTY: u8 = 254;
+/// The weather zone's first channel record (WX-1): channels 991-997 as shown, out of the way of your own numbering.
+pub const WX_FIRST: u16 = 990;
 
 /// Writes waiting for the Storage task.
 const QUEUE: usize = 8;
@@ -567,16 +569,16 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     }
 
     /// WX-1: in the US and Canada, the seven weather channels (162.400-162.550 MHz, receive only, wide FM) as a
-    /// "Weather" zone after the others, numbered after the highest channel there is.
+    /// "Weather" zone on channels 991-997 (records 990-996), out of the way of your own numbering (decision 73);
+    /// a number already in use is left alone.
     async fn seed_wx(&self) -> Result {
         let z = self.zones.get();
         self.new_zone(b"Weather", &ZoneCfg { shown: true, dwell: 255, ..ZoneCfg::default() }).await?;
-        let first = (0..MAX_CHANNELS).rev().find(|&n| self.zmap[n as usize].get() != EMPTY).map_or(0, |n| n + 1);
         let cfg = ferrite_app::slot::SlotCfg { mode: 0, narrow: false, step: ferrite_app::slot::BANDS[4].step, ..ferrite_app::slot::DEFAULT_CFG };
         for k in 0..7u16 {
-            let num = first + k;
-            if num >= MAX_CHANNELS {
-                break;
+            let num = WX_FIRST + k;
+            if self.zmap[num as usize].get() != EMPTY {
+                continue;
             }
             let rec = {
                 let mut c = ferrite_app::chan::channel(num, z, mhz(162) + 40_000 + k as Freq10 * 2_500, "", cfg);

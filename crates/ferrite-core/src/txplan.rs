@@ -140,9 +140,10 @@ pub fn locked_125m(f: Freq10) -> bool {
 }
 
 /// Where transmit may go: the region's bands (or, with Extend TX, any band the hardware covers) and the HF
-/// windows. Calibration windows are the Radio task's to add.
+/// windows. Extend TX never reaches below 64 MHz: the calibration has no HF window, so HF stays on the amateur
+/// windows (TX-41). Calibration windows are the Radio task's to add.
 pub fn check(f: Freq10, region: Region, extend: bool) -> Result<(), Refusal> {
-    if extend {
+    if extend && f >= mhz(64) {
         // Calibration ∩ hardware: the TX chips' ranges (6 m and below 24 MHz stay locked, TX-4).
         let hw = (mhz(136)..mhz(174)).contains(&f) || (mhz(200)..mhz(260)).contains(&f) || (mhz(400)..mhz(520)).contains(&f);
         return if hw || HF.iter().any(|b| (b.lo..b.hi).contains(&f)) { Ok(()) } else { Err(Refusal::NotCalibrated) };
@@ -171,9 +172,18 @@ mod tests {
         assert_eq!(check(mhz(420) + 50_000, Region::Us, false), Ok(()));
         assert_eq!(check(mhz(147), Region::Uk, false), Err(Refusal::OutOfBand));
         assert_eq!(check(mhz(28) + 40_000, Region::Japan, false), Ok(()));
-        assert_eq!(check(mhz(52), Region::Us, true), Err(Refusal::NotCalibrated), "6 m locked");
+        assert_eq!(check(mhz(52), Region::Us, true), Err(Refusal::OutOfBand), "6 m locked");
         assert_eq!(check(mhz(162) + 55_000, Region::Us, true), Ok(()));
         assert_eq!(nearest(mhz(420) + 50_000, Region::Canada).name, "70 cm");
+    }
+
+    #[test]
+    fn extend_stops_at_64_mhz() {
+        assert_eq!(check(mhz(27) + 18_500, Region::Us, true), Err(Refusal::OutOfBand), "CB, even with Extend TX");
+        assert_eq!(check(mhz(21) + 20_000, Region::Us, true), Err(Refusal::OutOfBand), "15 m");
+        assert_eq!(check(mhz(28) + 40_000, Region::Us, true), Ok(()), "10 m stays open");
+        assert_eq!(check(mhz(24) + 94_000, Region::Uk, true), Ok(()), "12 m stays open");
+        assert_eq!(check(mhz(162) + 55_000, Region::Us, true), Ok(()), "above 64 MHz Extend still widens");
     }
 
     #[test]
