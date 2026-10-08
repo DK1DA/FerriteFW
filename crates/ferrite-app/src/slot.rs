@@ -25,7 +25,7 @@ pub struct SlotCfg {
     pub step: u8,
     /// Level 0-9; on a channel also [`SQ_GLOBAL`]: the slot's own level (SQL-6).
     pub squelch: u8,
-    /// 0 off, 1 carrier, 2 wrong tone.
+    /// Busy lockout: 0 off, 1 on (TX-21).
     pub busy: u8,
     pub reverse: bool,
     /// Split (MENU 5, the 4th offset choice): transmit on the absolute frequency in `offset`, whatever RX is
@@ -412,7 +412,7 @@ impl Item {
             Item::Offset => (if c.split { 3 } else { (c.offset.signum() + 3) % 3 }, 4), // simplex, +, -, split
             Item::Step => (c.step as i32, STEPS.len() as i32),
             Item::Mode => (c.mode as i32, SLOT_MODES as i32),
-            Item::BusyLock => (c.busy as i32, 3),
+            Item::BusyLock => (c.busy.min(1) as i32, 2),
             Item::Reverse => (c.reverse as i32, 2),
             _ => (0, 1),
         }
@@ -516,7 +516,7 @@ impl Item {
                 }
             }
             Item::Mode => b.set(MODES[c.mode as usize % MODES.len()].as_bytes()),
-            Item::BusyLock => b.set(["Off", "Carrier", "Tone"][c.busy as usize % 3].as_bytes()),
+            Item::BusyLock => b.set(if c.busy != 0 { b"On" } else { b"Off" }),
             Item::Reverse => b.set(if c.reverse { b"On" } else { b"Off" }),
             _ => {}
         }

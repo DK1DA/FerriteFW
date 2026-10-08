@@ -18,7 +18,7 @@ pub const CH_LEN: usize = 64;
 /// The record's format, at offset 60.
 const CH_VERSION: u8 = 1;
 /// Flag bits the UI's `Channel::flags` carries (0-2 skip, APRS, RX-only; 5-6 talkaround, hidden); 3-4 are
-/// busy lockout from the slot settings, 7 "has position" (kept), 9 reverse, 10 split (TX at bytes 4-7 is the
+/// busy lockout (bit 3; a nonzero bit 4 from the old three-way setting reads as on), 7 "has position" (kept), 9 reverse, 10 split (TX at bytes 4-7 is the
 /// transmit frequency itself, not RX plus a shift: CHAN-2); 8 and 11-15 are kept as they were. A record from
 /// before split has bit 10 clear and reads as a shift, as it always did.
 const UI_FLAGS: u16 = 0x0067;
@@ -71,7 +71,7 @@ pub fn ch_decode(num: u16, b: &[u8; CH_LEN]) -> Option<Channel> {
     } else {
         (tx as i64 - rx as i64) as i32
     };
-    cfg.busy = ((flags >> BUSY_SHIFT) & 3) as u8;
+    cfg.busy = ((flags >> BUSY_SHIFT) & 3 != 0) as u8;
     cfg.reverse = flags & REVERSE != 0;
     // 0 = Global (the slot's level), 1-10 = levels 0-9 (CHAN-14). Records written before Global existed always
     // stored level + 1, so they read the same.
@@ -119,7 +119,7 @@ pub fn ch_encode(ch: &Channel, old: &[u8; CH_LEN]) -> [u8; CH_LEN] {
     let flags = (old_flags & !(UI_FLAGS | 3 << BUSY_SHIFT | REVERSE | SPLIT | PRIORITY))
         | (ch.flags as u16 & UI_FLAGS)
         | if ch.flags & ferrite_app::chan::FLAG_PRIORITY != 0 { PRIORITY } else { 0 }
-        | ((c.busy as u16 & 3) << BUSY_SHIFT)
+        | ((c.busy.min(1) as u16) << BUSY_SHIFT)
         | if c.reverse { REVERSE } else { 0 }
         | if c.split { SPLIT } else { 0 };
     b[16..18].copy_from_slice(&flags.to_le_bytes());
@@ -316,7 +316,7 @@ mod tests {
         cfg.tx_tone = DCS_FLAG | 0o023;
         cfg.offset = -60_000;
         cfg.power = 2;
-        cfg.busy = 2;
+        cfg.busy = 1;
         cfg.reverse = true;
         cfg.squelch = 0;
         let mut c = channel(11, 1, 14_694_000, "North hill", cfg);

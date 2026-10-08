@@ -55,7 +55,8 @@ const CHIP1_FROM: Freq10 = mhz(18);
 const TOP: Freq10 = mhz(64);
 const BOTTOM: Freq10 = 15_000; // 150 kHz
 
-/// The ◀▶ band list (open in the manual): name, start, end, where it starts, its mode.
+/// The HF bands, low to high: name, start, end, where it starts, its mode. ◀▶ walks one of two lists picked by
+/// the mode (HF-32): broadcast or amateur ([`HAM`]).
 const BANDS: [(&str, Freq10, Freq10, Freq10, u8); 19] = [
     ("LW", 15_300, 27_900, 19_800, AM),
     ("MW", 53_000, 171_000, 90_900, AM),
@@ -76,6 +77,11 @@ const BANDS: [(&str, Freq10, Freq10, Freq10, u8); 19] = [
     ("CB", 2_696_500, 2_740_500, 2_718_500, AM),
     ("10 m", 2_800_000, 2_970_000, 2_960_000, FM),
     ("6 m", 5_000_000, 5_400_000, 5_012_500, USB),
+];
+
+/// HF-32: the amateur list (CB with it); the rest are the broadcast list.
+const HAM: [bool; BANDS.len()] = [
+    false, false, true, true, false, true, false, false, true, false, true, false, true, true, false, true, true, true, true,
 ];
 
 /// Steps in 10 Hz: AM 1, 5, 9, 10 kHz; USB/LSB/CW 10, 50, 100 Hz, 1 kHz; chip 1 FM the home steps.
@@ -177,6 +183,26 @@ impl HfMem {
             1 => BW_SSB[self.bw as usize % 4],
             _ => BW_FM[self.bw as usize % 2],
         }
+    }
+
+    /// HF-32: ◀▶ walks the amateur list in USB, LSB, CW and FM, and in AM inside an amateur band or CB;
+    /// otherwise (AM) the broadcast list.
+    fn ham_list(&self) -> bool {
+        self.mode != AM || self.band().is_some_and(|b| HAM[b])
+    }
+
+    /// HF-32: the next band in the mode's list up or down from here, wrapping.
+    fn next_band(&self, up: bool) -> usize {
+        let ham = self.ham_list();
+        let list = || (0..BANDS.len()).filter(move |&i| HAM[i] == ham);
+        let cur = self.band().filter(|&b| HAM[b] == ham);
+        let found = match (cur, up) {
+            (Some(i), true) => list().find(|&b| b > i),
+            (Some(i), false) => list().rfind(|&b| b < i),
+            (None, true) => list().find(|&b| BANDS[b].1 > self.freq),
+            (None, false) => list().rfind(|&b| BANDS[b].2 < self.freq),
+        };
+        found.unwrap_or_else(|| if up { list().next().unwrap_or(0) } else { list().next_back().unwrap_or(0) })
     }
 
     fn band(&self) -> Option<usize> {
@@ -460,13 +486,8 @@ impl View for Hf {
                 tune_to(app, (h.freq as i32 + s) as Freq10, None);
             }
             (Key::Left | Key::Right, Short | Repeat) => {
-                // the next band up or down from here
-                let b = match (h.band(), e.key == Key::Right) {
-                    (Some(i), true) => (i + 1) % BANDS.len(),
-                    (Some(i), false) => (i + BANDS.len() - 1) % BANDS.len(),
-                    (None, true) => BANDS.iter().position(|b| b.1 > h.freq).unwrap_or(0),
-                    (None, false) => BANDS.iter().rposition(|b| b.2 < h.freq).unwrap_or(BANDS.len() - 1),
-                };
+                // HF-32: the next band up or down in the mode's list
+                let b = h.next_band(e.key == Key::Right);
                 // HF-27: the band's own VFO as it was left; its start the first time.
                 match app.set.hf.band_vfo(b) {
                     Some((f, m, step, bw, bfo)) => tune_vfo(app, f, Some(m), Some((step, bw, bfo))),
@@ -678,5 +699,41 @@ impl View for Hf {
         } else {
             Hints::new(&[("*", "Mode"), ("#", "Recent"), ("Hold MENU", "Options")])
         }
+    }
+}
+
+#[cfg(test)]
+mod band_list_tests {
+    use super::*;
+
+    fn at(f: Freq10, mode: u8) -> HfMem {
+        HfMem { freq: f, mode, ..HfMem::DEFAULT }
+    }
+
+    fn walk(mut h: HfMem, up: bool, n: usize) -> std::vec::Vec<&'static str> {
+        (0..n)
+            .map(|_| {
+                let b = h.next_band(up);
+                h.freq = BANDS[b].3;
+                BANDS[b].0
+            })
+            .collect()
+    }
+
+    /// HF-32: AM walks the broadcast list, SSB the amateur list (CB in it), each wrapping.
+    #[test]
+    fn mode_picks_the_list() {
+        assert_eq!(walk(at(90_900, AM), true, 8), ["49 m", "41 m", "31 m", "25 m", "19 m", "13 m", "LW", "MW"]);
+        assert_eq!(walk(at(707_400, LSB), true, 11), ["30 m", "20 m", "17 m", "15 m", "12 m", "CB", "10 m", "6 m", "160 m", "80 m", "40 m"]);
+        assert_eq!(walk(at(707_400, LSB), false, 2), ["80 m", "160 m"]);
+    }
+
+    /// HF-32: AM inside an amateur band or CB keeps the amateur list; AM between bands is broadcast.
+    #[test]
+    fn am_on_ham_keeps_the_ham_list() {
+        assert_eq!(walk(at(2_718_500, AM), true, 2), ["10 m", "6 m"]);
+        assert_eq!(walk(at(2_900_000, AM), false, 1), ["CB"]);
+        assert_eq!(walk(at(1_300_000, AM), true, 1), ["19 m"]);
+        assert_eq!(walk(at(1_300_000, USB), true, 1), ["20 m"]);
     }
 }

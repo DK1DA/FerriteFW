@@ -380,6 +380,28 @@ fn frequency_counter() {
     assert!(t.cmds().contains(&RadioCmd::Counter(false)), "TSRCH-8: it only ever received");
 }
 
+/// TSRCH-10, TSRCH-11: only 64–1300 MHz outside 630–756 counts; # freezes the reading while the list keeps
+/// filling, and OK copies the held frequency.
+#[test]
+fn counter_range_and_hold() {
+    let mut t = T::new();
+    menu0(&mut t, &[3, 3]);
+    for f in [mhz(28) + 40_000, mhz(700), mhz(1_400)] {
+        t.live.mode = ModeLive::Probe { freq: f, rssi: -40, tone: 0 };
+        t.wait(100);
+    }
+    assert_eq!(t.app.radio.hits[0].what, 0, "nothing outside the range counts");
+    t.live.mode = ModeLive::Probe { freq: mhz(1_296), rssi: -60, tone: 0 };
+    t.wait(100);
+    t.tap(Key::Hash);
+    assert!(matches!(t.app.screen(), Screen::Counter(c) if c.hold && c.held == mhz(1_296)));
+    t.live.mode = ModeLive::Probe { freq: mhz(446) + 6_250, rssi: -40, tone: 0 };
+    t.wait(100);
+    assert_eq!(t.app.radio.hits[0].what, mhz(446) + 6_250, "held, it keeps listening");
+    t.tap(Key::Menu);
+    assert_eq!(t.freq(), mhz(1_296), "OK copies the held reading");
+}
+
 /// HOME-8: hold 0 puts the active slot on the home channel at the long press; the toast names the channel.
 #[test]
 fn hold_0_home_channel_toast() {
@@ -658,33 +680,23 @@ fn rx_only_channel_refuses() {
     ptt(&mut t, false);
 }
 
-/// TX-21: busy lockout. Carrier refuses while the squelch is open; wrong tone refuses only while it is open
-/// with another tone (the slot's RX tone not heard); off never refuses.
+/// TX-21: busy lockout is on or off, as nicFW: on refuses while the squelch is open, whatever tone it carries;
+/// off never refuses.
 #[test]
-fn busy_lockout_carrier_and_wrong_tone() {
+fn busy_lockout_on_off() {
     let mut t = ready();
     let mut cfg = DEFAULT_CFG;
     cfg.rx_tone = 885;
-    t.live.slots[0].squelch_open = true;
-    for (busy, tone_heard, refuses) in [(0, false, false), (1, true, true), (1, false, true), (2, false, true), (2, true, false)] {
+    for (busy, open, refuses) in [(0, true, false), (1, true, true), (1, false, false)] {
         cfg.busy = busy;
         t.app.set_vfo_cfg(0, cfg);
-        t.live.slots[0].tone_heard = tone_heard;
+        t.live.slots[0].squelch_open = open;
         t.wait(100);
         ptt(&mut t, true);
-        assert_eq!(refused(&t) == Some(Refusal::Busy), refuses, "busy {busy}, own tone heard {tone_heard}");
+        assert_eq!(refused(&t) == Some(Refusal::Busy), refuses, "busy {busy}, squelch open {open}");
         ptt(&mut t, false);
         t.hold(Key::Exit);
     }
-    // Wrong tone with no RX tone set: any carrier is another group's.
-    cfg.rx_tone = 0;
-    cfg.busy = 2;
-    t.app.set_vfo_cfg(0, cfg);
-    t.live.slots[0].tone_heard = false;
-    t.wait(100);
-    ptt(&mut t, true);
-    assert_eq!(refused(&t), Some(Refusal::Busy));
-    ptt(&mut t, false);
 }
 
 /// KEY-7: PTT B transmits on slot B even when A is the active slot; the connector's PTT keys the active slot.

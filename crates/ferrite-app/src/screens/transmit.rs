@@ -82,14 +82,9 @@ pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
     if slot < SLOTS as u8 && !txplan::relay_ok(app.tuned_cfg(slot).rx_of(app.tuned_freq(slot)), tx_freq(app, slot)) {
         return Some(Refusal::RelayMismatch);
     }
-    // TX-21: busy lockout. Carrier: refuse while the squelch is open. Wrong tone: refuse while it is open with a
-    // tone other than the slot's RX tone (with no RX tone set, any carrier is another group's).
-    if slot < SLOTS as u8 && app.rx_mask & 1 << slot != 0 {
-        let c = app.tuned_cfg(slot);
-        let other_tone = c.heard_tone() == 0 || app.tone_mask & 1 << slot == 0;
-        if c.busy == 1 || c.busy == 2 && other_tone {
-            return Some(Refusal::Busy);
-        }
+    // TX-21: busy lockout, on or off as nicFW: refuse while the squelch is open.
+    if slot < SLOTS as u8 && app.rx_mask & 1 << slot != 0 && app.tuned_cfg(slot).busy != 0 {
+        return Some(Refusal::Busy);
     }
     None
 }
@@ -494,7 +489,6 @@ impl View for TxRefused {
                 more = b"The calibration, read only:";
             }
             Refusal::RxOnlyChannel => a.set(b"This channel is receive only."),
-            Refusal::Busy if self.slot < SLOTS as u8 && app.slot(self.slot).cfg().busy == 2 => a.set(b"Busy lockout: the channel is in use with another tone."),
             Refusal::Busy => a.set(b"Busy lockout: the channel is in use."),
             Refusal::Battery => {
                 a.set(b"The battery is below the transmit cut-off.");

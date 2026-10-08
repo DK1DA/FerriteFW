@@ -271,8 +271,6 @@ pub struct App {
     want_reset: bool,
     /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
     rx_mask: u8,
-    /// Slots whose own RX tone is heard on the carrier (busy lockout "wrong tone").
-    tone_mask: u8,
     scan_mask: u8,
     relay_mask: u8,
     /// Where each scanning slot is stopped on a hit (squelch open, or still on its last hit in the resume wait);
@@ -335,7 +333,6 @@ impl App {
             aprs_st: 0,
             want_reset: false,
             rx_mask: 0,
-            tone_mask: 0,
             scan_mask: 0,
             relay_mask: 0,
             scan_hit: [0; SLOTS],
@@ -814,12 +811,10 @@ impl App {
         self.tick_keys(now, store);
         self.lights_tick(now, live);
         let mut rx = 0;
-        let mut tone = 0;
         let mut scan = 0;
         let mut relay = 0;
         for (i, s) in live.slots.iter().enumerate() {
             rx |= (s.squelch_open as u8) << i;
-            tone |= (s.tone_heard as u8) << i;
             scan |= (s.scanning as u8) << i;
             relay |= (s.relay as u8) << i;
             self.scan_hit[i] = if s.scanning && (s.squelch_open || s.last_hit != 0 && s.freq == s.last_hit) { s.freq } else { 0 };
@@ -837,7 +832,7 @@ impl App {
                 store.used(c.num);
             }
         }
-        (self.rx_mask, self.tone_mask, self.scan_mask, self.relay_mask) = (rx, tone, scan, relay);
+        (self.rx_mask, self.scan_mask, self.relay_mask) = (rx, scan, relay);
         if let Some(t) = self.toast.filter(|t| after(now, t.until)) {
             self.toast = None;
             self.drawn.popup_gone |= t.center;

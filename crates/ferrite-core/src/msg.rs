@@ -125,7 +125,7 @@ pub enum Param {
     Offset,
     /// 0 low, 1 mid, 2 high. The Radio task caps 1.25 m at 0.25 W whatever this says.
     Power,
-    /// 0 off, 1 carrier, 2 wrong tone.
+    /// 0 off, 1 on: refuse transmit while the squelch is open (TX-21).
     BusyLock,
     /// 0 off, 1 on.
     Reverse,
@@ -238,8 +238,6 @@ pub struct SlotLive {
     pub rssi: i16,
     /// A carrier above the squelch (the BK4829's RSSI and noise squelch), whatever tone it carries.
     pub squelch_open: bool,
-    /// The slot's own RX tone (CTCSS or DCS) is decoded on that carrier (busy lockout "wrong tone", TX-21).
-    pub tone_heard: bool,
     pub scanning: bool,
     /// Scan hits so far, and the last one.
     pub hits: u8,

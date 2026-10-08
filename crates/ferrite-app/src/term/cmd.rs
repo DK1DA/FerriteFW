@@ -422,7 +422,7 @@ fn pick(w: &[u8], list: &[&str], what: &str) -> Result<u8, Msg> {
 }
 
 const POWERS: [&str; 3] = ["low", "mid", "high"];
-const BUSY: [&str; 3] = ["off", "carrier", "tone"];
+const BUSY: [&str; 2] = ["off", "on"];
 const BW: [&str; 2] = ["wide", "narrow"];
 /// Channel fields by name, in the order a `ch` line writes them.
 const FIELDS: [&str; 20] = [
@@ -476,7 +476,7 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     }
     if g.busy != 0 {
         out.push(b" busy=");
-        out.push(BUSY[g.busy as usize % 3].as_bytes());
+        out.push(BUSY[g.busy.min(1) as usize].as_bytes());
     }
     for (on, w) in [
         (g.reverse, "reverse"),

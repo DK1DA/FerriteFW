@@ -356,7 +356,7 @@ impl FakeRadio {
             Fake::Tone { t0 } => ModeLive::Probe { freq: 0, rssi: -84, tone: if t - t0 > 2.5 { 1000 } else { 0 } },
             Fake::Counter { t0 } => {
                 let p = (t - t0) % 6.0;
-                let (freq, rssi) = if p < 1.0 { (0, -127) } else if p < 3.5 { (mhz(147) + 15_000, -42) } else { (mhz(146) + 94_000, -58) };
+                let (freq, rssi) = if p < 1.0 { (0, -127) } else if p < 3.0 { (mhz(147) + 15_000, -42) } else if p < 4.5 { (mhz(446) + 6_250, -51) } else { (mhz(146) + 94_000, -58) };
                 ModeLive::Probe { freq, rssi, tone: 0 }
             }
             Fake::Fm => {
@@ -461,7 +461,6 @@ impl FakeRadio {
         for (i, s) in self.live.slots.iter_mut().enumerate() {
             let (_, level) = carrier(i, s);
             s.squelch_open = self.watcher.open(i as u8) || self.monitor & 1 << i != 0;
-            s.tone_heard = s.squelch_open; // the sample's stations use the slot's own tone
             s.rssi = if s.squelch_open { level as i16 } else { -121 + ((t * 0.9 + i as f32).sin() * 2.0) as i16 };
             s.relay = out.cancelled && self.watch & 1 << i != 0 && relay(s.freq) != active_relay; // WATCH-11
         }

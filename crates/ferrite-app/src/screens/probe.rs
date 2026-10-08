@@ -7,7 +7,9 @@
 //! were (TSRCH-5).
 //!
 //! Counter (MENU 0 3 3): the strongest nearby transmitter's frequency and level, a hold, the last hits
-//! (TSRCH-6); OK copies the frequency to the active slot's VFO (TSRCH-7). It only receives (TSRCH-8).
+//! (TSRCH-6); OK copies the frequency to the active slot's VFO (TSRCH-7). It only receives (TSRCH-8). It counts
+//! 64–1300 MHz on both BK4829s without moving the relay (TSRCH-10); # holds the reading while it keeps listening
+//! (TSRCH-11).
 
 use super::activity::{mmss, Hit, Mode, HITS};
 use super::scan::ago;
@@ -17,6 +19,7 @@ use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::tone_text;
 use crate::{App, Screen};
+use ferrite_core::freq::Freq10;
 use ferrite_core::keys::Key;
 use ferrite_core::msg::{LiveAll, ModeLive, Param, RadioCmd};
 use ferrite_ui::assets::*;
@@ -258,8 +261,18 @@ fn done(app: &mut App, slot: u8, what: &[u8]) {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Counter {
-    /// The reading is held: new signals go to the list only.
+    /// TSRCH-11: the reading is held: new signals go to the list only.
     pub hold: bool,
+    /// The held reading: frequency (0 none) and dBm.
+    pub held: Freq10,
+    pub held_rssi: i16,
+}
+
+/// TSRCH-10: what the counter reports: 64–1300 MHz, outside chip 1's 630–756 MHz gap. 18–64 MHz would need the
+/// band relay, which the counter never moves (SAFE-20).
+pub fn countable(f: Freq10) -> bool {
+    use ferrite_core::freq::mhz;
+    (mhz(64)..=mhz(1300)).contains(&f) && !(mhz(630)..mhz(756)).contains(&f)
 }
 
 /// MENU 0 3 3 (TSRCH-6).
@@ -267,7 +280,7 @@ pub fn open_counter(app: &mut App) -> Screen {
     app.start_mode(Mode::Counter);
     app.out.push(RadioCmd::Counter(true));
     app.radio.clear_hits();
-    Screen::Counter(Counter { hold: false })
+    Screen::Counter(Counter { hold: false, held: 0, held_rssi: 0 })
 }
 
 impl View for Counter {
@@ -281,10 +294,14 @@ impl View for Counter {
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
         match (e.key, e.press) {
-            (Key::Hash, Press::Short) => app.screen = Screen::Counter(Counter { hold: !self.hold }),
+            (Key::Hash, Press::Short) => {
+                // TSRCH-11: freeze the reading shown now (the newest hit), or release it.
+                let (held, held_rssi) = if self.hold { (0, 0) } else { (app.radio.hits[0].what, app.radio.hits[0].rssi()) };
+                app.screen = Screen::Counter(Counter { hold: !self.hold, held, held_rssi })
+            }
             (Key::Menu, Press::Short) => {
-                // TSRCH-7: to the active slot's VFO.
-                let f = app.radio.hits[0].what;
+                // TSRCH-7: to the active slot's VFO; the held reading while held.
+                let f = if self.hold { self.held } else { app.radio.hits[0].what };
                 if f == 0 {
                     return app.show_toast(b"Nothing heard yet", b"", false);
                 }
@@ -307,7 +324,8 @@ impl View for Counter {
 
     fn tick(self, app: &mut App, live: &LiveAll) {
         if let ModeLive::Probe { freq, rssi, .. } = live.mode {
-            if freq != 0 && !self.hold {
+            // TSRCH-11: a hold freezes the reading, not the listening; the list keeps filling.
+            if countable(freq) {
                 app.radio.push_hit(Hit::new(freq, app.now, rssi), false);
             }
         }
@@ -315,10 +333,10 @@ impl View for Counter {
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let (f, rssi, live) = match cx.live.mode {
-            ModeLive::Probe { freq, rssi, .. } if freq != 0 => (freq, rssi, true),
+            ModeLive::Probe { freq, rssi, .. } if countable(freq) => (freq, rssi, true),
             _ => (app.radio.hits[0].what, app.radio.hits[0].rssi(), false),
         };
-        let (f, rssi) = if self.hold { (app.radio.hits[0].what, app.radio.hits[0].rssi()) } else { (f, rssi) };
+        let (f, rssi) = if self.hold { (self.held, self.held_rssi) } else { (f, rssi) };
         if app.dirty(1, hash(&self.hold)) {
             w::field(lcd, 8, 170, 22, 40, 35, Align::Left, b"Strongest nearby signal", &UI_12, SUB, BG);
             lcd.fill(178, 22, 62, 18, BG);
