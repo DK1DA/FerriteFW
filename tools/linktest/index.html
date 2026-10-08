@@ -79,7 +79,7 @@ input.wide { flex: 1; min-width: 180px; font-family: ui-monospace, monospace; }
 
   <div class="cols">
     <section>
-      <h2>Module control (FF31)</h2>
+      <h2>Module diagnostics (FF31)</h2>
       <div class="row">
         <button data-at="AT+BAUD?" class="at" disabled>AT+BAUD?</button>
         <button data-at="AT" class="at" disabled>AT</button>
@@ -92,7 +92,7 @@ input.wide { flex: 1; min-width: 180px; font-family: ui-monospace, monospace; }
         <select id="ctleol"><option value="">no ending</option><option value="\r\n">CR LF</option><option value="\r">CR</option></select>
         <button id="ctlsend" disabled>Send</button>
       </div>
-      <p class="warn">AT+BAUD=N changes the module's stored rate. If the radio's firmware doesn't run at the new rate, its Bluetooth stops working until an app sets it back. Read first; set only on purpose.</p>
+      <p class="warn">For the bench only: AT+BAUD? should read 115200, the rate stock and Ferrite run (LINK-25). Ferrite never changes the module's rate; AT+BAUD=N would leave the radio's Bluetooth silent until it is set back to 115200.</p>
     </section>
     <section>
       <h2>Log</h2>
@@ -108,12 +108,12 @@ input.wide { flex: 1; min-width: 180px; font-family: ui-monospace, monospace; }
 <script>
 'use strict';
 // Known BT513 UUIDs (docs/research/ios-ble-kiss.md): service FFE0 with FFE1 (data), FFE2, FF31 (control),
-// FF32 (preferred data). Web Bluetooth only lets us see services named up front, so list every likely one.
+// FF32 (KDH's app's data channel). The module bridges to USART1 at 115200 (LINK-25). Web Bluetooth only lets us see services named up front, so list every likely one.
 const u16 = n => BluetoothUUID.canonicalUUID(n);
 const SERVICES = [0xffe0, 0xff30, 0xff00, 0xfff0, 0xfee0, 0x1800, 0x1801, 0x180a, 0x180f]
   .map(u16).concat(['00000001-ba2a-46c9-ae49-01b0961f68bb']);
 const CTRL = u16(0xff31);
-const DATA_PREF = [u16(0xff32), u16(0xffe1), u16(0xffe2)];
+const DATA_PREF = [u16(0xffe1), u16(0xff32), u16(0xffe2)];
 const CHUNK = 180; // under a 185-byte ATT MTU; Chrome negotiates up to 512 by itself
 
 const $ = id => document.getElementById(id);
@@ -183,7 +183,7 @@ async function connectBle() {
   }
   await listGatt(services);
   ctrlChar = chars[CTRL] || null;
-  // Data channel: FF32 preferred, then FFE1, FFE2 (per KDH's app); any writable+notify char otherwise.
+  // Data channel: FFE1 first, as stock's KISS(BLE) and nicFW's BTLE console use it; then FF32 (KDH's app), FFE2.
   const candidates = Object.values(chars).filter(c => (c.properties.notify || c.properties.indicate) &&
     (c.properties.write || c.properties.writeWithoutResponse) && c.uuid !== CTRL);
   candidates.sort((a, b) => rank(a.uuid) - rank(b.uuid));
