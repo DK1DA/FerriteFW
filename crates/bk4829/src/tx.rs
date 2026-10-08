@@ -12,6 +12,14 @@ const POWER_TX_MIC: u16 = 0xC1FE;
 const POWER_TX_TONE: u16 = 0xC3FA;
 const POWER_RX: u16 = 0xBFF1;
 
+/// Tone 1's gain for a transmitted single tone (tone burst, end tone, CW ID): stock's 0xBC00 in REG_70 (0x0801EB8C
+/// with 1, which also selects REG_30 mode 4).
+pub const TONE_TX_GAIN: u8 = 0x3C;
+/// Both generators' gain for a DTMF pair: stock's REG_70 0xC5C5 (0x0801DFA8).
+pub const DTMF_GAIN: u8 = 0x45;
+/// REG_47 for the sidetone while tones are sent: stock's AF route 3 (the generator to the speaker).
+const AF_OUT_SIDETONE: u16 = 0x6342;
+
 /// What modulates the carrier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -73,6 +81,32 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::TONE2_FREQ, tone_word(f2));
         let t = ((f1 != 0) as u16) << 15 | (g1 as u16 & 0x7F) << 8 | ((f2 != 0) as u16) << 7 | (g2 as u16 & 0x7F);
         self.write(reg::TONE, t);
+    }
+
+    /// A single tone at [`TONE_TX_GAIN`] (`hz` 0: tones off). While keyed, switch with [`Bk4829::tx_on`] to
+    /// [`Source::Tones`] first, as stock moves REG_30 to its mode 4 for any internal tone.
+    pub fn tone_tx(&mut self, hz: u32) {
+        if hz == 0 {
+            self.write(reg::TONE, 0); // stock's "tones off" (0x0801EB4C)
+        } else {
+            self.tones(hz, TONE_TX_GAIN, 0, 0);
+        }
+    }
+
+    /// A DTMF symbol's pair at [`DTMF_GAIN`] each (0-9, A-D, *, #); false for anything else, nothing changed.
+    pub fn dtmf_tx(&mut self, symbol: char) -> bool {
+        let Some((row, col)) = dtmf_pair(symbol) else { return false };
+        self.tones(row, DTMF_GAIN, col, DTMF_GAIN);
+        true
+    }
+
+    /// Hear the tones being sent (stock's mode 4 sidetone, AF route 3), or not (AF muted).
+    pub fn sidetone(&mut self, on: bool) {
+        if on {
+            self.write(reg::AF_OUT, AF_OUT_SIDETONE);
+        } else {
+            self.af_out(crate::AfOut::Mute);
+        }
     }
 
     /// Load a packet (words, first sent first) and send it: FIFO cleared, the done interrupt enabled, transmit

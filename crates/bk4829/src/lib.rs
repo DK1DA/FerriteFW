@@ -75,6 +75,10 @@ pub mod reg {
     pub const RSSI: u8 = 0x67;
     pub const CDCSS_HI: u8 = 0x69;
     pub const CDCSS_LO: u8 = 0x6A;
+    pub const FUNC2: u8 = 0x31;
+    pub const FREQ_SCAN: u8 = 0x32;
+    pub const SCAN_HI: u8 = 0x0D;
+    pub const SCAN_LO: u8 = 0x0E;
     pub const TONE: u8 = 0x70;
     pub const TONE1_FREQ: u8 = 0x71;
     pub const TONE2_FREQ: u8 = 0x72;
@@ -132,6 +136,29 @@ const POWER_RX: u16 = 0xBFF1;
 const LDO_ON: u16 = 0x9D1F;
 const LDO_SLEEP: u16 = 0x1D00;
 const POWER_AF_ONLY: u16 = 0x0200;
+
+/// REG_30 for a local beep, stock's mode 3 (`analysis/audio_path.md` §4): AF DAC and Tx DSP only. The PLL/VCO
+/// (bits 7:4), the PA gain (bit 3) and the microphone ADC (bit 2) stay off, so nothing can radiate.
+pub const POWER_BEEP: u16 = 0x0302;
+/// Tone 1's gain for local beeps: stock V0.29's (V0.27 used 0x3C, louder).
+pub const BEEP_GAIN: u8 = 0x17;
+/// REG_47 and REG_48 while a local beep plays (stock's AF route 3: the tone to the speaker, Gain2 -21 dB, DAC 3).
+const AF_OUT_BEEP: u16 = 0x6342;
+const AF_GAIN_BEEP: u16 = 0xB0A3;
+/// REG_32, the frequency scan (stock's counter, 0x0801E1BC / 0x0801E1CC): scan time 0.8 s (bits 15:14 = 10),
+/// stock's other bits, enable in bit 0.
+const FREQ_SCAN_ON: u16 = 0x8245;
+const FREQ_SCAN_OFF: u16 = 0x8244;
+
+/// The demodulator: stock's receive-path modes (V0.27 0x0801DED8): 7 FM, 6 AM (the airband, or a channel's AM).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Demod {
+    /// REG_31 bit 0 clear, REG_42 0x6B5A, REG_2A 0x7400, REG_2B 0 (every AF filter on).
+    Fm,
+    /// REG_31 bit 0 set (the AM demodulator), REG_42 0x6F5C, REG_2A 0x7434, REG_2B 0x0500 (receive high-pass and
+    /// de-emphasis off, the 3 kHz low-pass on).
+    Am,
+}
 
 /// Channel bandwidth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -505,6 +532,57 @@ impl<B: Bus> Bk4829<B> {
     /// The received packet's CRC passed (after done).
     pub fn fsk_crc_ok(&mut self) -> bool {
         self.read(reg::DTMF_CODE) & 0x10 != 0
+    }
+
+    /// FM or AM (stock's writes; REG_42 and REG_2A are undocumented). Set after [`Bk4829::rx_filters`]: it
+    /// rewrites REG_2B.
+    pub fn demod(&mut self, d: Demod) {
+        let (am, r42, r2a, r2b) = match d {
+            Demod::Fm => (0, 0x6B5A, 0x7400, 0x0000),
+            Demod::Am => (1, 0x6F5C, 0x7434, 0x0500),
+        };
+        self.modify(reg::FUNC2, 1, am);
+        self.write(0x42, r42);
+        self.write(0x2A, r2a);
+        self.write(reg::AF_FILTERS, r2b);
+    }
+
+    /// A local beep on the speaker, as stock (0x0801EB8C with 0): tone 1 at `hz` with [`BEEP_GAIN`], REG_30 to
+    /// [`POWER_BEEP`] (receiving stops meanwhile), AF route 3. Returns REG_48 for [`Bk4829::beep_off`].
+    pub fn beep_on(&mut self, hz: u32) -> u16 {
+        let gain = self.read(reg::AF_GAIN);
+        self.write(reg::TONE1_FREQ, tone_word(hz));
+        let t = self.read(reg::TONE);
+        self.write(reg::TONE, (t & 0x00FF) | 1 << 15 | (BEEP_GAIN as u16) << 8);
+        self.write(reg::POWER, POWER_BEEP);
+        self.write(reg::AF_OUT, AF_OUT_BEEP);
+        self.write(reg::AF_GAIN, AF_GAIN_BEEP);
+        gain
+    }
+
+    /// The beep's end (stock 0x0801EB4C): tone 1 off, AF muted, REG_48 back. REG_30 is left at the beep's value:
+    /// [`Bk4829::rx_on`] to receive again, or [`Bk4829::sleep`].
+    pub fn beep_off(&mut self, af_gain: u16) {
+        self.write(reg::TONE, 0);
+        self.write(reg::AF_GAIN, af_gain);
+        self.af_out(AfOut::Mute);
+    }
+
+    /// The frequency scan (frequency counter): on, it measures the strongest carrier the chip's front end hears
+    /// over 0.8 s; off, it stops. Receive must be on.
+    pub fn freq_scan(&mut self, on: bool) {
+        self.write(reg::FREQ_SCAN, if on { FREQ_SCAN_ON } else { FREQ_SCAN_OFF });
+    }
+
+    /// The scan's reading, Hz: None while it is still measuring (REG_0D bit 15), as stock reads it (0x0801DEB0:
+    /// REG_0D bits 10:0 high, REG_0E low, 10 Hz units).
+    pub fn freq_scan_result(&mut self) -> Option<u32> {
+        let hi = self.read(reg::SCAN_HI);
+        if hi & 0x8000 != 0 {
+            return None;
+        }
+        let lo = self.read(reg::SCAN_LO);
+        Some(((hi as u32 & 0x7FF) << 16 | lo as u32) * 10)
     }
 
     /// Modem off (stock: REG_70 then REG_58 to 0).

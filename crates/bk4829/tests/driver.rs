@@ -1,7 +1,7 @@
 //! The driver against a register-file model: stock's start-up word for word, the receive features' register
 //! values, and that nothing a receive-only build can call sets a transmit bit.
 
-use bk4829::{dcs_codeword, int, reg, AfOut, Bandwidth, Bk4829, Bus, Fsk, Squelch};
+use bk4829::{dcs_codeword, int, reg, AfOut, Bandwidth, Bk4829, Bus, Demod, Fsk, Squelch, POWER_BEEP};
 
 #[derive(Default)]
 struct Regs {
@@ -208,11 +208,21 @@ fn receive_never_keys() {
     bk.fsk_read();
     bk.fsk_off();
     bk.interrupts_enable(0xFFFF);
+    bk.demod(Demod::Am);
+    bk.demod(Demod::Fm);
+    let g = bk.beep_on(1000);
+    bk.beep_off(g);
+    bk.freq_scan(true);
+    bk.freq_scan_result();
+    bk.freq_scan(false);
     bk.sleep();
     bk.wake();
     bk.off();
     for &(reg, v) in &r.writes {
         match reg {
+            // The local beep's REG_30 has the transmit DSP (stock's mode 3) but no PLL, PA gain or microphone: no
+            // carrier, nothing radiates (checked below).
+            reg::POWER if v == POWER_BEEP => {}
             reg::POWER => assert_eq!(v & 0b1110, 0, "REG_30 {v:#06x}"),
             reg::SUBTONE => assert_eq!(v & 0x8000, 0),
             reg::PA => panic!("PA written"),
@@ -220,6 +230,57 @@ fn receive_never_keys() {
             _ => {}
         }
     }
+}
+
+#[test]
+fn beep_cannot_radiate() {
+    assert_eq!(POWER_BEEP & 0x00F0, 0, "PLL/VCO off");
+    assert_eq!(POWER_BEEP & 0b1100, 0, "PA gain and microphone off");
+}
+
+/// Stock's local beep (0x0801EB8C with 0, then 0x0801EB4C), V0.29's tone gain.
+#[test]
+fn beep_matches_stock() {
+    let mut r = Regs::new();
+    r.regs[0x48] = 0xB2BF;
+    let mut bk = Bk4829::new(&mut r);
+    let g = bk.beep_on(1000);
+    assert_eq!(g, 0xB2BF);
+    assert_eq!(r.regs[0x71], 10324, "1000 Hz x 10.32444");
+    assert_eq!(r.regs[0x70], 0x9700, "tone 1 on, gain 0x17");
+    assert_eq!((r.regs[0x30], r.regs[0x47], r.regs[0x48]), (0x0302, 0x6342, 0xB0A3));
+    let mut bk = Bk4829::new(&mut r);
+    bk.beep_off(g);
+    assert_eq!((r.regs[0x70], r.regs[0x48], r.regs[0x47] & 0x0F00), (0, 0xB2BF, 0));
+}
+
+/// Stock's receive-path modes 7 (FM) and 6 (AM), V0.27 0x0801DED8.
+#[test]
+fn demod_matches_stock() {
+    let mut r = Regs::new();
+    r.regs[0x31] = 0x0002;
+    let mut bk = Bk4829::new(&mut r);
+    bk.demod(Demod::Am);
+    assert_eq!((r.regs[0x31], r.regs[0x42], r.regs[0x2A], r.regs[0x2B]), (0x0003, 0x6F5C, 0x7434, 0x0500));
+    let mut bk = Bk4829::new(&mut r);
+    bk.demod(Demod::Fm);
+    assert_eq!((r.regs[0x31], r.regs[0x42], r.regs[0x2A], r.regs[0x2B]), (0x0002, 0x6B5A, 0x7400, 0));
+}
+
+/// Stock's counter: REG_32 0x8245 on, 0x8244 off; the reading from REG_0D/0E in 10 Hz, none while REG_0D bit 15.
+#[test]
+fn freq_scan_matches_stock() {
+    let mut r = Regs::new();
+    let mut bk = Bk4829::new(&mut r);
+    bk.freq_scan(true);
+    assert_eq!(r.regs[0x32], 0x8245);
+    r.regs[0x0D] = 0x8000;
+    assert_eq!(Bk4829::new(&mut r).freq_scan_result(), None);
+    let f = 446_006_250u32 / 10;
+    (r.regs[0x0D], r.regs[0x0E]) = ((f >> 16) as u16, f as u16);
+    assert_eq!(Bk4829::new(&mut r).freq_scan_result(), Some(446_006_250));
+    Bk4829::new(&mut r).freq_scan(false);
+    assert_eq!(r.regs[0x32], 0x8244);
 }
 
 #[cfg(feature = "tx")]
@@ -255,6 +316,27 @@ mod tx {
         bk.tones(1750, 0x40, 0, 0);
         assert_eq!(r.regs[0x70], 0xC000);
         assert_eq!(r.regs[0x71], 18068, "1750 Hz x 10.32444");
+    }
+
+    /// Stock's transmitted tones: a single tone at gain 0x3C (REG_70 0xBC00), a DTMF pair at 0x45 each (0xC5C5),
+    /// the sidetone on AF route 3.
+    #[test]
+    fn tones_match_stock() {
+        let mut r = Regs::new();
+        let mut bk = Bk4829::new(&mut r);
+        bk.tone_tx(1750);
+        assert_eq!(r.regs[0x70], 0xBC00);
+        let mut bk = Bk4829::new(&mut r);
+        assert!(bk.dtmf_tx('D'));
+        assert_eq!(r.regs[0x70], 0xC5C5);
+        assert_eq!((r.regs[0x71], r.regs[0x72]), (bk4829::tone_word(941), bk4829::tone_word(1633)));
+        let mut bk = Bk4829::new(&mut r);
+        assert!(!bk.dtmf_tx('x'));
+        bk.sidetone(true);
+        assert_eq!(r.regs[0x47], 0x6342);
+        let mut bk = Bk4829::new(&mut r);
+        bk.tone_tx(0);
+        assert_eq!(r.regs[0x70], 0);
     }
 
     #[test]
