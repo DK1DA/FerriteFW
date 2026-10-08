@@ -10,8 +10,9 @@
 //! 3. when it's out ([`AFSK_DONE`]), the unkey. A key-up the Radio task refuses, or a frame that never finishes,
 //!    unkeys after a timeout.
 //!
-//! The decoder runs while APRS mode is on (APRS-16). Bluetooth KISS waits for roadmap 3d; the digipeater for its
-//! setting (0 5 8 is display-only: off, APRS-12).
+//! The decoder runs while APRS mode is on (APRS-16), and without it while a slot on a channel flagged APRS is
+//! the active one (APRS-22: decode only, nothing sent). Bluetooth KISS waits for roadmap 3d. The digipeater
+//! follows 0 5 8 (off by default, APRS-12, APRS-26).
 
 use super::dsp::{Frame, AFSK_DONE, AFSK_TX, APRS_RX};
 use crate::chan::DSP;
@@ -95,7 +96,7 @@ impl Aprs {
         extra.set_callsign(app.callsign());
         let kiss_on = app.settings().cable_port == PORT_KISS;
         let on = app.aprs_on();
-        let decode = on || kiss_on;
+        let decode = on || kiss_on || app.aprs_flag_decode(); // APRS-22
         if decode != self.on && DSP.try_send(DspCmd::Decoder(if decode { DecoderKind::Afsk } else { DecoderKind::Off })).is_ok() {
             self.on = decode;
         }
@@ -109,7 +110,7 @@ impl Aprs {
                 });
                 crate::chan::TERM_WAKE.signal(());
             }
-            let rx = extra.aprs.receive(f.bytes(), now_s, me.as_bytes(), false);
+            let rx = extra.aprs.receive(f.bytes(), now_s, me.as_bytes(), &extra.cfg());
             if let Some((from, text)) = rx.inbound {
                 app.notify(from.as_bytes(), text.as_bytes(), false);
                 store.message_in(true, from.as_bytes(), text.as_bytes(), 0);

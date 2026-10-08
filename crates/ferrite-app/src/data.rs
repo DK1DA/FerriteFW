@@ -342,6 +342,8 @@ pub enum Op {
     Send,
     MessageRead(u16),
     BeaconNow,
+    /// A voice transmission ended with beacon after voice on (APRS-27): a beacon when APRS-9's spacing allows.
+    AfterVoice,
     ClearHeard,
     /// The reset (BOOT-14): everything the owner keeps goes (channels, zones, presets, DTMF memories, messages,
     /// the event log, waypoints, trims); never calibration or the SSB patch. A store with records starts over as

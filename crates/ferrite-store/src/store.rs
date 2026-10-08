@@ -87,9 +87,12 @@ pub enum Job {
     AprsSave,
 }
 
-/// The APRS record: the settings (4) and the quick messages, each a length (0xFF: the factory text) and 67 bytes.
+/// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
+/// bytes), then the settings added later (path, digipeater, beacon after voice, one spare: [`APRS_MORE`]). A
+/// record from before them is shorter and reads them as their defaults.
 const QUICK_LEN: usize = 68;
-const APRS_PAYLOAD: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
+const APRS_MORE: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
+const APRS_PAYLOAD: usize = APRS_MORE + 4;
 const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
 /// The store's clock starts here when nothing is stored and no clock is set: about UTC when Ferrite was written
 /// (Sep 2026), so a GPS fix later moves it by a plausible amount rather than decades.
@@ -208,7 +211,14 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if let Some(c) = settings::latest_of(&self.f, APRS_COPIES, APRS_PAYLOAD)? {
             let mut b = [0u8; 4];
             self.f.raw_read(c.at, &mut b)?;
-            let cfg = AprsCfg { f5k: crate::u16_at(&b, 0), beacon: b[2], power: b[3].min(2) };
+            let mut cfg = AprsCfg { f5k: crate::u16_at(&b, 0), beacon: b[2], power: b[3].min(2), ..AprsCfg::DEFAULT };
+            if c.len as usize >= APRS_PAYLOAD {
+                let mut m = [0u8; 4];
+                self.f.raw_read(c.at + APRS_MORE as u32, &mut m)?;
+                cfg.path = if (m[0] as usize) < ferrite_app::aprs::PATHS.len() { m[0] } else { cfg.path };
+                cfg.digi = m[1] & 0x73;
+                cfg.after_voice = m[2] == 1;
+            }
             self.aprs.set(cfg);
             self.extra.request(Op::AprsCfg(cfg)); // the APRS task's copy
         }
@@ -904,6 +914,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let c = self.aprs.get();
         p[..2].copy_from_slice(&c.f5k.to_le_bytes());
         (p[2], p[3]) = (c.beacon, c.power);
+        (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2]) = (c.path, c.digi, c.after_voice as u8);
         for i in 0..ferrite_app::words::QUICK {
             let t = match q {
                 Some((k, t)) if k as usize == i => t,

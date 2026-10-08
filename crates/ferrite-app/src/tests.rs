@@ -119,8 +119,10 @@ fn ram_is_small() {
     // and the slots' clarifier (VFO-22, +8 with padding) took it to 1136; channel scans in the Radio task
     // (the set being sent, 4 bytes, and the last ask answered, 2: +8 with padding) to 1144; a channel's end tone
     // and tail (decision 86: one byte, but Channel goes from 40 to 44 bytes with its alignment, and the App holds a
-    // Channel in each slot and in the queued write, plus the byte in undo) to 1176
-    assert!(n <= 1176, "App is {n} bytes");
+    // Channel in each slot and in the queued write, plus the byte in undo) to 1176; the APRS settings' path,
+    // digipeater and beacon after voice (APRS-26, APRS-27: 3 bytes in the App's AprsCfg, 4 to 7, +8 with padding)
+    // to 1184
+    assert!(n <= 1184, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

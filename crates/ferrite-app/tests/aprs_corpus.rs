@@ -4,6 +4,7 @@
 //! step, the decoder slot's AFSK demodulator at 12 kHz, then the APRS task's parser and heard list. Run with
 //! `cargo test --release -p ferrite-app --test aprs_corpus -- --ignored --nocapture`.
 
+use ferrite_app::aprs::AprsCfg;
 use ferrite_app::aprs_live::AprsLive;
 use ferrite_core::audio::{Decim, ADC_HZ};
 use ferrite_core::decoders::{Decoder, Found};
@@ -75,7 +76,7 @@ fn wa8lmf_through_the_radio_path() {
             for f in frame_bufs.drain(..) {
                 frames += 1;
                 let before = aprs.stations();
-                let rx = aprs.receive(&f, frames, b"N0CALL", false);
+                let rx = aprs.receive(&f, frames, b"N0CALL", &AprsCfg::DEFAULT);
                 parsed += (rx.changed || aprs.stations() != before) as u32;
             }
         }
@@ -113,7 +114,7 @@ fn loopback_beacon_through_dac_and_adc() {
         });
     }
     assert_eq!(got, vec![out[..t.len].to_vec()], "the frame comes back intact");
-    rx.receive(&got[0], 1, b"N0CALL", false);
+    rx.receive(&got[0], 1, b"N0CALL", &AprsCfg::DEFAULT);
     let st = rx.station(0).unwrap();
     assert_eq!(st.call.as_bytes(), b"VE3XYZ-7");
     assert!(st.pos.is_some());

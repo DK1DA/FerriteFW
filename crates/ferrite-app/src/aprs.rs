@@ -27,7 +27,7 @@ pub const APRS_SLOT: u8 = 2;
 /// few minutes on a busy frequency). The oldest heard goes when a new one comes; power off empties it.
 pub const HEARD_MAX: u16 = 20;
 
-/// The APRS settings kept with the APRS store (0 5 5 1, 0 5 5 4, 0 5 7 1).
+/// The APRS settings kept with the APRS store (0 5 5 1, 0 5 5 3, 0 5 5 4, 0 5 6 1, 0 5 7 1, 0 5 8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AprsCfg {
     /// The frequency in 5 kHz units; 0 = the region's (APRS-15).
@@ -38,10 +38,37 @@ pub struct AprsCfg {
     pub beacon: u8,
     /// Beacon and message power: 0 low (APRS-20's default), 1 mid, 2 high.
     pub power: u8,
+    /// The path beacons and messages ask for (0 5 6 1): an index into [`PATHS`].
+    pub path: u8,
+    /// The digipeater (0 5 8, APRS-12, APRS-26): bit 0 on, bit 1 our callsign as an alias too, bits 4-6 the wait
+    /// before relaying in seconds (0-5).
+    pub digi: u8,
+    /// A beacon after each voice transmission (0 5 5 3, APRS-27).
+    pub after_voice: bool,
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0 };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false };
+
+    /// The path's entries.
+    pub fn path(&self) -> &'static [&'static [u8]] {
+        PATHS[self.path as usize % PATHS.len()].1
+    }
+
+    /// The digipeater is on (0 5 8 1).
+    pub fn digi_on(&self) -> bool {
+        self.digi & DIGI_ON != 0
+    }
+
+    /// The digipeater also relays frames that name our callsign (0 5 8 2).
+    pub fn digi_mycall(&self) -> bool {
+        self.digi & DIGI_MYCALL != 0
+    }
+
+    /// Seconds the digipeater waits before relaying (0 5 8 3).
+    pub fn digi_wait_s(&self) -> u8 {
+        (self.digi >> 4 & 7).min(DIGI_WAIT_MAX)
+    }
 
     /// The beacon mode, 0 when off.
     pub fn mode(&self) -> u8 {
@@ -63,6 +90,17 @@ impl AprsCfg {
         self.mode() as usize == SMART
     }
 }
+
+/// The paths offered (0 5 6 1, APRS-26): name and entries. A custom path (0 5 6 2) isn't built yet.
+pub const PATHS: [(&str, &[&[u8]]); 3] = [("None", &[]), ("WIDE1-1", &[b"WIDE1-1"]), ("WIDE1-1,WIDE2-1", &[b"WIDE1-1", b"WIDE2-1"])];
+/// WIDE1-1,WIDE2-1, the usual path and the default.
+pub const PATH_DEFAULT: u8 = 2;
+/// [`AprsCfg::digi`]'s bits.
+pub const DIGI_ON: u8 = 1;
+pub const DIGI_MYCALL: u8 = 2;
+pub const DIGI_WAIT_MAX: u8 = 5;
+/// 0 5 8 2's values.
+pub const DIGI_ALIASES: [&str; 2] = ["WIDE1-1", "WIDE1-1, my call"];
 
 /// Bit 7 of [`AprsCfg::beacon`].
 const BEACON_PAUSED: u8 = 0x80;
@@ -154,6 +192,8 @@ const F_MAX: Freq10 = mhz(300);
 
 const LOADED: u8 = 1;
 const DIRTY: u8 = 2;
+/// A voice transmission ended (APRS-27); the next tick asks for the beacon.
+const AFTER_VOICE: u8 = 4;
 const TOAST_HEAD: &[u8] = b"APRS mode:";
 const TOAST_BODY: &[u8] = b"off at MENU 0 5 3";
 
@@ -161,6 +201,13 @@ impl App {
     /// APRS mode is on (0 5 3).
     pub fn aprs_on(&self) -> bool {
         self.set.aprs_mode
+    }
+
+    /// APRS-22: without APRS mode, the active slot is on a channel flagged APRS, so what it receives is decoded
+    /// (into the heard list and messages; nothing is sent: transmitting is APRS mode's).
+    pub fn aprs_flag_decode(&self) -> bool {
+        let s = self.slot(self.active());
+        !self.set.aprs_mode && !s.vfo_mode && s.ch.is_some_and(|c| c.flags & crate::chan::FLAG_APRS != 0)
     }
 
     /// Slot `s` is the APRS slot now.
@@ -309,6 +356,17 @@ impl App {
             data.request(crate::data::Op::AprsCfg(self.aprs)); // NoData (the radio until the APRS store): kept in RAM
             self.aprs_st &= !DIRTY;
         }
+        if self.aprs_st & AFTER_VOICE != 0 {
+            self.aprs_st &= !AFTER_VOICE;
+            if self.set.aprs_mode && self.aprs.after_voice {
+                data.request(crate::data::Op::AfterVoice);
+            }
+        }
+    }
+
+    /// A voice transmission ended (PTT released): APRS-27's beacon, asked for at the next tick.
+    pub(crate) fn voice_ended(&mut self) {
+        self.aprs_st |= AFTER_VOICE;
     }
 
     /// The APRS card's beacon line (APRS-17, APRS-20, APRS-24): "Beacon off", "Beacon manual", "Next beacon in 4 min",

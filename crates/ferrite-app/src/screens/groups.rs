@@ -183,7 +183,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         (slow!("After voice TX"), slow!("Off"), slow!("Beacon after you talk.")),
         (slow!("Power"), slow!("Low"), slow!("Beacon and message power.")),
     ]),
-    ((5, 6), &[(slow!("Preset"), slow!("WIDE1-1,WIDE2-1"), slow!("The usual paths.")), (slow!("Custom path"), slow!("Empty"), slow!("Your own path."))]),
+    ((5, 6), &[(slow!("Path"), slow!("WIDE1-1,WIDE2-1"), slow!("None, WIDE1-1, or WIDE1-1,WIDE2-1.")), (slow!("Custom path"), slow!("Not yet"), slow!("Your own path: not built yet."))]),
     ((5, 7), &[
         (slow!("Frequency"), slow!("144.390"), slow!("The APRS channel.")),
         (slow!("TX delay"), slow!("300 ms"), slow!("Carrier before data.")),
@@ -195,8 +195,8 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ]),
     ((5, 8), &[
         (slow!("Digipeat"), slow!("Off"), slow!("Relay others' packets.")),
-        (slow!("Aliases"), slow!("WIDE1-1"), slow!("The aliases relayed.")),
-        (slow!("Wait"), slow!("0 s"), slow!("Delay before relaying.")),
+        (slow!("Aliases"), slow!("WIDE1-1"), slow!("WIDE1-1, and your call if chosen.")),
+        (slow!("Wait"), slow!("0 s"), slow!("Delay before relaying, 0-5 s.")),
     ]),
     ((5, 9), &[
         (slow!("KISS TNC"), slow!("Off"), slow!("Raw KISS on the cable or Bluetooth.")),
@@ -458,6 +458,27 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &crate::aprs::POWERS, app.aprs_cfg().power);
             app.aprs_cfg().power != 0
         }
+        [5, 5, 3] => {
+            pick(b, &ON_OFF, app.aprs_cfg().after_voice as u8);
+            app.aprs_cfg().after_voice
+        }
+        // The group rows show their setting too (APRS-26).
+        [5, 6] | [5, 6, 1] => {
+            b.set(crate::aprs::PATHS[app.aprs_cfg().path as usize % crate::aprs::PATHS.len()].0.as_bytes());
+            app.aprs_cfg().path != crate::aprs::PATH_DEFAULT
+        }
+        [5, 8] | [5, 8, 1] => {
+            pick(b, &ON_OFF, app.aprs_cfg().digi_on() as u8);
+            app.aprs_cfg().digi_on()
+        }
+        [5, 8, 2] => {
+            pick(b, &crate::aprs::DIGI_ALIASES, app.aprs_cfg().digi_mycall() as u8);
+            app.aprs_cfg().digi_mycall()
+        }
+        [5, 8, 3] => {
+            let _ = uwrite!(b, "{} s", app.aprs_cfg().digi_wait_s());
+            app.aprs_cfg().digi_wait_s() != 0
+        }
         [5, 7, 1] => {
             b.set(crate::slot::mhz3(app.aprs_freq()).as_bytes());
             app.aprs_cfg().f5k != 0
@@ -651,7 +672,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 43] = [
+pub(crate) const SETTABLE: [&[u8]; 48] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -667,7 +688,12 @@ pub(crate) const SETTABLE: [&[u8]; 43] = [
     &[4, 9, 1],
     &[5, 3],
     &[5, 5, 1],
+    &[5, 5, 3],
     &[5, 5, 4],
+    &[5, 6, 1],
+    &[5, 8, 1],
+    &[5, 8, 2],
+    &[5, 8, 3],
     &[6, 1],
     &[6, 4],
     &[6, 5],
@@ -746,6 +772,15 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         }
         [5, 5, 1] => app.step_beacon(d),
         [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
+        [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
+        [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { path: cycle(app.aprs_cfg().path, d, crate::aprs::PATHS.len()), ..app.aprs_cfg() }),
+        [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
+        [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
+        [5, 8, 3] => {
+            let c = app.aprs_cfg();
+            let w = cycle(c.digi_wait_s(), d, crate::aprs::DIGI_WAIT_MAX as usize + 1);
+            app.set_aprs(crate::aprs::AprsCfg { digi: c.digi & 0x0F | w << 4, ..c });
+        }
         [5, 7, 1] => app.step_aprs_freq(d),
         [4, 9, 1] => s.same = !s.same,
         [9, 2, 1] => s.bt = !s.bt,
@@ -858,6 +893,11 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 3] if s.aprs_mode != d.aprs_mode => app.set_aprs_mode(d.aprs_mode),
         [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
         [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
+        [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: false, ..app.aprs_cfg() }),
+        [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { path: crate::aprs::PATH_DEFAULT, ..app.aprs_cfg() }),
+        [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
+        [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
+        [5, 8, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
         [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
         [4, 9, 1] => s.same = d.same,
         [9, 2, 1] => s.bt = d.bt,

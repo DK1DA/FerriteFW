@@ -342,3 +342,92 @@ fn card_text() {
     let dev = Device::default();
     a.app.render(&mut fb, &a.live, &dev, &a.s);
 }
+
+/// APRS-26, APRS-27: 0 5 5 3, 0 5 6 1 and 0 5 8 change the APRS settings, and # puts each back.
+#[test]
+fn path_digipeater_and_after_voice_settings() {
+    use crate::screens::groups::{change, reset};
+    let mut a = A::new();
+    assert_eq!(a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice(), b"WIDE2-1"]);
+    change(&mut a.app, &[5, 6, 1], 1);
+    assert!(a.app.aprs_cfg().path().is_empty(), "WIDE1-1,WIDE2-1 then None");
+    change(&mut a.app, &[5, 6, 1], 1);
+    assert_eq!(a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice()]);
+    reset(&mut a.app, &[5, 6, 1]);
+    assert_eq!(a.app.aprs_cfg().path().len(), 2);
+    assert!(!a.app.aprs_cfg().digi_on(), "APRS-12: off by default");
+    change(&mut a.app, &[5, 8, 1], 1);
+    change(&mut a.app, &[5, 8, 2], 1);
+    change(&mut a.app, &[5, 8, 3], -1);
+    let c = a.app.aprs_cfg();
+    assert!(c.digi_on() && c.digi_mycall() && c.digi_wait_s() == 5);
+    reset(&mut a.app, &[5, 8, 3]);
+    assert!(a.app.aprs_cfg().digi_on() && a.app.aprs_cfg().digi_wait_s() == 0);
+    change(&mut a.app, &[5, 5, 3], 1);
+    assert!(a.app.aprs_cfg().after_voice);
+    // Kept by the APRS store's owner (written back at the next tick).
+    a.tick();
+    assert!(a.s.aprs_cfg() == a.app.aprs_cfg());
+}
+
+/// APRS-27: with APRS mode and beacon after voice on, releasing PTT asks for a beacon; off, it doesn't.
+#[test]
+fn beacon_after_voice_on_release() {
+    let mut a = A::new();
+    a.app.radio.tx_built = true;
+    a.app.set_region(Some(Region::Us), false);
+    a.app.active = 0;
+    a.mode(true);
+    a.wait(2000);
+    let sent = |a: &mut A| {
+        let mut any = false;
+        for _ in 0..3 {
+            a.wait(1000);
+            any |= a.s.aprs_tick(a.t / 1000, true, true).tx == Some("Beacon");
+        }
+        any
+    };
+    assert!(!sent(&mut a), "no beacon by itself (beacons off)");
+    a.press(Key::Ptt(0), 300);
+    a.press(Key::Exit, 100);
+    assert!(!sent(&mut a), "after voice is off by default");
+    a.app.set_aprs(AprsCfg { after_voice: true, ..a.app.aprs_cfg() });
+    a.cmds();
+    a.press(Key::Ptt(0), 300);
+    assert!(a.cmds().contains(&RadioCmd::Transmit { slot: 0, on: true }), "a voice transmission on A");
+    assert!(sent(&mut a), "a beacon after the voice transmission");
+}
+
+/// APRS-22: without APRS mode, the active slot on a channel flagged APRS decodes; a VFO or APRS mode doesn't.
+#[test]
+fn aprs_flag_decodes_on_its_slot() {
+    let mut a = A::new();
+    assert!(!a.app.aprs_flag_decode());
+    let mut ch = crate::chan::channel(5, crate::chan::NO_ZONE, ferrite_core::freq::mhz(144) + 39_000, "APRS", crate::slot::DEFAULT_CFG);
+    ch.flags |= crate::chan::FLAG_APRS;
+    a.app.slots[0].ch = Some(ch);
+    a.app.slots[0].vfo_mode = false;
+    a.app.active = 0;
+    assert!(a.app.aprs_flag_decode());
+    a.mode(true);
+    assert!(!a.app.aprs_flag_decode(), "APRS mode decodes on C instead");
+}
+
+/// APRS-28: the station screen's Message line comes from the newest stored message the station sent us.
+#[test]
+fn station_shows_its_last_message() {
+    let a = A::new();
+    // The sample's VE3KPW-9 sent "On my way" 2 minutes ago (and was sent "Where are you?", not shown).
+    let mut s = a.s.station(0).unwrap();
+    assert_eq!(s.call.as_bytes(), b"VE3KPW-9");
+    s.msg = Buf::new();
+    s.msg_min = None;
+    crate::screens::aprs::last_message(&mut s, &a.s, Some(10 * 60));
+    assert_eq!(s.msg.as_bytes(), b"On my way");
+    assert_eq!(s.msg_min, Some(10 * 60 - 2));
+    // A station that sent us nothing keeps its dash.
+    let mut s = a.s.station(2).unwrap();
+    s.msg = Buf::new();
+    crate::screens::aprs::last_message(&mut s, &a.s, Some(600));
+    assert!(s.msg.is_empty());
+}

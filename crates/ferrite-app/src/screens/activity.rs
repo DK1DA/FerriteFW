@@ -225,6 +225,7 @@ impl App {
     pub(crate) fn ptt_released(&mut self) {
         if let Some(slot) = self.radio.keyed.take() {
             self.out.push(RadioCmd::Transmit { slot, on: false });
+            self.voice_ended(); // APRS-27
             // WATCH-16: watch waits 30 s of quiet (or a key) so the reply on this slot isn't missed; a longer #
             // pause (WATCH-6) is left as it is.
             let until = self.now.wrapping_add(crate::TX_PAUSE_S as u32 * 1000);

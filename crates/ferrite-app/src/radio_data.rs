@@ -115,6 +115,7 @@ impl Data for RadioData {
                 self.aprs.send(d.to.as_bytes(), d.text.as_bytes());
             }
             Op::BeaconNow => self.aprs.beacon_now(),
+            Op::AfterVoice => self.aprs.after_voice(),
             Op::ClearHeard => self.aprs.clear_heard(),
             Op::AprsCfg(c) => self.cfg.set(c),
             Op::Wipe => {

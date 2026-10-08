@@ -92,7 +92,10 @@ impl View for Aprs {
         }
         if self.station {
             match data.station(self.cur.sel) {
-                Some(s) => station(app, lcd, &s, data, cx.live, cx.dev),
+                Some(mut s) => {
+                    last_message(&mut s, data, cx.dev.clock_min);
+                    station(app, lcd, &s, data, cx.live, cx.dev)
+                }
                 None => app.empty(lcd, b"No such station", b"The heard list changed"),
             }
             return;
@@ -254,6 +257,23 @@ slow_table! {
         }),
     ];
 }
+
+/// The station screen's Message line (APRS-28): the newest message it sent us, from the stored messages (the
+/// newest [`MSG_LOOK`] only, so the screen never reads the whole ring), with the clock time it came.
+pub(crate) fn last_message(s: &mut crate::data::Station, data: &dyn crate::data::Data, clock_min: Option<u16>) {
+    if !s.msg.is_empty() {
+        return;
+    }
+    let n = data.messages().min(MSG_LOOK);
+    if let Some(m) = (0..n).filter_map(|i| data.message(i)).find(|m| m.inbound && m.peer.as_bytes().eq_ignore_ascii_case(s.call.as_bytes())) {
+        let t = m.text.as_bytes();
+        s.msg = Buf::from(&t[..t.len().min(32)]);
+        s.msg_min = clock_min.map(|c| (c as i32 - (m.ago_s / 60) as i32).rem_euclid(1440) as u16);
+    }
+}
+
+/// How many of the newest messages the station screen looks through.
+const MSG_LOOK: u16 = 32;
 
 /// A speed sent in mph, in the units of 0 6 4 (metric km/h, imperial mph, nautical knots).
 fn speed(units: u8, mph: u16, b: &mut Buf<40>) {

@@ -1,7 +1,8 @@
 //! The radio's APRS task logic (manual chapter 25, roadmap 5b-5d): AX.25 frames from the AFSK decoder in, frames
 //! for the modulator out. The heard list (APRS-3, APRS-4: RAM only), messages to us acked (APRS-6), ours tried
-//! on APRS-13's schedule until an ack, beacons by the beacon mode (APRS-24), the fill-in digipeater (APRS-12,
-//! off unless asked), APRS-9's 30 s spacing and APRS-20's wait for the band relay. Pure logic: the firmware's UI
+//! on APRS-13's schedule until an ack, beacons by the beacon mode (APRS-24) and after voice (APRS-27), the
+//! fill-in digipeater (APRS-12, APRS-26: off unless asked), the path (0 5 6 1), APRS-9's 30 s spacing and
+//! APRS-20's wait for the band relay. Pure logic: the firmware's UI
 //! task feeds it frames and ticks it once a second (the store and the App are there); the host tests run the
 //! same code on recorded audio. The simulators keep their made-up traffic (`sample::aprs`).
 //!
@@ -36,8 +37,6 @@ const DUPE_S: u32 = 30;
 const DIGI_GAP_S: u32 = 5;
 /// The destination ("tocall") that names the software: APZ is experimental, FER for Ferrite.
 const TOCALL: &[u8] = b"APZFER";
-/// The path beacons and messages ask for (0 5 6's default).
-const PATH: [&[u8]; 2] = [b"WIDE1-1", b"WIDE2-1"];
 
 /// A station heard: what the heard list and the station screen show, about 110 bytes.
 #[derive(Clone, Copy)]
@@ -103,12 +102,15 @@ pub struct AprsLive {
     seen: [Cell<Option<(Buf<10>, Buf<5>)>>; SEEN],
     dupes: [Cell<(u16, u32)>; DUPES],
     dupe_at: Cell<u8>,
-    /// A frame to digipeat, waiting for its turn.
+    /// A frame to digipeat, waiting for its turn, and the second it may go (0 5 8 3's wait).
     digi: Cell<Option<([u8; FRAME_MAX], u16)>>,
+    digi_at: Cell<u32>,
     last_digi: Cell<Option<u32>>,
     last_auto: Cell<Option<u32>>,
     beacon_last: Cell<Option<LastBeacon>>,
     beacon_now: Cell<bool>,
+    /// APRS-27: a beacon owed after a voice transmission (kept to APRS-9's spacing, unlike "beacon now").
+    after_voice: Cell<bool>,
     waiting: Cell<bool>,
     on_since: Cell<Option<u32>>,
     now_s: Cell<u32>,
@@ -131,10 +133,12 @@ impl AprsLive {
             dupes: [const { Cell::new((0, 0)) }; DUPES],
             dupe_at: Cell::new(0),
             digi: Cell::new(None),
+            digi_at: Cell::new(0),
             last_digi: Cell::new(None),
             last_auto: Cell::new(None),
             beacon_last: Cell::new(None),
             beacon_now: Cell::new(false),
+            after_voice: Cell::new(false),
             waiting: Cell::new(false),
             on_since: Cell::new(None),
             now_s: Cell::new(0),
@@ -179,6 +183,8 @@ impl AprsLive {
         self.out.iter().for_each(|o| o.set(None));
         self.acks.iter().for_each(|a| a.set(None));
         self.beacon_last.set(None);
+        self.after_voice.set(false);
+        self.digi.set(None);
     }
 
     /// A station heard now: to the front, its old entry (if any) gone, the oldest dropped when full.
@@ -215,6 +221,11 @@ impl AprsLive {
         self.beacon_now.set(true);
     }
 
+    /// A voice transmission ended (APRS-27): a beacon at the next turn that APRS-9's spacing allows.
+    pub fn after_voice(&self) {
+        self.after_voice.set(true);
+    }
+
     /// The beacon's state for the APRS card (APRS-17, APRS-20).
     pub fn beacon(&self, cfg: &AprsCfg) -> Beacon {
         let next_s = cfg.every_min().map(|m| match self.beacon_last.get() {
@@ -227,8 +238,8 @@ impl AprsLive {
     // ---- receive ----
 
     /// A frame from the decoder. `me` is our callsign (empty: none set, nothing is acked or digipeated, APRS-8);
-    /// `digi` whether the digipeater is on (0 5 8, off by default: APRS-12).
-    pub fn receive(&self, frame: &[u8], now_s: u32, me: &[u8], digi: bool) -> Rx {
+    /// `cfg` has the digipeater's settings (0 5 8, off by default: APRS-12, APRS-26).
+    pub fn receive(&self, frame: &[u8], now_s: u32, me: &[u8], cfg: &AprsCfg) -> Rx {
         self.now_s.set(now_s);
         let mut rx = Rx::default();
         let Some(f) = Frame::parse(frame) else { return rx };
@@ -240,9 +251,11 @@ impl AprsLive {
             return rx; // our own, digipeated back
         }
         let dupe = self.dupe(&f, now_s);
-        if digi && !dupe {
+        if cfg.digi_on() && !dupe {
             if let Some(m) = my {
-                self.digipeat(&f, m);
+                if self.digipeat(&f, m, cfg.digi_mycall()) {
+                    self.digi_at.set(now_s + cfg.digi_wait_s() as u32);
+                }
             }
         }
         let mut call = Buf::<10>::new();
@@ -363,12 +376,14 @@ impl AprsLive {
         seen
     }
 
-    /// A fill-in digipeater: the first unused path entry, when it is WIDE1-1, becomes our call, used.
-    fn digipeat(&self, f: &Frame, me: Address) {
+    /// A fill-in digipeater (APRS-26): the first unused path entry, when it is WIDE1-1 (or our callsign, with
+    /// `mycall`), becomes our call, used. True when a frame is waiting to go.
+    fn digipeat(&self, f: &Frame, me: Address, mycall: bool) -> bool {
         let wide1 = Address::from_text(b"WIDE1-1");
-        let Some(i) = f.digis().iter().position(|d| !d.repeated) else { return };
-        if !wide1.is_some_and(|w| f.digis()[i].same(&w)) {
-            return;
+        let Some(i) = f.digis().iter().position(|d| !d.repeated) else { return false };
+        let next = &f.digis()[i];
+        if !(wide1.is_some_and(|w| next.same(&w)) || mycall && next.same(&me)) {
+            return false;
         }
         let mut path = [me; uaprs::ax25::MAX_DIGIS];
         let n = f.digis().len();
@@ -377,9 +392,9 @@ impl AprsLive {
         used.repeated = true;
         path[i] = used;
         let mut buf = [0u8; FRAME_MAX];
-        if let Some(len) = Frame::new(f.src, f.dest, &path[..n], f.info).and_then(|g| g.write(&mut buf)) {
-            self.digi.set(Some((buf, len as u16)));
-        }
+        let Some(len) = Frame::new(f.src, f.dest, &path[..n], f.info).and_then(|g| g.write(&mut buf)) else { return false };
+        self.digi.set(Some((buf, len as u16)));
+        true
     }
 
     // ---- transmit ----
@@ -391,6 +406,9 @@ impl AprsLive {
         self.now_s.set(now_s);
         let mut t = Tick::default();
         if !on {
+            // Without APRS mode nothing is sent (APRS-22 only decodes): acks owed meanwhile are dropped, so
+            // turning the mode on later doesn't send stale ones.
+            self.acks.iter().for_each(|a| a.set(None));
             self.on_since.set(None);
             t.changed = self.waiting.replace(false);
             return t;
@@ -417,11 +435,13 @@ impl AprsLive {
             let a = c.get().unwrap();
             c.set(None);
             if let Some(n) = uaprs::build::ack(a.peer.as_bytes(), a.id.as_bytes(), &mut info) {
-                return self.framed(my, &info[..n], "Ack", out, t);
+                return self.framed(my, &info[..n], "Ack", cfg, out, t);
             }
         }
         if let Some((buf, len)) = self.digi.take() {
-            if self.last_digi.get().is_none_or(|l| now_s.wrapping_sub(l) >= DIGI_GAP_S) {
+            if now_s < self.digi_at.get() {
+                self.digi.set(Some((buf, len))); // 0 5 8 3's wait
+            } else if self.last_digi.get().is_none_or(|l| now_s.wrapping_sub(l) >= DIGI_GAP_S) {
                 self.last_digi.set(Some(now_s));
                 out[..len as usize].copy_from_slice(&buf[..len as usize]);
                 return Tick { len: len as usize, what: "Digipeat", ..t };
@@ -443,10 +463,12 @@ impl AprsLive {
             let id = num(o.id);
             if let Some(n) = uaprs::build::message(o.peer.as_bytes(), o.text.as_bytes(), Some(id.as_bytes()), &mut info) {
                 t.changed = true;
-                return self.framed(my, &info[..n], "Message", out, t);
+                return self.framed(my, &info[..n], "Message", cfg, out, t);
             }
         }
+        let beacon = beacon || self.after_voice.get() && auto_ok;
         if beacon && (auto_ok || self.beacon_now.get()) {
+            self.after_voice.set(false);
             let Some(f) = fix else {
                 self.beacon_now.set(false);
                 return Tick { what: "Beacon: no position", ..t };
@@ -467,16 +489,21 @@ impl AprsLive {
             };
             if let Some(n) = uaprs::build::position(&r, &mut info) {
                 t.changed = true;
-                return self.framed(my, &info[..n], "Beacon", out, t);
+                return self.framed(my, &info[..n], "Beacon", cfg, out, t);
             }
         }
         t
     }
 
-    fn framed(&self, me: Address, info: &[u8], what: &'static str, out: &mut [u8; FRAME_MAX], t: Tick) -> Tick {
-        let path = PATH.map(|p| Address::from_text(p).unwrap_or(me));
+    /// Our frame with 0 5 6 1's path (APRS-26).
+    fn framed(&self, me: Address, info: &[u8], what: &'static str, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX], t: Tick) -> Tick {
+        let names = cfg.path();
+        let mut path = [me; 2];
+        for (a, n) in path.iter_mut().zip(names) {
+            *a = Address::from_text(n).unwrap_or(me);
+        }
         let dest = Address::from_text(TOCALL).unwrap_or(me);
-        let len = Frame::new(me, dest, &path, info).and_then(|f| f.write(out)).unwrap_or(0);
+        let len = Frame::new(me, dest, &path[..names.len().min(2)], info).and_then(|f| f.write(out)).unwrap_or(0);
         Tick { len, what, ..t }
     }
 }
@@ -541,7 +568,7 @@ mod tests {
         for i in 0..25u32 {
             let call = std::format!("VE3A{}", (b'A' + i as u8) as char);
             let (f, n) = frame(call.as_bytes(), b"APRS", &[b"WIDE1-1*"], b"!4525.51N/07554.20W>Mobile");
-            assert!(a.receive(&f[..n], i, b"VE3XYZ", false).changed);
+            assert!(a.receive(&f[..n], i, b"VE3XYZ", &AprsCfg::DEFAULT).changed);
         }
         assert_eq!(a.stations(), HEARD_MAX);
         let s = a.station(0).unwrap();
@@ -552,7 +579,7 @@ mod tests {
         assert_eq!(s.comment.as_bytes(), b"Mobile");
         // Heard again: to the front, counted, not twice.
         let (f, n) = frame(b"VE3AM", b"APRS", &[], b">On the air");
-        a.receive(&f[..n], 30, b"VE3XYZ", false);
+        a.receive(&f[..n], 30, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert_eq!(a.station(0).unwrap().call.as_bytes(), b"VE3AM");
         assert_eq!(a.station(0).unwrap().times, 2);
         assert!(a.station(0).unwrap().pos.is_some(), "a status keeps the last position");
@@ -563,7 +590,7 @@ mod tests {
     fn message_to_us_is_acked_once() {
         let a = AprsLive::new();
         let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ   :On my way{12");
-        let rx = a.receive(&f[..n], 100, b"VE3XYZ", false);
+        let rx = a.receive(&f[..n], 100, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert_eq!(rx.inbound.unwrap().1.as_bytes(), b"On my way");
         let mut out = [0u8; FRAME_MAX];
         let t = a.tick(100, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
@@ -572,12 +599,12 @@ mod tests {
         assert_eq!(g.info, b":VE3KPW-9 :ack12");
         assert_eq!(g.digis().len(), 2);
         // The same message again (its sender didn't hear our ack): acked again, no second inbox entry.
-        let rx = a.receive(&f[..n], 130, b"VE3XYZ", false);
+        let rx = a.receive(&f[..n], 130, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert!(rx.inbound.is_none());
         assert_eq!(a.tick(131, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).what, "Ack");
         // Not to us: nothing.
         let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VA3ABC   :Hi{3");
-        assert!(a.receive(&f[..n], 140, b"VE3XYZ", false).inbound.is_none());
+        assert!(a.receive(&f[..n], 140, b"VE3XYZ", &AprsCfg::DEFAULT).inbound.is_none());
     }
 
     #[test]
@@ -594,7 +621,7 @@ mod tests {
         assert_eq!(t.what, "Message");
         assert!(matches!(t.states[0], Some((_, _, MsgState::Retrying(2)))));
         let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ   :ack1");
-        let rx = a.receive(&f[..n], 40, b"VE3XYZ", false);
+        let rx = a.receive(&f[..n], 40, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert!(matches!(rx.state, Some((_, _, MsgState::Acked))));
         assert_eq!(a.tick(200, true, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "acked: no more tries");
         // Never acked: five tries, then failed.
@@ -633,27 +660,78 @@ mod tests {
         assert_eq!(a.tick(3, true, true, b"", Some(fix()), &cfg, &mut out).len, 0, "APRS-8: no callsign, nothing sent");
     }
 
+    const DIGI: AprsCfg = AprsCfg { digi: crate::aprs::DIGI_ON, ..AprsCfg::DEFAULT };
+
     #[test]
     fn digipeater_fills_in_once() {
         let a = AprsLive::new();
         let mut out = [0u8; FRAME_MAX];
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b">Walking");
-        a.receive(&f[..n], 10, b"VE3XYZ", true);
+        a.receive(&f[..n], 10, b"VE3XYZ", &DIGI);
         let t = a.tick(10, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
         assert_eq!(t.what, "Digipeat");
         let g = Frame::parse(&out[..t.len]).unwrap();
         assert!(g.digis()[0].repeated && g.digis()[0].call() == b"VE3XYZ");
         assert!(!g.digis()[1].repeated);
         // The same frame again within 30 s, or one already past WIDE1: not repeated.
-        a.receive(&f[..n], 20, b"VE3XYZ", true);
+        a.receive(&f[..n], 20, b"VE3XYZ", &DIGI);
         assert_eq!(a.tick(20, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1*", b"WIDE2-1"], b">Later");
-        a.receive(&f[..n], 50, b"VE3XYZ", true);
+        a.receive(&f[..n], 50, b"VE3XYZ", &DIGI);
         assert_eq!(a.tick(50, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
         // Off by default (APRS-12).
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b">Again");
-        a.receive(&f[..n], 90, b"VE3XYZ", false);
+        a.receive(&f[..n], 90, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert_eq!(a.tick(90, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
+    }
+
+    /// APRS-26: our callsign as an alias when asked, and 0 5 8 3's wait before relaying.
+    #[test]
+    fn digipeater_mycall_alias_and_wait() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"VE3XYZ", b"WIDE2-1"], b">To me");
+        a.receive(&f[..n], 10, b"VE3XYZ", &DIGI);
+        assert_eq!(a.tick(10, true, true, b"VE3XYZ", None, &DIGI, &mut out).len, 0, "my call isn't an alias by default");
+        let cfg = AprsCfg { digi: crate::aprs::DIGI_ON | crate::aprs::DIGI_MYCALL | 3 << 4, ..AprsCfg::DEFAULT };
+        let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"VE3XYZ", b"WIDE2-1"], b">To me again");
+        a.receive(&f[..n], 40, b"VE3XYZ", &cfg);
+        assert_eq!(a.tick(41, true, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "waits 3 s");
+        let t = a.tick(43, true, true, b"VE3XYZ", None, &cfg, &mut out);
+        assert_eq!(t.what, "Digipeat");
+        assert!(Frame::parse(&out[..t.len]).unwrap().digis()[0].repeated);
+    }
+
+    /// 0 5 6 1: the path our frames ask for.
+    #[test]
+    fn path_setting() {
+        let mut out = [0u8; FRAME_MAX];
+        for (k, want) in [(0u8, 0usize), (1, 1), (2, 2)] {
+            let a = AprsLive::new();
+            let cfg = AprsCfg { path: k, ..AprsCfg::DEFAULT };
+            a.beacon_now();
+            let t = a.tick(1, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out);
+            assert_eq!(t.what, "Beacon");
+            let g = Frame::parse(&out[..t.len]).unwrap();
+            assert_eq!(g.digis().len(), want);
+            if want > 0 {
+                assert_eq!(g.digis()[0].call(), b"WIDE1");
+            }
+        }
+    }
+
+    /// APRS-27: a beacon after voice, kept to APRS-9's 30 s spacing.
+    #[test]
+    fn beacon_after_voice() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg { beacon: 1, after_voice: true, ..AprsCfg::DEFAULT }; // manual beacons only
+        a.after_voice();
+        assert_eq!(a.tick(100, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
+        a.after_voice();
+        assert_eq!(a.tick(110, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "30 s spacing");
+        assert_eq!(a.tick(131, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
+        assert_eq!(a.tick(170, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "once per transmission");
     }
 
     #[test]

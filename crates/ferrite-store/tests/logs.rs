@@ -177,7 +177,7 @@ fn waypoints_list_newest_first_and_move_down_on_delete() {
 fn aprs_settings_wait_two_seconds_and_quick_messages_are_kept() {
     let s = mount(SimFlash::new());
     let a = app();
-    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1 };
+    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: 1, digi: 0x23, after_voice: true };
     s.autosave(1000, &a);
     assert!(s.request(Op::AprsCfg(cfg)));
     assert!(s.aprs_cfg() == cfg);
@@ -200,7 +200,7 @@ fn the_reset_empties_them_all() {
     s.log(&ev(Src::Same, 1));
     s.message_in(true, b"A", b"B", 0);
     s.add_waypoint(&wp(1));
-    s.request(Op::AprsCfg(AprsCfg { f5k: 1, beacon: 1, power: 1 }));
+    s.request(Op::AprsCfg(AprsCfg { f5k: 1, beacon: 1, power: 1, ..AprsCfg::DEFAULT }));
     assert!(s.request(Op::Wipe));
     assert_eq!((s.events(), s.messages(), s.waypoints()), (0, 0, 0));
     assert!(s.aprs_cfg() == AprsCfg::DEFAULT);
@@ -307,7 +307,7 @@ fn power_cuts_leave_before_or_after() {
         s.message_in(n.is_multiple_of(2), b"VA3RTX", format!("msg {n}").as_bytes(), 0);
         s.add_waypoint(&wp(n));
     }
-    s.request(Op::AprsCfg(AprsCfg { f5k: 7, beacon: 2, power: 0 }));
+    s.request(Op::AprsCfg(AprsCfg { f5k: 7, beacon: 2, power: 0, ..AprsCfg::DEFAULT }));
     s.flush(&app());
     let mut f = s.into_parts().0;
     let (mut old, mut new, mut dup) = (0, 0, 0);
@@ -336,7 +336,7 @@ fn power_cuts_leave_before_or_after() {
                 }
             }
             _ => {
-                s.request(Op::AprsCfg(AprsCfg { f5k: n as u16, beacon: 1, power: 2 }));
+                s.request(Op::AprsCfg(AprsCfg { f5k: n as u16, beacon: 1, power: 2, ..AprsCfg::DEFAULT }));
                 s.flush(&app());
                 s.request(Op::Quick((n % 9) as u8, Some(Buf::from(format!("q {n}").as_bytes()))));
             }

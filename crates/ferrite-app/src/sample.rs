@@ -672,7 +672,7 @@ impl Data for Sample {
                     true
                 }
             },
-            Op::BeaconNow => {
+            Op::BeaconNow | Op::AfterVoice => {
                 let ok = self.call.get().is_some(); // APRS-8
                 if ok {
                     self.aprs.beacon_now();
