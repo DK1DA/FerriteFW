@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ferrite Link Test</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<style>
+:root {
+  --bg: #f4f4f2; --panel: #ffffff; --ink: #1b1b1b; --muted: #666; --line: #d8d8d4;
+  --accent: #c2410c; --ok: #15803d; --bad: #b91c1c; --term: #101010;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141414; --panel: #1d1d1d; --ink: #e8e8e6; --muted: #999; --line: #333;
+    --accent: #f97316; --ok: #4ade80; --bad: #f87171; --term: #0a0a0a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141414; --panel: #1d1d1d; --ink: #e8e8e6; --muted: #999; --line: #333;
+  --accent: #f97316; --ok: #4ade80; --bad: #f87171; --term: #0a0a0a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+h1 { font-size: 18px; margin: 0; }
+h1 small { color: var(--muted); font-weight: normal; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select, input { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .45; cursor: default; }
+input.wide { flex: 1; min-width: 180px; font-family: ui-monospace, monospace; }
+#status { font-weight: 600; }
+#status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+#stats { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+#term { background: var(--term); border-radius: 4px; height: 420px; overflow: hidden; }
+#term .xterm { padding: 6px; }
+#log { font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto; margin: 0; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .cols { grid-template-columns: 1fr; } #term { height: 320px; } }
+.warn { color: var(--bad); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ferrite link test <small>Bluetooth (BT513) or cable, VT100 terminal</small></h1>
+
+  <section>
+    <h2>Connection</h2>
+    <div class="row">
+      <select id="transport">
+        <option value="ble">Bluetooth (Web Bluetooth)</option>
+        <option value="serial">Cable (Web Serial)</option>
+      </select>
+      <select id="baud" title="Cable baud rate">
+        <option>115200</option><option>9600</option><option>38400</option><option>230400</option><option>460800</option><option>921600</option>
+      </select>
+      <button id="connect" class="primary">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <span id="status">Not connected</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>Data channel <select id="datach" disabled></select></label>
+      <label><input type="checkbox" id="localecho"> Local echo</label>
+      <label>Enter sends <select id="eol"><option value="\r">CR</option><option value="\r\n">CR LF</option><option value="\n">LF</option></select></label>
+      <span id="stats"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Terminal</h2>
+    <div id="term"></div>
+  </section>
+
+  <div class="cols">
+    <section>
+      <h2>Module control (FF31)</h2>
+      <div class="row">
+        <button data-at="AT+BAUD?" class="at" disabled>AT+BAUD?</button>
+        <button data-at="AT" class="at" disabled>AT</button>
+        <button data-at="AT+VERS?" class="at" disabled>AT+VERS?</button>
+        <button data-at="AT+HELP" class="at" disabled>AT+HELP</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="ctltext" class="wide" placeholder="Text, or hex like 3F3F3F3F 05 …">
+        <select id="ctlmode"><option value="text">Text</option><option value="hex">Hex</option></select>
+        <select id="ctleol"><option value="">no ending</option><option value="\r\n">CR LF</option><option value="\r">CR</option></select>
+        <button id="ctlsend" disabled>Send</button>
+      </div>
+      <p class="warn">AT+BAUD=N changes the module's stored rate. If the radio's firmware doesn't run at the new rate, its Bluetooth stops working until an app sets it back. Read first; set only on purpose.</p>
+    </section>
+    <section>
+      <h2>Log</h2>
+      <div class="row" style="margin-bottom:6px">
+        <button id="gatt" disabled>List services</button>
+        <button id="clearlog">Clear</button>
+      </div>
+      <pre id="log"></pre>
+    </section>
+  </div>
+</main>
+
+<script>
+'use strict';
+// Known BT513 UUIDs (docs/research/ios-ble-kiss.md): service FFE0 with FFE1 (data), FFE2, FF31 (control),
+// FF32 (preferred data). Web Bluetooth only lets us see services named up front, so list every likely one.
+const u16 = n => BluetoothUUID.canonicalUUID(n);
+const SERVICES = [0xffe0, 0xff30, 0xff00, 0xfff0, 0xfee0, 0x1800, 0x1801, 0x180a, 0x180f]
+  .map(u16).concat(['00000001-ba2a-46c9-ae49-01b0961f68bb']);
+const CTRL = u16(0xff31);
+const DATA_PREF = [u16(0xff32), u16(0xffe1), u16(0xffe2)];
+const CHUNK = 180; // under a 185-byte ATT MTU; Chrome negotiates up to 512 by itself
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+const enc = new TextEncoder(), dec = new TextDecoder();
+let link = null;            // { send(bytes), close(), kind }
+let chars = {};             // uuid -> characteristic (BLE)
+let dataChar = null, ctrlChar = null;
+let rx = 0, tx = 0, t0 = 0;
+
+const term = new Terminal({ convertEol: false, fontSize: 13, cursorBlink: true, scrollback: 2000,
+  theme: { background: '#101010' } });
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open($('term'));
+fit.fit();
+window.addEventListener('resize', () => fit.fit());
+term.writeln('Ferrite link test. Connect, then type: the terminal speaks VT100 to the radio.');
+
+function log(msg, cls) {
+  const t = new Date().toLocaleTimeString();
+  logEl.textContent += `[${t}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function hex(b) { return [...b].map(x => x.toString(16).padStart(2, '0')).join(' '); }
+function printable(b) { return [...b].map(x => x >= 32 && x < 127 ? String.fromCharCode(x) : '.').join(''); }
+function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = cls || ''; }
+function stats() {
+  const dt = Math.max((performance.now() - t0) / 1000, 0.001);
+  $('stats').textContent = link ? `rx ${rx} B  tx ${tx} B  (${(rx / dt).toFixed(0)} B/s in)` : '';
+}
+setInterval(stats, 1000);
+function enable(on) {
+  $('connect').disabled = on; $('disconnect').disabled = !on;
+  $('transport').disabled = on; $('baud').disabled = on;
+  const ctl = on && !!ctrlChar;
+  document.querySelectorAll('.at').forEach(b => b.disabled = !ctl);
+  $('ctlsend').disabled = !ctl;
+  $('gatt').disabled = !(on && link && link.kind === 'ble');
+  $('datach').disabled = !(on && link && link.kind === 'ble');
+}
+
+function received(bytes) {
+  rx += bytes.length;
+  term.write(bytes);
+}
+
+// Terminal input -> radio
+term.onData(s => {
+  if (!link) return;
+  s = s.replace(/\r/g, JSON.parse(`"${$('eol').value}"`));
+  if ($('localecho').checked) term.write(s.replace(/\n/g, '\r\n'));
+  link.send(enc.encode(s));
+});
+
+// ---------- Bluetooth ----------
+async function connectBle() {
+  const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SERVICES });
+  log(`Picked "${dev.name || '(no name)'}"`);
+  dev.addEventListener('gattserverdisconnected', () => { log('Bluetooth disconnected'); closed(); });
+  setStatus('Connecting…');
+  const gatt = await dev.gatt.connect();
+  chars = {};
+  const services = await gatt.getPrimaryServices();
+  for (const s of services) {
+    for (const c of await s.getCharacteristics()) chars[c.uuid] = c;
+  }
+  await listGatt(services);
+  ctrlChar = chars[CTRL] || null;
+  // Data channel: FF32 preferred, then FFE1, FFE2 (per KDH's app); any writable+notify char otherwise.
+  const candidates = Object.values(chars).filter(c => (c.properties.notify || c.properties.indicate) &&
+    (c.properties.write || c.properties.writeWithoutResponse) && c.uuid !== CTRL);
+  candidates.sort((a, b) => rank(a.uuid) - rank(b.uuid));
+  const sel = $('datach'); sel.innerHTML = '';
+  for (const c of candidates) sel.add(new Option(short(c.uuid), c.uuid));
+  if (!candidates.length) throw new Error('No characteristic with both write and notify was found');
+  await useData(candidates[0].uuid);
+  if (ctrlChar && (ctrlChar.properties.notify || ctrlChar.properties.indicate)) {
+    ctrlChar.addEventListener('characteristicvaluechanged', e => {
+      const b = new Uint8Array(e.target.value.buffer);
+      log(`FF31 ← "${printable(b)}"  [${hex(b)}]`);
+    });
+    await ctrlChar.startNotifications();
+  }
+  log(ctrlChar ? 'Control characteristic FF31 found' : 'No FF31 control characteristic on this device');
+  let queue = Promise.resolve();
+  link = {
+    kind: 'ble',
+    send(bytes) {
+      tx += bytes.length;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        const part = bytes.slice(i, i + CHUNK);
+        queue = queue.then(() => write(dataChar, part)).catch(e => log('Write failed: ' + e.message));
+      }
+    },
+    close() { if (dev.gatt.connected) dev.gatt.disconnect(); },
+  };
+  return dev.name || 'device';
+}
+function rank(uuid) { const i = DATA_PREF.indexOf(uuid); return i < 0 ? 99 : i; }
+function short(uuid) { const m = uuid.match(/^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/); return m ? m[1].toUpperCase() : uuid; }
+function write(c, bytes) {
+  return c.properties.writeWithoutResponse ? c.writeValueWithoutResponse(bytes) : c.writeValueWithResponse(bytes);
+}
+async function useData(uuid) {
+  if (dataChar) { try { await dataChar.stopNotifications(); } catch (_) {} dataChar.removeEventListener('characteristicvaluechanged', onData); }
+  dataChar = chars[uuid];
+  dataChar.addEventListener('characteristicvaluechanged', onData);
+  await dataChar.startNotifications();
+  log(`Data channel: ${short(uuid)}`);
+}
+function onData(e) { received(new Uint8Array(e.target.value.buffer)); }
+$('datach').onchange = e => useData(e.target.value).catch(err => log('Data channel: ' + err.message));
+
+async function listGatt(services) {
+  for (const s of services) {
+    log(`Service ${short(s.uuid)}`);
+    for (const c of await s.getCharacteristics()) {
+      const p = c.properties;
+      const props = ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'].filter(k => p[k]).join(', ');
+      let val = '';
+      if (p.read) {
+        try { const b = new Uint8Array((await c.readValue()).buffer); val = `  = "${printable(b)}" [${hex(b)}]`; } catch (_) {}
+      }
+      log(`  ${short(c.uuid)}  (${props})${val}`);
+    }
+  }
+}
+$('gatt').onclick = async () => {
+  try { const dev = link && link.kind === 'ble'; if (!dev) return;
+    const svcs = new Set(Object.values(chars).map(c => c.service));
+    await listGatt([...svcs]);
+  } catch (e) { log('List failed: ' + e.message); }
+};
+
+// Control characteristic (FF31): AT commands and raw bytes
+async function sendCtrl(bytes) {
+  if (!ctrlChar) return;
+  log(`FF31 → "${printable(bytes)}"  [${hex(bytes)}]`);
+  try { await write(ctrlChar, bytes); } catch (e) { log('FF31 write failed: ' + e.message); }
+}
+document.querySelectorAll('.at').forEach(b => b.onclick = () => sendCtrl(enc.encode(b.dataset.at)));
+$('ctlsend').onclick = () => {
+  const v = $('ctltext').value.trim(); if (!v) return;
+  let bytes;
+  if ($('ctlmode').value === 'hex') {
+    const h = v.replace(/[^0-9a-f]/gi, '');
+    if (h.length % 2) { log('Hex needs an even number of digits'); return; }
+    bytes = new Uint8Array(h.match(/../g).map(x => parseInt(x, 16)));
+  } else {
+    bytes = enc.encode(v + JSON.parse(`"${$('ctleol').value}"`));
+  }
+  if (/AT\+BAUD=/i.test(dec.decode(bytes)) && !confirm('This changes the module\'s stored UART rate. Send it?')) return;
+  sendCtrl(bytes);
+};
+
+// ---------- Cable (Web Serial) ----------
+async function connectSerial() {
+  const port = await navigator.serial.requestPort();
+  const baudRate = +$('baud').value;
+  await port.open({ baudRate });
+  const reader = port.readable.getReader();
+  const writer = port.writable.getWriter();
+  (async () => {
+    try {
+      for (;;) { const { value, done } = await reader.read(); if (done) break; if (value) received(value); }
+    } catch (e) { log('Serial read: ' + e.message); }
+    finally { reader.releaseLock(); }
+  })();
+  link = {
+    kind: 'serial',
+    send(bytes) { tx += bytes.length; writer.write(bytes).catch(e => log('Serial write: ' + e.message)); },
+    async close() { try { await reader.cancel(); } catch (_) {} writer.releaseLock(); await port.close(); },
+  };
+  return `cable at ${baudRate}`;
+}
+
+// ---------- Connect / disconnect ----------
+$('connect').onclick = async () => {
+  const kind = $('transport').value;
+  if (kind === 'ble' && !navigator.bluetooth) { log('This browser has no Web Bluetooth: use Chrome or Edge on desktop or Android.'); return; }
+  if (kind === 'serial' && !navigator.serial) { log('This browser has no Web Serial: use Chrome or Edge on desktop.'); return; }
+  try {
+    rx = tx = 0; t0 = performance.now(); ctrlChar = null; dataChar = null;
+    const what = kind === 'ble' ? await connectBle() : await connectSerial();
+    setStatus(`Connected: ${what}`, 'ok'); log(`Connected (${what})`);
+    enable(true); term.focus();
+  } catch (e) {
+    log('Connect failed: ' + e.message); setStatus('Not connected', 'bad'); link = null; enable(false);
+  }
+};
+$('disconnect').onclick = async () => { try { await link?.close(); } catch (_) {} closed(); };
+function closed() { link = null; ctrlChar = null; dataChar = null; setStatus('Not connected'); enable(false); stats(); }
+$('transport').onchange = () => { $('baud').style.display = $('transport').value === 'serial' ? '' : 'none'; };
+$('transport').onchange();
+$('clearlog').onclick = () => { logEl.textContent = ''; };
+if (!window.isSecureContext) log('Not a secure context: open this page from file:// or http://localhost, or Bluetooth and Serial stay off.');
+</script>
+</body>
+</html>
