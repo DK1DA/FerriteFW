@@ -489,16 +489,61 @@ pub struct LinkLive {
     pub write_pct: Option<u8>,
 }
 
-/// GPS, published by the GPS task.
+/// The latest GPS fix, published by the GPS task (the firmware's `POSITION` watch) for the UI and the APRS task
+/// (manual chapter 28). Compact on purpose: each reader keeps a copy. Position users take the fixed position
+/// when there is no fix (GPS-3), and every reader judges the fix by its age (GPS-2): `at_ms` against its own
+/// clock, never a fix older than it can use.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Position {
-    pub fix: bool,
-    /// Degrees x 1e7.
+pub struct GpsFix {
+    /// The module is powered (GPS-1, GPS-4); off: nothing below is current.
+    pub on: bool,
+    /// 0 no fix, 2 a 2D fix, 3 a 3D fix.
+    pub fix: u8,
+    /// Satellites used in the fix and in view.
+    pub used: u8,
+    pub view: u8,
+    /// Degrees x 1e7, south and west negative.
     pub lat: i32,
     pub lon: i32,
-    pub sats: u8,
-    /// UTC seconds of the day.
-    pub time_s: u32,
+    /// Altitude above mean sea level, decimetres (3D fixes).
+    pub alt_dm: i32,
+    /// Speed over ground in tenths of a knot, course over ground in tenths of a degree from true north.
+    pub speed_kn10: u16,
+    pub course10: u16,
+    /// Horizontal dilution of precision x 10 (accuracy is HDOP x 5 m, GPS-2).
+    pub hdop10: u16,
+    /// UTC as seconds since 1970 from the module's time and date (RMC), 0 until it has both: the clock
+    /// (GPS-7) works from this even before a position fix.
+    pub unix: u32,
+    /// When this was parsed, in the reader's milliseconds since boot (embassy-time's clock on the radio).
+    pub at_ms: u32,
+}
+
+impl GpsFix {
+    /// A position to use: on, with a fix.
+    pub fn has_fix(&self) -> bool {
+        self.on && self.fix >= 2
+    }
+}
+
+/// One satellite in view, for the sky plot (GPS-18).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SkySat {
+    pub prn: u8,
+    /// Signal, dB-Hz (0: tracked, no signal).
+    pub snr: u8,
+    /// Elevation in degrees, azimuth in degrees from true north halved (0-179), to keep the list small.
+    pub elev: u8,
+    pub azim_2: u8,
+    /// Bit 0: used in the fix; bit 1: BeiDou (else GPS and the rest).
+    pub flags: u8,
+}
+
+/// The satellites in view, for the UI only (GPS-18). The ATGM336H reports up to about 24; 16 cover the plot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GpsSky {
+    pub n: u8,
+    pub sat: [SkySat; 16],
 }
 
 #[cfg(test)]
@@ -514,6 +559,9 @@ mod tests {
         // modes share one slot in it, the largest being the band scope's 240 bars (SCOPE-9: 308 bytes, about
         // 0.45 KB more over the three copies than with 56 bars; accepted Oct 6, 2026).
         assert!(core::mem::size_of::<LiveAll>() <= 320);
+        // Each reader of the GPS watch keeps a copy of the fix; the sky list only the UI.
+        assert!(core::mem::size_of::<GpsFix>() <= 32);
+        assert!(core::mem::size_of::<GpsSky>() <= 81);
     }
 }
 

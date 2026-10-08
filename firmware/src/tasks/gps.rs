@@ -5,7 +5,7 @@ use crate::chan::POSITION;
 use crate::hal::uart;
 use crate::report::UART_GPS;
 use embassy_time::Timer;
-use ferrite_core::msg::Position;
+use ferrite_core::msg::GpsFix;
 use nmea::Nmea;
 
 /// The ATGM336H's default rate.
@@ -23,13 +23,13 @@ pub async fn task() {
             fresh |= nmea.feed(c);
         }
         if fresh {
-            let hms = nmea.utc_hms;
-            tx.send(Position {
-                fix: nmea.has_fix(),
+            tx.send(GpsFix {
+                on: true,
+                fix: if nmea.has_fix() { 2 } else { 0 },
                 lat: nmea.lat_e7,
                 lon: nmea.lon_e7,
-                sats: nmea.sats_used,
-                time_s: hms / 10000 * 3600 + hms / 100 % 100 * 60 + hms % 100,
+                used: nmea.sats_used,
+                ..GpsFix::default()
             });
         }
         Timer::after_millis(50).await; // 960 bytes/s at most: the 1 KB ring holds a second
