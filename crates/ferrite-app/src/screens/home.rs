@@ -256,10 +256,13 @@ impl View for Home {
             }
             // Header rows: y+7..y+24 on the big card, y+4..y+21 on the compact ones (their digits start at y+22).
             let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 4, y + 17) };
-            // VFO-22: the clarifier, beside the state (left of an RX or MON tag)
+            // Beside the state (left of an RX or MON tag): the clarifier (VFO-22), or on the APRS card that it takes
+            // turns on chip 0 with A or B, so a packet can be missed (APRS-21).
             let mut clr = Buf::<16>::new();
             let c = app.slots[s as usize].clar;
-            if c != 0 && !lv.scanning {
+            if aprs && app.aprs_shared().is_some() {
+                clr.set(b"VHF shared");
+            } else if c != 0 && !lv.scanning {
                 slot::clar_text(c, &mut clr);
             }
             if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr))) {

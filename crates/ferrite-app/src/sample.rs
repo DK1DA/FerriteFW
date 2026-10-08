@@ -320,7 +320,7 @@ impl Sample {
     /// band relay where the active slot holds it. The caller notifies the arrivals and shows the transmissions.
     pub fn aprs_tick(&self, now_s: u32, on: bool, relay_ok: bool) -> AprsNews {
         let known = |c: &[u8]| STATIONS.iter().any(|s| s.0.as_bytes() == c) || self.aprs.heard(c);
-        let n = self.aprs.tick(now_s, on, relay_ok, &known);
+        let n = self.aprs.tick(now_s, on, relay_ok, &known, self.fix.get());
         if n.changed {
             self.bump();
         }

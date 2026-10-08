@@ -4,8 +4,8 @@
 //! waiting while the band relay is in the other state (APRS-20). A station we have heard acks our message on its
 //! second try; anyone else never does, so the message ends failed. Nothing here is in the firmware.
 
-use crate::aprs::{beacon_due, retry_wait, AprsCfg, TRIES};
-use crate::data::{Beacon, Message, MsgState, Pos, Station, Sym};
+use crate::aprs::{beacon_due, retry_wait, AprsCfg, LastBeacon, TRIES};
+use crate::data::{Beacon, Fix, Message, MsgState, Pos, Station, Sym};
 use core::cell::Cell;
 use ferrite_ui::text::Buf;
 
@@ -63,7 +63,7 @@ pub(super) struct AprsSim {
     heard_gone: Cell<u8>,
     inbound: Cell<u8>,
     acks_due: Cell<u8>,
-    beacon_last: Cell<Option<u32>>,
+    beacon_last: Cell<Option<LastBeacon>>,
     beacon_now: Cell<bool>,
     waiting: Cell<bool>,
     last_auto: Cell<Option<u32>>,
@@ -169,15 +169,16 @@ impl AprsSim {
     pub fn beacon(&self) -> Beacon {
         let c = self.cfg.get();
         let next_s = c.every_min().map(|m| match self.beacon_last.get() {
-            Some(t) => (t + m as u32 * 60).saturating_sub(self.now_s()),
+            Some(l) => (l.at_s + m as u32 * 60).saturating_sub(self.now_s()),
             None => 0,
         });
         Beacon { waiting: self.waiting.get(), next_s: next_s.filter(|_| self.on_since.get().is_some()) }
     }
 
     /// A second of the APRS task: `on` is APRS mode, `relay_ok` whether slot C can transmit with the band
-    /// relay where the active slot holds it, `known` whether a station acks (it has been heard).
-    pub fn tick(&self, now_s: u32, on: bool, relay_ok: bool, known: &dyn Fn(&[u8]) -> bool) -> AprsNews {
+    /// relay where the active slot holds it, `known` whether a station acks (it has been heard), `fix` the GPS's
+    /// for distance and smart beacons (APRS-24).
+    pub fn tick(&self, now_s: u32, on: bool, relay_ok: bool, known: &dyn Fn(&[u8]) -> bool, fix: Option<Fix>) -> AprsNews {
         self.now_s.set(now_s);
         let mut news = AprsNews::default();
         if !on {
@@ -221,7 +222,7 @@ impl AprsSim {
         }
         // one transmission a tick, on C's frequency: the relay must already be where C needs it (APRS-20)
         let auto_ok = self.last_auto.get().is_none_or(|t| now_s - t >= AUTO_GAP_S);
-        let beacon = self.beacon_now.get() || beacon_due(&self.cfg.get(), self.beacon_last.get(), now_s);
+        let beacon = self.beacon_now.get() || beacon_due(&self.cfg.get(), self.beacon_last.get(), now_s, fix);
         let waiting = beacon && !relay_ok;
         news.changed |= self.waiting.replace(waiting) != waiting;
         if !relay_ok {
@@ -253,7 +254,7 @@ impl AprsSim {
         }
         if beacon && (auto_ok || self.beacon_now.get()) {
             self.beacon_now.set(false);
-            self.beacon_last.set(Some(now_s));
+            self.beacon_last.set(Some(LastBeacon::new(now_s, fix)));
             self.last_auto.set(Some(now_s));
             news.tx = Some("Beacon");
             news.changed = true;

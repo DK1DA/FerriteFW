@@ -29,6 +29,7 @@ nmea = { git = "https://github.com/infamy/uradio", rev = "" }
 uafsk = { git = "https://github.com/infamy/udigimodes", rev = "" }
 upocsag = { git = "https://github.com/infamy/udigimodes", rev = "" }
 udsc = { git = "https://github.com/infamy/udigimodes", rev = "" }
+uaprs = { git = "https://github.com/infamy/udigimodes", rev = "", default-features = false }
 
 [profile.release]
 opt-level = "z"

@@ -33,8 +33,8 @@ Packed format v2 (little-endian), linked into the firmware's slow flash and read
   ... entries, sorted by key sequence, then rank (best first): the letters shared with the previous entry of the
       bucket (u4, high) and the number of new letters (u4, low), the new letters 5 bits each (a=1..z=26), padded
       to a byte, then a byte: bit 7 capitals, bits 6-0 the rank (127 best)
-  short forms: u8 count, then word NUL short-form NUL, one word each (assets/words/abbrev.txt; phrases of more
-      than one word are skipped)
+  short forms: u8 count, then word NUL short-form NUL (assets/words/abbrev.txt); a phrase ("see you later")
+      is its words with single spaces, offered after its last word when the words before it were typed (TEXT-4)
   quick messages: u8 count, then each message NUL-terminated (assets/words/quick.txt, the factory set)
 
 The committed copy is assets/words/dict.bin (and dict.txt, the ranked list, for review):
@@ -163,8 +163,7 @@ def pack(order, caps):
     shorts = []
     for l in plain(os.path.join(WORDS, "abbrev.txt")):
         word, short = l.split("\t")
-        if " " not in word:
-            shorts.append((word, short))
+        shorts.append((" ".join(word.split()), short))
     sec_short = bytearray([len(shorts)])
     for word, short in shorts:
         sec_short += word.encode() + b"\0" + short.upper().encode() + b"\0"

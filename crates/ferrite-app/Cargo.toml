@@ -10,6 +10,7 @@ description = "Ferrite's UI state machine: keys and the radio's snapshot in, rad
 ufmt.workspace = true
 ferrite-core.workspace = true
 ferrite-ui.workspace = true
+uaprs.workspace = true # smart beaconing (APRS-24)
 
 [dev-dependencies]
 ferrite-ui = { workspace = true, features = ["std"] }

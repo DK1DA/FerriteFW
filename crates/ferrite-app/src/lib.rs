@@ -75,6 +75,9 @@ pub const TOAST_MS: u32 = 3000;
 /// A hold-digit shortcut's popup (HOME-8).
 pub const POPUP_MS: u32 = 1200;
 pub const UNDO_MS: u32 = 5000;
+/// The refusal beep (SND-4, TEXT-5): short and low, unlike a key beep.
+const REFUSED_HZ: u16 = 440;
+const REFUSED_MS: u16 = 80;
 /// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
 pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
@@ -987,6 +990,11 @@ impl App {
         self.show_toast(head, body, false);
     }
 
+    /// The short refusal beep (SND-4, TEXT-5), from the BK4829's tone generator (SND-11).
+    pub(crate) fn beep_refused(&mut self) {
+        self.out.push(RadioCmd::Beep { hz: REFUSED_HZ, ms: REFUSED_MS });
+    }
+
     fn show_toast(&mut self, head: &[u8], body: &[u8], icon: bool) {
         self.toast = Some(Toast { head: Buf::from(head), body: Buf::from(body), icon, center: false, until: self.now.wrapping_add(TOAST_MS) });
     }
@@ -1003,7 +1011,7 @@ impl App {
     }
 
     /// The watched slots: Watch's, and C while APRS mode has it (APRS-16).
-    fn watch_mask(&self) -> u8 {
+    pub(crate) fn watch_mask(&self) -> u8 {
         [0, 0b011, 0b111][self.watch as usize % 3] | (self.set.aprs_mode as u8) << aprs::APRS_SLOT
     }
 

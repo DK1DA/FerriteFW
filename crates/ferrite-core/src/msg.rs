@@ -82,6 +82,9 @@ pub enum RadioCmd {
     /// HF mode: the SI4732's own seek, up or down from the frequency it is on (AM, below 30 MHz; HF-31). The
     /// frequency it stops on comes back in [`ModeLive::Hf`].
     HfSeek { up: bool },
+    /// A short tone from the BK4829's tone generator to the speaker (SND-11), e.g. a key refused at a limit
+    /// (TEXT-5).
+    Beep { hz: u16, ms: u16 },
     /// The crossband repeater: start with these settings, or stop (XB-14).
     Crossband(Option<XbCfg>),
 }

@@ -1,7 +1,8 @@
-//! APRS mode on slot C (APRS-13, APRS-15 to APRS-20) and the simulator's APRS task.
+//! APRS mode on slot C (APRS-13, APRS-15 to APRS-20), beacon modes (APRS-24) and the simulator's APRS task.
 
 use super::*;
-use crate::aprs::{AprsCfg, APRS_SLOT};
+use crate::aprs::{beacon_due, AprsCfg, LastBeacon, APRS_SLOT, BEACON_MODES, SMART};
+use crate::data::{Fix, Pos};
 use crate::data::{Data, Draft, MsgState, Op};
 use crate::sample::Sample;
 use ferrite_core::txplan::Region;
@@ -183,6 +184,75 @@ fn beacon_settings() {
     a.app.set_aprs(AprsCfg { power: 2, ..a.app.aprs_cfg() });
     a.mode(true);
     assert!(a.cmds().contains(&RadioCmd::SlotParam { slot: 2, param: Param::Power, value: 2 }));
+}
+
+/// APRS-21: the card says the VHF chip is shared while A or B listens on chip 0 too (active or watched).
+#[test]
+fn aprs_shares_the_vhf_chip() {
+    let mut a = A::new();
+    for s in &mut a.app.slots[..2] {
+        s.vfo_mode = true;
+    }
+    a.app.slots[0].vfo = 44_600_000;
+    a.app.slots[1].vfo = 14_652_000;
+    a.app.set_watch(0);
+    a.mode(true);
+    assert_eq!(a.app.aprs_shared(), None, "A on UHF, B not watched");
+    a.app.set_watch(1);
+    assert_eq!(a.app.aprs_shared(), Some(1), "B on 2 m, watched");
+    a.app.slots[0].vfo = 14_652_000;
+    assert_eq!(a.app.aprs_shared(), Some(0), "the active slot listens whatever Watch says");
+    a.mode(false);
+    assert_eq!(a.app.aprs_shared(), None);
+}
+
+/// 0 5 5 1 steps through off, manual, the timed, distance and smart modes, and wraps (APRS-24).
+#[test]
+fn beacon_modes_in_order() {
+    let mut a = A::new();
+    let mut seen = std::vec::Vec::new();
+    for _ in 0..BEACON_MODES {
+        let mut b = Buf::<24>::new();
+        a.app.beacon_mode_text(&mut b);
+        seen.push(std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap());
+        a.app.step_beacon(1);
+    }
+    assert_eq!(seen[..3], ["Off", "Manual", "Every 1 min"]);
+    assert_eq!(seen[10..], ["Every 0.1 km", "Every 0.2 km", "Every 0.5 km", "Every 1 km", "Every 2 km", "Every 5 km", "Every 10 km", "Smart"]);
+    assert_eq!(a.app.aprs_cfg().mode(), 0, "wraps to off");
+}
+
+fn fix(lat: i32, speed_kmh: u16, heading: u16) -> Option<Fix> {
+    Some(Fix { pos: Pos { lat, lon: -794_000_000 }, three_d: true, alt_m: 0, speed_kmh, heading, hdop_x10: 9, used: 8, age_s: 1, utc_s: 0 })
+}
+
+/// APRS-24: distance beacons go once the GPS has moved that far from the last one, never without a fix.
+#[test]
+fn distance_beacons() {
+    let c = AprsCfg { beacon: 13, ..AprsCfg::DEFAULT }; // every 1 km
+    assert_eq!(c.every_m(), Some(1000));
+    let here = 437_000_000;
+    assert!(!beacon_due(&c, None, 0, None), "no fix, no distance beacon");
+    assert!(beacon_due(&c, None, 0, fix(here, 0, 0)), "the first with a fix");
+    let last = Some(LastBeacon::new(0, fix(here, 0, 0)));
+    assert!(!beacon_due(&c, last, 3600, fix(here + 80_000, 40, 0)), "0.9 km on: not yet, however long");
+    assert!(beacon_due(&c, last, 60, fix(here + 95_000, 40, 0)), "1.06 km on");
+}
+
+/// APRS-24: smart beacons with SmartBeaconing's standard values.
+#[test]
+fn smart_beacons() {
+    let c = AprsCfg { beacon: SMART as u8, ..AprsCfg::DEFAULT };
+    assert!(c.smart() && c.every_min().is_none() && c.every_m().is_none());
+    let here = 437_000_000;
+    let last = Some(LastBeacon::new(0, fix(here, 50, 90)));
+    assert!(!beacon_due(&c, last, 300, fix(here, 2, 90)), "parked: 30 min");
+    assert!(beacon_due(&c, last, 1800, fix(here, 2, 90)));
+    assert!(!beacon_due(&c, last, 170, fix(here, 110, 90)), "fast: every 3 min");
+    assert!(beacon_due(&c, last, 180, fix(here, 110, 90)));
+    assert!(beacon_due(&c, last, 40, fix(here, 60, 180)), "a 90 degree turn after 30 s");
+    assert!(!beacon_due(&c, last, 20, fix(here, 60, 180)), "not within 30 s of the last");
+    assert!(beacon_due(&c, last, 1800, None), "no fix: the slow rate");
 }
 
 /// The simulator's APRS task: retries on APRS-13's schedule, an ack from a heard station on the second try,

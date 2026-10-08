@@ -401,6 +401,7 @@ version = "0.1.0"
 dependencies = [
  "ferrite-core",
  "ferrite-ui",
+ "uaprs",
  "ufmt",
 ]
 
@@ -1214,6 +1215,14 @@ dependencies = [
 
 [[package]]
 name = "uafsk"
+version = "0.1.0"
+source = "git+https://github.com/infamy/udigimodes?rev=d364f194a866158bd110c1693d586bc590ef1837#d364f194a866158bd110c1693d586bc590ef1837"
+dependencies = [
+ "udsp",
+]
+
+[[package]]
+name = "uaprs"
 version = "0.1.0"
 source = "git+https://github.com/infamy/udigimodes?rev=d364f194a866158bd110c1693d586bc590ef1837#d364f194a866158bd110c1693d586bc590ef1837"
 dependencies = [

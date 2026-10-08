@@ -770,6 +770,27 @@ fn predictive_short_forms() {
     assert_eq!(text(&t), "QSL QTH ");
 }
 
+/// TEXT-4: after the words of a phrase, its last word offers the phrase's short form, which takes their place.
+#[test]
+fn predictive_phrase_short_forms() {
+    let mut t = T::new();
+    compose_to(&mut t);
+    for w in ["see", "you"] {
+        keys(&mut t, w);
+        t.tap(Key::Hash);
+    }
+    assert_eq!(text(&t), "See you ");
+    keys(&mut t, "later");
+    t.app.knob(1, t.t, &t.s); // later, CUL
+    t.draw();
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "CUL ");
+    keys(&mut t, "later");
+    t.app.knob(1, t.t, &t.s);
+    t.tap(Key::Hash);
+    assert_eq!(text(&t), "CUL later ", "no phrase before it: later is the only candidate");
+}
+
 /// TEXT-3: keys that spell nothing aren't guessed; BACK takes the keys back one by one.
 #[test]
 fn predictive_no_word() {
@@ -809,7 +830,7 @@ fn predictive_marks_digits_and_switch() {
     assert_eq!(text(&t), "Ok, 73g", "multi-tap now");
 }
 
-/// TEXT-5: 67 characters at most.
+/// TEXT-5: 67 characters at most; the key that would pass it beeps.
 #[test]
 fn predictive_limit() {
     use crate::data::Op;
@@ -819,8 +840,10 @@ fn predictive_limit() {
     d.text.set(&[b'x'; 65]);
     t.s.request(Op::Draft(d));
     keys(&mut t, "ok");
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Beep { .. })));
     t.tap(Key::Digit(6)); // a third key would pass 67
     assert_eq!(t.app.text.as_bytes(), b"65");
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Beep { .. })), "refused with a beep");
     t.tap(Key::Hash);
     assert_eq!(text(&t).len(), 67);
 }

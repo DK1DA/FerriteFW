@@ -288,19 +288,21 @@ fn put_text(store: &impl ChannelStore, s: Compose, head: Buf<67>) {
     }
 }
 
-/// Candidate `i` for `keys` (TEXT-2, TEXT-4): the dictionary's matches best first, each followed by its short
-/// form when it has one; whether it is shown in capitals.
-fn candidate(keys: &[u8], i: usize) -> Option<(Buf<16>, bool)> {
+/// A candidate: the word, whether it is shown in capitals, and how many bytes before it a phrase's short form
+/// replaces (0 for a word).
+type Cand = (Buf<16>, bool, usize);
+
+/// Candidate `i` for `keys` after `head` (TEXT-2, TEXT-4): the dictionary's matches best first, each followed by
+/// its short form, and by a phrase's when the words before it in `head` complete one (see you + later → CUL).
+fn candidate(keys: &[u8], head: &[u8], i: usize) -> Option<Cand> {
     let mut k = 0;
     for n in 0.. {
         let w = crate::words::nth(keys, n)?;
-        if k == i {
-            return Some((w.text, w.caps));
-        }
-        k += 1;
-        if let Some(s) = crate::words::short(w.text.as_bytes()) {
+        let short = crate::words::short(w.text.as_bytes()).map(|s| (s, 0));
+        let phrase = crate::words::phrase(head, w.text.as_bytes());
+        for c in [Some((w.text, w.caps, 0)), short.map(|(s, d)| (Buf::from(s), true, d)), phrase.map(|(s, d)| (Buf::from(s), true, d))].into_iter().flatten() {
             if k == i {
-                return Some((Buf::from(s), true));
+                return Some(c);
             }
             k += 1;
         }
@@ -308,8 +310,8 @@ fn candidate(keys: &[u8], i: usize) -> Option<(Buf<16>, bool)> {
     None
 }
 
-fn candidates(keys: &[u8]) -> usize {
-    (0..).take_while(|&i| candidate(keys, i).is_some()).count()
+fn candidates(keys: &[u8], head: &[u8]) -> usize {
+    (0..).take_while(|&i| candidate(keys, head, i).is_some()).count()
 }
 
 /// A word as it goes in: capitals for Q-codes and shorthand, else the case chosen (Capital, CAPS, lower).
@@ -324,11 +326,12 @@ fn cased(w: &[u8], caps: bool, pcase: u8) -> Buf<16> {
     b
 }
 
-/// What the word in progress shows as: the picked candidate, or the keys as digits when nothing matches.
-fn pending(keys: &[u8], s: Compose) -> (Buf<16>, bool) {
-    match candidate(keys, s.pick as usize) {
-        Some((w, caps)) => (cased(w.as_bytes(), caps, s.pcase), true),
-        None => (Buf::from(keys), false),
+/// What the word in progress shows as: the picked candidate, or the keys as digits when nothing matches; and
+/// how many bytes of `head` it replaces (a phrase's short form).
+fn pending(keys: &[u8], head: &[u8], s: Compose) -> (Buf<16>, bool, usize) {
+    match candidate(keys, head, s.pick as usize) {
+        Some((w, caps, drop)) => (cased(w.as_bytes(), caps, s.pcase), true, drop),
+        None => (Buf::from(keys), false, 0),
     }
 }
 
@@ -342,9 +345,9 @@ fn next_case(t: &[u8], pcase: u8) -> u8 {
     }
 }
 
-/// The 67-character limit (TEXT-5): why, in a toast. (The short beep waits for a way from the App to the DSP
-/// task's beep.)
+/// The 67-character limit (TEXT-5): a short beep, and why in a toast.
 fn refuse_full(app: &mut App) {
+    app.beep_refused();
     app.show_toast(slow!("67 characters").as_bytes(), slow!("the APRS limit").as_bytes(), false);
 }
 
@@ -359,15 +362,17 @@ fn accept(app: &mut App, s: &mut Compose, t: &mut Buf<67>) -> bool {
         return true;
     }
     let keys = app.text;
-    let (w, ok) = pending(keys.as_bytes(), *s);
+    let (w, ok, drop) = pending(keys.as_bytes(), t.as_bytes(), *s);
     if !ok {
         app.show_toast(b"No word", slow!("hold * to spell it").as_bytes(), false); // TEXT-3
         return false;
     }
-    if t.len() + w.len() > room(*s) {
+    if t.len() - drop + w.len() > room(*s) {
         refuse_full(app);
         return false;
     }
+    let head = *t;
+    t.set(&head.as_bytes()[..head.len() - drop]);
     t.push(w.as_bytes());
     app.text.clear();
     s.pick = 0;
@@ -471,7 +476,7 @@ impl Compose {
     fn pred_knob(self, app: &mut App, d: i32, store: &impl ChannelStore) -> bool {
         let keys = app.text;
         if !keys.is_empty() {
-            let n = candidates(keys.as_bytes()).max(1) as i32;
+            let n = candidates(keys.as_bytes(), text_of(store, self).as_bytes()).max(1) as i32;
             let pick = (self.pick as i32 + d).rem_euclid(n) as u8;
             app.screen = Screen::Compose(Compose { pick, ..self });
             return true;
@@ -667,9 +672,11 @@ impl View for Compose {
         app.page(lcd, 0u8);
         let pred = app.set.predictive;
         let keys = app.text;
-        let text = text_of(cx.store, self);
+        let head = text_of(cx.store, self);
         let full = full_of(cx.store, self);
-        let (word, matched) = if pred && !keys.is_empty() { pending(keys.as_bytes(), self) } else { (Buf::new(), true) };
+        let (word, matched, drop) = if pred && !keys.is_empty() { pending(keys.as_bytes(), head.as_bytes(), self) } else { (Buf::new(), true, 0) };
+        // a phrase's short form shows in place of the words it replaces (TEXT-4)
+        let text = Buf::<67>::from(&head.as_bytes()[..head.len() - drop]);
         let quick_list = pred && self.field == 1 && full.is_empty() && keys.is_empty() && !self.quick_edit_on();
         if quick_list != self.list {
             app.screen = Screen::Compose(Compose { list: quick_list, ..self });
@@ -692,7 +699,7 @@ impl View for Compose {
             lcd.fill(0, y, 240, h + 24, BG);
             lcd.text4(8, y + 12, if quick_list { slow!("Quick messages").as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
             let mut c = Buf::<12>::new();
-            let _ = uwrite!(c, "{}/{}", full.len() + word.len(), TEXT_MAX); // TEXT-5
+            let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX); // TEXT-5
             let cw = text4_width(c.as_bytes(), &UI_12);
             lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
             let focus = self.field == 1;
@@ -705,7 +712,7 @@ impl View for Compose {
                 let mut all = Buf::<84>::from(text.as_bytes());
                 all.push(word.as_bytes());
                 let at = all.len();
-                all.push(&full.as_bytes()[text.len().min(full.len())..]);
+                all.push(&full.as_bytes()[head.len().min(full.len())..]);
                 wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, all.as_bytes(), bg);
                 if focus {
                     let under = if !word.is_empty() { text4_width(word.as_bytes(), &UI_12) } else if pending_tap { 7 } else { 0 };
@@ -714,12 +721,12 @@ impl View for Compose {
             }
         }
         let callsign = cx.store.data().callsign();
-        let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list);
+        let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list, head);
         if app.dirty(R_NOTE, hash(&strip)) {
             let y = 236;
             lcd.fill(0, y, 240, 60, BG);
             if pred && self.field == 1 && !keys.is_empty() {
-                candidate_strip(lcd, y + 2, keys.as_bytes(), self);
+                candidate_strip(lcd, y + 2, keys.as_bytes(), head.as_bytes(), self);
             } else {
                 let mut b = Buf::<40>::new();
                 if pred && self.field == 1 {
@@ -783,8 +790,8 @@ fn quick_rows(store: &impl ChannelStore, lcd: &mut impl Panel, y: i32, sel: usiz
 
 /// The candidate strip (TEXT-11): three at a time, the picked one selected, and where it is in the list; or
 /// "no word" (TEXT-3).
-fn candidate_strip(lcd: &mut impl Panel, y: i32, keys: &[u8], s: Compose) {
-    let n = candidates(keys);
+fn candidate_strip(lcd: &mut impl Panel, y: i32, keys: &[u8], head: &[u8], s: Compose) {
+    let n = candidates(keys, head);
     if n == 0 {
         lcd.text4(8, y + 11, slow!("No word: hold * to spell it").as_bytes(), &UI_12, AMBER, BG);
         return;
@@ -793,7 +800,7 @@ fn candidate_strip(lcd: &mut impl Panel, y: i32, keys: &[u8], s: Compose) {
     let mut words = [Buf::<16>::new(); 3];
     let mut k = 0;
     for (i, w) in words.iter_mut().enumerate() {
-        if let Some((c, caps)) = candidate(keys, from + i) {
+        if let Some((c, caps, _)) = candidate(keys, head, from + i) {
             *w = cased(c.as_bytes(), caps, s.pcase);
             k += 1;
         }

@@ -147,6 +147,29 @@ pub fn short(word: &[u8]) -> Option<&'static [u8]> {
     None
 }
 
+/// A phrase's short form ending in `word` (TEXT-4): see you later → CUL when "see you" was typed just before it.
+/// `head` is the text before the word; the second value is how many of its bytes the short form replaces (the
+/// phrase's earlier words and the spaces after them).
+pub fn phrase(head: &[u8], word: &[u8]) -> Option<(&'static [u8], usize)> {
+    if !valid() {
+        return None;
+    }
+    let h = head.trim_ascii_end();
+    let mut it = strings(u32_at(8));
+    while let (Some(p), Some(s)) = (it.next(), it.next()) {
+        let Some(sp) = p.iter().rposition(|&c| c == b' ') else { continue };
+        let (front, last) = (&p[..sp], &p[sp + 1..]);
+        if !last.eq_ignore_ascii_case(word) || h.len() < front.len() {
+            continue;
+        }
+        let at = h.len() - front.len();
+        if h[at..].eq_ignore_ascii_case(front) && (at == 0 || h[at - 1] == b' ') {
+            return Some((s, head.len() - at));
+        }
+    }
+    None
+}
+
 /// The factory quick messages (TEXT-7): `i` of [`QUICK`].
 pub fn quick(i: usize) -> &'static [u8] {
     if !valid() {
@@ -213,6 +236,18 @@ mod tests {
         assert_eq!(short(b"received"), Some(&b"QSL"[..]));
         assert_eq!(short(b"Thanks"), Some(&b"TNX"[..]));
         assert_eq!(short(b"home"), None);
+        assert_eq!(short(b"later"), None, "a phrase's short form needs its earlier words ([`phrase`])");
+    }
+
+    /// TEXT-4: a phrase's short form after its last word, replacing the words typed before it.
+    #[test]
+    fn phrase_short_forms() {
+        assert_eq!(phrase(b"Ok, see you ", b"later"), Some((&b"CUL"[..], 8)));
+        assert_eq!(phrase(b"Thank ", b"you"), Some((&b"TU"[..], 6)));
+        assert_eq!(phrase(b"good ", b"night"), Some((&b"GN"[..], 5)));
+        assert_eq!(phrase(b"see ", b"later"), None, "the whole phrase or nothing");
+        assert_eq!(phrase(b"oversee you ", b"later"), None, "at a word start");
+        assert_eq!(phrase(b"", b"later"), None);
     }
 
     /// TEXT-7: the factory quick messages come from quick.txt.
