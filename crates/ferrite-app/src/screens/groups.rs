@@ -112,7 +112,7 @@ const G8: [Entry; 9] = [
 ];
 const G9: [Entry; 9] = [
     (slow!("Keys and lock"), slow!("No auto lock"), slow!("Auto lock, lock covers, key test, shortcuts.")),
-    (slow!("Connections"), slow!("BT off"), slow!("Bluetooth, paired devices, link.")),
+    (slow!("Connections"), slow!("BT off"), slow!("Bluetooth, approved devices, link.")),
     (slow!("PIN and lock"), slow!("Off"), slow!("PIN lock, channel-only mode, PIN.")),
     (slow!("Region"), slow!("Not set"), slow!("Your amateur bands and defaults.")),
     (slow!("Receiver"), slow!("Tail 150 ms"), slow!("Advanced squelch, tail, discriminator.")),
@@ -257,7 +257,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ]),
     ((9, 2), &[
         (slow!("Bluetooth"), slow!("Off"), slow!("The Bluetooth link to the web app.")),
-        (slow!("Paired devices"), slow!(""), slow!("Approved devices; forget one.")),
+        (slow!("Approved devices"), slow!(""), slow!("Devices allowed to write; forget one.")),
         (slow!("Link status"), slow!(""), slow!("Cable and Bluetooth now.")),
         (slow!("Debug console"), slow!("Off"), slow!("Off, cable or Bluetooth.")),
         (slow!("Cable port"), slow!("Auto"), slow!("Link, terminal or KISS.")),

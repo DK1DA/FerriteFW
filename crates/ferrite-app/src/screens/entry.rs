@@ -344,15 +344,14 @@ impl View for Entry {
         if app.dirty(R_NOTE, hash(&note)) {
             para(lcd, 8, 210, 224, 2, 17, note, &UI_12, AMBER, BG);
         }
-        let mut tip = Buf::<64>::new();
-        match self.to {
-            EntryFor::Vfo => tip.set(b"After three digits the point comes by itself; * types it (52*525)."),
-            EntryFor::Channel => tip.set(b"Type the channel number, then OK."),
-            EntryFor::SplitTx => tip.set(b"Transmit here whatever RX is on. OK keeps it; BACK keeps the old shift."),
-            _ => tip.set(b"* is the point. OK keeps it, BACK deletes."),
-        }
+        let tip: &[u8] = match self.to {
+            EntryFor::Vfo => b"After three digits the point comes by itself; * types it (52*525).",
+            EntryFor::Channel => b"Type the channel number, then OK.",
+            EntryFor::SplitTx => b"Transmit here whatever RX is on. OK keeps it; BACK keeps the old shift.",
+            _ => b"* is the point. OK keeps it, BACK deletes.",
+        };
         if app.dirty(R_HELP, hash(&tip)) {
-            para(lcd, 8, 250, 224, 3, 15, tip.as_bytes(), &UI_12, SUB, BG);
+            para(lcd, 8, 250, 224, 3, 15, tip, &UI_12, SUB, BG);
         }
     }
 

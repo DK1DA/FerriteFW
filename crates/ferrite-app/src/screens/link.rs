@@ -1,4 +1,4 @@
-//! Bluetooth and the link (manual chapter 29): link status (D17, MENU 0 9 2 3; LINK-17), paired devices (D18,
+//! Bluetooth and the link (manual chapter 29): link status (D17, MENU 0 9 2 3; LINK-17), approved devices (D18,
 //! MENU 0 9 2 2; LINK-7), the write approval prompt (D20; LINK-7, LINK-8, SAFE-6) and a write session's
 //! progress (D21; LINK-9). The Link task opens the last two with [`App::open`] (`Dest::WriteApproval`,
 //! `Dest::WriteProgress`) and reads the answer from [`App::take_link_answer`].
@@ -21,7 +21,7 @@ use ufmt::uwrite;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkPage {
     Status,
-    Paired,
+    Approved,
     Approve,
     Progress,
 }
@@ -93,7 +93,7 @@ impl View for Link {
     fn name(self) -> &'static str {
         match self.page {
             LinkPage::Status => "Link status",
-            LinkPage::Paired => "Paired devices",
+            LinkPage::Approved => "Approved devices",
             LinkPage::Approve => "Write approval",
             LinkPage::Progress => "Writing",
         }
@@ -102,7 +102,7 @@ impl View for Link {
     fn title(self, _: &App, b: &mut Buf<10>) {
         b.set(match self.page {
             LinkPage::Status => b"Link".as_slice(),
-            LinkPage::Paired => b"Paired",
+            LinkPage::Approved => b"Approved",
             LinkPage::Approve => b"Bluetooth",
             LinkPage::Progress => b"Writing",
         });
@@ -131,11 +131,11 @@ impl View for Link {
                 app.show_toast(b"Write cancelled", b"", false);
             }
             (LinkPage::Progress, ..) => {}
-            (LinkPage::Paired, Key::Up | Key::Down, Short | Repeat) => {
+            (LinkPage::Approved, Key::Up | Key::Down, Short | Repeat) => {
                 app.screen = Screen::Link(Link { row: self.row ^ 1, ..self });
             }
-            (LinkPage::Paired, Key::Menu, Short) if self.row == 0 => app.show_toast(b"Forget", b"comes with the link task", false),
-            (LinkPage::Paired, Key::Menu, Short) => app.open(Dest::PairBt),
+            (LinkPage::Approved, Key::Menu, Short) if self.row == 0 => app.show_toast(b"Forget", b"comes with the link task", false),
+            (LinkPage::Approved, Key::Menu, Short) => app.open(Dest::AddDevice),
             (_, Key::Exit, Short) => app.back(),
             _ => {}
         }
@@ -154,12 +154,12 @@ impl View for Link {
                 app.table(lcd, &STATUS, cx.live, dev, &(), None);
                 app.help_box(lcd, 160, 48, b"The web app connects by cable or Bluetooth.", b"");
             }
-            LinkPage::Paired => {
+            LinkPage::Approved => {
                 let bt = dev.bt;
-                // The connected device (approval tokens are kept by the link task, still to come), then pairing.
+                // The connected device (approval tokens are kept by the link task, still to come), then adding one.
                 let rows = [
                     Row { num: Some(1), name: b"Connected device", value: if bt { b"approved" } else { b"none" }, dot: false, selected: self.row == 0, grey: !bt },
-                    Row { num: Some(2), name: b"Pair a device", value: b">", dot: false, selected: self.row == 1, grey: false },
+                    Row { num: Some(2), name: b"Add a device", value: b">", dot: false, selected: self.row == 1, grey: false },
                 ];
                 for (i, r) in rows.iter().enumerate() {
                     app.list_row(lcd, i, 23 + 22 * i as i32, 22, r);
@@ -195,7 +195,7 @@ impl View for Link {
         match self.page {
             LinkPage::Approve => Hints::new(&[("OK", "Allow"), ("BACK", "Refuse")]),
             LinkPage::Progress => Hints::new(&[("BACK", "Cancel")]),
-            LinkPage::Paired => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")]),
+            LinkPage::Approved => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")]),
             LinkPage::Status => Hints::new(&[("BACK", "Back")]),
         }
     }

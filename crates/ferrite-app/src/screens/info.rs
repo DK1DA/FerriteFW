@@ -1,7 +1,7 @@
 //! The system's read-only pages, one module because they are one pattern (a title, label + value rows, a note
 //! at the foot): About and its self-test detail (D7; chapter 36, SELF-5 to SELF-7), calibration (D8; CAL-5 to
 //! CAL-7), advanced squelch (D10; SQL-1, SQL-2: read only for now), SSB patch status (D16; HF-20, SELF-6), the
-//! SSB patch confirm at boot (D15; INST-12), pair Bluetooth (D19), power off (D22; PWR-17), empty battery
+//! SSB patch confirm at boot (D15; INST-12), add a device (D19), power off (D22; PWR-17), empty battery
 //! (D23; PWR-16) and the mailbox (D24; chapter 38, no menu number yet).
 //!
 //! Each page is data ([`def`]): its rows are a [`super::table`] table naming a value function, so adding a row is
@@ -32,7 +32,7 @@ pub enum Page {
     AdvSquelch,
     SsbPatch,
     SsbConfirm,
-    PairBt,
+    AddDevice,
     PowerOff,
     EmptyBattery,
     Mailbox,
@@ -243,8 +243,8 @@ fn def(p: Page) -> PageDef {
             note: "",
             hints: &[("OK", "Use it"), ("BACK", "Not now")],
         },
-        Page::PairBt => PageDef {
-            title: "Pair BT",
+        Page::AddDevice => PageDef {
+            title: "Add device",
             rows: &NONE,
             note: "",
             hints: &BACK_ONLY,
@@ -267,9 +267,9 @@ fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'static str, &'st
             "The patch in flash doesn't match a known stock version. Use it for USB, LSB and CW? You can change this in MENU 0 9 6.",
             AMBER,
         ),
-        Page::PairBt => (
-            "Pair Bluetooth",
-            "Turn Bluetooth on (MENU 0 9 2 1), then pick the radio in the web app. Its first write asks here; after that the device is trusted until you forget it (MENU 0 9 2 2).",
+        Page::AddDevice => (
+            "Add a device",
+            "Turn Bluetooth on (MENU 0 9 2 1), then connect from the web app; the phone and the module handle Bluetooth pairing. The device's first write asks here; after that it's approved until you forget it (MENU 0 9 2 2).",
             TEXT,
         ),
         Page::PowerOff => ("Saving...", "Finishing writes, then off.", TEXT),

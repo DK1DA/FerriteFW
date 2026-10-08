@@ -152,10 +152,10 @@ pub fn run(scale: u32) {
         (Dest::AdvSquelch, "adv-squelch"),
         (Dest::SsbPatch, "ssb-patch"),
         (Dest::SsbConfirm, "ssb-confirm"),
-        (Dest::PairBt, "pair-bt"),
+        (Dest::AddDevice, "pair-bt"),
         (Dest::Mailbox, "mailbox"),
         (Dest::LinkStatus, "link-status"),
-        (Dest::Paired, "paired"),
+        (Dest::Approved, "paired"),
         (Dest::WriteApproval, "write-approval"),
         (Dest::PowerOff, "power-off"),
     ] {

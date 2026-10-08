@@ -171,10 +171,10 @@ pub enum Dest {
     SsbPatch,
     /// D17: link status (MENU 0 9 2 3).
     LinkStatus,
-    /// D18: paired devices (MENU 0 9 2 2).
-    Paired,
-    /// D19: pair Bluetooth.
-    PairBt,
+    /// D18: approved devices (MENU 0 9 2 2): Ferrite's write approval, not BLE pairing (decision 76).
+    Approved,
+    /// D19: add a device (how a phone or PC gets approved).
+    AddDevice,
     /// D20: Bluetooth write approval.
     WriteApproval,
     /// D21: link write progress.
@@ -256,8 +256,8 @@ impl Dest {
             SsbConfirm => ("SSB patch confirm", "30", "D15"),
             SsbPatch => ("SSB patch", "20a", "D16"),
             LinkStatus => ("Link status", "29", "D17"),
-            Paired => ("Paired devices", "29", "D18"),
-            PairBt => ("Pair Bluetooth", "29", "D19"),
+            Approved => ("Approved devices", "29", "D18"),
+            AddDevice => ("Add a device", "29", "D19"),
             WriteApproval => ("Write approval", "29", "D20"),
             WriteProgress => ("Writing", "29", "D21"),
             PowerOff => ("Power off", "33", "D22"),
@@ -312,7 +312,7 @@ pub const ALL: [Dest; 69] = {
         Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage,
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, FmPresets, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
-        LinkStatus, Paired, PairBt, WriteApproval, WriteProgress, PowerOff, EmptyBattery, Mailbox,
+        LinkStatus, Approved, AddDevice, WriteApproval, WriteProgress, PowerOff, EmptyBattery, Mailbox,
         Group(1), Sub(3, 1), Value(Item::Power),
     ]
 };
@@ -368,7 +368,7 @@ pub const MENU0: [(&[u8], Dest); 60] = [
     (&[9, 1, 4], Dest::ShortcutMap),
     (&[9, 3, 3], Dest::Pin),
     (&[9, 2], Dest::Sub(9, 2)),
-    (&[9, 2, 2], Dest::Paired),
+    (&[9, 2, 2], Dest::Approved),
     (&[9, 2, 3], Dest::LinkStatus),
     (&[9, 3], Dest::Sub(9, 3)),
     (&[9, 5], Dest::Sub(9, 5)),
@@ -456,7 +456,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::AdvSquelch => Screen::Info(Info { page: Page::AdvSquelch }),
         Dest::SsbPatch => Screen::Info(Info { page: Page::SsbPatch }),
         Dest::SsbConfirm => Screen::Info(Info { page: Page::SsbConfirm }),
-        Dest::PairBt => Screen::Info(Info { page: Page::PairBt }),
+        Dest::AddDevice => Screen::Info(Info { page: Page::AddDevice }),
         Dest::PowerOff => Screen::Info(Info { page: Page::PowerOff }),
         Dest::EmptyBattery => Screen::Info(Info { page: Page::EmptyBattery }),
         Dest::Mailbox => Screen::Info(Info { page: Page::Mailbox }),
@@ -466,7 +466,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::DtmfDialer => Screen::Dtmf(super::dtmf::DtmfPad::dialer()),
         Dest::DtmfMemories => Screen::Dtmf(super::dtmf::DtmfPad::memories()),
         Dest::LinkStatus => Screen::Link(Link::new(LinkPage::Status)),
-        Dest::Paired => Screen::Link(Link::new(LinkPage::Paired)),
+        Dest::Approved => Screen::Link(Link::new(LinkPage::Approved)),
         Dest::WriteApproval => Screen::Link(Link::new(LinkPage::Approve)),
         Dest::WriteProgress => Screen::Link(Link::new(LinkPage::Progress)),
         Dest::FmBroadcast => fm::open(app),
