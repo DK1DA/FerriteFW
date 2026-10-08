@@ -18,9 +18,10 @@ use crate::msg::SLOTS;
 use crate::path::Sel;
 
 /// How long the active slot keeps a shared chip per turn (to confirm on the bench).
-pub const ACTIVE_DWELL_MS: u32 = 500;
-/// How long a watched slot keeps a shared chip per turn: enough for the squelch to open on a carrier.
-pub const WATCHED_DWELL_MS: u32 = 100;
+pub const ACTIVE_DWELL_MS: u32 = 150;
+/// How long a watched slot keeps a shared chip per turn: enough for the squelch to open on a carrier (stock
+/// hops about every 70 ms; to confirm on the bench).
+pub const WATCHED_DWELL_MS: u32 = 70;
 /// A slot that closes keeps its chip (and a followed slot stays active) this long.
 pub const HOLD_MS: u32 = 2_000;
 
@@ -152,6 +153,9 @@ impl Watch {
         } else {
             (0..SLOTS as u8).find(|&s| s != active && self.open(s) && c.muted & 1 << s == 0)
         };
+        if self.home == Some(active) {
+            self.home = None; // back already (or the UI never followed): nothing to return to
+        }
         match (c.follow, out.audio) {
             (Follow::Off, _) => self.home = None,
             (f, Some(s)) if s != active => {
@@ -188,11 +192,11 @@ mod tests {
         let c = cfg();
         let o = w.tick(0, &c, [false; 2], false);
         assert_eq!(o.chip, [Some(0), Some(1)]);
-        assert_eq!(w.tick(499, &c, [false; 2], false).chip[0], Some(0));
-        assert_eq!(w.tick(500, &c, [false; 2], false).chip[0], Some(2), "active dwell over");
-        assert_eq!(w.tick(599, &c, [false; 2], false).chip[0], Some(2));
-        assert_eq!(w.tick(600, &c, [false; 2], false).chip[0], Some(0), "watched dwell over");
-        assert_eq!(w.tick(600, &c, [false; 2], false).chip[1], Some(1), "alone on its chip");
+        assert_eq!(w.tick(149, &c, [false; 2], false).chip[0], Some(0));
+        assert_eq!(w.tick(150, &c, [false; 2], false).chip[0], Some(2), "active dwell over");
+        assert_eq!(w.tick(219, &c, [false; 2], false).chip[0], Some(2));
+        assert_eq!(w.tick(220, &c, [false; 2], false).chip[0], Some(0), "watched dwell over");
+        assert_eq!(w.tick(220, &c, [false; 2], false).chip[1], Some(1), "alone on its chip");
     }
 
     #[test]
@@ -200,8 +204,8 @@ mod tests {
         let mut w = Watch::new();
         let c = cfg();
         w.tick(0, &c, [false; 2], false);
-        w.tick(500, &c, [false; 2], false); // C on chip 0
-        let o = w.tick(550, &c, [true, true], false); // C and B open
+        w.tick(150, &c, [false; 2], false); // C on chip 0
+        let o = w.tick(200, &c, [true, true], false); // C and B open
         assert_eq!(o.chip[0], Some(2));
         assert_eq!(o.audio, Some(1), "B first among the watched");
         let o = w.tick(5_000, &c, [true, true], false);
@@ -252,7 +256,25 @@ mod tests {
         let c1 = Cfg { active: 1, ..c };
         assert_eq!(w.tick(200, &c1, [false, true], false).follow, None);
         assert_eq!(w.tick(300, &c1, [false, false], false).follow, None, "within the hold");
+        assert_eq!(w.tick(2_299, &c1, [false, false], false).follow, None);
         assert_eq!(w.tick(2_300, &c1, [false, false], false).follow, Some(0), "back after the tail");
+        // Not followed (the UI on another screen): no return left over for when B is chosen later.
+        let mut w = Watch::new();
+        let c = Cfg { follow: Follow::Return, ..cfg() };
+        w.tick(0, &c, [false; 2], false);
+        assert_eq!(w.tick(100, &c, [false, true], false).follow, Some(1));
+        w.tick(200, &c, [false, false], false);
+        w.tick(3_000, &c, [false, false], false);
+        assert_eq!(w.tick(3_100, &Cfg { active: 1, ..c }, [false, false], false).follow, None, "B by hand stays");
+        // On: follows, never returns.
+        let mut w = Watch::new();
+        let c = Cfg { follow: Follow::On, ..cfg() };
+        w.tick(0, &c, [false; 2], false);
+        assert_eq!(w.tick(100, &c, [false, true], false).follow, Some(1));
+        let c1 = Cfg { active: 1, ..c };
+        w.tick(200, &c1, [false, true], false);
+        assert_eq!(w.tick(300, &c1, [false, false], false).follow, None);
+        assert_eq!(w.tick(10_000, &c1, [false, false], false).follow, None, "stays");
         let mut w = Watch::new();
         let c = Cfg { follow: Follow::Off, ..cfg() };
         w.tick(0, &c, [false; 2], false);

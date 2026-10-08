@@ -95,25 +95,28 @@ impl<const N: usize> Persist for Text<N> {
 
 /// `persist!(Type { field, ... })`: saves and loads the fields in this order. New fields go at the end only.
 macro_rules! persist {
-    // Booleans after the fields share one byte, bit 0 first: a record from before a flag joined reads the old
-    // byte (one bool, 0 or 1) as the first flag, and the rest keep their defaults.
+    // Booleans after the fields share one byte, bit 0 first, each stored as "differs from the type's DEFAULT": a
+    // record from before a flag joined reads the old byte (one bool, 0 or 1) as the first flag, and the flags it
+    // didn't have read 0, their defaults.
     ($t:ty { $($f:ident),* $(,)? } bits { $($b:ident),* $(,)? }) => {
         impl Persist for $t {
             fn save(&self, s: &mut dyn Sink) {
                 $(self.$f.save(s);)*
+                let d = <$t>::DEFAULT;
                 let mut v = 0u8;
                 let mut _i = 0;
-                $(v |= (self.$b as u8) << _i; _i += 1;)*
+                $(v |= ((self.$b != d.$b) as u8) << _i; _i += 1;)*
                 v.save(s);
             }
             fn load(&mut self, r: &mut dyn Source) {
                 $(self.$f.load(r);)*
+                let d = <$t>::DEFAULT;
                 let mut v = 0u8;
                 let mut _i = 0;
-                $(v |= (self.$b as u8) << _i; _i += 1;)*
+                $(v |= ((self.$b != d.$b) as u8) << _i; _i += 1;)*
                 v.load(r);
                 let mut _i = 0;
-                $(self.$b = v >> _i & 1 != 0; _i += 1;)*
+                $(self.$b = d.$b ^ (v >> _i & 1 != 0); _i += 1;)*
             }
         }
     };
@@ -170,7 +173,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     link_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only });
+} bits { show_hidden, chan_only, follow, follow_back });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -233,6 +236,7 @@ impl App {
         }
         self.out.push(RadioCmd::Active(self.active));
         self.out.push(RadioCmd::Watch(self.watch_mask()));
+        self.send_follow();
         self.out.push(RadioCmd::BatterySave(crate::level(self.bsave)));
     }
 }

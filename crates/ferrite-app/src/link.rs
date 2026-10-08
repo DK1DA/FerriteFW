@@ -570,6 +570,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             new.load(&mut Rd { b: rec, n: 0 });
             keep_protected(&mut new, &old);
             *app.set = new;
+            app.send_follow();
             Status::Ok
         }
         what::CHANNEL if idx < MAX_CHANNELS => {

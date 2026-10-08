@@ -44,8 +44,9 @@ fn start_up_sends_every_slot_whole() {
         }
     }
     assert!(v.contains(&RadioCmd::Active(0)) && v.contains(&RadioCmd::Watch(0b011)));
+    assert!(v.contains(&RadioCmd::Follow(ferrite_core::watch::Follow::Return)), "WATCH-5's defaults");
     assert!(v.iter().any(|c| matches!(c, RadioCmd::BatterySave(_))));
-    assert_eq!(v.len(), 3 + 3 * 11); // per slot: tune and ten parameters (split included)
+    assert_eq!(v.len(), 4 + 3 * 11); // per slot: tune and ten parameters (split included)
     // Stepping through channels faster than the commands drain: the slot goes out once, as it is now.
     let mut t = T::new();
     t.tap(Key::VfoMem);

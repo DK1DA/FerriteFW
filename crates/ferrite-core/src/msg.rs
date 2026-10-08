@@ -37,6 +37,8 @@ pub enum RadioCmd {
     Scan { slot: u8, on: bool },
     /// Pause watching for this many seconds (WATCH-6, WATCH-16); 0 resumes it now.
     PauseWatch(u16),
+    /// Follow and follow return (WATCH-5): what the watch engine does when a watched slot is heard.
+    Follow(crate::watch::Follow),
     /// Key or unkey a slot (3 = the HF mode frequency), after the UI's checks; the Radio task checks again
     /// (TX-17) and answers in [`LiveAll::tx`].
     Transmit { slot: u8, on: bool },
@@ -246,6 +248,16 @@ pub struct LiveAll {
     pub tx: TxLive,
     /// The one exclusive mode running, if any: scope, tone search, counter, FM broadcast, HF, crossband.
     pub mode: ModeLive,
+    /// The watch engine's last follow (WATCH-5).
+    pub follow: FollowLive,
+}
+
+/// The watch engine asking for a slot to become active (follow, or back on follow return): a count that
+/// changes with each ask, so the UI acts on each once whichever snapshots it sees.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FollowLive {
+    pub n: u8,
+    pub slot: u8,
 }
 
 /// Transmit now (TX-22).

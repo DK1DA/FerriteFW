@@ -347,6 +347,7 @@ impl App {
         }
         app.out.push(RadioCmd::Active(0));
         app.out.push(RadioCmd::Watch(app.watch_mask()));
+        app.send_follow();
         app.out.push(RadioCmd::BatterySave(level(app.bsave)));
         app
     }
@@ -974,6 +975,17 @@ impl App {
     /// The watched slots: Watch's, and C while APRS mode has it (APRS-16).
     fn watch_mask(&self) -> u8 {
         [0, 0b011, 0b111][self.watch as usize % 3] | (self.set.aprs_mode as u8) << aprs::APRS_SLOT
+    }
+
+    /// Follow and follow return (0 1 2 2, 0 1 2 3) to the watch engine (WATCH-5).
+    pub(crate) fn send_follow(&mut self) {
+        use ferrite_core::watch::Follow;
+        let f = match (self.set.follow, self.set.follow_back) {
+            (false, _) => Follow::Off,
+            (true, false) => Follow::On,
+            (true, true) => Follow::Return,
+        };
+        self.out.push(RadioCmd::Follow(f));
     }
 
     /// The slot's frequency and every setting, to the Radio task (made when popped: [`App::pop_cmd`]).

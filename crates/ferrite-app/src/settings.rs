@@ -83,6 +83,8 @@ pub const LAYOUTS: [&str; 3] = ["Watch", "Single + scope", "Watch + activity"];
 pub const THEMES: [&str; 3] = ["Dark", "Daylight", "Night red"];
 pub const PIN_MODES: [&str; 3] = ["Off", "At power on", "Power on + unlock"];
 pub const ON_OFF: [&str; 2] = ["Off", "On"];
+/// Follow return (0 1 2 3, WATCH-5).
+pub const FOLLOW_RETURNS: [&str; 2] = ["Stay", "Switch back"];
 /// Boot screen (0 7 3 3).
 pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
 /// The cable port (0 9 2 5, TERM-2): auto picks from the first bytes; the others force one.
@@ -183,6 +185,10 @@ pub struct Settings {
     pub show_hidden: bool,
     /// 0 9 3 2: channel-only mode (PIN-5): no V/M, MENU 0 or editing; hold # leaves it.
     pub chan_only: bool,
+    /// 0 1 2 2: the active slot follows a watched slot that is heard (WATCH-5).
+    pub follow: bool,
+    /// 0 1 2 3: and switches back once it has been closed for 2 s.
+    pub follow_back: bool,
 }
 
 /// 0 7 4 1's values, seconds (0 never).
@@ -262,6 +268,8 @@ impl Settings {
         arrival_tone: true,
         show_hidden: false,
         chan_only: false,
+        follow: true,
+        follow_back: true,
     };
 
     /// The region's name, or "Not set".

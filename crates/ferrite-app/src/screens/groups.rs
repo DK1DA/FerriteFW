@@ -128,7 +128,7 @@ const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS"
 pub(crate) const SUBS: [((u8, u8), &[Entry]); 27] = [
     ((1, 2), &[
         (slow!("Watched audio"), slow!("Heard"), slow!("Heard, muted, per slot.")),
-        (slow!("Follow"), slow!("Off"), slow!("The active slot follows a watched one.")),
+        (slow!("Follow"), slow!("On"), slow!("The active slot follows a watched one.")),
         (slow!("Follow return"), slow!("Switch back"), slow!("Stay, or switch back after.")),
         (slow!("Pause time"), slow!("1 min"), slow!("# on home pauses watch this long.")),
     ]),
@@ -501,6 +501,14 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.push(b"-9");
             false
         }
+        [1, 2, 2] => {
+            pick(b, &ON_OFF, s.follow as u8);
+            !s.follow
+        }
+        [1, 2, 3] => {
+            pick(b, &FOLLOW_RETURNS, s.follow_back as u8);
+            !s.follow_back
+        }
         [9, 3, 2] => {
             pick(b, &ON_OFF, s.chan_only as u8);
             s.chan_only
@@ -569,8 +577,10 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 30] = [
+pub(crate) const SETTABLE: [&[u8]; 32] = [
     &[1, 1],
+    &[1, 2, 2],
+    &[1, 2, 3],
     &[3, 1, 2],
     &[3, 1, 3],
     &[3, 1, 4],
@@ -607,6 +617,14 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
     let s = &mut app.set;
     match p {
         [1, 1] => app.change(Item::Watch, d),
+        [1, 2, 2] => {
+            s.follow = !s.follow;
+            app.send_follow();
+        }
+        [1, 2, 3] => {
+            s.follow_back = !s.follow_back;
+            app.send_follow();
+        }
         [7, 7] => app.change(Item::BatterySave, d),
         [6, 3] => s.coord_fmt = cycle(s.coord_fmt, d, COORD_FORMATS.len()),
         [6, 4] => s.units = cycle(s.units, d, UNITS.len()),
@@ -685,6 +703,14 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
     match p {
         [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
         [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
+        [1, 2, 2] => {
+            s.follow = d.follow;
+            app.send_follow();
+        }
+        [1, 2, 3] => {
+            s.follow_back = d.follow_back;
+            app.send_follow();
+        }
         [6, 3] => s.coord_fmt = d.coord_fmt,
         [6, 9] => s.fixed_on = false,
         [6, 4] => s.units = d.units,
