@@ -50,6 +50,7 @@ pub mod keys;
 pub mod lights;
 pub mod link;
 pub mod persist;
+pub mod ports;
 pub mod radio_data;
 pub mod sample;
 pub mod screens;

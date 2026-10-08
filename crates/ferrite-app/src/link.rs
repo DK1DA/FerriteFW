@@ -45,8 +45,9 @@ pub struct Session {
     approved: bool,
     /// The owner refused this device; asking again needs a new `HELLO`.
     refused: bool,
-    /// The approval prompt is up.
+    /// The approval prompt is up, and whether the terminal asked it (TERM-25: no token, only this connection).
     asking: bool,
+    for_term: bool,
     /// The token made when this device was approved, for `TOKEN`.
     token: Option<[u8; 8]>,
     /// When the last valid frame arrived, and whether one has.
@@ -81,6 +82,7 @@ impl Session {
             approved: false,
             refused: false,
             asking: false,
+            for_term: false,
             token: None,
             last: 0,
             seen: false,
@@ -102,6 +104,43 @@ impl Session {
     /// The fastest cable rate the caller's UART can run (LINK-11): `BAUD` above it is refused.
     pub fn set_max_baud(&mut self, b: u32) {
         self.max_baud = b;
+    }
+
+    /// The session moves to another port (the cable or Bluetooth: [`crate::ports`]): a frame half received,
+    /// an approval and a refusal stay with the old one. `max_baud` is the new port's (Bluetooth: 115200 only,
+    /// LINK-25).
+    pub fn set_port(&mut self, trusted: bool, max_baud: u32) {
+        (self.rn, self.overflow, self.have) = (0, false, false);
+        (self.trusted, self.approved, self.refused, self.asking, self.for_term) = (trusted, false, false, false, false);
+        (self.token, self.seen, self.baud, self.max_baud) = (None, false, None, max_baud);
+    }
+
+    /// This port may write now: the cable, or an approved Bluetooth device (LINK-7).
+    pub fn may_write_now(&self) -> bool {
+        self.trusted || self.approved
+    }
+
+    /// The terminal wants to write (TERM-25): the same prompt as a link write, asked once; the approval lasts
+    /// for this connection and makes no token (a terminal has no `HELLO` to present one). True when it may.
+    pub fn ask_for_terminal(&mut self, app: &mut App) -> bool {
+        if self.may_write_now() {
+            return true;
+        }
+        if !self.asking && !self.refused {
+            (self.asking, self.for_term) = (true, true);
+            app.link_write_request();
+        }
+        false
+    }
+
+    /// The approval prompt this session asked for is up (a caller with its own use of the prompt waits).
+    pub fn asking(&self) -> bool {
+        self.asking
+    }
+
+    /// The owner refused this connection's writes (until it ends).
+    pub fn refused(&self) -> bool {
+        self.refused
     }
 
     /// Takes another byte now: false while a whole frame waits for its answer.
@@ -163,9 +202,11 @@ impl Session {
         match answer {
             Some(LinkAnswer::Allowed) if self.asking => {
                 (self.asking, self.approved) = (false, true);
-                self.token = Some(self.new_token(app, now));
+                if !core::mem::take(&mut self.for_term) {
+                    self.token = Some(self.new_token(app, now));
+                }
             }
-            Some(LinkAnswer::Refused) if self.asking => (self.asking, self.refused) = (false, true),
+            Some(LinkAnswer::Refused) if self.asking => (self.asking, self.refused, self.for_term) = (false, true, false),
             Some(LinkAnswer::Cancelled) => self.cancelled = true,
             _ => {}
         }
@@ -493,6 +534,7 @@ fn keep_protected(new: &mut Settings, old: &Settings) {
     (new.pin_mode, new.pin, new.pin_len, new.pin_misses, new.pin_wait) = (old.pin_mode, old.pin, old.pin_len, old.pin_misses, old.pin_wait);
     new.setup_done = old.setup_done;
     new.cable_port = old.cable_port;
+    new.kiss_port = old.kiss_port; // KISS-7: turning KISS on is the owner's consent, made on the radio
     new.link_tokens = old.link_tokens;
 }
 

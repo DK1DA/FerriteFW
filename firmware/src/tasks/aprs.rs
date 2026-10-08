@@ -32,8 +32,6 @@ const SLOT_C: u8 = 2;
 const KEY_WAIT_MS: u32 = 1_500;
 /// The longest frame (330 bytes at 1200 Bd, about 2.2 s) after up to 2.55 s of flags, with margin.
 const PLAY_WAIT_MS: u32 = 6_000;
-/// The cable port setting's KISS value (0 9 2 5: auto, link, terminal, KISS).
-const PORT_KISS: u8 = 3;
 /// KISS-2's TX delay default, 300 ms (the app may change it); the APRS task's own frames use it too.
 const TXDELAY_10MS: u8 = 30;
 
@@ -65,7 +63,7 @@ impl Aprs {
         Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), seed: 0x2545_F491 }
     }
 
-    /// A byte from the cable while KISS has it (TERM-2's route).
+    /// A byte from the KISS port, the cable or Bluetooth (KISS-6; TERM-2's route on the cable).
     pub fn kiss_in(&mut self, b: u8) {
         let Some(r) = self.kiss.push(b) else { return };
         if let kiss::Command::Data(d) = self.params.apply(&r) {
@@ -94,7 +92,10 @@ impl Aprs {
     pub fn poll(&mut self, app: &mut App, store: &Store, live: &LiveAll, now_ms: u32) {
         let extra = &store.extra;
         extra.set_callsign(app.callsign());
-        let kiss_on = app.settings().cable_port == PORT_KISS;
+        // KISS-6: the cable (0 9 2 5 on KISS, or 0 5 9 1 on Cable) or Bluetooth (0 5 9 1, with Bluetooth on).
+        let kiss_cable = app.settings().kiss_on_cable();
+        let kiss_bt = app.settings().kiss_on_bt() && app.settings().bt;
+        let kiss_on = kiss_cable || kiss_bt;
         let on = app.aprs_on();
         let decode = on || kiss_on || app.aprs_flag_decode(); // APRS-22
         if decode != self.on && DSP.try_send(DspCmd::Decoder(if decode { DecoderKind::Afsk } else { DecoderKind::Off })).is_ok() {
@@ -105,8 +106,9 @@ impl Aprs {
         // Frames heard (APRS-3, APRS-6).
         while let Ok(f) = APRS_RX.try_receive() {
             if kiss_on {
+                let out = if kiss_cable { &crate::chan::TERM_OUT } else { &crate::chan::BT_OUT };
                 kiss::encode(0, f.bytes(), |b| {
-                    crate::chan::TERM_OUT.put(b); // KISS-4; a full ring drops the rest of the frame
+                    out.put(b); // KISS-4; a full ring drops the rest of the frame
                 });
                 crate::chan::TERM_WAKE.signal(());
             }

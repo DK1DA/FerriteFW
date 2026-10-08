@@ -4,7 +4,7 @@
 
 use crate::board::{BACKLIGHT, KEYPAD_LIGHT, LED_ACTIVE_HIGH, LED_GREEN, LED_RED, POWER_HOLD, POWER_SW, SCREEN_LIGHT};
 use crate::bringup;
-use crate::chan::{Input, ALERTS, CABLE_BAUD, DEBUG_ANS, DEBUG_REQ, INPUT, LINK_BAUD, LINK_HELLOS, LINK_ON, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
+use crate::chan::{Input, ALERTS, BT_IN, BT_LINK_ON, BT_ON, BT_OUT, CABLE_BAUD, DEBUG_ANS, DEBUG_REQ, INPUT, LINK_BAUD, LINK_HELLOS, LINK_ON, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::display::Screen;
 use crate::hal::gpio::Mode;
 use crate::store;
@@ -12,7 +12,8 @@ use crate::tasks::{check, CHECK_CAL, CHECK_FLASH, CHECK_MCU, CHECK_STATE, FAILED
 use core::sync::atomic::Ordering::Relaxed;
 use embassy_futures::select::{select, select4, Either, Either4};
 use embassy_time::{Duration, Instant, Timer};
-use ferrite_app::term::{Sink, Term};
+use ferrite_app::ports::{Port, Ports};
+use ferrite_app::term::Sink;
 use ferrite_app::App;
 use ferrite_core::chipid;
 use ferrite_core::keys;
@@ -26,16 +27,17 @@ use ferrite_ui::gfx::BG;
 const TICK_HELD_MS: u64 = 20;
 const TICK_IDLE_MS: u64 = 250;
 
-/// The terminal's output: the cable's transmit ring, emptied by the Link task.
-struct Cable;
+/// A port's output for the terminal and the link: its transmit ring, emptied by the Link task (the cable's
+/// `TERM_OUT`, Bluetooth's `BT_OUT`).
+struct Out(&'static crate::ring::Ring<'static>);
 
-impl Sink for Cable {
+impl Sink for Out {
     fn room(&self) -> usize {
-        TERM_OUT.room() as usize
+        self.0.room() as usize
     }
     fn put(&mut self, b: &[u8]) {
         for &c in b {
-            TERM_OUT.put(c);
+            self.0.put(c);
         }
     }
 }
@@ -194,11 +196,11 @@ pub async fn task() {
     // Key codes down (mapped ones only): the app is ticked often while any is held.
     let mut down = 0u32;
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
-    let mut term = Term::new();
+    // ... and over Bluetooth (roadmap 3d): one terminal and one link session, held by one port at a time.
     // The link protocol on the same cable (chapter 29), trusted as the cable is (LINK-7); TERM-2 routes the bytes.
-    let mut link = ferrite_app::link::Session::new(true);
+    let mut ports = Ports::new();
     let fastest = ferrite_core::link::RATES.iter().copied().filter(|&r| crate::hal::uart::rate_ok(crate::report::UART_CPS, r)).max();
-    link.set_max_baud(fastest.unwrap_or(115_200));
+    ports.set_cable_max_baud(fastest.unwrap_or(115_200));
     // Bring-up: the receiver on the cable log once a second while it changes.
     let mut logged = (LiveAll::default(), Instant::now());
     // The APRS task (chapter 25): it feeds the App and the store, so it runs here.
@@ -219,29 +221,32 @@ pub async fn task() {
             logged.1 = Instant::now();
         }
         // A whole line waits until the store has caught up (TERM-13): the bytes after it stay in the ring.
-        while !bringup::ON.load(Relaxed) && term.ready() && link.ready() {
-            let Some(b) = TERM_IN.get() else { break };
-            match ferrite_app::link::route(app.settings().cable_port, link.active(now_ms()), b) {
-                ferrite_app::link::Route::Link => link.feed(b, now_ms()),
-                ferrite_app::link::Route::Term => term.feed(&mut app, b, now_ms(), store),
-                ferrite_app::link::Route::Drop => aprs.kiss_in(b), // KISS has the cable (chapter 26)
-            }
-            while let Some(w) = app.pop_write() {
-                store.apply(w);
+        // The cable first, then Bluetooth (its bytes only while 0 9 2 1 has the module on).
+        BT_ON.store(app.settings().bt, Relaxed);
+        for (port, ring) in [(Port::Cable, &TERM_IN), (Port::Bt, &BT_IN)] {
+            while !bringup::ON.load(Relaxed) && ports.ready() {
+                let Some(b) = ring.get() else { break };
+                match ports.route(&app, port, b, now_ms()) {
+                    ferrite_app::ports::To::Kiss => aprs.kiss_in(b), // KISS has this port (chapter 26)
+                    to => ports.feed(&mut app, store, to, b, now_ms()),
+                }
+                while let Some(w) = app.pop_write() {
+                    store.apply(w);
+                }
             }
         }
         if !bringup::ON.load(Relaxed) {
             // Debug commands (TERM-21): memory here, registers by the Radio task (it signals TERM_WAKE).
             if let Ok(a) = DEBUG_ANS.try_receive() {
-                term.debug_answer(a);
+                ports.term.debug_answer(a);
             }
-            term.poll(&mut app, store, &dev, &live, now_ms(), &mut Cable);
-            // The link: one waiting request answered when the cable and the store have room (LINK-1).
-            link.poll(&mut app, store, now_ms(), &mut Cable);
-            if let Some(r) = link.take_baud() {
+            // The terminal redrawn and one waiting link request answered when the port and the store have room
+            // (LINK-1), on the port that holds them.
+            ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT), &mut Out(&BT_OUT));
+            if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)
             }
-            if link.take_reboot() {
+            if ports.link.take_reboot() {
                 // LINK-24: the radio quiet, everything written (at most 3 s), the answer out, then a system
                 // reset: the stock bootloader listens for the updater first, as after hwtest's `reboot`.
                 RADIO.send(RadioCmd::Shutdown).await;
@@ -254,17 +259,19 @@ pub async fn task() {
                 Timer::after_millis(50).await; // the answer's bytes leave the UART
                 cortex_m::peripheral::SCB::sys_reset();
             }
-            LINK_HELLOS.store(link.hellos(), Relaxed);
-            LINK_ON.store(link.active(now_ms()), Relaxed);
+            LINK_HELLOS.store(ports.link.hellos(), Relaxed);
+            LINK_ON.store(ports.link_on(Port::Cable, now_ms()), Relaxed);
+            BT_LINK_ON.store(ports.link_on(Port::Bt, now_ms()), Relaxed);
+            dev.bt = ports.bt_connected(&app, now_ms());
             dev.link = ferrite_core::msg::LinkLive {
-                cable: link.active(now_ms()),
+                cable: ports.link_on(Port::Cable, now_ms()),
                 baud_100: (CABLE_BAUD.load(Relaxed) / 100) as u16,
-                write_pct: link.progress(),
+                write_pct: ports.link.progress(),
             };
-            if let Some(r) = term.debug_req() {
+            if let Some(r) = ports.term.debug_req() {
                 match r {
-                    ferrite_core::msg::DebugReq::Mem { .. } => term.debug_answer(crate::debug::mem(r)),
-                    _ if DEBUG_REQ.try_send(r).is_err() => term.debug_answer(ferrite_core::msg::DebugAns::Refused("the Radio task is busy")),
+                    ferrite_core::msg::DebugReq::Mem { .. } => ports.term.debug_answer(crate::debug::mem(r)),
+                    _ if DEBUG_REQ.try_send(r).is_err() => ports.term.debug_answer(ferrite_core::msg::DebugAns::Refused("the Radio task is busy")),
                     _ => {}
                 }
                 TERM_WAKE.signal(()); // print the answer, or wait for it, on the next turn
@@ -325,7 +332,7 @@ pub async fn task() {
         let leds = app.leds(&live, &dev);
         LED_RED.write(leds.red == LED_ACTIVE_HIGH);
         LED_GREEN.write(leds.green == LED_ACTIVE_HIGH);
-        let mut period = if down != 0 || term.busy() || !link.ready() { TICK_HELD_MS } else { TICK_IDLE_MS };
+        let mut period = if down != 0 || ports.term.busy() || !ports.link.ready() { TICK_HELD_MS } else { TICK_IDLE_MS };
         if leds.next_ms != 0 {
             period = period.min(leds.next_ms as u64);
         }

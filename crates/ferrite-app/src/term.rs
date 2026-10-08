@@ -311,6 +311,11 @@ pub struct Term {
     ask: list::Ask,
     find: Buf<16>,
     bulk: Option<list::Bulk>,
+    /// Bluetooth (TERM-25): auto start only (the cable port setting is the cable's), writes only once approved
+    /// ([`Term::set_writable`]); a write tried before asks once ([`Term::take_write_ask`]).
+    bt: bool,
+    writable: bool,
+    write_ask: bool,
 }
 
 impl Default for Term {
@@ -369,6 +374,9 @@ impl Term {
             srow: 0,
             first: list::START,
             ask: list::Ask::None,
+            bt: false,
+            writable: true,
+            write_ask: false,
             find: Buf::new(),
             bulk: None,
         }
@@ -403,6 +411,37 @@ impl Term {
         !self.pending
     }
 
+    /// The terminal is open (Enter started it and Ctrl-C hasn't ended it).
+    pub fn on(&self) -> bool {
+        self.page != Page::Off
+    }
+
+    /// Which port this terminal runs on: Bluetooth starts on Enter whatever the cable port setting says, and
+    /// writes only when approved (TERM-25).
+    pub fn set_bluetooth(&mut self, bt: bool) {
+        self.bt = bt;
+    }
+
+    /// Whether this port may write now (the cable always; Bluetooth once approved: TERM-3, TERM-25).
+    pub fn set_writable(&mut self, w: bool) {
+        self.writable = w;
+    }
+
+    /// A write was tried before the approval: ask the owner on the radio (once per try; the session keeps
+    /// the prompt from repeating).
+    pub fn take_write_ask(&mut self) -> bool {
+        core::mem::take(&mut self.write_ask)
+    }
+
+    /// TERM-25: a change from an unapproved Bluetooth device asks the owner and is not made.
+    fn may_write(&mut self) -> bool {
+        if !self.writable {
+            self.write_ask = true;
+            self.say(slow!("Writes need approval: OK on the radio, then try again").as_bytes(), true);
+        }
+        self.writable
+    }
+
     /// Everything again: clear the screen, forget what each row showed (Ctrl-L, TERM-16).
     fn redraw(&mut self) {
         self.clear = true;
@@ -415,7 +454,7 @@ impl Term {
     }
 
     fn start(&mut self) {
-        *self = Term { cols: self.cols, rows: self.rows, ..Term::new() };
+        *self = Term { cols: self.cols, rows: self.rows, bt: self.bt, writable: self.writable, ..Term::new() };
         self.page = Page::Splash;
         self.ask_size = true;
         self.redraw();
@@ -442,7 +481,7 @@ impl Term {
         if self.page == Page::Off {
             // TERM-2: auto starts on a typed Enter; terminal on any byte; link and KISS never. COBS link frames
             // (the 0x00 delimiter) select the link protocol in milestone 3.
-            let go = match app.set.cable_port {
+            let go = match if self.bt { 0 } else { app.set.cable_port } {
                 0 => b == b'\r' || b == b'\n',
                 2 => true,
                 _ => false,
@@ -800,6 +839,9 @@ impl Term {
 
     /// ◀▶ on a field: the same steps and checks as the radio's channel editor (TERM-6, TERM-7).
     fn change<S: ChannelStore>(&mut self, app: &mut App, c: Channel, f: F, d: i32, store: &S) {
+        if f != F::Name && f != F::Tx && !self.may_write() {
+            return;
+        }
         let mut n = c;
         match f {
             F::Name => return self.say(slow!("Enter types the name (16 characters)").as_bytes(), false),
@@ -847,6 +889,9 @@ impl Term {
 
     /// # on a field: its default (MENU-18).
     fn default(&mut self, app: &mut App, c: Channel, f: F) {
+        if !self.may_write() {
+            return;
+        }
         let mut n = c;
         match f {
             F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => return,
@@ -869,6 +914,9 @@ impl Term {
     /// A typed value: the name, or the receive frequency in MHz.
     fn commit(&mut self, app: &mut App, s: &[u8]) {
         let Some(c) = self.edit else { return };
+        if !self.may_write() {
+            return;
+        }
         let mut n = c;
         match FIELDS[self.field as usize % FIELDS.len()] {
             F::Name => {
@@ -923,7 +971,7 @@ impl Term {
             K::Left | K::Right if self.g != 0 => self.settings_change(app, if k == K::Right { 1 } else { -1 }),
             K::Ch(b'#') if self.g != 0 => {
                 let (p, pl) = self.path(self.set_sel);
-                if !blocked(&p[..pl]) {
+                if !blocked(&p[..pl]) && self.may_write() {
                     groups::reset(app, &p[..pl]);
                     self.say(slow!("Back to the default").as_bytes(), false);
                 }
@@ -973,6 +1021,9 @@ impl Term {
         }
         if let Some(why) = groups::greyed(app, p) {
             return self.say(why.as_bytes(), true);
+        }
+        if !self.may_write() {
+            return;
         }
         if groups::change(app, p, d) {
             self.say(b"Changed", false);
@@ -1092,6 +1143,9 @@ impl Term {
             line += 1;
             let r = if core::mem::take(&mut self.long) {
                 Err(cmd::Msg::from(slow!("too long: 255 characters at most").as_bytes()))
+            } else if !self.writable && cmd::writes(&self.cbuf[..n]) {
+                self.write_ask = true;
+                Err(cmd::Msg::from(slow!("writes need approval: OK on the radio").as_bytes()))
             } else {
                 cmd::run(app, store, dev, &self.cbuf[..n], true)
             };
@@ -1112,6 +1166,10 @@ impl Term {
             put!(l, "\r\x1b[K  {} lines read: {} applied, {} refused", line, ok, bad);
             out.put(l.as_bytes());
             return;
+        }
+        if !self.writable && cmd::writes(&self.cbuf[..n]) {
+            self.write_ask = true;
+            return self.say(slow!("Writes need approval: OK on the radio, then run it again").as_bytes(), true);
         }
         let (m, warn) = match cmd::run(app, store, dev, &self.cbuf[..n], false) {
             Ok(cmd::Done::Nothing) => return,

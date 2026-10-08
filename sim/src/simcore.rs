@@ -14,7 +14,7 @@ use crate::face::{Face, Part};
 use crate::fake::{self, FakeRadio};
 use ferrite_app::chan::ChannelStore;
 use ferrite_app::data::{Data, MsgState, Src};
-use ferrite_app::link::{self, Route, Session};
+use ferrite_app::ports::{Port, Ports, To};
 use ferrite_app::sample::Sample;
 use ferrite_app::settings::Settings;
 use ferrite_core::layout::{LAYOUT_HEADER, WAYPOINTS};
@@ -28,7 +28,7 @@ use ferrite_core::msg::{Device, GpsState};
 use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::fb::FrameBuffer;
-use ferrite_app::term::{cmd, Sink, Term};
+use ferrite_app::term::{cmd, Sink};
 use ferrite_ui::gfx::Gfx;
 use ferrite_ui::panel::{Panel, H, W};
 
@@ -166,13 +166,17 @@ pub struct SimCore {
     last_key: String,
     last_px: u64,
     flashes: Vec<Flash>,
-    /// The terminal over the cable (manual chapter 37), and what it has drawn that the cable hasn't taken.
-    term: Term,
+    /// The terminal (manual chapter 37) and the link protocol (chapter 29) on the cable and Bluetooth, as the
+    /// firmware runs them ([`Ports`]); what each port has been sent that its reader hasn't taken.
+    ports: Ports,
     term_out: Vec<u8>,
-    /// Bytes from the cable the terminal hasn't taken yet: a line waits while the one before it runs (TERM-13).
+    /// Bytes from the cable not taken yet: a line waits while the one before it runs (TERM-13).
     term_in: std::collections::VecDeque<u8>,
-    /// The link protocol on the same cable (manual chapter 29; TERM-2 routes the bytes): trusted, as the cable is.
-    link: Session,
+    /// Bluetooth's bytes both ways (roadmap 3d): a phone app on the BT513's serial characteristic.
+    bt_in: std::collections::VecDeque<u8>,
+    bt_out: Vec<u8>,
+    /// KISS bytes that reached the TNC from either port (KISS-6), for tests.
+    pub kiss_in: Vec<u8>,
 }
 
 /// The terminal's bytes waiting for the cable: room up to [`TERM_BUF`].
@@ -289,14 +293,16 @@ impl SimCore {
             last_key: String::from("-"),
             last_px: 0,
             flashes: Vec::new(),
-            term: Term::new(),
+            ports: {
+                let mut p = Ports::new();
+                p.set_cable_max_baud(921_600); // a pseudo-terminal has no rate
+                p
+            },
             term_out: Vec::new(),
             term_in: std::collections::VecDeque::new(),
-            link: {
-                let mut l = Session::new(true);
-                l.set_max_baud(921_600); // a pseudo-terminal has no rate
-                l
-            },
+            bt_in: std::collections::VecDeque::new(),
+            bt_out: Vec::new(),
+            kiss_in: Vec::new(),
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -410,8 +416,9 @@ impl SimCore {
                 let name = ferrite_core::same::event_name(&a.header.event).unwrap_or("Alert");
                 store.log(&log_event(Src::Same, a.slot, a.freq, name.as_bytes(), &a.header.event)); // INBOX-6
             }
-            // The fake link: an allowed write runs a session, 2 % a step, then ends.
-            match app.take_link_answer() {
+            // The fake link: an allowed write runs a session, 2 % a step, then ends (not while a real session's
+            // own question is up: its answer is the session's).
+            match if self.ports.link.asking() { None } else { app.take_link_answer() } {
                 Some(ferrite_app::screens::link::LinkAnswer::Allowed) => {
                     dev.link.write_pct = Some(0);
                     app.link_write_progress();
@@ -457,20 +464,20 @@ impl SimCore {
             }
             store.autosave(now, app);
             app.render(&mut self.lcd, &radio.live, dev, store);
-            self.term.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out));
-            if let Some(r) = self.term.debug_req() {
-                self.term.debug_answer(radio.debug(r)); // TERM-21: the fake radio answers at once
+            dev.bt = self.ports.bt_connected(app, now);
+            self.ports.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
+            if let Some(r) = self.ports.term.debug_req() {
+                self.ports.term.debug_answer(radio.debug(r)); // TERM-21: the fake radio answers at once
             }
-            self.link.poll(app, store, now, &mut TermBuf(&mut self.term_out));
-            let _ = self.link.take_baud(); // a pseudo-terminal keeps no rate
-            if let Some(p) = self.link.progress() {
+            let _ = self.ports.take_baud(); // a pseudo-terminal keeps no rate
+            if let Some(p) = self.ports.link.progress() {
                 dev.link.write_pct = Some(p);
             }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
             }
         }
-        if self.live() && (!self.term_in.is_empty() || self.term.busy() || !self.link.ready()) {
+        if self.live() && (!self.term_in.is_empty() || !self.bt_in.is_empty() || self.ports.term.busy() || !self.ports.link.ready()) {
             self.term_pump(); // a load or a dump goes on between frames
         }
         if self.lcd.pixels > 0 {
@@ -596,26 +603,28 @@ impl SimCore {
     /// line by line); stops when the output is full or after a few hundred lines, to go on next frame.
     fn term_pump(&mut self) {
         for _ in 0..400 {
-            while self.term.ready() && self.link.ready() {
-                let Some(b) = self.term_in.pop_front() else { break };
-                match link::route(self.app.settings().cable_port, self.link.active(self.now), b) {
-                    Route::Link => self.link.feed(b, self.now),
-                    Route::Term => self.term.feed(&mut self.app, b, self.now, &self.store),
-                    Route::Drop => {}
-                }
-                while let Some(w) = self.app.pop_write() {
-                    self.store.apply(w); // one channel write per key
+            for port in [Port::Cable, Port::Bt] {
+                while self.ports.ready() {
+                    let q = if port == Port::Cable { &mut self.term_in } else { &mut self.bt_in };
+                    let Some(b) = q.pop_front() else { break };
+                    match self.ports.route(&self.app, port, b, self.now) {
+                        To::Kiss if self.kiss_in.len() < 4096 => self.kiss_in.push(b),
+                        To::Kiss => {}
+                        to => self.ports.feed(&mut self.app, &self.store, to, b, self.now),
+                    }
+                    while let Some(w) = self.app.pop_write() {
+                        self.store.apply(w); // one channel write per key
+                    }
                 }
             }
-            self.link.poll(&mut self.app, &self.store, self.now, &mut TermBuf(&mut self.term_out));
-            self.term.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out));
-            if let Some(r) = self.term.debug_req() {
-                self.term.debug_answer(self.radio.debug(r));
+            self.ports.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
+            if let Some(r) = self.ports.term.debug_req() {
+                self.ports.term.debug_answer(self.radio.debug(r));
             }
             while let Some(w) = self.app.pop_write() {
                 self.store.apply(w);
             }
-            if self.term_in.is_empty() && self.term.ready() && self.link.ready() || self.term_out.len() >= TERM_BUF / 2 {
+            if self.term_in.is_empty() && self.bt_in.is_empty() && self.ports.ready() || self.term_out.len() >= TERM_BUF / 2 || self.bt_out.len() >= TERM_BUF / 2 {
                 break;
             }
         }
@@ -668,6 +677,20 @@ impl SimCore {
         report
     }
 
+    /// Bytes from a phone on Bluetooth (roadmap 3d): the terminal, the link or KISS, as the radio routes them.
+    pub fn bt_feed(&mut self, bytes: &[u8]) {
+        if !self.live() {
+            return;
+        }
+        self.bt_in.extend(bytes);
+        self.term_pump();
+    }
+
+    /// What went out on Bluetooth since the last call.
+    pub fn bt_take(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.bt_out)
+    }
+
     /// What the terminal drew since the last call, for the cable.
     pub fn term_take(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.term_out)
@@ -685,7 +708,7 @@ impl SimCore {
 
     /// The terminal's size from outside (the web page's pane); a terminal program answers the size question itself.
     pub fn term_size(&mut self, cols: u16, rows: u16) {
-        self.term.set_size(cols, rows);
+        self.ports.term.set_size(cols, rows);
     }
 
     /// The power switch on the volume knob (PE0): off saves ("Saving...", PWR-17) then goes dark; on is a fresh
@@ -698,11 +721,12 @@ impl SimCore {
             self.radio = FakeRadio::new();
             self.app = power_on(&self.store, &mut self.radio);
             (self.off, self.boot_end) = (false, self.now + BOOT_MS);
-            self.term = Term::new(); // the cable starts over too: Enter opens the terminal again
-            self.link = Session::new(true);
-            self.link.set_max_baud(921_600);
+            self.ports = Ports::new(); // the cable and Bluetooth start over too: Enter opens the terminal again
+            self.ports.set_cable_max_baud(921_600);
             self.term_out.clear();
             self.term_in.clear();
+            self.bt_in.clear();
+            self.bt_out.clear();
             self.draw_boot();
             self.last_key = String::from("power on");
         } else if self.booting {

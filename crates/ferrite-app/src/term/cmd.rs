@@ -1009,6 +1009,19 @@ fn set_line(app: &App, dev: &Device, p: &[u8], out: &mut Line) {
 // ---- Running a line ----
 
 /// Runs one line: typed after `:`, or read by `load` (`loading`: only the lines a dump holds).
+/// Whether a command line changes something (TERM-25: an unapproved Bluetooth device may only read). Reading
+/// is `get`, `help`, `dump`, `mem`/`mem32`, `gpio`, `ch`, `zone` or `preset` with nothing more than a number
+/// (they show it) and a bare `home`; everything else, `home N`, the BK4829 and SI4732 commands included, counts
+/// as a write.
+pub fn writes(line: &[u8]) -> bool {
+    let mut w = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty());
+    let Some(c) = w.next() else { return false };
+    let rest = w.count();
+    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio"].iter().any(|r| same(c, r));
+    let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || same(c, b"home") && rest == 0;
+    !(reads || shows)
+}
+
 pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], loading: bool) -> Result<Done, Msg> {
     let mut t = Toks::new(line);
     let c = match t.next()? {

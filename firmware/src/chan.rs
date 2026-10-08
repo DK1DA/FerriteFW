@@ -69,3 +69,15 @@ pub static LINK_BAUD: Signal<M, u32> = Signal::new();
 pub static LINK_HELLOS: AtomicU16 = AtomicU16::new(0);
 pub static CABLE_BAUD: AtomicU32 = AtomicU32::new(115_200);
 pub static LINK_ON: AtomicBool = AtomicBool::new(false);
+
+/// Bluetooth (manual chapter 29, roadmap 3d): the Link task moves USART1's bytes into `BT_IN` and sends `BT_OUT`,
+/// as it does the cable's; the UI task runs the terminal, the link or KISS on them ([`ferrite_app::ports`]).
+/// 64 B in (the UART's own 256 B ring is behind it), 512 B out (a terminal page in a few turns, a link answer,
+/// a KISS frame). `BT_ON` is 0 9 2 1 (the module's power, PB9), `BT_LINK_ON` the link holding Bluetooth (no
+/// XON/XOFF then).
+static BT_IN_BUF: [AtomicU8; 64] = [const { AtomicU8::new(0) }; 64];
+static BT_OUT_BUF: [AtomicU8; 512] = [const { AtomicU8::new(0) }; 512];
+pub static BT_IN: Ring<'static> = Ring::new(&BT_IN_BUF);
+pub static BT_OUT: Ring<'static> = Ring::new(&BT_OUT_BUF);
+pub static BT_ON: AtomicBool = AtomicBool::new(false);
+pub static BT_LINK_ON: AtomicBool = AtomicBool::new(false);

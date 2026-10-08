@@ -91,6 +91,8 @@ pub const POWER_ON: [&str; 3] = ["Off", "Callsign", "Text"];
 pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
 /// The cable port (0 9 2 5, TERM-2): auto picks from the first bytes; the others force one.
 pub const CABLE_PORTS: [&str; 4] = ["Auto", "Link", "Terminal", "KISS"];
+/// 0 5 9 1's values (KISS-6): which port is the KISS TNC.
+pub const KISS_PORTS: [&str; 3] = ["Off", "Cable", "Bluetooth"];
 
 /// FM broadcast step (0 3 1 2) in 10 kHz units, and its names.
 pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "200 kHz")];
@@ -131,6 +133,8 @@ pub struct Settings {
     pub bt: bool,
     /// 0 9 2 5: what the cable carries, an index into [`CABLE_PORTS`] (TERM-2).
     pub cable_port: u8,
+    /// 0 5 9 1: the KISS TNC's port, an index into [`KISS_PORTS`] (KISS-6).
+    pub kiss_port: u8,
     /// 0 4 9 1 (US and Canada only).
     pub same: bool,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
@@ -265,6 +269,16 @@ pub const COORD_FORMATS: [&str; 4] = ["Degrees", "Deg, min", "Deg, min, sec", "G
 pub const SAME_CODES: usize = 8;
 
 impl Settings {
+    /// KISS-6: the cable carries raw KISS (0 9 2 5 on KISS, or 0 5 9 1 on Cable).
+    pub fn kiss_on_cable(&self) -> bool {
+        self.cable_port == 3 || self.kiss_port == 1
+    }
+
+    /// KISS-5, KISS-6: Bluetooth carries raw KISS (0 5 9 1 on Bluetooth).
+    pub fn kiss_on_bt(&self) -> bool {
+        self.kiss_port == 2
+    }
+
     pub const DEFAULT: Settings = Settings {
         callsign: Text::EMPTY,
         owner: [Text::EMPTY; 3],
@@ -287,6 +301,7 @@ impl Settings {
         pin_wait: 0,
         bt: false,
         cable_port: 0,
+        kiss_port: 0,
         same: true,
         fm_freq: 10_110,
         fm_step: 1,

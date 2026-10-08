@@ -560,6 +560,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &CABLE_PORTS, s.cable_port);
             s.cable_port != 0
         }
+        [5, 9, 1] => {
+            pick(b, &crate::settings::KISS_PORTS, s.kiss_port);
+            s.kiss_port != 0
+        }
         [9, 2] => {
             b.set(if dev.bt { b"BT connected".as_slice() } else if s.bt { b"BT on" } else { b"BT off" });
             s.bt
@@ -672,7 +676,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 48] = [
+pub(crate) const SETTABLE: [&[u8]; 49] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -694,6 +698,7 @@ pub(crate) const SETTABLE: [&[u8]; 48] = [
     &[5, 8, 1],
     &[5, 8, 2],
     &[5, 8, 3],
+    &[5, 9, 1],
     &[6, 1],
     &[6, 4],
     &[6, 5],
@@ -785,6 +790,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [4, 9, 1] => s.same = !s.same,
         [9, 2, 1] => s.bt = !s.bt,
         [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
+        [5, 9, 1] => s.kiss_port = cycle(s.kiss_port, d, crate::settings::KISS_PORTS.len()),
         [9, 2, 6] => s.term_colour = !s.term_colour,
         [7, 4, 1] => s.backlight = cycle(s.backlight, d, BACKLIGHT_TIMES.len()),
         [7, 4, 5] => s.keypad_light = cycle(s.keypad_light, d, KEYPAD_LIGHTS.len()),
@@ -902,6 +908,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [4, 9, 1] => s.same = d.same,
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,
+        [5, 9, 1] => s.kiss_port = d.kiss_port,
         [9, 2, 6] => s.term_colour = d.term_colour,
         [7, 4, 1] => s.backlight = d.backlight,
         [7, 4, 5] => s.keypad_light = d.keypad_light,
