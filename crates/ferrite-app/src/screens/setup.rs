@@ -251,8 +251,13 @@ impl View for Setup {
 
     fn mockup(self) -> Option<&'static str> {
         match self.page {
+            0 => Some("SetupWelcome.png"),
             1 => Some("SetupCall.png"),
             2 => Some("SetupRegion.png"),
+            3 => Some("SetupOwner.png"),
+            4 => Some("SetupTime.png"),
+            5 => Some("SetupLook.png"),
+            6 => Some("SetupBattery.png"),
             7 => Some("SetupSummary.png"),
             _ => None,
         }

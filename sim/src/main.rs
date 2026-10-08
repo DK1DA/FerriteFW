@@ -453,6 +453,17 @@ fn main() {
         run(&mut app, &mut fb, t, &mut t);
         save(&fb, name, scale);
     }
+    // HF mode in AM on a broadcast band (HF-32): 6.070 MHz, 49 m; group D's "hf" is 7.074 USB on 40 m.
+    press(&mut app, Key::Exit, 800, &mut t);
+    run(&mut app, &mut fb, t + 3500, &mut t);
+    app.open(Dest::HfMode);
+    run(&mut app, &mut fb, t + 3000, &mut t); // the patch loads
+    for k in [Key::Digit(6), Key::Digit(0), Key::Digit(7), Key::Digit(0), Key::Menu] {
+        press(&mut app, k, 80, &mut t);
+        t += 150;
+    }
+    run(&mut app, &mut fb, t + 1500, &mut t);
+    save(&fb, "hf-am", scale);
     // SCAN-14: the range preset editor refuses a span across 64 MHz (144-148 MHz, Start turned down to 54).
     press(&mut app, Key::Exit, 800, &mut t);
     run(&mut app, &mut fb, t + 3500, &mut t);

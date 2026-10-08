@@ -426,6 +426,10 @@ impl View for Hf {
         "HF mode"
     }
 
+    fn mockup(self) -> Option<&'static str> {
+        Some("HfMode.png")
+    }
+
     fn title(self, _: &App, b: &mut Buf<10>) {
         b.set(b"HF"); // HF-5
     }
