@@ -143,6 +143,52 @@ impl Watch {
     }
 }
 
+/// The receive path select (the RF path machine's one RX select, SAFE-11) between the two chips while both have a
+/// slot: one band's front end at a time, as stock's dual watch hops. The chip with the slot being heard keeps it;
+/// otherwise it alternates, each chip for its slot's dwell. A chip without its path is taken as hearing nothing
+/// (to confirm on the bench: if the other band's front end leaks enough, both could listen at once).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Hop {
+    cur: Option<u8>,
+    since: u32,
+}
+
+impl Hop {
+    pub const fn new() -> Self {
+        Hop { cur: None, since: 0 }
+    }
+
+    /// The chip whose path is selected now.
+    pub fn chip(&self) -> Option<u8> {
+        self.cur
+    }
+
+    /// The chip to select after a [`Watch::tick`] that gave `out`; `active` and `freq` as in [`Cfg`].
+    pub fn next(&mut self, now: u32, out: &Out, active: u8) -> Option<u8> {
+        let has = |n: u8| out.chip[n as usize].is_some();
+        let next = match (has(0), has(1)) {
+            (false, false) => None,
+            (true, false) => Some(0),
+            (false, true) => Some(1),
+            (true, true) => {
+                let heard = out.audio.and_then(|s| (0..2u8).find(|&n| out.chip[n as usize] == Some(s)));
+                match (heard, self.cur) {
+                    (Some(n), _) => Some(n),
+                    (None, Some(c)) => {
+                        let dwell = if out.chip[c as usize] == Some(active) { ACTIVE_DWELL_MS } else { WATCHED_DWELL_MS };
+                        Some(if now.wrapping_sub(self.since) < dwell { c } else { c ^ 1 })
+                    }
+                    (None, None) => out.chip.iter().position(|&s| s == Some(active)).map_or(Some(0), |n| Some(n as u8)),
+                }
+            }
+        };
+        if next != self.cur {
+            (self.cur, self.since) = (next, now);
+        }
+        next
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +270,23 @@ mod tests {
         assert_eq!((o.chip[1], o.audio), (Some(1), Some(1)));
         let o = w.tick(200, &c, [true, true], false);
         assert_eq!(o.audio, Some(0), "the active slot's audio first (WATCH-3)");
+    }
+
+    /// The path hops between the two chips at their dwells, and stays with the chip being heard.
+    #[test]
+    fn hop_between_chips() {
+        let mut h = Hop::new();
+        let both = Out { chip: [Some(0), Some(1)], ..Out::default() };
+        assert_eq!(h.next(0, &both, 0), Some(0), "the active slot's chip first");
+        assert_eq!(h.next(149, &both, 0), Some(0));
+        assert_eq!(h.next(150, &both, 0), Some(1), "active dwell over");
+        assert_eq!(h.next(219, &both, 0), Some(1));
+        assert_eq!(h.next(220, &both, 0), Some(0), "watched dwell over");
+        let heard = Out { audio: Some(1), ..both };
+        assert_eq!(h.next(5_000, &heard, 0), Some(1), "B heard: its chip keeps the path");
+        assert_eq!(h.next(9_000, &heard, 0), Some(1));
+        let one = Out { chip: [None, Some(1)], ..Out::default() };
+        assert_eq!(h.next(9_010, &one, 1), Some(1));
+        assert_eq!(h.next(9_020, &Out::default(), 0), None);
     }
 }

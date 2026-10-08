@@ -16,7 +16,7 @@ use ferrite_app::term::{Sink, Term};
 use ferrite_app::App;
 use ferrite_core::chipid;
 use ferrite_core::keys;
-use ferrite_core::msg::{Device, Live, LiveAll, RadioCmd, SlotLive, Source};
+use ferrite_core::msg::{Device, LiveAll, RadioCmd, Source};
 use ferrite_core::VERSION;
 use ferrite_ui::boot::{self, BootInfo, Check, State};
 use ferrite_ui::gfx::BG;
@@ -43,13 +43,6 @@ impl Sink for Cable {
 /// The milliseconds the app counts in (wrapping).
 fn now_ms() -> u32 {
     Instant::now().as_millis() as u32
-}
-
-/// The single receiver's snapshot as slot A's (the Radio task follows slot A until it runs three slots).
-fn slot_a(all: &mut LiveAll, l: &Live) {
-    all.slots[0] = SlotLive { freq: l.freq, rssi: l.rssi, squelch_open: l.squelch_open, ..all.slots[0] };
-    all.rx_asleep = l.rx_asleep;
-    all.chips = l.chips;
 }
 
 /// MENU pressed or released: whether it is held, for the settings reset at power on (BOOT-14).
@@ -186,7 +179,7 @@ pub async fn task() {
     let mut live_rx = LIVE.receiver().unwrap();
     let mut live = LiveAll::default();
     if let Some(l) = live_rx.try_get() {
-        slot_a(&mut live, &l);
+        live = l;
     }
     // Key codes down (mapped ones only): the app is ticked often while any is held.
     let mut down = 0u32;
@@ -197,7 +190,7 @@ pub async fn task() {
     let fastest = ferrite_core::link::RATES.iter().copied().filter(|&r| crate::hal::uart::rate_ok(crate::report::UART_CPS, r)).max();
     link.set_max_baud(fastest.unwrap_or(115_200));
     // Bring-up: the receiver on the cable log once a second while it changes.
-    let mut logged = (Live::default(), Instant::now());
+    let mut logged = (LiveAll::default(), Instant::now());
     loop {
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
@@ -322,7 +315,7 @@ pub async fn task() {
         }
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {
-            Either4::First(l) => slot_a(&mut live, &l),
+            Either4::First(l) => live = l,
             // WX-4: a decoded SAME header opens the alert over any screen.
             Either4::Fourth(a) => {
                 app.same_alert(&a.header, a.slot, a.freq);
@@ -377,20 +370,28 @@ fn log_input(i: &Input) {
     });
 }
 
-/// Bring-up log: the receiver's snapshot.
-fn log_live(l: &Live) {
-    bringup::linef(|b| {
-        let f = l.freq % 100_000;
-        let _ = ufmt::uwrite!(b, "rx {}.", l.freq / 100_000);
-        for d in [10_000, 1_000, 100, 10, 1] {
-            b.push(&[b'0' + (f / d % 10) as u8]); // five decimals, zeros kept: 146.05200
-        }
-        let _ = ufmt::uwrite!(b, " MHz  rssi {} dBm  squelch {}  chips ", l.rssi, if l.squelch_open { "open" } else { "closed" });
-        bringup::hex(b, l.chips as u32);
-        if l.rx_asleep {
-            b.push(b"  asleep");
-        }
-    });
+/// Bring-up log: the receivers' snapshot, a line per slot.
+fn log_live(l: &LiveAll) {
+    for (i, s) in l.slots.iter().enumerate() {
+        bringup::linef(|b| {
+            let f = s.freq % 100_000;
+            let _ = ufmt::uwrite!(b, "{} rx {}.", ["A", "B", "C"][i], s.freq / 100_000);
+            for d in [10_000, 1_000, 100, 10, 1] {
+                b.push(&[b'0' + (f / d % 10) as u8]); // five decimals, zeros kept: 146.05200
+            }
+            let _ = ufmt::uwrite!(b, " MHz  rssi {} dBm  squelch {}", s.rssi, if s.squelch_open { "open" } else { "closed" });
+            if s.scanning {
+                let _ = ufmt::uwrite!(b, "  scanning, {} hits", s.hits);
+            }
+            if i == 0 {
+                b.push(b"  chips ");
+                bringup::hex(b, l.chips as u32);
+                if l.rx_asleep {
+                    b.push(b"  asleep");
+                }
+            }
+        });
+    }
 }
 
 /// Bring-up log: what the boot found.

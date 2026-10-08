@@ -87,6 +87,34 @@ impl List for Range<'_> {
     }
 }
 
+/// The band a range scan walks when it isn't given a preset: the band `f` is in, at its usual step (the Radio
+/// task's band scan, as the simulators' fake radio scans). Outside these, a window of 1 MHz each side at 12.5 kHz.
+pub fn band_range(f: Freq10) -> Range<'static> {
+    use crate::freq::mhz;
+    // lo, hi, step (10 Hz units): HF, 6 m, airband, 2 m and VHF, marine, 1.25 m, UHF. 5 kHz on the VHF bands
+    // covers both the 15 kHz and 12.5 kHz channel plans' usual frequencies (146.520, 145.500).
+    const BANDS: [(Freq10, Freq10, Freq10); 7] = [
+        (mhz(1) + 80_000, mhz(30), 500),
+        (mhz(50), mhz(54), 500),
+        (mhz(108), mhz(137), 2_500),
+        (mhz(137), mhz(156), 500),
+        (mhz(156), mhz(163), 2_500),
+        (mhz(220), mhz(225), 500),
+        (mhz(400), mhz(520), 1_250),
+    ];
+    let (lo, hi, step) = BANDS
+        .iter()
+        .copied()
+        .find(|&(lo, hi, _)| (lo..hi).contains(&f))
+        .unwrap_or((f.saturating_sub(mhz(1)), f + mhz(1), 1_250));
+    Range { lo, hi: hi - step, step, skipped: &[] }
+}
+
+/// Where `f` is in `r` (its nearest step at or below).
+pub fn range_pos(r: &Range<'_>, f: Freq10) -> u16 {
+    (f.saturating_sub(r.lo) / r.step.max(1)).min(r.len().saturating_sub(1) as u32) as u16
+}
+
 /// SCAN-5's resume rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Resume {
@@ -557,5 +585,17 @@ mod tests {
         }
         s.tick(&Chans, t, true);
         assert_eq!((s.pos(), s.hits), (7, 2));
+    }
+
+    #[test]
+    fn band_ranges() {
+        let r = band_range(mhz(146) + 52_000);
+        assert_eq!((r.lo, r.step), (mhz(137), 500));
+        assert_eq!(r.at(range_pos(&r, mhz(146) + 52_000)), Some(mhz(146) + 52_000));
+        let r = band_range(mhz(121) + 50_000);
+        assert_eq!((r.lo, r.step), (mhz(108), 2_500));
+        let r = band_range(mhz(300) + 10_000);
+        assert_eq!((r.lo, r.hi), (mhz(299) + 10_000, mhz(301) + 10_000 - 1_250), "no band: a window around it");
+        assert_eq!(range_pos(&r, mhz(400)), r.len() - 1, "clamped to the range");
     }
 }

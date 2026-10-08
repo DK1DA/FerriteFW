@@ -8,7 +8,7 @@ use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use crate::ring::Ring;
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU8};
-use ferrite_core::msg::{DebugAns, DebugReq, DspCmd, Event, Live, Position, RadioCmd, SameDecoded, StorageCmd};
+use ferrite_core::msg::{DebugAns, DebugReq, DspCmd, Event, LiveAll, Position, RadioCmd, SameDecoded, StorageCmd};
 
 pub static RADIO: Channel<M, RadioCmd, 8> = Channel::new();
 pub static STORAGE: Channel<M, StorageCmd, 8> = Channel::new();
@@ -33,7 +33,8 @@ pub static EVENTS: PubSubChannel<M, Event, 16, 4, 6> = PubSubChannel::new();
 /// Two deep: a second header (SAME repeats each three times) waits while the first is shown.
 pub static ALERTS: Channel<M, SameDecoded, 2> = Channel::new();
 
-pub static LIVE: Watch<M, Live, 2> = Watch::new();
+/// The Radio task's snapshot of all three slots (one copy, 308 B: the UI keeps its own).
+pub static LIVE: Watch<M, LiveAll, 2> = Watch::new();
 pub static POSITION: Watch<M, Position, 2> = Watch::new();
 
 /// The terminal over the cable (manual chapter 37): the Link task moves the cable's bytes into `TERM_IN` and
