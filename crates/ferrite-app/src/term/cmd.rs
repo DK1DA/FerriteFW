@@ -316,11 +316,11 @@ fn index(w: &[u8], max: u32, what: &str) -> Result<u32, Msg> {
     }
 }
 
-/// "146.52", "146.520 00" (one word here): MHz from 18 MHz up to 1000 MHz.
+/// "146.52", "146.520 00" (one word here): MHz from 0.15 MHz (HF channels, CHAN-26) up to 1300 MHz.
 fn freq(w: &[u8], what: &str) -> Result<Freq10, Msg> {
     match parse_mhz(w) {
-        Some(f) if w.iter().all(|c| c.is_ascii_digit() || *c == b'.') && (mhz(18)..mhz(1000)).contains(&f) => Ok(f),
-        _ => Err(msg!("{}: MHz from 18 to 1000, e.g. 146.52", what)),
+        Some(f) if w.iter().all(|c| c.is_ascii_digit() || *c == b'.') && (crate::chan::CH_LO..mhz(1300)).contains(&f) => Ok(f),
+        _ => Err(msg!("{}: MHz from 0.15 to 1300, e.g. 146.52", what)),
     }
 }
 
@@ -546,7 +546,7 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
         2 => (g.offset, g.split) = (offset(v)?, false),
         17 => (g.split, g.offset) = (true, freq(v, "tx")? as i32),
         3 => {
-            g.mode = pick(v, &MODES[..SLOT_MODES], "mode")?;
+            g.mode = pick(v, &MODES, "mode")?; // USB, LSB and CW: HF channels only (check)
             g.narrow = g.mode == 1; // VFO-20
         }
         // bw= from older dumps: FM and NFM follow it; AM stays AM (VFO-20)
@@ -588,8 +588,21 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
 
 /// What the radio's channel editor would refuse (CHAN-22, TX-9, TERM-7).
 pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
-    if !(mhz(64)..mhz(1000)).contains(&c.rx) {
-        return Err(msg!("rx: a channel is from 64 to 1000 MHz"));
+    if !crate::chan::rx_ok(c.rx) {
+        return Err(msg!("rx: 0.15-64 MHz (HF), 64-630 or 756-1300 MHz"));
+    }
+    if c.is_hf() {
+        // CHAN-26: HF mode's frequency and mode, simplex
+        if !crate::screens::hf::channel_mode_ok(c.rx, c.cfg.mode) {
+            return Err(msg!("mode: an HF channel is AM, USB, LSB or CW (FM from 18 MHz)"));
+        }
+        if c.cfg.offset != 0 || c.cfg.split {
+            return Err(msg!("offset: an HF channel is simplex"));
+        }
+        return Ok(());
+    }
+    if c.cfg.mode as usize >= SLOT_MODES {
+        return Err(msg!("mode: USB, LSB and CW are for HF channels, below 64 MHz"));
     }
     if c.cfg.split && c.cfg.offset <= 0 {
         return Err(msg!("offset=split needs its TX frequency: tx=146.52"));
@@ -599,7 +612,7 @@ pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
     }
     let tx = c.cfg.tx_of(c.rx) as i64;
     if !(mhz(64) as i64..mhz(1000) as i64).contains(&tx) {
-        return Err(msg!("offset: the TX frequency would be outside 64 to 1000 MHz"));
+        return Err(msg!("offset: the TX frequency would be outside 64 to 1000 MHz")); // never TX above 1000
     }
     if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) && c.cfg.power != 0 { // the cap goes by the TX band
         return Err(msg!("power: fixed at 0.25 W on 1.25 m; use power=low"));

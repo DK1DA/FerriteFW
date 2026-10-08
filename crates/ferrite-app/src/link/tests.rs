@@ -157,10 +157,14 @@ fn channel_round_trip_and_checks() {
     assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, 0);
     assert_eq!(pc.st.get(c.num).unwrap().name[0], b'Z');
     let mut bad = rec.clone();
-    bad[3..7].copy_from_slice(&1_000_000u32.to_le_bytes()); // 10 MHz
+    bad[3..7].copy_from_slice(&70_000_000u32.to_le_bytes()); // 700 MHz: no chip receives it
     let (s, why) = pc.write(what::CHANNEL, c.num, &bad, 240);
     assert_eq!(s, Status::Invalid as u8);
-    assert!(std::str::from_utf8(&why).unwrap().contains("64 to 1000 MHz"), "{why:?}");
+    assert!(std::str::from_utf8(&why).unwrap().contains("756-1300 MHz"), "{why:?}");
+    bad[3..7].copy_from_slice(&1_000_000u32.to_le_bytes()); // 10 MHz: an HF channel, but NFM isn't HF mode's
+    let (s, why) = pc.write(what::CHANNEL, c.num, &bad, 240);
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(std::str::from_utf8(&why).unwrap().contains("an HF channel is AM"), "{why:?}");
     assert_eq!(pc.read(what::CHANNEL, 999).unwrap_err(), Status::NotFound as u8);
     assert_eq!(pc.ask(msg::DELETE, &[what::CHANNEL, (c.num & 255) as u8, (c.num >> 8) as u8]).0, 0);
     assert!(pc.st.get(c.num).is_none());

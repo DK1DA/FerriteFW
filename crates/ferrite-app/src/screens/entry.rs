@@ -1,5 +1,6 @@
 //! Direct entry (manual chapters 6, 9 and 10; NAV-4, VFO-11 to VFO-14): a digit on home opens it with that
-//! digit. In VFO mode it is a frequency, \* the point (the point comes by itself after three MHz digits);
+//! digit. In VFO mode it is a frequency, \* the point (the point comes by itself after three MHz digits; a
+//! second \* after 100-130 takes it away again, for a fourth MHz digit: 1 2 9 \* \* 6 is 1296 MHz, VFO-21);
 //! the screen shows the digits, the band, the frequency it snaps to on the step, and whether transmit is
 //! allowed there or why not. In channel mode it is a channel number, shown with its name or "empty". OK goes
 //! there, BACK deletes a digit (with none left, it leaves). The same screen types a frequency for the channel
@@ -42,17 +43,19 @@ pub enum EntryFor {
 pub struct Entry {
     pub to: EntryFor,
     /// Digits and the point as typed.
-    pub buf: [u8; 9],
+    pub buf: [u8; 10],
     pub n: u8,
+    /// Four MHz digits (1000-1300 MHz): the automatic point comes after the fourth.
+    pub wide: bool,
 }
 
 /// Home VFOs tune 18 MHz and up (VFO-14), to what the chips reach.
 const LO: Freq10 = mhz(18);
-const HI: Freq10 = mhz(1000) - 1;
+const HI: Freq10 = mhz(1300) - 1;
 
 impl Entry {
     pub fn new(to: EntryFor, first: Option<u8>) -> Self {
-        let mut e = Entry { to, buf: [0; 9], n: 0 };
+        let mut e = Entry { to, buf: [0; 10], n: 0, wide: false };
         if let Some(d) = first {
             e.push(b'0' + d);
         }
@@ -61,7 +64,7 @@ impl Entry {
 
     /// Prefilled with a frequency ("146.52"; trailing zeros after the point dropped), to edit or keep with OK.
     pub fn with_freq(to: EntryFor, f: Freq10) -> Self {
-        let mut e = Entry { to, buf: [0; 9], n: 0 };
+        let mut e = Entry { to, buf: [0; 10], n: 0, wide: f >= mhz(1000) };
         let (int, mut frac, mut k) = (f / 100_000, f % 100_000, 5);
         while k > 1 && frac % 10 == 0 {
             frac /= 10;
@@ -111,15 +114,22 @@ impl Entry {
             return;
         }
         if c == b'.' {
+            // VFO-21: a second * right after the point on 100-130 takes it away, for 1000-1300 MHz
+            let three = self.buf[..3].iter().fold(0u32, |a, &c| a * 10 + (c.wrapping_sub(b'0')) as u32);
+            if point && !self.wide && self.n == 4 && self.buf[3] == b'.' && (100..=130).contains(&three) {
+                (self.n, self.wide) = (3, true);
+                return;
+            }
             if !point && self.n > 0 && (self.n as usize) < self.buf.len() {
                 self.buf[self.n as usize] = c;
                 self.n += 1;
             }
             return;
         }
-        if !point && self.n == 3 {
-            self.buf[3] = b'.'; // three MHz digits: the point comes by itself
-            self.n = 4;
+        let mhz_digits = if self.wide { 4 } else { 3 };
+        if !point && self.n == mhz_digits {
+            self.buf[self.n as usize] = b'.'; // three (or four) MHz digits: the point comes by itself
+            self.n += 1;
         }
         if (self.n as usize) < self.buf.len() {
             self.buf[self.n as usize] = c;
@@ -155,6 +165,7 @@ impl Entry {
 
     /// The entry holding exactly f (5 decimals), so OK's path commits it.
     fn set_freq(&mut self, f: Freq10) {
+        self.wide = f >= mhz(1000);
         let mut b = Buf::<12>::new();
         let _ = uwrite!(b, "{}.{}", f / 100_000, ferrite_ui::text::Zero(f % 100_000, 5));
         let n = b.as_bytes().len().min(self.buf.len());
@@ -202,7 +213,7 @@ fn refuse(f: Freq10) -> Option<&'static str> {
     if f < LO {
         Some("Below 18 MHz: HF mode (MENU 0 3 4)") // VFO-14
     } else if f > HI || !ferrite_core::freq::receivable(f) {
-        Some("Can't tune: 18-580, 760-1000 MHz")
+        Some("Can't tune: 18-630, 756-1300 MHz")
     } else {
         None
     }
@@ -240,8 +251,12 @@ impl View for Entry {
             (Key::Exit, Press::Short) if s.n == 0 => return app.back(),
             (Key::Exit, Press::Short) => {
                 s.n -= 1;
-                if s.n == 3 && s.buf[3] == b'.' && s.freq_mode() {
-                    s.n = 2; // the automatic point goes with the digit before it
+                let auto = if s.wide { 4 } else { 3 };
+                if s.n == auto && s.buf[auto as usize] == b'.' && s.freq_mode() {
+                    s.n = auto - 1; // the automatic point goes with the digit before it
+                }
+                if s.n < 3 {
+                    s.wide = false;
                 }
             }
             (Key::Menu, Press::Short) => return commit(s, app, store),
@@ -356,6 +371,7 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
     if e.to == EntryFor::Channel {
         let Some(num) = e.number() else { return };
         match store.by_num(num) {
+            Some((c, _)) if c.is_hf() => super::hf::recall(app, &c), // CHAN-26
             Some((c, pos)) => {
                 let a = app.active as usize;
                 let s = &mut app.slots[a];
@@ -398,8 +414,8 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
             app.go_home();
         }
         EntryFor::ChannelFreq => {
-            if f < mhz(64) {
-                return app.show_toast(b"Channels are 64 MHz and up", b"", false); // CHAN-22
+            if f < crate::chan::HF_TOP {
+                return app.show_toast(b"Below 64 MHz", b"HF channels: hold V/M in HF mode", false); // CHAN-26
             }
             super::chedit::edit(app, |c| c.rx = f);
             app.back();

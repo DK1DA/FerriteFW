@@ -152,6 +152,8 @@ pub enum WpSrc {
     Marked,
     Aprs,
     Link,
+    /// Typed as a grid square (GPS-21).
+    Grid,
 }
 
 /// A waypoint (GPS-10).
@@ -369,6 +371,8 @@ pub enum Op {
     Dtmf(u8, Option<Dtmf>),
     /// DTMF memory i's name, up to 10 characters (DTMF-12); empty clears it.
     DtmfName(u8, Buf<10>),
+    /// A waypoint typed as a grid square, at its centre, named with it (GPS-21).
+    AddWaypoint(Pos, Buf<16>),
 }
 
 /// The records, read one at a time. Every method has a default (nothing there), so an owner that doesn't

@@ -38,6 +38,9 @@ pub enum TextFor {
     PowerOn,
     /// A DTMF memory's name (DTMF-12).
     DtmfName(u8),
+    /// A grid square (GPS-21): the fixed position (A8), or a new waypoint.
+    GridFixed,
+    GridWaypoint,
 }
 
 impl TextFor {
@@ -49,6 +52,7 @@ impl TextFor {
             TextFor::Callsign => "Callsign",
             TextFor::PowerOn => "Power-on message",
             TextFor::DtmfName(_) => "DTMF memory name",
+            TextFor::GridFixed | TextFor::GridWaypoint => "Grid square",
         }
     }
 
@@ -57,6 +61,7 @@ impl TextFor {
             TextFor::Callsign => 10,
             TextFor::Preset(_) => 12,
             TextFor::DtmfName(_) => 10,
+            TextFor::GridFixed | TextFor::GridWaypoint => 6,
             _ => 16,
         }
     }
@@ -73,11 +78,14 @@ impl TextFor {
             TextFor::Callsign => Buf::from(app.set.callsign.as_bytes()),
             TextFor::PowerOn => Buf::from(app.set.pon_text.as_bytes()),
             TextFor::DtmfName(i) => Buf::from(store.data().dtmf_name(i).as_bytes()),
+            TextFor::GridFixed if app.set.fixed_on => Buf::from(&super::lists::grid(app.set.fixed)),
+            TextFor::GridFixed | TextFor::GridWaypoint => Buf::new(),
         }
     }
 
+    /// Capitals and digits only, * switching them (a callsign, a grid square).
     fn callsign(self) -> bool {
-        self == TextFor::Callsign
+        matches!(self, TextFor::Callsign | TextFor::GridFixed | TextFor::GridWaypoint)
     }
 }
 
@@ -289,6 +297,23 @@ fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
         }
         TextFor::DtmfName(i) => {
             store.data().request(crate::data::Op::DtmfName(i, Buf::from(t.as_bytes())));
+        }
+        TextFor::GridFixed | TextFor::GridWaypoint => {
+            // GPS-21: 4 or 6 characters, the square's centre; anything else stays here to be fixed
+            let Some(p) = super::lists::grid_pos(t.as_bytes()) else {
+                return app.show_toast(b"Grid square", b"like FN31 or FN31PR", false);
+            };
+            app.back();
+            if to == TextFor::GridFixed {
+                (app.set.fixed, app.set.fixed_on) = (p, true);
+                return app.show_toast(b"Fixed position", &super::lists::grid(p), false);
+            }
+            if store.data().request(crate::data::Op::AddWaypoint(p, Buf::from(t.as_bytes()))) {
+                app.show_toast(b"Waypoint added", t.as_bytes(), false);
+            } else {
+                app.show_toast(b"Waypoint", b"no room", false);
+            }
+            return;
         }
     }
     app.back();

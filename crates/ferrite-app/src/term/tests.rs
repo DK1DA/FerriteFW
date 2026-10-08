@@ -429,8 +429,8 @@ fn typed_values() {
     assert_eq!(r.store.by_num(num).unwrap().0.name(), b"Test name");
     // RX: field 2.
     r.send(b"\x1b[B\x1b[B");
-    r.send(b"\r30\r");
-    assert!(r.vt.has("64 to 1000 MHz"), "refused");
+    r.send(b"\r700\r");
+    assert!(r.vt.has("756-1300 MHz"), "refused");
     r.send(b"\r146.52\r");
     assert_eq!(r.store.by_num(num).unwrap().0.rx, 14_652_000);
     assert!(r.vt.has("146.52000 MHz"));
@@ -712,7 +712,9 @@ fn command_errors() {
         ("ch 12 power ultra", "power: low, mid, high"),
         ("ch 12 tone 300.0", "300.0 Hz is outside 60.0 to 260.0 Hz"),
         ("ch 12 tone D028N", "a DCS code (D023N, D023I)"),
-        ("ch 12 rx 30", "rx: a channel is from 64 to 1000 MHz"),
+        ("ch 12 rx 700", "rx: 0.15-64 MHz (HF), 64-630 or 756-1300 MHz"),
+        ("ch 12 rx 30", "an HF channel is AM, USB, LSB or CW"),
+        ("ch 12 mode usb", "USB, LSB and CW are for HF channels"),
         ("ch 12 zone 9", "zone 9 doesn't exist"),
         ("ch 12 \"Name", "no closing quote"),
         ("ch 1001", "ch: a number from 1 to 1000"),

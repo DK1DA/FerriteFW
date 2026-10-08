@@ -656,8 +656,8 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             p.step.load(&mut r);
             p.mode.load(&mut r);
             p.narrow.load(&mut r);
-            if !(mhz(18)..=mhz(1000)).contains(&p.start) || p.end <= p.start || p.end > mhz(1000) {
-                return invalid(o, slow!("start and end: 18 to 1000 MHz, end above start").as_bytes());
+            if !(mhz(18)..=mhz(1300)).contains(&p.start) || p.end <= p.start || p.end > mhz(1300) {
+                return invalid(o, slow!("start and end: 18 to 1300 MHz, end above start").as_bytes());
             }
             if p.step as usize >= STEPS.len() || p.mode as usize >= SLOT_MODES.min(MODES.len()) {
                 return invalid(o, slow!("step or mode out of range").as_bytes());

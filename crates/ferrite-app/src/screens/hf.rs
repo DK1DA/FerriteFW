@@ -7,7 +7,8 @@
 //!
 //! Keys (HF-12, HF-13): knob or ▲▼ tune by the step (SIDE2 + knob: 1 MHz), ◀▶ band, * mode (a point while
 //! typing), digits a frequency (kHz, or MHz with a point; OK enters), # the recent list, hold MENU the options,
-//! BACK leaves HF mode, one level back. SLOT, V/M and SIDE2 alone do nothing here. PTT transmits on the HF frequency without going home
+//! BACK leaves HF mode, one level back; hold V/M saves it as a channel (CHAN-26). SLOT, V/M and SIDE2 alone do
+//! nothing here. PTT transmits on the HF frequency without going home
 //! (HF-23), and refuses on the SI4732's frequencies and modes (HF-24).
 
 use super::activity::Mode;
@@ -183,7 +184,7 @@ impl HfMem {
     }
 
     /// A mode allowed here: FM only on chip 1's range; USB, LSB, CW only with the patch (HF-20).
-    fn allowed(&self, m: u8, patch: bool) -> bool {
+    pub(crate) fn allowed(&self, m: u8, patch: bool) -> bool {
         match m {
             FM => self.freq >= CHIP1_FROM,
             USB | LSB | CW => patch,
@@ -196,6 +197,32 @@ impl HfMem {
     fn can_tx(&self) -> bool {
         self.freq >= CHIP1_FROM && matches!(self.mode, FM | AM)
     }
+}
+
+/// An HF channel's mode is one HF mode has at its frequency (CHAN-26): AM, USB, LSB and CW anywhere, FM from
+/// 18 MHz (chip 1).
+pub fn channel_mode_ok(f: Freq10, m: u8) -> bool {
+    matches!(m, AM | USB | LSB | CW) || m == FM && f >= CHIP1_FROM
+}
+
+/// CHAN-26: an HF channel recalled (by number, from the browser, the home channel) opens HF mode on its
+/// frequency and mode; without the SSB patch, USB, LSB and CW come up as AM.
+pub fn recall(app: &mut App, c: &crate::chan::Channel) {
+    let patch = app.radio.ssb_patch;
+    let m = if app.set.hf.allowed(c.cfg.mode, patch) && channel_mode_ok(c.rx, c.cfg.mode) { c.cfg.mode } else { AM };
+    if in_hf(app) {
+        tune_to(app, c.rx, Some(m));
+    } else {
+        app.set.hf.freq = c.rx.clamp(BOTTOM, TOP - 1);
+        app.set.hf.mode = m;
+        app.go_home();
+        app.open(Dest::HfMode);
+    }
+    let mut l = Buf::<32>::new();
+    crate::slot::chan_label(c.num, &mut l);
+    l.push(b" ");
+    l.push(c.name());
+    app.show_toast(b"HF mode", l.as_bytes(), false);
 }
 
 /// In HF mode now (the status bar, the Status page).
@@ -463,6 +490,11 @@ impl View for Hf {
             // HF-31: hold 3 seeks up, hold 1 down (nicFW's tuner keys), with the SI4732's own seek.
             (Key::Digit(d @ (1 | 3)), Long) => seek(app, d == 3),
             (Key::Hash, Short) => app.open(Dest::HfRecent),
+            // CHAN-26: hold V/M saves the HF frequency and mode as a channel, as on a home VFO
+            (Key::VfoMem, Long) => {
+                app.open(Dest::SaveChannel);
+                app.screen = Screen::Save(super::save::Save::hf());
+            }
             (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves HF mode", false), // HF-13
             (Key::Exit, Short) => {
                 app.stop_mode(); // HF-4: BACK leaves HF mode, one level back

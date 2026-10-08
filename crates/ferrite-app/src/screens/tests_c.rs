@@ -925,3 +925,46 @@ fn dtmf_memory_names() {
     t.tap(Key::Hash);
     assert_eq!(t.name(), "DTMF memories", "an empty memory has nothing to name");
 }
+
+/// GPS-21: the waypoints' options add one from a grid square, typed as a callsign is (capitals, * for digits).
+#[test]
+fn waypoint_from_grid_square() {
+    let mut t = T::new();
+    t.open(Dest::Waypoints);
+    t.hold(Key::Menu);
+    assert_eq!(t.name(), "Options");
+    t.tap(Key::Digit(2));
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "Text entry");
+    for k in [3, 3, 3] {
+        t.tap(Key::Digit(k)); // F
+    }
+    t.wait(1100);
+    t.tap(Key::Digit(6));
+    t.tap(Key::Digit(6)); // N
+    t.tap(Key::Star); // digits
+    t.tap(Key::Digit(3));
+    t.tap(Key::Digit(1));
+    assert_eq!(t.app.text.as_bytes(), b"FN31");
+    t.tap(Key::Menu);
+    let w = t.s.waypoint(0).expect("a waypoint");
+    assert_eq!((w.name.as_bytes(), w.src), (&b"FN31"[..], crate::data::WpSrc::Grid));
+    assert_eq!((w.pos.lat, w.pos.lon), (415_000_000, -730_000_000));
+}
+
+/// APRS-23: a weather station's screen reads its weather fields: wind on the course row, the rest on Weather.
+#[test]
+fn aprs_weather_station() {
+    let mut t = T::new();
+    let n = t.s.stations();
+    let i = (0..n).find(|&i| t.s.station(i).is_some_and(|s| s.call.as_bytes() == b"VE3OBW")).expect("the WX station");
+    let s = t.s.station(i).unwrap();
+    let w = crate::aprs::wx(s.comment.as_bytes()).expect("weather");
+    assert_eq!((w.dir, w.temp_f, w.hum, w.baro), (Some(270), Some(72), Some(65), Some(10123)));
+    t.open(Dest::AprsHeard);
+    for _ in 0..i {
+        t.tap(Key::Down);
+    }
+    t.tap(Key::Menu);
+    t.draw(); // renders without a panic
+}

@@ -516,6 +516,30 @@ pub fn grid(p: Pos) -> [u8; 6] {
     ]
 }
 
+/// A typed grid square, 4 or 6 characters in either case ("FN31", "fn31pr"), as the centre of the square
+/// (GPS-21); None if it isn't one.
+pub fn grid_pos(g: &[u8]) -> Option<Pos> {
+    if g.len() != 4 && g.len() != 6 {
+        return None;
+    }
+    let up = |i: usize| g[i].to_ascii_uppercase();
+    let letter = |i: usize, max: u8| up(i).checked_sub(b'A').filter(|&v| v < max).map(|v| v as i64);
+    let digit = |i: usize| g[i].checked_sub(b'0').filter(|&v| v < 10).map(|v| v as i64);
+    let d = 10_000_000i64;
+    // degrees x 1e7 from the south-west corner (-180, -90)
+    let mut lon = letter(0, 18)? * 20 * d + digit(2)? * 2 * d;
+    let mut lat = letter(1, 18)? * 10 * d + digit(3)? * d;
+    if g.len() == 6 {
+        // subsquares: 5' of longitude, 2.5' of latitude; to their centre
+        lon += letter(4, 24)? * 2 * d / 24 + d / 24;
+        lat += letter(5, 24)? * d / 24 + d / 48;
+    } else {
+        lon += d; // the square's centre: 1 degree in, half a degree up
+        lat += d / 2;
+    }
+    Some(Pos { lat: (lat - 90 * d) as i32, lon: (lon - 180 * d) as i32 })
+}
+
 /// A frequency as "146.520" (MHz, at least three decimals, more when they aren't zero).
 pub fn mhz_text(f: u32, b: &mut Buf<16>) {
     b.clear();

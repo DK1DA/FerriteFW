@@ -5,7 +5,17 @@
 
 use crate::data::{Data, NoData, Pos};
 use crate::slot::SlotCfg;
-use ferrite_core::freq::Freq10;
+use ferrite_core::freq::{mhz, Freq10};
+
+/// Channels below this are HF channels (CHAN-26).
+pub const HF_TOP: Freq10 = mhz(64);
+/// The lowest channel frequency: HF mode's bottom, 150 kHz.
+pub const CH_LO: Freq10 = 15_000;
+
+/// A frequency a channel can hold (CHAN-22): an HF one (150 kHz - 64 MHz, CHAN-26), or one the chips receive.
+pub fn rx_ok(f: Freq10) -> bool {
+    (CH_LO..HF_TOP).contains(&f) || ferrite_core::freq::receivable(f)
+}
 
 /// A zone's (or channel's) name: 16 bytes at most (CHAN-5).
 pub type Name = ferrite_ui::text::Buf<16>;
@@ -59,6 +69,13 @@ impl Channel {
     pub fn name(&self) -> &[u8] {
         let n = self.name.iter().position(|&c| c == 0).unwrap_or(16);
         &self.name[..n]
+    }
+
+    /// An HF channel (CHAN-26): below 64 MHz, HF mode's, on the SI4732 or chip 1 through the relay. It opens HF
+    /// mode on it; a home slot never sits on one, and no slot scan stops on one (SAFE-20: a scan never moves the
+    /// relay; the SI4732 is HF mode's).
+    pub fn is_hf(&self) -> bool {
+        self.rx < HF_TOP
     }
 
     /// Left out of every scan (CHAN-4, SCAN-9).

@@ -3,9 +3,11 @@
 //! template from the left; * flips N/S, E/W or the altitude's sign; ▲▼ keep the row and move; OK keeps it and
 //! leaves; # clears the fixed position (none); BACK deletes a digit, or leaves when nothing is typed. A typed row
 //! is checked (degrees, minutes and seconds in range) before it is kept; each kept row is saved at once.
-//! Grid square entry has no letters on the keypad: it is typed as degrees and minutes.
+//! The fourth row is the grid square: OK on it types one (4 or 6 characters, multi-tap capitals and digits as a
+//! callsign is typed), and the position becomes the square's centre (GPS-21, as nicFW takes a grid).
 
 use super::lists::grid;
+use super::shared::ARROWS_UD;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
@@ -18,7 +20,7 @@ use ufmt::uwrite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PosEntry {
-    /// 0 latitude, 1 longitude, 2 altitude.
+    /// 0 latitude, 1 longitude, 2 altitude, 3 grid square.
     pub row: u8,
     /// The digits typed on that row, two to a byte, and how many (0: the row shows its saved value).
     buf: [u8; 5],
@@ -204,9 +206,26 @@ impl View for PosEntry {
         Some(MENU_TIMEOUT_MS)
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let mut s = self;
+        if s.row == 3 {
+            // GPS-21: the grid row types a square in text entry
+            match (e.key, e.press) {
+                (Key::Menu, Short) => return super::text::open(app, super::text::TextFor::GridFixed, store),
+                (Key::Up | Key::Down, Short | Repeat) => {
+                    s.row = if e.key == Key::Up { 2 } else { 0 };
+                    app.screen = Screen::PosEntry(s);
+                }
+                (Key::Hash, Short) => {
+                    app.set.fixed_on = false;
+                    app.show_toast(b"Fixed position", b"none", false);
+                }
+                (Key::Exit, Short) => app.back(),
+                _ => {}
+            }
+            return;
+        }
         let max = if s.row == 2 { ALT_DIGITS } else { digits(template(fmt(app), s.row)) };
         match (e.key, e.press) {
             (Key::Digit(d), Short) if s.n < max => s = s.typed(d),
@@ -223,8 +242,8 @@ impl View for PosEntry {
                 if !keep(app, s) {
                     return;
                 }
-                let d = if e.key == Key::Up { 2 } else { 1 };
-                s = PosEntry { row: (s.row + d) % 3, buf: [0; 5], n: 0 };
+                let d = if e.key == Key::Up { 3 } else { 1 };
+                s = PosEntry { row: (s.row + d) % 4, buf: [0; 5], n: 0 };
             }
             (Key::Menu, Short) => {
                 if keep(app, s) {
@@ -261,9 +280,9 @@ impl View for PosEntry {
         } else {
             g.set(b"-");
         }
-        app.row1(lcd, 3, b"Grid square", g.as_bytes(), false, false, true);
-        let note: &[u8] = if app.set.coord_fmt == 3 {
-            b"Typed as degrees and minutes. Used with no GPS fix; # clears it."
+        app.row1(lcd, 3, b"Grid square", g.as_bytes(), false, self.row == 3, false);
+        let note: &[u8] = if self.row == 3 {
+            b"OK types a grid square: its centre is used. # clears it."
         } else {
             b"Used when there is no GPS fix (APRS, Nearby). # clears it."
         };
@@ -271,6 +290,9 @@ impl View for PosEntry {
     }
 
     fn hints(self, _: &App) -> Hints {
+        if self.row == 3 {
+            return Hints::new(&[(ARROWS_UD, "Row"), ("OK", "Type it"), ("#", "Clear")]);
+        }
         let star = match self.row {
             0 => "N/S",
             1 => "E/W",

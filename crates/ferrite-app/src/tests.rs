@@ -115,8 +115,8 @@ impl T {
 fn ram_is_small() {
     let n = core::mem::size_of::<App>();
     std::println!("App: {n} bytes");
-    // 1024 until Oct 7, 2026; the scan hit list (SCAN-23: 16 hits of 8 bytes, 13 more than the probes' 3) took
-    // it past
+    // 1024 until Oct 7, 2026: the scan hit list (SCAN-23: 16 hits of 8 bytes, 13 more than the probes' 3, +112)
+    // and the slots' clarifier (VFO-22, +8 with padding) took it to 1136
     assert!(n <= 1136, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
@@ -670,6 +670,8 @@ mod radio_activity;
 mod lights;
 mod aprs;
 mod d64;
+/// Decision 72: the nicFW gaps (HF channels, 1000-1300 MHz, the clarifier, grid entry).
+mod nicfw;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]

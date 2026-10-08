@@ -544,6 +544,13 @@ pub fn mode_chip(c: &SlotCfg, b: &mut Buf<16>) {
     b.set(if c.mode == 1 { b"FM-N" } else { MODES[c.mode as usize % MODES.len()].as_bytes() });
 }
 
+/// The clarifier in 100 Hz as "CLR +0.3" (VFO-22).
+pub fn clar_text(c: i8, b: &mut Buf<16>) {
+    b.set(b"CLR ");
+    b.push(if c < 0 { b"-" } else { b"+" });
+    let _ = uwrite!(b, "{}.{}", c.unsigned_abs() / 10, c.unsigned_abs() % 10);
+}
+
 /// "CH 012": menus, lists and editors.
 pub fn chan_label(num: u16, b: &mut Buf<32>) {
     let _ = uwrite!(b, "CH {}", Zero(num as u32 + 1, 3));

@@ -97,6 +97,9 @@ pub struct Slot {
     pub pos: u16,
     /// A copy of the channel it is on, edits included.
     pub ch: Option<Channel>,
+    /// The clarifier (VFO-22): a receive offset in 100 Hz, -25 to 25; never saved, gone when the slot is
+    /// tuned again.
+    pub clar: i8,
 }
 
 impl Slot {
@@ -109,7 +112,7 @@ impl Slot {
         let b = &BANDS[band_near(f)];
         cfg.mode = b.mode;
         cfg.step = b.step;
-        Slot { vfo_mode: true, vfo: f, cfg, mem, zone: 0, pos: 0, ch: None }
+        Slot { vfo_mode: true, vfo: f, cfg, mem, zone: 0, pos: 0, ch: None, clar: 0 }
     }
 
     pub fn on_channel(&self) -> bool {
@@ -528,9 +531,13 @@ impl App {
     /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
     pub fn set_channel(&mut self, slot: u8, zone: u8, pos: u16, store: &impl ChannelStore) {
         let s = &mut self.slots[slot as usize % SLOTS];
-        if let Some(c) = store.zone_at(zone, pos) {
-            (s.zone, s.pos, s.ch, s.vfo_mode) = (zone, pos, Some(c), false);
-            self.send_slot(slot);
+        match store.zone_at(zone, pos) {
+            Some(c) if c.is_hf() => screens::hf::recall(self, &c), // CHAN-26: HF mode's, not a slot's
+            Some(c) => {
+                (s.zone, s.pos, s.ch, s.vfo_mode) = (zone, pos, Some(c), false);
+                self.send_slot(slot);
+            }
+            None => {}
         }
     }
 
@@ -993,7 +1000,24 @@ impl App {
 
     /// The slot's frequency and every setting, to the Radio task (made when popped: [`App::pop_cmd`]).
     fn send_slot(&mut self, slot: u8) {
+        self.slots[slot as usize % SLOTS].clar = 0; // VFO-22: a retune clears the clarifier (the Radio task's too)
         self.out.sync(slot);
+    }
+
+    /// VFO-22: SIDE1 + ◀▶ on home move the active slot's clarifier 100 Hz, within ±2.5 kHz.
+    pub(crate) fn step_clarifier(&mut self, d: i32) {
+        let a = self.active;
+        let s = &mut self.slots[a as usize];
+        s.clar = (s.clar as i32 + d).clamp(-25, 25) as i8;
+        let c = s.clar;
+        self.out.push(RadioCmd::SlotParam { slot: a, param: Param::Clarifier, value: c as i32 * 100 });
+        let mut b = Buf::<16>::new();
+        if c == 0 {
+            b.set(b"off");
+        } else {
+            slot::clar_text(c, &mut b);
+        }
+        self.show_toast(b"Clarifier", b.as_bytes(), false);
     }
 
     /// 1.25 m: transmit power fixed at 0.25 W (the Radio task enforces it too). By the band it transmits on:

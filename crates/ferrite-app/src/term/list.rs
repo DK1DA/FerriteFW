@@ -503,7 +503,7 @@ impl Term {
     fn new_channel<S: ChannelStore>(&mut self, app: &mut App, st: &S) {
         let Some(num) = st.free_num(0) else { return self.tell(slow!("All 1000 channels are in use").as_bytes(), true) };
         let s = &app.slots[app.active as usize];
-        let rx = s.freq().clamp(mhz(64), mhz(1000) - 1); // CHAN-22
+        let rx = s.freq().clamp(mhz(64), mhz(1300) - 1); // CHAN-22
         let zone = if self.zone == super::ALL { NO_ZONE } else { self.zone };
         let c = Channel { num, zone, rx, name: [0; 16], cfg: *s.cfg(), flags: 0 };
         app.put_channel(c);

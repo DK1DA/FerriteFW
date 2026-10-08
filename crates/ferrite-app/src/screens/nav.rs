@@ -422,7 +422,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::ToneSearch => probe::open_tone(app),
         Dest::Counter => probe::open_counter(app),
         Dest::Crossband => Screen::Crossband(xb::Crossband { cell: 0 }),
-        Dest::Squelch => Screen::Squelch(squelch::Squelch),
+        Dest::Squelch => Screen::Squelch(squelch::Squelch { floor: 0 }),
         // Group C: lists and data
         Dest::EventLog => Screen::Log(super::log::Log::new()),
         Dest::EventDetail => Screen::Log(super::log::Log { detail: true, ..super::log::Log::new() }),
@@ -544,6 +544,7 @@ fn offset_cell(app: &mut App) {
 /// Hold 0: the active slot to the home channel, in channel mode, from VFO or any zone (CHAN-19, CHAN-20).
 fn home_channel(app: &mut App, store: &impl ChannelStore) {
     match app.set.home_ch.and_then(|n| store.by_num(n)) {
+        Some((c, _)) if c.is_hf() => super::hf::recall(app, &c), // CHAN-26
         Some((c, pos)) => {
             let a = app.active as usize;
             let s = &mut app.slots[a];

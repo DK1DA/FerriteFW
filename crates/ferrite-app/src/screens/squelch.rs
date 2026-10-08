@@ -1,6 +1,8 @@
 //! Squelch from home (manual chapter 12, SQL-7 and SQL-10; no mock-up, the status bar name "Squelch" is
 //! inferred): hold SIDE1 and turn the knob or press ▲▼. The level 0-9 and the active slot's live signal show
-//! while SIDE1 is held; the change is live (SQL-7); letting SIDE1 go returns home.
+//! while SIDE1 is held; the change is live (SQL-7); letting SIDE1 go returns home. Beside the live signal, the
+//! noise floor (SQL-12, as nicFW's floor readout): the signal while the squelch is closed, smoothed, so the gap
+//! between a station and the noise shows where to set the level.
 
 use super::shared::*;
 use super::{Cx, Hints, View};
@@ -17,14 +19,17 @@ use ferrite_ui::widgets as w;
 use super::parts;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Squelch;
+pub struct Squelch {
+    /// The noise floor, dBm (SQL-12); 0 until one is read.
+    pub floor: i16,
+}
 
 /// SIDE1 held + knob or ▲▼: one level up or down (stops at 0 and 9), and this screen while SIDE1 is held.
 pub fn step(app: &mut App, d: i32) {
     app.keys.used(Key::Side(1));
     app.step_squelch(d);
     if !matches!(app.screen, Screen::Squelch(_)) {
-        app.screen = Screen::Squelch(Squelch);
+        app.screen = Screen::Squelch(Squelch { floor: 0 });
     }
 }
 
@@ -43,9 +48,16 @@ impl View for Squelch {
         step(app, d);
     }
 
-    fn tick(self, app: &mut App, _: &LiveAll) {
+    fn tick(self, app: &mut App, live: &LiveAll) {
         if !app.keys.is_held(Key::Side(1)) {
             app.screen = Screen::Home;
+            return;
+        }
+        // SQL-12: the floor follows the signal while the squelch is closed (an eighth of each reading)
+        let lv = live.slots[app.active as usize];
+        if !lv.squelch_open && lv.rssi < 0 {
+            let floor = if self.floor == 0 { lv.rssi } else { (self.floor * 7 + lv.rssi) / 8 };
+            app.screen = Screen::Squelch(Squelch { floor });
         }
     }
 
@@ -74,6 +86,17 @@ impl View for Squelch {
             w::field(lcd, 8, 160, 178, 196, 191, Align::Left, t, &UI_12B, c, BG);
             w::field(lcd, 168, 64, 178, 196, 191, Align::Right, w::s_text(lv.rssi).as_bytes(), &UI_12B, TEXT, BG);
             w::meter(lcd, 20, 204, None, lit, if lv.squelch_open { GREEN } else { DIM }, BG);
+        }
+        // SQL-12: the floor and how far the signal is above it
+        let mut fl = Buf::<40>::new();
+        if self.floor != 0 {
+            let _ = ufmt::uwrite!(fl, "Noise floor {} dBm", self.floor);
+            if lv.squelch_open && lv.rssi > self.floor {
+                let _ = ufmt::uwrite!(fl, ", signal +{} dB", lv.rssi - self.floor);
+            }
+        }
+        if app.dirty(4, hash(&fl)) {
+            w::field(lcd, 8, 224, 216, 234, 229, Align::Left, fl.as_bytes(), &UI_12, SUB, BG);
         }
         if app.dirty(3, 1) {
             let mut b = Buf::<40>::new();

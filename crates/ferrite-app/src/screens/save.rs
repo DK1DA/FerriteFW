@@ -2,8 +2,8 @@
 //! and Add repeater (MENU 0 2 2; chapter 10, MENU-10): one form. Save shows the number (the first free one
 //! after the slot's last channel), the zone (the one being browsed) and the name; Add repeater asks the
 //! frequency, shift and tone first and ends on the channel editor. The knob or ◀▶ change a row, OK on the
-//! name or frequency types it, OK elsewhere saves. Channels are 64 MHz and up (CHAN-22): below, it says so
-//! and does not save.
+//! name or frequency types it, OK elsewhere saves. Hold V/M in HF mode saves its frequency and mode as an HF
+//! channel (CHAN-26), with the same rows.
 
 use super::chedit::ChEdit;
 use super::entry::{Entry, EntryFor};
@@ -24,10 +24,20 @@ use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
 use ferrite_ui::widgets::{self as w, Row};
 
+/// What the form saves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Kind {
+    /// The active slot's VFO (A9).
+    Vfo,
+    /// Add repeater (A10).
+    Repeater,
+    /// HF mode's frequency and mode (CHAN-26).
+    Hf,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Save {
-    /// Add repeater (A10) rather than save the VFO (A9).
-    pub repeater: bool,
+    pub kind: Kind,
     pub row: u8,
     /// The new channel's number ([`UNSET`] until the store has been asked).
     pub num: u16,
@@ -77,11 +87,20 @@ fn auto_shift(f: Freq10) -> i32 {
 
 impl Save {
     pub fn new(repeater: bool) -> Self {
-        Save { repeater, row: 0, num: UNSET, zone: NO_ZONE, freq: 0, offset: 0, tone: 0 }
+        Save { kind: if repeater { Kind::Repeater } else { Kind::Vfo }, row: 0, num: UNSET, zone: NO_ZONE, freq: 0, offset: 0, tone: 0 }
+    }
+
+    /// Hold V/M in HF mode (CHAN-26).
+    pub fn hf() -> Self {
+        Save { kind: Kind::Hf, ..Save::new(false) }
+    }
+
+    fn repeater(self) -> bool {
+        self.kind == Kind::Repeater
     }
 
     fn rows(self) -> &'static [F] {
-        if self.repeater { &REPEATER_ROWS } else { &SAVE_ROWS }
+        if self.repeater() { &REPEATER_ROWS } else { &SAVE_ROWS }
     }
 
     fn at(self) -> F {
@@ -95,7 +114,11 @@ impl Save {
     }
 
     fn freq_of(self, app: &App) -> Freq10 {
-        if self.repeater { self.freq } else { app.slots[app.active as usize].vfo }
+        match self.kind {
+            Kind::Repeater => self.freq,
+            Kind::Hf => app.set.hf.freq,
+            Kind::Vfo => app.slots[app.active as usize].vfo,
+        }
     }
 
     /// First use: the number, zone and frequency from the slot and the store, and an empty name.
@@ -116,8 +139,8 @@ impl Save {
 
     /// Why it can't be saved, if it can't.
     fn refuse(self, app: &App) -> Option<&'static str> {
-        if self.freq_of(app) < mhz(64) {
-            Some("Below 64 MHz: channels are 64 MHz and up. HF mode keeps its own recent list.") // CHAN-22
+        if self.kind == Kind::Repeater && self.freq_of(app) < crate::chan::HF_TOP {
+            Some("Below 64 MHz: save it from HF mode (hold V/M there).") // CHAN-26
         } else if self.num >= MAX_CHANNELS {
             Some("No free channel number: all 1000 are used.")
         } else {
@@ -128,11 +151,11 @@ impl Save {
 
 impl View for Save {
     fn name(self) -> &'static str {
-        if self.repeater { "Add repeater" } else { "Save as channel" }
+        if self.repeater() { "Add repeater" } else { "Save as channel" }
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(if self.repeater { b"Repeater" } else { b"Save" });
+        b.set(if self.repeater() { b"Repeater" } else { b"Save" });
     }
 
     fn timeout(self) -> Option<u32> {
@@ -177,9 +200,13 @@ impl View for Save {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let s = self.ready(app, cx.store);
         let f = s.freq_of(app);
-        if app.dirty(R_TOP, hash(&(s.repeater, f))) {
+        if app.dirty(R_TOP, hash(&(s.kind, f))) {
             lcd.fill(0, 21, 240, 72, BG);
-            let head: &[u8] = if s.repeater { b"Add a repeater" } else { b"Save this VFO as a channel" };
+            let head: &[u8] = match s.kind {
+                Kind::Repeater => b"Add a repeater",
+                Kind::Hf => b"Save this HF frequency",
+                Kind::Vfo => b"Save this VFO as a channel",
+            };
             w::field(lcd, 8, 224, 24, 41, 37, Align::Left, head, &UI_12B, TEXT, BG);
             w::freq(lcd, 8, 232, 84, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
             lcd.fill(0, 92, 240, 1, LINE);
@@ -239,7 +266,7 @@ fn change(mut s: Save, app: &App, store: &impl ChannelStore, d: i32) -> Save {
     match s.at() {
         F::Freq => {
             let step = STEPS[crate::slot::band_step(band_near(s.freq), app.set.region()) as usize].0 as i32;
-            s.set_freq((s.freq as i32 + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1) as Freq10);
+            s.set_freq((s.freq as i32 + d * step).clamp(mhz(64) as i32, mhz(1300) as i32 - 1) as Freq10);
         }
         F::Shift => {
             let a = BANDS[band_near(s.freq)].shift.max(60_000);
@@ -279,18 +306,28 @@ fn save(s: Save, app: &mut App, store: &impl ChannelStore) {
     }
     let a = app.active as usize;
     let f = s.freq_of(app);
-    let cfg = if s.repeater {
-        let b = &BANDS[band_near(f)];
-        let mut c = DEFAULT_CFG;
-        (c.mode, c.offset, c.tx_tone) = (b.mode, s.offset, s.tone);
-        c
-    } else {
-        app.slots[a].cfg
+    let cfg = match s.kind {
+        Kind::Repeater => {
+            let b = &BANDS[band_near(f)];
+            let mut c = DEFAULT_CFG;
+            (c.mode, c.offset, c.tx_tone) = (b.mode, s.offset, s.tone);
+            c
+        }
+        // CHAN-26: the frequency and mode; HF mode keeps its own step, bandwidth and AGC
+        Kind::Hf => SlotCfg { mode: app.set.hf.mode, narrow: false, step: BANDS[band_near(f)].step, ..DEFAULT_CFG },
+        Kind::Vfo => app.slots[a].cfg,
     };
     let cfg = SlotCfg { squelch: SQ_GLOBAL, ..cfg }; // a new channel follows the slot's level (CHAN-14)
     let mut ch = Channel { num: s.num, zone: s.zone, rx: f, name: [0; 16], cfg, flags: 0 };
     ch.set_name(app.text.as_bytes());
     app.write(ChanWrite::Put { ch, from: None });
+    if s.kind == Kind::Hf {
+        let mut l = Buf::<32>::new();
+        l.push(b"Saved as ");
+        chan_label(s.num, &mut l);
+        app.show_toast(l.as_bytes(), b"HF channel", false);
+        return app.back(); // HF mode, as it was
+    }
     let pos = (0..store.zone_len(s.zone)).filter_map(|i| store.zone_at(s.zone, i)).filter(|o| o.num < s.num).count() as u16;
     let sl = &mut app.slots[a];
     (sl.ch, sl.zone, sl.pos) = (Some(ch), s.zone, pos);
@@ -299,7 +336,7 @@ fn save(s: Save, app: &mut App, store: &impl ChannelStore) {
     chan_label(s.num, &mut l);
     let z = store.zone_label(s.zone, b"no zone", b"");
     app.show_toast(l.as_bytes(), z.as_bytes(), false);
-    if s.repeater {
+    if s.repeater() {
         app.slots[a].vfo_mode = false;
         app.send_slot(a as u8);
         app.screen = Screen::ChEdit(ChEdit { cell: 0 });

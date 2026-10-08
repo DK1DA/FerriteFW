@@ -165,7 +165,7 @@ fn text(b: &mut Buf<40>, s: &[u8]) -> u16 {
 
 slow_table! {
     /// C4's rows.
-    ROWS: [(&str, Val<Station>); 7] = [
+    ROWS: [(&str, Val<Station>); 8] = [
         (slow!("Position"), |c, b| match c.x.pos {
             Some(p) => {
                 let mut pb = Buf::<32>::new();
@@ -174,9 +174,35 @@ slow_table! {
             }
             None => text(b, b"none"),
         }),
-        (slow!("Course"), |c, b| match c.x.course {
-            Some((d, v)) => {
+        (slow!("Course"), |c, b| match (c.x.course, crate::aprs::wx(c.x.comment.as_bytes())) {
+            // APRS-23: a weather station's course and speed are its wind
+            (_, Some(w)) => {
+                b.push(b"wind ");
+                match w.dir {
+                    Some(d) => {
+                        let _ = uwrite!(b, "{}\u{b0}", d);
+                    }
+                    None => b.push(b"-"),
+                }
+                if let Some(v) = w.wind {
+                    b.push(" \u{b7} ".as_bytes());
+                    speed(c.app.set.units, v, b);
+                }
+                if let Some(g) = w.gust {
+                    b.push(b", gust ");
+                    speed(c.app.set.units, g, b);
+                }
+                TEXT
+            }
+            (Some((d, v)), None) => {
                 let _ = uwrite!(b, "{}\u{b0} \u{b7} {} km/h", d, v);
+                TEXT
+            }
+            (None, None) => text(b, b"-"),
+        }),
+        (slow!("Weather"), |c, b| match crate::aprs::wx(c.x.comment.as_bytes()) {
+            Some(w) => {
+                weather(c.app.set.units, &w, b);
                 TEXT
             }
             None => text(b, b"-"),
@@ -208,7 +234,12 @@ slow_table! {
             let _ = uwrite!(b, "{} ago \u{b7} {} {}", Txt(age.as_bytes()), s.times, if s.times == 1 { "time" } else { "times" });
             TEXT
         }),
-        (slow!("Comment"), |c, b| text(b, if c.x.comment.is_empty() { b"-".as_slice() } else { c.x.comment.as_bytes() })),
+        (slow!("Comment"), |c, b| {
+            // a weather station's comment is what follows its weather fields
+            let t = c.x.comment.as_bytes();
+            let t = crate::aprs::wx(t).map_or(t, |w| t[w.rest..].trim_ascii());
+            text(b, if t.is_empty() { b"-".as_slice() } else { t })
+        }),
         (slow!("Message"), |c, b| {
             let s = c.x;
             if s.msg.is_empty() {
@@ -222,6 +253,44 @@ slow_table! {
             TEXT
         }),
     ];
+}
+
+/// A speed sent in mph, in the units of 0 6 4 (metric km/h, imperial mph, nautical knots).
+fn speed(units: u8, mph: u16, b: &mut Buf<40>) {
+    let mph = mph as u32;
+    let _ = match units {
+        1 => uwrite!(b, "{} mph", mph),
+        2 => uwrite!(b, "{} kn", (mph * 869 + 500) / 1000),
+        _ => uwrite!(b, "{} km/h", (mph * 1609 + 500) / 1000),
+    };
+}
+
+/// APRS-23: temperature, humidity, pressure and the last hour's rain, as they are sent, in 0 6 4's units.
+fn weather(units: u8, w: &crate::aprs::Wx, b: &mut Buf<40>) {
+    let sep = |b: &mut Buf<40>| {
+        if !b.is_empty() {
+            b.push(" \u{b7} ".as_bytes());
+        }
+    };
+    if let Some(f) = w.temp_f {
+        sep(b);
+        let _ = if units == 1 { uwrite!(b, "{}\u{b0}F", f) } else { uwrite!(b, "{}\u{b0}C", ((f as i32 - 32) * 5 - if f < 32 { 4 } else { -4 }) / 9) };
+    }
+    if let Some(h) = w.hum {
+        sep(b);
+        let _ = uwrite!(b, "{}%", h);
+    }
+    if let Some(p) = w.baro {
+        sep(b);
+        let _ = uwrite!(b, "{} hPa", (p + 5) / 10);
+    }
+    if let Some(r) = w.rain.filter(|&r| r > 0) {
+        sep(b);
+        let _ = if units == 1 { uwrite!(b, "rain {}.{}\"", r / 100, ferrite_ui::text::Zero(r as u32 % 100, 2)) } else { uwrite!(b, "rain {} mm", (r as u32 * 254 + 500) / 1000) };
+    }
+    if b.is_empty() {
+        b.set(b"-");
+    }
 }
 
 slow_table! {

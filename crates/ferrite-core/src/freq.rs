@@ -26,9 +26,11 @@ pub fn band(f: Freq10) -> (Band, u8) {
     }
 }
 
-/// What the BK4829s receive (datasheet: 18-580 and 760-1160 MHz), up to what frequency entry takes (three MHz
-/// digits): home VFOs and channels. Below 18 MHz is HF mode's, on the SI4732 (VFO-14).
-pub const RX_RANGES: [(Freq10, Freq10); 2] = [(mhz(18), mhz(580)), (mhz(760), mhz(1000))];
+/// What the BK4829s receive: home VFOs and channels. The datasheet says 18-580 and 760-1160 MHz; as nicFW does,
+/// Ferrite tunes 18-630 and 756-1300 MHz, where the PLL is reported to lock (VFO-21; to confirm on the bench,
+/// and pulled back if it won't lock at 1.2 GHz). Receive only above 1000 MHz: no transmit plan reaches it.
+/// Below 18 MHz is HF mode's, on the SI4732 (VFO-14).
+pub const RX_RANGES: [(Freq10, Freq10); 2] = [(mhz(18), mhz(630)), (mhz(756), mhz(1300))];
 
 /// Whether a chip can receive `f` ([`RX_RANGES`]).
 pub fn receivable(f: Freq10) -> bool {

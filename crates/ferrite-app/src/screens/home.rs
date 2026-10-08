@@ -134,6 +134,11 @@ impl View for Home {
                 }
                 step(app, if e.key == Key::Up { 1 } else { -1 }, big, store);
             }
+            // VFO-22: SIDE1 + ◀▶ is the clarifier (SIDE1 + ▲▼ the squelch: SIDE1 holds the receive side)
+            (Key::Left | Key::Right, Short | Repeat) if app.keys.is_held(Key::Side(1)) => {
+                app.keys.used(Key::Side(1));
+                app.step_clarifier(if e.key == Key::Right { 1 } else { -1 });
+            }
             (Key::Left | Key::Right, Short | Repeat) => group(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Slot, Short) => {
                 // NAV-5
@@ -245,20 +250,32 @@ impl View for Home {
             }
             // Header rows: y+7..y+24 on the big card, y+4..y+21 on the compact ones (their digits start at y+22).
             let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 4, y + 17) };
-            if app.dirty(R_HEAD + p, hash(&(s, head, state, big))) {
+            // VFO-22: the clarifier, beside the state (left of an RX or MON tag)
+            let mut clr = Buf::<16>::new();
+            let c = app.slots[s as usize].clar;
+            if c != 0 && !lv.scanning {
+                slot::clar_text(c, &mut clr);
+            }
+            if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr))) {
                 w::badge(lcd, 14, hy + 1, s, big, SURFACE);
                 lcd.fill(28, hy, 6, 17, SURFACE);
                 w::field(lcd, 34, 120, hy, hy + 17, hb, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
                 if big {
                     lcd.fill(154, y + 6, 74, 18, SURFACE);
-                    if state == "RX" || state == "MON" {
+                    let tagged = state == "RX" || state == "MON";
+                    if tagged {
                         w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
                     } else if state != "idle" {
                         w::field(lcd, 154, 72, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
                     }
+                    if !clr.is_empty() && (tagged || state == "idle") {
+                        let right = if tagged { 194 } else { 226 };
+                        w::field(lcd, 154, right - 154, y + 7, y + 24, y + 20, Align::Right, clr.as_bytes(), &UI_12, AMBER, SURFACE);
+                    }
                 } else {
                     let f = if state == "RX" { &UI_12B } else { &UI_12 };
-                    w::field(lcd, 154, 72, hy, hy + 17, hb, Align::Right, state.as_bytes(), f, sc, SURFACE);
+                    let (t, c): (&[u8], u16) = if state == "idle" && !clr.is_empty() { (clr.as_bytes(), AMBER) } else { (state.as_bytes(), sc) };
+                    w::field(lcd, 154, 72, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
                 }
             }
             if aprs {
@@ -388,15 +405,23 @@ fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) {
         if n == 0 {
             return;
         }
-        s.pos = (s.pos as i32 + d * if big { 10 } else { 1 }).rem_euclid(n) as u16;
+        let mut p = (s.pos as i32 + d * if big { 10 } else { 1 }).rem_euclid(n);
+        // CHAN-26: HF channels are HF mode's; stepping goes past them
+        for _ in 0..n {
+            if store.zone_at(s.zone, p as u16).is_some_and(|c| !c.is_hf()) {
+                break;
+            }
+            p = (p + d.signum()).rem_euclid(n);
+        }
+        s.pos = p as u16;
         s.ch = store.zone_at(s.zone, s.pos);
         app.send_slot(a as u8);
     } else {
         let step = if big { 100_000 } else { STEPS[s.cfg.step as usize % STEPS.len()].0 as i32 };
         // Plain steps from where it is (146.520 stays on its 5 kHz raster with a 12.5 kHz step); snapping to
         // the step is for typed entry (VFO-12). Kept inside what the chips tune.
-        let f = (s.vfo as i32 + d * step).clamp(mhz(1) as i32 + 80_000, mhz(999) as i32) as Freq10;
-        s.vfo = f;
+        let f = (s.vfo as i32 + d * step).clamp(mhz(1) as i32 + 80_000, mhz(1300) as i32 - 1) as Freq10;
+        (s.vfo, s.clar) = (f, 0); // VFO-22: a retune clears the clarifier
         s.mem[band_near(f)] = f;
         app.out.push(RadioCmd::TuneSlot { slot: a as u8, freq: f });
     }
@@ -412,13 +437,13 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
         let mut z = s.zone as i32;
         for _ in 0..zones {
             z = (z + d).rem_euclid(zones);
-            if store.zone_len(z as u8) > 0 {
+            if first_slot_channel(store, z as u8).is_some() {
                 break;
             }
         }
-        if z as u8 != s.zone {
-            (s.zone, s.pos) = (z as u8, 0);
-            s.ch = store.zone_at(s.zone, 0);
+        if let Some(p) = first_slot_channel(store, z as u8).filter(|_| z as u8 != s.zone) {
+            (s.zone, s.pos) = (z as u8, p);
+            s.ch = store.zone_at(s.zone, p);
             app.send_slot(a as u8);
         }
     } else {
@@ -452,15 +477,20 @@ fn copy_to_vfo(app: &mut App) {
     app.show_toast(b"Copied to VFO", b"V/M goes back to the channel", false);
 }
 
+/// The first channel in a zone a home slot can sit on: not an HF channel (CHAN-26).
+fn first_slot_channel(store: &impl ChannelStore, z: u8) -> Option<u16> {
+    (0..store.zone_len(z)).find(|&i| store.zone_at(z, i).is_some_and(|c| !c.is_hf()))
+}
+
 fn toggle_vfo(app: &mut App, store: &impl ChannelStore) {
     let a = app.active as usize;
     let s = &mut app.slots[a];
     if s.vfo_mode {
         if s.ch.is_none() {
-            match (0..store.zones()).find(|&z| store.zone_len(z) > 0) {
-                Some(z) => {
-                    (s.zone, s.pos) = (z, 0);
-                    s.ch = store.zone_at(z, 0);
+            match (0..store.zones()).find_map(|z| Some(z).zip(first_slot_channel(store, z))) {
+                Some((z, p)) => {
+                    (s.zone, s.pos) = (z, p);
+                    s.ch = store.zone_at(z, p);
                 }
                 None => return app.show_toast(b"No channels yet", b"", false),
             }

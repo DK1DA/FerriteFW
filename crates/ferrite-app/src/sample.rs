@@ -83,7 +83,7 @@ const STATIONS: [StationRow; 11] = [
     ("VE3KPW-9", Sym::Car, at(454_467_741, -756_572_082), 120, "", Some((92, 54)), Some(87), 6, "Mobile, on 146.520", "On my way", Some(14 * 60 + 10)),
     ("VA3RTX", Sym::Home, at(454_633_076, -758_249_370), 240, "VE3RSB-1*", None, Some(102), 14, "Ron, Kanata. QRV 2 m/70 cm", "Net at 8 tonight?", Some(13 * 60 + 12)),
     ("VE3RSB-1", Sym::Digi, at(456_158_696, -755_964_076), 300, "", None, Some(212), 31, "Fill-in digi, Gatineau", "", None),
-    ("VE3OBW", Sym::Wx, at(452_778_355, -757_716_987), 540, "VE3RSB-1*", None, Some(95), 9, "22C 1012 hPa wind 270/12", "", None),
+    ("VE3OBW", Sym::Wx, at(452_778_355, -757_716_987), 540, "VE3RSB-1*", None, Some(95), 9, "270/007g012t072r004h65b10123 Ottawa WX", "", None),
     ("VA3ZZB-7", Sym::Ht, at(454_243_110, -756_744_871), 720, "", Some((10, 4)), Some(71), 3, "On foot", "", None),
     ("VE2GPA-10", Sym::IGate, at(455_383_826, -752_396_720), 1260, "WIDE2*", None, None, 22, "RX-only iGate", "", None),
     ("VE3JLH", Sym::Home, at(454_662_798, -756_436_661), 2040, "", None, Some(78), 5, "", "", None),
@@ -211,6 +211,8 @@ pub struct Sample {
     wp_gone: Cell<u32>,
     wp_marked: Cell<u8>,
     wp_saved: Cell<Option<u16>>,
+    /// A waypoint typed as a grid square (GPS-21): one, first in the list.
+    wp_typed: Cell<Option<(Pos, Buf<16>)>>,
     skips_gone: Cell<u32>,
     heard_cleared: Cell<bool>,
     version: Cell<u32>,
@@ -248,6 +250,7 @@ impl Sample {
             wp_gone: Cell::new(0),
             wp_marked: Cell::new(0),
             wp_saved: Cell::new(None),
+            wp_typed: Cell::new(None),
             skips_gone: Cell::new(0),
             heard_cleared: Cell::new(false),
             version: Cell::new(1),
@@ -312,7 +315,7 @@ impl Sample {
     }
 
     fn marked(&self) -> u16 {
-        self.wp_marked.get() as u16 + self.wp_saved.get().is_some() as u16
+        self.wp_marked.get() as u16 + self.wp_saved.get().is_some() as u16 + self.wp_typed.get().is_some() as u16
     }
 
     fn sent_n(&self) -> u16 {
@@ -434,7 +437,14 @@ impl Data for Sample {
         // Marked ones first (newest first), then the stored ones; deleted ones skipped.
         let k = (0..WAYPOINTS.len() as u16 + self.marked()).filter(|&k| self.wp_gone.get() & 1 << k == 0).nth(i as usize)?;
         let fix = self.fix.get().map_or(HERE, |f| f.pos);
-        let m = self.marked();
+        let mut m = self.marked();
+        let mut k = k;
+        if let Some((pos, name)) = self.wp_typed.get() {
+            if k == 0 {
+                return Some(Waypoint { name, pos, src: WpSrc::Grid });
+            }
+            (k, m) = (k - 1, m - 1);
+        }
         if k < m {
             if let (0, Some(s)) = (k, self.wp_saved.get()) {
                 let st = self.station(s)?;
@@ -613,9 +623,17 @@ impl Data for Sample {
             },
             Op::MarkHere => {
                 // Shifts the stored ones' deleted bits along with them.
-                let ok = self.fix.get().is_some() && self.wp_saved.get().is_none() && self.wp_marked.get() < 9;
+                let ok = self.fix.get().is_some() && self.wp_saved.get().is_none() && self.wp_typed.get().is_none() && self.wp_marked.get() < 9;
                 if ok {
                     self.wp_marked.set(self.wp_marked.get() + 1);
+                    self.wp_gone.set(self.wp_gone.get() << 1);
+                }
+                ok
+            }
+            Op::AddWaypoint(pos, name) => {
+                let ok = self.wp_typed.get().is_none() && self.marked() == 0;
+                if ok {
+                    self.wp_typed.set(Some((pos, name)));
                     self.wp_gone.set(self.wp_gone.get() << 1);
                 }
                 ok

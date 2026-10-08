@@ -287,9 +287,90 @@ pub(crate) fn last_text<const N: usize>(data: &dyn Data, b: &mut Buf<N>) {
     }
 }
 
+/// A weather station's report (APRS-23), read from the start of its comment, where the APRS task leaves the
+/// weather data of a positional weather report ("270/007g012t072r000p000P000h65b10123", then any text). Units as
+/// sent: mph, degrees F, hundredths of an inch, tenths of a millibar. Nothing is kept: it is read when the
+/// station screen is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Wx {
+    pub dir: Option<u16>,
+    pub wind: Option<u16>,
+    pub gust: Option<u16>,
+    pub temp_f: Option<i16>,
+    /// Rain in the last hour.
+    pub rain: Option<u16>,
+    pub hum: Option<u8>,
+    pub baro: Option<u32>,
+    /// Where the comment's own text starts.
+    pub rest: usize,
+}
+
+/// APRS-23: the weather fields at the start of a comment, if it starts with them (wind direction and speed).
+pub fn wx(c: &[u8]) -> Option<Wx> {
+    // a number of `n` characters at i: digits, a leading '-' (temperature), or dots / spaces for "no data"
+    let num = |i: usize, n: usize| -> Option<Option<i32>> {
+        let f = c.get(i..i + n)?;
+        if f.iter().all(|&b| b == b'.' || b == b' ') {
+            return Some(None);
+        }
+        let (neg, d) = match f.split_first() {
+            Some((b'-', d)) => (true, d),
+            _ => (false, f),
+        };
+        if d.is_empty() || !d.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        let v = d.iter().fold(0i32, |a, &b| a * 10 + (b - b'0') as i32);
+        Some(Some(if neg { -v } else { v }))
+    };
+    let mut w = Wx::default();
+    // "DDD/SSS", or the complete-weather "cDDDsSSS"
+    let mut i = if c.get(3) == Some(&b'/') {
+        (w.dir, w.wind) = (num(0, 3)?.map(|v| v as u16), num(4, 3)?.map(|v| v as u16));
+        7
+    } else if c.first() == Some(&b'c') && c.get(4) == Some(&b's') {
+        (w.dir, w.wind) = (num(1, 3)?.map(|v| v as u16), num(5, 3)?.map(|v| v as u16));
+        8
+    } else {
+        return None;
+    };
+    // then letter-tagged fields, each a fixed width, in any order
+    while let Some(&k) = c.get(i) {
+        let n = match k {
+            b'g' | b't' | b'r' | b'p' | b'P' | b'L' | b'l' | b's' => 3,
+            b'h' => 2,
+            b'b' => 5,
+            _ => break,
+        };
+        let Some(v) = num(i + 1, n) else { break };
+        match k {
+            b'g' => w.gust = v.map(|v| v as u16),
+            b't' => w.temp_f = v.map(|v| v as i16),
+            b'r' => w.rain = v.map(|v| v as u16),
+            b'h' => w.hum = v.map(|v| if v == 0 { 100 } else { v as u8 }), // h00 is 100 %
+            b'b' => w.baro = v.map(|v| v as u32),
+            _ => {}
+        }
+        i += 1 + n;
+    }
+    w.rest = i;
+    Some(w)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weather_reports() {
+        let w = wx(b"270/007g012t072r001p000P000h65b10123 Ottawa WX").unwrap();
+        assert_eq!((w.dir, w.wind, w.gust, w.temp_f, w.rain, w.hum, w.baro), (Some(270), Some(7), Some(12), Some(72), Some(1), Some(65), Some(10123)));
+        assert_eq!(&b"270/007g012t072r001p000P000h65b10123 Ottawa WX"[w.rest..], b" Ottawa WX");
+        let w = wx(b"c...s...g...t-05h00").unwrap();
+        assert_eq!((w.dir, w.wind, w.temp_f, w.hum), (None, None, Some(-5), Some(100)));
+        assert!(wx(b"Mobile, on 146.520").is_none());
+        assert!(wx(b"").is_none());
+    }
 
     #[test]
     fn region_frequencies() {

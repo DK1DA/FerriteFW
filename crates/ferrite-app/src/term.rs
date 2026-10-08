@@ -811,7 +811,7 @@ impl Term {
             }
             F::Rx => {
                 let step = STEPS[crate::slot::band_step(band_near(c.rx), app.set.region()) as usize].0 as i32;
-                n.rx = (c.rx as i32 + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1) as Freq10; // CHAN-22
+                n.rx = (c.rx as i32 + d * step).clamp(crate::chan::CH_LO as i32, mhz(1300) as i32 - 1) as Freq10; // CHAN-22
             }
             F::Tx if c.cfg.split => {
                 let step = STEPS[crate::slot::band_step(band_near(c.cfg.offset.max(0) as Freq10), app.set.region()) as usize].0 as i32;
@@ -878,8 +878,8 @@ impl Term {
                 n.set_name(s);
             }
             F::Rx => match parse_mhz(s) {
-                Some(f) if (mhz(64)..mhz(1000)).contains(&f) => n.rx = f, // CHAN-22
-                _ => return self.say(slow!("RX: a frequency from 64 to 1000 MHz, e.g. 146.52").as_bytes(), true),
+                Some(f) if crate::chan::rx_ok(f) => n.rx = f, // CHAN-22, CHAN-26
+                _ => return self.say(slow!("RX: 0.15-64 (HF), 64-630 or 756-1300 MHz, e.g. 146.52").as_bytes(), true),
             },
             F::Tx => match parse_mhz(s) {
                 Some(f) if !ferrite_core::txplan::relay_ok(n.rx, f) => {

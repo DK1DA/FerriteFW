@@ -442,6 +442,7 @@ fn src_name(s: WpSrc) -> &'static [u8] {
         WpSrc::Marked => b"Mark",
         WpSrc::Aprs => b"APRS",
         WpSrc::Link => b"Link",
+        WpSrc::Grid => b"Grid",
     }
 }
 

@@ -48,6 +48,8 @@ enum Act {
     ShowHidden,
     /// Beacons off, or on again in their mode (APRS-17).
     Beacon,
+    /// A waypoint typed as a grid square (GPS-21): text entry.
+    Grid,
 }
 
 type Opt = (&'static str, Act, &'static str);
@@ -83,8 +85,9 @@ const APRS_CARD: [Opt; 4] = [
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
 ];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
-const WAYPOINTS: [Opt; 2] = [
+const WAYPOINTS: [Opt; 3] = [
     ("Mark here", Act::Do(Op::MarkHere), "A waypoint at this fix"),
+    ("Add a grid square", Act::Grid, "A waypoint at a square's centre: FN31pr"),
     ("GPS position", Act::Open(Dest::GpsPosition), "Fix, satellites, grid square"),
 ];
 
@@ -167,6 +170,10 @@ impl View for Options {
                 Act::Beacon => {
                     app.back();
                     app.toggle_beacon();
+                }
+                Act::Grid => {
+                    app.back();
+                    super::text::open(app, super::text::TextFor::GridWaypoint, store);
                 }
                 Act::ShowHidden => {
                     app.set.show_hidden = !app.set.show_hidden;
