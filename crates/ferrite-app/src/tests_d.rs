@@ -235,9 +235,9 @@ fn hf_mode() {
     assert_eq!(t.app.screen().name(), "Transmit refused", "9.58 MHz AM is the SI4732's (HF-24)");
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Hf(_)));
-    t.tap(Key::Up); // 9.589
+    t.tap(Key::Up); // 9.585 (5 kHz on shortwave broadcast, HF-34)
     t.wait(10_500);
-    assert_eq!(t.app.set.hf.recent[0] & 0x0FFF_FFFF, 958_900, "used 10 s: in the recent list");
+    assert_eq!(t.app.set.hf.recent[0] & 0x0FFF_FFFF, 958_500, "used 10 s: in the recent list");
     for d in [2, 8, 4, 0, 0] {
         t.tap(Key::Digit(d)); // 28400 kHz
     }
@@ -247,7 +247,7 @@ fn hf_mode() {
     assert_eq!(t.app.screen().name(), "HF recent");
     t.tap(Key::Menu); // tunes the newest, back in HF mode
     assert!(matches!(t.app.screen(), Screen::Hf(_)));
-    assert_eq!(t.app.set.hf.freq, 958_900);
+    assert_eq!(t.app.set.hf.freq, 958_500);
     t.cmds();
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Group(g) if g.g == 3), "BACK: one level, to the menu it came from");

@@ -130,7 +130,7 @@ impl HfMem {
     pub const DEFAULT: HfMem = HfMem {
         freq: 958_000,
         mode: AM,
-        step: 2,
+        step: 1, // 5 kHz on 31 m (HF-34)
         bw: 0,
         agc: 0,
         lna: false,
@@ -309,6 +309,17 @@ fn send(app: &mut App) {
 
 fn tune_to(app: &mut App, f: Freq10, mode: Option<u8>) {
     tune_vfo(app, f, mode, None)
+}
+
+/// A band's step the first time it is tuned (HF-34): MW 10 kHz in the Americas (region 0 US, 1 Canada) and
+/// 9 kHz elsewhere, LW 9 kHz, shortwave broadcast 5 kHz; SSB and CW bands 100 Hz (index 2).
+fn first_step(b: usize, region: u8) -> u8 {
+    match BANDS[b].0 {
+        "MW" if region <= 1 => 3,
+        "LW" | "MW" => 2,
+        _ if BANDS[b].4 == AM => 1,
+        _ => 2,
+    }
 }
 
 /// [`tune_to`], with a band's remembered step, bandwidth and fine tune (HF-27).
@@ -495,7 +506,11 @@ impl View for Hf {
                 // HF-27: the band's own VFO as it was left; its start the first time.
                 match app.set.hf.band_vfo(b) {
                     Some((f, m, step, bw, bfo)) => tune_vfo(app, f, Some(m), Some((step, bw, bfo))),
-                    None => tune_to(app, BANDS[b].3, Some(BANDS[b].4)),
+                    None => {
+                        let h = &app.set.hf;
+                        let rest = (first_step(b, app.set.region), h.bw, h.bfo);
+                        tune_vfo(app, BANDS[b].3, Some(BANDS[b].4), Some(rest))
+                    }
                 }
             }
             (Key::Star, Short) => {
@@ -739,5 +754,18 @@ mod band_list_tests {
         assert_eq!(walk(at(2_900_000, AM), false, 1), ["CB"]);
         assert_eq!(walk(at(1_300_000, AM), true, 1), ["19 m"]);
         assert_eq!(walk(at(1_300_000, USB), true, 1), ["20 m"]);
+    }
+
+    /// HF-34: a band's first step: shortwave broadcast 5 kHz, MW 10 kHz in the Americas and 9 kHz elsewhere.
+    #[test]
+    fn first_step_by_band() {
+        let b = |n: &str| BANDS.iter().position(|x| x.0 == n).unwrap();
+        let khz = |b: usize, r: u8| STEPS_AM[first_step(b, r) as usize] / 100;
+        assert_eq!(khz(b("49 m"), 0), 5);
+        assert_eq!(khz(b("MW"), 0), 10);
+        assert_eq!(khz(b("MW"), 3), 9);
+        assert_eq!(khz(b("LW"), 2), 9);
+        assert_eq!(STEPS_SSB[first_step(b("40 m"), 0) as usize], 10);
+        assert_eq!(STEPS_AM[HfMem::DEFAULT.step as usize], 500);
     }
 }
