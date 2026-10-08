@@ -85,6 +85,8 @@ const STATIONS: [(u16, &str, &str); 4] = [
 /// Three slots: A has a signal 3 s in every 10, B one for 2 s in every 25 (a watched slot opening), C scans.
 pub struct FakeRadio {
     pub live: LiveAll,
+    /// No stations on the air (the simulators' LED demo: a dark screen stays dark).
+    pub quiet: bool,
     watch: u8,
     /// The engines, as the Radio task runs them.
     watcher: Watch,
@@ -132,6 +134,7 @@ impl FakeRadio {
         path.rx(Rx::Bk(Sel::rx(live.slots[0].freq)), Cause::ActiveSlot, 0, &mut Steps::default()).ok();
         FakeRadio {
             live,
+            quiet: false,
             watch: 0b111,
             watcher: Watch::new(),
             scans,
@@ -427,7 +430,11 @@ impl FakeRadio {
         }
         self.mode_step(t);
         // Carriers where each slot is tuned now.
+        let quiet = self.quiet;
         let carrier = |i: usize, s: &SlotLive| -> (bool, f32) {
+            if quiet {
+                return (false, 0.0);
+            }
             if s.scanning {
                 return (scan_carrier(s.freq), -79.0 + (t * 3.1).sin() * 5.0);
             }

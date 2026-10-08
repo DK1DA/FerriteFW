@@ -100,7 +100,8 @@ pub enum Event {
     Layout,
     /// B: a beacon (an automatic transmit).
     Beacon,
-    /// D: the backlight time runs out now (to see the dark-screen heartbeat, e.g. after M).
+    /// D: the LED demo: the bands go quiet and the backlight time runs out now, so the screen stays dark and the
+    /// heartbeat shows (a double flash while M's message is unread); D again brings the stations back.
     ScreenOff,
 }
 
@@ -746,7 +747,12 @@ impl SimCore {
                     GpsState::Fix => GpsState::Off,
                 }
             }
-            Event::ScreenOff if live => app.backlight_out(),
+            Event::ScreenOff if live => {
+                self.radio.quiet = !self.radio.quiet;
+                if self.radio.quiet {
+                    app.backlight_out();
+                }
+            }
             Event::Bluetooth => self.dev.bt = !self.dev.bt,
             Event::Battery => {
                 self.battery = (self.battery + 1) % 3;
