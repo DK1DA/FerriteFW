@@ -9,6 +9,7 @@
 //! screens show (MENU-7).
 
 use crate::screens::hf::HfMem;
+use ferrite_core::freq::Freq10;
 use ferrite_core::msg::XbCfg;
 use ferrite_core::txplan::Region;
 use ferrite_ui::boot::Owner;
@@ -137,6 +138,11 @@ pub struct Settings {
     pub kiss_port: u8,
     /// 0 4 9 1 (US and Canada only).
     pub same: bool,
+    /// 0 4 2 (DEC-4, DEC-18): the pager decoder on or off, its frequency, and the one capcode it keeps (0: every
+    /// capcode).
+    pub pocsag_on: bool,
+    pub pocsag_freq: Freq10,
+    pub pocsag_cap: u32,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
     pub fm_freq: u16,
     pub fm_step: u8,
@@ -303,6 +309,9 @@ impl Settings {
         cable_port: 0,
         kiss_port: 0,
         same: true,
+        pocsag_on: false,
+        pocsag_freq: 43_998_750,
+        pocsag_cap: 0,
         fm_freq: 10_110,
         fm_step: 1,
         fm_agc: 0,

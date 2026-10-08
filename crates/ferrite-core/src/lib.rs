@@ -22,6 +22,7 @@ pub mod msg;
 pub mod path;
 pub mod rxsleep;
 pub mod same;
+pub mod same_rx;
 pub mod scan;
 pub mod tonegen;
 pub mod txcal;

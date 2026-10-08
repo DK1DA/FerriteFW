@@ -205,6 +205,8 @@ pub async fn task() {
     let mut logged = (LiveAll::default(), Instant::now());
     // The APRS task (chapter 25): it feeds the App and the store, so it runs here.
     let mut aprs = super::aprs::Aprs::new();
+    // SAME and the pager decoder (roadmap 6b).
+    let mut decode = super::decode::Decode::new();
     loop {
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
@@ -279,6 +281,7 @@ pub async fn task() {
         }
         if !bringup::ON.load(Relaxed) {
             aprs.poll(&mut app, store, &live, now_ms());
+            decode.poll(&mut app, store, &live);
         }
         while let Some(c) = app.pop_cmd() {
             RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
@@ -343,9 +346,7 @@ pub async fn task() {
         match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {
             Either4::First(l) => live = l,
             // WX-4: a decoded SAME header opens the alert over any screen.
-            Either4::Fourth(a) => {
-                app.same_alert(&a.header, a.slot, a.freq);
-            }
+            Either4::Fourth(a) => super::decode::Decode::alert(&mut app, store, &a),
             Either4::Second(Input::Key(keypad::Event::Press(code))) => {
                 log_input(&Input::Key(keypad::Event::Press(code)));
                 app.raw_key(code, true); // every code, mapped or not: the key test names them (KEY-2)

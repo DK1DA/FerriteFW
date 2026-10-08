@@ -113,6 +113,8 @@ pub struct FakeRadio {
     /// A slot on a NOAA / Weatheradio channel since this time (s): the fake decoder hears a SAME warning there.
     wx_since: Option<f32>,
     same: Option<SameDecoded>,
+    /// When the fake pager system last sent (seconds of fake time).
+    paged_at: f32,
     /// An APRS packet going out on this slot until this time (s): the TX LED and keyed state for a moment.
     burst: Option<(u8, f32)>,
     /// DTMF-3's timing ([`RadioCmd::DtmfTiming`]: ms, delay in 10 ms) and a dialled sequence being sent until this
@@ -140,6 +142,7 @@ impl FakeRadio {
         path.rx(Rx::Bk(Sel::rx(live.slots[0].freq)), Cause::ActiveSlot, 0, &mut Steps::default()).ok();
         FakeRadio {
             live,
+            paged_at: 0.0,
             quiet: false,
             watch: 0b111,
             watcher: Watch::new(),
@@ -331,6 +334,26 @@ impl FakeRadio {
     /// UI task gets the same from the DSP task over a channel).
     pub fn take_same(&mut self) -> Option<SameDecoded> {
         self.same.take()
+    }
+
+    /// The fake pager system (DEC-4): while the pager decoder is wanted, a page every 20 s, in turn from a
+    /// short list (text, numeric, tone only), as the DSP task's decoder would hand them to the UI task.
+    pub fn take_page(&mut self, wanted: bool) -> Option<ferrite_core::decoders::Page> {
+        use ferrite_core::decoders::{Page, PAGE_TEXT};
+        const PAGES: [(u32, u16, u8, &[u8]); 3] =
+            [(1_234_567, 1200, 3, b"STN 4 RESPOND MVC HWY 417 EB AT KM 120"), (1_234_570, 512, 0, b"5551234"), (1_234_571, 2400, 2, b"")];
+        if !wanted {
+            self.paged_at = self.now;
+            return None;
+        }
+        if self.now - self.paged_at < 20.0 {
+            return None;
+        }
+        self.paged_at = self.now;
+        let (capcode, baud, function, text) = PAGES[(self.now / 20.0) as usize % PAGES.len()];
+        let mut p = Page { capcode, baud, function, numeric: function == 0, len: text.len() as u8, text: [0; PAGE_TEXT] };
+        p.text[..text.len()].copy_from_slice(text);
+        Some(p)
     }
 
     /// While a slot sits on a weather channel, a warning comes 8 s in (once per visit).

@@ -94,6 +94,9 @@ pub enum RadioCmd {
     ToneSearch { slot: u8, on: bool },
     /// The frequency counter (TSRCH-6).
     Counter(bool),
+    /// SAME weather alerts on or off (0 4 9 1 and the region, WX-3): the BK4829's SAME receiver runs on the chip of
+    /// any slot tuned to a weather channel (DEC-19).
+    Same(bool),
     /// HF mode: enter on a frequency and mode (as [`Param::Mode`]), retune, or leave (HF-3, HF-4). Entering
     /// powers the SI4732 up with the SSB patch and pauses watch, scan, decoders, jobs and beacons; leaving undoes
     /// all of it (HF-8). The receiver follows from frequency and mode (HF-10), and the relay from the receiver:
@@ -206,7 +209,11 @@ pub struct SameDecoded {
 /// To the DSP task: which decoder runs in the shared slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DspCmd {
+    /// What the APRS task wants in the decoder slot (AFSK or off).
     Decoder(DecoderKind),
+    /// The pager decoder wanted (POCSAG on and a slot on its frequency) or not. The slot runs one decoder:
+    /// APRS's AFSK first, the pager decoder when APRS doesn't want it (DEC-18).
+    Pager(bool),
     Beep { hz: u16, ms: u16 },
 }
 

@@ -2,6 +2,7 @@
 //! the input sampler that feeds the UI.
 
 pub mod aprs;
+pub mod decode;
 pub mod dsp;
 pub mod gps;
 pub mod input;

@@ -49,6 +49,7 @@ pub mod gpsdata;
 pub mod keys;
 pub mod lights;
 pub mod link;
+pub mod pager;
 pub mod persist;
 pub mod ports;
 pub mod radio_data;

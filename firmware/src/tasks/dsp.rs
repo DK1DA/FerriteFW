@@ -2,7 +2,11 @@
 //! of DAC1 (APRS-1, APRS-14; roadmap 2f, 5b, 5c). Runs on the second interrupt executor, below Radio.
 //!
 //! - **Receive:** while a decoder runs, the capture runs ([`hal::audio`]); each 2 ms half goes through
-//!   [`Decim`] to the slot. An AFSK frame with a good CRC goes to the UI task's APRS task through [`APRS_RX`].
+//!   [`Decim`] to the slot. An AFSK frame with a good CRC goes to the UI task's APRS task through [`APRS_RX`], a
+//!   page to the UI task through [`PAGES`].
+//! - **One slot, two wanting it (DEC-18):** the APRS task asks for AFSK, the UI task for the pager decoder; APRS
+//!   comes first (APRS mode gives it slot C), the pagers get the slot whenever APRS doesn't want it. Background
+//!   jobs on watched slots (roadmap 6f) will share it more finely.
 //! - **Transmit:** the UI task keys slot C, then hands a frame to [`AFSK_TX`]; it is played from TX delay's
 //!   flags to the end (the flags cover the key-up), PC12 high meanwhile, and [`AFSK_DONE`] says it's out so the
 //!   UI task unkeys. Receiving pauses while it plays.
@@ -16,7 +20,7 @@ use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
 use ferrite_app::aprs_live::FRAME_MAX;
 use ferrite_core::audio::{afsk_tx, to_dac, uafsk, Decim, BLOCK_DAC, BLOCK_IN, BLOCK_OUT};
-use ferrite_core::decoders::{Decoder, Found};
+use ferrite_core::decoders::{Decoder, Found, Page};
 use ferrite_core::msg::{DecoderKind, DspCmd};
 
 /// An AX.25 frame without its FCS, as the demodulator gives it and the modulator takes it.
@@ -39,6 +43,8 @@ pub static APRS_RX: Channel<M, Frame, 2> = Channel::new();
 /// A frame to send on the transmission the UI task just keyed, and its "sent" (true) or "not sent" (false).
 pub static AFSK_TX: Signal<M, Frame> = Signal::new();
 pub static AFSK_DONE: Signal<M, bool> = Signal::new();
+/// Pages heard, to the UI task (DEC-7): two deep, 144 B.
+pub static PAGES: Channel<M, Page, 2> = Channel::new();
 /// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
 pub static FRAMES: AtomicU32 = AtomicU32::new(0);
 pub static DROPPED: AtomicU32 = AtomicU32::new(0);
@@ -50,9 +56,24 @@ pub async fn task() {
     let mut slot = Decoder::Off;
     let mut dec = Decim::new();
     let mut capturing = false;
+    // What each side asks for, and what runs (DEC-18).
+    let (mut aprs, mut pager, mut running) = (DecoderKind::Off, false, DecoderKind::Off);
     loop {
         match select3(DSP.receive(), audio::ADC_HALF.wait(), AFSK_TX.wait()).await {
-            Either3::First(DspCmd::Decoder(kind)) => {
+            Either3::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_))) => {
+                match cmd {
+                    DspCmd::Decoder(k) => aprs = k,
+                    DspCmd::Pager(on) => pager = on,
+                    _ => {}
+                }
+                let kind = match (aprs, pager) {
+                    (DecoderKind::Off, true) => DecoderKind::Pocsag,
+                    (k, _) => k,
+                };
+                if kind == running {
+                    continue;
+                }
+                running = kind;
                 slot = match kind {
                     DecoderKind::Off => Decoder::Off,
                     DecoderKind::Afsk => Decoder::afsk(),
@@ -82,8 +103,8 @@ pub async fn task() {
                         }
                     });
                 }
-                slot.push(&out[..n], |f| {
-                    if let Found::Frame(b) = f {
+                slot.push(&out[..n], |f| match f {
+                    Found::Frame(b) => {
                         FRAMES.fetch_add(1, Relaxed);
                         let mut fr = Frame { len: b.len().min(FRAME_MAX) as u16, txdelay_10ms: 0, b: [0; FRAME_MAX] };
                         fr.b[..fr.len as usize].copy_from_slice(&b[..fr.len as usize]);
@@ -91,6 +112,12 @@ pub async fn task() {
                             DROPPED.fetch_add(1, Relaxed);
                         }
                     }
+                    Found::Page(m) => {
+                        if PAGES.try_send(Page::from(m)).is_err() {
+                            DROPPED.fetch_add(1, Relaxed);
+                        }
+                    }
+                    Found::Call(_) => {} // DSC: roadmap 6c
                 });
             }
             Either3::Third(frame) => {

@@ -27,16 +27,17 @@
 
 use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
 use crate::bus::{BusyDelay, Io, Out, SiBus};
-use crate::chan::{DEBUG_ANS, DEBUG_REQ, EVENTS, LIVE, RADIO, TERM_WAKE};
+use crate::chan::{ALERTS, DEBUG_ANS, DEBUG_REQ, EVENTS, LIVE, RADIO, TERM_WAKE};
 use crate::hal::gpio::Mode;
 use crate::hal::i2c::I2c;
 use crate::tasks::{check, CHECK_BK0, CHECK_BK1};
 use bk4829::wire::ThreeWire;
-use bk4829::{AfOut, Bandwidth, Bk4829, Demod};
+use bk4829::{int, AfOut, Bandwidth, Bk4829, Demod, Fsk};
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, mhz, Freq10};
-use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, Source, SLOTS};
+use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, Source, SLOTS};
+use ferrite_core::same_rx::{self, Assembler, Repeats, Step};
 use ferrite_core::path::{Act, Cause, Path, Rx, Sel, Steps};
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use ferrite_core::scan::{self, Check, Range, Scan};
@@ -156,6 +157,9 @@ struct Radio {
     hf: Option<HfOn>,
     /// The frequency counter (TSRCH-10), while on.
     counter: Option<Counter>,
+    /// SAME weather alerts (WX-4, DEC-19): on from the UI, and the BK4829 receiver's state.
+    same_on: bool,
+    same: SameRx,
     #[cfg(feature = "tx")]
     tx: Tx,
 }
@@ -168,6 +172,37 @@ struct Counter {
     since: u32,
     last: Option<Freq10>,
 }
+
+/// The BK4829's SAME receiver (DEC-19): on the chip of a slot tuned to a weather channel, the burst being put
+/// together, and the headers already raised. 280 bytes.
+struct SameRx {
+    chip: Option<u8>,
+    /// The slot and frequency it was set up for: a retune sets it up again.
+    at: Option<(u8, Freq10)>,
+    /// The modem is set up and listening for the sync word.
+    armed: bool,
+    asm: Assembler,
+    repeats: Repeats,
+}
+
+/// The weather channels, 162.400-162.550 MHz (WX-1).
+const WX: core::ops::RangeInclusive<Freq10> = mhz(162) + 40_000..=mhz(162) + 55_000;
+
+/// The modem in its NOAA SAME receive mode (BK4819 application note; nobody's firmware uses it yet, so every
+/// value is bench-confirm, roadmap 6b): REG_58 receive mode 000 with bandwidth 010 and receive gain 3 (bits 7:6
+/// set as in both of stock's modem modes), the rate in Tone 2's word (520.83 baud x 10.32444), the four sync
+/// bytes `ZCZC`, no CRC (stock's REG_5C with bit 6 clear), and the longest header's length.
+const SAME_FSK: Fsk = Fsk {
+    mode: 0x03C4,
+    tone_word: ((same_rx::BAUD_MILLI as u64 * 1_032_444 + 50_000_000) / 100_000_000) as u16,
+    tone_gain: 0,
+    preamble: 16,
+    sync: same_rx::SYNC,
+    sync4: true,
+    crc: 0xA730 & !(1 << 6),
+    scramble: false,
+    len: same_rx::MAX_LEN as u16,
+};
 
 /// A chip gives up measuring after this long with no carrier, and the other chip takes a turn (stock's scan time
 /// is 0.8 s per reading).
@@ -420,6 +455,59 @@ impl Radio {
         bk.rx_on();
     }
 
+    /// SAME (DEC-19, WX-4): the BK4829's own receiver on the chip of a slot tuned to a weather channel, as
+    /// long as alerts are on. Each burst's FIFO words go through [`Assembler`]; the first that parses raises
+    /// the alert, through the UI task ([`ALERTS`]), and the same text again within `REPEAT_S` doesn't (the
+    /// header's other two bursts). The modem is set up again whenever its chip retunes or wakes (Battery Save
+    /// keeps its cycle, WX-11).
+    fn same_tick(&mut self, now: u32) {
+        let tuned = self.tuned;
+        let wx = |n: u8| tuned[n as usize].filter(|&(s, f)| (s as usize) < SLOTS && WX.contains(&f));
+        let chip = if self.same_on { (0..2u8).find(|&n| wx(n).is_some()) } else { None };
+        let at = chip.and_then(wx);
+        if chip != self.same.chip || at != self.same.at {
+            if let Some(old) = self.same.chip.filter(|&o| self.tuned[o as usize].is_some()) {
+                self.chip(old).fsk_off();
+            }
+            (self.same.chip, self.same.at) = (chip, at);
+            self.same.armed = false;
+        }
+        let (Some(n), Some((slot, freq))) = (chip, at) else { return };
+        if !self.same.armed {
+            let mut bk = self.chip(n);
+            bk.fsk_setup(&SAME_FSK);
+            bk.fsk_rx(&SAME_FSK);
+            self.same.armed = true;
+            return;
+        }
+        let flags = self.chip(n).interrupts();
+        if flags & int::FSK_SYNC != 0 {
+            self.same.asm.start();
+        }
+        if flags & (int::FSK_FIFO_FULL | int::FSK_RX_DONE) == 0 {
+            return;
+        }
+        // Almost full is 4 words (REG_5E's default); done leaves at most the FIFO's 8.
+        let words = if flags & int::FSK_RX_DONE != 0 { 8 } else { 4 };
+        for _ in 0..words {
+            let w = self.chip(n).fsk_read();
+            match self.same.asm.push(w) {
+                Step::More => continue,
+                Step::Done => {
+                    if let Some(header) = self.same.repeats.take(self.same.asm.text(), now / 1000) {
+                        let _ = ALERTS.try_send(SameDecoded { header, slot, freq });
+                    }
+                    self.same.armed = false; // listen for the next burst
+                }
+                Step::Bad => self.same.armed = false,
+            }
+            break;
+        }
+        if flags & int::FSK_RX_DONE != 0 {
+            self.same.armed = false;
+        }
+    }
+
     /// Battery Save's phase change: both chips sleep together (WATCH-8); waking, the next tick tunes them.
     async fn apply(&mut self, a: Action) {
         match a {
@@ -497,6 +585,8 @@ impl Radio {
                 Check::Squelch => open,
             };
         }
+        // SAME on a weather channel's chip (DEC-19).
+        self.same_tick(now);
         // 2. The watch turn.
         let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: 0 };
         let keyed = self.path.keyed().is_some();
@@ -904,6 +994,8 @@ pub async fn task() {
         tone_level: 1,
         hf: None,
         counter: None,
+        same_on: false,
+        same: SameRx { chip: None, at: None, armed: false, asm: Assembler::new(), repeats: Repeats::new() },
         #[cfg(feature = "tx")]
         tx: Tx {
             seq: TxSeq::new(),
@@ -1079,6 +1171,7 @@ impl Radio {
                 speaker(false);
             }
             RadioCmd::Counter(on) => self.counter(on),
+            RadioCmd::Same(on) => self.same_on = on,
             RadioCmd::Beep { hz, ms } => self.beep(hz, ms).await,
             #[cfg(feature = "tx")]
             RadioCmd::ToneBurst { on } => self.keyed_tone(if on { Some(1750) } else { None }, None),

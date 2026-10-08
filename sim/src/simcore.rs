@@ -416,6 +416,12 @@ impl SimCore {
                 let name = ferrite_core::same::event_name(&a.header.event).unwrap_or("Alert");
                 store.log(&log_event(Src::Same, a.slot, a.freq, name.as_bytes(), &a.header.event)); // INBOX-6
             }
+            // The pager decoder (DEC-4, DEC-18): the fake system's pages while a slot sits on 0 4 2's frequency.
+            if let Some(p) = radio.take_page(app.pager_wanted(&radio.live)) {
+                if let Some(e) = app.pager_hit(&p, &radio.live) {
+                    store.log(&e);
+                }
+            }
             // The fake link: an allowed write runs a session, 2 % a step, then ends (not while a real session's
             // own question is up: its answer is the session's).
             match if self.ports.link.asking() { None } else { app.take_link_answer() } {

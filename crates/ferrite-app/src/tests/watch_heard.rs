@@ -5,6 +5,28 @@ use super::*;
 use crate::persist::{Persist, Sink, SliceSource};
 use ferrite_core::watch::{self, Watch};
 
+/// The settings record's bytes after its flag byte (the `then` fields: the power-on message, the subtone level,
+/// the scan resume and priority check, the Transmit group's tones, the GPS settings, the KISS port, the pager
+/// settings, and whatever comes next), found by toggling a flag: the byte that changes is the flag byte. Tests that
+/// cut a record back to an older one use it, so a new field doesn't need its count in every test.
+pub(super) fn then_len() -> usize {
+    struct V(Vec<u8>);
+    impl Sink for V {
+        fn put(&mut self, b: &[u8]) {
+            self.0.extend_from_slice(b);
+        }
+    }
+    let save = |s: &crate::settings::Settings| {
+        let mut v = V(Vec::new());
+        s.save(&mut v);
+        v.0
+    };
+    let d = crate::settings::Settings::DEFAULT;
+    let (a, b) = (save(&d), save(&crate::settings::Settings { show_hidden: !d.show_hidden, ..d }));
+    let flag = a.iter().zip(&b).position(|(x, y)| x != y).expect("the flag byte");
+    a.len() - flag - 1
+}
+
 /// The Radio task's side, as the firmware will run it: the App's commands in, the engine's squelch out.
 struct Radio {
     w: Watch,
@@ -94,7 +116,7 @@ fn flags_round_trip_around_the_spare_bits() {
     }
     // A record saved with Follow's bits set (Follow off, a change from its old default): ignored.
     let mut v = save(&crate::settings::Settings { scan_tx: !d.scan_tx, ..d });
-    let i = v.len() - 30 - 1; // the flag byte, before the power-on message, subtone level, scan resume and priority check, the Transmit group's tones (6), the GPS settings (3) and the KISS port
+    let i = v.len() - then_len() - 1; // the flag byte
     v[i] |= 0b1100;
     let b = load(&v);
     assert_eq!(b.scan_tx, !d.scan_tx, "scan inputs kept its bit");
@@ -125,7 +147,7 @@ fn power_on_message_round_trip_and_boot_line() {
     assert_eq!((b.pon, b.pon_text, b.chan_only), (2, a.pon_text, true));
     assert_eq!(b.boot_line(), Some(b"Hello there".as_slice()));
     let mut c = crate::settings::Settings::DEFAULT;
-    c.load(&mut SliceSource(&v.0[..v.0.len() - 30]));
+    c.load(&mut SliceSource(&v.0[..v.0.len() - then_len()]));
     assert_eq!((c.pon, c.chan_only), (1, true), "an older record: callsign, its flags kept");
     assert_eq!(c.boot_line(), Some(b"VA7FER".as_slice()));
     c.pon = 0;

@@ -157,9 +157,9 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         (slow!("Open band scope"), slow!(""), slow!("Sweep around the active slot. Home: hold 1.")),
     ]),
     ((4, 2), &[
-        (slow!("Frequency"), slow!("439.9875"), slow!("The pager channel.")),
-        (slow!("Baud"), slow!("1200"), slow!("512, 1200 or 2400.")),
-        (slow!("Capcode filter"), slow!("None"), slow!("Only these capcodes.")),
+        (slow!("Decode"), slow!("Off"), slow!("Pagers on a slot tuned to the frequency.")),
+        (slow!("Frequency"), slow!("439.9875"), slow!("The pager channel; 512, 1200 and 2400 baud.")),
+        (slow!("Capcode filter"), slow!("None"), slow!("Only this capcode; # clears it.")),
     ]),
     ((4, 3), &[(slow!("DSC"), slow!("Off"), slow!("Decode DSC on channel 70.")), (slow!("Own MMSI"), slow!("None"), slow!("Your MMSI, receive only."))]),
     ((4, 4), &[(slow!("AIS"), slow!("Off"), slow!("161.975 and 162.025, in turn.")), (slow!("Range filter"), slow!("25 nm"), slow!("Off, 5, 10, 25, 50 nm; needs a fix."))]),
@@ -552,6 +552,31 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.same as u8);
             !s.same
         }
+        // 0 4 2 (DEC-4, DEC-18): the row in the group shows the frequency while decoding, else Off.
+        [4, 2] => {
+            if s.pocsag_on {
+                b.set(crate::slot::mhz3(s.pocsag_freq).as_bytes());
+            } else {
+                b.set(b"Off");
+            }
+            s.pocsag_on
+        }
+        [4, 2, 1] => {
+            pick(b, &ON_OFF, s.pocsag_on as u8);
+            s.pocsag_on
+        }
+        [4, 2, 2] => {
+            b.set(crate::slot::mhz3(s.pocsag_freq).as_bytes());
+            s.pocsag_freq != Settings::DEFAULT.pocsag_freq
+        }
+        [4, 2, 3] => {
+            if s.pocsag_cap == 0 {
+                b.set(b"None");
+            } else {
+                let _ = uwrite!(b, "{}", s.pocsag_cap);
+            }
+            s.pocsag_cap != 0
+        }
         [9, 2, 1] => {
             pick(b, &ON_OFF, s.bt as u8);
             s.bt
@@ -676,7 +701,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 49] = [
+pub(crate) const SETTABLE: [&[u8]; 51] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -689,6 +714,8 @@ pub(crate) const SETTABLE: [&[u8]; 49] = [
     &[3, 2, 3],
     &[3, 2, 4],
     &[3, 2, 5],
+    &[4, 2, 1],
+    &[4, 2, 2],
     &[4, 9, 1],
     &[5, 3],
     &[5, 5, 1],
@@ -788,6 +815,9 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         }
         [5, 7, 1] => app.step_aprs_freq(d),
         [4, 9, 1] => s.same = !s.same,
+        [4, 2, 1] => s.pocsag_on = !s.pocsag_on,
+        // 6.25 kHz steps across the VHF and UHF pager bands.
+        [4, 2, 2] => s.pocsag_freq = (s.pocsag_freq as i64 + d as i64 * 625).clamp(13_600_000, 52_000_000) as ferrite_core::freq::Freq10,
         [9, 2, 1] => s.bt = !s.bt,
         [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
         [5, 9, 1] => s.kiss_port = cycle(s.kiss_port, d, crate::settings::KISS_PORTS.len()),
@@ -906,6 +936,9 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 8, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
         [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
         [4, 9, 1] => s.same = d.same,
+        [4, 2, 1] => s.pocsag_on = d.pocsag_on,
+        [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
+        [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,
         [5, 9, 1] => s.kiss_port = d.kiss_port,
