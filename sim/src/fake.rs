@@ -516,6 +516,11 @@ impl FakeRadio {
             self.live.tx.keyed = false;
         }
         self.mode_step(t);
+        // XB-13, WATCH-9, SCAN-8: while the crossband repeater runs, watch and scans pause where they are (the
+        // Radio task gives both chips to the repeater).
+        if matches!(self.mode, Fake::Xb { .. }) {
+            return;
+        }
         // Carriers where each slot is tuned now.
         let quiet = self.quiet;
         let carrier = |i: usize, s: &SlotLive| -> (bool, f32) {
@@ -554,7 +559,7 @@ impl FakeRadio {
         for (i, s) in self.live.slots.iter_mut().enumerate() {
             let (_, level) = carrier(i, s);
             s.squelch_open = self.watcher.open(i as u8) || self.monitor & 1 << i != 0;
-            s.rssi = if s.squelch_open { level as i16 } else { -121 + ((t * 0.9 + i as f32).sin() * 2.0) as i16 };
+            s.rssi = if s.squelch_open { level as i16 } else if quiet { -121 } else { -121 + ((t * 0.9 + i as f32).sin() * 2.0) as i16 };
             s.relay = out.cancelled && self.watch & 1 << i != 0 && relay(s.freq) != active_relay; // WATCH-11
         }
     }

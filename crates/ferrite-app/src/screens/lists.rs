@@ -223,7 +223,7 @@ pub(crate) fn row2(lcd: &mut impl Panel, y: i32, r: &Row2) {
     let (fg, sub) = if r.selected { (BLUE_FG, BLUE_FG) } else { (TEXT, SUB) };
     lcd.fill(0, y, 240, h - 1, bg);
     lcd.fill(0, y + h - 1, 240, 1, LINE);
-    let mut x = 7;
+    let mut x = 8; // the side margin (DISP-2)
     if !r.tag.is_empty() {
         // 15 px tall so the 9 px capitals centre (DISP-19), the ink centred across
         let tw = text4_width(r.tag, &UI_12) + 8;

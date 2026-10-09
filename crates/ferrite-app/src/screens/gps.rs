@@ -66,8 +66,8 @@ impl View for Gps {
     fn title(self, _: &App, b: &mut Buf<10>) {
         b.set(match self.page {
             Page::Position => b"GPS".as_slice(),
-            Page::Satellites => b"Satellites",
-            Page::Waypoints => b"Waypoints",
+            Page::Satellites => b"Sky",
+            Page::Waypoints => b"Waypoint",
             Page::Go => b"Go to",
         });
     }

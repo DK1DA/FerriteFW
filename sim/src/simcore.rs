@@ -529,7 +529,9 @@ impl SimCore {
                 store.set_time(u);
             }
             let secs = self.clock0 + now as u64 / 1000;
-            dev.clock_min = Some(((secs % 86_400) / 60) as u16);
+            // As the firmware's GPS task: local time by 0 6 3's zone, `Z` when that is UTC (SBAR-2, GPS-8).
+            let (min, utc) = ferrite_app::gpsdata::local_clock(secs as u32, app.settings().tz);
+            (dev.clock_min, dev.utc) = (Some(min), utc);
             app.tick(now, &radio.live, store);
             while let Some(c) = app.pop_cmd() {
                 send(radio, c);

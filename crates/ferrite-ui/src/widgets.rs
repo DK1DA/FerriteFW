@@ -665,7 +665,8 @@ impl StatusBar {
                 }
                 None => b"--:--",
             };
-            field(lcd, 100, 40, 0, SBAR_H - 1, 14, Align::Center, t, &UI_12B, TEXT, BG);
+            // 98..142: wide enough for `14:32Z` (41 px), still centred on 120 (SBAR-2).
+            field(lcd, 98, 44, 0, SBAR_H - 1, 14, Align::Center, t, &UI_12B, TEXT, BG);
         }
         if old.is_none_or(|o| !self.right_eq(o)) {
             self.draw_right(lcd);
@@ -673,7 +674,7 @@ impl StatusBar {
     }
 
     fn draw_left(&self, lcd: &mut impl Panel) {
-        let (y0, y1, base, gap, x_end) = (0, SBAR_H - 1, 14, 5, 100);
+        let (y0, y1, base, gap, x_end) = (0, SBAR_H - 1, 14, 5, 98);
         let mut count = Buf::<4>::new();
         let _ = ufmt::uwrite!(count, "{}", self.inbox.min(99));
         // Icons first, in order (SBAR-3): the name gets what is left of the ~90 px (SBAR-5).
@@ -685,7 +686,7 @@ impl StatusBar {
         let mut x = 8;
         lcd.fill(0, y0, 8, y1, BG);
         if !self.name.is_empty() {
-            let name = fit(self.name.as_bytes(), &UI_12, 92 - icons);
+            let name = fit(self.name.as_bytes(), &UI_12, 90 - icons);
             x += field(lcd, x, text4_width(name, &UI_12), y0, y1, base, Align::Left, name, &UI_12, SUB, BG);
             lcd.fill(x, y0, gap, y1, BG);
             x += gap;
@@ -723,7 +724,7 @@ impl StatusBar {
     }
 
     fn draw_right(&self, lcd: &mut impl Panel) {
-        lcd.fill(140, 0, 100, SBAR_H - 1, BG);
+        lcd.fill(142, 0, 98, SBAR_H - 1, BG);
         // Battery at the right edge (SBAR-9): body 17 x 10 and a nub.
         let c = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { SUB };
         let fillc = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { GREEN };
@@ -810,7 +811,7 @@ mod tests {
         assert_eq!(lcd.1, 0, "nothing changed, nothing drawn");
         let b = StatusBar { clock: Some(14 * 60 + 33), ..a };
         b.draw(&mut lcd, Some(&a));
-        assert!(lcd.1 > 0 && lcd.1 <= 40 * 19, "only the clock: {} px", lcd.1);
+        assert!(lcd.1 > 0 && lcd.1 <= 44 * 19, "only the clock (its 44 px field): {} px", lcd.1);
     }
 
     #[test]

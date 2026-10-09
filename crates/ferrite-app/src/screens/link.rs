@@ -103,7 +103,7 @@ impl View for Link {
         b.set(match self.page {
             LinkPage::Status => b"Link".as_slice(),
             LinkPage::Approved => b"Approved",
-            LinkPage::Approve => b"Bluetooth",
+            LinkPage::Approve => b"Approve",
             LinkPage::Progress => b"Writing",
         });
     }

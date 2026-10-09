@@ -51,7 +51,7 @@ impl View for SameCodes {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(b"Locations");
+        b.set(b"Location"); // 8 or fewer (SBAR-5)
     }
 
     fn timeout(self) -> Option<u32> {

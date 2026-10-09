@@ -217,9 +217,10 @@ pub trait View: Copy {
         None
     }
 
-    /// The status bar's screen name (SBAR): up to 10 characters.
+    /// The status bar's screen name (SBAR-5): 8 characters or fewer; screens whose name is longer have a
+    /// short one here or their own `title`.
     fn title(self, _app: &App, b: &mut Buf<10>) {
-        b.set(self.name().as_bytes());
+        b.set(short_title(self.name()).as_bytes());
     }
 
     /// Idle time after which it goes home: menus use the menu timeout (MENU-28); None stays.
@@ -389,5 +390,19 @@ impl App {
         if let Some(t) = self.toast.filter(|t| t.center) {
             w::popup(lcd, t.head.as_bytes(), t.body.as_bytes());
         }
+    }
+}
+
+/// A screen name of more than 8 characters, shortened for the status bar (SBAR-5); others as they are.
+pub(crate) fn short_title(name: &str) -> &str {
+    match name {
+        "Extend TX" => "Extend",
+        "Shortcut map" => "Shortcut",
+        "HF recent" => "Recent",
+        "FM presets" => "Presets",
+        "Calibrate" => "Trims",
+        "SSB patch" => "SSB",
+        "Add device" => "Device",
+        n => n,
     }
 }

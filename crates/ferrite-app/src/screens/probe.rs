@@ -133,7 +133,7 @@ impl View for ToneSearch {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(b"Tone srch");
+        b.set(b"Search");
     }
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {

@@ -41,7 +41,7 @@ impl View for Shortcut {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(b"Shortcuts");
+        b.set(b"Shortcut");
     }
 
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {

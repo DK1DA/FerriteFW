@@ -497,7 +497,7 @@ impl View for TxRefused {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(b"TX refused");
+        b.set(b"Refused");
     }
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
@@ -648,7 +648,7 @@ impl View for Emergency {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(b"Emergency");
+        b.set(b"Distress"); // 8 or fewer (SBAR-5)
     }
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {

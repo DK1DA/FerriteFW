@@ -228,7 +228,7 @@ impl View for Entry {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(if self.freq_mode() { b"Frequency" } else { b"Channel" });
+        b.set(if self.freq_mode() { b"Freq" } else { b"Channel" }); // 8 or fewer (SBAR-5)
     }
 
     fn timeout(self) -> Option<u32> {

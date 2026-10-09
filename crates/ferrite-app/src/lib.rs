@@ -673,6 +673,12 @@ impl App {
             self.show_toast(b"SAME test", name.as_bytes(), true);
             return false;
         }
+        // WX-10: with location codes set, a warning counts only when one of its areas is in the list; with
+        // none set, every warning does.
+        let codes = &self.set.same_codes;
+        if codes.iter().any(|&c| c != 0) && !h.areas[..h.n_areas as usize].iter().any(|a| codes.contains(a)) {
+            return false;
+        }
         let mut a = AlertInfo::NONE;
         a.event.set(name.as_bytes());
         let mut areas = Buf::<20>::new();
