@@ -104,10 +104,11 @@ impl View for Home {
         use Press::*;
         let big = app.keys.is_held(Key::Side(2));
         // PIN-5: channel-only mode: no V/M, editing, settings or MENU 0.
-        if matches!(
+        // A digit on a VFO slot would open frequency entry, which channel-only mode hides too.
+        if (matches!(
             (e.key, e.press),
             (Key::VfoMem, _) | (Key::Slot | Key::Menu, Long) | (Key::Menu | Key::Star, Short) | (Key::Star, Long) | (Key::Side(2), LongUp)
-        )
+        ) || matches!((e.key, e.press), (Key::Digit(_), Short)) && !app.slots[app.active as usize].on_channel())
             && app.chan_only_refuse()
         {
             return;
