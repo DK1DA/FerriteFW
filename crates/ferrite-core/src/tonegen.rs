@@ -132,6 +132,15 @@ pub fn dtmf_seq_ms(digits: usize, ms: u16, delay_ms: u16) -> u32 {
 /// A local beep's length, clamped: the Radio task waits through it.
 pub const BEEP_MAX_MS: u16 = 1_000;
 
+/// Beep volume 1-5 (SND-3, 0 7 5 2) as tone 1's gain: level 3 is stock V0.29's 0x17, each step about 3 dB.
+/// Bench-confirm the steps by ear.
+pub const BEEP_GAINS: [u8; 5] = [0x0B, 0x10, 0x17, 0x20, 0x2D];
+
+/// The tone gain for beep volume `vol` (1-5; out of range clamps).
+pub fn beep_gain(vol: u8) -> u8 {
+    BEEP_GAINS[vol.clamp(1, 5) as usize - 1]
+}
+
 /// The counter (TSRCH-10): stock (0x08021BC4) takes two frequency-scan readings in a row and keeps them only when
 /// they agree within 500 Hz, then the mean. 10 Hz units.
 pub fn counter_agree(a: Freq10, b: Freq10) -> Option<Freq10> {
@@ -227,5 +236,13 @@ mod tests {
         assert_eq!(tail_kind(885, 2), TailKind::Shift(2), "CTCSS: the phase shift");
         assert_eq!(tail_kind(0x8000 | 0o23, 2), TailKind::Shift(0), "DCS: the turn-off code, phase or not");
         assert_eq!(dtmf_seq_ms(4, 100, 300), 1100);
+    }
+
+    /// SND-3: volume 3 is stock's beep gain; the scale rises and clamps.
+    #[test]
+    fn beep_volume_gains() {
+        assert_eq!(beep_gain(3), 0x17);
+        assert!(BEEP_GAINS.windows(2).all(|w| w[0] < w[1]));
+        assert_eq!((beep_gain(0), beep_gain(9)), (0x0B, 0x2D));
     }
 }

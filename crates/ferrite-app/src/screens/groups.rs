@@ -429,6 +429,15 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.fm_monitor as u8);
             !s.fm_monitor
         }
+        [3, 1, 5] => {
+            match SLEEP_TIMES[s.fm_sleep as usize % SLEEP_TIMES.len()] {
+                0 => b.set(b"Off"),
+                m => {
+                    let _ = uwrite!(b, "{} min", m);
+                }
+            }
+            s.fm_sleep != 0
+        }
         [3, 2, 1] => {
             let _ = uwrite!(b, "{}", SCOPE_BAR_COUNTS[s.scope_bars as usize % 4]);
             s.scope_bars != 1
@@ -508,9 +517,38 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &KEYPAD_LIGHTS, s.keypad_light);
             s.keypad_light != Settings::DEFAULT.keypad_light
         }
+        [7, 5, 1] => {
+            pick(b, &ON_OFF, s.key_beep as u8);
+            !s.key_beep
+        }
+        [7, 5, 2] => {
+            let _ = uwrite!(b, "{}", s.beep_vol.clamp(1, 5));
+            s.beep_vol != Settings::DEFAULT.beep_vol
+        }
+        [7, 5, 3] => {
+            pick(b, &ON_OFF, s.alert_tones as u8);
+            !s.alert_tones
+        }
         [7, 5, 4] => {
             pick(b, &ON_OFF, s.arrival_tone as u8);
             !s.arrival_tone
+        }
+        [8, 2] | [8, 2, 1] => {
+            pick(b, &ON_OFF, s.vox as u8);
+            s.vox
+        }
+        [8, 2, 2] => {
+            let _ = uwrite!(b, "{}", s.vox_level.clamp(1, 9));
+            s.vox_level != Settings::DEFAULT.vox_level
+        }
+        [8, 2, 3] => {
+            let t = VOX_TAILS[s.vox_tail as usize % VOX_TAILS.len()];
+            if t.is_multiple_of(10) {
+                let _ = uwrite!(b, "{} s", t / 10);
+            } else {
+                let _ = uwrite!(b, "{}.{} s", t / 10, t % 10);
+            }
+            s.vox_tail != Settings::DEFAULT.vox_tail
         }
         [7, 6] => {
             pick(b, &LED_MODES, s.leds);
@@ -710,7 +748,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 54] = [
+pub(crate) const SETTABLE: [&[u8]; 61] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -718,6 +756,7 @@ pub(crate) const SETTABLE: [&[u8]; 54] = [
     &[3, 1, 2],
     &[3, 1, 3],
     &[3, 1, 4],
+    &[3, 1, 5],
     &[3, 2, 1],
     &[3, 2, 2],
     &[3, 2, 3],
@@ -749,10 +788,16 @@ pub(crate) const SETTABLE: [&[u8]; 54] = [
     &[7, 3, 3],
     &[7, 4, 1],
     &[7, 4, 5],
+    &[7, 5, 1],
+    &[7, 5, 2],
+    &[7, 5, 3],
     &[7, 5, 4],
     &[7, 6],
     &[7, 7],
     &[7, 8],
+    &[8, 2, 1],
+    &[8, 2, 2],
+    &[8, 2, 3],
     &[8, 4, 2],
     &[8, 5, 1],
     &[8, 5, 2],
@@ -841,6 +886,25 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [7, 4, 1] => s.backlight = cycle(s.backlight, d, BACKLIGHT_TIMES.len()),
         [7, 4, 5] => s.keypad_light = cycle(s.keypad_light, d, KEYPAD_LIGHTS.len()),
         [7, 5, 4] => s.arrival_tone = !s.arrival_tone,
+        [7, 5, 1] => s.key_beep = !s.key_beep,
+        [7, 5, 3] => s.alert_tones = !s.alert_tones,
+        [7, 5, 2] => {
+            s.beep_vol = (s.beep_vol.clamp(1, 5) as i32 + d).clamp(1, 5) as u8;
+            app.out.push(RadioCmd::BeepVol(app.set.beep_vol));
+        }
+        [3, 1, 5] => s.fm_sleep = cycle(s.fm_sleep, d, SLEEP_TIMES.len()),
+        [8, 2] | [8, 2, 1] => {
+            s.vox = !s.vox;
+            app.send_vox();
+        }
+        [8, 2, 2] => {
+            s.vox_level = (s.vox_level.clamp(1, 9) as i32 + d).clamp(1, 9) as u8;
+            app.send_vox();
+        }
+        [8, 2, 3] => {
+            s.vox_tail = cycle(s.vox_tail, d, VOX_TAILS.len());
+            app.send_vox();
+        }
         [7, 6] => s.leds = cycle(s.leds, d, LED_MODES.len()),
         [7, 8] => s.auto_off = cycle(s.auto_off, d, AUTO_OFF_TIMES.len()),
         [9, 1, 1] => s.auto_lock = cycle(s.auto_lock, d, AUTO_LOCK_TIMES.len()), // KEY-20
@@ -969,6 +1033,21 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [7, 4, 1] => s.backlight = d.backlight,
         [7, 4, 5] => s.keypad_light = d.keypad_light,
         [7, 5, 4] => s.arrival_tone = d.arrival_tone,
+        [7, 5, 1] => s.key_beep = d.key_beep,
+        [7, 5, 3] => s.alert_tones = d.alert_tones,
+        [7, 5, 2] => {
+            s.beep_vol = d.beep_vol;
+            app.out.push(RadioCmd::BeepVol(app.set.beep_vol));
+        }
+        [3, 1, 5] => s.fm_sleep = d.fm_sleep,
+        [8, 2] | [8, 2, 1] | [8, 2, 2] | [8, 2, 3] => {
+            match p {
+                [8, 2, 2] => s.vox_level = d.vox_level,
+                [8, 2, 3] => s.vox_tail = d.vox_tail,
+                _ => s.vox = d.vox,
+            }
+            app.send_vox();
+        }
         [7, 6] => s.leds = d.leds,
         [7, 8] => s.auto_off = d.auto_off,
         [9, 1, 1] => s.auto_lock = d.auto_lock,
@@ -1047,8 +1126,30 @@ impl View for Group {
         self.draw(app, lcd, cx);
     }
 
-    fn hints(self, _: &App) -> Hints {
-        Hints::new(&[("Knob", "Change"), ("OK", "Open"), ("BACK", "Back")])
+    fn hints(self, app: &App) -> Hints {
+        if app.set_undo.is_some() || app.undo.is_some() {
+            Hints::new(&[("Knob", "Change"), ("*", "Undo"), ("BACK", "Back")]) // MENU-22
+        } else {
+            Hints::new(&[("Knob", "Change"), ("OK", "Open"), ("BACK", "Back")])
+        }
+    }
+}
+
+/// The value a setting shows, as a hash (MENU-22's undo compares it).
+fn shown(app: &App, p: &[u8]) -> u32 {
+    let mut b = Buf::<24>::new();
+    let _ = wired(app, &Device::default(), p, &mut b);
+    hash(&b.as_bytes())
+}
+
+/// MENU-22: steps the setting back the other way until it shows what it did before the run of changes (a
+/// toggle flips back, a list walks back); bounded, so a value that can't come back stops trying.
+pub(crate) fn undo_setting(app: &mut App, u: &crate::SetUndo) {
+    let p = &u.path[..u.len as usize];
+    for _ in 0..64 {
+        if shown(app, p) == u.was || !change(app, p, -(u.dir as i32)) {
+            break;
+        }
     }
 }
 
@@ -1059,7 +1160,12 @@ impl Group {
         if let Some(why) = greyed(app, &p[..pl]) {
             app.show_toast(self.items()[self.row as usize].0.as_bytes(), why.as_bytes(), false);
         } else {
-            change(app, &p[..pl], d);
+            let p = &p[..pl];
+            // MENU-22: a radio-wide setting changed here offers "* Undo" (the slot's own items keep theirs).
+            let was = shown(app, p);
+            if change(app, p, d) && !matches!(p, [1, 1] | [7, 7]) && shown(app, p) != was {
+                app.keep_set_undo(p, d, was);
+            }
         }
     }
 

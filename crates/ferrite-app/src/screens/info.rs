@@ -102,7 +102,11 @@ fn volts(b: &mut Buf<40>, mv: u16) {
 
 slow_table! {
     ABOUT: [InfoRow; 9] = [
-        (slow!("Version"), |_, b| fixed(b, VERSION, TEXT)),
+        // SELF-5: version and build (the git commit; "+" built from uncommitted changes).
+        (slow!("Version"), |_, b| {
+            let _ = uwrite!(b, "{} {}", VERSION, ferrite_core::build());
+            TEXT
+        }),
         (slow!("MCU"), |Ctx { dev: d, .. }, b| {
             let t = &d.selftest;
             match (t.idcode, t.mcu_ok) {

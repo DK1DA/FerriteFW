@@ -42,13 +42,13 @@ pub fn tune<B: Bus>(bk: &mut Bk4829<B>, s: &RxSetup) {
     bk.rx_on();
 }
 
-/// A local beep's start on a chip (SND-11, stock 0x0801EB8C): woken first if it was asleep. Returns REG_48 for
-/// [`beep_end`].
-pub fn beep_start<B: Bus>(bk: &mut Bk4829<B>, hz: u32, asleep: bool) -> u16 {
+/// A local beep's start on a chip (SND-11, stock 0x0801EB8C): woken first if it was asleep, tone 1 at `tone_gain`
+/// (the beep volume, SND-3: `tonegen::beep_gain`; stock's is 0x17). Returns REG_48 for [`beep_end`].
+pub fn beep_start<B: Bus>(bk: &mut Bk4829<B>, hz: u32, tone_gain: u8, asleep: bool) -> u16 {
     if asleep {
         bk.wake();
     }
-    bk.beep_on(hz)
+    bk.beep_on_gain(hz, tone_gain)
 }
 
 /// The beep's end: tone off, REG_48 back, then the chip asleep again or back to receive.

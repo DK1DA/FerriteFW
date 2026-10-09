@@ -84,6 +84,13 @@ pub const UNDO_MS: u32 = 5000;
 /// The refusal beep (SND-4, TEXT-5): short and low, unlike a key beep.
 const REFUSED_HZ: u16 = 440;
 const REFUSED_MS: u16 = 80;
+/// A key beep (SND-3): short and high, so it never sounds like a refusal. Bench-confirm against stock's.
+pub const KEY_BEEP_HZ: u16 = 1000;
+pub const KEY_BEEP_MS: u16 = 30;
+/// An alert's tone (SND-6, INBOX-4): 1050 Hz, as the weather service's attention tone, half a second each
+/// second until acknowledged.
+pub const ALERT_HZ: u16 = 1050;
+pub const ALERT_MS: u16 = 500;
 /// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
 pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
@@ -174,6 +181,18 @@ struct Undo {
     until: u32,
 }
 
+/// A settings-list change, for "* Undo" (MENU-22): the item's path, the way the knob turned, and a hash of the
+/// value it showed before the run of changes. Undo steps the other way until that value shows again: one
+/// record (12 bytes) covers every radio-wide setting without a copy of the settings.
+#[derive(Clone, Copy)]
+pub(crate) struct SetUndo {
+    pub path: [u8; 3],
+    pub len: u8,
+    pub dir: i8,
+    pub was: u32,
+    pub until: u32,
+}
+
 #[derive(Clone, Copy)]
 struct ChUndo {
     /// The number (0-999, 10 bits) and, above it, the end tone and tail byte (5 bits, decision 86): one u16
@@ -260,8 +279,14 @@ pub struct App {
     /// An unread alert (the bar's alert mark); [`ALERT_WAIT`]: one came in while the crossband repeater ran,
     /// shown as a banner, and its screen opens when the repeater stops (XB-19).
     alert: u8,
+    /// VOX keyed the active slot and holds it (VOX-13).
+    vox_on: bool,
+    /// The second of the alert tone's last beep, with the top bit set (SND-6, INBOX-4).
+    alert_beep: u16,
     toast: Option<Toast>,
     undo: Option<Undo>,
+    /// A radio-wide setting changed in a settings list, for "* Undo" (MENU-22).
+    pub(crate) set_undo: Option<SetUndo>,
     /// The last settings changed, newest first (MENU-8).
     recent: [Option<Item>; 3],
     keys: KeyTracker,
@@ -332,8 +357,11 @@ impl App {
             locked: false,
             inbox: 0,
             alert: 0,
+            vox_on: false,
+            alert_beep: 0,
             toast: None,
             undo: None,
+            set_undo: None,
             recent: [None; 3],
             keys: KeyTracker::new(),
             now: 0,
@@ -809,6 +837,9 @@ impl App {
         self.keys.down(key, now);
         self.last_input = now;
         self.out.push(RadioCmd::Activity);
+        if self.set.key_beep && !matches!(key, Key::Ptt(_)) {
+            self.out.push(RadioCmd::Beep { hz: KEY_BEEP_HZ, ms: KEY_BEEP_MS }); // SND-3
+        }
         if self.tx_pause && !matches!(key, Key::Ptt(_)) {
             // WATCH-16: a key press ends the pause after a transmission
             (self.paused_until, self.tx_pause) = (None, false);
@@ -906,6 +937,11 @@ impl App {
         if self.undo.is_some_and(|u| after(now, u.until)) {
             self.undo = None;
         }
+        if self.set_undo.is_some_and(|u| after(now, u.until)) {
+            self.set_undo = None;
+        }
+        self.alert_tone();
+        self.vox_tick(live, now, store);
         if self.paused_until.is_some_and(|t| after(now, t)) {
             (self.paused_until, self.tx_pause) = (None, false);
         }
@@ -1074,7 +1110,17 @@ impl App {
     pub(crate) fn send_radio_settings(&mut self) {
         self.out.push(RadioCmd::ScanTx(self.set.scan_tx));
         self.out.push(RadioCmd::ToneLevel(self.set.tone_level));
+        self.out.push(RadioCmd::BeepVol(self.set.beep_vol.clamp(1, 5)));
+        self.send_vox();
         self.send_tx_tones();
+    }
+
+    /// VOX's level and tail to the Radio task (VOX-2, VOX-5, VOX-13; 0 8 2): level 0 when it is off.
+    pub(crate) fn send_vox(&mut self) {
+        let s = &self.set;
+        let level = if s.vox { s.vox_level.clamp(1, 9) } else { 0 };
+        let tail = settings::VOX_TAILS[s.vox_tail as usize % settings::VOX_TAILS.len()];
+        self.out.push(RadioCmd::Vox { level, tail });
     }
 
     /// The Transmit group's tone settings to the Radio task (TONE-5 to TONE-10, VOX-12, DTMF-3, DTMF-8): the
@@ -1310,7 +1356,53 @@ impl App {
         }
     }
 
-    fn do_undo(&mut self) {
+    /// SND-6, INBOX-4: the alert screen sounds its tone each second until OK, when alert tones are on.
+    fn alert_tone(&mut self) {
+        let sounding = matches!(self.screen, Screen::Alert(a) if !a.silenced) && self.set.alert_tones;
+        let sec = (self.now / 1000) as u16 | 0x8000;
+        if sounding && sec != self.alert_beep {
+            self.alert_beep = sec;
+            self.out.push(RadioCmd::Beep { hz: ALERT_HZ, ms: ALERT_MS });
+        }
+    }
+
+    /// VOX-13, VOX-4: speech from the Radio task keys the active slot as PTT A does, with every PTT check;
+    /// its end (after the tail) releases it. Not on the APRS slot, whose PTT opens compose.
+    fn vox_tick(&mut self, live: &LiveAll, now: u32, store: &impl ChannelStore) {
+        let voice = live.tx.voice && self.set.vox && !self.aprs_slot(self.active);
+        if voice && !self.vox_on && self.radio.keyed.is_none() {
+            self.vox_on = true;
+            self.key_down(Key::PTT, now, store);
+        } else if !voice && self.vox_on {
+            self.vox_on = false;
+            self.key_up(Key::PTT, now, store);
+        }
+    }
+
+    /// Before a settings-list change (MENU-22): keeps the value shown, unless a run on the same item is open;
+    /// every change restarts the 5 s.
+    pub(crate) fn keep_set_undo(&mut self, p: &[u8], d: i32, was: u32) {
+        let mut path = [0u8; 3];
+        let len = p.len().min(3);
+        path[..len].copy_from_slice(&p[..len]);
+        let same = self.set_undo.is_some_and(|u| u.path == path && u.len as usize == len);
+        if !same {
+            self.set_undo = Some(SetUndo { path, len: len as u8, dir: d.signum() as i8, was, until: 0 });
+        }
+        if let Some(u) = &mut self.set_undo {
+            u.until = self.now.wrapping_add(UNDO_MS);
+        }
+    }
+
+    pub(crate) fn do_undo(&mut self) {
+        if let Some(u) = self.set_undo.take() {
+            screens::groups::undo_setting(self, &u);
+            return self.show_toast(b"Undone", b"", false);
+        }
+        self.undo_slot();
+    }
+
+    fn undo_slot(&mut self) {
         if let Some(u) = self.undo.take() {
             let s = &mut self.slots[u.slot as usize];
             match u.ch {

@@ -341,7 +341,7 @@ fn beep_never_keys_and_restores() {
         r.regs[reg::AF_GAIN as usize] = 0x1234;
         r
     });
-    let gain = chip::beep_start(&mut b, 1000, true);
+    let gain = chip::beep_start(&mut b, 1000, 0x17, true);
     assert_eq!(gain, 0x1234);
     chip::beep_end(&mut b, gain, true);
     let bus = b.release();
@@ -352,7 +352,7 @@ fn beep_never_keys_and_restores() {
     assert_eq!(bus.last(reg::AF_GAIN), Some(0x1234), "REG_48 back");
     assert_eq!(bus.writes.last().map(|w| w.0), Some(reg::LDO), "asleep again last");
     let mut b = bk();
-    let g = chip::beep_start(&mut b, 1000, false);
+    let g = chip::beep_start(&mut b, 1000, 0x17, false);
     chip::beep_end(&mut b, g, false);
     assert_eq!(b.release().writes.last(), Some(&(reg::POWER, 0xBFF1)), "receive again");
 }

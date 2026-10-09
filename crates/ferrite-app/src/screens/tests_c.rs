@@ -840,10 +840,12 @@ fn predictive_limit() {
     d.text.set(&[b'x'; 65]);
     t.s.request(Op::Draft(d));
     keys(&mut t, "ok");
-    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Beep { .. })));
+    // Key beeps (SND-3) are 1000 Hz; the refusal beep is the low one.
+    let refused = |c: &RadioCmd| matches!(c, RadioCmd::Beep { hz, .. } if *hz != crate::KEY_BEEP_HZ);
+    assert!(!t.cmds().iter().any(refused));
     t.tap(Key::Digit(6)); // a third key would pass 67
     assert_eq!(t.app.text.as_bytes(), b"65");
-    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Beep { .. })), "refused with a beep");
+    assert!(t.cmds().iter().any(refused), "refused with a beep");
     t.tap(Key::Hash);
     assert_eq!(text(&t).len(), 67);
 }

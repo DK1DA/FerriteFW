@@ -38,6 +38,8 @@ impl Radio {
     }
 
     pub fn with(stored: Stored) -> Self {
+        // Pictures and screen text don't change with each commit (SELF-5's build ID reads 0000000).
+        ferrite_core::BUILD_FIXED.store(true, core::sync::atomic::Ordering::Relaxed);
         let mut sim = SimCore::with_flash(1, false, stored);
         sim.set_clock(1_791_400_000); // a fixed clock: Oct 8, 2026, 19:06 UTC
         sim.log_cmds(true);

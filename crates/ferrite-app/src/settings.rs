@@ -146,6 +146,18 @@ pub struct Settings {
     /// 0 4 8 (DEC-7): a toast for each decoder hit (pages and the other decoders); off, they only go to the
     /// event log and the inbox count.
     pub popups: bool,
+    /// 0 7 5 1-3 (SND-3, SND-6): key beep, beep volume (1-5, relative to voice: the knob scales both) and alert
+    /// tones.
+    pub key_beep: bool,
+    pub beep_vol: u8,
+    pub alert_tones: bool,
+    /// 0 8 2 (VOX-1 to VOX-5, VOX-13): VOX on, its level (1-9, 1 the least sensitive) and its tail (index into
+    /// [`VOX_TAILS`]).
+    pub vox: bool,
+    pub vox_level: u8,
+    pub vox_tail: u8,
+    /// 0 3 1 5 (BCR-5): the broadcast's sleep timer, an index into [`SLEEP_TIMES`] (0 off).
+    pub fm_sleep: u8,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
     pub fm_freq: u16,
     pub fm_step: u8,
@@ -253,6 +265,10 @@ pub const END_TONE_NAMES: [&str; 6] = ["Off", "Beep", "Two-tone up", "Two-tone d
 pub const CW_ID_MODES: [&str; 3] = ["Off", "Every 10 min", "On unkey"];
 
 /// 0 8 4 2's values (TONE-16).
+/// 0 8 2 3's VOX tails, in 100 ms (VOX-5: 2 s by default, as nicFW's VOX Tail).
+pub const VOX_TAILS: [u8; 6] = [5, 10, 15, 20, 30, 50];
+/// 0 3 1 5's sleep times in minutes (BCR-5: off, 15-120 min).
+pub const SLEEP_TIMES: [u8; 7] = [0, 15, 30, 45, 60, 90, 120];
 pub const TONE_LEVELS: [&str; 3] = ["Low", "Normal", "High"];
 
 /// 0 7 4 1's values, seconds (0 never).
@@ -316,6 +332,13 @@ impl Settings {
         pocsag_freq: 43_998_750,
         pocsag_cap: 0,
         popups: true,
+        key_beep: true,
+        beep_vol: 3,
+        alert_tones: true,
+        vox: false,
+        vox_level: 5,
+        vox_tail: 3,
+        fm_sleep: 0,
         fm_freq: 10_110,
         fm_step: 1,
         fm_agc: 0,

@@ -41,18 +41,20 @@ pub struct Fm {
     /// The options page is open, and its row.
     pub menu: bool,
     pub row: u8,
+    /// When the broadcast started, for the sleep timer (BCR-5).
+    pub since: u32,
 }
 
 /// MENU 0 3 1 6 (BCR-1): the broadcast starts on the last station.
 pub fn open(app: &mut App) -> Screen {
     app.start_mode(Mode::Fm);
     app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(app.set.fm_freq)));
-    Screen::Fm(Fm::new())
+    Screen::Fm(Fm { since: app.now, ..Fm::new() })
 }
 
 impl Fm {
     pub fn new() -> Self {
-        Fm { menu: false, row: 0 }
+        Fm { menu: false, row: 0, since: 0 }
     }
 
     fn tune(app: &mut App, d: i32) {
@@ -82,7 +84,7 @@ impl View for Fm {
 
     /// MENU-25: the options page, drawn in the shared options style.
     fn options(self, app: &mut App) -> bool {
-        app.screen = Screen::Fm(Fm { menu: true, row: 0 });
+        app.screen = Screen::Fm(Fm { menu: true, row: 0, ..self });
         true
     }
 
@@ -133,6 +135,12 @@ impl View for Fm {
             if freq != 0 {
                 app.set.fm_freq = freq;
             }
+        }
+        // BCR-5: the sleep timer ends the broadcast once its time is up.
+        let min = crate::settings::SLEEP_TIMES[app.set.fm_sleep as usize % crate::settings::SLEEP_TIMES.len()] as u32;
+        if min != 0 && app.now.wrapping_sub(self.since) >= min * 60_000 {
+            app.go_home();
+            app.show_toast(b"Sleep timer", b"broadcast off", false);
         }
     }
 

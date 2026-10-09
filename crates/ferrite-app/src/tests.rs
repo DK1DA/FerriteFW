@@ -123,8 +123,10 @@ fn ram_is_small() {
     // digipeater and beacon after voice (APRS-26, APRS-27: 3 bytes in the App's AprsCfg, 4 to 7, +8 with padding)
     // to 1184; the scroll cue's redraw region (DISP-24: one more 4-byte hash, +8 with padding) to 1192; the custom
     // APRS path (APRS-26: 16 bytes of text in the App's AprsCfg) and a clock set by hand waiting for its owner
-    // (GPS-23: an Option<u32>, 8) to 1216
-    assert!(n <= 1216, "App is {n} bytes");
+    // (GPS-23: an Option<u32>, 8) to 1216; a settings-list change kept for "* Undo" (MENU-22: path, direction
+    // and the shown value's hash, 16 with its Option), VOX holding the key and the alert tone's second (VOX-13,
+    // SND-6: 3 bytes, 8 with padding) to 1240
+    assert!(n <= 1240, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -424,6 +426,7 @@ fn every_destination_draws() {
 mod group_a;
 mod watch_heard;
 mod ports;
+mod sound_vox;
 
 fn count_px(fb: &FrameBuffer, y0: i32, y1: i32, f: impl Fn(u16) -> bool) -> usize {
     (y0..y1).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| f(fb.at(x, y))).count()

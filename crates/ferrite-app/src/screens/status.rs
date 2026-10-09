@@ -39,7 +39,7 @@ fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
 
 slow_table! {
     /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
-    ROWS: [(&str, Val<()>); 19] = [
+    ROWS: [(&str, Val<()>); 20] = [
         // SBAR-14: why transmit is locked, if it is (BOOT-11).
         (slow!("Transmit"), |c, b| match super::info::tx_lock(c.dev) {
             None => {
@@ -176,6 +176,8 @@ slow_table! {
             }
         }),
         (slow!("Key lock"), |c, b| on_off(b, c.app.locked)),
+        // VOX-1: VOX shows here when on.
+        (slow!("VOX"), |c, b| on_off(b, c.app.set.vox)),
         // SBAR-18: paused in HF mode; WX-3: US and Canada only.
         (slow!("Weather alerts"), |c, b| {
             if !c.app.set.wx_region() {
@@ -195,7 +197,7 @@ slow_table! {
 }
 
 slow_table! {
-    GO: [Go; 19] = [
+    GO: [Go; 20] = [
         Go::Open(Dest::Group(8)),
         Go::Open(Dest::Group(9)),
         Go::Open(Dest::Group(8)),
@@ -213,6 +215,7 @@ slow_table! {
         Go::Later,
         Go::Later, // MCU temperature: nothing to set
         Go::Later,
+        Go::Open(Dest::Sub(8, 2)),
         Go::Open(Dest::Sub(4, 9)),
         Go::Open(Dest::Mailbox),
     ];
@@ -278,5 +281,21 @@ mod tests {
         app.settings_mut().set_region(Some(Region::Uk));
         assert_eq!(region_row(&app).as_bytes(), app.settings().region_name().as_bytes());
         assert_ne!(region_row(&app).as_bytes(), b"Not set");
+    }
+
+    /// VOX-1: VOX is off by default; when on, it shows on the Status page.
+    #[test]
+    fn vox_row() {
+        let mut app = App::new(crate::tests::set(), crate::tests::alert());
+        let i = ROWS.iter().position(|r| r.0 == "VOX").expect("a VOX row");
+        let row = |app: &App| {
+            let mut b = Buf::<40>::new();
+            let (live, dev) = (LiveAll::default(), Device::default());
+            (ROWS[i].1)(&Ctx { app, live: &live, dev: &dev, x: &() }, &mut b);
+            b
+        };
+        assert_eq!(row(&app).as_bytes(), b"Off");
+        app.settings_mut().vox = true;
+        assert_eq!(row(&app).as_bytes(), b"On");
     }
 }

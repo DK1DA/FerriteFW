@@ -89,6 +89,13 @@ pub struct FakeRadio {
     pub live: LiveAll,
     /// No stations on the air (the simulators' LED demo: a dark screen stays dark).
     pub quiet: bool,
+    /// Beeps asked for (SND-3, SND-6): how many, the last one's tone and length, and the volume (0 7 5 2).
+    pub beeps: u32,
+    pub last_beep: (u16, u16),
+    pub beep_vol: u8,
+    /// VOX's level and tail as the UI sent them (0 8 2); the sims have no microphone, so `voice` is set by
+    /// tests.
+    pub vox: (u8, u8),
     watch: u8,
     /// The engines, as the Radio task runs them.
     watcher: Watch,
@@ -146,6 +153,10 @@ impl FakeRadio {
             live,
             paged_at: 0.0,
             quiet: false,
+            beeps: 0,
+            last_beep: (0, 0),
+            beep_vol: 3,
+            vox: (0, 0),
             watch: 0b111,
             watcher: Watch::new(),
             scans,
@@ -203,7 +214,7 @@ impl FakeRadio {
         };
         let now = self.ms();
         let r = self.seq.key(&req, &mut self.path, now, &mut Steps::default());
-        self.live.tx = TxLive { keyed: r.is_ok(), slot, mic: 0, refused: r.err(), dtmf_sent: self.live.tx.dtmf_sent };
+        self.live.tx = TxLive { keyed: r.is_ok(), slot, mic: 0, refused: r.err(), dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
     }
 
     fn unkey(&mut self) {
@@ -335,6 +346,12 @@ impl FakeRadio {
             }
             RadioCmd::Crossband(None) => self.set(Fake::Off),
             RadioCmd::DtmfTiming { ms, delay_10ms } => self.dtmf = (ms, delay_10ms),
+            RadioCmd::Beep { hz, ms } if !self.live.tx.keyed => {
+                self.beeps += 1;
+                self.last_beep = (hz, ms);
+            }
+            RadioCmd::BeepVol(v) => self.beep_vol = v,
+            RadioCmd::Vox { level, tail } => self.vox = (level, tail),
             RadioCmd::DtmfSend { len } if self.live.tx.keyed => {
                 let ms = ferrite_core::tonegen::dtmf_seq_ms(len as usize, self.dtmf.0 as u16, self.dtmf.1 as u16 * 10);
                 self.dialling = Some(self.now + ms as f32 / 1000.0);

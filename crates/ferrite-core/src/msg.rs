@@ -41,6 +41,12 @@ pub enum RadioCmd {
     /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 4 2; sent at start-up and when
     /// it changes).
     ToneLevel(u8),
+    /// The beep volume, 1-5 (SND-3, 0 7 5 2; sent at start-up and when it changes): every beep's tone gain.
+    BeepVol(u8),
+    /// VOX (VOX-1 to VOX-5, VOX-13, VOX-14; 0 8 2): level 1-9, or 0 for off, and the tail in 100 ms. The Radio
+    /// task compares the mic (PA0) with the level's threshold and reports speech in [`TxLive::voice`]; the UI
+    /// keys the active slot from it, with every PTT check (VOX-4).
+    Vox { level: u8, tail: u8 },
     /// Pause watching for this many seconds (WATCH-6, WATCH-16); 0 resumes it now.
     PauseWatch(u16),
     /// Key or unkey a slot (3 = the HF mode frequency), after the UI's checks; the Radio task checks again
@@ -327,6 +333,8 @@ pub struct TxLive {
     pub refused: Option<crate::txplan::Refusal>,
     /// Counts each dialled sequence sent to the end ([`RadioCmd::DtmfSend`]): the UI unkeys when it moves.
     pub dtmf_sent: u8,
+    /// VOX hears speech (the tail included): the UI keys the active slot while it is set (VOX-13).
+    pub voice: bool,
 }
 
 /// The terminal's debug commands (TERM-21 to TERM-24): what the firmware is asked. Memory is read where the

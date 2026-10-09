@@ -167,6 +167,8 @@ struct Radio {
     /// the `tx` build's).
     scan_tx: bool,
     tone_level: u8,
+    /// The beep volume's tone gain (SND-3, 0 7 5 2: `tonegen::beep_gain`).
+    beep_gain: u8,
     hf: Option<HfOn>,
     /// The frequency counter (TSRCH-10), while on.
     counter: Option<Counter>,
@@ -252,6 +254,10 @@ struct Tx {
     sidetone: bool,
     /// The chip keyed now: the tones at unkey play on it after the path machine has planned the unkey.
     chip: Option<u8>,
+    /// VOX (VOX-2, VOX-5, VOX-14): level 1-9 or 0 off, tail in 100 ms, the detector, and when PA0 was last read.
+    vox: (u8, u8),
+    vox_det: ferrite_core::vox::Vox,
+    vox_at: u32,
     /// The region and Extend TX from the UI's last [`RadioCmd::TxPlan`]: the crossband repeater's key-ups use them.
     region: Option<(Region, bool)>,
     /// DTMF-3: each digit's on and off time (ms) and the first digit delay (10 ms); a dialled sequence, and whether
@@ -479,8 +485,31 @@ impl Radio {
         }
     }
 
+    /// VOX (VOX-2, VOX-3, VOX-5, VOX-14): every 20 ms, PA0's mic level against the level's threshold; speech
+    /// (with its tail) goes to the UI in `TxLive::voice`, which keys the active slot (VOX-13). Blocked while the
+    /// active slot receives and nothing is keyed (VOX-3). The accessory-change debounce isn't modelled yet.
+    #[cfg(feature = "tx")]
+    fn vox_poll(&mut self) {
+        use crate::hal::adc;
+        let (level, tail) = self.tx.vox;
+        if level == 0 {
+            return;
+        }
+        let now = now_ms() as u32;
+        if now.wrapping_sub(self.tx.vox_at) < 20 {
+            return;
+        }
+        self.tx.vox_at = now;
+        adc::init();
+        let mic = adc::read(adc::CH_PA0);
+        let blocked = self.path.keyed().is_none() && self.live.slots[self.active as usize].squelch_open;
+        self.live.tx.voice = self.tx.vox_det.step(mic, level, tail as u32 * 100, blocked, now);
+    }
+
     async fn tick(&mut self) {
         self.mcu_temp();
+        #[cfg(feature = "tx")]
+        self.vox_poll();
         if self.hf.is_some() {
             self.hf_poll();
             return;
@@ -785,7 +814,8 @@ impl Radio {
             return;
         };
         let asleep = self.tuned[n as usize].is_none();
-        let gain = radio_chip::beep_start(&mut self.chip(n), hz as u32, asleep);
+        let tone_gain = self.beep_gain;
+        let gain = radio_chip::beep_start(&mut self.chip(n), hz as u32, tone_gain, asleep);
         speaker(true);
         Timer::after_millis(ms.min(tonegen::BEEP_MAX_MS) as u64).await;
         // Asleep again, or back to receive (the audio decision unmutes it on the next tick, if it is heard).
@@ -1015,6 +1045,7 @@ pub async fn task() {
         monitor: 0,
         scan_tx: false,
         tone_level: 1,
+        beep_gain: tonegen::beep_gain(3),
         hf: None,
         counter: None,
         same_on: false,
@@ -1044,6 +1075,9 @@ pub async fn task() {
             digits: [0; 16],
             dialled: false,
             chip: None,
+            vox: (0, 20),
+            vox_det: ferrite_core::vox::Vox::new(),
+            vox_at: 0,
             region: None,
         },
         #[cfg(feature = "tx")]
@@ -1173,6 +1207,18 @@ impl Radio {
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
             RadioCmd::ScanTx(on) => self.scan_tx = on,
             RadioCmd::ToneLevel(l) => self.tone_level = l.min(2),
+            RadioCmd::BeepVol(v) => self.beep_gain = tonegen::beep_gain(v),
+            #[cfg(feature = "tx")]
+            RadioCmd::Vox { level, tail } => {
+                self.tx.vox = (level.min(9), tail.max(1));
+                if level == 0 {
+                    self.tx.vox_det = ferrite_core::vox::Vox::new();
+                    self.live.tx.voice = false;
+                }
+            }
+            // Nothing keys in this build, so VOX has nothing to do.
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::Vox { .. } => {}
             RadioCmd::BatterySave(level) => {
                 let a = self.save.set_level(level, now_ms());
                 self.apply(a).await;
@@ -1365,7 +1411,7 @@ impl Radio {
         }
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, req.power));
         self.tx.fault = false;
-        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent };
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
         (self.tx.slot, self.tx.dialled) = (slot, false);
         let r = self.tx.seq.key(&req, &mut self.path, now, &mut st);
         if let Err(r) = r {
@@ -1500,7 +1546,7 @@ impl Radio {
     }
 
     fn refuse(&mut self, slot: u8, why: Refusal) {
-        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why), dtmf_sent: self.live.tx.dtmf_sent };
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why), dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
         log(b"tx refused ", why as u32);
     }
 }
@@ -1743,7 +1789,7 @@ impl Radio {
             return log(b"xb read-back failed", 0);
         }
         self.tx.chip = Some(n);
-        self.live.tx = TxLive { keyed: true, slot: to, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent };
+        self.live.tx = TxLive { keyed: true, slot: to, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
         log(b"xb pass to khz ", f / 100);
     }
 
