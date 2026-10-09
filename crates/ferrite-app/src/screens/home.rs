@@ -25,10 +25,13 @@ use ufmt::uwrite;
 pub struct Home;
 
 /// Watch layout: the slots always stacked A, B, C; the active one is the large card, in its own place.
+/// The three cards fill the content area with 5 px clear above the hint bar, as below the status bar (HOME-11).
 const CARD_TOP: i32 = 25;
-const CARD_BIG: i32 = 115;
-const CARD_SMALL: i32 = 62;
+const CARD_BIG: i32 = 124;
+const CARD_SMALL: i32 = 67;
 const CARD_GAP: i32 = 6;
+/// Top of the big card's chip row, from the card's top.
+pub(crate) const CHIP_Y: i32 = 82;
 
 /// Card position (y, height) of slot `s` when `active` is the large one (HOME-11).
 pub(crate) fn card(s: u8, active: u8) -> (i32, i32) {
@@ -52,28 +55,28 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
     app.drawn.meter[p] = None;
     if big {
         if app.dirty(R_FREQ + p, hash(&(f, 1u8))) {
-            lcd.fill(15, y + 25, 211, 49, SURFACE);
-            w::freq(lcd, 15, 226, y + 64, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+            lcd.fill(15, y + 28, 211, 49, SURFACE);
+            w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
         }
         if app.dirty(R_INFO + p, hash(&last)) {
-            w::field(lcd, 15, 211, y + 74, y + 92, y + 88, Align::Left, w::fit(last.as_bytes(), &UI_12, 211), &UI_12, TEXT, SURFACE);
+            w::field(lcd, 15, 211, y + 80, y + 98, y + 94, Align::Left, w::fit(last.as_bytes(), &UI_12, 211), &UI_12, TEXT, SURFACE);
         }
         if app.dirty(R_SUB + p, hash(&(&beacon, &heard, waiting))) {
-            lcd.fill(14, y + 93, 212, 20, SURFACE);
+            lcd.fill(14, y + 102, 212, 20, SURFACE);
             let c = if waiting { AMBER } else { SUB };
-            w::field(lcd, 15, 140, y + 94, y + 111, y + 108, Align::Left, beacon.as_bytes(), &UI_12, c, SURFACE);
-            w::field(lcd, 155, 71, y + 94, y + 111, y + 108, Align::Right, heard.as_bytes(), &UI_12B, TEXT, SURFACE);
+            w::field(lcd, 15, 140, y + 103, y + 120, y + 117, Align::Left, beacon.as_bytes(), &UI_12, c, SURFACE);
+            w::field(lcd, 155, 71, y + 103, y + 120, y + 117, Align::Right, heard.as_bytes(), &UI_12B, TEXT, SURFACE);
         }
     } else {
         if app.dirty(R_FREQ + p, hash(&(f, &heard, 1u8))) {
-            lcd.fill(15, y + 22, 211, 24, SURFACE);
-            w::freq(lcd, 15, 130, y + 42, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
-            w::field(lcd, 130, 96, y + 26, y + 44, y + 42, Align::Right, heard.as_bytes(), &UI_12, TEXT, SURFACE);
+            lcd.fill(15, y + 25, 211, 24, SURFACE);
+            w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+            w::field(lcd, 130, 96, y + 29, y + 47, y + 45, Align::Right, heard.as_bytes(), &UI_12, TEXT, SURFACE);
         }
         let (line, c) = if waiting { (beacon.as_bytes(), AMBER) } else { (last.as_bytes(), SUB) };
         if app.dirty(R_SUB + p, hash(&(line, c))) {
-            lcd.fill(15, y + 46, 211, 15, SURFACE);
-            w::field(lcd, 15, 211, y + 46, y + 60, y + 56, Align::Left, w::fit(line, &UI_12, 211), &UI_12, c, SURFACE);
+            lcd.fill(15, y + 51, 211, 15, SURFACE);
+            w::field(lcd, 15, 211, y + 51, y + 65, y + 61, Align::Left, w::fit(line, &UI_12, 211), &UI_12, c, SURFACE);
         }
     }
 }
@@ -255,8 +258,8 @@ impl View for Home {
                 h.push(slot::mhz3(cfg.offset.max(0) as Freq10).as_bytes());
                 head = h;
             }
-            // Header rows: y+7..y+24 on the big card, y+4..y+21 on the compact ones (their digits start at y+22).
-            let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 4, y + 17) };
+            // Header rows: y+7..y+24 on the big card, y+5..y+22 on the compact ones (their digits start at y+25).
+            let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 5, y + 18) };
             // Beside the state (left of an RX or MON tag): the clarifier (VFO-22), or on the APRS card that it takes
             // turns on chip 0 with A or B, so a packet can be missed (APRS-21).
             let mut clr = Buf::<16>::new();
@@ -298,15 +301,15 @@ impl View for Home {
             let name = app.chan_name(s, live);
             if big {
                 if app.dirty(R_FREQ + p, hash(&(f, name))) {
-                    lcd.fill(15, y + 25, 211, 49, SURFACE);
+                    lcd.fill(15, y + 28, 211, 49, SURFACE);
                     if name.is_empty() {
-                        w::freq(lcd, 15, 226, y + 64, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+                        w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
                     } else {
                         // 26 px when the whole name fits (13 characters), else 22 px (16 always fit).
                         let nb = name.as_bytes();
-                        let (font, base) = if text4_width(nb, &NAME_26) <= 211 { (&NAME_26, y + 51) } else { (&NAME_22, y + 49) };
-                        w::field(lcd, 15, 211, y + 26, y + 57, base, Align::Left, w::fit(nb, font, 211), font, TEXT, SURFACE);
-                        w::freq(lcd, 15, 226, y + 72, f, &DIG_17, &DIG_17, SUB, SUB, SURFACE);
+                        let (font, base) = if text4_width(nb, &NAME_26) <= 211 { (&NAME_26, y + 54) } else { (&NAME_22, y + 52) };
+                        w::field(lcd, 15, 211, y + 29, y + 60, base, Align::Left, w::fit(nb, font, 211), font, TEXT, SURFACE);
+                        w::freq(lcd, 15, 226, y + 75, f, &DIG_17, &DIG_17, SUB, SUB, SURFACE);
                     }
                 }
                 // Chips in fixed slots (HOME-4): mode, tone, shift (with R while reversed), power pinned right. An
@@ -321,7 +324,7 @@ impl View for Home {
                     pw.set([b"LOW".as_slice(), b"MID", b"HIGH"][cfg.power as usize % 3]);
                 }
                 if app.dirty(R_INFO + p, hash(&(m, t, o, pw))) {
-                    let cy = y + 76;
+                    let cy = y + CHIP_Y;
                     w::chip_slot(lcd, w::SLOT_MODE, cy, m.as_bytes(), TEXT, LINE, SURFACE);
                     w::chip_slot(lcd, w::SLOT_TONE, cy, t.as_bytes(), TEXT, LINE, SURFACE);
                     w::chip_slot(lcd, w::SLOT_SHIFT, cy, o.as_bytes(), TEXT, LINE, SURFACE);
@@ -332,25 +335,25 @@ impl View for Home {
                 let col = if lv.squelch_open { GREEN } else { DIM };
                 let old = app.drawn.meter[p].filter(|&(_, o)| o == lv.squelch_open).map(|(l, _)| l);
                 if app.drawn.meter[p] != Some((lit, lv.squelch_open)) {
-                    w::meter(lcd, 14, y + 100, old, lit, col, SURFACE);
+                    w::meter(lcd, 14, y + 109, old, lit, col, SURFACE);
                     app.drawn.meter[p] = Some((lit, lv.squelch_open));
                 }
                 let st = w::s_text(lv.rssi);
                 if app.dirty(R_SUB + p, hash(&st)) {
-                    w::field(lcd, 212, 21, y + 94, y + 111, y + 108, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
+                    w::field(lcd, 212, 21, y + 103, y + 120, y + 117, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
                 }
             } else {
                 // Left: the name (channel) or the frequency; right: the frequency small (channel) or the scan's hits.
                 if app.dirty(R_FREQ + p, hash(&(f, name))) {
-                    lcd.fill(15, y + 22, 211, 24, SURFACE);
+                    lcd.fill(15, y + 25, 211, 24, SURFACE);
                     app.drawn.hash[R_INFO + p] = 0; // the right-hand text shares the row
                     if name.is_empty() {
-                        w::freq(lcd, 15, 130, y + 42, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+                        w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
                     } else {
                         // The 22 px name when it fits beside the frequency, else 15 px bold.
                         let nb = name.as_bytes();
                         let font = if text4_width(nb, &NAME_22) <= 150 { &NAME_22 } else { &UI_15B };
-                        w::field(lcd, 15, 150, y + 22, y + 46, y + 41, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
+                        w::field(lcd, 15, 150, y + 25, y + 49, y + 44, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
                     }
                 }
                 let mut right = Buf::<16>::new();
@@ -361,7 +364,7 @@ impl View for Home {
                 }
                 if app.dirty(R_INFO + p, hash(&right)) {
                     let (x, c) = if name.is_empty() { (130, TEXT) } else { (170, SUB) };
-                    w::field(lcd, x, 226 - x, y + 26, y + 44, y + 42, Align::Right, right.as_bytes(), &UI_12, c, SURFACE);
+                    w::field(lcd, x, 226 - x, y + 29, y + 47, y + 45, Align::Right, right.as_bytes(), &UI_12, c, SURFACE);
                 }
                 // The value line: the scan's mode and last hit, or mode, tone and shift in fixed columns (HOME-4), so a
                 // value coming or going never moves the others.
@@ -381,11 +384,11 @@ impl View for Home {
                     shift_text(&cfg, false, &mut cols[2]); // "TX 146.520" for a split
                 }
                 if app.dirty(R_SUB + p, hash(&(lv.scanning, &cols))) {
-                    lcd.fill(15, y + 46, 211, 15, SURFACE);
+                    lcd.fill(15, y + 51, 211, 15, SURFACE);
                     let xs: [(i32, i32); 3] = if lv.scanning { [(15, 36), (51, 175), (226, 0)] } else { [(15, 36), (51, 56), (107, 119)] };
                     for (c, (x, wd)) in cols.iter().zip(xs) {
                         if wd > 0 && !c.is_empty() {
-                            w::field(lcd, x, wd, y + 46, y + 60, y + 56, Align::Left, c.as_bytes(), &UI_12, SUB, SURFACE);
+                            w::field(lcd, x, wd, y + 51, y + 65, y + 61, Align::Left, c.as_bytes(), &UI_12, SUB, SURFACE);
                         }
                     }
                 }

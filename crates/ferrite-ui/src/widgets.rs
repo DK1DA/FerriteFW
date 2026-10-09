@@ -239,7 +239,7 @@ pub fn s_text(dbm: i16) -> Buf<4> {
 }
 
 /// One line of text with keys in bold: `key` (arrows as triangles), then `label`. Returns the width.
-fn key_label(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: &str, bg: u16, draw: bool) -> i32 {
+pub fn key_label(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: &str, bg: u16, draw: bool) -> i32 {
     let (y0, y1) = (baseline - 13, baseline + 4);
     let mut px = x;
     for part in key.as_bytes().split_inclusive(|&c| (0x18..=0x1b).contains(&c)) {
@@ -315,6 +315,36 @@ pub fn hint_bar(lcd: &mut impl Panel, items: &[(&str, &str)]) {
         x = end + gap;
     }
     lcd.fill(end, HINT_Y + 2, 240 - end, 17, BG);
+}
+
+/// The manual's QR code (HELP-2) at x, y, `scale` px a module, with the 4-module quiet zone: black on white
+/// whatever the theme (night red too: it is drawn past the theme, the one exception), so any phone reads it. Dark
+/// modules go out as runs along each row. Returns the side in px. The whole code is on screen; nothing is clipped.
+pub fn manual_qr(lcd: &mut impl Panel, x: i32, y: i32, scale: i32) -> i32 {
+    use crate::qr::{MANUAL_QR, QR_SIZE};
+    let mut raw = |x: i32, y: i32, w: i32, h: i32, c: u16| {
+        lcd.window(x, y, x + w - 1, y + h - 1);
+        lcd.push(c, (w * h) as u32);
+    };
+    let side = (QR_SIZE + 8) * scale;
+    raw(x, y, side, side, 0xFFFF);
+    let (x0, y0) = (x + 4 * scale, y + 4 * scale);
+    for (r, &bits) in MANUAL_QR.iter().enumerate() {
+        let mut c = 0;
+        while c < QR_SIZE {
+            let dark = |c: i32| bits >> (QR_SIZE - 1 - c) & 1 != 0;
+            if !dark(c) {
+                c += 1;
+                continue;
+            }
+            let start = c;
+            while c < QR_SIZE && dark(c) {
+                c += 1;
+            }
+            raw(x0 + start * scale, y0 + r as i32 * scale, (c - start) * scale, scale, 0x0000);
+        }
+    }
+    side
 }
 
 /// The envelope: 12 x 9.

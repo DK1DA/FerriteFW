@@ -133,6 +133,24 @@ fn home_layouts_and_themes_match_their_goldens() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// HELP-1 to HELP-5: About's Help pages, ▶ by ▶ from About: the manual's QR code and the key card pages.
+#[test]
+fn help_pages_match_their_goldens() {
+    let about = jump_names().position(|n| n.ends_with("About")).expect("About in the jump list");
+    let mut failures = Vec::new();
+    for (i, name) in ["manual", "home-keys", "side-keys", "shortcuts", "menu-numbers"].iter().enumerate() {
+        let mut r = Radio::new();
+        r.sim.jump(about);
+        r.wait(200);
+        for _ in 0..=i {
+            r.press(ferrite_core::keys::Key::Right);
+        }
+        r.wait(1000);
+        failures.extend(check(&format!("help-{name}"), &r.sim.screen_rgb()));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// The same screen drawn twice from scratch is the same: the goldens can only change when the code does.
 #[test]
 fn shots_are_deterministic() {

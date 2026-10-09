@@ -441,7 +441,7 @@ fn screens_draw() {
     t.render(&mut fb);
     // Home: a blue-bordered big card, a green meter (receiving), a hint bar.
     assert_eq!(fb.at(6, 80), BLUE);
-    assert!(count_px(&fb, 125, 133, |c| c == GREEN) > 100, "meter lit green");
+    assert!(count_px(&fb, 134, 142, |c| c == GREEN) > 100, "meter lit green");
     assert!(count_px(&fb, 301, 320, |c| c != BG) > 50, "hint bar text");
     for (k, hold) in [(Key::Slot, 800), (Key::Exit, 100), (Key::Menu, 100), (Key::Digit(0), 100), (Key::Exit, 100)] {
         t.press(k, hold);
@@ -506,7 +506,8 @@ fn toasts_replace_the_hint_bar_for_3_s() {
     assert_ne!(fb.at(120, 300), BLUE, "hint bar back");
 }
 
-/// HOME-11: the slots stay stacked A, B, C; SLOT only moves which one is large, in its own place.
+/// HOME-11: the slots stay stacked A, B, C; SLOT only moves which one is large, in its own place. HOME-12: they
+/// fill the content area, 5 px clear above the hint bar as below the status bar.
 #[test]
 fn slots_stay_in_order() {
     use crate::screens::home::card;
@@ -517,9 +518,10 @@ fn slots_stay_in_order() {
         assert!(ya < yb && yb < yc, "A above B above C");
         assert_eq!(ya, 25);
         assert!(yc + hc <= 296, "fits above the hint bar");
-        assert_eq!(card(active, active).1, 115);
+        assert_eq!(card(active, active).1, 124);
     }
-    assert_eq!(card(1, 1), (93, 115));
+    assert_eq!(card(1, 1), (98, 124));
+    assert_eq!(card(2, 2).0 + card(2, 2).1, 295, "5 px clear above the hint bar, as below the status bar");
 }
 
 /// HOME-11: after SLOT moves the large card, nothing of the old large card is left in the new gaps.
@@ -529,7 +531,7 @@ fn slot_change_leaves_no_trace() {
     let mut fb = FrameBuffer::new();
     t.render(&mut fb);
     t.render(&mut fb);
-    // A is large (25..140). After SLOT, B is large: A shrinks to 25..87 and the gap 87..93 must be background.
+    // A is large (25..149). After SLOT, B is large: A shrinks to 25..92 and the gap 92..98 must be background.
     t.tap(Key::Slot);
     t.render(&mut fb);
     let (ya, ha) = crate::screens::home::card(0, 1);
@@ -682,6 +684,7 @@ mod aprs;
 mod d64;
 /// Decision 72: the nicFW gaps (HF channels, 1000-1300 MHz, the clarifier, grid entry).
 mod nicfw;
+mod help;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]
@@ -877,7 +880,7 @@ fn chip_slots_never_move() {
     let mut fb = FrameBuffer::new();
     t.render(&mut fb);
     let (y, _) = crate::screens::home::card(0, 0);
-    let cy = y + 76;
+    let cy = y + crate::screens::home::CHIP_Y;
     let grab = |fb: &FrameBuffer, (x, w): (i32, i32)| (x..x + w).flat_map(|x| (cy..cy + 17).map(move |y| (x, y))).map(|(x, y)| fb.at(x, y)).collect::<Vec<_>>();
     let (mode, shift, power) = (grab(&fb, SLOT_MODE), grab(&fb, SLOT_SHIFT), grab(&fb, SLOT_POWER));
     assert!(grab(&fb, SLOT_TONE).iter().any(|&c| c != SURFACE), "a tone shows");

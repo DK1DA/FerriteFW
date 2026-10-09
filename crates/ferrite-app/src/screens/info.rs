@@ -8,6 +8,7 @@
 //! one line.
 
 use super::groups::cal_text;
+use super::help::{self, Help};
 use super::shared::*;
 use super::table::{slow_table, Ctx, Table, Val};
 use super::{Cx, Hints, View};
@@ -28,6 +29,8 @@ use ufmt::uwrite;
 pub enum Page {
     About,
     Checks,
+    /// HELP-1: the Help pages between About and the self-test.
+    Help(Help),
     Calibration,
     AdvSquelch,
     SsbPatch,
@@ -207,6 +210,18 @@ slow_table! {
 }
 
 const NONE: [InfoRow; 0] = [];
+
+/// HELP-1: About's pages in ◀▶ order; ▶ goes on, ◀ back, round.
+const CYCLE: [Page; 7] = [
+    Page::About,
+    Page::Help(Help::Manual),
+    Page::Help(Help::HomeKeys),
+    Page::Help(Help::SideKeys),
+    Page::Help(Help::Digits),
+    Page::Help(Help::MenuNos),
+    Page::Checks,
+];
+
 const BACK_ONLY: [(&str, &str); 1] = [("BACK", "Back")];
 
 fn def(p: Page) -> PageDef {
@@ -215,7 +230,7 @@ fn def(p: Page) -> PageDef {
             title: "About",
             rows: &ABOUT,
             note: "Updating: hold the bottom two side buttons while switching on for the stock bootloader, then use the web flasher.",
-            hints: &[(ARROWS_LR, "Self-test"), ("BACK", "Back")],
+            hints: &[(ARROWS_LR, "Help"), ("BACK", "Back")],
         },
         Page::Checks => PageDef {
             title: "Self-test",
@@ -223,6 +238,17 @@ fn def(p: Page) -> PageDef {
             note: "A failed check never stops receive. Transmit needs the MCU and calibration checks to pass.",
             hints: &[(ARROWS_LR, "About"), ("BACK", "Back")],
         },
+        // The hint bar names the page ▶ goes to.
+        Page::Help(h) => {
+            let (title, hints): (_, &'static [(&str, &str)]) = match h {
+                Help::Manual => ("Manual", &[(ARROWS_LR, "Keys"), ("BACK", "Back")]),
+                Help::HomeKeys => ("Home keys", &[(ARROWS_LR, "Side keys"), ("BACK", "Back")]),
+                Help::SideKeys => ("Side keys", &[(ARROWS_LR, "Shortcuts"), ("BACK", "Back")]),
+                Help::Digits => ("Shortcuts", &[(ARROWS_LR, "Menu numbers"), ("BACK", "Back")]),
+                Help::MenuNos => ("Menu numbers", &[(ARROWS_LR, "Self-test"), ("BACK", "Back")]),
+            };
+            PageDef { title, rows: &NONE, note: "", hints }
+        }
         Page::Calibration => PageDef {
             title: "Calibrate",
             rows: &CALIBRATION,
@@ -286,7 +312,7 @@ fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'static str, &'st
 }
 
 impl View for Info {
-    /// KEY-19: ◀▶ switch About and the self-test.
+    /// KEY-19: ◀▶ go through About, Help and the self-test (HELP-1).
     fn own_arrows(self) -> bool {
         true
     }
@@ -304,8 +330,11 @@ impl View for Info {
             return;
         }
         match (self.page, e.key) {
-            (Page::About, Key::Left | Key::Right) => app.screen = Screen::Info(Info { page: Page::Checks }),
-            (Page::Checks, Key::Left | Key::Right) => app.screen = Screen::Info(Info { page: Page::About }),
+            (p, Key::Left | Key::Right) if CYCLE.contains(&p) => {
+                let i = CYCLE.iter().position(|&c| c == p).unwrap_or(0) as i32;
+                let d = if e.key == Key::Right { 1 } else { -1 };
+                app.screen = Screen::Info(Info { page: CYCLE[(i + d).rem_euclid(CYCLE.len() as i32) as usize] });
+            }
             (Page::SsbConfirm, Key::Menu) => {
                 app.back();
                 app.show_toast(b"SSB patch", b"in use", false);
@@ -324,6 +353,9 @@ impl View for Info {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let d = def(self.page);
         app.new_page(lcd, hash(&self.page));
+        if let Page::Help(h) = self.page {
+            return help::render(app, lcd, h);
+        }
         let mut b = Buf::<40>::new();
         if let Some((head, text, c)) = message(self.page, cx.dev, &mut b) {
             app.message(lcd, head.as_bytes(), b.as_bytes(), text.as_bytes(), c);

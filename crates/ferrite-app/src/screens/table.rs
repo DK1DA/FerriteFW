@@ -56,10 +56,10 @@ impl<C> Table<C> {
 
 /// A `static` in the slow flash section on the radio (see `slow!`).
 macro_rules! slow_table {
-    ($(#[$m:meta])* $name:ident: $t:ty = $e:expr;) => {
+    ($(#[$m:meta])* $v:vis $name:ident: $t:ty = $e:expr;) => {
         $(#[$m])*
         #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-        static $name: $t = $e;
+        $v static $name: $t = $e;
     };
 }
 pub(crate) use slow_table;

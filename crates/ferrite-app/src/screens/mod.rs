@@ -47,6 +47,7 @@ pub mod fm;
 pub(crate) mod forms;
 pub mod gps;
 pub mod groups;
+pub mod help;
 pub mod hf;
 pub mod home;
 pub mod info;
@@ -403,6 +404,11 @@ pub(crate) fn short_title(name: &str) -> &str {
         "Calibrate" => "Trims",
         "SSB patch" => "SSB",
         "Add device" => "Device",
+        "Self-test" => "Checks",
+        "Home keys" => "Keys", // HELP-3
+        "Side keys" => "Side+PTT",
+        "Shortcuts" => "Hold 0-9", // HELP-4
+        "Menu numbers" => "Menu nos", // HELP-5
         n => n,
     }
 }

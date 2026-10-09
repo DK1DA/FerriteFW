@@ -18,6 +18,7 @@ pub mod font4;
 pub mod gfx;
 pub mod home;
 pub mod panel;
+pub mod qr;
 pub mod theme;
 pub mod text;
 pub mod widgets;
