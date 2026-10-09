@@ -254,6 +254,19 @@ fn beep_matches_stock() {
     assert_eq!((r.regs[0x70], r.regs[0x48], r.regs[0x47] & 0x0F00), (0, 0xB2BF, 0));
 }
 
+/// A beep at another tone gain only changes REG_70's gain field; the rest is stock's beep.
+#[test]
+fn beep_gain_is_the_tone_field() {
+    let mut r = Regs::new();
+    let mut bk = Bk4829::new(&mut r);
+    bk.beep_on_gain(1000, 0x2D);
+    assert_eq!(r.regs[0x70], 0x8000 | 0x2D << 8);
+    assert_eq!(r.regs[0x30], 0x0302, "still the beep's REG_30: nothing radiates");
+    let mut bk = Bk4829::new(&mut r);
+    bk.beep_on_gain(1000, 0xFF);
+    assert_eq!(r.regs[0x70] >> 8, 0x80 | 0x7F, "the gain is 7 bits");
+}
+
 /// Stock's receive-path modes 7 (FM) and 6 (AM), V0.27 0x0801DED8.
 #[test]
 fn demod_matches_stock() {

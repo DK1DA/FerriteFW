@@ -550,10 +550,16 @@ impl<B: Bus> Bk4829<B> {
     /// A local beep on the speaker, as stock (0x0801EB8C with 0): tone 1 at `hz` with [`BEEP_GAIN`], REG_30 to
     /// [`POWER_BEEP`] (receiving stops meanwhile), AF route 3. Returns REG_48 for [`Bk4829::beep_off`].
     pub fn beep_on(&mut self, hz: u32) -> u16 {
+        self.beep_on_gain(hz, BEEP_GAIN)
+    }
+
+    /// [`Bk4829::beep_on`] with tone 1's gain given (REG_70 bits 8-14, 0-0x7F; stock's beep is [`BEEP_GAIN`]),
+    /// for a beep volume setting.
+    pub fn beep_on_gain(&mut self, hz: u32, tone_gain: u8) -> u16 {
         let gain = self.read(reg::AF_GAIN);
         self.write(reg::TONE1_FREQ, tone_word(hz));
         let t = self.read(reg::TONE);
-        self.write(reg::TONE, (t & 0x00FF) | 1 << 15 | (BEEP_GAIN as u16) << 8);
+        self.write(reg::TONE, (t & 0x00FF) | 1 << 15 | ((tone_gain & 0x7F) as u16) << 8);
         self.write(reg::POWER, POWER_BEEP);
         self.write(reg::AF_OUT, AF_OUT_BEEP);
         self.write(reg::AF_GAIN, AF_GAIN_BEEP);
