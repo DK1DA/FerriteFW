@@ -18,6 +18,7 @@ bk4829.workspace = true
 # The host tests cover the transmit steps too. Dev-dependencies never reach the firmware's build (`cargo fw`
 # builds `-p ferrite` for the radio, which takes `tx` only from its own feature).
 ferrite-radio = { path = ".", features = ["tx"] }
+ferrite-store.workspace = true
 
 [lints]
 workspace = true

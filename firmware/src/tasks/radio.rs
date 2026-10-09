@@ -234,7 +234,7 @@ struct Tx {
     /// after it (TONE-11), the APRS power (0 5 5 4) instead of the slot's.
     data: Option<u8>,
     /// TX-42: every PTT input has read released since boot.
-    ptt_ok: bool,
+    ptt: ferrite_radio::ptt::PttGuard,
     /// The calibrated PA drive for the key-up being run (`Act::PaRamp`).
     pa: u8,
     /// The read-back failed during a key-up (TX-7): the plan stops and the safe state follows.
@@ -1059,7 +1059,7 @@ pub async fn task() {
             power: [0; 4],
             plan: None,
             data: None,
-            ptt_ok: false,
+            ptt: ferrite_radio::ptt::PttGuard::default(),
             pa: 0,
             fault: false,
             adc: false,
@@ -1326,11 +1326,12 @@ impl Radio {
     /// since boot.
     fn ptt_seen_released(&mut self) -> bool {
         use crate::board::{KEY_PTT, KEY_SIDE1, KEY_SIDE2};
-        if !self.tx.ptt_ok && KEY_PTT.read() && KEY_SIDE1.read() && KEY_SIDE2.read() {
-            self.tx.ptt_ok = true;
+        let was = self.tx.ptt.seen(false);
+        let ok = self.tx.ptt.seen(KEY_PTT.read() && KEY_SIDE1.read() && KEY_SIDE2.read()); // `ferrite_radio::ptt`
+        if ok && !was {
             log(b"ptt released since boot", 0);
         }
-        self.tx.ptt_ok
+        ok
     }
 
     /// The battery for transmit (PWR-20): the PA1 reading against the calibration's gauge.

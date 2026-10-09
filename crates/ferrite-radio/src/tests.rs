@@ -487,3 +487,54 @@ fn bluetooth_pb9() {
     assert_eq!(b.step(false, true).power, Some(false));
     assert!(!b.step(false, false).reassert, "never while off");
 }
+
+/// SAFE-1, CAL-1, CAL-2, INST-7, INST-8, SAFE-2, UPD-7: the SPI driver's guard refuses any program or erase that
+/// touches calibration (0x00F000-0x00FFFF) or the update area (0x300000 up), checks the erase unit (a whole 4 KB
+/// sector, aligned) rather than the range asked for, and keeps programs inside one page; everything between the
+/// layout header and the waypoints is writable; the bring-up build writes nowhere.
+#[test]
+fn spi_flash_guard() {
+    use crate::flash::{erase_ok, program_ok, PAGE, SECTOR};
+    use ferrite_core::layout::{CALIBRATION, UPDATE_AREA, WRITABLE};
+    assert_eq!((PAGE as usize, SECTOR as usize), (ferrite_store::PAGE as usize, ferrite_store::SECTOR as usize));
+    let ok = &WRITABLE[..];
+    for a in [CALIBRATION.start, CALIBRATION.start + 0x800, UPDATE_AREA.start, UPDATE_AREA.end - SECTOR] {
+        assert!(!program_ok(ok, a, 16), "program at 0x{a:06X}");
+        assert!(!erase_ok(ok, a & !(SECTOR - 1)), "erase at 0x{a:06X}");
+    }
+    assert!(!erase_ok(ok, CALIBRATION.start - SECTOR), "the sector below calibration isn't Ferrite's either");
+    assert!(!erase_ok(ok, 0x02_D800), "unaligned: refused, not rounded");
+    assert!(!program_ok(ok, 0x02_D0F8, 16), "across a page boundary");
+    assert!(!program_ok(ok, 0x02_D000, 0) && !program_ok(ok, 0x02_D000, PAGE + 1));
+    assert!(!program_ok(ok, u32::MAX - 4, 8), "no wrap-around");
+    for r in ok {
+        assert!(erase_ok(ok, r.start) && erase_ok(ok, r.end - SECTOR) && program_ok(ok, r.start, PAGE));
+        assert!(!erase_ok(ok, r.end) || ok.iter().any(|o| o.start == r.end));
+    }
+    assert!(!program_ok(&[], 0x02_D000, 16) && !erase_ok(&[], 0x02_D000), "bring-up: nowhere");
+}
+
+/// SAFE-14, BOOT-3, KEY-8, TX-19, TX-42 (the released-once part): a PTT held at power-on keeps transmit shut until
+/// every PTT input has read released once; after that it stays open for the power-on.
+#[test]
+fn ptt_held_at_power_on() {
+    let mut g = crate::ptt::PttGuard::default();
+    assert!(!g.seen(false) && !g.seen(false), "held since boot");
+    assert!(g.seen(true), "released once");
+    assert!(g.seen(false), "pressed again later: that's a real PTT");
+}
+
+/// PWR-5: Battery Save's sleep and wake on a chip, as stock: sleep writes REG_30 = 0 then REG_37 = 0x1D00; wake
+/// REG_37 = 0x9D1F, then the receive sequence (`chip::tune` wakes first and turns receive on last).
+#[test]
+fn sleep_and_wake_as_stock() {
+    let mut b = bk();
+    b.sleep();
+    let bus = b.release();
+    assert_eq!(bus.writes, [(reg::POWER, 0), (reg::LDO, 0x1D00)]);
+    let mut b = bk();
+    chip::tune(&mut b, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone: 0, rx_tail: false });
+    let bus = b.release();
+    assert_eq!(bus.writes.first(), Some(&(reg::LDO, 0x9D1F)));
+    assert_eq!(bus.writes.last(), Some(&(reg::POWER, 0xBFF1)));
+}

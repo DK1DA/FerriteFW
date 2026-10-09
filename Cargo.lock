@@ -425,6 +425,7 @@ dependencies = [
  "bk4829",
  "ferrite-core",
  "ferrite-radio",
+ "ferrite-store",
 ]
 
 [[package]]

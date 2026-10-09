@@ -21,7 +21,7 @@ use embassy_time::Timer;
 use ferrite_app::radio_data::RadioData;
 #[cfg(not(feature = "bringup"))]
 use ferrite_core::layout::WRITABLE;
-use ferrite_store::{FlashStore, Nor, NorError, PAGE, SECTOR};
+use ferrite_store::{FlashStore, Nor, NorError};
 use uradio_bus::{Delay, Spi};
 use w25q::W25q;
 
@@ -71,10 +71,6 @@ impl Chip {
         s
     }
 
-    fn writable(addr: u32, len: u32) -> bool {
-        WRITE_OK.iter().any(|r| r.start <= addr && addr + len <= r.end)
-    }
-
     fn start(&mut self, op: u8, addr: u32, data: &[u8]) -> ferrite_store::Result {
         // The bring-up build never programs or erases, whatever asks (the store isn't even mounted there).
         if cfg!(feature = "bringup") {
@@ -120,15 +116,15 @@ impl Nor for Chip {
     }
 
     fn start_program(&mut self, addr: u32, data: &[u8]) -> ferrite_store::Result {
-        let len = data.len() as u32;
-        if len == 0 || len > PAGE || addr / PAGE != (addr + len - 1) / PAGE || !Self::writable(addr, len) {
+        // SAFE-1, SAFE-2: the guard (`ferrite_radio::flash`, host-tested).
+        if !ferrite_radio::flash::program_ok(WRITE_OK, addr, data.len() as u32) {
             return Err(NorError);
         }
         self.start(PAGE_PROGRAM, addr, data)
     }
 
     fn start_erase(&mut self, addr: u32) -> ferrite_store::Result {
-        if !addr.is_multiple_of(SECTOR) || !Self::writable(addr, SECTOR) {
+        if !ferrite_radio::flash::erase_ok(WRITE_OK, addr) {
             return Err(NorError);
         }
         self.start(SECTOR_ERASE, addr, &[])
