@@ -289,7 +289,7 @@ fn bk() -> Bk4829<RecBus> {
     Bk4829::new(RecBus::new())
 }
 
-/// VFO-20, TX-20 (AM is receive only, AM keeps the wide filter): tuning a slot in AM writes stock's mode 6
+/// VFO-20 (AM keeps the wide filter): tuning a slot in AM writes stock's mode 6
 /// (REG_31 bit 0, REG_42 0x6F5C, REG_2A 0x7434, REG_2B 0x0500), FM stock's mode 7 (0x6B5A, 0x7400, 0x0000), the
 /// wide filter for AM, the audio muted before receive comes on last.
 #[test]
@@ -375,7 +375,7 @@ fn counter_uses_stocks_frequency_scan() {
     assert_eq!(b.freq_scan_result(), Some(((1 << 16) | 0x6550) * 10));
 }
 
-/// DEC-19, WX-1: SAME on the chip's own modem: REG_58 0x03C4 (receive mode 000, bandwidth 010, gain 3), the
+/// DEC-19: SAME on the chip's own modem: REG_58 0x03C4 (receive mode 000, bandwidth 010, gain 3), the
 /// 520.83 baud rate word, the sync bytes `ZCZC`, set up on a chip tuned to the weather channels (162.400-162.550).
 #[test]
 fn same_modem_setup() {
@@ -389,7 +389,7 @@ fn same_modem_setup() {
     assert!(chip::WX.contains(&(mhz(162) + 55_000)) && !chip::WX.contains(&(mhz(162) + 56_000)));
 }
 
-/// TX-23 (the chip keyed with its read-back before the PA), TX-12's levels: key with the microphone (REG_30
+/// TX-23 (the chip keyed with its read-back before the PA): key with the microphone (REG_30
 /// 0xC1FE), read REG_30 back, then stock's REG_36 (0x7F High, 0x57 otherwise); a wrong read-back writes no REG_36.
 #[test]
 fn key_reads_back_before_the_pa() {
