@@ -123,8 +123,8 @@ mod tests {
         b
     }
 
-    /// TX-13: calibration is checked, never replaced: an erased sector or a hole in a used row locks transmit
-    /// instead of falling back to built-in curves.
+    /// TX-13, CAL-4, CAL-5: calibration is checked, never replaced: an erased sector or a hole in a used row locks
+    /// transmit instead of falling back to built-in curves.
     #[test]
     fn blank_and_holes_refuse() {
         let mut b = sector(GAUGE_DEFAULT);
@@ -139,6 +139,8 @@ mod tests {
         assert!(TxCal::parse(&b).is_some(), "UHF entries past 520 MHz aren't reached on amateur bands");
     }
 
+    /// TX-8, CAL-8, CAL-9, TX-11, CAL-10: the PA drive comes only from the band's calibration curve at the chosen
+    /// level, by stock's lookup (High is stock's row 0, Low its row 2), and never reads past its row's 16 entries.
     #[test]
     fn lookup_as_stock() {
         let c = TxCal::parse(&sector(GAUGE_DEFAULT)).unwrap();
@@ -153,6 +155,8 @@ mod tests {
         assert_eq!(c.dac(mhz(290), 2), 100 + R200 as u8 * 4 + 15, "280-300: the row's last entry, not the next row");
     }
 
+    /// PWR-20: the battery gauge is stock's: the PA1 reading against the seven thresholds at 0xF200 (stock's
+    /// defaults when blank), transmit refused below the cut-off and above about 9 V.
     #[test]
     fn gauge() {
         let g = Gauge::parse(&sector([0xFF; 7]));

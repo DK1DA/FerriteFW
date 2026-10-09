@@ -199,6 +199,8 @@ mod tests {
         Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0 }
     }
 
+    /// WATCH-2, WATCH-17: slots sharing a chip take turns on it, 150 ms on the active slot and 70 ms on each
+    /// watched one; a slot alone on its chip keeps it.
     #[test]
     fn turns_on_a_shared_chip() {
         let mut w = Watch::new();
@@ -248,6 +250,7 @@ mod tests {
         assert!(!w.tick(32_000, &c, [false; 2], false).paused, "a key resumes");
     }
 
+    /// WATCH-11: a watch set needing different relay states cancels watch until the set agrees again.
     #[test]
     fn relay_mismatch_cancels() {
         let mut w = Watch::new();

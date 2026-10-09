@@ -359,6 +359,8 @@ mod tests {
         assert_eq!(sides_ok([mhz(146), mhz(446)], true), Err(Stop::Relay));
     }
 
+    /// XB-4, XB-7: a pass starts after 30 ms of open squelch, the mic comes back at the 100 ms drop while still
+    /// keyed, and it ends after the hang time.
     #[test]
     fn a_pass_with_hang_and_id() {
         let cfg = XbCfg { hang_ds: 10, flags: XbCfg::TONE_GATE | XbCfg::ID, ..XbCfg::DEFAULT };
@@ -417,6 +419,7 @@ mod tests {
         assert!(unkeys.iter().all(|(_, c)| *c == Cmd::Unkey { id: false }), "{unkeys:?}");
     }
 
+    /// XB-9: each pass has its own timeout; a timed-out side can't pass again until its squelch closes.
     #[test]
     fn timeout_locks_until_it_drops() {
         let cfg = XbCfg { timeout_10s: 3, ..XbCfg::DEFAULT };

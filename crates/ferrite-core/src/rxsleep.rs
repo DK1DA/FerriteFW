@@ -129,6 +129,8 @@ mod tests {
         awake
     }
 
+    /// PWR-1, PWR-3: stock's timings: fully on for 10 s after activity, then the recent window's cycle, then the
+    /// level's own cycle.
     #[test]
     fn stock_cycle_after_the_recent_window() {
         let mut s = RxSleep::new(Level::L3, 0);
@@ -144,6 +146,7 @@ mod tests {
         assert!((17_000..=19_000).contains(&a), "{a}");
     }
 
+    /// PWR-3, PWR-4: any key or squelch change wakes the receiver and holds it on; it never sleeps while busy.
     #[test]
     fn activity_and_busy_wake_it() {
         let mut s = RxSleep::new(Level::L1, 0);
@@ -162,6 +165,7 @@ mod tests {
         assert_eq!(run(&mut s, 0, HOLD_MS + RECENT_MS + 60_000, false), HOLD_MS + RECENT_MS + 60_000);
     }
 
+    /// PWR-1: Battery Save off keeps the receivers on.
     #[test]
     fn turning_it_off_wakes_the_receiver() {
         let mut s = RxSleep::new(Level::L2, 0);

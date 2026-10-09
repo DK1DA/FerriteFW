@@ -177,6 +177,7 @@ mod tests {
         assert_eq!(nearest(mhz(420) + 50_000, Region::Canada).name, "70 cm");
     }
 
+    /// TX-4, TX-41: below 64 MHz only 12 m and 10 m transmit, Extend TX or not; CB and 15 m never; 6 m locked.
     #[test]
     fn extend_stops_at_64_mhz() {
         assert_eq!(check(mhz(27) + 18_500, Region::Us, true), Err(Refusal::OutOfBand), "CB, even with Extend TX");
@@ -186,6 +187,7 @@ mod tests {
         assert_eq!(check(mhz(162) + 55_000, Region::Us, true), Ok(()), "above 64 MHz Extend still widens");
     }
 
+    /// CAL-15: no transmit on 1.25 m until its power ceiling is measured; 243.0 MHz keeps the 0.25 W cap.
     #[test]
     fn unmeasured_125m_is_locked() {
         assert!(locked_125m(mhz(223) + 50_000));
