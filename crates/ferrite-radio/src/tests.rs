@@ -102,7 +102,7 @@ fn unkey_order_on_the_pins() {
     assert!(hw.time(tx_off) - hw.time(zero) >= UNKEY_WAIT_MS as u32, "the unkey wait before the paths change");
 }
 
-/// TX-23 (the read-back before the PA ramp), SAFE-11: a key-up whose read-back fails stops the plan there: no
+/// TX-7, TX-23 (the read-back before the PA ramp), SAFE-11: a key-up whose read-back fails stops the plan there: no
 /// PA ramp, the fault reported for the caller's safe state.
 #[test]
 fn failed_read_back_never_ramps() {
@@ -389,25 +389,56 @@ fn same_modem_setup() {
     assert!(chip::WX.contains(&(mhz(162) + 55_000)) && !chip::WX.contains(&(mhz(162) + 56_000)));
 }
 
-/// TX-23 (the chip keyed with its read-back before the PA): key with the microphone (REG_30
-/// 0xC1FE), read REG_30 back, then stock's REG_36 (0x7F High, 0x57 otherwise); a wrong read-back writes no REG_36.
+/// TX-7, TX-23 (the chip keyed with its read-back before the PA): key with the microphone (REG_30 0xC1FE), read
+/// back REG_30, the frequency (REG_38/39) and REG_3B, then stock's REG_36 (0x7F High, 0x57 otherwise) and its
+/// read-back; all match: keyed.
 #[test]
 fn key_reads_back_before_the_pa() {
     for (high, r36) in [(true, 0x7F), (false, 0x57)] {
-        let mut b = bk();
-        assert!(chip::key_mic(&mut b, high));
+        let (mut b, want) = keyed_ready();
+        assert_eq!(chip::key_mic(&mut b, high, &want), Ok(()));
         let bus = b.release();
         assert_eq!(bus.last(reg::POWER), Some(chip::REG30_TX_MIC));
         assert_eq!(bus.last(reg::PA), Some(r36));
         assert!(bus.first(reg::PA).unwrap() > bus.writes.iter().rposition(|w| w.0 == reg::POWER).unwrap());
     }
-    let mut b = Bk4829::new({
-        let mut r = RecBus::new();
-        r.stuck = Some((reg::POWER, 0x0200));
-        r
-    });
-    assert!(!chip::key_mic(&mut b, true));
+}
+
+/// A chip tuned to 146.520 MHz with a REG_3B of its own, and what TX-7 expects of it.
+fn keyed_ready() -> (Bk4829<RecBus>, chip::TxExpect) {
+    let f = mhz(146) + 52_000;
+    let mut b = bk();
+    b.set_freq(f * 10);
+    b.write(0x3B, 0x1234);
+    (b, chip::TxExpect { freq: f, reg3b: 0x1234 })
+}
+
+/// TX-7: any one register wrong refuses the key-up, naming it, before REG_36's level is left standing: REG_30 not
+/// keyed, the synthesized frequency not the one written, REG_3B changed since start-up, REG_36 not taking. The
+/// caller then goes to the safe state with the PA at zero (`failed_read_back_never_ramps`).
+#[test]
+fn any_wrong_read_back_refuses() {
+    use chip::ReadBack;
+    let stuck = |r: u8, v: u16| {
+        let (b, want) = keyed_ready();
+        let mut bus = b.release();
+        bus.stuck = Some((r, v));
+        (Bk4829::new(bus), want)
+    };
+    let (mut b, want) = stuck(reg::POWER, 0x0200);
+    assert_eq!(chip::key_mic(&mut b, true, &want), Err(ReadBack::Power));
     assert!(b.release().last(reg::PA).is_none(), "no REG_36 after a failed read-back");
+    let (mut b, want) = stuck(reg::FREQ_LO, 0x0001);
+    assert_eq!(chip::key_mic(&mut b, true, &want), Err(ReadBack::Freq));
+    assert!(b.release().last(reg::PA).is_none());
+    let (mut b, mut want) = keyed_ready();
+    want.freq += 1; // the word in the chip isn't the one asked for
+    assert_eq!(chip::key_mic(&mut b, true, &want), Err(ReadBack::Freq));
+    let (mut b, want) = stuck(0x3B, 0x1235);
+    assert_eq!(chip::key_mic(&mut b, true, &want), Err(ReadBack::Xtal));
+    assert!(b.release().last(reg::PA).is_none());
+    let (mut b, want) = stuck(reg::PA, 0x0000);
+    assert_eq!(chip::key_mic(&mut b, false, &want), Err(ReadBack::Bias));
 }
 
 /// TONE-13, DTMF-7, DTMF-8, DTMF-11: while keyed a tone burst or a DTMF symbol (A-D too) switches REG_30 to tone

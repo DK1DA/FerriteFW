@@ -99,17 +99,51 @@ pub fn si_input(am: bool) -> [bool; 2] {
 #[cfg(feature = "tx")]
 pub const REG30_TX_MIC: u16 = 0xC1FE;
 
-/// `Act::ChipTx` (TX-7): the chip already holds the TX frequency and tone; key it with the microphone, read REG_30
-/// back, and only then stock's REG_36 for the level ({0x7F, 0x57, 0x57}[level], `analysis/calibration.md`).
-/// False when the read-back differs: REG_36 is left alone and the caller goes to the safe state.
+/// What the keyed chip must hold before the PA is driven (TX-7): the TX frequency word Ferrite wrote (10 Hz units,
+/// REG_38/39) and REG_3B (the crystal register Ferrite never writes: the value read after the chip's start-up).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TxExpect {
+    pub freq: Freq10,
+    pub reg3b: u16,
+}
+
+/// The register a TX-7 read-back found wrong.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadBack {
+    /// REG_38/39: the synthesized frequency.
+    Freq,
+    /// REG_30: not keyed with the microphone.
+    Power,
+    /// REG_3B: the crystal register changed.
+    Xtal,
+    /// REG_36: the PA bias didn't take.
+    Bias,
+}
+
+/// `Act::ChipTx` (TX-7, TX-23): the chip already holds the TX frequency and tone; key it with the microphone, then
+/// read back REG_30, the frequency (REG_38/39) and REG_3B, write stock's REG_36 for the level ({0x7F, 0x57,
+/// 0x57}[level], `analysis/calibration.md`) and read it back too, all before the PA is driven. Stock reads nothing
+/// back; this is Ferrite's (decision 97). Err names the first register that differs: the caller goes to the safe
+/// state with the PA at zero.
 #[cfg(feature = "tx")]
-pub fn key_mic<B: Bus>(bk: &mut Bk4829<B>, high: bool) -> bool {
+pub fn key_mic<B: Bus>(bk: &mut Bk4829<B>, high: bool, want: &TxExpect) -> Result<(), ReadBack> {
     bk.tx_on(bk4829::tx::Source::Mic);
     if bk.read(0x30) != REG30_TX_MIC {
-        return false;
+        return Err(ReadBack::Power);
     }
-    bk.write(0x36, if high { 0x7F } else { 0x57 });
-    true
+    let word = bk.read(0x38) as u32 | (bk.read(0x39) as u32) << 16;
+    if word != want.freq {
+        return Err(ReadBack::Freq);
+    }
+    if bk.read(0x3B) != want.reg3b {
+        return Err(ReadBack::Xtal);
+    }
+    let bias = if high { 0x7F } else { 0x57 };
+    bk.write(0x36, bias);
+    if bk.read(0x36) != bias {
+        return Err(ReadBack::Bias);
+    }
+    Ok(())
 }
 
 /// While keyed (TONE-13, DTMF-7, DTMF-11): the tone burst or a DTMF symbol on the keyed chip, as stock sends any

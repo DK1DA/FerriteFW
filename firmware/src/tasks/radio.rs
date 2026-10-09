@@ -239,6 +239,8 @@ struct Tx {
     pa: u8,
     /// The read-back failed during a key-up (TX-7): the plan stops and the safe state follows.
     fault: bool,
+    /// Each chip's REG_3B as read after its start-up (TX-7: Ferrite never writes it, so a key-up expects it unchanged).
+    reg3b: [u16; 2],
     adc: bool,
     /// Each slot's end tone (TONE-10: an index into `tonegen::END_TONES`, 0 off) and transmit tail elimination
     /// (TONE-5), the channel's over the radio's as the UI resolved them; the slot keyed now (index 3: HF mode).
@@ -1062,6 +1064,7 @@ pub async fn task() {
             ptt: ferrite_radio::ptt::PttGuard::default(),
             pa: 0,
             fault: false,
+            reg3b: [0; 2],
             adc: false,
             end: [0; 4],
             tail: [false; 4],
@@ -1093,6 +1096,10 @@ pub async fn task() {
         if found {
             r.chips |= 1 << n;
             r.chip(n).init();
+            #[cfg(feature = "tx")]
+            {
+                r.tx.reg3b[n as usize] = r.chip(n).read(0x3B); // TX-7's reference
+            }
             r.chip(n).sleep(); // until the engines give it a slot
         }
         check(Source::Radio, if n == 0 { CHECK_BK0 } else { CHECK_BK1 }, found);
@@ -1344,14 +1351,26 @@ impl Radio {
         self.tx.gauge.tx_ok(adc::read(adc::CH_PA1))
     }
 
-    /// `Act::ChipTx`: the chip already holds the TX frequency and tone; key it with the microphone, read REG_30
-    /// back (TX-7), and stock's REG_36 for the level ({0x7F, 0x57, 0x57}[level], `analysis/calibration.md`).
+    /// `Act::ChipTx`: the chip already holds the TX frequency and tone; key it with the microphone and read back
+    /// REG_30, the frequency, REG_3B and REG_36 before the PA (TX-7, decision 97), with stock's REG_36 for the level
+    /// ({0x7F, 0x57, 0x57}[level], `analysis/calibration.md`).
     fn key_chip(&mut self, n: u8) -> bool {
         if !self.has(n) {
             return false;
         }
+        // The frequency both key-up paths wrote just before the plan ran (`transmit`, `xb_key`).
+        let Some((_, freq)) = self.tuned[n as usize] else {
+            return false;
+        };
         let high = self.tx.data.unwrap_or(self.tx.power[self.live.tx.slot as usize % 4]) == 2;
-        radio_chip::key_mic(&mut self.chip(n), high)
+        let want = radio_chip::TxExpect { freq, reg3b: self.tx.reg3b[n as usize] };
+        match radio_chip::key_mic(&mut self.chip(n), high, &want) {
+            Ok(()) => true,
+            Err(r) => {
+                log(b"tx read-back wrong, register ", r as u32);
+                false
+            }
+        }
     }
 
     /// Key up or unkey a slot (3 = HF mode's frequency); `data`: a data key-up at that power level (APRS).
