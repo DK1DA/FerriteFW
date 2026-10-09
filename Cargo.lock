@@ -384,6 +384,7 @@ dependencies = [
  "embassy-time-queue-utils",
  "ferrite-app",
  "ferrite-core",
+ "ferrite-radio",
  "ferrite-store",
  "ferrite-ui",
  "keypad",
@@ -415,6 +416,15 @@ dependencies = [
  "uafsk",
  "udsc",
  "upocsag",
+]
+
+[[package]]
+name = "ferrite-radio"
+version = "0.1.0"
+dependencies = [
+ "bk4829",
+ "ferrite-core",
+ "ferrite-radio",
 ]
 
 [[package]]

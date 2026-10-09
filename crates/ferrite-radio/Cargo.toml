@@ -1,0 +1,23 @@
+[package]
+name = "ferrite-radio"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The firmware tasks' hardware steps apart from the MCU: the RF path plan carried out on the pins, the chips' set-ups (stock's register recipes), GPS and Bluetooth power; tested on the PC against a recording mock"
+
+[features]
+# Transmit (the firmware's `tx`): the PA drive, keying and the keyed tones.
+tx = ["bk4829/tx"]
+
+[dependencies]
+ferrite-core.workspace = true
+bk4829.workspace = true
+
+[dev-dependencies]
+# The host tests cover the transmit steps too. Dev-dependencies never reach the firmware's build (`cargo fw`
+# builds `-p ferrite` for the radio, which takes `tx` only from its own feature).
+ferrite-radio = { path = ".", features = ["tx"] }
+
+[lints]
+workspace = true
