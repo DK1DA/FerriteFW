@@ -10,7 +10,8 @@ use crate::Screen;
 use ferrite_core::keys::Key;
 use ferrite_ui::assets::{UI_12, UI_12B};
 use ferrite_ui::fb::FrameBuffer;
-use ferrite_ui::gfx::text4_width;
+use ferrite_ui::gfx::{text4_width, BG, TEXT};
+use ferrite_ui::theme::map;
 use ferrite_ui::qr::{MANUAL_QR, MANUAL_URL, QR_SIZE};
 use ferrite_ui::widgets::{hint_width, key_label};
 
@@ -63,7 +64,7 @@ fn help_pages_draw_and_hints_fit() {
     }
 }
 
-/// HELP-2: the QR code is drawn black on white with its quiet zone, whatever the theme, and the address shows as
+/// HELP-2: the QR code is drawn in the theme's text colour on its background with its quiet zone, and the address shows as
 /// text; the matrix is the generated one (finder patterns in three corners).
 #[test]
 fn manual_qr_is_scannable() {
@@ -89,11 +90,12 @@ fn manual_qr_is_scannable() {
         let (x0, y0) = ((240 - side) / 2, 30);
         for i in 0..side {
             for (x, y) in [(x0 + i, y0), (x0 + i, y0 + side - 1), (x0, y0 + i), (x0 + side - 1, y0 + i)] {
-                assert_eq!(fb.at(x, y), 0xFFFF, "quiet zone white at {x},{y} (theme {theme})");
+                assert_eq!(fb.at(x, y), map(BG), "quiet zone is the background at {x},{y} (theme {theme})");
             }
         }
         // The top-left finder's corner module, 4 modules in from the quiet zone's edge.
-        assert_eq!(fb.at(x0 + 20 + 2, y0 + 20 + 2), 0x0000, "dark module black (theme {theme})");
+        assert_eq!(fb.at(x0 + 20 + 2, y0 + 20 + 2), map(TEXT), "dark module in the text colour (theme {theme})");
+        assert_ne!(map(TEXT), map(BG));
     }
 }
 
