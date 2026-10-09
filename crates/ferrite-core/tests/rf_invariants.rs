@@ -2,7 +2,10 @@
 //! transmit sequencer for a plan: the plans are run on a model of the pins and every step is checked.
 //! - the relay moves only with no TX select, the PA at 0, both chips receiving and the unkey wait over, and the
 //!   new path is set only after its settle time (SAFE-21, TX-28);
-//! - never two RX selects, never an RX and a TX select together (TX-27);
+//! - never two RX selects or two TX selects; an RX and a TX select together only for the crossband repeater,
+//!   on different chips (TX-27, XB-6), and the receiving chip never transmits;
+//! - the crossband repeater never moves the relay, ramps the PA only with the repeat audio selected and puts the
+//!   mic back only with the PA at zero (XB-2, XB-6, XB-8);
 //! - a TX select only between key-up and unkey, the PA ramp only on a TX path with its chip transmitting.
 
 use ferrite_core::freq::{mhz, Freq10};
@@ -17,6 +20,7 @@ struct Pins {
     pa: bool,
     chip_tx: [bool; 2],
     muted: bool,
+    repeat: bool,
     /// ms waited since the last chip went back to receive (None: none has yet).
     since_rx: Option<u32>,
     /// ms waited since the relay last moved.
@@ -54,18 +58,32 @@ impl Pins {
                     self.sel[s as usize] = on;
                     let rx = Sel::ALL.iter().filter(|s| !s.is_tx() && self.sel[**s as usize]).count();
                     let tx = Sel::ALL.iter().filter(|s| s.is_tx() && self.sel[**s as usize]).count();
-                    assert!(rx + tx <= 1, "{what}: two selects on ({rx} RX, {tx} TX)");
+                    assert!(rx <= 1 && tx <= 1, "{what}: two selects on ({rx} RX, {tx} TX)");
+                    if rx + tx == 2 {
+                        let (r, t) = (self.rx_sel().unwrap(), self.tx_sel().unwrap());
+                        assert_ne!(r.chip(), t.chip(), "{what}: RX and TX selects on one chip");
+                    }
                 }
                 Act::PaZero => self.pa = false,
                 Act::PaRamp => {
                     let tx = Sel::ALL.iter().find(|s| s.is_tx() && self.sel[**s as usize]).expect("PA ramp without a TX path");
                     assert!(self.chip_tx[tx.chip() as usize], "{what}: PA ramp before the chip transmits");
+                    if self.rx_sel().is_some() {
+                        assert!(self.repeat, "{what}: crossband PA ramp before the repeat audio");
+                    }
                     self.pa = true;
                 }
                 Act::ChipTx(n) => {
                     let tx = Sel::ALL.iter().find(|s| s.is_tx() && self.sel[**s as usize]).expect("chip TX without a TX path");
                     assert_eq!(tx.chip(), n, "{what}: the wrong chip keyed");
+                    assert!(self.rx_sel().is_none_or(|r| r.chip() != n), "{what}: the receiving chip keyed");
                     self.chip_tx[n as usize] = true;
+                }
+                Act::RepeatAudio(on) => {
+                    if !on {
+                        assert!(!self.pa, "{what}: mic back with the PA up");
+                    }
+                    self.repeat = on;
                 }
                 Act::ChipRx(n) => {
                     assert!(!self.pa, "{what}: chip off TX with PA drive");
@@ -80,6 +98,16 @@ impl Pins {
                 }
             }
         }
+    }
+}
+
+impl Pins {
+    fn rx_sel(&self) -> Option<Sel> {
+        Sel::ALL.into_iter().find(|s| !s.is_tx() && self.sel[*s as usize])
+    }
+
+    fn tx_sel(&self) -> Option<Sel> {
+        Sel::ALL.into_iter().find(|s| s.is_tx() && self.sel[*s as usize])
     }
 }
 
@@ -164,6 +192,105 @@ fn random_sequences_keep_the_rules() {
     assert!(keys > 500 && moves > 500 && ptt_moves > 20, "the sequences reach it all: {keys} key-ups, {moves} relay steps, {ptt_moves} at PTT");
 }
 
+/// The crossband repeater (XB-2, XB-6, XB-8, decision 93): the receive path hops between the two sides while
+/// ready, a pass keys the other chip on its own frequency with the receiver left on, and through it all the relay
+/// never moves, the receiving chip never transmits and the mic is never back with the PA up.
+#[test]
+fn crossband_sequences_keep_the_rules() {
+    use ferrite_core::msg::XbCfg;
+    use ferrite_core::xb::{Cmd, Repeater};
+    let pairs = [(mhz(146) + 52_000, mhz(446)), (mhz(145) + 50_000, mhz(433) + 50_000), (mhz(147), mhz(442))];
+    let mut rng = Rng(93);
+    let (mut keys, mut refused) = (0, 0);
+    for run in 0..100 {
+        let (f1, f2) = pairs[run % pairs.len()];
+        let f = [f1, f2];
+        let cfg = Cfg { cw_id: true, cw_each: true, timeout_s: 200, ..Cfg::default() };
+        let (mut path, mut seq, mut pins) = (Path::new(), TxSeq::new(), Pins { since_relay: 1_000, ..Pins::default() });
+        let mut rep = Repeater::new(XbCfg { timeout_10s: 3, hang_ds: rng.next(30) as u8, ..XbCfg::DEFAULT }, 0);
+        let mut now = 0u32;
+        let mut s = Steps::default();
+        path.safe(now, &mut s);
+        pins.run(&s, false, "safe");
+        let mut s = Steps::default();
+        path.rx(Rx::Bk(Sel::rx(f1)), Cause::ActiveSlot, now, &mut s).unwrap();
+        pins.run(&s, false, "start");
+        let relay = pins.relay;
+        let mut open = [false; 2];
+        let mut hop = 0usize;
+        for i in 0..2_000 {
+            now += 10;
+            let what = std::format!("run {run} step {i}");
+            if rng.next(40) == 0 {
+                open[rng.next(2) as usize] ^= true;
+            }
+            let mut s = Steps::default();
+            // Ready: the receive path hops between the sides every 50 ms; a pass keeps its side's.
+            let heard = match rep.from() {
+                Some(from) => {
+                    let mut h = [None; 2];
+                    h[from as usize] = Some(open[from as usize]);
+                    h
+                }
+                None => {
+                    if i % 5 == 0 {
+                        hop ^= 1;
+                        let _ = path.rx(Rx::Bk(Sel::rx(f[hop])), Cause::Auto, now, &mut s);
+                    }
+                    let mut h = [None; 2];
+                    h[hop] = Some(open[hop]);
+                    h
+                }
+            };
+            let keyed_before = path.keyed().is_some();
+            match rep.tick(now, heard) {
+                Some(Cmd::Key { from }) => {
+                    let to = 1 - from as usize;
+                    let r = Req {
+                        tx: f[to],
+                        rx: f[from as usize],
+                        kind: Kind::Voice,
+                        person: false,
+                        confirmed: false,
+                        am: false,
+                        region: Region::Us,
+                        extend: false,
+                        cal_ok: true,
+                        batt_ok: rng.next(30) != 0,
+                        power: rng.next(2) as u8,
+                    };
+                    match seq.key_xb(&r, &mut path, now, &mut s) {
+                        Ok(()) => keys += 1,
+                        Err(_) => {
+                            refused += 1;
+                            rep.refused(now);
+                        }
+                    }
+                }
+                Some(Cmd::Unkey { id }) => seq.release(&Cfg { cw_id: id, ..cfg }, &mut path, now, &mut s),
+                None => {
+                    if let Some(e) = seq.tick(&cfg, true, &mut path, now, &mut s) {
+                        if e != ferrite_core::txseq::Event::PreAlert {
+                            rep.cut(now);
+                        }
+                    }
+                }
+            }
+            if rng.next(500) == 0 {
+                seq.safe(&mut path, now, &mut s);
+                rep.cut(now);
+            }
+            assert!(!s.as_slice().iter().any(|a| matches!(a, Act::Relay(r) if *r != relay)), "{what}: the relay moved");
+            pins.run(&s, keyed_before || path.keyed().is_some(), &what);
+            assert_eq!(pins.relay, relay, "{what}: the relay moved");
+            if path.keyed().is_none() {
+                assert!(pins.chip_tx == [false; 2] && !pins.pa && !pins.repeat, "{what}: unkeyed with RF or the repeat audio on");
+            }
+        }
+    }
+    assert!(keys > 200 && refused > 0, "the sequences reach it all: {keys} passes, {refused} refused");
+}
+
 /// The Radio task's RAM for these: kept small (each documents its size).
 #[test]
 fn sizes() {
@@ -173,4 +300,7 @@ fn sizes() {
     assert_eq!(size_of::<TxSeq>(), 28);
     assert_eq!(size_of::<ferrite_core::watch::Watch>(), 36);
     assert_eq!(size_of::<ferrite_core::scan::Scan>(), 60);
+    // The repeater: 168 bytes, 100 of them the running screen's XbLive (the 60-column strip); held only while
+    // the repeater runs, in the Radio task's state.
+    assert_eq!(size_of::<ferrite_core::xb::Repeater>(), 168);
 }

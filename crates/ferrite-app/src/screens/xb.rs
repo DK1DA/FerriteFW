@@ -2,8 +2,9 @@
 //! screen in three states: the start page (each side's slot, the settings grid, the pre-flight checks: XB-2),
 //! then, once # starts it, ready (listening both) and passing (one direction, its timeout), both with the last
 //! 30 minutes of activity (XB-16). BACK stops (XB-14), and so does leaving by any route (hold BACK, a
-//! timeout). Local PTT transmits on its own slot and the repeater carries on after (XB-14); each side is simplex (XB-18). No menu number yet: "Advanced › Transmit ›
-//! Crossband" is full (`Dest::Crossband`).
+//! timeout). Local PTT transmits on its own slot and the repeater carries on after (XB-14); each side is simplex
+//! (XB-18). MENU 0 3 5. The radio side is the `tx` build's (`ferrite_core::xb`, decision 93); a refusal from the
+//! radio comes back in `XbLive::stopped` and the screen goes back to its start page saying why.
 
 use super::activity::{mmss, Mode};
 use super::parts;
@@ -130,7 +131,10 @@ fn checks(app: &App, batt: u8, out: &mut [(Check, Buf<40>); 4]) -> Option<usize>
     };
     let shifted = [c.side1, c.side2].iter().any(|&s| app.slot(s).cfg().offset != 0 || app.slot(s).cfg().split);
     let sq0 = app.sq_level(c.side1) == 0 || app.sq_level(c.side2) == 0;
-    if !tx(c.side1) || !tx(c.side2) {
+    if !app.radio.tx_built {
+        // Decision 93: the repeater keys only in the `tx` build.
+        put(1, Check::Fail, ferrite_core::xb::Stop::NoTx.text().as_bytes(), &mut fail);
+    } else if !tx(c.side1) || !tx(c.side2) {
         let which = if !tx(c.side1) { 1 } else { 2 };
         b.clear();
         let _ = uwrite!(b, "Side {} can't transmit there", which);
@@ -269,6 +273,9 @@ fn start(app: &mut App) {
         return app.show_toast(b"Can't start:", out[i].1.as_bytes(), false);
     }
     app.start_mode(Mode::Xb);
+    // The region and Extend TX for the Radio task's own checks on every pass (decision 93), then the start.
+    let region = txplan::Region::ALL.iter().position(|&r| r == app.set.tx_region()).unwrap_or(0) as u8;
+    app.out.push(RadioCmd::TxPlan { tx: app.slot(app.set.xb.side1).freq(), region, extend: app.set.extend_tx });
     app.out.push(RadioCmd::Crossband(Some(app.set.xb)));
 }
 

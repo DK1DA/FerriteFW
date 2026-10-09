@@ -15,7 +15,7 @@ use crate::txplan::{self, Refusal, Region};
 pub enum Kind {
     /// PTT, VOX, remote KEY.
     Voice,
-    /// APRS, KISS, packet frames, a tone burst on its own, DTMF dialling, the crossband repeater.
+    /// APRS, KISS, packet frames, a tone burst on its own, DTMF dialling.
     Data,
 }
 
@@ -151,6 +151,22 @@ impl TxSeq {
     pub fn key(&mut self, r: &Req, path: &mut Path, now: u32, out: &mut Steps) -> Result<(), Refusal> {
         self.check(r, path, now)?;
         path.key_up(Sel::tx(r.tx), now, out).map_err(|b| match b {
+            Blocked::Keyed => Refusal::InProgress,
+            Blocked::NeedsRelay | Blocked::TooOften => Refusal::RelayMismatch,
+        })?;
+        self.since = Some((now, r.kind));
+        self.weight = DUTY_WEIGHT[r.power.min(2) as usize] as u8;
+        self.alerted = false;
+        Ok(())
+    }
+
+    /// The crossband repeater's key-up (XB-6, XB-10): the same checks (region, calibration, relay, battery, the duty
+    /// limit weighted by power), then the path machine's crossband key-up, the receiving chip left in receive.
+    /// Send it as voice that no person keyed (`person: false`): it relays voice, gets the CW ID when the
+    /// repeater asks for it, and is refused on an emergency frequency.
+    pub fn key_xb(&mut self, r: &Req, path: &mut Path, now: u32, out: &mut Steps) -> Result<(), Refusal> {
+        self.check(r, path, now)?;
+        path.key_up_xb(Sel::tx(r.tx), out).map_err(|b| match b {
             Blocked::Keyed => Refusal::InProgress,
             Blocked::NeedsRelay | Blocked::TooOften => Refusal::RelayMismatch,
         })?;

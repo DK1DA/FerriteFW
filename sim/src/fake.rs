@@ -65,7 +65,9 @@ enum Fake {
     Counter { t0: f32 },
     Fm,
     Hf { t0: f32, freq: Freq10, mode: u8 },
-    Xb { t0: f32 },
+    /// The crossband repeater: the real engine, fed made-up signals (decision 93); or the radio's refusal.
+    Xb { t0: f32, rep: ferrite_core::xb::Repeater },
+    XbStopped(u8),
 }
 
 /// Carriers the scope and counter "hear": frequency and level (dBm).
@@ -320,7 +322,18 @@ impl FakeRadio {
                     *freq = *next.unwrap_or(if up { &HF_STATIONS[0] } else { &HF_STATIONS[HF_STATIONS.len() - 1] });
                 }
             }
-            RadioCmd::Crossband(c) => self.set(if c.is_some() { Fake::Xb { t0: self.now } } else { Fake::Off }),
+            RadioCmd::Crossband(Some(cfg)) => {
+                let f = [cfg.side1, cfg.side2].map(|s| self.live.slots[s as usize % 3].freq);
+                match ferrite_core::xb::sides_ok(f, self.path.relay()) {
+                    Ok(()) => {
+                        let mut rep = ferrite_core::xb::Repeater::new(cfg, self.ms());
+                        rep.demo_past(XB_PAST, 72 * 60, 23, 9 * 60);
+                        self.set(Fake::Xb { t0: self.now, rep });
+                    }
+                    Err(why) => self.set(Fake::XbStopped(why as u8)),
+                }
+            }
+            RadioCmd::Crossband(None) => self.set(Fake::Off),
             RadioCmd::DtmfTiming { ms, delay_10ms } => self.dtmf = (ms, delay_10ms),
             RadioCmd::DtmfSend { len } if self.live.tx.keyed => {
                 let ms = ferrite_core::tonegen::dtmf_seq_ms(len as usize, self.dtmf.0 as u16, self.dtmf.1 as u16 * 10);
@@ -434,7 +447,17 @@ impl FakeRadio {
                 let si4732 = freq < mhz(18) || matches!(mode, 3..=5); // USB, LSB, CW as Param::Mode
                 ModeLive::Hf { freq, rssi: -95 + ((t * 1.3).sin() * 8.0) as i16, snr: 12, si4732, loading: if p > 100 { 255 } else { p as u8 } }
             }
-            Fake::Xb { t0 } => ModeLive::Xb(xb(t - t0)),
+            Fake::Xb { t0, mut rep } => {
+                // Side 1 heard 12 s of every 30, side 2 8 s of every 45 (from 20 s), as the mock-ups show; the
+                // engine makes the passes, hangs and strip.
+                let s = t - t0;
+                let heard = [Some(s % 30.0 < 12.0), Some(s % 45.0 > 20.0 && s % 45.0 < 28.0)];
+                rep.set_rssi(-79);
+                let _ = rep.tick(self.ms(), heard);
+                self.mode = Fake::Xb { t0, rep };
+                ModeLive::Xb(rep.live)
+            }
+            Fake::XbStopped(stopped) => ModeLive::Xb(XbLive { stopped, ..Default::default() }),
         };
         // Transmit: speech, the mic level wandering 30-85%.
         if self.live.tx.keyed {
@@ -560,40 +583,11 @@ fn scan_carrier(f: Freq10) -> bool {
     scan_pos(f) % 40 == 20
 }
 
-/// The crossband repeater, `s` seconds after it started (shown as 1 h 12 m in): a pass side 1 -> 2 every
-/// 30 s for 12 s, one 2 -> 1 every 45 s for 8 s; the strip a fixed past plus what this run did.
-fn xb(s: f32) -> XbLive {
-    const PAST: [i8; XB_COLS] = [
-        0, 0, 0, 0, 0, 12, 22, 25, 20, 0, -8, -14, 0, 0, 0, 0, 16, 24, 22, 18, 12, 0, -20, -26, -18, -10, 0, 0, 0, 0,
-        0, 0, 14, 20, 0, 0, 0, 0, 18, 22, 25, 24, 20, 16, 0, 0, 0, -12, -22, -16, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0,
-    ];
-    let a = s % 30.0;
-    let b = s % 45.0;
-    let (state, pass) = if a < 12.0 { (1, a) } else if b > 20.0 && b < 28.0 { (2, b - 20.0) } else { (0, 0.0) };
-    let mut strip = PAST;
-    let cols = (s / 30.0) as usize;
-    strip.rotate_left(cols.min(XB_COLS));
-    if state == 1 {
-        strip[XB_COLS - 1] = (pass as i8).max(3);
-    } else if state == 2 {
-        strip[XB_COLS - 1] = -(pass as i8).max(3);
-    }
-    let run = 72 * 60 + s as u32;
-    XbLive {
-        state,
-        run_s: run,
-        pass_s: if state != 0 { pass as u16 } else { 18 },
-        idle_s: if state == 0 { (a - 12.0).max(0.0) as u16 + 110 } else { 0 },
-        last_dir: 2,
-        passes: 23 + (s / 30.0) as u16,
-        busy_s: 9 * 60 + (s / 3.0) as u16,
-        duty: if state != 0 { 34 } else { 8 },
-        next_id_s: 240 - (s as u16 % 240),
-        rssi: -79,
-        reduced: false,
-        strip,
-    }
-}
+/// The crossband repeater's past in the simulators (shown as 1 h 12 m in): the strip's earlier columns.
+const XB_PAST: [i8; XB_COLS] = [
+    0, 0, 0, 0, 0, 12, 22, 25, 20, 0, -8, -14, 0, 0, 0, 0, 16, 24, 22, 18, 12, 0, -20, -26, -18, -10, 0, 0, 0, 0, 0, 0,
+    14, 20, 0, 0, 0, 0, 18, 22, 25, 24, 20, 16, 0, 0, 0, -12, -22, -16, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0,
+];
 
 /// GPS fix with 9 satellites, 7.9 V; the clock from the PC's UTC time.
 #[cfg(not(target_arch = "wasm32"))]

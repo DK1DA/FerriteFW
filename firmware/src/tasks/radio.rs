@@ -24,8 +24,13 @@
 //! (`ferrite_core::txseq`, TX-17) with its own checks (region, calibration, battery, duty, PTT seen released
 //! since boot), then the path machine's TX-23 order: PA 0, paths clear, the TX path, the chip to transmit with
 //! its read-back (TX-7), the PA ramp to the calibrated level (`ferrite_core::txcal`, stock's lookup).
+//!
+//! The crossband repeater (manual chapter 19, decision 93) is the `tx` build's too: [`Repeater`] decides, the
+//! receive path hops between the two sides while ready, and a pass keys the other chip with the receiving one
+//! left in receive (`Path::key_up_xb`), the receiving chip's audio routed into the transmitting chip's mic input
+//! as stock does it (PA15 low, PB8 on; `analysis/crossband_repeat.md`, to confirm on the bench).
 
-use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
+use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, REPEAT_AUDIO, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
 use crate::bus::{BusyDelay, Io, Out, SiBus};
 use crate::chan::{ALERTS, DEBUG_ANS, DEBUG_REQ, EVENTS, LIVE, RADIO, TERM_WAKE};
 use crate::hal::gpio::Mode;
@@ -50,6 +55,7 @@ use ferrite_core::{
     txcal::{Gauge, TxCal},
     txplan::{Refusal, Region},
     txseq::{self, Kind as TxKind, Req, TxSeq},
+    xb::{self, Cmd as XbCmd, Repeater},
 };
 
 type Wire = ThreeWire<Out, Io, BusyDelay>;
@@ -73,6 +79,10 @@ const HF_SLOT: u8 = 3;
 /// what the UI sends ([`RadioCmd::TxTones`], [`Param::EndTone`], [`Param::Tail`]): see `Radio::tx_cfg`.
 #[cfg(feature = "tx")]
 const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone: false, cw_id: false, cw_each: false, tail: false };
+/// The crossband repeater's receive path turn per side while ready (XB-4: a pass needs 30 ms of open squelch; to
+/// confirm on the bench with the unselected front end, which may hear enough to drop the hop).
+#[cfg(feature = "tx")]
+const XB_TURN_MS: u32 = 50;
 /// REG_30 read back after the key-up write (TX-7): stock's transmit value with the microphone.
 #[cfg(feature = "tx")]
 const REG30_TX_MIC: u16 = 0xC1FE;
@@ -164,6 +174,18 @@ struct Radio {
     same: SameRx,
     #[cfg(feature = "tx")]
     tx: Tx,
+    /// The crossband repeater while it runs (168 + 8 bytes).
+    #[cfg(feature = "tx")]
+    xb: Option<XbRun>,
+}
+
+/// The crossband repeater running: the engine, each side's slot, and the receive path's turn while ready.
+#[cfg(feature = "tx")]
+struct XbRun {
+    rep: Repeater,
+    sides: [u8; 2],
+    hop: u8,
+    hop_t: u32,
 }
 
 /// The frequency counter: which chip measures now, when its scan started, and its last reading (stock keeps a
@@ -246,6 +268,10 @@ struct Tx {
     cw_call: [u8; 10],
     cw_len: u8,
     sidetone: bool,
+    /// The chip keyed now: the tones at unkey play on it after the path machine has planned the unkey.
+    chip: Option<u8>,
+    /// The region and Extend TX from the UI's last [`RadioCmd::TxPlan`]: the crossband repeater's key-ups use them.
+    region: Option<(Region, bool)>,
     /// DTMF-3: each digit's on and off time (ms) and the first digit delay (10 ms); a dialled sequence, and whether
     /// this transmission is one (no end tone or CW ID after it: TONE-11).
     dtmf: (u8, u8),
@@ -358,6 +384,14 @@ impl Radio {
                     }
                 }
                 Act::Wait(ms) => Timer::after_millis(ms as u64).await,
+                // XB-6, XB-8: stock's crossband route, PA15 low with the audio stage (PB8) on; back high after.
+                Act::RepeatAudio(on) => {
+                    REPEAT_AUDIO.write(!on);
+                    if on {
+                        AMP_EN[0].write(true);
+                    }
+                    log(b"repeat audio ", on as u32);
+                }
                 #[cfg(feature = "tx")]
                 Act::ChipTx(n) => {
                     if !self.key_chip(n) {
@@ -534,7 +568,17 @@ impl Radio {
     /// Something running that keeps the engines ticking fast: a slot sharing the chips, or a scan.
     fn busy(&self) -> bool {
         let set = self.watch_set | 1 << self.active;
-        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some()
+        let xb = {
+            #[cfg(feature = "tx")]
+            {
+                self.xb.is_some()
+            }
+            #[cfg(not(feature = "tx"))]
+            {
+                false
+            }
+        };
+        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some() || xb
     }
 
     /// The engines' tick: each listening chip's squelch, the watch turn, the scans, the chips and the path, and
@@ -560,6 +604,19 @@ impl Radio {
         self.mcu_temp();
         if self.hf.is_some() {
             self.hf_poll();
+            return;
+        }
+        // The crossband repeater owns both chips while it runs (XB-13: no watch, scan or Battery Save); local PTT
+        // holds it (XB-14), and that transmission runs as any other.
+        #[cfg(feature = "tx")]
+        if let Some(held) = self.xb.as_ref().map(|x| x.rep.held()) {
+            let now = now_ms() as u32;
+            if !held {
+                return self.xb_tick(now).await;
+            }
+            if self.path.keyed().is_some() {
+                return self.tx_tick(now).await;
+            }
             return;
         }
         if self.save.asleep() {
@@ -1041,7 +1098,11 @@ pub async fn task() {
             dtmf: (100, 30),
             digits: [0; 16],
             dialled: false,
+            chip: None,
+            region: None,
         },
+        #[cfg(feature = "tx")]
+        xb: None,
     };
     // Start from the safe state: every path low, the relay released (board start-up set them low already).
     let mut s = Steps::default();
@@ -1231,14 +1292,32 @@ impl Radio {
             RadioCmd::Sweep { .. }
             | RadioCmd::ScopeCfg { .. }
             | RadioCmd::ScopeListen { .. }
-            | RadioCmd::ToneSearch { .. }
-            | RadioCmd::Crossband(_) => {}
+            | RadioCmd::ToneSearch { .. } => {}
             #[cfg(feature = "tx")]
-            RadioCmd::TxPlan { tx, region, extend } => {
-                self.tx.plan = Some((tx, Region::ALL.get(region as usize).copied().unwrap_or(Region::Other), extend));
+            RadioCmd::Crossband(c) => self.crossband(c).await,
+            // XB-2: no transmit in this build; the UI refuses first, and the radio says so too.
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::Crossband(c) => {
+                let stopped = ferrite_core::xb::Stop::NoTx as u8;
+                self.live.mode = if c.is_some() { ModeLive::Xb(ferrite_core::msg::XbLive { stopped, ..Default::default() }) } else { ModeLive::Off };
             }
             #[cfg(feature = "tx")]
-            RadioCmd::Transmit { slot, on } => self.transmit(slot, on, None).await,
+            RadioCmd::TxPlan { tx, region, extend } => {
+                let r = Region::ALL.get(region as usize).copied().unwrap_or(Region::Other);
+                self.tx.plan = Some((tx, r, extend));
+                self.tx.region = Some((r, extend));
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::Transmit { slot, on } => {
+                // XB-14: local PTT interrupts a pass (unkeyed first) and holds the repeater until it's released.
+                if on {
+                    self.xb_hold(true).await;
+                }
+                self.transmit(slot, on, None).await;
+                if !on {
+                    self.xb_hold(false).await;
+                }
+            }
             #[cfg(feature = "tx")]
             RadioCmd::TransmitData { slot, power, on } => self.transmit(slot, on, Some(power)).await,
             // Transmit code is out of this build: the UI refuses first (RX-only build).
@@ -1364,6 +1443,7 @@ impl Radio {
             return self.refuse(slot, Refusal::Locked);
         }
         self.live.tx.keyed = true;
+        self.tx.chip = Some(n);
     }
 
     /// While keyed: the sequencer's own unkeys (timeout backstop, duty limit, battery under load).
@@ -1406,7 +1486,7 @@ impl Radio {
     /// (74, as its CTCSS) where stock takes the calibration's byte (0xF210 byte 1): to confirm on the bench.
     async fn tail_elim(&mut self) {
         use bk4829::tx::Tail;
-        let Some(n) = self.path.keyed().map(|s| s.chip()).filter(|&n| self.has(n)) else { return };
+        let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
         let kind = match tonegen::tail_kind(self.tx.tone[self.tx.slot as usize % 4], self.tx.phase) {
             tonegen::TailKind::Tone55 => Tail::Tone55 { dev: 74 },
             tonegen::TailKind::Shift(p) => Tail::Shift { phase: p },
@@ -1484,7 +1564,7 @@ impl Radio {
     /// off, each step's tone (0 = silence) for its time.
     async fn play_keyed(&mut self, steps: impl Iterator<Item = tonegen::Step>) {
         use bk4829::tx::Source as TxSource;
-        let Some(n) = self.path.keyed().map(|s| s.chip()).filter(|&n| self.has(n)) else { return };
+        let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
         self.chip(n).tx_on(TxSource::Tones);
         for (hz, ms) in steps {
             self.chip(n).tone_tx(hz as u32);
@@ -1496,6 +1576,7 @@ impl Radio {
     /// After any unkey: the chips back to their slots on the next tick, the UI told.
     fn unkeyed(&mut self) {
         self.tuned = [None; 2];
+        self.tx.chip = None;
         self.live.tx.keyed = false;
         log(b"tx unkey", 0);
     }
@@ -1503,5 +1584,252 @@ impl Radio {
     fn refuse(&mut self, slot: u8, why: Refusal) {
         self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why), dtmf_sent: self.live.tx.dtmf_sent };
         log(b"tx refused ", why as u32);
+    }
+}
+
+/// The crossband repeater (manual chapter 19, decision 93), in the `tx` build only.
+#[cfg(feature = "tx")]
+impl Radio {
+    /// Start or stop. XB-2 on the radio: two sides on different chips, neither on HF, the relay released as it is
+    /// now (the repeater never moves it); a refusal goes back in `XbLive::stopped` for the UI to show.
+    async fn crossband(&mut self, c: Option<ferrite_core::msg::XbCfg>) {
+        let now = now_ms() as u32;
+        let Some(cfg) = c else {
+            if let Some(x) = self.xb.take() {
+                if self.path.keyed().is_some() {
+                    self.xb_unkey(&x, false, now).await;
+                }
+            }
+            self.tuned = [None; 2];
+            self.live.mode = ModeLive::Off;
+            speaker(false);
+            log(b"xb off", 0);
+            return;
+        };
+        let sides = [cfg.side1 % SLOTS as u8, cfg.side2 % SLOTS as u8];
+        let f = sides.map(|s| self.slots[s as usize].freq);
+        if let Err(why) = xb::sides_ok(f, self.path.relay()) {
+            self.live.mode = ModeLive::Xb(ferrite_core::msg::XbLive { stopped: why as u8, ..Default::default() });
+            log(b"xb refused ", why as u32);
+            return;
+        }
+        // XB-13: Battery Save's receivers awake; watch and scans simply don't run while it does.
+        let a = self.save.activity(now_ms());
+        self.apply(a).await;
+        self.tuned = [None; 2];
+        speaker(false);
+        let rep = Repeater::new(cfg, now);
+        self.live.mode = ModeLive::Xb(rep.live);
+        self.xb = Some(XbRun { rep, sides, hop: 0, hop_t: now });
+        log(b"xb on, side 1 khz ", f[0] / 100);
+    }
+
+    /// XB-14: local PTT holds the repeater, unkeying a pass first; released, it carries on.
+    async fn xb_hold(&mut self, on: bool) {
+        let now = now_ms() as u32;
+        let Some(mut x) = self.xb.take() else { return };
+        if on && x.rep.from().is_some() && self.path.keyed().is_some() {
+            self.xb_unkey(&x, false, now).await;
+        }
+        x.rep.hold(on, now);
+        if !on {
+            self.tuned = [None; 2]; // back on the sides on the next tick
+        }
+        self.xb = Some(x);
+    }
+
+    /// The repeater's tick (10 ms): while ready the receive path takes turns on the two sides; a pass keeps its
+    /// side's. Each listened side's squelch, with its tone when the tone gate is on (XB-4), goes to the engine; its
+    /// key-ups and unkeys are carried out; the sequencer's duty limit, battery and backstop run while keyed.
+    async fn xb_tick(&mut self, now: u32) {
+        let Some(mut x) = self.xb.take() else { return };
+        let keyed = self.path.keyed().is_some();
+        if keyed {
+            let batt = self.battery_ok();
+            let cfg = self.xb_seq_cfg(&x, false);
+            let mut st = Steps::default();
+            if let Some(e) = self.tx.seq.tick(&cfg, batt, &mut self.path, now, &mut st) {
+                self.run(&st).await;
+                if e != txseq::Event::PreAlert {
+                    x.rep.cut(now);
+                    self.xb_after_unkey(&x);
+                    log(b"xb cut by the sequencer ", e as u32);
+                }
+            }
+        }
+        let keyed_chip = self.path.keyed().map(|s| s.chip());
+        // Each side's chip on its slot (the transmitting one stays as keyed: simplex, the same frequency).
+        for s in x.sides {
+            let n = Sel::rx(self.slots[s as usize].freq).chip();
+            if keyed_chip != Some(n) {
+                self.tune_chip(n, Some((s, self.slots[s as usize].rx_freq())));
+            }
+        }
+        let listen = match x.rep.from() {
+            Some(from) => from,
+            None => {
+                if now.wrapping_sub(x.hop_t) >= XB_TURN_MS {
+                    (x.hop, x.hop_t) = (x.hop ^ 1, now);
+                }
+                x.hop
+            }
+        };
+        let ls = x.sides[listen as usize];
+        let lf = self.slots[ls as usize].freq;
+        if keyed_chip.is_none() {
+            self.select_rx(lf, Cause::Auto).await; // never the relay: refused instead (checked at start)
+        }
+        let mut heard = [None; 2];
+        let n = Sel::rx(lf).chip();
+        if self.path.rx_now() == Rx::Bk(Sel::rx(lf)) && self.has(n) && keyed_chip != Some(n) {
+            let mut bk = self.chip(n);
+            let (rssi, st) = (bk.rssi_dbm(), bk.status());
+            let sl = self.slots[ls as usize];
+            let gate = x.rep.cfg.flags & ferrite_core::msg::XbCfg::TONE_GATE != 0 && sl.rx_tone != 0;
+            let open = st.squelch_open && (!gate || st.ctcss || st.cdcss);
+            heard[listen as usize] = Some(open);
+            self.live.slots[ls as usize].rssi = rssi;
+            if x.rep.from() == Some(listen) || x.rep.from().is_none() {
+                x.rep.set_rssi(rssi);
+            }
+        }
+        match x.rep.tick(now, heard) {
+            Some(XbCmd::Key { from }) => self.xb_key(&mut x, from, now).await,
+            Some(XbCmd::Unkey { id }) => self.xb_unkey(&x, id, now).await,
+            None => {}
+        }
+        // Audio (XB-15): the passing side's chip always (its audio is what goes out); the speaker per the
+        // setting, or SIDE1's monitor on that side.
+        let from = x.rep.from();
+        let spk_set = x.rep.cfg.flags & ferrite_core::msg::XbCfg::SPEAKER != 0;
+        let mut heard_slot = None;
+        for i in 0..2u8 {
+            let s = x.sides[i as usize];
+            let n = Sel::rx(self.slots[s as usize].freq).chip();
+            let open = from == Some(i) || heard[i as usize] == Some(true);
+            if open {
+                heard_slot = Some(s);
+            }
+            if self.has(n) && keyed_chip != Some(n) {
+                self.chip(n).af_out(if open { AfOut::Normal } else { AfOut::Mute });
+            }
+            let sl = &mut self.live.slots[s as usize];
+            sl.squelch_open = open;
+            if !open {
+                sl.rssi = sl.rssi.min(-121);
+            }
+        }
+        let spk = heard_slot.is_some_and(|s| spk_set || self.monitor & 1 << s != 0);
+        if self.path.keyed().is_some() {
+            AMP_EN[0].write(true); // the audio stage carries the repeat audio (stock: PB8 on)
+            AMP_EN[1].write(spk);
+        } else {
+            speaker(spk);
+        }
+        self.live.mode = ModeLive::Xb(x.rep.live);
+        self.xb = Some(x);
+    }
+
+    /// The sequencer's settings for a pass: its timeout a little after the repeater's own (XB-9: the repeater
+    /// unkeys first), the CW ID when the repeater asks for it (XB-12), tail elimination as the transmitting
+    /// slot's; no end tone.
+    fn xb_seq_cfg(&self, x: &XbRun, id: bool) -> txseq::Cfg {
+        let to = x.rep.from().map_or(0, |f| x.sides[1 - f as usize]);
+        txseq::Cfg {
+            timeout_s: (x.rep.timeout_ms() / 1000 + 5).min(600) as u16,
+            prealert_s: 0,
+            end_tone: false,
+            cw_id: id && self.tx.cw_len != 0,
+            cw_each: true,
+            tail: self.tx.tail[to as usize % 4],
+        }
+    }
+
+    /// A pass: the other side's chip keyed on its own receive frequency (XB-18) with its tone, at the repeater's
+    /// power (XB-3: Low or Mid), through the sequencer's checks; the receiving chip stays in receive (XB-6).
+    async fn xb_key(&mut self, x: &mut XbRun, from: u8, now: u32) {
+        if let Some(c) = crate::chan::TX_CAL.try_take() {
+            (self.tx.cal, self.tx.gauge) = c;
+        }
+        let to = x.sides[1 - from as usize];
+        let rx = self.slots[x.sides[from as usize] as usize].freq;
+        let f = self.slots[to as usize].freq;
+        let power = x.rep.cfg.power.min(1);
+        let Some((region, extend)) = self.tx.region else {
+            x.rep.refused(now);
+            return log(b"xb refused: no region from the UI", 0);
+        };
+        let req = Req {
+            tx: f,
+            rx,
+            kind: TxKind::Voice,
+            person: false,
+            confirmed: false,
+            am: self.slots[to as usize].am,
+            region,
+            extend,
+            cal_ok: self.tx.cal.is_some(),
+            batt_ok: self.battery_ok(),
+            power,
+        };
+        if let Err(r) = self.tx.seq.check(&req, &self.path, now) {
+            x.rep.refused(now);
+            return log(b"xb refused ", r as u32);
+        }
+        let n = Sel::tx(f).chip();
+        if !self.has(n) {
+            x.rep.refused(now);
+            return;
+        }
+        let tone = self.tx.tone[to as usize % 4];
+        let mut bk = self.chip(n);
+        bk.wake();
+        bk.af_out(AfOut::Mute);
+        bk.set_freq(f * 10);
+        match tone {
+            0 => bk.subtone_off(),
+            t if t & 0x8000 != 0 => bk.dcs_tx(t & 0x3FFF, t & 0x4000 != 0),
+            t => bk.ctcss_tx(t),
+        }
+        self.tuned[n as usize] = Some((to, f));
+        self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, power));
+        (self.tx.fault, self.tx.data, self.tx.slot, self.tx.dialled) = (false, Some(power), to, false);
+        let mut st = Steps::default();
+        if let Err(r) = self.tx.seq.key_xb(&req, &mut self.path, now, &mut st) {
+            x.rep.refused(now);
+            return log(b"xb refused ", r as u32);
+        }
+        self.run(&st).await;
+        if self.tx.fault {
+            let mut st = Steps::default();
+            self.tx.seq.safe(&mut self.path, now_ms() as u32, &mut st);
+            self.run(&st).await;
+            x.rep.cut(now);
+            self.xb_after_unkey(x);
+            return log(b"xb read-back failed", 0);
+        }
+        self.tx.chip = Some(n);
+        self.live.tx = TxLive { keyed: true, slot: to, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent };
+        log(b"xb pass to khz ", f / 100);
+    }
+
+    /// The end of a pass (XB-8): the CW ID first when due (XB-12) and tail elimination as the slot's, then the path
+    /// machine's crossband unkey (PA 0 with the repeat audio on, the unkey wait, the TX path off, the mic back).
+    async fn xb_unkey(&mut self, x: &XbRun, id: bool, now: u32) {
+        let cfg = self.xb_seq_cfg(x, id);
+        let mut st = Steps::default();
+        self.tx.seq.release(&cfg, &mut self.path, now, &mut st);
+        self.run(&st).await;
+        self.xb_after_unkey(x);
+        log(b"xb unkey, id ", id as u32);
+    }
+
+    /// After any unkey of a pass: the transmitting chip back to its side's receive settings on the next tick.
+    fn xb_after_unkey(&mut self, _x: &XbRun) {
+        if let Some(n) = self.tx.chip.take() {
+            self.tuned[n as usize] = None;
+        }
+        self.tx.data = None;
+        self.live.tx.keyed = false;
     }
 }

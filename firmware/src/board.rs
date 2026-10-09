@@ -24,6 +24,10 @@ pub const BK_SDA: Pin = pin(GPIOE, 11);
 
 // Audio
 pub const AMP_EN: [Pin; 2] = [pin(GPIOB, 8), pin(GPIOE, 4)]; // (L) both
+/// PA15: high in stock's receive, low while its crossband repeater transmits: believed to route the receiving
+/// chip's audio into the transmitting chip's mic input (`analysis/crossband_repeat.md` §5; to confirm on the
+/// bench). Driven only through the path machine's `Act::RepeatAudio` (XB-6, XB-8).
+pub const REPEAT_AUDIO: Pin = pin(GPIOA, 15); // (L)
 
 // Power
 pub const POWER_HOLD: Pin = pin(GPIOA, 11); // (L) set at start-up by stock, cleared to switch off
@@ -107,7 +111,7 @@ pub fn safe_state() {
     // Pins stock leaves low that sit next to RF or TX audio: band relay PC4, broadcast-receiver input paths
     // PA7/PC5, PE9 (BK4829/RF cluster), APRS TX audio PC12, audio switches PC9/PE1, and the unused PA3/PB2.
     // Normally the bootloader already left them low; set them so a fault or a start without the bootloader
-    // never leaves them floating. PA15 (high in stock RX) is left alone.
+    // never leaves them floating. PA15 (high in stock RX) is set high in `init` once JTAG is off.
     for p in SAFE_LOW {
         p.output(false, Mode::OutPp);
     }
@@ -126,6 +130,9 @@ pub fn init() {
     clock::init();
     time::init();
     gpio::jtag_off();
+    // PA15 is free once JTAG is off: stock's app sets it high at start-up (its receive state; the bootloader leaves
+    // it low), so the mic, not the receiver, feeds the transmitter until a crossband pass selects repeat audio.
+    REPEAT_AUDIO.output(true, Mode::OutPp);
     LED_RED.output(!LED_ACTIVE_HIGH, Mode::OutPp);
     LED_GREEN.output(!LED_ACTIVE_HIGH, Mode::OutPp);
     for p in BACKLIGHT {

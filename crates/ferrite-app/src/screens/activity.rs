@@ -238,6 +238,13 @@ impl App {
 
     /// Every tick: each slot's activity for the watch + activity layout.
     pub(crate) fn radio_tick(&mut self, live: &LiveAll) {
+        // XB-2 on the radio (decision 93): it refused to start the repeater; say why and stop.
+        if let (Mode::Xb, ferrite_core::msg::ModeLive::Xb(x)) = (self.radio.mode, live.mode) {
+            if let Some(why) = ferrite_core::xb::Stop::from_code(x.stopped) {
+                self.stop_mode();
+                self.show_toast(b"Can't start:", why.text().as_bytes(), false);
+            }
+        }
         if self.radio.keyed.is_none() {
             self.radio.dtmf_seen = live.tx.dtmf_sent;
         }

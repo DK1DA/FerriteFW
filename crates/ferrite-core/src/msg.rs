@@ -417,15 +417,18 @@ pub struct XbLive {
     pub next_id_s: u16,
     /// Receive level on the input side (dBm).
     pub rssi: i16,
-    /// The output side's power is cut back (battery, heat): shown instead of the level (TX-12).
+    /// The output side's power is cut back, or a key-up was refused (battery, heat): shown instead of the level
+    /// (TX-12).
     pub reduced: bool,
+    /// The radio refused to start it ([`crate::xb::Stop`] as a number; 0 = running): the UI says why and stops.
+    pub stopped: u8,
     /// Seconds passed per column, oldest first: positive side 1 -> 2, negative 2 -> 1.
     pub strip: [i8; XB_COLS],
 }
 
 impl Default for XbLive {
     fn default() -> Self {
-        XbLive { state: 0, run_s: 0, pass_s: 0, idle_s: 0, last_dir: 0, passes: 0, busy_s: 0, duty: 0, next_id_s: 0, rssi: -127, reduced: false, strip: [0; XB_COLS] }
+        XbLive { state: 0, run_s: 0, pass_s: 0, idle_s: 0, last_dir: 0, passes: 0, busy_s: 0, duty: 0, next_id_s: 0, rssi: -127, reduced: false, stopped: 0, strip: [0; XB_COLS] }
     }
 }
 

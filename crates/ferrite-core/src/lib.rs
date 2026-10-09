@@ -30,6 +30,7 @@ pub mod txcal;
 pub mod txplan;
 pub mod txseq;
 pub mod watch;
+pub mod xb;
 
 /// Shown on the boot screen and in the link's hello.
 pub const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));

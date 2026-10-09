@@ -10,7 +10,10 @@
 //!   receiver is muted and its select cleared first, then [`RELAY_SETTLE_MS`] before the new path and unmute;
 //! - more than [`GUARD_SWITCHES`] relay switches in a minute holds the relay where it is (SAFE-22) until the
 //!   minute has passed, except for [`Path::safe`];
-//! - while keyed nothing but [`Path::unkey`] and [`Path::safe`] changes a pin (TX-29).
+//! - while keyed nothing but [`Path::unkey`] and [`Path::safe`] changes a pin (TX-29);
+//! - the one exception to "never RX and TX together" is the crossband repeater ([`Path::key_up_xb`], XB-6): the
+//!   receiving chip's RX select stays on while the other chip's TX select is on, on different chips, and the relay
+//!   never moves for it.
 
 use crate::freq::{band, Band, Freq10};
 
@@ -82,6 +85,9 @@ pub enum Act {
     ChipTx(u8),
     /// A BK4829 back to receive.
     ChipRx(u8),
+    /// The crossband repeater's audio route (XB-6, XB-8): the receiving chip's audio into the transmitting chip's
+    /// mic input (stock's PA15 low, with the audio stage PB8 on; to confirm on the bench), or back to the mic.
+    RepeatAudio(bool),
     /// While keyed: the end tone (TONE-8), the CW ID (VOX-12), tail elimination (TONE-9).
     EndTone,
     CwId,
@@ -185,6 +191,8 @@ pub struct Path {
     nt: u8,
     /// The guard tripped since the last [`Path::take_alarm`].
     alarm: bool,
+    /// Keyed by [`Path::key_up_xb`]: the receive select stayed on.
+    xb: bool,
 }
 
 impl Default for Path {
@@ -196,7 +204,7 @@ impl Default for Path {
 impl Path {
     /// After [`Path::safe`] at start-up: everything low, relay released.
     pub const fn new() -> Self {
-        Path { rx: Rx::Off, tx: None, relay: false, restore: None, times: [0; GUARD_SWITCHES], nt: 0, alarm: false }
+        Path { rx: Rx::Off, tx: None, relay: false, restore: None, times: [0; GUARD_SWITCHES], nt: 0, alarm: false, xb: false }
     }
 
     pub fn rx_now(&self) -> Rx {
@@ -325,10 +333,42 @@ impl Path {
         Ok(())
     }
 
+    /// The crossband repeater's key-up (XB-6): the other chip transmits while the receiving one stays in receive,
+    /// its RX select on and unmuted (its audio is what goes out). Only on a different chip from the receive select
+    /// and on the relay state as it is: the relay never moves for the repeater (XB-2, SAFE-20). PA 0, the TX
+    /// path, the chip to transmit with its read-back, the repeat audio, then the PA ramp.
+    pub fn key_up_xb(&mut self, tx: Sel, out: &mut Steps) -> Result<(), Blocked> {
+        if self.tx.is_some() {
+            return Err(Blocked::Keyed);
+        }
+        let tx = tx.to_tx();
+        let Rx::Bk(rx) = self.rx else { return Err(Blocked::NeedsRelay) };
+        if rx.chip() == tx.chip() || tx.relay() != self.relay || rx.relay() != self.relay {
+            return Err(Blocked::NeedsRelay);
+        }
+        out.push(Act::PaZero);
+        out.push(Act::Sel(tx, true));
+        out.push(Act::ChipTx(tx.chip()));
+        out.push(Act::RepeatAudio(true));
+        out.push(Act::PaRamp);
+        (self.tx, self.xb) = (Some(tx), true);
+        Ok(())
+    }
+
     /// Unkey (TX-26), after any end tone, CW ID and tail elimination the sequencer put first: PA 0, the chip back
     /// to receive, the unkey wait, the TX path clear, the relay back if key-up moved it, the RX path, unmute.
+    /// A crossband key-up's (XB-8): PA 0 with the repeat audio still on, the chip back to receive, the unkey
+    /// wait, the TX path clear, then the mic back; the receive select never left.
     pub fn unkey(&mut self, now: u32, out: &mut Steps) {
         let Some(tx) = self.tx.take() else { return };
+        if core::mem::take(&mut self.xb) {
+            out.push(Act::PaZero);
+            out.push(Act::ChipRx(tx.chip()));
+            out.push(Act::Wait(UNKEY_WAIT_MS));
+            out.push(Act::Sel(tx, false));
+            out.push(Act::RepeatAudio(false));
+            return;
+        }
         out.push(Act::PaZero);
         out.push(Act::ChipRx(tx.chip()));
         out.push(Act::Wait(UNKEY_WAIT_MS));
@@ -359,6 +399,9 @@ impl Path {
         if let Some(tx) = self.tx.take() {
             out.push(Act::ChipRx(tx.chip()));
             out.push(Act::Wait(UNKEY_WAIT_MS));
+        }
+        if core::mem::take(&mut self.xb) {
+            out.push(Act::RepeatAudio(false));
         }
         for s in Sel::ALL {
             out.push(Act::Sel(s, false));
@@ -494,5 +537,25 @@ mod tests {
         assert_eq!(a[2..4], [Act::ChipRx(1), Act::Wait(100)]);
         assert_eq!(a[a.len() - 2..], [Act::SiInput(false), Act::Relay(false)]);
         assert!(p.keyed().is_none() && p.rx_now() == Rx::Off);
+    }
+
+    #[test]
+    fn crossband_keeps_the_receiver() {
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
+        let mut s = Steps::default();
+        assert_eq!(p.key_up_xb(Sel::UhfTx, &mut s), Err(Blocked::NeedsRelay), "never the receiving chip");
+        assert_eq!(p.key_up_xb(Sel::HfTx, &mut s), Err(Blocked::NeedsRelay), "never the relay");
+        p.key_up_xb(Sel::VhfTx, &mut s).unwrap();
+        assert_eq!(s.as_slice(), [Act::PaZero, Act::Sel(Sel::VhfTx, true), Act::ChipTx(0), Act::RepeatAudio(true), Act::PaRamp]);
+        assert_eq!(p.rx_now(), Rx::Bk(Sel::UhfRx));
+        let mut s = Steps::default();
+        p.unkey(0, &mut s);
+        assert_eq!(s.as_slice(), [Act::PaZero, Act::ChipRx(0), Act::Wait(100), Act::Sel(Sel::VhfTx, false), Act::RepeatAudio(false)]);
+        assert!(p.keyed().is_none() && p.rx_now() == Rx::Bk(Sel::UhfRx));
+        // The safe state from a crossband pass puts the mic back too.
+        p.key_up_xb(Sel::VhfTx, &mut Steps::default()).unwrap();
+        let mut s = Steps::default();
+        p.safe(0, &mut s);
+        assert!(s.as_slice().contains(&Act::RepeatAudio(false)));
     }
 }
