@@ -586,6 +586,35 @@ mod tests {
         assert_eq!(a.stations(), HEARD_MAX);
     }
 
+    /// APRS-11: what we send is capped and identifies us as the protocol requires: the source address is our
+    /// callsign and SSID, the destination an APRS tocall, the path the chosen one, and the information field
+    /// within 256 bytes; a message's text is cut to APRS's 67 characters however long it was typed.
+    #[test]
+    fn sent_frames_carry_our_id_and_stay_capped() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg::DEFAULT;
+        let long = [b'x'; 200];
+        assert!(a.send(b"VE3KPW-9", &long));
+        let t = a.tick(0, true, true, b"VE3XYZ-7", None, &cfg, &mut out);
+        assert_eq!(t.what, "Message");
+        let g = Frame::parse(&out[..t.len]).unwrap();
+        assert_eq!((g.src.call(), g.src.ssid), (&b"VE3XYZ"[..], 7), "our callsign and SSID");
+        assert!(g.dest.call().starts_with(b"AP"), "an APRS tocall");
+        assert_eq!(g.digis().len(), 2, "the default path, WIDE1-1,WIDE2-1");
+        assert!(g.info.len() <= INFO_MAX);
+        // ":VE3KPW-9 :" + text + "{n": the text is APRS's 67 characters at most
+        let text = &g.info[11..g.info.iter().rposition(|&c| c == b'{').unwrap()];
+        assert!(!text.is_empty() && text.len() <= 67, "message text {} long", text.len());
+        let a = AprsLive::new(); // a beacon alone (the message above would still be retrying)
+        a.beacon_now();
+        let t = a.tick(400, true, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+        assert_eq!(t.what, "Beacon");
+        let g = Frame::parse(&out[..t.len]).unwrap();
+        assert_eq!(g.src.call(), b"VE3XYZ");
+        assert!(g.info.len() <= INFO_MAX);
+    }
+
     /// APRS-25: a frame's information field is at most 256 bytes: 256 is taken whole, 257 is dropped.
     #[test]
     fn info_field_capped_at_256() {

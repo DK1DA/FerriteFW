@@ -437,7 +437,10 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             self.seen.set(c);
             self.changed_at.set(now);
         }
-        if self.seen.get() != self.saved.get() && now.wrapping_sub(self.changed_at.get()) >= SAVE_DELAY_MS {
+        // HF-29: HF mode's VFOs and recent list are written on leaving it, never while tuning: nothing is
+        // saved while its screen is open (power off still flushes).
+        let in_hf = matches!(app.screen(), ferrite_app::screens::Screen::Hf(_));
+        if !in_hf && self.seen.get() != self.saved.get() && now.wrapping_sub(self.changed_at.get()) >= SAVE_DELAY_MS {
             return self.save(app);
         }
         false

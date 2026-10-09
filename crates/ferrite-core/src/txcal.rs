@@ -61,7 +61,9 @@ impl TxCal {
             400.. => p[UHF][(((mhz - 400) / 10) as usize).min(15)],
             350..=399 => p[R350][((mhz - 350) / 5) as usize],
             300..=349 => p[R350][0],
-            200..=299 => p[R200][(((mhz - 200) / 5) as usize).min(15)],
+            // CAL-14, TX-9: the 200-300 MHz PA path (1.25 m, and 243.0 MHz) takes the Low curve whatever the
+            // level; the bench-measured 0.25 W ceiling clamps it further once known (TX-10).
+            200..=299 => self.pa[2][R200][(((mhz - 200) / 5) as usize).min(15)],
             130..=199 => p[VHF][(((mhz - 130) / 3) as usize).min(15)],
             18..=63 => self.hf[level][(((mhz - 15) / 5) as usize).min(11)],
             // Below 18 MHz and 64-130 MHz: entry 0 of the High VHF row, whatever the level (stock).
@@ -139,8 +141,21 @@ mod tests {
         assert!(TxCal::parse(&b).is_some(), "UHF entries past 520 MHz aren't reached on amateur bands");
     }
 
+    /// CAL-14: the 1.25 m PA path (200-300 MHz, 243.0 MHz included) takes the Low curve at every level, so the
+    /// emergency frequency's double PTT can't drive it at High.
+    #[test]
+    fn band_125m_low_curve_only() {
+        let c = TxCal::parse(&sector(GAUGE_DEFAULT)).unwrap();
+        for f in [mhz(223) + 50_000, mhz(243), mhz(299)] {
+            let low = c.dac(f, 0);
+            assert_eq!(c.dac(f, 1), low);
+            assert_eq!(c.dac(f, 2), low);
+        }
+        assert_ne!(c.dac(mhz(146), 2), c.dac(mhz(146), 0), "other bands keep their levels");
+    }
+
     /// TX-8, CAL-8, CAL-9, TX-11, CAL-10: the PA drive comes only from the band's calibration curve at the chosen
-    /// level, by stock's lookup (High is stock's row 0, Low its row 2), and never reads past its row's 16 entries.
+    /// level (1.25 m: the Low curve, CAL-14), by stock's lookup (High is stock's row 0, Low its row 2), and never reads past its row's 16 entries.
     #[test]
     fn lookup_as_stock() {
         let c = TxCal::parse(&sector(GAUGE_DEFAULT)).unwrap();
@@ -149,10 +164,10 @@ mod tests {
         assert_eq!(c.dac(mhz(146) + 52_000, 0), 100 + 80 + VHF as u8 * 4 + 5, "Low is stock's level 2");
         assert_eq!(c.dac(mhz(446), 1), 100 + 40 + 4, "UHF entry (446-400)/10 = 4, Mid");
         assert_eq!(c.dac(mhz(190), 2), 100 + VHF as u8 * 4 + 15, "175-200 MHz: entry 15");
-        assert_eq!(c.dac(mhz(223) + 50_000, 2), 100 + R200 as u8 * 4 + 4);
+        assert_eq!(c.dac(mhz(223) + 50_000, 2), 100 + 80 + R200 as u8 * 4 + 4, "1.25 m: the Low curve (CAL-14)");
         assert_eq!(c.dac(mhz(28) + 40_000, 2), 60 + 2, "10 m: HF entry (28-15)/5 = 2");
         assert_eq!(c.dac(mhz(70), 0), 100 + VHF as u8 * 4, "64-130 MHz: High VHF entry 0, any level");
-        assert_eq!(c.dac(mhz(290), 2), 100 + R200 as u8 * 4 + 15, "280-300: the row's last entry, not the next row");
+        assert_eq!(c.dac(mhz(290), 2), 100 + 80 + R200 as u8 * 4 + 15, "280-300: the row's last entry, not the next row");
     }
 
     /// PWR-20: the battery gauge is stock's: the PA1 reading against the seven thresholds at 0xF200 (stock's
