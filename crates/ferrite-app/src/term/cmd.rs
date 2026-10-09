@@ -949,6 +949,42 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     if want.is_empty() {
         return Err(msg!("set needs a value after the number, e.g. set 0 7 1 Dark"));
     }
+    // Typed values (DEC-4's capcode, APRS-26's custom path): taken as written, "None" clears.
+    match p {
+        [4, 2, 3] => {
+            let v = if same(want, b"none") {
+                0
+            } else if want.len() <= 7 && want.iter().all(u8::is_ascii_digit) {
+                want.iter().fold(0u32, |a, &c| a * 10 + (c - b'0') as u32)
+            } else {
+                u32::MAX
+            };
+            if v > ferrite_core::decoders::CAPCODE_MAX {
+                return Err(msg!("{}: a capcode up to 2097151, or None", name));
+            }
+            app.set.pocsag_cap = v;
+        }
+        [5, 6, 2] if same(want, b"none") => groups::reset(app, p),
+        [5, 6, 2] => {
+            let mut up = Buf::<24>::new();
+            for &c in want {
+                up.push(&[c.to_ascii_uppercase()]);
+            }
+            if !crate::aprs::path_ok(up.as_bytes()) {
+                return Err(msg!("{}: one or two entries like WIDE1-1,WIDE2-1 (16 characters at most), or None", name));
+            }
+            app.set_aprs_custom_path(up.as_bytes());
+        }
+        _ => {}
+    }
+    if matches!(p, [4, 2, 3] | [5, 6, 2]) {
+        let mut v = Buf::<24>::new();
+        value(app, dev, p, &mut v);
+        let mut m = Msg::new();
+        path_text(p, &mut m);
+        put!(m, " {}: {}", name, Bytes(v.as_bytes()));
+        return Ok(Done::Said(m));
+    }
     // Step through the values as the knob does until one reads as asked; a full turn brings it back.
     let mut v = Buf::<24>::new();
     value(app, dev, p, &mut v);

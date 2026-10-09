@@ -143,6 +143,9 @@ pub struct Settings {
     pub pocsag_on: bool,
     pub pocsag_freq: Freq10,
     pub pocsag_cap: u32,
+    /// 0 4 8 (DEC-7): a toast for each decoder hit (pages and the other decoders); off, they only go to the
+    /// event log and the inbox count.
+    pub popups: bool,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
     pub fm_freq: u16,
     pub fm_step: u8,
@@ -312,6 +315,7 @@ impl Settings {
         pocsag_on: false,
         pocsag_freq: 43_998_750,
         pocsag_cap: 0,
+        popups: true,
         fm_freq: 10_110,
         fm_step: 1,
         fm_agc: 0,

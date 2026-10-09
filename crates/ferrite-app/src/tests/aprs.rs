@@ -348,11 +348,11 @@ fn card_text() {
 fn path_digipeater_and_after_voice_settings() {
     use crate::screens::groups::{change, reset};
     let mut a = A::new();
-    assert_eq!(a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice(), b"WIDE2-1"]);
+    assert_eq!(&*a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice(), b"WIDE2-1"]);
     change(&mut a.app, &[5, 6, 1], 1);
     assert!(a.app.aprs_cfg().path().is_empty(), "WIDE1-1,WIDE2-1 then None");
     change(&mut a.app, &[5, 6, 1], 1);
-    assert_eq!(a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice()]);
+    assert_eq!(&*a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice()]);
     reset(&mut a.app, &[5, 6, 1]);
     assert_eq!(a.app.aprs_cfg().path().len(), 2);
     assert!(!a.app.aprs_cfg().digi_on(), "APRS-12: off by default");
@@ -430,4 +430,34 @@ fn station_shows_its_last_message() {
     s.msg = Buf::new();
     crate::screens::aprs::last_message(&mut s, &a.s, Some(600));
     assert!(s.msg.is_empty());
+}
+
+/// APRS-26: 0 5 6 2's custom path: checked, kept, chosen at once, offered by 0 5 6 1 after the three, and # forgets
+/// it (the path going back to the default when it was in use).
+#[test]
+fn custom_path() {
+    use crate::aprs::{path_ok, PATH_CUSTOM, PATH_DEFAULT};
+    use crate::screens::groups::{change, reset};
+    for good in [b"WIDE2-2".as_slice(), b"WIDE1-1,WIDE2-2", b"VE3KPW", b"RS0ISS"] {
+        assert!(path_ok(good), "{:?}", core::str::from_utf8(good));
+    }
+    for bad in [b"".as_slice(), b"wide1-1", b"WIDE1-1,WIDE2-1,WIDE3-1", b"WIDE1-16", b"WIDE1-0", b"TOOLONGCALL", b"WIDE1-1,", b"WIDE1-1,WIDE2-2X"] {
+        assert!(!path_ok(bad), "{:?}", core::str::from_utf8(bad));
+    }
+    let mut a = A::new();
+    assert_eq!(a.app.aprs_cfg().path_choices(), 3, "no custom path: three choices");
+    a.app.set_aprs_custom_path(b"WIDE2-2");
+    let c = a.app.aprs_cfg();
+    assert_eq!((c.path, &*c.path()), (PATH_CUSTOM, &[b"WIDE2-2".as_slice()][..]));
+    assert_eq!(c.path_name(), b"WIDE2-2");
+    change(&mut a.app, &[5, 6, 1], 1);
+    assert_eq!(a.app.aprs_cfg().path, 0, "Custom then None: four choices");
+    change(&mut a.app, &[5, 6, 1], -1);
+    assert_eq!(a.app.aprs_cfg().path, PATH_CUSTOM);
+    a.app.set_aprs_custom_path(b"WIDE1-1,WIDE2-2");
+    assert_eq!(&*a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice(), b"WIDE2-2"]);
+    reset(&mut a.app, &[5, 6, 2]);
+    let c = a.app.aprs_cfg();
+    assert!(c.custom_text().is_empty());
+    assert_eq!(c.path, PATH_DEFAULT, "forgetting the path in use goes back to the default");
 }

@@ -45,14 +45,62 @@ pub struct AprsCfg {
     pub digi: u8,
     /// A beacon after each voice transmission (0 5 5 3, APRS-27).
     pub after_voice: bool,
+    /// The custom path (0 5 6 2, APRS-26) as typed, like `WIDE1-1,WIDE2-2`, zero-padded; used when
+    /// [`AprsCfg::path`] is [`PATH_CUSTOM`]. Checked by [`path_ok`] before it is kept.
+    pub custom: [u8; CUSTOM_LEN],
+}
+
+/// The custom path's room: two entries of up to 9 characters would be 19, so two short ones (WIDE1-1,WIDE2-2).
+pub const CUSTOM_LEN: usize = 16;
+
+/// The path entries a frame asks for: up to two (APRS-26).
+#[derive(Clone, Copy, Debug)]
+pub struct PathNames<'a> {
+    names: [&'a [u8]; 2],
+    n: usize,
+}
+
+impl<'a> core::ops::Deref for PathNames<'a> {
+    type Target = [&'a [u8]];
+    fn deref(&self) -> &Self::Target {
+        &self.names[..self.n]
+    }
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN] };
 
-    /// The path's entries.
-    pub fn path(&self) -> &'static [&'static [u8]] {
-        PATHS[self.path as usize % PATHS.len()].1
+    /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
+    pub fn path(&self) -> PathNames<'_> {
+        let mut p = PathNames { names: [b"", b""], n: 0 };
+        if self.path == PATH_CUSTOM {
+            for e in self.custom_text().split(|&c| c == b',').filter(|e| !e.is_empty()).take(2) {
+                p.names[p.n] = e;
+                p.n += 1;
+            }
+        } else {
+            for &e in PATHS[self.path as usize % PATHS.len()].1 {
+                p.names[p.n] = e;
+                p.n += 1;
+            }
+        }
+        p
+    }
+
+    /// The custom path as typed (empty: none set).
+    pub fn custom_text(&self) -> &[u8] {
+        let n = self.custom.iter().position(|&c| c == 0).unwrap_or(CUSTOM_LEN);
+        &self.custom[..n]
+    }
+
+    /// 0 5 6 1's choices: the [`PATHS`], and Custom once one is set.
+    pub fn path_choices(&self) -> u8 {
+        PATHS.len() as u8 + !self.custom_text().is_empty() as u8
+    }
+
+    /// 0 5 6 1's name for the path in use.
+    pub fn path_name(&self) -> &[u8] {
+        if self.path == PATH_CUSTOM { self.custom_text() } else { PATHS[self.path as usize % PATHS.len()].0.as_bytes() }
     }
 
     /// The digipeater is on (0 5 8 1).
@@ -91,8 +139,31 @@ impl AprsCfg {
     }
 }
 
-/// The paths offered (0 5 6 1, APRS-26): name and entries. A custom path (0 5 6 2) isn't built yet.
+/// The paths offered (0 5 6 1, APRS-26): name and entries; the custom path (0 5 6 2) is [`PATH_CUSTOM`].
 pub const PATHS: [(&str, &[&[u8]]); 3] = [("None", &[]), ("WIDE1-1", &[b"WIDE1-1"]), ("WIDE1-1,WIDE2-1", &[b"WIDE1-1", b"WIDE2-1"])];
+/// 0 5 6 1 on the custom path (0 5 6 2).
+pub const PATH_CUSTOM: u8 = PATHS.len() as u8;
+
+/// A custom path (0 5 6 2, APRS-26) is one or two entries split by a comma, each a callsign or alias of 1-6
+/// capitals and digits with an optional -SSID of 1-15 (WIDE1-1, WIDE2-2, a club's call), and fits
+/// [`CUSTOM_LEN`].
+pub fn path_ok(t: &[u8]) -> bool {
+    let entry = |e: &[u8]| {
+        let (call, ssid) = match e.iter().position(|&c| c == b'-') {
+            Some(i) => (&e[..i], Some(&e[i + 1..])),
+            None => (e, None),
+        };
+        let call_ok = (1..=6).contains(&call.len()) && call.iter().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+        let ssid_ok = ssid.is_none_or(|s| {
+            !s.is_empty() && s.len() <= 2 && s.iter().all(u8::is_ascii_digit) && s[0] != b'0' && {
+                let v = s.iter().fold(0u32, |a, &c| a * 10 + (c - b'0') as u32);
+                (1..=15).contains(&v)
+            }
+        });
+        call_ok && ssid_ok
+    };
+    !t.is_empty() && t.len() <= CUSTOM_LEN && t.split(|&c| c == b',').count() <= 2 && t.split(|&c| c == b',').all(entry)
+}
 /// WIDE1-1,WIDE2-1, the usual path and the default.
 pub const PATH_DEFAULT: u8 = 2;
 /// [`AprsCfg::digi`]'s bits.
@@ -267,6 +338,20 @@ impl App {
         if self.set.aprs_mode {
             self.send_slot(APRS_SLOT);
         }
+    }
+
+    /// The custom path as typed (0 5 6 2).
+    pub fn aprs_custom_path(&self) -> &[u8] {
+        self.aprs.custom_text()
+    }
+
+    /// A custom path typed at 0 5 6 2, already checked by [`path_ok`]: kept and chosen (APRS-26).
+    pub(crate) fn set_aprs_custom_path(&mut self, t: &[u8]) {
+        let mut c = self.aprs;
+        c.custom = [0; CUSTOM_LEN];
+        c.custom[..t.len().min(CUSTOM_LEN)].copy_from_slice(&t[..t.len().min(CUSTOM_LEN)]);
+        c.path = PATH_CUSTOM;
+        self.set_aprs(c);
     }
 
     /// 0 5 7 1 by the knob: 5 kHz steps from where it is, within chip 0's range.

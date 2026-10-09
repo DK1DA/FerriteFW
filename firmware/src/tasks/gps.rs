@@ -152,6 +152,12 @@ impl GpsUi {
             self.cfg = Some(cfg);
         }
         (dev.gps, dev.sats) = g.state();
+        // GPS-23: a clock set by hand runs from now; GPS time takes over when it comes, while 0 6 6 says GPS.
+        if let Some(u) = app.take_clock_set() {
+            self.clock = Some((u, now));
+            self.store_time = 0;
+        }
+        let set = app.settings();
         // GPS-7: GPS time sets the clock while "from GPS" is on; the clock keeps running from it after.
         if set.clock_gps {
             if let Some(u) = g.utc_now() {

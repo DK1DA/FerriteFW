@@ -83,7 +83,7 @@ const G6: [Entry; 9] = [
     (slow!("Coordinate format"), slow!("Deg, min"), slow!("How positions are written.")),
     (slow!("Units"), slow!("Metric"), slow!("Distance, altitude and speed units.")),
     (slow!("Time zone"), slow!("UTC"), slow!("The clock's offset from UTC.")),
-    (slow!("Clock"), slow!("24 h"), slow!("12 or 24 h, and set from GPS.")),
+    (slow!("Clock"), slow!("24 h"), slow!("12 or 24 h, from GPS; OK sets it by hand.")),
     (slow!("Waypoints"), slow!(""), slow!("Marked places; go to one.")),
     (slow!("GPS during RX/TX"), slow!("Always on"), slow!("Turn the GPS off around signals.")),
     (slow!("Fixed position"), slow!("None"), slow!("Used when there is no fix.")),
@@ -159,7 +159,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ((4, 2), &[
         (slow!("Decode"), slow!("Off"), slow!("Pagers on a slot tuned to the frequency.")),
         (slow!("Frequency"), slow!("439.9875"), slow!("The pager channel; 512, 1200 and 2400 baud.")),
-        (slow!("Capcode filter"), slow!("None"), slow!("Only this capcode; # clears it.")),
+        (slow!("Capcode filter"), slow!("None"), slow!("Only this capcode: OK types it, # clears it.")),
     ]),
     ((4, 3), &[(slow!("DSC"), slow!("Off"), slow!("Decode DSC on channel 70.")), (slow!("Own MMSI"), slow!("None"), slow!("Your MMSI, receive only."))]),
     ((4, 4), &[(slow!("AIS"), slow!("Off"), slow!("161.975 and 162.025, in turn.")), (slow!("Range filter"), slow!("25 nm"), slow!("Off, 5, 10, 25, 50 nm; needs a fix."))]),
@@ -183,7 +183,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         (slow!("After voice TX"), slow!("Off"), slow!("Beacon after you talk.")),
         (slow!("Power"), slow!("Low"), slow!("Beacon and message power.")),
     ]),
-    ((5, 6), &[(slow!("Path"), slow!("WIDE1-1,WIDE2-1"), slow!("None, WIDE1-1, or WIDE1-1,WIDE2-1.")), (slow!("Custom path"), slow!("Not yet"), slow!("Your own path: not built yet."))]),
+    ((5, 6), &[(slow!("Path"), slow!("WIDE1-1,WIDE2-1"), slow!("None, WIDE1-1, WIDE1-1,WIDE2-1, or custom.")), (slow!("Custom path"), slow!("None"), slow!("Your own path, like WIDE2-2: OK types it."))]),
     ((5, 7), &[
         (slow!("Frequency"), slow!("144.390"), slow!("The APRS channel.")),
         (slow!("TX delay"), slow!("300 ms"), slow!("Carrier before data.")),
@@ -464,8 +464,17 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
         }
         // The group rows show their setting too (APRS-26).
         [5, 6] | [5, 6, 1] => {
-            b.set(crate::aprs::PATHS[app.aprs_cfg().path as usize % crate::aprs::PATHS.len()].0.as_bytes());
+            b.set(app.aprs_cfg().path_name());
             app.aprs_cfg().path != crate::aprs::PATH_DEFAULT
+        }
+        [5, 6, 2] => {
+            let c = app.aprs_cfg();
+            b.set(if c.custom_text().is_empty() { b"None".as_slice() } else { c.custom_text() });
+            !c.custom_text().is_empty()
+        }
+        [4, 8] => {
+            pick(b, &ON_OFF, s.popups as u8);
+            !s.popups
         }
         [5, 8] | [5, 8, 1] => {
             pick(b, &ON_OFF, app.aprs_cfg().digi_on() as u8);
@@ -701,7 +710,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 51] = [
+pub(crate) const SETTABLE: [&[u8]; 54] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -716,12 +725,15 @@ pub(crate) const SETTABLE: [&[u8]; 51] = [
     &[3, 2, 5],
     &[4, 2, 1],
     &[4, 2, 2],
+    &[4, 2, 3],
+    &[4, 8],
     &[4, 9, 1],
     &[5, 3],
     &[5, 5, 1],
     &[5, 5, 3],
     &[5, 5, 4],
     &[5, 6, 1],
+    &[5, 6, 2],
     &[5, 8, 1],
     &[5, 8, 2],
     &[5, 8, 3],
@@ -805,7 +817,11 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [5, 5, 1] => app.step_beacon(d),
         [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
         [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
-        [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { path: cycle(app.aprs_cfg().path, d, crate::aprs::PATHS.len()), ..app.aprs_cfg() }),
+        [5, 6, 1] => {
+            let c = app.aprs_cfg();
+            app.set_aprs(crate::aprs::AprsCfg { path: cycle(c.path, d, c.path_choices() as usize), ..c });
+        }
+        [4, 8] => s.popups = !s.popups,
         [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
         [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
         [5, 8, 3] => {
@@ -939,6 +955,13 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [4, 2, 1] => s.pocsag_on = d.pocsag_on,
         [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
         [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
+        [4, 8] => s.popups = d.popups,
+        // # forgets the custom path; a path set to it goes back to the default (APRS-26)
+        [5, 6, 2] => {
+            let c = app.aprs_cfg();
+            let path = if c.path == crate::aprs::PATH_CUSTOM { crate::aprs::PATH_DEFAULT } else { c.path };
+            app.set_aprs(crate::aprs::AprsCfg { custom: [0; crate::aprs::CUSTOM_LEN], path, ..c });
+        }
         [9, 2, 1] => s.bt = d.bt,
         [9, 2, 5] => s.cable_port = d.cable_port,
         [5, 9, 1] => s.kiss_port = d.kiss_port,
@@ -1100,6 +1123,23 @@ impl Group {
                 app.open(Dest::Text(super::text::TextFor::PowerOn));
             }
             [8, 9] if ok => set_extend(app, !app.set.extend_tx),
+            // OK types the capcode (DEC-4), the clock (GPS-23) or the custom path (APRS-26); the knob still
+            // changes 0 6 6's format.
+            [4, 2, 3] => {
+                app.text = Buf::new();
+                if app.set.pocsag_cap != 0 {
+                    let _ = uwrite!(app.text, "{}", app.set.pocsag_cap);
+                }
+                app.open(Dest::Text(super::text::TextFor::Capcode));
+            }
+            [6, 6] if ok => {
+                app.text = Buf::new();
+                app.open(Dest::Text(super::text::TextFor::Clock));
+            }
+            [5, 6, 2] => {
+                app.text = Buf::from(app.aprs_custom_path());
+                app.open(Dest::Text(super::text::TextFor::AprsPath));
+            }
             _ => {
                 if let Some(d) = nav::menu0(p) {
                     app.open(d);

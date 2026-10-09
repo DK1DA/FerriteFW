@@ -41,6 +41,22 @@ pub enum TextFor {
     /// A grid square (GPS-21): the fixed position (A8), or a new waypoint.
     GridFixed,
     GridWaypoint,
+    /// 0 4 2 3: the one pager capcode kept (DEC-4), digits only; empty keeps every capcode.
+    Capcode,
+    /// 0 6 6: the clock set by hand (GPS-23), 12 digits YYYYMMDDhhmm in local time.
+    Clock,
+    /// 0 5 6 2: a custom APRS path (APRS-26), capitals and digits, # for the comma.
+    AprsPath,
+}
+
+/// What a text takes: any text, capitals and digits (a callsign, a grid square), digits only, or a path
+/// (capitals and digits with # typing the comma between entries).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Any,
+    Caps,
+    Digits,
+    Path,
 }
 
 impl TextFor {
@@ -53,6 +69,9 @@ impl TextFor {
             TextFor::PowerOn => "Power-on message",
             TextFor::DtmfName(_) => "DTMF memory name",
             TextFor::GridFixed | TextFor::GridWaypoint => "Grid square",
+            TextFor::Capcode => "Pager capcode",
+            TextFor::Clock => "Date and time",
+            TextFor::AprsPath => "APRS path",
         }
     }
 
@@ -62,6 +81,8 @@ impl TextFor {
             TextFor::Preset(_) => 12,
             TextFor::DtmfName(_) => 10,
             TextFor::GridFixed | TextFor::GridWaypoint => 6,
+            TextFor::Capcode => 7,
+            TextFor::Clock => 12,
             _ => 16,
         }
     }
@@ -79,13 +100,29 @@ impl TextFor {
             TextFor::PowerOn => Buf::from(app.set.pon_text.as_bytes()),
             TextFor::DtmfName(i) => Buf::from(store.data().dtmf_name(i).as_bytes()),
             TextFor::GridFixed if app.set.fixed_on => Buf::from(&super::lists::grid(app.set.fixed)),
-            TextFor::GridFixed | TextFor::GridWaypoint => Buf::new(),
+            TextFor::GridFixed | TextFor::GridWaypoint | TextFor::Clock => Buf::new(),
+            TextFor::Capcode if app.set.pocsag_cap == 0 => Buf::new(),
+            TextFor::Capcode => {
+                let mut b = Buf::new();
+                let _ = uwrite!(b, "{}", app.set.pocsag_cap);
+                b
+            }
+            TextFor::AprsPath => Buf::from(app.aprs_custom_path()),
         }
     }
 
-    /// Capitals and digits only, * switching them (a callsign, a grid square).
+    fn kind(self) -> Kind {
+        match self {
+            TextFor::Callsign | TextFor::GridFixed | TextFor::GridWaypoint => Kind::Caps,
+            TextFor::Capcode | TextFor::Clock => Kind::Digits,
+            TextFor::AprsPath => Kind::Path,
+            _ => Kind::Any,
+        }
+    }
+
+    /// Capitals and digits only, * switching them (a callsign, a grid square, a path).
     fn callsign(self) -> bool {
-        matches!(self, TextFor::Callsign | TextFor::GridFixed | TextFor::GridWaypoint)
+        matches!(self.kind(), Kind::Caps | Kind::Path)
     }
 }
 
@@ -112,11 +149,15 @@ pub struct Text {
 
 impl Text {
     pub fn new(to: TextFor) -> Self {
-        Text { to, mode: 0, last: 0, tail: 0, at: 0 }
+        let mode = if to.kind() == Kind::Digits { 2 } else { 0 };
+        Text { to, mode, last: 0, tail: 0, at: 0 }
     }
 
     /// The mode * goes to: KEY-12's case and symbols; a callsign has capitals and digits only (SETUP-12).
     fn next_mode(self) -> u8 {
+        if self.to.kind() == Kind::Digits {
+            return 2; // digits only: * changes nothing
+        }
         match (self.to.callsign(), self.mode) {
             (true, 0) => 2,
             (true, _) => 0,
@@ -201,9 +242,9 @@ impl View for Text {
                 s.mode = self.next_mode();
                 s.last = 0;
             }
-            (Key::Hash, Press::Short) if !self.to.callsign() => {
+            (Key::Hash, Press::Short) if matches!(self.to.kind(), Kind::Any | Kind::Path) => {
                 if app.text.len() < max {
-                    app.text.push(b" ");
+                    app.text.push(if self.to.kind() == Kind::Path { b"," } else { b" " });
                 }
                 s.last = 0;
             }
@@ -241,13 +282,21 @@ impl View for Text {
         }
         if app.dirty(R_HELP, hash(&(self.mode, self.to))) {
             let m = self.mode;
-            let (star, hash_): (&[u8], &[u8]) = if self.to.callsign() {
-                (if m == 0 { b"digits" } else { b"letters" }, b"")
+            let (star, hash_): (&[u8], &[u8]) = if self.to.kind() == Kind::Digits {
+                (b"", b"")
+            } else if self.to.callsign() {
+                (if m == 0 { b"digits" } else { b"letters" }, if self.to.kind() == Kind::Path { b"comma" } else { b"" })
             } else {
                 (MODES[self.next_mode() as usize].as_bytes(), b"space")
             };
             keypad(lcd, 104, |d| legend(m, d), star, hash_);
-            let tip: &[u8] = if self.to.callsign() {
+            let tip: &[u8] = if self.to == TextFor::Clock {
+                b"Year, month, day, hour, minute: 202610081430. Local time."
+            } else if self.to == TextFor::Capcode {
+                b"The capcode's digits. Empty keeps every capcode."
+            } else if self.to == TextFor::AprsPath {
+                b"Like WIDE1-1,WIDE2-1: up to 2 entries, # between."
+            } else if self.to.callsign() {
                 b"Tap a key again for its next letter. Capitals only."
             } else {
                 b"Tap a key again for its next letter; * changes case."
@@ -258,6 +307,9 @@ impl View for Text {
 
     fn hints(self, app: &App) -> Hints {
         let back = if app.text.is_empty() { ("BACK", "Back") } else { ("BACK", "Delete") };
+        if self.to.kind() == Kind::Digits {
+            return Hints::new(&[("OK", "Keep"), back]);
+        }
         Hints::new(&[("*", MODES[self.next_mode() as usize]), ("OK", "Keep"), back])
     }
 }
@@ -300,6 +352,31 @@ fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
         }
         TextFor::DtmfName(i) => {
             store.data().request(crate::data::Op::DtmfName(i, Buf::from(t.as_bytes())));
+        }
+        TextFor::Capcode => {
+            // DEC-4: one capcode (21 bits, up to 2,097,151); empty keeps every capcode
+            let v = t.as_bytes().iter().fold(0u32, |a, &c| a.saturating_mul(10).saturating_add((c - b'0') as u32));
+            if v > ferrite_core::decoders::CAPCODE_MAX {
+                return app.show_toast(b"Capcode", b"up to 2097151", false);
+            }
+            app.set.pocsag_cap = v;
+        }
+        TextFor::Clock => {
+            // GPS-23: a manual set, in local time; GPS time takes over when a fix comes, if 0 6 6 says "GPS"
+            let Some(local) = crate::gpsdata::parse_clock(t.as_bytes()) else {
+                return app.show_toast(b"Date and time", b"like 202610081430", false);
+            };
+            let utc = crate::gpsdata::local_to_utc(local, app.set.tz);
+            app.set_clock_by_hand(utc);
+            app.back();
+            return app.show_toast(b"Clock", b"set", false);
+        }
+        TextFor::AprsPath => {
+            // APRS-26: up to 2 entries like WIDE2-1, chosen at once
+            if !crate::aprs::path_ok(t.as_bytes()) {
+                return app.show_toast(b"APRS path", b"like WIDE1-1,WIDE2-1", false);
+            }
+            app.set_aprs_custom_path(t.as_bytes());
         }
         TextFor::GridFixed | TextFor::GridWaypoint => {
             // GPS-21: 4 or 6 characters, the square's centre; anything else stays here to be fixed

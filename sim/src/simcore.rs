@@ -459,6 +459,11 @@ impl SimCore {
                     }
                 }
             }
+            // GPS-23: a clock set by hand at 0 6 6 (the sim has no GPS time to take over)
+            if let Some(u) = app.take_clock_set() {
+                self.clock0 = (u as u64).saturating_sub(now as u64 / 1000);
+                store.set_time(u);
+            }
             let secs = self.clock0 + now as u64 / 1000;
             dev.clock_min = Some(((secs % 86_400) / 60) as u16);
             app.tick(now, &radio.live, store);

@@ -151,6 +151,28 @@ pub fn local_clock(utc: u32, tz: u8) -> (u16, bool) {
     (min.rem_euclid(1440) as u16, q == 0)
 }
 
+/// A clock typed by hand (GPS-23): 12 digits YYYYMMDDhhmm, years 2000-2099, as seconds since 1970 in the
+/// same time it was typed in (local); None if it isn't a real date and time.
+pub fn parse_clock(t: &[u8]) -> Option<u32> {
+    if t.len() != 12 || !t.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let n = |a: usize, b: usize| t[a..b].iter().fold(0u32, |v, &c| v * 10 + (c - b'0') as u32);
+    let (y, m, d, hh, mm) = (n(0, 4), n(4, 6), n(6, 8), n(8, 10), n(10, 12));
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if !(2000..=2099).contains(&y) || !(1..=12).contains(&m) || d == 0 || d > days[m as usize - 1] {
+        return None;
+    }
+    ferrite_core::gps::unix_time(d * 10_000 + m * 100 + y % 100, hh * 10_000 + mm * 100)
+}
+
+/// Local seconds (as [`parse_clock`] gives them) back to UTC for time zone `tz` (an index into [`TIME_ZONES`]).
+pub fn local_to_utc(local: u32, tz: u8) -> u32 {
+    let q = TIME_ZONES[tz as usize % TIME_ZONES.len()] as i32;
+    (local as i64 - q as i64 * 900) as u32
+}
+
 /// Metres between two positions (equirectangular: plenty for the arrival radii of 50 m to 1 km).
 pub fn metres(a: Pos, b: Pos) -> u32 {
     let lat = ((a.lat as f32 + b.lat as f32) * 0.5e-7).to_radians();
@@ -342,5 +364,22 @@ mod tests {
         (set.gps_on, set.gps_rxtx, set.arrival) = (false, 2, 2);
         assert_eq!(cfg(&set), GpsCfg { on: false, rxtx: 2 });
         assert_eq!(arrival_radius_m(&set), 100);
+    }
+
+    /// GPS-23: a typed clock: real dates only, and back to UTC by the zone.
+    #[test]
+    fn clock_by_hand() {
+        let t = parse_clock(b"202610081430").expect("a real date");
+        assert_eq!(t, ferrite_core::gps::unix_time(81_026, 143_000).unwrap());
+        assert!(parse_clock(b"202602300000").is_none(), "no 30 February");
+        assert!(parse_clock(b"202402290000").is_some(), "2024 is a leap year");
+        assert!(parse_clock(b"202613010000").is_none());
+        assert!(parse_clock(b"202610082460").is_none());
+        assert!(parse_clock(b"2026100814").is_none(), "12 digits");
+        let utc0 = TIME_ZONES.iter().position(|&q| q == 0).unwrap() as u8;
+        assert_eq!(local_to_utc(t, utc0), t);
+        if let Some(east) = TIME_ZONES.iter().position(|&q| q == 4) {
+            assert_eq!(local_to_utc(t, east as u8), t - 3600, "UTC+1: local is an hour ahead");
+        }
     }
 }

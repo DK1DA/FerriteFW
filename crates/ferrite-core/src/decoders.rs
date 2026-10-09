@@ -58,6 +58,8 @@ const _: () = assert!(core::mem::size_of::<Decoder>() <= BUDGET);
 
 /// A pager message's characters kept: the event log's text field holds 64.
 pub const PAGE_TEXT: usize = 64;
+/// The largest capcode: POCSAG addresses are 21 bits.
+pub const CAPCODE_MAX: u32 = (1 << 21) - 1;
 
 /// A decoded page, small enough to cross from the DSP task to the UI task (DEC-4, DEC-7): 72 bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

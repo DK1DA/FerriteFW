@@ -499,7 +499,7 @@ impl AprsLive {
     fn framed(&self, me: Address, info: &[u8], what: &'static str, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX], t: Tick) -> Tick {
         let names = cfg.path();
         let mut path = [me; 2];
-        for (a, n) in path.iter_mut().zip(names) {
+        for (a, n) in path.iter_mut().zip(names.iter()) {
             *a = Address::from_text(n).unwrap_or(me);
         }
         let dest = Address::from_text(TOCALL).unwrap_or(me);

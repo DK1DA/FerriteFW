@@ -280,6 +280,8 @@ pub struct App {
     aprs_st: u8,
     /// The armed reset's # was held 3 s ([`screens::confirm`]): done at the next tick, which has the store.
     want_reset: bool,
+    /// A clock set by hand (GPS-23), UTC seconds, for the clock's owner to take ([`App::take_clock_set`]).
+    clock_set: Option<u32>,
     /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
     rx_mask: u8,
     scan_mask: u8,
@@ -343,6 +345,7 @@ impl App {
             aprs: aprs::AprsCfg::DEFAULT,
             aprs_st: 0,
             want_reset: false,
+            clock_set: None,
             rx_mask: 0,
             scan_mask: 0,
             relay_mask: 0,
@@ -585,6 +588,26 @@ impl App {
     pub fn redraw_all(&mut self) {
         self.drawn.screen = None;
         self.drawn.sbar = None;
+    }
+
+    /// The clock set by hand at 0 6 6 (GPS-23): UTC seconds for the clock's owner (the GPS loop on the radio,
+    /// the simulator) to take; GPS time takes over again when a fix comes, while 0 6 6 says "GPS" (GPS-7).
+    pub(crate) fn set_clock_by_hand(&mut self, utc: u32) {
+        self.clock_set = Some(utc);
+    }
+
+    /// A clock set by hand since the last call ([`App::set_clock_by_hand`]).
+    pub fn take_clock_set(&mut self) -> Option<u32> {
+        self.clock_set.take()
+    }
+
+    /// A decoder's hit (DEC-7): the inbox count, and a toast only while Popups (0 4 8) is on.
+    pub fn notify_decode(&mut self, head: &[u8], body: &[u8]) {
+        if self.set.popups {
+            self.notify(head, body, false);
+        } else {
+            self.inbox = self.inbox.saturating_add(1);
+        }
     }
 
     /// A message, decode or alert arrived: a toast and the inbox count (SBAR-6); an alert also opens the alert

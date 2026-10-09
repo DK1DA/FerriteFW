@@ -1224,3 +1224,71 @@ fn transmit_tones_reach_the_radio() {
     t.app.set.tail_mode = 2; // transmit only
     assert_eq!(t.app.slot_tones(1), (1, 2), "a VFO follows the radio's");
 }
+
+/// DEC-4: 0 4 2 3 types the capcode (digits only, 21 bits at most); empty keeps every capcode.
+#[test]
+fn capcode_typed_at_0_4_2_3() {
+    let mut t = T::new();
+    menu0(&mut t, &[4, 2, 3]);
+    assert!(matches!(t.app.screen(), Screen::Text(_)));
+    for d in [1, 2, 3, 4, 5, 6, 7] {
+        t.tap(Key::Digit(d));
+    }
+    t.tap(Key::Menu);
+    assert_eq!(t.app.set.pocsag_cap, 1_234_567);
+    t.app.screen = Screen::Home;
+    menu0(&mut t, &[4, 2, 3]);
+    for _ in 0..7 {
+        t.tap(Key::Exit); // delete the digits
+    }
+    t.tap(Key::Menu);
+    assert_eq!(t.app.set.pocsag_cap, 0, "empty: every capcode");
+    t.app.screen = Screen::Home;
+    menu0(&mut t, &[4, 2, 3]);
+    for d in [9, 9, 9, 9, 9, 9, 9] {
+        t.tap(Key::Digit(d));
+    }
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Text(_)), "over 2097151 stays to be fixed");
+    assert_eq!(t.app.set.pocsag_cap, 0);
+}
+
+/// GPS-23: OK on 0 6 6 sets the clock by hand, typed in local time; the clock's owner takes it as UTC.
+#[test]
+fn clock_set_by_hand() {
+    let mut t = T::new();
+    let utc_minus5 = crate::settings::TIME_ZONES.iter().position(|&q| q == -20).expect("UTC-5") as u8;
+    t.app.set.tz = utc_minus5;
+    menu0(&mut t, &[6, 6]);
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Text(_)));
+    for c in b"202610081430" {
+        t.tap(Key::Digit(c - b'0'));
+    }
+    t.tap(Key::Menu);
+    let local = ferrite_core::gps::unix_time(81_026, 143_000).unwrap();
+    assert_eq!(t.app.take_clock_set(), Some(local + 5 * 3600), "14:30 at UTC-5 is 19:30 UTC");
+    assert_eq!(t.app.take_clock_set(), None, "taken once");
+    // A date that doesn't exist stays to be fixed.
+    t.app.screen = Screen::Home;
+    menu0(&mut t, &[6, 6]);
+    t.tap(Key::Menu);
+    for c in b"202602301200" {
+        t.tap(Key::Digit(c - b'0'));
+    }
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Text(_)));
+    assert_eq!(t.app.take_clock_set(), None);
+}
+
+/// DEC-7: 0 4 8 Popups is a real setting, # puts it back on.
+#[test]
+fn popups_setting() {
+    use crate::screens::groups::{change, reset};
+    let mut t = T::new();
+    assert!(t.app.set.popups, "on by default");
+    change(&mut t.app, &[4, 8], 1);
+    assert!(!t.app.set.popups);
+    reset(&mut t.app, &[4, 8]);
+    assert!(t.app.set.popups);
+}

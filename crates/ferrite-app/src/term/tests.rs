@@ -693,6 +693,22 @@ fn command_line_set_and_get() {
     assert_eq!(r.app.set.fm_step, 2);
     r.cmd("set 0 1 1 off");
     assert_eq!(r.app.watch, 0);
+    // Typed values: the pager capcode (DEC-4), the custom APRS path (APRS-26), Popups (DEC-7).
+    r.cmd("set 0 4 2 3 1234567");
+    assert_eq!(r.app.set.pocsag_cap, 1_234_567);
+    r.cmd("set 0 4 2 3 none");
+    assert_eq!(r.app.set.pocsag_cap, 0);
+    r.cmd("set 0 4 2 3 9999999");
+    assert!(r.bottom().contains("a capcode up to 2097151"), "{}", r.bottom());
+    r.cmd("set 0 5 6 2 wide2-2");
+    assert_eq!(r.app.aprs_cfg().custom_text(), b"WIDE2-2");
+    assert_eq!(r.app.aprs_cfg().path, crate::aprs::PATH_CUSTOM);
+    r.cmd("set 0 5 6 2 WIDE1-1,WIDE2-1,WIDE3-1");
+    assert!(r.bottom().contains("one or two entries"), "{}", r.bottom());
+    r.cmd("set 0 5 6 2 None");
+    assert!(r.app.aprs_cfg().custom_text().is_empty());
+    r.cmd("set 0 4 8 off");
+    assert!(!r.app.set.popups);
 }
 
 /// Every refusal says what was wrong and how to put it right; nothing changes.

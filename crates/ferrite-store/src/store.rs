@@ -88,11 +88,13 @@ pub enum Job {
 }
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
-/// bytes), then the settings added later (path, digipeater, beacon after voice, one spare: [`APRS_MORE`]). A
-/// record from before them is shorter and reads them as their defaults.
+/// bytes), then the settings added later (path, digipeater, beacon after voice, one spare: [`APRS_MORE`]), then
+/// the custom path (0 5 6 2, zero-padded: [`APRS_PATH`]). A record from before them is shorter and reads them as
+/// their defaults.
 const QUICK_LEN: usize = 68;
 const APRS_MORE: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
-const APRS_PAYLOAD: usize = APRS_MORE + 4;
+const APRS_PATH: usize = APRS_MORE + 4;
+const APRS_PAYLOAD: usize = APRS_PATH + ferrite_app::aprs::CUSTOM_LEN;
 const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
 /// The store's clock starts here when nothing is stored and no clock is set: about UTC when Ferrite was written
 /// (Sep 2026), so a GPS fix later moves it by a plausible amount rather than decades.
@@ -213,9 +215,18 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             self.f.raw_read(c.at, &mut b)?;
             let mut cfg = AprsCfg { f5k: crate::u16_at(&b, 0), beacon: b[2], power: b[3].min(2), ..AprsCfg::DEFAULT };
             if c.len as usize >= APRS_PAYLOAD {
+                let mut t = [0u8; ferrite_app::aprs::CUSTOM_LEN];
+                self.f.raw_read(c.at + APRS_PATH as u32, &mut t)?;
+                // kept only if it still checks (APRS-26); anything else reads as none
+                let n = t.iter().position(|&b| b == 0).unwrap_or(t.len());
+                if ferrite_app::aprs::path_ok(&t[..n]) {
+                    cfg.custom[..n].copy_from_slice(&t[..n]);
+                }
+            }
+            if c.len as usize >= APRS_PATH {
                 let mut m = [0u8; 4];
                 self.f.raw_read(c.at + APRS_MORE as u32, &mut m)?;
-                cfg.path = if (m[0] as usize) < ferrite_app::aprs::PATHS.len() { m[0] } else { cfg.path };
+                cfg.path = if m[0] < cfg.path_choices() { m[0] } else { cfg.path };
                 cfg.digi = m[1] & 0x73;
                 cfg.after_voice = m[2] == 1;
             }
@@ -915,6 +926,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         p[..2].copy_from_slice(&c.f5k.to_le_bytes());
         (p[2], p[3]) = (c.beacon, c.power);
         (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2]) = (c.path, c.digi, c.after_voice as u8);
+        p[APRS_PATH..APRS_PAYLOAD].copy_from_slice(&c.custom);
         for i in 0..ferrite_app::words::QUICK {
             let t = match q {
                 Some((k, t)) if k as usize == i => t,

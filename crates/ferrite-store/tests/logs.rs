@@ -177,7 +177,10 @@ fn waypoints_list_newest_first_and_move_down_on_delete() {
 fn aprs_settings_wait_two_seconds_and_quick_messages_are_kept() {
     let s = mount(SimFlash::new());
     let a = app();
-    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: 1, digi: 0x23, after_voice: true };
+    // APRS-26: the custom path is kept too, and chosen (path 3)
+    let mut custom = [0u8; ferrite_app::aprs::CUSTOM_LEN];
+    custom[..7].copy_from_slice(b"WIDE2-2");
+    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom };
     s.autosave(1000, &a);
     assert!(s.request(Op::AprsCfg(cfg)));
     assert!(s.aprs_cfg() == cfg);

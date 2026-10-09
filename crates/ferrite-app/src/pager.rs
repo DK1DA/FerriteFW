@@ -27,7 +27,8 @@ impl App {
         self.pager_slot(live).is_some()
     }
 
-    /// A page the decoder heard: through the capcode filter (0 4 2 3), into the inbox with a toast (DEC-7),
+    /// A page the decoder heard: through the capcode filter (0 4 2 3), into the inbox with a toast if Popups is on
+    /// (DEC-7),
     /// and the event log record to keep (INBOX-6). None when the filter drops it.
     pub fn pager_hit(&mut self, p: &Page, live: &LiveAll) -> Option<Event> {
         let s = &self.set;
@@ -39,7 +40,7 @@ impl App {
         let mut head = Buf::<20>::new();
         let _ = uwrite!(head, "Pager {}", p.capcode);
         let text: &[u8] = if p.len == 0 { b"(tone only)" } else { p.text() };
-        self.notify(head.as_bytes(), text, false);
+        self.notify_decode(head.as_bytes(), text);
         Some(Event { src: Src::Pocsag, ago_s: 0, freq, slot, unread: true, id: p.capcode, x: p.baud, y: p.function as u16, pos: None, name: Buf::new(), text: Buf::from(text) })
     }
 }
@@ -87,5 +88,22 @@ mod tests {
         t.app.set.pocsag_cap = 42;
         assert!(t.app.pager_hit(&page(1_234_567, b"NOT FOR US"), &live).is_none(), "filtered");
         assert!(t.app.pager_hit(&page(42, b""), &live).is_some_and(|e| e.text.as_bytes() == b"(tone only)"));
+    }
+
+    /// DEC-7: with Popups (0 4 8) off a page still counts in the inbox and is logged, but shows no toast.
+    #[test]
+    fn popups_off_logs_without_a_toast() {
+        let mut t = Harness { app: App::new(crate::tests::set(), crate::tests::alert()) };
+        t.app.set.pocsag_on = true;
+        t.app.set.popups = false;
+        let mut live = LiveAll::default();
+        live.slots[0].freq = 43_998_750;
+        let before = t.app.inbox;
+        assert!(t.app.pager_hit(&page(7, b"QUIET"), &live).is_some(), "still logged");
+        assert_eq!(t.app.inbox, before + 1);
+        assert!(t.app.toast.is_none(), "no toast with Popups off");
+        t.app.set.popups = true;
+        t.app.pager_hit(&page(7, b"LOUD"), &live);
+        assert!(t.app.toast.is_some(), "a toast with Popups on");
     }
 }
