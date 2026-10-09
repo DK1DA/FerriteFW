@@ -67,6 +67,7 @@ input.wide { flex: 1; min-width: 180px; font-family: ui-monospace, monospace; }
     <div class="row" style="margin-top:8px">
       <label>Data channel <select id="datach" disabled></select></label>
       <label><input type="checkbox" id="localecho"> Local echo</label>
+      <label title="Also log every received chunk as hex below (KISS and other binary data)"><input type="checkbox" id="hexlog" checked> Hex log</label>
       <label>Enter sends <select id="eol"><option value="\r">CR</option><option value="\r\n">CR LF</option><option value="\n">LF</option></select></label>
       <span id="stats"></span>
     </div>
@@ -143,7 +144,7 @@ function printable(b) { return [...b].map(x => x >= 32 && x < 127 ? String.fromC
 function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = cls || ''; }
 function stats() {
   const dt = Math.max((performance.now() - t0) / 1000, 0.001);
-  $('stats').textContent = link ? `rx ${rx} B  tx ${tx} B  (${(rx / dt).toFixed(0)} B/s in)` : '';
+  $('stats').textContent = `rx ${rx} B  tx ${tx} B` + (link ? `  (${(rx / dt).toFixed(0)} B/s in)` : '');
 }
 setInterval(stats, 1000);
 function enable(on) {
@@ -159,6 +160,7 @@ function enable(on) {
 function received(bytes) {
   rx += bytes.length;
   term.write(bytes);
+  if ($('hexlog').checked) log(`RX ${bytes.length} B  "${printable(bytes)}"  [${hex(bytes)}]`);
 }
 
 // Terminal input -> radio
