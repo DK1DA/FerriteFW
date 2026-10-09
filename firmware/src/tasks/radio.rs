@@ -39,13 +39,15 @@ use crate::hal::gpio::Mode;
 use crate::hal::i2c::I2c;
 use crate::tasks::{check, CHECK_BK0, CHECK_BK1};
 use bk4829::wire::ThreeWire;
-use bk4829::{int, AfOut, Bandwidth, Bk4829, Demod, Fsk};
+use bk4829::{int, AfOut, Bk4829};
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, mhz, Freq10};
 use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, Source, SLOTS};
-use ferrite_core::same_rx::{self, Assembler, Repeats, Step};
-use ferrite_core::path::{Act, Cause, Path, Rx, Sel, Steps};
+use ferrite_core::same_rx::{Assembler, Repeats, Step};
+use ferrite_core::path::{Cause, Path, Rx, Sel, Steps};
+use ferrite_radio::chip::{self as radio_chip, RxSetup};
+use ferrite_radio::Pin;
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use ferrite_core::scan::{self, Check, Range, Scan};
 use ferrite_core::tonegen;
@@ -85,9 +87,6 @@ const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone:
 /// confirm on the bench with the unselected front end, which may hear enough to drop the hop).
 #[cfg(feature = "tx")]
 const XB_TURN_MS: u32 = 50;
-/// REG_30 read back after the key-up write (TX-7): stock's transmit value with the microphone.
-#[cfg(feature = "tx")]
-const REG30_TX_MIC: u16 = 0xC1FE;
 
 /// Speaker amplifier and the shared audio stage (both roles likely, from stock).
 fn speaker(on: bool) {
@@ -211,30 +210,11 @@ struct SameRx {
     repeats: Repeats,
 }
 
-/// The weather channels, 162.400-162.550 MHz (WX-1).
-const WX: core::ops::RangeInclusive<Freq10> = mhz(162) + 40_000..=mhz(162) + 55_000;
-
-/// The modem in its NOAA SAME receive mode (BK4819 application note; nobody's firmware uses it yet, so every
-/// value is bench-confirm, roadmap 6b): REG_58 receive mode 000 with bandwidth 010 and receive gain 3 (bits 7:6
-/// set as in both of stock's modem modes), the rate in Tone 2's word (520.83 baud x 10.32444), the four sync
-/// bytes `ZCZC`, no CRC (stock's REG_5C with bit 6 clear), and the longest header's length.
-const SAME_FSK: Fsk = Fsk {
-    mode: 0x03C4,
-    tone_word: ((same_rx::BAUD_MILLI as u64 * 1_032_444 + 50_000_000) / 100_000_000) as u16,
-    tone_gain: 0,
-    preamble: 16,
-    sync: same_rx::SYNC,
-    sync4: true,
-    crc: 0xA730 & !(1 << 6),
-    scramble: false,
-    len: same_rx::MAX_LEN as u16,
-};
+use radio_chip::{COUNTER_TUNE, WX};
 
 /// A chip gives up measuring after this long with no carrier, and the other chip takes a turn (stock's scan time
 /// is 0.8 s per reading).
 const COUNTER_TURN_MS: u32 = 2_000;
-/// Where each chip sits while counting: its band's middle, for the front end the path selects.
-const COUNTER_TUNE: [Freq10; 2] = [mhz(146), mhz(446)];
 
 /// The `tx` build's transmit state.
 #[cfg(feature = "tx")]
@@ -347,99 +327,10 @@ impl Radio {
         self.chips & 1 << n != 0
     }
 
-    /// Carry out a path plan, waits included, before anything else reaches the pins.
+    /// Carry out a path plan, waits included, before anything else reaches the pins (`ferrite_radio::run`,
+    /// host-tested on a recording mock through [`ferrite_radio::Hw`] below).
     async fn run(&mut self, steps: &Steps) {
-        for &a in steps.as_slice() {
-            match a {
-                Act::Sel(s, on) => {
-                    RF_PINS[s as usize].write(on);
-                    if on {
-                        log(b"path select ", s as u32);
-                    }
-                }
-                Act::PaZero => {
-                    #[cfg(feature = "tx")]
-                    crate::hal::pa::zero();
-                    #[cfg(not(feature = "tx"))]
-                    RF_PINS[6].write(false);
-                }
-                Act::Relay(on) => {
-                    if on != RELAY.read() {
-                        log(b"relay ", on as u32);
-                    }
-                    RELAY.write(on);
-                }
-                // BCR-20, stock's states: the mode's own state is set when the SI4732 is started (`si_input`);
-                // away from it, 1/0 once it has been used, as stock leaves broadcast. Boot and the safe state
-                // before any broadcast keep stock's 0/0.
-                Act::SiInput(true) => self.si_used = true,
-                Act::SiInput(false) => {
-                    if self.si_used {
-                        SI_IN[0].write(true);
-                        SI_IN[1].write(false);
-                    }
-                }
-                Act::Mute(m) => {
-                    self.muted = m;
-                    if m {
-                        speaker(false);
-                    }
-                }
-                Act::Wait(ms) => Timer::after_millis(ms as u64).await,
-                // XB-6, XB-8, decision 95: stock's crossband route at its PTT state 1, PA15 low with PB8 set
-                // (0x080248C2-0x080248D8); PA15 high again at the receive drop, still keyed (0x0801F534).
-                Act::RepeatAudio(on) => {
-                    REPEAT_AUDIO.write(!on);
-                    if on {
-                        AMP_EN[0].write(true);
-                    }
-                    log(b"repeat audio ", on as u32);
-                }
-                #[cfg(feature = "tx")]
-                Act::ChipTx(n) => {
-                    if !self.key_chip(n) {
-                        self.tx.fault = true;
-                        log(b"tx read-back failed, chip ", n as u32);
-                        break; // no PA ramp: the caller puts the safe state next
-                    }
-                }
-                #[cfg(feature = "tx")]
-                Act::ChipRx(n) => {
-                    if self.has(n) {
-                        self.chip(n).tx_off();
-                    }
-                }
-                #[cfg(feature = "tx")]
-                Act::PaRamp => {
-                    // TX-23's ramp: the calibrated level in four steps over 4 ms.
-                    let v = self.tx.pa as u32;
-                    for k in 1..=4u32 {
-                        crate::hal::pa::set((v * k / 4) as u8);
-                        Timer::after_millis(1).await;
-                    }
-                    log(b"tx pa ", v);
-                }
-                // TONE-8 order at unkey, still keyed: end tone, CW ID when due, tail elimination (the sequencer
-                // plans each only when its setting is on).
-                #[cfg(feature = "tx")]
-                Act::EndTone => {
-                    let e = self.tx.end[self.tx.slot as usize % 4];
-                    let t = tonegen::END_TONES.get(e as usize).copied().unwrap_or(&[]);
-                    self.play_keyed(t.iter().copied()).await;
-                }
-                #[cfg(feature = "tx")]
-                Act::CwId => {
-                    let (call, len) = (self.tx.cw_call, self.tx.cw_len as usize);
-                    let cw = tonegen::Cw::new(&call[..len.min(10)], tonegen::CW_WPM);
-                    self.play_keyed(cw.map(|(on, ms)| (if on { tonegen::CW_HZ } else { 0 }, ms))).await;
-                }
-                #[cfg(feature = "tx")]
-                Act::TailElim => self.tail_elim().await,
-                // Transmit steps: only a key-up plans them, and this build never asks for one.
-                #[cfg(not(feature = "tx"))]
-                Act::ChipTx(_) | Act::ChipRx(_) | Act::PaRamp | Act::EndTone | Act::CwId | Act::TailElim => {}
-            }
-        }
+        ferrite_radio::run(self, steps).await;
         if self.path.take_alarm() {
             // SAFE-22: the event log's "Relay switching too often".
             let mut e = Event::new(Kind::Fault, Source::Radio);
@@ -475,23 +366,9 @@ impl Radio {
             // HF mode on chip 1 (18-64 MHz): AM is the mode's own (Param::Mode 2); FM otherwise.
             _ => SlotRx { freq: f, am: self.hf.is_some_and(|h| h.mode == 2), ..SlotRx::DEFAULT },
         };
-        let mut bk = self.chip(n);
-        bk.wake();
-        bk.set_freq(f * 10);
-        bk.bandwidth(if slot.narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
-        bk.demod(if slot.am { Demod::Am } else { Demod::Fm }); // stock's modes 6 and 7 (VFO-20: AM keeps wide)
-        match slot.rx_tone {
-            // TONE-6: no tone to lose, so the detector listens for the 55 Hz tail instead (stock: REG_07 0x21CD).
-            0 if slot.rx_tail => {
-                bk.ctcss_rx(550);
-                bk.tail_detect();
-            }
-            0 => bk.subtone_off(),
-            t if t & 0x8000 != 0 => bk.dcs_rx(t & 0x3FFF, t & 0x4000 != 0),
-            t => bk.ctcss_rx(t),
-        }
-        bk.af_out(AfOut::Mute); // the audio decision unmutes the one heard
-        bk.rx_on();
+        // Stock's modes 6 and 7, the sub-tone detector, muted until the audio decision (`ferrite_radio::chip`).
+        let setup = RxSetup { freq: f, narrow: slot.narrow, am: slot.am, rx_tone: slot.rx_tone, rx_tail: slot.rx_tail };
+        radio_chip::tune(&mut self.chip(n), &setup);
     }
 
     /// SAME (DEC-19, WX-4): the BK4829's own receiver on the chip of a slot tuned to a weather channel, as
@@ -514,8 +391,7 @@ impl Radio {
         let (Some(n), Some((slot, freq))) = (chip, at) else { return };
         if !self.same.armed {
             let mut bk = self.chip(n);
-            bk.fsk_setup(&SAME_FSK);
-            bk.fsk_rx(&SAME_FSK);
+            radio_chip::same_arm(&mut bk);
             self.same.armed = true;
             return;
         }
@@ -909,20 +785,11 @@ impl Radio {
             return;
         };
         let asleep = self.tuned[n as usize].is_none();
-        let mut bk = self.chip(n);
-        if asleep {
-            bk.wake();
-        }
-        let gain = bk.beep_on(hz as u32);
+        let gain = radio_chip::beep_start(&mut self.chip(n), hz as u32, asleep);
         speaker(true);
         Timer::after_millis(ms.min(tonegen::BEEP_MAX_MS) as u64).await;
-        let mut bk = self.chip(n);
-        bk.beep_off(gain);
-        if asleep {
-            bk.sleep();
-        } else {
-            bk.rx_on(); // the audio decision unmutes it on the next tick, if it is heard
-        }
+        // Asleep again, or back to receive (the audio decision unmutes it on the next tick, if it is heard).
+        radio_chip::beep_end(&mut self.chip(n), gain, asleep);
         speaker(false);
         log(b"beep hz ", hz as u32);
     }
@@ -991,12 +858,87 @@ impl Radio {
 /// The counter's own index in [`Radio::tuned`] (after the three slots and HF mode's).
 const COUNTER_SLOT: u8 = 4;
 
+/// The pins, waits and chip steps a path plan moves ([`ferrite_radio::run`]).
+impl ferrite_radio::Hw for Radio {
+    fn pin(&mut self, p: Pin, high: bool) {
+        match p {
+            Pin::Sel(s) => RF_PINS[s as usize].write(high),
+            Pin::PaDrive => RF_PINS[6].write(high),
+            Pin::Relay => RELAY.write(high),
+            Pin::SiIn(i) => SI_IN[i as usize & 1].write(high),
+            Pin::RepeatAudio => REPEAT_AUDIO.write(high),
+            Pin::Amp(i) => AMP_EN[i as usize & 1].write(high),
+        }
+    }
+    fn relay_is(&mut self) -> bool {
+        RELAY.read()
+    }
+    async fn wait_ms(&mut self, ms: u32) {
+        Timer::after_millis(ms as u64).await
+    }
+    fn muted(&mut self, m: bool) {
+        self.muted = m;
+    }
+    fn si_used(&mut self) -> bool {
+        self.si_used
+    }
+    fn set_si_used(&mut self) {
+        self.si_used = true;
+    }
+    fn log(&mut self, tag: &[u8], v: u32) {
+        log(tag, v);
+    }
+    #[cfg(feature = "tx")]
+    fn pa_zero(&mut self) {
+        crate::hal::pa::zero();
+    }
+    #[cfg(feature = "tx")]
+    fn pa_set(&mut self, v: u8) {
+        crate::hal::pa::set(v);
+    }
+    #[cfg(feature = "tx")]
+    fn pa_level(&mut self) -> u8 {
+        self.tx.pa
+    }
+    #[cfg(feature = "tx")]
+    fn key_chip(&mut self, n: u8) -> bool {
+        Radio::key_chip(self, n)
+    }
+    #[cfg(feature = "tx")]
+    fn chip_fault(&mut self, _n: u8) {
+        self.tx.fault = true;
+    }
+    #[cfg(feature = "tx")]
+    fn unkey_chip(&mut self, n: u8) {
+        if self.has(n) {
+            self.chip(n).tx_off();
+        }
+    }
+    // TONE-8's order at the unkey, still keyed: end tone, CW ID when due, tail elimination.
+    #[cfg(feature = "tx")]
+    async fn end_tone(&mut self) {
+        let e = self.tx.end[self.tx.slot as usize % 4];
+        let t = tonegen::END_TONES.get(e as usize).copied().unwrap_or(&[]);
+        self.play_keyed(t.iter().copied()).await;
+    }
+    #[cfg(feature = "tx")]
+    async fn cw_id(&mut self) {
+        let (call, len) = (self.tx.cw_call, self.tx.cw_len as usize);
+        let cw = tonegen::Cw::new(&call[..len.min(10)], tonegen::CW_WPM);
+        self.play_keyed(cw.map(|(on, ms)| (if on { tonegen::CW_HZ } else { 0 }, ms))).await;
+    }
+    #[cfg(feature = "tx")]
+    async fn tail_elim(&mut self) {
+        Radio::tail_elim(self).await
+    }
+}
+
 /// The SI4732's input path for its mode, as stock (BCR-20, `analysis/audio_path.md` §2): FM broadcast PA7 = PC5 = 0,
 /// AM (and SW, SSB, CW) PA7 = PC5 = 1, the LNA path.
 fn si_input(mode: SiMode) {
-    let am = mode != SiMode::Fm;
-    SI_IN[0].write(am);
-    SI_IN[1].write(am);
+    let [a, b] = radio_chip::si_input(mode != SiMode::Fm);
+    SI_IN[0].write(a);
+    SI_IN[1].write(b);
 }
 
 /// The broadcast receiver: powered up in the mode asked for (reset pulse, power-up, crystal settling), then
@@ -1362,13 +1304,7 @@ impl Radio {
             return false;
         }
         let high = self.tx.data.unwrap_or(self.tx.power[self.live.tx.slot as usize % 4]) == 2;
-        let mut bk = self.chip(n);
-        bk.tx_on(bk4829::tx::Source::Mic);
-        if bk.read(0x30) != REG30_TX_MIC {
-            return false;
-        }
-        bk.write(0x36, if high { 0x7F } else { 0x57 });
-        true
+        radio_chip::key_mic(&mut self.chip(n), high)
     }
 
     /// Key up or unkey a slot (3 = HF mode's frequency); `data`: a data key-up at that power level (APRS).
@@ -1488,12 +1424,8 @@ impl Radio {
     /// shift (0 8 5 2) on CTCSS, the 134.4 Hz turn-off code on DCS. The 55 Hz tone at the driver's sub-tone gain
     /// (74, as its CTCSS) where stock takes the calibration's byte (0xF210 byte 1): to confirm on the bench.
     async fn tail_elim(&mut self) {
-        use bk4829::tx::Tail;
         let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
-        let kind = match tonegen::tail_kind(self.tx.tone[self.tx.slot as usize % 4], self.tx.phase) {
-            tonegen::TailKind::Tone55 => Tail::Tone55 { dev: 74 },
-            tonegen::TailKind::Shift(p) => Tail::Shift { phase: p },
-        };
+        let kind = radio_chip::tail(self.tx.tone[self.tx.slot as usize % 4], self.tx.phase);
         self.chip(n).tail_tx(Some(kind));
         Timer::after_millis(tonegen::TAIL_MS as u64).await;
         self.chip(n).tail_tx(None);
@@ -1533,32 +1465,15 @@ impl Radio {
     /// sidetone heard (DTMF-8, for DTMF as 0 8 6 6 says); both None goes back to
     /// the microphone (0xC1FE).
     fn keyed_tone(&mut self, hz: Option<u16>, dtmf: Option<char>) {
-        use bk4829::tx::Source as TxSource;
         let Some(sel) = self.path.keyed() else { return };
         let n = sel.chip();
         if !self.has(n) {
             return;
         }
         let heard = dtmf.is_none() || self.tx.sidetone; // DTMF-8's setting; the burst is always heard
-        let mut bk = self.chip(n);
-        let sending = match (hz, dtmf) {
-            (Some(hz), _) => {
-                bk.tone_tx(hz as u32);
-                true
-            }
-            (None, Some(d)) => bk.dtmf_tx(d),
-            (None, None) => false,
-        };
-        if sending {
-            bk.tx_on(TxSource::Tones);
-            bk.sidetone(heard);
-        } else {
-            bk.tone_tx(0);
-            bk.sidetone(false);
-            bk.tx_on(TxSource::Mic);
-            if bk.read(0x30) != REG30_TX_MIC {
-                log(b"tx mic read-back failed, chip ", n as u32);
-            }
+        let (sending, mic_ok) = radio_chip::keyed_tone(&mut self.chip(n), hz, dtmf, heard);
+        if !mic_ok {
+            log(b"tx mic read-back failed, chip ", n as u32);
         }
         speaker(sending && heard);
     }

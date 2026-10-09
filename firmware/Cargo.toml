@@ -14,7 +14,7 @@ bench = false
 
 [features]
 # Transmit. Off until milestone 4: without it the build has no transmit code at all (the bk4829 crate's tx feature).
-tx = ["bk4829/tx"]
+tx = ["bk4829/tx", "ferrite-radio/tx"]
 # The first builds on a new radio (roadmap 1c): nothing is ever written to or erased from the SPI flash (settings
 # live in RAM for the power-on), any key held through the boot screen opens the key test, and the cable prints a
 # plain log (boot report, every raw key code, the receiver, faults) until a byte arrives, then the terminal takes
@@ -26,6 +26,7 @@ ferrite-core.workspace = true
 ferrite-ui.workspace = true
 ferrite-app.workspace = true
 ferrite-store.workspace = true
+ferrite-radio.workspace = true
 ufmt.workspace = true
 uradio-bus.workspace = true
 bk4829.workspace = true

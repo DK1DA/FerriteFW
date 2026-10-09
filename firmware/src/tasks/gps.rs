@@ -22,6 +22,7 @@ use embassy_time::{Instant, Timer};
 use ferrite_app::gpsdata::GpsCfg;
 use ferrite_core::gps::Nmea;
 use ferrite_core::msg::{GpsFix, GpsSky};
+use ferrite_radio::gps::GpsPower;
 
 /// The ATGM336H's default rate.
 const BAUD: u32 = 9600;
@@ -31,8 +32,6 @@ const GPS_TX: crate::hal::gpio::Pin = pin(GPIOB, 10);
 const POLL_MS: u64 = 50;
 /// The fix is published at most this often (the module sends once a second, in several sentences).
 const PUBLISH_MS: u32 = 500;
-/// Back on this long after the last signal that turned it off (GPS-4).
-const QUIET_MS: u32 = 2000;
 
 fn now_ms() -> u32 {
     Instant::now().as_millis() as u32
@@ -46,9 +45,10 @@ pub async fn task() {
     let (tx, sky) = (POSITION.sender(), SKY.sender());
     tx.send(GpsFix::default());
     let mut cfg = GpsCfg::DEFAULT;
-    let (mut powered, mut tx_low) = (false, false);
-    // When a signal last wanted the module off, and when the fix and the sky were last published.
-    let (mut busy_at, mut fix_at, mut sky_at) = (0u32, 0u32, 0u32);
+    // The power and PB10 decisions (`ferrite_radio::gps`, host-tested), and when the fix and the sky were last
+    // published.
+    let mut power = GpsPower::default();
+    let (mut fix_at, mut sky_at) = (0u32, 0u32);
     let mut last_state = (false, 0u8);
     loop {
         if let Some(c) = GPS_CFG.try_take() {
@@ -57,23 +57,17 @@ pub async fn task() {
         let now = now_ms();
         let rf = RF_STATE.load(Relaxed);
         let (keyed, rx) = (rf & RF_BUSY_KEYED != 0, rf & RF_BUSY_RX != 0);
-        // GPS-22: PB10 low while keyed, back to the UART after.
-        if keyed != tx_low {
-            if keyed {
-                GPS_TX.output(false, Mode::OutPp);
-            } else {
-                GPS_TX.output(true, Mode::AfPp);
-            }
-            tx_low = keyed;
+        // GPS-22: PB10 low while keyed, back to the UART after. GPS-4: off around signals as asked, back on
+        // `QUIET_MS` after the last.
+        let out = power.step(now, cfg.on, cfg.powered(rx, keyed), keyed);
+        match out.pb10_low {
+            Some(true) => GPS_TX.output(false, Mode::OutPp),
+            Some(false) => GPS_TX.output(true, Mode::AfPp),
+            None => {}
         }
-        // GPS-4: off around signals as asked, back on after QUIET_MS without one.
-        if !cfg.powered(rx, keyed) {
-            busy_at = now;
-        }
-        let want = cfg.on && (!powered && now.wrapping_sub(busy_at) >= QUIET_MS || powered && cfg.powered(rx, keyed));
-        if want != powered {
+        let powered = power.powered;
+        if let Some(want) = out.power {
             GPS_PWR_N.write(!want);
-            powered = want;
             if !want {
                 nmea.reset();
                 tx.send(GpsFix::default());

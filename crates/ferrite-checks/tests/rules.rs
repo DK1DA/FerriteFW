@@ -70,19 +70,28 @@ fn no_mcu_flash_writes() {
 }
 
 /// GOAL-2: receive never depends on transmit code. Transmit is the firmware's `tx` cargo feature, which is what
-/// turns on the BK4829 driver's own `tx` feature; it is not a default, and nothing else enables the driver's
-/// transmit code, so a build without it has no transmit code at all.
+/// turns on the BK4829 driver's own `tx` feature (directly and through `ferrite-radio`'s, which only forwards it
+/// and is no default); nothing else enables the driver's transmit code, so a build without it has no transmit
+/// code at all. `ferrite-radio`'s host tests enable its `tx` as a dev-dependency, which never reaches `cargo fw`.
 #[test]
 fn transmit_is_a_feature() {
-    let fw = std::fs::read_to_string(root().join("firmware/Cargo.toml")).unwrap();
-    let features = fw.split("[features]").nth(1).and_then(|s| s.split("\n[").next()).unwrap_or("");
-    assert!(features.contains("tx = [\"bk4829/tx\"]"), "the firmware's tx feature enables bk4829/tx");
-    assert!(!features.lines().any(|l| l.trim_start().starts_with("default") && l.contains("tx")), "tx is not a default");
+    let section = |manifest: &str| {
+        let m = std::fs::read_to_string(root().join(manifest)).unwrap();
+        m.split("[features]").nth(1).and_then(|s| s.split("\n[").next()).unwrap_or("").to_string()
+    };
+    let fw = section("firmware/Cargo.toml");
+    assert!(fw.contains("tx = [\"bk4829/tx\", \"ferrite-radio/tx\"]"), "the firmware's tx feature enables bk4829/tx");
+    let radio = section("crates/ferrite-radio/Cargo.toml");
+    assert!(radio.contains("tx = [\"bk4829/tx\"]"), "ferrite-radio's tx only forwards the driver's");
+    for f in [&fw, &radio] {
+        assert!(!f.lines().any(|l| l.trim_start().starts_with("default") && l.contains("tx")), "tx is not a default");
+    }
     // No other manifest switches the driver's transmit code on.
     let mut others = Vec::new();
     walk(&root(), &mut |p| {
         if p.file_name().is_some_and(|n| n == "Cargo.toml")
             && !p.ends_with("firmware/Cargo.toml")
+            && !p.ends_with("crates/ferrite-radio/Cargo.toml")
             && std::fs::read_to_string(p).unwrap_or_default().contains("bk4829/tx")
         {
             others.push(p.display().to_string());

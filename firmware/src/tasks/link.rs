@@ -5,6 +5,7 @@
 //! happen here, after the answer has gone; Bluetooth stays at 115200 (LINK-25).
 
 use crate::board::BT_PWR;
+use ferrite_radio::bt::BtPower;
 use crate::chan::{BT_IN, BT_LINK_ON, BT_ON, BT_OUT, CABLE_BAUD, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::hal::uart;
 use crate::report::{UART_BT, UART_CPS};
@@ -104,17 +105,16 @@ pub async fn task() {
     uart::init(UART_CPS, BAUD); // every boot starts at 115200 (LINK-10)
     let mut cable = Port { uart: UART_CPS, rx: &TERM_IN, tx: &TERM_OUT, link: &LINK_ON, held: false };
     let mut bt = Port { uart: UART_BT, rx: &BT_IN, tx: &BT_OUT, link: &BT_LINK_ON, held: false };
-    let mut bt_on = false;
-    let mut keyed = false;
+    // 0 9 2 1 and PB9 (`ferrite_radio::bt`, host-tested).
+    let mut bt_pw = BtPower::default();
     // Whose turn it is to send when both ports have bytes waiting.
     let mut bt_turn = false;
     // A rate change on probation: its deadline and the HELLO count when it was made.
     let mut probation: Option<(Instant, u16)> = None;
     loop {
         // 0 9 2 1 as the UI last set it.
-        let want = BT_ON.load(Relaxed);
-        if want != bt_on {
-            bt_on = want;
+        let out = bt_pw.step(BT_ON.load(Relaxed), RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0);
+        if let Some(want) = out.power {
             if want {
                 BT_PWR.write(true);
                 Timer::after_millis(BT_POWER_MS).await;
@@ -122,11 +122,10 @@ pub async fn task() {
             bt_power(want);
         }
         // Decision 76: stock sets PB9 again after each transmission while Bluetooth is on.
-        let k = RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0;
-        if keyed && !k && bt_on {
+        if out.reassert {
             BT_PWR.write(true);
         }
-        keyed = k;
+        let bt_on = bt_pw.on;
         let mut got = cable.receive();
         if bt_on {
             got |= bt.receive();
