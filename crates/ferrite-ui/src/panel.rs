@@ -10,4 +10,8 @@ pub trait Panel {
     /// `count` pixels of one colour.
     fn push(&mut self, color: u16, count: u32);
     fn push_buf(&mut self, px: &[u16]);
+    /// The text just drawn into the box (x0, y0)-(x1, y1) inclusive, before its pixels: for the simulator's
+    /// end-to-end tests, which read the screen as text. Panels ignore it (the radio's inlines to nothing).
+    #[inline(always)]
+    fn text_hint(&mut self, _x0: i32, _y0: i32, _x1: i32, _y1: i32, _s: &[u8]) {}
 }

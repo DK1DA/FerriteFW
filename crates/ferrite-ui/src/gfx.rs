@@ -259,6 +259,7 @@ pub trait Gfx: Panel {
         let mut line = [0u16; W as usize];
         let n = (x1 - x0) as usize;
         self.window(x0, y0, x1 - 1, y1 - 1);
+        self.text_hint(x0, y0, x1 - 1, y1 - 1, s);
         for row in y0..y1 {
             cov[..n].fill(0);
             let mut pen = x;

@@ -1,0 +1,474 @@
+//! End-to-end journeys through the simulator: keys in, screen out, as a person uses the radio (the harness is
+//! `common`). Each test names the rules it exercises; the rule coverage report counts a rule as covered when its ID
+//! appears in a test's doc comment.
+//!
+//! The sample radio: slot A a VFO on 146.520, B channel 012 "Club repeater" on 443.475, C scanning the airband,
+//! watch A+B+C; the fake radio hears A from 6 to 9 s of every 10 s and B from 20 to 22 s of every 25 s.
+
+mod common;
+
+use common::Radio;
+use ferrite_core::freq::mhz;
+use ferrite_core::keys::Key;
+use ferrite_core::msg::RadioCmd;
+use ferrite_sim::simcore::Event;
+
+/// First boot on a blank flash runs setup: eight pages, OK through them, the region picked on page 3, and the
+/// summary before home (SETUP-1, SETUP-2, SETUP-3, SETUP-4, SETUP-10, BOOT-12).
+#[test]
+fn first_run_setup() {
+    let mut r = Radio::blank();
+    r.expect_screen("Setup").expect_text("1 of 8").expect_text("Welcome to Ferrite");
+    r.run("press OK; expect text \"2 of 8\"; expect text \"Your callsign\"");
+    r.run("press OK; expect text \"3 of 8\"; expect text \"United States\"; expect text \"Other\"");
+    r.run("press DOWN; press OK; expect text \"4 of 8\"");
+    for page in 5..=8 {
+        r.press(Key::Menu);
+        r.expect_text(&format!("{page} of 8"));
+    }
+    r.expect_text("All set").expect_text("Region Canada").expect_text("Channels none yet");
+    r.run("press OK; expect screen \"Home\"");
+}
+
+/// A digit on home opens frequency entry; the point comes by itself after three digits, and OK tunes what was
+/// typed, exactly (VFO-11, VFO-12, VFO-17, VFO-19, NAV-4).
+#[test]
+fn frequency_entry() {
+    let mut r = Radio::new();
+    r.run("type 4461; expect screen \"Frequency entry\"; expect text \"446.1\"; expect text \"Band UHF\"");
+    r.run("press OK; expect screen \"Home\"");
+    assert_eq!(r.sim.app().slot(0).freq(), mhz(446) + 10_000);
+    r.expect_text("446.100");
+    // Whole on the step grid: in without OK (VFO-17).
+    r.run("type 446125; wait 300ms; expect screen \"Home\"");
+    assert_eq!(r.sim.app().slot(0).freq(), mhz(446) + 12_500);
+}
+
+/// A frequency no chip can receive is refused and the entry stays open (VFO-21).
+#[test]
+fn frequency_entry_refuses_the_gap() {
+    let mut r = Radio::new();
+    r.run("type 700; press OK; wait 300ms; expect screen \"Frequency entry\"");
+    assert_ne!(r.sim.app().slot(0).freq(), mhz(700));
+}
+
+/// V/M flips the active slot between its VFO and its channel; hold V/M on a channel copies it to the VFO
+/// (VFO-9, VFO-23).
+#[test]
+fn vfo_and_channel() {
+    let mut r = Radio::new();
+    r.run("press VM; expect text \"Calling 2 m\"");
+    assert!(r.sim.app().slot(0).on_channel());
+    r.run("hold VM; expect text \"Copied to VFO\"");
+    assert!(!r.sim.app().slot(0).on_channel());
+}
+
+/// SLOT makes the next slot active, and only SLOT does (HOME-11, WATCH-1).
+#[test]
+fn slot_changes_the_active_slot() {
+    let mut r = Radio::new();
+    assert_eq!(r.sim.app().active(), 0);
+    r.press(Key::Slot);
+    assert_eq!(r.sim.app().active(), 1);
+    r.press(Key::Slot).press(Key::Slot);
+    assert_eq!(r.sim.app().active(), 0);
+}
+
+/// A watched slot that is heard plays and is highlighted, and the active slot never moves by itself (WATCH-3,
+/// WATCH-4, WATCH-5, decision 81).
+#[test]
+fn watched_slot_heard_active_stays() {
+    let mut r = Radio::new();
+    r.wait(17_500); // past 20 s: B is heard from 20 to 22 s
+    assert!(r.sim.radio().live.slots[1].squelch_open, "B heard");
+    assert_eq!(r.sim.app().active(), 0, "A stays active");
+    r.expect_screen("Home");
+    r.wait(5_000);
+    assert_eq!(r.sim.app().active(), 0);
+}
+
+/// Hold 4 turns watch off, and on again as A+B (WATCH-7); the status bar shows TW for three watched slots and
+/// DW for two (SBAR-16).
+#[test]
+fn watch_on_and_off() {
+    let mut r = Radio::new();
+    r.expect_text("TW");
+    r.run("hold 4; wait 3500ms; expect no text \"TW\"; expect no text \"DW\"");
+    r.run("menu 0 0; expect text \"Watch Off\"; home");
+    r.run("hold 4; wait 3500ms; expect text \"DW\"");
+    r.run("menu 0 0; expect text \"Watch A+B\"");
+}
+
+/// SIDE1 held and the knob set the squelch from home; SIDE1 tapped latches the monitor, shown as MON on the
+/// card (SQL-9, SQL-10, SQL-14, MENU-11).
+#[test]
+fn squelch_and_monitor() {
+    let mut r = Radio::new();
+    r.run("press OK; expect text \"1 Squelch 4\"; home");
+    r.down(Key::Side(1)).wait(300);
+    r.knob(1);
+    r.expect_screen("Squelch").expect_text("Squelch, active slot");
+    r.up(Key::Side(1)).wait(200);
+    r.expect_screen("Home");
+    r.run("press OK; expect text \"1 Squelch 5\"; home");
+    r.press(Key::Side(1)).wait(200);
+    r.expect_text("MON");
+    r.press(Key::Side(1)).wait(200);
+    r.expect_no_text("MON");
+}
+
+/// SIDE2 starts and stops a scan on the active slot; SCN shows in the bar while it runs (SCAN-1, SBAR-11).
+#[test]
+fn scan_start_and_stop() {
+    let mut r = Radio::new();
+    r.press(Key::Slot); // B: the zone "Repeaters"
+    r.run("press SIDE2; wait 500ms; expect screen \"Scan\"; expect text \"Zone Repeaters\"");
+    assert!(r.sim.radio().live.slots[1].scanning);
+    r.expect_text("SCN");
+    r.run("home; press SIDE2; wait 500ms");
+    assert!(!r.sim.radio().live.slots[1].scanning);
+}
+
+/// Hold 1 opens the band scope on the active slot's band (KEY-11, SCOPE-1).
+#[test]
+fn band_scope() {
+    let mut r = Radio::new();
+    r.run("hold 1; expect screen \"Scope\"; expect text \"Band scope\"; expect text \"bars\"");
+    r.run("press BACK; expect screen \"Home\"");
+}
+
+/// The frequency counter: SIDE2 held alone opens it when it comes up (KEY-22, TSRCH-10).
+#[test]
+fn frequency_counter() {
+    let mut r = Radio::new();
+    r.hold(Key::Side(2)).wait(200);
+    r.expect_screen("Frequency counter");
+}
+
+/// AM is receive only: PTT on an airband frequency is refused and says why (TX-20, VFO-4).
+#[test]
+fn transmit_refused_on_am() {
+    let mut r = Radio::new();
+    r.run("type 1215; press OK; wait 300ms; down PTT; wait 300ms");
+    r.expect_screen("Transmit refused").expect_text("AM is receive only");
+    r.run("up PTT; press BACK; wait 200ms; expect screen \"Home\"");
+}
+
+/// PTT A on 2 m transmits on the active slot through its shift, and the watched slots pause (KEY-7, TX-1,
+/// WATCH-16).
+#[test]
+fn transmit_on_two_metres() {
+    let mut r = Radio::new();
+    r.run("down PTT; wait 500ms; expect screen \"Transmit\"; expect text \"TRANSMIT\"; expect text \"145.920\"");
+    assert!(r.sim.radio().live.tx.keyed);
+    assert!(r.has("paused"), "watched slots pause while keyed");
+    r.run("up PTT; wait 500ms; expect screen \"Home\"");
+    assert!(!r.sim.radio().live.tx.keyed);
+}
+
+/// An emergency frequency needs PTT twice (TX-29, TX-30): the first press warns.
+#[test]
+fn emergency_needs_ptt_twice() {
+    let mut r = Radio::new();
+    r.run("type 1210; press OK; wait 300ms; down PTT; wait 300ms; up PTT; wait 200ms");
+    assert!(!r.sim.radio().live.tx.keyed);
+    assert_ne!(r.screen(), "Transmit");
+}
+
+/// Hold 5 opens the tone picker for the active slot (KEY-11, TONE-2).
+#[test]
+fn tones() {
+    let mut r = Radio::new();
+    r.run("hold 5; expect screen \"Tone picker\"; expect text \"RX tone\"; expect text \"TX tone\"");
+}
+
+/// The DTMF dialer types digits and shows where it sends (DTMF-1, DTMF-3, DTMF-13).
+#[test]
+fn dtmf_dialer() {
+    let mut r = Radio::new();
+    r.run("menu 0 8 6 1; expect screen \"DTMF dialer\"; expect text \"Sends on slot A\"");
+    r.type_("123");
+    r.expect_text("123");
+}
+
+/// APRS mode takes slot C; with C active, PTT opens compose instead of transmitting (APRS-15, APRS-18).
+#[test]
+fn aprs_mode_compose() {
+    let mut r = Radio::new();
+    r.run("menu 0 5 3; press OK; expect text \"APRS mode On\"");
+    r.run("home; expect text \"APRS\"; press SLOT; press SLOT");
+    assert_eq!(r.sim.app().active(), 2);
+    r.run("down PTT; wait 300ms; up PTT; wait 300ms; expect screen \"Compose message\"");
+    assert!(!r.sim.radio().live.tx.keyed);
+}
+
+/// The heard list lives in RAM and shows the stations heard, newest first (APRS-4).
+#[test]
+fn aprs_heard_list() {
+    let mut r = Radio::new();
+    r.run("menu 0 5 1; expect screen \"APRS heard\"; expect text \"newest first\"; expect text \"VE3KPW-9\"");
+}
+
+/// A message arrives: a toast, the inbox count goes up, and with the screen dark the LED double-flashes every
+/// 2 s while it's unread (APRS-6, INBOX-1, decision 63's heartbeat).
+#[test]
+fn message_and_led_double_flash() {
+    let mut r = Radio::new();
+    r.run("menu 0 0; expect text \"Inbox 3 unread\"; home");
+    r.event(Event::Message);
+    r.expect_text("VE3KPW-9");
+    r.run("menu 0 0; expect text \"Inbox 4 unread\"; home");
+    r.event(Event::ScreenOff).wait(500);
+    assert!(r.sim.dark());
+    // Over 2 s: two short green flashes 250 ms apart.
+    let mut flashes = 0;
+    let mut was = false;
+    for _ in 0..100 {
+        r.wait(20);
+        let (green, _) = r.sim.leds();
+        if green && !was {
+            flashes += 1;
+        }
+        was = green;
+    }
+    assert_eq!(flashes, 2, "a double flash every 2 s");
+}
+
+/// A SAME warning takes the full screen over home (WX-4, INBOX-2).
+#[test]
+fn same_alert_full_screen() {
+    let mut r = Radio::new();
+    r.event(Event::Alert);
+    r.expect_screen("Alert").expect_text("WEATHER ALERT").expect_text("Severe thunderstorm");
+}
+
+/// While the crossband repeater runs, an alert is a banner and the repeater keeps running (XB-19).
+#[test]
+fn alert_during_crossband_is_a_banner() {
+    let mut r = Radio::new();
+    r.run("event crossband; expect screen \"Crossband repeater\"; press HASH; wait 2s; expect text \"PASSING\"");
+    r.event(Event::Alert);
+    r.expect_screen("Crossband repeater").expect_text("ALERT");
+}
+
+/// The crossband repeater's start screen states the pairing and ID off by default (XB-2, XB-12, XB-18).
+#[test]
+fn crossband_setup_screen() {
+    let mut r = Radio::new();
+    r.run("event crossband; expect text \"VHF and UHF, two chips\"; expect text \"ID off\"; expect text \"Simplex\"");
+}
+
+/// POCSAG: 0 4 2 decode off by default; Popups (0 4 8) on by default (DEC-4, DEC-7).
+#[test]
+fn pocsag_and_popups_settings() {
+    let mut r = Radio::new();
+    r.run("menu 0 4 2; expect text \"Decode Off\"; expect text \"Capcode filter None\"");
+    r.run("menu 0 4; expect text \"Popups On\"");
+    r.run("menu 0 4 8; press OK; expect text \"Popups Off\"");
+}
+
+/// GPS: the position page shows the fix; F5 cycles off, searching, fix, and the Status page follows (GPS-15,
+/// SBAR-14).
+#[test]
+fn gps_position_and_status() {
+    let mut r = Radio::new();
+    r.run("menu 0 6 2; expect screen \"GPS position\"; expect text \"3D fix\"; expect text \"Grid\"");
+    r.run("event gps; menu 0 0; expect text \"GPS Off\"");
+}
+
+/// HF mode loads the SSB patch, then shows the band, receiver and mode (HF-1, HF-15, HF-19); hold 3 seeks
+/// (HF-31).
+#[test]
+fn hf_mode() {
+    let mut r = Radio::new();
+    r.run("menu 0 3 4; expect screen \"HF mode\"; expect text \"Loading SSB patch\"; wait 3s");
+    r.expect_text("31 m").expect_text("SI4732").expect_text("9.580");
+    r.run("hold 3; wait 3s");
+    assert_ne!(r.sim.app().settings().hf.freq, 958_000, "seek moved");
+}
+
+/// FM broadcast opens from 0 3 1 6 on the SI4732 (BCR-1, BCR-2).
+#[test]
+fn fm_broadcast() {
+    let mut r = Radio::new();
+    r.run("menu 0 3 1 6; expect screen \"FM broadcast\"; expect text \"MHz\"; expect text \"Signal\"");
+}
+
+/// Hold # locks the keys and shows it; locked, OK does nothing; hold # unlocks (KEY-13, KEY-14).
+#[test]
+fn key_lock() {
+    let mut r = Radio::new();
+    r.run("hold HASH; expect text \"Keys locked\"");
+    assert!(r.sim.app().locked());
+    r.run("press OK; expect screen \"Home\"; expect text \"hold # to unlock\"");
+    r.run("hold HASH; expect text \"Keys unlocked\"");
+    assert!(!r.sim.app().locked());
+}
+
+/// Setting a PIN starts with "New PIN" (PIN-10, PIN-2).
+#[test]
+fn pin_entry() {
+    let mut r = Radio::new();
+    r.run("menu 0 9 3 1; press OK; expect screen \"PIN entry\"; expect text \"New PIN\"; expect text \"4 to 6 digits\"");
+}
+
+/// Channel-only mode hides MENU 0, editing and frequency entry; hold # leaves it (PIN-5, VFO-10).
+#[test]
+fn channel_only_mode() {
+    let mut r = Radio::new();
+    r.run("menu 0 9 3 2; press OK; home");
+    r.run("press OK; expect screen \"Home\"; expect text \"Channel-only mode\"");
+    r.run("type 1; expect screen \"Home\"");
+    r.run("hold SLOT; expect screen \"Home\"");
+    r.run("hold HASH; wait 300ms; press OK; expect screen \"Quick\"");
+}
+
+/// The Status page lists every state in words, including the MCU temperature, with a scroll cue for the rows
+/// below (SBAR-13, SBAR-14, SBAR-20, DISP-24, HOME-10).
+#[test]
+fn status_page() {
+    let mut r = Radio::new();
+    r.run("press HASH; expect screen \"Status\"; expect text \"Transmit Ready\"; expect text \"Region Canada\"");
+    // The rows below the page: the MCU temperature is further down.
+    // The list wraps at its end; 16 rows down shows the last rows.
+    for _ in 0..16 {
+        r.press(Key::Down);
+    }
+    r.expect_text("MCU temperature").expect_text("31");
+}
+
+/// Quick settings: MENU on home, nine rows for the active slot, 0 opens advanced (MENU-1).
+#[test]
+fn quick_settings() {
+    let mut r = Radio::new();
+    r.run("press OK; expect screen \"Quick\"; expect text \"1 Squelch\"; expect text \"9 Battery Save\"");
+    r.run("type 0; expect screen \"Advanced\"; expect text \"9 System\"");
+}
+
+/// Hold BACK goes home from any screen (KEY-5).
+#[test]
+fn hold_back_goes_home() {
+    let mut r = Radio::new();
+    r.run("menu 0 8 6 1; expect screen \"DTMF dialer\"; home; expect screen \"Home\"");
+}
+
+/// A setting changed in the menu takes effect at once and reaches the radio: the active slot's TX power
+/// (MENU-19, quick row 2).
+#[test]
+fn setting_reaches_the_radio() {
+    let mut r = Radio::new();
+    r.take_cmds();
+    r.run("press OK; press DOWN; knob 1; wait 200ms");
+    assert!(r.take_cmds().iter().any(|c| matches!(c, RadioCmd::SlotParam { .. })), "a slot setting was sent");
+}
+
+/// The channel browser lists zones and All (CHAN-24, chapter 10).
+#[test]
+fn channel_browser() {
+    let mut r = Radio::new();
+    r.run("menu 0 2 1; expect screen \"Channel browser\"; expect text \"Repeaters\"; expect text \"All 21\"");
+}
+
+/// The terminal over the cable answers a `get` (TERM-12) and a write from Bluetooth waits for approval on the
+/// radio (LINK-7, TERM-25).
+#[test]
+fn terminal_get() {
+    let mut r = Radio::new();
+    r.sim.term_feed(b"\r:get 0 4 8\r");
+    r.wait(400);
+    let out = String::from_utf8_lossy(&r.sim.term_take()).into_owned();
+    assert!(out.contains("On"), "{out}");
+}
+
+/// The power switch saves and the radio comes back with what was set (chapter 33, BOOT).
+#[test]
+fn power_cycle_keeps_settings() {
+    let mut r = Radio::new();
+    r.run("type 4461; press OK; wait 3s");
+    r.event(Event::PowerSwitch);
+    r.wait(3000);
+    r.event(Event::PowerSwitch);
+    r.wait(4000);
+    r.expect_screen("Home");
+    assert_eq!(r.sim.app().slot(0).freq(), mhz(446) + 10_000);
+}
+
+/// POCSAG on: a slot on the pager frequency decodes the fake system's pages into a toast and the inbox (DEC-4,
+/// DEC-7, DEC-18).
+#[test]
+fn pocsag_page_with_popups() {
+    let mut r = Radio::new();
+    r.run("menu 0 4 2 1; press OK; expect text \"Decode On\"");
+    r.run("home; press SLOT; press VM; type 439987; press OK; wait 1s");
+    r.run("wait 21s; expect text \"Pager\"");
+    r.run("menu 0 0; expect text \"Inbox 4 unread\"");
+}
+
+/// Popups off: a page still goes to the inbox, but no toast shows (DEC-7).
+#[test]
+fn pocsag_page_without_popups() {
+    let mut r = Radio::new();
+    r.run("menu 0 4 2 1; press OK; menu 0 4 8; press OK; expect text \"Popups Off\"");
+    r.run("home; press SLOT; press VM; type 439987; press OK; wait 1s");
+    for _ in 0..21 {
+        r.wait(1000);
+        r.expect_no_text("Pager");
+    }
+    r.run("menu 0 0; expect text \"Inbox 4 unread\"");
+}
+
+/// The crossband repeater refuses to start with both sides on one chip, and says why (XB-2).
+#[test]
+fn crossband_refuses_one_chip() {
+    let mut r = Radio::new();
+    r.run("press SLOT; press VM; type 14694; press OK; wait 500ms");
+    r.run("event crossband; expect text \"VHF and VHF, one chip\"; expect text \"Can't start yet\"");
+    r.run("press HASH; wait 1s; expect no text \"PASSING\"; expect text \"Can't start\"");
+}
+
+/// A write from a new Bluetooth device asks first; reading needs no approval (LINK-7).
+#[test]
+fn link_write_asks_first() {
+    let mut r = Radio::new();
+    r.run("event linkwrite; expect screen \"Write approval\"; expect text \"Allow writes?\"; expect text \"Reading needs\"");
+    r.run("press BACK; wait 300ms");
+    assert_ne!(r.screen(), "Write approval");
+}
+
+/// Setting the clock by hand: OK on 0 6 6 takes YYYYMMDDhhmm in local time (GPS-23).
+#[test]
+fn clock_set_by_hand() {
+    let mut r = Radio::new();
+    r.run("menu 0 6 6; press OK; expect screen \"Text entry\"; expect text \"Date and time\"");
+    r.run("type 202610081230; press OK; wait 500ms; expect text \"Clock set\"; home; expect text \"12:30\"");
+}
+
+/// Hold 9 opens the zones; OK edits one, with its scan and priority options (KEY-11, chapter 10, SCAN-12).
+#[test]
+fn zones_and_zone_editor() {
+    let mut r = Radio::new();
+    r.run("hold 9; expect screen \"Zones\"; expect text \"6 zones\"; expect text \"Repeaters\"");
+    r.run("press OK; expect screen \"Zone editor\"; expect text \"Scan all\"; expect text \"Priority 1\"");
+}
+
+/// An automatic transmission (a beacon) keys the radio briefly and returns to home by itself (TX-1, APRS-20).
+#[test]
+fn automatic_beacon_transmits() {
+    let mut r = Radio::new();
+    r.sim.event(Event::Beacon);
+    r.wait(40);
+    assert!(r.sim.radio().live.tx.keyed, "keyed for the burst");
+    r.wait(3000);
+    assert!(!r.sim.radio().live.tx.keyed, "and back to receive");
+    r.expect_screen("Home");
+}
+
+/// The home layouts: L cycles them; the status bar and slots stay (HOME-1, DISP).
+#[test]
+fn home_layouts() {
+    let mut r = Radio::new();
+    for _ in 0..3 {
+        r.event(Event::Layout);
+        r.expect_screen("Home").expect_text("146.520");
+    }
+}

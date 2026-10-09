@@ -50,17 +50,69 @@ pub const MAX_SCALE: usize = 2;
 const BOOT_MS: u32 = 2000;
 const SAVE_MS: u32 = 1500;
 
-/// The frame buffer, plus a record of what each redraw touched.
+/// The frame buffer, plus a record of what each redraw touched, and the text on the screen now (for the
+/// end-to-end tests: [`SimCore::screen_text`]): each pixel remembers the string that last painted it, and a
+/// string counts as on screen while it still owns at least half of its box.
 struct Counting {
     fb: FrameBuffer,
     rects: Vec<(i32, i32, i32, i32)>,
     pixels: u64,
+    texts: Vec<(u32, TextItem)>,
+    /// Per pixel: the id of the string that painted it last, 0 if anything else did.
+    owner: Vec<u32>,
+    next_id: u32,
+}
+
+/// A string as drawn, and the box it covers (inclusive).
+#[derive(Clone, Debug)]
+pub struct TextItem {
+    pub x0: i32,
+    pub y0: i32,
+    pub x1: i32,
+    pub y1: i32,
+    pub s: String,
+}
+
+impl Counting {
+    fn new() -> Self {
+        Counting { fb: FrameBuffer::new(), rects: Vec::new(), pixels: 0, texts: Vec::new(), owner: vec![0; (W * H) as usize], next_id: 1 }
+    }
+
+    fn mark(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, id: u32) {
+        for y in y0.max(0)..=y1.min(H - 1) {
+            for x in x0.max(0)..=x1.min(W - 1) {
+                self.owner[(y * W + x) as usize] = id;
+            }
+        }
+    }
+
+    /// The strings still on screen, dropping the ones painted over.
+    fn visible(&mut self) -> Vec<TextItem> {
+        let mut owned = std::collections::HashMap::<u32, i32>::new();
+        for &o in &self.owner {
+            if o != 0 {
+                *owned.entry(o).or_default() += 1;
+            }
+        }
+        self.texts.retain(|(id, t)| 2 * owned.get(id).copied().unwrap_or(0) >= (t.x1 - t.x0 + 1) * (t.y1 - t.y0 + 1));
+        self.texts.iter().map(|(_, t)| t.clone()).collect()
+    }
 }
 
 impl Panel for Counting {
     fn window(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
         self.rects.push((x0, y0, x1, y1));
         self.fb.window(x0, y0, x1, y1);
+        self.mark(x0, y0, x1, y1, 0);
+    }
+    fn text_hint(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, s: &[u8]) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.mark(x0, y0, x1, y1, id);
+        self.texts.push((id, TextItem { x0, y0, x1, y1, s: String::from_utf8_lossy(s).into_owned() }));
+        if self.texts.len() > 4096 {
+            self.visible();
+        }
     }
     fn push(&mut self, color: u16, count: u32) {
         self.pixels += count as u64;
@@ -177,6 +229,9 @@ pub struct SimCore {
     bt_out: Vec<u8>,
     /// KISS bytes that reached the TNC from either port (KISS-6), for tests.
     pub kiss_in: Vec<u8>,
+    /// Every command the App sent the fake radio, when [`SimCore::log_cmds`] is on (tests).
+    pub cmds: Vec<ferrite_core::msg::RadioCmd>,
+    log_cmds: bool,
 }
 
 /// The terminal's bytes waiting for the cable: room up to [`TERM_BUF`].
@@ -273,7 +328,7 @@ impl SimCore {
             store,
             radio,
             dev: fake::device_at(0),
-            lcd: Counting { fb: FrameBuffer::new(), rects: Vec::new(), pixels: 0 },
+            lcd: Counting::new(),
             face,
             scale,
             out,
@@ -303,6 +358,8 @@ impl SimCore {
             bt_in: std::collections::VecDeque::new(),
             bt_out: Vec::new(),
             kiss_in: Vec::new(),
+            cmds: Vec::new(),
+            log_cmds: false,
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -404,8 +461,15 @@ impl SimCore {
         }
         if self.live() {
             let (app, radio, store, dev) = (&mut self.app, &mut self.radio, &self.store, &mut self.dev);
-            while let Some(c) = app.pop_cmd() {
+            let (log, cmds) = (self.log_cmds, &mut self.cmds);
+            let mut send = |radio: &mut FakeRadio, c| {
+                if log {
+                    cmds.push(c);
+                }
                 radio.cmd(c);
+            };
+            while let Some(c) = app.pop_cmd() {
+                send(radio, c);
             }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
@@ -468,7 +532,7 @@ impl SimCore {
             dev.clock_min = Some(((secs % 86_400) / 60) as u16);
             app.tick(now, &radio.live, store);
             while let Some(c) = app.pop_cmd() {
-                radio.cmd(c);
+                send(radio, c);
             }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
@@ -772,8 +836,12 @@ impl SimCore {
                 app.set_layout(self.layout);
             }
             Event::Beacon if live => {
+                // The checks of an automatic transmission, then a short burst on the active slot, as the APRS
+                // task's beacons do.
                 let a = app.active();
-                ferrite_app::screens::transmit::auto_tx(app, a, b"Beacon");
+                if ferrite_app::screens::transmit::auto_tx(app, a, b"Beacon") {
+                    self.radio.burst(a);
+                }
             }
             Event::Gps => {
                 self.dev.gps = match self.dev.gps {
@@ -854,6 +922,85 @@ impl SimCore {
     /// Booting or off: the app is not running.
     pub fn booting(&self) -> bool {
         self.booting
+    }
+
+    // ---- For the end-to-end and screenshot tests (sim/tests) ----
+
+    /// The App, as the firmware's UI task holds it.
+    pub fn app(&self) -> &App {
+        &self.app
+    }
+    pub fn app_mut(&mut self) -> &mut App {
+        &mut self.app
+    }
+    /// The fake radio (its live snapshot, traffic switch).
+    pub fn radio(&self) -> &FakeRadio {
+        &self.radio
+    }
+    pub fn radio_mut(&mut self) -> &mut FakeRadio {
+        &mut self.radio
+    }
+    /// The store on the simulated SPI flash.
+    pub fn store(&self) -> &FlashStore<SimFlash, Sample> {
+        &self.store
+    }
+    /// What the radio reports (battery, GPS, Bluetooth...).
+    pub fn device(&self) -> &Device {
+        &self.dev
+    }
+    pub fn device_mut(&mut self) -> &mut Device {
+        &mut self.dev
+    }
+    /// The LEDs as the firmware drives them now: (green, red).
+    pub fn leds(&self) -> (bool, bool) {
+        if !self.live() {
+            return (false, false);
+        }
+        let l = self.app.leds(&self.radio.live, &self.dev);
+        (l.green, l.red)
+    }
+    /// Record every command the App sends the radio in [`SimCore::cmds`].
+    pub fn log_cmds(&mut self, on: bool) {
+        self.log_cmds = on;
+    }
+    /// The text on the screen now, as drawn (each string with its box), top to bottom, left to right.
+    pub fn screen_texts(&mut self) -> Vec<TextItem> {
+        let mut v = self.lcd.visible();
+        v.sort_by_key(|t| (t.y0, t.x0));
+        v
+    }
+    /// The screen's text as lines: strings whose boxes overlap vertically joined left to right with a space.
+    pub fn screen_text(&mut self) -> String {
+        let mut lines: Vec<(i32, i32, Vec<TextItem>)> = Vec::new();
+        for t in self.screen_texts() {
+            match lines.iter_mut().find(|(y0, y1, _)| t.y0 <= *y1 && *y0 <= t.y1) {
+                Some(l) => l.2.push(t),
+                None => lines.push((t.y0, t.y1, vec![t])),
+            }
+        }
+        lines.sort_by_key(|l| l.0);
+        lines
+            .into_iter()
+            .map(|(_, _, mut items)| {
+                items.sort_by_key(|t| t.x0);
+                items.into_iter().map(|t| t.s).collect::<Vec<_>>().join(" ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+    /// The screen alone, 240 x 320, 0xRRGGBB (not dimmed when dark): for the goldens.
+    pub fn screen_rgb(&self) -> Vec<u32> {
+        let mut v = Vec::with_capacity((W * H) as usize);
+        for y in 0..H {
+            for x in 0..W {
+                v.push(rgb565_to_rgb(self.lcd.fb.at(x, y)));
+            }
+        }
+        v
+    }
+    /// Whether the screen is dark (backlight off).
+    pub fn dark(&self) -> bool {
+        self.live() && self.app.dark()
     }
 }
 
