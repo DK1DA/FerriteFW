@@ -327,7 +327,7 @@ impl App {
             let _ = uwrite!(f, "C on {}", Txt(crate::slot::mhz3(self.aprs_freq()).as_bytes()));
             self.show_toast(b"APRS mode on", f.as_bytes(), false);
         } else {
-            self.show_toast(b"APRS mode off", b"C is back as it was", false);
+            self.show_toast(b"APRS mode off", b"slot C restored", false);
         }
     }
 

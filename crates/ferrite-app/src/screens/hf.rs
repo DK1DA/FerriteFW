@@ -535,7 +535,7 @@ impl View for Hf {
                 app.open(Dest::SaveChannel);
                 app.screen = Screen::Save(super::save::Save::hf());
             }
-            (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves HF mode", false), // HF-13
+            (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves", false), // HF-13
             (Key::Exit, Short) => {
                 app.stop_mode(); // HF-4: BACK leaves HF mode, one level back
                 app.back();

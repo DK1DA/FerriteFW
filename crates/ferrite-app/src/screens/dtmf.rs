@@ -111,7 +111,7 @@ impl View for DtmfPad {
                 (Key::Hash, Short) if data.dtmf(s.cur).is_some() => {
                     return super::text::open(app, super::text::TextFor::DtmfName(s.cur), store);
                 }
-                (Key::Hash, Short) => return app.show_toast(b"Empty memory", b"type its digits first", false),
+                (Key::Hash, Short) => return app.show_toast(b"Empty memory", b"type digits first", false),
                 (Key::Exit, Short) => return app.back(),
                 _ => return,
             }

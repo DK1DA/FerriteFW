@@ -484,7 +484,7 @@ fn copy_to_vfo(app: &mut App) {
     }
     (s.vfo, s.cfg, s.vfo_mode) = (c.rx, cfg, true);
     app.send_slot(a as u8);
-    app.show_toast(b"Copied to VFO", b"V/M goes back to the channel", false);
+    app.show_toast(b"Copied to VFO", b"V/M: channel", false);
 }
 
 /// The first channel in a zone a home slot can sit on: not an HF channel (CHAN-26).

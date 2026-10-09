@@ -262,7 +262,7 @@ impl View for Scope {
             app.send_slot(app.active);
             super::nav::transmit(app);
         } else {
-            app.show_toast(b"Listen to a signal first", b"SIDE1 listens to the marker", false);
+            app.show_toast(b"Listen first", b"SIDE1 at the marker", false);
         }
     }
 

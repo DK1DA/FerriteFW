@@ -317,7 +317,7 @@ fn pin_entry() {
 fn channel_only_mode() {
     let mut r = Radio::new();
     r.run("menu 0 9 3 2; press OK; home");
-    r.run("press OK; expect screen \"Home\"; expect text \"Channel-only mode\"");
+    r.run("press OK; expect screen \"Home\"; expect text \"Channel-only\"");
     r.run("type 1; expect screen \"Home\"");
     r.run("hold SLOT; expect screen \"Home\"");
     r.run("hold HASH; wait 300ms; press OK; expect screen \"Quick\"");

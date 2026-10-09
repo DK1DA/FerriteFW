@@ -155,7 +155,7 @@ impl App {
                 self.lit |= WANT_OFF;
             } else if idle + OFF_WARN_MS >= off && self.lit & WARNED == 0 {
                 self.lit = (self.lit | WARNED) & !DARK;
-                self.show_toast(b"Auto power off", b"in 10 s: press a key to stay on", false);
+                self.show_toast(b"Off in 10 s", b"press a key", false);
             }
         }
     }

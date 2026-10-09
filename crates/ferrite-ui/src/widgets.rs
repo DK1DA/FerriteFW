@@ -405,6 +405,23 @@ pub fn popup(lcd: &mut impl Panel, head: &[u8], body: &[u8]) {
     }
 }
 
+/// Whether a toast's head and body fit the hint bar's one line as [`toast`] lays them out, with nothing cut
+/// (HOME-9, INBOX-1); the toast tests check every toast against it.
+pub fn toast_fits(head: &[u8], body: &[u8], icon: bool) -> bool {
+    let x = if icon { 26 } else { 8 };
+    let hw = text4_width(head, &UI_12B);
+    if hw > 232 - x {
+        return false;
+    }
+    body.is_empty() || text4_width(body, &UI_12) <= 232 - (x + hw + 7)
+}
+
+/// Whether a shortcut popup's head and body fit their lines as [`popup`] lays them out (HOME-8).
+pub fn popup_fits(head: &[u8], body: &[u8]) -> bool {
+    let w = POPUP_BOX.2 - 16;
+    text4_width(head, &UI_15B) <= w && text4_width(body, &UI_12) <= w
+}
+
 pub fn toast(lcd: &mut impl Panel, head: &[u8], body: &[u8], icon: bool) {
     lcd.fill(0, HINT_Y, 240, 1, BLUE);
     lcd.fill(0, HINT_Y + 1, 240, 19, TOAST);

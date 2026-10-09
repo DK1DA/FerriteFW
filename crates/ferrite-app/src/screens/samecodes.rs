@@ -87,7 +87,7 @@ impl View for SameCodes {
                 let _ = uwrite!(b, "{}", Zero(s.value(), 6));
                 app.show_toast(b"Location code", b.as_bytes(), false);
             }
-            (Key::Menu, Short, true) => app.show_toast(b"Location code", b"six digits, not all 0", false),
+            (Key::Menu, Short, true) => app.show_toast(b"Bad code", b"six digits, not all 0", false),
             (Key::Exit, Short, true) if s.n > 0 => s.n -= 1,
             (Key::Exit, Short, true) => s.edit = false,
             _ => return,

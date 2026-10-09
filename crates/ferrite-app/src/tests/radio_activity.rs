@@ -273,7 +273,7 @@ fn scan_skip_for_good() {
     t.wait(100);
     t.tap(Key::Hash);
     assert!(t.app.pop_write().is_none());
-    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"No skip list here"));
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"No skip list"));
 }
 
 /// SCAN-19: PTT while stopped on a hit ends the scan and transmits there; not on a hit, on the slot's own
@@ -933,7 +933,7 @@ fn split_across_the_relay() {
     tune(&mut t, mhz(146) + 52_000);
     assert!(!t.app.set_split(mhz(50) + 12_500));
     assert!(!t.app.slot(0).cfg().split, "not kept");
-    assert_eq!(t.app.toast.map(|x| x.head).as_ref().map(|b| b.as_bytes()), Some(&b"Split TX needs relay"[..]));
+    assert_eq!(t.app.toast.map(|x| x.head).as_ref().map(|b| b.as_bytes()), Some(&b"No split TX"[..]));
     // RX 28.400 / TX 146.520: refused too.
     tune(&mut t, mhz(28) + 40_000);
     assert!(!t.app.set_split(mhz(146) + 52_000));

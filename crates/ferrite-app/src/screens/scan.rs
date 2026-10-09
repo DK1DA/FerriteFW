@@ -343,7 +343,7 @@ fn lasting_skip(app: &mut App, s: u8, store: &impl ChannelStore) {
     }
     let sl = *app.slot(s);
     if !sl.on_channel() {
-        return app.show_toast(b"No skip list here", b"band scan: * skips it once", false);
+        return app.show_toast(b"No skip list", b"* skips it once", false);
     }
     let zones = core::iter::once(sl.zone).chain((0..10u8).filter(|z| app.radio.zones & 1 << z != 0));
     let Some(mut c) = zones.filter_map(|z| channel_on(store, z, f)).next() else {

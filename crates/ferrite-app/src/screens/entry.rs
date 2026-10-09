@@ -414,7 +414,7 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
         }
         EntryFor::ChannelFreq => {
             if f < crate::chan::HF_TOP {
-                return app.show_toast(b"Below 64 MHz", b"HF channels: hold V/M in HF mode", false); // CHAN-26
+                return app.show_toast(b"Below 64 MHz", b"save it in HF mode", false); // CHAN-26
             }
             super::chedit::edit(app, |c| c.rx = f);
             app.back();

@@ -135,7 +135,7 @@ impl Pin {
             let first = Pin { digits: self.first, n: self.first_n, ..self };
             if first.value() != self.value() || self.first_n != self.n {
                 Pin::set(self.purpose - AGAIN).put(app);
-                return app.show_toast(b"PINs differ", b"type the new PIN again", false);
+                return app.show_toast(b"PINs differ", b"type it again", false);
             }
             let s = &mut app.set;
             (s.pin, s.pin_len, s.pin_mode) = (self.value(), self.n, self.purpose - AGAIN);
@@ -193,7 +193,7 @@ impl App {
             }
         }
         self.go_home();
-        self.show_toast(b"Channel-only mode", b"hold # to leave", false);
+        self.show_toast(b"Channel-only", b"hold # to leave", false);
     }
 
     /// PIN-5: hold # leaves channel-only mode (the PIN first when one is set); it isn't the key lock there.
@@ -210,7 +210,7 @@ impl App {
     /// PIN-5: in channel-only mode this is refused, with a toast. True when refused.
     pub(crate) fn chan_only_refuse(&mut self) -> bool {
         if self.set.chan_only {
-            self.show_toast(b"Channel-only mode:", b"hold # to leave", false);
+            self.show_toast(b"Channel-only", b"hold # to leave", false);
         }
         self.set.chan_only
     }

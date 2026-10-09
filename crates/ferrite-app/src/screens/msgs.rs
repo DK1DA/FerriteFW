@@ -508,7 +508,7 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     let d = data.draft();
     // APRS-8: nothing sends without a callsign.
     if data.callsign().is_none() {
-        return app.show_toast(slow!("Set a callsign first").as_bytes(), slow!("MENU 0 8 7 1").as_bytes(), false);
+        return app.show_toast(slow!("No callsign").as_bytes(), slow!("MENU 0 8 7 1").as_bytes(), false);
     }
     let text = full_of(store, s);
     if d.to.is_empty() || text.is_empty() {

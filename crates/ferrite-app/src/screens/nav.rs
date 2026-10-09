@@ -498,7 +498,7 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
     let on_ch = app.slot(app.active).on_channel();
     // Channel-only mode (PIN-5): shortcuts that change a value are refused; those that open a view still work.
     if app.set.chan_only && matches!(d, 0 | 2..=8) {
-        return app.show_toast(b"Channel-only mode", b"hold # to leave it", false);
+        return app.show_toast(b"Channel-only", b"hold # to leave", false);
     }
     match d {
         0 => home_channel(app, store),
@@ -551,7 +551,7 @@ fn home_channel(app: &mut App, store: &impl ChannelStore) {
             crate::slot::chan_label(c.num, &mut l);
             app.show_toast(b"Home channel", l.as_bytes(), false);
         }
-        None => app.show_toast(b"No home channel.", b"Hold SLOT on a channel", false),
+        None => app.show_toast(b"No home channel", b"hold SLOT to set", false),
     }
 }
 

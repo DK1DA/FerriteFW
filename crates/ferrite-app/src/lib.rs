@@ -1163,7 +1163,7 @@ impl App {
 
     /// TX-37's refusal when a shift or split is set (the full sentence is on the TX refused screen).
     fn relay_toast(&mut self) {
-        self.show_toast(b"Split TX needs relay", b"not with this RX frequency", false);
+        self.show_toast(b"No split TX", b"needs other relay", false);
     }
 
     /// Why an item can't be changed on the active slot right now (MENU-14, EDIT-7), if it can't.

@@ -114,7 +114,7 @@ pub fn dial(app: &mut App, slot: u8, keys: &[u8]) -> bool {
         return false;
     }
     if txplan::emergency(tx_freq(app, slot)) {
-        app.show_toast(b"DTMF not sent:", b"emergency frequency", false);
+        app.show_toast(b"No DTMF", b"emergency frequency", false);
         return false;
     }
     let n = keys.len().min(16);
