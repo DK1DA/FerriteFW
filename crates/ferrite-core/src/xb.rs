@@ -75,6 +75,11 @@ pub enum Cmd {
     Key { from: u8 },
     /// Unkey (XB-8), sending the CW ID first when due (XB-12).
     Unkey { id: bool },
+    /// The receiving side's squelch has been closed [`DROP_MS`] with a hang time still to run: still keyed, the mic
+    /// back, as stock's RX end (decision 95; [`crate::path::Path::xb_drop`]).
+    Drop,
+    /// The signal back inside the hang time: the same pass, the repeat audio again ([`crate::path::Path::xb_reopen`]).
+    Reopen,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,12 +216,17 @@ impl Repeater {
                     self.timed_out = Some(from);
                     Some(self.end(now))
                 } else if open {
+                    let was_hang = matches!(self.st, St::Hang { .. });
                     self.st = St::Pass { from, last_open };
-                    None
+                    was_hang.then_some(Cmd::Reopen)
                 } else if now.wrapping_sub(last_open) >= DROP_MS + self.cfg.hang_ds.min(30) as u32 * 100 {
                     Some(self.end(now))
+                } else if now.wrapping_sub(last_open) >= DROP_MS {
+                    let was_pass = matches!(self.st, St::Pass { .. });
+                    self.st = St::Hang { from, last_open };
+                    was_pass.then_some(Cmd::Drop)
                 } else {
-                    self.st = if now.wrapping_sub(last_open) >= DROP_MS { St::Hang { from, last_open } } else { St::Pass { from, last_open } };
+                    self.st = St::Pass { from, last_open };
                     None
                 }
             }
@@ -324,7 +334,15 @@ mod tests {
     use crate::freq::mhz;
     use std::vec::Vec;
 
+    /// Key-ups and unkeys only.
     fn run(r: &mut Repeater, t: &mut u32, until: u32, heard: [Option<bool>; 2], out: &mut Vec<(u32, Cmd)>) {
+        let mut all = Vec::new();
+        run_all(r, t, until, heard, &mut all);
+        out.extend(all.into_iter().filter(|(_, c)| matches!(c, Cmd::Key { .. } | Cmd::Unkey { .. })));
+    }
+
+    /// Every command, the drop and reopen (decision 95) too.
+    fn run_all(r: &mut Repeater, t: &mut u32, until: u32, heard: [Option<bool>; 2], out: &mut Vec<(u32, Cmd)>) {
         while *t < until {
             if let Some(c) = r.tick(*t, heard) {
                 out.push((*t, c));
@@ -356,17 +374,19 @@ mod tests {
         run(&mut r, &mut t, 6_000, [Some(true), Some(true)], &mut out);
         assert_eq!(out.len(), 1);
         // Closed: 100 ms, then 1 s hang, then the unkey with the first ID (XB-12).
-        run(&mut r, &mut t, 6_500, [Some(false), None], &mut out);
+        let mut drop = Vec::new();
+        run_all(&mut r, &mut t, 6_500, [Some(false), None], &mut drop);
         assert_eq!(r.live.state, 3, "hang");
+        assert_eq!(drop, [(6_090, Cmd::Drop)], "the mic back at the drop, still keyed (decision 95)");
         run(&mut r, &mut t, 8_000, [Some(false), None], &mut out);
         assert_eq!(out[1], (7_090, Cmd::Unkey { id: true }), "last open 5 990 + 100 ms + 1 s hang");
         // A reopening in the hang continues the same pass.
         let mut r2 = Repeater::new(cfg, 0);
         let (mut t2, mut o2) = (0, Vec::new());
-        run(&mut r2, &mut t2, 1_000, [Some(true), Some(false)], &mut o2);
-        run(&mut r2, &mut t2, 1_500, [Some(false), Some(false)], &mut o2);
-        run(&mut r2, &mut t2, 2_000, [Some(true), Some(false)], &mut o2);
-        assert_eq!(o2.len(), 1);
+        run_all(&mut r2, &mut t2, 1_000, [Some(true), Some(false)], &mut o2);
+        run_all(&mut r2, &mut t2, 1_500, [Some(false), Some(false)], &mut o2);
+        run_all(&mut r2, &mut t2, 2_000, [Some(true), Some(false)], &mut o2);
+        assert_eq!(o2.iter().map(|o| o.1).collect::<Vec<_>>(), [Cmd::Key { from: 0 }, Cmd::Drop, Cmd::Reopen]);
         assert_eq!(r2.live.passes, 1);
         // Side 1 again soon: no ID until 10 min have passed (XB-12).
         run(&mut r, &mut t, 9_000, [Some(false), Some(true)], &mut out);

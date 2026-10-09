@@ -28,6 +28,9 @@ pub const AMP_EN: [Pin; 2] = [pin(GPIOB, 8), pin(GPIOE, 4)]; // (L) both
 /// chip's audio into the transmitting chip's mic input (`analysis/crossband_repeat.md` §5; to confirm on the
 /// bench). Driven only through the path machine's `Act::RepeatAudio` (XB-6, XB-8).
 pub const REPEAT_AUDIO: Pin = pin(GPIOA, 15); // (L)
+/// PC15: stock's debounced, active-low accessory / mute detect (`analysis/pin_audit.md`; docs/hardware.md 6.8):
+/// low, stock holds PB8 on. Read by the crossband key-up (stock clears PB8 at TX setup unless it's low).
+pub const ACC_DET: Pin = pin(GPIOC, 15); // (L: connector pin 3)
 
 // Power
 pub const POWER_HOLD: Pin = pin(GPIOA, 11); // (L) set at start-up by stock, cleared to switch off
@@ -139,6 +142,7 @@ pub fn init() {
         p.output(false, Mode::OutPp);
     }
     POWER_SW.config(Mode::InPu);
+    ACC_DET.config(Mode::InPu); // as stock: input, pull-up
     SI_RST.output(false, Mode::OutPp); // SI4732 held in reset until its driver needs it
     // GPS and Bluetooth modules start powered down; the test pages switch them on.
     GPS_PWR_N.output(true, Mode::OutPp);

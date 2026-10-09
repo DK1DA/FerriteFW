@@ -28,7 +28,9 @@
 //! The crossband repeater (manual chapter 19, decision 93) is the `tx` build's too: [`Repeater`] decides, the
 //! receive path hops between the two sides while ready, and a pass keys the other chip with the receiving one
 //! left in receive (`Path::key_up_xb`), the receiving chip's audio routed into the transmitting chip's mic input
-//! as stock does it (PA15 low, PB8 on; `analysis/crossband_repeat.md`, to confirm on the bench).
+//! with stock's timing (decision 95: PA15 low 10-20 ms after the PA is up, high again at the receive drop while
+//! still keyed; PB8 cleared at TX setup unless PC15 says an accessory; `analysis/crossband_repeat.md`, to confirm
+//! on the bench).
 
 use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, REPEAT_AUDIO, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
 use crate::bus::{BusyDelay, Io, Out, SiBus};
@@ -384,7 +386,8 @@ impl Radio {
                     }
                 }
                 Act::Wait(ms) => Timer::after_millis(ms as u64).await,
-                // XB-6, XB-8: stock's crossband route, PA15 low with the audio stage (PB8) on; back high after.
+                // XB-6, XB-8, decision 95: stock's crossband route at its PTT state 1, PA15 low with PB8 set
+                // (0x080248C2-0x080248D8); PA15 high again at the receive drop, still keyed (0x0801F534).
                 Act::RepeatAudio(on) => {
                     REPEAT_AUDIO.write(!on);
                     if on {
@@ -1696,6 +1699,17 @@ impl Radio {
         match x.rep.tick(now, heard) {
             Some(XbCmd::Key { from }) => self.xb_key(&mut x, from, now).await,
             Some(XbCmd::Unkey { id }) => self.xb_unkey(&x, id, now).await,
+            // Decision 95: stock's RX end while keyed (the mic back), and the repeat audio again on a return.
+            Some(XbCmd::Drop) => {
+                let mut st = Steps::default();
+                self.path.xb_drop(&mut st);
+                self.run(&st).await;
+            }
+            Some(XbCmd::Reopen) => {
+                let mut st = Steps::default();
+                self.path.xb_reopen(&mut st);
+                self.run(&st).await;
+            }
             None => {}
         }
         // Audio (XB-15): the passing side's chip always (its audio is what goes out); the speaker per the
@@ -1731,14 +1745,14 @@ impl Radio {
     }
 
     /// The sequencer's settings for a pass: its timeout a little after the repeater's own (XB-9: the repeater
-    /// unkeys first), the CW ID when the repeater asks for it (XB-12), tail elimination as the transmitting
-    /// slot's; no end tone.
+    /// unkeys first), the CW ID when the repeater asks for it (XB-12), the end tone and tail elimination as the
+    /// transmitting slot's (decision 95: stock plays its ROGER and TAIL at a repeat's unkey as for any TX).
     fn xb_seq_cfg(&self, x: &XbRun, id: bool) -> txseq::Cfg {
         let to = x.rep.from().map_or(0, |f| x.sides[1 - f as usize]);
         txseq::Cfg {
             timeout_s: (x.rep.timeout_ms() / 1000 + 5).min(600) as u16,
             prealert_s: 0,
-            end_tone: false,
+            end_tone: self.tx.end[to as usize % 4] != 0,
             cw_id: id && self.tx.cw_len != 0,
             cw_each: true,
             tail: self.tx.tail[to as usize % 4],
@@ -1794,6 +1808,11 @@ impl Radio {
         self.tuned[n as usize] = Some((to, f));
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, power));
         (self.tx.fault, self.tx.data, self.tx.slot, self.tx.dialled) = (false, Some(power), to, false);
+        // Decision 95: stock's TX setup clears PB8 unless the accessory detect (PC15) is low; its PTT state 1
+        // sets it again with the repeat audio (`Act::RepeatAudio`).
+        if crate::board::ACC_DET.read() {
+            AMP_EN[0].write(false);
+        }
         let mut st = Steps::default();
         if let Err(r) = self.tx.seq.key_xb(&req, &mut self.path, now, &mut st) {
             x.rep.refused(now);

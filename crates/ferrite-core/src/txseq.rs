@@ -188,6 +188,12 @@ impl TxSeq {
         self.heat(now);
         let Some((_, kind)) = self.since.take() else { return };
         let voice = kind == Kind::Voice && normal;
+        // Crossband (decision 95): stock's RX end first, while still keyed: the mic back and the receive select
+        // off, then the roger and tail, then the carrier held (path::XB_HOLD_MS) before the PA goes to 0.
+        let xb = path.keyed_xb();
+        if xb {
+            path.xb_rx_end(out);
+        }
         if voice && cfg.end_tone {
             out.push(Act::EndTone);
         }
@@ -196,7 +202,11 @@ impl TxSeq {
             self.last_id = Some(now);
         }
         if cfg.tail {
-            out.push(Act::TailElim);
+            out.push(Act::TailElim); // inside stock's 400 ms hold (tonegen::TAIL_MS)
+        } else if xb && normal {
+            for _ in 0..crate::path::XB_HOLD_MS / 200 {
+                out.push(Act::Wait(200));
+            }
         }
         path.unkey(now, out);
     }

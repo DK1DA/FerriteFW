@@ -4,8 +4,9 @@
 //!   new path is set only after its settle time (SAFE-21, TX-28);
 //! - never two RX selects or two TX selects; an RX and a TX select together only for the crossband repeater,
 //!   on different chips (TX-27, XB-6), and the receiving chip never transmits;
-//! - the crossband repeater never moves the relay, ramps the PA only with the repeat audio selected and puts the
-//!   mic back only with the PA at zero (XB-2, XB-6, XB-8);
+//! - the crossband repeater never moves the relay, and its audio switching is stock's (decision 95): the repeat
+//!   audio only while a chip transmits with the PA up, the mic back at the receive drop while still keyed, never
+//!   the repeat audio once unkeyed (XB-2, XB-6, XB-8);
 //! - a TX select only between key-up and unkey, the PA ramp only on a TX path with its chip transmitting.
 
 use ferrite_core::freq::{mhz, Freq10};
@@ -39,8 +40,10 @@ impl Pins {
                     assert!(!self.pa, "{what}: relay with PA drive");
                     assert!(self.chip_tx == [false; 2], "{what}: relay while a chip transmits");
                     assert!(Sel::ALL.iter().all(|s| !self.sel[*s as usize]), "{what}: relay with a path selected");
-                    assert!(self.since_rx.is_none_or(|t| t >= 100), "{what}: relay in the unkey wait");
                     if r != self.relay {
+                        // A move, not the safe state's write of the level it already has (after a crossband
+                        // unkey the chip leaves transmit at the end of the plan, stock's order, decision 95).
+                        assert!(self.since_rx.is_none_or(|t| t >= 100), "{what}: relay in the unkey wait");
                         assert!(self.muted, "{what}: relay moved unmuted");
                         self.since_relay = 0;
                     }
@@ -68,9 +71,6 @@ impl Pins {
                 Act::PaRamp => {
                     let tx = Sel::ALL.iter().find(|s| s.is_tx() && self.sel[**s as usize]).expect("PA ramp without a TX path");
                     assert!(self.chip_tx[tx.chip() as usize], "{what}: PA ramp before the chip transmits");
-                    if self.rx_sel().is_some() {
-                        assert!(self.repeat, "{what}: crossband PA ramp before the repeat audio");
-                    }
                     self.pa = true;
                 }
                 Act::ChipTx(n) => {
@@ -80,8 +80,9 @@ impl Pins {
                     self.chip_tx[n as usize] = true;
                 }
                 Act::RepeatAudio(on) => {
-                    if !on {
-                        assert!(!self.pa, "{what}: mic back with the PA up");
+                    if on {
+                        // Stock's PTT state 1: after the TX start, with a chip transmitting and the PA up.
+                        assert!(self.pa && self.chip_tx.contains(&true), "{what}: repeat audio before the PA is up");
                     }
                     self.repeat = on;
                 }
@@ -194,7 +195,7 @@ fn random_sequences_keep_the_rules() {
 
 /// The crossband repeater (XB-2, XB-6, XB-8, decision 93): the receive path hops between the two sides while
 /// ready, a pass keys the other chip on its own frequency with the receiver left on, and through it all the relay
-/// never moves, the receiving chip never transmits and the mic is never back with the PA up.
+/// never moves, the receiving chip never transmits, and the audio switching is stock's (decision 95).
 #[test]
 fn crossband_sequences_keep_the_rules() {
     use ferrite_core::msg::XbCfg;
@@ -268,6 +269,8 @@ fn crossband_sequences_keep_the_rules() {
                     }
                 }
                 Some(Cmd::Unkey { id }) => seq.release(&Cfg { cw_id: id, ..cfg }, &mut path, now, &mut s),
+                Some(Cmd::Drop) => path.xb_drop(&mut s),
+                Some(Cmd::Reopen) => path.xb_reopen(&mut s),
                 None => {
                     if let Some(e) = seq.tick(&cfg, true, &mut path, now, &mut s) {
                         if e != ferrite_core::txseq::Event::PreAlert {
