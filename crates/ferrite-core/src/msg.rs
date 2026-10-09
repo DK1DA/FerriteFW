@@ -139,7 +139,8 @@ pub struct XbCfg {
     pub timeout_10s: u8,
     /// Hang time in 0.1 s (0 - 3 s).
     pub hang_ds: u8,
-    /// Bit 0 tone gate, bit 1 CW ID, bit 2 speaker.
+    /// Bit 0 tone gate, bit 1 CW ID (its own setting, off by default: stock's repeater sends none, and users
+    /// may ID themselves; decision 94), bit 2 speaker.
     pub flags: u8,
 }
 
@@ -147,7 +148,7 @@ impl XbCfg {
     pub const TONE_GATE: u8 = 1;
     pub const ID: u8 = 2;
     pub const SPEAKER: u8 = 4;
-    pub const DEFAULT: XbCfg = XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 3 };
+    pub const DEFAULT: XbCfg = XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: XbCfg::TONE_GATE };
 }
 
 /// A slot setting carried by [`RadioCmd::SlotParam`]. Values are the UI's indexes, documented per variant.

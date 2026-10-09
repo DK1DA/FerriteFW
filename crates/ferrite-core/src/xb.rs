@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn a_pass_with_hang_and_id() {
-        let cfg = XbCfg { hang_ds: 10, ..XbCfg::DEFAULT };
+        let cfg = XbCfg { hang_ds: 10, flags: XbCfg::TONE_GATE | XbCfg::ID, ..XbCfg::DEFAULT };
         let mut r = Repeater::new(cfg, 0);
         let (mut t, mut out) = (0, Vec::new());
         run(&mut r, &mut t, 1_000, [Some(false); 2], &mut out);
@@ -378,6 +378,23 @@ mod tests {
         run(&mut r, &mut t, ID_MS + 21_000, [Some(true), Some(false)], &mut out);
         run(&mut r, &mut t, ID_MS + 24_000, [Some(false), Some(false)], &mut out);
         assert_eq!(out.last().unwrap().1, Cmd::Unkey { id: true });
+    }
+
+    /// Decision 94: ID off (the default) never asks for CW, however many passes and minutes.
+    #[test]
+    fn id_off_never_ids() {
+        assert_eq!(XbCfg::DEFAULT.flags & XbCfg::ID, 0, "off by default");
+        let mut r = Repeater::new(XbCfg { hang_ds: 0, ..XbCfg::DEFAULT }, 0);
+        let (mut t, mut out) = (0, Vec::new());
+        for k in 0..4u32 {
+            let start = k * (ID_MS + 30_000);
+            t = t.max(start);
+            run(&mut r, &mut t, start + 3_000, [Some(true), Some(false)], &mut out);
+            run(&mut r, &mut t, start + 6_000, [Some(false), Some(false)], &mut out);
+        }
+        let unkeys: Vec<_> = out.iter().filter(|(_, c)| matches!(c, Cmd::Unkey { .. })).collect();
+        assert_eq!(unkeys.len(), 4);
+        assert!(unkeys.iter().all(|(_, c)| *c == Cmd::Unkey { id: false }), "{unkeys:?}");
     }
 
     #[test]

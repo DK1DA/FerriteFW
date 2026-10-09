@@ -3,7 +3,7 @@
 use super::*;
 use crate::screens::activity::Mode;
 use crate::screens::nav::Dest;
-use ferrite_core::msg::{BroadcastCmd, ModeLive, XbLive};
+use ferrite_core::msg::{BroadcastCmd, ModeLive, XbCfg, XbLive};
 use ferrite_core::txplan::{Refusal, Region};
 
 fn ready() -> T {
@@ -501,9 +501,11 @@ fn xb_ready(t: &mut T) {
 #[test]
 fn crossband_repeater() {
     let mut t = ready();
+    assert_eq!(t.app.set.xb.flags & XbCfg::ID, 0, "ID off by default (decision 94)");
+    t.app.set.xb.flags |= XbCfg::ID;
     t.app.open(Dest::Crossband);
     t.tap(Key::Hash);
-    assert_ne!(t.app.radio.mode, Mode::Xb, "no callsign for the ID: refused");
+    assert_ne!(t.app.radio.mode, Mode::Xb, "ID on with no callsign: refused");
     assert!(t.app.toast.is_some());
     xb_ready(&mut t);
     t.knob(1); // side 1: A -> C, both on chip 0 with B? C is 118.950: VHF chip, B is UHF: fine
