@@ -107,6 +107,9 @@ fn shot_home(layout: u8, theme: u8) -> Vec<u32> {
     r.sim.screen_rgb()
 }
 
+/// Every screen as reviewed, pixel for pixel: the goldens hold the approved look, so a change to the fonts and
+/// sizes (DISP-6), the corners (DISP-19) or the centring of text in boxes (DISP-20) fails here until it is
+/// reviewed and blessed.
 #[test]
 fn every_screen_matches_its_golden() {
     let names: Vec<String> = jump_names().collect();

@@ -76,7 +76,8 @@ fn led_heartbeat() {
     assert_eq!(count(&mut t, dev(90, false), 5000).0, 0, "RX and TX only: no heartbeat");
 }
 
-/// KEY-20: the keys lock after the set time without a key; receiving doesn't hold it off.
+/// KEY-20 (and KEY-15, which names it): the keys lock after the set time without a key; receiving doesn't
+/// hold it off.
 #[test]
 fn auto_key_lock() {
     let mut t = T::new();

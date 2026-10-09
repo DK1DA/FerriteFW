@@ -316,6 +316,35 @@ mod tests {
     use ferrite_app::chan::channel;
     use ferrite_app::slot::DCS_FLAG;
 
+    /// CHAN-1: 1,000 channels of 64 B from SPI 0x02F000, all inside the region; an erased record (RX
+    /// frequency 0xFFFFFFFF) is empty. CHAN-6: 254 zones of 32 B from 0x03F000, 127 per sector, inside theirs.
+    #[test]
+    fn channel_and_zone_regions() {
+        assert_eq!(CH_LEN, 64);
+        assert_eq!(CHANNELS.start, 0x02_F000);
+        assert!(ch_addr(999) + CH_LEN as u32 <= CHANNELS.end);
+        assert!(!ch_valid(&[0xFF; CH_LEN]) && ch_decode(5, &[0xFF; CH_LEN]).is_none());
+        assert_eq!((ZONE_LEN, ZONES_PER_SECTOR, MAX_ZONES), (32, 127, 254));
+        assert_eq!(zone_addr(0), 0x03_F000);
+        assert_eq!(zone_addr(127), 0x03_F000 + SECTOR);
+        assert!(zone_addr(MAX_ZONES - 1) + ZONE_LEN as u32 <= ZONES.end);
+    }
+
+    /// CHAN-3: the tone word is CTCSS in 0.1 Hz, bit 15 DCS, bit 14 inverted, 0 none; each survives a round
+    /// trip through the record as written.
+    #[test]
+    fn tone_words() {
+        for (rx, tx) in [(885u16, 1000u16), (DCS_FLAG | 0o023, DCS_FLAG | 0x4000 | 0o754), (0, 1318)] {
+            let mut cfg = DEFAULT_CFG;
+            (cfg.rx_tone, cfg.tx_tone) = (rx, tx);
+            let c = channel(3, 0, 14_652_000, "T", cfg);
+            let b = ch_encode(&c, &[0xFF; CH_LEN]);
+            assert_eq!((u16::from_le_bytes([b[12], b[13]]), u16::from_le_bytes([b[14], b[15]])), (rx, tx));
+            assert_eq!(ch_decode(3, &b).map(|d| (d.cfg.rx_tone, d.cfg.tx_tone)), Some((rx, tx)));
+        }
+        assert_eq!(DCS_FLAG, 0x8000);
+    }
+
     /// CHAN-7: each channel has a fixed place in flash: channel n at sector n / 63, slot n % 63.
     #[test]
     fn channel_places_are_fixed() {
@@ -402,8 +431,8 @@ mod tests {
         assert!(dtmf_name_decode(&[0xFF; DTMF_NAME_LEN]).is_none());
     }
 
-    /// Decision 86: end tone and tail in byte 31 round trip; an older record (0 there) and a value out of range
-    /// read as Global.
+    /// Decision 86, TONE-17: end tone and tail in byte 31 round trip; an older record (0 there) and a value out
+    /// of range read as Global.
     #[test]
     fn end_tone_and_tail_in_byte_31() {
         let mut c = Channel { num: 4, zone: 0, rx: 14_652_000, name: [0; 16], cfg: DEFAULT_CFG, flags: 0, tones: 0 };

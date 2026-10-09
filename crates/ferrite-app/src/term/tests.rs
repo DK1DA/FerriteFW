@@ -522,7 +522,7 @@ fn settings_same_numbers_and_validation() {
     assert_eq!(r.app.set.cable_port, 0);
 }
 
-/// Monitor: the event log, newest at the bottom, and a slot receiving now.
+/// Monitor: the event log's decodes one line each, newest at the bottom, and a slot receiving now (TERM-5).
 #[test]
 fn monitor() {
     let mut r = Rig::main();

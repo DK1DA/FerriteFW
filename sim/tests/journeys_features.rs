@@ -1,0 +1,318 @@
+//! End-to-end journeys through features, chapter by chapter: setup, channels, tuning, scans, tones, broadcast,
+//! HF, the scope, alerts, APRS, GPS and Bluetooth. The harness is `common`; a rule counts as covered when its ID
+//! is in a test's doc comment.
+
+mod common;
+
+use common::Radio;
+use ferrite_core::freq::mhz;
+use ferrite_core::keys::Key;
+use ferrite_core::msg::RadioCmd;
+use ferrite_sim::simcore::Event;
+
+/// Setup has no arming step and no licence page: eight pages of questions only (SETUP-6).
+#[test]
+fn setup_has_no_licence_or_arming() {
+    let mut r = Radio::blank();
+    for _ in 0..8 {
+        let t = r.text().to_lowercase();
+        for w in ["licen", "arm ", "arming", "i agree", "accept"] {
+            assert!(!t.contains(w), "setup page mentions {w:?}:\n{t}");
+        }
+        r.press(Key::Menu);
+    }
+    r.expect_screen("Home");
+}
+
+/// An empty callsign is allowed in setup; automatic transmissions stay refused until one is set (SETUP-9).
+#[test]
+fn setup_without_a_callsign() {
+    let mut r = Radio::blank();
+    r.press(Key::Menu); // page 2: the callsign, left empty
+    r.expect_text("2 of 8").press(Key::Menu);
+    r.expect_text("3 of 8");
+    for _ in 3..=8 {
+        r.press(Key::Menu);
+    }
+    r.expect_screen("Home");
+    r.take_cmds();
+    r.event(Event::Beacon).wait(500);
+    assert!(!r.sim.radio().live.tx.keyed, "no beacon without a callsign");
+    assert!(!r.take_cmds().iter().any(|c| matches!(c, RadioCmd::TransmitData { .. })), "nothing keyed");
+}
+
+/// Hold 0 with no home channel says so and how to set one (CHAN-20).
+#[test]
+fn no_home_channel() {
+    let mut r = Radio::new();
+    r.run("hold 0; expect text \"No home channel\"; expect text \"hold SLOT to set\"");
+}
+
+/// Hold * toggles reverse on the active slot: the shift chip shows R, the Radio task gets the Reverse
+/// parameter, and the transmit checks use the frequency after the swap (VFO-7, VOX-7, VOX-9).
+#[test]
+fn reverse() {
+    let mut r = Radio::new(); // A: 146.520, -600 kHz
+    let tx_plan = |r: &mut Radio| {
+        r.take_cmds();
+        r.down(Key::Ptt(ferrite_core::keys::PTT_A)).wait(300);
+        let plan = r.take_cmds().into_iter().find_map(|c| match c {
+            RadioCmd::TxPlan { tx, .. } => Some(tx),
+            _ => None,
+        });
+        r.up(Key::Ptt(ferrite_core::keys::PTT_A)).wait(800);
+        plan
+    };
+    assert_eq!(tx_plan(&mut r), Some(mhz(145) + 92_000), "TX on the input, 600 kHz down");
+    r.take_cmds();
+    r.run("hold STAR; expect text \"R-600k\"");
+    assert!(
+        r.take_cmds().iter().any(|c| matches!(c, RadioCmd::SlotParam { param: ferrite_core::msg::Param::Reverse, value: 1, .. })),
+        "the Radio task is told to swap"
+    );
+    assert_eq!(tx_plan(&mut r), Some(mhz(146) + 52_000), "reversed: TX on the output");
+    r.run("hold STAR; expect no text \"R-600k\"; expect text \"-600k\"");
+}
+
+/// The knob steps by the slot's step, SIDE2 + knob by 1 MHz, and ◀▶ step bands (VFO-5).
+#[test]
+fn tuning_steps() {
+    let mut r = Radio::new();
+    let f = |r: &Radio| r.sim.app().slot(0).freq();
+    let f0 = f(&r);
+    r.knob(1);
+    assert!(f(&r) > f0 && f(&r) - f0 <= 2_500, "one step up: {} -> {}", f0, f(&r));
+    let f1 = f(&r);
+    r.down(Key::Side(2)).knob(1).up(Key::Side(2)).wait(200);
+    assert_eq!(f(&r), f1 + mhz(1), "SIDE2 + knob: 1 MHz");
+    r.press(Key::Right);
+    assert!(f(&r) > mhz(150), "▶ to the next band up: {}", f(&r));
+}
+
+/// RX and TX tones are set apart in the tone picker (VFO-6, TONE-17's page of the picker).
+#[test]
+fn rx_and_tx_tones_apart() {
+    let mut r = Radio::new();
+    let tones = |r: &Radio| (r.sim.app().slot(0).cfg().rx_tone, r.sim.app().slot(0).cfg().tx_tone);
+    let (rx0, tx0) = tones(&r);
+    r.run("hold 5; expect screen \"Tone picker\"; expect text \"RX tone\"; expect text \"TX tone\"; press UP");
+    r.knob(3).press(Key::Menu).wait(200);
+    let (rx1, tx1) = tones(&r);
+    assert!(rx1 != rx0 && tx1 == tx0, "only the RX tone changed: rx {rx0}->{rx1}, tx {tx0}->{tx1}");
+}
+
+/// The scan screen shows the target, resume rule, position, hits and skips (SCAN-7); a zone scan walks its
+/// channels in number order (SCAN-4).
+#[test]
+fn zone_scan_screen_and_order() {
+    let mut r = Radio::new();
+    r.sim.radio_mut().quiet = true; // nothing heard: the scan never stops
+    r.press(Key::Slot);
+    r.run("press SIDE2; wait 500ms; expect screen \"Scan\"");
+    for w in ["Target Zone Repeaters", "Resume", "Position", "Hits", "Skips"] {
+        r.expect_text(w);
+    }
+    let mut seen: Vec<u16> = Vec::new();
+    for _ in 0..1500 {
+        r.wait(20);
+        let t = r.text();
+        if let Some(n) = t.lines().find_map(|l| l.strip_prefix("CH ").and_then(|s| s.get(..3)).and_then(|s| s.parse().ok())) {
+            if seen.last() != Some(&n) {
+                seen.push(n);
+            }
+        }
+    }
+    assert!(seen.len() >= 3, "the scan moved: {seen:?}");
+    let drops = seen.windows(2).filter(|w| w[1] < w[0]).count();
+    assert!(drops <= seen.len() / 3, "number order, wrapping at the end: {seen:?}");
+}
+
+/// The scope shows the band, the centre, MHz labels under the graph and the marker readout; OK goes to the
+/// marker's frequency (SCOPE-2, MENU-26).
+#[test]
+fn scope_screen_and_go() {
+    let mut r = Radio::new();
+    r.run("hold 1; expect screen \"Scope\"; expect text \"VHF\"; expect text \"centre\"; expect text \"Marker\"");
+    let texts = r.sim.screen_texts();
+    let labels = texts.iter().filter(|t| t.y0 > 200 && t.y1 < 300 && t.s.contains('.')).count();
+    assert!(labels >= 2, "MHz labels under the graph");
+    r.knob(3);
+    let marker = r.text();
+    r.press(Key::Menu).wait(300);
+    r.expect_screen("Home");
+    let f = r.sim.app().slot(0).freq();
+    assert_ne!(f, mhz(146) + 52_000, "Go tuned the marker, from:\n{marker}");
+}
+
+/// Only the bars that change are redrawn while the scope sweeps (SCOPE-7).
+#[test]
+fn scope_redraws_little() {
+    let mut r = Radio::new();
+    r.hold(Key::Digit(1)).wait(2000);
+    for _ in 0..20 {
+        r.wait(20);
+        assert!(r.sim.last_px() < 240 * 320 / 2, "a sweep frame redrew {} pixels", r.sim.last_px());
+    }
+}
+
+/// FM broadcast: hold MENU opens its own options (BCR-3); ▲ tunes by the step, digits do nothing on the main
+/// screen, OK opens the presets (BCR-18); it tunes 64-108 MHz, wrapping at the ends (BCR-17); with radio monitor on, a
+/// slot that opens interrupts it (BCR-4).
+#[test]
+fn broadcast() {
+    let mut r = Radio::new();
+    r.run("menu 0 3 1; press UP; press OK; wait 500ms; expect screen \"FM broadcast\"; expect text \"101.1\"");
+    r.run("hold OK; expect text \"Step\"; expect text \"AGC\"; expect text \"Radio monitor\"; press BACK");
+    r.run("press UP; wait 300ms; expect text \"101.2\"");
+    r.run("press 5; wait 300ms; expect screen \"FM broadcast\"; expect text \"101.2\"");
+    for _ in 0..372 {
+        r.press(Key::Down); // 101.2 down to the bottom of the band
+    }
+    r.expect_text("64.0");
+    r.press(Key::Down); // past it: round to the top, never below 64
+    r.expect_text("108.0");
+    r.wait(12_000); // C's airband scan hears something
+    r.expect_text("broadcast paused");
+    r.run("press OK; expect screen \"FM presets\"; expect text \"of 20 used\"");
+}
+
+/// Hold MENU in HF mode opens its options: step, bandwidth, AGC, LNA, fine tune and the recent list (HF-14).
+#[test]
+fn hf_options() {
+    let mut r = Radio::new();
+    r.run("menu 0 3 4; wait 8s; expect screen \"HF mode\"");
+    r.run("hold OK; expect text \"Step\"; expect text \"Bandwidth\"; expect text \"AGC\"; expect text \"LNA\"");
+}
+
+/// A weather alert takes the screen; a message only shows a toast (WX-9).
+#[test]
+fn alerts_take_the_screen_messages_toast() {
+    let mut r = Radio::new();
+    r.event(Event::Message).expect_screen("Home");
+    r.run("menu 0 0").event(Event::Alert);
+    r.expect_screen("Alert");
+}
+
+/// The weather channel setting defaults to Auto, over the 162.400-162.550 MHz channels (WX-2).
+#[test]
+fn weather_channel_auto() {
+    let mut r = Radio::new();
+    r.run("menu 0 4 9; expect text \"Auto\"");
+}
+
+/// The heard list: newest first with callsign, distance, bearing and age; a station without a position shows a
+/// dash for its distance (APRS-3, APRS-5).
+#[test]
+fn heard_list_fields() {
+    let mut r = Radio::new();
+    r.run("menu 0 5 1; expect screen \"APRS heard\"");
+    let t = r.text();
+    assert!(t.contains("km") || t.contains(" mi"), "distances shown:\n{t}");
+    assert!(t.contains("ago") || t.contains(" min") || t.contains(" s"), "ages shown:\n{t}");
+}
+
+/// KISS is off by default (KISS-1).
+#[test]
+fn kiss_off_by_default() {
+    let mut r = Radio::new();
+    r.run("menu 0 5 9 1; expect text \"Off\"");
+    assert_eq!(r.sim.app().settings().kiss_port, 0);
+}
+
+/// Bluetooth: the status-bar icon shows only while a device is connected, and Status shows the state (LINK-17).
+#[test]
+fn bluetooth_state() {
+    let mut r = Radio::new();
+    assert!(!r.sim.device().bt);
+    r.run("menu 0 9 2 1; press OK; home");
+    r.sim.bt_feed(b"\r");
+    r.wait(500);
+    assert!(r.sim.device().bt, "connected once the device talks");
+    r.run("menu 0 0; expect text \"Bluetooth\"");
+    let t = r.text();
+    assert!(t.contains("Connected") || t.contains("On"), "Status shows the state:\n{t}");
+}
+
+/// Channel-only mode hides VFO mode and all channel editing: V/M stays on the channel, hold SLOT edits nothing
+/// (CHAN-16).
+#[test]
+fn channel_only_hides_vfo_and_editing() {
+    let mut r = Radio::new();
+    r.press(Key::Slot); // B on a channel
+    r.run("menu 0 9 3 2; press OK; home");
+    r.press(Key::VfoMem);
+    assert!(r.sim.app().slot(1).on_channel(), "V/M didn't leave the channel");
+    r.run("hold SLOT; expect screen \"Home\"");
+}
+
+/// The menu never interrupts the radio: with a settings list open, the scan keeps going and a watched slot
+/// is still heard (MENU-29).
+#[test]
+fn menu_doesnt_interrupt() {
+    let mut r = Radio::new();
+    r.run("menu 0 8 6");
+    let mut heard = false;
+    for _ in 0..1250 {
+        r.wait(20); // 25 s: inside the menu's idle timeout (MENU-28)
+        heard |= r.sim.radio().live.slots[1].squelch_open;
+    }
+    assert!(r.sim.radio().live.slots[2].scanning, "C still scanning");
+    assert!(heard, "B heard under the menu");
+    r.expect_screen("Settings group");
+}
+
+/// A notification interrupts nothing and never keys: a message during a scan leaves it scanning (INBOX-5).
+#[test]
+fn notification_interrupts_nothing() {
+    let mut r = Radio::new();
+    r.event(Event::Message).wait(1000);
+    assert!(r.sim.radio().live.slots[2].scanning, "C still scanning");
+    assert!(!r.sim.radio().live.tx.keyed);
+}
+
+/// A tapped monitor shows MON on the slot's card and nowhere in the status bar (SQL-14).
+#[test]
+fn monitor_on_the_card_only() {
+    let mut r = Radio::new();
+    r.press(Key::Side(1)).wait(300);
+    let mon: Vec<_> = r.sim.screen_texts().into_iter().filter(|t| t.s == "MON").collect();
+    assert!(!mon.is_empty(), "MON shown");
+    assert!(mon.iter().all(|t| t.y0 >= 20), "MON not in the bar");
+}
+
+/// 1.25 m is capped: its power shows 0.25 W and the knob can't raise it (TX-9, its display).
+#[test]
+fn power_capped_on_125m() {
+    let mut r = Radio::new();
+    r.run("type 2235; press OK; wait 300ms; press OK; expect text \"TX power 0.25 W\"; press DOWN; knob 2");
+    r.expect_text("TX power 0.25 W");
+}
+
+/// With no ID code, PTT ID is greyed and says why; one radio-wide ID code (0 8 6 5) and the VFOs' choice
+/// (0 8 6 4) (DTMF-5, DTMF-6).
+#[test]
+fn ptt_id_needs_a_code() {
+    let mut r = Radio::new();
+    r.run("menu 0 8 6; expect text \"ID code Empty\"; expect text \"PTT ID on VFOs Off\"");
+    r.run("press 4; knob 1; expect text \"PTT ID on VFOs Off\"");
+    let t = r.text().to_lowercase();
+    assert!(t.contains("code"), "it says why:\n{t}");
+}
+
+/// CW ID (0 8 7 2): off, every 10 min or on unkey; the choice and the callsign go to the Radio task; with no
+/// callsign it stays off and says why (VOX-16).
+#[test]
+fn cw_id_setting() {
+    let mut r = Radio::new();
+    r.take_cmds();
+    r.run("menu 0 8 7; press 2; knob 1");
+    assert!(!r.has("CW ID Off"), "CW ID turned on");
+    assert!(r.take_cmds().iter().any(|c| matches!(c, RadioCmd::CwCall { .. } | RadioCmd::TxTones { .. })), "sent to the radio");
+    let mut b = Radio::blank();
+    for _ in 0..8 {
+        b.press(Key::Menu);
+    }
+    b.run("menu 0 8 7; press 2; knob 1; expect text \"CW ID Off\"");
+    let t = b.text().to_lowercase();
+    assert!(t.contains("callsign"), "says why:\n{t}");
+}

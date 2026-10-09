@@ -119,4 +119,28 @@ mod tests {
         set(DARK);
         assert_eq!(map(BG), BG);
     }
+
+    /// WCAG contrast ratio of two RGB565 colours.
+    fn contrast(a: u16, b: u16) -> f32 {
+        let lin = |v: u16, bits: u32| {
+            let c = v as f32 / ((1u32 << bits) - 1) as f32;
+            if c <= 0.039_28 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        };
+        let lum = |c: u16| 0.2126 * lin(c >> 11, 5) + 0.7152 * lin((c >> 5) & 0x3F, 6) + 0.0722 * lin(c & 0x1F, 5);
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    /// DISP-8: text is at least 4.5:1 against its ground in the dark and daylight themes (main and secondary
+    /// text, the state colours, text on the selected row and on a toast), and night red keeps main text at full
+    /// red. Greyed text (DIM, a setting that doesn't apply) is an inactive control, outside the rule.
+    #[test]
+    fn text_contrast() {
+        let pairs = [(TEXT, BG), (SUB, BG), (BLUE, BG), (GREEN, BG), (AMBER, BG), (RED, BG), (TEXT, SURFACE), (TEXT, TOAST), (BLUE_FG, BLUE)];
+        for (f, g) in pairs {
+            assert!(contrast(f, g) >= 4.5, "dark: {f:04x} on {g:04x} is {:.2}", contrast(f, g));
+            assert!(contrast(day(f), day(g)) >= 4.5, "daylight: {f:04x} on {g:04x} is {:.2}", contrast(day(f), day(g)));
+        }
+        assert_eq!(night(TEXT) >> 11, 31, "night red: main text at full red");
+    }
 }

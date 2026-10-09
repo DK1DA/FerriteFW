@@ -321,9 +321,10 @@ impl View for Scope {
             let lo = w::freq3(bar_freq(centre, step, n, 0));
             let hi = w::freq3(bar_freq(centre, step, n, n as i32 - 1));
             lcd.fill(0, BASE, 240, 1, LINE);
-            w::field(lcd, 4, 74, BASE + 2, BASE + 18, BASE + 14, Align::Left, lo.as_bytes(), &UI_12, SUB, BG);
-            w::field(lcd, 78, 84, BASE + 2, BASE + 18, BASE + 14, Align::Center, fq.as_bytes(), &UI_12, BLUE, BG);
-            w::field(lcd, 162, 74, BASE + 2, BASE + 18, BASE + 14, Align::Right, hi.as_bytes(), &UI_12, SUB, BG);
+            // Inside the 8 px side margins (DISP-2).
+            w::field(lcd, 8, 74, BASE + 2, BASE + 18, BASE + 14, Align::Left, lo.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 82, 76, BASE + 2, BASE + 18, BASE + 14, Align::Center, fq.as_bytes(), &UI_12, BLUE, BG);
+            w::field(lcd, 158, 74, BASE + 2, BASE + 18, BASE + 14, Align::Right, hi.as_bytes(), &UI_12, SUB, BG);
         }
         // Bars, 40 px at a time (SCOPE-7): blank bars grey, the centre line blue, the marker amber, the bar being
         // listened to green, bars over the trigger red (SCOPE-8), the trigger line dashed red.
@@ -508,4 +509,25 @@ pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32,
     w::field(lcd, 8, 60, y + h + 2, y + h + 18, y + h + 14, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
     w::field(lcd, 80, 80, y + h + 2, y + h + 18, y + h + 14, Align::Center, w::freq3(centre).as_bytes(), &UI_12, SUB, BG);
     w::field(lcd, 172, 60, y + h + 2, y + h + 18, y + h + 14, Align::Right, b.as_bytes(), &UI_12, SUB, BG);
+}
+
+#[cfg(test)]
+mod floor_tests {
+    use super::*;
+
+    /// SCOPE-8: bars stand on the noise floor: the floor is the lowest bar of the sweep (blank points left out),
+    /// each bar's height is its level above that, the floor bar still a pixel tall, a strong one capped at the
+    /// graph's height; a weak signal over a quiet band stands out as much as a strong one over a noisy band.
+    #[test]
+    fn bars_on_the_floor() {
+        let quiet = [40u8, 41, 40, 0, 46, 40];
+        let (floor, pk) = floor_peak(&quiet);
+        assert_eq!((floor, pk), (40, Some(4)), "blank points don't set the floor");
+        assert_eq!(bar_h(40, floor), 1, "the floor bar is a pixel");
+        assert_eq!(bar_h(0, floor), 0, "a blank point has no bar");
+        let noisy = [90u8, 91, 90, 96, 90];
+        let (nf, _) = floor_peak(&noisy);
+        assert_eq!(bar_h(46, floor), bar_h(96, nf), "the same rise above the floor, the same height");
+        assert_eq!(bar_h(255, 0), H, "capped at the graph");
+    }
 }

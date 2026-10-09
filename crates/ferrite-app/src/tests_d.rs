@@ -390,6 +390,24 @@ fn same_header_raises_the_alert() {
     assert!(!t.app.same_alert(&h, 2, 16_255_000));
 }
 
+/// Location codes: with some set, a warning raises the alert only when one of its areas is in the list;
+/// with none set, every warning does (WX-10).
+#[test]
+fn same_location_codes() {
+    use ferrite_core::same::parse;
+    use ferrite_core::txplan::Region;
+    let h = parse(b"ZCZC-WXR-SVR-024031-024033+0045-2761828-KLWX/NWS-").unwrap();
+    let mut t = T::new();
+    t.app.settings_mut().set_region(Some(Region::Us));
+    t.app.settings_mut().same_codes[0] = 51_059;
+    assert!(!t.app.same_alert(&h, 2, 16_255_000), "not for 051059");
+    t.app.settings_mut().same_codes[1] = 24_033;
+    assert!(t.app.same_alert(&h, 2, 16_255_000), "024033 is one of its areas");
+    t.hold(Key::Exit);
+    t.app.settings_mut().same_codes = [0; crate::settings::SAME_CODES];
+    assert!(t.app.same_alert(&h, 2, 16_255_000), "no codes: every warning");
+}
+
 /// Crossband has its menu number: MENU 0 3 5 (Tools) opens the crossband repeater.
 #[test]
 fn crossband_from_the_menu() {

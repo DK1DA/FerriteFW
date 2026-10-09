@@ -75,6 +75,7 @@ fn app() -> App {
     App::new(set, alert)
 }
 
+/// Each event keeps its own read mark across power cycles, newest first (INBOX-7).
 #[test]
 fn events_round_trip_newest_first_and_are_marked_read() {
     let s = mount(SimFlash::new());
@@ -98,6 +99,7 @@ fn events_round_trip_newest_first_and_are_marked_read() {
     assert_eq!(cycle(s).events(), 0);
 }
 
+/// When the ring is full, the oldest go a sector (31 records) at a time, newest first with no gaps (INBOX-8).
 #[test]
 fn the_log_wraps_a_sector_at_a_time() {
     let s = mount(SimFlash::new());
@@ -298,6 +300,8 @@ fn cut_during(f: SimFlash, r: &mut Rng, op: &dyn Fn(&Store)) -> (Store, Snap, Sn
     (mount(f), before, after)
 }
 
+/// A power cut at any flash operation leaves the store as before or after the write, or one of the allowed
+/// in-between states: at most the record being written is lost (INBOX-13).
 #[test]
 fn power_cuts_leave_before_or_after() {
     let mut r = Rng(0x1065_0001);

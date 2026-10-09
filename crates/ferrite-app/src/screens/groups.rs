@@ -1155,3 +1155,22 @@ impl Group {
         }
     }
 }
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    /// MENU-3: at most 9 items per list, every list on one screen, and a group's third level is the deepest
+    /// (MENU 0 g s i): sub-lists hang only off a group's own rows and have no sub-lists of their own.
+    #[test]
+    fn menu_shape() {
+        for (g, items) in GROUP_ITEMS.iter().enumerate() {
+            assert!(!items.is_empty() && items.len() <= 9, "group {} has {} items", g + 1, items.len());
+        }
+        for ((g, s), items) in SUBS {
+            assert!((1..=9).contains(&g) && (1..=9).contains(&s), "sub-list ({g}, {s})");
+            assert!(s as usize <= GROUP_ITEMS[g as usize - 1].len(), "({g}, {s}) hangs off a row its group has");
+            assert!(!items.is_empty() && items.len() <= 9, "({g}, {s}) has {} items", items.len());
+        }
+    }
+}

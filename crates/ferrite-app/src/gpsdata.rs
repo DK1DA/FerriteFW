@@ -281,6 +281,8 @@ mod tests {
         GpsFix { on: true, fix: 3, used: 9, view: 15, lat: 454_215_833, lon: -756_976_667, alt_dm: 712, speed_kn10: 126, course10: 873, hdop10: 9, unix: 1_791_383_530, at_ms }
     }
 
+    /// GPS-25: a fix is current for 10 s after the module last reported it; after that the state reads
+    /// searching and no fix is offered.
     #[test]
     fn fix_age_and_state() {
         let g = GpsData::new();
@@ -299,9 +301,11 @@ mod tests {
         assert_eq!(g.state(), (GpsState::Searching, 9));
     }
 
+    /// GPS-3: with no current fix, position users take the fixed position, or none; a current fix wins.
     #[test]
     fn fixed_position_stands_in() {
         let g = GpsData::new();
+        assert_eq!(g.position(), None, "no fix and no fixed position: none");
         let p = Pos { lat: 1, lon: 2 };
         g.set_fixed(Some(p));
         assert_eq!(g.position(), Some(p));
@@ -326,6 +330,8 @@ mod tests {
         assert_eq!(local_clock(60, 9).0, 20 * 60 + 1);
     }
 
+    /// GPS-4: GPS during RX/TX powers the module off for the chosen cases (receiving, transmitting, both) and
+    /// on otherwise.
     #[test]
     fn powered_around_signals() {
         let c = GpsCfg { on: true, rxtx: 1 };
@@ -336,6 +342,7 @@ mod tests {
         assert!(GpsCfg::DEFAULT.powered(true, true));
     }
 
+    /// GPS-12: the arrival alarm fires once inside the radius, and again only after leaving it.
     #[test]
     fn arrival_fires_once() {
         let wp = Pos { lat: 454_215_833, lon: -756_976_667 };
