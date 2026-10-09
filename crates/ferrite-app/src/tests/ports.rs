@@ -145,8 +145,9 @@ fn kiss_beside_the_terminal() {
     assert_eq!(r.send(Port::Cable, &[0xC0]), [To::Kiss]);
 }
 
-/// A Bluetooth connection quiet for BT_IDLE_MS is over: its terminal closes, its approval ends, the cable has
-/// the port again; `BAUD` never changes Bluetooth's rate (LINK-25).
+/// LINK-29: a Bluetooth connection quiet for BT_IDLE_MS is over: its terminal closes, its approval ends, the
+/// cable has the port again, and turning Bluetooth off ends it at once; LINK-15: `BAUD` never changes
+/// Bluetooth's rate (LINK-25).
 #[test]
 fn bluetooth_goes_quiet() {
     let mut r = Rig::new();
@@ -164,4 +165,11 @@ fn bluetooth_goes_quiet() {
     r.app.set.bt = false;
     r.poll();
     assert_eq!(r.p.owner(), Port::Cable);
+}
+
+/// LINK-14: Bluetooth is off by default.
+#[test]
+fn bluetooth_off_by_default() {
+    let set = core::hint::black_box(crate::settings::Settings::DEFAULT);
+    assert!(!set.bt, "Bluetooth off by default");
 }

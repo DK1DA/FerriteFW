@@ -150,6 +150,8 @@ mod tests {
         all
     }
 
+    /// SCAN-25: a channel scan needs no copy of the channels in the Radio task: the UI streams which channel
+    /// numbers are stops, a few chunks per tick, without overflowing the outbox.
     #[test]
     fn the_set_streams_without_overflow() {
         let store = Sample::new();

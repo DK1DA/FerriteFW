@@ -316,6 +316,15 @@ mod tests {
     use ferrite_app::chan::channel;
     use ferrite_app::slot::DCS_FLAG;
 
+    /// CHAN-7: each channel has a fixed place in flash: channel n at sector n / 63, slot n % 63.
+    #[test]
+    fn channel_places_are_fixed() {
+        assert_eq!(ch_addr(0), CHANNELS.start);
+        assert_eq!(ch_addr(62), CHANNELS.start + 62 * CH_LEN as u32);
+        assert_eq!(ch_addr(63), CHANNELS.start + SECTOR);
+        assert_eq!(ch_addr(999), CHANNELS.start + 999 / 63 * SECTOR + 999 % 63 * CH_LEN as u32);
+    }
+
     #[test]
     fn channel_round_trip_keeps_unmodelled_fields() {
         let mut cfg = DEFAULT_CFG;

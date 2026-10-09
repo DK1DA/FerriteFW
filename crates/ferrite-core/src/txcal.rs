@@ -123,6 +123,8 @@ mod tests {
         b
     }
 
+    /// TX-13: calibration is checked, never replaced: an erased sector or a hole in a used row locks transmit
+    /// instead of falling back to built-in curves.
     #[test]
     fn blank_and_holes_refuse() {
         let mut b = sector(GAUGE_DEFAULT);

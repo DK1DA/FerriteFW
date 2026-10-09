@@ -586,6 +586,20 @@ mod tests {
         assert_eq!(a.stations(), HEARD_MAX);
     }
 
+    /// APRS-25: a frame's information field is at most 256 bytes: 256 is taken whole, 257 is dropped.
+    #[test]
+    fn info_field_capped_at_256() {
+        let a = AprsLive::new();
+        for (len, kept) in [(INFO_MAX, true), (INFO_MAX + 1, false)] {
+            let mut info = std::vec![b'x'; len];
+            info[0] = b'>';
+            let mut b = std::vec![0u8; 512];
+            let src: &[u8] = if kept { b"VE3AA" } else { b"VE3BB" };
+            let n = Frame::new(Address::from_text(src).unwrap(), Address::from_text(b"APRS").unwrap(), &[], &info).unwrap().write(&mut b).unwrap();
+            assert_eq!(a.receive(&b[..n], 1, b"VE3XYZ", &AprsCfg::DEFAULT).changed, kept, "{len} bytes");
+        }
+    }
+
     #[test]
     fn message_to_us_is_acked_once() {
         let a = AprsLive::new();

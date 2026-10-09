@@ -1,0 +1,12 @@
+[package]
+name = "ferrite-checks"
+description = "Checks of the manual's code-review rules (source, asset and build structure), run by cargo test"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

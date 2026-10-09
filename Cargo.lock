@@ -405,6 +405,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrite-checks"
+version = "0.1.0"
+
+[[package]]
 name = "ferrite-core"
 version = "0.1.0"
 dependencies = [

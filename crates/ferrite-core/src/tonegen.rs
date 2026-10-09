@@ -218,6 +218,8 @@ mod tests {
         assert_eq!(mic_percent(0xFFF), 100);
     }
 
+    /// TONE-18: tail elimination as stock: 55 Hz with no sub-tone, the phase shift on CTCSS, the DCS turn-off
+    /// code on DCS.
     #[test]
     fn tails_and_dtmf_timing() {
         assert_eq!(tail_kind(0, 2), TailKind::Tone55, "no sub-tone: 55 Hz whatever the phase");
