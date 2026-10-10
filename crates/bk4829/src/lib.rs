@@ -464,6 +464,15 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::CTC, 0x2000 | (25391 / 55));
     }
 
+    /// Sub-tone scan: no compare, the detectors only measure whatever CTCSS tone or DCS code is on air, read with
+    /// [`Bk4829::subtone_scan`]. As the BK4819 drivers' tone scan: REG_51 = 51 (CDCSS mode, auto bandwidths, gain
+    /// 51) and CTC1 at the 134.4 Hz bit rate. Put the slot's own detector back after ([`Bk4829::ctcss_rx`],
+    /// [`Bk4829::dcs_rx`]). Bench-confirm on the BK4829.
+    pub fn subtone_scan_on(&mut self) {
+        self.write(reg::SUBTONE, 51);
+        self.write(reg::CTC, 0x0AD7);
+    }
+
     /// The CTCSS frequency or DCS code being received, from the scan detectors (REG_68, REG_69/6A): tenths of a Hz,
     /// or the 23-bit word. None while scanning.
     pub fn subtone_scan(&mut self) -> (Option<u16>, Option<u32>) {
