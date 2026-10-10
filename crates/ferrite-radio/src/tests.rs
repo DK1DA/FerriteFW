@@ -377,6 +377,34 @@ fn heard_tone_decodes() {
     assert_eq!(chip::heard_tone(Some(885), Some(inv), &CT, &DC), Some(0x8000 | 0x4000 | 0o023), "D023I");
 }
 
+/// TSRCH-13: the DCS match reads the code out of each rotation instead of building every code's word; for every
+/// 9-bit code, every rotation and both polarities it gives what the one-codeword-per-code search gave.
+#[test]
+fn heard_dcs_matches_the_full_search() {
+    let all: Vec<u16> = (0..0o1000).collect();
+    let reference = |w: u32| {
+        for inverted in [false, true] {
+            let mut x = if inverted { !w & 0x7F_FFFF } else { w & 0x7F_FFFF };
+            for _ in 0..23 {
+                if let Some(&c) = all.iter().find(|&&c| bk4829::dcs_codeword(c, false) == x) {
+                    return Some(0x8000 | if inverted { 0x4000 } else { 0 } | c);
+                }
+                x = (x >> 1) | (x & 1) << 22;
+            }
+        }
+        None
+    };
+    for &c in &all {
+        for inv in [false, true] {
+            let mut w = bk4829::dcs_codeword(c, inv);
+            for _ in 0..23 {
+                assert_eq!(chip::heard_tone(None, Some(w), &[], &all), reference(w), "code {c:o} inv {inv} word {w:06x}");
+                w = (w >> 1) | (w & 1) << 22;
+            }
+        }
+    }
+}
+
 /// SND-11: a local beep on a chip: REG_30 to stock's beep value 0x0302 (AF and the tone DSP only: no PLL, no PA,
 /// no mic), the tone generator at stock's beep gain; a sleeping chip is woken first and put back to sleep after;
 /// a receiving one goes back to receive with its REG_48.

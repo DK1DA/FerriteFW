@@ -67,6 +67,7 @@ impl Hint {
     /// One receive tick for a slot whose chip is listening: `carrier` the noise squelch, `toned` the tone squelch
     /// open, `eligible` whether it may be probed (TSRCH-15: held on a signal, a receive tone set, not transmitting,
     /// scanning or monitored). `freq` and `rx_tone` are the slot's now.
+    #[inline(never)] // in .slow_text (memory.x): runs once a tick at most, off any interrupt path
     pub fn tick(&mut self, now: u32, freq: Freq10, rx_tone: u16, carrier: bool, toned: bool, eligible: bool) -> Act {
         let mut act = Act::None;
         if (freq, rx_tone) != (self.freq, self.tone) {
@@ -114,6 +115,7 @@ impl Hint {
     }
 
     /// For a slot no chip is listening to: the hint still goes 30 s after its carrier was last heard (TSRCH-14).
+    #[inline(never)] // in .slow_text (memory.x): runs once a tick at most, off any interrupt path
     pub fn age(&mut self, now: u32) {
         if self.heard != 0 && now.wrapping_sub(self.seen) >= KEEP_MS {
             self.heard = 0;
@@ -121,6 +123,7 @@ impl Hint {
     }
 
     /// The detectors read a tone (word in CHAN-3's form) while probing: the hint, unless it is the slot's own.
+    #[inline(never)] // in .slow_text (memory.x): runs once a tick at most, off any interrupt path
     pub fn found(&mut self, now: u32, word: u16) -> Act {
         if !self.probing() {
             return Act::None;

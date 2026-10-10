@@ -55,12 +55,16 @@ pub fn tone_probe<B: Bus>(bk: &mut Bk4829<B>) {
 /// What the scan detectors heard as a tone word (CHAN-3's form; TSRCH-13), from [`Bk4829::subtone_scan`]: CTCSS
 /// snapped to the nearest of `ctcss` within 1 Hz (else to 0.1 Hz, 60-260 Hz only); DCS matched against `dcs` in
 /// any of its 23 rotations, normal before inverted (the complement). None if nothing usable.
+#[inline(never)] // in .slow_text (memory.x): once per probe
 pub fn heard_tone(ctcss_dhz: Option<u16>, dcs_word: Option<u32>, ctcss: &[u16], dcs: &[u16]) -> Option<u16> {
     if let Some(w) = dcs_word {
         for inverted in [false, true] {
             let mut x = if inverted { !w & 0x7F_FFFF } else { w & 0x7F_FFFF };
             for _ in 0..23 {
-                if let Some(&c) = dcs.iter().find(|&&c| bk4829::dcs_codeword(c, false) == x) {
+                // The word carries its code: data bits 0-8, then the fixed 100 in bits 9-11. Only a rotation
+                // with that marker is checked, with one codeword: at most 46 a read, not one per code.
+                let c = (x & 0x1FF) as u16;
+                if x & 0xE00 == 0x800 && bk4829::dcs_codeword(c, false) == x && dcs.contains(&c) {
                     return Some(0x8000 | if inverted { 0x4000 } else { 0 } | c);
                 }
                 x = (x >> 1) | (x & 1) << 22;

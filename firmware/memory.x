@@ -53,6 +53,10 @@ SECTIONS
      * (uafsk) stays fast: the DSP task runs it. */
     *(.text.*7ferrite5tasks4aprs*);
     *(.text.*5uaprs*);
+    /* The tone hint (TSRCH-12, -13): the Radio task's step for it and the heard-tone decode, at most once a
+     * receive tick, never from an interrupt. */
+    *(.text.*8tonehint*);
+    *(.text.*4chip10heard_tone*);
     . = ALIGN(4);
     __eslow_text = .;
   } > FLASH
