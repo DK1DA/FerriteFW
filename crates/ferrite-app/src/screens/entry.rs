@@ -211,7 +211,7 @@ fn tx_text(app: &App, f: Freq10, tx_built: bool) -> Result<&'static str, &'stati
 /// anything else no chip receives names the ranges that are (VFO-21). Each fits the entry's note on one line.
 pub(crate) fn refuse(f: Freq10) -> Option<&'static str> {
     if f < LO {
-        Some("Below 18 MHz: HF mode, 0 3 4") // VFO-14
+        Some("< 18 MHz: HF mode, MENU 0 3 4") // VFO-14
     } else if f > HI || !ferrite_core::freq::receivable(f) {
         Some("Can't tune: 18-630, 756-1300 MHz")
     } else {

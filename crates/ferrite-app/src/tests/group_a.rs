@@ -85,7 +85,7 @@ fn frequency_entry() {
     t.tap(Key::Exit);
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Home);
-    // Below 18 MHz: HF mode (VFO-14)
+    // < 18 MHz: HF mode (VFO-14)
     let f = t.freq();
     t.digits("7*1");
     t.tap(Key::Menu);
