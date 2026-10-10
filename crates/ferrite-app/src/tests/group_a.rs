@@ -100,6 +100,20 @@ fn frequency_entry() {
     assert_eq!(t.freq(), mhz(52) + 52_500);
 }
 
+/// VFO-14, VFO-21: every reason entry gives fits its note on one line (224 px, never wrapped) and the toast it
+/// splits into fits the hint bar.
+#[test]
+fn entry_reasons_fit_one_line() {
+    use ferrite_ui::assets::UI_12;
+    use ferrite_ui::gfx::text4_width;
+    for f in [mhz(7), mhz(700), mhz(2000)] {
+        let why = crate::screens::entry::refuse(f).expect("refused");
+        assert!(text4_width(why.as_bytes(), &UI_12) <= 224, "{why}: wraps on the entry screen");
+        let (head, body) = why.split_once(": ").unwrap();
+        assert!(ferrite_ui::widgets::toast_fits(head.as_bytes(), body.as_bytes(), false), "{why}: toast cut");
+    }
+}
+
 /// NAV-4 in channel mode: a number, its name or "empty".
 #[test]
 fn channel_entry() {
