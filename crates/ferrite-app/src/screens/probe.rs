@@ -116,7 +116,8 @@ fn found(live: &LiveAll) -> u16 {
     }
 }
 
-fn set_tone(app: &mut App, slot: u8, t: u16, tx: bool) {
+/// One tone on a slot, live, without saving a channel's record (TSRCH-9; the tone hint's too, TSRCH-16).
+pub(crate) fn set_tone(app: &mut App, slot: u8, t: u16, tx: bool) {
     let c = app.slots[slot as usize].cfg_mut();
     if tx {
         c.tx_tone = t;
@@ -251,9 +252,14 @@ fn or_none(b: &Buf<16>) -> &str {
 
 /// Tones applied: home, with what happened (TSRCH-9: a channel's record is left alone).
 fn done(app: &mut App, slot: u8, what: &[u8]) {
-    let ch = app.slot(slot).on_channel();
     app.stop_mode();
-    app.back(); // one level back (KEY-5): the menu from MENU 0 3 6
+    applied(app, slot, what);
+}
+
+/// One level back (KEY-5) with what was set, and on a channel that it wasn't saved (TSRCH-9, TSRCH-16).
+pub(crate) fn applied(app: &mut App, slot: u8, what: &[u8]) {
+    let ch = app.slot(slot).on_channel();
+    app.back();
     app.show_toast(what, if ch { b"loaded, not saved" } else { b"" }, false);
 }
 

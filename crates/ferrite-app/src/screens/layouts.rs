@@ -43,13 +43,21 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     let lv = live.slots[a as usize];
     let f = app.shown_freq(a, live);
     let (state, sc) = app.state(a, live);
-    if app.dirty(1, hash(&(a, band_name(f), state))) {
+    // TSRCH-13: a tone hint takes the state's place, in a wider field.
+    let mut ht = Buf::<16>::new();
+    if state == "heard" {
+        heard_text(lv.heard_tone, &mut ht);
+    }
+    if app.dirty(1, hash(&(a, band_name(f), state, &ht))) {
         w::badge(lcd, 8, 25, a, true, BG);
         let mut h = Buf::<32>::new();
         app.head_text(a, live, &mut h);
-        w::field(lcd, 26, 140, 22, 40, 36, Align::Left, h.as_bytes(), &UI_12, SUB, BG);
-        lcd.fill(166, 22, 74, 20, BG);
-        if state == "RX" || state == "MON" {
+        let hw = if ht.is_empty() { 140 } else { 232 - HEARD_W - 26 };
+        w::field(lcd, 26, hw, 22, 40, 36, Align::Left, w::fit(h.as_bytes(), &UI_12, hw), &UI_12, SUB, BG);
+        lcd.fill(26 + hw, 22, 240 - 26 - hw, 20, BG);
+        if !ht.is_empty() {
+            w::field(lcd, 232 - HEARD_W, HEARD_W, 22, 40, 36, Align::Right, ht.as_bytes(), &UI_12, sc, BG);
+        } else if state == "RX" || state == "MON" {
             w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
         } else if state != "idle" {
             w::field(lcd, 166, 66, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
@@ -169,12 +177,15 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         if state == "RX" {
             stt.push(b" ");
             stt.push(w::s_text(lv.rssi).as_bytes());
+        } else if state == "heard" {
+            heard_text(lv.heard_tone, &mut stt); // TSRCH-13, in a wider field
         }
         if app.dirty(R_HEAD + p, hash(&(head, stt, active))) {
             w::badge(lcd, 14, y + 5, s, active, SURFACE);
-            w::field(lcd, 34, 120, y + 4, y + 21, y + 17, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
+            let sw = if state == "heard" { HEARD_W } else { 72 };
+            w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, Align::Left, w::fit(head.as_bytes(), &UI_12, 192 - sw), &UI_12, SUB, SURFACE);
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
-            w::field(lcd, 154, 72, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);
+            w::field(lcd, 226 - sw, sw, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);
         }
         let f = app.shown_freq(s, live);
         // Channel mode: the name at the left, the frequency small at the right (HOME-4).

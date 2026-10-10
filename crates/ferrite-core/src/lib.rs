@@ -26,6 +26,7 @@ pub mod same;
 pub mod same_rx;
 pub mod scan;
 pub mod tonegen;
+pub mod tonehint;
 pub mod txcal;
 pub mod txplan;
 pub mod txseq;

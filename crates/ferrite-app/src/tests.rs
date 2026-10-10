@@ -685,6 +685,8 @@ mod d64;
 /// Decision 72: the nicFW gaps (HF channels, 1000-1300 MHz, the clarifier, grid entry).
 mod nicfw;
 mod help;
+/// The tone hint (TSRCH-13, TSRCH-16).
+mod tonehint;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]

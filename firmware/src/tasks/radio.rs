@@ -51,6 +51,7 @@ use ferrite_radio::Pin;
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use ferrite_core::scan::{self, Check, Range, Scan};
 use ferrite_core::tonegen;
+use ferrite_core::tonehint::{Act as HintAct, Hint};
 use ferrite_core::watch::{self, Hop, Watch};
 use si4732::{Mode as SiMode, Si4732, Sideband};
 #[cfg(feature = "tx")]
@@ -163,6 +164,9 @@ struct Radio {
     floor: [i16; 2],
     /// Monitor latched, a bit per slot (SQL-2).
     monitor: u8,
+    /// Each slot's tone hint (TSRCH-12 to TSRCH-15): when to measure the tone on a carrier its tone squelch keeps
+    /// shut, and what was heard.
+    hints: [Hint; SLOTS],
     /// Radio-wide settings the UI sends: scan inputs (SCAN-22, for channel lists) and the subtone level (TONE-16,
     /// the `tx` build's).
     scan_tx: bool,
@@ -364,6 +368,12 @@ impl Radio {
         if !self.has(n) || self.tuned[n as usize] == want {
             return;
         }
+        // A probe on the slot this chip had, or gets, ends: tuning sets the slot's own detector (TSRCH-12).
+        for (s, _) in [self.tuned[n as usize], want].into_iter().flatten() {
+            if let Some(h) = self.hints.get_mut(s as usize) {
+                h.retuned();
+            }
+        }
         self.tuned[n as usize] = want;
         let Some((s, f)) = want else {
             self.chip(n).sleep();
@@ -564,13 +574,25 @@ impl Radio {
             // A tone channel goes quiet when its tone stops (the tail's phase shift or turn-off code ends it, TONE-6);
             // with no tone and receive tail on, the 55 Hz tail mutes.
             let sl = self.slots[s as usize];
-            toned[n as usize] = open && if sl.rx_tone == 0 { !(sl.rx_tail && st.tail) } else { st.ctcss || st.cdcss };
+            // TSRCH-12: while the tone hint probes, the detectors scan: their reading, not a match, so the audio
+            // stays shut this tick.
+            let probing = self.hints[s as usize].probing();
+            toned[n as usize] =
+                !probing && open && if sl.rx_tone == 0 { !(sl.rx_tail && st.tail) } else { st.ctcss || st.cdcss };
             let sl = &mut self.live.slots[s as usize];
             sl.rssi = rssi;
             scan_open[s as usize] = match self.scans[s as usize].check() {
                 Check::Rssi => rssi > *fl + FAST_MARGIN_DB,
                 Check::Squelch => open,
             };
+            if probing {
+                let (c, d) = self.chip(n).subtone_scan();
+                let heard = radio_chip::heard_tone(c, d, &ferrite_app::slot::CTCSS, &ferrite_app::slot::DCS);
+                if heard.is_some_and(|w| self.hints[s as usize].found(now, w) == HintAct::Restore) {
+                    let sl = self.slots[s as usize];
+                    radio_chip::subtone(&mut self.chip(n), sl.rx_tone, sl.rx_tail);
+                }
+            }
         }
         // SAME on a weather channel's chip (DEC-19).
         self.same_tick(now);
@@ -578,6 +600,8 @@ impl Radio {
         let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: 0 };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.tick(now, &cfg, sq, keyed);
+        // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
+        self.hint_tick(now, listening, &sq, &toned, out.audio);
         // 3. Scans step while their slot has a chip, on the answer from that chip.
         for i in 0..SLOTS {
             if !self.scans[i].running() || !self.tuned.iter().any(|t| t.is_some_and(|(s, _)| s as usize == i)) {
@@ -637,12 +661,32 @@ impl Radio {
                 sl.rssi = sl.rssi.min(-121);
             }
             sl.squelch_open = open;
+            sl.heard_tone = self.hints[i].heard;
             sl.relay = out.cancelled && self.watch_set & 1 << i != 0 && Sel::rx(self.slots[i].freq).relay() != active_relay;
         }
         // Battery Save: anything open or scanning keeps the receivers awake.
         let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning);
         let a = self.save.tick(now_ms(), busy);
         self.apply(a).await;
+    }
+
+    /// The tone hint's step for the slot on the listening chip (TSRCH-12, TSRCH-15): eligible while the watch
+    /// holds it for audio, it has a receive tone, and no scan or latched monitor runs on it (transmit, HF mode and
+    /// the exclusive modes never reach the receive tick). The chip's detectors switch to scan, or back.
+    fn hint_tick(&mut self, now: u32, listening: Option<u8>, sq: &[bool; 2], toned: &[bool; 2], audio: Option<u8>) {
+        for h in &mut self.hints {
+            h.age(now);
+        }
+        let Some(n) = listening else { return };
+        let Some((s, _)) = self.tuned[n as usize].filter(|&(s, _)| (s as usize) < SLOTS) else { return };
+        let i = s as usize;
+        let sl = self.slots[i];
+        let eligible = audio == Some(s) && !self.scans[i].running() && self.monitor & 1 << s == 0;
+        match self.hints[i].tick(now, sl.freq, sl.rx_tone, sq[n as usize], toned[n as usize], eligible) {
+            HintAct::Start => radio_chip::tone_probe(&mut self.chip(n)),
+            HintAct::Restore => radio_chip::subtone(&mut self.chip(n), sl.rx_tone, sl.rx_tail),
+            HintAct::None => {}
+        }
     }
 
     /// HF mode on, retuned or off (HF-3, HF-4, HF-10, HF-11): the SI4732 below 18 MHz and for AM up to 30 MHz,
@@ -1045,6 +1089,7 @@ pub async fn task() {
         tuned: [None; 2],
         floor: [-125; 2],
         monitor: 0,
+        hints: [Hint::new(); SLOTS],
         scan_tx: false,
         tone_level: 1,
         beep_gain: tonegen::beep_gain(3),

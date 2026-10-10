@@ -304,6 +304,8 @@ pub struct SlotLive {
     pub relay: bool,
     /// Nuisance skips in this scan (SCAN-11).
     pub skips: u8,
+    /// The tone hint (TSRCH-13): the tone word heard on a carrier the slot's tone squelch keeps shut, 0 none.
+    pub heard_tone: u16,
 }
 
 /// All three slots, published by the Radio task as one snapshot; [`Live`] stays the single-receiver view.
@@ -606,7 +608,8 @@ mod tests {
         // The snapshot isn't queued (one copy in the watch, the Radio task's and the UI's); the exclusive
         // modes share one slot in it, the largest being the band scope's 240 bars (SCOPE-9: 308 bytes, about
         // 0.45 KB more over the three copies than with 56 bars; accepted Oct 6, 2026).
-        assert!(core::mem::size_of::<LiveAll>() <= 320);
+        // The tone hint's heard tone (TSRCH-13: 2 bytes a slot, 4 with alignment) took it from 312 to 324.
+        assert!(core::mem::size_of::<LiveAll>() <= 324);
         // Each reader of the GPS watch keeps a copy of the fix; the sky list only the UI.
         assert!(core::mem::size_of::<GpsFix>() <= 32);
         assert!(core::mem::size_of::<GpsSky>() <= 81);

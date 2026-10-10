@@ -313,6 +313,9 @@ pub struct App {
     relay_mask: u8,
     /// Where each scanning slot is stopped on a hit (squelch open, or still on its last hit in the resume wait);
     /// 0 when it isn't. PTT transmits there (SCAN-19).
+    /// The tone hint per slot (TSRCH-13, TSRCH-16): the tone word the Radio task heard, kept from the last tick
+    /// for the quick settings' Tones row.
+    pub(crate) heard: [u16; SLOTS],
     scan_hit: [Freq10; SLOTS],
     /// Slots with monitor latched (SIDE1 tap): MON on the card.
     pub(crate) monitor: u8,
@@ -378,6 +381,7 @@ impl App {
             scan_mask: 0,
             relay_mask: 0,
             scan_hit: [0; SLOTS],
+            heard: [0; SLOTS],
             monitor: 0,
             out: Outbox { q: [None; 16], head: 0, len: 0, sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
@@ -911,6 +915,7 @@ impl App {
             rx |= (s.squelch_open as u8) << i;
             scan |= (s.scanning as u8) << i;
             relay |= (s.relay as u8) << i;
+            self.heard[i] = s.heard_tone;
             self.scan_hit[i] = if s.scanning && (s.squelch_open || s.last_hit != 0 && s.freq == s.last_hit) { s.freq } else { 0 };
         }
         // CHAN-25: Recent gets a channel when you tune to it (the active slot's), transmit on it, or a slot on it

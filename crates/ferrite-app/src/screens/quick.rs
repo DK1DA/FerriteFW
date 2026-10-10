@@ -47,6 +47,12 @@ impl View for Quick {
             (Key::Digit(d), Short) => app.screen = Screen::Quick(Quick { row: d - 1 }), // MENU-5
             (Key::Menu, Short) => match item {
                 Item::Advanced => to_advanced(app),
+                // TSRCH-16: a tone hint: OK uses the heard tone for RX, then asks about TX.
+                Item::Tones if heard(app) != 0 => {
+                    let (a, t) = (app.active, heard(app));
+                    super::probe::set_tone(app, a, t, false);
+                    super::confirm::ask(app, super::confirm::Ask::ToneTx(t));
+                }
                 // MENU 8: save the VFO as a channel, or edit the channel.
                 Item::Channel if app.slots[app.active as usize].on_channel() => app.open(Dest::ChannelEdit),
                 Item::Channel => app.open(Dest::SaveChannel),
@@ -89,8 +95,17 @@ impl View for Quick {
             lcd.fill(0, 40, 240, 1, LINE);
         }
         for (i, item) in QUICK.into_iter().enumerate() {
-            let mut v = Buf::<16>::new();
-            app.item_text(item, true, &mut v);
+            let mut v = Buf::<32>::new();
+            let mut t = Buf::<16>::new();
+            app.item_text(item, true, &mut t);
+            v.set(t.as_bytes());
+            if item == Item::Tones && heard(app) != 0 {
+                // TSRCH-16: "T 100.0, heard 88.5"
+                let mut h = Buf::<16>::new();
+                super::shared::heard_text(heard(app), &mut h);
+                v.push(b", heard");
+                v.push(&h.as_bytes()[5..]);
+            }
             let r = Row {
                 num: Some(((i + 1) % 10) as u8),
                 name: item.name().as_bytes(),
@@ -105,7 +120,8 @@ impl View for Quick {
         let why = app.greyed(item);
         let mut p = Buf::<16>::new();
         let _ = uwrite!(p, "MENU {}", (row + 1) % 10);
-        app.help_box(lcd, 265, 33, why.unwrap_or(item.help(!sl.on_channel())).as_bytes(), p.as_bytes());
+        let help = if item == Item::Tones && heard(app) != 0 { "OK uses the heard tone." } else { why.unwrap_or(item.help(!sl.on_channel())) };
+        app.help_box(lcd, 265, 33, help.as_bytes(), p.as_bytes());
     }
 
     fn hints(self, app: &App) -> Hints {
@@ -113,10 +129,17 @@ impl View for Quick {
             Hints::new(&[("Knob", "Change"), ("*", "Undo"), ("BACK", "Back")])
         } else if self.row == 9 {
             Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")])
+        } else if QUICK[self.row as usize] == Item::Tones && heard(app) != 0 {
+            Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Use heard"), ("BACK", "Back")])
         } else {
             Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("BACK", "Back")])
         }
     }
+}
+
+/// The active slot's tone hint (TSRCH-16), 0 none.
+fn heard(app: &App) -> u16 {
+    app.heard[app.active as usize]
 }
 
 /// MENU 0 from quick settings: advanced settings, one level down (BACK returns here, MENU-24).

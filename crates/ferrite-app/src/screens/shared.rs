@@ -246,7 +246,8 @@ impl App {
         if lv.scanning { lv.freq } else { self.tuned_freq(s) }
     }
 
-    /// The slot's state word and colour on a card: RX, relay, off (not watched), scanning, idle.
+    /// The slot's state word and colour on a card: RX, relay, off (not watched), heard (a tone hint), scanning,
+    /// idle.
     pub(crate) fn state(&self, s: u8, live: &LiveAll) -> (&'static str, u16) {
         let lv = &live.slots[s as usize];
         let watched = s == self.active || self.watch_mask() & 1 << s != 0;
@@ -256,6 +257,8 @@ impl App {
             ("MON", AMBER) // a latched monitor: squelch held open (decided Oct 6, 2026)
         } else if !watched {
             ("off", DIM)
+        } else if lv.heard_tone != 0 {
+            ("heard", AMBER) // TSRCH-13: the card shows "Heard 88.5" ([`heard_text`])
         } else if lv.squelch_open {
             ("RX", GREEN)
         } else if lv.scanning {
@@ -267,3 +270,16 @@ impl App {
         }
     }
 }
+
+/// The tone hint on a card (TSRCH-13): "Heard 88.5", "Heard D023I". At most 11 characters (77 px at UI_12), so a
+/// card's state field widens to [`HEARD_W`] for it.
+pub(crate) fn heard_text(t: u16, b: &mut Buf<16>) {
+    let mut tone = Buf::<16>::new();
+    crate::slot::tone_text(t, &mut tone);
+    let tb = tone.as_bytes();
+    b.set(b"Heard ");
+    b.push(tb.strip_prefix(b"T ").unwrap_or(tb));
+}
+
+/// The state field's width for a tone hint (TSRCH-13): 11 characters.
+pub(crate) const HEARD_W: i32 = 80;

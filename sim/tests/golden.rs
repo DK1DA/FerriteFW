@@ -151,6 +151,23 @@ fn help_pages_match_their_goldens() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// TSRCH-13, TSRCH-16: the tone hint on the active slot's card (the T event: a station sending 88.5 where the
+/// slot has 100.0), and quick settings' Tones row offering it.
+#[test]
+fn tone_hint_matches_its_goldens() {
+    let mut r = Radio::new();
+    r.home();
+    r.event(Event::ToneHint);
+    r.wait(1000);
+    let mut failures = Vec::new();
+    failures.extend(check("tone-hint-home", &r.sim.screen_rgb()));
+    r.press(ferrite_core::keys::Key::Menu);
+    r.press(ferrite_core::keys::Key::Digit(4));
+    r.wait(1000);
+    failures.extend(check("tone-hint-quick", &r.sim.screen_rgb()));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// The same screen drawn twice from scratch is the same: the goldens can only change when the code does.
 #[test]
 fn shots_are_deterministic() {

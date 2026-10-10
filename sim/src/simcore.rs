@@ -155,6 +155,9 @@ pub enum Event {
     /// D: the LED demo: the bands go quiet and the backlight time runs out now, so the screen stays dark and the
     /// heartbeat shows (a double flash while M's message is unread); D again brings the stations back.
     ScreenOff,
+    /// T: a station on the active slot sending another tone than the slot's: the tone hint (TSRCH-13) shows 88.5;
+    /// T again, or a retune or new receive tone, clears it.
+    ToneHint,
 }
 
 /// A recent redraw region and when it was drawn (ms), for the redraw flash.
@@ -851,6 +854,10 @@ impl SimCore {
                     GpsState::Searching => GpsState::Fix,
                     GpsState::Fix => GpsState::Off,
                 }
+            }
+            Event::ToneHint if live => {
+                let a = app.active();
+                self.radio.hint = if self.radio.hint.is_some() { None } else { Some((a, 885)) };
             }
             Event::ScreenOff if live => {
                 self.radio.quiet = !self.radio.quiet;

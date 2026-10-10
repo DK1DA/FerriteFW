@@ -28,9 +28,16 @@ pub fn tune<B: Bus>(bk: &mut Bk4829<B>, s: &RxSetup) {
     bk.set_freq(s.freq * 10);
     bk.bandwidth(if s.narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
     bk.demod(if s.am { Demod::Am } else { Demod::Fm });
-    match s.rx_tone {
+    subtone(bk, s.rx_tone, s.rx_tail);
+    bk.af_out(AfOut::Mute);
+    bk.rx_on();
+}
+
+/// The slot's own sub-tone detector (CHAN-3, TONE-6): set by [`tune`], and put back after a tone hint's probe.
+pub fn subtone<B: Bus>(bk: &mut Bk4829<B>, rx_tone: u16, rx_tail: bool) {
+    match rx_tone {
         // TONE-6: no tone to lose, so the detector listens for the 55 Hz tail instead (stock: REG_07 0x21CD).
-        0 if s.rx_tail => {
+        0 if rx_tail => {
             bk.ctcss_rx(550);
             bk.tail_detect();
         }
@@ -38,8 +45,31 @@ pub fn tune<B: Bus>(bk: &mut Bk4829<B>, s: &RxSetup) {
         t if t & 0x8000 != 0 => bk.dcs_rx(t & 0x3FFF, t & 0x4000 != 0),
         t => bk.ctcss_rx(t),
     }
-    bk.af_out(AfOut::Mute);
-    bk.rx_on();
+}
+
+/// The tone hint's probe (TSRCH-12): the detectors measure whatever is on air; audio stays as it is (muted).
+pub fn tone_probe<B: Bus>(bk: &mut Bk4829<B>) {
+    bk.subtone_scan_on();
+}
+
+/// What the scan detectors heard as a tone word (CHAN-3's form; TSRCH-13), from [`Bk4829::subtone_scan`]: CTCSS
+/// snapped to the nearest of `ctcss` within 1 Hz (else to 0.1 Hz, 60-260 Hz only); DCS matched against `dcs` in
+/// any of its 23 rotations, normal before inverted (the complement). None if nothing usable.
+pub fn heard_tone(ctcss_dhz: Option<u16>, dcs_word: Option<u32>, ctcss: &[u16], dcs: &[u16]) -> Option<u16> {
+    if let Some(w) = dcs_word {
+        for inverted in [false, true] {
+            let mut x = if inverted { !w & 0x7F_FFFF } else { w & 0x7F_FFFF };
+            for _ in 0..23 {
+                if let Some(&c) = dcs.iter().find(|&&c| bk4829::dcs_codeword(c, false) == x) {
+                    return Some(0x8000 | if inverted { 0x4000 } else { 0 } | c);
+                }
+                x = (x >> 1) | (x & 1) << 22;
+            }
+        }
+    }
+    let d = ctcss_dhz.filter(|d| (600..=2600).contains(d))?;
+    let near = ctcss.iter().copied().min_by_key(|&t| t.abs_diff(d));
+    Some(near.filter(|t| t.abs_diff(d) <= 10).unwrap_or(d))
 }
 
 /// A local beep's start on a chip (SND-11, stock 0x0801EB8C): woken first if it was asleep, tone 1 at `tone_gain`

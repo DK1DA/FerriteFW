@@ -89,6 +89,9 @@ pub struct FakeRadio {
     pub live: LiveAll,
     /// No stations on the air (the simulators' LED demo: a dark screen stays dark).
     pub quiet: bool,
+    /// The tone hint the fake reports (TSRCH-13): a slot and the tone word heard there, until that slot retunes
+    /// or gets a new receive tone.
+    pub hint: Option<(u8, u16)>,
     /// Beeps asked for (SND-3, SND-6): how many, the last one's tone and length, and the volume (0 7 5 2).
     pub beeps: u32,
     pub last_beep: (u16, u16),
@@ -153,6 +156,7 @@ impl FakeRadio {
             live,
             paged_at: 0.0,
             quiet: false,
+            hint: None,
             beeps: 0,
             last_beep: (0, 0),
             beep_vol: 3,
@@ -235,6 +239,7 @@ impl FakeRadio {
                 (s.scanning, s.hits, s.skips) = (true, 0, 0);
             }
             RadioCmd::TuneSlot { slot, freq } => {
+                self.hint = self.hint.filter(|h| h.0 != slot); // TSRCH-14
                 let s = &mut self.live.slots[slot as usize % 3];
                 s.freq = freq;
                 s.scanning = false;
@@ -263,6 +268,7 @@ impl FakeRadio {
                 }
             }
             RadioCmd::Watch(m) => self.watch = m,
+            RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::RxTone, .. } => self.hint = self.hint.filter(|h| h.0 != slot),
             RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::Power, value } => self.power[slot as usize % 4] = value.clamp(0, 2) as u8,
             RadioCmd::PauseWatch(secs) => {
                 let now = self.ms();
@@ -578,6 +584,7 @@ impl FakeRadio {
             s.squelch_open = self.watcher.open(i as u8) || self.monitor & 1 << i != 0;
             s.rssi = if s.squelch_open { level as i16 } else if quiet { -121 } else { -121 + ((t * 0.9 + i as f32).sin() * 2.0) as i16 };
             s.relay = out.cancelled && self.watch & 1 << i != 0 && relay(s.freq) != active_relay; // WATCH-11
+            s.heard_tone = self.hint.filter(|h| h.0 as usize == i).map_or(0, |h| h.1);
         }
     }
 }

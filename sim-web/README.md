@@ -96,8 +96,10 @@ V = V/M, Q = SIDE1, W = SIDE2, Space = PTT A, `[` `]` = knob.
 | 9 | Crossband repeater (X) |
 | 10 | Next home layout (L) |
 | 11 | A beacon, an automatic transmit (B) |
+| 12 | LED demo: quiet bands and the screen off; again brings the stations back (D) |
+| 13 | A station on the active slot with another tone: the tone hint; again clears it (T) |
 
-Events 0, 1 and 6–11 are ignored while booting or off.
+Events 0, 1 and 6–13 are ignored while booting or off.
 
 ## The terminal
 

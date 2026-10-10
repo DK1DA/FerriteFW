@@ -32,7 +32,7 @@ pub enum Ask {
     DeleteZone(u8),
     /// Delete a range preset, by index (MENU 0 1 7).
     DeletePreset(u8),
-    /// Tone search found a tone: set it as the TX tone too (TSRCH-4).
+    /// The tone hint's tone is the RX tone now: set it as the TX tone too (TSRCH-16, as tone search's TSRCH-4).
     ToneTx(u16),
 }
 
@@ -134,11 +134,22 @@ impl View for Confirm {
                         app.screen = Screen::ScanLists(super::scanlists::ScanLists { cur: Default::default(), ..s });
                     }
                 }
+                // TSRCH-16 (the tone hint), as tone search asks (TSRCH-4): TX too, loaded on a channel.
                 Ask::ToneTx(t) => {
-                    super::tones::set(app, false, t);
-                    app.back();
+                    let a = app.active;
+                    super::probe::set_tone(app, a, t, true);
+                    super::probe::applied(app, a, b"RX and TX tone set");
                 }
             },
+            (Key::Exit, Press::Short) if matches!(self.ask, Ask::ToneTx(_)) => {
+                super::probe::applied(app, app.active, b"RX tone set");
+            }
+            // TSRCH-16, TSRCH-9: on a channel # saves the RX tone just set into its record.
+            (Key::Hash, Press::Short) if matches!(self.ask, Ask::ToneTx(_)) && app.slot(app.active).on_channel() => {
+                app.save_channel(app.active, None);
+                app.back();
+                app.show_toast(b"Tone saved", b"in the channel", false);
+            }
             (Key::Exit, Press::Short) if self.ask == (Ask::Reset { armed: true }) => {
                 app.screen = Screen::Confirm(Confirm { ask: Ask::Reset { armed: false }, since: 0, ..self })
             }
@@ -217,7 +228,14 @@ impl View for Confirm {
         }
     }
 
-    fn hints(self, _: &App) -> Hints {
+    fn hints(self, app: &App) -> Hints {
+        if matches!(self.ask, Ask::ToneTx(_)) {
+            return if app.slot(app.active).on_channel() {
+                Hints::new(&[("OK", "TX too"), ("#", "Save"), ("BACK", "RX only")])
+            } else {
+                Hints::new(&[("OK", "TX too"), ("BACK", "RX only")])
+            };
+        }
         match words(self.ask).3 {
             "Reset" if self.ask == (Ask::Reset { armed: true }) => Hints::new(&[("Hold #", "Reset"), ("BACK", "Cancel")]),
             "Reset" => Hints::new(&[("OK", "Next"), ("BACK", "Cancel")]),

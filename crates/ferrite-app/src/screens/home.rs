@@ -269,11 +269,22 @@ impl View for Home {
             } else if c != 0 && !lv.scanning {
                 slot::clar_text(c, &mut clr);
             }
-            if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr))) {
+            // TSRCH-13: a tone hint takes the state's place, in a wider field.
+            let heard = state == "heard";
+            let mut ht = Buf::<16>::new();
+            if heard {
+                heard_text(lv.heard_tone, &mut ht);
+            }
+            if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, &ht))) {
                 w::badge(lcd, 14, hy + 1, s, big, SURFACE);
                 lcd.fill(28, hy, 6, 17, SURFACE);
-                w::field(lcd, 34, 120, hy, hy + 17, hb, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
-                if big {
+                let hw = if heard { 226 - HEARD_W - 34 } else { 120 };
+                w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, SUB, SURFACE);
+                if heard {
+                    let top = if big { y + 6 } else { hy };
+                    lcd.fill(226 - HEARD_W, top, HEARD_W + 2, 18, SURFACE);
+                    w::field(lcd, 226 - HEARD_W, HEARD_W, hy, hy + 17, hb, Align::Right, ht.as_bytes(), &UI_12, sc, SURFACE);
+                } else if big {
                     lcd.fill(154, y + 6, 74, 18, SURFACE);
                     let tagged = state == "RX" || state == "MON";
                     if tagged {

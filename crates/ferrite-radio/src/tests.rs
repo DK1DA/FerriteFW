@@ -331,6 +331,52 @@ fn tune_sets_the_subtone_detector() {
     assert_eq!(tail.last(reg::CTC), Some(0x21CD), "stock's 55 Hz tail word");
 }
 
+/// TSRCH-12: the tone hint's probe switches the detectors to scan (REG_51 51, CTC1 the DCS bit rate) without
+/// touching the frequency, filters or audio; putting the slot's tone back writes what tuning wrote (CTCSS, DCS,
+/// none with REG_07 then unused, the 55 Hz tail).
+#[test]
+fn tone_probe_and_restore() {
+    let mut b = bk();
+    chip::tone_probe(&mut b);
+    let bus = b.release();
+    assert_eq!(bus.writes, [(reg::SUBTONE, 51), (reg::CTC, 0x0AD7)], "only the detector registers");
+    for (rx_tone, rx_tail) in [(1000, false), (0x8000 | 0o23, false), (0x8000 | 0x4000 | 0o754, false), (0, false), (0, true)] {
+        let mut t = bk();
+        chip::tune(&mut t, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone, rx_tail });
+        let tuned = t.release();
+        let mut r = bk();
+        chip::tone_probe(&mut r);
+        chip::subtone(&mut r, rx_tone, rx_tail);
+        let restored = r.release();
+        for reg_ in [reg::SUBTONE, reg::CTC, reg::CDCSS, reg::CTCSS_THRESH] {
+            if reg_ == reg::CTC && rx_tone == 0 && !rx_tail {
+                continue; // detector off (REG_51 0): REG_07 is unused
+            }
+            assert_eq!(restored.regs[reg_ as usize], tuned.regs[reg_ as usize], "REG_{reg_:02X} for {rx_tone:#x}");
+        }
+    }
+}
+
+/// TSRCH-13: what the detectors read becomes a tone word: CTCSS snapped to the standard tone within 1 Hz (REG_68's
+/// conversion truncates, 88.5 can read 88.4), else kept to 0.1 Hz; out of 60-260 Hz ignored; DCS in any rotation,
+/// with its polarity (the complement is inverted), and a DCS reading wins over a CTCSS one.
+#[test]
+fn heard_tone_decodes() {
+    const CT: [u16; 4] = [670, 885, 1000, 1622];
+    const DC: [u16; 3] = [0o023, 0o114, 0o754];
+    assert_eq!(chip::heard_tone(Some(884), None, &CT, &DC), Some(885));
+    assert_eq!(chip::heard_tone(Some(1003), None, &CT, &DC), Some(1000));
+    assert_eq!(chip::heard_tone(Some(1300), None, &CT, &DC), Some(1300), "off the list: as read");
+    assert_eq!(chip::heard_tone(Some(550), None, &CT, &DC), None, "the 55 Hz tail is no tone");
+    assert_eq!(chip::heard_tone(None, None, &CT, &DC), None);
+    let w = bk4829::dcs_codeword(0o114, false);
+    assert_eq!(chip::heard_tone(None, Some(w), &CT, &DC), Some(0x8000 | 0o114));
+    let rot = (w >> 5) | (w << 18) & 0x7F_FFFF;
+    assert_eq!(chip::heard_tone(None, Some(rot), &CT, &DC), Some(0x8000 | 0o114), "rotated");
+    let inv = bk4829::dcs_codeword(0o023, true);
+    assert_eq!(chip::heard_tone(Some(885), Some(inv), &CT, &DC), Some(0x8000 | 0x4000 | 0o023), "D023I");
+}
+
 /// SND-11: a local beep on a chip: REG_30 to stock's beep value 0x0302 (AF and the tone DSP only: no PLL, no PA,
 /// no mic), the tone generator at stock's beep gain; a sleeping chip is woken first and put back to sleep after;
 /// a receiving one goes back to receive with its REG_48.
