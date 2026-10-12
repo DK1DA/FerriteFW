@@ -672,3 +672,31 @@ fn channel_end_tone_and_tail() {
     t.tap(Key::Down);
     assert!(matches!(t.app.screen(), Screen::Tones(s) if s.row < 2));
 }
+
+/// BOOT-9: the boot screen drawn once and then only updated as checks finish (a whole redraw per check flashed
+/// the logo on the radio, Oct 12, 2026) ends up exactly as a fresh full draw, on the logo screen and the card.
+#[test]
+fn boot_progress_updates_match_a_full_draw() {
+    use ferrite_ui::boot::{self, BootInfo, Check, State};
+    let mut s = crate::settings::Settings::DEFAULT;
+    for card in [false, true] {
+        if card {
+            crate::sample::owner_card(&mut s);
+        }
+        let mut checks = [Check { label: "MCU", value: "", state: State::Pending }; 6];
+        let mut fb = FrameBuffer::new();
+        boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &checks });
+        for i in 0..checks.len() {
+            checks[i].state = if i == 4 { State::Off } else { State::Ok };
+            let info = BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &checks };
+            boot::update(&mut fb, &info);
+            let mut fresh = FrameBuffer::new();
+            boot::draw(&mut fresh, &info);
+            for y in 0..320 {
+                for x in 0..240 {
+                    assert_eq!(fb.at(x, y), fresh.at(x, y), "card {card}, after check {i}: stale pixel at {x},{y}");
+                }
+            }
+        }
+    }
+}

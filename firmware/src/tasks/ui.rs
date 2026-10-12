@@ -118,6 +118,9 @@ pub async fn task() {
     let mut key_seen = false;
     ferrite_ui::theme::set(set.theme); // the boot screen in the saved theme (0 7 1)
     let start = Instant::now();
+    // The boot screen is drawn whole once, then only its progress as checks finish (BOOT-9; a whole redraw per
+    // check flashed the logo on the radio). Whole again only if a failure turns the owner card into the logo.
+    let mut shown: Option<(bool, [u8; 8])> = None;
     loop {
         for (c, s) in checks.iter_mut().zip(&CHECK_STATE) {
             c.state = match s.load(Relaxed) {
@@ -127,7 +130,18 @@ pub async fn task() {
                 _ => State::Pending,
             };
         }
-        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &checks });
+        let info = BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &checks };
+        let mut states = [0u8; 8];
+        for (d, c) in states.iter_mut().zip(checks.iter()) {
+            *d = c.state as u8 + 1;
+        }
+        let now = (boot::shows_card(&info), states);
+        match shown {
+            Some((card_shown, _)) if card_shown == now.0 && shown != Some(now) => boot::update(&mut lcd, &info),
+            Some(_) if shown == Some(now) => {}
+            _ => boot::draw(&mut lcd, &info),
+        }
+        shown = Some(now);
         let done = checks.iter().all(|c| c.state != State::Pending);
         let t = start.elapsed();
         if (done && (t >= least || skip)) || t >= Duration::from_secs(5) {

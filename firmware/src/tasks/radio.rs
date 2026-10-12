@@ -857,11 +857,12 @@ impl Radio {
         };
         // Stock beeps on the chip it is using (0x0801EB8C on its current chip): the active slot's, when it has one
         // (on the radio a beep on the least-used chip came out as a squelch-break squawk, Oct 12, 2026), else the
-        // chip that disturbs least.
+        // chip that disturbs least. Never on a chip passing received audio: the beep takes it off receive, and
+        // coming back sounds like a squelch break. If both are, no beep.
         let active = self.active;
         let on_active = (0..2u8).find(|&n| self.has(n) && self.tuned[n as usize].is_some_and(|(s, _)| s == active));
-        let Some(n) = on_active.or_else(|| {
-            (0..2u8).filter(|&n| self.has(n)).min_by_key(|&n| (heard(self, n), self.tuned[n as usize].is_some()))
+        let Some(n) = on_active.filter(|&n| !heard(self, n)).or_else(|| {
+            (0..2u8).filter(|&n| self.has(n) && !heard(self, n)).min_by_key(|&n| self.tuned[n as usize].is_some())
         }) else {
             return;
         };
