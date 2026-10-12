@@ -30,6 +30,11 @@ pub struct ThreeWire<K: OutPin, S: IoPin, D: Delay> {
 /// REG_00 holds the chip ID.
 pub const ID: u16 = 0x4829;
 
+/// Half an SCK period, in microseconds: stock's (V0.27 0x0801DE60 waits `delay(5)` between edges, 155 loop turns,
+/// about 5 us at 120 MHz, so SCK runs near 100 kHz). 1 us worked on the 8 MHz bring-up clock only because call
+/// overhead stretched it; at 120 MHz chip 0 stopped answering (Oct 12, 2026).
+pub const HALF_US: u32 = 5;
+
 impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     /// Leaves SCK low and SDATA released. Reads use [`Align::BeforeFall`] until [`ThreeWire::detect`].
     pub fn new(mut sck: K, mut sda: S, delay: D) -> Self {
@@ -47,9 +52,9 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
         for i in (0..8).rev() {
             self.sck.set(false);
             self.sda.set(out >> i & 1 != 0);
-            self.delay.delay_us(1);
+            self.delay.delay_us(HALF_US);
             self.sck.set(true);
-            self.delay.delay_us(1);
+            self.delay.delay_us(HALF_US);
         }
     }
 
@@ -57,18 +62,18 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     fn samples(&mut self, cs: &mut impl OutPin, reg: u8) -> u32 {
         self.sck.set(false);
         cs.set(false);
-        self.delay.delay_us(1);
+        self.delay.delay_us(HALF_US);
         self.address(0x80 | (reg & 0x7F));
         self.sda.drive(false); // turnaround
-        self.delay.delay_us(1);
+        self.delay.delay_us(HALF_US);
         let mut bits = self.sda.is_high() as u32;
         for k in 1..=16 {
             self.sck.set(false);
-            self.delay.delay_us(if k == 1 { 2 } else { 1 });
+            self.delay.delay_us(if k == 1 { 2 * HALF_US } else { HALF_US });
             bits = bits << 1 | self.sda.is_high() as u32;
             if k < 16 {
                 self.sck.set(true);
-                self.delay.delay_us(1);
+                self.delay.delay_us(HALF_US);
             }
         }
         cs.set(true);
@@ -87,14 +92,14 @@ impl<K: OutPin, S: IoPin, D: Delay> ThreeWire<K, S, D> {
     pub fn write(&mut self, cs: &mut impl OutPin, reg: u8, value: u16) {
         self.sck.set(false);
         cs.set(false);
-        self.delay.delay_us(1);
+        self.delay.delay_us(HALF_US);
         self.address(reg & 0x7F);
         for i in (0..16).rev() {
             self.sck.set(false);
             self.sda.set(value >> i & 1 != 0);
-            self.delay.delay_us(1);
+            self.delay.delay_us(HALF_US);
             self.sck.set(true);
-            self.delay.delay_us(1);
+            self.delay.delay_us(HALF_US);
         }
         self.sck.set(false);
         cs.set(true);
