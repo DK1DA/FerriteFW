@@ -2,8 +2,8 @@
 //! `keypad` crate with the tables below; the side inputs get codes 24 up.
 //!
 //! The 20 matrix codes are the digit pad (12), the navigation pad (UP, DOWN, LEFT, RIGHT, MENU/OK, BACK) and the
-//! dedicated SLOT (A/B/C) and V/M keys. Which code is which still needs the radio (the key test); until then only
-//! the inputs whose role is known map to a [`Key`]: the PTTs and the side keys PF1/PF2.
+//! dedicated SLOT (A/B/C) and V/M keys, mapped from the key test on the black radio (Oct 12, 2026: each key
+//! pressed in turn with the bring-up build's cable log; 3 inferred from the order, to confirm on the key test).
 
 /// Stock's code table (0x0802F706 in V0.27). The ground row: keys from the sense lines straight to ground.
 pub const GROUND_ROW: [u8; 4] = [10, 14, 18, 13];
@@ -55,9 +55,29 @@ impl Key {
     pub const PTT: Key = Key::Ptt(PTT_ACTIVE);
 }
 
-/// Key code to meaning. The matrix entries are filled in from the key test on the radio.
+/// Key code to meaning. The front keys from the key test on the radio (Oct 12, 2026).
 pub const MAP: [Option<Key>; CODES] = {
     let mut m = [None; CODES];
+    m[10] = Some(Key::Menu);
+    m[11] = Some(Key::Up);
+    m[12] = Some(Key::Exit);
+    m[14] = Some(Key::Slot);
+    m[15] = Some(Key::Left);
+    m[16] = Some(Key::Right);
+    m[18] = Some(Key::VfoMem);
+    m[19] = Some(Key::Down);
+    m[20] = Some(Key::Digit(1));
+    m[13] = Some(Key::Digit(2));
+    m[17] = Some(Key::Digit(3));
+    m[21] = Some(Key::Digit(4));
+    m[6] = Some(Key::Digit(5));
+    m[3] = Some(Key::Digit(6));
+    m[7] = Some(Key::Digit(7));
+    m[8] = Some(Key::Digit(8));
+    m[4] = Some(Key::Digit(9));
+    m[5] = Some(Key::Star);
+    m[9] = Some(Key::Digit(0));
+    m[2] = Some(Key::Hash);
     // PF1 and PF2, stock's codes 0 and 1 (`analysis/keypad.md`): SIDE1 and SIDE2 (decision 77; stock's PF1 is
     // PTT C, nicFW's S1-S3 are PE2, PE5 and PA12).
     m[0] = Some(Key::Side(1));
@@ -88,5 +108,19 @@ mod tests {
         assert_eq!(key(CODE_PTT_B), Some(Key::Ptt(1)), "PTT B keys slot B");
         assert_eq!((key(0), key(1)), (Some(Key::Side(1)), Some(Key::Side(2))), "PF1 = SIDE1, PF2 = SIDE2");
         assert_eq!(key(99), None);
+    }
+
+    /// Every code 0-21 means one key, and every front key has exactly one code (the radio's key test).
+    #[test]
+    fn front_keys_mapped_once() {
+        let mut keys: [Option<Key>; 22] = [None; 22];
+        for (c, k) in keys.iter_mut().enumerate() {
+            *k = key(c as u8);
+            assert!(k.is_some(), "code {c} unmapped");
+        }
+        let front = [Key::Menu, Key::Exit, Key::Up, Key::Down, Key::Left, Key::Right, Key::Slot, Key::VfoMem, Key::Star, Key::Hash];
+        for f in front.iter().copied().chain((0..10).map(Key::Digit)) {
+            assert_eq!(keys.iter().filter(|k| **k == Some(f)).count(), 1, "{f:?}");
+        }
     }
 }

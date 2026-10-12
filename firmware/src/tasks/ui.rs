@@ -56,6 +56,33 @@ fn menu_state(i: &Input, held: &mut bool) {
     }
 }
 
+/// Bring-up only: which way of filling reaches the panel (Oct 12, 2026: one-colour fills went missing on the
+/// radio while text drew). Each step covers the whole screen for 0.8 s and is named on the cable:
+/// red = one window, one long run (the boot clear's path); green = one window, pixel buffers (text's path);
+/// blue = one run per row; white = one window, one run, with interrupts masked.
+async fn fill_test(lcd: &mut Screen) {
+    const RED: u16 = 0xF800;
+    const GREEN: u16 = 0x07E0;
+    const BLUE: u16 = 0x001F;
+    bringup::line(b"fill test: red = one run, green = pixel buffers, blue = run per row, white = run, irqs off");
+    lcd.0.fill(0, 0, 240, 320, RED);
+    Timer::after_millis(800).await;
+    lcd.0.window(0, 0, 240, 320);
+    let row = [GREEN; 240];
+    for _ in 0..320 {
+        lcd.0.pixels(&row);
+    }
+    Timer::after_millis(800).await;
+    for y in 0..320 {
+        lcd.0.fill(0, y, 240, 1, BLUE);
+    }
+    Timer::after_millis(800).await;
+    critical_section::with(|_| lcd.0.fill(0, 0, 240, 320, 0xFFFF));
+    Timer::after_millis(800).await;
+    lcd.0.fill(0, 0, 240, 320, BG);
+    bringup::line(b"fill test: done");
+}
+
 #[embassy_executor::task]
 pub async fn task() {
     let mut lcd = Screen::new();
@@ -69,6 +96,9 @@ pub async fn task() {
     lcd.0.on(true);
     for p in BACKLIGHT {
         p.output(true, Mode::OutPp);
+    }
+    if cfg!(feature = "bringup") {
+        fill_test(&mut lcd).await;
     }
 
     // The MCU check is ours to make: transmit (in the tx build) needs the expected part; receive runs regardless.

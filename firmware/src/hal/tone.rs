@@ -16,15 +16,17 @@ pub fn start(hz: u32, level: u8) {
     let level = level.clamp(1, 11) as u32;
     let amp = (1 << (level + 1)) - 1; // triangle peak, counts
     let trig = hz * 2 * amp; // DAC steps per second
-    let clk = clock::APB1_HZ; // TMR6 clock, APB1 undivided
-    let div = ((clk + trig / 2) / trig).clamp(2, 65536);
-    ACTUAL_HZ.store(clk / div / (2 * amp), Relaxed);
+    let clk = clock::TMR_HZ; // TMR6 clock: APB1 /2, so twice APB1
+    let total = ((clk + trig / 2) / trig).max(2);
+    let psc = (total - 1) / 65536 + 1; // a prescaler only when the period alone won't fit 16 bits
+    let div = ((total + psc / 2) / psc).clamp(2, 65536);
+    ACTUAL_HZ.store(clk / psc / div / (2 * amp), Relaxed);
 
     pin(GPIOA, 4).config(Mode::Analog);
     modify(CRM_APB1EN, 0, CRM_APB1_TMR6 | CRM_APB1_DAC);
     modify(CRM_APB1RST, CRM_APB1_DAC, 0);
     wr(TMR6 + TMR_CTRL1, 0);
-    wr(TMR6 + TMR_DIV, 0);
+    wr(TMR6 + TMR_DIV, psc - 1);
     wr(TMR6 + TMR_PR, div - 1);
     wr(TMR6 + TMR_CTRL2, TMR_CTRL2_PTOS_OVF);
     wr(TMR6 + TMR_SWEVT, 1); // load PR

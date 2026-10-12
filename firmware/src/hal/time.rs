@@ -1,6 +1,6 @@
 //! Busy-wait timing on the cycle counter (usable before and outside the executors), and a free-running
 //! 16-bit microsecond counter on TMR7 that keeps counting while the core sleeps. Mirrors fw/hal/hal_time.
-use super::clock::{APB1_HZ, SYSCLK_HZ};
+use super::clock::{SYSCLK_HZ, TMR_HZ};
 use super::regs::*;
 use super::{modify, rd, wr};
 
@@ -30,7 +30,7 @@ pub fn delay_ms_busy(ms: u32) {
 pub fn us_init() {
     modify(CRM_APB1EN, 0, CRM_APB1_TMR7);
     wr(TMR7 + TMR_CTRL1, 0);
-    wr(TMR7 + TMR_DIV, APB1_HZ / 1_000_000 - 1);
+    wr(TMR7 + TMR_DIV, TMR_HZ / 1_000_000 - 1);
     wr(TMR7 + TMR_PR, 0xFFFF);
     wr(TMR7 + TMR_SWEVT, 1);
     wr(TMR7 + TMR_CTRL1, 1);

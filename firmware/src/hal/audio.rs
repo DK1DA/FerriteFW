@@ -96,9 +96,10 @@ pub static DAC_HALF: Signal<M, u8> = Signal::new();
 /// Halves the DSP task didn't take in time (it was busy): a capture overrun, counted for the bench.
 pub static ADC_LATE: AtomicU8 = AtomicU8::new(0);
 
-/// A timer's reload for `hz` from its clock (TMR2 and TMR6 are on APB1; undivided APB1 clocks them at its rate).
+/// A timer's reload for `hz` from its clock (TMR2 and TMR6 are on APB1; with APB1 /2 they run at twice it, 120 MHz;
+/// stock's 9599.2 Hz is 120 MHz / 12501). Fits 16 bits down to 1.9 kHz.
 fn reload(hz: u32) -> u32 {
-    (clock::APB1_HZ + hz / 2) / hz
+    (clock::TMR_HZ + hz / 2) / hz
 }
 
 /// Capture on: PA2 analog, TMR2 at the ADC rate, ADC1 on its trigger, DMA1 channel 1 circular. ADC1 must have
@@ -203,7 +204,7 @@ pub fn read_preempted(chan: u32) -> u16 {
     modify(ADC_CTRL2, 0, ADC_CTRL2_PCSWTRG);
     let start = super::time::cycles();
     while rd(ADC_STS) & ADC_STS_PCCE == 0 {
-        if super::time::cycles().wrapping_sub(start) > 8_000_000 {
+        if super::time::cycles().wrapping_sub(start) > super::clock::SYSCLK_HZ {
             return 0;
         }
     }

@@ -26,7 +26,7 @@ fn init_once() {
     for n in 0..3 {
         pin(GPIOA, n).config(Mode::Analog);
     }
-    modify(CRM_CFG, CRM_CFG_ADCDIV_MASK, 0); // ADC clock = APB2 / 2 = 4 MHz on the reset tree
+    modify(CRM_CFG, CRM_CFG_ADCDIV_MASK, 0b10 << 14); // ADC clock = APB2 / 6 = 10 MHz, stock's (28 MHz max)
     modify(CRM_APB2EN, 0, CRM_APB2_ADC1);
     wr(ADC_CTRL1, 0);
     wr(ADC_SPT1, 0x00FF_FFFF); // 239.5 cycles everywhere: high-impedance dividers

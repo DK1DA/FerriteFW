@@ -10,8 +10,9 @@ use embassy_time::{Duration, Ticker};
 use ferrite_core::keys::{CODE_PTT_A, CODE_PTT_B, CODE_PTT_VFO, DIRECT, GROUND_ROW, ROWS};
 use keypad::{Encoder, Keys, Matrix};
 
-/// Quadrature steps per click: to confirm with hwtest's knob figure.
-const PER_DETENT: i8 = 4;
+/// Quadrature steps per click: 2 on the RT-950 Pro's channel knob (20 clicks a turn; with 4, only every other
+/// click counted on the radio, Oct 12, 2026).
+const PER_DETENT: i8 = 2;
 
 #[embassy_executor::task]
 pub async fn task() {

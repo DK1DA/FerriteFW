@@ -1,11 +1,11 @@
 //! Embassy time driver on TMR3 (a general-purpose timer, so SysTick stays free). No Artery support exists
 //! in Embassy, so this is ours; it follows embassy-stm32's 16-bit timer driver.
 //!
-//! - TMR3 counts at 1 kHz (8 MHz / 8000): one tick is 1 ms, the FreeRTOS tick of the C image
-//!   (embassy-time-driver feature `tick-hz-1_000`). Revisit with the clock when the PLL comes in.
+//! - TMR3 counts at 2 kHz (120 MHz timer clock / 60000; 1 kHz would need a prescaler over 16 bits): one tick is
+//!   0.5 ms (embassy-time-driver feature `tick-hz-2_000`).
 //! - The 16-bit counter is extended to 64 bits by counting half periods: the overflow interrupt and a
 //!   compare at 0x8000 (channel 4) each advance `period`, so `now()` never needs the two to agree exactly.
-//!   An overflow every 65.5 s, so two interrupts a minute when nothing else is due.
+//!   An overflow every 32.8 s, so four interrupts a minute when nothing else is due.
 //! - Channel 1 is the alarm. An alarm more than 0xC000 ticks out is armed by the period interrupt once it
 //!   comes within range.
 //! - One timer queue (embassy-time-queue-utils, the executor's integrated queue) serves both executors.
@@ -44,7 +44,7 @@ fn calc_now(period: u32, counter: u16) -> u64 {
 pub fn init(prio: u8) {
     modify(CRM_APB1EN, 0, CRM_APB1_TMR3);
     wr(TMR3 + TMR_CTRL1, 0);
-    wr(TMR3 + TMR_DIV, super::clock::APB1_HZ / 1000 - 1);
+    wr(TMR3 + TMR_DIV, super::clock::TMR_HZ / 2000 - 1);
     wr(TMR3 + TMR_PR, 0xFFFF);
     wr(TMR3 + TMR_C4DT, 0x8000);
     wr(TMR3 + TMR_SWEVT, 1); // load DIV now

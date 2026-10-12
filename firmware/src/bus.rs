@@ -97,11 +97,25 @@ impl Lcd {
 }
 
 #[inline(always)]
+fn nops<const N: usize>() {
+    for _ in 0..N {
+        cortex_m::asm::nop();
+    }
+}
+
+#[inline(always)]
 fn byte(b: u8) {
     // One write to PD8-PD15, leaving PD0-PD7 alone (PD4-PD7 are the keypad sense pull-ups); latched on WR rising.
+    // At 120 MHz back-to-back port writes break the ST7789's 8080 timing (one-colour fills went missing on the
+    // radio, Oct 12, 2026; the 8 MHz image was fine): data setup before WR falls, WR low six nops as stock
+    // (0x080293E8), then a hold with WR high before the next byte's data, so a tight fill loop keeps the write
+    // cycle (66 ns), data hold (10 ns) and WR high time (15 ns) as text's slower loop does.
     gpio::write_high_byte(LCD_DATA_PORT, b);
+    nops::<2>();
     LCD_WR.clr();
+    nops::<6>();
     LCD_WR.set();
+    nops::<4>();
 }
 
 impl st7789::Bus8080 for Lcd {

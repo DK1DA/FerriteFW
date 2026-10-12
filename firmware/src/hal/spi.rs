@@ -3,14 +3,14 @@ use super::gpio::{pin, Mode, GPIOB};
 use super::regs::*;
 use super::{modify, rd, wr};
 
-/// APB1 / 2 = 4 MHz on the reset tree.
+/// APB1 / 4 = 15 MHz, stock's divider (SPI2 CTRL1 0x34F at 0x08016C00).
 pub fn spi2_init() {
     modify(CRM_APB1EN, 0, CRM_APB1_SPI2);
     wr(SPI2 + SPI_CTRL1, 0);
     pin(GPIOB, 13).output(false, Mode::AfPp);
     pin(GPIOB, 14).config(Mode::InPu);
     pin(GPIOB, 15).output(false, Mode::AfPp);
-    wr(SPI2 + SPI_CTRL1, SPI_CTRL1_MSTEN | SPI_CTRL1_SWCSEN | SPI_CTRL1_SWCSIL); // /2, mode 0, 8-bit
+    wr(SPI2 + SPI_CTRL1, SPI_CTRL1_MSTEN | SPI_CTRL1_SWCSEN | SPI_CTRL1_SWCSIL | 1 << 3); // /4, mode 0, 8-bit
     modify(SPI2 + SPI_CTRL1, 0, SPI_CTRL1_SPIEN);
 }
 

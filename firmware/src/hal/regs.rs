@@ -14,6 +14,7 @@ pub const CRM_CTRL_HICKSTBL: u32 = 1 << 1;
 pub const CRM_CTRL_HEXTEN: u32 = 1 << 16;
 pub const CRM_CTRL_HEXTSTBL: u32 = 1 << 17;
 pub const CRM_CTRL_PLLEN: u32 = 1 << 24;
+pub const CRM_CTRL_PLLSTBL: u32 = 1 << 25;
 pub const CRM_CFG_SCLKSEL_MASK: u32 = 3 << 0;
 pub const CRM_CFG_SCLKSTS_MASK: u32 = 3 << 2; // 0 = HICK
 pub const CRM_CFG_DIV_MASK: u32 = (0xF << 4) | (7 << 8) | (7 << 11); // AHB, APB1, APB2
