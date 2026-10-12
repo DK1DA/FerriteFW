@@ -855,8 +855,14 @@ impl Radio {
             Some(_) => true, // HF mode's or the counter's chip: always in use
             None => false,
         };
-        let Some(n) = (0..2u8).filter(|&n| self.has(n)).min_by_key(|&n| (heard(self, n), self.tuned[n as usize].is_some()))
-        else {
+        // Stock beeps on the chip it is using (0x0801EB8C on its current chip): the active slot's, when it has one
+        // (on the radio a beep on the least-used chip came out as a squelch-break squawk, Oct 12, 2026), else the
+        // chip that disturbs least.
+        let active = self.active;
+        let on_active = (0..2u8).find(|&n| self.has(n) && self.tuned[n as usize].is_some_and(|(s, _)| s == active));
+        let Some(n) = on_active.or_else(|| {
+            (0..2u8).filter(|&n| self.has(n)).min_by_key(|&n| (heard(self, n), self.tuned[n as usize].is_some()))
+        }) else {
             return;
         };
         let asleep = self.tuned[n as usize].is_none();
@@ -868,6 +874,7 @@ impl Radio {
         radio_chip::beep_end(&mut self.chip(n), gain, asleep);
         speaker(false);
         log(b"beep hz ", hz as u32);
+        log(b"beep chip ", n as u32 | (asleep as u32) << 4); // 0x1n: the chip was asleep
     }
 
     /// The frequency counter on or off (TSRCH-10): an exclusive mode like HF mode; watch and scans pause.

@@ -1,5 +1,6 @@
 //! Input sampler: the knob every millisecond, the keys every 10 ms (debounced; press and release). It
-//! runs on the DSP's interrupt executor so a slow redraw on the thread executor never makes it miss a knob step;
+//! runs on its own interrupt executor, above the Radio task's, so neither a slow redraw nor a busy scan makes it
+//! miss a knob step or a key;
 //! the UI task owns what the keys mean.
 
 use crate::board::{ENC_A, ENC_B, KEY_DIRECT0, KEY_DIRECT1, KEY_DRIVE, KEY_PTT, KEY_SENSE, KEY_SIDE1, KEY_SIDE2};

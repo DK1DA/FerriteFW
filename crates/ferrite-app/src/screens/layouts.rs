@@ -65,8 +65,10 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     }
     // Channel mode: the name large, the frequency small under it (HOME-4).
     let name = app.chan_name(a, live);
-    if app.dirty(2, hash(&(f, name))) {
-        lcd.fill(8, 42, 224, 52, BG);
+    if let Some(clear) = app.dirty_shape(2, hash(&(f, name)), name.is_empty()) {
+        if clear {
+            lcd.fill(8, 42, 224, 52, BG);
+        }
         if name.is_empty() {
             w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
         } else {

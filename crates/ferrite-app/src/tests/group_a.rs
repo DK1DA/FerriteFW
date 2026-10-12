@@ -689,3 +689,35 @@ fn text_cursor_edits_a_name() {
     t.digits("3"); // D at the end
     assert_eq!(t.app.text.as_bytes(), b"ACD");
 }
+
+/// HOME-11: a frequency box redrawn in place (no blank first: tearing on the radio, Oct 12, 2026) ends up
+/// exactly as a fresh full redraw, through frequencies of different widths and a name/frequency layout change.
+#[test]
+fn frequency_redrawn_in_place_matches_a_full_redraw() {
+    let mut t = T::new();
+    let mut fb = FrameBuffer::new();
+    t.render(&mut fb);
+    let mut check = |t: &mut T, fb: &mut FrameBuffer, what: &str| {
+        t.render(fb);
+        let mut fresh = FrameBuffer::new();
+        t.app.redraw_all();
+        t.render(&mut fresh);
+        for y in 0..320 {
+            for x in 0..240 {
+                assert_eq!(fb.at(x, y), fresh.at(x, y), "{what}: stale pixel at {x},{y}");
+            }
+        }
+    };
+    for d in [1i8, 1, -3, 10, -10] {
+        t.knob(d);
+        check(&mut t, &mut fb, "knob");
+    }
+    t.digits("52525"); // 6 m: a narrower number
+    check(&mut t, &mut fb, "52.525");
+    t.digits("446100");
+    check(&mut t, &mut fb, "446.100");
+    t.tap(Key::Slot); // the large card moves: B has a channel with a name
+    check(&mut t, &mut fb, "slot B");
+    t.tap(Key::VfoMem);
+    check(&mut t, &mut fb, "V/M");
+}

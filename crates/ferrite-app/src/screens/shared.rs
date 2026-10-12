@@ -96,6 +96,20 @@ impl App {
         d
     }
 
+    /// As [`App::dirty`] for a box whose content can take two layouts (`shape`: e.g. a bare frequency or a name
+    /// over a small one). Some(true): blank the box first (first draw, or the layout changed); Some(false): draw
+    /// straight over it, since each part repaints its own rows and the rest is already background. Blanking on
+    /// every change showed as tearing on the radio while the knob turned (Oct 12, 2026). The layout rides in the
+    /// hash's low bit; bit 1 keeps it non-zero (0 = not drawn).
+    pub(crate) fn dirty_shape(&mut self, r: usize, h: u32, shape: bool) -> Option<bool> {
+        let prev = self.drawn.hash[r];
+        let h = (h & !3) | 2 | shape as u32;
+        if !self.dirty(r, h) {
+            return None;
+        }
+        Some(prev == 0 || prev & 1 != shape as u32)
+    }
+
     /// DISP-24: the scroll cue beside rows `R_ROW + from ..+ count`, drawn from `y` for `h` when there are rows
     /// above or below the page (`top` of `n`, `shown` on it); redrawn whenever those rows redraw (they paint
     /// full width) or the page moves, and cleared once a list no longer scrolls.

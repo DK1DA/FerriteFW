@@ -54,8 +54,10 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
     let waiting = data.beacon().waiting;
     app.drawn.meter[p] = None;
     if big {
-        if app.dirty(R_FREQ + p, hash(&(f, 1u8))) {
-            lcd.fill(15, y + 28, 211, 49, SURFACE);
+        if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, 1u8)), true) {
+            if clear {
+                lcd.fill(15, y + 28, 211, 49, SURFACE);
+            }
             w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
         }
         if app.dirty(R_INFO + p, hash(&last)) {
@@ -68,8 +70,10 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
             w::field(lcd, 155, 71, y + 103, y + 120, y + 117, Align::Right, heard.as_bytes(), &UI_12B, TEXT, SURFACE);
         }
     } else {
-        if app.dirty(R_FREQ + p, hash(&(f, &heard, 1u8))) {
-            lcd.fill(15, y + 25, 211, 24, SURFACE);
+        if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, &heard, 1u8)), true) {
+            if clear {
+                lcd.fill(15, y + 25, 211, 24, SURFACE);
+            }
             w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
             w::field(lcd, 130, 96, y + 29, y + 47, y + 45, Align::Right, heard.as_bytes(), &UI_12, TEXT, SURFACE);
         }
@@ -311,8 +315,10 @@ impl View for Home {
             // without a name shows the frequency large.
             let name = app.chan_name(s, live);
             if big {
-                if app.dirty(R_FREQ + p, hash(&(f, name))) {
-                    lcd.fill(15, y + 28, 211, 49, SURFACE);
+                if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, name)), name.is_empty()) {
+                    if clear {
+                        lcd.fill(15, y + 28, 211, 49, SURFACE);
+                    }
                     if name.is_empty() {
                         w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
                     } else {
@@ -355,9 +361,11 @@ impl View for Home {
                 }
             } else {
                 // Left: the name (channel) or the frequency; right: the frequency small (channel) or the scan's hits.
-                if app.dirty(R_FREQ + p, hash(&(f, name))) {
-                    lcd.fill(15, y + 25, 211, 24, SURFACE);
-                    app.drawn.hash[R_INFO + p] = 0; // the right-hand text shares the row
+                if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, name)), name.is_empty()) {
+                    if clear {
+                        lcd.fill(15, y + 25, 211, 24, SURFACE);
+                        app.drawn.hash[R_INFO + p] = 0; // the right-hand text shares the row
+                    }
                     if name.is_empty() {
                         w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
                     } else {

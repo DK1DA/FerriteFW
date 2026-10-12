@@ -73,10 +73,14 @@ static MODEL_TAG_BOOT: [u8; 16] = *b"RT-950      \0\0\0\0";
 /// Spare interrupt lines for the two interrupt executors: DMA2 channels 1 and 2, never clocked.
 const IRQ_RADIO: u16 = 56;
 const IRQ_DSP: u16 = 57;
-// NVIC priorities (lower is more urgent): UART receive 3 (hal::uart), time driver 4, then the executors.
+const IRQ_INPUT: u16 = 59; // DMA2 channels 4 and 5, never clocked
+// NVIC priorities (lower is more urgent): UART receive 3 (hal::uart), time driver 4, then the executors. The
+// input sampler has its own, above the Radio task: a scan keeps the Radio task busy most of the time (each
+// BK4829 register write is about 250 us at stock's bus speed), and on the radio that starved the keys (Oct 12, 2026).
 const PRIO_TIME: u8 = 4;
-const PRIO_RADIO: u8 = 5;
-const PRIO_DSP: u8 = 6;
+const PRIO_INPUT: u8 = 5;
+const PRIO_RADIO: u8 = 6;
+const PRIO_DSP: u8 = 7;
 
 type Vector = unsafe extern "C" fn();
 
@@ -89,6 +93,7 @@ static __INTERRUPTS: [Vector; 96] = {
     v[hal::time_driver::IRQ as usize] = tmr3;
     v[IRQ_RADIO as usize] = radio_irq;
     v[IRQ_DSP as usize] = dsp_irq;
+    v[IRQ_INPUT as usize] = input_irq;
     v[hal::irq::USART1 as usize] = usart1;
     v[hal::irq::USART3 as usize] = usart3;
     v[hal::irq::UART4 as usize] = uart4;
@@ -121,6 +126,7 @@ extern "C" fn dac_dma() {
 
 static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static DSP_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
+static INPUT_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
 extern "C" fn radio_irq() {
     // SAFETY: the executor's own interrupt handler, the only place it is polled.
@@ -129,6 +135,10 @@ extern "C" fn radio_irq() {
 extern "C" fn dsp_irq() {
     // SAFETY: as above.
     unsafe { DSP_EXECUTOR.on_interrupt() }
+}
+extern "C" fn input_irq() {
+    // SAFETY: as above.
+    unsafe { INPUT_EXECUTOR.on_interrupt() }
 }
 
 // With panic=immediate-abort a panic is an undefined instruction, so it arrives here as a HardFault.
@@ -162,10 +172,11 @@ fn main() -> ! {
     hal::time_driver::init(PRIO_TIME);
     hal::irq::set_priority(IRQ_RADIO, PRIO_RADIO);
     hal::irq::set_priority(IRQ_DSP, PRIO_DSP);
+    hal::irq::set_priority(IRQ_INPUT, PRIO_INPUT);
     RADIO_EXECUTOR.start(Irq(IRQ_RADIO)).spawn(tasks::radio::task().unwrap());
     let dsp = DSP_EXECUTOR.start(Irq(IRQ_DSP));
     dsp.spawn(tasks::dsp::task().unwrap());
-    dsp.spawn(tasks::input::task().unwrap());
+    INPUT_EXECUTOR.start(Irq(IRQ_INPUT)).spawn(tasks::input::task().unwrap());
     // SAFETY: start-up is done; interrupts may run from here.
     unsafe { cortex_m::interrupt::enable() };
     run_thread_executor(|s| {
