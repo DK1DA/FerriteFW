@@ -63,6 +63,13 @@ extern "C" fn before_ram() {
 #[no_mangle]
 static MODEL_TAG: [u8; 16] = *b"RT-950      \0\0\0\0";
 
+/// The same tag at 0x080037E0: the bootloader compares it at every power-on and shows "Firmware Error!" instead
+/// of starting the image when it differs (bootloader 0x08000654; found on the radio, Oct 11, 2026).
+#[link_section = ".model_tag_boot"]
+#[used]
+#[no_mangle]
+static MODEL_TAG_BOOT: [u8; 16] = *b"RT-950      \0\0\0\0";
+
 /// Spare interrupt lines for the two interrupt executors: DMA2 channels 1 and 2, never clocked.
 const IRQ_RADIO: u16 = 56;
 const IRQ_DSP: u16 = 57;

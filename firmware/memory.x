@@ -6,14 +6,20 @@ MEMORY
   RAM   : ORIGIN = 0x20000000, LENGTH = 96K
 }
 
-/* Code starts after the model tag, which must sit at 0x080033E0 (image offset 0x3E0). */
-_stext = ORIGIN(FLASH) + 0x400;
+/* Code starts after the model tags, which must sit at 0x080033E0 (image offset 0x3E0, read by the stock updater)
+ * and 0x080037E0 (0x7E0: the bootloader compares it at every power-on and shows "Firmware Error!" instead of
+ * starting the app when it differs; 0x08000654, found on the radio Oct 11, 2026). */
+_stext = ORIGIN(FLASH) + 0x800;
 
 SECTIONS
 {
   .model_tag ORIGIN(FLASH) + 0x3E0 :
   {
     KEEP(*(.model_tag));
+  } > FLASH
+  .model_tag_boot ORIGIN(FLASH) + 0x7E0 :
+  {
+    KEEP(*(.model_tag_boot));
   } > FLASH
 } INSERT AFTER .vector_table;
 

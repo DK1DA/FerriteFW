@@ -34,6 +34,9 @@ APP_MAX = 948 * 1024            # our limit: stop below the stock marker sector 
 BOOT_MAX = 0xFD000              # the bootloader's own limit, for reading stock files
 MODEL_OFF = 0x3E0
 MODEL_TAG = b"RT-950      "     # 12 bytes; the bootloader compares exactly these
+# The bootloader also compares the tag at image offset 0x7E0 (0x080037E0) at every power-on and shows
+# "Firmware Error!" instead of starting the app when it differs (0x08000654; found on the radio Oct 11, 2026).
+MODEL_OFF_BOOT = 0x7E0
 KEY_OFF, BLOCK = 0x400, 0x400
 ENC_START = 0x800
 
@@ -63,7 +66,7 @@ def crypt(buf, key):
 def check_image(img, limit=APP_MAX):
     """Problems that would stop the bootloader starting the image, or hurt the radio. Empty = fine."""
     errs = []
-    if len(img) < MODEL_OFF + len(MODEL_TAG):
+    if len(img) < MODEL_OFF_BOOT + len(MODEL_TAG):
         return [f"image is only {len(img)} bytes"]
     sp, reset = struct.unpack_from("<II", img, 0)
     if sp & 0x2FFE0000 != 0x20000000:
@@ -72,6 +75,9 @@ def check_image(img, limit=APP_MAX):
         errs.append(f"reset vector {reset:#010x} is not a Thumb address inside the image")
     if img[MODEL_OFF:MODEL_OFF + len(MODEL_TAG)] != MODEL_TAG:
         errs.append(f"no model tag {MODEL_TAG!r} at {MODEL_OFF:#x} (the stock updater sends it to the bootloader)")
+    if img[MODEL_OFF_BOOT:MODEL_OFF_BOOT + len(MODEL_TAG)] != MODEL_TAG:
+        errs.append(f"no model tag {MODEL_TAG!r} at {MODEL_OFF_BOOT:#x} (the bootloader checks it at power-on: "
+                    "\"Firmware Error!\")")
     if len(img) > limit:
         errs.append(f"image is {len(img)} bytes; over {limit} would reach the stock marker sector at 0x080F0000")
     return errs
@@ -113,6 +119,7 @@ def selftest(stock_dir=None):
     img = bytearray(os.urandom(5000))
     img[0:8] = struct.pack("<II", 0x20018000, APP_BASE + 0x201)
     img[MODEL_OFF:MODEL_OFF + 12] = MODEL_TAG
+    img[MODEL_OFF_BOOT:MODEL_OFF_BOOT + 12] = MODEL_TAG
     img = bytes(img)
     btf = pack(img)
     back, _ = unpack(btf)
