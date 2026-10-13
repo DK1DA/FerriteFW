@@ -22,6 +22,7 @@ pub mod logs;
 pub mod records;
 pub mod scratch;
 pub mod settings;
+pub mod ssb;
 pub mod store;
 
 #[cfg(feature = "std")]

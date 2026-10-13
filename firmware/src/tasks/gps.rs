@@ -50,6 +50,8 @@ pub async fn task() {
     let mut power = GpsPower::default();
     let (mut fix_at, mut sky_at) = (0u32, 0u32);
     let mut last_state = (false, 0u8);
+    // The cable log (TERM-28): sentences and bytes from the module per 5 s while powered, and the fix.
+    let (mut sentences, mut bytes, mut log_at) = (0u32, 0u32, 0u32);
     loop {
         if let Some(c) = GPS_CFG.try_take() {
             cfg = c;
@@ -68,6 +70,8 @@ pub async fn task() {
         let powered = power.powered;
         if let Some(want) = out.power {
             GPS_PWR_N.write(!want);
+            crate::bringup::line(if want { b"gps: power on" } else { b"gps: power off" });
+            (sentences, bytes, log_at) = (0, 0, now);
             if !want {
                 nmea.reset();
                 tx.send(GpsFix::default());
@@ -80,8 +84,18 @@ pub async fn task() {
         let mut fresh = false;
         while let Some(c) = uart::getc(UART_GPS) {
             if powered {
-                fresh |= nmea.feed(c);
+                bytes += 1;
+                let done = nmea.feed(c);
+                sentences += done as u32;
+                fresh |= done;
             }
+        }
+        if powered && now.wrapping_sub(log_at) >= 5_000 {
+            let f = nmea.fix(now);
+            crate::bringup::linef(|b| {
+                let _ = ufmt::uwrite!(b, "gps: {} sentences, {} bytes in 5 s; fix {}D, {} used, {} in view", sentences, bytes, f.fix, f.used, f.view);
+            });
+            (sentences, bytes, log_at) = (0, 0, now);
         }
         if powered && fresh {
             let f = nmea.fix(now);

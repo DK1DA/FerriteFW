@@ -495,3 +495,110 @@ fn reads_during_a_queued_write_see_old_or_new() {
     eprintln!("queued writes: {polls} polls with reads in between");
     assert!(polls > 1000);
 }
+
+/// BOOT-12, SAFE-1: a first boot on a chip full of stock's (or any) data outside Ferrite's areas, with the power
+/// cut at points through the format: the next boot formats again and comes up as a first boot, and nothing
+/// outside the formatted areas changes — not calibration, not the SSB patch and trims (kept by a format), not
+/// stock's data below 0x02C000 or above the waypoints.
+#[test]
+fn power_cuts_during_the_first_format() {
+    use ferrite_core::layout::{CALIBRATION, SSB_PATCH, TRIMS, WRITABLE};
+    let mut f = SimFlash::new();
+    let mut r = Rng(11);
+    for b in f.mem.iter_mut() {
+        *b = r.next() as u8;
+    }
+    let before = f.mem.clone();
+    // How many flash operations a whole first mount takes.
+    let total = {
+        let s = mount(f.clone());
+        assert_eq!(s.mounted(), Mounted::FirstBoot);
+        let n = s.nor().ops;
+        n
+    };
+    assert!(total > 10);
+    let kept = |a: usize| !WRITABLE[0].contains(&(a as u32)) || SSB_PATCH.contains(&(a as u32)) || TRIMS.contains(&(a as u32));
+    for cut in [1, 2, total / 3, total / 2, total - 2, total - 1] {
+        let mut g = f.clone();
+        g.cut_at = Some(cut);
+        let s = mount(g);
+        let mut g = unmount(s);
+        g.power_on();
+        let s = mount(g);
+        assert_eq!(s.mounted(), Mounted::FirstBoot, "cut at op {cut} of {total}: formats again");
+        assert_eq!(s.count(), 0);
+        index_agrees(&s);
+        let g = unmount(s);
+        for (a, (&x, &y)) in before.iter().zip(&g.mem).enumerate() {
+            if kept(a) {
+                assert_eq!(x, y, "cut at {cut}: byte {a:#x} outside the formatted areas changed");
+            }
+        }
+        assert_eq!(&g.mem[CALIBRATION.start as usize..CALIBRATION.end as usize], &before[CALIBRATION.start as usize..CALIBRATION.end as usize]);
+    }
+}
+
+fn fake_patch() -> (ferrite_core::ssb::Patch, Vec<u8>) {
+    let p: Vec<u8> = (0..1979 * 8).map(|i| if i % 8 == 0 { if i % 80 == 0 { 0x15 } else { 0x16 } } else { (i * 13 + 5) as u8 }).collect();
+    (ferrite_core::ssb::Patch { len: p.len() as u32, sha: ferrite_core::sha256::sha256(&p) }, p)
+}
+
+/// HF-18, HF-20, HF-21 (SAFE-9): the patch installs into SSB_PATCH and checks; the same patch again writes
+/// nothing; a reformat (a foreign header) keeps it; a patch that doesn't match its header is refused before
+/// anything is erased; nothing outside SSB_PATCH changes.
+#[test]
+fn ssb_patch_install_and_check() {
+    use ferrite_core::layout::SSB_PATCH;
+    let (p, patch) = fake_patch();
+    let s = mount(SimFlash::new());
+    assert_eq!(s.ssb_check(), Ok(None));
+    let before = s.nor().mem.clone();
+    assert_eq!(ferrite_store::block(s.ssb_install(p, &patch, ferrite_core::ssb::SOURCE_FLASHER)), Ok(true));
+    assert_eq!(s.ssb_check(), Ok(Some(p)));
+    for (a, (&x, &y)) in before.iter().zip(&s.nor().mem).enumerate() {
+        if !SSB_PATCH.contains(&(a as u32)) {
+            assert_eq!(x, y, "byte {a:#x} outside SSB_PATCH changed");
+        }
+    }
+    let ops = s.nor().ops;
+    assert_eq!(ferrite_store::block(s.ssb_install(p, &patch, ferrite_core::ssb::SOURCE_FLASHER)), Ok(false));
+    assert!(s.nor().ops - ops <= 1, "the same patch again: read only");
+    let mut wrong = patch.clone();
+    wrong[100] ^= 1;
+    let ops = s.nor().ops;
+    assert!(ferrite_store::block(s.ssb_install(p, &wrong, ferrite_core::ssb::SOURCE_FLASHER)).is_err());
+    assert_eq!(s.nor().ops, ops, "refused before any write");
+    // A foreign layout header: the store formats, the patch stays.
+    let mut f = unmount(s);
+    f.mem[ferrite_core::layout::LAYOUT_HEADER.start as usize + 4] = 1;
+    let s = mount(f);
+    assert_eq!(s.mounted(), Mounted::FirstBoot);
+    assert_eq!(s.ssb_check(), Ok(Some(p)), "a format keeps the patch");
+}
+
+/// HF-18: the power cut at any point of an install never leaves a patch that checks unless it's the whole one,
+/// and the next install completes.
+#[test]
+fn ssb_patch_install_power_cuts() {
+    let (p, patch) = fake_patch();
+    let total = {
+        let s = mount(SimFlash::new());
+        let n0 = s.nor().ops;
+        ferrite_store::block(s.ssb_install(p, &patch, 1)).unwrap();
+        let n = s.nor().ops - n0;
+        n
+    };
+    for cut in [1, 2, total / 4, total / 2, total - 3, total - 1] {
+        let s = mount(SimFlash::new());
+        let n0 = s.nor().ops;
+        s.nor().cut_at = Some(n0 + cut);
+        let _ = ferrite_store::block(s.ssb_install(p, &patch, 1));
+        let mut f = unmount(s);
+        f.power_on();
+        let s = mount(f);
+        let c = s.ssb_check().unwrap();
+        assert!(c.is_none() || c == Some(p), "cut at {cut}: a half patch never checks");
+        assert!(ferrite_store::block(s.ssb_install(p, &patch, 1)).is_ok());
+        assert_eq!(s.ssb_check(), Ok(Some(p)), "cut at {cut}: the next install completes");
+    }
+}

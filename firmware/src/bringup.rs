@@ -1,14 +1,15 @@
-//! The bring-up build's cable log (feature `bringup`, roadmap 1c): plain lines on the programming cable at
-//! 115200 baud, so a first boot on a new radio can be followed without trusting the screen or the key map. The
-//! boot report, every raw key code, the knob, the receiver once a second, and a fault's address. The first byte
-//! from the PC ends the log and starts the terminal (chapter 37). Normal builds have none of it.
+//! The cable log (roadmap 1c; TERM-28): plain lines on the programming cable at 115200 baud, so a boot can be
+//! followed without trusting the screen or the key map. The boot report, every raw key code, the knob, the
+//! receiver once a second, beeps, redraw times and a fault's address. The first byte from the PC ends the log and
+//! starts the terminal or link (chapter 37). Every build prints the boot report; after it the bring-up build keeps
+//! logging, the normal build only with Cable log on (0 9 2 6). A fault's report prints in every build.
 
 use crate::chan::{TERM_OUT, TERM_WAKE};
 use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use ferrite_ui::text::Buf;
 
-/// The log is on (until the PC sends a byte).
-pub static ON: AtomicBool = AtomicBool::new(cfg!(feature = "bringup"));
+/// The log is on (until the PC sends a byte). On at power on in every build, for the boot report.
+pub static ON: AtomicBool = AtomicBool::new(true);
 
 /// One line to the cable (dropped bytes if the ring is full: the log never waits).
 pub fn line(s: &[u8]) {
@@ -41,9 +42,6 @@ pub fn hex(b: &mut Buf<96>, v: u32) {
 /// From the fault path (interrupts off, safe state done): straight to the UART, polled; nothing if the cable's
 /// UART was never started. Plain byte arrays only: the fault path stays in fast flash (tools/slowcheck.py).
 pub fn fault(pc: Option<u32>) {
-    if !cfg!(feature = "bringup") {
-        return;
-    }
     let uart = crate::report::UART_CPS;
     crate::hal::uart::write(uart, b"\r\n*** FAULT: safe state, red LED, stopped");
     if let Some(pc) = pc {

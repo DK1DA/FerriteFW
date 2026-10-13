@@ -281,6 +281,17 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.f.nor()
     }
 
+    /// HF-20: the SSB patch in SPI flash, if its header parses and its bytes hash to the header's SHA-256.
+    pub fn ssb_check(&self) -> Result<Option<ferrite_core::ssb::Patch>> {
+        crate::ssb::check(&self.f)
+    }
+
+    /// HF-18: stores `patch` (with `p` from its bundle or link header) in SSB_PATCH, unless the same verified copy is
+    /// already there (Ok(false)); a format never erases it (SAFE-9). Verified after writing; Err if it doesn't check.
+    pub async fn ssb_install(&self, p: ferrite_core::ssb::Patch, patch: &[u8], source: u8) -> Result<bool> {
+        crate::ssb::install(&self.f, p, patch, source).await
+    }
+
     fn ok(&self) -> bool {
         self.mounted.get() != Mounted::Failed
     }

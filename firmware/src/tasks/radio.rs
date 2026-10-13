@@ -791,6 +791,7 @@ impl Radio {
             // AM only until the SSB patch is imported (HF-24; the UI asks for AM without it).
             let khz = (freq / 100) as u16;
             let ok = broadcast(&mut self.si, BroadcastCmd::Am(khz)).await.is_ok();
+            log(if ok { b"hf si am ok, khz " } else { b"hf si FAILED, khz " }, khz as u32);
             speaker(ok && !self.muted);
         } else {
             if was.is_some_and(|h| h.si) {
@@ -816,6 +817,14 @@ impl Radio {
             (self.chip(1).rssi_dbm(), 0)
         };
         self.live.mode = ModeLive::Hf { freq: h.freq, rssi, snr, si4732: h.si, loading: 255 };
+        // The cable log (TERM-28): the HF receiver's level once a second.
+        static LOGGED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+        let now = now_ms() as u32;
+        if now.wrapping_sub(LOGGED.load(core::sync::atomic::Ordering::Relaxed)) >= 1000 {
+            LOGGED.store(now, core::sync::atomic::Ordering::Relaxed);
+            log(b"hf rssi -dbm ", (-(rssi as i32)).max(0) as u32);
+            log(b"hf snr db ", snr as u32);
+        }
     }
 
     /// HF-31: the SI4732's own seek from where it is (AM, below 30 MHz); the frequency it stops on is kept.
@@ -1532,7 +1541,21 @@ impl Radio {
             }
             RadioCmd::Squelch(l) => self.param(self.active, Param::Squelch, l as i32),
             RadioCmd::Broadcast(b) => {
-                let _ = broadcast(&mut self.si, b).await; // errors: the UI shows no station (reporting: next)
+                // Errors: the UI shows no station. The cable log (TERM-28) says what the SI4732 did.
+                let r = broadcast(&mut self.si, b).await;
+                match (b, r.is_ok()) {
+                    (BroadcastCmd::Off, _) => log(b"si off", 0),
+                    (BroadcastCmd::Fm(f), true) => log(b"si fm ok, 10 khz ", f as u32),
+                    (BroadcastCmd::Am(k), true) => log(b"si am ok, khz ", k as u32),
+                    (BroadcastCmd::Seek { .. }, true) => log(b"si seek ok", 0),
+                    (_, false) => log(b"si FAILED, cmd ", match b { BroadcastCmd::Fm(_) => 1, BroadcastCmd::Am(_) => 2, _ => 3 }),
+                }
+                if r.is_ok() && b != BroadcastCmd::Off {
+                    if let Ok(q) = self.si.rsq(&mut BusyDelay) {
+                        log(b"si rssi dbuv ", q.rssi as u32);
+                        log(b"si snr db ", q.snr as u32);
+                    }
+                }
             }
             RadioCmd::Hf { freq, mode, on } => self.hf(freq, mode, on).await,
             RadioCmd::HfSeek { up } => self.hf_seek(up).await,

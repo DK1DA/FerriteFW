@@ -261,6 +261,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         (slow!("Debug console"), slow!("Off"), slow!("Off, cable or Bluetooth.")),
         (slow!("Cable port"), slow!("Auto"), slow!("Link, terminal or KISS.")),
         (slow!("Terminal colour"), slow!("Off"), slow!("ANSI colour on the cable terminal.")),
+        (slow!("Cable log"), slow!("Off"), slow!("Plain log on the cable at power on.")),
     ]),
     ((9, 3), &[(slow!("PIN lock"), slow!("Off"), slow!("Ask for the PIN at power on, or unlock too.")), (slow!("Channel-only mode"), slow!("Off"), slow!("Hide VFO and editing.")), (slow!("Change PIN"), slow!("None"), slow!("Type a new PIN; the old one first."))]),
     ((9, 5), &[
@@ -510,6 +511,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.term_colour as u8);
             s.term_colour
         }
+        [9, 2, 6] => {
+            pick(b, &ON_OFF, s.cable_log as u8);
+            s.cable_log
+        }
         [7, 4] | [7, 4, 1] => {
             secs(b, BACKLIGHT_TIMES[s.backlight as usize % BACKLIGHT_TIMES.len()] as u32, "Never");
             s.backlight != Settings::DEFAULT.backlight
@@ -749,7 +754,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 61] = [
+pub(crate) const SETTABLE: [&[u8]; 62] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -811,6 +816,7 @@ pub(crate) const SETTABLE: [&[u8]; 61] = [
     &[9, 2, 1],
     &[9, 2, 4],
     &[9, 2, 5],
+    &[9, 2, 6],
 ];
 
 /// The knob or ◀▶ on a wired setting (MENU-16); false if it isn't changeable here.
@@ -889,6 +895,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [9, 2, 4] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
         [5, 9, 1] => s.kiss_port = cycle(s.kiss_port, d, crate::settings::KISS_PORTS.len()),
         [9, 2, 5] => s.term_colour = !s.term_colour,
+        [9, 2, 6] => s.cable_log = !s.cable_log,
         [7, 4, 1] => s.backlight = cycle(s.backlight, d, BACKLIGHT_TIMES.len()),
         [7, 4, 5] => s.keypad_light = cycle(s.keypad_light, d, KEYPAD_LIGHTS.len()),
         [7, 5, 4] => s.arrival_tone = !s.arrival_tone,
@@ -1036,6 +1043,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [9, 2, 4] => s.cable_port = d.cable_port,
         [5, 9, 1] => s.kiss_port = d.kiss_port,
         [9, 2, 5] => s.term_colour = d.term_colour,
+        [9, 2, 6] => s.cable_log = d.cable_log,
         [7, 4, 1] => s.backlight = d.backlight,
         [7, 4, 5] => s.keypad_light = d.keypad_light,
         [7, 5, 4] => s.arrival_tone = d.arrival_tone,

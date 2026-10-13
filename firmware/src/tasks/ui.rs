@@ -202,6 +202,34 @@ pub async fn task() {
         menu_state(&i, &mut menu_held);
     }
     boot_report(flash, &checks, key_seen);
+    // HF-18: a patch the flasher bundled goes into SPI flash (normal build; once: the same patch again writes
+    // nothing). The bring-up build stores nothing and only says whether one is there.
+    match (ssb_bundle(), cfg!(feature = "bringup")) {
+        (None, _) => bringup::line(b"ssb: no patch bundled with this image"),
+        (Some(_), true) => bringup::line(b"ssb: patch bundled; not installed (bring-up build stores nothing)"),
+        (Some((p, patch)), false) => bringup::line(match store.ssb_install(p, patch, ferrite_core::ssb::SOURCE_FLASHER).await {
+            Ok(true) => b"ssb: patch installed and verified",
+            Ok(false) => b"ssb: patch already installed",
+            Err(_) => b"ssb: install FAILED",
+        }),
+    }
+    let ssb_ok = !cfg!(feature = "bringup") && store.ssb_check().is_ok_and(|p| p.is_some());
+    if ssb_ok {
+        bringup::line(b"ssb: stored patch verified");
+    }
+    // The store's state (the first normal boot formats Ferrite's areas: only layout::WRITABLE, never calibration).
+    bringup::line(match (cfg!(feature = "bringup"), store.mounted()) {
+        (true, _) => b"store: not mounted (bring-up build)",
+        (false, ferrite_store::store::Mounted::Ok) => b"store: mounted",
+        (false, ferrite_store::store::Mounted::FirstBoot) => b"store: first boot (Ferrite's areas formatted)",
+        (false, ferrite_store::store::Mounted::Failed) => b"store: FAILED (nothing is saved this power-on)",
+    });
+    // TERM-28: after the boot report the normal build logs only with Cable log on (0 9 2 6); the bring-up build
+    // always. Either way the first byte from the PC ends it.
+    let mut cable_log = cfg!(feature = "bringup") || set.cable_log;
+    if !cable_log {
+        bringup::ON.store(false, Relaxed);
+    }
 
     // Hand-off: the whole screen cleared, then the app draws everything once (HOME-2).
     lcd.0.fill(0, 0, 240, 320, BG);
@@ -226,6 +254,7 @@ pub async fn task() {
     app.redraw_all();
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
     let mut dev = Device { tx_built: cfg!(feature = "tx"), battery_pct: 100, ..Default::default() };
+    let mut bat_logged = 0u32;
     // About and Self-test (SELF-5 to SELF-7): what the boot checks found. The BK4829s from the Radio task's
     // snapshot below; the SI4732 isn't tested at boot; the SSB patch store comes with the link's SSB_WRITE.
     {
@@ -236,6 +265,7 @@ pub async fn task() {
             (t.flash_id, t.flash_mb) = (id, (size >> 20) as u8);
         }
         t.si4732 = CHECK_STATE[crate::tasks::CHECK_SI as usize].load(Relaxed) == PASSED;
+        t.ssb_patch = ssb_ok;
         t.cal = if CHECK_STATE[CHECK_CAL as usize].load(Relaxed) == PASSED { ferrite_core::msg::CalState::Ok } else { ferrite_core::msg::CalState::Blank };
     }
     let mut live_rx = LIVE.receiver().unwrap();
@@ -297,6 +327,13 @@ pub async fn task() {
             let mv = ferrite_core::txcal::battery_mv(raw) as i32 + dev.selftest.battery_trim as i32 * 10;
             dev.battery_mv = mv.max(0) as u16;
             dev.battery_pct = ferrite_core::txcal::Gauge::defaults().percent(raw);
+            // The cable log (TERM-28): the battery every 10 s (no charger-detect input is known on this board).
+            if now_ms().wrapping_sub(bat_logged) >= 10_000 {
+                bat_logged = now_ms();
+                bringup::linef(|b| {
+                    let _ = ufmt::uwrite!(b, "battery {} mV, {}%, PA1 {}", dev.battery_mv, dev.battery_pct, raw);
+                });
+            }
         }
         dev.selftest.chips = live.chips;
         // SBAR-20: the Radio task's MCU temperature reading, in whole degrees.
@@ -421,7 +458,12 @@ pub async fn task() {
         gps.step(&mut app, store, &mut dev);
         let (c0, b0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed));
         app.render(&mut lcd, &live, &dev, store);
-        if cfg!(feature = "bringup") {
+        // Cable log turned on or off in the menu (0 9 2 6; the bring-up build ignores it: always on).
+        if !cfg!(feature = "bringup") && app.settings().cable_log != cable_log {
+            cable_log = app.settings().cable_log;
+            bringup::ON.store(cable_log, Relaxed);
+        }
+        if bringup::ON.load(Relaxed) {
             // Redraw timing (Oct 12, 2026: large redraws were slow): total, and how many bytes went to the panel.
             let us = crate::hal::time::cycles().wrapping_sub(c0) / (crate::hal::clock::SYSCLK_HZ / 1_000_000);
             if us >= 5_000 {
@@ -559,4 +601,25 @@ fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
     }
     bringup::line(if key_seen { b"key at boot: opening the key test (hold BACK leaves)" } else { b"no key at boot" });
     bringup::line(b"keys, knob and receiver follow; send any byte for the terminal");
+}
+
+/// HF-18: the SSB patch the flasher bundled after the image (`--ssb-from`, tools/ssbpatch.py): its header and the
+/// patch, at the first 1 KB boundary after the image's last bytes (the end of `.data`'s load image, or a boundary
+/// just below it when the image ends in erased bytes).
+fn ssb_bundle() -> Option<(ferrite_core::ssb::Patch, &'static [u8])> {
+    extern "C" {
+        static __sidata: u32;
+        static __sdata: u32;
+        static __edata: u32;
+    }
+    // Linker symbols: only their addresses are used.
+    let end = core::ptr::addr_of!(__sidata) as u32 + (core::ptr::addr_of!(__edata) as u32 - core::ptr::addr_of!(__sdata) as u32);
+    let top = end.div_ceil(1024) * 1024;
+    for at in (0..4).map(|k| top - 1024 * k) {
+        let h = crate::hal::sys::mcu_flash(at, ferrite_core::ssb::HEADER as u32)?;
+        if let Some(p) = ferrite_core::ssb::bundle(h.try_into().ok()?) {
+            return Some((p, crate::hal::sys::mcu_flash(at + ferrite_core::ssb::HEADER as u32, p.len)?));
+        }
+    }
+    None
 }

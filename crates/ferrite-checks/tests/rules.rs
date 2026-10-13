@@ -254,6 +254,10 @@ fn ssb_patch_never_committed() {
     walk(&root(), &mut |p| {
         let n = p.file_name().unwrap().to_string_lossy().to_lowercase();
         let len = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+        // Python's bytecode cache (git-ignored) is code, not data: tools/ssbpatch.py's own .pyc is named after it.
+        if p.components().any(|c| c.as_os_str() == "__pycache__") {
+            return;
+        }
         let binary = !matches!(p.extension().and_then(|e| e.to_str()), Some("rs" | "md" | "txt" | "toml" | "py" | "svg" | "html" | "json" | "lock" | "sh" | "yml"));
         if binary && ((15_800..=15_960).contains(&len) || n.contains("ssb") && !n.ends_with(".png")) {
             found.push(p.display().to_string());

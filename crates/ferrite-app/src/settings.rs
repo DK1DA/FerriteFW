@@ -216,9 +216,9 @@ pub struct Settings {
     pub show_hidden: bool,
     /// 0 9 3 2: channel-only mode (PIN-5): no V/M, MENU 0 or editing; hold # leaves it.
     pub chan_only: bool,
-    /// Spare: was Follow (0 1 2 2), dropped in decision 81. Always false; kept so the saved flag bits after
-    /// it keep their places.
-    pub spare_flag1: bool,
+    /// Cable log (0 9 2 6, TERM-28): the plain log on the cable in the normal build, until a byte arrives. Its
+    /// bit was Follow's (0 1 2 2, dropped in decision 81), so the saved flag bits after it keep their places.
+    pub cable_log: bool,
     /// Spare: was Follow return (0 1 2 3), dropped in decision 81.
     pub spare_flag2: bool,
     /// 0 1 6 3: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
@@ -373,7 +373,7 @@ impl Settings {
         arrival_tone: true,
         show_hidden: false,
         chan_only: false,
-        spare_flag1: false,
+        cable_log: false,
         spare_flag2: false,
         scan_tx: false,
         tone_level: 1,

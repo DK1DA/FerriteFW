@@ -11,6 +11,9 @@ use crate::{Crc32, Nor, Result, PAGE, SECTOR};
 use core::cell::{Cell, RefCell};
 use ferrite_core::layout::SCRATCH;
 
+/// Pauses [`Flash::wait`] allows (each 1 ms on the radio).
+pub const WAIT_MAX: u32 = 3000;
+
 /// The largest record programmed in place (a channel).
 const PEND_MAX: usize = 64;
 
@@ -89,8 +92,16 @@ impl<N: Nor> Flash<N> {
         Ok(c.get())
     }
 
+    /// Until the chip is idle, or [`WAIT_MAX`] pauses (about 3 s on the radio, several times the slowest sector
+    /// erase): a chip that never clears BUSY (a stuck part, or MISO reading 0xFF) fails the write instead of
+    /// holding the Storage task, or the boot's mount, for ever.
     async fn wait(&self) -> Result {
+        let mut n = 0;
         while self.nor.borrow_mut().busy()? {
+            n += 1;
+            if n > WAIT_MAX {
+                return Err(crate::NorError);
+            }
             N::pause().await;
         }
         Ok(())
@@ -170,5 +181,43 @@ impl<N: Nor> Flash<N> {
             off += n as u32;
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod wait_tests {
+    use super::*;
+    use crate::{block, NorError};
+
+    /// A chip that never finishes: every program or erase leaves BUSY set.
+    struct Stuck {
+        polls: u32,
+    }
+    impl Nor for Stuck {
+        fn read(&mut self, _: u32, buf: &mut [u8]) -> Result {
+            buf.fill(0xFF);
+            Ok(())
+        }
+        fn start_program(&mut self, _: u32, _: &[u8]) -> Result {
+            Ok(())
+        }
+        fn start_erase(&mut self, _: u32) -> Result {
+            Ok(())
+        }
+        fn busy(&mut self) -> Result<bool> {
+            self.polls += 1;
+            Ok(true)
+        }
+        async fn pause() {}
+    }
+
+    /// A stuck BUSY fails the erase and the program after WAIT_MAX polls; nothing waits for ever.
+    #[test]
+    fn stuck_busy_fails_cleanly() {
+        let f = Flash::new(Stuck { polls: 0 });
+        assert_eq!(block(f.erase(SCRATCH.start)), Err(NorError));
+        assert!(f.nor().polls > WAIT_MAX && f.nor().polls <= WAIT_MAX + 2);
+        let f = Flash::new(Stuck { polls: 0 });
+        assert_eq!(block(f.program(SCRATCH.start, &[0u8; 16])), Err(NorError));
     }
 }
