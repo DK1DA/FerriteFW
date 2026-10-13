@@ -154,6 +154,8 @@ struct Radio {
     muted: bool,
     /// The SI4732 has had the antenna since boot: leaving it sets stock's radio state, PA7 = 1, PC5 = 0 (BCR-20).
     si_used: bool,
+    /// FM broadcast's receiver state for the live report (BCR-2, BCR-5).
+    fm: Option<FmRx>,
     /// BCR-6: the SI4732 is the source being heard (broadcast on, no slot heard); its hard mute follows this.
     si_heard: bool,
     slots: [SlotRx; SLOTS],
@@ -572,6 +574,7 @@ impl Radio {
 
     async fn tick(&mut self) {
         self.mcu_temp();
+        self.fm_poll();
         // SQL-1: the calibration's squelch tables, once the UI task has read them: every tuned chip again.
         if let Some(c) = crate::chan::SQ_CAL.try_take() {
             self.sqcal = c;
@@ -822,6 +825,35 @@ impl Radio {
     }
 
     /// HF mode's report: frequency, signal and which receiver (ModeLive::Hf).
+    /// BCR-2, BCR-5: FM broadcast's report twice a second: the signal, stereo pilot and SNR, and up to 8 RDS
+    /// groups into the decoder (station name, radio text). Nothing in HF mode or with FM off.
+    fn fm_poll(&mut self) {
+        let now = now_ms() as u32;
+        let Some(fm) = self.fm.as_mut() else { return };
+        if self.hf.is_some() || now.wrapping_sub(fm.poll_at) > u32::MAX / 2 {
+            return;
+        }
+        fm.poll_at = now.wrapping_add(500);
+        let d = &mut BusyDelay;
+        let q = self.si.rsq(d).ok();
+        for _ in 0..8 {
+            match self.si.rds_read(d) {
+                Ok(Some(g)) => fm.rds.feed(g.blocks[0], g.blocks[1], g.blocks[2], g.blocks[3], g.errors),
+                _ => break,
+            }
+        }
+        let mut rt = [0u8; 32];
+        rt.copy_from_slice(&fm.rds.rt[..32]);
+        self.live.mode = ModeLive::Fm {
+            freq: fm.freq,
+            ps: fm.rds.ps,
+            rt,
+            rssi: q.map_or(0, |q| q.rssi),
+            snr: q.map_or(0, |q| q.snr),
+            stereo: q.is_some_and(|q| q.stereo),
+        };
+    }
+
     fn hf_poll(&mut self) {
         let Some(h) = self.hf else { return };
         let (rssi, snr) = if h.si {
@@ -1274,14 +1306,22 @@ async fn si_probe(si: &mut Si4732<SiBus>) -> bool {
 
 /// The broadcast receiver: powered up in the mode asked for (reset pulse, power-up, crystal settling), then
 /// tuned by polling. FM in 10 kHz units, AM in kHz. PA7/PC5 take stock's state for the mode (BCR-20). SSB (patch from SPI flash) comes with the link's patch import.
-async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<(), si4732::Error> {
+/// FM broadcast while on: the tuned frequency (10 kHz), the RDS decoder, the next report time.
+struct FmRx {
+    freq: u16,
+    rds: si4732::rds::Rds,
+    poll_at: u32,
+}
+
+/// Returns the frequency the receiver tuned to (FM 10 kHz units, AM kHz; 0 when switched off).
+async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4732::Error> {
     let d = &mut BusyDelay;
     let (mode, freq) = match cmd {
         BroadcastCmd::Off => {
             if si.mode().is_some() {
                 si.power_down(d)?;
             }
-            return Ok(());
+            return Ok(0);
         }
         BroadcastCmd::Fm(f) => (SiMode::Fm, Some(f)),
         BroadcastCmd::Am(f) => (SiMode::Am, Some(f)),
@@ -1305,14 +1345,19 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<(), si47
         }
         Timer::after_millis(500).await; // crystal
         si.volume(63, d)?; // the volume knob is analog, after the chip
+        if mode == SiMode::Fm {
+            let _ = si.rds_on(d); // BCR-2: station name and radio text
+        }
     }
     if let Some(f) = freq {
         si.tune_start(f, Sideband::Usb, d)?;
     }
-    while si.tune_poll(d)?.is_none() {
+    loop {
+        if let Some(t) = si.tune_poll(d)? {
+            return Ok(t.freq);
+        }
         Timer::after_millis(10).await;
     }
-    Ok(())
 }
 
 #[embassy_executor::task]
@@ -1338,6 +1383,7 @@ pub async fn task() {
         muted: false,
         si_used: false,
         si_heard: false,
+        fm: None,
         slots: [SlotRx::DEFAULT; SLOTS],
         active: 0,
         watch_set: 0,
@@ -1582,6 +1628,14 @@ impl Radio {
             RadioCmd::Broadcast(b) => {
                 // Errors: the UI shows no station. The cable log (TERM-28) says what the SI4732 did.
                 let r = broadcast(&mut self.si, b).await;
+                // BCR-2, BCR-5: FM's live report (frequency, signal, stereo, RDS) from here on; the tick polls it.
+                self.fm = match (b, &r) {
+                    (BroadcastCmd::Off, _) | (BroadcastCmd::Am(_), _) | (_, Err(_)) => None,
+                    (_, Ok(f)) => Some(FmRx { freq: *f, rds: si4732::rds::Rds::init(), poll_at: 0 }),
+                };
+                if self.fm.is_none() && matches!(self.live.mode, ModeLive::Fm { .. }) {
+                    self.live.mode = ModeLive::Off;
+                }
                 match (b, r.is_ok()) {
                     (BroadcastCmd::Off, _) => log(b"si off", 0),
                     (BroadcastCmd::Fm(f), true) => log(b"si fm ok, 10 khz ", f as u32),
