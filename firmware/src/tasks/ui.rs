@@ -276,6 +276,17 @@ pub async fn task() {
                 }
             }
         }
+        // Every pass, bring-up log or not (inside the `!bringup::ON` branch they never updated About). PWR-20: the battery from the Radio task's PA1 reading, with the user trim (10 mV steps).
+        let raw = crate::chan::BATTERY_RAW.load(Relaxed);
+        if raw != 0 {
+            let mv = ferrite_core::txcal::battery_mv(raw) as i32 + dev.selftest.battery_trim as i32 * 10;
+            dev.battery_mv = mv.max(0) as u16;
+            dev.battery_pct = ferrite_core::txcal::Gauge::defaults().percent(raw);
+        }
+        dev.selftest.chips = live.chips;
+        // SBAR-20: the Radio task's MCU temperature reading, in whole degrees.
+        let t = crate::chan::MCU_TEMP.load(Relaxed);
+        dev.mcu_temp = (t != i16::MIN).then(|| ferrite_core::mcutemp::whole(t));
         if !bringup::ON.load(Relaxed) {
             // Debug commands (TERM-21): memory here, registers by the Radio task (it signals TERM_WAKE).
             if let Ok(a) = DEBUG_ANS.try_receive() {
@@ -300,17 +311,6 @@ pub async fn task() {
                 Timer::after_millis(50).await; // the answer's bytes leave the UART
                 cortex_m::peripheral::SCB::sys_reset();
             }
-            // PWR-20: the battery from the Radio task's PA1 reading, with the user trim (10 mV steps).
-            let raw = crate::chan::BATTERY_RAW.load(Relaxed);
-            if raw != 0 {
-                let mv = ferrite_core::txcal::battery_mv(raw) as i32 + dev.selftest.battery_trim as i32 * 10;
-                dev.battery_mv = mv.max(0) as u16;
-                dev.battery_pct = ferrite_core::txcal::Gauge::defaults().percent(raw);
-            }
-            dev.selftest.chips = live.chips;
-            // SBAR-20: the Radio task's MCU temperature reading, in whole degrees.
-            let t = crate::chan::MCU_TEMP.load(Relaxed);
-            dev.mcu_temp = (t != i16::MIN).then(|| ferrite_core::mcutemp::whole(t));
             LINK_HELLOS.store(ports.link.hellos(), Relaxed);
             LINK_ON.store(ports.link_on(Port::Cable, now_ms()), Relaxed);
             BT_LINK_ON.store(ports.link_on(Port::Bt, now_ms()), Relaxed);

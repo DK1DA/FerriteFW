@@ -74,7 +74,9 @@ pub async fn run<H: Hw>(hw: &mut H, steps: &Steps) {
         match a {
             Act::Sel(s, on) => {
                 hw.pin(Pin::Sel(s), on);
-                if on {
+                // Transmit selects only: the receive select hops with dual watch many times a second and
+                // flooded the bring-up log on the radio (Oct 12, 2026).
+                if on && s.is_tx() {
                     hw.log(b"path select ", s as u32);
                 }
             }
