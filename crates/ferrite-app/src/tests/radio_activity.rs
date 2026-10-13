@@ -1564,7 +1564,8 @@ fn knob_holds_the_heavier_redraws() {
     }
 }
 
-/// MODE-1, MODE-2: random use (keys, the knob, layouts, screens opened, timeouts, PTT) never leaves the radio in
+/// MODE-1, MODE-2, BCR-29: random use (keys, the knob, layouts, screens opened, timeouts, PTT, slots tuned in and
+/// out of the broadcast band) never leaves the radio in
 /// a mode the app doesn't want: after every step the mode is the wanted one; home on the plain layout with no
 /// mode screen under it is normal receive; and the commands sent, played on a model of the Radio task, never
 /// start a mode over another and end in the mode the app thinks runs.

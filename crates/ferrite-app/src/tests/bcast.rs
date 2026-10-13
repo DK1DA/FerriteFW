@@ -111,7 +111,7 @@ fn card_states() {
     assert_eq!(t.app.state(1, &t.live).0, "Watch off: relay");
 }
 
-/// BCR-26: the radio text, else the station name, else nothing.
+/// BCR-26, BCR-30: the radio text (all 64 characters), else the station name, else nothing.
 #[test]
 fn rds_text_rule() {
     let mut rt = [0u8; 64];
@@ -192,7 +192,7 @@ fn quick_settings_rows() {
     assert_eq!(t.app.set.fm_agc, 1, "row 3: AGC");
 }
 
-/// TX-24: PTT on another slot stops the broadcast before the key-up and starts it again after.
+/// TX-24, BCR-29: PTT on another slot stops the broadcast before the key-up and starts it again after.
 #[test]
 fn transmit_switches_the_receiver_away_and_back() {
     let mut t = ready();
