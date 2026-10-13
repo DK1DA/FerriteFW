@@ -1326,3 +1326,136 @@ fn scope_bars_redraw_in_place() {
         }
     }
 }
+
+/// HOME-3: leaving the single + scope layout stops the strip's sweep, so the slots receive again.
+#[test]
+fn leaving_the_scope_layout_stops_the_sweep() {
+    let mut t = ready();
+    t.app.set.layout = 1;
+    t.wait(100);
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Sweep { on: true, .. })), "the strip sweeps");
+    t.app.set.layout = 0;
+    t.wait(100);
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Sweep { on: false, .. })), "back to Watch: the sweep stops");
+}
+
+/// An exclusive mode's stop command (the Radio task's side of [`App::stop_mode`]).
+fn stops(m: Mode, c: &RadioCmd) -> bool {
+    match m {
+        Mode::Scope | Mode::Strip => matches!(c, RadioCmd::Sweep { on: false, .. }),
+        Mode::Tone => matches!(c, RadioCmd::ToneSearch { on: false, .. }),
+        Mode::Counter => matches!(c, RadioCmd::Counter(false)),
+        Mode::Fm => matches!(c, RadioCmd::Broadcast(BroadcastCmd::Off)),
+        Mode::Hf => matches!(c, RadioCmd::Hf { on: false, .. }),
+        Mode::Xb => matches!(c, RadioCmd::Crossband(None)),
+        Mode::Off => false,
+    }
+}
+
+/// Start mode `m` from home, as a person would: its screen (crossband: and # Start), or for the strip the
+/// single + scope layout.
+fn start(t: &mut T, m: Mode) {
+    match m {
+        Mode::Scope => t.open(Dest::BandScope),
+        Mode::Strip => {
+            t.app.set.layout = 1;
+            t.wait(100);
+        }
+        Mode::Tone => t.open(Dest::ToneSearch),
+        Mode::Counter => t.open(Dest::Counter),
+        Mode::Fm => t.open(Dest::FmBroadcast),
+        Mode::Hf => t.open(Dest::HfMode),
+        Mode::Xb => {
+            t.open(Dest::Crossband);
+            t.tap(Key::Hash);
+        }
+        Mode::Off => {}
+    }
+    assert_eq!(t.app.radio.mode, m, "{m:?} runs");
+}
+
+const MODES: [Mode; 7] = [Mode::Scope, Mode::Strip, Mode::Tone, Mode::Counter, Mode::Fm, Mode::Hf, Mode::Xb];
+
+/// HOME-2, SCOPE-4 and each mode's own rules: an exclusive mode stops with its screen, however the screen is left
+/// (BACK, hold BACK, the screen's timeout, PTT; the strip by leaving its layout), and only then: the Radio task
+/// gets the mode's stop command once, and no mode is left running behind another screen.
+#[test]
+fn every_way_out_of_a_mode_stops_it() {
+    #[derive(Debug, Clone, Copy)]
+    enum Out {
+        Back,
+        HoldBack,
+        Timeout,
+        Ptt,
+        Layout,
+    }
+    for m in MODES {
+        let outs: &[Out] = if m == Mode::Strip { &[Out::Ptt, Out::Layout] } else { &[Out::Back, Out::HoldBack, Out::Timeout, Out::Ptt] };
+        for &out in outs {
+            let mut t = ready();
+            start(&mut t, m);
+            let shown = t.app.screen();
+            t.cmds();
+            match out {
+                Out::Back => t.tap(Key::Exit),
+                Out::HoldBack => t.hold(Key::Exit),
+                Out::Timeout => t.wait(15 * 60 * 1000),
+                Out::Ptt => {
+                    ptt(&mut t, true);
+                    // keyed on another screen (Transmit): the mode stopped before the key-up, not after; HF mode
+                    // transmits (or refuses) in place (HF-23, HF-24), the repeater is held (XB-14)
+                    if t.app.screen() != shown && !matches!(m, Mode::Hf | Mode::Xb) {
+                        assert_eq!(t.app.radio.mode, Mode::Off, "{m:?}: PTT left its screen and the mode ran on");
+                    }
+                    ptt(&mut t, false);
+                    t.wait(500);
+                }
+                Out::Layout => {
+                    t.app.set.layout = 0;
+                    t.wait(100);
+                }
+            }
+            let cmds = t.cmds();
+            let sent = cmds.iter().filter(|c| stops(m, c)).count();
+            if let (Mode::Hf | Mode::Xb, Out::Ptt) = (m, out) {
+                // HF mode transmits in place (HF-23); the repeater is held and carries on after (XB-14)
+                assert_eq!((sent, t.app.radio.mode), (0, m), "{m:?}, PTT: the mode stays");
+            } else if let (Mode::Strip, Out::Ptt) = (m, out) {
+                // home's strip stops for the transmission and sweeps again once home is back
+                assert_eq!((sent, t.app.radio.mode), (1, Mode::Strip), "strip, PTT");
+                let again = cmds.iter().rposition(|c| matches!(c, RadioCmd::Sweep { on: true, .. }));
+                assert!(again > cmds.iter().position(|c| stops(m, c)), "strip, PTT: sweeping again after");
+            } else if t.app.radio.mode == Mode::Off {
+                assert_eq!(sent, 1, "{m:?}, {out:?}: the stop command, once");
+            } else {
+                // still running: only on its own screen (no timeout there; the scope refuses PTT unless listening,
+                // SCOPE-12), and nothing stopped
+                assert_eq!((t.app.radio.mode, sent), (m, 0), "{m:?}, {out:?}");
+                assert!(t.app.screen() == shown && matches!(out, Out::Timeout | Out::Ptt), "{m:?}, {out:?}: running behind another screen");
+            }
+        }
+    }
+}
+
+/// Starting one exclusive mode stops the one running first: its stop command goes before the new mode's start.
+#[test]
+fn a_mode_stops_the_one_before_it() {
+    for a in MODES {
+        for b in MODES {
+            if a == b || b == Mode::Strip {
+                continue; // the strip starts only from home's layout
+            }
+            let mut t = ready();
+            start(&mut t, a);
+            t.cmds();
+            if a != Mode::Strip {
+                t.app.go_home(); // a mode screen's own keys don't open the others: home first, as a person would
+            }
+            start(&mut t, b);
+            let cmds = t.cmds();
+            let stop = cmds.iter().position(|c| stops(a, c));
+            assert!(stop.is_some(), "{a:?} then {b:?}: {a:?} stopped ({cmds:?})");
+            assert_eq!(t.app.radio.mode, b);
+        }
+    }
+}
