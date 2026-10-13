@@ -721,3 +721,21 @@ fn frequency_redrawn_in_place_matches_a_full_redraw() {
     t.tap(Key::VfoMem);
     check(&mut t, &mut fb, "V/M");
 }
+
+
+/// HOME-11: home's redraws stay cheap on the radio's bus (each pixel written costs bus time): a slot change writes
+/// at most 1.7 screens' worth, a V/M change half a screen. Oct 12, 2026: 3.2 screens (five passes over the cards)
+/// took about 470 ms on the radio.
+#[test]
+fn home_redraws_dont_overdraw() {
+    let mut t = T::new();
+    let mut fb = FrameBuffer::new();
+    t.render(&mut fb);
+    for (what, key, most) in [("slot", Key::Slot, 1.7), ("V/M", Key::VfoMem, 0.5)] {
+        fb.writes.iter_mut().for_each(|w| *w = 0);
+        t.tap(key);
+        t.render(&mut fb);
+        let screens = fb.writes.iter().map(|&w| w as f64).sum::<f64>() / 76_800.0;
+        assert!(screens <= most, "{what}: {screens:.2} screens written, at most {most}");
+    }
+}

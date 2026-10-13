@@ -65,11 +65,17 @@ pub async fn task() {
             Timer::after_millis(ms as u64).await;
         }
     }
+    let c0 = crate::hal::time::cycles();
     lcd.0.fill(0, 0, 240, 320, BG);
+    let fill_us = crate::hal::time::cycles().wrapping_sub(c0) / (crate::hal::clock::SYSCLK_HZ / 1_000_000);
     lcd.0.on(true);
     for p in BACKLIGHT {
         p.output(true, Mode::OutPp);
     }
+    // Bring-up: the panel bus speed, from the whole-screen clear (153,600 bytes).
+    bringup::linef(|b| {
+        let _ = ufmt::uwrite!(b, "panel: full-screen fill {} us, {} ns a byte", fill_us, fill_us * 1000 / 153_600);
+    });
 
     // The MCU check is ours to make: transmit (in the tx build) needs the expected part; receive runs regardless.
     check(Source::Ui, CHECK_MCU, crate::hal::sys::idcode() == chipid::EXPECTED_PID);

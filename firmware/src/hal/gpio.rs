@@ -104,3 +104,16 @@ pub fn port_input(port: u32) -> u16 {
 pub fn write_high_byte(port: u32, b: u8) {
     wr(port + GPIO_SCR, (b as u32) << 8 | ((!b) as u32) << 24);
 }
+
+/// Reads the port's output register back: the write before it has reached the pins once this returns (the bus
+/// orders the read after the write), so pin timings don't depend on the write buffer.
+#[inline(always)]
+pub fn sync(port: u32) {
+    let _ = rd(port + GPIO_ODT);
+}
+
+/// As [`write_high_byte`], and clears the low-byte pins in `clear` in the same atomic write.
+#[inline(always)]
+pub fn write_high_byte_clear(port: u32, b: u8, clear: u8) {
+    wr(port + GPIO_SCR, (b as u32) << 8 | ((!b) as u32) << 24 | (clear as u32) << 16);
+}

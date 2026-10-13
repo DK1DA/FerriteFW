@@ -5,13 +5,15 @@ use std::vec::Vec;
 
 pub struct FrameBuffer {
     pub px: Vec<u16>, // row-major, W x H
+    /// How many times each pixel was written: overdraw (on the radio every write costs bus time).
+    pub writes: Vec<u16>,
     win: (i32, i32, i32, i32),
     cur: (i32, i32),
 }
 
 impl FrameBuffer {
     pub fn new() -> Self {
-        FrameBuffer { px: std::vec![0; (W * H) as usize], win: (0, 0, W - 1, H - 1), cur: (0, 0) }
+        FrameBuffer { px: std::vec![0; (W * H) as usize], writes: std::vec![0; (W * H) as usize], win: (0, 0, W - 1, H - 1), cur: (0, 0) }
     }
 
     pub fn at(&self, x: i32, y: i32) -> u16 {
@@ -23,6 +25,7 @@ impl FrameBuffer {
         let (x, y) = self.cur;
         if x < W && y < H {
             self.px[(y * W + x) as usize] = c;
+            self.writes[(y * W + x) as usize] = self.writes[(y * W + x) as usize].saturating_add(1);
         }
         self.cur = if x + 1 > x1 { (x0, if y + 1 > y1 { y0 } else { y + 1 }) } else { (x + 1, y) };
     }

@@ -96,32 +96,32 @@ impl Lcd {
     }
 }
 
-#[inline(always)]
-fn nops<const N: usize>() {
-    for _ in 0..N {
-        cortex_m::asm::nop();
-    }
-}
-
 /// Bring-up only: bytes sent to the LCD, so the redraw log can split bus time from drawing time.
 pub static LCD_BYTES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// LCD_WR is PD0, on the data lines' port: one write to GPIOD's set/clear register puts the byte on PD8-PD15 and
+/// pulls WR low together (PD1-PD7 untouched: PD4-PD7 are the keypad sense pull-ups).
+const WR_LOW: u8 = 1 << 0;
 
 #[inline(always)]
 fn byte(b: u8) {
     if cfg!(feature = "bringup") {
         LCD_BYTES.store(LCD_BYTES.load(core::sync::atomic::Ordering::Relaxed).wrapping_add(1), core::sync::atomic::Ordering::Relaxed);
     }
-    // One write to PD8-PD15, leaving PD0-PD7 alone (PD4-PD7 are the keypad sense pull-ups); latched on WR rising.
-    // At 120 MHz back-to-back port writes break the ST7789's 8080 timing (one-colour fills went missing on the
-    // radio, Oct 12, 2026; the 8 MHz image was fine): data setup before WR falls, WR low six nops as stock
-    // (0x080293E8), then a hold with WR high before the next byte's data, so a tight fill loop keeps the write
-    // cycle (66 ns), data hold (10 ns) and WR high time (15 ns) as text's slower loop does.
-    gpio::write_high_byte(LCD_DATA_PORT, b);
-    nops::<2>();
-    LCD_WR.clr();
-    nops::<6>();
+    // The ST7789 latches on WR rising, so the data may change as WR falls: one write sets both. Then WR stays low
+    // for unrolled nops and high for a few more, keeping the 8080 write cycle (66 ns), WR low/high (15 ns) and data
+    // setup/hold (10 ns) at 120 MHz. Oct 12, 2026: separate writes and looped nops cost about 1 us a byte (120
+    // cycles); at 120 MHz with no padding one-colour fills were lost.
+    // Each write is read back before the wait, so the strobe's low and high times have a floor whatever the
+    // write buffer does (unrolled nops alone left the screen blank on the radio, Oct 12, 2026; 6 low / 4 high left grey specks
+    // around redrawn boxes, so 10 / 8).
+    gpio::write_high_byte_clear(LCD_DATA_PORT, b, WR_LOW);
+    gpio::sync(LCD_DATA_PORT);
+    // SAFETY: nops only.
+    unsafe { core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", options(nomem, nostack, preserves_flags)) };
     LCD_WR.set();
-    nops::<4>();
+    gpio::sync(LCD_DATA_PORT);
+    unsafe { core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", options(nomem, nostack, preserves_flags)) };
 }
 
 impl st7789::Bus8080 for Lcd {

@@ -224,10 +224,19 @@ impl View for Home {
             _ => {}
         }
         let live = cx.live;
-        // The large card moved (SLOT): the gaps between cards moved too, so clear the whole card area and draw
-        // every card again; otherwise slivers of the old large card stay behind (HOME-11).
+        // The large card moved (SLOT): the gaps between cards moved too, so clear them and draw every card again;
+        // otherwise slivers of the old large card stay behind (HOME-11). Only the gaps: each card paints its own
+        // rectangle (clearing the whole area first was one of five passes over it, slow on the radio's bus).
         if app.dirty(R_NOTE, hash(&app.active)) {
-            lcd.fill(0, 21, 240, 279, BG);
+            lcd.fill(0, 21, 6, 279, BG);
+            lcd.fill(234, 21, 6, 279, BG);
+            let mut top = 21;
+            for s in 0..SLOTS as u8 {
+                let (y, h) = card(s, app.active);
+                lcd.fill(6, top, 228, y - top, BG);
+                top = y + h;
+            }
+            lcd.fill(6, top, 228, 300 - top, BG);
             app.drawn.hash[R_FRAME..=R_SUB + 2].fill(0);
             app.drawn.meter = [None; SLOTS];
         }
@@ -241,12 +250,16 @@ impl View for Home {
             let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
             let aprs = app.aprs_slot(s);
             if app.dirty(R_FRAME + p, hash(&(s, y, h, border, aprs))) {
-                lcd.fill(6, y, 228, h, BG);
+                // The background only where the rounded corners leave it showing (3 px squares), not the whole card.
+                for (cx, cy) in [(6, y), (231, y), (6, y + h - 3), (231, y + h - 3)] {
+                    lcd.fill(cx, cy, 3, 3, BG);
+                }
                 lcd.fill_r(6, y, 228, h, 3, SURFACE);
                 lcd.frame_r(6, y, 228, h, 3, border);
                 for r in [R_HEAD, R_FREQ, R_INFO, R_SUB] {
                     app.drawn.hash[r + p] = 0;
                 }
+                app.drawn.hash[R_FREQ + p] = FRESH; // the frequency box is plain surface: no blank needed
                 app.drawn.meter[p] = None;
             }
             // Header: letter, VFO/CH/SCAN and band, the state at the right (HOME-4, HOME-5).

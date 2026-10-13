@@ -15,6 +15,9 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets::{self as w, Row, StatusBar};
 
 // Regions. Screens reuse the numbers; a screen change clears the content and forgets every hash.
+/// A region's hash after its box was just filled with its background: [`App::dirty_shape`] draws it without a
+/// blank (bit 1 clear, so no hash `dirty_shape` makes equals it).
+pub(crate) const FRESH: u32 = 0xFFFF_FFF0;
 pub(crate) const R_HINT: usize = 0;
 pub(crate) const R_FRAME: usize = 1; // home: three cards' frames (1-3)
 pub(crate) const R_HEAD: usize = 4; // card headers (4-6)
@@ -107,7 +110,7 @@ impl App {
         if !self.dirty(r, h) {
             return None;
         }
-        Some(prev == 0 || prev & 1 != shape as u32)
+        Some(prev != FRESH && (prev == 0 || prev & 1 != shape as u32))
     }
 
     /// DISP-24: the scroll cue beside rows `R_ROW + from ..+ count`, drawn from `y` for `h` when there are rows
