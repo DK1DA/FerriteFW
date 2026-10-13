@@ -154,6 +154,8 @@ struct Radio {
     muted: bool,
     /// The SI4732 has had the antenna since boot: leaving it sets stock's radio state, PA7 = 1, PC5 = 0 (BCR-20).
     si_used: bool,
+    /// BCR-6: the SI4732 is the source being heard (broadcast on, no slot heard); its hard mute follows this.
+    si_heard: bool,
     slots: [SlotRx; SLOTS],
     active: u8,
     /// The watch set from the UI, a bit per slot.
@@ -724,7 +726,18 @@ impl Radio {
                 self.chip(n).af_out(if Some(n) == audio_chip { AfOut::Normal } else { AfOut::Mute });
             }
         }
-        speaker(audio_chip.is_some() && !self.muted);
+        // BCR-6: in FM or AM broadcast the SI4732 is the source while no slot is heard (radio monitor); a heard slot
+        // mutes it and plays the BK4829 instead. Without this the amp stayed off in FM broadcast on the radio
+        // (Oct 12, 2026): only the BK4829s were ever counted as a source.
+        let broadcast = self.si.mode().is_some() && self.hf.is_none();
+        let si_heard = broadcast && audio_chip.is_none();
+        if self.si_heard != si_heard {
+            if broadcast {
+                let _ = self.si.mute(!si_heard, &mut BusyDelay);
+            }
+            self.si_heard = si_heard;
+        }
+        speaker((audio_chip.is_some() || si_heard) && !self.muted);
         // 6. The snapshot.
         let active_relay = Sel::rx(self.slots[self.active as usize].freq).relay();
         for (i, sl) in self.live.slots.iter_mut().enumerate() {
@@ -737,7 +750,8 @@ impl Radio {
             sl.relay = out.cancelled && self.watch_set & 1 << i != 0 && Sel::rx(self.slots[i].freq).relay() != active_relay;
         }
         // Battery Save: anything open or scanning keeps the receivers awake.
-        let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning);
+        // FM or AM broadcast keeps the receivers awake too: Battery Save's sleep would silence it (speaker off).
+        let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning) || (self.si.mode().is_some() && self.hf.is_none());
         let a = self.save.tick(now_ms(), busy);
         self.apply(a).await;
     }
@@ -1323,6 +1337,7 @@ pub async fn task() {
         path: Path::new(),
         muted: false,
         si_used: false,
+        si_heard: false,
         slots: [SlotRx::DEFAULT; SLOTS],
         active: 0,
         watch_set: 0,

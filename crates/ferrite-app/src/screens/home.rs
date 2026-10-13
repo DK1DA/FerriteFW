@@ -222,22 +222,24 @@ impl View for Home {
         // The large card moved (SLOT): the gaps between cards moved too, so clear them and draw every card again;
         // otherwise slivers of the old large card stay behind (HOME-11). Only the gaps: each card paints its own
         // rectangle (clearing the whole area first was one of five passes over it, slow on the radio's bus).
-        if app.dirty(R_NOTE, hash(&app.active)) {
-            lcd.fill(0, 21, 6, 279, BG);
-            lcd.fill(234, 21, 6, 279, BG);
-            let mut top = 21;
-            for s in 0..SLOTS as u8 {
-                let (y, h) = card(s, app.active);
-                lcd.fill(6, top, 228, y - top, BG);
-                top = y + h;
-            }
-            lcd.fill(6, top, 228, 300 - top, BG);
+        // The gaps are drawn top to bottom with the cards, each just before the card under it, so the screen changes
+        // as one wipe: drawing every gap first cut the old large card in half with a dark line (on the radio, Oct 12,
+        // 2026).
+        let gaps = app.dirty(R_NOTE, hash(&app.active));
+        if gaps {
             app.drawn.hash[R_FRAME..=R_SUB + 2].fill(0);
             app.drawn.meter = [None; SLOTS];
         }
+        let mut top = 21;
         for s in 0..SLOTS as u8 {
             let p = s as usize;
             let (y, h) = card(s, app.active);
+            if gaps {
+                lcd.fill(0, top, 240, y - top, BG);
+                lcd.fill(0, y, 6, h, BG);
+                lcd.fill(234, y, 6, h, BG);
+                top = y + h;
+            }
             let geom = hash(&(s, y, h, app.aprs_slot(s))) | 1;
             if app.drawn.hash[R_FRAME + p] != 0 && app.drawn.card[p] == geom {
                 // HOME-13: while the knob turns only the active card follows; the others wait in place.
@@ -254,6 +256,9 @@ impl View for Home {
                 (app.drawn.hash, app.drawn.meter) = (hash0, meter0);
                 draw_card(app, b, cx, s);
             });
+        }
+        if gaps {
+            lcd.fill(0, top, 240, 300 - top, BG);
         }
     }
 
