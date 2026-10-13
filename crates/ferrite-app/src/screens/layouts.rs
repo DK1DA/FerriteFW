@@ -31,7 +31,8 @@ pub fn tick(app: &mut App) {
     if app.radio.mode != Mode::Strip || app.radio.centre != f {
         app.radio.mode = Mode::Strip;
         app.radio.centre = f;
-        app.out.push(RadioCmd::ScopeCfg { bars: scope::STRIP_BARS as u8, dwell: 10 });
+        // Stock's 10 ms a point (dwell is in 0.1 ms): at 1 ms the strip starved the UI on the radio (Oct 12, 2026).
+        app.out.push(RadioCmd::ScopeCfg { bars: scope::STRIP_BARS as u8, dwell: 100 });
         app.out.push(RadioCmd::Sweep { centre: f, step: STRIP_STEP, on: true });
     }
 }

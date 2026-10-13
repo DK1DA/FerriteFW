@@ -1417,7 +1417,9 @@ pub async fn task() {
         at = at.max(now_ms() + 1);
         // The band scope waits its dwell between points (0.1 ms steps), listening or not at the tick.
         let wake = match &r.scope {
-            Some(sc) if sc.listen == 0 => Instant::now() + embassy_time::Duration::from_micros(sc.dwell_us as u64),
+            // At least 2 ms between points whatever the dwell: each point is about 1.25 ms of BK4829 writes on a task
+            // that runs above the UI, and 1 ms points starved it (keys dead on the radio, Oct 12, 2026).
+            Some(sc) if sc.listen == 0 => Instant::now() + embassy_time::Duration::from_micros(sc.dwell_us.max(2_000) as u64),
             _ => Instant::from_millis(at),
         };
         match select3(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive()).await {
