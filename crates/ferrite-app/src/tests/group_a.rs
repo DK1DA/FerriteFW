@@ -739,3 +739,24 @@ fn home_redraws_dont_overdraw() {
         assert!(screens <= most, "{what}: {screens:.2} screens written, at most {most}");
     }
 }
+
+/// LINK-7: 0 9 2 2 lists the approval tokens and OK on one forgets it (that app asks again at its next write);
+/// an empty row says so; the last row opens Add a device.
+#[test]
+fn approved_devices_forget() {
+    let mut t = T::new();
+    t.app.set.link_tokens[0] = [7; 8];
+    t.app.set.link_tokens[1] = [9; 8];
+    t.open(Dest::Approved);
+    t.tap(Key::Down); // Device 2
+    t.tap(Key::Menu);
+    assert_eq!(t.app.set.link_tokens[1], [0; 8], "forgotten");
+    assert_eq!(t.app.set.link_tokens[0], [7; 8], "the other kept");
+    t.tap(Key::Down); // Device 3: empty
+    t.tap(Key::Menu);
+    assert_eq!(t.app.set.link_tokens[0], [7; 8]);
+    t.tap(Key::Down);
+    t.tap(Key::Down); // Add a device
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen().name(), "Add device");
+}

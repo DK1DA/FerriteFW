@@ -698,6 +698,8 @@ impl FakeRadio {
                 data[0] = 0x80;
                 DebugAns::Si { data, n: reply.clamp(1, 16) }
             }
+            // TERM-27: a module that, like the radio's, says nothing back.
+            DebugReq::Bt { .. } => DebugAns::Bt { data: [0; 48], n: 0 },
         }
     }
 }

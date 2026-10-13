@@ -81,7 +81,7 @@ pub fn open(app: &mut App) -> Screen {
 
 fn sweep(app: &mut App, centre: Freq10) {
     app.start_mode(Mode::Scope);
-    let (step, bars, dwell) = (step_of(app), bars_n(app) as u8, app.set.scope_dwell.clamp(1, 40));
+    let (step, bars, dwell) = (step_of(app), bars_n(app) as u8, app.set.scope_dwell.clamp(1, 100));
     app.out.push(RadioCmd::ScopeCfg { bars, dwell });
     app.out.push(RadioCmd::Sweep { centre, step, on: true });
 }
@@ -429,7 +429,7 @@ impl View for Scope {
         }
         // Bars, step, speed, trigger (SCOPE-2).
         let mut t = Buf::<40>::new();
-        let d = app.set.scope_dwell.clamp(1, 40);
+        let d = app.set.scope_dwell.clamp(1, 100);
         let _ = uwrite!(t, "{} bars \u{b7} ", n);
         khz(step as u32, &mut t);
         let _ = uwrite!(t, " \u{b7} {}.{} ms", d / 10, d % 10);

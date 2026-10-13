@@ -56,6 +56,19 @@ fn menu_state(i: &Input, held: &mut bool) {
     }
 }
 
+/// TERM-27: a `bt` query in progress. The link task keeps USART1 and PB9; this only borrows the module's rings
+/// (`BT_OUT`, `BT_IN`) for the query, and holds 0 9 2 1 on for it when Bluetooth is off.
+struct BtQuery {
+    text: [u8; 16],
+    n: u8,
+    /// Bluetooth was off: powered for the query, off again after.
+    forced: bool,
+    sent: bool,
+    at: Instant,
+    buf: [u8; 48],
+    got: u8,
+}
+
 #[embassy_executor::task]
 pub async fn task() {
     let mut lcd = Screen::new();
@@ -234,6 +247,7 @@ pub async fn task() {
     let mut gps = crate::tasks::gps::GpsUi::new();
     // Key codes down (mapped ones only): the app is ticked often while any is held.
     let mut down = 0u32;
+    let mut bt_q: Option<BtQuery> = None;
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
     // ... and over Bluetooth (roadmap 3d): one terminal and one link session, held by one port at a time.
     // The link protocol on the same cable (chapter 29), trusted as the cable is (LINK-7); TERM-2 routes the bytes.
@@ -263,9 +277,10 @@ pub async fn task() {
         }
         // A whole line waits until the store has caught up (TERM-13): the bytes after it stay in the ring.
         // The cable first, then Bluetooth (its bytes only while 0 9 2 1 has the module on).
-        BT_ON.store(app.settings().bt, Relaxed);
+        BT_ON.store(app.settings().bt || bt_q.as_ref().is_some_and(|q| q.forced), Relaxed);
         for (port, ring) in [(Port::Cable, &TERM_IN), (Port::Bt, &BT_IN)] {
-            while !bringup::ON.load(Relaxed) && ports.ready() {
+            // While a `bt` query waits, the module's bytes are its answer, not a session's.
+            while !bringup::ON.load(Relaxed) && ports.ready() && !(port == Port::Bt && bt_q.is_some()) {
                 let Some(b) = ring.get() else { break };
                 match ports.route(&app, port, b, now_ms()) {
                     ferrite_app::ports::To::Kiss => aprs.kiss_in(b), // KISS has this port (chapter 26)
@@ -320,9 +335,35 @@ pub async fn task() {
                 baud_100: (CABLE_BAUD.load(Relaxed) / 100) as u16,
                 write_pct: ports.link.progress(),
             };
+            // TERM-27: the `bt` query: send once the module has power (20 ms after PB9, then the UART), collect for
+            // 500 ms, answer.
+            if let Some(q) = bt_q.as_mut() {
+                if !q.sent && (!q.forced || q.at.elapsed() >= Duration::from_millis(150)) {
+                    BT_IN.clear();
+                    for &c in q.text[..q.n as usize].iter().chain(b"\r\n") {
+                        BT_OUT.put(c);
+                    }
+                    (q.sent, q.at) = (true, Instant::now());
+                } else if q.sent {
+                    while let Some(c) = BT_IN.get() {
+                        if (q.got as usize) < q.buf.len() {
+                            q.buf[q.got as usize] = c;
+                            q.got += 1;
+                        }
+                    }
+                    if q.at.elapsed() >= Duration::from_millis(500) {
+                        ports.term.debug_answer(ferrite_core::msg::DebugAns::Bt { data: q.buf, n: q.got });
+                        bt_q = None;
+                    }
+                }
+            }
             if let Some(r) = ports.term.debug_req() {
                 match r {
                     ferrite_core::msg::DebugReq::Mem { .. } => ports.term.debug_answer(crate::debug::mem(r)),
+                    ferrite_core::msg::DebugReq::Bt { text, n } => {
+                        let forced = !app.settings().bt;
+                        bt_q = Some(BtQuery { text, n, forced, sent: false, at: Instant::now(), buf: [0; 48], got: 0 });
+                    }
                     _ if DEBUG_REQ.try_send(r).is_err() => ports.term.debug_answer(ferrite_core::msg::DebugAns::Refused("the Radio task is busy")),
                     _ => {}
                 }
@@ -402,6 +443,9 @@ pub async fn task() {
         }
         if aprs.busy() {
             period = period.min(20); // keying or playing an APRS frame: its unkey on time
+        }
+        if bt_q.is_some() {
+            period = period.min(10); // a `bt` query: send and collect on time (a timer, so the link task runs too)
         }
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {

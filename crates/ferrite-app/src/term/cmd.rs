@@ -1092,6 +1092,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
         _ if same(c, b"bk") => bk(&mut t),
         _ if same(c, b"si") => si(&mut t),
+        _ if same(c, b"bt") => bt(&mut t),
         _ if same(c, b"load") => Ok(Done::Load),
         _ if same(c, b"clear") => {
             if !same(t.word("clear channels N: deletes every channel")?, b"channels") {
@@ -1165,6 +1166,21 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
         }
         _ => Err(msg!("{}", USAGE)),
     }
+}
+
+/// TERM-27: `bt AT+VERS?`, one read-only query to the Bluetooth module.
+fn bt(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "bt AT, bt AT+HELP or bt AT+WORD? (queries only)";
+    let Some(Tok::Word(w)) = t.next()? else { return Err(msg!("{}", USAGE)) };
+    if t.next()?.is_some() || w.len() > 16 {
+        return Err(msg!("{}", USAGE));
+    }
+    if let Some(why) = ferrite_core::msg::bt_query_refused(w) {
+        return Err(msg!("refused: {}", why));
+    }
+    let mut text = [0u8; 16];
+    text[..w.len()].copy_from_slice(w);
+    Ok(Done::Debug(Job::new(Kind::Bt { text, n: w.len() as u8 })))
 }
 
 fn si(t: &mut Toks) -> Result<Done, Msg> {
@@ -1333,7 +1349,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 24] = [
+const HELP: [&str; 25] = [
     slow!("Commands: type : then one of these, and Enter. A dump is made of the same lines."),
     "",
     slow!("  set 0 7 1 Dark         a setting, by its number in the radio's menu"),
@@ -1357,5 +1373,6 @@ const HELP: [&str; 24] = [
     slow!("  bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)"),
     slow!("  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)"),
     slow!("  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property"),
+    slow!("  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)"),
     slow!("  The radio's own logic may rewrite a register you set (a tune, Battery Save)."),
 ];

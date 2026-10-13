@@ -34,6 +34,8 @@ pub enum Kind {
     BkDump { chip: u8 },
     /// `si BYTES...`, `si prop P [V]`: a command and how many bytes come back.
     Si { cmd: [u8; 8], n: u8, reply: u8 },
+    /// `bt AT+VERS?`: a read-only query to the Bluetooth module (TERM-27).
+    Bt { text: [u8; 16], n: u8 },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -92,6 +94,7 @@ impl Job {
             Kind::BkWrite { chip, reg, val } => DebugReq::BkWrite { chip, reg, val },
             Kind::BkDump { chip } => DebugReq::BkRead { chip, reg: self.done as u8 },
             Kind::Si { cmd, n, reply } => DebugReq::Si { cmd, n, reply },
+            Kind::Bt { text, n } => DebugReq::Bt { text, n },
         })
     }
 
@@ -183,6 +186,20 @@ impl Job {
                     out.push(b" ");
                     hex(v as u32, 4, out);
                 }
+                Step::Line
+            }
+            (Kind::Bt { text, n: tn }, DebugAns::Bt { data, n }) => {
+                out.push(b"  bt ");
+                out.push(&text[..tn as usize]);
+                if n == 0 {
+                    out.push(b" -> no answer in 500 ms");
+                } else {
+                    out.push(b" -> ");
+                    for &c in &data[..n as usize] {
+                        out.push(&[if (b' '..=b'~').contains(&c) { c } else { b'.' }]);
+                    }
+                }
+                self.st = St::Over;
                 Step::Line
             }
             (Kind::Si { cmd, n: cn, .. }, DebugAns::Si { data, n }) => {

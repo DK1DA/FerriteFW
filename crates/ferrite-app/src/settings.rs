@@ -354,7 +354,7 @@ impl Settings {
         same_codes: [0; SAME_CODES],
         scope_bars: 1,
         scope_step: 11, // 25 kHz
-        scope_dwell: 10,
+        scope_dwell: 100, // 10 ms a point, stock's (V0.27 0x08023808: one 10 ms tick between tune and RSSI)
         scope_trig: 0,
         scope_line: 0,
         scope_wf: false,

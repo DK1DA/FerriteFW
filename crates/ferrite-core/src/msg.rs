@@ -352,6 +352,9 @@ pub enum DebugReq {
     BkWrite { chip: u8, reg: u8, val: u16 },
     /// An SI4732 command: its first `n` bytes, and `reply` bytes back (the status byte first).
     Si { cmd: [u8; 8], n: u8, reply: u8 },
+    /// A read-only query to the Bluetooth module (TERM-27): its first `n` bytes, sent with CR LF on USART1;
+    /// [`bt_query_refused`] has passed it.
+    Bt { text: [u8; 16], n: u8 },
 }
 
 /// The most memory one [`DebugReq::Mem`] reads.
@@ -363,8 +366,49 @@ pub enum DebugAns {
     Mem { addr: u32, data: [u8; DEBUG_MEM], n: u8 },
     Reg { chip: u8, reg: u8, val: u16 },
     Si { data: [u8; 16], n: u8 },
+    /// What the Bluetooth module sent back within 500 ms (TERM-27).
+    Bt { data: [u8; 48], n: u8 },
     /// Not done, and why.
     Refused(&'static str),
+}
+
+/// TERM-27: a Bluetooth module query is sent only when it can't change the module (the user's rule, decision 79:
+/// a wrong `AT+BAUD=` leaves the radio's Bluetooth silent): `AT`, `AT+HELP`, or `AT+WORD?` (letters and digits).
+/// Anything with `=`, anything else: refused.
+pub fn bt_query_refused(t: &[u8]) -> Option<&'static str> {
+    if t.contains(&b'=') {
+        return Some("'=' sets something on the module: only queries are sent");
+    }
+    let up = |c: &u8| c.to_ascii_uppercase();
+    let is = |s: &[u8]| t.len() == s.len() && t.iter().map(up).eq(s.iter().copied());
+    if is(b"AT") || is(b"AT+HELP") {
+        return None;
+    }
+    let ok = t.len() > 4
+        && t[..3].iter().map(up).eq(b"AT+".iter().copied())
+        && t[t.len() - 1] == b'?'
+        && t[3..t.len() - 1].iter().all(|c| c.is_ascii_alphanumeric());
+    if ok {
+        None
+    } else {
+        Some("only AT, AT+HELP or AT+WORD? queries are sent to the module")
+    }
+}
+
+#[cfg(test)]
+mod bt_query_tests {
+    use super::bt_query_refused as r;
+
+    /// TERM-27: queries pass; anything that could set the module doesn't.
+    #[test]
+    fn only_queries_reach_the_module() {
+        for ok in [&b"AT"[..], b"at", b"AT+HELP", b"AT+BAUD?", b"AT+VERS?", b"at+name?", b"AT+ADDR?"] {
+            assert_eq!(r(ok), None, "{}", core::str::from_utf8(ok).unwrap());
+        }
+        for bad in [&b"AT+BAUD=9600"[..], b"AT+NAME=x", b"AT+RST", b"AT+BAUD", b"AT+?", b"AT+NA ME?", b"PROGRAMBT9000U", b"", b"AT+NAME?="] {
+            assert!(r(bad).is_some(), "{}", core::str::from_utf8(bad).unwrap());
+        }
+    }
 }
 
 /// BK4829 REG_30 bits that turn on the transmitter: Tx DSP Enable (1) and PA Gain Enable (3), from the

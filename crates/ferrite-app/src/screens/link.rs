@@ -3,6 +3,7 @@
 //! progress (D21; LINK-9). The Link task opens the last two with [`App::open`] (`Dest::WriteApproval`,
 //! `Dest::WriteProgress`) and reads the answer from [`App::take_link_answer`].
 
+use crate::link::TOKENS;
 use super::nav::Dest;
 use super::shared::*;
 use super::table::{slow_table, Ctx, Table, Val};
@@ -83,6 +84,11 @@ slow_table! {
     STATUS: Table<()> = Table { rows: &ROWS, go: &[], y: 22, h: 20, style: w::KV_STATUS };
 }
 
+/// 0 9 2 2's rows: one per approval token, then Add a device.
+const APPROVED_ROWS: usize = TOKENS + 1;
+/// What the tokens are called: the newest is Device 1 (no names: the module never says who connected, LINK-29).
+const DEVICE_NAMES: [&str; TOKENS] = ["Device 1", "Device 2", "Device 3", "Device 4"];
+
 impl Link {
     pub fn new(page: LinkPage) -> Self {
         Link { page, row: 0 }
@@ -131,10 +137,22 @@ impl View for Link {
                 app.show_toast(b"Write cancelled", b"", false);
             }
             (LinkPage::Progress, ..) => {}
+            // LINK-7: the approved devices (their tokens), then Add a device.
             (LinkPage::Approved, Key::Up | Key::Down, Short | Repeat) => {
-                app.screen = Screen::Link(Link { row: self.row ^ 1, ..self });
+                let n = APPROVED_ROWS as u8;
+                let row = if e.key == Key::Down { (self.row + 1) % n } else { (self.row + n - 1) % n };
+                app.screen = Screen::Link(Link { row, ..self });
             }
-            (LinkPage::Approved, Key::Menu, Short) if self.row == 0 => app.show_toast(b"Forget", b"comes with the link task", false),
+            (LinkPage::Approved, Key::Menu, Short) if (self.row as usize) < TOKENS => {
+                let i = self.row as usize;
+                if app.set.link_tokens[i].iter().all(|&b| b == 0) {
+                    app.show_toast(b"No device here", b"", false);
+                } else {
+                    // Forgetting deletes the token: that app asks again at its next write.
+                    app.set.link_tokens[i] = [0; 8];
+                    app.show_toast(DEVICE_NAMES[i].as_bytes(), b"forgotten", false);
+                }
+            }
             (LinkPage::Approved, Key::Menu, Short) => app.open(Dest::AddDevice),
             (_, Key::Exit, Short) => app.back(),
             _ => {}
@@ -155,20 +173,18 @@ impl View for Link {
                 app.help_box(lcd, 160, 48, b"The web app connects by cable or Bluetooth.", b"");
             }
             LinkPage::Approved => {
-                let bt = dev.bt;
-                // The connected device (approval tokens are kept by the link task, still to come), then adding one.
-                let rows = [
-                    Row { num: Some(1), name: b"Connected device", value: if bt { b"approved" } else { b"none" }, dot: false, selected: self.row == 0, grey: !bt },
-                    Row { num: Some(2), name: b"Add a device", value: b">", dot: false, selected: self.row == 1, grey: false },
-                ];
-                for (i, r) in rows.iter().enumerate() {
-                    app.list_row(lcd, i, 23 + 22 * i as i32, 22, r);
+                // The four approval tokens (LINK-7: the oldest gives way), then Add a device. The module tells the
+                // radio nothing about the phone (LINK-29), so a device is its token: "Device 1" is the newest.
+                for i in 0..APPROVED_ROWS {
+                    let set = i < TOKENS && app.set.link_tokens[i].iter().any(|&b| b != 0);
+                    let r = if i < TOKENS {
+                        Row { num: Some(i as u8 + 1), name: DEVICE_NAMES[i].as_bytes(), value: if set { b"approved" } else { b"-" }, dot: false, selected: self.row as usize == i, grey: !set }
+                    } else {
+                        Row { num: Some(i as u8 + 1), name: b"Add a device", value: b">", dot: false, selected: self.row as usize == i, grey: false }
+                    };
+                    app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
                 }
-                let help: &[u8] = if bt {
-                    b"Forget a device to make it ask again."
-                } else {
-                    b"Devices are approved at their first write."
-                };
+                let help: &[u8] = b"OK on a device forgets it: it asks again at its next write.";
                 app.help_box(lcd, 226, 46, help, b"MENU 0 9 2 2");
             }
             LinkPage::Approve => app.message(

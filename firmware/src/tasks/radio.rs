@@ -184,6 +184,9 @@ struct Radio {
     hf: Option<HfOn>,
     /// The frequency counter (TSRCH-10), while on.
     counter: Option<Counter>,
+    /// The band scope (SCOPE-4), while it runs; its points per sweep and dwell (0.1 ms) from the last ScopeCfg.
+    scope: Option<ScopeRun>,
+    scope_cfg: (u8, u8),
     /// SAME weather alerts (WX-4, DEC-19): on from the UI, and the BK4829 receiver's state.
     same_on: bool,
     same: SameRx,
@@ -201,6 +204,25 @@ struct XbRun {
     sides: [u8; 2],
     hop: u8,
     hop_t: u32,
+}
+
+/// The band scope sweeping (SCOPE-4, SCOPE-5): one chip, its audio off, one point per wait. As stock (V0.27
+/// 0x08023808 / 0x080235E8): the frequency (REG_38/39), REG_30 0x0200 then 0xBFF1 (the VCO recalibration), the
+/// dwell, then REG_67. Stock dwells about 10 ms a point (its 10 ms tick); the dwell is 0 3 2 3's.
+struct ScopeRun {
+    chip: u8,
+    centre: Freq10,
+    step: Freq10,
+    n: u8,
+    dwell_us: u32,
+    /// The point measured at the next wait (tuned already), and the raw level of each point last sweep.
+    i: u8,
+    last: [u8; ferrite_core::msg::SCOPE_BARS],
+    sweeps: u8,
+    started: u32,
+    /// Listening on a frequency (SCOPE-11) instead of sweeping; its demod (0 FM, 1 NFM, 2 AM).
+    listen: Freq10,
+    mode: u8,
 }
 
 /// The frequency counter: which chip measures now, when its scan started, and its last reading (stock keeps a
@@ -390,6 +412,10 @@ impl Radio {
         };
         let slot = match s {
             s if s < SLOTS as u8 => self.slots[s as usize],
+            SCOPE_SLOT => {
+                let m = self.scope.as_ref().map_or(0, |sc| sc.mode);
+                SlotRx { freq: f, am: m == 2, narrow: m == 1, ..SlotRx::DEFAULT }
+            }
             // HF mode on chip 1 (18-64 MHz): AM is the mode's own (Param::Mode 2); FM otherwise.
             _ => SlotRx { freq: f, am: self.hf.is_some_and(|h| h.mode == 2), ..SlotRx::DEFAULT },
         };
@@ -491,7 +517,7 @@ impl Radio {
                 false
             }
         };
-        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some() || xb
+        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some() || self.scope.is_some() || xb
     }
 
     /// The engines' tick: each listening chip's squelch, the watch turn, the scans, the chips and the path, and
@@ -584,6 +610,9 @@ impl Radio {
             }
         }
         let now = now_ms() as u32;
+        if self.scope.is_some() {
+            return self.scope_tick(now).await;
+        }
         if self.counter.is_some() {
             return self.counter_tick(now).await;
         }
@@ -972,6 +1001,139 @@ impl Radio {
     }
 }
 
+/// The scope's own index in [`Radio::tuned`] (after the counter's).
+const SCOPE_SLOT: u8 = 5;
+
+impl Radio {
+    /// SCOPE-4, SCOPE-13: the scope on (the centre's chip sweeps, the other sleeps, the relay stays) or off (the
+    /// engines retune on the next tick).
+    async fn scope(&mut self, centre: Freq10, step: u16, on: bool) {
+        self.tuned = [None; 2];
+        speaker(false);
+        if !on {
+            for n in 0..2u8 {
+                if self.has(n) {
+                    self.chip(n).af_out(AfOut::Mute);
+                }
+            }
+            self.scope = None;
+            self.live.mode = ModeLive::Off;
+            log(b"scope ", 0);
+            return;
+        }
+        let chip = Sel::rx(centre).chip();
+        let (n, tenths) = self.scope_cfg;
+        let n = n.clamp(1, ferrite_core::msg::SCOPE_BARS as u8);
+        let keep = self.scope.as_ref().filter(|sc| sc.centre == centre && sc.step == step as Freq10 && sc.n == n);
+        let last = keep.map_or([0; ferrite_core::msg::SCOPE_BARS], |sc| sc.last);
+        self.scope = Some(ScopeRun {
+            chip,
+            centre,
+            step: step as Freq10,
+            n,
+            dwell_us: tenths.max(1) as u32 * 100,
+            i: 0,
+            last,
+            sweeps: 0,
+            started: now_ms() as u32,
+            listen: 0,
+            mode: 0,
+        });
+        self.live.mode = ModeLive::Scope { centre, bars: last, n, sweeps: 0, listen: 0, open: false };
+        if self.has(1 - chip) {
+            self.tune_chip(1 - chip, None);
+        }
+        // The chip's full receive setup once on the centre (filter, demod, squelch), muted; the path asked for with
+        // Cause::Auto, so the relay never moves (SCOPE-5).
+        self.tune_chip(chip, Some((SCOPE_SLOT, centre)));
+        self.chip(chip).af_out(AfOut::Mute);
+        self.select_rx(centre, Cause::Auto).await;
+        self.scope_point();
+        log(b"scope points ", n as u32);
+    }
+
+    /// SCOPE-11: listen on `freq` with the scope's mode (the path set first); 0 goes back to sweeping.
+    async fn scope_listen(&mut self, freq: Freq10, mode: u8) {
+        let Some(sc) = self.scope.as_mut() else { return };
+        (sc.listen, sc.mode) = (freq, mode);
+        let chip = sc.chip;
+        let back = sc.centre;
+        self.tuned[chip as usize] = None;
+        self.tune_chip(chip, Some((SCOPE_SLOT, if freq != 0 { freq } else { back })));
+        self.chip(chip).af_out(AfOut::Mute);
+        if freq != 0 {
+            self.select_rx(freq, Cause::Auto).await;
+        } else {
+            speaker(false);
+            self.scope_point();
+        }
+    }
+
+    /// The frequency of point `i`, or None when it needs the other chip or relay state (SCOPE-5) or no chip
+    /// receives it.
+    fn scope_freq(sc: &ScopeRun, i: u8) -> Option<Freq10> {
+        let low = sc.centre as i64 - sc.step as i64 * sc.n as i64 / 2;
+        let f = low + sc.step as i64 * i as i64;
+        let f = Freq10::try_from(f).ok()?;
+        let (here, centre) = (Sel::rx(f), Sel::rx(sc.centre));
+        (here.chip() == centre.chip() && here.relay() == centre.relay() && freq::receivable(f)).then_some(f)
+    }
+
+    /// Tune the scope's chip to its current point: stock's per-point sequence, frequency then the REG_30 retune.
+    fn scope_point(&mut self) {
+        let Some(sc) = self.scope.as_ref() else { return };
+        if let Some(f) = Self::scope_freq(sc, sc.i) {
+            let chip = sc.chip;
+            let mut bk = self.chip(chip);
+            bk.set_freq(f * 10);
+            bk.rx_on();
+        }
+    }
+
+    /// The scope's tick: while listening, the squelch decides the audio; while sweeping, the point tuned at the
+    /// last wait is read (after the dwell) and the next is tuned. Each sweep's time goes to the bring-up log.
+    async fn scope_tick(&mut self, now: u32) {
+        let Some(mut sc) = self.scope.take() else { return };
+        let chip = sc.chip;
+        if sc.listen != 0 {
+            let st = self.chip(chip).status();
+            let open = st.squelch_open;
+            self.chip(chip).af_out(if open { AfOut::Normal } else { AfOut::Mute });
+            speaker(open && !self.muted);
+            if let ModeLive::Scope { listen, open: o, .. } = &mut self.live.mode {
+                (*listen, *o) = (sc.listen, open);
+            }
+            self.scope = Some(sc);
+            return;
+        }
+        let i = sc.i as usize;
+        let level = if Self::scope_freq(&sc, sc.i).is_some() {
+            let dbm = self.chip(chip).rssi_dbm();
+            (dbm + 160).clamp(1, 255) as u8
+        } else {
+            0
+        };
+        let bar = if level != 0 && sc.last[i] != 0 { ((level as u16 + sc.last[i] as u16) / 2) as u8 } else { level };
+        sc.last[i] = level;
+        if let ModeLive::Scope { bars, listen, open, .. } = &mut self.live.mode {
+            bars[i] = bar;
+            (*listen, *open) = (0, false);
+        }
+        sc.i += 1;
+        if sc.i >= sc.n {
+            sc.i = 0;
+            sc.sweeps = sc.sweeps.wrapping_add(1);
+            if let ModeLive::Scope { sweeps, .. } = &mut self.live.mode {
+                *sweeps = sc.sweeps;
+            }
+            log(b"scope sweep ms ", now.wrapping_sub(sc.started));
+            sc.started = now;
+        }
+        self.scope = Some(sc);
+        self.scope_point();
+    }
+}
+
 /// The counter's own index in [`Radio::tuned`] (after the three slots and HF mode's).
 const COUNTER_SLOT: u8 = 4;
 
@@ -1167,6 +1329,8 @@ pub async fn task() {
         beep_level: 7,
         hf: None,
         counter: None,
+        scope: None,
+        scope_cfg: (60, 100),
         same_on: false,
         same: SameRx { chip: None, at: None, armed: false, asm: Assembler::new(), repeats: Repeats::new() },
         #[cfg(feature = "tx")]
@@ -1242,7 +1406,12 @@ pub async fn task() {
         }
         // Never wait on a time already past: that wait fires at once, and this task runs above the UI.
         at = at.max(now_ms() + 1);
-        match select3(RADIO.receive(), Timer::at(Instant::from_millis(at)), DEBUG_REQ.receive()).await {
+        // The band scope waits its dwell between points (0.1 ms steps), listening or not at the tick.
+        let wake = match &r.scope {
+            Some(sc) if sc.listen == 0 => Instant::now() + embassy_time::Duration::from_micros(sc.dwell_us as u64),
+            _ => Instant::from_millis(at),
+        };
+        match select3(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive()).await {
             Either3::First(c) => r.cmd(c).await,
             Either3::Second(()) => r.tick().await,
             Either3::Third(d) => {
@@ -1414,10 +1583,11 @@ impl Radio {
             | RadioCmd::DtmfSend { .. } => {}
             // Not on the radio yet, each waiting on something named in the manual's Status lines: band scope,
             // tone search, crossband (chapters 21, 22, 19): their own exclusive modes, after 2d.
-            RadioCmd::Sweep { .. }
-            | RadioCmd::ScopeCfg { .. }
-            | RadioCmd::ScopeListen { .. }
-            | RadioCmd::ToneSearch { .. } => {}
+            RadioCmd::ScopeCfg { bars, dwell } => self.scope_cfg = (bars, dwell),
+            RadioCmd::Sweep { centre, step, on } => self.scope(centre, step, on).await,
+            RadioCmd::ScopeListen { freq, mode } => self.scope_listen(freq, mode).await,
+            // Tone search: its own exclusive mode, after 2d (chapter 22).
+            RadioCmd::ToneSearch { .. } => {}
             #[cfg(feature = "tx")]
             RadioCmd::Crossband(c) => self.crossband(c).await,
             // XB-2: no transmit in this build; the UI refuses first, and the radio says so too.

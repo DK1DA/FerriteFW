@@ -1052,6 +1052,30 @@ fn regs(r: DebugReq) -> DebugAns {
             data[0] = 0x80;
             DebugAns::Si { data, n: reply }
         }
+        // A module that answers its version.
+        DebugReq::Bt { .. } => {
+            let mut data = [0u8; 48];
+            data[..8].copy_from_slice(b"V1.0\r\nOK");
+            DebugAns::Bt { data, n: 8 }
+        }
+    }
+}
+
+/// TERM-27: `bt` sends only queries; the answer prints as text (control bytes as dots); settings are refused
+/// before anything is sent.
+#[test]
+fn debug_bt_queries_only() {
+    let mut r = Rig::main();
+    r.cmd("bt AT+VERS?");
+    let mut text = [0u8; 16];
+    text[..8].copy_from_slice(b"AT+VERS?");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Bt { text, n: 8 }]);
+    assert!(r.raw().contains("bt AT+VERS? -> V1.0..OK"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["bt AT+BAUD=9600", "bt AT+RST", "bt AT+NAME=Ferrite"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("refused"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
 }
 

@@ -449,9 +449,9 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             s.scope_step != 11
         }
         [3, 2, 3] => {
-            let d = s.scope_dwell.clamp(1, 40);
+            let d = s.scope_dwell.clamp(1, 100);
             let _ = uwrite!(b, "{}.{} ms", d / 10, d % 10);
-            s.scope_dwell != 10
+            s.scope_dwell != 100
         }
         [3, 2, 4] => {
             pick(b, &SCOPE_TRIGGERS, s.scope_trig);
@@ -854,7 +854,12 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [3, 1, 4] => s.fm_monitor = !s.fm_monitor,
         [3, 2, 1] => s.scope_bars = cycle(s.scope_bars, d, SCOPE_BAR_COUNTS.len()),
         [3, 2, 2] => s.scope_step = cycle(s.scope_step, d, crate::slot::STEPS.len()),
-        [3, 2, 3] => s.scope_dwell = (s.scope_dwell.clamp(1, 40) as i32 + d).clamp(1, 40) as u8,
+        // 0.1 ms steps up to 1 ms, then 1 ms steps to 10 ms (stock's dwell, the default).
+        [3, 2, 3] => {
+            let v = s.scope_dwell.clamp(1, 100) as i32;
+            let step = if v + d > 10 && v >= 10 { 10 } else { 1 };
+            s.scope_dwell = (v + d * step).clamp(1, 100) as u8;
+        }
         [3, 2, 4] => s.scope_trig = cycle(s.scope_trig, d, SCOPE_TRIGGERS.len()),
         [3, 2, 5] => s.scope_wf = !s.scope_wf,
         [5, 3] => {
