@@ -35,7 +35,6 @@ pub enum Page {
     AdvSquelch,
     SsbPatch,
     SsbConfirm,
-    AddDevice,
     PowerOff,
     EmptyBattery,
     Mailbox,
@@ -282,12 +281,6 @@ fn def(p: Page) -> PageDef {
             note: "",
             hints: &[("OK", "Use it"), ("BACK", "Not now")],
         },
-        Page::AddDevice => PageDef {
-            title: "Add device",
-            rows: &NONE,
-            note: "",
-            hints: &BACK_ONLY,
-        },
         Page::PowerOff | Page::EmptyBattery => PageDef { title: "Power", rows: &NONE, note: "", hints: &[] },
         Page::Mailbox => PageDef {
             title: "Mailbox",
@@ -305,11 +298,6 @@ fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'static str, &'st
             "Unknown SSB patch",
             "The patch in flash doesn't match a known stock version. Use it for USB, LSB and CW? You can change this in MENU 0 9 6.",
             AMBER,
-        ),
-        Page::AddDevice => (
-            "Add a device",
-            "Turn Bluetooth on (MENU 0 9 2 1), then connect from the web app; the phone and the module handle Bluetooth pairing. The device's first write asks here; after that it's approved until you forget it (MENU 0 9 2 2).",
-            TEXT,
         ),
         Page::PowerOff => ("Saving...", "Finishing writes, then off.", TEXT),
         Page::EmptyBattery => {

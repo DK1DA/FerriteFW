@@ -152,11 +152,8 @@ pub fn run(scale: u32) {
         (Dest::AdvSquelch, "adv-squelch"),
         (Dest::SsbPatch, "ssb-patch"),
         (Dest::SsbConfirm, "ssb-confirm"),
-        (Dest::AddDevice, "pair-bt"),
         (Dest::Mailbox, "mailbox"),
         (Dest::LinkStatus, "link-status"),
-        (Dest::Approved, "paired"),
-        (Dest::WriteApproval, "write-approval"),
         (Dest::PowerOff, "power-off"),
     ] {
         s.home();

@@ -6,8 +6,8 @@
 //! payload, little-endian. The PC sends requests (types 0x01-0x7F); the radio answers each one with type | 0x80,
 //! the same seq, and a payload that starts with a [`Status`] byte: every frame is acknowledged (LINK-1).
 
-/// The protocol version in `HELLO` and its answer.
-pub const PROTOCOL: u8 = 1;
+/// The protocol version in `HELLO` and its answer. 2: no approval tokens; `AUTH` with the radio's PIN (decision 104).
+pub const PROTOCOL: u8 = 2;
 /// The most payload in a frame (BLE chunks stay small: LINK-16).
 pub const MAX_PAYLOAD: usize = 240;
 /// The most body bytes: type, seq, payload, CRC.
@@ -19,12 +19,15 @@ pub const ANSWER: u8 = 0x80;
 
 /// Requests, PC to radio. The numbers are part of the published protocol: never reuse one.
 pub mod msg {
-    /// Start a session: protocol version, an approval token (8 bytes, zero for none), the client's name.
+    /// Start a session: protocol version, then the client's name. The answer's third byte says whether the session
+    /// may go on (1) or must send `AUTH` first (0: the radio's PIN is set and this is Bluetooth, LINK-30).
     pub const HELLO: u8 = 0x01;
     /// Firmware version and what the radio holds.
     pub const INFO: u8 = 0x02;
-    /// After a write was approved on the radio's screen: the token to present next time (LINK-7).
-    pub const TOKEN: u8 = 0x03;
+    // 0x03 was TOKEN (approval tokens, dropped by decision 104): not reused.
+    /// The radio's PIN as ASCII digits (4-6), on Bluetooth while one is set (LINK-30, LINK-31): Ok, `Refused`
+    /// (wrong; it counts toward the radio's lockout, PIN-3), or `Busy` (locked out: wait).
+    pub const AUTH: u8 = 0x04;
     /// Read part of a record: what, index, offset, length.
     pub const READ: u8 = 0x10;
     /// Write part of a record: what, index, offset, total length, bytes; applied when the last part arrives.
@@ -37,8 +40,8 @@ pub mod msg {
     pub const END: u8 = 0x14;
     /// Propose a faster cable rate (LINK-11).
     pub const BAUD: u8 = 0x20;
-    /// Restart into the bootloader, for a firmware update (LINK-24): the cable, or an approved Bluetooth
-    /// device; refused while transmitting. The answer goes out first, then the radio saves, goes quiet and
+    /// Restart into the bootloader, for a firmware update (LINK-24): the cable, or a Bluetooth session that may go
+    /// on (LINK-30); refused while transmitting. The answer goes out first, then the radio saves, goes quiet and
     /// resets.
     pub const REBOOT: u8 = 0x21;
 }
@@ -67,9 +70,9 @@ pub enum Status {
     BadArg = 3,
     /// Never allowed over the link (calibration, the update area, TX limits: LINK-3, LINK-5).
     Refused = 4,
-    /// This device may not write: the owner refused it on the radio (LINK-7).
-    NotApproved = 5,
-    /// The radio is asking its owner now (LINK-7): send the same request again in a second.
+    /// The radio's PIN is set and this Bluetooth session hasn't sent the right one: `AUTH` first (LINK-30).
+    NotAuthorised = 5,
+    /// Not sent since decision 104 (it was "the radio is asking its owner"); kept so the number isn't reused.
     Pending = 6,
     /// The radio's store is busy: send the same request again shortly.
     Busy = 7,

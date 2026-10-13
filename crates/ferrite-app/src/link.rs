@@ -5,13 +5,14 @@
 //!
 //! The caller feeds the port's bytes while [`Session::ready`], and polls: a whole frame is handled when the
 //! answer has room on the port and the store has taken the last write, so nothing is dropped and the PC waits
-//! for each answer (every frame is acknowledged). Writes from a port that isn't trusted (Bluetooth: LINK-7) ask
-//! the owner on the radio's screen once; the cable is always trusted.
+//! for each answer (every frame is acknowledged). The cable is always trusted (LINK-7); on Bluetooth, while the
+//! radio's PIN lock is on, nothing but `HELLO` and `AUTH` is answered until `AUTH` gives the PIN (LINK-30).
 
 use crate::chan::{Channel, ChannelStore, MAX_CHANNELS, NO_ZONE};
 use crate::data::{Op, RangePreset, ZoneCfg};
 use crate::persist::{Persist, Sink as PSink, Source};
 use crate::screens::link::LinkAnswer;
+use crate::screens::pin::RemotePin;
 use crate::settings::Settings;
 use crate::slot::{SlotCfg, MODES, SLOT_MODES, STEPS};
 use crate::term::Sink;
@@ -28,8 +29,6 @@ pub const RECORD_MAX: usize = 512;
 pub const ACTIVE_MS: u32 = 10_000;
 /// A write session with no frame for this long ends by itself (its progress screen closes).
 pub const SESSION_MS: u32 = 5_000;
-/// Approval tokens kept with the settings (LINK-7): the oldest gives way.
-pub const TOKENS: usize = 4;
 
 /// One port's link session.
 pub struct Session {
@@ -40,16 +39,9 @@ pub struct Session {
     overflow: bool,
     /// A whole frame waits to be handled.
     have: bool,
-    /// The cable is trusted; a Bluetooth device writes once approved (LINK-7).
+    /// The cable is trusted (LINK-7); a Bluetooth session gave the radio's PIN (LINK-30).
     trusted: bool,
-    approved: bool,
-    /// The owner refused this device; asking again needs a new `HELLO`.
-    refused: bool,
-    /// The approval prompt is up, and whether the terminal asked it (TERM-25: no token, only this connection).
-    asking: bool,
-    for_term: bool,
-    /// The token made when this device was approved, for `TOKEN`.
-    token: Option<[u8; 8]>,
+    pin_ok: bool,
     /// When the last valid frame arrived, and whether one has.
     last: u32,
     seen: bool,
@@ -68,7 +60,6 @@ pub struct Session {
     /// `REBOOT` was accepted: the caller restarts once the answer has gone (LINK-24).
     reboot: bool,
     hellos: u16,
-    seed: u32,
 }
 
 impl Session {
@@ -79,11 +70,7 @@ impl Session {
             overflow: false,
             have: false,
             trusted,
-            approved: false,
-            refused: false,
-            asking: false,
-            for_term: false,
-            token: None,
+            pin_ok: false,
             last: 0,
             seen: false,
             asm: [0; RECORD_MAX],
@@ -97,7 +84,6 @@ impl Session {
             baud: None,
             reboot: false,
             hellos: 0,
-            seed: 0x9E37_79B9,
         }
     }
 
@@ -106,41 +92,18 @@ impl Session {
         self.max_baud = b;
     }
 
-    /// The session moves to another port (the cable or Bluetooth: [`crate::ports`]): a frame half received,
-    /// an approval and a refusal stay with the old one. `max_baud` is the new port's (Bluetooth: 115200 only,
-    /// LINK-25).
+    /// The session moves to another port (the cable or Bluetooth: [`crate::ports`]): a frame half received and a
+    /// PIN given stay with the old one. `max_baud` is the new port's (Bluetooth: 115200 only, LINK-25).
     pub fn set_port(&mut self, trusted: bool, max_baud: u32) {
         (self.rn, self.overflow, self.have) = (0, false, false);
-        (self.trusted, self.approved, self.refused, self.asking, self.for_term) = (trusted, false, false, false, false);
-        (self.token, self.seen, self.baud, self.max_baud) = (None, false, None, max_baud);
+        (self.trusted, self.pin_ok) = (trusted, false);
+        (self.seen, self.baud, self.max_baud) = (false, None, max_baud);
     }
 
-    /// This port may write now: the cable, or an approved Bluetooth device (LINK-7).
-    pub fn may_write_now(&self) -> bool {
-        self.trusted || self.approved
-    }
-
-    /// The terminal wants to write (TERM-25): the same prompt as a link write, asked once; the approval lasts
-    /// for this connection and makes no token (a terminal has no `HELLO` to present one). True when it may.
-    pub fn ask_for_terminal(&mut self, app: &mut App) -> bool {
-        if self.may_write_now() {
-            return true;
-        }
-        if !self.asking && !self.refused {
-            (self.asking, self.for_term) = (true, true);
-            app.link_write_request();
-        }
-        false
-    }
-
-    /// The approval prompt this session asked for is up (a caller with its own use of the prompt waits).
-    pub fn asking(&self) -> bool {
-        self.asking
-    }
-
-    /// The owner refused this connection's writes (until it ends).
-    pub fn refused(&self) -> bool {
-        self.refused
+    /// This session may do anything a session may (LINK-7, LINK-30): the cable, Bluetooth with no PIN lock on, or
+    /// Bluetooth after `AUTH` gave the PIN.
+    pub fn authorised(&self, app: &App) -> bool {
+        self.trusted || self.pin_ok || !app.pin_required()
     }
 
     /// Takes another byte now: false while a whole frame waits for its answer.
@@ -197,18 +160,9 @@ impl Session {
 
     /// Handles the owner's answers, ends a quiet session, and answers a waiting frame when there is room.
     pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, now: u32, out: &mut impl Sink) {
-        // The owner's answer is ours only when this session asked or runs a write session.
-        let answer = if self.asking || self.session { app.take_link_answer() } else { None };
-        match answer {
-            Some(LinkAnswer::Allowed) if self.asking => {
-                (self.asking, self.approved) = (false, true);
-                if !core::mem::take(&mut self.for_term) {
-                    self.token = Some(self.new_token(app, now));
-                }
-            }
-            Some(LinkAnswer::Refused) if self.asking => (self.asking, self.refused, self.for_term) = (false, true, false),
-            Some(LinkAnswer::Cancelled) => self.cancelled = true,
-            _ => {}
+        // BACK on the progress screen (LINK-9) is ours only while a write session runs.
+        if self.session && app.take_link_answer() == Some(LinkAnswer::Cancelled) {
+            self.cancelled = true;
         }
         if self.session && now.wrapping_sub(self.last) >= SESSION_MS {
             self.end(app);
@@ -244,14 +198,10 @@ impl Session {
         let mut o = Out { a, n: 1 };
         let s = match ty {
             msg::HELLO => self.hello(app, p, &mut o),
+            msg::AUTH => self.auth(app, p),
+            // LINK-30: on Bluetooth with the PIN lock on, nothing else until AUTH.
+            _ if !self.authorised(app) => Status::NotAuthorised,
             msg::INFO => info(app, st, &mut o),
-            msg::TOKEN => match self.token.filter(|_| self.approved && !self.trusted) {
-                Some(t) => {
-                    o.put(&t);
-                    Status::Ok
-                }
-                None => Status::Refused,
-            },
             msg::READ => read(app, st, p, &mut o),
             msg::WRITE | msg::DELETE | msg::BEGIN => match self.may_write(app) {
                 Status::Ok => match ty {
@@ -277,8 +227,6 @@ impl Session {
                 }
                 None => Status::BadArg,
             },
-            // LINK-24: no prompt (it isn't a write); an unapproved Bluetooth device is refused.
-            msg::REBOOT if !(self.trusted || self.approved) => Status::NotApproved,
             msg::REBOOT if app.radio.keyed.is_some() => Status::Busy,
             msg::REBOOT => {
                 self.reboot = true;
@@ -294,35 +242,35 @@ impl Session {
         o.n
     }
 
-    fn hello(&mut self, app: &App, p: &[u8], o: &mut Out) -> Status {
+    /// `HELLO`: the protocol, the largest payload, and whether this session may go on (0: `AUTH` first).
+    fn hello(&mut self, app: &App, _p: &[u8], o: &mut Out) -> Status {
         self.hellos = self.hellos.wrapping_add(1);
-        self.refused = false; // a new session may ask again (LINK-7)
-        if let Some(t) = p.get(1..9) {
-            if t.iter().any(|&b| b != 0) && app.set.link_tokens.iter().any(|k| k == t) {
-                self.approved = true;
-            }
-        }
-        o.put(&[PROTOCOL, MAX_PAYLOAD as u8, (self.trusted || self.approved) as u8]);
+        o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
         Status::Ok
     }
 
-    /// Whether this port may write now (LINK-7, LINK-9).
-    fn may_write(&mut self, app: &mut App) -> Status {
+    /// `AUTH`: the radio's PIN over Bluetooth (LINK-31). The cable and a session with no PIN lock need none.
+    fn auth(&mut self, app: &mut App, p: &[u8]) -> Status {
+        if self.authorised(app) {
+            return Status::Ok;
+        }
+        match app.remote_pin(p) {
+            RemotePin::Ok => {
+                self.pin_ok = true;
+                Status::Ok
+            }
+            RemotePin::Wrong => Status::Refused,
+            RemotePin::Wait(_) => Status::Busy,
+        }
+    }
+
+    /// Whether this session's writes go ahead (LINK-9: refused after BACK until `END`).
+    fn may_write(&mut self, _app: &mut App) -> Status {
         if self.cancelled {
             return Status::Cancelled;
         }
-        if self.trusted || self.approved {
-            return Status::Ok;
-        }
-        if self.refused {
-            return Status::NotApproved;
-        }
-        if !self.asking {
-            self.asking = true;
-            app.link_write_request();
-        }
-        Status::Pending
+        Status::Ok
     }
 
     fn begin(&mut self, app: &mut App, p: &[u8]) -> Status {
@@ -388,25 +336,6 @@ impl Session {
             _ => Status::BadArg,
         }
     }
-
-    /// A token for an approved device (LINK-7), kept with the settings, the oldest given up. Its randomness is
-    /// the time of approval stirred with the session's state: good enough to tell devices apart, not a secret
-    /// against someone listening to the link.
-    fn new_token(&mut self, app: &mut App, now: u32) -> [u8; 8] {
-        let mut x = self.seed ^ now.rotate_left(13) ^ (self.hellos as u32) << 16 ^ 0xA5A5_5A5A;
-        let mut t = [0u8; 8];
-        for b in t.iter_mut() {
-            x ^= x << 13;
-            x ^= x >> 17;
-            x ^= x << 5;
-            *b = (x >> 11) as u8;
-        }
-        self.seed = x;
-        let k = &mut app.set.link_tokens;
-        k.copy_within(0..TOKENS - 1, 1);
-        k[0] = t;
-        t
-    }
 }
 
 /// Where a byte from the cable goes (TERM-2).
@@ -418,7 +347,7 @@ pub enum Route {
     Drop,
 }
 
-/// TERM-2: the cable port setting (0 9 2 5: auto, link, terminal, KISS) decides; in auto a link frame (its
+/// TERM-2: the cable port setting (0 9 2 4: auto, link, terminal, KISS) decides; in auto a link frame (its
 /// 0x00 delimiter: the web app sends one before its first frame) takes the port, and keeps it while frames
 /// keep coming ([`ACTIVE_MS`]); anything else is the terminal's, which starts on a typed Enter.
 pub fn route(cable_port: u8, link_active: bool, b: u8) -> Route {
@@ -515,17 +444,16 @@ impl Source for Rd<'_> {
     }
 }
 
-/// The settings record as the link reads it, into `w`: the PIN and the approval tokens read as zeros (LINK-7).
-/// Its whole length.
+/// The settings record as the link reads it, into `w`: the PIN reads as zeros (LINK-7). Its whole length.
 fn settings_record(app: &App, w: &mut Window) -> usize {
-    let m = Settings { pin: 0, pin_misses: 0, pin_wait: 0, link_tokens: [[0; 8]; TOKENS], ..*app.set };
+    let m = Settings { pin: 0, pin_misses: 0, pin_wait: 0, ..*app.set };
     m.save(w);
     w.n
 }
 
 /// Settings the link never changes (LINK-5): the region, Extend TX, the PIN, setup, the cable port (the link
-/// would lose its own port) and the tokens. A written record keeps the radio's. The callsign is written, in
-/// capitals as on the radio (LINK-26, decision 77: the write approval is enough, as nicFW's RMS writes it).
+/// would lose its own port) and the spare bytes. A written record keeps the radio's. The callsign is written, in
+/// capitals as on the radio (LINK-26, decision 77: as nicFW's RMS writes it).
 fn keep_protected(new: &mut Settings, old: &Settings) {
     let call = new.callsign;
     new.set_callsign(call.as_bytes());
@@ -535,7 +463,7 @@ fn keep_protected(new: &mut Settings, old: &Settings) {
     new.setup_done = old.setup_done;
     new.cable_port = old.cable_port;
     new.kiss_port = old.kiss_port; // KISS-7: turning KISS on is the owner's consent, made on the radio
-    new.link_tokens = old.link_tokens;
+    new.spare_tokens = [0; 32];
 }
 
 fn channel_save(c: &Channel, s: &mut dyn PSink) {

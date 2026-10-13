@@ -510,10 +510,10 @@ fn settings_same_numbers_and_validation() {
     r.send(b"\x1b[C");
     assert_eq!(r.app.set.region, region);
     assert!(r.vt.has("Change this one on the radio"));
-    // 0 9 2 5: the cable port itself.
+    // 0 9 2 4: the cable port itself.
     r.send(b"\x1b[A\x1b[A\r");
     assert!(r.vt.has("Cable port"));
-    for _ in 0..4 {
+    for _ in 0..3 {
         r.send(b"\x1b[B");
     }
     r.send(b"\x1b[C");
@@ -1391,12 +1391,12 @@ fn radio_editor_wins() {
     assert!(r.bottom().contains("open on the radio's menu"), "{}", r.bottom());
 }
 
-/// TERM-18: colour is off by default (reverse video and bold only); 0 9 2 6 turns it on.
+/// TERM-18: colour is off by default (reverse video and bold only); 0 9 2 5 turns it on.
 #[test]
 fn colour_is_optional() {
     let mut r = Rig::main();
     assert!(!r.raw().contains("\x1b[0;97;44m"));
-    r.cmd("set 0 9 2 6 On");
+    r.cmd("set 0 9 2 5 On");
     assert!(r.app.set.term_colour);
     r.send(b"\x0c");
     r.poll();

@@ -92,7 +92,7 @@ impl Aprs {
     pub fn poll(&mut self, app: &mut App, store: &Store, live: &LiveAll, now_ms: u32) {
         let extra = &store.extra;
         extra.set_callsign(app.callsign());
-        // KISS-6: the cable (0 9 2 5 on KISS, or 0 5 9 1 on Cable) or Bluetooth (0 5 9 1, with Bluetooth on).
+        // KISS-6: the cable (0 9 2 4 on KISS, or 0 5 9 1 on Cable) or Bluetooth (0 5 9 1, with Bluetooth on).
         let kiss_cable = app.settings().kiss_on_cable();
         let kiss_bt = app.settings().kiss_on_bt() && app.settings().bt;
         let kiss_on = kiss_cable || kiss_bt;

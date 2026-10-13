@@ -257,7 +257,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ]),
     ((9, 2), &[
         (slow!("Bluetooth"), slow!("Off"), slow!("The Bluetooth link to the web app.")),
-        (slow!("Approved devices"), slow!(""), slow!("Devices allowed to write; forget one.")),
         (slow!("Link status"), slow!(""), slow!("Cable and Bluetooth now.")),
         (slow!("Debug console"), slow!("Off"), slow!("Off, cable or Bluetooth.")),
         (slow!("Cable port"), slow!("Auto"), slow!("Link, terminal or KISS.")),
@@ -507,7 +506,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.scope_wf as u8);
             s.scope_wf
         }
-        [9, 2, 6] => {
+        [9, 2, 5] => {
             pick(b, &ON_OFF, s.term_colour as u8);
             s.term_colour
         }
@@ -630,7 +629,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.bt as u8);
             s.bt
         }
-        [9, 2, 5] => {
+        [9, 2, 4] => {
             pick(b, &CABLE_PORTS, s.cable_port);
             s.cable_port != 0
         }
@@ -810,8 +809,8 @@ pub(crate) const SETTABLE: [&[u8]; 61] = [
     &[8, 7, 2],
     &[9, 1, 1],
     &[9, 2, 1],
+    &[9, 2, 4],
     &[9, 2, 5],
-    &[9, 2, 6],
 ];
 
 /// The knob or ◀▶ on a wired setting (MENU-16); false if it isn't changeable here.
@@ -887,9 +886,9 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         // 6.25 kHz steps across the VHF and UHF pager bands.
         [4, 2, 2] => s.pocsag_freq = (s.pocsag_freq as i64 + d as i64 * 625).clamp(13_600_000, 52_000_000) as ferrite_core::freq::Freq10,
         [9, 2, 1] => s.bt = !s.bt,
-        [9, 2, 5] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
+        [9, 2, 4] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
         [5, 9, 1] => s.kiss_port = cycle(s.kiss_port, d, crate::settings::KISS_PORTS.len()),
-        [9, 2, 6] => s.term_colour = !s.term_colour,
+        [9, 2, 5] => s.term_colour = !s.term_colour,
         [7, 4, 1] => s.backlight = cycle(s.backlight, d, BACKLIGHT_TIMES.len()),
         [7, 4, 5] => s.keypad_light = cycle(s.keypad_light, d, KEYPAD_LIGHTS.len()),
         [7, 5, 4] => s.arrival_tone = !s.arrival_tone,
@@ -1034,9 +1033,9 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
             app.set_aprs(crate::aprs::AprsCfg { custom: [0; crate::aprs::CUSTOM_LEN], path, ..c });
         }
         [9, 2, 1] => s.bt = d.bt,
-        [9, 2, 5] => s.cable_port = d.cable_port,
+        [9, 2, 4] => s.cable_port = d.cable_port,
         [5, 9, 1] => s.kiss_port = d.kiss_port,
-        [9, 2, 6] => s.term_colour = d.term_colour,
+        [9, 2, 5] => s.term_colour = d.term_colour,
         [7, 4, 1] => s.backlight = d.backlight,
         [7, 4, 5] => s.keypad_light = d.keypad_light,
         [7, 5, 4] => s.arrival_tone = d.arrival_tone,

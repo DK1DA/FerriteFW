@@ -421,9 +421,6 @@ impl Term {
     /// The typed answer to a prompt (Enter).
     pub(super) fn answer<S: ChannelStore>(&mut self, app: &mut App, s: &[u8], st: &S) {
         let a = core::mem::replace(&mut self.ask, Ask::None);
-        if a != Ask::Find && !self.may_write() {
-            return;
-        }
         let s = super::cmd_trim(s);
         match a {
             Ask::Find => self.find_next(s, st),
@@ -522,9 +519,6 @@ impl Term {
 
     /// Checks and starts a change; it runs from [`Term::bulk_step`].
     fn begin<S: ChannelStore>(&mut self, app: &App, op: Op, st: &S) {
-        if !self.may_write() {
-            return;
-        }
         let (total, single) = self.targets(st);
         if total == 0 {
             return;

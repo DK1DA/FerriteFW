@@ -178,19 +178,18 @@ fn only_records_are_written() {
     assert_eq!(s, Status::Refused as u8);
 }
 
-/// LINK-5, LINK-7: the settings read without the PIN or tokens, write back in parts, and the protected ones
+/// LINK-5, LINK-7: the settings read without the PIN, write back in parts, and the protected ones
 /// (region, Extend TX, PIN, cable port) keep the radio's values; the callsign is written, in capitals (LINK-26).
 #[test]
 fn settings_round_trip_keeps_protected() {
     let mut pc = Pc::new(true);
     pc.app.set.pin = 1234;
     pc.app.set.pin_len = 4;
-    pc.app.set.link_tokens[0] = [9; 8];
     let rec = pc.read(what::SETTINGS, 0).unwrap();
     assert!(rec.len() <= RECORD_MAX, "{} bytes", rec.len());
     let mut s = Settings::DEFAULT;
     s.load(&mut Rd { b: &rec, n: 0 });
-    assert_eq!((s.pin, s.link_tokens[0]), (0, [0; 8]), "masked");
+    assert_eq!(s.pin, 0, "masked");
     s.theme = 2;
     s.region = 3;
     s.extend_tx = true;
@@ -208,38 +207,45 @@ fn settings_round_trip_keeps_protected() {
     assert_eq!(pc.app.set.theme, 2, "changed");
     assert_eq!(pc.app.set.callsign.as_bytes(), b"VA7FER", "the callsign is written, in capitals (LINK-26)");
     assert_eq!((pc.app.set.region, pc.app.set.extend_tx, pc.app.set.cable_port), (region, false, 0), "kept");
-    assert_eq!((pc.app.set.pin, pc.app.set.link_tokens[0]), (1234, [9; 8]), "kept, not zeroed by the masked read");
+    assert_eq!(pc.app.set.pin, 1234, "kept, not zeroed by the masked read");
 }
 
-/// LINK-7: a port that isn't trusted asks once on screen; OK approves this device and gives it a token that
-/// approves it next time without asking; BACK refuses.
+/// LINK-7, LINK-30, LINK-31: with no PIN lock, a Bluetooth session reads and writes like the cable, with no
+/// prompt on the radio. With the PIN lock on, HELLO says AUTH first and every other request is refused until
+/// AUTH gives the radio's PIN; wrong PINs count toward the radio's own 30 s wait (PIN-3), shown on its screen.
 #[test]
-fn approval_once_per_device() {
+fn bluetooth_pin_only() {
     let mut pc = Pc::new(false);
     let c = pc.st.by_number(0).unwrap();
-    let rec = pc.read(what::CHANNEL, c.num).unwrap(); // reading needs no approval
-    assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, Status::Pending as u8);
-    assert!(matches!(pc.app.screen(), Screen::Link(l) if l.page == LinkPage::Approve), "{:?}", pc.app.screen());
-    assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, Status::Pending as u8, "still asking");
-    pc.key(Key::Menu); // OK allows
-    assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, 0);
-    let (s, token) = pc.ask(msg::TOKEN, &[]);
-    assert_eq!(s, 0);
-    assert_eq!(pc.app.set.link_tokens[0][..], token[..]);
-    // the same device later, presenting its token
-    let set = *pc.app.set;
-    let mut pc2 = Pc::new(false);
-    *pc2.app.set = set;
-    let mut hello = std::vec![PROTOCOL];
-    hello.extend_from_slice(&token);
-    assert_eq!(pc2.ask(msg::HELLO, &hello).1[2], 1, "may write");
-    assert_eq!(pc2.write(what::CHANNEL, c.num, &rec, 240).0, 0, "no asking");
-    // a device the owner refuses
-    let mut pc3 = Pc::new(false);
-    assert_eq!(pc3.write(what::CHANNEL, c.num, &rec, 240).0, Status::Pending as u8);
-    pc3.key(Key::Exit);
-    assert_eq!(pc3.write(what::CHANNEL, c.num, &rec, 240).0, Status::NotApproved as u8);
-    assert_eq!(pc3.ask(msg::TOKEN, &[]).0, Status::Refused as u8);
+    let rec = pc.read(what::CHANNEL, c.num).unwrap();
+    assert_eq!(pc.ask(msg::HELLO, &[PROTOCOL]).1[2], 1, "no PIN lock: may go on");
+    assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, 0, "no PIN lock: writes go ahead");
+    assert!(!matches!(pc.app.screen(), Screen::Link(_)), "no prompt on the radio");
+    // the PIN lock on
+    let mut bt = Pc::new(false);
+    (bt.app.set.pin, bt.app.set.pin_len, bt.app.set.pin_mode) = (1234, 4, 1);
+    assert_eq!(bt.ask(msg::HELLO, &[PROTOCOL]).1[2], 0, "AUTH first");
+    assert_eq!(bt.read(what::CHANNEL, c.num), Err(Status::NotAuthorised as u8), "not even reads");
+    assert_eq!(bt.ask(msg::INFO, &[]).0, Status::NotAuthorised as u8);
+    assert_eq!(bt.ask(msg::AUTH, b"0000").0, Status::Refused as u8, "wrong");
+    assert_eq!(bt.app.set.pin_misses, 1, "the radio's own counter");
+    assert_eq!(bt.ask(msg::AUTH, b"01234").0, Status::Refused as u8, "length counts");
+    assert_eq!(bt.ask(msg::AUTH, b"9999").0, Status::Refused as u8, "third miss");
+    assert!(bt.app.set.pin_wait != 0, "the radio's 30 s wait started");
+    assert_eq!(bt.ask(msg::AUTH, b"1234").0, Status::Busy as u8, "even the right PIN waits");
+    bt.app.set.pin_wait = 0;
+    assert_eq!(bt.ask(msg::AUTH, b"1234").0, 0);
+    assert_eq!(bt.app.set.pin_misses, 0, "a right PIN clears the count");
+    assert_eq!(bt.ask(msg::HELLO, &[PROTOCOL]).1[2], 1);
+    assert_eq!(bt.write(what::CHANNEL, c.num, &rec, 240).0, 0, "writes after AUTH, no prompt");
+    // a new connection asks again
+    bt.link.set_port(false, 115_200);
+    assert_eq!(bt.ask(msg::INFO, &[]).0, Status::NotAuthorised as u8, "a new connection gives it again");
+    // the cable never asks
+    let mut cable = Pc::new(true);
+    (cable.app.set.pin, cable.app.set.pin_len, cable.app.set.pin_mode) = (1234, 4, 1);
+    assert_eq!(cable.ask(msg::HELLO, &[PROTOCOL]).1[2], 1);
+    assert_eq!(cable.write(what::CHANNEL, c.num, &rec, 240).0, 0, "the cable is trusted");
 }
 
 /// LINK-9: BEGIN shows progress; BACK cancels the session's writes until END.
@@ -272,8 +278,8 @@ fn baud_within_the_uart() {
     assert_eq!(pc.link.take_baud(), None);
 }
 
-/// LINK-24: REBOOT on the cable is answered, then handed to the caller once; never while transmitting; a
-/// Bluetooth device needs its approval first (no prompt).
+/// LINK-24: REBOOT on the cable is answered, then handed to the caller once; never while transmitting; on
+/// Bluetooth with the PIN lock on, only after AUTH (LINK-30).
 #[test]
 fn reboot_to_the_bootloader() {
     let mut pc = Pc::new(true);
@@ -285,9 +291,12 @@ fn reboot_to_the_bootloader() {
     assert!(pc.link.take_reboot());
     assert!(!pc.link.take_reboot(), "once");
     let mut bt = Pc::new(false);
-    assert_eq!(bt.ask(msg::REBOOT, &[]).0, Status::NotApproved as u8);
+    (bt.app.set.pin, bt.app.set.pin_len, bt.app.set.pin_mode) = (1234, 4, 1);
+    assert_eq!(bt.ask(msg::REBOOT, &[]).0, Status::NotAuthorised as u8);
     assert!(!bt.link.take_reboot());
-    assert!(!matches!(bt.app.screen(), Screen::Link(_)), "no approval prompt for a restart");
+    assert_eq!(bt.ask(msg::AUTH, b"1234").0, 0);
+    assert_eq!(bt.ask(msg::REBOOT, &[]).0, 0);
+    assert!(bt.link.take_reboot());
 }
 
 /// TERM-2: the cable port setting and the first bytes decide.

@@ -360,9 +360,9 @@ fn shortcuts_and_menu_paths() {
     t.tap(Key::Digit(4)); // NAV-4: entry
     assert!(matches!(t.app.screen(), Screen::Entry(_)));
     t.hold(Key::Exit);
-    // MENU 0 9 2 3: link status, typed straight through (MENU-5)
+    // MENU 0 9 2 2: link status, typed straight through (MENU-5)
     use crate::screens::groups::Group;
-    for d in [0, 9, 2, 3] {
+    for d in [0, 9, 2, 2] {
         t.tap(if d == 0 { Key::Menu } else { Key::Digit(d) });
         if d == 0 {
             t.tap(Key::Digit(0));
@@ -370,7 +370,7 @@ fn shortcuts_and_menu_paths() {
     }
     assert!(matches!(t.app.screen(), Screen::Link(_)));
     t.tap(Key::Exit);
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 9, sub: 2, row: 2 }), "the list, on its row");
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 9, sub: 2, row: 1 }), "the list, on its row");
     t.tap(Key::Exit);
     assert_eq!(t.app.screen(), Screen::Group(Group { g: 9, sub: 0, row: 1 }));
     t.tap(Key::Exit);
@@ -420,7 +420,7 @@ fn every_destination_draws() {
         }
     }
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
-    assert_eq!(ids.len(), 65, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75)");
+    assert_eq!(ids.len(), 62, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104)");
 }
 
 mod group_a;

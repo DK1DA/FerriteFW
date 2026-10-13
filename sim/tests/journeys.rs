@@ -426,13 +426,13 @@ fn crossband_refuses_one_chip() {
     r.run("press HASH; wait 1s; expect no text \"PASSING\"; expect text \"Can't start\"");
 }
 
-/// A write from a new Bluetooth device asks first; reading needs no approval (LINK-7).
+/// A web app writing shows its progress at once (no approval since decision 104); BACK cancels it (LINK-9).
 #[test]
-fn link_write_asks_first() {
+fn link_write_shows_progress() {
     let mut r = Radio::new();
-    r.run("event linkwrite; expect screen \"Write approval\"; expect text \"Allow writes?\"; expect text \"Reading needs\"");
+    r.run("event linkwrite; expect screen \"Writing\"; expect text \"BACK cancels\"");
     r.run("press BACK; wait 300ms");
-    assert_ne!(r.screen(), "Write approval");
+    assert_ne!(r.screen(), "Writing");
 }
 
 /// Setting the clock by hand: OK on 0 6 6 takes YYYYMMDDhhmm in local time (GPS-23).

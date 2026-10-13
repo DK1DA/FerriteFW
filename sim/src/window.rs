@@ -18,7 +18,7 @@
 //!
 //! Stand-ins for what the radio would report: M a message arrives, N an alert, F5 GPS off/searching/fix,
 //! F6 Bluetooth, F7 battery normal/low/cut-off, F8 the power switch, F9 an empty battery, F10 an unknown SSB
-//! patch at boot, F11 a write from a new Bluetooth device (allowed, it runs a fake write session). Each calls
+//! patch at boot, F11 a write from the web app (a fake write session, LINK-9). Each calls
 //! the App hook the firmware calls.
 
 use ferrite_sim::face::Face;

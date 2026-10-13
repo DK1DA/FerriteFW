@@ -27,7 +27,7 @@
 //!
 //! Crossband is MENU 0 3 5 (Tools); the mailbox is the Status page's last row. The screens an event opens
 //! have App hooks the firmware (and the simulator's keys) call: [`App::power_off`], [`App::battery_empty`],
-//! [`App::ssb_patch_found`], [`App::link_write_request`], [`App::link_write_progress`] and
+//! [`App::ssb_patch_found`], [`App::link_write_progress`] and
 //! [`App::link_write_done`], [`App::same_alert`].
 //! Still placeholders: position entry (A8), location codes (A13), the DTMF dialer and memories (A14, A15).
 
@@ -169,14 +169,8 @@ pub enum Dest {
     SsbConfirm,
     /// D16: SSB patch (MENU 0 9 6).
     SsbPatch,
-    /// D17: link status (MENU 0 9 2 3).
+    /// D17: link status (MENU 0 9 2 2). (D18-D20, approved devices and the write approval, went with decision 104.)
     LinkStatus,
-    /// D18: approved devices (MENU 0 9 2 2): Ferrite's write approval, not BLE pairing (decision 76).
-    Approved,
-    /// D19: add a device (how a phone or PC gets approved).
-    AddDevice,
-    /// D20: Bluetooth write approval.
-    WriteApproval,
     /// D21: link write progress.
     WriteProgress,
     /// D22: power off, "Saving...".
@@ -256,9 +250,6 @@ impl Dest {
             SsbConfirm => ("SSB patch confirm", "30", "D15"),
             SsbPatch => ("SSB patch", "20a", "D16"),
             LinkStatus => ("Link status", "29", "D17"),
-            Approved => ("Approved devices", "29", "D18"),
-            AddDevice => ("Add a device", "29", "D19"),
-            WriteApproval => ("Write approval", "29", "D20"),
             WriteProgress => ("Writing", "29", "D21"),
             PowerOff => ("Power off", "33", "D22"),
             EmptyBattery => ("Empty battery", "33", "D23"),
@@ -303,7 +294,7 @@ impl Dest {
 }
 
 /// Every destination once (groups and lists by one example each), for tests and the screen inventory.
-pub const ALL: [Dest; 69] = {
+pub const ALL: [Dest; 66] = {
     use Dest::*;
     [
         Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
@@ -312,14 +303,14 @@ pub const ALL: [Dest; 69] = {
         Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage,
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, FmPresets, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
-        LinkStatus, Approved, AddDevice, WriteApproval, WriteProgress, PowerOff, EmptyBattery, Mailbox,
+        LinkStatus, WriteProgress, PowerOff, EmptyBattery, Mailbox,
         Group(1), Sub(3, 1), Value(Item::Power),
     ]
 };
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 60] = [
+pub const MENU0: [(&[u8], Dest); 59] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -368,8 +359,7 @@ pub const MENU0: [(&[u8], Dest); 60] = [
     (&[9, 1, 4], Dest::ShortcutMap),
     (&[9, 3, 3], Dest::Pin),
     (&[9, 2], Dest::Sub(9, 2)),
-    (&[9, 2, 2], Dest::Approved),
-    (&[9, 2, 3], Dest::LinkStatus),
+    (&[9, 2, 2], Dest::LinkStatus),
     (&[9, 3], Dest::Sub(9, 3)),
     (&[9, 5], Dest::Sub(9, 5)),
     (&[9, 5, 1], Dest::AdvSquelch),
@@ -456,7 +446,6 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::AdvSquelch => Screen::Info(Info { page: Page::AdvSquelch }),
         Dest::SsbPatch => Screen::Info(Info { page: Page::SsbPatch }),
         Dest::SsbConfirm => Screen::Info(Info { page: Page::SsbConfirm }),
-        Dest::AddDevice => Screen::Info(Info { page: Page::AddDevice }),
         Dest::PowerOff => Screen::Info(Info { page: Page::PowerOff }),
         Dest::EmptyBattery => Screen::Info(Info { page: Page::EmptyBattery }),
         Dest::Mailbox => Screen::Info(Info { page: Page::Mailbox }),
@@ -466,8 +455,6 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::DtmfDialer => Screen::Dtmf(super::dtmf::DtmfPad::dialer()),
         Dest::DtmfMemories => Screen::Dtmf(super::dtmf::DtmfPad::memories()),
         Dest::LinkStatus => Screen::Link(Link::new(LinkPage::Status)),
-        Dest::Approved => Screen::Link(Link::new(LinkPage::Approved)),
-        Dest::WriteApproval => Screen::Link(Link::new(LinkPage::Approve)),
         Dest::WriteProgress => Screen::Link(Link::new(LinkPage::Progress)),
         Dest::FmBroadcast => fm::open(app),
         Dest::HfMode => hf::open(app),

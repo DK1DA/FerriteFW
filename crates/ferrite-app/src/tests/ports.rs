@@ -3,10 +3,8 @@
 
 use crate::ports::{Port, Ports, To, BT_IDLE_MS};
 use crate::sample::Sample;
-use crate::screens::link::LinkPage;
 use crate::term::Sink;
 use crate::{App, Screen};
-use ferrite_core::keys::Key;
 use ferrite_core::link::{self as wire, msg, Status, MAX_WIRE};
 use ferrite_core::msg::{Device, LiveAll};
 use std::vec::Vec;
@@ -66,12 +64,6 @@ impl Rig {
         }
     }
 
-    fn key(&mut self, k: Key) {
-        self.app.key_down(k, self.now, &self.st);
-        self.now += 100;
-        self.app.key_up(k, self.now, &self.st);
-    }
-
     /// One link request from `port`: its answer's status.
     fn ask(&mut self, port: Port, ty: u8, payload: &[u8]) -> u8 {
         let mut w = [0u8; MAX_WIRE];
@@ -87,28 +79,49 @@ impl Rig {
     }
 }
 
-/// TERM-25: the terminal opens on Bluetooth with Enter and draws there, not on the cable; reading works at
-/// once; a write asks the owner on the radio's screen and isn't made; after OK it is, and the approval makes
-/// no device token (the terminal has no HELLO to present one).
+/// TERM-25: the terminal opens on Bluetooth with Enter and draws there, not on the cable; with no PIN lock it
+/// reads and writes at once, with no prompt on the radio (LINK-7, decision 104).
 #[test]
-fn bluetooth_terminal_reads_then_asks() {
+fn bluetooth_terminal_without_pin() {
     let mut r = Rig::new();
     r.send(Port::Bt, b"\r");
     assert_eq!(r.p.owner(), Port::Bt);
     assert!(r.p.term.on());
     assert!(!r.bt.0.is_empty() && r.cable.0.is_empty(), "drawn on Bluetooth only");
-    let tokens = r.app.set.link_tokens;
-    let home = r.app.set.home_ch;
     r.send(Port::Bt, b":home 3\r");
-    assert_eq!(r.app.set.home_ch, home, "not written before the approval");
-    assert!(matches!(r.app.screen(), Screen::Link(l) if l.page == LinkPage::Approve), "{:?}", r.app.screen());
-    r.key(Key::Menu); // OK allows
-    r.poll();
-    r.send(Port::Bt, b":home 3\r");
-    assert_eq!(r.app.set.home_ch, Some(2), "written once approved");
-    assert_eq!(r.app.set.link_tokens, tokens, "no token for a terminal");
+    assert_eq!(r.app.set.home_ch, Some(2), "written, no approval");
+    assert!(!matches!(r.app.screen(), Screen::Link(_)), "no prompt on the radio");
     assert!(crate::term::cmd::writes(b"home 3") && !crate::term::cmd::writes(b"get 0 9 2 1") && !crate::term::cmd::writes(b"ch 12"));
     assert!(crate::term::cmd::writes(b"bk 0 30 0") && crate::term::cmd::writes(b"ch 12 \"X\" 146.52"));
+}
+
+/// LINK-30, LINK-31: with the PIN lock on, a Bluetooth terminal asks for the radio's PIN before anything else
+/// (shown as *, nothing else read); wrong ones count toward the radio's own wait (PIN-3); the cable never asks.
+#[test]
+fn bluetooth_terminal_asks_for_the_pin() {
+    let mut r = Rig::new();
+    (r.app.set.pin, r.app.set.pin_len, r.app.set.pin_mode) = (2468, 4, 1);
+    r.send(Port::Bt, b"\r");
+    assert!(r.p.term.on());
+    let shown = std::string::String::from_utf8_lossy(&r.bt.0).into_owned();
+    assert!(shown.contains("PIN"), "the prompt: {shown}");
+    let home = r.app.set.home_ch;
+    r.send(Port::Bt, b":home 3\r");
+    assert_eq!(r.app.set.home_ch, home, "nothing runs before the PIN");
+    assert_eq!(r.app.set.pin_misses, 1, "only its digit was read, as a wrong PIN");
+    r.send(Port::Bt, b"1111\r");
+    assert_eq!(r.app.set.pin_misses, 2, "a wrong PIN counts on the radio");
+    r.bt.0.clear();
+    r.send(Port::Bt, b"2468\r");
+    assert_eq!(r.app.set.pin_misses, 0);
+    r.send(Port::Bt, b":home 3\r");
+    assert_eq!(r.app.set.home_ch, Some(2), "runs after the PIN");
+    // the cable takes over: never asked
+    let mut c = Rig::new();
+    (c.app.set.pin, c.app.set.pin_len, c.app.set.pin_mode) = (2468, 4, 1);
+    c.send(Port::Cable, b"\r");
+    c.send(Port::Cable, b":home 3\r");
+    assert_eq!(c.app.set.home_ch, Some(2), "the cable is trusted");
 }
 
 /// The cable always takes the terminal and the link (physical access, LINK-7); while it has them, Bluetooth's

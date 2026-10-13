@@ -90,7 +90,7 @@ pub const ON_OFF: [&str; 2] = ["Off", "On"];
 pub const POWER_ON: [&str; 3] = ["Off", "Callsign", "Text"];
 /// Boot screen (0 7 3 3).
 pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
-/// The cable port (0 9 2 5, TERM-2): auto picks from the first bytes; the others force one.
+/// The cable port (0 9 2 4, TERM-2): auto picks from the first bytes; the others force one.
 pub const CABLE_PORTS: [&str; 4] = ["Auto", "Link", "Terminal", "KISS"];
 /// 0 5 9 1's values (KISS-6): which port is the KISS TNC.
 pub const KISS_PORTS: [&str; 3] = ["Off", "Cable", "Bluetooth"];
@@ -132,7 +132,7 @@ pub struct Settings {
     pub pin_wait: u16,
     /// 0 9 2 1.
     pub bt: bool,
-    /// 0 9 2 5: what the cable carries, an index into [`CABLE_PORTS`] (TERM-2).
+    /// 0 9 2 4: what the cable carries, an index into [`CABLE_PORTS`] (TERM-2).
     pub cable_port: u8,
     /// 0 5 9 1: the KISS TNC's port, an index into [`KISS_PORTS`] (KISS-6).
     pub kiss_port: u8,
@@ -189,14 +189,15 @@ pub struct Settings {
     pub scope_line: u8,
     pub scope_wf: bool,
     pub scope_mode: u8,
-    /// 0 9 2 6: the cable terminal in ANSI colour (TERM-18); off, reverse video and bold only.
+    /// 0 9 2 5: the cable terminal in ANSI colour (TERM-18); off, reverse video and bold only.
     pub term_colour: bool,
     /// 0 5 3: APRS mode, slot C as the APRS slot (APRS-15 – APRS-22; the takeover itself comes in milestone 5).
     pub aprs_mode: bool,
     /// Message text is typed predictively (TEXT-10); hold \* switches, and the choice is kept for the next one.
     pub predictive: bool,
-    /// Approval tokens of Bluetooth devices allowed to write (LINK-7), newest first; all zero is none.
-    pub link_tokens: [[u8; 8]; crate::link::TOKENS],
+    /// Unused, kept so the fields after it stay where older records have them: it held Bluetooth approval tokens
+    /// until decision 104 (PIN only). Saved as zeros.
+    pub spare_tokens: [u8; 32],
     /// 0 7 4 1: the screen goes dark after this ([`BACKLIGHT_TIMES`] index; 0 never).
     pub backlight: u8,
     /// 0 7 4 5: the keypad light ([`KEYPAD_LIGHTS`]).
@@ -294,7 +295,7 @@ pub const COORD_FORMATS: [&str; 4] = ["Degrees", "Deg, min", "Deg, min, sec", "G
 pub const SAME_CODES: usize = 8;
 
 impl Settings {
-    /// KISS-6: the cable carries raw KISS (0 9 2 5 on KISS, or 0 5 9 1 on Cable).
+    /// KISS-6: the cable carries raw KISS (0 9 2 4 on KISS, or 0 5 9 1 on Cable).
     pub fn kiss_on_cable(&self) -> bool {
         self.cable_port == 3 || self.kiss_port == 1
     }
@@ -362,7 +363,7 @@ impl Settings {
         term_colour: false,
         aprs_mode: false,
         predictive: true,
-        link_tokens: [[0; 8]; crate::link::TOKENS],
+        spare_tokens: [0; 32],
         backlight: 5, // 60 s (15 s felt short on the radio, Oct 12, 2026)
         keypad_light: 1,
         leds: 2,

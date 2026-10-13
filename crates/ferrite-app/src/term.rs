@@ -311,11 +311,14 @@ pub struct Term {
     ask: list::Ask,
     find: Buf<16>,
     bulk: Option<list::Bulk>,
-    /// Bluetooth (TERM-25): auto start only (the cable port setting is the cable's), writes only once approved
-    /// ([`Term::set_writable`]); a write tried before asks once ([`Term::take_write_ask`]).
+    /// Bluetooth (TERM-25): auto start only (the cable port setting is the cable's). While the radio's PIN lock is
+    /// on, a Bluetooth terminal asks for the PIN first and does nothing else until it's right (LINK-30, LINK-31):
+    /// whether it's needed, given, and the digits typed so far.
     bt: bool,
-    writable: bool,
-    write_ask: bool,
+    pin_need: bool,
+    pin_ok: bool,
+    pin: [u8; 6],
+    pin_n: u8,
 }
 
 impl Default for Term {
@@ -375,8 +378,10 @@ impl Term {
             first: list::START,
             ask: list::Ask::None,
             bt: false,
-            writable: true,
-            write_ask: false,
+            pin_need: false,
+            pin_ok: false,
+            pin: [0; 6],
+            pin_n: 0,
             find: Buf::new(),
             bulk: None,
         }
@@ -416,30 +421,53 @@ impl Term {
         self.page != Page::Off
     }
 
-    /// Which port this terminal runs on: Bluetooth starts on Enter whatever the cable port setting says, and
-    /// writes only when approved (TERM-25).
+    /// Which port this terminal runs on: Bluetooth starts on Enter whatever the cable port setting says (TERM-25).
     pub fn set_bluetooth(&mut self, bt: bool) {
         self.bt = bt;
     }
 
-    /// Whether this port may write now (the cable always; Bluetooth once approved: TERM-3, TERM-25).
-    pub fn set_writable(&mut self, w: bool) {
-        self.writable = w;
+    /// LINK-30: this terminal must be given the radio's PIN before anything else (Bluetooth with the PIN lock on).
+    /// Set each poll; the PIN given lasts for this terminal (a new connection opens a new one).
+    pub fn set_pin_needed(&mut self, need: bool) {
+        self.pin_need = need;
     }
 
-    /// A write was tried before the approval: ask the owner on the radio (once per try; the session keeps
-    /// the prompt from repeating).
-    pub fn take_write_ask(&mut self) -> bool {
-        core::mem::take(&mut self.write_ask)
+    /// Open and still waiting for the PIN (LINK-30).
+    fn pin_gate(&self) -> bool {
+        self.page != Page::Off && self.pin_need && !self.pin_ok
     }
 
-    /// TERM-25: a change from an unapproved Bluetooth device asks the owner and is not made.
-    fn may_write(&mut self) -> bool {
-        if !self.writable {
-            self.write_ask = true;
-            self.say(slow!("Writes need approval: OK on the radio, then try again").as_bytes(), true);
+    /// LINK-31: one byte typed at the PIN prompt: digits (shown as *), Backspace, Enter checks it against the
+    /// radio's PIN with its counter and wait, Ctrl-C leaves. Nothing else is read.
+    fn pin_byte(&mut self, app: &mut App, b: u8) {
+        match b {
+            b'0'..=b'9' if (self.pin_n as usize) < self.pin.len() => {
+                self.pin[self.pin_n as usize] = b;
+                self.pin_n += 1;
+            }
+            0x08 | 0x7F => self.pin_n = self.pin_n.saturating_sub(1),
+            b'\r' | b'\n' if self.pin_n > 0 => {
+                let n = core::mem::take(&mut self.pin_n) as usize;
+                match app.remote_pin(&self.pin[..n]) {
+                    crate::screens::pin::RemotePin::Ok => {
+                        self.pin_ok = true;
+                        self.note.clear();
+                        self.redraw();
+                        return;
+                    }
+                    crate::screens::pin::RemotePin::Wrong => self.say(slow!("Wrong PIN").as_bytes(), true),
+                    crate::screens::pin::RemotePin::Wait(w) => {
+                        let mut b = Buf::<40>::new();
+                        put!(b, "Too many tries: wait {} s", w);
+                        self.say(b.as_bytes(), true);
+                    }
+                }
+                self.pin = [0; 6];
+            }
+            0x03 => self.bye = true,
+            _ => {}
         }
-        self.writable
+        self.all_dirty();
     }
 
     /// Everything again: clear the screen, forget what each row showed (Ctrl-L, TERM-16).
@@ -454,7 +482,7 @@ impl Term {
     }
 
     fn start(&mut self) {
-        *self = Term { cols: self.cols, rows: self.rows, bt: self.bt, writable: self.writable, ..Term::new() };
+        *self = Term { cols: self.cols, rows: self.rows, bt: self.bt, pin_need: self.pin_need, ..Term::new() };
         self.page = Page::Splash;
         self.ask_size = true;
         self.redraw();
@@ -490,6 +518,9 @@ impl Term {
                 self.start();
             }
             return;
+        }
+        if self.pin_gate() {
+            return self.pin_byte(app, b);
         }
         if let Con::Run(Body::Load { .. }) = self.con {
             return self.load_byte(b);
@@ -839,9 +870,6 @@ impl Term {
 
     /// ◀▶ on a field: the same steps and checks as the radio's channel editor (TERM-6, TERM-7).
     fn change<S: ChannelStore>(&mut self, app: &mut App, c: Channel, f: F, d: i32, store: &S) {
-        if f != F::Name && f != F::Tx && !self.may_write() {
-            return;
-        }
         let mut n = c;
         match f {
             F::Name => return self.say(slow!("Enter types the name (16 characters)").as_bytes(), false),
@@ -889,9 +917,6 @@ impl Term {
 
     /// # on a field: its default (MENU-18).
     fn default(&mut self, app: &mut App, c: Channel, f: F) {
-        if !self.may_write() {
-            return;
-        }
         let mut n = c;
         match f {
             F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => return,
@@ -914,9 +939,6 @@ impl Term {
     /// A typed value: the name, or the receive frequency in MHz.
     fn commit(&mut self, app: &mut App, s: &[u8]) {
         let Some(c) = self.edit else { return };
-        if !self.may_write() {
-            return;
-        }
         let mut n = c;
         match FIELDS[self.field as usize % FIELDS.len()] {
             F::Name => {
@@ -971,7 +993,7 @@ impl Term {
             K::Left | K::Right if self.g != 0 => self.settings_change(app, if k == K::Right { 1 } else { -1 }),
             K::Ch(b'#') if self.g != 0 => {
                 let (p, pl) = self.path(self.set_sel);
-                if !blocked(&p[..pl]) && self.may_write() {
+                if !blocked(&p[..pl]) {
                     groups::reset(app, &p[..pl]);
                     self.say(slow!("Back to the default").as_bytes(), false);
                 }
@@ -1021,9 +1043,6 @@ impl Term {
         }
         if let Some(why) = groups::greyed(app, p) {
             return self.say(why.as_bytes(), true);
-        }
-        if !self.may_write() {
-            return;
         }
         if groups::change(app, p, d) {
             self.say(b"Changed", false);
@@ -1116,7 +1135,7 @@ impl Term {
                 continue;
             }
             let mut h = Hash(0x811C_9DC5);
-            let colour = app.set.term_colour; // TERM-18, 0 9 2 6
+            let colour = app.set.term_colour; // TERM-18, 0 9 2 5
             self.row(r, &cx, &mut W { o: &mut h, col: 0, cols: self.cols as u16, rev: false, colour });
             let h = h.0 | 1;
             if h != self.hash[r as usize] {
@@ -1143,9 +1162,6 @@ impl Term {
             line += 1;
             let r = if core::mem::take(&mut self.long) {
                 Err(cmd::Msg::from(slow!("too long: 255 characters at most").as_bytes()))
-            } else if !self.writable && cmd::writes(&self.cbuf[..n]) {
-                self.write_ask = true;
-                Err(cmd::Msg::from(slow!("writes need approval: OK on the radio").as_bytes()))
             } else {
                 cmd::run(app, store, dev, &self.cbuf[..n], true)
             };
@@ -1166,10 +1182,6 @@ impl Term {
             put!(l, "\r\x1b[K  {} lines read: {} applied, {} refused", line, ok, bad);
             out.put(l.as_bytes());
             return;
-        }
-        if !self.writable && cmd::writes(&self.cbuf[..n]) {
-            self.write_ask = true;
-            return self.say(slow!("Writes need approval: OK on the radio, then run it again").as_bytes(), true);
         }
         let (m, warn) = match cmd::run(app, store, dev, &self.cbuf[..n], false) {
             Ok(cmd::Done::Nothing) => return,
@@ -1256,6 +1268,22 @@ impl Term {
     fn row<S: ChannelStore>(&self, r: u8, cx: &Cx<S>, w: &mut W) {
         if r == 0 {
             return self.top(cx, w);
+        }
+        if self.pin_gate() {
+            // LINK-30: the PIN prompt, alone.
+            match r {
+                2 => w.s(slow!("  This radio has a PIN lock. Type its PIN, then Enter.").as_bytes()),
+                4 => {
+                    w.s(b"  PIN: ");
+                    for _ in 0..self.pin_n {
+                        w.s(b"*");
+                    }
+                }
+                6 if !self.note.is_empty() => w.s(self.note.as_bytes()),
+                _ if r == self.rows - 1 => w.s(slow!(" Enter Check   Ctrl-C Leave").as_bytes()),
+                _ => {}
+            }
+            return;
         }
         if r == self.rows - 1 {
             return self.hints(w);
@@ -2058,7 +2086,7 @@ fn chan_at<S: ChannelStore>(z: u8, i: u16, st: &S) -> Option<Channel> {
     if z == ALL { st.by_number(i) } else { st.zone_at(z, i) }
 }
 
-/// The cable port setting's names (0 9 2 5), for the radio's menu too.
+/// The cable port setting's names (0 9 2 4), for the radio's menu too.
 pub fn port_name(p: u8) -> &'static str {
     CABLE_PORTS[p as usize % CABLE_PORTS.len()]
 }
@@ -2111,7 +2139,7 @@ pub(crate) fn digits(mut n: u32, d: &mut [u8; 10]) -> &[u8] {
 }
 
 /// One row: text clipped to the width, columns counted (attributes take none), reverse video and bold only
-/// (TERM-1: plain VT100); with `colour` (TERM-18, setting 0 9 2 6), ANSI colours in their place: the top line
+/// (TERM-1: plain VT100); with `colour` (TERM-18, setting 0 9 2 5), ANSI colours in their place: the top line
 /// and the selection white on blue, headings cyan, warnings yellow.
 struct W<'a> {
     o: &'a mut dyn Out,

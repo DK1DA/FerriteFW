@@ -489,15 +489,9 @@ impl SimCore {
                     store.log(&e);
                 }
             }
-            // The fake link: an allowed write runs a session, 2 % a step, then ends (not while a real session's
-            // own question is up: its answer is the session's).
-            match if self.ports.link.asking() { None } else { app.take_link_answer() } {
-                Some(ferrite_app::screens::link::LinkAnswer::Allowed) => {
-                    dev.link.write_pct = Some(0);
-                    app.link_write_progress();
-                }
-                Some(_) => dev.link.write_pct = None,
-                None => {}
+            // The fake link (the LinkWrite event): a write session, 2 % a step, then ends; BACK cancels it (LINK-9).
+            if dev.link.write_pct.is_some() && app.take_link_answer().is_some() {
+                dev.link.write_pct = None;
             }
             if let Some(p) = dev.link.write_pct {
                 if p >= 100 {
@@ -875,7 +869,11 @@ impl SimCore {
             Event::PowerSwitch => self.power_switch(),
             Event::EmptyBattery if live => app.battery_empty(),
             Event::SsbPatch if live => app.ssb_patch_found(),
-            Event::LinkWrite if live => app.link_write_request(),
+            Event::LinkWrite if live => {
+                // A web app writing (LINK-9): no approval since decision 104, so straight to the progress screen.
+                self.dev.link.write_pct = Some(0);
+                app.link_write_progress();
+            }
             _ => {}
         }
     }

@@ -6,13 +6,13 @@
 //!   about 2 KB together, so there is no second set). The cable always wins: physical access (LINK-7), and the
 //!   way back if a phone left a session open. Bluetooth takes them when the cable has neither open; while the
 //!   cable has them, Bluetooth's terminal and link bytes are dropped.
-//! - **KISS** needs neither, so it runs on its port alongside the other one (KISS-6): the cable by 0 9 2 5 on
+//! - **KISS** needs neither, so it runs on its port alongside the other one (KISS-6): the cable by 0 9 2 4 on
 //!   KISS or 0 5 9 1 on Cable, Bluetooth by 0 5 9 1 on Bluetooth. Its bytes go back to the caller.
-//! - **Trust:** the cable is trusted (TERM-3, LINK-7); on Bluetooth the link and the terminal share one
-//!   approval (TERM-25), and `BAUD` can't change the rate (LINK-25: 115200 only).
+//! - **Trust:** the cable is trusted (TERM-3, LINK-7). On Bluetooth, while the radio's PIN lock is on, the
+//!   terminal and the link each ask for the PIN first (LINK-30); `BAUD` can't change the rate (LINK-25).
 //! - **A Bluetooth connection** ends when it has been quiet for [`BT_IDLE_MS`]: the module tells the radio
 //!   nothing about connects (it is a transparent bridge, LINK-25), so silence is the only sign the phone left.
-//!   Its terminal closes and its approval ends with it.
+//!   Its terminal closes, and the PIN it gave ends with it.
 
 use crate::chan::ChannelStore;
 use crate::link::{self, Route, Session};
@@ -93,7 +93,6 @@ impl Ports {
         self.owner = port;
         self.term = Term::new();
         self.term.set_bluetooth(port == Port::Bt);
-        self.term.set_writable(port == Port::Cable);
         self.link.set_port(port == Port::Cable, if port == Port::Cable { self.cable_max } else { BT_BAUD });
     }
 
@@ -136,7 +135,7 @@ impl Ports {
     }
 
     /// The terminal redrawn and a waiting link frame answered, into the owner's output. Ends a Bluetooth
-    /// connection gone quiet, and passes the terminal's write requests to the session's approval (TERM-25).
+    /// connection gone quiet; a Bluetooth terminal asks for the PIN while the PIN lock is on (LINK-30).
     #[allow(clippy::too_many_arguments)]
     pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, now: u32, cable: &mut impl Sink, bt: &mut impl Sink) {
         if self.bt_seen && (now.wrapping_sub(self.bt_last) >= BT_IDLE_MS || !app.set.bt) {
@@ -145,10 +144,7 @@ impl Ports {
                 self.switch(Port::Cable);
             }
         }
-        if self.term.take_write_ask() {
-            self.link.ask_for_terminal(app);
-        }
-        self.term.set_writable(self.link.may_write_now());
+        self.term.set_pin_needed(self.owner == Port::Bt && app.pin_required());
         match self.owner {
             Port::Cable => {
                 self.term.poll(app, store, dev, live, now, cable);

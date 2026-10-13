@@ -169,15 +169,59 @@ impl Pin {
             }
             return;
         }
-        let now = Pin::secs(app);
-        let s = &mut app.set;
+        app.pin_miss();
+        Pin { n: 0, ..self }.put(app);
+        app.show_toast(b"Wrong PIN", b"", false);
+    }
+}
+
+/// A PIN typed over Bluetooth (LINK-31): right, wrong (counted toward the radio's wait), or the wait's seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemotePin {
+    Ok,
+    Wrong,
+    Wait(u16),
+}
+
+impl App {
+    /// LINK-30: a PIN lock is on, so a Bluetooth session must give the radio's PIN before anything else.
+    pub fn pin_required(&self) -> bool {
+        self.set.pin_mode != 0 && self.set.pin_len > 0
+    }
+
+    /// LINK-31: the radio's PIN as typed over Bluetooth (ASCII digits). Same PIN, same counter and the same 30 s
+    /// wait as on the radio (PIN-3); a wrong one and the wait show on the radio's screen too.
+    pub fn remote_pin(&mut self, digits: &[u8]) -> RemotePin {
+        let wait = Pin::power_on().waiting(self);
+        if wait > 0 {
+            return RemotePin::Wait(wait);
+        }
+        let ok = digits.len() == self.set.pin_len as usize
+            && digits.iter().all(u8::is_ascii_digit)
+            && digits.iter().fold(0u32, |v, &d| v * 10 + (d - b'0') as u32) == self.set.pin;
+        if ok {
+            self.set.pin_misses = 0;
+            return RemotePin::Ok;
+        }
+        if self.pin_miss() {
+            self.show_toast(b"PIN locked 30 s", b"Bluetooth", false);
+        } else {
+            self.show_toast(b"Wrong PIN", b"Bluetooth", false);
+        }
+        RemotePin::Wrong
+    }
+
+    /// PIN-3: one more miss; the third starts the wait (true then).
+    fn pin_miss(&mut self) -> bool {
+        let now = Pin::secs(self);
+        let s = &mut self.set;
         s.pin_misses += 1;
         if s.pin_misses >= TRIES {
             s.pin_misses = 0;
             s.pin_wait = now.wrapping_add(WAIT_S).max(1);
+            return true;
         }
-        Pin { n: 0, ..self }.put(app);
-        app.show_toast(b"Wrong PIN", b"", false);
+        false
     }
 }
 

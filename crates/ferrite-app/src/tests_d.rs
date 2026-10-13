@@ -338,15 +338,11 @@ fn groups_change_values() {
     }
 }
 
-/// D20, D21: the write approval answers the Link task; a write session ignores keys but BACK (LINK-9).
+/// D21: a write session ignores keys but BACK, which answers the Link task (LINK-9).
 #[test]
 fn link_prompts() {
     use crate::screens::link::LinkAnswer;
     let mut t = T::new();
-    t.app.open(Dest::WriteApproval);
-    t.tap(Key::Menu);
-    assert_eq!(t.app.take_link_answer(), Some(LinkAnswer::Allowed));
-    assert_eq!(t.app.screen(), Screen::Home);
     t.app.open(Dest::WriteProgress);
     t.tap(Key::Menu);
     t.hold(Key::Hash);
@@ -424,17 +420,13 @@ fn crossband_from_the_menu() {
 #[test]
 fn event_hooks_open_their_screens() {
     use crate::screens::info::{Info, Page};
-    use crate::screens::link::{LinkAnswer, LinkPage};
+    use crate::screens::link::LinkPage;
     let mut t = T::new();
     t.tap(Key::Menu); // quick settings under the next ones
     t.app.ssb_patch_found();
     assert_eq!(t.app.screen(), Screen::Info(Info { page: Page::SsbConfirm }));
     t.tap(Key::Menu);
     assert!(matches!(t.app.screen(), Screen::Quick(_)), "OK uses it and returns");
-    t.app.link_write_request();
-    assert!(matches!(t.app.screen(), Screen::Link(l) if l.page == LinkPage::Approve));
-    t.tap(Key::Menu);
-    assert_eq!(t.app.take_link_answer(), Some(LinkAnswer::Allowed));
     t.app.link_write_progress();
     assert!(matches!(t.app.screen(), Screen::Link(l) if l.page == LinkPage::Progress));
     t.tap(Key::Menu);

@@ -46,14 +46,14 @@ fn ask_bt(sim: &mut SimCore, t: &mut u32, ty: u8, seq: u8, payload: &[u8]) -> Ve
     f.payload.to_vec()
 }
 
-/// HELLO over Bluetooth answers on Bluetooth, not the cable, and says the device may not write yet (LINK-7);
-/// `BAUD` can't move Bluetooth off 115200 (LINK-25).
+/// HELLO over Bluetooth answers on Bluetooth, not the cable; with no PIN lock the session may go on at once
+/// (LINK-7, LINK-30); `BAUD` can't move Bluetooth off 115200 (LINK-25).
 #[test]
 fn link_over_bluetooth() {
     let (mut sim, mut t) = radio();
-    let a = ask_bt(&mut sim, &mut t, msg::HELLO, 1, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let a = ask_bt(&mut sim, &mut t, msg::HELLO, 1, &[PROTOCOL]);
     assert_eq!(&a[..2], &[0, PROTOCOL]);
-    assert_eq!(a[3], 0, "not approved: it reads, and asks before writing");
+    assert_eq!(a[3], 1, "no PIN lock: no AUTH needed");
     assert!(sim.term_take().is_empty(), "nothing on the cable");
     let b = ask_bt(&mut sim, &mut t, msg::BAUD, 2, &921_600u32.to_le_bytes());
     assert_ne!(b[0], 0, "refused");

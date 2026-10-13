@@ -764,14 +764,6 @@ impl App {
         self.open(Dest::SsbConfirm);
     }
 
-    /// The Link task: the first write from a device not approved yet (LINK-7, SAFE-6). The answer comes back
-    /// through [`App::take_link_answer`].
-    pub fn link_write_request(&mut self) {
-        if !matches!(self.screen, Screen::Link(l) if l.page == screens::link::LinkPage::Approve) {
-            self.open(Dest::WriteApproval);
-        }
-    }
-
     /// The Link task: a write session is running (LINK-9): its progress screen (the percentage is the
     /// Device's `link.write_pct`), keys ignored but BACK, which cancels.
     pub fn link_write_progress(&mut self) {

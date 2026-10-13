@@ -92,7 +92,7 @@ V = V/M, Q = SIDE1, W = SIDE2, Space = PTT A, `[` `]` = knob.
 | 5 | The power switch, same as clicking VOL (F8): off shows "Saving…", then dark; on boots again |
 | 6 | Empty battery (F9) |
 | 7 | An unknown SSB patch at boot (F10) |
-| 8 | A write from a new Bluetooth device (F11) |
+| 8 | A write from the web app: the progress screen (F11) |
 | 9 | Crossband repeater (X) |
 | 10 | Next home layout (L) |
 | 11 | A beacon, an automatic transmit (B) |
