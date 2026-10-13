@@ -573,8 +573,15 @@ impl Radio {
             }
             return;
         }
+        // Battery Save asleep: only its phase change runs (PWR-*). Returning before it, as this did, left its wake
+        // time in the past, so the main loop's wait fired at once forever: the Radio task spun above the UI and the
+        // receivers never woke (on the black radio, Oct 12, 2026, once real squelch thresholds let it sleep).
         if self.save.asleep() {
-            return;
+            let a = self.save.tick(now_ms(), false);
+            self.apply(a).await;
+            if self.save.asleep() {
+                return;
+            }
         }
         let now = now_ms() as u32;
         if self.counter.is_some() {
@@ -1204,6 +1211,8 @@ pub async fn task() {
         if !r.save.asleep() || r.hf.is_some() {
             at = at.min(now_ms() + if r.busy() { TICK_MS } else { POLL_MS });
         }
+        // Never wait on a time already past: that wait fires at once, and this task runs above the UI.
+        at = at.max(now_ms() + 1);
         match select3(RADIO.receive(), Timer::at(Instant::from_millis(at)), DEBUG_REQ.receive()).await {
             Either3::First(c) => r.cmd(c).await,
             Either3::Second(()) => r.tick().await,
