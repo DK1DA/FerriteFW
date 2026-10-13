@@ -709,6 +709,14 @@ fn command_line_set_and_get() {
     assert!(r.app.aprs_cfg().custom_text().is_empty());
     r.cmd("set 0 4 8 off");
     assert!(!r.app.set.popups);
+    // A wired value (the backlight timeout) is matched too, and a wrong one lists the choices and changes
+    // nothing (on the radio, Oct 12, 2026, it listed them run together and left the timeout one step on).
+    r.cmd("set 0 7 4 1 10 s");
+    assert!(r.bottom().contains("Timeout: 10 s"), "{}", r.bottom());
+    let bl = r.app.set.backlight;
+    r.cmd("set 0 7 4 1 7 s");
+    assert!(r.bottom().contains("one of 10 s, 15 s"), "{}", r.bottom());
+    assert_eq!(r.app.set.backlight, bl, "a refused value changes nothing");
 }
 
 /// Every refusal says what was wrong and how to put it right; nothing changes.

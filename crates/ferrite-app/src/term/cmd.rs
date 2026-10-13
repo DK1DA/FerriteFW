@@ -915,6 +915,7 @@ fn path_text<const N: usize>(p: &[u8], out: &mut Buf<N>) {
 }
 
 fn value(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> bool {
+    *b = Buf::new(); // some wired values push: start empty, or the knob loop never sees its start again
     match groups::wired(app, dev, p, b) {
         Some(d) => d,
         None => {
