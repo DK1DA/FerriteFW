@@ -311,6 +311,22 @@ fn tune_writes_stocks_am_and_fm() {
     assert_eq!(bus.last(reg::FREQ_LO).map(|lo| lo as u32 | (bus.regs[reg::FREQ_HI as usize] as u32) << 16), Some(VHF));
 }
 
+/// SND-2, RX audio level: every receive setup writes stock's REG_48 0xB2BF (Gain2 -4.5 dB, AF DAC 15), FM wide,
+/// narrow and AM alike; the start-up 0xB3FF (+3.5 dB) distorted receive audio on the radio (Oct 12, 2026). The wide
+/// filter is stock's 0x3028, narrow 0x4008, and the AF route is written whole (0x6042 muted).
+#[test]
+fn tune_writes_stocks_receive_level() {
+    for (narrow, am, filter) in [(false, false, 0x3028), (true, false, 0x4008), (false, true, 0x3028)] {
+        let mut b = bk();
+        chip::tune(&mut b, &RxSetup { freq: if am { mhz(118) + 95_000 } else { VHF }, narrow, am, rx_tone: 0, rx_tail: false });
+        let bus = b.release();
+        assert_eq!(bus.last(reg::AF_GAIN), Some(bk4829::AF_GAIN_RX), "REG_48 (narrow {narrow}, am {am})");
+        assert_eq!(bk4829::AF_GAIN_RX, 0xB2BF);
+        assert_eq!(bus.last(reg::RF_FILTER), Some(filter));
+        assert_eq!(bus.last(reg::AF_OUT), Some(0x6042), "muted, whole register");
+    }
+}
+
 /// CHAN-3, TONE-6: the receive tone word picks the detector: 0 none (REG_51 0), CTCSS in 0.1 Hz, bit 15 DCS (the
 /// 134.4 Hz word in REG_07), and no tone with tail elimination on listens for the 55 Hz tail (stock's REG_07 0x21CD).
 #[test]

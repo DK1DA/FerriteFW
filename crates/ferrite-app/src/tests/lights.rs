@@ -10,6 +10,7 @@ fn dev(pct: u8, low: bool) -> Device {
 #[test]
 fn dark_and_wake() {
     let mut t = T::new();
+    t.app.set.backlight = 3; // 15 s: the times below are written for it
     t.wait(16_000);
     assert!(t.app.dark(), "15 s by default");
     let f = t.freq();
@@ -38,6 +39,7 @@ fn dark_and_wake() {
 #[test]
 fn led_heartbeat() {
     let mut t = T::new();
+    t.app.set.backlight = 3; // 15 s: the times below are written for it
     t.live.tx.keyed = true;
     let l = t.app.leds(&t.live, &dev(90, false));
     assert!(l.red && !l.green);
@@ -113,6 +115,7 @@ fn auto_power_off() {
 #[test]
 fn keypad_light() {
     let mut t = T::new();
+    t.app.set.backlight = 3; // 15 s: the times below are written for it
     assert!(t.app.keypad_lit(), "with the screen");
     t.wait(16_000);
     assert!(!t.app.keypad_lit());

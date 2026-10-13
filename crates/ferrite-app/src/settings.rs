@@ -272,7 +272,7 @@ pub const SLEEP_TIMES: [u8; 7] = [0, 15, 30, 45, 60, 90, 120];
 pub const TONE_LEVELS: [&str; 3] = ["Low", "Normal", "High"];
 
 /// 0 7 4 1's values, seconds (0 never).
-pub const BACKLIGHT_TIMES: [u16; 6] = [0, 5, 10, 15, 30, 60];
+pub const BACKLIGHT_TIMES: [u16; 9] = [0, 5, 10, 15, 30, 60, 120, 300, 600];
 /// 0 7 4 5's values.
 pub const KEYPAD_LIGHTS: [&str; 4] = ["Off", "With screen", "On key press", "Always"];
 /// 0 7 6's values: the heartbeat is the dark-screen flash in the battery's colour.
@@ -363,7 +363,7 @@ impl Settings {
         aprs_mode: false,
         predictive: true,
         link_tokens: [[0; 8]; crate::link::TOKENS],
-        backlight: 3,
+        backlight: 5, // 60 s (15 s felt short on the radio, Oct 12, 2026)
         keypad_light: 1,
         leds: 2,
         auto_off: 0,

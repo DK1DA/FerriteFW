@@ -86,7 +86,8 @@ fn checks(dev: &Device) -> [(&'static str, Option<bool>); 6] {
         ("SPI flash", read(t.flash_id, t.flash_mb > 0)),
         ("BK4829 VHF", Some(t.chips & 1 != 0)),
         ("BK4829 UHF", Some(t.chips & 2 != 0)),
-        ("SI4732", Some(t.si4732)),
+        // The SI4732 isn't tested at boot (it stays powered down until FM or HF mode): "Not run" until it answers.
+        ("SI4732", t.si4732.then_some(true)),
         ("Calibration", (t.cal != CalState::Unknown).then_some(t.cal == CalState::Ok)),
     ]
 }
@@ -104,7 +105,7 @@ fn volts(b: &mut Buf<40>, mv: u16) {
 }
 
 slow_table! {
-    ABOUT: [InfoRow; 9] = [
+    ABOUT: [InfoRow; 10] = [
         // SELF-5: version and build (the git commit; "+" built from uncommitted changes).
         (slow!("Version"), |_, b| {
             let _ = uwrite!(b, "{} {}", VERSION, ferrite_core::build());
@@ -144,6 +145,14 @@ slow_table! {
         (slow!("Battery"), |Ctx { dev: d, .. }, b| {
             volts(b, d.battery_mv); // the trim is on Calibration and trims
             TEXT
+        }),
+        // SBAR-20: the MCU's die temperature (the Radio task reads it every 10 s).
+        (slow!("MCU temp"), |Ctx { dev: d, .. }, b| match d.mcu_temp {
+            Some(c) => {
+                let _ = uwrite!(b, "{} \u{b0}C", c);
+                TEXT
+            }
+            None => fixed(b, slow!("Not read yet"), SUB),
         }),
         (slow!("Uptime"), |Ctx { app: a, .. }, b| {
             let m = a.now / 60_000;
@@ -229,7 +238,7 @@ fn def(p: Page) -> PageDef {
         Page::About => PageDef {
             title: "About",
             rows: &ABOUT,
-            note: "Updating: hold the bottom two side buttons while switching on for the stock bootloader, then use the web flasher.",
+            note: "Updating: hold PF1 + PF2 while switching on, then use the web flasher.",
             hints: &[(ARROWS_LR, "Help"), ("BACK", "Back")],
         },
         Page::Checks => PageDef {

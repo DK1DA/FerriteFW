@@ -30,6 +30,7 @@ pub fn tune<B: Bus>(bk: &mut Bk4829<B>, s: &RxSetup) {
     bk.demod(if s.am { Demod::Am } else { Demod::Fm });
     subtone(bk, s.rx_tone, s.rx_tail);
     bk.af_out(AfOut::Mute);
+    bk.af_gain_rx(); // REG_48 0xB2BF, stock's receive level (RX-* / SND-2: the knob is the volume)
     bk.rx_on();
 }
 
