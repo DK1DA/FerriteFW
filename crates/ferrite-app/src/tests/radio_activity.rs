@@ -1294,3 +1294,35 @@ fn popups_setting() {
     reset(&mut t.app, &[4, 8]);
     assert!(t.app.set.popups);
 }
+
+/// SCOPE-7, HOME-3: the scope screen and home's scope strip redraw their bars in place (no blank first: it
+/// flickered on the radio, Oct 12, 2026) and end up exactly as a fresh full redraw, through changing sweeps.
+#[test]
+fn scope_bars_redraw_in_place() {
+    use ferrite_ui::fb::FrameBuffer;
+    let same = |t: &mut T, fb: &mut FrameBuffer, what: &str| {
+        t.render(fb);
+        let mut fresh = FrameBuffer::new();
+        t.app.redraw_all();
+        t.render(&mut fresh);
+        for y in 0..320 {
+            for x in 0..240 {
+                assert_eq!(fb.at(x, y), fresh.at(x, y), "{what}: stale pixel at {x},{y}");
+            }
+        }
+    };
+    for layout_strip in [false, true] {
+        let mut t = ready();
+        let mut fb = FrameBuffer::new();
+        if layout_strip {
+            t.app.set.layout = 1;
+        } else {
+            t.hold(Key::Digit(1)); // the scope screen
+        }
+        let c = t.freq();
+        for (k, (at, peak)) in [(10usize, 30u8), (40, 5), (25, 60), (59, 0)].into_iter().enumerate() {
+            scope_live(&mut t, c, at, peak, k as u8, false, 0);
+            same(&mut t, &mut fb, if layout_strip { "home strip" } else { "scope screen" });
+        }
+    }
+}

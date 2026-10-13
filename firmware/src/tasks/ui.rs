@@ -571,7 +571,11 @@ fn log_live(l: &LiveAll) {
 /// Bring-up log: what the boot found.
 fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
     bringup::linef(|b| {
-        let _ = ufmt::uwrite!(b, "Ferrite {} bring-up build: nothing is written to the SPI flash", VERSION);
+        if cfg!(feature = "bringup") {
+            let _ = ufmt::uwrite!(b, "Ferrite {} bring-up build: nothing is written to the SPI flash", VERSION);
+        } else {
+            let _ = ufmt::uwrite!(b, "Ferrite {} {}", VERSION, ferrite_core::build());
+        }
     });
     bringup::linef(|b| {
         b.push(b"MCU idcode ");

@@ -347,18 +347,17 @@ impl View for Scope {
                 continue;
             }
             let x0 = g as i32 * 40;
-            lcd.fill(x0, TOP - 8, 40, H + 8, BG);
+            // Each bar column is built in a buffer and sent once, so no pixel is blanked and redrawn: blanking the
+            // group first flickered on the radio (Oct 12, 2026). Columns are at most 10 px wide (bw = 240 / n).
+            const ROWS: usize = (H + 8) as usize;
+            let map = ferrite_ui::theme::map;
+            let dash = |x: i32| lh > 0 && (x - x0) % 5 < 3;
             for (k, &v) in r.iter().enumerate() {
                 let i = a + k;
                 let bx = x0 + k as i32 * bw;
-                if v == 0 {
-                    lcd.fill(bx, TOP, bw, H, SURFACE); // SCOPE-5: the other chip or relay state
-                    continue;
-                }
-                if i == n / 2 {
-                    lcd.fill(bx + bw / 2, TOP, 1, H, BLUE);
-                }
-                let h = bar_h(v, floor);
+                let w = bw.min(10) as usize;
+                let mut col = [0u16; 10 * ROWS];
+                let h = if v == 0 { 0 } else { bar_h(v, floor) };
                 let c = if i == m {
                     AMBER
                 } else if has_l == Some(i as i32) {
@@ -368,18 +367,37 @@ impl View for Scope {
                 } else {
                     rgb565(0x4D, 0x80, 0xC0)
                 };
-                lcd.fill(bx, BASE - h, if bw >= 4 { bw - 1 } else { bw }, h, c);
+                let bar_w = if bw >= 4 { bw - 1 } else { bw } as usize;
+                for row in 0..ROWS {
+                    let y = TOP - 8 + row as i32;
+                    for x in 0..w {
+                        // Topmost first, as the old drawing order left them: the trigger dashes over everything, then
+                        // a blank bar's surface, the bar, the centre line, the background.
+                        let px = if y == BASE - lh && dash(bx + x as i32) {
+                            RED
+                        } else if v == 0 && y >= TOP {
+                            SURFACE // SCOPE-5: the other chip or relay state
+                        } else if v != 0 && y >= BASE - h && x < bar_w {
+                            c
+                        } else if v != 0 && i == n / 2 && y >= TOP && x == w / 2 {
+                            BLUE
+                        } else {
+                            BG
+                        };
+                        col[row * w + x] = map(px);
+                    }
+                }
+                lcd.window(bx, TOP - 8, bx + w as i32 - 1, BASE - 1);
+                lcd.push_buf(&col[..w * ROWS]);
+            }
+            // Past the last bar of the group: background, unchanged pixels.
+            let used = (r.len() as i32) * bw;
+            if used < 40 {
+                lcd.fill(x0 + used, TOP - 8, 40 - used, H + 8, BG);
             }
             if let Some(i) = has_m {
                 let cx = x0 + (i - a) as i32 * bw + bw / 2;
                 lcd.tri((cx - 3).clamp(x0, x0 + 33), TOP - 8, 7, 1, AMBER);
-            }
-            if lh > 0 {
-                let mut x = x0;
-                while x < x0 + 40 {
-                    lcd.fill(x, BASE - lh, 3, 1, RED);
-                    x += 5;
-                }
             }
         }
         // Waterfall (0 3 2 5): one row per sweep, wrapping; the next row's place shows dark.
@@ -488,17 +506,21 @@ const MID: i32 = STRIP_BARS as i32 / 2;
 
 /// The small scope under the active slot (home, single + scope; HOME-3): bars, the centre in blue, the edges.
 pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32, centre: Freq10, step: u16, bars: &[u8]) {
-    if !app.dirty(region, hash(&(bars, centre))) {
-        return;
+    // The bars change every point: each is drawn as background above and colour below, two fills that don't
+    // overlap, never blanked first (blanking the strip flickered on the radio, Oct 12, 2026). The frame, axis and
+    // labels only when the strip is first drawn or the centre moves.
+    let Some(clear) = app.dirty_shape(region, hash(&(bars, centre)), true) else { return };
+    if clear {
+        lcd.fill(0, y, 240, h + 18, BG);
+        lcd.fill(X0, y + h, 224, 1, LINE);
     }
-    lcd.fill(0, y, 240, h + 18, BG);
     for (i, &v) in bars.iter().enumerate() {
         let bx = X0 + i as i32 * 4;
         let bh = parts::level_h(v, h).max(2);
         let c = if i as i32 == MID { BLUE } else { DIM };
+        lcd.fill(bx, y, 3, h - bh, BG);
         lcd.fill(bx, y + h - bh, 3, bh, c);
     }
-    lcd.fill(X0, y + h, 224, 1, LINE);
     let half = step as u32 * MID as u32;
     let mut a = Buf::<40>::new();
     a.push(b"-");
