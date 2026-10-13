@@ -117,6 +117,8 @@ pub struct Rsq {
     pub rssi: u8,
     pub snr: u8,
     pub valid: bool,
+    /// FM: the stereo pilot is present (FM_RSQ_STATUS resp3 bit 7, PILOT).
+    pub stereo: bool,
 }
 
 /// SSB settings (SSB_MODE property).
@@ -348,7 +350,7 @@ impl<B: I2c> Si4732<B> {
         let mut r = [0u8; 6];
         let op = self.op(FM_RSQ_STATUS)?;
         self.command(&[op, 0x00], &mut r, delay)?;
-        Ok(Rsq { valid: r[2] & 1 != 0, rssi: r[4], snr: r[5] })
+        Ok(Rsq { valid: r[2] & 1 != 0, rssi: r[4], snr: r[5], stereo: r[3] & 0x80 != 0 })
     }
 
     /// One RDS group from the receiver's FIFO, if it has one.

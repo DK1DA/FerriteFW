@@ -87,7 +87,7 @@ fn fm_tune_by_polling_and_rds() {
     };
     assert_eq!(polls, 4);
     assert_eq!(t, Tune { freq: 0x2710, rssi: 45, snr: 20, valid: true });
-    assert_eq!(si.rsq(&mut d).unwrap(), Rsq { rssi: 30, snr: 12, valid: true });
+    assert_eq!(si.rsq(&mut d).unwrap(), Rsq { rssi: 30, snr: 12, valid: true, stereo: false });
     let g = si.rds_read(&mut d).unwrap().unwrap();
     assert_eq!(g.blocks, [0x1234, 0x0002, 0xABCD, 0x4142]);
     let w = writes(&si.release().txns);
