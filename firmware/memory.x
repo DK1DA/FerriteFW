@@ -49,6 +49,9 @@ SECTIONS
     *(.text.*10ferrite_ui3gfx*);
     *(.text.*10ferrite_ui5font4*);
     *(.text.*10ferrite_ui5panel*);
+    /* the off-screen canvas's band (DISP-25): drawing into it is per-pixel work too */
+    *(.text.*10ferrite_ui6canvas4Band*3gfx3Gfx*);
+    *(.text.*10ferrite_ui6canvasNtB*4Band*);
     . = ALIGN(4);
     __efast_ui = .;
   } > FLASH

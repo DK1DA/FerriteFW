@@ -328,17 +328,18 @@ impl View for Setup {
         app.new_page(lcd, hash(&page));
         // Top bar: "Setup 2 of 8" and eight dashes, the pages so far in blue.
         if app.dirty(R_LINE, hash(&(page, single))) {
-            lcd.fill(0, 0, 240, 19, BG);
-            let x = 8 + lcd.text4(8, 14, b"Setup", &UI_12B, TEXT, BG);
-            if !single {
-                let mut t = Buf::<12>::new();
-                let _ = uwrite!(t, " {} of {}", page + 1, PAGES.len());
-                lcd.text4(x, 14, t.as_bytes(), &UI_12, SUB, BG);
-                for i in 0..8 {
-                    lcd.fill_r(154 + 10 * i, 8, 7, 3, 1, if i <= page as i32 { BLUE } else { LINE });
+            ferrite_ui::canvas::banded(lcd, 0, 0, 240, 19, BG, |lcd| {
+                let x = 8 + lcd.text4(8, 14, b"Setup", &UI_12B, TEXT, BG);
+                if !single {
+                    let mut t = Buf::<12>::new();
+                    let _ = uwrite!(t, " {} of {}", page + 1, PAGES.len());
+                    lcd.text4(x, 14, t.as_bytes(), &UI_12, SUB, BG);
+                    for i in 0..8 {
+                        lcd.fill_r(154 + 10 * i, 8, 7, 3, 1, if i <= page as i32 { BLUE } else { LINE });
+                    }
                 }
-            }
-            lcd.fill(0, 19, 240, 1, LINE);
+                lcd.fill(0, 19, 240, 1, LINE);
+            });
         }
         // Heading and text.
         let (head, text, _) = PAGES[page as usize];
@@ -374,10 +375,11 @@ impl View for Setup {
                     lcd.fill(10, 246, 220, 1, LINE);
                     let sel = row == REGION_ROWS;
                     let bg = if sel { FOCUS } else { BG };
-                    lcd.fill(0, 247, 240, 23, BG);
-                    lcd.fill_r(4, 248, 232, 21, 1, bg);
-                    w::field(lcd, 10, 120, 249, 267, 262, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
-                    w::field(lcd, 130, 100, 249, 267, 262, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
+                    ferrite_ui::canvas::banded(lcd, 0, 247, 240, 23, BG, |lcd| {
+                        lcd.fill_r(4, 248, 232, 21, 1, bg);
+                        w::field(lcd, 10, 120, 249, 267, 262, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
+                        w::field(lcd, 130, 100, 249, 267, 262, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
+                    });
                     w::wrap(lcd, 10, 220, 270, 300, 283, 15, b"On: transmit wherever the radio can, not only amateur bands. Warns first.", &UI_12, SUB, BG);
                 }
             }
@@ -495,54 +497,57 @@ impl View for Setup {
 /// A choice in a rounded box: name at the left, a note at the right; the chosen one blue-edged (SetupRegion).
 fn choice(lcd: &mut impl Panel, y: i32, h: i32, name: &[u8], note: &[u8], sel: bool) {
     let (bg, edge) = if sel { (FOCUS, BLUE) } else { (BG, LINE) };
-    lcd.fill(0, y - 2, 240, h + 4, BG);
-    lcd.fill_r(10, y, 220, h, 1, bg);
-    lcd.frame_r(10, y, 220, h, 1, edge);
-    let base = y + h / 2 + 5;
-    w::field(lcd, 17, 120, y + 2, y + h - 2, base, Align::Left, name, &UI_12, TEXT, bg);
-    w::field(lcd, 137, 86, y + 2, y + h - 2, base, Align::Right, note, &UI_12, SUB, bg);
+    ferrite_ui::canvas::banded(lcd, 0, y - 2, 240, h + 4, BG, |lcd| {
+        lcd.fill_r(10, y, 220, h, 1, bg);
+        lcd.frame_r(10, y, 220, h, 1, edge);
+        let base = y + h / 2 + 5;
+        w::field(lcd, 17, 120, y + 2, y + h - 2, base, Align::Left, name, &UI_12, TEXT, bg);
+        w::field(lcd, 137, 86, y + 2, y + h - 2, base, Align::Right, note, &UI_12, SUB, bg);
+    });
 }
 
 /// A text field in a box: label above, the text with a cursor when focused (SetupCall); `big` for the callsign.
 fn text_box(lcd: &mut impl Panel, y: i32, h: i32, label: &[u8], text: &[u8], focused: bool, big: bool) {
     let edge = if focused { BLUE } else { LINE };
-    lcd.fill(0, y - 1, 240, h + 2, BG);
-    lcd.frame_r(10, y, 220, h, 2, edge);
-    lcd.text4_rows(18, y + 14, label, &UI_12, SUB, BG, y + 1, y + 18);
-    let (f, base) = if big { (&UI_15B, y + 37) } else { (&UI_12, y + 30) };
-    let tw = lcd.text4_rows(18, base, w::fit(text, f, 196), f, TEXT, BG, y + 18, y + h - 1);
-    if focused {
-        let ch = if big { 16 } else { 13 };
-        lcd.fill(19 + tw, base - ch + 2, if big { 6 } else { 5 }, ch, TEXT);
-    }
+    ferrite_ui::canvas::banded(lcd, 0, y - 1, 240, h + 2, BG, |lcd| {
+        lcd.frame_r(10, y, 220, h, 2, edge);
+        lcd.text4_rows(18, y + 14, label, &UI_12, SUB, BG, y + 1, y + 18);
+        let (f, base) = if big { (&UI_15B, y + 37) } else { (&UI_12, y + 30) };
+        let tw = lcd.text4_rows(18, base, w::fit(text, f, 196), f, TEXT, BG, y + 18, y + h - 1);
+        if focused {
+            let ch = if big { 16 } else { 13 };
+            lcd.fill(19 + tw, base - ch + 2, if big { 6 } else { 5 }, ch, TEXT);
+        }
+    });
 }
 
 /// A small picture of a home layout (0 watch, 1 single + scope, 2 watch + activity), 68 x 90.
 fn preview(lcd: &mut impl Panel, x: i32, y: i32, which: u8, chosen: bool, focus: bool) {
     let edge = if chosen { if focus { BLUE } else { SUB } } else { LINE };
-    lcd.fill(x, y, 68, 90, BG);
-    lcd.frame_r(x, y, 68, 90, 2, edge);
-    let cards: &[(i32, i32)] = match which {
-        0 => &[(6, 36), (45, 18), (66, 18)],
-        1 => &[(6, 36)],
-        _ => &[(6, 36), (45, 18)],
-    };
-    for &(dy, h) in cards {
-        lcd.fill(x + 5, y + dy, 58, h, SURFACE);
-    }
-    if which == 1 {
-        // the scope's bars
-        for (i, h) in [6, 10, 4, 18, 30, 12, 5, 8, 22, 6, 4, 9].into_iter().enumerate() {
-            lcd.fill(x + 7 + 5 * i as i32, y + 84 - h, 3, h, BLUE);
+    ferrite_ui::canvas::banded(lcd, x, y, 68, 90, BG, |lcd| {
+        lcd.frame_r(x, y, 68, 90, 2, edge);
+        let cards: &[(i32, i32)] = match which {
+            0 => &[(6, 36), (45, 18), (66, 18)],
+            1 => &[(6, 36)],
+            _ => &[(6, 36), (45, 18)],
+        };
+        for &(dy, h) in cards {
+            lcd.fill(x + 5, y + dy, 58, h, SURFACE);
         }
-    } else if which == 2 {
-        // the activity lines
-        for i in 0..3 {
-            lcd.fill(x + 7, y + 70 + 6 * i, 40 - 8 * i, 2, SUB);
+        if which == 1 {
+            // the scope's bars
+            for (i, h) in [6, 10, 4, 18, 30, 12, 5, 8, 22, 6, 4, 9].into_iter().enumerate() {
+                lcd.fill(x + 7 + 5 * i as i32, y + 84 - h, 3, h, BLUE);
+            }
+        } else if which == 2 {
+            // the activity lines
+            for i in 0..3 {
+                lcd.fill(x + 7, y + 70 + 6 * i, 40 - 8 * i, 2, SUB);
+            }
         }
-    }
-    // the active card's frequency bar
-    lcd.fill(x + 9, y + 14, 34, 6, if chosen { TEXT } else { SUB });
+        // the active card's frequency bar
+        lcd.fill(x + 9, y + 14, 34, 6, if chosen { TEXT } else { SUB });
+    });
 }
 
 /// The Extend TX warning (A19, SETUP-8, TX-2), shown once before Extend TX turns on. OK turns it on, BACK keeps

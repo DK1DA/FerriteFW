@@ -172,10 +172,11 @@ impl View for Fm {
         let f = app.set.fm_freq;
         if app.dirty(R_FREQ, hash(&(f, stereo))) {
             w::field(lcd, 10, 120, 24, 42, 38, Align::Left, b"FM broadcast", &UI_12, SUB, BG);
-            lcd.fill(130, 24, 102, 18, BG);
-            if stereo {
-                w::tag(lcd, 230, 25, b"STEREO", SUB, BG);
-            }
+            ferrite_ui::canvas::banded(lcd, 130, 24, 102, 18, BG, |lcd| {
+                if stereo {
+                    w::tag(lcd, 230, 25, b"STEREO", SUB, BG);
+                }
+            });
             let mut t = Buf::<8>::new();
             let _ = uwrite!(t, "{}.{}", f / 100, f % 100 / 10);
             if !f.is_multiple_of(10) {
@@ -183,9 +184,10 @@ impl View for Fm {
             }
             let tw = text4_width(t.as_bytes(), &DIG_46) + 6 + text4_width(b"MHz", &UI_12B);
             let x = 120 - tw / 2;
-            lcd.fill(0, 48, 240, 52, BG);
-            let x2 = x + lcd.text4_rows(x, 96, t.as_bytes(), &DIG_46, TEXT, BG, 48, 100);
-            lcd.text4(x2 + 6, 96, b"MHz", &UI_12B, SUB, BG);
+            ferrite_ui::canvas::banded(lcd, 0, 48, 240, 52, BG, |lcd| {
+                let x2 = x + lcd.text4_rows(x, 96, t.as_bytes(), &DIG_46, TEXT, BG, 48, 100);
+                lcd.text4(x2 + 6, 96, b"MHz", &UI_12B, SUB, BG);
+            });
         }
         // RDS: the station name and radio text (BCR-2), and the preset this frequency is stored in. Without
         // RDS, no empty box: one quiet line.
@@ -201,16 +203,17 @@ impl View for Fm {
             }
         }
         if app.dirty(R_INFO, hash(&(ps, rt, pre))) {
-            lcd.fill(0, 108, 240, 80, BG);
-            if ps.is_empty() && rt.is_empty() {
-                w::field(lcd, 16, 208, 114, 136, 132, Align::Center, pre.as_bytes(), &UI_15B, TEXT, BG);
-                w::field(lcd, 16, 208, 138, 156, 152, Align::Center, b"No RDS", &UI_12, DIM, BG);
-            } else {
-                lcd.fill_r(8, 110, 224, 74, 2, SURFACE);
-                w::field(lcd, 16, 208, 114, 136, 132, Align::Left, ps, &UI_15B, TEXT, SURFACE);
-                w::wrap(lcd, 16, 208, 138, 166, 152, 15, rt, &UI_12, SUB, SURFACE);
-                w::field(lcd, 16, 208, 166, 182, 178, Align::Left, pre.as_bytes(), &UI_12, DIM, SURFACE);
-            }
+            ferrite_ui::canvas::banded(lcd, 0, 108, 240, 80, BG, |lcd| {
+                if ps.is_empty() && rt.is_empty() {
+                    w::field(lcd, 16, 208, 114, 136, 132, Align::Center, pre.as_bytes(), &UI_15B, TEXT, BG);
+                    w::field(lcd, 16, 208, 138, 156, 152, Align::Center, b"No RDS", &UI_12, DIM, BG);
+                } else {
+                    lcd.fill_r(8, 110, 224, 74, 2, SURFACE);
+                    w::field(lcd, 16, 208, 114, 136, 132, Align::Left, ps, &UI_15B, TEXT, SURFACE);
+                    w::wrap(lcd, 16, 208, 138, 166, 152, 15, rt, &UI_12, SUB, SURFACE);
+                    w::field(lcd, 16, 208, 166, 182, 178, Align::Left, pre.as_bytes(), &UI_12, DIM, SURFACE);
+                }
+            });
         }
         // Signal and SNR.
         let lit = (rssi as u32 * w::METER_SEGS as u32 / 70).min(w::METER_SEGS as u32) as u8;

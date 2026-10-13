@@ -14,6 +14,7 @@ use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
 use ferrite_core::msg::{RadioCmd, SLOTS};
 use ferrite_ui::assets::*;
+use ferrite_ui::canvas;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
@@ -55,10 +56,9 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
     app.drawn.meter[p] = None;
     if big {
         if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, 1u8)), true) {
-            if clear {
-                lcd.fill(15, y + 28, 211, 49, SURFACE);
-            }
-            w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+            redraw_box!(clear, lcd, (15, y + 28, 211, 49, SURFACE), {
+                w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+            });
         }
         if app.dirty(R_INFO + p, hash(&last)) {
             w::field(lcd, 15, 211, y + 80, y + 98, y + 94, Align::Left, w::fit(last.as_bytes(), &UI_12, 211), &UI_12, TEXT, SURFACE);
@@ -71,16 +71,16 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
         }
     } else {
         if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, &heard, 1u8)), true) {
-            if clear {
-                lcd.fill(15, y + 25, 211, 24, SURFACE);
-            }
-            w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
-            w::field(lcd, 130, 96, y + 29, y + 47, y + 45, Align::Right, heard.as_bytes(), &UI_12, TEXT, SURFACE);
+            redraw_box!(clear, lcd, (15, y + 25, 211, 24, SURFACE), {
+                w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+                w::field(lcd, 130, 96, y + 29, y + 47, y + 45, Align::Right, heard.as_bytes(), &UI_12, TEXT, SURFACE);
+            });
         }
         let (line, c) = if waiting { (beacon.as_bytes(), AMBER) } else { (last.as_bytes(), SUB) };
         if app.dirty(R_SUB + p, hash(&(line, c))) {
-            lcd.fill(15, y + 51, 211, 15, SURFACE);
-            w::field(lcd, 15, 211, y + 51, y + 65, y + 61, Align::Left, w::fit(line, &UI_12, 211), &UI_12, c, SURFACE);
+            ferrite_ui::canvas::banded(lcd, 15, y + 51, 211, 15, SURFACE, |lcd| {
+                w::field(lcd, 15, 211, y + 51, y + 65, y + 61, Align::Left, w::fit(line, &UI_12, 211), &UI_12, c, SURFACE);
+            });
         }
     }
 }
@@ -223,7 +223,6 @@ impl View for Home {
             2 => return super::layouts::activity(app, lcd, cx),
             _ => {}
         }
-        let live = cx.live;
         // The large card moved (SLOT): the gaps between cards moved too, so clear them and draw every card again;
         // otherwise slivers of the old large card stay behind (HOME-11). Only the gaps: each card paints its own
         // rectangle (clearing the whole area first was one of five passes over it, slow on the radio's bus).
@@ -241,190 +240,21 @@ impl View for Home {
             app.drawn.meter = [None; SLOTS];
         }
         for s in 0..SLOTS as u8 {
-            // Fixed order A, B, C: the card's region index is its slot.
             let p = s as usize;
             let (y, h) = card(s, app.active);
-            let big = s == app.active;
-            let lv = live.slots[s as usize];
-            let (state, sc) = app.state(s, live);
-            let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
-            let aprs = app.aprs_slot(s);
-            if app.dirty(R_FRAME + p, hash(&(s, y, h, border, aprs))) {
-                // The background only where the rounded corners leave it showing (3 px squares), not the whole card.
-                for (cx, cy) in [(6, y), (231, y), (6, y + h - 3), (231, y + h - 3)] {
-                    lcd.fill(cx, cy, 3, 3, BG);
-                }
-                lcd.fill_r(6, y, 228, h, 3, SURFACE);
-                lcd.frame_r(6, y, 228, h, 3, border);
-                for r in [R_HEAD, R_FREQ, R_INFO, R_SUB] {
-                    app.drawn.hash[r + p] = 0;
-                }
-                app.drawn.hash[R_FREQ + p] = FRESH; // the frequency box is plain surface: no blank needed
-                app.drawn.meter[p] = None;
-            }
-            // Header: letter, VFO/CH/SCAN and band, the state at the right (HOME-4, HOME-5).
-            let mut head = Buf::<32>::new();
-            app.head_text(s, live, &mut head);
-            let cfg = *app.slots[s as usize].cfg();
-            if big && cfg.split && !lv.scanning {
-                // A split's TX frequency takes the band's place in the header: its chip slot only says SPLIT.
-                let n = head.as_bytes().iter().position(|&c| c == b' ').unwrap_or(head.len());
-                let mut h = Buf::<32>::new();
-                h.push(&head.as_bytes()[..n]);
-                h.push(" \u{b7} TX ".as_bytes());
-                h.push(slot::mhz3(cfg.offset.max(0) as Freq10).as_bytes());
-                head = h;
-            }
-            // Header rows: y+7..y+24 on the big card, y+5..y+22 on the compact ones (their digits start at y+25).
-            let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 5, y + 18) };
-            // Beside the state (left of an RX or MON tag): the clarifier (VFO-22), or on the APRS card that it takes
-            // turns on chip 0 with A or B, so a packet can be missed (APRS-21).
-            let mut clr = Buf::<16>::new();
-            let c = app.slots[s as usize].clar;
-            if aprs && app.aprs_shared().is_some() {
-                clr.set(b"VHF shared");
-            } else if c != 0 && !lv.scanning {
-                slot::clar_text(c, &mut clr);
-            }
-            // TSRCH-13: a tone hint takes the state's place, in a wider field.
-            let heard = state == "heard";
-            let mut ht = Buf::<16>::new();
-            if heard {
-                heard_text(lv.heard_tone, &mut ht);
-            }
-            if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, &ht))) {
-                w::badge(lcd, 14, hy + 1, s, big, SURFACE);
-                lcd.fill(28, hy, 6, 17, SURFACE);
-                let hw = if heard { 226 - HEARD_W - 34 } else { 120 };
-                w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, SUB, SURFACE);
-                if heard {
-                    let top = if big { y + 6 } else { hy };
-                    lcd.fill(226 - HEARD_W, top, HEARD_W + 2, 18, SURFACE);
-                    w::field(lcd, 226 - HEARD_W, HEARD_W, hy, hy + 17, hb, Align::Right, ht.as_bytes(), &UI_12, sc, SURFACE);
-                } else if big {
-                    lcd.fill(154, y + 6, 74, 18, SURFACE);
-                    let tagged = state == "RX" || state == "MON";
-                    if tagged {
-                        w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
-                    } else if state != "idle" {
-                        w::field(lcd, 154, 72, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
-                    }
-                    if !clr.is_empty() && (tagged || state == "idle") {
-                        let right = if tagged { 194 } else { 226 };
-                        w::field(lcd, 154, right - 154, y + 7, y + 24, y + 20, Align::Right, clr.as_bytes(), &UI_12, AMBER, SURFACE);
-                    }
-                } else {
-                    let f = if state == "RX" { &UI_12B } else { &UI_12 };
-                    let (t, c): (&[u8], u16) = if state == "idle" && !clr.is_empty() { (clr.as_bytes(), AMBER) } else { (state.as_bytes(), sc) };
-                    w::field(lcd, 154, 72, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
-                }
-            }
-            if aprs {
-                aprs_card(app, lcd, cx.store.data(), s, y, big);
+            let geom = hash(&(s, y, h, app.aprs_slot(s))) | 1;
+            if app.drawn.hash[R_FRAME + p] != 0 && app.drawn.card[p] == geom {
+                draw_card(app, lcd, cx, s);
                 continue;
             }
-            let f = app.shown_freq(s, live);
-            // Channel mode puts the name first, the frequency small under it (HOME-4); a VFO, a scan or a channel
-            // without a name shows the frequency large.
-            let name = app.chan_name(s, live);
-            if big {
-                if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, name)), name.is_empty()) {
-                    if clear {
-                        lcd.fill(15, y + 28, 211, 49, SURFACE);
-                    }
-                    if name.is_empty() {
-                        w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
-                    } else {
-                        // 26 px when the whole name fits (13 characters), else 22 px (16 always fit).
-                        let nb = name.as_bytes();
-                        let (font, base) = if text4_width(nb, &NAME_26) <= 211 { (&NAME_26, y + 54) } else { (&NAME_22, y + 52) };
-                        w::field(lcd, 15, 211, y + 29, y + 60, base, Align::Left, w::fit(nb, font, 211), font, TEXT, SURFACE);
-                        w::freq(lcd, 15, 226, y + 75, f, &DIG_17, &DIG_17, SUB, SUB, SURFACE);
-                    }
-                }
-                // Chips in fixed slots (HOME-4): mode, tone, shift (with R while reversed), power pinned right. An
-                // absent value leaves its slot empty; nothing moves.
-                let (mut m, mut t, mut o, mut pw) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
-                mode_chip(&cfg, &mut m);
-                tone_text(cfg.sent_tone(), &mut t);
-                shift_chip(&cfg, &mut o);
-                if app.capped(s) {
-                    pw.set(b"0.25 W");
-                } else {
-                    pw.set([b"LOW".as_slice(), b"MID", b"HIGH"][cfg.power as usize % 3]);
-                }
-                if app.dirty(R_INFO + p, hash(&(m, t, o, pw))) {
-                    let cy = y + CHIP_Y;
-                    w::chip_slot(lcd, w::SLOT_MODE, cy, m.as_bytes(), TEXT, LINE, SURFACE);
-                    w::chip_slot(lcd, w::SLOT_TONE, cy, t.as_bytes(), TEXT, LINE, SURFACE);
-                    w::chip_slot(lcd, w::SLOT_SHIFT, cy, o.as_bytes(), TEXT, LINE, SURFACE);
-                    w::chip_slot(lcd, w::SLOT_POWER, cy, pw.as_bytes(), TEXT, LINE, SURFACE);
-                }
-                // S-meter: only the segments that changed (HOME-6, HOME-7).
-                let lit = w::meter_level(lv.rssi);
-                let col = if lv.squelch_open { GREEN } else { DIM };
-                let old = app.drawn.meter[p].filter(|&(_, o)| o == lv.squelch_open).map(|(l, _)| l);
-                if app.drawn.meter[p] != Some((lit, lv.squelch_open)) {
-                    w::meter(lcd, 14, y + 109, old, lit, col, SURFACE);
-                    app.drawn.meter[p] = Some((lit, lv.squelch_open));
-                }
-                let st = w::s_text(lv.rssi);
-                if app.dirty(R_SUB + p, hash(&st)) {
-                    w::field(lcd, 212, 21, y + 103, y + 120, y + 117, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
-                }
-            } else {
-                // Left: the name (channel) or the frequency; right: the frequency small (channel) or the scan's hits.
-                if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, name)), name.is_empty()) {
-                    if clear {
-                        lcd.fill(15, y + 25, 211, 24, SURFACE);
-                        app.drawn.hash[R_INFO + p] = 0; // the right-hand text shares the row
-                    }
-                    if name.is_empty() {
-                        w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
-                    } else {
-                        // The 22 px name when it fits beside the frequency, else 15 px bold.
-                        let nb = name.as_bytes();
-                        let font = if text4_width(nb, &NAME_22) <= 150 { &NAME_22 } else { &UI_15B };
-                        w::field(lcd, 15, 150, y + 25, y + 49, y + 44, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
-                    }
-                }
-                let mut right = Buf::<16>::new();
-                if lv.scanning {
-                    let _ = uwrite!(right, "{} hits", lv.hits);
-                } else if !name.is_empty() {
-                    right.set(w::freq3(f).as_bytes());
-                }
-                if app.dirty(R_INFO + p, hash(&right)) {
-                    let (x, c) = if name.is_empty() { (130, TEXT) } else { (170, SUB) };
-                    w::field(lcd, x, 226 - x, y + 29, y + 47, y + 45, Align::Right, right.as_bytes(), &UI_12, c, SURFACE);
-                }
-                // The value line: the scan's mode and last hit, or mode, tone and shift in fixed columns (HOME-4), so a
-                // value coming or going never moves the others.
-                let mut cols = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
-                if lv.scanning {
-                    let c = &mut cols[0];
-                    c.set(slot::MODES[cfg.mode as usize % 6].as_bytes());
-                    if lv.hits > 0 && lv.last_hit != f {
-                        let mut b = Buf::<16>::new();
-                        b.set(b"last ");
-                        b.push(w::freq3(lv.last_hit).as_bytes());
-                        cols[1] = b;
-                    }
-                } else {
-                    mode_chip(&cfg, &mut cols[0]);
-                    tone_text(cfg.sent_tone(), &mut cols[1]);
-                    shift_text(&cfg, false, &mut cols[2]); // "TX 146.520" for a split
-                }
-                if app.dirty(R_SUB + p, hash(&(lv.scanning, &cols))) {
-                    lcd.fill(15, y + 51, 211, 15, SURFACE);
-                    let xs: [(i32, i32); 3] = if lv.scanning { [(15, 36), (51, 175), (226, 0)] } else { [(15, 36), (51, 56), (107, 119)] };
-                    for (c, (x, wd)) in cols.iter().zip(xs) {
-                        if wd > 0 && !c.is_empty() {
-                            w::field(lcd, x, wd, y + 51, y + 65, y + 61, Align::Left, c.as_bytes(), &UI_12, SUB, SURFACE);
-                        }
-                    }
-                }
-            }
+            // DISP-25: a card in a new place or size (SLOT moved the large card, a scan began) is drawn whole in
+            // bands, frame and content, so the panel goes from the old picture to the new with no blank card
+            // between. Each band runs the card's drawing afresh: what it has drawn is forgotten before each.
+            let (hash0, meter0) = (app.drawn.hash, app.drawn.meter);
+            canvas::banded(lcd, 6, y, 228, h, BG, |b| {
+                (app.drawn.hash, app.drawn.meter) = (hash0, meter0);
+                draw_card(app, b, cx, s);
+            });
         }
     }
 
@@ -438,6 +268,211 @@ impl View for Home {
             return Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, ("Hold MENU", "APRS")]); // APRS-17
         }
         Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, (ARROWS_LR, group)])
+    }
+}
+
+/// Card `s` of the cards layout: its frame when it changed, and every part of it that changed.
+fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s: u8) {
+    let live = cx.live;
+    // Fixed order A, B, C: the card's region index is its slot.
+    let p = s as usize;
+    let (y, h) = card(s, app.active);
+    let big = s == app.active;
+    let lv = live.slots[s as usize];
+    let (state, sc) = app.state(s, live);
+    let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
+    let aprs = app.aprs_slot(s);
+    let geom = hash(&(s, y, h, aprs)) | 1;
+    let drawn_before = app.drawn.hash[R_FRAME + p] != 0;
+    if !app.dirty(R_FRAME + p, hash(&(s, y, h, border, aprs))) {
+        // unchanged
+    } else if drawn_before && app.drawn.card[p] == geom {
+        // Only the border's colour changed (RX, idle): redraw the border alone. Redrawing the whole card blanked
+        // its content, which flickered on the radio (DISP-25).
+        lcd.frame_r(6, y, 228, h, 3, border);
+    } else {
+        app.drawn.card[p] = geom;
+        // The background only where the rounded corners leave it showing (3 px squares), not the whole card.
+        for (cx, cy) in [(6, y), (231, y), (6, y + h - 3), (231, y + h - 3)] {
+            lcd.fill(cx, cy, 3, 3, BG);
+        }
+        lcd.fill_r(6, y, 228, h, 3, SURFACE);
+        lcd.frame_r(6, y, 228, h, 3, border);
+        for r in [R_HEAD, R_FREQ, R_INFO, R_SUB] {
+            app.drawn.hash[r + p] = 0;
+        }
+        app.drawn.hash[R_FREQ + p] = FRESH; // the frequency box is plain surface: no blank needed
+        app.drawn.meter[p] = None;
+    }
+    // Header: letter, VFO/CH/SCAN and band, the state at the right (HOME-4, HOME-5).
+    let mut head = Buf::<32>::new();
+    app.head_text(s, live, &mut head);
+    let cfg = *app.slots[s as usize].cfg();
+    if big && cfg.split && !lv.scanning {
+        // A split's TX frequency takes the band's place in the header: its chip slot only says SPLIT.
+        let n = head.as_bytes().iter().position(|&c| c == b' ').unwrap_or(head.len());
+        let mut h = Buf::<32>::new();
+        h.push(&head.as_bytes()[..n]);
+        h.push(" \u{b7} TX ".as_bytes());
+        h.push(slot::mhz3(cfg.offset.max(0) as Freq10).as_bytes());
+        head = h;
+    }
+    // Header rows: y+7..y+24 on the big card, y+5..y+22 on the compact ones (their digits start at y+25).
+    let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 5, y + 18) };
+    // Beside the state (left of an RX or MON tag): the clarifier (VFO-22), or on the APRS card that it takes
+    // turns on chip 0 with A or B, so a packet can be missed (APRS-21).
+    let mut clr = Buf::<16>::new();
+    let c = app.slots[s as usize].clar;
+    if aprs && app.aprs_shared().is_some() {
+        clr.set(b"VHF shared");
+    } else if c != 0 && !lv.scanning {
+        slot::clar_text(c, &mut clr);
+    }
+    // TSRCH-13: a tone hint takes the state's place, in a wider field.
+    let heard = state == "heard";
+    let mut ht = Buf::<16>::new();
+    if heard {
+        heard_text(lv.heard_tone, &mut ht);
+    }
+    if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, &ht))) {
+        w::badge(lcd, 14, hy + 1, s, big, SURFACE);
+        lcd.fill(28, hy, 6, 17, SURFACE);
+        let hw = if heard { 226 - HEARD_W - 34 } else { 120 };
+        w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, SUB, SURFACE);
+        if heard {
+            let top = if big { y + 6 } else { hy };
+            ferrite_ui::canvas::banded(lcd, 226 - HEARD_W, top, HEARD_W + 2, 18, SURFACE, |lcd| {
+                w::field(lcd, 226 - HEARD_W, HEARD_W, hy, hy + 17, hb, Align::Right, ht.as_bytes(), &UI_12, sc, SURFACE);
+            });
+        } else if big {
+            ferrite_ui::canvas::banded(lcd, 154, y + 6, 74, 18, SURFACE, |lcd| {
+                let tagged = state == "RX" || state == "MON";
+                if tagged {
+                    w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
+                } else if state != "idle" {
+                    w::field(lcd, 154, 72, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
+                }
+                if !clr.is_empty() && (tagged || state == "idle") {
+                    let right = if tagged { 194 } else { 226 };
+                    w::field(lcd, 154, right - 154, y + 7, y + 24, y + 20, Align::Right, clr.as_bytes(), &UI_12, AMBER, SURFACE);
+                }
+            });
+        } else {
+            let f = if state == "RX" { &UI_12B } else { &UI_12 };
+            let (t, c): (&[u8], u16) = if state == "idle" && !clr.is_empty() { (clr.as_bytes(), AMBER) } else { (state.as_bytes(), sc) };
+            w::field(lcd, 154, 72, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
+        }
+    }
+    if aprs {
+        aprs_card(app, lcd, cx.store.data(), s, y, big);
+        return;
+    }
+    let f = app.shown_freq(s, live);
+    // Channel mode puts the name first, the frequency small under it (HOME-4); a VFO, a scan or a channel
+    // without a name shows the frequency large.
+    let name = app.chan_name(s, live);
+    if big {
+        if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, name)), name.is_empty()) {
+            redraw_box!(clear, lcd, (15, y + 28, 211, 49, SURFACE), {
+                if name.is_empty() {
+                    w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+                } else {
+                    // 26 px when the whole name fits (13 characters), else 22 px (16 always fit).
+                    let nb = name.as_bytes();
+                    let (font, base) = if text4_width(nb, &NAME_26) <= 211 { (&NAME_26, y + 54) } else { (&NAME_22, y + 52) };
+                    w::field(lcd, 15, 211, y + 29, y + 60, base, Align::Left, w::fit(nb, font, 211), font, TEXT, SURFACE);
+                    w::freq(lcd, 15, 226, y + 75, f, &DIG_17, &DIG_17, SUB, SUB, SURFACE);
+                }
+            });
+        }
+        // Chips in fixed slots (HOME-4): mode, tone, shift (with R while reversed), power pinned right. An
+        // absent value leaves its slot empty; nothing moves.
+        let (mut m, mut t, mut o, mut pw) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
+        mode_chip(&cfg, &mut m);
+        tone_text(cfg.sent_tone(), &mut t);
+        shift_chip(&cfg, &mut o);
+        if app.capped(s) {
+            pw.set(b"0.25 W");
+        } else {
+            pw.set([b"LOW".as_slice(), b"MID", b"HIGH"][cfg.power as usize % 3]);
+        }
+        if app.dirty(R_INFO + p, hash(&(m, t, o, pw))) {
+            let cy = y + CHIP_Y;
+            w::chip_slot(lcd, w::SLOT_MODE, cy, m.as_bytes(), TEXT, LINE, SURFACE);
+            w::chip_slot(lcd, w::SLOT_TONE, cy, t.as_bytes(), TEXT, LINE, SURFACE);
+            w::chip_slot(lcd, w::SLOT_SHIFT, cy, o.as_bytes(), TEXT, LINE, SURFACE);
+            w::chip_slot(lcd, w::SLOT_POWER, cy, pw.as_bytes(), TEXT, LINE, SURFACE);
+        }
+        // S-meter: only the segments that changed (HOME-6, HOME-7).
+        let lit = w::meter_level(lv.rssi);
+        let col = if lv.squelch_open { GREEN } else { DIM };
+        let old = app.drawn.meter[p].filter(|&(_, o)| o == lv.squelch_open).map(|(l, _)| l);
+        if app.drawn.meter[p] != Some((lit, lv.squelch_open)) {
+            w::meter(lcd, 14, y + 109, old, lit, col, SURFACE);
+            app.drawn.meter[p] = Some((lit, lv.squelch_open));
+        }
+        let st = w::s_text(lv.rssi);
+        if app.dirty(R_SUB + p, hash(&st)) {
+            w::field(lcd, 212, 21, y + 103, y + 120, y + 117, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
+        }
+    } else {
+        // Left: the name (channel) or the frequency; right: the frequency small (channel) or the scan's hits.
+        let mut right = Buf::<16>::new();
+        if lv.scanning {
+            let _ = uwrite!(right, "{} hits", lv.hits);
+        } else if !name.is_empty() {
+            right.set(w::freq3(f).as_bytes());
+        }
+        let (x, c) = if name.is_empty() { (130, TEXT) } else { (170, SUB) };
+        let info = app.dirty(R_INFO + p, hash(&right));
+        let freq = app.dirty_shape(R_FREQ + p, hash(&(f, name)), name.is_empty());
+        if let Some(clear) = freq {
+            // A new layout redraws the row in bands with the right-hand text, which shares it.
+            redraw_box!(clear, lcd, (15, y + 25, 211, 24, SURFACE), {
+                if name.is_empty() {
+                    w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+                } else {
+                    // The 22 px name when it fits beside the frequency, else 15 px bold.
+                    let nb = name.as_bytes();
+                    let font = if text4_width(nb, &NAME_22) <= 150 { &NAME_22 } else { &UI_15B };
+                    w::field(lcd, 15, 150, y + 25, y + 49, y + 44, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
+                }
+                if clear {
+                    w::field(lcd, x, 226 - x, y + 29, y + 47, y + 45, Align::Right, right.as_bytes(), &UI_12, c, SURFACE);
+                }
+            });
+        }
+        if info && freq != Some(true) {
+            w::field(lcd, x, 226 - x, y + 29, y + 47, y + 45, Align::Right, right.as_bytes(), &UI_12, c, SURFACE);
+        }
+        // The value line: the scan's mode and last hit, or mode, tone and shift in fixed columns (HOME-4), so a
+        // value coming or going never moves the others.
+        let mut cols = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
+        if lv.scanning {
+            let c = &mut cols[0];
+            c.set(slot::MODES[cfg.mode as usize % 6].as_bytes());
+            if lv.hits > 0 && lv.last_hit != f {
+                let mut b = Buf::<16>::new();
+                b.set(b"last ");
+                b.push(w::freq3(lv.last_hit).as_bytes());
+                cols[1] = b;
+            }
+        } else {
+            mode_chip(&cfg, &mut cols[0]);
+            tone_text(cfg.sent_tone(), &mut cols[1]);
+            shift_text(&cfg, false, &mut cols[2]); // "TX 146.520" for a split
+        }
+        if app.dirty(R_SUB + p, hash(&(lv.scanning, &cols))) {
+            // Off-screen, sent once (DISP-25).
+            canvas::banded(lcd, 15, y + 51, 211, 15, SURFACE, |b| {
+                let xs: [(i32, i32); 3] = if lv.scanning { [(15, 36), (51, 175), (226, 0)] } else { [(15, 36), (51, 56), (107, 119)] };
+                for (c, (x, wd)) in cols.iter().zip(xs) {
+                    if wd > 0 && !c.is_empty() {
+                        w::field(b, x, wd, y + 51, y + 65, y + 61, Align::Left, c.as_bytes(), &UI_12, SUB, SURFACE);
+                    }
+                }
+            });
+        }
     }
 }
 

@@ -277,8 +277,9 @@ impl View for Text {
             let mut c = Buf::<16>::new();
             let _ = uwrite!(c, "{}/{}", t.len(), self.to.max());
             w::field(lcd, 8, 100, 78, 95, 91, Align::Left, c.as_bytes(), &UI_12, SUB, BG);
-            lcd.fill(108, 78, 132, 17, BG);
-            w::tag(lcd, 232, 78, MODES[self.mode as usize % 4].as_bytes(), BLUE, BG);
+            ferrite_ui::canvas::banded(lcd, 108, 78, 132, 17, BG, |lcd| {
+                w::tag(lcd, 232, 78, MODES[self.mode as usize % 4].as_bytes(), BLUE, BG);
+            });
         }
         if app.dirty(R_HELP, hash(&(self.mode, self.to))) {
             let m = self.mode;

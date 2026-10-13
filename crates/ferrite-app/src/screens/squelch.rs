@@ -68,15 +68,16 @@ impl View for Squelch {
         if app.dirty(1, hash(&(a, sq))) {
             w::badge(lcd, 8, 30, a, true, BG);
             w::field(lcd, 28, 200, 28, 46, 41, Align::Left, b"Squelch, active slot", &UI_12, SUB, BG);
-            lcd.fill(0, 52, 240, 60, BG);
-            lcd.text4_rows(100, 104, &[b'0' + sq], &DIG_46, TEXT, BG, 60, 106);
-            // 0-9: the level's segments.
-            for i in 0..10 {
-                let c = if i < sq { BLUE } else { LINE };
-                lcd.fill_r(20 + i as i32 * 20, 122, 16, 10, 1, c);
-            }
-            w::field(lcd, 8, 30, 136, 152, 148, Align::Left, b"open", &UI_12, SUB, BG);
-            w::field(lcd, 172, 60, 136, 152, 148, Align::Right, b"tight", &UI_12, SUB, BG);
+            ferrite_ui::canvas::banded(lcd, 0, 52, 240, 60, BG, |lcd| {
+                lcd.text4_rows(100, 104, &[b'0' + sq], &DIG_46, TEXT, BG, 60, 106);
+                // 0-9: the level's segments.
+                for i in 0..10 {
+                    let c = if i < sq { BLUE } else { LINE };
+                    lcd.fill_r(20 + i as i32 * 20, 122, 16, 10, 1, c);
+                }
+                w::field(lcd, 8, 30, 136, 152, 148, Align::Left, b"open", &UI_12, SUB, BG);
+                w::field(lcd, 172, 60, 136, 152, 148, Align::Right, b"tight", &UI_12, SUB, BG);
+            });
         }
         // The live signal: what the level lets through (SQL-7).
         let lit = w::meter_level(lv.rssi);

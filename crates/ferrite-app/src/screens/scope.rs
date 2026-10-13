@@ -347,58 +347,42 @@ impl View for Scope {
                 continue;
             }
             let x0 = g as i32 * 40;
-            // Each bar column is built in a buffer and sent once, so no pixel is blanked and redrawn: blanking the
-            // group first flickered on the radio (Oct 12, 2026). Columns are at most 10 px wide (bw = 240 / n).
-            const ROWS: usize = (H + 8) as usize;
-            let map = ferrite_ui::theme::map;
-            let dash = |x: i32| lh > 0 && (x - x0) % 5 < 3;
-            for (k, &v) in r.iter().enumerate() {
-                let i = a + k;
-                let bx = x0 + k as i32 * bw;
-                let w = bw.min(10) as usize;
-                let mut col = [0u16; 10 * ROWS];
-                let h = if v == 0 { 0 } else { bar_h(v, floor) };
-                let c = if i == m {
-                    AMBER
-                } else if has_l == Some(i as i32) {
-                    GREEN
-                } else if lh > 0 && h >= lh {
-                    RED
-                } else {
-                    rgb565(0x4D, 0x80, 0xC0)
-                };
-                let bar_w = if bw >= 4 { bw - 1 } else { bw } as usize;
-                for row in 0..ROWS {
-                    let y = TOP - 8 + row as i32;
-                    for x in 0..w {
-                        // Topmost first, as the old drawing order left them: the trigger dashes over everything, then
-                        // a blank bar's surface, the bar, the centre line, the background.
-                        let px = if y == BASE - lh && dash(bx + x as i32) {
-                            RED
-                        } else if v == 0 && y >= TOP {
-                            SURFACE // SCOPE-5: the other chip or relay state
-                        } else if v != 0 && y >= BASE - h && x < bar_w {
-                            c
-                        } else if v != 0 && i == n / 2 && y >= TOP && x == w / 2 {
-                            BLUE
-                        } else {
-                            BG
-                        };
-                        col[row * w + x] = map(px);
+            // The group drawn off-screen and sent once (DISP-25): blanking it before the bars flickered on the radio.
+            ferrite_ui::canvas::banded(lcd, x0, TOP - 8, 40, H + 8, BG, |lcd| {
+                for (k, &v) in r.iter().enumerate() {
+                    let i = a + k;
+                    let bx = x0 + k as i32 * bw;
+                    if v == 0 {
+                        lcd.fill(bx, TOP, bw, H, SURFACE); // SCOPE-5: the other chip or relay state
+                        continue;
+                    }
+                    if i == n / 2 {
+                        lcd.fill(bx + bw / 2, TOP, 1, H, BLUE);
+                    }
+                    let h = bar_h(v, floor);
+                    let c = if i == m {
+                        AMBER
+                    } else if has_l == Some(i as i32) {
+                        GREEN
+                    } else if lh > 0 && h >= lh {
+                        RED
+                    } else {
+                        rgb565(0x4D, 0x80, 0xC0)
+                    };
+                    lcd.fill(bx, BASE - h, if bw >= 4 { bw - 1 } else { bw }, h, c);
+                }
+                if let Some(i) = has_m {
+                    let cx = x0 + (i - a) as i32 * bw + bw / 2;
+                    lcd.tri((cx - 3).clamp(x0, x0 + 33), TOP - 8, 7, 1, AMBER);
+                }
+                if lh > 0 {
+                    let mut x = x0;
+                    while x < x0 + 40 {
+                        lcd.fill(x, BASE - lh, 3, 1, RED);
+                        x += 5;
                     }
                 }
-                lcd.window(bx, TOP - 8, bx + w as i32 - 1, BASE - 1);
-                lcd.push_buf(&col[..w * ROWS]);
-            }
-            // Past the last bar of the group: background, unchanged pixels.
-            let used = (r.len() as i32) * bw;
-            if used < 40 {
-                lcd.fill(x0 + used, TOP - 8, 40 - used, H + 8, BG);
-            }
-            if let Some(i) = has_m {
-                let cx = x0 + (i - a) as i32 * bw + bw / 2;
-                lcd.tri((cx - 3).clamp(x0, x0 + 33), TOP - 8, 7, 1, AMBER);
-            }
+            });
         }
         // Waterfall (0 3 2 5): one row per sweep, wrapping; the next row's place shows dark.
         let wf = app.set.scope_wf;
@@ -421,16 +405,6 @@ impl View for Scope {
             _ => (&b"Listen"[..], GREEN, self.freq(app), heard.filter(|&i| (0..n as i32).contains(&i)).map_or(0, |i| bars[i as usize])),
         };
         let st = if lv == 0 { Buf::from(b"-") } else { w::s_text(lv as i16 - 160) };
-        if app.dirty(11, hash(&(label, f, st.as_bytes()))) {
-            let y = BOX_Y;
-            lcd.fill(6, y, 228, 44, BG);
-            lcd.fill_r(6, y, 228, 44, 3, SURFACE);
-            lcd.frame_r(6, y, 228, 44, 3, lab_c);
-            lcd.text4_rows(15, y + 20, label, &UI_12, lab_c, SURFACE, y + 4, y + 24);
-            w::freq(lcd, 66, 180, y + 21, f, &DIG_17, &DIG_17, TEXT, SUB, SURFACE);
-            w::field(lcd, 180, 46, y + 4, y + 24, y + 20, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
-            app.drawn.hash[12] = 0;
-        }
         let mut p = Buf::<40>::new();
         if self.listen != 0 {
             p.push(if open { b"Signal" } else { b"Quiet " });
@@ -442,7 +416,19 @@ impl View for Scope {
                 None => p.push(b"none"),
             }
         }
-        if app.dirty(12, hash(&p)) {
+        let line = app.dirty(12, hash(&p));
+        if app.dirty(11, hash(&(label, f, st.as_bytes()))) {
+            // The box whole in bands, with the line under the marker (DISP-25).
+            let y = BOX_Y;
+            ferrite_ui::canvas::banded(lcd, 6, y, 228, 44, BG, |lcd| {
+                lcd.fill_r(6, y, 228, 44, 3, SURFACE);
+                lcd.frame_r(6, y, 228, 44, 3, lab_c);
+                lcd.text4_rows(15, y + 20, label, &UI_12, lab_c, SURFACE, y + 4, y + 24);
+                w::freq(lcd, 66, 180, y + 21, f, &DIG_17, &DIG_17, TEXT, SUB, SURFACE);
+                w::field(lcd, 180, 46, y + 4, y + 24, y + 20, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
+                w::field(lcd, 15, 211, BOX_Y + 22, BOX_Y + 39, BOX_Y + 35, Align::Left, p.as_bytes(), &UI_12, SUB, SURFACE);
+            });
+        } else if line {
             w::field(lcd, 15, 211, BOX_Y + 22, BOX_Y + 39, BOX_Y + 35, Align::Left, p.as_bytes(), &UI_12, SUB, SURFACE);
         }
         // Bars, step, speed, trigger (SCOPE-2).

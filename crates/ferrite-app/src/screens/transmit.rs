@@ -436,24 +436,25 @@ impl View for Transmit {
         if app.dirty(9, hash(&(s, app.watch))) {
             for o in (0..SLOTS as u8).filter(|&o| o != s) {
                 let (by, bh) = place(s, o);
-                lcd.fill(6, by, 228, bh, BG);
-                lcd.frame_r(6, by, 228, bh, 3, LINE);
-                let ry = by + 3;
-                w::badge(lcd, 12, ry + 2, o, false, BG);
-                let sl = app.slot(o);
-                let mut t = Buf::<40>::new();
-                t.push(w::freq3(sl.freq()).as_bytes());
-                if let Some(c) = sl.ch.filter(|_| sl.on_channel()) {
-                    t.push(" \u{b7} ".as_bytes());
-                    t.push(c.name());
-                } else {
-                    t.push(" \u{b7} ".as_bytes());
-                    t.push(band_name(sl.freq()).as_bytes());
-                }
-                w::field(lcd, 32, 152, ry, ry + 17, ry + 13, Align::Left, t.as_bytes(), &UI_12, DIM, BG);
-                let watched = app.watch_mask() & 1 << o != 0;
-                let st: &[u8] = if watched { b"paused" } else { b"off" };
-                w::field(lcd, 184, 44, ry, ry + 17, ry + 13, Align::Right, st, &UI_12, DIM, BG);
+                ferrite_ui::canvas::banded(lcd, 6, by, 228, bh, BG, |lcd| {
+                    lcd.frame_r(6, by, 228, bh, 3, LINE);
+                    let ry = by + 3;
+                    w::badge(lcd, 12, ry + 2, o, false, BG);
+                    let sl = app.slot(o);
+                    let mut t = Buf::<40>::new();
+                    t.push(w::freq3(sl.freq()).as_bytes());
+                    if let Some(c) = sl.ch.filter(|_| sl.on_channel()) {
+                        t.push(" \u{b7} ".as_bytes());
+                        t.push(c.name());
+                    } else {
+                        t.push(" \u{b7} ".as_bytes());
+                        t.push(band_name(sl.freq()).as_bytes());
+                    }
+                    w::field(lcd, 32, 152, ry, ry + 17, ry + 13, Align::Left, t.as_bytes(), &UI_12, DIM, BG);
+                    let watched = app.watch_mask() & 1 << o != 0;
+                    let st: &[u8] = if watched { b"paused" } else { b"off" };
+                    w::field(lcd, 184, 44, ry, ry + 17, ry + 13, Align::Right, st, &UI_12, DIM, BG);
+                });
             }
         }
     }

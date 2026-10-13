@@ -201,15 +201,16 @@ impl View for Save {
         let s = self.ready(app, cx.store);
         let f = s.freq_of(app);
         if app.dirty(R_TOP, hash(&(s.kind, f))) {
-            lcd.fill(0, 21, 240, 72, BG);
-            let head: &[u8] = match s.kind {
-                Kind::Repeater => b"Add a repeater",
-                Kind::Hf => b"Save this HF frequency",
-                Kind::Vfo => b"Save this VFO as a channel",
-            };
-            w::field(lcd, 8, 224, 24, 41, 37, Align::Left, head, &UI_12B, TEXT, BG);
-            w::freq(lcd, 8, 232, 84, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
-            lcd.fill(0, 92, 240, 1, LINE);
+            ferrite_ui::canvas::banded(lcd, 0, 21, 240, 72, BG, |lcd| {
+                let head: &[u8] = match s.kind {
+                    Kind::Repeater => b"Add a repeater",
+                    Kind::Hf => b"Save this HF frequency",
+                    Kind::Vfo => b"Save this VFO as a channel",
+                };
+                w::field(lcd, 8, 224, 24, 41, 37, Align::Left, head, &UI_12B, TEXT, BG);
+                w::freq(lcd, 8, 232, 84, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
+                lcd.fill(0, 92, 240, 1, LINE);
+            });
         }
         for (i, &r) in s.rows().iter().enumerate() {
             let mut v = Buf::<32>::new();

@@ -217,7 +217,15 @@ pub struct Row2<'a> {
 /// The tag column: wide enough for "iGate", "Pager" and "Selcall".
 pub(crate) const TAG_W: i32 = 46;
 
-pub(crate) fn row2(lcd: &mut impl Panel, y: i32, r: &Row2) {
+/// A two-line row at y, off-screen in bands with its part of the scroll cue (DISP-25).
+pub(crate) fn row2(lcd: &mut impl Panel, y: i32, r: &Row2, cue: w::Cue) {
+    ferrite_ui::canvas::banded(lcd, 0, y, 240, ROW2_H, BG, |b| {
+        row2_now(b, y, r);
+        cue.draw(b);
+    });
+}
+
+fn row2_now(lcd: &mut impl Panel, y: i32, r: &Row2) {
     let h = ROW2_H;
     let bg = if r.selected { BLUE } else { BG };
     let (fg, sub) = if r.selected { (BLUE_FG, BLUE_FG) } else { (TEXT, SUB) };
@@ -271,7 +279,7 @@ impl App {
     /// Two-line row `i` of a list page, drawn when it changed.
     pub(crate) fn row2(&mut self, lcd: &mut impl Panel, i: usize, r: &Row2) {
         if self.dirty(R_ROW + i, hash(r)) {
-            row2(lcd, LIST_Y + i as i32 * ROW2_H, r);
+            row2(lcd, LIST_Y + i as i32 * ROW2_H, r, self.cue());
         }
     }
 
@@ -308,9 +316,13 @@ impl App {
     /// What an empty list says, in the middle of the page.
     pub(crate) fn empty(&mut self, lcd: &mut impl Panel, line1: &[u8], line2: &[u8]) {
         if self.dirty(R_NOTE, hash(&(line1, line2))) {
-            w::field(lcd, 8, 224, 130, 147, 143, Align::Center, line1, &UI_12B, SUB, BG);
-            w::field(lcd, 8, 224, 152, 169, 165, Align::Center, line2, &UI_12, DIM, BG);
+            Self::empty_now(lcd, line1, line2);
         }
+    }
+
+    pub(crate) fn empty_now(lcd: &mut impl Panel, line1: &[u8], line2: &[u8]) {
+        w::field(lcd, 8, 224, 130, 147, 143, Align::Center, line1, &UI_12B, SUB, BG);
+        w::field(lcd, 8, 224, 152, 169, 165, Align::Center, line2, &UI_12, DIM, BG);
     }
 
     /// The box asking before a destructive action (MENU-23): what goes, and the keys.
@@ -328,10 +340,12 @@ impl App {
 
 pub(crate) fn head(lcd: &mut impl Panel, left: &[u8], right: &[u8]) {
     let rw = text4_width(right, &UI_12);
-    w::field(lcd, 0, 232 - rw - 8, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Left, b"", &UI_12, SUB, BG);
-    lcd.text4_rows(8, HEAD_Y + 14, w::fit(left, &UI_12, 224 - rw - 12), &UI_12, SUB, BG, HEAD_Y, HEAD_Y + 20);
-    w::field(lcd, 232 - rw, rw + 8, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Left, right, &UI_12, SUB, BG);
-    lcd.fill(0, HEAD_Y + 20, 240, 1, LINE);
+    // in bands: the old line goes straight to the new (DISP-25)
+    ferrite_ui::canvas::banded(lcd, 0, HEAD_Y, 240, 21, BG, |lcd| {
+        lcd.text4_rows(8, HEAD_Y + 14, w::fit(left, &UI_12, 224 - rw - 12), &UI_12, SUB, BG, HEAD_Y, HEAD_Y + 20);
+        w::field(lcd, 232 - rw, rw + 8, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Left, right, &UI_12, SUB, BG);
+        lcd.fill(0, HEAD_Y + 20, 240, 1, LINE);
+    });
 }
 
 /// Record text (ASCII) into ufmt.
@@ -416,16 +430,17 @@ pub fn ring(lcd: &mut impl Panel, cx: i32, cy: i32, r: i32, t: i32, c: u16) {
 
 /// The compass (AprsStation, waypoint go): a ring, N at the top, the arrow to the target; None draws a dash.
 pub fn compass(lcd: &mut impl Panel, cx: i32, cy: i32, r: i32, deg: Option<u16>) {
-    lcd.fill(cx - r - 1, cy - r - 1, 2 * r + 3, 2 * r + 3, BG);
-    ring(lcd, cx, cy, r, 2, LINE);
-    lcd.text4(cx - 4, cy - r + 17, b"N", &UI_12, SUB, BG);
-    match deg {
-        Some(d) => {
-            arrow(lcd, cx, cy, r / 2, d as i32, BLUE, BG);
-            lcd.fill_r(cx - 2, cy - 2, 5, 5, 2, TEXT);
+    ferrite_ui::canvas::banded(lcd, cx - r - 1, cy - r - 1, 2 * r + 3, 2 * r + 3, BG, |lcd| {
+        ring(lcd, cx, cy, r, 2, LINE);
+        lcd.text4(cx - 4, cy - r + 17, b"N", &UI_12, SUB, BG);
+        match deg {
+            Some(d) => {
+                arrow(lcd, cx, cy, r / 2, d as i32, BLUE, BG);
+                lcd.fill_r(cx - 2, cy - 2, 5, 5, 2, TEXT);
+            }
+            None => lcd.fill(cx - 6, cy, 13, 2, SUB),
         }
-        None => lcd.fill(cx - 6, cy, 13, 2, SUB),
-    }
+    });
 }
 
 pub fn isqrt(v: u64) -> u64 {

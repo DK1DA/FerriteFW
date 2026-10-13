@@ -251,7 +251,8 @@ pub trait Gfx: Panel {
         let w = text4_width(s, f);
         let top = baseline - f.ascent as i32;
         let (x0, x1) = (x.max(0), (x + w).min(W));
-        let (y0, y1) = (y0.max(top).max(0), y1.min(top + f.line_h as i32).min(H));
+        let (r0, r1) = self.rows();
+        let (y0, y1) = (y0.max(top).max(r0), y1.min(top + f.line_h as i32).min(r1));
         if x1 <= x0 || y1 <= y0 {
             return w;
         }

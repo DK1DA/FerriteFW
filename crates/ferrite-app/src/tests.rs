@@ -125,8 +125,10 @@ fn ram_is_small() {
     // APRS path (APRS-26: 16 bytes of text in the App's AprsCfg) and a clock set by hand waiting for its owner
     // (GPS-23: an Option<u32>, 8) to 1216; a settings-list change kept for "* Undo" (MENU-22: path, direction
     // and the shown value's hash, 16 with its Option), VOX holding the key and the alert tone's second (VOX-13,
-    // SND-6: 3 bytes, 8 with padding) to 1240
-    assert!(n <= 1240, "App is {n} bytes");
+    // SND-6: 3 bytes, 8 with padding) to 1240; each home card's geometry hash, so a border colour change redraws
+    // only the border (DISP-25: 3 x 4 bytes, +8 with the packing) to 1248; the scroll cue as drawn, so a row
+    // redrawn beside it draws its part too instead of blanking it (DISP-25: 4 x 2 bytes) to 1256
+    assert!(n <= 1256, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

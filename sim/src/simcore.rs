@@ -235,6 +235,23 @@ pub struct SimCore {
     /// Every command the App sent the fake radio, when [`SimCore::log_cmds`] is on (tests).
     pub cmds: Vec<ferrite_core::msg::RadioCmd>,
     log_cmds: bool,
+    /// Every render pass's flicker and overdraw, when [`SimCore::watch_passes`] is on (tests, DISP-25).
+    pub passes: Vec<PassHit>,
+    watch: bool,
+    /// The screen the last watched pass drew.
+    last_screen: &'static str,
+    last_page: u32,
+}
+
+/// One render pass as [`SimCore::watch_passes`] records it.
+#[derive(Clone, Debug)]
+pub struct PassHit {
+    pub at: u32,
+    /// The screen after the pass, and whether the pass before drew it too, on the same page (a live update, not a
+    /// change of screen or page).
+    pub screen: &'static str,
+    pub live: bool,
+    pub report: ferrite_ui::fb::PassReport,
 }
 
 /// The terminal's bytes waiting for the cable: room up to [`TERM_BUF`].
@@ -363,6 +380,10 @@ impl SimCore {
             kiss_in: Vec::new(),
             cmds: Vec::new(),
             log_cmds: false,
+            passes: Vec::new(),
+            watch: false,
+            last_screen: "",
+            last_page: 0,
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -537,7 +558,20 @@ impl SimCore {
                 store.apply(w);
             }
             store.autosave(now, app);
+            if self.watch {
+                self.lcd.fb.begin_pass();
+            }
             app.render(&mut self.lcd, &radio.live, dev, store);
+            if self.watch {
+                let screen = app.screen().name();
+                let page = app.page_shown();
+                let live = screen == self.last_screen && page == self.last_page;
+                let report = self.lcd.fb.end_pass(live);
+                if report.writes > 0 {
+                    self.passes.push(PassHit { at: now, screen, live, report });
+                }
+                (self.last_screen, self.last_page) = (screen, page);
+            }
             dev.bt = self.ports.bt_connected(app, now);
             self.ports.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
             if let Some(r) = self.ports.term.debug_req() {
@@ -879,6 +913,18 @@ impl SimCore {
     }
 
     /// Opens screen `i` of [`jump_names`] (0 = home), from home, so BACK returns there.
+    /// Record every render pass's flicker and overdraw in [`SimCore::passes`] (tests, DISP-25).
+    pub fn watch_passes(&mut self, on: bool) {
+        self.watch = on;
+        self.passes.clear();
+        self.lcd.fb.clear_heat();
+    }
+
+    /// Flickering passes per pixel since [`SimCore::watch_passes`] (row-major, 240 x 320).
+    pub fn flicker_heat(&self) -> Vec<u32> {
+        self.lcd.fb.heat().map(|h| h.to_vec()).unwrap_or_default()
+    }
+
     pub fn jump(&mut self, i: usize) {
         if !self.live() {
             return;

@@ -14,6 +14,7 @@ extern crate std;
 
 pub mod assets;
 pub mod boot;
+pub mod canvas;
 pub mod font4;
 pub mod gfx;
 pub mod home;

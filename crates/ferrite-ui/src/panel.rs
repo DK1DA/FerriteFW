@@ -14,4 +14,15 @@ pub trait Panel {
     /// end-to-end tests, which read the screen as text. Panels ignore it (the radio's inlines to nothing).
     #[inline(always)]
     fn text_hint(&mut self, _x0: i32, _y0: i32, _x1: i32, _y1: i32, _s: &[u8]) {}
+    /// The rows y0..y1 this panel keeps; drawing may skip the others. A band of an off-screen canvas keeps a few
+    /// (canvas.rs); the panel itself keeps all, which compiles to nothing.
+    #[inline(always)]
+    fn rows(&self) -> (i32, i32) {
+        (0, H)
+    }
+    /// Drawing here is off the screen already (a band of a canvas): a canvas inside draws straight into it.
+    #[inline(always)]
+    fn offscreen(&self) -> bool {
+        false
+    }
 }

@@ -14,6 +14,7 @@ use crate::slot::{band_name, mode_chip, shift_text, tone_text, Item, STEPS};
 use crate::App;
 use ferrite_core::msg::{LiveAll, ModeLive, RadioCmd, SCOPE_BARS, SLOTS};
 use ferrite_ui::assets::*;
+use ferrite_ui::canvas;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
@@ -24,6 +25,13 @@ pub const STRIP_STEP: u16 = 400;
 
 /// Home's tick: the single + scope layout keeps a narrow sweep running around the active frequency.
 pub fn tick(app: &mut App) {
+    // Leaving the layout stops the strip: without this the Radio task stayed in scope mode and receive audio was
+    // gone after switching back to Watch (on the radio, Oct 12, 2026).
+    if app.set.layout != 1 && app.radio.mode == Mode::Strip {
+        app.radio.mode = Mode::Off;
+        app.out.push(RadioCmd::Sweep { centre: app.radio.centre, step: STRIP_STEP, on: false });
+        return;
+    }
     if app.set.layout != 1 || !matches!(app.radio.mode, Mode::Off | Mode::Strip) {
         return;
     }
@@ -55,30 +63,30 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         app.head_text(a, live, &mut h);
         let hw = if ht.is_empty() { 140 } else { 232 - HEARD_W - 26 };
         w::field(lcd, 26, hw, 22, 40, 36, Align::Left, w::fit(h.as_bytes(), &UI_12, hw), &UI_12, SUB, BG);
-        lcd.fill(26 + hw, 22, 240 - 26 - hw, 20, BG);
-        if !ht.is_empty() {
-            w::field(lcd, 232 - HEARD_W, HEARD_W, 22, 40, 36, Align::Right, ht.as_bytes(), &UI_12, sc, BG);
-        } else if state == "RX" || state == "MON" {
-            w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
-        } else if state != "idle" {
-            w::field(lcd, 166, 66, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
-        }
+        canvas::banded(lcd, 26 + hw, 22, 240 - 26 - hw, 20, BG, |lcd| {
+            if !ht.is_empty() {
+                w::field(lcd, 232 - HEARD_W, HEARD_W, 22, 40, 36, Align::Right, ht.as_bytes(), &UI_12, sc, BG);
+            } else if state == "RX" || state == "MON" {
+                w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
+            } else if state != "idle" {
+                w::field(lcd, 166, 66, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
+            }
+        });
     }
     // Channel mode: the name large, the frequency small under it (HOME-4).
     let name = app.chan_name(a, live);
     if let Some(clear) = app.dirty_shape(2, hash(&(f, name)), name.is_empty()) {
-        if clear {
-            lcd.fill(8, 42, 224, 52, BG);
-        }
-        if name.is_empty() {
-            w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
-        } else {
-            // 26 px when the whole name fits, else 22 px (HOME-4a).
-            let nb = name.as_bytes();
-            let (font, base) = if text4_width(nb, &NAME_26) <= 224 { (&NAME_26, 70) } else { (&NAME_22, 68) };
-            w::field(lcd, 8, 224, 43, 76, base, Align::Left, w::fit(nb, font, 224), font, TEXT, BG);
-            w::freq(lcd, 8, 232, 92, f, &DIG_17, &DIG_17, SUB, SUB, BG);
-        }
+        redraw_box!(clear, lcd, (8, 42, 224, 52, BG), {
+            if name.is_empty() {
+                w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
+            } else {
+                // 26 px when the whole name fits, else 22 px (HOME-4a).
+                let nb = name.as_bytes();
+                let (font, base) = if text4_width(nb, &NAME_26) <= 224 { (&NAME_26, 70) } else { (&NAME_22, 68) };
+                w::field(lcd, 8, 224, 43, 76, base, Align::Left, w::fit(nb, font, 224), font, TEXT, BG);
+                w::freq(lcd, 8, 232, 92, f, &DIG_17, &DIG_17, SUB, SUB, BG);
+            }
+        });
     }
     // The settings, label over value (HOME-4): mode, tone, power; step, offset, squelch.
     let cfg = *app.slot(a).cfg();
@@ -164,7 +172,14 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         let (state, sc) = app.state(s, live);
         let active = s == app.active;
         let border = if active { BLUE } else if state == "RX" { GREEN } else { LINE };
-        if app.dirty(R_FRAME + p, hash(&(s, border))) {
+        let geom = hash(&(s, 2u8)) | 1;
+        let drawn_before = app.drawn.hash[R_FRAME + p] != 0;
+        if !app.dirty(R_FRAME + p, hash(&(s, border))) {
+            // unchanged
+        } else if drawn_before && app.drawn.card[p] == geom {
+            lcd.frame_r(6, y, 228, h, 3, border); // the border's colour alone (DISP-25)
+        } else {
+            app.drawn.card[p] = geom;
             lcd.fill(6, y, 228, h, BG);
             lcd.fill_r(6, y, 228, h, 3, SURFACE);
             lcd.frame_r(6, y, 228, h, 3, border);
@@ -193,17 +208,6 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         let f = app.shown_freq(s, live);
         // Channel mode: the name at the left, the frequency small at the right (HOME-4).
         let name = app.chan_name(s, live);
-        if app.dirty(R_FREQ + p, hash(&(f, name))) {
-            lcd.fill(15, y + 22, 211, 24, SURFACE);
-            app.drawn.hash[R_INFO + p] = 0;
-            if name.is_empty() {
-                w::freq(lcd, 15, 140, y + 44, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
-            } else {
-                let nb = name.as_bytes();
-                let font = if text4_width(nb, &NAME_22) <= 150 { &NAME_22 } else { &UI_15B };
-                w::field(lcd, 15, 150, y + 22, y + 46, y + 42, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
-            }
-        }
         let sl = *app.slot(s);
         let mut right = Buf::<16>::new();
         if lv.scanning {
@@ -211,8 +215,21 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         } else if !name.is_empty() {
             right.set(w::freq3(f).as_bytes());
         }
-        if app.dirty(R_INFO + p, hash(&right)) {
-            let (x, c, fo) = if name.is_empty() { (140, TEXT, &UI_12B) } else { (170, SUB, &UI_12) };
+        let (x, c, fo) = if name.is_empty() { (140, TEXT, &UI_12B) } else { (170, SUB, &UI_12) };
+        let info = app.dirty(R_INFO + p, hash(&right));
+        if app.dirty(R_FREQ + p, hash(&(f, name))) {
+            // Off-screen, sent once with the text at its right, which shares the rows (DISP-25).
+            canvas::banded(lcd, 15, y + 22, 211, 24, SURFACE, |b| {
+                if name.is_empty() {
+                    w::freq(b, 15, 140, y + 44, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
+                } else {
+                    let nb = name.as_bytes();
+                    let font = if text4_width(nb, &NAME_22) <= 150 { &NAME_22 } else { &UI_15B };
+                    w::field(b, 15, 150, y + 22, y + 46, y + 42, Align::Left, w::fit(nb, font, 150), font, TEXT, SURFACE);
+                }
+                w::field(b, x, 226 - x, y + 26, y + 44, y + 42, Align::Right, right.as_bytes(), fo, c, SURFACE);
+            });
+        } else if info {
             w::field(lcd, x, 226 - x, y + 26, y + 44, y + 42, Align::Right, right.as_bytes(), fo, c, SURFACE);
         }
         let cfg = *sl.cfg();
@@ -230,24 +247,26 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             cols[2].set(super::transmit::power_name(app, s).as_bytes());
         }
         if app.dirty(R_SUB + p, hash(&cols)) {
-            lcd.fill(15, y + 46, 211, 15, SURFACE);
-            w::field(lcd, 15, 36, y + 46, y + 61, y + 58, Align::Left, cols[0].as_bytes(), &UI_12, SUB, SURFACE);
-            w::field(lcd, 51, 120, y + 46, y + 61, y + 58, Align::Left, cols[1].as_bytes(), &UI_12, SUB, SURFACE);
-            w::field(lcd, 156, 70, y + 46, y + 61, y + 58, Align::Right, cols[2].as_bytes(), &UI_12, SUB, SURFACE);
+            canvas::banded(lcd, 15, y + 46, 211, 15, SURFACE, |b| {
+                w::field(b, 15, 36, y + 46, y + 61, y + 58, Align::Left, cols[0].as_bytes(), &UI_12, SUB, SURFACE);
+                w::field(b, 51, 120, y + 46, y + 61, y + 58, Align::Left, cols[1].as_bytes(), &UI_12, SUB, SURFACE);
+                w::field(b, 156, 70, y + 46, y + 61, y + 58, Align::Right, cols[2].as_bytes(), &UI_12, SUB, SURFACE);
+            });
         }
         // The last minute: a bar per 1.2 s bucket heard, newest at the right, on a dotted baseline.
         let act = app.radio.act[p];
         if app.dirty(16 + p, hash(&act)) {
             let (by, bh) = (y + 62, 10);
-            lcd.fill(14, by, 212, bh + 1, SURFACE);
-            for i in 0..ACT_BUCKETS as i32 {
-                let x = 18 + (ACT_BUCKETS as i32 - 1 - i) * 6 + 10;
-                if act & 1 << i != 0 {
-                    lcd.fill(x, by, 4, bh, w::slot_colour(s));
-                } else {
-                    lcd.fill(x, by + bh - 1, 2, 1, DIM);
+            canvas::banded(lcd, 14, by, 212, bh + 1, SURFACE, |b| {
+                for i in 0..ACT_BUCKETS as i32 {
+                    let x = 18 + (ACT_BUCKETS as i32 - 1 - i) * 6 + 10;
+                    if act & 1 << i != 0 {
+                        b.fill(x, by, 4, bh, w::slot_colour(s));
+                    } else {
+                        b.fill(x, by + bh - 1, 2, 1, DIM);
+                    }
                 }
-            }
+            });
         }
     }
 }

@@ -256,6 +256,11 @@ pub(crate) struct Drawn {
     pub hash: [u32; REGIONS],
     /// Each card's meter: lit segments and whether squelch was open.
     pub meter: [Option<(u8, bool)>; SLOTS],
+    /// Each home card's geometry (slot, place, size, APRS) as last drawn: a change of border colour alone then
+    /// redraws only the border, not the whole card (DISP-25).
+    pub card: [u32; SLOTS],
+    /// The scroll cue as last drawn; on the screen while region R_SCROLL says so ([`App::cue`]).
+    pub cue: ferrite_ui::widgets::Cue,
     /// A popup just went: clear its box and redraw the screen's regions under it.
     pub popup_gone: bool,
 }
@@ -387,7 +392,7 @@ impl App {
             write: None,
             text: Buf::new(),
             back: [None; BACK_DEPTH],
-            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], popup_gone: false },
+            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false },
             radio: screens::activity::RadioUi::new(),
             set,
             alert_info: alert,
@@ -406,6 +411,12 @@ impl App {
 
     pub fn screen(&self) -> Screen {
         self.screen
+    }
+
+    /// The page the content area shows, as a hash that changes when a screen turns its page (HF's loading page,
+    /// setup): the simulator's flicker survey counts that as a change of screen, not a live update (DISP-25).
+    pub fn page_shown(&self) -> u32 {
+        self.drawn.hash[screens::shared::R_PAGE]
     }
 
     pub fn active(&self) -> u8 {

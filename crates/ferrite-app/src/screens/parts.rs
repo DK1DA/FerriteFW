@@ -12,11 +12,13 @@ use ferrite_ui::widgets as w;
 /// A rounded bar filled `num / den` in `fg` over LINE.
 pub fn bar(lcd: &mut impl Panel, x: i32, y: i32, wd: i32, h: i32, num: u32, den: u32, fg: u16, bg: u16) {
     let f = (wd as u32 * num.min(den)).checked_div(den).unwrap_or(0) as i32;
-    lcd.fill(x, y, wd, h, bg);
-    lcd.fill_r(x, y, wd, h, h / 2, LINE);
-    if f > 0 {
-        lcd.fill_r(x, y, f.max(h), h, h / 2, fg);
-    }
+    // in bands, so a moving bar never shows its blank track (DISP-25)
+    ferrite_ui::canvas::banded(lcd, x, y, wd, h, bg, |lcd| {
+        lcd.fill_r(x, y, wd, h, h / 2, LINE);
+        if f > 0 {
+            lcd.fill_r(x, y, f.max(h), h, h / 2, fg);
+        }
+    });
 }
 
 /// `n` segments `sw` wide on a `pitch`, `h` tall, the first `lit` in `on`.
@@ -76,26 +78,30 @@ pub fn lines(s: &[u8], f: &Font4, wd: i32, max: i32) -> i32 {
 
 /// A card: SURFACE, rounded, a 1 px border.
 pub fn card(lcd: &mut impl Panel, x: i32, y: i32, wd: i32, h: i32, border: u16) {
-    lcd.fill(x, y, wd, h, BG);
-    lcd.fill_r(x, y, wd, h, 3, SURFACE);
-    lcd.frame_r(x, y, wd, h, 3, border);
+    ferrite_ui::canvas::banded(lcd, x, y, wd, h, BG, |lcd| {
+        lcd.fill_r(x, y, wd, h, 3, SURFACE);
+        lcd.frame_r(x, y, wd, h, 3, border);
+    });
 }
 
 /// A dialog: a card with a coloured title band ("Can't transmit"). The body is the caller's, on SURFACE.
 pub fn dialog(lcd: &mut impl Panel, y: i32, h: i32, title: &[u8], c: u16) {
-    card(lcd, 10, y, 220, h, c);
-    lcd.fill_r(11, y + 1, 218, 24, 2, c);
-    lcd.fill(11, y + 14, 218, 11, c);
-    lcd.text4_rows(19, y + 18, title, &UI_12B, WHITE, c, y + 2, y + 25);
+    ferrite_ui::canvas::banded(lcd, 10, y, 220, h, BG, |lcd| {
+        card(lcd, 10, y, 220, h, c);
+        lcd.fill_r(11, y + 1, 218, 24, 2, c);
+        lcd.fill(11, y + 14, 218, 11, c);
+        lcd.text4_rows(19, y + 18, title, &UI_12B, WHITE, c, y + 2, y + 25);
+    });
 }
 
 /// A key chip like the hint bar's ("MENU 0 8 9"), blue outlined; returns its width.
 pub fn path_chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], bg: u16) -> i32 {
     // 17 px tall like the chips, so the 9 px capitals centre (DISP-19)
     let wd = text4_width(s, &UI_12B) + 12;
-    lcd.fill(x, y + 17, wd, 1, bg);
-    w::field(lcd, x, wd, y, y + 17, y + 13, Align::Center, s, &UI_12B, BLUE, bg);
-    lcd.frame_r(x, y, wd, 17, 1, BLUE);
+    ferrite_ui::canvas::banded(lcd, x, y, wd, 18, bg, |lcd| {
+        w::field(lcd, x, wd, y, y + 17, y + 13, Align::Center, s, &UI_12B, BLUE, bg);
+        lcd.frame_r(x, y, wd, 17, 1, BLUE);
+    });
     wd
 }
 
@@ -126,8 +132,7 @@ pub fn arrow2(lcd: &mut impl Panel, x: i32, y: i32, len: i32, c: u16) {
 
 /// A filled dot (status lights).
 pub fn dot(lcd: &mut impl Panel, x: i32, y: i32, d: i32, c: u16, bg: u16) {
-    lcd.fill(x, y, d, d, bg);
-    lcd.fill_r(x, y, d, d, d / 2, c);
+    ferrite_ui::canvas::banded(lcd, x, y, d, d, bg, |lcd| lcd.fill_r(x, y, d, d, d / 2, c));
 }
 
 /// Level 0-255 (dBm + 160) as a bar height out of `h`, from -130 dBm (empty) to -40 dBm (full).

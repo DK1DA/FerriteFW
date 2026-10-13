@@ -190,16 +190,17 @@ impl View for ToneSearch {
             kind.push(m.as_bytes());
         }
         if app.dirty(4, hash(&(d, kind))) {
-            lcd.fill(0, 100, 240, 60, BG);
-            if t != 0 {
-                w::field(lcd, 8, 224, 102, 118, 114, Align::Left, b"Found", &UI_12, SUB, BG);
-                lcd.text4_rows(8, 152, d.as_bytes(), &DIG_46, GREEN, BG, 118, 154);
-                let x = 8 + text4_width(d.as_bytes(), &DIG_46) + 8;
-                w::field(lcd, x, 232 - x, 138, 155, 151, Align::Left, kind.as_bytes(), &UI_12, SUB, BG);
-            } else {
-                w::field(lcd, 8, 224, 120, 140, 134, Align::Left, kind.as_bytes(), &UI_12B, AMBER, BG);
-                w::field(lcd, 8, 224, 140, 156, 152, Align::Left, b"Listening for CTCSS and DCS", &UI_12, SUB, BG);
-            }
+            ferrite_ui::canvas::banded(lcd, 0, 100, 240, 60, BG, |lcd| {
+                if t != 0 {
+                    w::field(lcd, 8, 224, 102, 118, 114, Align::Left, b"Found", &UI_12, SUB, BG);
+                    lcd.text4_rows(8, 152, d.as_bytes(), &DIG_46, GREEN, BG, 118, 154);
+                    let x = 8 + text4_width(d.as_bytes(), &DIG_46) + 8;
+                    w::field(lcd, x, 232 - x, 138, 155, 151, Align::Left, kind.as_bytes(), &UI_12, SUB, BG);
+                } else {
+                    w::field(lcd, 8, 224, 120, 140, 134, Align::Left, kind.as_bytes(), &UI_12B, AMBER, BG);
+                    w::field(lcd, 8, 224, 140, 156, 152, Align::Left, b"Listening for CTCSS and DCS", &UI_12, SUB, BG);
+                }
+            });
         }
         // The slot's tones now; while asking, the question.
         let c = *app.slot(self.slot).cfg();
@@ -345,18 +346,20 @@ impl View for Counter {
         let (f, rssi) = if self.hold { (self.held, self.held_rssi) } else { (f, rssi) };
         if app.dirty(1, hash(&self.hold)) {
             w::field(lcd, 8, 170, 22, 40, 35, Align::Left, b"Strongest nearby signal", &UI_12, SUB, BG);
-            lcd.fill(178, 22, 62, 18, BG);
-            if self.hold {
-                w::tag(lcd, 232, 23, b"HOLD", AMBER, BG);
-            }
+            ferrite_ui::canvas::banded(lcd, 178, 22, 62, 18, BG, |lcd| {
+                if self.hold {
+                    w::tag(lcd, 232, 23, b"HOLD", AMBER, BG);
+                }
+            });
         }
         if app.dirty(2, hash(&f)) {
-            lcd.fill(0, 42, 240, 52, BG);
-            if f == 0 {
-                w::field(lcd, 8, 224, 56, 76, 70, Align::Left, b"Listening...", &UI_12B, AMBER, BG);
-            } else {
-                w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, if live || self.hold { TEXT } else { SUB }, SUB, BG);
-            }
+            ferrite_ui::canvas::banded(lcd, 0, 42, 240, 52, BG, |lcd| {
+                if f == 0 {
+                    w::field(lcd, 8, 224, 56, 76, 70, Align::Left, b"Listening...", &UI_12B, AMBER, BG);
+                } else {
+                    w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, if live || self.hold { TEXT } else { SUB }, SUB, BG);
+                }
+            });
         }
         let lit = if f == 0 { 0 } else { w::meter_level(rssi) };
         if app.dirty(3, hash(&lit)) {

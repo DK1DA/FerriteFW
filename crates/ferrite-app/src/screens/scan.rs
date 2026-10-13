@@ -180,11 +180,17 @@ impl View for Scan {
         } else {
             ("scanning", SUB)
         };
+        let first = app.drawn.hash[1] == 0;
         if app.dirty(1, hash(&(state == "RX"))) {
-            lcd.fill(6, y, 228, h, BG);
-            lcd.fill_r(6, y, 228, h, 3, SURFACE);
-            lcd.frame_r(6, y, 228, h, 3, if state == "RX" { GREEN } else { BLUE });
-            app.drawn.hash[2..5].fill(0);
+            let border = if state == "RX" { GREEN } else { BLUE };
+            if first {
+                lcd.fill(6, y, 228, h, BG);
+                lcd.fill_r(6, y, 228, h, 3, SURFACE);
+                lcd.frame_r(6, y, 228, h, 3, border);
+                app.drawn.hash[2..5].fill(0);
+            } else {
+                lcd.frame_r(6, y, 228, h, 3, border); // the border's colour alone (DISP-25)
+            }
         }
         let mut head = Buf::<32>::new();
         head.push(b"SCAN");
@@ -194,8 +200,9 @@ impl View for Scan {
             w::badge(lcd, 14, y + 8, s, true, SURFACE);
             w::field(lcd, 34, 120, y + 7, y + 24, y + 20, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
             if state == "RX" {
-                lcd.fill(154, y + 6, 74, 18, SURFACE);
-                w::tag(lcd, 226, y + 7, b"RX", GREEN, SURFACE);
+                ferrite_ui::canvas::banded(lcd, 154, y + 6, 74, 18, SURFACE, |lcd| {
+                    w::tag(lcd, 226, y + 7, b"RX", GREEN, SURFACE);
+                });
             } else {
                 w::field(lcd, 154, 72, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
             }

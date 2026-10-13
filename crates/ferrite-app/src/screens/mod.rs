@@ -32,6 +32,18 @@
 //! Tones, are 12-16 for now). Lists read their items on demand (channels from the
 //! store, settings from tables), never a copy.
 
+/// DISP-25: `$body` (drawing on `$lcd`) straight onto the panel; or, when `$clear` (a box whose layout changed), off
+/// the screen in bands over the box, so its old content goes to the new without a blank between.
+macro_rules! redraw_box {
+    ($clear:expr, $lcd:ident, ($x:expr, $y:expr, $w:expr, $h:expr, $bg:expr), $body:block) => {
+        if $clear {
+            ferrite_ui::canvas::banded($lcd, $x, $y, $w, $h, $bg, |$lcd| $body);
+        } else {
+            $body
+        }
+    };
+}
+
 pub mod activity;
 pub mod advanced;
 pub mod alert;

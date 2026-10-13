@@ -634,8 +634,9 @@ impl View for Hf {
         let chip1 = h.chip1();
         if app.dirty(R_HEAD, hash(&(band, chip1))) {
             w::field(lcd, 10, 120, 24, 42, 38, Align::Left, band.as_bytes(), &UI_12B, TEXT, BG);
-            lcd.fill(130, 24, 102, 18, BG);
-            w::tag(lcd, 230, 25, if chip1 { b"CHIP 1".as_slice() } else { b"SI4732" }, SUB, BG);
+            ferrite_ui::canvas::banded(lcd, 130, 24, 102, 18, BG, |lcd| {
+                w::tag(lcd, 230, 25, if chip1 { b"CHIP 1".as_slice() } else { b"SI4732" }, SUB, BG);
+            });
         }
         if app.dirty(R_FREQ, hash(&h.freq)) {
             w::freq(lcd, 12, 232, 96, h.freq, &DIG_46, &DIG_28, TEXT, SUB, BG);
@@ -647,8 +648,9 @@ impl View for Hf {
         }
         let step = STEP_NAMES[rx][h.step as usize % 4];
         if app.dirty(R_INFO, hash(&(h.mode, step, h.bw_text(), bfo))) {
-            lcd.fill(12, 106, 220, 17, BG); // chips leave their gaps unpainted
-            w::chips(lcd, 12, 106, 220, &[mode_name(h.mode).as_bytes(), step.as_bytes(), h.bw_text().as_bytes(), bfo.as_bytes()], BG);
+            ferrite_ui::canvas::banded(lcd, 12, 106, 220, 17, BG, |lcd| {
+                w::chips(lcd, 12, 106, 220, &[mode_name(h.mode).as_bytes(), step.as_bytes(), h.bw_text().as_bytes(), bfo.as_bytes()], BG);
+            });
         }
         // Signal: SNR on the SI4732, an S-meter on chip 1 (HF-15).
         let (rssi, snr) = match cx.live.mode {
@@ -696,15 +698,16 @@ impl View for Hf {
         let tx = h.can_tx();
         let patch = app.radio.ssb_patch;
         if app.dirty(R_HELP, hash(&(tx, patch))) {
-            lcd.fill(0, 204, 240, 96, BG);
-            lcd.fill_r(8, 206, 224, 76, 2, SURFACE);
-            let mut t = Buf::<140>::new();
-            t.push(b"Paused: watch, scan, APRS, decoders, jobs and beacons. ");
-            t.push(if tx { b"PTT transmits here on chip 1.".as_slice() } else { b"Receive only here." });
-            if !patch {
-                t.push(b" No SSB patch: AM only.");
-            }
-            w::wrap(lcd, 16, 208, 209, 279, 222, 15, t.as_bytes(), &UI_12, SUB, SURFACE);
+            ferrite_ui::canvas::banded(lcd, 0, 204, 240, 96, BG, |lcd| {
+                lcd.fill_r(8, 206, 224, 76, 2, SURFACE);
+                let mut t = Buf::<140>::new();
+                t.push(b"Paused: watch, scan, APRS, decoders, jobs and beacons. ");
+                t.push(if tx { b"PTT transmits here on chip 1.".as_slice() } else { b"Receive only here." });
+                if !patch {
+                    t.push(b" No SSB patch: AM only.");
+                }
+                w::wrap(lcd, 16, 208, 209, 279, 222, 15, t.as_bytes(), &UI_12, SUB, SURFACE);
+            });
         }
     }
 

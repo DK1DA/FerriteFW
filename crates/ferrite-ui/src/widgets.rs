@@ -83,6 +83,10 @@ pub fn field(
 
 /// The 14 x 14 slot letter: filled for the active slot, outlined for the others.
 pub fn badge(lcd: &mut impl Panel, x: i32, y: i32, slot: u8, filled: bool, bg: u16) {
+    crate::canvas::banded(lcd, x, y, 14, 14, bg, |b| badge_now(b, x, y, slot, filled, bg));
+}
+
+fn badge_now(lcd: &mut impl Panel, x: i32, y: i32, slot: u8, filled: bool, bg: u16) {
     let c = slot_colour(slot);
     let (fg, back) = if filled { (BLUE_FG, c) } else { (c, bg) };
     // 13 x 13: the 9 px letter sits 1 px from the top and bottom inside (an even box can't centre an odd
@@ -101,9 +105,10 @@ pub fn tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16, bg: u16
     // 15 px tall so the 9 px capitals sit 2 px from the top and bottom inside (DISP-19)
     let w = text4_width(s, &UI_12B) + 10;
     let x = x_right - w;
-    lcd.fill(x, y + 15, w, 1, bg);
-    field(lcd, x, w, y, y + 15, y + 12, Align::Center, s, &UI_12B, c, bg);
-    lcd.frame_r(x, y, w, 15, 1, c);
+    crate::canvas::banded(lcd, x, y, w, 16, bg, |b| {
+        field(b, x, w, y, y + 15, y + 12, Align::Center, s, &UI_12B, c, bg);
+        b.frame_r(x, y, w, 15, 1, c);
+    });
     w
 }
 
@@ -127,6 +132,10 @@ pub const SLOT_POWER: (i32, i32) = (176, 50);
 /// A chip in a fixed slot (x, w) at y..y+17: the slot is cleared first, then a chip of the slot's full width when
 /// `s` isn't empty, so a shorter value never leaves pixels behind.
 pub fn chip_slot(lcd: &mut impl Panel, slot: (i32, i32), y: i32, s: &[u8], fg: u16, frame: u16, bg: u16) {
+    crate::canvas::banded(lcd, slot.0, y, slot.1, 17, bg, |b| chip_slot_now(b, slot, y, s, fg, frame, bg));
+}
+
+fn chip_slot_now(lcd: &mut impl Panel, slot: (i32, i32), y: i32, s: &[u8], fg: u16, frame: u16, bg: u16) {
     let (x, w) = slot;
     lcd.fill(x, y, w, 17, bg);
     if !s.is_empty() {
@@ -206,8 +215,14 @@ pub fn meter(lcd: &mut impl Panel, x: i32, y: i32, old: Option<u8>, lit: u8, on:
         None => (0, METER_SEGS),
     };
     if old.is_none() {
-        lcd.fill(x, y, METER_SEGS as i32 * 10, 8, bg);
+        // the whole meter in one band: the gaps' background and every segment (DISP-25)
+        crate::canvas::banded(lcd, x, y, METER_SEGS as i32 * 10, 8, bg, |band| meter_segs(band, x, y, 0, METER_SEGS, lit, on));
+    } else {
+        meter_segs(lcd, x, y, a, b, lit, on);
     }
+}
+
+fn meter_segs(lcd: &mut impl Panel, x: i32, y: i32, a: u8, b: u8, lit: u8, on: u16) {
     for i in a..b.min(METER_SEGS) {
         lcd.fill_r(x + i as i32 * 10, y, 8, 8, 1, if i < lit { on } else { LINE });
     }
@@ -293,6 +308,11 @@ pub fn hint_width(lcd: &mut impl Panel, items: &[(&str, &str)]) -> i32 {
 /// The hint bar (KEY-9): up to [`HINT_MAX`] key + label pairs, the first at the left margin, the last at the
 /// right, the one between centred in the gap.
 pub fn hint_bar(lcd: &mut impl Panel, items: &[(&str, &str)]) {
+    // Off-screen, sent once (DISP-25): the key boxes were drawn over their own blank.
+    crate::canvas::banded(lcd, 0, HINT_Y, 240, 20, BG, |b| hint_bar_now(b, items));
+}
+
+fn hint_bar_now(lcd: &mut impl Panel, items: &[(&str, &str)]) {
     let base = HINT_Y + 15; // text rows HINT_Y + 2 .. HINT_Y + 19
     lcd.fill(0, HINT_Y, 240, 1, LINE);
     lcd.fill(0, HINT_Y + 1, 240, 1, BG);
@@ -422,6 +442,13 @@ pub const POPUP_BOX: (i32, i32, i32, i32) = (24, 128, 192, 64);
 pub fn popup(lcd: &mut impl Panel, head: &[u8], body: &[u8]) {
     let (x, _, w, _) = POPUP_BOX;
     let (y, h) = if body.is_empty() { (138, 44) } else { (128, 64) };
+    // Off-screen: the box keeps whatever was under its rounded corners (DISP-25).
+    crate::canvas::banded_over(lcd, x, y, w, h, |b| popup_now(b, head, body));
+}
+
+fn popup_now(lcd: &mut impl Panel, head: &[u8], body: &[u8]) {
+    let (x, _, w, _) = POPUP_BOX;
+    let (y, h) = if body.is_empty() { (138, 44) } else { (128, 64) };
     lcd.fill_r(x, y, w, h, 4, BLUE);
     lcd.fill_r(x + 1, y + 1, w - 2, h - 2, 3, TOAST);
     let hb = if body.is_empty() { y + 28 } else { y + 26 };
@@ -449,6 +476,10 @@ pub fn popup_fits(head: &[u8], body: &[u8]) -> bool {
 }
 
 pub fn toast(lcd: &mut impl Panel, head: &[u8], body: &[u8], icon: bool) {
+    crate::canvas::banded(lcd, 0, HINT_Y, 240, 20, TOAST, |b| toast_now(b, head, body, icon));
+}
+
+fn toast_now(lcd: &mut impl Panel, head: &[u8], body: &[u8], icon: bool) {
     lcd.fill(0, HINT_Y, 240, 1, BLUE);
     lcd.fill(0, HINT_Y + 1, 240, 19, TOAST);
     let mut x = 8;
@@ -475,7 +506,14 @@ pub struct Row<'a> {
     pub grey: bool,
 }
 
-pub fn list_row(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
+pub fn list_row(lcd: &mut impl Panel, y: i32, h: i32, r: &Row, cue: Cue) {
+    crate::canvas::banded(lcd, 0, y, 240, h, BG, |b| {
+        list_row_now(b, y, h, r);
+        cue.draw(b);
+    });
+}
+
+fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
     let bg = if r.selected { BLUE } else { BG };
     let (fg, sub) = if r.selected { (BLUE_FG, BLUE_FG) } else { (if r.grey { DIM } else { TEXT }, SUB) };
     let base = y + h / 2 + 5;
@@ -537,7 +575,16 @@ pub fn kv_h(st: &KvStyle, value: &[u8], h: i32) -> i32 {
 
 /// A label + value row from y, `h` tall ([`kv_h`]): the label in SUB at x = 8, the value in `vc`; all white on
 /// blue when selected. Paints the whole row.
-pub fn kv(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], value: &[u8], vc: u16, selected: bool) {
+#[allow(clippy::too_many_arguments)]
+pub fn kv(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], value: &[u8], vc: u16, selected: bool, cue: Cue) {
+    crate::canvas::banded(lcd, 0, y, 240, h, BG, |b| {
+        kv_now(b, y, h, st, label, value, vc, selected);
+        cue.draw(b);
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn kv_now(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], value: &[u8], vc: u16, selected: bool) {
     let bg = if selected { BLUE } else { BG };
     let (lc, vc) = if selected { (BLUE_FG, BLUE_FG) } else { (SUB, vc) };
     let (vx, vw) = (st.vx as i32, 232 - st.vx as i32);
@@ -566,18 +613,48 @@ pub fn kv(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], valu
 /// from `y` for `h`, and a thumb (SUB) for the page, placed at the first shown row's share of all `n` rows (at
 /// least 12 px tall); 1 px corners (DISP-19). x 236-238, right of the values (they end at 232).
 pub const CUE_X: i32 = 236;
-pub fn scroll_cue(lcd: &mut impl Panel, y: i32, h: i32, top: u32, shown: u32, n: u32) {
-    let n = n.max(1);
-    lcd.fill_r(CUE_X, y, 3, h, 1, LINE);
-    let th = (h as u32 * shown.min(n) / n).max(12).min(h as u32) as i32;
-    let room = (h - th).max(0) as u32;
-    let span = n.saturating_sub(shown).max(1);
-    let ty = y + (room * top.min(span) / span) as i32;
-    lcd.fill_r(CUE_X, ty, 3, th, 1, SUB);
+
+/// A scroll cue on the screen (h 0: none): its track from y, h tall, and the thumb's place in it. A row redrawn
+/// beside it draws its part of the cue in the same band, so the cue never blanks under a row's redraw (DISP-25).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Cue {
+    pub y: i16,
+    pub h: i16,
+    pub ty: i16,
+    pub th: i16,
+}
+
+impl Cue {
+    /// Rows `top..top + shown` of `n` beside a track from y, h tall: the thumb's share and place.
+    pub fn new(y: i32, h: i32, top: u32, shown: u32, n: u32) -> Self {
+        let n = n.max(1);
+        let th = (h as u32 * shown.min(n) / n).max(12).min(h as u32) as i32;
+        let room = (h - th).max(0) as u32;
+        let span = n.saturating_sub(shown).max(1);
+        let ty = y + (room * top.min(span) / span) as i32;
+        Cue { y: y as i16, h: h as i16, ty: ty as i16, th: th as i16 }
+    }
+
+    /// The cue's pixels inside what `lcd` takes (a row's band clips it to the row).
+    pub fn draw(self, lcd: &mut impl Panel) {
+        if self.h > 0 {
+            lcd.fill_r(CUE_X, self.y as i32, 3, self.h as i32, 1, LINE);
+            lcd.fill_r(CUE_X, self.ty as i32, 3, self.th as i32, 1, SUB);
+        }
+    }
+}
+
+pub fn scroll_cue(lcd: &mut impl Panel, cue: Cue) {
+    // Track and thumb off-screen, sent once (DISP-25); the corners keep the background.
+    crate::canvas::banded_over(lcd, CUE_X, cue.y as i32, 3, cue.h as i32, |b| cue.draw(b));
 }
 
 /// The help line at the foot of a menu (MENU-15): a rounded box, the text wrapped on words, then the path.
 pub fn help_box(lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) {
+    crate::canvas::banded(lcd, 0, y, 240, h, BG, |b| help_box_now(b, y, h, text, path));
+}
+
+fn help_box_now(lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) {
     lcd.fill(0, y, 240, h, BG);
     lcd.fill_r(8, y, 224, h, 2, SURFACE);
     let max = 208;
@@ -612,7 +689,13 @@ pub fn help_box(lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) 
 }
 
 /// A setting in the edit grid: label above, value below; the focused one is blue with the knob mark.
+#[allow(clippy::too_many_arguments)]
 pub fn edit_cell(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, label: &[u8], value: &[u8], focused: bool, grey: bool) {
+    crate::canvas::banded(lcd, x, y, w, h, BG, |b| edit_cell_now(b, x, y, w, h, label, value, focused, grey));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn edit_cell_now(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, label: &[u8], value: &[u8], focused: bool, grey: bool) {
     let (bg, border, lc) = if focused { (FOCUS, BLUE, BLUE) } else { (BG, LINE, SUB) };
     lcd.fill(x, y, w, h, bg);
     // the two lines are laid out for 29 px; a taller cell moves them down to keep them centred
@@ -676,8 +759,9 @@ impl StatusBar {
         if old.is_none() {
             lcd.fill(0, SBAR_H - 1, 240, 1, LINE);
         }
+        // Each half drawn off-screen and sent once (DISP-25): it was blanked and drawn, which flickered.
         if old.is_none_or(|o| !self.left_eq(o)) {
-            self.draw_left(lcd);
+            crate::canvas::banded(lcd, 0, 0, 98, SBAR_H - 1, BG, |b| self.draw_left(b));
         }
         if old.is_none_or(|o| (o.clock, o.utc) != (self.clock, self.utc)) {
             let mut b = Buf::<8>::new();
@@ -695,7 +779,7 @@ impl StatusBar {
             field(lcd, 98, 44, 0, SBAR_H - 1, 14, Align::Center, t, &UI_12B, TEXT, BG);
         }
         if old.is_none_or(|o| !self.right_eq(o)) {
-            self.draw_right(lcd);
+            crate::canvas::banded(lcd, 142, 0, 98, SBAR_H - 1, BG, |b| self.draw_right(b));
         }
     }
 
@@ -854,8 +938,8 @@ mod tests {
         hint_bar(&mut fb, &[("SLOT", "A·B·C"), ("OK", "Quick"), (LEFT, "Band")]);
         hint_bar(&mut fb, &[(UP, ""), ("Knob", "Change")]);
         toast(&mut fb, b"VE3KPW-9", b"On my way", true);
-        list_row(&mut fb, 41, 22, &Row { num: Some(1), name: b"Squelch", value: b"4", dot: true, selected: true, grey: false });
-        kv(&mut fb, 20, 18, &KV_STATUS, b"Transmit", b"Ready", GREEN, false);
+        list_row(&mut fb, 41, 22, &Row { num: Some(1), name: b"Squelch", value: b"4", dot: true, selected: true, grey: false }, Cue::default());
+        kv(&mut fb, 20, 18, &KV_STATUS, b"Transmit", b"Ready", GREEN, false, Cue::default());
         help_box(&mut fb, 265, 33, b"Audio opens above this level. Home: SIDE1 + knob.", b"MENU 1");
         edit_cell(&mut fb, 161, 85, 72, 31, b"Tone", b"T 100.0", true, false);
         badge(&mut fb, 14, 33, 2, false, SURFACE);

@@ -132,7 +132,7 @@ impl View for Msgs {
                 age_text(m.ago_s, &mut age);
                 let top = Row2 { tag: if m.inbound { b"From" } else { b"To" }, title: m.peer.as_bytes(), big: true, right: time.as_bytes(), sub: if m.inbound { b"Received" } else { b"Sent" }, ..Row2::default() };
                 if app.dirty(R_TOP, hash(&top)) {
-                    row2(lcd, 22, &top);
+                    row2(lcd, 22, &top, w::Cue::default());
                 }
                 let mut b = Buf::<40>::new();
                 // The clock time is in the header: here how long ago, and for a sent message its state.
@@ -140,8 +140,9 @@ impl View for Msgs {
                 let (l, v): (&[u8], &[u8]) = if m.inbound { (b"", b"") } else { (b"State", st.as_bytes()) };
                 app.kv(lcd, 1, y, 0, &w::KV_DETAIL, l, v, c, false);
                 if app.dirty(R_NOTE, hash(&m.text)) {
-                    lcd.fill(0, 100, 240, 196, BG);
-                    wrap(lcd, 8, 104, 224, 296, m.text.as_bytes(), TEXT);
+                    ferrite_ui::canvas::banded(lcd, 0, 100, 240, 196, BG, |b| {
+                        wrap(b, 8, 104, 224, 296, m.text.as_bytes(), TEXT);
+                    });
                 }
             }
             return;
@@ -686,70 +687,73 @@ impl View for Compose {
         // the recipient, or which quick message this is
         if app.dirty(R_TOP, hash(&(d.to, self.field, pending_tap && self.field == 0, self.edit))) {
             if self.quick_edit_on() {
-                lcd.fill(0, 24, 240, 60, BG);
-                let mut b = Buf::<40>::new();
-                let _ = uwrite!(b, "Quick message {}", self.edit + 1);
-                lcd.text4(8, 36, b.as_bytes(), &UI_12B, TEXT, BG);
-                lcd.text4(8, 56, slow!("# in the list: the factory text again").as_bytes(), &UI_12, SUB, BG);
+                ferrite_ui::canvas::banded(lcd, 0, 24, 240, 60, BG, |lcd| {
+                    let mut b = Buf::<40>::new();
+                    let _ = uwrite!(b, "Quick message {}", self.edit + 1);
+                    lcd.text4(8, 36, b.as_bytes(), &UI_12B, TEXT, BG);
+                    lcd.text4(8, 56, slow!("# in the list: the factory text again").as_bytes(), &UI_12, SUB, BG);
+                });
             } else {
                 field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending_tap && self.field == 0, slow!("callsign-SSID").as_bytes());
             }
         }
         if app.dirty(R_ROW, hash(&(full, self.tail, word, self.field, pending_tap && self.field == 1, quick_list, quick_list.then_some(self.quick)))) {
             let (y, h) = (86, 120);
-            lcd.fill(0, y, 240, h + 24, BG);
-            lcd.text4(8, y + 12, if quick_list { slow!("Quick messages").as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
-            let mut c = Buf::<12>::new();
-            let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX); // TEXT-5
-            let cw = text4_width(c.as_bytes(), &UI_12);
-            lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
-            let focus = self.field == 1;
-            let bg = if focus { FOCUS } else { SURFACE };
-            lcd.fill_r(8, y + 18, 224, h, 2, bg);
-            lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
-            if quick_list {
-                quick_rows(cx.store, lcd, y + 20, self.quick as usize, bg);
-            } else {
-                let mut all = Buf::<84>::from(text.as_bytes());
-                all.push(word.as_bytes());
-                let at = all.len();
-                all.push(&full.as_bytes()[head.len().min(full.len())..]);
-                wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, all.as_bytes(), bg);
-                if focus {
-                    let under = if !word.is_empty() { text4_width(word.as_bytes(), &UI_12) } else if pending_tap { 7 } else { 0 };
-                    caret(lcd, all.as_bytes(), at, 14, y + 22, 212, under, if matched { BLUE } else { AMBER });
+            ferrite_ui::canvas::banded(lcd, 0, y, 240, h + 24, BG, |lcd| {
+                lcd.text4(8, y + 12, if quick_list { slow!("Quick messages").as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
+                let mut c = Buf::<12>::new();
+                let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX); // TEXT-5
+                let cw = text4_width(c.as_bytes(), &UI_12);
+                lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
+                let focus = self.field == 1;
+                let bg = if focus { FOCUS } else { SURFACE };
+                lcd.fill_r(8, y + 18, 224, h, 2, bg);
+                lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
+                if quick_list {
+                    quick_rows(cx.store, lcd, y + 20, self.quick as usize, bg);
+                } else {
+                    let mut all = Buf::<84>::from(text.as_bytes());
+                    all.push(word.as_bytes());
+                    let at = all.len();
+                    all.push(&full.as_bytes()[head.len().min(full.len())..]);
+                    wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, all.as_bytes(), bg);
+                    if focus {
+                        let under = if !word.is_empty() { text4_width(word.as_bytes(), &UI_12) } else if pending_tap { 7 } else { 0 };
+                        caret(lcd, all.as_bytes(), at, 14, y + 22, 212, under, if matched { BLUE } else { AMBER });
+                    }
                 }
-            }
+            });
         }
         let callsign = cx.store.data().callsign();
         let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list, head);
         if app.dirty(R_NOTE, hash(&strip)) {
             let y = 236;
-            lcd.fill(0, y, 240, 60, BG);
-            if pred && self.field == 1 && !keys.is_empty() {
-                candidate_strip(lcd, y + 2, keys.as_bytes(), head.as_bytes(), self);
-            } else {
-                let mut b = Buf::<40>::new();
-                if pred && self.field == 1 {
-                    let _ = uwrite!(b, "Words: {}", PCASES[self.pcase as usize % 3]);
+            ferrite_ui::canvas::banded(lcd, 0, y, 240, 60, BG, |lcd| {
+                if pred && self.field == 1 && !keys.is_empty() {
+                    candidate_strip(lcd, y + 2, keys.as_bytes(), head.as_bytes(), self);
                 } else {
-                    let _ = uwrite!(b, "Typing: {}", ["abc", "ABC", "123"][self.case as usize % 3]);
+                    let mut b = Buf::<40>::new();
+                    if pred && self.field == 1 {
+                        let _ = uwrite!(b, "Words: {}", PCASES[self.pcase as usize % 3]);
+                    } else {
+                        let _ = uwrite!(b, "Typing: {}", ["abc", "ABC", "123"][self.case as usize % 3]);
+                    }
+                    lcd.text4(8, y + 13, b.as_bytes(), &UI_12, SUB, BG);
                 }
-                lcd.text4(8, y + 13, b.as_bytes(), &UI_12, SUB, BG);
-            }
-            match callsign {
-                Some(c) if !self.quick_edit_on() => {
-                    let mut f = Buf::<40>::new();
-                    let _ = uwrite!(f, "From {}", Txt(c.as_bytes()));
-                    lcd.text4(8, y + 37, f.as_bytes(), &UI_12, SUB, BG);
+                match callsign {
+                    Some(c) if !self.quick_edit_on() => {
+                        let mut f = Buf::<40>::new();
+                        let _ = uwrite!(f, "From {}", Txt(c.as_bytes()));
+                        lcd.text4(8, y + 37, f.as_bytes(), &UI_12, SUB, BG);
+                    }
+                    None if !self.quick_edit_on() => {
+                        lcd.text4(8, y + 37, slow!("No callsign: set one to send").as_bytes(), &UI_12, AMBER, BG);
+                    }
+                    _ => {}
                 }
-                None if !self.quick_edit_on() => {
-                    lcd.text4(8, y + 37, slow!("No callsign: set one to send").as_bytes(), &UI_12, AMBER, BG);
-                }
-                _ => {}
-            }
-            let help: &[u8] = if pred && self.field == 1 { slow!("1 marks   hold a digit: digit").as_bytes() } else { slow!("1 . , ? !   0 space   # space").as_bytes() };
-            lcd.text4(8, y + 55, help, &UI_12, DIM, BG);
+                let help: &[u8] = if pred && self.field == 1 { slow!("1 marks   hold a digit: digit").as_bytes() } else { slow!("1 . , ? !   0 space   # space").as_bytes() };
+                lcd.text4(8, y + 55, help, &UI_12, DIM, BG);
+            });
         }
     }
 
@@ -821,28 +825,29 @@ fn pop<const N: usize>(b: &mut Buf<N>) {
 
 /// A one-line field: label, a box with the value, a hint when empty.
 fn field_box(lcd: &mut impl Panel, y: i32, h: i32, label: &[u8], v: &[u8], focus: bool, pending: bool, empty: &[u8]) {
-    lcd.fill(0, y, 240, h + 26, BG);
-    lcd.text4(8, y + 12, label, &UI_12, SUB, BG);
-    let bg = if focus { FOCUS } else { SURFACE };
-    lcd.fill_r(8, y + 18, 224, h, 2, bg);
-    lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
-    let base = y + 18 + h / 2 + 6;
-    if v.is_empty() {
-        lcd.text4(16, base, empty, &UI_12, DIM, bg);
-        if focus {
-            lcd.fill(16, base - 13, 1, 16, BLUE);
-        }
-    } else {
-        let wv = lcd.text4(16, base - 1, v, &UI_15B, TEXT, bg);
-        if focus {
-            if pending {
-                let lw = text4_width(&v[v.len() - 1..], &UI_15B);
-                lcd.fill(16 + wv - lw, base + 2, lw, 2, BLUE);
-            } else {
-                lcd.fill(16 + wv + 1, base - 15, 1, 18, BLUE);
+    ferrite_ui::canvas::banded(lcd, 0, y, 240, h + 26, BG, |lcd| {
+        lcd.text4(8, y + 12, label, &UI_12, SUB, BG);
+        let bg = if focus { FOCUS } else { SURFACE };
+        lcd.fill_r(8, y + 18, 224, h, 2, bg);
+        lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
+        let base = y + 18 + h / 2 + 6;
+        if v.is_empty() {
+            lcd.text4(16, base, empty, &UI_12, DIM, bg);
+            if focus {
+                lcd.fill(16, base - 13, 1, 16, BLUE);
+            }
+        } else {
+            let wv = lcd.text4(16, base - 1, v, &UI_15B, TEXT, bg);
+            if focus {
+                if pending {
+                    let lw = text4_width(&v[v.len() - 1..], &UI_15B);
+                    lcd.fill(16 + wv - lw, base + 2, lw, 2, BLUE);
+                } else {
+                    lcd.fill(16 + wv + 1, base - 15, 1, 18, BLUE);
+                }
             }
         }
-    }
+    });
 }
 
 /// Wrapped text on a box's colour; returns the lines used.

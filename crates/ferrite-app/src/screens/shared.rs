@@ -124,10 +124,16 @@ impl App {
             return;
         }
         if more {
-            w::scroll_cue(lcd, y, h, top, shown, n);
+            self.drawn.cue = w::Cue::new(y, h, top, shown, n);
+            w::scroll_cue(lcd, self.drawn.cue);
         } else if prev & 1 != 0 {
             lcd.fill(w::CUE_X, y, 3, h, BG);
         }
+    }
+
+    /// The scroll cue on the screen, for the rows beside it to draw with (none once the region is forgotten).
+    pub(crate) fn cue(&self) -> w::Cue {
+        if self.drawn.hash[R_SCROLL] & 1 != 0 { self.drawn.cue } else { w::Cue::default() }
     }
 
     /// A screen with pages (setup, About, a list and its detail): when the page changes, the content area is
@@ -196,7 +202,7 @@ impl App {
     /// List row `i` (region R_ROW + i) at y, drawn when what it shows changed (MENU-12).
     pub(crate) fn list_row(&mut self, lcd: &mut impl Panel, i: usize, y: i32, h: i32, r: &Row) {
         if self.dirty(R_ROW + i, hash(&(r.num, r.name, r.value, r.dot, r.selected, r.grey))) {
-            w::list_row(lcd, y, h, r);
+            w::list_row(lcd, y, h, r, self.cue());
         }
     }
 

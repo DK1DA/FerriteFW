@@ -139,15 +139,16 @@ impl View for Value {
             _ => b"this VFO",
         });
         if app.dirty(R_NOTE, hash(&(item, def))) {
-            lcd.fill(0, 41, 240, BOX_H + 6, BG);
-            lcd.frame_r(6, BOX_Y, 228, BOX_H, 3, BLUE);
-            let mut h = Buf::<24>::new();
-            if let Some(i) = qi {
-                let _ = uwrite!(h, "{} ", (i + 1) % 10);
-            }
-            h.push(item.name().as_bytes());
-            let hw = w::field(lcd, 14, 120, BOX_Y + 6, BOX_Y + 24, BOX_Y + 19, Align::Left, h.as_bytes(), &UI_12B, TEXT, BG);
-            w::field(lcd, 22 + hw, 204 - hw, BOX_Y + 6, BOX_Y + 24, BOX_Y + 19, Align::Right, def.as_bytes(), &UI_12, SUB, BG);
+            ferrite_ui::canvas::banded(lcd, 0, 41, 240, BOX_H + 6, BG, |b| {
+                b.frame_r(6, BOX_Y, 228, BOX_H, 3, BLUE);
+                let mut h = Buf::<24>::new();
+                if let Some(i) = qi {
+                    let _ = uwrite!(h, "{} ", (i + 1) % 10);
+                }
+                h.push(item.name().as_bytes());
+                let hw = w::field(b, 14, 120, BOX_Y + 6, BOX_Y + 24, BOX_Y + 19, Align::Left, h.as_bytes(), &UI_12B, TEXT, BG);
+                w::field(b, 22 + hw, 204 - hw, BOX_Y + 6, BOX_Y + 24, BOX_Y + 19, Align::Right, def.as_bytes(), &UI_12, SUB, BG);
+            });
             for r in [R_FREQ, R_SUB, R_INFO] {
                 app.drawn.hash[r] = 0; // inside the box just cleared
             }
@@ -155,20 +156,23 @@ impl View for Value {
         // The value, large, between the arrows; greyed with why (MENU-14).
         if app.dirty(R_FREQ, hash(&(vt, grey))) {
             let (y0, y1) = (BOX_Y + 28, BOX_Y + 70);
-            lcd.fill(12, y0, 216, y1 - y0, BG);
-            let col = if grey.is_some() { DIM } else { TEXT };
-            let numeric = vt.as_bytes().iter().all(|c| c.is_ascii_digit());
-            let tw = if numeric {
-                let tw = text4_width(vt.as_bytes(), &DIG_46);
-                lcd.text4_rows(120 - tw / 2, y1 - 4, vt.as_bytes(), &DIG_46, col, BG, y0, y1);
-                tw
-            } else {
-                w::field(lcd, 40, 160, y0 + 10, y0 + 30, y0 + 25, Align::Center, vt.as_bytes(), &UI_12B, col, BG);
-                text4_width(vt.as_bytes(), &UI_12B)
-            };
-            let ax = (tw / 2 + 22).min(96);
-            lcd.tri(120 - ax - 10, y0 + 14, 12, 2, SUB);
-            lcd.tri(120 + ax, y0 + 14, 12, 3, SUB);
+            // Squelch's level bars start at BOX_Y + 68: the band stops above them, as they draw only when they change.
+            let bot = if item == Item::Squelch { BOX_Y + 68 } else { y1 };
+            ferrite_ui::canvas::banded(lcd, 12, y0, 216, bot - y0, BG, |b| {
+                let col = if grey.is_some() { DIM } else { TEXT };
+                let numeric = vt.as_bytes().iter().all(|c| c.is_ascii_digit());
+                let tw = if numeric {
+                    let tw = text4_width(vt.as_bytes(), &DIG_46);
+                    b.text4_rows(120 - tw / 2, y1 - 4, vt.as_bytes(), &DIG_46, col, BG, y0, y1);
+                    tw
+                } else {
+                    w::field(b, 40, 160, y0 + 10, y0 + 30, y0 + 25, Align::Center, vt.as_bytes(), &UI_12B, col, BG);
+                    text4_width(vt.as_bytes(), &UI_12B)
+                };
+                let ax = (tw / 2 + 22).min(96);
+                b.tri(120 - ax - 10, y0 + 14, 12, 2, SUB);
+                b.tri(120 + ax, y0 + 14, 12, 3, SUB);
+            });
         }
         if item == Item::Squelch {
             let l = app.sq_level(a) as i32; // Global shows the slot's level it uses
@@ -177,8 +181,9 @@ impl View for Value {
             let y = BOX_Y + 74;
             match grey {
                 Some(why) => {
-                    lcd.fill(12, y, 216, 82, BG);
-                    w::field(lcd, 14, 212, y + 4, y + 21, y + 17, Align::Center, why.as_bytes(), &UI_12, AMBER, BG);
+                    ferrite_ui::canvas::banded(lcd, 12, y, 216, 82, BG, |b| {
+                        w::field(b, 14, 212, y + 4, y + 21, y + 17, Align::Center, why.as_bytes(), &UI_12, AMBER, BG);
+                    });
                 }
                 None => picker(lcd, 40, y, 160, 5, 16, v, n, |i, b| text_of(app, item, i, b), BG),
             }
@@ -217,12 +222,14 @@ impl Value {
     fn squelch(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, v: i32) {
         let y = BOX_Y + 68;
         if app.dirty(R_SUB, hash(&v)) {
-            for i in 0..10 {
-                let x = 15 + i * 22;
-                lcd.fill_r(x, y, 14, 5, 1, if i <= v { BLUE } else { LINE });
-                w::field(lcd, x - 4, 22, y + 7, y + 22, y + 19, Align::Center, &[b'0' + i as u8], &UI_12, SUB, BG);
-            }
-            w::field(lcd, 15, 200, y + 23, y + 40, y + 36, Align::Left, b"Signal now", &UI_12, SUB, BG);
+            ferrite_ui::canvas::banded(lcd, 11, y, 220, 41, BG, |b| {
+                for i in 0..10 {
+                    let x = 15 + i * 22;
+                    b.fill_r(x, y, 14, 5, 1, if i <= v { BLUE } else { LINE });
+                    w::field(b, x - 4, 22, y + 7, y + 22, y + 19, Align::Center, &[b'0' + i as u8], &UI_12, SUB, BG);
+                }
+                w::field(b, 15, 200, y + 23, y + 40, y + 36, Align::Left, b"Signal now", &UI_12, SUB, BG);
+            });
         }
         let rssi = cx.live.slots[app.active as usize].rssi;
         // Where audio opens: the levels spread over the bar (the level table has no values yet: SQL-1).
@@ -231,12 +238,13 @@ impl Value {
         let st = w::s_text(rssi);
         if app.dirty(R_INFO, hash(&(level, open, st))) {
             let by = y + 42;
-            lcd.fill(12, by - 2, 216, 14, BG);
-            lcd.fill_r(15, by, 210, 10, 1, LINE);
-            if level > 3 {
-                lcd.fill_r(15, by, level, 10, 1, SUB);
-            }
-            lcd.fill(open, by - 2, 2, 14, BLUE);
+            ferrite_ui::canvas::banded(lcd, 12, by - 2, 216, 14, BG, |b| {
+                b.fill_r(15, by, 210, 10, 1, LINE);
+                if level > 3 {
+                    b.fill_r(15, by, level, 10, 1, SUB);
+                }
+                b.fill(open, by - 2, 2, 14, BLUE);
+            });
             let mut t = Buf::<48>::new();
             t.set(b"Noise ");
             t.push(st.as_bytes());

@@ -217,17 +217,18 @@ impl View for Tones {
                 let y = 46 + i as i32 * 36;
                 let (bg, border) = if f { (FOCUS, BLUE) } else { (BG, LINE) };
                 // 33 px: the 9 px capitals centre (DISP-19)
-                lcd.fill(6, y, 228, 33, BG);
-                lcd.fill_r(6, y, 228, 33, 2, bg);
-                let mut b = Buf::<16>::new();
-                text(t, &mut b);
-                w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
-                w::field(lcd, 84, 70, y + 2, y + 30, y + 21, Align::Left, b.as_bytes(), &UI_12B, TEXT, bg);
-                w::field(lcd, 154, 72, y + 2, y + 30, y + 21, Align::Right, kind(t).as_bytes(), &UI_12, SUB, bg);
-                if f {
-                    w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
-                }
-                lcd.frame_r(6, y, 228, 33, 2, border);
+                ferrite_ui::canvas::banded(lcd, 6, y, 228, 33, BG, |lcd| {
+                    lcd.fill_r(6, y, 228, 33, 2, bg);
+                    let mut b = Buf::<16>::new();
+                    text(t, &mut b);
+                    w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
+                    w::field(lcd, 84, 70, y + 2, y + 30, y + 21, Align::Left, b.as_bytes(), &UI_12B, TEXT, bg);
+                    w::field(lcd, 154, 72, y + 2, y + 30, y + 21, Align::Right, kind(t).as_bytes(), &UI_12, SUB, bg);
+                    if f {
+                        w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
+                    }
+                    lcd.frame_r(6, y, 228, 33, 2, border);
+                });
             }
         }
         let t = if self.row == 0 { rx } else { tx };
@@ -267,14 +268,15 @@ impl Tones {
             if app.dirty(R_ROW + i, hash(&(1u8, v, f))) {
                 let y = 46 + i as i32 * 36;
                 let (bg, border) = if f { (FOCUS, BLUE) } else { (BG, LINE) };
-                lcd.fill(6, y, 228, 33, BG);
-                lcd.fill_r(6, y, 228, 33, 2, bg);
-                w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
-                w::field(lcd, 84, 150, y + 2, y + 30, y + 21, Align::Left, name.as_bytes(), &UI_12B, TEXT, bg);
-                if f {
-                    w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
-                }
-                lcd.frame_r(6, y, 228, 33, 2, border);
+                ferrite_ui::canvas::banded(lcd, 6, y, 228, 33, BG, |lcd| {
+                    lcd.fill_r(6, y, 228, 33, 2, bg);
+                    w::field(lcd, 14, 70, y + 2, y + 30, y + 21, Align::Left, label.as_bytes(), &UI_12, if f { BLUE } else { SUB }, bg);
+                    w::field(lcd, 84, 150, y + 2, y + 30, y + 21, Align::Left, name.as_bytes(), &UI_12B, TEXT, bg);
+                    if f {
+                        w::knob_mark(lcd, 14 + text4_width(label.as_bytes(), &UI_12) + 4, y + 9, BLUE, bg);
+                    }
+                    lcd.frame_r(6, y, 228, 33, 2, border);
+                });
             }
         }
         let (v, n) = ch_value(app, self.row);

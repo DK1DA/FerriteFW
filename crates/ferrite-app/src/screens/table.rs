@@ -73,7 +73,7 @@ impl App {
     pub(crate) fn kv(&mut self, lcd: &mut impl Panel, i: usize, y: i32, h: i32, st: &KvStyle, label: &[u8], value: &[u8], c: u16, sel: bool) -> i32 {
         let h = w::kv_h(st, value, h);
         if self.dirty(R_ROW + i, hash(&(label, value, c, sel, y))) {
-            w::kv(lcd, y, h, st, label, value, c, sel);
+            w::kv(lcd, y, h, st, label, value, c, sel, self.cue());
         }
         y + h
     }

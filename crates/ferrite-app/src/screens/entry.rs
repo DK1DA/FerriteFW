@@ -269,30 +269,31 @@ impl View for Entry {
         let a = app.active;
         // What is typed, big, with a block cursor.
         if app.dirty(R_TOP, hash(&(a, self.to, self.typed()))) {
-            lcd.fill(0, 21, 240, 92, BG);
-            w::badge(lcd, 8, 26, a, true, BG);
-            let what: &[u8] = match self.to {
-                EntryFor::Vfo => b"Frequency, MHz",
-                EntryFor::Channel => b"Channel number",
-                EntryFor::ChannelFreq => b"Channel frequency, MHz",
-                EntryFor::Repeater => b"Repeater output, MHz",
-                EntryFor::SplitTx => b"Split: TX frequency, MHz",
-                EntryFor::ScopeCentre => b"Scope centre, MHz",
-            };
-            w::field(lcd, 28, 204, 24, 41, 37, Align::Left, what, &UI_12, SUB, BG);
-            // As home shows a frequency: MHz and three decimals big, the 10 Hz digits small, so the size never
-            // changes while typing (a digit lands in the size it will have on the card).
-            let t = self.typed();
-            let cut = match t.iter().position(|&c| c == b'.') {
-                Some(p) if self.freq_mode() => t.len().min(p + 4),
-                _ => t.len(),
-            };
-            let mut x = 8 + lcd.text4_rows(8, 96, &t[..cut], &DIG_46, TEXT, BG, 48, 100);
-            if cut < t.len() {
-                x += lcd.text4_rows(x, 96, &t[cut..], &DIG_28, TEXT, BG, 48, 100);
-            }
-            lcd.fill(x + 3, 92, 16, 4, BLUE);
-            lcd.fill(0, 112, 240, 1, LINE);
+            ferrite_ui::canvas::banded(lcd, 0, 21, 240, 92, BG, |lcd| {
+                w::badge(lcd, 8, 26, a, true, BG);
+                let what: &[u8] = match self.to {
+                    EntryFor::Vfo => b"Frequency, MHz",
+                    EntryFor::Channel => b"Channel number",
+                    EntryFor::ChannelFreq => b"Channel frequency, MHz",
+                    EntryFor::Repeater => b"Repeater output, MHz",
+                    EntryFor::SplitTx => b"Split: TX frequency, MHz",
+                    EntryFor::ScopeCentre => b"Scope centre, MHz",
+                };
+                w::field(lcd, 28, 204, 24, 41, 37, Align::Left, what, &UI_12, SUB, BG);
+                // As home shows a frequency: MHz and three decimals big, the 10 Hz digits small, so the size never
+                // changes while typing (a digit lands in the size it will have on the card).
+                let t = self.typed();
+                let cut = match t.iter().position(|&c| c == b'.') {
+                    Some(p) if self.freq_mode() => t.len().min(p + 4),
+                    _ => t.len(),
+                };
+                let mut x = 8 + lcd.text4_rows(8, 96, &t[..cut], &DIG_46, TEXT, BG, 48, 100);
+                if cut < t.len() {
+                    x += lcd.text4_rows(x, 96, &t[cut..], &DIG_28, TEXT, BG, 48, 100);
+                }
+                lcd.fill(x + 3, 92, 16, 4, BLUE);
+                lcd.fill(0, 112, 240, 1, LINE);
+            });
         }
         // The rows under it: what the digits mean.
         let mut rows: [(&[u8], Buf<40>, u16); 4] = [(b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT)];

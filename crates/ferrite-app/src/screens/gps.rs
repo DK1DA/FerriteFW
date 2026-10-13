@@ -234,10 +234,11 @@ const NEAR_Y: i32 = 246;
 /// A labelled value in a box: the label small, the value in 15 px bold.
 fn tile(lcd: &mut impl Panel, k: i32, label: &[u8], value: &[u8], c: u16) {
     let (x, y) = (if k % 2 == 0 { 6 } else { 122 }, TILE_Y + k / 2 * TILE_DY);
-    lcd.fill(x, y, TILE_W, TILE_H, BG);
-    lcd.text4_rows(x + 8, y + 15, label, &UI_12, SUB, BG, y + 1, y + 18);
-    lcd.text4_rows(x + 8, y + 35, w::fit(value, &UI_15B, TILE_W - 14), &UI_15B, c, BG, y + 18, y + TILE_H - 1);
-    lcd.frame_r(x, y, TILE_W, TILE_H, 2, LINE);
+    ferrite_ui::canvas::banded(lcd, x, y, TILE_W, TILE_H, BG, |lcd| {
+        lcd.text4_rows(x + 8, y + 15, label, &UI_12, SUB, BG, y + 1, y + 18);
+        lcd.text4_rows(x + 8, y + 35, w::fit(value, &UI_15B, TILE_W - 14), &UI_15B, c, BG, y + 18, y + TILE_H - 1);
+        lcd.frame_r(x, y, TILE_W, TILE_H, 2, LINE);
+    });
 }
 
 /// C16: the fix at a glance.
@@ -268,35 +269,45 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
         w::field(lcd, 232 - aw, aw, HEAD_Y, HEAD_Y + 20, HEAD_Y + 14, Align::Right, age.as_bytes(), &UI_12, if stale { AMBER } else { SUB }, BG);
     }
     // Between a fix and none, the page's layout changes: clear it and redraw every part.
+    let none: (&[u8], &[u8]) = if gps == GpsState::Off { (b"GPS is off", b"MENU 0 6 1 turns it on") } else { (b"No fix yet", b"Left or right: the satellites") };
     if app.dirty(R_HELP, hash(&fix.is_some())) {
-        lcd.fill(0, HEAD_Y + 21, 240, 298 - HEAD_Y - 21, BG);
         app.drawn.hash[R_ROW..R_ROW + 8].fill(0);
         app.drawn.hash[R_NOTE] = 0;
+        // in bands, with the message when the fix went: no blank page between (DISP-25)
+        ferrite_ui::canvas::banded(lcd, 0, HEAD_Y + 21, 240, 298 - HEAD_Y - 21, BG, |lcd| {
+            if fix.is_none() {
+                App::empty_now(lcd, none.0, none.1);
+            }
+        });
+        if fix.is_none() {
+            app.dirty(R_NOTE, hash(&none));
+        }
     }
     let Some(f) = fix else {
-        app.empty(lcd, if gps == GpsState::Off { b"GPS is off" } else { b"No fix yet" }, if gps == GpsState::Off { b"MENU 0 6 1 turns it on" } else { b"Left or right: the satellites" });
+        app.empty(lcd, none.0, none.1);
         return;
     };
     // The position, large (GPS-15): latitude and longitude in the 0 6 3 format; as a grid square, the square
     // large and the coordinates small under it.
     if app.dirty(R_ROW, hash(&(f.pos, fmt))) {
-        lcd.fill(0, 42, 240, 64, BG);
-        let (mut la, mut lo) = (Buf::<24>::new(), Buf::<24>::new());
-        if fmt == 3 {
-            coord(f.pos.lat, "N", "S", 1, &mut la);
-            coord(f.pos.lon, "E", "W", 1, &mut lo);
-            lcd.text4(10, 72, &grid(f.pos), &NAME_26, TEXT, BG);
-            let mut both = Buf::<48>::new();
-            both.push(la.as_bytes());
-            both.push(b"  ");
-            both.push(lo.as_bytes());
-            lcd.text4_rows(10, 98, w::fit(both.as_bytes(), &UI_12, 222), &UI_12, SUB, BG, 84, 104);
-        } else {
-            coord(f.pos.lat, "N", "S", fmt, &mut la);
-            coord(f.pos.lon, "E", "W", fmt, &mut lo);
-            lcd.text4_rows(10, 67, w::fit(la.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 42, 74);
-            lcd.text4_rows(10, 97, w::fit(lo.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 74, 106);
-        }
+        ferrite_ui::canvas::banded(lcd, 0, 42, 240, 64, BG, |lcd| {
+            let (mut la, mut lo) = (Buf::<24>::new(), Buf::<24>::new());
+            if fmt == 3 {
+                coord(f.pos.lat, "N", "S", 1, &mut la);
+                coord(f.pos.lon, "E", "W", 1, &mut lo);
+                lcd.text4(10, 72, &grid(f.pos), &NAME_26, TEXT, BG);
+                let mut both = Buf::<48>::new();
+                both.push(la.as_bytes());
+                both.push(b"  ");
+                both.push(lo.as_bytes());
+                lcd.text4_rows(10, 98, w::fit(both.as_bytes(), &UI_12, 222), &UI_12, SUB, BG, 84, 104);
+            } else {
+                coord(f.pos.lat, "N", "S", fmt, &mut la);
+                coord(f.pos.lon, "E", "W", fmt, &mut lo);
+                lcd.text4_rows(10, 67, w::fit(la.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 42, 74);
+                lcd.text4_rows(10, 97, w::fit(lo.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 74, 106);
+            }
+        });
     }
     // Six tiles (GPS-15, GPS-16, GPS-17).
     let moving = f.speed_kmh >= MOVING_KMH;
@@ -332,24 +343,25 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
     let key = near.map(|((m, d), wp)| (m, d, wp.name));
     if app.dirty(R_NOTE, hash(&(key, units))) {
         let y = NEAR_Y;
-        lcd.fill(6, y, 228, 47, BG);
-        lcd.text4_rows(14, y + 15, b"Nearest waypoint", &UI_12, SUB, BG, y + 1, y + 18);
-        match near {
-            Some(((m, deg), wp)) => {
-                let mut d = Buf::<16>::new();
-                dist_u(m, units, &mut d);
-                let _ = uwrite!(d, " {}", compass_name(deg));
-                let dw = text4_width(d.as_bytes(), &UI_12B);
-                // the arrow keeps 6 px from the frame, the distance 8 px from the arrow
-                lcd.text4_rows(14, y + 37, w::fit(wp.name.as_bytes(), &UI_15B, 176 - dw), &UI_15B, TEXT, BG, y + 19, y + 46);
-                lcd.text4_rows(196 - dw, y + 37, d.as_bytes(), &UI_12B, TEXT, BG, y + 19, y + 46);
-                arrow(lcd, 215, y + 30, 10, deg as i32, BLUE, BG);
+        ferrite_ui::canvas::banded(lcd, 6, y, 228, 47, BG, |lcd| {
+            lcd.text4_rows(14, y + 15, b"Nearest waypoint", &UI_12, SUB, BG, y + 1, y + 18);
+            match near {
+                Some(((m, deg), wp)) => {
+                    let mut d = Buf::<16>::new();
+                    dist_u(m, units, &mut d);
+                    let _ = uwrite!(d, " {}", compass_name(deg));
+                    let dw = text4_width(d.as_bytes(), &UI_12B);
+                    // the arrow keeps 6 px from the frame, the distance 8 px from the arrow
+                    lcd.text4_rows(14, y + 37, w::fit(wp.name.as_bytes(), &UI_15B, 176 - dw), &UI_15B, TEXT, BG, y + 19, y + 46);
+                    lcd.text4_rows(196 - dw, y + 37, d.as_bytes(), &UI_12B, TEXT, BG, y + 19, y + 46);
+                    arrow(lcd, 215, y + 30, 10, deg as i32, BLUE, BG);
+                }
+                None => {
+                    lcd.text4_rows(14, y + 37, b"None: # marks one here", &UI_12, DIM, BG, y + 19, y + 46);
+                }
             }
-            None => {
-                lcd.text4_rows(14, y + 37, b"None: # marks one here", &UI_12, DIM, BG, y + 19, y + 46);
-            }
-        }
-        lcd.frame_r(6, y, 228, 47, 2, LINE);
+            lcd.frame_r(6, y, 228, 47, 2, LINE);
+        });
     }
 }
 
@@ -380,37 +392,38 @@ fn satellites(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<
     let sky = (0..n).filter_map(|i| data.sat(i)).fold(0u32, |h, s| h.wrapping_mul(31).wrapping_add(s.prn as u32 * 7 + s.elev as u32 * 3 + s.azim as u32 + s.used as u32));
     if app.dirty(R_ROW, sky) {
         let (cx, cy, rr) = SKY;
-        lcd.fill(0, cy - rr - 4, 240, 2 * rr + 9, BG);
-        ring(lcd, cx, cy, rr, 1, LINE);
-        ring(lcd, cx, cy, rr * 2 / 3, 1, LINE);
-        ring(lcd, cx, cy, rr / 3, 1, LINE);
-        lcd.fill(cx - rr, cy, 2 * rr + 1, 1, LINE);
-        lcd.fill(cx, cy - rr, 1, 2 * rr + 1, LINE);
-        for (t, x, y) in [(b"N", cx - 3, cy - rr + 14), (b"S", cx - 3, cy + rr - 4), (b"E", cx + rr - 11, cy + 5), (b"W", cx - rr + 4, cy + 5)] {
-            lcd.text4(x, y, t, &UI_12, SUB, BG);
-        }
-        for i in 0..n {
-            let Some(s) = data.sat(i) else { continue };
-            let d = rr * (90 - s.elev.min(90) as i32) / 90;
-            let a = s.azim as i32 * 10;
-            let (x, y) = (cx + d * sin10(a) / 4096, cy - d * cos10(a) / 4096);
-            let c = match (s.used, s.beidou) {
-                (false, _) => DIM,
-                (true, false) => BLUE,
-                (true, true) => VIOLET,
-            };
-            if s.used {
-                lcd.fill_r(x - 4, y - 4, 9, 9, 4, c);
-            } else {
-                ring(lcd, x, y, 4, 1, c);
+        ferrite_ui::canvas::banded(lcd, 0, cy - rr - 4, 240, 2 * rr + 9, BG, |lcd| {
+            ring(lcd, cx, cy, rr, 1, LINE);
+            ring(lcd, cx, cy, rr * 2 / 3, 1, LINE);
+            ring(lcd, cx, cy, rr / 3, 1, LINE);
+            lcd.fill(cx - rr, cy, 2 * rr + 1, 1, LINE);
+            lcd.fill(cx, cy - rr, 1, 2 * rr + 1, LINE);
+            for (t, x, y) in [(b"N", cx - 3, cy - rr + 14), (b"S", cx - 3, cy + rr - 4), (b"E", cx + rr - 11, cy + 5), (b"W", cx - rr + 4, cy + 5)] {
+                lcd.text4(x, y, t, &UI_12, SUB, BG);
             }
-            let mut p = Buf::<4>::new();
-            let _ = uwrite!(p, "{}", s.prn);
-            // to the right of the dot, unless that would cross the horizon ring (or the E): then to its left
-            let pw = text4_width(p.as_bytes(), &UI_12);
-            let lx = if x + 6 + pw > cx + rr - 12 { x - 6 - pw } else { x + 6 };
-            lcd.text4(lx, y + 4, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
-        }
+            for i in 0..n {
+                let Some(s) = data.sat(i) else { continue };
+                let d = rr * (90 - s.elev.min(90) as i32) / 90;
+                let a = s.azim as i32 * 10;
+                let (x, y) = (cx + d * sin10(a) / 4096, cy - d * cos10(a) / 4096);
+                let c = match (s.used, s.beidou) {
+                    (false, _) => DIM,
+                    (true, false) => BLUE,
+                    (true, true) => VIOLET,
+                };
+                if s.used {
+                    lcd.fill_r(x - 4, y - 4, 9, 9, 4, c);
+                } else {
+                    ring(lcd, x, y, 4, 1, c);
+                }
+                let mut p = Buf::<4>::new();
+                let _ = uwrite!(p, "{}", s.prn);
+                // to the right of the dot, unless that would cross the horizon ring (or the E): then to its left
+                let pw = text4_width(p.as_bytes(), &UI_12);
+                let lx = if x + 6 + pw > cx + rr - 12 { x - 6 - pw } else { x + 6 };
+                lcd.text4(lx, y + 4, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
+            }
+        });
     }
     // The signal bars (dB-Hz; 50 fills them).
     let (top, base) = (204, 254);
@@ -422,15 +435,16 @@ fn satellites(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<
         }
         let x = 8 + i as i32 * bw;
         let h = (s.snr.min(50) as i32 * (base - top) / 50).max(2);
-        lcd.fill(x, top, bw, base - top + 21, BG);
-        lcd.fill_r(x + 2, base - h, bw - 4, h, 1, match (s.used, s.beidou) {
-            (false, _) => DIM,
-            (true, false) => BLUE,
-            (true, true) => VIOLET,
+        ferrite_ui::canvas::banded(lcd, x, top, bw, base - top + 21, BG, |lcd| {
+            lcd.fill_r(x + 2, base - h, bw - 4, h, 1, match (s.used, s.beidou) {
+                (false, _) => DIM,
+                (true, false) => BLUE,
+                (true, true) => VIOLET,
+            });
+            let mut p = Buf::<4>::new();
+            let _ = uwrite!(p, "{}", s.prn);
+            w::field(lcd, x, bw, base + 3, base + 20, base + 16, Align::Center, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
         });
-        let mut p = Buf::<4>::new();
-        let _ = uwrite!(p, "{}", s.prn);
-        w::field(lcd, x, bw, base + 3, base + 20, base + 16, Align::Center, p.as_bytes(), &UI_12, if s.used { TEXT } else { SUB }, BG);
     }
     if app.dirty(R_NOTE, 1) {
         w::field(lcd, 8, 224, 278, 296, 291, Align::Left, b"Used: blue GPS, violet BeiDou", &UI_12, DIM, BG);
@@ -476,24 +490,25 @@ fn waypoints(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<F
 /// The go-to dial (GPS-19): a ring with N; course up while moving (the ring turns so the direction of travel is
 /// up and N moves round it, a tick marks "ahead"), north up when stopped; the arrow points to the waypoint.
 fn dial(lcd: &mut impl Panel, cx: i32, cy: i32, r: i32, course: Option<u16>, bearing: Option<u16>) {
-    lcd.fill(cx - r - 7, cy - r - 9, 2 * r + 15, 2 * r + 17, BG);
-    ring(lcd, cx, cy, r, 2, LINE);
-    let up = course.unwrap_or(0) as i32;
-    let a = (360 - up) * 10; // where north sits, clockwise from up
-    // N sits on the ring, like a compass bezel: a gap is cleared in the ring behind it
-    let (nx, ny) = (cx + r * sin10(a) / 4096, cy - r * cos10(a) / 4096);
-    lcd.fill(nx - 6, ny - 7, 13, 14, BG);
-    lcd.text4(nx - 3, ny + 5, b"N", &UI_12B, if course.is_some() { AMBER } else { SUB }, BG);
-    if course.is_some() {
-        lcd.tri(cx - 4, cy - r - 9, 9, 1, TEXT); // ahead
-    }
-    match bearing {
-        Some(b) => {
-            arrow(lcd, cx, cy, r / 2, (b as i32 - up).rem_euclid(360), BLUE, BG);
-            lcd.fill_r(cx - 2, cy - 2, 5, 5, 2, TEXT);
+    ferrite_ui::canvas::banded(lcd, cx - r - 7, cy - r - 9, 2 * r + 15, 2 * r + 17, BG, |lcd| {
+        ring(lcd, cx, cy, r, 2, LINE);
+        let up = course.unwrap_or(0) as i32;
+        let a = (360 - up) * 10; // where north sits, clockwise from up
+        // N sits on the ring, like a compass bezel: a gap is cleared in the ring behind it
+        let (nx, ny) = (cx + r * sin10(a) / 4096, cy - r * cos10(a) / 4096);
+        lcd.fill(nx - 6, ny - 7, 13, 14, BG);
+        lcd.text4(nx - 3, ny + 5, b"N", &UI_12B, if course.is_some() { AMBER } else { SUB }, BG);
+        if course.is_some() {
+            lcd.tri(cx - 4, cy - r - 9, 9, 1, TEXT); // ahead
         }
-        None => lcd.fill(cx - 6, cy, 13, 2, SUB),
-    }
+        match bearing {
+            Some(b) => {
+                arrow(lcd, cx, cy, r / 2, (b as i32 - up).rem_euclid(360), BLUE, BG);
+                lcd.fill_r(cx - 2, cy - 2, 5, 5, 2, TEXT);
+            }
+            None => lcd.fill(cx - 6, cy, 13, 2, SUB),
+        }
+    });
 }
 
 /// C15: one waypoint: the dial, its distance big, the bearing and, while moving, the time to get there.
@@ -505,18 +520,19 @@ fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i:
     let where_ = fix.map(|f| dist_bearing(f.pos, wp.pos));
     let course = fix.filter(|f| f.speed_kmh >= MOVING_KMH).map(|f| (f.heading, f.speed_kmh));
     if app.dirty(R_TOP, hash(&(wp, where_))) {
-        lcd.fill(0, 20, 240, 50, BG);
-        lcd.text4(8, 42, wp.name.as_bytes(), &UI_12B, TEXT, BG);
-        // the position page's coordinate format (deg-min under a grid square), not the lists' compact one
-        let fmt = if app.set.coord_fmt == 3 { 1 } else { app.set.coord_fmt };
-        let (mut la, mut lo) = (Buf::<24>::new(), Buf::<24>::new());
-        coord(wp.pos.lat, "N", "S", fmt, &mut la);
-        coord(wp.pos.lon, "E", "W", fmt, &mut lo);
-        let mut b = Buf::<48>::new();
-        b.push(la.as_bytes());
-        b.push(b"  ");
-        b.push(lo.as_bytes());
-        lcd.text4(8, 60, w::fit(b.as_bytes(), &UI_12, 224), &UI_12, SUB, BG);
+        ferrite_ui::canvas::banded(lcd, 0, 20, 240, 50, BG, |lcd| {
+            lcd.text4(8, 42, wp.name.as_bytes(), &UI_12B, TEXT, BG);
+            // the position page's coordinate format (deg-min under a grid square), not the lists' compact one
+            let fmt = if app.set.coord_fmt == 3 { 1 } else { app.set.coord_fmt };
+            let (mut la, mut lo) = (Buf::<24>::new(), Buf::<24>::new());
+            coord(wp.pos.lat, "N", "S", fmt, &mut la);
+            coord(wp.pos.lon, "E", "W", fmt, &mut lo);
+            let mut b = Buf::<48>::new();
+            b.push(la.as_bytes());
+            b.push(b"  ");
+            b.push(lo.as_bytes());
+            lcd.text4(8, 60, w::fit(b.as_bytes(), &UI_12, 224), &UI_12, SUB, BG);
+        });
     }
     if app.dirty(R_NOTE, hash(&(where_, course))) {
         dial(lcd, 120, 142, 58, course.map(|c| c.0), where_.map(|w| w.1));
@@ -531,29 +547,30 @@ fn go(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, i:
         w::field(lcd, 8, 224, 204, 221, 217, Align::Center, t.as_bytes(), &UI_12, SUB, BG);
     }
     if app.dirty(R_HELP, hash(&(where_, course, units))) {
-        lcd.fill(0, 222, 240, 76, BG);
-        match where_ {
-            Some((m, deg)) => {
-                let mut d = Buf::<16>::new();
-                dist_u(m, units, &mut d);
-                let (num, unit) = d.as_bytes().split_at(d.as_bytes().iter().position(|&c| c == b' ').unwrap_or(d.len()));
-                let wn = text4_width(num, &DIG_46) + 4 + text4_width(unit.trim_ascii_start(), &UI_12B);
-                let x = 120 - wn / 2;
-                let x2 = x + lcd.text4(x, 270, num, &DIG_46, TEXT, BG);
-                lcd.text4(x2 + 4, 270, unit.trim_ascii_start(), &UI_12B, TEXT, BG);
-                let mut b = Buf::<40>::new();
-                let _ = uwrite!(b, "{} {}\u{b0}", compass_name(deg), deg);
-                if let Some((_, kmh)) = course {
-                    // ETA at the present speed
-                    let s = m as u64 * 36 / (kmh as u64 * 10).max(1);
-                    let _ = if s < 3600 { uwrite!(b, " \u{b7} ETA {} min", (s / 60).max(1) as u32) } else { uwrite!(b, " \u{b7} ETA {} h {}", (s / 3600) as u32, (s / 60 % 60) as u32) };
+        ferrite_ui::canvas::banded(lcd, 0, 222, 240, 76, BG, |lcd| {
+            match where_ {
+                Some((m, deg)) => {
+                    let mut d = Buf::<16>::new();
+                    dist_u(m, units, &mut d);
+                    let (num, unit) = d.as_bytes().split_at(d.as_bytes().iter().position(|&c| c == b' ').unwrap_or(d.len()));
+                    let wn = text4_width(num, &DIG_46) + 4 + text4_width(unit.trim_ascii_start(), &UI_12B);
+                    let x = 120 - wn / 2;
+                    let x2 = x + lcd.text4(x, 270, num, &DIG_46, TEXT, BG);
+                    lcd.text4(x2 + 4, 270, unit.trim_ascii_start(), &UI_12B, TEXT, BG);
+                    let mut b = Buf::<40>::new();
+                    let _ = uwrite!(b, "{} {}\u{b0}", compass_name(deg), deg);
+                    if let Some((_, kmh)) = course {
+                        // ETA at the present speed
+                        let s = m as u64 * 36 / (kmh as u64 * 10).max(1);
+                        let _ = if s < 3600 { uwrite!(b, " \u{b7} ETA {} min", (s / 60).max(1) as u32) } else { uwrite!(b, " \u{b7} ETA {} h {}", (s / 3600) as u32, (s / 60 % 60) as u32) };
+                    }
+                    w::field(lcd, 8, 224, 277, 296, 292, Align::Center, b.as_bytes(), &UI_12B, TEXT, BG);
                 }
-                w::field(lcd, 8, 224, 277, 296, 292, Align::Center, b.as_bytes(), &UI_12B, TEXT, BG);
+                None => {
+                    w::field(lcd, 8, 224, 240, 260, 255, Align::Center, b"No GPS fix: no distance", &UI_12, SUB, BG);
+                }
             }
-            None => {
-                w::field(lcd, 8, 224, 240, 260, 255, Align::Center, b"No GPS fix: no distance", &UI_12, SUB, BG);
-            }
-        }
+        });
     }
 }
 

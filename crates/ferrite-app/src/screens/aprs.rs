@@ -327,30 +327,31 @@ fn station(app: &mut App, lcd: &mut impl Panel, s: &Station, data: &dyn Data, li
     };
     let moving = s.course.is_some_and(|c| c.1 > 0);
     if app.dirty(R_TOP, hash(&(s.call, s.sym, moving, where_))) {
-        lcd.fill(0, 20, 156, 102, BG);
-        lcd.text4(8, 42, s.call.as_bytes(), &UI_15B, TEXT, BG);
-        let mut t = Buf::<24>::new();
-        t.push(s.sym.name().as_bytes());
-        t.push(" \u{b7} ".as_bytes());
-        t.push(if moving { b"moving".as_slice() } else if s.course.is_some() { b"stopped" } else { b"fixed" });
-        lcd.text4(8, 61, t.as_bytes(), &UI_12, SUB, BG);
-        match where_ {
-            Some((m, deg)) => {
-                // the distance big: "4.2" in the digit font, the unit beside it
-                let mut d = Buf::<12>::new();
-                dist_text(m, &mut d);
-                let (num, unit) = d.as_bytes().split_at(d.as_bytes().iter().position(|&c| c == b' ').unwrap_or(d.len()));
-                let x = 8 + lcd.text4(8, 98, num, &DIG_28, TEXT, BG);
-                lcd.text4(x + 4, 98, unit.trim_ascii_start(), &UI_12B, TEXT, BG);
-                let mut b = Buf::<12>::new();
-                let _ = uwrite!(b, "{} {}\u{b0}", compass_name(deg), deg);
-                lcd.text4(8, 117, b.as_bytes(), &UI_12B, TEXT, BG);
+        ferrite_ui::canvas::banded(lcd, 0, 20, 156, 102, BG, |lcd| {
+            lcd.text4(8, 42, s.call.as_bytes(), &UI_15B, TEXT, BG);
+            let mut t = Buf::<24>::new();
+            t.push(s.sym.name().as_bytes());
+            t.push(" \u{b7} ".as_bytes());
+            t.push(if moving { b"moving".as_slice() } else if s.course.is_some() { b"stopped" } else { b"fixed" });
+            lcd.text4(8, 61, t.as_bytes(), &UI_12, SUB, BG);
+            match where_ {
+                Some((m, deg)) => {
+                    // the distance big: "4.2" in the digit font, the unit beside it
+                    let mut d = Buf::<12>::new();
+                    dist_text(m, &mut d);
+                    let (num, unit) = d.as_bytes().split_at(d.as_bytes().iter().position(|&c| c == b' ').unwrap_or(d.len()));
+                    let x = 8 + lcd.text4(8, 98, num, &DIG_28, TEXT, BG);
+                    lcd.text4(x + 4, 98, unit.trim_ascii_start(), &UI_12B, TEXT, BG);
+                    let mut b = Buf::<12>::new();
+                    let _ = uwrite!(b, "{} {}\u{b0}", compass_name(deg), deg);
+                    lcd.text4(8, 117, b.as_bytes(), &UI_12B, TEXT, BG);
+                }
+                None => {
+                    lcd.text4(8, 98, b"-", &DIG_28, SUB, BG);
+                    lcd.text4(8, 117, if s.pos.is_none() { b"No position".as_slice() } else { b"No GPS fix here" }, &UI_12, SUB, BG);
+                }
             }
-            None => {
-                lcd.text4(8, 98, b"-", &DIG_28, SUB, BG);
-                lcd.text4(8, 117, if s.pos.is_none() { b"No position".as_slice() } else { b"No GPS fix here" }, &UI_12, SUB, BG);
-            }
-        }
+        });
     }
     if app.dirty(R_NOTE, hash(&where_.map(|w| w.1))) {
         compass(lcd, 194, 71, 33, where_.map(|w| w.1));
