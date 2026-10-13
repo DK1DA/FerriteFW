@@ -9,6 +9,8 @@ pub struct Rds {
     pub groups: u32,  // groups accepted
     pub ps_seen: u8,  // bit per 2-character segment received
     pub rt_ab: u8,    // text A/B flag: a change means new text
+    pub rt_seen: u16, // bit per radio text segment received since the last A/B change
+    pub rt_end: u8,   // the segment holding the end (0x0D), 0xFF none yet
 }
 
 fn clean(c: u8) -> u8 {
@@ -18,7 +20,7 @@ fn clean(c: u8) -> u8 {
 impl Rds {
     /// All zero, as the status starts; `init()` is the state after a retune.
     pub const fn zeroed() -> Self {
-        Rds { pi: 0, ps: [0; 8], rt: [0; 64], groups: 0, ps_seen: 0, rt_ab: 0 }
+        Rds { pi: 0, ps: [0; 8], rt: [0; 64], groups: 0, ps_seen: 0, rt_ab: 0, rt_seen: 0, rt_end: 0xFF }
     }
 
     pub const fn init() -> Self {
@@ -32,6 +34,13 @@ impl Rds {
 
     pub fn ps_complete(&self) -> bool {
         self.ps_seen == 0x0F
+    }
+
+    /// The whole radio text is in: every segment up to the one with the end (0x0D), or all 16 segments (64
+    /// characters in 2A, 32 in 2B) when the station sends no end.
+    pub fn rt_complete(&self) -> bool {
+        let need = if self.rt_end < 16 { (2u32 << self.rt_end) - 1 } else { 0xFFFF } as u16;
+        self.rt_seen != 0 && self.rt_seen & need == need
     }
 
     /// ble = block error levels from the receiver, 2 bits per block (A in bits 7:6 ... D in 1:0); blocks with
@@ -60,19 +69,27 @@ impl Rds {
                 if ab != self.rt_ab {
                     self.rt = [0; 64];
                     self.rt_ab = ab;
+                    (self.rt_seen, self.rt_end) = (0, 0xFF);
                 }
                 let seg = (b & 0xF) as usize;
-                if !version_b {
+                let got: &[u8] = if !version_b {
                     if ec == 3 || ed == 3 {
                         return;
                     }
-                    self.rt[seg * 4..seg * 4 + 4].copy_from_slice(&[(c >> 8) as u8, c as u8, (d >> 8) as u8, d as u8]);
+                    let g = [(c >> 8) as u8, c as u8, (d >> 8) as u8, d as u8];
+                    self.rt[seg * 4..seg * 4 + 4].copy_from_slice(&g);
+                    &self.rt[seg * 4..seg * 4 + 4]
                 } else {
                     if ed == 3 {
                         return;
                     }
                     self.rt[seg * 2..seg * 2 + 2].copy_from_slice(&[(d >> 8) as u8, d as u8]);
+                    &self.rt[seg * 2..seg * 2 + 2]
+                };
+                if got.contains(&0x0D) {
+                    self.rt_end = self.rt_end.min(seg as u8);
                 }
+                self.rt_seen |= 1 << seg;
                 // 0x0D ends the text; everything else unprintable becomes a space
                 for ch in self.rt.iter_mut() {
                     if *ch == 0x0D {
