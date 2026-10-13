@@ -345,7 +345,18 @@ pub async fn task() {
             }
         }
         gps.step(&mut app, store, &mut dev);
+        let (c0, b0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed));
         app.render(&mut lcd, &live, &dev, store);
+        if cfg!(feature = "bringup") {
+            // Redraw timing (Oct 12, 2026: large redraws were slow): total, and how many bytes went to the panel.
+            let us = crate::hal::time::cycles().wrapping_sub(c0) / (crate::hal::clock::SYSCLK_HZ / 1_000_000);
+            if us >= 5_000 {
+                let n = crate::bus::LCD_BYTES.load(Relaxed).wrapping_sub(b0);
+                bringup::linef(|b| {
+                    let _ = ufmt::uwrite!(b, "draw {} ms, {} KB to the panel, {}", us / 1000, n / 1024, app.screen().name());
+                });
+            }
+        }
         // The lights (decision 63): screen and keypad, and the LEDs with their next change.
         SCREEN_LIGHT.write(!app.dark());
         KEYPAD_LIGHT.write(app.keypad_lit());

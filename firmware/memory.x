@@ -40,6 +40,19 @@ SECTIONS
  * The image stays one contiguous binary for the bootloader: no gap, no padding. */
 SECTIONS
 {
+  /* The drawing primitives stay fast, ahead of the slow part: text, glyphs, masks, fills and the panel's pixel
+   * runs run once per pixel, and from slow flash they made large redraws crawl on the radio (Oct 12, 2026). Matched
+   * here first, so .slow_text's ferrite_ui pattern doesn't take them. */
+  .fast_ui : ALIGN(4)
+  {
+    __sfast_ui = .;
+    *(.text.*10ferrite_ui3gfx*);
+    *(.text.*10ferrite_ui5font4*);
+    *(.text.*10ferrite_ui5panel*);
+    . = ALIGN(4);
+    __efast_ui = .;
+  } > FLASH
+
   .slow_rodata : ALIGN(4)
   {
     __sslow_rodata = .;
@@ -70,5 +83,6 @@ SECTIONS
 
 /* The fast part (code and the other constants) must end inside the zero-wait region (0x08000000 + 256 KB). */
 ASSERT(__erodata <= 0x08040000, "fast code and constants run past the 256 KB zero-wait flash");
+ASSERT(__efast_ui <= 0x08040000, "the fast drawing code runs past the 256 KB zero-wait flash");
 /* The UI code really went to the slow part (the name patterns above still match the symbols). */
 ASSERT(__eslow_text - __sslow_text > 32K, ".slow_text is (nearly) empty: the UI code stayed in the zero-wait flash");

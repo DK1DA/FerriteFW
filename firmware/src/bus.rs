@@ -103,8 +103,14 @@ fn nops<const N: usize>() {
     }
 }
 
+/// Bring-up only: bytes sent to the LCD, so the redraw log can split bus time from drawing time.
+pub static LCD_BYTES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 #[inline(always)]
 fn byte(b: u8) {
+    if cfg!(feature = "bringup") {
+        LCD_BYTES.store(LCD_BYTES.load(core::sync::atomic::Ordering::Relaxed).wrapping_add(1), core::sync::atomic::Ordering::Relaxed);
+    }
     // One write to PD8-PD15, leaving PD0-PD7 alone (PD4-PD7 are the keypad sense pull-ups); latched on WR rising.
     // At 120 MHz back-to-back port writes break the ST7789's 8080 timing (one-colour fills went missing on the
     // radio, Oct 12, 2026; the 8 MHz image was fine): data setup before WR falls, WR low six nops as stock
