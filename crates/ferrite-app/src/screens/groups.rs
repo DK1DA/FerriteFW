@@ -27,6 +27,8 @@ use ufmt::uwrite;
 /// One item: name, value shown until it is wired (a list shows a summary), help line.
 pub(crate) type Entry = (&'static str, &'static str, &'static str);
 
+/// SND-3: the beep volume (0 7 5 2), three DAC levels (decision 100).
+const BEEP_VOLS: [&str; 3] = ["Low", "Mid", "High"];
 const G1: [Entry; 8] = [
     (slow!("Watch"), slow!("A+B"), slow!("Which slots are heard besides the active one.")),
     (slow!("Watch behaviour"), slow!("Heard"), slow!("Watched audio and pause time.")),
@@ -522,7 +524,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             !s.key_beep
         }
         [7, 5, 2] => {
-            let _ = uwrite!(b, "{}", s.beep_vol.clamp(1, 5));
+            pick(b, &BEEP_VOLS, s.beep_vol.clamp(1, 3) - 1);
             s.beep_vol != Settings::DEFAULT.beep_vol
         }
         [7, 5, 3] => {
@@ -889,7 +891,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [7, 5, 1] => s.key_beep = !s.key_beep,
         [7, 5, 3] => s.alert_tones = !s.alert_tones,
         [7, 5, 2] => {
-            s.beep_vol = (s.beep_vol.clamp(1, 5) as i32 + d).clamp(1, 5) as u8;
+            s.beep_vol = (s.beep_vol.clamp(1, 3) as i32 + d).clamp(1, 3) as u8;
             app.out.push(RadioCmd::BeepVol(app.set.beep_vol));
         }
         [3, 1, 5] => s.fm_sleep = cycle(s.fm_sleep, d, SLEEP_TIMES.len()),

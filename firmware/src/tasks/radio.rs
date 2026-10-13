@@ -134,6 +134,10 @@ struct HfOn {
 struct Radio {
     /// The MCU temperature (SBAR-20): when it was last read, and its smoothed tenths.
     temp: (Option<u32>, Option<i16>),
+    /// SQL-1: the calibration's squelch tables (stock's defaults until the UI task has read the sector), and what
+    /// each chip was last given (REG_78, REG_4F), so a retune writes them only when they change.
+    sqcal: ferrite_core::sqcal::SqCal,
+    sq_regs: [Option<(u16, u16)>; 2],
     /// When the battery was last read (PWR-20).
     bat_at: Option<u32>,
     si: Si4732<SiBus>,
@@ -175,7 +179,7 @@ struct Radio {
     tone_level: u8,
     /// The beep volume's tone gain (SND-3, 0 7 5 2: `tonegen::beep_gain`).
     beep_gain: u8,
-    /// The DAC beep's level (1-11, `hal::tone`), from the beep volume (SND-3: 1-5 -> 3-7).
+    /// The DAC beep's level (1-11, `hal::tone`), from the beep volume (SND-3: Low, Mid, High -> 5, 7, 9).
     beep_level: u8,
     hf: Option<HfOn>,
     /// The frequency counter (TSRCH-10), while on.
@@ -381,6 +385,7 @@ impl Radio {
         self.tuned[n as usize] = want;
         let Some((s, f)) = want else {
             self.chip(n).sleep();
+            self.sq_regs[n as usize] = None; // written again on waking
             return;
         };
         let slot = match s {
@@ -391,6 +396,13 @@ impl Radio {
         // Stock's modes 6 and 7, the sub-tone detector, muted until the audio decision (`ferrite_radio::chip`).
         let setup = RxSetup { freq: f, narrow: slot.narrow, am: slot.am, rx_tone: slot.rx_tone, rx_tail: slot.rx_tail };
         radio_chip::tune(&mut self.chip(n), &setup);
+        // SQL-1: stock's thresholds for this frequency and the slot's level (stock writes them at each receive
+        // setup); only when they differ from what the chip has.
+        let regs = self.sqcal.regs(f, slot.sq);
+        if self.sq_regs[n as usize] != Some(regs) {
+            radio_chip::squelch(&mut self.chip(n), regs);
+            self.sq_regs[n as usize] = Some(regs);
+        }
     }
 
     /// SAME (DEC-19, WX-4): the BK4829's own receiver on the chip of a slot tuned to a weather channel, as
@@ -530,6 +542,18 @@ impl Radio {
 
     async fn tick(&mut self) {
         self.mcu_temp();
+        // SQL-1: the calibration's squelch tables, once the UI task has read them: every tuned chip again.
+        if let Some(c) = crate::chan::SQ_CAL.try_take() {
+            self.sqcal = c;
+            for n in 0..2u8 {
+                if let Some((s, f)) = self.tuned[n as usize] {
+                    let level = self.slots.get(s as usize).map_or(self.slots[self.active as usize].sq, |sl| sl.sq);
+                    let regs = self.sqcal.regs(f, level);
+                    radio_chip::squelch(&mut self.chip(n), regs);
+                    self.sq_regs[n as usize] = Some(regs);
+                }
+            }
+        }
         #[cfg(feature = "tx")]
         self.vox_poll();
         if self.hf.is_some() {
@@ -1086,6 +1110,8 @@ pub async fn task() {
         save: RxSleep::new(DEFAULT_SAVE, now_ms()),
         temp: (None, None),
         bat_at: None,
+        sqcal: ferrite_core::sqcal::SqCal::DEFAULT,
+        sq_regs: [None; 2],
         path: Path::new(),
         muted: false,
         si_used: false,
@@ -1103,8 +1129,8 @@ pub async fn task() {
         hints: [Hint::new(); SLOTS],
         scan_tx: false,
         tone_level: 1,
-        beep_gain: tonegen::beep_gain(3),
-        beep_level: 5,
+        beep_gain: tonegen::beep_gain(3), // Mid
+        beep_level: 7,
         hf: None,
         counter: None,
         same_on: false,
@@ -1272,8 +1298,11 @@ impl Radio {
             RadioCmd::ScanTx(on) => self.scan_tx = on,
             RadioCmd::ToneLevel(l) => self.tone_level = l.min(2),
             RadioCmd::BeepVol(v) => {
-                self.beep_gain = tonegen::beep_gain(v);
-                self.beep_level = 2 + v.clamp(1, 5);
+                // SND-3: Low, Mid, High. The DAC beep at levels 5, 7, 9 (a quiet Low; 11 would be full scale); the DTMF sidetone (on the
+                // BK4829, it goes on air) at the matching points of the generator's old 1-5 scale.
+                let i = v.clamp(1, 3) as usize - 1;
+                self.beep_gain = tonegen::beep_gain([2, 3, 5][i]);
+                self.beep_level = [5, 7, 9][i];
             }
             #[cfg(feature = "tx")]
             RadioCmd::Vox { level, tail } => {

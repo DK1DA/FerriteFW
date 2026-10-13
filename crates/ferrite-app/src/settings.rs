@@ -333,7 +333,7 @@ impl Settings {
         pocsag_cap: 0,
         popups: true,
         key_beep: true,
-        beep_vol: 3,
+        beep_vol: 2,
         alert_tones: true,
         vox: false,
         vox_level: 5,

@@ -103,6 +103,13 @@ pub async fn task() {
         && cal.iter().any(|&b| b != 0xFF)
         && cal.iter().any(|&b| b != 0);
     check(Source::Storage, CHECK_CAL, cal_ok);
+    // SQL-1: the squelch tables for the Radio task, in every build (read only; stock's defaults if blank or unread).
+    {
+        use ferrite_core::sqcal::{SqCal, READ_LEN};
+        let mut b = [0xFFu8; READ_LEN];
+        let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
+        crate::chan::SQ_CAL.signal(if read { SqCal::parse(&b) } else { SqCal::DEFAULT });
+    }
     // The `tx` build: the PA curves and battery gauge for the Radio task (read only, chapter 35).
     #[cfg(feature = "tx")]
     {

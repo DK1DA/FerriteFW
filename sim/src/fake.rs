@@ -159,7 +159,7 @@ impl FakeRadio {
             hint: None,
             beeps: 0,
             last_beep: (0, 0),
-            beep_vol: 3,
+            beep_vol: 2,
             vox: (0, 0),
             watch: 0b111,
             watcher: Watch::new(),

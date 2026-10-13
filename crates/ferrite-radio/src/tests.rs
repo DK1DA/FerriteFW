@@ -431,6 +431,14 @@ fn beep_never_keys_and_restores() {
     assert_eq!(b.release().writes.last(), Some(&(reg::POWER, 0xBFF1)), "receive again");
 }
 
+/// SQL-15, SQL-16: the squelch thresholds go to REG_78 and REG_4F as computed (stock's 0x0801E64C), and nothing else.
+#[test]
+fn squelch_writes_stocks_registers() {
+    let mut b = bk();
+    chip::squelch(&mut b, (0x5955, 0x2827));
+    assert_eq!(b.release().writes, [(reg::SQ_RSSI, 0x5955), (reg::SQ_NOISE, 0x2827)]);
+}
+
 /// TSRCH-10: the counter's chips sit mid-band, chip 0 below 300 MHz and chip 1 above, each in its own front end,
 /// and use stock's frequency scan (REG_32 0x8245 on, 0x8244 off; the reading from REG_0D/0E in 10 Hz units).
 #[test]

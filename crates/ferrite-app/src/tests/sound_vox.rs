@@ -22,9 +22,9 @@ fn key_beep_and_volume() {
     t.tap(Key::Up);
     assert_eq!(beeps(&t.cmds(), KEY_BEEP_HZ), 0, "key beep off");
     crate::screens::groups::change(&mut t.app, &[7, 5, 2], 1);
-    assert!(t.cmds().contains(&RadioCmd::BeepVol(4)));
+    assert!(t.cmds().contains(&RadioCmd::BeepVol(3)), "Mid to High");
     crate::screens::groups::change(&mut t.app, &[7, 5, 2], 9);
-    assert_eq!(t.app.set.beep_vol, 5, "1-5");
+    assert_eq!(t.app.set.beep_vol, 3, "Low, Mid, High");
 }
 
 /// SND-6, INBOX-4: an alert sounds its tone each second until OK (MENU) silences it; with alert tones off it
@@ -54,12 +54,12 @@ fn settings_list_undo() {
     let mut t = T::new();
     t.open(Dest::Sub(7, 5));
     t.tap(Key::Down); // Beep volume
-    t.knob(1);
-    t.knob(1);
-    assert_eq!(t.app.set.beep_vol, 5);
+    t.knob(-1);
+    t.knob(-1);
+    assert_eq!(t.app.set.beep_vol, 1);
     assert!(t.app.screen().hints(&t.app).as_slice().contains(&("*", "Undo")), "the hint bar offers * Undo");
     t.tap(Key::Star);
-    assert_eq!(t.app.set.beep_vol, 3, "back to before the run");
+    assert_eq!(t.app.set.beep_vol, 2, "back to before the run");
     // A toggle, and the offer ends after 5 s.
     t.tap(Key::Down); // Alert tones
     t.knob(1);

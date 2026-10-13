@@ -47,6 +47,14 @@ pub fn subtone<B: Bus>(bk: &mut Bk4829<B>, rx_tone: u16, rx_tail: bool) {
     }
 }
 
+/// The squelch thresholds (SQL-1): REG_78 (RSSI open/close) and REG_4F (noise), from
+/// [`ferrite_core::sqcal::SqCal::regs`], written as stock's 0x0801E64C does. The glitch thresholds stay as the
+/// chip's start-up left them, as stock's do.
+pub fn squelch<B: Bus>(bk: &mut Bk4829<B>, regs: (u16, u16)) {
+    bk.write(bk4829::reg::SQ_RSSI, regs.0);
+    bk.write(bk4829::reg::SQ_NOISE, regs.1);
+}
+
 /// The tone hint's probe (TSRCH-12): the detectors measure whatever is on air; audio stays as it is (muted).
 pub fn tone_probe<B: Bus>(bk: &mut Bk4829<B>) {
     bk.subtone_scan_on();

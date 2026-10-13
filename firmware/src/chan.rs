@@ -41,6 +41,8 @@ pub static LIVE: Watch<M, LiveAll, 2> = Watch::new();
 /// and the battery gauge (PWR-20).
 #[cfg(feature = "tx")]
 pub static TX_CAL: Signal<M, (Option<ferrite_core::txcal::TxCal>, ferrite_core::txcal::Gauge)> = Signal::new();
+/// SQL-1: the calibration's squelch tables, read at boot in every build (the UI task), for the Radio task.
+pub static SQ_CAL: Signal<M, ferrite_core::sqcal::SqCal> = Signal::new();
 /// GPS (manual chapter 28): the latest fix for the UI and the APRS task (and one spare reader), and the
 /// satellites in view for the UI's sky plot. The GPS task sends both.
 pub static POSITION: Watch<M, GpsFix, 3> = Watch::new();
