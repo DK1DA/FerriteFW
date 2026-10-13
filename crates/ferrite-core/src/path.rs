@@ -439,12 +439,15 @@ impl Path {
         self.mute(false, out);
     }
 
-    /// Battery Save's sleep phase: the receive path off (refused while keyed, TX-29).
+    /// Battery Save's sleep phase: a BK4829's receive select off (refused while keyed, TX-29). Only that: no mute,
+    /// and the SI4732's input is left as it is, so broadcast FM plays on through the BK4829s' sleep (BCR-19).
     pub fn rx_off(&mut self, out: &mut Steps) -> Result<(), Blocked> {
         if self.tx.is_some() {
             return Err(Blocked::Keyed);
         }
-        self.clear_rx(out);
+        if matches!(self.rx, Rx::Bk(_)) {
+            self.clear_rx(out);
+        }
         Ok(())
     }
 
@@ -500,6 +503,21 @@ mod tests {
         let mut s = Steps::default();
         f(&mut p, &mut s);
         (p, s)
+    }
+
+    /// PWR-6, BCR-19, HF-33: Battery Save's sleep step clears only a BK4829's receive select: no mute (the speaker
+    /// stays as the broadcast has it) and never the SI4732's input; with the SI4732 on the path it does nothing.
+    #[test]
+    fn sleep_step_leaves_the_si4732_alone() {
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::VhfRx), Cause::ActiveSlot, 0, s).unwrap());
+        let mut s = Steps::default();
+        p.rx_off(&mut s).unwrap();
+        assert_eq!(s.as_slice(), [Act::Sel(Sel::VhfRx, false)]);
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Si, Cause::HfReceiver, 0, s).unwrap());
+        let mut s = Steps::default();
+        p.rx_off(&mut s).unwrap();
+        assert!(s.is_empty(), "{:?}", s.as_slice());
+        assert_eq!(p.rx_now(), Rx::Si);
     }
 
     #[test]

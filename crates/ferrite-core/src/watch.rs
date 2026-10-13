@@ -5,7 +5,9 @@
 //! - Two chips: slots on the same chip take turns on it (WATCH-2), [`ACTIVE_DWELL_MS`] on the active slot and
 //!   [`WATCHED_DWELL_MS`] on each watched one; a slot with its squelch open keeps the chip, and for
 //!   [`HOLD_MS`] after it closes (the reply after the squelch tail).
-//! - Audio: the active slot's first; a watched slot only while the active one is closed, unless muted (WATCH-3).
+//! - Audio: the active slot's first; a watched slot only while the active one is closed or muted (WATCH-3). A
+//!   muted slot (quick mute, HOME-15) is never heard and never holds a shared chip past its dwell, so it blocks
+//!   no other slot; it still listens, so its squelch and S-meter carry on.
 //! - The active slot never changes here: a watched slot that is heard plays and shows RX, and only the user
 //!   changes the active slot (WATCH-5; Follow was dropped, decision 81).
 //! - Paused (WATCH-6, WATCH-16, TX-34): while keyed and until [`Watch::pause`]'s time, only the active slot.
@@ -35,7 +37,7 @@ pub struct Cfg {
     pub active: u8,
     /// Each slot's frequency now (for its chip and relay state).
     pub freq: [Freq10; SLOTS],
-    /// Watched slots not heard (still highlighted).
+    /// Slots not heard, the active one too: quick mute (HOME-15). They still listen.
     pub muted: u8,
     /// Slots not listened to at all, the active one too (BCR-23).
     pub off: u8,
@@ -122,8 +124,8 @@ impl Watch {
             let mine = |s: u8| set & 1 << s != 0 && band(c.freq[s as usize]).1 == n;
             let cur = self.on[n as usize].filter(|&s| mine(s));
             let next = match cur {
-                // Open, or closed within the hold: it keeps the chip.
-                Some(s) if (self.open | self.recent) & 1 << s != 0 => Some(s),
+                // Open, or closed within the hold: it keeps the chip (a muted slot only for its dwell, HOME-15).
+                Some(s) if (self.open | self.recent) & !c.muted & 1 << s != 0 => Some(s),
                 Some(s) => {
                     let dwell = if s == active { ACTIVE_DWELL_MS } else { WATCHED_DWELL_MS };
                     if now.wrapping_sub(self.since[n as usize]) < dwell {
@@ -140,7 +142,7 @@ impl Watch {
             self.on[n as usize] = next;
         }
         out.chip = self.on;
-        out.audio = if self.open(active) {
+        out.audio = if self.open(active) && c.muted & 1 << active == 0 {
             Some(active)
         } else {
             (0..SLOTS as u8).find(|&s| s != active && self.open(s) && c.muted & 1 << s == 0)
@@ -270,6 +272,29 @@ mod tests {
         assert_eq!(w.tick(7_200, &c, [true, true], false).audio, Some(0));
         let o = w.tick(7_300, &Cfg { muted: 0b010, ..c }, [false, true], false);
         assert_eq!(o.audio, None, "B muted, A closed");
+    }
+
+    /// HOME-15, WATCH-3: a muted active slot is never heard and takes no audio priority: a watched slot open
+    /// beside it plays. On a shared chip it keeps only its dwell, so the slot sharing it still gets turns; it
+    /// still listens (its squelch is reported as open).
+    #[test]
+    fn muted_slot_never_blocks() {
+        let mut w = Watch::new();
+        let c = Cfg { muted: 0b001, ..cfg() };
+        w.tick(0, &c, [false; 2], false);
+        let o = w.tick(100, &c, [true, true], false); // A (chip 0) and B (chip 1) open
+        assert!(w.open(0), "A still receives");
+        assert_eq!(o.audio, Some(1), "A muted: B is heard");
+        let o = w.tick(150, &c, [true, true], false);
+        assert_eq!(o.chip[0], Some(2), "A open but muted: C gets its turn on chip 0");
+        let o = w.tick(200, &c, [false, false], false);
+        assert_eq!(o.audio, None, "B closed, A muted: nothing");
+        // Unmuted, A's open squelch keeps the chip and the speaker again.
+        let c = cfg();
+        w.tick(220, &c, [false, false], false); // back to A
+        let o = w.tick(300, &c, [true, true], false);
+        assert_eq!((o.chip[0], o.audio), (Some(0), Some(0)));
+        assert_eq!(w.tick(400, &c, [true, true], false).chip[0], Some(0), "open, unmuted: keeps it");
     }
 
     #[test]

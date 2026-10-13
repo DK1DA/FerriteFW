@@ -132,6 +132,8 @@ pub struct FakeRadio {
     bk: [[u16; 128]; 2],
     /// Slots with monitor latched: squelch held open.
     monitor: u8,
+    /// Quick mute (HOME-15): slots still received, never heard.
+    mute: u8,
     fm: u16,
     /// The slot playing broadcast (BCR-23: no chip listens to it while FM plays) and the broadcast's turn on the
     /// speaker (BCR-24), as the Radio task keeps them.
@@ -191,6 +193,7 @@ impl FakeRadio {
             power: [2; 4],
             bk: fake_bk(),
             monitor: 0,
+            mute: 0,
             fm: 9_810,
             bcast: None,
             bturn: BcastTurn::new(),
@@ -307,6 +310,7 @@ impl FakeRadio {
                 self.scan_out(i, o);
             }
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
+            RadioCmd::Mute(m) => self.mute = m,
             RadioCmd::ScanDir { slot, up, .. } => {
                 // SCAN-16: on a hit (or in its resume wait) the engine leaves it at once.
                 let now = self.ms();
@@ -597,12 +601,14 @@ impl FakeRadio {
             }
             _ => 0,
         };
-        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: 0, off };
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off };
         let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
-        // BCR-24: the broadcast plays while no slot is heard, and 2 s after one goes quiet.
-        let turn = self.bturn.tick(now, out.audio.is_some() || self.monitor & 1 << self.active != 0);
+        // BCR-24: the broadcast plays while no slot is heard, and 2 s after one goes quiet; a muted broadcast slot
+        // never plays (HOME-15).
+        let turn = self.bturn.tick(now, out.audio.is_some() || self.monitor & !self.mute & 1 << self.active != 0);
+        let bmuted = self.bcast.is_some_and(|b| self.mute & 1 << b != 0);
         if let ModeLive::Fm { heard, .. } = &mut self.live.mode {
-            *heard = turn;
+            *heard = turn && !bmuted;
         }
         // Scans step only while their slot has a chip.
         for i in 0..3 {

@@ -986,26 +986,43 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         put!(m, " {}: {}", name, Bytes(v.as_bytes()));
         return Ok(Done::Said(m));
     }
-    // Step through the values as the knob does until one reads as asked; a full turn brings it back.
+    // Step through the values as the knob does until one reads as asked: up, and a full turn brings it back. A
+    // value that stops at its ends (a level, 1-10) is walked up to its top, then down, then back to where it was.
     let mut v = Buf::<24>::new();
     value(app, dev, p, &mut v);
     let start = v;
     let mut all = msg!("{}: one of ", name);
-    for k in 0..64 {
-        if same(v.as_bytes(), want) {
-            let mut m = Msg::new();
-            path_text(p, &mut m);
-            put!(m, " {}: {}", name, Bytes(v.as_bytes()));
-            return Ok(Done::Said(m));
+    let mut n = 0;
+    for d in [1, -1, 1] {
+        if d == -1 {
+            (all, n) = (msg!("{}: one of ", name), 0); // the whole range, top to bottom
         }
-        if k > 0 {
-            all.push(b", ");
+        for _ in 0..64 {
+            if d == 1 && n > 0 && v == start {
+                return Err(all); // back where it started
+            }
+            if same(v.as_bytes(), want) && n != usize::MAX {
+                let mut m = Msg::new();
+                path_text(p, &mut m);
+                put!(m, " {}: {}", name, Bytes(v.as_bytes()));
+                return Ok(Done::Said(m));
+            }
+            if n != usize::MAX {
+                if n > 0 {
+                    all.push(b", ");
+                }
+                all.push(v.as_bytes());
+                n += 1;
+            }
+            let was = v;
+            groups::change(app, p, d);
+            value(app, dev, p, &mut v);
+            if v == was {
+                break; // an end
+            }
         }
-        all.push(v.as_bytes());
-        groups::change(app, p, 1);
-        value(app, dev, p, &mut v);
-        if v == start {
-            break;
+        if d == -1 {
+            n = usize::MAX; // the last pass only goes back to the start
         }
     }
     Err(all)

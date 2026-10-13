@@ -96,7 +96,7 @@ const G7: [Entry; 9] = [
     (slow!("Display"), slow!("Bars"), slow!("S-meter, power-on message, boot screen.")),
     (slow!("Backlight"), slow!("15 s"), slow!("Timeout, brightness, wake.")),
     (slow!("Sounds"), slow!("Beep on"), slow!("Key beep, volume, alert tones.")),
-    (slow!("LEDs"), slow!("Receive, transmit and heartbeat"), slow!("And a flash while the screen is dark.")),
+    (slow!("LEDs"), slow!("RX, TX and heartbeat"), slow!("And a flash while the screen is dark.")),
     (slow!("Battery Save"), slow!("Level 1"), slow!("Receiver sleep: longer life, slower.")),
     (slow!("Auto power off"), slow!("Off"), slow!("Off after a time without key or signal.")),
     (slow!("Menu timeout"), slow!("30 s"), slow!("An idle menu returns home.")),
@@ -215,10 +215,10 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         (slow!("Boot screen"), slow!("Logo"), slow!("Logo, or the owner card.")),
     ]),
     ((7, 4), &[
-        (slow!("Timeout"), slow!("15 s"), slow!("Backlight off after this.")),
-        (slow!("Brightness"), slow!("7"), slow!("1-10.")),
+        (slow!("Timeout"), slow!("1 min"), slow!("Backlight off after this.")),
+        (slow!("Brightness"), slow!("7"), slow!("1-10; night red keeps its own.")),
         (slow!("On transmit"), slow!("On"), slow!("Light up while transmitting.")),
-        (slow!("Wake screen on"), slow!("Keys, receive"), slow!("What wakes the screen.")),
+        (slow!("Wake screen on"), slow!("Keys and RX"), slow!("What wakes the screen.")),
         (slow!("Keypad light"), slow!("With screen"), slow!("Off, with the screen, on key press, always.")),
     ]),
     ((7, 5), &[
@@ -520,6 +520,20 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             secs(b, BACKLIGHT_TIMES[s.backlight as usize % BACKLIGHT_TIMES.len()] as u32, "Never");
             s.backlight != Settings::DEFAULT.backlight
         }
+        [7, 4, 2] => {
+            let _ = uwrite!(b, "{}", s.brightness());
+            let mut d = Settings::DEFAULT;
+            d.theme = s.theme;
+            s.brightness() != d.brightness()
+        }
+        [7, 4, 3] => {
+            pick(b, &ON_OFF, s.tx_light as u8);
+            !s.tx_light
+        }
+        [7, 4, 4] => {
+            pick(b, &WAKE_ON, s.wake_on);
+            s.wake_on != Settings::DEFAULT.wake_on
+        }
         [7, 4, 5] => {
             pick(b, &KEYPAD_LIGHTS, s.keypad_light);
             s.keypad_light != Settings::DEFAULT.keypad_light
@@ -755,7 +769,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 62] = [
+pub(crate) const SETTABLE: [&[u8]; 65] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -794,6 +808,9 @@ pub(crate) const SETTABLE: [&[u8]; 62] = [
     &[7, 3, 2],
     &[7, 3, 3],
     &[7, 4, 1],
+    &[7, 4, 2],
+    &[7, 4, 3],
+    &[7, 4, 4],
     &[7, 4, 5],
     &[7, 5, 1],
     &[7, 5, 2],
@@ -898,6 +915,9 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [9, 2, 5] => s.term_colour = !s.term_colour,
         [9, 2, 6] => s.cable_log = !s.cable_log,
         [7, 4, 1] => s.backlight = cycle(s.backlight, d, BACKLIGHT_TIMES.len()),
+        [7, 4, 2] => *s.brightness_mut() = (s.brightness() as i32 + d).clamp(1, 10) as u8, // DISP-16, DISP-23
+        [7, 4, 3] => s.tx_light = !s.tx_light,
+        [7, 4, 4] => s.wake_on = cycle(s.wake_on, d, WAKE_ON.len()),
         [7, 4, 5] => s.keypad_light = cycle(s.keypad_light, d, KEYPAD_LIGHTS.len()),
         [7, 5, 4] => s.arrival_tone = !s.arrival_tone,
         [7, 5, 1] => s.key_beep = !s.key_beep,
@@ -1046,6 +1066,12 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [9, 2, 5] => s.term_colour = d.term_colour,
         [9, 2, 6] => s.cable_log = d.cable_log,
         [7, 4, 1] => s.backlight = d.backlight,
+        [7, 4, 2] => {
+            let night = s.theme == NIGHT_RED;
+            *s.brightness_mut() = if night { d.brightness_night } else { d.brightness };
+        }
+        [7, 4, 3] => s.tx_light = d.tx_light,
+        [7, 4, 4] => s.wake_on = d.wake_on,
         [7, 4, 5] => s.keypad_light = d.keypad_light,
         [7, 5, 4] => s.arrival_tone = d.arrival_tone,
         [7, 5, 1] => s.key_beep = d.key_beep,

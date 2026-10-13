@@ -1,6 +1,7 @@
 //! Backlight, LEDs, auto key lock and auto power off (decision 63, KEY-20).
 
 use super::*;
+use crate::settings::Settings;
 
 fn dev(pct: u8, low: bool) -> Device {
     Device { battery_pct: pct, battery_low: low, ..Default::default() }
@@ -127,4 +128,122 @@ fn keypad_light() {
     assert!(t.app.keypad_lit(), "after a key");
     t.wait(6_000);
     assert!(!t.app.keypad_lit());
+}
+
+/// DISP-15: 0 7 4 4 decides whether receive and transmit wake the screen and hold it lit; keys always do. Auto
+/// power off still counts them whatever it says. Broadcast FM never wakes it.
+#[test]
+fn wake_screen_on() {
+    let mut t = T::new();
+    t.app.set.backlight = 3; // 15 s
+    t.app.set.wake_on = 0; // keys
+    t.wait(16_000);
+    assert!(t.app.dark());
+    t.live.slots[1].squelch_open = true;
+    t.wait(1_000);
+    assert!(t.app.dark(), "keys only: receive leaves it dark");
+    t.live.slots[1].squelch_open = false;
+    t.app.set.wake_on = 1; // keys and receive (the default)
+    assert_eq!(Settings::DEFAULT.wake_on, 1);
+    t.live.slots[1].squelch_open = true;
+    t.wait(200);
+    assert!(!t.app.dark(), "receive wakes it");
+    t.wait(30_000);
+    assert!(!t.app.dark(), "and holds it lit");
+    t.live.slots[1].squelch_open = false;
+    t.wait(16_000);
+    assert!(t.app.dark());
+    t.live.tx.keyed = true; // VOX or a beacon: no key pressed
+    t.wait(1_000);
+    assert!(t.app.dark(), "keys and receive: transmit doesn't wake it");
+    t.app.set.wake_on = 2;
+    t.wait(200);
+    assert!(!t.app.dark(), "keys, receive and transmit");
+    t.live.tx.keyed = false;
+    // Broadcast FM never wakes it, nor lights the LED.
+    t.wait(16_000);
+    assert!(t.app.dark());
+    t.live.mode = ferrite_core::msg::ModeLive::Fm { freq: 10_050, ps: [b' '; 8], rt: [0; 64], rssi: 40, snr: 20, stereo: true, heard: true };
+    t.wait(1_000);
+    assert!(t.app.dark(), "broadcast plays: still dark");
+    assert!(!t.app.leds(&t.live, &dev(90, false)).green, "no receive LED for broadcast");
+}
+
+/// DISP-15, PWR-17: with keys only waking the screen, a slot receiving still holds auto power off off.
+#[test]
+fn auto_off_counts_receive_whatever_wakes() {
+    let mut t = T::new();
+    t.app.set.auto_off = 1; // 30 min
+    t.app.set.wake_on = 0;
+    t.live.slots[0].squelch_open = true;
+    t.wait(31 * 60_000);
+    assert!(!t.app.take_power_off());
+    assert!(t.app.dark(), "the screen went dark all the same");
+}
+
+/// DISP-26: 0 7 4 3 on (the default): a lit screen stays lit through a long transmission, past the timeout; off:
+/// the backlight is dark while keyed and back after, the timeout where it was.
+#[test]
+fn backlight_on_transmit() {
+    let mut t = T::new();
+    t.app.set.backlight = 3; // 15 s
+    const { assert!(Settings::DEFAULT.tx_light) };
+    t.wait(5_000);
+    t.live.tx.keyed = true;
+    t.wait(60_000);
+    assert!(!t.app.dark() && t.app.backlight_duty() > 0, "lit through the transmission");
+    t.live.tx.keyed = false;
+    t.wait(16_000);
+    assert!(t.app.dark(), "the timeout runs again after it");
+    // Off: dark while keyed, whatever 0 7 4 4 says.
+    t.app.set.tx_light = false;
+    t.tap(Key::Up);
+    assert!(t.app.backlight_duty() > 0);
+    t.live.tx.keyed = true;
+    t.wait(200);
+    assert_eq!(t.app.backlight_duty(), 0, "dark while keyed");
+    assert!(!t.app.keypad_lit(), "the keypad light with it");
+    t.live.tx.keyed = false;
+    t.wait(200);
+    assert!(t.app.backlight_duty() > 0, "back at unkey");
+}
+
+/// DISP-16, DISP-23: 0 7 4 2's levels 1-10 as PWM duty, rising, 10 full on, 0 while dark; night red keeps its own
+/// level, and 0 7 4 2 sets the one for the theme in use.
+#[test]
+fn brightness_levels() {
+    use crate::lights::BRIGHTNESS;
+    let mut t = T::new();
+    t.app.set.backlight = 3;
+    assert_eq!(Settings::DEFAULT.brightness, 7);
+    assert_eq!(t.app.backlight_duty(), BRIGHTNESS[6]);
+    assert!(BRIGHTNESS.windows(2).all(|w| w[0] < w[1]) && BRIGHTNESS[9] == 1000 && BRIGHTNESS[0] > 0);
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 4, 2], 5));
+    assert_eq!((t.app.set.brightness, t.app.backlight_duty()), (10, 1000), "10 at most");
+    // Night red: its own level (3 by default), set apart from the others'.
+    t.app.set.theme = crate::settings::NIGHT_RED;
+    assert_eq!(t.app.backlight_duty(), BRIGHTNESS[2]);
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 4, 2], -5));
+    assert_eq!((t.app.set.brightness_night, t.app.set.brightness), (1, 10), "1 at least; the day level untouched");
+    t.app.set.theme = 0;
+    assert_eq!(t.app.backlight_duty(), 1000);
+    t.wait(16_000);
+    assert_eq!(t.app.backlight_duty(), 0, "dark");
+}
+
+/// DISP-22: "on key press" lights the keypad for 5 s after any key, the one that woke the screen too.
+#[test]
+fn keypad_light_on_key_press() {
+    let mut t = T::new();
+    t.app.set.backlight = 3;
+    t.app.set.keypad_light = 2;
+    t.wait(16_000);
+    assert!(t.app.dark() && !t.app.keypad_lit());
+    t.tap(Key::Up); // only wakes the screen
+    assert!(!t.app.dark());
+    assert!(t.app.keypad_lit(), "the waking key lights it");
+    t.wait(5_000);
+    assert!(!t.app.keypad_lit(), "5 s after");
+    t.knob(1);
+    assert!(t.app.keypad_lit(), "the knob too");
 }

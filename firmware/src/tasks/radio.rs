@@ -180,6 +180,8 @@ struct Radio {
     floor: [i16; 2],
     /// Monitor latched, a bit per slot (SQL-2).
     monitor: u8,
+    /// Quick mute from the UI, a bit per slot (HOME-15): still received, never on the speaker.
+    user_mute: u8,
     /// Each slot's tone hint (TSRCH-12 to TSRCH-15): when to measure the tone on a carrier its tone squelch keeps
     /// shut, and what was heard.
     hints: [Hint; SLOTS],
@@ -498,7 +500,8 @@ impl Radio {
         match a {
             Action::None => return,
             Action::Sleep => {
-                speaker(false);
+                // BCR-19: only the BK4829s sleep; a broadcast playing keeps the SI4732 and the speaker.
+                speaker(self.si_heard && !self.muted);
                 for n in 0..2u8 {
                     self.tune_chip(n, None);
                 }
@@ -617,6 +620,7 @@ impl Radio {
             let a = self.save.tick(now_ms(), false);
             self.apply(a).await;
             if self.save.asleep() {
+                self.bcast_audio(now_ms() as u32, false); // BCR-19: the broadcast plays on, and returns on time
                 return;
             }
         }
@@ -678,7 +682,7 @@ impl Radio {
         // SAME on a weather channel's chip (DEC-19).
         self.same_tick(now);
         // 2. The watch turn.
-        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: 0, off: self.bcast_off() };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.tick(now, &cfg, sq, keyed);
         // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
@@ -725,7 +729,7 @@ impl Radio {
         // 5. Audio (WATCH-3): the slot the engine picks, if its tone matches; a latched monitor on the active
         // slot opens it whatever it hears (SQL-2).
         let heard_chip = |s: u8| (0..2u8).find(|&n| self.tuned[n as usize].is_some_and(|(t, _)| t == s));
-        let monitor_active = self.monitor & 1 << self.active != 0;
+        let monitor_active = self.monitor & !self.user_mute & 1 << self.active != 0; // HOME-15: muted, not heard
         let audio = if monitor_active { Some(self.active) } else { out.audio };
         let audio_chip = audio.and_then(heard_chip).filter(|&n| monitor_active || toned[n as usize]);
         for n in 0..2u8 {
@@ -733,20 +737,7 @@ impl Radio {
                 self.chip(n).af_out(if Some(n) == audio_chip { AfOut::Normal } else { AfOut::Mute });
             }
         }
-        // BCR-6: in FM or AM broadcast the SI4732 is the source while no slot is heard (radio monitor); a heard slot
-        // mutes it and plays the BK4829 instead, and the broadcast returns 2 s after it goes quiet (BCR-24).
-        // Without this the amp stayed off in FM broadcast on the radio (Oct 12, 2026): only the BK4829s were ever
-        // counted as a source.
-        let broadcast = self.si.mode().is_some() && self.hf.is_none();
-        let turn = self.bturn.tick(now, audio_chip.is_some());
-        let si_heard = broadcast && turn;
-        if self.si_heard != si_heard {
-            if broadcast {
-                let _ = self.si.mute(!si_heard, &mut BusyDelay);
-            }
-            self.si_heard = si_heard;
-        }
-        speaker((audio_chip.is_some() || si_heard) && !self.muted);
+        self.bcast_audio(now, audio_chip.is_some());
         // 6. The snapshot.
         let active_relay = Sel::rx(self.slots[self.active as usize].freq).relay();
         for (i, sl) in self.live.slots.iter_mut().enumerate() {
@@ -758,11 +749,30 @@ impl Radio {
             sl.heard_tone = self.hints[i].heard;
             sl.relay = out.cancelled && self.watch_set & 1 << i != 0 && Sel::rx(self.slots[i].freq).relay() != active_relay;
         }
-        // Battery Save: anything open or scanning keeps the receivers awake.
-        // FM or AM broadcast keeps the receivers awake too: Battery Save's sleep would silence it (speaker off).
-        let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning) || (self.si.mode().is_some() && self.hf.is_none());
+        // Battery Save: anything open or scanning keeps the receivers awake. Broadcast doesn't (BCR-19): the
+        // BK4829s keep the level's cycle for the slots watched, and the sleep step leaves the SI4732 playing.
+        let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning);
         let a = self.save.tick(now_ms(), busy);
         self.apply(a).await;
+    }
+
+    /// BCR-6: in FM or AM broadcast the SI4732 is the source while no slot is heard (radio monitor); a heard slot
+    /// mutes it and plays the BK4829 instead, and the broadcast returns 2 s after it goes quiet (BCR-24). A
+    /// broadcast slot muted with \* stays muted (HOME-15). Then the speaker for whichever plays. Without this the
+    /// amp stayed off in FM broadcast on the radio (Oct 12, 2026): only the BK4829s were ever counted as a source.
+    /// Also run while Battery Save has the BK4829s asleep (BCR-19), so the broadcast comes back on time.
+    fn bcast_audio(&mut self, now: u32, slot_heard: bool) {
+        let broadcast = self.si.mode().is_some() && self.hf.is_none();
+        let turn = self.bturn.tick(now, slot_heard);
+        let muted = self.bcast_slot.is_some_and(|b| self.user_mute & 1 << b != 0);
+        let si_heard = broadcast && turn && !muted;
+        if self.si_heard != si_heard {
+            if broadcast {
+                let _ = self.si.mute(!si_heard, &mut BusyDelay);
+            }
+            self.si_heard = si_heard;
+        }
+        speaker((slot_heard || si_heard) && !self.muted);
     }
 
     /// The tone hint's step for the slot on the listening chip (TSRCH-12, TSRCH-15): eligible while the watch
@@ -1424,6 +1434,7 @@ pub async fn task() {
         tuned: [None; 2],
         floor: [-125; 2],
         monitor: 0,
+        user_mute: 0,
         hints: [Hint::new(); SLOTS],
         scan_tx: false,
         tone_level: 1,
@@ -1503,7 +1514,8 @@ pub async fn task() {
     loop {
         // Wake for the next command, the next Battery Save phase change, or (awake) the next tick.
         let mut at = r.save.deadline();
-        if !r.save.asleep() || r.hf.is_some() {
+        // Broadcast FM's report (fm_poll) runs on the tick, also while Battery Save has the BK4829s asleep (BCR-19).
+        if !r.save.asleep() || r.hf.is_some() || r.fm.is_some() {
             at = at.min(now_ms() + if r.busy() { TICK_MS } else { POLL_MS });
         }
         // MODE-3: a held exclusive mode is checked by its lease's end at the latest.
@@ -1625,6 +1637,7 @@ impl Radio {
                 self.scan_out(i, o);
             }
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
+            RadioCmd::Mute(m) => self.user_mute = m,
             RadioCmd::ScanTx(on) => self.scan_tx = on,
             RadioCmd::ToneLevel(l) => self.tone_level = l.min(2),
             RadioCmd::BeepVol(v) => {

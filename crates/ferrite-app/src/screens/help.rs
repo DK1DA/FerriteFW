@@ -25,7 +25,7 @@ slow_table! {
         (slow!("Knob \x18\x19"), slow!("Tune or step channels")),
         (slow!("\x1b\x1a"), slow!("Band, or zone")),
         (slow!("0-9"), slow!("Type freq or channel")),
-        (slow!("*"), slow!("Decimal point")),
+        (slow!("*"), slow!("Mute slot; point")),
         (slow!("SLOT"), slow!("Next slot, A-B-C")),
         (slow!("Hold SLOT"), slow!("Edit the slot")),
         (slow!("V/M"), slow!("VFO or channel")),

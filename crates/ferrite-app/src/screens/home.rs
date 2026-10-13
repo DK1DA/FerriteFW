@@ -203,7 +203,7 @@ impl View for Home {
         // A digit on a VFO slot would open frequency entry, which channel-only mode hides too.
         if (matches!(
             (e.key, e.press),
-            (Key::VfoMem, _) | (Key::Slot | Key::Menu, Long) | (Key::Menu | Key::Star, Short) | (Key::Star, Long) | (Key::Side(2), LongUp)
+            (Key::VfoMem, _) | (Key::Slot | Key::Menu, Long) | (Key::Menu, Short) | (Key::Star, Long) | (Key::Side(2), LongUp)
         ) || matches!((e.key, e.press), (Key::Digit(_), Short)) && !app.slots[app.active as usize].on_channel())
             && app.chan_only_refuse()
         {
@@ -283,6 +283,9 @@ impl View for Home {
                 app.out.push(RadioCmd::Monitor { slot: a, on });
                 app.show_toast(b"Monitor", if on { b"on: tap SIDE1 again" } else { b"off" }, false);
             }
+            // KEY-18, SCAN-11: on a scanning slot \* skips the hit, as on the scan screen; otherwise quick mute.
+            (Key::Star, Short) if app.scan_mask & 1 << app.active != 0 => super::scan::skip(app, app.active),
+            (Key::Star, Short) => quick_mute(app), // HOME-15
             (Key::Star, Long) => app.change(Item::Reverse, 1), // VFO-7: two values, so +1 toggles
             (Key::Digit(d), Short) => app.open(Dest::Entry(d)), // NAV-4, VFO-11
             // HOME-8: the shortcut runs at the long press, a popup names it (KEY-11).
@@ -368,6 +371,19 @@ impl View for Home {
         let group = if app.bcast_slot() == Some(a) && !app.slots[a as usize].on_channel() { "Seek" } else { group }; // BCR-25
         Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, (ARROWS_LR, group)])
     }
+}
+
+/// HOME-15: \* mutes or unmutes the active slot: it still receives (state, S-meter, the green LED), but its audio
+/// never reaches the speaker and never holds it from a watched slot. RAM only; it stays with the slot until \* again.
+fn quick_mute(app: &mut App) {
+    let a = app.active;
+    app.mute ^= 1 << a;
+    app.out.push(RadioCmd::Mute(app.mute));
+    let mut t = Buf::<16>::new();
+    t.set(b"Slot ");
+    t.push(&[b'A' + a]);
+    t.push(if app.mute & 1 << a != 0 { b" muted" } else { b" unmuted" });
+    app.show_toast(t.as_bytes(), if app.mute & 1 << a != 0 { b"* again to hear it" } else { b"" }, false);
 }
 
 /// Card `s` of the cards layout: its frame when it changed, and every part of it that changed.

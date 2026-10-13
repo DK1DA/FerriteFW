@@ -176,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     spare_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, cable_log, spare_flag2, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep });
+} bits { show_hidden, chan_only, cable_log, spare_flag2, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;

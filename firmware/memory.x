@@ -83,6 +83,8 @@ SECTIONS
      * never from an interrupt. */
     *(.text.*5Radio7fm_poll*);
     *(.text.*5Radio9bcast_off*);
+    /* The backlight's PWM (DISP-23): set by the UI task only, once a pass. */
+    *(.text.*3hal9backlight*);
     . = ALIGN(4);
     __eslow_text = .;
   } > FLASH

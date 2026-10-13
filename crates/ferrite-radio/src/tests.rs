@@ -225,6 +225,19 @@ fn si4732_input_pins() {
     assert!(a < b);
 }
 
+/// BCR-19, PWR-6: Battery Save's sleep step during broadcast FM, on the pins: only the BK4829's receive select
+/// goes off; the speaker amp, the receiver mute and the SI4732's input pins are never touched, so the broadcast
+/// plays on.
+#[test]
+fn sleep_step_keeps_the_broadcast_playing() {
+    let (mut path, _, mut hw, _) = receiving(VHF);
+    hw.si_used = true; // broadcast FM running
+    let mut s = Steps::default();
+    path.rx_off(&mut s).unwrap();
+    block_on(run(&mut hw, &s));
+    assert_eq!(hw.evs(), [Ev::Pin(Pin::Sel(Sel::VhfRx), false)]);
+}
+
 /// TX-27, TX-28, SAFE-21, SAFE-11: random sequences of everything that plans (tuning, watch, key-up and unkey,
 /// the sequencer's tick, the safe state) carried out by `run` on the mock: the pin-level rules hold after every
 /// plan (the same sequences `ferrite-core`'s rf_invariants checks at the plan level).

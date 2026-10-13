@@ -34,11 +34,14 @@ struct Radio {
     active: u8,
     on_chip: [Option<u8>; 2],
     heard_audio: bool,
+    /// Quick mute (HOME-15) and whose audio the engine played last.
+    mute: u8,
+    audio: Option<u8>,
 }
 
 impl Radio {
     fn new() -> Self {
-        Radio { w: Watch::new(), set: 0, active: 0, on_chip: [None; 2], heard_audio: false }
+        Radio { w: Watch::new(), set: 0, active: 0, on_chip: [None; 2], heard_audio: false, mute: 0, audio: None }
     }
 
     /// 10 ms: the App's commands, one engine turn with `heard` slots carrying a signal, then the App's tick.
@@ -47,15 +50,17 @@ impl Radio {
             match c {
                 RadioCmd::Watch(m) => self.set = m,
                 RadioCmd::Active(a) => self.active = a,
+                RadioCmd::Mute(m) => self.mute = m,
                 _ => {}
             }
         }
         let freq = [0, 1, 2].map(|s| t.app.slot(s).freq());
-        let cfg = watch::Cfg { set: self.set, active: self.active, freq, muted: 0, off: 0 };
+        let cfg = watch::Cfg { set: self.set, active: self.active, freq, muted: self.mute, off: 0 };
         let sq = self.on_chip.map(|o| o.is_some_and(|s| heard & 1 << s != 0));
         let out = self.w.tick(t.t, &cfg, sq, false);
         self.on_chip = out.chip;
         self.heard_audio |= out.audio == Some(1);
+        self.audio = out.audio;
         for (i, s) in t.live.slots.iter_mut().enumerate() {
             s.squelch_open = self.w.open(i as u8);
         }
@@ -87,6 +92,27 @@ fn heard_slot_never_becomes_active() {
     t.open(crate::screens::nav::Dest::Status);
     r.run(&mut t, 3_000, 0b010);
     assert_eq!(t.app.active(), 0, "a screen open: the same");
+}
+
+/// HOME-15, WATCH-3: A muted with \* while A and B both receive: A shows RX muted and keeps its S-meter, B's audio
+/// plays (a muted active slot takes no priority); \* again and A has the speaker back.
+#[test]
+fn muted_active_slot_lets_watched_be_heard() {
+    let mut t = T::new();
+    t.app.set.backlight = 0;
+    t.app.out.push(RadioCmd::Watch(t.app.watch_mask()));
+    let mut r = Radio::new();
+    r.run(&mut t, 500, 0);
+    r.run(&mut t, 2_000, 0b011);
+    assert_eq!(r.audio, Some(0), "A first");
+    t.tap(Key::Star);
+    r.run(&mut t, 500, 0b011);
+    assert_eq!(r.audio, Some(1), "A muted: B heard");
+    assert!(t.live.slots[0].squelch_open);
+    assert_eq!(t.app.state(0, &t.live).0, "RX muted");
+    t.tap(Key::Star);
+    r.run(&mut t, 500, 0b011);
+    assert_eq!(r.audio, Some(0), "unmuted: A again");
 }
 
 /// The two flag bits that were Follow's (decision 81) keep scan inputs' bit in place: old records still load it.

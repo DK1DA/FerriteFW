@@ -4,19 +4,34 @@
 //! [`App::take_power_off`] says so.
 //!
 //! - **Dark:** no key, PTT or receiving for the backlight time (0 7 4 1). The key press that wakes a dark screen
-//!   only wakes it; PTT acts at once (decision 63).
+//!   only wakes it; PTT acts at once (decision 63). Receive and transmit wake it and hold it lit only as 0 7 4 4
+//!   says (DISP-15); with 0 7 4 3 on, a lit screen stays lit through a transmission, off it is dark while keyed
+//!   (DISP-26).
+//! - **Brightness:** 0 7 4 2's level for the theme (night red its own), as a PWM duty: [`App::backlight_duty`]
+//!   (DISP-16, DISP-23).
 //! - **LEDs:** red while transmitting, green while a slot receives; while the screen is dark, a heartbeat in the
 //!   battery's colour (green above 80 %, yellow = both between the low warning and 80 %, red at or below it):
 //!   one short flash every 5 s, or a double flash every 2 s while a message or alert is unread.
 
 use crate::settings::{AUTO_LOCK_TIMES, AUTO_OFF_TIMES, BACKLIGHT_TIMES};
 use crate::App;
+
+/// 0 7 4 2's levels 1-10 as PWM duty, thousandths: about even steps to the eye (a power curve, near gamma 2), with
+/// level 1 still readable indoors. Level 10 is full on.
+pub const BRIGHTNESS: [u16; 10] = [20, 45, 80, 125, 180, 260, 360, 500, 700, 1000];
+
+/// `a` is at or after `b` (wrapping ms).
+fn after(a: u32, b: u32) -> bool {
+    a.wrapping_sub(b) < 1 << 31
+}
 use ferrite_core::msg::{Device, LiveAll};
 
 const DARK: u8 = 1;
 const WARNED: u8 = 2;
 const WANT_OFF: u8 = 4;
 const SWALLOW: u8 = 8;
+/// Keyed with 0 7 4 3 off: dark while keyed (DISP-26), the timeout left as it was.
+const TX_DARK: u8 = 16;
 
 /// A flash's length, and the two heartbeat periods.
 const FLASH_MS: u32 = 80;
@@ -43,12 +58,23 @@ impl App {
         self.lit & DARK != 0
     }
 
-    /// The keypad light (0 7 4 5).
+    /// The backlight's PWM duty in thousandths (DISP-16, DISP-23): 0 while dark, else 0 7 4 2's level for the theme
+    /// in use on a perceptual curve, 1000 at 10.
+    pub fn backlight_duty(&self) -> u16 {
+        if self.dark() || self.lit & TX_DARK != 0 {
+            return 0;
+        }
+        BRIGHTNESS[self.set.brightness() as usize - 1]
+    }
+
+    /// The keypad light (0 7 4 5, DISP-22): with the screen, or for [`KEY_LIGHT_MS`] after any key or knob step
+    /// (the one that woke the screen too).
     pub fn keypad_lit(&self) -> bool {
+        let lit = !self.dark() && self.lit & TX_DARK == 0;
         match self.set.keypad_light {
             0 => false,
-            1 => !self.dark(),
-            2 => !self.dark() && self.now.wrapping_sub(self.last_input) < KEY_LIGHT_MS,
+            1 => lit,
+            2 => lit && self.now.wrapping_sub(self.pressed) < KEY_LIGHT_MS,
             _ => true,
         }
     }
@@ -98,6 +124,7 @@ impl App {
     /// A key or the knob while dark: light up; true when this input only woke the screen.
     pub(crate) fn wake(&mut self, now: u32) -> bool {
         self.seen = now;
+        self.pressed = now;
         self.lit &= !WARNED;
         if self.dark() {
             self.lit &= !DARK;
@@ -131,11 +158,24 @@ impl App {
         }
     }
 
-    /// Time passed: receiving keeps the screen and the radio awake; the backlight, auto lock and auto off.
+    /// Time passed: receiving keeps the radio awake (auto off); receive and transmit wake the screen as 0 7 4 4
+    /// says (DISP-15), and 0 7 4 3 holds a lit screen through a transmission or darkens it (DISP-26); the
+    /// backlight, auto lock and auto off.
     pub(crate) fn lights_tick(&mut self, now: u32, live: &LiveAll) {
-        if live.tx.keyed || live.slots.iter().any(|s| s.squelch_open) {
-            self.seen = now;
+        let rx = live.slots.iter().any(|s| s.squelch_open);
+        let tx = live.tx.keyed;
+        // Auto off counts any activity, whatever wakes the screen.
+        if rx || tx {
+            self.awake = now;
             self.lit &= !WARNED;
+        }
+        if rx && self.set.wake_on >= 1 || tx && (self.set.wake_on >= 2 || self.set.tx_light && !self.dark()) {
+            self.seen = now;
+        }
+        if tx && !self.set.tx_light {
+            self.lit |= TX_DARK;
+        } else {
+            self.lit &= !TX_DARK;
         }
         let idle = now.wrapping_sub(self.seen);
         let bl = BACKLIGHT_TIMES[self.set.backlight as usize % BACKLIGHT_TIMES.len()] as u32 * 1000;
@@ -150,6 +190,7 @@ impl App {
             self.locked = true;
         }
         let off = AUTO_OFF_TIMES[self.set.auto_off as usize % AUTO_OFF_TIMES.len()] as u32 * 60_000;
+        let idle = now.wrapping_sub(if after(self.awake, self.seen) { self.awake } else { self.seen });
         if off != 0 {
             if idle >= off {
                 self.lit |= WANT_OFF;

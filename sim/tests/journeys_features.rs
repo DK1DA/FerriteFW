@@ -379,3 +379,41 @@ fn strip_off_while_broadcast() {
     assert_eq!(r.sim.app().bcast_slot(), None);
     r.expect_text("+112k");
 }
+
+/// HOME-15: \* on home mutes the active slot: its card says Muted, then RX muted while its carrier is on (the fake
+/// radio still opens its squelch and moves its meter); \* again and it is heard as before. On the broadcast slot \*
+/// keeps the broadcast off the speaker until pressed again.
+#[test]
+fn quick_mute() {
+    use ferrite_core::msg::ModeLive;
+    let mut r = Radio::new();
+    r.home();
+    // C's airband scan holds chip 0 on its hits: stop it, so A gets the chip.
+    r.run("press SLOT; press SLOT; press SIDE2; press SLOT; wait 1s");
+    r.take_cmds();
+    r.press(Key::Star).expect_text("Muted");
+    assert!(r.take_cmds().contains(&RadioCmd::Mute(0b001)));
+    // A's fake carrier comes every 10 s, for 3 s.
+    let mut seen = false;
+    for _ in 0..600 {
+        r.wait(20);
+        if r.sim.radio().live.slots[0].squelch_open {
+            seen = true;
+            break;
+        }
+    }
+    assert!(seen, "A still receives");
+    r.wait(100).expect_text("RX muted");
+    r.press(Key::Star).wait(100);
+    assert!(!r.text().contains("Muted") && !r.text().contains("RX muted"));
+    // The broadcast slot: muted, the broadcast is never heard.
+    r.event(Event::FmStation).wait(2500);
+    assert_eq!(r.sim.app().bcast_slot(), Some(0));
+    r.press(Key::Star).wait(500);
+    for _ in 0..200 {
+        r.wait(20);
+        let ModeLive::Fm { heard, .. } = r.sim.radio().live.mode else { panic!("FM runs") };
+        assert!(!heard, "muted broadcast heard at {} ms", r.t);
+    }
+    r.expect_text("Muted");
+}

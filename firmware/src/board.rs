@@ -63,7 +63,8 @@ pub const LCD_DATA_PORT: u32 = GPIOD;
 pub const LED_RED: Pin = pin(GPIOC, 13);
 pub const LED_GREEN: Pin = pin(GPIOC, 14);
 pub const BACKLIGHT: [Pin; 2] = [SCREEN_LIGHT, KEYPAD_LIGHT]; // (L) both
-/// The screen's backlight and the keypad light (docs/hardware.md: PB3 is the keypad light).
+/// The screen's backlight and the keypad light (docs/hardware.md: PB3 is the keypad light). Both start as low
+/// outputs; the UI task then hands PC6 to its PWM (`hal::backlight`, DISP-23).
 pub const SCREEN_LIGHT: Pin = pin(GPIOC, 6);
 pub const KEYPAD_LIGHT: Pin = pin(GPIOB, 3);
 pub const LED_ACTIVE_HIGH: bool = true; // (L) flip if the LEDs turn out active-low

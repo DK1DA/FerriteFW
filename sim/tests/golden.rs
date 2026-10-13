@@ -201,6 +201,29 @@ fn broadcast_slot_matches_its_goldens() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// HOME-15: quick mute's state word in each layout: A (active, the large card) muted with \*, and B muted while
+/// its fake carrier is on ("RX muted" on a compact card or line).
+#[test]
+fn quick_mute_matches_its_goldens() {
+    use ferrite_core::keys::Key;
+    let mut failures = Vec::new();
+    for l in 0..3u8 {
+        let mut r = Radio::new();
+        for _ in 0..l {
+            r.event(Event::Layout);
+        }
+        r.home();
+        r.press(Key::Slot).press(Key::Star).press(Key::Slot).press(Key::Slot).press(Key::Star);
+        // B's fake carrier: 20-22 s of every 25.
+        while !r.sim.radio().live.slots[1].squelch_open {
+            r.wait(20);
+        }
+        r.wait(1000);
+        failures.extend(check(&format!("mute-layout{l}"), &r.sim.screen_rgb()));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// The same screen drawn twice from scratch is the same: the goldens can only change when the code does.
 #[test]
 fn shots_are_deterministic() {

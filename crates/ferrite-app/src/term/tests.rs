@@ -719,6 +719,38 @@ fn command_line_set_and_get() {
     assert_eq!(r.app.set.backlight, bl, "a refused value changes nothing");
 }
 
+/// TERM-12, DISP-15, DISP-16, DISP-22, DISP-23, DISP-26, DISP-17: every light setting takes `set` by the value
+/// the radio shows (0 7 4 1 to 0 7 4 5 and 0 7 6), for testing the lights over the cable. Brightness stops at 1
+/// and 10, so `set` walks it both ways; a refused level lists 10 to 1 and changes nothing.
+#[test]
+fn set_every_light_setting() {
+    let mut r = Rig::main();
+    for (cmd, says) in [
+        ("set 0 7 4 1 30 s", "0 7 4 1 Timeout: 30 s"),
+        ("set 0 7 4 2 10", "0 7 4 2 Brightness: 10"),
+        ("set 0 7 4 2 1", "0 7 4 2 Brightness: 1"),
+        ("set 0 7 4 2 4", "0 7 4 2 Brightness: 4"),
+        ("set 0 7 4 3 off", "0 7 4 3 On transmit: Off"),
+        ("set 0 7 4 4 keys", "0 7 4 4 Wake screen on: Keys"),
+        ("set 0 7 4 4 keys, rx and tx", "0 7 4 4 Wake screen on: Keys, RX and TX"),
+        ("set 0 7 4 5 on key press", "0 7 4 5 Keypad light: On key press"),
+        ("set 0 7 6 rx, tx and heartbeat", "0 7 6 LEDs: RX, TX and heartbeat"),
+        ("set 0 7 6 rx and tx", "0 7 6 LEDs: RX and TX"),
+    ] {
+        r.cmd(cmd);
+        assert!(r.bottom().contains(says), "{cmd}: {}", r.bottom());
+    }
+    let s = &r.app.set;
+    assert_eq!((s.backlight, s.brightness, s.tx_light, s.wake_on, s.keypad_light, s.leds), (4, 4, false, 2, 2, 1));
+    r.cmd("set 0 7 4 2 11");
+    assert!(r.bottom().contains("one of 10, 9, 8, 7, 6, 5, 4, 3, 2, 1"), "{}", r.bottom());
+    assert_eq!(r.app.set.brightness, 4, "a refused level changes nothing");
+    // Night red: 0 7 4 2 is its own level.
+    r.cmd("set 0 7 1 night red");
+    r.cmd("set 0 7 4 2 2");
+    assert_eq!((r.app.set.brightness_night, r.app.set.brightness), (2, 4));
+}
+
 /// Every refusal says what was wrong and how to put it right; nothing changes.
 #[test]
 fn command_errors() {

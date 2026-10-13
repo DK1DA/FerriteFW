@@ -158,6 +158,14 @@ pub struct Settings {
     pub vox_tail: u8,
     /// 0 3 1 5 (BCR-5): the broadcast's sleep timer, an index into [`SLEEP_TIMES`] (0 off).
     pub fm_sleep: u8,
+    /// 0 7 4 2 (DISP-16, DISP-23): the screen's brightness, 1-10, and night red's own level (the item sets the one
+    /// for the theme in use).
+    pub brightness: u8,
+    pub brightness_night: u8,
+    /// 0 7 4 3 (DISP-26): the backlight stays on through a transmission.
+    pub tx_light: bool,
+    /// 0 7 4 4 (DISP-15): what wakes the screen ([`WAKE_ON`]): 0 keys, 1 and receive, 2 and transmit.
+    pub wake_on: u8,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
     pub fm_freq: u16,
     pub fm_step: u8,
@@ -274,10 +282,15 @@ pub const TONE_LEVELS: [&str; 3] = ["Low", "Normal", "High"];
 
 /// 0 7 4 1's values, seconds (0 never).
 pub const BACKLIGHT_TIMES: [u16; 9] = [0, 5, 10, 15, 30, 60, 120, 300, 600];
+/// 0 7 4 4's values (DISP-15).
+pub const WAKE_ON: [&str; 3] = ["Keys", "Keys and RX", "Keys, RX and TX"];
+/// The night red theme's index in [`THEMES`] (DISP-23: its own brightness).
+pub const NIGHT_RED: u8 = 2;
 /// 0 7 4 5's values.
 pub const KEYPAD_LIGHTS: [&str; 4] = ["Off", "With screen", "On key press", "Always"];
-/// 0 7 6's values: the heartbeat is the dark-screen flash in the battery's colour.
-pub const LED_MODES: [&str; 3] = ["Off", "Receive and transmit", "Receive, transmit and heartbeat"];
+/// 0 7 6's values: the heartbeat is the dark-screen flash in the battery's colour. Short enough for the menu's
+/// value column and the terminal's `set` (24 characters).
+pub const LED_MODES: [&str; 3] = ["Off", "RX and TX", "RX, TX and heartbeat"];
 /// 0 7 8's values, minutes (0 off).
 pub const AUTO_OFF_TIMES: [u16; 5] = [0, 30, 60, 120, 240];
 /// 0 9 1 1's values, seconds (0 off).
@@ -340,6 +353,10 @@ impl Settings {
         vox_level: 5,
         vox_tail: 3,
         fm_sleep: 0,
+        brightness: 7,
+        brightness_night: 3,
+        tx_light: true,
+        wake_on: 1,
         fm_freq: 10_110,
         fm_step: 1,
         fm_agc: 0,
@@ -389,6 +406,16 @@ impl Settings {
         gps_rxtx: 0,
         arrival: 0,
     };
+
+    /// 0 7 4 2: the brightness for the theme in use, 1-10 (DISP-23: night red keeps its own).
+    pub fn brightness(&self) -> u8 {
+        (if self.theme == NIGHT_RED { self.brightness_night } else { self.brightness }).clamp(1, 10)
+    }
+
+    /// 0 7 4 2 for the theme in use.
+    pub fn brightness_mut(&mut self) -> &mut u8 {
+        if self.theme == NIGHT_RED { &mut self.brightness_night } else { &mut self.brightness }
+    }
 
     /// The region's name, or "Not set".
     pub fn region_name(&self) -> &'static str {

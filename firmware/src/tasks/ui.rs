@@ -2,7 +2,8 @@
 //! (`ferrite-app`, the same state machine the simulator runs): keys and the knob in, the Radio task's snapshot
 //! in, its commands out to the Radio task, and the screen redrawn where it changed.
 
-use crate::board::{BACKLIGHT, KEYPAD_LIGHT, LED_ACTIVE_HIGH, LED_GREEN, LED_RED, POWER_HOLD, POWER_SW, SCREEN_LIGHT};
+use crate::board::{KEYPAD_LIGHT, LED_ACTIVE_HIGH, LED_GREEN, LED_RED, POWER_HOLD, POWER_SW};
+use crate::hal::backlight;
 use crate::bringup;
 use crate::chan::{Input, ALERTS, BT_IN, BT_LINK_ON, BT_ON, BT_OUT, CABLE_BAUD, DEBUG_ANS, DEBUG_REQ, INPUT, LINK_BAUD, LINK_HELLOS, LINK_ON, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::display::Screen;
@@ -82,9 +83,10 @@ pub async fn task() {
     lcd.0.fill(0, 0, 240, 320, BG);
     let fill_us = crate::hal::time::cycles().wrapping_sub(c0) / (crate::hal::clock::SYSCLK_HZ / 1_000_000);
     lcd.0.on(true);
-    for p in BACKLIGHT {
-        p.output(true, Mode::OutPp);
-    }
+    // The screen light by PWM (DISP-23), full until the settings are read; the keypad light on/off.
+    backlight::init();
+    backlight::set(1000);
+    KEYPAD_LIGHT.output(true, Mode::OutPp);
     // Bring-up: the panel bus speed, from the whole-screen clear (153,600 bytes).
     bringup::linef(|b| {
         let _ = ufmt::uwrite!(b, "panel: full-screen fill {} us, {} ns a byte", fill_us, fill_us * 1000 / 153_600);
@@ -133,6 +135,7 @@ pub async fn task() {
     }
     let set = store::settings();
     store.load_settings(set);
+    backlight::set(ferrite_app::lights::BRIGHTNESS[set.brightness() as usize - 1]); // 0 7 4 2 from here on
     // D13: the owner card instead of the logo when 0 7 3 3 picks it and the card has something on it (BOOT-9).
     // The bring-up build never mounts the store, so its settings are the defaults: always the logo there.
     let card = set.boot_owner().is_some();
@@ -445,9 +448,8 @@ pub async fn task() {
                 if auto_off && !POWER_SW.read() {
                     // Still powered: the switch is on, and only it cuts the power. Standby until a key: the
                     // chips are off (Shutdown above), the screen, keypad light and LEDs too; then start again.
-                    for p in BACKLIGHT {
-                        p.write(false);
-                    }
+                    backlight::set(0);
+                    KEYPAD_LIGHT.write(false);
                     LED_RED.write(!LED_ACTIVE_HIGH);
                     LED_GREEN.write(!LED_ACTIVE_HIGH);
                     while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) && !POWER_SW.read() {}
@@ -474,7 +476,7 @@ pub async fn task() {
             }
         }
         // The lights (decision 63): screen and keypad, and the LEDs with their next change.
-        SCREEN_LIGHT.write(!app.dark());
+        backlight::set(app.backlight_duty()); // DISP-16, DISP-23: 0 while dark
         KEYPAD_LIGHT.write(app.keypad_lit());
         let leds = app.leds(&live, &dev);
         LED_RED.write(leds.red == LED_ACTIVE_HIGH);

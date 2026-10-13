@@ -304,8 +304,12 @@ pub struct App {
     /// The pause is the one after a transmission (WATCH-16): a key press ends it, a signal on the active slot
     /// extends it. The # pause (WATCH-6) is neither.
     tx_pause: bool,
-    /// The last activity for the backlight and auto power off: keys, PTT, a slot receiving ([`lights`]).
+    /// The last activity for the backlight: keys, PTT, and receive and transmit as 0 7 4 4 says ([`lights`]).
     seen: u32,
+    /// The last activity of any kind, receive and transmit too, for auto power off ([`lights`]); and the last key
+    /// or knob step, the waking one too, for the keypad light's "on key press" (DISP-22).
+    awake: u32,
+    pressed: u32,
     /// [`lights`]'s flags: dark, warned of auto off, power off wanted, the waking key swallowed.
     lit: u8,
     /// The APRS settings from the APRS store ([`aprs`]), and whether they were loaded and need writing back.
@@ -327,6 +331,8 @@ pub struct App {
     scan_hit: [Freq10; SLOTS],
     /// Slots with monitor latched (SIDE1 tap): MON on the card.
     pub(crate) monitor: u8,
+    /// Quick mute (\* on home, HOME-15): slots received but never heard, a bit per slot. RAM only.
+    pub(crate) mute: u8,
     out: Outbox,
     /// The channel write for the store's owner ([`App::pop_write`]): one, as every input makes at most one and
     /// the owner drains after every input.
@@ -381,6 +387,8 @@ impl App {
             paused_until: None,
             tx_pause: false,
             seen: 0,
+            awake: 0,
+            pressed: 0,
             lit: 0,
             aprs: aprs::AprsCfg::DEFAULT,
             aprs_st: 0,
@@ -392,6 +400,7 @@ impl App {
             scan_hit: [0; SLOTS],
             heard: [0; SLOTS],
             monitor: 0,
+            mute: 0,
             out: Outbox { q: [None; 16], head: 0, len: 0, sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
             text: Buf::new(),
@@ -847,6 +856,7 @@ impl App {
         }
         self.keys.down(key, now);
         self.last_input = now;
+        self.pressed = now;
         self.out.push(RadioCmd::Activity);
         if self.set.key_beep && !matches!(key, Key::Ptt(_)) {
             self.out.push(RadioCmd::Beep { hz: KEY_BEEP_HZ, ms: KEY_BEEP_MS }); // SND-3
@@ -902,6 +912,7 @@ impl App {
             return;
         }
         self.last_input = now;
+        self.pressed = now;
         self.out.push(RadioCmd::Activity);
         if self.locked {
             return self.locked_toast();

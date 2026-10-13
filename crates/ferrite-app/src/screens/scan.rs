@@ -121,15 +121,7 @@ impl View for Scan {
                 app.out.push(RadioCmd::Scan { slot: s, on: false });
                 app.go_home();
             }
-            (Key::Star, Press::Short) => {
-                // SCAN-11: on a hit, or in the resume wait after one.
-                if app.rx_mask & 1 << s != 0 || app.radio.hits[0].what != 0 && app.radio.hits[0].age_ms(app.now) < 6000 {
-                    app.out.push(RadioCmd::ScanSkip { slot: s });
-                    app.show_toast(b"Skipped", b"for this scan", false);
-                } else {
-                    app.show_toast(b"Nothing to skip", b"", false);
-                }
-            }
+            (Key::Star, Press::Short) => skip(app, s),
             (Key::Digit(d), Press::Short) if app.slot(s).on_channel() => {
                 // SCAN-3: zones by number join or leave the set (0-9 here).
                 app.radio.zones ^= 1 << d;
@@ -382,5 +374,16 @@ pub fn ago(ms: u32, b: &mut Buf<16>) {
         let _ = uwrite!(b, "{} min", s / 60);
     } else {
         let _ = uwrite!(b, "{} h", s / 3600);
+    }
+}
+
+/// SCAN-11, KEY-18: \* skips the current hit for this scan, on a hit or in the resume wait after one (the scan
+/// screen, and home on a scanning slot).
+pub(crate) fn skip(app: &mut App, s: u8) {
+    if app.rx_mask & 1 << s != 0 || app.radio.hits[0].what != 0 && app.radio.hits[0].age_ms(app.now) < 6000 {
+        app.out.push(RadioCmd::ScanSkip { slot: s });
+        app.show_toast(b"Skipped", b"for this scan", false);
+    } else {
+        app.show_toast(b"Nothing to skip", b"", false);
     }
 }

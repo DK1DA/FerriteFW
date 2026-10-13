@@ -130,8 +130,10 @@ fn ram_is_small() {
     // redrawn beside it draws its part too instead of blanking it (DISP-25: 4 x 2 bytes) to 1256; the modes by
     // state (MODE-1 to MODE-4: the repeater started, the active frequency and when it last moved, the lease's
     // renewal and the Radio task's drop count) and the knob's last step (HOME-13), 32 with padding, to 1288; the
-    // broadcast slot, the slots in the band, the station sent and a seek landing (BCR-22, BCR-25), 8 to 1296
-    assert!(n <= 1296, "App is {n} bytes");
+    // broadcast slot, the slots in the band, the station sent and a seek landing (BCR-22, BCR-25), 8 to 1296;
+    // quick mute (HOME-15, a byte), auto off's own activity time and the last key for the keypad light (DISP-15,
+    // DISP-22: 2 x 4), 16 with padding, to 1312
+    assert!(n <= 1312, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -693,6 +695,8 @@ mod nicfw;
 mod help;
 /// The tone hint (TSRCH-13, TSRCH-16).
 mod tonehint;
+/// Quick mute (HOME-15).
+mod mute;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]

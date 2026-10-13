@@ -111,6 +111,21 @@ fn card_states() {
     assert_eq!(t.app.state(1, &t.live).0, "Watch off: relay");
 }
 
+/// HOME-15: \* on the broadcast slot mutes the broadcast too: the mask goes to the Radio task (which keeps the
+/// SI4732 muted) and the card says Muted.
+#[test]
+fn star_mutes_the_broadcast() {
+    let mut t = ready();
+    tune(&mut t, 0, FM1005);
+    live_fm(&mut t, 10_050, true);
+    t.tap(Key::Star);
+    assert!(t.cmds().contains(&RadioCmd::Mute(0b001)));
+    live_fm(&mut t, 10_050, false);
+    assert_eq!(t.app.state(0, &t.live).0, "Muted");
+    t.tap(Key::Star);
+    assert!(t.cmds().contains(&RadioCmd::Mute(0)));
+}
+
 /// BCR-26, BCR-30: the radio text (all 64 characters), else the station name, else nothing.
 #[test]
 fn rds_text_rule() {
