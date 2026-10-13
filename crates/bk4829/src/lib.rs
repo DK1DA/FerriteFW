@@ -143,6 +143,8 @@ pub const POWER_BEEP: u16 = 0x0302;
 /// Tone 1's gain for local beeps: stock V0.29's (V0.27 used 0x3C, louder).
 pub const BEEP_GAIN: u8 = 0x17;
 /// REG_47 and REG_48 while a local beep plays (stock's AF route 3: the tone to the speaker, Gain2 -21 dB, DAC 3).
+/// REG_47 without the route field (bits 11:8), as stock always writes it.
+const AF_OUT_BASE: u16 = 0x6042;
 const AF_OUT_BEEP: u16 = 0x6342;
 const AF_GAIN_BEEP: u16 = 0xB0A3;
 /// REG_32, the frequency scan (stock's counter, 0x0801E1BC / 0x0801E1CC): scan time 0.8 s (bits 15:14 = 10),
@@ -363,7 +365,10 @@ impl<B: Bus> Bk4829<B> {
             AfOut::Tone => 2,
             AfOut::Raw(v) => v & 15,
         };
-        self.modify(reg::AF_OUT, 0x0F00, (v as u16) << 8);
+        // Stock writes the whole register, 0x6042 | route (V0.27 0x0801E82C / 0x0801EFB0, LUT 0x0802B80C): bit 1 is
+        // never clear in stock, and with only the route field changed (keeping the power-on 0x6040) no receive
+        // audio reached the speaker on the RT-950 Pro (Oct 12, 2026).
+        self.write(reg::AF_OUT, AF_OUT_BASE | (v as u16) << 8);
     }
 
     /// Receive audio level: `gain2` 0-63 (-28 to +3.5 dB, 0.5 dB steps), `dac` 0-15 (about 2 dB steps).
