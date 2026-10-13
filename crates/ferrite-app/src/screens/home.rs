@@ -212,10 +212,6 @@ impl View for Home {
         step(app, d, big, store);
     }
 
-    fn tick(self, app: &mut App, _: &ferrite_core::msg::LiveAll) {
-        super::layouts::tick(app);
-    }
-
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         // HOME-3: the other two layouts draw differently; the keys are the same.
         match app.set.layout {
@@ -244,7 +240,10 @@ impl View for Home {
             let (y, h) = card(s, app.active);
             let geom = hash(&(s, y, h, app.aprs_slot(s))) | 1;
             if app.drawn.hash[R_FRAME + p] != 0 && app.drawn.card[p] == geom {
-                draw_card(app, lcd, cx, s);
+                // HOME-13: while the knob turns only the active card follows; the others wait in place.
+                if s == app.active || !app.held(R_FRAME + p) {
+                    draw_card(app, lcd, cx, s);
+                }
                 continue;
             }
             // DISP-25: a card in a new place or size (SLOT moved the large card, a scan began) is drawn whole in

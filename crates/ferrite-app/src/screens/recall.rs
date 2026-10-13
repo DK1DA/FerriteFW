@@ -55,7 +55,9 @@ impl View for Recall {
                     return app.show_toast(b"Empty preset", b"", false);
                 };
                 app.set.fm_freq = p.freq;
-                app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(p.freq)));
+                if app.radio.mode == super::activity::Mode::Fm {
+                    app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(p.freq))); // else FM's start takes it (MODE-2)
+                }
                 let mut f = Buf::<16>::new();
                 fm_text(p.freq, &mut f);
                 // Back to the FM screen it was picked from (replaced, not opened again: one BACK leaves FM);

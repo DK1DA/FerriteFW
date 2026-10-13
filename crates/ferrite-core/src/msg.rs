@@ -100,6 +100,9 @@ pub enum RadioCmd {
     ToneSearch { slot: u8, on: bool },
     /// The frequency counter (TSRCH-6).
     Counter(bool),
+    /// MODE-3: the UI still wants the exclusive mode running (sent at least every [`crate::lease::RENEW_MS`]
+    /// while one runs); without it for [`crate::lease::WINDOW_MS`] the Radio task stops the mode itself.
+    Lease,
     /// SAME weather alerts on or off (0 4 9 1 and the region, WX-3): the BK4829's SAME receiver runs on the chip of
     /// any slot tuned to a weather channel (DEC-19).
     Same(bool),
@@ -318,6 +321,9 @@ pub struct LiveAll {
     pub tx: TxLive,
     /// The one exclusive mode running, if any: scope, tone search, counter, FM broadcast, HF, crossband.
     pub mode: ModeLive,
+    /// MODE-3: counts the exclusive modes the Radio task stopped itself because the UI's lease ran out; the UI
+    /// takes a change as "nothing runs" and starts again whatever it still wants.
+    pub lease_drops: u8,
     /// A channel scan needs a channel's frequencies ([`crate::scan::want`]): its number plus 1, 0 for none (so
     /// the default is none); the UI answers with [`RadioCmd::ScanEntry`]. Read it with [`LiveAll::wanted`].
     pub want: u16,

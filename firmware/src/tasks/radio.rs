@@ -134,6 +134,8 @@ struct HfOn {
 struct Radio {
     /// The MCU temperature (SBAR-20): when it was last read, and its smoothed tenths.
     temp: (Option<u32>, Option<i16>),
+    /// MODE-3: the UI's lease on the exclusive mode running here.
+    lease: ferrite_core::lease::Lease,
     /// SQL-1: the calibration's squelch tables (stock's defaults until the UI task has read the sector), and what
     /// each chip was last given (REG_78, REG_4F), so a retune writes them only when they change.
     sqcal: ferrite_core::sqcal::SqCal,
@@ -1314,6 +1316,7 @@ pub async fn task() {
         live: LiveAll::default(),
         save: RxSleep::new(DEFAULT_SAVE, now_ms()),
         temp: (None, None),
+        lease: ferrite_core::lease::Lease::new(),
         bat_at: None,
         sqcal: ferrite_core::sqcal::SqCal::DEFAULT,
         sq_regs: [None; 2],
@@ -1413,6 +1416,11 @@ pub async fn task() {
         if !r.save.asleep() || r.hf.is_some() {
             at = at.min(now_ms() + if r.busy() { TICK_MS } else { POLL_MS });
         }
+        // MODE-3: a held exclusive mode is checked by its lease's end at the latest.
+        r.lease_check().await;
+        if let Some(d) = r.lease.deadline() {
+            at = at.min(d as u64 + 1);
+        }
         // Never wait on a time already past: that wait fires at once, and this task runs above the UI.
         at = at.max(now_ms() + 1);
         // The band scope waits its dwell between points (0.1 ms steps), listening or not at the tick.
@@ -1448,11 +1456,25 @@ pub async fn task() {
 }
 
 impl Radio {
+    /// MODE-3: the UI stopped renewing the exclusive mode (an app bug, or a UI too busy to run): stop it here and
+    /// go back to normal receive, and tell the UI through the snapshot's drop count.
+    async fn lease_check(&mut self) {
+        // Commands still queued (this task was busy, say loading the SSB patch) may hold the renewals.
+        if !crate::chan::RADIO.is_empty() {
+            return;
+        }
+        let Some(h) = self.lease.expired(now_ms() as u32) else { return };
+        log(b"mode lease ran out, stopped ", h as u32);
+        self.cmd(h.stop_cmd()).await;
+        self.live.lease_drops = self.live.lease_drops.wrapping_add(1);
+    }
+
     /// One command from the UI.
     async fn cmd(&mut self, c: RadioCmd) {
         let now = now_ms() as u32;
         // The single-receiver command is the active slot's tune.
         let c = if let RadioCmd::Tune(freq) = c { RadioCmd::TuneSlot { slot: self.active, freq } } else { c };
+        self.lease.note(&c, now); // MODE-3
         // Channel scans: the set, priorities, resume rule, start, and the frequencies the UI answers with; one
         // a stopped scan waited for is tuned now.
         if let Some((i, f)) = self.chans.cmd(&c, &mut self.scans, now) {
@@ -1572,6 +1594,7 @@ impl Radio {
                 speaker(false);
             }
             RadioCmd::Counter(on) => self.counter(on),
+            RadioCmd::Lease => {} // MODE-3: renewed above (`Lease::note`)
             RadioCmd::Same(on) => self.same_on = on,
             RadioCmd::Beep { hz, ms } => self.beep(hz, ms).await,
             #[cfg(feature = "tx")]

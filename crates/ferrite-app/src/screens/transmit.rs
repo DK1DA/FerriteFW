@@ -142,6 +142,7 @@ pub fn key(app: &mut App, slot: u8) {
         return refuse(app, slot, r);
     }
     app.radio.keyed = Some(slot);
+    app.reconcile_mode(); // MODE-1: a mode that doesn't run keyed stops before the key-up (BCR-16, SCOPE-12)
     app.radio.t0 = app.now;
     let region = txplan::Region::ALL.iter().position(|&r| r == app.set.tx_region()).unwrap_or(0) as u8;
     app.out.push(RadioCmd::TxPlan { tx: tx_freq(app, slot), region, extend: app.set.extend_tx });

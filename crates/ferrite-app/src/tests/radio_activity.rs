@@ -558,7 +558,7 @@ fn home_layouts() {
     assert!(t.app.radio.act[0] & 0b11 != 0, "slot A heard in the last buckets");
     assert_eq!(t.app.radio.act[1], 0);
     t.app.set_layout(1);
-    t.wait(100);
+    t.wait(600); // MODE-4: the strip waits for the frequency to rest 500 ms after the Up/Down above
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Sweep { on: true, .. })), "the strip sweeps");
 }
 
@@ -1458,4 +1458,249 @@ fn a_mode_stops_the_one_before_it() {
             assert_eq!(t.app.radio.mode, b);
         }
     }
+}
+
+/// MODE-4 (UI backlog 5): turning the knob on the single + scope layout stops the strip at the first step, so
+/// normal receive follows the knob; it sweeps again 500 ms after the last step, centred on the new frequency.
+#[test]
+fn strip_rests_while_the_knob_turns() {
+    let mut t = ready();
+    start(&mut t, Mode::Strip);
+    t.cmds();
+    t.knob(1);
+    assert_eq!(t.app.radio.mode, Mode::Off, "the first step stops the strip");
+    assert!(t.cmds().iter().any(|c| stops(Mode::Strip, c)), "its stop sent at once");
+    for _ in 0..8 {
+        t.wait(200);
+        t.knob(1);
+        assert_eq!(t.app.radio.mode, Mode::Off, "still turning");
+    }
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Sweep { on: true, .. })), "no sweep while turning");
+    t.wait(400);
+    assert_eq!(t.app.radio.mode, Mode::Off, "400 ms after the last step: still resting");
+    t.wait(200);
+    assert_eq!(t.app.radio.mode, Mode::Strip, "back 500 ms after the last step");
+    let f = t.freq();
+    let c = t.cmds();
+    assert!(c.iter().any(|c| matches!(c, RadioCmd::Sweep { on: true, centre, .. } if *centre == f)), "centred on the new frequency: {c:?}");
+}
+
+/// MODE-3: while an exclusive mode runs the app confirms it at least every RENEW_MS; with none running it sends
+/// no lease. When the Radio task stopped a mode itself (its lease ran out), the app takes it as stopped and starts
+/// again what its screen still wants, with no stop command of its own.
+#[test]
+fn modes_hold_a_lease() {
+    use ferrite_core::lease::{RENEW_MS, WINDOW_MS};
+    const { assert!(RENEW_MS * 3 <= WINDOW_MS, "two renewals may go missing before the Radio task gives up") };
+    for m in MODES {
+        let mut t = ready();
+        start(&mut t, m);
+        t.cmds();
+        for _ in 0..6 {
+            t.wait(RENEW_MS + 100);
+            assert!(t.cmds().contains(&RadioCmd::Lease), "{m:?}: renewed");
+        }
+        // the Radio task dropped it
+        t.live.lease_drops = t.live.lease_drops.wrapping_add(1);
+        t.wait(100);
+        let c = t.cmds();
+        assert!(!c.iter().any(|c| stops(m, c)), "{m:?}: no stop for a mode already stopped: {c:?}");
+        assert_eq!(t.app.radio.mode, m, "{m:?}: started again, its screen still up");
+        assert_eq!(t.app.radio.lease_drops, t.live.lease_drops);
+    }
+    let mut t = ready();
+    t.wait(5000);
+    assert!(!t.cmds().contains(&RadioCmd::Lease), "no mode, no lease");
+}
+
+/// HOME-13 (UI backlog 6): while the knob turns, home redraws only the active slot's part; the other slots, the
+/// activity rows and the strip wait, and draw once the knob rests, to the same picture a full redraw gives.
+#[test]
+fn knob_holds_the_heavier_redraws() {
+    struct Count(FrameBuffer, Vec<(i32, i32, i32, i32)>);
+    impl Panel for Count {
+        fn window(&mut self, a: i32, b: i32, c: i32, d: i32) {
+            self.1.push((a, b, c, d));
+            self.0.window(a, b, c, d)
+        }
+        fn push(&mut self, c: u16, n: u32) {
+            self.0.push(c, n)
+        }
+        fn push_buf(&mut self, p: &[u16]) {
+            self.0.push_buf(p)
+        }
+    }
+    // per layout: the active slot's rows (the frequency and what goes with it) and where the held parts start
+    for (layout, live_end, held_from) in [(0u8, 150, 155), (1, 200, 200), (2, 87, 87)] {
+        let mut t = ready();
+        let dev = Device { clock_min: Some(600), ..Default::default() };
+        let mut lcd = Count(FrameBuffer::new(), Vec::new());
+        t.app.set_layout(layout);
+        t.live.slots[0] = SlotLive { freq: t.freq(), ..Default::default() };
+        t.wait(1000);
+        t.app.render(&mut lcd, &t.live, &dev, &store());
+        // something changes in the other slots (and the strip's centre with the knob)
+        t.live.slots[1] = SlotLive { squelch_open: true, rssi: -70, ..Default::default() };
+        t.wait(1300); // the last minute's bucket ticks over
+        t.app.render(&mut lcd, &t.live, &dev, &store());
+        t.live.slots[1] = SlotLive::default();
+        t.live.slots[2] = SlotLive { squelch_open: true, rssi: -60, ..Default::default() };
+        let f0 = t.freq();
+        lcd.1.clear();
+        t.knob(1);
+        assert_ne!(t.freq(), f0);
+        t.app.render(&mut lcd, &t.live, &dev, &store());
+        let held: Vec<_> = lcd.1.iter().filter(|r| r.1 >= 21 && r.1 < 300 && !(r.1 < live_end)).collect();
+        assert!(lcd.1.iter().any(|r| r.1 >= 21 && r.1 < live_end), "layout {layout}: the frequency redrew at once");
+        assert!(held.is_empty(), "layout {layout}: held parts drew while the knob turned: {held:?}");
+        t.wait(500);
+        lcd.1.clear();
+        t.app.render(&mut lcd, &t.live, &dev, &store());
+        assert!(lcd.1.iter().any(|r| r.1 >= held_from && r.1 < 300), "layout {layout}: the held parts drew once it rested");
+        let after = lcd.0.px.clone();
+        t.app.redraw_all();
+        t.app.render(&mut lcd, &t.live, &dev, &store());
+        assert!(after == lcd.0.px, "layout {layout}: the same picture as a full redraw");
+    }
+}
+
+/// MODE-1, MODE-2: random use (keys, the knob, layouts, screens opened, timeouts, PTT) never leaves the radio in
+/// a mode the app doesn't want: after every step the mode is the wanted one; home on the plain layout with no
+/// mode screen under it is normal receive; and the commands sent, played on a model of the Radio task, never
+/// start a mode over another and end in the mode the app thinks runs.
+#[test]
+fn random_use_keeps_modes_in_step() {
+    const KEYS: [Key; 16] = [
+        Key::Menu, Key::Exit, Key::Up, Key::Down, Key::Left, Key::Right, Key::Slot, Key::VfoMem, Key::Digit(0),
+        Key::Digit(1), Key::Digit(3), Key::Digit(7), Key::Star, Key::Hash, Key::Side(1), Key::Side(2),
+    ];
+    const DESTS: [Dest; 8] = [Dest::BandScope, Dest::ToneSearch, Dest::Counter, Dest::FmBroadcast, Dest::HfMode, Dest::Crossband, Dest::Scan, Dest::Squelch];
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Kind {
+        Sweep,
+        Tone,
+        Counter,
+        Fm,
+        Hf,
+        Xb,
+    }
+    fn kind(m: Mode) -> Option<Kind> {
+        match m {
+            Mode::Off => None,
+            Mode::Scope | Mode::Strip => Some(Kind::Sweep),
+            Mode::Tone => Some(Kind::Tone),
+            Mode::Counter => Some(Kind::Counter),
+            Mode::Fm => Some(Kind::Fm),
+            Mode::Hf => Some(Kind::Hf),
+            Mode::Xb => Some(Kind::Xb),
+        }
+    }
+    // the Radio task's view: what a command starts (Some) or stops (None)
+    fn effect(c: &RadioCmd) -> Option<(Kind, bool)> {
+        Some(match c {
+            RadioCmd::Sweep { on, .. } => (Kind::Sweep, *on),
+            RadioCmd::ToneSearch { on, .. } => (Kind::Tone, *on),
+            RadioCmd::Counter(on) => (Kind::Counter, *on),
+            RadioCmd::Broadcast(b) => (Kind::Fm, *b != BroadcastCmd::Off),
+            RadioCmd::Hf { on, .. } => (Kind::Hf, *on),
+            RadioCmd::Crossband(x) => (Kind::Xb, x.is_some()),
+            _ => return None,
+        })
+    }
+    // play commands on the model; a start over another mode fails
+    fn play(cmds: Vec<RadioCmd>, radio: &mut Option<Kind>, at: &str) {
+        for c in cmds {
+            let Some((k, on)) = effect(&c) else { continue };
+            if on {
+                assert!(radio.is_none() || *radio == Some(k), "{at}: {k:?} started over {radio:?}");
+                *radio = Some(k);
+            } else if *radio == Some(k) {
+                *radio = None;
+            }
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for seed in 1..=32u64 {
+        let mut rng = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        let mut next = |n: u64| {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng % n
+        };
+        let mut t = ready();
+        let mut keyed = false;
+        let mut radio: Option<Kind> = None;
+        for step in 0..2000 {
+            let s = store();
+            let what = match next(20) {
+                0..=7 => {
+                    let k = KEYS[next(KEYS.len() as u64) as usize];
+                    if next(6) == 0 {
+                        t.hold(k);
+                    } else {
+                        t.tap(k);
+                    }
+                    "key"
+                }
+                8..=10 => {
+                    let d = if next(2) == 0 { 1 } else { -1 };
+                    for _ in 0..=next(4) {
+                        t.knob(d);
+                        while t.app.pop_write().is_some() {} // the UI task takes each input's write
+                        t.t += 30;
+                        t.app.tick(t.t, &t.live, &s);
+                    }
+                    "knob"
+                }
+                11 => {
+                    t.app.set_layout(next(3) as u8);
+                    "layout"
+                }
+                12 => {
+                    t.app.set.layout = next(3) as u8; // a setting changed underneath (a link write, a reset)
+                    t.wait(100);
+                    "setting"
+                }
+                13..=14 => {
+                    t.open(DESTS[next(DESTS.len() as u64) as usize]);
+                    "open"
+                }
+                15..=16 => {
+                    t.wait(100 + next(3000) as u32);
+                    "wait"
+                }
+                17 => {
+                    // in steps, the commands taken as the UI task does each turn
+                    for _ in 0..if next(4) == 0 { 900 } else { 30 } {
+                        t.wait(1000);
+                        play(t.cmds(), &mut radio, &std::format!("seed {seed} step {step} (timeout)"));
+                    }
+                    "timeout"
+                }
+                _ => {
+                    keyed = !keyed;
+                    ptt(&mut t, keyed);
+                    "ptt"
+                }
+            };
+            while t.app.pop_write().is_some() {}
+            play(t.cmds(), &mut radio, &std::format!("seed {seed} step {step} ({what})"));
+            let m = t.app.radio.mode;
+            seen.insert(std::format!("{m:?}"));
+            assert_eq!(m, t.app.wanted_mode(), "seed {seed} step {step} ({what}): reconciled");
+            assert_eq!(radio, kind(m), "seed {seed} step {step} ({what}): the Radio task runs what the app thinks");
+            let mode_screen = |s: &Screen| matches!(s, Screen::Scope(_) | Screen::ToneSearch(_) | Screen::Counter(_) | Screen::Fm(_) | Screen::Hf(_) | Screen::Crossband(_));
+            if t.app.screen() == Screen::Home && t.app.set.layout == 0 && !t.app.back.iter().flatten().any(mode_screen) {
+                assert_eq!(m, Mode::Off, "seed {seed} step {step} ({what}): home is normal receive");
+            }
+            if t.app.radio.keyed.is_some() {
+                assert!(matches!(m, Mode::Off | Mode::Hf | Mode::Xb), "seed {seed} step {step} ({what}): {m:?} ran while keyed");
+            }
+        }
+        if keyed {
+            ptt(&mut t, false);
+        }
+    }
+    assert_eq!(seen.len(), MODES.len() + 1, "every mode reached: {seen:?}");
 }

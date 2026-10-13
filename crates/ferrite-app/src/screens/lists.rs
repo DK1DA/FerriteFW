@@ -39,6 +39,7 @@ impl App {
     pub(crate) fn open_screen(&mut self, s: crate::Screen) {
         self.push_back();
         self.screen = s;
+        self.reconcile_mode(); // MODE-2
     }
 
     /// The region changed (setup, 0 9 4): a VFO on 2 m or 1.25 m still on a region default step takes the new

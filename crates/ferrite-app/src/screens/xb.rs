@@ -192,7 +192,7 @@ impl View for Crossband {
         if running(app) {
             match (e.key, e.press) {
                 (Key::Exit, Short) => {
-                    app.stop_mode(); // XB-14: the Radio task unkeys first
+                    app.radio.xb_on = false; // XB-14: the Radio task unkeys first
                     app.show_toast(b"Repeater stopped", b"", false);
                 }
                 (Key::Menu, Short) => app.show_toast(b"Stop it first", b"to change settings", false),
@@ -272,8 +272,12 @@ fn start(app: &mut App) {
     if let Some(i) = checks(app, 100, &mut out) {
         return app.show_toast(b"Can't start:", out[i].1.as_bytes(), false);
     }
-    app.start_mode(Mode::Xb);
-    // The region and Extend TX for the Radio task's own checks on every pass (decision 93), then the start.
+    app.radio.xb_on = true; // MODE-2: the reconciler starts it
+}
+
+/// The repeater's start: the region and Extend TX for the Radio task's own checks on every pass (decision 93),
+/// then the start.
+pub(crate) fn send_start(app: &mut App) {
     let region = txplan::Region::ALL.iter().position(|&r| r == app.set.tx_region()).unwrap_or(0) as u8;
     app.out.push(RadioCmd::TxPlan { tx: app.slot(app.set.xb.side1).freq(), region, extend: app.set.extend_tx });
     app.out.push(RadioCmd::Crossband(Some(app.set.xb)));

@@ -91,7 +91,22 @@ pub(crate) fn hash<T: Hash>(t: &T) -> u32 {
 /// Off, A+B, A+B+C.
 pub(crate) const WATCH_TEXT: [&str; 3] = ["Off", "A+B", "A+B+C"];
 
+/// HOME-13: how long the knob rests before home draws its heavier parts again.
+pub const KNOB_REST_MS: u32 = 400;
+
 impl App {
+    /// HOME-13: the knob stepped within [`KNOB_REST_MS`]. Signed, since a step can carry a time just ahead of
+    /// the last tick's.
+    pub(crate) fn knob_busy(&self) -> bool {
+        self.knob_at.is_some_and(|t| (self.now.wrapping_sub(t) as i32) < KNOB_REST_MS as i32)
+    }
+
+    /// HOME-13: region r is on the screen and waits while the knob turns; it redraws once the knob rests (its
+    /// hash still differs then). A region not yet drawn is never held.
+    pub(crate) fn held(&self, r: usize) -> bool {
+        self.drawn.hash[r] != 0 && self.knob_busy()
+    }
+
     /// True (and remembered) when region r's content differs from what is on screen.
     pub(crate) fn dirty(&mut self, r: usize, h: u32) -> bool {
         let d = self.drawn.hash[r] != h;

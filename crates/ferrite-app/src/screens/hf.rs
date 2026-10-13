@@ -262,9 +262,7 @@ pub fn open(app: &mut App) -> Screen {
         app.show_toast(b"HF mode", if app.radio.mode == Mode::Xb { b"stop the repeater first" } else { b"not while transmitting" }, false);
         return app.screen;
     }
-    app.start_mode(Mode::Hf);
-    send(app);
-    Screen::Hf(Hf::new())
+    Screen::Hf(Hf::new()) // MODE-2: the reconciler starts HF mode
 }
 
 /// PTT in HF mode (HF-23): transmit on the HF frequency on chip 1 without going home, or refuse on the
@@ -301,7 +299,7 @@ fn seek(app: &mut App, up: bool) {
     app.out.push(RadioCmd::HfSeek { up });
 }
 
-fn send(app: &mut App) {
+pub(crate) fn send(app: &mut App) {
     (app.radio.hf_tuned_at, app.radio.hf_counted) = (app.now, false);
     let h = &app.set.hf;
     app.out.push(RadioCmd::Hf { freq: h.freq, mode: h.mode, on: true });
@@ -336,7 +334,9 @@ fn tune_vfo(app: &mut App, f: Freq10, mode: Option<u8>, rest: Option<(u8, u8, i1
     if !h.allowed(h.mode, app.radio.ssb_patch) {
         h.mode = if h.freq >= CHIP1_FROM { FM } else { AM };
     }
-    send(app);
+    if app.radio.mode == Mode::Hf {
+        send(app); // MODE-2: stopped, the start takes the new frequency
+    }
 }
 
 /// Adds the current frequency to the recent list: newest first, no duplicates (HF-28).
@@ -449,8 +449,7 @@ impl View for Hf {
         use Press::*;
         if !self.loaded {
             if (e.key, e.press) == (Key::Exit, Short) {
-                app.stop_mode(); // HF-3: BACK during the load cancels, one level back
-                app.back();
+                app.back(); // HF-3: BACK during the load cancels, one level back
             }
             return;
         }
@@ -536,10 +535,7 @@ impl View for Hf {
                 app.screen = Screen::Save(super::save::Save::hf());
             }
             (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves", false), // HF-13
-            (Key::Exit, Short) => {
-                app.stop_mode(); // HF-4: BACK leaves HF mode, one level back
-                app.back();
-            }
+            (Key::Exit, Short) => app.back(), // HF-4: BACK leaves HF mode, one level back
             _ => {}
         }
     }

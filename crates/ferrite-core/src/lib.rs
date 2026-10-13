@@ -19,6 +19,7 @@ pub mod freq;
 pub mod gps;
 pub mod keys;
 pub mod layout;
+pub mod lease;
 pub mod link;
 pub mod mcutemp;
 pub mod msg;

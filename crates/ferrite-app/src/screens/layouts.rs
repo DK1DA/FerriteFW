@@ -5,7 +5,7 @@
 //!   one line each.
 //! - Watch + activity: three equal cards, each with its last minute of activity (`RadioUi::act`).
 
-use super::activity::{Mode, ACT_BUCKETS};
+use super::activity::ACT_BUCKETS;
 use super::scope;
 use super::shared::*;
 use super::Cx;
@@ -23,26 +23,11 @@ use ferrite_ui::widgets as w;
 /// The strip's step: 4 kHz, so 56 bars cover about ±112 kHz.
 pub const STRIP_STEP: u16 = 400;
 
-/// Home's tick: the single + scope layout keeps a narrow sweep running around the active frequency.
-pub fn tick(app: &mut App) {
-    // Leaving the layout stops the strip: without this the Radio task stayed in scope mode and receive audio was
-    // gone after switching back to Watch (on the radio, Oct 12, 2026).
-    if app.set.layout != 1 && app.radio.mode == Mode::Strip {
-        app.radio.mode = Mode::Off;
-        app.out.push(RadioCmd::Sweep { centre: app.radio.centre, step: STRIP_STEP, on: false });
-        return;
-    }
-    if app.set.layout != 1 || !matches!(app.radio.mode, Mode::Off | Mode::Strip) {
-        return;
-    }
-    let f = app.slot(app.active).freq();
-    if app.radio.mode != Mode::Strip || app.radio.centre != f {
-        app.radio.mode = Mode::Strip;
-        app.radio.centre = f;
-        // Stock's 10 ms a point (dwell is in 0.1 ms): at 1 ms the strip starved the UI on the radio (Oct 12, 2026).
-        app.out.push(RadioCmd::ScopeCfg { bars: scope::STRIP_BARS as u8, dwell: 100 });
-        app.out.push(RadioCmd::Sweep { centre: f, step: STRIP_STEP, on: true });
-    }
+/// The strip's start (MODE-2, from [`App::reconcile_mode`]): stock's 10 ms a point (dwell is in 0.1 ms; at 1 ms
+/// the strip starved the UI on the radio, Oct 12, 2026) around the active frequency.
+pub(crate) fn send_strip(app: &mut App, f: ferrite_core::freq::Freq10) {
+    app.out.push(RadioCmd::ScopeCfg { bars: scope::STRIP_BARS as u8, dwell: 100 });
+    app.out.push(RadioCmd::Sweep { centre: f, step: STRIP_STEP, on: true });
 }
 
 /// Single + scope (HomeB).
@@ -141,7 +126,10 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         ModeLive::Scope { centre, bars, .. } => (centre, bars),
         _ => (f, [0; SCOPE_BARS]),
     };
-    scope::strip(app, lcd, 10, 200, 34, centre, STRIP_STEP, &bars[..scope::STRIP_BARS]);
+    // HOME-13: the strip and the other slots' lines wait while the knob turns.
+    if !app.held(10) {
+        scope::strip(app, lcd, 10, 200, 34, centre, STRIP_STEP, &bars[..scope::STRIP_BARS]);
+    }
     // The other slots, a line each.
     for (i, o) in (0..SLOTS as u8).filter(|&o| o != a).enumerate() {
         let (st, c) = app.state(o, live);
@@ -154,7 +142,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
             None => t.push(band_name(sl.freq()).as_bytes()),
         }
         let y = 256 + 21 * i as i32;
-        if app.dirty(11 + i, hash(&(o, t, st))) {
+        if !app.held(11 + i) && app.dirty(11 + i, hash(&(o, t, st))) {
             w::badge(lcd, 8, y + 2, o, false, BG);
             w::field(lcd, 28, 140, y, y + 18, y + 14, Align::Left, t.as_bytes(), &UI_12, TEXT, BG);
             w::field(lcd, 168, 64, y, y + 18, y + 14, Align::Right, st.as_bytes(), &UI_12, c, BG); // "scanning" whole
@@ -171,6 +159,10 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         let lv = live.slots[p];
         let (state, sc) = app.state(s, live);
         let active = s == app.active;
+        // HOME-13: while the knob turns only the active card follows, and its last minute waits too.
+        if !active && app.held(R_FRAME + p) {
+            continue;
+        }
         let border = if active { BLUE } else if state == "RX" { GREEN } else { LINE };
         let geom = hash(&(s, 2u8)) | 1;
         let drawn_before = app.drawn.hash[R_FRAME + p] != 0;
@@ -255,7 +247,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         }
         // The last minute: a bar per 1.2 s bucket heard, newest at the right, on a dotted baseline.
         let act = app.radio.act[p];
-        if app.dirty(16 + p, hash(&act)) {
+        if !app.held(16 + p) && app.dirty(16 + p, hash(&act)) {
             let (by, bh) = (y + 62, 10);
             canvas::banded(lcd, 14, by, 212, bh + 1, SURFACE, |b| {
                 for i in 0..ACT_BUCKETS as i32 {

@@ -6,8 +6,9 @@
 //! MENU-25), BACK leaves, PTT leaves and transmits from home (BCR-16). The broadcast is an exclusive mode
 //! ([`super::activity::Mode::Fm`]): it stops when the screen goes home, by any route.
 
-use super::groups::agc_text;
 use super::activity::Mode;
+use super::groups::agc_text;
+
 use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
@@ -47,8 +48,6 @@ pub struct Fm {
 
 /// MENU 0 3 1 6 (BCR-1): the broadcast starts on the last station.
 pub fn open(app: &mut App) -> Screen {
-    app.start_mode(Mode::Fm);
-    app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(app.set.fm_freq)));
     Screen::Fm(Fm { since: app.now, ..Fm::new() })
 }
 
@@ -62,7 +61,10 @@ impl Fm {
         let span = (HI - LO) as i32 + step;
         let f = (app.set.fm_freq as i32 - LO as i32 + d * step).rem_euclid(span) + LO as i32;
         app.set.fm_freq = (f as u16).clamp(LO, HI);
-        app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(app.set.fm_freq)));
+        // MODE-2: only to a running receiver; stopped (keyed, BCR-16), the start takes the new station
+        if app.radio.mode == Mode::Fm {
+            app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(app.set.fm_freq)));
+        }
     }
 
     fn change(self, app: &mut App, d: i32) {
@@ -114,7 +116,7 @@ impl View for Fm {
         }
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => Fm::tune(app, if e.key == Key::Up { 1 } else { -1 }),
-            (Key::Left | Key::Right, Short) => app.out.push(RadioCmd::Broadcast(BroadcastCmd::Seek { up: e.key == Key::Right })),
+            (Key::Left | Key::Right, Short) if app.radio.mode == Mode::Fm => app.out.push(RadioCmd::Broadcast(BroadcastCmd::Seek { up: e.key == Key::Right })),
             (Key::Menu, Short) => app.open(Dest::FmPresets), // OK: pick a station
             (Key::Exit, Short) => app.back(),
             _ => {}
@@ -146,8 +148,7 @@ impl View for Fm {
 
     fn ptt(self, app: &mut App, down: bool) {
         if down {
-            app.stop_mode(); // BCR-16: the SI4732 muted and switched away before key-up
-            super::nav::transmit(app);
+            super::nav::transmit(app); // BCR-16: its way home stops the broadcast before the key-up (MODE-1)
         }
     }
 

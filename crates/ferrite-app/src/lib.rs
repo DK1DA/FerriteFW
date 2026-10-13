@@ -297,6 +297,8 @@ pub struct App {
     keys: KeyTracker,
     now: u32,
     last_input: u32,
+    /// HOME-13: the last knob step, while home holds its heavier redraws ([`App::knob_busy`]).
+    pub(crate) knob_at: Option<u32>,
     paused_until: Option<u32>,
     /// The pause is the one after a transmission (WATCH-16): a key press ends it, a signal on the active slot
     /// extends it. The # pause (WATCH-6) is neither.
@@ -374,6 +376,7 @@ impl App {
             keys: KeyTracker::new(),
             now: 0,
             last_input: 0,
+            knob_at: None,
             paused_until: None,
             tx_pause: false,
             seen: 0,
@@ -888,6 +891,7 @@ impl App {
             Some(e) if !self.locked => self.screen.key(self, e, store),
             _ => {}
         }
+        self.reconcile_mode(); // MODE-2: PTT up, or what the key did
     }
 
     /// Knob: +1 per click clockwise.
@@ -902,6 +906,8 @@ impl App {
             return self.locked_toast();
         }
         self.screen.knob(self, d as i32, store);
+        self.knob_at = Some(now); // HOME-13: home holds its heavier redraws while the knob turns
+        self.reconcile_mode(); // MODE-2
     }
 
     /// Time passes: long presses and repeats, toasts, undo, timeouts; and the latest snapshot.
@@ -967,9 +973,10 @@ impl App {
         if core::mem::take(&mut self.want_reset) {
             screens::confirm::reset_all(self, store);
         }
-        if self.screen == Screen::Home {
-            self.home_stops_modes(); // however the screen went home
+        if self.knob_at.is_some() && !self.knob_busy() {
+            self.knob_at = None; // HOME-13: rested; home draws what it held
         }
+        self.reconcile_mode(); // MODE-2: however the screen or a setting changed
     }
 
     fn tick_keys(&mut self, now: u32, store: &impl ChannelStore) {
@@ -988,6 +995,7 @@ impl App {
         for e in evs.into_iter().flatten() {
             self.last_input = now;
             self.on_key(e, store);
+            self.reconcile_mode(); // MODE-2
         }
     }
 
@@ -1040,9 +1048,9 @@ impl App {
 
     /// Home, forgetting where BACK would return (HOME-2).
     pub fn go_home(&mut self) {
-        self.stop_mode(); // a scope, search or repeater stops with its screen
         self.screen = Screen::Home;
         self.back = [None; BACK_DEPTH];
+        self.reconcile_mode(); // MODE-1: a scope, search or repeater stops with its screen, before what follows
     }
 
     /// Opens a screen by where it is in the manual ([`Dest`]), remembering this one for BACK. Screens not built
@@ -1056,6 +1064,7 @@ impl App {
         }
         self.push_back();
         self.screen = screens::nav::enter(dest, self);
+        self.reconcile_mode(); // MODE-2: a mode screen's mode starts as it opens
     }
 
     /// Remembers the screen up now for BACK (MENU-24); full, the oldest goes.
@@ -1074,7 +1083,10 @@ impl App {
     /// steps of their own (an edit, a sub-page, typed digits) take one step back first.
     fn back(&mut self) {
         match self.back.iter_mut().rev().find(|b| b.is_some()).and_then(|b| b.take()) {
-            Some(s) if s != Screen::Home => self.screen = s,
+            Some(s) if s != Screen::Home => {
+                self.screen = s;
+                self.reconcile_mode(); // MODE-1
+            }
             _ => self.go_home(), // home by BACK too stops what the screens started
         }
     }

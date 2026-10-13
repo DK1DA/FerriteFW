@@ -11,7 +11,7 @@
 //! 64–1300 MHz on both BK4829s without moving the relay (TSRCH-10); # holds the reading while it keeps listening
 //! (TSRCH-11).
 
-use super::activity::{mmss, Hit, Mode, HITS};
+use super::activity::{mmss, Hit, HITS};
 use super::scan::ago;
 use super::shared::*;
 use super::{Cx, Hints, View};
@@ -101,9 +101,7 @@ pub struct ToneSearch {
 
 /// MENU 0 3 6 (TSRCH-1): search on the active slot.
 pub fn open_tone(app: &mut App) -> Screen {
-    let slot = app.active;
-    app.start_mode(Mode::Tone);
-    app.out.push(RadioCmd::ToneSearch { slot, on: true });
+    let slot = app.active; // MODE-2: the reconciler starts the search on it
     app.radio.t0 = app.now;
     app.radio.clear_hits();
     Screen::ToneSearch(ToneSearch { slot, ask_tx: false })
@@ -155,14 +153,10 @@ impl View for ToneSearch {
                     set_tone(app, self.slot, t, false);
                 }
                 app.save_channel(self.slot, None);
-                app.stop_mode();
                 app.back();
                 app.show_toast(b"Tone saved", b"in the channel", false);
             }
-            (Key::Exit, Press::Short, false) => {
-                app.stop_mode(); // TSRCH-5: tones unchanged
-                app.back();
-            }
+            (Key::Exit, Press::Short, false) => app.back(), // TSRCH-5: tones unchanged
             _ => {}
         }
     }
@@ -253,7 +247,6 @@ fn or_none(b: &Buf<16>) -> &str {
 
 /// Tones applied: home, with what happened (TSRCH-9: a channel's record is left alone).
 fn done(app: &mut App, slot: u8, what: &[u8]) {
-    app.stop_mode();
     applied(app, slot, what);
 }
 
@@ -284,9 +277,7 @@ pub fn countable(f: Freq10) -> bool {
 
 /// MENU 0 3 3 (TSRCH-6).
 pub fn open_counter(app: &mut App) -> Screen {
-    app.start_mode(Mode::Counter);
-    app.out.push(RadioCmd::Counter(true));
-    app.radio.clear_hits();
+    app.radio.clear_hits(); // MODE-2: the reconciler starts the counter
     Screen::Counter(Counter { hold: false, held: 0, held_rssi: 0 })
 }
 
@@ -315,16 +306,12 @@ impl View for Counter {
                 let a = app.active as usize;
                 app.slots[a].vfo = f;
                 app.slots[a].vfo_mode = true;
-                app.stop_mode();
                 app.go_home();
                 app.send_slot(a as u8);
                 let fq = w::freq3(f);
                 app.show_toast(b"VFO set", fq.as_bytes(), false);
             }
-            (Key::Exit, Press::Short) => {
-                app.stop_mode();
-                app.back();
-            }
+            (Key::Exit, Press::Short) => app.back(),
             _ => {}
         }
     }

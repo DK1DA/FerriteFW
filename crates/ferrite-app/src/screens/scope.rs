@@ -74,13 +74,20 @@ pub fn step_of(app: &App) -> u16 {
 /// Hold 1 on home, MENU 0 3 2 6 (SCOPE-1): the scope around the active slot's frequency.
 pub fn open(app: &mut App) -> Screen {
     let f = app.slot(app.active).freq();
-    app.radio.centre = f;
-    sweep(app, f);
+    app.radio.centre = f; // MODE-2: the reconciler starts the sweep here
     Screen::Scope(Scope { marker: (bars_n(app) / 2) as u8, listen: 0, at: 0, peak: 255, run: 0, seen: 0, heard: false, since: 0 })
 }
 
+/// A new centre or setting while the scope runs; [`App::reconcile_mode`] starts it otherwise (MODE-2).
 fn sweep(app: &mut App, centre: Freq10) {
-    app.start_mode(Mode::Scope);
+    app.radio.centre = centre;
+    if app.radio.mode == Mode::Scope {
+        send_sweep(app, centre);
+    }
+}
+
+/// The scope's start or retune: its settings, then the sweep around `centre`.
+pub(crate) fn send_sweep(app: &mut App, centre: Freq10) {
     let (step, bars, dwell) = (step_of(app), bars_n(app) as u8, app.set.scope_dwell.clamp(1, 100));
     app.out.push(RadioCmd::ScopeCfg { bars, dwell });
     app.out.push(RadioCmd::Sweep { centre, step, on: true });
@@ -232,10 +239,7 @@ impl View for Scope {
                 listen(app, 0);
                 app.screen = Screen::Scope(self.sweeping());
             }
-            (Key::Exit, Short) => {
-                app.stop_mode();
-                app.back();
-            }
+            (Key::Exit, Short) => app.back(),
             _ => {}
         }
     }
@@ -258,8 +262,7 @@ impl View for Scope {
         }
         if self.listen != 0 {
             tune(app, self.freq(app));
-            app.stop_mode();
-            app.send_slot(app.active);
+            app.send_slot(app.active); // the transmit's way home stops the scope (MODE-1)
             super::nav::transmit(app);
         } else {
             app.show_toast(b"Listen first", b"SIDE1 at the marker", false);
