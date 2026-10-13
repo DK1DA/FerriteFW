@@ -217,7 +217,9 @@ fn brightness_levels() {
     t.app.set.backlight = 3;
     assert_eq!(Settings::DEFAULT.brightness, 7);
     assert_eq!(t.app.backlight_duty(), BRIGHTNESS[6]);
-    assert!(BRIGHTNESS.windows(2).all(|w| w[0] < w[1]) && BRIGHTNESS[9] == 1000 && BRIGHTNESS[0] > 0);
+    assert!(BRIGHTNESS.windows(2).all(|w| w[0] < w[1]) && BRIGHTNESS[9] == 1000 && BRIGHTNESS[0] == 45);
+    // Roughly geometric: each step between 1.3 and 1.5 times the last.
+    assert!(BRIGHTNESS.windows(2).all(|w| (130..=150).contains(&(w[1] as u32 * 100 / w[0] as u32))));
     assert!(crate::screens::groups::change(&mut t.app, &[7, 4, 2], 5));
     assert_eq!((t.app.set.brightness, t.app.backlight_duty()), (10, 1000), "10 at most");
     // Night red: its own level (3 by default), set apart from the others'.
@@ -229,6 +231,29 @@ fn brightness_levels() {
     assert_eq!(t.app.backlight_duty(), 1000);
     t.wait(16_000);
     assert_eq!(t.app.backlight_duty(), 0, "dark");
+}
+
+/// DISP-22: the keypad light, when lit, at the screen's level (night red's in night red); 0 when off, and lit at
+/// that level while the screen is dark with "always".
+#[test]
+fn keypad_light_dims_with_the_screen() {
+    use crate::lights::BRIGHTNESS;
+    let mut t = T::new();
+    t.app.set.backlight = 3;
+    t.app.set.keypad_light = 1;
+    assert_eq!(t.app.keypad_duty(), t.app.backlight_duty());
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 4, 2], -3));
+    assert_eq!((t.app.keypad_duty(), t.app.backlight_duty()), (BRIGHTNESS[3], BRIGHTNESS[3]));
+    t.app.set.theme = crate::settings::NIGHT_RED;
+    assert_eq!(t.app.keypad_duty(), BRIGHTNESS[t.app.set.brightness_night as usize - 1]);
+    t.app.set.theme = 0;
+    t.app.set.keypad_light = 0;
+    assert_eq!(t.app.keypad_duty(), 0, "off");
+    t.app.set.keypad_light = 3;
+    t.wait(16_000);
+    assert_eq!((t.app.backlight_duty(), t.app.keypad_duty()), (0, BRIGHTNESS[3]), "always: lit while the screen is dark");
+    t.app.set.keypad_light = 1;
+    assert_eq!(t.app.keypad_duty(), 0, "with the screen: dark with it");
 }
 
 /// DISP-22: "on key press" lights the keypad for 5 s after any key, the one that woke the screen too.

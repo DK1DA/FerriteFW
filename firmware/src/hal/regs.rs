@@ -20,7 +20,9 @@ pub const CRM_CFG_SCLKSTS_MASK: u32 = 3 << 2; // 0 = HICK
 pub const CRM_CFG_DIV_MASK: u32 = (0xF << 4) | (7 << 8) | (7 << 11); // AHB, APB1, APB2
 pub const CRM_CFG_ADCDIV_MASK: u32 = (3 << 14) | (1 << 28); // 0 = APB2 / 2
 pub const CRM_CTRLSTS_RSTFC: u32 = 1 << 24; // write 1: clear reset flags
+pub const CRM_APB1_TMR2: u32 = 1 << 0;
 pub const CRM_APB1_TMR3: u32 = 1 << 1;
+pub const CRM_APB1_TMR4: u32 = 1 << 2;
 pub const CRM_APB1_TMR6: u32 = 1 << 4;
 pub const CRM_APB1_TMR7: u32 = 1 << 5;
 pub const CRM_APB1_SPI2: u32 = 1 << 14;
@@ -45,6 +47,9 @@ pub const GPIO_CLR: u32 = 0x14;
 pub const IOMUX_REMAP: u32 = 0x4001_0004;
 pub const IOMUX_SWJTAG_MASK: u32 = 7 << 24;
 pub const IOMUX_SWJTAG_SWD_ONLY: u32 = 2 << 24; // JTAG off (frees PB3, PB4, PA15), SWD kept
+/// TMR2_MUX (bits 9-8): 01 = CH1/EXT on PA15, CH2 on PB3, CH3 PA2, CH4 PA3 (RM_AT32F403A_407 V2.07, 7.4.2 IOMUX_REMAP).
+pub const IOMUX_TMR2_MUX_MASK: u32 = 3 << 8;
+pub const IOMUX_TMR2_MUX_PB3: u32 = 1 << 8;
 
 // USART / UART
 pub const USART1: u32 = 0x4001_3800;
@@ -123,8 +128,10 @@ pub const DAC_CTRL_EN2: u32 = 1 << 16;
 #[cfg(feature = "tx")]
 pub const DAC_DHR8R2: u32 = DAC + 0x1C;
 
-// Timers (STM32F1 TIM layout): TMR3 general purpose, TMR6 / TMR7 basic, TMR8 advanced
+// Timers (STM32F1 TIM layout): TMR2-4 general purpose, TMR6 / TMR7 basic, TMR8 advanced
+pub const TMR2: u32 = 0x4000_0000;
 pub const TMR3: u32 = 0x4000_0400;
+pub const TMR4: u32 = 0x4000_0800;
 pub const TMR6: u32 = 0x4000_1000;
 pub const TMR7: u32 = 0x4000_1400;
 pub const TMR8: u32 = 0x4001_3400;
@@ -134,11 +141,13 @@ pub const TMR_IDEN: u32 = 0x0C; // interrupt enables
 pub const TMR_ISTS: u32 = 0x10; // flags, write 0 to clear
 pub const TMR_SWEVT: u32 = 0x14;
 pub const TMR_CM1: u32 = 0x18;
+pub const TMR_CM2: u32 = 0x1C;
 pub const TMR_CCTRL: u32 = 0x20;
 pub const TMR_CVAL: u32 = 0x24;
 pub const TMR_DIV: u32 = 0x28;
 pub const TMR_PR: u32 = 0x2C;
 pub const TMR_C1DT: u32 = 0x34;
+pub const TMR_C2DT: u32 = 0x38;
 pub const TMR_C4DT: u32 = 0x40;
 pub const TMR_BRK: u32 = 0x44;
 pub const TMR_CTRL2_PTOS_OVF: u32 = 2 << 4; // TRGO on overflow

@@ -16,9 +16,10 @@
 use crate::settings::{AUTO_LOCK_TIMES, AUTO_OFF_TIMES, BACKLIGHT_TIMES};
 use crate::App;
 
-/// 0 7 4 2's levels 1-10 as PWM duty, thousandths: about even steps to the eye (a power curve, near gamma 2), with
-/// level 1 still readable indoors. Level 10 is full on.
-pub const BRIGHTNESS: [u16; 10] = [20, 45, 80, 125, 180, 260, 360, 500, 700, 1000];
+/// 0 7 4 2's levels 1-10 as PWM duty, thousandths, for the screen and the keypad light alike: a geometric curve
+/// (each step about 1.41 times the last), so the steps look even to the eye. Level 1 is 4.5 %, the dimmest found
+/// readable on the radio (Oct 12, 2026: the old 2 % was too dark); level 10 is full on.
+pub const BRIGHTNESS: [u16; 10] = [45, 65, 90, 125, 180, 250, 355, 500, 710, 1000];
 
 /// `a` is at or after `b` (wrapping ms).
 fn after(a: u32, b: u32) -> bool {
@@ -65,6 +66,16 @@ impl App {
             return 0;
         }
         BRIGHTNESS[self.set.brightness() as usize - 1]
+    }
+
+    /// The keypad light's PWM duty in thousandths (DISP-22): 0 while [`App::keypad_lit`] says off, else the same
+    /// level as the screen's (the theme's 0 7 4 2), lit or not, so one level dims both.
+    pub fn keypad_duty(&self) -> u16 {
+        if self.keypad_lit() {
+            BRIGHTNESS[self.set.brightness() as usize - 1]
+        } else {
+            0
+        }
     }
 
     /// The keypad light (0 7 4 5, DISP-22): with the screen, or for [`KEY_LIGHT_MS`] after any key or knob step

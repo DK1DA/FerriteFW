@@ -1,9 +1,12 @@
 //! The audio converters, each paced by a timer and fed by DMA into a ping-pong buffer (roadmap 2f, 5b, 5c):
 //!
-//! - **Capture:** ADC1 channel 2 (PA2, the BK4829s' EARO), triggered by TMR2 channel 2 at
+//! - **Capture:** ADC1 channel 2 (PA2, the BK4829s' EARO), triggered by TMR4 channel 4 at
 //!   [`ferrite_core::audio::ADC_HZ`], DMA1 channel 1 into [`ADC_BUF`]; each half done raises DMA1 channel 1's
 //!   interrupt, which signals [`ADC_HALF`]. Stock's path, at 48 kHz instead of 9.6 (`analysis/audio_path.md`:
-//!   TMR2 CH2 trigger, DMA1 ch1).
+//!   stock triggers on TMR2 CH2, DMA1 ch1). Ferrite's TMR2 dims the keypad light ([`super::backlight`], DISP-22),
+//!   so the trigger is TMR4 CH4, the other timer compare ADC1's ordinary group takes. Only its internal compare
+//!   event is used: TMR4 CH4's pin, PB9 (Bluetooth power), stays a general-purpose output, so the channel's
+//!   output never reaches it.
 //! - **Playback:** DAC1 (PA4, output buffer off as stock), triggered by TMR6's update at
 //!   [`ferrite_core::audio::DAC_HZ`], DMA2 channel 3 from [`DAC_BUF`]; each half played signals [`DAC_HALF`] for
 //!   the DSP task to refill. PC12 high routes DAC1 into the BK4829's microphone input while it plays, low after
@@ -24,7 +27,6 @@ use ferrite_core::audio::{ADC_HZ, BLOCK_DAC, BLOCK_IN, DAC_HZ};
 const CRM_AHBEN: u32 = 0x4002_1014;
 const CRM_AHB_DMA1: u32 = 1 << 0;
 const CRM_AHB_DMA2: u32 = 1 << 1;
-const CRM_APB1_TMR2: u32 = 1 << 0;
 
 const DMA1: u32 = 0x4002_0000;
 const DMA2: u32 = 0x4002_0400;
@@ -55,17 +57,18 @@ const fn half_flag(n: u32) -> u32 {
     1 << (4 * (n - 1) + 2)
 }
 
-const TMR2: u32 = 0x4000_0000;
-const TMR_C2DT: u32 = 0x38;
-const TMR_CM1_C2_PWM1: u32 = 6 << 12;
-const TMR_CCTRL_C2EN: u32 = 1 << 4;
+/// CM2: channel 4 output, PWM mode A (C4OCTRL = 110, bits 12-14).
+const TMR_CM2_C4_PWM1: u32 = 6 << 12;
+const TMR_CCTRL_C4EN: u32 = 1 << 12;
 const TMR_CTRL1_CNTEN: u32 = 1 << 0;
 
 const ADC_PSQ: u32 = ADC1 + 0x38; // preempted sequence: with one conversion, the channel is in bits 15-19
 const ADC_PDT1: u32 = ADC1 + 0x3C;
 const ADC_CTRL2_DMAEN: u32 = 1 << 8;
 const ADC_CTRL2_OCTESEL_MASK: u32 = 7 << 17;
-const ADC_CTRL2_OCTESEL_TMR2CH2: u32 = 3 << 17;
+/// OCTESEL = 0101: TMR4 CH4 event (RM_AT32F403A_407 V2.07, Table 19-1 and 19.6.3 ADC_CTRL2; OCTESEL[3] is bit 25,
+/// left 0). Was 0011, TMR2 CH2, before the keypad light took TMR2.
+const ADC_CTRL2_OCTESEL_TMR4CH4: u32 = 5 << 17;
 const ADC_CTRL2_PCTESEL_SW: u32 = 7 << 12;
 const ADC_CTRL2_PCTEN: u32 = 1 << 15;
 const ADC_CTRL2_PCSWTRG: u32 = 1 << 21;
@@ -96,18 +99,18 @@ pub static DAC_HALF: Signal<M, u8> = Signal::new();
 /// Halves the DSP task didn't take in time (it was busy): a capture overrun, counted for the bench.
 pub static ADC_LATE: AtomicU8 = AtomicU8::new(0);
 
-/// A timer's reload for `hz` from its clock (TMR2 and TMR6 are on APB1; with APB1 /2 they run at twice it, 120 MHz;
+/// A timer's reload for `hz` from its clock (TMR4 and TMR6 are on APB1; with APB1 /2 they run at twice it, 120 MHz;
 /// stock's 9599.2 Hz is 120 MHz / 12501). Fits 16 bits down to 1.9 kHz.
 fn reload(hz: u32) -> u32 {
     (clock::TMR_HZ + hz / 2) / hz
 }
 
-/// Capture on: PA2 analog, TMR2 at the ADC rate, ADC1 on its trigger, DMA1 channel 1 circular. ADC1 must have
+/// Capture on: PA2 analog, TMR4 at the ADC rate, ADC1 on its trigger, DMA1 channel 1 circular. ADC1 must have
 /// been through [`super::adc::init`].
 pub fn capture_start() {
     pin(GPIOA, 2).config(Mode::Analog);
     modify(CRM_AHBEN, 0, CRM_AHB_DMA1);
-    modify(CRM_APB1EN, 0, CRM_APB1_TMR2);
+    modify(CRM_APB1EN, 0, CRM_APB1_TMR4);
     let c = ch(DMA1, 1);
     wr(c + CH_CTRL, 0);
     wr(DMA1 + DMA_CLR, flags(1));
@@ -116,27 +119,28 @@ pub fn capture_start() {
     wr(c + CH_DTCNT, ADC_BUF.len() as u32);
     wr(c + CH_CTRL, DMA_MINCM | DMA_LM | DMA_PWIDTH_16 | DMA_MWIDTH_16 | DMA_CHPL_HIGH | DMA_HDTIEN | DMA_FDTIEN);
     modify(c + CH_CTRL, 0, DMA_EN);
-    // ADC1: channel 2 alone in the ordinary group, short sample time, each conversion on TMR2 CH2, to DMA.
+    // ADC1: channel 2 alone in the ordinary group, short sample time, each conversion on TMR4 CH4, to DMA.
     modify(ADC_SPT2, SPT2_CH2_MASK, SPT2_CH2_28);
     wr(ADC_OSQ1, 0);
     wr(ADC_OSQ3, 2);
-    modify(ADC_CTRL2, ADC_CTRL2_OCTESEL_MASK, ADC_CTRL2_OCTESEL_TMR2CH2 | ADC_CTRL2_OCTEN | ADC_CTRL2_DMAEN);
-    // TMR2 CH2: PWM at the ADC rate, its compare edge the trigger.
+    modify(ADC_CTRL2, ADC_CTRL2_OCTESEL_MASK, ADC_CTRL2_OCTESEL_TMR4CH4 | ADC_CTRL2_OCTEN | ADC_CTRL2_DMAEN);
+    // TMR4 CH4: PWM at the ADC rate, its compare edge the trigger (channel enabled as stock's TMR2 CH2 was; PB9
+    // is a GPIO output, `board::BT_PWR`, so nothing reaches the pin).
     let pr = reload(ADC_HZ);
-    wr(TMR2 + TMR_CTRL1, 0);
-    wr(TMR2 + TMR_DIV, 0);
-    wr(TMR2 + TMR_PR, pr - 1);
-    wr(TMR2 + TMR_C2DT, pr / 2);
-    wr(TMR2 + TMR_CM1, TMR_CM1_C2_PWM1);
-    wr(TMR2 + TMR_CCTRL, TMR_CCTRL_C2EN);
-    wr(TMR2 + TMR_SWEVT, 1);
+    wr(TMR4 + TMR_CTRL1, 0);
+    wr(TMR4 + TMR_DIV, 0);
+    wr(TMR4 + TMR_PR, pr - 1);
+    wr(TMR4 + TMR_C4DT, pr / 2);
+    wr(TMR4 + TMR_CM2, TMR_CM2_C4_PWM1);
+    wr(TMR4 + TMR_CCTRL, TMR_CCTRL_C4EN);
+    wr(TMR4 + TMR_SWEVT, 1);
     irq::enable(IRQ_ADC_DMA, PRIO);
-    wr(TMR2 + TMR_CTRL1, TMR_CTRL1_CNTEN);
+    wr(TMR4 + TMR_CTRL1, TMR_CTRL1_CNTEN);
 }
 
 /// Capture off: the timer stopped, ADC1 back to software triggers, DMA off.
 pub fn capture_stop() {
-    wr(TMR2 + TMR_CTRL1, 0);
+    wr(TMR4 + TMR_CTRL1, 0);
     irq::disable(IRQ_ADC_DMA);
     modify(ch(DMA1, 1) + CH_CTRL, DMA_EN, 0);
     modify(ADC_CTRL2, ADC_CTRL2_OCTESEL_MASK | ADC_CTRL2_DMAEN, super::regs::ADC_CTRL2_OCTESEL_SW);

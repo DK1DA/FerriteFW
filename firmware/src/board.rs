@@ -50,7 +50,8 @@ pub const SI_IN: [Pin; 2] = [pin(GPIOA, 7), pin(GPIOC, 5)];
 
 // GPS on USART3 (PB10 TX, PB11 RX); Bluetooth module on USART1 (PA9 TX, PA10 RX)
 pub const GPS_PWR_N: Pin = pin(GPIOA, 8); // low = GPS powered
-pub const BT_PWR: Pin = pin(GPIOB, 9); // (L) high = module powered
+pub const BT_PWR: Pin = pin(GPIOB, 9); // (L) high = module powered. A GPIO output always: it's TMR4 CH4's pin, the audio
+// capture's ADC trigger (`hal::audio`), whose output must never reach it.
 
 // Display: ST7789V, 8080 8-bit, data on PD8-PD15
 pub const LCD_WR: Pin = pin(GPIOD, 0);
@@ -64,7 +65,8 @@ pub const LED_RED: Pin = pin(GPIOC, 13);
 pub const LED_GREEN: Pin = pin(GPIOC, 14);
 pub const BACKLIGHT: [Pin; 2] = [SCREEN_LIGHT, KEYPAD_LIGHT]; // (L) both
 /// The screen's backlight and the keypad light (docs/hardware.md: PB3 is the keypad light). Both start as low
-/// outputs; the UI task then hands PC6 to its PWM (`hal::backlight`, DISP-23).
+/// outputs; the UI task then hands them to their PWM (`hal::backlight`: PC6 on TMR8 CH1, PB3 on TMR2 CH2 through
+/// TMR2's partial remap, which needs JTAG off first; DISP-22, DISP-23).
 pub const SCREEN_LIGHT: Pin = pin(GPIOC, 6);
 pub const KEYPAD_LIGHT: Pin = pin(GPIOB, 3);
 pub const LED_ACTIVE_HIGH: bool = true; // (L) flip if the LEDs turn out active-low
