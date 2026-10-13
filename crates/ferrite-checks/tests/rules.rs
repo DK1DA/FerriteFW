@@ -186,16 +186,21 @@ fn dictionary_is_small() {
     assert!(bin < 4096, "dict.bin is {bin} bytes");
 }
 
-/// TONE-12: tones come from the BK4829's generator, timed by the Radio task; nothing uses the DAC for them. The
-/// DAC test tone (`hal::tone`) is only reset at start-up and used by the bring-up build; the tone code
-/// (`ferrite_core::tonegen`) and the Radio task never touch the audio DAC.
+/// TONE-12, SND-11: tones that go on air come from the BK4829's generator; only local beeps use DAC1, as stock's
+/// key beeps do (decision 100). The DAC tone (`hal::tone`) is used by the board's reset, the bring-up build and
+/// the Radio task's `beep` only; the tone code (`ferrite_core::tonegen`) never touches the DAC, and the Radio task
+/// never uses the audio DAC's DMA path (`audio::`).
 #[test]
 fn tones_never_use_the_dac() {
-    only(files_using("firmware/src", "tone::"), &["firmware/src/board.rs", "firmware/src/bringup.rs"], "the DAC test tone");
-    for f in ["firmware/src/tasks/radio.rs", "crates/ferrite-core/src/tonegen.rs"] {
-        let c = code(&root().join(f));
-        assert!(!c.contains("hal::tone") && !c.contains("audio::"), "{f} must not use the DAC");
-    }
+    only(files_using("firmware/src", "tone::"), &["firmware/src/board.rs", "firmware/src/bringup.rs", "firmware/src/tasks/radio.rs"], "the DAC tone");
+    let tonegen = code(&root().join("crates/ferrite-core/src/tonegen.rs"));
+    assert!(!tonegen.contains("hal::tone") && !tonegen.contains("audio::"), "tonegen must not use the DAC");
+    let radio = code(&root().join("firmware/src/tasks/radio.rs"));
+    assert!(!radio.contains("audio::"), "the Radio task must not use the audio DAC path");
+    let uses: Vec<_> = radio.match_indices("hal::tone::").map(|(i, _)| i).collect();
+    let beep = radio.find("async fn beep").expect("the beep");
+    let end = beep + radio[beep..].find("\n    }\n").expect("its end");
+    assert!(uses.iter().all(|&i| i > beep && i < end), "only the beep uses the DAC tone");
 }
 
 /// BCR-14: PA7/PC5, the SI4732's input switch, are set only by the Radio task's path state.

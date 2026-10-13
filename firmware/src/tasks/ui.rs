@@ -206,6 +206,17 @@ pub async fn task() {
     app.redraw_all();
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
     let mut dev = Device { tx_built: cfg!(feature = "tx"), battery_pct: 100, ..Default::default() };
+    // About and Self-test (SELF-5 to SELF-7): what the boot checks found. The BK4829s from the Radio task's
+    // snapshot below; the SI4732 isn't tested at boot; the SSB patch store comes with the link's SSB_WRITE.
+    {
+        let t = &mut dev.selftest;
+        t.idcode = crate::hal::sys::idcode();
+        t.mcu_ok = t.idcode == chipid::EXPECTED_PID;
+        if let Some((id, size)) = flash {
+            (t.flash_id, t.flash_mb) = (id, (size >> 20) as u8);
+        }
+        t.cal = if CHECK_STATE[CHECK_CAL as usize].load(Relaxed) == PASSED { ferrite_core::msg::CalState::Ok } else { ferrite_core::msg::CalState::Blank };
+    }
     let mut live_rx = LIVE.receiver().unwrap();
     let mut live = LiveAll::default();
     if let Some(l) = live_rx.try_get() {
@@ -281,6 +292,14 @@ pub async fn task() {
                 Timer::after_millis(50).await; // the answer's bytes leave the UART
                 cortex_m::peripheral::SCB::sys_reset();
             }
+            // PWR-20: the battery from the Radio task's PA1 reading, with the user trim (10 mV steps).
+            let raw = crate::chan::BATTERY_RAW.load(Relaxed);
+            if raw != 0 {
+                let mv = ferrite_core::txcal::battery_mv(raw) as i32 + dev.selftest.battery_trim as i32 * 10;
+                dev.battery_mv = mv.max(0) as u16;
+                dev.battery_pct = ferrite_core::txcal::Gauge::defaults().percent(raw);
+            }
+            dev.selftest.chips = live.chips;
             // SBAR-20: the Radio task's MCU temperature reading, in whole degrees.
             let t = crate::chan::MCU_TEMP.load(Relaxed);
             dev.mcu_temp = (t != i16::MIN).then(|| ferrite_core::mcutemp::whole(t));

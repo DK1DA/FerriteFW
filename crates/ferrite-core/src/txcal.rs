@@ -13,6 +13,12 @@ const GAUGE_AT: usize = 0x200;
 /// Stock's gauge when 0xF200 byte 0 is 0x00 or 0xFF; the seventh is 0xBB whatever the sector says.
 const GAUGE_DEFAULT: [u8; 7] = [0x81, 0x87, 0x8E, 0x93, 0x98, 0xA0, 0xBB];
 
+/// PWR-20: the battery in mV from the 12-bit PA1 reading: (reading >> 4) x 48.2 mV, before the user trim. Stock's
+/// factor; the black radio's full pack read 8.312 V on a meter (Oct 9, 2026), which is reading 172.
+pub fn battery_mv(adc: u16) -> u16 {
+    ((adc >> 4) as u32 * 482 / 10) as u16
+}
+
 /// The PA drive curves: 3 levels (stock order: 0 High, 1 Mid, 2 Low) x 4 rows (UHF 400 MHz up in 10 MHz steps,
 /// VHF 130-180 in 3 MHz, 200-300 in 5 MHz, 350-400 in 5 MHz) x 16, and the HF rows (15 MHz up in 5 MHz, 3 levels).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +96,17 @@ impl Gauge {
 
     /// Transmit allowed on this reading (the 12-bit PA1 conversion): at or above the first threshold (the
     /// cut-off, about 6.2 V) and not above the seventh (about 9 V, stock's level 7).
+    /// PWR-20's level 0-6 for the PA1 reading: thresholds at or below it (stock's gauge), as a percentage.
+    pub fn percent(&self, adc: u16) -> u8 {
+        let v = (adc >> 4).min(255) as u8;
+        (self.0[..6].iter().filter(|&&t| v >= t).count() * 100 / 6) as u8
+    }
+
+    /// Stock's defaults, for builds that don't read the calibration (the receive-only build reads no PA curves).
+    pub const fn defaults() -> Gauge {
+        Gauge(GAUGE_DEFAULT)
+    }
+
     pub fn tx_ok(&self, adc: u16) -> bool {
         let v = (adc >> 4).min(255) as u8;
         v >= self.0[0] && v <= self.0[6]
@@ -182,5 +199,20 @@ mod tests {
         let g = Gauge::parse(&sector([0x70, 0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0]));
         assert_eq!(g.0[6], 0xBB, "the seventh is always 0xBB");
         assert!(g.tx_ok(0x70 << 4));
+    }
+}
+
+#[cfg(test)]
+mod battery_tests {
+    use super::*;
+
+    /// PWR-20: stock's factor and gauge; the black radio's 8.312 V pack sits on the top level.
+    #[test]
+    fn battery_reading() {
+        assert_eq!(battery_mv(172 << 4), 8290);
+        let g = Gauge::defaults();
+        assert_eq!(g.percent(172 << 4), 100);
+        assert_eq!(g.percent(0x80 << 4), 0);
+        assert_eq!(g.percent(0x93 << 4), 66);
     }
 }

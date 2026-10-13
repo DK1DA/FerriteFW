@@ -134,6 +134,8 @@ struct HfOn {
 struct Radio {
     /// The MCU temperature (SBAR-20): when it was last read, and its smoothed tenths.
     temp: (Option<u32>, Option<i16>),
+    /// When the battery was last read (PWR-20).
+    bat_at: Option<u32>,
     si: Si4732<SiBus>,
     wire: Wire,
     cs: [Out; 2],
@@ -173,6 +175,8 @@ struct Radio {
     tone_level: u8,
     /// The beep volume's tone gain (SND-3, 0 7 5 2: `tonegen::beep_gain`).
     beep_gain: u8,
+    /// The DAC beep's level (1-11, `hal::tone`), from the beep volume (SND-3: 1-5 -> 3-7).
+    beep_level: u8,
     hf: Option<HfOn>,
     /// The frequency counter (TSRCH-10), while on.
     counter: Option<Counter>,
@@ -485,6 +489,12 @@ impl Radio {
     fn mcu_temp(&mut self) {
         use crate::hal::adc;
         let now = now_ms() as u32;
+        // PWR-20: the battery (PA1) every 2 s, here too, as the Radio task owns the ADC's software reads.
+        if self.bat_at.is_none_or(|t| now.wrapping_sub(t) >= 2_000) {
+            self.bat_at = Some(now);
+            adc::init();
+            crate::chan::BATTERY_RAW.store(adc::read_avg(adc::CH_PA1, 8), core::sync::atomic::Ordering::Relaxed);
+        }
         if self.temp.0.is_some_and(|t| now.wrapping_sub(t) < 10_000) {
             return;
         }
@@ -850,32 +860,24 @@ impl Radio {
         if self.path.keyed().is_some() || hz == 0 {
             return;
         }
-        let heard = |r: &Radio, n: u8| match r.tuned[n as usize] {
-            Some((s, _)) if (s as usize) < SLOTS => r.live.slots[s as usize].squelch_open,
-            Some(_) => true, // HF mode's or the counter's chip: always in use
-            None => false,
-        };
-        // Stock beeps on the chip it is using (0x0801EB8C on its current chip): the active slot's, when it has one
-        // (on the radio a beep on the least-used chip came out as a squelch-break squawk, Oct 12, 2026), else the
-        // chip that disturbs least. Never on a chip passing received audio: the beep takes it off receive, and
-        // coming back sounds like a squelch break. If both are, no beep.
-        let active = self.active;
-        let on_active = (0..2u8).find(|&n| self.has(n) && self.tuned[n as usize].is_some_and(|(s, _)| s == active));
-        let Some(n) = on_active.filter(|&n| !heard(self, n)).or_else(|| {
-            (0..2u8).filter(|&n| self.has(n) && !heard(self, n)).min_by_key(|&n| self.tuned[n as usize].is_some())
-        }) else {
-            return;
-        };
-        let asleep = self.tuned[n as usize].is_none();
-        let tone_gain = self.beep_gain;
-        let gain = radio_chip::beep_start(&mut self.chip(n), hz as u32, tone_gain, asleep);
+        // As stock (V0.27, Oct 12, 2026 trace): key beeps come from the MCU's DAC1 (PA4) into the speaker amp, not
+        // a BK4829's tone generator (taking a receiving chip into tone mode and back squawked like a squelch break
+        // on the radio). The chips keep receiving; the one passing audio is only muted for the beep (REG_47), and
+        // the audio decision unmutes it on the next tick. Stock's order: DAC on, 30 ms, amp on; amp off, 30 ms,
+        // DAC off.
+        for n in 0..2u8 {
+            if self.has(n) && self.tuned[n as usize].is_some() {
+                self.chip(n).af_out(AfOut::Mute);
+            }
+        }
+        crate::hal::tone::start(hz as u32, self.beep_level);
+        Timer::after_millis(30).await;
         speaker(true);
         Timer::after_millis(ms.min(tonegen::BEEP_MAX_MS) as u64).await;
-        // Asleep again, or back to receive (the audio decision unmutes it on the next tick, if it is heard).
-        radio_chip::beep_end(&mut self.chip(n), gain, asleep);
         speaker(false);
+        Timer::after_millis(30).await;
+        crate::hal::tone::stop();
         log(b"beep hz ", hz as u32);
-        log(b"beep chip ", n as u32 | (asleep as u32) << 4); // 0x1n: the chip was asleep
     }
 
     /// The frequency counter on or off (TSRCH-10): an exclusive mode like HF mode; watch and scans pause.
@@ -1083,6 +1085,7 @@ pub async fn task() {
         live: LiveAll::default(),
         save: RxSleep::new(DEFAULT_SAVE, now_ms()),
         temp: (None, None),
+        bat_at: None,
         path: Path::new(),
         muted: false,
         si_used: false,
@@ -1101,6 +1104,7 @@ pub async fn task() {
         scan_tx: false,
         tone_level: 1,
         beep_gain: tonegen::beep_gain(3),
+        beep_level: 5,
         hf: None,
         counter: None,
         same_on: false,
@@ -1267,7 +1271,10 @@ impl Radio {
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
             RadioCmd::ScanTx(on) => self.scan_tx = on,
             RadioCmd::ToneLevel(l) => self.tone_level = l.min(2),
-            RadioCmd::BeepVol(v) => self.beep_gain = tonegen::beep_gain(v),
+            RadioCmd::BeepVol(v) => {
+                self.beep_gain = tonegen::beep_gain(v);
+                self.beep_level = 2 + v.clamp(1, 5);
+            }
             #[cfg(feature = "tx")]
             RadioCmd::Vox { level, tail } => {
                 self.tx.vox = (level.min(9), tail.max(1));

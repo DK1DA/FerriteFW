@@ -53,6 +53,8 @@ pub const RF_BUSY_KEYED: u8 = 1;
 /// The MCU's die temperature in tenths of a degree C (chapter 8, SBAR-20), smoothed; `i16::MIN` until read. The
 /// Radio task reads it with its other ADC reads (the preempted group isn't shared between tasks); the UI shows it.
 pub static MCU_TEMP: AtomicI16 = AtomicI16::new(i16::MIN);
+/// PWR-20: the latest PA1 battery reading (12-bit, averaged), 0 until the first one; the Radio task reads it.
+pub static BATTERY_RAW: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
 pub const RF_BUSY_RX: u8 = 2;
 
 /// The terminal over the cable (manual chapter 37): the Link task moves the cable's bytes into `TERM_IN` and
