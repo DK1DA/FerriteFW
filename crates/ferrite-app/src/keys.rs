@@ -1,7 +1,8 @@
 //! Key presses from key down/up and time (manual chapter 7):
 //!
 //! - **KEY-3** a short press fires on release, under 700 ms; a long press fires while held, at 700 ms, and the
-//!   release after it does nothing. There is no gap between the two (decided Oct 7, 2026).
+//!   release after it does nothing (home's hold 0 is the one that acts at its release, HOME-16). There is no gap
+//!   between the two (decided Oct 7, 2026).
 //! - **KEY-4** the four arrows repeat at 10 per second after 400 ms held; once one has repeated, its release does
 //!   nothing. Arrows have no long press.
 //!
@@ -21,8 +22,8 @@ pub enum Press {
     Short,
     Long,
     Repeat,
-    /// The release after a long press (not after a repeat): only the screen hears it, so the shortcut map can
-    /// run its shortcut when the digit comes up (HOME-8).
+    /// The release after a long press (not after a repeat): only the screen hears it, so home can run hold 0's
+    /// shortcut when the digit comes up (HOME-16) and SIDE2's counter open (KEY-22).
     LongUp,
 }
 

@@ -224,6 +224,19 @@ fn quick_mute_matches_its_goldens() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// HOME-16: hold 0 + knob on home: the "Brightness N" toast in the hint bar, the knob turned once from 7 (the
+/// picture is drawn at the full-brightness colours: the backlight's level isn't in the frame buffer).
+#[test]
+fn brightness_toast_matches_its_golden() {
+    use ferrite_core::keys::Key;
+    let mut r = Radio::new();
+    r.home();
+    r.down(Key::Digit(0)).wait(200).knob(1).wait(500);
+    let failures: Vec<String> = check("brightness-toast", &r.sim.screen_rgb()).into_iter().collect();
+    r.up(Key::Digit(0));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// The same screen drawn twice from scratch is the same: the goldens can only change when the code does.
 #[test]
 fn shots_are_deterministic() {

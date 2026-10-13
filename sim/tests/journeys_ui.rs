@@ -148,6 +148,44 @@ fn short_and_long_press() {
     r.expect_screen("Scope");
 }
 
+/// Hold 0 on home (HOME-16): + knob steps the brightness live with a "Brightness N" toast in the hint bar and
+/// doesn't tune; the release after a turn does nothing. Alone, the jump to the home channel waits for the release
+/// (HOME-8's one exception, KEY-3), and a short 0 is still a digit (NAV-4).
+#[test]
+fn hold_0_knob_brightness_and_home_channel_at_release() {
+    let mut r = Radio::new();
+    r.sim.app_mut().settings_mut().home_ch = Some(2); // channel 3
+    r.home();
+    fn active(r: &Radio) -> &ferrite_app::Slot {
+        r.sim.app().slot(r.sim.app().active())
+    }
+    if active(&r).on_channel() {
+        r.press(Key::VfoMem);
+    }
+    let f = active(&r).freq();
+    let level = r.sim.app().settings().brightness;
+    r.down(Key::Digit(0)).wait(300).knob(2);
+    assert_eq!(r.sim.app().settings().brightness, level + 2);
+    let toast = r.sim.screen_texts().into_iter().find(|t| t.s.contains("Brightness")).expect("the toast");
+    assert!(toast.y0 >= 300, "in the hint bar: {}", toast.y0);
+    r.expect_text(&format!("{}", level + 2));
+    r.wait(800).knob(-1);
+    assert_eq!(r.sim.app().settings().brightness, level + 1);
+    r.up(Key::Digit(0)).wait(300);
+    assert_eq!(active(&r).freq(), f, "the knob didn't tune");
+    assert!(!active(&r).on_channel(), "no home channel after a turn");
+    r.expect_screen("Home");
+    // Alone: nothing at the long press, the home channel at the release.
+    r.down(Key::Digit(0)).wait(1200);
+    assert!(!active(&r).on_channel(), "not while held");
+    r.up(Key::Digit(0)).wait(300);
+    assert_eq!(active(&r).ch.filter(|_| active(&r).on_channel()).map(|c| c.num), Some(2), "at the release");
+    r.expect_text("Home channel");
+    // Short: a digit.
+    r.press(Key::Digit(0));
+    r.expect_screen("Channel entry");
+}
+
 /// Keys typed faster than a frame are all taken, in order (KEY-6).
 #[test]
 fn typed_ahead_keys_are_kept() {

@@ -1,5 +1,6 @@
 //! The shortcut map (MENU 0 9 1 4; manual chapter 7, HOME-8, KEY-11, KEY-21): the ten hold-digit shortcuts
-//! with what each would do now. Holding a digit on home runs its shortcut at once ([`super::nav::hold_digit`]);
+//! with what each would do now. Holding a digit on home runs its shortcut at once ([`super::nav::hold_digit`];
+//! 0 at its release, and 0 + knob is brightness: HOME-16);
 //! here ▲▼ (or the knob, or a digit) pick one and OK runs it on home, as nicFW's function menu does, while the
 //! help line names the digit to hold next time.
 
@@ -96,6 +97,11 @@ impl View for Shortcut {
             let grey = d == 6 && app.greyed(Item::Step).is_some(); // VFO-8: step is VFO only
             let r = Row { num: Some(d as u8), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: d == self.sel as usize, grey };
             app.list_row(lcd, d, 44 + 22 * d as i32, 22, &r);
+        }
+        // HOME-16: hold 0 also takes the knob (brightness); its line names that instead of "OK runs it", one line
+        // in the box either way.
+        if self.sel == 0 {
+            return app.help_box(lcd, 268, 28, slow!("Hold 0; + knob: brightness").as_bytes(), b"");
         }
         let mut path = Buf::<16>::new();
         path.push(b"Hold ");

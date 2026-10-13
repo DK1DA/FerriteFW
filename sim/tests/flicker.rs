@@ -306,6 +306,31 @@ fn no_flicker_and_overdraw_in_budget() {
     assert!(bad.is_empty(), "DISP-25 (find a region with flicker_where):\n{}", bad.join("\n"));
 }
 
+/// DISP-25, HOME-16: hold 0 + knob on home in each layout: the "Brightness N" toast updates in place, each step,
+/// with no blank-then-draw anywhere on the screen.
+#[test]
+fn brightness_toast_has_no_flicker() {
+    let mut bad = Vec::new();
+    for layout in 0..3 {
+        let mut r = Radio::new();
+        for _ in 0..layout {
+            r.event(Event::Layout);
+        }
+        r.home();
+        r.wait(1000);
+        r.sim.watch_passes(true);
+        r.down(Key::Digit(0)).wait(200);
+        r.knob(3).wait(200).knob(-5).wait(200);
+        r.up(Key::Digit(0)).wait(3500);
+        let live = r.sim.passes.iter().filter(|h| h.live).count();
+        assert!(live > 0, "layout {layout}: live updates watched");
+        for h in r.sim.passes.iter().filter(|h| h.live && h.report.flicker > 0) {
+            bad.push(format!("layout {layout}: {} at {} ms: {} px flicker in {:?}", h.screen, h.at, h.report.flicker, h.report.bbox));
+        }
+    }
+    assert!(bad.is_empty(), "DISP-25:\n{}", bad.join("\n"));
+}
+
 /// BUDGET's rows, measured now with a quarter's headroom.
 #[test]
 #[ignore]

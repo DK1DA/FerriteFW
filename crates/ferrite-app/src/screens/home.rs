@@ -213,10 +213,11 @@ impl View for Home {
         if app.aprs_slot(app.active) {
             match (e.key, e.press) {
                 (Key::Menu, Long) => return app.open_screen(super::opts::Of::AprsCard.screen()),
-                // the shortcuts that don't touch the slot (scope, watch) still run
-                (Key::Digit(1 | 4), Long) => {}
+                // the shortcuts that don't touch the slot (scope, watch) still run; hold 0 waits for its release
+                (Key::Digit(0 | 1 | 4), Long) => {}
                 (Key::Up | Key::Down | Key::Left | Key::Right, Short | Repeat)
                 | (Key::Slot | Key::VfoMem | Key::Digit(_), Long)
+                | (Key::Digit(0), LongUp)
                 | (Key::VfoMem | Key::Side(2) | Key::Digit(_), Short) => {
                     app.aprs_refuse(app.active);
                     return;
@@ -288,6 +289,10 @@ impl View for Home {
             (Key::Star, Short) => quick_mute(app), // HOME-15
             (Key::Star, Long) => app.change(Item::Reverse, 1), // VFO-7: two values, so +1 toggles
             (Key::Digit(d), Short) => app.open(Dest::Entry(d)), // NAV-4, VFO-11
+            // HOME-16: hold 0 runs at the release, as long as the knob didn't turn while it was held (brightness);
+            // a turn makes the release nothing ([`brightness`]).
+            (Key::Digit(0), Long) => {}
+            (Key::Digit(0), LongUp) => super::nav::hold_digit(app, 0, store),
             // HOME-8: the shortcut runs at the long press, a popup names it (KEY-11).
             (Key::Digit(d), Long) => super::nav::hold_digit(app, d, store),
             _ => {}
@@ -295,6 +300,9 @@ impl View for Home {
     }
 
     fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
+        if app.keys.is_held(Key::Digit(0)) {
+            return brightness(app, d); // HOME-16: not the slot's, so before APRS-19's refusal
+        }
         if app.aprs_refuse(app.active) {
             return; // APRS-19
         }
@@ -384,6 +392,17 @@ fn quick_mute(app: &mut App) {
     t.push(&[b'A' + a]);
     t.push(if app.mute & 1 << a != 0 { b" muted" } else { b" unmuted" });
     app.show_toast(t.as_bytes(), if app.mute & 1 << a != 0 { b"* again to hear it" } else { b"" }, false);
+}
+
+/// HOME-16: 0 held + knob: 0 7 4 2's level for the theme in use, live and saved as the setting is (DISP-16), the
+/// keypad light's with it (DISP-22). The toast updates in place while turning. The 0's release does nothing after
+/// a turn: no home channel, no digit.
+fn brightness(app: &mut App, d: i32) {
+    app.keys.used(Key::Digit(0));
+    super::groups::change(app, &[7, 4, 2], d);
+    let mut b = Buf::<4>::new();
+    let _ = uwrite!(b, "{}", app.set.brightness());
+    app.show_toast(slow!("Brightness").as_bytes(), b.as_bytes(), false);
 }
 
 /// Card `s` of the cards layout: its frame when it changed, and every part of it that changed.

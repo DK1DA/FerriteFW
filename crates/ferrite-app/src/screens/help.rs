@@ -106,6 +106,11 @@ fn rows(lcd: &mut impl Panel, head: &[u8], rows: impl Iterator<Item = Row>) {
 /// HELP-4: the ten hold digits, from the table the shortcut list (MENU 0 9 1 4) runs.
 const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
+/// HELP-4, HOME-16: the line under 0: hold 0 + knob is brightness.
+fn zero_knob() -> Row {
+    (slow!("0 + Knob"), slow!("Brightness"))
+}
+
 /// HELP-2: the QR code, centred, and the address under it.
 fn manual(lcd: &mut impl Panel) {
     const SCALE: i32 = 5;
@@ -136,11 +141,18 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, h: Help) {
         Help::Manual => manual(lcd),
         Help::HomeKeys => rows(lcd, b"", HOME_KEYS.iter().copied()),
         Help::SideKeys => rows(lcd, b"", SIDE_KEYS.iter().copied()),
-        Help::Digits => rows(
-            lcd,
-            slow!("Hold a digit on home").as_bytes(),
-            DIGITS.iter().zip(super::shortcut::SHORTCUTS).map(|(&d, s)| (d, s)),
-        ),
+        Help::Digits => {
+            // 0, then 0 + knob under it, then 1-9 (a plain array: core's iterator adapters would land in fast flash)
+            let mut all: [Row; 11] = [("", ""); 11];
+            for (i, r) in all.iter_mut().enumerate() {
+                *r = match i {
+                    0 => (DIGITS[0], super::shortcut::SHORTCUTS[0]),
+                    1 => zero_knob(),
+                    _ => (DIGITS[i - 1], super::shortcut::SHORTCUTS[i - 1]),
+                };
+            }
+            rows(lcd, slow!("Hold a digit on home").as_bytes(), all.iter().copied())
+        }
         Help::MenuNos => rows(lcd, slow!("MENU, then the number").as_bytes(), MENU_NOS.iter().copied()),
     }
 }

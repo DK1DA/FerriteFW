@@ -697,6 +697,8 @@ mod help;
 mod tonehint;
 /// Quick mute (HOME-15).
 mod mute;
+/// Hold 0 on home: + knob brightness, alone the home channel at the release (HOME-16).
+mod hold0;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]
