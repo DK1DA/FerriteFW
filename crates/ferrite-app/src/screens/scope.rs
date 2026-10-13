@@ -522,6 +522,20 @@ pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32,
     w::field(lcd, 172, 60, y + h + 2, y + h + 18, y + h + 14, Align::Right, b.as_bytes(), &UI_12, SUB, BG);
 }
 
+/// HOME-14: the strip while it can't run (FM broadcast has the receiver: BCR-29): its area blanked once, then only a
+/// dim frame, with no grid, bars or labels, so it doesn't look like a scope that is just quiet. Shares the strip's
+/// region, so either drawing replaces the other whole.
+pub fn strip_off(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32) {
+    if app.dirty_shape(region, hash(&(y, h)), false).is_none() {
+        return;
+    }
+    lcd.fill(0, y, 240, h + 18, BG);
+    lcd.fill(X0, y, 224, 1, LINE);
+    lcd.fill(X0, y + h, 224, 1, LINE);
+    lcd.fill(X0, y + 1, 1, h - 1, LINE);
+    lcd.fill(X0 + 223, y + 1, 1, h - 1, LINE);
+}
+
 #[cfg(test)]
 mod floor_tests {
     use super::*;

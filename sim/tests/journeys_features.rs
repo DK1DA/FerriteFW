@@ -363,3 +363,19 @@ fn broadcast_slot_and_audio_priority() {
     r.expect_text("FM on B").expect_text("Broadcast plays on B");
 }
 
+
+/// HOME-14: on the single + scope layout the strip is drawn plainly off while broadcast FM has the receiver (a dim
+/// frame, no bars or labels), and comes back as a working strip once the slot is tuned out of the band.
+#[test]
+fn strip_off_while_broadcast() {
+    let mut r = Radio::new();
+    r.event(Event::Layout);
+    r.home().wait(1500);
+    r.expect_text("+112k");
+    r.event(Event::FmStation).wait(2500);
+    assert_eq!(r.sim.app().bcast_slot(), Some(0));
+    assert!(!r.text().contains("112k"), "no strip labels while broadcast plays:\n{}", r.text());
+    r.run("type 1460; press OK; expect screen \"Home\"; wait 1500ms");
+    assert_eq!(r.sim.app().bcast_slot(), None);
+    r.expect_text("+112k");
+}

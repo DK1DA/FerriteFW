@@ -148,7 +148,11 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     };
     // HOME-13: the strip and the other slots' lines wait while the knob turns.
     if !app.held(10) {
-        scope::strip(app, lcd, 10, 200, 34, centre, STRIP_STEP, &bars[..scope::STRIP_BARS]);
+        if super::home::card_kind(app, a) == 2 || app.bcast_slot().is_some() {
+            scope::strip_off(app, lcd, 10, 200, 34); // HOME-14: broadcast has the receiver
+        } else {
+            scope::strip(app, lcd, 10, 200, 34, centre, STRIP_STEP, &bars[..scope::STRIP_BARS]);
+        }
     }
     // The other slots, a line each.
     for (i, o) in (0..SLOTS as u8).filter(|&o| o != a).enumerate() {
