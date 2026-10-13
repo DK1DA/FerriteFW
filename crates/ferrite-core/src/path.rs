@@ -202,6 +202,9 @@ pub struct Path {
     alarm: bool,
     /// Keyed by [`Path::key_up_xb`]: 0 no, 1 keyed with the mic selected (PA15 high), 2 with the repeat audio.
     xb: u8,
+    /// The last mute asked for: a receive path selected while muted unmutes, or the safe state's mute at boot
+    /// stayed on and no receive audio reached the speaker (black radio, Oct 12, 2026).
+    muted: bool,
 }
 
 impl Default for Path {
@@ -213,7 +216,7 @@ impl Default for Path {
 impl Path {
     /// After [`Path::safe`] at start-up: everything low, relay released.
     pub const fn new() -> Self {
-        Path { rx: Rx::Off, tx: None, relay: false, restore: None, times: [0; GUARD_SWITCHES], nt: 0, alarm: false, xb: 0 }
+        Path { rx: Rx::Off, tx: None, relay: false, restore: None, times: [0; GUARD_SWITCHES], nt: 0, alarm: false, xb: 0, muted: false }
     }
 
     pub fn rx_now(&self) -> Rx {
@@ -293,18 +296,26 @@ impl Path {
                 if !self.room(1, now) {
                     return Err(Blocked::TooOften);
                 }
-                out.push(Act::Mute(true));
+                self.mute(true, out);
                 self.clear_rx(out);
                 self.move_relay(r, now, out);
                 self.set_rx(rx, out);
-                out.push(Act::Mute(false));
+                self.mute(false, out);
             }
             _ => {
                 self.clear_rx(out);
                 self.set_rx(rx, out);
+                if self.muted && rx != Rx::Off {
+                    self.mute(false, out);
+                }
             }
         }
         Ok(())
+    }
+
+    fn mute(&mut self, m: bool, out: &mut Steps) {
+        out.push(Act::Mute(m));
+        self.muted = m;
     }
 
     fn move_relay(&mut self, r: bool, now: u32, out: &mut Steps) {
@@ -327,7 +338,7 @@ impl Path {
             return Err(Blocked::TooOften); // room for the move and the one back after
         }
         out.push(Act::PaZero);
-        out.push(Act::Mute(true));
+        self.mute(true, out);
         let back = self.rx;
         self.clear_rx(out);
         self.rx = back; // what the unkey goes back to
@@ -425,7 +436,7 @@ impl Path {
         }
         let rx = core::mem::replace(&mut self.rx, Rx::Off);
         self.set_rx(rx, out);
-        out.push(Act::Mute(false));
+        self.mute(false, out);
     }
 
     /// Battery Save's sleep phase: the receive path off (refused while keyed, TX-29).
@@ -442,7 +453,7 @@ impl Path {
     /// allowed, guard or not.
     pub fn safe(&mut self, now: u32, out: &mut Steps) {
         out.push(Act::PaZero);
-        out.push(Act::Mute(true));
+        self.mute(true, out);
         if let Some(tx) = self.tx.take() {
             out.push(Act::ChipRx(tx.chip()));
             out.push(Act::Wait(UNKEY_WAIT_MS));
@@ -466,6 +477,22 @@ impl Path {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SAFE-11: the safe state at boot mutes; the first receive path selected (no relay move) unmutes, and later
+    /// selects while unmuted add no mute steps.
+    #[test]
+    fn boot_safe_then_receive_unmutes() {
+        let mut p = Path::new();
+        let mut s = Steps::default();
+        p.safe(0, &mut s);
+        assert!(s.as_slice().contains(&Act::Mute(true)));
+        let mut s = Steps::default();
+        p.rx(Rx::Bk(Sel::VhfRx), Cause::ActiveSlot, 1000, &mut s).unwrap();
+        assert_eq!(s.as_slice().last(), Some(&Act::Mute(false)), "receive selected: unmuted");
+        let mut s = Steps::default();
+        p.rx(Rx::Bk(Sel::UhfRx), Cause::Auto, 2000, &mut s).unwrap();
+        assert!(!s.as_slice().iter().any(|a| matches!(a, Act::Mute(_))), "already unmuted: {:?}", s.as_slice());
+    }
     use crate::freq::mhz;
 
     fn plan(f: impl FnOnce(&mut Path, &mut Steps)) -> (Path, Steps) {
