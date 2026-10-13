@@ -147,6 +147,11 @@ pub const BEEP_GAIN: u8 = 0x17;
 const AF_OUT_BASE: u16 = 0x6042;
 const AF_OUT_BEEP: u16 = 0x6342;
 const AF_GAIN_BEEP: u16 = 0xB0A3;
+/// REG_48 while receiving: stock's 0xB00F | (gain2 << 4) with gain2 = 0x2B (Gain1 0 dB, Gain2 -4.5 dB, AF DAC 15).
+/// Stock's loader forces the calibration's two gain bytes (0xF210[3], [4]) to 0x2B on every radio, so this is a
+/// constant (`analysis/audio_path.md` §4, `analysis/calibration.md`). The start-up 0xB3FF (Gain2 +3.5 dB) is 8 dB
+/// hotter and distorted receive audio on the RT-950 Pro (Oct 12, 2026).
+pub const AF_GAIN_RX: u16 = 0xB2BF;
 /// REG_32, the frequency scan (stock's counter, 0x0801E1BC / 0x0801E1CC): scan time 0.8 s (bits 15:14 = 10),
 /// stock's other bits, enable in bit 0.
 const FREQ_SCAN_ON: u16 = 0x8245;
@@ -330,6 +335,12 @@ impl<B: Bus> Bk4829<B> {
     }
 
     /// Receive (stock: REG_30 0x0200 then 0xBFF1; the 0-to-1 of bit 15 recalibrates the VCO).
+    /// Stock's receive audio level, [`AF_GAIN_RX`] (written with each receive setup, as stock writes it with the AF
+    /// route).
+    pub fn af_gain_rx(&mut self) {
+        self.write(reg::AF_GAIN, AF_GAIN_RX);
+    }
+
     pub fn rx_on(&mut self) {
         self.write(reg::POWER, POWER_AF_ONLY);
         self.write(reg::POWER, POWER_RX);
