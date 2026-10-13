@@ -35,10 +35,6 @@ pub const UNTESTED: u8 = 3;
 /// not lost.
 pub static CHECK_STATE: [AtomicU8; CHECKS] = [const { AtomicU8::new(PENDING) }; CHECKS];
 
-/// A check the boot doesn't run: the boot screen shows it greyed, not failed.
-pub fn untested(index: u8) {
-    CHECK_STATE[index as usize].store(UNTESTED, Relaxed);
-}
 
 /// A boot check result: kept for the boot screen and announced on the event bus (for the log and the link).
 pub fn check(source: Source, index: u8, ok: bool) {

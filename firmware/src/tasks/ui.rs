@@ -222,6 +222,7 @@ pub async fn task() {
         if let Some((id, size)) = flash {
             (t.flash_id, t.flash_mb) = (id, (size >> 20) as u8);
         }
+        t.si4732 = CHECK_STATE[crate::tasks::CHECK_SI as usize].load(Relaxed) == PASSED;
         t.cal = if CHECK_STATE[CHECK_CAL as usize].load(Relaxed) == PASSED { ferrite_core::msg::CalState::Ok } else { ferrite_core::msg::CalState::Blank };
     }
     let mut live_rx = LIVE.receiver().unwrap();

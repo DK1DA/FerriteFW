@@ -1058,6 +1058,33 @@ fn si_input(mode: SiMode) {
     SI_IN[1].write(b);
 }
 
+/// The boot check of the SI4732: reset pulse, FM power-up, ready within 500 ms, its revision read, then powered
+/// down and held in reset. True when it answered.
+async fn si_probe(si: &mut Si4732<SiBus>) -> bool {
+    let d = &mut BusyDelay;
+    SI_RST.write(false);
+    Timer::after_millis(10).await;
+    SI_RST.write(true);
+    Timer::after_millis(10).await;
+    let mut ok = si.power_up_start(SiMode::Fm).is_ok();
+    if ok {
+        let t0 = now_ms();
+        ok = loop {
+            match si.ready() {
+                Ok(true) => break true,
+                Ok(false) if now_ms() - t0 < 500 => Timer::after_millis(5).await,
+                _ => break false,
+            }
+        };
+    }
+    if ok {
+        ok = si.revision(d).is_ok();
+    }
+    let _ = si.power_down(d); // also clears the driver's mode when the chip didn't answer
+    SI_RST.write(false);
+    ok
+}
+
 /// The broadcast receiver: powered up in the mode asked for (reset pulse, power-up, crystal settling), then
 /// tuned by polling. FM in 10 kHz units, AM in kHz. PA7/PC5 take stock's state for the mode (BCR-20). SSB (patch from SPI flash) comes with the link's patch import.
 async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<(), si4732::Error> {
@@ -1198,8 +1225,10 @@ pub async fn task() {
     for (i, sl) in r.live.slots.iter_mut().enumerate() {
         (sl.freq, sl.rssi) = (r.slots[i].freq, -121);
     }
-    // The SI4732 is held in reset (PA6) until FM broadcast or HF mode powers it: not tested at boot.
-    crate::tasks::untested(crate::tasks::CHECK_SI);
+    // SELF-*: the SI4732 at boot: out of reset (PA6), FM power-up, answering within 500 ms, then powered down and
+    // held in reset again until FM broadcast or HF mode needs it. Silent (no audio path changes).
+    let si_ok = si_probe(&mut r.si).await;
+    check(Source::Radio, crate::tasks::CHECK_SI, si_ok);
     r.select_rx(DEFAULT, Cause::ActiveSlot).await;
     r.tick().await;
     let live = LIVE.sender();
