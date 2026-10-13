@@ -825,18 +825,20 @@ impl Radio {
     }
 
     /// HF mode's report: frequency, signal and which receiver (ModeLive::Hf).
-    /// BCR-2, BCR-5: FM broadcast's report twice a second: the signal, stereo pilot and SNR, and up to 8 RDS
-    /// groups into the decoder (station name, radio text). Nothing in HF mode or with FM off.
+    /// BCR-2, BCR-5: FM broadcast's report ten times a second (the signal, stereo pilot and SNR: about 2 ms of I2C
+    /// each) and, every other time, up to 8 RDS groups into the decoder (station name, radio text). Nothing in HF
+    /// mode or with FM off.
     fn fm_poll(&mut self) {
         let now = now_ms() as u32;
         let Some(fm) = self.fm.as_mut() else { return };
         if self.hf.is_some() || now.wrapping_sub(fm.poll_at) > u32::MAX / 2 {
             return;
         }
-        fm.poll_at = now.wrapping_add(500);
+        fm.poll_at = now.wrapping_add(100);
+        fm.rds_turn = !fm.rds_turn;
         let d = &mut BusyDelay;
         let q = self.si.rsq(d).ok();
-        for _ in 0..8 {
+        for _ in 0..if fm.rds_turn { 8 } else { 0 } {
             match self.si.rds_read(d) {
                 Ok(Some(g)) => fm.rds.feed(g.blocks[0], g.blocks[1], g.blocks[2], g.blocks[3], g.errors),
                 _ => break,
@@ -1311,6 +1313,8 @@ struct FmRx {
     freq: u16,
     rds: si4732::rds::Rds,
     poll_at: u32,
+    /// RDS is read on every other report (5 times a second).
+    rds_turn: bool,
 }
 
 /// Returns the frequency the receiver tuned to (FM 10 kHz units, AM kHz; 0 when switched off).
@@ -1631,7 +1635,7 @@ impl Radio {
                 // BCR-2, BCR-5: FM's live report (frequency, signal, stereo, RDS) from here on; the tick polls it.
                 self.fm = match (b, &r) {
                     (BroadcastCmd::Off, _) | (BroadcastCmd::Am(_), _) | (_, Err(_)) => None,
-                    (_, Ok(f)) => Some(FmRx { freq: *f, rds: si4732::rds::Rds::init(), poll_at: 0 }),
+                    (_, Ok(f)) => Some(FmRx { freq: *f, rds: si4732::rds::Rds::init(), poll_at: 0, rds_turn: false }),
                 };
                 if self.fm.is_none() && matches!(self.live.mode, ModeLive::Fm { .. }) {
                     self.live.mode = ModeLive::Off;
