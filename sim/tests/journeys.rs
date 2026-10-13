@@ -287,11 +287,11 @@ fn hf_mode() {
     assert_ne!(r.sim.app().settings().hf.freq, 958_000, "seek moved");
 }
 
-/// FM broadcast opens from 0 3 1 6 on the SI4732 (BCR-1, BCR-2).
+/// FM broadcast opens from 0 3 1 on the SI4732 (BCR-1, BCR-2).
 #[test]
 fn fm_broadcast() {
     let mut r = Radio::new();
-    r.run("menu 0 3 1 6; expect screen \"FM broadcast\"; expect text \"MHz\"; expect text \"Signal\"");
+    r.run("menu 0 3 1; expect screen \"FM broadcast\"; expect text \"MHz\"; expect text \"Signal\"");
 }
 
 /// Hold # locks the keys and shows it; locked, OK does nothing; hold # unlocks (KEY-13, KEY-14).

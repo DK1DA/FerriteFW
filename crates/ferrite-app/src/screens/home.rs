@@ -12,7 +12,7 @@ use crate::slot::{self, band_near, mode_chip, shift_chip, shift_text, tone_text,
 use crate::{App, Screen, PAUSE_S};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
-use ferrite_core::msg::{RadioCmd, SLOTS};
+use ferrite_core::msg::{LiveAll, ModeLive, RadioCmd, SLOTS};
 use ferrite_ui::assets::*;
 use ferrite_ui::canvas;
 use ferrite_ui::gfx::*;
@@ -39,6 +39,95 @@ pub(crate) fn card(s: u8, active: u8) -> (i32, i32) {
     let h = |i: u8| if i == active { CARD_BIG } else { CARD_SMALL };
     let y = CARD_TOP + (0..s).map(|i| h(i) + CARD_GAP).sum::<i32>();
     (y, h(s))
+}
+
+/// What a card shows: a slot's own (0), the APRS card (1, APRS-17) or the broadcast card (2, BCR-26). A change
+/// redraws the card whole.
+pub(crate) fn card_kind(app: &App, s: u8) -> u8 {
+    if app.aprs_slot(s) {
+        1
+    } else if app.in_bcast_band(s) {
+        2
+    } else {
+        0
+    }
+}
+
+/// BCR-26: a slot in the broadcast band: the frequency with the stereo pilot and SNR, the RDS text (the radio text
+/// whole, wrapped on the large card; else the station name) and the signal. A slot in the band while another has
+/// the broadcast says where it plays instead (BCR-22).
+fn bcast_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8, y: i32, big: bool) {
+    use crate::bcast::{rds_text, trim};
+    use super::activity::Mode;
+    let p = s as usize;
+    let f = (app.tuned_freq(s) / 1000) as u16;
+    let mine = app.bcast_slot() == Some(s);
+    let (ps, rt, rssi, snr, stereo) = match live.mode {
+        ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if mine && app.radio.mode == Mode::Fm => (ps, rt, rssi, snr, stereo),
+        _ => ([b' '; 8], [0; 64], 0, 0, false),
+    };
+    let mut note = Buf::<24>::new();
+    if let Some(b) = app.bcast_slot().filter(|_| !mine) {
+        let _ = uwrite!(note, "Broadcast plays on {}", w::LETTERS[b as usize % 3] as char);
+    }
+    let (text, is_rt) = if note.is_empty() { (rds_text(&ps, &rt), !trim(&rt).is_empty()) } else { (note.as_bytes(), true) };
+    let tc = if note.is_empty() { TEXT } else { DIM };
+    let mut fb = Buf::<8>::new();
+    super::fm::fm_mhz(f, &mut fb);
+    let mut snr_t = Buf::<16>::new();
+    if rssi > 0 {
+        let _ = uwrite!(snr_t, "SNR {} dB", snr);
+    }
+    let heard = app.bcast_heard(live) && mine;
+    if big {
+        // The frequency row: MHz at 28 px, the stereo tag and SNR at the right.
+        if app.dirty(R_FREQ + p, hash(&(f, stereo, &snr_t))) {
+            canvas::banded(lcd, 14, y + 26, 212, 35, SURFACE, |lcd| {
+                let x2 = 15 + lcd.text4_rows(15, y + 56, fb.as_bytes(), &DIG_28, TEXT, SURFACE, y + 26, y + 61);
+                lcd.text4(x2 + 5, y + 56, b"MHz", &UI_12B, SUB, SURFACE);
+                if stereo {
+                    w::tag(lcd, 226, y + 28, b"STEREO", SUB, SURFACE);
+                }
+                w::field(lcd, 140, 86, y + 44, y + 61, y + 57, Align::Right, snr_t.as_bytes(), &UI_12, SUB, SURFACE);
+            });
+        }
+        // Three lines of RDS: 64 characters wrap into them.
+        if app.dirty(R_INFO + p, hash(&(text, is_rt, tc))) {
+            canvas::banded(lcd, 14, y + 62, 212, 45, SURFACE, |lcd| {
+                if text.is_empty() {
+                    w::field(lcd, 15, 211, y + 62, y + 80, y + 76, Align::Left, b"No RDS", &UI_12, DIM, SURFACE);
+                } else if is_rt {
+                    w::wrap(lcd, 15, 211, y + 62, y + 107, y + 75, 15, text, &UI_12, tc, SURFACE);
+                } else {
+                    w::field(lcd, 15, 211, y + 62, y + 84, y + 80, Align::Left, text, &UI_15B, TEXT, SURFACE);
+                }
+            });
+        }
+        // The signal: the FM screen's scale, green while it plays.
+        let lit = (rssi as u32 * w::METER_SEGS as u32 / 70).min(w::METER_SEGS as u32) as u8;
+        let old = app.drawn.meter[p].filter(|&(_, o)| o == heard).map(|(l, _)| l);
+        if app.drawn.meter[p] != Some((lit, heard)) {
+            w::meter(lcd, 14, y + 109, old, lit, if heard { GREEN } else { DIM }, SURFACE);
+            app.drawn.meter[p] = Some((lit, heard));
+        }
+    } else {
+        app.drawn.meter[p] = None;
+        if app.dirty(R_FREQ + p, hash(&(f, stereo))) {
+            canvas::banded(lcd, 14, y + 25, 212, 25, SURFACE, |lcd| {
+                let x2 = 15 + lcd.text4_rows(15, y + 45, fb.as_bytes(), &DIG_26, TEXT, SURFACE, y + 25, y + 50);
+                lcd.text4(x2 + 5, y + 45, b"MHz", &UI_12B, SUB, SURFACE);
+                if stereo {
+                    w::tag(lcd, 226, y + 30, b"STEREO", SUB, SURFACE);
+                }
+            });
+        }
+        // One line: as much of the text as fits.
+        if app.dirty(R_SUB + p, hash(&(text, tc))) {
+            canvas::banded(lcd, 15, y + 51, 211, 15, SURFACE, |lcd| {
+                w::field(lcd, 15, 211, y + 51, y + 65, y + 61, Align::Left, w::fit(text, &UI_12, 211), &UI_12, tc, SURFACE);
+            });
+        }
+    }
 }
 
 /// APRS-17: slot C in APRS mode is the APRS card: the frequency, stations heard, the last station or message and
@@ -150,6 +239,10 @@ impl View for Home {
                 app.keys.used(Key::Side(1));
                 app.step_clarifier(if e.key == Key::Right { 1 } else { -1 });
             }
+            // BCR-25: ◀▶ seek on the broadcast slot's VFO
+            (Key::Left | Key::Right, Short) if app.bcast_slot() == Some(app.active) && !app.slots[app.active as usize].on_channel() => {
+                app.fm_seek(e.key == Key::Right)
+            }
             (Key::Left | Key::Right, Short | Repeat) => group(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Slot, Short) => {
                 // NAV-5
@@ -240,7 +333,7 @@ impl View for Home {
                 lcd.fill(234, y, 6, h, BG);
                 top = y + h;
             }
-            let geom = hash(&(s, y, h, app.aprs_slot(s))) | 1;
+            let geom = hash(&(s, y, h, card_kind(app, s))) | 1;
             if app.drawn.hash[R_FRAME + p] != 0 && app.drawn.card[p] == geom {
                 // HOME-13: while the knob turns only the active card follows; the others wait in place.
                 if s == app.active || !app.held(R_FRAME + p) {
@@ -271,6 +364,8 @@ impl View for Home {
         if app.aprs_slot(app.active) {
             return Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, ("Hold MENU", "APRS")]); // APRS-17
         }
+        let a = app.active;
+        let group = if app.bcast_slot() == Some(a) && !app.slots[a as usize].on_channel() { "Seek" } else { group }; // BCR-25
         Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, (ARROWS_LR, group)])
     }
 }
@@ -286,9 +381,10 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
     let (state, sc) = app.state(s, live);
     let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
     let aprs = app.aprs_slot(s);
-    let geom = hash(&(s, y, h, aprs)) | 1;
+    let kind = card_kind(app, s);
+    let geom = hash(&(s, y, h, kind)) | 1;
     let drawn_before = app.drawn.hash[R_FRAME + p] != 0;
-    if !app.dirty(R_FRAME + p, hash(&(s, y, h, border, aprs))) {
+    if !app.dirty(R_FRAME + p, hash(&(s, y, h, border, kind))) {
         // unchanged
     } else if drawn_before && app.drawn.card[p] == geom {
         // Only the border's colour changed (RX, idle): redraw the border alone. Redrawing the whole card blanked
@@ -332,25 +428,30 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
     } else if c != 0 && !lv.scanning {
         slot::clar_text(c, &mut clr);
     }
-    // TSRCH-13: a tone hint takes the state's place, in a wider field.
+    // TSRCH-13: a tone hint takes the state's place, in a wider field; so does a long state ("Watch off: relay",
+    // BCR-15).
     let heard = state == "heard";
     let mut ht = Buf::<16>::new();
     if heard {
         heard_text(lv.heard_tone, &mut ht);
+    } else if state.len() > 8 {
+        ht.set(state.as_bytes());
     }
+    let wide = !ht.is_empty();
+    let ww = if wide { (text4_width(ht.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { 0 };
     if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, &ht))) {
         w::badge(lcd, 14, hy + 1, s, big, SURFACE);
         lcd.fill(28, hy, 6, 17, SURFACE);
-        let hw = if heard { 226 - HEARD_W - 34 } else { 120 };
+        let hw = if wide { 226 - ww - 34 } else { 120 };
         w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, SUB, SURFACE);
-        if heard {
+        if wide {
             let top = if big { y + 6 } else { hy };
-            ferrite_ui::canvas::banded(lcd, 226 - HEARD_W, top, HEARD_W + 2, 18, SURFACE, |lcd| {
-                w::field(lcd, 226 - HEARD_W, HEARD_W, hy, hy + 17, hb, Align::Right, ht.as_bytes(), &UI_12, sc, SURFACE);
+            ferrite_ui::canvas::banded(lcd, 226 - ww, top, ww + 2, 18, SURFACE, |lcd| {
+                w::field(lcd, 226 - ww, ww, hy, hy + 17, hb, Align::Right, ht.as_bytes(), &UI_12, sc, SURFACE);
             });
         } else if big {
             ferrite_ui::canvas::banded(lcd, 154, y + 6, 74, 18, SURFACE, |lcd| {
-                let tagged = state == "RX" || state == "MON";
+                let tagged = matches!(state, "RX" | "MON" | "FM");
                 if tagged {
                     w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
                 } else if state != "idle" {
@@ -369,6 +470,10 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
     }
     if aprs {
         aprs_card(app, lcd, cx.store.data(), s, y, big);
+        return;
+    }
+    if kind == 2 {
+        bcast_card(app, lcd, live, s, y, big);
         return;
     }
     let f = app.shown_freq(s, live);
@@ -483,6 +588,8 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
 /// Knob or ▲▼ on home: a step in VFO mode (NAV-2), a channel in channel mode (NAV-1); big with SIDE2 (NAV-3).
 fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) {
     let a = app.active as usize;
+    // BCR-25: a VFO in the broadcast band steps by the FM step (0 3 1 2)
+    let fm_step = (!big && app.in_bcast_band(a as u8)).then(|| crate::settings::FM_STEPS[app.set.fm_step as usize % 3].0 as i32 * 1000);
     let s = &mut app.slots[a];
     if s.on_channel() {
         let n = store.zone_len(s.zone) as i32;
@@ -501,7 +608,7 @@ fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) {
         s.ch = store.zone_at(s.zone, s.pos);
         app.send_slot(a as u8);
     } else {
-        let step = if big { 100_000 } else { STEPS[s.cfg.step as usize % STEPS.len()].0 as i32 };
+        let step = if big { 100_000 } else { fm_step.unwrap_or(STEPS[s.cfg.step as usize % STEPS.len()].0 as i32) };
         // Plain steps from where it is (146.520 stays on its 5 kHz raster with a 12.5 kHz step); snapping to
         // the step is for typed entry (VFO-12). Kept inside what the chips tune.
         let f = (s.vfo as i32 + d * step).clamp(mhz(1) as i32 + 80_000, mhz(1300) as i32 - 1) as Freq10;

@@ -168,6 +168,39 @@ fn tone_hint_matches_its_goldens() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// BCR-26 to BCR-28: slot A tuned to 100.5 MHz plays broadcast FM: its card with the full radio text, stereo and
+/// SNR; 99.1 (no radio text: the station name); slot B tuned in too takes it ("FM on B" on A); the FM screen, quick
+/// settings and the other two layouts with the broadcast slot.
+#[test]
+fn broadcast_slot_matches_its_goldens() {
+    use ferrite_core::keys::Key;
+    let mut failures = Vec::new();
+    let mut r = Radio::new();
+    r.home();
+    r.event(Event::FmStation);
+    r.wait(3000);
+    failures.extend(check("bcast-home", &r.sim.screen_rgb()));
+    r.press(Key::Menu).wait(1000);
+    failures.extend(check("bcast-quick", &r.sim.screen_rgb()));
+    r.home();
+    r.menu("0 3 1").wait(3000);
+    failures.extend(check("bcast-fm-screen", &r.sim.screen_rgb()));
+    r.home();
+    r.event(Event::FmStation); // 99.1: the station name only
+    r.wait(3000);
+    failures.extend(check("bcast-home-ps", &r.sim.screen_rgb()));
+    r.press(Key::Slot);
+    r.event(Event::FmStation); // B to 100.5: the broadcast moves to B
+    r.wait(3000);
+    failures.extend(check("bcast-home-handover", &r.sim.screen_rgb()));
+    for l in 1..3 {
+        r.event(Event::Layout);
+        r.home().wait(1000);
+        failures.extend(check(&format!("bcast-layout{l}"), &r.sim.screen_rgb()));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// The same screen drawn twice from scratch is the same: the goldens can only change when the code does.
 #[test]
 fn shots_are_deterministic() {

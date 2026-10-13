@@ -129,8 +129,9 @@ fn ram_is_small() {
     // only the border (DISP-25: 3 x 4 bytes, +8 with the packing) to 1248; the scroll cue as drawn, so a row
     // redrawn beside it draws its part too instead of blanking it (DISP-25: 4 x 2 bytes) to 1256; the modes by
     // state (MODE-1 to MODE-4: the repeater started, the active frequency and when it last moved, the lease's
-    // renewal and the Radio task's drop count) and the knob's last step (HOME-13), 32 with padding, to 1288
-    assert!(n <= 1288, "App is {n} bytes");
+    // renewal and the Radio task's drop count) and the knob's last step (HOME-13), 32 with padding, to 1288; the
+    // broadcast slot, the slots in the band, the station sent and a seek landing (BCR-22, BCR-25), 8 to 1296
+    assert!(n <= 1296, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -683,6 +684,7 @@ fn literal_scanner() {
 
 /// Group B: transmit, scan, scope, tone search, counter, FM, HF, weather, alert, crossband, layouts.
 mod radio_activity;
+mod bcast;
 mod lights;
 mod aprs;
 mod d64;

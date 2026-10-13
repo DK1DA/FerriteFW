@@ -1,0 +1,154 @@
+//! Broadcast FM by frequency (manual chapter 20, BCR-21 to BCR-30; decision 107): a slot tuned into the broadcast
+//! FM band plays on the SI4732 by itself, with no menu, and becomes a BK4829 slot again when tuned out. One slot
+//! at a time: the slot that last came into the band has it, and another one in the band shows "FM on B" with no
+//! audio until it is tuned out. The FM screen and the broadcast slot share one FM state: its frequency is the
+//! slot's while there is one, and the presets recall into it.
+//!
+//! The broadcast is the exclusive mode [`Mode::Fm`] like the FM screen's ([`App::wanted_mode`]): any other mode
+//! screen, or PTT, stops it (TX-24), and it starts again after.
+
+use crate::screens::activity::Mode;
+use crate::App;
+use ferrite_core::freq::{mhz, Freq10};
+use ferrite_core::msg::{BroadcastCmd, LiveAll, ModeLive, RadioCmd, SLOTS};
+use ferrite_core::txplan::Region;
+
+/// The broadcast FM band (BCR-21): 87.5-108.0 MHz, 76-95 MHz with region Japan.
+pub fn band(r: Option<Region>) -> (Freq10, Freq10) {
+    match r {
+        Some(Region::Japan) => (mhz(76), mhz(95)),
+        _ => (mhz(87) + 50_000, mhz(108)),
+    }
+}
+
+/// A seek that hasn't landed by now is given up (the receiver found nothing new).
+const SEEK_MS: u32 = 10_000;
+
+impl App {
+    /// Slot `s` is tuned into the broadcast FM band (BCR-21); the APRS slot never is (it is held to its
+    /// frequency, APRS-19).
+    pub fn in_bcast_band(&self, s: u8) -> bool {
+        let (lo, hi) = band(self.set.region());
+        !self.aprs_slot(s) && (lo..=hi).contains(&self.tuned_freq(s))
+    }
+
+    /// The slot playing broadcast FM (BCR-22), if any.
+    pub fn bcast_slot(&self) -> Option<u8> {
+        self.radio.bcast
+    }
+
+    /// BCR-22: which slot has the broadcast, from where the slots are: a slot that came into the band takes it
+    /// (the active one first when several came at once); the slot that has it keeps it while it stays in; when it
+    /// leaves, another slot still in the band takes it back. A change goes to the Radio task (BCR-23).
+    pub(crate) fn bcast_update(&mut self) {
+        let inb = (0..SLOTS as u8).filter(|&s| self.in_bcast_band(s)).fold(0u8, |m, s| m | 1 << s);
+        let came = inb & !self.radio.bcast_in;
+        self.radio.bcast_in = inb;
+        let a = self.active;
+        let pick = |m: u8| match m {
+            0 => None,
+            m if m & 1 << a != 0 => Some(a),
+            m => Some(m.trailing_zeros() as u8),
+        };
+        let next = pick(came).or(self.radio.bcast.filter(|&s| inb & 1 << s != 0)).or_else(|| pick(inb));
+        if next != self.radio.bcast {
+            self.radio.bcast = next;
+            self.out.push(RadioCmd::BcastSlot(next));
+        }
+    }
+
+    /// The station the SI4732 plays (10 kHz): the broadcast slot's frequency, else the FM screen's last one.
+    pub fn fm_freq(&self) -> u16 {
+        match self.radio.bcast {
+            Some(s) => (self.tuned_freq(s) / 1000) as u16,
+            None => self.set.fm_freq,
+        }
+    }
+
+    /// The FM tuning range (10 kHz): the broadcast band while a slot has the broadcast (tuning never takes it out
+    /// from the FM screen), else the FM screen's 64-108 MHz (BCR-17).
+    pub(crate) fn fm_range(&self) -> (u16, u16) {
+        match self.radio.bcast {
+            Some(_) => {
+                let (lo, hi) = band(self.set.region());
+                ((lo / 1000) as u16, (hi / 1000) as u16)
+            }
+            None => (crate::screens::fm::LO, crate::screens::fm::HI),
+        }
+    }
+
+    /// A new FM station (tuned, sought or a preset, BCR-25): into the broadcast slot, on its VFO (a channel slot
+    /// moves to its VFO there), and kept as the FM screen's last station. The reconciler retunes the receiver.
+    pub(crate) fn fm_set(&mut self, f: u16) {
+        self.set.fm_freq = f;
+        let Some(s) = self.radio.bcast else { return };
+        let f10 = f as Freq10 * 1000;
+        let sl = &mut self.slots[s as usize % SLOTS];
+        if sl.vfo_mode && sl.vfo == f10 {
+            return;
+        }
+        (sl.vfo, sl.vfo_mode, sl.clar) = (f10, true, 0);
+        sl.mem[crate::slot::band_near(f10)] = f10;
+        self.send_slot(s);
+    }
+
+    /// ◀▶ seek from the station playing (BCR-25): the receiver's own; the station it stops on is taken as it lands
+    /// ([`App::bcast_tick`]).
+    pub(crate) fn fm_seek(&mut self, up: bool) {
+        if self.radio.mode == Mode::Fm {
+            self.out.push(RadioCmd::Broadcast(BroadcastCmd::Seek { up }));
+            self.radio.fm_seek_at = Some(self.now);
+        }
+    }
+
+    /// MODE-2 for the broadcast: while FM runs, a new station (the slot tuned, a preset) retunes the receiver.
+    /// Not while a seek is landing: that one is the receiver's.
+    pub(crate) fn fm_retune(&mut self) {
+        let f = self.fm_freq();
+        if self.radio.mode == Mode::Fm && self.radio.fm_seek_at.is_none() && f != self.radio.fm_sent {
+            self.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(f)));
+            self.radio.fm_sent = f;
+            self.set.fm_freq = f;
+        }
+    }
+
+    /// Every tick: a seek's station, once the receiver reports one other than where it began.
+    pub(crate) fn bcast_tick(&mut self, live: &LiveAll) {
+        let Some(t) = self.radio.fm_seek_at else { return };
+        match live.mode {
+            ModeLive::Fm { freq, .. } if self.radio.mode == Mode::Fm && freq != 0 && freq != self.radio.fm_sent => {
+                self.radio.fm_sent = freq;
+                self.radio.fm_seek_at = None;
+                self.fm_set(freq);
+            }
+            _ if self.radio.mode != Mode::Fm || self.now.wrapping_sub(t) >= SEEK_MS => self.radio.fm_seek_at = None,
+            _ => {}
+        }
+    }
+
+    /// The broadcast plays on the speaker now (no amateur slot heard, BCR-24).
+    pub fn bcast_heard(&self, live: &LiveAll) -> bool {
+        self.radio.mode == Mode::Fm && matches!(live.mode, ModeLive::Fm { heard: true, .. })
+    }
+
+    /// Slot `s` isn't listened to while broadcast plays: the band relay is released (BCR-15), and it needs it.
+    pub(crate) fn relay_off(&self, s: u8) -> bool {
+        self.radio.mode == Mode::Fm && Some(s) != self.radio.bcast && ferrite_core::path::Sel::rx(self.tuned_freq(s)).relay()
+    }
+}
+
+/// The RDS line (BCR-26): the radio text, else the station name, else nothing (padding trimmed).
+pub fn rds_text<'a>(ps: &'a [u8], rt: &'a [u8]) -> &'a [u8] {
+    let rt = trim(rt);
+    if rt.is_empty() { trim(ps) } else { rt }
+}
+
+/// Text up to its padding (NULs, trailing spaces).
+pub fn trim(b: &[u8]) -> &[u8] {
+    let n = b.iter().position(|&c| c == 0).unwrap_or(b.len());
+    let mut s = &b[..n];
+    while let [rest @ .., b' '] = s {
+        s = rest;
+    }
+    s
+}

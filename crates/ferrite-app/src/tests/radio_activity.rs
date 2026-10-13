@@ -464,7 +464,7 @@ fn hf_mode() {
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: false, .. })));
 }
 
-/// BCR-1: MENU 0 3 1 6; the knob tunes; BACK turns it off.
+/// BCR-1: MENU 0 3 1; the knob tunes; BACK turns it off.
 #[test]
 fn fm_broadcast() {
     let mut t = T::new();
@@ -1633,7 +1633,7 @@ fn random_use_keeps_modes_in_step() {
         let mut radio: Option<Kind> = None;
         for step in 0..2000 {
             let s = store();
-            let what = match next(20) {
+            let what = match next(21) {
                 0..=7 => {
                     let k = KEYS[next(KEYS.len() as u64) as usize];
                     if next(6) == 0 {
@@ -1678,6 +1678,13 @@ fn random_use_keeps_modes_in_step() {
                     }
                     "timeout"
                 }
+                20 => {
+                    // BCR-22: a slot tuned into (or out of) the broadcast band
+                    let f = [mhz(100) + 50_000, mhz(99) + 10_000, mhz(146) + 52_000][next(3) as usize];
+                    t.app.set_vfo(next(3) as u8, f);
+                    t.wait(100);
+                    "broadcast"
+                }
                 _ => {
                     keyed = !keyed;
                     ptt(&mut t, keyed);
@@ -1692,7 +1699,11 @@ fn random_use_keeps_modes_in_step() {
             assert_eq!(radio, kind(m), "seed {seed} step {step} ({what}): the Radio task runs what the app thinks");
             let mode_screen = |s: &Screen| matches!(s, Screen::Scope(_) | Screen::ToneSearch(_) | Screen::Counter(_) | Screen::Fm(_) | Screen::Hf(_) | Screen::Crossband(_));
             if t.app.screen() == Screen::Home && t.app.set.layout == 0 && !t.app.back.iter().flatten().any(mode_screen) {
-                assert_eq!(m, Mode::Off, "seed {seed} step {step} ({what}): home is normal receive");
+                let want = if t.app.bcast_slot().is_some() && t.app.radio.keyed.is_none() { Mode::Fm } else { Mode::Off };
+                assert_eq!(m, want, "seed {seed} step {step} ({what}): home is normal receive, or the broadcast slot's");
+            }
+            if let Some(b) = t.app.bcast_slot() {
+                assert!(t.app.in_bcast_band(b), "seed {seed} step {step} ({what}): the broadcast slot is in the band");
             }
             if t.app.radio.keyed.is_some() {
                 assert!(matches!(m, Mode::Off | Mode::Hf | Mode::Xb), "seed {seed} step {step} ({what}): {m:?} ran while keyed");

@@ -158,6 +158,10 @@ struct Radio {
     fm: Option<FmRx>,
     /// BCR-6: the SI4732 is the source being heard (broadcast on, no slot heard); its hard mute follows this.
     si_heard: bool,
+    /// BCR-24: the broadcast's turn on the speaker (back 2 s after a slot heard goes quiet).
+    bturn: watch::BcastTurn,
+    /// BCR-23: the slot playing broadcast FM (no chip listens to it while FM plays).
+    bcast_slot: Option<u8>,
     slots: [SlotRx; SLOTS],
     active: u8,
     /// The watch set from the UI, a bit per slot.
@@ -674,7 +678,7 @@ impl Radio {
         // SAME on a weather channel's chip (DEC-19).
         self.same_tick(now);
         // 2. The watch turn.
-        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: 0 };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: 0, off: self.bcast_off() };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.tick(now, &cfg, sq, keyed);
         // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
@@ -730,10 +734,12 @@ impl Radio {
             }
         }
         // BCR-6: in FM or AM broadcast the SI4732 is the source while no slot is heard (radio monitor); a heard slot
-        // mutes it and plays the BK4829 instead. Without this the amp stayed off in FM broadcast on the radio
-        // (Oct 12, 2026): only the BK4829s were ever counted as a source.
+        // mutes it and plays the BK4829 instead, and the broadcast returns 2 s after it goes quiet (BCR-24).
+        // Without this the amp stayed off in FM broadcast on the radio (Oct 12, 2026): only the BK4829s were ever
+        // counted as a source.
         let broadcast = self.si.mode().is_some() && self.hf.is_none();
-        let si_heard = broadcast && audio_chip.is_none();
+        let turn = self.bturn.tick(now, audio_chip.is_some());
+        let si_heard = broadcast && turn;
         if self.si_heard != si_heard {
             if broadcast {
                 let _ = self.si.mute(!si_heard, &mut BusyDelay);
@@ -828,6 +834,7 @@ impl Radio {
     /// BCR-2, BCR-5: FM broadcast's report ten times a second (the signal, stereo pilot and SNR: about 2 ms of I2C
     /// each) and, every other time, up to 8 RDS groups into the decoder (station name, radio text). Nothing in HF
     /// mode or with FM off.
+    #[inline(never)] // in slow flash (memory.x): ten times a second at most
     fn fm_poll(&mut self) {
         let now = now_ms() as u32;
         let Some(fm) = self.fm.as_mut() else { return };
@@ -844,8 +851,12 @@ impl Radio {
                 _ => break,
             }
         }
-        let mut rt = [0u8; 32];
-        rt.copy_from_slice(&fm.rds.rt[..32]);
+        // BCR-30: the radio text whole, once complete; until then (and through an A/B change) the last one shown.
+        let rt = match self.live.mode {
+            _ if fm.rds.rt_complete() => fm.rds.rt,
+            ModeLive::Fm { rt, .. } => rt,
+            _ => [0; 64],
+        };
         self.live.mode = ModeLive::Fm {
             freq: fm.freq,
             ps: fm.rds.ps,
@@ -853,7 +864,19 @@ impl Radio {
             rssi: q.map_or(0, |q| q.rssi),
             snr: q.map_or(0, |q| q.snr),
             stereo: q.is_some_and(|q| q.stereo),
+            heard: self.si_heard,
         };
+    }
+
+    /// BCR-23: while FM broadcast plays no chip listens to the broadcast slot, nor to a slot needing the band relay,
+    /// which FM leaves released (BCR-15). In slow flash (memory.x): once a receive tick.
+    #[inline(never)]
+    fn bcast_off(&self) -> u8 {
+        if self.fm.is_none() {
+            return 0;
+        }
+        let relay = (0..SLOTS).filter(|&i| Sel::rx(self.slots[i].freq).relay()).fold(0u8, |m, i| m | 1 << i);
+        relay | self.bcast_slot.map_or(0, |s| 1 << s)
     }
 
     fn hf_poll(&mut self) {
@@ -1387,6 +1410,8 @@ pub async fn task() {
         muted: false,
         si_used: false,
         si_heard: false,
+        bturn: watch::BcastTurn::new(),
+        bcast_slot: None,
         fm: None,
         slots: [SlotRx::DEFAULT; SLOTS],
         active: 0,
@@ -1637,7 +1662,8 @@ impl Radio {
                     (BroadcastCmd::Off, _) | (BroadcastCmd::Am(_), _) | (_, Err(_)) => None,
                     (_, Ok(f)) => Some(FmRx { freq: *f, rds: si4732::rds::Rds::init(), poll_at: 0, rds_turn: false }),
                 };
-                if self.fm.is_none() && matches!(self.live.mode, ModeLive::Fm { .. }) {
+                // A new station (or none): nothing of the last one's RDS carries over.
+                if matches!(self.live.mode, ModeLive::Fm { .. }) {
                     self.live.mode = ModeLive::Off;
                 }
                 match (b, r.is_ok()) {
@@ -1654,6 +1680,7 @@ impl Radio {
                     }
                 }
             }
+            RadioCmd::BcastSlot(s) => self.bcast_slot = s,
             RadioCmd::Hf { freq, mode, on } => self.hf(freq, mode, on).await,
             RadioCmd::HfSeek { up } => self.hf_seek(up).await,
             RadioCmd::Shutdown => {

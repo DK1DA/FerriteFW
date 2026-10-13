@@ -76,6 +76,7 @@ fn map_event(k: K) -> Option<Event> {
         K::B => Event::Beacon,
         K::D => Event::ScreenOff,
         K::T => Event::ToneHint,
+        K::R => Event::FmStation,
         _ => return None,
     })
 }

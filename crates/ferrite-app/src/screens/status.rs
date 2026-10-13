@@ -123,8 +123,11 @@ slow_table! {
         (slow!("Broadcast"), |c, b| {
             match c.app.radio.mode {
                 super::activity::Mode::Fm => {
-                    let f = c.app.set.fm_freq as u32;
+                    let f = c.app.fm_freq() as u32;
                     let _ = uwrite!(b, "FM {}.{}", f / 100, f % 100 / 10);
+                    if let Some(s) = c.app.bcast_slot() {
+                        let _ = uwrite!(b, " on {}", w::LETTERS[s as usize % 3] as char); // BCR-27
+                    }
                 }
                 super::activity::Mode::Hf => b.set(b"HF mode"),
                 _ => b.set(b"Off"),

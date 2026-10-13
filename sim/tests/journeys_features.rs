@@ -156,22 +156,27 @@ fn scope_redraws_little() {
 }
 
 /// FM broadcast: hold MENU opens its own options (BCR-3); ▲ tunes by the step, digits do nothing on the main
-/// screen, OK opens the presets (BCR-18); it tunes 64-108 MHz, wrapping at the ends (BCR-17); with radio monitor on, a
+/// screen but 1-5 (BCR-3), OK opens the presets (BCR-18); it tunes 64-108 MHz, wrapping at the ends (BCR-17); with radio monitor on, a
 /// slot that opens interrupts it (BCR-4).
 #[test]
 fn broadcast() {
     let mut r = Radio::new();
-    r.run("menu 0 3 1; press UP; press OK; wait 500ms; expect screen \"FM broadcast\"; expect text \"101.1\"");
+    r.run("menu 0 3 1; wait 500ms; expect screen \"FM broadcast\"; expect text \"101.1\"");
     r.run("hold OK; expect text \"Step\"; expect text \"AGC\"; expect text \"Radio monitor\"; press BACK");
     r.run("press UP; wait 300ms; expect text \"101.2\"");
-    r.run("press 5; wait 300ms; expect screen \"FM broadcast\"; expect text \"101.2\"");
+    r.run("press 7; wait 300ms; expect screen \"FM broadcast\"; expect text \"101.2\"");
     for _ in 0..372 {
         r.press(Key::Down); // 101.2 down to the bottom of the band
     }
     r.expect_text("64.0");
     r.press(Key::Down); // past it: round to the top, never below 64
     r.expect_text("108.0");
-    r.wait(12_000); // C's airband scan hears something
+    // C's airband scan hears something
+    for _ in 0..300 {
+        if r.wait(100).has("broadcast paused") {
+            break;
+        }
+    }
     r.expect_text("broadcast paused");
     r.run("press OK; expect screen \"FM presets\"; expect text \"of 20 used\"");
 }
@@ -316,3 +321,45 @@ fn cw_id_setting() {
     let t = b.text().to_lowercase();
     assert!(t.contains("callsign"), "says why:\n{t}");
 }
+
+/// BCR-21 to BCR-24: the R event tunes A to 100.5: A plays broadcast with its RDS, B and C keep watching; every
+/// time an amateur slot is heard the broadcast goes quiet at once, and it comes back 2 s after the last one ends.
+#[test]
+fn broadcast_slot_and_audio_priority() {
+    use ferrite_core::msg::ModeLive;
+    let mut r = Radio::new();
+    r.home();
+    // C's airband scan stops on a carrier every few seconds, each a slot heard: stop it, so B's signal (2 s in
+    // every 25) is the one that interrupts.
+    r.run("press SLOT; press SLOT; press SIDE2; press SLOT; wait 3s");
+    assert!(!r.sim.radio().live.slots[2].scanning);
+    r.event(Event::FmStation).wait(2500);
+    r.expect_text("100.5").expect_text("Harvest Moon").expect_text("STEREO");
+    assert_eq!(r.sim.app().bcast_slot(), Some(0));
+    let (mut last_open, mut muted, mut back) = (0u32, 0, 0);
+    let mut was = true;
+    for _ in 0..3000 {
+        r.wait(20);
+        let live = &r.sim.radio().live;
+        let ModeLive::Fm { heard, .. } = live.mode else { panic!("FM runs: {:?}", live.mode) };
+        assert!(!live.slots[0].squelch_open, "no chip on the broadcast slot");
+        if live.slots.iter().any(|s| s.squelch_open) {
+            last_open = r.t;
+            assert!(!heard, "at {} ms a slot is heard and so is the broadcast", r.t);
+        }
+        if heard {
+            assert!(r.t - last_open >= 1_980, "back {} ms after a slot", r.t - last_open);
+        } else if last_open > 0 && r.t - last_open >= 2_100 {
+            panic!("still muted {} ms after the last slot", r.t - last_open);
+        }
+        muted += (was && !heard) as u32;
+        back += (!was && heard) as u32;
+        was = heard;
+    }
+    assert!(muted > 0 && back > 0, "seen muted {muted} and back {back} times");
+    // B tuned in too: the broadcast moves; A says where it plays.
+    r.press(Key::Slot).event(Event::FmStation).wait(2500);
+    assert_eq!(r.sim.app().bcast_slot(), Some(1));
+    r.expect_text("FM on B").expect_text("Broadcast plays on B");
+}
+

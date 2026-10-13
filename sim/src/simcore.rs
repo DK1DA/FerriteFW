@@ -40,7 +40,8 @@ keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits
       hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
       M message · N alert · F5 GPS · F6 Bluetooth · F7 battery · F8 power off (or click VOL: the power switch) · F9 empty battery
       F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 5)
-      L home layout · B a beacon (automatic transmit) · hold Enter while booting: the settings reset
+      L home layout · B a beacon (automatic transmit) · R broadcast FM on the active slot (100.5, again 99.1)
+      hold Enter while booting: the settings reset
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
 
 /// The largest whole scale offered.
@@ -158,6 +159,9 @@ pub enum Event {
     /// T: a station on the active slot sending another tone than the slot's: the tone hint (TSRCH-13) shows 88.5;
     /// T again, or a retune or new receive tone, clears it.
     ToneHint,
+    /// R: the active slot's VFO to 100.5 MHz, a broadcast FM station with the full RDS radio text, so the slot plays
+    /// broadcast (BCR-21); R again: 99.1, a station with only its name (BCR-26).
+    FmStation,
 }
 
 /// A recent redraw region and when it was drawn (ms), for the redraw flash.
@@ -882,6 +886,11 @@ impl SimCore {
                     GpsState::Searching => GpsState::Fix,
                     GpsState::Fix => GpsState::Off,
                 }
+            }
+            Event::FmStation if live => {
+                let a = app.active();
+                let f = if app.slot(a).freq() == freq::mhz(100) + 50_000 { freq::mhz(99) + 10_000 } else { freq::mhz(100) + 50_000 };
+                app.set_vfo(a, f);
             }
             Event::ToneHint if live => {
                 let a = app.active();

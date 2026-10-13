@@ -457,6 +457,21 @@ fn fm_preset_tunes_the_broadcast_receiver() {
     assert_eq!(t.name(), "FM broadcast");
 }
 
+/// BCR-25: with a slot playing broadcast, a preset recalls into that slot's VFO (one FM state).
+#[test]
+fn fm_preset_recalls_into_the_broadcast_slot() {
+    let mut t = T::new();
+    t.app.set_vfo(1, 10_050_000);
+    t.wait(100);
+    assert_eq!(t.app.bcast_slot(), Some(1));
+    t.open(Dest::FmBroadcast);
+    t.tap(Key::Menu);
+    t.tap(Key::Down);
+    t.tap(Key::Menu);
+    assert_eq!(t.app.slot(1).freq(), 9_150_000);
+    assert!(t.cmds().contains(&RadioCmd::Broadcast(ferrite_core::msg::BroadcastCmd::Fm(9150))));
+}
+
 /// Picking a preset from the FM screen returns to that FM screen: one BACK leaves FM broadcast.
 #[test]
 fn fm_preset_returns_to_the_same_fm_screen() {
@@ -465,8 +480,8 @@ fn fm_preset_returns_to_the_same_fm_screen() {
     assert_eq!(t.name(), "FM broadcast");
     for options in [false, true] {
         if options {
-            t.hold(Key::Menu); // the FM options: Presets is the fourth row
-            t.tap(Key::Digit(4));
+            t.hold(Key::Menu); // the FM options: Presets is the first row (0 3 1 1)
+            t.tap(Key::Digit(1));
         }
         t.tap(Key::Menu);
         assert_eq!(t.name(), "FM presets");

@@ -10,6 +10,8 @@
 //!   changes the active slot (WATCH-5; Follow was dropped, decision 81).
 //! - Paused (WATCH-6, WATCH-16, TX-34): while keyed and until [`Watch::pause`]'s time, only the active slot.
 //! - Cancelled (WATCH-11): when the watch set needs more than one relay state, only the active slot.
+//! - Off (BCR-23): slots no chip listens to at all, whatever the set says: the broadcast slot (the SI4732 has it)
+//!   and, while broadcast plays with the relay released, slots that need the relay (BCR-15).
 //!
 //! The timings marked "to confirm on the bench" in the manual (WATCH-17).
 
@@ -35,6 +37,8 @@ pub struct Cfg {
     pub freq: [Freq10; SLOTS],
     /// Watched slots not heard (still highlighted).
     pub muted: u8,
+    /// Slots not listened to at all, the active one too (BCR-23).
+    pub off: u8,
 }
 
 /// What to do now.
@@ -101,15 +105,17 @@ impl Watch {
         let mut out = Out::default();
         let active = c.active % SLOTS as u8;
         let relay = |s: usize| Sel::rx(c.freq[s]).relay();
-        let mut set = c.set | 1 << active;
-        if (0..SLOTS).any(|s| set & 1 << s != 0 && relay(s) != relay(active as usize)) {
-            (set, out.cancelled) = (1 << active, true);
+        let mut set = (c.set | 1 << active) & !c.off;
+        // The relay state the set is held to: the active slot's, or released when the active slot is off (BCR-15).
+        let base = set & 1 << active != 0 && relay(active as usize);
+        if (0..SLOTS).any(|s| set & 1 << s != 0 && relay(s) != base) {
+            (set, out.cancelled) = (1 << active & !c.off, true);
         }
         if self.pause_until.is_some_and(|t| after(now, t)) {
             self.pause_until = None;
         }
         if keyed || self.pause_until.is_some() {
-            (set, out.paused) = (1 << active, true);
+            (set, out.paused) = (1 << active & !c.off, true);
         }
         self.open &= set;
         for n in 0..2u8 {
@@ -140,6 +146,38 @@ impl Watch {
             (0..SLOTS as u8).find(|&s| s != active && self.open(s) && c.muted & 1 << s == 0)
         };
         out
+    }
+}
+
+/// BCR-24: the broadcast comes back this long after the last amateur slot heard goes quiet.
+pub const BCAST_RETURN_MS: u32 = 2_000;
+
+/// The broadcast's turn on the speaker (BCR-24): any amateur slot heard takes it at once and mutes the broadcast,
+/// which comes back [`BCAST_RETURN_MS`] after that slot's audio ends (its squelch tail); a new signal meanwhile
+/// starts the wait again.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BcastTurn {
+    last: Option<u32>,
+}
+
+impl BcastTurn {
+    pub const fn new() -> Self {
+        BcastTurn { last: None }
+    }
+
+    /// `slot_heard`: an amateur slot's audio is on the speaker now. True when the broadcast plays.
+    pub fn tick(&mut self, now: u32, slot_heard: bool) -> bool {
+        if slot_heard {
+            self.last = Some(now);
+            return false;
+        }
+        match self.last {
+            Some(t) if now.wrapping_sub(t) < BCAST_RETURN_MS => false,
+            _ => {
+                self.last = None;
+                true
+            }
+        }
     }
 }
 
@@ -196,7 +234,7 @@ mod tests {
 
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {
-        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0 }
+        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0 }
     }
 
     /// WATCH-2, WATCH-17: slots sharing a chip take turns on it, 150 ms on the active slot and 70 ms on each
@@ -291,5 +329,40 @@ mod tests {
         let one = Out { chip: [None, Some(1)], ..Out::default() };
         assert_eq!(h.next(9_010, &one, 1), Some(1));
         assert_eq!(h.next(9_020, &Out::default(), 0), None);
+    }
+
+    /// BCR-23: an off slot gets no chip and no audio, even as the active slot; the rest are watched as before.
+    #[test]
+    fn off_slots() {
+        let mut w = Watch::new();
+        // A (active) is the broadcast slot on 100.5 MHz: B and C keep their chips.
+        let c = Cfg { freq: [mhz(100) + 50_000, mhz(443) + 47_500, mhz(146) + 52_000], off: 0b001, ..cfg() };
+        let o = w.tick(0, &c, [false, false], false);
+        assert_eq!(o.chip, [Some(2), Some(1)]);
+        assert!(!o.cancelled);
+        let o = w.tick(100, &c, [true, false], false);
+        assert_eq!(o.audio, Some(2), "C heard while A is off");
+        // Keyed or paused: only the active slot, which is off: nothing.
+        let o = w.tick(200, &c, [false, false], true);
+        assert_eq!(o.chip, [None, None]);
+        // A 6 m slot needing the relay, off while broadcast plays: no cancelling for it.
+        let c = Cfg { freq: [mhz(100) + 50_000, mhz(50) + 12_500, mhz(146) + 52_000], off: 0b011, ..cfg() };
+        let o = w.tick(5_000, &c, [false, false], false);
+        assert!(!o.cancelled && o.chip == [Some(2), None], "{o:?}");
+    }
+
+    /// BCR-24: a slot heard mutes the broadcast at once; it returns 2 s after the slot's audio ends, and a new
+    /// signal in the wait starts it again.
+    #[test]
+    fn broadcast_turn() {
+        let mut b = BcastTurn::new();
+        assert!(b.tick(0, false));
+        assert!(!b.tick(100, true));
+        assert!(!b.tick(1_000, true));
+        assert!(!b.tick(2_900, false), "1.9 s after");
+        assert!(!b.tick(2_950, true), "a new signal");
+        assert!(!b.tick(4_900, false));
+        assert!(b.tick(4_950, false), "2 s after the last");
+        assert!(b.tick(9_000, false));
     }
 }

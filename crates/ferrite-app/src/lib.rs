@@ -41,6 +41,7 @@ macro_rules! slow {
 }
 
 pub mod aprs;
+pub mod bcast;
 pub mod aprs_live;
 pub mod chan;
 pub mod chanscan;

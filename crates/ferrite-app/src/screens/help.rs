@@ -65,7 +65,7 @@ slow_table! {
         (slow!("0 0"), slow!("Status page")),
         (slow!("0 2 1"), slow!("Channels")),
         (slow!("0 2 3"), slow!("Zones")),
-        (slow!("0 3 1 6"), slow!("FM broadcast")),
+        (slow!("0 3 1"), slow!("FM broadcast")),
         (slow!("0 3 2 6"), slow!("Band scope")),
         (slow!("0 3 3"), slow!("Frequency counter")),
         (slow!("0 3 4"), slow!("HF mode")),

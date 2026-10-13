@@ -1,5 +1,5 @@
 //! Short frequency lists that tune something: HF recent (# in HF mode; chapter 20a, HF-28; C18), the last 10
-//! HF frequencies with their mode, newest first; and FM presets (MENU 0 3 1 1; chapter 20; C19), 20 places.
+//! HF frequencies with their mode, newest first; and FM presets (OK or 1 on the FM screen; chapter 20; C19), 20 places.
 //! OK tunes the entry: an FM preset goes to the broadcast receiver; an HF entry back to HF mode. FM presets are
 //! stored records ([`crate::data`]); the HF list is HF mode's memory, kept with the settings (HF-29).
 
@@ -10,7 +10,6 @@ use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::keys::Key;
-use ferrite_core::msg::{BroadcastCmd, RadioCmd};
 use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
 use ufmt::uwrite;
@@ -54,17 +53,15 @@ impl View for Recall {
                 let Some(p) = d.fm_preset(self.cur.sel as u8) else {
                     return app.show_toast(b"Empty preset", b"", false);
                 };
-                app.set.fm_freq = p.freq;
-                if app.radio.mode == super::activity::Mode::Fm {
-                    app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(p.freq))); // else FM's start takes it (MODE-2)
-                }
+                app.fm_set(p.freq); // BCR-25: into the broadcast slot when one plays; the reconciler retunes (MODE-2)
                 let mut f = Buf::<16>::new();
                 fm_text(p.freq, &mut f);
-                // Back to the FM screen it was picked from (replaced, not opened again: one BACK leaves FM);
-                // picked from the menu (MENU 0 3 1 1), FM opens over the menu.
+                // Back to the FM screen it was picked from (replaced, not opened again: one BACK leaves FM), or
+                // to quick settings on a broadcast slot (BCR-28); from elsewhere, FM opens over it.
                 app.back();
                 match app.screen {
                     Screen::Fm(f) => app.screen = Screen::Fm(super::fm::Fm { menu: false, ..f }),
+                    Screen::Quick(_) => {}
                     _ => app.open(Dest::FmBroadcast),
                 }
                 app.show_toast(f.as_bytes(), p.name.as_bytes(), false);

@@ -98,8 +98,9 @@ V = V/M, Q = SIDE1, W = SIDE2, Space = PTT A, `[` `]` = knob.
 | 11 | A beacon, an automatic transmit (B) |
 | 12 | LED demo: quiet bands and the screen off; again brings the stations back (D) |
 | 13 | A station on the active slot with another tone: the tone hint; again clears it (T) |
+| 14 | Broadcast FM: the active slot's VFO to 100.5 MHz (full RDS radio text); again 99.1 (station name only) (R) |
 
-Events 0, 1 and 6–13 are ignored while booting or off.
+Events 0, 1 and 6–14 are ignored while booting or off.
 
 ## The terminal
 

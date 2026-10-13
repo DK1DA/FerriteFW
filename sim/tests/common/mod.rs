@@ -10,7 +10,7 @@
 //!
 //! Steps: `press K` (a short press), `hold K` (held 0.8 s: the long press), `down K` / `up K`, `type 14652`
 //! (digits, `*` and `#`, each a short press), `knob N` (N steps, negative turns down), `wait 2s` / `wait 300ms`,
-//! `event NAME` (message, alert, gps, bluetooth, battery, power, crossband, layout, beacon, led), `expect screen
+//! `event NAME` (message, alert, gps, bluetooth, battery, power, crossband, layout, beacon, led, fm), `expect screen
 //! "Name"`, `expect text "s"`, `expect no text "s"`, `home` (to the home screen). Keys: OK (MENU), BACK, UP,
 //! DOWN, LEFT, RIGHT, SLOT, VM, STAR, HASH, 0-9, SIDE1, SIDE2, PTT (PTT A), PTTB.
 #![allow(dead_code)]
@@ -266,6 +266,7 @@ fn event(s: &str) -> Event {
         "linkwrite" => Event::LinkWrite,
         "empty" => Event::EmptyBattery,
         "ssb" => Event::SsbPatch,
+        "fm" => Event::FmStation,
         _ => panic!("no event {s:?}"),
     }
 }

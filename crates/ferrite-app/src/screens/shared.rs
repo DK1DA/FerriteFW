@@ -262,7 +262,8 @@ impl App {
             b.push(b"VFO");
         }
         b.push(" \u{b7} ".as_bytes());
-        b.push(band_name(self.shown_freq(s, live)).as_bytes());
+        // BCR-21: a slot in the broadcast band says so where the band goes
+        b.push(if self.in_bcast_band(s) && !lv.scanning { b"Broadcast".as_slice() } else { band_name(self.shown_freq(s, live)).as_bytes() });
     }
 
     /// A channel slot's name, the cards' main line in channel mode (HOME-4); empty for a VFO, a scan or a
@@ -285,11 +286,23 @@ impl App {
     }
 
     /// The slot's state word and colour on a card: RX, relay, off (not watched), heard (a tone hint), scanning,
-    /// idle.
+    /// idle; on a broadcast slot FM (playing), muted (a slot heard has the speaker) or off, and "FM on B" on
+    /// another slot in the band (BCR-22, BCR-27); "Watch off: relay" while broadcast plays (BCR-15).
     pub(crate) fn state(&self, s: u8, live: &LiveAll) -> (&'static str, u16) {
         let lv = &live.slots[s as usize];
         let watched = s == self.active || self.watch_mask() & 1 << s != 0;
-        if lv.relay {
+        if self.in_bcast_band(s) && !lv.scanning {
+            return match self.bcast_slot() {
+                Some(b) if b != s => ([slow!("FM on A"), slow!("FM on B"), slow!("FM on C")][b as usize % 3], DIM),
+                Some(_) if self.radio.mode != super::activity::Mode::Fm => ("off", DIM),
+                Some(_) if self.bcast_heard(live) => ("FM", GREEN),
+                Some(_) => (slow!("muted"), AMBER),
+                None => ("off", DIM),
+            };
+        }
+        if self.relay_off(s) {
+            (slow!("Watch off: relay"), AMBER)
+        } else if lv.relay {
             ("relay", AMBER)
         } else if self.monitor & 1 << s != 0 {
             ("MON", AMBER) // a latched monitor: squelch held open (decided Oct 6, 2026)

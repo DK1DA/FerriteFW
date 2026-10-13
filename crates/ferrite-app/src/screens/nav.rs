@@ -98,7 +98,7 @@ pub enum Dest {
     Scan,
     /// B10: band scope (hold 1, MENU 0 3 2 6).
     BandScope,
-    /// B11: FM broadcast (MENU 0 3 1 6).
+    /// B11: FM broadcast (MENU 0 3 1).
     FmBroadcast,
     /// B12, B13: HF mode (MENU 0 3 4 only).
     HfMode,
@@ -304,13 +304,13 @@ pub const ALL: [Dest; 66] = {
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, FmPresets, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
         LinkStatus, WriteProgress, PowerOff, EmptyBattery, Mailbox,
-        Group(1), Sub(3, 1), Value(Item::Power),
+        Group(1), Sub(4, 2), Value(Item::Power),
     ]
 };
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 59] = [
+pub const MENU0: [(&[u8], Dest); 57] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -318,9 +318,7 @@ pub const MENU0: [(&[u8], Dest); 59] = [
     (&[2, 1], Dest::Browse),
     (&[2, 2], Dest::AddRepeater),
     (&[2, 3], Dest::Zones),
-    (&[3, 1], Dest::Sub(3, 1)),
-    (&[3, 1, 1], Dest::FmPresets),
-    (&[3, 1, 6], Dest::FmBroadcast),
+    (&[3, 1], Dest::FmBroadcast), // BCR-1: the screen itself; its options hold 0 3 1 1-5
     (&[3, 2], Dest::Sub(3, 2)),
     (&[3, 2, 6], Dest::BandScope),
     (&[3, 3], Dest::Counter),

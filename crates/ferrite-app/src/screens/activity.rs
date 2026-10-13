@@ -108,6 +108,13 @@ pub struct RadioUi {
     /// stopped itself as last seen.
     pub lease_at: u32,
     pub lease_drops: u8,
+    /// BCR-22: the slot playing broadcast FM, and the slots in the broadcast band as last seen (one coming in
+    /// takes the broadcast).
+    pub bcast: Option<u8>,
+    pub bcast_in: u8,
+    /// The FM station last sent to the SI4732 (10 kHz), and a seek landing since then.
+    pub fm_sent: u16,
+    pub fm_seek_at: Option<u32>,
 }
 
 impl RadioUi {
@@ -137,6 +144,10 @@ impl RadioUi {
             hf_entry: 0,
             feed: None,
             want_seen: 0,
+            bcast: None,
+            bcast_in: 0,
+            fm_sent: 0,
+            fm_seek_at: None,
         }
     }
 
@@ -212,7 +223,8 @@ impl App {
     /// MODE-1: the exclusive mode the radio should be in now, from the screen, what BACK returns to and the
     /// settings: the nearest mode screen up or under the screen up (a scope's typed centre, HF mode's recent list or
     /// save keep their mode), else home's scope strip (single + scope layout) once the active frequency has
-    /// rested for [`STRIP_REST_MS`] (MODE-4), else none. While keyed only HF mode (HF-23, it transmits in place)
+    /// rested for [`STRIP_REST_MS`] (MODE-4), else FM broadcast while a slot is in the broadcast band (BCR-22; it
+    /// takes the strip's place), else none. While keyed only HF mode (HF-23, it transmits in place)
     /// and the crossband repeater (XB-14, held through local PTT) keep running; the others stop before the
     /// key-up (BCR-16, SCOPE-12). Screens never start or stop a mode themselves: [`App::reconcile_mode`] does.
     pub(crate) fn wanted_mode(&self) -> Mode {
@@ -230,8 +242,14 @@ impl App {
             };
             return if keyed && !matches!(m, Mode::Hf | Mode::Xb) { Mode::Off } else { m };
         }
+        if keyed {
+            return Mode::Off; // TX-24: the broadcast stops before the key-up and starts again after
+        }
+        if self.radio.bcast.is_some() {
+            return Mode::Fm;
+        }
         let rested = self.radio.seen_freq.is_some() && self.now.wrapping_sub(self.radio.freq_at) >= STRIP_REST_MS;
-        if self.screen == Screen::Home && self.set.layout == 1 && !keyed && rested {
+        if self.screen == Screen::Home && self.set.layout == 1 && rested {
             Mode::Strip
         } else {
             Mode::Off
@@ -243,6 +261,7 @@ impl App {
     /// change and tick, so every way of leaving a mode (BACK, hold BACK, a timeout, PTT, a setting, a reset) ends
     /// it, and nothing else ever has to remember to.
     pub(crate) fn reconcile_mode(&mut self) {
+        self.bcast_update(); // BCR-22: which slot (if any) has the broadcast
         let f = self.slot(self.active).freq();
         if self.radio.seen_freq != Some(f) {
             // MODE-4: the knob (or a slot change) moved it; the first sight counts as long rested
@@ -264,6 +283,7 @@ impl App {
             }
             self.radio.lease_at = self.now;
         }
+        self.fm_retune();
     }
 
     /// The screen up, or one BACK returns to, matches.
@@ -291,7 +311,11 @@ impl App {
                 self.out.push(RadioCmd::ToneSearch { slot, on: true });
             }
             Mode::Counter => self.out.push(RadioCmd::Counter(true)),
-            Mode::Fm => self.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(self.set.fm_freq))),
+            Mode::Fm => {
+                let f = self.fm_freq();
+                (self.radio.fm_sent, self.radio.fm_seek_at) = (f, None);
+                self.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(f)));
+            }
             Mode::Hf => super::hf::send(self),
             Mode::Xb => super::xb::send_start(self),
         }
@@ -353,6 +377,7 @@ impl App {
         if self.radio.keyed.is_none() {
             self.radio.dtmf_seen = live.tx.dtmf_sent;
         }
+        self.bcast_tick(live);
         let b = (self.now / ACT_MS) as u16;
         let shift = b.wrapping_sub(self.radio.act_bucket).min(32) as u32;
         if shift > 0 {

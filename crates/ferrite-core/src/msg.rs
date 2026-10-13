@@ -23,6 +23,9 @@ pub enum RadioCmd {
     Activity,
     /// Broadcast receiver: FM in 10 kHz units, AM in kHz.
     Broadcast(BroadcastCmd),
+    /// The slot playing broadcast FM (BCR-21), none = the FM screen's own: while the SI4732 plays FM no chip
+    /// listens to it (BCR-23).
+    BcastSlot(Option<u8>),
     /// Everything off but the MCU (power switch).
     Shutdown,
     /// Receive on a frequency in one slot (0 = A, 1 = B, 2 = C).
@@ -449,8 +452,10 @@ pub enum ModeLive {
     Scope { centre: Freq10, bars: [u8; SCOPE_BARS], n: u8, sweeps: u8, listen: Freq10, open: bool },
     /// Tone search: the tone word found (0 = searching); counter: the strongest frequency (0 = none) and level.
     Probe { freq: Freq10, rssi: i16, tone: u16 },
-    /// FM broadcast: frequency (10 kHz), RDS station name and text, level (dBuV) and SNR (dB).
-    Fm { freq: u16, ps: [u8; 8], rt: [u8; 32], rssi: u8, snr: u8, stereo: bool },
+    /// FM broadcast: frequency (10 kHz), RDS station name and the last complete radio text (all 64 characters,
+    /// NUL-padded: BCR-30), level (dBuV), SNR (dB), the stereo pilot, and whether it is on the speaker now (no
+    /// amateur slot heard, BCR-24).
+    Fm { freq: u16, ps: [u8; 8], rt: [u8; 64], rssi: u8, snr: u8, stereo: bool, heard: bool },
     /// HF mode: frequency, signal (dBm), SNR on the SI4732, which receiver, the SSB patch load (0-100, 255 =
     /// loaded or none).
     Hf { freq: Freq10, rssi: i16, snr: u8, si4732: bool, loading: u8 },

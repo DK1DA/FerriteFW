@@ -206,7 +206,7 @@ pub fn run(scale: u32) {
     s.save("key-test");
     s.home();
 
-    // FM broadcast (MENU 0 3 1 6) and its options.
+    // FM broadcast (MENU 0 3 1) and its options.
     s.open(Dest::FmBroadcast);
     s.save("fm");
     s.press(Key::Menu, 800);

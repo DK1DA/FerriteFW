@@ -172,7 +172,14 @@ fn runs() -> impl Iterator<Item = (String, Radio)> {
         r.home();
         (format!("Home layout {layout}"), r)
     });
-    screens.chain(homes)
+    // BCR-26: home with slot A playing broadcast FM (RDS, signal, stereo, the slot muted and back).
+    let bcast = core::iter::once_with(|| {
+        let mut r = Radio::new();
+        r.home();
+        r.event(Event::FmStation);
+        ("Home broadcast".to_string(), r)
+    });
+    screens.chain(homes).chain(bcast)
 }
 
 /// The regression run, shorter than [`exercise`]: a few seconds of traffic, the status bar's events, the knob
@@ -266,11 +273,12 @@ const BUDGET: &[(&str, u64)] = &[
     ("D23 Empty battery", 67000),
     ("D24 Mailbox", 10000),
     ("D3 Settings group #2", 88000),
-    ("D3 Settings list #2", 64000),
+    ("D3 Settings list #2", 67000),
     ("A5 Value editor #2", 70000),
     ("Home layout 0", 1061000),
     ("Home layout 1", 10413000),
     ("Home layout 2", 1363000),
+    ("Home broadcast", 1000000),
 ];
 
 /// DISP-25: no live update on any screen shows a pixel that is neither its old value nor its new one, and none

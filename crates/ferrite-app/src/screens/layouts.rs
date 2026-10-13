@@ -37,21 +37,24 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     let lv = live.slots[a as usize];
     let f = app.shown_freq(a, live);
     let (state, sc) = app.state(a, live);
-    // TSRCH-13: a tone hint takes the state's place, in a wider field.
+    // TSRCH-13: a tone hint takes the state's place, in a wider field; so does a long state (BCR-15).
     let mut ht = Buf::<16>::new();
     if state == "heard" {
         heard_text(lv.heard_tone, &mut ht);
+    } else if state.len() > 8 {
+        ht.set(state.as_bytes());
     }
-    if app.dirty(1, hash(&(a, band_name(f), state, &ht))) {
+    let mut h = Buf::<32>::new();
+    app.head_text(a, live, &mut h);
+    if app.dirty(1, hash(&(a, &h, state, &ht))) {
         w::badge(lcd, 8, 25, a, true, BG);
-        let mut h = Buf::<32>::new();
-        app.head_text(a, live, &mut h);
-        let hw = if ht.is_empty() { 140 } else { 232 - HEARD_W - 26 };
+        let ww = (text4_width(ht.as_bytes(), &UI_12) + 2).max(HEARD_W);
+        let hw = if ht.is_empty() { 140 } else { 232 - ww - 26 };
         w::field(lcd, 26, hw, 22, 40, 36, Align::Left, w::fit(h.as_bytes(), &UI_12, hw), &UI_12, SUB, BG);
         canvas::banded(lcd, 26 + hw, 22, 240 - 26 - hw, 20, BG, |lcd| {
             if !ht.is_empty() {
-                w::field(lcd, 232 - HEARD_W, HEARD_W, 22, 40, 36, Align::Right, ht.as_bytes(), &UI_12, sc, BG);
-            } else if state == "RX" || state == "MON" {
+                w::field(lcd, 232 - ww, ww, 22, 40, 36, Align::Right, ht.as_bytes(), &UI_12, sc, BG);
+            } else if matches!(state, "RX" | "MON" | "FM") {
                 w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
             } else if state != "idle" {
                 w::field(lcd, 166, 66, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
@@ -98,9 +101,26 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     app.item_text(Item::Squelch, false, &mut sq);
     v[5] = sq;
     const LABELS: [&str; 6] = ["Mode", "Tone", "Power", "Step", "Offset", "Squelch"];
+    if super::home::card_kind(app, a) == 2 {
+        // BCR-26: a broadcast slot's RDS text takes the settings' place, wrapped.
+        let (ps, rt) = match live.mode {
+            ModeLive::Fm { ps, rt, .. } if app.bcast_slot() == Some(a) => (ps, rt),
+            _ => ([b' '; 8], [0; 64]),
+        };
+        let text = crate::bcast::rds_text(&ps, &rt);
+        if app.dirty(3, hash(&(text, 2u8))) {
+            canvas::banded(lcd, 8, 96, 224, 70, BG, |lcd| {
+                let t: &[u8] = if text.is_empty() { b"No RDS" } else { text };
+                w::wrap(lcd, 8, 224, 96, 166, 110, 15, t, &UI_12, if text.is_empty() { DIM } else { TEXT }, BG);
+            });
+        }
+        for i in 4..9 {
+            app.dirty(i, hash(&2u8)); // drawn again when the slot leaves the band
+        }
+    }
     for (i, l) in LABELS.iter().enumerate() {
         let (x, y) = (8 + (i as i32 % 3) * 76, 96 + (i as i32 / 3) * 36);
-        if app.dirty(3 + i, hash(&v[i])) {
+        if super::home::card_kind(app, a) != 2 && app.dirty(3 + i, hash(&v[i])) {
             w::field(lcd, x, 74, y, y + 16, y + 12, Align::Left, l.as_bytes(), &UI_12, SUB, BG);
             w::field(lcd, x, 74, y + 16, y + 34, y + 30, Align::Left, v[i].as_bytes(), &UI_12B, TEXT, BG);
         }
@@ -142,6 +162,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
             None => t.push(band_name(sl.freq()).as_bytes()),
         }
         let y = 256 + 21 * i as i32;
+        let st = if st.len() > 9 { "relay" } else { st }; // "Watch off: relay" (BCR-15) in the line's room
         if !app.held(11 + i) && app.dirty(11 + i, hash(&(o, t, st))) {
             w::badge(lcd, 8, y + 2, o, false, BG);
             w::field(lcd, 28, 140, y, y + 18, y + 14, Align::Left, t.as_bytes(), &UI_12, TEXT, BG);
@@ -192,7 +213,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         }
         if app.dirty(R_HEAD + p, hash(&(head, stt, active))) {
             w::badge(lcd, 14, y + 5, s, active, SURFACE);
-            let sw = if state == "heard" { HEARD_W } else { 72 };
+            let sw = if state == "heard" { HEARD_W } else if state.len() > 8 { text4_width(stt.as_bytes(), &UI_12) + 2 } else { 72 };
             w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, Align::Left, w::fit(head.as_bytes(), &UI_12, 192 - sw), &UI_12, SUB, SURFACE);
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
             w::field(lcd, 226 - sw, sw, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);
@@ -232,6 +253,15 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             if lv.hits > 0 && lv.last_hit != f {
                 cols[1].set(b"last ");
                 cols[1].push(w::freq3(lv.last_hit).as_bytes());
+            }
+        } else if super::home::card_kind(app, s) == 2 {
+            // BCR-26: FM, as much of the RDS text as fits, the stereo pilot
+            cols[0].set(b"FM");
+            if let ModeLive::Fm { ps, rt, stereo, .. } = live.mode {
+                if app.bcast_slot() == Some(s) && app.radio.mode == super::activity::Mode::Fm {
+                    cols[1].set(w::fit(crate::bcast::rds_text(&ps, &rt), &UI_12, 104));
+                    cols[2].set(if stereo { b"STEREO".as_slice() } else { b"" });
+                }
             }
         } else {
             mode_chip(&cfg, &mut cols[0]);

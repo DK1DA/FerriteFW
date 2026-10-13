@@ -1,23 +1,24 @@
-//! FM broadcast (B11; MENU 0 3 1 6; manual chapter 20, BCR-1 to BCR-17): the SI4732 on 64-108 MHz with the
-//! RDS station name and text, signal and SNR, and whether radio monitor is watching the slots (BCR-4).
+//! FM broadcast (B11; MENU 0 3 1; manual chapter 20, BCR-1 to BCR-30): the SI4732 on 64-108 MHz with the
+//! RDS text, signal and SNR, stereo, and whether radio monitor is watching the slots (BCR-4). One FM state with
+//! home's broadcast slot ([`crate::bcast`]): while a slot plays broadcast this screen shows and tunes that slot.
 //!
-//! Keys (the manual leaves them open; these follow HF mode's): the knob or ▲▼ tune by the step, ◀▶ seek, OK
-//! the presets, hold MENU this screen's options (step, AGC, radio monitor, presets; 0 the full menu: BCR-3,
-//! MENU-25), BACK leaves, PTT leaves and transmits from home (BCR-16). The broadcast is an exclusive mode
-//! ([`super::activity::Mode::Fm`]): it stops when the screen goes home, by any route.
+//! Keys (BCR-18): the knob or ▲▼ tune by the step, ◀▶ seek, OK the presets, 1 the presets and 2-5 the options at
+//! that row (so MENU 0 3 1 2 still reaches the step), hold MENU this screen's options (presets, step, AGC, radio
+//! monitor, sleep timer; 0 the full menu: BCR-3, MENU-25), BACK leaves, PTT leaves and transmits from home
+//! (BCR-16). The broadcast is an exclusive mode ([`super::activity::Mode::Fm`]): it stops when the screen goes
+//! home, by any route, unless a slot plays broadcast there.
 
 use super::activity::Mode;
-use super::groups::agc_text;
-
 use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
+use crate::bcast::rds_text;
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::settings::{FM_STEPS, ON_OFF};
+use crate::settings::FM_STEPS;
 use crate::{App, Screen};
 use ferrite_core::keys::Key;
-use ferrite_core::msg::{BroadcastCmd, LiveAll, ModeLive, RadioCmd};
+use ferrite_core::msg::{LiveAll, ModeLive};
 use ferrite_ui::assets::*;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
@@ -26,16 +27,39 @@ use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
 /// FM tunes 64-108 MHz (BCR-17), in 10 kHz.
-const LO: u16 = 6_400;
-const HI: u16 = 10_800;
+pub(crate) const LO: u16 = 6_400;
+pub(crate) const HI: u16 = 10_800;
 
-/// The options page (MENU): step, AGC, radio monitor, presets.
-const OPTIONS: [(&str, &str); 4] = [
-    ("Step", "Tuning step: 50, 100 or 200 kHz."),
-    ("AGC", "Automatic gain, or a fixed gain."),
-    ("Radio monitor", "Slots keep watching; one opening interrupts."),
-    ("Presets", "20 stations (MENU 0 3 1 1)."),
+/// The options (BCR-3): label, help and the setting's menu path (0 3 1 1-5, kept for the terminal and muscle
+/// memory). Quick settings shows the same rows on a broadcast slot (BCR-28).
+pub(crate) const OPTIONS: [(&str, &str, &[u8]); 5] = [
+    (slow!("Presets"), slow!("20 stations: OK picks one."), &[3, 1, 1]),
+    (slow!("Step"), slow!("Tuning step: 50, 100 or 200 kHz."), &[3, 1, 2]),
+    (slow!("AGC"), slow!("Automatic gain, or a fixed gain."), &[3, 1, 3]),
+    (slow!("Radio monitor"), slow!("Slots keep watching; one opening interrupts."), &[3, 1, 4]),
+    (slow!("Sleep timer"), slow!("End the broadcast after a time."), &[3, 1, 5]),
 ];
+const ROWS: u8 = OPTIONS.len() as u8;
+
+/// An option's value text (the presets row: ">").
+pub(crate) fn option_text(app: &App, cx_dev: &ferrite_core::msg::Device, row: u8, b: &mut Buf<24>) -> bool {
+    match row {
+        0 => {
+            b.set(b">");
+            false
+        }
+        r => super::groups::wired(app, cx_dev, OPTIONS[r as usize % OPTIONS.len()].2, b).unwrap_or(false),
+    }
+}
+
+/// An option changed by the knob or ◀▶ (the presets row opens instead).
+pub(crate) fn option_change(app: &mut App, row: u8, d: i32) {
+    if row == 0 {
+        app.open(Dest::FmPresets);
+    } else {
+        super::groups::change(app, OPTIONS[row as usize % OPTIONS.len()].2, d);
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Fm {
@@ -46,7 +70,7 @@ pub struct Fm {
     pub since: u32,
 }
 
-/// MENU 0 3 1 6 (BCR-1): the broadcast starts on the last station.
+/// MENU 0 3 1 (BCR-1): the broadcast starts on the last station, or plays the broadcast slot's.
 pub fn open(app: &mut App) -> Screen {
     Screen::Fm(Fm { since: app.now, ..Fm::new() })
 }
@@ -56,25 +80,13 @@ impl Fm {
         Fm { menu: false, row: 0, since: 0 }
     }
 
+    /// A step up or down, wrapping in the range: the broadcast band while a slot has the broadcast (BCR-25).
     fn tune(app: &mut App, d: i32) {
         let step = FM_STEPS[app.set.fm_step as usize % 3].0 as i32;
-        let span = (HI - LO) as i32 + step;
-        let f = (app.set.fm_freq as i32 - LO as i32 + d * step).rem_euclid(span) + LO as i32;
-        app.set.fm_freq = (f as u16).clamp(LO, HI);
-        // MODE-2: only to a running receiver; stopped (keyed, BCR-16), the start takes the new station
-        if app.radio.mode == Mode::Fm {
-            app.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(app.set.fm_freq)));
-        }
-    }
-
-    fn change(self, app: &mut App, d: i32) {
-        let s = &mut app.set;
-        match self.row {
-            0 => s.fm_step = (s.fm_step as i32 + d).rem_euclid(3) as u8,
-            1 => s.fm_agc = (s.fm_agc as i32 + d).rem_euclid(11) as u8,
-            2 => s.fm_monitor = !s.fm_monitor,
-            _ => {}
-        }
+        let (lo, hi) = app.fm_range();
+        let span = (hi - lo) as i32 + step;
+        let f = (app.fm_freq() as i32 - lo as i32 + d * step).rem_euclid(span) + lo as i32;
+        app.fm_set((f as u16).clamp(lo, hi)); // MODE-2: the reconciler retunes a running receiver
     }
 }
 
@@ -102,13 +114,12 @@ impl View for Fm {
         use Press::*;
         if self.menu {
             match (e.key, e.press) {
-                (Key::Up, Short | Repeat) => app.screen = Screen::Fm(Fm { row: (self.row + 3) % 4, ..self }),
-                (Key::Down, Short | Repeat) => app.screen = Screen::Fm(Fm { row: (self.row + 1) % 4, ..self }),
-                (Key::Left | Key::Right, Short | Repeat) => self.change(app, if e.key == Key::Right { 1 } else { -1 }),
-                (Key::Digit(d @ 1..=4), Short) => app.screen = Screen::Fm(Fm { row: d - 1, ..self }),
+                (Key::Up, Short | Repeat) => app.screen = Screen::Fm(Fm { row: (self.row + ROWS - 1) % ROWS, ..self }),
+                (Key::Down, Short | Repeat) => app.screen = Screen::Fm(Fm { row: (self.row + 1) % ROWS, ..self }),
+                (Key::Left | Key::Right, Short | Repeat) => option_change(app, self.row, if e.key == Key::Right { 1 } else { -1 }),
+                (Key::Digit(d @ 1..=5), Short) => app.screen = Screen::Fm(Fm { row: d - 1, ..self }),
                 (Key::Digit(0), Short) => app.open(Dest::Advanced), // MENU-25: 0 the full menu
-                (Key::Menu, Short) if self.row == 3 => app.open(Dest::FmPresets),
-                (Key::Menu, Short) => self.change(app, 1),
+                (Key::Menu, Short) => option_change(app, self.row, 1),
                 (Key::Exit, Short) => app.screen = Screen::Fm(Fm { menu: false, ..self }),
                 _ => {}
             }
@@ -116,8 +127,10 @@ impl View for Fm {
         }
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => Fm::tune(app, if e.key == Key::Up { 1 } else { -1 }),
-            (Key::Left | Key::Right, Short) if app.radio.mode == Mode::Fm => app.out.push(RadioCmd::Broadcast(BroadcastCmd::Seek { up: e.key == Key::Right })),
-            (Key::Menu, Short) => app.open(Dest::FmPresets), // OK: pick a station
+            (Key::Left | Key::Right, Short) => app.fm_seek(e.key == Key::Right),
+            (Key::Menu | Key::Digit(1), Short) => app.open(Dest::FmPresets), // OK: pick a station
+            // MENU 0 3 1 2-5 as before the screen took 0 3 1: the options at that row (BCR-3)
+            (Key::Digit(d @ 2..=5), Short) => app.screen = Screen::Fm(Fm { menu: true, row: d - 1, ..self }),
             (Key::Exit, Short) => app.back(),
             _ => {}
         }
@@ -125,19 +138,14 @@ impl View for Fm {
 
     fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
         if self.menu {
-            self.change(app, d);
+            option_change(app, self.row, d);
         } else {
             Fm::tune(app, d);
         }
     }
 
-    /// Seek moves the station: the receiver's frequency is the one kept (BCR-1: the last station).
-    fn tick(self, app: &mut App, live: &LiveAll) {
-        if let ModeLive::Fm { freq, .. } = live.mode {
-            if freq != 0 {
-                app.set.fm_freq = freq;
-            }
-        }
+    /// A seek's station is taken as it lands ([`App::bcast_tick`]).
+    fn tick(self, app: &mut App, _: &LiveAll) {
         // BCR-5: the sleep timer ends the broadcast once its time is up.
         let min = crate::settings::SLEEP_TIMES[app.set.fm_sleep as usize % crate::settings::SLEEP_TIMES.len()] as u32;
         if min != 0 && app.now.wrapping_sub(self.since) >= min * 60_000 {
@@ -155,34 +163,36 @@ impl View for Fm {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         app.new_page(lcd, hash(&self.menu));
         if self.menu {
-            let s = *app.set;
-            let mut vals = [Buf::<24>::new(); 4];
-            vals[0].set(FM_STEPS[s.fm_step as usize % 3].1.as_bytes());
-            agc_text(s.fm_agc, &mut vals[1]);
-            vals[2].set(ON_OFF[s.fm_monitor as usize].as_bytes());
-            vals[3].set(b">");
-            // The shared options style (MENU-25).
-            super::opts::options_page(app, lcd, OPTIONS.iter().zip(&vals).map(|((name, _), v)| (name.as_bytes(), v.as_bytes())), self.row);
-            app.help_box(lcd, super::opts::OPTS_HELP_Y, 46, OPTIONS[self.row as usize % 4].1.as_bytes(), b"FM MENU");
+            let mut vals = [Buf::<24>::new(); OPTIONS.len()];
+            for (i, v) in vals.iter_mut().enumerate() {
+                option_text(app, cx.dev, i as u8, v);
+            }
+            // The shared options style (MENU-25), the help under its "0 Full menu" row.
+            super::opts::options_page(app, lcd, OPTIONS.iter().zip(&vals).map(|((name, ..), v)| (name.as_bytes(), v.as_bytes())), self.row);
+            let help = OPTIONS[(self.row % ROWS) as usize].1;
+            app.help_box(lcd, 23 + 22 * (ROWS as i32 + 1) + 6, 46, help.as_bytes(), b"FM MENU");
             return;
         }
         let (ps, rt, rssi, snr, stereo) = match cx.live.mode {
-            ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } => (ps, rt, rssi, snr, stereo),
-            _ => ([b' '; 8], [0; 32], 0, 0, false),
+            ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if app.radio.mode == Mode::Fm => (ps, rt, rssi, snr, stereo),
+            _ => ([b' '; 8], [0; 64], 0, 0, false),
         };
-        let f = app.set.fm_freq;
-        if app.dirty(R_FREQ, hash(&(f, stereo))) {
-            w::field(lcd, 10, 120, 24, 42, 38, Align::Left, b"FM broadcast", &UI_12, SUB, BG);
-            ferrite_ui::canvas::banded(lcd, 130, 24, 102, 18, BG, |lcd| {
+        let f = app.fm_freq();
+        // BCR-27: the slot playing it, when one does.
+        let mut title = Buf::<24>::new();
+        title.set(b"FM broadcast");
+        if let Some(s) = app.bcast_slot() {
+            let _ = uwrite!(title, " \u{b7} slot {}", w::LETTERS[s as usize % 3] as char);
+        }
+        if app.dirty(R_FREQ, hash(&(f, stereo, title))) {
+            w::field(lcd, 10, 150, 24, 42, 38, Align::Left, title.as_bytes(), &UI_12, SUB, BG);
+            ferrite_ui::canvas::banded(lcd, 160, 24, 72, 18, BG, |lcd| {
                 if stereo {
                     w::tag(lcd, 230, 25, b"STEREO", SUB, BG);
                 }
             });
             let mut t = Buf::<8>::new();
-            let _ = uwrite!(t, "{}.{}", f / 100, f % 100 / 10);
-            if !f.is_multiple_of(10) {
-                let _ = uwrite!(t, "{}", f % 10);
-            }
+            fm_mhz(f, &mut t);
             let tw = text4_width(t.as_bytes(), &DIG_46) + 6 + text4_width(b"MHz", &UI_12B);
             let x = 120 - tw / 2;
             ferrite_ui::canvas::banded(lcd, 0, 48, 240, 52, BG, |lcd| {
@@ -190,10 +200,10 @@ impl View for Fm {
                 lcd.text4(x2 + 6, 96, b"MHz", &UI_12B, SUB, BG);
             });
         }
-        // RDS: the station name and radio text (BCR-2), and the preset this frequency is stored in. Without
-        // RDS, no empty box: one quiet line.
-        let ps = trim(&ps);
-        let rt = trim(&rt);
+        // RDS (BCR-26): the radio text, whole (it is shown once complete, BCR-30), wrapped; the station name only
+        // when there is no radio text; and the preset this frequency is stored in. Without RDS, no empty box.
+        let text = rds_text(&ps, &rt);
+        let is_rt = !crate::bcast::trim(&rt).is_empty();
         let data = cx.store.data();
         let mut pre = Buf::<24>::new();
         if let Some(i) = (0..super::recall::FM_PLACES as u8).find(|&i| data.fm_preset(i).is_some_and(|p| p.freq == f)) {
@@ -203,15 +213,18 @@ impl View for Fm {
                 pre.push(p.name.as_bytes());
             }
         }
-        if app.dirty(R_INFO, hash(&(ps, rt, pre))) {
+        if app.dirty(R_INFO, hash(&(text, pre))) {
             ferrite_ui::canvas::banded(lcd, 0, 108, 240, 80, BG, |lcd| {
-                if ps.is_empty() && rt.is_empty() {
+                if text.is_empty() {
                     w::field(lcd, 16, 208, 114, 136, 132, Align::Center, pre.as_bytes(), &UI_15B, TEXT, BG);
                     w::field(lcd, 16, 208, 138, 156, 152, Align::Center, b"No RDS", &UI_12, DIM, BG);
                 } else {
                     lcd.fill_r(8, 110, 224, 74, 2, SURFACE);
-                    w::field(lcd, 16, 208, 114, 136, 132, Align::Left, ps, &UI_15B, TEXT, SURFACE);
-                    w::wrap(lcd, 16, 208, 138, 166, 152, 15, rt, &UI_12, SUB, SURFACE);
+                    if is_rt {
+                        w::wrap(lcd, 16, 208, 113, 166, 126, 15, text, &UI_12, TEXT, SURFACE);
+                    } else {
+                        w::field(lcd, 16, 208, 114, 136, 132, Align::Left, text, &UI_15B, TEXT, SURFACE);
+                    }
                     w::field(lcd, 16, 208, 166, 182, 178, Align::Left, pre.as_bytes(), &UI_12, DIM, SURFACE);
                 }
             });
@@ -252,12 +265,10 @@ impl View for Fm {
     }
 }
 
-/// Text up to its padding (zeros, trailing spaces).
-fn trim(b: &[u8]) -> &[u8] {
-    let n = b.iter().position(|&c| c == 0).unwrap_or(b.len());
-    let mut s = &b[..n];
-    while let [rest @ .., b' '] = s {
-        s = rest;
+/// "100.5", "100.55" (10 kHz units).
+pub(crate) fn fm_mhz<const N: usize>(f: u16, t: &mut Buf<N>) {
+    let _ = uwrite!(t, "{}.{}", f / 100, f % 100 / 10);
+    if !f.is_multiple_of(10) {
+        let _ = uwrite!(t, "{}", f % 10);
     }
-    s
 }

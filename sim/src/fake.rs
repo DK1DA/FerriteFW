@@ -11,7 +11,7 @@ use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::path::{Cause, Path, Rx, Sel, Steps};
 use ferrite_core::scan::{Range, Resume, Scan};
 use ferrite_core::txseq::{self, Kind, Req, TxSeq};
-use ferrite_core::watch::{self, Watch};
+use ferrite_core::watch::{self, BcastTurn, Watch};
 use ferrite_core::msg::{BroadcastCmd, Device, GpsState, LiveAll, ModeLive, RadioCmd, SlotLive, TxLive, XbLive, SCOPE_BARS, XB_COLS};
 use ferrite_core::txplan::Region;
 use ferrite_core::msg::{CalState, LinkLive, SameDecoded, SelfTest};
@@ -63,7 +63,9 @@ enum Fake {
     Scope { centre: Freq10, step: u16, n: u8, dwell: u8, t0: f32, listen: Freq10, tl: f32 },
     Tone { t0: f32 },
     Counter { t0: f32 },
-    Fm,
+    /// FM broadcast, tuned (or a seek landed) at t0 s: the station name comes 0.4 s in, the radio text once
+    /// complete, 1.5 s in (BCR-30).
+    Fm { t0: f32 },
     Hf { t0: f32, freq: Freq10, mode: u8 },
     /// The crossband repeater: the real engine, fed made-up signals (decision 93); or the radio's refusal.
     Xb { t0: f32, rep: ferrite_core::xb::Repeater },
@@ -77,11 +79,21 @@ const CARRIERS: [(Freq10, f32); 5] =
 /// AM broadcasters an HF seek stops on (10 Hz units): LW, MW and shortwave.
 const HF_STATIONS: [Freq10; 9] = [19_800, 90_900, 108_900, 502_500, 607_000, 733_500, 958_000, 1_173_500, 1_540_000];
 
-const STATIONS: [(u16, &str, &str); 4] = [
-    (8_890, "CBC R2", "Tempo with Julie Nesrallah"),
-    (9_150, "CBC R1", "Ottawa Morning: traffic and weather on the hour"),
-    (9_810, "JAZZ FM", "Now playing: Take Five, Dave Brubeck Quartet"),
-    (10_650, "KISS", "The Morning Show"),
+/// The fake's FM stations: frequency (10 kHz), RDS station name, radio texts (the station swaps to the next
+/// every 20 s, flipping the A/B flag: BCR-30), signal (dBuV), SNR (dB) and stereo. 99.1 sends no radio text, so its
+/// card falls back to the station name (BCR-26); 100.5 sends the full 64 characters.
+pub type Station = (u16, &'static str, [&'static str; 2], u8, u8, bool);
+
+pub const STATIONS: [Station; 6] = [
+    (8_890, "CBC R2", ["Tempo with Julie Nesrallah", "Tempo with Julie Nesrallah"], 38, 16, true),
+    (9_150, "CBC R1", ["Ottawa Morning: traffic and weather on the hour", "Ottawa Morning: traffic and weather on the hour"], 41, 18, true),
+    (9_810, "JAZZ FM", ["Now playing: Take Five, Dave Brubeck Quartet", "Up next: So What, Miles Davis"], 36, 15, true),
+    (9_910, "CHEZ 99", ["", ""], 31, 11, false),
+    (10_050, "RDS TEST", [
+        "Now playing: Harvest Moon by Neil Young, live at Massey Hall 71",
+        "Up next: the 9 o'clock news, then Ottawa traffic and weather now",
+    ], 48, 24, true),
+    (10_650, "KISS", ["The Morning Show", "The Morning Show"], 44, 20, true),
 ];
 
 /// Three slots: A has a signal 3 s in every 10, B one for 2 s in every 25 (a watched slot opening), C scans.
@@ -121,6 +133,10 @@ pub struct FakeRadio {
     /// Slots with monitor latched: squelch held open.
     monitor: u8,
     fm: u16,
+    /// The slot playing broadcast (BCR-23: no chip listens to it while FM plays) and the broadcast's turn on the
+    /// speaker (BCR-24), as the Radio task keeps them.
+    bcast: Option<u8>,
+    bturn: BcastTurn,
     now: f32,
     /// A slot on a NOAA / Weatheradio channel since this time (s): the fake decoder hears a SAME warning there.
     wx_since: Option<f32>,
@@ -176,6 +192,8 @@ impl FakeRadio {
             bk: fake_bk(),
             monitor: 0,
             fm: 9_810,
+            bcast: None,
+            bturn: BcastTurn::new(),
             now: 0.0,
             wx_since: None,
             same: None,
@@ -314,7 +332,7 @@ impl FakeRadio {
             RadioCmd::Counter(on) => self.set(if on { Fake::Counter { t0: self.now } } else { Fake::Off }),
             RadioCmd::Broadcast(BroadcastCmd::Fm(f)) => {
                 self.fm = f;
-                self.set(Fake::Fm);
+                self.set(Fake::Fm { t0: self.now });
             }
             RadioCmd::Broadcast(BroadcastCmd::Seek { up }) => {
                 let next = if up {
@@ -323,7 +341,9 @@ impl FakeRadio {
                     STATIONS.iter().rev().find(|s| s.0 < self.fm).unwrap_or(&STATIONS[STATIONS.len() - 1])
                 };
                 self.fm = next.0;
+                self.set(Fake::Fm { t0: self.now }); // a new station: its RDS starts over
             }
+            RadioCmd::BcastSlot(s) => self.bcast = s,
             RadioCmd::Broadcast(_) => self.set(Fake::Off),
             RadioCmd::Hf { freq, mode, on } => {
                 let t0 = match self.mode {
@@ -453,17 +473,25 @@ impl FakeRadio {
                 let (freq, rssi) = if p < 1.0 { (0, -127) } else if p < 3.0 { (mhz(147) + 15_000, -42) } else if p < 4.5 { (mhz(446) + 6_250, -51) } else { (mhz(146) + 94_000, -58) };
                 ModeLive::Probe { freq, rssi, tone: 0 }
             }
-            Fake::Fm => {
+            Fake::Fm { t0 } => {
                 let st = STATIONS.iter().find(|s| s.0 == self.fm);
-                let mut ps = [0u8; 8];
-                let mut rt = [0u8; 32];
+                let mut ps = [b' '; 8];
+                let mut rt = [0u8; 64];
+                let heard = matches!(self.live.mode, ModeLive::Fm { heard: true, .. });
                 if let Some(s) = st {
-                    ps[..s.1.len()].copy_from_slice(s.1.as_bytes());
-                    let n = s.2.len().min(32);
-                    rt[..n].copy_from_slice(&s.2.as_bytes()[..n]);
+                    let age = t - t0;
+                    if age >= 0.4 {
+                        ps[..s.1.len()].copy_from_slice(s.1.as_bytes());
+                    }
+                    // The radio text once complete; each new one (A/B) replaces the last when it is in.
+                    if age >= 1.5 {
+                        let text = s.2[((age - 1.5) / 20.0) as usize % 2].as_bytes();
+                        let n = text.len().min(64);
+                        rt[..n].copy_from_slice(&text[..n]);
+                    }
                 }
-                let on = st.is_some();
-                ModeLive::Fm { freq: self.fm, ps, rt, rssi: if on { 42 } else { 8 }, snr: if on { 18 } else { 2 }, stereo: on }
+                let (rssi, snr, stereo) = st.map_or((8, 2, false), |s| (s.3 + ((t * 1.3).sin() * 2.0) as u8, s.4, s.5));
+                ModeLive::Fm { freq: self.fm, ps, rt, rssi, snr, stereo, heard }
             }
             Fake::Hf { t0, freq, mode } => {
                 let p = ((t - t0) / 2.0 * 100.0) as u32;
@@ -561,8 +589,21 @@ impl FakeRadio {
         };
         // Watch (WATCH-2): each chip's squelch for the slot it was on, then the engine's next turn.
         let sq = self.on_chip.map(|o| o.is_some_and(|i| carrier(i as usize, &self.live.slots[i as usize]).0));
-        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: 0 };
+        // BCR-23: while FM plays, no chip on the broadcast slot or on a slot needing the relay.
+        let off = match self.mode {
+            Fake::Fm { .. } => {
+                let relay = (0..3).filter(|&i| Sel::rx(self.live.slots[i].freq).relay()).fold(0u8, |m, i| m | 1 << i);
+                relay | self.bcast.map_or(0, |s| 1 << s)
+            }
+            _ => 0,
+        };
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: 0, off };
         let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
+        // BCR-24: the broadcast plays while no slot is heard, and 2 s after one goes quiet.
+        let turn = self.bturn.tick(now, out.audio.is_some() || self.monitor & 1 << self.active != 0);
+        if let ModeLive::Fm { heard, .. } = &mut self.live.mode {
+            *heard = turn;
+        }
         // Scans step only while their slot has a chip.
         for i in 0..3 {
             if self.live.slots[i].scanning && out.chip.contains(&Some(i as u8)) {

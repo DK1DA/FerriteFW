@@ -184,7 +184,7 @@ fn key_test() {
     assert_eq!(t.app.screen(), Screen::Home, "hold BACK leaves");
 }
 
-/// BCR-1, BCR-16: MENU 0 3 1 6 starts FM broadcast on the SI4732; tuning sends it; leaving (BACK or PTT) stops it.
+/// BCR-1, BCR-16: MENU 0 3 1 starts FM broadcast on the SI4732; tuning sends it; leaving (BACK or PTT) stops it.
 #[test]
 fn fm_broadcast() {
     let mut t = T::new();

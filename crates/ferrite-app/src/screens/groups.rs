@@ -47,7 +47,7 @@ const G2: [Entry; 5] = [
     (slow!("Channel display"), slow!("Name"), slow!("Name, number or frequency on home.")),
 ];
 const G3: [Entry; 6] = [
-    (slow!("FM broadcast"), slow!("Monitor on"), slow!("Presets, step, AGC, monitor, sleep.")),
+    (slow!("FM broadcast"), slow!(""), slow!("Listen now; hold MENU there for its settings.")),
     (slow!("Band scope"), slow!("60 bars"), slow!("Bars, step, speed, trigger, waterfall.")),
     (slow!("Frequency counter"), slow!(""), slow!("Find a nearby transmitter's frequency.")),
     (slow!("HF mode"), slow!(""), slow!("Below 64 MHz. Everything else pauses.")),
@@ -142,13 +142,14 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         (slow!("Return to"), slow!("Start"), slow!("Where a stopped scan returns.")),
         (slow!("Priority check"), slow!("Every 2 s"), slow!("Look at the priority channels.")),
     ]),
+    // The FM screen's options (BCR-3): on the radio 0 3 1 opens the screen and its digits 1-5 reach these; the
+    // terminal lists them here (TERM-12).
     ((3, 1), &[
         (slow!("Presets"), slow!("Empty"), slow!("20 stations.")),
         (slow!("Step"), slow!("100 kHz"), slow!("Tuning step.")),
         (slow!("AGC"), slow!("Auto"), slow!("Gain control.")),
         (slow!("Radio monitor"), slow!("On"), slow!("A slot opening interrupts the broadcast.")),
         (slow!("Sleep timer"), slow!("Off"), slow!("End the broadcast after a time.")),
-        (slow!("Open FM broadcast"), slow!(""), slow!("Listen now.")),
     ]),
     ((3, 2), &[
         (slow!("Bars"), slow!("60"), slow!("Bars across; span is bars x step.")),

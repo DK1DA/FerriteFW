@@ -79,6 +79,10 @@ SECTIONS
      * receive tick, never from an interrupt. */
     *(.text.*8tonehint*);
     *(.text.*4chip10heard_tone*);
+    /* FM broadcast's report (at most ten times a second) and its watch mask (BCR-2, BCR-23): the Radio task's,
+     * never from an interrupt. */
+    *(.text.*5Radio7fm_poll*);
+    *(.text.*5Radio9bcast_off*);
     . = ALIGN(4);
     __eslow_text = .;
   } > FLASH
