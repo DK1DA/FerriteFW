@@ -309,3 +309,248 @@ fn cable_routing() {
     assert_eq!(route(2, true, 0), Route::Term);
     assert_eq!(route(3, false, 0), Route::Drop);
 }
+
+// ---- Remote PTT (LINK-20) ----
+
+use crate::remote::RemoteEnd;
+use ferrite_core::keys::{PTT_A, PTT_B};
+use ferrite_core::link::{key, Ptt};
+use ferrite_core::msg::{LiveAll, RadioCmd};
+
+impl Pc {
+    /// A transmit build with a region set, as a person's PTT would key.
+    fn tx() -> Self {
+        let mut pc = Pc::new(true);
+        pc.app.radio.tx_built = true;
+        pc.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
+        while pc.app.pop_cmd().is_some() {}
+        pc
+    }
+
+    fn ptt(&mut self, p: Ptt) -> (u8, Vec<u8>) {
+        let mut b = [0u8; 3];
+        let n = p.encode(&mut b);
+        self.ask(msg::KEY, &b[..n])
+    }
+
+    /// Time passes on the radio: the App's ticks, and the session polled.
+    fn pass(&mut self, ms: u32, live: &LiveAll) {
+        let end = self.now + ms;
+        while self.now < end {
+            self.now += 50;
+            self.app.tick(self.now, live, &self.st);
+            self.link.poll(&mut self.app, &self.st, self.now, &mut Wire(Vec::new()));
+        }
+    }
+
+    fn cmds(&mut self) -> Vec<RadioCmd> {
+        core::iter::from_fn(|| self.app.pop_cmd()).collect()
+    }
+}
+
+fn keyed(c: &[RadioCmd]) -> bool {
+    c.iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. }))
+}
+
+fn unkeyed(c: &[RadioCmd]) -> bool {
+    c.iter().any(|c| matches!(c, RadioCmd::Transmit { on: false, .. }))
+}
+
+fn text(a: &[u8]) -> &str {
+    core::str::from_utf8(a).unwrap()
+}
+
+/// LINK-20: KEY on keys the active slot through the PTT path (the Transmit screen, marked Remote), keepalives
+/// hold it, KEY off unkeys; then a keepalive says it isn't keyed, and KEY off is always ok.
+#[test]
+fn remote_ptt_keys_and_unkeys() {
+    let mut pc = Pc::tx();
+    let (s, a) = pc.ptt(Ptt::On(key::ACTIVE));
+    assert_eq!((s, a.as_slice()), (Status::Ok as u8, &[0u8][..]), "the active slot, A, keyed");
+    let c = pc.cmds();
+    assert!(c.iter().any(|c| matches!(c, RadioCmd::TxPlan { confirmed: false, .. })), "never a confirmed emergency plan");
+    assert!(c.contains(&RadioCmd::Transmit { slot: 0, on: true }));
+    assert!(matches!(pc.app.screen(), Screen::Transmit(_)) && pc.app.remote_keyed());
+    for _ in 0..6 {
+        pc.pass(500, &LiveAll::default());
+        assert_eq!(pc.ptt(Ptt::Alive).0, Status::Ok as u8, "keepalives hold it");
+    }
+    assert!(!unkeyed(&pc.cmds()), "3 s keyed with keepalives");
+    assert_eq!(pc.ptt(Ptt::Off).0, Status::Ok as u8);
+    assert!(pc.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }));
+    assert_eq!(pc.app.screen(), Screen::Home);
+    let (s, a) = pc.ptt(Ptt::Alive);
+    assert_eq!((s, text(&a)), (Status::Invalid as u8, "not keyed"));
+    assert_eq!(pc.ptt(Ptt::Off).0, Status::Ok as u8, "off again is fine");
+    // PTT B's slot; C only while it is the active slot.
+    assert_eq!(pc.ptt(Ptt::On(1)), (0, std::vec![1]));
+    assert!(pc.cmds().contains(&RadioCmd::Transmit { slot: 1, on: true }));
+    assert_eq!(pc.ptt(Ptt::On(1)).0, 0, "a repeated key-up is a keepalive");
+    assert_eq!(pc.ptt(Ptt::On(0)).0, Status::Invalid as u8, "one transmission at a time");
+    pc.ptt(Ptt::Off);
+    let (s, a) = pc.ptt(Ptt::On(2));
+    assert_eq!(s, Status::Invalid as u8, "C isn't active: {}", text(&a));
+    assert!(!keyed(&pc.cmds()));
+    assert_eq!(pc.ask(msg::KEY, &[key::PTT, key::ON]).0, Status::BadArg as u8, "ON needs its slot");
+    assert_eq!(pc.ask(msg::KEY, &[0x10, 1]).0, Status::BadArg as u8, "other keys: LINK-19, not built");
+}
+
+/// LINK-20: no keepalive for 2 s, no transmit; the PC hears why.
+#[test]
+fn remote_ptt_keepalive_timeout() {
+    let mut pc = Pc::tx();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    pc.cmds();
+    pc.pass(1800, &LiveAll::default());
+    assert!(pc.app.remote_keyed() && !unkeyed(&pc.cmds()), "1.8 s: still keyed");
+    pc.pass(300, &LiveAll::default());
+    assert!(!pc.app.remote_keyed());
+    assert!(unkeyed(&pc.cmds()), "past 2 s: unkeyed");
+    assert_eq!(pc.app.screen(), Screen::Home);
+    let (s, a) = pc.ptt(Ptt::Alive);
+    assert_eq!((s, text(&a)), (Status::Invalid as u8, RemoteEnd::Keepalive.text()));
+}
+
+/// LINK-20, LINK-28: the session closing or moving port ends a remote transmission.
+#[test]
+fn remote_ptt_ends_with_the_session() {
+    let mut pc = Pc::tx();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    pc.cmds();
+    pc.link.set_port(false, 115_200); // Bluetooth took the session, or the cable took it back
+    pc.pass(50, &LiveAll::default());
+    assert!(unkeyed(&pc.cmds()) && !pc.app.remote_keyed());
+    assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::Session.text());
+}
+
+/// LINK-20: the radio's own refusals come back as `invalid` with the reason; the Radio task's stops too.
+#[test]
+fn remote_ptt_refusals_pass_through() {
+    let mut pc = Pc::new(true); // a receive-only build
+    let (s, a) = pc.ptt(Ptt::On(key::ACTIVE));
+    assert_eq!((s, text(&a)), (Status::Invalid as u8, "receive-only build"));
+    assert!(!keyed(&pc.cmds()) && !pc.app.remote_keyed());
+    // outside the band plan
+    let mut pc = Pc::tx();
+    let a0 = pc.app.active as usize;
+    (pc.app.slots[a0].vfo, pc.app.slots[a0].vfo_mode) = (ferrite_core::freq::mhz(160), true);
+    let (s, a) = pc.ptt(Ptt::On(key::ACTIVE));
+    assert_eq!((s, text(&a)), (Status::Invalid as u8, "outside the band plan"));
+    assert!(matches!(pc.app.screen(), Screen::TxRefused(_)), "the radio shows it as for PTT");
+    // keyed, then the Radio task stops it (the transmitter too hot): the next keepalive says so
+    let mut pc = Pc::tx();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    let mut live = LiveAll::default();
+    live.tx.refused = Some(ferrite_core::txplan::Refusal::Hot);
+    pc.pass(100, &live);
+    assert!(!pc.app.remote_keyed());
+    assert_eq!(text(&pc.ptt(Ptt::Alive).1), "transmitter cooling");
+    // the transmit timeout (TX-30)
+    let mut pc = Pc::tx();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    let limit = pc.app.set.tx_timeout_s() * 1000;
+    let mut t = 0;
+    while t < limit + 500 {
+        pc.pass(500, &LiveAll::default());
+        pc.ptt(Ptt::Alive);
+        t += 500;
+    }
+    assert!(!pc.app.remote_keyed());
+    assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::Timeout.text());
+}
+
+/// LINK-20, TX-35: a remote key-up never transmits on an emergency frequency, never opens the second-PTT prompt,
+/// and never answers one a person opened.
+#[test]
+fn remote_ptt_never_on_an_emergency_frequency() {
+    let mut pc = Pc::tx();
+    pc.app.set_region(Some(ferrite_core::txplan::Region::Us), true);
+    let a0 = pc.app.active as usize;
+    (pc.app.slots[a0].vfo, pc.app.slots[a0].vfo_mode) = (ferrite_core::freq::mhz(406) + 2_500, true);
+    pc.cmds();
+    let (s, a) = pc.ptt(Ptt::On(key::ACTIVE));
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(text(&a).starts_with("emergency frequency"));
+    assert!(!pc.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. } | RadioCmd::TxPlan { .. })));
+    assert!(!matches!(pc.app.screen(), Screen::Emergency(_)), "no prompt");
+    // A person's first PTT opens the prompt; a remote KEY on slot B doesn't confirm it.
+    pc.app.key_down(Key::Ptt(PTT_A), pc.now, &pc.st);
+    pc.app.key_up(Key::Ptt(PTT_A), pc.now + 100, &pc.st);
+    assert!(matches!(pc.app.screen(), Screen::Emergency(_)));
+    assert_eq!(pc.ptt(Ptt::On(1)).0, Status::Invalid as u8);
+    assert!(!pc.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. } | RadioCmd::TxPlan { .. })));
+}
+
+/// LINK-20: the radio's operator wins. A local PTT during a remote transmission ends it and keys nothing until let
+/// go; a remote key-up is refused while a local PTT is held; after, PTT keys as usual.
+#[test]
+fn remote_ptt_local_ptt_wins() {
+    let mut pc = Pc::tx();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    pc.cmds();
+    pc.app.key_down(Key::PTT, pc.now, &pc.st); // the side connector's, the same key the remote pressed
+    let c = pc.cmds();
+    assert!(unkeyed(&c) && !keyed(&c), "unkeyed, and the press keys nothing");
+    assert!(!pc.app.remote_keyed());
+    assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::LocalPtt.text());
+    let (s, a) = pc.ptt(Ptt::On(key::ACTIVE));
+    assert_eq!((s, text(&a)), (Status::Invalid as u8, "PTT held on the radio"));
+    pc.app.key_up(Key::PTT, pc.now + 200, &pc.st);
+    assert!(pc.cmds().is_empty(), "its release does nothing either");
+    // PTT B held: the remote waits; once let go, a person's PTT keys as usual.
+    pc.app.key_down(Key::Ptt(PTT_B), pc.now, &pc.st);
+    assert!(keyed(&pc.cmds()));
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, Status::Invalid as u8);
+    pc.app.key_up(Key::Ptt(PTT_B), pc.now + 300, &pc.st);
+    assert!(unkeyed(&pc.cmds()));
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0, "the remote again");
+    pc.ptt(Ptt::Off);
+}
+
+/// LINK-20, TX-43: `KEY` is answered without room for the largest answer and with the store busy (on the cable its
+/// answers wait in the send ring while keyed), so keepalives keep coming in.
+#[test]
+fn remote_ptt_answered_with_a_full_ring() {
+    struct Small(Vec<u8>);
+    impl Sink for Small {
+        fn room(&self) -> usize {
+            16usize.saturating_sub(self.0.len())
+        }
+        fn put(&mut self, b: &[u8]) {
+            assert!(b.len() <= self.room(), "never cut");
+            self.0.extend_from_slice(b);
+        }
+    }
+    let mut pc = Pc::tx();
+    let mut b = [0u8; 3];
+    let n = Ptt::On(key::ACTIVE).encode(&mut b);
+    let mut w = [0u8; MAX_WIRE];
+    let k = wire::build(msg::KEY, 1, &b[..n], &mut w).unwrap();
+    pc.raw(&w[..k]);
+    let mut out = Small(Vec::new());
+    pc.link.poll(&mut pc.app, &pc.st, pc.now, &mut out);
+    assert!(pc.app.remote_keyed() && !out.0.is_empty(), "answered with 16 bytes of room");
+    // a full ring: the keepalive still counts, its answer is dropped whole
+    let n = Ptt::Alive.encode(&mut b);
+    let k = wire::build(msg::KEY, 2, &b[..n], &mut w).unwrap();
+    pc.now += 1500;
+    pc.raw(&w[..k]);
+    pc.link.poll(&mut pc.app, &pc.st, pc.now, &mut Small(std::vec![0; 16]));
+    assert!(pc.link.ready(), "handled");
+    pc.now += 1000;
+    pc.app.tick(pc.now, &LiveAll::default(), &pc.st);
+    assert!(pc.app.remote_keyed(), "the keepalive counted: 1 s since it");
+}
+
+/// LINK-20, LINK-30: on Bluetooth with a PIN lock, `KEY` only after `AUTH`.
+#[test]
+fn remote_ptt_needs_the_pin_on_bluetooth() {
+    let mut bt = Pc::tx();
+    bt.link = Session::new(false);
+    (bt.app.set.pin, bt.app.set.pin_len, bt.app.set.pin_mode) = (1234, 4, 1);
+    assert_eq!(bt.ptt(Ptt::On(key::ACTIVE)).0, Status::NotAuthorised as u8);
+    assert!(!keyed(&bt.cmds()));
+    assert_eq!(bt.ask(msg::AUTH, b"1234").0, 0);
+    assert_eq!(bt.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    assert!(keyed(&bt.cmds()));
+}

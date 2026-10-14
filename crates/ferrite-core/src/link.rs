@@ -44,6 +44,70 @@ pub mod msg {
     /// on (LINK-30); refused while transmitting. The answer goes out first, then the radio saves, goes quiet and
     /// resets.
     pub const REBOOT: u8 = 0x21;
+    /// A key on the radio (LINK-19, LINK-20): the key, then what it does ([`super::key`]). Version 1 carries only
+    /// remote PTT ([`super::Ptt`]); any other key answers `bad argument`.
+    pub const KEY: u8 = 0x30;
+}
+
+/// `KEY`'s payload: the key, its action, then the action's own bytes.
+pub mod key {
+    /// Remote PTT (LINK-20). Actions [`ON`] (then the slot), [`ALIVE`], [`OFF`].
+    pub const PTT: u8 = 0x80;
+    /// Unkey: always `ok`, keyed or not, so a PC can send it whatever happened.
+    pub const OFF: u8 = 0;
+    /// Key up, with every transmit check a PTT press has; then a byte: the slot ([`ACTIVE`], or 0-2 for A-C).
+    /// `ok` and the slot keyed, or `invalid` and the reason as text.
+    pub const ON: u8 = 1;
+    /// Keepalive: at least every [`KEEPALIVE_MS`] or the radio unkeys (no keepalive, no transmit). `ok` while
+    /// keyed; `invalid` and why it ended once it has.
+    pub const ALIVE: u8 = 2;
+    /// The slot byte for "the active slot", as PTT A and the side connector key it (KEY-7).
+    pub const ACTIVE: u8 = 0xFF;
+    /// No keepalive for this long, and the radio unkeys (LINK-20).
+    pub const KEEPALIVE_MS: u32 = 2000;
+}
+
+/// Remote PTT, as `KEY`'s payload carries it (LINK-20).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ptt {
+    /// Key up: the slot ([`key::ACTIVE`], or 0-2).
+    On(u8),
+    Alive,
+    Off,
+}
+
+impl Ptt {
+    /// The `KEY` payload; its length.
+    pub fn encode(self, out: &mut [u8; 3]) -> usize {
+        out[0] = key::PTT;
+        match self {
+            Ptt::On(slot) => {
+                (out[1], out[2]) = (key::ON, slot);
+                3
+            }
+            Ptt::Alive => {
+                out[1] = key::ALIVE;
+                2
+            }
+            Ptt::Off => {
+                out[1] = key::OFF;
+                2
+            }
+        }
+    }
+
+    /// A `KEY` payload: None if it isn't remote PTT, or is malformed (`ON` with no slot, or a slot past C).
+    pub fn decode(p: &[u8]) -> Option<Ptt> {
+        if p.first() != Some(&key::PTT) {
+            return None;
+        }
+        match (p.get(1).copied()?, p.get(2).copied()) {
+            (key::OFF, _) => Some(Ptt::Off),
+            (key::ALIVE, _) => Some(Ptt::Alive),
+            (key::ON, Some(s)) if s == key::ACTIVE || s < 3 => Some(Ptt::On(s)),
+            _ => None,
+        }
+    }
 }
 
 /// What a `READ`, `WRITE` or `DELETE` is about.
@@ -237,5 +301,26 @@ mod tests {
         assert!(build(1, 0, &[0; MAX_PAYLOAD + 1], &mut wire).is_none());
         let n = build(1, 0, &[0; MAX_PAYLOAD], &mut wire).unwrap();
         assert!(n <= MAX_WIRE);
+    }
+
+    /// LINK-20: remote PTT's `KEY` payloads encode and decode, framed too; malformed ones don't decode.
+    #[test]
+    fn remote_ptt_payloads() {
+        for p in [Ptt::On(key::ACTIVE), Ptt::On(0), Ptt::On(1), Ptt::On(2), Ptt::Alive, Ptt::Off] {
+            let mut b = [0u8; 3];
+            let n = p.encode(&mut b);
+            assert_eq!(Ptt::decode(&b[..n]), Some(p));
+            let mut wire = [0u8; MAX_WIRE];
+            let k = build(msg::KEY, 3, &b[..n], &mut wire).unwrap();
+            let f = parse(&mut wire[..k - 1]).unwrap();
+            assert_eq!((f.ty, Ptt::decode(f.payload)), (msg::KEY, Some(p)));
+        }
+        assert_eq!(Ptt::On(1).encode(&mut [0; 3]), 3);
+        let mut b = [0u8; 3];
+        Ptt::On(key::ACTIVE).encode(&mut b);
+        assert_eq!(b, [0x80, 1, 0xFF], "the bytes Appendix G gives");
+        for bad in [&[][..], &[0x80], &[0x80, 1], &[0x80, 1, 3], &[0x80, 7], &[0x10, 1, 0]] {
+            assert_eq!(Ptt::decode(bad), None, "{bad:?}");
+        }
     }
 }

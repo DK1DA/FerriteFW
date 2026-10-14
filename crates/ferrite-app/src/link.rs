@@ -18,7 +18,8 @@ use crate::slot::{SlotCfg, MODES, SLOT_MODES, STEPS};
 use crate::term::Sink;
 use crate::App;
 use ferrite_core::freq::mhz;
-use ferrite_core::link::{self as wire, msg, what, Status, MAX_PAYLOAD, MAX_WIRE, PROTOCOL};
+use ferrite_core::link::{self as wire, msg, what, Ptt, Status, MAX_PAYLOAD, MAX_WIRE, PROTOCOL};
+use crate::remote::RemoteEnd;
 use ferrite_core::VERSION;
 use ferrite_ui::text::Buf;
 
@@ -60,6 +61,8 @@ pub struct Session {
     /// `REBOOT` was accepted: the caller restarts once the answer has gone (LINK-24).
     reboot: bool,
     hellos: u16,
+    /// The session moved port (LINK-28): a remote transmission it keyed ends at the next poll (LINK-20).
+    closed: bool,
 }
 
 impl Session {
@@ -84,6 +87,7 @@ impl Session {
             baud: None,
             reboot: false,
             hellos: 0,
+            closed: false,
         }
     }
 
@@ -98,6 +102,7 @@ impl Session {
         (self.rn, self.overflow, self.have) = (0, false, false);
         (self.trusted, self.pin_ok) = (trusted, false);
         (self.seen, self.baud, self.max_baud) = (false, None, max_baud);
+        self.closed = true;
     }
 
     /// This session may do anything a session may (LINK-7, LINK-30): the cable, Bluetooth with no PIN lock on, or
@@ -167,7 +172,14 @@ impl Session {
         if self.session && now.wrapping_sub(self.last) >= SESSION_MS {
             self.end(app);
         }
-        if !self.have || out.room() < MAX_WIRE || app.write_pending() || store.data().busy() {
+        // LINK-20: remote PTT ends with the session that keyed it.
+        if core::mem::take(&mut self.closed) {
+            app.remote_unkey(RemoteEnd::Session, now, store);
+        }
+        // `KEY` never waits for the store, nor for room for the largest answer: its answers are a few bytes, and on
+        // the cable they wait in the send ring while keyed (TX-43), so keepalives must still be handled then.
+        let key = self.rn >= 2 && self.rx[0] >= 2 && self.rx[1] == msg::KEY;
+        if !self.have || !key && (out.room() < MAX_WIRE || app.write_pending() || store.data().busy()) {
             return;
         }
         let mut ans = [0u8; MAX_PAYLOAD];
@@ -188,7 +200,11 @@ impl Session {
         };
         let mut w = [0u8; MAX_WIRE];
         if let Some(k) = wire::build(ty | wire::ANSWER, seq, &ans[..len], &mut w) {
-            out.put(&w[..k]);
+            // Only a `KEY` answer can find too little room (the send ring full of them while keyed, TX-43): it is
+            // dropped whole, never cut, and the request has still been acted on.
+            if out.room() >= k {
+                out.put(&w[..k]);
+            }
         }
         (self.have, self.rn) = (false, 0);
     }
@@ -232,9 +248,9 @@ impl Session {
                 self.reboot = true;
                 Status::Ok
             }
+            msg::KEY => remote_ptt(app, st, now, p, &mut o),
             _ => Status::UnknownType,
         };
-        let _ = now;
         o.a[0] = s as u8;
         if s != Status::Ok && s != Status::Invalid {
             o.n = 1; // a refusal carries no partial answer
@@ -389,6 +405,26 @@ impl Out<'_> {
     fn text(&mut self, t: &[u8]) {
         self.put(&[t.len().min(255) as u8]);
         self.put(t);
+    }
+}
+
+/// `KEY` (LINK-20): remote PTT. Any other key is LINK-19's, not built: `bad argument`.
+fn remote_ptt<S: ChannelStore>(app: &mut App, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
+    let res = match Ptt::decode(p) {
+        None => return Status::BadArg,
+        Some(Ptt::Off) => {
+            app.remote_unkey(RemoteEnd::Off, now, st);
+            return Status::Ok;
+        }
+        Some(Ptt::On(slot)) => app.remote_key(slot, now, st).map(|s| o.put(&[s])),
+        Some(Ptt::Alive) => app.remote_keepalive(now),
+    };
+    match res {
+        Ok(()) => Status::Ok,
+        Err(why) => {
+            o.put(why.as_bytes());
+            Status::Invalid
+        }
     }
 }
 

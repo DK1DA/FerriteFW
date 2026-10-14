@@ -360,11 +360,17 @@ impl View for Transmit {
         let hf = s == super::transmit::HF_SLOT;
         let secs = if app.radio.keyed.is_some() { app.now.wrapping_sub(app.radio.t0) / 1000 } else { 0 };
         let (y, h) = place(s, s);
-        if app.dirty(1, 1) {
+        let remote = app.remote_keyed();
+        if app.dirty(1, 1 + remote as u32) {
             parts::card(lcd, 6, y, 228, h, RED);
             lcd.fill_r(7, y + 1, 226, 20, 2, RED);
             lcd.fill(7, y + 12, 226, 9, RED);
             lcd.text4_rows(15, y + 15, b"TRANSMIT", &UI_12B, WHITE, RED, y + 2, y + 20);
+            // LINK-20: keyed over the link, small beside the title.
+            if remote {
+                let x = 15 + text4_width(b"TRANSMIT", &UI_12B) + 8;
+                lcd.text4_rows(x, y + 15, b"Remote", &UI_12, WHITE, RED, y + 2, y + 20);
+            }
         }
         let mut t = Buf::<16>::new();
         mmss(secs, &mut t);
@@ -478,7 +484,10 @@ impl View for Transmit {
         }
     }
 
-    fn hints(self, _: &App) -> Hints {
+    fn hints(self, app: &App) -> Hints {
+        if app.remote_keyed() {
+            return Hints::new(&[("PTT", "Stop remote")]); // LINK-20: a press on the radio ends it
+        }
         Hints::new(&[("PTT", "Release to stop")])
     }
 }
@@ -679,10 +688,10 @@ impl View for Emergency {
         }
     }
 
-    /// TX-3: the second PTT within 5 s transmits; the first one's release does nothing. VOX never confirms it
-    /// (TX-35): its speech is not a person pressing PTT.
+    /// TX-3: the second PTT within 5 s transmits; the first one's release does nothing. VOX and remote PTT never
+    /// confirm it (TX-35, LINK-20): neither is a person pressing PTT.
     fn ptt(self, app: &mut App, down: bool) {
-        if down && !app.vox_on {
+        if down && !app.vox_on && !app.virtual_ptt {
             app.screen = Screen::Home;
             key_as(app, self.slot, true);
         }

@@ -33,6 +33,7 @@ pub mod pager;
 pub mod persist;
 pub mod ports;
 pub mod radio_data;
+pub mod remote;
 pub mod sample;
 pub mod screens;
 pub mod settings;
@@ -277,6 +278,14 @@ pub struct App {
     vox_on: bool,
     /// VOX's speech refused on an emergency frequency (TX-35): the toast once per burst of speech.
     vox_refused: bool,
+    /// Remote PTT over the link holds the key (LINK-20, [`remote`]); why the last one ended; a VOX or remote PTT
+    /// press is going through the PTT path now (not a person's); the local PTTs held, and those whose press ended
+    /// a remote transmission (dead until let go), bits from [`remote::bit`].
+    pub(crate) remote: Option<remote::Remote>,
+    pub(crate) remote_ended: Option<remote::RemoteEnd>,
+    pub(crate) virtual_ptt: bool,
+    pub(crate) local_ptt: u8,
+    pub(crate) ptt_cut: u8,
     /// The second of the alert tone's last beep, with the top bit set (SND-6, INBOX-4).
     alert_beep: u16,
     toast: Option<Toast>,
@@ -369,6 +378,11 @@ impl App {
             alert: 0,
             vox_on: false,
             vox_refused: false,
+            remote: None,
+            remote_ended: None,
+            virtual_ptt: false,
+            local_ptt: 0,
+            ptt_cut: 0,
             alert_beep: 0,
             toast: None,
             undo: None,
@@ -849,6 +863,10 @@ impl App {
             self.keys.down(key, now);
             return;
         }
+        // LINK-20: a person's PTT during a remote transmission ends it, and does nothing else until let go.
+        if self.local_ptt_down(key, now, store) {
+            return;
+        }
         self.keys.down(key, now);
         self.last_input = now;
         self.pressed = now;
@@ -893,6 +911,9 @@ impl App {
 
     pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        if self.local_ptt_up(key) {
+            return; // LINK-20: the press that ended a remote transmission
+        }
         if !matches!(key, Key::Ptt(_)) && self.swallow(false) {
             self.keys.release(key, now);
             return;
@@ -997,6 +1018,7 @@ impl App {
         self.aprs_tick(store.data());
         self.radio_tick(live);
         self.screen.tick(self, live);
+        self.remote_tick(now, store); // LINK-20: after the screen's own unkeys (TX-30, the Radio task's stops)
         if core::mem::take(&mut self.want_reset) {
             screens::confirm::reset_all(self, store);
         }
@@ -1451,10 +1473,14 @@ impl App {
         self.vox_refused &= voice;
         if voice && !self.vox_on && self.radio.keyed.is_none() {
             self.vox_on = true;
+            self.virtual_ptt = true;
             self.key_down(Key::PTT, now, store);
+            self.virtual_ptt = false;
         } else if !voice && self.vox_on {
             self.vox_on = false;
+            self.virtual_ptt = true;
             self.key_up(Key::PTT, now, store);
+            self.virtual_ptt = false;
         }
     }
 

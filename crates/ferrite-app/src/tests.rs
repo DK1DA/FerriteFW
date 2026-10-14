@@ -134,8 +134,9 @@ fn ram_is_small() {
     // quick mute (HOME-15, a byte), auto off's own activity time and the last key for the keypad light (DISP-15,
     // DISP-22: 2 x 4), 16 with padding, to 1312; the quick menu (HOME-17: its last input and the rows as drawn,
     // 12 with its Option), the PTTs it holds dead, the theme before night red and its repaint flag, 24 with
-    // padding, to 1336
-    assert!(n <= 1336, "App is {n} bytes");
+    // padding, to 1336; remote PTT (LINK-20: the transmission, its keepalive and why it ended, the local PTTs held
+    // and cut), 16 with padding, to 1352
+    assert!(n <= 1352, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
