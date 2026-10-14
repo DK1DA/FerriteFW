@@ -44,7 +44,7 @@ pub enum Kind {
     Settle(Option<ferrite_core::settle::Settle>),
     /// `mic`: a burst of PA0 (the mic level tap) readings, summed up (TERM-32).
     Mic,
-    /// `txtest [MODE [FILTERS]]`: the transmit test signal for the next PTT key-up (TERM-33).
+    /// `txtest [MODE [FILTERS] [LEVEL]]`: the transmit test signal for the next PTT key-up (TERM-33).
     TxTest(ferrite_core::txtest::Ask),
 }
 
@@ -256,12 +256,13 @@ impl Job {
             }
             (Kind::TxTest(_), DebugAns::TxTest(Some(a))) => {
                 if self.line == 0 {
-                    put!(out, "  txtest: {} armed for the next PTT key-up, from the key-up to the release; once", a.signal.name());
+                    put!(out, "  txtest: {} at {} % armed for the next PTT key-up, from the key-up to the release; once", a.signal.name(), a.level);
                 } else {
-                    out.push(if a.flat {
-                        &b"  flat: TX HPF, LPF, pre-emphasis (REG_2B 2:0), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey"[..]
-                    } else {
-                        b"  voice: the chip's TX filters, MIC AGC and ALC as for speech; REG_7D 0x34, as an APRS burst"
+                    use ferrite_core::txtest::Filters;
+                    out.push(match a.filters {
+                        Filters::Flat => &b"  flat: TX HPF, LPF, pre-emphasis (REG_2B 2:0 = 111), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey"[..],
+                        Filters::Data => b"  data: TX HPF off, pre-emphasis and LPF on (REG_2B 2:0 = 100), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey",
+                        Filters::Voice => b"  voice: the chip's TX filters, MIC AGC and ALC as for speech; REG_7D 0x34, as an APRS burst",
                     });
                     self.st = St::Over;
                 }

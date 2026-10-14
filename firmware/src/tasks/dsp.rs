@@ -11,7 +11,7 @@
 //!   flags to the end (the flags cover the key-up), PC12 high meanwhile, and [`AFSK_DONE`] says it's out so the
 //!   UI task unkeys. Receiving pauses while it plays.
 //! - **Transmit test (TERM-33, `tx` builds):** the Radio task, after a PTT key-up with `txtest` armed, signals
-//!   [`TXTEST`] with the signal; it plays (generated a sample at a time, [`ferrite_core::txtest::Gen`]) until the
+//!   [`TXTEST`] with the arming; it plays the signal at the arming's level (generated a sample at a time, [`ferrite_core::txtest::Gen`]) until the
 //!   Radio task signals None at the release. Receiving pauses while it plays, as for AFSK.
 
 use crate::chan::DSP;
@@ -48,7 +48,7 @@ pub static AFSK_TX: Signal<M, Frame> = Signal::new();
 pub static AFSK_DONE: Signal<M, bool> = Signal::new();
 /// TERM-33: the transmit test to play now (Some, from the key-up) or to stop (None, at the release).
 #[cfg(feature = "tx")]
-pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Signal>> = Signal::new();
+pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Arm>> = Signal::new();
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
 /// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
@@ -69,7 +69,7 @@ pub async fn task() {
         #[cfg(feature = "tx")]
         let test = TXTEST.wait();
         #[cfg(not(feature = "tx"))]
-        let test = core::future::pending::<Option<ferrite_core::txtest::Signal>>();
+        let test = core::future::pending::<Option<ferrite_core::txtest::Arm>>();
         match select4(DSP.receive(), audio::ADC_HALF.wait(), AFSK_TX.wait(), test).await {
             Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_))) => {
                 match cmd {
@@ -132,11 +132,11 @@ pub async fn task() {
                 });
             }
             Either4::Fourth(None) => {} // a stop with nothing playing
-            Either4::Fourth(Some(sig)) => {
+            Either4::Fourth(Some(arm)) => {
                 if capturing {
                     audio::capture_stop();
                 }
-                play_test(sig).await;
+                play_test(arm).await;
                 if capturing {
                     dec = Decim::new();
                     audio::capture_start();
@@ -191,8 +191,8 @@ async fn play(f: &Frame) {
 /// TERM-33: the test signal out of DAC1 until [`TXTEST`] says stop (None; a new Some stops it too), looped by the
 /// generator itself; then a half of silence, and stopped once that has played.
 #[cfg(feature = "tx")]
-async fn play_test(sig: ferrite_core::txtest::Signal) {
-    let mut g = ferrite_core::txtest::Gen::new(sig);
+async fn play_test(arm: ferrite_core::txtest::Arm) {
+    let mut g = ferrite_core::txtest::Gen::new(arm.signal, arm.level);
     let fill = |half: usize, g: Option<&mut ferrite_core::txtest::Gen>| match g {
         Some(g) => {
             for d in &audio::DAC_BUF[half * BLOCK_DAC..(half + 1) * BLOCK_DAC] {
@@ -225,4 +225,4 @@ async fn play_test(sig: ferrite_core::txtest::Signal) {
 }
 
 #[cfg(not(feature = "tx"))]
-async fn play_test(_: ferrite_core::txtest::Signal) {}
+async fn play_test(_: ferrite_core::txtest::Arm) {}

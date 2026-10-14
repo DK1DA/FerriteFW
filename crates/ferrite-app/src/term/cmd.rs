@@ -1239,24 +1239,36 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
     }
 }
 
-/// TERM-33 (decision 132, a bench test): `txtest` asks what is armed, `txtest off` disarms, `txtest MODE [FILTERS]`
-/// arms MODE (4fsk, sweep, afsk) for the next PTT key-up with the BK4829's TX audio `flat` or as for `voice` (the
-/// default: flat for 4fsk and sweep, voice for afsk). Anything else is refused here, before anything is sent.
+/// TERM-33 (decision 132, a bench test): `txtest` asks what is armed, `txtest off` disarms, `txtest MODE [FILTERS]
+/// [LEVEL]` arms MODE (4fsk, sweep, afsk) for the next PTT key-up with the BK4829's TX audio `voice`, `flat` or
+/// `data` (the default: data for 4fsk and sweep, voice for afsk) at LEVEL percent of the mode's nominal (10 to 150,
+/// default 100). Anything else is refused here, before anything is sent.
 fn txtest(t: &mut Toks) -> Result<Done, Msg> {
-    use ferrite_core::txtest::{Arm, Ask, Signal};
-    const USAGE: &str = "txtest 4fsk|sweep|afsk [flat|voice], txtest off; txtest alone shows what is armed";
+    use ferrite_core::txtest::{Arm, Ask, Filters, Signal, LEVEL_DEFAULT, LEVEL_MAX, LEVEL_MIN};
+    const USAGE: &str = "txtest 4fsk|sweep|afsk [voice|flat|data] [10-150 %], txtest off; txtest alone shows what is armed";
+    let level = |w: &[u8]| number(w).filter(|n| (LEVEL_MIN as u32..=LEVEL_MAX as u32).contains(n)).map(|n| n as u8).ok_or_else(|| msg!("{}", USAGE));
     let ask = match t.next()? {
         None => Ask::Show,
         Some(Tok::Word(w)) if same(w, b"off") => Ask::Set(None),
         Some(Tok::Word(w)) => {
             let signal = Signal::parse(w).ok_or_else(|| msg!("{}", USAGE))?;
-            let flat = match t.next()? {
-                None => signal.flat_by_default(),
-                Some(Tok::Word(f)) if same(f, b"flat") => true,
-                Some(Tok::Word(f)) if same(f, b"voice") => false,
+            let mut arm = Arm { signal, filters: signal.default_filters(), level: LEVEL_DEFAULT };
+            match t.next()? {
+                None => {}
+                Some(Tok::Word(f)) => match Filters::parse(f) {
+                    Some(f) => {
+                        arm.filters = f;
+                        match t.next()? {
+                            None => {}
+                            Some(Tok::Word(l)) => arm.level = level(l)?,
+                            _ => return Err(msg!("{}", USAGE)),
+                        }
+                    }
+                    None => arm.level = level(f)?,
+                },
                 _ => return Err(msg!("{}", USAGE)),
-            };
-            Ask::Set(Some(Arm { signal, flat }))
+            }
+            Ask::Set(Some(arm))
         }
         _ => return Err(msg!("{}", USAGE)),
     };
@@ -1511,7 +1523,7 @@ const HELP: [&str; 31] = [
     "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
     "  gps                    the GPS module's last GGA sentence, its age and heights",
     "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",
-    "  txtest 4fsk|sweep|afsk [flat|voice]   bench test: that signal on the next PTT",
-    "                         key-up until release (tx builds); txtest off; txtest asks",
+    "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal",
+    "                         at that % on the next PTT key-up until release (tx builds)",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
 ];

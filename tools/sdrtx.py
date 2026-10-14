@@ -272,7 +272,8 @@ def eye(dev, fs, out_png=None):
     dec = np.array([-3, -1, 1, 3])[lab]
     ref = prbs_symbols()
     m = min(1000, len(dec))
-    # Either polarity: the chain from the DAC to the deviation (and the dongle's spectrum) may invert it.
+    # Either polarity: the chain from the DAC to the deviation inverts (measured Oct 13, 2026), which Ferrite's
+    # generator now undoes (TERM-33), so "polarity inverted" here means a build before that or a flipped dongle.
     def align(d):
         best = max(range(511), key=lambda s: np.sum(d[:m] == np.roll(ref, -s)[np.arange(m) % 511]))
         return int(np.sum(d != np.roll(ref, -best)[np.arange(len(d)) % 511]))

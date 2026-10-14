@@ -322,7 +322,7 @@ pub fn tail(tx_tone: u16, phase: u8, dev: u8) -> bk4829::tx::Tail {
     }
 }
 
-/// TERM-33's `flat` test key-up (decision 132): the four registers as they were, for [`tx_test_restore`].
+/// TERM-33's `flat` or `data` test key-up (decision 132): the four registers as they were, for [`tx_test_restore`].
 #[cfg(feature = "tx")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TestRegs {
@@ -335,6 +335,10 @@ pub struct TestRegs {
 /// REG_2B[2:0]: the TX HPF300, LPF1 and pre-emphasis, each 1 = off (the register table).
 #[cfg(feature = "tx")]
 pub const TX_FILTERS_OFF: u16 = 0b111;
+/// REG_2B[2:0] for `data`: the TX HPF300 off (bit 2), pre-emphasis and LPF on. Measured on the black radio
+/// (Oct 13, 2026): the pre-emphasis cancels the DAC injection's 6 dB/octave fall, +-1 dB from 250 Hz to 2.5 kHz.
+#[cfg(feature = "tx")]
+pub const TX_HPF_OFF: u16 = 0b100;
 /// REG_19[15]: MIC AGC, 1 = off (the register table; the BK4819 app note turns it off for DMR).
 #[cfg(feature = "tx")]
 pub const MIC_AGC_OFF: u16 = 1 << 15;
@@ -347,13 +351,15 @@ pub const ALC_OFF: u16 = 1 << 6;
 #[cfg(feature = "tx")]
 pub const TX_MUTE: u16 = 1 << 15;
 
-/// TERM-33 `flat`, after [`tx_setup`] and before the key-up: the TX audio filters, MIC AGC and the ALC off and the
-/// TX mute clear, so DAC1's test signal reaches the modulator as it is. REG_7D[5:0] is the data key-up's
-/// [`ferrite_core::vox::MIC_DATA`] from [`tx_setup`]. Returns what was there.
+/// TERM-33 `flat` or `data` (never called for `voice`), after [`tx_setup`] and before the key-up: REG_2B[2:0] to
+/// [`TX_FILTERS_OFF`] (`flat`) or exactly [`TX_HPF_OFF`] (`data`; the register's other bits kept), MIC AGC and the
+/// ALC off and the TX mute clear, so DAC1's test signal reaches the modulator without the voice processing.
+/// REG_7D[5:0] is the data key-up's [`ferrite_core::vox::MIC_DATA`] from [`tx_setup`]. Returns what was there.
 #[cfg(feature = "tx")]
-pub fn tx_test_flat<B: Bus>(bk: &mut Bk4829<B>) -> TestRegs {
+pub fn tx_test_filters<B: Bus>(bk: &mut Bk4829<B>, f: ferrite_core::txtest::Filters) -> TestRegs {
     let was = TestRegs { r2b: bk.read(bk4829::reg::AF_FILTERS), r19: bk.read(0x19), r7d: bk.read(bk4829::reg::MIC), r50: bk.read(0x50) };
-    bk.write(bk4829::reg::AF_FILTERS, was.r2b | TX_FILTERS_OFF);
+    let bits = if f == ferrite_core::txtest::Filters::Flat { TX_FILTERS_OFF } else { TX_HPF_OFF };
+    bk.write(bk4829::reg::AF_FILTERS, (was.r2b & !TX_FILTERS_OFF) | bits);
     bk.write(0x19, was.r19 | MIC_AGC_OFF);
     bk.write(bk4829::reg::MIC, was.r7d | ALC_OFF);
     if was.r50 & TX_MUTE != 0 {
@@ -362,7 +368,7 @@ pub fn tx_test_flat<B: Bus>(bk: &mut Bk4829<B>) -> TestRegs {
     was
 }
 
-/// At the unkey of a `flat` test: the four registers as [`tx_test_flat`] found them.
+/// At the unkey of a `flat` or `data` test: the four registers as [`tx_test_filters`] found them.
 #[cfg(feature = "tx")]
 pub fn tx_test_restore<B: Bus>(bk: &mut Bk4829<B>, r: &TestRegs) {
     bk.write(bk4829::reg::AF_FILTERS, r.r2b);

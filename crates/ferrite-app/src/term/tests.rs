@@ -1225,35 +1225,50 @@ fn debug_mic() {
     assert!(!super::cmd::writes(b"mic"));
 }
 
-/// TERM-33: `txtest MODE [FILTERS]` arms, `txtest off` disarms, `txtest` alone asks (a read); the filters default
-/// to flat for 4fsk and sweep, voice for afsk; anything else is refused before anything is sent; a receive-only
-/// build's refusal prints as one.
+/// TERM-33: `txtest MODE [FILTERS] [LEVEL]` arms, `txtest off` disarms, `txtest` alone asks (a read); the filters
+/// default to data for 4fsk and sweep, voice for afsk; the level to 100 %, 10 to 150 taken, with or without the
+/// filters before it; anything else is refused before anything is sent; a receive-only build's refusal prints as one.
 #[test]
 fn debug_txtest() {
-    use ferrite_core::txtest::{Arm, Ask, Signal};
+    use ferrite_core::txtest::{Arm, Ask, Filters, Signal};
     let mut r = Rig::main();
     r.cmd("txtest");
     assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Show)]);
     assert!(r.raw().contains("txtest: off (nothing armed"), "{}", r.raw());
     r.send(b"\r");
-    for (line, signal, flat) in [("txtest 4fsk", Signal::Fsk4, true), ("txtest SWEEP", Signal::Sweep, true), ("txtest afsk", Signal::Afsk, false), ("txtest afsk flat", Signal::Afsk, true), ("txtest 4fsk voice", Signal::Fsk4, false)] {
+    for (line, signal, filters, level) in [
+        ("txtest 4fsk", Signal::Fsk4, Filters::Data, 100),
+        ("txtest SWEEP", Signal::Sweep, Filters::Data, 100),
+        ("txtest afsk", Signal::Afsk, Filters::Voice, 100),
+        ("txtest afsk flat", Signal::Afsk, Filters::Flat, 100),
+        ("txtest 4fsk voice", Signal::Fsk4, Filters::Voice, 100),
+        ("txtest 4fsk flat 80", Signal::Fsk4, Filters::Flat, 80),
+        ("txtest afsk 70", Signal::Afsk, Filters::Voice, 70),
+        ("txtest sweep DATA 150", Signal::Sweep, Filters::Data, 150),
+        ("txtest 4fsk 10", Signal::Fsk4, Filters::Data, 10),
+    ] {
         r.cmd(line);
-        assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal, flat })))], "{line}");
+        assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal, filters, level })))], "{line}");
         let raw = r.raw();
-        assert!(raw.contains(&std::format!("txtest: {} armed for the next PTT key-up", signal.name())), "{raw}");
-        assert!(raw.contains(if flat { "flat: TX HPF, LPF, pre-emphasis" } else { "voice: the chip's TX filters" }), "{line}: {raw}");
+        assert!(raw.contains(&std::format!("txtest: {} at {level} % armed for the next PTT key-up", signal.name())), "{raw}");
+        let want = match filters {
+            Filters::Flat => "flat: TX HPF, LPF, pre-emphasis",
+            Filters::Data => "data: TX HPF off, pre-emphasis and LPF on (REG_2B 2:0 = 100)",
+            Filters::Voice => "voice: the chip's TX filters",
+        };
+        assert!(raw.contains(want), "{line}: {raw}");
         r.send(b"\r");
     }
     r.cmd("txtest off");
     assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(None))]);
     r.send(b"\r");
-    for bad in ["txtest fsk", "txtest 4fsk loud", "txtest sweep flat 2", "txtest off now"] {
+    for bad in ["txtest fsk", "txtest 4fsk loud", "txtest sweep flat 2", "txtest off now", "txtest 4fsk 9", "txtest 4fsk 151", "txtest afsk data 100 1", "txtest 4fsk 100 flat"] {
         r.cmd(bad);
         assert!(r.bottom().contains("txtest 4fsk|sweep|afsk"), "{bad}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
     r.cmd("txtest 4fsk");
-    assert_eq!(r.serve(4, |_| DebugAns::Refused("the receive-only build has no transmit")), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal: Signal::Fsk4, flat: true })))]);
+    assert_eq!(r.serve(4, |_| DebugAns::Refused("the receive-only build has no transmit")), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal: Signal::Fsk4, filters: Filters::Data, level: 100 })))]);
     assert!(r.raw().contains("refused: the receive-only build has no transmit"), "{}", r.raw());
     assert!(!super::cmd::writes(b"txtest") && super::cmd::writes(b"txtest 4fsk") && super::cmd::writes(b"txtest off"));
 }

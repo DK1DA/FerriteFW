@@ -1,4 +1,4 @@
-//! TERM-33 (decision 132, a bench test): the transmit baseband test signals. `txtest MODE [filters]` arms one for the
+//! TERM-33 (decision 132, a bench test): the transmit baseband test signals. `txtest MODE [FILTERS] [LEVEL]` arms one for the
 //! next PTT key-up of a `tx` build; the DSP task plays it out of DAC1 into the BK4829's mic input (PC12, as an APRS
 //! burst) from the key-up to the release, looped, and `tools/sdrtx.py` measures it off the air (`--eye`, `--sweep`,
 //! `--afsk`). Everything is made sample by sample at [`RATE_HZ`]: no buffer, only the named tables below in flash.
@@ -6,11 +6,15 @@
 //! - **4FSK** ([`Fsk4`]): M17's symbols, 4800 a second, levels +-3 and +-1 ([`level`]: M17's dibit map), root-
 //!   raised-cosine shaped as M17 (alpha 0.5, [`RRC`]); first [`PREAMBLE_SYMBOLS`] of +3/-3 (40 ms, M17's
 //!   preamble: a 2400 Hz square-ish tone the analysis finds), then PRBS9 ([`Prbs9`]) dibits for as long as PTT is
-//!   held. A +3 symbol is [`FSK_AMP`]: M17's 2400 Hz if [`crate::audio::AFSK_AMP`] makes APRS's 3 kHz.
+//!   held. A +3 symbol is [`FSK_AMP`], set on the bench for M17's 2400 Hz. The DAC-to-air chain inverts (measured
+//!   Oct 13, 2026: a positive DAC swing goes out as negative deviation), so the generator sends each symbol negated
+//!   and +3 goes out as +2400 Hz.
 //! - **Sweep** ([`Sweep`]): a 1 kHz marker ([`MARKER_MS`]), then each third-octave tone of [`SWEEP_HZ`] (50 Hz to
 //!   8 kHz) for [`TONE_MS`], [`GAP_MS`] of silence after each, all at [`SWEEP_AMP`]; then again.
 //! - **AFSK** ([`Afsk`]): Bell 202 HDLC flags (0x7E) and nothing else: no callsign, no frame. NRZI makes each flag
 //!   seven bits of one tone and one of the other.
+//!
+//! Each is at its nominal level times the arming's [`Arm::level`] percent ([`LEVEL_MIN`] to [`LEVEL_MAX`]).
 
 use crate::audio::{AFSK_AMP, DAC_HZ};
 use udsp::trig::{ccos, cos_sin_phase, csin, phase_step};
@@ -26,16 +30,18 @@ pub const SPAN: usize = 8;
 pub const TAPS: usize = SPAN * SPS + 1;
 /// The +3/-3 preamble at the start: 40 ms (M17's).
 pub const PREAMBLE_SYMBOLS: u32 = SYMBOL_HZ / 25;
-/// A +3 symbol's level, full scale 32767: 2400 / 3000 of AFSK's peak.
-pub const FSK_AMP: i32 = AFSK_AMP as i32 * 4 / 5;
+/// A +3 symbol's level, full scale 32767: M17's 2400 Hz in the `data` filters (bench, black radio, chip 0,
+/// Oct 13, 2026: 6400 made about 3100 Hz, so 6400 x 0.77). A multiple of 3 (the unit is a third of it).
+pub const FSK_AMP: i32 = 4920;
 
-/// Sweep: the marker, each tone and the silence after each, ms; the tones' peak (half AFSK's, so the
-/// pre-emphasis of the `voice` filters doesn't drive the limiter at the top tones).
+/// Sweep: the marker, each tone and the silence after each, ms; the tones' peak (the first build's half of the old
+/// AFSK level, kept so sweeps compare across builds; low enough that the pre-emphasis of the `voice` filters doesn't
+/// drive the limiter at the top tones).
 pub const MARKER_MS: u32 = 500;
 pub const MARKER_HZ: u16 = 1000;
 pub const TONE_MS: u32 = 300;
 pub const GAP_MS: u32 = 50;
-pub const SWEEP_AMP: i32 = AFSK_AMP as i32 / 2;
+pub const SWEEP_AMP: i32 = 4000;
 /// The third-octave centre frequencies (IEC 61260's nominal ones) from 50 Hz to 8 kHz: 23 tones. A `static`: read
 /// by the DSP task, so it stays in the fast flash (firmware/memory.x).
 pub static SWEEP_HZ: [u16; 23] = [
@@ -67,19 +73,59 @@ impl Signal {
         Signal::ALL.into_iter().find(|s| s.name().as_bytes().eq_ignore_ascii_case(w))
     }
 
-    /// The filters when none are named: `flat` for the 4FSK and the sweep (the baseband itself), `voice` for AFSK
-    /// (as an APRS burst goes out).
-    pub fn flat_by_default(self) -> bool {
-        self != Signal::Afsk
+    /// The filters when none are named: `data` for the 4FSK and the sweep (the bench's best data setting), `voice`
+    /// for AFSK (as an APRS burst goes out).
+    pub fn default_filters(self) -> Filters {
+        if self == Signal::Afsk { Filters::Voice } else { Filters::Data }
     }
 }
 
-/// A test armed for the next PTT key-up. `flat`: the BK4829's TX audio filters, MIC AGC and ALC off for it
-/// (`ferrite_radio::chip::tx_test_flat`); otherwise the chip's voice settings.
+/// The BK4829's TX audio set-up for a test key-up (`ferrite_radio::chip::tx_test_filters`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Filters {
+    /// The chip's voice settings, as an APRS burst goes out.
+    Voice,
+    /// REG_2B[2:0] = 111 (TX HPF, LPF and pre-emphasis off), MIC AGC and ALC off. Measured: the injection falls
+    /// 6 dB/octave above ~150 Hz.
+    Flat,
+    /// REG_2B[2:0] = 100 (TX HPF off; pre-emphasis and LPF on: the pre-emphasis cancels the injection's slope), MIC
+    /// AGC and ALC off. Measured: +-1 dB from 250 Hz to 2.5 kHz; the data setting.
+    Data,
+}
+
+impl Filters {
+    pub const ALL: [Filters; 3] = [Filters::Voice, Filters::Flat, Filters::Data];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Filters::Voice => "voice",
+            Filters::Flat => "flat",
+            Filters::Data => "data",
+        }
+    }
+
+    pub fn parse(w: &[u8]) -> Option<Filters> {
+        Filters::ALL.into_iter().find(|f| f.name().as_bytes().eq_ignore_ascii_case(w))
+    }
+}
+
+/// The level, percent of the signal's nominal: the range and the default.
+pub const LEVEL_MIN: u8 = 10;
+pub const LEVEL_MAX: u8 = 150;
+pub const LEVEL_DEFAULT: u8 = 100;
+
+/// A test armed for the next PTT key-up: the signal, the chip's TX audio set-up for it, and its level in percent
+/// of the nominal ([`LEVEL_MIN`] to [`LEVEL_MAX`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Arm {
     pub signal: Signal,
-    pub flat: bool,
+    pub filters: Filters,
+    pub level: u8,
+}
+
+/// `amp` at `level` percent.
+const fn scaled(amp: i32, level: u8) -> i32 {
+    amp * level as i32 / 100
 }
 
 /// The terminal's request: show what is armed, or arm (`Some`) or disarm (`None`).
@@ -169,17 +215,20 @@ pub struct Fsk4 {
     /// Symbols made so far (saturating: only the preamble's count matters).
     n: u32,
     prbs: Prbs9,
+    /// A unit symbol's level (a third of [`FSK_AMP`], at the arming's level).
+    unit: i32,
 }
 
 impl Default for Fsk4 {
     fn default() -> Self {
-        Self::new()
+        Self::new(LEVEL_DEFAULT)
     }
 }
 
 impl Fsk4 {
-    pub fn new() -> Self {
-        Fsk4 { syms: [0; SPAN + 1], at: 0, phase: 0, n: 0, prbs: Prbs9::default() }
+    /// At `level` percent of [`FSK_AMP`].
+    pub fn new(level: u8) -> Self {
+        Fsk4 { syms: [0; SPAN + 1], at: 0, phase: 0, n: 0, prbs: Prbs9::default(), unit: scaled(FSK_AMP / 3, level) }
     }
 
     /// The next symbol: the preamble's, then the PRBS's.
@@ -209,7 +258,8 @@ impl Fsk4 {
             tap += SPS;
         }
         self.phase = if self.phase as usize + 1 == SPS { 0 } else { self.phase + 1 };
-        ((acc * (FSK_AMP / 3)) >> RRC_SHIFT).clamp(-32767, 32767) as i16
+        // Negated: the DAC-to-air chain inverts, so +3 goes out as positive deviation.
+        (-((acc * self.unit) >> RRC_SHIFT)).clamp(-32767, 32767) as i16
     }
 }
 
@@ -234,19 +284,31 @@ pub fn sweep_tone(pos: u32) -> Option<u16> {
 }
 
 /// The sweep, a sample at a time: each tone from phase 0.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct Sweep {
     pos: u32,
     phase: u32,
+    amp: i32,
+}
+
+impl Default for Sweep {
+    fn default() -> Self {
+        Self::new(LEVEL_DEFAULT)
+    }
 }
 
 impl Sweep {
+    /// At `level` percent of [`SWEEP_AMP`].
+    pub fn new(level: u8) -> Self {
+        Sweep { pos: 0, phase: 0, amp: scaled(SWEEP_AMP, level) }
+    }
+
     pub fn sample(&mut self) -> i16 {
         let s = match sweep_tone(self.pos) {
             Some(hz) => {
                 let (_, s) = cos_sin_phase(self.phase);
                 self.phase = self.phase.wrapping_add(phase_step(hz as u64 * 1000, RATE_HZ as u64 * 1000));
-                (s * SWEEP_AMP) >> 15
+                (s * self.amp) >> 15
             }
             None => {
                 self.phase = 0;
@@ -258,7 +320,7 @@ impl Sweep {
     }
 }
 
-/// Bell 202 flags, phase-continuous, at [`AFSK_AMP`].
+/// Bell 202 flags, phase-continuous, at [`AFSK_AMP`] (the APRS beacon's level) times the arming's level.
 #[derive(Clone, Copy, Debug)]
 pub struct Afsk {
     phase: u32,
@@ -266,11 +328,12 @@ pub struct Afsk {
     /// The bit of the flag being sent (0-7, LSB first).
     bit: u8,
     mark: bool,
+    amp: i32,
 }
 
 impl Default for Afsk {
     fn default() -> Self {
-        Self::new()
+        Self::new(LEVEL_DEFAULT)
     }
 }
 
@@ -278,9 +341,10 @@ const MARK_STEP: u32 = phase_step(1_200_000, RATE_HZ as u64 * 1000);
 const SPACE_STEP: u32 = phase_step(2_200_000, RATE_HZ as u64 * 1000);
 
 impl Afsk {
-    pub fn new() -> Self {
+    /// At `level` percent of [`AFSK_AMP`].
+    pub fn new(level: u8) -> Self {
         // The first bit (a 0) toggles: the pattern starts on space.
-        Afsk { phase: 0, bit_phase: 0, bit: 0, mark: false }
+        Afsk { phase: 0, bit_phase: 0, bit: 0, mark: false, amp: scaled(AFSK_AMP as i32, level) }
     }
 
     /// Whether the tone now is mark (1200 Hz).
@@ -300,7 +364,7 @@ impl Afsk {
                 self.mark = !self.mark;
             }
         }
-        ((s * AFSK_AMP as i32) >> 15) as i16
+        ((s * self.amp) >> 15) as i16
     }
 }
 
@@ -313,11 +377,12 @@ pub enum Gen {
 }
 
 impl Gen {
-    pub fn new(s: Signal) -> Gen {
+    /// `s` at `level` percent of its nominal.
+    pub fn new(s: Signal, level: u8) -> Gen {
         match s {
-            Signal::Fsk4 => Gen::Fsk4(Fsk4::new()),
-            Signal::Sweep => Gen::Sweep(Sweep::default()),
-            Signal::Afsk => Gen::Afsk(Afsk::new()),
+            Signal::Fsk4 => Gen::Fsk4(Fsk4::new(level)),
+            Signal::Sweep => Gen::Sweep(Sweep::new(level)),
+            Signal::Afsk => Gen::Afsk(Afsk::new(level)),
         }
     }
 
@@ -353,7 +418,7 @@ mod tests {
     #[test]
     fn symbol_levels() {
         assert_eq!([level(0, 1), level(0, 0), level(1, 0), level(1, 1)], [3, 1, -1, -3]);
-        let mut f = Fsk4::new();
+        let mut f = Fsk4::default();
         let pre: Vec<i8> = (0..PREAMBLE_SYMBOLS).map(|_| f.symbol()).collect();
         assert_eq!(PREAMBLE_SYMBOLS, 192);
         assert!(pre.chunks(2).all(|c| c == [3, -3]));
@@ -395,18 +460,19 @@ mod tests {
         // Each side's continuity at the singular taps (+-5): between its neighbours' trend.
         assert!(RRC[35] > RRC[34] && RRC[36] > RRC[35]);
 
-        // The generator through a matched RRC (unit sum): the PRBS part's symbol centres at +-1, +-3 of FSK_AMP / 3.
-        let mut g = Fsk4::new();
+        // The generator through a matched RRC (unit sum): the PRBS part's symbol centres at +-1, +-3 of FSK_AMP / 3,
+        // negated (the DAC-to-air chain inverts).
+        let mut g = Fsk4::default();
         let x: Vec<f64> = (0..SPS * 1400).map(|_| g.sample() as f64).collect();
         assert!(x.iter().all(|v| v.abs() < 32000.0));
         let h: Vec<f64> = fs.iter().map(|v| v / fsum).collect();
         let y: Vec<f64> = (0..x.len()).map(|n| (0..TAPS).filter(|&k| k <= n).map(|k| h[k] * x[n - k]).sum()).collect();
         // Delay: the transmit filter's 40 samples plus the receive filter's 40.
         let unit = (FSK_AMP / 3) as f64;
-        let mut f2 = Fsk4::new();
+        let mut f2 = Fsk4::default();
         let want: Vec<i8> = (0..1400).map(|_| f2.symbol()).collect();
         for (m, &w) in want.iter().enumerate().skip(220).take(1000) {
-            let got = y[m * SPS + 80] / unit;
+            let got = -y[m * SPS + 80] / unit;
             assert!((got - w as f64).abs() < 0.08, "symbol {m}: {got} vs {w}");
         }
     }
@@ -443,7 +509,7 @@ mod tests {
     /// TERM-33: AFSK flags: seven bits of space, one of mark, at 1200 baud (40 samples a bit), phase-continuous.
     #[test]
     fn afsk_flags() {
-        let mut a = Afsk::new();
+        let mut a = Afsk::default();
         let mut marks = Vec::new();
         let mut x = Vec::new();
         for _ in 0..40 * 64 {
@@ -466,6 +532,45 @@ mod tests {
         }
         assert_eq!(Signal::parse(b"SWEEP"), Some(Signal::Sweep));
         assert_eq!(Signal::parse(b"fsk"), None);
-        assert!(Signal::Fsk4.flat_by_default() && !Signal::Afsk.flat_by_default());
+        for f in Filters::ALL {
+            assert_eq!(Filters::parse(f.name().to_ascii_uppercase().as_bytes()), Some(f));
+        }
+        assert_eq!(Filters::parse(b"loud"), None);
+        assert_eq!(Signal::ALL.map(Signal::default_filters), [Filters::Data, Filters::Data, Filters::Voice]);
+    }
+
+    /// TERM-33: 4FSK polarity. The DAC-to-air chain inverts, so the generator sends +3 as a negative swing: the
+    /// preamble's first symbol (+3) comes out negative at its centre, the second (-3) positive (and `rrc_shape`'s
+    /// matched-filter round trip checks every PRBS symbol negated).
+    #[test]
+    fn fsk4_polarity() {
+        let mut f = Fsk4::default();
+        // The preamble (+3, -3, ...): its first symbol's centre, 40 samples of filter delay in.
+        let x: Vec<i16> = (0..SPS * 8).map(|_| f.sample()).collect();
+        assert!(x[TAPS / 2] < -(FSK_AMP / 2) as i16, "{}", x[TAPS / 2]);
+        assert!(x[TAPS / 2 + SPS] > (FSK_AMP / 2) as i16, "{}", x[TAPS / 2 + SPS]);
+    }
+
+    /// TERM-33: the level scales every signal's amplitude by its percent (10 to 150), and 100 is the nominal.
+    #[test]
+    fn level_scaling() {
+        let peak = |s: Signal, level: u8, n: usize| {
+            let mut g = Gen::new(s, level);
+            (0..n).map(|_| g.sample().unsigned_abs() as i32).max().unwrap()
+        };
+        for s in Signal::ALL {
+            let n = 48 * 600;
+            let full = peak(s, LEVEL_DEFAULT, n);
+            for level in [LEVEL_MIN, 50, LEVEL_MAX] {
+                let got = peak(s, level, n);
+                let want = full * level as i32 / 100;
+                assert!((got - want).abs() <= want / 50 + 2, "{s:?} at {level}: {got} vs {want}");
+            }
+        }
+        // The nominal peaks: AFSK's sine at AFSK_AMP, the sweep's marker at SWEEP_AMP.
+        assert!((peak(Signal::Afsk, 100, 4800) - AFSK_AMP as i32).abs() < 20);
+        assert!((peak(Signal::Sweep, 100, 4800) - SWEEP_AMP).abs() < 20);
+        // 150 % stays inside the DAC.
+        assert!(peak(Signal::Fsk4, LEVEL_MAX, 48_000) < 32767);
     }
 }

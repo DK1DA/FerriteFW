@@ -394,7 +394,7 @@ struct Tx {
     /// The keyed slot's bandwidth: stock keys through REG_30 0x0200 when wide (TX audit F3).
     narrow: bool,
     /// TERM-33: the test signal armed for the next PTT key-up; while one plays, the chip whose registers the `flat`
-    /// set-up changed (and what they were), and whether the DSP task is playing it.
+    /// or `data` set-up changed (and what they were), and whether the DSP task is playing it.
     test: Option<ferrite_core::txtest::Arm>,
     test_regs: Option<(u8, radio_chip::TestRegs)>,
     test_playing: bool,

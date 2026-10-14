@@ -19,9 +19,10 @@ pub const DECIM: usize = (ADC_HZ / RATE_HZ) as usize;
 /// DAC1's rate for AFSK (and later other modulators). Stock plays AFSK at 38.4 kHz; 48 kHz is the same timer
 /// arithmetic as the ADC's.
 pub const DAC_HZ: u32 = 48_000;
-/// AFSK's peak, full scale 32767: about a quarter of the DAC's range, the level stock's table gives the mic
-/// input. Bench-confirm: the deviation it makes (3 kHz is APRS's target; roadmap 5c).
-pub const AFSK_AMP: i16 = 8_000;
+/// AFSK's peak, full scale 32767, for the APRS beacon and `txtest afsk` alike (APRS-14, decision 133): about 3 kHz
+/// deviation, APRS's usual. Bench-measured on the black radio (chip 0, voice filters, REG_7D 0x34, Oct 13, 2026):
+/// the first level, 8000, made 4.3-4.4 kHz, so 8000 x 0.69. Stock's own beacon level is still to be compared.
+pub const AFSK_AMP: i16 = 5_500;
 
 /// Each half of the ADC's DMA buffer: 2 ms at 48 kHz. The DSP task gets 500 blocks a second of
 /// [`BLOCK_OUT`] decoder samples.
