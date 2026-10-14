@@ -264,6 +264,8 @@ pub(crate) struct Drawn {
     pub cue: ferrite_ui::widgets::Cue,
     /// A popup just went: clear its box and redraw the screen's regions under it.
     pub popup_gone: bool,
+    /// The quick menu's box just went (HOME-17): its rectangle is drawn again from the screen under it.
+    pub qmenu_gone: bool,
 }
 
 /// [`App::alert`]'s bits.
@@ -276,6 +278,13 @@ pub struct App {
     active: u8,
     /// The slot the PTT being pressed keys ([`App::ptt_target`]).
     pub(crate) ptt_slot: u8,
+    /// The quick menu (hold \* on home, HOME-17) while it is up.
+    pub(crate) qmenu: Option<screens::qmenu::QuickMenu>,
+    /// HOME-17 (safety): PTT A (bit 0) and PTT B (bit 1) went down while the quick menu was up: dead until let go,
+    /// whether or not the menu is still up ([`screens::qmenu::ptt_bit`]).
+    pub(crate) ptt_block: u8,
+    /// The theme in use before night red, for the quick menu's PTT B (0 7 1; RAM only).
+    pub(crate) day_theme: u8,
     /// Index into Watch's values: off, A+B, A+B+C.
     watch: u8,
     /// Battery Save: 0 off, 1-3.
@@ -369,6 +378,9 @@ impl App {
             slots: [Slot::new(mhz(146) + 52_000), Slot::new(mhz(443) + 47_500), Slot::new(mhz(118) + 95_000)],
             active: 0,
             ptt_slot: 0,
+            qmenu: None,
+            ptt_block: 0,
+            day_theme: 0,
             watch: 1,
             bsave: 1,
             locked: false,
@@ -405,7 +417,7 @@ impl App {
             write: None,
             text: Buf::new(),
             back: [None; BACK_DEPTH],
-            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false },
+            drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false, qmenu_gone: false },
             radio: screens::activity::RadioUi::new(),
             set,
             alert_info: alert,
@@ -866,8 +878,18 @@ impl App {
             (self.paused_until, self.tx_pause) = (None, false);
             self.out.push(RadioCmd::PauseWatch(0));
         }
+        // HOME-17: while the quick menu is up it takes every key but the side connector's PTT (which closes it):
+        // PTT A and PTT B run its features and never get further.
+        if screens::qmenu::key_down(self, key) {
+            return;
+        }
         self.screen.raw(self, Some(key), None, true);
         if let Key::Ptt(k) = key {
+            // HOME-17 (safety): a PTT pressed while the quick menu was up never keys, even after the menu closed,
+            // until it has been let go (a second down without an up, a bounce, is the same press).
+            if self.ptt_block & screens::qmenu::ptt_bit(k) != 0 {
+                return;
+            }
             // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there. PTT B keys
             // slot B; PTT A and the side connector's key the active slot (decision 77, as nicFW).
             let s = self.ptt_target(k);
@@ -892,8 +914,13 @@ impl App {
             return;
         }
         self.screen.raw(self, Some(key), None, false);
-        if matches!(key, Key::Ptt(_)) {
-            self.screen.ptt(self, false);
+        if let Key::Ptt(k) = key {
+            // HOME-17: a PTT the quick menu took comes up: it never went down for the screen, so nor does it come up
+            let bit = screens::qmenu::ptt_bit(k);
+            if self.ptt_block & bit == 0 {
+                self.screen.ptt(self, false);
+            }
+            self.ptt_block &= !bit;
             self.ptt_released(); // TX-25: whatever the screen did, PTT up unkeys
         }
         match self.keys.release(key, now) {
@@ -916,6 +943,9 @@ impl App {
         self.out.push(RadioCmd::Activity);
         if self.locked {
             return self.locked_toast();
+        }
+        if screens::qmenu::knob(self, d as i32) {
+            return; // HOME-17: brightness while the quick menu is up
         }
         self.screen.knob(self, d as i32, store);
         self.knob_at = Some(now); // HOME-13: home holds its heavier redraws while the knob turns
@@ -988,11 +1018,13 @@ impl App {
         if self.knob_at.is_some() && !self.knob_busy() {
             self.knob_at = None; // HOME-13: rested; home draws what it held
         }
+        screens::qmenu::expire(self); // HOME-17: 5 s idle, dark, locked or away from home
         self.reconcile_mode(); // MODE-2: however the screen or a setting changed
     }
 
     fn tick_keys(&mut self, now: u32, store: &impl ChannelStore) {
         self.now = now;
+        screens::qmenu::expire(self); // HOME-17: closed by time before the input is looked at
         let mut evs = [None; 8];
         let mut n = 0;
         self.keys.tick(now, |e| {
@@ -1005,6 +1037,9 @@ impl App {
             return; // the key that woke the screen: no long press or repeat either
         }
         for e in evs.into_iter().flatten() {
+            if self.qmenu.is_some() {
+                break; // HOME-17: the quick menu just opened and took every key held
+            }
             self.last_input = now;
             self.on_key(e, store);
             self.reconcile_mode(); // MODE-2

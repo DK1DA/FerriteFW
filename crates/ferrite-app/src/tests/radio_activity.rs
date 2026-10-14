@@ -402,7 +402,7 @@ fn counter_range_and_hold() {
     assert_eq!(t.freq(), mhz(1_296), "OK copies the held reading");
 }
 
-/// HOME-8, HOME-16: hold 0 puts the active slot on the home channel when it comes up; the toast names the channel.
+/// HOME-8: hold 0 puts the active slot on the home channel at the long press; the toast names the channel.
 #[test]
 fn hold_0_home_channel_toast() {
     let mut t = T::new();
@@ -411,12 +411,12 @@ fn hold_0_home_channel_toast() {
     t.app.set.home_ch = Some(n);
     t.app.key_down(Key::Digit(0), t.t, &s);
     t.wait(800);
-    t.app.key_up(Key::Digit(0), t.t, &s);
     assert_eq!(t.app.screen(), Screen::Home);
     assert!(t.app.slot(0).on_channel());
     let toast = t.app.toast.expect("a toast");
     assert_eq!(toast.head.as_bytes(), b"Home channel");
     assert!(!toast.body.is_empty());
+    t.app.key_up(Key::Digit(0), t.t, &s);
 }
 
 /// SQL-10: SIDE1 + knob shows the squelch screen while SIDE1 is held.

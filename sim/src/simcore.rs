@@ -245,6 +245,8 @@ pub struct SimCore {
     /// The screen the last watched pass drew.
     last_screen: &'static str,
     last_page: u32,
+    /// The theme of the last pass: a new theme redraws everything, as a new screen does (DISP-18, DISP-25).
+    last_theme: u8,
 }
 
 /// One render pass as [`SimCore::watch_passes`] records it.
@@ -388,6 +390,7 @@ impl SimCore {
             watch: false,
             last_screen: "",
             last_page: 0,
+            last_theme: 0,
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -569,12 +572,13 @@ impl SimCore {
             if self.watch {
                 let screen = app.screen().name();
                 let page = app.page_shown();
-                let live = screen == self.last_screen && page == self.last_page;
+                let theme = app.settings().theme;
+                let live = screen == self.last_screen && page == self.last_page && theme == self.last_theme;
                 let report = self.lcd.fb.end_pass(live);
                 if report.writes > 0 {
                     self.passes.push(PassHit { at: now, screen, live, report });
                 }
-                (self.last_screen, self.last_page) = (screen, page);
+                (self.last_screen, self.last_page, self.last_theme) = (screen, page, theme);
             }
             dev.bt = self.ports.bt_connected(app, now);
             self.ports.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));

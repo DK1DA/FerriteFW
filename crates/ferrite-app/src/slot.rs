@@ -397,7 +397,7 @@ impl Item {
             Item::Advanced => "Everything else, in nine groups.",
             Item::Mode => "FM wide, NFM narrow, AM. USB, LSB, CW: HF mode.",
             Item::BusyLock => "Refuse transmit while the channel is busy.",
-            Item::Reverse => "Listen on the repeater's input. Home: hold *.",
+            Item::Reverse => "Listen on the repeater's input. Hold *, PTT A.",
         }
     }
 

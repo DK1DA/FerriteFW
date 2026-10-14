@@ -91,6 +91,9 @@ pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
 
 /// PTT down for a slot (KEY-7): home first, then refuse, prompt (emergency) or key.
 pub fn ptt(app: &mut App, slot: u8) {
+    if app.qmenu.is_some() {
+        return; // HOME-17 (safety): never while the quick menu is up (its PTTs never get here: the last check)
+    }
     if app.radio.mode != super::activity::Mode::Xb {
         app.go_home();
     } // XB-14: while the repeater runs, PTT transmits on its own slot and the repeater carries on after
@@ -138,6 +141,11 @@ pub fn dial(app: &mut App, slot: u8, keys: &[u8]) -> bool {
 
 /// Key up (after the checks, or the emergency prompt's second PTT): the Transmit screen over where it was.
 pub fn key(app: &mut App, slot: u8) {
+    // HOME-17 (safety): nothing keys while the quick menu is up. Its PTTs never get this far and the side
+    // connector's closes it first; this is the last check before the one key-up command.
+    if app.qmenu.is_some() {
+        return;
+    }
     if let Some(r) = ptt_refusal(app, slot) {
         return refuse(app, slot, r);
     }

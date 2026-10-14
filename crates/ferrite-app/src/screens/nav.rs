@@ -9,7 +9,7 @@
 //!
 //! | From | Keys | Goes to |
 //! | --- | --- | --- |
-//! | Home | hold 0-9 ([`hold_digit`]: runs [`shortcut`] at the long press, 0 at its release, a popup names it, HOME-8, HOME-16, KEY-11) | 0 home channel, 1 band scope, 2 TX power, 3 squelch, 4 watch, 5 tones, 6 step, 7 shift, 8 offset, 9 zones |
+//! | Home | hold 0-9 ([`hold_digit`]: runs [`shortcut`] at the long press, a popup names it, HOME-8, KEY-11) | 0 home channel, 1 band scope, 2 TX power, 3 squelch, 4 watch, 5 tones, 6 step, 7 shift, 8 offset, 9 zones |
 //! | Home | a digit (NAV-4, VFO-11) | [`Dest::Entry`] with the digit |
 //! | Home | hold V/M on a VFO (VFO-9) | [`Dest::SaveChannel`] |
 //! | Home | hold SLOT / MENU / hold MENU / # | edit in place (on a channel: [`Dest::ChannelEdit`]) / quick / advanced / Status |
@@ -464,8 +464,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
 }
 
 /// A digit held on home: the shortcut runs at the long press, while still held; the release does nothing (HOME-8,
-/// KEY-3). Hold 0 is the exception: it runs at the release, unless the knob turned while it was held (HOME-16).
-/// No page during the hold: a popup in the middle names what ran.
+/// KEY-3). No page during the hold: a popup in the middle names what ran.
 pub fn hold_digit(app: &mut App, d: u8, store: &impl ChannelStore) {
     let (before, prev) = (app.screen, app.toast.map(|t| t.until));
     shortcut(app, d, store);

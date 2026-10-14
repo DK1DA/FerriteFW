@@ -148,42 +148,49 @@ fn short_and_long_press() {
     r.expect_screen("Scope");
 }
 
-/// Hold 0 on home (HOME-16): + knob steps the brightness live with a "Brightness N" toast in the hint bar and
-/// doesn't tune; the release after a turn does nothing. Alone, the jump to the home channel waits for the release
-/// (HOME-8's one exception, KEY-3), and a short 0 is still a digit (NAV-4).
+/// The quick menu (HOME-17): hold * on home brings the box up over home naming each key and its state; PTT A,
+/// PTT B, PF1, PF2 and the knob act at once and the rows follow; PTT never keys while it is up, nor a PTT held
+/// through its close; BACK closes it; it closes by itself after 5 s; afterwards PTT keys as usual.
 #[test]
-fn hold_0_knob_brightness_and_home_channel_at_release() {
+fn quick_menu_on_hold_star() {
+    use ferrite_core::msg::RadioCmd;
     let mut r = Radio::new();
-    r.sim.app_mut().settings_mut().home_ch = Some(2); // channel 3
     r.home();
-    fn active(r: &Radio) -> &ferrite_app::Slot {
-        r.sim.app().slot(r.sim.app().active())
+    let keyed = |r: &mut Radio| r.take_cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. }));
+    r.hold(Key::Star);
+    for t in ["PTT A", "Reverse", "PTT B", "Night red", "PF1", "GPS", "PF2", "Bluetooth", "Knob", "Brightness"] {
+        r.expect_text(t);
     }
-    if active(&r).on_channel() {
-        r.press(Key::VfoMem);
-    }
-    let f = active(&r).freq();
-    let level = r.sim.app().settings().brightness;
-    r.down(Key::Digit(0)).wait(300).knob(2);
-    assert_eq!(r.sim.app().settings().brightness, level + 2);
-    let toast = r.sim.screen_texts().into_iter().find(|t| t.s.contains("Brightness")).expect("the toast");
-    assert!(toast.y0 >= 300, "in the hint bar: {}", toast.y0);
-    r.expect_text(&format!("{}", level + 2));
-    r.wait(800).knob(-1);
-    assert_eq!(r.sim.app().settings().brightness, level + 1);
-    r.up(Key::Digit(0)).wait(300);
-    assert_eq!(active(&r).freq(), f, "the knob didn't tune");
-    assert!(!active(&r).on_channel(), "no home channel after a turn");
+    let rows = |r: &mut Radio| {
+        let mut v: Vec<_> = r.sim.screen_texts().into_iter().filter(|t| t.y0 > 100 && t.y1 < 220 && t.x0 >= 170 && t.x1 <= 200).collect();
+        v.sort_by_key(|t| t.y0);
+        v.into_iter().map(|t| t.s).collect::<Vec<_>>()
+    };
+    assert_eq!(rows(&mut r), ["off", "off", "on", "off", "7"], "reverse, night red, GPS, Bluetooth, brightness");
+    r.take_cmds();
+    r.down(Key::Ptt(ferrite_core::keys::PTT_A)).wait(1500);
     r.expect_screen("Home");
-    // Alone: nothing at the long press, the home channel at the release.
-    r.down(Key::Digit(0)).wait(1200);
-    assert!(!active(&r).on_channel(), "not while held");
-    r.up(Key::Digit(0)).wait(300);
-    assert_eq!(active(&r).ch.filter(|_| active(&r).on_channel()).map(|c| c.num), Some(2), "at the release");
-    r.expect_text("Home channel");
-    // Short: a digit.
-    r.press(Key::Digit(0));
-    r.expect_screen("Channel entry");
+    assert!(!keyed(&mut r), "PTT A in the menu never keys");
+    r.up(Key::Ptt(ferrite_core::keys::PTT_A)).wait(100);
+    r.press(Key::Side(1)).press(Key::Side(2)).knob(2).wait(300);
+    assert_eq!(rows(&mut r), ["on", "off", "off", "on", "9"]);
+    // PTT B: night red, and back.
+    r.down(Key::Ptt(ferrite_core::keys::PTT_B)).wait(300);
+    assert_eq!(r.sim.app().settings().theme, 2, "night red");
+    r.up(Key::Ptt(ferrite_core::keys::PTT_B)).press(Key::Ptt(ferrite_core::keys::PTT_B)).wait(300);
+    assert_eq!(r.sim.app().settings().theme, 0);
+    assert!(!keyed(&mut r));
+    // BACK closes it and does nothing else; the card shows the reverse.
+    r.press(Key::Exit).wait(300);
+    r.expect_no_text("Brightness").expect_screen("Home").expect_text("R-600k");
+    // Held through the 5 s close: never keys; pressed again: keys.
+    r.hold(Key::Star).down(Key::Ptt(ferrite_core::keys::PTT_A)).wait(7000);
+    r.expect_no_text("Brightness");
+    assert!(!keyed(&mut r), "held through the close: never keys");
+    r.up(Key::Ptt(ferrite_core::keys::PTT_A)).wait(200);
+    r.down(Key::Ptt(ferrite_core::keys::PTT_A)).wait(300);
+    assert!(keyed(&mut r), "after the menu: PTT A keys");
+    r.up(Key::Ptt(ferrite_core::keys::PTT_A)).wait(1000);
 }
 
 /// Keys typed faster than a frame are all taken, in order (KEY-6).

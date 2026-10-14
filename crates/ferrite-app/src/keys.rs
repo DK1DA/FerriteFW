@@ -1,8 +1,7 @@
 //! Key presses from key down/up and time (manual chapter 7):
 //!
 //! - **KEY-3** a short press fires on release, under 700 ms; a long press fires while held, at 700 ms, and the
-//!   release after it does nothing (home's hold 0 is the one that acts at its release, HOME-16). There is no gap
-//!   between the two (decided Oct 7, 2026).
+//!   release after it does nothing. There is no gap between the two (decided Oct 7, 2026).
 //! - **KEY-4** the four arrows repeat at 10 per second after 400 ms held; once one has repeated, its release does
 //!   nothing. Arrows have no long press.
 //!
@@ -22,8 +21,8 @@ pub enum Press {
     Short,
     Long,
     Repeat,
-    /// The release after a long press (not after a repeat): only the screen hears it, so home can run hold 0's
-    /// shortcut when the digit comes up (HOME-16) and SIDE2's counter open (KEY-22).
+    /// The release after a long press (not after a repeat): only the screen hears it, so the shortcut map can
+    /// run its shortcut when the digit comes up (HOME-8).
     LongUp,
 }
 
@@ -43,6 +42,8 @@ struct Held {
     long: bool,
     /// When the next repeat is due.
     next: u32,
+    /// Taken by the quick menu (HOME-17): no long press, repeat or release event at all.
+    dead: bool,
 }
 
 /// Up to four keys held at once (SIDE2 + an arrow, # held while another key goes down, ...).
@@ -64,7 +65,7 @@ impl KeyTracker {
             return; // the PC's auto-repeat, or a bounce: one press
         }
         if let Some(slot) = self.held.iter_mut().find(|h| h.is_none()) {
-            *slot = Some(Held { key, since: now, fired: false, long: false, next: now.wrapping_add(REPEAT_AFTER_MS) });
+            *slot = Some(Held { key, since: now, fired: false, long: false, next: now.wrapping_add(REPEAT_AFTER_MS), dead: false });
         }
     }
 
@@ -77,6 +78,9 @@ impl KeyTracker {
     pub fn release(&mut self, key: Key, now: u32) -> Option<KeyEvent> {
         let slot = self.held.iter_mut().find(|h| h.is_some_and(|h| h.key == key))?;
         let h = slot.take()?;
+        if h.dead {
+            return None;
+        }
         if h.fired {
             (h.long && !repeats(key)).then_some(KeyEvent { key, press: Press::LongUp })
         } else {
@@ -87,6 +91,9 @@ impl KeyTracker {
     /// Long presses and repeats that are due by `now`, oldest first.
     pub fn tick(&mut self, now: u32, mut out: impl FnMut(KeyEvent)) {
         for h in self.held.iter_mut().flatten() {
+            if h.dead {
+                continue;
+            }
             if repeats(h.key) {
                 while now.wrapping_sub(h.next) as i32 >= 0 {
                     h.fired = true;
@@ -107,6 +114,16 @@ impl KeyTracker {
         for h in self.held.iter_mut().flatten().filter(|h| h.key == key) {
             h.fired = true;
             h.long = false;
+        }
+    }
+
+    /// The held key (`None`: every held key) was taken by the quick menu (HOME-17): it gives no long press, no
+    /// repeat and nothing at its release. It still counts as held.
+    pub fn kill(&mut self, key: Option<Key>) {
+        for h in self.held.iter_mut().flatten() {
+            if key.is_none_or(|k| h.key == k) {
+                h.dead = true;
+            }
         }
     }
 
@@ -195,6 +212,23 @@ mod tests {
         assert_eq!(t.up(Key::Up, 1400), None, "no extra step on release");
         t.down(Key::Down, 2000);
         assert_eq!(t.up(Key::Down, 2100), Some(KeyEvent { key: Key::Down, press: Press::Short }));
+    }
+
+    /// HOME-17: a key taken by the quick menu gives nothing more: no long press, no repeat, nothing at its release.
+    #[test]
+    fn killed_keys_give_nothing() {
+        let mut t = KeyTracker::new();
+        t.down(Key::Up, 0);
+        t.down(Key::Star, 0);
+        t.kill(Some(Key::Up));
+        assert_eq!(run(&mut t, 0, 1000), [KeyEvent { key: Key::Star, press: Press::Long }], "no repeats for UP");
+        assert!(t.is_held(Key::Up));
+        assert_eq!(t.release(Key::Up, 1000), None);
+        t.kill(None);
+        assert_eq!(t.release(Key::Star, 1100), None, "not even the release after a long press");
+        t.down(Key::Ptt(0), 2000);
+        t.kill(Some(Key::Ptt(0)));
+        assert_eq!(t.release(Key::Ptt(0), 2100), None, "no short press");
     }
 
     #[test]

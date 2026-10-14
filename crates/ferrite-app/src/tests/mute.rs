@@ -58,9 +58,10 @@ fn mute_is_never_saved() {
     assert_eq!(t.app.state(0, &t.live).0, "idle");
 }
 
-/// KEY-18, SCAN-11, VFO-7: \* on a scanning slot still skips the hit (no mute); hold \* is still reverse.
+/// KEY-18, SCAN-11, HOME-17: \* on a scanning slot still skips the hit (no mute), and hold \* there does nothing
+/// (no quick menu); off the scan, hold \* opens the quick menu, which mutes nothing either.
 #[test]
-fn star_keeps_skip_and_reverse() {
+fn star_keeps_skip_and_hold_star_is_the_quick_menu() {
     let mut t = T::new();
     t.live.slots[0].scanning = true;
     t.live.slots[0].squelch_open = true;
@@ -70,12 +71,17 @@ fn star_keeps_skip_and_reverse() {
     let c = t.cmds();
     assert!(c.contains(&RadioCmd::ScanSkip { slot: 0 }), "{c:?}");
     assert!(!c.iter().any(|c| matches!(c, RadioCmd::Mute(_))), "{c:?}");
+    let rev = t.app.slot(0).cfg().reverse;
+    t.hold(Key::Star);
+    assert!(t.app.qmenu.is_none(), "no quick menu while scanning");
+    assert_eq!(t.app.slot(0).cfg().reverse, rev, "and no reverse");
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::ScanSkip { .. })), "a hold skips nothing");
     t.live.slots[0].scanning = false;
     t.live.slots[0].squelch_open = false;
     t.wait(100);
-    let rev = t.app.slot(0).cfg().reverse;
     t.hold(Key::Star);
-    assert_ne!(t.app.slot(0).cfg().reverse, rev, "hold * still toggles reverse");
+    assert!(t.app.qmenu.is_some(), "the quick menu");
+    assert_eq!(t.app.slot(0).cfg().reverse, rev, "hold * alone doesn't toggle reverse any more");
     assert!(mutes(&mut t).is_empty());
 }
 

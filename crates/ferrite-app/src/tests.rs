@@ -132,8 +132,10 @@ fn ram_is_small() {
     // renewal and the Radio task's drop count) and the knob's last step (HOME-13), 32 with padding, to 1288; the
     // broadcast slot, the slots in the band, the station sent and a seek landing (BCR-22, BCR-25), 8 to 1296;
     // quick mute (HOME-15, a byte), auto off's own activity time and the last key for the keypad light (DISP-15,
-    // DISP-22: 2 x 4), 16 with padding, to 1312
-    assert!(n <= 1312, "App is {n} bytes");
+    // DISP-22: 2 x 4), 16 with padding, to 1312; the quick menu (HOME-17: its last input and the rows as drawn,
+    // 12 with its Option), the PTTs it holds dead, the theme before night red and its repaint flag, 24 with
+    // padding, to 1336
+    assert!(n <= 1336, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -697,8 +699,8 @@ mod help;
 mod tonehint;
 /// Quick mute (HOME-15).
 mod mute;
-/// Hold 0 on home: + knob brightness, alone the home channel at the release (HOME-16).
-mod hold0;
+/// The quick menu on hold \* (HOME-17).
+mod qmenu;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]

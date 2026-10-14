@@ -48,8 +48,9 @@ fn no_home_channel() {
     r.run("hold 0; expect text \"No home channel\"; expect text \"hold SLOT to set\"");
 }
 
-/// Hold * toggles reverse on the active slot: the shift chip shows R, the Radio task gets the Reverse
-/// parameter, and the transmit checks use the frequency after the swap (VFO-7, VOX-7, VOX-9).
+/// Hold *, then PTT A (the quick menu) toggles reverse on the active slot: the shift chip shows R once the menu is
+/// closed, the Radio task gets the Reverse parameter, and the transmit checks use the frequency after the swap
+/// (VFO-7, VOX-7, VOX-9, HOME-17).
 #[test]
 fn reverse() {
     let mut r = Radio::new(); // A: 146.520, -600 kHz
@@ -65,13 +66,13 @@ fn reverse() {
     };
     assert_eq!(tx_plan(&mut r), Some(mhz(145) + 92_000), "TX on the input, 600 kHz down");
     r.take_cmds();
-    r.run("hold STAR; expect text \"R-600k\"");
+    r.run("hold STAR; press PTTA; expect text \"on\"; press BACK; expect text \"R-600k\"");
     assert!(
         r.take_cmds().iter().any(|c| matches!(c, RadioCmd::SlotParam { param: ferrite_core::msg::Param::Reverse, value: 1, .. })),
         "the Radio task is told to swap"
     );
     assert_eq!(tx_plan(&mut r), Some(mhz(146) + 52_000), "reversed: TX on the output");
-    r.run("hold STAR; expect no text \"R-600k\"; expect text \"-600k\"");
+    r.run("hold STAR; press PTTA; press BACK; expect no text \"R-600k\"; expect text \"-600k\"");
 }
 
 /// The knob steps by the slot's step, SIDE2 + knob by 1 MHz, and ◀▶ step bands (VFO-5).

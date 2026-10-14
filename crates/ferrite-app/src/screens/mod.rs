@@ -75,6 +75,7 @@ pub mod posentry;
 pub mod parts;
 pub mod pin;
 pub mod probe;
+pub mod qmenu;
 pub mod quick;
 pub mod recall;
 pub mod save;
@@ -373,11 +374,13 @@ impl App {
             self.drawn.sbar = None;
         }
         let id = core::mem::discriminant(&self.screen);
-        if self.drawn.screen != Some(id) {
+        let cleared = self.drawn.screen != Some(id);
+        if cleared {
             lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
             self.drawn.hash = [0; shared::REGIONS];
             self.drawn.meter = [None; SLOTS];
             self.drawn.screen = Some(id);
+            qmenu::unseen(self); // the quick menu's box went with the content: drawn again whole over the screen
         }
         self.note_device(dev);
         if self.screen.bar() {
@@ -389,7 +392,8 @@ impl App {
         } else {
             self.drawn.sbar = None; // the screen draws its own; the status bar comes back whole
         }
-        if self.drawn.popup_gone {
+        let popup_gone = self.drawn.popup_gone;
+        if popup_gone {
             // The popup went: clear its box and let every region draw again over it.
             let (x, y, w_, h) = w::POPUP_BOX;
             lcd.fill(x, y, w_, h, BG);
@@ -397,8 +401,17 @@ impl App {
             self.drawn.meter = [None; SLOTS];
             self.drawn.popup_gone = false;
         }
-        self.screen.render(self, lcd, &Cx { live, dev, store });
+        let cx = Cx { live, dev, store };
+        if self.drawn.qmenu_gone {
+            qmenu::repaint(self, lcd, &cx); // HOME-17: the box went: home again where it was, straight from the box
+        }
+        // HOME-17: while the quick menu's box is up the screen under it waits, so nothing draws through the box
+        // (DISP-25); a cleared screen (or one under a popup that just went) is drawn whole first, the box over it.
+        if cleared || popup_gone || !qmenu::frozen(self) {
+            self.screen.render(self, lcd, &cx);
+        }
         self.render_hint(lcd);
+        qmenu::draw(self, lcd);
         // A shortcut's popup sits over the screen: drawn after it every time, as the screen may have drawn under it.
         if let Some(t) = self.toast.filter(|t| t.center) {
             w::popup(lcd, t.head.as_bytes(), t.body.as_bytes());

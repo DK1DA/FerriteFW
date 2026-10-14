@@ -306,10 +306,12 @@ fn no_flicker_and_overdraw_in_budget() {
     assert!(bad.is_empty(), "DISP-25 (find a region with flicker_where):\n{}", bad.join("\n"));
 }
 
-/// DISP-25, HOME-16: hold 0 + knob on home in each layout: the "Brightness N" toast updates in place, each step,
-/// with no blank-then-draw anywhere on the screen.
+/// DISP-25, HOME-17: the quick menu over home in each layout while the fake radio's traffic runs: the box comes up,
+/// its rows change (every key and the knob), it closes (BACK, and the 5 s idle close), with no blank-then-draw
+/// anywhere on the screen. Night red's pass redraws everything, as a theme change does, so it isn't live.
 #[test]
-fn brightness_toast_has_no_flicker() {
+fn quick_menu_has_no_flicker() {
+    use ferrite_core::keys::{PTT_A, PTT_B};
     let mut bad = Vec::new();
     for layout in 0..3 {
         let mut r = Radio::new();
@@ -319,9 +321,16 @@ fn brightness_toast_has_no_flicker() {
         r.home();
         r.wait(1000);
         r.sim.watch_passes(true);
-        r.down(Key::Digit(0)).wait(200);
-        r.knob(3).wait(200).knob(-5).wait(200);
-        r.up(Key::Digit(0)).wait(3500);
+        for close in [Key::Exit, Key::Digit(5)] {
+            r.hold(Key::Star).wait(300);
+            r.press(Key::Ptt(PTT_A)).wait(300).press(Key::Side(1)).wait(300).press(Key::Side(2)).wait(300);
+            r.knob(2).wait(200).knob(-1).wait(200);
+            r.press(Key::Ptt(PTT_B)).wait(300).press(Key::Ptt(PTT_B)).wait(300);
+            r.wait(2000); // traffic under the box
+            r.press(close).wait(1500);
+        }
+        r.hold(Key::Star).wait(6000); // the idle close
+        r.wait(25_000); // a cycle of the fake radio's traffic after it
         let live = r.sim.passes.iter().filter(|h| h.live).count();
         assert!(live > 0, "layout {layout}: live updates watched");
         for h in r.sim.passes.iter().filter(|h| h.live && h.report.flicker > 0) {

@@ -864,7 +864,12 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             let v = cycle(s.clock * 2 + !s.clock_gps as u8, d, 4);
             (s.clock, s.clock_gps) = (v / 2, v.is_multiple_of(2));
         }
-        [7, 1] => s.theme = cycle(s.theme, d, THEMES.len()),
+        [7, 1] => {
+            if s.theme != crate::settings::NIGHT_RED {
+                app.day_theme = s.theme; // HOME-17: the quick menu's PTT B comes back to it from night red
+            }
+            s.theme = cycle(s.theme, d, THEMES.len());
+        }
         [7, 2] => s.layout = cycle(s.layout, d, LAYOUTS.len()),
         [7, 3, 2] => s.pon = cycle(s.pon, d, POWER_ON.len()),
         [7, 3, 3] => s.boot_card = !s.boot_card,
