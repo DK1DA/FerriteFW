@@ -2164,14 +2164,9 @@ impl Radio {
         self.tuned[n as usize] = Some((slot, f)); // not the receive frequency: retuned after the unkey
         self.ldo_on(n);
         let tone = self.tx.tone[s];
-        let mut bk = self.chip(n);
-        bk.af_out(AfOut::Mute);
-        bk.set_freq(f * 10);
-        match tone {
-            0 => bk.subtone_off(),
-            t if t & 0x8000 != 0 => bk.dcs_tx(t & 0x3FFF, t & 0x4000 != 0),
-            t => bk.ctcss_tx(t),
-        }
+        // The keyed slot's bandwidth (HF mode's NFM is its mode 1).
+        let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
+        radio_chip::tx_setup(&mut self.chip(n), f, narrow, tone);
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, req.power));
         self.tx.fault = false;
         self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
@@ -2522,14 +2517,9 @@ impl Radio {
         }
         let tone = self.tx.tone[to as usize % 4];
         self.ldo_on(n);
-        let mut bk = self.chip(n);
-        bk.af_out(AfOut::Mute);
-        bk.set_freq(f * 10);
-        match tone {
-            0 => bk.subtone_off(),
-            t if t & 0x8000 != 0 => bk.dcs_tx(t & 0x3FFF, t & 0x4000 != 0),
-            t => bk.ctcss_tx(t),
-        }
+        // Decision 95: the TX side's own bandwidth (stock takes the receiving channel's).
+        let narrow = self.slots[to as usize].narrow;
+        radio_chip::tx_setup(&mut self.chip(n), f, narrow, tone);
         self.tuned[n as usize] = Some((to, f));
         self.maybe_awake |= 1 << n;
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, power));

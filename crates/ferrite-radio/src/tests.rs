@@ -554,6 +554,26 @@ fn key_reads_back_before_the_pa() {
     }
 }
 
+/// TX audit M7: the TX set-up writes stock's REG_43 with every TX frequency (0x3028 wide, 0x4008 narrow), over
+/// whatever the chip held (here the reset value 0x4048, as a cross-band split's TX chip may), with the AF muted
+/// first and the sub-tone after.
+#[test]
+fn tx_setup_writes_the_bandwidth() {
+    for (narrow, r43) in [(false, 0x3028), (true, 0x4008)] {
+        let mut b = bk();
+        b.write(reg::RF_FILTER, 0x4048);
+        chip::tx_setup(&mut b, VHF, narrow, 885);
+        let bus = b.release();
+        assert_eq!(bus.last(reg::RF_FILTER), Some(r43));
+        assert_eq!(bus.regs[reg::FREQ_LO as usize] as u32 | (bus.regs[reg::FREQ_HI as usize] as u32) << 16, VHF);
+        assert!(bus.first(reg::AF_OUT).unwrap() < bus.writes.iter().rposition(|w| w.0 == reg::RF_FILTER).unwrap(), "muted first");
+        assert_eq!(bus.regs[reg::SUBTONE as usize] & 0x8000, 0x8000, "CTCSS sent");
+    }
+    let mut b = bk();
+    chip::tx_setup(&mut b, UHF, false, 0);
+    assert_eq!(b.release().last(reg::RF_FILTER), Some(0x3028));
+}
+
 /// A chip tuned to 146.520 MHz with a REG_3B of its own, and what TX-7 expects of it.
 fn keyed_ready() -> (Bk4829<RecBus>, chip::TxExpect) {
     let f = mhz(146) + 52_000;

@@ -193,6 +193,23 @@ pub fn si_input(am: bool) -> [bool; 2] {
     [am, am]
 }
 
+/// The transmitting chip's set-up before the path plan keys it (TX-23): AF muted, the TX frequency, the channel
+/// bandwidth and the sub-tone sent (the tone word: CTCSS in 0.1 Hz, bit 15 DCS, bit 14 inverted; 0 none). REG_43
+/// goes with every TX frequency as stock writes it (0x3028 wide, 0x4008 narrow; 0x0801DE38-0x0801DE52): with one
+/// chip awake at a time (decision 111), the TX chip of a cross-band split was last set for another slot, or holds
+/// the reset value 0x4048 (TX audit M7).
+#[cfg(feature = "tx")]
+pub fn tx_setup<B: Bus>(bk: &mut Bk4829<B>, freq: Freq10, narrow: bool, tone: u16) {
+    bk.af_out(AfOut::Mute);
+    bk.set_freq(freq * 10);
+    bk.bandwidth(if narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
+    match tone {
+        0 => bk.subtone_off(),
+        t if t & 0x8000 != 0 => bk.dcs_tx(t & 0x3FFF, t & 0x4000 != 0),
+        t => bk.ctcss_tx(t),
+    }
+}
+
 /// REG_30 read back after a key-up with the microphone (TX-7): stock's transmit value.
 #[cfg(feature = "tx")]
 pub const REG30_TX_MIC: u16 = 0xC1FE;
