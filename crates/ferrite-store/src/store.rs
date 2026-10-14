@@ -35,8 +35,12 @@ use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
 
 /// The layout header: magic, layout version, 10 bytes the installer may fill (0xFF until then), CRC-32 of the
-/// 16 bytes before.
+/// 16 bytes before. Bytes 6-9 hold the calibration sector's CRC-32 (CAL-7), programmed into the erased bytes on
+/// the first boot that records it; the header's own CRC takes them as 0xFF, so recording it later keeps the
+/// header valid (and headers written before it still are).
 const HEADER_MAGIC: u32 = 0x5452_5246; // "FRRT"
+/// Where in the layout header the calibration's CRC is (CAL-7).
+const CAL_CRC_AT: usize = 6;
 /// 2: the fixed map (Oct 4, 2026). A chip with another version is formatted.
 pub const LAYOUT_VERSION: u16 = 2;
 
@@ -240,8 +244,38 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let mut h = [0u8; 20];
         self.f.raw_read(LAYOUT_HEADER.start, &mut h)?;
         let mut c = Crc32::new();
-        c.update(&h[..16]);
+        let mut body = [0u8; 16];
+        body.copy_from_slice(&h[..16]);
+        body[CAL_CRC_AT..CAL_CRC_AT + 4].fill(0xFF);
+        c.update(&body);
         Ok(crate::u32_at(&h, 0) == HEADER_MAGIC && crate::u16_at(&h, 4) == LAYOUT_VERSION && crate::u32_at(&h, 16) == c.get())
+    }
+
+    /// CAL-7 (TX audit F8): the calibration sector (read only) against the CRC the layout header recorded; none
+    /// recorded yet (the first boot of a build that records it, or after a format) records it now, into the
+    /// header's erased bytes. Unknown when the store isn't mounted. Only the layout header is ever written here.
+    pub async fn check_cal(&self) -> ferrite_core::txcal::CalCrc {
+        use ferrite_core::txcal::CalCrc;
+        if !matches!(self.mounted.get(), Mounted::Ok | Mounted::FirstBoot) {
+            return CalCrc::Unknown;
+        }
+        let cal = ferrite_core::layout::CALIBRATION;
+        let Ok(now) = self.f.crc(cal.start, cal.end - cal.start) else { return CalCrc::Unknown };
+        let mut rec = [0u8; 4];
+        if self.f.raw_read(LAYOUT_HEADER.start + CAL_CRC_AT as u32, &mut rec).is_err() {
+            return CalCrc::Unknown;
+        }
+        if rec == [0xFF; 4] {
+            return match self.f.program(LAYOUT_HEADER.start + CAL_CRC_AT as u32, &now.to_le_bytes()).await {
+                Ok(()) => CalCrc::Recorded,
+                Err(_) => CalCrc::Unknown,
+            };
+        }
+        if u32::from_le_bytes(rec) == now {
+            CalCrc::Same
+        } else {
+            CalCrc::Changed
+        }
     }
 
     /// A blank or foreign chip: every area erased, then the header (a cut before it formats again next time).

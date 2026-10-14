@@ -43,6 +43,38 @@ pub enum Fault {
     Trim,
     /// A sub-tone gain (0xF210 byte 1 or 2) doesn't fit REG_51's 7-bit field (TX-14); stock masks it with 0x7F.
     ToneGain,
+    /// The PA curves out of order: at some entry the amateur bands reach, Low isn't below Mid or Mid below High
+    /// (TX-14, CAL-6).
+    LevelOrder,
+    /// The MCU doesn't read as the AT32F403AVGT7 (TX-15).
+    Mcu,
+    /// The calibration sector's CRC isn't the one recorded at install (CAL-7, TX-14), or it couldn't be checked.
+    Changed,
+}
+
+/// CAL-7: the calibration sector's CRC against the one recorded at install (the layout header, the store's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CalCrc {
+    /// The same as recorded.
+    Same,
+    /// None was recorded (the first boot of a build that records it): recorded now.
+    Recorded,
+    /// Not the one recorded: transmit locked.
+    Changed,
+    /// The store isn't there to say (flash failed, the bring-up build): transmit locked.
+    Unknown,
+}
+
+/// TX-13 to TX-15 (TX audit F8): what the Radio task gets: the curves when the MCU check passed, the sector is the
+/// one recorded at install and it parses; else why transmit is locked, the MCU first.
+pub fn gate(cal: Result<TxCal, Fault>, mcu_ok: bool, crc: CalCrc) -> Result<TxCal, Fault> {
+    if !mcu_ok {
+        return Err(Fault::Mcu);
+    }
+    if matches!(crc, CalCrc::Changed | CalCrc::Unknown) {
+        return Err(Fault::Changed);
+    }
+    cal
 }
 
 /// CAL-12: the factory crystal trim k when the sector marks one (0xF210 byte 11 = 0xA0), else None. Stock's loader
@@ -135,6 +167,12 @@ impl TxCal {
         let reached = c.pa.iter().any(|l| bad(&l[UHF][..13]) || bad(&l[VHF])) || c.hf.iter().any(|r| bad(&r[..12]));
         if reached {
             return Err(Fault::PaCurve);
+        }
+        // TX-14, CAL-6 (TX audit F8): Low < Mid < High at every entry those rows reach (stock's order: 0 High).
+        let rising = |a: &[u8], b: &[u8], n: usize| a[..n].iter().zip(&b[..n]).all(|(x, y)| x < y);
+        let ordered = |row: usize, n: usize| rising(&c.pa[2][row], &c.pa[1][row], n) && rising(&c.pa[1][row], &c.pa[0][row], n);
+        if !ordered(UHF, 13) || !ordered(VHF, 16) || !rising(&c.hf[2], &c.hf[1], 12) || !rising(&c.hf[1], &c.hf[0], 12) {
+            return Err(Fault::LevelOrder);
         }
         if b[WINDOWS_AT[0]] == 0xFF {
             return Err(Fault::Windows);
@@ -293,6 +331,29 @@ mod tests {
         let mut b = sector(GAUGE_DEFAULT);
         b[UHF * 0x10 + 14] = 0xFF;
         assert!(TxCal::parse(&b).is_some(), "UHF entries past 520 MHz aren't reached on amateur bands");
+    }
+
+    /// TX-14, CAL-6, TX-15, CAL-7 (TX audit F8): the curves must rise Low < Mid < High at every reached entry (the
+    /// black radio's do, by 30 or more); the MCU check and the CRC since install gate the result.
+    #[test]
+    fn level_order_mcu_and_crc() {
+        let b = sector(GAUGE_DEFAULT);
+        assert!(TxCal::read(&b).is_ok());
+        let mut o = b;
+        o[0x40 + 0x10 * VHF + 7] = o[0x10 * VHF + 7]; // Mid = High at VHF entry 7
+        assert_eq!(TxCal::read(&o).err(), Some(Fault::LevelOrder));
+        let mut o = b;
+        o[0x190 + 0x20 + 3] = 0xF0; // Low HF (stock's third row) above Mid at entry 3
+        assert_eq!(TxCal::read(&o).err(), Some(Fault::LevelOrder));
+        let mut o = b;
+        o[0x80 + 0x10 * UHF + 14] = 0xFE; // past 520 MHz: not reached on the amateur bands
+        assert!(TxCal::read(&o).is_ok());
+        let c = TxCal::read(&b);
+        assert!(gate(c, true, CalCrc::Same).is_ok() && gate(c, true, CalCrc::Recorded).is_ok());
+        assert_eq!(gate(c, false, CalCrc::Same).err(), Some(Fault::Mcu));
+        assert_eq!(gate(c, true, CalCrc::Changed).err(), Some(Fault::Changed));
+        assert_eq!(gate(c, true, CalCrc::Unknown).err(), Some(Fault::Changed));
+        assert_eq!(gate(Err(Fault::Blank), false, CalCrc::Changed).err(), Some(Fault::Mcu), "the MCU first");
     }
 
     /// CAL-11, TX-1, TX-14: the windows as stock checks them (low <= f < high, whole MHz from BCD), the black

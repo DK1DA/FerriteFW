@@ -91,8 +91,10 @@ pub async fn task() {
         let _ = ufmt::uwrite!(b, "panel: full-screen fill {} us, {} ns a byte", fill_us, fill_us * 1000 / 153_600);
     });
 
-    // The MCU check is ours to make: transmit (in the tx build) needs the expected part; receive runs regardless.
-    check(Source::Ui, CHECK_MCU, crate::hal::sys::idcode() == chipid::EXPECTED_PID);
+    // The MCU check is ours to make: transmit (in the tx build) needs the expected part (TX-15); receive runs
+    // regardless.
+    let mcu_ok = crate::hal::sys::idcode() == chipid::EXPECTED_PID;
+    check(Source::Ui, CHECK_MCU, mcu_ok);
     let mut checks = [
         Check { label: "MCU", value: "", state: State::Pending },
         Check { label: "SPI flash", value: "", state: State::Pending },
@@ -117,6 +119,14 @@ pub async fn task() {
         && cal.iter().any(|&b| b != 0xFF)
         && cal.iter().any(|&b| b != 0);
     check(Source::Storage, CHECK_CAL, cal_ok);
+    // CAL-7: the sector's CRC against the one the layout header recorded (recorded on the first boot that checks).
+    let cal_crc = if cal_ok && !cfg!(feature = "bringup") { store.check_cal().await } else { ferrite_core::txcal::CalCrc::Unknown };
+    bringup::line(match cal_crc {
+        ferrite_core::txcal::CalCrc::Same => b"calibration crc: same as recorded",
+        ferrite_core::txcal::CalCrc::Recorded => b"calibration crc: recorded now",
+        ferrite_core::txcal::CalCrc::Changed => b"calibration crc: CHANGED since recorded",
+        ferrite_core::txcal::CalCrc::Unknown => b"calibration crc: not checked",
+    });
     // SQL-1: the squelch tables for the Radio task, in every build (read only; stock's defaults if blank or unread).
     {
         use ferrite_core::sqcal::{SqCal, READ_LEN};
@@ -128,10 +138,11 @@ pub async fn task() {
     // cable log says why transmit is locked, if it is.
     #[cfg(feature = "tx")]
     {
-        use ferrite_core::txcal::{Fault, Gauge, TxCal, READ_LEN};
+        use ferrite_core::txcal::{gate, Fault, Gauge, TxCal, READ_LEN};
         let mut b = [0xFFu8; READ_LEN];
         let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
-        let tx = if read && cal_ok { TxCal::read(&b) } else { Err(Fault::Blank) };
+        // TX-13 to TX-15 (TX audit F8): the MCU check, the CRC since install, then the sector itself.
+        let tx = gate(if read && cal_ok { TxCal::read(&b) } else { Err(Fault::Blank) }, mcu_ok, cal_crc);
         if let Err(f) = tx {
             bringup::line(match f {
                 Fault::Blank => b"tx calibration: locked, sector blank or unread",
@@ -139,6 +150,9 @@ pub async fn task() {
                 Fault::Windows => b"tx calibration: locked, TX windows blank or invalid",
                 Fault::Trim => b"tx calibration: locked, factory crystal trim not applied yet",
                 Fault::ToneGain => b"tx calibration: locked, a sub-tone gain byte is over 0x7F",
+                Fault::LevelOrder => b"tx calibration: locked, PA curves not Low < Mid < High",
+                Fault::Mcu => b"tx calibration: locked, the MCU isn't an AT32F403AVGT7",
+                Fault::Changed => b"tx calibration: locked, the sector changed since recorded (or unchecked)",
             });
         }
         crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));

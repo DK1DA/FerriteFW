@@ -602,3 +602,30 @@ fn ssb_patch_install_power_cuts() {
         assert_eq!(s.ssb_check(), Ok(Some(p)), "cut at {cut}: the next install completes");
     }
 }
+
+/// CAL-7, TX-14 (TX audit F8): the calibration sector's CRC is recorded in the layout header on the first boot
+/// that checks it, then compared at every boot; recording it leaves the header valid (nothing is formatted), and
+/// a changed sector reads as changed. Calibration itself is only read.
+#[test]
+fn calibration_crc_recorded_then_checked() {
+    use ferrite_core::txcal::CalCrc;
+    let cal = ferrite_core::layout::CALIBRATION.start as usize;
+    let mut f = seeded();
+    for (i, b) in f.mem[cal..cal + 0x1000].iter_mut().enumerate() {
+        *b = (i * 7) as u8;
+    }
+    let before = f.mem[cal..cal + 0x1000].to_vec();
+    let s = mount(f);
+    assert_eq!(s.mounted(), Mounted::Ok);
+    let n = s.count();
+    assert_eq!(ferrite_store::block(s.check_cal()), CalCrc::Recorded);
+    assert_eq!(ferrite_store::block(s.check_cal()), CalCrc::Same);
+    let mut f = unmount(s);
+    assert_eq!(f.mem[cal..cal + 0x1000], before[..], "calibration never written");
+    let s = mount(f.clone());
+    assert_eq!((s.mounted(), s.count()), (Mounted::Ok, n), "the header still valid: nothing formatted");
+    assert_eq!(ferrite_store::block(s.check_cal()), CalCrc::Same);
+    f.mem[cal + 0x210] ^= 1;
+    let s = mount(f);
+    assert_eq!(ferrite_store::block(s.check_cal()), CalCrc::Changed);
+}
