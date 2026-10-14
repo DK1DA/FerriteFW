@@ -102,6 +102,18 @@ pub fn subtone<B: Bus>(bk: &mut Bk4829<B>, rx_tone: u16, rx_tail: bool) {
     }
 }
 
+/// The slot's receive tone is heard (CHAN-3, TONE-20), from REG_0C as stock's 0x0801EAC4 decides: CTCSS on bit 10,
+/// a normal DCS code only on bit 14 (positive code), an inverted one only on bit 15 (negative code). The other
+/// polarity of the same code keeps the squelch shut (decision 142: Ferrite opened on either). `rx_tone` 0 is true.
+pub fn tone_heard(rx_tone: u16, st: &bk4829::Status) -> bool {
+    match rx_tone {
+        0 => true,
+        t if t & 0x8000 == 0 => st.ctcss,
+        t if t & 0x4000 != 0 => st.cdcss_neg,
+        _ => st.cdcss_pos,
+    }
+}
+
 /// The squelch thresholds (SQL-1): REG_78 (RSSI open/close) and REG_4F (noise), from
 /// [`ferrite_core::sqcal::SqCal::regs`], written as stock's 0x0801E64C does. The glitch thresholds stay as the
 /// chip's start-up left them, as stock's do.

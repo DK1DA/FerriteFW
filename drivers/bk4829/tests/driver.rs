@@ -84,7 +84,7 @@ fn squelch_and_meters() {
     bk.squelch(&Squelch { rssi_open: 0x48, rssi_close: 0x46, noise_open: 0x2E, noise_close: 0x2F, glitch_open: 8, glitch_close: 0x20 });
     assert_eq!(bk.rssi_dbm(), -100);
     let s = bk.status();
-    assert!(s.squelch_open && s.ctcss && s.interrupt && !s.cdcss && !s.vox);
+    assert!(s.squelch_open && s.ctcss && s.interrupt && !s.cdcss_pos && !s.cdcss_neg && !s.vox);
     assert_eq!(r.regs[0x78], 0x4846);
     assert_eq!(r.regs[0x4F], 0x2F2E, "the table's reset value for the same thresholds");
     assert_eq!(r.regs[0x4D], 0xA020, "delays kept");
@@ -113,8 +113,26 @@ fn subtones() {
     bk.tail_detect();
     let w = &r.writes;
     assert_eq!(w[..3], [(0x51, 0x104A), (0x07, 1827), (0x52, 0x0292)], "88.5 Hz x 20.64888 = 1827");
-    assert_eq!(w[3..7], [(0x51, 51), (0x07, 0x0AD7), (0x08, 0x0813), (0x08, 0x8763)], "stock's CDCSS sequence");
+    assert_eq!(w[3..7], [(0x51, 0xA000 | 51), (0x07, 0x0AD7), (0x08, 0x0813), (0x08, 0x8763)], "stock's CDCSS sequence");
     assert_eq!(w[7], (0x07, 0x21CD), "stock's 55 Hz tail word");
+}
+
+/// TONE-20 (decision 142): DCS receive as stock V0.27's 0x0800D3CC: REG_51 0xA000 (normal) or 0x8000 (inverted)
+/// with the normal codeword for both; REG_0C bit 14 reads as the positive code, bit 15 as the negative.
+#[test]
+fn dcs_rx_matches_stock() {
+    for (inverted, r51) in [(false, 0xA000 | 51), (true, 0x8000 | 51)] {
+        let mut r = Regs::new();
+        let mut bk = Bk4829::new(&mut r);
+        bk.dcs_rx(0o23, inverted);
+        assert_eq!(r.writes[..4], [(0x51, r51), (0x07, 0x0AD7), (0x08, 0x0813), (0x08, 0x8763)], "inverted {inverted}");
+    }
+    let mut r = Regs::new();
+    for (v, pos, neg) in [(1u16 << 14, true, false), (1 << 15, false, true), (0, false, false)] {
+        r.regs[0x0C] = v;
+        let s = Bk4829::new(&mut r).status();
+        assert_eq!((s.cdcss_pos, s.cdcss_neg), (pos, neg), "REG_0C {v:#06x}");
+    }
 }
 
 #[test]
@@ -198,7 +216,9 @@ fn sleep_in_two_halves() {
 }
 
 /// Everything a receive-only build has, called in turn: REG_30 never gets a transmit bit (PA gain, MIC ADC,
-/// transmit DSP), REG_51 never its transmit enable, REG_36 (PA) never written.
+/// transmit DSP), REG_51 never its transmit enable except in DCS receive's stock values (TONE-20, decision 142:
+/// stock writes its transmit REG_51 on receive too; bit 15 only picks the sub-tone source and cannot key the chip,
+/// which REG_30 does), REG_36 (PA) never written.
 #[test]
 fn receive_never_keys() {
     let mut r = Regs::new();
@@ -239,6 +259,7 @@ fn receive_never_keys() {
             // carrier, nothing radiates (checked below).
             reg::POWER if v == POWER_BEEP => {}
             reg::POWER => assert_eq!(v & 0b1110, 0, "REG_30 {v:#06x}"),
+            reg::SUBTONE if v == bk4829::DCS_RX_NORMAL || v == bk4829::DCS_RX_INVERTED => {}
             reg::SUBTONE => assert_eq!(v & 0x8000, 0),
             reg::PA => panic!("PA written"),
             reg::FSK_CTRL => assert_eq!(v & 1 << 11, 0, "FSK transmit"),

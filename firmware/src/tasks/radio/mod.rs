@@ -164,7 +164,7 @@ impl SlotRx {
     /// stops (the tail's phase shift or turn-off code ends it, TONE-6); with no tone and receive tail on, the 55 Hz
     /// tail mutes.
     fn toned(&self, open: bool, st: &bk4829::Status) -> bool {
-        open && if self.rx_tone == 0 { !(self.rx_tail && st.tail) } else { st.ctcss || st.cdcss }
+        open && if self.rx_tone == 0 { !(self.rx_tail && st.tail) } else { radio_chip::tone_heard(self.rx_tone, st) }
     }
 
     /// Where the chip tunes: the frequency moved by the clarifier (10 Hz units).

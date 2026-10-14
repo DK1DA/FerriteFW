@@ -621,6 +621,35 @@ fn dcs_tx_polarity_is_stocks() {
     }
 }
 
+/// TONE-20 (decision 142): DCS receive as stock V0.27 (0x0800A50C -> 0x0800D3CC): tuning a D023N slot writes REG_51
+/// 0xA000 (bit 13 set), D023I 0x8000, both with the normal codeword (0x0813, 0x8763); and the squelch decision, as
+/// stock's 0x0801EAC4, opens a normal code only on REG_0C bit 14 and an inverted one only on bit 15 (on air Ferrite's
+/// D023N opened to a stock radio's D023I too). CTCSS opens on bit 10 alone, no tone always.
+#[test]
+fn dcs_rx_polarity_is_stocks() {
+    for (inverted, r51) in [(false, 0xA000 | 51), (true, 0x8000 | 51)] {
+        let mut b = bk();
+        let tone = 0x8000 | if inverted { 0x4000 } else { 0 } | 0o23;
+        chip::tune(&mut b, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone: tone, rx_tail: false });
+        let bus = b.release();
+        assert_eq!(bus.last(reg::SUBTONE), Some(r51), "inverted {inverted}");
+        let at = bus.first(reg::SUBTONE).unwrap();
+        assert_eq!(bus.writes[at + 1..at + 4], [(0x07, 0x0AD7), (0x08, 0x0813), (0x08, 0x8763)], "inverted {inverted}");
+    }
+    let st = |r0c: u16| {
+        let mut b = bk();
+        b.write(reg::STATUS, r0c);
+        b.status()
+    };
+    let (n, i) = (0x8000 | 0o23, 0xC000 | 0o23);
+    let (pos, neg, ctc, none) = (st(1 << 14), st(1 << 15), st(1 << 10), st(0));
+    assert!(chip::tone_heard(n, &pos) && !chip::tone_heard(n, &neg), "N opens on bit 14 only");
+    assert!(chip::tone_heard(i, &neg) && !chip::tone_heard(i, &pos), "I opens on bit 15 only");
+    assert!(!chip::tone_heard(n, &ctc) && !chip::tone_heard(i, &none));
+    assert!(chip::tone_heard(885, &ctc) && !chip::tone_heard(885, &pos) && !chip::tone_heard(885, &neg));
+    assert!(chip::tone_heard(0, &none));
+}
+
 /// TONE-10, TONE-19 (decision 141): a keyed tone sequence (end tone, CW ID) starts silent: the tone off, REG_40 at
 /// the tones' 0x43C (top four bits kept), then tone transmit through stock's REG_30 step; the caller then waits
 /// `TONE_LEAD_MS` for the generator to settle. The end puts the tone off and REG_40 back to stock's 0x50A.

@@ -101,7 +101,7 @@ impl Radio {
             let (rssi, st) = (bk.rssi_dbm(), bk.status());
             let sl = self.slots[ls as usize];
             let gate = x.rep.cfg.flags & ferrite_core::msg::XbCfg::TONE_GATE != 0 && sl.rx_tone != 0;
-            let open = st.squelch_open && (!gate || st.ctcss || st.cdcss);
+            let open = st.squelch_open && (!gate || radio_chip::tone_heard(sl.rx_tone, &st));
             heard[listen as usize] = Some(open);
             self.live.slots[ls as usize].rssi = rssi;
             if x.rep.from() == Some(listen) || x.rep.from().is_none() {

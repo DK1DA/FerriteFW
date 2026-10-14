@@ -212,6 +212,12 @@ pub struct Squelch {
     pub glitch_close: u8,
 }
 
+/// REG_51 for DCS receive, stock's (0x0800D3D4): the same mode bits as a DCS transmission (bit 15, bit 13 set for a
+/// normal code, CDCSS, 23 bits, auto bandwidths), with the gain the scan detector uses (51; the gain is the
+/// transmit's and does nothing on receive, where stock leaves its calibration byte).
+pub const DCS_RX_NORMAL: u16 = 0xA000 | 51;
+pub const DCS_RX_INVERTED: u16 = 0x8000 | 51;
+
 /// The receive status (REG_0C).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Status {
@@ -220,8 +226,10 @@ pub struct Status {
     pub ctcss: bool,
     /// The 55 Hz tail tone.
     pub tail: bool,
-    pub cdcss: bool,
-    pub cdcss_inverted: bool,
+    /// REG_0C bit 14, "CDCSS positive code received": the code set by [`Bk4829::dcs_rx`] heard as a normal code.
+    pub cdcss_pos: bool,
+    /// REG_0C bit 15, "CDCSS negative code received": heard as an inverted code.
+    pub cdcss_neg: bool,
     /// An interrupt flag is waiting in REG_02.
     pub interrupt: bool,
 }
@@ -448,8 +456,8 @@ impl<B: Bus> Bk4829<B> {
             vox: s & 4 != 0,
             ctcss: s & 1 << 10 != 0,
             tail: s & 1 << 11 != 0,
-            cdcss: s & 3 << 14 != 0,
-            cdcss_inverted: s & 1 << 15 != 0,
+            cdcss_pos: s & 1 << 14 != 0,
+            cdcss_neg: s & 1 << 15 != 0,
             interrupt: s & 1 != 0,
         }
     }
@@ -482,10 +490,14 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::CTCSS_THRESH, 0x0292);
     }
 
-    /// Detect a DCS code on receive (octal digits' value: 023 is 0o23).
+    /// Detect a DCS code on receive (octal digits' value: 023 is 0o23), as stock V0.27 sets it up (0x0801E4C8 ->
+    /// 0x0800A50C -> 0x0800D3CC, the transmit's set-up): REG_51 [`DCS_RX_NORMAL`] or [`DCS_RX_INVERTED`] (bit 13
+    /// alone differs) and the normal codeword for both polarities. The chip then reports a normal code in REG_0C
+    /// bit 14 ([`Status::cdcss_pos`]) and an inverted one in bit 15 ([`Status::cdcss_neg`]); the caller opens on
+    /// the channel's polarity only, as stock's 0x0801EAC4 (TONE-20, decision 142).
     pub fn dcs_rx(&mut self, code: u16, inverted: bool) {
-        self.write(reg::SUBTONE, 51);
-        self.cdcss_word(dcs_codeword(code, inverted));
+        self.write(reg::SUBTONE, if inverted { DCS_RX_INVERTED } else { DCS_RX_NORMAL });
+        self.cdcss_word(dcs_codeword(code, false));
     }
 
     fn cdcss_word(&mut self, w: u32) {
