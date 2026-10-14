@@ -21,6 +21,8 @@ pub enum Held {
     Crossband,
 }
 
+const HELD: [Held; 5] = [Held::Scope, Held::Counter, Held::Broadcast, Held::Hf, Held::Crossband];
+
 impl Held {
     /// The command that stops it, as the UI would send it.
     pub fn stop_cmd(self) -> RadioCmd {
@@ -34,27 +36,27 @@ impl Held {
     }
 }
 
+/// The modes held, a bit per [`Held`]: home's strip can sweep beside a broadcast another slot plays (MODE-5,
+/// decision 115), so two can be held at once; one renewal covers both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Lease {
-    held: Option<Held>,
+    held: u8,
     at: u32,
 }
 
 impl Lease {
     pub const fn new() -> Self {
-        Lease { held: None, at: 0 }
+        Lease { held: 0, at: 0 }
     }
 
     /// A mode started (or was retuned): held, renewed now.
     pub fn start(&mut self, h: Held, now: u32) {
-        (self.held, self.at) = (Some(h), now);
+        (self.held, self.at) = (self.held | 1 << h as u8, now);
     }
 
     /// The mode stopped (its stop command, or the Radio task's own stop).
     pub fn stop(&mut self, h: Held) {
-        if self.held == Some(h) {
-            self.held = None;
-        }
+        self.held &= !(1 << h as u8);
     }
 
     /// The UI still wants it.
@@ -80,23 +82,25 @@ impl Lease {
         }
     }
 
+    /// The first mode held, if any.
     pub fn held(&self) -> Option<Held> {
-        self.held
+        HELD.into_iter().find(|&h| self.held & 1 << h as u8 != 0)
     }
 
-    /// The mode to stop now, if its lease ran out; it is no longer held afterwards.
+    /// A mode to stop now, if the lease ran out; it is no longer held afterwards (a second held mode comes on the
+    /// next call).
     pub fn expired(&mut self, now: u32) -> Option<Held> {
-        let h = self.held?;
+        let h = self.held()?;
         if now.wrapping_sub(self.at) < WINDOW_MS {
             return None;
         }
-        self.held = None;
+        self.stop(h);
         Some(h)
     }
 
     /// When the lease runs out (ms), for the Radio task's wait; None when nothing is held.
     pub fn deadline(&self) -> Option<u32> {
-        self.held.map(|_| self.at.wrapping_add(WINDOW_MS))
+        (self.held != 0).then_some(self.at.wrapping_add(WINDOW_MS))
     }
 }
 
@@ -154,6 +158,23 @@ mod tests {
             l.note(&h.stop_cmd(), 1_200);
             assert_eq!(l.held(), None, "{h:?}: its stop ends it");
         }
+    }
+
+    /// MODE-5 (decision 115): home's strip beside a broadcast holds both; one renewal covers both; stopping one
+    /// leaves the other; run out, each is stopped in turn.
+    #[test]
+    fn two_held() {
+        let mut l = Lease::new();
+        l.note(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_050)), 100);
+        l.note(&RadioCmd::Sweep { centre: 14_652_000, step: 400, on: true }, 200);
+        l.note(&RadioCmd::Lease, 600);
+        assert_eq!(l.expired(600 + WINDOW_MS - 1), None);
+        l.note(&RadioCmd::Sweep { centre: 0, step: 0, on: false }, 700);
+        assert_eq!(l.held(), Some(Held::Broadcast), "the strip stopped, the broadcast plays on");
+        l.note(&RadioCmd::Sweep { centre: 14_652_000, step: 400, on: true }, 800);
+        assert_eq!(l.expired(800 + WINDOW_MS), Some(Held::Scope));
+        assert_eq!(l.expired(800 + WINDOW_MS), Some(Held::Broadcast));
+        assert_eq!((l.expired(u32::MAX / 2), l.deadline()), (None, None));
     }
 
     /// The millisecond clock wraps: renewals across the wrap still count.

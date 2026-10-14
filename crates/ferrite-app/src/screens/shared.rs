@@ -298,7 +298,7 @@ impl App {
         if self.in_bcast_band(s) && !lv.scanning {
             return match self.bcast_slot() {
                 Some(b) if b != s => ([slow!("FM on A"), slow!("FM on B"), slow!("FM on C")][b as usize % 3], DIM),
-                Some(_) if self.radio.mode != super::activity::Mode::Fm => ("off", DIM),
+                Some(_) if !self.radio.fm_on => ("off", DIM),
                 Some(_) if self.bcast_heard(live) => ("FM", GREEN),
                 Some(_) => (slow!("muted"), AMBER),
                 None => ("off", DIM),

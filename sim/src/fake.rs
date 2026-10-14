@@ -135,6 +135,9 @@ pub struct FakeRadio {
     /// Quick mute (HOME-15): slots still received, never heard.
     mute: u8,
     fm: u16,
+    /// The broadcast plays, tuned (or a seek landed) at this time (s): as [`Fake::Fm`], or beside home's strip
+    /// (MODE-5), which then has the mode report.
+    fm_t0: Option<f32>,
     /// The slot playing broadcast (BCR-23: no chip listens to it while FM plays) and the broadcast's turn on the
     /// speaker (BCR-24), as the Radio task keeps them.
     bcast: Option<u8>,
@@ -195,6 +198,7 @@ impl FakeRadio {
             monitor: 0,
             mute: 0,
             fm: 9_810,
+            fm_t0: None,
             bcast: None,
             bturn: BcastTurn::new(),
             now: 0.0,
@@ -322,10 +326,11 @@ impl FakeRadio {
                 };
                 self.scan_out(i, o);
             }
-            RadioCmd::ScopeCfg { bars, dwell } => self.scope_cfg = (bars, dwell),
+            RadioCmd::ScopeCfg { bars, dwell, .. } => self.scope_cfg = (bars, dwell),
             RadioCmd::Sweep { centre, step, on } => {
                 let (n, dwell) = self.scope_cfg;
-                self.set(if on { Fake::Scope { centre, step, n, dwell, t0: self.now, listen: 0, tl: 0.0 } } else { Fake::Off })
+                let off = self.fm_t0.map_or(Fake::Off, |t0| Fake::Fm { t0 }); // the broadcast beside it plays on
+                self.set(if on { Fake::Scope { centre, step, n, dwell, t0: self.now, listen: 0, tl: 0.0 } } else { off })
             }
             RadioCmd::ScopeListen { freq, .. } => {
                 if let Fake::Scope { listen, tl, .. } = &mut self.mode {
@@ -336,7 +341,7 @@ impl FakeRadio {
             RadioCmd::Counter(on) => self.set(if on { Fake::Counter { t0: self.now } } else { Fake::Off }),
             RadioCmd::Broadcast(BroadcastCmd::Fm(f)) => {
                 self.fm = f;
-                self.set(Fake::Fm { t0: self.now });
+                self.fm_on();
             }
             RadioCmd::Broadcast(BroadcastCmd::Seek { up }) => {
                 let next = if up {
@@ -345,10 +350,15 @@ impl FakeRadio {
                     STATIONS.iter().rev().find(|s| s.0 < self.fm).unwrap_or(&STATIONS[STATIONS.len() - 1])
                 };
                 self.fm = next.0;
-                self.set(Fake::Fm { t0: self.now }); // a new station: its RDS starts over
+                self.fm_on(); // a new station: its RDS starts over
             }
             RadioCmd::BcastSlot(s) => self.bcast = s,
-            RadioCmd::Broadcast(_) => self.set(Fake::Off),
+            RadioCmd::Broadcast(_) => {
+                self.fm_t0 = None;
+                if matches!(self.mode, Fake::Fm { .. }) {
+                    self.set(Fake::Off);
+                }
+            }
             RadioCmd::Hf { freq, mode, on } => {
                 let t0 = match self.mode {
                     Fake::Hf { t0, .. } => t0,
@@ -429,6 +439,14 @@ impl FakeRadio {
             }
             (None, _) => self.wx_since = None,
             _ => {}
+        }
+    }
+
+    /// The broadcast (re)tuned now: the mode, unless home's strip sweeps beside it (MODE-5).
+    fn fm_on(&mut self) {
+        self.fm_t0 = Some(self.now);
+        if !matches!(self.mode, Fake::Scope { .. }) {
+            self.set(Fake::Fm { t0: self.now });
         }
     }
 
@@ -594,8 +612,8 @@ impl FakeRadio {
         // Watch (WATCH-2): each chip's squelch for the slot it was on, then the engine's next turn.
         let sq = self.on_chip.map(|o| o.is_some_and(|i| carrier(i as usize, &self.live.slots[i as usize]).0));
         // BCR-23: while FM plays, no chip on the broadcast slot or on a slot needing the relay.
-        let off = match self.mode {
-            Fake::Fm { .. } => {
+        let off = match self.fm_t0 {
+            Some(_) => {
                 let relay = (0..3).filter(|&i| Sel::rx(self.live.slots[i].freq).relay()).fold(0u8, |m, i| m | 1 << i);
                 relay | self.bcast.map_or(0, |s| 1 << s)
             }
@@ -610,6 +628,7 @@ impl FakeRadio {
         if let ModeLive::Fm { heard, .. } = &mut self.live.mode {
             *heard = turn && !bmuted;
         }
+        self.live.bcast_heard = self.fm_t0.is_some() && turn && !bmuted;
         // Scans step only while their slot has a chip.
         for i in 0..3 {
             if self.live.slots[i].scanning && out.chip.contains(&Some(i as u8)) {

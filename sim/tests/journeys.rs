@@ -472,3 +472,21 @@ fn home_layouts() {
         r.expect_screen("Home").expect_text("146.520");
     }
 }
+
+/// The strip beside a broadcast (MODE-5, BCR-29, HOME-14, BCR-26; decision 115): on single + scope with B playing
+/// broadcast, B made active shows its signal, SNR and stereo pilot with the strip plainly off; back on A, the strip
+/// sweeps around 146.520 while B's broadcast plays on (its line says FM, or muted while A's call has the speaker).
+#[test]
+fn strip_beside_broadcast() {
+    use ferrite_core::msg::ModeLive;
+    let mut r = Radio::new();
+    r.event(Event::Layout); // single + scope
+    r.press(Key::Slot).event(Event::FmStation).wait(3000); // B to 100.5 MHz
+    r.expect_text("100.500").expect_text("SNR").expect_text("dBuV").expect_text("STEREO");
+    r.expect_no_text("+112k");
+    assert!(matches!(r.sim.radio().live.mode, ModeLive::Fm { .. }), "B active: the broadcast alone");
+    r.press(Key::Slot).press(Key::Slot).wait(1000); // C, then A
+    assert_eq!(r.sim.app().active(), 0);
+    assert!(matches!(r.sim.radio().live.mode, ModeLive::Scope { centre, .. } if centre == mhz(146) + 52_000), "the strip sweeps around A");
+    r.expect_text("-112k").expect_text("+112k").expect_no_text("SNR").expect_text("100.500");
+}

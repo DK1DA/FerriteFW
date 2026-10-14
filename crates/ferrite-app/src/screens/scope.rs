@@ -89,7 +89,7 @@ fn sweep(app: &mut App, centre: Freq10) {
 /// The scope's start or retune: its settings, then the sweep around `centre`.
 pub(crate) fn send_sweep(app: &mut App, centre: Freq10) {
     let (step, bars, dwell) = (step_of(app), bars_n(app) as u8, app.set.scope_dwell.clamp(1, 100));
-    app.out.push(RadioCmd::ScopeCfg { bars, dwell });
+    app.out.push(RadioCmd::ScopeCfg { bars, dwell, strip: false });
     app.out.push(RadioCmd::Sweep { centre, step, on: true });
 }
 

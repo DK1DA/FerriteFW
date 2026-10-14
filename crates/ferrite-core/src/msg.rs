@@ -100,8 +100,9 @@ pub enum RadioCmd {
     /// `on` is false (SCOPE-4). The active slot's chip sweeps with its audio off.
     Sweep { centre: Freq10, step: u16, on: bool },
     /// The band scope's points per sweep and dwell per point in 0.1 ms (SCOPE-9, 0 3 2 3); sent before a sweep.
-    /// Apart from [`RadioCmd::Sweep`] so a command stays 8 bytes.
-    ScopeCfg { bars: u8, dwell: u8 },
+    /// Apart from [`RadioCmd::Sweep`] so a command stays 8 bytes. `strip`: the sweep is home's strip, which keeps
+    /// looking at the active slot's own frequency and holds there on a carrier (MODE-5, decision 115).
+    ScopeCfg { bars: u8, dwell: u8, strip: bool },
     /// A key or knob step while the scope or home's strip sweeps: the sweep waits and its pass starts again, so the
     /// UI handles the input first (SCOPE-14, `ferrite_core::sweephold`).
     SweepHold,
@@ -336,6 +337,9 @@ pub struct LiveAll {
     /// MODE-3: counts the exclusive modes the Radio task stopped itself because the UI's lease ran out; the UI
     /// takes a change as "nothing runs" and starts again whatever it still wants.
     pub lease_drops: u8,
+    /// BCR-24: the broadcast plays on the speaker now (no amateur slot heard). Apart from [`ModeLive::Fm`], which
+    /// home's strip replaces with its bars while it sweeps beside a broadcast (MODE-5).
+    pub bcast_heard: bool,
     /// A channel scan needs a channel's frequencies ([`crate::scan::want`]): its number plus 1, 0 for none (so
     /// the default is none); the UI answers with [`RadioCmd::ScanEntry`]. Read it with [`LiveAll::wanted`].
     pub want: u16,

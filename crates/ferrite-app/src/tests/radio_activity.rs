@@ -1626,11 +1626,12 @@ fn knob_holds_the_heavier_redraws() {
     }
 }
 
-/// MODE-1, MODE-2, BCR-29: random use (keys, the knob, layouts, screens opened, timeouts, PTT, slots tuned in and
-/// out of the broadcast band) never leaves the radio in
+/// MODE-1, MODE-2, MODE-5, BCR-29, TX-24: random use (keys, the knob, layouts, screens opened, timeouts, PTT, slots
+/// tuned in and out of the broadcast band) never leaves the radio in
 /// a mode the app doesn't want: after every step the mode is the wanted one; home on the plain layout with no
 /// mode screen under it is normal receive; and the commands sent, played on a model of the Radio task, never
-/// start a mode over another and end in the mode the app thinks runs.
+/// start a mode over another and end in the mode the app thinks runs. The broadcast runs beside nothing but home's
+/// strip, and only with the active slot a normal one (MODE-5); never while keyed.
 #[test]
 fn random_use_keeps_modes_in_step() {
     const KEYS: [Key; 16] = [
@@ -1647,13 +1648,13 @@ fn random_use_keeps_modes_in_step() {
         Hf,
         Xb,
     }
+    // the exclusive part (the broadcast is tracked apart: it may play beside the strip)
     fn kind(m: Mode) -> Option<Kind> {
         match m {
-            Mode::Off => None,
+            Mode::Off | Mode::Fm => None,
             Mode::Scope | Mode::Strip => Some(Kind::Sweep),
             Mode::Tone => Some(Kind::Tone),
             Mode::Counter => Some(Kind::Counter),
-            Mode::Fm => Some(Kind::Fm),
             Mode::Hf => Some(Kind::Hf),
             Mode::Xb => Some(Kind::Xb),
         }
@@ -1670,19 +1671,28 @@ fn random_use_keeps_modes_in_step() {
             _ => return None,
         })
     }
-    // play commands on the model; a start over another mode fails
-    fn play(cmds: Vec<RadioCmd>, radio: &mut Option<Kind>, at: &str) {
+    // play commands on the model (the exclusive mode, the broadcast); a start over another mode fails, and only a
+    // sweep and the broadcast ever run together
+    fn play(cmds: Vec<RadioCmd>, radio: &mut (Option<Kind>, bool), at: &str) {
         for c in cmds {
             let Some((k, on)) = effect(&c) else { continue };
-            if on {
-                assert!(radio.is_none() || *radio == Some(k), "{at}: {k:?} started over {radio:?}");
-                *radio = Some(k);
-            } else if *radio == Some(k) {
-                *radio = None;
+            match (k, on) {
+                (Kind::Fm, on) => {
+                    assert!(!on || matches!(radio.0, None | Some(Kind::Sweep)), "{at}: the broadcast started over {:?}", radio.0);
+                    radio.1 = on;
+                }
+                (k, true) => {
+                    assert!(radio.0.is_none() || radio.0 == Some(k), "{at}: {k:?} started over {:?}", radio.0);
+                    assert!(!radio.1 || k == Kind::Sweep, "{at}: {k:?} started over the broadcast");
+                    radio.0 = Some(k);
+                }
+                (k, false) if radio.0 == Some(k) => radio.0 = None,
+                _ => {}
             }
         }
     }
     let mut seen = std::collections::BTreeSet::new();
+    let mut beside = 0; // steps with the strip sweeping beside a broadcast (MODE-5)
     for seed in 1..=32u64 {
         let mut rng = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
         let mut next = |n: u64| {
@@ -1693,7 +1703,7 @@ fn random_use_keeps_modes_in_step() {
         };
         let mut t = ready();
         let mut keyed = false;
-        let mut radio: Option<Kind> = None;
+        let mut radio: (Option<Kind>, bool) = (None, false);
         for step in 0..2000 {
             let s = store();
             let what = match next(21) {
@@ -1759,7 +1769,14 @@ fn random_use_keeps_modes_in_step() {
             let m = t.app.radio.mode;
             seen.insert(std::format!("{m:?}"));
             assert_eq!(m, t.app.wanted_mode(), "seed {seed} step {step} ({what}): reconciled");
-            assert_eq!(radio, kind(m), "seed {seed} step {step} ({what}): the Radio task runs what the app thinks");
+            assert_eq!(radio, (kind(m), t.app.radio.fm_on), "seed {seed} step {step} ({what}): the Radio task runs what the app thinks");
+            let fm = m == Mode::Fm || m == Mode::Strip && t.app.bcast_slot().is_some();
+            assert_eq!(t.app.radio.fm_on, fm, "seed {seed} step {step} ({what}): the broadcast plays in FM, or beside the strip");
+            if radio == (Some(Kind::Sweep), true) {
+                beside += 1;
+                assert_eq!(m, Mode::Strip, "seed {seed} step {step} ({what}): only home's strip sweeps beside a broadcast");
+                assert!(!t.app.in_bcast_band(t.app.active), "seed {seed} step {step} ({what}): not with the broadcast slot active (HOME-14)");
+            }
             let mode_screen = |s: &Screen| matches!(s, Screen::Scope(_) | Screen::ToneSearch(_) | Screen::Counter(_) | Screen::Fm(_) | Screen::Hf(_) | Screen::Crossband(_));
             if t.app.screen() == Screen::Home && t.app.set.layout == 0 && !t.app.back.iter().flatten().any(mode_screen) {
                 let want = if t.app.bcast_slot().is_some() && t.app.radio.keyed.is_none() { Mode::Fm } else { Mode::Off };
@@ -1770,6 +1787,7 @@ fn random_use_keeps_modes_in_step() {
             }
             if t.app.radio.keyed.is_some() {
                 assert!(matches!(m, Mode::Off | Mode::Hf | Mode::Xb), "seed {seed} step {step} ({what}): {m:?} ran while keyed");
+                assert!(!radio.1, "seed {seed} step {step} ({what}): the broadcast played while keyed (TX-24)");
             }
         }
         if keyed {
@@ -1777,4 +1795,5 @@ fn random_use_keeps_modes_in_step() {
         }
     }
     assert_eq!(seen.len(), MODES.len() + 1, "every mode reached: {seen:?}");
+    assert!(beside > 0, "the strip swept beside a broadcast");
 }

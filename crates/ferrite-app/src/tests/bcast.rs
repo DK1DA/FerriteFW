@@ -31,6 +31,7 @@ fn live_fm(t: &mut T, freq: u16, heard: bool) {
     let mut rt = [0u8; 64];
     rt[..9].copy_from_slice(b"Some text");
     t.live.mode = ModeLive::Fm { freq, ps: *b"STATION ", rt, rssi: 40, snr: 20, stereo: true, heard };
+    t.live.bcast_heard = heard;
 }
 
 /// BCR-21, BCR-22: each slot tuned into the band plays broadcast on the SI4732 by itself, and tuned out is a
@@ -224,4 +225,96 @@ fn transmit_switches_the_receiver_away_and_back() {
     t.wait(200);
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_050))));
     assert_eq!(t.app.radio.mode, Mode::Fm);
+}
+
+/// MODE-5, BCR-29, HOME-14 (decision 115): on single + scope with another slot playing broadcast, home's strip sweeps
+/// around the active slot and the broadcast keeps playing beside it: the knob stops and restarts the strip only
+/// (MODE-4), never the broadcast; the strip tells the Radio task it is the strip (it looks at the slot's own
+/// frequency). The broadcast slot made active stops the strip and keeps the broadcast; so does an active slot
+/// needing the band relay (BCR-15).
+#[test]
+fn strip_sweeps_beside_the_broadcast() {
+    let mut t = ready();
+    t.app.set_layout(1);
+    t.wait(600);
+    let mut c = t.cmds();
+    c.extend(tune(&mut t, 1, FM1005));
+    t.wait(600);
+    c.extend(t.cmds());
+    assert_eq!((t.app.radio.mode, t.app.radio.fm_on), (Mode::Strip, true), "{c:?}");
+    assert!(c.contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_050))), "{c:?}");
+    assert!(c.contains(&RadioCmd::ScopeCfg { bars: crate::screens::scope::STRIP_BARS as u8, dwell: 100, strip: true }), "{c:?}");
+    assert!(c.iter().any(|c| matches!(c, RadioCmd::Sweep { centre: TWO_M, on: true, .. })), "{c:?}");
+    assert!(!t.app.strip_blocked());
+    // the knob: the strip waits for it to rest; the broadcast plays on, untouched
+    t.knob(1);
+    t.wait(100);
+    let c = t.cmds();
+    assert!(c.iter().any(|c| matches!(c, RadioCmd::Sweep { on: false, .. })), "{c:?}");
+    assert_eq!((t.app.radio.mode, t.app.radio.fm_on), (Mode::Fm, true));
+    t.wait(600);
+    let c = t.cmds();
+    assert_eq!(t.app.radio.mode, Mode::Strip);
+    assert!(!c.iter().any(|c| matches!(c, RadioCmd::Broadcast(_))), "the broadcast never restarts: {c:?}");
+    // the slot heard while the strip sweeps (the strip's report has the mode): B says FM, then muted
+    t.live.mode = ModeLive::Scope { centre: TWO_M, bars: [0; ferrite_core::msg::SCOPE_BARS], n: 56, sweeps: 1, listen: 0, open: false };
+    t.live.bcast_heard = true;
+    assert_eq!(t.app.state(1, &t.live).0, "FM");
+    t.live.bcast_heard = false;
+    assert_eq!(t.app.state(1, &t.live).0, "muted");
+    // the broadcast slot active: HOME-14, the strip off, the broadcast on
+    t.tap(Key::Slot);
+    t.wait(600);
+    let c = t.cmds();
+    assert_eq!(t.app.active, 1);
+    assert_eq!((t.app.radio.mode, t.app.radio.fm_on), (Mode::Fm, true), "{c:?}");
+    assert!(c.iter().any(|c| matches!(c, RadioCmd::Sweep { on: false, .. })) && !c.iter().any(|c| matches!(c, RadioCmd::Broadcast(_))), "{c:?}");
+    // an active slot on 6 m needs the relay the broadcast leaves released: no strip
+    t.tap(Key::Slot);
+    tune(&mut t, 2, mhz(50) + 12_500);
+    t.wait(600);
+    assert_eq!(t.app.active, 2);
+    assert!(t.app.strip_blocked());
+    assert_eq!((t.app.radio.mode, t.app.radio.fm_on), (Mode::Fm, true));
+}
+
+/// TX-24, MODE-5: PTT with the strip sweeping beside a broadcast stops both before the key-up, and both come back
+/// after.
+#[test]
+fn transmit_stops_the_strip_and_the_broadcast() {
+    let mut t = ready();
+    t.app.set_layout(1);
+    tune(&mut t, 1, FM1005);
+    t.wait(600);
+    t.cmds();
+    let s = store();
+    t.app.key_down(Key::PTT, t.t, &s);
+    t.t += 50;
+    t.app.tick(t.t, &t.live, &s);
+    let c = t.cmds();
+    let off = c.iter().position(|c| *c == RadioCmd::Broadcast(BroadcastCmd::Off)).expect("broadcast off");
+    let sweep = c.iter().position(|c| matches!(c, RadioCmd::Sweep { on: false, .. })).expect("sweep off");
+    let key = c.iter().position(|c| matches!(c, RadioCmd::Transmit { on: true, .. })).expect("keyed");
+    assert!(off < key && sweep < key, "{c:?}");
+    t.app.key_up(Key::PTT, t.t, &s);
+    t.wait(800);
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_050))), "{c:?}");
+    assert_eq!((t.app.radio.mode, t.app.radio.fm_on), (Mode::Strip, true));
+}
+
+/// MODE-3, MODE-5: the Radio task dropped the modes (the lease ran out): the app takes both as stopped and starts
+/// the broadcast and the strip again.
+#[test]
+fn lease_drop_restarts_both() {
+    let mut t = ready();
+    t.app.set_layout(1);
+    tune(&mut t, 1, FM1005);
+    t.wait(600);
+    t.cmds();
+    t.live.lease_drops = t.live.lease_drops.wrapping_add(2);
+    t.wait(100);
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_050))) && c.iter().any(|c| matches!(c, RadioCmd::Sweep { on: true, .. })), "{c:?}");
+    assert!(!c.contains(&RadioCmd::Broadcast(BroadcastCmd::Off)), "{c:?}");
 }

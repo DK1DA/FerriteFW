@@ -26,7 +26,7 @@ pub const STRIP_STEP: u16 = 400;
 /// The strip's start (MODE-2, from [`App::reconcile_mode`]): stock's 10 ms a point (dwell is in 0.1 ms; at 1 ms
 /// the strip starved the UI on the radio, Oct 12, 2026) around the active frequency.
 pub(crate) fn send_strip(app: &mut App, f: ferrite_core::freq::Freq10) {
-    app.out.push(RadioCmd::ScopeCfg { bars: scope::STRIP_BARS as u8, dwell: 100 });
+    app.out.push(RadioCmd::ScopeCfg { bars: scope::STRIP_BARS as u8, dwell: 100, strip: true });
     app.out.push(RadioCmd::Sweep { centre: f, step: STRIP_STEP, on: true });
 }
 
@@ -101,45 +101,80 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     app.item_text(Item::Squelch, false, &mut sq);
     v[5] = sq;
     const LABELS: [&str; 6] = ["Mode", "Tone", "Power", "Step", "Offset", "Squelch"];
-    if super::home::card_kind(app, a) == 2 {
-        // BCR-26: a broadcast slot's RDS text takes the settings' place, wrapped.
-        let (ps, rt) = match live.mode {
-            ModeLive::Fm { ps, rt, .. } if app.bcast_slot() == Some(a) => (ps, rt),
-            _ => ([b' '; 8], [0; 64]),
-        };
-        let text = crate::bcast::rds_text(&ps, &rt);
-        if app.dirty(3, hash(&(text, 2u8))) {
-            canvas::banded(lcd, 8, 96, 224, 70, BG, |lcd| {
-                let t: &[u8] = if text.is_empty() { b"No RDS" } else { text };
-                w::wrap(lcd, 8, 224, 96, 166, 110, 15, t, &UI_12, if text.is_empty() { DIM } else { TEXT }, BG);
+    let bcast = super::home::card_kind(app, a) == 2;
+    // BCR-26: the broadcast slot's report (signal in dBuV, SNR, stereo pilot, RDS) while it plays.
+    let (ps, rt, rssi, snr, stereo) = match live.mode {
+        ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if bcast && app.bcast_slot() == Some(a) && app.radio.fm_on => (ps, rt, rssi, snr, stereo),
+        _ => ([b' '; 8], [0; 64], 0, 0, false),
+    };
+    if bcast {
+        // The signal and SNR with the stereo pilot under the frequency, as the cards and the FM screen show them;
+        // then the RDS text wrapped in the settings' place (three lines hold the 64 characters).
+        let mut sig = Buf::<24>::new();
+        if rssi > 0 {
+            let _ = ufmt::uwrite!(sig, "{} dBuV \u{b7} SNR {} dB", rssi, snr);
+        }
+        if app.dirty(4, hash(&(&sig, stereo, 2u8))) {
+            canvas::banded(lcd, 8, 96, 224, 18, BG, |lcd| {
+                w::field(lcd, 8, 160, 96, 114, 110, Align::Left, sig.as_bytes(), &UI_12, SUB, BG);
+                if stereo {
+                    w::tag(lcd, 232, 97, b"STEREO", SUB, BG);
+                }
             });
         }
-        for i in 4..9 {
+        let text = crate::bcast::rds_text(&ps, &rt);
+        if app.dirty(3, hash(&(text, 2u8))) {
+            canvas::banded(lcd, 8, 114, 224, 52, BG, |lcd| {
+                let t: &[u8] = if text.is_empty() { b"No RDS" } else { text };
+                w::wrap(lcd, 8, 224, 114, 166, 128, 15, t, &UI_12, if text.is_empty() { DIM } else { TEXT }, BG);
+            });
+        }
+        for i in 5..9 {
             app.dirty(i, hash(&2u8)); // drawn again when the slot leaves the band
         }
     }
+    if app.dirty(13, hash(&bcast)) && !bcast {
+        lcd.fill(8, 96, 224, 70, BG); // the broadcast's rows gone whole, gaps between the fields too
+    }
     for (i, l) in LABELS.iter().enumerate() {
         let (x, y) = (8 + (i as i32 % 3) * 76, 96 + (i as i32 / 3) * 36);
-        if super::home::card_kind(app, a) != 2 && app.dirty(3 + i, hash(&v[i])) {
+        if !bcast && app.dirty(3 + i, hash(&v[i])) {
             w::field(lcd, x, 74, y, y + 16, y + 12, Align::Left, l.as_bytes(), &UI_12, SUB, BG);
             w::field(lcd, x, 74, y + 16, y + 34, y + 30, Align::Left, v[i].as_bytes(), &UI_12B, TEXT, BG);
         }
     }
-    // S-meter with its scale.
-    let lit = w::meter_level(lv.rssi);
-    let col = if lv.squelch_open { GREEN } else { DIM };
-    let old = app.drawn.meter[a as usize].filter(|&(_, o)| o == lv.squelch_open).map(|(l, _)| l);
-    if app.drawn.meter[a as usize] != Some((lit, lv.squelch_open)) {
-        w::meter(lcd, 8, 170, old, lit, col, BG);
-        app.drawn.meter[a as usize] = Some((lit, lv.squelch_open));
+    // S-meter with its scale. A broadcast slot's is the SI4732's signal on the FM screen's scale (0-70 dBuV, as
+    // the cards), green while it plays (BCR-26); the BK4829's RSSI means nothing there.
+    let (lit, on) = if bcast {
+        ((rssi as u32 * w::METER_SEGS as u32 / 70).min(w::METER_SEGS as u32) as u8, app.bcast_heard(live) && app.bcast_slot() == Some(a))
+    } else {
+        (w::meter_level(lv.rssi), lv.squelch_open)
+    };
+    let col = if on { GREEN } else { DIM };
+    // One meter, the active slot's: what another slot's left there is drawn over whole (a slot change).
+    for o in (0..SLOTS).filter(|&o| o != a as usize) {
+        app.drawn.meter[o] = None;
     }
-    let s = w::s_text(lv.rssi);
-    if app.dirty(9, hash(&s)) {
-        for (i, t) in ["1", "3", "5", "7", "9", "+20", "+40"].iter().enumerate() {
-            let x = 8 + [0, 20, 40, 60, 80, 120, 160][i];
-            lcd.text4_rows(x, 192, t.as_bytes(), &UI_12, SUB, BG, 180, 196);
-        }
-        w::field(lcd, 208, 26, 178, 196, 192, Align::Right, s.as_bytes(), &UI_12B, TEXT, BG);
+    let old = app.drawn.meter[a as usize].filter(|&(_, o)| o == on).map(|(l, _)| l);
+    if app.drawn.meter[a as usize] != Some((lit, on)) {
+        w::meter(lcd, 8, 170, old, lit, col, BG);
+        app.drawn.meter[a as usize] = Some((lit, on));
+    }
+    let s = if bcast { Buf::new() } else { w::s_text(lv.rssi) };
+    if app.dirty(9, hash(&(s, bcast))) {
+        canvas::banded(lcd, 8, 178, 226, 18, BG, |lcd| {
+            if bcast {
+                for (i, t) in ["0", "10", "20", "30", "40", "50", "60"].iter().enumerate() {
+                    lcd.text4_rows(8 + i as i32 * 200 / 7, 192, t.as_bytes(), &UI_12, SUB, BG, 180, 196); // dBuV
+                }
+            } else {
+                for (i, t) in ["1", "3", "5", "7", "9", "+20", "+40"].iter().enumerate() {
+                    let x = 8 + [0, 20, 40, 60, 80, 120, 160][i];
+                    lcd.text4_rows(x, 192, t.as_bytes(), &UI_12, SUB, BG, 180, 196);
+                }
+                w::field(lcd, 208, 26, 178, 196, 192, Align::Right, s.as_bytes(), &UI_12B, TEXT, BG);
+            }
+        });
     }
     // The scope strip (SCOPE strip from the sweep the tick keeps running).
     let (centre, bars) = match live.mode {
@@ -148,8 +183,8 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     };
     // HOME-13: the strip and the other slots' lines wait while the knob turns.
     if !app.held(10) {
-        if super::home::card_kind(app, a) == 2 || app.bcast_slot().is_some() {
-            scope::strip_off(app, lcd, 10, 200, 34); // HOME-14: broadcast has the receiver
+        if bcast || app.strip_blocked() {
+            scope::strip_off(app, lcd, 10, 200, 34); // HOME-14: the broadcast slot is active (or needs the relay)
         } else {
             scope::strip(app, lcd, 10, 200, 34, centre, STRIP_STEP, &bars[..scope::STRIP_BARS]);
         }
@@ -262,7 +297,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             // BCR-26: FM, as much of the RDS text as fits, the stereo pilot
             cols[0].set(b"FM");
             if let ModeLive::Fm { ps, rt, stereo, .. } = live.mode {
-                if app.bcast_slot() == Some(s) && app.radio.mode == super::activity::Mode::Fm {
+                if app.bcast_slot() == Some(s) && app.radio.fm_on {
                     cols[1].set(w::fit(crate::bcast::rds_text(&ps, &rt), &UI_12, 104));
                     cols[2].set(if stereo { b"STEREO".as_slice() } else { b"" });
                 }

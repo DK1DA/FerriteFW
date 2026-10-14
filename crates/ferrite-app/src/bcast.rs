@@ -4,10 +4,10 @@
 //! audio until it is tuned out. The FM screen and the broadcast slot share one FM state: its frequency is the
 //! slot's while there is one, and the presets recall into it.
 //!
-//! The broadcast is the exclusive mode [`Mode::Fm`] like the FM screen's ([`App::wanted_mode`]): any other mode
-//! screen, or PTT, stops it (TX-24), and it starts again after.
+//! The broadcast is the exclusive mode [`Mode::Fm`](crate::screens::activity::Mode::Fm) like the FM screen's ([`App::wanted_mode`]): any other mode
+//! screen, or PTT, stops it (TX-24), and it starts again after. Home's scope strip is the one mode it plays
+//! beside, while the active slot is another, normal one (MODE-5, decision 115; [`crate::screens::activity::RadioUi::fm_on`]).
 
-use crate::screens::activity::Mode;
 use crate::App;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::{BroadcastCmd, LiveAll, ModeLive, RadioCmd, SLOTS};
@@ -95,7 +95,7 @@ impl App {
     /// ◀▶ seek from the station playing (BCR-25): the receiver's own; the station it stops on is taken as it lands
     /// ([`App::bcast_tick`]).
     pub(crate) fn fm_seek(&mut self, up: bool) {
-        if self.radio.mode == Mode::Fm {
+        if self.radio.fm_on {
             self.out.push(RadioCmd::Broadcast(BroadcastCmd::Seek { up }));
             self.radio.fm_seek_at = Some(self.now);
         }
@@ -105,7 +105,7 @@ impl App {
     /// Not while a seek is landing: that one is the receiver's.
     pub(crate) fn fm_retune(&mut self) {
         let f = self.fm_freq();
-        if self.radio.mode == Mode::Fm && self.radio.fm_seek_at.is_none() && f != self.radio.fm_sent {
+        if self.radio.fm_on && self.radio.fm_seek_at.is_none() && f != self.radio.fm_sent {
             self.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(f)));
             self.radio.fm_sent = f;
             self.set.fm_freq = f;
@@ -116,24 +116,30 @@ impl App {
     pub(crate) fn bcast_tick(&mut self, live: &LiveAll) {
         let Some(t) = self.radio.fm_seek_at else { return };
         match live.mode {
-            ModeLive::Fm { freq, .. } if self.radio.mode == Mode::Fm && freq != 0 && freq != self.radio.fm_sent => {
+            ModeLive::Fm { freq, .. } if self.radio.fm_on && freq != 0 && freq != self.radio.fm_sent => {
                 self.radio.fm_sent = freq;
                 self.radio.fm_seek_at = None;
                 self.fm_set(freq);
             }
-            _ if self.radio.mode != Mode::Fm || self.now.wrapping_sub(t) >= SEEK_MS => self.radio.fm_seek_at = None,
+            _ if !self.radio.fm_on || self.now.wrapping_sub(t) >= SEEK_MS => self.radio.fm_seek_at = None,
             _ => {}
         }
     }
 
     /// The broadcast plays on the speaker now (no amateur slot heard, BCR-24).
     pub fn bcast_heard(&self, live: &LiveAll) -> bool {
-        self.radio.mode == Mode::Fm && matches!(live.mode, ModeLive::Fm { heard: true, .. })
+        self.radio.fm_on && live.bcast_heard
     }
 
     /// Slot `s` isn't listened to while broadcast plays: the band relay is released (BCR-15), and it needs it.
     pub(crate) fn relay_off(&self, s: u8) -> bool {
-        self.radio.mode == Mode::Fm && Some(s) != self.radio.bcast && ferrite_core::path::Sel::rx(self.tuned_freq(s)).relay()
+        self.radio.fm_on && Some(s) != self.radio.bcast && ferrite_core::path::Sel::rx(self.tuned_freq(s)).relay()
+    }
+
+    /// HOME-14, MODE-5: home's strip can't sweep beside the broadcast: the active slot is in the broadcast band (it
+    /// plays, or shows "FM on B"), or needs the band relay the broadcast leaves released (BCR-15).
+    pub(crate) fn strip_blocked(&self) -> bool {
+        self.radio.bcast.is_some() && (self.in_bcast_band(self.active) || ferrite_core::path::Sel::rx(self.tuned_freq(self.active)).relay())
     }
 }
 

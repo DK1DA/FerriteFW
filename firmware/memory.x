@@ -104,6 +104,9 @@ SECTIONS
      * never from an interrupt. */
     *(.text.*5Radio7fm_poll*);
     *(.text.*5Radio9bcast_off*);
+    /* The band scope's and home strip's step (SCOPE-4, MODE-5): once a point, at least 2 ms apart, the Radio
+     * task's; the BK4829 writes it calls stay fast. */
+    *(.text.*5Radio10scope_tick*);
     /* The backlight's PWM (DISP-23): set by the UI task only, once a pass. */
     *(.text.*3hal9backlight*);
     . = ALIGN(4);

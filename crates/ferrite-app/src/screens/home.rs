@@ -58,12 +58,11 @@ pub(crate) fn card_kind(app: &App, s: u8) -> u8 {
 /// the broadcast says where it plays instead (BCR-22).
 fn bcast_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8, y: i32, big: bool) {
     use crate::bcast::{rds_text, trim};
-    use super::activity::Mode;
     let p = s as usize;
     let f = (app.tuned_freq(s) / 1000) as u16;
     let mine = app.bcast_slot() == Some(s);
     let (ps, rt, rssi, snr, stereo) = match live.mode {
-        ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if mine && app.radio.mode == Mode::Fm => (ps, rt, rssi, snr, stereo),
+        ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if mine && app.radio.fm_on => (ps, rt, rssi, snr, stereo),
         _ => ([b' '; 8], [0; 64], 0, 0, false),
     };
     let mut note = Buf::<24>::new();

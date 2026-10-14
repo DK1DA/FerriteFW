@@ -8,7 +8,6 @@
 //! (BCR-16). The broadcast is an exclusive mode ([`super::activity::Mode::Fm`]): it stops when the screen goes
 //! home, by any route, unless a slot plays broadcast there.
 
-use super::activity::Mode;
 use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
@@ -174,7 +173,7 @@ impl View for Fm {
             return;
         }
         let (ps, rt, rssi, snr, stereo) = match cx.live.mode {
-            ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if app.radio.mode == Mode::Fm => (ps, rt, rssi, snr, stereo),
+            ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if app.radio.fm_on => (ps, rt, rssi, snr, stereo),
             _ => ([b' '; 8], [0; 64], 0, 0, false),
         };
         let f = app.fm_freq();

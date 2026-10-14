@@ -201,6 +201,19 @@ fn broadcast_slot_matches_its_goldens() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// MODE-5 (decision 115): single + scope with B playing broadcast and A active: the strip sweeps around A.
+#[test]
+fn strip_beside_broadcast_matches_its_golden() {
+    use ferrite_core::keys::Key;
+    let mut r = Radio::new();
+    r.event(Event::Layout);
+    r.press(Key::Slot).event(Event::FmStation).wait(1000);
+    r.press(Key::Slot).press(Key::Slot).wait(2000);
+    if let Some(f) = check("bcast-strip", &r.sim.screen_rgb()) {
+        panic!("{f}");
+    }
+}
+
 /// HOME-15: quick mute's state word in each layout: A (active, the large card) muted with \*, and B muted while
 /// its fake carrier is on ("RX muted" on a compact card or line).
 #[test]

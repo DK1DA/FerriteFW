@@ -112,6 +112,10 @@ pub struct RadioUi {
     /// takes the broadcast).
     pub bcast: Option<u8>,
     pub bcast_in: u8,
+    /// The broadcast plays on the SI4732: in [`Mode::Fm`] (the FM screen, or a broadcast slot), or beside home's
+    /// strip while another slot than the active one plays broadcast (MODE-5, decision 115). Started and stopped
+    /// by [`App::reconcile_mode`] apart from the exclusive mode, so the strip coming and going never restarts it.
+    pub fm_on: bool,
     /// The FM station last sent to the SI4732 (10 kHz), and a seek landing since then.
     pub fm_sent: u16,
     pub fm_seek_at: Option<u32>,
@@ -146,6 +150,7 @@ impl RadioUi {
             want_seen: 0,
             bcast: None,
             bcast_in: 0,
+            fm_on: false,
             fm_sent: 0,
             fm_seek_at: None,
         }
@@ -223,8 +228,9 @@ impl App {
     /// MODE-1: the exclusive mode the radio should be in now, from the screen, what BACK returns to and the
     /// settings: the nearest mode screen up or under the screen up (a scope's typed centre, HF mode's recent list or
     /// save keep their mode), else home's scope strip (single + scope layout) once the active frequency has
-    /// rested for [`STRIP_REST_MS`] (MODE-4), else FM broadcast while a slot is in the broadcast band (BCR-22; it
-    /// takes the strip's place), else none. While keyed only HF mode (HF-23, it transmits in place)
+    /// rested for [`STRIP_REST_MS`] (MODE-4) and the strip can run beside a broadcast (MODE-5:
+    /// [`App::strip_blocked`]), else FM broadcast while a slot is in the broadcast band (BCR-22), else none.
+    /// The strip with a broadcast slot keeps the broadcast playing beside it ([`RadioUi::fm_on`]). While keyed only HF mode (HF-23, it transmits in place)
     /// and the crossband repeater (XB-14, held through local PTT) keep running; the others stop before the
     /// key-up (BCR-16, SCOPE-12). Screens never start or stop a mode themselves: [`App::reconcile_mode`] does.
     pub(crate) fn wanted_mode(&self) -> Mode {
@@ -245,12 +251,11 @@ impl App {
         if keyed {
             return Mode::Off; // TX-24: the broadcast stops before the key-up and starts again after
         }
-        if self.radio.bcast.is_some() {
-            return Mode::Fm;
-        }
         let rested = self.radio.seen_freq.is_some() && self.now.wrapping_sub(self.radio.freq_at) >= STRIP_REST_MS;
-        if self.screen == Screen::Home && self.set.layout == 1 && rested {
+        if self.screen == Screen::Home && self.set.layout == 1 && rested && !self.strip_blocked() {
             Mode::Strip
+        } else if self.radio.bcast.is_some() {
+            Mode::Fm
         } else {
             Mode::Off
         }
@@ -272,6 +277,13 @@ impl App {
             self.radio.xb_on = false; // left the repeater's screen: it doesn't start again on return
         }
         let want = self.wanted_mode();
+        // The broadcast: in its own mode, or beside the strip (MODE-5). Stopped before, started after the mode's
+        // change (MODE-2's order), and left playing while the strip comes and goes.
+        let fm = want == Mode::Fm || want == Mode::Strip && self.radio.bcast.is_some();
+        if !fm && self.radio.fm_on {
+            self.radio.fm_on = false;
+            self.out.push(RadioCmd::Broadcast(BroadcastCmd::Off));
+        }
         if want != self.radio.mode {
             self.stop_mode();
             self.radio.mode = want;
@@ -281,6 +293,12 @@ impl App {
             if self.out.len == 0 {
                 self.out.push(RadioCmd::Lease); // a queued command renews it as well (MODE-3)
             }
+            self.radio.lease_at = self.now;
+        }
+        if fm && !self.radio.fm_on {
+            let f = self.fm_freq();
+            (self.radio.fm_on, self.radio.fm_sent, self.radio.fm_seek_at) = (true, f, None);
+            self.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(f)));
             self.radio.lease_at = self.now;
         }
         self.fm_retune();
@@ -311,11 +329,7 @@ impl App {
                 self.out.push(RadioCmd::ToneSearch { slot, on: true });
             }
             Mode::Counter => self.out.push(RadioCmd::Counter(true)),
-            Mode::Fm => {
-                let f = self.fm_freq();
-                (self.radio.fm_sent, self.radio.fm_seek_at) = (f, None);
-                self.out.push(RadioCmd::Broadcast(BroadcastCmd::Fm(f)));
-            }
+            Mode::Fm => {} // the broadcast's start is the reconciler's (MODE-5)
             Mode::Hf => super::hf::send(self),
             Mode::Xb => super::xb::send_start(self),
         }
@@ -337,7 +351,7 @@ impl App {
             Mode::Scope | Mode::Strip => self.out.push(RadioCmd::Sweep { centre: 0, step: 0, on: false }),
             Mode::Tone => self.out.push(RadioCmd::ToneSearch { slot: a, on: false }),
             Mode::Counter => self.out.push(RadioCmd::Counter(false)),
-            Mode::Fm => self.out.push(RadioCmd::Broadcast(BroadcastCmd::Off)),
+            Mode::Fm => {} // the broadcast's stop is the reconciler's (MODE-5)
             Mode::Hf => self.out.push(RadioCmd::Hf { freq: self.set.hf.freq, mode: self.set.hf.mode, on: false }),
             Mode::Xb => self.out.push(RadioCmd::Crossband(None)),
         }
@@ -372,7 +386,7 @@ impl App {
         // again whatever is still wanted.
         if live.lease_drops != self.radio.lease_drops {
             self.radio.lease_drops = live.lease_drops;
-            self.radio.mode = Mode::Off;
+            (self.radio.mode, self.radio.fm_on) = (Mode::Off, false);
         }
         if self.radio.keyed.is_none() {
             self.radio.dtmf_seen = live.tx.dtmf_sent;
