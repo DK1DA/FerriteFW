@@ -26,6 +26,16 @@ The hand-kept steps live in docs/test-plan/<chapter>.md, one entry per rule:
 
 Method is one or more of host, sim, radio, bench, n/a (a moved or retired rule). --init never rewrites an entry
 that exists; edit them by hand.
+
+Every radio or bench entry also has a How: line, right after Method:, saying who can run the radio step:
+
+    How: auto-radio — what the PC script does     (remote keys + UI readback + the terminal and link tools)
+    How: auto-sdr — what it keys and measures     (PC keying on the tx-dry build + the RTL-SDR, tools/bench.py)
+    How: host-covered — the tests, what to confirm (host/sim tests carry it; one quick batched pass on the radio)
+    How: hands: NEED — what to do, what to look for (a person: a place, equipment, a physical action, judgement)
+
+From these the tool also writes docs/test-by-hand.md (the hands entries as short sessions, grouped by NEED)
+and docs/test-auto.md (what the PC will run, for scripting).
 """
 import argparse, pathlib, re, sys
 
@@ -169,7 +179,7 @@ def parse_sources(d):
             if line.startswith("## ") or line.startswith("# "):
                 cur = None
                 continue
-            m = re.match(r"^(Method|Equipment|Steps|Pass):\s*(.*)$", line)
+            m = re.match(r"^(Method|How|Equipment|Steps|Pass):\s*(.*)$", line)
             if m:
                 cur[m.group(1).lower()] = m.group(2).strip()
                 in_results = False
@@ -421,9 +431,158 @@ def main():
             what = cell(r["text"])
             out.append(f"| [{r["id"]}](manual.html#{r["id"]}) | {what} | {e.get('method', '')} | {by} | {link} | {result} |")
         out.append("")
+    hows, no_how = how_counts(rules, entries)
+    out.insert(out.index("## Summary") + 2,
+               "- Radio and bench entries by How: " + ", ".join(f"{k} {v}" for k, v in hows.items())
+               + (f"; without a How: line {len(no_how)}: " + " ".join(no_how) if no_how else "")
+               + ". By-hand checklist: [test-by-hand.md](test-by-hand.md); for the PC: [test-auto.md](test-auto.md).")
     (a.docs / "test-plan.md").write_text("\n".join(out))
+    write_by_hand(a.docs, rules, entries)
+    write_auto(a.docs, rules, entries, covered)
+    print("by How: " + ", ".join(f"{k} {v}" for k, v in hows.items())
+          + (f", without How {len(no_how)}" if no_how else ""))
     print(f"wrote {a.docs / 'test-plan.md'}: {len(rules)} rules, {len(auto)} automated ({pct:.0f}%), "
           f"{len(none)} without test or entry, {len(stale)} stale tags")
+
+
+# ---- How: the by-hand list and the PC's list ----
+
+HOWS = ("auto-radio", "auto-sdr", "host-covered", "hands")
+
+# The hands sessions, in the order to do them: (key words in the NEED, title, minutes per item).
+SESSIONS = [
+    (("power and held keys",), None, "At the bench: power switch and keys only a hand can press", 2),
+    (("looks", "sound"), None, "At the bench: looks and sound", 2),
+    (("clear radio",), {"SQL", "HOME", "MODE", "WATCH", "BCR", "SND", "DISP", "TX"},
+     "With the clear radio, 1: squelch, home, watch and broadcast", 3),
+    (("clear radio",), {"SCAN", "KEY", "TSRCH"}, "With the clear radio, 2: scanning, tone search and the counter", 3),
+    (("clear radio",), {"XB", "TONE"}, "With the clear radio, 3: crossband, DCS and the tail", 4),
+    (("clear radio",), None, "With the clear radio, 4: APRS, decoders and alerts", 3),
+    (("speaker mic",), None, "With the speaker mic", 5),
+    (("phone",), None, "With a phone (Bluetooth)", 4),
+    (("dummy load", "power meter"), None, "With the tx build into a dummy load and power meter", 5),
+    (("meter", "bench supply", "battery run"), None, "With a meter and the bench supply (or a battery run)", 5),
+    (("oscilloscope",), None, "With an oscilloscope", 5),
+    (("signal generator",), None, "With a signal generator", 10),
+    (("outdoors",), None, "Outdoors with GPS (a walk, then a drive)", 3),
+    (("restore day",), None, "Restore day (back to stock and return)", 30),
+    (("real same",), None, "When a real SAME test comes (weekly, no fixed time)", 0),
+]
+
+
+def how_of(e):
+    h = e.get("how", "")
+    for k in HOWS:
+        if h.startswith(k):
+            rest = h[len(k):].lstrip(" :—-").strip()
+            return k, rest
+    return "", h
+
+
+def needs_radio(e):
+    return any(m.strip() in ("radio", "bench") for m in e.get("method", "").split(","))
+
+
+def how_counts(rules, entries):
+    counts = {k: 0 for k in HOWS}
+    missing = []
+    for r in rules:
+        e = entries.get(r["id"])
+        if not e or not needs_radio(e):
+            continue
+        k, _ = how_of(e)
+        if k:
+            counts[k] += 1
+        else:
+            missing.append(r["id"])
+    return counts, missing
+
+
+def last_result(e):
+    res = [x for x in e.get("results", []) if x and x[0]]
+    if not res:
+        return ""
+    last = res[-1]
+    mark = (last[2] if len(last) > 2 else "").strip()
+    return {"pass": "✓", "partial": "◐", "fail": "✗"}.get(mark, mark)
+
+
+def write_by_hand(docs, rules, entries):
+    groups = {s[2]: [] for s in SESSIONS}
+    other = []
+    for r in rules:
+        e = entries.get(r["id"])
+        if not e or not needs_radio(e):
+            continue
+        k, rest = how_of(e)
+        if k != "hands":
+            continue
+        need, _, what = rest.partition(" — ")
+        item = (r, e, need.strip(), (what or rest).strip())
+        for words, prefixes, title, _ in SESSIONS:
+            if any(w in need.lower() for w in words) and (prefixes is None or r["prefix"] in prefixes):
+                groups[title].append(item)
+                break
+        else:
+            other.append(item)
+    total = sum(len(v) for v in groups.values()) + len(other)
+    out = ["# Testing by hand", "",
+           "Generated by `ferrite/tools/testplan.py` from the `How: hands` lines in [`test-plan/`](test-plan/). "
+           "Don't edit this file: edit the entries, then run the tool. These are the radio checks that need a "
+           "person (a place, equipment, a physical action or judgement); everything else the PC runs "
+           "([test-auto.md](test-auto.md)). Record each result in the rule's entry (date, firmware, ✓/◐/✗, a note).",
+           "", f"{total} checks in {sum(1 for v in groups.values() if v) + bool(other)} sessions.", ""]
+    for words, prefixes, title, mins in SESSIONS:
+        items = groups[title]
+        if not items:
+            continue
+        todo = [i for i in items if last_result(i[1]) != "✓"]
+        done = [i for i in items if last_result(i[1]) == "✓"]
+        est = f", about {max(5, round(len(todo) * mins / 5) * 5)} min" if mins and todo else ""
+        out += [f"## {title}: {len(todo)} to do{est}", ""]
+        for r, e, need, what in todo:
+            lr = last_result(e)
+            extra = f" ({need})" if need and not any(w in need.lower() for w in words) or (
+                need and need.lower() not in title.lower() and len(words) > 1) else ""
+            out.append(f"- [ ] [{r['id']}](manual.html#{r['id']}){extra}: {what}"
+                       + (f" (last: {lr})" if lr else ""))
+        if done:
+            out += ["", "Already passed (recheck only after a change): "
+                    + ", ".join(f"[{r['id']}](manual.html#{r['id']})" for r, *_ in done) + "."]
+        out.append("")
+    if other:
+        out += ["## Other", ""] + [f"- [ ] [{r['id']}](manual.html#{r['id']}) ({n}): {w}" for r, e, n, w in other] + [""]
+    (docs / "test-by-hand.md").write_text("\n".join(out))
+
+
+def write_auto(docs, rules, entries, covered):
+    out = ["# Radio checks the PC runs", "",
+           "Generated by `ferrite/tools/testplan.py` from the `How:` lines in [`test-plan/`](test-plan/). "
+           "Don't edit this file. **auto-radio**: a PC script with remote keys and UI readback (LINK-19), the "
+           "terminal and link tools (`slot`, `set`/`get`, `bk`, `gpio`, `mem`, `gps`, restart, the cable log) "
+           "checks it unattended. **auto-sdr**: PC keying on the `tx-dry` build (LINK-20) and the RTL-SDR "
+           "(`tools/bench.py`, `sdrtx.py`, `sdrtones.py`, `sdrsuite.py`). **host-covered**: the host and sim "
+           "tests carry the logic; the radio step is one quick confirmation pass. The by-hand rest: "
+           "[test-by-hand.md](test-by-hand.md).", ""]
+    for k, title in (("auto-radio", "auto-radio"), ("auto-sdr", "auto-sdr"),
+                     ("host-covered", "host-covered (one batched confirmation pass)")):
+        rows = []
+        for r in rules:
+            e = entries.get(r["id"])
+            if not e or not needs_radio(e):
+                continue
+            kk, rest = how_of(e)
+            if kk == k:
+                rows.append((r, e, rest))
+        todo = sum(1 for r, e, _ in rows if last_result(e) != "✓")
+        out += [f"## {title}: {len(rows)} ({todo} without a pass yet)", "",
+                "| Rule | What the PC does | Tests | Last |", "| --- | --- | --- | --- |"]
+        for r, e, rest in rows:
+            ts = covered.get(r["id"], [])
+            by = ", ".join(f"`{t['name']}`" for t in ts[:2]) + (f" +{len(ts) - 2}" if len(ts) > 2 else "")
+            out.append(f"| [{r['id']}](manual.html#{r['id']}) | {cell(rest, 160)} | {by} | {last_result(e)} |")
+        out.append("")
+    (docs / "test-auto.md").write_text("\n".join(out))
 
 
 ID_PAT = None
