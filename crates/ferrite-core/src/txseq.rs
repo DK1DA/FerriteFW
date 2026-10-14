@@ -86,6 +86,11 @@ pub const DUTY_DRAIN_DIV: u32 = 4;
 /// A `static`: read at key-up by the Radio task, and only named statics stay in the firmware's fast flash.
 pub static DUTY_WEIGHT: [u32; 3] = [1, 2, 4];
 
+/// TX-32's hysteresis (TX audit F13): the battery must read under the cut-off this long without a break before a
+/// transmission is cut; one low sample (a PA current spike, ADC noise) doesn't unkey. At the 10-50 ms keyed tick,
+/// that is 10 or more readings.
+pub const BATT_LOW_MS: u32 = 500;
+
 /// Why the sequencer unkeyed by itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -98,7 +103,7 @@ pub enum Event {
     Battery,
 }
 
-/// The sequencer (28 bytes).
+/// The sequencer (36 bytes).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TxSeq {
     /// Keyed since (ms), and what.
@@ -113,11 +118,13 @@ pub struct TxSeq {
     hot: bool,
     /// The keyed power level's fill weight (DUTY_WEIGHT).
     weight: u8,
+    /// Since when the battery has read under the cut-off without a break while keyed (TX-32, [`BATT_LOW_MS`]).
+    batt_low: Option<u32>,
 }
 
 impl TxSeq {
     pub const fn new() -> Self {
-        TxSeq { since: None, alerted: false, held: false, last_id: None, duty: 0, duty_at: 0, hot: false, weight: 4 }
+        TxSeq { since: None, alerted: false, held: false, last_id: None, duty: 0, duty_at: 0, hot: false, weight: 4, batt_low: None }
     }
 
     pub fn keyed(&self) -> bool {
@@ -189,7 +196,7 @@ impl TxSeq {
         }
         self.since = Some((now, r.kind));
         self.weight = DUTY_WEIGHT[r.power.min(2) as usize] as u8;
-        self.alerted = false;
+        (self.alerted, self.batt_low) = (false, None);
         Ok(())
     }
 
@@ -205,7 +212,7 @@ impl TxSeq {
         })?;
         self.since = Some((now, r.kind));
         self.weight = DUTY_WEIGHT[r.power.min(2) as usize] as u8;
-        self.alerted = false;
+        (self.alerted, self.batt_low) = (false, None);
         Ok(())
     }
 
@@ -272,10 +279,13 @@ impl TxSeq {
     }
 
     /// Time passing while keyed: the pre-alert, then the timeout (PTT must be released after), the duty limit and
-    /// the battery under load each unkey without the end tone (TONE-11).
+    /// the battery under load (low for [`BATT_LOW_MS`] without a break, TX-32) each unkey without the end tone
+    /// (TONE-11).
     pub fn tick(&mut self, cfg: &Cfg, batt_ok: bool, path: &mut Path, now: u32, out: &mut Steps) -> Option<Event> {
         self.heat(now);
         let (t0, _) = self.since?;
+        self.batt_low = if batt_ok { None } else { Some(self.batt_low.unwrap_or(now)) };
+        let batt_cut = self.batt_low.is_some_and(|t| now.wrapping_sub(t) >= BATT_LOW_MS);
         let on = now.wrapping_sub(t0);
         let limit = cfg.timeout_s.clamp(30, 600) as u32 * 1000;
         let ev = if on >= limit {
@@ -283,7 +293,7 @@ impl TxSeq {
             Event::Timeout
         } else if self.hot {
             Event::Hot
-        } else if !batt_ok {
+        } else if batt_cut {
             Event::Battery
         } else {
             if !self.alerted && cfg.prealert_s > 0 && on + cfg.prealert_s as u32 * 1000 >= limit {
@@ -439,13 +449,24 @@ mod tests {
         assert_eq!(t.key(&r, &mut p, 33_000, &mut Steps::default()), Ok(()));
     }
 
+    /// TX-32 (TX audit F13): the battery under load cuts only after reading low for BATT_LOW_MS without a break;
+    /// one low sample, or low readings broken by a good one, don't.
     #[test]
     fn battery_under_load() {
         let mut t = TxSeq::new();
         let mut p = rx_on(mhz(446));
+        let cfg = Cfg::default();
         t.key(&req(mhz(446)), &mut p, 0, &mut Steps::default()).unwrap();
-        assert_eq!(t.tick(&Cfg::default(), false, &mut p, 1_000, &mut Steps::default()), Some(Event::Battery));
+        assert_eq!(t.tick(&cfg, false, &mut p, 1_000, &mut Steps::default()), None, "one low sample");
+        assert_eq!(t.tick(&cfg, true, &mut p, 1_020, &mut Steps::default()), None);
+        assert_eq!(t.tick(&cfg, false, &mut p, 1_040, &mut Steps::default()), None, "the run starts again");
+        assert_eq!(t.tick(&cfg, false, &mut p, 1_040 + BATT_LOW_MS - 1, &mut Steps::default()), None);
+        assert!(t.keyed());
+        assert_eq!(t.tick(&cfg, false, &mut p, 1_040 + BATT_LOW_MS, &mut Steps::default()), Some(Event::Battery));
         assert!(!t.keyed());
+        // A new key-up starts with no low run.
+        t.key(&req(mhz(446)), &mut p, 10_000, &mut Steps::default()).unwrap();
+        assert_eq!(t.tick(&cfg, false, &mut p, 10_010, &mut Steps::default()), None);
     }
 
     #[test]
