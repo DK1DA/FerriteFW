@@ -66,7 +66,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     if let Some(clear) = app.dirty_shape(2, hash(&(f, name)), name.is_empty()) {
         redraw_box!(clear, lcd, (8, 42, 224, 52, BG), {
             if name.is_empty() {
-                w::freq(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG);
+                w::freq_centred(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG); // HOME-3: centred
             } else {
                 // 26 px when the whole name fits, else 22 px (HOME-4a).
                 let nb = name.as_bytes();

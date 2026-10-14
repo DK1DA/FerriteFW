@@ -194,6 +194,30 @@ pub fn freq(
     sx + ws
 }
 
+/// [`freq`] centred between `x` and `x_end`, the space left of it cleared too. Returns where the text ends.
+#[allow(clippy::too_many_arguments)]
+pub fn freq_centred(
+    lcd: &mut impl Panel,
+    x: i32,
+    x_end: i32,
+    baseline: i32,
+    f: Freq10,
+    big: &Font4,
+    small: &Font4,
+    fg: u16,
+    fg_small: u16,
+    bg: u16,
+) -> i32 {
+    let mut b = [0u8; 16];
+    let n = freq::format(f, &mut b);
+    let split = n.saturating_sub(3);
+    let w = text4_width(&b[..split], big) + 4 + text4_width(&b[split + 1..n], small);
+    let sx = (x + (x_end - x - w) / 2).max(x);
+    let (y0, y1) = (baseline - digit_h(big), baseline + 1);
+    lcd.fill(x, y0, sx - x, y1 - y0, bg);
+    self::freq(lcd, sx, x_end, baseline, f, big, small, fg, fg_small, bg)
+}
+
 /// Height of a digit above the baseline.
 pub fn digit_h(f: &Font4) -> i32 {
     f.glyph('0' as u32).map_or(f.ascent as i32, |g| -(g.y as i32))
