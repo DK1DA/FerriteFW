@@ -129,7 +129,7 @@ const G7: [Entry; 9] = [
 const G8: [Entry; 9] = [
     Entry("Timeout|120 s|Transmit timeout and its pre-alert."),
     Entry("VOX|Off|Voice-operated transmit."),
-    Entry("Mic gain|5|Microphone level, 1-9."),
+    Entry("Mic gain|5|Higher is louder on air: 1-9."),
     Entry("Tones sent|1750 Hz|Tone burst, subtone level."),
     Entry("Tail elimination|Off|Squelch tail, end tone (roger beep)."),
     Entry("DTMF|100 ms|Dialer, memories, timing, PTT ID."),
@@ -253,7 +253,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         Entry("Arrival tone|On|A tone on reaching a waypoint."),
     ]),
     ((8, 1), &[Entry("TX timeout|120 s|Transmit stops after this."), Entry("Pre-alert|10 s|Warning before the timeout.")]),
-    ((8, 2), &[Entry("VOX|Off|Transmit when you talk."), Entry("Level|5|1-9; keys the active slot."), Entry("Tail|2 s|Hang time after speech.")]),
+    ((8, 2), &[Entry("VOX|Off|Transmit when you talk."), Entry("Level|5|Higher needs a louder voice: 1 keys easiest."), Entry("Tail|2 s|Hang time after speech.")]),
     ((8, 4), &[
         Entry("Tone burst|1750 Hz|PTT + SIDE2 sends it."),
         Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),

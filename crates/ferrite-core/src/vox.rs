@@ -2,9 +2,11 @@
 //! PA0 and feeds it here; this decides when speech starts and when it has stopped for the tail. Keying is the
 //! UI's, with every PTT check (VOX-4): this only says whether there is speech.
 
-/// Stock's thresholds (0x0802F73C, PA0 reading): level 1 = 101 down to level 9 = 21, in steps of 10 (VOX-14).
+/// Stock's thresholds (0x0802F73C, PA0 reading), numbered as stock's menu: level 1 = 21 (keys easiest) up to
+/// level 9 = 101, in steps of 10: a higher level needs a louder voice, as a higher volume number (VOX-14,
+/// decision 131).
 pub fn threshold(level: u8) -> u16 {
-    111 - 10 * level.clamp(1, 9) as u16
+    11 + 10 * level.clamp(1, 9) as u16
 }
 
 /// VOX-15: stock's default mic sensitivity, REG_7D[5:0] = 0x24 (0x0801DD90: Mic Gain setting 0, the default;
@@ -151,9 +153,9 @@ mod tests {
     /// VOX-14: stock's thresholds, 101 at level 1 down to 21 at level 9.
     #[test]
     fn thresholds_are_stocks() {
-        assert_eq!(threshold(1), 101);
+        assert_eq!(threshold(1), 21);
         assert_eq!(threshold(5), 61);
-        assert_eq!(threshold(9), 21);
+        assert_eq!(threshold(9), 101);
     }
 
     /// VOX-2, VOX-5, VOX-14: on at the threshold, held down to 8 counts below it, off after the tail.
@@ -173,24 +175,24 @@ mod tests {
     fn never_while_off_booting_or_receiving() {
         let mut v = Vox::new();
         assert!(!v.step(500, 0, 2000, false, 9000), "VOX off");
-        assert!(!v.step(500, 9, 2000, false, 4999), "within 5 s of boot");
-        assert!(v.step(500, 9, 2000, false, 9000));
-        assert!(!v.step(500, 9, 2000, true, 9100), "the slot receives: speech drops at once");
-        assert!(!v.step(500, 9, 2000, false, 9100 + HOLD_MS - 1), "stock's 1.5 s hold after the audio");
-        assert!(v.step(500, 9, 2000, false, 9100 + HOLD_MS));
+        assert!(!v.step(500, 1, 2000, false, 4999), "within 5 s of boot");
+        assert!(v.step(500, 1, 2000, false, 9000));
+        assert!(!v.step(500, 1, 2000, true, 9100), "the slot receives: speech drops at once");
+        assert!(!v.step(500, 1, 2000, false, 9100 + HOLD_MS - 1), "stock's 1.5 s hold after the audio");
+        assert!(v.step(500, 1, 2000, false, 9100 + HOLD_MS));
     }
 
     /// VOX-14: stock compares bits 11-4 of the 12-bit reading. The noise floor and an envelope's decay (under
-    /// 300 raw on the black radio, Oct 13, 2026) never reach level 9's 21; the loud whistle seen (~800 raw = 49)
-    /// passes levels 7-9 only.
+    /// 300 raw on the black radio, Oct 13, 2026) never reach level 1's 21; the loud whistle seen (~800 raw = 49)
+    /// passes levels 1-3 only.
     #[test]
     fn stock_scaling() {
         assert_eq!(reading(799), 49);
         assert_eq!(reading(0xFFF), 255);
         let mut v = Vox::new();
-        assert!(!v.step(48, 9, 2000, false, 9000), "a decaying envelope (48 raw = 3) is not speech");
-        assert!(!v.step(335, 9, 2000, false, 9020), "335 raw = 20: below level 9's 21");
-        assert!(v.step(336, 9, 2000, false, 9040), "336 raw = 21: level 9");
+        assert!(!v.step(48, 1, 2000, false, 9000), "a decaying envelope (48 raw = 3) is not speech");
+        assert!(!v.step(335, 1, 2000, false, 9020), "335 raw = 20: below level 1's 21");
+        assert!(v.step(336, 1, 2000, false, 9040), "336 raw = 21: level 1");
         let mut v = Vox::new();
         assert!(!v.step(799, 5, 2000, false, 9000), "the whistle (49) is below level 5's 61");
     }
