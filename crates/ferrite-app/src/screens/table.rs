@@ -86,9 +86,10 @@ impl App {
             let c = f(&Ctx { app: self, live, dev, x }, &mut b);
             y = self.kv(lcd, i - top, y, t.h as i32, &t.style, label.as_bytes(), b.as_bytes(), c, sel == Some(i as u8));
         }
-        // DISP-24: rows above or below the page
+        // DISP-24: rows above or below the page. Each row draws its own part of the cue (w::kv), so a row's
+        // change doesn't send the whole cue again: no rows for the cue's hash.
         let more = shown < n;
-        self.scroll_cue(lcd, (0, shown), t.y as i32, y - t.y as i32, more, top as u32, shown as u32, n as u32);
+        self.scroll_cue(lcd, (0, 0), t.y as i32, y - t.y as i32, more, top as u32, shown as u32, n as u32);
         y
     }
 }

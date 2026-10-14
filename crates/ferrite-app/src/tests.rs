@@ -503,6 +503,83 @@ fn redraws_only_what_changed() {
     assert!(lcd.1.iter().all(|r| r.1 >= 50 && r.3 <= 115), "frequency only: {:?}", lcd.1);
 }
 
+/// DISP-24, DISP-25: on the Status page a changing value (the GPS countdown, the battery, the clock's source, the
+/// speaker mic) redraws its own row and nothing else: not the other rows, not the whole scroll cue (each row draws
+/// its own part of it). Moving the selection within the page redraws the two rows; only scrolling the page (or a
+/// new screen) draws every row.
+#[test]
+fn status_value_change_redraws_its_row_only() {
+    use ferrite_core::gpspower::GpsPhase;
+    // windows that pixels went to (the simulator's text-hint pass sends windows with no pixels)
+    struct Count(FrameBuffer, Vec<(i32, i32, i32, i32)>, u64, Option<(i32, i32, i32, i32)>);
+    impl Count {
+        fn sent(&mut self, n: u64) {
+            self.2 += n;
+            if let Some(w) = self.3.take() {
+                self.1.push(w);
+            }
+        }
+    }
+    impl Panel for Count {
+        fn window(&mut self, a: i32, b: i32, c: i32, d: i32) {
+            self.3 = Some((a, b, c, d));
+            self.0.window(a, b, c, d)
+        }
+        fn push(&mut self, c: u16, n: u32) {
+            self.sent(n as u64);
+            self.0.push(c, n)
+        }
+        fn push_buf(&mut self, p: &[u16]) {
+            self.sent(p.len() as u64);
+            self.0.push_buf(p)
+        }
+    }
+    const ROW_PX: u64 = 240 * 18;
+    let mut t = T::new();
+    t.tap(Key::Hash);
+    assert!(matches!(t.app.screen(), Screen::Status(_)));
+    let mut lcd = Count(FrameBuffer::new(), Vec::new(), 0, None);
+    let mut dev = Device { clock_min: Some(600), gps: GpsState::Fix, gps_phase: GpsPhase::Standby(42), battery_pct: 80, ..Default::default() };
+    t.app.render(&mut lcd, &t.live, &dev, &store());
+    type Rect = (i32, i32, i32, i32);
+    let pass = |t: &mut T, lcd: &mut Count, dev: &Device| -> (Vec<Rect>, u64) {
+        lcd.1.clear();
+        lcd.2 = 0;
+        t.app.render(lcd, &t.live, dev, &store());
+        (lcd.1.clone(), lcd.2)
+    };
+    assert_eq!(pass(&mut t, &mut lcd, &dev).1, 0, "nothing changed, nothing drawn");
+    // (row, the change): GPS is row 9, Clock 11, Speaker mic 13, Battery 14 (y = 20 + 18 row)
+    type Change = (i32, fn(&mut Device));
+    let changes: [Change; 5] = [
+        (9, |d| d.gps_phase = GpsPhase::Standby(41)),
+        (9, |d| d.gps_phase = GpsPhase::Running),
+        (14, |d| d.battery_pct = 79),
+        (11, |d| d.gps = GpsState::Searching),
+        (13, |d| d.spkmic = true),
+    ];
+    for (row, change) in changes {
+        change(&mut dev);
+        let (wins, px) = pass(&mut t, &mut lcd, &dev);
+        let (y0, y1) = (20 + 18 * row, 20 + 18 * row + 17);
+        if row == 11 {
+            // Searching: the GPS row says so too, the clock's source is now "Set by hand" and the status bar's GPS
+            // icon changes; nothing else
+            let ok = |w: &(i32, i32, i32, i32)| w.3 < 20 || (w.1 >= 182 && w.3 <= 199) || (w.1 >= y0 && w.3 <= y1);
+            assert!(wins.iter().all(ok), "rows 9 and 11 and the status bar only: {wins:?}");
+            assert!(px <= 3 * ROW_PX, "{px} px");
+            continue;
+        }
+        assert!(px > 0 && px <= ROW_PX, "row {row}: {px} px, one row is {ROW_PX}");
+        assert!(wins.iter().all(|w| w.1 >= y0 && w.3 <= y1), "row {row} ({y0}-{y1}) only: {wins:?}");
+    }
+    // the selection one row down: the two rows, nothing else
+    t.tap(Key::Down);
+    let (wins, px) = pass(&mut t, &mut lcd, &dev);
+    assert!(px <= 2 * ROW_PX, "{px} px");
+    assert!(wins.iter().all(|w| w.1 >= 20 && w.3 < 20 + 36), "rows 0 and 1 only: {wins:?}");
+}
+
 #[test]
 fn toasts_replace_the_hint_bar_for_3_s() {
     let mut t = T::new();

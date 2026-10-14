@@ -129,8 +129,10 @@ impl App {
     }
 
     /// DISP-24: the scroll cue beside rows `R_ROW + from ..+ count`, drawn from `y` for `h` when there are rows
-    /// above or below the page (`top` of `n`, `shown` on it); redrawn whenever those rows redraw (they paint
-    /// full width) or the page moves, and cleared once a list no longer scrolls.
+    /// above or below the page (`top` of `n`, `shown` on it); redrawn whenever those rows redraw (a list's blank
+    /// rows paint full width, over the cue) or the page moves, and cleared once a list no longer scrolls. A page
+    /// whose every row draws its own part of the cue (a [`super::table::Table`]) passes no rows: a row's change
+    /// then redraws that row only, not the whole cue as well (Oct 13, 2026).
     pub(crate) fn scroll_cue(&mut self, lcd: &mut impl Panel, rows: (usize, usize), y: i32, h: i32, more: bool, top: u32, shown: u32, n: u32) {
         let under = hash(&&self.drawn.hash[R_ROW + rows.0..(R_ROW + rows.0 + rows.1).min(R_PAGE)]);
         let prev = self.drawn.hash[R_SCROLL];
