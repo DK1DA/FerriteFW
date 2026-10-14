@@ -554,7 +554,7 @@ fn key_reads_back_before_the_pa() {
     }
 }
 
-/// TX audit M7: the TX set-up writes stock's REG_43 with every TX frequency (0x3028 wide, 0x4008 narrow), over
+/// TX-45 (TX audit M7): the TX set-up writes stock's REG_43 with every TX frequency (0x3028 wide, 0x4008 narrow), over
 /// whatever the chip held (here the reset value 0x4048, as a cross-band split's TX chip may), with the AF muted
 /// first and the sub-tone after.
 #[test]
@@ -611,7 +611,7 @@ fn any_wrong_read_back_refuses() {
     assert_eq!(chip::key_mic(&mut b, false, &want), Err(ReadBack::Bias));
 }
 
-/// TONE-13, DTMF-7, DTMF-8, DTMF-11: while keyed a tone burst or a DTMF symbol (A-D too) switches REG_30 to tone
+/// TONE-13, TONE-19, DTMF-7, DTMF-8, DTMF-11: while keyed a tone burst or a DTMF symbol (A-D too) switches REG_30 to tone
 /// transmit (stock's mode 4, the microphone off) with the sidetone as asked; letting go returns to the microphone
 /// with its read-back.
 #[test]

@@ -301,7 +301,7 @@ mod tests {
         assert!(TxCal::parse(&sector(GAUGE_DEFAULT)).is_some());
     }
 
-    /// CAL-12, TX audit M4: a factory crystal trim (marker 0xA0, k not 0) locks transmit until Ferrite applies it;
+    /// CAL-19, CAL-12, TX audit M4: a factory crystal trim (marker 0xA0, k not 0) locks transmit until Ferrite applies it;
     /// the marker with k = 0, or no marker (the black radio's 0xFF), changes nothing.
     #[test]
     fn factory_trim_locks() {
