@@ -117,6 +117,9 @@ pub enum Refusal {
     PttAtBoot,
     /// The duty limit: the transmitter is cooling (TX-31).
     Hot,
+    /// The SI4732 is still playing a broadcast at key-up (TX-24: the UI stops it first, BCR-29; the Radio task's
+    /// backstop, TX audit F11).
+    Broadcast,
 }
 
 /// TX-37: a pair is allowed only when RX and TX need the band relay in the same state.

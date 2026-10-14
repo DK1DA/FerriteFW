@@ -241,9 +241,9 @@ impl Radio {
                 self.live.mode = if c.is_some() { ModeLive::Xb(ferrite_core::msg::XbLive { stopped, ..Default::default() }) } else { ModeLive::Off };
             }
             #[cfg(feature = "tx")]
-            RadioCmd::TxPlan { tx, region, extend } => {
+            RadioCmd::TxPlan { tx, region, extend, confirmed } => {
                 let r = Region::ALL.get(region as usize).copied().unwrap_or(Region::Other);
-                self.tx.plan = Some((tx, r, extend));
+                self.tx.plan = Some((tx, r, extend, confirmed));
                 self.tx.region = Some((r, extend));
             }
             #[cfg(feature = "tx")]

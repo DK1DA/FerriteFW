@@ -28,6 +28,10 @@ fn req(tx: Freq10, rx: Freq10) -> Req {
         person: true,
         confirmed: false,
         am: false,
+        rx_only: false,
+        busy: false,
+        hf_si: false,
+        si_on: false,
         region: Region::Us,
         extend: false,
         cal_ok: true,
@@ -187,24 +191,17 @@ fn relay_guard_on_the_pins() {
     assert!(path.take_alarm(), "the event log's alarm");
 }
 
-/// TX-28, SAFE-21: a key-up on a frequency behind the other relay state moves it before the TX path, with the PA
-/// at zero, and back after the unkey wait.
+/// TX-37, TX-28, WATCH-12 (TX audit F11): a key-up on a frequency behind the other relay state (a 10 m slot keyed
+/// while 2 m is heard, or HF mode with the SI4732 on the antenna) is refused by the Radio task's own sequencer,
+/// with no pin moved: the relay never switches at key-up.
 #[test]
-fn key_up_across_the_relay() {
+fn key_up_across_the_relay_is_refused() {
     let (mut path, mut seq, mut hw, st) = receiving(VHF);
     let mut s = Steps::default();
-    seq.key(&req(TEN_M, TEN_M), &mut path, 0, &mut s).unwrap(); // e.g. a 10 m slot while 2 m is heard
-    let st = go(&mut hw, &s, &st);
-    let relay = hw.at(|e| *e == Ev::Pin(Pin::Relay, true)).unwrap();
-    let tx_on = hw.at(|e| *e == Ev::Pin(Pin::Sel(Sel::HfTx), true)).unwrap();
-    assert!(relay < tx_on, "{:?}", hw.evs());
-    let mut s = Steps::default();
-    seq.release(&Cfg::default(), &mut path, 5_000, &mut s);
+    assert_eq!(seq.key(&req(TEN_M, TEN_M), &mut path, 0, &mut s), Err(ferrite_core::txplan::Refusal::RelayMismatch));
     go(&mut hw, &s, &st);
-    let zero = hw.at(|e| *e == Ev::Pa(0)).unwrap();
-    let unkey = hw.at(|e| *e == Ev::Unkey(1)).unwrap();
-    let back = hw.at(|e| *e == Ev::Pin(Pin::Relay, false)).unwrap();
-    assert!(unkey < back && hw.time(back) - hw.time(zero) >= UNKEY_WAIT_MS as u32, "{:?}", hw.evs());
+    assert!(hw.evs().is_empty(), "{:?}", hw.evs());
+    assert!(!seq.keyed() && path.keyed().is_none() && !path.relay());
 }
 
 /// XB-6, XB-7, XB-8 (decision 95: stock's crossband audio switching): the other chip keys with the receiving

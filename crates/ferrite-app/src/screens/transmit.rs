@@ -63,7 +63,7 @@ pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
         return Some(Refusal::Battery);
     }
     // CHAN-4 (safety): a receive-only channel never transmits.
-    if slot < SLOTS as u8 && !app.aprs_slot(slot) && app.slot(slot).on_channel() && app.slot(slot).ch.is_some_and(|c| c.flags & crate::chan::FLAG_RX_ONLY != 0) {
+    if app.rx_only(slot) {
         return Some(Refusal::RxOnlyChannel);
     }
     // TX-20: the BK4829 has no AM modulator.
@@ -138,8 +138,14 @@ pub fn dial(app: &mut App, slot: u8, keys: &[u8]) -> bool {
     true
 }
 
-/// Key up (after the checks, or the emergency prompt's second PTT): the Transmit screen over where it was.
+/// Key up (after the checks): the Transmit screen over where it was.
 pub fn key(app: &mut App, slot: u8) {
+    key_as(app, slot, false);
+}
+
+/// [`key`], saying whether a person's second PTT on the emergency prompt confirmed it (TX-3): the Radio task
+/// refuses an emergency frequency without it (TX-35, TX audit F11).
+fn key_as(app: &mut App, slot: u8, confirmed: bool) {
     // HOME-17 (safety): nothing keys while the quick menu is up. Its PTTs never get this far and the side
     // connector's closes it first; this is the last check before the one key-up command.
     if app.qmenu.is_some() {
@@ -152,7 +158,7 @@ pub fn key(app: &mut App, slot: u8) {
     app.reconcile_mode(); // MODE-1: a mode that doesn't run keyed stops before the key-up (BCR-16, SCOPE-12)
     app.radio.t0 = app.now;
     let region = txplan::Region::ALL.iter().position(|&r| r == app.set.tx_region()).unwrap_or(0) as u8;
-    app.out.push(RadioCmd::TxPlan { tx: tx_freq(app, slot), region, extend: app.set.extend_tx });
+    app.out.push(RadioCmd::TxPlan { tx: tx_freq(app, slot), region, extend: app.set.extend_tx, confirmed });
     app.out.push(RadioCmd::Transmit { slot, on: true });
     app.open(Dest::Transmit);
     if let Screen::Transmit(t) = &mut app.screen {
@@ -195,7 +201,7 @@ pub fn data_key(app: &mut App, slot: u8, power: u8, what: &[u8]) -> bool {
         return false;
     }
     let region = txplan::Region::ALL.iter().position(|&r| r == app.set.tx_region()).unwrap_or(0) as u8;
-    app.out.push(RadioCmd::TxPlan { tx: tx_freq(app, slot), region, extend: app.set.extend_tx });
+    app.out.push(RadioCmd::TxPlan { tx: tx_freq(app, slot), region, extend: app.set.extend_tx, confirmed: false });
     app.out.push(RadioCmd::TransmitData { slot, power, on: true });
     true
 }
@@ -234,6 +240,7 @@ pub fn short(r: Refusal) -> &'static str {
         Refusal::ReleasePtt => "release PTT first",
         Refusal::PttAtBoot => "PTT held at power-on",
         Refusal::Hot => "transmitter cooling",
+        Refusal::Broadcast => "broadcast playing",
     }
 }
 
@@ -257,7 +264,8 @@ fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
         | Refusal::Emergency
         | Refusal::ReleasePtt
         | Refusal::PttAtBoot
-        | Refusal::Hot => None,
+        | Refusal::Hot
+        | Refusal::Broadcast => None,
     }
 }
 
@@ -605,6 +613,7 @@ impl View for TxRefused {
             Refusal::AmRxOnly => a.set(b"AM is receive only: the radio has no AM modulator."),
             Refusal::Emergency => a.set(b"An emergency frequency: only a person pressing PTT twice transmits here."),
             Refusal::ReleasePtt => a.set(b"The timeout ended the last transmission. Release PTT, then press it again."),
+            Refusal::Broadcast => a.set(b"The broadcast receiver was still playing at key-up. Release PTT, then press it again. (TX-24)"),
             Refusal::PttAtBoot => a.set(b"PTT was held at power-on. Release every PTT, then press it again. (SAFE-14)"),
             Refusal::Hot => {
                 a.set(b"The transmitter is cooling after a long time keyed.");
@@ -670,11 +679,12 @@ impl View for Emergency {
         }
     }
 
-    /// TX-3: the second PTT within 5 s transmits; the first one's release does nothing.
+    /// TX-3: the second PTT within 5 s transmits; the first one's release does nothing. VOX never confirms it
+    /// (TX-35): its speech is not a person pressing PTT.
     fn ptt(self, app: &mut App, down: bool) {
-        if down {
+        if down && !app.vox_on {
             app.screen = Screen::Home;
-            key(app, self.slot);
+            key_as(app, self.slot, true);
         }
     }
 

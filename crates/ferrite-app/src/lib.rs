@@ -275,6 +275,8 @@ pub struct App {
     alert: u8,
     /// VOX keyed the active slot and holds it (VOX-13).
     vox_on: bool,
+    /// VOX's speech refused on an emergency frequency (TX-35): the toast once per burst of speech.
+    vox_refused: bool,
     /// The second of the alert tone's last beep, with the top bit set (SND-6, INBOX-4).
     alert_beep: u16,
     toast: Option<Toast>,
@@ -366,6 +368,7 @@ impl App {
             inbox: 0,
             alert: 0,
             vox_on: false,
+            vox_refused: false,
             alert_beep: 0,
             toast: None,
             undo: None,
@@ -460,13 +463,14 @@ impl App {
         let slot = self.out.cur;
         let c = match self.out.step {
             0 => RadioCmd::TuneSlot { slot, freq: self.tuned_freq(slot) },
-            // After the slot's settings: its end tone and tail (the channel's over the radio's).
+            // After the slot's settings: its end tone and tail (the channel's over the radio's), and whether its
+            // channel is receive-only (CHAN-4, for the Radio task's own refusal: TX audit F11).
             k if k as usize > slot::params(&DEFAULT_CFG).len() => {
                 let (end, tail) = self.slot_tones(slot);
-                if k as usize == slot::params(&DEFAULT_CFG).len() + 1 {
-                    RadioCmd::SlotParam { slot, param: Param::EndTone, value: end as i32 }
-                } else {
-                    RadioCmd::SlotParam { slot, param: Param::Tail, value: tail as i32 }
+                match k as usize - slot::params(&DEFAULT_CFG).len() {
+                    1 => RadioCmd::SlotParam { slot, param: Param::EndTone, value: end as i32 },
+                    2 => RadioCmd::SlotParam { slot, param: Param::Tail, value: tail as i32 },
+                    _ => RadioCmd::SlotParam { slot, param: Param::RxOnly, value: self.rx_only(slot) as i32 },
                 }
             }
             k => {
@@ -477,7 +481,7 @@ impl App {
             }
         };
         self.out.step += 1;
-        if self.out.step as usize > slot::params(&DEFAULT_CFG).len() + 2 {
+        if self.out.step as usize > slot::params(&DEFAULT_CFG).len() + 3 {
             self.out.sync &= !(1 << slot);
             self.out.cur = NO_SLOT;
         }
@@ -1226,8 +1230,16 @@ impl App {
         (end, tail)
     }
 
+    /// CHAN-4: the slot transmits from a receive-only channel (the APRS slot keeps its own frequency).
+    pub(crate) fn rx_only(&self, slot: u8) -> bool {
+        slot < SLOTS as u8
+            && !self.aprs_slot(slot)
+            && self.slot(slot).on_channel()
+            && self.slot(slot).ch.is_some_and(|c| c.flags & crate::chan::FLAG_RX_ONLY != 0)
+    }
+
     /// The slot's frequency and every setting, to the Radio task (made when popped: [`App::pop_cmd`]).
-    fn send_slot(&mut self, slot: u8) {
+    pub(crate) fn send_slot(&mut self, slot: u8) {
         self.slots[slot as usize % SLOTS].clar = 0; // VFO-22: a retune clears the clarifier (the Radio task's too)
         self.out.sync(slot);
     }
@@ -1428,6 +1440,15 @@ impl App {
     /// its end (after the tail) releases it. Not on the APRS slot, whose PTT opens compose.
     fn vox_tick(&mut self, live: &LiveAll, now: u32, store: &impl ChannelStore) {
         let voice = live.tx.voice && self.set.vox && !self.aprs_slot(self.active);
+        // TX-35 (TX audit F11): VOX is automatic, so never on an emergency frequency: a toast, not the prompt.
+        if voice && !self.vox_on && self.radio.keyed.is_none() && ferrite_core::txplan::emergency(screens::transmit::tx_freq(self, self.active)) {
+            if !self.vox_refused {
+                self.vox_refused = true;
+                self.show_toast(b"No VOX", b"emergency frequency", false);
+            }
+            return;
+        }
+        self.vox_refused &= voice;
         if voice && !self.vox_on && self.radio.keyed.is_none() {
             self.vox_on = true;
             self.key_down(Key::PTT, now, store);

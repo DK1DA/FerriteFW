@@ -55,8 +55,8 @@ fn start_up_sends_every_slot_whole() {
     assert!(v.contains(&RadioCmd::TxTimeout(120)), "TX-30: the default timeout");
     // Nine radio-wide (with the beep volume, the mic gain, the timeout and VOX: SND-3, VOX-15, TX-30, VOX-13), the
     // tones' four (TxTones, the callsign's two chunks, DTMF timing); per slot: tune, ten parameters (split
-    // included), end tone and tail.
-    assert_eq!(v.len(), 13 + 3 * 13);
+    // included), end tone, tail and receive-only (CHAN-4, TX audit F11).
+    assert_eq!(v.len(), 13 + 3 * 14);
     // Stepping through channels faster than the commands drain: the slot goes out once, as it is now.
     let mut t = T::new();
     t.tap(Key::VfoMem);

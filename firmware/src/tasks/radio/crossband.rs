@@ -192,6 +192,10 @@ impl Radio {
             person: false,
             confirmed: false,
             am: self.slots[to as usize].am,
+            rx_only: self.slots[to as usize].rx_only,
+            busy: false, // the repeater relays what it hears; its own tone gate decides (XB-*)
+            hf_si: false,
+            si_on: self.si.mode().is_some(),
             region,
             extend,
             cal_ok: self.tx.cal.is_some(),
@@ -203,6 +207,11 @@ impl Radio {
             x.rep.refused(now);
             return log(b"xb refused ", r as u32);
         }
+        // TX-11 (TX audit F16): the PA lookup refuses outside its rows.
+        let Some(pa) = self.tx.cal.and_then(|c| c.dac(f, power)) else {
+            x.rep.refused(now);
+            return log(b"xb refused: no PA curve there", 0);
+        };
         let n = Sel::tx(f).chip();
         if !self.has(n) {
             x.rep.refused(now);
@@ -216,7 +225,7 @@ impl Radio {
         radio_chip::tx_setup(&mut self.chip(n), &setup);
         self.tuned[n as usize] = Some((to, f));
         self.maybe_awake |= 1 << n;
-        self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, power));
+        self.tx.pa = pa;
         (self.tx.fault, self.tx.data, self.tx.slot, self.tx.dialled) = (false, Some(power), to, false);
         // Decision 95: stock's TX setup clears PB8 unless the accessory detect (PC15) is low; its PTT state 1
         // sets it again with the repeat audio (`Act::RepeatAudio`).

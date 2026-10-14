@@ -279,7 +279,7 @@ fn start(app: &mut App) {
 /// then the start.
 pub(crate) fn send_start(app: &mut App) {
     let region = txplan::Region::ALL.iter().position(|&r| r == app.set.tx_region()).unwrap_or(0) as u8;
-    app.out.push(RadioCmd::TxPlan { tx: app.slot(app.set.xb.side1).freq(), region, extend: app.set.extend_tx });
+    app.out.push(RadioCmd::TxPlan { tx: app.slot(app.set.xb.side1).freq(), region, extend: app.set.extend_tx, confirmed: false });
     app.out.push(RadioCmd::Crossband(Some(app.set.xb)));
 }
 

@@ -94,6 +94,27 @@ fn vox_keys_the_active_slot() {
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
 }
 
+/// TX-35, VOX-4 (TX audit F11): VOX never keys an emergency frequency, nor answers its prompt: a toast says why,
+/// and speech that comes and goes never acts as the second PTT.
+#[test]
+fn vox_never_on_an_emergency_frequency() {
+    let mut t = T::new();
+    t.app.radio.tx_built = true;
+    t.app.set_region(Some(ferrite_core::txplan::Region::Us), true);
+    crate::screens::groups::change(&mut t.app, &[8, 2, 1], 1);
+    let a = t.app.active as usize;
+    (t.app.slots[a].vfo, t.app.slots[a].vfo_mode) = (ferrite_core::freq::mhz(406) + 2_500, true);
+    t.cmds();
+    for _ in 0..3 {
+        t.live.tx.voice = true;
+        t.wait(200);
+        t.live.tx.voice = false;
+        t.wait(200);
+    }
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. } | RadioCmd::TxPlan { .. })));
+    assert!(!matches!(t.app.screen(), crate::Screen::Emergency(_)), "no prompt for VOX to answer");
+}
+
 /// BCR-5: the sleep timer ends the broadcast once its time is up.
 #[test]
 fn broadcast_sleep_timer() {

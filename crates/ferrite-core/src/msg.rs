@@ -70,8 +70,9 @@ pub enum RadioCmd {
     TransmitData { slot: u8, power: u8, on: bool },
     /// Sent just before each [`RadioCmd::Transmit`] key-up: the frequency the UI checked (offset, split and
     /// reverse applied), the region (an index into `txplan::Region::ALL`) and Extend TX, for the Radio task's own
-    /// checks (TX-17). Apart from `Transmit` so a command stays 8 bytes.
-    TxPlan { tx: Freq10, region: u8, extend: bool },
+    /// checks (TX-17). Apart from `Transmit` so a command stays 8 bytes. `confirmed`: a person's second PTT on the
+    /// emergency prompt keyed it (TX-3, TX-35); never for VOX or anything automatic.
+    TxPlan { tx: Freq10, region: u8, extend: bool, confirmed: bool },
     /// Scanning: skip the current hit for the rest of this scan (SCAN-11).
     ScanSkip { slot: u8 },
     /// A channel scan's stops: bytes `chunk * 5..` of the slot's bitmap, a bit per channel number
@@ -212,6 +213,8 @@ pub enum Param {
     /// Tail elimination on this slot (TONE-5 to TONE-7, the channel's over 0 8 5 1 already resolved): bit 0 on
     /// receive, bit 1 on transmit.
     Tail,
+    /// 1: the slot is on a receive-only channel (CHAN-4): the Radio task refuses its key-ups too (TX audit F11).
+    RxOnly,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

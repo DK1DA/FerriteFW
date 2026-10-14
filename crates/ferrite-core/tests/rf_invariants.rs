@@ -152,7 +152,7 @@ fn random_sequences_keep_the_rules() {
             let keyed_before = path.keyed().is_some();
             match rng.next(8) {
                 0 | 1 => {
-                    let cause = [Cause::ActiveSlot, Cause::Auto, Cause::HfReceiver, Cause::Ptt][rng.next(4) as usize];
+                    let cause = [Cause::ActiveSlot, Cause::Auto, Cause::HfReceiver][rng.next(3) as usize];
                     let rx = if rng.next(6) == 0 { Rx::Si } else { Rx::Bk(Sel::ALL[rng.next(6) as usize]) };
                     let r = path.rx(rx, cause, now, &mut s);
                     assert!(r.is_err() || !keyed_before, "{what}: RX change while keyed");
@@ -166,6 +166,10 @@ fn random_sequences_keep_the_rules() {
                         person: rng.next(2) == 0,
                         confirmed: rng.next(2) == 0,
                         am: rng.next(10) == 0,
+                        rx_only: rng.next(20) == 0,
+                        busy: rng.next(20) == 0,
+                        hf_si: rng.next(20) == 0,
+                        si_on: rng.next(30) == 0,
                         region: Region::Us,
                         extend: rng.next(2) == 0,
                         cal_ok: rng.next(20) != 0,
@@ -176,7 +180,8 @@ fn random_sequences_keep_the_rules() {
                     let relay = path.relay();
                     if seq.key(&r, &mut path, now, &mut s).is_ok() {
                         keys += 1;
-                        ptt_moves += (path.relay() != relay) as u32;
+                        assert_eq!(path.relay(), relay, "{what}: the relay moved at key-up (TX-37)");
+                        ptt_moves += 1;
                     }
                 }
                 4 => seq.release(&cfg, &mut path, now, &mut s),
@@ -206,7 +211,7 @@ fn random_sequences_keep_the_rules() {
             }
         }
     }
-    assert!(keys > 500 && moves > 500 && ptt_moves > 20 && boths > 100, "the sequences reach it all: {keys} key-ups, {moves} relay steps, {ptt_moves} at PTT, {boths} holds");
+    assert!(keys > 500 && moves > 500 && ptt_moves > 20 && boths > 100, "the sequences reach it all: {keys} key-ups, {moves} relay steps, {ptt_moves} key-ups kept the relay, {boths} holds");
 }
 
 /// The crossband repeater (XB-2, XB-6, XB-8, decision 93): the receive path hops between the two sides while
@@ -273,6 +278,10 @@ fn crossband_sequences_keep_the_rules() {
                         person: false,
                         confirmed: false,
                         am: false,
+                        rx_only: false,
+                        busy: false,
+                        hf_si: false,
+                        si_on: false,
                         region: Region::Us,
                         extend: false,
                         cal_ok: true,

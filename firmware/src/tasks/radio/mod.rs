@@ -148,10 +148,13 @@ struct SlotRx {
     am: bool,
     /// Tail elimination on receive (TONE-6, [`Param::Tail`] bit 0): with no receive tone, the 55 Hz tail mutes.
     rx_tail: bool,
+    /// Busy lockout (TX-21) and a receive-only channel (CHAN-4): the Radio task refuses key-ups too (TX audit F11).
+    busy: bool,
+    rx_only: bool,
 }
 
 impl SlotRx {
-    const DEFAULT: SlotRx = SlotRx { freq: DEFAULT, narrow: false, rx_tone: 0, clar: 0, sq: 3, am: false, rx_tail: false };
+    const DEFAULT: SlotRx = SlotRx { freq: DEFAULT, narrow: false, rx_tone: 0, clar: 0, sq: 3, am: false, rx_tail: false, busy: false, rx_only: false };
 
     /// The slot's audio opens (WATCH-3): squelch `open` and its tone heard; a tone channel goes quiet when its tone
     /// stops (the tail's phase shift or turn-off code ends it, TONE-6); with no tone and receive tail on, the 55 Hz
@@ -344,8 +347,9 @@ struct Tx {
     /// Each slot's transmit tone word and power level (index 3: HF mode's).
     tone: [u16; 4],
     power: [u8; 4],
-    /// The UI's [`RadioCmd::TxPlan`] for the next key-up.
-    plan: Option<(Freq10, Region, bool)>,
+    /// The UI's [`RadioCmd::TxPlan`] for the next key-up: frequency, region, Extend TX, the emergency prompt's
+    /// second PTT given.
+    plan: Option<(Freq10, Region, bool, bool)>,
     /// The key-up now is a data one ([`RadioCmd::TransmitData`]: APRS) at this power level: no end tone or CW ID
     /// after it (TONE-11), the APRS power (0 5 5 4) instead of the slot's.
     data: Option<u8>,

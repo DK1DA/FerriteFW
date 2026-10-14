@@ -121,6 +121,8 @@ impl Radio {
     pub(super) async fn apply(&mut self, a: Action) {
         match a {
             Action::None => return,
+            // TX-29 (TX audit F12): never while keyed, whatever asks; the unkey's wait is inside its plan.
+            Action::Sleep if !self.path.may_sleep() => {}
             Action::Sleep => {
                 // BCR-19: only the BK4829s sleep; a broadcast playing keeps the SI4732 and the speaker.
                 speaker(self.si_heard && !self.muted);
@@ -193,8 +195,11 @@ impl Radio {
             }
             #[cfg(not(feature = "tx"))]
             Param::TxTone | Param::Power | Param::EndTone => return,
-            // The transmit frequency comes with each key-up (RadioCmd::TxPlan); busy lockout is the UI's (TX-21).
-            Param::Offset | Param::BusyLock | Param::Reverse | Param::Split => return,
+            // TX audit F11: kept for the key-up's own refusals (TX-21, CHAN-4); nothing to retune.
+            Param::BusyLock => return s.busy = value != 0,
+            Param::RxOnly => return s.rx_only = value != 0,
+            // The transmit frequency comes with each key-up (RadioCmd::TxPlan).
+            Param::Offset | Param::Reverse | Param::Split => return,
         }
         self.retune(slot);
     }

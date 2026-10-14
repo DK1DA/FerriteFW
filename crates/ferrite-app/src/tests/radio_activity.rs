@@ -165,7 +165,10 @@ fn emergency_frequency_needs_ptt_twice() {
     t.wait(2000);
     ptt(&mut t, true);
     assert!(matches!(t.app.screen(), Screen::Transmit(_)));
-    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: true }));
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::Transmit { slot: 0, on: true }));
+    // TX-35, TX audit F11: the plan says a person confirmed it, for the Radio task's own check.
+    assert!(c.iter().any(|c| matches!(c, RadioCmd::TxPlan { confirmed: true, .. })));
     ptt(&mut t, false);
     // Unanswered: home after 5 s.
     ptt(&mut t, true);
@@ -730,6 +733,10 @@ fn rx_only_channel_refuses() {
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "never keyed");
     ptt(&mut t, false);
     assert!(!crate::screens::transmit::auto_tx(&mut t.app, 0, b"Beacon"));
+    // TX audit F11: the Radio task is told too (its own refusal, CHAN-4).
+    assert!(t.app.rx_only(0));
+    t.app.send_slot(0);
+    assert!(t.cmds().contains(&RadioCmd::SlotParam { slot: 0, param: ferrite_core::msg::Param::RxOnly, value: 1 }));
     t.tap(Key::Menu); // the fix: the channel editor
     assert!(matches!(t.app.screen(), Screen::ChEdit(_)));
     t.app.screen = Screen::ChEdit(ChEdit { cell: 3 + 9 });

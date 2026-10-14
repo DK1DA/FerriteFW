@@ -170,14 +170,18 @@ impl TxCal {
     }
 
     /// The PA drive for transmitting on `f` at Ferrite's `power` (0 Low, 1 Mid, 2 High), stock's lookup
-    /// (`pa_cal_lookup`): the row by frequency, the entry by its step, clamped as stock clamps, except that a
-    /// frequency stock reads past a row for (280-300 MHz, 560 MHz up) takes the row's last entry instead.
-    pub fn dac(&self, f: Freq10, power: u8) -> u8 {
+    /// (`pa_cal_lookup`): the row by frequency, the entry by its step, clamped as stock clamps (175-200 MHz the VHF
+    /// row's last entry, 300-350 MHz the 350 row's first), except that 280-300 MHz takes the 200 row's last entry
+    /// where stock reads past it. None outside every row's span (TX-11, CAL-10, TX audit F16): below 18 MHz,
+    /// 64-130 MHz (stock falls back to High VHF entry 0) and 560 MHz up (stock reads past the UHF row); `txplan`
+    /// refuses those first, and the lookup refuses them too.
+    pub fn dac(&self, f: Freq10, power: u8) -> Option<u8> {
         let level = 2 - power.min(2) as usize; // stock's order: 0 is High
         let mhz = f / 100_000;
         let p = &self.pa[level];
-        match mhz {
-            400.. => p[UHF][(((mhz - 400) / 10) as usize).min(15)],
+        Some(match mhz {
+            560.. => return None,
+            400.. => p[UHF][((mhz - 400) / 10) as usize],
             350..=399 => p[R350][((mhz - 350) / 5) as usize],
             300..=349 => p[R350][0],
             // CAL-14, TX-9: the 200-300 MHz PA path (1.25 m, and 243.0 MHz) takes the Low curve whatever the
@@ -185,9 +189,9 @@ impl TxCal {
             200..=299 => self.pa[2][R200][(((mhz - 200) / 5) as usize).min(15)],
             130..=199 => p[VHF][(((mhz - 130) / 3) as usize).min(15)],
             18..=63 => self.hf[level][(((mhz - 15) / 5) as usize).min(11)],
-            // Below 18 MHz and 64-130 MHz: entry 0 of the High VHF row, whatever the level (stock).
-            _ => self.pa[0][VHF][0],
-        }
+            // Below 18 MHz and 64-130 MHz: stock takes entry 0 of the High VHF row whatever the level; refused here.
+            _ => return None,
+        })
     }
 }
 
@@ -245,18 +249,28 @@ mod tests {
         0x01, 0x03, 0x30, 0x04, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, //
     ];
 
-    /// A sector with every curve entry `base + level * 10 + index`, the gauge given, and the black radio's
-    /// tuning block and windows.
+    /// The test sector's PA curve entry for stock's level `l` (0 High), row `r`, index `i`: High above Mid above
+    /// Low at every index, as a real sector (TX-14).
+    fn curve(l: usize, r: usize, i: usize) -> u8 {
+        (180 - l * 40 + r * 4 + i) as u8
+    }
+
+    /// The HF rows' entries, the same way.
+    fn hf_curve(l: usize, i: usize) -> u8 {
+        (140 - l * 40 + i) as u8
+    }
+
+    /// A sector with the curves above, the gauge given, and the black radio's tuning block and windows.
     fn sector(gauge: [u8; 7]) -> [u8; READ_LEN] {
         let mut b = [0x55u8; READ_LEN];
         for l in 0..3 {
             for r in 0..4 {
                 for i in 0..16 {
-                    b[0x40 * l + 0x10 * r + i] = (100 + l * 40 + r * 4 + i) as u8;
+                    b[0x40 * l + 0x10 * r + i] = curve(l, r, i);
                 }
             }
             for i in 0..16 {
-                b[0x190 + 0x10 * l + i] = (60 + l * 40 + i) as u8;
+                b[0x190 + 0x10 * l + i] = hf_curve(l, i);
             }
         }
         b[BLANK_AT] = 0x00;
@@ -378,6 +392,7 @@ mod tests {
         let c = TxCal::parse(&sector(GAUGE_DEFAULT)).unwrap();
         for f in [mhz(223) + 50_000, mhz(243), mhz(299)] {
             let low = c.dac(f, 0);
+            assert!(low.is_some());
             assert_eq!(c.dac(f, 1), low);
             assert_eq!(c.dac(f, 2), low);
         }
@@ -385,19 +400,24 @@ mod tests {
     }
 
     /// TX-8, CAL-8, CAL-9, TX-11, CAL-10: the PA drive comes only from the band's calibration curve at the chosen
-    /// level (1.25 m: the Low curve, CAL-14), by stock's lookup (High is stock's row 0, Low its row 2), and never reads past its row's 16 entries.
+    /// level (1.25 m: the Low curve, CAL-14), by stock's lookup (High is stock's row 0, Low its row 2), and never
+    /// reads past its row's 16 entries; outside every row the lookup refuses (TX audit F16).
     #[test]
     fn lookup_as_stock() {
         let c = TxCal::parse(&sector(GAUGE_DEFAULT)).unwrap();
+        let at = |l: usize, r: usize, i: usize| Some(curve(l, r, i));
         // High is stock's level 0: 146.52 MHz is VHF entry (146-130)/3 = 5.
-        assert_eq!(c.dac(mhz(146) + 52_000, 2), 100 + VHF as u8 * 4 + 5);
-        assert_eq!(c.dac(mhz(146) + 52_000, 0), 100 + 80 + VHF as u8 * 4 + 5, "Low is stock's level 2");
-        assert_eq!(c.dac(mhz(446), 1), 100 + 40 + 4, "UHF entry (446-400)/10 = 4, Mid");
-        assert_eq!(c.dac(mhz(190), 2), 100 + VHF as u8 * 4 + 15, "175-200 MHz: entry 15");
-        assert_eq!(c.dac(mhz(223) + 50_000, 2), 100 + 80 + R200 as u8 * 4 + 4, "1.25 m: the Low curve (CAL-14)");
-        assert_eq!(c.dac(mhz(28) + 40_000, 2), 60 + 2, "10 m: HF entry (28-15)/5 = 2");
-        assert_eq!(c.dac(mhz(70), 0), 100 + VHF as u8 * 4, "64-130 MHz: High VHF entry 0, any level");
-        assert_eq!(c.dac(mhz(290), 2), 100 + 80 + R200 as u8 * 4 + 15, "280-300: the row's last entry, not the next row");
+        assert_eq!(c.dac(mhz(146) + 52_000, 2), at(0, VHF, 5));
+        assert_eq!(c.dac(mhz(146) + 52_000, 0), at(2, VHF, 5), "Low is stock's level 2");
+        assert_eq!(c.dac(mhz(446), 1), at(1, UHF, 4), "UHF entry (446-400)/10 = 4, Mid");
+        assert_eq!(c.dac(mhz(190), 2), at(0, VHF, 15), "175-200 MHz: entry 15");
+        assert_eq!(c.dac(mhz(223) + 50_000, 2), at(2, R200, 4), "1.25 m: the Low curve (CAL-14)");
+        assert_eq!(c.dac(mhz(28) + 40_000, 2), Some(hf_curve(0, 2)), "10 m: HF entry (28-15)/5 = 2");
+        assert_eq!(c.dac(mhz(290), 2), at(2, R200, 15), "280-300: the row's last entry, not the next row");
+        assert_eq!(c.dac(mhz(559), 2), at(0, UHF, 15), "the UHF row's last entry");
+        for f in [mhz(70), mhz(129) + 99_999, mhz(17) + 99_999, mhz(1), mhz(560), mhz(600)] {
+            assert_eq!(c.dac(f, 2), None, "{f}: outside every row (stock: High VHF entry 0, or past the row)");
+        }
     }
 
     /// PWR-20: the battery gauge is stock's: the PA1 reading against the seven thresholds at 0xF200 (stock's

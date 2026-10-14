@@ -63,22 +63,30 @@ impl Radio {
         if let Some(c) = crate::chan::TX_CAL.try_take() {
             (self.tx.cal, self.tx.gauge) = c;
         }
-        let Some((f, region, extend)) = self.tx.plan.take() else {
+        let Some((f, region, extend, confirmed)) = self.tx.plan.take() else {
             return self.refuse(slot, Refusal::Locked);
         };
         if !self.ptt_seen_released() {
             return self.refuse(slot, Refusal::PttAtBoot);
         }
         let s = slot as usize % 4;
-        let rx = if slot < SLOTS as u8 { self.slots[s].freq } else { f };
+        let home = slot < SLOTS as u8;
+        let rx = if home { self.slots[s].freq } else { f };
         self.tx.data = data;
+        // TX audit F11: the UI's refusals made again here from the Radio task's own state. HF mode: AM on chip 1
+        // is receive only; the SI4732's frequencies and modes (HF-24) and HF mode already left refuse.
+        let hf = if home { None } else { Some(self.hf) };
         let req = Req {
             tx: f,
             rx,
             kind: if data.is_some() { TxKind::Data } else { TxKind::Voice },
             person: data.is_none(),
-            confirmed: true, // the UI asked for the emergency prompt's second PTT before this (TX-3)
-            am: slot < SLOTS as u8 && self.slots[s].am,
+            confirmed, // only the emergency prompt's second PTT (TX-3, TX-35)
+            am: if home { self.slots[s].am } else { self.hf.is_some_and(|h| h.mode == 2) },
+            rx_only: home && self.slots[s].rx_only,
+            busy: home && self.slots[s].busy && self.live.slots[s].squelch_open,
+            hf_si: hf.is_some_and(|h| h.is_none_or(|h| h.si)),
+            si_on: self.si.mode().is_some() && self.hf.is_none(),
             region,
             extend,
             cal_ok: self.tx.cal.is_some(),
@@ -89,6 +97,10 @@ impl Radio {
         if let Err(r) = self.tx.seq.check(&req, &self.path, now) {
             return self.refuse(slot, r);
         }
+        // TX-11 (TX audit F16): the PA lookup refuses outside its rows, before anything is touched.
+        let Some(pa) = self.tx.cal.and_then(|c| c.dac(f, req.power)) else {
+            return self.refuse(slot, Refusal::NotCalibrated);
+        };
         // The chip for the TX frequency: tuned there with the slot's tone, before the plan keys it.
         let n = Sel::tx(f).chip();
         if !self.has(n) {
@@ -110,7 +122,7 @@ impl Radio {
         let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
         let setup = self.tx_chip_setup(f, narrow, tone, data.is_some());
         radio_chip::tx_setup(&mut self.chip(n), &setup);
-        self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, req.power));
+        self.tx.pa = pa;
         self.tx.fault = false;
         self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
         (self.tx.slot, self.tx.dialled) = (slot, false);

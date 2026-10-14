@@ -164,15 +164,13 @@ impl Steps {
     }
 }
 
-/// Why the relay (or a path) may move. Only the first three are deliberate (SAFE-20).
+/// Why the relay (or a path) may move. Only the first two are deliberate (SAFE-20); the relay never moves at key-up (TX-37).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cause {
     /// Tuning or switching the active slot.
     ActiveSlot,
     /// HF mode changing receiver (HF-11).
     HfReceiver,
-    /// PTT on a slot that needs the other relay state (WATCH-12).
-    Ptt,
     /// Watch, scan, jobs, sweeps, link and the rest: they never move the relay.
     Auto,
 }
@@ -214,8 +212,6 @@ pub struct Path {
     /// The TX select while keyed.
     tx: Option<Sel>,
     relay: bool,
-    /// Relay state to put back after the unkey (moved at key-up, WATCH-12).
-    restore: Option<bool>,
     /// The guard's last relay switch times (ms), oldest first once full.
     times: [u32; GUARD_SWITCHES],
     nt: u8,
@@ -256,7 +252,7 @@ impl Default for Path {
 impl Path {
     /// After [`Path::safe`] at start-up: everything low, relay released.
     pub const fn new() -> Self {
-        Path { rx: Rx::Off, tx: None, relay: false, restore: None, times: [0; GUARD_SWITCHES], nt: 0, flags: 0, xb: 0 }
+        Path { rx: Rx::Off, tx: None, relay: false, times: [0; GUARD_SWITCHES], nt: 0, flags: 0, xb: 0 }
     }
 
     pub fn rx_now(&self) -> Rx {
@@ -265,6 +261,12 @@ impl Path {
 
     pub fn keyed(&self) -> Option<Sel> {
         self.tx
+    }
+
+    /// TX-29 (TX audit F12): Battery Save may put the chips to sleep: never while keyed (the unkey wait runs inside
+    /// the unkey's plan, so it is covered too).
+    pub fn may_sleep(&self) -> bool {
+        self.tx.is_none()
     }
 
     pub fn relay(&self) -> bool {
@@ -441,27 +443,23 @@ impl Path {
     }
 
     /// Key-up on `tx` (a TX select; RX ones are taken as their TX twin), TX-23 and TX-24: PA 0, SI4732 away, mute,
-    /// RX path clear, the relay if the slot needs the other state (moved back after the unkey), the TX path, the
-    /// chip to TX with its read-back, the PA ramp. Both band receive selects held (SAFE-24): both cleared here,
-    /// before the TX select; the hold stays asked for and the unkey sets both again.
-    pub fn key_up(&mut self, tx: Sel, now: u32, out: &mut Steps) -> Result<(), Blocked> {
+    /// RX path clear, the TX path, the chip to TX with its read-back, the PA ramp. The relay never moves at key-up
+    /// (TX-37, as nicFW): a TX select that needs the other relay state is refused (TX audit F11; HF mode with the
+    /// SI4732 on the antenna reached it). Both band receive selects held (SAFE-24): both cleared here, before the TX
+    /// select; the hold stays asked for and the unkey sets both again.
+    pub fn key_up(&mut self, tx: Sel, _now: u32, out: &mut Steps) -> Result<(), Blocked> {
         if self.tx.is_some() {
             return Err(Blocked::Keyed);
         }
         let tx = tx.to_tx();
-        let moves = tx.relay() != self.relay;
-        if moves && !self.room(2, now) {
-            return Err(Blocked::TooOften); // room for the move and the one back after
+        if tx.relay() != self.relay {
+            return Err(Blocked::NeedsRelay);
         }
         out.push(Act::PaZero);
         self.mute(true, out);
         let back = self.rx;
         self.clear_rx(out);
         self.rx = back; // what the unkey goes back to
-        if moves {
-            self.restore = Some(self.relay);
-            self.move_relay(tx.relay(), now, out);
-        }
         out.push(Act::Sel(tx, true));
         out.push(Act::ChipTx(tx.chip()));
         out.push(Act::PaRamp);
@@ -534,12 +532,11 @@ impl Path {
 
     /// Unkey (TX-26, TX-47), after any end tone, CW ID, tail elimination and hold the sequencer put first, in stock's
     /// order (PTT state 4, 0x08024DCC on; TX audit F4): PA 0, the unkey wait (V0.29's 100 ms), the chip out of
-    /// transmit (REG_30 0; receive is the next tune's), the TX path clear, the relay back if key-up moved it, the RX
-    /// path, unmute.
+    /// transmit (REG_30 0; receive is the next tune's), the TX path clear, the RX path, unmute.
     /// A crossband key-up's (XB-8, decision 95), as stock's PTT state 4 (0x08024DCC on): the mic and the receive
     /// select already handled by [`Path::xb_rx_end`], then PA 0, the unkey wait (V0.29's 100 ms), the chip out of
     /// transmit, the TX path clear.
-    pub fn unkey(&mut self, now: u32, out: &mut Steps) {
+    pub fn unkey(&mut self, _now: u32, out: &mut Steps) {
         let Some(tx) = self.tx.take() else { return };
         if self.xb != 0 {
             self.xb_rx_end(out); // a no-op after the sequencer's own call
@@ -554,9 +551,6 @@ impl Path {
         out.push(Act::Wait(UNKEY_WAIT_MS));
         out.push(Act::ChipRx(tx.chip()));
         out.push(Act::Sel(tx, false));
-        if let Some(r) = self.restore.take() {
-            self.move_relay(r, now, out); // counted, never refused: room was kept at key-up
-        }
         let rx = core::mem::replace(&mut self.rx, Rx::Off);
         self.set_rx(rx, out);
         self.mute(false, out);
@@ -600,7 +594,7 @@ impl Path {
             out.push(Act::Wait(RELAY_SETTLE_MS));
             self.count(now);
         }
-        (self.rx, self.relay, self.restore) = (Rx::Off, false, None);
+        (self.rx, self.relay) = (Rx::Off, false);
         self.flag(F_BOTH, false);
     }
 }
@@ -703,7 +697,9 @@ mod tests {
     /// for); crossband clears the transmitting chip's band select first and keeps the receiving one.
     #[test]
     fn both_held_cleared_before_key_up() {
-        for tx in [Sel::VhfTx, Sel::UhfTx, Sel::HfTx] {
+        // HF TX needs the energised relay, never moved at key-up (TX-37): refused from the held pair.
+        assert_eq!(both_on().key_up(Sel::HfTx, 0, &mut Steps::default()), Err(Blocked::NeedsRelay));
+        for tx in [Sel::VhfTx, Sel::UhfTx] {
             let mut p = both_on();
             let mut s = Steps::default();
             p.key_up(tx, 0, &mut s).unwrap();
@@ -825,12 +821,14 @@ mod tests {
         assert!(p.relay());
     }
 
+    /// TX-23, TX-26, TX-29 (`may_sleep`, TX audit F12): the key-up and unkey plans.
     #[test]
     fn key_up_and_unkey_orders() {
         let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::VhfRx), Cause::ActiveSlot, 0, s).unwrap());
         let mut s = Steps::default();
         p.key_up(Sel::VhfTx, 0, &mut s).unwrap();
         assert_eq!(s.as_slice(), [Act::PaZero, Act::Mute(true), Act::Sel(Sel::VhfRx, false), Act::Sel(Sel::VhfTx, true), Act::ChipTx(0), Act::PaRamp]);
+        assert!(!p.may_sleep(), "TX-29: no Battery Save sleep while keyed (TX audit F12)");
         let mut s = Steps::default();
         assert_eq!(p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, &mut s), Err(Blocked::Keyed));
         assert_eq!(p.rx_off(false, &mut s), Err(Blocked::Keyed));
@@ -841,25 +839,23 @@ mod tests {
             [Act::PaZero, Act::Wait(100), Act::ChipRx(0), Act::Sel(Sel::VhfTx, false), Act::Sel(Sel::VhfRx, true), Act::Mute(false)]
         );
         assert_eq!(p.rx_now(), Rx::Bk(Sel::VhfRx));
+        assert!(p.may_sleep());
     }
 
+    /// TX-37, WATCH-12 (TX audit F11): the relay never moves at key-up: a TX select on the other relay state is
+    /// refused with nothing planned, the receive path left as it was.
     #[test]
-    fn ptt_on_the_other_relay_state_moves_it_and_back() {
+    fn key_up_never_moves_the_relay() {
         let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
         let mut s = Steps::default();
-        p.key_up(Sel::HfTx, 0, &mut s).unwrap();
-        let a = s.as_slice();
-        let relay = a.iter().position(|x| *x == Act::Relay(true)).unwrap();
-        assert_eq!(a[relay + 1], Act::Wait(10));
-        assert!(a[..relay].contains(&Act::Sel(Sel::UhfRx, false)) && a[relay..].contains(&Act::Sel(Sel::HfTx, true)));
-        let mut s = Steps::default();
-        p.unkey(0, &mut s);
-        let a = s.as_slice();
-        let wait = a.iter().position(|x| *x == Act::Wait(100)).unwrap();
-        let relay = a.iter().position(|x| *x == Act::Relay(false)).unwrap();
-        assert!(relay > wait && a[..relay].contains(&Act::Sel(Sel::HfTx, false)), "after the unkey wait, TX path clear");
-        assert_eq!(a[a.len() - 2], Act::Sel(Sel::UhfRx, true));
-        assert!(!p.relay());
+        assert_eq!(p.key_up(Sel::HfTx, 0, &mut s), Err(Blocked::NeedsRelay));
+        assert!(s.is_empty() && p.keyed().is_none() && !p.relay() && p.rx_now() == Rx::Bk(Sel::UhfRx));
+        // HF mode with the SI4732 on the antenna (relay released): chip 1's HF TX path is refused too.
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Si, Cause::HfReceiver, 0, s).unwrap());
+        assert_eq!(p.key_up(Sel::HfTx, 0, &mut Steps::default()), Err(Blocked::NeedsRelay));
+        // On the energised relay (chip 1 receiving HF), HF TX keys.
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::HfRx), Cause::ActiveSlot, 0, s).unwrap());
+        assert!(p.key_up(Sel::HfTx, 0, &mut Steps::default()).is_ok());
     }
 
     #[test]

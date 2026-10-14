@@ -30,8 +30,16 @@ pub struct Req {
     pub person: bool,
     /// The emergency prompt's second PTT was given (TX-3).
     pub confirmed: bool,
-    /// The slot is in AM.
+    /// The slot is in AM (HF mode's AM on chip 1 too).
     pub am: bool,
+    /// The slot is on a receive-only channel (CHAN-4; TX audit F11: the Radio task's own copy of the flag).
+    pub rx_only: bool,
+    /// Busy lockout is on for the slot and its squelch is open (TX-21).
+    pub busy: bool,
+    /// HF mode on an SI4732 frequency or mode (HF-24): below 18 MHz, AM up to 30 MHz, USB, LSB, CW.
+    pub hf_si: bool,
+    /// The SI4732 is playing a broadcast (TX-24: the UI stops it before key-up, BCR-29).
+    pub si_on: bool,
     pub region: Region,
     pub extend: bool,
     /// The calibration sector and the MCU check passed (TX-13 to TX-15).
@@ -125,8 +133,18 @@ impl TxSeq {
         if self.held {
             return Err(Refusal::ReleasePtt);
         }
+        // TX audit F11: the UI's refusals, again here, so no path to the Radio task skips them.
+        if r.rx_only {
+            return Err(Refusal::RxOnlyChannel);
+        }
+        if r.hf_si {
+            return Err(Refusal::ReceiveOnlyHere);
+        }
         if r.am {
             return Err(Refusal::AmRxOnly);
+        }
+        if r.si_on {
+            return Err(Refusal::Broadcast);
         }
         txplan::check(r.tx, r.region, r.extend)?;
         if !r.cal_ok {
@@ -141,6 +159,9 @@ impl TxSeq {
         }
         if !txplan::relay_ok(r.rx, r.tx) {
             return Err(Refusal::RelayMismatch);
+        }
+        if r.busy {
+            return Err(Refusal::Busy);
         }
         if txplan::emergency(r.tx) && !(r.person && r.confirmed) {
             return Err(Refusal::Emergency);
@@ -283,7 +304,24 @@ mod tests {
     use crate::path::{Cause, Rx};
 
     fn req(tx: Freq10) -> Req {
-        Req { tx, rx: tx, kind: Kind::Voice, person: true, confirmed: false, am: false, region: Region::Us, extend: false, cal_ok: true, cal_window: true, batt_ok: true, power: 2 }
+        Req {
+            tx,
+            rx: tx,
+            kind: Kind::Voice,
+            person: true,
+            confirmed: false,
+            am: false,
+            rx_only: false,
+            busy: false,
+            hf_si: false,
+            si_on: false,
+            region: Region::Us,
+            extend: false,
+            cal_ok: true,
+            cal_window: true,
+            batt_ok: true,
+            power: 2,
+        }
     }
 
     fn rx_on(f: Freq10) -> Path {
@@ -299,6 +337,11 @@ mod tests {
         let ok = req(mhz(146) + 52_000);
         assert_eq!(t.check(&ok, &p, 0), Ok(()));
         assert_eq!(t.check(&Req { am: true, ..ok }, &p, 0), Err(Refusal::AmRxOnly));
+        // TX audit F11: the UI's refusals made again in the Radio task (TX-20, TX-21, TX-24, HF-24, CHAN-4).
+        assert_eq!(t.check(&Req { rx_only: true, ..ok }, &p, 0), Err(Refusal::RxOnlyChannel));
+        assert_eq!(t.check(&Req { busy: true, ..ok }, &p, 0), Err(Refusal::Busy));
+        assert_eq!(t.check(&Req { hf_si: true, ..req(mhz(28) + 40_000) }, &p, 0), Err(Refusal::ReceiveOnlyHere));
+        assert_eq!(t.check(&Req { si_on: true, ..ok }, &p, 0), Err(Refusal::Broadcast));
         assert_eq!(t.check(&Req { cal_ok: false, ..ok }, &p, 0), Err(Refusal::Locked));
         assert_eq!(t.check(&Req { cal_window: false, ..ok }, &p, 0), Err(Refusal::NotCalibrated), "CAL-11");
         assert_eq!(t.check(&Req { cal_window: false, ..req(mhz(162) + 55_000) }, &p, 0), Err(Refusal::OutOfBand), "the plan first");
