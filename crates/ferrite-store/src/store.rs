@@ -390,6 +390,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             let mut sub = Limit { inner: r, left: n as u32 };
             set.load(&mut sub);
             sub.skip();
+            set.sanitize();
         })
     }
 

@@ -81,6 +81,8 @@ pub const TZ_DEFAULT: u8 = 14;
 const _: () = assert!(TIME_ZONES[TZ_DEFAULT as usize] == 0);
 
 pub const CLOCKS: [&str; 2] = ["24 h", "12 h"];
+/// 0 3 1 3, FM AGC: 0 is Auto, 1-10 fixed gain (0-36 dB in 4 dB steps).
+pub const AGC_MAX: u8 = 10;
 pub const UNITS: [&str; 3] = ["Metric", "Imperial", "Nautical"];
 pub const LAYOUTS: [&str; 3] = ["Watch", "Single + scope", "Watch + activity"];
 pub const THEMES: [&str; 3] = ["Dark", "Daylight", "Night red"];
@@ -411,6 +413,19 @@ impl Settings {
         gps_rxtx: 0,
         arrival: 0,
     };
+
+    /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's
+    /// settings write). FM AGC (0 3 1 3) is 0-10 and the clock (0 6 6) 0-1; the menu multiplies both in a u8,
+    /// which overflowed on a bad record (found in the settings table refactor). Most other list
+    /// settings are read modulo their list and need nothing here.
+    pub fn sanitize(&mut self) {
+        if self.fm_agc > AGC_MAX {
+            self.fm_agc = Self::DEFAULT.fm_agc;
+        }
+        if self.clock as usize >= CLOCKS.len() {
+            self.clock = Self::DEFAULT.clock;
+        }
+    }
 
     /// 0 7 4 2: the brightness for the theme in use, 1-10 (DISP-23: night red keeps its own).
     pub fn brightness(&self) -> u8 {

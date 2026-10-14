@@ -558,6 +558,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             let old = *app.set;
             let mut new = old;
             new.load(&mut Rd { b: rec, n: 0 });
+            new.sanitize();
             keep_protected(&mut new, &old);
             *app.set = new;
             app.send_radio_settings();

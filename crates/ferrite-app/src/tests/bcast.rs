@@ -208,6 +208,28 @@ fn quick_settings_rows() {
     assert_eq!(t.app.set.fm_agc, 1, "row 3: AGC");
 }
 
+/// A stored FM AGC or clock value out of range (a bad record) must not overflow the menu's u8 arithmetic: the
+/// value text and the knob work, and the knob brings it back in range; load and the link clamp it first.
+#[test]
+fn out_of_range_agc_and_clock_do_not_overflow() {
+    let mut t = ready();
+    t.app.set.fm_agc = 200;
+    t.app.set.clock = 200;
+    menu0(&mut t, &[3, 1, 3]);
+    t.knob(1);
+    assert!(t.app.set.fm_agc <= crate::settings::AGC_MAX, "{}", t.app.set.fm_agc);
+    menu0(&mut t, &[6, 6]);
+    t.knob(1);
+    assert!(t.app.set.clock <= 1, "{}", t.app.set.clock);
+    let mut s = crate::settings::Settings::DEFAULT;
+    (s.fm_agc, s.clock) = (255, 255);
+    s.sanitize();
+    assert_eq!((s.fm_agc, s.clock), (crate::settings::Settings::DEFAULT.fm_agc, crate::settings::Settings::DEFAULT.clock));
+    (s.fm_agc, s.clock) = (crate::settings::AGC_MAX, 1);
+    s.sanitize();
+    assert_eq!((s.fm_agc, s.clock), (crate::settings::AGC_MAX, 1), "in range: kept");
+}
+
 /// TX-24, BCR-29: PTT on another slot stops the broadcast before the key-up and starts it again after.
 #[test]
 fn transmit_switches_the_receiver_away_and_back() {

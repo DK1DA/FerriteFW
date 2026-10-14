@@ -414,7 +414,7 @@ static SETTINGS: [Setting; 66] = [
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
     field!([1, 6, 5], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
     field!([3, 1, 2], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), Nothing),
-    field!([3, 1, 3], fm_agc: u8, Kind::Round(11, agc_text), Nothing),
+    field!([3, 1, 3], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), Nothing),
     field!([3, 1, 4], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([3, 1, 5], fm_sleep: u8, Kind::Round(SLEEP_TIMES.len() as u8, sleep_text), Nothing),
     field!([3, 2, 1], scope_bars: u8, Kind::Round(SCOPE_BAR_COUNTS.len() as u8, bars_text), Nothing),
@@ -799,7 +799,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [7, 7] => app.change(Item::BatterySave, d),
         [6, 6] => {
             // 24 h + GPS, 24 h, 12 h + GPS, 12 h
-            let v = cycle(s.clock * 2 + !s.clock_gps as u8, d, 4);
+            let v = cycle(s.clock.min(1) * 2 + !s.clock_gps as u8, d, 4);
             (s.clock, s.clock_gps) = (v / 2, v.is_multiple_of(2));
         }
         [7, 1] => {
@@ -927,7 +927,7 @@ pub(crate) fn agc_text(v: u8, b: &mut Buf<24>) {
         b.set(b"Auto");
     } else {
         b.clear();
-        let _ = uwrite!(b, "{} dB", (v - 1) * 4);
+        let _ = uwrite!(b, "{} dB", (v.min(crate::settings::AGC_MAX) - 1) * 4);
     }
 }
 
