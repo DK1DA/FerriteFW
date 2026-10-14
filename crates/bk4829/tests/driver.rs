@@ -367,14 +367,14 @@ mod tx {
         assert_eq!((r.regs[0x51], r.regs[0x52]), (0, 0x0292));
     }
 
-    /// Stock's transmitted tones: a single tone at gain 0x3C (REG_70 0xBC00), a DTMF pair at 0x45 each (0xC5C5),
-    /// the sidetone on AF route 3.
+    /// Stock's transmitted tones: a single tone at V0.29's gain 0x17 (REG_70 0x9700; V0.27's 0xBC00 was about
+    /// 8 dB hotter), a DTMF pair at 0x45 each (0xC5C5), the sidetone on AF route 3.
     #[test]
     fn tones_match_stock() {
         let mut r = Regs::new();
         let mut bk = Bk4829::new(&mut r);
         bk.tone_tx(1750);
-        assert_eq!(r.regs[0x70], 0xBC00);
+        assert_eq!(r.regs[0x70], 0x9700);
         let mut bk = Bk4829::new(&mut r);
         assert!(bk.dtmf_tx('D'));
         assert_eq!(r.regs[0x70], 0xC5C5);

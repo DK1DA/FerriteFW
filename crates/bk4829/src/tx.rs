@@ -12,9 +12,10 @@ const POWER_TX_MIC: u16 = 0xC1FE;
 const POWER_TX_TONE: u16 = 0xC3FA;
 const POWER_RX: u16 = 0xBFF1;
 
-/// Tone 1's gain for a transmitted single tone (tone burst, end tone, CW ID): stock's 0xBC00 in REG_70 (0x0801EB8C
-/// with 1, which also selects REG_30 mode 4).
-pub const TONE_TX_GAIN: u8 = 0x3C;
+/// Tone 1's gain for a transmitted single tone (tone burst, end tone, CW ID): stock V0.29's REG_70 0x9700
+/// (0x0801F33C: `(R & 0x7F) | 0x9700`, with REG_30 mode 4). V0.27 sent 0xBC00 (gain 0x3C, 0x0801EB8C), about 8 dB
+/// more; V0.29 lowered it, as it did the local beep ([`crate::BEEP_GAIN`]).
+pub const TONE_TX_GAIN: u8 = 0x17;
 /// Both generators' gain for a DTMF pair: stock's REG_70 0xC5C5 (0x0801DFA8).
 pub const DTMF_GAIN: u8 = 0x45;
 /// REG_47 for the sidetone while tones are sent: stock's AF route 3 (the generator to the speaker).
