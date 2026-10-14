@@ -35,8 +35,10 @@ pub const SCS: Range<u32> = 0xE000_E000..0xE000_F000;
 /// DBGMCU: the MCU ID code and debug freeze bits, word reads only.
 pub const DBGMCU: Range<u32> = 0xE004_2000..0xE004_2008;
 
-/// The terminal's answer when an address is refused: what can be read.
-pub const READABLE: &str = "not readable; readable: flash 08000000-080FFFFF, RAM 20000000-20017FFF, system 1FFFB000 (boot), 1FFFF7E0 (ID), 1FFFF800 (user system data), peripherals 4000xxxx-4002xxxx (mem32)";
+/// The terminal's answer when an address is refused: what can be read (flash, RAM, the boot memory, the ID and
+/// the user system data; the peripherals by `mem32`). It shows on the terminal's bottom row after a space, so it
+/// stays within 78 characters to fit 80 columns.
+pub const READABLE: &str = "only 080xxxxx, 20000000-20017FFF, 1FFFB000/F7E0/F800, mem32 4000xxxx-4002xxxx";
 
 fn word_ok(a: u32) -> bool {
     BLOCKS.iter().any(|&b| (b..b + 0x400).contains(&a)) || SCS.contains(&a) || DBGMCU.contains(&a)
@@ -99,5 +101,6 @@ mod tests {
             assert_eq!(check(a, 4, true), Err(READABLE), "{a:#x}");
         }
         assert_eq!(check(0xFFFF_FFFC, 8, false), Err("past the end of memory"));
+        assert!(READABLE.len() <= 78, "fits the 80-column bottom row: {}", READABLE.len());
     }
 }

@@ -1185,14 +1185,15 @@ fn debug_mem() {
 }
 
 /// TERM-22: an address outside the readable map (`ferrite_core::memmap`) is refused before anything goes to the
-/// radio, saying what can be read; the AT32's user system data at 1FFFF800 (STM32's option-byte address) reads.
+/// radio, saying what can be read, all of it within the 80-column bottom row; the AT32's user system data at
+/// 1FFFF800 (STM32's option-byte address) reads.
 #[test]
 fn debug_mem_refuses_unsafe_addresses() {
     let mut r = Rig::main();
     for (c, says) in [
-        ("mem 50000000", "not readable; readable: flash 08000000"),
-        ("mem32 1FFFF000", "not readable; readable: flash"),
-        ("mem 080FFFF8 16", "not readable"),
+        ("mem 50000000", ferrite_core::memmap::READABLE),
+        ("mem32 1FFFF000", ferrite_core::memmap::READABLE),
+        ("mem 080FFFF8 16", "only 080xxxxx"),
         ("mem 40010808", "use mem32"),
     ] {
         r.cmd(c);
