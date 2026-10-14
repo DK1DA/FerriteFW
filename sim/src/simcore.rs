@@ -39,7 +39,7 @@ keys: arrows = UP/DOWN/LEFT/RIGHT · Enter = MENU/OK · Esc = BACK · 0-9 digits
       or click the radio's keys (hold the mouse for long presses; hold SIDE1 + wheel = squelch)
       hold a key 0.7 s for its long press (hold S: edit, hold . : lock, hold Esc: home, hold Enter: MENU 0)
       M message · N alert · F5 GPS · F6 Bluetooth · F7 battery · F8 power off (or click VOL: the power switch) · F9 empty battery
-      F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 5)
+      F10 unknown SSB patch · F11 a write from a new device · X crossband (also MENU 0 3 5) · K speaker mic in/out
       L home layout · B a beacon (automatic transmit) · R broadcast FM on the active slot (100.5, again 99.1)
       hold Enter while booting: the settings reset
       F2 redraw flash · F3 mock-up overlay · F12 screenshot · Ctrl-Q quit";
@@ -162,6 +162,8 @@ pub enum Event {
     /// R: the active slot's VFO to 100.5 MHz, a broadcast FM station with the full RDS radio text, so the slot plays
     /// broadcast (BCR-21); R again: 99.1, a station with only its name (BCR-26).
     FmStation,
+    /// K: a speaker mic plugged into the side connector, or taken out (SND-12): the Status page's row.
+    SpeakerMic,
 }
 
 /// A recent redraw region and when it was drawn (ms), for the redraw flash.
@@ -917,6 +919,7 @@ impl SimCore {
                 }
             }
             Event::Bluetooth => self.dev.bt = !self.dev.bt,
+            Event::SpeakerMic => self.dev.spkmic = !self.dev.spkmic,
             Event::Battery => {
                 self.battery = (self.battery + 1) % 3;
                 let d = &mut self.dev;

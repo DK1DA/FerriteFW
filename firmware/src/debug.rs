@@ -30,3 +30,13 @@ pub fn mem(r: DebugReq) -> DebugAns {
     }
     DebugAns::Mem { addr, data, n: n as u8 }
 }
+
+/// TERM-30: the GPS module's last GGA sentence (kept by the GPS task) and its age.
+#[inline(never)] // in .slow_text (memory.x): the terminal's, never from an interrupt
+pub fn gga() -> DebugAns {
+    let now = embassy_time::Instant::now().as_millis() as u32;
+    crate::chan::GGA.lock(|g| {
+        let g = g.borrow();
+        DebugAns::Gga { data: g.data, n: g.n, age_s: now.wrapping_sub(g.at_ms) / 1000 }
+    })
+}

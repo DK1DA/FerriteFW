@@ -240,6 +240,16 @@ impl Nmea {
         false
     }
 
+    /// The sentence [`Nmea::feed`] just took (after it returned true), without its `$`, checksum included.
+    pub fn last(&self) -> &[u8] {
+        &self.line[..self.len as usize]
+    }
+
+    /// The last sentence was a GGA (any talker).
+    pub fn last_is_gga(&self) -> bool {
+        self.len >= 5 && self.line[2..5] == *b"GGA"
+    }
+
     /// Forget the fix (the module was powered off, GPS-1): the next one starts from nothing.
     pub fn reset(&mut self) {
         *self = Nmea { sentences: self.sentences, checksum_errors: self.checksum_errors, overlong: self.overlong, ..Nmea::new() };
@@ -487,6 +497,18 @@ mod tests {
         assert!(!n.fix(0).has_fix());
         assert_eq!(n.sky().n, 0);
         assert!(n.sentences > 0, "the counters stay");
+    }
+
+    /// TERM-30: the last sentence is kept until the next `$`, so the GPS task can copy a GGA as received.
+    #[test]
+    fn last_sentence() {
+        let mut n = Nmea::new();
+        feed(&mut n, &FIX_SECOND[..1]);
+        assert!(n.last_is_gga());
+        assert!(n.last().starts_with(b"GNGGA,143210.000,") && n.last()[n.last().len() - 3] == b'*');
+        feed(&mut n, &FIX_SECOND[1..2]);
+        assert!(!n.last_is_gga());
+        assert!(n.last().starts_with(b"GNGLL,"));
     }
 
     /// 7 Oct 2026, 14:32:10 UTC near Ottawa, moving at 12.6 kn: what the ATGM336H sends each second.

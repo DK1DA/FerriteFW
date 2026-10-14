@@ -75,6 +75,19 @@ fn manage(mgr: &mut GpsManager, nmea: &mut Nmea, phase: &mut GpsPhase, now: u32,
     (out, woke)
 }
 
+/// TERM-30: the GGA sentence just parsed, with its `$`, into [`crate::chan::GGA`] for the terminal's `gps`.
+#[inline(never)] // in .slow_text (memory.x): once a second, never from an interrupt
+fn keep_gga(nmea: &Nmea, now: u32) {
+    crate::chan::GGA.lock(|g| {
+        let mut g = g.borrow_mut();
+        let s = nmea.last();
+        let n = s.len().min(g.data.len() - 1);
+        g.data[0] = b'$';
+        g.data[1..=n].copy_from_slice(&s[..n]);
+        (g.n, g.at_ms) = (n as u8 + 1, now);
+    });
+}
+
 #[embassy_executor::task]
 pub async fn task() {
     GPS_PWR_N.write(true); // off until the first look below decides
@@ -137,6 +150,9 @@ pub async fn task() {
             if powered {
                 bytes += 1;
                 let done = nmea.feed(c);
+                if done && nmea.last_is_gga() {
+                    keep_gga(&nmea, now);
+                }
                 sentences += done as u32;
                 fresh |= done;
             }

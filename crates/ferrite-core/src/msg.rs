@@ -147,6 +147,9 @@ pub enum RadioCmd {
     /// Send the first `len` symbols of the sequence on the transmission just keyed (DTMF-3's timing), then say so
     /// in [`TxLive::dtmf_sent`]; the UI unkeys. The key-up is a data one: no end tone or CW ID after it (TONE-11).
     DtmfSend { len: u8 },
+    /// From the input task, not the UI: the side connector's speaker mic connected or removed, debounced
+    /// ([`crate::acc`], SND-12). The Radio task switches PE1 to it and holds PB8 on while it is connected.
+    Accessory(bool),
 }
 
 /// The crossband repeater's settings (manual chapter 19): small enough to ride in a [`RadioCmd`].
@@ -381,7 +384,12 @@ pub enum DebugReq {
     /// (`Some(false)`), or only ask (`None`). The Radio task refuses while keyed, in HF mode and while the
     /// crossband repeater runs.
     RxBoth(Option<bool>),
+    /// TERM-30: the GPS module's last GGA sentence as received, answered where the terminal runs.
+    Gga,
 }
+
+/// The longest GGA sentence [`DebugAns::Gga`] carries: NMEA's 82 characters less CR LF.
+pub const GGA_MAX: usize = 80;
 
 /// The most memory one [`DebugReq::Mem`] reads.
 pub const DEBUG_MEM: usize = 64;
@@ -396,6 +404,8 @@ pub enum DebugAns {
     Bt { data: [u8; 48], n: u8 },
     /// TERM-29: whether both band receive selects are held on now.
     RxBoth(bool),
+    /// TERM-30: the last GGA sentence from `$` to the checksum (`n` 0: none since boot), and its age in seconds.
+    Gga { data: [u8; GGA_MAX], n: u8, age_s: u32 },
     /// Not done, and why.
     Refused(&'static str),
 }
@@ -563,6 +573,8 @@ pub struct Device {
     pub battery_cutoff: bool,
     /// The MCU's die temperature in whole °C (chapter 8, [`crate::mcutemp`]); None until read.
     pub mcu_temp: Option<i8>,
+    /// A speaker mic is in the side connector (SND-12, [`crate::acc`]): the Status page shows it.
+    pub spkmic: bool,
     /// This build can transmit (`--features tx`).
     pub tx_built: bool,
     pub selftest: SelfTest,

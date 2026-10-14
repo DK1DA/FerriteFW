@@ -99,6 +99,7 @@ V = V/M, Q = SIDE1, W = SIDE2, Space = PTT A, `[` `]` = knob.
 | 12 | LED demo: quiet bands and the screen off; again brings the stations back (D) |
 | 13 | A station on the active slot with another tone: the tone hint; again clears it (T) |
 | 14 | Broadcast FM: the active slot's VFO to 100.5 MHz (full RDS radio text); again 99.1 (station name only) (R) |
+| 15 | A speaker mic plugged into the side connector, or taken out: the Status page's Speaker mic row (K) |
 
 Events 0, 1 and 6–14 are ignored while booting or off.
 

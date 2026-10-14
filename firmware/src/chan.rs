@@ -8,7 +8,7 @@ use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use crate::ring::Ring;
 use core::sync::atomic::{AtomicBool, AtomicI16, AtomicU16, AtomicU32, AtomicU8};
-use ferrite_core::msg::{DebugAns, DebugReq, DspCmd, Event, GpsFix, GpsSky, LiveAll, RadioCmd, SameDecoded, StorageCmd};
+use ferrite_core::msg::{DebugAns, DebugReq, GGA_MAX, DspCmd, Event, GpsFix, GpsSky, LiveAll, RadioCmd, SameDecoded, StorageCmd};
 
 pub static RADIO: Channel<M, RadioCmd, 8> = Channel::new();
 pub static STORAGE: Channel<M, StorageCmd, 8> = Channel::new();
@@ -61,6 +61,21 @@ pub const RF_BUSY_KEYED: u8 = 1;
 pub static MCU_TEMP: AtomicI16 = AtomicI16::new(i16::MIN);
 /// The last MCU temperature reading's raw ADC counts, sensor << 16 | VREFINT, for the cable log (SBAR-20).
 pub static MCU_TEMP_RAW: AtomicU32 = AtomicU32::new(0);
+/// SND-12: the side connector's speaker mic, debounced by the input task ([`ferrite_core::acc::AccDet::pack`]: bit 0
+/// connected, bit 1 a change being debounced). The Radio task holds PB8 on while connected and keeps VOX off while
+/// it changes (VOX-3); the UI shows it on the Status page.
+pub static ACCESSORY: AtomicU8 = AtomicU8::new(0);
+/// TERM-30: the GPS module's last GGA sentence as received (from `$` to the checksum) and when (ms since boot): the
+/// GPS task writes it, the terminal's `gps` reads it. 88 B.
+pub static GGA: embassy_sync::blocking_mutex::Mutex<M, core::cell::RefCell<GgaCopy>> =
+    embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(GgaCopy { data: [0; GGA_MAX], n: 0, at_ms: 0 }));
+
+/// [`GGA`]'s contents.
+pub struct GgaCopy {
+    pub data: [u8; GGA_MAX],
+    pub n: u8,
+    pub at_ms: u32,
+}
 /// PWR-20: the latest PA1 battery reading (12-bit, averaged), 0 until the first one; the Radio task reads it.
 pub static BATTERY_RAW: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
 pub const RF_BUSY_RX: u8 = 2;

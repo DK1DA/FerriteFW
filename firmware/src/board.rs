@@ -28,9 +28,12 @@ pub const AMP_EN: [Pin; 2] = [pin(GPIOB, 8), pin(GPIOE, 4)]; // (L) both
 /// chip's audio into the transmitting chip's mic input (`analysis/crossband_repeat.md` §5; to confirm on the
 /// bench). Driven only through the path machine's `Act::RepeatAudio` (XB-6, XB-8).
 pub const REPEAT_AUDIO: Pin = pin(GPIOA, 15); // (L)
-/// PC15: stock's debounced, active-low accessory / mute detect (`analysis/pin_audit.md`; docs/hardware.md 6.8):
-/// low, stock holds PB8 on. Read by the crossband key-up (stock clears PB8 at TX setup unless it's low).
+/// PC15: stock's debounced, active-low accessory / mute detect (`analysis/pin_audit.md`; docs/hardware.md 6.8): a
+/// speaker mic in the side connector grounds it. The input task debounces it (`ferrite_core::acc`, SND-12).
 pub const ACC_DET: Pin = pin(GPIOC, 15); // (L: connector pin 3)
+/// PE1: stock's audio route switch, high while the speaker mic is connected (PC15 low): the speaker and mic to the
+/// side connector, the internal ones off (SND-10). Only the Radio task drives it; low in the safe state.
+pub const ACC_ROUTE: Pin = pin(GPIOE, 1); // (L: role from stock's code, to confirm on the bench)
 
 // Power
 pub const POWER_HOLD: Pin = pin(GPIOA, 11); // (L) set at start-up by stock, cleared to switch off
@@ -92,7 +95,7 @@ const SAFE_LOW: [Pin; 9] = [
     pin(GPIOE, 9),
     pin(GPIOC, 12),
     pin(GPIOC, 9),
-    pin(GPIOE, 1),
+    ACC_ROUTE,
     pin(GPIOA, 3),
     pin(GPIOB, 2),
 ];
@@ -115,7 +118,7 @@ pub fn safe_state() {
     BK_SCK.output(false, Mode::OutPp);
     FLASH_CS.output(true, Mode::OutPp);
     // Pins stock leaves low that sit next to RF or TX audio: band relay PC4, broadcast-receiver input paths
-    // PA7/PC5, PE9 (BK4829/RF cluster), APRS TX audio PC12, audio switches PC9/PE1, and the unused PA3/PB2.
+    // PA7/PC5, PE9 (BK4829/RF cluster), APRS TX audio PC12, audio switches PC9 and PE1 (ACC_ROUTE), and the unused PA3/PB2.
     // Normally the bootloader already left them low; set them so a fault or a start without the bootloader
     // never leaves them floating. PA15 (high in stock RX) is set high in `init` once JTAG is off.
     for p in SAFE_LOW {

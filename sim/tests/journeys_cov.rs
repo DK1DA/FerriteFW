@@ -270,3 +270,26 @@ fn radio_refusal_shows_the_refused_screen() {
     assert!(refused, "the duty limit's refusal is shown:\n{}", r.text());
     r.expect_text("Can't transmit");
 }
+
+/// A speaker mic plugged into the side connector shows on the Status page, and taken out again (SND-12).
+#[test]
+fn speaker_mic_on_status_page() {
+    let mut r = Radio::new();
+    r.run("press HASH; expect screen \"Status\"");
+    for _ in 0..12 {
+        r.press(Key::Down);
+    }
+    r.expect_text("Speaker mic").expect_text("None");
+    r.run("event spkmic; wait 300ms; expect text \"Connected\"");
+    assert!(r.sim.device().spkmic);
+    r.run("event spkmic; wait 300ms; expect text \"None\"");
+}
+
+/// The terminal's `gps`: the last GGA sentence as the module sent it, its age, and fields 9 and 11 (TERM-30).
+#[test]
+fn terminal_gps_gga() {
+    let mut r = Radio::new();
+    let out = term(&mut r, ":gps");
+    assert!(out.contains("GGA, 1 s ago: $GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57"), "{out}");
+    assert!(out.contains("altitude (field 9) -12.3 m, geoid separation (field 11) empty"), "{out}");
+}

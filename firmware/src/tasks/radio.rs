@@ -36,7 +36,7 @@
 //! still keyed; PB8 cleared at TX setup unless PC15 says an accessory; `analysis/crossband_repeat.md`, to confirm
 //! on the bench).
 
-use crate::board::{AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, REPEAT_AUDIO, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
+use crate::board::{ACC_ROUTE, AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, REPEAT_AUDIO, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
 use crate::bus::{BusyDelay, Io, Out, SiBus};
 use crate::chan::{ALERTS, DEBUG_ANS, DEBUG_REQ, EVENTS, LIVE, RADIO, TERM_WAKE};
 use crate::hal::gpio::Mode;
@@ -95,10 +95,17 @@ const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone:
 const XB_TURN_MS: u32 = 50;
 
 /// Speaker amplifier and the shared audio stage (both roles likely, from stock).
+#[inline(never)]
 fn speaker(on: bool) {
-    for p in AMP_EN {
-        p.write(on);
-    }
+    pb8(on);
+    AMP_EN[1].write(on);
+}
+
+/// The shared audio stage (PB8). Held on while a speaker mic is connected (SND-12): stock's arbiter and PTT
+/// handler never clear it while its PC15 flag is set.
+#[inline(never)]
+fn pb8(on: bool) {
+    AMP_EN[0].write(on || crate::chan::ACCESSORY.load(core::sync::atomic::Ordering::Relaxed) & ferrite_core::acc::ON != 0);
 }
 
 /// What the Radio task keeps of a slot's settings for receiving (the transmit side is the `tx` build's).
@@ -641,7 +648,7 @@ impl Radio {
 
     /// VOX (VOX-2, VOX-3, VOX-5, VOX-14): every 20 ms, PA0's mic level against the level's threshold; speech
     /// (with its tail) goes to the UI in `TxLive::voice`, which keys the active slot (VOX-13). Blocked while the
-    /// active slot receives and nothing is keyed (VOX-3). The accessory-change debounce isn't modelled yet.
+    /// active slot receives and nothing is keyed, or while the input task debounces a speaker-mic change (VOX-3).
     #[cfg(feature = "tx")]
     fn vox_poll(&mut self) {
         use crate::hal::adc;
@@ -656,7 +663,8 @@ impl Radio {
         self.tx.vox_at = now;
         adc::init();
         let mic = adc::read(adc::CH_PA0);
-        let blocked = self.path.keyed().is_none() && self.live.slots[self.active as usize].squelch_open;
+        let changing = crate::chan::ACCESSORY.load(core::sync::atomic::Ordering::Relaxed) & ferrite_core::acc::CHANGING != 0;
+        let blocked = changing || self.path.keyed().is_none() && self.live.slots[self.active as usize].squelch_open;
         self.live.tx.voice = self.tx.vox_det.step(mic, level, tail as u32 * 100, blocked, now);
     }
 
@@ -1380,7 +1388,8 @@ impl ferrite_radio::Hw for Radio {
             Pin::Relay => RELAY.write(high),
             Pin::SiIn(i) => SI_IN[i as usize & 1].write(high),
             Pin::RepeatAudio => REPEAT_AUDIO.write(high),
-            Pin::Amp(i) => AMP_EN[i as usize & 1].write(high),
+            Pin::Amp(0) => pb8(high),
+            Pin::Amp(_) => AMP_EN[1].write(high),
         }
     }
     fn relay_is(&mut self) -> bool {
@@ -1814,6 +1823,14 @@ impl Radio {
             // Nothing keys in this build, so VOX has nothing to do.
             #[cfg(not(feature = "tx"))]
             RadioCmd::Vox { .. } => {}
+            // SND-12, from the input task: as stock, PE1 follows the speaker mic and PB8 goes on with it. Removed,
+            // PB8 stays as it is (it may carry receive or repeat audio now) until the next speaker change clears it.
+            RadioCmd::Accessory(on) => {
+                ACC_ROUTE.write(on);
+                if on {
+                    AMP_EN[0].write(true);
+                }
+            }
             RadioCmd::BatterySave(level) => {
                 let a = self.save.set_level(level, now_ms());
                 self.apply(a).await;
@@ -2428,9 +2445,7 @@ impl Radio {
         (self.tx.fault, self.tx.data, self.tx.slot, self.tx.dialled) = (false, Some(power), to, false);
         // Decision 95: stock's TX setup clears PB8 unless the accessory detect (PC15) is low; its PTT state 1
         // sets it again with the repeat audio (`Act::RepeatAudio`).
-        if crate::board::ACC_DET.read() {
-            AMP_EN[0].write(false);
-        }
+        pb8(false);
         let mut st = Steps::default();
         if let Err(r) = self.tx.seq.key_xb(&req, &mut self.path, now, &mut st) {
             x.rep.refused(now);

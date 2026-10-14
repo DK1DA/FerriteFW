@@ -1106,14 +1106,14 @@ fn set_line(app: &App, dev: &Device, p: &[u8], out: &mut Line) {
 
 /// Runs one line: typed after `:`, or read by `load` (`loading`: only the lines a dump holds).
 /// Whether a command line changes something (TERM-25: an unapproved Bluetooth device may only read). Reading
-/// is `get`, `help`, `dump`, `mem`/`mem32`, `gpio`, `ch`, `zone` or `preset` with nothing more than a number
+/// is `get`, `help`, `dump`, `mem`/`mem32`, `gpio`, `gps`, `ch`, `zone` or `preset` with nothing more than a number
 /// (they show it) and a bare `home`; everything else, `home N`, the BK4829 and SI4732 commands included, counts
 /// as a write.
 pub fn writes(line: &[u8]) -> bool {
     let mut w = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty());
     let Some(c) = w.next() else { return false };
     let rest = w.count();
-    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio"].iter().any(|r| same(c, r));
+    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"gps"].iter().any(|r| same(c, r));
     let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx"].iter().any(|r| same(c, r)) && rest == 0;
     !(reads || shows)
 }
@@ -1150,6 +1150,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"dump") => Ok(Done::Dump),
         _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
         _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
+        _ if same(c, b"gps") => Ok(Done::Debug(Job::new(Kind::Gga))),
         _ if same(c, b"bk") => bk(&mut t),
         _ if same(c, b"si") => si(&mut t),
         _ if same(c, b"bt") => bt(&mut t),
@@ -1430,7 +1431,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 26] = [
+const HELP: [&str; 27] = [
     slow!("Commands: type : then one of these, and Enter. A dump is made of the same lines."),
     "",
     slow!("  set 0 7 1 Dark         a setting, by its number in the radio's menu"),
@@ -1456,5 +1457,6 @@ const HELP: [&str; 26] = [
     slow!("  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property"),
     slow!("  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)"),
     slow!("  rx both   rx one       bench test: VHF and UHF receive selects both on, or one"),
+    slow!("  gps                    the GPS module's last GGA sentence, its age and heights"),
     slow!("  The radio's own logic may rewrite a register you set (a tune, Battery Save)."),
 ];

@@ -78,6 +78,8 @@ impl Lease {
             RadioCmd::Hf { on: false, .. } => self.stop(Held::Hf),
             RadioCmd::Crossband(Some(_)) => self.start(Held::Crossband, now),
             RadioCmd::Crossband(None) => self.stop(Held::Crossband),
+            // The input task's, not the UI's: no sign the UI is running.
+            RadioCmd::Accessory(_) => {}
             _ => self.renew(now),
         }
     }

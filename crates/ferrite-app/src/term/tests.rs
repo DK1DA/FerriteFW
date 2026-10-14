@@ -552,14 +552,14 @@ fn frequencies() {
 }
 
 /// The state is small: no screen buffer (TERM-19); the command line's 255-byte buffer (TERM-12), a debug
-/// command's one answer (64 bytes of memory at most, TERM-22: about 100 bytes) and the channel list's tools
-/// (TERM-14: marks, a bit per channel, 125 bytes; a sorted page of up to 56 channel numbers, 112 bytes;
-/// Oct 6, 2026) on top.
+/// command's one answer (64 bytes of memory at most, TERM-22, or a GGA sentence of 80, TERM-30: about 100 bytes)
+/// and the channel list's tools (TERM-14: marks, a bit per channel, 125 bytes; a sorted page of up to 56 channel
+/// numbers, 112 bytes; Oct 6, 2026) on top. The GGA answer added 16 bytes (Oct 13, 2026).
 #[test]
 fn small() {
     let n = core::mem::size_of::<Term>();
     std::eprintln!("Term is {n} bytes");
-    assert!(n <= 512 + 256 + 112 + 304, "Term is {n} bytes");
+    assert!(n <= 512 + 256 + 112 + 304 + 16, "Term is {n} bytes");
 }
 
 // ---- The command line and dump/load (TERM-12, TERM-13) ----
@@ -1132,7 +1132,49 @@ fn regs(r: DebugReq) -> DebugAns {
             DebugAns::Bt { data, n: 8 }
         }
         DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),
+        // The ATGM336H sentence suspected on the black radio: field 9 low, field 11 empty.
+        DebugReq::Gga => gga(b"$GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57", 12),
     }
+}
+
+fn gga(s: &[u8], age_s: u32) -> DebugAns {
+    let mut data = [0u8; ferrite_core::msg::GGA_MAX];
+    data[..s.len()].copy_from_slice(s);
+    DebugAns::Gga { data, n: s.len() as u8, age_s }
+}
+
+/// TERM-30: `gps` shows the module's last GGA sentence as received, its age, and fields 9 and 11 as read; with
+/// none yet it says so. A read: allowed for an unapproved Bluetooth device (TERM-25).
+#[test]
+fn debug_gps_gga() {
+    let mut r = Rig::main();
+    r.cmd("gps");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Gga]);
+    let raw = r.raw();
+    assert!(raw.contains("GGA, 12 s ago: $GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57"), "{raw}");
+    assert!(raw.contains("altitude (field 9) -12.3 m, geoid separation (field 11) empty"), "{raw}");
+    r.send(b"\r");
+    r.cmd("GPS");
+    r.serve(4, |_| gga(b"$GPGGA,1,4525.2950,N,07541.8600,W,1,09,0.9,71.2,M,-34.0,M,,*00", 0));
+    assert!(r.raw().contains("altitude (field 9) 71.2 m, geoid separation (field 11) -34.0 m"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("gps");
+    r.serve(4, |_| gga(b"", 0));
+    assert!(r.raw().contains("no GGA since boot"), "{}", r.raw());
+    assert!(!super::cmd::writes(b"gps"));
+}
+
+/// TERM-30: the heights as read from fields 9 and 11, in decimetres.
+#[test]
+fn gga_heights() {
+    use super::debug::gga_heights as h;
+    assert_eq!(h(b"$GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,71.2,M,-34.0,M,,*5E"), (Some(712), Some(-340)));
+    assert_eq!(h(b"GNGGA,1,4525.2950,N,07541.8600,W,1,09,0.9,-12.34,M,,M,,"), (Some(-123), None));
+    assert_eq!(h(b"GNGGA,143000.000,,,,,0,00,25.5,,,,,,"), (None, None));
+    assert_eq!(h(b"GNGGA,1,,,,,1,09,0.9,5,M,0.0,M,,"), (Some(50), Some(0)));
+    assert_eq!(h(b"GNGGA,1,,,,,1,09,0.9,5.,M,x,M,,"), (Some(50), None));
+    assert_eq!(h(b"GNGGA,1,,,,,1,09,0.9,.,M,-,M"), (None, None));
+    assert_eq!(h(b"GNGGA,1"), (None, None));
 }
 
 /// TERM-29: `rx both` and `rx one` ask the Radio task for the hold on both band receive selects and say what is

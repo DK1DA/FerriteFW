@@ -18,7 +18,7 @@
 //!
 //! Stand-ins for what the radio would report: M a message arrives, N an alert, F5 GPS off/searching/fix,
 //! F6 Bluetooth, F7 battery normal/low/cut-off, F8 the power switch, F9 an empty battery, F10 an unknown SSB
-//! patch at boot, F11 a write from the web app (a fake write session, LINK-9). Each calls
+//! patch at boot, F11 a write from the web app (a fake write session, LINK-9), K a speaker mic in or out. Each calls
 //! the App hook the firmware calls.
 
 use ferrite_sim::face::Face;
@@ -77,6 +77,7 @@ fn map_event(k: K) -> Option<Event> {
         K::D => Event::ScreenOff,
         K::T => Event::ToneHint,
         K::R => Event::FmStation,
+        K::K => Event::SpeakerMic,
         _ => return None,
     })
 }

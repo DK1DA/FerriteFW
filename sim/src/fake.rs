@@ -704,6 +704,7 @@ pub fn device_at(secs: u64) -> Device {
         battery_low: false,
         battery_cutoff: false,
         mcu_temp: Some(31),
+        spkmic: false,
         tx_built: true, // the fake radio transmits (into nothing)
         selftest: SelfTest {
             idcode: ferrite_core::chipid::EXPECTED_PID,
@@ -764,6 +765,13 @@ impl FakeRadio {
                 let mut data = [0u8; 16];
                 data[0] = 0x80;
                 DebugAns::Si { data, n: reply.clamp(1, 16) }
+            }
+            // TERM-30: the sentence suspected on the black radio (field 9 about 17 m low, field 11 empty), 1 s old.
+            DebugReq::Gga => {
+                let s = b"$GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57";
+                let mut data = [0u8; ferrite_core::msg::GGA_MAX];
+                data[..s.len()].copy_from_slice(s);
+                DebugAns::Gga { data, n: s.len() as u8, age_s: 1 }
             }
             // TERM-27: a module that, like the radio's, says nothing back.
             DebugReq::Bt { .. } => DebugAns::Bt { data: [0; 48], n: 0 },

@@ -2,12 +2,19 @@
 //! runs on its own interrupt executor, above the Radio task's, so neither a slow redraw nor a busy scan makes it
 //! miss a knob step or a key;
 //! the UI task owns what the keys mean.
+//!
+//! With the keys, the side connector's speaker-mic detect (PC15, SND-12): stock's boot check, then its 10 ms poll
+//! and four-reading debounce (`ferrite_core::acc`). The state goes to [`ACCESSORY`]; each change to the Radio task,
+//! which owns the audio switches (PE1, PB8).
 
-use crate::board::{ENC_A, ENC_B, KEY_DIRECT0, KEY_DIRECT1, KEY_DRIVE, KEY_PTT, KEY_SENSE, KEY_SIDE1, KEY_SIDE2};
+use crate::board::{ACC_DET, ENC_A, ENC_B, KEY_DIRECT0, KEY_DIRECT1, KEY_DRIVE, KEY_PTT, KEY_SENSE, KEY_SIDE1, KEY_SIDE2};
 use crate::bus::{BusyDelay, In, Out};
-use crate::chan::{Input, INPUT};
+use crate::chan::{Input, ACCESSORY, INPUT, RADIO};
 use crate::hal::gpio::Mode;
+use core::sync::atomic::Ordering::Relaxed;
 use embassy_time::{Duration, Ticker};
+use ferrite_core::acc::AccDet;
+use ferrite_core::msg::RadioCmd;
 use ferrite_core::keys::{CODE_PTT_A, CODE_PTT_B, CODE_PTT_VFO, DIRECT, GROUND_ROW, ROWS};
 use keypad::{Encoder, Keys, Matrix};
 
@@ -38,6 +45,11 @@ pub async fn task() {
     let mut keys = Keys::new(2, 0, 0);
     let mut enc = Encoder::new(PER_DETENT);
     enc.update(ENC_A.read(), ENC_B.read());
+    // SND-12: PC15 (board::init made it an input with its pull-up) with the keys: stock's boot check, then its
+    // debounce. What the Radio task has been told: it starts with PE1 low, nothing connected; a full queue is
+    // tried again on the next poll.
+    let mut acc = AccDet::new();
+    let mut told = false;
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut tick = 0u32;
     loop {
@@ -55,8 +67,19 @@ pub async fn task() {
             keys.tick(raw, |e| {
                 let _ = INPUT.try_send(Input::Key(e));
             });
+            acc_poll(&mut acc, &mut told);
         }
         tick = tick.wrapping_add(1);
         ticker.next().await;
+    }
+}
+
+/// SND-12: one reading of PC15 into the debounce, the state to [`ACCESSORY`], a change to the Radio task.
+#[inline(never)]
+fn acc_poll(acc: &mut AccDet, told: &mut bool) {
+    acc.poll(!ACC_DET.read());
+    ACCESSORY.store(acc.pack(), Relaxed);
+    if acc.on() != *told && RADIO.try_send(RadioCmd::Accessory(acc.on())).is_ok() {
+        *told = acc.on();
     }
 }

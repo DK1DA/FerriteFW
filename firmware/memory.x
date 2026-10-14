@@ -99,6 +99,9 @@ SECTIONS
     /* The GPS power manager (GPS-26 to GPS-33): the GPS task's decision and its sends, a few times a second. */
     *(.text.*8gpspower*);
     *(.text.*7ferrite5tasks3gps6manage*);
+    /* TERM-30: the GGA copy for the terminal's `gps` (once a second, the GPS task) and its answer (the UI task). */
+    *(.text.*7ferrite5tasks3gps8keep_gga*);
+    *(.text.*7ferrite5debug3gga*);
     *(.text.*4chip10heard_tone*);
     /* FM broadcast's report (at most ten times a second) and its watch mask (BCR-2, BCR-23): the Radio task's,
      * never from an interrupt. */

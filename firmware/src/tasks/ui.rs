@@ -352,6 +352,8 @@ pub async fn task() {
         // SBAR-20: the Radio task's MCU temperature reading, in whole degrees.
         let t = crate::chan::MCU_TEMP.load(Relaxed);
         dev.mcu_temp = (t != i16::MIN).then(|| ferrite_core::mcutemp::whole(t));
+        // SND-12: the speaker mic, as the input task debounced it.
+        dev.spkmic = crate::chan::ACCESSORY.load(Relaxed) & ferrite_core::acc::ON != 0;
         if !bringup::ON.load(Relaxed) {
             // Debug commands (TERM-21): memory here, registers by the Radio task (it signals TERM_WAKE).
             if let Ok(a) = DEBUG_ANS.try_receive() {
@@ -410,6 +412,7 @@ pub async fn task() {
             if let Some(r) = ports.term.debug_req() {
                 match r {
                     ferrite_core::msg::DebugReq::Mem { .. } => ports.term.debug_answer(crate::debug::mem(r)),
+                    ferrite_core::msg::DebugReq::Gga => ports.term.debug_answer(crate::debug::gga()),
                     ferrite_core::msg::DebugReq::Bt { text, n } => {
                         let forced = !app.settings().bt;
                         bt_q = Some(BtQuery { text, n, forced, sent: false, at: Instant::now(), buf: [0; 48], got: 0 });

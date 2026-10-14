@@ -38,6 +38,8 @@ pub enum Kind {
     Bt { text: [u8; 16], n: u8 },
     /// `rx both`, `rx one`, `rx`: the bench test's hold on both band receive selects (TERM-29), or ask.
     RxBoth(Option<bool>),
+    /// `gps`: the GPS module's last GGA sentence and its two heights (TERM-30).
+    Gga,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -98,6 +100,7 @@ impl Job {
             Kind::Si { cmd, n, reply } => DebugReq::Si { cmd, n, reply },
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
+            Kind::Gga => DebugReq::Gga,
         })
     }
 
@@ -214,6 +217,29 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            (Kind::Gga, DebugAns::Gga { n: 0, .. }) => {
+                out.push(b"  no GGA since boot (GPS off, or no sentence from the module yet)");
+                self.st = St::Over;
+                Step::Line
+            }
+            (Kind::Gga, DebugAns::Gga { data, n, age_s }) => {
+                let s = &data[..(n as usize).min(data.len())];
+                if self.line == 0 {
+                    put!(out, "  GGA, {} s ago: ", age_s);
+                    out.push(s);
+                } else {
+                    // Field 9 as the module gives it (said to be above mean sea level) and field 11, the geoid
+                    // separation: a module reporting the ellipsoid height leaves 11 empty or 0.
+                    let (alt, sep) = gga_heights(s);
+                    out.push(b"  altitude (field 9) ");
+                    metres(alt, out);
+                    out.push(b", geoid separation (field 11) ");
+                    metres(sep, out);
+                    self.st = St::Over;
+                }
+                self.line += 1;
+                Step::Line
+            }
             (Kind::Si { cmd, n: cn, .. }, DebugAns::Si { data, n }) => {
                 out.push(b"  si");
                 for b in &cmd[..cn as usize] {
@@ -234,6 +260,52 @@ impl Job {
                 Step::Line
             }
         }
+    }
+}
+
+/// A GGA sentence's heights (TERM-30), as received (`$` and `*hh` may be on it): field 9, the altitude the module
+/// gives as above mean sea level, and field 11, the geoid separation (mean sea level above the WGS-84 ellipsoid),
+/// in decimetres; None where a field is empty or bad. A module that puts the ellipsoid height in field 9 sends
+/// field 11 empty or 0.
+pub fn gga_heights(s: &[u8]) -> (Option<i32>, Option<i32>) {
+    let body = s.split(|&c| c == b'*').next().unwrap_or(s);
+    let mut f = body.split(|&c| c == b',');
+    let alt = f.nth(9).and_then(dm);
+    (alt, f.nth(1).and_then(dm))
+}
+
+/// "-12.34" as decimetres (-123), tenths kept and the rest dropped; None if empty or not a number.
+fn dm(f: &[u8]) -> Option<i32> {
+    let (neg, f) = match f {
+        [b'-', r @ ..] => (true, r),
+        _ => (false, f),
+    };
+    let (mut v, mut dot, mut tenth) = (0i32, false, false);
+    for &c in f {
+        match c {
+            b'.' if !dot => dot = true,
+            b'0'..=b'9' if dot && tenth => {}
+            b'0'..=b'9' => {
+                v = v.checked_mul(10)?.checked_add((c - b'0') as i32)?;
+                tenth |= dot;
+            }
+            _ => return None,
+        }
+    }
+    if f.is_empty() || f == b"." {
+        return None;
+    }
+    if !tenth {
+        v = v.checked_mul(10)?;
+    }
+    Some(if neg { -v } else { v })
+}
+
+/// Decimetres as metres with one decimal ("-12.3 m"), or "empty".
+fn metres(dm: Option<i32>, out: &mut Line) {
+    match dm {
+        None => out.push(b"empty"),
+        Some(v) => put!(out, "{}{}.{} m", if v < 0 { "-" } else { "" }, v.unsigned_abs() / 10, v.unsigned_abs() % 10),
     }
 }
 

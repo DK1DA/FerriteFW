@@ -40,7 +40,7 @@ fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
 
 slow_table! {
     /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
-    ROWS: [(&str, Val<()>); 20] = [
+    ROWS: [(&str, Val<()>); 21] = [
         // SBAR-14: why transmit is locked, if it is (BOOT-11).
         (slow!("Transmit"), |c, b| match super::info::tx_lock(c.dev) {
             None => {
@@ -156,6 +156,11 @@ slow_table! {
             b.set(if c.dev.bt { b"Connected".as_slice() } else { b"Off" });
             TEXT
         }),
+        // SND-12: a speaker mic in the side connector (the internal speaker and mic are off).
+        (slow!("Speaker mic"), |c, b| {
+            b.set(if c.dev.spkmic { b"Connected".as_slice() } else { b"None" });
+            TEXT
+        }),
         (slow!("Battery"), |c, b| {
             let d = c.dev;
             let _ = uwrite!(b, "{}%", d.battery_pct); // volts are on About
@@ -209,7 +214,7 @@ slow_table! {
 }
 
 slow_table! {
-    GO: [Go; 20] = [
+    GO: [Go; 21] = [
         Go::Open(Dest::Group(8)),
         Go::Open(Dest::Group(9)),
         Go::Open(Dest::Group(8)),
@@ -223,6 +228,7 @@ slow_table! {
         Go::Open(Dest::FmBroadcast),
         Go::Open(Dest::Group(6)),
         Go::Open(Dest::Sub(9, 2)),
+        Go::Later, // Speaker mic: nothing to set
         Go::Later,
         Go::Later,
         Go::Later, // MCU temperature: nothing to set
@@ -293,6 +299,23 @@ mod tests {
         app.settings_mut().set_region(Some(Region::Uk));
         assert_eq!(region_row(&app).as_bytes(), app.settings().region_name().as_bytes());
         assert_ne!(region_row(&app).as_bytes(), b"Not set");
+    }
+
+    /// SND-12: the speaker mic row follows the input task's detect.
+    #[test]
+    fn speaker_mic_row() {
+        let app = App::new(crate::tests::set(), crate::tests::alert());
+        let i = ROWS.iter().position(|r| r.0 == "Speaker mic").expect("a Speaker mic row");
+        assert!(matches!(GO[i], Go::Later));
+        let row = |on: bool| {
+            let mut b = Buf::<40>::new();
+            let live = LiveAll::default();
+            let dev = Device { spkmic: on, ..Device::default() };
+            (ROWS[i].1)(&Ctx { app: &app, live: &live, dev: &dev, x: &() }, &mut b);
+            b
+        };
+        assert_eq!(row(false).as_bytes(), b"None");
+        assert_eq!(row(true).as_bytes(), b"Connected");
     }
 
     /// VOX-1: VOX is off by default; when on, it shows on the Status page.
