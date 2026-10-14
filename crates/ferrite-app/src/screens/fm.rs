@@ -32,11 +32,11 @@ pub(crate) const HI: u16 = 10_800;
 /// The options (BCR-3): label, help and the setting's menu path (0 3 1 1-5, kept for the terminal and muscle
 /// memory). Quick settings shows the same rows on a broadcast slot (BCR-28).
 pub(crate) const OPTIONS: [(&str, &str, &[u8]); 5] = [
-    (slow!("Presets"), slow!("20 stations: OK picks one."), &[3, 1, 1]),
-    (slow!("Step"), slow!("Tuning step: 50, 100 or 200 kHz."), &[3, 1, 2]),
-    (slow!("AGC"), slow!("Automatic gain, or a fixed gain."), &[3, 1, 3]),
-    (slow!("Radio monitor"), slow!("Slots keep watching; one opening interrupts."), &[3, 1, 4]),
-    (slow!("Sleep timer"), slow!("End the broadcast after a time."), &[3, 1, 5]),
+    ("Presets", "20 stations: OK picks one.", &[3, 1, 1]),
+    ("Step", "Tuning step: 50, 100 or 200 kHz.", &[3, 1, 2]),
+    ("AGC", "Automatic gain, or a fixed gain.", &[3, 1, 3]),
+    ("Radio monitor", "Slots keep watching; one opening interrupts.", &[3, 1, 4]),
+    ("Sleep timer", "End the broadcast after a time.", &[3, 1, 5]),
 ];
 const ROWS: u8 = OPTIONS.len() as u8;
 

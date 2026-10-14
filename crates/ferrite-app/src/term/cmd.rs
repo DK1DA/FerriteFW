@@ -28,10 +28,10 @@ pub type Msg = Buf<96>;
 /// [`fmt`], so a call site is a pointer and its arguments rather than its own formatting code.
 macro_rules! msg {
     ($t:literal) => {
-        fmt(slow!($t), &[])
+        fmt($t, &[])
     };
     ($t:literal, $($a:expr),+ $(,)?) => {
-        fmt(slow!($t), &[$(Arg::from($a)),+])
+        fmt($t, &[$(Arg::from($a)),+])
     };
 }
 
@@ -1311,9 +1311,9 @@ pub struct DumpPos {
 }
 
 const HEAD: [&str; 3] = [
-    slow!("# One command per line, as typed after : in the terminal; :load reads it back. # starts a note."),
-    slow!("# Channels and zones are merged by number: lines replace what they name, nothing else is deleted."),
-    slow!("# Settings, by their numbers in the radio's menu"),
+    "# One command per line, as typed after : in the terminal; :load reads it back. # starts a note.",
+    "# Channels and zones are merged by number: lines replace what they name, nothing else is deleted.",
+    "# Settings, by their numbers in the radio's menu",
 ];
 
 /// The dump's next line into `out`; false once it is over (TERM-13: streamed, never held whole).
@@ -1349,7 +1349,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 }
             }
             2 if i == 0 => {
-                out.push(slow!("# Zones (a channel's zone=N is one of these)").as_bytes());
+                out.push("# Zones (a channel's zone=N is one of these)".as_bytes());
                 return true;
             }
             2 if i <= st.zones() as u16 => {
@@ -1357,7 +1357,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 return true;
             }
             3 if i == 0 => {
-                out.push(slow!("# Range presets (0 1 7)").as_bytes());
+                out.push("# Range presets (0 1 7)".as_bytes());
                 return true;
             }
             3 if i <= st.data().presets() as u16 => {
@@ -1415,7 +1415,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
                     true
                 }
                 None if i == 0 => {
-                    out.push(slow!("All settings are at their defaults.").as_bytes());
+                    out.push("All settings are at their defaults.".as_bytes());
                     true
                 }
                 None => false,
@@ -1432,31 +1432,31 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
 }
 
 const HELP: [&str; 27] = [
-    slow!("Commands: type : then one of these, and Enter. A dump is made of the same lines."),
+    "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
-    slow!("  set 0 7 1 Dark         a setting, by its number in the radio's menu"),
-    slow!("  get 0 7 1   get        one setting; every setting not at its default"),
-    slow!("  ch 12                  channel 12, as its ch line"),
-    slow!("  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone"),
-    slow!("                         power zone step squelch busy reverse skip aprs rxonly hidden priority"),
-    slow!("  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel"),
-    slow!("  ch 12 delete           delete channel 12"),
-    slow!("  zone 2 \"Repeaters\"     a zone (made in order); fields scan shown resume ..."),
-    slow!("  preset 1 \"2 m\" 144 148 a range preset; fields step mode bw"),
-    slow!("  home 12   home none    the home channel"),
-    slow!("  dump                   everything, as these lines; save it with your terminal's log"),
-    slow!("  load                   read a dump back: send the file, it ends at the line end"),
-    slow!("  clear channels N       delete every channel (N: how many there are)"),
+    "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
+    "  get 0 7 1   get        one setting; every setting not at its default",
+    "  ch 12                  channel 12, as its ch line",
+    "  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone",
+    "                         power zone step squelch busy reverse skip aprs rxonly hidden priority",
+    "  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel",
+    "  ch 12 delete           delete channel 12",
+    "  zone 2 \"Repeaters\"     a zone (made in order); fields scan shown resume ...",
+    "  preset 1 \"2 m\" 144 148 a range preset; fields step mode bw",
+    "  home 12   home none    the home channel",
+    "  dump                   everything, as these lines; save it with your terminal's log",
+    "  load                   read a dump back: send the file, it ends at the line end",
+    "  clear channels N       delete every channel (N: how many there are)",
     "",
-    slow!("Debug (hex addresses, registers and values; Esc stops):"),
-    slow!("  mem 20000000 64        bytes of MCU memory (flash, RAM)"),
-    slow!("  mem32 40010808 4       32-bit words: use this for peripheral registers"),
-    slow!("  gpio                   ports A to E: input and output bits, 15 to 0"),
-    slow!("  bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)"),
-    slow!("  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)"),
-    slow!("  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property"),
-    slow!("  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)"),
-    slow!("  rx both   rx one       bench test: VHF and UHF receive selects both on, or one"),
-    slow!("  gps                    the GPS module's last GGA sentence, its age and heights"),
-    slow!("  The radio's own logic may rewrite a register you set (a tune, Battery Save)."),
+    "Debug (hex addresses, registers and values; Esc stops):",
+    "  mem 20000000 64        bytes of MCU memory (flash, RAM)",
+    "  mem32 40010808 4       32-bit words: use this for peripheral registers",
+    "  gpio                   ports A to E: input and output bits, 15 to 0",
+    "  bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)",
+    "  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)",
+    "  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property",
+    "  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)",
+    "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
+    "  gps                    the GPS module's last GGA sentence, its age and heights",
+    "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
 ];

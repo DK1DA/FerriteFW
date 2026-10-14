@@ -16,7 +16,7 @@ use ferrite_core::freq::mhz;
 use ferrite_ui::text::{Buf, Bytes};
 
 /// The sortable columns, as the list shows them (TERM-14): 0 is the store's own number order.
-pub(super) const SORTS: [&str; 8] = [slow!("number"), slow!("name"), slow!("RX"), slow!("TX"), slow!("mode"), slow!("tone"), slow!("power"), slow!("flags")];
+pub(super) const SORTS: [&str; 8] = ["number", "name", "RX", "TX", "mode", "tone", "power", "flags"];
 /// Rows a sorted page holds at most: the tallest terminal less the list's other rows.
 pub(super) const VIS: usize = 56;
 /// "From the start" for a sorted page's first channel.
@@ -302,14 +302,14 @@ impl Term {
             if matches!(k, K::Ch(b'y' | b'Y')) {
                 self.begin(app, Op::Delete, st);
             } else {
-                self.tell(slow!("Nothing deleted").as_bytes(), false);
+                self.tell("Nothing deleted".as_bytes(), false);
             }
             return true;
         }
         if self.bulk.is_some() {
             if matches!(k, K::Esc | K::CtrlC) {
                 self.bulk = None;
-                self.tell(slow!("Stopped: what was done stays done").as_bytes(), true);
+                self.tell("Stopped: what was done stays done".as_bytes(), true);
             }
             return true; // keys wait while several channels change
         }
@@ -393,26 +393,26 @@ impl Term {
             }
         };
         match self.ask {
-            Ask::Find => out.push(slow!("Find (name or MHz; Enter alone finds the last again): ").as_bytes()),
+            Ask::Find => out.push("Find (name or MHz; Enter alone finds the last again): ".as_bytes()),
             Ask::Move => {
                 out.push(b"Move ");
                 what(out);
-                out.push(slow!(" to zone (number, name, or none): ").as_bytes());
+                out.push(" to zone (number, name, or none): ".as_bytes());
             }
             Ask::Copy => {
                 out.push(b"Copy ");
                 what(out);
-                out.push(slow!(" to free numbers from (Enter: the first free): ").as_bytes());
+                out.push(" to free numbers from (Enter: the first free): ".as_bytes());
             }
             Ask::Renumber => {
-                out.push(slow!("Renumber ").as_bytes());
+                out.push("Renumber ".as_bytes());
                 what(out);
-                out.push(slow!(" from number: ").as_bytes());
+                out.push(" from number: ".as_bytes());
             }
             Ask::Delete => {
                 out.push(b"Delete ");
                 what(out);
-                out.push(slow!("? y deletes, any other key keeps").as_bytes());
+                out.push("? y deletes, any other key keeps".as_bytes());
             }
             Ask::None => {}
         }
@@ -434,19 +434,19 @@ impl Term {
                 };
                 match z {
                     Some(z) => self.begin(app, Op::Move(z), st),
-                    None => self.tell(slow!("No such zone: a zone's number (1 is the first) or name, or none").as_bytes(), true),
+                    None => self.tell("No such zone: a zone's number (1 is the first) or name, or none".as_bytes(), true),
                 }
             }
             Ask::Copy => {
                 let from = if s.is_empty() { Some(0) } else { number(s) };
                 match from {
                     Some(f) => self.begin(app, Op::Copy(f), st),
-                    None => self.tell(slow!("Copy to: a channel number from 1 to 1000").as_bytes(), true),
+                    None => self.tell("Copy to: a channel number from 1 to 1000".as_bytes(), true),
                 }
             }
             Ask::Renumber => match number(s) {
                 Some(f) => self.begin(app, Op::Renumber(f), st),
-                None => self.tell(slow!("Renumber from: a channel number from 1 to 1000").as_bytes(), true),
+                None => self.tell("Renumber from: a channel number from 1 to 1000".as_bytes(), true),
             },
             Ask::Delete | Ask::None => {}
         }
@@ -459,7 +459,7 @@ impl Term {
         }
         let t = self.find;
         if t.is_empty() {
-            return self.tell(slow!("Find what? Type part of a name or a frequency").as_bytes(), true);
+            return self.tell("Find what? Type part of a name or a frequency".as_bytes(), true);
         }
         if self.sort == 0 {
             let n = list_len(self.zone, st);
@@ -501,7 +501,7 @@ impl Term {
     /// A new channel at the first free number, in this list's zone, on the active slot's frequency, and its
     /// editor (TERM-14).
     fn new_channel<S: ChannelStore>(&mut self, app: &mut App, st: &S) {
-        let Some(num) = st.free_num(0) else { return self.tell(slow!("All 1000 channels are in use").as_bytes(), true) };
+        let Some(num) = st.free_num(0) else { return self.tell("All 1000 channels are in use".as_bytes(), true) };
         let s = &app.slots[app.active as usize];
         let rx = s.freq().clamp(mhz(64), mhz(1300) - 1); // CHAN-22
         let zone = if self.zone == super::ALL { NO_ZONE } else { self.zone };

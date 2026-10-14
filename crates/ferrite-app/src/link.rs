@@ -583,13 +583,13 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             if r.n != rec.len() {
                 return Status::BadArg;
             }
-            let Some(nm) = name_of::<16>(&name) else { return invalid(o, slow!("name: printable ASCII only").as_bytes()) };
+            let Some(nm) = name_of::<16>(&name) else { return invalid(o, "name: printable ASCII only".as_bytes()) };
             c.set_name(nm.as_bytes());
             if c.zone != NO_ZONE && c.zone >= st.zones() {
-                return invalid(o, slow!("zone: no such zone").as_bytes());
+                return invalid(o, "zone: no such zone".as_bytes());
             }
             if c.cfg.mode as usize >= SLOT_MODES || c.cfg.step as usize >= STEPS.len() {
-                return invalid(o, slow!("mode or step out of range").as_bytes());
+                return invalid(o, "mode or step out of range".as_bytes());
             }
             if let Err(m) = crate::term::cmd::check(&c) {
                 return invalid(o, m.as_bytes());
@@ -616,9 +616,9 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             c.dwell.load(&mut r);
             0u8.load(&mut r); // reserved
             c.pri.load(&mut r);
-            let Some(nm) = name_of::<16>(&name).filter(|n| !n.as_bytes().is_empty()) else { return invalid(o, slow!("name: 1 to 16 printable characters").as_bytes()) };
+            let Some(nm) = name_of::<16>(&name).filter(|n| !n.as_bytes().is_empty()) else { return invalid(o, "name: 1 to 16 printable characters".as_bytes()) };
             if c.resume > 12 {
-                return invalid(o, slow!("resume out of range").as_bytes());
+                return invalid(o, "resume out of range".as_bytes());
             }
             request(st, Op::PutZone(idx as u8, nm, c))
         }
@@ -628,7 +628,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             if !r.take(&mut name) {
                 return Status::BadArg;
             }
-            let Some(nm) = name_of::<12>(&name) else { return invalid(o, slow!("name: printable ASCII only").as_bytes()) };
+            let Some(nm) = name_of::<12>(&name) else { return invalid(o, "name: printable ASCII only".as_bytes()) };
             let mut p = RangePreset { name: nm, start: 0, end: 0, step: 0, mode: 0, narrow: true, skips: 0, resume: 0 };
             p.start.load(&mut r);
             p.end.load(&mut r);
@@ -637,13 +637,13 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             p.narrow.load(&mut r);
             p.resume.load(&mut r);
             if p.resume > 12 {
-                return invalid(o, slow!("resume out of range").as_bytes());
+                return invalid(o, "resume out of range".as_bytes());
             }
             if !(mhz(18)..=mhz(1300)).contains(&p.start) || p.end <= p.start || p.end > mhz(1300) {
-                return invalid(o, slow!("start and end: 18 to 1300 MHz, end above start").as_bytes());
+                return invalid(o, "start and end: 18 to 1300 MHz, end above start".as_bytes());
             }
             if p.step as usize >= STEPS.len() || p.mode as usize >= SLOT_MODES.min(MODES.len()) {
-                return invalid(o, slow!("step or mode out of range").as_bytes());
+                return invalid(o, "step or mode out of range".as_bytes());
             }
             if let Some(old) = st.data().preset(idx as u8) {
                 p.skips = old.skips;

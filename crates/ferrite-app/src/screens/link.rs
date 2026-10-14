@@ -4,7 +4,7 @@
 //! (LINK-7, LINK-30): no approval prompt and no approved-devices list (decision 104).
 
 use super::shared::*;
-use super::table::{slow_table, Ctx, Table, Val};
+use super::table::{Ctx, Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
@@ -35,49 +35,45 @@ pub enum LinkAnswer {
     Cancelled,
 }
 
-slow_table! {
-    ROWS: [(&str, Val<()>); 5] = [
-        (slow!("Bluetooth"), |Ctx { app: a, dev: d, .. }, b| {
-            if d.bt {
-                b.set(b"Connected");
-                BLUE
-            } else {
-                b.set(if a.set.bt { b"On, waiting".as_slice() } else { b"Off" });
-                TEXT
-            }
-        }),
-        (slow!("Cable"), |Ctx { dev: d, .. }, b| {
-            if !d.link.cable {
-                b.set(b"Not connected");
-                return SUB;
-            }
-            b.set(b"Connected"); // always trusted (LINK-7)
+const ROWS: [(&str, Val<()>); 5] = [
+    ("Bluetooth", |Ctx { app: a, dev: d, .. }, b| {
+        if d.bt {
+            b.set(b"Connected");
             BLUE
-        }),
-        (slow!("Writes"), |Ctx { dev: d, .. }, b| {
-            match d.link.write_pct {
-                Some(p) => {
-                    let _ = uwrite!(b, "Writing, {} %", p);
-                }
-                None => b.set(b"Idle"),
+        } else {
+            b.set(if a.set.bt { b"On, waiting".as_slice() } else { b"Off" });
+            TEXT
+        }
+    }),
+    ("Cable", |Ctx { dev: d, .. }, b| {
+        if !d.link.cable {
+            b.set(b"Not connected");
+            return SUB;
+        }
+        b.set(b"Connected"); // always trusted (LINK-7)
+        BLUE
+    }),
+    ("Writes", |Ctx { dev: d, .. }, b| {
+        match d.link.write_pct {
+            Some(p) => {
+                let _ = uwrite!(b, "Writing, {} %", p);
             }
-            TEXT
-        }),
-        // LINK-30: Bluetooth asks for the radio's PIN while the PIN lock is on.
-        (slow!("BT access"), |Ctx { app: a, .. }, b| {
-            b.set(if a.pin_required() { b"PIN".as_slice() } else { b"Open" });
-            TEXT
-        }),
-        (slow!("Debug console"), |_, b| {
-            b.set(ON_OFF[0].as_bytes());
-            TEXT
-        }),
-    ];
-}
+            None => b.set(b"Idle"),
+        }
+        TEXT
+    }),
+    // LINK-30: Bluetooth asks for the radio's PIN while the PIN lock is on.
+    ("BT access", |Ctx { app: a, .. }, b| {
+        b.set(if a.pin_required() { b"PIN".as_slice() } else { b"Open" });
+        TEXT
+    }),
+    ("Debug console", |_, b| {
+        b.set(ON_OFF[0].as_bytes());
+        TEXT
+    }),
+];
 
-slow_table! {
-    STATUS: Table<()> = Table { rows: &ROWS, go: &[], y: 22, h: 20, style: w::KV_STATUS };
-}
+const STATUS: Table<()> = Table { rows: &ROWS, go: &[], y: 22, h: 20, style: w::KV_STATUS };
 
 impl Link {
     pub fn new(page: LinkPage) -> Self {

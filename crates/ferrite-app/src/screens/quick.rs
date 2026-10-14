@@ -189,7 +189,7 @@ fn render_fm(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, ro
         w::badge(lcd, 8, 23, a, true, BG);
         w::field(lcd, 22, 4, 21, 39, 35, Align::Left, b"", &UI_12, SUB, BG);
         w::field(lcd, 26, 66, 21, 39, 35, Align::Left, fb.as_bytes(), &UI_12B, TEXT, BG);
-        w::field(lcd, 92, 140, 21, 39, 35, Align::Right, slow!("Broadcast FM").as_bytes(), &UI_12, SUB, BG);
+        w::field(lcd, 92, 140, 21, 39, 35, Align::Right, "Broadcast FM".as_bytes(), &UI_12, SUB, BG);
         lcd.fill(0, 40, 240, 1, LINE);
     }
     for i in 0..=FM_ROWS {
@@ -204,7 +204,7 @@ fn render_fm(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, ro
         app.list_row(lcd, i as usize, 41 + 22 * i as i32, 22, &r);
     }
     let i = row.min(FM_ROWS);
-    let help = if i < FM_ROWS { fm::OPTIONS[i as usize].1 } else { slow!("Every setting, by group.") };
+    let help = if i < FM_ROWS { fm::OPTIONS[i as usize].1 } else { "Every setting, by group." };
     let mut p = Buf::<16>::new();
     let _ = uwrite!(p, "MENU {}", if i < FM_ROWS { i + 1 } else { 0 });
     app.help_box(lcd, 265, 33, help.as_bytes(), p.as_bytes());

@@ -9,7 +9,7 @@ use super::lists::*;
 use super::nav::Dest;
 use super::opts::Of;
 use super::shared::*;
-use super::table::{slow_table, Table, Val};
+use super::table::{Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::data::{Data, Draft, Op, Station};
@@ -167,97 +167,95 @@ fn text(b: &mut Buf<40>, s: &[u8]) -> u16 {
     TEXT
 }
 
-slow_table! {
-    /// C4's rows.
-    ROWS: [(&str, Val<Station>); 8] = [
-        (slow!("Position"), |c, b| match c.x.pos {
-            Some(p) => {
-                let mut pb = Buf::<32>::new();
-                pos_text(p, &mut pb);
-                text(b, pb.as_bytes())
-            }
-            None => text(b, b"none"),
-        }),
-        (slow!("Course"), |c, b| match (c.x.course, crate::aprs::wx(c.x.comment.as_bytes())) {
-            // APRS-23: a weather station's course and speed are its wind
-            (_, Some(w)) => {
-                b.push(b"wind ");
-                match w.dir {
-                    Some(d) => {
-                        let _ = uwrite!(b, "{}\u{b0}", d);
-                    }
-                    None => b.push(b"-"),
+/// C4's rows.
+const ROWS: [(&str, Val<Station>); 8] = [
+    ("Position", |c, b| match c.x.pos {
+        Some(p) => {
+            let mut pb = Buf::<32>::new();
+            pos_text(p, &mut pb);
+            text(b, pb.as_bytes())
+        }
+        None => text(b, b"none"),
+    }),
+    ("Course", |c, b| match (c.x.course, crate::aprs::wx(c.x.comment.as_bytes())) {
+        // APRS-23: a weather station's course and speed are its wind
+        (_, Some(w)) => {
+            b.push(b"wind ");
+            match w.dir {
+                Some(d) => {
+                    let _ = uwrite!(b, "{}\u{b0}", d);
                 }
-                if let Some(v) = w.wind {
-                    b.push(" \u{b7} ".as_bytes());
-                    speed(c.app.set.units, v, b);
-                }
-                if let Some(g) = w.gust {
-                    b.push(b", gust ");
-                    speed(c.app.set.units, g, b);
-                }
-                TEXT
+                None => b.push(b"-"),
             }
-            (Some((d, v)), None) => {
-                let _ = uwrite!(b, "{}\u{b0} \u{b7} {} km/h", d, v);
-                TEXT
+            if let Some(v) = w.wind {
+                b.push(" \u{b7} ".as_bytes());
+                speed(c.app.set.units, v, b);
             }
-            (None, None) => text(b, b"-"),
-        }),
-        (slow!("Weather"), |c, b| match crate::aprs::wx(c.x.comment.as_bytes()) {
-            Some(w) => {
-                weather(c.app.set.units, &w, b);
-                TEXT
-            }
-            None => text(b, b"-"),
-        }),
-        (slow!("Altitude"), |c, b| match c.x.alt_m {
-            Some(a) => {
-                let _ = uwrite!(b, "{} m", a);
-                TEXT
-            }
-            None => text(b, b"-"),
-        }),
-        (slow!("Path"), |c, b| {
-            let s = c.x;
-            if s.via.is_empty() {
-                return text(b, b"direct");
-            }
-            for (k, hop) in s.via.as_bytes().split(|&ch| ch == b',').enumerate() {
-                if k > 0 {
-                    b.push(b", ");
-                }
-                b.push(hop);
+            if let Some(g) = w.gust {
+                b.push(b", gust ");
+                speed(c.app.set.units, g, b);
             }
             TEXT
-        }),
-        (slow!("Heard"), |c, b| {
-            let s = c.x;
-            let mut age = Buf::<12>::new();
-            age_text(s.ago_s, &mut age);
-            let _ = uwrite!(b, "{} ago \u{b7} {} {}", Txt(age.as_bytes()), s.times, if s.times == 1 { "time" } else { "times" });
+        }
+        (Some((d, v)), None) => {
+            let _ = uwrite!(b, "{}\u{b0} \u{b7} {} km/h", d, v);
             TEXT
-        }),
-        (slow!("Comment"), |c, b| {
-            // a weather station's comment is what follows its weather fields
-            let t = c.x.comment.as_bytes();
-            let t = crate::aprs::wx(t).map_or(t, |w| t[w.rest..].trim_ascii());
-            text(b, if t.is_empty() { b"-".as_slice() } else { t })
-        }),
-        (slow!("Message"), |c, b| {
-            let s = c.x;
-            if s.msg.is_empty() {
-                return text(b, b"-");
-            }
-            let mut clock = Buf::<12>::new();
-            if let Some(m) = s.msg_min {
-                clock_text(Some(m), 0, &mut clock);
-            }
-            let _ = uwrite!(b, "\"{}\" {}", Txt(s.msg.as_bytes()), Txt(clock.as_bytes()));
+        }
+        (None, None) => text(b, b"-"),
+    }),
+    ("Weather", |c, b| match crate::aprs::wx(c.x.comment.as_bytes()) {
+        Some(w) => {
+            weather(c.app.set.units, &w, b);
             TEXT
-        }),
-    ];
-}
+        }
+        None => text(b, b"-"),
+    }),
+    ("Altitude", |c, b| match c.x.alt_m {
+        Some(a) => {
+            let _ = uwrite!(b, "{} m", a);
+            TEXT
+        }
+        None => text(b, b"-"),
+    }),
+    ("Path", |c, b| {
+        let s = c.x;
+        if s.via.is_empty() {
+            return text(b, b"direct");
+        }
+        for (k, hop) in s.via.as_bytes().split(|&ch| ch == b',').enumerate() {
+            if k > 0 {
+                b.push(b", ");
+            }
+            b.push(hop);
+        }
+        TEXT
+    }),
+    ("Heard", |c, b| {
+        let s = c.x;
+        let mut age = Buf::<12>::new();
+        age_text(s.ago_s, &mut age);
+        let _ = uwrite!(b, "{} ago \u{b7} {} {}", Txt(age.as_bytes()), s.times, if s.times == 1 { "time" } else { "times" });
+        TEXT
+    }),
+    ("Comment", |c, b| {
+        // a weather station's comment is what follows its weather fields
+        let t = c.x.comment.as_bytes();
+        let t = crate::aprs::wx(t).map_or(t, |w| t[w.rest..].trim_ascii());
+        text(b, if t.is_empty() { b"-".as_slice() } else { t })
+    }),
+    ("Message", |c, b| {
+        let s = c.x;
+        if s.msg.is_empty() {
+            return text(b, b"-");
+        }
+        let mut clock = Buf::<12>::new();
+        if let Some(m) = s.msg_min {
+            clock_text(Some(m), 0, &mut clock);
+        }
+        let _ = uwrite!(b, "\"{}\" {}", Txt(s.msg.as_bytes()), Txt(clock.as_bytes()));
+        TEXT
+    }),
+];
 
 /// The station screen's Message line (APRS-28): the newest message it sent us, from the stored messages (the
 /// newest [`MSG_LOOK`] only, so the screen never reads the whole ring), with the clock time it came.
@@ -314,9 +312,7 @@ fn weather(units: u8, w: &crate::aprs::Wx, b: &mut Buf<40>) {
     }
 }
 
-slow_table! {
-    STATION: Table<Station> = Table { rows: &ROWS, go: &[], y: 122, h: 0, style: w::KV_DETAIL };
-}
+const STATION: Table<Station> = Table { rows: &ROWS, go: &[], y: 122, h: 0, style: w::KV_DETAIL };
 
 /// C4: one station.
 fn station(app: &mut App, lcd: &mut impl Panel, s: &Station, data: &dyn Data, live: &LiveAll, dev: &Device) {

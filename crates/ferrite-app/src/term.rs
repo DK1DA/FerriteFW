@@ -31,11 +31,11 @@ use ferrite_ui::widgets as w;
 macro_rules! put {
     ($o:expr, $t:literal) => {{
         use $crate::term::cmd::Fmt as _;
-        $o.fill(slow!($t), &[])
+        $o.fill($t, &[])
     }};
     ($o:expr, $t:literal, $($a:expr),+ $(,)?) => {{
         use $crate::term::cmd::Fmt as _;
-        $o.fill(slow!($t), &[$($crate::term::cmd::Arg::from($a)),+])
+        $o.fill($t, &[$($crate::term::cmd::Arg::from($a)),+])
     }};
 }
 
@@ -174,75 +174,75 @@ const FIELDS: [F; 17] = [
 const ALL: u8 = 254;
 /// The main menu (TERM screens), with what each opens.
 const MAIN: [(&str, Page); 7] = [
-    (slow!("Channels"), Page::Channels),
-    (slow!("Zones"), Page::Zones),
-    (slow!("Settings"), Page::Settings),
-    (slow!("Monitor"), Page::Monitor),
-    (slow!("Mail"), Page::Mail),
-    (slow!("TNC"), Page::Tnc),
-    (slow!("About"), Page::About),
+    ("Channels", Page::Channels),
+    ("Zones", Page::Zones),
+    ("Settings", Page::Settings),
+    ("Monitor", Page::Monitor),
+    ("Mail", Page::Mail),
+    ("TNC", Page::Tnc),
+    ("About", Page::About),
 ];
 
 // The bottom line's keys per page (TERM-11), and each page's help (TERM-16): kept in the slow flash.
-const H_TYPE: [(&str, &str); 3] = [(slow!("Enter"), slow!("Save")), (slow!("Backspace"), slow!("Delete")), (slow!("Esc"), slow!("Cancel"))];
-const H_HELP: [(&str, &str); 1] = [(slow!("Esc"), slow!("Close help"))];
-const H_SPLASH: [(&str, &str); 3] = [(slow!("Enter"), slow!("Menu")), (slow!("?"), slow!("Help")), (slow!("Ctrl-C"), slow!("Leave"))];
+const H_TYPE: [(&str, &str); 3] = [("Enter", "Save"), ("Backspace", "Delete"), ("Esc", "Cancel")];
+const H_HELP: [(&str, &str); 1] = [("Esc", "Close help")];
+const H_SPLASH: [(&str, &str); 3] = [("Enter", "Menu"), ("?", "Help"), ("Ctrl-C", "Leave")];
 const H_MAIN: [(&str, &str); 6] = [
-    (slow!("Up/Dn"), slow!("Move")),
-    (slow!("Enter"), slow!("Open")),
-    (slow!("1-7"), slow!("Jump")),
-    (slow!(":"), slow!("Command")),
-    (slow!("?"), slow!("Help")),
-    (slow!("Ctrl-C"), slow!("Leave")),
+    ("Up/Dn", "Move"),
+    ("Enter", "Open"),
+    ("1-7", "Jump"),
+    (":", "Command"),
+    ("?", "Help"),
+    ("Ctrl-C", "Leave"),
 ];
 const H_CHANNELS: [(&str, &str); 7] = [
-    (slow!("Enter"), slow!("Edit")),
-    (slow!("N"), slow!("New")),
-    (slow!("D"), slow!("Delete")),
-    (slow!("M"), slow!("Move")),
-    (slow!("/"), slow!("Find")),
-    (slow!("Z"), slow!("Zone")),
-    (slow!("Esc"), slow!("Back")),
+    ("Enter", "Edit"),
+    ("N", "New"),
+    ("D", "Delete"),
+    ("M", "Move"),
+    ("/", "Find"),
+    ("Z", "Zone"),
+    ("Esc", "Back"),
 ];
 const H_EDIT: [(&str, &str); 5] =
-    [(slow!("Up/Dn"), slow!("Field")), (slow!("<- ->"), slow!("Change")), (slow!("Enter"), slow!("Type")), (slow!("#"), slow!("Default")), (slow!("Esc"), slow!("Back"))];
-const H_ZONES: [(&str, &str); 3] = [(slow!("Up/Dn"), slow!("Move")), (slow!("Enter"), slow!("Channels")), (slow!("Esc"), slow!("Back"))];
+    [("Up/Dn", "Field"), ("<- ->", "Change"), ("Enter", "Type"), ("#", "Default"), ("Esc", "Back")];
+const H_ZONES: [(&str, &str); 3] = [("Up/Dn", "Move"), ("Enter", "Channels"), ("Esc", "Back")];
 const H_SETTINGS: [(&str, &str); 6] = [
-    (slow!("Up/Dn"), slow!("Move")),
-    (slow!("<- ->"), slow!("Change")),
-    (slow!("Enter"), slow!("Open")),
-    (slow!("1-9"), slow!("Jump")),
-    (slow!("#"), slow!("Default")),
-    (slow!("Esc"), slow!("Back")),
+    ("Up/Dn", "Move"),
+    ("<- ->", "Change"),
+    ("Enter", "Open"),
+    ("1-9", "Jump"),
+    ("#", "Default"),
+    ("Esc", "Back"),
 ];
-const H_BACK: [(&str, &str); 1] = [(slow!("Esc"), slow!("Back"))];
+const H_BACK: [(&str, &str); 1] = [("Esc", "Back")];
 
 const HELP_MAIN: [&str; 3] = [
-    slow!("Arrows move, Enter opens, a digit jumps (the same numbers as the radio's menu)."),
-    slow!(": opens the command line on any page; :help lists the commands, :dump and :load back up."),
-    slow!("Ctrl-L redraws the screen, Ctrl-C leaves the terminal."),
+    "Arrows move, Enter opens, a digit jumps (the same numbers as the radio's menu).",
+    ": opens the command line on any page; :help lists the commands, :dump and :load back up.",
+    "Ctrl-L redraws the screen, Ctrl-C leaves the terminal.",
 ];
 const HELP_CHANNELS: [&str; 7] = [
-    slow!("Up/Dn move, PgUp/PgDn page, Home/End jump to the ends, Enter edits a channel."),
-    slow!("Z shows the next zone, then channels with no zone, then all channels. S sorts by the next column."),
-    slow!("/ finds a name or frequency (Enter alone finds the same again). N makes a new channel."),
-    slow!("Space marks a channel (*), A marks the whole list, U clears the marks."),
-    slow!("D deletes, M moves to a zone, C copies to free numbers, R renumbers: the marked channels,"),
-    slow!("or the selected one when none are marked. Delete asks first. Esc stops a change part way."),
-    slow!("A channel open in the radio's own editor isn't changed here: the radio's copy shows."),
+    "Up/Dn move, PgUp/PgDn page, Home/End jump to the ends, Enter edits a channel.",
+    "Z shows the next zone, then channels with no zone, then all channels. S sorts by the next column.",
+    "/ finds a name or frequency (Enter alone finds the same again). N makes a new channel.",
+    "Space marks a channel (*), A marks the whole list, U clears the marks.",
+    "D deletes, M moves to a zone, C copies to free numbers, R renumbers: the marked channels,",
+    "or the selected one when none are marked. Delete asks first. Esc stops a change part way.",
+    "A channel open in the radio's own editor isn't changed here: the radio's copy shows.",
 ];
 const HELP_EDIT: [&str; 3] = [
-    slow!("<- -> change a field at once: it saves as on the radio, and the radio's screen follows."),
-    slow!("Enter types the name or the RX frequency (MHz). # puts a field back to its default."),
-    slow!("Frequencies run from 64 to 1000 MHz; 1.25 m power stays at 0.25 W."),
+    "<- -> change a field at once: it saves as on the radio, and the radio's screen follows.",
+    "Enter types the name or the RX frequency (MHz). # puts a field back to its default.",
+    "Frequencies run from 64 to 1000 MHz; 1.25 m power stays at 0.25 W.",
 ];
 const HELP_SETTINGS: [&str; 3] = [
-    slow!("The radio's MENU 0 settings, with the same numbers. <- -> change, Enter opens a list."),
-    slow!("* marks a value that isn't the default; # puts it back. Settings not built yet show their default."),
-    slow!("A few (PIN, region, Extend TX) change only on the radio, where they have their own screen."),
+    "The radio's MENU 0 settings, with the same numbers. <- -> change, Enter opens a list.",
+    "* marks a value that isn't the default; # puts it back. Settings not built yet show their default.",
+    "A few (PIN, region, Extend TX) change only on the radio, where they have their own screen.",
 ];
-const HELP_MONITOR: [&str; 1] = [slow!("The event log, newest at the bottom, then the slots receiving now. Esc goes back.")];
-const HELP_OTHER: [&str; 1] = [slow!("Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves the terminal.")];
+const HELP_MONITOR: [&str; 1] = ["The event log, newest at the bottom, then the slots receiving now. Esc goes back."];
+const HELP_OTHER: [&str; 1] = ["Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves the terminal."];
 
 pub struct Term {
     page: Page,
@@ -456,7 +456,7 @@ impl Term {
                         self.redraw();
                         return;
                     }
-                    crate::screens::pin::RemotePin::Wrong => self.say(slow!("Wrong PIN").as_bytes(), true),
+                    crate::screens::pin::RemotePin::Wrong => self.say("Wrong PIN".as_bytes(), true),
                     crate::screens::pin::RemotePin::Wait(w) => {
                         let mut b = Buf::<40>::new();
                         put!(b, "Too many tries: wait {} s", w);
@@ -873,7 +873,7 @@ impl Term {
     fn change<S: ChannelStore>(&mut self, app: &mut App, c: Channel, f: F, d: i32, store: &S) {
         let mut n = c;
         match f {
-            F::Name => return self.say(slow!("Enter types the name (16 characters)").as_bytes(), false),
+            F::Name => return self.say("Enter types the name (16 characters)".as_bytes(), false),
             F::Zone => {
                 let z = store.zones() as i32 + 1;
                 let i = if c.zone == NO_ZONE { z - 1 } else { c.zone as i32 };
@@ -888,18 +888,18 @@ impl Term {
                 let step = STEPS[crate::slot::band_step(band_near(c.cfg.offset.max(0) as Freq10), app.set.region()) as usize].0 as i32;
                 n.cfg.offset = (c.cfg.offset + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1);
             }
-            F::Tx => return self.say(slow!("TX: Enter types a TX frequency (split)").as_bytes(), false),
+            F::Tx => return self.say("TX: Enter types a TX frequency (split)".as_bytes(), false),
             F::It(Item::Offset) if (Item::Offset.get(&c.cfg).0 + d).rem_euclid(4) == 3 => {
                 // Split needs its frequency: the TX row, typing
                 self.field = FIELDS.iter().position(|x| *x == F::Tx).unwrap_or(0) as u8;
                 self.line = Some(Buf::new());
-                return self.say(slow!("Split: type the TX frequency, then Enter").as_bytes(), false);
+                return self.say("Split: type the TX frequency, then Enter".as_bytes(), false);
             }
             F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => {
-                return self.say(slow!("Power: fixed at 0.25 W on 1.25 m").as_bytes(), true); // TX-9, TERM-7
+                return self.say("Power: fixed at 0.25 W on 1.25 m".as_bytes(), true); // TX-9, TERM-7
             }
             F::It(Item::Power) if c.flags & FLAG_RX_ONLY != 0 => {
-                return self.say(slow!("Power: this channel is RX only").as_bytes(), true);
+                return self.say("Power: this channel is RX only".as_bytes(), true);
             }
             F::It(it) => {
                 let shift = BANDS[band_near(c.rx)].shift;
@@ -910,7 +910,7 @@ impl Term {
             F::Home => {
                 let on = app.set.home_ch != Some(c.num);
                 app.set.home_ch = if on { Some(c.num) } else { app.set.home_ch.filter(|&h| h != c.num) };
-                return self.say(if on { slow!("Home channel: hold 0 on home jumps here").as_bytes() } else { slow!("No longer the home channel").as_bytes() }, false);
+                return self.say(if on { "Home channel: hold 0 on home jumps here".as_bytes() } else { "No longer the home channel".as_bytes() }, false);
             }
         }
         self.save(app, n);
@@ -944,20 +944,20 @@ impl Term {
         match FIELDS[self.field as usize % FIELDS.len()] {
             F::Name => {
                 if s.iter().any(|b| !(0x20..0x7F).contains(b)) {
-                    return self.say(slow!("Name: letters, digits and punctuation only").as_bytes(), true);
+                    return self.say("Name: letters, digits and punctuation only".as_bytes(), true);
                 }
                 n.set_name(s);
             }
             F::Rx => match parse_mhz(s) {
                 Some(f) if crate::chan::rx_ok(f) => n.rx = f, // CHAN-22, CHAN-26
-                _ => return self.say(slow!("RX: 0.15-64 (HF), 64-630 or 756-1300 MHz, e.g. 146.52").as_bytes(), true),
+                _ => return self.say("RX: 0.15-64 (HF), 64-630 or 756-1300 MHz, e.g. 146.52".as_bytes(), true),
             },
             F::Tx => match parse_mhz(s) {
                 Some(f) if !ferrite_core::txplan::relay_ok(n.rx, f) => {
-                    return self.say(slow!("Split TX needs the HF relay: not allowed with this RX frequency").as_bytes(), true); // TX-37
+                    return self.say("Split TX needs the HF relay: not allowed with this RX frequency".as_bytes(), true); // TX-37
                 }
                 Some(f) if (mhz(64)..mhz(1000)).contains(&f) => (n.cfg.split, n.cfg.offset) = (true, f as i32),
-                _ => return self.say(slow!("TX: a frequency from 64 to 1000 MHz, e.g. 146.52").as_bytes(), true),
+                _ => return self.say("TX: a frequency from 64 to 1000 MHz, e.g. 146.52".as_bytes(), true),
             },
             _ => return,
         }
@@ -967,7 +967,7 @@ impl Term {
     fn save(&mut self, app: &mut App, n: Channel) {
         if list::radio_channel(app) == Some(n.num) {
             // TERM-17: the radio's editor has it; its copy wins and shows here.
-            return self.say(slow!("Open in the radio's editor: showing its copy; change it there or close it").as_bytes(), true);
+            return self.say("Open in the radio's editor: showing its copy; change it there or close it".as_bytes(), true);
         }
         if Some(n) != self.edit {
             app.put_channel(n);
@@ -996,7 +996,7 @@ impl Term {
                 let (p, pl) = self.path(self.set_sel);
                 if !blocked(&p[..pl]) {
                     groups::reset(app, &p[..pl]);
-                    self.say(slow!("Back to the default").as_bytes(), false);
+                    self.say("Back to the default".as_bytes(), false);
                 }
             }
             K::Esc => self.settings_up(),
@@ -1036,11 +1036,11 @@ impl Term {
     fn settings_change(&mut self, app: &mut App, d: i32) {
         let (p, pl) = self.path(self.set_sel);
         if list::radio_setting(app) == Some((p, pl)) {
-            return self.say(slow!("Open on the radio's menu: change it there, or move off it").as_bytes(), true); // TERM-17
+            return self.say("Open on the radio's menu: change it there, or move off it".as_bytes(), true); // TERM-17
         }
         let p = &p[..pl];
         if blocked(p) {
-            return self.say(slow!("Change this one on the radio: it needs its own screen there").as_bytes(), true);
+            return self.say("Change this one on the radio: it needs its own screen there".as_bytes(), true);
         }
         if let Some(why) = groups::greyed(app, p) {
             return self.say(why.as_bytes(), true);
@@ -1048,7 +1048,7 @@ impl Term {
         if groups::change(app, p, d) {
             self.say(b"Changed", false);
         } else {
-            self.say(slow!("Not settable yet: it shows its default until its feature lands").as_bytes(), true);
+            self.say("Not settable yet: it shows its default until its feature lands".as_bytes(), true);
         }
     }
 
@@ -1085,7 +1085,7 @@ impl Term {
                 return;
             }
             out.put(b"\x1b[0m\x1b[2J\x1b[H");
-            out.put(slow!("Ferrite terminal closed. Press Enter to open it again.\r\n").as_bytes());
+            out.put("Ferrite terminal closed. Press Enter to open it again.\r\n".as_bytes());
             *self = Term { cols: self.cols, rows: self.rows, ..Term::new() };
             return;
         }
@@ -1162,7 +1162,7 @@ impl Term {
         if let Con::Run(Body::Load { mut line, mut ok, mut bad, end }) = self.con {
             line += 1;
             let r = if core::mem::take(&mut self.long) {
-                Err(cmd::Msg::from(slow!("too long: 255 characters at most").as_bytes()))
+                Err(cmd::Msg::from("too long: 255 characters at most".as_bytes()))
             } else {
                 cmd::run(app, store, dev, &self.cbuf[..n], true)
             };
@@ -1212,7 +1212,7 @@ impl Term {
                 }
                 out.put(b"\x1b[0m\x1b[2J\x1b[H");
                 if let Body::Load { .. } = b {
-                    out.put(slow!("Load: send the dump now (paste it, or your terminal's send-file). Each line is checked\r\nas the radio checks it; a line that fails is skipped and named. It ends at the line\r\n\"end\" or Ctrl-D; Ctrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n").as_bytes());
+                    out.put("Load: send the dump now (paste it, or your terminal's send-file). Each line is checked\r\nas the radio checks it; a line that fails is skipped and named. It ends at the line\r\n\"end\" or Ctrl-D; Ctrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n".as_bytes());
                 }
                 self.con = Con::Run(b);
                 self.console(app, store, dev, out);
@@ -1253,7 +1253,7 @@ impl Term {
             }
             Con::Stop => {
                 if out.room() >= LINE_ROOM {
-                    out.put(slow!("\r\n  Stopped.\r\n").as_bytes());
+                    out.put("\r\n  Stopped.\r\n".as_bytes());
                     self.pending = false;
                     self.done(out);
                 }
@@ -1262,7 +1262,7 @@ impl Term {
     }
 
     fn done(&mut self, out: &mut impl Sink) {
-        out.put(slow!("\r\n  Enter or Esc returns to the menu.").as_bytes());
+        out.put("\r\n  Enter or Esc returns to the menu.".as_bytes());
         (self.con, self.clen) = (Con::Done, 0);
     }
 
@@ -1273,7 +1273,7 @@ impl Term {
         if self.pin_gate() {
             // LINK-30: the PIN prompt, alone.
             match r {
-                2 => w.s(slow!("  This radio has a PIN lock. Type its PIN, then Enter.").as_bytes()),
+                2 => w.s("  This radio has a PIN lock. Type its PIN, then Enter.".as_bytes()),
                 4 => {
                     w.s(b"  PIN: ");
                     for _ in 0..self.pin_n {
@@ -1281,7 +1281,7 @@ impl Term {
                     }
                 }
                 6 if !self.note.is_empty() => w.s(self.note.as_bytes()),
-                _ if r == self.rows - 1 => w.s(slow!(" Enter Check   Ctrl-C Leave").as_bytes()),
+                _ if r == self.rows - 1 => w.s(" Enter Check   Ctrl-C Leave".as_bytes()),
                 _ => {}
             }
             return;
@@ -1307,7 +1307,7 @@ impl Term {
                     w.s(b" ");
                     w.bold(if self.page == Page::Mail { b"Mail" } else { b"TNC" });
                 } else if b == 3 {
-                    w.s(slow!("  Not built yet: the packet mailbox and TNC come with manual chapter 38.").as_bytes());
+                    w.s("  Not built yet: the packet mailbox and TNC come with manual chapter 38.".as_bytes());
                 }
             }
             Page::About => about(b, cx, w),
@@ -1410,7 +1410,7 @@ impl Term {
             1 => {
                 w.s(b" ");
                 w.bold(b"Ferrite terminal");
-                w.s(slow!("   type a number, or move and press Enter").as_bytes());
+                w.s("   type a number, or move and press Enter".as_bytes());
             }
             3..=9 => {
                 let i = b - 3;
@@ -1433,10 +1433,10 @@ impl Term {
                         v.push(digits(cx.store.zones() as u32, &mut [0; 10]));
                         v.push(b" zones");
                     }
-                    2 => v.set(slow!("same numbers as MENU 0 on the radio").as_bytes()),
-                    3 => v.set(slow!("the event log and live activity").as_bytes()),
-                    4 | 5 => v.set(slow!("not built yet").as_bytes()),
-                    _ => v.set(slow!("version, calibration, self-test").as_bytes()),
+                    2 => v.set("same numbers as MENU 0 on the radio".as_bytes()),
+                    3 => v.set("the event log and live activity".as_bytes()),
+                    4 | 5 => v.set("not built yet".as_bytes()),
+                    _ => v.set("version, calibration, self-test".as_bytes()),
                 }
                 w.s(v.as_bytes());
                 if sel {
@@ -1507,7 +1507,7 @@ impl Term {
                 let i = b as u16 - 3;
                 let Some(c) = self.row_chan(i, st) else {
                     if i == 0 && list_len(self.zone, st) == 0 {
-                        w.s(slow!("  No channels here.").as_bytes());
+                        w.s("  No channels here.".as_bytes());
                     }
                     return;
                 };
@@ -1658,14 +1658,14 @@ impl Term {
                 } else if c.cfg.split {
                     w.s(b"Split: TX ");
                     w.s(mhz5(c.cfg.offset.max(0) as Freq10).as_bytes());
-                    w.s(slow!(" MHz, whatever RX is. Saved as you go.").as_bytes());
+                    w.s(" MHz, whatever RX is. Saved as you go.".as_bytes());
                 } else if c.cfg.offset != 0 {
                     let tx = (c.rx as i64 + c.cfg.offset as i64).max(0) as Freq10;
                     w.s(b"TX ");
                     w.s(mhz5(tx).as_bytes());
-                    w.s(slow!(" MHz from the offset. Saved as you go.").as_bytes());
+                    w.s(" MHz from the offset. Saved as you go.".as_bytes());
                 } else {
-                    w.s(slow!("Simplex. Saved as you go.").as_bytes());
+                    w.s("Simplex. Saved as you go.".as_bytes());
                 }
             }
             _ => {}
@@ -1713,7 +1713,7 @@ impl Term {
                 0 => {
                     w.s(b" ");
                     w.bold(b"Settings");
-                    w.s(slow!("   the same numbers as MENU 0 on the radio").as_bytes());
+                    w.s("   the same numbers as MENU 0 on the radio".as_bytes());
                 }
                 2..=10 => {
                     let i = b - 2;
@@ -1749,7 +1749,7 @@ impl Term {
                     t.push(groups::items(self.g, 0).get(self.sub as usize - 1).map_or("", |e| e.0).as_bytes());
                 }
                 w.bold(t.as_bytes());
-                w.s(slow!("      * = not the default").as_bytes());
+                w.s("      * = not the default".as_bytes());
             }
             _ if b >= 2 && b - 2 < n => {
                 let i = b - 2;
@@ -1825,13 +1825,13 @@ impl Term {
         if b == 0 {
             w.s(b" ");
             w.bold(b"Monitor");
-            w.s(slow!("   the event log and the slots receiving now").as_bytes());
+            w.s("   the event log and the slots receiving now".as_bytes());
             return;
         }
         if b == body - 1 {
             w.s(b" ");
             w.bold(b"-- live --");
-            w.s(slow!("   newest at the bottom").as_bytes());
+            w.s("   newest at the bottom".as_bytes());
             return;
         }
         // Lines from row 2 to body - 3: the newest events, oldest first, then the slots receiving now.
@@ -1867,7 +1867,7 @@ impl Term {
             w.at(32);
             w.s(w::s_text(l.rssi).as_bytes());
         } else if k == 0 {
-            w.s(slow!("  Nothing yet: decodes, alerts and signals show here as they come.").as_bytes());
+            w.s("  Nothing yet: decodes, alerts and signals show here as they come.".as_bytes());
         }
     }
 }
@@ -1883,7 +1883,7 @@ fn splash<S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W) {
             v.push(b"FERRITE ");
             v.push(version());
             w.bold(v.as_bytes());
-            w.s(slow!(" - open firmware for the RT-950 Pro").as_bytes());
+            w.s(" - open firmware for the RT-950 Pro".as_bytes());
         }
         4 => {
             w.at(2);
@@ -1893,7 +1893,7 @@ fn splash<S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W) {
         6 => {
             w.at(2);
             w.bold(b"Press Enter");
-            w.s(slow!(" for the menu, ? for help").as_bytes());
+            w.s(" for the menu, ? for help".as_bytes());
         }
         _ => {}
     }

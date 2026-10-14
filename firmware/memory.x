@@ -90,6 +90,9 @@ SECTIONS
      * interrupt or per pass of the Radio task must be a `static` (tools/slowcheck.py fails on a table read from
      * interrupt context in this section). */
     *(.rodata..Lanon.*);
+    /* Not the merged pools of 4, 8, 16 and 32-byte constants (`.rodata.cst*`, one input section each): hot code reads
+     * them (the encoder, the safe state, the DSC framer), and after LTO small named statics land in them too. They
+     * stay fast, short UI strings of those sizes with them (about 4 KB in the tx build, Oct 13, 2026). */
     /* The UI's match jump tables (the code that reads them is slow anyway). */
     *(.rodata..Lswitch.table.*11ferrite_app*);
     *(.rodata..Lswitch.table.*10ferrite_ui*);

@@ -2,7 +2,6 @@
 //! pages, reached with ◀▶ like the self-test. Read only, rarely opened: the text lives in slow flash.
 
 use super::shared::*;
-use super::table::slow_table;
 use crate::App;
 use ferrite_ui::assets::*;
 use ferrite_ui::gfx::*;
@@ -19,65 +18,59 @@ pub(crate) const ACTION_X: i32 = 80;
 pub(crate) const ACTION_W: i32 = 240 - 8 - ACTION_X;
 const ROW_H: i32 = 18;
 
-slow_table! {
-    /// HELP-3: home's keys (Appendix B, the key card), one line each.
-    pub(crate) HOME_KEYS: [Row; 15] = [
-        (slow!("Knob \x18\x19"), slow!("Tune or step channels")),
-        (slow!("\x1b\x1a"), slow!("Band, or zone")),
-        (slow!("0-9"), slow!("Type freq or channel")),
-        (slow!("*"), slow!("Mute slot; point")),
-        (slow!("SLOT"), slow!("Next slot, A-B-C")),
-        (slow!("Hold SLOT"), slow!("Edit the slot")),
-        (slow!("V/M"), slow!("VFO or channel")),
-        (slow!("Hold V/M"), slow!("Save VFO as channel")),
-        (slow!("MENU"), slow!("Quick settings")),
-        (slow!("Hold MENU"), slow!("Advanced settings")),
-        (slow!("MENU 0"), slow!("Menu by number")),
-        (slow!("#"), slow!("Status; pause watch")),
-        (slow!("Hold #"), slow!("Key lock")),
-        (slow!("Hold *"), slow!("Quick menu")),
-        (slow!("Hold BACK"), slow!("Home, from anywhere")),
-    ];
-}
+/// HELP-3: home's keys (Appendix B, the key card), one line each.
+pub(crate) const HOME_KEYS: [Row; 15] = [
+    ("Knob \x18\x19", "Tune or step channels"),
+    ("\x1b\x1a", "Band, or zone"),
+    ("0-9", "Type freq or channel"),
+    ("*", "Mute slot; point"),
+    ("SLOT", "Next slot, A-B-C"),
+    ("Hold SLOT", "Edit the slot"),
+    ("V/M", "VFO or channel"),
+    ("Hold V/M", "Save VFO as channel"),
+    ("MENU", "Quick settings"),
+    ("Hold MENU", "Advanced settings"),
+    ("MENU 0", "Menu by number"),
+    ("#", "Status; pause watch"),
+    ("Hold #", "Key lock"),
+    ("Hold *", "Quick menu"),
+    ("Hold BACK", "Home, from anywhere"),
+];
 
-slow_table! {
-    /// HELP-3: the side keys and PTTs.
-    pub(crate) SIDE_KEYS: [Row; 13] = [
-        ("", slow!("SIDE1 (PF1)")),
-        (slow!("Tap"), slow!("Monitor on or off")),
-        (slow!("Hold"), slow!("Monitor while held")),
-        (slow!("+ Knob \x18\x19"), slow!("Squelch")),
-        (slow!("+ \x1b\x1a"), slow!("Clarifier")),
-        ("", slow!("SIDE2 (PF2)")),
-        (slow!("Tap"), slow!("Scan start or stop")),
-        (slow!("Hold"), slow!("Frequency counter")),
-        (slow!("+ Knob \x18\x19"), slow!("1 MHz or 10 channels")),
-        ("", slow!("PTT")),
-        (slow!("PTT A"), slow!("Transmit, active slot")),
-        (slow!("PTT B"), slow!("Transmit on slot B")),
-        (slow!("PTT+SIDE2"), slow!("Tone burst")),
-    ];
-}
+/// HELP-3: the side keys and PTTs.
+pub(crate) const SIDE_KEYS: [Row; 13] = [
+    ("", "SIDE1 (PF1)"),
+    ("Tap", "Monitor on or off"),
+    ("Hold", "Monitor while held"),
+    ("+ Knob \x18\x19", "Squelch"),
+    ("+ \x1b\x1a", "Clarifier"),
+    ("", "SIDE2 (PF2)"),
+    ("Tap", "Scan start or stop"),
+    ("Hold", "Frequency counter"),
+    ("+ Knob \x18\x19", "1 MHz or 10 channels"),
+    ("", "PTT"),
+    ("PTT A", "Transmit, active slot"),
+    ("PTT B", "Transmit on slot B"),
+    ("PTT+SIDE2", "Tone burst"),
+];
 
-slow_table! {
-    /// HELP-5: the menu numbers most often wanted (MENU, then the digits).
-    pub(crate) MENU_NOS: [Row; 14] = [
-        (slow!("0 0"), slow!("Status page")),
-        (slow!("0 2 1"), slow!("Channels")),
-        (slow!("0 2 3"), slow!("Zones")),
-        (slow!("0 3 1"), slow!("FM broadcast")),
-        (slow!("0 3 2 6"), slow!("Band scope")),
-        (slow!("0 3 3"), slow!("Frequency counter")),
-        (slow!("0 3 4"), slow!("HF mode")),
-        (slow!("0 3 6"), slow!("Tone search")),
-        (slow!("0 4 1"), slow!("Event log")),
-        (slow!("0 5 1"), slow!("APRS heard")),
-        (slow!("0 5 2"), slow!("Messages")),
-        (slow!("0 7 2"), slow!("Home layout")),
-        (slow!("0 9 2 1"), slow!("Bluetooth")),
-        (slow!("0 9 8 1"), slow!("Run setup again")),
-    ];
-}
+/// HELP-5: the menu numbers most often wanted (MENU, then the digits).
+pub(crate) const MENU_NOS: [Row; 14] = [
+    ("0 0", "Status page"),
+    ("0 2 1", "Channels"),
+    ("0 2 3", "Zones"),
+    ("0 3 1", "FM broadcast"),
+    ("0 3 2 6", "Band scope"),
+    ("0 3 3", "Frequency counter"),
+    ("0 3 4", "HF mode"),
+    ("0 3 6", "Tone search"),
+    ("0 4 1", "Event log"),
+    ("0 5 1", "APRS heard"),
+    ("0 5 2", "Messages"),
+    ("0 7 2", "Home layout"),
+    ("0 9 2 1", "Bluetooth"),
+    ("0 9 8 1", "Run setup again"),
+];
 
 /// One key | action line at baseline `b`, or a section heading when the key is empty.
 fn row(lcd: &mut impl Panel, b: i32, (key, action): Row) {
@@ -113,7 +106,7 @@ fn manual(lcd: &mut impl Panel) {
     let y = 30;
     w::manual_qr(lcd, (240 - side) / 2, y, SCALE);
     let t = y + side + 8;
-    w::field(lcd, 8, 224, t, t + 17, t + 13, Align::Center, slow!("The full manual").as_bytes(), &UI_12B, TEXT, BG);
+    w::field(lcd, 8, 224, t, t + 17, t + 13, Align::Center, "The full manual".as_bytes(), &UI_12B, TEXT, BG);
     w::field(lcd, 8, 224, t + 18, t + 35, t + 31, Align::Center, MANUAL_URL.as_bytes(), &UI_12, SUB, BG);
 }
 
@@ -142,8 +135,8 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, h: Help) {
             for (i, r) in all.iter_mut().enumerate() {
                 *r = (DIGITS[i], super::shortcut::SHORTCUTS[i]);
             }
-            rows(lcd, slow!("Hold a digit on home").as_bytes(), all.iter().copied())
+            rows(lcd, "Hold a digit on home".as_bytes(), all.iter().copied())
         }
-        Help::MenuNos => rows(lcd, slow!("MENU, then the number").as_bytes(), MENU_NOS.iter().copied()),
+        Help::MenuNos => rows(lcd, "MENU, then the number".as_bytes(), MENU_NOS.iter().copied()),
     }
 }

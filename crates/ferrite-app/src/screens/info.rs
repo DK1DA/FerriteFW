@@ -10,7 +10,7 @@
 use super::groups::cal_text;
 use super::help::{self, Help};
 use super::shared::*;
-use super::table::{slow_table, Ctx, Table, Val};
+use super::table::{Ctx, Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
@@ -103,119 +103,107 @@ fn volts(b: &mut Buf<40>, mv: u16) {
     let _ = uwrite!(b, "{}.{} V", mv / 1000, Zero((mv % 1000 / 10) as u32, 2));
 }
 
-slow_table! {
-    ABOUT: [InfoRow; 10] = [
-        // SELF-5: version and build (the git commit; "+" built from uncommitted changes).
-        (slow!("Version"), |_, b| {
-            let _ = uwrite!(b, "{} {}", VERSION, ferrite_core::build());
-            TEXT
-        }),
-        (slow!("MCU"), |Ctx { dev: d, .. }, b| {
-            let t = &d.selftest;
-            match (t.idcode, t.mcu_ok) {
-                (0, _) => fixed(b, slow!("Not read"), SUB),
-                (_, true) => fixed(b, slow!("AT32F403A"), TEXT),
-                (id, false) => {
-                    let _ = uwrite!(b, "Unknown {:08X}", id);
-                    RED
-                }
+const ABOUT: [InfoRow; 10] = [
+    // SELF-5: version and build (the git commit; "+" built from uncommitted changes).
+    ("Version", |_, b| {
+        let _ = uwrite!(b, "{} {}", VERSION, ferrite_core::build());
+        TEXT
+    }),
+    ("MCU", |Ctx { dev: d, .. }, b| {
+        let t = &d.selftest;
+        match (t.idcode, t.mcu_ok) {
+            (0, _) => fixed(b, "Not read", SUB),
+            (_, true) => fixed(b, "AT32F403A", TEXT),
+            (id, false) => {
+                let _ = uwrite!(b, "Unknown {:08X}", id);
+                RED
             }
-        }),
-        (slow!("SPI flash"), |Ctx { dev: d, .. }, b| {
-            let t = &d.selftest;
-            if t.flash_id == 0 {
-                return fixed(b, slow!("No answer"), RED);
-            }
-            let _ = uwrite!(b, "{} MB \u{b7} {:06X}", t.flash_mb, t.flash_id);
+        }
+    }),
+    ("SPI flash", |Ctx { dev: d, .. }, b| {
+        let t = &d.selftest;
+        if t.flash_id == 0 {
+            return fixed(b, "No answer", RED);
+        }
+        let _ = uwrite!(b, "{} MB \u{b7} {:06X}", t.flash_mb, t.flash_id);
+        TEXT
+    }),
+    ("Calibration", |Ctx { dev: d, .. }, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { TEXT } else { AMBER })),
+    ("Transmit", |Ctx { dev: d, .. }, b| match tx_lock(d) {
+        None => fixed(b, "Ready", GREEN),
+        Some(why) => fixed(b, why, AMBER),
+    }),
+    ("Self-test", |Ctx { dev: d, .. }, b| {
+        let c = checks(d);
+        let ok = c.iter().filter(|x| x.1 == Some(true)).count();
+        let failed = c.iter().any(|x| x.1 == Some(false));
+        let _ = uwrite!(b, "{} of {} passed", ok, c.len());
+        if failed { RED } else { TEXT }
+    }),
+    ("Battery", |Ctx { dev: d, .. }, b| {
+        volts(b, d.battery_mv); // the trim is on Calibration and trims
+        TEXT
+    }),
+    // SBAR-20: the MCU's die temperature (the Radio task reads it every 10 s).
+    ("MCU temp", |Ctx { dev: d, .. }, b| match d.mcu_temp {
+        Some(c) => {
+            let _ = uwrite!(b, "{} \u{b0}C", c);
             TEXT
-        }),
-        (slow!("Calibration"), |Ctx { dev: d, .. }, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { TEXT } else { AMBER })),
-        (slow!("Transmit"), |Ctx { dev: d, .. }, b| match tx_lock(d) {
-            None => fixed(b, slow!("Ready"), GREEN),
-            Some(why) => fixed(b, why, AMBER),
-        }),
-        (slow!("Self-test"), |Ctx { dev: d, .. }, b| {
-            let c = checks(d);
-            let ok = c.iter().filter(|x| x.1 == Some(true)).count();
-            let failed = c.iter().any(|x| x.1 == Some(false));
-            let _ = uwrite!(b, "{} of {} passed", ok, c.len());
-            if failed { RED } else { TEXT }
-        }),
-        (slow!("Battery"), |Ctx { dev: d, .. }, b| {
-            volts(b, d.battery_mv); // the trim is on Calibration and trims
-            TEXT
-        }),
-        // SBAR-20: the MCU's die temperature (the Radio task reads it every 10 s).
-        (slow!("MCU temp"), |Ctx { dev: d, .. }, b| match d.mcu_temp {
-            Some(c) => {
-                let _ = uwrite!(b, "{} \u{b0}C", c);
-                TEXT
-            }
-            None => fixed(b, slow!("Not read yet"), SUB),
-        }),
-        (slow!("Uptime"), |Ctx { app: a, .. }, b| {
-            let m = a.now / 60_000;
-            let _ = uwrite!(b, "{} h {} min", m / 60, m % 60);
-            TEXT
-        }),
-        (slow!("SSB patch"), |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, slow!("Installed"), TEXT) } else { fixed(b, slow!("Not installed"), SUB) }),
-    ];
-}
+        }
+        None => fixed(b, "Not read yet", SUB),
+    }),
+    ("Uptime", |Ctx { app: a, .. }, b| {
+        let m = a.now / 60_000;
+        let _ = uwrite!(b, "{} h {} min", m / 60, m % 60);
+        TEXT
+    }),
+    ("SSB patch", |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, "Installed", TEXT) } else { fixed(b, "Not installed", SUB) }),
+];
 
-slow_table! {
-    CHECKS: [InfoRow; 6] = [
-        (slow!("MCU"), |Ctx { dev: d, .. }, b| check_row(0, d, b)),
-        (slow!("SPI flash"), |Ctx { dev: d, .. }, b| check_row(1, d, b)),
-        (slow!("BK4829 VHF"), |Ctx { dev: d, .. }, b| check_row(2, d, b)),
-        (slow!("BK4829 UHF"), |Ctx { dev: d, .. }, b| check_row(3, d, b)),
-        (slow!("SI4732"), |Ctx { dev: d, .. }, b| check_row(4, d, b)),
-        (slow!("Calibration"), |Ctx { dev: d, .. }, b| check_row(5, d, b)),
-    ];
-}
+const CHECKS: [InfoRow; 6] = [
+    ("MCU", |Ctx { dev: d, .. }, b| check_row(0, d, b)),
+    ("SPI flash", |Ctx { dev: d, .. }, b| check_row(1, d, b)),
+    ("BK4829 VHF", |Ctx { dev: d, .. }, b| check_row(2, d, b)),
+    ("BK4829 UHF", |Ctx { dev: d, .. }, b| check_row(3, d, b)),
+    ("SI4732", |Ctx { dev: d, .. }, b| check_row(4, d, b)),
+    ("Calibration", |Ctx { dev: d, .. }, b| check_row(5, d, b)),
+];
 
-slow_table! {
-    CALIBRATION: [InfoRow; 3] = [
-        (slow!("Status"), |Ctx { dev: d, .. }, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { GREEN } else { AMBER })),
-        (slow!("CRC at install"), |Ctx { dev: d, .. }, b| match d.selftest.cal {
-            CalState::CrcMismatch => fixed(b, slow!("Changed"), RED),
-            CalState::Unknown => fixed(b, slow!("Not checked"), SUB),
-            _ => fixed(b, slow!("Matches"), GREEN),
-        }),
-        (slow!("User trims"), |_, b| fixed(b, slow!("MENU 0 9 7"), SUB)),
-    ];
-}
+const CALIBRATION: [InfoRow; 3] = [
+    ("Status", |Ctx { dev: d, .. }, b| fixed(b, cal_text(d.selftest.cal), if d.selftest.cal == CalState::Ok { GREEN } else { AMBER })),
+    ("CRC at install", |Ctx { dev: d, .. }, b| match d.selftest.cal {
+        CalState::CrcMismatch => fixed(b, "Changed", RED),
+        CalState::Unknown => fixed(b, "Not checked", SUB),
+        _ => fixed(b, "Matches", GREEN),
+    }),
+    ("User trims", |_, b| fixed(b, "MENU 0 9 7", SUB)),
+];
 
-slow_table! {
-    ADV_SQUELCH: [InfoRow; 3] = [
-        (slow!("Thresholds"), |_, b| fixed(b, slow!("From calibration"), SUB)),
-        (slow!("Squelch tail"), |_, b| fixed(b, slow!("150 ms"), TEXT)),
-        (slow!("Levels"), |_, b| fixed(b, slow!("0-9 per slot"), TEXT)),
-    ];
-}
+const ADV_SQUELCH: [InfoRow; 3] = [
+    ("Thresholds", |_, b| fixed(b, "From calibration", SUB)),
+    ("Squelch tail", |_, b| fixed(b, "150 ms", TEXT)),
+    ("Levels", |_, b| fixed(b, "0-9 per slot", TEXT)),
+];
 
-slow_table! {
-    SSB_PATCH: [InfoRow; 3] = [
-        (slow!("State"), |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, slow!("Verified"), GREEN) } else { fixed(b, slow!("Not installed"), AMBER) }),
-        (slow!("Loads"), |_, b| fixed(b, slow!("Entering HF mode"), TEXT)),
-        (slow!("Source"), |_, b| fixed(b, slow!("Your stock .BTF"), TEXT)),
-    ];
-}
+const SSB_PATCH: [InfoRow; 3] = [
+    ("State", |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, "Verified", GREEN) } else { fixed(b, "Not installed", AMBER) }),
+    ("Loads", |_, b| fixed(b, "Entering HF mode", TEXT)),
+    ("Source", |_, b| fixed(b, "Your stock .BTF", TEXT)),
+];
 
-slow_table! {
-    MAILBOX: [InfoRow; 4] = [
-        (slow!("Mailbox"), |_, b| fixed(b, slow!("Off"), TEXT)),
-        (slow!("SSID"), |Ctx { app: a, .. }, b| {
-            if a.set.callsign.is_empty() {
-                return fixed(b, slow!("Needs a callsign"), AMBER);
-            }
-            b.set(a.set.callsign.as_bytes());
-            b.push(b"-1");
-            TEXT
-        }),
-        (slow!("Bulletins"), |_, b| fixed(b, slow!("On"), TEXT)),
-        (slow!("Messages"), |_, b| fixed(b, slow!("None"), SUB)),
-    ];
-}
+const MAILBOX: [InfoRow; 4] = [
+    ("Mailbox", |_, b| fixed(b, "Off", TEXT)),
+    ("SSID", |Ctx { app: a, .. }, b| {
+        if a.set.callsign.is_empty() {
+            return fixed(b, "Needs a callsign", AMBER);
+        }
+        b.set(a.set.callsign.as_bytes());
+        b.push(b"-1");
+        TEXT
+    }),
+    ("Bulletins", |_, b| fixed(b, "On", TEXT)),
+    ("Messages", |_, b| fixed(b, "None", SUB)),
+];
 
 const NONE: [InfoRow; 0] = [];
 

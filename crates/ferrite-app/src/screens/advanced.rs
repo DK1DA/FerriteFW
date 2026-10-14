@@ -43,15 +43,15 @@ fn step(app: &App, row: u8, d: i32) -> u8 {
 
 /// Advanced settings groups (MENU 0 1-9) and their help lines.
 pub(crate) const GROUPS: [(&str, &str); 9] = [
-    (slow!("Watch and scan"), slow!("Watch, background jobs, scan, skip list.")),
-    (slow!("Channels"), slow!("Browse channels and zones, add a repeater.")),
-    (slow!("Tools"), slow!("FM, scope, counter, HF, crossband, tones.")),
-    (slow!("Decoders and alerts"), slow!("Event log, pagers, DSC, AIS, weather alerts.")),
-    (slow!("APRS"), slow!("Heard, messages, beacons, your station.")),
-    (slow!("GPS and time"), slow!("GPS, position, units, time zone, clock.")),
-    (slow!("Display, sound, power"), slow!("Theme, layout, backlight, sounds, power.")),
-    (slow!("Transmit"), slow!("Timeout, VOX, mic gain, DTMF, callsign, ID.")),
-    (slow!("System"), slow!("Keys, links, PIN, region, receiver, reset.")),
+    ("Watch and scan", "Watch, background jobs, scan, skip list."),
+    ("Channels", "Browse channels and zones, add a repeater."),
+    ("Tools", "FM, scope, counter, HF, crossband, tones."),
+    ("Decoders and alerts", "Event log, pagers, DSC, AIS, weather alerts."),
+    ("APRS", "Heard, messages, beacons, your station."),
+    ("GPS and time", "GPS, position, units, time zone, clock."),
+    ("Display, sound, power", "Theme, layout, backlight, sounds, power."),
+    ("Transmit", "Timeout, VOX, mic gain, DTMF, callsign, ID."),
+    ("System", "Keys, links, PIN, region, receiver, reset."),
 ];
 
 impl View for Advanced {

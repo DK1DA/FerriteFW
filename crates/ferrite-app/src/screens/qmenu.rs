@@ -154,11 +154,11 @@ pub(crate) fn lines(app: &App) -> [Line; ROWS] {
     let mut b = Buf::<4>::new();
     let _ = uwrite!(b, "{}", level);
     [
-        (slow!("PTT A"), slow!("Reverse"), rev.0, rev.1, rev.2),
-        (slow!("PTT B"), slow!("Night red"), night.0, night.1, night.2),
-        (slow!("PF1"), slow!("GPS"), gps.0, gps.1, gps.2),
-        (slow!("PF2"), slow!("Bluetooth"), bt.0, bt.1, bt.2),
-        (slow!("Knob"), slow!("Brightness"), b, TEXT, level),
+        ("PTT A", "Reverse", rev.0, rev.1, rev.2),
+        ("PTT B", "Night red", night.0, night.1, night.2),
+        ("PF1", "GPS", gps.0, gps.1, gps.2),
+        ("PF2", "Bluetooth", bt.0, bt.1, bt.2),
+        ("Knob", "Brightness", b, TEXT, level),
     ]
 }
 

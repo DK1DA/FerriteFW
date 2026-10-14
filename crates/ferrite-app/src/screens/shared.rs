@@ -292,20 +292,20 @@ impl App {
         let lv = &live.slots[s as usize];
         // HOME-15: quick mute takes the state word, "RX muted" while it receives (the broadcast slot too).
         if self.mute & 1 << s != 0 && !self.relay_off(s) && !lv.relay {
-            return if lv.squelch_open { (slow!("RX muted"), AMBER) } else { (slow!("Muted"), AMBER) };
+            return if lv.squelch_open { ("RX muted", AMBER) } else { ("Muted", AMBER) };
         }
         let watched = s == self.active || self.watch_mask() & 1 << s != 0;
         if self.in_bcast_band(s) && !lv.scanning {
             return match self.bcast_slot() {
-                Some(b) if b != s => ([slow!("FM on A"), slow!("FM on B"), slow!("FM on C")][b as usize % 3], DIM),
+                Some(b) if b != s => (["FM on A", "FM on B", "FM on C"][b as usize % 3], DIM),
                 Some(_) if !self.radio.fm_on => ("off", DIM),
                 Some(_) if self.bcast_heard(live) => ("FM", GREEN),
-                Some(_) => (slow!("muted"), AMBER),
+                Some(_) => ("muted", AMBER),
                 None => ("off", DIM),
             };
         }
         if self.relay_off(s) {
-            (slow!("Watch off: relay"), AMBER)
+            ("Watch off: relay", AMBER)
         } else if lv.relay {
             ("relay", AMBER)
         } else if self.monitor & 1 << s != 0 {

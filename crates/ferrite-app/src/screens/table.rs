@@ -1,8 +1,8 @@
 //! Label + value pages as data: the Status page, the system pages ([`super::info`]), link status, the GPS
-//! position and an APRS station. A page is a [`Table`], a `static` in the slow flash section (it is read once
-//! per redraw): each row a label and a function that writes the value and returns its colour. One renderer
-//! ([`App::table`]) draws any table through the one label + value drawer ([`w::kv`]), and one key handler
-//! ([`key`]) moves and opens the rows of a table that has a selection. The screen's state stays its row.
+//! position and an APRS station. A page is a [`Table`], a `const` (in the slow flash with every unnamed constant;
+//! it is read once per redraw): each row a label and a function that writes the value and returns its colour.
+//! One renderer ([`App::table`]) draws any table through the one label + value drawer ([`w::kv`]), and one key
+//! handler ([`key`]) moves and opens the rows of a table that has a selection. The screen's state stays its row.
 //!
 //! Adding a row is one line in its table.
 
@@ -53,16 +53,6 @@ impl<C> Table<C> {
         self.rows.len() as u8
     }
 }
-
-/// A `static` in the slow flash section on the radio (see `slow!`).
-macro_rules! slow_table {
-    ($(#[$m:meta])* $v:vis $name:ident: $t:ty = $e:expr;) => {
-        $(#[$m])*
-        #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-        $v static $name: $t = $e;
-    };
-}
-pub(crate) use slow_table;
 
 /// Where a scrolling table's rows end (the hint bar starts below).
 const TABLE_END: i32 = 298;

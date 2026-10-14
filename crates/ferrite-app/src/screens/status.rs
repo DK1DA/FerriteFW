@@ -5,7 +5,7 @@ use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
-use super::table::{self, slow_table, Act, Ctx, Go, Table, Val};
+use super::table::{self, Act, Ctx, Go, Table, Val};
 use crate::keys::KeyEvent;
 use crate::slot::{band_name, Item};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
@@ -38,210 +38,204 @@ fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
     TEXT
 }
 
-slow_table! {
-    /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
-    ROWS: [(&str, Val<()>); 21] = [
-        // SBAR-14: why transmit is locked, if it is (BOOT-11).
-        (slow!("Transmit"), |c, b| match super::info::tx_lock(c.dev) {
-            None => {
-                b.set(b"Ready");
-                GREEN
+/// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
+const ROWS: [(&str, Val<()>); 21] = [
+    // SBAR-14: why transmit is locked, if it is (BOOT-11).
+    ("Transmit", |c, b| match super::info::tx_lock(c.dev) {
+        None => {
+            b.set(b"Ready");
+            GREEN
+        }
+        Some(why) => {
+            b.set(why.as_bytes());
+            AMBER
+        }
+    }),
+    ("Region", |c, b| {
+        b.set(c.app.set.region_name().as_bytes());
+        TEXT
+    }),
+    ("Extend TX", |c, b| on_off(b, c.app.set.extend_tx)),
+    ("Inbox", |c, b| {
+        if c.app.inbox == 0 {
+            b.set(b"Empty");
+        } else {
+            let _ = uwrite!(b, "{} unread", c.app.inbox);
+        }
+        TEXT
+    }),
+    ("Scan", |c, b| {
+        if paused(c, b) {
+            return AMBER;
+        }
+        // Decision 63: where each scan is now.
+        for (s, l) in c.live.slots.iter().enumerate().filter(|(_, l)| l.scanning) {
+            if !b.is_empty() {
+                b.push(b", ");
             }
-            Some(why) => {
-                b.set(why.as_bytes());
-                AMBER
+            let _ = uwrite!(b, "{}: ", w::LETTERS[s] as char);
+            b.push(w::freq3(l.freq).as_bytes());
+            if c.live.slots.iter().filter(|l| l.scanning).count() == 1 {
+                b.push(" \u{b7} ".as_bytes());
+                b.push(band_name(l.freq).as_bytes());
             }
-        }),
-        (slow!("Region"), |c, b| {
-            b.set(c.app.set.region_name().as_bytes());
+        }
+        if b.is_empty() {
+            b.set(b"Off");
+        }
+        TEXT
+    }),
+    ("Watch", |c, b| {
+        if paused(c, b) {
+            return AMBER;
+        }
+        b.set(WATCH_TEXT[c.app.watch as usize % 3].as_bytes());
+        if c.app.paused_until.is_some() {
+            b.push(" \u{b7} paused".as_bytes());
+        }
+        TEXT
+    }),
+    ("Jobs", |c, b| {
+        if paused(c, b) {
+            return AMBER;
+        }
+        b.set(b"None");
+        TEXT
+    }),
+    ("Beacon", |c, b| if paused(c, b) { AMBER } else { on_off(b, false) }),
+    ("Battery Save", |c, b| {
+        let mut t = Buf::<16>::new();
+        c.app.item_text(Item::BatterySave, true, &mut t);
+        b.set(t.as_bytes());
+        TEXT
+    }),
+    ("GPS", |c, b| {
+        // GPS-26: the module asleep between fixes, and when it wakes (the row is short: "Fix · sleep 42 s").
+        match (c.dev.gps, c.dev.gps_phase) {
+            (GpsState::Off, _) => b.set(b"Off"),
+            (GpsState::Fix, GpsPhase::Standby(s)) => {
+                let _ = uwrite!(b, "Fix \u{b7} sleep {} s", s);
+            }
+            (_, GpsPhase::Standby(s)) => {
+                let _ = uwrite!(b, "Sleep {} s", s);
+            }
+            (_, GpsPhase::Waking) => b.set(b"Waking"),
+            (GpsState::Searching, _) => b.set(b"Searching"),
+            (GpsState::Fix, _) => {
+                let _ = uwrite!(b, "Fix \u{b7} {} sats", c.dev.sats);
+            }
+        }
+        TEXT
+    }),
+    // Decision 63: the broadcast receiver's state.
+    ("Broadcast", |c, b| {
+        if c.app.radio.fm_on {
+            let f = c.app.fm_freq() as u32;
+            let _ = uwrite!(b, "FM {}.{}", f / 100, f % 100 / 10);
+            if let Some(s) = c.app.bcast_slot() {
+                let _ = uwrite!(b, " on {}", w::LETTERS[s as usize % 3] as char); // BCR-27
+            }
+        } else if c.app.radio.mode == super::activity::Mode::Hf {
+            b.set(b"HF mode");
+        } else {
+            b.set(b"Off");
+        }
+        TEXT
+    }),
+    // Decision 63: where the clock comes from.
+    ("Clock", |c, b| {
+        match c.dev.clock_min {
+            None => b.set(b"Not set"),
+            Some(_) if c.app.set.clock_gps && c.dev.gps == GpsState::Fix => b.set(b"From GPS"),
+            Some(_) => b.set(b"Set by hand"),
+        }
+        TEXT
+    }),
+    ("Bluetooth", |c, b| {
+        b.set(if c.dev.bt { b"Connected".as_slice() } else { b"Off" });
+        TEXT
+    }),
+    // SND-12: a speaker mic in the side connector (the internal speaker and mic are off).
+    ("Speaker mic", |c, b| {
+        b.set(if c.dev.spkmic { b"Connected".as_slice() } else { b"None" });
+        TEXT
+    }),
+    ("Battery", |c, b| {
+        let d = c.dev;
+        let _ = uwrite!(b, "{}%", d.battery_pct); // volts are on About
+        if d.battery_cutoff {
+            RED
+        } else if d.battery_low {
+            AMBER
+        } else {
             TEXT
-        }),
-        (slow!("Extend TX"), |c, b| on_off(b, c.app.set.extend_tx)),
-        (slow!("Inbox"), |c, b| {
-            if c.app.inbox == 0 {
-                b.set(b"Empty");
-            } else {
-                let _ = uwrite!(b, "{} unread", c.app.inbox);
-            }
-            TEXT
-        }),
-        (slow!("Scan"), |c, b| {
-            if paused(c, b) {
-                return AMBER;
-            }
-            // Decision 63: where each scan is now.
-            for (s, l) in c.live.slots.iter().enumerate().filter(|(_, l)| l.scanning) {
-                if !b.is_empty() {
-                    b.push(b", ");
-                }
-                let _ = uwrite!(b, "{}: ", w::LETTERS[s] as char);
-                b.push(w::freq3(l.freq).as_bytes());
-                if c.live.slots.iter().filter(|l| l.scanning).count() == 1 {
-                    b.push(" \u{b7} ".as_bytes());
-                    b.push(band_name(l.freq).as_bytes());
-                }
-            }
-            if b.is_empty() {
-                b.set(b"Off");
-            }
-            TEXT
-        }),
-        (slow!("Watch"), |c, b| {
-            if paused(c, b) {
-                return AMBER;
-            }
-            b.set(WATCH_TEXT[c.app.watch as usize % 3].as_bytes());
-            if c.app.paused_until.is_some() {
-                b.push(" \u{b7} paused".as_bytes());
-            }
-            TEXT
-        }),
-        (slow!("Jobs"), |c, b| {
-            if paused(c, b) {
-                return AMBER;
-            }
-            b.set(b"None");
-            TEXT
-        }),
-        (slow!("Beacon"), |c, b| if paused(c, b) { AMBER } else { on_off(b, false) }),
-        (slow!("Battery Save"), |c, b| {
-            let mut t = Buf::<16>::new();
-            c.app.item_text(Item::BatterySave, true, &mut t);
-            b.set(t.as_bytes());
-            TEXT
-        }),
-        (slow!("GPS"), |c, b| {
-            // GPS-26: the module asleep between fixes, and when it wakes (the row is short: "Fix · sleep 42 s").
-            match (c.dev.gps, c.dev.gps_phase) {
-                (GpsState::Off, _) => b.set(b"Off"),
-                (GpsState::Fix, GpsPhase::Standby(s)) => {
-                    let _ = uwrite!(b, "Fix \u{b7} sleep {} s", s);
-                }
-                (_, GpsPhase::Standby(s)) => {
-                    let _ = uwrite!(b, "Sleep {} s", s);
-                }
-                (_, GpsPhase::Waking) => b.set(b"Waking"),
-                (GpsState::Searching, _) => b.set(b"Searching"),
-                (GpsState::Fix, _) => {
-                    let _ = uwrite!(b, "Fix \u{b7} {} sats", c.dev.sats);
-                }
-            }
-            TEXT
-        }),
-        // Decision 63: the broadcast receiver's state.
-        (slow!("Broadcast"), |c, b| {
-            if c.app.radio.fm_on {
-                let f = c.app.fm_freq() as u32;
-                let _ = uwrite!(b, "FM {}.{}", f / 100, f % 100 / 10);
-                if let Some(s) = c.app.bcast_slot() {
-                    let _ = uwrite!(b, " on {}", w::LETTERS[s as usize % 3] as char); // BCR-27
-                }
-            } else if c.app.radio.mode == super::activity::Mode::Hf {
-                b.set(b"HF mode");
-            } else {
-                b.set(b"Off");
-            }
-            TEXT
-        }),
-        // Decision 63: where the clock comes from.
-        (slow!("Clock"), |c, b| {
-            match c.dev.clock_min {
-                None => b.set(b"Not set"),
-                Some(_) if c.app.set.clock_gps && c.dev.gps == GpsState::Fix => b.set(b"From GPS"),
-                Some(_) => b.set(b"Set by hand"),
-            }
-            TEXT
-        }),
-        (slow!("Bluetooth"), |c, b| {
-            b.set(if c.dev.bt { b"Connected".as_slice() } else { b"Off" });
-            TEXT
-        }),
-        // SND-12: a speaker mic in the side connector (the internal speaker and mic are off).
-        (slow!("Speaker mic"), |c, b| {
-            b.set(if c.dev.spkmic { b"Connected".as_slice() } else { b"None" });
-            TEXT
-        }),
-        (slow!("Battery"), |c, b| {
-            let d = c.dev;
-            let _ = uwrite!(b, "{}%", d.battery_pct); // volts are on About
-            if d.battery_cutoff {
-                RED
-            } else if d.battery_low {
-                AMBER
-            } else {
-                TEXT
-            }
-        }),
-        // Decision 63: the battery's warning and cut-off levels (from the bench: open point, chapter 33).
-        (slow!("Battery levels"), |_, b| {
-            b.set(b"Not measured yet");
+        }
+    }),
+    // Decision 63: the battery's warning and cut-off levels (from the bench: open point, chapter 33).
+    ("Battery levels", |_, b| {
+        b.set(b"Not measured yet");
+        SUB
+    }),
+    // SBAR-20: the MCU's die temperature (informational: not the PA's), in 0 6 4's units, as read.
+    ("MCU temperature", |c, b| match c.dev.mcu_temp {
+        None => {
+            b.set(b"Not read yet");
             SUB
-        }),
-        // SBAR-20: the MCU's die temperature (informational: not the PA's), in 0 6 4's units, as read.
-        (slow!("MCU temperature"), |c, b| match c.dev.mcu_temp {
-            None => {
-                b.set(b"Not read yet");
-                SUB
-            }
-            Some(t) if c.app.set.units == 1 => {
-                let _ = uwrite!(b, "{}\u{b0}F", t as i32 * 9 / 5 + 32);
-                TEXT
-            }
-            Some(t) => {
-                let _ = uwrite!(b, "{}\u{b0}C", t);
-                TEXT
-            }
-        }),
-        (slow!("Key lock"), |c, b| on_off(b, c.app.locked)),
-        // VOX-1: VOX shows here when on.
-        (slow!("VOX"), |c, b| on_off(b, c.app.set.vox)),
-        // SBAR-18: paused in HF mode; WX-3: US and Canada only.
-        (slow!("Weather alerts"), |c, b| {
-            if !c.app.set.wx_region() {
-                b.set(b"Not in region");
-                SUB
-            } else if !c.app.set.same {
-                on_off(b, false)
-            } else if paused(c, b) {
-                AMBER
-            } else {
-                on_off(b, true)
-            }
-        }),
-        // Chapter 38: the packet mailbox (no menu number: it is reached from here).
-        (slow!("Mailbox"), |_, b| on_off(b, false)),
-    ];
-}
+        }
+        Some(t) if c.app.set.units == 1 => {
+            let _ = uwrite!(b, "{}\u{b0}F", t as i32 * 9 / 5 + 32);
+            TEXT
+        }
+        Some(t) => {
+            let _ = uwrite!(b, "{}\u{b0}C", t);
+            TEXT
+        }
+    }),
+    ("Key lock", |c, b| on_off(b, c.app.locked)),
+    // VOX-1: VOX shows here when on.
+    ("VOX", |c, b| on_off(b, c.app.set.vox)),
+    // SBAR-18: paused in HF mode; WX-3: US and Canada only.
+    ("Weather alerts", |c, b| {
+        if !c.app.set.wx_region() {
+            b.set(b"Not in region");
+            SUB
+        } else if !c.app.set.same {
+            on_off(b, false)
+        } else if paused(c, b) {
+            AMBER
+        } else {
+            on_off(b, true)
+        }
+    }),
+    // Chapter 38: the packet mailbox (no menu number: it is reached from here).
+    ("Mailbox", |_, b| on_off(b, false)),
+];
 
-slow_table! {
-    GO: [Go; 21] = [
-        Go::Open(Dest::Group(8)),
-        Go::Open(Dest::Group(9)),
-        Go::Open(Dest::Group(8)),
-        Go::Open(Dest::EventLog),
-        Go::Later,
-        Go::Quick(6),
-        Go::Later,
-        Go::Later,
-        Go::Quick(8),
-        Go::Open(Dest::GpsPosition),
-        Go::Open(Dest::FmBroadcast),
-        Go::Open(Dest::Group(6)),
-        Go::Open(Dest::Sub(9, 2)),
-        Go::Later, // Speaker mic: nothing to set
-        Go::Later,
-        Go::Later,
-        Go::Later, // MCU temperature: nothing to set
-        Go::Later,
-        Go::Open(Dest::Sub(8, 2)),
-        Go::Open(Dest::Sub(4, 9)),
-        Go::Open(Dest::Mailbox),
-    ];
-}
+const GO: [Go; 21] = [
+    Go::Open(Dest::Group(8)),
+    Go::Open(Dest::Group(9)),
+    Go::Open(Dest::Group(8)),
+    Go::Open(Dest::EventLog),
+    Go::Later,
+    Go::Quick(6),
+    Go::Later,
+    Go::Later,
+    Go::Quick(8),
+    Go::Open(Dest::GpsPosition),
+    Go::Open(Dest::FmBroadcast),
+    Go::Open(Dest::Group(6)),
+    Go::Open(Dest::Sub(9, 2)),
+    Go::Later, // Speaker mic: nothing to set
+    Go::Later,
+    Go::Later,
+    Go::Later, // MCU temperature: nothing to set
+    Go::Later,
+    Go::Open(Dest::Sub(8, 2)),
+    Go::Open(Dest::Sub(4, 9)),
+    Go::Open(Dest::Mailbox),
+];
 
-slow_table! {
-    PAGE: Table<()> = Table { rows: &ROWS, go: &GO, y: 20, h: 18, style: w::KV_STATUS };
-}
+const PAGE: Table<()> = Table { rows: &ROWS, go: &GO, y: 20, h: 18, style: w::KV_STATUS };
 
 impl View for Status {
     fn name(self) -> &'static str {

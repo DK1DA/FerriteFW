@@ -21,7 +21,7 @@ struct Call {
     icon: bool,
 }
 
-/// The string literals in one argument: `b"..."`, `"..."` and `slow!("...")` all count.
+/// The string literals in one argument: `b"..."` and `"..."` both count.
 fn literals(arg: &str) -> Vec<String> {
     let b = arg.as_bytes();
     let mut out = Vec::new();

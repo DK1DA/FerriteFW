@@ -193,7 +193,7 @@ impl View for Msgs {
 // ---- compose (A16) ----
 
 /// Multi-tap letters per digit (KEY-12); 1 has the punctuation.
-const TAPS: [&[u8]; 10] = [b" 0", slow!(".,?!-/@'1").as_bytes(), b"abc2", b"def3", b"ghi4", b"jkl5", b"mno6", b"pqrs7", b"tuv8", b"wxyz9"];
+const TAPS: [&[u8]; 10] = [b" 0", ".,?!-/@'1".as_bytes(), b"abc2", b"def3", b"ghi4", b"jkl5", b"mno6", b"pqrs7", b"tuv8", b"wxyz9"];
 /// The same key again within this many ms changes the last letter instead of adding one.
 pub const TAP_MS: u32 = 1000;
 /// APRS limits: an addressee of 9, a message of 67 characters.
@@ -350,7 +350,7 @@ fn next_case(t: &[u8], pcase: u8) -> u8 {
 /// The 67-character limit (TEXT-5): a short beep, and why in a toast.
 fn refuse_full(app: &mut App) {
     app.beep_refused();
-    app.show_toast(slow!("67 characters").as_bytes(), slow!("the APRS limit").as_bytes(), false);
+    app.show_toast("67 characters".as_bytes(), "the APRS limit".as_bytes(), false);
 }
 
 /// Room before the cursor: the 67 characters less what is after it.
@@ -366,7 +366,7 @@ fn accept(app: &mut App, s: &mut Compose, t: &mut Buf<67>) -> bool {
     let keys = app.text;
     let (w, ok, drop) = pending(keys.as_bytes(), t.as_bytes(), *s);
     if !ok {
-        app.show_toast(b"No word", slow!("hold * to spell it").as_bytes(), false); // TEXT-3
+        app.show_toast(b"No word", "hold * to spell it".as_bytes(), false); // TEXT-3
         return false;
     }
     if t.len() - drop + w.len() > room(*s) {
@@ -509,17 +509,17 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     let d = data.draft();
     // APRS-8: nothing sends without a callsign.
     if data.callsign().is_none() {
-        return app.show_toast(slow!("No callsign").as_bytes(), slow!("MENU 0 8 7 1").as_bytes(), false);
+        return app.show_toast("No callsign".as_bytes(), "MENU 0 8 7 1".as_bytes(), false);
     }
     let text = full_of(store, s);
     if d.to.is_empty() || text.is_empty() {
-        return app.show_toast(slow!("Nothing to send").as_bytes(), if d.to.is_empty() { slow!("add a recipient").as_bytes() } else { slow!("write a message").as_bytes() }, false);
+        return app.show_toast("Nothing to send".as_bytes(), if d.to.is_empty() { "add a recipient".as_bytes() } else { "write a message".as_bytes() }, false);
     }
     if data.request(Op::Send) {
         app.back();
-        app.show_toast(slow!("Message queued").as_bytes(), d.to.as_bytes(), false);
+        app.show_toast("Message queued".as_bytes(), d.to.as_bytes(), false);
     } else {
-        app.show_toast(slow!("Not sent").as_bytes(), slow!("try again").as_bytes(), false);
+        app.show_toast("Not sent".as_bytes(), "try again".as_bytes(), false);
     }
 }
 
@@ -549,7 +549,7 @@ impl View for Compose {
             put_text(store, s, t);
             app.set.predictive = !app.set.predictive;
             app.text.clear();
-            app.show_toast(if app.set.predictive { slow!("Predictive").as_bytes() } else { slow!("Multi-tap").as_bytes() }, slow!("hold * to switch").as_bytes(), false);
+            app.show_toast(if app.set.predictive { "Predictive".as_bytes() } else { "Multi-tap".as_bytes() }, "hold * to switch".as_bytes(), false);
             app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
             return;
         }
@@ -636,7 +636,7 @@ impl View for Compose {
             }
             (Key::Menu, Short) if s.quick_edit_on() => {
                 app.back();
-                return app.show_toast(slow!("Quick message").as_bytes(), b"kept", false);
+                return app.show_toast("Quick message".as_bytes(), b"kept", false);
             }
             (Key::Menu, Short) => return send(app, store),
             _ => return,
@@ -691,16 +691,16 @@ impl View for Compose {
                     let mut b = Buf::<40>::new();
                     let _ = uwrite!(b, "Quick message {}", self.edit + 1);
                     lcd.text4(8, 36, b.as_bytes(), &UI_12B, TEXT, BG);
-                    lcd.text4(8, 56, slow!("# in the list: the factory text again").as_bytes(), &UI_12, SUB, BG);
+                    lcd.text4(8, 56, "# in the list: the factory text again".as_bytes(), &UI_12, SUB, BG);
                 });
             } else {
-                field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending_tap && self.field == 0, slow!("callsign-SSID").as_bytes());
+                field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending_tap && self.field == 0, "callsign-SSID".as_bytes());
             }
         }
         if app.dirty(R_ROW, hash(&(full, self.tail, word, self.field, pending_tap && self.field == 1, quick_list, quick_list.then_some(self.quick)))) {
             let (y, h) = (86, 120);
             ferrite_ui::canvas::banded(lcd, 0, y, 240, h + 24, BG, |lcd| {
-                lcd.text4(8, y + 12, if quick_list { slow!("Quick messages").as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
+                lcd.text4(8, y + 12, if quick_list { "Quick messages".as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
                 let mut c = Buf::<12>::new();
                 let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX); // TEXT-5
                 let cw = text4_width(c.as_bytes(), &UI_12);
@@ -747,11 +747,11 @@ impl View for Compose {
                         lcd.text4(8, y + 37, f.as_bytes(), &UI_12, SUB, BG);
                     }
                     None if !self.quick_edit_on() => {
-                        lcd.text4(8, y + 37, slow!("No callsign: set one to send").as_bytes(), &UI_12, AMBER, BG);
+                        lcd.text4(8, y + 37, "No callsign: set one to send".as_bytes(), &UI_12, AMBER, BG);
                     }
                     _ => {}
                 }
-                let help: &[u8] = if pred && self.field == 1 { slow!("1 marks   hold a digit: digit").as_bytes() } else { slow!("1 . , ? !   0 space   # space").as_bytes() };
+                let help: &[u8] = if pred && self.field == 1 { "1 marks   hold a digit: digit".as_bytes() } else { "1 . , ? !   0 space   # space".as_bytes() };
                 lcd.text4(8, y + 55, help, &UI_12, DIM, BG);
             });
         }
@@ -798,7 +798,7 @@ fn quick_rows(store: &impl ChannelStore, lcd: &mut impl Panel, y: i32, sel: usiz
 fn candidate_strip(lcd: &mut impl Panel, y: i32, keys: &[u8], head: &[u8], s: Compose) {
     let n = candidates(keys, head);
     if n == 0 {
-        lcd.text4(8, y + 11, slow!("No word: hold * to spell it").as_bytes(), &UI_12, AMBER, BG);
+        lcd.text4(8, y + 11, "No word: hold * to spell it".as_bytes(), &UI_12, AMBER, BG);
         return;
     }
     let from = s.pick as usize / 3 * 3;
@@ -926,7 +926,7 @@ impl View for QuickMsgs {
             }
             (Key::Hash, Short) => {
                 store.data().request(Op::Quick(i as u8, None));
-                app.show_toast(slow!("Factory text").as_bytes(), crate::words::quick(i), false);
+                app.show_toast("Factory text".as_bytes(), crate::words::quick(i), false);
             }
             (Key::Exit, Short) => app.back(),
             _ => {}
@@ -943,7 +943,7 @@ impl View for QuickMsgs {
         if !app.gate((self, cx.store.data().version())) {
             return;
         }
-        app.list_head(lcd, slow!("Shown on an empty message").as_bytes(), b"");
+        app.list_head(lcd, "Shown on an empty message".as_bytes(), b"");
         let rows = self.cur.rows(crate::words::QUICK as u16, ROWS2, &ALL, |r, i| {
             let mut n = Buf::<4>::new();
             let _ = uwrite!(n, "{}", i + 1);
