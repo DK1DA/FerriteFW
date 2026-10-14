@@ -1,6 +1,7 @@
 //! Direct entry (manual chapters 6, 9 and 10; NAV-4, VFO-11 to VFO-14): a digit on home opens it with that
 //! digit. In VFO mode it is a frequency, \* the point (the point comes by itself after three MHz digits; a
-//! second \* after 100-130 takes it away again, for a fourth MHz digit: 1 2 9 \* \* 6 is 1296 MHz, VFO-21);
+//! second \* after 100-130 takes it away again, for a fourth MHz digit: 1 2 9 \* \* 6 is 1296 MHz, VFO-21), and
+//! \* after a digit past the point is OK (146 \* 52 \*, VFO-24);
 //! the screen shows the digits, the band, the frequency it snaps to on the step, and whether transmit is
 //! allowed there or why not. In channel mode it is a channel number, shown with its name or "empty". OK goes
 //! there, BACK deletes a digit (with none left, it leaves). The same screen types a frequency for the channel
@@ -173,6 +174,12 @@ impl Entry {
         self.n = n as u8;
     }
 
+    /// VFO-24: \* now does what OK does: a frequency with the point and at least one digit after it.
+    fn accepts_star(&self) -> bool {
+        let t = self.typed();
+        self.freq_mode() && t.iter().position(|&c| c == b'.').is_some_and(|p| p + 1 < t.len())
+    }
+
     /// The typed channel number (0-999, typed as 1-1000).
     pub fn number(&self) -> Option<u16> {
         let v = self.typed().iter().fold(0u32, |a, &c| a * 10 + (c - b'0') as u32);
@@ -247,6 +254,9 @@ impl View for Entry {
                     return commit(whole, app, store);
                 }
             }
+            // VFO-24: \* after the point and a digit is OK (146 \* 52 \*), one-handed; before that it is the point
+            // (and \* \* on 100-130 the fourth MHz digit, VFO-11). It never types a second point.
+            (Key::Star, Press::Short) if s.accepts_star() => return commit(s, app, store),
             (Key::Star, Press::Short) => s.push(b'.'),
             (Key::Exit, Press::Short) if s.n == 0 => return app.back(),
             (Key::Exit, Press::Short) => {
@@ -346,10 +356,10 @@ impl View for Entry {
             para(lcd, 8, 210, 224, 2, 17, note, &UI_12, AMBER, BG);
         }
         let tip: &[u8] = match self.to {
-            EntryFor::Vfo => b"After three digits the point comes by itself; * types it (52*525).",
+            EntryFor::Vfo => b"After three digits the point comes by itself; * types it, and * again enters (52*525*).",
             EntryFor::Channel => b"Type the channel number, then OK.",
-            EntryFor::SplitTx => b"Transmit here whatever RX is on. OK keeps it; BACK keeps the old shift.",
-            _ => b"* is the point. OK keeps it, BACK deletes.",
+            EntryFor::SplitTx => b"Transmit here whatever RX is on. OK or * keeps it; BACK keeps the old shift.",
+            _ => b"* is the point, then * or OK keeps it. BACK deletes.",
         };
         if app.dirty(R_HELP, hash(&tip)) {
             para(lcd, 8, 250, 224, 3, 15, tip, &UI_12, SUB, BG);
@@ -358,7 +368,9 @@ impl View for Entry {
 
     fn hints(self, _: &App) -> Hints {
         let back = if self.n == 0 { ("BACK", "Back") } else { ("BACK", "Delete") };
-        if self.freq_mode() {
+        if self.accepts_star() {
+            Hints::new(&[("*/OK", "Go"), back]) // VFO-24
+        } else if self.freq_mode() {
             Hints::new(&[("*", "Point"), ("OK", "Go"), back])
         } else {
             Hints::new(&[("0-9", "Number"), ("OK", "Go"), back])

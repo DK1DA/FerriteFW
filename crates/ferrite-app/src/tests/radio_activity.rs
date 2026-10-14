@@ -464,6 +464,40 @@ fn hf_mode() {
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Hf { on: false, .. })));
 }
 
+/// VFO-24: \* after a digit past the point is OK on every frequency entry: split TX (OK sets it) and HF mode's
+/// own typing (OK tunes).
+#[test]
+fn star_enters_split_tx_and_hf() {
+    use crate::screens::entry::EntryFor;
+    let mut t = ready();
+    tune(&mut t, 44_600_000);
+    t.app.change(Item::Offset, 3); // Split
+    assert!(t.app.slot(0).cfg().split);
+    t.app.open(crate::screens::nav::Dest::Value(Item::Offset));
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::SplitTx), "{:?}", t.app.screen());
+    // prefilled "446." with nothing after the point: * types nothing; BACK deletes it, then 146 * 52 *
+    while matches!(t.app.screen(), Screen::Entry(e) if e.n > 0) {
+        t.tap(Key::Exit);
+    }
+    for k in [Key::Digit(1), Key::Digit(4), Key::Digit(6), Key::Star, Key::Digit(5), Key::Digit(2), Key::Star] {
+        t.tap(k);
+    }
+    assert!(matches!(t.app.screen(), Screen::Value(_)), "* set it, as OK: {:?}", t.app.screen());
+    assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 0), 14_652_000);
+    // HF mode: 7 * 074 * tunes 7.074 MHz
+    t.app.set_region(Some(Region::Us), false);
+    t.app.go_home();
+    menu0(&mut t, &[3, 4]);
+    t.wait(100);
+    assert!(matches!(t.app.screen(), Screen::Hf(h) if h.loaded), "{:?}", t.app.screen());
+    for k in [Key::Digit(7), Key::Star, Key::Star, Key::Digit(0), Key::Digit(7), Key::Digit(4), Key::Star] {
+        t.tap(k);
+    }
+    assert!(matches!(t.app.screen(), Screen::Hf(h) if h.n == 0), "{:?}", t.app.screen());
+    assert_eq!(t.app.set.hf.freq, 707_400);
+}
+
 /// BCR-1: MENU 0 3 1; the knob tunes; BACK turns it off.
 #[test]
 fn fm_broadcast() {

@@ -6,7 +6,7 @@
 //! and with the alerts-paused bell when SAME is on (HF-5, SBAR-18).
 //!
 //! Keys (HF-12, HF-13): knob or ▲▼ tune by the step (SIDE2 + knob: 1 MHz), ◀▶ band, * mode (a point while
-//! typing), digits a frequency (kHz, or MHz with a point; OK enters), # the recent list, hold MENU the options,
+//! typing, then OK once a digit follows it, VFO-24), digits a frequency (kHz, or MHz with a point; OK enters), # the recent list, hold MENU the options,
 //! BACK leaves HF mode, one level back; hold V/M saves it as a channel (CHAN-26). SLOT, V/M and SIDE2 alone do
 //! nothing here. PTT transmits on the HF frequency without going home
 //! (HF-23), and refuses on the SI4732's frequencies and modes (HF-24).
@@ -480,15 +480,15 @@ impl View for Hf {
                     Hf { n: self.n + 1, point, ..self }.put(app);
                 }
                 (Key::Star, Short) if self.point == 0 => Hf { point: 1, ..self }.put(app),
-                (Key::Left, Short) => Hf { n: 0, point: 0, ..self }.put(app),
-                (Key::Menu, Short) => {
+                // VFO-24: \* after a digit past the point enters, as OK (7 \* 074 \*)
+                (Key::Menu, Short) | (Key::Star, Short) if e.key == Key::Menu || self.point > 1 => {
                     match self.typed(app.radio.hf_entry) {
                         Some(f) => tune_to(app, f, None),
                         None => app.show_toast(b"HF mode", b"0.15 to 64 MHz", false),
                     }
                     Hf { n: 0, point: 0, ..self }.put(app);
                 }
-                (Key::Exit, Short) => Hf { n: 0, point: 0, ..self }.put(app),
+                (Key::Left, Short) | (Key::Exit, Short) => Hf { n: 0, point: 0, ..self }.put(app),
                 _ => {}
             }
             return;
@@ -712,6 +712,8 @@ impl View for Hf {
             Hints::new(&[("BACK", "Cancel")])
         } else if self.menu {
             Hints::new(&[("Knob", "Change"), ("0", "Full menu"), ("BACK", "Back")])
+        } else if self.n > 0 && self.point > 1 {
+            Hints::new(&[("*/OK", "Go"), ("BACK", "Cancel")]) // VFO-24
         } else if self.n > 0 {
             Hints::new(&[("*", "Point"), ("OK", "Go"), ("BACK", "Cancel")])
         } else {

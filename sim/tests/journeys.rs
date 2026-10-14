@@ -44,6 +44,18 @@ fn frequency_entry() {
     assert_eq!(r.sim.app().slot(0).freq(), mhz(446) + 12_500);
 }
 
+/// One-handed entry: \* types the point, and \* again after a digit enters it as OK does; the hint bar says so once
+/// it would (VFO-24). \* \* on 100-130 is still the fourth MHz digit (VFO-21).
+#[test]
+fn star_enters_a_frequency() {
+    let mut r = Radio::new();
+    r.run("type 146*5; expect screen \"Frequency entry\"; expect text \"146.5\"; expect text \"*/OK\"");
+    r.run("type 2*; wait 300ms; expect screen \"Home\"; expect text \"146.520\"");
+    assert_eq!(r.sim.app().slot(0).freq(), mhz(146) + 52_000);
+    r.run("type 129**6; expect text \"1296\"; type *0*; wait 300ms; expect screen \"Home\"");
+    assert_eq!(r.sim.app().slot(0).freq(), mhz(1296));
+}
+
 /// A frequency no chip can receive is refused and the entry stays open (VFO-21).
 #[test]
 fn frequency_entry_refuses_the_gap() {

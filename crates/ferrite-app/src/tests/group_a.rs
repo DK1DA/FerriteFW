@@ -100,6 +100,38 @@ fn frequency_entry() {
     assert_eq!(t.freq(), mhz(52) + 52_500);
 }
 
+/// VFO-24: \* after the point and a digit enters the frequency exactly as OK does (one-handed); \* \* keeps its
+/// meaning (VFO-11, VFO-21: the point, then a fourth MHz digit on 100-130); \* never types a second point.
+#[test]
+fn star_enters_a_frequency() {
+    let mut t = T::new();
+    t.digits("146*52*");
+    assert_eq!(t.app.screen(), Screen::Home, "the second * entered it");
+    assert_eq!(t.freq(), mhz(146) + 52_000);
+    assert!(t.cmds().contains(&RadioCmd::TuneSlot { slot: 0, freq: mhz(146) + 52_000 }));
+    // one decimal is enough
+    t.digits("4465*");
+    assert_eq!((t.app.screen(), t.freq()), (Screen::Home, mhz(446) + 50_000));
+    // * * on 100-130 is still the fourth MHz digit; then the point, a digit and * enter it
+    t.digits("129**6*0*");
+    assert_eq!((t.app.screen(), t.freq()), (Screen::Home, mhz(1296)), "1296 MHz");
+    // the point with nothing after it: * again types nothing (no second point), and waits
+    t.digits("146**");
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.buf[..e.n as usize] == *b"146."), "{:?}", t.app.screen());
+    t.digits("5*");
+    assert_eq!((t.app.screen(), t.freq()), (Screen::Home, mhz(146) + 50_000));
+    // refused as OK is: the entry stays with its digits (VFO-14)
+    let f = t.freq();
+    t.digits("7*1*");
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.buf[..e.n as usize] == *b"7.1"), "{:?}", t.app.screen());
+    assert_eq!(t.freq(), f);
+    t.hold(Key::Exit);
+    // channel entry: * is nothing there (no point in a channel number)
+    t.tap(Key::VfoMem);
+    t.digits("11*");
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.n == 2));
+}
+
 /// VFO-14, VFO-21: every reason entry gives fits its note on one line (224 px, never wrapped) and the toast it
 /// splits into fits the hint bar.
 #[test]
