@@ -191,6 +191,9 @@ def kmeans4(v):
     return c, np.argmin(np.abs(v[:, None] - c[None, :]), 1)
 
 
+EYE_SKIP_S = 0.0  # --skip: start the 4FSK analysis this long after the preamble
+
+
 def eye(dev, fs, out_png=None):
     """4FSK analysis; returns the figures it printed (for --selftest)."""
     sps = fs / SYMBOL_HZ
@@ -198,7 +201,7 @@ def eye(dev, fs, out_png=None):
     # The preamble: +3/-3 alternation, a 2400 Hz tone, at the start of the test signal.
     env = tone_env(dev, fs, SYMBOL_HZ / 2, 5)
     first = np.argmax(env > 0.5 * np.max(env[: int(fs * 2)])) if len(env) > fs * 0.1 else 0
-    data0 = first + int(fs * (PREAMBLE_S + 2 / SYMBOL_HZ))
+    data0 = first + int(fs * (PREAMBLE_S + 2 / SYMBOL_HZ)) + int(fs * EYE_SKIP_S)
     print(f"4FSK: preamble found {first / fs * 1000:.0f} ms into the keyed part; data from {data0 / fs * 1000:.0f} ms")
     # The matched filter: RRC, 8 symbols, unit sum (a symbol centre then reads its level in Hz).
     span = int(np.ceil(4 * sps))
@@ -286,7 +289,7 @@ def eye(dev, fs, out_png=None):
     d = -dec if inv else dec
     parts = [align(d[i : i + 2000]) / 2000 for i in range(0, len(d) - 2000, 2000)]
     if parts:
-        print("  errors per 2000 symbols, each aligned alone: " + " ".join(f"{e:.0%}" for e in parts[:12]))
+        print("  errors per 2000 symbols, each aligned alone: " + " ".join(f"{e:.0%}" for e in parts))
     print(f"  symbol errors against PRBS9: {errs} of {len(dec)} ({errs / len(dec):.2e}){', polarity inverted' if inv else ''}")
     # Drift and droop: per 0.5 s, the mean of all symbols (DC) and the outer span.
     per = int(SYMBOL_HZ * 0.5)
@@ -562,6 +565,7 @@ def main():
     a.add_argument("--ppm", type=int, default=0)
     a.add_argument("--save")
     a.add_argument("--load")
+    a.add_argument("--skip", type=float, default=0.0, help="--eye: analyse from this many seconds after the preamble")
     a.add_argument("--tones", action="store_true")
     a.add_argument("--audio-lp", type=float, help="audio low-pass after the demodulator, Hz (6000; 12000 with --sweep)")
     a.add_argument("--eye", action="store_true", help="TERM-33 4FSK: levels, eyes, PRBS errors, drift; eye PNG")
@@ -570,6 +574,8 @@ def main():
     a.add_argument("--out", help="where the PNGs go")
     a.add_argument("--selftest", action="store_true", help="run the analyses on synthetic IQ and check them")
     o = a.parse_args()
+    global EYE_SKIP_S
+    EYE_SKIP_S = o.skip
     if o.selftest:
         d = o.out or tempfile.mkdtemp(prefix="sdrtx-")
         sys.exit(0 if selftest(d) else 1)
