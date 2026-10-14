@@ -1107,7 +1107,7 @@ fn set_line(app: &App, dev: &Device, p: &[u8], out: &mut Line) {
 /// Runs one line: typed after `:`, or read by `load` (`loading`: only the lines a dump holds).
 /// Whether a command line changes something (TERM-25: an unapproved Bluetooth device may only read). Reading
 /// is `get`, `help`, `dump`, `mem`/`mem32`, `gpio`, `gps`, `ch`, `zone` or `preset` with nothing more than a number
-/// (they show it) and a bare `home`; everything else, `home N`, the BK4829 and SI4732 commands included, counts
+/// (they show it), a bare `home` or `rx`, and `bk settle` alone; everything else, `home N`, the BK4829 and SI4732 commands included, counts
 /// as a write.
 pub fn writes(line: &[u8]) -> bool {
     let mut w = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty());
@@ -1115,6 +1115,8 @@ pub fn writes(line: &[u8]) -> bool {
     let rest = w.count();
     let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"gps"].iter().any(|r| same(c, r));
     let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx"].iter().any(|r| same(c, r)) && rest == 0;
+    // `bk settle` alone only shows the waits (TERM-31).
+    let shows = shows || same(c, b"bk") && rest == 1 && line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1).is_some_and(|w| same(w, b"settle"));
     !(reads || shows)
 }
 
@@ -1210,10 +1212,11 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
 }
 
 fn bk(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value";
+    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle";
     let chip = match t.word(USAGE)? {
         b"0" => 0,
         b"1" => 1,
+        w if same(w, b"settle") => return settle(t),
         _ => return Err(msg!("{}", USAGE)),
     };
     let w = t.word(USAGE)?;
@@ -1232,6 +1235,25 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
         }
         _ => Err(msg!("{}", USAGE)),
     }
+}
+
+/// TERM-31 (decision 119, a bench test): `bk settle` says the BK4829 settle waits in force, `bk settle N` sets both
+/// to N ms, `bk settle W S` the wake and the sleep wait apart; 0 to 20 ms, decimal; 0 is stock's (no wait).
+fn settle(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "bk settle [WAKE [SLEEP]]: ms, 0 to 20 (0 is stock's, no wait); bk settle alone shows them";
+    let mut ms = [None; 2];
+    for m in ms.iter_mut() {
+        *m = match t.next()? {
+            None => break,
+            Some(Tok::Word(w)) => Some(number(w).filter(|&n| n <= ferrite_core::settle::MAX_MS as u32).ok_or_else(|| msg!("{}", USAGE))? as u8),
+            _ => return Err(msg!("{}", USAGE)),
+        };
+    }
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    let set = ms[0].and_then(|w| ferrite_core::settle::Settle::new(w, ms[1].unwrap_or(w)));
+    Ok(Done::Debug(Job::new(Kind::Settle(set))))
 }
 
 /// TERM-29 (decision 114, a bench test): `rx both` holds both band receive selects on, `rx one` goes back to
@@ -1431,7 +1453,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 27] = [
+const HELP: [&str; 28] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
@@ -1457,6 +1479,7 @@ const HELP: [&str; 27] = [
     "  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property",
     "  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)",
     "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
+    "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
     "  gps                    the GPS module's last GGA sentence, its age and heights",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
 ];

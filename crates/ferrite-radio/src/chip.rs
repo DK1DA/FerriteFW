@@ -5,6 +5,7 @@
 use bk4829::{AfOut, Bandwidth, Bk4829, Bus, Demod, Fsk};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::same_rx;
+use ferrite_core::settle::Settle;
 
 /// What a chip needs to receive a slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,18 +21,71 @@ pub struct RxSetup {
     pub rx_tail: bool,
 }
 
-/// Tune a chip to receive (`Radio::tune_chip`): awake, the frequency, the bandwidth, FM or AM (stock's modes 7 and
-/// 6; VFO-20: AM keeps the wide filter), the sub-tone detector, audio muted (the audio decision unmutes the one
-/// heard), then receive on.
+/// Tune a chip to receive with no settle wait (stock's order): [`wake`], then [`tune_rest`]. The Radio task does
+/// the two apart, with PWR-21's wait between them when the chip was asleep.
 pub fn tune<B: Bus>(bk: &mut Bk4829<B>, s: &RxSetup) {
     bk.wake();
+    tune_rest(bk, s);
+}
+
+/// The receive set-up after the wake (`Radio::tune_chip`): audio muted first (the audio decision unmutes the one
+/// heard; a receiving chip being retuned is silent through it), the frequency, the bandwidth, FM or AM (stock's
+/// modes 7 and 6; VFO-20: AM keeps the wide filter), the sub-tone detector, the receive level, then receive on.
+pub fn tune_rest<B: Bus>(bk: &mut Bk4829<B>, s: &RxSetup) {
+    bk.af_out(AfOut::Mute);
     bk.set_freq(s.freq * 10);
     bk.bandwidth(if s.narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
     bk.demod(if s.am { Demod::Am } else { Demod::Fm });
     subtone(bk, s.rx_tone, s.rx_tail);
-    bk.af_out(AfOut::Mute);
     bk.af_gain_rx(); // REG_48 0xB2BF, stock's receive level (RX-* / SND-2: the knob is the volume)
     bk.rx_on();
+}
+
+/// A wait that lets the rest of the firmware run (the Radio task's `Timer::after_millis`; PWR-21's waits are a few
+/// ms on the highest-priority executor, too long to spin).
+#[allow(async_fn_in_trait)]
+pub trait Delay {
+    async fn ms(&mut self, ms: u32);
+}
+
+/// PWR-21 (decision 119): tune a chip with the wake settle. `woke` is when its REG_37 supplies came on (the Radio
+/// task's record), None if it is asleep: then they come on here, at `now`. Whatever is left of `settle.wake_ms`
+/// since then is waited before [`tune_rest`] (nothing for a chip woken a tick early by the hop, or long awake).
+/// Returns the wake time to keep.
+pub async fn tune_settled<B: Bus, D: Delay>(bk: &mut Bk4829<B>, d: &mut D, s: &RxSetup, settle: Settle, woke: Option<u32>, now: u32) -> u32 {
+    let (at, left) = wake_start(bk, settle, woke, now);
+    if left > 0 {
+        d.ms(left).await;
+    }
+    tune_rest(bk, s);
+    at
+}
+
+/// [`tune_settled`]'s first half (the Radio task runs the halves apart, around its own timer): REG_37's supplies
+/// on if `woke` is None, and returns (the wake time, the ms of settle left at `now`).
+pub fn wake_start<B: Bus>(bk: &mut Bk4829<B>, settle: Settle, woke: Option<u32>, now: u32) -> (u32, u32) {
+    let at = woke.unwrap_or_else(|| {
+        bk.wake();
+        now
+    });
+    (at, settle.wake_left(at, now))
+}
+
+/// PWR-21: a chip to sleep with the sleep settle: [`sleep_begin`] (muted, REG_30 off), `settle.sleep_ms`, then
+/// REG_37's supplies off. With 0 it is stock's two writes back to back (after the mute).
+pub async fn sleep_settled<B: Bus, D: Delay>(bk: &mut Bk4829<B>, d: &mut D, settle: Settle) {
+    sleep_begin(bk);
+    if settle.sleep_ms > 0 {
+        d.ms(settle.sleep_ms as u32).await;
+    }
+    bk.ldo_sleep();
+}
+
+/// PWR-21, the sleep's first half: the AF route muted, then REG_30 off. The Radio task waits the sleep settle, then
+/// [`Bk4829::ldo_sleep`]. Muting first means the chip never goes off, nor comes back, with its audio routed.
+pub fn sleep_begin<B: Bus>(bk: &mut Bk4829<B>) {
+    bk.af_out(AfOut::Mute);
+    bk.off();
 }
 
 /// The slot's own sub-tone detector (CHAN-3, TONE-6): set by [`tune`], and put back after a tone hint's probe.

@@ -1,5 +1,5 @@
-//! The terminal's debug commands (manual chapter 37, TERM-21 to TERM-24, TERM-27, TERM-29): MCU memory, the GPIO
-//! ports, BK4829 registers, SI4732 commands, the Bluetooth module's queries and the both-receive-selects bench test, for bring-up without a custom build each time. A command becomes a [`Job`]:
+//! The terminal's debug commands (manual chapter 37, TERM-21 to TERM-24, TERM-27, TERM-29, TERM-31): MCU memory, the GPIO
+//! ports, BK4829 registers, SI4732 commands, the Bluetooth module's queries, the both-receive-selects bench test and the BK4829 settle waits (TERM-31), for bring-up without a custom build each time. A command becomes a [`Job`]:
 //! the firmware takes its requests one at a time ([`crate::term::Term::debug_req`]), answers them
 //! ([`crate::term::Term::debug_answer`]), and the console prints the answers as lines. Memory is read by the
 //! firmware where the terminal runs; registers by the Radio task, which owns the chips and refuses writes that
@@ -40,6 +40,8 @@ pub enum Kind {
     RxBoth(Option<bool>),
     /// `gps`: the GPS module's last GGA sentence and its two heights (TERM-30).
     Gga,
+    /// `bk settle [WAKE [SLEEP]]`: the BK4829 settle waits (TERM-31), set or asked.
+    Settle(Option<ferrite_core::settle::Settle>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -101,6 +103,7 @@ impl Job {
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
             Kind::Gga => DebugReq::Gga,
+            Kind::Settle(s) => DebugReq::Settle(s),
         })
     }
 
@@ -214,6 +217,14 @@ impl Job {
                 } else {
                     b"  rx one: only the receiving band's select on (PB0 or PE12), as normal"
                 });
+                self.st = St::Over;
+                Step::Line
+            }
+            (Kind::Settle(_), DebugAns::Settle(s)) => {
+                put!(out, "  bk settle: wake {} ms, sleep {} ms", s.wake_ms, s.sleep_ms);
+                if s == ferrite_core::settle::Settle::STOCK {
+                    out.push(b" (stock's: no wait)");
+                }
                 self.st = St::Over;
                 Step::Line
             }

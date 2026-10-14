@@ -130,6 +130,8 @@ pub struct FakeRadio {
     power: [u8; 4],
     /// The two BK4829s' registers, for the terminal's `bk` (TERM-21).
     bk: [[u16; 128]; 2],
+    /// The BK4829 settle waits the terminal sets (TERM-31); the fake has no chip power to wait on.
+    settle: ferrite_core::settle::Settle,
     /// Slots with monitor latched: squelch held open.
     monitor: u8,
     /// Quick mute (HOME-15): slots still received, never heard.
@@ -195,6 +197,7 @@ impl FakeRadio {
             scope_cfg: (60, 10),
             power: [2; 4],
             bk: fake_bk(),
+            settle: ferrite_core::settle::Settle::DEFAULT,
             monitor: 0,
             mute: 0,
             fm: 9_810,
@@ -782,6 +785,11 @@ impl FakeRadio {
                 Err(ferrite_core::path::Blocked::Keyed) => DebugAns::Refused("transmitting: try again after the unkey"),
                 Err(_) => DebugAns::Refused("an HF slot has the relay energised: tune VHF or UHF first"),
             },
+            // TERM-31: kept and answered, as the Radio task does.
+            DebugReq::Settle(s) => {
+                self.settle = s.unwrap_or(self.settle);
+                DebugAns::Settle(self.settle)
+            }
         }
     }
 }

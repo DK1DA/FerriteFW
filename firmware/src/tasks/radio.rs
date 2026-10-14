@@ -54,6 +54,7 @@ use ferrite_radio::chip::{self as radio_chip, RxSetup};
 use ferrite_radio::Pin;
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use ferrite_core::scan::{self, Check, Range, Scan};
+use ferrite_core::settle::Settle;
 use ferrite_core::sweephold::{self, SweepHold};
 use ferrite_core::tonegen;
 use ferrite_core::tonehint::{Act as HintAct, Hint};
@@ -197,6 +198,11 @@ struct Radio {
     /// Chips that may be awake, a bit per chip: set when one is tuned or keyed, cleared when it sleeps. A reset of
     /// `tuned` (after an unkey, a mode) leaves it, so a chip no longer wanted is put to sleep, not left on.
     maybe_awake: u8,
+    /// PWR-21 (decision 119): the BK4829 settle waits, from the terminal (`bk settle`, TERM-31), RAM only.
+    settle: Settle,
+    /// When each chip's REG_37 supplies came on (ms), None while they are off: what is left of the wake settle
+    /// counts from here, so a chip woken a tick early by the hop is tuned at once.
+    woke: [Option<u32>; 2],
     /// Slots whose chip stays awake (APRS mode's C: [`RadioCmd::Awake`], decision 111).
     keep: u8,
     /// Each chip's noise floor (dBm), a slow average of its RSSI with the squelch closed (the fast pass's
@@ -401,6 +407,13 @@ impl Radio {
                 self.chip(chip).write(reg, val);
                 DebugAns::Reg { chip, reg, val: self.chip(chip).read(reg) }
             }
+            // TERM-31, PWR-21: the settle waits, set or asked; from the next wake or sleep on.
+            DebugReq::Settle(set) => {
+                if let Some(set) = set {
+                    self.settle = set;
+                }
+                DebugAns::Settle(self.settle)
+            }
             DebugReq::Si { cmd, n, reply } => {
                 let (n, rn) = ((n as usize).min(8), (reply as usize).clamp(1, 16));
                 let mut data = [0u8; 16];
@@ -468,11 +481,26 @@ impl Radio {
         self.run(&s).await;
     }
 
-    /// Tune chip `n` to a slot (or sleep it): only when it changes.
-    fn tune_chip(&mut self, n: u8, want: Option<(u8, Freq10)>) {
+    /// Tune chip `n` to a slot (or sleep it): only when it changes. Waking and sleeping take PWR-21's settle
+    /// waits on a timer, so other tasks run meanwhile: the two halves are plain functions around the one wait
+    /// (`ferrite_radio::chip::tune_settled` and `sleep_settled` are the same steps, host-tested).
+    async fn tune_chip(&mut self, n: u8, want: Option<(u8, Freq10)>) {
+        if let Some(ms) = self.tune_start(n, want) {
+            if ms > 0 {
+                Timer::after_millis(ms as u64).await;
+            }
+            self.tune_finish(n);
+        }
+    }
+
+    /// [`Radio::tune_chip`] up to the settle wait: None if nothing changes, else the wait. Asleep: muted and REG_30
+    /// off (`chip::sleep_begin`), the wait is the sleep settle. Awake: REG_37's supplies on unless they are on
+    /// already (woken a tick early by the hop, or awake), the wait is what is left of the wake settle.
+    #[inline(never)]
+    fn tune_start(&mut self, n: u8, want: Option<(u8, Freq10)>) -> Option<u32> {
         let asleep = self.maybe_awake & 1 << n == 0;
         if !self.has(n) || self.tuned[n as usize] == want && (want.is_some() || asleep) {
-            return;
+            return None;
         }
         // A probe on the slot this chip had, or gets, ends: tuning sets the slot's own detector (TSRCH-12).
         for (s, _) in [self.tuned[n as usize], want].into_iter().flatten() {
@@ -481,13 +509,28 @@ impl Radio {
             }
         }
         self.tuned[n as usize] = want;
-        let Some((s, f)) = want else {
+        if want.is_none() {
             self.maybe_awake &= !(1 << n);
-            self.chip(n).sleep();
             self.sq_regs[n as usize] = None; // written again on waking
+            self.woke[n as usize] = None;
+            radio_chip::sleep_begin(&mut self.chip(n));
+            return Some(self.settle.sleep_ms as u32);
+        }
+        self.maybe_awake |= 1 << n;
+        let (settle, woke) = (self.settle, self.woke[n as usize]);
+        let (at, left) = radio_chip::wake_start(&mut self.chip(n), settle, woke, now_ms() as u32);
+        self.woke[n as usize] = Some(at);
+        Some(left)
+    }
+
+    /// [`Radio::tune_chip`] after the settle wait: REG_37's supplies off for a chip going to sleep; for one tuned,
+    /// the receive set-up and receive on, then its squelch thresholds.
+    #[inline(never)]
+    fn tune_finish(&mut self, n: u8) {
+        let Some((s, f)) = self.tuned[n as usize] else {
+            self.chip(n).ldo_sleep();
             return;
         };
-        self.maybe_awake |= 1 << n;
         let slot = match s {
             s if s < SLOTS as u8 => self.slots[s as usize],
             SCOPE_SLOT => {
@@ -499,7 +542,7 @@ impl Radio {
         };
         // Stock's modes 6 and 7, the sub-tone detector, muted until the audio decision (`ferrite_radio::chip`).
         let setup = RxSetup { freq: f, narrow: slot.narrow, am: slot.am, rx_tone: slot.rx_tone, rx_tail: slot.rx_tail };
-        radio_chip::tune(&mut self.chip(n), &setup);
+        radio_chip::tune_rest(&mut self.chip(n), &setup);
         // SQL-1: stock's thresholds for this frequency and the slot's level (stock writes them at each receive
         // setup); only when they differ from what the chip has.
         let regs = self.sqcal.regs(f, slot.sq);
@@ -507,6 +550,16 @@ impl Radio {
             radio_chip::squelch(&mut self.chip(n), regs);
             self.sq_regs[n as usize] = Some(regs);
         }
+    }
+
+    /// PWR-21: chip `n`'s REG_37 supplies on now if they are off, without receive (the hop's early wake, and a
+    /// key-up's chip); the wake settle counts from here.
+    fn ldo_on(&mut self, n: u8) {
+        if self.woke[n as usize].is_none() {
+            self.chip(n).wake();
+            self.woke[n as usize] = Some(now_ms() as u32);
+        }
+        self.maybe_awake |= 1 << n;
     }
 
     /// SAME (DEC-19, WX-4): the BK4829's own receiver on the chip of a slot tuned to a weather channel, as
@@ -572,7 +625,7 @@ impl Radio {
                 let kept = self.kept();
                 for n in 0..2u8 {
                     if !self.tuned[n as usize].is_some_and(|(s, _)| (s as usize) < SLOTS && kept & 1 << s != 0) {
-                        self.tune_chip(n, None);
+                        self.tune_chip(n, None).await;
                     }
                 }
                 for (i, s) in self.live.slots.iter_mut().enumerate() {
@@ -807,9 +860,22 @@ impl Radio {
         // unless a kept slot has it (WATCH-2, PWR-7, decision 111: one BK4829 awake at a time, as stock).
         let path = self.hop.next(now, &out, self.active);
         let awake = watch::awake(&out, path, self.kept());
-        for n in 0..2u8 {
-            let want = out.chip[n as usize].filter(|_| awake[n as usize]).map(|s| (s, self.slots[s as usize].rx_freq()));
-            self.tune_chip(n, want);
+        // PWR-21: the chip the hop turns to by the next tick has its supplies on now, so their settle overlaps
+        // this dwell and the hop isn't delayed; it is tuned (receive on) at the hop as before.
+        let early = if self.settle.wake_ms > 0 { self.hop.due(now, &out, self.active, TICK_MS as u32) } else { None };
+        // The chips to listen with first, those to sleep after: a sleep's settle never holds up the other chip.
+        for listen in [true, false] {
+            for n in 0..2u8 {
+                let want = out.chip[n as usize].filter(|_| awake[n as usize]).map(|s| (s, self.slots[s as usize].rx_freq()));
+                if want.is_some() != listen {
+                    continue;
+                }
+                if want.is_none() && early == Some(n) && self.has(n) && self.tuned[n as usize].is_none() {
+                    self.ldo_on(n);
+                    continue;
+                }
+                self.tune_chip(n, want).await;
+            }
         }
         if let Some(n) = path {
             if let Some((_, f)) = self.tuned[n as usize] {
@@ -905,7 +971,7 @@ impl Radio {
         let was = self.hf.replace(HfOn { freq, mode, si });
         for n in 0..2u8 {
             if !(n == 1 && !si) {
-                self.tune_chip(n, None);
+                self.tune_chip(n, None).await;
             }
         }
         speaker(false);
@@ -923,7 +989,7 @@ impl Radio {
             if was.is_some_and(|h| h.si) {
                 let _ = broadcast(&mut self.si, BroadcastCmd::Off).await;
             }
-            self.tune_chip(1, Some((HF_SLOT, freq)));
+            self.tune_chip(1, Some((HF_SLOT, freq))).await;
             self.chip(1).af_out(AfOut::Normal);
             speaker(!self.muted);
         }
@@ -1148,8 +1214,8 @@ impl Radio {
         let n = c.chip;
         let f = COUNTER_TUNE[n as usize];
         if self.tuned[n as usize].is_none() {
-            self.tune_chip(1 - n, None);
-            self.tune_chip(n, Some((COUNTER_SLOT, f)));
+            self.tune_chip(1 - n, None).await;
+            self.tune_chip(n, Some((COUNTER_SLOT, f))).await;
             self.select_rx(f, Cause::Auto).await;
             if self.path.rx_now() == Rx::Bk(Sel::rx(f)) {
                 self.chip(n).freq_scan(true);
@@ -1175,7 +1241,7 @@ impl Radio {
                 self.live.mode = ModeLive::Probe { freq: 0, rssi: -127, tone: 0 };
                 let other = 1 - n;
                 if self.has(other) {
-                    self.tune_chip(n, None);
+                    self.tune_chip(n, None).await;
                     c.chip = other;
                 }
                 self.tuned[c.chip as usize] = None; // starts its scan on the next tick
@@ -1230,11 +1296,11 @@ impl Radio {
         });
         self.live.mode = ModeLive::Scope { centre, bars: last, n, sweeps: 0, listen: 0, open: false };
         if self.has(1 - chip) {
-            self.tune_chip(1 - chip, None);
+            self.tune_chip(1 - chip, None).await;
         }
         // The chip's full receive setup once on the centre (filter, demod, squelch), muted; the path asked for with
         // Cause::Auto, so the relay never moves (SCOPE-5). The strip's is its slot's own (tone, squelch level).
-        self.tune_chip(chip, Some((home.unwrap_or(SCOPE_SLOT), centre)));
+        self.tune_chip(chip, Some((home.unwrap_or(SCOPE_SLOT), centre))).await;
         self.chip(chip).af_out(AfOut::Mute);
         self.select_rx(centre, Cause::Auto).await;
         self.scope_point();
@@ -1248,7 +1314,7 @@ impl Radio {
         let chip = sc.chip;
         let back = sc.centre;
         self.tuned[chip as usize] = None;
-        self.tune_chip(chip, Some((SCOPE_SLOT, if freq != 0 { freq } else { back })));
+        self.tune_chip(chip, Some((SCOPE_SLOT, if freq != 0 { freq } else { back }))).await;
         self.chip(chip).af_out(AfOut::Mute);
         if freq != 0 {
             self.select_rx(freq, Cause::Auto).await;
@@ -1603,6 +1669,8 @@ pub async fn task() {
         chans: scan::ChanScans::new(),
         tuned: [None; 2],
         maybe_awake: 0,
+        settle: Settle::DEFAULT,
+        woke: [None; 2],
         keep: 0,
         floor: [-125; 2],
         monitor: 0,
@@ -1877,7 +1945,7 @@ impl Radio {
             RadioCmd::HfSeek { up } => self.hf_seek(up).await,
             RadioCmd::Shutdown => {
                 for n in 0..2u8 {
-                    self.tune_chip(n, None);
+                    self.tune_chip(n, None).await;
                 }
                 let _ = broadcast(&mut self.si, BroadcastCmd::Off).await;
                 let mut s = Steps::default();
@@ -2074,13 +2142,12 @@ impl Radio {
         self.apply(a).await;
         let kept = self.kept();
         if !self.tuned[n as usize ^ 1].is_some_and(|(s, _)| (s as usize) < SLOTS && kept & 1 << s != 0) {
-            self.tune_chip(n ^ 1, None);
+            self.tune_chip(n ^ 1, None).await;
         }
         self.tuned[n as usize] = Some((slot, f)); // not the receive frequency: retuned after the unkey
-        self.maybe_awake |= 1 << n;
+        self.ldo_on(n);
         let tone = self.tx.tone[s];
         let mut bk = self.chip(n);
-        bk.wake();
         bk.af_out(AfOut::Mute);
         bk.set_freq(f * 10);
         match tone {
@@ -2305,7 +2372,7 @@ impl Radio {
         for s in x.sides {
             let n = Sel::rx(self.slots[s as usize].freq).chip();
             if keyed_chip != Some(n) {
-                self.tune_chip(n, Some((s, self.slots[s as usize].rx_freq())));
+                self.tune_chip(n, Some((s, self.slots[s as usize].rx_freq()))).await;
             }
         }
         let listen = match x.rep.from() {
@@ -2436,8 +2503,8 @@ impl Radio {
             return;
         }
         let tone = self.tx.tone[to as usize % 4];
+        self.ldo_on(n);
         let mut bk = self.chip(n);
-        bk.wake();
         bk.af_out(AfOut::Mute);
         bk.set_freq(f * 10);
         match tone {

@@ -686,3 +686,97 @@ fn sleep_and_wake_as_stock() {
     assert_eq!(bus.writes.first(), Some(&(reg::LDO, 0x9D1F)));
     assert_eq!(bus.writes.last(), Some(&(reg::POWER, 0xBFF1)));
 }
+
+/// A BK4829 bus and a delay writing to one log, so a wait's place among the register writes shows: a wait is
+/// logged as (`WAIT`, ms).
+#[derive(Clone, Default)]
+struct Log(std::rc::Rc<core::cell::RefCell<Vec<(u8, u16)>>>);
+
+const WAIT: u8 = 0xFF;
+
+impl bk4829::Bus for Log {
+    fn write(&mut self, reg: u8, value: u16) {
+        self.0.borrow_mut().push((reg, value));
+    }
+    fn read(&mut self, _reg: u8) -> u16 {
+        0
+    }
+    fn delay_us(&mut self, us: u32) {
+        self.0.borrow_mut().push((WAIT_US, us as u16));
+    }
+}
+
+/// The driver's busy waits (us), as (`WAIT_US`, us).
+const WAIT_US: u8 = 0xFE;
+
+impl chip::Delay for Log {
+    async fn ms(&mut self, ms: u32) {
+        self.0.borrow_mut().push((WAIT, ms as u16));
+    }
+}
+
+impl Log {
+    fn take(&self) -> Vec<(u8, u16)> {
+        core::mem::take(&mut *self.0.borrow_mut())
+    }
+}
+
+const RX: RxSetup = RxSetup { freq: VHF, narrow: false, am: false, rx_tone: 0, rx_tail: false };
+
+/// PWR-21 (decision 119): from sleep, REG_37's supplies on, the wake settle, then the receive set-up with the AF
+/// route muted before anything else and receive on (REG_30) last; the wake time is kept.
+#[test]
+fn wake_settles_before_the_receive_setup() {
+    use ferrite_core::settle::Settle;
+    let log = Log::default();
+    let (mut bk, mut d) = (Bk4829::new(log.clone()), log.clone());
+    let at = block_on(chip::tune_settled(&mut bk, &mut d, &RX, Settle { wake_ms: 2, sleep_ms: 1 }, None, 100));
+    assert_eq!(at, 100);
+    let w = log.take();
+    assert_eq!(w[..3], [(reg::LDO, 0x9D1F), (WAIT, 2), (reg::AF_OUT, 0x6042)], "{w:x?}");
+    assert_eq!(w.iter().position(|e| e.0 == reg::POWER), Some(w.len() - 3), "REG_30 only at the end");
+    // Stock's 50 us between the two REG_30 writes (decision 119, the TX audit).
+    assert_eq!(w[w.len() - 3..], [(reg::POWER, 0x0200), (WAIT_US, 50), (reg::POWER, 0xBFF1)]);
+    assert_eq!(w.iter().filter(|e| e.0 == WAIT).count(), 1);
+}
+
+/// PWR-21: a chip whose supplies came on a tick early (the hop's `due`), or that is long awake, is tuned with no
+/// wait and no second REG_37 write; one woken 1 ms ago waits the rest; 0 is stock's: no wait at all.
+#[test]
+fn wake_settle_counts_from_the_early_wake() {
+    use ferrite_core::settle::Settle;
+    let s = Settle { wake_ms: 2, sleep_ms: 1 };
+    let log = Log::default();
+    let (mut bk, mut d) = (Bk4829::new(log.clone()), log.clone());
+    assert_eq!(block_on(chip::tune_settled(&mut bk, &mut d, &RX, s, Some(90), 100)), 90);
+    let w = log.take();
+    assert!(!w.iter().any(|e| e.0 == WAIT || e.0 == reg::LDO), "{w:x?}");
+    block_on(chip::tune_settled(&mut bk, &mut d, &RX, s, Some(99), 100));
+    assert_eq!(log.take().iter().filter(|e| e.0 == WAIT).collect::<Vec<_>>(), [&(WAIT, 1)]);
+    block_on(chip::tune_settled(&mut bk, &mut d, &RX, Settle::STOCK, None, 100));
+    let w = log.take();
+    assert_eq!(w[0], (reg::LDO, 0x9D1F));
+    assert!(!w.iter().any(|e| e.0 == WAIT), "stock's: back to back");
+}
+
+/// PWR-21: to sleep, the AF route muted, REG_30 off, the sleep settle, then REG_37's supplies off; with 0 the same
+/// writes with no wait (stock's REG_30 0 then REG_37 0x1D00, after the mute).
+#[test]
+fn sleep_mutes_then_settles() {
+    use ferrite_core::settle::Settle;
+    let log = Log::default();
+    let (mut bk, mut d) = (Bk4829::new(log.clone()), log.clone());
+    block_on(chip::sleep_settled(&mut bk, &mut d, Settle { wake_ms: 2, sleep_ms: 1 }));
+    assert_eq!(log.take(), [(reg::AF_OUT, 0x6042), (reg::POWER, 0), (WAIT, 1), (reg::LDO, 0x1D00)]);
+    block_on(chip::sleep_settled(&mut bk, &mut d, Settle::STOCK));
+    assert_eq!(log.take(), [(reg::AF_OUT, 0x6042), (reg::POWER, 0), (reg::LDO, 0x1D00)]);
+}
+
+/// PWR-21: a receiving chip retuned (scan, a new frequency) is muted before its frequency changes.
+#[test]
+fn retune_mutes_first() {
+    let log = Log::default();
+    let mut bk = Bk4829::new(log.clone());
+    chip::tune_rest(&mut bk, &RX);
+    assert_eq!(log.take()[0], (reg::AF_OUT, 0x6042));
+}

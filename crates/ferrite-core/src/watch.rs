@@ -235,6 +235,18 @@ impl Hop {
         }
         next
     }
+
+    /// PWR-21: the chip the path turns to within `within` ms if nothing changes (both chips have a slot, neither
+    /// is heard, the current dwell ends by then), after a [`Hop::next`] with the same `out`. The Radio task turns
+    /// that chip's supplies on a tick early, so their settle overlaps the dwell instead of delaying the hop.
+    pub fn due(&self, now: u32, out: &Out, active: u8, within: u32) -> Option<u8> {
+        let c = self.cur?;
+        if out.chip.iter().any(Option::is_none) || out.audio.is_some_and(|s| out.chip.contains(&Some(s))) {
+            return None;
+        }
+        let dwell = if out.chip[c as usize] == Some(active) { ACTIVE_DWELL_MS } else { WATCHED_DWELL_MS };
+        (now.wrapping_sub(self.since).saturating_add(within) >= dwell).then_some(c ^ 1)
+    }
 }
 
 #[cfg(test)]
@@ -362,6 +374,41 @@ mod tests {
         let one = Out { chip: [None, Some(1)], ..Out::default() };
         assert_eq!(h.next(9_010, &one, 1), Some(1));
         assert_eq!(h.next(9_020, &Out::default(), 0), None);
+    }
+
+    /// PWR-21: the chip the hop turns to by the next tick is named a tick early, never while a chip is heard or
+    /// only one has a slot; in a 10 ms tick run it is named on exactly the tick before each hop.
+    #[test]
+    fn hop_due_a_tick_early() {
+        let mut h = Hop::new();
+        let both = Out { chip: [Some(0), Some(1)], ..Out::default() };
+        assert_eq!(h.due(0, &both, 0, 10), None, "no path yet");
+        h.next(0, &both, 0);
+        assert_eq!(h.due(139, &both, 0, 10), None);
+        assert_eq!(h.due(140, &both, 0, 10), Some(1), "active dwell (150) over by the next tick");
+        h.next(150, &both, 0);
+        assert_eq!(h.due(209, &both, 0, 10), None);
+        assert_eq!(h.due(210, &both, 0, 10), Some(0), "watched dwell (70)");
+        let heard = Out { audio: Some(1), ..both };
+        assert_eq!(h.due(210, &heard, 0, 10), None, "B heard: its chip keeps the path");
+        let one = Out { chip: [None, Some(1)], ..Out::default() };
+        assert_eq!(h.due(210, &one, 1, 10), None, "one chip: no hop");
+        // A whole run in 10 ms ticks: each hop was named on the tick before it, and only then.
+        let mut h = Hop::new();
+        let mut early = None;
+        let mut hops = 0;
+        for t in (0..3_000).step_by(10) {
+            let prev = h.chip();
+            let p = h.next(t, &both, 0);
+            if prev.is_some() && p != prev {
+                assert_eq!(early, p, "the hop at {t} was named a tick early");
+                hops += 1;
+            } else if prev.is_some() {
+                assert_eq!(early, None, "named early before {t}, then no hop");
+            }
+            early = h.due(t, &both, 0, 10);
+        }
+        assert!(hops > 20, "{hops}");
     }
 
     /// WATCH-2, PWR-7 (decision 111): only the hop's chip is awake; APRS mode's C keeps its chip awake beside it.

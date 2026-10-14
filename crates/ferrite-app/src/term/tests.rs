@@ -1132,6 +1132,7 @@ fn regs(r: DebugReq) -> DebugAns {
             DebugAns::Bt { data, n: 8 }
         }
         DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),
+        DebugReq::Settle(s) => DebugAns::Settle(s.unwrap_or(ferrite_core::settle::Settle::DEFAULT)),
         // The ATGM336H sentence suspected on the black radio: field 9 low, field 11 empty.
         DebugReq::Gga => gga(b"$GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57", 12),
     }
@@ -1203,6 +1204,35 @@ fn debug_rx_both() {
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
     assert!(!super::cmd::writes(b"rx") && super::cmd::writes(b"rx both"));
+}
+
+/// TERM-31: `bk settle` asks the waits, `bk settle N` sets both to N ms, `bk settle W S` each; 0 is stock's; out of
+/// range or extra words are refused here, before anything is sent. `bk settle` alone is a read (TERM-25).
+#[test]
+fn debug_bk_settle() {
+    use ferrite_core::settle::Settle;
+    let mut r = Rig::main();
+    r.cmd("bk settle");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Settle(None)]);
+    assert!(r.raw().contains("bk settle: wake 2 ms, sleep 1 ms"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bk settle 5");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Settle(Some(Settle { wake_ms: 5, sleep_ms: 5 }))]);
+    assert!(r.raw().contains("wake 5 ms, sleep 5 ms"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("BK SETTLE 10 0");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Settle(Some(Settle { wake_ms: 10, sleep_ms: 0 }))]);
+    r.send(b"\r");
+    r.cmd("bk settle 0");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Settle(Some(Settle::STOCK))]);
+    assert!(r.raw().contains("wake 0 ms, sleep 0 ms (stock's: no wait)"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["bk settle 21", "bk settle 2 21", "bk settle 2 1 0", "bk settle x", "bk settle -1"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("bk settle [WAKE [SLEEP]]"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+    assert!(!super::cmd::writes(b"bk settle") && super::cmd::writes(b"bk settle 2") && super::cmd::writes(b"bk 0 30"));
 }
 
 /// TERM-27: `bt` sends only queries; the answer prints as text (control bytes as dots); settings are refused

@@ -386,6 +386,9 @@ pub enum DebugReq {
     RxBoth(Option<bool>),
     /// TERM-30: the GPS module's last GGA sentence as received, answered where the terminal runs.
     Gga,
+    /// TERM-31, PWR-21 (decision 119, a bench test): the BK4829 wake and sleep settle waits, set (`Some`, each
+    /// within [`crate::settle::MAX_MS`]) or only asked (`None`). RAM only.
+    Settle(Option<crate::settle::Settle>),
 }
 
 /// The longest GGA sentence [`DebugAns::Gga`] carries: NMEA's 82 characters less CR LF.
@@ -404,6 +407,8 @@ pub enum DebugAns {
     Bt { data: [u8; 48], n: u8 },
     /// TERM-29: whether both band receive selects are held on now.
     RxBoth(bool),
+    /// TERM-31: the settle waits in force now.
+    Settle(crate::settle::Settle),
     /// TERM-30: the last GGA sentence from `$` to the checksum (`n` 0: none since boot), and its age in seconds.
     Gga { data: [u8; GGA_MAX], n: u8, age_s: u32 },
     /// Not done, and why.
