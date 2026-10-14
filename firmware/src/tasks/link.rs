@@ -43,9 +43,10 @@ struct Port {
 }
 
 impl Port {
-    /// Whether a byte may go now (TX-43: never on the cable while keyed, but in the `tx-dry` build).
+    /// Whether a byte may go now (TX-43: never on the cable while keyed, but in the `tx-dry` build; SND-14: never
+    /// on the cable with a speaker mic connected).
     fn may_send(&self) -> bool {
-        !self.cable || ferrite_radio::cable::may_send(RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0, cfg!(feature = "tx-dry"))
+        !self.cable || ferrite_radio::cable::may_send(RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0, cfg!(feature = "tx-dry"), spkmic())
     }
 
     /// Received bytes into the UI's ring (only what it has room for: the rest waits in the UART's ring, never
@@ -91,6 +92,27 @@ impl Port {
     }
 }
 
+/// A speaker mic is in the side connector (SND-12, the input task's debounced state), or PC15 reads low (connected)
+/// while that is still being decided (the boot check, a change): the cable goes quiet at the first sign of one.
+fn spkmic() -> bool {
+    use ferrite_core::acc::{CHANGING, ON};
+    let a = crate::chan::ACCESSORY.load(Relaxed);
+    a & ON != 0 || a & CHANGING != 0 && !crate::board::ACC_DET.read()
+}
+
+/// SND-14 (decision 146): with a speaker mic, PC10 (UART4 TX) held high as a GPIO, as stock; back on the UART
+/// without. Whatever was being sent has left first; what waits for the cable is dropped.
+fn cable_quiet(quiet: bool) {
+    if quiet {
+        uart::flush(UART_CPS);
+        uart::tx_pin_quiet(UART_CPS);
+        TERM_OUT.clear();
+    } else {
+        uart::tx_pin_live(UART_CPS);
+        crate::bringup::line(b"cable: live (speaker mic removed)");
+    }
+}
+
 /// 0 9 2 1: the module powered (PB9, active high) and USART1 at 115200, or both off with the TX pin let go so a
 /// powered-down module isn't fed (LINK-25: the MCU never configures the module; the rate is fixed).
 fn bt_power(on: bool) {
@@ -116,7 +138,13 @@ pub async fn task() {
     let mut bt_turn = false;
     // A rate change on probation: its deadline and the HELLO count when it was made.
     let mut probation: Option<(Instant, u16)> = None;
+    // SND-14: PC10 held high while a speaker mic is connected.
+    let mut quiet = false;
     loop {
+        if spkmic() != quiet {
+            quiet = !quiet;
+            cable_quiet(quiet);
+        }
         // 0 9 2 1 as the UI last set it.
         let out = bt_pw.step(BT_ON.load(Relaxed), RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0);
         if let Some(want) = out.power {
@@ -152,6 +180,9 @@ pub async fn task() {
             if let Some(rate) = LINK_BAUD.try_take() {
                 uart::flush(UART_CPS);
                 uart::init(UART_CPS, rate);
+                if quiet {
+                    uart::tx_pin_quiet(UART_CPS); // init gave the pin back to the UART
+                }
                 CABLE_BAUD.store(rate, Relaxed);
                 probation = Some((Instant::now() + BAUD_PROOF, LINK_HELLOS.load(Relaxed)));
             }
@@ -161,6 +192,9 @@ pub async fn task() {
                 probation = None;
             } else if Instant::now() >= until {
                 uart::init(UART_CPS, BAUD);
+                if quiet {
+                    uart::tx_pin_quiet(UART_CPS);
+                }
                 CABLE_BAUD.store(BAUD, Relaxed);
                 probation = None;
             }

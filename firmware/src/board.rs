@@ -127,6 +127,9 @@ pub fn safe_state() {
         p.output(false, Mode::OutPp);
     }
     POWER_HOLD.output(true, Mode::OutPp);
+    // SND-14: PC10 (UART4 TX, the side connector's pin 11) high from reset, as stock's init (0x08016660) drives it:
+    // a speaker mic's bias comes from it. Never low; the link task puts it on the UART.
+    pin(GPIOC, 10).output(true, Mode::OutPp);
 }
 
 /// Called from `__pre_init`, before RAM is initialised (interrupts already masked): the safe state, then

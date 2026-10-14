@@ -878,12 +878,16 @@ fn gps_pb10_before_the_key_up() {
 }
 
 /// TX-43 (TX audit F9): the cable sends nothing while keyed, except in the `tx-dry` build (the bench reads the
-/// chips over it with the PA drive at 0).
+/// chips over it with the PA drive at 0). SND-14: nothing at all with a speaker mic connected (PC10 is its bias).
 #[test]
 fn cable_held_while_keyed() {
     use crate::cable::may_send;
-    assert!(may_send(false, false) && !may_send(true, false));
-    assert!(may_send(true, true) && may_send(false, true));
+    assert!(may_send(false, false, false) && !may_send(true, false, false));
+    assert!(may_send(true, true, false) && may_send(false, true, false));
+    // SND-14 (decision 146): a speaker mic connected: nothing, keyed or not, dry or not.
+    for (k, d) in [(false, false), (true, false), (false, true), (true, true)] {
+        assert!(!may_send(k, d, true), "keyed {k} dry {d}");
+    }
 }
 
 /// GPS-1, GPS-4, GPS-25: powered with 0 6 1; off at once for a signal 0 6 8 covers, and back on only after

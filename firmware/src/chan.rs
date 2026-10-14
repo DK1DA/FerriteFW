@@ -67,7 +67,7 @@ pub static MCU_TEMP_RAW: AtomicU32 = AtomicU32::new(0);
 /// SND-12: the side connector's speaker mic, debounced by the input task ([`ferrite_core::acc::AccDet::pack`]: bit 0
 /// connected, bit 1 a change being debounced). The Radio task holds PB8 on while connected and keeps VOX off while
 /// it changes (VOX-3); the UI shows it on the Status page.
-pub static ACCESSORY: AtomicU8 = AtomicU8::new(0);
+pub static ACCESSORY: AtomicU8 = AtomicU8::new(ferrite_core::acc::CHANGING); // changing until the boot check
 /// TERM-30: the GPS module's last GGA sentence as received (from `$` to the checksum) and when (ms since boot): the
 /// GPS task writes it, the terminal's `gps` reads it. 88 B.
 pub static GGA: embassy_sync::blocking_mutex::Mutex<M, core::cell::RefCell<GgaCopy>> =

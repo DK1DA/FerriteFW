@@ -60,6 +60,18 @@ pub fn rate_ok(id: usize, baud: u32) -> bool {
     div >= 16 && (clk / div).abs_diff(baud) * 50 <= baud
 }
 
+/// SND-14: the TX pin a GPIO output held high, the UART still enabled (its receive works; what it shifts out
+/// reaches no pin). Stock holds PC10 so outside programming mode: a speaker mic takes its bias from it. Call after
+/// [`flush`]; [`init`] puts the pin back on the UART, so call again after it. Never low: that would cut the bias.
+pub fn tx_pin_quiet(id: usize) {
+    HW[id].tx.output(true, Mode::OutPp);
+}
+
+/// The TX pin back on the UART (idle high: no edge on the way).
+pub fn tx_pin_live(id: usize) {
+    HW[id].tx.output(true, Mode::AfPp);
+}
+
 /// Until the last byte written has left the pin (before a rate change).
 pub fn flush(id: usize) {
     let base = HW[id].base;
