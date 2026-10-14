@@ -228,9 +228,25 @@ def eye(dev, fs, out_png=None):
     k0 = int(np.ceil(data0 / sps - (icpt + slope * data0)))
     k1 = int(np.floor(len(y) / sps - (icpt + slope * len(y)))) - 1
     k = np.arange(k0, k1)
-    nk = (k + icpt) / (1 / sps - slope)
-    nk = nk[(nk > data0) & (nk < len(y) - 2)]
-    v = np.interp(nk, np.arange(len(y)), y)
+    nk0 = (k + icpt) / (1 / sps - slope)
+
+    # The squared signal's phase finds the clock but not reliably the centre (it can land on the transitions,
+    # Oct 13, 2026 on the radio): of 32 offsets across a symbol, keep the one with the most open eye.
+    def at(off):
+        n = nk0 + off * sps
+        n = n[(n > data0) & (n < len(y) - 2)]
+        return n, np.interp(n, np.arange(len(y)), y)
+
+    def openness(v):
+        cc, ll = kmeans4(v)
+        cc = np.sort(cc)
+        sp = np.mean([v[ll == i].std() for i in range(4) if np.any(ll == i)])
+        return np.min(np.diff(cc)) / max(sp, 1e-9)
+
+    off = max(np.arange(32) / 32 - 0.5, key=lambda o: openness(at(o)[1][:20000]))
+    nk, v = at(off)
+    if abs(off) > 1e-9:
+        print(f"  centre found {off:+.2f} symbol from the clock estimate")
     ppm = slope * sps * 1e6
     print(f"  {len(v)} symbols; symbol clock {SYMBOL_HZ * (1 + slope * sps):.2f} Bd against the dongle's ({ppm:+.0f} ppm, both clocks' error)")
     c, lab = kmeans4(v)
@@ -253,10 +269,25 @@ def eye(dev, fs, out_png=None):
     dec = np.array([-3, -1, 1, 3])[lab]
     ref = prbs_symbols()
     m = min(1000, len(dec))
-    best = max(range(511), key=lambda s: np.sum(dec[:m] == np.roll(ref, -s)[np.arange(m) % 511]))
-    want = np.roll(ref, -best)[np.arange(len(dec)) % 511]
-    errs = int(np.sum(dec != want))
-    print(f"  symbol errors against PRBS9: {errs} of {len(dec)} ({errs / len(dec):.2e})")
+    # Either polarity: the chain from the DAC to the deviation (and the dongle's spectrum) may invert it.
+    def align(d):
+        best = max(range(511), key=lambda s: np.sum(d[:m] == np.roll(ref, -s)[np.arange(m) % 511]))
+        return int(np.sum(d != np.roll(ref, -best)[np.arange(len(d)) % 511]))
+
+    errs, inv = min((align(dec), False), (align(-dec), True))
+    # Which level carries which symbol, if not M17's order: the best of the 24 maps on the first 2000 symbols.
+    import itertools
+    best_map = min(itertools.permutations([-3, -1, 1, 3]), key=lambda pm: align(np.array(pm)[lab[:2000]]))
+    if list(best_map) != [-3, -1, 1, 3]:
+        alt = align(np.array(best_map)[lab])
+        print(f"  levels low to high carry {list(best_map)} (M17's order is [-3, -1, 1, 3]): {alt} errors that way ({alt / len(dec):.2e})")
+    # Slips (the DAC dropping or repeating a block) show as errors that jump after a clean start: per 2000
+    # symbols, each aligned on its own.
+    d = -dec if inv else dec
+    parts = [align(d[i : i + 2000]) / 2000 for i in range(0, len(d) - 2000, 2000)]
+    if parts:
+        print("  errors per 2000 symbols, each aligned alone: " + " ".join(f"{e:.0%}" for e in parts[:12]))
+    print(f"  symbol errors against PRBS9: {errs} of {len(dec)} ({errs / len(dec):.2e}){', polarity inverted' if inv else ''}")
     # Drift and droop: per 0.5 s, the mean of all symbols (DC) and the outer span.
     per = int(SYMBOL_HZ * 0.5)
     dcs, spans = [], []
@@ -365,6 +396,9 @@ def sweep(dev, fs, out_png=None):
         for p in (lo, hi):
             if p:
                 ax.axvline(p, color="#c0392b", lw=0.8, ls=":")
+        ticks = [50, 100, 200, 300, 500, 1000, 2000, 3150, 5000, 8000]
+        ax.set_xticks(ticks, ["50", "100", "200", "300", "500", "1k", "2k", "3.15k", "5k", "8k"])
+        ax.set_xticks([], minor=True)
         ax.set_xlabel("audio frequency (Hz)")
         ax.set_ylabel("deviation, dB against 1 kHz")
         ax.set_title(f"TX response (1 kHz = {ref:.0f} Hz dev); -3 dB {lo or 0:.0f} Hz to {hi or 0:.0f} Hz")
