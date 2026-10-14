@@ -340,7 +340,8 @@ fn both_ptts_in_the_box() {
 }
 
 /// HOME-17, KEY-7: the side connector's PTT isn't one of the box's keys: it closes the box and transmits on the
-/// active slot as usual; so does VOX (VOX-13 keys as that PTT does).
+/// active slot as usual. VOX doesn't: the box isn't home, so VOX is held while it is up (VOX-3, decision 145) and
+/// keys only once it has closed.
 #[test]
 fn external_ptt_and_vox_close_it_and_key() {
     let mut t = ready();
@@ -359,8 +360,12 @@ fn external_ptt_and_vox_close_it_and_key() {
     t.cmds();
     t.live.tx.voice = true;
     t.wait(200);
+    assert!(t.app.qmenu.is_some(), "VOX leaves the box up");
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "VOX held while it is up");
+    t.tap(Key::Exit);
+    t.wait(200);
     assert!(t.app.qmenu.is_none());
-    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { slot: 0, on: true })), "VOX keys");
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { slot: 0, on: true })), "home: VOX keys");
     t.live.tx.voice = false;
     t.wait(200);
 }

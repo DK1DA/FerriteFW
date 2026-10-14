@@ -384,6 +384,8 @@ struct Tx {
     vox: (u8, u8),
     vox_det: ferrite_core::vox::Vox,
     vox_at: u32,
+    /// VOX-3: the UI's screen lets VOX sample (home); false until the UI says so.
+    vox_screen: bool,
     /// The region and Extend TX from the UI's last [`RadioCmd::TxPlan`]: the crossband repeater's key-ups use them.
     region: Option<(Region, bool)>,
     /// DTMF-3: each digit's on and off time (ms) and the first digit delay (10 ms); a dialled sequence, and whether
@@ -647,6 +649,7 @@ pub async fn task() {
             vox: (0, 20),
             vox_det: ferrite_core::vox::Vox::new(),
             vox_at: 0,
+            vox_screen: false,
             region: None,
             mic: 5,
             timeout_s: 120,

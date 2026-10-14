@@ -37,7 +37,8 @@ impl Radio {
 
     /// VOX (VOX-2, VOX-3, VOX-5, VOX-14): every 20 ms, PA0's mic level against the level's threshold; speech
     /// (with its tail) goes to the UI in `TxLive::voice`, which keys the active slot (VOX-13). Blocked while the
-    /// active slot receives and nothing is keyed, or while the input task debounces a speaker-mic change (VOX-3).
+    /// active slot receives and nothing is keyed, while the input task debounces a speaker-mic change, or while the
+    /// UI shows anything but home (VOX-3).
     #[cfg(feature = "tx")]
     fn vox_poll(&mut self) {
         use crate::hal::adc;
@@ -56,7 +57,8 @@ impl Radio {
         // VOX-3, as stock (0x08025994): never while any audio plays (a slot heard, the broadcast, a beep: the
         // speaker on, which also turns the tap off through PB8) or any slot's squelch is open; then the 1.5 s hold.
         let audio = SPEAKER_ON.load(core::sync::atomic::Ordering::Relaxed) || self.si.mode().is_some();
-        let blocked = changing || self.path.keyed().is_none() && (audio || self.live.slots.iter().any(|s| s.squelch_open));
+        // And, as stock's UI mode (state+1 != 0), any screen but home: the detector reset, 1.5 s after home again.
+        let blocked = changing || !self.tx.vox_screen || self.path.keyed().is_none() && (audio || self.live.slots.iter().any(|s| s.squelch_open));
         self.live.tx.voice = self.tx.vox_det.step(mic, level, tail as u32 * 100, blocked, now);
     }
 

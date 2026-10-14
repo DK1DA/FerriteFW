@@ -107,9 +107,11 @@ impl Radio {
                     self.live.tx.voice = false;
                 }
             }
+            #[cfg(feature = "tx")]
+            RadioCmd::VoxScreen(ok) => self.tx.vox_screen = ok,
             // Nothing keys in this build, so VOX has nothing to do.
             #[cfg(not(feature = "tx"))]
-            RadioCmd::Vox { .. } => {}
+            RadioCmd::Vox { .. } | RadioCmd::VoxScreen(_) => {}
             // SND-12, from the input task: as stock, PE1 follows the speaker mic and PB8 goes on with it. Removed,
             // PB8 stays as it is (it may carry receive or repeat audio now) until the next speaker change clears it.
             RadioCmd::Accessory(on) => {

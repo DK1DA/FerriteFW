@@ -63,6 +63,10 @@ pub const TOAST_MS: u32 = 3000;
 /// A hold-digit shortcut's popup (HOME-8).
 pub const POPUP_MS: u32 = 1200;
 pub const UNDO_MS: u32 = 5000;
+/// [`App`]'s VOX flags (`vox_bits`).
+const VOX_REFUSED: u8 = 1;
+const VOX_SENT: u8 = 2;
+const VOX_SCREEN: u8 = 4;
 /// The refusal beep (SND-4, TEXT-5): short and low, unlike a key beep.
 const REFUSED_HZ: u16 = 440;
 const REFUSED_MS: u16 = 80;
@@ -277,8 +281,10 @@ pub struct App {
     alert: u8,
     /// VOX keyed the active slot and holds it (VOX-13).
     vox_on: bool,
-    /// VOX's speech refused on an emergency frequency (TX-35): the toast once per burst of speech.
-    vox_refused: bool,
+    /// VOX's flags: [`VOX_REFUSED`], speech refused on an emergency frequency (TX-35: the toast once per burst);
+    /// [`VOX_SENT`] and [`VOX_SCREEN`], whether the screen lets VOX sample as last sent to the Radio task (VOX-3,
+    /// [`App::vox_screen`]). One byte: the App's RAM budget (`ram_is_small`).
+    vox_bits: u8,
     /// Remote PTT over the link holds the key (LINK-20, [`remote`]); why the last one ended; a VOX or remote PTT
     /// press is going through the PTT path now (not a person's); the local PTTs held, and those whose press ended
     /// a remote transmission (dead until let go), bits from [`remote::bit`].
@@ -378,7 +384,7 @@ impl App {
             inbox: 0,
             alert: 0,
             vox_on: false,
-            vox_refused: false,
+            vox_bits: 0,
             remote: None,
             remote_ended: None,
             virtual_ptt: false,
@@ -1483,19 +1489,41 @@ impl App {
         }
     }
 
+    /// VOX-3, as stock's UI mode 0 (0x08025994: any other screen holds VOX): VOX samples only on home, with no
+    /// quick menu up; its own Transmit screen counts as home while VOX holds the key. Every other screen (menus,
+    /// settings, editors, entry, popups, prompts, alerts, setup, the link's and the terminal's screens) blocks it,
+    /// so MENU 0 8 2 can always be reached to turn VOX off.
+    pub fn vox_screen(&self) -> bool {
+        self.qmenu.is_none()
+            && match self.screen {
+                Screen::Home => true,
+                Screen::Transmit(_) => self.vox_on,
+                _ => false,
+            }
+    }
+
     /// VOX-13, VOX-4: speech from the Radio task keys the active slot as PTT A does, with every PTT check;
     /// its end (after the tail) releases it. Not on the APRS slot, whose PTT opens compose.
     fn vox_tick(&mut self, live: &LiveAll, now: u32, store: &impl ChannelStore) {
-        let voice = live.tx.voice && self.set.vox && !self.aprs_slot(self.active);
+        let screen_ok = self.vox_screen();
+        let bits = VOX_SENT | if screen_ok { VOX_SCREEN } else { 0 };
+        if self.vox_bits & (VOX_SENT | VOX_SCREEN) != bits {
+            self.vox_bits = self.vox_bits & VOX_REFUSED | bits;
+            self.out.push(RadioCmd::VoxScreen(screen_ok));
+        }
+        // VOX-3: speech keys only from home; a release always goes through.
+        let voice = live.tx.voice && self.set.vox && !self.aprs_slot(self.active) && (screen_ok || self.vox_on);
         // TX-35 (TX audit F11): VOX is automatic, so never on an emergency frequency: a toast, not the prompt.
         if voice && !self.vox_on && self.radio.keyed.is_none() && ferrite_core::txplan::emergency(screens::transmit::tx_freq(self, self.active)) {
-            if !self.vox_refused {
-                self.vox_refused = true;
+            if self.vox_bits & VOX_REFUSED == 0 {
+                self.vox_bits |= VOX_REFUSED;
                 self.show_toast(b"No VOX", b"emergency frequency", false);
             }
             return;
         }
-        self.vox_refused &= voice;
+        if !voice {
+            self.vox_bits &= !VOX_REFUSED;
+        }
         if voice && !self.vox_on && self.radio.keyed.is_none() {
             self.vox_on = true;
             self.virtual_ptt = true;

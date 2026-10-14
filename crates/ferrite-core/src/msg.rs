@@ -59,6 +59,9 @@ pub enum RadioCmd {
     /// task compares the mic (PA0) with the level's threshold and reports speech in [`TxLive::voice`]; the UI
     /// keys the active slot from it, with every PTT check (VOX-4).
     Vox { level: u8, tail: u8 },
+    /// VOX-3 (as stock's UI mode 0, 0x08025994): VOX may sample (true) only with home on the screen; false blocks
+    /// it, the detector reset, and it samples again 1.5 s after the next true. Sent when it changes.
+    VoxScreen(bool),
     /// Pause watching for this many seconds (WATCH-6, WATCH-16); 0 resumes it now.
     PauseWatch(u16),
     /// Key or unkey a slot (3 = the HF mode frequency), after the UI's checks; the Radio task checks again

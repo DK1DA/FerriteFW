@@ -403,6 +403,7 @@ impl FakeRadio {
             }
             RadioCmd::BeepVol(v) => self.beep_vol = v,
             RadioCmd::Vox { level, tail } => self.vox = (level, tail),
+            RadioCmd::VoxScreen(_) => {}
             RadioCmd::DtmfSend { len } if self.live.tx.keyed => {
                 let ms = ferrite_core::tonegen::dtmf_seq_ms(len as usize, self.dtmf.0 as u16, self.dtmf.1 as u16 * 10);
                 self.dialling = Some(self.now + ms as f32 / 1000.0);
