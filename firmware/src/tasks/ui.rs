@@ -137,6 +137,7 @@ pub async fn task() {
                 Fault::Blank => b"tx calibration: locked, sector blank or unread",
                 Fault::PaCurve => b"tx calibration: locked, a PA curve byte is 0x00 or 0xFF",
                 Fault::Windows => b"tx calibration: locked, TX windows blank or invalid",
+                Fault::Trim => b"tx calibration: locked, factory crystal trim not applied yet",
             });
         }
         crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));

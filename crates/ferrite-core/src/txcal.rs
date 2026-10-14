@@ -16,6 +16,11 @@ const GAUGE_AT: usize = 0x200;
 /// 0xF240 window 4 (350), five bytes each: the enable byte (1 on), then the low and the high edge, each two bytes of
 /// BCD giving whole MHz (01 36 = 136 MHz). Stock's loader, `analysis/calibration.md`.
 const WINDOWS_AT: [usize; 4] = [0x230, 0x235, 0x23A, 0x240];
+/// The factory crystal trim (CAL-12): 0xF210 byte 11 = [`TRIM_MARKER`] marks it valid, bytes 12-13 hold k, signed
+/// 16-bit little-endian. Stock adds `(f / 100) * k / 435500` to every frequency it tunes, receive and transmit
+/// (0x0801DDD0), about 0.023 ppm a unit.
+const TRIM_AT: usize = 0x21B;
+pub const TRIM_MARKER: u8 = 0xA0;
 
 /// Why the calibration locks transmit (TX-13, TX-14, CAL-5, CAL-6): the Radio task gets no [`TxCal`], and every
 /// key-up is refused as Locked; receive is unaffected.
@@ -29,6 +34,16 @@ pub enum Fault {
     /// never has: CAL-4), an enable byte other than 0x00, 0x01 or 0xFF, or an enabled window that isn't BCD with
     /// low < high (TX-14).
     Windows,
+    /// A factory crystal trim is set (0xF210 byte 11 = 0xA0 and k not 0). Ferrite doesn't apply it yet, so this
+    /// radio would transmit off frequency by it: transmit is locked until it does (TX audit M4, a deviation from
+    /// stock, which applies it). A radio without the marker (the black radio: 0xFF) is unaffected.
+    Trim,
+}
+
+/// CAL-12: the factory crystal trim k when the sector marks one (0xF210 byte 11 = 0xA0), else None. Stock's loader
+/// skips 0xF210 on a blank sector, so a blank one has none.
+pub fn factory_trim(b: &[u8; READ_LEN]) -> Option<i16> {
+    (b[BLANK_AT] != 0xFF && b[TRIM_AT] == TRIM_MARKER).then(|| i16::from_le_bytes([b[TRIM_AT + 1], b[TRIM_AT + 2]]))
 }
 
 /// A BCD byte's value, None if a digit is over 9.
@@ -80,10 +95,14 @@ impl TxCal {
     }
 
     /// The curves and windows, or why transmit is locked: the sector blank (CAL-5), a curve the radio's bands use
-    /// holding a 0 or 0xFF (CAL-6's plausibility), the TX windows blank or invalid (TX-14).
+    /// holding a 0 or 0xFF (CAL-6's plausibility), the TX windows blank or invalid (TX-14), a factory crystal
+    /// trim Ferrite doesn't apply yet ([`Fault::Trim`]).
     pub fn read(b: &[u8; READ_LEN]) -> Result<TxCal, Fault> {
         if b[BLANK_AT] == 0xFF {
             return Err(Fault::Blank);
+        }
+        if factory_trim(b).is_some_and(|k| k != 0) {
+            return Err(Fault::Trim);
         }
         let mut c = TxCal { pa: [[[0; 16]; 4]; 3], hf: [[0; 16]; 3], win: [(0, 0); 4] };
         for (l, level) in c.pa.iter_mut().enumerate() {
@@ -280,6 +299,25 @@ mod tests {
         assert_eq!(bad(0x23A, 0x02), Some(Fault::Windows), "enable byte 2");
         assert_eq!(bad(0x234, 0x75), None, "136-175 MHz: still a window");
         assert!(TxCal::parse(&sector(GAUGE_DEFAULT)).is_some());
+    }
+
+    /// CAL-12, TX audit M4: a factory crystal trim (marker 0xA0, k not 0) locks transmit until Ferrite applies it;
+    /// the marker with k = 0, or no marker (the black radio's 0xFF), changes nothing.
+    #[test]
+    fn factory_trim_locks() {
+        let b = sector(GAUGE_DEFAULT);
+        assert_eq!(factory_trim(&b), None, "the black radio: no marker");
+        assert!(TxCal::read(&b).is_ok());
+        let mut b = sector(GAUGE_DEFAULT);
+        b[TRIM_AT..TRIM_AT + 3].copy_from_slice(&[0xA0, 0x2C, 0xFF]); // k = -212, about -4.9 ppm
+        assert_eq!(factory_trim(&b), Some(-212));
+        assert_eq!(TxCal::read(&b).err(), Some(Fault::Trim));
+        b[TRIM_AT + 1..TRIM_AT + 3].fill(0);
+        assert_eq!(factory_trim(&b), Some(0));
+        assert!(TxCal::read(&b).is_ok(), "marker with k = 0: no trim to apply");
+        let mut b = sector(GAUGE_DEFAULT);
+        b[TRIM_AT..TRIM_AT + 3].copy_from_slice(&[0x00, 0x2C, 0xFF]);
+        assert!(TxCal::read(&b).is_ok(), "k without the marker: stock ignores it");
     }
 
     /// CAL-14: the 1.25 m PA path (200-300 MHz, 243.0 MHz included) takes the Low curve at every level, so the
