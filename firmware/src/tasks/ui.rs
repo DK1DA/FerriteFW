@@ -592,6 +592,9 @@ fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
             let _ = ufmt::uwrite!(b, "Ferrite {} {}", VERSION, ferrite_core::build());
         }
     });
+    if cfg!(feature = "tx-dry") {
+        bringup::line(b"TX DRY: PA drive held at 0");
+    }
     bringup::linef(|b| {
         b.push(b"MCU idcode ");
         bringup::hex(b, crate::hal::sys::idcode());

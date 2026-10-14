@@ -15,6 +15,10 @@ bench = false
 [features]
 # Transmit. Off until milestone 4: without it the build has no transmit code at all (the bk4829 crate's tx feature).
 tx = ["bk4829/tx", "ferrite-radio/tx"]
+# The dry run (TX audit, section 6): the whole transmit build with the PA drive held at 0. Every key-up, unkey and
+# read-back runs, the cable log prints the drive it would have used ("tx pa N"), and DAC2 never leaves 0 nor PA5 its
+# GPIO low: `hal::pa::set` is the one place that drives it. `cargo fw --features tx-dry`; `tools/mkbtf.sh tx-dry`.
+tx-dry = ["tx"]
 # The first builds on a new radio (roadmap 1c): nothing is ever written to or erased from the SPI flash (settings
 # live in RAM for the power-on), any key held through the boot screen opens the key test, and the cable prints a
 # plain log (boot report, every raw key code, the receiver, faults) until a byte arrives, then the terminal takes

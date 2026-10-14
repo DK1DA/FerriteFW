@@ -17,6 +17,7 @@ jobs:
       - run: cargo fw-clippy -- -D warnings
       - run: cargo fw-bringup  # the first image on a new radio; not in the per-change checks
       - run: cargo fw --features tx
+      - run: cargo fw --features tx-dry  # the first transmit build on a radio: PA drive held at 0
       - run: cargo fw  # last, so the size below is the receive-only image's
       - name: Size, and no core::fmt in the image
         run: |
