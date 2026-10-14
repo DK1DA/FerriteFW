@@ -12,6 +12,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT delete-channel 12
     python3 tools/ferrite_link.py PORT baud 230400
     python3 tools/ferrite_link.py PORT reboot                     # into the bootloader, for flash.py
+    python3 tools/ferrite_link.py PORT term "LINE" ["LINE" ...]   # terminal command lines over the link (LINK-34)
     python3 tools/ferrite_link.py PORT slot [A|B|C]             # a slot's working fields (LINK-33)
     python3 tools/ferrite_link.py PORT key [--seconds N] [--slot active|a|b|c]   # remote PTT (LINK-20)
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
@@ -28,6 +29,9 @@ term.py or any terminal program holding the serial device first: one program per
 the cable to the link. The link keeps it while frames come and lets go 10 s after the last; then Enter in a terminal
 program opens the terminal again. With Cable port on Terminal or KISS the link never answers.
 
+`term "LINE"` (LINK-34) runs terminal command lines (`slot`, `set`, `get`, `bk`, `mic`, `txtest`, `help`, ...) on this
+one link session, as the terminal's command line would, and prints their output; no switching to the terminal.
+
 `key` (LINK-20): keys like a PTT press, with every transmit check, never on an emergency frequency; sends a keepalive
 every 0.5 s (the radio unkeys after 2 s without one) and KEY off after --seconds (default 5) or Ctrl-C, always.
 A refusal prints the radio's reason. On the cable a `tx` build sends nothing while keyed (TX-43): the answers wait on
@@ -41,8 +45,8 @@ import sys
 import time
 
 PROTOCOL = 2
-HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY = (0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13,
-                                                                           0x14, 0x16, 0x20, 0x21, 0x30)
+HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD, MORE = (
+    0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32)
 SETTINGS, CHANNEL, ZONE, PRESET = 1, 2, 3, 4
 # KEY's remote PTT (Appendix G): key 0x80, then the action (0 off, 1 on + slot, 2 keepalive); slot 0xFF: the active one
 PTT, PTT_OFF, PTT_ON, PTT_ALIVE, ACTIVE = 0x80, 0, 1, 2, 0xFF
@@ -288,6 +292,22 @@ def run(link, a):
         link.ok(AUTH, a.pin.encode("ascii"))
     if a.cmd == "key":
         return remote_ptt(link, a.seconds, a.slot)
+    if a.cmd == "term":
+        bad = 0
+        for line in a.args:
+            status, rest = link.ask(CMD, line.encode("ascii"))
+            while True:
+                if status != 0:
+                    print(f"{line}: {why(status, rest)}")
+                    bad = 1
+                    break
+                sys.stdout.write(rest[1:].decode("ascii", "replace"))
+                if rest[0] == 0:
+                    break
+                if len(rest) == 1:
+                    time.sleep(0.05)  # the radio is still working on it (a debug command)
+                status, rest = link.ask(MORE)
+        return bad
     if a.cmd == "slot":
         for n in [ "ABC".index(x.upper()) for x in a.args] or [0, 1, 2]:
             r = link.ok(SLOT, bytes([n]))

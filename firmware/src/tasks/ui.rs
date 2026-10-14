@@ -382,7 +382,7 @@ pub async fn task() {
         if !bringup::ON.load(Relaxed) {
             // Debug commands (TERM-21): memory here, registers by the Radio task (it signals TERM_WAKE).
             if let Ok(a) = DEBUG_ANS.try_receive() {
-                ports.term.debug_answer(a);
+                ports.debug_answer(a);
             }
             // The terminal redrawn and one waiting link request answered when the port and the store have room
             // (LINK-1), on the port that holds them.
@@ -429,20 +429,20 @@ pub async fn task() {
                         }
                     }
                     if q.at.elapsed() >= Duration::from_millis(500) {
-                        ports.term.debug_answer(ferrite_core::msg::DebugAns::Bt { data: q.buf, n: q.got });
+                        ports.debug_answer(ferrite_core::msg::DebugAns::Bt { data: q.buf, n: q.got });
                         bt_q = None;
                     }
                 }
             }
-            if let Some(r) = ports.term.debug_req() {
+            if let Some(r) = ports.debug_req() {
                 match r {
-                    ferrite_core::msg::DebugReq::Mem { .. } => ports.term.debug_answer(crate::debug::mem(r)),
-                    ferrite_core::msg::DebugReq::Gga => ports.term.debug_answer(crate::debug::gga()),
+                    ferrite_core::msg::DebugReq::Mem { .. } => ports.debug_answer(crate::debug::mem(r)),
+                    ferrite_core::msg::DebugReq::Gga => ports.debug_answer(crate::debug::gga()),
                     ferrite_core::msg::DebugReq::Bt { text, n } => {
                         let forced = !app.settings().bt;
                         bt_q = Some(BtQuery { text, n, forced, sent: false, at: Instant::now(), buf: [0; 48], got: 0 });
                     }
-                    _ if DEBUG_REQ.try_send(r).is_err() => ports.term.debug_answer(ferrite_core::msg::DebugAns::Refused("the Radio task is busy")),
+                    _ if DEBUG_REQ.try_send(r).is_err() => ports.debug_answer(ferrite_core::msg::DebugAns::Refused("the Radio task is busy")),
                     _ => {}
                 }
                 TERM_WAKE.signal(()); // print the answer, or wait for it, on the next turn

@@ -594,8 +594,8 @@ impl SimCore {
             }
             dev.bt = self.ports.bt_connected(app, now);
             self.ports.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
-            if let Some(r) = self.ports.term.debug_req() {
-                self.ports.term.debug_answer(radio.debug(r)); // TERM-21: the fake radio answers at once
+            if let Some(r) = self.ports.debug_req() {
+                self.ports.debug_answer(radio.debug(r)); // TERM-21: the fake radio answers at once
             }
             let _ = self.ports.take_baud(); // a pseudo-terminal keeps no rate
             if let Some(p) = self.ports.link.progress() {
@@ -746,8 +746,8 @@ impl SimCore {
                 }
             }
             self.ports.poll(&mut self.app, &self.store, &self.dev, &self.radio.live, self.now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
-            if let Some(r) = self.ports.term.debug_req() {
-                self.ports.term.debug_answer(self.radio.debug(r));
+            if let Some(r) = self.ports.debug_req() {
+                self.ports.debug_answer(self.radio.debug(r));
             }
             while let Some(w) = self.app.pop_write() {
                 self.store.apply(w);

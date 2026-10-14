@@ -20,6 +20,9 @@ use crate::App;
 use ferrite_core::freq::mhz;
 use ferrite_core::link::{self as wire, msg, what, Ptt, Status, MAX_PAYLOAD, MAX_WIRE, PROTOCOL};
 use crate::remote::RemoteEnd;
+use crate::term::cmd::{self, Done, DumpPos, Line, List};
+use crate::term::debug::{Job, Step};
+use ferrite_core::msg::{DebugAns, DebugReq, Device};
 use ferrite_core::VERSION;
 use ferrite_ui::text::Buf;
 
@@ -63,6 +66,19 @@ pub struct Session {
     hellos: u16,
     /// The session moved port (LINK-28): a remote transmission it keyed ends at the next poll (LINK-20).
     closed: bool,
+    /// A terminal command's output still to send (LINK-34), and the time for its debug requests.
+    run: Run,
+    now: u32,
+}
+
+/// What a terminal command run over the link still has to say (LINK-34): made a line at a time, as the terminal's
+/// console makes them, so nothing is buffered whole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Run {
+    Off,
+    List(List, u16),
+    Dump(DumpPos),
+    Debug(Job),
 }
 
 impl Session {
@@ -88,6 +104,8 @@ impl Session {
             reboot: false,
             hellos: 0,
             closed: false,
+            run: Run::Off,
+            now: 0,
         }
     }
 
@@ -103,6 +121,7 @@ impl Session {
         (self.trusted, self.pin_ok) = (trusted, false);
         (self.seen, self.baud, self.max_baud) = (false, None, max_baud);
         self.closed = true;
+        self.run = Run::Off;
     }
 
     /// This session may do anything a session may (LINK-7, LINK-30): the cable, Bluetooth with no PIN lock on, or
@@ -164,7 +183,8 @@ impl Session {
     }
 
     /// Handles the owner's answers, ends a quiet session, and answers a waiting frame when there is room.
-    pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, now: u32, out: &mut impl Sink) {
+    pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, now: u32, out: &mut impl Sink) {
+        self.now = now;
         // BACK on the progress screen (LINK-9) is ours only while a write session runs.
         if self.session && app.take_link_answer() == Some(LinkAnswer::Cancelled) {
             self.cancelled = true;
@@ -195,7 +215,7 @@ impl Session {
                 let pl = f.payload.len();
                 p[..pl].copy_from_slice(f.payload);
                 (self.last, self.seen) = (now, true);
-                (ty, seq, self.handle(app, store, now, ty, &p[..pl], &mut ans))
+                (ty, seq, self.handle(app, store, dev, now, ty, &p[..pl], &mut ans))
             }
         };
         let mut w = [0u8; MAX_WIRE];
@@ -210,7 +230,8 @@ impl Session {
     }
 
     /// One request: its answer's payload into `a` (status first); the length.
-    fn handle<S: ChannelStore>(&mut self, app: &mut App, st: &S, now: u32, ty: u8, p: &[u8], a: &mut [u8; MAX_PAYLOAD]) -> usize {
+    #[allow(clippy::too_many_arguments)]
+    fn handle<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, now: u32, ty: u8, p: &[u8], a: &mut [u8; MAX_PAYLOAD]) -> usize {
         let mut o = Out { a, n: 1 };
         let s = match ty {
             msg::HELLO => self.hello(app, p, &mut o),
@@ -250,6 +271,11 @@ impl Session {
             }
             msg::KEY => remote_ptt(app, st, now, p, &mut o),
             msg::SLOT => slot(app, st, p, &mut o),
+            msg::CMD => self.command(app, st, dev, p, &mut o),
+            msg::MORE => {
+                self.more(app, st, dev, &mut o);
+                Status::Ok
+            }
             _ => Status::UnknownType,
         };
         o.a[0] = s as u8;
@@ -257,6 +283,89 @@ impl Session {
             o.n = 1; // a refusal carries no partial answer
         }
         o.n
+    }
+
+    /// A debug command's next request for the firmware (TERM-21, run over the link: LINK-34), once.
+    pub fn debug_req(&mut self) -> Option<DebugReq> {
+        match &mut self.run {
+            Run::Debug(j) => j.request(self.now),
+            _ => None,
+        }
+    }
+
+    /// The firmware's answer to the last [`Session::debug_req`]; ignored once the command has ended.
+    pub fn debug_answer(&mut self, a: DebugAns) {
+        if let Run::Debug(j) = &mut self.run {
+            j.answer(a);
+        }
+    }
+
+    /// `CMD` (LINK-34): the line as the terminal's command line runs it (`cmd::run`: the same commands, checks and
+    /// refusals), then its first output.
+    fn command<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, p: &[u8], o: &mut Out) -> Status {
+        self.run = Run::Off;
+        let r = match cmd::run(app, st, dev, p, false) {
+            Ok(Done::Nothing) => Run::Off,
+            Ok(Done::Said(m)) => {
+                o.put(&[0]);
+                o.put(m.as_bytes());
+                o.put(b"\n");
+                return Status::Ok;
+            }
+            Ok(Done::List(l)) => Run::List(l, 0),
+            Ok(Done::Dump) => Run::Dump(DumpPos::default()),
+            Ok(Done::Debug(j)) => Run::Debug(j),
+            Ok(Done::Load) => {
+                o.put(b"load: not over the link; WRITE the records, or load in the terminal");
+                return Status::Invalid;
+            }
+            Err(m) => {
+                o.put(m.as_bytes());
+                return Status::Invalid;
+            }
+        };
+        self.run = r;
+        self.more(app, st, dev, o);
+        Status::Ok
+    }
+
+    /// The running command's next whole lines, as many as fit: the "more" byte, then the text.
+    fn more<S: ChannelStore>(&mut self, app: &App, st: &S, dev: &Device, o: &mut Out) {
+        let flag = o.n;
+        o.put(&[0]);
+        let mut l = Line::new();
+        loop {
+            let was = self.run;
+            let got = match &mut self.run {
+                Run::Off => false,
+                Run::List(list, i) => {
+                    let g = cmd::list_line(app, st, dev, *list, *i, &mut l);
+                    *i += 1;
+                    g
+                }
+                Run::Dump(pos) => cmd::dump_line(app, st, dev, pos, &mut l),
+                Run::Debug(j) => match j.line(self.now, &mut l) {
+                    Step::Line => true,
+                    Step::Wait => {
+                        o.a[flag] = 1; // the firmware hasn't answered yet: MORE again
+                        return;
+                    }
+                    Step::Over => false,
+                },
+            };
+            if !got {
+                self.run = Run::Off;
+                return;
+            }
+            let room = MAX_PAYLOAD - o.n;
+            if l.len() + 1 > room && o.n > flag + 1 {
+                self.run = was; // this line goes in the next answer
+                o.a[flag] = 1;
+                return;
+            }
+            o.put(&l.as_bytes()[..l.len().min(room - 1)]); // a line longer than any answer is cut
+            o.put(b"\n");
+        }
     }
 
     /// `HELLO`: the protocol, the largest payload, and whether this session may go on (0: `AUTH` first).

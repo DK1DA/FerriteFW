@@ -53,6 +53,8 @@ pub struct Ports {
     bt_seen: bool,
     /// Bluetooth bytes dropped while the cable held the terminal or the link.
     pub dropped: u32,
+    /// The last debug request came from a command run over the link (LINK-34), not the terminal.
+    dbg_link: bool,
 }
 
 impl Default for Ports {
@@ -63,7 +65,7 @@ impl Default for Ports {
 
 impl Ports {
     pub const fn new() -> Self {
-        Ports { term: Term::new(), link: Session::new(true), owner: Port::Cable, cable_max: BT_BAUD, bt_last: 0, bt_seen: false, dropped: 0 }
+        Ports { term: Term::new(), link: Session::new(true), owner: Port::Cable, cable_max: BT_BAUD, bt_last: 0, bt_seen: false, dropped: 0, dbg_link: false }
     }
 
     /// The fastest cable rate the caller's UART runs within 2 % (LINK-11).
@@ -148,12 +150,33 @@ impl Ports {
         match self.owner {
             Port::Cable => {
                 self.term.poll(app, store, dev, live, now, cable);
-                self.link.poll(app, store, now, cable);
+                self.link.poll(app, store, dev, now, cable);
             }
             Port::Bt => {
                 self.term.poll(app, store, dev, live, now, bt);
-                self.link.poll(app, store, now, bt);
+                self.link.poll(app, store, dev, now, bt);
             }
+        }
+    }
+
+    /// A debug command's next request for the firmware (TERM-21), from the terminal or from a command run over the
+    /// link (LINK-34): one at a time. Answer with [`Ports::debug_answer`].
+    pub fn debug_req(&mut self) -> Option<ferrite_core::msg::DebugReq> {
+        if let Some(r) = self.term.debug_req() {
+            self.dbg_link = false;
+            return Some(r);
+        }
+        let r = self.link.debug_req()?;
+        self.dbg_link = true;
+        Some(r)
+    }
+
+    /// The firmware's answer to the last [`Ports::debug_req`], to whichever asked.
+    pub fn debug_answer(&mut self, a: ferrite_core::msg::DebugAns) {
+        if self.dbg_link {
+            self.link.debug_answer(a);
+        } else {
+            self.term.debug_answer(a);
         }
     }
 

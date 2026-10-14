@@ -6,6 +6,7 @@ use crate::sample::Sample;
 use crate::screens::link::LinkPage;
 use crate::Screen;
 use ferrite_core::keys::Key;
+use ferrite_core::msg::Device;
 use std::vec::Vec;
 
 /// The cable's other end: frames out, answers back.
@@ -44,7 +45,7 @@ impl Pc {
         let mut out = Wire(Vec::new());
         for _ in 0..4 {
             self.now += 10;
-            self.link.poll(&mut self.app, &self.st, self.now, &mut out);
+            self.link.poll(&mut self.app, &self.st, &Device::default(), self.now, &mut out);
             while let Some(wr) = self.app.pop_write() {
                 self.st.apply(wr);
             }
@@ -140,7 +141,7 @@ fn errors_are_answered() {
     w[4] ^= 0x10;
     pc.raw(&w[..n]);
     let mut out = Wire(Vec::new());
-    pc.link.poll(&mut pc.app, &pc.st, 2000, &mut out);
+    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), 2000, &mut out);
     let k = out.0.len() - 1;
     let f = wire::parse(&mut out.0[..k]).unwrap();
     assert_eq!((f.ty, f.seq, f.payload[0]), (msg::INFO | wire::ANSWER, 9, Status::BadFrame as u8));
@@ -339,7 +340,7 @@ impl Pc {
         while self.now < end {
             self.now += 50;
             self.app.tick(self.now, live, &self.st);
-            self.link.poll(&mut self.app, &self.st, self.now, &mut Wire(Vec::new()));
+            self.link.poll(&mut self.app, &self.st, &Device::default(), self.now, &mut Wire(Vec::new()));
         }
     }
 
@@ -528,14 +529,14 @@ fn remote_ptt_answered_with_a_full_ring() {
     let k = wire::build(msg::KEY, 1, &b[..n], &mut w).unwrap();
     pc.raw(&w[..k]);
     let mut out = Small(Vec::new());
-    pc.link.poll(&mut pc.app, &pc.st, pc.now, &mut out);
+    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), pc.now, &mut out);
     assert!(pc.app.remote_keyed() && !out.0.is_empty(), "answered with 16 bytes of room");
     // a full ring: the keepalive still counts, its answer is dropped whole
     let n = Ptt::Alive.encode(&mut b);
     let k = wire::build(msg::KEY, 2, &b[..n], &mut w).unwrap();
     pc.now += 1500;
     pc.raw(&w[..k]);
-    pc.link.poll(&mut pc.app, &pc.st, pc.now, &mut Small(std::vec![0; 16]));
+    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), pc.now, &mut Small(std::vec![0; 16]));
     assert!(pc.link.ready(), "handled");
     pc.now += 1000;
     pc.app.tick(pc.now, &LiveAll::default(), &pc.st);
@@ -586,4 +587,88 @@ fn slot_read_and_set() {
     assert_eq!(pc.ask(msg::SLOT, &[3]).0, Status::BadArg as u8);
     assert_eq!(pc.ask(msg::SLOT, &[0, m::FREQ, 1, 2]).0, Status::BadArg as u8, "a field cut short");
     assert_eq!(pc.ask(msg::SLOT, &[0, 0x80]).0, Status::BadArg as u8);
+}
+
+// ---- CMD and MORE (LINK-34) ----
+
+impl Pc {
+    /// A terminal command over the link: every part's text joined, or the refusal (status, text).
+    fn cmd(&mut self, line: &str) -> Result<std::string::String, (u8, std::string::String)> {
+        let (s, a) = self.ask(msg::CMD, line.as_bytes());
+        if s != 0 {
+            return Err((s, text(&a).into()));
+        }
+        let mut all: std::string::String = text(&a[1..]).into();
+        let mut more = a[0];
+        let mut parts = 0;
+        while more == 1 {
+            let (s, a) = self.ask(msg::MORE, &[]);
+            assert_eq!(s, 0);
+            assert!(a.len() < MAX_PAYLOAD);
+            assert!(a.len() == 1 || a.last() == Some(&b'\n'), "whole lines only");
+            all.push_str(text(&a[1..]));
+            more = a[0];
+            parts += 1;
+            assert!(parts < 2000);
+        }
+        Ok(all)
+    }
+}
+
+/// LINK-34: a terminal command line over the link runs as in the terminal (TERM-12): its answer line, a list
+/// paged over as many `MORE`s as it takes in whole lines, the terminal's refusals as `invalid` with its text.
+#[test]
+fn terminal_commands_over_the_link() {
+    let mut pc = Pc::new(true);
+    let help = pc.cmd("help").unwrap();
+    assert!(help.starts_with("Commands:") && help.contains("  slot, slot A") && help.lines().count() > 20, "{help}");
+    let s = pc.cmd("slot B 146.94 nfm").unwrap();
+    assert!(s.starts_with("B  vfo 146.94000 mode=NFM"), "{s}");
+    assert_eq!(pc.app.slot_state(1).mode, 1, "the same change as the terminal's");
+    assert_eq!(pc.cmd("slot").unwrap().lines().count(), 3);
+    assert!(pc.cmd("set 0 7 1 Dark").is_ok());
+    assert!(pc.cmd("get 0 7 1").unwrap().contains("Dark"));
+    let (s, why) = pc.cmd("frobnicate").unwrap_err();
+    assert_eq!((s, why.contains("no such command")), (Status::Invalid as u8, true), "{why}");
+    let (s, why) = pc.cmd("slot A 7.1").unwrap_err();
+    assert!(s == Status::Invalid as u8 && why.contains("HF mode"), "{why}");
+    assert_eq!(pc.cmd("load").unwrap_err().0, Status::Invalid as u8, "load stays the terminal's");
+    let dump = pc.cmd("dump").unwrap();
+    assert!(dump.lines().any(|l| l.starts_with("ch ")) && dump.lines().any(|l| l.starts_with("set ")), "the whole dump");
+    assert_eq!(pc.ask(msg::MORE, &[]), (0, std::vec![0]), "nothing running");
+}
+
+/// LINK-34, TERM-21: a debug command over the link asks the firmware as the terminal's does; MORE says "still
+/// working" until the answer comes, then gives its lines. A new CMD ends one still running.
+#[test]
+fn debug_commands_over_the_link() {
+    let mut pc = Pc::new(true);
+    let (s, a) = pc.ask(msg::CMD, b"bk 0 30");
+    assert_eq!((s, a.as_slice()), (0, &[1u8][..]), "waiting for the firmware");
+    let r = pc.link.debug_req().expect("the request for the Radio task");
+    assert_eq!(r, DebugReq::BkRead { chip: 0, reg: 0x30 });
+    assert!(pc.link.debug_req().is_none(), "once");
+    assert_eq!(pc.ask(msg::MORE, &[]).1, std::vec![1], "still waiting");
+    pc.link.debug_answer(DebugAns::Reg { chip: 0, reg: 0x30, val: 0xBFF1 });
+    let (_, a) = pc.ask(msg::MORE, &[]);
+    assert_eq!(a[0], 0);
+    assert!(text(&a[1..]).to_ascii_lowercase().contains("bff1"), "{}", text(&a[1..]));
+    // ended by the next command
+    pc.ask(msg::CMD, b"bk 0 31");
+    assert!(pc.link.debug_req().is_some());
+    assert!(pc.cmd("slot A").is_ok());
+    assert!(pc.link.debug_req().is_none());
+    // refused before anything is sent, as in the terminal (TERM-23: registers to 0x7F)
+    assert_eq!(pc.ask(msg::CMD, b"bk 0 99").0, Status::Invalid as u8);
+}
+
+/// LINK-34, LINK-30: on Bluetooth with a PIN lock, commands only after AUTH, as the terminal's PIN prompt.
+#[test]
+fn terminal_commands_need_the_pin_on_bluetooth() {
+    let mut bt = Pc::new(false);
+    (bt.app.set.pin, bt.app.set.pin_len, bt.app.set.pin_mode) = (1234, 4, 1);
+    assert_eq!(bt.ask(msg::CMD, b"slot").0, Status::NotAuthorised as u8);
+    assert_eq!(bt.ask(msg::MORE, &[]).0, Status::NotAuthorised as u8);
+    assert_eq!(bt.ask(msg::AUTH, b"1234").0, 0);
+    assert!(bt.cmd("slot").is_ok());
 }

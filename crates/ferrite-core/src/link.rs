@@ -47,6 +47,13 @@ pub mod msg {
     /// on (LINK-30); refused while transmitting. The answer goes out first, then the radio saves, goes quiet and
     /// resets.
     pub const REBOOT: u8 = 0x21;
+    /// A terminal command line (LINK-34, chapter 37): run as the terminal's command line runs it. The answer is
+    /// its output: a byte, 1 if more follows (ask with [`MORE`]), then text, lines ending in `\n`; or `invalid` and
+    /// the terminal's refusal. A new `CMD` ends one still running.
+    pub const CMD: u8 = 0x31;
+    /// The running command's next output, as `CMD`'s answer; 1 with no text: the radio is still working on it, ask
+    /// again shortly. Nothing running: 0 and no text.
+    pub const MORE: u8 = 0x32;
     /// A key on the radio (LINK-19, LINK-20): the key, then what it does ([`super::key`]). Version 1 carries only
     /// remote PTT ([`super::Ptt`]); any other key answers `bad argument`.
     pub const KEY: u8 = 0x30;
