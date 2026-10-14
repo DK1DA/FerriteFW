@@ -39,6 +39,7 @@ pub mod tonehint;
 pub mod txcal;
 pub mod txplan;
 pub mod txseq;
+pub mod txsuite;
 pub mod txtest;
 pub mod vox;
 pub mod watch;

@@ -10,9 +10,10 @@
 //! - **Transmit:** the UI task keys slot C, then hands a frame to [`AFSK_TX`]; it is played from TX delay's
 //!   flags to the end (the flags cover the key-up), PC12 high meanwhile, and [`AFSK_DONE`] says it's out so the
 //!   UI task unkeys. Receiving pauses while it plays.
-//! - **Transmit test (TERM-33, `tx` builds):** the Radio task, after a PTT key-up with `txtest` armed, signals
-//!   [`TXTEST`] with the arming; it plays the signal at the arming's level (generated a sample at a time, [`ferrite_core::txtest::Gen`]) until the
-//!   Radio task signals None at the release. Receiving pauses while it plays, as for AFSK.
+//! - **Transmit test (TERM-33, TERM-34, `tx` builds):** the Radio task, after a PTT key-up with `txtest` armed,
+//!   signals [`TXTEST`] with the generator to play (a test signal at the arming's level, made a sample at a time:
+//!   [`ferrite_core::txtest::Gen`]); a new generator while one plays takes over at the next half (the suite's
+//!   steps, DAC1 running throughout); None at the release stops it. Receiving pauses while it plays, as for AFSK.
 
 use crate::chan::DSP;
 use crate::hal::{adc, audio};
@@ -46,9 +47,10 @@ pub static APRS_RX: Channel<M, Frame, 2> = Channel::new();
 /// A frame to send on the transmission the UI task just keyed, and its "sent" (true) or "not sent" (false).
 pub static AFSK_TX: Signal<M, Frame> = Signal::new();
 pub static AFSK_DONE: Signal<M, bool> = Signal::new();
-/// TERM-33: the transmit test to play now (Some, from the key-up) or to stop (None, at the release).
+/// TERM-33, TERM-34: the transmit test's generator to play now (Some, from the key-up; another Some takes over
+/// seamlessly) or to stop (None, at the release).
 #[cfg(feature = "tx")]
-pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Arm>> = Signal::new();
+pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Gen>> = Signal::new();
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
 /// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
@@ -69,7 +71,7 @@ pub async fn task() {
         #[cfg(feature = "tx")]
         let test = TXTEST.wait();
         #[cfg(not(feature = "tx"))]
-        let test = core::future::pending::<Option<ferrite_core::txtest::Arm>>();
+        let test = core::future::pending::<Option<ferrite_core::txtest::Gen>>();
         match select4(DSP.receive(), audio::ADC_HALF.wait(), AFSK_TX.wait(), test).await {
             Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_))) => {
                 match cmd {
@@ -132,11 +134,11 @@ pub async fn task() {
                 });
             }
             Either4::Fourth(None) => {} // a stop with nothing playing
-            Either4::Fourth(Some(arm)) => {
+            Either4::Fourth(Some(g)) => {
                 if capturing {
                     audio::capture_stop();
                 }
-                play_test(arm).await;
+                play_test(g).await;
                 if capturing {
                     dec = Decim::new();
                     audio::capture_start();
@@ -188,11 +190,11 @@ async fn play(f: &Frame) {
     audio::play_stop();
 }
 
-/// TERM-33: the test signal out of DAC1 until [`TXTEST`] says stop (None; a new Some stops it too), looped by the
-/// generator itself; then a half of silence, and stopped once that has played.
+/// TERM-33, TERM-34: the test signal out of DAC1 until [`TXTEST`] says stop (None); a new generator (Some) takes
+/// over from the next half filled, DAC1 still running (the suite's steps). Each generator loops or ends in silence
+/// by itself. Then a half of silence, and stopped once that has played.
 #[cfg(feature = "tx")]
-async fn play_test(arm: ferrite_core::txtest::Arm) {
-    let Some(mut g) = ferrite_core::txtest::Gen::new(arm.signal, arm.level) else { return }; // afsk-bk: not DAC1's
+async fn play_test(mut g: ferrite_core::txtest::Gen) {
     let fill = |half: usize, g: Option<&mut ferrite_core::txtest::Gen>| match g {
         Some(g) => {
             for d in &audio::DAC_BUF[half * BLOCK_DAC..(half + 1) * BLOCK_DAC] {
@@ -213,7 +215,8 @@ async fn play_test(arm: ferrite_core::txtest::Arm) {
         use embassy_futures::select::{select, Either};
         match select(audio::DAC_HALF.wait(), TXTEST.wait()).await {
             Either::First(half) => fill(half as usize, Some(&mut g)),
-            Either::Second(_) => break,
+            Either::Second(Some(next)) => g = next,
+            Either::Second(None) => break,
         }
     }
     // Both halves silent, so whichever plays next is mid-scale; then off.
@@ -225,4 +228,4 @@ async fn play_test(arm: ferrite_core::txtest::Arm) {
 }
 
 #[cfg(not(feature = "tx"))]
-async fn play_test(_: ferrite_core::txtest::Arm) {}
+async fn play_test(_: ferrite_core::txtest::Gen) {}

@@ -43,11 +43,23 @@ impl Radio {
                 DebugAns::Mic(MicCapture::from_samples(&s, us))
             }
             // TERM-33 (decision 132, a bench test): armed for the next PTT key-up, once; the key-up plays it.
+            // TERM-34: the suite needs a TX timeout it fits in; asked while it runs, its progress.
             #[cfg(feature = "tx")]
             DebugReq::TxTest(ask) => {
-                if let ferrite_core::txtest::Ask::Set(a) = ask {
-                    self.tx.test = a;
-                    log(b"txtest armed ", a.map_or(0, |a| a.signal as u32 + 1));
+                use ferrite_core::txtest::{Ask, Signal};
+                match ask {
+                    Ask::Set(Some(a)) if a.signal == Signal::Suite && self.tx.timeout_s < ferrite_core::txsuite::TIMEOUT_MIN_S => {
+                        return DebugAns::Refused("the suite runs 60 s: set the TX timeout (0 8 1 1) to 90 s or more first");
+                    }
+                    Ask::Set(a) => {
+                        self.tx.test = a;
+                        log(b"txtest armed ", a.map_or(0, |a| a.signal as u32 + 1));
+                    }
+                    Ask::Show => {
+                        if let Some((section, left_ms)) = self.suite_status() {
+                            return DebugAns::TxSuite { section, left_ms };
+                        }
+                    }
                 }
                 DebugAns::TxTest(self.tx.test)
             }

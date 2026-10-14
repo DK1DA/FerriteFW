@@ -985,3 +985,80 @@ fn retune_mutes_first() {
     chip::tune_rest(&mut bk, &RX);
     assert_eq!(log.take()[0], (reg::AF_OUT, 0x6042));
 }
+
+/// TERM-34 (decision 139) `txtest suite` on the recording bus, for a key-up with no sub-tone, CTCSS and DCS: every
+/// step of the table in turn, then the hold, then the end. At each step the chip is on the mic (REG_30 0xC1FE) for
+/// DAC1's and the sub-tones' steps and in tone transmit (0xC3FA) for the generator's; REG_2B[2:0], MIC AGC and the
+/// ALC as the step's set-up; REG_40's low bits the step's, its top four the key-up's; a sub-tone only in section 6
+/// (REG_51 bit 15, with the calibration's gain for its kind), the tone generator on only for its own steps
+/// (REG_70). Only those registers (and the tone words, REG_07/08 and REG_52 the sub-tones rewrite) are written.
+/// After the end every register is back as the key-up left it but the tone words (REG_71/72, unused until the next
+/// tone sets them) and, with no DCS at the key-up, REG_08 (DCS's codeword, unused with REG_51 off; the receive
+/// tune after the unkey writes it).
+#[test]
+fn suite_steps_and_restore() {
+    use ferrite_core::txsuite::{Src, HOLD, REG40_STOCK, STEPS};
+    use ferrite_core::txtest::Filters;
+    assert_eq!(REG40_STOCK, bk4829::tx::TX_DEVIATION);
+    let (ctcss_dev, dcs_dev) = (0x3C, 0x2E);
+    for tone in [0, 885, 0x8000 | 0o152] {
+        let mut b = bk();
+        for (r, v) in [(reg::AF_FILTERS, 0x0700), (0x19, 0x1041), (reg::MIC, 0xE912), (0x50, 0xBB18), (reg::DEVIATION, 0x7123), (reg::CTCSS_THRESH, 0x0292)] {
+            b.write(r, v);
+        }
+        let s = chip::TxSetup { tone, tone_dev: 0x46, mic: ferrite_core::vox::MIC_DATA, ..setup(VHF, false, 0) };
+        chip::tx_setup(&mut b, &s);
+        b.tx_on(bk4829::tx::Source::Mic, true);
+        let before = b.release();
+        let keyed = before.regs;
+        let n0 = before.writes.len();
+        let mut b = Bk4829::new(before);
+        let was = chip::suite_begin(&mut b, s.tone, s.tone_dev);
+        assert_eq!(was.r40, 0x750A);
+        assert_eq!(b.read(reg::SUBTONE), 0, "the slot's sub-tone off for the suite");
+        let mut prev = None;
+        for (i, st) in STEPS.iter().chain([HOLD].iter()).enumerate() {
+            let dev = if st.src.subtone() & 0x8000 != 0 { dcs_dev } else { ctcss_dev };
+            chip::suite_step(&mut b, &was, prev.as_ref(), st, false, dev);
+            let r = |b: &mut Bk4829<RecBus>, x| b.read(x);
+            let want30 = if st.src.tones() { 0xC3FA } else { chip::REG30_TX_MIC };
+            assert_eq!(r(&mut b, reg::POWER), want30, "step {i}");
+            let low = r(&mut b, reg::AF_FILTERS);
+            match st.filters {
+                Filters::Voice => assert_eq!((low, r(&mut b, 0x19), r(&mut b, reg::MIC), r(&mut b, 0x50)), (0x0700, 0x1041, 0xE934, 0xBB18), "step {i}"),
+                f => {
+                    assert_eq!(low, if f == Filters::Flat { 0x0707 } else { 0x0704 }, "step {i}");
+                    assert_eq!((r(&mut b, 0x19), r(&mut b, reg::MIC), r(&mut b, 0x50)), (0x9041, 0xE974, 0x3B18), "step {i}");
+                }
+            }
+            assert_eq!(r(&mut b, reg::DEVIATION), 0x7000 | st.reg40, "step {i}");
+            let r51 = r(&mut b, reg::SUBTONE);
+            match st.src {
+                Src::Sub(t) => {
+                    assert_eq!(r51 & 0x8000, 0x8000, "step {i}");
+                    assert_eq!(r51 & 0x7F, if t & 0x8000 != 0 { dcs_dev } else { ctcss_dev } as u16, "step {i}");
+                }
+                _ => assert_eq!(r51 & 0x8000, 0, "step {i}: a sub-tone outside section 6"),
+            }
+            let r70 = r(&mut b, reg::TONE);
+            match st.src {
+                Src::BkFlags => assert_eq!(r70, 0x8000 | 66 << 8, "step {i}"),
+                Src::BkTone(hz) => {
+                    assert_eq!(r70, 0x8000 | (bk4829::tx::TONE_TX_GAIN as u16) << 8, "step {i}");
+                    assert_eq!(r(&mut b, reg::TONE1_FREQ), bk4829::tone_word(hz as u32), "step {i}");
+                }
+                _ => assert_eq!(r70 & 0x8000, 0, "step {i}: the generator on"),
+            }
+            prev = Some(*st);
+        }
+        chip::suite_end(&mut b, &was);
+        let bus = b.release();
+        let allowed = [reg::AF_FILTERS, 0x19, reg::MIC, 0x50, reg::DEVIATION, reg::POWER, reg::SUBTONE, reg::CTC, reg::CDCSS, reg::CTCSS_THRESH, reg::TONE, reg::TONE1_FREQ, reg::TONE2_FREQ];
+        assert!(bus.writes[n0..].iter().all(|w| allowed.contains(&w.0)), "{:x?}", bus.writes[n0..].iter().find(|w| !allowed.contains(&w.0)));
+        for r in 0..128u8 {
+            if r != reg::TONE1_FREQ && r != reg::TONE2_FREQ && !(r == reg::CDCSS && tone & 0x8000 == 0) {
+                assert_eq!(bus.regs[r as usize], keyed[r as usize], "tone {tone:#x}: register {r:#04x} not back");
+            }
+        }
+    }
+}

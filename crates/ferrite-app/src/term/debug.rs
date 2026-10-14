@@ -249,6 +249,15 @@ impl Job {
                 self.line += 1;
                 Step::Line
             }
+            (Kind::TxTest(_), DebugAns::TxSuite { section, left_ms }) => {
+                match section {
+                    0 => put!(out, "  txtest suite running: the lead-in, {} s to the end tone", left_ms.div_ceil(1000)),
+                    1..=7 => put!(out, "  txtest suite running: section {} of 7 ({}), {} s to the end tone", section, ferrite_core::txsuite::SECTION_NAMES[section as usize - 1], left_ms.div_ceil(1000)),
+                    _ => out.push(b"  txtest suite done: holding 1 kHz until you release PTT"),
+                }
+                self.st = St::Over;
+                Step::Line
+            }
             (Kind::TxTest(_), DebugAns::TxTest(None)) => {
                 out.push(b"  txtest: off (nothing armed; PTT transmits the mic as normal)");
                 self.st = St::Over;
@@ -259,6 +268,12 @@ impl Job {
                     put!(out, "  txtest: {} at {} % armed for the next PTT key-up, from the key-up to the release; once", a.signal.name(), a.level);
                 } else {
                     use ferrite_core::txtest::{bk_gain, Filters, Signal};
+                    if a.signal == Signal::Suite {
+                        put!(out, "  suite: 7 sections, {} s, each after a marker tone (400-700 Hz); then 1 kHz until release; registers put back", ferrite_core::txsuite::SUITE_MS.div_ceil(1000));
+                        self.st = St::Over;
+                        self.line += 1;
+                        return Step::Line;
+                    }
                     if a.signal == Signal::AfskBk {
                         put!(out, "  afsk-bk: tone 1 1200/2200 Hz (REG_71) at gain {} (REG_70), REG_30 0xC3FA (mic off), TMR5 at 1200 Bd; DAC1, PC12 untouched", bk_gain(a.level));
                         self.st = St::Over;

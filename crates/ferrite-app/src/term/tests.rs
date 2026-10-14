@@ -1281,6 +1281,40 @@ fn debug_txtest() {
     assert!(!super::cmd::writes(b"txtest") && super::cmd::writes(b"txtest 4fsk") && super::cmd::writes(b"txtest off"));
 }
 
+/// TERM-34: `txtest suite` arms the suite (no filters word, no level: refused with either); the armed answer says
+/// what it runs; asked while it runs, the section and the time to the end tone, then the hold; the Radio task's
+/// refusal for a TX timeout too short prints as one.
+#[test]
+fn debug_txtest_suite() {
+    use ferrite_core::txtest::{Arm, Ask, Filters, Signal};
+    let mut r = Rig::main();
+    let arm = Arm { signal: Signal::Suite, filters: Filters::Data, level: 100 };
+    r.cmd("txtest suite");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(arm)))]);
+    let raw = r.raw();
+    assert!(raw.contains("txtest: suite at 100 % armed for the next PTT key-up"), "{raw}");
+    assert!(raw.contains("suite: 7 sections, 60 s, each after a marker tone (400-700 Hz); then 1 kHz until release"), "{raw}");
+    r.send(b"\r");
+    for bad in ["txtest suite data", "txtest suite 100", "txtest suite voice 50"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("txtest 4fsk|sweep|afsk"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+    for (section, left_ms, want) in [
+        (0, 59_000, "txtest suite running: the lead-in, 59 s to the end tone"),
+        (4, 30_500, "txtest suite running: section 4 of 7 (AFSK from the tone generator per REG_40, then data and flat), 31 s to the end tone"),
+        (8, 0, "txtest suite done: holding 1 kHz until you release PTT"),
+    ] {
+        r.cmd("txtest");
+        assert_eq!(r.serve(4, |_| DebugAns::TxSuite { section, left_ms }), vec![DebugReq::TxTest(Ask::Show)]);
+        assert!(r.raw().contains(want), "{}", r.raw());
+        r.send(b"\r");
+    }
+    r.cmd("txtest suite");
+    r.serve(4, |_| DebugAns::Refused("the suite runs 60 s: set the TX timeout (0 8 1 1) to 90 s or more first"));
+    assert!(r.raw().contains("refused: the suite runs 60 s"), "{}", r.raw());
+}
+
 /// TERM-31: `bk settle` asks the waits, `bk settle N` sets both to N ms, `bk settle W S` each; 0 is stock's; out of
 /// range or extra words are refused here, before anything is sent. `bk settle` alone is a read (TERM-25).
 #[test]

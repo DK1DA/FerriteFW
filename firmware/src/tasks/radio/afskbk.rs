@@ -50,11 +50,17 @@ pub(super) struct BkRun {
 }
 
 impl Radio {
-    /// After the key-up's plan: the chip to tone transmit on the space tone at LEVEL's gain, then the timer, from
-    /// now: the first change 7 bits on.
+    /// After the key-up's plan: the chip to tone transmit on the space tone at LEVEL's gain, then the timer.
     pub(super) fn afsk_bk_start(&mut self, n: u8, level: u8) {
         let narrow = self.tx.narrow;
         radio_chip::afsk_bk_begin(&mut self.chip(n), bk_tone(0), bk_gain(level), narrow);
+        self.afsk_bk_timer(n);
+        log(b"txtest afsk-bk gain ", bk_gain(level) as u32);
+    }
+
+    /// The timer from now, the chip already sending the space tone (TERM-34's flag steps set it with the rest of
+    /// the step): the first change 7 bits on.
+    pub(super) fn afsk_bk_timer(&mut self, n: u8) {
         CHANGES.store(0, Relaxed);
         EDGE.reset();
         let t0 = crate::hal::edge::start(PRIO);
@@ -63,7 +69,6 @@ impl Radio {
         critical_section::with(|cs| *SCHED.borrow_ref_mut(cs) = Some((f, t0)));
         crate::hal::edge::arm(first);
         self.tx.bk = Some(BkRun { chip: n, sent: 0, missed: 0 });
-        log(b"txtest afsk-bk gain ", bk_gain(level) as u32);
     }
 
     /// The Radio task woken by [`EDGE`]: the tone for the count of changes so far (REG_71, one write).
@@ -84,17 +89,24 @@ impl Radio {
     /// At the release (or any unkey): the timer stopped, then the tones off on the chip (REG_70 0, REG_30 left at
     /// tone transmit for the unkey's REG_30 = 0, as the end tone leaves it).
     pub(super) fn afsk_bk_stop(&mut self) {
-        let Some(run) = self.tx.bk.take() else { return };
+        let Some(chip) = self.afsk_bk_halt() else { return };
+        if self.has(chip) {
+            radio_chip::afsk_bk_end(&mut self.chip(chip));
+        }
+    }
+
+    /// The timer stopped and the run's counts logged; the chip untouched (TERM-34's next step turns the tones
+    /// off). The chip it played on, if one played.
+    pub(super) fn afsk_bk_halt(&mut self) -> Option<u8> {
+        let run = self.tx.bk.take()?;
         crate::hal::edge::stop();
         critical_section::with(|cs| *SCHED.borrow_ref_mut(cs) = None);
         EDGE.reset();
-        if self.has(run.chip) {
-            radio_chip::afsk_bk_end(&mut self.chip(run.chip));
-        }
         log(b"txtest afsk-bk changes ", run.sent);
         if run.missed != 0 {
             log(b"txtest afsk-bk missed ", run.missed);
         }
+        Some(run.chip)
     }
 
     /// Whether `afsk-bk` plays (the main wait listens to [`EDGE`] only then).

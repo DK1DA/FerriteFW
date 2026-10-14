@@ -13,6 +13,40 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sdrtx  # noqa: E402
 
 
+def steady_tones(fm, fs, step_s=0.005, win_s=0.02, min_dev=150):
+    """The steady tones in an FM deviation (Hz): per `step_s`, the strongest tone 300-3500 Hz over `win_s` (FFT with
+    zero padding) and its deviation; runs where the frequency holds within 30 Hz and the deviation is well above the
+    quiet. Each (start s, end s, Hz, median deviation Hz)."""
+    blk = int(fs * step_s)
+    w = int(fs * win_s)
+    win = np.hanning(w)
+    fr = np.fft.rfftfreq(8192, 1 / fs)
+    band = (fr > 300) & (fr < 3500)
+    rows = []
+    for k in range(0, len(fm) - w, blk):
+        sp = np.abs(np.fft.rfft(fm[k : k + w] * win, 8192)) * 2 / win.sum()
+        j = np.argmax(sp * band)
+        rows.append((k / fs, fr[j], sp[j]))
+    if not rows:
+        return []
+    rows = np.array(rows)
+    quiet = np.percentile(rows[:, 2], 20)
+    tones, start = [], None
+    for r in range(len(rows)):
+        t, f, d = rows[r]
+        live = d > max(min_dev, quiet * 4)
+        same = start is not None and abs(f - rows[start][1]) < 30
+        if start is not None and (not live or not same):
+            if r - start >= 4:
+                tones.append((rows[start][0], rows[r - 1][0] + win_s, np.median(rows[start:r, 1]), np.median(rows[start:r, 2])))
+            start = None
+        if live and start is None:
+            start = r
+    if start is not None and len(rows) - start >= 4:
+        tones.append((rows[start][0], rows[-1][0] + win_s, np.median(rows[start:, 1]), np.median(rows[start:, 2])))
+    return tones
+
+
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("mhz", type=float)
@@ -56,32 +90,7 @@ def main():
     fm = np.angle(seg[1:] * np.conj(seg[:-1])) * fs / (2 * np.pi)
     fm = np.convolve(fm, sdrtx.lowpass(4_000, fs), "same")
     fm -= np.median(fm)
-    # Per 5 ms: the strongest tone 300-3500 Hz (FFT with zero padding) and its deviation.
-    w = int(fs * 0.02)
-    rows = []
-    for k in range(0, len(fm) - w, blk):
-        s = fm[k : k + w] * np.hanning(w)
-        sp = np.abs(np.fft.rfft(s, 8192)) * 2 / np.hanning(w).sum()
-        fr = np.fft.rfftfreq(8192, 1 / fs)
-        band = (fr > 300) & (fr < 3500)
-        j = np.argmax(sp * band)
-        rows.append((k / fs, fr[j], sp[j]))
-    rows = np.array(rows)
-    # Steady tones: runs where the frequency holds within 30 Hz and the deviation is well above the quiet.
-    quiet = np.percentile(rows[:, 2], 20)
-    tones, start = [], None
-    for r in range(len(rows)):
-        t, f, d = rows[r]
-        live = d > max(150, quiet * 4)
-        same = start is not None and abs(f - rows[start][1]) < 30
-        if start is not None and (not live or not same):
-            if r - start >= 4:
-                tones.append((rows[start][0], rows[r - 1][0] + 0.02, np.median(rows[start:r, 1]), np.median(rows[start:r, 2])))
-            start = None
-        if live and start is None:
-            start = r
-    if start is not None and len(rows) - start >= 4:
-        tones.append((rows[start][0], rows[-1][0] + 0.02, np.median(rows[start:, 1]), np.median(rows[start:, 2])))
+    tones = steady_tones(fm, fs)
     end = (i1 - a0) * 0.005
     if not tones:
         print(f"no steady tone in the last {o.tail:.1f} s")

@@ -159,11 +159,14 @@ impl Radio {
         self.tx.chip = Some(n);
         // TERM-33: DAC1 plays the test from here to the release (PC12 high meanwhile, PB8 already on); `afsk-bk`
         // is the keyed chip's tone generator instead, timed by TMR5 (`afskbk`), DAC1 and PC12 untouched.
+        // TERM-34: the suite runs step by step from here (`suite`), DAC1 and TMR5 as its steps ask.
         if let Some(t) = test {
             self.tx.test = None;
-            if t.signal.dac() {
+            if t.signal == ferrite_core::txtest::Signal::Suite {
+                self.suite_start(n, &setup);
+            } else if let Some(g) = ferrite_core::txtest::Gen::new(t.signal, t.level) {
                 self.tx.test_playing = true;
-                crate::tasks::dsp::TXTEST.signal(Some(t));
+                crate::tasks::dsp::TXTEST.signal(Some(g));
             } else {
                 self.afsk_bk_start(n, t.level);
             }
@@ -172,8 +175,9 @@ impl Radio {
     }
 
     /// TERM-33: the test signal stopped (the DSP task puts DAC1 to mid-scale and PC12 low; `afsk-bk`'s timer
-    /// stops and the tones go off).
+    /// stops and the tones go off); TERM-34: the suite ended and the registers it changed put back.
     fn test_audio_off(&mut self) {
+        self.suite_stop();
         if core::mem::take(&mut self.tx.test_playing) {
             crate::tasks::dsp::TXTEST.signal(None);
         }

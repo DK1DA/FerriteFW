@@ -85,6 +85,8 @@ mod tx;
 #[cfg(feature = "tx")]
 pub mod afskbk;
 #[cfg(feature = "tx")]
+mod suite;
+#[cfg(feature = "tx")]
 mod crossband;
 
 type Wire = ThreeWire<Out, Io, BusyDelay>;
@@ -402,6 +404,17 @@ struct Tx {
     test_playing: bool,
     /// TERM-33 `afsk-bk` while it plays (`afskbk`).
     bk: Option<afskbk::BkRun>,
+    /// TERM-34 `txtest suite` while it runs (`suite`).
+    suite: Option<suite::SuiteRun>,
+}
+
+/// What woke the main loop for a transmit test (TERM-33, TERM-34; only the `tx` build has either).
+#[cfg_attr(not(feature = "tx"), allow(dead_code))]
+enum TestEv {
+    /// `afsk-bk`'s timer made a tone change.
+    Edge,
+    /// The suite's next step is due.
+    Step,
 }
 
 fn now_ms() -> u64 {
@@ -642,6 +655,7 @@ pub async fn task() {
             test_regs: None,
             test_playing: false,
             bk: None,
+            suite: None,
         },
         #[cfg(feature = "tx")]
         xb: None,
@@ -692,24 +706,40 @@ pub async fn task() {
             },
             _ => Instant::from_millis(at),
         };
-        // TERM-33 `afsk-bk`: TMR5's tone changes, waited on only while one plays (`afskbk`); handled at once, with
-        // nothing else after it (no snapshot: nothing the UI sees changes).
+        // TERM-33 `afsk-bk`: TMR5's tone changes, waited on only while one plays (`afskbk`); TERM-34: the suite's
+        // next step at its time (`suite`). Each handled at once, with nothing else after it (no snapshot: nothing
+        // the UI sees changes).
         #[cfg(feature = "tx")]
-        let bk_on = r.afsk_bk_on();
+        let (bk_on, suite_at) = (r.afsk_bk_on(), r.suite_due());
         #[cfg(feature = "tx")]
-        let edge = async {
-            if bk_on {
-                afskbk::EDGE.wait().await
-            } else {
-                core::future::pending().await
+        let test = async {
+            let edge = async {
+                if bk_on {
+                    afskbk::EDGE.wait().await
+                } else {
+                    core::future::pending().await
+                }
+            };
+            match suite_at {
+                Some(at) => match embassy_futures::select::select(edge, Timer::at(Instant::from_millis(at))).await {
+                    embassy_futures::select::Either::First(()) => TestEv::Edge,
+                    embassy_futures::select::Either::Second(()) => TestEv::Step,
+                },
+                None => {
+                    edge.await;
+                    TestEv::Edge
+                }
             }
         };
         #[cfg(not(feature = "tx"))]
-        let edge = core::future::pending::<()>();
-        match select4(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive(), edge).await {
-            Either4::Fourth(()) => {
+        let test = core::future::pending::<TestEv>();
+        match select4(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive(), test).await {
+            Either4::Fourth(_ev) => {
                 #[cfg(feature = "tx")]
-                r.afsk_bk_edge();
+                match _ev {
+                    TestEv::Edge => r.afsk_bk_edge(),
+                    TestEv::Step => r.suite_next(),
+                }
                 continue;
             }
             Either4::First(c) => r.cmd(c).await,

@@ -428,6 +428,9 @@ pub enum DebugAns {
     Mic(crate::vox::MicCapture),
     /// TERM-33: what is armed for the next PTT key-up now (None: nothing).
     TxTest(Option<crate::txtest::Arm>),
+    /// TERM-34: `txtest suite` running: the section (1-7; 0 the lead-in before the first, 8 holding the end tone
+    /// until the release) and the ms left to the hold.
+    TxSuite { section: u8, left_ms: u32 },
     /// TERM-30: the last GGA sentence from `$` to the checksum (`n` 0: none since boot), and its age in seconds.
     Gga { data: [u8; GGA_MAX], n: u8, age_s: u32 },
     /// Not done, and why.

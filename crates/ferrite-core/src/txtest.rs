@@ -63,10 +63,13 @@ pub enum Signal {
     Afsk,
     /// AFSK flags from the BK4829's tone generator, not DAC1.
     AfskBk,
+    /// TERM-34: every test above and more in one key-up, in a fixed order ([`crate::txsuite`]); the Radio task
+    /// runs it, asking DAC1 for its DAC parts.
+    Suite,
 }
 
 impl Signal {
-    pub const ALL: [Signal; 4] = [Signal::Fsk4, Signal::Sweep, Signal::Afsk, Signal::AfskBk];
+    pub const ALL: [Signal; 5] = [Signal::Fsk4, Signal::Sweep, Signal::Afsk, Signal::AfskBk, Signal::Suite];
 
     /// The terminal's word for it.
     pub fn name(self) -> &'static str {
@@ -75,13 +78,20 @@ impl Signal {
             Signal::Sweep => "sweep",
             Signal::Afsk => "afsk",
             Signal::AfskBk => "afsk-bk",
+            Signal::Suite => "suite",
         }
     }
 
-    /// Played from DAC1 by the DSP task (all but `afsk-bk`, which is the BK4829's tone generator and the Radio
-    /// task's: PC12 and DAC1 stay untouched).
+    /// Played from DAC1 by the DSP task as one signal from the key-up to the release (all but `afsk-bk`, which is
+    /// the BK4829's tone generator and the Radio task's: PC12 and DAC1 stay untouched; and `suite`, which the Radio
+    /// task runs step by step, DAC parts included).
     pub fn dac(self) -> bool {
-        self != Signal::AfskBk
+        !matches!(self, Signal::AfskBk | Signal::Suite)
+    }
+
+    /// Takes a FILTERS word and a LEVEL (the DAC signals and `afsk-bk`'s LEVEL; `suite` neither: its own are fixed).
+    pub fn takes_level(self) -> bool {
+        self != Signal::Suite
     }
 
     /// A word as typed, any case.
@@ -91,7 +101,7 @@ impl Signal {
 
     /// The filters when none are named: `data` for the DAC signals (the bench's best data setting, and how an APRS
     /// burst goes out: APRS-14, decision 135); `afsk-bk` takes no filters word and leaves the chip's voice
-    /// settings.
+    /// settings; `suite` sets its own per step (shown as `data`, the set-up its markers use).
     pub fn default_filters(self) -> Filters {
         if self == Signal::AfskBk { Filters::Voice } else { Filters::Data }
     }
@@ -129,7 +139,8 @@ impl Filters {
 /// The TX audio set-up a key-up changes (and the unkey puts back), or None for the chip's voice settings: an APRS
 /// burst (a data key-up, `aprs`) always `data` (APRS-14, decision 135: the level then follows the DAC linearly,
 /// where the voice set-up's MIC AGC holds it near 4 kHz whatever the DAC); a `txtest` key-up its arming's filters
-/// (`voice` none; `afsk-bk` none, not a DAC signal); a voice key-up none.
+/// (`voice` none; `afsk-bk` none, not a DAC signal; `suite` none: it sets its own per step, TERM-34); a voice key-up
+/// none.
 pub fn key_up_filters(aprs: bool, test: Option<Arm>) -> Option<Filters> {
     let f = if aprs { Some(Filters::Data) } else { test.filter(|t| t.signal.dac()).map(|t| t.filters) };
     f.filter(|&f| f != Filters::Voice)
@@ -299,22 +310,22 @@ pub const SWEEP_SAMPLES: u32 = samples(MARKER_MS + GAP_MS) + SWEEP_HZ.len() as u
 
 /// The sweep's tone at sample `pos` of a pass (None: a silence).
 pub fn sweep_tone(pos: u32) -> Option<u16> {
-    let pos = pos % SWEEP_SAMPLES;
-    let first = samples(MARKER_MS + GAP_MS);
-    if pos < first {
-        return (pos < samples(MARKER_MS)).then_some(MARKER_HZ);
-    }
-    let r = pos - first;
-    let i = (r / samples(TONE_MS + GAP_MS)) as usize;
-    (r % samples(TONE_MS + GAP_MS) < samples(TONE_MS)).then(|| SWEEP_HZ[i])
+    Sweep::default().tone_at(pos % SWEEP_SAMPLES)
 }
 
-/// The sweep, a sample at a time: each tone from phase 0.
+/// The sweep, a sample at a time: each tone from phase 0. `txtest sweep`'s ([`Sweep::new`]: the marker, then the
+/// tones, looped) or the suite's ([`Sweep::once`]: the tones alone at their own length, once, then silence).
 #[derive(Clone, Copy, Debug)]
 pub struct Sweep {
     pos: u32,
     phase: u32,
     amp: i32,
+    /// Samples: the marker (0: none), each tone, the silence after each (and after the marker).
+    marker: u32,
+    tone: u32,
+    gap: u32,
+    /// One pass, then silence; else looped.
+    once: bool,
 }
 
 impl Default for Sweep {
@@ -326,11 +337,35 @@ impl Default for Sweep {
 impl Sweep {
     /// At `level` percent of [`SWEEP_AMP`].
     pub fn new(level: u8) -> Self {
-        Sweep { pos: 0, phase: 0, amp: scaled(SWEEP_AMP, level) }
+        Sweep { pos: 0, phase: 0, amp: scaled(SWEEP_AMP, level), marker: samples(MARKER_MS), tone: samples(TONE_MS), gap: samples(GAP_MS), once: false }
+    }
+
+    /// The tones of [`SWEEP_HZ`] alone, `tone_ms` each with `gap_ms` of silence after each, once, at [`SWEEP_AMP`].
+    pub const fn once(tone_ms: u32, gap_ms: u32) -> Self {
+        Sweep { pos: 0, phase: 0, amp: SWEEP_AMP, marker: 0, tone: samples(tone_ms), gap: samples(gap_ms), once: true }
+    }
+
+    /// One pass, samples.
+    pub const fn pass(&self) -> u32 {
+        (if self.marker > 0 { self.marker + self.gap } else { 0 }) + SWEEP_HZ.len() as u32 * (self.tone + self.gap)
+    }
+
+    /// The tone at sample `pos` of a pass (None: a silence; past the pass, silence).
+    pub fn tone_at(&self, pos: u32) -> Option<u16> {
+        let first = if self.marker > 0 { self.marker + self.gap } else { 0 };
+        if pos < first {
+            return (pos < self.marker).then_some(MARKER_HZ);
+        }
+        let r = pos - first;
+        let i = (r / (self.tone + self.gap)) as usize;
+        if i >= SWEEP_HZ.len() {
+            return None;
+        }
+        (r % (self.tone + self.gap) < self.tone).then(|| SWEEP_HZ[i])
     }
 
     pub fn sample(&mut self) -> i16 {
-        let s = match sweep_tone(self.pos) {
+        let s = match self.tone_at(self.pos) {
             Some(hz) => {
                 let (_, s) = cos_sin_phase(self.phase);
                 self.phase = self.phase.wrapping_add(phase_step(hz as u64 * 1000, RATE_HZ as u64 * 1000));
@@ -341,8 +376,30 @@ impl Sweep {
                 0
             }
         };
-        self.pos = (self.pos + 1) % SWEEP_SAMPLES;
+        let pass = self.pass();
+        self.pos = if self.once { (self.pos + 1).min(pass) } else { (self.pos + 1) % pass };
         s as i16
+    }
+}
+
+/// A steady tone (or silence at `amp` 0), phase-continuous, from phase 0: the suite's markers and silences.
+#[derive(Clone, Copy, Debug)]
+pub struct Tone {
+    phase: u32,
+    step: u32,
+    amp: i32,
+}
+
+impl Tone {
+    /// `hz` at a peak of `amp` (full scale 32767).
+    pub fn new(hz: u16, amp: i32) -> Self {
+        Tone { phase: 0, step: phase_step(hz as u64 * 1000, RATE_HZ as u64 * 1000), amp }
+    }
+
+    pub fn sample(&mut self) -> i16 {
+        let (_, s) = cos_sin_phase(self.phase);
+        self.phase = self.phase.wrapping_add(self.step);
+        ((s * self.amp) >> 15) as i16
     }
 }
 
@@ -487,12 +544,13 @@ impl BkFlags {
     }
 }
 
-/// One of the three DAC signals, for the DSP task.
+/// One of the DAC signals, for the DSP task: a `txtest` mode's, or a step of the suite's (TERM-34).
 #[derive(Clone, Copy, Debug)]
 pub enum Gen {
     Fsk4(Fsk4),
     Sweep(Sweep),
     Afsk(Afsk),
+    Tone(Tone),
 }
 
 impl Gen {
@@ -502,7 +560,7 @@ impl Gen {
             Signal::Fsk4 => Gen::Fsk4(Fsk4::new(level)),
             Signal::Sweep => Gen::Sweep(Sweep::new(level)),
             Signal::Afsk => Gen::Afsk(Afsk::new(level)),
-            Signal::AfskBk => return None,
+            Signal::AfskBk | Signal::Suite => return None,
         })
     }
 
@@ -512,6 +570,7 @@ impl Gen {
             Gen::Fsk4(g) => g.sample(),
             Gen::Sweep(g) => g.sample(),
             Gen::Afsk(g) => g.sample(),
+            Gen::Tone(g) => g.sample(),
         }
     }
 }
@@ -656,10 +715,13 @@ mod tests {
             assert_eq!(Filters::parse(f.name().to_ascii_uppercase().as_bytes()), Some(f));
         }
         assert_eq!(Filters::parse(b"loud"), None);
-        assert_eq!(Signal::ALL.map(Signal::default_filters), [Filters::Data, Filters::Data, Filters::Data, Filters::Voice]);
+        assert_eq!(Signal::ALL.map(Signal::default_filters), [Filters::Data, Filters::Data, Filters::Data, Filters::Voice, Filters::Data]);
         assert_eq!(Signal::parse(b"AFSK-BK"), Some(Signal::AfskBk));
-        assert_eq!(Signal::ALL.map(Signal::dac), [true, true, true, false]);
+        assert_eq!(Signal::parse(b"Suite"), Some(Signal::Suite));
+        assert_eq!(Signal::ALL.map(Signal::dac), [true, true, true, false, false]);
+        assert_eq!(Signal::ALL.map(Signal::takes_level), [true, true, true, true, false]);
         assert!(Gen::new(Signal::AfskBk, 100).is_none(), "the DSP task never plays afsk-bk");
+        assert!(Gen::new(Signal::Suite, 100).is_none(), "the suite's DAC parts come step by step");
     }
 
     /// TERM-33: 4FSK polarity. The DAC-to-air chain inverts, so the generator sends +3 as a negative swing: the
@@ -810,5 +872,6 @@ mod tests {
         assert_eq!(key_up_filters(false, arm(Signal::Afsk, Filters::Voice)), None);
         assert_eq!(key_up_filters(false, arm(Signal::AfskBk, Filters::Voice)), None);
         assert_eq!(key_up_filters(false, arm(Signal::AfskBk, Filters::Data)), None, "afsk-bk never changes the filters");
+        assert_eq!(key_up_filters(false, arm(Signal::Suite, Filters::Data)), None, "the suite sets its own per step");
     }
 }

@@ -107,13 +107,35 @@ def capture(o):
     return raw
 
 
+def baseband(raw, chunk=1 << 20):
+    """rtl_sdr's u8 IQ to complex baseband at FS / DEC: the signal moved from -OFF to 0 Hz, low-passed at 20 kHz and
+    decimated; the same numbers as conv_same over the whole capture, a chunk at a time (overlap-save) so a minute's
+    capture fits in memory."""
+    h = lowpass(20_000, FS)
+    L = len(h)
+    s = (L - 1) // 2
+    n = len(raw) // 2
+    out = []
+    m = 1 << (chunk + L - 2).bit_length()
+    H = np.fft.fft(h, m)
+    for a in range(0, n, chunk):
+        b = min(a + chunk, n)
+        lo, hi = a - s, b + s  # the inputs y[a:b] need
+        x = np.zeros(hi - lo, np.complex128)
+        i0, i1 = max(lo, 0), min(hi, n)
+        seg = raw[2 * i0 : 2 * i1].astype(np.float64) - 127.5
+        k = np.arange(i0, i1)
+        x[i0 - lo : i1 - lo] = (seg[0::2] + 1j * seg[1::2]) * np.exp(2j * np.pi * OFF * (k % FS) / FS)
+        y = np.fft.ifft(np.fft.fft(x, m) * H)[L - 1 : len(x)]
+        out.append(y[::DEC].astype(np.complex64))
+    return np.concatenate(out) if out else np.zeros(0, np.complex64)
+
+
 def demod(raw, mhz, audio_lp, quiet=False):
     """The keyed part's FM deviation (Hz, carrier offset removed) at 64 kS/s, and the offset; None if no
     transmission."""
     clip = np.mean((raw == 0) | (raw == 255))
-    x = (raw[0::2].astype(np.float32) - 127.5) + 1j * (raw[1::2].astype(np.float32) - 127.5)
-    x *= np.exp(2j * np.pi * OFF * np.arange(len(x)) / FS)  # the signal from -OFF to 0 Hz
-    x = conv_same(x, lowpass(20_000, FS))[::DEC]
+    x = baseband(raw)
     fs = FS / DEC
     p = np.abs(x) ** 2
     blk = int(fs * 0.01)
@@ -364,24 +386,29 @@ def sweep(dev, fs, out_png=None):
     if not starts:
         print("  no 1 kHz marker: was `:txtest sweep` armed, and PTT held for a pass?")
         return None
+    firsts = [s + int(fs * (MARKER_S + GAP_S)) for s in starts]
+    fr, a = sweep_measure(dev, fs, firsts, TONE_S, GAP_S)
+    return sweep_report(fr, a, out_png)
+
+
+def sweep_measure(dev, fs, firsts, tone_s, gap_s):
+    """Each sweep tone's deviation (Hz, the median over the passes) for passes whose first tone starts at the samples
+    `firsts`, each tone `tone_s` long with `gap_s` after: a sine fitted to its middle (50 ms clear of each end)."""
     amps = {f: [] for f in SWEEP_HZ}
-    for s in starts:
+    for s in firsts:
         for i, f in enumerate(SWEEP_HZ):
-            a = s + int(fs * (MARKER_S + GAP_S + i * (TONE_S + GAP_S) + 0.05))
-            b = a + int(fs * (TONE_S - 0.1))
-            if b <= len(dev):
+            a = s + int(fs * (i * (tone_s + gap_s) + 0.05))
+            b = a + int(fs * (tone_s - 0.1))
+            if a >= 0 and b <= len(dev):
                 # The phase-difference discriminator's own response, sin(pi f/fs) / (pi f/fs): -0.2 dB at 8 kHz.
                 amps[f].append(fit_amp(dev[a:b], fs, f) / np.sinc(f / fs))
     fr = [f for f in SWEEP_HZ if amps[f]]
-    a = np.array([np.median(amps[f]) for f in fr])
-    if 1000 not in fr:
-        print("  the pass is cut short before 1 kHz")
-        return None
-    ref = a[fr.index(1000)]
-    db = 20 * np.log10(np.maximum(a, 1e-3) / ref)
-    print("    Hz     dev Hz    dB (1 kHz = 0)")
-    for f, x, d in zip(fr, a, db):
-        print(f"  {f:5d}  {x:8.0f}  {d:+7.1f}")
+    return fr, np.array([np.median(amps[f]) for f in fr])
+
+
+def minus3(fr, db):
+    """The -3 dB points against 1 kHz (log-interpolated), low and high; None where the response doesn't fall that
+    far."""
     i1 = fr.index(1000)
 
     def cross(rng):
@@ -393,7 +420,20 @@ def sweep(dev, fs, out_png=None):
             prev = i
         return None
 
-    lo, hi = cross(range(i1 - 1, -1, -1)), cross(range(i1 + 1, len(fr)))
+    return cross(range(i1 - 1, -1, -1)), cross(range(i1 + 1, len(fr)))
+
+
+def sweep_report(fr, a, out_png=None):
+    """The response table against 1 kHz and the -3 dB points (printed), the plot PNG if asked."""
+    if 1000 not in fr:
+        print("  the pass is cut short before 1 kHz")
+        return None
+    ref = a[fr.index(1000)]
+    db = 20 * np.log10(np.maximum(a, 1e-3) / ref)
+    print("    Hz     dev Hz    dB (1 kHz = 0)")
+    for f, x, d in zip(fr, a, db):
+        print(f"  {f:5d}  {x:8.0f}  {d:+7.1f}")
+    lo, hi = minus3(fr, db)
     print(f"  -3 dB points: low {f'{lo:.0f} Hz' if lo else f'below {fr[0]} Hz'}, high {f'{hi:.0f} Hz' if hi else f'above {fr[-1]} Hz'}")
     plt = pyplot() if out_png else None
     if plt:
