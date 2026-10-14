@@ -124,13 +124,23 @@ pub async fn task() {
         let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
         crate::chan::SQ_CAL.signal(if read { SqCal::parse(&b) } else { SqCal::DEFAULT });
     }
-    // The `tx` build: the PA curves and battery gauge for the Radio task (read only, chapter 35).
+    // The `tx` build: the PA curves, TX windows and battery gauge for the Radio task (read only, chapter 35); the
+    // cable log says why transmit is locked, if it is.
     #[cfg(feature = "tx")]
     {
-        use ferrite_core::txcal::{Gauge, TxCal, READ_LEN};
+        use ferrite_core::txcal::{Fault, Gauge, TxCal, READ_LEN};
         let mut b = [0xFFu8; READ_LEN];
         let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
-        crate::chan::TX_CAL.signal((if read && cal_ok { TxCal::parse(&b) } else { None }, Gauge::parse(&b)));
+        let tx = if read && cal_ok { TxCal::read(&b) } else { Err(Fault::Blank) };
+        if let Err(f) = tx {
+            bringup::line(match f {
+                Fault::Blank => b"tx calibration: locked, sector blank or unread",
+                Fault::PaCurve => b"tx calibration: locked, a PA curve byte is 0x00 or 0xFF",
+                Fault::Windows => b"tx calibration: locked, TX windows blank or invalid",
+                Fault::Trim => b"tx calibration: locked, factory crystal trim not applied yet",
+            });
+        }
+        crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));
     }
     let set = store::settings();
     store.load_settings(set);
@@ -592,6 +602,9 @@ fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
             let _ = ufmt::uwrite!(b, "Ferrite {} {}", VERSION, ferrite_core::build());
         }
     });
+    if cfg!(feature = "tx-dry") {
+        bringup::line(b"TX DRY: PA drive held at 0");
+    }
     bringup::linef(|b| {
         b.push(b"MCU idcode ");
         bringup::hex(b, crate::hal::sys::idcode());

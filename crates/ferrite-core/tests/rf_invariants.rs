@@ -162,6 +162,7 @@ fn random_sequences_keep_the_rules() {
                         region: Region::Us,
                         extend: rng.next(2) == 0,
                         cal_ok: rng.next(20) != 0,
+                        cal_window: rng.next(10) != 0,
                         batt_ok: rng.next(20) != 0,
                         power: rng.next(3) as u8,
                     };
@@ -268,6 +269,7 @@ fn crossband_sequences_keep_the_rules() {
                         region: Region::Us,
                         extend: false,
                         cal_ok: true,
+                        cal_window: true,
                         batt_ok: rng.next(30) != 0,
                         power: rng.next(2) as u8,
                     };

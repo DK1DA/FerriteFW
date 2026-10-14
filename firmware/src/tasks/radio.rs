@@ -743,6 +743,12 @@ impl Radio {
         #[cfg(feature = "tx")]
         self.vox_poll();
         if self.hf.is_some() {
+            // Keyed from HF mode (HF-23): the keyed tick as from home (TX-30 backstop, TX-31 duty limit, TX-32
+            // battery under load); the HF receiver's report waits for the unkey (TX audit M5).
+            #[cfg(feature = "tx")]
+            if self.path.keyed().is_some() {
+                return self.tx_tick(now_ms() as u32).await;
+            }
             self.hf_poll();
             return;
         }
@@ -1961,6 +1967,16 @@ impl Radio {
             RadioCmd::Hf { freq, mode, on } => self.hf(freq, mode, on).await,
             RadioCmd::HfSeek { up } => self.hf_seek(up).await,
             RadioCmd::Shutdown => {
+                // TX-33: power off while keyed (a pass of the repeater too) unkeys first: PA drive 0, the chip out
+                // of transmit, the unkey wait, every select off, before any chip sleeps or the SI4732 is touched
+                // (TX audit M6). Stock unkeys nothing at power off (PE0, the save, then PA11 cleared).
+                #[cfg(feature = "tx")]
+                if self.path.keyed().is_some() || self.tx.seq.keyed() {
+                    let mut s = Steps::default();
+                    self.tx.seq.safe(&mut self.path, now_ms() as u32, &mut s);
+                    self.run(&s).await;
+                    self.unkeyed();
+                }
                 for n in 0..2u8 {
                     self.tune_chip(n, None).await;
                 }
@@ -2141,6 +2157,7 @@ impl Radio {
             region,
             extend,
             cal_ok: self.tx.cal.is_some(),
+            cal_window: self.tx.cal.is_some_and(|c| c.in_window(f)),
             batt_ok: self.battery_ok(),
             power: data.unwrap_or(self.tx.power[s]).min(2),
         };
@@ -2164,14 +2181,9 @@ impl Radio {
         self.tuned[n as usize] = Some((slot, f)); // not the receive frequency: retuned after the unkey
         self.ldo_on(n);
         let tone = self.tx.tone[s];
-        let mut bk = self.chip(n);
-        bk.af_out(AfOut::Mute);
-        bk.set_freq(f * 10);
-        match tone {
-            0 => bk.subtone_off(),
-            t if t & 0x8000 != 0 => bk.dcs_tx(t & 0x3FFF, t & 0x4000 != 0),
-            t => bk.ctcss_tx(t),
-        }
+        // The keyed slot's bandwidth (HF mode's NFM is its mode 1).
+        let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
+        radio_chip::tx_setup(&mut self.chip(n), f, narrow, tone);
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, req.power));
         self.tx.fault = false;
         self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
@@ -2507,6 +2519,7 @@ impl Radio {
             region,
             extend,
             cal_ok: self.tx.cal.is_some(),
+            cal_window: self.tx.cal.is_some_and(|c| c.in_window(f)),
             batt_ok: self.battery_ok(),
             power,
         };
@@ -2521,14 +2534,9 @@ impl Radio {
         }
         let tone = self.tx.tone[to as usize % 4];
         self.ldo_on(n);
-        let mut bk = self.chip(n);
-        bk.af_out(AfOut::Mute);
-        bk.set_freq(f * 10);
-        match tone {
-            0 => bk.subtone_off(),
-            t if t & 0x8000 != 0 => bk.dcs_tx(t & 0x3FFF, t & 0x4000 != 0),
-            t => bk.ctcss_tx(t),
-        }
+        // Decision 95: the TX side's own bandwidth (stock takes the receiving channel's).
+        let narrow = self.slots[to as usize].narrow;
+        radio_chip::tx_setup(&mut self.chip(n), f, narrow, tone);
         self.tuned[n as usize] = Some((to, f));
         self.maybe_awake |= 1 << n;
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, power));

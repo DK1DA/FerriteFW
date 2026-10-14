@@ -5,9 +5,10 @@ use super::gpio::{pin, Mode, GPIOA};
 use super::regs::*;
 use super::{modify, wr};
 
-/// The PA drive to `v` (0-255 = 0 V to Vref). Channel 1 (the audio tone) is left as it is.
+/// The PA drive to `v` (0-255 = 0 V to Vref). Channel 1 (the audio tone) is left as it is. The `tx-dry` build
+/// holds it at 0 whatever `v` is: the one choke point, as no other code writes DHR8R2 or makes PA5 analog.
 pub fn set(v: u8) {
-    if v == 0 {
+    if v == 0 || cfg!(feature = "tx-dry") {
         return zero();
     }
     modify(CRM_APB1EN, 0, CRM_APB1_DAC);

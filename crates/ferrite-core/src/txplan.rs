@@ -132,16 +132,17 @@ pub fn is_125m(f: Freq10) -> bool {
     (mhz(200)..mhz(300)).contains(&f)
 }
 
-/// TX-10: transmit in the 1.25 m amateur band (219-225 MHz, which covers every region's plan) is held back until
-/// the ceiling is measured. The 0.25 W cap (TX-9) still covers the whole 200-300 MHz PA path, so 243.0 MHz stays
-/// possible with the emergency double PTT (TX-3), capped (user decision Oct 3, 2026).
+/// TX-10: transmit anywhere on the 200-300 MHz PA path (the 1.25 m band, and 243.0 MHz) is held back until the
+/// ceiling is measured: nothing there is capped yet, and the path's Low curve alone isn't 0.25 W (TX audit M3).
+/// Once measured, the 0.25 W cap (TX-9) covers the whole path and 243.0 MHz takes the emergency double PTT (TX-3).
 pub fn locked_125m(f: Freq10) -> bool {
-    !CAP_125M_MEASURED && (mhz(219)..mhz(225)).contains(&f)
+    !CAP_125M_MEASURED && is_125m(f)
 }
 
 /// Where transmit may go: the region's bands (or, with Extend TX, any band the hardware covers) and the HF
 /// windows. Extend TX never reaches below 64 MHz: the calibration has no HF window, so HF stays on the amateur
-/// windows (TX-41). Calibration windows are the Radio task's to add.
+/// windows (TX-41). The calibration's own windows are intersected after this, in the Radio task's sequencer
+/// (`TxCal::in_window`, `txseq::Req::cal_window`): the UI doesn't read them.
 pub fn check(f: Freq10, region: Region, extend: bool) -> Result<(), Refusal> {
     if extend && f >= mhz(64) {
         // Calibration ∩ hardware: the TX chips' ranges (6 m and below 24 MHz stay locked, TX-4).
@@ -187,13 +188,16 @@ mod tests {
         assert_eq!(check(mhz(162) + 55_000, Region::Us, true), Ok(()), "above 64 MHz Extend still widens");
     }
 
-    /// CAL-15: no transmit on 1.25 m until its power ceiling is measured; 243.0 MHz keeps the 0.25 W cap.
+    /// CAL-15, TX-10: no transmit anywhere on the 200-300 MHz PA path until its power ceiling is measured: the
+    /// 1.25 m band and 243.0 MHz alike (TX audit M3); the edges are the path's.
     #[test]
     fn unmeasured_125m_is_locked() {
         assert!(locked_125m(mhz(223) + 50_000));
+        assert!(locked_125m(mhz(243)), "243.0 MHz: on the same uncapped path");
+        assert!(locked_125m(mhz(200)) && locked_125m(mhz(300) - 1));
+        assert!(!locked_125m(mhz(200) - 1) && !locked_125m(mhz(300)));
         assert!(!locked_125m(mhz(146) + 52_000) && !locked_125m(mhz(446)));
-        assert!(!locked_125m(mhz(243)), "243.0 MHz: emergency double PTT, capped, not locked");
-        assert!(is_125m(mhz(243)), "but the 0.25 W cap still applies there");
+        assert!(is_125m(mhz(243)), "the 0.25 W cap will apply there too");
     }
 
     #[test]

@@ -593,7 +593,7 @@ impl View for TxRefused {
             }
             Refusal::Crossband => a.set(b"The crossband repeater is running. BACK on its screen stops it."),
             Refusal::Unmeasured125 => {
-                a.set(b"1.25 m transmit is locked until its 0.25 W limit is measured on the bench.");
+                a.set(b"Transmit on 200-300 MHz (1.25 m, 243.0) is locked until its 0.25 W limit is measured on the bench.");
                 more = b"Receive works as usual. (TX-10)";
             }
             Refusal::RelayMismatch => {

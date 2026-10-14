@@ -76,6 +76,7 @@ To pack the image for the stock bootloader (build, slow-flash check, pack, dry r
 ```sh
 tools/mkbtf.sh            # target/ferrite.btf
 tools/mkbtf.sh bringup    # target/ferrite-bringup.btf: the first builds on a radio
+tools/mkbtf.sh tx-dry     # target/ferrite-txdry.btf: transmit with the PA drive held at 0 (the dry run)
 python3 tools/flash.py PORT target/ferrite-bringup.btf --backup flash.bin
 ```
 

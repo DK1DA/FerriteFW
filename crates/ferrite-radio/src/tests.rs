@@ -31,6 +31,7 @@ fn req(tx: Freq10, rx: Freq10) -> Req {
         region: Region::Us,
         extend: false,
         cal_ok: true,
+        cal_window: true,
         batt_ok: true,
         power: 2,
     }
@@ -113,6 +114,38 @@ fn failed_read_back_never_ramps() {
     go(&mut hw, &s, &st);
     assert!(hw.at(|e| *e == Ev::Fault(1)).is_some(), "{:?}", hw.evs());
     assert!(hw.at(pa_up).is_none(), "no PA drive after a failed read-back: {:?}", hw.evs());
+}
+
+/// TX-33 (the Radio task's `Shutdown` while keyed, TX audit M6): the sequencer's safe state, run before any chip
+/// sleeps, takes the PA drive to 0 first, with no end tone, CW ID or tail; then the chip out of transmit, the unkey
+/// wait, every select off. The same from a crossband pass, its repeat audio off before the chip unkeys.
+#[test]
+fn power_off_while_keyed_zeroes_the_pa_first() {
+    let (mut path, mut seq, mut hw, st) = receiving(UHF);
+    let mut s = Steps::default();
+    seq.key(&req(UHF, UHF), &mut path, 0, &mut s).unwrap();
+    let st = go(&mut hw, &s, &st);
+    let mut s = Steps::default();
+    seq.safe(&mut path, 1_000, &mut s);
+    let end = go(&mut hw, &s, &st);
+    assert_eq!(hw.evs()[0], Ev::Pa(0), "PA drive 0 before anything else: {:?}", hw.evs());
+    assert!(hw.at(|e| matches!(e, Ev::EndTone | Ev::CwId | Ev::Tail)).is_none(), "no tones at a power off");
+    let unkey = hw.at(|e| *e == Ev::Unkey(1)).unwrap();
+    let tx_off = hw.at(|e| *e == Ev::Pin(Pin::Sel(Sel::UhfTx), false)).unwrap();
+    assert!(unkey < tx_off && hw.time(tx_off) >= UNKEY_WAIT_MS as u32, "{:?}", hw.evs());
+    assert!(end.sel.iter().all(|&x| !x) && end.pa == 0 && end.keyed.is_none());
+    assert!(!seq.keyed() && path.keyed().is_none());
+
+    // A crossband pass: RX on UHF, TX on VHF.
+    let (mut path, mut seq, mut hw, st) = receiving(UHF);
+    let mut s = Steps::default();
+    seq.key_xb(&Req { person: false, ..req(VHF, UHF) }, &mut path, 0, &mut s).unwrap();
+    let st = go(&mut hw, &s, &st);
+    let mut s = Steps::default();
+    seq.safe(&mut path, 1_000, &mut s);
+    let end = go(&mut hw, &s, &st);
+    assert_eq!(hw.evs()[0], Ev::Pa(0), "{:?}", hw.evs());
+    assert!(end.sel.iter().all(|&x| !x) && end.pa == 0 && end.keyed.is_none() && !end.repeat);
 }
 
 /// SAFE-20, SAFE-21, HF-11, TX-27: tuning the active slot from 2 m to 10 m moves the relay with no RF: muted,
@@ -521,6 +554,26 @@ fn key_reads_back_before_the_pa() {
     }
 }
 
+/// TX-45 (TX audit M7): the TX set-up writes stock's REG_43 with every TX frequency (0x3028 wide, 0x4008 narrow), over
+/// whatever the chip held (here the reset value 0x4048, as a cross-band split's TX chip may), with the AF muted
+/// first and the sub-tone after.
+#[test]
+fn tx_setup_writes_the_bandwidth() {
+    for (narrow, r43) in [(false, 0x3028), (true, 0x4008)] {
+        let mut b = bk();
+        b.write(reg::RF_FILTER, 0x4048);
+        chip::tx_setup(&mut b, VHF, narrow, 885);
+        let bus = b.release();
+        assert_eq!(bus.last(reg::RF_FILTER), Some(r43));
+        assert_eq!(bus.regs[reg::FREQ_LO as usize] as u32 | (bus.regs[reg::FREQ_HI as usize] as u32) << 16, VHF);
+        assert!(bus.first(reg::AF_OUT).unwrap() < bus.writes.iter().rposition(|w| w.0 == reg::RF_FILTER).unwrap(), "muted first");
+        assert_eq!(bus.regs[reg::SUBTONE as usize] & 0x8000, 0x8000, "CTCSS sent");
+    }
+    let mut b = bk();
+    chip::tx_setup(&mut b, UHF, false, 0);
+    assert_eq!(b.release().last(reg::RF_FILTER), Some(0x3028));
+}
+
 /// A chip tuned to 146.520 MHz with a REG_3B of its own, and what TX-7 expects of it.
 fn keyed_ready() -> (Bk4829<RecBus>, chip::TxExpect) {
     let f = mhz(146) + 52_000;
@@ -558,7 +611,7 @@ fn any_wrong_read_back_refuses() {
     assert_eq!(chip::key_mic(&mut b, false, &want), Err(ReadBack::Bias));
 }
 
-/// TONE-13, DTMF-7, DTMF-8, DTMF-11: while keyed a tone burst or a DTMF symbol (A-D too) switches REG_30 to tone
+/// TONE-13, TONE-19, DTMF-7, DTMF-8, DTMF-11: while keyed a tone burst or a DTMF symbol (A-D too) switches REG_30 to tone
 /// transmit (stock's mode 4, the microphone off) with the sidetone as asked; letting go returns to the microphone
 /// with its read-back.
 #[test]
@@ -569,11 +622,15 @@ fn keyed_tones_switch_the_source() {
     let tone = bus.last(reg::POWER).unwrap();
     assert_ne!(tone, chip::REG30_TX_MIC, "tone transmit, not the microphone");
     assert_eq!(bus.last(reg::TONE1_FREQ), Some(bk4829::tone_word(1750)));
+    // TX audit M8: the burst (and the end tone and CW ID, through the same tone_tx) at V0.29's gain 0x17, REG_70
+    // 0x9700, not V0.27's 0xBC00; DTMF pairs keep 0xC5C5 (both versions).
+    assert_eq!(bus.last(reg::TONE), Some(0x9700));
     for d in ['5', 'A', 'D', '#'] {
         let mut b = bk();
         assert_eq!(chip::keyed_tone(&mut b, None, Some(d), false), (true, true), "{d}");
         let bus = b.release();
         assert_eq!(bus.last(reg::POWER), Some(tone));
+        assert_eq!(bus.last(reg::TONE), Some(0xC5C5));
         let pair = bk4829::tx::dtmf_pair(d).unwrap();
         assert_eq!((bus.last(reg::TONE1_FREQ), bus.last(reg::TONE2_FREQ)), (Some(bk4829::tone_word(pair.0)), Some(bk4829::tone_word(pair.1))));
     }
