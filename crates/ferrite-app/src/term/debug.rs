@@ -40,8 +40,9 @@ pub enum Kind {
     RxBoth(Option<bool>),
     /// `gps`: the GPS module's last GGA sentence and its two heights (TERM-30).
     Gga,
-    /// `gps query N`, `gps standby N`: a CASIC sentence to the module and its TXT answer (TERM-36).
-    Gps { id: u8, arg: u16 },
+    /// `gps query N`, `gps nmea off|on`, `gps standby N [quiet]`: a CASIC sentence to the module and its TXT
+    /// answer (TERM-36).
+    Gps { id: u8, arg: u16, quiet: bool },
     /// `bk settle [WAKE [SLEEP]]`: the BK4829 settle waits (TERM-31), set or asked.
     Settle(Option<ferrite_core::settle::Settle>),
     /// `mic`: a burst of PA0 (the mic level tap) readings, summed up (TERM-32).
@@ -109,7 +110,7 @@ impl Job {
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
             Kind::Gga => DebugReq::Gga,
-            Kind::Gps { id, arg } => DebugReq::Gps { id, arg },
+            Kind::Gps { id, arg, quiet } => DebugReq::Gps { id, arg, quiet },
             Kind::Settle(s) => DebugReq::Settle(s),
             Kind::Mic => DebugReq::Mic,
             Kind::TxTest(a) => DebugReq::TxTest(a),
@@ -293,18 +294,30 @@ impl Job {
                 self.line += 1;
                 Step::Line
             }
-            (Kind::Gps { id, arg }, DebugAns::GpsSent { data, n }) => {
+            (Kind::Gps { id, arg, quiet }, DebugAns::GpsSent { data, n }) => {
+                use ferrite_core::gpspower::{casic, CASIC_MAX, CAS_NMEA, CAS_STANDBY};
                 if self.line == 0 {
-                    let mut b = [0u8; 18];
-                    let k = ferrite_core::gpspower::casic(id, arg, &mut b);
+                    let mut b = [0u8; CASIC_MAX];
                     out.push(b"  sent ");
+                    if quiet {
+                        let k = casic(CAS_NMEA, 0, &mut b);
+                        out.push(&b[..k - 2]);
+                        out.push(b" CR LF, 100 ms later ");
+                    }
+                    let k = casic(id, arg, &mut b);
                     out.push(&b[..k - 2]);
                     out.push(b" CR LF");
                 } else {
                     if n > 0 {
                         out.push(b"  answer: ");
                         out.push(&data[..(n as usize).min(data.len())]);
-                    } else if id == ferrite_core::gpspower::CAS_STANDBY {
+                    } else if quiet {
+                        out.push(b"  NMEA on (stock's CAS03) once NMEA comes back, or the standby + 3 s: cable log");
+                    } else if id == CAS_NMEA && arg == 0 {
+                        out.push(b"  NMEA off if the cable log's 5 s counts drop to 0 sentences (gps nmea on undoes)");
+                    } else if id == CAS_NMEA {
+                        out.push(b"  NMEA back if the cable log's 5 s counts climb again (stock's CAS03)");
+                    } else if id == CAS_STANDBY {
                         out.push(b"  asleep if the cable log's 5 s counts drop to 0 sentences");
                     } else {
                         out.push(b"  no TXT answer from the module in 1.2 s");

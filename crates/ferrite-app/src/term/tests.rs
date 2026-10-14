@@ -1149,22 +1149,34 @@ fn regs(r: DebugReq) -> DebugAns {
 }
 
 /// TERM-36: `gps query N` sends CAS06 and shows the sentence sent and the module's TXT answer; `gps standby N`
-/// sends CAS12; anything else (another CAS number, CAS00 save, CAS01 baud, a bad argument) is refused before it
+/// sends CAS12; `gps nmea off|on` CAS03 (all off, stock's on); `gps standby N quiet` NMEA off then CAS12; anything else (another CAS number, CAS00 save, CAS01 baud, a bad argument) is refused before it
 /// reaches the firmware. The query reads (allowed for an unapproved Bluetooth device, TERM-25), standby writes.
 #[test]
 fn terminal_gps_casic() {
     let mut r = Rig::main();
     r.cmd("gps query");
-    assert_eq!(r.serve(4, regs), vec![DebugReq::Gps { id: 6, arg: 0 }]);
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Gps { id: 6, arg: 0, quiet: false }]);
     let raw = r.raw();
     assert!(raw.contains("sent $PCAS06,0*1B CR LF"), "{raw}");
     assert!(raw.contains("answer: $GPTXT,01,01,02,SW=URANUS5,V5.3.0.0*1D"), "{raw}");
     r.send(b"\r");
     r.cmd("gps standby 60");
     let data = [0u8; ferrite_core::msg::GGA_MAX];
-    assert_eq!(r.serve(4, |_| DebugAns::GpsSent { data, n: 0 }), vec![DebugReq::Gps { id: 12, arg: 60 }]);
+    assert_eq!(r.serve(4, |_| DebugAns::GpsSent { data, n: 0 }), vec![DebugReq::Gps { id: 12, arg: 60, quiet: false }]);
     assert!(r.raw().contains("sent $PCAS12,60*28 CR LF"), "{}", r.raw());
-    for bad in ["gps query 3", "gps standby 0", "gps standby 70000", "gps baud 9600", "gps query 0 1"] {
+    // TERM-36: NMEA off and stock's on (CAS03), and the quiet standby (NMEA off, then CAS12).
+    for (c, want, shown) in [
+        ("gps nmea off", DebugReq::Gps { id: 3, arg: 0, quiet: false }, "sent $PCAS03,0,0,0,0,0,0,0,0*02 CR LF"),
+        ("gps nmea on", DebugReq::Gps { id: 3, arg: 1, quiet: false }, "sent $PCAS03,5,0,0,0,0,3,7,60*35 CR LF"),
+        ("gps standby 40 quiet", DebugReq::Gps { id: 12, arg: 40, quiet: true }, "sent $PCAS03,0,0,0,0,0,0,0,0*02 CR LF, 100 ms later $PCAS12,40*2A CR LF"),
+    ] {
+        r.send(b"\r");
+        r.cmd(c);
+        assert_eq!(r.serve(4, |_| DebugAns::GpsSent { data, n: 0 }), vec![want], "{c}");
+        assert!(r.raw().contains(shown), "{c}: {}", r.raw());
+        assert!(super::cmd::writes(c.as_bytes()), "{c}");
+    }
+    for bad in ["gps query 3", "gps standby 0", "gps standby 70000", "gps baud 9600", "gps query 0 1", "gps nmea", "gps nmea 1", "gps nmea off on", "gps standby 40 loud", "gps standby 40 quiet 1", "gps query 1 quiet"] {
         r.send(b"\r");
         r.cmd(bad);
         assert!(r.serve(4, regs).is_empty(), "{bad}");

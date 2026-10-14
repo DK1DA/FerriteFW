@@ -1324,11 +1324,13 @@ fn rx(t: &mut Toks) -> Result<Done, Msg> {
     Ok(Done::Debug(Job::new(Kind::RxBoth(on))))
 }
 
-/// TERM-30, TERM-36: `gps` (the last GGA), `gps query [0|1|2|4|6]` (CAS06, the module's answer), `gps standby N`
-/// (CAS12 for N s): nothing else goes to the module ([`ferrite_core::gpspower::casic_refused`]).
+/// TERM-30, TERM-36: `gps` (the last GGA), `gps query [0|1|2|4|6]` (CAS06, the module's answer), `gps nmea off`
+/// (CAS03, all NMEA off) and `gps nmea on` (stock's CAS03), `gps standby N [quiet]` (CAS12 for N s; quiet: NMEA off
+/// first, not on after): nothing else goes to the module ([`ferrite_core::gpspower::casic_refused`]).
 fn gps(t: &mut Toks) -> Result<Done, Msg> {
-    use ferrite_core::gpspower::{casic_refused, CAS_QUERY, CAS_STANDBY};
-    const USAGE: &str = "gps, gps query [0|1|2|4|6] (CAS06), gps standby N (CAS12, 1-65535 s)";
+    use ferrite_core::gpspower::{casic_refused, CAS_NMEA, CAS_QUERY, CAS_STANDBY};
+    const USAGE: &str = "gps, gps query [0|1|2|4|6] (CAS06), gps nmea off|on (CAS03), gps standby N [quiet] (CAS12, 1-65535 s)";
+    let mut quiet = false;
     let (id, arg) = match t.next()? {
         None => return Ok(Done::Debug(Job::new(Kind::Gga))),
         Some(Tok::Word(w)) if same(w, b"query") => match t.next()? {
@@ -1336,10 +1338,23 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
             Some(Tok::Word(n)) => (CAS_QUERY, number(n).filter(|&n| n <= 9).ok_or_else(|| msg!("{}", USAGE))? as u16),
             _ => return Err(msg!("{}", USAGE)),
         },
-        Some(Tok::Word(w)) if same(w, b"standby") => match t.next()? {
-            Some(Tok::Word(n)) => (CAS_STANDBY, number(n).filter(|&n| n <= 65535).ok_or_else(|| msg!("{}", USAGE))? as u16),
+        Some(Tok::Word(w)) if same(w, b"nmea") => match t.next()? {
+            Some(Tok::Word(o)) if same(o, b"off") => (CAS_NMEA, 0),
+            Some(Tok::Word(o)) if same(o, b"on") => (CAS_NMEA, 1),
             _ => return Err(msg!("{}", USAGE)),
         },
+        Some(Tok::Word(w)) if same(w, b"standby") => {
+            let n = match t.next()? {
+                Some(Tok::Word(n)) => number(n).filter(|&n| n <= 65535).ok_or_else(|| msg!("{}", USAGE))? as u16,
+                _ => return Err(msg!("{}", USAGE)),
+            };
+            match t.next()? {
+                None => {}
+                Some(Tok::Word(q)) if same(q, b"quiet") => quiet = true,
+                _ => return Err(msg!("{}", USAGE)),
+            }
+            (CAS_STANDBY, n)
+        }
         _ => return Err(msg!("{}", USAGE)),
     };
     if t.next()?.is_some() {
@@ -1348,7 +1363,7 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
     if let Some(why) = casic_refused(id, arg) {
         return Err(msg!("refused: {}", why));
     }
-    Ok(Done::Debug(Job::new(Kind::Gps { id, arg })))
+    Ok(Done::Debug(Job::new(Kind::Gps { id, arg, quiet })))
 }
 
 /// TERM-27: `bt AT+VERS?`, one read-only query to the Bluetooth module.
@@ -1539,7 +1554,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 38] = [
+const HELP: [&str; 40] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
@@ -1571,7 +1586,9 @@ const HELP: [&str; 38] = [
     "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
     "  gps                    the GPS module's last GGA sentence, its age and heights",
     "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)",
+    "  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: stock's CAS03",
     "  gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)",
+    "  gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s",
     "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",
     "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal",
     "                         at that % on the next PTT key-up until release (tx builds)",

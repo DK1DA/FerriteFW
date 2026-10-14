@@ -73,10 +73,10 @@ pub static ACCESSORY: AtomicU8 = AtomicU8::new(ferrite_core::acc::CHANGING); // 
 pub static GGA: embassy_sync::blocking_mutex::Mutex<M, core::cell::RefCell<GgaCopy>> =
     embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(GgaCopy { data: [0; GGA_MAX], n: 0, at_ms: 0 }));
 
-/// TERM-36: a CASIC sentence for the GPS task to send (`$PCAS<id>,<arg>`, already passed by
+/// TERM-36: a CASIC sentence for the GPS task to send (`$PCAS<id>,<arg>` and the quiet flag, already passed by
 /// `ferrite_core::gpspower::casic_refused`), from the UI task's terminal; and the GPS task's answer, which the UI task
 /// hands to the terminal.
-pub static GPS_SEND: Signal<M, (u8, u16)> = Signal::new();
+pub static GPS_SEND: Signal<M, (u8, u16, bool)> = Signal::new();
 pub static GPS_ANS: Signal<M, ferrite_core::msg::DebugAns> = Signal::new();
 
 /// [`GGA`]'s contents.

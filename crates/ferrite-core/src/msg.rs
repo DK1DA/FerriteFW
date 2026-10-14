@@ -411,8 +411,9 @@ pub enum DebugReq {
     /// only asked. The Radio task of a receive-only build refuses it.
     TxTest(crate::txtest::Ask),
     /// TERM-36 (a bench test): a CASIC sentence to the GPS module, `$PCAS<id>,<arg>`, which
-    /// [`crate::gpspower::casic_refused`] has passed (CAS06 queries, CAS12 standby); the GPS task sends it.
-    Gps { id: u8, arg: u16 },
+    /// [`crate::gpspower::casic_refused`] has passed (CAS03 NMEA off or stock's on, CAS06 queries, CAS12 standby);
+    /// the GPS task sends it ([`crate::gpspower::GpsBench`]). `quiet`: a standby with NMEA off first and not on after.
+    Gps { id: u8, arg: u16, quiet: bool },
 }
 
 /// The longest GGA sentence [`DebugAns::Gga`] carries: NMEA's 82 characters less CR LF.

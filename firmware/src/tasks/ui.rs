@@ -442,7 +442,7 @@ pub async fn task() {
                     ferrite_core::msg::DebugReq::Mem { .. } => ports.debug_answer(crate::debug::mem(r)),
                     ferrite_core::msg::DebugReq::Gga => ports.debug_answer(crate::debug::gga()),
                     // TERM-36: the GPS task sends it and answers through GPS_ANS (checked again there).
-                    ferrite_core::msg::DebugReq::Gps { id, arg } => crate::chan::GPS_SEND.signal((id, arg)),
+                    ferrite_core::msg::DebugReq::Gps { id, arg, quiet } => crate::chan::GPS_SEND.signal((id, arg, quiet)),
                     ferrite_core::msg::DebugReq::Bt { text, n } => {
                         let forced = !app.settings().bt;
                         bt_q = Some(BtQuery { text, n, forced, sent: false, at: Instant::now(), buf: [0; 48], got: 0 });

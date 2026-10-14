@@ -304,9 +304,18 @@ impl GpsPhase {
     }
 }
 
-/// A CASIC command with one number (CASIC protocol 2.7): `$PCASnn,arg*CS` and CR LF into `out`, the checksum the
-/// XOR of everything between `$` and `*`. Returns the length (at most 18).
-pub fn casic(id: u8, arg: u16, out: &mut [u8; 18]) -> usize {
+/// The longest CASIC sentence sent, CR LF included ([`NMEA_STOCK`], 29 bytes).
+pub const CASIC_MAX: usize = 32;
+
+/// A CASIC command (CASIC protocol 2.7) and CR LF into `out`, the checksum the XOR of everything between `$` and `*`:
+/// `$PCASnn,arg*CS` for one number, or for [`CAS_NMEA`] one of the two fixed sentences (`arg` 0 [`NMEA_OFF`], else
+/// [`NMEA_STOCK`]). Returns the length. Only what [`casic_refused`] passed is ever sent.
+pub fn casic(id: u8, arg: u16, out: &mut [u8; CASIC_MAX]) -> usize {
+    if id == CAS_NMEA {
+        let s = if arg == 0 { NMEA_OFF } else { NMEA_STOCK };
+        out[..s.len()].copy_from_slice(s);
+        return s.len();
+    }
     out[..5].copy_from_slice(b"$PCAS");
     (out[5], out[6], out[7]) = (b'0' + id / 10 % 10, b'0' + id % 10, b',');
     let mut n = 8;
@@ -328,17 +337,157 @@ pub const CAS_STANDBY: u8 = 12;
 /// The product information query (CAS06, 2.7.7): 0 firmware version, 1 hardware model and serial, 2 working mode,
 /// 4 GNSS signals, 6 chip; the module answers with a TXT sentence.
 pub const CAS_QUERY: u8 = 6;
+/// The NMEA output command (CAS03, 2.7.4: `nGGA,nGLL,nGSA,nGSV,nRMC,nVTG,nZDA,nANT,...`, each 0-9 = every n-th
+/// fix, 0 none, empty kept). The terminal sends one of two fixed sentences, both RAM only (no CAS00, so the
+/// module's flash keeps its own; a power cycle restores it). Arg 0 is [`NMEA_OFF`], 1 [`NMEA_STOCK`].
+pub const CAS_NMEA: u8 = 3;
+/// TERM-36: every NMEA sentence off (the eight fields stock names, GGA to ANT; the rest left as they are).
+/// Other AT6558 users found the chip acts on CASIC commands reliably only with its NMEA output off.
+pub const NMEA_OFF: &[u8] = b"$PCAS03,0,0,0,0,0,0,0,0*02\r\n";
+/// TERM-36: stock's own CAS03, exactly as V0.27 sends it at GPS power-up and after each TXT (0x0800CDE0: the
+/// text at 0x0800CE46, its checksum and CR LF added there). Read as CAS03 it asks GGA every 5th fix, VTG every
+/// 3rd, ZDA every 7th, ANT "60" (out of the spec's 0-9) and GLL, GSA, GSV, RMC off; a module that acted on all of
+/// it would drop the RMC and GSV that Ferrite reads. The bench (GPS-31) says what this module does with it.
+pub const NMEA_STOCK: &[u8] = b"$PCAS03,5,0,0,0,0,3,7,60*35\r\n";
 
-/// What may be sent to the module (TERM-36): CAS06 queries (0, 1, 2, 4, 6) and CAS12 standby (1-65535 s), nothing
-/// else. Never CAS00 (saves the configuration to the module's flash) or CAS01 (its baud rate: a wrong one leaves
-/// the GPS silent), nor any other setting.
+/// What may be sent to the module (TERM-36): CAS03 NMEA off or stock's on, CAS06 queries (0, 1, 2, 4, 6) and
+/// CAS12 standby (1-65535 s), nothing else. Never CAS00 (saves the configuration to the module's flash) or CAS01
+/// (its baud rate: a wrong one leaves the GPS silent), nor any other setting.
 pub fn casic_refused(id: u8, arg: u16) -> Option<&'static str> {
     match (id, arg) {
+        (CAS_NMEA, 0 | 1) => None,
+        (CAS_NMEA, _) => Some("CAS03 is only NMEA off (0) or stock's on (1)"),
         (CAS_QUERY, 0 | 1 | 2 | 4 | 6) => None,
         (CAS_QUERY, _) => Some("CAS06 takes 0, 1, 2, 4 or 6"),
         (CAS_STANDBY, 1..) => None,
         (CAS_STANDBY, _) => Some("standby needs 1 to 65535 s"),
-        _ => Some("only CAS06 queries and CAS12 standby go to the module"),
+        _ => Some("only CAS03 NMEA off/on, CAS06 queries and CAS12 standby go to the module"),
+    }
+}
+
+/// A quiet standby (TERM-36): the CAS12 goes this long after NMEA off.
+pub const QUIET_GAP_MS: u32 = 100;
+/// A quiet standby: stock's NMEA on goes this long after the standby's end at the latest.
+pub const QUIET_RESTORE_MS: u32 = 3_000;
+
+/// What follows a bench standby's end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum After {
+    /// Back to the power manager.
+    Idle,
+    /// NMEA stays off (a standby sent after `gps nmea off`).
+    Quiet,
+    /// A quiet standby: stock's NMEA on once NMEA comes back, or [`QUIET_RESTORE_MS`] after the end.
+    Restore,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Bench {
+    #[default]
+    Idle,
+    /// NMEA off (`gps nmea off`) until `gps nmea on` or a power off.
+    Quiet,
+    /// A quiet standby: NMEA off went at `at`, the CAS12 for `n` s goes [`QUIET_GAP_MS`] later.
+    Pending { at: u32, n: u16 },
+    /// A bench standby sent at `at`, its end at `until`; `heard` once a sentence came [`SETTLE_MS`] or more in.
+    Standby { at: u32, until: u32, after: After, heard: bool },
+}
+
+/// The terminal's GPS bench test (TERM-36, GPS-31): from `gps nmea off` or a `gps standby` until NMEA is on again
+/// and the standby over, the power manager is held (nothing of its goes to the module, no power cycle) and no other
+/// terminal sentence is let through during a standby. Pure logic: the GPS task sends what it returns.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GpsBench {
+    st: Bench,
+}
+
+impl GpsBench {
+    pub const fn new() -> Self {
+        GpsBench { st: Bench::Idle }
+    }
+
+    /// A terminal command at `now` ([`casic_refused`] passed it): the sentence to send now, or why not. `quiet`
+    /// (CAS12 only): NMEA off now, the CAS12 [`QUIET_GAP_MS`] later ([`GpsBench::step`]), no NMEA on after it.
+    #[inline(never)] // in .slow_text (memory.x)
+    pub fn command(&mut self, id: u8, arg: u16, quiet: bool, now: u32) -> Result<(u8, u16), &'static str> {
+        if let Some(why) = casic_refused(id, arg) {
+            return Err(why);
+        }
+        if quiet && id != CAS_STANDBY {
+            return Err("only a standby is quiet");
+        }
+        if matches!(self.st, Bench::Pending { .. } | Bench::Standby { .. }) {
+            return Err("a bench standby is running: nothing else goes to the module until it ends");
+        }
+        match (id, arg) {
+            (CAS_NMEA, 0) => self.st = Bench::Quiet,
+            (CAS_NMEA, _) => self.st = Bench::Idle,
+            (CAS_STANDBY, n) if quiet => {
+                self.st = Bench::Pending { at: now, n };
+                return Ok((CAS_NMEA, 0));
+            }
+            (CAS_STANDBY, n) => {
+                let after = if self.st == Bench::Quiet { After::Quiet } else { After::Idle };
+                self.st = Bench::Standby { at: now, until: now.wrapping_add(n as u32 * 1000), after, heard: false };
+            }
+            _ => {}
+        }
+        Ok((id, arg))
+    }
+
+    /// One look at `now` (not while keyed: PB10 is held low then): a quiet standby's CAS12, or its NMEA on at the
+    /// latest [`QUIET_RESTORE_MS`] after its end.
+    #[inline(never)] // in .slow_text (memory.x)
+    pub fn step(&mut self, now: u32) -> Option<(u8, u16)> {
+        match self.st {
+            Bench::Pending { at, n } if now.wrapping_sub(at) >= QUIET_GAP_MS => {
+                self.st = Bench::Standby { at: now, until: now.wrapping_add(n as u32 * 1000), after: After::Restore, heard: false };
+                Some((CAS_STANDBY, n))
+            }
+            Bench::Standby { until, after: After::Restore, .. } if reached(now, until.wrapping_add(QUIET_RESTORE_MS)) => {
+                self.st = Bench::Idle;
+                Some((CAS_NMEA, 1))
+            }
+            Bench::Standby { until, after, .. } if after != After::Restore && reached(now, until) => {
+                self.st = if after == After::Quiet { Bench::Quiet } else { Bench::Idle };
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// A sentence came from the module at `now`. The first [`SETTLE_MS`] or more into a bench standby: its seconds
+    /// since the CAS12 (for the cable log), and for a quiet standby stock's NMEA on to send now (the module woke,
+    /// or never slept).
+    #[inline(never)] // in .slow_text (memory.x)
+    pub fn heard(&mut self, now: u32) -> (Option<u32>, Option<(u8, u16)>) {
+        match self.st {
+            Bench::Standby { at, until, after, heard } if now.wrapping_sub(at) >= SETTLE_MS => {
+                let first = (!heard).then_some(now.wrapping_sub(at) / 1000);
+                if after == After::Restore {
+                    self.st = Bench::Idle;
+                    return (first, Some((CAS_NMEA, 1)));
+                }
+                self.st = Bench::Standby { at, until, after, heard: true };
+                (first, None)
+            }
+            _ => (None, None),
+        }
+    }
+
+    /// The module lost power (GPS off, around a signal): its RAM settings are gone, the test with them.
+    pub fn off(&mut self) {
+        self.st = Bench::Idle;
+    }
+
+    /// The power manager is held (a bench test is running).
+    pub fn holds(&self) -> bool {
+        self.st != Bench::Idle
+    }
+
+    /// A bench standby (or a quiet one's gap) is running: nothing else may go to the module.
+    pub fn in_standby(&self) -> bool {
+        matches!(self.st, Bench::Pending { .. } | Bench::Standby { .. })
     }
 }
 
@@ -371,7 +520,7 @@ mod tests {
     use super::*;
 
     fn cmd(id: u8, arg: u16) -> std::string::String {
-        let mut b = [0u8; 18];
+        let mut b = [0u8; CASIC_MAX];
         let n = casic(id, arg, &mut b);
         assert!(b[..n].ends_with(b"\r\n"));
         std::string::String::from_utf8(b[..n - 2].to_vec()).unwrap()
@@ -624,10 +773,10 @@ mod tests {
         assert_eq!(casic_refused(CAS_STANDBY, 60), None);
         assert_eq!(casic_refused(CAS_STANDBY, 65535), None);
         assert!(casic_refused(CAS_STANDBY, 0).is_some());
-        for id in [0, 1, 2, 3, 4, 5, 10, 11, 15, 20] {
+        for id in [0, 1, 2, 4, 5, 10, 11, 15, 20] {
             assert!(casic_refused(id, 0).is_some() && casic_refused(id, 9600).is_some(), "CAS{id:02}");
         }
-        let mut b = [0u8; 18];
+        let mut b = [0u8; CASIC_MAX];
         let n = casic(CAS_STANDBY, 60, &mut b);
         assert_eq!(&b[..n], b"$PCAS12,60*28\r\n", "the exact bytes on the wire, CR LF last");
         let mut o = [0u8; 40];
@@ -635,6 +784,102 @@ mod tests {
         assert_eq!(&o[..k], b"$PCAS12,60*28<CR><LF>");
         let k = shown(&[b'a', 0], &mut o);
         assert_eq!(&o[..k], b"a<00>");
+    }
+
+    /// TERM-36: NMEA off and stock's on are the exact bytes, each checksum the XOR between `$` and `*` (checked
+    /// against the spec's own CAS03 example, 2.7.4, `*02`), CR LF last; CAS03 takes only 0 (off) and 1 (stock's).
+    #[test]
+    fn nmea_off_and_stocks_on() {
+        let xor = |s: &[u8]| {
+            let star = s.iter().position(|&c| c == b'*').unwrap();
+            let cs = s[1..star].iter().fold(0u8, |a, &c| a ^ c);
+            std::format!("{cs:02X}").into_bytes() == s[star + 1..star + 3]
+        };
+        assert!(xor(b"$PCAS03,1,1,1,1,1,1,1,1,0,1,0,0,1,0*02"), "the spec's example");
+        let mut b = [0u8; CASIC_MAX];
+        let n = casic(CAS_NMEA, 0, &mut b);
+        assert_eq!(&b[..n], b"$PCAS03,0,0,0,0,0,0,0,0*02\r\n");
+        assert!(xor(&b[..n]));
+        let n = casic(CAS_NMEA, 1, &mut b);
+        assert_eq!(&b[..n], b"$PCAS03,5,0,0,0,0,3,7,60*35\r\n", "stock V0.27's (0x0800CDE0)");
+        assert!(xor(&b[..n]));
+        assert!(NMEA_OFF.len() <= CASIC_MAX && NMEA_STOCK.len() <= CASIC_MAX);
+        assert_eq!(casic_refused(CAS_NMEA, 0), None);
+        assert_eq!(casic_refused(CAS_NMEA, 1), None);
+        for a in [2, 9, 60, 9600] {
+            assert!(casic_refused(CAS_NMEA, a).is_some(), "CAS03 {a}");
+        }
+        // Never a save (CAS00), a baud rate (CAS01), nor any other setting, whatever the argument.
+        for id in [0, 1, 2, 4, 5, 7, 8, 9, 10, 11, 13, 20, 99] {
+            for a in [0, 1, 3, 9600, 65535] {
+                assert!(casic_refused(id, a).is_some(), "CAS{id:02},{a}");
+            }
+        }
+    }
+
+    /// TERM-36: `gps nmea off` holds the manager until `gps nmea on`; a standby sent then keeps NMEA off after its
+    /// end; nothing else goes to the module during a standby.
+    #[test]
+    fn bench_nmea_off_standby_on() {
+        let mut b = GpsBench::new();
+        assert!(!b.holds());
+        assert_eq!(b.command(CAS_NMEA, 0, false, 1000), Ok((CAS_NMEA, 0)));
+        assert!(b.holds() && !b.in_standby());
+        assert_eq!(b.command(CAS_QUERY, 1, false, 1500), Ok((CAS_QUERY, 1)), "a query while quiet");
+        assert_eq!(b.command(CAS_STANDBY, 60, false, 2000), Ok((CAS_STANDBY, 60)));
+        assert!(b.in_standby());
+        for (id, a) in [(CAS_NMEA, 1), (CAS_QUERY, 0), (CAS_STANDBY, 10)] {
+            assert!(b.command(id, a, false, 30_000).is_err(), "CAS{id:02} during the standby");
+        }
+        assert_eq!(b.heard(3000), (None, None), "settling");
+        assert_eq!(b.heard(5000), (Some(3), None), "NMEA 3 s in: logged once");
+        assert_eq!(b.heard(6000), (None, None));
+        assert_eq!(b.step(61_999), None);
+        assert!(b.in_standby());
+        assert_eq!(b.step(62_000), None, "the end: NMEA stays off");
+        assert!(b.holds() && !b.in_standby());
+        assert_eq!(b.command(CAS_NMEA, 1, false, 70_000), Ok((CAS_NMEA, 1)));
+        assert!(!b.holds());
+        // A plain standby: held to its end, then back to the manager.
+        assert_eq!(b.command(CAS_STANDBY, 10, false, 80_000), Ok((CAS_STANDBY, 10)));
+        assert!(b.holds());
+        assert_eq!(b.step(90_000), None);
+        assert!(!b.holds());
+        // Refusals: the allow-list, and quiet only with a standby.
+        assert!(b.command(1, 9600, false, 0).is_err());
+        assert!(b.command(0, 0, false, 0).is_err());
+        assert!(b.command(CAS_QUERY, 0, true, 0).is_err());
+        assert!(b.command(CAS_NMEA, 0, true, 0).is_err());
+        assert!(!b.holds());
+    }
+
+    /// TERM-36: `gps standby N quiet`: NMEA off, the CAS12 100 ms later, no NMEA on after it; stock's NMEA on once
+    /// NMEA comes back, or N + 3 s after the CAS12; a power off ends the test.
+    #[test]
+    fn bench_quiet_standby() {
+        let mut b = GpsBench::new();
+        assert_eq!(b.command(CAS_STANDBY, 40, true, 1000), Ok((CAS_NMEA, 0)), "NMEA off first");
+        assert!(b.in_standby());
+        assert_eq!(b.step(1050), None);
+        assert!(b.command(CAS_NMEA, 1, false, 1050).is_err(), "nothing else in the gap");
+        assert_eq!(b.step(1100), Some((CAS_STANDBY, 40)));
+        assert_eq!(b.heard(1500), (None, None), "a sentence already on its way");
+        assert_eq!(b.step(41_100), None, "its end: no NMEA on yet");
+        assert_eq!(b.step(44_099), None);
+        assert_eq!(b.step(44_100), Some((CAS_NMEA, 1)), "N + 3 s");
+        assert!(!b.holds());
+        assert_eq!(b.step(50_000), None, "once");
+        // NMEA back before that (the module woke with its own settings): NMEA on at once.
+        assert_eq!(b.command(CAS_STANDBY, 40, true, 0), Ok((CAS_NMEA, 0)));
+        assert_eq!(b.step(100), Some((CAS_STANDBY, 40)));
+        assert_eq!(b.heard(40_500), (Some(40), Some((CAS_NMEA, 1))));
+        assert!(!b.holds());
+        // Power off: the module forgets, so does the test.
+        assert_eq!(b.command(CAS_STANDBY, 40, true, 0), Ok((CAS_NMEA, 0)));
+        b.off();
+        assert!(!b.holds());
+        assert_eq!(b.step(100), None);
+        assert!(core::mem::size_of::<GpsBench>() <= 16);
     }
 
     /// GPS off: PA8 off, and on again it is running.

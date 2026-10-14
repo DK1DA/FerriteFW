@@ -59,7 +59,7 @@ impl FakeGps {
             }
         }
         if let Some(s) = out.standby_s {
-            let mut b = [0u8; 18];
+            let mut b = [0u8; ferrite_core::gpspower::CASIC_MAX];
             let n = casic(CAS_STANDBY, s, &mut b);
             self.log.push((now, String::from_utf8_lossy(&b[..n - 2]).into_owned()));
             (self.awake, self.asleep_until) = (None, Some(now + s as u32 * 1000));
