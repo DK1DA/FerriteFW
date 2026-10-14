@@ -1567,3 +1567,169 @@ fn colour_is_optional() {
     assert!(r.raw().contains("\x1b[0;97;44m"), "the top line in white on blue");
     assert!(r.raw().contains("\x1b[1;36m"), "headings in cyan");
 }
+
+/// The settings plumbing as the menu and the terminal see it, written out in full and compared with
+/// `settings.golden` (TERM-12, TERM-13, MENU-12, MENU-16, MENU-18). The golden file was written before the settings
+/// moved into one table (Oct 13, 2026), so this pins that refactor and any later one to the same behaviour: every
+/// menu path's value and default flag in three states (the sample radio, a changed one, one with out-of-range
+/// stored values), the dump and the changed list, `get` on every path, the knob's steps and # on every path with
+/// what each sends the Radio task, and `set` with a value that isn't one (its "one of" list walks every value).
+/// Bless a deliberate change with FERRITE_BLESS=1.
+#[test]
+fn settings_golden() {
+    use crate::screens::groups::{self, SETTABLE};
+    use std::fmt::Write as _;
+    use std::string::ToString;
+
+    // Every menu path: the nine groups' items and the third-level lists' items.
+    let mut paths: Vec<Vec<u8>> = Vec::new();
+    for g in 1..=9u8 {
+        for i in 1..=groups::items(g, 0).len() as u8 {
+            paths.push(vec![g, i]);
+            for j in 1..=groups::items(g, i).len() as u8 {
+                paths.push(vec![g, i, j]);
+            }
+        }
+    }
+    let strip = |s: &str| {
+        // Escape sequences out, line ends as \n.
+        let mut o = String::new();
+        let mut it = s.chars().peekable();
+        while let Some(c) = it.next() {
+            if c == '\x1b' {
+                if it.peek() == Some(&'[') {
+                    it.next();
+                    for d in it.by_ref() {
+                        if d.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                } else {
+                    it.next();
+                }
+            } else if c != '\r' {
+                o.push(c);
+            }
+        }
+        o
+    };
+    let said = |r: &mut Rig<Sample>, c: &str| {
+        let n = r.vt.raw.len();
+        r.cmd(c);
+        r.poll();
+        strip(&String::from_utf8_lossy(&r.vt.raw[n..]))
+    };
+    let state = |app: &App| std::format!("{:?} aprs {:?}", app.set, app.aprs_cfg());
+    let mut out = String::new();
+    let wired_all = |app: &App, dev: &Device, out: &mut String| {
+        for p in &paths {
+            let mut b = Buf::<24>::new();
+            let w = groups::wired(app, dev, p, &mut b);
+            let _ = writeln!(out, "wired {:?}: {:?} {}", p, w, String::from_utf8_lossy(b.as_bytes()));
+        }
+    };
+    let ptxt = |p: &[u8]| p.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ");
+
+    for pass in 0..3 {
+        let mut r = Rig::main();
+        match pass {
+            1 => {
+                // A changed radio: every settable path stepped a few times, a few fields set directly.
+                for (k, p) in SETTABLE.iter().enumerate() {
+                    for d in [1, 1, -1, (k % 3) as i32 + 1] {
+                        groups::change(&mut r.app, p, d);
+                    }
+                }
+                for &c in b"N0CALL" {
+                    r.app.set.callsign.push(c);
+                }
+                r.app.set.fixed_on = true;
+                r.app.set.same_codes[0] = 12345;
+                r.app.set.pocsag_cap = 1234;
+                r.app.set.pin_len = 4;
+                r.app.set.pin_mode = 1;
+                r.app.set.region = 2;
+            }
+            2 => {
+                // Out-of-range stored values (a record from elsewhere): every u8 setting the menu shows.
+                let s = &mut r.app.set;
+                for v in [
+                    &mut s.tone_level, &mut s.beep_vol, &mut s.vox_level, &mut s.vox_tail, &mut s.dtmf_ms,
+                    &mut s.dtmf_delay, &mut s.scan_resume, &mut s.scan_prio, &mut s.fm_step,
+                    &mut s.fm_sleep, &mut s.scope_bars, &mut s.scope_step, &mut s.scope_dwell, &mut s.scope_trig,
+                    &mut s.backlight, &mut s.wake_on, &mut s.keypad_light, &mut s.leds, &mut s.auto_off,
+                    &mut s.auto_lock, &mut s.tail_mode, &mut s.tail_phase, &mut s.end_tone, &mut s.cw_id,
+                    &mut s.gps_rxtx, &mut s.coord_fmt, &mut s.units, &mut s.theme, &mut s.layout, &mut s.pon,
+                    &mut s.cable_port, &mut s.kiss_port, &mut s.tz,
+                ] {
+                    *v = 250;
+                }
+                s.brightness = 0;
+                s.brightness_night = 99;
+            }
+            _ => {}
+        }
+        while r.app.pop_cmd().is_some() {}
+        let _ = writeln!(out, "== pass {pass}: {}", state(&r.app));
+        wired_all(&r.app, &r.dev, &mut out);
+        let _ = writeln!(out, "-- dump");
+        for l in dump(&r.app, &r.store, &r.dev) {
+            if l.starts_with("ch ") || l.starts_with("zone ") || l.starts_with("preset ") {
+                continue;
+            }
+            let _ = writeln!(out, "{l}");
+        }
+        let _ = writeln!(out, "-- changed");
+        let mut i = 0;
+        let mut l = cmd::Line::new();
+        while cmd::list_line(&r.app, &r.store, &r.dev, cmd::List::Changed, i, &mut l) {
+            let _ = writeln!(out, "{}", String::from_utf8_lossy(l.as_bytes()));
+            i += 1;
+        }
+        let _ = writeln!(out, "-- get");
+        for p in &paths {
+            let s = said(&mut r, &std::format!("get 0 {}", ptxt(p)));
+            let _ = writeln!(out, "{}", s.trim());
+        }
+        let _ = writeln!(out, "-- knob and #");
+        for p in &paths {
+            for d in [1, -1, 2, -2, 3, 0] {
+                let ok = groups::change(&mut r.app, p, d);
+                let mut cmds = Vec::new();
+                while let Some(c) = r.app.pop_cmd() {
+                    cmds.push(c);
+                }
+                let mut b = Buf::<24>::new();
+                let w = groups::wired(&r.app, &r.dev, p, &mut b);
+                let _ = writeln!(out, "change {:?} {d}: {ok} {:?} {} {:?} {:?}", p, w, String::from_utf8_lossy(b.as_bytes()), cmds, r.app.screen());
+            }
+            groups::reset(&mut r.app, p);
+            let mut cmds = Vec::new();
+            while let Some(c) = r.app.pop_cmd() {
+                cmds.push(c);
+            }
+            let _ = writeln!(out, "reset {:?}: {:?} {}", p, cmds, state(&r.app));
+            r.app.go_home();
+        }
+        let _ = writeln!(out, "-- set");
+        for p in SETTABLE.iter() {
+            for v in ["xyzzy", "on", "off", "1", "2", "10", "none"] {
+                let s = said(&mut r, &std::format!("set 0 {} {v}", ptxt(p)));
+                let _ = writeln!(out, "{}", s.trim());
+            }
+        }
+        let _ = writeln!(out, "-- end {}", state(&r.app));
+    }
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/term/settings.golden");
+    if std::env::var("FERRITE_BLESS").is_ok() {
+        std::fs::write(&path, &out).unwrap();
+    }
+    let want = std::fs::read_to_string(&path).unwrap_or_default();
+    if want != out {
+        let new = path.with_extension("golden.new");
+        std::fs::write(&new, &out).unwrap();
+        let line = want.lines().zip(out.lines()).position(|(a, b)| a != b).unwrap_or(0);
+        panic!("settings differ from {} at line {} (written: {})", path.display(), line + 1, new.display());
+    }
+}
