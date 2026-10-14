@@ -161,6 +161,11 @@ impl TxSeq {
             Blocked::Keyed => Refusal::InProgress,
             Blocked::NeedsRelay | Blocked::TooOften => Refusal::RelayMismatch,
         })?;
+        // TX audit F6: a data burst (APRS, KISS: AFSK from DAC1) with the audio stage on, as stock sets PB8 before
+        // its AFSK (0x080091BC); it stays on to the unkey.
+        if r.kind == Kind::Data {
+            out.push(Act::Stage);
+        }
         self.since = Some((now, r.kind));
         self.weight = DUTY_WEIGHT[r.power.min(2) as usize] as u8;
         self.alerted = false;
@@ -189,14 +194,15 @@ impl TxSeq {
         self.unkey(cfg, true, path, now, out);
     }
 
-    /// Unkey (TX-26, TONE-8): end tone (voice, unless cut short) → CW ID when due (voice only; never at a cut)
-    /// → tail elimination → the path machine's unkey.
+    /// Unkey (TX-26, TX-47, TONE-8): end tone (voice, unless cut short) → CW ID when due (voice only; never at a
+    /// cut) → the audio stage on (stock's PB8 at 0x08024D80) → tail elimination inside stock's 400 ms carrier hold,
+    /// or the hold alone (every unkey but a cut: timeout, duty, battery) → the path machine's unkey.
     fn unkey(&mut self, cfg: &Cfg, normal: bool, path: &mut Path, now: u32, out: &mut Steps) {
         self.heat(now);
         let Some((_, kind)) = self.since.take() else { return };
         let voice = kind == Kind::Voice && normal;
         // Crossband (decision 95): stock's RX end first, while still keyed: the mic back and the receive select
-        // off, then the roger and tail, then the carrier held (path::XB_HOLD_MS) before the PA goes to 0.
+        // off, then the roger and tail, then the carrier held (path::UNKEY_HOLD_MS) before the PA goes to 0.
         let xb = path.keyed_xb();
         if xb {
             path.xb_rx_end(out);
@@ -208,10 +214,13 @@ impl TxSeq {
             out.push(Act::CwId);
             self.last_id = Some(now);
         }
+        out.push(Act::Stage);
+        // TX-47 (TX audit F5): stock holds the carrier 400 ms at every unkey (0x08024DD8), the tail inside it. A cut
+        // (timeout, duty limit, battery under load) drops at once: Ferrite's own protections, no carrier added.
         if cfg.tail {
             out.push(Act::TailElim); // inside stock's 400 ms hold (tonegen::TAIL_MS)
-        } else if xb && normal {
-            for _ in 0..crate::path::XB_HOLD_MS / 200 {
+        } else if normal {
+            for _ in 0..crate::path::UNKEY_HOLD_MS / 200 {
                 out.push(Act::Wait(200));
             }
         }
@@ -319,27 +328,53 @@ mod tests {
         assert_eq!(t.key(&r, &mut p, 0, &mut Steps::default()), Err(Refusal::InProgress));
         let mut s = Steps::default();
         t.release(&cfg, &mut p, 5_000, &mut s);
-        assert_eq!(s.as_slice()[..4], [Act::EndTone, Act::CwId, Act::TailElim, Act::PaZero]);
+        assert_eq!(s.as_slice()[..5], [Act::EndTone, Act::CwId, Act::Stage, Act::TailElim, Act::PaZero]);
         // Again within ten minutes: no ID.
         t.key(&r, &mut p, 60_000, &mut Steps::default()).unwrap();
         let mut s = Steps::default();
         t.release(&cfg, &mut p, 65_000, &mut s);
-        assert_eq!(s.as_slice()[..3], [Act::EndTone, Act::TailElim, Act::PaZero]);
+        assert_eq!(s.as_slice()[..4], [Act::EndTone, Act::Stage, Act::TailElim, Act::PaZero]);
         // "On unkey": the ID every time.
         let each = Cfg { cw_each: true, ..cfg };
         t.key(&r, &mut p, 70_000, &mut Steps::default()).unwrap();
         let mut s = Steps::default();
         t.release(&each, &mut p, 75_000, &mut s);
-        assert_eq!(s.as_slice()[..3], [Act::EndTone, Act::CwId, Act::TailElim]);
-        // Ten minutes after the last ID, data: no end tone, no ID.
-        t.key(&Req { kind: Kind::Data, ..r }, &mut p, 700_000, &mut Steps::default()).unwrap();
+        assert_eq!(s.as_slice()[..3], [Act::EndTone, Act::CwId, Act::Stage]);
+        // Ten minutes after the last ID, data: no end tone, no ID; the audio stage on from the key-up (F6).
+        let mut s = Steps::default();
+        t.key(&Req { kind: Kind::Data, ..r }, &mut p, 700_000, &mut s).unwrap();
+        assert_eq!(s.as_slice().last(), Some(&Act::Stage), "after the PA ramp");
         let mut s = Steps::default();
         t.release(&cfg, &mut p, 700_500, &mut s);
-        assert_eq!(s.as_slice()[..2], [Act::TailElim, Act::PaZero]);
+        assert_eq!(s.as_slice()[..3], [Act::Stage, Act::TailElim, Act::PaZero]);
         // Not keyed: release does nothing.
         let mut s = Steps::default();
         t.release(&cfg, &mut p, 701_000, &mut s);
         assert!(s.is_empty());
+    }
+
+    /// TX-47 (TX audit F5): stock's 400 ms carrier hold at every unkey, voice or data, tail or not (the tail plays
+    /// inside it); a cut drops at once.
+    #[test]
+    fn carrier_held_400_ms_at_every_unkey() {
+        let mut t = TxSeq::new();
+        let mut p = rx_on(mhz(146));
+        let r = req(mhz(146) + 52_000);
+        for kind in [Kind::Voice, Kind::Data] {
+            t.key(&Req { kind, ..r }, &mut p, 0, &mut Steps::default()).unwrap();
+            let mut s = Steps::default();
+            t.release(&Cfg::default(), &mut p, 5_000, &mut s);
+            let a = s.as_slice();
+            let zero = a.iter().position(|x| *x == Act::PaZero).unwrap();
+            let held: u32 = a[..zero].iter().map(|x| if let Act::Wait(ms) = x { *ms as u32 } else { 0 }).sum();
+            assert_eq!(held, crate::path::UNKEY_HOLD_MS as u32, "{kind:?}");
+            assert_eq!(a[zero + 1], Act::Wait(crate::path::UNKEY_WAIT_MS), "then the unkey wait (F4)");
+            assert_eq!(a[zero + 2], Act::ChipRx(0), "then the chip out of transmit");
+        }
+        t.key(&r, &mut p, 0, &mut Steps::default()).unwrap();
+        let mut s = Steps::default();
+        t.tick(&Cfg::default(), false, &mut p, 1_000, &mut s);
+        assert!(!s.as_slice().iter().take_while(|x| **x != Act::PaZero).any(|x| matches!(x, Act::Wait(_))), "a cut: no hold");
     }
 
     #[test]
@@ -354,7 +389,7 @@ mod tests {
         assert_eq!(t.tick(&cfg, true, &mut p, 26_000, &mut Steps::default()), None);
         let mut s = Steps::default();
         assert_eq!(t.tick(&cfg, true, &mut p, 30_000, &mut s), Some(Event::Timeout));
-        assert_eq!(s.as_slice()[0], Act::PaZero, "no end tone at a timeout (TONE-11)");
+        assert_eq!(s.as_slice()[..2], [Act::Stage, Act::PaZero], "no end tone at a timeout (TONE-11), no hold (TX-47)");
         assert!(!t.keyed() && p.keyed().is_none());
         assert_eq!(t.key(&r, &mut p, 31_000, &mut Steps::default()), Err(Refusal::ReleasePtt));
         t.release(&cfg, &mut p, 32_000, &mut Steps::default());

@@ -23,7 +23,8 @@ struct Pins {
     chip_tx: [bool; 2],
     muted: bool,
     repeat: bool,
-    /// ms waited since the last chip went back to receive (None: none has yet).
+    /// ms waited since the PA drive last went to 0 at the end of a transmission (None: none has yet): the unkey
+    /// wait (TX-26, TX-28) runs from there.
     since_rx: Option<u32>,
     /// ms waited since the relay last moved.
     since_relay: u32,
@@ -70,7 +71,14 @@ impl Pins {
                         assert_ne!(r.chip(), t.chip(), "{what}: RX and TX selects on one chip");
                     }
                 }
-                Act::PaZero => self.pa = false,
+                Act::PaZero => {
+                    if self.pa || self.chip_tx.contains(&true) {
+                        self.since_rx = Some(0);
+                    }
+                    self.pa = false;
+                }
+                // TX audit F6: the audio stage only while keyed (a data key-up, the unkey).
+                Act::Stage => assert!(keyed && self.chip_tx.contains(&true), "{what}: audio stage set while not keyed"),
                 Act::PaRamp => {
                     let tx = Sel::ALL.iter().find(|s| s.is_tx() && self.sel[**s as usize]).expect("PA ramp without a TX path");
                     assert!(self.chip_tx[tx.chip() as usize], "{what}: PA ramp before the chip transmits");
@@ -92,7 +100,6 @@ impl Pins {
                 Act::ChipRx(n) => {
                     assert!(!self.pa, "{what}: chip off TX with PA drive");
                     self.chip_tx[n as usize] = false;
-                    self.since_rx = Some(0);
                 }
                 Act::Mute(m) => self.muted = m,
                 Act::SiInput(_) | Act::EndTone | Act::CwId | Act::TailElim => {

@@ -16,7 +16,7 @@
 //!   never moves for it. Its audio switching follows stock's exactly (decision 95, `analysis/crossband_repeat.md`
 //!   §4.2 and §5): the repeat audio (PA15 low) [`XB_AUDIO_DELAY_MS`] after the PA is up, back to the mic at the
 //!   receive drop while still keyed, the receive select cleared before the roger and tail, the carrier held
-//!   [`XB_HOLD_MS`], then the PA to 0 and the unkey wait before the chip leaves transmit.
+//!   [`UNKEY_HOLD_MS`], then the PA to 0 and the unkey wait before the chip leaves transmit.
 //! - a bench test (decision 114, SAFE-24): [`Path::set_both`] holds both band receive selects on (VHF RX PB0 and
 //!   UHF RX PE12, the two LNAs), so the watch hop between a VHF and a UHF slot toggles no select. Never the HF
 //!   select, never with the relay energised; every key-up clears both before any TX select, the safe state and
@@ -112,6 +112,10 @@ pub enum Act {
     EndTone,
     CwId,
     TailElim,
+    /// The shared audio stage (PB8) on: stock sets it before an AFSK burst (0x080091BC) and at every unkey
+    /// (0x08024D80), the stage that carries DAC1's injection (TX audit F6). The receive audio decision clears it
+    /// after the unkey, as stock's arbiter does.
+    Stage,
     /// Wait this many ms before the next step.
     Wait(u8),
 }
@@ -123,9 +127,9 @@ pub const UNKEY_WAIT_MS: u8 = 100;
 /// Crossband (decision 95): stock selects the repeat audio at its PTT state 1, 10-20 ms after the TX start that
 /// ramps the PA (0x080248C2-0x080248D8; its 10 ms pass runs that state every other call). The middle of that.
 pub const XB_AUDIO_DELAY_MS: u8 = 15;
-/// Crossband (decision 95): stock keeps the carrier up 400 ms after the roger and tail (+0x07 = 40, 0x08024DCC)
-/// before the PA goes to 0; tail elimination plays inside it.
-pub const XB_HOLD_MS: u16 = 400;
+/// Stock keeps the carrier up 400 ms after the roger at every unkey (+0x07 = 40, unconditional at 0x08024DD8)
+/// before the PA goes to 0; tail elimination plays inside it (TX-47, TX audit F5; crossband: decision 95).
+pub const UNKEY_HOLD_MS: u16 = 400;
 /// SAFE-22: more relay switches than this in [`GUARD_WINDOW_MS`] is a bug.
 pub const GUARD_SWITCHES: usize = 10;
 pub const GUARD_WINDOW_MS: u32 = 60_000;
@@ -528,8 +532,10 @@ impl Path {
         }
     }
 
-    /// Unkey (TX-26), after any end tone, CW ID and tail elimination the sequencer put first: PA 0, the chip back
-    /// to receive, the unkey wait, the TX path clear, the relay back if key-up moved it, the RX path, unmute.
+    /// Unkey (TX-26, TX-47), after any end tone, CW ID, tail elimination and hold the sequencer put first, in stock's
+    /// order (PTT state 4, 0x08024DCC on; TX audit F4): PA 0, the unkey wait (V0.29's 100 ms), the chip out of
+    /// transmit (REG_30 0; receive is the next tune's), the TX path clear, the relay back if key-up moved it, the RX
+    /// path, unmute.
     /// A crossband key-up's (XB-8, decision 95), as stock's PTT state 4 (0x08024DCC on): the mic and the receive
     /// select already handled by [`Path::xb_rx_end`], then PA 0, the unkey wait (V0.29's 100 ms), the chip out of
     /// transmit, the TX path clear.
@@ -545,8 +551,8 @@ impl Path {
             return;
         }
         out.push(Act::PaZero);
-        out.push(Act::ChipRx(tx.chip()));
         out.push(Act::Wait(UNKEY_WAIT_MS));
+        out.push(Act::ChipRx(tx.chip()));
         out.push(Act::Sel(tx, false));
         if let Some(r) = self.restore.take() {
             self.move_relay(r, now, out); // counted, never refused: room was kept at key-up
@@ -832,7 +838,7 @@ mod tests {
         p.unkey(0, &mut s);
         assert_eq!(
             s.as_slice(),
-            [Act::PaZero, Act::ChipRx(0), Act::Wait(100), Act::Sel(Sel::VhfTx, false), Act::Sel(Sel::VhfRx, true), Act::Mute(false)]
+            [Act::PaZero, Act::Wait(100), Act::ChipRx(0), Act::Sel(Sel::VhfTx, false), Act::Sel(Sel::VhfRx, true), Act::Mute(false)]
         );
         assert_eq!(p.rx_now(), Rx::Bk(Sel::VhfRx));
     }

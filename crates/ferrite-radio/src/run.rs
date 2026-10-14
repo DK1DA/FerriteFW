@@ -110,6 +110,7 @@ pub async fn run<H: Hw>(hw: &mut H, steps: &Steps) {
                 }
             }
             Act::Wait(ms) => hw.wait_ms(ms as u32).await,
+            Act::Stage => hw.pin(Pin::Amp(0), true),
             // XB-6, XB-8, decision 95: stock's crossband route at its PTT state 1, PA15 low with PB8 set
             // (0x080248C2-0x080248D8); PA15 high again at the receive drop, still keyed (0x0801F534).
             Act::RepeatAudio(on) => {

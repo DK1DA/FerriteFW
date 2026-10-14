@@ -80,8 +80,9 @@ fn key_up_order_on_the_pins() {
     assert!(hw.at(|e| *e == Ev::Pin(Pin::Amp(0), false)).is_some(), "muted while keyed: the speaker off");
 }
 
-/// TX-26, TONE-8, TX-28: the unkey on the pins: end tone, CW ID and tail elimination while still keyed, then PA
-/// drive 0, the chip back to receive, at least 100 ms, then the TX select clear and the receive path back.
+/// TX-26, TX-47, TONE-8, TX-28: the unkey on the pins in stock's order: end tone, CW ID, the audio stage (PB8) on
+/// and tail elimination while still keyed, then PA drive 0, at least 100 ms, the chip out of transmit, then the
+/// TX select clear and the receive path back (TX audit F4, F6).
 #[test]
 fn unkey_order_on_the_pins() {
     let (mut path, mut seq, mut hw, st) = receiving(VHF);
@@ -99,8 +100,9 @@ fn unkey_order_on_the_pins() {
     let unkey = hw.at(|e| *e == Ev::Unkey(0)).unwrap();
     let tx_off = hw.at(|e| *e == Ev::Pin(Pin::Sel(Sel::VhfTx), false)).unwrap();
     let rx_on = hw.at(|e| *e == Ev::Pin(Pin::Sel(Sel::VhfRx), true)).unwrap();
-    assert!(tone < cw && cw < tail && tail < zero && zero < unkey && unkey < tx_off && tx_off < rx_on, "{:?}", hw.evs());
-    assert!(hw.time(tx_off) - hw.time(zero) >= UNKEY_WAIT_MS as u32, "the unkey wait before the paths change");
+    let stage = hw.at(|e| *e == Ev::Pin(Pin::Amp(0), true)).unwrap();
+    assert!(tone < cw && cw < stage && stage < tail && tail < zero && zero < unkey && unkey < tx_off && tx_off < rx_on, "{:?}", hw.evs());
+    assert!(hw.time(unkey) - hw.time(zero) >= UNKEY_WAIT_MS as u32, "the unkey wait before the chip leaves transmit");
 }
 
 /// TX-7, TX-23 (the read-back before the PA ramp), SAFE-11: a key-up whose read-back fails stops the plan there: no
@@ -199,9 +201,10 @@ fn key_up_across_the_relay() {
     let mut s = Steps::default();
     seq.release(&Cfg::default(), &mut path, 5_000, &mut s);
     go(&mut hw, &s, &st);
+    let zero = hw.at(|e| *e == Ev::Pa(0)).unwrap();
     let unkey = hw.at(|e| *e == Ev::Unkey(1)).unwrap();
     let back = hw.at(|e| *e == Ev::Pin(Pin::Relay, false)).unwrap();
-    assert!(unkey < back && hw.time(back) - hw.time(unkey) >= UNKEY_WAIT_MS as u32, "{:?}", hw.evs());
+    assert!(unkey < back && hw.time(back) - hw.time(zero) >= UNKEY_WAIT_MS as u32, "{:?}", hw.evs());
 }
 
 /// XB-6, XB-7, XB-8 (decision 95: stock's crossband audio switching): the other chip keys with the receiving
