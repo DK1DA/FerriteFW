@@ -19,8 +19,10 @@ impl Radio {
             log(b"ptt released since boot", 0);
         }
         let stuck = self.tx.ptt.stuck(now_ms() as u32);
-        if stuck != self.live.tx.ptt_stuck {
-            self.live.tx.ptt_stuck = stuck;
+        // The high nibble keeps what was stuck since boot, so the UI names it even when released before it looked.
+        let was = self.live.tx.ptt_stuck;
+        self.live.tx.ptt_stuck = ferrite_core::stuck::latch(was, stuck);
+        if stuck != was & ferrite_core::stuck::NOW {
             // "ptt stuck: PTT A + side PTT 5" (the bits last), "ptt stuck: let go 0" (no formatter: this task stays
             // in the fast flash).
             let mut t = [0u8; 36];

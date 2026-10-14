@@ -378,7 +378,8 @@ pub struct TxLive {
     /// VOX hears speech (the tail included): the UI keys the active slot while it is set (VOX-13).
     pub voice: bool,
     /// SAFE-14: the PTT inputs held since boot for over 1 s and not let go (`ferrite_radio::ptt` bits: 1 PTT A,
-    /// 2 PTT B, 4 the side connector's): the UI shows "PTT stuck" with the names while it is set.
+    /// 2 PTT B, 4 the side connector's), and in the high nibble those stuck at some time since boot
+    /// ([`crate::stuck::latch`]): the UI shows "PTT stuck" with the names while held and 2 s after.
     pub ptt_stuck: u8,
 }
 

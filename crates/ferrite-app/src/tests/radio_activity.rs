@@ -1864,21 +1864,60 @@ fn random_use_keeps_modes_in_step() {
 }
 
 /// SAFE-14: a PTT held from boot for over 1 s (the Radio task's `TxLive::ptt_stuck`) shows "PTT stuck" with the
-/// inputs' names, kept up while held, over another toast, and gone as soon as it is let go.
+/// inputs' names as a popup in the middle, kept up while held, over another toast, and 2 s after the release.
 #[test]
 fn ptt_stuck_notice() {
-    use ferrite_core::stuck::{PTT_A, PTT_EXT};
+    use ferrite_core::stuck::{latch, PTT_A, PTT_B, PTT_EXT};
     let mut t = T::new();
-    let shown = |t: &T| t.app.toast.map(|x| (std::string::String::from_utf8_lossy(x.head.as_bytes()).into_owned(), std::string::String::from_utf8_lossy(x.body.as_bytes()).into_owned()));
-    t.live.tx.ptt_stuck = PTT_A | PTT_EXT;
+    let shown = |t: &T| t.app.toast.filter(|x| x.center).map(|x| (std::string::String::from_utf8_lossy(x.head.as_bytes()).into_owned(), std::string::String::from_utf8_lossy(x.body.as_bytes()).into_owned()));
+    t.live.tx.ptt_stuck = latch(0, PTT_A | PTT_EXT);
     t.wait(100);
     assert_eq!(shown(&t), Some(("PTT stuck".into(), "PTT A + side PTT".into())));
     t.wait(10_000);
     assert_eq!(shown(&t).map(|s| s.0), Some("PTT stuck".into()), "kept up while held");
-    t.live.tx.ptt_stuck = PTT_A;
+    t.app.show_toast(b"Other", b"toast", false);
+    t.wait(100);
+    assert_eq!(shown(&t).map(|s| s.0), Some("PTT stuck".into()), "over another toast");
+    t.live.tx.ptt_stuck = latch(t.live.tx.ptt_stuck, PTT_A);
     t.wait(100);
     assert_eq!(shown(&t).map(|s| s.1), Some("PTT A".into()));
-    t.live.tx.ptt_stuck = 0;
+    t.live.tx.ptt_stuck = latch(t.live.tx.ptt_stuck, 0);
+    t.wait(1500);
+    assert!(shown(&t).is_some(), "let go: still up 1.5 s after");
+    t.wait(600);
+    assert!(shown(&t).is_none(), "and gone 2 s after");
+    t.wait(10_000);
+    assert!(shown(&t).is_none(), "once let go, not again");
+    assert!(ferrite_ui::widgets::popup_fits(b"PTT stuck", b"PTT A + PTT B + side PTT"));
+    // Released before the UI first looked: named once, for 2 s.
+    let mut t = T::new();
+    t.live.tx.ptt_stuck = latch(latch(0, PTT_B), 0);
     t.wait(100);
-    assert!(shown(&t).is_none(), "let go: gone");
+    assert_eq!(shown(&t), Some(("PTT stuck".into(), "PTT B".into())));
+    t.wait(2100);
+    assert!(shown(&t).is_none());
+}
+
+/// SAFE-14: booted with PTT A held: home's first draw already has the "PTT stuck" popup on the panel, in the
+/// middle of the screen (the hint bar's toast wasn't seen on the radio, Oct 13, 2026).
+#[test]
+fn ptt_stuck_on_screen_at_boot() {
+    use ferrite_ui::gfx::TOAST;
+    use ferrite_ui::widgets::POPUP_BOX;
+    let mut t = T::new();
+    t.live.tx.ptt_stuck = ferrite_core::stuck::latch(0, ferrite_core::stuck::PTT_A);
+    t.app.tick(t.t, &t.live, &store());
+    assert_eq!(t.app.screen(), Screen::Home);
+    let mut fb = ferrite_ui::fb::FrameBuffer::new();
+    t.render(&mut fb);
+    let (x, y, w, h) = POPUP_BOX;
+    let toast = (x + 8..x + w - 8).step_by(4).flat_map(|px| (y + 4..y + h - 4).step_by(4).map(move |py| (px, py))).filter(|&(px, py)| fb.at(px, py) == TOAST).count();
+    assert!(toast > 200, "the popup's box on the panel: {toast} samples");
+    // Without it, the same spot is home.
+    let mut t = T::new();
+    let mut fb = ferrite_ui::fb::FrameBuffer::new();
+    t.app.tick(t.t, &t.live, &store());
+    t.render(&mut fb);
+    let bare = (x + 8..x + w - 8).step_by(4).flat_map(|px| (y + 4..y + h - 4).step_by(4).map(move |py| (px, py))).filter(|&(px, py)| fb.at(px, py) == TOAST).count();
+    assert!(bare < toast / 2, "{bare}");
 }

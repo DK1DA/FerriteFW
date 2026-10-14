@@ -1,10 +1,21 @@
 //! SAFE-14's stuck PTT notice, shared by the Radio task (which watches the inputs, `ferrite_radio::ptt`) and the UI
 //! (which shows them): the inputs as bits, and their names.
 
-/// The inputs, as bits of `TxLive::ptt_stuck` and `ferrite_radio::ptt`'s masks.
+/// The inputs, as bits of `TxLive::ptt_stuck` (its low nibble: stuck now) and `ferrite_radio::ptt`'s masks.
 pub const PTT_A: u8 = 1;
 pub const PTT_B: u8 = 2;
 pub const PTT_EXT: u8 = 4;
+
+/// `TxLive::ptt_stuck`'s low nibble: the inputs stuck now.
+pub const NOW: u8 = 0x0F;
+/// Its high nibble: the inputs stuck at some time since boot (kept after the release), so the UI can name them even
+/// when they were let go before it first looked.
+pub const EVER_SHIFT: u8 = 4;
+
+/// The next `TxLive::ptt_stuck` from the last and the inputs stuck now.
+pub const fn latch(prev: u8, now: u8) -> u8 {
+    (now & NOW) | ((prev | now << EVER_SHIFT) & !NOW)
+}
 
 /// The stuck inputs' names for the notice and the cable log ("PTT A", "PTT B", "side PTT", joined with " + ").
 pub fn names(mask: u8, out: &mut [u8]) -> usize {
@@ -22,4 +33,23 @@ pub fn names(mask: u8, out: &mut [u8]) -> usize {
         }
     }
     n
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SAFE-14: what was stuck since boot stays in the high nibble after the release; the low nibble follows now.
+    #[test]
+    fn latch_keeps_what_was_stuck() {
+        let v = latch(0, PTT_A);
+        assert_eq!((v & NOW, v >> EVER_SHIFT), (PTT_A, PTT_A));
+        let v = latch(v, 0);
+        assert_eq!((v & NOW, v >> EVER_SHIFT), (0, PTT_A));
+        let v = latch(v, PTT_EXT);
+        assert_eq!((v & NOW, v >> EVER_SHIFT), (PTT_EXT, PTT_A | PTT_EXT));
+        let mut b = [0u8; 28];
+        let n = names(v >> EVER_SHIFT, &mut b);
+        assert_eq!(&b[..n], b"PTT A + side PTT");
+    }
 }

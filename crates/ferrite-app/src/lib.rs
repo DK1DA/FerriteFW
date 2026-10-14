@@ -60,6 +60,8 @@ pub use screens::Screen;
 
 /// Toasts show for 3 s (HOME-9); undo is offered for 5 s (EDIT-4, MENU-22).
 pub const TOAST_MS: u32 = 3000;
+/// SAFE-14: the "PTT stuck" popup stays this long after the release.
+pub const STUCK_AFTER_MS: u32 = 2000;
 /// A hold-digit shortcut's popup (HOME-8).
 pub const POPUP_MS: u32 = 1200;
 pub const UNDO_MS: u32 = 5000;
@@ -292,6 +294,8 @@ pub struct App {
     pub(crate) remote_ended: Option<remote::RemoteEnd>,
     /// The PTT release in progress is a cut (LINK-20: a remote key-up lost), sent as [`RadioCmd::TxCut`].
     pub(crate) tx_cut: bool,
+    /// SAFE-14: the "PTT stuck" popup has shown this power-on.
+    pub(crate) stuck_shown: bool,
     pub(crate) virtual_ptt: bool,
     pub(crate) local_ptt: u8,
     pub(crate) ptt_cut: u8,
@@ -390,6 +394,7 @@ impl App {
             remote: None,
             remote_ended: None,
             tx_cut: false,
+            stuck_shown: false,
             virtual_ptt: false,
             local_ptt: 0,
             ptt_cut: 0,
@@ -1174,25 +1179,30 @@ impl App {
         self.toast = Some(Toast { head: Buf::from(head), body: Buf::from(body), icon, center: false, until: self.now.wrapping_add(TOAST_MS) });
     }
 
-    /// SAFE-14: "PTT stuck" and the inputs held since boot (`stuck` bits, [`ferrite_core::stuck`]), kept up while
-    /// they stay held (over any other toast) and gone as soon as they are let go.
+    /// SAFE-14: "PTT stuck" and the inputs held since boot (`stuck`: [`ferrite_core::stuck`]'s bits, held now in the
+    /// low nibble, stuck since boot in the high), as a popup in the middle of the screen over whatever is up (the
+    /// hint bar's toast was missed on the radio, Oct 13, 2026): kept up while held, over any other toast, and
+    /// [`STUCK_AFTER_MS`] after the release; inputs let go before the UI first looked are named once for as long.
     fn ptt_stuck_notice(&mut self, stuck: u8) {
+        use ferrite_core::stuck::{names, EVER_SHIFT, NOW};
         const HEAD: &[u8] = b"PTT stuck";
-        let ours = self.toast.is_some_and(|t| t.head.as_bytes() == HEAD);
-        if stuck == 0 {
-            if ours {
-                self.toast = None;
-            }
-            return;
-        }
-        let mut b = [0u8; 28];
-        let n = ferrite_core::stuck::names(stuck, &mut b);
-        if ours && self.toast.is_some_and(|t| t.body.as_bytes() == &b[..n]) {
-            if let Some(t) = &mut self.toast {
-                t.until = self.now.wrapping_add(TOAST_MS);
-            }
+        let held = stuck & NOW;
+        let mask = if held != 0 {
+            held
+        } else if !self.stuck_shown && stuck >> EVER_SHIFT != 0 {
+            stuck >> EVER_SHIFT
         } else {
-            self.show_toast(HEAD, &b[..n], true);
+            return; // released: the popup goes at its time (the toast expiry above)
+        };
+        self.stuck_shown = true;
+        let mut b = [0u8; 28];
+        let n = names(mask, &mut b);
+        let ours = self.toast.is_some_and(|t| t.center && t.head.as_bytes() == HEAD && t.body.as_bytes() == &b[..n]);
+        if !ours {
+            self.show_popup(HEAD, &b[..n]);
+        }
+        if let Some(t) = &mut self.toast {
+            t.until = self.now.wrapping_add(STUCK_AFTER_MS);
         }
     }
 

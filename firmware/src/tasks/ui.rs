@@ -205,8 +205,8 @@ pub async fn task() {
         if card || cfg!(feature = "bringup") {
             // Keys while the card shows: any press skips the rest of it; MENU's state still counts (BOOT-14).
             if let Either::First(i) = select(INPUT.receive(), Timer::after_millis(100)).await {
-                skip |= card && matches!(i, Input::Key(keypad::Event::Press(_)));
-                key_seen |= matches!(i, Input::Key(keypad::Event::Press(_)));
+                skip |= card && front_key(&i);
+                key_seen |= front_key(&i);
                 log_input(&i);
                 menu_state(&i, &mut menu_held);
             }
@@ -226,7 +226,7 @@ pub async fn task() {
     // Keys pressed during the boot screen: only whether MENU is still held counts (BOOT-14); the rest are
     // dropped, as a PTT held at power on is (KEY-8).
     while let Ok(i) = INPUT.try_receive() {
-        key_seen |= matches!(i, Input::Key(keypad::Event::Press(_)));
+        key_seen |= front_key(&i);
         log_input(&i);
         menu_state(&i, &mut menu_held);
     }
@@ -613,6 +613,12 @@ fn log_live(l: &LiveAll) {
     }
 }
 
+/// A front-panel key pressed (BOOT-14, the bring-up key test): a PTT held at power on is not one (SAFE-14: it is
+/// ignored until released, and never opens the key test or skips the owner card).
+fn front_key(i: &Input) -> bool {
+    matches!(i, Input::Key(keypad::Event::Press(c)) if !matches!(keys::key(*c), Some(keys::Key::Ptt(_))))
+}
+
 /// Bring-up log: what the boot found.
 fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
     bringup::linef(|b| {
@@ -651,7 +657,11 @@ fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
             });
         });
     }
-    bringup::line(if key_seen { b"key at boot: opening the key test (hold BACK leaves)" } else { b"no key at boot" });
+    bringup::line(match (key_seen, cfg!(feature = "bringup")) {
+        (true, true) => b"key at boot: opening the key test (hold BACK leaves)",
+        (true, false) => b"key at boot",
+        (false, _) => b"no key at boot",
+    });
     bringup::line(b"keys, knob and receiver follow; send any byte for the terminal");
 }
 
