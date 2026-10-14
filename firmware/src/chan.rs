@@ -59,7 +59,7 @@ pub const RF_BUSY_KEYED: u8 = 1;
 /// The MCU's die temperature in tenths of a degree C (chapter 8, SBAR-20), smoothed; `i16::MIN` until read. The
 /// Radio task reads it with its other ADC reads (the preempted group isn't shared between tasks); the UI shows it.
 pub static MCU_TEMP: AtomicI16 = AtomicI16::new(i16::MIN);
-/// The last MCU temperature reading's raw ADC counts, sensor << 16 | VREFINT, for the cable log (SBAR-21).
+/// The last MCU temperature reading's raw ADC counts, sensor << 16 | VREFINT, for the cable log (SBAR-20).
 pub static MCU_TEMP_RAW: AtomicU32 = AtomicU32::new(0);
 /// PWR-20: the latest PA1 battery reading (12-bit, averaged), 0 until the first one; the Radio task reads it.
 pub static BATTERY_RAW: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);

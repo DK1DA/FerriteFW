@@ -1,8 +1,9 @@
 //! The MCU's die temperature for the Status page (chapter 8): the AT32F403A's internal sensor (ADC channel 16)
 //! scaled by VDDA from the internal reference (channel 17), with the datasheet's typical values
 //! (DS_AT32F403A V2.04, Table 55: V25 1.28 V, Avg_Slope -4.26 mV/°C; Temperature = (V25 - VTS) / Avg_Slope + 25).
-//! It reads the die, not the PA. The datasheet puts the line's offset up to 50 °C apart from chip to chip, so the
-//! reading is uncalibrated until 0 9 7 4's one-point offset is set (SBAR-21); informational only.
+//! It reads the die, not the PA, and is shown as read: the datasheet puts the line's offset up to 50 °C apart from
+//! chip to chip, but the die can't be measured on the assembled radio, so there is no calibration (decision 112:
+//! 0 9 7 4's offset, SBAR-21, withdrawn); informational only.
 //!
 //! Fixed Oct 13, 2026: the slope was taken as +4.1 mV/°C (STM32F1's sensor, which falls with temperature, as
 //! hwtest's `fw/src/core/analog.c` still does). The AT32's slope is negative: its sensor's voltage rises with

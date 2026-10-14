@@ -176,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     spare_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, cable_log, spare_flag2, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, mcu_temp_off });
+} bits { show_hidden, chan_only, cable_log, spare_flag2, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -297,6 +297,20 @@ mod tests {
         c.load(&mut SliceSource(&v.0[..10]));
         assert_eq!(c.callsign, a.callsign);
         assert_eq!(c.hf, Settings::DEFAULT.hf);
+    }
+
+    /// Decision 112: the byte that held 0 9 7 4's MCU temperature offset (SBAR-21, withdrawn) stays, last in the
+    /// record, so the record keeps its length; an old offset still in it loads into the spare and changes nothing.
+    #[test]
+    fn old_mcu_temp_offset_is_ignored() {
+        let mut v = Vec2(std::vec::Vec::new());
+        Settings::DEFAULT.save(&mut v);
+        assert_eq!(v.0.last(), Some(&0), "the spare is the last byte");
+        let n = v.0.len();
+        v.0[n - 1] = (-5i8) as u8; // an offset of -5 saved by the firmware that had it
+        let mut b = Settings::DEFAULT;
+        b.load(&mut SliceSource(&v.0));
+        assert_eq!(Settings { spare_temp: 0, ..b }, Settings::DEFAULT);
     }
 
     /// The settings' length, the settings and the slots must fit the store's 1 KB record (ferrite-store

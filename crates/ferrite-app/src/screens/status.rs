@@ -172,22 +172,18 @@ slow_table! {
             b.set(b"Not measured yet");
             SUB
         }),
-        // SBAR-20: the MCU's die temperature (informational: not the PA's), in 0 6 4's units.
-        // SBAR-21: with 0 9 7 4's offset, "(uncalibrated)" until it is set.
-        (slow!("MCU temperature"), |c, b| match c.app.set.mcu_temp(c.dev.mcu_temp) {
+        // SBAR-20: the MCU's die temperature (informational: not the PA's), in 0 6 4's units, as read.
+        (slow!("MCU temperature"), |c, b| match c.dev.mcu_temp {
             None => {
                 b.set(b"Not read yet");
                 SUB
             }
-            Some((t, cal)) => {
-                if c.app.set.units == 1 {
-                    let _ = uwrite!(b, "{}\u{b0}F", t as i32 * 9 / 5 + 32);
-                } else {
-                    let _ = uwrite!(b, "{}\u{b0}C", t);
-                }
-                if !cal {
-                    b.push(b" (uncalibrated)");
-                }
+            Some(t) if c.app.set.units == 1 => {
+                let _ = uwrite!(b, "{}\u{b0}F", t as i32 * 9 / 5 + 32);
+                TEXT
+            }
+            Some(t) => {
+                let _ = uwrite!(b, "{}\u{b0}C", t);
                 TEXT
             }
         }),

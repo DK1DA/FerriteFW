@@ -920,29 +920,3 @@ fn chip_slots_never_move() {
     }
     assert!(SLOT_POWER.0 + SLOT_POWER.1 == 226 && SLOT_SHIFT.0 + SLOT_SHIFT.1 < SLOT_POWER.0);
 }
-
-/// SBAR-21: 0 9 7 4, the MCU temperature's one-point offset: unset until the first step (the reading is
-/// "uncalibrated"), whole degrees within ±40, # back to unset; the Status row adds it.
-#[test]
-fn mcu_temp_offset() {
-    use crate::screens::groups;
-    use crate::settings::{MCU_TEMP_OFF_MAX, MCU_TEMP_UNSET};
-    let mut t = T::new();
-    assert_eq!(t.app.set.mcu_temp_off, MCU_TEMP_UNSET);
-    assert_eq!(t.app.set.mcu_temp(Some(30)), Some((30, false)), "uncalibrated: as read");
-    assert_eq!(t.app.set.mcu_temp(None), None);
-    assert!(groups::change(&mut t.app, &[9, 7, 4], -1));
-    assert_eq!(t.app.set.mcu_temp(Some(30)), Some((29, true)));
-    groups::change(&mut t.app, &[9, 7, 4], 1);
-    assert_eq!(t.app.set.mcu_temp(Some(30)), Some((30, true)), "set to 0 still counts as calibrated");
-    for _ in 0..60 {
-        groups::change(&mut t.app, &[9, 7, 4], 1);
-    }
-    assert_eq!(t.app.set.mcu_temp_off, MCU_TEMP_OFF_MAX);
-    for _ in 0..100 {
-        groups::change(&mut t.app, &[9, 7, 4], -1);
-    }
-    assert_eq!(t.app.set.mcu_temp_off, -MCU_TEMP_OFF_MAX);
-    groups::reset(&mut t.app, &[9, 7, 4]);
-    assert_eq!(t.app.set.mcu_temp_off, MCU_TEMP_UNSET, "# forgets it");
-}

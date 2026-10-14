@@ -274,7 +274,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         (slow!("Calibration"), slow!(""), slow!("The factory calibration, read only.")),
         (slow!("Crystal trim"), slow!("0 ppm"), slow!("Centre a known signal.")),
         (slow!("Battery reading trim"), slow!("+0.00 V"), slow!("Match the reading to a meter.")),
-        (slow!("MCU temp offset"), slow!("Not set"), slow!("Match the MCU reading to a thermometer.")),
     ]),
     ((9, 8), &[
         (slow!("Run setup again"), slow!(""), slow!("The first-boot questions.")),
@@ -707,15 +706,6 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(cal_text(dev.selftest.cal).as_bytes());
             false
         }
-        [9, 7, 4] => {
-            match s.mcu_temp_off {
-                MCU_TEMP_UNSET => b.set(b"Not set"),
-                t => {
-                    let _ = uwrite!(b, "{}{} \u{b0}C", if t < 0 { "-" } else { "+" }, t.unsigned_abs());
-                }
-            }
-            s.mcu_temp_off != MCU_TEMP_UNSET
-        }
         [9, 7, 3] => {
             let t = dev.selftest.battery_trim as i32;
             let _ = uwrite!(b, "{}{}.{} V", if t < 0 { "-" } else { "+" }, t.abs() / 100, ferrite_ui::text::Zero(t.unsigned_abs() % 100, 2));
@@ -779,7 +769,7 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
 
 /// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
 /// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 66] = [
+pub(crate) const SETTABLE: [&[u8]; 65] = [
     &[1, 1],
     &[1, 5],
     &[1, 6, 3],
@@ -845,7 +835,6 @@ pub(crate) const SETTABLE: [&[u8]; 66] = [
     &[9, 2, 4],
     &[9, 2, 5],
     &[9, 2, 6],
-    &[9, 7, 4],
 ];
 
 /// The knob or ◀▶ on a wired setting (MENU-16); false if it isn't changeable here.
@@ -860,11 +849,6 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         // 1-10 s, carrier drop, stop on hit (SCAN-5); the next scan takes it
         [1, 5] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
         [1, 6, 5] => s.scan_prio = cycle(s.scan_prio, d, 6),
-        // SBAR-21: whole degrees, ±40; the first step sets it (from 0), even back to 0
-        [9, 7, 4] => {
-            let t = if s.mcu_temp_off == MCU_TEMP_UNSET { 0 } else { s.mcu_temp_off as i32 };
-            s.mcu_temp_off = (t + d).clamp(-(MCU_TEMP_OFF_MAX as i32), MCU_TEMP_OFF_MAX as i32) as i8;
-        }
         [8, 4, 2] => {
             s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
             app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
@@ -1093,7 +1077,6 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         }
         [7, 4, 3] => s.tx_light = d.tx_light,
         [7, 4, 4] => s.wake_on = d.wake_on,
-        [9, 7, 4] => s.mcu_temp_off = d.mcu_temp_off,
         [7, 4, 5] => s.keypad_light = d.keypad_light,
         [7, 5, 4] => s.arrival_tone = d.arrival_tone,
         [7, 5, 1] => s.key_beep = d.key_beep,
