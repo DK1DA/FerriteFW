@@ -95,9 +95,13 @@ const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone:
 #[cfg(feature = "tx")]
 const XB_TURN_MS: u32 = 50;
 
+/// The speaker as [`speaker`] last set it: a beep reads it to know whether audio is already playing (SND-13).
+static SPEAKER_ON: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 /// Speaker amplifier and the shared audio stage (both roles likely, from stock).
 #[inline(never)]
 fn speaker(on: bool) {
+    SPEAKER_ON.store(on, core::sync::atomic::Ordering::Relaxed);
     pb8(on);
     AMP_EN[1].write(on);
 }
@@ -1175,16 +1179,29 @@ impl Radio {
         // on the radio). The chips keep receiving; the one passing audio is only muted for the beep (REG_47), and
         // the audio decision unmutes it on the next tick. Stock's order: DAC on, 30 ms, amp on; amp off, 30 ms,
         // DAC off.
-        for n in 0..2u8 {
-            if self.has(n) && self.tuned[n as usize].is_some() {
-                self.chip(n).af_out(AfOut::Mute);
+        // SND-13: with audio already playing (a slot heard, the broadcast, HF), key and refusal beeps are skipped:
+        // muting the chip and switching the amp off cut the audio and sounded rough on the radio (Oct 13, 2026).
+        // The alert tone still sounds, over the audio, leaving the chips and the amp as they are.
+        let playing = SPEAKER_ON.load(core::sync::atomic::Ordering::Relaxed);
+        if playing && hz != ferrite_app::ALERT_HZ {
+            return;
+        }
+        if !playing {
+            for n in 0..2u8 {
+                if self.has(n) && self.tuned[n as usize].is_some() {
+                    self.chip(n).af_out(AfOut::Mute);
+                }
             }
         }
         crate::hal::tone::start(hz as u32, self.beep_level);
         Timer::after_millis(30).await;
-        speaker(true);
+        if !playing {
+            speaker(true);
+        }
         Timer::after_millis(ms.min(tonegen::BEEP_MAX_MS) as u64).await;
-        speaker(false);
+        if !playing {
+            speaker(false);
+        }
         Timer::after_millis(30).await;
         crate::hal::tone::stop();
         log(b"beep hz ", hz as u32);
