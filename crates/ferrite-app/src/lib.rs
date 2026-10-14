@@ -1306,6 +1306,30 @@ impl App {
         true
     }
 
+    /// A repeater shift on the active slot (`shift` 10 Hz, signed; 0 simplex), as MENU 5's knob sets one (its
+    /// [`Item::Offset`] path, with the amount given instead of the band's): split ends, the Radio task is told, a
+    /// channel slot's channel saved (EDIT-4). Refused (false, with a toast) when TX would need the band relay in the
+    /// other state from RX (TX-37). The PC's `slot X offset` (TERM-35, LINK-33).
+    pub(crate) fn set_shift(&mut self, shift: i32) -> bool {
+        let a = self.active;
+        let rx = self.slots[a as usize].freq();
+        let mut c = *self.slots[a as usize].cfg();
+        let was_split = c.split;
+        let Some((param, value)) = Item::Offset.set(&mut c, (shift.signum() + 3) % 3, shift.abs()) else { return false };
+        if !ferrite_core::txplan::relay_ok(c.rx_of(rx), c.tx_of(rx)) {
+            self.relay_toast();
+            return false;
+        }
+        self.keep_undo();
+        *self.slots[a as usize].cfg_mut() = c;
+        self.out.push(RadioCmd::SlotParam { slot: a, param, value });
+        if was_split {
+            self.out.push(RadioCmd::SlotParam { slot: a, param: Param::Split, value: 0 });
+        }
+        self.save_channel(a, None);
+        true
+    }
+
     /// TX-37's refusal when a shift or split is set (the full sentence is on the TX refused screen).
     fn relay_toast(&mut self) {
         self.show_toast(b"No split TX", b"needs other relay", false);

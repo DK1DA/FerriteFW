@@ -61,6 +61,46 @@ fn slot_sets_a_vfo_as_the_keypad() {
     assert!(said(&mut t.app, "slot B rxtone D023N txtone off").contains("txtone=off rxtone=D023N"));
 }
 
+/// TERM-35, LINK-33: the offset from the PC, MENU 5's path: a VFO's -0.6 MHz shift cleared with `offset off`
+/// (the Radio task told, no channel written), set to any amount with a sign, and a split's TX frequency; a shift
+/// that needs the other band relay (TX-37), 100 MHz or more, or a split no chip tunes is refused, nothing changed.
+/// On a channel slot it changes the channel and saves it (EDIT-4).
+#[test]
+fn slot_offset_and_split() {
+    let mut t = T::new();
+    let s = said(&mut t.app, "slot B 146.94 offset -0.6");
+    assert!(s.contains("offset=-0.60000"), "{s}");
+    let (c, w) = drain(&mut t.app);
+    assert!(c.contains(&RadioCmd::SlotParam { slot: 1, param: Param::Offset, value: -60_000 }), "{c:?}");
+    assert!(w.is_empty());
+    let s = said(&mut t.app, "slot B offset off");
+    assert!(!s.contains("offset="), "simplex: {s}");
+    assert_eq!(t.app.slot_state(1).offset, 0);
+    assert!(drain(&mut t.app).0.contains(&RadioCmd::SlotParam { slot: 1, param: Param::Offset, value: 0 }));
+    said(&mut t.app, "slot B offset +1.6");
+    assert_eq!((t.app.slot_state(1).offset, t.app.slot_state(1).split), (160_000, false));
+    let s = said(&mut t.app, "slot B split 147.5");
+    assert!(s.contains("tx=147.50000"), "{s}");
+    assert!(drain(&mut t.app).0.contains(&RadioCmd::SlotParam { slot: 1, param: Param::Split, value: (mhz(147) + 50_000) as i32 }));
+    // a shift back ends the split
+    said(&mut t.app, "slot B offset -0.6");
+    let g = t.app.slot_state(1);
+    assert_eq!((g.offset, g.split), (-60_000, false));
+    assert!(drain(&mut t.app).0.contains(&RadioCmd::SlotParam { slot: 1, param: Param::Split, value: 0 }));
+    for bad in ["slot B split 52.0", "slot B offset +300", "slot B split 5.0", "slot B offset +100"] {
+        let r = refused(&mut t.app, bad);
+        assert!(!r.is_empty(), "{bad}");
+        let g = t.app.slot_state(1);
+        assert_eq!((g.offset, g.split), (-60_000, false), "{bad}: unchanged");
+    }
+    // a channel slot: the channel saved
+    t.app.set_channel(0, 0, 0, &store());
+    drain(&mut t.app);
+    said(&mut t.app, "slot A offset +0.6");
+    let (_, w) = drain(&mut t.app);
+    assert!(matches!(w[..], [ChanWrite::Put { ch, .. }] if ch.cfg.offset == 60_000 && !ch.cfg.split), "{w:?}");
+}
+
 /// TERM-35: a channel slot isn't retuned: a frequency needs `vfo` (V/M first); its mode, power and tones change
 /// the channel and save it, as the quick settings do on the radio (EDIT-4).
 #[test]

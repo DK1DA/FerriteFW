@@ -284,6 +284,11 @@ def main():
         port.close()
 
 
+def build_name(rest):
+    """LINK-35: the build byte after HELLO's version or INFO's callsign (absent before Oct 13, 2026)."""
+    return {0: "receive", 1: "tx", 2: "tx-dry"}.get(rest[0], f"unknown {rest[0]}") if rest else "not given"
+
+
 def run(link, a):
     hello = link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + b"ferrite_link.py")
     if not hello[2]:
@@ -319,15 +324,16 @@ def run(link, a):
                   f"{' scanning' if fl & 4 else ''}")
         return 0
     if a.cmd == "hello":
-        ver, _ = text(hello[3:])
-        print(f"protocol {hello[0]}, max payload {hello[1]}, may write {bool(hello[2])}, firmware {ver}")
+        ver, rest = text(hello[3:])
+        print(f"protocol {hello[0]}, max payload {hello[1]}, may write {bool(hello[2])}, firmware {ver}, "
+              f"build {build_name(rest)}")
     elif a.cmd == "info":
         r = link.ok(INFO)
         ver, r = text(r)
         chans, zones, presets, slen, region = struct.unpack("<HBBHB", r[:7])
-        call, _ = text(r[7:])
-        print(f"firmware {ver}; {chans} channels, {zones} zones, {presets} presets; settings {slen} B; "
-              f"region {region}; callsign {call or '-'}")
+        call, rest = text(r[7:])
+        print(f"firmware {ver} ({build_name(rest)}); {chans} channels, {zones} zones, {presets} presets; "
+              f"settings {slen} B; region {region}; callsign {call or '-'}")
     elif a.cmd == "read-settings":
         rec = link.read(SETTINGS, 0)
         open(a.args[0], "wb").write(rec)

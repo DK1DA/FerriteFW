@@ -234,11 +234,11 @@ impl Session {
     fn handle<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, now: u32, ty: u8, p: &[u8], a: &mut [u8; MAX_PAYLOAD]) -> usize {
         let mut o = Out { a, n: 1 };
         let s = match ty {
-            msg::HELLO => self.hello(app, p, &mut o),
+            msg::HELLO => self.hello(app, dev, p, &mut o),
             msg::AUTH => self.auth(app, p),
             // LINK-30: on Bluetooth with the PIN lock on, nothing else until AUTH.
             _ if !self.authorised(app) => Status::NotAuthorised,
-            msg::INFO => info(app, st, &mut o),
+            msg::INFO => info(app, st, dev, &mut o),
             msg::READ => read(app, st, p, &mut o),
             msg::WRITE | msg::DELETE | msg::BEGIN => match self.may_write(app) {
                 Status::Ok => match ty {
@@ -369,10 +369,11 @@ impl Session {
     }
 
     /// `HELLO`: the protocol, the largest payload, and whether this session may go on (0: `AUTH` first).
-    fn hello(&mut self, app: &App, _p: &[u8], o: &mut Out) -> Status {
+    fn hello(&mut self, app: &App, dev: &Device, _p: &[u8], o: &mut Out) -> Status {
         self.hellos = self.hellos.wrapping_add(1);
         o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
+        o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry)]); // LINK-35
         Status::Ok
     }
 
@@ -571,7 +572,14 @@ fn slot<S: ChannelStore>(app: &mut App, st: &S, p: &[u8], o: &mut Out) -> Status
         let Some(v) = take(2) else { return Status::BadArg };
         c.tx_tone = Some(v as u16);
     }
-    if mask & 0x80 != 0 || !f.is_empty() {
+    if mask & m::OFFSET != 0 {
+        let (Some(v), Some(split)) = (take(4), take(1)) else { return Status::BadArg };
+        if split > 1 {
+            return Status::BadArg;
+        }
+        c.offset = Some((v as i32, split == 1));
+    }
+    if !f.is_empty() {
         return Status::BadArg;
     }
     if !c.is_empty() {
@@ -593,13 +601,14 @@ fn slot<S: ChannelStore>(app: &mut App, st: &S, p: &[u8], o: &mut Out) -> Status
     Status::Ok
 }
 
-fn info<S: ChannelStore>(app: &App, st: &S, o: &mut Out) -> Status {
+fn info<S: ChannelStore>(app: &App, st: &S, dev: &Device, o: &mut Out) -> Status {
     o.text(VERSION.as_bytes());
     o.put(&st.count().to_le_bytes());
     o.put(&[st.zones(), st.data().presets()]);
     o.put(&(settings_record(app, &mut Window { b: &mut [], from: 0, n: 0 }) as u16).to_le_bytes());
     o.put(&[app.set.region]);
     o.text(app.set.callsign.as_bytes());
+    o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry)]); // LINK-35
     Status::Ok
 }
 

@@ -16,6 +16,8 @@ struct Pc {
     link: Session,
     now: u32,
     seq: u8,
+    /// What the firmware tells the session (the build, LINK-35).
+    dev: Device,
 }
 
 struct Wire(Vec<u8>);
@@ -33,7 +35,7 @@ impl Pc {
     fn new(trusted: bool) -> Self {
         let mut app = App::new(crate::tests::set(), crate::tests::alert());
         while app.pop_cmd().is_some() {}
-        Pc { app, st: Sample::new(), link: Session::new(trusted), now: 1000, seq: 0 }
+        Pc { app, st: Sample::new(), link: Session::new(trusted), now: 1000, seq: 0, dev: Device::default() }
     }
 
     /// Sends one request, polls until its answer: (status, the rest of the payload).
@@ -45,7 +47,7 @@ impl Pc {
         let mut out = Wire(Vec::new());
         for _ in 0..4 {
             self.now += 10;
-            self.link.poll(&mut self.app, &self.st, &Device::default(), self.now, &mut out);
+            self.link.poll(&mut self.app, &self.st, &self.dev, self.now, &mut out);
             while let Some(wr) = self.app.pop_write() {
                 self.st.apply(wr);
             }
@@ -128,6 +130,24 @@ fn hello_and_info() {
     assert_eq!(pc.link.hellos(), 1);
     assert!(pc.link.active(pc.now));
     assert!(!pc.link.active(pc.now + ACTIVE_MS));
+}
+
+/// LINK-35: HELLO's answer ends with the build after the version, INFO's after the callsign: 0 receive, 1 tx,
+/// 2 tx-dry, from the firmware's features (`Device::tx_built`, `Device::tx_dry`).
+#[test]
+fn hello_and_info_give_the_build() {
+    for (tx, dry, b) in [(false, false, 0u8), (true, false, 1), (true, true, 2)] {
+        let mut pc = Pc::new(true);
+        (pc.dev.tx_built, pc.dev.tx_dry) = (tx, dry);
+        let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
+        let v = 4 + a[3] as usize;
+        assert_eq!(a[v..], [b], "HELLO, tx {tx} dry {dry}");
+        let (_, a) = pc.ask(msg::INFO, &[]);
+        let v = 1 + a[0] as usize + 7;
+        let c = v + 1 + a[v] as usize;
+        assert_eq!(a[c..], [b], "INFO");
+    }
+    assert_eq!(ferrite_core::link::build::name(2), "tx-dry");
 }
 
 /// A damaged frame, an unknown type and a short payload are answered, not dropped.
@@ -587,6 +607,21 @@ fn slot_read_and_set() {
     assert_eq!(pc.ask(msg::SLOT, &[3]).0, Status::BadArg as u8);
     assert_eq!(pc.ask(msg::SLOT, &[0, m::FREQ, 1, 2]).0, Status::BadArg as u8, "a field cut short");
     assert_eq!(pc.ask(msg::SLOT, &[0, 0x80]).0, Status::BadArg as u8);
+    // OFFSET: a -0.6 MHz shift, then simplex (the shift cleared from the PC), then a split; split byte 2 is bad
+    let off = |v: i32, split: u8| {
+        let mut p = std::vec![1, m::OFFSET];
+        p.extend_from_slice(&v.to_le_bytes());
+        p.push(split);
+        p
+    };
+    let (s, a) = pc.ask(msg::SLOT, &off(-60_000, 0));
+    assert_eq!((s, i32::from_le_bytes([a[14], a[15], a[16], a[17]]), a[18] & m::SPLIT), (0, -60_000, 0));
+    let (s, a) = pc.ask(msg::SLOT, &off(0, 0));
+    assert_eq!((s, i32::from_le_bytes([a[14], a[15], a[16], a[17]])), (0, 0), "simplex");
+    let tx = (ferrite_core::freq::mhz(147) + 50_000) as i32;
+    let (s, a) = pc.ask(msg::SLOT, &off(tx, 1));
+    assert_eq!((s, i32::from_le_bytes([a[14], a[15], a[16], a[17]]), a[18] & m::SPLIT), (0, tx, m::SPLIT));
+    assert_eq!(pc.ask(msg::SLOT, &off(0, 2)).0, Status::BadArg as u8);
 }
 
 // ---- CMD and MORE (LINK-34) ----

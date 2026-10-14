@@ -613,6 +613,8 @@ pub struct Device {
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).
     pub tx_built: bool,
+    /// The `tx-dry` build: transmit with the PA drive held at 0 (LINK-35 tells the PC).
+    pub tx_dry: bool,
     pub selftest: SelfTest,
     pub link: LinkLive,
 }

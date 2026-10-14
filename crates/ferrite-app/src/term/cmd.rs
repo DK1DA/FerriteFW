@@ -1539,14 +1539,15 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 37] = [
+const HELP: [&str; 38] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
     "  get 0 7 1   get        one setting; every setting not at its default",
     "  ch 12                  channel 12, as its ch line",
     "  slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,",
-    "                         slot B active: as the keys would (a channel slot: add vfo)",
+    "                         slot B active, slot A offset off|-0.6, slot A split 446.0:",
+    "                         as the keys would (a channel slot: add vfo)",
     "  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone",
     "                         power zone step squelch busy reverse skip aprs rxonly hidden priority",
     "  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel",
@@ -1584,7 +1585,7 @@ const HELP: [&str; 37] = [
 /// `slot`, `slot X`, `slot X [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [active]`: the
 /// slots' working fields, read or changed as the keypad would ([`crate::slotctl`]); a refusal changes nothing.
 fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "slot A|B|C [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [active]";
+    const USAGE: &str = "slot A|B|C [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [offset off|+N|-N] [split TX] [active]";
     let s = match t.next()? {
         None => return Ok(Done::List(List::Slots)),
         Some(Tok::Word(w)) if w.len() == 1 && (b'a'..=b'c').contains(&w[0].to_ascii_lowercase()) => w[0].to_ascii_lowercase() - b'a',
@@ -1608,6 +1609,11 @@ fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Ms
             c.rx_tone = Some(tone(t.word("rxtone: off, 100.0 or D023N")?, "rxtone")?);
         } else if same(w, b"txtone") {
             c.tx_tone = Some(tone(t.word("txtone: off, 100.0 or D023N")?, "txtone")?);
+        } else if same(w, b"offset") {
+            let v = t.word("offset: off, or MHz with a sign, e.g. -0.6")?;
+            c.offset = Some((if same(v, b"off") { 0 } else { offset(v)? }, false));
+        } else if same(w, b"split") {
+            c.offset = Some((freq(t.word("split: the TX frequency in MHz")?, "split")? as i32, true));
         } else if w.first().is_some_and(u8::is_ascii_digit) {
             c.freq = Some(freq(w, "slot: the frequency in MHz, e.g. 146.52")?);
         } else {

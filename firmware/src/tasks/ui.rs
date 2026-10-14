@@ -282,7 +282,7 @@ pub async fn task() {
     }
     app.redraw_all();
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
-    let mut dev = Device { tx_built: cfg!(feature = "tx"), battery_pct: 100, ..Default::default() };
+    let mut dev = Device { tx_built: cfg!(feature = "tx"), tx_dry: cfg!(feature = "tx-dry"), battery_pct: 100, ..Default::default() };
     let mut bat_logged = 0u32;
     // About and Self-test (SELF-5 to SELF-7): what the boot checks found. The BK4829s from the Radio task's
     // snapshot below; the SI4732 isn't tested at boot; the SSB patch store comes with the link's SSB_WRITE.

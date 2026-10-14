@@ -14,6 +14,36 @@ pub const MAX_PAYLOAD: usize = 240;
 pub const MAX_BODY: usize = MAX_PAYLOAD + 4;
 /// The most bytes a frame takes on the wire: COBS adds one byte per 254, plus the delimiter.
 pub const MAX_WIRE: usize = MAX_BODY + MAX_BODY / 254 + 2;
+/// The build, as `HELLO` and `INFO` give it (LINK-35): what a bench tool checks before it keys (a `tx-dry` build
+/// holds the PA drive at 0).
+pub mod build {
+    /// Receive only: no transmit code (no `tx` feature).
+    pub const RECEIVE: u8 = 0;
+    /// Transmits (`--features tx`).
+    pub const TX: u8 = 1;
+    /// The whole transmit build with the PA drive held at 0 (`--features tx-dry`).
+    pub const TX_DRY: u8 = 2;
+
+    /// The byte for a build with or without transmit, dry or not.
+    pub const fn of(tx: bool, dry: bool) -> u8 {
+        match (tx, dry) {
+            (_, true) => TX_DRY,
+            (true, false) => TX,
+            (false, false) => RECEIVE,
+        }
+    }
+
+    /// Its name, as the tools print it.
+    pub const fn name(b: u8) -> &'static str {
+        match b {
+            RECEIVE => "receive",
+            TX => "tx",
+            TX_DRY => "tx-dry",
+            _ => "unknown",
+        }
+    }
+}
+
 /// Answers carry the request's type with this bit set.
 pub const ANSWER: u8 = 0x80;
 
@@ -75,6 +105,9 @@ pub mod slot {
     pub const VFO: u8 = 32;
     /// No bytes: make it the active slot (the SLOT key), after the rest.
     pub const ACTIVE: u8 = 64;
+    /// i32 then u8, as the answer gives them: the signed shift in 10 Hz (0 simplex) and 0, or the split's TX
+    /// frequency and 1 (MENU 5's paths; LINK-33).
+    pub const OFFSET: u8 = 128;
     /// The answer's flags byte.
     pub const SPLIT: u8 = 1;
     pub const APRS: u8 = 2;
