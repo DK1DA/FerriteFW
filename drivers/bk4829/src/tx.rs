@@ -4,7 +4,7 @@
 //! module only does what it is told. [`Bk4829::tx_on`] keys the chip on the frequency already set;
 //! [`Bk4829::tx_off`] takes it out of transmit (receive is the next tune's).
 
-use crate::{int, reg, tone_word, Bk4829, Bus, Fsk};
+use crate::{dcs_codeword, int, reg, tone_word, Bk4829, Bus, Fsk};
 
 /// REG_30 values stock uses for transmit: VCO calibration, PLL, PA gain, transmit DSP, with the microphone ADC
 /// (voice) or with the AF DAC (tones and data, microphone off).
@@ -14,6 +14,22 @@ const POWER_TX_TONE: u16 = 0xC3FA;
 pub const TX_ON_GAP_US: u32 = 50;
 /// REG_40's low 12 bits at every key-up, stock's (0x0801E9E0): `(REG_40 & 0xF000) | 0x50A`.
 pub const TX_DEVIATION: u16 = 0x050A;
+
+/// REG_51 for a transmitted DCS code, stock's (0x0800D3D4, 0x0800D4B2): sub-tone transmit on (bit 15), CDCSS
+/// (bit 12 clear), 23 bits, auto bandwidths; bit 13 ("transmit negative code") set for a normal code, clear for an
+/// inverted one. The gain (bits 6:0) is the calibration's, set after by [`Bk4829::subtone_gain`].
+pub const DCS_TX_NORMAL: u16 = 0xA000;
+pub const DCS_TX_INVERTED: u16 = 0x8000;
+/// The gain [`Bk4829::dcs_tx`] writes before [`Bk4829::subtone_gain`] sets the calibration's (the receive
+/// detector's 51).
+const DCS_GAIN: u16 = 51;
+
+/// REG_40's low 12 bits while a tone from the generator goes on air (end tone, tone burst, DTMF, CW ID; TONE-19,
+/// decision 141). The generator's deviation is set by REG_40, not its REG_70 gain; through the voice set-up's
+/// pre-emphasis it rises with frequency. Measured on the black radio (wide FM, VHF and UHF alike; NFM halves): at
+/// stock's 0x50A, 800 Hz 1.82 kHz, 1000 Hz 2.43, 1200 Hz 3.04, 1500 Hz 3.89, 2475 Hz 4.30; 0x43C is 0.595 of 0x50A,
+/// so Quindar's 2475 Hz goes at about 2.56 kHz, 1000 Hz at about 1.45 kHz. Stock leaves 0x50A for its tones.
+pub const TONE_DEVIATION: u16 = 0x043C;
 
 /// Tone 1's gain for a transmitted single tone (tone burst, end tone, CW ID): stock V0.29's REG_70 0x9700
 /// (0x0801F33C: `(R & 0x7F) | 0x9700`, with REG_30 mode 4). V0.27 sent 0xBC00 (gain 0x3C, 0x0801EB8C), about 8 dB
@@ -80,6 +96,13 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::DEVIATION, (v & 0xF000) | TX_DEVIATION);
     }
 
+    /// REG_40 for the generator's tones ([`TONE_DEVIATION`], `on`) or back to the key-up's ([`TX_DEVIATION`]); the
+    /// top four bits kept.
+    pub fn tone_deviation(&mut self, on: bool) {
+        let v = self.read(reg::DEVIATION);
+        self.write(reg::DEVIATION, (v & 0xF000) | if on { TONE_DEVIATION } else { TX_DEVIATION });
+    }
+
     /// Microphone sensitivity, REG_7D[5:0] (0.5 dB a step, 0x00 min to 0x3F max; the register table's field).
     /// The rest of REG_7D stays.
     pub fn mic_gain(&mut self, g: u8) {
@@ -101,11 +124,15 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::SUBTONE, v | 0x8000);
     }
 
-    /// Send a DCS code (octal digits' value) with the transmission.
+    /// Send a DCS code (octal digits' value) with the transmission, as stock V0.27 0x0800D3CC: REG_51 = 0xA000
+    /// (normal) or 0x8000 (inverted) with the gain, REG_07 the 134.4 Hz bit rate, then the codeword in two halves.
+    /// The codeword is always the normal one ([`dcs_codeword`]`(code, false)`, stock's 0x08014C44); REG_51 bit 13
+    /// ("transmit negative code") alone picks the polarity, and it is set for a normal code: with it clear the chip
+    /// sends the code inverted (decision 140: a stock receiver on D023N opened only to bit 13 clear with the
+    /// inverted codeword, and an SDR read bit 13 clear with the normal codeword as 047N, 023's inverse).
     pub fn dcs_tx(&mut self, code: u16, inverted: bool) {
-        self.dcs_rx(code, inverted);
-        let v = self.read(reg::SUBTONE);
-        self.write(reg::SUBTONE, v | 0x8000);
+        self.write(reg::SUBTONE, if inverted { DCS_TX_INVERTED } else { DCS_TX_NORMAL } | DCS_GAIN);
+        self.cdcss_word(dcs_codeword(code, false));
     }
 
     /// Tail elimination while still keyed (stock 0x0801D078), held until `None` ends it; stock keeps the carrier

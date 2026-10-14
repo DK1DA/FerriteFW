@@ -301,14 +301,35 @@ pub fn keyed_tone<B: Bus>(bk: &mut Bk4829<B>, hz: Option<u16>, dtmf: Option<char
         (None, None) => false,
     };
     if sending {
+        bk.tone_deviation(true); // TONE-19: the tones' REG_40 while they play
         bk.tx_on(Source::Tones, !narrow);
         bk.sidetone(heard);
         return (true, true);
     }
     bk.tone_tx(0);
+    bk.tone_deviation(false);
     bk.af_out(AfOut::Normal);
     bk.tx_on(Source::Mic, !narrow);
     (false, bk.read(0x30) == REG30_TX_MIC)
+}
+
+/// The generator's silent lead-in before a keyed tone sequence (TONE-10, TONE-19): the tone off, the tones' REG_40,
+/// then tone transmit (REG_30 through stock's step, the microphone off). The first tone after entering tone transmit
+/// swells (time constant about 80 ms, 90 % at about 190 ms; measured Oct 13, 2026), so the caller waits
+/// [`ferrite_core::tonegen::TONE_LEAD_MS`] before the first step (decision 141).
+#[cfg(feature = "tx")]
+pub fn tones_begin<B: Bus>(bk: &mut Bk4829<B>, narrow: bool) {
+    bk.tone_tx(0);
+    bk.tone_deviation(true);
+    bk.tx_on(bk4829::tx::Source::Tones, !narrow);
+}
+
+/// After a keyed tone sequence: the tone off and REG_40 back to the key-up's (stock's 0x50A). REG_30 stays at tone
+/// transmit until the unkey's REG_30 = 0.
+#[cfg(feature = "tx")]
+pub fn tones_end<B: Bus>(bk: &mut Bk4829<B>) {
+    bk.tone_tx(0);
+    bk.tone_deviation(false);
 }
 
 /// The tail sent at the unkey (TONE-5, TONE-6, TONE-9): the 55 Hz tone at the calibration's CTCSS byte (`dev`,

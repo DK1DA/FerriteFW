@@ -365,6 +365,33 @@ mod tx {
         assert_eq!(r.regs[0x71], 18068, "1750 Hz x 10.32444");
     }
 
+    /// Stock V0.27's DCS transmit (0x0800D3CC with the codeword from 0x08014C44): REG_51 0xA000 (normal, bit 13
+    /// set) or 0x8000 (inverted) with the gain, REG_07 0x0AD7, then the normal codeword's halves in both; the
+    /// calibration's gain (byte 2, the black radio's 0x34 here) keeps the mode bits (decision 140).
+    #[test]
+    fn dcs_tx_matches_stock() {
+        for (inverted, r51) in [(false, 0xA034), (true, 0x8034)] {
+            let mut r = Regs::new();
+            let mut bk = Bk4829::new(&mut r);
+            bk.dcs_tx(0o23, inverted);
+            bk.subtone_gain(0x34);
+            assert_eq!(r.writes[..4], [(0x51, if inverted { 0x8000 } else { 0xA000 } | 51), (0x07, 0x0AD7), (0x08, 0x0813), (0x08, 0x8763)]);
+            assert_eq!(r.regs[0x51], r51, "inverted {inverted}");
+        }
+    }
+
+    /// The tones' REG_40 (TONE-19) and back to stock's, the top four bits kept.
+    #[test]
+    fn tone_deviation_and_back() {
+        let mut r = Regs::new();
+        r.regs[0x40] = 0x350A;
+        let mut bk = Bk4829::new(&mut r);
+        bk.tone_deviation(true);
+        assert_eq!(bk.read(0x40), 0x343C);
+        bk.tone_deviation(false);
+        assert_eq!(r.regs[0x40], 0x350A);
+    }
+
     /// Tail elimination as stock sends it (0x0801D078): the 55 Hz tone with no sub-tone, REG_52's shift with one;
     /// ending it leaves REG_52's other bits as they were.
     #[test]

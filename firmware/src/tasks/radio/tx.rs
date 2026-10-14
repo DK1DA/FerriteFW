@@ -291,17 +291,18 @@ impl Radio {
     }
 
     /// A tone sequence on the keyed chip, still keyed (TONE-8: end tone, CW ID): tone transmit with the microphone
-    /// off, each step's tone (0 = silence) for its time.
+    /// off and the tones' REG_40 (TONE-19), silent for [`tonegen::TONE_LEAD_MS`] while the generator settles
+    /// (TONE-10), then each step's tone (0 = silence) for its time; REG_40 back after.
     pub(super) async fn play_keyed(&mut self, steps: impl Iterator<Item = tonegen::Step>) {
-        use bk4829::tx::Source as TxSource;
         let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
-        let wide = !self.tx.narrow;
-        self.chip(n).tx_on(TxSource::Tones, wide);
+        let narrow = self.tx.narrow;
+        radio_chip::tones_begin(&mut self.chip(n), narrow);
+        Timer::after_millis(tonegen::TONE_LEAD_MS as u64).await;
         for (hz, ms) in steps {
             self.chip(n).tone_tx(hz as u32);
             Timer::after_millis(ms as u64).await;
         }
-        self.chip(n).tone_tx(0);
+        radio_chip::tones_end(&mut self.chip(n));
     }
 
     /// After any unkey: the chips back to their slots on the next tick, the UI told.

@@ -101,6 +101,11 @@ pub fn dtmf_symbol(key: u8) -> Option<char> {
     }
 }
 
+/// The silent lead-in in tone transmit before an end tone or CW ID (TONE-10, decision 141): the BK4829's generator
+/// swells on the first tone after tone transmit is entered (time constant about 80 ms, 90 % at about 190 ms), and
+/// tones after that are steady, so the sequence starts this long after the switch.
+pub const TONE_LEAD_MS: u16 = 200;
+
 /// Tail elimination (TONE-5): how long the carrier stays up with it, as stock (0x08024DCC keeps the TX 400 ms).
 pub const TAIL_MS: u16 = 400;
 

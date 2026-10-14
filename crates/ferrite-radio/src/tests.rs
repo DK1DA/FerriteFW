@@ -604,6 +604,48 @@ fn tx_setup_writes_stocks_registers() {
     assert_eq!(bus.last(reg::MIC), Some(0xE934), "a data key-up: V0.29's 0x34");
 }
 
+/// TONE-20 (decision 140): a DCS transmission as stock V0.27's 0x0800D3CC, on the recording bus: REG_51 0xA000 for a
+/// normal code and 0x8000 for an inverted one (bit 13, "transmit negative code", set for normal), with the
+/// calibration's DCS byte, REG_07 the 134.4 Hz bit rate, and the same normal codeword in both (D023: 0x0813, then
+/// 0x8763). Bit 13 clear with the normal codeword went out as 047N, 023 inverted, on the bench.
+#[test]
+fn dcs_tx_polarity_is_stocks() {
+    for (inverted, r51) in [(false, 0xA03E), (true, 0x803E)] {
+        let mut b = bk();
+        let tone = 0x8000 | if inverted { 0x4000 } else { 0 } | 0o23;
+        chip::tx_setup(&mut b, &chip::TxSetup { tone, tone_dev: 0x3E, ..setup(VHF, false, 0) });
+        let bus = b.release();
+        assert_eq!(bus.last(reg::SUBTONE), Some(r51), "inverted {inverted}");
+        let at = bus.first(reg::SUBTONE).unwrap();
+        assert_eq!(bus.writes[at + 1..at + 4], [(0x07, 0x0AD7), (0x08, 0x0813), (0x08, 0x8763)], "inverted {inverted}");
+    }
+}
+
+/// TONE-10, TONE-19 (decision 141): a keyed tone sequence (end tone, CW ID) starts silent: the tone off, REG_40 at
+/// the tones' 0x43C (top four bits kept), then tone transmit through stock's REG_30 step; the caller then waits
+/// `TONE_LEAD_MS` for the generator to settle. The end puts the tone off and REG_40 back to stock's 0x50A.
+#[test]
+fn keyed_tone_sequence_lead_in_and_deviation() {
+    let mut b = bk();
+    b.write(reg::DEVIATION, 0x350A);
+    let n0 = b.release().writes.len();
+    let mut b = bk();
+    b.write(reg::DEVIATION, 0x350A);
+    chip::tones_begin(&mut b, false);
+    let bus = b.release();
+    assert_eq!(
+        bus.writes[n0..],
+        [(reg::TONE, 0), (reg::DEVIATION, 0x343C), (reg::POWER, 0x0200), (reg::POWER, 0xC3FA)],
+        "silent, the tones' REG_40, then tone transmit"
+    );
+    assert_eq!(ferrite_core::tonegen::TONE_LEAD_MS, 200, "past the swell's 90 % at about 190 ms");
+    let mut b = Bk4829::new(bus);
+    chip::tones_end(&mut b);
+    let bus = b.release();
+    let n = bus.writes.len();
+    assert_eq!(bus.writes[n - 2..], [(reg::TONE, 0), (reg::DEVIATION, 0x350A)]);
+}
+
 /// TERM-33 (decision 132): a `flat` test key-up turns off the TX HPF/LPF/pre-emphasis (REG_2B[2:0] = 111), a
 /// `data` one only the TX HPF (REG_2B[2:0] = 100 exactly, whatever was there; the other bits kept); both turn off
 /// MIC AGC (REG_19[15]) and the ALC (REG_7D[6]) on top of the data key-up's REG_7D 0x34, clear a TX mute
@@ -734,8 +776,8 @@ fn any_wrong_read_back_refuses() {
 }
 
 /// TONE-13, TONE-19, DTMF-7, DTMF-8, DTMF-11: while keyed a tone burst or a DTMF symbol (A-D too) switches REG_30 to tone
-/// transmit (stock's mode 4, the microphone off) with the sidetone as asked; letting go returns to the microphone
-/// with its read-back.
+/// transmit (stock's mode 4, the microphone off) with the sidetone as asked and the tones' REG_40; letting go returns
+/// to the microphone with its read-back and stock's REG_40.
 #[test]
 fn keyed_tones_switch_the_source() {
     let mut b = bk();
@@ -747,6 +789,7 @@ fn keyed_tones_switch_the_source() {
     // TX audit M8: the burst (and the end tone and CW ID, through the same tone_tx) at V0.29's gain 0x17, REG_70
     // 0x9700, not V0.27's 0xBC00; DTMF pairs keep 0xC5C5 (both versions).
     assert_eq!(bus.last(reg::TONE), Some(0x9700));
+    assert_eq!(bus.last(reg::DEVIATION).map(|v| v & 0xFFF), Some(bk4829::tx::TONE_DEVIATION), "TONE-19: the tones' REG_40");
     for d in ['5', 'A', 'D', '#'] {
         let mut b = bk();
         assert_eq!(chip::keyed_tone(&mut b, None, Some(d), false, false), (true, true), "{d}");
@@ -760,6 +803,7 @@ fn keyed_tones_switch_the_source() {
     assert_eq!(chip::keyed_tone(&mut b, None, None, false, true), (false, true));
     let bus = b.release();
     assert_eq!((bus.last(reg::TONE), bus.last(reg::POWER)), (Some(0), Some(chip::REG30_TX_MIC)));
+    assert_eq!(bus.last(reg::DEVIATION).map(|v| v & 0xFFF), Some(bk4829::tx::TX_DEVIATION), "REG_40 back to stock's 0x50A");
     assert_eq!(bus.last(reg::AF_OUT), Some(0x6142), "back to the key-up's AF route (F14)");
     let n = bus.writes.len();
     assert_eq!(bus.writes[n - 2..], [(reg::POWER, 0), (reg::POWER, chip::REG30_TX_MIC)], "narrow: through 0, as stock (F3)");
