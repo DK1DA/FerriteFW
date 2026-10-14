@@ -578,7 +578,7 @@ fn tx_setup_writes_the_bandwidth() {
     assert_eq!(b.release().last(reg::RF_FILTER), Some(0x3028));
 }
 
-/// VOX-6, VOX-15, TONE-1, TX audit F1, F2, F7, F14: the key-up writes stock's registers from the start-up values:
+/// TX-46, VOX-6, VOX-15, TONE-1, TX audit F1, F2, F7, F14: the key-up writes stock's registers from the start-up values:
 /// REG_7D 0xE912 to stock's default 0xE924 (bit 5 is the 6-bit field's top bit; Mic gain 5), REG_40 0x34D2 to
 /// stock's 0x350A, REG_47 0x6142 (stock's TX route), REG_51 with the calibration's CTCSS byte (0x9046 on the black
 /// radio) or its DCS byte in REG_51's low 7 bits, and REG_30 0 before any of them.
