@@ -149,7 +149,9 @@ SECTIONS
 /* The fast-flash budget: everything from the image start to the end of .fast_ui (vectors, the gaps by the tags,
  * .text, .rodata, .fast_ui). Set Oct 13, 2026 at the tx build's use (141.5 KB; the receive-only build 127.6 KB)
  * plus a small margin, of the 244 KB zero-wait room: growth past it is a decision (move something to the slow
- * part, or raise this), not an accident. tools/slowcheck.py prints the use against it. */
+ * part, or raise this), not an accident. tools/slowcheck.py prints the use against it. After the flash moves of the
+ * same day (unnamed constants, the outliner, the GPS task) the tx build uses 81,604 B and the receive-only one
+ * 68,200 B; the budget is left where it was until lowering it is decided. */
 __fast_budget = 148K;
 ASSERT(__efast_ui - ORIGIN(FLASH) <= __fast_budget, "fast flash over its budget (__fast_budget in memory.x): move code to the slow part or raise the budget");
 
