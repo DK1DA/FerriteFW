@@ -192,7 +192,7 @@ async fn play(f: &Frame) {
 /// generator itself; then a half of silence, and stopped once that has played.
 #[cfg(feature = "tx")]
 async fn play_test(arm: ferrite_core::txtest::Arm) {
-    let mut g = ferrite_core::txtest::Gen::new(arm.signal, arm.level);
+    let Some(mut g) = ferrite_core::txtest::Gen::new(arm.signal, arm.level) else { return }; // afsk-bk: not DAC1's
     let fill = |half: usize, g: Option<&mut ferrite_core::txtest::Gen>| match g {
         Some(g) => {
             for d in &audio::DAC_BUF[half * BLOCK_DAC..(half + 1) * BLOCK_DAC] {

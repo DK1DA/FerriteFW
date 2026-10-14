@@ -1241,11 +1241,12 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
 
 /// TERM-33 (decision 132, a bench test): `txtest` asks what is armed, `txtest off` disarms, `txtest MODE [FILTERS]
 /// [LEVEL]` arms MODE (4fsk, sweep, afsk) for the next PTT key-up with the BK4829's TX audio `voice`, `flat` or
-/// `data` (the default: data for 4fsk and sweep, voice for afsk) at LEVEL percent of the mode's nominal (10 to 150,
-/// default 100). Anything else is refused here, before anything is sent.
+/// `data` (the default, as an APRS burst goes out) at LEVEL percent of the mode's nominal (10 to 150,
+/// default 100); `txtest afsk-bk [LEVEL]` the BK4829 tone generator's AFSK, which takes no filters word (decision
+/// 134). Anything else is refused here, before anything is sent.
 fn txtest(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::txtest::{Arm, Ask, Filters, Signal, LEVEL_DEFAULT, LEVEL_MAX, LEVEL_MIN};
-    const USAGE: &str = "txtest 4fsk|sweep|afsk [voice|flat|data] [10-150 %], txtest off; txtest alone shows what is armed";
+    const USAGE: &str = "txtest 4fsk|sweep|afsk [voice|flat|data] [10-150 %], txtest afsk-bk [10-150 %], txtest off; txtest alone shows what is armed";
     let level = |w: &[u8]| number(w).filter(|n| (LEVEL_MIN as u32..=LEVEL_MAX as u32).contains(n)).map(|n| n as u8).ok_or_else(|| msg!("{}", USAGE));
     let ask = match t.next()? {
         None => Ask::Show,
@@ -1256,6 +1257,7 @@ fn txtest(t: &mut Toks) -> Result<Done, Msg> {
             match t.next()? {
                 None => {}
                 Some(Tok::Word(f)) => match Filters::parse(f) {
+                    Some(_) if !signal.dac() => return Err(msg!("{}", USAGE)),
                     Some(f) => {
                         arm.filters = f;
                         match t.next()? {
@@ -1494,7 +1496,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 31] = [
+const HELP: [&str; 32] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
@@ -1525,5 +1527,6 @@ const HELP: [&str; 31] = [
     "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",
     "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal",
     "                         at that % on the next PTT key-up until release (tx builds)",
+    "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
 ];

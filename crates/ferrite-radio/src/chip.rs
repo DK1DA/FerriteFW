@@ -351,8 +351,8 @@ pub const ALC_OFF: u16 = 1 << 6;
 #[cfg(feature = "tx")]
 pub const TX_MUTE: u16 = 1 << 15;
 
-/// TERM-33 `flat` or `data` (never called for `voice`), after [`tx_setup`] and before the key-up: REG_2B[2:0] to
-/// [`TX_FILTERS_OFF`] (`flat`) or exactly [`TX_HPF_OFF`] (`data`; the register's other bits kept), MIC AGC and the
+/// TERM-33 `flat` or `data`, and every APRS burst's `data` (APRS-14, decision 135; never called for `voice`), after
+/// [`tx_setup`] and before the key-up: REG_2B[2:0] to [`TX_FILTERS_OFF`] (`flat`) or exactly [`TX_HPF_OFF`] (`data`; the register's other bits kept), MIC AGC and the
 /// ALC off and the TX mute clear, so DAC1's test signal reaches the modulator without the voice processing.
 /// REG_7D[5:0] is the data key-up's [`ferrite_core::vox::MIC_DATA`] from [`tx_setup`]. Returns what was there.
 #[cfg(feature = "tx")]
@@ -375,4 +375,31 @@ pub fn tx_test_restore<B: Bus>(bk: &mut Bk4829<B>, r: &TestRegs) {
     bk.write(0x19, r.r19);
     bk.write(bk4829::reg::MIC, r.r7d);
     bk.write(0x50, r.r50);
+}
+
+/// TERM-33 `afsk-bk`, on the keyed chip after the key-up's plan: AFSK from the tone generator, as stock sends any
+/// internal tone while keyed (the end tone's path, [`bk4829::Bk4829::tone_tx`] after `tx_on(Tones)`): REG_30 to
+/// tone transmit through stock's step (0x0200 wide or 0 narrow, about 50 us, then 0xC3FA: the mic ADC off, so the
+/// mic adds nothing), then tone 1 at `hz` (REG_71), tone 2 off (REG_72 0) and REG_70 tone 1 on at `gain` (bits
+/// 14:8; tone 2 off). BD1EEA's `BK4819_AFSK_BeginTx` writes the same REG_70/71 and the same REG_30 value
+/// (`BK4819_EnableTXLink`: VCO cal, AF DAC, disc mode, PLL, PA gain, TX DSP = 0xC3FA); its REG_50 TX mute around
+/// the switch (0xBB18/0x3B18) is left out, as stock's tone path leaves it. REG_47 is left at the key-up's 0x6142
+/// (no sidetone: the speaker is off for a data key-up).
+#[cfg(feature = "tx")]
+pub fn afsk_bk_begin<B: Bus>(bk: &mut Bk4829<B>, hz: u16, gain: u8, narrow: bool) {
+    bk.tx_on(bk4829::tx::Source::Tones, !narrow);
+    bk.tones(hz as u32, gain, 0, 0);
+}
+
+/// `afsk-bk`'s tone change: REG_71 only (BD1EEA's `BK4819_AFSK_SetTone`), one bus write.
+#[cfg(feature = "tx")]
+pub fn afsk_bk_tone<B: Bus>(bk: &mut Bk4829<B>, hz: u16) {
+    bk.write(bk4829::reg::TONE1_FREQ, bk4829::tone_word(hz as u32));
+}
+
+/// `afsk-bk` stopped at the release, before the unkey's steps: tones off (REG_70 0), as the end tone leaves the
+/// chip at the unkey (`play_keyed`); REG_30 stays at tone transmit (mic off) until the unkey's REG_30 = 0.
+#[cfg(feature = "tx")]
+pub fn afsk_bk_end<B: Bus>(bk: &mut Bk4829<B>) {
+    bk.tone_tx(0);
 }

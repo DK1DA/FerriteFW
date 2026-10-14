@@ -91,6 +91,10 @@ type Vector = unsafe extern "C" fn();
 static __INTERRUPTS: [Vector; 96] = {
     let mut v: [Vector; 96] = [stray; 96];
     v[hal::time_driver::IRQ as usize] = tmr3;
+    #[cfg(feature = "tx")]
+    {
+        v[hal::edge::IRQ as usize] = tmr5;
+    }
     v[IRQ_RADIO as usize] = radio_irq;
     v[IRQ_DSP as usize] = dsp_irq;
     v[IRQ_INPUT as usize] = input_irq;
@@ -107,6 +111,11 @@ extern "C" fn stray() {
 }
 extern "C" fn tmr3() {
     hal::time_driver::on_interrupt()
+}
+/// TERM-33 `afsk-bk`'s bit timer (decision 134).
+#[cfg(feature = "tx")]
+extern "C" fn tmr5() {
+    tasks::radio::afskbk::on_interrupt()
 }
 extern "C" fn usart1() {
     hal::uart::isr(UART_BT)

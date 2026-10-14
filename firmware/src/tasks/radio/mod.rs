@@ -44,7 +44,7 @@ use crate::hal::i2c::I2c;
 use crate::tasks::{check, CHECK_BK0, CHECK_BK1};
 use bk4829::wire::ThreeWire;
 use bk4829::{int, AfOut, Bk4829};
-use embassy_futures::select::{select3, Either3};
+use embassy_futures::select::{select4, Either4};
 use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, mhz, Freq10};
 use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, Source, SLOTS};
@@ -82,6 +82,8 @@ mod scope;
 mod hw;
 #[cfg(feature = "tx")]
 mod tx;
+#[cfg(feature = "tx")]
+pub mod afskbk;
 #[cfg(feature = "tx")]
 mod crossband;
 
@@ -398,6 +400,8 @@ struct Tx {
     test: Option<ferrite_core::txtest::Arm>,
     test_regs: Option<(u8, radio_chip::TestRegs)>,
     test_playing: bool,
+    /// TERM-33 `afsk-bk` while it plays (`afskbk`).
+    bk: Option<afskbk::BkRun>,
 }
 
 fn now_ms() -> u64 {
@@ -637,6 +641,7 @@ pub async fn task() {
             test: None,
             test_regs: None,
             test_playing: false,
+            bk: None,
         },
         #[cfg(feature = "tx")]
         xb: None,
@@ -687,10 +692,29 @@ pub async fn task() {
             },
             _ => Instant::from_millis(at),
         };
-        match select3(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive()).await {
-            Either3::First(c) => r.cmd(c).await,
-            Either3::Second(()) => r.tick().await,
-            Either3::Third(d) => {
+        // TERM-33 `afsk-bk`: TMR5's tone changes, waited on only while one plays (`afskbk`); handled at once, with
+        // nothing else after it (no snapshot: nothing the UI sees changes).
+        #[cfg(feature = "tx")]
+        let bk_on = r.afsk_bk_on();
+        #[cfg(feature = "tx")]
+        let edge = async {
+            if bk_on {
+                afskbk::EDGE.wait().await
+            } else {
+                core::future::pending().await
+            }
+        };
+        #[cfg(not(feature = "tx"))]
+        let edge = core::future::pending::<()>();
+        match select4(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive(), edge).await {
+            Either4::Fourth(()) => {
+                #[cfg(feature = "tx")]
+                r.afsk_bk_edge();
+                continue;
+            }
+            Either4::First(c) => r.cmd(c).await,
+            Either4::Second(()) => r.tick().await,
+            Either4::Third(d) => {
                 let a = match d {
                     DebugReq::RxBoth(on) => r.rx_both(on).await,
                     d => r.debug(d),

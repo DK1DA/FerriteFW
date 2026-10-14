@@ -13,6 +13,13 @@
 //!   8 kHz) for [`TONE_MS`], [`GAP_MS`] of silence after each, all at [`SWEEP_AMP`]; then again.
 //! - **AFSK** ([`Afsk`]): Bell 202 HDLC flags (0x7E) and nothing else: no callsign, no frame. NRZI makes each flag
 //!   seven bits of one tone and one of the other.
+//! - **AFSK from the BK4829** (`afsk-bk`, [`BkFlags`]): the same flags, but from the keyed BK4829's own tone
+//!   generator instead of DAC1: REG_30 in stock's tone-transmit mode (0xC3FA, the mic off), tone 1 at
+//!   [`BK_GAIN`] switched between 1200 and 2200 Hz (REG_71) at each NRZI change. The Radio task writes the tone;
+//!   a hardware timer times the changes ([`BitClock`]: exact 1200 Bd, accumulated, never drifting). Not a DAC
+//!   signal: the DSP task never plays it ([`Signal::dac`]). The method is BD1EEA's APRS for the UV-K5/K6
+//!   (LerwinB/uv-k6v3-aprs, Apache-2.0: App/app/aprs.c `APRS_SendNrziBit`, App/driver/bk4829.c
+//!   `BK4819_AFSK_BeginTx`/`SetTone`), adapted: the registers are checked against our driver and stock's tone path.
 //!
 //! Each is at its nominal level times the arming's [`Arm::level`] percent ([`LEVEL_MIN`] to [`LEVEL_MAX`]).
 
@@ -54,10 +61,12 @@ pub enum Signal {
     Fsk4,
     Sweep,
     Afsk,
+    /// AFSK flags from the BK4829's tone generator, not DAC1.
+    AfskBk,
 }
 
 impl Signal {
-    pub const ALL: [Signal; 3] = [Signal::Fsk4, Signal::Sweep, Signal::Afsk];
+    pub const ALL: [Signal; 4] = [Signal::Fsk4, Signal::Sweep, Signal::Afsk, Signal::AfskBk];
 
     /// The terminal's word for it.
     pub fn name(self) -> &'static str {
@@ -65,7 +74,14 @@ impl Signal {
             Signal::Fsk4 => "4fsk",
             Signal::Sweep => "sweep",
             Signal::Afsk => "afsk",
+            Signal::AfskBk => "afsk-bk",
         }
+    }
+
+    /// Played from DAC1 by the DSP task (all but `afsk-bk`, which is the BK4829's tone generator and the Radio
+    /// task's: PC12 and DAC1 stay untouched).
+    pub fn dac(self) -> bool {
+        self != Signal::AfskBk
     }
 
     /// A word as typed, any case.
@@ -73,10 +89,11 @@ impl Signal {
         Signal::ALL.into_iter().find(|s| s.name().as_bytes().eq_ignore_ascii_case(w))
     }
 
-    /// The filters when none are named: `data` for the 4FSK and the sweep (the bench's best data setting), `voice`
-    /// for AFSK (as an APRS burst goes out).
+    /// The filters when none are named: `data` for the DAC signals (the bench's best data setting, and how an APRS
+    /// burst goes out: APRS-14, decision 135); `afsk-bk` takes no filters word and leaves the chip's voice
+    /// settings.
     pub fn default_filters(self) -> Filters {
-        if self == Signal::Afsk { Filters::Voice } else { Filters::Data }
+        if self == Signal::AfskBk { Filters::Voice } else { Filters::Data }
     }
 }
 
@@ -107,6 +124,15 @@ impl Filters {
     pub fn parse(w: &[u8]) -> Option<Filters> {
         Filters::ALL.into_iter().find(|f| f.name().as_bytes().eq_ignore_ascii_case(w))
     }
+}
+
+/// The TX audio set-up a key-up changes (and the unkey puts back), or None for the chip's voice settings: an APRS
+/// burst (a data key-up, `aprs`) always `data` (APRS-14, decision 135: the level then follows the DAC linearly,
+/// where the voice set-up's MIC AGC holds it near 4 kHz whatever the DAC); a `txtest` key-up its arming's filters
+/// (`voice` none; `afsk-bk` none, not a DAC signal); a voice key-up none.
+pub fn key_up_filters(aprs: bool, test: Option<Arm>) -> Option<Filters> {
+    let f = if aprs { Some(Filters::Data) } else { test.filter(|t| t.signal.dac()).map(|t| t.filters) };
+    f.filter(|&f| f != Filters::Voice)
 }
 
 /// The level, percent of the signal's nominal: the range and the default.
@@ -320,7 +346,7 @@ impl Sweep {
     }
 }
 
-/// Bell 202 flags, phase-continuous, at [`AFSK_AMP`] (the APRS beacon's level) times the arming's level.
+/// Bell 202 flags, phase-continuous, at [`AFSK_AMP`] (the APRS beacon's level, in the `data` set-up) times the arming's level.
 #[derive(Clone, Copy, Debug)]
 pub struct Afsk {
     phase: u32,
@@ -368,7 +394,100 @@ impl Afsk {
     }
 }
 
-/// One of the three, for the DSP task.
+/// `afsk-bk`'s tones (Bell 202): mark and space, Hz, and the bit rate.
+pub const BK_MARK_HZ: u16 = 1200;
+pub const BK_SPACE_HZ: u16 = 2200;
+pub const BAUD: u32 = 1200;
+
+/// `afsk-bk`'s tone 1 gain at 100 % (REG_70[14:8], 0-127): 66, BD1EEA's `APRS_TONE_GAIN` on the BK4819/BK4829
+/// family, with REG_40's deviation field (0x516 there) within 1 % of the 0x50A every Ferrite key-up writes. Meant
+/// as about 3 kHz in wide FM; nothing of ours has measured the generator's deviation per gain step yet (TONE-19's
+/// 0x17 is still "to confirm on the bench"), so `tools/sdrtx.py --afsk` measures it and LEVEL trims it.
+pub const BK_GAIN: u8 = 66;
+
+/// [`BK_GAIN`] at `level` percent, rounded, kept inside REG_70's field (1-127).
+pub const fn bk_gain(level: u8) -> u8 {
+    let g = (BK_GAIN as u32 * level as u32 + 50) / 100;
+    if g < 1 {
+        1
+    } else if g > 127 {
+        127
+    } else {
+        g as u8
+    }
+}
+
+/// The bit (from the key-up's first, 0) at which the `k`th tone change (from 0) of an endless run of flags comes.
+/// NRZI: a 0 changes the tone, a 1 keeps it; 0x7E sent LSB first is 0 1 1 1 1 1 1 0, so the changes come at each
+/// flag's first and last bit, in pairs one bit apart: 0 (the start, already on space), 7, 8, 15, 16, ... The
+/// key-up's start counts as the first flag's first change (the tone before it, mark, is never sent), as the DAC
+/// generator [`Afsk`] starts on space.
+pub const fn toggle_bit(k: u32) -> u32 {
+    (k / 2) * 8 + 7 + (k & 1)
+}
+
+/// The tone after `n` changes: space at the start, then mark, space, ...
+pub const fn bk_tone(n: u32) -> u16 {
+    if n.is_multiple_of(2) { BK_SPACE_HZ } else { BK_MARK_HZ }
+}
+
+/// Bit boundaries in a timer's ticks, exact in the long run: each bit is `tick_hz / baud` ticks plus the remainder
+/// carried (Bresenham), so after N bits the boundary is exactly floor(N x tick_hz / baud) ticks from the start, and
+/// no bit is off by more than one tick. The tick count wraps at 2^32 (a 16-bit timer compares the low half).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BitClock {
+    q: u32,
+    r: u32,
+    den: u32,
+    rem: u32,
+    at: u32,
+}
+
+impl BitClock {
+    pub const fn new(tick_hz: u32, baud: u32) -> Self {
+        BitClock { q: tick_hz / baud, r: tick_hz % baud, den: baud, rem: 0, at: 0 }
+    }
+
+    /// `bits` more bits: the boundary after them, ticks from the start.
+    pub fn advance(&mut self, bits: u32) -> u32 {
+        for _ in 0..bits {
+            self.at = self.at.wrapping_add(self.q);
+            self.rem += self.r;
+            if self.rem >= self.den {
+                self.rem -= self.den;
+                self.at = self.at.wrapping_add(1);
+            }
+        }
+        self.at
+    }
+}
+
+/// `afsk-bk`'s schedule for the timer interrupt: each tone change's tick from the start, in order.
+#[derive(Clone, Copy, Debug)]
+pub struct BkFlags {
+    clock: BitClock,
+    /// Changes scheduled so far, and the bit the last was at.
+    k: u32,
+    bit: u32,
+}
+
+impl BkFlags {
+    /// A timer counting at `tick_hz`.
+    pub const fn new(tick_hz: u32) -> Self {
+        BkFlags { clock: BitClock::new(tick_hz, BAUD), k: 0, bit: 0 }
+    }
+
+    /// The next tone change's tick, from the start (wrapping).
+    pub fn next_change(&mut self) -> u32 {
+        let b = toggle_bit(self.k);
+        self.k += 1;
+        let t = self.clock.advance(b - self.bit);
+        self.bit = b;
+        t
+    }
+}
+
+/// One of the three DAC signals, for the DSP task.
 #[derive(Clone, Copy, Debug)]
 pub enum Gen {
     Fsk4(Fsk4),
@@ -377,13 +496,14 @@ pub enum Gen {
 }
 
 impl Gen {
-    /// `s` at `level` percent of its nominal.
-    pub fn new(s: Signal, level: u8) -> Gen {
-        match s {
+    /// `s` at `level` percent of its nominal; None for `afsk-bk` (not a DAC signal).
+    pub fn new(s: Signal, level: u8) -> Option<Gen> {
+        Some(match s {
             Signal::Fsk4 => Gen::Fsk4(Fsk4::new(level)),
             Signal::Sweep => Gen::Sweep(Sweep::new(level)),
             Signal::Afsk => Gen::Afsk(Afsk::new(level)),
-        }
+            Signal::AfskBk => return None,
+        })
     }
 
     #[inline]
@@ -536,7 +656,10 @@ mod tests {
             assert_eq!(Filters::parse(f.name().to_ascii_uppercase().as_bytes()), Some(f));
         }
         assert_eq!(Filters::parse(b"loud"), None);
-        assert_eq!(Signal::ALL.map(Signal::default_filters), [Filters::Data, Filters::Data, Filters::Voice]);
+        assert_eq!(Signal::ALL.map(Signal::default_filters), [Filters::Data, Filters::Data, Filters::Data, Filters::Voice]);
+        assert_eq!(Signal::parse(b"AFSK-BK"), Some(Signal::AfskBk));
+        assert_eq!(Signal::ALL.map(Signal::dac), [true, true, true, false]);
+        assert!(Gen::new(Signal::AfskBk, 100).is_none(), "the DSP task never plays afsk-bk");
     }
 
     /// TERM-33: 4FSK polarity. The DAC-to-air chain inverts, so the generator sends +3 as a negative swing: the
@@ -555,10 +678,10 @@ mod tests {
     #[test]
     fn level_scaling() {
         let peak = |s: Signal, level: u8, n: usize| {
-            let mut g = Gen::new(s, level);
+            let mut g = Gen::new(s, level).unwrap();
             (0..n).map(|_| g.sample().unsigned_abs() as i32).max().unwrap()
         };
-        for s in Signal::ALL {
+        for s in Signal::ALL.into_iter().filter(|s| s.dac()) {
             let n = 48 * 600;
             let full = peak(s, LEVEL_DEFAULT, n);
             for level in [LEVEL_MIN, 50, LEVEL_MAX] {
@@ -572,5 +695,120 @@ mod tests {
         assert!((peak(Signal::Sweep, 100, 4800) - SWEEP_AMP).abs() < 20);
         // 150 % stays inside the DAC.
         assert!(peak(Signal::Fsk4, LEVEL_MAX, 48_000) < 32767);
+    }
+
+    /// The tone per bit of an endless run of flags, NRZI from scratch: 0x7E LSB first, a 0 changes the tone, the
+    /// tone before the first bit mark.
+    fn nrzi_flag_tones(bits: usize) -> Vec<u16> {
+        let mut tone = BK_MARK_HZ;
+        (0..bits)
+            .map(|b| {
+                if (0x7E >> (b % 8)) & 1 == 0 {
+                    tone = if tone == BK_MARK_HZ { BK_SPACE_HZ } else { BK_MARK_HZ };
+                }
+                tone
+            })
+            .collect()
+    }
+
+    /// TERM-33 `afsk-bk`: the tone changes ([`toggle_bit`]) and the tone after each ([`bk_tone`]) are NRZI flags
+    /// bit for bit (a change at each flag's first and last bit, the start on space), and the same pattern as the
+    /// DAC generator's (`afsk`, sampled mid-bit), so the two modes compare on the air.
+    #[test]
+    fn bk_flags_nrzi() {
+        let want = nrzi_flag_tones(800);
+        assert_eq!(want[..9], [2200, 2200, 2200, 2200, 2200, 2200, 2200, 1200, 2200]);
+        let changes: Vec<u32> = (1..800u32).filter(|&b| want[b as usize] != want[b as usize - 1]).collect();
+        let sched: Vec<u32> = (0..changes.len() as u32).map(toggle_bit).collect();
+        assert_eq!(changes, sched);
+        assert_eq!(sched[..6], [7, 8, 15, 16, 23, 24]);
+        // The tone after n changes, bit by bit.
+        let mut n = 0;
+        for (b, &t) in want.iter().enumerate() {
+            while n < sched.len() && sched[n] as usize <= b {
+                n += 1;
+            }
+            assert_eq!(bk_tone(n as u32), t, "bit {b}");
+        }
+        // The DAC generator: 40 samples a bit, its tone mid-bit.
+        let mut a = Afsk::default();
+        let dac: Vec<u16> = (0..800 * 40)
+            .map(|_| {
+                let m = a.mark();
+                a.sample();
+                if m { BK_MARK_HZ } else { BK_SPACE_HZ }
+            })
+            .collect();
+        for b in 0..800 {
+            assert_eq!(dac[b * 40 + 20], want[b], "bit {b}: afsk and afsk-bk differ");
+        }
+    }
+
+    /// TERM-33 `afsk-bk`: the bit clock is exact in the long run. At 1.2 MHz (the timer's: 120 MHz / 100) a bit is
+    /// exactly 1000 ticks; at 1 MHz the 833.33 us bits are 833 or 834 ticks, never off the ideal by a tick or more,
+    /// and after 1200 bits exactly 1 s; after 10 million bits (2.3 hours) still exact, through the 2^32 wrap.
+    #[test]
+    fn bit_clock_never_drifts() {
+        let mut c = BitClock::new(1_200_000, BAUD);
+        assert_eq!((c.advance(1), c.advance(7), c.advance(1)), (1000, 8000, 9000));
+        let mut c = BitClock::new(1_000_000, BAUD);
+        let mut last = 0u32;
+        for n in 1..=12_000u64 {
+            let t = c.advance(1);
+            let ideal = n as f64 * 1e6 / 1200.0;
+            assert!((t as f64 - ideal).abs() < 1.0, "bit {n}: {t} vs {ideal}");
+            assert!([833, 834].contains(&t.wrapping_sub(last)), "bit {n}");
+            last = t;
+            if n == 1200 {
+                assert_eq!(t, 1_000_000);
+            }
+        }
+        let mut c = BitClock::new(120_000_000, BAUD); // 100000 a bit: wraps 2^32 after 42950 bits
+        let n = 10_000_000u64;
+        let mut done = 0u64;
+        let mut t = 0;
+        while done < n {
+            t = c.advance(7);
+            done += 7;
+        }
+        assert_eq!(t, ((done * 120_000_000 / 1200) % (1 << 32)) as u32);
+        let mut c = BitClock::new(1_000_000, BAUD);
+        let mut t = 0;
+        for _ in 0..n / 8 {
+            t = c.advance(8);
+        }
+        assert_eq!(t as u64, (n * 1_000_000 / 1200) % (1 << 32));
+    }
+
+    /// TERM-33 `afsk-bk`: the schedule the timer interrupt follows is the changes' bits on the bit clock: at
+    /// 1.2 MHz bits 7, 8, 15, 16 ... times 1000 ticks; the 7-bit gap and the 1-bit gap alternate. The gain: 66 at
+    /// 100 %, scaled by the level and rounded, inside REG_70's 7 bits.
+    #[test]
+    fn bk_schedule_and_gain() {
+        let mut f = BkFlags::new(1_200_000);
+        let t: Vec<u32> = (0..6).map(|_| f.next_change()).collect();
+        assert_eq!(t, [7000, 8000, 15000, 16000, 23000, 24000]);
+        let mut f = BkFlags::new(1_000_000);
+        for k in 0..10_000u32 {
+            let want = (toggle_bit(k) as u64 * 1_000_000 / 1200) as u32;
+            assert_eq!(f.next_change(), want, "change {k}");
+        }
+        assert_eq!((bk_gain(100), bk_gain(LEVEL_MIN), bk_gain(50), bk_gain(LEVEL_MAX)), (66, 7, 33, 99));
+        assert_eq!((bk_gain(0), bk_gain(255)), (1, 127));
+    }
+
+    /// APRS-14 (decision 135), TERM-33: an APRS burst's key-up takes the `data` set-up whatever else is armed (a
+    /// data key-up never plays a test); a test key-up its filters, none for `voice` or `afsk-bk`; a voice key-up none.
+    #[test]
+    fn key_up_set_up() {
+        let arm = |signal, filters| Some(Arm { signal, filters, level: 100 });
+        assert_eq!(key_up_filters(true, None), Some(Filters::Data));
+        assert_eq!(key_up_filters(true, arm(Signal::Fsk4, Filters::Flat)), Some(Filters::Data));
+        assert_eq!(key_up_filters(false, None), None);
+        assert_eq!(key_up_filters(false, arm(Signal::Fsk4, Filters::Flat)), Some(Filters::Flat));
+        assert_eq!(key_up_filters(false, arm(Signal::Afsk, Signal::Afsk.default_filters())), Some(Filters::Data));
+        assert_eq!(key_up_filters(false, arm(Signal::Afsk, Filters::Voice)), None);
+        assert_eq!(key_up_filters(false, arm(Signal::AfskBk, Filters::Voice)), None);
+        assert_eq!(key_up_filters(false, arm(Signal::AfskBk, Filters::Data)), None, "afsk-bk never changes the filters");
     }
 }

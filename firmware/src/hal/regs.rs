@@ -23,6 +23,7 @@ pub const CRM_CTRLSTS_RSTFC: u32 = 1 << 24; // write 1: clear reset flags
 pub const CRM_APB1_TMR2: u32 = 1 << 0;
 pub const CRM_APB1_TMR3: u32 = 1 << 1;
 pub const CRM_APB1_TMR4: u32 = 1 << 2;
+pub const CRM_APB1_TMR5: u32 = 1 << 3;
 pub const CRM_APB1_TMR6: u32 = 1 << 4;
 pub const CRM_APB1_TMR7: u32 = 1 << 5;
 pub const CRM_APB1_SPI2: u32 = 1 << 14;
@@ -128,10 +129,11 @@ pub const DAC_CTRL_EN2: u32 = 1 << 16;
 #[cfg(feature = "tx")]
 pub const DAC_DHR8R2: u32 = DAC + 0x1C;
 
-// Timers (STM32F1 TIM layout): TMR2-4 general purpose, TMR6 / TMR7 basic, TMR8 advanced
+// Timers (STM32F1 TIM layout): TMR2-5 general purpose, TMR6 / TMR7 basic, TMR8 advanced
 pub const TMR2: u32 = 0x4000_0000;
 pub const TMR3: u32 = 0x4000_0400;
 pub const TMR4: u32 = 0x4000_0800;
+pub const TMR5: u32 = 0x4000_0C00;
 pub const TMR6: u32 = 0x4000_1000;
 pub const TMR7: u32 = 0x4000_1400;
 pub const TMR8: u32 = 0x4001_3400;

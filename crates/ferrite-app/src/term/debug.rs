@@ -258,11 +258,17 @@ impl Job {
                 if self.line == 0 {
                     put!(out, "  txtest: {} at {} % armed for the next PTT key-up, from the key-up to the release; once", a.signal.name(), a.level);
                 } else {
-                    use ferrite_core::txtest::Filters;
+                    use ferrite_core::txtest::{bk_gain, Filters, Signal};
+                    if a.signal == Signal::AfskBk {
+                        put!(out, "  afsk-bk: tone 1 1200/2200 Hz (REG_71) at gain {} (REG_70), REG_30 0xC3FA (mic off), TMR5 at 1200 Bd; DAC1, PC12 untouched", bk_gain(a.level));
+                        self.st = St::Over;
+                        self.line += 1;
+                        return Step::Line;
+                    }
                     out.push(match a.filters {
                         Filters::Flat => &b"  flat: TX HPF, LPF, pre-emphasis (REG_2B 2:0 = 111), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey"[..],
-                        Filters::Data => b"  data: TX HPF off, pre-emphasis and LPF on (REG_2B 2:0 = 100), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey",
-                        Filters::Voice => b"  voice: the chip's TX filters, MIC AGC and ALC as for speech; REG_7D 0x34, as an APRS burst",
+                        Filters::Data => b"  data: TX HPF off, pre-emphasis and LPF on (REG_2B 2:0 = 100), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey (as an APRS burst)",
+                        Filters::Voice => b"  voice: the chip's TX filters, MIC AGC and ALC as for speech; REG_7D 0x34",
                     });
                     self.st = St::Over;
                 }

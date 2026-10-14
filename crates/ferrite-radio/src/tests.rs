@@ -636,6 +636,66 @@ fn tx_test_filters_and_restore() {
     }
 }
 
+/// APRS-14 (decision 135): an APRS burst's key-up, on the recording bus: the data key-up's REG_7D 0x34, then the
+/// `data` set-up (`key_up_filters` for a data key-up): REG_2B[2:0] = 100, MIC AGC off (REG_19[15]), ALC off
+/// (REG_7D[6]), REG_50's TX mute clear; the unkey's restore puts the four back as the key-up found them.
+#[test]
+fn aprs_burst_takes_the_data_set_up() {
+    let f = ferrite_core::txtest::key_up_filters(true, None).expect("an APRS burst changes the set-up");
+    let mut b = bk();
+    for (r, v) in [(reg::AF_FILTERS, 0x0000), (0x19, 0x1041), (reg::MIC, 0xE924), (0x50, 0x3B18)] {
+        b.write(r, v);
+    }
+    chip::tx_setup(&mut b, &chip::TxSetup { mic: ferrite_core::vox::MIC_DATA, ..setup(VHF, false, 0) });
+    let was = chip::tx_test_filters(&mut b, f);
+    let bus = b.release();
+    assert_eq!((bus.last(reg::AF_FILTERS), bus.last(0x19), bus.last(reg::MIC)), (Some(0x0004), Some(0x9041), Some(0xE974)));
+    assert_eq!(bus.last(0x50), Some(0x3B18));
+    let mut b = Bk4829::new(bus);
+    chip::tx_test_restore(&mut b, &was);
+    let bus = b.release();
+    assert_eq!([bus.last(reg::AF_FILTERS), bus.last(0x19), bus.last(reg::MIC), bus.last(0x50)], [Some(0), Some(0x1041), Some(0xE934), Some(0x3B18)]);
+    // A voice key-up changes none of it.
+    assert_eq!(ferrite_core::txtest::key_up_filters(false, None), None);
+}
+
+/// TERM-33 `afsk-bk`: the begin switches the keyed chip to tone transmit through stock's step (REG_30 0x0200 wide
+/// or 0 narrow, then 0xC3FA: the mic ADC off) and only then sets tone 1 to the space tone at the gain (REG_71,
+/// REG_72 0, REG_70 0x8000 | gain << 8); a change writes REG_71 alone; the end turns the tones off (REG_70 0) and
+/// leaves REG_30 at tone transmit for the unkey; REG_47 (the key-up's AF route), REG_50, REG_2B, REG_7D and
+/// REG_19 are never written.
+#[test]
+fn afsk_bk_registers() {
+    use ferrite_core::txtest::{bk_gain, BK_MARK_HZ, BK_SPACE_HZ};
+    for narrow in [false, true] {
+        let mut b = bk();
+        chip::afsk_bk_begin(&mut b, BK_SPACE_HZ, bk_gain(100), narrow);
+        let bus = b.release();
+        let step = if narrow { 0 } else { 0x0200 };
+        assert_eq!(
+            bus.writes,
+            [(reg::POWER, step), (reg::POWER, 0xC3FA), (reg::TONE1_FREQ, bk4829::tone_word(2200)), (reg::TONE2_FREQ, 0), (reg::TONE, 0x8000 | 66 << 8)],
+            "narrow {narrow}"
+        );
+        assert_eq!(bk4829::tone_word(2200), 22714);
+        let mut b = Bk4829::new(bus);
+        chip::afsk_bk_tone(&mut b, BK_MARK_HZ);
+        chip::afsk_bk_tone(&mut b, BK_SPACE_HZ);
+        let bus = b.release();
+        assert_eq!(bus.writes[5..], [(reg::TONE1_FREQ, 12389), (reg::TONE1_FREQ, 22714)]);
+        let mut b = Bk4829::new(bus);
+        chip::afsk_bk_end(&mut b);
+        let bus = b.release();
+        assert_eq!(bus.writes[7..], [(reg::TONE, 0)]);
+        assert_eq!(bus.last(reg::POWER), Some(0xC3FA), "the mic stays off until the unkey");
+        assert!(bus.writes.iter().all(|w| [reg::POWER, reg::TONE, reg::TONE1_FREQ, reg::TONE2_FREQ].contains(&w.0)), "{:?}", bus.writes);
+    }
+    // LEVEL scales the gain into REG_70[14:8].
+    let mut b = bk();
+    chip::afsk_bk_begin(&mut b, BK_SPACE_HZ, bk_gain(150), false);
+    assert_eq!(b.release().last(reg::TONE), Some(0x8000 | 99 << 8));
+}
+
 /// A chip tuned to 146.520 MHz with a REG_3B of its own, and what TX-7 expects of it.
 fn keyed_ready() -> (Bk4829<RecBus>, chip::TxExpect) {
     let f = mhz(146) + 52_000;

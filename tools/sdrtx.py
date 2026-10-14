@@ -6,7 +6,7 @@ deviation.
     sdrtx.py 145.495 --seconds 15 [--gain 0] [--ppm 0] [--save cap.u8] [--load cap.u8]
     sdrtx.py 145.495 --eye    [--save cap.u8]    # `:txtest 4fsk` on the radio, then PTT for 10 s or more
     sdrtx.py 145.495 --sweep  [--save cap.u8]    # `:txtest sweep`: hold PTT for one pass at least (8.6 s)
-    sdrtx.py 145.495 --afsk   [--save cap.u8]    # `:txtest afsk`
+    sdrtx.py 145.495 --afsk   [--save cap.u8]    # `:txtest afsk` or `:txtest afsk-bk`
     sdrtx.py 0 --load cap.u8 --eye               # analyse a saved capture again (the frequency is only a label)
     sdrtx.py 0 --selftest                        # the analyses on synthetic FM IQ, no radio or SDR
 
@@ -17,7 +17,10 @@ The three test analyses (TERM-33, the firmware's `txtest`; signals in ferrite-co
   against PRBS9, and the DC drift and level droop over the run; saves an eye diagram PNG.
 - `--sweep`: the 1 kHz marker, then each third-octave tone (50 Hz to 8 kHz): deviation in Hz and dB against the 1 kHz
   tone, the -3 dB points, and a response plot PNG. The audio low-pass after the demodulator is 12 kHz for it.
-- `--afsk`: each tone's deviation (from the samples where the audio is at that tone) and the twist.
+- `--afsk`: each tone's deviation (from the samples where the audio is at that tone) and the twist; then the tone
+  switches: bit timing jitter against an ideal 1200 Bd grid (rms and peak, us, with the fitted baud), the phase step
+  at each switch (typical and spread, per direction) and the discriminator's spikes above 2.6 kHz at the switches
+  against mid-bit. The same for `:txtest afsk` (DAC1) and `:txtest afsk-bk` (the BK4829's tone generator).
 PNGs go to --out (default: next to --load's file, else the current directory); the path is printed.
 
 Needs librtlsdr (`rtl_sdr` on the PATH) and numpy (the project's .venv); matplotlib for the PNGs. The dongle's own
@@ -449,7 +452,141 @@ def afsk(dev, fs):
         tw = 20 * np.log10(res[2200] / res[1200])
         print(f"  twist (2200 over 1200): {tw:+.2f} dB")
         res["twist"] = tw
+        res.update(afsk_edges(dev, fs, res[1200], res[2200]))
     return res
+
+
+def tone_switches(dev, fs, a_mark, a_space):
+    """The tone switch instants (s), each with its direction (True: to mark): where the two tones' amplitudes, each
+    over its own median and smoothed by a 600 Hz low-pass (symmetric, so no delay), cross."""
+    t = np.arange(len(dev)) / fs
+    h = lowpass(600, fs, 2 * int(fs / 1200) + 1)
+    am = np.abs(conv_same(dev * np.exp(-2j * np.pi * 1200 * t), h)) / a_mark
+    asp = np.abs(conv_same(dev * np.exp(-2j * np.pi * 2200 * t), h)) / a_space
+    d = am - asp
+    # Hysteresis: a switch counts once the difference has gone a tenth of the way to the other tone; its instant
+    # is the last zero crossing before that (a phase jump's spike may cross and cross back first).
+    h = 0.2
+    side = np.where(d > h, 1, np.where(d < -h, -1, 0))
+    nz = np.nonzero(side)[0]
+    if len(nz) < 2:
+        return np.array([]), np.array([], bool)
+    flips = nz[1:][side[nz[1:]] != side[nz[:-1]]]
+    cross = np.nonzero(np.sign(d[1:]) != np.sign(d[:-1]))[0]
+    out_t, out_up = [], []
+    for j in flips:
+        k = np.searchsorted(cross, j) - 1
+        if k < 0:
+            continue
+        i = cross[k]
+        out_t.append((i + d[i] / (d[i] - d[i + 1])) / fs)
+        out_up.append(side[j] > 0)
+    return np.array(out_t), np.array(out_up)
+
+
+def afsk_edges(dev, fs, a_mark, a_space):
+    """Bit timing and phase continuity at the tone switches (TERM-33, for `afsk` from DAC1 and `afsk-bk` from the
+    BK4829's generator alike).
+
+    Timing: the bit period that lines the switch instants up best (the radio's baud with the dongle's clock error in
+    it), then each switch's place within its bit against the mean place of its kind (the gap before it, 1 bit or
+    more, and its direction: the detector's own bias at a 1-bit run, the same every time); the spread is the
+    jitter: rms, peak and 99 %, microseconds. Phase jumps dent the tones' amplitudes and move the detected instants
+    too, so a large phase spread inflates the jitter: read the two together.
+
+    Phase: each switch's two tones are fitted on either side (0.4 bit each, 0.1 bit clear of the switch) and carried
+    to the switch: the phase step there (degrees). A phase-continuous source gives a constant step per direction
+    (the receive path's delay differs per tone), so its spread is what counts. Spikes: the discriminator's output
+    above 2.6 kHz (both tones and their sidebands under it), its peak within 0.2 bit of each switch against the same
+    at mid-bit in the 7-bit runs; a phase jump shows as a spike at the switch."""
+    T0 = 1 / 1200
+    ts, up = tone_switches(dev, fs, a_mark, a_space)
+    # Keep the switches at least half a bit after the last kept (a noise crossing inside a bit falls out) and
+    # number them by their gaps rounded to whole bits.
+    keep = [0]
+    for k in range(1, len(ts)):
+        if (ts[k] - ts[keep[-1]]) / T0 > 0.5:
+            keep.append(k)
+    ts, up = ts[keep], up[keep]
+    out = {}
+    if len(ts) < 20:
+        print("  bit timing: too few tone switches found")
+        return out
+    gaps = np.round(np.diff(ts) / T0).astype(int)
+    use = np.arange(len(ts)) > 0
+    kind = np.concatenate([[0], np.minimum(gaps, 2)]) * 2 + up  # the gap before (1 bit, or more) and the direction
+    # The bit clock: the period that lines the switches up best (each switch's place within its bit, as a phase,
+    # most concentrated), searched over +-500 ppm (the dongle's clock error), then the place's spread per kind of
+    # switch. Counting no bits, a missed or an extra switch costs one point, not the fit.
+    tu, ku = ts[use], kind[use]
+    def conc(T):
+        z = np.exp(2j * np.pi * tu / T)
+        return sum(abs(z[ku == k].sum()) for k in set(ku))
+    grid = T0 / (1 + np.arange(-500, 501, 2) * 1e-6)
+    T = grid[np.argmax([conc(x) for x in grid])]
+    fine = T * (1 + np.arange(-3, 3.01, 0.05) * 1e-6)
+    T = fine[np.argmax([conc(x) for x in fine])]
+    ph = np.angle(np.exp(2j * np.pi * tu / T))
+    resid = np.empty_like(ph)
+    bias = {}
+    for k in set(ku):
+        m = np.angle(np.mean(np.exp(1j * ph[ku == k])))
+        resid[ku == k] = np.angle(np.exp(1j * (ph[ku == k] - m)))
+        bias[k] = m * T / (2 * np.pi) * 1e6
+    jit = resid * T / (2 * np.pi) * 1e6
+    nbits = int(round((ts[-1] - ts[0]) / T))
+    out.update(period_us=T * 1e6, baud_ppm=(T0 / T - 1) * 1e6, jitter_rms_us=float(np.sqrt(np.mean(jit**2))), jitter_peak_us=float(np.max(np.abs(jit))), switches=int(use.sum()))
+    print(f"  bit timing: {out['switches']} tone switches over {nbits} bits; bit {out['period_us']:.3f} us "
+          f"({out['baud_ppm']:+.0f} ppm against 1200 Bd, the dongle's clock error included)")
+    print(f"  jitter of the switches against the ideal 1200 Bd grid: rms {out['jitter_rms_us']:.1f} us, peak {out['jitter_peak_us']:.1f} us, "
+          f"99 % {np.percentile(np.abs(jit), 99):.1f} us ({out['jitter_rms_us'] / (T0 * 1e6) * 100:.2f} % of a bit rms)")
+    ref = np.median(list(bias.values()))
+    rel = {k: np.angle(np.exp(2j * np.pi * (v - ref) / (T * 1e6))) * T * 1e6 / (2 * np.pi) for k, v in bias.items()}
+    print("  detector offset per switch kind (us; gap 1 = after a 1-bit tone): " + ", ".join(
+        f"gap {'1' if k < 4 else '2+'} to {'mark' if k % 2 else 'space'} {v:+.1f}" for k, v in sorted(rel.items())))
+    # Phase step at each switch.
+    w, clear = int(0.4 * T0 * fs), int(0.1 * T0 * fs)
+    def fit(seg_t, x, hz):
+        B = np.column_stack([np.cos(2 * np.pi * hz * seg_t), np.sin(2 * np.pi * hz * seg_t), np.ones(len(seg_t))])
+        c, *_ = np.linalg.lstsq(B, x, rcond=None)
+        return np.arctan2(-c[1], c[0])  # x ~ cos(2 pi f (t - ts) + phase)
+    steps = {True: [], False: []}
+    for k in np.nonzero(use)[0]:
+        c = int(round(ts[k] * fs))
+        if c - clear - w < 0 or c + clear + w > len(dev):
+            continue
+        before, after = (1200, 2200) if not up[k] else (2200, 1200)
+        tb = (np.arange(c - clear - w, c - clear) / fs) - ts[k]
+        ta = (np.arange(c + clear, c + clear + w) / fs) - ts[k]
+        pb = fit(tb, dev[c - clear - w : c - clear], before)
+        pa = fit(ta, dev[c + clear : c + clear + w], after)
+        steps[bool(up[k])].append(np.angle(np.exp(1j * (pa - pb))))
+    for d, name in ((True, "to mark"), (False, "to space")):
+        v = np.array(steps[d])
+        if len(v) < 5:
+            continue
+        m = np.angle(np.mean(np.exp(1j * v)))
+        spread = np.degrees(np.sqrt(-2 * np.log(max(np.abs(np.mean(np.exp(1j * v))), 1e-9))))
+        out[f"phase_{name.split()[1]}"] = (float(np.degrees(m)), float(spread))
+        print(f"  phase step at the switch {name}: {np.degrees(m):+.0f} deg typical, spread {spread:.0f} deg (circular sd; "
+              f"near 0 for a phase-continuous source, tens of degrees when each switch jumps)")
+    # Spikes: above 2.6 kHz, at the switches against mid-bit.
+    f = np.fft.rfftfreq(len(dev), 1 / fs)
+    hi = np.abs(np.fft.irfft(np.fft.rfft(dev) * (f > 2600), len(dev)))
+    r2 = int(0.2 * T0 * fs)
+    def peak(tc):
+        c = int(round(tc * fs))
+        return hi[max(c - r2, 0) : c + r2 + 1].max() if r2 < c < len(hi) - r2 else np.nan
+    at_sw = np.array([peak(x) for x in ts[use]])
+    mids = [ts[k - 1] + (j + 0.5) * T for k in np.nonzero(use)[0] if gaps[k - 1] >= 5 for j in range(1, gaps[k - 1] - 1)]
+    at_mid = np.array([peak(x) for x in mids])
+    if np.isfinite(at_sw).any() and np.isfinite(at_mid).any():
+        es, em = np.nanmedian(at_sw), np.nanmedian(at_mid)
+        out["spike_db"] = float(20 * np.log10(es / max(em, 1e-9)))
+        out["spike_hz"] = float(es)
+        print(f"  discriminator above 2.6 kHz: {es:.0f} Hz peak at the switches, {em:.0f} Hz mid-bit (median): "
+              f"{out['spike_db']:+.1f} dB at the switches")
+    return out
 
 
 # ---- --selftest ----
@@ -480,14 +617,27 @@ def gen_sweep(passes, rate=48_000):
     return np.concatenate(out)
 
 
-def gen_afsk(secs, space_gain, rate=48_000):
-    """Bell 202 flags, NRZI (a 0 changes the tone), phase-continuous; the space tone `space_gain` times the mark's."""
+def gen_afsk(secs, space_gain, rate=48_000, jitter_us=0.0, phase_jump=False, rng=None):
+    """Bell 202 flags, NRZI (a 0 changes the tone; the first bit on space, as the firmware), phase-continuous; the
+    space tone `space_gain` times the mark's. `jitter_us`: each switch moved by a uniform random time up to that
+    (as the BK4829 path's late writes); `phase_jump`: each tone starts again from a random phase at a switch."""
     n = int(secs * rate)
-    nb = n * 1200 // rate + 1
+    nb = n * 1200 // rate + 2
     flag = (0x7E >> (np.arange(nb) % 8)) & 1
     mark_bit = (np.cumsum(flag == 0) % 2) == 0
-    mark = mark_bit[np.arange(n) * 1200 // rate]
-    ph = 2 * np.pi * np.cumsum(np.where(mark, 1200, 2200)) / rate
+    edges = np.arange(nb + 1) / 1200.0
+    if jitter_us:
+        edges = edges + rng.uniform(0, jitter_us * 1e-6, len(edges))
+    t = np.arange(n) / rate
+    bit = np.searchsorted(edges, t, side="right") - 1
+    mark = mark_bit[bit]
+    hz = np.where(mark, 1200, 2200)
+    if phase_jump:
+        changed = np.concatenate([[True], mark_bit[1:] != mark_bit[:-1]])
+        last = np.maximum.accumulate(np.where(changed, np.arange(nb), 0))  # the bit each tone run started at
+        ph = 2 * np.pi * hz * (t - edges[last[bit]]) + rng.uniform(0, 2 * np.pi, nb)[last[bit]]
+    else:
+        ph = 2 * np.pi * np.cumsum(hz) / rate
     return np.sin(ph) * np.where(mark, 1.0, space_gain)
 
 
@@ -554,6 +704,30 @@ def selftest(out_dir):
     r = afsk(dev, fs)
     check("mark deviation", abs(r[1200] - 2500) < 75, f"{r[1200]:.0f} Hz")
     check("twist +2 dB", abs(r.get("twist", 99) - 2) < 0.4, f"{r.get('twist', 0):+.2f} dB")
+    check("clean timing: jitter under 10 us rms", r.get("jitter_rms_us", 99) < 10, f"{r.get('jitter_rms_us', 0):.1f} us")
+    check("baud: the +10 ppm clock", abs(r.get("baud_ppm", 99) - 10) < 20, f"{r.get('baud_ppm', 0):+.0f} ppm")
+    pc = [r.get("phase_mark", (0, 99))[1], r.get("phase_space", (0, 99))[1]]
+    check("phase-continuous: step spread under 10 deg", max(pc) < 10, pc)
+    clean_spike = r.get("spike_hz", 0)
+
+    print("== selftest AFSK, late switches (as the BK4829 path's late writes might be): each up to 300 us late, uniform")
+    raw = to_iq(gen_afsk(3, 10 ** (2 / 20), jitter_us=300, rng=rng) * 2500, 48_000, -20, 300, rng)
+    dev, fs, off = demod(raw, 0, 6000)
+    r = afsk(dev, fs)
+    want = 300 / np.sqrt(12)
+    check(f"jitter near {want:.0f} us rms (uniform 0-300 us)", abs(r.get("jitter_rms_us", 0) - want) < 15, f"{r.get('jitter_rms_us', 0):.1f} us")
+    check("baud: the -20 ppm clock", abs(r.get("baud_ppm", 99) + 20) < 40, f"{r.get('baud_ppm', 0):+.0f} ppm")
+
+    print("== selftest AFSK, phase jumps: each tone run from a random phase, on time")
+    raw = to_iq(gen_afsk(3, 10 ** (2 / 20), phase_jump=True, rng=rng) * 2500, 48_000, 0, 300, rng)
+    dev, fs, off = demod(raw, 0, 6000)
+    r = afsk(dev, fs)
+    pc = [r.get("phase_mark", (0, 0))[1], r.get("phase_space", (0, 0))[1]]
+    check("phase jumps: step spread over 40 deg", min(pc) > 40, [round(x) for x in pc])
+    check("phase jumps: bigger spikes at the switches than the clean signal's", r.get("spike_hz", 0) > clean_spike * 1.2, f"{r.get('spike_hz', 0):.0f} vs {clean_spike:.0f} Hz")
+    # Phase jumps move the detected switch instants too (each jump dents both tones' amplitudes differently), so the
+    # jitter reads high on this signal although every switch is on time: read the jitter with the phase spread.
+    print(f"  (jitter on a phase-jumping signal: {r.get('jitter_rms_us', 0):.0f} us rms, from the jumps, not the timing)")
     print("selftest:", "all pass" if ok else "FAILED")
     return ok
 
@@ -571,7 +745,7 @@ def main():
     a.add_argument("--audio-lp", type=float, help="audio low-pass after the demodulator, Hz (6000; 12000 with --sweep)")
     a.add_argument("--eye", action="store_true", help="TERM-33 4FSK: levels, eyes, PRBS errors, drift; eye PNG")
     a.add_argument("--sweep", action="store_true", help="TERM-33 sweep: response, -3 dB points; plot PNG")
-    a.add_argument("--afsk", action="store_true", help="TERM-33 AFSK flags: each tone's deviation and the twist")
+    a.add_argument("--afsk", action="store_true", help="TERM-33 AFSK flags (afsk or afsk-bk): deviations, twist, bit timing jitter, phase at the switches")
     a.add_argument("--out", help="where the PNGs go")
     a.add_argument("--selftest", action="store_true", help="run the analyses on synthetic IQ and check them")
     o = a.parse_args()

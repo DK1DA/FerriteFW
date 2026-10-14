@@ -1226,8 +1226,9 @@ fn debug_mic() {
 }
 
 /// TERM-33: `txtest MODE [FILTERS] [LEVEL]` arms, `txtest off` disarms, `txtest` alone asks (a read); the filters
-/// default to data for 4fsk and sweep, voice for afsk; the level to 100 %, 10 to 150 taken, with or without the
-/// filters before it; anything else is refused before anything is sent; a receive-only build's refusal prints as one.
+/// default to data (4fsk, sweep and afsk alike, as an APRS burst goes out); the level to 100 %, 10 to 150 taken, with or without the
+/// filters before it; `afsk-bk` takes a level but no filters word and shows its tone gain (66 at 100 %, 99 at 150);
+/// anything else is refused before anything is sent; a receive-only build's refusal prints as one.
 #[test]
 fn debug_txtest() {
     use ferrite_core::txtest::{Arm, Ask, Filters, Signal};
@@ -1239,30 +1240,37 @@ fn debug_txtest() {
     for (line, signal, filters, level) in [
         ("txtest 4fsk", Signal::Fsk4, Filters::Data, 100),
         ("txtest SWEEP", Signal::Sweep, Filters::Data, 100),
-        ("txtest afsk", Signal::Afsk, Filters::Voice, 100),
+        ("txtest afsk", Signal::Afsk, Filters::Data, 100),
         ("txtest afsk flat", Signal::Afsk, Filters::Flat, 100),
         ("txtest 4fsk voice", Signal::Fsk4, Filters::Voice, 100),
         ("txtest 4fsk flat 80", Signal::Fsk4, Filters::Flat, 80),
-        ("txtest afsk 70", Signal::Afsk, Filters::Voice, 70),
+        ("txtest afsk 70", Signal::Afsk, Filters::Data, 70),
+        ("txtest afsk voice", Signal::Afsk, Filters::Voice, 100),
         ("txtest sweep DATA 150", Signal::Sweep, Filters::Data, 150),
         ("txtest 4fsk 10", Signal::Fsk4, Filters::Data, 10),
+        ("txtest afsk-bk", Signal::AfskBk, Filters::Voice, 100),
+        ("txtest AFSK-BK 150", Signal::AfskBk, Filters::Voice, 150),
     ] {
         r.cmd(line);
         assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal, filters, level })))], "{line}");
         let raw = r.raw();
         assert!(raw.contains(&std::format!("txtest: {} at {level} % armed for the next PTT key-up", signal.name())), "{raw}");
         let want = match filters {
+            _ if signal == Signal::AfskBk => "afsk-bk: tone 1 1200/2200 Hz (REG_71) at gain",
             Filters::Flat => "flat: TX HPF, LPF, pre-emphasis",
             Filters::Data => "data: TX HPF off, pre-emphasis and LPF on (REG_2B 2:0 = 100)",
             Filters::Voice => "voice: the chip's TX filters",
         };
         assert!(raw.contains(want), "{line}: {raw}");
+        if signal == Signal::AfskBk {
+            assert!(raw.contains(&std::format!("at gain {} (REG_70)", if level == 100 { 66 } else { 99 })), "{raw}");
+        }
         r.send(b"\r");
     }
     r.cmd("txtest off");
     assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(None))]);
     r.send(b"\r");
-    for bad in ["txtest fsk", "txtest 4fsk loud", "txtest sweep flat 2", "txtest off now", "txtest 4fsk 9", "txtest 4fsk 151", "txtest afsk data 100 1", "txtest 4fsk 100 flat"] {
+    for bad in ["txtest fsk", "txtest 4fsk loud", "txtest sweep flat 2", "txtest off now", "txtest 4fsk 9", "txtest 4fsk 151", "txtest afsk data 100 1", "txtest 4fsk 100 flat", "txtest afsk-bk data", "txtest afsk-bk voice 100", "txtest afsk-bk 151"] {
         r.cmd(bad);
         assert!(r.bottom().contains("txtest 4fsk|sweep|afsk"), "{bad}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");

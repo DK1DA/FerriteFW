@@ -131,8 +131,11 @@ impl Radio {
         let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
         let setup = self.tx_chip_setup(f, narrow, tone, data.is_some() || test.is_some());
         radio_chip::tx_setup(&mut self.chip(n), &setup);
-        if let Some(t) = test.filter(|t| t.filters != ferrite_core::txtest::Filters::Voice) {
-            self.tx.test_regs = Some((n, radio_chip::tx_test_filters(&mut self.chip(n), t.filters)));
+        // APRS-14 (decision 135): an APRS burst (a data key-up) goes out with the `data` TX audio set-up, as
+        // `txtest`'s `data`; a test with `flat` or `data` its own; both put back at the unkey. `afsk-bk` and `voice`
+        // leave the chip's voice settings.
+        if let Some(f) = ferrite_core::txtest::key_up_filters(data.is_some(), test) {
+            self.tx.test_regs = Some((n, radio_chip::tx_test_filters(&mut self.chip(n), f)));
         }
         self.tx.pa = pa;
         self.tx.fault = false;
@@ -154,20 +157,27 @@ impl Radio {
         }
         self.live.tx.keyed = true;
         self.tx.chip = Some(n);
-        // TERM-33: DAC1 plays the test from here to the release (PC12 high meanwhile, PB8 already on).
+        // TERM-33: DAC1 plays the test from here to the release (PC12 high meanwhile, PB8 already on); `afsk-bk`
+        // is the keyed chip's tone generator instead, timed by TMR5 (`afskbk`), DAC1 and PC12 untouched.
         if let Some(t) = test {
             self.tx.test = None;
-            self.tx.test_playing = true;
-            crate::tasks::dsp::TXTEST.signal(Some(t));
+            if t.signal.dac() {
+                self.tx.test_playing = true;
+                crate::tasks::dsp::TXTEST.signal(Some(t));
+            } else {
+                self.afsk_bk_start(n, t.level);
+            }
             log(b"txtest playing ", t.signal as u32 + 1);
         }
     }
 
-    /// TERM-33: the test signal stopped (the DSP task puts DAC1 to mid-scale and PC12 low).
+    /// TERM-33: the test signal stopped (the DSP task puts DAC1 to mid-scale and PC12 low; `afsk-bk`'s timer
+    /// stops and the tones go off).
     fn test_audio_off(&mut self) {
         if core::mem::take(&mut self.tx.test_playing) {
             crate::tasks::dsp::TXTEST.signal(None);
         }
+        self.afsk_bk_stop();
     }
 
     /// The chip set-up for a key-up (TX-23; TX audit F1, F2, F7, F14): the calibration's sub-tone deviation at the
@@ -292,7 +302,8 @@ impl Radio {
 
     /// After any unkey: the chips back to their slots on the next tick, the UI told.
     pub(super) fn unkeyed(&mut self) {
-        // TERM-33: a test's audio off and the `flat` or `data` registers back, on the chip that was keyed.
+        // TERM-33: a test's audio off and the `flat` or `data` registers back (an APRS burst's too), on the chip
+        // that was keyed.
         self.test_audio_off();
         if let Some((n, r)) = self.tx.test_regs.take().filter(|(n, _)| self.has(*n)) {
             radio_chip::tx_test_restore(&mut self.chip(n), &r);
