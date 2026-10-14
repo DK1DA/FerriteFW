@@ -34,8 +34,10 @@ pub struct Req {
     pub am: bool,
     pub region: Region,
     pub extend: bool,
-    /// The calibration sector and the MCU check passed (TX-13 to TX-15), and calibration covers `tx`.
+    /// The calibration sector and the MCU check passed (TX-13 to TX-15).
     pub cal_ok: bool,
+    /// The calibration's TX windows hold `tx` (CAL-11, `TxCal::in_window`; always true below 64 MHz, TX-41).
+    pub cal_window: bool,
     /// The battery is above the cut-off.
     pub batt_ok: bool,
     /// The power level: 0 Low, 1 Mid, 2 High; it sets how fast the duty bucket fills (TX-38).
@@ -129,6 +131,10 @@ impl TxSeq {
         txplan::check(r.tx, r.region, r.extend)?;
         if !r.cal_ok {
             return Err(Refusal::Locked);
+        }
+        // TX-1, CAL-11: the region plan (or Extend TX's hardware range) ∩ this radio's calibration windows.
+        if !r.cal_window {
+            return Err(Refusal::NotCalibrated);
         }
         if txplan::locked_125m(r.tx) {
             return Err(Refusal::Unmeasured125);
@@ -268,7 +274,7 @@ mod tests {
     use crate::path::{Cause, Rx};
 
     fn req(tx: Freq10) -> Req {
-        Req { tx, rx: tx, kind: Kind::Voice, person: true, confirmed: false, am: false, region: Region::Us, extend: false, cal_ok: true, batt_ok: true, power: 2 }
+        Req { tx, rx: tx, kind: Kind::Voice, person: true, confirmed: false, am: false, region: Region::Us, extend: false, cal_ok: true, cal_window: true, batt_ok: true, power: 2 }
     }
 
     fn rx_on(f: Freq10) -> Path {
@@ -285,6 +291,8 @@ mod tests {
         assert_eq!(t.check(&ok, &p, 0), Ok(()));
         assert_eq!(t.check(&Req { am: true, ..ok }, &p, 0), Err(Refusal::AmRxOnly));
         assert_eq!(t.check(&Req { cal_ok: false, ..ok }, &p, 0), Err(Refusal::Locked));
+        assert_eq!(t.check(&Req { cal_window: false, ..ok }, &p, 0), Err(Refusal::NotCalibrated), "CAL-11");
+        assert_eq!(t.check(&Req { cal_window: false, ..req(mhz(162) + 55_000) }, &p, 0), Err(Refusal::OutOfBand), "the plan first");
         assert_eq!(t.check(&Req { batt_ok: false, ..ok }, &p, 0), Err(Refusal::Battery));
         assert_eq!(t.check(&req(mhz(162) + 55_000), &p, 0), Err(Refusal::OutOfBand));
         assert_eq!(t.check(&Req { extend: true, ..req(mhz(162) + 55_000) }, &p, 0), Ok(()));

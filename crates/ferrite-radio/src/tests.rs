@@ -31,6 +31,7 @@ fn req(tx: Freq10, rx: Freq10) -> Req {
         region: Region::Us,
         extend: false,
         cal_ok: true,
+        cal_window: true,
         batt_ok: true,
         power: 2,
     }

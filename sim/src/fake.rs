@@ -241,6 +241,7 @@ impl FakeRadio {
             region: Region::Us,
             extend: true,
             cal_ok: true,
+            cal_window: true,
             batt_ok: true,
             power: self.power[slot as usize % 4],
         };

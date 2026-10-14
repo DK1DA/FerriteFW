@@ -2140,6 +2140,7 @@ impl Radio {
             region,
             extend,
             cal_ok: self.tx.cal.is_some(),
+            cal_window: self.tx.cal.is_some_and(|c| c.in_window(f)),
             batt_ok: self.battery_ok(),
             power: data.unwrap_or(self.tx.power[s]).min(2),
         };
@@ -2506,6 +2507,7 @@ impl Radio {
             region,
             extend,
             cal_ok: self.tx.cal.is_some(),
+            cal_window: self.tx.cal.is_some_and(|c| c.in_window(f)),
             batt_ok: self.battery_ok(),
             power,
         };

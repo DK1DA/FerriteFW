@@ -141,7 +141,8 @@ pub fn locked_125m(f: Freq10) -> bool {
 
 /// Where transmit may go: the region's bands (or, with Extend TX, any band the hardware covers) and the HF
 /// windows. Extend TX never reaches below 64 MHz: the calibration has no HF window, so HF stays on the amateur
-/// windows (TX-41). Calibration windows are the Radio task's to add.
+/// windows (TX-41). The calibration's own windows are intersected after this, in the Radio task's sequencer
+/// (`TxCal::in_window`, `txseq::Req::cal_window`): the UI doesn't read them.
 pub fn check(f: Freq10, region: Region, extend: bool) -> Result<(), Refusal> {
     if extend && f >= mhz(64) {
         // Calibration ∩ hardware: the TX chips' ranges (6 m and below 24 MHz stay locked, TX-4).
