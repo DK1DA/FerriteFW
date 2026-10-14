@@ -116,6 +116,8 @@ def demod(raw, mhz, audio_lp, quiet=False):
     blk = int(fs * 0.01)
     pb = p[: len(p) // blk * blk].reshape(-1, blk).mean(1)
     floor = np.percentile(pb, 10)  # the quietest tenth: a capture can be mostly keyed
+    if floor > 1e3:  # keyed through nearly all of it: an unkeyed dongle reads well under 30 dB here
+        floor = 1.0
     on = pb > floor * 100  # 20 dB over the floor
     if not on.any():
         print(f"no transmission found (floor {10*np.log10(floor+1e-12):.1f} dB, clipping {clip:.2%})")
