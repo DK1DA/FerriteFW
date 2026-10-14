@@ -70,6 +70,18 @@ impl Radio {
         }
     }
 
+    /// LINK-20, TX-47: unkey as a cut (a remote key-up whose keepalive or session was lost): no end tone, CW ID or
+    /// carrier hold, as the timeout's.
+    pub(super) async fn transmit_cut(&mut self) {
+        let now = now_ms() as u32;
+        let mut st = Steps::default();
+        self.test_audio_off();
+        let cfg = self.tx_cfg();
+        self.tx.seq.cut(&cfg, &mut self.path, now, &mut st);
+        self.run(&st).await;
+        self.unkeyed();
+    }
+
     /// Key up or unkey a slot (3 = HF mode's frequency); `data`: a data key-up at that power level (APRS).
     pub(super) async fn transmit(&mut self, slot: u8, on: bool, data: Option<u8>) {
         let now = now_ms() as u32;

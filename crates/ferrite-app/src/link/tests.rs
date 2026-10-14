@@ -374,7 +374,12 @@ fn keyed(c: &[RadioCmd]) -> bool {
 }
 
 fn unkeyed(c: &[RadioCmd]) -> bool {
-    c.iter().any(|c| matches!(c, RadioCmd::Transmit { on: false, .. }))
+    c.iter().any(|c| matches!(c, RadioCmd::Transmit { on: false, .. } | RadioCmd::TxCut { .. }))
+}
+
+/// LINK-20, TX-47: unkeyed as a cut (no end tone, CW ID or carrier hold), not as a PTT let go.
+fn cut(c: &[RadioCmd]) -> bool {
+    c.iter().any(|c| matches!(c, RadioCmd::TxCut { .. })) && !c.iter().any(|c| matches!(c, RadioCmd::Transmit { on: false, .. }))
 }
 
 fn text(a: &[u8]) -> &str {
@@ -398,7 +403,9 @@ fn remote_ptt_keys_and_unkeys() {
     }
     assert!(!unkeyed(&pc.cmds()), "3 s keyed with keepalives");
     assert_eq!(pc.ptt(Ptt::Off).0, Status::Ok as u8);
-    assert!(pc.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }));
+    let c = pc.cmds();
+    assert!(c.contains(&RadioCmd::Transmit { slot: 0, on: false }), "KEY off: a PTT let go (the hold, TX-47)");
+    assert!(!c.iter().any(|c| matches!(c, RadioCmd::TxCut { .. })));
     assert_eq!(pc.app.screen(), Screen::Home);
     let (s, a) = pc.ptt(Ptt::Alive);
     assert_eq!((s, text(&a)), (Status::Invalid as u8, "not keyed"));
@@ -416,7 +423,8 @@ fn remote_ptt_keys_and_unkeys() {
     assert_eq!(pc.ask(msg::KEY, &[0x10, 1]).0, Status::BadArg as u8, "other keys: LINK-19, not built");
 }
 
-/// LINK-20: no keepalive for 2 s, no transmit; the PC hears why.
+/// LINK-20: no keepalive for 2 s, no transmit, and the carrier drops at once (a cut, TX-47: no 400 ms hold); the
+/// PC hears why.
 #[test]
 fn remote_ptt_keepalive_timeout() {
     let mut pc = Pc::tx();
@@ -426,13 +434,14 @@ fn remote_ptt_keepalive_timeout() {
     assert!(pc.app.remote_keyed() && !unkeyed(&pc.cmds()), "1.8 s: still keyed");
     pc.pass(300, &LiveAll::default());
     assert!(!pc.app.remote_keyed());
-    assert!(unkeyed(&pc.cmds()), "past 2 s: unkeyed");
+    assert!(cut(&pc.cmds()), "past 2 s: unkeyed as a cut");
+    assert!(!pc.app.tx_cut);
     assert_eq!(pc.app.screen(), Screen::Home);
     let (s, a) = pc.ptt(Ptt::Alive);
     assert_eq!((s, text(&a)), (Status::Invalid as u8, RemoteEnd::Keepalive.text()));
 }
 
-/// LINK-20, LINK-28: the session closing or moving port ends a remote transmission.
+/// LINK-20, LINK-28: the session closing or moving port ends a remote transmission, as a cut (TX-47).
 #[test]
 fn remote_ptt_ends_with_the_session() {
     let mut pc = Pc::tx();
@@ -440,7 +449,7 @@ fn remote_ptt_ends_with_the_session() {
     pc.cmds();
     pc.link.set_port(false, 115_200); // Bluetooth took the session, or the cable took it back
     pc.pass(50, &LiveAll::default());
-    assert!(unkeyed(&pc.cmds()) && !pc.app.remote_keyed());
+    assert!(cut(&pc.cmds()) && !pc.app.remote_keyed());
     assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::Session.text());
 }
 

@@ -311,7 +311,7 @@ impl FakeRadio {
                 self.watcher.pause(now, secs);
             }
             RadioCmd::Transmit { slot, on: true } => self.key(slot, Kind::Voice),
-            RadioCmd::Transmit { on: false, .. } => self.unkey(),
+            RadioCmd::Transmit { on: false, .. } | RadioCmd::TxCut { .. } => self.unkey(),
             RadioCmd::TransmitData { slot, on: true, .. } => self.key(slot, Kind::Data),
             RadioCmd::TransmitData { on: false, .. } => self.unkey(),
             RadioCmd::ScanSkip { slot } => {

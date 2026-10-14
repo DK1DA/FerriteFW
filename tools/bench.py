@@ -43,7 +43,7 @@ page, txt and charts in <run>/, the capture (<run>.u8, unless --no-keep-captures
 self-contained page. The build is the radio's version plus --build LABEL, or the flashed image's hash, or the host
 checkout's git hash (marked "host"). Each run is compared with the newest earlier session holding the same
 configuration (run name, frequency, mode); changes beyond the tolerances (config `tolerances`: [glob, abs|rel|exact,
-value], first match wins) are flagged. --config FILE.json overrides any default (see DEFAULTS).
+value], first match wins) are flagged; an `info` tolerance shows the change but never flags it. --config FILE.json overrides any default (see DEFAULTS).
 
 Needs numpy and matplotlib (the project's .venv), pyserial for the cable, rtl_sdr for a capture.
 """
@@ -111,9 +111,17 @@ DEFAULTS = {
         ["markers_found", "exact", 0],
         ["hold", "exact", 0],
         ["dcs.code", "exact", 0],
-        ["fsk4.errors", "abs", 0],
+        # The tone generator's swell and timing per REG_40 burst vary run to run on an unchanged build (start_frac
+        # swung -2.2 to +0.7, jitter 14 to 41 us): shown, never flagged. Their deviation and twist stay strict.
+        ["reg40.*.start_frac", "info", 0],
+        ["reg40.*.tau_ms", "info", 0],
+        ["reg40.*.jitter_rms_us", "info", 0],
+        # Exact at 0 errors; a run already full of errors (6855 against 6878) isn't a change.
+        ["fsk4.errors", "rel", 0.05],
         ["fsk4.symbols", "rel", 0.2],
-        ["fsk4.levels.*", "rel", 0.03],
+        # Absolute, so a UHF carrier offset of ~70 Hz (the SDR's ppm) moves all four together; fsk4.ratio (strict)
+        # catches a real change of scale, a flip moves them by thousands.
+        ["fsk4.levels.*", "abs", 100],
         ["fsk4.ratio", "abs", 0.1],
         ["sweep.*.low_hz", "rel", 0.05],
         ["sweep.*.high_hz", "abs", 30],
@@ -524,7 +532,7 @@ def compare(cfg, now, prev):
     for k in sorted(set(now) | set(prev)):
         a, b = now.get(k), prev.get(k)
         kind, val = tolerance(cfg, k)
-        tol = {"abs": f"±{val:g}", "rel": f"±{val * 100:g} %", "exact": "same"}[kind]
+        tol = {"abs": f"±{val:g}", "rel": f"±{val * 100:g} %", "exact": "same", "info": "info only"}[kind]
         if a is None and b is None:
             continue
         if b is None:
@@ -533,13 +541,16 @@ def compare(cfg, now, prev):
         if a is None:
             rows.append((k, None, b, None, tol, "missing"))
             continue
+        if kind == "info":
+            rows.append((k, a, b, None if isinstance(a, str) or isinstance(b, str) else a - b, tol, "ok" if a == b else "info"))
+            continue
         if isinstance(a, str) or isinstance(b, str) or kind == "exact":
             rows.append((k, a, b, None, tol, "ok" if a == b else "CHANGED"))
             continue
         d = a - b
         lim = val if kind == "abs" else val * max(abs(b), 1e-9)
         rows.append((k, a, b, d, tol, "ok" if abs(d) <= lim + 1e-12 else "CHANGED"))
-    order = {"CHANGED": 0, "missing": 1, "new": 2, "ok": 3}
+    order = {"CHANGED": 0, "missing": 1, "new": 2, "info": 3, "ok": 4}
     rows.sort(key=lambda r: (order[r[5]], r[0]))
     return rows
 
@@ -1031,7 +1042,7 @@ def sweep_svg(cur, prev):
 
 
 def pill(status):
-    cls = {"ok": "ok", "pass": "ok", "CHANGED": "bad", "FAIL": "bad", "missing": "bad", "new": "warn"}.get(status, "warn")
+    cls = {"ok": "ok", "pass": "ok", "info": "ok", "CHANGED": "bad", "FAIL": "bad", "missing": "bad", "new": "warn"}.get(status, "warn")
     return f"<span class='pill {cls}'>{html.escape(status)}</span>"
 
 
@@ -1053,7 +1064,7 @@ def summary_page(session, sess_dir, runs, extras, meta):
         m = j["metrics"]
         prev = j.get("previous")
         rows = j.get("comparison", [])
-        flagged = [r for r in rows if r[5] != "ok"]
+        flagged = [r for r in rows if r[5] not in ("ok", "info")]
         tiles = "".join(f"<div class=tile><div class=k>{e(k)}</div><div class=v>{e(v)}</div></div>" for k, v in headline(m))
         link = f"<a href='{e(j['files']['suite_html'])}'>sdrsuite page</a>" if j["files"].get("suite_html") else ""
         cmp_txt = (f"against {e(prev['session'])}: " + (f"{pill('CHANGED')} {len([r for r in rows if r[5] in ('CHANGED', 'missing')])} beyond tolerance"

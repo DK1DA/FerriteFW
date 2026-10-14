@@ -360,7 +360,8 @@ impl App {
     /// PTT released: unkey whatever is keyed (TX-25), whichever screen is up.
     pub(crate) fn ptt_released(&mut self) {
         if let Some(slot) = self.radio.keyed.take() {
-            self.out.push(RadioCmd::Transmit { slot, on: false });
+            // LINK-20, TX-47: a remote key-up lost (keepalive, session) unkeys as a cut, the carrier dropped at once.
+            self.out.push(if self.tx_cut { RadioCmd::TxCut { slot } } else { RadioCmd::Transmit { slot, on: false } });
             self.voice_ended(); // APRS-27
             // WATCH-16: watch waits 30 s of quiet (or a key) so the reply on this slot isn't missed; a longer #
             // pause (WATCH-6) is left as it is.

@@ -5,7 +5,8 @@
 //!
 //! - **Never an emergency frequency** (TX-35): refused with a toast, never the second-PTT prompt, and a remote
 //!   press never answers a prompt a person opened ([`crate::screens::transmit::Emergency`]).
-//! - **No keepalive, no transmit:** none for [`key::KEEPALIVE_MS`] and the radio unkeys.
+//! - **No keepalive, no transmit:** none for [`key::KEEPALIVE_MS`] and the radio unkeys as a cut (TX-47: no end
+//!   tone, CW ID or carrier hold), as it does when the session closes or moves port.
 //! - **The radio's own operator wins:** a local PTT pressed during a remote transmission ends it and does nothing
 //!   else until it is let go (pressing again then transmits as usual); a remote key-up is refused while a local PTT
 //!   is held. Ending it, rather than handing the transmission over, is the safest choice: a press is how a person
@@ -146,7 +147,11 @@ impl App {
     pub fn remote_unkey(&mut self, why: RemoteEnd, now: u32, store: &impl ChannelStore) {
         let Some(r) = self.remote.take() else { return };
         self.remote_ended = Some(why);
+        // LINK-20, TX-47: a lost keepalive or session is a cut (no end tone, ID or carrier hold), as the timeout;
+        // `KEY` off and the other ends unkey as a PTT let go.
+        self.tx_cut = matches!(why, RemoteEnd::Keepalive | RemoteEnd::Session);
         self.press(Key::Ptt(r.ptt), false, now, store);
+        self.tx_cut = false;
         let body: &[u8] = match why {
             RemoteEnd::Keepalive => b"no keepalive",
             RemoteEnd::Session => b"link closed",

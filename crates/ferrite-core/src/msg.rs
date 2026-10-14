@@ -67,6 +67,9 @@ pub enum RadioCmd {
     /// Key or unkey a slot (3 = the HF mode frequency), after the UI's checks; the Radio task checks again
     /// (TX-17) and answers in [`LiveAll::tx`].
     Transmit { slot: u8, on: bool },
+    /// Unkey a slot as a cut (TX-47: no end tone, CW ID or 400 ms carrier hold, as the timeout, duty limit and
+    /// battery): a remote transmission whose keepalive stopped or whose link session closed or moved (LINK-20).
+    TxCut { slot: u8 },
     /// A data key-up or unkey (APRS beacons, messages, acks, digipeats: APRS-7, APRS-20): as [`RadioCmd::Transmit`]
     /// after the UI's checks, at `power` (0 low, 1 mid, 2 high: 0 5 5 4, default low), with no end tone or CW ID
     /// after it (TONE-11). The DSP task plays the frame once it is keyed. Preceded by [`RadioCmd::TxPlan`].

@@ -290,6 +290,8 @@ pub struct App {
     /// a remote transmission (dead until let go), bits from [`remote::bit`].
     pub(crate) remote: Option<remote::Remote>,
     pub(crate) remote_ended: Option<remote::RemoteEnd>,
+    /// The PTT release in progress is a cut (LINK-20: a remote key-up lost), sent as [`RadioCmd::TxCut`].
+    pub(crate) tx_cut: bool,
     pub(crate) virtual_ptt: bool,
     pub(crate) local_ptt: u8,
     pub(crate) ptt_cut: u8,
@@ -387,6 +389,7 @@ impl App {
             vox_bits: 0,
             remote: None,
             remote_ended: None,
+            tx_cut: false,
             virtual_ptt: false,
             local_ptt: 0,
             ptt_cut: 0,

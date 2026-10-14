@@ -260,10 +260,16 @@ impl Radio {
                 }
             }
             #[cfg(feature = "tx")]
+            RadioCmd::TxCut { .. } => {
+                // LINK-20, TX-47: a remote key-up lost: unkeyed as a cut, the carrier dropped at once.
+                self.transmit_cut().await;
+                self.xb_hold(false).await;
+            }
+            #[cfg(feature = "tx")]
             RadioCmd::TransmitData { slot, power, on } => self.transmit(slot, on, Some(power)).await,
             // Transmit code is out of this build: the UI refuses first (RX-only build).
             #[cfg(not(feature = "tx"))]
-            RadioCmd::Transmit { .. } | RadioCmd::TransmitData { .. } | RadioCmd::TxPlan { .. } => {}
+            RadioCmd::Transmit { .. } | RadioCmd::TxCut { .. } | RadioCmd::TransmitData { .. } | RadioCmd::TxPlan { .. } => {}
             RadioCmd::Tune(_) => {}
         }
     }

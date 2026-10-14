@@ -222,9 +222,17 @@ impl TxSeq {
         self.unkey(cfg, true, path, now, out);
     }
 
+    /// A remote transmission lost (LINK-20: no keepalive, the session gone): its PTT is up, and it unkeys as a cut
+    /// (no end tone, CW ID or carrier hold, TX-47), the carrier dropped at once like the timeout's.
+    pub fn cut(&mut self, cfg: &Cfg, path: &mut Path, now: u32, out: &mut Steps) {
+        self.held = false;
+        self.unkey(cfg, false, path, now, out);
+    }
+
     /// Unkey (TX-26, TX-47, TONE-8): end tone (voice, unless cut short) → CW ID when due (voice only; never at a
     /// cut) → the audio stage on (stock's PB8 at 0x08024D80) → tail elimination inside stock's 400 ms carrier hold,
-    /// or the hold alone (every unkey but a cut: timeout, duty, battery) → the path machine's unkey.
+    /// or the hold alone (every unkey but a cut: timeout, duty, battery, a lost remote key-up) → the path machine's
+    /// unkey.
     fn unkey(&mut self, cfg: &Cfg, normal: bool, path: &mut Path, now: u32, out: &mut Steps) {
         self.heat(now);
         let Some((_, kind)) = self.since.take() else { return };
@@ -428,6 +436,27 @@ mod tests {
         let mut s = Steps::default();
         t.tick(&Cfg::default(), false, &mut p, 1_000, &mut s);
         assert!(!s.as_slice().iter().take_while(|x| **x != Act::PaZero).any(|x| matches!(x, Act::Wait(_))), "a cut: no hold");
+    }
+
+    /// LINK-20, TX-47: a remote key-up lost (no keepalive, the session gone) is a cut: no end tone, CW ID or carrier
+    /// hold before the PA goes to 0 (the bench measured 2.72 s from the last keepalive with the hold); its PTT counts
+    /// as up, so the next key-up is allowed.
+    #[test]
+    fn remote_loss_is_a_cut() {
+        let mut t = TxSeq::new();
+        let mut p = rx_on(mhz(146));
+        let cfg = Cfg { end_tone: true, cw_id: true, ..Cfg::default() };
+        let r = req(mhz(146));
+        t.key(&r, &mut p, 0, &mut Steps::default()).unwrap();
+        let mut s = Steps::default();
+        t.cut(&cfg, &mut p, 5_000, &mut s);
+        assert_eq!(s.as_slice()[..2], [Act::Stage, Act::PaZero], "no end tone, ID or hold");
+        assert!(!t.keyed() && p.keyed().is_none());
+        assert_eq!(t.key(&r, &mut p, 6_000, &mut Steps::default()), Ok(()), "not held like a timeout");
+        let mut s = Steps::default();
+        t.cut(&cfg, &mut p, 7_000, &mut s);
+        t.cut(&cfg, &mut p, 7_100, &mut s);
+        assert!(!t.keyed());
     }
 
     #[test]
