@@ -146,9 +146,12 @@ slow_table! {
             TEXT
         }),
         // SBAR-20: the MCU's die temperature (the Radio task reads it every 10 s).
-        (slow!("MCU temp"), |Ctx { dev: d, .. }, b| match d.mcu_temp {
-            Some(c) => {
+        (slow!("MCU temp"), |Ctx { app: a, dev: d, .. }, b| match a.set.mcu_temp(d.mcu_temp) {
+            Some((c, cal)) => {
                 let _ = uwrite!(b, "{} \u{b0}C", c);
+                if !cal {
+                    b.push(b" (uncalibrated)"); // SBAR-21
+                }
                 TEXT
             }
             None => fixed(b, slow!("Not read yet"), SUB),

@@ -578,7 +578,14 @@ impl Radio {
         }
         self.temp.0 = Some(now);
         adc::init();
-        if let Some(c10) = ferrite_core::mcutemp::temp_c10(adc::read_avg(adc::CH_TEMP, 4), adc::read_avg(adc::CH_VREF, 4)) {
+        // The battery's PA1 read just before (every 10 s the two fall together) leaves its divider's voltage on the
+        // sample capacitor: one conversion of each internal channel thrown away first.
+        let _ = adc::read(adc::CH_TEMP);
+        let ts = adc::read_avg(adc::CH_TEMP, 4);
+        let _ = adc::read(adc::CH_VREF);
+        let vref = adc::read_avg(adc::CH_VREF, 4);
+        crate::chan::MCU_TEMP_RAW.store((ts as u32) << 16 | vref as u32, core::sync::atomic::Ordering::Relaxed);
+        if let Some(c10) = ferrite_core::mcutemp::temp_c10(ts, vref) {
             let s = ferrite_core::mcutemp::smooth(self.temp.1, c10);
             self.temp.1 = Some(s);
             crate::chan::MCU_TEMP.store(s, core::sync::atomic::Ordering::Relaxed);

@@ -1,14 +1,19 @@
 //! The MCU's die temperature for the Status page (chapter 8): the AT32F403A's internal sensor (ADC channel 16)
-//! scaled by VDDA from the internal reference (channel 17), with the datasheet's typical values, as hwtest
-//! (`fw/src/core/analog.c`). It reads the die, not the PA, to within a few degrees (typ. ±1.5 °C after the
-//! datasheet's spread); informational only.
+//! scaled by VDDA from the internal reference (channel 17), with the datasheet's typical values
+//! (DS_AT32F403A V2.04, Table 55: V25 1.28 V, Avg_Slope -4.26 mV/°C; Temperature = (V25 - VTS) / Avg_Slope + 25).
+//! It reads the die, not the PA. The datasheet puts the line's offset up to 50 °C apart from chip to chip, so the
+//! reading is uncalibrated until 0 9 7 4's one-point offset is set (SBAR-21); informational only.
+//!
+//! Fixed Oct 13, 2026: the slope was taken as +4.1 mV/°C (STM32F1's sensor, which falls with temperature, as
+//! hwtest's `fw/src/core/analog.c` still does). The AT32's slope is negative: its sensor's voltage rises with
+//! temperature, so the old formula read low (about 12 °C in a warm room) and fell as the radio warmed.
 
 /// The internal reference's typical voltage (mV).
 pub const VREFINT_MV: u32 = 1200;
 /// The sensor's typical voltage at 25 °C (mV).
 pub const V25_MV: i32 = 1280;
-/// Its typical slope, falling with temperature (µV per °C).
-pub const SLOPE_UV: i32 = 4100;
+/// Its typical slope, Avg_Slope (µV per °C): negative, the voltage rises with temperature.
+pub const SLOPE_UV: i32 = -4260;
 
 /// Tenths of a degree C from 12-bit readings of the sensor and the reference; None if either reads 0.
 pub fn temp_c10(raw_temp: u16, raw_vref: u16) -> Option<i16> {
@@ -45,12 +50,15 @@ mod tests {
         (mv * 4095 / 3300) as u16
     }
 
+    /// SBAR-20: Table 55's formula: 1.28 V is 25 °C, 4.26 mV more per degree warmer (Avg_Slope is negative).
     #[test]
     fn datasheet_points() {
-        // 1.28 V is 25 C; 4.1 mV less per degree warmer.
         assert_eq!(temp_c10(raw_at(1280), VREF_3V3).map(whole), Some(25));
-        assert_eq!(temp_c10(raw_at(1280 - 41 * 2), VREF_3V3).map(whole), Some(45));
-        assert_eq!(temp_c10(raw_at(1280 + 41), VREF_3V3).map(whole), Some(15));
+        assert_eq!(temp_c10(raw_at(1280 + 85), VREF_3V3).map(whole), Some(45), "warmer: higher");
+        assert_eq!(temp_c10(raw_at(1280 - 43), VREF_3V3).map(whole), Some(15), "cooler: lower");
+        // The bug's reading on the radio: a sensor 12 °C-worth above V25 read as 12 °C below.
+        let warm = temp_c10(raw_at(1280 + 51), VREF_3V3).map(whole).unwrap();
+        assert!((36..=37).contains(&warm), "{warm}");
         assert_eq!(temp_c10(0, VREF_3V3), None);
         assert_eq!(temp_c10(1000, 0), None);
     }

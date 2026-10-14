@@ -337,6 +337,21 @@ pub async fn task() {
                 bringup::linef(|b| {
                     let _ = ufmt::uwrite!(b, "battery {} mV, {}%, PA1 {}", dev.battery_mv, dev.battery_pct, raw);
                 });
+                // SBAR-21: the MCU temperature's raw counts and what they give, for the one-point calibration.
+                let t = crate::chan::MCU_TEMP.load(Relaxed);
+                let r = crate::chan::MCU_TEMP_RAW.load(Relaxed);
+                if t != i16::MIN {
+                    let off = app.settings().mcu_temp_off;
+                    bringup::linef(|b| {
+                        let (s, a) = (if t < 0 { "-" } else { "" }, t.unsigned_abs());
+                        let _ = ufmt::uwrite!(b, "mcu temp {}{}.{} C, TS {}, VREFINT {}, offset ", s, a / 10, a % 10, r >> 16, r & 0xFFFF);
+                        if off == ferrite_app::settings::MCU_TEMP_UNSET {
+                            b.push(b"not set");
+                        } else {
+                            let _ = ufmt::uwrite!(b, "{}", off);
+                        }
+                    });
+                }
             }
         }
         dev.selftest.chips = live.chips;

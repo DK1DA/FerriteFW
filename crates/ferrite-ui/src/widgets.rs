@@ -611,7 +611,9 @@ pub fn kv(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], valu
 fn kv_now(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], value: &[u8], vc: u16, selected: bool) {
     let bg = if selected { BLUE } else { BG };
     let (lc, vc) = if selected { (BLUE_FG, BLUE_FG) } else { (SUB, vc) };
-    let (vx, vw) = (st.vx as i32, 232 - st.vx as i32);
+    // A value against the right edge may use the room a short label leaves (8 px clear of it).
+    let vx = if st.right { (st.vx as i32).min(16 + text4_width(label, &UI_12)) } else { st.vx as i32 };
+    let vw = 232 - vx;
     let y1 = y + h - st.line as i32;
     let base = y + if st.base == 0 { h / 2 + 5 } else { st.base as i32 };
     lcd.fill(0, y, 240, y1 - y, bg);

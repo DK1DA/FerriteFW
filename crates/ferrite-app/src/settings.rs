@@ -98,6 +98,11 @@ pub const KISS_PORTS: [&str; 3] = ["Off", "Cable", "Bluetooth"];
 /// FM broadcast step (0 3 1 2) in 10 kHz units, and its names.
 pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "200 kHz")];
 
+/// 0 9 7 4 not set yet: the MCU temperature is uncalibrated (SBAR-21).
+pub const MCU_TEMP_UNSET: i8 = i8::MIN;
+/// 0 9 7 4's range, whole degrees either way.
+pub const MCU_TEMP_OFF_MAX: i8 = 40;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
     /// 0 8 7 1, capitals (SETUP-12).
@@ -166,6 +171,9 @@ pub struct Settings {
     pub tx_light: bool,
     /// 0 7 4 4 (DISP-15): what wakes the screen ([`WAKE_ON`]): 0 keys, 1 and receive, 2 and transmit.
     pub wake_on: u8,
+    /// 0 9 7 4 (SBAR-21): the MCU temperature's one-point calibration, whole degrees added, ±40;
+    /// [`MCU_TEMP_UNSET`] until it is set (the reading shows "(uncalibrated)").
+    pub mcu_temp_off: i8,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
     pub fm_freq: u16,
     pub fm_step: u8,
@@ -308,6 +316,13 @@ pub const COORD_FORMATS: [&str; 4] = ["Degrees", "Deg, min", "Deg, min, sec", "G
 pub const SAME_CODES: usize = 8;
 
 impl Settings {
+    /// SBAR-20, SBAR-21: the MCU's die temperature (whole °C, as read) with 0 9 7 4's offset, and whether that
+    /// offset has been set.
+    pub fn mcu_temp(&self, raw: Option<i8>) -> Option<(i16, bool)> {
+        let set = self.mcu_temp_off != MCU_TEMP_UNSET;
+        raw.map(|t| (t as i16 + if set { self.mcu_temp_off as i16 } else { 0 }, set))
+    }
+
     /// KISS-6: the cable carries raw KISS (0 9 2 4 on KISS, or 0 5 9 1 on Cable).
     pub fn kiss_on_cable(&self) -> bool {
         self.cable_port == 3 || self.kiss_port == 1
@@ -357,6 +372,7 @@ impl Settings {
         brightness_night: 3,
         tx_light: true,
         wake_on: 1,
+        mcu_temp_off: MCU_TEMP_UNSET,
         fm_freq: 10_110,
         fm_step: 1,
         fm_agc: 0,
