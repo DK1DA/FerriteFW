@@ -9,7 +9,11 @@
 //! - [`Scan`] walks a slot's band (a range at its step, the fast pass of SCAN-21) while the slot has a chip,
 //!   or its channels: a channel scan (zone, zone set) from the set the UI sends, asking the UI for the
 //!   frequencies a few stops ahead ([`scan::ChanScans`], shared with the simulators' fake radio).
-//! - Battery Save (`ferrite_core::rxsleep`) sleeps both chips together (WATCH-8, as stock's dual watch).
+//! - One BK4829 awake at a time, as stock (WATCH-2, PWR-7, decision 111): the chip the hop selects; the other
+//!   sleeps until the hop comes back to it, and a key-up sleeps the chip not transmitting. APRS mode's C keeps its
+//!   chip awake beside it ([`RadioCmd::Awake`]), through Battery Save's sleep too (PWR-4).
+//! - Battery Save (`ferrite_core::rxsleep`) sleeps both chips together (WATCH-8, as stock's dual watch), but for
+//!   a kept one.
 //!
 //! Every path select, the PA drive and the band relay change through the path machine (`ferrite_core::path`,
 //! SAFE-11): it plans, [`Radio::run`] carries the plan out to the end. Watch, scan and the path hop ask with
@@ -173,8 +177,13 @@ struct Radio {
     /// Channel scans: each slot's set of channel numbers and the frequencies asked for (SCAN-3, SCAN-12,
     /// SCAN-22; decision 86).
     chans: scan::ChanScans,
-    /// What each chip is tuned to now: the slot and its receive frequency; None asleep.
+    /// What each chip is tuned to now: the slot and its receive frequency; None asleep, or to tune again.
     tuned: [Option<(u8, Freq10)>; 2],
+    /// Chips that may be awake, a bit per chip: set when one is tuned or keyed, cleared when it sleeps. A reset of
+    /// `tuned` (after an unkey, a mode) leaves it, so a chip no longer wanted is put to sleep, not left on.
+    maybe_awake: u8,
+    /// Slots whose chip stays awake (APRS mode's C: [`RadioCmd::Awake`], decision 111).
+    keep: u8,
     /// Each chip's noise floor (dBm), a slow average of its RSSI with the squelch closed (the fast pass's
     /// reference).
     floor: [i16; 2],
@@ -407,7 +416,8 @@ impl Radio {
 
     /// Tune chip `n` to a slot (or sleep it): only when it changes.
     fn tune_chip(&mut self, n: u8, want: Option<(u8, Freq10)>) {
-        if !self.has(n) || self.tuned[n as usize] == want {
+        let asleep = self.maybe_awake & 1 << n == 0;
+        if !self.has(n) || self.tuned[n as usize] == want && (want.is_some() || asleep) {
             return;
         }
         // A probe on the slot this chip had, or gets, ends: tuning sets the slot's own detector (TSRCH-12).
@@ -418,10 +428,12 @@ impl Radio {
         }
         self.tuned[n as usize] = want;
         let Some((s, f)) = want else {
+            self.maybe_awake &= !(1 << n);
             self.chip(n).sleep();
             self.sq_regs[n as usize] = None; // written again on waking
             return;
         };
+        self.maybe_awake |= 1 << n;
         let slot = match s {
             s if s < SLOTS as u8 => self.slots[s as usize],
             SCOPE_SLOT => {
@@ -495,26 +507,38 @@ impl Radio {
         }
     }
 
-    /// Battery Save's phase change: both chips sleep together (WATCH-8); waking, the next tick tunes them.
+    /// Battery Save's phase change: both chips sleep together (WATCH-8), but for one a kept slot has (APRS mode's
+    /// C, PWR-4: its decoder runs); waking, the next tick tunes them.
     async fn apply(&mut self, a: Action) {
         match a {
             Action::None => return,
             Action::Sleep => {
                 // BCR-19: only the BK4829s sleep; a broadcast playing keeps the SI4732 and the speaker.
                 speaker(self.si_heard && !self.muted);
+                let kept = self.kept();
                 for n in 0..2u8 {
-                    self.tune_chip(n, None);
+                    if !self.tuned[n as usize].is_some_and(|(s, _)| (s as usize) < SLOTS && kept & 1 << s != 0) {
+                        self.tune_chip(n, None);
+                    }
                 }
-                for s in &mut self.live.slots {
-                    s.squelch_open = false;
+                for (i, s) in self.live.slots.iter_mut().enumerate() {
+                    s.squelch_open &= kept & 1 << i != 0;
                 }
-                let mut s = Steps::default();
-                let _ = self.path.rx_off(&mut s); // refused only while keyed (TX-29)
-                self.run(&s).await;
+                if self.tuned.iter().all(Option::is_none) {
+                    let mut s = Steps::default();
+                    let _ = self.path.rx_off(&mut s); // refused only while keyed (TX-29)
+                    self.run(&s).await;
+                }
             }
             Action::Wake => {}
         }
         self.live.rx_asleep = self.save.asleep();
+    }
+
+    /// The kept slots that are listened to (decision 111): their chip stays awake beside the hop's, and through
+    /// Battery Save's sleep.
+    fn kept(&self) -> u8 {
+        self.keep & (self.watch_set | 1 << self.active) & !self.bcast_off()
     }
 
     /// Something running that keeps the engines ticking fast: a slot sharing the chips, or a scan.
@@ -619,7 +643,8 @@ impl Radio {
         if self.save.asleep() {
             let a = self.save.tick(now_ms(), false);
             self.apply(a).await;
-            if self.save.asleep() {
+            // A kept slot (APRS mode's C) listens on through the sleep: the turn runs for it alone (PWR-4).
+            if self.save.asleep() && self.kept() == 0 {
                 self.bcast_audio(now_ms() as u32, false); // BCR-19: the broadcast plays on, and returns on time
                 return;
             }
@@ -682,7 +707,8 @@ impl Radio {
         // SAME on a weather channel's chip (DEC-19).
         self.same_tick(now);
         // 2. The watch turn.
-        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() };
+        let asleep = if self.save.asleep() { !self.kept() } else { 0 };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.tick(now, &cfg, sq, keyed);
         // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
@@ -716,12 +742,15 @@ impl Radio {
         }
         // The channel the channel scans need next, for the UI to answer (LiveAll::want).
         self.live.set_want(self.chans.want(&self.scans));
-        // 4. The chips: each on the slot the engine names (or asleep), the path on the one listening now.
+        // 4. The path on the chip to listen to now, and that chip on the slot the engine names; the other asleep
+        // unless a kept slot has it (WATCH-2, PWR-7, decision 111: one BK4829 awake at a time, as stock).
+        let path = self.hop.next(now, &out, self.active);
+        let awake = watch::awake(&out, path, self.kept());
         for n in 0..2u8 {
-            let want = out.chip[n as usize].map(|s| (s, self.slots[s as usize].rx_freq()));
+            let want = out.chip[n as usize].filter(|_| awake[n as usize]).map(|s| (s, self.slots[s as usize].rx_freq()));
             self.tune_chip(n, want);
         }
-        if let Some(n) = self.hop.next(now, &out, self.active) {
+        if let Some(n) = path {
             if let Some((_, f)) = self.tuned[n as usize] {
                 self.select_rx(f, Cause::Auto).await;
             }
@@ -1432,6 +1461,8 @@ pub async fn task() {
         ranges: [scan::band_range(DEFAULT); SLOTS],
         chans: scan::ChanScans::new(),
         tuned: [None; 2],
+        maybe_awake: 0,
+        keep: 0,
         floor: [-125; 2],
         monitor: 0,
         user_mute: 0,
@@ -1515,7 +1546,7 @@ pub async fn task() {
         // Wake for the next command, the next Battery Save phase change, or (awake) the next tick.
         let mut at = r.save.deadline();
         // Broadcast FM's report (fm_poll) runs on the tick, also while Battery Save has the BK4829s asleep (BCR-19).
-        if !r.save.asleep() || r.hf.is_some() || r.fm.is_some() {
+        if !r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() {
             at = at.min(now_ms() + if r.busy() { TICK_MS } else { POLL_MS });
         }
         // MODE-3: a held exclusive mode is checked by its lease's end at the latest.
@@ -1616,6 +1647,7 @@ impl Radio {
                 }
             }
             RadioCmd::Watch(m) => self.watch_set = m,
+            RadioCmd::Awake(m) => self.keep = m,
             RadioCmd::PauseWatch(secs) => self.watcher.pause(now, secs),
             RadioCmd::Scan { slot, on } => self.scan(slot, on),
             RadioCmd::ScanSkip { slot } => {
@@ -1876,7 +1908,16 @@ impl Radio {
             return self.refuse(slot, Refusal::Locked);
         }
         speaker(false);
+        // PWR-4: no Battery Save sleep from here on; decision 111: the other chip sleeps while keyed, unless a kept
+        // slot (APRS mode's C) has it. The receive tick wakes what it needs after the unkey.
+        let a = self.save.activity(now_ms());
+        self.apply(a).await;
+        let kept = self.kept();
+        if !self.tuned[n as usize ^ 1].is_some_and(|(s, _)| (s as usize) < SLOTS && kept & 1 << s != 0) {
+            self.tune_chip(n ^ 1, None);
+        }
         self.tuned[n as usize] = Some((slot, f)); // not the receive frequency: retuned after the unkey
+        self.maybe_awake |= 1 << n;
         let tone = self.tx.tone[s];
         let mut bk = self.chip(n);
         bk.wake();
@@ -2245,6 +2286,7 @@ impl Radio {
             t => bk.ctcss_tx(t),
         }
         self.tuned[n as usize] = Some((to, f));
+        self.maybe_awake |= 1 << n;
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, power));
         (self.tx.fault, self.tx.data, self.tx.slot, self.tx.dialled) = (false, Some(power), to, false);
         // Decision 95: stock's TX setup clears PB8 unless the accessory detect (PC15) is low; its PTT state 1

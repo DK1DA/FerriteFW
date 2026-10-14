@@ -36,6 +36,9 @@ pub enum RadioCmd {
     Active(u8),
     /// The watch set, a bit per slot (0 = watch off).
     Watch(u8),
+    /// Slots whose chip stays awake whatever the hop and Battery Save do, a bit per slot: APRS mode's C, for its
+    /// decoder (APRS-16, PWR-4, decision 111).
+    Awake(u8),
     /// Start or stop scanning in a slot.
     Scan { slot: u8, on: bool },
     /// Channel scans also listen on each channel's transmit frequency when it has a shift or split (SCAN-22,

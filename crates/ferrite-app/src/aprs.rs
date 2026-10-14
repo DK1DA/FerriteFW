@@ -322,6 +322,7 @@ impl App {
         }
         self.send_slot(APRS_SLOT);
         self.out.push(RadioCmd::Watch(self.watch_mask()));
+        self.out.push(RadioCmd::Awake((self.set.aprs_mode as u8) << APRS_SLOT));
         if on {
             let mut f = Buf::<20>::new();
             let _ = uwrite!(f, "C on {}", Txt(crate::slot::mhz3(self.aprs_freq()).as_bytes()));

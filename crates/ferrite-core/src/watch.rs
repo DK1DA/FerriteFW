@@ -151,6 +151,14 @@ impl Watch {
     }
 }
 
+/// WATCH-2, PWR-7 (decision 111): which chips stay awake after a watch turn. One BK4829 at a time, as stock: the
+/// chip whose receive path [`Hop`] selected; the other sleeps until the hop comes back to it. A chip on a slot in
+/// `keep` (APRS mode's C, APRS-16) stays awake beside it. A chip with no slot sleeps.
+pub fn awake(out: &Out, path: Option<u8>, keep: u8) -> [bool; 2] {
+    let on = |n: usize| out.chip[n].is_some_and(|s| path == Some(n as u8) || keep & 1 << s != 0);
+    [on(0), on(1)]
+}
+
 /// BCR-24: the broadcast comes back this long after the last amateur slot heard goes quiet.
 pub const BCAST_RETURN_MS: u32 = 2_000;
 
@@ -354,6 +362,29 @@ mod tests {
         let one = Out { chip: [None, Some(1)], ..Out::default() };
         assert_eq!(h.next(9_010, &one, 1), Some(1));
         assert_eq!(h.next(9_020, &Out::default(), 0), None);
+    }
+
+    /// WATCH-2, PWR-7 (decision 111): only the hop's chip is awake; APRS mode's C keeps its chip awake beside it.
+    #[test]
+    fn one_chip_awake() {
+        let both = Out { chip: [Some(0), Some(1)], ..Out::default() };
+        assert_eq!(awake(&both, Some(0), 0), [true, false]);
+        assert_eq!(awake(&both, Some(1), 0), [false, true], "the hop wakes the other chip, this one sleeps");
+        let aprs = Out { chip: [Some(2), Some(1)], ..Out::default() };
+        assert_eq!(awake(&aprs, Some(1), 0b100), [true, true], "APRS mode's C stays awake");
+        assert_eq!(awake(&aprs, Some(0), 0b100), [true, false]);
+        let one = Out { chip: [None, Some(1)], ..Out::default() };
+        assert_eq!(awake(&one, Some(1), 0b100), [false, true], "no slot: asleep");
+        assert_eq!(awake(&Out::default(), None, 0b111), [false, false]);
+        // A whole run: A on 2 m (chip 0) and B on 70 cm (chip 1) watched: never both awake.
+        let (mut w, mut h) = (Watch::new(), Hop::new());
+        let c = Cfg { set: 0b011, ..cfg() };
+        for t in (0..2_000).step_by(10) {
+            let o = w.tick(t, &c, [false; 2], false);
+            let a = awake(&o, h.next(t, &o, 0), 0);
+            assert!(!(a[0] && a[1]), "both awake at {t}");
+            assert!(a[0] || a[1]);
+        }
     }
 
     /// BCR-23: an off slot gets no chip and no audio, even as the active slot; the rest are watched as before.

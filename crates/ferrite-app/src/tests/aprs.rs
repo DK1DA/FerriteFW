@@ -82,6 +82,7 @@ fn aprs_mode_takes_slot_c() {
     let c = a.cmds();
     assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: 14_439_000 }), "no region: 144.390");
     assert!(c.contains(&RadioCmd::Watch(0b100)), "C watched with Watch off: {c:?}");
+    assert!(c.contains(&RadioCmd::Awake(0b100)), "C's chip stays awake (decision 111)");
     assert!(c.contains(&RadioCmd::SlotParam { slot: 2, param: Param::Power, value: 0 }), "beacon power Low");
     assert!(c.contains(&RadioCmd::SlotParam { slot: 2, param: Param::Mode, value: 0 }), "FM");
     assert_eq!(a.app.slot(APRS_SLOT).freq(), own, "C's own VFO is kept aside");
@@ -103,6 +104,7 @@ fn aprs_mode_takes_slot_c() {
     let c = a.cmds();
     assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: own }), "C back as it was");
     assert!(c.contains(&RadioCmd::Watch(0)));
+    assert!(c.contains(&RadioCmd::Awake(0)));
 }
 
 /// APRS-19: C can be the active slot, but tuning, V/M, entry, the edit grid and quick settings refuse.
