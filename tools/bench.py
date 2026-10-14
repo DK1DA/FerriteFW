@@ -9,6 +9,10 @@ each run's numbers stored, compared with the previous run of the same configurat
     tools/bench.py --load DIR [--build LABEL]          # re-analyse saved captures (DIR searched for <run>.u8)
     tools/bench.py --selftest                          # a fake radio and synthetic IQ: the whole flow and the gates
     tools/bench.py --selftest --sim tcp:127.0.0.1:7300 # the same against the simulator's link (fake SDR)
+    tools/bench.py --auto [--dry-plan]                 # what changed since the last on-radio runs decides: the UI
+                                                       # tests (tools/uitest.py), the SDR suite, both + a reboot check
+    tools/bench.py --auto --all | --ui | --rf          # everything, or one side, forced
+    tools/bench.py --auto --dry-plan --diff-files crates/ferrite-app/src/screens/home.rs   # a made-up change
 
 Per run (TERM-34, LINK-20, LINK-33, LINK-34; everything goes over the link, nothing through the keypad):
   1. save slot A as it is (`slot A`; its VFO's if it is on a channel), the active slot, the end tone (0 8 5 4) and
@@ -20,10 +24,11 @@ Per run (TERM-34, LINK-20, LINK-33, LINK-34; everything goes over the link, noth
      sdrsuite.py's analysis, the numbers stored and compared.
 
 Safety gates: nothing is keyed unless all of these hold, checked right before every KEY:
-  - the build is `tx-dry` (PA drive held at 0): its version string says so ("dry"/"TX DRY"), or --flash flashed an
-    image with the "TX DRY" boot line in it in this same invocation. Ferrite v0.1 doesn't say it over the link
-    (HELLO and INFO carry "v0.1.0" only; the TX DRY line is on the boot screen), so without either the bench
-    refuses, unless --i-know-its-tx-dry is given (a warning is printed and recorded);
+  - the build is `tx-dry` (PA drive held at 0): HELLO's build byte says tx-dry with the bench bit (LINK-35: 0x82,
+    decision 151; a radio that says receive or tx is refused outright, --i-know-its-tx-dry or not), or its version
+    string says so ("dry"/"TX DRY"), or --flash flashed an image with the "TX DRY" boot line in it in this same
+    invocation. Firmware from before the build byte doesn't say it, so without one of these the bench refuses,
+    unless --i-know-its-tx-dry is given (a warning is printed and recorded);
   - the build transmits at all (`txtest` isn't refused as a receive-only build);
   - the slot is on its VFO at one of the approved test frequencies (config `test_freqs`), with no offset and no
     split (TX on the same frequency), power low, not scanning, not APRS, and it is the active slot;
@@ -242,8 +247,8 @@ class Radio:
             raise BenchError(f"HELLO: {fl.why(s, r)}")
         if not r[2]:
             raise BenchError("the radio's PIN lock is on (LINK-30); the bench uses the cable")
-        ver, _ = fl.text(r[3:])
-        return dict(protocol=r[0], version=ver)
+        ver, rest = fl.text(r[3:])
+        return dict(protocol=r[0], version=ver, build=fl.build_name(rest), bench=fl.build_bench(rest))
 
     def info(self):
         s, r = self._ask(fl.INFO)
@@ -628,7 +633,16 @@ class Bench:
 
     def check_build(self, hello, info, flashed_dry=None):
         ver = info.get("version") or hello.get("version")
-        if flashed_dry:
+        said = hello.get("build", "not given")
+        if said not in ("not given", "tx-dry"):
+            # LINK-35 (decision 151): the radio names its build; a receive or full-power tx build is never keyed.
+            self.gate("tx-dry build", False, f"the radio says it runs a {said} build (LINK-35): flash a tx-dry image")
+        if said == "tx-dry":
+            self.gate("a bench build (txtest is in it)", hello.get("bench"),
+                      "the build byte says tx-dry without the bench bit (0x80): txtest isn't in it")
+        if said == "tx-dry" and not flashed_dry:
+            self.tx_dry = "the radio says so (LINK-35 build byte: tx-dry, bench)"
+        elif flashed_dry:
             self.tx_dry = f"flashed {flashed_dry} (its image has the TX DRY boot line)"
         elif says_tx_dry(ver) or says_tx_dry(hello.get("version")):
             self.tx_dry = f"the version says so ({ver})"
@@ -1051,13 +1065,24 @@ def summary_page(session, sess_dir, runs, extras, meta):
     parts = []
     nflag = sum(sum(r[5] in ("CHANGED", "missing") for r in j.get("comparison", [])) for j in runs)
     notes = meta.get("warnings", []) + meta.get("restore_notes", [])
-    head = (f"<h1>Ferrite TX bench</h1><p class=sub>{e(session)} · build {e(meta['build']['label'])} · "
-            f"{e(meta['source'])}</p>")
+    head = (f"<h1>Ferrite {'TX ' if runs or extras else ''}bench</h1><p class=sub>{e(session)} · build "
+            f"{e(meta['build']['label'])} · {e(meta['source'])}"
+            + (f" · commit {e(meta['commit'])}" if meta.get("commit") else "") + "</p>")
+    if meta.get("decision"):
+        d = meta["decision"]
+        head += (f"<div class=card><b>Why this ran</b><p>{e(d['what'])}</p><p class=muted>{e(d['why'])}</p>"
+                 + (f"<details><summary>{len(d['files'])} files changed</summary><ul class=notes>"
+                    + "".join(f"<li>{e(f)} <span class=muted>({e(c)})</span></li>" for f, c in d["files"])
+                    + "</ul></details>" if d.get("files") else "") + "</div>")
+    if not runs and not extras:
+        parts.append(head)
+        head = None
     over = [("Runs", str(len(runs))), ("Beyond tolerance", str(nflag)),
             ("Extra checks", ", ".join(f"{k} {'pass' if all_ok(v) else 'FAIL'}" for k, v in extras.items()) or "none"),
             ("TX-dry known by", meta.get("tx_dry") or "–")]
-    parts.append(head + "<div class=tiles>" + "".join(
-        f"<div class=tile><div class=k>{e(k)}</div><div class=v>{e(v)}</div></div>" for k, v in over) + "</div>")
+    if head is not None:
+        parts.append(head + "<div class=tiles>" + "".join(
+            f"<div class=tile><div class=k>{e(k)}</div><div class=v>{e(v)}</div></div>" for k, v in over) + "</div>")
     if notes:
         parts.append("<div class=card><b>Notes</b><ul class=notes>" + "".join(f"<li>{e(n)}</li>" for n in notes) + "</ul></div>")
     for j in runs:
@@ -1099,6 +1124,12 @@ def summary_page(session, sess_dir, runs, extras, meta):
             if k in extras:
                 r = extras[k]
                 parts.append(f"<div class=card><h3>{e(title)} {pill('pass' if r['ok'] else 'FAIL')}</h3><p>{e(r['text'])}</p></div>")
+    if meta.get("ui"):
+        import uitest
+        parts.append(uitest.ui_section(meta["ui"]))
+    if meta.get("reboot"):
+        r = meta["reboot"]
+        parts.append(f"<h2>Reboot check {pill('pass' if r['ok'] else 'FAIL')}</h2><div class=card><p>{e(r['text'])}</p></div>")
     gl = meta.get("gates", [])
     if gl:
         seen, rows = set(), []
@@ -1115,7 +1146,7 @@ def summary_page(session, sess_dir, runs, extras, meta):
                  f"{' · image ' + e(b['image']) if b.get('image') else ''} · port {e(meta.get('port') or '–')} · "
                  f"slot {e(meta.get('slot', 'A'))} · results {e(sess_dir)}</p>")
     return (f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            f"<title>Ferrite TX bench</title><style>{CSS}</style></head><body><main>{''.join(parts)}</main></body></html>")
+            f"<title>Ferrite bench</title><style>{CSS}</style></head><body><main>{''.join(parts)}</main></body></html>")
 
 
 def all_ok(v):
@@ -1181,7 +1212,8 @@ def plan(cfg, a, runs):
     if a.flash:
         p.append(f"flash: check {a.flash} has the TX DRY boot line; flash.py {cfg['port']} {a.flash} --backup {cfg['backup']}; "
                  "wait for HELLO (up to 90 s)")
-    p.append("connect: HELLO, INFO (version), `txtest` (a transmit build?)")
+    p.append("connect: HELLO (the LINK-35 build byte: tx-dry with the bench bit, else refused), INFO (version), "
+             "`txtest` (a transmit build?)")
     p.append("gate: tx-dry known: version says dry / flashed a TX DRY image here / --i-know-its-tx-dry"
              + (" [given: a warning will be printed]" if a.i_know_its_tx_dry else " [not given]"))
     p.append(f"save: `slot {L}` (and `slot {L} vfo` if on a channel), the active slot (SLOT), `get {END_TONE}`, `get {TX_TIMEOUT}`")
@@ -1227,7 +1259,8 @@ class FakeRadio:
     BANDS = [(144.0, 148.0), (420.0, 450.0)]
 
     def __init__(self, clock, version="v0.1.0", rx_only=False, hold_answers=False, offset=0, cable=True,
-                 ignore_freq=False, stuck_power=None, fail_alive_after=None):
+                 ignore_freq=False, stuck_power=None, fail_alive_after=None, build="not given"):
+        self.build = build
         self.clock, self.version, self.rx_only, self.hold, self.cable = clock, version, rx_only, hold_answers, cable
         self.ignore_freq, self.stuck_power, self.fail_alive_after = ignore_freq, stuck_power, fail_alive_after
         self.slots = [dict(ch=None, freq=146.52, mode="FM", power="low", tx="100.0", rx="off", offset=offset),
@@ -1247,7 +1280,7 @@ class FakeRadio:
         pass
 
     def hello(self):
-        return dict(protocol=2, version=self.version)
+        return dict(protocol=2, version=self.version, build=self.build, bench=self.build == "tx-dry")
 
     def info(self):
         return dict(version=self.version, channels=21, zones=6, presets=4, region=2, callsign="TEST")
@@ -1532,7 +1565,8 @@ def do_bench(cfg, a, radio=None, sdr=None, clock=None):
         build = dict(label=label, version=info["version"], host=host_build(), image=f"{image} {sha}" if image else None)
         session, sess_dir = new_session(cfg, label)
         say(f"session {sess_dir}")
-        meta = dict(build=build, source="on air", port=getattr(radio, "spec", "fake"), slot=cfg["slot"])
+        meta = dict(build=build, source="on air", port=getattr(radio, "spec", "fake"), slot=cfg["slot"],
+                    commit=host_build(), kinds=["rf"])
         try:
             caps, extras = bench.on_air(sess_dir, runs, hello, info, flashed_dry=image)
         except SafetyError as e:
@@ -1565,6 +1599,334 @@ def _last_ditch():
 
 
 atexit.register(_last_ditch)
+
+
+# ---- Change-aware selection (--auto) ----
+
+# (glob, class, why): first match wins. Paths are in the ferrite checkout. Classes: link (link, store, boot,
+# ports: both sides and a reboot check), rf (radio, drivers, DSP, TX, calibration, firmware tasks: the SDR suite on
+# tx-dry and the UI smoke set), ui (screens, drawing, app logic, docs: the UI tests on the normal build), host
+# (tests, the simulators, CI, PC tools that don't touch the radio: nothing on the radio).
+CLASSES = [
+    # Link, store, boot, ports, the image itself.
+    ("crates/ferrite-app/src/link.rs", "link", "the link"),
+    ("crates/ferrite-app/src/link/*", "link", "the link"),
+    ("crates/ferrite-core/src/link.rs", "link", "the link protocol"),
+    ("crates/ferrite-core/src/memmap.rs", "link", "the flash map"),
+    ("crates/ferrite-store/*", "link", "the store"),
+    ("crates/ferrite-app/src/persist.rs", "link", "what is saved"),
+    ("crates/ferrite-app/src/ports.rs", "link", "the ports"),
+    ("crates/ferrite-radio/src/cable.rs", "link", "the cable"),
+    ("crates/ferrite-radio/src/flash.rs", "link", "the SPI flash"),
+    ("firmware/src/tasks/link.rs", "link", "the link task"),
+    ("firmware/src/tasks/storage.rs", "link", "the storage task"),
+    ("firmware/src/store.rs", "link", "the store"),
+    ("firmware/src/main.rs", "link", "boot"),
+    ("firmware/src/board.rs", "link", "boot"),
+    ("firmware/src/bringup.rs", "link", "boot"),
+    ("firmware/src/report.rs", "link", "the boot report"),
+    ("firmware/src/hal/uart.rs", "link", "the UART"),
+    ("firmware/src/hal/clock.rs", "link", "clocks"),
+    ("firmware/src/hal/irq.rs", "link", "interrupts"),
+    ("firmware/src/hal/sys.rs", "link", "the system"),
+    ("firmware/memory.x", "link", "the memory map"),
+    ("firmware/build.rs", "link", "the build"),
+    ("firmware/Cargo.toml", "link", "the firmware's features"),
+    ("drivers/w25q/*", "link", "the SPI flash driver"),
+    ("Cargo.toml", "link", "dependencies"),
+    ("Cargo.lock", "link", "dependencies"),
+    ("rust-toolchain.toml", "link", "the toolchain"),
+    (".cargo/*", "link", "the build"),
+    ("tools/ferrite_link.py", "link", "the PC side of the link"),
+    ("tools/flash.py", "link", "flashing"),
+    ("tools/btf.py", "link", "the image format"),
+    ("tools/mkbtf.sh", "link", "the image build"),
+    # Radio, drivers, DSP, transmit, calibration.
+    ("firmware/src/tasks/radio/*", "rf", "the Radio task"),
+    ("firmware/src/tasks/dsp.rs", "rf", "DSP"),
+    ("firmware/src/tasks/decode.rs", "rf", "decoders"),
+    ("firmware/src/tasks/aprs.rs", "rf", "APRS"),
+    ("firmware/src/tasks/gps.rs", "rf", "GPS"),
+    ("firmware/src/tasks/input.rs", "ui", "keys"),
+    ("firmware/src/tasks/ui.rs", "ui", "the UI task"),
+    ("firmware/src/display.rs", "ui", "the display"),
+    ("firmware/src/hal/backlight.rs", "ui", "the backlight"),
+    ("firmware/*", "rf", "firmware"),
+    ("drivers/st7789/*", "ui", "the display driver"),
+    ("drivers/keypad/*", "ui", "the keypad driver"),
+    ("drivers/*", "rf", "a chip driver"),
+    ("crates/ferrite-radio/*", "rf", "chip recipes"),
+    ("crates/ferrite-core/src/tx*.rs", "rf", "transmit"),
+    ("crates/ferrite-core/src/*cal*.rs", "rf", "calibration"),
+    ("crates/ferrite-core/src/tonegen.rs", "rf", "tones"),
+    ("crates/ferrite-core/src/audio.rs", "rf", "audio"),
+    ("crates/ferrite-core/src/settle.rs", "rf", "chip timing"),
+    ("crates/ferrite-core/src/rxsleep.rs", "rf", "receive sleep"),
+    ("crates/ferrite-core/src/vox.rs", "rf", "VOX"),
+    ("crates/ferrite-core/src/ssb.rs", "rf", "SSB"),
+    ("crates/ferrite-core/src/xb.rs", "rf", "crossband"),
+    ("crates/ferrite-core/src/same*.rs", "rf", "SAME"),
+    ("crates/ferrite-core/src/decoders.rs", "rf", "decoders"),
+    ("crates/ferrite-core/src/stuck.rs", "rf", "the PTT check"),
+    ("crates/ferrite-core/src/gpspower.rs", "rf", "GPS power"),
+    ("crates/ferrite-core/src/chipid.rs", "rf", "chip IDs"),
+    ("crates/ferrite-core/src/acc.rs", "rf", "the accumulator"),
+    ("tools/bench.py", "rf", "the bench itself"),
+    ("tools/sdr*.py", "rf", "the SDR analysis"),
+    # The UI and the app's logic.
+    ("crates/ferrite-app/src/term/*", "ui", "the terminal"),
+    ("crates/ferrite-app/*", "ui", "the app"),
+    ("crates/ferrite-ui/*", "ui", "drawing"),
+    ("crates/ferrite-core/*", "ui", "core logic"),
+    ("fonts/*", "ui", "fonts"),
+    ("assets/*", "ui", "assets"),
+    ("tools/uitest.py", "ui", "the UI tests"),
+    ("tools/uitests/*", "ui", "the UI tests"),
+    ("README.md", "ui", "docs"),
+    ("*.md", "ui", "docs"),
+    # Nothing on the radio.
+    ("*/tests/*", "host", "host tests"),
+    ("*/tests.rs", "host", "host tests"),
+    ("*/tests_*.rs", "host", "host tests"),
+    ("sim/*", "host", "the simulator"),
+    ("sim-web/*", "host", "the web simulator"),
+    (".github/*", "host", "CI"),
+    ("crates/ferrite-checks/*", "host", "the rule checks"),
+    ("tools/*", "host", "a PC tool"),
+]
+CLASS_ORDER = {"host": 0, "ui": 1, "rf": 2, "link": 3}
+
+
+def classify(path):
+    """(class, why) of one changed file; unknown files count as link (both sides and a reboot: the safe side)."""
+    for glob, cls, why in CLASSES:
+        if fnmatch.fnmatch(path, glob):
+            # Host tests inside src/ (tests.rs, tests/...) don't change the image.
+            if cls != "host" and re.search(r"(^|/)tests?(_\w+)?(\.rs|/)", path) and path.endswith(".rs"):
+                return "host", "host tests"
+            return cls, why
+    return "link", "not classified: both sides to be safe"
+
+
+def git_ferrite(*a):
+    r = subprocess.run(["git", "-C", FERRITE, *a], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def changed_files(base):
+    """Files changed from base to HEAD (and uncommitted ones); None if base isn't in this checkout."""
+    if git_ferrite("cat-file", "-e", f"{base}^{{commit}}") is None:
+        return None
+    out = git_ferrite("diff", "--name-only", f"{base}..HEAD") or ""
+    out += git_ferrite("diff", "--name-only", "HEAD") or ""
+    return sorted({x for x in out.splitlines() if x})
+
+
+def last_runs(results):
+    """The newest on-radio session per side: {"ui": (session, commit), "rf": (...)}. Simulator, selftest and
+    --load sessions don't count."""
+    found = {}
+    if not os.path.isdir(results):
+        return found
+    for name in sorted(os.listdir(results)):
+        p = os.path.join(results, name, "session.json")
+        try:
+            m = json.load(open(p))
+        except (OSError, ValueError):
+            continue
+        if m.get("source") not in ("on air", "radio") or str(m.get("port", "")).startswith("tcp:"):
+            continue
+        commit = (m.get("commit") or (m.get("build") or {}).get("host") or "").rstrip("+")
+        if not commit or commit == "unknown":
+            continue
+        kinds = m.get("kinds") or (["rf"] if m.get("runs") else [])
+        for k in kinds:
+            found[k] = (name, commit)
+    return found
+
+
+def decide(cfg, a):
+    """What --auto runs and why: dict(ui=None|"full"|"smoke", rf=bool, reboot=bool, what, why, files)."""
+    head = (git_ferrite("rev-parse", "--short=7", "HEAD") or "?").strip()
+    if a.all:
+        return dict(ui="full", rf=True, reboot=True, what="everything (--all)", why="forced", files=[], head=head)
+    if a.ui or a.rf:
+        return dict(ui="full" if a.ui else ("smoke" if a.rf else None), rf=bool(a.rf), reboot=False,
+                    what=("UI tests" if a.ui else "") + (" and " if a.ui and a.rf else "") + ("the SDR suite" if a.rf else ""),
+                    why="forced (--ui/--rf)", files=[], head=head)
+    last = last_runs(cfg["results"])
+    if a.diff_files is not None:
+        files = {k: [f for f in a.diff_files.split(",") if f] for k in ("ui", "rf")}
+        bases = {k: "(--diff-files)" for k in ("ui", "rf")}
+    else:
+        files, bases = {}, {}
+        for k in ("ui", "rf"):
+            if a.since:
+                bases[k] = a.since
+            elif k in last:
+                bases[k] = last[k][1]
+            else:
+                bases[k] = None
+            files[k] = changed_files(bases[k]) if bases[k] else None
+    if files["ui"] is None and files["rf"] is None:
+        why = ("no earlier on-radio run with a commit in " + cfg["results"]) if not last else             f"the last runs' commits ({', '.join(c for _, c in last.values())}) aren't in this checkout"
+        return dict(ui="full", rf=True, reboot=True, what="everything: the first run", why=why, files=[], head=head)
+    cls = {k: [(f, *classify(f)) for f in (v or [])] for k, v in files.items()}
+    # A side with no earlier on-radio run runs in full (the first time: everything on that side).
+    rf_cls = {c for _, c, _ in cls["rf"]} if files["rf"] is not None else {"rf"}
+    ui_cls = {c for _, c, _ in cls["ui"]} if files["ui"] is not None else {"ui"}
+    first = [k.upper() for k in ("ui", "rf") if files[k] is None]
+    allf = sorted({(f, f"{c}: {w}") for k in cls for f, c, w in cls[k]})
+    link = "link" in rf_cls | ui_cls
+    rf = link or "rf" in rf_cls
+    ui_full = link or bool(ui_cls & {"ui"})
+    since = "; ".join(f"{k.upper()} since {bases[k]}" + (f" ({last[k][0]})" if k in last and bases[k] == last[k][1] else "")
+                      for k in ("ui", "rf") if bases.get(k))
+    names = lambda c: ", ".join(f for f, cc, _ in sorted({x for k in cls for x in cls[k]}) if cc == c)  # noqa: E731
+    if link:
+        d = dict(ui="full", rf=True, reboot=True, what="both: the UI tests and the SDR suite on tx-dry, then a reboot check",
+                 why=f"link/store/boot/port changes ({names('link')})")
+    elif rf:
+        d = dict(ui="full" if ui_full else "smoke", rf=True, reboot=False,
+                 what="the SDR suite on tx-dry + " + ("the UI tests" if ui_full else "the UI smoke set"),
+                 why=f"radio/driver/DSP/TX/calibration changes ({names('rf')})"
+                 + (f"; UI changes too ({names('ui')})" if ui_full else ""))
+    elif ui_full:
+        d = dict(ui="full", rf=False, reboot=False, what="the UI tests on the normal build only (no TX, no SDR)",
+                 why=f"UI/app-only changes ({names('ui')})")
+    elif allf:
+        d = dict(ui=None, rf=False, reboot=False, what="nothing on the radio",
+                 why=f"host-only changes (tests, simulators, CI, PC tools: {names('host')}); --ui or --rf to run anyway")
+    else:
+        d = dict(ui=None, rf=False, reboot=False, what="nothing on the radio", why="nothing changed since the last runs")
+    if first:
+        d["why"] += f"; no earlier on-radio {' or '.join(first)} run: that side runs in full"
+    d.update(files=allf, head=head, since=since)
+    return d
+
+
+def print_decision(d):
+    say(f"decision: {d['what']}")
+    say(f"  why: {d['why']}" + (f" [{d['since']}]" if d.get("since") else "") + f"; HEAD {d['head']}")
+    for f, c in d.get("files", [])[:40]:
+        say(f"    {c:28s} {f}")
+    if len(d.get("files", [])) > 40:
+        say(f"    ... {len(d['files']) - 40} more")
+
+
+def reboot_check(port, log=say):
+    """LINK-24 restart (into the bootloader, which starts Ferrite again after ~200 ms), HELLO again within 60 s,
+    home on the screen, and every setting, channel and zone as before (`dump`)."""
+    r = fl.Radio(port)
+    before = r.cmd("dump")
+    r.link.ok(fl.REBOOT)
+    r.close()
+    t0 = time.time()
+    time.sleep(3)
+    while True:
+        try:
+            r = fl.Radio(port)
+            break
+        except Exception:
+            if time.time() - t0 > 60:
+                return dict(ok=False, text="no HELLO within 60 s of the restart")
+            time.sleep(2)
+    up = time.time() - t0
+    time.sleep(2)
+    screen = r.ui()["screen"]["id"]
+    after = r.cmd("dump")
+    r.close()
+    la, lb = [x for x in before.splitlines() if not x.startswith("#")], [x for x in after.splitlines() if not x.startswith("#")]
+    diff = [x for x in la if x not in lb] + [x for x in lb if x not in la]
+    ok = screen == "Home" and not diff
+    text = f"back after {up:.0f} s; screen {screen}; dump {'unchanged' if not diff else 'changed: ' + '; '.join(diff[:6])}"
+    log(f"reboot check: {'pass' if ok else 'FAIL'}: {text}")
+    return dict(ok=ok, text=text)
+
+
+def do_auto(cfg, a):
+    """--auto (and --all, --ui, --rf): decide, then run what was decided, one session and one page for both."""
+    import uitest
+    d = decide(cfg, a)
+    print_decision(d)
+    if a.dry_plan:
+        if d["rf"]:
+            say("")
+            plan(cfg, a, pick_runs(cfg, a.runs))
+        if d["ui"]:
+            say(f"UI: tools/uitest.py --port {cfg['port']}{' --smoke' if d['ui'] == 'smoke' else ''} (remote keys and readback; "
+                "no PTT; settings and slots put back)")
+        if d["reboot"]:
+            say("reboot: LINK-24 restart, HELLO within 60 s, home on the screen, `dump` unchanged")
+        return 0
+    if not (d["ui"] or d["rf"] or d["reboot"]):
+        return 0
+    bad = False
+    sess_dir = page = None
+    meta = None
+    if d["rf"]:
+        try:
+            out, extras, page, _ = do_bench(cfg, a)
+        except SafetyError as e:
+            say(f"SDR suite refused: {e}")
+            return 2
+        sess_dir = os.path.dirname(page)
+        meta = json.load(open(os.path.join(sess_dir, "session.json")))
+        runs = out
+        bad |= any(not j["ok"] for j in out) or any(not all_ok(v) for v in extras.values())
+    else:
+        runs, extras = [], {}
+    ui_summary = None
+    if d["ui"]:
+        ua = uitest.main_args(["--port", cfg["port"]] + (["--smoke"] if d["ui"] == "smoke" else []))
+        sel = uitest.select(uitest.load_tests(), ua, cfg["port"].startswith("tcp:"))
+        sim = cfg["port"].startswith("tcp:")
+        ui_summary = uitest.run(ua, cfg["port"], sim, sel)
+        if sess_dir is None:
+            label = f"{ui_summary['version']}-{ui_summary['commit']}-{ui_summary['build']}"
+            session, sess_dir = new_session(cfg, label)
+            meta = dict(build=dict(label=label, version=ui_summary["version"], host=host_build()),
+                        source="simulator" if sim else "radio",
+                        port=cfg["port"], commit=host_build(), kinds=[])
+        uitest.write_results(ui_summary, sess_dir)
+        meta["kinds"] = sorted(set(meta.get("kinds", [])) | {"ui"})
+        meta["ui"] = dict(counts=ui_summary["counts"], set="smoke" if d["ui"] == "smoke" else "full")
+        c = ui_summary["counts"]
+        bad |= bool(c["fail"] or c["error"] or ui_summary["left_changed"])
+    if d["reboot"]:
+        rb = reboot_check(cfg["port"])
+        meta["reboot"] = rb
+        bad |= not rb["ok"]
+    meta["decision"] = {k: d[k] for k in ("what", "why", "files", "head")}
+    json.dump(jsonable(meta), open(os.path.join(sess_dir, "session.json"), "w"), indent=1)
+    page_meta = dict(meta, ui=ui_summary) if ui_summary else meta
+    page = os.path.join(sess_dir, "summary.html")
+    open(page, "w").write(summary_page(os.path.basename(sess_dir), sess_dir, runs, jsonable(extras), page_meta))
+    say(f"\npage: {page}")
+    return 1 if bad else 0
+
+
+def selftest_auto():
+    """The selection rules on example diffs (no radio): each example's decision."""
+    examples = [
+        (["crates/ferrite-app/src/screens/home.rs", "crates/ferrite-ui/src/widgets.rs"], "ui", False, False),
+        (["firmware/src/tasks/radio/tx.rs", "crates/ferrite-app/src/screens/home.rs"], "full", True, False),
+        (["drivers/bk4829/src/lib.rs"], "smoke", True, False),
+        (["crates/ferrite-core/src/txcal.rs"], "smoke", True, False),
+        (["crates/ferrite-store/src/lib.rs"], "full", True, True),
+        (["crates/ferrite-app/src/link.rs"], "full", True, True),
+        (["sim/src/main.rs", "crates/ferrite-app/src/tests/qmenu.rs", ".github/workflows/ci.yml"], None, False, False),
+        (["some/new/thing.rs"], "full", True, True),
+    ]
+    ok = True
+    for files, ui, rf, rb in examples:
+        a = argparse.Namespace(all=False, ui=False, rf=False, since=None, diff_files=",".join(files))
+        d = decide(dict(results="/nonexistent"), a)
+        want_ui = "full" if ui == "ui" else ui
+        good = (d["ui"], d["rf"], d["reboot"]) == (want_ui, rf, rb)
+        ok &= good
+        say(f"  [{'pass' if good else 'FAIL'}] {', '.join(files)}: {d['what']}")
+    return ok
 
 
 # ---- Selftest ----
@@ -1608,6 +1970,10 @@ def selftest(a):
     r = gated("gate: no tx-dry evidence, no flag -> refused before anything", {}, {}, "tx-dry build")
     check("  ... and nothing was changed or keyed", r.calls == [], r.calls)
     gated("gate: a receive-only build", {"version": "v0.1.0 tx-dry", "rx_only": True}, {}, "a transmit build")
+    gated("gate: the radio says tx (LINK-35), even with --i-know-its-tx-dry", {"build": "tx"},
+          {"i_know_its_tx_dry": True}, "says it runs a tx build")
+    gated("gate: the radio says receive (LINK-35)", {"build": "receive"}, {"i_know_its_tx_dry": True},
+          "says it runs a receive build")
     gated("gate: frequency not approved (the radio ignores the tune)", {"version": "v0.1.0-txdry", "ignore_freq": True}, {},
           "frequency approved")
     gated("gate: power not low", {"stuck_power": "high"}, {"i_know_its_tx_dry": True}, "power low")
@@ -1686,6 +2052,8 @@ def selftest(a):
     flagged = {x[0]: x[5] for x in compare(cfg, m2, j["metrics"]) if x[5] != "ok"}
     check("compare: changes beyond tolerance flagged, small ones not", flagged == {"sweep.data.high_hz": "CHANGED", "dcs.code": "CHANGED",
                                                                                   "fsk4.errors": "CHANGED", "tone1k.tau_ms": "missing"}, flagged)
+    say("\n== --auto: the selection rules on example diffs")
+    check("--auto: each example diff picks the right side", selftest_auto())
     say("\n".join(["", "selftest:"] + lines))
     say("selftest: " + ("all pass" if ok else "FAILED") + f"\npage: {page}\npage: {page2}")
     return ok
@@ -1697,6 +2065,14 @@ def selftest_sim(a):
     tmp = a.out or tempfile.mkdtemp(prefix="bench-sim-")
     cfg["results"] = os.path.join(tmp, "results")
     radio = Radio(a.sim)
+    h = radio.hello_ans
+    if h.get("build") != "tx-dry" or not h.get("bench"):
+        # Decision 151: the simulators run without the bench feature (no txtest), and say so in LINK-35's byte.
+        say(f"selftest --sim: skipped: the simulator says it is a {h.get('build')} build"
+            f"{' with' if h.get('bench') else ' without'} the bench feature; the bench needs a tx-dry bench build "
+            "(txtest). The plain --selftest covers the flow and the gates.")
+        radio.close()
+        return True
     ok = True
     # The simulator's VFO A may carry a repeater shift; --clear-offset is what a radio with one would need.
     clk = Clock()
@@ -1762,6 +2138,13 @@ def main():
     ap.add_argument("--selftest", action="store_true", help="fake radio + synthetic IQ: the whole flow and the gates")
     ap.add_argument("--sim", metavar="tcp:HOST:PORT", help="with --selftest: against the simulator's link")
     ap.add_argument("--out", help="selftest: where its results go")
+    ap.add_argument("--auto", action="store_true", help="pick the UI tests and/or the SDR suite from what changed since "
+                    "the last on-radio runs (git diff); prints the decision and why")
+    ap.add_argument("--all", action="store_true", help="with --auto: everything (UI tests, SDR suite, reboot check)")
+    ap.add_argument("--ui", action="store_true", help="with --auto: the UI tests (full set)")
+    ap.add_argument("--rf", action="store_true", help="with --auto: the SDR suite on tx-dry (+ the UI smoke set)")
+    ap.add_argument("--since", metavar="COMMIT", help="with --auto: diff from this commit, not the last runs'")
+    ap.add_argument("--diff-files", metavar="A,B,...", help="with --auto: decide as if these files had changed")
     a = ap.parse_args()
     cfg = load_cfg(a.config)
     for k in ("port", "slot", "results"):
@@ -1769,6 +2152,8 @@ def main():
             cfg[k] = getattr(a, k)
     if a.selftest:
         sys.exit(0 if (selftest_sim(a) if a.sim else selftest(a)) else 1)
+    if a.auto or a.all or a.ui or a.rf:
+        sys.exit(do_auto(cfg, a))
     if a.dry_plan:
         plan(cfg, a, pick_runs(cfg, a.runs))
         return

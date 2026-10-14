@@ -1,0 +1,589 @@
+#!/usr/bin/env python3
+"""Ferrite's on-radio UI tests: remote keys and the screen read back over the link (LINK-19), checked against the
+manual's rules. The tests are in tools/uitests/*.py, each tagged with the rule IDs it checks.
+
+    tools/uitest.py --sim tcp:127.0.0.1:7300           # against the simulator (the reference)
+    tools/uitest.py --sim auto                          # start a headless simulator for the run, then stop it
+    tools/uitest.py                                     # against the radio on the cable (port from --port)
+    tools/uitest.py --list                              # the tests and their rules
+    tools/uitest.py -k quick --rules MENU-1,HOME-*      # a selection (name substring, rule globs, --module menus)
+    tools/uitest.py --smoke                             # the short smoke set (bench.py runs it beside the SDR suite)
+    tools/uitest.py --slow                              # also the tests that wait on timers (menu timeout, auto lock)
+    tools/uitest.py --record                            # write a result row per rule into docs/test-plan/*.md
+
+A run: connect (HELLO), read the build flavour (receive, tx, tx-dry), snapshot every setting (`dump`) and the slots
+(`slot`), then each test from home (hold BACK); after each test the settings and slots are compared with the
+snapshot and anything changed is put back (`set`, `slot`, V/M for a slot that was on a channel). At the end the
+whole `dump` is compared again and any difference is reported (and fails the run).
+
+Safe by construction: no remote PTT (KEY 0x80) is ever sent, remote keys never transmit (LINK-19), and no test
+changes a setting that could transmit or take the cable away (uitests/core.py UNSAFE).
+
+Results: <results>/<date-time>_<build>/ui/results.json (each test: rules, pass/fail/skip, the checks, the readback
+lines it looked at), ui/summary.html. --session DIR puts them under an existing session (bench.py does). With
+--record each rule a run covered gets a row in its test-plan entry (date, firmware = build + commit, ✓/✗, a short
+note); entries not covered are never touched. Simulator runs are never recorded into the real test plan: --record
+on the simulator needs --docs pointing at a copy.
+"""
+import argparse
+import datetime
+import fnmatch
+import html
+import importlib
+import json
+import os
+import pkgutil
+import re
+import socket
+import subprocess
+import sys
+import time
+import traceback
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+FERRITE = os.path.dirname(HERE)
+ROOT = os.path.dirname(FERRITE)
+sys.path.insert(0, HERE)
+import ferrite_link as fl  # noqa: E402
+from uitests import core  # noqa: E402
+
+DEFAULT_PORT = "/dev/cu.usbserial-114220"
+RESULTS = os.path.join(ROOT, "bench-results")
+
+
+def say(*a):
+    print(*a, flush=True)
+
+
+def load_tests():
+    import uitests
+    for m in pkgutil.iter_modules(uitests.__path__):
+        if m.name != "core":
+            importlib.import_module(f"uitests.{m.name}")
+    return core.REGISTRY
+
+
+def git(*a):
+    r = subprocess.run(["git", "-C", FERRITE, *a], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def host_commit():
+    h = git("rev-parse", "--short=7", "HEAD") or "unknown"
+    return h + ("+" if git("status", "--porcelain", "--untracked-files=no") else "")
+
+
+class Radio(fl.Radio):
+    """ferrite_link's Radio, keeping the cable: the link lets it go 10 s after the last frame (TERM-2)."""
+
+    def __init__(self, port, pin=None):
+        self.spec = port
+        super().__init__(port, pin=pin, name=b"uitest.py")
+        self.last = time.time()
+
+    def _ok(self, ty, payload=b"", busy_s=3.0):
+        if time.time() - self.last > 8:
+            self.port.write(b"\x00")
+            time.sleep(0.05)
+        try:
+            return super()._ok(ty, payload, busy_s)
+        finally:
+            self.last = time.time()
+
+
+# ---- The snapshot: settings and slots, and putting them back ----
+
+SET_LINE = re.compile(r"^set ((?:\d )*\d) ?(.*?)\s+# (.*)$")
+
+
+class State:
+    """Every setting (from `dump`), the slots (`slot`) and the active one, as at the run's start."""
+
+    def __init__(self, r):
+        self.r = r
+        self.dump = self.r.cmd("dump")
+        self.paths = {}  # path -> value
+        self.names = {}  # path -> name
+        for line in self.dump.splitlines():
+            p = self.resolve(line)
+            if p:
+                path, val, name = p
+                self.paths[path], self.names[path] = val, name
+        self.slots = self.slot_lines()
+
+    def resolve(self, line):
+        """A `set` line's (path, value, name): the path is 0 + two or three digits; `get` settles which."""
+        m = re.match(r"^set (0(?: \d){2,3})(?: (.*?))?\s+# (.*)$", line.rstrip())
+        if not m:
+            return None
+        toks = line.split("#")[0].split()[1:]
+        name = m.group(3).strip()
+        for n in (3, 4):
+            path = " ".join(toks[:n])
+            if len(toks) < n or not all(t.isdigit() and len(t) == 1 for t in toks[:n]):
+                continue
+            if n == 4 and not toks[3].isdigit():
+                break
+            known = getattr(self, "names", {}).get(path)
+            if known is not None:
+                if known == name:
+                    return path, " ".join(toks[n:]), name
+                continue
+            try:
+                out = self.r.cmd(f"get {path}").strip()
+            except fl.RadioError:
+                continue
+            g = core.GET.match(out)
+            if g and g.group(1) == path and g.group(2) == name:
+                return path, " ".join(toks[n:]), name
+        return None
+
+    def slot_lines(self):
+        return [x.strip() for x in self.r.cmd("slot").splitlines() if x.strip()]
+
+    def nondefault(self):
+        out = {}
+        for line in self.r.cmd("get").splitlines():
+            m = re.match(r"^set (.*?)\s+# (.*)$", line.rstrip())
+            if not m:
+                continue
+            body = m.group(1)
+            for path in sorted(self.paths, key=len, reverse=True):
+                if body.startswith(path + " ") or body == path:
+                    out[path] = body[len(path):].strip()
+                    break
+        return out
+
+    def settings_now(self):
+        """Each setting's value now: the defaults from the snapshot's dump where `get` lists nothing."""
+        nd = self.nondefault()
+        return nd
+
+    def restore(self, notes, base_nd):
+        """Settings and slots back as at the start; what couldn't be is added to notes."""
+        put = []
+        now = self.nondefault()
+        for path in sorted(set(now) | set(base_nd)):
+            if now.get(path) == base_nd.get(path):
+                continue
+            want = self.paths.get(path)
+            if want is None:
+                notes.append(f"{path}: changed and not in the snapshot")
+                continue
+            try:
+                self.r.cmd(f"set {path} {want}")
+                put.append(f"{path} {self.names.get(path, '')} -> {want}")
+            except fl.RadioError as e:
+                notes.append(f"{path} {self.names.get(path, '')}: can't put back {want!r}: {e}")
+        put += self.restore_slots(notes)
+        return put
+
+    def restore_slots(self, notes):
+        now = self.slot_lines()
+        same = lambda x, y: slot_fields(x)["cmp"] == slot_fields(y)["cmp"]  # noqa: E731
+        if len(now) == len(self.slots) and all(same(w, h) for w, h in zip(self.slots, now)):
+            return []
+        put = []
+        active = None
+        for want, have in zip(self.slots, now):
+            if want.startswith(want[0] + "*"):
+                active = want[0]
+            if same(want, have):
+                continue
+            L = want[0]
+            w = slot_fields(want)
+            h = slot_fields(have)
+            if w["ch"] is not None:
+                if h["ch"] != w["ch"]:
+                    # Back to its channel: V/M on that slot (VFO-23: V/M goes back to the channel).
+                    self.r.cmd(f"slot {L} active")
+                    self.r.keys("BACK:long")
+                    self.r.press("VM")
+                    time.sleep(0.15)
+                    h = slot_fields(self.r.cmd(f"slot {L}").strip())
+                    if h["ch"] != w["ch"]:
+                        notes.append(f"slot {L}: was on channel {w['ch']}, now {h['line']}")
+                        continue
+                put.append(f"slot {L} channel {w['ch']}")
+                continue
+            line = f"slot {L} vfo {w['freq']} {w['mode'].lower()} {w['power']}"
+            if "tone" in w["kv"]:
+                line += f" tone {w['kv']['tone']}"
+            else:
+                line += f" txtone {w['kv'].get('txtone', 'off')} rxtone {w['kv'].get('rxtone', 'off')}"
+            if "split" in w["kv"]:
+                line += f" split {w['kv']['split']}"
+            else:
+                line += f" offset {w['kv'].get('offset', 'off')}"
+            try:
+                self.r.cmd(line)
+                put.append(line)
+            except fl.RadioError as e:
+                notes.append(f"slot {L}: {line}: {e}")
+        if active:
+            self.r.cmd(f"slot {active} active")
+        now = self.slot_lines()
+        for want, have in zip(self.slots, now):
+            if slot_fields(want)["cmp"] != slot_fields(have)["cmp"]:
+                notes.append(f"slot {want[0]}: was {want!r}, now {have!r}")
+        return put
+
+
+def slot_fields(line):
+    m = re.match(r'([ABC])(\*?)\s+(?:(vfo|aprs)|ch (\d+)(?: "[^"]*")?)\s+(\d+\.\d+)\s*(.*)$', line)
+    if not m:
+        return dict(ch=None, freq=None, mode="", power="", kv={}, line=line, cmp=line)
+    kv = dict(re.findall(r"(\w+)=(\S+)", m.group(6)))
+    # "scanning" is the slot's own state (it may stop or start by itself on the simulator): not compared.
+    cmp = re.sub(r"\s*scanning", "", line)
+    if m.group(4):
+        cmp = f"{m.group(1)}{m.group(2)} ch {m.group(4)}"
+    return dict(ch=int(m.group(4)) if m.group(4) else None, freq=m.group(5), mode=kv.get("mode", "fm"),
+                power=kv.get("power", "low"), kv=kv, line=line, cmp=cmp)
+
+
+def dump_diff(a, b):
+    """Lines of two dumps that differ (the header aside)."""
+    la = [x for x in a.splitlines() if x and not x.startswith("#")]
+    lb = [x for x in b.splitlines() if x and not x.startswith("#")]
+    sa, sb = set(la), set(lb)
+    return [f"- {x}" for x in la if x not in sb] + [f"+ {x}" for x in lb if x not in sa]
+
+
+# ---- Running ----
+
+
+def select(tests, a, sim):
+    out = []
+    for t in tests:
+        if a.k and not any(k.lower() in t.name.lower() for k in a.k.split(",")):
+            continue
+        if a.module and t.module not in a.module.split(","):
+            continue
+        if a.rules and not any(fnmatch.fnmatch(r, g.strip()) for g in a.rules.split(",") for r in t.rules):
+            continue
+        if a.smoke and not t.smoke:
+            continue
+        out.append(t)
+    return out
+
+
+def run_one(r, state, tst, sim, build, a):
+    base_nd = state.base_nd
+    t = core.T(r, sim, build)
+    t.state = state
+    res = dict(name=tst.name, module=tst.module, rules=tst.rules, where=tst.where, doc=tst.doc)
+    t0 = time.time()
+    if tst.where == "radio" and sim:
+        res.update(result="skip", why="radio only: the simulator doesn't model it")
+    elif tst.where == "sim" and not sim:
+        res.update(result="skip", why="simulator only")
+    elif tst.slow and not a.slow:
+        res.update(result="skip", why="slow (waits on a timer): --slow")
+    elif tst.needs and build not in tst.needs:
+        res.update(result="skip", why=f"needs a {' or '.join(tst.needs)} build (this is {build})")
+    else:
+        try:
+            t.home()
+            tst.fn(t)
+            res["result"] = "pass"
+        except core.Skip as e:
+            res.update(result="skip", why=str(e))
+        except core.Fail as e:
+            res.update(result="fail", why=str(e))
+        except (fl.RadioError, TimeoutError, OSError) as e:
+            res.update(result="error", why=f"{type(e).__name__}: {e}")
+        except Exception as e:  # a bug in the test: shown with its place
+            res.update(result="error", why=f"{type(e).__name__}: {e}",
+                       trace=traceback.format_exc(limit=-3))
+    if tst.xfail and res["result"] in ("fail", "pass"):
+        res["result"] = "xfail" if res["result"] == "fail" else "xpass"
+        res["known"] = tst.xfail
+    res["secs"] = round(time.time() - t0, 2)
+    res["checks"] = t.checks
+    res["notes"] = t.notes
+    res["evidence"] = t.evidence[-3:]
+    if res["result"] in ("fail", "error") and t.last is not None:
+        res["evidence"] = (t.evidence + [t.last.lines])[-3:] if t.last.lines not in t.evidence else t.evidence[-3:]
+    # Put back what the test changed, from home.
+    notes = []
+    try:
+        core.T(r, sim, build).home()
+    except Exception as e:
+        notes.append(f"home after the test: {e}")
+    try:
+        put = state.restore(notes, base_nd)
+        if put:
+            res["restored"] = put
+    except Exception as e:
+        notes.append(f"restore: {type(e).__name__}: {e}")
+    if notes:
+        res["restore_notes"] = notes
+    return res
+
+
+def run(a, port, sim, tests, sess_dir=None, log=say):
+    r = Radio(port, pin=a.pin)
+    build = r.build
+    if a.expect_build and build != a.expect_build:
+        log(f"warning: the radio runs a {build} build, not {a.expect_build}")
+    info = r.link.ok(fl.INFO)
+    version, _ = fl.text(info)
+    commit = a.commit or host_commit()
+    log(f"radio: Ferrite {version}, build {build}{' (simulator)' if sim else ''}; host commit {commit}")
+    state = State(r)
+    state.base_nd = state.nondefault()
+    log(f"snapshot: {len(state.paths)} settings, slots {' | '.join(state.slots)}")
+    results = []
+    started = datetime.datetime.now()
+    try:
+        for tst in tests:
+            res = run_one(r, state, tst, sim, build, a)
+            results.append(res)
+            mark = {"pass": "pass", "fail": "FAIL", "error": "ERROR", "skip": "skip", "xfail": "xfail",
+                    "xpass": "XPASS"}[res["result"]]
+            log(f"  [{mark:5s}] {tst.module}.{tst.name} ({', '.join(tst.rules)}) {res['secs']:.1f} s"
+                + (f": {res.get('why')}" if res["result"] not in ("pass", "xpass") else "")
+                + (f" [known: {res['known']}]" if res.get("known") else "")
+                + (f"  [restored: {'; '.join(res['restored'])}]" if res.get("restored") else "")
+                + (f"  [NOT restored: {'; '.join(res['restore_notes'])}]" if res.get("restore_notes") else ""))
+            if res["result"] in ("fail", "error") and a.verbose:
+                for line in (res["evidence"][-1] if res["evidence"] else []):
+                    log(f"         | {line}")
+                if res.get("trace"):
+                    log(res["trace"])
+            if a.stop and res["result"] in ("fail", "error"):
+                break
+    finally:
+        left = []
+        try:
+            core.T(r, sim, build).home()
+            notes = []
+            state.restore(notes, state.base_nd)
+            left = dump_diff(state.dump, r.cmd("dump")) + notes
+        except Exception as e:
+            left = [f"final check: {type(e).__name__}: {e}"]
+        r.close()
+    rules = {}
+    for res in results:
+        for rid in res["rules"]:
+            prev = rules.get(rid)
+            order = {"fail": 4, "error": 4, "xfail": 3, "xpass": 2, "pass": 2, "skip": 1}
+            if prev is None or order[res["result"]] > order[prev["result"]]:
+                rules[rid] = dict(result=res["result"], test=res["name"], why=res.get("why", ""))
+    summary = dict(
+        tool="uitest.py", started=started.isoformat(timespec="seconds"), port=port, sim=sim, build=build,
+        version=version, commit=commit, label=a.build or f"{version}-{commit}-{build}",
+        counts={k: sum(1 for x in results if x["result"] == k) for k in ("pass", "fail", "error", "skip", "xfail", "xpass")},
+        rules=rules, left_changed=left, tests=results)
+    return summary
+
+
+def new_session(results_root, label):
+    os.makedirs(results_root, exist_ok=True)
+    while True:
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        if not any(x.startswith(stamp) for x in os.listdir(results_root)):
+            break
+        time.sleep(0.3)
+    session = f"{stamp}_{re.sub(r'[^A-Za-z0-9._-]+', '-', label)[:48]}"
+    d = os.path.join(results_root, session)
+    os.makedirs(d)
+    return d
+
+
+def write_results(summary, sess_dir):
+    d = os.path.join(sess_dir, "ui")
+    os.makedirs(d, exist_ok=True)
+    json.dump(summary, open(os.path.join(d, "results.json"), "w"), indent=1, ensure_ascii=False)
+    page = os.path.join(d, "summary.html")
+    open(page, "w").write(page_html(summary))
+    return d, page
+
+
+def ui_section(summary, link_prefix=""):
+    """The UI tests as a section of a summary page (bench.py's page uses it too)."""
+    e = html.escape
+    c = summary["counts"]
+    cls = {"pass": "ok", "xpass": "ok", "fail": "bad", "error": "bad"}
+
+    def pill(s):
+        return f"<span class='pill {cls.get(s, 'warn')}'>{e(s)}</span>"
+    out = [f"<h2>UI tests <span class=muted>· {e(summary['build'])} build{' · simulator' if summary['sim'] else ''}</span></h2>",
+           "<div class=tiles>" + "".join(
+               f"<div class=tile><div class=k>{k}</div><div class=v>{v}</div></div>"
+               for k, v in (("Passed", c["pass"]), ("Failed", c["fail"] + c["error"]), ("Known deviations", c["xfail"]),
+                            ("Skipped", c["skip"]),
+                            ("Rules checked", sum(1 for x in summary["rules"].values() if x["result"] != "skip")))) + "</div>"]
+    if summary.get("left_changed"):
+        out.append("<div class=card><b>Left changed after the run</b><ul class=notes>"
+                   + "".join(f"<li>{e(x)}</li>" for x in summary["left_changed"]) + "</ul></div>")
+    rows = []
+    for t in summary["tests"]:
+        ev = ""
+        if t["result"] in ("fail", "error") and t.get("evidence"):
+            ev = "<details><summary>readback</summary><pre>" + e("\n".join(t["evidence"][-1])) + "</pre></details>"
+        rows.append(f"<tr><td>{e(t['module'])}.{e(t['name'])}</td><td>{e(', '.join(t['rules']))}</td><td>{pill(t['result'])}</td>"
+                    f"<td>{e(t.get('why', '') or t.get('doc', ''))}{' (known: ' + e(t['known']) + ')' if t.get('known') else ''}{ev}</td></tr>")
+    out.append("<div class=card><div class=wrap><table><tr><th>test</th><th>rules</th><th></th><th>note</th></tr>"
+               + "".join(rows) + "</table></div></div>")
+    return "".join(out)
+
+
+def page_html(summary):
+    sys.path.insert(0, HERE)
+    css = bench_css()
+    head = (f"<h1>Ferrite UI tests</h1><p class=sub>{html.escape(summary['label'])} · {html.escape(summary['started'])} · "
+            f"{html.escape(summary['port'])}</p>")
+    return (f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            f"<title>Ferrite UI tests</title><style>{css}</style></head><body><main>{head}{ui_section(summary)}</main></body></html>")
+
+
+def bench_css():
+    """bench.py's page style (read from its source, so this tool doesn't need numpy)."""
+    src = open(os.path.join(HERE, "bench.py")).read()
+    m = re.search(r'^CSS = """(.*?)"""', src, re.S | re.M)
+    return m.group(1) if m else "body{font:14px system-ui}"
+
+
+def rule_key(rid):
+    p, _, n = rid.partition("-")
+    return p, int(n) if n.isdigit() else 0
+
+
+def manual_rules(docs):
+    import pathlib
+    import testplan
+    rules, _, _ = testplan.parse_manual(pathlib.Path(docs) / "manual.md")
+    return {r["id"] for r in rules}
+
+
+# ---- Recording into the test plan ----
+
+
+def record(summary, docs):
+    sys.path.insert(0, HERE)
+    import testplan
+    date = datetime.date.today().strftime("%b %-d, %Y")
+    fw = f"{summary['commit']} ({summary['build']}{', sim' if summary['sim'] else ''})"
+    rows = []
+    for rid, x in sorted(summary["rules"].items()):
+        if x["result"] == "skip":
+            continue
+        mark = "✓" if x["result"] in ("pass", "xpass") else "✗"
+        note = f"uitest {x['test']}" + (f": {x['why']}" if x["result"] != "pass" and x.get("why") else "")
+        rows.append((rid, date, fw, mark, note))
+    done, missing = testplan.record_results(rows, docs)
+    return done, missing
+
+
+# ---- The simulator ----
+
+
+def free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+def start_sim(secs=3600):
+    exe = os.path.join(FERRITE, "target", "debug", "ferrite-sim")
+    say("building the simulator (cargo build -p ferrite-sim) ...")
+    b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)
+    if b.returncode != 0 or not os.path.exists(exe):
+        sys.exit("can't build the simulator")
+    port = free_port()
+    p = subprocess.Popen([exe, "--term-headless", str(secs), "--term-tcp", str(port)], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+    for _ in range(50):
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            break
+        except OSError:
+            time.sleep(0.1)
+    time.sleep(0.5)
+    return p, f"tcp:127.0.0.1:{port}"
+
+
+def main_args(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--port", default=DEFAULT_PORT, help="the cable (default %(default)s)")
+    ap.add_argument("--sim", metavar="tcp:HOST:PORT|auto", help="the simulator's link instead of the radio")
+    ap.add_argument("--pin", help="the radio's PIN (Bluetooth with a PIN lock)")
+    ap.add_argument("-k", help="tests whose name has one of these (comma list)")
+    ap.add_argument("--module", help="tests in these modules (comma list: menus, home, keys, ...)")
+    ap.add_argument("--rules", help="tests checking a rule matching one of these globs (MENU-*,HOME-17)")
+    ap.add_argument("--smoke", action="store_true", help="the smoke set only")
+    ap.add_argument("--slow", action="store_true", help="also the tests that wait on timers")
+    ap.add_argument("--list", action="store_true", help="list the tests and the rules they check")
+    ap.add_argument("--results", default=RESULTS, help="results root (default %(default)s)")
+    ap.add_argument("--session", help="an existing session directory to write ui/ into")
+    ap.add_argument("--build", help="the build's label for the results directory")
+    ap.add_argument("--commit", help="the firmware's commit (default: the host checkout's)")
+    ap.add_argument("--expect-build", choices=["receive", "tx", "tx-dry"], help="warn when the radio runs another")
+    ap.add_argument("--record", action="store_true", help="a result row per rule into the test plan")
+    ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
+    ap.add_argument("--stop", action="store_true", help="stop at the first failure")
+    ap.add_argument("--verbose", "-v", action="store_true", help="print the readback of a failure")
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    a = main_args(argv)
+    tests = load_tests()
+    if a.list:
+        sel = select(tests, a, False)
+        for t in sel:
+            say(f"{t.module}.{t.name:40s} {', '.join(t.rules)}{'  [radio only]' if t.where == 'radio' else ''}"
+                f"{'  [slow]' if t.slow else ''}{'  [smoke]' if t.smoke else ''}")
+        ids = sorted({r for t in sel for r in t.rules}, key=rule_key)
+        say(f"{len(sel)} tests, {len(ids)} rules: {' '.join(ids)}")
+        unknown = [i for i in ids if i not in manual_rules(a.docs)]
+        if unknown:
+            say(f"rules the manual doesn't have: {' '.join(unknown)}")
+            return 1
+        return 0
+    proc = None
+    port, sim = a.port, a.port.startswith("tcp:")
+    if a.sim:
+        sim = True
+        if a.sim == "auto":
+            proc, port = start_sim()
+        else:
+            port = a.sim
+    if a.record and sim and os.path.realpath(a.docs) == os.path.realpath(os.path.join(ROOT, "docs")):
+        sys.exit("--record on the simulator: give --docs a copy (simulator runs never go into the real test plan)")
+    sel = select(tests, a, sim)
+    try:
+        summary = run(a, port, sim, sel)
+    finally:
+        if proc:
+            proc.terminate()
+    sess = a.session or new_session(a.results, summary["label"] + ("-sim" if sim else ""))
+    d, page = write_results(summary, sess)
+    if not a.session:
+        json.dump(dict(tool="uitest.py", kinds=["ui"], commit=summary["commit"], build=dict(label=summary["label"],
+                       flavour=summary["build"], version=summary["version"]), source="simulator" if sim else "radio",
+                       port=port, ui=summary["counts"]), open(os.path.join(sess, "session.json"), "w"), indent=1)
+    c = summary["counts"]
+    rules_ok = sorted(k for k, v in summary["rules"].items() if v["result"] in ("pass", "xpass"))
+    rules_bad = sorted(k for k, v in summary["rules"].items() if v["result"] in ("fail", "error"))
+    rules_known = sorted(k for k, v in summary["rules"].items() if v["result"] == "xfail")
+    say(f"\nui tests: {c['pass']} pass, {c['fail']} fail, {c['error']} error, {c['skip']} skipped"
+        + (f", {c['xfail']} known deviations (xfail)" if c["xfail"] else "") + (f", {c['xpass']} XPASS (drop the mark)" if c["xpass"] else "")
+        + "; "
+        f"rules: {len(rules_ok)} pass" + (f", {len(rules_bad)} fail ({' '.join(rules_bad)})" if rules_bad else "")
+        + (f", {len(rules_known)} with a known deviation ({' '.join(rules_known)})" if rules_known else ""))
+    if summary["left_changed"]:
+        say("left changed after the run:\n  " + "\n  ".join(summary["left_changed"]))
+    say(f"results: {d}/results.json\npage: {page}")
+    if a.record:
+        done, missing = record(summary, a.docs)
+        say(f"recorded {len(done)} rules into {a.docs}/test-plan" + (f"; no entry for {' '.join(missing)}" if missing else ""))
+    return 0 if not (c["fail"] or c["error"] or summary["left_changed"]) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

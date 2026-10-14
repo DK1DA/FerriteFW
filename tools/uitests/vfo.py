@@ -1,0 +1,222 @@
+"""VFO tuning, frequency entry, channels and the slot editor (chapters 9 and 10, VFO-*, NAV-*, EDIT-*)."""
+from .core import test
+
+
+def tune(t, f="146.52", rest="fm low tone 100.0 offset -0.6"):
+    t.cmd(f"slot A vfo {f} {rest}")
+    return t.home()
+
+
+@test("VFO-11", "VFO-24", "VFO-19", smoke=True)
+def star_enters_a_frequency(t):
+    """A digit opens entry; * is the point; 146 * 52 * tunes 146.520 (the * after a decimal is OK); # does
+    nothing in entry."""
+    tune(t, "145.00")
+    u = t.keys("1")
+    t.eq((u.id, u["entry"]["args"][0]), ("Entry", "1"), "a digit opens entry")
+    u = t.keys("4 6 STAR 5")
+    t.eq(u["entry"]["args"][0], "146.5", "* is the point")
+    u = t.keys("HASH")
+    t.eq((u.id, u["entry"]["args"][0]), ("Entry", "146.5"), "# does nothing")
+    u = t.keys("2 STAR")
+    t.eq(u.id, "Home", "* after a decimal enters it")
+    t.eq(u.active["freq"], "146.52000", "tuned")
+
+
+@test("VFO-17")
+def whole_frequency_goes_in_without_ok(t):
+    """With a 5 kHz step 146.940 goes in at its last 0; five decimals always go in."""
+    tune(t, "145.00")
+    u = t.keys("MENU 6")
+    t.need(u.sel["value"] == "5 kHz", f"step is {u.sel['value']}, not 5 kHz")
+    t.home()
+    u = t.keys("1 4 6 STAR 9 4")
+    t.eq(u.id, "Entry", "146.94: still typing")
+    u = t.keys("0")
+    t.eq((u.id, u.active.get("freq")), ("Home", "146.94000"), "146.940 went in by itself")
+    u = t.keys("1 4 6 STAR 5 2 3 4 5")
+    t.eq((u.id, u.active.get("freq")), ("Home", "146.52345"), "five decimals go in")
+
+
+@test("VFO-12", "NAV-2")
+def off_step_is_tuned_as_typed(t):
+    """146.5234 OK tunes exactly that (never snapped); the knob then steps from there by the step."""
+    tune(t, "145.00")
+    u = t.keys("1 4 6 STAR 5 2 3 4 MENU")
+    t.eq((u.id, u.active["freq"]), ("Home", "146.52340"), "what's typed is what's tuned")
+    u = t.knob(+1)
+    t.eq(u.active["freq"], "146.52840", "the knob steps 5 kHz from there")
+    u = t.keys("DOWN")
+    t.eq(u.active["freq"], "146.52340", "▼ one step back")
+
+
+@test("VFO-14", "VFO-21")
+def entry_ranges(t):
+    """Below 18 MHz: "< 18 MHz: HF mode, MENU 0 3 4"; 630-756 and above 1300 MHz refused with the range;
+    18, 630, 756 and 1300 MHz accepted."""
+    tune(t)
+    u = t.keys("1 0 STAR 5 MENU")
+    t.check(u.toast and u.toast["head"] == "< 18 MHz" and "MENU 0 3 4" in u.toast["body"], "10.5 MHz", u.toast)
+    for f, mhz in (("7 0 0", "700.0"), ("1 4 0 0", "1400.0")):
+        tune(t)
+        u = t.keys(f"{f} MENU")
+        t.check(u.toast and u.toast["head"] == "Can't tune" and "756-1300" in u.toast["body"], f"{f}: refused", u.toast)
+        t.check(f" {mhz}" not in t.slot("A"), f"{f}: not tuned there", t.slot("A"))
+    for f, want in (("1 8", "18.00000"), ("6 2 9 STAR 9 9", "629.99000"), ("7 5 6", "756.00000")):
+        t.home()
+        u = t.keys(f"{f} MENU")
+        t.eq((u.id, (u.cards.get("A") or {}).get("freq")), ("Home", want), f"{f}: tuned")
+    tune(t)
+
+
+@test("VFO-21", xfail="the edges: 630.000 is refused (629.99 is the top) and 1000-1300 MHz can't be typed as "
+                      "digits (1 2 9 9 tunes 129.9, 1 3 0 0 tunes 130) (sim, Oct 14, 2026)")
+def entry_range_edges(t):
+    """630 and 1300 MHz, the range's own ends, tune when typed (1 0 5 0 too: above 1000 MHz receive only)."""
+    for f, want in (("6 3 0", "630.00000"), ("1 3 0 0", "1300.00000"), ("1 0 5 0", "1050.00000")):
+        tune(t)
+        u = t.keys(f"{f} MENU")
+        t.eq((u.id, (u.cards.get("A") or {}).get("freq")), ("Home", want), f"{f}: tuned")
+    tune(t)
+
+
+@test("NAV-2", "VFO-5")
+def knob_steps_and_bands(t):
+    """VFO: knob and ▲▼ step by the step; ◀▶ step bands and come back."""
+    u = tune(t)
+    u = t.knob(+2)
+    t.eq(u.active["freq"], "146.53000", "knob +2 at 5 kHz")
+    u = t.keys("UP")
+    t.eq(u.active["freq"], "146.53500", "▲")
+    u = t.knob(-3)
+    t.eq(u.active["freq"], "146.52000", "back")
+    h0 = u.active["head"]
+    u = t.keys("RIGHT")
+    t.check(u.active["head"] != h0 and float(u.active["freq"]) > 146.52, "▶: the next band up", u.active)
+    u = t.keys("LEFT")
+    t.eq(u.active["head"], h0, "◀: back to the band")
+
+
+@test("NAV-1", "VFO-23")
+def channel_mode_and_copy_to_vfo(t):
+    """V/M: channel mode (header the channel number, hint "Zone"); knob steps channels; hold V/M on a channel
+    copies it to the VFO ("Copied to VFO") and V/M goes back to the channel untouched."""
+    tune(t)
+    u = t.keys("VM")
+    a = u.active
+    t.check(a["head"][:3].isdigit(), "V/M: a channel", a["head"])
+    t.eq(u.hint("<>"), "Zone", "◀▶ step zones in channel mode")
+    ch0 = a["head"]
+    u = t.knob(+1)
+    t.check(u.active["head"] != ch0 and u.active["head"][:3].isdigit(), "knob: the next channel", u.active["head"])
+    u = t.knob(-1)
+    t.eq(u.active["head"], ch0, "knob back")
+    name, freq, mode = u.active["name"], u.active["freq"], u.active["mode"]
+    u = t.press("VM", long=True)
+    t.check(u.toast and u.toast["head"] == "Copied to VFO", "the toast", u.toast)
+    t.check(u.active["head"].startswith("VFO"), "the slot is on its VFO", u.active["head"])
+    t.eq((u.active["freq"], u.active["mode"]), (freq, mode), "with the channel's frequency and mode")
+    u = t.keys("VM")
+    t.eq((u.active["head"], u.active["name"]), (ch0, name), "V/M: back to the channel, untouched")
+    t.keys("VM")
+
+
+@test("VFO-9")
+def hold_vm_saves_a_vfo(t):
+    """Hold V/M on a VFO opens the save screen (BACK cancels, nothing saved); on a channel it does nothing.
+    (VFO-9's "on 18-64 MHz it refuses" predates HF channels, CHAN-22/CHAN-26: the radio saves one; not checked.)"""
+    tune(t)
+    n0 = t.cmd("dump").count("\nch ")
+    u = t.press("VM", long=True)
+    t.eq(u.id, "Save", "hold V/M on a VFO")
+    u = t.keys("BACK")
+    t.eq(u.id, "Home", "BACK cancels")
+    t.eq(t.cmd("dump").count("\nch "), n0, "nothing saved")
+
+
+@test("TX-36", xfail="HF keeps High: tuning onto 28.4 MHz from High stays High (sim, Oct 14, 2026)")
+def hf_starts_on_low(t):
+    """Tuning onto an HF frequency (28.4 MHz) puts the power at Low, whatever it was."""
+    t.cmd("slot A vfo 146.52 high")
+    t.eq(t.ui().active["power"], "HIGH", "High on 2 m")
+    u = t.keys("2 8 STAR 4 MENU")
+    t.eq((u.active["freq"], u.active["power"]), ("28.40000", "LOW"), "28.4 MHz: Low")
+    tune(t)
+
+
+@test("TX-9", "CAL-16", "MENU-14", "LINK-33")
+def power_capped_on_125m(t):
+    """1.25 m: the card shows 0.25 W, quick settings' TX power is greyed with the reason, and `slot A high`
+    (as the link's SLOT) is refused naming it."""
+    t.cmd("slot A vfo 223.5")
+    u = t.home()
+    t.eq(u.active["power"], "0.25 W", "the card")
+    u = t.keys("MENU")
+    p = u.row("TX power")
+    t.check(p["grey"], "TX power greyed", p)
+    u = t.keys("2")
+    u = t.knob(+1)
+    t.check(u.toast and "0.25 W" in u.toast["head"] + u.toast["body"], "the reason", u.toast)
+    ok, why = t.cmd_err("slot A high")
+    t.check(not ok and "0.25 W" in why, "`slot A high` refused", why)
+    tune(t)
+
+
+@test("TX-37", "LINK-33", "TERM-35")
+def split_and_tune_refusals(t):
+    """`slot` refuses a split across 64 MHz and a frequency out of range with the reason, changing nothing;
+    a good change shows on the card at once."""
+    before = t.slot("A")
+    ok, why = t.cmd_err("slot A split 28.4")
+    t.check(not ok and why, "split 146.52 -> 28.4 refused", why)
+    ok, why = t.cmd_err("slot A 700")
+    t.check(not ok and why, "700 MHz refused", why)
+    t.eq(t.slot("A"), before, "nothing changed")
+    t.cmd("slot A 146.94")
+    t.eq(t.ui().cards["A"]["freq"], "146.94000", "a good change shows on the card")
+    tune(t)
+
+
+@test("EDIT-1", "EDIT-3", "EDIT-6")
+def hold_slot_edits_in_place(t):
+    """Hold SLOT: the edit screen, status bar "EDIT A", hint "<^v> Pick, Knob Change"; BACK ends it."""
+    u = t.press("SLOT", long=True)
+    t.eq((u.id, u.title), ("Edit", "EDIT A"), "hold SLOT")
+    # "* Undo" takes Pick's place for 5 s after a change (the runner's restore counts as one).
+    t.check(("Knob", "Change") in u.hints and (("<^v>", "Pick") in u.hints or ("*", "Undo") in u.hints),
+            "the hint bar: Pick, Knob Change", u.hints)
+    t.eq(u.hints[-1], ("BACK", "Done"), "BACK Done")
+    u = t.keys("BACK")
+    t.eq(u.id, "Home", "BACK ends it")
+    u = t.press("SLOT", long=True)
+    u = t.keys("SLOT")
+    t.eq(u.id, "Home", "SLOT ends it")
+
+
+@test("EDIT-6", slow=True)
+def edit_ends_after_idle(t):
+    """The slot editor ends by itself after 8 s idle."""
+    u = t.press("SLOT", long=True)
+    t.eq(u.id, "Edit", "hold SLOT")
+    t.wait(lambda u: u.id == "Home", timeout=11, what="home after 8 s idle", every=0.5)
+
+
+@test("CHAN-22", "TERM-35")
+def channel_edges_over_the_terminal(t):
+    """`ch` (the mini-CPS) refuses 700 MHz and 0.1 MHz with a reason, takes 28.4 MHz (an HF channel) and
+    64.5 MHz; the channel then reads back; delete removes it."""
+    n = 990
+    ok, out = t.cmd_err(f"ch {n}")
+    t.need(not ok and "no such channel" in out, f"channel {n} isn't empty: {out.strip()}")
+    try:
+        for f in ("700", "0.1"):
+            ok, why = t.cmd_err(f'ch {n} "UITEST" {f}')
+            t.check(not ok and why, f"{f} MHz refused", why)
+        for f in ("28.4 mode=am", "64.5", "146.52"):
+            ok, why = t.cmd_err(f'ch {n} "UITEST" {f}')
+            t.check(ok, f"{f} MHz accepted", why)
+            t.has(t.cmd(f"ch {n}"), "UITEST", f"ch {n} reads back")
+    finally:
+        t.cmd_err(f"ch {n} delete")
+    ok, out = t.cmd_err(f"ch {n}")
+    t.check(not ok and "no such channel" in out, "deleted", out)

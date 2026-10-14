@@ -375,7 +375,8 @@ class Radio:
             if not pin:
                 raise RadioError(5)
             self._ok(AUTH, pin.encode("ascii"))
-        self.build = build_name(text(hello[3:])[1])
+        rest = text(hello[3:])[1]
+        self.build, self.bench = build_name(rest), build_bench(rest)
 
     def __enter__(self):
         return self
@@ -486,9 +487,18 @@ def main():
         port.close()
 
 
+BENCH_BIT = 0x80  # LINK-35: bit 7 of the build byte marks a bench build (decision 151: tx-dry is 0x82)
+
+
 def build_name(rest):
-    """LINK-35: the build byte after HELLO's version or INFO's callsign (absent before Oct 13, 2026)."""
-    return {0: "receive", 1: "tx", 2: "tx-dry"}.get(rest[0], f"unknown {rest[0]}") if rest else "not given"
+    """LINK-35: the build byte after HELLO's version or INFO's callsign (absent before Oct 13, 2026): its flavour,
+    bit 7 (a bench build) masked off; build_bench() says whether it is set."""
+    return {0: "receive", 1: "tx", 2: "tx-dry"}.get(rest[0] & 0x7F, f"unknown {rest[0]}") if rest else "not given"
+
+
+def build_bench(rest):
+    """LINK-35: a bench build (bit 7): the bench terminal commands (txtest, bk, mem, gpio, ...) are in it."""
+    return bool(rest and rest[0] & BENCH_BIT)
 
 
 def run(link, a):
@@ -542,13 +552,13 @@ def run(link, a):
     if a.cmd == "hello":
         ver, rest = text(hello[3:])
         print(f"protocol {hello[0]}, max payload {hello[1]}, may write {bool(hello[2])}, firmware {ver}, "
-              f"build {build_name(rest)}")
+              f"build {build_name(rest)}{' (bench)' if build_bench(rest) else ''}")
     elif a.cmd == "info":
         r = link.ok(INFO)
         ver, r = text(r)
         chans, zones, presets, slen, region = struct.unpack("<HBBHB", r[:7])
         call, rest = text(r[7:])
-        print(f"firmware {ver} ({build_name(rest)}); {chans} channels, {zones} zones, {presets} presets; "
+        print(f"firmware {ver} ({build_name(rest)}{', bench' if build_bench(rest) else ''}); {chans} channels, {zones} zones, {presets} presets; "
               f"settings {slen} B; region {region}; callsign {call or '-'}")
     elif a.cmd == "read-settings":
         rec = link.read(SETTINGS, 0)
