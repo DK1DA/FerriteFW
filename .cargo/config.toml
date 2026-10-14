@@ -1,9 +1,14 @@
 # The radio: every size option (nightly, pinned in rust-toolchain.toml): core rebuilt at opt-level z, no panic
 # location strings, panics as a trap (HardFault -> safe state), identical-code folding. Only the radio target
 # gets these, so the host crates build and test with plain `cargo test`.
+# The machine outliner is off: its shared OUTLINED_FUNCTION_* fragments match no name pattern in memory.x, so all of
+# them sat in the fast flash (10.5 KB, 8.7 KB of it used only by slow UI code), and they can't be moved by name
+# because interrupt code uses some of them. Off, the fast code is a little bigger but makes fewer calls, and the
+# slow UI code grows instead (fast-flash audit, Oct 13, 2026).
 [target.thumbv7em-none-eabihf]
 rustflags = ["-C", "link-arg=-Tlink.x", "-C", "target-cpu=cortex-m4", "-Zlocation-detail=none",
-             "-Zunstable-options", "-Cpanic=immediate-abort", "-C", "link-arg=--icf=all"]
+             "-Zunstable-options", "-Cpanic=immediate-abort", "-C", "link-arg=--icf=all",
+             "-C", "llvm-args=-enable-machine-outliner=never"]
 
 [alias]
 # The firmware image: target/thumbv7em-none-eabihf/release/ferrite
