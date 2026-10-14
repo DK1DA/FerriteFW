@@ -986,26 +986,65 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         put!(m, " {}: {}", name, Bytes(v.as_bytes()));
         return Ok(Done::Said(m));
     }
-    // Step through the values as the knob does until one reads as asked: up, and a full turn brings it back. A
-    // value that stops at its ends (a level, 1-10) is walked up to its top, then down, then back to where it was.
+    match walk(app, dev, p, name, want) {
+        // Not one of the values as written: an unambiguous short form names the one meant (`set 0 7 7 1` for
+        // "Level 1"); the walk again with that value, so it changes exactly as if typed in full.
+        Walk::Short(v) => match walk(app, dev, p, name, v.as_bytes()) {
+            Walk::Set(m) => Ok(Done::Said(m)),
+            Walk::Short(_) => Err(msg!("{}: not changed", name)), // never: the value was just seen
+            Walk::No(m) => Err(m),
+        },
+        Walk::Set(m) => Ok(Done::Said(m)),
+        Walk::No(m) => Err(m),
+    }
+}
+
+/// What [`walk`] found.
+enum Walk {
+    /// Set: what it says.
+    Set(Msg),
+    /// Not as written, but the one value a short form names.
+    Short(Buf<24>),
+    /// Neither: the "one of" message.
+    No(Msg),
+}
+
+/// A short form of a setting's value (TERM-12): a bare number names the one value that has it as a whole word
+/// ("1" for "Level 1", "10" for "10 s"), so a number still means that number; anything else is the start of a
+/// value ("night" for "Night red"). Only when one value matches, checked by the caller.
+fn loose(v: &[u8], want: &[u8]) -> bool {
+    let numeric = want.iter().any(u8::is_ascii_digit) && want.iter().all(|c| c.is_ascii_digit() || b".+-".contains(c));
+    if numeric {
+        v.split(|c| *c == b' ').any(|w| w == want)
+    } else {
+        !want.is_empty() && v.len() >= want.len() && same(&v[..want.len()], want)
+    }
+}
+
+/// Step through the values as the knob does until one reads as asked: up, and a full turn brings it back. A
+/// value that stops at its ends (a level, 1-10) is walked up to its top, then down, then back to where it was.
+/// Not found: the one value [`loose`] matches if exactly one does, or the "one of" message.
+fn walk(app: &mut App, dev: &Device, p: &[u8], name: &str, want: &[u8]) -> Walk {
     let mut v = Buf::<24>::new();
     value(app, dev, p, &mut v);
     let start = v;
     let mut all = msg!("{}: one of ", name);
     let mut n = 0;
+    let (mut hits, mut hit) = (0, Buf::<24>::new());
+    let fail = |all: Msg, hits: u32, hit: Buf<24>| if hits == 1 { Walk::Short(hit) } else { Walk::No(all) };
     for d in [1, -1, 1] {
         if d == -1 {
-            (all, n) = (msg!("{}: one of ", name), 0); // the whole range, top to bottom
+            (all, n, hits) = (msg!("{}: one of ", name), 0, 0); // the whole range, top to bottom
         }
         for _ in 0..64 {
             if d == 1 && n > 0 && v == start {
-                return Err(all); // back where it started
+                return fail(all, hits, hit); // back where it started
             }
             if same(v.as_bytes(), want) && n != usize::MAX {
                 let mut m = Msg::new();
                 path_text(p, &mut m);
                 put!(m, " {}: {}", name, Bytes(v.as_bytes()));
-                return Ok(Done::Said(m));
+                return Walk::Set(m);
             }
             if n != usize::MAX {
                 if n > 0 {
@@ -1013,6 +1052,9 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
                 }
                 all.push(v.as_bytes());
                 n += 1;
+                if loose(v.as_bytes(), want) {
+                    (hits, hit) = (hits + 1, v);
+                }
             }
             let was = v;
             groups::change(app, p, d);
@@ -1025,7 +1067,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
             n = usize::MAX; // the last pass only goes back to the start
         }
     }
-    Err(all)
+    fail(all, hits, hit)
 }
 
 fn get(app: &App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
@@ -1072,7 +1114,7 @@ pub fn writes(line: &[u8]) -> bool {
     let Some(c) = w.next() else { return false };
     let rest = w.count();
     let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio"].iter().any(|r| same(c, r));
-    let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || same(c, b"home") && rest == 0;
+    let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx"].iter().any(|r| same(c, r)) && rest == 0;
     !(reads || shows)
 }
 
@@ -1111,6 +1153,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"bk") => bk(&mut t),
         _ if same(c, b"si") => si(&mut t),
         _ if same(c, b"bt") => bt(&mut t),
+        _ if same(c, b"rx") => rx(&mut t),
         _ if same(c, b"load") => Ok(Done::Load),
         _ if same(c, b"clear") => {
             if !same(t.word("clear channels N: deletes every channel")?, b"channels") {
@@ -1188,6 +1231,22 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
         }
         _ => Err(msg!("{}", USAGE)),
     }
+}
+
+/// TERM-29 (decision 114, a bench test): `rx both` holds both band receive selects on, `rx one` goes back to
+/// the normal one, `rx` alone says which. The Radio task refuses it while keyed, in HF mode and in crossband.
+fn rx(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "rx both, rx one, or rx to ask: both band receive selects held on (a bench test)";
+    let on = match t.next()? {
+        None => None,
+        Some(Tok::Word(w)) if same(w, b"both") => Some(true),
+        Some(Tok::Word(w)) if same(w, b"one") => Some(false),
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::RxBoth(on))))
 }
 
 /// TERM-27: `bt AT+VERS?`, one read-only query to the Bluetooth module.
@@ -1371,7 +1430,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 25] = [
+const HELP: [&str; 26] = [
     slow!("Commands: type : then one of these, and Enter. A dump is made of the same lines."),
     "",
     slow!("  set 0 7 1 Dark         a setting, by its number in the radio's menu"),
@@ -1396,5 +1455,6 @@ const HELP: [&str; 25] = [
     slow!("  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)"),
     slow!("  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property"),
     slow!("  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)"),
+    slow!("  rx both   rx one       bench test: VHF and UHF receive selects both on, or one"),
     slow!("  The radio's own logic may rewrite a register you set (a tune, Battery Save)."),
 ];

@@ -1,5 +1,5 @@
-//! The terminal's debug commands (manual chapter 37, TERM-21 to TERM-24): MCU memory, the GPIO ports, BK4829
-//! registers and SI4732 commands, for bring-up without a custom build each time. A command becomes a [`Job`]:
+//! The terminal's debug commands (manual chapter 37, TERM-21 to TERM-24, TERM-27, TERM-29): MCU memory, the GPIO
+//! ports, BK4829 registers, SI4732 commands, the Bluetooth module's queries and the both-receive-selects bench test, for bring-up without a custom build each time. A command becomes a [`Job`]:
 //! the firmware takes its requests one at a time ([`crate::term::Term::debug_req`]), answers them
 //! ([`crate::term::Term::debug_answer`]), and the console prints the answers as lines. Memory is read by the
 //! firmware where the terminal runs; registers by the Radio task, which owns the chips and refuses writes that
@@ -36,6 +36,8 @@ pub enum Kind {
     Si { cmd: [u8; 8], n: u8, reply: u8 },
     /// `bt AT+VERS?`: a read-only query to the Bluetooth module (TERM-27).
     Bt { text: [u8; 16], n: u8 },
+    /// `rx both`, `rx one`, `rx`: the bench test's hold on both band receive selects (TERM-29), or ask.
+    RxBoth(Option<bool>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -95,6 +97,7 @@ impl Job {
             Kind::BkDump { chip } => DebugReq::BkRead { chip, reg: self.done as u8 },
             Kind::Si { cmd, n, reply } => DebugReq::Si { cmd, n, reply },
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
+            Kind::RxBoth(on) => DebugReq::RxBoth(on),
         })
     }
 
@@ -199,6 +202,15 @@ impl Job {
                         out.push(&[if (b' '..=b'~').contains(&c) { c } else { b'.' }]);
                     }
                 }
+                self.st = St::Over;
+                Step::Line
+            }
+            (Kind::RxBoth(_), DebugAns::RxBoth(on)) => {
+                out.push(if on {
+                    b"  rx both: VHF RX (PB0) and UHF RX (PE12) held on, until rx one or a restart"
+                } else {
+                    b"  rx one: only the receiving band's select on (PB0 or PE12), as normal"
+                });
                 self.st = St::Over;
                 Step::Line
             }

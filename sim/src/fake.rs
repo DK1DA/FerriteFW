@@ -748,6 +748,13 @@ impl FakeRadio {
             }
             // TERM-27: a module that, like the radio's, says nothing back.
             DebugReq::Bt { .. } => DebugAns::Bt { data: [0; 48], n: 0 },
+            // TERM-29: the fake path machine holds both band receive selects (or refuses, as the radio's).
+            DebugReq::RxBoth(None) => DebugAns::RxBoth(self.path.both()),
+            DebugReq::RxBoth(Some(on)) => match self.path.set_both(on, &mut Steps::default()) {
+                Ok(()) => DebugAns::RxBoth(on),
+                Err(ferrite_core::path::Blocked::Keyed) => DebugAns::Refused("transmitting: try again after the unkey"),
+                Err(_) => DebugAns::Refused("an HF slot has the relay energised: tune VHF or UHF first"),
+            },
         }
     }
 }

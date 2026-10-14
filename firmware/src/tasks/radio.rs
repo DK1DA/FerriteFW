@@ -49,7 +49,7 @@ use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, mhz, Freq10};
 use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, Source, SLOTS};
 use ferrite_core::same_rx::{Assembler, Repeats, Step};
-use ferrite_core::path::{Cause, Path, Rx, Sel, Steps};
+use ferrite_core::path::{Blocked, Cause, Path, Rx, Sel, Steps};
 use ferrite_radio::chip::{self as radio_chip, RxSetup};
 use ferrite_radio::Pin;
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
@@ -385,6 +385,29 @@ impl Radio {
         }
     }
 
+    /// TERM-29, SAFE-24 (decision 114, a bench test): hold both band receive selects on (VHF RX PB0 and UHF RX
+    /// PE12), back to one, or ask. Refused while keyed, in HF mode (its path and the relay) and while the crossband
+    /// repeater runs (it owns both chips' paths). RAM only: off at boot.
+    async fn rx_both(&mut self, on: Option<bool>) -> DebugAns {
+        let Some(on) = on else { return DebugAns::RxBoth(self.path.both()) };
+        if self.hf.is_some() {
+            return DebugAns::Refused("HF mode is on: it has the HF path and the relay; leave HF mode first");
+        }
+        #[cfg(feature = "tx")]
+        if self.xb.is_some() {
+            return DebugAns::Refused("the crossband repeater is running: it owns both chips' paths");
+        }
+        let mut s = Steps::default();
+        match self.path.set_both(on, &mut s) {
+            Err(Blocked::Keyed) => DebugAns::Refused("transmitting: try again after the unkey"),
+            Err(_) => DebugAns::Refused("an HF slot has the relay energised: tune VHF or UHF first"),
+            Ok(()) => {
+                self.run(&s).await;
+                DebugAns::RxBoth(on)
+            }
+        }
+    }
+
     fn chip(&mut self, n: u8) -> Bk4829<bk4829::wire::Chip<'_, Out, Io, BusyDelay, Out>> {
         Bk4829::new(self.wire.chip(&mut self.cs[n as usize]))
     }
@@ -528,8 +551,11 @@ impl Radio {
                     s.squelch_open &= kept & 1 << i != 0;
                 }
                 if self.tuned.iter().all(Option::is_none) {
+                    // BCR-19: during a broadcast the band's receive select stays on (switching it clicks in the
+                    // shared amp); otherwise off, as stock.
+                    let broadcast = self.si.mode().is_some() && self.hf.is_none();
                     let mut s = Steps::default();
-                    let _ = self.path.rx_off(&mut s); // refused only while keyed (TX-29)
+                    let _ = self.path.rx_off(broadcast, &mut s); // refused only while keyed (TX-29)
                     self.run(&s).await;
                 }
             }
@@ -1589,7 +1615,10 @@ pub async fn task() {
             Either3::First(c) => r.cmd(c).await,
             Either3::Second(()) => r.tick().await,
             Either3::Third(d) => {
-                let a = r.debug(d);
+                let a = match d {
+                    DebugReq::RxBoth(on) => r.rx_both(on).await,
+                    d => r.debug(d),
+                };
                 DEBUG_ANS.send(a).await;
                 TERM_WAKE.signal(()); // the UI task runs the terminal
                 continue;

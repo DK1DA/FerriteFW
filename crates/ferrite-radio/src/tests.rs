@@ -225,15 +225,21 @@ fn si4732_input_pins() {
     assert!(a < b);
 }
 
-/// BCR-19, PWR-6: Battery Save's sleep step during broadcast FM, on the pins: only the BK4829's receive select
-/// goes off; the speaker amp, the receiver mute and the SI4732's input pins are never touched, so the broadcast
-/// plays on.
+/// BCR-19, PWR-6 (decision 113): Battery Save's sleep step during broadcast FM, on the pins: nothing at all (the
+/// receive select stays on: switching it clicked in the shared amp); the speaker amp, the receiver mute and the
+/// SI4732's input pins are never touched, so the broadcast plays on. Without a broadcast only the BK4829's
+/// receive select goes off, as stock.
 #[test]
 fn sleep_step_keeps_the_broadcast_playing() {
     let (mut path, _, mut hw, _) = receiving(VHF);
     hw.si_used = true; // broadcast FM running
     let mut s = Steps::default();
-    path.rx_off(&mut s).unwrap();
+    path.rx_off(true, &mut s).unwrap();
+    block_on(run(&mut hw, &s));
+    assert_eq!(hw.evs(), []);
+    let (mut path, _, mut hw, _) = receiving(VHF);
+    let mut s = Steps::default();
+    path.rx_off(false, &mut s).unwrap();
     block_on(run(&mut hw, &s));
     assert_eq!(hw.evs(), [Ev::Pin(Pin::Sel(Sel::VhfRx), false)]);
 }

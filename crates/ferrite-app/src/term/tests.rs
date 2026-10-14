@@ -751,6 +751,39 @@ fn set_every_light_setting() {
     assert_eq!((r.app.set.brightness_night, r.app.set.brightness), (2, 4));
 }
 
+/// TERM-12: a short form names a value when only one matches: a bare number as a whole word of the value
+/// (Battery Save's "1" is "Level 1"; on the radio, Oct 13, 2026, it was refused), the start of a word-value;
+/// a number still means the number (Brightness 1 is 1, never 10), and an ambiguous one lists the choices.
+#[test]
+fn set_short_forms() {
+    let mut r = Rig::main();
+    for (cmd, says) in [
+        ("set 0 7 7 1", "0 7 7 Battery Save: Level 1"),
+        ("set 0 7 7 3", "0 7 7 Battery Save: Level 3"),
+        ("set 0 7 7 of", "0 7 7 Battery Save: Off"),
+        ("set 0 7 7 level 2", "0 7 7 Battery Save: Level 2"),
+        ("set 0 7 1 night", "0 7 1 Theme: Night red"),
+        ("set 0 7 4 2 1", "0 7 4 2 Brightness: 1"),
+        ("set 0 7 4 1 1", "0 7 4 1 Timeout: 1 min"),
+        ("set 0 7 4 1 15", "0 7 4 1 Timeout: 15 s"),
+    ] {
+        r.cmd(cmd);
+        assert!(r.bottom().contains(says), "{cmd}: {}", r.bottom());
+    }
+    assert_eq!(r.app.set.brightness_night, 1, "Night red has its own level");
+    let (theme, bs) = (r.app.set.theme, r.app.bsave);
+    for (cmd, says) in [
+        ("set 0 7 1 d", "Theme: one of Night red, Dark, Daylight"),
+        ("set 0 7 7 level", "Battery Save: one of"),
+        ("set 0 7 7 4", "Battery Save: one of"),
+        ("set 0 7 4 1 7", "Timeout: one of"),
+    ] {
+        r.cmd(cmd);
+        assert!(r.bottom().contains(says), "{cmd}: {}", r.bottom());
+    }
+    assert_eq!((r.app.set.theme, r.app.bsave), (theme, bs), "a refused short form changes nothing");
+}
+
 /// Every refusal says what was wrong and how to put it right; nothing changes.
 #[test]
 fn command_errors() {
@@ -1098,7 +1131,36 @@ fn regs(r: DebugReq) -> DebugAns {
             data[..8].copy_from_slice(b"V1.0\r\nOK");
             DebugAns::Bt { data, n: 8 }
         }
+        DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),
     }
+}
+
+/// TERM-29: `rx both` and `rx one` ask the Radio task for the hold on both band receive selects and say what is
+/// on; `rx` asks; a refusal (keyed, HF mode) is shown as the Radio task gives it; bad words are refused here.
+#[test]
+fn debug_rx_both() {
+    let mut r = Rig::main();
+    r.cmd("rx both");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::RxBoth(Some(true))]);
+    assert!(r.raw().contains("rx both: VHF RX (PB0) and UHF RX (PE12) held on"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("RX one");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::RxBoth(Some(false))]);
+    assert!(r.raw().contains("rx one: only the receiving band's select on"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("rx");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::RxBoth(None)]);
+    r.send(b"\r");
+    r.cmd("rx both");
+    r.serve(4, |_| DebugAns::Refused("HF mode is on: it has the HF path and the relay; leave HF mode first"));
+    assert!(r.raw().contains("refused: HF mode is on"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["rx all", "rx both now"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("rx both, rx one"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+    assert!(!super::cmd::writes(b"rx") && super::cmd::writes(b"rx both"));
 }
 
 /// TERM-27: `bt` sends only queries; the answer prints as text (control bytes as dots); settings are refused

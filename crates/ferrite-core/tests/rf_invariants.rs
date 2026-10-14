@@ -7,6 +7,7 @@
 //! - the crossband repeater never moves the relay, and its audio switching is stock's (decision 95): the repeat
 //!   audio only while a chip transmits with the PA up, the mic back at the receive drop while still keyed, never
 //!   the repeat audio once unkeyed (XB-2, XB-6, XB-8);
+//! - two RX selects only for the bench test's hold (VHF and UHF, SAFE-24), never with a TX select on;
 //! - a TX select only between key-up and unkey, the PA ramp only on a TX path with its chip transmitting.
 
 use ferrite_core::freq::{mhz, Freq10};
@@ -61,8 +62,10 @@ impl Pins {
                     self.sel[s as usize] = on;
                     let rx = Sel::ALL.iter().filter(|s| !s.is_tx() && self.sel[**s as usize]).count();
                     let tx = Sel::ALL.iter().filter(|s| s.is_tx() && self.sel[**s as usize]).count();
-                    assert!(rx <= 1 && tx <= 1, "{what}: two selects on ({rx} RX, {tx} TX)");
-                    if rx + tx == 2 {
+                    // SAFE-24: the one pair of RX selects allowed, VHF and UHF held together, never with a TX select on.
+                    let both = rx == 2 && self.sel[Sel::VhfRx as usize] && self.sel[Sel::UhfRx as usize];
+                    assert!((rx <= 1 || both && tx == 0) && tx <= 1, "{what}: two selects on ({rx} RX, {tx} TX)");
+                    if rx == 1 && tx == 1 {
                         let (r, t) = (self.rx_sel().unwrap(), self.tx_sel().unwrap());
                         assert_ne!(r.chip(), t.chip(), "{what}: RX and TX selects on one chip");
                     }
@@ -76,7 +79,7 @@ impl Pins {
                 Act::ChipTx(n) => {
                     let tx = Sel::ALL.iter().find(|s| s.is_tx() && self.sel[**s as usize]).expect("chip TX without a TX path");
                     assert_eq!(tx.chip(), n, "{what}: the wrong chip keyed");
-                    assert!(self.rx_sel().is_none_or(|r| r.chip() != n), "{what}: the receiving chip keyed");
+                    assert!(Sel::ALL.iter().all(|s| s.is_tx() || !self.sel[*s as usize] || s.chip() != n), "{what}: the receiving chip keyed");
                     self.chip_tx[n as usize] = true;
                 }
                 Act::RepeatAudio(on) => {
@@ -127,7 +130,7 @@ const FREQS: [Freq10; 7] = [mhz(146) + 52_000, mhz(147), mhz(223) + 50_000, mhz(
 fn random_sequences_keep_the_rules() {
     let mut rng = Rng(950);
     let cfg = Cfg { end_tone: true, cw_id: true, tail: true, timeout_s: 30, ..Cfg::default() };
-    let (mut keys, mut moves, mut ptt_moves) = (0, 0, 0);
+    let (mut keys, mut moves, mut ptt_moves, mut boths) = (0, 0, 0, 0u32);
     for run in 0..200 {
         let (mut path, mut seq, mut pins) = (Path::new(), TxSeq::new(), Pins { since_relay: 1_000, ..Pins::default() });
         let mut now = 0u32;
@@ -173,11 +176,16 @@ fn random_sequences_keep_the_rules() {
                     let _ = seq.tick(&cfg, rng.next(30) != 0, &mut path, now, &mut s);
                 }
                 6 => {
-                    let _ = path.rx_off(&mut s);
+                    let _ = path.rx_off(rng.next(2) == 0, &mut s);
                 }
                 _ => {
                     if rng.next(10) == 0 {
                         seq.safe(&mut path, now, &mut s);
+                    } else if rng.next(3) == 0 {
+                        // SAFE-24: the bench test's hold on both band receive selects, on and off at random.
+                        let r = path.set_both(rng.next(2) == 0, &mut s);
+                        assert!(r.is_err() || !keyed_before, "{what}: the hold changed while keyed");
+                        boths += path.both() as u32;
                     }
                 }
             }
@@ -190,7 +198,7 @@ fn random_sequences_keep_the_rules() {
             }
         }
     }
-    assert!(keys > 500 && moves > 500 && ptt_moves > 20, "the sequences reach it all: {keys} key-ups, {moves} relay steps, {ptt_moves} at PTT");
+    assert!(keys > 500 && moves > 500 && ptt_moves > 20 && boths > 100, "the sequences reach it all: {keys} key-ups, {moves} relay steps, {ptt_moves} at PTT, {boths} holds");
 }
 
 /// The crossband repeater (XB-2, XB-6, XB-8, decision 93): the receive path hops between the two sides while
@@ -215,6 +223,9 @@ fn crossband_sequences_keep_the_rules() {
         pins.run(&s, false, "safe");
         let mut s = Steps::default();
         path.rx(Rx::Bk(Sel::rx(f1)), Cause::ActiveSlot, now, &mut s).unwrap();
+        if run % 2 == 0 {
+            path.set_both(true, &mut s).unwrap(); // SAFE-24: the hold, cleared at each pass's key-up
+        }
         pins.run(&s, false, "start");
         let relay = pins.relay;
         let mut open = [false; 2];

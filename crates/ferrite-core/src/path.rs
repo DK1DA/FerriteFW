@@ -17,6 +17,10 @@
 //!   §4.2 and §5): the repeat audio (PA15 low) [`XB_AUDIO_DELAY_MS`] after the PA is up, back to the mic at the
 //!   receive drop while still keyed, the receive select cleared before the roger and tail, the carrier held
 //!   [`XB_HOLD_MS`], then the PA to 0 and the unkey wait before the chip leaves transmit.
+//! - a bench test (decision 114, SAFE-24): [`Path::set_both`] holds both band receive selects on (VHF RX PB0 and
+//!   UHF RX PE12, the two LNAs), so the watch hop between a VHF and a UHF slot toggles no select. Never the HF
+//!   select, never with the relay energised; every key-up clears both before any TX select, the safe state and
+//!   HF mode drop it.
 
 use crate::freq::{band, Band, Freq10};
 
@@ -198,13 +202,32 @@ pub struct Path {
     /// The guard's last relay switch times (ms), oldest first once full.
     times: [u32; GUARD_SWITCHES],
     nt: u8,
-    /// The guard tripped since the last [`Path::take_alarm`].
-    alarm: bool,
+    /// [`F_ALARM`], [`F_MUTED`] and [`F_BOTH`] (one byte, so the machine stays 48 bytes).
+    flags: u8,
     /// Keyed by [`Path::key_up_xb`]: 0 no, 1 keyed with the mic selected (PA15 high), 2 with the repeat audio.
     xb: u8,
-    /// The last mute asked for: a receive path selected while muted unmutes, or the safe state's mute at boot
-    /// stayed on and no receive audio reached the speaker (black radio, Oct 12, 2026).
-    muted: bool,
+}
+
+/// The guard tripped since the last [`Path::take_alarm`].
+const F_ALARM: u8 = 1;
+/// The last mute asked for: a receive path selected while muted unmutes, or the safe state's mute at boot stayed
+/// on and no receive audio reached the speaker (black radio, Oct 12, 2026).
+const F_MUTED: u8 = 2;
+/// Both band receive selects held on ([`Path::set_both`], the bench test of decision 114): RAM only, off at boot.
+const F_BOTH: u8 = 4;
+
+/// VHF RX or UHF RX: the two selects [`Path::set_both`] holds.
+fn vu(s: Sel) -> bool {
+    matches!(s, Sel::VhfRx | Sel::UhfRx)
+}
+
+/// The other one of the two.
+fn other(s: Sel) -> Sel {
+    if s == Sel::VhfRx {
+        Sel::UhfRx
+    } else {
+        Sel::VhfRx
+    }
 }
 
 impl Default for Path {
@@ -216,7 +239,7 @@ impl Default for Path {
 impl Path {
     /// After [`Path::safe`] at start-up: everything low, relay released.
     pub const fn new() -> Self {
-        Path { rx: Rx::Off, tx: None, relay: false, restore: None, times: [0; GUARD_SWITCHES], nt: 0, alarm: false, xb: 0, muted: false }
+        Path { rx: Rx::Off, tx: None, relay: false, restore: None, times: [0; GUARD_SWITCHES], nt: 0, flags: 0, xb: 0 }
     }
 
     pub fn rx_now(&self) -> Rx {
@@ -233,14 +256,61 @@ impl Path {
 
     /// The guard tripped (once per trip): the event log's "Relay switching too often".
     pub fn take_alarm(&mut self) -> bool {
-        core::mem::take(&mut self.alarm)
+        let a = self.flags & F_ALARM != 0;
+        self.flags &= !F_ALARM;
+        a
+    }
+
+    fn flag(&mut self, f: u8, on: bool) {
+        if on {
+            self.flags |= f;
+        } else {
+            self.flags &= !f;
+        }
+    }
+
+    /// Both band receive selects held on ([`Path::set_both`]): asked for, whether or not they are on now (keyed,
+    /// or nothing receiving, they aren't).
+    pub fn both(&self) -> bool {
+        self.flags & F_BOTH != 0
+    }
+
+    /// The two are on now: held, not keyed (a crossband key-up cleared the other already), and receiving on VHF
+    /// RX or UHF RX.
+    fn both_live(&self) -> bool {
+        self.both() && self.tx.is_none() && self.xb == 0 && matches!(self.rx, Rx::Bk(s) if vu(s))
+    }
+
+    /// The bench test of decision 114 (SAFE-24, TERM-29): hold both band receive selects on (VHF RX PB0 and UHF
+    /// RX PE12), or back to one. On: the other band's select is set beside the one receiving now (nothing if no
+    /// receive path is on; the next one sets both), and from then the receive path between VHF and UHF changes
+    /// no pin. Refused while keyed (TX-29) and while the relay is energised, HF receives or the SI4732 has the
+    /// input (HF mode): never the HF select, never anything needing the relay. Off: the other band's select
+    /// cleared, the one receiving now kept. RAM only, off at boot.
+    pub fn set_both(&mut self, on: bool, out: &mut Steps) -> Result<(), Blocked> {
+        if self.tx.is_some() {
+            return Err(Blocked::Keyed);
+        }
+        if on == self.both() {
+            return Ok(());
+        }
+        if on && (self.relay || matches!(self.rx, Rx::Si | Rx::Bk(Sel::HfRx))) {
+            return Err(Blocked::NeedsRelay);
+        }
+        if let Rx::Bk(s) = self.rx {
+            if vu(s) {
+                out.push(Act::Sel(other(s), on));
+            }
+        }
+        self.flag(F_BOTH, on);
+        Ok(())
     }
 
     /// Whether `n` more relay switches fit in the guard's minute; trips the alarm if not.
     fn room(&mut self, n: usize, now: u32) -> bool {
         let used = self.times[..self.nt as usize].iter().filter(|&&t| now.wrapping_sub(t) < GUARD_WINDOW_MS).count();
         if used + n > GUARD_SWITCHES {
-            self.alarm = true;
+            self.flags |= F_ALARM;
             return false;
         }
         true
@@ -256,19 +326,31 @@ impl Path {
         }
     }
 
-    /// Clear the receive path (muted first if the relay is next).
+    /// Clear the receive path (muted first if the relay is next): both band selects while they are held.
     fn clear_rx(&mut self, out: &mut Steps) {
+        let both = self.both_live();
         match self.rx {
-            Rx::Bk(s) => out.push(Act::Sel(s, false)),
+            Rx::Bk(s) => {
+                out.push(Act::Sel(s, false));
+                if both {
+                    out.push(Act::Sel(other(s), false));
+                }
+            }
             Rx::Si => out.push(Act::SiInput(false)),
             Rx::Off => {}
         }
         self.rx = Rx::Off;
     }
 
+    /// Set the receive path: both band selects while they are held (never while keyed: callers are unkeyed).
     fn set_rx(&mut self, rx: Rx, out: &mut Steps) {
         match rx {
-            Rx::Bk(s) => out.push(Act::Sel(s, true)),
+            Rx::Bk(s) => {
+                out.push(Act::Sel(s, true));
+                if self.both() && vu(s) {
+                    out.push(Act::Sel(other(s), true));
+                }
+            }
             Rx::Si => out.push(Act::SiInput(true)),
             Rx::Off => {}
         }
@@ -276,7 +358,9 @@ impl Path {
     }
 
     /// Receive with `rx` (tuning, Battery Save's wake, HF mode's receivers). Moving the relay needs a deliberate
-    /// cause and room in the guard: mute, clear RX, relay, settle, the new path, unmute (SAFE-21).
+    /// cause and room in the guard: mute, clear RX, relay, settle, the new path, unmute (SAFE-21). With both band
+    /// selects held, VHF RX to UHF RX (or back) changes no pin; HF RX or the SI4732 clears both and drops the hold
+    /// (HF mode, SAFE-24).
     pub fn rx(&mut self, rx: Rx, cause: Cause, now: u32, out: &mut Steps) -> Result<(), Blocked> {
         if self.tx.is_some() {
             return Err(Blocked::Keyed);
@@ -298,14 +382,21 @@ impl Path {
                 }
                 self.mute(true, out);
                 self.clear_rx(out);
+                self.drop_both(rx);
                 self.move_relay(r, now, out);
                 self.set_rx(rx, out);
                 self.mute(false, out);
             }
             _ => {
-                self.clear_rx(out);
-                self.set_rx(rx, out);
-                if self.muted && rx != Rx::Off {
+                match (self.rx, rx) {
+                    (Rx::Bk(a), Rx::Bk(b)) if self.both_live() && vu(a) && vu(b) => self.rx = rx, // both on already
+                    _ => {
+                        self.clear_rx(out);
+                        self.drop_both(rx);
+                        self.set_rx(rx, out);
+                    }
+                }
+                if self.flags & F_MUTED != 0 && rx != Rx::Off {
                     self.mute(false, out);
                 }
             }
@@ -313,9 +404,16 @@ impl Path {
         Ok(())
     }
 
+    /// SAFE-24: a receive path off VHF and UHF (HF RX, the SI4732: HF mode) drops the hold on both selects.
+    fn drop_both(&mut self, rx: Rx) {
+        if matches!(rx, Rx::Si | Rx::Bk(Sel::HfRx)) {
+            self.flag(F_BOTH, false);
+        }
+    }
+
     fn mute(&mut self, m: bool, out: &mut Steps) {
         out.push(Act::Mute(m));
-        self.muted = m;
+        self.flag(F_MUTED, m);
     }
 
     fn move_relay(&mut self, r: bool, now: u32, out: &mut Steps) {
@@ -327,7 +425,8 @@ impl Path {
 
     /// Key-up on `tx` (a TX select; RX ones are taken as their TX twin), TX-23 and TX-24: PA 0, SI4732 away, mute,
     /// RX path clear, the relay if the slot needs the other state (moved back after the unkey), the TX path, the
-    /// chip to TX with its read-back, the PA ramp.
+    /// chip to TX with its read-back, the PA ramp. Both band receive selects held (SAFE-24): both cleared here,
+    /// before the TX select; the hold stays asked for and the unkey sets both again.
     pub fn key_up(&mut self, tx: Sel, now: u32, out: &mut Steps) -> Result<(), Blocked> {
         if self.tx.is_some() {
             return Err(Blocked::Keyed);
@@ -358,7 +457,9 @@ impl Path {
     /// and on the relay state as it is: the relay never moves for the repeater (XB-2, SAFE-20). PA 0, the TX
     /// path, the chip to transmit with its read-back, the PA ramp, then stock's 10-20 ms (PTT state 1) and the
     /// repeat audio (decision 95). Stock writes the PA drive before the TX path; Ferrite keeps PA 0 until the
-    /// path and the chip are set (TX-23), the one difference kept (a hot switch otherwise).
+    /// path and the chip are set (TX-23), the one difference kept (a hot switch otherwise). Both band receive
+    /// selects held (SAFE-24): the transmitting chip's band select is cleared first, so only the receiving one is
+    /// on, as without the hold.
     pub fn key_up_xb(&mut self, tx: Sel, out: &mut Steps) -> Result<(), Blocked> {
         if self.tx.is_some() {
             return Err(Blocked::Keyed);
@@ -367,6 +468,9 @@ impl Path {
         let Rx::Bk(rx) = self.rx else { return Err(Blocked::NeedsRelay) };
         if rx.chip() == tx.chip() || tx.relay() != self.relay || rx.relay() != self.relay {
             return Err(Blocked::NeedsRelay);
+        }
+        if self.both_live() {
+            out.push(Act::Sel(other(rx), false));
         }
         out.push(Act::PaZero);
         out.push(Act::Sel(tx, true));
@@ -439,21 +543,24 @@ impl Path {
         self.mute(false, out);
     }
 
-    /// Battery Save's sleep phase: a BK4829's receive select off (refused while keyed, TX-29). Only that: no mute,
-    /// and the SI4732's input is left as it is, so broadcast FM plays on through the BK4829s' sleep (BCR-19).
-    pub fn rx_off(&mut self, out: &mut Steps) -> Result<(), Blocked> {
+    /// Battery Save's sleep phase: a BK4829's receive select off (refused while keyed, TX-29), as stock's
+    /// `rf_path(band, 0)`. Only that: no mute, and the SI4732's input is left as it is, so broadcast FM plays on
+    /// through the BK4829s' sleep (BCR-19). While a `broadcast` plays the select stays on too (BCR-19, decision
+    /// 113): switching the band's LNA supply clicks in the shared speaker amp (bench, Oct 13, 2026), and the
+    /// BK4829s' own sleep is silent. Both band selects held (SAFE-24) stay on as well.
+    pub fn rx_off(&mut self, broadcast: bool, out: &mut Steps) -> Result<(), Blocked> {
         if self.tx.is_some() {
             return Err(Blocked::Keyed);
         }
-        if matches!(self.rx, Rx::Bk(_)) {
+        if matches!(self.rx, Rx::Bk(_)) && !broadcast && !self.both() {
             self.clear_rx(out);
         }
         Ok(())
     }
 
     /// The safe state, from anything (a fault, power off, a refused read-back): PA 0, both chips to receive,
-    /// the unkey wait if keyed, every select and the SI4732 input clear, the relay released, muted. Always
-    /// allowed, guard or not.
+    /// the unkey wait if keyed, every select and the SI4732 input clear, the relay released, muted, the hold on
+    /// both band selects dropped (SAFE-24). Always allowed, guard or not.
     pub fn safe(&mut self, now: u32, out: &mut Steps) {
         out.push(Act::PaZero);
         self.mute(true, out);
@@ -474,6 +581,7 @@ impl Path {
             self.count(now);
         }
         (self.rx, self.relay, self.restore) = (Rx::Off, false, None);
+        self.flag(F_BOTH, false);
     }
 }
 
@@ -511,13 +619,128 @@ mod tests {
     fn sleep_step_leaves_the_si4732_alone() {
         let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::VhfRx), Cause::ActiveSlot, 0, s).unwrap());
         let mut s = Steps::default();
-        p.rx_off(&mut s).unwrap();
+        p.rx_off(false, &mut s).unwrap();
         assert_eq!(s.as_slice(), [Act::Sel(Sel::VhfRx, false)]);
         let (mut p, _) = plan(|p, s| p.rx(Rx::Si, Cause::HfReceiver, 0, s).unwrap());
         let mut s = Steps::default();
-        p.rx_off(&mut s).unwrap();
+        p.rx_off(false, &mut s).unwrap();
         assert!(s.is_empty(), "{:?}", s.as_slice());
         assert_eq!(p.rx_now(), Rx::Si);
+    }
+
+    /// BCR-19, PWR-6 (decision 113): during a broadcast Battery Save's sleep leaves the band's receive select on
+    /// (its switching clicks in the shared amp); the wake's select then changes nothing.
+    #[test]
+    fn sleep_during_broadcast_keeps_the_select() {
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
+        let mut s = Steps::default();
+        p.rx_off(true, &mut s).unwrap();
+        assert!(s.is_empty(), "{:?}", s.as_slice());
+        assert_eq!(p.rx_now(), Rx::Bk(Sel::UhfRx));
+        p.rx(Rx::Bk(Sel::UhfRx), Cause::Auto, 0, &mut s).unwrap();
+        assert!(s.is_empty(), "the wake toggles nothing: {:?}", s.as_slice());
+        assert_eq!(p.rx_off(true, &mut s), Ok(()));
+    }
+
+    fn both_on() -> Path {
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::VhfRx), Cause::ActiveSlot, 0, s).unwrap());
+        let mut s = Steps::default();
+        p.set_both(true, &mut s).unwrap();
+        assert_eq!(s.as_slice(), [Act::Sel(Sel::UhfRx, true)]);
+        assert!(p.both());
+        p
+    }
+
+    /// SAFE-24, TERM-29: both band selects held: set together, a VHF-UHF hop toggles nothing, Battery Save's sleep
+    /// leaves them, off clears only the other one; never the relay.
+    #[test]
+    fn both_held_hops_toggle_nothing() {
+        let mut p = both_on();
+        for rx in [Sel::UhfRx, Sel::VhfRx, Sel::UhfRx] {
+            let mut s = Steps::default();
+            p.rx(Rx::Bk(rx), Cause::Auto, 0, &mut s).unwrap();
+            assert!(s.is_empty(), "{:?}", s.as_slice());
+            assert_eq!(p.rx_now(), Rx::Bk(rx));
+        }
+        let mut s = Steps::default();
+        p.rx_off(false, &mut s).unwrap();
+        assert!(s.is_empty(), "held through the sleep: {:?}", s.as_slice());
+        p.set_both(true, &mut s).unwrap();
+        assert!(s.is_empty(), "already on");
+        p.set_both(false, &mut s).unwrap();
+        assert_eq!(s.as_slice(), [Act::Sel(Sel::VhfRx, false)], "the receiving one (UHF) stays");
+        assert!(!p.both() && !p.relay());
+        // Asked for with nothing receiving: the next receive path sets both.
+        let mut p = Path::new();
+        let mut s = Steps::default();
+        p.set_both(true, &mut s).unwrap();
+        assert!(s.is_empty());
+        p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, &mut s).unwrap();
+        assert_eq!(s.as_slice(), [Act::Sel(Sel::UhfRx, true), Act::Sel(Sel::VhfRx, true)]);
+    }
+
+    /// SAFE-24: every key-up clears both before any TX select; the unkey sets both again (the hold stays asked
+    /// for); crossband clears the transmitting chip's band select first and keeps the receiving one.
+    #[test]
+    fn both_held_cleared_before_key_up() {
+        for tx in [Sel::VhfTx, Sel::UhfTx, Sel::HfTx] {
+            let mut p = both_on();
+            let mut s = Steps::default();
+            p.key_up(tx, 0, &mut s).unwrap();
+            let a = s.as_slice();
+            let make = a.iter().position(|x| *x == Act::Sel(tx, true)).unwrap();
+            assert!(a[..make].contains(&Act::Sel(Sel::VhfRx, false)) && a[..make].contains(&Act::Sel(Sel::UhfRx, false)), "{tx:?}: {a:?}");
+            assert!(!a.iter().any(|x| matches!(x, Act::Sel(r, true) if !r.is_tx())), "{tx:?}: no RX select while keyed");
+            assert_eq!(p.set_both(false, &mut Steps::default()), Err(Blocked::Keyed));
+            let mut s = Steps::default();
+            p.unkey(0, &mut s);
+            let a = s.as_slice();
+            let brk = a.iter().position(|x| *x == Act::Sel(tx, false)).unwrap();
+            assert!(a[brk..].contains(&Act::Sel(Sel::VhfRx, true)) && a[brk..].contains(&Act::Sel(Sel::UhfRx, true)), "{tx:?}: {a:?}");
+            assert!(p.both() && !p.relay());
+        }
+        let mut p = both_on();
+        p.rx(Rx::Bk(Sel::UhfRx), Cause::Auto, 0, &mut Steps::default()).unwrap();
+        let mut s = Steps::default();
+        p.key_up_xb(Sel::VhfTx, &mut s).unwrap();
+        assert_eq!(s.as_slice()[..2], [Act::Sel(Sel::VhfRx, false), Act::PaZero]);
+        assert!(!s.as_slice().contains(&Act::Sel(Sel::UhfRx, false)), "the receiving select stays (XB-6)");
+        let mut s = Steps::default();
+        p.unkey(0, &mut s);
+        assert_eq!(s.as_slice().iter().filter(|x| **x == Act::Sel(Sel::VhfRx, false)).count(), 0, "cleared once only");
+        let mut s = Steps::default();
+        p.rx(Rx::Bk(Sel::UhfRx), Cause::Auto, 0, &mut s).unwrap();
+        assert_eq!(s.as_slice(), [Act::Sel(Sel::UhfRx, true), Act::Sel(Sel::VhfRx, true)], "the next tick: both again");
+    }
+
+    /// SAFE-24: the safe state and HF mode drop the hold; HF and the relay refuse it.
+    #[test]
+    fn both_held_dropped_by_safe_and_hf() {
+        let mut p = both_on();
+        let mut s = Steps::default();
+        p.safe(0, &mut s);
+        assert!(!p.both());
+        assert!(s.as_slice().contains(&Act::Sel(Sel::VhfRx, false)) && s.as_slice().contains(&Act::Sel(Sel::UhfRx, false)));
+        let mut p = both_on();
+        let mut s = Steps::default();
+        p.rx(Rx::Si, Cause::HfReceiver, 0, &mut s).unwrap();
+        assert_eq!(s.as_slice()[..3], [Act::Sel(Sel::VhfRx, false), Act::Sel(Sel::UhfRx, false), Act::SiInput(true)]);
+        assert!(!p.both());
+        assert_eq!(p.set_both(true, &mut s), Err(Blocked::NeedsRelay), "HF mode refuses it");
+        let mut p = both_on();
+        let mut s = Steps::default();
+        p.rx(Rx::Bk(Sel::HfRx), Cause::ActiveSlot, 0, &mut s).unwrap();
+        assert_eq!(s.as_slice()[..3], [Act::Mute(true), Act::Sel(Sel::VhfRx, false), Act::Sel(Sel::UhfRx, false)]);
+        assert!(!p.both() && !s.as_slice().contains(&Act::Sel(Sel::VhfRx, true)));
+        let mut s = Steps::default();
+        assert_eq!(p.set_both(true, &mut s), Err(Blocked::NeedsRelay), "never with the relay energised");
+        assert!(s.is_empty());
+        // Only the deliberate relay move was the HF slot's own: the hold never moves it.
+        let mut p = both_on();
+        let mut s = Steps::default();
+        p.set_both(false, &mut s).unwrap();
+        p.set_both(true, &mut s).unwrap();
+        assert!(!s.as_slice().iter().any(|a| matches!(a, Act::Relay(_) | Act::Sel(Sel::HfRx | Sel::HfTx, _))));
     }
 
     #[test]
@@ -590,7 +813,7 @@ mod tests {
         assert_eq!(s.as_slice(), [Act::PaZero, Act::Mute(true), Act::Sel(Sel::VhfRx, false), Act::Sel(Sel::VhfTx, true), Act::ChipTx(0), Act::PaRamp]);
         let mut s = Steps::default();
         assert_eq!(p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, &mut s), Err(Blocked::Keyed));
-        assert_eq!(p.rx_off(&mut s), Err(Blocked::Keyed));
+        assert_eq!(p.rx_off(false, &mut s), Err(Blocked::Keyed));
         assert_eq!(p.key_up(Sel::VhfTx, 0, &mut s), Err(Blocked::Keyed));
         p.unkey(0, &mut s);
         assert_eq!(

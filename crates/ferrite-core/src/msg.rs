@@ -373,6 +373,10 @@ pub enum DebugReq {
     /// A read-only query to the Bluetooth module (TERM-27): its first `n` bytes, sent with CR LF on USART1;
     /// [`bt_query_refused`] has passed it.
     Bt { text: [u8; 16], n: u8 },
+    /// TERM-29, the bench test of decision 114: hold both band receive selects on (`Some(true)`), back to one
+    /// (`Some(false)`), or only ask (`None`). The Radio task refuses while keyed, in HF mode and while the
+    /// crossband repeater runs.
+    RxBoth(Option<bool>),
 }
 
 /// The most memory one [`DebugReq::Mem`] reads.
@@ -386,6 +390,8 @@ pub enum DebugAns {
     Si { data: [u8; 16], n: u8 },
     /// What the Bluetooth module sent back within 500 ms (TERM-27).
     Bt { data: [u8; 48], n: u8 },
+    /// TERM-29: whether both band receive selects are held on now.
+    RxBoth(bool),
     /// Not done, and why.
     Refused(&'static str),
 }
