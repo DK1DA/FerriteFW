@@ -182,6 +182,16 @@ fn sleep_and_wake_are_stocks() {
     assert_eq!(r.writes, [(0x30, 0), (0x37, 0x1D00), (0x37, 0x9D1F), (0x30, 0x0200), (0x30, 0xBFF1)]);
 }
 
+/// The sleep in two halves, for a caller that waits between them: the same writes as [`Bk4829::sleep`].
+#[test]
+fn sleep_in_two_halves() {
+    let mut r = Regs::new();
+    let mut bk = Bk4829::new(&mut r);
+    bk.off();
+    bk.ldo_sleep();
+    assert_eq!(r.writes, [(0x30, 0), (0x37, 0x1D00)]);
+}
+
 /// Everything a receive-only build has, called in turn: REG_30 never gets a transmit bit (PA gain, MIC ADC,
 /// transmit DSP), REG_51 never its transmit enable, REG_36 (PA) never written.
 #[test]

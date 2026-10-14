@@ -355,12 +355,19 @@ impl<B: Bus> Bk4829<B> {
     /// the crystal, band-gap, LDO and DSP enables cleared. Registers are kept. Stock's Battery Save writes exactly
     /// this, to both chips at once.
     pub fn sleep(&mut self) {
-        self.write(reg::POWER, 0);
+        self.off();
+        self.ldo_sleep();
+    }
+
+    /// The second half of [`Bk4829::sleep`] on its own: REG_37's enables cleared, for a caller that waits between
+    /// [`Bk4829::off`] and this (stock writes the two back to back).
+    pub fn ldo_sleep(&mut self) {
         self.write(reg::LDO, LDO_SLEEP);
     }
 
     /// Out of [`Bk4829::sleep`]: LDOs, crystal, band-gap and DSP back on (stock's start-up value). Then
-    /// [`Bk4829::rx_on`] to receive, as stock does straight after, with no wait between.
+    /// [`Bk4829::rx_on`] to receive: stock does it straight after, with no wait between; a caller may wait for the
+    /// supplies to settle first.
     pub fn wake(&mut self) {
         self.write(reg::LDO, LDO_ON);
     }
