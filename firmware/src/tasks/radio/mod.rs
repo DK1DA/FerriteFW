@@ -101,11 +101,15 @@ const TICK_MS: u64 = 10;
 const FAST_MARGIN_DB: i16 = 10;
 /// The HF mode's internal slot index (the chips' `tuned` entry for it).
 const HF_SLOT: u8 = 3;
-/// The sequencer's settings in the `tx` build: the timeout a little after the UI's own 120 s (the UI unkeys
-/// first; this is the backstop), no pre-alert (the UI shows it). End tone, CW ID and tail elimination follow
-/// what the UI sends ([`RadioCmd::TxTones`], [`Param::EndTone`], [`Param::Tail`]): see `Radio::tx_cfg`.
+/// The sequencer's settings in the `tx` build: the timeout a little after the UI's own (0 8 1 1, sent as
+/// [`RadioCmd::TxTimeout`]: the UI unkeys first; this is the backstop), no pre-alert (the UI shows it). End tone,
+/// CW ID and tail elimination follow what the UI sends ([`RadioCmd::TxTones`], [`Param::EndTone`],
+/// [`Param::Tail`]): see `Radio::tx_cfg`.
 #[cfg(feature = "tx")]
 const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone: false, cw_id: false, cw_each: false, tail: false };
+/// TX-30: the Radio task's backstop runs this long after the UI's timeout.
+#[cfg(feature = "tx")]
+const TX_BACKSTOP_S: u16 = 5;
 /// The crossband repeater's receive path turn per side while ready (XB-4: a pass needs 30 ms of open squelch; to
 /// confirm on the bench with the unselected front end, which may hear enough to drop the hop).
 #[cfg(feature = "tx")]
@@ -381,6 +385,8 @@ struct Tx {
     dialled: bool,
     /// Mic gain 1-9 (0 8 3, VOX-15): REG_7D at each voice key-up.
     mic: u8,
+    /// TX-30: 0 8 1 1's timeout (s); the sequencer's backstop is [`TX_BACKSTOP_S`] after it.
+    timeout_s: u16,
     /// The keyed slot's bandwidth: stock keys through REG_30 0x0200 when wide (TX audit F3).
     narrow: bool,
 }
@@ -617,6 +623,7 @@ pub async fn task() {
             vox_at: 0,
             region: None,
             mic: 5,
+            timeout_s: 120,
             narrow: false,
         },
         #[cfg(feature = "tx")]

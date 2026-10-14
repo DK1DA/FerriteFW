@@ -26,9 +26,8 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
-/// TX timeout (MENU 0 8 1 1, 30-600 s, default 120 s) and pre-alert (0 8 1 2, default 10 s), until the
-/// settings store holds them (TX-30).
-pub const TIMEOUT_S: u32 = 120;
+/// The pre-alert (0 8 1 2, default 10 s) until the settings store holds it (TX-30); the timeout itself is 0 8 1 1
+/// (`Settings::tx_timeout_s`).
 pub const PREALERT_S: u32 = 10;
 /// The emergency prompt waits this long for the second PTT (TX-3).
 pub const EMERGENCY_MS: u32 = 5000;
@@ -340,7 +339,7 @@ impl View for Transmit {
             return;
         }
         // TX-30: unkey at the timeout; PTT must come up before the next transmission.
-        if app.radio.keyed.is_some() && app.now.wrapping_sub(app.radio.t0) >= TIMEOUT_S * 1000 {
+        if app.radio.keyed.is_some() && app.now.wrapping_sub(app.radio.t0) >= app.set.tx_timeout_s() * 1000 {
             app.ptt_released();
             app.back();
             app.show_toast(b"TX timeout", b"release PTT", false);
@@ -429,11 +428,12 @@ impl View for Transmit {
         // Timeout: the bar fills to the limit; amber from the pre-alert (TX-30).
         if app.dirty(7, hash(&secs)) {
             w::field(lcd, 15, 40, y + 127, y + 144, y + 140, Align::Left, b"TOT", &UI_12, SUB, SURFACE);
-            let c = if secs + PREALERT_S >= TIMEOUT_S { AMBER } else { SUB };
-            parts::bar(lcd, 56, y + 132, 110, 6, secs, TIMEOUT_S, c, SURFACE);
+            let limit = app.set.tx_timeout_s();
+            let c = if secs + PREALERT_S >= limit { AMBER } else { SUB };
+            parts::bar(lcd, 56, y + 132, 110, 6, secs, limit, c, SURFACE);
             let mut b = Buf::<16>::new();
             b.push(b"of ");
-            mmss(TIMEOUT_S, &mut b);
+            mmss(limit, &mut b);
             w::field(lcd, 168, 58, y + 127, y + 144, y + 140, Align::Right, b.as_bytes(), &UI_12, TEXT, SURFACE);
         }
         let mv = cx.dev.battery_mv as u32;

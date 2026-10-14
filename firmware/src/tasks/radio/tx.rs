@@ -173,6 +173,7 @@ impl Radio {
             cw_id: voice && self.tx.cw != 0 && self.tx.cw_len != 0,
             cw_each: self.tx.cw == 2,
             tail: self.tx.tail[s],
+            timeout_s: self.tx.timeout_s + TX_BACKSTOP_S,
             ..TX_CFG
         }
     }

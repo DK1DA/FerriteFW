@@ -353,6 +353,7 @@ enum Tell {
     BeepVol,
     Vox,
     MicGain,
+    TxTimeout,
     TxTones,
     SlotTones,
 }
@@ -409,7 +410,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 67] = [
+static SETTINGS: [Setting; 68] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -461,6 +462,7 @@ static SETTINGS: [Setting; 67] = [
     field!([7, 6, 0], leds: u8, Kind::Pick(&LED_MODES), Nothing),
     field!([7, 7, 0], special),
     field!([7, 8, 0], auto_off: u8, Kind::Round(AUTO_OFF_TIMES.len() as u8, auto_off_text), Nothing),
+    field!([8, 1, 1], tx_timeout: u8, Kind::Level(1, 20, 1, tx_timeout_text), TxTimeout),
     field!([8, 2, 1], vox: bool, Kind::Flip(&ON_OFF), Vox),
     field!([8, 2, 2], vox_level: u8, Kind::Level(1, 9, 1, vox_level_text), Vox),
     field!([8, 2, 3], vox_tail: u8, Kind::Round(VOX_TAILS.len() as u8, vox_tail_text), Vox),
@@ -503,6 +505,7 @@ fn tell(app: &mut App, t: Tell) {
         Tell::BeepVol => app.out.push(RadioCmd::BeepVol(app.set.beep_vol)),
         Tell::Vox => app.send_vox(),
         Tell::MicGain => app.out.push(RadioCmd::MicGain(app.set.mic_gain.clamp(1, 9))),
+        Tell::TxTimeout => app.out.push(RadioCmd::TxTimeout(app.set.tx_timeout_s() as u16)),
         Tell::TxTones => app.send_tx_tones(),
         Tell::SlotTones => app.send_slot_tones(),
     }
@@ -571,6 +574,10 @@ fn beep_vol_text(v: u8, b: &mut Buf<24>) {
 
 fn vox_level_text(v: u8, b: &mut Buf<24>) {
     let _ = uwrite!(b, "{}", v.clamp(1, 9));
+}
+
+fn tx_timeout_text(v: u8, b: &mut Buf<24>) {
+    let _ = uwrite!(b, "{} s", v.clamp(1, 20) as u16 * 30);
 }
 
 fn dtmf_ms_text(v: u8, b: &mut Buf<24>) {

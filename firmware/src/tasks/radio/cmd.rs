@@ -95,8 +95,10 @@ impl Radio {
             }
             #[cfg(feature = "tx")]
             RadioCmd::MicGain(g) => self.tx.mic = g.clamp(1, 9),
+            #[cfg(feature = "tx")]
+            RadioCmd::TxTimeout(s) => self.tx.timeout_s = s.clamp(30, 600),
             #[cfg(not(feature = "tx"))]
-            RadioCmd::MicGain(_) => {}
+            RadioCmd::MicGain(_) | RadioCmd::TxTimeout(_) => {}
             #[cfg(feature = "tx")]
             RadioCmd::Vox { level, tail } => {
                 self.tx.vox = (level.min(9), tail.max(1));

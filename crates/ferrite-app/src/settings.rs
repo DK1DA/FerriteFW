@@ -160,6 +160,8 @@ pub struct Settings {
     pub vox_tail: u8,
     /// 0 8 3 (VOX-15): Mic gain 1-9, 5 stock's default REG_7D.
     pub mic_gain: u8,
+    /// 0 8 1 1 (TX-30): the transmit timeout in 30 s steps, 1-20 (30-600 s; stock's TOT counts 30 s too).
+    pub tx_timeout: u8,
     /// 0 3 1 5 (BCR-5): the broadcast's sleep timer, an index into [`SLEEP_TIMES`] (0 off).
     pub fm_sleep: u8,
     /// 0 7 4 2 (DISP-16, DISP-23): the screen's brightness, 1-10, and night red's own level (the item sets the one
@@ -361,6 +363,7 @@ impl Settings {
         vox_level: 5,
         vox_tail: 3,
         mic_gain: 5,
+        tx_timeout: 4,
         fm_sleep: 0,
         brightness: 7,
         brightness_night: 3,
@@ -431,6 +434,14 @@ impl Settings {
         if !(1..=9).contains(&self.mic_gain) {
             self.mic_gain = Self::DEFAULT.mic_gain;
         }
+        if !(1..=20).contains(&self.tx_timeout) {
+            self.tx_timeout = Self::DEFAULT.tx_timeout;
+        }
+    }
+
+    /// TX-30: 0 8 1 1's timeout in seconds, 30-600.
+    pub fn tx_timeout_s(&self) -> u32 {
+        self.tx_timeout.clamp(1, 20) as u32 * 30
     }
 
     /// 0 7 4 2: the brightness for the theme in use, 1-10 (DISP-23: night red keeps its own).

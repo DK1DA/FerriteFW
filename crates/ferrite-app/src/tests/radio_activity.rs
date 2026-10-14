@@ -125,14 +125,29 @@ fn radio_refusal_shows() {
     assert_eq!(refused(&t), Some(Refusal::Locked));
 }
 
-/// TX-30: unkey at the timeout, home with a toast.
+/// TX-30: unkey at the timeout (0 8 1 1, 120 s by default), home with a toast.
 #[test]
 fn timeout_unkeys() {
     let mut t = ready();
     ptt(&mut t, true);
     t.cmds();
-    t.wait(crate::screens::transmit::TIMEOUT_S * 1000 + 200);
+    t.wait(120_000 + 200);
     assert_eq!(t.app.screen(), Screen::Home);
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }));
+}
+
+/// TX-30 (TX audit F10): 0 8 1 1 sets the timeout the UI unkeys at, and goes to the Radio task for its backstop.
+#[test]
+fn timeout_follows_the_setting() {
+    let mut t = ready();
+    t.app.set.tx_timeout = 1; // 30 s
+    t.app.send_radio_settings();
+    assert!(t.cmds().contains(&RadioCmd::TxTimeout(30)), "the Radio task's backstop follows");
+    ptt(&mut t, true);
+    t.cmds();
+    t.wait(29_000);
+    assert!(!t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }), "not before the setting");
+    t.wait(1_200);
     assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }));
 }
 
