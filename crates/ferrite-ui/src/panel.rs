@@ -20,6 +20,12 @@ pub trait Panel {
     fn rows(&self) -> (i32, i32) {
         (0, H)
     }
+    /// Input (a key or knob step) is waiting: a long redraw that can be finished later (the scope's bars, home's
+    /// strip) stops here, so the input is handled first (SCOPE-14). Only the radio's panel ever says so.
+    #[inline(always)]
+    fn input_pending(&self) -> bool {
+        false
+    }
     /// Drawing here is off the screen already (a band of a canvas): a canvas inside draws straight into it.
     #[inline(always)]
     fn offscreen(&self) -> bool {

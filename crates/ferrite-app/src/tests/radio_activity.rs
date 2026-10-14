@@ -1485,6 +1485,68 @@ fn strip_rests_while_the_knob_turns() {
     assert!(c.iter().any(|c| matches!(c, RadioCmd::Sweep { on: true, centre, .. } if *centre == f)), "centred on the new frequency: {c:?}");
 }
 
+/// SCOPE-14 (UI backlog 7): a key or knob step while the scope or home's strip sweeps holds the sweep (the Radio
+/// task starts the pass again after it); none with no sweep running. With input waiting the scope's bars and the
+/// strip don't draw (still dirty), and they catch up on the next pass, to the same picture.
+#[test]
+fn input_first_on_the_scope() {
+    struct Pending(FrameBuffer, Vec<(i32, i32, i32, i32)>, bool);
+    impl Panel for Pending {
+        fn window(&mut self, a: i32, b: i32, c: i32, d: i32) {
+            self.1.push((a, b, c, d));
+            self.0.window(a, b, c, d)
+        }
+        fn push(&mut self, c: u16, n: u32) {
+            self.0.push(c, n)
+        }
+        fn push_buf(&mut self, p: &[u16]) {
+            self.0.push_buf(p)
+        }
+        fn input_pending(&self) -> bool {
+            self.2
+        }
+    }
+    for m in [Mode::Scope, Mode::Strip] {
+        let mut t = ready();
+        start(&mut t, m);
+        t.cmds();
+        t.tap(Key::Left);
+        assert!(t.cmds().contains(&RadioCmd::SweepHold), "{m:?}: a key holds the sweep");
+        if m == Mode::Scope {
+            t.knob(1);
+            assert!(t.cmds().contains(&RadioCmd::SweepHold), "the knob too");
+        }
+    }
+    let mut t = ready();
+    t.tap(Key::Left);
+    t.knob(1);
+    assert!(!t.cmds().contains(&RadioCmd::SweepHold), "no sweep: no hold");
+    // The drawing: the scope screen, then home's strip, with bars from the Radio task.
+    let dev = Device::default();
+    for (m, rows) in [(Mode::Scope, 50..162), (Mode::Strip, 200..234)] {
+        let mut t = ready();
+        start(&mut t, m);
+        let mut bars = [0u8; ferrite_core::msg::SCOPE_BARS];
+        for (i, b) in bars.iter_mut().enumerate() {
+            *b = 40 + (i * 7 % 60) as u8;
+        }
+        let n = if m == Mode::Strip { crate::screens::scope::STRIP_BARS } else { crate::screens::scope::bars_n(&t.app) } as u8;
+        t.live.mode = ModeLive::Scope { centre: t.app.radio.centre.max(t.freq()), bars, n, sweeps: 1, listen: 0, open: false };
+        t.wait(100);
+        let mut lcd = Pending(FrameBuffer::new(), Vec::new(), true);
+        t.app.render(&mut lcd, &t.live, &dev, &store());
+        assert!(!lcd.1.iter().any(|r| rows.contains(&r.1) && r.3 >= rows.start), "{m:?}: bars drew with input waiting");
+        lcd.2 = false;
+        lcd.1.clear();
+        t.app.render(&mut lcd, &t.live, &dev, &store());
+        assert!(lcd.1.iter().any(|r| rows.contains(&r.1)), "{m:?}: the bars caught up");
+        let after = lcd.0.px.clone();
+        t.app.redraw_all();
+        t.app.render(&mut lcd, &t.live, &dev, &store());
+        assert!(after == lcd.0.px, "{m:?}: the same picture as a full redraw");
+    }
+}
+
 /// MODE-3: while an exclusive mode runs the app confirms it at least every RENEW_MS; with none running it sends
 /// no lease. When the Radio task stopped a mode itself (its lease ran out), the app takes it as stopped and starts
 /// again what its screen still wants, with no stop command of its own.

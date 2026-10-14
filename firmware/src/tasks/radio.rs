@@ -54,6 +54,7 @@ use ferrite_radio::chip::{self as radio_chip, RxSetup};
 use ferrite_radio::Pin;
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
 use ferrite_core::scan::{self, Check, Range, Scan};
+use ferrite_core::sweephold::{self, SweepHold};
 use ferrite_core::tonegen;
 use ferrite_core::tonehint::{Act as HintAct, Hint};
 use ferrite_core::watch::{self, Hop, Watch};
@@ -207,6 +208,8 @@ struct Radio {
     counter: Option<Counter>,
     /// The band scope (SCOPE-4), while it runs; its points per sweep and dwell (0.1 ms) from the last ScopeCfg.
     scope: Option<ScopeRun>,
+    /// SCOPE-14: the sweep waits after a key or knob step, so the UI handles it first.
+    sweep_hold: SweepHold,
     scope_cfg: (u8, u8),
     /// SAME weather alerts (WX-4, DEC-19): on from the UI, and the BK4829 receiver's state.
     same_on: bool,
@@ -1227,6 +1230,10 @@ impl Radio {
             self.scope = Some(sc);
             return;
         }
+        if self.sweep_hold.held(now) {
+            self.scope = Some(sc);
+            return; // SCOPE-14: the UI first
+        }
         let i = sc.i as usize;
         let level = if Self::scope_freq(&sc, sc.i).is_some() {
             let dbm = self.chip(chip).rssi_dbm();
@@ -1474,6 +1481,7 @@ pub async fn task() {
         hf: None,
         counter: None,
         scope: None,
+        sweep_hold: SweepHold::new(),
         scope_cfg: (60, 100),
         same_on: false,
         same: SameRx { chip: None, at: None, armed: false, asm: Assembler::new(), repeats: Repeats::new() },
@@ -1560,7 +1568,14 @@ pub async fn task() {
         let wake = match &r.scope {
             // At least 2 ms between points whatever the dwell: each point is about 1.25 ms of BK4829 writes on a task
             // that runs above the UI, and 1 ms points starved it (keys dead on the radio, Oct 12, 2026).
-            Some(sc) if sc.listen == 0 => Instant::now() + embassy_time::Duration::from_micros(sc.dwell_us.max(2_000) as u64),
+            // SCOPE-14: held after a key or knob step: the next point once the hold is over.
+            Some(sc) if sc.listen == 0 => match r.sweep_hold.deadline() {
+                Some(d) => {
+                    let left = d.wrapping_sub(now_ms() as u32); // past the end: wraps above HOLD_MS
+                    Instant::now() + embassy_time::Duration::from_millis(if left <= sweephold::HOLD_MS { left as u64 } else { 0 })
+                }
+                None => Instant::now() + embassy_time::Duration::from_micros(sc.dwell_us.max(2_000) as u64),
+            },
             _ => Instant::from_millis(at),
         };
         match select3(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive()).await {
@@ -1777,7 +1792,20 @@ impl Radio {
             // Not on the radio yet, each waiting on something named in the manual's Status lines: band scope,
             // tone search, crossband (chapters 21, 22, 19): their own exclusive modes, after 2d.
             RadioCmd::ScopeCfg { bars, dwell } => self.scope_cfg = (bars, dwell),
-            RadioCmd::Sweep { centre, step, on } => self.scope(centre, step, on).await,
+            RadioCmd::Sweep { centre, step, on } => {
+                self.sweep_hold.clear();
+                self.scope(centre, step, on).await
+            }
+            // SCOPE-14: the pass starts again from its first point once the hold is over.
+            RadioCmd::SweepHold => {
+                let now = now_ms() as u32;
+                if let Some(sc) = self.scope.as_mut().filter(|sc| sc.listen == 0) {
+                    if self.sweep_hold.input(now) {
+                        (sc.i, sc.started) = (0, now);
+                        self.scope_point();
+                    }
+                }
+            }
             RadioCmd::ScopeListen { freq, mode } => self.scope_listen(freq, mode).await,
             // Tone search: its own exclusive mode, after 2d (chapter 22).
             RadioCmd::ToneSearch { .. } => {}

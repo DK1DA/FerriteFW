@@ -343,6 +343,11 @@ impl View for Scope {
             if a >= n {
                 break;
             }
+            // SCOPE-14: input waiting: the rest of the redraw waits for the next pass (the groups not drawn stay
+            // dirty), so the key or knob step is handled first.
+            if lcd.input_pending() {
+                return;
+            }
             let r = &bars[a..b];
             let has_m = (a..b).contains(&m).then_some(m);
             let has_l = heard.filter(|&i| (a as i32..b as i32).contains(&i));
@@ -498,6 +503,10 @@ pub fn strip(app: &mut App, lcd: &mut impl Panel, region: usize, y: i32, h: i32,
     // The bars change every point: each is drawn as background above and colour below, two fills that don't
     // overlap, never blanked first (blanking the strip flickered on the radio, Oct 12, 2026). The frame, axis and
     // labels only when the strip is first drawn or the centre moves.
+    // SCOPE-14: input waiting: the strip waits for the next pass (still dirty), so the input is handled first.
+    if lcd.input_pending() {
+        return;
+    }
     let Some(clear) = app.dirty_shape(region, hash(&(bars, centre)), true) else { return };
     if clear {
         lcd.fill(0, y, 240, h + 18, BG);

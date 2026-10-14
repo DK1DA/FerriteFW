@@ -870,6 +870,7 @@ impl App {
         self.last_input = now;
         self.pressed = now;
         self.out.push(RadioCmd::Activity);
+        self.sweep_hold();
         if self.set.key_beep && !matches!(key, Key::Ptt(_)) {
             self.out.push(RadioCmd::Beep { hz: KEY_BEEP_HZ, ms: KEY_BEEP_MS }); // SND-3
         }
@@ -941,6 +942,7 @@ impl App {
         self.last_input = now;
         self.pressed = now;
         self.out.push(RadioCmd::Activity);
+        self.sweep_hold();
         if self.locked {
             return self.locked_toast();
         }
@@ -1165,6 +1167,14 @@ impl App {
     /// A watched slot (not the active one) is receiving.
     fn watched_rx(&self) -> bool {
         self.rx_mask & self.watch_mask() & !(1 << self.active) & !self.relay_mask != 0
+    }
+
+    /// SCOPE-14 (UI backlog 7): a key or knob step while the scope or home's strip sweeps holds the sweep and
+    /// starts its pass again, so the input is handled and drawn first; the bars catch up after.
+    fn sweep_hold(&mut self) {
+        if matches!(self.radio.mode, screens::activity::Mode::Scope | screens::activity::Mode::Strip) {
+            self.out.push(RadioCmd::SweepHold);
+        }
     }
 
     /// The watched slots: Watch's, and C while APRS mode has it (APRS-16).

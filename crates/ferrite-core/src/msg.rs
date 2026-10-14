@@ -102,6 +102,9 @@ pub enum RadioCmd {
     /// The band scope's points per sweep and dwell per point in 0.1 ms (SCOPE-9, 0 3 2 3); sent before a sweep.
     /// Apart from [`RadioCmd::Sweep`] so a command stays 8 bytes.
     ScopeCfg { bars: u8, dwell: u8 },
+    /// A key or knob step while the scope or home's strip sweeps: the sweep waits and its pass starts again, so the
+    /// UI handles the input first (SCOPE-14, `ferrite_core::sweephold`).
+    SweepHold,
     /// Band scope: listen on a frequency with the scope's mode (0 FM, 1 NFM, 2 AM), the path set first
     /// (SCOPE-11); `freq` 0 goes back to sweeping.
     ScopeListen { freq: Freq10, mode: u8 },

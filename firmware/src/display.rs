@@ -23,4 +23,8 @@ impl Panel for Screen {
     fn push_buf(&mut self, px: &[u16]) {
         self.0.pixels(px)
     }
+    /// SCOPE-14: a key or knob step waiting in the input channel.
+    fn input_pending(&self) -> bool {
+        !crate::chan::INPUT.is_empty()
+    }
 }
