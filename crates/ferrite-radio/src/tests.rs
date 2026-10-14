@@ -622,11 +622,15 @@ fn keyed_tones_switch_the_source() {
     let tone = bus.last(reg::POWER).unwrap();
     assert_ne!(tone, chip::REG30_TX_MIC, "tone transmit, not the microphone");
     assert_eq!(bus.last(reg::TONE1_FREQ), Some(bk4829::tone_word(1750)));
+    // TX audit M8: the burst (and the end tone and CW ID, through the same tone_tx) at V0.29's gain 0x17, REG_70
+    // 0x9700, not V0.27's 0xBC00; DTMF pairs keep 0xC5C5 (both versions).
+    assert_eq!(bus.last(reg::TONE), Some(0x9700));
     for d in ['5', 'A', 'D', '#'] {
         let mut b = bk();
         assert_eq!(chip::keyed_tone(&mut b, None, Some(d), false), (true, true), "{d}");
         let bus = b.release();
         assert_eq!(bus.last(reg::POWER), Some(tone));
+        assert_eq!(bus.last(reg::TONE), Some(0xC5C5));
         let pair = bk4829::tx::dtmf_pair(d).unwrap();
         assert_eq!((bus.last(reg::TONE1_FREQ), bus.last(reg::TONE2_FREQ)), (Some(bk4829::tone_word(pair.0)), Some(bk4829::tone_word(pair.1))));
     }
