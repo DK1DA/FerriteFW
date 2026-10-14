@@ -96,8 +96,16 @@ impl Lcd {
     }
 }
 
-/// Bring-up only: bytes sent to the LCD, so the redraw log can split bus time from drawing time.
+/// Bytes sent to the LCD (pixel data and fills; commands not counted), so the cable log's draw lines can split bus
+/// time from drawing time. Counted once per `data` or `repeat` call, not per byte: the byte loop stays as it was.
+/// Until Oct 13, 2026 it counted only in the bring-up build, so the normal build's log always said "0 KB".
 pub static LCD_BYTES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+#[inline(always)]
+fn add_bytes(n: u32) {
+    use core::sync::atomic::Ordering::Relaxed;
+    LCD_BYTES.store(LCD_BYTES.load(Relaxed).wrapping_add(n), Relaxed);
+}
 
 /// LCD_WR is PD0, on the data lines' port: one write to GPIOD's set/clear register puts the byte on PD8-PD15 and
 /// pulls WR low together (PD1-PD7 untouched: PD4-PD7 are the keypad sense pull-ups).
@@ -105,9 +113,6 @@ const WR_LOW: u8 = 1 << 0;
 
 #[inline(always)]
 fn byte(b: u8) {
-    if cfg!(feature = "bringup") {
-        LCD_BYTES.store(LCD_BYTES.load(core::sync::atomic::Ordering::Relaxed).wrapping_add(1), core::sync::atomic::Ordering::Relaxed);
-    }
     // The ST7789 latches on WR rising, so the data may change as WR falls: one write sets both. Then WR stays low
     // for unrolled nops and high for a few more, keeping the 8080 write cycle (66 ns), WR low/high (15 ns) and data
     // setup/hold (10 ns) at 120 MHz. Oct 12, 2026: separate writes and looped nops cost about 1 us a byte (120
@@ -131,12 +136,14 @@ impl st7789::Bus8080 for Lcd {
         LCD_DC.set();
     }
     fn data(&mut self, data: &[u8]) {
+        add_bytes(data.len() as u32);
         for &b in data {
             byte(b)
         }
     }
     fn repeat(&mut self, color: u16, count: u32) {
         let (hi, lo) = ((color >> 8) as u8, color as u8);
+        add_bytes(count.wrapping_mul(2));
         for _ in 0..count {
             byte(hi);
             byte(lo);
