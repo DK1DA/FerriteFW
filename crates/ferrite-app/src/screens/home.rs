@@ -8,7 +8,7 @@ use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::data::Data;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{self, band_near, mode_chip, shift_chip, shift_text, tone_text, BANDS, STEPS};
+use crate::slot::{self, band_near, card_tone, mode_chip, shift_chip, shift_text, BANDS, STEPS};
 use crate::{App, Screen, PAUSE_S};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
@@ -515,7 +515,7 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
         // absent value leaves its slot empty; nothing moves.
         let (mut m, mut t, mut o, mut pw) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
         mode_chip(&cfg, &mut m);
-        tone_text(cfg.sent_tone(), &mut t);
+        card_tone(&cfg, &mut t);
         shift_chip(&cfg, &mut o);
         if app.capped(s) {
             pw.set(b"0.25 W");
@@ -585,7 +585,7 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
             }
         } else {
             mode_chip(&cfg, &mut cols[0]);
-            tone_text(cfg.sent_tone(), &mut cols[1]);
+            card_tone(&cfg, &mut cols[1]);
             shift_text(&cfg, false, &mut cols[2]); // "TX 146.520" for a split
         }
         if app.dirty(R_SUB + p, hash(&(lv.scanning, &cols))) {
@@ -708,4 +708,41 @@ fn toggle_vfo(app: &mut App, store: &impl ChannelStore) {
         s.vfo_mode = true;
     }
     app.send_slot(a as u8);
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::slot::{card_tone, DEFAULT_CFG, DCS_FLAG, DCS_INV};
+    use ferrite_ui::assets::UI_12;
+    use ferrite_ui::gfx::text4_width;
+    use ferrite_ui::text::Buf;
+
+    /// HOME-4: the card's tone chip shows both tones: the same both ways as before, an RX-only tone as "R ...", a
+    /// different RX tone as a "*" after the sent one; reverse swaps sent and heard. Each fits the tone slot (57 px,
+    /// 2 px a side of frame and padding) and the compact card's tone column (56 px).
+    #[test]
+    fn tone_chip_shows_both_tones() {
+        let d023n = DCS_FLAG | 0o23;
+        let d754i = DCS_FLAG | DCS_INV | 0o754;
+        let show = |tx: u16, rx: u16, reverse: bool| {
+            let c = crate::slot::SlotCfg { tx_tone: tx, rx_tone: rx, reverse, ..DEFAULT_CFG };
+            let mut b = Buf::<16>::new();
+            card_tone(&c, &mut b);
+            assert!(text4_width(b.as_bytes(), &UI_12) <= 53, "{:?} too wide", core::str::from_utf8(b.as_bytes()));
+            std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap()
+        };
+        assert_eq!(show(1000, 1000, false), "T 100.0");
+        assert_eq!(show(d023n, d023n, false), "D023N");
+        assert_eq!(show(0, 0, false), "");
+        assert_eq!(show(0, d023n, false), "R D023N", "RX only (the bench's case)");
+        assert_eq!(show(0, 885, false), "R 88.5");
+        assert_eq!(show(0, 2541, false), "R 254.1");
+        assert_eq!(show(1000, 885, false), "T100.0*");
+        assert_eq!(show(2541, 885, false), "T254.1*");
+        assert_eq!(show(d754i, d023n, false), "D754I*");
+        assert_eq!(show(1000, 0, false), "T 100.0", "TX only: as before");
+        // Reverse: it sends the RX tone and listens for the TX one.
+        assert_eq!(show(0, d023n, true), "D023N");
+        assert_eq!(show(d023n, 0, true), "R D023N");
+    }
 }

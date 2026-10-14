@@ -183,6 +183,29 @@ pub fn tone_text(t: u16, b: &mut Buf<16>) {
     }
 }
 
+/// The tones as home's cards show them (HOME-4), at most 7 characters (the chip's width), reverse swapping sent and
+/// heard ([`SlotCfg::sent_tone`]): the same both ways as [`tone_text`] ("T 100.0", "D023N"); heard only, "R " and the
+/// tone ("R 88.5", "R D023N"); sent with a different heard tone, the sent one marked "*" ("T100.0*", "D023N*"); sent
+/// only (the usual repeater access tone), as before.
+pub fn card_tone(c: &SlotCfg, b: &mut Buf<16>) {
+    let (sent, heard) = (c.sent_tone(), c.heard_tone());
+    tone_text(if sent == 0 { heard } else { sent }, b);
+    if sent == heard || heard == 0 || b.is_empty() {
+        return;
+    }
+    let mut t = Buf::<16>::new();
+    let v = b.as_bytes().strip_prefix(b"T ").unwrap_or(b.as_bytes());
+    if sent == 0 {
+        t.set(b"R ");
+        t.push(v);
+    } else {
+        t.set(if sent & DCS_FLAG == 0 { b"T".as_slice() } else { b"" });
+        t.push(v);
+        t.push(b"*");
+    }
+    *b = t;
+}
+
 /// The shift as text: [`offset_text`], or for split the TX frequency itself: "TX 146.520" (short, the cards and
 /// lists) / "Split 146.520" (long, the editors).
 pub fn shift_text(c: &SlotCfg, long: bool, b: &mut Buf<16>) {

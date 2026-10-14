@@ -10,7 +10,7 @@ use super::scope;
 use super::shared::*;
 use super::Cx;
 use crate::chan::ChannelStore;
-use crate::slot::{band_name, mode_chip, shift_text, tone_text, Item, STEPS};
+use crate::slot::{band_name, card_tone, mode_chip, shift_text, Item, STEPS};
 use crate::App;
 use ferrite_core::msg::{LiveAll, ModeLive, RadioCmd, SCOPE_BARS, SLOTS};
 use ferrite_ui::assets::*;
@@ -80,7 +80,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     let cfg = *app.slot(a).cfg();
     let mut v = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
     mode_chip(&cfg, &mut v[0]);
-    tone_text(cfg.tx_tone, &mut v[1]);
+    card_tone(&cfg, &mut v[1]);
     if v[1].is_empty() {
         v[1].set(b"None");
     }
@@ -304,7 +304,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             }
         } else {
             mode_chip(&cfg, &mut cols[0]);
-            tone_text(cfg.tx_tone, &mut cols[1]);
+            card_tone(&cfg, &mut cols[1]);
             cols[2].set(super::transmit::power_name(app, s).as_bytes());
         }
         if app.dirty(R_SUB + p, hash(&cols)) {
