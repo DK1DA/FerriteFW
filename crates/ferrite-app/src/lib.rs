@@ -1000,6 +1000,7 @@ impl App {
             self.toast = None;
             self.drawn.popup_gone |= t.center;
         }
+        self.ptt_stuck_notice(live.tx.ptt_stuck);
         if self.alert & ALERT_WAIT != 0 && !screens::xb::running(self) && self.radio.keyed.is_none() {
             self.open_alert();
         }
@@ -1168,6 +1169,28 @@ impl App {
 
     fn show_toast(&mut self, head: &[u8], body: &[u8], icon: bool) {
         self.toast = Some(Toast { head: Buf::from(head), body: Buf::from(body), icon, center: false, until: self.now.wrapping_add(TOAST_MS) });
+    }
+
+    /// SAFE-14: "PTT stuck" and the inputs held since boot (`stuck` bits, [`ferrite_core::stuck`]), kept up while
+    /// they stay held (over any other toast) and gone as soon as they are let go.
+    fn ptt_stuck_notice(&mut self, stuck: u8) {
+        const HEAD: &[u8] = b"PTT stuck";
+        let ours = self.toast.is_some_and(|t| t.head.as_bytes() == HEAD);
+        if stuck == 0 {
+            if ours {
+                self.toast = None;
+            }
+            return;
+        }
+        let mut b = [0u8; 28];
+        let n = ferrite_core::stuck::names(stuck, &mut b);
+        if ours && self.toast.is_some_and(|t| t.body.as_bytes() == &b[..n]) {
+            if let Some(t) = &mut self.toast {
+                t.until = self.now.wrapping_add(TOAST_MS);
+            }
+        } else {
+            self.show_toast(HEAD, &b[..n], true);
+        }
     }
 
     /// A hold-digit shortcut's popup in the middle of the screen: what ran, and its new value if it has one (HOME-8).

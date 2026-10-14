@@ -944,10 +944,28 @@ fn spi_flash_guard() {
 /// every PTT input has read released once; after that it stays open for the power-on.
 #[test]
 fn ptt_held_at_power_on() {
-    let mut g = crate::ptt::PttGuard::default();
-    assert!(!g.seen(false) && !g.seen(false), "held since boot");
-    assert!(g.seen(true), "released once");
-    assert!(g.seen(false), "pressed again later: that's a real PTT");
+    use crate::ptt::{names, PttGuard, PTT_A, PTT_B, PTT_EXT, STUCK_MS};
+    let mut g = PttGuard::default();
+    assert!(!g.look(PTT_A) && !g.look(PTT_A), "held since boot");
+    assert!(g.look(0), "released once");
+    assert!(g.look(PTT_A), "pressed again later: that's a real PTT");
+    assert_eq!(g.stuck(STUCK_MS + 10), 0, "let go before 1 s: never stuck");
+    // Held past 1 s: stuck, by name, until each is let go; a press after boot is never stuck.
+    let mut g = PttGuard::default();
+    g.look(PTT_A | PTT_EXT);
+    assert_eq!(g.stuck(STUCK_MS - 1), 0, "not yet");
+    assert!(!g.look(PTT_A | PTT_EXT));
+    assert_eq!(g.stuck(STUCK_MS), PTT_A | PTT_EXT);
+    g.look(PTT_A | PTT_B);
+    assert_eq!(g.stuck(1500), PTT_A, "the side PTT let go; PTT B pressed after boot isn't stuck");
+    assert!(!g.open(), "PTT A still held since boot");
+    g.look(0);
+    assert_eq!((g.stuck(2000), g.open()), (0, true));
+    g.look(PTT_A);
+    assert_eq!(g.stuck(2500), 0, "pressed again: a real PTT, not stuck");
+    let mut b = [0u8; 40];
+    let n = names(PTT_A | PTT_EXT, &mut b);
+    assert_eq!(&b[..n], b"PTT A + side PTT");
 }
 
 /// PWR-5: Battery Save's sleep and wake on a chip, as stock: sleep writes REG_30 = 0 then REG_37 = 0x1D00; wake

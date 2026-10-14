@@ -15,6 +15,7 @@ pub mod audio;
 pub mod chipid;
 pub mod sha256;
 pub mod ssb;
+pub mod stuck;
 pub mod decoders;
 pub mod freq;
 pub mod gps;

@@ -374,6 +374,9 @@ pub struct TxLive {
     pub dtmf_sent: u8,
     /// VOX hears speech (the tail included): the UI keys the active slot while it is set (VOX-13).
     pub voice: bool,
+    /// SAFE-14: the PTT inputs held since boot for over 1 s and not let go (`ferrite_radio::ptt` bits: 1 PTT A,
+    /// 2 PTT B, 4 the side connector's): the UI shows "PTT stuck" with the names while it is set.
+    pub ptt_stuck: u8,
 }
 
 /// The terminal's debug commands (TERM-21 to TERM-24): what the firmware is asked. Memory is read where the
@@ -737,8 +740,9 @@ mod tests {
         // The snapshot isn't queued (one copy in the watch, the Radio task's and the UI's); the exclusive
         // modes share one slot in it, the largest being the band scope's 240 bars (SCOPE-9: 308 bytes, about
         // 0.45 KB more over the three copies than with 56 bars; accepted Oct 6, 2026).
-        // The tone hint's heard tone (TSRCH-13: 2 bytes a slot, 4 with alignment) took it from 312 to 324.
-        assert!(core::mem::size_of::<LiveAll>() <= 324);
+        // The tone hint's heard tone (TSRCH-13: 2 bytes a slot, 4 with alignment) took it from 312 to 324; the stuck
+        // PTT bits (SAFE-14, one byte, 4 with alignment) to 328.
+        assert!(core::mem::size_of::<LiveAll>() <= 328, "{}", core::mem::size_of::<LiveAll>());
         // Each reader of the GPS watch keeps a copy of the fix; the sky list only the UI.
         assert!(core::mem::size_of::<GpsFix>() <= 32);
         assert!(core::mem::size_of::<GpsSky>() <= 81);

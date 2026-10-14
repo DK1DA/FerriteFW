@@ -7,12 +7,33 @@ use super::*;
 impl Radio {
     /// TX-42: every PTT input (PTT A PE3, PTT B PE2, the connector's PE6; low when pressed) has read released
     /// since boot.
+    /// SAFE-14: one held from boot for over 1 s is reported stuck (`TxLive::ptt_stuck`, the UI's notice; a cable
+    /// log line with its name when that changes) until let go.
     pub(super) fn ptt_seen_released(&mut self) -> bool {
         use crate::board::{KEY_PTT, KEY_SIDE1, KEY_SIDE2};
-        let was = self.tx.ptt.seen(false);
-        let ok = self.tx.ptt.seen(KEY_PTT.read() && KEY_SIDE1.read() && KEY_SIDE2.read()); // `ferrite_radio::ptt`
+        use ferrite_radio::ptt;
+        let was = self.tx.ptt.open();
+        let pressed = if KEY_PTT.read() { 0 } else { ptt::PTT_A } | if KEY_SIDE1.read() { 0 } else { ptt::PTT_B } | if KEY_SIDE2.read() { 0 } else { ptt::PTT_EXT };
+        let ok = self.tx.ptt.look(pressed);
         if ok && !was {
             log(b"ptt released since boot", 0);
+        }
+        let stuck = self.tx.ptt.stuck(now_ms() as u32);
+        if stuck != self.live.tx.ptt_stuck {
+            self.live.tx.ptt_stuck = stuck;
+            // "ptt stuck: PTT A + side PTT 5" (the bits last), "ptt stuck: let go 0" (no formatter: this task stays
+            // in the fast flash).
+            let mut t = [0u8; 36];
+            t[..11].copy_from_slice(b"ptt stuck: ");
+            let k = if stuck == 0 {
+                t[11..18].copy_from_slice(b"let go ");
+                18
+            } else {
+                let k = (11 + ptt::names(stuck, &mut t[11..35])).min(35);
+                t[k] = b' ';
+                k + 1
+            };
+            log(&t[..k], stuck as u32);
         }
         ok
     }
@@ -139,7 +160,7 @@ impl Radio {
         }
         self.tx.pa = pa;
         self.tx.fault = false;
-        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice, ptt_stuck: self.live.tx.ptt_stuck };
         (self.tx.slot, self.tx.dialled) = (slot, false);
         let r = self.tx.seq.key(&req, &mut self.path, now, &mut st);
         if let Err(r) = r {
@@ -320,7 +341,7 @@ impl Radio {
     }
 
     fn refuse(&mut self, slot: u8, why: Refusal) {
-        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why), dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why), dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice, ptt_stuck: self.live.tx.ptt_stuck };
         log(b"tx refused ", why as u32);
     }
 }

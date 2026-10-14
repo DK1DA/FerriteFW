@@ -120,7 +120,7 @@ fn rx_only_build_and_battery_refuse() {
 fn radio_refusal_shows() {
     let mut t = ready();
     ptt(&mut t, true);
-    t.live.tx = ferrite_core::msg::TxLive { keyed: false, slot: 0, mic: 0, refused: Some(Refusal::Locked), dtmf_sent: 0, voice: false };
+    t.live.tx = ferrite_core::msg::TxLive { keyed: false, slot: 0, mic: 0, refused: Some(Refusal::Locked), dtmf_sent: 0, voice: false, ptt_stuck: 0 };
     t.wait(100);
     assert_eq!(refused(&t), Some(Refusal::Locked));
 }
@@ -1861,4 +1861,24 @@ fn random_use_keeps_modes_in_step() {
     }
     assert_eq!(seen.len(), MODES.len() + 1, "every mode reached: {seen:?}");
     assert!(beside > 0, "the strip swept beside a broadcast");
+}
+
+/// SAFE-14: a PTT held from boot for over 1 s (the Radio task's `TxLive::ptt_stuck`) shows "PTT stuck" with the
+/// inputs' names, kept up while held, over another toast, and gone as soon as it is let go.
+#[test]
+fn ptt_stuck_notice() {
+    use ferrite_core::stuck::{PTT_A, PTT_EXT};
+    let mut t = T::new();
+    let shown = |t: &T| t.app.toast.map(|x| (std::string::String::from_utf8_lossy(x.head.as_bytes()).into_owned(), std::string::String::from_utf8_lossy(x.body.as_bytes()).into_owned()));
+    t.live.tx.ptt_stuck = PTT_A | PTT_EXT;
+    t.wait(100);
+    assert_eq!(shown(&t), Some(("PTT stuck".into(), "PTT A + side PTT".into())));
+    t.wait(10_000);
+    assert_eq!(shown(&t).map(|s| s.0), Some("PTT stuck".into()), "kept up while held");
+    t.live.tx.ptt_stuck = PTT_A;
+    t.wait(100);
+    assert_eq!(shown(&t).map(|s| s.1), Some("PTT A".into()));
+    t.live.tx.ptt_stuck = 0;
+    t.wait(100);
+    assert!(shown(&t).is_none(), "let go: gone");
 }
