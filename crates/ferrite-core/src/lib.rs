@@ -17,6 +17,7 @@ pub mod ssb;
 pub mod decoders;
 pub mod freq;
 pub mod gps;
+pub mod gpspower;
 pub mod keys;
 pub mod layout;
 pub mod lease;

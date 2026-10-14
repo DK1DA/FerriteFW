@@ -247,6 +247,8 @@ pub struct SimCore {
     last_page: u32,
     /// The theme of the last pass: a new theme redraws everything, as a new screen does (DISP-18, DISP-25).
     last_theme: u8,
+    /// The fake GPS module under the power manager (GPS-26 to GPS-33), when asked for ([`SimCore::gps_model`]).
+    gps: Option<crate::fakegps::FakeGps>,
 }
 
 /// One render pass as [`SimCore::watch_passes`] records it.
@@ -391,6 +393,7 @@ impl SimCore {
             last_screen: "",
             last_page: 0,
             last_theme: 0,
+            gps: None,
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -560,6 +563,13 @@ impl SimCore {
             app.tick(now, &radio.live, store);
             while let Some(c) = app.pop_cmd() {
                 send(radio, c);
+            }
+            // The GPS module under the power manager, as the firmware's GPS task runs it (GPS-26).
+            if let Some(g) = &mut self.gps {
+                let d = ferrite_app::gpsdata::demand(app, store.data(), false, now);
+                g.step(now, &d, radio.live.tx.keyed);
+                (dev.gps, dev.sats) = g.state(now, d.on);
+                dev.gps_phase = g.phase(now);
             }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
@@ -1010,6 +1020,19 @@ impl SimCore {
     pub fn store(&self) -> &FlashStore<SimFlash, Sample> {
         &self.store
     }
+    /// The fake GPS module run by the power manager (GPS-26 to GPS-33): `Some(indoor)` starts it (or moves it
+    /// indoors or out), None stops it (the status bar back to F5's state).
+    pub fn gps_model(&mut self, indoor: Option<bool>) {
+        match indoor {
+            Some(i) => self.gps.get_or_insert_with(crate::fakegps::FakeGps::new).indoor = i,
+            None => self.gps = None,
+        }
+    }
+
+    pub fn gps(&self) -> Option<&crate::fakegps::FakeGps> {
+        self.gps.as_ref()
+    }
+
     /// What the radio reports (battery, GPS, Bluetooth...).
     pub fn device(&self) -> &Device {
         &self.dev

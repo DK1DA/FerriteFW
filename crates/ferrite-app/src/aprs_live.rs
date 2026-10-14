@@ -35,6 +35,9 @@ const AUTO_GAP_S: u32 = 30;
 /// (decided Oct 7, 2026, chapter 25).
 const DUPE_S: u32 = 30;
 const DIGI_GAP_S: u32 = 5;
+/// GPS-33: an automatic beacon whose fix is older than its interval waits this long for a fresh one (the GPS
+/// manager wakes the module for it), then is skipped until the next.
+const FIX_WAIT_S: u32 = 120;
 /// The destination ("tocall") that names the software: APZ is experimental, FER for Ferrite.
 const TOCALL: &[u8] = b"APZFER";
 
@@ -112,6 +115,8 @@ pub struct AprsLive {
     /// APRS-27: a beacon owed after a voice transmission (kept to APRS-9's spacing, unlike "beacon now").
     after_voice: Cell<bool>,
     waiting: Cell<bool>,
+    /// GPS-33: a due beacon waiting for a fresh fix since then.
+    fix_wait: Cell<Option<u32>>,
     on_since: Cell<Option<u32>>,
     now_s: Cell<u32>,
 }
@@ -140,6 +145,7 @@ impl AprsLive {
             beacon_now: Cell::new(false),
             after_voice: Cell::new(false),
             waiting: Cell::new(false),
+            fix_wait: Cell::new(None),
             on_since: Cell::new(None),
             now_s: Cell::new(0),
         }
@@ -184,6 +190,7 @@ impl AprsLive {
         self.acks.iter().for_each(|a| a.set(None));
         self.beacon_last.set(None);
         self.after_voice.set(false);
+        self.fix_wait.set(None);
         self.digi.set(None);
     }
 
@@ -410,6 +417,7 @@ impl AprsLive {
             // turning the mode on later doesn't send stale ones.
             self.acks.iter().for_each(|a| a.set(None));
             self.on_since.set(None);
+            self.fix_wait.set(None);
             t.changed = self.waiting.replace(false);
             return t;
         }
@@ -468,11 +476,26 @@ impl AprsLive {
         }
         let beacon = beacon || self.after_voice.get() && auto_ok;
         if beacon && (auto_ok || self.beacon_now.get()) {
-            self.after_voice.set(false);
-            let Some(f) = fix else {
+            // GPS-33: never a fix older than the beacon interval as current (the fixed position stands in as
+            // itself, GPS-3). An automatic beacon waits for a fresh fix, then is skipped (the caller logs it); one
+            // asked for now is refused at once.
+            let max_s = cfg.every_min().map_or(u32::MAX, |m| m as u32 * 60);
+            let Some(f) = fix.filter(|f| f.age_s == crate::gpsdata::FIXED_AGE || f.age_s as u32 <= max_s) else {
+                if !self.beacon_now.get() {
+                    let since = *self.fix_wait.get().get_or_insert(now_s);
+                    self.fix_wait.set(Some(since));
+                    if now_s.wrapping_sub(since) < FIX_WAIT_S {
+                        return Tick { what: "Beacon: waiting for a fix", ..t };
+                    }
+                    self.beacon_last.set(Some(LastBeacon { at_s: now_s, ..self.beacon_last.get().unwrap_or_default() }));
+                }
+                self.fix_wait.set(None);
                 self.beacon_now.set(false);
-                return Tick { what: "Beacon: no position", ..t };
+                self.after_voice.set(false);
+                return Tick { what: if fix.is_some() { "Beacon: old fix" } else { "Beacon: no position" }, ..t };
             };
+            self.after_voice.set(false);
+            self.fix_wait.set(None);
             self.beacon_now.set(false);
             self.beacon_last.set(Some(LastBeacon::new(now_s, Some(f))));
             self.last_auto.set(Some(now_s));
@@ -701,6 +724,35 @@ mod tests {
         assert_eq!(a.tick(2, true, true, b"VE3XYZ", None, &cfg, &mut out).what, "Beacon: no position");
         a.beacon_now();
         assert_eq!(a.tick(3, true, true, b"", Some(fix()), &cfg, &mut out).len, 0, "APRS-8: no callsign, nothing sent");
+    }
+
+    /// GPS-33: a timed beacon with a fix older than its interval waits up to 2 minutes for a fresh one and goes on
+    /// it; with none it is skipped (once, for the caller to log) and the next comes by the schedule. Beacon now
+    /// with an old fix is refused at once.
+    #[test]
+    fn beacon_waits_for_a_fresh_fix() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg { beacon: 2, ..AprsCfg::DEFAULT }; // every minute
+        let old = Some(Fix { age_s: 90, ..fix() });
+        assert_eq!(a.tick(100, true, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: waiting for a fix");
+        assert_eq!(a.tick(150, true, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: waiting for a fix");
+        assert_eq!(a.tick(151, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon", "a fresh fix: sent");
+        // The next: the module never finds the sky again.
+        let mut skipped = 0;
+        let mut sent = 0;
+        for s in 211..340 {
+            let w = a.tick(s, true, true, b"VE3XYZ", old, &cfg, &mut out).what;
+            skipped += (w == "Beacon: old fix") as u32;
+            sent += (w == "Beacon") as u32;
+        }
+        assert_eq!((skipped, sent), (1, 0), "skipped once after 2 minutes, then the schedule's next");
+        assert_eq!(a.tick(400, true, true, b"VE3XYZ", None, &cfg, &mut out).what, "Beacon: waiting for a fix", "no position: waits too");
+        // The fixed position stands in as itself.
+        let fixed = Some(Fix { age_s: crate::gpsdata::FIXED_AGE, ..fix() });
+        assert_eq!(a.tick(401, true, true, b"VE3XYZ", fixed, &cfg, &mut out).what, "Beacon");
+        a.beacon_now();
+        assert_eq!(a.tick(440, true, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: old fix", "beacon now: at once");
     }
 
     const DIGI: AprsCfg = AprsCfg { digi: crate::aprs::DIGI_ON, ..AprsCfg::DEFAULT };

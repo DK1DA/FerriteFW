@@ -678,6 +678,7 @@ pub fn device_at(secs: u64) -> Device {
         utc: true,
         gps: GpsState::Fix,
         sats: 9,
+        gps_phase: ferrite_core::gpspower::GpsPhase::Off,
         bt: false,
         battery_mv: 7900,
         battery_pct: 82,

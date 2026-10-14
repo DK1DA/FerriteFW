@@ -78,6 +78,9 @@ SECTIONS
     /* The tone hint (TSRCH-12, -13): the Radio task's step for it and the heard-tone decode, at most once a
      * receive tick, never from an interrupt. */
     *(.text.*8tonehint*);
+    /* The GPS power manager (GPS-26 to GPS-33): the GPS task's decision and its sends, a few times a second. */
+    *(.text.*8gpspower*);
+    *(.text.*7ferrite5tasks3gps6manage*);
     *(.text.*4chip10heard_tone*);
     /* FM broadcast's report (at most ten times a second) and its watch mask (BCR-2, BCR-23): the Radio task's,
      * never from an interrupt. */

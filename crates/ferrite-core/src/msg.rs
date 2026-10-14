@@ -535,6 +535,8 @@ pub struct Device {
     pub utc: bool,
     pub gps: GpsState,
     pub sats: u8,
+    /// What the GPS power manager has the module doing (GPS-26): the Status page and the terminal show it.
+    pub gps_phase: crate::gpspower::GpsPhase,
     /// A Bluetooth device is connected.
     pub bt: bool,
     /// Battery in millivolts and percent.

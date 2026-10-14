@@ -170,8 +170,14 @@ impl Aprs {
                         self.frame.b[..t.len].copy_from_slice(&out[..t.len]);
                         self.tx = Tx::Keying { at_ms: now_ms };
                     }
-                } else if t.what == "Beacon: no position" {
-                    transmit::not_sent(app, b"Beacon", b"no position");
+                } else if let Some(why) = match t.what {
+                    "Beacon: no position" => Some(&b"no position"[..]),
+                    "Beacon: old fix" => Some(&b"fix too old"[..]),
+                    _ => None,
+                } {
+                    // GPS-33: a beacon not sent is said and logged (one waiting for a fresh fix says nothing yet).
+                    transmit::not_sent(app, b"Beacon", why);
+                    store.log(&log_event(app.aprs_freq(), b"Beacon not sent", why));
                 }
             }
             Tx::Idle => {}

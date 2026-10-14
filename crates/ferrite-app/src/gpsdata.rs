@@ -1,11 +1,14 @@
 //! The GPS as the screens read it (manual chapter 28): the GPS task's latest [`GpsFix`] and [`GpsSky`] turned
 //! into the [`Data`] answers the GPS pages, Nearby, waypoints and APRS use, with the fix's age (GPS-2), the
 //! fixed position when there is no fix (GPS-3), the clock from GPS time (GPS-7), and the arrival alarm
-//! (GPS-12). The radio's UI task fills one from the `POSITION` and `SKY` watches; it holds about 130 bytes.
+//! (GPS-12). The radio's UI task fills one from the `POSITION` and `SKY` watches; it holds about 160 bytes.
+//! With the power manager (GPS-26) the module sleeps between fixes, so the last fix is kept with its age and is
+//! the position for [`RECENT_MS`] (GPS-25); [`demand`] says who needs the module awake.
 
 use crate::data::{Data, Fix, Pos, Sat};
 use crate::settings::TIME_ZONES;
 use core::cell::Cell;
+use ferrite_core::gpspower::GpsDemand;
 use ferrite_core::msg::{GpsFix, GpsSky, GpsState};
 
 /// The age a stand-in fix from the fixed position carries (GPS-3): "Mark here" refuses it, as it isn't a fix.
@@ -13,6 +16,11 @@ pub const FIXED_AGE: u16 = u16::MAX;
 
 /// A fix older than this is not shown as current (the position page turns its age amber past 10 s, GPS-15).
 pub const STALE_MS: u32 = 10_000;
+
+/// The last fix is the position this long after the module reported it (GPS-25): the status bar's icon solid,
+/// Nearby and APRS taking it, its age shown. The module wakes once a minute (GPS-26), so this spans a couple of
+/// wakes that found no sky.
+pub const RECENT_MS: u32 = 180_000;
 
 /// What the GPS task is asked to do (GPS-1, GPS-4): the module on or off, and off around signals
 /// (0 always on, 1 off while receiving, 2 off while transmitting, 3 both).
@@ -36,6 +44,21 @@ pub fn cfg(set: &crate::settings::Settings) -> GpsCfg {
     GpsCfg { on: set.gps_on, rxtx: set.gps_rxtx & 3 }
 }
 
+/// Who needs the GPS module awake now (GPS-26 to GPS-28), for the GPS task's power manager: GPS on (0 6 1); a GPS
+/// screen open (position, satellites, waypoints, go to) or the arrival alarm armed (`alarm`); smart or distance
+/// beaconing; the next timed beacon, `now_ms` plus its seconds (APRS mode on).
+pub fn demand(app: &crate::App, data: &dyn Data, alarm: bool, now_ms: u32) -> GpsDemand {
+    let watch = alarm || matches!(app.screen(), crate::Screen::Gps(_));
+    let (mut track, mut beacon_at) = (false, None);
+    if app.aprs_on() {
+        let c = data.aprs_cfg();
+        track = c.smart() || c.every_m().is_some();
+        // Due now or overdue (waiting for a fix, the relay or a callsign) holds nothing: the minute wakes bring the fix.
+        beacon_at = data.beacon().next_s.filter(|&s| s > 0).map(|s| now_ms.wrapping_add(s.saturating_mul(1000)));
+    }
+    GpsDemand { on: app.settings().gps_on, watch, track, beacon_at }
+}
+
 /// The arrival alarm's radius in metres, 0 when off (0 6 7, GPS-12).
 pub fn arrival_radius_m(set: &crate::settings::Settings) -> u32 {
     crate::settings::ARRIVAL_M[set.arrival as usize % crate::settings::ARRIVAL_M.len()] as u32
@@ -44,6 +67,8 @@ pub fn arrival_radius_m(set: &crate::settings::Settings) -> u32 {
 /// The GPS's latest, read by the screens through the store (the radio's [`Data`] owner).
 pub struct GpsData {
     fix: Cell<GpsFix>,
+    /// The last report with a position (kept while the module sleeps or searches again; gone with GPS off).
+    good: Cell<Option<GpsFix>>,
     sky: Cell<GpsSky>,
     /// Milliseconds now, the same clock as [`GpsFix::at_ms`].
     now: Cell<u32>,
@@ -62,6 +87,7 @@ impl GpsData {
     pub const fn new() -> Self {
         GpsData {
             fix: Cell::new(GpsFix { on: false, fix: 0, used: 0, view: 0, lat: 0, lon: 0, alt_dm: 0, speed_kn10: 0, course10: 0, hdop10: 0, unix: 0, at_ms: 0 }),
+            good: Cell::new(None),
             sky: Cell::new(GpsSky { n: 0, sat: [ferrite_core::msg::SkySat { prn: 0, snr: 0, elev: 0, azim_2: 0, flags: 0 }; 16] }),
             now: Cell::new(0),
             fixed: Cell::new(None),
@@ -73,6 +99,11 @@ impl GpsData {
     pub fn set_fix(&self, f: GpsFix) {
         if f != self.fix.get() {
             self.fix.set(f);
+            if f.has_fix() {
+                self.good.set(Some(f));
+            } else if !f.on {
+                self.good.set(None);
+            }
             self.bump();
         }
     }
@@ -110,33 +141,37 @@ impl GpsData {
         self.fix.get()
     }
 
-    /// A fix that is current: on, a position, and younger than [`STALE_MS`].
-    fn current(&self) -> bool {
-        let f = self.fix.get();
-        f.has_fix() && self.now.get().wrapping_sub(f.at_ms) < STALE_MS
+    /// The last fix while it is recent (GPS-25): reported within [`RECENT_MS`].
+    fn recent(&self) -> Option<GpsFix> {
+        self.good.get().filter(|f| self.fix.get().on && self.now.get().wrapping_sub(f.at_ms) < RECENT_MS)
     }
 
-    /// The status bar's GPS state (GPS-6) and the satellites used.
+    /// Whether there is a recent fix (what a tick watches change).
+    fn current(&self) -> bool {
+        self.recent().is_some()
+    }
+
+    /// The status bar's GPS state (GPS-6): solid with a fix in the last [`RECENT_MS`], not while the module
+    /// merely runs; and the satellites the fix used.
     pub fn state(&self) -> (GpsState, u8) {
         let f = self.fix.get();
-        match (f.on, self.current()) {
+        match (f.on, self.recent()) {
             (false, _) => (GpsState::Off, 0),
-            (true, false) => (GpsState::Searching, f.used),
-            (true, true) => (GpsState::Fix, f.used),
+            (true, None) => (GpsState::Searching, f.used),
+            (true, Some(g)) => (GpsState::Fix, g.used),
         }
     }
 
-    /// UTC seconds since 1970 now from GPS time (None until the module has sent a time and date): the fix's
-    /// time plus how long ago it came.
+    /// UTC seconds since 1970 now from GPS time (None until the module has sent a time and date): the report's
+    /// time plus how long ago it came (the last fix's while the module sleeps).
     pub fn utc_now(&self) -> Option<u32> {
-        let f = self.fix.get();
-        (f.unix != 0).then(|| f.unix.wrapping_add(self.now.get().wrapping_sub(f.at_ms) / 1000))
+        let f = Some(self.fix.get()).filter(|f| f.unix != 0).or(self.good.get().filter(|g| g.unix != 0))?;
+        Some(f.unix.wrapping_add(self.now.get().wrapping_sub(f.at_ms) / 1000))
     }
 
-    /// The position users take (GPS-3): a current fix, else the fixed position, else none.
+    /// The position users take (GPS-3): a recent fix, else the fixed position, else none.
     pub fn position(&self) -> Option<Pos> {
-        if self.current() {
-            let f = self.fix.get();
+        if let Some(f) = self.recent() {
             return Some(Pos { lat: f.lat, lon: f.lon });
         }
         self.fixed.get()
@@ -216,6 +251,11 @@ impl Arrival {
         }
     }
 
+    /// Watching a waypoint: the module stays awake (GPS-28) while the radius is on.
+    pub fn armed(&self, radius_m: u32) -> bool {
+        self.target.is_some() && radius_m > 0
+    }
+
     /// A new position: Some(waypoint index, metres) when the alarm fires.
     pub fn check(&mut self, here: Pos, radius_m: u32) -> Option<(u16, u32)> {
         let (i, at) = self.target?;
@@ -240,8 +280,7 @@ impl Data for GpsData {
     }
 
     fn fix(&self) -> Option<Fix> {
-        let f = self.fix.get();
-        if self.current() {
+        if let Some(f) = self.recent() {
             let age = self.now.get().wrapping_sub(f.at_ms) / 1000;
             return Some(Fix {
                 pos: Pos { lat: f.lat, lon: f.lon },
@@ -281,8 +320,9 @@ mod tests {
         GpsFix { on: true, fix: 3, used: 9, view: 15, lat: 454_215_833, lon: -756_976_667, alt_dm: 712, speed_kn10: 126, course10: 873, hdop10: 9, unix: 1_791_383_530, at_ms }
     }
 
-    /// GPS-25: a fix is current for 10 s after the module last reported it; after that the state reads
-    /// searching and no fix is offered.
+    /// GPS-25: a fix is the position for 3 minutes after the module last reported it, with its age; after that the
+    /// state reads searching and no fix is offered. A report without a fix (the module waking, searching) keeps
+    /// the last one; GPS off drops it.
     #[test]
     fn fix_age_and_state() {
         let g = GpsData::new();
@@ -294,11 +334,24 @@ mod tests {
         assert_eq!((f.age_s, f.alt_m, f.speed_kmh, f.heading, f.used, f.three_d), (2, 71, 23, 87, 9, true));
         assert_eq!(f.utc_s, (1_791_383_530 + 2) % 86_400);
         assert_eq!(g.state(), (GpsState::Fix, 9));
+        g.tick(61_000); // the module asleep a minute: the fix stands, a minute old
+        assert_eq!(g.fix().unwrap().age_s, 60);
+        assert_eq!(g.state(), (GpsState::Fix, 9));
+        g.set_fix(GpsFix { on: true, used: 2, at_ms: 62_000, ..GpsFix::default() }); // awake, no fix yet
+        g.tick(62_000);
+        assert_eq!(g.fix().unwrap().age_s, 61, "the last fix kept");
+        assert_eq!(g.utc_now(), Some(1_791_383_530 + 61), "the clock from the last fix's time");
         let v = g.version();
-        g.tick(11_500); // past STALE_MS: no longer current, and the screens hear of it
+        g.tick(181_500); // past RECENT_MS: no longer current, and the screens hear of it
         assert_ne!(g.version(), v);
         assert!(g.fix().is_none());
-        assert_eq!(g.state(), (GpsState::Searching, 9));
+        assert_eq!(g.state(), (GpsState::Searching, 2));
+        g.set_fix(fix_at(182_000));
+        g.tick(182_000);
+        assert!(g.fix().is_some());
+        g.set_fix(GpsFix::default()); // GPS off
+        assert!(g.fix().is_none());
+        assert_eq!(g.state().0, GpsState::Off);
     }
 
     /// GPS-3: with no current fix, position users take the fixed position, or none; a current fix wins.
@@ -361,6 +414,37 @@ mod tests {
         assert_eq!(a.check(near, 0), None, "radius off");
         let east = Pos { lat: wp.lat, lon: wp.lon + 10_000 }; // 0.001 deg at 45.4 N is about 78 m
         assert!((74..=82).contains(&metres(wp, east)), "{}", metres(wp, east));
+    }
+
+    /// GPS-26 to GPS-28: who needs the module: GPS off, a GPS screen or the alarm, smart beaconing, the next
+    /// timed beacon (APRS mode on only).
+    #[test]
+    fn demand_from_the_app() {
+        struct D(crate::aprs::AprsCfg, Option<u32>);
+        impl Data for D {
+            fn version(&self) -> u32 {
+                0
+            }
+            fn aprs_cfg(&self) -> crate::aprs::AprsCfg {
+                self.0
+            }
+            fn beacon(&self) -> crate::data::Beacon {
+                crate::data::Beacon { waiting: false, next_s: self.1 }
+            }
+        }
+        let mut app = crate::App::new(crate::tests::set(), crate::tests::alert());
+        let timed = D(crate::aprs::AprsCfg { beacon: 2 + 3, ..crate::aprs::AprsCfg::DEFAULT }, Some(400)); // 10 minutes
+        let d = demand(&app, &timed, false, 1000);
+        assert_eq!(d, GpsDemand { on: true, watch: false, track: false, beacon_at: None }, "APRS mode off: no beacon");
+        app.set_aprs_mode(true);
+        assert_eq!(demand(&app, &timed, false, 1000).beacon_at, Some(401_000));
+        assert!(demand(&app, &timed, true, 1000).watch, "the arrival alarm");
+        let smart = D(crate::aprs::AprsCfg { beacon: crate::aprs::SMART as u8, ..crate::aprs::AprsCfg::DEFAULT }, None);
+        assert!(demand(&app, &smart, false, 0).track);
+        app.open(crate::screens::nav::Dest::GpsPosition);
+        assert!(demand(&app, &smart, false, 0).watch, "the GPS screen");
+        app.settings_mut().gps_on = false;
+        assert!(!demand(&app, &smart, false, 0).on);
     }
 
     #[test]

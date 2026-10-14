@@ -9,6 +9,7 @@ use super::table::{self, slow_table, Act, Ctx, Go, Table, Val};
 use crate::keys::KeyEvent;
 use crate::slot::{band_name, Item};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
+use ferrite_core::gpspower::GpsPhase;
 use ferrite_core::msg::GpsState;
 use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
@@ -110,10 +111,18 @@ slow_table! {
             TEXT
         }),
         (slow!("GPS"), |c, b| {
-            match c.dev.gps {
-                GpsState::Off => b.set(b"Off"),
-                GpsState::Searching => b.set(b"Searching"),
-                GpsState::Fix => {
+            // GPS-26: the module asleep between fixes, and when it wakes (the row is short: "Fix · sleep 42 s").
+            match (c.dev.gps, c.dev.gps_phase) {
+                (GpsState::Off, _) => b.set(b"Off"),
+                (GpsState::Fix, GpsPhase::Standby(s)) => {
+                    let _ = uwrite!(b, "Fix \u{b7} sleep {} s", s);
+                }
+                (_, GpsPhase::Standby(s)) => {
+                    let _ = uwrite!(b, "Sleep {} s", s);
+                }
+                (_, GpsPhase::Waking) => b.set(b"Waking"),
+                (GpsState::Searching, _) => b.set(b"Searching"),
+                (GpsState::Fix, _) => {
                     let _ = uwrite!(b, "Fix \u{b7} {} sats", c.dev.sats);
                 }
             }

@@ -49,6 +49,10 @@ pub static POSITION: Watch<M, GpsFix, 3> = Watch::new();
 pub static SKY: Watch<M, GpsSky, 1> = Watch::new();
 /// What the GPS should do (0 6 1, 0 6 8), from the UI when the settings change.
 pub static GPS_CFG: Signal<M, ferrite_app::gpsdata::GpsCfg> = Signal::new();
+/// Who needs a position (GPS-26 to GPS-28), from the UI when it changes, for the GPS task's power manager; and
+/// what the manager has the module doing ([`ferrite_core::gpspower::GpsPhase::pack`]) for the Status page.
+pub static GPS_DEMAND: Signal<M, ferrite_core::gpspower::GpsDemand> = Signal::new();
+pub static GPS_PHASE: AtomicU32 = AtomicU32::new(0);
 /// What the radio is doing, for the GPS task (GPS-4, GPS-22): set by the Radio task with each snapshot.
 pub static RF_STATE: AtomicU8 = AtomicU8::new(0);
 pub const RF_BUSY_KEYED: u8 = 1;

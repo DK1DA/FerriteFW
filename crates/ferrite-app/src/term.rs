@@ -20,6 +20,7 @@ use crate::settings::CABLE_PORTS;
 use crate::slot::{band_near, band_of, mode_chip, tone_text, Item, BANDS, BAND_125M, STEPS};
 use crate::App;
 use ferrite_core::freq::{mhz, Freq10};
+use ferrite_core::gpspower::GpsPhase;
 use ferrite_core::msg::{Device, GpsState, LiveAll, SLOTS};
 use ferrite_core::VERSION;
 use ferrite_ui::text::{Buf, Zero};
@@ -1455,7 +1456,15 @@ impl Term {
                     GpsState::Searching => "GPS searching",
                     GpsState::Fix => "GPS fix",
                 };
-                put!(v, "Battery {}.{} V   {}   Bluetooth {}   Battery Save ", d.battery_mv / 1000, d.battery_mv % 1000 / 100, gps, if d.bt { "on" } else { "off" });
+                put!(v, "Battery {}.{} V   {}", d.battery_mv / 1000, d.battery_mv % 1000 / 100, gps);
+                // GPS-26: the power manager's state, to check over the cable.
+                match d.gps_phase {
+                    GpsPhase::Standby(s) if d.gps != GpsState::Off => put!(v, ", standby {} s", s),
+                    GpsPhase::Waking if d.gps != GpsState::Off => put!(v, ", waking"),
+                    GpsPhase::Running | GpsPhase::Searching if d.gps != GpsState::Off => put!(v, ", awake"),
+                    _ => {}
+                }
+                put!(v, "   Bluetooth {}   Battery Save ", if d.bt { "on" } else { "off" });
                 put!(v, "{}", cx.app.bsave);
                 w.at(2);
                 w.s(v.as_bytes());
