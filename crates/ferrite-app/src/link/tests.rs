@@ -554,3 +554,36 @@ fn remote_ptt_needs_the_pin_on_bluetooth() {
     assert_eq!(bt.ptt(Ptt::On(key::ACTIVE)).0, 0);
     assert!(keyed(&bt.cmds()));
 }
+
+// ---- SLOT (LINK-33) ----
+
+/// LINK-33: `SLOT` reads a slot, changes it through the keypad's paths (as the terminal's `slot`, TERM-35) and
+/// answers it as it is after; a refusal is `invalid` with the reason and changes nothing.
+#[test]
+fn slot_read_and_set() {
+    use ferrite_core::link::slot as m;
+    let mut pc = Pc::new(true);
+    let (s, a) = pc.ask(msg::SLOT, &[1]);
+    assert_eq!((s, a.len(), a[0], a[1]), (0, 19, 1, 0), "slot B, not active");
+    assert_eq!(u16::from_le_bytes([a[2], a[3]]), 0xFFFF, "on its VFO");
+    let mut p = std::vec![1, m::FREQ | m::MODE | m::POWER | m::TX_TONE | m::ACTIVE];
+    p.extend_from_slice(&(ferrite_core::freq::mhz(146) + 94_000).to_le_bytes());
+    p.extend_from_slice(&[1, 0]);
+    p.extend_from_slice(&1000u16.to_le_bytes());
+    let (s, a) = pc.ask(msg::SLOT, &p);
+    assert_eq!(s, 0);
+    assert_eq!(u32::from_le_bytes([a[4], a[5], a[6], a[7]]), ferrite_core::freq::mhz(146) + 94_000);
+    assert_eq!((a[1], a[8], a[9], u16::from_le_bytes([a[12], a[13]])), (1, 1, 0, 1000), "active, NFM, low, tone sent");
+    assert_eq!(pc.app.active(), 1);
+    // refused: nothing changes
+    let mut p = std::vec![1, m::FREQ | m::MODE];
+    p.extend_from_slice(&ferrite_core::freq::mhz(7).to_le_bytes());
+    p.push(0);
+    let (s, a) = pc.ask(msg::SLOT, &p);
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(text(&a).contains("HF mode"));
+    assert_eq!(pc.app.slot_state(1).mode, 1, "the mode not changed either");
+    assert_eq!(pc.ask(msg::SLOT, &[3]).0, Status::BadArg as u8);
+    assert_eq!(pc.ask(msg::SLOT, &[0, m::FREQ, 1, 2]).0, Status::BadArg as u8, "a field cut short");
+    assert_eq!(pc.ask(msg::SLOT, &[0, 0x80]).0, Status::BadArg as u8);
+}

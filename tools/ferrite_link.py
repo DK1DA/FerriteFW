@@ -12,6 +12,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT delete-channel 12
     python3 tools/ferrite_link.py PORT baud 230400
     python3 tools/ferrite_link.py PORT reboot                     # into the bootloader, for flash.py
+    python3 tools/ferrite_link.py PORT slot [A|B|C]             # a slot's working fields (LINK-33)
     python3 tools/ferrite_link.py PORT key [--seconds N] [--slot active|a|b|c]   # remote PTT (LINK-20)
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
 
@@ -40,8 +41,8 @@ import sys
 import time
 
 PROTOCOL = 2
-HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, BAUD, REBOOT, KEY = (0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14,
-                                                                     0x20, 0x21, 0x30)
+HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY = (0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13,
+                                                                           0x14, 0x16, 0x20, 0x21, 0x30)
 SETTINGS, CHANNEL, ZONE, PRESET = 1, 2, 3, 4
 # KEY's remote PTT (Appendix G): key 0x80, then the action (0 off, 1 on + slot, 2 keepalive); slot 0xFF: the active one
 PTT, PTT_OFF, PTT_ON, PTT_ALIVE, ACTIVE = 0x80, 0, 1, 2, 0xFF
@@ -287,6 +288,16 @@ def run(link, a):
         link.ok(AUTH, a.pin.encode("ascii"))
     if a.cmd == "key":
         return remote_ptt(link, a.seconds, a.slot)
+    if a.cmd == "slot":
+        for n in [ "ABC".index(x.upper()) for x in a.args] or [0, 1, 2]:
+            r = link.ok(SLOT, bytes([n]))
+            s, act, ch, f, mode, pw, rxt, txt, off, fl = struct.unpack("<BBHIBBHHiB", r[:19])
+            where = f"ch {ch + 1}" if ch != 0xFFFF else ("aprs" if fl & 2 else "vfo")
+            print(f"{'ABC'[s]}{'*' if act else ' '} {where} {f / 100000:.5f} MHz {MODES[mode]} "
+                  f"{['low', 'mid', 'high'][pw]} txtone 0x{txt:04X} rxtone 0x{rxt:04X} "
+                  f"{'split tx ' + str(off / 100000) if fl & 1 else 'offset ' + str(off / 100000)}"
+                  f"{' scanning' if fl & 4 else ''}")
+        return 0
     if a.cmd == "hello":
         ver, _ = text(hello[3:])
         print(f"protocol {hello[0]}, max payload {hello[1]}, may write {bool(hello[2])}, firmware {ver}")

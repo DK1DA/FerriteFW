@@ -164,6 +164,8 @@ pub enum List {
     Changed,
     /// One channel, as its `ch` line.
     Show(u16),
+    /// The three slots, one `slot` line each (TERM-35).
+    Slots,
 }
 
 // ---- Words ----
@@ -1116,6 +1118,7 @@ pub fn writes(line: &[u8]) -> bool {
     let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"gps", b"mic"].iter().any(|r| same(c, r));
     let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx", b"txtest"].iter().any(|r| same(c, r)) && rest == 0;
     // `bk settle` alone only shows the waits (TERM-31).
+    let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
     let shows = shows || same(c, b"bk") && rest == 1 && line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1).is_some_and(|w| same(w, b"settle"));
     !(reads || shows)
 }
@@ -1148,6 +1151,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         }
         _ if loading => only_typed(core::str::from_utf8(c).unwrap_or("that")),
         _ if same(c, b"get") => get(app, dev, &mut t),
+        _ if same(c, b"slot") => slot(app, st, &mut t),
         _ if same(c, b"help") || c == b"?" => Ok(Done::List(List::Help)),
         _ if same(c, b"dump") => Ok(Done::Dump),
         _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
@@ -1486,6 +1490,13 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
                 None => false,
             }
         }
+        List::Slots => {
+            if i as usize >= ferrite_core::msg::SLOTS {
+                return false;
+            }
+            slot_line(app, st, i as u8, out);
+            true
+        }
         List::Show(n) => match (i, st.by_num(n)) {
             (0, Some((c, _))) => {
                 ch_line(&c, st, out);
@@ -1496,12 +1507,14 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 32] = [
+const HELP: [&str; 34] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
     "  get 0 7 1   get        one setting; every setting not at its default",
     "  ch 12                  channel 12, as its ch line",
+    "  slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,",
+    "                         slot B active: as the keys would (a channel slot: add vfo)",
     "  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone",
     "                         power zone step squelch busy reverse skip aprs rxonly hidden priority",
     "  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel",
@@ -1530,3 +1543,89 @@ const HELP: [&str; 32] = [
     "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
 ];
+
+// ---- Slots (TERM-35) ----
+
+/// `slot`, `slot X`, `slot X [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [active]`: the
+/// slots' working fields, read or changed as the keypad would ([`crate::slotctl`]); a refusal changes nothing.
+fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "slot A|B|C [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [active]";
+    let s = match t.next()? {
+        None => return Ok(Done::List(List::Slots)),
+        Some(Tok::Word(w)) if w.len() == 1 && (b'a'..=b'c').contains(&w[0].to_ascii_lowercase()) => w[0].to_ascii_lowercase() - b'a',
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    let mut c = crate::slotctl::SlotChange::default();
+    while let Some(tok) = t.next()? {
+        let Tok::Word(w) = tok else { return Err(msg!("{}", USAGE)) };
+        if let Some(m) = ["fm", "nfm", "am"].iter().position(|m| same(w, m.as_bytes())) {
+            c.mode = Some(m as u8);
+        } else if let Some(p) = POWERS.iter().position(|p| same(w, p.as_bytes())) {
+            c.power = Some(p as u8);
+        } else if same(w, b"vfo") {
+            c.vfo = true;
+        } else if same(w, b"active") {
+            c.active = true;
+        } else if same(w, b"tone") {
+            let v = tone(t.word("tone: off, 100.0 or D023N")?, "tone")?;
+            (c.rx_tone, c.tx_tone) = (Some(v), Some(v));
+        } else if same(w, b"rxtone") {
+            c.rx_tone = Some(tone(t.word("rxtone: off, 100.0 or D023N")?, "rxtone")?);
+        } else if same(w, b"txtone") {
+            c.tx_tone = Some(tone(t.word("txtone: off, 100.0 or D023N")?, "txtone")?);
+        } else if w.first().is_some_and(u8::is_ascii_digit) {
+            c.freq = Some(freq(w, "slot: the frequency in MHz, e.g. 146.52")?);
+        } else {
+            return Err(msg!("{}: not a slot word; {}", Bytes(w), USAGE));
+        }
+    }
+    if !c.is_empty() {
+        app.slot_apply(s, &c, st).map_err(|why| msg!("slot {}: {}", Bytes(&[b'A' + s]), why))?;
+    }
+    let mut l = Line::new();
+    slot_line(app, st, s, &mut l);
+    Ok(Done::Said(Msg::from(&l.as_bytes()[..l.len().min(96)])))
+}
+
+/// "A* vfo 146.52000 mode=NFM power=high tone=100.0 offset=+0.6" or "B  ch 12 "Club" 145.23000 ...": the active
+/// slot starred.
+pub fn slot_line<S: ChannelStore>(app: &App, st: &S, s: u8, out: &mut Line) {
+    let g = app.slot_state(s);
+    out.push(&[b'A' + s, if g.active { b'*' } else { b' ' }, b' ']);
+    match g.channel {
+        Some(n) => {
+            num(out, b"ch ", n as u32 + 1);
+            out.push(b" ");
+            if let Some((c, _)) = st.by_num(n) {
+                quoted(c.name(), out);
+                out.push(b" ");
+            }
+        }
+        None if g.aprs => out.push(b"aprs "),
+        None => out.push(b"vfo "),
+    }
+    out.push(mhz5(g.freq).as_bytes());
+    out.push(b" mode=");
+    out.push(MODES[g.mode as usize % MODES.len()].as_bytes());
+    out.push(b" power=");
+    out.push(POWERS[g.power as usize % 3].as_bytes());
+    if g.rx_tone == g.tx_tone {
+        out.push(b" tone=");
+        tone_word(g.tx_tone, out);
+    } else {
+        out.push(b" txtone=");
+        tone_word(g.tx_tone, out);
+        out.push(b" rxtone=");
+        tone_word(g.rx_tone, out);
+    }
+    if g.split {
+        out.push(b" tx=");
+        out.push(mhz5(g.offset.max(0) as Freq10).as_bytes());
+    } else if g.offset != 0 {
+        out.push(b" offset=");
+        offset_word(g.offset, out);
+    }
+    if g.scanning {
+        out.push(b" scanning");
+    }
+}

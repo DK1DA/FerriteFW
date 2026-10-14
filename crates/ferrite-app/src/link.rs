@@ -249,6 +249,7 @@ impl Session {
                 Status::Ok
             }
             msg::KEY => remote_ptt(app, st, now, p, &mut o),
+            msg::SLOT => slot(app, st, p, &mut o),
             _ => Status::UnknownType,
         };
         o.a[0] = s as u8;
@@ -426,6 +427,61 @@ fn remote_ptt<S: ChannelStore>(app: &mut App, st: &S, now: u32, p: &[u8], o: &mu
             Status::Invalid
         }
     }
+}
+
+/// `SLOT` (LINK-33): the slot, then optionally a mask and its fields; the slot after, or `invalid` and the reason
+/// (nothing changed).
+fn slot<S: ChannelStore>(app: &mut App, st: &S, p: &[u8], o: &mut Out) -> Status {
+    use ferrite_core::link::slot as m;
+    let Some(&s) = p.first().filter(|&&s| (s as usize) < ferrite_core::msg::SLOTS) else { return Status::BadArg };
+    let mask = p.get(1).copied().unwrap_or(0);
+    let mut c = crate::slotctl::SlotChange { vfo: mask & m::VFO != 0, active: mask & m::ACTIVE != 0, ..Default::default() };
+    let mut f = p.get(2..).unwrap_or(&[]);
+    let mut take = |n: usize| -> Option<u32> {
+        let b = f.get(..n)?;
+        f = &f[n..];
+        Some(b.iter().rev().fold(0u32, |v, &x| v << 8 | x as u32))
+    };
+    if mask & m::FREQ != 0 {
+        let Some(v) = take(4) else { return Status::BadArg };
+        c.freq = Some(v);
+    }
+    if mask & m::MODE != 0 {
+        let Some(v) = take(1) else { return Status::BadArg };
+        c.mode = Some(v as u8);
+    }
+    if mask & m::POWER != 0 {
+        let Some(v) = take(1) else { return Status::BadArg };
+        c.power = Some(v as u8);
+    }
+    if mask & m::RX_TONE != 0 {
+        let Some(v) = take(2) else { return Status::BadArg };
+        c.rx_tone = Some(v as u16);
+    }
+    if mask & m::TX_TONE != 0 {
+        let Some(v) = take(2) else { return Status::BadArg };
+        c.tx_tone = Some(v as u16);
+    }
+    if mask & 0x80 != 0 || !f.is_empty() {
+        return Status::BadArg;
+    }
+    if !c.is_empty() {
+        if let Err(why) = app.slot_apply(s, &c, st) {
+            o.put(why.as_bytes());
+            return Status::Invalid;
+        }
+    }
+    let g = app.slot_state(s);
+    o.put(&[s, g.active as u8]);
+    o.put(&g.channel.unwrap_or(0xFFFF).to_le_bytes());
+    o.put(&g.freq.to_le_bytes());
+    o.put(&[g.mode, g.power]);
+    o.put(&g.rx_tone.to_le_bytes());
+    o.put(&g.tx_tone.to_le_bytes());
+    o.put(&g.offset.to_le_bytes());
+    let flags = if g.split { m::SPLIT } else { 0 } | if g.aprs { m::APRS } else { 0 } | if g.scanning { m::SCANNING } else { 0 };
+    o.put(&[flags]);
+    Status::Ok
 }
 
 fn info<S: ChannelStore>(app: &App, st: &S, o: &mut Out) -> Status {

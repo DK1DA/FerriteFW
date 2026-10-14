@@ -38,6 +38,9 @@ pub mod msg {
     pub const BEGIN: u8 = 0x13;
     /// The write session ends.
     pub const END: u8 = 0x14;
+    /// A slot's working fields, read or changed as the keypad would (LINK-33): the slot (0-2), then optionally a
+    /// [`super::slot`] mask and its fields in bit order. The answer is the slot as it is after.
+    pub const SLOT: u8 = 0x16;
     /// Propose a faster cable rate (LINK-11).
     pub const BAUD: u8 = 0x20;
     /// Restart into the bootloader, for a firmware update (LINK-24): the cable, or a Bluetooth session that may go
@@ -47,6 +50,28 @@ pub mod msg {
     /// A key on the radio (LINK-19, LINK-20): the key, then what it does ([`super::key`]). Version 1 carries only
     /// remote PTT ([`super::Ptt`]); any other key answers `bad argument`.
     pub const KEY: u8 = 0x30;
+}
+
+/// `SLOT`'s mask (LINK-33): which fields follow, in this order.
+pub mod slot {
+    /// The VFO's frequency, u32 in 10 Hz.
+    pub const FREQ: u8 = 1;
+    /// u8: 0 FM, 1 NFM, 2 AM.
+    pub const MODE: u8 = 2;
+    /// u8: 0 low, 1 mid, 2 high.
+    pub const POWER: u8 = 4;
+    /// u16, CHAN-3's tone word (the tone decoded).
+    pub const RX_TONE: u8 = 8;
+    /// u16 (the tone sent).
+    pub const TX_TONE: u8 = 16;
+    /// No bytes: to the slot's VFO (V/M), before the frequency.
+    pub const VFO: u8 = 32;
+    /// No bytes: make it the active slot (the SLOT key), after the rest.
+    pub const ACTIVE: u8 = 64;
+    /// The answer's flags byte.
+    pub const SPLIT: u8 = 1;
+    pub const APRS: u8 = 2;
+    pub const SCANNING: u8 = 4;
 }
 
 /// `KEY`'s payload: the key, its action, then the action's own bytes.

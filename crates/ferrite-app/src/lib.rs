@@ -36,6 +36,7 @@ pub mod radio_data;
 pub mod remote;
 pub mod sample;
 pub mod screens;
+pub mod slotctl;
 pub mod settings;
 pub mod slot;
 pub mod words;

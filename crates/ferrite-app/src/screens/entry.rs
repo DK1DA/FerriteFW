@@ -379,6 +379,26 @@ impl View for Entry {
 }
 
 /// OK: go there (the VFO, a channel), or hand the frequency back to the editor that asked.
+/// A frequency typed for a slot's VFO (VFO-11; the terminal's and the link's `slot`, TERM-35): the slot goes to
+/// its VFO there; a new band brings its mode and step, and the offset's direction kept with its amount (NAV-2).
+/// `f` has passed [`refuse`].
+pub(crate) fn tune_vfo(app: &mut App, slot: u8, f: Freq10) {
+    let region = app.set.region();
+    let s = &mut app.slots[slot as usize];
+    let (old, new) = (band_near(s.vfo), band_near(f));
+    s.mem[old] = s.vfo;
+    if old != new {
+        s.cfg.mode = crate::slot::band_mode(new, region);
+        s.cfg.narrow = s.cfg.mode == 1;
+        s.cfg.step = crate::slot::band_step(new, region);
+        if s.cfg.offset != 0 && !s.cfg.split {
+            s.cfg.offset = s.cfg.offset.signum() * BANDS[new].shift;
+        }
+    }
+    (s.vfo, s.mem[new], s.vfo_mode) = (f, f, true);
+    app.send_slot(slot);
+}
+
 fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
     if e.to == EntryFor::Channel {
         let Some(num) = e.number() else { return };
@@ -407,22 +427,7 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
     }
     match e.to {
         EntryFor::Vfo => {
-            let a = app.active as usize;
-            let region = app.set.region();
-            let s = &mut app.slots[a];
-            let (old, new) = (band_near(s.vfo), band_near(f));
-            s.mem[old] = s.vfo;
-            if old != new {
-                // A new band: its mode and step, and the offset's direction kept with its amount (NAV-2).
-                s.cfg.mode = crate::slot::band_mode(new, region);
-                s.cfg.narrow = s.cfg.mode == 1;
-                s.cfg.step = crate::slot::band_step(new, region);
-                if s.cfg.offset != 0 && !s.cfg.split {
-                    s.cfg.offset = s.cfg.offset.signum() * BANDS[new].shift;
-                }
-            }
-            (s.vfo, s.mem[new], s.vfo_mode) = (f, f, true);
-            app.send_slot(a as u8);
+            tune_vfo(app, app.active, f);
             app.go_home();
         }
         EntryFor::ChannelFreq => {
