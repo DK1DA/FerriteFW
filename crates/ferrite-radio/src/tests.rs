@@ -115,6 +115,38 @@ fn failed_read_back_never_ramps() {
     assert!(hw.at(pa_up).is_none(), "no PA drive after a failed read-back: {:?}", hw.evs());
 }
 
+/// TX-33 (the Radio task's `Shutdown` while keyed, TX audit M6): the sequencer's safe state, run before any chip
+/// sleeps, takes the PA drive to 0 first, with no end tone, CW ID or tail; then the chip out of transmit, the unkey
+/// wait, every select off. The same from a crossband pass, its repeat audio off before the chip unkeys.
+#[test]
+fn power_off_while_keyed_zeroes_the_pa_first() {
+    let (mut path, mut seq, mut hw, st) = receiving(UHF);
+    let mut s = Steps::default();
+    seq.key(&req(UHF, UHF), &mut path, 0, &mut s).unwrap();
+    let st = go(&mut hw, &s, &st);
+    let mut s = Steps::default();
+    seq.safe(&mut path, 1_000, &mut s);
+    let end = go(&mut hw, &s, &st);
+    assert_eq!(hw.evs()[0], Ev::Pa(0), "PA drive 0 before anything else: {:?}", hw.evs());
+    assert!(hw.at(|e| matches!(e, Ev::EndTone | Ev::CwId | Ev::Tail)).is_none(), "no tones at a power off");
+    let unkey = hw.at(|e| *e == Ev::Unkey(1)).unwrap();
+    let tx_off = hw.at(|e| *e == Ev::Pin(Pin::Sel(Sel::UhfTx), false)).unwrap();
+    assert!(unkey < tx_off && hw.time(tx_off) >= UNKEY_WAIT_MS as u32, "{:?}", hw.evs());
+    assert!(end.sel.iter().all(|&x| !x) && end.pa == 0 && end.keyed.is_none());
+    assert!(!seq.keyed() && path.keyed().is_none());
+
+    // A crossband pass: RX on UHF, TX on VHF.
+    let (mut path, mut seq, mut hw, st) = receiving(UHF);
+    let mut s = Steps::default();
+    seq.key_xb(&Req { person: false, ..req(VHF, UHF) }, &mut path, 0, &mut s).unwrap();
+    let st = go(&mut hw, &s, &st);
+    let mut s = Steps::default();
+    seq.safe(&mut path, 1_000, &mut s);
+    let end = go(&mut hw, &s, &st);
+    assert_eq!(hw.evs()[0], Ev::Pa(0), "{:?}", hw.evs());
+    assert!(end.sel.iter().all(|&x| !x) && end.pa == 0 && end.keyed.is_none() && !end.repeat);
+}
+
 /// SAFE-20, SAFE-21, HF-11, TX-27: tuning the active slot from 2 m to 10 m moves the relay with no RF: muted,
 /// every select clear, the PA at zero, then the relay, its settle time (10 ms), then the new select. Watch and scan
 /// (`Cause::Auto`) never move it.

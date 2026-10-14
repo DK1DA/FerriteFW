@@ -1950,6 +1950,16 @@ impl Radio {
             RadioCmd::Hf { freq, mode, on } => self.hf(freq, mode, on).await,
             RadioCmd::HfSeek { up } => self.hf_seek(up).await,
             RadioCmd::Shutdown => {
+                // TX-33: power off while keyed (a pass of the repeater too) unkeys first: PA drive 0, the chip out
+                // of transmit, the unkey wait, every select off, before any chip sleeps or the SI4732 is touched
+                // (TX audit M6). Stock unkeys nothing at power off (PE0, the save, then PA11 cleared).
+                #[cfg(feature = "tx")]
+                if self.path.keyed().is_some() || self.tx.seq.keyed() {
+                    let mut s = Steps::default();
+                    self.tx.seq.safe(&mut self.path, now_ms() as u32, &mut s);
+                    self.run(&s).await;
+                    self.unkeyed();
+                }
                 for n in 0..2u8 {
                     self.tune_chip(n, None).await;
                 }

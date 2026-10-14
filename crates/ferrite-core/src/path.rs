@@ -571,18 +571,19 @@ impl Path {
         Ok(())
     }
 
-    /// The safe state, from anything (a fault, power off, a refused read-back): PA 0, both chips to receive,
-    /// the unkey wait if keyed, every select and the SI4732 input clear, the relay released, muted, the hold on
-    /// both band selects dropped (SAFE-24). Always allowed, guard or not.
+    /// The safe state, from anything (a fault, power off, a refused read-back): PA 0, a crossband pass's repeat
+    /// audio off, both chips to receive, the unkey wait if keyed, every select and the SI4732 input clear, the
+    /// relay released, muted, the hold on both band selects dropped (SAFE-24). Always allowed, guard or not.
     pub fn safe(&mut self, now: u32, out: &mut Steps) {
         out.push(Act::PaZero);
         self.mute(true, out);
+        // As a pass's own unkey (`xb_rx_end`): the repeat audio off before the chip leaves transmit.
+        if core::mem::take(&mut self.xb) == 2 {
+            out.push(Act::RepeatAudio(false));
+        }
         if let Some(tx) = self.tx.take() {
             out.push(Act::ChipRx(tx.chip()));
             out.push(Act::Wait(UNKEY_WAIT_MS));
-        }
-        if core::mem::take(&mut self.xb) == 2 {
-            out.push(Act::RepeatAudio(false));
         }
         for s in Sel::ALL {
             out.push(Act::Sel(s, false));
