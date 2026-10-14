@@ -150,11 +150,11 @@ impl Ports {
         match self.owner {
             Port::Cable => {
                 self.term.poll(app, store, dev, live, now, cable);
-                self.link.poll(app, store, dev, now, cable);
+                self.link.poll(app, store, dev, live, now, cable);
             }
             Port::Bt => {
                 self.term.poll(app, store, dev, live, now, bt);
-                self.link.poll(app, store, dev, now, bt);
+                self.link.poll(app, store, dev, live, now, bt);
             }
         }
     }

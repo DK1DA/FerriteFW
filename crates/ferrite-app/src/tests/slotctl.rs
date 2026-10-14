@@ -30,7 +30,7 @@ fn slot_lists_and_shows() {
     assert!(matches!(run(&mut t.app, "slot"), Ok(Done::List(List::Slots))));
     let mut l = Line::new();
     let lines: Vec<_> = (0..4)
-        .map_while(|i| cmd::list_line(&t.app, &store(), &Device::default(), List::Slots, i, &mut l).then(|| std::string::String::from_utf8_lossy(l.as_bytes()).into_owned()))
+        .map_while(|i| cmd::list_line(&t.app, &store(), &Device::default(), &ferrite_core::msg::LiveAll::default(), List::Slots, i, &mut l).then(|| std::string::String::from_utf8_lossy(l.as_bytes()).into_owned()))
         .collect();
     assert_eq!(lines.len(), 3);
     assert!(lines[0].starts_with("A* vfo ") && lines[1].starts_with("B  ") && lines[2].starts_with("C  "), "{lines:?}");

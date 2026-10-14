@@ -19,6 +19,7 @@ use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
 use ferrite_ui::widgets::{self as w, Row};
 use ufmt::uwrite;
+use ferrite_core::msg::Device;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Advanced {
@@ -128,33 +129,7 @@ impl View for Advanced {
             }
         }
         for (i, (name, _)) in GROUPS.iter().enumerate() {
-            let mut v = Buf::<24>::new();
-            match i {
-                0 => {
-                    v.push(WATCH_TEXT[app.watch as usize % 3].as_bytes());
-                    if app.scan_mask != 0 {
-                        v.push(" \u{b7} scan".as_bytes());
-                    }
-                }
-                1 => {
-                    let _ = uwrite!(v, "{} used", cx.store.count());
-                }
-                3 => v.set(b"Off"), // no decoder running (a short word: the name is long)
-                4 if app.inbox > 0 => {
-                    let _ = uwrite!(v, "{} new", app.inbox);
-                }
-                5 => match dev.gps {
-                    GpsState::Off => v.set(b"GPS off"),
-                    GpsState::Searching => v.set(b"Searching"),
-                    GpsState::Fix => {
-                        let _ = uwrite!(v, "{} sats", dev.sats);
-                    }
-                },
-                6 => v.set(b"Dark"),
-                7 => v.set(if dev.tx_built { b"Ready".as_slice() } else { b"Receive only" }),
-                8 => v.set(VERSION.as_bytes()),
-                _ => {}
-            }
+            let v = group_value(app, cx.store.count(), dev, i);
             let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: i as u8 == row, grey: false };
             app.list_row(lcd, i, 41 + 22 * i as i32, 22, &r);
         }
@@ -178,4 +153,36 @@ impl View for Advanced {
     fn hints(self, _: &App) -> Hints {
         Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")]) // digits jump: the rows show them
     }
+}
+
+/// Group `i`'s value as drawn (the UI readback reads it too, LINK-19).
+pub(crate) fn group_value(app: &App, channels: u16, dev: &Device, i: usize) -> Buf<24> {
+    let mut v = Buf::<24>::new();
+    match i {
+        0 => {
+            v.push(WATCH_TEXT[app.watch as usize % 3].as_bytes());
+            if app.scan_mask != 0 {
+                v.push(" \u{b7} scan".as_bytes());
+            }
+        }
+        1 => {
+            let _ = uwrite!(v, "{} used", channels);
+        }
+        3 => v.set(b"Off"), // no decoder running (a short word: the name is long)
+        4 if app.inbox > 0 => {
+            let _ = uwrite!(v, "{} new", app.inbox);
+        }
+        5 => match dev.gps {
+            GpsState::Off => v.set(b"GPS off"),
+            GpsState::Searching => v.set(b"Searching"),
+            GpsState::Fix => {
+                let _ = uwrite!(v, "{} sats", dev.sats);
+            }
+        },
+        6 => v.set(b"Dark"),
+        7 => v.set(if dev.tx_built { b"Ready".as_slice() } else { b"Receive only" }),
+        8 => v.set(VERSION.as_bytes()),
+        _ => {}
+    }
+    v
 }

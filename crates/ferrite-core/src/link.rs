@@ -84,9 +84,14 @@ pub mod msg {
     /// The running command's next output, as `CMD`'s answer; 1 with no text: the radio is still working on it, ask
     /// again shortly. Nothing running: 0 and no text.
     pub const MORE: u8 = 0x32;
-    /// A key on the radio (LINK-19, LINK-20): the key, then what it does ([`super::key`]). Version 1 carries only
-    /// remote PTT ([`super::Ptt`]); any other key answers `bad argument`.
+    /// A key on the radio (LINK-19, LINK-20): the key, then what it does ([`super::key`]). The keypad and side keys
+    /// by stock's key code with a press type (LINK-19), the knob ([`super::key::KNOB`]), or remote PTT
+    /// ([`super::Ptt`], LINK-20); anything else answers `bad argument`.
     pub const KEY: u8 = 0x30;
+    /// What the screen shows (LINK-19's readback, decision 150): as `CMD` `ui`, its text in lines (the screen, the
+    /// status bar, the home cards or the list's rows, the hint bar, a toast), `MORE` for the rest. An optional
+    /// byte: 0 the state, 1 the key names (`ui keys`).
+    pub const UI: u8 = 0x33;
 }
 
 /// `SLOT`'s mask (LINK-33): which fields follow, in this order.
@@ -115,7 +120,30 @@ pub mod slot {
 }
 
 /// `KEY`'s payload: the key, its action, then the action's own bytes.
+///
+/// LINK-19: a keypad or side key is its stock key code (0-21: `keys::MAP`; PF1 0, PF2 1), then [`UP`], [`DOWN`],
+/// [`SHORT`] or [`LONG`]; the knob is [`KNOB`], then the steps (i8, +1 a click clockwise, at most
+/// [`KNOB_MAX`] either way). The PTT codes (24-26) are never keys here: transmit is remote PTT's alone (LINK-20).
 pub mod key {
+    /// A keypad key let go (as remote PTT's [`OFF`]).
+    pub const UP: u8 = 0;
+    /// A keypad key pressed and held, until [`UP`] (or 30 s: [`HOLD_MAX_MS`]).
+    pub const DOWN: u8 = 1;
+    /// Pressed and let go: a short press (KEY-3).
+    pub const SHORT: u8 = 2;
+    /// Held to the long press (KEY-3: 700 ms), then let go: the radio lets it go [`LONG_HOLD_MS`] after the
+    /// answer, and answers `busy` to keys until then.
+    pub const LONG: u8 = 3;
+    /// How long a remote long press is held.
+    pub const LONG_HOLD_MS: u32 = 750;
+    /// A remote key held down longer than this is let go.
+    pub const HOLD_MAX_MS: u32 = 30_000;
+    /// The knob: then the steps, an i8.
+    pub const KNOB: u8 = 0x81;
+    /// The most knob steps in one `KEY`.
+    pub const KNOB_MAX: i8 = 20;
+    /// The last keypad code (stock's 0-21); 24 up are the PTTs, never keys here.
+    pub const LAST_CODE: u8 = 21;
     /// Remote PTT (LINK-20). Actions [`ON`] (then the slot), [`ALIVE`], [`OFF`].
     pub const PTT: u8 = 0x80;
     /// Unkey: always `ok`, keyed or not, so a PC can send it whatever happened.

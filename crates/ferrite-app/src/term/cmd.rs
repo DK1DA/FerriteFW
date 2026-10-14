@@ -166,6 +166,10 @@ pub enum List {
     Show(u16),
     /// The three slots, one `slot` line each (TERM-35).
     Slots,
+    /// What the screen shows (`ui`, LINK-19): [`crate::uistate`].
+    Ui,
+    /// The key names `key` and the link's `KEY` take (`ui keys`).
+    UiKeys,
 }
 
 // ---- Words ----
@@ -1155,6 +1159,13 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if loading => only_typed(core::str::from_utf8(c).unwrap_or("that")),
         _ if same(c, b"get") => get(app, dev, &mut t),
         _ if same(c, b"slot") => slot(app, st, &mut t),
+        _ if same(c, b"ui") => match t.next()? {
+            None => Ok(Done::List(List::Ui)),
+            Some(Tok::Word(w)) if same(w, b"keys") => Ok(Done::List(List::UiKeys)),
+            _ => Err(msg!("ui, or ui keys")),
+        },
+        _ if same(c, b"key") => key(app, st, &mut t),
+        _ if same(c, b"knob") => knob(app, st, &mut t),
         _ if same(c, b"help") || c == b"?" => Ok(Done::List(List::Help)),
         _ if same(c, b"dump") => Ok(Done::Dump),
         _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
@@ -1182,6 +1193,46 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
             }
         }
         _ => Err(msg!("{}: no such command; help lists them", Bytes(c))),
+    }
+}
+
+// ---- Remote keys (LINK-19) ----
+
+/// `key NAME [short|long|down|up]`: a keypad or side key, as the link's `KEY` presses it (LINK-19).
+fn key<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
+    use crate::remote::Press;
+    let usage = "key NAME [long|down|up]: ui keys lists the names";
+    let name = t.word(usage)?;
+    let Some(code) = crate::uistate::key_code(name) else { return Err(msg!("{}: no such key; ui keys lists them", Bytes(name))) };
+    let how = match t.next()? {
+        None => Press::Short,
+        Some(Tok::Word(w)) if same(w, b"short") => Press::Short,
+        Some(Tok::Word(w)) if same(w, b"long") => Press::Long,
+        Some(Tok::Word(w)) if same(w, b"down") => Press::Down,
+        Some(Tok::Word(w)) if same(w, b"up") => Press::Up,
+        _ => return Err(msg!("{}", usage)),
+    };
+    let now = app.now;
+    match app.remote_press(code, how, now, st) {
+        Ok(()) => Ok(Done::Said(msg!("key {} {}", crate::uistate::key_name(code), ["up", "down", "short", "long"][how as usize]))),
+        Err(r) => Err(msg!("key: {}", r.text())),
+    }
+}
+
+/// `knob +N|-N`: knob steps, as the link's `KEY` turns it (LINK-19).
+fn knob<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
+    let usage = "knob +N or -N: 1 to 20 steps, + clockwise";
+    let w = t.word(usage)?;
+    let (neg, digits) = match w.split_first() {
+        Some((b'-', d)) => (true, d),
+        Some((b'+', d)) => (false, d),
+        _ => (false, w),
+    };
+    let n = number(digits).filter(|&n| (1..=20).contains(&n)).ok_or_else(|| msg!("{}", usage))? as i8;
+    let now = app.now;
+    match app.remote_knob(if neg { -n } else { n }, now, st) {
+        Ok(()) => Ok(Done::Said(msg!("knob {}{}", if neg { "-" } else { "+" }, n as u32))),
+        Err(r) => Err(msg!("knob: {}", r.text())),
     }
 }
 
@@ -1510,9 +1561,11 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
 }
 
 /// The console's lists: help, the settings not at their defaults, one channel.
-pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u16, out: &mut Line) -> bool {
+pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrite_core::msg::LiveAll, l: List, i: u16, out: &mut Line) -> bool {
     out.clear();
     match l {
+        List::Ui => crate::uistate::line(app, st, dev, live, i, out),
+        List::UiKeys => crate::uistate::key_line(i, out),
         List::Help => match HELP.get(i as usize) {
             Some(h) => {
                 out.push(h.as_bytes());

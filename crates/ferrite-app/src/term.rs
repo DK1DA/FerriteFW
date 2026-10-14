@@ -1128,7 +1128,7 @@ impl Term {
             self.exec(app, store, dev, out);
         }
         if self.con != Con::Off {
-            return self.console(app, store, dev, out);
+            return self.console(app, store, dev, live, out);
         }
         let cx = Cx { app, store, dev, live };
         for r in 0..self.rows {
@@ -1202,7 +1202,7 @@ impl Term {
     }
 
     /// The console: a clear screen, then lines while the sink has room; then "Enter returns".
-    fn console<S: ChannelStore>(&mut self, app: &App, store: &S, dev: &Device, out: &mut impl Sink) {
+    fn console<S: ChannelStore>(&mut self, app: &App, store: &S, dev: &Device, live: &LiveAll, out: &mut impl Sink) {
         const LINE_ROOM: usize = 300;
         match self.con {
             Con::Off | Con::Done => {}
@@ -1215,7 +1215,7 @@ impl Term {
                     out.put("Load: send the dump now (paste it, or your terminal's send-file). Each line is checked\r\nas the radio checks it; a line that fails is skipped and named. It ends at the line\r\n\"end\" or Ctrl-D; Ctrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n".as_bytes());
                 }
                 self.con = Con::Run(b);
-                self.console(app, store, dev, out);
+                self.console(app, store, dev, live, out);
             }
             Con::Run(Body::Load { line, ok, bad, end }) => {
                 if end != 0 && !self.pending && out.room() >= LINE_ROOM {
@@ -1231,7 +1231,7 @@ impl Term {
                     let mut l = cmd::Line::new();
                     let more = match &mut b {
                         Body::List(what, i) => {
-                            let m = cmd::list_line(app, store, dev, *what, *i, &mut l);
+                            let m = cmd::list_line(app, store, dev, live, *what, *i, &mut l);
                             *i += 1;
                             m
                         }

@@ -41,6 +41,7 @@ pub mod settings;
 pub mod slot;
 pub mod words;
 pub mod term;
+pub mod uistate;
 
 use chan::{ChanWrite, Channel, ChannelStore};
 use screens::alert::AlertInfo;
@@ -297,6 +298,13 @@ pub struct App {
     /// SAFE-14: the "PTT stuck" popup has shown this power-on.
     pub(crate) stuck_shown: bool,
     pub(crate) virtual_ptt: bool,
+    /// LINK-19: the keys the link holds and its long press ([`remote::RemoteKeys`]); a remote key's input is being
+    /// handled now (it never transmits: [`App::remote_tx_refused`]).
+    pub(crate) rkeys: remote::RemoteKeys,
+    pub(crate) remote_in: bool,
+    /// Redraws that changed something, and when the last was (the link's UI readback: LINK-19).
+    pub(crate) frames: u32,
+    pub(crate) drawn_at: u32,
     pub(crate) local_ptt: u8,
     pub(crate) ptt_cut: u8,
     /// The second of the alert tone's last beep, with the top bit set (SND-6, INBOX-4).
@@ -396,6 +404,10 @@ impl App {
             tx_cut: false,
             stuck_shown: false,
             virtual_ptt: false,
+            rkeys: remote::RemoteKeys::default(),
+            remote_in: false,
+            frames: 0,
+            drawn_at: 0,
             local_ptt: 0,
             ptt_cut: 0,
             alert_beep: 0,
@@ -1035,6 +1047,7 @@ impl App {
         self.radio_tick(live);
         self.screen.tick(self, live);
         self.remote_tick(now, store); // LINK-20: after the screen's own unkeys (TX-30, the Radio task's stops)
+        self.remote_keys_tick(now, store); // LINK-19: a remote long press let go on time
         if core::mem::take(&mut self.want_reset) {
             screens::confirm::reset_all(self, store);
         }
@@ -1064,7 +1077,11 @@ impl App {
                 break; // HOME-17: the quick menu just opened and took every key held
             }
             self.last_input = now;
+            // LINK-19: a long press or repeat of a key the link holds is a remote key's (it never transmits).
+            let was = self.remote_in;
+            self.remote_in |= self.remote_held(e.key);
             self.on_key(e, store);
+            self.remote_in = was;
             self.reconcile_mode(); // MODE-2
         }
     }

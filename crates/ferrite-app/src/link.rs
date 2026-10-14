@@ -21,6 +21,7 @@ use ferrite_core::freq::mhz;
 use ferrite_core::link::{self as wire, msg, what, Ptt, Status, MAX_PAYLOAD, MAX_WIRE, PROTOCOL};
 use crate::remote::RemoteEnd;
 use crate::term::cmd::{self, Done, DumpPos, Line, List};
+use ferrite_core::msg::LiveAll;
 use crate::term::debug::{Job, Step};
 use ferrite_core::msg::{DebugAns, DebugReq, Device};
 use ferrite_core::VERSION;
@@ -183,7 +184,7 @@ impl Session {
     }
 
     /// Handles the owner's answers, ends a quiet session, and answers a waiting frame when there is room.
-    pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, now: u32, out: &mut impl Sink) {
+    pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, now: u32, out: &mut impl Sink) {
         self.now = now;
         // BACK on the progress screen (LINK-9) is ours only while a write session runs.
         if self.session && app.take_link_answer() == Some(LinkAnswer::Cancelled) {
@@ -195,6 +196,7 @@ impl Session {
         // LINK-20: remote PTT ends with the session that keyed it.
         if core::mem::take(&mut self.closed) {
             app.remote_unkey(RemoteEnd::Session, now, store);
+            app.remote_keys_release(now, store); // LINK-19: and every key it held
         }
         // `KEY` never waits for the store, nor for room for the largest answer: its answers are a few bytes, and on
         // the cable they wait in the send ring while keyed (TX-43), so keepalives must still be handled then.
@@ -215,7 +217,7 @@ impl Session {
                 let pl = f.payload.len();
                 p[..pl].copy_from_slice(f.payload);
                 (self.last, self.seen) = (now, true);
-                (ty, seq, self.handle(app, store, dev, now, ty, &p[..pl], &mut ans))
+                (ty, seq, self.handle(app, store, dev, live, now, ty, &p[..pl], &mut ans))
             }
         };
         let mut w = [0u8; MAX_WIRE];
@@ -231,7 +233,7 @@ impl Session {
 
     /// One request: its answer's payload into `a` (status first); the length.
     #[allow(clippy::too_many_arguments)]
-    fn handle<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, now: u32, ty: u8, p: &[u8], a: &mut [u8; MAX_PAYLOAD]) -> usize {
+    fn handle<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, now: u32, ty: u8, p: &[u8], a: &mut [u8; MAX_PAYLOAD]) -> usize {
         let mut o = Out { a, n: 1 };
         let s = match ty {
             msg::HELLO => self.hello(app, dev, p, &mut o),
@@ -269,13 +271,22 @@ impl Session {
                 self.reboot = true;
                 Status::Ok
             }
-            msg::KEY => remote_ptt(app, st, now, p, &mut o),
+            msg::KEY => key(app, st, now, p, &mut o),
             msg::SLOT => slot(app, st, p, &mut o),
-            msg::CMD => self.command(app, st, dev, p, &mut o),
+            msg::CMD => self.command(app, st, dev, live, p, &mut o),
             msg::MORE => {
-                self.more(app, st, dev, &mut o);
+                self.more(app, st, dev, live, &mut o);
                 Status::Ok
             }
+            // LINK-19: what the screen shows, as the terminal's `ui` (or `ui keys`) prints it.
+            msg::UI => match p.first().copied().unwrap_or(0) {
+                w @ (0 | 1) => {
+                    self.run = Run::List(if w == 0 { List::Ui } else { List::UiKeys }, 0);
+                    self.more(app, st, dev, live, &mut o);
+                    Status::Ok
+                }
+                _ => Status::BadArg,
+            },
             _ => Status::UnknownType,
         };
         o.a[0] = s as u8;
@@ -302,7 +313,7 @@ impl Session {
 
     /// `CMD` (LINK-34): the line as the terminal's command line runs it (`cmd::run`: the same commands, checks and
     /// refusals), then its first output.
-    fn command<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, p: &[u8], o: &mut Out) -> Status {
+    fn command<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, p: &[u8], o: &mut Out) -> Status {
         self.run = Run::Off;
         let r = match cmd::run(app, st, dev, p, false) {
             Ok(Done::Nothing) => Run::Off,
@@ -325,12 +336,12 @@ impl Session {
             }
         };
         self.run = r;
-        self.more(app, st, dev, o);
+        self.more(app, st, dev, live, o);
         Status::Ok
     }
 
     /// The running command's next whole lines, as many as fit: the "more" byte, then the text.
-    fn more<S: ChannelStore>(&mut self, app: &App, st: &S, dev: &Device, o: &mut Out) {
+    fn more<S: ChannelStore>(&mut self, app: &App, st: &S, dev: &Device, live: &LiveAll, o: &mut Out) {
         let flag = o.n;
         o.put(&[0]);
         let mut l = Line::new();
@@ -339,7 +350,7 @@ impl Session {
             let got = match &mut self.run {
                 Run::Off => false,
                 Run::List(list, i) => {
-                    let g = cmd::list_line(app, st, dev, *list, *i, &mut l);
+                    let g = cmd::list_line(app, st, dev, live, *list, *i, &mut l);
                     *i += 1;
                     g
                 }
@@ -519,7 +530,40 @@ impl Out<'_> {
     }
 }
 
-/// `KEY` (LINK-20): remote PTT. Any other key is LINK-19's, not built: `bad argument`.
+/// `KEY`: a keypad or side key, or the knob (LINK-19), or remote PTT (LINK-20).
+fn key<S: ChannelStore>(app: &mut App, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
+    use crate::remote::{KeyRefusal, Press};
+    use ferrite_core::link::key as k;
+    let res = match (p.first().copied(), p.get(1).copied(), p.len()) {
+        (Some(c), Some(a), 2) if c <= k::LAST_CODE => match Press::of(a) {
+            Some(how) => keypad(app, st, |app| app.remote_press(c, how, now, st)),
+            None => Err(KeyRefusal::Invalid("")),
+        },
+        (Some(k::KNOB), Some(n), 2) => keypad(app, st, |app| app.remote_knob(n as i8, now, st)),
+        (Some(k::PTT), ..) => return remote_ptt(app, st, now, p, o),
+        _ => return Status::BadArg,
+    };
+    match res {
+        Ok(()) => Status::Ok,
+        Err(KeyRefusal::Busy) => Status::Busy,
+        Err(KeyRefusal::Invalid("")) => Status::BadArg,
+        Err(KeyRefusal::Invalid(why)) => {
+            o.put(why.as_bytes());
+            Status::Invalid
+        }
+    }
+}
+
+/// A remote key waits for the store as every other request does (a key may write a channel); `KEY` alone is
+/// handled without waiting for it (LINK-20's keepalives), so the wait is a `busy` here.
+fn keypad<S: ChannelStore>(app: &mut App, st: &S, f: impl FnOnce(&mut App) -> Result<(), crate::remote::KeyRefusal>) -> Result<(), crate::remote::KeyRefusal> {
+    if app.write_pending() || st.data().busy() {
+        return Err(crate::remote::KeyRefusal::Busy);
+    }
+    f(app)
+}
+
+/// `KEY` (LINK-20): remote PTT.
 fn remote_ptt<S: ChannelStore>(app: &mut App, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
     let res = match Ptt::decode(p) {
         None => return Status::BadArg,

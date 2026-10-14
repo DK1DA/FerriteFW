@@ -1088,45 +1088,54 @@ impl Group {
         }
     }
 
-    fn draw(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        let list = self.items();
-        app.new_page(lcd, hash(&(self.g, self.sub)));
-        let mut count = Buf::<24>::new();
-        for (i, (name, val)) in list.iter().map(|e| (e.name(), e.value())).enumerate() {
-            let (p, pl) = self.path(i as u8);
-            let mut v = Buf::<24>::new();
-            let dot = match wired(app, cx.dev, &p[..pl], &mut v) {
-                Some(d) => d,
-                None => {
-                    match &p[..pl] {
-                        [2, 1] => {
-                            count.clear();
-                            let _ = uwrite!(count, "{} channels", cx.store.count());
-                            v.set(count.as_bytes());
-                        }
-                        [4, 1] if app.inbox > 0 => {
-                            let _ = uwrite!(v, "{} new", app.inbox);
-                        }
-                        [5, 4] => v.set(b"no callsign"),
-                        _ => v.set(val.as_bytes()),
+    /// Row `i` as drawn: its name, the value it shows, the changed-from-default dot and whether it is greyed
+    /// (MENU-14: a greyed row not selected shows why instead of its value). The UI readback reads it too (LINK-19).
+    pub(crate) fn row(self, app: &App, dev: &Device, store: &impl ChannelStore, i: u8) -> (&'static str, Buf<24>, bool, bool) {
+        let e = self.items()[i as usize];
+        let (p, pl) = self.path(i);
+        let mut v = Buf::<24>::new();
+        let dot = match wired(app, dev, &p[..pl], &mut v) {
+            Some(d) => d,
+            None => {
+                match &p[..pl] {
+                    [2, 1] => {
+                        let _ = uwrite!(v, "{} channels", store.count());
                     }
-                    false
+                    [4, 1] if app.inbox > 0 => {
+                        let _ = uwrite!(v, "{} new", app.inbox);
+                    }
+                    [5, 4] => v.set(b"no callsign"),
+                    _ => v.set(e.value().as_bytes()),
                 }
-            };
-            let grey = greyed(app, &p[..pl]);
-            if let (Some(why), true) = (grey, i as u8 != self.row) {
-                v.set(why.as_bytes()); // MENU-14: greyed items say why
+                false
             }
-            let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i as u8 == self.row, grey: grey.is_some() };
-            app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
+        };
+        let grey = greyed(app, &p[..pl]);
+        if let (Some(why), true) = (grey, i != self.row) {
+            v.set(why.as_bytes()); // MENU-14: greyed items say why
         }
+        (e.name(), v, dot, grey.is_some())
+    }
+
+    /// The help box: the highlighted item's path ("MENU 0 7 1") and help line (or why it is greyed).
+    pub(crate) fn help(self, app: &App) -> (Buf<20>, &'static str) {
         let (p, pl) = self.path(self.row);
         let mut path = Buf::<20>::new();
         path.push(b"MENU 0");
         for x in &p[..pl] {
             let _ = uwrite!(path, " {}", x);
         }
-        let help = greyed(app, &p[..pl]).unwrap_or(list.get(self.row as usize).map_or("", |e| e.help()));
+        (path, greyed(app, &p[..pl]).unwrap_or(self.items().get(self.row as usize).map_or("", |e| e.help())))
+    }
+
+    fn draw(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
+        app.new_page(lcd, hash(&(self.g, self.sub)));
+        for i in 0..self.items().len() {
+            let (name, v, dot, grey) = self.row(app, cx.dev, cx.store, i as u8);
+            let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i as u8 == self.row, grey };
+            app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
+        }
+        let (path, help) = self.help(app);
         app.help_box(lcd, 226, 46, help.as_bytes(), path.as_bytes());
     }
 

@@ -39,7 +39,7 @@ impl Of {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Act {
+pub(crate) enum Act {
     /// A reference, not the `Op` itself: `Op` is about 96 bytes (it carries drafts and buffers) and every row would
     /// be that size.
     Do(&'static Op),
@@ -56,7 +56,7 @@ enum Act {
     Arrival,
 }
 
-type Opt = (&'static str, Act, &'static str);
+pub(crate) type Opt = (&'static str, Act, &'static str);
 
 /// The rows: label, action, help line.
 const LOG: [Opt; 3] = [
@@ -96,7 +96,7 @@ const WAYPOINTS: [Opt; 4] = [
     ("GPS position", Act::Open(Dest::GpsPosition), "Fix, satellites, grid square"),
 ];
 
-fn rows(of: Of) -> &'static [Opt] {
+pub(crate) fn rows(of: Of) -> &'static [Opt] {
     match of {
         Of::Log => &LOG,
         Of::Heard => &HEARD,
@@ -110,7 +110,7 @@ fn rows(of: Of) -> &'static [Opt] {
 }
 
 /// The page's name, for the help box ("Event log MENU").
-fn title(of: Of) -> &'static [u8] {
+pub(crate) fn title(of: Of) -> &'static [u8] {
     match of {
         Of::Log => b"Event log",
         Of::Heard => b"APRS heard",
@@ -153,6 +153,9 @@ impl View for Options {
             (Key::Menu, Short) => match act {
                 Act::Confirm(_) if !self.confirm => app.screen = Screen::Options(Options { confirm: true, ..self }),
                 Act::Do(&op) | Act::Confirm(&op) => {
+                    if matches!(op, Op::BeaconNow | Op::Send) && app.remote_tx_refused() {
+                        return; // LINK-19: a beacon or message now is a transmission
+                    }
                     app.back();
                     if store.data().request(op) {
                         if op == Op::ReadAll {

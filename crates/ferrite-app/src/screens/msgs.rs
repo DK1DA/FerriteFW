@@ -496,6 +496,9 @@ impl Compose {
 /// predicted taken as it stands.
 pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     let Screen::Compose(c) = app.screen else { return };
+    if app.remote_tx_refused() {
+        return; // LINK-19: a message is a transmission
+    }
     let mut s = c.resolved(store);
     if s.field == 1 && app.set.predictive && !app.text.is_empty() {
         let mut t = text_of(store, s);

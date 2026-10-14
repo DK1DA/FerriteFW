@@ -267,6 +267,9 @@ impl View for Crossband {
 
 /// # on the start page: refuse saying why (XB-2), or start.
 fn start(app: &mut App) {
+    if app.remote_tx_refused() {
+        return; // LINK-19: the repeater transmits on its own once started
+    }
     let mut out = [(Check::Ok, Buf::new()); 4];
     // The battery line is a warning only; its level doesn't matter here.
     if let Some(i) = checks(app, 100, &mut out) {

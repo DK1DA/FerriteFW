@@ -47,7 +47,7 @@ impl Pc {
         let mut out = Wire(Vec::new());
         for _ in 0..4 {
             self.now += 10;
-            self.link.poll(&mut self.app, &self.st, &self.dev, self.now, &mut out);
+            self.link.poll(&mut self.app, &self.st, &self.dev, &LiveAll::default(), self.now, &mut out);
             while let Some(wr) = self.app.pop_write() {
                 self.st.apply(wr);
             }
@@ -161,7 +161,7 @@ fn errors_are_answered() {
     w[4] ^= 0x10;
     pc.raw(&w[..n]);
     let mut out = Wire(Vec::new());
-    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), 2000, &mut out);
+    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), &LiveAll::default(), 2000, &mut out);
     let k = out.0.len() - 1;
     let f = wire::parse(&mut out.0[..k]).unwrap();
     assert_eq!((f.ty, f.seq, f.payload[0]), (msg::INFO | wire::ANSWER, 9, Status::BadFrame as u8));
@@ -360,7 +360,7 @@ impl Pc {
         while self.now < end {
             self.now += 50;
             self.app.tick(self.now, live, &self.st);
-            self.link.poll(&mut self.app, &self.st, &Device::default(), self.now, &mut Wire(Vec::new()));
+            self.link.poll(&mut self.app, &self.st, &Device::default(), &LiveAll::default(), self.now, &mut Wire(Vec::new()));
         }
     }
 
@@ -420,7 +420,9 @@ fn remote_ptt_keys_and_unkeys() {
     assert_eq!(s, Status::Invalid as u8, "C isn't active: {}", text(&a));
     assert!(!keyed(&pc.cmds()));
     assert_eq!(pc.ask(msg::KEY, &[key::PTT, key::ON]).0, Status::BadArg as u8, "ON needs its slot");
-    assert_eq!(pc.ask(msg::KEY, &[0x10, 1]).0, Status::BadArg as u8, "other keys: LINK-19, not built");
+    for bad in [&[0x50u8, 1][..], &[22, 2], &[24, 2], &[25, 1], &[26, 1], &[6, 9], &[6], &[6, 2, 0]] {
+        assert_eq!(pc.ask(msg::KEY, bad).0, Status::BadArg as u8, "{bad:?}: not a key (the PTTs are LINK-20's alone)");
+    }
 }
 
 /// LINK-20: no keepalive for 2 s, no transmit, and the carrier drops at once (a cut, TX-47: no 400 ms hold); the
@@ -558,14 +560,14 @@ fn remote_ptt_answered_with_a_full_ring() {
     let k = wire::build(msg::KEY, 1, &b[..n], &mut w).unwrap();
     pc.raw(&w[..k]);
     let mut out = Small(Vec::new());
-    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), pc.now, &mut out);
+    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), &LiveAll::default(), pc.now, &mut out);
     assert!(pc.app.remote_keyed() && !out.0.is_empty(), "answered with 16 bytes of room");
     // a full ring: the keepalive still counts, its answer is dropped whole
     let n = Ptt::Alive.encode(&mut b);
     let k = wire::build(msg::KEY, 2, &b[..n], &mut w).unwrap();
     pc.now += 1500;
     pc.raw(&w[..k]);
-    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), pc.now, &mut Small(std::vec![0; 16]));
+    pc.link.poll(&mut pc.app, &pc.st, &Device::default(), &LiveAll::default(), pc.now, &mut Small(std::vec![0; 16]));
     assert!(pc.link.ready(), "handled");
     pc.now += 1000;
     pc.app.tick(pc.now, &LiveAll::default(), &pc.st);
@@ -715,4 +717,219 @@ fn terminal_commands_need_the_pin_on_bluetooth() {
     assert_eq!(bt.ask(msg::MORE, &[]).0, Status::NotAuthorised as u8);
     assert_eq!(bt.ask(msg::AUTH, b"1234").0, 0);
     assert!(bt.cmd("slot").is_ok());
+}
+
+// ---- Remote keys and the UI readback (LINK-19) ----
+
+use crate::uistate::{key_code, key_line};
+
+impl Pc {
+    /// `KEY` for a keypad key by name: (status, text).
+    fn press(&mut self, name: &str, action: u8) -> (u8, std::string::String) {
+        let (s, a) = self.ask(msg::KEY, &[key_code(name.as_bytes()).unwrap(), action]);
+        (s, text(&a).into())
+    }
+
+    /// Several short presses; each must be ok.
+    fn keys(&mut self, names: &str) {
+        for n in names.split(' ') {
+            assert_eq!(self.press(n, key::SHORT), (0, std::string::String::new()), "{n}");
+        }
+    }
+
+    /// `UI`: the whole text, over as many `MORE`s as it takes.
+    fn ui(&mut self) -> std::string::String {
+        let (s, a) = self.ask(msg::UI, &[]);
+        assert_eq!(s, 0);
+        let mut all: std::string::String = text(&a[1..]).into();
+        let mut more = a[0];
+        while more == 1 {
+            let (s, a) = self.ask(msg::MORE, &[]);
+            assert!(s == 0 && (a.len() == 1 || a.last() == Some(&b'\n')), "whole lines");
+            all.push_str(text(&a[1..]));
+            more = a[0];
+        }
+        all
+    }
+
+    fn lines(&mut self, kind: &str) -> Vec<std::string::String> {
+        self.ui().lines().filter(|l| l.split(' ').next() == Some(kind)).map(|l| l.into()).collect()
+    }
+}
+
+/// LINK-19: every front key and side key by stock's key code under its name; the PTTs have no name.
+#[test]
+fn remote_key_names() {
+    let want = [
+        ("MENU", Key::Menu), ("OK", Key::Menu), ("BACK", Key::Exit), ("exit", Key::Exit), ("UP", Key::Up), ("DOWN", Key::Down),
+        ("LEFT", Key::Left), ("RIGHT", Key::Right), ("SLOT", Key::Slot), ("VM", Key::VfoMem), ("STAR", Key::Star), ("*", Key::Star),
+        ("HASH", Key::Hash), ("#", Key::Hash), ("SIDE1", Key::Side(1)), ("PF2", Key::Side(2)), ("0", Key::Digit(0)), ("9", Key::Digit(9)),
+    ];
+    for (n, k) in want {
+        assert_eq!(key_code(n.as_bytes()).and_then(ferrite_core::keys::key), Some(k), "{n}");
+    }
+    assert_eq!(key_code(b"PTT"), None);
+    let mut l = crate::term::cmd::Line::new();
+    let names: Vec<_> = (0..).map_while(|i| key_line(i, &mut l).then(|| std::string::String::from(text(l.as_bytes())))).collect();
+    assert_eq!(names.len(), 23, "22 keys and the knob: {names:?}");
+    for c in 0..22u8 {
+        assert!(ferrite_core::keys::key(c).is_some_and(|k| !matches!(k, Key::Ptt(_))), "code {c} is a key, not a PTT");
+    }
+}
+
+/// LINK-19: remote keys go through the keypad's path: MENU opens quick settings, digits and the knob move through
+/// the menus, BACK goes back; the readback shows each screen, its rows and the selected one.
+#[test]
+fn remote_keys_drive_the_menus() {
+    let mut pc = Pc::new(true);
+    assert!(pc.ui().starts_with("screen Home \"Home\""));
+    assert_eq!(pc.lines("card").len(), 3, "a card per slot");
+    pc.keys("MENU");
+    assert!(matches!(pc.app.screen(), Screen::Quick(_)));
+    let rows = pc.lines("row");
+    assert_eq!(rows.len(), 10, "nine settings and 0 Advanced: {rows:?}");
+    assert!(rows[0].starts_with("row 1 \"Squelch\"") && rows[0].contains(" sel"), "{rows:?}");
+    pc.keys("0 7");
+    let ui = pc.ui();
+    assert!(ui.starts_with("screen Group \"Settings group\" title=\"Display\""), "{ui}");
+    assert!(ui.contains("row 1 \"Theme\" \"Dark\" sel") && ui.contains("help \"MENU 0 7 1\""), "{ui}");
+    assert_eq!(pc.ask(msg::KEY, &[key::KNOB, 1]).0, 0);
+    assert!(pc.ui().contains("row 1 \"Theme\" \"Daylight\" sel dot"), "the knob changed it");
+    assert_eq!(pc.ask(msg::KEY, &[key::KNOB, (-1i8) as u8]).0, 0);
+    pc.keys("DOWN");
+    let sel: Vec<_> = pc.lines("row").into_iter().filter(|r| r.contains(" sel")).collect();
+    assert_eq!(sel.len(), 1);
+    assert!(sel[0].starts_with("row 2 \"Home layout\""), "{sel:?}");
+    pc.keys("BACK");
+    assert!(matches!(pc.app.screen(), Screen::Advanced(_)));
+    assert_eq!(pc.ask(msg::KEY, &[key::KNOB, 0]).0, Status::Invalid as u8, "no steps");
+    assert_eq!(pc.ask(msg::KEY, &[key::KNOB, 21]).0, Status::Invalid as u8, "20 at most");
+}
+
+/// LINK-19, KEY-3, KEY-14: a long press is held to the long-press time and let go by the radio (keys answer
+/// `busy` meanwhile); hold # locks; a locked keypad takes remote keys as it takes the radio's (the toast, nothing
+/// else); down and up hold a key, and a session that moves port lets go of what it held.
+#[test]
+fn remote_long_press_lock_and_hold() {
+    let mut pc = Pc::new(true);
+    assert_eq!(pc.press("HASH", key::LONG).0, 0);
+    assert_eq!(pc.press("MENU", key::SHORT).0, Status::Busy as u8, "the long press is still held");
+    assert!(!pc.app.locked(), "not before 700 ms");
+    pc.pass(800, &LiveAll::default());
+    assert!(pc.app.locked() && pc.ui().contains("state ") && pc.ui().contains(" locked=1"));
+    pc.keys("MENU");
+    assert_eq!(pc.app.screen(), Screen::Home, "KEY-14: locked");
+    assert!(pc.ui().contains("toast \"Locked:\""), "{}", pc.ui());
+    assert_eq!(pc.press("HASH", key::LONG).0, 0);
+    pc.pass(800, &LiveAll::default());
+    assert!(!pc.app.locked());
+    // Down, held past the long press (hold MENU on home: advanced settings, MENU-2), then up.
+    assert_eq!(pc.press("MENU", key::DOWN).0, 0);
+    assert_eq!(pc.press("MENU", key::DOWN).0, 0, "down again: still the one press");
+    pc.pass(800, &LiveAll::default());
+    assert_eq!(pc.press("MENU", key::UP).0, 0);
+    assert!(matches!(pc.app.screen(), Screen::Advanced(_)), "{:?}", pc.app.screen());
+    assert_eq!(pc.press("UP", key::UP).0, 0, "up for a key not held: nothing");
+    // A key held when the session moves port is let go.
+    pc.keys("BACK");
+    assert_eq!(pc.press("VM", key::DOWN).0, 0);
+    assert_ne!(pc.app.remote_keys_held(), 0);
+    pc.link.set_port(true, 115_200);
+    pc.pass(100, &LiveAll::default());
+    assert_eq!(pc.app.remote_keys_held(), 0, "released with the session");
+}
+
+/// LINK-19 (safety): a remote key never keys the transmitter. The PTT codes aren't keys; the dialer's Send, a
+/// PTT path or a message from a remote key is refused with a toast; and while the radio transmits, remote keys
+/// (DTMF digits then) are refused.
+#[test]
+fn remote_keys_never_transmit() {
+    let mut pc = Pc::tx();
+    for c in [24u8, 25, 26] {
+        assert_eq!(pc.ask(msg::KEY, &[c, key::SHORT]).0, Status::BadArg as u8);
+    }
+    pc.keys("MENU 0 8 6 1");
+    assert!(matches!(pc.app.screen(), Screen::Dtmf(_)), "{:?}", pc.app.screen());
+    pc.keys("1 2 3");
+    pc.cmds();
+    pc.keys("MENU"); // Send
+    let c = pc.cmds();
+    assert!(!keyed(&c) && !c.iter().any(|c| matches!(c, RadioCmd::DtmfSeq { .. } | RadioCmd::DtmfSend { .. })), "{c:?}");
+    assert!(pc.ui().contains("toast \"Remote keys\" \"never transmit\""), "{}", pc.ui());
+    // A person's OK on the same dialer sends.
+    pc.key(Key::Menu);
+    assert!(keyed(&pc.cmds()), "the keypad's Send keys");
+    pc.key(Key::Ptt(PTT_A)); // a PTT ends the dialled transmission (TX-25)
+    pc.cmds();
+    // While remote PTT transmits, remote keys (DTMF digits on the Transmit screen) are refused.
+    pc.app.go_home();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    pc.cmds();
+    let (s, why) = pc.press("5", key::SHORT);
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(why.contains("transmitting"), "{why}");
+    assert_eq!(pc.ask(msg::KEY, &[key::KNOB, 1]).0, Status::Invalid as u8);
+    assert!(!pc.cmds().iter().any(|c| matches!(c, RadioCmd::Dtmf { .. })), "no DTMF");
+    assert!(pc.ui().contains("transmit slot=A remote=1"));
+    pc.ptt(Ptt::Off);
+    assert!(!pc.app.remote_in, "never left on");
+}
+
+/// LINK-19, DISP-15: a remote key on a dark screen only wakes it, as the radio's keys do.
+#[test]
+fn remote_key_wakes_first() {
+    let mut pc = Pc::new(true);
+    pc.app.set.backlight = 1;
+    pc.app.backlight_out();
+    pc.pass(100, &LiveAll::default());
+    assert!(pc.app.dark());
+    assert!(pc.ui().contains(" dark=1"));
+    pc.keys("MENU");
+    assert_eq!(pc.app.screen(), Screen::Home, "woken, nothing else");
+    assert!(!pc.app.dark());
+    pc.keys("MENU");
+    assert!(matches!(pc.app.screen(), Screen::Quick(_)));
+}
+
+/// LINK-19, TERM-37: the readback's lines on several screens: the screen line first, the hints last, the status
+/// bar, a value editor and a question; long ones page over `MORE`, the same text as the terminal's `ui`; the
+/// terminal's `key` and `knob`.
+#[test]
+fn ui_readback_screens() {
+    let mut pc = Pc::new(true);
+    let ui = pc.ui();
+    let lines: Vec<_> = ui.lines().collect();
+    assert!(lines[0].starts_with("screen Home") && lines[1].starts_with("state frame=") && lines[2].starts_with("bar lock=0"));
+    assert!(lines.last().unwrap().starts_with("hints \"SLOT\""), "{ui}");
+    assert!(lines[3].starts_with("card A active=1 head=\"VFO") && lines[3].contains(" freq=146.52000 "), "{ui}");
+    assert!(ui.len() > MAX_PAYLOAD, "home is longer than one answer, so it pages");
+    let mut term = std::string::String::new();
+    let mut l = crate::term::cmd::Line::new();
+    let mut i = 0;
+    while crate::term::cmd::list_line(&pc.app, &pc.st, &pc.dev, &LiveAll::default(), crate::term::cmd::List::Ui, i, &mut l) {
+        term.push_str(text(l.as_bytes()));
+        term.push('\n');
+        i += 1;
+    }
+    assert_eq!(term, ui, "the terminal's ui is the same text");
+    // A value editor (MENU 1 OK: squelch).
+    pc.keys("MENU OK");
+    let ui = pc.ui();
+    assert!(ui.starts_with("screen Value") && ui.contains("value \"Squelch\" \""), "{ui}");
+    // A question: the zones list's delete asks; here the reset (MENU 0 9 8 2).
+    pc.app.go_home();
+    pc.keys("MENU 0 9 8 2");
+    let ui = pc.ui();
+    assert!(ui.starts_with("screen Confirm") && ui.contains("ask \"Reset the radio?\""), "{ui}");
+    assert!(ui.contains("hints \"OK\" \"Next\" \"BACK\" \"Cancel\""), "{ui}");
+    pc.keys("BACK");
+    pc.app.go_home();
+    // The terminal's commands do the same (here over CMD, LINK-34).
+    assert!(pc.cmd("ui").unwrap().starts_with("screen Home"));
+    assert!(pc.cmd("ui keys").unwrap().contains("MENU 6 OK\n"));
+    assert_eq!(pc.cmd("key back long").unwrap(), "key BACK long\n");
+    pc.pass(800, &LiveAll::default());
+    assert!(pc.cmd("key PTT").is_err());
+    assert_eq!(pc.cmd("knob +3").unwrap(), "knob +3\n");
+    assert!(pc.cmd("knob 0").is_err() && pc.cmd("knob -21").is_err());
 }

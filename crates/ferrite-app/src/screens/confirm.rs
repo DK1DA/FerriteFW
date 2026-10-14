@@ -56,7 +56,7 @@ pub fn ask(app: &mut App, ask: Ask) {
 }
 
 /// Title, what goes, what stays (PIN-7: what will be cleared and what is kept).
-fn words(ask: Ask) -> (&'static str, &'static str, &'static str, &'static str) {
+pub(crate) fn words(ask: Ask) -> (&'static str, &'static str, &'static str, &'static str) {
     match ask {
         Ask::Reset { armed } => (
             if armed { "Hold # for 3 s to reset" } else { "Reset the radio?" },

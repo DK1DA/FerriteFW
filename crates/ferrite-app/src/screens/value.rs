@@ -34,7 +34,7 @@ impl Value {
 }
 
 /// The setting's value index on the active slot (or radio-wide), and how many values it has.
-fn cur(app: &App, item: Item) -> (i32, i32) {
+pub(crate) fn cur(app: &App, item: Item) -> (i32, i32) {
     match item {
         Item::Watch => (app.watch as i32, 3),
         Item::BatterySave => (app.bsave as i32, 4),
@@ -43,7 +43,7 @@ fn cur(app: &App, item: Item) -> (i32, i32) {
 }
 
 /// Value i of the setting, as text (long form).
-fn text_of(app: &App, item: Item, i: i32, b: &mut Buf<16>) {
+pub(crate) fn text_of(app: &App, item: Item, i: i32, b: &mut Buf<16>) {
     b.clear();
     match item {
         Item::Watch => b.set(WATCH_TEXT[i as usize % 3].as_bytes()),

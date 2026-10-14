@@ -15,6 +15,9 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT term "LINE" ["LINE" ...]   # terminal command lines over the link (LINK-34)
     python3 tools/ferrite_link.py PORT slot [A|B|C]             # a slot's working fields (LINK-33)
     python3 tools/ferrite_link.py PORT key [--seconds N] [--slot active|a|b|c]   # remote PTT (LINK-20)
+    python3 tools/ferrite_link.py PORT keys "MENU 0 8 2 1 OK" [--long]   # remote keys (LINK-19); NAME:long|down|up
+    python3 tools/ferrite_link.py PORT knob +3                    # knob steps (LINK-19)
+    python3 tools/ferrite_link.py PORT ui [keys]                  # what the screen shows (LINK-19's readback)
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
 
 PORT is a serial device (the programming cable, 115200 8N1), or tcp:HOST:PORT for the simulator:
@@ -37,6 +40,21 @@ every 0.5 s (the radio unkeys after 2 s without one) and KEY off after --seconds
 A refusal prints the radio's reason. On the cable a `tx` build sends nothing while keyed (TX-43): the answers wait on
 the radio and arrive after the unkey, so this tool doesn't wait for them while keyed (a `tx-dry` build answers at
 once). A PTT pressed on the radio ends the remote transmission (the radio's operator wins).
+
+`keys` and `knob` (LINK-19) press the keypad, the side keys and the knob as a person would: the same path as the
+keys (long press, lights, wake, lock). Names: MENU (OK), BACK (EXIT), UP, DOWN, LEFT, RIGHT, SLOT (ABC), VM, 0-9,
+STAR (*), HASH (#), SIDE1 (PF1), SIDE2 (PF2); `ui keys` lists them with their stock codes. A key is a short press,
+NAME:long a long one (held 750 ms), NAME:down / NAME:up hold and let go. Never the PTTs: a remote key never transmits.
+`ui` prints what the screen shows (the screen, status bar, home cards or list rows, hints, toast).
+
+As a library (the test runner's):
+
+    from ferrite_link import Radio
+    with Radio("tcp:127.0.0.1:7300") as r:      # or "/dev/cu.usbserial-114220", pin="1234" on Bluetooth
+        r.keys("MENU 0 7")                      # or r.press("MENU"), r.press("HASH", long=True)
+        r.knob(+2)
+        ui = r.ui()                             # {"screen": {...}, "rows": [...], "sel": {...}, "hints": [...]}
+        assert ui["screen"]["id"] == "Group" and ui["sel"]["name"] == "Theme"
 """
 import argparse
 import socket
@@ -45,12 +63,19 @@ import sys
 import time
 
 PROTOCOL = 2
-HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD, MORE = (
-    0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32)
+HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD, MORE, UI = (
+    0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32, 0x33)
 SETTINGS, CHANNEL, ZONE, PRESET = 1, 2, 3, 4
 # KEY's remote PTT (Appendix G): key 0x80, then the action (0 off, 1 on + slot, 2 keepalive); slot 0xFF: the active one
 PTT, PTT_OFF, PTT_ON, PTT_ALIVE, ACTIVE = 0x80, 0, 1, 2, 0xFF
 SLOTS = {"active": ACTIVE, "a": 0, "b": 1, "c": 2}
+# KEY's keypad (LINK-19): stock's key code, then the action (0 up, 1 down, 2 short, 3 long); 0x81 the knob + i8 steps
+KEY_UP, KEY_DOWN, KEY_SHORT, KEY_LONG, KNOB = 0, 1, 2, 3, 0x81
+LONG_HOLD = 0.75  # the radio lets a remote long press go 750 ms after it went down
+KEY_CODES = {"MENU": 6, "OK": 6, "BACK": 9, "EXIT": 9, "UP": 7, "DOWN": 8, "LEFT": 4, "RIGHT": 5, "SLOT": 3,
+             "ABC": 3, "VM": 2, "V/M": 2, "0": 17, "1": 10, "2": 11, "3": 12, "4": 14, "5": 15, "6": 16, "7": 18,
+             "8": 19, "9": 20, "STAR": 13, "*": 13, "HASH": 21, "#": 21, "SIDE1": 0, "PF1": 0, "SIDE2": 1, "PF2": 1}
+ACTIONS = {"short": KEY_SHORT, "long": KEY_LONG, "down": KEY_DOWN, "up": KEY_UP}
 STATUS = ["ok", "bad frame", "unknown type", "bad argument", "refused", "not authorised (send AUTH: --pin)",
           "pending (asking on the radio)", "busy", "not found", "invalid", "cancelled"]
 MODES = ["FM", "NFM", "AM"]
@@ -254,6 +279,182 @@ def remote_ptt(link, seconds, slot):
     return 1 if ended else 0
 
 
+class RadioError(Exception):
+    """The radio refused a request: `status` (STATUS's index) and its reason."""
+
+    def __init__(self, status, rest=b""):
+        self.status = status
+        super().__init__(why(status, rest))
+
+
+def key_code(name):
+    try:
+        return KEY_CODES[name.upper()]
+    except KeyError:
+        raise ValueError(f"no key {name!r}: {', '.join(sorted(set(KEY_CODES)))}") from None
+
+
+def parse_ui_line(line):
+    """One `ui` line: (kind, [positional strings], {key: value}). Strings are in double quotes with \" and \\."""
+    pos, kv, i, n = [], {}, 0, len(line)
+
+    def quoted(i):
+        out, i = [], i + 1
+        while i < n and line[i] != '"':
+            if line[i] == "\\" and i + 1 < n:
+                i += 1
+            out.append(line[i])
+            i += 1
+        return "".join(out), i + 1
+
+    while i < n:
+        if line[i] == " ":
+            i += 1
+        elif line[i] == '"':
+            v, i = quoted(i)
+            pos.append(v)
+        else:
+            j = i
+            while j < n and line[j] not in ' ="':
+                j += 1
+            word = line[i:j]
+            if j < n and line[j] == "=":
+                if j + 1 < n and line[j + 1] == '"':
+                    v, i = quoted(j + 1)
+                else:
+                    k = j + 1
+                    while k < n and line[k] != " ":
+                        k += 1
+                    v, i = line[j + 1:k], k
+                kv[word] = int(v) if v.lstrip("-").isdigit() else v
+            else:
+                pos.append(word)
+                i = j
+    return (pos[0] if pos else ""), pos[1:], kv
+
+
+def parse_ui(text):
+    """`ui`'s lines as a dict: screen, state, bar, toast/popup, qmenu, cards, rows (and sel, the selected row),
+    help, hints and the screen's own lines (value, ask, entry, ...) under their first word; `lines` is the text."""
+    ui = {"lines": text.splitlines(), "cards": [], "rows": [], "qmenu": [], "toast": None, "popup": None, "sel": None,
+          "hints": []}
+    for line in ui["lines"]:
+        kind, pos, kv = parse_ui_line(line)
+        if kind == "screen":
+            ui["screen"] = {"id": pos[0] if pos else "", "name": pos[1] if len(pos) > 1 else "", **kv}
+        elif kind == "card":
+            ui["cards"].append({"slot": pos[0] if pos else "", **kv})
+        elif kind == "row":
+            num, rest = (int(pos[0]), pos[1:]) if pos and pos[0].isdigit() else (None, pos)
+            r = {"num": num, "name": rest[0] if rest else "", "value": rest[1] if len(rest) > 1 else "",
+                 "sel": "sel" in rest[2:], "dot": "dot" in rest[2:], "grey": "grey" in rest[2:]}
+            ui["rows"].append(r)
+            if r["sel"]:
+                ui["sel"] = r
+        elif kind in ("toast", "popup"):
+            ui[kind] = {"head": pos[0] if pos else "", "body": pos[1] if len(pos) > 1 else ""}
+        elif kind == "qmenu":
+            ui["qmenu"].append(pos)
+        elif kind == "hints":
+            ui["hints"] = list(zip(pos[0::2], pos[1::2]))
+        elif kind:
+            ui[kind] = {"args": pos, **kv} if pos or not kv else kv
+    return ui
+
+
+class Radio:
+    """The link as a test runner uses it (LINK-19): press keys, turn the knob, read the screen back.
+
+    `port` is a serial device (the cable or a Bluetooth serial port) or tcp:HOST:PORT for the simulator."""
+
+    def __init__(self, port, pin=None, name=b"ferrite_link.py"):
+        self.port = Port(port)
+        self.link = Link(self.port)
+        hello = self.link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + name)
+        if not hello[2]:
+            if not pin:
+                raise RadioError(5)
+            self._ok(AUTH, pin.encode("ascii"))
+        self.build = build_name(text(hello[3:])[1])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self):
+        self.port.close()
+
+    def _ok(self, ty, payload=b"", busy_s=3.0):
+        """A request, again while the radio answers `busy` (a long press still held, the store writing)."""
+        end = time.time() + busy_s
+        while True:
+            s, rest = self.link.ask(ty, payload)
+            if s == 0:
+                return rest
+            if s != 7 or time.time() > end:
+                raise RadioError(s, rest)
+            time.sleep(0.05)
+
+    def _key(self, name, action):
+        self._ok(KEY, bytes([key_code(name), action]))
+
+    def press(self, name, long=False):
+        """A short press, or a long one (held 750 ms: the call returns once it has been let go)."""
+        self._key(name, KEY_LONG if long else KEY_SHORT)
+        if long:
+            time.sleep(LONG_HOLD + 0.05)
+
+    def down(self, name):
+        self._key(name, KEY_DOWN)
+
+    def up(self, name):
+        self._key(name, KEY_UP)
+
+    def keys(self, seq, long=False):
+        """Several keys: "MENU 0 8 2 1 OK"; a word NAME:long, NAME:down or NAME:up says how (short by default)."""
+        for word in seq.split():
+            name, _, how = word.partition(":")
+            how = how.lower() or ("long" if long else "short")
+            if how not in ACTIONS:
+                raise ValueError(f"{word}: :long, :down or :up")
+            if how in ("short", "long"):
+                self.press(name, long=how == "long")
+            else:
+                self._key(name, ACTIONS[how])
+
+    def knob(self, steps):
+        """Knob steps, + clockwise; more than 20 go in several requests."""
+        while steps:
+            n = max(-20, min(20, steps))
+            self._ok(KEY, bytes([KNOB, n & 0xFF]))
+            steps -= n
+
+    def ui_text(self, what=0):
+        """What the screen shows, as the radio's text (0 the state, 1 the key names)."""
+        out, rest = [], self._ok(UI, bytes([what]))
+        while True:
+            out.append(rest[1:].decode("utf-8", "replace"))
+            if rest[0] == 0:
+                return "".join(out)
+            rest = self._ok(MORE)
+
+    def ui(self):
+        return parse_ui(self.ui_text())
+
+    def cmd(self, line):
+        """A terminal command line (LINK-34); its output."""
+        out, rest = [], self._ok(CMD, line.encode("ascii"))
+        while True:
+            out.append(rest[1:].decode("utf-8", "replace"))
+            if rest[0] == 0:
+                return "".join(out)
+            if len(rest) == 1:
+                time.sleep(0.05)
+            rest = self._ok(MORE)
+
+
 def text(b):
     n = b[0]
     return b[1:1 + n].decode("ascii", "replace"), b[1 + n:]
@@ -276,6 +477,7 @@ def main():
     ap.add_argument("--slot", choices=sorted(SLOTS), default="active",
                     help="key: the active slot (PTT A), b (PTT B), or a/c only while active")
     ap.add_argument("--pin", help="the radio's PIN, for Bluetooth while a PIN lock is on (LINK-30)")
+    ap.add_argument("--long", action="store_true", help="keys: every key a long press")
     a = ap.parse_args()
     port = Port(a.port)
     try:
@@ -297,6 +499,20 @@ def run(link, a):
         link.ok(AUTH, a.pin.encode("ascii"))
     if a.cmd == "key":
         return remote_ptt(link, a.seconds, a.slot)
+    if a.cmd in ("keys", "knob", "ui"):
+        r = Radio.__new__(Radio)  # this session, already past HELLO and AUTH
+        r.port, r.link = link.p, link
+        try:
+            if a.cmd == "keys":
+                r.keys(" ".join(a.args), long=a.long)
+            elif a.cmd == "knob":
+                r.knob(int(a.args[0]))
+            else:
+                sys.stdout.write(r.ui_text(1 if a.args[:1] == ["keys"] else 0))
+        except RadioError as e:
+            print(f"{a.cmd}: {e}")
+            return 1
+        return 0
     if a.cmd == "term":
         bad = 0
         for line in a.args:
@@ -306,7 +522,7 @@ def run(link, a):
                     print(f"{line}: {why(status, rest)}")
                     bad = 1
                     break
-                sys.stdout.write(rest[1:].decode("ascii", "replace"))
+                sys.stdout.write(rest[1:].decode("utf-8", "replace"))
                 if rest[0] == 0:
                     break
                 if len(rest) == 1:

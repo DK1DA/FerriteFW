@@ -367,6 +367,16 @@ impl Screen {
 impl App {
     /// Draws what changed since the last call: the status bar, the screen, then the hint bar or a toast.
     pub fn render(&mut self, lcd: &mut impl Panel, live: &LiveAll, dev: &Device, store: &impl ChannelStore) {
+        // LINK-19's readback counts the redraws that changed something (what was drawn, as the regions record it).
+        let before = (self.drawn.screen, self.drawn.sbar, self.drawn.hash, self.drawn.meter, self.toast.is_some());
+        self.render_all(lcd, live, dev, store);
+        if before != (self.drawn.screen, self.drawn.sbar, self.drawn.hash, self.drawn.meter, self.toast.is_some()) {
+            self.frames = self.frames.wrapping_add(1);
+            self.drawn_at = self.now;
+        }
+    }
+
+    fn render_all(&mut self, lcd: &mut impl Panel, live: &LiveAll, dev: &Device, store: &impl ChannelStore) {
         if ferrite_ui::theme::get() != self.set.theme {
             // 0 7 1 changed (or the settings were loaded): everything again, in the new colours.
             ferrite_ui::theme::set(self.set.theme);

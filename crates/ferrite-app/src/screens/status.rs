@@ -235,7 +235,7 @@ const GO: [Go; 21] = [
     Go::Open(Dest::Mailbox),
 ];
 
-const PAGE: Table<()> = Table { rows: &ROWS, go: &GO, y: 20, h: 18, style: w::KV_STATUS };
+pub(crate) const PAGE: Table<()> = Table { rows: &ROWS, go: &GO, y: 20, h: 18, style: w::KV_STATUS };
 
 impl View for Status {
     fn name(self) -> &'static str {

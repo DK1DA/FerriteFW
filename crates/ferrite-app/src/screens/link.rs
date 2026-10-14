@@ -73,7 +73,7 @@ const ROWS: [(&str, Val<()>); 5] = [
     }),
 ];
 
-const STATUS: Table<()> = Table { rows: &ROWS, go: &[], y: 22, h: 20, style: w::KV_STATUS };
+pub(crate) const STATUS: Table<()> = Table { rows: &ROWS, go: &[], y: 22, h: 20, style: w::KV_STATUS };
 
 impl Link {
     pub fn new(page: LinkPage) -> Self {

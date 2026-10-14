@@ -220,3 +220,185 @@ impl App {
         cut
     }
 }
+
+// ---- Remote keys (LINK-19) ----
+
+/// A remote keypad press (LINK-19, Appendix G's `KEY` actions [`key::UP`] to [`key::LONG`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Press {
+    Up,
+    Down,
+    Short,
+    Long,
+}
+
+impl Press {
+    /// From `KEY`'s action byte.
+    pub fn of(action: u8) -> Option<Press> {
+        Some(match action {
+            key::UP => Press::Up,
+            key::DOWN => Press::Down,
+            key::SHORT => Press::Short,
+            key::LONG => Press::Long,
+            _ => return None,
+        })
+    }
+}
+
+/// Why a remote key isn't pressed: the link answers `busy` or `invalid` with the text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyRefusal {
+    /// A remote long press is still held: try again shortly (`busy`).
+    Busy,
+    /// `invalid`, and why.
+    Invalid(&'static str),
+}
+
+impl KeyRefusal {
+    pub fn text(self) -> &'static str {
+        match self {
+            KeyRefusal::Busy => "busy: a long press is still held",
+            KeyRefusal::Invalid(t) => t,
+        }
+    }
+}
+
+/// A keypad or side key's stock code (0-21), the way back from [`Key`]. None for the PTTs.
+pub fn code_of(k: Key) -> Option<u8> {
+    (0..=key::LAST_CODE).find(|&c| ferrite_core::keys::key(c) == Some(k))
+}
+
+/// The remote keys held now and the long press in progress (LINK-19). Kept by the App, so the long press is let go
+/// on time by its own tick and every key event is known as remote or local.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RemoteKeys {
+    /// Codes held by the link, a bit each.
+    held: u32,
+    /// The long press: its code, and when it is let go.
+    long: Option<(u8, u32)>,
+    /// When the last remote key went down (a key held [`key::HOLD_MAX_MS`] is let go).
+    since: u32,
+}
+
+impl App {
+    /// LINK-19: a keypad or side key from the link (stock's `code`), through the same path as the keypad
+    /// ([`App::key_down`], [`App::key_up`], the long press, the lights, the wake and the lock). A remote key never
+    /// transmits: it is refused while the radio transmits (DTMF and the tone burst are keys then), and any
+    /// transmission it would start (PTT's paths, the dialer, a message, a beacon, the repeater) is refused while
+    /// it is handled ([`App::remote_tx_refused`]). The PTTs are not keys here (LINK-20 is remote PTT).
+    pub fn remote_press(&mut self, code: u8, how: Press, now: u32, store: &impl ChannelStore) -> Result<(), KeyRefusal> {
+        let k = match ferrite_core::keys::key(code) {
+            Some(k) if code <= key::LAST_CODE && !matches!(k, Key::Ptt(_)) => k,
+            _ => return Err(KeyRefusal::Invalid("no such key: stock key codes 0-21")),
+        };
+        let bit = 1u32 << code;
+        if how == Press::Up {
+            if self.rkeys.held & bit != 0 {
+                self.remote_up(code, now, store);
+            }
+            return Ok(()); // a key the link doesn't hold: nothing (never a person's key)
+        }
+        if self.rkeys.long.is_some() {
+            return Err(KeyRefusal::Busy);
+        }
+        if self.radio.keyed.is_some() {
+            return Err(KeyRefusal::Invalid("transmitting: remote keys wait for the unkey"));
+        }
+        if self.rkeys.held & bit != 0 {
+            return match how {
+                Press::Down => Ok(()),
+                _ => Err(KeyRefusal::Invalid("held: send up first")),
+            };
+        }
+        if self.keys.is_held(k) {
+            return Err(KeyRefusal::Invalid("held on the radio"));
+        }
+        self.rkeys.held |= bit;
+        self.rkeys.since = now;
+        self.remote_in = true;
+        self.key_down(k, now, store);
+        self.remote_in = false;
+        match how {
+            Press::Short => self.remote_up(code, now, store),
+            Press::Long => self.rkeys.long = Some((code, now.wrapping_add(key::LONG_HOLD_MS))),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// LINK-19: knob steps from the link, one click at a time as the encoder gives them ([`App::knob`]).
+    pub fn remote_knob(&mut self, steps: i8, now: u32, store: &impl ChannelStore) -> Result<(), KeyRefusal> {
+        if steps == 0 || steps.unsigned_abs() > key::KNOB_MAX as u8 {
+            return Err(KeyRefusal::Invalid("knob: 1 to 20 steps either way"));
+        }
+        if self.rkeys.long.is_some() {
+            return Err(KeyRefusal::Busy);
+        }
+        if self.radio.keyed.is_some() {
+            return Err(KeyRefusal::Invalid("transmitting: remote keys wait for the unkey"));
+        }
+        self.remote_in = true;
+        for _ in 0..steps.unsigned_abs() {
+            self.knob(steps.signum(), now, store);
+        }
+        self.remote_in = false;
+        Ok(())
+    }
+
+    /// The keys the link holds now, a bit per stock code.
+    pub fn remote_keys_held(&self) -> u32 {
+        self.rkeys.held
+    }
+
+    /// A remote long press still held: the link answers `busy` to keys until it is let go.
+    pub fn remote_key_busy(&self) -> bool {
+        self.rkeys.long.is_some()
+    }
+
+    /// Every key the link holds, let go (the session closed or moved port).
+    pub fn remote_keys_release(&mut self, now: u32, store: &impl ChannelStore) {
+        while self.rkeys.held != 0 {
+            let code = self.rkeys.held.trailing_zeros() as u8;
+            self.remote_up(code, now, store);
+        }
+    }
+
+    /// Every tick: a long press let go on time, and a key held too long let go.
+    pub(crate) fn remote_keys_tick(&mut self, now: u32, store: &impl ChannelStore) {
+        if let Some((code, at)) = self.rkeys.long {
+            if now.wrapping_sub(at) as i32 >= 0 {
+                self.remote_up(code, now, store);
+            }
+        }
+        if self.rkeys.held != 0 && now.wrapping_sub(self.rkeys.since) >= key::HOLD_MAX_MS {
+            self.remote_keys_release(now, store);
+        }
+    }
+
+    fn remote_up(&mut self, code: u8, now: u32, store: &impl ChannelStore) {
+        self.rkeys.held &= !(1 << code);
+        if self.rkeys.long.is_some_and(|(c, _)| c == code) {
+            self.rkeys.long = None;
+        }
+        if let Some(k) = ferrite_core::keys::key(code) {
+            self.remote_in = true;
+            self.key_up(k, now, store);
+            self.remote_in = false;
+        }
+    }
+
+    /// A key event from the tracker (a long press, a repeat) is a remote key's.
+    pub(crate) fn remote_held(&self, k: Key) -> bool {
+        code_of(k).is_some_and(|c| self.rkeys.held & 1 << c != 0)
+    }
+
+    /// LINK-19: a remote key is being handled and would start a transmission: refused, with a toast. Every
+    /// key-up a key can make (PTT's, the dialer's, a message sent, a beacon now, the crossband repeater) asks
+    /// this first.
+    pub(crate) fn remote_tx_refused(&mut self) -> bool {
+        if self.remote_in {
+            self.show_toast(b"Remote keys", b"never transmit", false);
+        }
+        self.remote_in
+    }
+}

@@ -90,7 +90,7 @@ pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
 
 /// PTT down for a slot (KEY-7): home first, then refuse, prompt (emergency) or key.
 pub fn ptt(app: &mut App, slot: u8) {
-    if app.qmenu.is_some() {
+    if app.qmenu.is_some() || app.remote_tx_refused() {
         return; // HOME-17 (safety): never while the quick menu is up (its PTTs never get here: the last check)
     }
     if app.radio.mode != super::activity::Mode::Xb {
@@ -111,6 +111,9 @@ pub fn ptt(app: &mut App, slot: u8) {
 /// Radio task waits the first digit delay, sends each digit (DTMF-3) and says so, and the Transmit screen unkeys.
 /// Not on an emergency frequency (its second-PTT prompt is for a person talking). True when it keyed.
 pub fn dial(app: &mut App, slot: u8, keys: &[u8]) -> bool {
+    if app.remote_tx_refused() {
+        return false; // LINK-19: the dialer's Send from a remote key
+    }
     if let Some(r) = ptt_refusal(app, slot) {
         refuse(app, slot, r);
         return false;
@@ -149,6 +152,10 @@ fn key_as(app: &mut App, slot: u8, confirmed: bool) {
     // HOME-17 (safety): nothing keys while the quick menu is up. Its PTTs never get this far and the side
     // connector's closes it first; this is the last check before the one key-up command.
     if app.qmenu.is_some() {
+        return;
+    }
+    // LINK-19 (safety): nothing a remote key does keys the transmitter; the last check before the key-up too.
+    if app.remote_tx_refused() {
         return;
     }
     if let Some(r) = ptt_refusal(app, slot) {
@@ -197,7 +204,7 @@ pub fn auto_tx(app: &mut App, slot: u8, what: &[u8]) -> bool {
 /// True when it was asked for; the Radio task may still refuse ([`ferrite_core::msg::TxLive`]), and the caller
 /// unkeys with [`data_unkey`] once the frame is out.
 pub fn data_key(app: &mut App, slot: u8, power: u8, what: &[u8]) -> bool {
-    if !auto_tx(app, slot, what) {
+    if app.remote_tx_refused() || !auto_tx(app, slot, what) {
         return false;
     }
     let region = txplan::Region::ALL.iter().position(|&r| r == app.set.tx_region()).unwrap_or(0) as u8;

@@ -1865,7 +1865,7 @@ fn settings_golden() {
         let _ = writeln!(out, "-- changed");
         let mut i = 0;
         let mut l = cmd::Line::new();
-        while cmd::list_line(&r.app, &r.store, &r.dev, cmd::List::Changed, i, &mut l) {
+        while cmd::list_line(&r.app, &r.store, &r.dev, &ferrite_core::msg::LiveAll::default(), cmd::List::Changed, i, &mut l) {
             let _ = writeln!(out, "{}", String::from_utf8_lossy(l.as_bytes()));
             i += 1;
         }

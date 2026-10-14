@@ -136,8 +136,9 @@ fn ram_is_small() {
     // 12 with its Option), the PTTs it holds dead, the theme before night red and its repaint flag, 24 with
     // padding, to 1336; remote PTT (LINK-20: the transmission, its keepalive and why it ended, the local PTTs held
     // and cut), 16 with padding, to 1352; a remote key-up's release as a cut (LINK-20, TX-47: a byte), 8 with
-    // padding, to 1360
-    assert!(n <= 1360, "App is {n} bytes");
+    // padding, to 1360; remote keys (LINK-19: the keys the link holds, its long press and when the last went
+    // down, 16 with its Option) and the readback's redraw count and time (8), to 1384
+    assert!(n <= 1384, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

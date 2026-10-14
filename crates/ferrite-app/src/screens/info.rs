@@ -45,12 +45,12 @@ pub struct Info {
     pub page: Page,
 }
 
-type InfoRow = (&'static str, Val<()>);
+pub(crate) type InfoRow = (&'static str, Val<()>);
 
 /// A page: status-bar name, rows, the note at the foot, hints.
-struct PageDef {
-    title: &'static str,
-    rows: &'static [InfoRow],
+pub(crate) struct PageDef {
+    pub title: &'static str,
+    pub rows: &'static [InfoRow],
     note: &'static str,
     hints: &'static [(&'static str, &'static str)],
 }
@@ -220,7 +220,7 @@ const CYCLE: [Page; 7] = [
 
 const BACK_ONLY: [(&str, &str); 1] = [("BACK", "Back")];
 
-fn def(p: Page) -> PageDef {
+pub(crate) fn def(p: Page) -> PageDef {
     match p {
         Page::About => PageDef {
             title: "About",
@@ -280,7 +280,7 @@ fn def(p: Page) -> PageDef {
 }
 
 /// Pages that are a message, not rows: heading, text lines, colour.
-fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'static str, &'static str, u16)> {
+pub(crate) fn message(p: Page, dev: &Device, b: &mut Buf<40>) -> Option<(&'static str, &'static str, u16)> {
     Some(match p {
         Page::SsbConfirm => (
             "Unknown SSB patch",

@@ -121,17 +121,7 @@ impl View for Quick {
             lcd.fill(0, 40, 240, 1, LINE);
         }
         for (i, item) in QUICK.into_iter().enumerate() {
-            let mut v = Buf::<32>::new();
-            let mut t = Buf::<16>::new();
-            app.item_text(item, true, &mut t);
-            v.set(t.as_bytes());
-            if item == Item::Tones && heard(app) != 0 {
-                // TSRCH-16: "T 100.0, heard 88.5"
-                let mut h = Buf::<16>::new();
-                super::shared::heard_text(heard(app), &mut h);
-                v.push(b", heard");
-                v.push(&h.as_bytes()[5..]);
-            }
+            let v = row_value(app, item);
             let r = Row {
                 num: Some(((i + 1) % 10) as u8),
                 name: item.name().as_bytes(),
@@ -168,6 +158,27 @@ impl View for Quick {
             Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("BACK", "Back")])
         }
     }
+}
+
+/// A row's value as drawn (the UI readback reads it too, LINK-19).
+pub(crate) fn row_value(app: &App, item: Item) -> Buf<32> {
+    let mut v = Buf::<32>::new();
+    let mut t = Buf::<16>::new();
+    app.item_text(item, true, &mut t);
+    v.set(t.as_bytes());
+    if item == Item::Tones && heard(app) != 0 {
+        // TSRCH-16: "T 100.0, heard 88.5"
+        let mut h = Buf::<16>::new();
+        super::shared::heard_text(heard(app), &mut h);
+        v.push(b", heard");
+        v.push(&h.as_bytes()[5..]);
+    }
+    v
+}
+
+/// The active slot is in the broadcast band: quick settings are FM's (the readback says so).
+pub(crate) fn fm_rows(app: &App) -> bool {
+    bcast(app)
 }
 
 /// FM's rows on a broadcast slot (BCR-28), then "0 Advanced".
