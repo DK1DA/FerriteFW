@@ -1,0 +1,252 @@
+//! Transmit (the `tx` build).
+
+use super::*;
+
+/// The `tx` build's transmit side (manual chapter 15).
+#[cfg(feature = "tx")]
+impl Radio {
+    /// TX-42: every PTT input (PTT A PE3, PTT B PE2, the connector's PE6; low when pressed) has read released
+    /// since boot.
+    fn ptt_seen_released(&mut self) -> bool {
+        use crate::board::{KEY_PTT, KEY_SIDE1, KEY_SIDE2};
+        let was = self.tx.ptt.seen(false);
+        let ok = self.tx.ptt.seen(KEY_PTT.read() && KEY_SIDE1.read() && KEY_SIDE2.read()); // `ferrite_radio::ptt`
+        if ok && !was {
+            log(b"ptt released since boot", 0);
+        }
+        ok
+    }
+
+    /// The battery for transmit (PWR-20): the PA1 reading against the calibration's gauge.
+    pub(super) fn battery_ok(&mut self) -> bool {
+        use crate::hal::adc;
+        if !self.tx.adc {
+            adc::init();
+            self.tx.adc = true;
+        }
+        self.tx.gauge.tx_ok(adc::read(adc::CH_PA1))
+    }
+
+    /// `Act::ChipTx`: the chip already holds the TX frequency and tone; key it with the microphone and read back
+    /// REG_30, the frequency, REG_3B and REG_36 before the PA (TX-7, decision 97), with stock's REG_36 for the level
+    /// ({0x7F, 0x57, 0x57}[level], `analysis/calibration.md`).
+    pub(super) fn key_chip(&mut self, n: u8) -> bool {
+        if !self.has(n) {
+            return false;
+        }
+        // The frequency both key-up paths wrote just before the plan ran (`transmit`, `xb_key`).
+        let Some((_, freq)) = self.tuned[n as usize] else {
+            return false;
+        };
+        let high = self.tx.data.unwrap_or(self.tx.power[self.live.tx.slot as usize % 4]) == 2;
+        let want = radio_chip::TxExpect { freq, reg3b: self.tx.reg3b[n as usize] };
+        match radio_chip::key_mic(&mut self.chip(n), high, &want) {
+            Ok(()) => true,
+            Err(r) => {
+                log(b"tx read-back wrong, register ", r as u32);
+                false
+            }
+        }
+    }
+
+    /// Key up or unkey a slot (3 = HF mode's frequency); `data`: a data key-up at that power level (APRS).
+    pub(super) async fn transmit(&mut self, slot: u8, on: bool, data: Option<u8>) {
+        let now = now_ms() as u32;
+        let mut st = Steps::default();
+        if !on {
+            let cfg = self.tx_cfg();
+            self.tx.seq.release(&cfg, &mut self.path, now, &mut st);
+            self.run(&st).await;
+            self.unkeyed();
+            return;
+        }
+        if let Some(c) = crate::chan::TX_CAL.try_take() {
+            (self.tx.cal, self.tx.gauge) = c;
+        }
+        let Some((f, region, extend)) = self.tx.plan.take() else {
+            return self.refuse(slot, Refusal::Locked);
+        };
+        if !self.ptt_seen_released() {
+            return self.refuse(slot, Refusal::ReleasePtt);
+        }
+        let s = slot as usize % 4;
+        let rx = if slot < SLOTS as u8 { self.slots[s].freq } else { f };
+        self.tx.data = data;
+        let req = Req {
+            tx: f,
+            rx,
+            kind: if data.is_some() { TxKind::Data } else { TxKind::Voice },
+            person: data.is_none(),
+            confirmed: true, // the UI asked for the emergency prompt's second PTT before this (TX-3)
+            am: slot < SLOTS as u8 && self.slots[s].am,
+            region,
+            extend,
+            cal_ok: self.tx.cal.is_some(),
+            cal_window: self.tx.cal.is_some_and(|c| c.in_window(f)),
+            batt_ok: self.battery_ok(),
+            power: data.unwrap_or(self.tx.power[s]).min(2),
+        };
+        if let Err(r) = self.tx.seq.check(&req, &self.path, now) {
+            return self.refuse(slot, r);
+        }
+        // The chip for the TX frequency: tuned there with the slot's tone, before the plan keys it.
+        let n = Sel::tx(f).chip();
+        if !self.has(n) {
+            return self.refuse(slot, Refusal::Locked);
+        }
+        speaker(false);
+        // PWR-4: no Battery Save sleep from here on; decision 111: the other chip sleeps while keyed, unless a kept
+        // slot (APRS mode's C) has it. The receive tick wakes what it needs after the unkey.
+        let a = self.save.activity(now_ms());
+        self.apply(a).await;
+        let kept = self.kept();
+        if !self.tuned[n as usize ^ 1].is_some_and(|(s, _)| (s as usize) < SLOTS && kept & 1 << s != 0) {
+            self.tune_chip(n ^ 1, None).await;
+        }
+        self.tuned[n as usize] = Some((slot, f)); // not the receive frequency: retuned after the unkey
+        self.ldo_on(n);
+        let tone = self.tx.tone[s];
+        // The keyed slot's bandwidth (HF mode's NFM is its mode 1).
+        let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
+        radio_chip::tx_setup(&mut self.chip(n), f, narrow, tone);
+        self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, req.power));
+        self.tx.fault = false;
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
+        (self.tx.slot, self.tx.dialled) = (slot, false);
+        let r = self.tx.seq.key(&req, &mut self.path, now, &mut st);
+        if let Err(r) = r {
+            self.unkeyed();
+            return self.refuse(slot, r);
+        }
+        log(b"tx key khz ", f / 100);
+        self.run(&st).await;
+        if self.tx.fault {
+            let mut st = Steps::default();
+            self.tx.seq.safe(&mut self.path, now_ms() as u32, &mut st);
+            self.run(&st).await;
+            self.unkeyed();
+            return self.refuse(slot, Refusal::Locked);
+        }
+        self.live.tx.keyed = true;
+        self.tx.chip = Some(n);
+    }
+
+    /// While keyed: the sequencer's own unkeys (timeout backstop, duty limit, battery under load).
+    pub(super) async fn tx_tick(&mut self, now: u32) {
+        let batt = self.battery_ok();
+        // TX-12's mic meter: PA0, the mic-level tap stock's VOX reads (decision 76).
+        self.live.tx.mic = tonegen::mic_percent(crate::hal::adc::read(crate::hal::adc::CH_PA0));
+        let mut st = Steps::default();
+        let cfg = self.tx_cfg();
+        if let Some(e) = self.tx.seq.tick(&cfg, batt, &mut self.path, now, &mut st) {
+            self.run(&st).await;
+            if e != txseq::Event::PreAlert {
+                log(b"tx unkeyed by the sequencer ", e as u32);
+                self.unkeyed();
+                self.live.tx.refused = Some(match e {
+                    txseq::Event::Hot => Refusal::Hot,
+                    txseq::Event::Battery => Refusal::Battery,
+                    _ => Refusal::ReleasePtt,
+                });
+            }
+        }
+    }
+
+    /// The sequencer's settings from what the UI has sent: the keyed slot's end tone and tail, CW ID with a
+    /// callsign (VOX-10); none of the end tone or ID after a dialled sequence (TONE-11).
+    fn tx_cfg(&self) -> txseq::Cfg {
+        let s = self.tx.slot as usize % 4;
+        let voice = !self.tx.dialled;
+        txseq::Cfg {
+            end_tone: voice && self.tx.end[s] != 0,
+            cw_id: voice && self.tx.cw != 0 && self.tx.cw_len != 0,
+            cw_each: self.tx.cw == 2,
+            tail: self.tx.tail[s],
+            ..TX_CFG
+        }
+    }
+
+    /// TONE-5: the tail at unkey, still keyed, for stock's 400 ms: the 55 Hz tone with no sub-tone, the phase
+    /// shift (0 8 5 2) on CTCSS, the 134.4 Hz turn-off code on DCS. The 55 Hz tone at the driver's sub-tone gain
+    /// (74, as its CTCSS) where stock takes the calibration's byte (0xF210 byte 1): to confirm on the bench.
+    pub(super) async fn tail_elim(&mut self) {
+        let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
+        let kind = radio_chip::tail(self.tx.tone[self.tx.slot as usize % 4], self.tx.phase);
+        self.chip(n).tail_tx(Some(kind));
+        Timer::after_millis(tonegen::TAIL_MS as u64).await;
+        self.chip(n).tail_tx(None);
+        log(b"tx tail", 0);
+    }
+
+    /// DTMF-1, DTMF-3: the dialled sequence on the transmission just keyed: the first digit delay, then each
+    /// symbol on and off for the speed; then the UI is told and unkeys. The Radio task waits through it (at most
+    /// 1 s + 16 x 400 ms).
+    pub(super) async fn dial(&mut self, len: u8) {
+        if self.path.keyed().is_none() {
+            return;
+        }
+        self.tx.dialled = true;
+        let (ms, delay) = (self.tx.dtmf.0 as u64, self.tx.dtmf.1 as u64 * 10);
+        Timer::after_millis(delay).await;
+        for k in 0..(len as usize).min(16) {
+            if self.path.keyed().is_none() {
+                return; // cut off (timeout, battery)
+            }
+            if let Some(c) = tonegen::dtmf_symbol(self.tx.digits[k]) {
+                self.keyed_tone(None, Some(c));
+                Timer::after_millis(ms).await;
+            }
+            if let Some(n) = self.path.keyed().map(|s| s.chip()).filter(|&n| self.has(n)) {
+                self.chip(n).tone_tx(0);
+            }
+            Timer::after_millis(ms).await;
+        }
+        self.keyed_tone(None, None);
+        self.live.tx.dtmf_sent = self.live.tx.dtmf_sent.wrapping_add(1);
+        log(b"tx dtmf sent ", len as u32);
+    }
+
+    /// While keyed (TONE-13, DTMF-7, DTMF-11): the tone burst or a DTMF symbol on the keyed chip, as stock sends any
+    /// internal tone: the generator set, REG_30 to tone transmit (mode 4, 0xC3FA: the microphone off) and the
+    /// sidetone heard (DTMF-8, for DTMF as 0 8 6 6 says); both None goes back to
+    /// the microphone (0xC1FE).
+    pub(super) fn keyed_tone(&mut self, hz: Option<u16>, dtmf: Option<char>) {
+        let Some(sel) = self.path.keyed() else { return };
+        let n = sel.chip();
+        if !self.has(n) {
+            return;
+        }
+        let heard = dtmf.is_none() || self.tx.sidetone; // DTMF-8's setting; the burst is always heard
+        let (sending, mic_ok) = radio_chip::keyed_tone(&mut self.chip(n), hz, dtmf, heard);
+        if !mic_ok {
+            log(b"tx mic read-back failed, chip ", n as u32);
+        }
+        speaker(sending && heard);
+    }
+
+    /// A tone sequence on the keyed chip, still keyed (TONE-8: end tone, CW ID): tone transmit with the microphone
+    /// off, each step's tone (0 = silence) for its time.
+    pub(super) async fn play_keyed(&mut self, steps: impl Iterator<Item = tonegen::Step>) {
+        use bk4829::tx::Source as TxSource;
+        let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
+        self.chip(n).tx_on(TxSource::Tones);
+        for (hz, ms) in steps {
+            self.chip(n).tone_tx(hz as u32);
+            Timer::after_millis(ms as u64).await;
+        }
+        self.chip(n).tone_tx(0);
+    }
+
+    /// After any unkey: the chips back to their slots on the next tick, the UI told.
+    pub(super) fn unkeyed(&mut self) {
+        self.tuned = [None; 2];
+        self.tx.chip = None;
+        self.live.tx.keyed = false;
+        log(b"tx unkey", 0);
+    }
+
+    fn refuse(&mut self, slot: u8, why: Refusal) {
+        self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: Some(why), dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
+        log(b"tx refused ", why as u32);
+    }
+}

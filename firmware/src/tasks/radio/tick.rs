@@ -1,0 +1,275 @@
+//! The receive tick: the engines, the watch hop and the audio; the ADC reads and VOX.
+
+use super::*;
+
+impl Radio {
+    /// The engines' tick: each listening chip's squelch, the watch turn, the scans, the chips and the path, and
+    /// the audio.
+    /// SBAR-20: the MCU's die temperature every 10 s, for the Status page (informational; read here because the
+    /// Radio task owns the ADC's software reads).
+    fn mcu_temp(&mut self) {
+        use crate::hal::adc;
+        let now = now_ms() as u32;
+        // PWR-20: the battery (PA1) every 2 s, here too, as the Radio task owns the ADC's software reads.
+        if self.bat_at.is_none_or(|t| now.wrapping_sub(t) >= 2_000) {
+            self.bat_at = Some(now);
+            adc::init();
+            crate::chan::BATTERY_RAW.store(adc::read_avg(adc::CH_PA1, 8), core::sync::atomic::Ordering::Relaxed);
+        }
+        if self.temp.0.is_some_and(|t| now.wrapping_sub(t) < 10_000) {
+            return;
+        }
+        self.temp.0 = Some(now);
+        adc::init();
+        // The battery's PA1 read just before (every 10 s the two fall together) leaves its divider's voltage on the
+        // sample capacitor: one conversion of each internal channel thrown away first.
+        let _ = adc::read(adc::CH_TEMP);
+        let ts = adc::read_avg(adc::CH_TEMP, 4);
+        let _ = adc::read(adc::CH_VREF);
+        let vref = adc::read_avg(adc::CH_VREF, 4);
+        crate::chan::MCU_TEMP_RAW.store((ts as u32) << 16 | vref as u32, core::sync::atomic::Ordering::Relaxed);
+        if let Some(c10) = ferrite_core::mcutemp::temp_c10(ts, vref) {
+            let s = ferrite_core::mcutemp::smooth(self.temp.1, c10);
+            self.temp.1 = Some(s);
+            crate::chan::MCU_TEMP.store(s, core::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// VOX (VOX-2, VOX-3, VOX-5, VOX-14): every 20 ms, PA0's mic level against the level's threshold; speech
+    /// (with its tail) goes to the UI in `TxLive::voice`, which keys the active slot (VOX-13). Blocked while the
+    /// active slot receives and nothing is keyed, or while the input task debounces a speaker-mic change (VOX-3).
+    #[cfg(feature = "tx")]
+    fn vox_poll(&mut self) {
+        use crate::hal::adc;
+        let (level, tail) = self.tx.vox;
+        if level == 0 {
+            return;
+        }
+        let now = now_ms() as u32;
+        if now.wrapping_sub(self.tx.vox_at) < 20 {
+            return;
+        }
+        self.tx.vox_at = now;
+        adc::init();
+        let mic = adc::read(adc::CH_PA0);
+        let changing = crate::chan::ACCESSORY.load(core::sync::atomic::Ordering::Relaxed) & ferrite_core::acc::CHANGING != 0;
+        let blocked = changing || self.path.keyed().is_none() && self.live.slots[self.active as usize].squelch_open;
+        self.live.tx.voice = self.tx.vox_det.step(mic, level, tail as u32 * 100, blocked, now);
+    }
+
+    pub(super) async fn tick(&mut self) {
+        self.mcu_temp();
+        self.fm_poll();
+        // SQL-1: the calibration's squelch tables, once the UI task has read them: every tuned chip again.
+        if let Some(c) = crate::chan::SQ_CAL.try_take() {
+            self.sqcal = c;
+            for n in 0..2u8 {
+                if let Some((s, f)) = self.tuned[n as usize] {
+                    let level = self.slots.get(s as usize).map_or(self.slots[self.active as usize].sq, |sl| sl.sq);
+                    let regs = self.sqcal.regs(f, level);
+                    radio_chip::squelch(&mut self.chip(n), regs);
+                    self.sq_regs[n as usize] = Some(regs);
+                }
+            }
+        }
+        #[cfg(feature = "tx")]
+        self.vox_poll();
+        if self.hf.is_some() {
+            // Keyed from HF mode (HF-23): the keyed tick as from home (TX-30 backstop, TX-31 duty limit, TX-32
+            // battery under load); the HF receiver's report waits for the unkey (TX audit M5).
+            #[cfg(feature = "tx")]
+            if self.path.keyed().is_some() {
+                return self.tx_tick(now_ms() as u32).await;
+            }
+            self.hf_poll();
+            return;
+        }
+        // The crossband repeater owns both chips while it runs (XB-13: no watch, scan or Battery Save); local PTT
+        // holds it (XB-14), and that transmission runs as any other.
+        #[cfg(feature = "tx")]
+        if let Some(held) = self.xb.as_ref().map(|x| x.rep.held()) {
+            let now = now_ms() as u32;
+            if !held {
+                return self.xb_tick(now).await;
+            }
+            if self.path.keyed().is_some() {
+                return self.tx_tick(now).await;
+            }
+            return;
+        }
+        // Battery Save asleep: only its phase change runs (PWR-*). Returning before it, as this did, left its wake
+        // time in the past, so the main loop's wait fired at once forever: the Radio task spun above the UI and the
+        // receivers never woke (on the black radio, Oct 12, 2026, once real squelch thresholds let it sleep).
+        if self.save.asleep() {
+            let a = self.save.tick(now_ms(), false);
+            self.apply(a).await;
+            // A kept slot (APRS mode's C) listens on through the sleep: the turn runs for it alone (PWR-4).
+            if self.save.asleep() && self.kept() == 0 {
+                self.bcast_audio(now_ms() as u32, false); // BCR-19: the broadcast plays on, and returns on time
+                return;
+            }
+        }
+        let now = now_ms() as u32;
+        if self.scope.is_some() {
+            return self.scope_tick(now);
+        }
+        if self.counter.is_some() {
+            return self.counter_tick(now).await;
+        }
+        // Keyed: the chips and paths are the transmission's (TX-29); only the sequencer's timeout, duty limit
+        // and battery under load run.
+        #[cfg(feature = "tx")]
+        if self.path.keyed().is_some() {
+            return self.tx_tick(now).await;
+        }
+        let listening = self.hop.chip();
+        // 1. What each chip heard for the slot it was on: the carrier squelch (watch) and the tone (audio); for a
+        // scan's fast step, the RSSI over the floor (SCAN-21).
+        let mut sq = [false; 2];
+        let mut toned = [false; 2];
+        let mut scan_open = [false; SLOTS];
+        for n in 0..2u8 {
+            let Some((s, _)) = self.tuned[n as usize] else { continue };
+            if listening != Some(n) || s >= SLOTS as u8 {
+                continue;
+            }
+            let mut bk = self.chip(n);
+            let (rssi, st) = (bk.rssi_dbm(), bk.status());
+            let open = st.squelch_open || self.slots[s as usize].sq == 0;
+            let fl = &mut self.floor[n as usize];
+            if !st.squelch_open {
+                *fl += (rssi - *fl) / 8; // a slow average of the quiet RSSI
+            }
+            sq[n as usize] = open;
+            // TSRCH-12: while the tone hint probes, the detectors scan: their reading, not a match, so the audio
+            // stays shut this tick.
+            let probing = self.hints[s as usize].probing();
+            toned[n as usize] = !probing && self.slots[s as usize].toned(open, &st);
+            let sl = &mut self.live.slots[s as usize];
+            sl.rssi = rssi;
+            scan_open[s as usize] = match self.scans[s as usize].check() {
+                Check::Rssi => rssi > *fl + FAST_MARGIN_DB,
+                Check::Squelch => open,
+            };
+            if probing {
+                let (c, d) = self.chip(n).subtone_scan();
+                let heard = radio_chip::heard_tone(c, d, &ferrite_app::slot::CTCSS, &ferrite_app::slot::DCS);
+                if heard.is_some_and(|w| self.hints[s as usize].found(now, w) == HintAct::Restore) {
+                    let sl = self.slots[s as usize];
+                    radio_chip::subtone(&mut self.chip(n), sl.rx_tone, sl.rx_tail);
+                }
+            }
+        }
+        // SAME on a weather channel's chip (DEC-19).
+        self.same_tick(now);
+        // 2. The watch turn.
+        let asleep = if self.save.asleep() { !self.kept() } else { 0 };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep };
+        let keyed = self.path.keyed().is_some();
+        let out = self.watcher.tick(now, &cfg, sq, keyed);
+        // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
+        self.hint_tick(now, listening, &sq, &toned, out.audio);
+        // 3. Scans step while their slot has a chip, on the answer from that chip.
+        for i in 0..SLOTS {
+            if !self.scans[i].running() || !self.tuned.iter().any(|t| t.is_some_and(|(s, _)| s as usize == i)) {
+                continue;
+            }
+            let o = if self.chans.is_on(i) {
+                self.chans.tick(i, &mut self.scans[i], now, scan_open[i])
+            } else {
+                self.scans[i].tick(&self.ranges[i], now, scan_open[i])
+            };
+            if o.ended {
+                self.chans.off(i);
+            }
+            let sl = &mut self.live.slots[i];
+            if let Some(f) = o.tune {
+                self.slots[i].freq = f;
+                sl.freq = f;
+            }
+            if o.hit.is_some() {
+                sl.hits = sl.hits.saturating_add(1);
+                sl.last_hit = sl.freq;
+            }
+            sl.skips = self.scans[i].skips.max(sl.skips);
+            if o.ended {
+                sl.scanning = false;
+            }
+        }
+        // The channel the channel scans need next, for the UI to answer (LiveAll::want).
+        self.live.set_want(self.chans.want(&self.scans));
+        // 4. The path on the chip to listen to now, and that chip on the slot the engine names; the other asleep
+        // unless a kept slot has it (WATCH-2, PWR-7, decision 111: one BK4829 awake at a time, as stock).
+        let path = self.hop.next(now, &out, self.active);
+        let awake = watch::awake(&out, path, self.kept());
+        // PWR-21: the chip the hop turns to by the next tick has its supplies on now, so their settle overlaps
+        // this dwell and the hop isn't delayed; it is tuned (receive on) at the hop as before.
+        let early = if self.settle.wake_ms > 0 { self.hop.due(now, &out, self.active, TICK_MS as u32) } else { None };
+        // The chips to listen with first, those to sleep after: a sleep's settle never holds up the other chip.
+        for listen in [true, false] {
+            for n in 0..2u8 {
+                let want = out.chip[n as usize].filter(|_| awake[n as usize]).map(|s| (s, self.slots[s as usize].rx_freq()));
+                if want.is_some() != listen {
+                    continue;
+                }
+                if want.is_none() && early == Some(n) && self.has(n) && self.tuned[n as usize].is_none() {
+                    self.ldo_on(n);
+                    continue;
+                }
+                self.tune_chip(n, want).await;
+            }
+        }
+        if let Some(n) = path {
+            if let Some((_, f)) = self.tuned[n as usize] {
+                self.select_rx(f, Cause::Auto).await;
+            }
+        }
+        // 5. Audio (WATCH-3): the slot the engine picks, if its tone matches; a latched monitor on the active
+        // slot opens it whatever it hears (SQL-2).
+        let heard_chip = |s: u8| (0..2u8).find(|&n| self.tuned[n as usize].is_some_and(|(t, _)| t == s));
+        let monitor_active = self.monitor & !self.user_mute & 1 << self.active != 0; // HOME-15: muted, not heard
+        let audio = if monitor_active { Some(self.active) } else { out.audio };
+        let audio_chip = audio.and_then(heard_chip).filter(|&n| monitor_active || toned[n as usize]);
+        for n in 0..2u8 {
+            if self.tuned[n as usize].is_some() {
+                self.chip(n).af_out(if Some(n) == audio_chip { AfOut::Normal } else { AfOut::Mute });
+            }
+        }
+        self.bcast_audio(now, audio_chip.is_some());
+        // 6. The snapshot.
+        let active_relay = Sel::rx(self.slots[self.active as usize].freq).relay();
+        for (i, sl) in self.live.slots.iter_mut().enumerate() {
+            let open = self.watcher.open(i as u8) || self.monitor & 1 << i != 0;
+            if !open {
+                sl.rssi = sl.rssi.min(-121);
+            }
+            sl.squelch_open = open;
+            sl.heard_tone = self.hints[i].heard;
+            sl.relay = out.cancelled && self.watch_set & 1 << i != 0 && Sel::rx(self.slots[i].freq).relay() != active_relay;
+        }
+        // Battery Save: anything open or scanning keeps the receivers awake. Broadcast doesn't (BCR-19): the
+        // BK4829s keep the level's cycle for the slots watched, and the sleep step leaves the SI4732 playing.
+        let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning);
+        let a = self.save.tick(now_ms(), busy);
+        self.apply(a).await;
+    }
+
+    /// The tone hint's step for the slot on the listening chip (TSRCH-12, TSRCH-15): eligible while the watch
+    /// holds it for audio, it has a receive tone, and no scan or latched monitor runs on it (transmit, HF mode and
+    /// the exclusive modes never reach the receive tick). The chip's detectors switch to scan, or back.
+    fn hint_tick(&mut self, now: u32, listening: Option<u8>, sq: &[bool; 2], toned: &[bool; 2], audio: Option<u8>) {
+        for h in &mut self.hints {
+            h.age(now);
+        }
+        let Some(n) = listening else { return };
+        let Some((s, _)) = self.tuned[n as usize].filter(|&(s, _)| (s as usize) < SLOTS) else { return };
+        let i = s as usize;
+        let sl = self.slots[i];
+        let eligible = audio == Some(s) && !self.scans[i].running() && self.monitor & 1 << s == 0;
+        match self.hints[i].tick(now, sl.freq, sl.rx_tone, sq[n as usize], toned[n as usize], eligible) {
+            HintAct::Start => radio_chip::tone_probe(&mut self.chip(n)),
+            HintAct::Restore => radio_chip::subtone(&mut self.chip(n), sl.rx_tone, sl.rx_tail),
+            HintAct::None => {}
+        }
+    }
+}

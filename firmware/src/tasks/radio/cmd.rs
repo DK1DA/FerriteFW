@@ -1,0 +1,262 @@
+//! The UI's commands.
+
+use super::*;
+
+impl Radio {
+    /// MODE-3: the UI stopped renewing the exclusive mode (an app bug, or a UI too busy to run): stop it here and
+    /// go back to normal receive, and tell the UI through the snapshot's drop count.
+    pub(super) async fn lease_check(&mut self) {
+        // Commands still queued (this task was busy, say loading the SSB patch) may hold the renewals.
+        if !crate::chan::RADIO.is_empty() {
+            return;
+        }
+        let Some(h) = self.lease.expired(now_ms() as u32) else { return };
+        log(b"mode lease ran out, stopped ", h as u32);
+        self.cmd(h.stop_cmd()).await;
+        self.live.lease_drops = self.live.lease_drops.wrapping_add(1);
+    }
+
+    /// One command from the UI.
+    pub(super) async fn cmd(&mut self, c: RadioCmd) {
+        let now = now_ms() as u32;
+        // The single-receiver command is the active slot's tune.
+        let c = if let RadioCmd::Tune(freq) = c { RadioCmd::TuneSlot { slot: self.active, freq } } else { c };
+        self.lease.note(&c, now); // MODE-3
+        // Channel scans: the set, priorities, resume rule, start, and the frequencies the UI answers with; one
+        // a stopped scan waited for is tuned now.
+        if let Some((i, f)) = self.chans.cmd(&c, &mut self.scans, now) {
+            self.slots[i].freq = f;
+            self.live.slots[i].freq = f;
+        }
+        match c {
+            RadioCmd::ScanChans { slot, .. } => {
+                let sl = &mut self.live.slots[slot as usize % SLOTS];
+                (sl.scanning, sl.hits, sl.skips) = (true, 0, 0);
+                log(b"scan start (channels) slot ", slot as u32);
+            }
+            RadioCmd::ScanSet { .. }
+            | RadioCmd::ScanPrio { .. }
+            | RadioCmd::ScanResume { .. }
+            | RadioCmd::ScanEntry { .. }
+            | RadioCmd::ScanEntryTx { .. } => {}
+            RadioCmd::TuneSlot { slot, freq } => {
+                let i = slot as usize % SLOTS;
+                (self.slots[i].freq, self.slots[i].clar) = (freq, 0); // VFO-22: a retune clears the clarifier
+                self.scans[i].stop();
+                self.chans.off(i);
+                let sl = &mut self.live.slots[i];
+                (sl.freq, sl.scanning) = (freq, false);
+                if slot == self.active && self.hf.is_none() {
+                    self.select_rx(freq, Cause::ActiveSlot).await; // the active slot may move the relay
+                }
+                self.retune(slot);
+                self.save.activity(now_ms());
+            }
+            RadioCmd::SlotParam { slot, param, value } => self.param(slot, param, value),
+            RadioCmd::Active(a) => {
+                self.active = a % SLOTS as u8;
+                if self.hf.is_none() {
+                    let f = self.slots[self.active as usize].freq;
+                    self.select_rx(f, Cause::ActiveSlot).await;
+                }
+            }
+            RadioCmd::Watch(m) => self.watch_set = m,
+            RadioCmd::Awake(m) => self.keep = m,
+            RadioCmd::PauseWatch(secs) => self.watcher.pause(now, secs),
+            RadioCmd::Scan { slot, on } => self.scan(slot, on),
+            RadioCmd::ScanSkip { slot } => {
+                let i = slot as usize % SLOTS;
+                let o = if self.chans.is_on(i) {
+                    self.chans.skip_once(i, &mut self.scans[i], now)
+                } else {
+                    self.scans[i].skip_once(&self.ranges[i], now)
+                };
+                self.scan_out(i, o);
+            }
+            RadioCmd::ScanDir { slot, up, .. } => {
+                let i = slot as usize % SLOTS;
+                let o = if self.chans.is_on(i) {
+                    self.chans.dir(i, &mut self.scans[i], up, now)
+                } else {
+                    self.scans[i].dir(up, &self.ranges[i], now)
+                };
+                self.scan_out(i, o);
+            }
+            RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
+            RadioCmd::Mute(m) => self.user_mute = m,
+            RadioCmd::ScanTx(on) => self.scan_tx = on,
+            RadioCmd::ToneLevel(l) => self.tone_level = l.min(2),
+            RadioCmd::BeepVol(v) => {
+                // SND-3: Low, Mid, High. The DAC beep at levels 5, 7, 9 (a quiet Low; 11 would be full scale); the DTMF sidetone (on the
+                // BK4829, it goes on air) at the matching points of the generator's old 1-5 scale.
+                let i = v.clamp(1, 3) as usize - 1;
+                self.beep_gain = tonegen::beep_gain([2, 3, 5][i]);
+                self.beep_level = [5, 7, 9][i];
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::Vox { level, tail } => {
+                self.tx.vox = (level.min(9), tail.max(1));
+                if level == 0 {
+                    self.tx.vox_det = ferrite_core::vox::Vox::new();
+                    self.live.tx.voice = false;
+                }
+            }
+            // Nothing keys in this build, so VOX has nothing to do.
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::Vox { .. } => {}
+            // SND-12, from the input task: as stock, PE1 follows the speaker mic and PB8 goes on with it. Removed,
+            // PB8 stays as it is (it may carry receive or repeat audio now) until the next speaker change clears it.
+            RadioCmd::Accessory(on) => {
+                ACC_ROUTE.write(on);
+                if on {
+                    AMP_EN[0].write(true);
+                }
+            }
+            RadioCmd::BatterySave(level) => {
+                let a = self.save.set_level(level, now_ms());
+                self.apply(a).await;
+            }
+            RadioCmd::Activity => {
+                let a = self.save.activity(now_ms());
+                self.apply(a).await;
+            }
+            RadioCmd::Squelch(l) => self.param(self.active, Param::Squelch, l as i32),
+            RadioCmd::Broadcast(b) => {
+                // Errors: the UI shows no station. The cable log (TERM-28) says what the SI4732 did.
+                let r = broadcast(&mut self.si, b).await;
+                // BCR-2, BCR-5: FM's live report (frequency, signal, stereo, RDS) from here on; the tick polls it.
+                self.fm = match (b, &r) {
+                    (BroadcastCmd::Off, _) | (BroadcastCmd::Am(_), _) | (_, Err(_)) => None,
+                    (_, Ok(f)) => Some(FmRx { freq: *f, rds: si4732::rds::Rds::init(), poll_at: 0, rds_turn: false }),
+                };
+                // A new station (or none): nothing of the last one's RDS carries over.
+                if matches!(self.live.mode, ModeLive::Fm { .. }) {
+                    self.live.mode = ModeLive::Off;
+                }
+                match (b, r.is_ok()) {
+                    (BroadcastCmd::Off, _) => log(b"si off", 0),
+                    (BroadcastCmd::Fm(f), true) => log(b"si fm ok, 10 khz ", f as u32),
+                    (BroadcastCmd::Am(k), true) => log(b"si am ok, khz ", k as u32),
+                    (BroadcastCmd::Seek { .. }, true) => log(b"si seek ok", 0),
+                    (_, false) => log(b"si FAILED, cmd ", match b { BroadcastCmd::Fm(_) => 1, BroadcastCmd::Am(_) => 2, _ => 3 }),
+                }
+                if r.is_ok() && b != BroadcastCmd::Off {
+                    if let Ok(q) = self.si.rsq(&mut BusyDelay) {
+                        log(b"si rssi dbuv ", q.rssi as u32);
+                        log(b"si snr db ", q.snr as u32);
+                    }
+                }
+            }
+            RadioCmd::BcastSlot(s) => self.bcast_slot = s,
+            RadioCmd::Hf { freq, mode, on } => self.hf(freq, mode, on).await,
+            RadioCmd::HfSeek { up } => self.hf_seek(up).await,
+            RadioCmd::Shutdown => {
+                // TX-33: power off while keyed (a pass of the repeater too) unkeys first: PA drive 0, the chip out
+                // of transmit, the unkey wait, every select off, before any chip sleeps or the SI4732 is touched
+                // (TX audit M6). Stock unkeys nothing at power off (PE0, the save, then PA11 cleared).
+                #[cfg(feature = "tx")]
+                if self.path.keyed().is_some() || self.tx.seq.keyed() {
+                    let mut s = Steps::default();
+                    self.tx.seq.safe(&mut self.path, now_ms() as u32, &mut s);
+                    self.run(&s).await;
+                    self.unkeyed();
+                }
+                for n in 0..2u8 {
+                    self.tune_chip(n, None).await;
+                }
+                let _ = broadcast(&mut self.si, BroadcastCmd::Off).await;
+                let mut s = Steps::default();
+                self.path.safe(now_ms() as u32, &mut s);
+                self.run(&s).await;
+                speaker(false);
+            }
+            RadioCmd::Counter(on) => self.counter(on),
+            RadioCmd::Lease => {} // MODE-3: renewed above (`Lease::note`)
+            RadioCmd::Same(on) => self.same_on = on,
+            RadioCmd::Beep { hz, ms } => self.beep(hz, ms).await,
+            #[cfg(feature = "tx")]
+            RadioCmd::ToneBurst { on } => self.keyed_tone(if on { Some(1750) } else { None }, None),
+            #[cfg(feature = "tx")]
+            RadioCmd::Dtmf { key, on } => self.keyed_tone(None, if on { tonegen::dtmf_symbol(key) } else { None }),
+            // Without the `tx` build nothing is keyed, so there is nothing to send them on.
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::ToneBurst { .. } | RadioCmd::Dtmf { .. } => {}
+            #[cfg(feature = "tx")]
+            RadioCmd::TxTones { phase, cw, sidetone } => (self.tx.phase, self.tx.cw, self.tx.sidetone) = (phase.min(3), cw.min(2), sidetone),
+            #[cfg(feature = "tx")]
+            RadioCmd::CwCall { chunk, text } => {
+                let at = (chunk as usize).min(1) * 5;
+                self.tx.cw_call[at..at + 5].copy_from_slice(&text);
+                self.tx.cw_len = self.tx.cw_call.iter().position(|&c| c == 0).unwrap_or(10) as u8;
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::DtmfTiming { ms, delay_10ms } => self.tx.dtmf = (ms.clamp(50, 200), delay_10ms.min(100)),
+            #[cfg(feature = "tx")]
+            RadioCmd::DtmfSeq { chunk, keys } => {
+                let at = (chunk as usize).min(3) * 5;
+                let n = (16 - at).min(5);
+                self.tx.digits[at..at + n].copy_from_slice(&keys[..n]);
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::DtmfSend { len } => self.dial(len).await,
+            // Nothing transmits in this build.
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::TxTones { .. }
+            | RadioCmd::CwCall { .. }
+            | RadioCmd::DtmfTiming { .. }
+            | RadioCmd::DtmfSeq { .. }
+            | RadioCmd::DtmfSend { .. } => {}
+            // Not on the radio yet, each waiting on something named in the manual's Status lines: band scope,
+            // tone search, crossband (chapters 21, 22, 19): their own exclusive modes, after 2d.
+            RadioCmd::ScopeCfg { bars, dwell, strip } => self.scope_cfg = (bars, dwell, strip),
+            RadioCmd::Sweep { centre, step, on } => {
+                self.sweep_hold.clear();
+                self.scope(centre, step, on).await
+            }
+            // SCOPE-14: the pass starts again from its first point once the hold is over.
+            RadioCmd::SweepHold => {
+                let now = now_ms() as u32;
+                if let Some(sc) = self.scope.as_mut().filter(|sc| sc.listen == 0) {
+                    if self.sweep_hold.input(now) {
+                        (sc.i, sc.started, sc.look) = (0, now, 0);
+                        self.scope_point();
+                    }
+                }
+            }
+            RadioCmd::ScopeListen { freq, mode } => self.scope_listen(freq, mode).await,
+            // Tone search: its own exclusive mode, after 2d (chapter 22).
+            RadioCmd::ToneSearch { .. } => {}
+            #[cfg(feature = "tx")]
+            RadioCmd::Crossband(c) => self.crossband(c).await,
+            // XB-2: no transmit in this build; the UI refuses first, and the radio says so too.
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::Crossband(c) => {
+                let stopped = ferrite_core::xb::Stop::NoTx as u8;
+                self.live.mode = if c.is_some() { ModeLive::Xb(ferrite_core::msg::XbLive { stopped, ..Default::default() }) } else { ModeLive::Off };
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::TxPlan { tx, region, extend } => {
+                let r = Region::ALL.get(region as usize).copied().unwrap_or(Region::Other);
+                self.tx.plan = Some((tx, r, extend));
+                self.tx.region = Some((r, extend));
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::Transmit { slot, on } => {
+                // XB-14: local PTT interrupts a pass (unkeyed first) and holds the repeater until it's released.
+                if on {
+                    self.xb_hold(true).await;
+                }
+                self.transmit(slot, on, None).await;
+                if !on {
+                    self.xb_hold(false).await;
+                }
+            }
+            #[cfg(feature = "tx")]
+            RadioCmd::TransmitData { slot, power, on } => self.transmit(slot, on, Some(power)).await,
+            // Transmit code is out of this build: the UI refuses first (RX-only build).
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::Transmit { .. } | RadioCmd::TransmitData { .. } | RadioCmd::TxPlan { .. } => {}
+            RadioCmd::Tune(_) => {}
+        }
+    }
+}

@@ -1,0 +1,692 @@
+//! Radio: the only task that touches the BK4829s and their bus, the SI4732, the RF path pins and the PA. Runs on
+//! the highest-priority interrupt executor.
+//!
+//! Three slots on two chips (manual chapters 6, 13, 14): the host-tested engines decide, this task carries out.
+//! - [`Watch`] names the slot each chip listens to (WATCH-2), whose audio is heard (WATCH-3) and when watch is
+//!   paused or cancelled (WATCH-6, WATCH-11, WATCH-16). The active slot never changes here (WATCH-5).
+//! - [`Hop`] moves the one receive path select between the two chips while both have a slot, as stock's dual
+//!   watch hops: a chip without its band's front end is taken as hearing nothing (to confirm on the bench).
+//! - [`Scan`] walks a slot's band (a range at its step, the fast pass of SCAN-21) while the slot has a chip,
+//!   or its channels: a channel scan (zone, zone set) from the set the UI sends, asking the UI for the
+//!   frequencies a few stops ahead ([`scan::ChanScans`], shared with the simulators' fake radio).
+//! - One BK4829 awake at a time, as stock (WATCH-2, PWR-7, decision 111): the chip the hop selects; the other
+//!   sleeps until the hop comes back to it, and a key-up sleeps the chip not transmitting. APRS mode's C keeps its
+//!   chip awake beside it ([`RadioCmd::Awake`]), through Battery Save's sleep too (PWR-4).
+//! - Battery Save (`ferrite_core::rxsleep`) sleeps both chips together (WATCH-8, as stock's dual watch), but for
+//!   a kept one.
+//!
+//! Every path select, the PA drive and the band relay change through the path machine (`ferrite_core::path`,
+//! SAFE-11): it plans, [`Radio::run`] carries the plan out to the end. Watch, scan and the path hop ask with
+//! [`Cause::Auto`], which never moves the relay (SAFE-20, WATCH-10); only the active slot and HF mode do.
+//!
+//! The bring-up build logs every relay move and path select on the cable (plain byte lines: this task runs from
+//! the fast flash and never calls the UI's text code).
+//!
+//! Transmit is only in the `tx` build (milestone 4): without it the bk4829 crate's transmit methods don't exist,
+//! the transmit command does nothing and no transmit path pin or PA drive is ever raised (only a key-up plans
+//! one, and only the `tx` build asks for a key-up). With it, every key-up goes through the sequencer
+//! (`ferrite_core::txseq`, TX-17) with its own checks (region, calibration, battery, duty, PTT seen released
+//! since boot), then the path machine's TX-23 order: PA 0, paths clear, the TX path, the chip to transmit with
+//! its read-back (TX-7), the PA ramp to the calibrated level (`ferrite_core::txcal`, stock's lookup).
+//!
+//! The crossband repeater (manual chapter 19, decision 93) is the `tx` build's too: [`Repeater`] decides, the
+//! receive path hops between the two sides while ready, and a pass keys the other chip with the receiving one
+//! left in receive (`Path::key_up_xb`), the receiving chip's audio routed into the transmitting chip's mic input
+//! with stock's timing (decision 95: PA15 low 10-20 ms after the PA is up, high again at the receive drop while
+//! still keyed; PB8 cleared at TX setup unless PC15 says an accessory; `analysis/crossband_repeat.md`, to confirm
+//! on the bench).
+
+use crate::board::{ACC_ROUTE, AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, REPEAT_AUDIO, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
+use crate::bus::{BusyDelay, Io, Out, SiBus};
+use crate::chan::{ALERTS, DEBUG_ANS, DEBUG_REQ, EVENTS, LIVE, RADIO, TERM_WAKE};
+use crate::hal::gpio::Mode;
+use crate::hal::i2c::I2c;
+use crate::tasks::{check, CHECK_BK0, CHECK_BK1};
+use bk4829::wire::ThreeWire;
+use bk4829::{int, AfOut, Bk4829};
+use embassy_futures::select::{select3, Either3};
+use embassy_time::{Instant, Timer};
+use ferrite_core::freq::{self, mhz, Freq10};
+use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, Source, SLOTS};
+use ferrite_core::same_rx::{Assembler, Repeats, Step};
+use ferrite_core::path::{Blocked, Cause, Path, Rx, Sel, Steps};
+use ferrite_radio::chip::{self as radio_chip, RxSetup};
+use ferrite_radio::Pin;
+use ferrite_core::rxsleep::{Action, Level, RxSleep};
+use ferrite_core::scan::{self, Check, Range, Scan};
+use ferrite_core::settle::Settle;
+use ferrite_core::sweephold::{self, SweepHold};
+use ferrite_core::tonegen;
+use ferrite_core::tonehint::{Act as HintAct, Hint};
+use ferrite_core::watch::{self, Hop, Watch};
+use si4732::{Mode as SiMode, Si4732, Sideband};
+#[cfg(feature = "tx")]
+use ferrite_core::{
+    msg::TxLive,
+    txcal::{Gauge, TxCal},
+    txplan::{Refusal, Region},
+    txseq::{self, Kind as TxKind, Req, TxSeq},
+    xb::{self, Cmd as XbCmd, Repeater},
+};
+
+mod cmd;
+mod debug;
+mod tune;
+mod tick;
+mod same;
+mod bcast;
+mod hf;
+mod beep;
+mod counter;
+mod scope;
+mod hw;
+#[cfg(feature = "tx")]
+mod tx;
+#[cfg(feature = "tx")]
+mod crossband;
+
+type Wire = ThreeWire<Out, Io, BusyDelay>;
+
+/// Start-up frequency until the UI's slots arrive: 2 m calling.
+const DEFAULT: Freq10 = freq::mhz(146) + 52_000;
+/// Battery Save until settings exist.
+const DEFAULT_SAVE: Level = Level::L1;
+/// Signal meter and squelch poll while one slot listens alone.
+const POLL_MS: u64 = 50;
+/// The engines' tick while watch hops or a scan runs: under the fast scan step (15 ms) and the watched dwell
+/// (70 ms).
+const TICK_MS: u64 = 10;
+/// The fast pass (SCAN-21) counts a step as "over the floor" this far above the chip's noise floor (to confirm
+/// on the bench).
+const FAST_MARGIN_DB: i16 = 10;
+/// The HF mode's internal slot index (the chips' `tuned` entry for it).
+const HF_SLOT: u8 = 3;
+/// The sequencer's settings in the `tx` build: the timeout a little after the UI's own 120 s (the UI unkeys
+/// first; this is the backstop), no pre-alert (the UI shows it). End tone, CW ID and tail elimination follow
+/// what the UI sends ([`RadioCmd::TxTones`], [`Param::EndTone`], [`Param::Tail`]): see `Radio::tx_cfg`.
+#[cfg(feature = "tx")]
+const TX_CFG: txseq::Cfg = txseq::Cfg { timeout_s: 125, prealert_s: 0, end_tone: false, cw_id: false, cw_each: false, tail: false };
+/// The crossband repeater's receive path turn per side while ready (XB-4: a pass needs 30 ms of open squelch; to
+/// confirm on the bench with the unselected front end, which may hear enough to drop the hop).
+#[cfg(feature = "tx")]
+const XB_TURN_MS: u32 = 50;
+
+/// The speaker as [`speaker`] last set it: a beep reads it to know whether audio is already playing (SND-13).
+static SPEAKER_ON: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Speaker amplifier and the shared audio stage (both roles likely, from stock).
+#[inline(never)]
+fn speaker(on: bool) {
+    SPEAKER_ON.store(on, core::sync::atomic::Ordering::Relaxed);
+    pb8(on);
+    AMP_EN[1].write(on);
+}
+
+/// The shared audio stage (PB8). Held on while a speaker mic is connected (SND-12): stock's arbiter and PTT
+/// handler never clear it while its PC15 flag is set.
+#[inline(never)]
+fn pb8(on: bool) {
+    AMP_EN[0].write(on || crate::chan::ACCESSORY.load(core::sync::atomic::Ordering::Relaxed) & ferrite_core::acc::ON != 0);
+}
+
+/// What the Radio task keeps of a slot's settings for receiving (the transmit side is the `tx` build's).
+#[derive(Clone, Copy)]
+struct SlotRx {
+    freq: Freq10,
+    narrow: bool,
+    /// The receive tone word (CHAN-3): CTCSS in 0.1 Hz, bit 15 DCS, bit 14 inverted; 0 none.
+    rx_tone: u16,
+    /// The clarifier, Hz (VFO-22): receive only.
+    clar: i16,
+    /// Squelch 0-9; 0 is open (SQL: always heard, like monitor).
+    sq: u8,
+    /// AM (Param::Mode 2): receive only (TX-20).
+    am: bool,
+    /// Tail elimination on receive (TONE-6, [`Param::Tail`] bit 0): with no receive tone, the 55 Hz tail mutes.
+    rx_tail: bool,
+}
+
+impl SlotRx {
+    const DEFAULT: SlotRx = SlotRx { freq: DEFAULT, narrow: false, rx_tone: 0, clar: 0, sq: 3, am: false, rx_tail: false };
+
+    /// The slot's audio opens (WATCH-3): squelch `open` and its tone heard; a tone channel goes quiet when its tone
+    /// stops (the tail's phase shift or turn-off code ends it, TONE-6); with no tone and receive tail on, the 55 Hz
+    /// tail mutes.
+    fn toned(&self, open: bool, st: &bk4829::Status) -> bool {
+        open && if self.rx_tone == 0 { !(self.rx_tail && st.tail) } else { st.ctcss || st.cdcss }
+    }
+
+    /// Where the chip tunes: the frequency moved by the clarifier (10 Hz units).
+    fn rx_freq(&self) -> Freq10 {
+        (self.freq as i32 + self.clar as i32 / 10).max(0) as Freq10
+    }
+}
+
+/// HF mode (manual chapter 20a): the frequency, its mode (as [`Param::Mode`]) and which receiver has it.
+#[derive(Clone, Copy, PartialEq)]
+struct HfOn {
+    freq: Freq10,
+    mode: u8,
+    /// The SI4732 (below 18 MHz, and AM up to 30 MHz: HF-10); otherwise chip 1 through the energised relay.
+    si: bool,
+}
+
+struct Radio {
+    /// The MCU temperature (SBAR-20): when it was last read, and its smoothed tenths.
+    temp: (Option<u32>, Option<i16>),
+    /// MODE-3: the UI's lease on the exclusive mode running here.
+    lease: ferrite_core::lease::Lease,
+    /// SQL-1: the calibration's squelch tables (stock's defaults until the UI task has read the sector), and what
+    /// each chip was last given (REG_78, REG_4F), so a retune writes them only when they change.
+    sqcal: ferrite_core::sqcal::SqCal,
+    sq_regs: [Option<(u16, u16)>; 2],
+    /// When the battery was last read (PWR-20).
+    bat_at: Option<u32>,
+    si: Si4732<SiBus>,
+    wire: Wire,
+    cs: [Out; 2],
+    chips: u8,
+    live: LiveAll,
+    save: RxSleep,
+    path: Path,
+    /// The path machine muted the receiver (around a relay move or while keyed): the squelch doesn't open the
+    /// speaker meanwhile.
+    muted: bool,
+    /// The SI4732 has had the antenna since boot: leaving it sets stock's radio state, PA7 = 1, PC5 = 0 (BCR-20).
+    si_used: bool,
+    /// FM broadcast's receiver state for the live report (BCR-2, BCR-5).
+    fm: Option<FmRx>,
+    /// BCR-6: the SI4732 is the source being heard (broadcast on, no slot heard); its hard mute follows this.
+    si_heard: bool,
+    /// BCR-24: the broadcast's turn on the speaker (back 2 s after a slot heard goes quiet).
+    bturn: watch::BcastTurn,
+    /// BCR-23: the slot playing broadcast FM (no chip listens to it while FM plays).
+    bcast_slot: Option<u8>,
+    slots: [SlotRx; SLOTS],
+    active: u8,
+    /// The watch set from the UI, a bit per slot.
+    watch_set: u8,
+    watcher: Watch,
+    hop: Hop,
+    scans: [Scan; SLOTS],
+    ranges: [Range<'static>; SLOTS],
+    /// Channel scans: each slot's set of channel numbers and the frequencies asked for (SCAN-3, SCAN-12,
+    /// SCAN-22; decision 86).
+    chans: scan::ChanScans,
+    /// What each chip is tuned to now: the slot and its receive frequency; None asleep, or to tune again.
+    tuned: [Option<(u8, Freq10)>; 2],
+    /// Chips that may be awake, a bit per chip: set when one is tuned or keyed, cleared when it sleeps. A reset of
+    /// `tuned` (after an unkey, a mode) leaves it, so a chip no longer wanted is put to sleep, not left on.
+    maybe_awake: u8,
+    /// PWR-21 (decision 119): the BK4829 settle waits, from the terminal (`bk settle`, TERM-31), RAM only.
+    settle: Settle,
+    /// When each chip's REG_37 supplies came on (ms), None while they are off: what is left of the wake settle
+    /// counts from here, so a chip woken a tick early by the hop is tuned at once.
+    woke: [Option<u32>; 2],
+    /// Slots whose chip stays awake (APRS mode's C: [`RadioCmd::Awake`], decision 111).
+    keep: u8,
+    /// Each chip's noise floor (dBm), a slow average of its RSSI with the squelch closed (the fast pass's
+    /// reference).
+    floor: [i16; 2],
+    /// Monitor latched, a bit per slot (SQL-2).
+    monitor: u8,
+    /// Quick mute from the UI, a bit per slot (HOME-15): still received, never on the speaker.
+    user_mute: u8,
+    /// Each slot's tone hint (TSRCH-12 to TSRCH-15): when to measure the tone on a carrier its tone squelch keeps
+    /// shut, and what was heard.
+    hints: [Hint; SLOTS],
+    /// Radio-wide settings the UI sends: scan inputs (SCAN-22, for channel lists) and the subtone level (TONE-16,
+    /// the `tx` build's).
+    scan_tx: bool,
+    tone_level: u8,
+    /// The beep volume's tone gain (SND-3, 0 7 5 2: `tonegen::beep_gain`).
+    beep_gain: u8,
+    /// The DAC beep's level (1-11, `hal::tone`), from the beep volume (SND-3: Low, Mid, High -> 5, 7, 9).
+    beep_level: u8,
+    hf: Option<HfOn>,
+    /// The frequency counter (TSRCH-10), while on.
+    counter: Option<Counter>,
+    /// The band scope (SCOPE-4), while it runs; its points per sweep and dwell (0.1 ms) from the last ScopeCfg.
+    scope: Option<ScopeRun>,
+    /// SCOPE-14: the sweep waits after a key or knob step, so the UI handles it first.
+    sweep_hold: SweepHold,
+    scope_cfg: (u8, u8, bool),
+    /// SAME weather alerts (WX-4, DEC-19): on from the UI, and the BK4829 receiver's state.
+    same_on: bool,
+    same: SameRx,
+    #[cfg(feature = "tx")]
+    tx: Tx,
+    /// The crossband repeater while it runs (168 + 8 bytes).
+    #[cfg(feature = "tx")]
+    xb: Option<XbRun>,
+}
+
+/// The crossband repeater running: the engine, each side's slot, and the receive path's turn while ready.
+#[cfg(feature = "tx")]
+struct XbRun {
+    rep: Repeater,
+    sides: [u8; 2],
+    hop: u8,
+    hop_t: u32,
+}
+
+/// The band scope sweeping (SCOPE-4, SCOPE-5): one chip, its audio off, one point per wait. As stock (V0.27
+/// 0x08023808 / 0x080235E8): the frequency (REG_38/39), REG_30 0x0200 then 0xBFF1 (the VCO recalibration), the
+/// dwell, then REG_67. Stock dwells about 10 ms a point (its 10 ms tick); the dwell is 0 3 2 3's.
+struct ScopeRun {
+    chip: u8,
+    centre: Freq10,
+    step: Freq10,
+    n: u8,
+    dwell_us: u32,
+    /// The point measured at the next wait (tuned already), and the raw level of each point last sweep.
+    i: u8,
+    last: [u8; ferrite_core::msg::SCOPE_BARS],
+    sweeps: u8,
+    started: u32,
+    /// Listening on a frequency (SCOPE-11) instead of sweeping; its demod (0 FM, 1 NFM, 2 AM).
+    listen: Freq10,
+    mode: u8,
+    /// Home's strip (MODE-5, decision 115): the slot whose own frequency it looks at between points, and holds on
+    /// while a carrier is there (`listen` set to it); the waits left on that frequency in a look, the points
+    /// since the last look, and the closed polls in a row while held.
+    home: Option<u8>,
+    look: u8,
+    since: u8,
+    closed: u8,
+}
+
+/// MODE-5: the strip looks at its slot's own frequency every this many points (8 x 10 ms at the strip's dwell)...
+const LOOK_EVERY: u8 = 8;
+/// ...for two dwells, stock's 10-20 ms settle after a retune before the squelch poll (`analysis/watch.md` §2).
+const LOOK_WAITS: u8 = 2;
+/// The hold ends after this many closed polls in a row: stock's 100 ms receive-end debounce at the 10 ms tick.
+const HOLD_CLOSED: u8 = 10;
+
+/// The frequency counter: which chip measures now, when its scan started, and its last reading (stock keeps a
+/// reading only when the next one agrees, `tonegen::counter_agree`).
+#[derive(Clone, Copy)]
+struct Counter {
+    chip: u8,
+    since: u32,
+    last: Option<Freq10>,
+}
+
+/// The BK4829's SAME receiver (DEC-19): on the chip of a slot tuned to a weather channel, the burst being put
+/// together, and the headers already raised. 280 bytes.
+struct SameRx {
+    chip: Option<u8>,
+    /// The slot and frequency it was set up for: a retune sets it up again.
+    at: Option<(u8, Freq10)>,
+    /// The modem is set up and listening for the sync word.
+    armed: bool,
+    asm: Assembler,
+    repeats: Repeats,
+}
+
+use radio_chip::{COUNTER_TUNE, WX};
+
+/// A chip gives up measuring after this long with no carrier, and the other chip takes a turn (stock's scan time
+/// is 0.8 s per reading).
+const COUNTER_TURN_MS: u32 = 2_000;
+
+/// The `tx` build's transmit state.
+#[cfg(feature = "tx")]
+struct Tx {
+    seq: TxSeq,
+    /// From the UI task once it has read the calibration (`TX_CAL`); None until then, or when blank.
+    cal: Option<TxCal>,
+    gauge: Gauge,
+    /// Each slot's transmit tone word and power level (index 3: HF mode's).
+    tone: [u16; 4],
+    power: [u8; 4],
+    /// The UI's [`RadioCmd::TxPlan`] for the next key-up.
+    plan: Option<(Freq10, Region, bool)>,
+    /// The key-up now is a data one ([`RadioCmd::TransmitData`]: APRS) at this power level: no end tone or CW ID
+    /// after it (TONE-11), the APRS power (0 5 5 4) instead of the slot's.
+    data: Option<u8>,
+    /// TX-42: every PTT input has read released since boot.
+    ptt: ferrite_radio::ptt::PttGuard,
+    /// The calibrated PA drive for the key-up being run (`Act::PaRamp`).
+    pa: u8,
+    /// The read-back failed during a key-up (TX-7): the plan stops and the safe state follows.
+    fault: bool,
+    /// Each chip's REG_3B as read after its start-up (TX-7: Ferrite never writes it, so a key-up expects it unchanged).
+    reg3b: [u16; 2],
+    adc: bool,
+    /// Each slot's end tone (TONE-10: an index into `tonegen::END_TONES`, 0 off) and transmit tail elimination
+    /// (TONE-5), the channel's over the radio's as the UI resolved them; the slot keyed now (index 3: HF mode).
+    end: [u8; 4],
+    tail: [bool; 4],
+    slot: u8,
+    /// 0 8 5 2's phase (0 55 Hz, 1-3 the CTCSS phase shifts), 0 8 7 2's CW ID (0 off, 1 every 10 min, 2 on unkey)
+    /// with the callsign (0 8 7 1; empty: no ID, VOX-10), 0 8 6 6's DTMF sidetone (DTMF-8).
+    phase: u8,
+    cw: u8,
+    cw_call: [u8; 10],
+    cw_len: u8,
+    sidetone: bool,
+    /// The chip keyed now: the tones at unkey play on it after the path machine has planned the unkey.
+    chip: Option<u8>,
+    /// VOX (VOX-2, VOX-5, VOX-14): level 1-9 or 0 off, tail in 100 ms, the detector, and when PA0 was last read.
+    vox: (u8, u8),
+    vox_det: ferrite_core::vox::Vox,
+    vox_at: u32,
+    /// The region and Extend TX from the UI's last [`RadioCmd::TxPlan`]: the crossband repeater's key-ups use them.
+    region: Option<(Region, bool)>,
+    /// DTMF-3: each digit's on and off time (ms) and the first digit delay (10 ms); a dialled sequence, and whether
+    /// this transmission is one (no end tone or CW ID after it: TONE-11).
+    dtmf: (u8, u8),
+    digits: [u8; 16],
+    dialled: bool,
+}
+
+fn now_ms() -> u64 {
+    Instant::now().as_millis()
+}
+
+/// Bring-up log: a tag and a number, as plain bytes (no formatter: this task stays in the fast flash).
+fn log(tag: &[u8], v: u32) {
+    let mut b = [0u8; 48];
+    let n = tag.len().min(36);
+    b[..n].copy_from_slice(&tag[..n]);
+    let mut d = [0u8; 10];
+    let mut k = 0;
+    let mut x = v;
+    loop {
+        d[k] = b'0' + (x % 10) as u8;
+        k += 1;
+        x /= 10;
+        if x == 0 || k == 10 {
+            break;
+        }
+    }
+    let mut i = n;
+    while k > 0 && i < b.len() {
+        k -= 1;
+        b[i] = d[k];
+        i += 1;
+    }
+    crate::bringup::line(&b[..i]);
+}
+
+/// The scope's own index in [`Radio::tuned`] (after the counter's).
+const SCOPE_SLOT: u8 = 5;
+
+/// The counter's own index in [`Radio::tuned`] (after the three slots and HF mode's).
+const COUNTER_SLOT: u8 = 4;
+
+/// The SI4732's input path for its mode, as stock (BCR-20, `analysis/audio_path.md` §2): FM broadcast PA7 = PC5 = 0,
+/// AM (and SW, SSB, CW) PA7 = PC5 = 1, the LNA path.
+fn si_input(mode: SiMode) {
+    let [a, b] = radio_chip::si_input(mode != SiMode::Fm);
+    SI_IN[0].write(a);
+    SI_IN[1].write(b);
+}
+
+/// The boot check of the SI4732: reset pulse, FM power-up, ready within 500 ms, its revision read, then powered
+/// down and held in reset. True when it answered.
+async fn si_probe(si: &mut Si4732<SiBus>) -> bool {
+    let d = &mut BusyDelay;
+    SI_RST.write(false);
+    Timer::after_millis(10).await;
+    SI_RST.write(true);
+    Timer::after_millis(10).await;
+    let mut ok = si.power_up_start(SiMode::Fm).is_ok();
+    if ok {
+        let t0 = now_ms();
+        ok = loop {
+            match si.ready() {
+                Ok(true) => break true,
+                Ok(false) if now_ms() - t0 < 500 => Timer::after_millis(5).await,
+                _ => break false,
+            }
+        };
+    }
+    if ok {
+        ok = si.revision(d).is_ok();
+    }
+    let _ = si.power_down(d); // also clears the driver's mode when the chip didn't answer
+    SI_RST.write(false);
+    ok
+}
+
+/// The broadcast receiver: powered up in the mode asked for (reset pulse, power-up, crystal settling), then
+/// tuned by polling. FM in 10 kHz units, AM in kHz. PA7/PC5 take stock's state for the mode (BCR-20). SSB (patch from SPI flash) comes with the link's patch import.
+/// FM broadcast while on: the tuned frequency (10 kHz), the RDS decoder, the next report time.
+struct FmRx {
+    freq: u16,
+    rds: si4732::rds::Rds,
+    poll_at: u32,
+    /// RDS is read on every other report (5 times a second).
+    rds_turn: bool,
+}
+
+/// Returns the frequency the receiver tuned to (FM 10 kHz units, AM kHz; 0 when switched off).
+async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4732::Error> {
+    let d = &mut BusyDelay;
+    let (mode, freq) = match cmd {
+        BroadcastCmd::Off => {
+            if si.mode().is_some() {
+                si.power_down(d)?;
+            }
+            return Ok(0);
+        }
+        BroadcastCmd::Fm(f) => (SiMode::Fm, Some(f)),
+        BroadcastCmd::Am(f) => (SiMode::Am, Some(f)),
+        BroadcastCmd::Seek { up } => {
+            si.seek_start(up, d)?;
+            (si.mode().unwrap_or(SiMode::Fm), None)
+        }
+    };
+    if si.mode() != Some(mode) {
+        if si.mode().is_some() {
+            si.power_down(d)?;
+        }
+        si_input(mode);
+        SI_RST.write(false);
+        Timer::after_millis(10).await;
+        SI_RST.write(true);
+        Timer::after_millis(10).await;
+        si.power_up_start(mode)?;
+        while !si.ready()? {
+            Timer::after_millis(5).await;
+        }
+        Timer::after_millis(500).await; // crystal
+        si.volume(63, d)?; // the volume knob is analog, after the chip
+        if mode == SiMode::Fm {
+            let _ = si.rds_on(d); // BCR-2: station name and radio text
+        }
+    }
+    if let Some(f) = freq {
+        si.tune_start(f, Sideband::Usb, d)?;
+    }
+    loop {
+        if let Some(t) = si.tune_poll(d)? {
+            return Ok(t.freq);
+        }
+        Timer::after_millis(10).await;
+    }
+}
+
+/// Each chip: find the read alignment from its ID, then stock's start-up. Once at power-on; not inlined, so
+/// tools/slowcheck.py can tell its register tables (unnamed constants, in the slow flash) from the hot ones.
+#[inline(never)]
+fn start_chips(r: &mut Radio) {
+    for n in 0..2u8 {
+        let found = r.wire.detect(&mut r.cs[n as usize]).is_some();
+        if found {
+            r.chips |= 1 << n;
+            r.chip(n).init();
+            #[cfg(feature = "tx")]
+            {
+                r.tx.reg3b[n as usize] = r.chip(n).read(0x3B); // TX-7's reference
+            }
+            r.chip(n).sleep(); // until the engines give it a slot
+        }
+        check(Source::Radio, if n == 0 { CHECK_BK0 } else { CHECK_BK1 }, found);
+    }
+}
+
+#[embassy_executor::task]
+pub async fn task() {
+    for p in AMP_EN {
+        p.output(false, Mode::OutPp);
+    }
+    let bus = I2c { scl: SI_SCL, sda: SI_SDA, half_us: 5 }; // about 50 kHz
+    bus.init();
+    let mut r = Radio {
+        si: Si4732::new(SiBus(bus), SI4732_ADDR),
+        wire: ThreeWire::new(Out(BK_SCK), Io(BK_SDA), BusyDelay),
+        cs: [Out(BK_CS[0]), Out(BK_CS[1])],
+        chips: 0,
+        live: LiveAll::default(),
+        save: RxSleep::new(DEFAULT_SAVE, now_ms()),
+        temp: (None, None),
+        lease: ferrite_core::lease::Lease::new(),
+        bat_at: None,
+        sqcal: ferrite_core::sqcal::SqCal::DEFAULT,
+        sq_regs: [None; 2],
+        path: Path::new(),
+        muted: false,
+        si_used: false,
+        si_heard: false,
+        bturn: watch::BcastTurn::new(),
+        bcast_slot: None,
+        fm: None,
+        slots: [SlotRx::DEFAULT; SLOTS],
+        active: 0,
+        watch_set: 0,
+        watcher: Watch::new(),
+        hop: Hop::new(),
+        scans: [Scan::new(); SLOTS],
+        ranges: [scan::band_range(DEFAULT); SLOTS],
+        chans: scan::ChanScans::new(),
+        tuned: [None; 2],
+        maybe_awake: 0,
+        settle: Settle::DEFAULT,
+        woke: [None; 2],
+        keep: 0,
+        floor: [-125; 2],
+        monitor: 0,
+        user_mute: 0,
+        hints: [Hint::new(); SLOTS],
+        scan_tx: false,
+        tone_level: 1,
+        beep_gain: tonegen::beep_gain(3), // Mid
+        beep_level: 7,
+        hf: None,
+        counter: None,
+        scope: None,
+        sweep_hold: SweepHold::new(),
+        scope_cfg: (60, 100, false),
+        same_on: false,
+        same: SameRx { chip: None, at: None, armed: false, asm: Assembler::new(), repeats: Repeats::new() },
+        #[cfg(feature = "tx")]
+        tx: Tx {
+            seq: TxSeq::new(),
+            cal: None,
+            gauge: Gauge::default(),
+            tone: [0; 4],
+            power: [0; 4],
+            plan: None,
+            data: None,
+            ptt: ferrite_radio::ptt::PttGuard::default(),
+            pa: 0,
+            fault: false,
+            reg3b: [0; 2],
+            adc: false,
+            end: [0; 4],
+            tail: [false; 4],
+            slot: 0,
+            phase: 0,
+            cw: 0,
+            cw_call: [0; 10],
+            cw_len: 0,
+            sidetone: true,
+            dtmf: (100, 30),
+            digits: [0; 16],
+            dialled: false,
+            chip: None,
+            vox: (0, 20),
+            vox_det: ferrite_core::vox::Vox::new(),
+            vox_at: 0,
+            region: None,
+        },
+        #[cfg(feature = "tx")]
+        xb: None,
+    };
+    // Start from the safe state: every path low, the relay released (board start-up set them low already).
+    let mut s = Steps::default();
+    r.path.safe(now_ms() as u32, &mut s);
+    r.run(&s).await;
+    start_chips(&mut r);
+    r.live.chips = r.chips;
+    for (i, sl) in r.live.slots.iter_mut().enumerate() {
+        (sl.freq, sl.rssi) = (r.slots[i].freq, -121);
+    }
+    // SELF-*: the SI4732 at boot: out of reset (PA6), FM power-up, answering within 500 ms, then powered down and
+    // held in reset again until FM broadcast or HF mode needs it. Silent (no audio path changes).
+    let si_ok = si_probe(&mut r.si).await;
+    check(Source::Radio, crate::tasks::CHECK_SI, si_ok);
+    r.select_rx(DEFAULT, Cause::ActiveSlot).await;
+    r.tick().await;
+    let live = LIVE.sender();
+    live.send(r.live);
+
+    loop {
+        // Wake for the next command, the next Battery Save phase change, or (awake) the next tick.
+        let mut at = r.save.deadline();
+        // Broadcast FM's report (fm_poll) runs on the tick, also while Battery Save has the BK4829s asleep (BCR-19).
+        if !r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() {
+            at = at.min(now_ms() + if r.busy() { TICK_MS } else { POLL_MS });
+        }
+        // MODE-3: a held exclusive mode is checked by its lease's end at the latest.
+        r.lease_check().await;
+        if let Some(d) = r.lease.deadline() {
+            at = at.min(d as u64 + 1);
+        }
+        // Never wait on a time already past: that wait fires at once, and this task runs above the UI.
+        at = at.max(now_ms() + 1);
+        // The band scope waits its dwell between points (0.1 ms steps), listening or not at the tick.
+        let wake = match &r.scope {
+            // At least 2 ms between points whatever the dwell: each point is about 1.25 ms of BK4829 writes on a task
+            // that runs above the UI, and 1 ms points starved it (keys dead on the radio, Oct 12, 2026).
+            // SCOPE-14: held after a key or knob step: the next point once the hold is over.
+            Some(sc) if sc.listen == 0 => match r.sweep_hold.deadline() {
+                Some(d) => {
+                    let left = d.wrapping_sub(now_ms() as u32); // past the end: wraps above HOLD_MS
+                    Instant::now() + embassy_time::Duration::from_millis(if left <= sweephold::HOLD_MS { left as u64 } else { 0 })
+                }
+                None => Instant::now() + embassy_time::Duration::from_micros(sc.dwell_us.max(2_000) as u64),
+            },
+            _ => Instant::from_millis(at),
+        };
+        match select3(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive()).await {
+            Either3::First(c) => r.cmd(c).await,
+            Either3::Second(()) => r.tick().await,
+            Either3::Third(d) => {
+                let a = match d {
+                    DebugReq::RxBoth(on) => r.rx_both(on).await,
+                    d => r.debug(d),
+                };
+                DEBUG_ANS.send(a).await;
+                TERM_WAKE.signal(()); // the UI task runs the terminal
+                continue;
+            }
+        }
+        let snap = r.live;
+        // The GPS task's view (GPS-4, GPS-22): keyed, and any slot receiving.
+        let rx = snap.slots.iter().any(|s| s.squelch_open);
+        let rf = if snap.tx.keyed { crate::chan::RF_BUSY_KEYED } else { 0 } | if rx { crate::chan::RF_BUSY_RX } else { 0 };
+        crate::chan::RF_STATE.store(rf, core::sync::atomic::Ordering::Relaxed);
+        live.send_if_modified(|v| {
+            let changed = *v != Some(snap);
+            if changed {
+                *v = Some(snap);
+            }
+            changed
+        });
+    }
+}
+

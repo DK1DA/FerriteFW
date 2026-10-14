@@ -10,18 +10,22 @@ fn set(v: Vec<String>) -> BTreeSet<String> {
     v.into_iter().collect()
 }
 
+/// The Radio task's module directory: an `allowed` entry ending in `/` covers every file under it.
+const RADIO: &str = "firmware/src/tasks/radio/";
+
 fn only(found: Vec<String>, allowed: &[&str], what: &str) {
-    let extra: Vec<_> = set(found).into_iter().filter(|f| !allowed.contains(&f.as_str())).collect();
+    let ok = |f: &str| allowed.iter().any(|a| if a.ends_with('/') { f.starts_with(a) } else { f == *a });
+    let extra: Vec<_> = set(found).into_iter().filter(|f| !ok(f)).collect();
     assert!(extra.is_empty(), "{what}: only {allowed:?} may, but also {extra:?}");
 }
 
-/// GOAL-3, SAFE-10, TX-17, KISS-3, APRS-7: one owner per chip. Only the Radio task (`tasks/radio.rs`) uses the
+/// GOAL-3, SAFE-10, TX-17, KISS-3, APRS-7: one owner per chip. Only the Radio task (`tasks/radio/`) uses the
 /// BK4829 driver and the PA drive (`hal::pa`), so every transmission, whether PTT, VOX, DTMF, APRS, KISS or a
 /// remote key, has to ask it; only the UI task and its display driver use the ST7789.
 #[test]
 fn one_owner_per_chip() {
-    only(files_using("firmware/src", "bk4829"), &["firmware/src/tasks/radio.rs"], "the BK4829 driver");
-    only(files_using("firmware/src", "pa::"), &["firmware/src/tasks/radio.rs"], "the PA drive (hal::pa)");
+    only(files_using("firmware/src", "bk4829"), &[RADIO], "the BK4829 driver");
+    only(files_using("firmware/src", "pa::"), &[RADIO], "the PA drive (hal::pa)");
     only(
         files_using("firmware/src", "st7789"),
         &["firmware/src/display.rs", "firmware/src/bus.rs", "firmware/src/tasks/ui.rs"],
@@ -192,10 +196,11 @@ fn dictionary_is_small() {
 /// never uses the audio DAC's DMA path (`audio::`).
 #[test]
 fn tones_never_use_the_dac() {
-    only(files_using("firmware/src", "tone::"), &["firmware/src/board.rs", "firmware/src/bringup.rs", "firmware/src/tasks/radio.rs"], "the DAC tone");
+    only(files_using("firmware/src", "tone::"), &["firmware/src/board.rs", "firmware/src/bringup.rs", RADIO], "the DAC tone");
     let tonegen = code(&root().join("crates/ferrite-core/src/tonegen.rs"));
     assert!(!tonegen.contains("hal::tone") && !tonegen.contains("audio::"), "tonegen must not use the DAC");
-    let radio = code(&root().join("firmware/src/tasks/radio.rs"));
+    let radio: String = rs_files(RADIO).iter().map(|p| code(p)).collect();
+    assert!(!radio.is_empty(), "the Radio task's sources");
     assert!(!radio.contains("audio::"), "the Radio task must not use the audio DAC path");
     let uses: Vec<_> = radio.match_indices("hal::tone::").map(|(i, _)| i).collect();
     let beep = radio.find("async fn beep").expect("the beep");
@@ -206,7 +211,7 @@ fn tones_never_use_the_dac() {
 /// BCR-14: PA7/PC5, the SI4732's input switch, are set only by the Radio task's path state.
 #[test]
 fn si_input_pins_belong_to_the_radio_task() {
-    only(files_using("firmware/src", "SI_IN"), &["firmware/src/board.rs", "firmware/src/tasks/radio.rs"], "PA7/PC5 (SI_IN)");
+    only(files_using("firmware/src", "SI_IN"), &["firmware/src/board.rs", RADIO], "PA7/PC5 (SI_IN)");
 }
 
 /// GPS-1, GPS-22: the GPS task owns the module's power (PA8) and its TX pin PB10 (driven low while keyed); only
