@@ -739,6 +739,12 @@ impl Radio {
         #[cfg(feature = "tx")]
         self.vox_poll();
         if self.hf.is_some() {
+            // Keyed from HF mode (HF-23): the keyed tick as from home (TX-30 backstop, TX-31 duty limit, TX-32
+            // battery under load); the HF receiver's report waits for the unkey (TX audit M5).
+            #[cfg(feature = "tx")]
+            if self.path.keyed().is_some() {
+                return self.tx_tick(now_ms() as u32).await;
+            }
             self.hf_poll();
             return;
         }
