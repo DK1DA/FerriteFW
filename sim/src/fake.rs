@@ -791,6 +791,8 @@ impl FakeRadio {
                 self.settle = s.unwrap_or(self.settle);
                 DebugAns::Settle(self.settle)
             }
+            // TERM-32: the simulator has no mic: a quiet tap (all zero), as the radio reads at rest.
+            DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; ferrite_core::vox::MIC_SAMPLES], 32_000)),
         }
     }
 }

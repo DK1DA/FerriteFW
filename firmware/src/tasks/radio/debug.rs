@@ -26,6 +26,22 @@ impl Radio {
                 }
                 DebugAns::Settle(self.settle)
             }
+            // TERM-32 (a bench test): PA0, the mic level tap VOX reads, at 8 kHz for 32 ms, to tell raw audio from an
+            // envelope. Through the ADC's preempted group, as VOX; the Radio task waits through it.
+            DebugReq::Mic => {
+                use crate::hal::{adc, clock::SYSCLK_HZ, time::cycles};
+                use ferrite_core::vox::{MicCapture, MIC_PERIOD_US, MIC_SAMPLES};
+                adc::init();
+                let mut s = [0u16; MIC_SAMPLES];
+                let per = MIC_PERIOD_US * (SYSCLK_HZ / 1_000_000);
+                let start = cycles();
+                for (i, v) in s.iter_mut().enumerate() {
+                    while cycles().wrapping_sub(start) < i as u32 * per {}
+                    *v = adc::read(adc::CH_PA0);
+                }
+                let us = cycles().wrapping_sub(start) / (SYSCLK_HZ / 1_000_000);
+                DebugAns::Mic(MicCapture::from_samples(&s, us))
+            }
             DebugReq::Si { cmd, n, reply } => {
                 let (n, rn) = ((n as usize).min(8), (reply as usize).clamp(1, 16));
                 let mut data = [0u8; 16];

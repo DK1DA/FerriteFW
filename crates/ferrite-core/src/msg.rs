@@ -389,6 +389,9 @@ pub enum DebugReq {
     /// TERM-31, PWR-21 (decision 119, a bench test): the BK4829 wake and sleep settle waits, set (`Some`, each
     /// within [`crate::settle::MAX_MS`]) or only asked (`None`). RAM only.
     Settle(Option<crate::settle::Settle>),
+    /// TERM-32 (a bench test): a burst of PA0 readings ([`crate::vox::MIC_SAMPLES`] at [`crate::vox::MIC_PERIOD_US`]),
+    /// summed up by the Radio task.
+    Mic,
 }
 
 /// The longest GGA sentence [`DebugAns::Gga`] carries: NMEA's 82 characters less CR LF.
@@ -409,6 +412,8 @@ pub enum DebugAns {
     RxBoth(bool),
     /// TERM-31: the settle waits in force now.
     Settle(crate::settle::Settle),
+    /// TERM-32: the PA0 burst.
+    Mic(crate::vox::MicCapture),
     /// TERM-30: the last GGA sentence from `$` to the checksum (`n` 0: none since boot), and its age in seconds.
     Gga { data: [u8; GGA_MAX], n: u8, age_s: u32 },
     /// Not done, and why.

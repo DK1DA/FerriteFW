@@ -1,5 +1,5 @@
-//! The terminal's debug commands (manual chapter 37, TERM-21 to TERM-24, TERM-27, TERM-29, TERM-31): MCU memory, the GPIO
-//! ports, BK4829 registers, SI4732 commands, the Bluetooth module's queries, the both-receive-selects bench test and the BK4829 settle waits (TERM-31), for bring-up without a custom build each time. A command becomes a [`Job`]:
+//! The terminal's debug commands (manual chapter 37, TERM-21 to TERM-24, TERM-27, TERM-29, TERM-31, TERM-32): MCU memory, the GPIO
+//! ports, BK4829 registers, SI4732 commands, the Bluetooth module's queries, the both-receive-selects bench test, the BK4829 settle waits (TERM-31) and the mic tap capture (TERM-32), for bring-up without a custom build each time. A command becomes a [`Job`]:
 //! the firmware takes its requests one at a time ([`crate::term::Term::debug_req`]), answers them
 //! ([`crate::term::Term::debug_answer`]), and the console prints the answers as lines. Memory is read by the
 //! firmware where the terminal runs; registers by the Radio task, which owns the chips and refuses writes that
@@ -42,6 +42,8 @@ pub enum Kind {
     Gga,
     /// `bk settle [WAKE [SLEEP]]`: the BK4829 settle waits (TERM-31), set or asked.
     Settle(Option<ferrite_core::settle::Settle>),
+    /// `mic`: a burst of PA0 (the mic level tap) readings, summed up (TERM-32).
+    Mic,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -104,6 +106,7 @@ impl Job {
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
             Kind::Gga => DebugReq::Gga,
             Kind::Settle(s) => DebugReq::Settle(s),
+            Kind::Mic => DebugReq::Mic,
         })
     }
 
@@ -226,6 +229,21 @@ impl Job {
                     out.push(b" (stock's: no wait)");
                 }
                 self.st = St::Over;
+                Step::Line
+            }
+            (Kind::Mic, DebugAns::Mic(c)) => {
+                match self.line {
+                    0 => put!(out, "  mic PA0: {} readings in {} us: min {}, max {}, mean {} (12-bit)", ferrite_core::vox::MIC_SAMPLES, c.us, c.min, c.max, c.mean),
+                    1 => put!(out, "  {} crossings of the mean: {} Hz if this is raw audio (a level or envelope barely crosses)", c.crossings, c.hz()),
+                    _ => {
+                        out.push(b"  first 16 (8-bit):");
+                        for v in c.first {
+                            put!(out, " {}", v);
+                        }
+                        self.st = St::Over;
+                    }
+                }
+                self.line += 1;
                 Step::Line
             }
             (Kind::Gga, DebugAns::Gga { n: 0, .. }) => {

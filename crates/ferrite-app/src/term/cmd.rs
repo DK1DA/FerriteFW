@@ -1113,7 +1113,7 @@ pub fn writes(line: &[u8]) -> bool {
     let mut w = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty());
     let Some(c) = w.next() else { return false };
     let rest = w.count();
-    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"gps"].iter().any(|r| same(c, r));
+    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"gps", b"mic"].iter().any(|r| same(c, r));
     let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx"].iter().any(|r| same(c, r)) && rest == 0;
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"bk") && rest == 1 && line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1).is_some_and(|w| same(w, b"settle"));
@@ -1153,6 +1153,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
         _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
         _ if same(c, b"gps") => Ok(Done::Debug(Job::new(Kind::Gga))),
+        _ if same(c, b"mic") => Ok(Done::Debug(Job::new(Kind::Mic))),
         _ if same(c, b"bk") => bk(&mut t),
         _ if same(c, b"si") => si(&mut t),
         _ if same(c, b"bt") => bt(&mut t),
@@ -1453,7 +1454,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 28] = [
+const HELP: [&str; 29] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
@@ -1481,5 +1482,6 @@ const HELP: [&str; 28] = [
     "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
     "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
     "  gps                    the GPS module's last GGA sentence, its age and heights",
+    "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
 ];

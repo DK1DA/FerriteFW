@@ -1134,6 +1134,7 @@ fn regs(r: DebugReq) -> DebugAns {
         DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),
         DebugReq::Settle(s) => DebugAns::Settle(s.unwrap_or(ferrite_core::settle::Settle::DEFAULT)),
         // The ATGM336H sentence suspected on the black radio: field 9 low, field 11 empty.
+        DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
         DebugReq::Gga => gga(b"$GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57", 12),
     }
 }
@@ -1204,6 +1205,22 @@ fn debug_rx_both() {
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
     assert!(!super::cmd::writes(b"rx") && super::cmd::writes(b"rx both"));
+}
+
+/// TERM-32: `mic` asks the Radio task for a PA0 burst and prints its summary in three lines; it only reads.
+#[test]
+fn debug_mic() {
+    use ferrite_core::vox::MicCapture;
+    let mut r = Rig::main();
+    r.cmd("mic");
+    let sine: Vec<u16> = (0..256).map(|i| (2048.0 + 600.0 * (i as f64 * core::f64::consts::TAU / 8.0 + 0.3).sin()) as u16).collect();
+    let cap = MicCapture::from_samples(&sine, 32_000);
+    assert_eq!(r.serve(6, |_| DebugAns::Mic(cap)), vec![DebugReq::Mic]);
+    let raw = r.raw();
+    assert!(raw.contains("mic PA0: 256 readings in 32000 us"), "{raw}");
+    assert!(raw.contains(" Hz if this is raw audio"), "{raw}");
+    assert!(raw.contains("first 16 (8-bit):"), "{raw}");
+    assert!(!super::cmd::writes(b"mic"));
 }
 
 /// TERM-31: `bk settle` asks the waits, `bk settle N` sets both to N ms, `bk settle W S` each; 0 is stock's; out of
