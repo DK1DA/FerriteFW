@@ -23,6 +23,7 @@ pub mod layout;
 pub mod lease;
 pub mod link;
 pub mod mcutemp;
+pub mod memmap;
 pub mod msg;
 pub mod path;
 pub mod rxsleep;

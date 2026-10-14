@@ -1184,6 +1184,25 @@ fn debug_mem() {
     assert!(r.bottom().contains("word-aligned"), "{}", r.bottom());
 }
 
+/// TERM-22: an address outside the readable map (`ferrite_core::memmap`) is refused before anything goes to the
+/// radio, saying what can be read; the AT32's user system data at 1FFFF800 (STM32's option-byte address) reads.
+#[test]
+fn debug_mem_refuses_unsafe_addresses() {
+    let mut r = Rig::main();
+    for (c, says) in [
+        ("mem 50000000", "not readable; readable: flash 08000000"),
+        ("mem32 1FFFF000", "not readable; readable: flash"),
+        ("mem 080FFFF8 16", "not readable"),
+        ("mem 40010808", "use mem32"),
+    ] {
+        r.cmd(c);
+        assert!(r.serve(4, regs).is_empty(), "{c}: nothing sent");
+        assert!(r.bottom().contains(says), "{c}: {}", r.bottom());
+    }
+    r.cmd("mem 1FFFF800 48");
+    assert_eq!(r.serve(6, regs), vec![DebugReq::Mem { addr: 0x1FFF_F800, n: 48, words: false }]);
+}
+
 /// TERM-22: `gpio` reads each port's input and output registers, A to E.
 #[test]
 fn debug_gpio() {

@@ -1158,6 +1158,10 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
     if n == 0 || len > MEM_MAX as u32 || (words && !addr.is_multiple_of(4)) {
         return Err(msg!("{}", usage));
     }
+    // TERM-22: refused here, before anything goes to the radio, when any of it is outside the readable map.
+    if let Err(why) = ferrite_core::memmap::check(addr, len, words) {
+        return Err(msg!("{}", why));
+    }
     Ok(Done::Debug(Job::new(Kind::Mem { addr, len: len as u16, words })))
 }
 
