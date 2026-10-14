@@ -22,11 +22,17 @@ def main(elf):
             sec[m.group(1)] = tuple(int(m.group(i), 16) for i in (2, 3, 4))
     lo, _, n = sec[".slow_text"]
     hi = lo + n
-    fast_end = sec[".rodata"][0] + sec[".rodata"][2]
-    print(f"fast  0x08003000-0x{fast_end:08x}: {fast_end - 0x08003000} B (.text {sec['.text'][2]}, .rodata {sec['.rodata'][2]})")
+    fast_end = max(sec[s][0] + sec[s][2] for s in (".rodata", ".fast_ui"))
+    gaps = sum(sec[s][2] for s in (".fast_gap1", ".fast_gap2") if s in sec)
+    print(f"fast  0x08003000-0x{fast_end:08x}: {fast_end - 0x08003000} B (.text {sec['.text'][2]}, .rodata {sec['.rodata'][2]}, "
+          f".fast_ui {sec['.fast_ui'][2]}, by the tags {gaps})")
+    budget = next((int(l.split()[0], 16) for l in run("arm-none-eabi-nm", elf).splitlines() if l.endswith(" __fast_budget")), None)
+    if budget is not None:
+        print(f"fast budget {budget} B: {fast_end - 0x08003000} used, {budget - (fast_end - 0x08003000)} left")
     print(f"slow  .slow_rodata {sec['.slow_rodata'][2]} B, .slow_text {n} B")
 
-    dis = run("arm-none-eabi-objdump", "-d", "--no-show-raw-insn", "-j", ".text", "-j", ".slow_text", elf)
+    fast_secs = [a for s in (".fast_gap1", ".fast_gap2", ".fast_ui") if s in sec for a in ("-j", s)]
+    dis = run("arm-none-eabi-objdump", "-d", "--no-show-raw-insn", "-j", ".text", *fast_secs, "-j", ".slow_text", elf)
     start, edges, cur = {}, {}, None
     for l in dis.splitlines():
         m = re.match(r"^([0-9a-f]+) <(.*)>:", l)

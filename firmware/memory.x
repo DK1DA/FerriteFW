@@ -13,15 +13,33 @@ _stext = ORIGIN(FLASH) + 0x800;
 
 SECTIONS
 {
+  /* The room around the tags (0x1C0-0x3E0 after the vector table, 0x3F0-0x7E0 between the tags) holds a few
+   * fast functions instead of padding: ones whose size moves only with the pinned toolchain, so a change of ours
+   * never pushes them past a tag. If one ever outgrows its gap, the ASSERTs below stop the link: drop its line
+   * (it then goes back into .text). Each is as fast here as in .text (all zero-wait flash). */
+  .fast_gap1 : ALIGN(4)
+  {
+    *(.text.*17compiler_builtins3int19specialized_div_rem11u64_div_rem);
+  } > FLASH
+  __efast_gap1 = .;
   .model_tag ORIGIN(FLASH) + 0x3E0 :
   {
     KEEP(*(.model_tag));
   } > FLASH
+  .fast_gap2 : ALIGN(4)
+  {
+    *(.text.*17compiler_builtins3mem7memmove);
+    *(.text.*17compiler_builtins3mem6memcpy);
+  } > FLASH
+  __efast_gap2 = .;
   .model_tag_boot ORIGIN(FLASH) + 0x7E0 :
   {
     KEEP(*(.model_tag_boot));
   } > FLASH
 } INSERT AFTER .vector_table;
+
+ASSERT(__efast_gap1 <= ORIGIN(FLASH) + 0x3E0, ".fast_gap1 runs into the model tag at 0x3E0: drop a line from it");
+ASSERT(__efast_gap2 <= ORIGIN(FLASH) + 0x7E0, ".fast_gap2 runs into the model tag at 0x7E0: drop a line from it");
 
 /* The slow part of flash. The AT32F403A runs code at full speed only from the first 256 KB (0x08000000-0x0803FFFF,
  * zero-wait; docs/firmware-design.md, "MCU flash"). Everything that has to be fast stays in .text and .rodata at
@@ -92,6 +110,13 @@ SECTIONS
     __eslow_text = .;
   } > FLASH
 } INSERT AFTER .rodata;
+
+/* The fast-flash budget: everything from the image start to the end of .fast_ui (vectors, the gaps by the tags,
+ * .text, .rodata, .fast_ui). Set Oct 13, 2026 at the tx build's use (141.5 KB; the receive-only build 127.6 KB)
+ * plus a small margin, of the 244 KB zero-wait room: growth past it is a decision (move something to the slow
+ * part, or raise this), not an accident. tools/slowcheck.py prints the use against it. */
+__fast_budget = 148K;
+ASSERT(__efast_ui - ORIGIN(FLASH) <= __fast_budget, "fast flash over its budget (__fast_budget in memory.x): move code to the slow part or raise the budget");
 
 /* The fast part (code and the other constants) must end inside the zero-wait region (0x08000000 + 256 KB). */
 ASSERT(__erodata <= 0x08040000, "fast code and constants run past the 256 KB zero-wait flash");
