@@ -1577,7 +1577,7 @@ fn colour_is_optional() {
 /// Bless a deliberate change with FERRITE_BLESS=1.
 #[test]
 fn settings_golden() {
-    use crate::screens::groups::{self, SETTABLE};
+    use crate::screens::groups;
     use std::fmt::Write as _;
     use std::string::ToString;
 
@@ -1635,7 +1635,7 @@ fn settings_golden() {
         match pass {
             1 => {
                 // A changed radio: every settable path stepped a few times, a few fields set directly.
-                for (k, p) in SETTABLE.iter().enumerate() {
+                for (k, p) in groups::settable().enumerate() {
                     for d in [1, 1, -1, (k % 3) as i32 + 1] {
                         groups::change(&mut r.app, p, d);
                     }
@@ -1712,7 +1712,7 @@ fn settings_golden() {
             r.app.go_home();
         }
         let _ = writeln!(out, "-- set");
-        for p in SETTABLE.iter() {
+        for p in groups::settable() {
             for v in ["xyzzy", "on", "off", "1", "2", "10", "none"] {
                 let s = said(&mut r, &std::format!("set 0 {} {v}", ptxt(p)));
                 let _ = writeln!(out, "{}", s.trim());
@@ -1727,7 +1727,9 @@ fn settings_golden() {
     }
     let want = std::fs::read_to_string(&path).unwrap_or_default();
     if want != out {
-        let new = path.with_extension("golden.new");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/golden-diff");
+        let _ = std::fs::create_dir_all(&dir);
+        let new = dir.join("settings.golden.new");
         std::fs::write(&new, &out).unwrap();
         let line = want.lines().zip(out.lines()).position(|(a, b)| a != b).unwrap_or(0);
         panic!("settings differ from {} at line {} (written: {})", path.display(), line + 1, new.display());

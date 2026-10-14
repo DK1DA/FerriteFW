@@ -8,7 +8,7 @@
 use super::{blocked, mhz5, parse_mhz};
 use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
 use crate::data::{Op, RangePreset, ZoneCfg};
-use crate::screens::groups::{self, SETTABLE, SUBS};
+use crate::screens::groups::{self, SUBS};
 use crate::screens::tones::{CTCSS_MAX, CTCSS_MIN};
 use crate::slot::{band_of, BAND_125M, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
 use crate::App;
@@ -943,7 +943,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     if let Some(why) = groups::greyed(app, p) {
         return Err(msg!("{}: {}", name, why));
     }
-    if !SETTABLE.contains(&p) {
+    if !groups::is_settable(p) {
         return Err(msg!("{} can't be set yet: it keeps its default until its feature lands", name));
     }
     let want = t.rest();
@@ -1319,6 +1319,7 @@ const HEAD: [&str; 3] = [
 /// The dump's next line into `out`; false once it is over (TERM-13: streamed, never held whole).
 pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpPos, out: &mut Line) -> bool {
     out.clear();
+    let settable = groups::settable().count();
     loop {
         let i = p.i;
         p.i += 1;
@@ -1331,18 +1332,17 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 out.push(HEAD[i as usize - 1].as_bytes());
                 return true;
             }
-            1 if (i as usize) < SETTABLE.len() => {
-                let path = SETTABLE[i as usize];
-                if groups::greyed(app, path).is_none() {
+            1 if (i as usize) < settable => {
+                if let Some(path) = groups::settable().nth(i as usize).filter(|p| groups::greyed(app, p).is_none()) {
                     set_line(app, dev, path, out);
                     return true;
                 }
             }
-            1 if i as usize == SETTABLE.len() => {
+            1 if i as usize == settable => {
                 put!(out, "# 0 9 4 Region: {} (changes only on the radio)", app.set.region_name());
                 return true;
             }
-            1 if i as usize == SETTABLE.len() + 1 => {
+            1 if i as usize == settable + 1 => {
                 if let Some(c) = app.set.boot_callsign() {
                     put!(out, "# 0 8 7 Callsign: {} (set on the radio)", Bytes(c));
                     return true;
@@ -1405,11 +1405,11 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
             None => false,
         },
         List::Changed => {
-            let changed = SETTABLE.iter().filter(|p| {
+            let mut changed = groups::settable().filter(|p| {
                 let mut v = Buf::<24>::new();
                 value(app, dev, p, &mut v)
             });
-            match changed.copied().nth(i as usize) {
+            match changed.nth(i as usize) {
                 Some(p) => {
                     set_line(app, dev, p, out);
                     true

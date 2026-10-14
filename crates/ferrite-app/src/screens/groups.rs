@@ -1,7 +1,9 @@
 //! A settings group (MENU 0 n) and a third-level list (MENU 0 n m): one list widget for both (manual chapter
 //! 11, MENU-3 to MENU-24; MenuGroup mock-up). The lists are data: [`GROUP_ITEMS`] and [`SUBS`] hold every item
-//! of the manual's Appendix A with its value and help line; [`wired`] gives the live value of the settings that exist
-//! so far, and [`change`] changes them. The rest show their default, read only, until their feature lands.
+//! of the manual's Appendix A with its value and help line. [`SETTINGS`] has each wired setting once: its path,
+//! its field, how it shows and steps, and what the Radio task is told; [`wired`] (the live value), [`change`] (the
+//! knob) and [`reset`] (#) work from it, with a short match for the settings that need more. The rest show their
+//! default, read only, until their feature lands.
 //!
 //! Keys: ▲▼ move, the knob or ◀▶ change the highlighted value (MENU-16), OK opens a screen or list, a digit
 //! picks its row and opens it (MENU-5: a path typed straight through lands where it would typed slowly), #
@@ -343,7 +345,241 @@ pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// The live value of a wired setting, and whether it differs from its default (MENU-12).
+/// What the Radio task is told after a setting changes (the knob, #, the terminal).
+#[derive(Clone, Copy)]
+enum Tell {
+    Nothing,
+    ScanTx,
+    BeepVol,
+    Vox,
+    TxTones,
+    SlotTones,
+}
+
+/// How a setting in [`SETTINGS`] shows, steps and resets.
+#[derive(Clone, Copy)]
+enum Kind {
+    /// Two values (Off/On, or the two names given): any knob step flips it.
+    Flip(&'static [&'static str; 2]),
+    /// One of a list's values, round and round.
+    Pick(&'static [&'static str]),
+    /// 0 to n - 1, round and round, shown by the function.
+    Round(u8, fn(u8, &mut Buf<24>)),
+    /// lo to hi in steps, stopping at the ends, shown by the function.
+    Level(u8, u8, u8, fn(u8, &mut Buf<24>)),
+    /// Shown, stepped and reset by name in [`wired`], [`change`] and [`reset`] (more than one field, a typed
+    /// value, a store of its own, or a step of its own).
+    Special,
+}
+
+/// One setting: its menu path (a 0 ends a two-number path), whether the terminal's `set` and `dump` take it
+/// (TERM-12, TERM-13), how it behaves, the `Settings` field it reads and writes as a number (a bool is 0 or 1),
+/// and what the Radio task is told after a change. Its default is the field's value in `Settings::DEFAULT`.
+#[derive(Clone, Copy)]
+pub(crate) struct Setting {
+    path: [u8; 3],
+    term: bool,
+    kind: Kind,
+    get: fn(&Settings) -> u8,
+    set: fn(&mut Settings, u8),
+    tell: Tell,
+}
+
+impl Setting {
+    fn path(&self) -> &[u8] {
+        &self.path[..if self.path[2] == 0 { 2 } else { 3 }]
+    }
+}
+
+/// A `Setting` for a field: `field!(gps_on: bool, ...)` or `field!(theme: u8, ...)`.
+macro_rules! field {
+    ($path:expr, $f:ident: bool, $kind:expr, $tell:ident) => {
+        Setting { path: $path, term: true, kind: $kind, get: |s| s.$f as u8, set: |s, v| s.$f = v != 0, tell: Tell::$tell }
+    };
+    ($path:expr, $f:ident: u8, $kind:expr, $tell:ident) => {
+        Setting { path: $path, term: true, kind: $kind, get: |s| s.$f, set: |s, v| s.$f = v, tell: Tell::$tell }
+    };
+    ($path:expr, special) => {
+        Setting { path: $path, term: true, kind: Kind::Special, get: |_| 0, set: |_, _| {}, tell: Tell::Nothing }
+    };
+}
+
+/// Every setting the menu changes, in menu order: what the terminal's `set` takes and `dump` writes (less those
+/// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
+/// setting is one row here (and its field, default and place in `persist.rs`).
+#[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
+static SETTINGS: [Setting; 66] = [
+    field!([1, 1, 0], special),
+    field!([1, 5, 0], special),
+    field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
+    field!([1, 6, 5], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
+    field!([3, 1, 2], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), Nothing),
+    field!([3, 1, 3], fm_agc: u8, Kind::Round(11, agc_text), Nothing),
+    field!([3, 1, 4], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([3, 1, 5], fm_sleep: u8, Kind::Round(SLEEP_TIMES.len() as u8, sleep_text), Nothing),
+    field!([3, 2, 1], scope_bars: u8, Kind::Round(SCOPE_BAR_COUNTS.len() as u8, bars_text), Nothing),
+    field!([3, 2, 2], scope_step: u8, Kind::Round(crate::slot::STEPS.len() as u8, scope_step_text), Nothing),
+    field!([3, 2, 3], special),
+    field!([3, 2, 4], scope_trig: u8, Kind::Pick(&SCOPE_TRIGGERS), Nothing),
+    field!([3, 2, 5], scope_wf: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([4, 2, 1], pocsag_on: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([4, 2, 2], special),
+    field!([4, 2, 3], special),
+    field!([4, 8, 0], popups: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([4, 9, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([5, 3, 0], special),
+    field!([5, 5, 1], special),
+    field!([5, 5, 3], special),
+    field!([5, 5, 4], special),
+    field!([5, 6, 1], special),
+    field!([5, 6, 2], special),
+    field!([5, 8, 1], special),
+    field!([5, 8, 2], special),
+    field!([5, 8, 3], special),
+    field!([5, 9, 1], kiss_port: u8, Kind::Pick(&crate::settings::KISS_PORTS), Nothing),
+    field!([6, 1, 0], gps_on: bool, Kind::Flip(&ON_OFF), Nothing),
+    // The knob steps it on the radio; the terminal doesn't take it.
+    Setting { term: false, ..field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing) },
+    field!([6, 4, 0], units: u8, Kind::Pick(&UNITS), Nothing),
+    field!([6, 5, 0], tz: u8, Kind::Round(TIME_ZONES.len() as u8, zone_text), Nothing),
+    field!([6, 6, 0], special),
+    field!([6, 8, 0], gps_rxtx: u8, Kind::Pick(&GPS_RXTX), Nothing),
+    field!([7, 1, 0], theme: u8, Kind::Pick(&THEMES), Nothing),
+    field!([7, 2, 0], layout: u8, Kind::Pick(&LAYOUTS), Nothing),
+    field!([7, 3, 2], pon: u8, Kind::Pick(&POWER_ON), Nothing),
+    field!([7, 3, 3], boot_card: bool, Kind::Flip(&BOOT_SCREENS), Nothing),
+    field!([7, 4, 1], backlight: u8, Kind::Round(BACKLIGHT_TIMES.len() as u8, backlight_text), Nothing),
+    field!([7, 4, 2], special),
+    field!([7, 4, 3], tx_light: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([7, 4, 4], wake_on: u8, Kind::Pick(&WAKE_ON), Nothing),
+    field!([7, 4, 5], keypad_light: u8, Kind::Pick(&KEYPAD_LIGHTS), Nothing),
+    field!([7, 5, 1], key_beep: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([7, 5, 2], beep_vol: u8, Kind::Level(1, 3, 1, beep_vol_text), BeepVol),
+    field!([7, 5, 3], alert_tones: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([7, 5, 4], arrival_tone: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([7, 6, 0], leds: u8, Kind::Pick(&LED_MODES), Nothing),
+    field!([7, 7, 0], special),
+    field!([7, 8, 0], auto_off: u8, Kind::Round(AUTO_OFF_TIMES.len() as u8, auto_off_text), Nothing),
+    field!([8, 2, 1], vox: bool, Kind::Flip(&ON_OFF), Vox),
+    field!([8, 2, 2], vox_level: u8, Kind::Level(1, 9, 1, vox_level_text), Vox),
+    field!([8, 2, 3], vox_tail: u8, Kind::Round(VOX_TAILS.len() as u8, vox_tail_text), Vox),
+    field!([8, 4, 2], special),
+    field!([8, 5, 1], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
+    field!([8, 5, 2], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
+    field!([8, 5, 4], end_tone: u8, Kind::Pick(&END_TONE_NAMES), SlotTones),
+    // 50-200 ms in 10 ms steps (DTMF-3)
+    field!([8, 6, 3], dtmf_ms: u8, Kind::Level(50, 200, 10, dtmf_ms_text), TxTones),
+    field!([8, 6, 6], dtmf_sidetone: bool, Kind::Flip(&ON_OFF), TxTones),
+    // 0-1000 ms in 50 ms steps (DTMF-3)
+    field!([8, 6, 7], dtmf_delay: u8, Kind::Level(0, 100, 5, dtmf_delay_text), TxTones),
+    field!([8, 7, 2], cw_id: u8, Kind::Pick(&CW_ID_MODES), TxTones),
+    field!([9, 1, 1], auto_lock: u8, Kind::Round(AUTO_LOCK_TIMES.len() as u8, auto_lock_text), Nothing), // KEY-20
+    field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 2, 4], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
+    field!([9, 2, 5], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 2, 6], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
+];
+
+fn row(p: &[u8]) -> Option<&'static Setting> {
+    SETTINGS.iter().find(|r| r.path() == p)
+}
+
+/// The settings the terminal's `set` takes and `dump` writes, in menu order (TERM-12, TERM-13).
+pub(crate) fn settable() -> impl Iterator<Item = &'static [u8]> + Clone {
+    SETTINGS.iter().filter(|r| r.term).map(|r| r.path())
+}
+
+/// Whether the terminal's `set` takes this path.
+pub(crate) fn is_settable(p: &[u8]) -> bool {
+    row(p).is_some_and(|r| r.term)
+}
+
+fn tell(app: &mut App, t: Tell) {
+    match t {
+        Tell::Nothing => {}
+        Tell::ScanTx => app.out.push(RadioCmd::ScanTx(app.set.scan_tx)),
+        Tell::BeepVol => app.out.push(RadioCmd::BeepVol(app.set.beep_vol)),
+        Tell::Vox => app.send_vox(),
+        Tell::TxTones => app.send_tx_tones(),
+        Tell::SlotTones => app.send_slot_tones(),
+    }
+}
+
+// The texts of the Round and Level settings.
+fn prio_text(v: u8, b: &mut Buf<24>) {
+    if v == 0 {
+        b.set(b"Off");
+    } else {
+        let _ = uwrite!(b, "Every {} s", v);
+    }
+}
+
+fn fm_step_text(v: u8, b: &mut Buf<24>) {
+    b.set(FM_STEPS[v as usize % 3].1.as_bytes());
+}
+
+fn sleep_text(v: u8, b: &mut Buf<24>) {
+    match SLEEP_TIMES[v as usize % SLEEP_TIMES.len()] {
+        0 => b.set(b"Off"),
+        m => {
+            let _ = uwrite!(b, "{} min", m);
+        }
+    }
+}
+
+fn bars_text(v: u8, b: &mut Buf<24>) {
+    let _ = uwrite!(b, "{}", SCOPE_BAR_COUNTS[v as usize % 4]);
+}
+
+fn scope_step_text(v: u8, b: &mut Buf<24>) {
+    b.set(crate::slot::STEPS[v as usize % crate::slot::STEPS.len()].1.as_bytes());
+}
+
+fn zone_text(v: u8, b: &mut Buf<24>) {
+    let mut t = Buf::<16>::new();
+    tz_text(TIME_ZONES[v as usize % TIME_ZONES.len()], &mut t);
+    b.set(t.as_bytes());
+}
+
+fn backlight_text(v: u8, b: &mut Buf<24>) {
+    secs(b, BACKLIGHT_TIMES[v as usize % BACKLIGHT_TIMES.len()] as u32, "Never");
+}
+
+fn auto_off_text(v: u8, b: &mut Buf<24>) {
+    secs(b, AUTO_OFF_TIMES[v as usize % AUTO_OFF_TIMES.len()] as u32 * 60, "Off");
+}
+
+fn auto_lock_text(v: u8, b: &mut Buf<24>) {
+    secs(b, AUTO_LOCK_TIMES[v as usize % AUTO_LOCK_TIMES.len()] as u32, "Off");
+}
+
+fn vox_tail_text(v: u8, b: &mut Buf<24>) {
+    let t = VOX_TAILS[v as usize % VOX_TAILS.len()];
+    if t.is_multiple_of(10) {
+        let _ = uwrite!(b, "{} s", t / 10);
+    } else {
+        let _ = uwrite!(b, "{}.{} s", t / 10, t % 10);
+    }
+}
+
+fn beep_vol_text(v: u8, b: &mut Buf<24>) {
+    b.set(BEEP_VOLS[(v.clamp(1, 3) - 1) as usize % BEEP_VOLS.len()].as_bytes());
+}
+
+fn vox_level_text(v: u8, b: &mut Buf<24>) {
+    let _ = uwrite!(b, "{}", v.clamp(1, 9));
+}
+
+fn dtmf_ms_text(v: u8, b: &mut Buf<24>) {
+    let _ = uwrite!(b, "{} ms", v.clamp(50, 200));
+}
+
+fn dtmf_delay_text(v: u8, b: &mut Buf<24>) {
+    let _ = uwrite!(b, "{} ms", v.min(100) as u32 * 10);
+}
+
+/// The live value of a wired setting, and whether it differs from its default (MENU-12): the special cases by
+/// name, the rest from [`SETTINGS`].
 pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Option<bool> {
     let s = &app.set;
     let pick = |b: &mut Buf<24>, l: &[&str], i: u8| b.set(l[i as usize % l.len()].as_bytes());
@@ -352,21 +588,9 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &WATCH_TEXT, app.watch);
             app.watch != 1
         }
-        [6, 1] => {
-            pick(b, &ON_OFF, s.gps_on as u8);
-            !s.gps_on
-        }
-        [6, 8] => {
-            pick(b, &GPS_RXTX, s.gps_rxtx);
-            s.gps_rxtx != 0
-        }
-        [6, 3] => {
-            pick(b, &COORD_FORMATS, s.coord_fmt);
-            s.coord_fmt != Settings::DEFAULT.coord_fmt
-        }
-        [6, 4] => {
-            pick(b, &UNITS, s.units);
-            s.units != 0
+        [1, 5] => {
+            resume_text(b, s.scan_resume);
+            s.scan_resume != Settings::DEFAULT.scan_resume
         }
         [6, 9] => {
             if s.fixed_on {
@@ -385,12 +609,6 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             }
             n != 0
         }
-        [6, 5] => {
-            let mut t = Buf::<16>::new();
-            s.tz_text(&mut t);
-            b.set(t.as_bytes());
-            s.tz != TZ_DEFAULT
-        }
         [6, 6] => {
             pick(b, &CLOCKS, s.clock);
             if s.clock_gps {
@@ -398,24 +616,12 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             }
             s.clock != 0 || !s.clock_gps
         }
-        [7, 1] => {
-            pick(b, &THEMES, s.theme);
-            s.theme != 0
-        }
-        [7, 2] => {
-            pick(b, &LAYOUTS, s.layout);
-            s.layout != 0
-        }
         [7, 3, 2] => {
             pick(b, &POWER_ON, s.pon);
             if s.pon == 2 && !s.pon_text.is_empty() {
                 b.set(s.pon_text.as_bytes());
             }
             s.pon != 1
-        }
-        [7, 3, 3] => {
-            pick(b, &BOOT_SCREENS, s.boot_card as u8);
-            s.boot_card
         }
         [7, 7] => {
             let mut t = Buf::<16>::new();
@@ -443,43 +649,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(VERSION.as_bytes());
             false
         }
-        [3, 1, 2] => {
-            b.set(FM_STEPS[s.fm_step as usize % 3].1.as_bytes());
-            s.fm_step != 1
-        }
-        [3, 1, 3] => {
-            agc_text(s.fm_agc, b);
-            s.fm_agc != 0
-        }
-        [3, 1, 4] => {
-            pick(b, &ON_OFF, s.fm_monitor as u8);
-            !s.fm_monitor
-        }
-        [3, 1, 5] => {
-            match SLEEP_TIMES[s.fm_sleep as usize % SLEEP_TIMES.len()] {
-                0 => b.set(b"Off"),
-                m => {
-                    let _ = uwrite!(b, "{} min", m);
-                }
-            }
-            s.fm_sleep != 0
-        }
-        [3, 2, 1] => {
-            let _ = uwrite!(b, "{}", SCOPE_BAR_COUNTS[s.scope_bars as usize % 4]);
-            s.scope_bars != 1
-        }
-        [3, 2, 2] => {
-            b.set(crate::slot::STEPS[s.scope_step as usize % crate::slot::STEPS.len()].1.as_bytes());
-            s.scope_step != 11
-        }
         [3, 2, 3] => {
             let d = s.scope_dwell.clamp(1, 100);
             let _ = uwrite!(b, "{}.{} ms", d / 10, d % 10);
             s.scope_dwell != 100
-        }
-        [3, 2, 4] => {
-            pick(b, &SCOPE_TRIGGERS, s.scope_trig);
-            s.scope_trig != 0
         }
         [5, 3] => {
             pick(b, &ON_OFF, s.aprs_mode as u8);
@@ -507,10 +680,6 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(if c.custom_text().is_empty() { b"None".as_slice() } else { c.custom_text() });
             !c.custom_text().is_empty()
         }
-        [4, 8] => {
-            pick(b, &ON_OFF, s.popups as u8);
-            !s.popups
-        }
         [5, 8] | [5, 8, 1] => {
             pick(b, &ON_OFF, app.aprs_cfg().digi_on() as u8);
             app.aprs_cfg().digi_on()
@@ -527,121 +696,23 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(crate::slot::mhz3(app.aprs_freq()).as_bytes());
             app.aprs_cfg().f5k != 0
         }
-        [3, 2, 5] => {
-            pick(b, &ON_OFF, s.scope_wf as u8);
-            s.scope_wf
-        }
-        [9, 2, 5] => {
-            pick(b, &ON_OFF, s.term_colour as u8);
-            s.term_colour
-        }
-        [9, 2, 6] => {
-            pick(b, &ON_OFF, s.cable_log as u8);
-            s.cable_log
-        }
-        [7, 4] | [7, 4, 1] => {
-            secs(b, BACKLIGHT_TIMES[s.backlight as usize % BACKLIGHT_TIMES.len()] as u32, "Never");
-            s.backlight != Settings::DEFAULT.backlight
-        }
+        // A group's row shows its list's first setting.
+        [7, 4] => return wired(app, dev, &[7, 4, 1], b),
+        [8, 2] => return wired(app, dev, &[8, 2, 1], b),
         [7, 4, 2] => {
             let _ = uwrite!(b, "{}", s.brightness());
             let mut d = Settings::DEFAULT;
             d.theme = s.theme;
             s.brightness() != d.brightness()
         }
-        [7, 4, 3] => {
-            pick(b, &ON_OFF, s.tx_light as u8);
-            !s.tx_light
-        }
-        [7, 4, 4] => {
-            pick(b, &WAKE_ON, s.wake_on);
-            s.wake_on != Settings::DEFAULT.wake_on
-        }
-        [7, 4, 5] => {
-            pick(b, &KEYPAD_LIGHTS, s.keypad_light);
-            s.keypad_light != Settings::DEFAULT.keypad_light
-        }
-        [7, 5, 1] => {
-            pick(b, &ON_OFF, s.key_beep as u8);
-            !s.key_beep
-        }
-        [7, 5, 2] => {
-            pick(b, &BEEP_VOLS, s.beep_vol.clamp(1, 3) - 1);
-            s.beep_vol != Settings::DEFAULT.beep_vol
-        }
-        [7, 5, 3] => {
-            pick(b, &ON_OFF, s.alert_tones as u8);
-            !s.alert_tones
-        }
-        [7, 5, 4] => {
-            pick(b, &ON_OFF, s.arrival_tone as u8);
-            !s.arrival_tone
-        }
-        [8, 2] | [8, 2, 1] => {
-            pick(b, &ON_OFF, s.vox as u8);
-            s.vox
-        }
-        [8, 2, 2] => {
-            let _ = uwrite!(b, "{}", s.vox_level.clamp(1, 9));
-            s.vox_level != Settings::DEFAULT.vox_level
-        }
-        [8, 2, 3] => {
-            let t = VOX_TAILS[s.vox_tail as usize % VOX_TAILS.len()];
-            if t.is_multiple_of(10) {
-                let _ = uwrite!(b, "{} s", t / 10);
-            } else {
-                let _ = uwrite!(b, "{}.{} s", t / 10, t % 10);
-            }
-            s.vox_tail != Settings::DEFAULT.vox_tail
-        }
-        [7, 6] => {
-            pick(b, &LED_MODES, s.leds);
-            s.leds != Settings::DEFAULT.leds
-        }
-        [7, 8] => {
-            secs(b, AUTO_OFF_TIMES[s.auto_off as usize % AUTO_OFF_TIMES.len()] as u32 * 60, "Off");
-            s.auto_off != 0
-        }
-        [9, 1] | [9, 1, 1] => {
+        [9, 1] => {
             let t = AUTO_LOCK_TIMES[s.auto_lock as usize % AUTO_LOCK_TIMES.len()] as u32;
-            if p.len() == 2 && t == 0 {
+            if t == 0 {
                 b.set(b"No auto lock");
             } else {
                 secs(b, t, "Off");
             }
             s.auto_lock != 0
-        }
-        [8, 6, 6] => {
-            pick(b, &ON_OFF, s.dtmf_sidetone as u8);
-            !s.dtmf_sidetone
-        }
-        [8, 5, 1] => {
-            pick(b, &TAIL_MODES, s.tail_mode);
-            s.tail_mode != 0
-        }
-        [8, 5, 2] => {
-            pick(b, &TAIL_PHASES, s.tail_phase);
-            s.tail_phase != 0
-        }
-        [8, 5, 4] => {
-            pick(b, &END_TONE_NAMES, s.end_tone);
-            s.end_tone != 0
-        }
-        [8, 6, 3] => {
-            let _ = uwrite!(b, "{} ms", s.dtmf_ms.clamp(50, 200));
-            s.dtmf_ms != Settings::DEFAULT.dtmf_ms
-        }
-        [8, 6, 7] => {
-            let _ = uwrite!(b, "{} ms", s.dtmf_delay.min(100) as u32 * 10);
-            s.dtmf_delay != Settings::DEFAULT.dtmf_delay
-        }
-        [8, 7, 2] => {
-            pick(b, &CW_ID_MODES, s.cw_id);
-            s.cw_id != 0
-        }
-        [4, 9, 1] => {
-            pick(b, &ON_OFF, s.same as u8);
-            !s.same
         }
         // 0 4 2 (DEC-4, DEC-18): the row in the group shows the frequency while decoding, else Off.
         [4, 2] => {
@@ -650,10 +721,6 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             } else {
                 b.set(b"Off");
             }
-            s.pocsag_on
-        }
-        [4, 2, 1] => {
-            pick(b, &ON_OFF, s.pocsag_on as u8);
             s.pocsag_on
         }
         [4, 2, 2] => {
@@ -668,23 +735,11 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             }
             s.pocsag_cap != 0
         }
-        [9, 2, 1] => {
-            pick(b, &ON_OFF, s.bt as u8);
-            s.bt
-        }
-        [9, 2, 4] => {
-            pick(b, &CABLE_PORTS, s.cable_port);
-            s.cable_port != 0
-        }
-        [5, 9, 1] => {
-            pick(b, &crate::settings::KISS_PORTS, s.kiss_port);
-            s.kiss_port != 0
-        }
         [9, 2] => {
             b.set(if dev.bt { b"BT connected".as_slice() } else if s.bt { b"BT on" } else { b"BT off" });
             s.bt
         }
-        [9, 7] => {
+        [9, 7] | [9, 7, 1] => {
             b.set(cal_text(dev.selftest.cal).as_bytes());
             false
         }
@@ -692,22 +747,6 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(s.callsign.as_bytes());
             b.push(b"-9");
             false
-        }
-        [1, 6, 3] => {
-            pick(b, &ON_OFF, s.scan_tx as u8);
-            s.scan_tx
-        }
-        [1, 5] => {
-            resume_text(b, s.scan_resume);
-            s.scan_resume != Settings::DEFAULT.scan_resume
-        }
-        [1, 6, 5] => {
-            if s.scan_prio == 0 {
-                b.set(b"Off");
-            } else {
-                let _ = uwrite!(b, "Every {} s", s.scan_prio);
-            }
-            s.scan_prio != Settings::DEFAULT.scan_prio
         }
         [8, 4, 2] => {
             pick(b, &crate::settings::TONE_LEVELS, s.tone_level);
@@ -725,18 +764,161 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(if s.pin_len > 0 { b"Set" } else { b"None" });
             s.pin_len > 0
         }
-        [9, 7, 1] => {
-            b.set(cal_text(dev.selftest.cal).as_bytes());
-            false
-        }
         [9, 7, 3] => {
             let t = dev.selftest.battery_trim as i32;
             let _ = uwrite!(b, "{}{}.{} V", if t < 0 { "-" } else { "+" }, t.abs() / 100, ferrite_ui::text::Zero(t.unsigned_abs() % 100, 2));
             t != 0
         }
-        _ => return None,
+        _ => {
+            let r = row(p)?;
+            let v = (r.get)(s);
+            match r.kind {
+                Kind::Flip(l) => pick(b, l, v),
+                Kind::Pick(l) => pick(b, l, v),
+                Kind::Round(_, text) | Kind::Level(_, _, _, text) => text(v, b),
+                Kind::Special => return None,
+            }
+            v != (r.get)(&Settings::DEFAULT)
+        }
     };
     Some(d)
+}
+
+/// The knob or ◀▶ on a wired setting (MENU-16); false if it isn't changeable here. The special cases by name,
+/// the rest from [`SETTINGS`].
+pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
+    let s = &mut app.set;
+    match p {
+        [1, 1] => app.change(Item::Watch, d),
+        // 1-10 s, carrier drop, stop on hit (SCAN-5); the next scan takes it
+        [1, 5] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
+        [8, 4, 2] => {
+            s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
+            app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
+        }
+        [7, 7] => app.change(Item::BatterySave, d),
+        [6, 6] => {
+            // 24 h + GPS, 24 h, 12 h + GPS, 12 h
+            let v = cycle(s.clock * 2 + !s.clock_gps as u8, d, 4);
+            (s.clock, s.clock_gps) = (v / 2, v.is_multiple_of(2));
+        }
+        [7, 1] => {
+            if s.theme != crate::settings::NIGHT_RED {
+                app.day_theme = s.theme; // HOME-17: the quick menu's PTT B comes back to it from night red
+            }
+            s.theme = cycle(s.theme, d, THEMES.len());
+        }
+        [9, 4] => {
+            s.region = cycle(s.region.max(1) - 1, d, REGION_LIST.len()) + 1;
+            app.region_steps(); // VFO-18
+        }
+        // 0.1 ms steps up to 1 ms, then 1 ms steps to 10 ms (stock's dwell, the default).
+        [3, 2, 3] => {
+            let v = s.scope_dwell.clamp(1, 100) as i32;
+            let step = if v + d > 10 && v >= 10 { 10 } else { 1 };
+            s.scope_dwell = (v + d * step).clamp(1, 100) as u8;
+        }
+        [5, 3] => {
+            let on = !app.set.aprs_mode;
+            app.set_aprs_mode(on); // APRS-15
+        }
+        [5, 5, 1] => app.step_beacon(d),
+        [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
+        [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
+        [5, 6, 1] => {
+            let c = app.aprs_cfg();
+            app.set_aprs(crate::aprs::AprsCfg { path: cycle(c.path, d, c.path_choices() as usize), ..c });
+        }
+        [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
+        [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
+        [5, 8, 3] => {
+            let c = app.aprs_cfg();
+            let w = cycle(c.digi_wait_s(), d, crate::aprs::DIGI_WAIT_MAX as usize + 1);
+            app.set_aprs(crate::aprs::AprsCfg { digi: c.digi & 0x0F | w << 4, ..c });
+        }
+        [5, 7, 1] => app.step_aprs_freq(d),
+        // 6.25 kHz steps across the VHF and UHF pager bands.
+        [4, 2, 2] => s.pocsag_freq = (s.pocsag_freq as i64 + d as i64 * 625).clamp(13_600_000, 52_000_000) as ferrite_core::freq::Freq10,
+        [7, 4, 2] => *s.brightness_mut() = (s.brightness() as i32 + d).clamp(1, 10) as u8, // DISP-16, DISP-23
+        [8, 2] => return change(app, &[8, 2, 1], d),
+        // VOX-10: CW ID needs a callsign
+        [8, 7, 2] if s.callsign.as_bytes().is_empty() => app.show_toast(b"CW ID", b"set a callsign first", false),
+        [8, 9] => set_extend(app, !app.set.extend_tx),
+        [9, 3, 2] if !s.chan_only => app.set_chan_only(), // PIN-5: leaving is hold #
+        [9, 3] | [9, 3, 1] => {
+            let m = cycle(s.pin_mode, d, PIN_MODES.len());
+            if m != 0 && s.pin_len == 0 {
+                app.open(Dest::Pin); // a PIN first (PIN-1): the PIN screen sets it, then the lock
+                app.screen = Screen::Pin(super::pin::Pin::set(m));
+            } else if m == 0 && s.pin_mode != 0 {
+                app.open(Dest::Pin); // turning the lock off: the PIN first (PIN-10)
+                app.screen = Screen::Pin(super::pin::Pin::off());
+            } else {
+                s.pin_mode = m;
+            }
+        }
+        _ => {
+            let Some(r) = row(p) else { return false };
+            let v = (r.get)(s);
+            let v = match r.kind {
+                Kind::Flip(_) => (v == 0) as u8,
+                Kind::Pick(l) => cycle(v, d, l.len()),
+                Kind::Round(n, _) => cycle(v, d, n as usize),
+                Kind::Level(lo, hi, step, _) => (v.clamp(lo, hi) as i32 + d * step as i32).clamp(lo as i32, hi as i32) as u8,
+                Kind::Special => return false,
+            };
+            (r.set)(s, v);
+            tell(app, r.tell);
+        }
+    }
+    true
+}
+
+/// # on a wired setting: its default (MENU-18). The special cases by name, the rest from [`SETTINGS`].
+pub(crate) fn reset(app: &mut App, p: &[u8]) {
+    let d = Settings::DEFAULT;
+    let s = &mut app.set;
+    match p {
+        [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
+        [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
+        [1, 5] => s.scan_resume = d.scan_resume,
+        [8, 4, 2] => {
+            s.tone_level = d.tone_level;
+            app.out.push(RadioCmd::ToneLevel(d.tone_level));
+        }
+        [6, 9] => s.fixed_on = false,
+        [6, 6] => (s.clock, s.clock_gps) = (d.clock, d.clock_gps),
+        [8, 9] => s.extend_tx = false,
+        [3, 2, 3] => s.scope_dwell = d.scope_dwell,
+        [5, 3] if s.aprs_mode != d.aprs_mode => app.set_aprs_mode(d.aprs_mode),
+        [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
+        [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
+        [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: false, ..app.aprs_cfg() }),
+        [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { path: crate::aprs::PATH_DEFAULT, ..app.aprs_cfg() }),
+        [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
+        [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
+        [5, 8, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
+        [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
+        [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
+        [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
+        // # forgets the custom path; a path set to it goes back to the default (APRS-26)
+        [5, 6, 2] => {
+            let c = app.aprs_cfg();
+            let path = if c.path == crate::aprs::PATH_CUSTOM { crate::aprs::PATH_DEFAULT } else { c.path };
+            app.set_aprs(crate::aprs::AprsCfg { custom: [0; crate::aprs::CUSTOM_LEN], path, ..c });
+        }
+        [7, 4, 2] => {
+            let night = s.theme == NIGHT_RED;
+            *s.brightness_mut() = if night { d.brightness_night } else { d.brightness };
+        }
+        [8, 2] => reset(app, &[8, 2, 1]),
+        _ => {
+            if let Some(r) = row(p).filter(|r| !matches!(r.kind, Kind::Special)) {
+                (r.set)(s, (r.get)(&d));
+                tell(app, r.tell);
+            }
+        }
+    }
 }
 
 /// "Auto", "12 dB".
@@ -790,237 +972,6 @@ fn cycle(v: u8, d: i32, n: usize) -> u8 {
     (v as i32 + d).rem_euclid(n as i32) as u8
 }
 
-/// The settings [`change`] steps, in menu order, less those that change only on the radio (PIN, region,
-/// Extend TX): what the terminal's `set` takes and `dump` writes (TERM-12, TERM-13).
-pub(crate) const SETTABLE: [&[u8]; 65] = [
-    &[1, 1],
-    &[1, 5],
-    &[1, 6, 3],
-    &[1, 6, 5],
-    &[3, 1, 2],
-    &[3, 1, 3],
-    &[3, 1, 4],
-    &[3, 1, 5],
-    &[3, 2, 1],
-    &[3, 2, 2],
-    &[3, 2, 3],
-    &[3, 2, 4],
-    &[3, 2, 5],
-    &[4, 2, 1],
-    &[4, 2, 2],
-    &[4, 2, 3],
-    &[4, 8],
-    &[4, 9, 1],
-    &[5, 3],
-    &[5, 5, 1],
-    &[5, 5, 3],
-    &[5, 5, 4],
-    &[5, 6, 1],
-    &[5, 6, 2],
-    &[5, 8, 1],
-    &[5, 8, 2],
-    &[5, 8, 3],
-    &[5, 9, 1],
-    &[6, 1],
-    &[6, 4],
-    &[6, 5],
-    &[6, 6],
-    &[6, 8],
-    &[7, 1],
-    &[7, 2],
-    &[7, 3, 2],
-    &[7, 3, 3],
-    &[7, 4, 1],
-    &[7, 4, 2],
-    &[7, 4, 3],
-    &[7, 4, 4],
-    &[7, 4, 5],
-    &[7, 5, 1],
-    &[7, 5, 2],
-    &[7, 5, 3],
-    &[7, 5, 4],
-    &[7, 6],
-    &[7, 7],
-    &[7, 8],
-    &[8, 2, 1],
-    &[8, 2, 2],
-    &[8, 2, 3],
-    &[8, 4, 2],
-    &[8, 5, 1],
-    &[8, 5, 2],
-    &[8, 5, 4],
-    &[8, 6, 3],
-    &[8, 6, 6],
-    &[8, 6, 7],
-    &[8, 7, 2],
-    &[9, 1, 1],
-    &[9, 2, 1],
-    &[9, 2, 4],
-    &[9, 2, 5],
-    &[9, 2, 6],
-];
-
-/// The knob or ◀▶ on a wired setting (MENU-16); false if it isn't changeable here.
-pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
-    let s = &mut app.set;
-    match p {
-        [1, 1] => app.change(Item::Watch, d),
-        [1, 6, 3] => {
-            s.scan_tx = !s.scan_tx;
-            app.out.push(RadioCmd::ScanTx(app.set.scan_tx));
-        }
-        // 1-10 s, carrier drop, stop on hit (SCAN-5); the next scan takes it
-        [1, 5] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
-        [1, 6, 5] => s.scan_prio = cycle(s.scan_prio, d, 6),
-        [8, 4, 2] => {
-            s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
-            app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
-        }
-        [7, 7] => app.change(Item::BatterySave, d),
-        [6, 1] => s.gps_on = !s.gps_on,
-        [6, 8] => s.gps_rxtx = cycle(s.gps_rxtx, d, GPS_RXTX.len()),
-        [6, 3] => s.coord_fmt = cycle(s.coord_fmt, d, COORD_FORMATS.len()),
-        [6, 4] => s.units = cycle(s.units, d, UNITS.len()),
-        [6, 5] => s.tz = cycle(s.tz, d, TIME_ZONES.len()),
-        [6, 6] => {
-            // 24 h + GPS, 24 h, 12 h + GPS, 12 h
-            let v = cycle(s.clock * 2 + !s.clock_gps as u8, d, 4);
-            (s.clock, s.clock_gps) = (v / 2, v.is_multiple_of(2));
-        }
-        [7, 1] => {
-            if s.theme != crate::settings::NIGHT_RED {
-                app.day_theme = s.theme; // HOME-17: the quick menu's PTT B comes back to it from night red
-            }
-            s.theme = cycle(s.theme, d, THEMES.len());
-        }
-        [7, 2] => s.layout = cycle(s.layout, d, LAYOUTS.len()),
-        [7, 3, 2] => s.pon = cycle(s.pon, d, POWER_ON.len()),
-        [7, 3, 3] => s.boot_card = !s.boot_card,
-        [9, 4] => {
-            s.region = cycle(s.region.max(1) - 1, d, REGION_LIST.len()) + 1;
-            app.region_steps(); // VFO-18
-        }
-        [3, 1, 2] => s.fm_step = cycle(s.fm_step, d, FM_STEPS.len()),
-        [3, 1, 3] => s.fm_agc = cycle(s.fm_agc, d, 11),
-        [3, 1, 4] => s.fm_monitor = !s.fm_monitor,
-        [3, 2, 1] => s.scope_bars = cycle(s.scope_bars, d, SCOPE_BAR_COUNTS.len()),
-        [3, 2, 2] => s.scope_step = cycle(s.scope_step, d, crate::slot::STEPS.len()),
-        // 0.1 ms steps up to 1 ms, then 1 ms steps to 10 ms (stock's dwell, the default).
-        [3, 2, 3] => {
-            let v = s.scope_dwell.clamp(1, 100) as i32;
-            let step = if v + d > 10 && v >= 10 { 10 } else { 1 };
-            s.scope_dwell = (v + d * step).clamp(1, 100) as u8;
-        }
-        [3, 2, 4] => s.scope_trig = cycle(s.scope_trig, d, SCOPE_TRIGGERS.len()),
-        [3, 2, 5] => s.scope_wf = !s.scope_wf,
-        [5, 3] => {
-            let on = !app.set.aprs_mode;
-            app.set_aprs_mode(on); // APRS-15
-        }
-        [5, 5, 1] => app.step_beacon(d),
-        [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
-        [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
-        [5, 6, 1] => {
-            let c = app.aprs_cfg();
-            app.set_aprs(crate::aprs::AprsCfg { path: cycle(c.path, d, c.path_choices() as usize), ..c });
-        }
-        [4, 8] => s.popups = !s.popups,
-        [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
-        [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
-        [5, 8, 3] => {
-            let c = app.aprs_cfg();
-            let w = cycle(c.digi_wait_s(), d, crate::aprs::DIGI_WAIT_MAX as usize + 1);
-            app.set_aprs(crate::aprs::AprsCfg { digi: c.digi & 0x0F | w << 4, ..c });
-        }
-        [5, 7, 1] => app.step_aprs_freq(d),
-        [4, 9, 1] => s.same = !s.same,
-        [4, 2, 1] => s.pocsag_on = !s.pocsag_on,
-        // 6.25 kHz steps across the VHF and UHF pager bands.
-        [4, 2, 2] => s.pocsag_freq = (s.pocsag_freq as i64 + d as i64 * 625).clamp(13_600_000, 52_000_000) as ferrite_core::freq::Freq10,
-        [9, 2, 1] => s.bt = !s.bt,
-        [9, 2, 4] => s.cable_port = cycle(s.cable_port, d, CABLE_PORTS.len()),
-        [5, 9, 1] => s.kiss_port = cycle(s.kiss_port, d, crate::settings::KISS_PORTS.len()),
-        [9, 2, 5] => s.term_colour = !s.term_colour,
-        [9, 2, 6] => s.cable_log = !s.cable_log,
-        [7, 4, 1] => s.backlight = cycle(s.backlight, d, BACKLIGHT_TIMES.len()),
-        [7, 4, 2] => *s.brightness_mut() = (s.brightness() as i32 + d).clamp(1, 10) as u8, // DISP-16, DISP-23
-        [7, 4, 3] => s.tx_light = !s.tx_light,
-        [7, 4, 4] => s.wake_on = cycle(s.wake_on, d, WAKE_ON.len()),
-        [7, 4, 5] => s.keypad_light = cycle(s.keypad_light, d, KEYPAD_LIGHTS.len()),
-        [7, 5, 4] => s.arrival_tone = !s.arrival_tone,
-        [7, 5, 1] => s.key_beep = !s.key_beep,
-        [7, 5, 3] => s.alert_tones = !s.alert_tones,
-        [7, 5, 2] => {
-            s.beep_vol = (s.beep_vol.clamp(1, 3) as i32 + d).clamp(1, 3) as u8;
-            app.out.push(RadioCmd::BeepVol(app.set.beep_vol));
-        }
-        [3, 1, 5] => s.fm_sleep = cycle(s.fm_sleep, d, SLEEP_TIMES.len()),
-        [8, 2] | [8, 2, 1] => {
-            s.vox = !s.vox;
-            app.send_vox();
-        }
-        [8, 2, 2] => {
-            s.vox_level = (s.vox_level.clamp(1, 9) as i32 + d).clamp(1, 9) as u8;
-            app.send_vox();
-        }
-        [8, 2, 3] => {
-            s.vox_tail = cycle(s.vox_tail, d, VOX_TAILS.len());
-            app.send_vox();
-        }
-        [7, 6] => s.leds = cycle(s.leds, d, LED_MODES.len()),
-        [7, 8] => s.auto_off = cycle(s.auto_off, d, AUTO_OFF_TIMES.len()),
-        [9, 1, 1] => s.auto_lock = cycle(s.auto_lock, d, AUTO_LOCK_TIMES.len()), // KEY-20
-        [8, 6, 6] => {
-            s.dtmf_sidetone = !s.dtmf_sidetone;
-            app.send_tx_tones();
-        }
-        [8, 5, 1] => {
-            s.tail_mode = cycle(s.tail_mode, d, TAIL_MODES.len());
-            app.send_slot_tones();
-        }
-        [8, 5, 2] => {
-            s.tail_phase = cycle(s.tail_phase, d, TAIL_PHASES.len());
-            app.send_tx_tones();
-        }
-        [8, 5, 4] => {
-            s.end_tone = cycle(s.end_tone, d, END_TONE_NAMES.len());
-            app.send_slot_tones();
-        }
-        // 50-200 ms in 10 ms steps (DTMF-3)
-        [8, 6, 3] => {
-            s.dtmf_ms = (s.dtmf_ms.clamp(50, 200) as i32 + d * 10).clamp(50, 200) as u8;
-            app.send_tx_tones();
-        }
-        // 0-1000 ms in 50 ms steps (DTMF-3)
-        [8, 6, 7] => {
-            s.dtmf_delay = (s.dtmf_delay.min(100) as i32 + d * 5).clamp(0, 100) as u8;
-            app.send_tx_tones();
-        }
-        // VOX-10: CW ID needs a callsign
-        [8, 7, 2] if s.callsign.as_bytes().is_empty() => app.show_toast(b"CW ID", b"set a callsign first", false),
-        [8, 7, 2] => {
-            s.cw_id = cycle(s.cw_id, d, CW_ID_MODES.len());
-            app.send_tx_tones();
-        }
-        [8, 9] => set_extend(app, !app.set.extend_tx),
-        [9, 3, 2] if !s.chan_only => app.set_chan_only(), // PIN-5: leaving is hold #
-        [9, 3] | [9, 3, 1] => {
-            let m = cycle(s.pin_mode, d, PIN_MODES.len());
-            if m != 0 && s.pin_len == 0 {
-                app.open(Dest::Pin); // a PIN first (PIN-1): the PIN screen sets it, then the lock
-                app.screen = Screen::Pin(super::pin::Pin::set(m));
-            } else if m == 0 && s.pin_mode != 0 {
-                app.open(Dest::Pin); // turning the lock off: the PIN first (PIN-10)
-                app.screen = Screen::Pin(super::pin::Pin::off());
-            } else {
-                s.pin_mode = m;
-            }
-        }
-        _ => return false,
-    }
-    true
-}
-
 /// Extend TX: turning it on shows the warning first, once (SETUP-8, TX-2).
 pub(crate) fn set_extend(app: &mut App, on: bool) {
     if on && !app.set.extend_warned {
@@ -1028,117 +979,6 @@ pub(crate) fn set_extend(app: &mut App, on: bool) {
         app.screen = Screen::ExtendTx(ExtendTx);
     } else {
         app.set.extend_tx = on;
-    }
-}
-
-/// # on a wired setting: its default (MENU-18).
-pub(crate) fn reset(app: &mut App, p: &[u8]) {
-    let d = Settings::DEFAULT;
-    let s = &mut app.set;
-    match p {
-        [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
-        [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
-        [1, 6, 3] => {
-            s.scan_tx = d.scan_tx;
-            app.out.push(RadioCmd::ScanTx(d.scan_tx));
-        }
-        [1, 5] => s.scan_resume = d.scan_resume,
-        [1, 6, 5] => s.scan_prio = d.scan_prio,
-        [8, 4, 2] => {
-            s.tone_level = d.tone_level;
-            app.out.push(RadioCmd::ToneLevel(d.tone_level));
-        }
-        [6, 1] => s.gps_on = d.gps_on,
-        [6, 8] => s.gps_rxtx = d.gps_rxtx,
-        [6, 3] => s.coord_fmt = d.coord_fmt,
-        [6, 9] => s.fixed_on = false,
-        [6, 4] => s.units = d.units,
-        [6, 5] => s.tz = d.tz,
-        [6, 6] => (s.clock, s.clock_gps) = (d.clock, d.clock_gps),
-        [7, 1] => s.theme = d.theme,
-        [7, 2] => s.layout = d.layout,
-        [7, 3, 2] => s.pon = d.pon,
-        [7, 3, 3] => s.boot_card = d.boot_card,
-        [8, 9] => s.extend_tx = false,
-        [3, 1, 2] => s.fm_step = d.fm_step,
-        [3, 1, 3] => s.fm_agc = d.fm_agc,
-        [3, 1, 4] => s.fm_monitor = d.fm_monitor,
-        [3, 2, 1] => s.scope_bars = d.scope_bars,
-        [3, 2, 2] => s.scope_step = d.scope_step,
-        [3, 2, 3] => s.scope_dwell = d.scope_dwell,
-        [3, 2, 4] => s.scope_trig = d.scope_trig,
-        [3, 2, 5] => s.scope_wf = d.scope_wf,
-        [5, 3] if s.aprs_mode != d.aprs_mode => app.set_aprs_mode(d.aprs_mode),
-        [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
-        [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
-        [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: false, ..app.aprs_cfg() }),
-        [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { path: crate::aprs::PATH_DEFAULT, ..app.aprs_cfg() }),
-        [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
-        [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
-        [5, 8, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
-        [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
-        [4, 9, 1] => s.same = d.same,
-        [4, 2, 1] => s.pocsag_on = d.pocsag_on,
-        [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
-        [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
-        [4, 8] => s.popups = d.popups,
-        // # forgets the custom path; a path set to it goes back to the default (APRS-26)
-        [5, 6, 2] => {
-            let c = app.aprs_cfg();
-            let path = if c.path == crate::aprs::PATH_CUSTOM { crate::aprs::PATH_DEFAULT } else { c.path };
-            app.set_aprs(crate::aprs::AprsCfg { custom: [0; crate::aprs::CUSTOM_LEN], path, ..c });
-        }
-        [9, 2, 1] => s.bt = d.bt,
-        [9, 2, 4] => s.cable_port = d.cable_port,
-        [5, 9, 1] => s.kiss_port = d.kiss_port,
-        [9, 2, 5] => s.term_colour = d.term_colour,
-        [9, 2, 6] => s.cable_log = d.cable_log,
-        [7, 4, 1] => s.backlight = d.backlight,
-        [7, 4, 2] => {
-            let night = s.theme == NIGHT_RED;
-            *s.brightness_mut() = if night { d.brightness_night } else { d.brightness };
-        }
-        [7, 4, 3] => s.tx_light = d.tx_light,
-        [7, 4, 4] => s.wake_on = d.wake_on,
-        [7, 4, 5] => s.keypad_light = d.keypad_light,
-        [7, 5, 4] => s.arrival_tone = d.arrival_tone,
-        [7, 5, 1] => s.key_beep = d.key_beep,
-        [7, 5, 3] => s.alert_tones = d.alert_tones,
-        [7, 5, 2] => {
-            s.beep_vol = d.beep_vol;
-            app.out.push(RadioCmd::BeepVol(app.set.beep_vol));
-        }
-        [3, 1, 5] => s.fm_sleep = d.fm_sleep,
-        [8, 2] | [8, 2, 1] | [8, 2, 2] | [8, 2, 3] => {
-            match p {
-                [8, 2, 2] => s.vox_level = d.vox_level,
-                [8, 2, 3] => s.vox_tail = d.vox_tail,
-                _ => s.vox = d.vox,
-            }
-            app.send_vox();
-        }
-        [7, 6] => s.leds = d.leds,
-        [7, 8] => s.auto_off = d.auto_off,
-        [9, 1, 1] => s.auto_lock = d.auto_lock,
-        [8, 6, 6] | [8, 5, 2] | [8, 6, 3] | [8, 6, 7] | [8, 7, 2] => {
-            match p {
-                [8, 6, 6] => s.dtmf_sidetone = d.dtmf_sidetone,
-                [8, 5, 2] => s.tail_phase = d.tail_phase,
-                [8, 6, 3] => s.dtmf_ms = d.dtmf_ms,
-                [8, 6, 7] => s.dtmf_delay = d.dtmf_delay,
-                _ => s.cw_id = d.cw_id,
-            }
-            app.send_tx_tones();
-        }
-        [8, 5, 1] | [8, 5, 4] => {
-            if p == [8, 5, 1] {
-                s.tail_mode = d.tail_mode;
-            } else {
-                s.end_tone = d.end_tone;
-            }
-            app.send_slot_tones();
-        }
-        _ => {}
     }
 }
 
@@ -1345,6 +1185,13 @@ mod shape_tests {
             assert!((1..=9).contains(&g) && (1..=9).contains(&s), "sub-list ({g}, {s})");
             assert!(s as usize <= GROUP_ITEMS[g as usize - 1].len(), "({g}, {s}) hangs off a row its group has");
             assert!(!items.is_empty() && items.len() <= 9, "({g}, {s}) has {} items", items.len());
+        }
+        // SETTINGS: every path is a menu item, once.
+        for (i, r) in SETTINGS.iter().enumerate() {
+            let p = r.path();
+            let list = items(p[0], if p.len() == 3 { p[1] } else { 0 });
+            assert!(p.last().is_some_and(|&x| x >= 1 && x as usize <= list.len()), "{p:?} is not a menu item");
+            assert!(SETTINGS[..i].iter().all(|q| q.path() != p), "{p:?} twice");
         }
         // Each item is "name|value|help": three parts, a name always.
         for e in GROUP_ITEMS.iter().copied().chain(SUBS.iter().map(|x| x.1)).flatten() {
