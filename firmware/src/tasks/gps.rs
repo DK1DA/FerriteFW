@@ -16,6 +16,8 @@
 //!   a second for the sky plot.
 //! - **The clock and the screens** are the UI task's: it reads POSITION and SKY into the store's GPS data
 //!   (`ferrite_app::gpsdata`), and sets the clock from GPS time (GPS-7).
+//! - **Slow flash** (memory.x, since Oct 13, 2026): the task and the parser run from the slow part. It is thread mode,
+//!   the UART interrupt (fast) fills the ring, and NMEA at 9600 bd is under 1 KB/s.
 
 use crate::board::GPS_PWR_N;
 use crate::chan::{GPS_CFG, GPS_DEMAND, GPS_PHASE, POSITION, RF_BUSY_KEYED, RF_BUSY_RX, RF_STATE, SKY};

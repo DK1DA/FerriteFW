@@ -43,8 +43,8 @@ ASSERT(__efast_gap2 <= ORIGIN(FLASH) + 0x7E0, ".fast_gap2 runs into the model ta
 
 /* The slow part of flash. The AT32F403A runs code at full speed only from the first 256 KB (0x08000000-0x0803FFFF,
  * zero-wait; docs/firmware-design.md, "MCU flash"). Everything that has to be fast stays in .text and .rodata at
- * the front: the vector table, interrupt handlers, the executors and time driver, the radio, DSP, input, storage,
- * link and GPS tasks, the drivers (the display bus too), core and compiler_builtins, the fault paths, and the
+ * the front: the vector table, interrupt handlers, the executors and time driver, the radio, DSP, input, storage
+ * and link tasks, the drivers (the display bus too), core and compiler_builtins, the fault paths, and the
  * named `static` tables they read.
  *
  * After them, in this order:
@@ -114,12 +114,20 @@ SECTIONS
     /* The tone hint (TSRCH-12, -13): the Radio task's step for it and the heard-tone decode, at most once a
      * receive tick, never from an interrupt. */
     *(.text.*8tonehint*);
-    /* The GPS power manager (GPS-26 to GPS-33): the GPS task's decision and its sends, a few times a second. */
+    /* The GPS task and its NMEA parser (thread mode, below every interrupt): the UART interrupt (fast) fills a ring,
+     * and NMEA at 9600 bd is under 1 KB/s, far from what parsing from the slow flash can do. With it the power
+     * manager (GPS-26 to GPS-33) and the GGA copy for the terminal's `gps` (TERM-30). */
+    *(.text.*7ferrite5tasks3gps*);
+    *(.text.*12ferrite_core3gps*);
     *(.text.*8gpspower*);
-    *(.text.*7ferrite5tasks3gps6manage*);
-    /* TERM-30: the GGA copy for the terminal's `gps` (once a second, the GPS task) and its answer (the UI task). */
-    *(.text.*7ferrite5tasks3gps8keep_gga*);
     *(.text.*7ferrite5debug3gga*);
+    /* Helpers only the UI task uses: the SSB patch check's SHA-256, `str` search (entry::commit) and UTF-8
+     * checks, the frequency formatter. */
+    *(.text.*12ferrite_core6sha256*);
+    *(.text.*4core3str7pattern*);
+    *(.text.*4core3str8converts9from_utf8*);
+    *(.text.*12ferrite_core4freq6format*);
+    *(.text.*12ferrite_core4freq8put_uint*);
     *(.text.*4chip10heard_tone*);
     /* FM broadcast's report (at most ten times a second) and its watch mask (BCR-2, BCR-23): the Radio task's,
      * never from an interrupt. */
