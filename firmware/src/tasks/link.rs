@@ -38,9 +38,16 @@ struct Port {
     /// The link holds the port: its binary frames can't carry XON/XOFF.
     link: &'static AtomicBool,
     held: bool,
+    /// The cable: sends nothing while keyed (TX-43).
+    cable: bool,
 }
 
 impl Port {
+    /// Whether a byte may go now (TX-43: never on the cable while keyed, but in the `tx-dry` build).
+    fn may_send(&self) -> bool {
+        !self.cable || ferrite_radio::cable::may_send(RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0, cfg!(feature = "tx-dry"))
+    }
+
     /// Received bytes into the UI's ring (only what it has room for: the rest waits in the UART's ring, never
     /// dropped), and flow control (TERM-13). True if any arrived.
     fn receive(&mut self) -> bool {
@@ -53,6 +60,8 @@ impl Port {
         let waiting = uart::rx_count(self.uart) + self.rx.count();
         if self.link.load(Relaxed) {
             self.held = false;
+        } else if !self.may_send() {
+            // TX-43: flow control waits too; the receive rings still fill as before.
         } else if !self.held && waiting >= XOFF_AT {
             uart::write(self.uart, &[XOFF]);
             self.held = true;
@@ -63,24 +72,20 @@ impl Port {
         got
     }
 
-    /// Up to [`CHUNK`] bytes out. True if any went.
+    /// Up to [`CHUNK`] bytes out. True if any went. The cable asks before each byte: nothing goes while
+    /// keyed (TX-43), and the rest waits in the ring.
     fn send(&mut self) -> bool {
-        let mut buf = [0u8; CHUNK];
         let mut n = 0;
         while n < CHUNK {
-            match self.tx.get() {
-                Some(b) => {
-                    buf[n] = b;
-                    n += 1;
-                }
-                None => break,
+            if !self.may_send() {
+                break;
             }
+            let Some(b) = self.tx.get() else { break };
+            uart::write(self.uart, &[b]);
+            n += 1;
         }
-        if n > 0 {
-            uart::write(self.uart, &buf[..n]);
-            if self.tx.count() == 0 {
-                TERM_WAKE.signal(()); // room again: the terminal may have rows waiting
-            }
+        if n > 0 && self.tx.count() == 0 {
+            TERM_WAKE.signal(()); // room again: the terminal may have rows waiting
         }
         n > 0
     }
@@ -103,8 +108,8 @@ fn bt_power(on: bool) {
 #[embassy_executor::task]
 pub async fn task() {
     uart::init(UART_CPS, BAUD); // every boot starts at 115200 (LINK-10)
-    let mut cable = Port { uart: UART_CPS, rx: &TERM_IN, tx: &TERM_OUT, link: &LINK_ON, held: false };
-    let mut bt = Port { uart: UART_BT, rx: &BT_IN, tx: &BT_OUT, link: &BT_LINK_ON, held: false };
+    let mut cable = Port { uart: UART_CPS, rx: &TERM_IN, tx: &TERM_OUT, link: &LINK_ON, held: false, cable: true };
+    let mut bt = Port { uart: UART_BT, rx: &BT_IN, tx: &BT_OUT, link: &BT_LINK_ON, held: false, cable: false };
     // 0 9 2 1 and PB9 (`ferrite_radio::bt`, host-tested).
     let mut bt_pw = BtPower::default();
     // Whose turn it is to send when both ports have bytes waiting.
@@ -160,7 +165,7 @@ pub async fn task() {
                 probation = None;
             }
         }
-        let busy = TERM_OUT.count() > 0 || bt_on && BT_OUT.count() > 0;
+        let busy = TERM_OUT.count() > 0 && cable.may_send() || bt_on && BT_OUT.count() > 0;
         Timer::after_millis(if busy { 1 } else { 10 }).await;
     }
 }

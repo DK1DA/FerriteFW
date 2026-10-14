@@ -26,6 +26,12 @@ pub struct GpsPower {
 }
 
 impl GpsPower {
+    /// The Radio task drove PB10 low itself before a key-up (GPS-22, stock's PTT press 0x0801C6D4; TX audit F15):
+    /// the next look hands it back to the UART unless the radio is keyed by then (a refused key-up).
+    pub fn forced_low(&mut self) {
+        self.tx_low = true;
+    }
+
     /// One look at `now`: `on` is 0 6 1; `allowed` is 0 6 8's answer for what the radio is doing now (false
     /// while a signal it covers is on); `keyed` while any chip transmits.
     pub fn step(&mut self, now: u32, on: bool, allowed: bool, keyed: bool) -> GpsOut {

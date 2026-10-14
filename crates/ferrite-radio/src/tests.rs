@@ -699,6 +699,28 @@ fn gps_pb10_while_keyed() {
     assert_eq!(g.step(30, true, true, false).pb10_low, Some(false));
 }
 
+/// GPS-22, GPS-5 (TX audit F15): the Radio task drives PB10 low before the key-up, as stock's PTT press; the GPS
+/// task's next look keeps it low if keyed, and hands it back to the UART if the key-up was refused.
+#[test]
+fn gps_pb10_before_the_key_up() {
+    let mut g = GpsPower::default();
+    g.forced_low();
+    assert_eq!(g.step(0, true, true, true).pb10_low, None, "keyed: already low");
+    assert_eq!(g.step(10, true, true, false).pb10_low, Some(false), "back after the unkey");
+    g.forced_low();
+    assert_eq!(g.step(20, true, true, false).pb10_low, Some(false), "a refused key-up: back at once");
+    assert_eq!(g.step(30, true, true, false).pb10_low, None);
+}
+
+/// TX-43 (TX audit F9): the cable sends nothing while keyed, except in the `tx-dry` build (the bench reads the
+/// chips over it with the PA drive at 0).
+#[test]
+fn cable_held_while_keyed() {
+    use crate::cable::may_send;
+    assert!(may_send(false, false) && !may_send(true, false));
+    assert!(may_send(true, true) && may_send(false, true));
+}
+
 /// GPS-1, GPS-4, GPS-25: powered with 0 6 1; off at once for a signal 0 6 8 covers, and back on only after
 /// `QUIET_MS` (2 s) without one, so a burst of short signals doesn't cycle it; 0 6 1 off keeps it off.
 #[test]

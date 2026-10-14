@@ -7,7 +7,8 @@
 //!   in order, waits included (TX-23, TX-26, SAFE-20 – SAFE-23, decision 95), through [`Hw`];
 //! - [`chip`]: each BK4829 set-up the Radio task writes (tuning, AM, tones, the beep, the counter, the SAME
 //!   modem, keying with its read-back), through the bk4829 driver's [`bk4829::Bus`];
-//! - [`gps`] and [`bt`]: the GPS module's power and PB10, and the Bluetooth module's PB9, as decisions;
+//! - [`gps`] and [`bt`]: the GPS module's power and PB10, and the Bluetooth module's PB9, as decisions; [`cable`]:
+//!   the programming cable held while keyed (TX-43);
 //! - [`flash`]: the SPI flash driver's guard on programs and erases; [`ptt`]: the PTT-at-power-on guard.
 //!
 //! The tests (`src/tests`) drive real plans from `ferrite-core` through a recording mock of every pin, DAC value,
@@ -17,6 +18,7 @@
 #![no_std]
 
 pub mod bt;
+pub mod cable;
 pub mod chip;
 pub mod flash;
 pub mod gps;

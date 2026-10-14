@@ -218,6 +218,8 @@ impl Radio {
             return;
         }
         let tone = self.tx.tone[to as usize % 4];
+        // TX-43 (TX audit F9): the cable stops before the pass keys; the snapshot after this tick corrects it.
+        crate::chan::RF_STATE.fetch_or(crate::chan::RF_BUSY_KEYED, core::sync::atomic::Ordering::Relaxed);
         self.ldo_on(n);
         // Decision 95: the TX side's own bandwidth (stock takes the receiving channel's).
         let narrow = self.slots[to as usize].narrow;

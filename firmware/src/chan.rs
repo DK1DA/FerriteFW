@@ -56,6 +56,9 @@ pub static GPS_PHASE: AtomicU32 = AtomicU32::new(0);
 /// What the radio is doing, for the GPS task (GPS-4, GPS-22): set by the Radio task with each snapshot.
 pub static RF_STATE: AtomicU8 = AtomicU8::new(0);
 pub const RF_BUSY_KEYED: u8 = 1;
+/// GPS-22 (TX audit F15): the Radio task drove PB10 low itself just before a key-up; the GPS task takes the pin
+/// back from there (`GpsPower::forced_low`).
+pub static PB10_FORCED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 /// The MCU's die temperature in tenths of a degree C (chapter 8, SBAR-20), smoothed; `i16::MIN` until read. The
 /// Radio task reads it with its other ADC reads (the preempted group isn't shared between tasks); the UI shows it.
 pub static MCU_TEMP: AtomicI16 = AtomicI16::new(i16::MIN);

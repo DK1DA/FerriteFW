@@ -106,6 +106,10 @@ impl Radio {
         if !self.has(n) {
             return self.refuse(slot, Refusal::Locked);
         }
+        // TX-43 (TX audit F9): the cable stops before the key-up, not after it; the snapshot after this command
+        // sets RF_STATE as it turned out. GPS-22 (F15): PB10 low now, as stock's PTT press (0x0801C6D4).
+        crate::chan::RF_STATE.fetch_or(crate::chan::RF_BUSY_KEYED, core::sync::atomic::Ordering::Relaxed);
+        crate::tasks::gps::pb10_low_now();
         speaker(false);
         // PWR-4: no Battery Save sleep from here on; decision 111: the other chip sleeps while keyed, unless a kept
         // slot (APRS mode's C) has it. The receive tick wakes what it needs after the unkey.

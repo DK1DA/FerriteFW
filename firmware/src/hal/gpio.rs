@@ -67,7 +67,10 @@ impl Pin {
         };
         let cfg = self.port + if self.n < 8 { GPIO_CFGLR } else { GPIO_CFGHR };
         let sh = (self.n as u32 & 7) * 4;
-        modify(cfg, 0xF << sh, nibble << sh);
+        // The read-modify-write of the shared configuration register in a critical section: tasks on different
+        // executors (the Radio task drives PB10 before a key-up, the GPS task hands it back) configure pins of
+        // the same port half.
+        cortex_m::interrupt::free(|_| modify(cfg, 0xF << sh, nibble << sh));
         // Pull direction comes from the output register. Set it only once the pin is an input, so releasing
         // a pin that was driven low never drives it high on the way (open-drain emulation).
         match m {

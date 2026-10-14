@@ -41,6 +41,14 @@ const POLL_MS: u64 = 50;
 /// The fix is published at most this often (the module sends once a second, in several sentences).
 const PUBLISH_MS: u32 = 500;
 
+/// GPS-22 (TX audit F15): PB10 driven low now, by the Radio task just before a key-up, as stock's PTT press does
+/// (0x0801C6D4) before its key-up; the GPS task's next look keeps it low while keyed, or hands it back.
+#[cfg(feature = "tx")]
+pub fn pb10_low_now() {
+    GPS_TX.output(false, Mode::OutPp);
+    crate::chan::PB10_FORCED.store(true, Relaxed);
+}
+
 fn now_ms() -> u32 {
     Instant::now().as_millis() as u32
 }
@@ -125,6 +133,9 @@ pub async fn task() {
         }
         // GPS-22: PB10 low while keyed, back to the UART after. GPS-4: off around signals as asked, back on
         // `QUIET_MS` after the last.
+        if crate::chan::PB10_FORCED.swap(false, Relaxed) {
+            power.forced_low();
+        }
         let out = power.step(now, cfg.on && m.power, cfg.powered(rx, keyed), keyed);
         match out.pb10_low {
             Some(true) => GPS_TX.output(false, Mode::OutPp),
