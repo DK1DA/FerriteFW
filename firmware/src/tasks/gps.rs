@@ -28,8 +28,8 @@ use core::sync::atomic::Ordering::Relaxed;
 use embassy_time::{Instant, Timer};
 use ferrite_app::gpsdata::GpsCfg;
 use ferrite_core::gps::Nmea;
-use ferrite_core::gpspower::{casic, GpsDemand, GpsManager, GpsOut, GpsPhase, CAS_STANDBY, POKE};
-use ferrite_core::msg::{GpsFix, GpsSky};
+use ferrite_core::gpspower::{casic, casic_refused, shown, GpsDemand, GpsManager, GpsOut, GpsPhase, CAS_STANDBY, POKE};
+use ferrite_core::msg::{DebugAns, GpsFix, GpsSky, GGA_MAX, GPS_REPLY_MS};
 use ferrite_radio::gps::GpsPower;
 
 /// The ATGM336H's default rate.
@@ -53,6 +53,49 @@ fn now_ms() -> u32 {
     Instant::now().as_millis() as u32
 }
 
+/// Sends bytes to the module with their cable-log line (TERM-28, GPS-26): "gps: > " and the bytes exactly as they
+/// go out, CR and LF shown as `<CR>` `<LF>`, so the bench can check every command.
+#[inline(never)] // in .slow_text (memory.x)
+fn send(b: &[u8]) {
+    uart::write(UART_GPS, b);
+    let mut t = [0u8; 48];
+    let n = shown(b, &mut t);
+    crate::bringup::linef(|l| {
+        let _ = ufmt::uwrite!(l, "gps: > {} ({} bytes)", core::str::from_utf8(&t[..n]).unwrap_or("?"), b.len());
+    });
+}
+
+/// TERM-36: the terminal's CASIC sentence, sent now (checked again: only CAS06 queries and CAS12 standby), or
+/// refused; a query's answer is the first TXT sentence within [`GPS_REPLY_MS`] (`Query` keeps the wait).
+#[inline(never)] // in .slow_text (memory.x)
+fn term_send(id: u8, arg: u16, powered: bool, keyed: bool, now: u32) -> Option<Query> {
+    let refuse = |why| {
+        crate::chan::GPS_ANS.signal(DebugAns::Refused(why));
+        crate::chan::TERM_WAKE.signal(());
+        None
+    };
+    if let Some(why) = casic_refused(id, arg) {
+        return refuse(why);
+    }
+    if !powered {
+        return refuse("the GPS module is off (0 6 1)");
+    }
+    if keyed {
+        return refuse("transmitting: PB10 is held low (GPS-22)");
+    }
+    let mut b = [0u8; 18];
+    let n = casic(id, arg, &mut b);
+    send(&b[..n]);
+    Some(Query { at: now, data: [0; GGA_MAX], n: 0 })
+}
+
+/// A terminal query waiting for its TXT answer.
+struct Query {
+    at: u32,
+    data: [u8; GGA_MAX],
+    n: u8,
+}
+
 /// The power manager's look (GPS-26 to GPS-33): what it sends the module goes out here, with a line in the cable
 /// log (TERM-28); its phase goes to [`GPS_PHASE`]. The power wanted (PA8) is the caller's, through GPS-4's rule.
 /// True as the module comes out of standby (its own wake or the byte): the parser has started afresh, so the fix
@@ -70,14 +113,14 @@ fn manage(mgr: &mut GpsManager, nmea: &mut Nmea, phase: &mut GpsPhase, now: u32,
     if let Some(s) = out.standby_s {
         let mut b = [0u8; 18];
         let n = casic(CAS_STANDBY, s, &mut b);
-        uart::write(UART_GPS, &b[..n]);
         crate::bringup::linef(|l| {
             let _ = ufmt::uwrite!(l, "gps: standby {} s", s);
         });
+        send(&b[..n]);
     }
     if out.poke {
-        uart::write(UART_GPS, POKE);
         crate::bringup::line(b"gps: wake byte (needed sooner)");
+        send(POKE);
     }
     if out.cycled {
         crate::bringup::line(b"gps: no NMEA after a wake: power cycled");
@@ -113,6 +156,7 @@ pub async fn task() {
     let mut phase = GpsPhase::Off;
     let (mut fix_at, mut sky_at) = (0u32, 0u32);
     let mut last_state = (false, 0u8);
+    let mut query: Option<Query> = None;
     // The cable log (TERM-28): sentences and bytes from the module per 5 s while powered, and the fix.
     let (mut sentences, mut bytes, mut log_at) = (0u32, 0u32, 0u32);
     loop {
@@ -158,6 +202,9 @@ pub async fn task() {
                 tx.send(GpsFix { on: true, at_ms: now, ..GpsFix::default() });
             }
         }
+        if let Some((id, arg)) = crate::chan::GPS_SEND.try_take() {
+            query = term_send(id, arg, powered, keyed, now);
+        }
         let mut fresh = false;
         while let Some(c) = uart::getc(UART_GPS) {
             if powered {
@@ -166,12 +213,26 @@ pub async fn task() {
                 if done && nmea.last_is_gga() {
                     keep_gga(&nmea, now);
                 }
+                // TERM-36: the module's answer to a query is a TXT sentence; the first one is kept.
+                if let Some(q) = query.as_mut().filter(|q| q.n == 0 && done) {
+                    let s = nmea.last();
+                    if s.len() >= 5 && s[2..5] == *b"TXT" {
+                        let k = s.len().min(GGA_MAX - 1);
+                        q.data[0] = b'$';
+                        q.data[1..=k].copy_from_slice(&s[..k]);
+                        q.n = k as u8 + 1;
+                    }
+                }
                 sentences += done as u32;
                 fresh |= done;
             }
         }
-        let asleep = matches!(phase, GpsPhase::Standby(_));
-        if powered && !asleep && now.wrapping_sub(log_at) >= 5_000 {
+        if let Some(q) = query.take_if(|q| q.n > 0 || now.wrapping_sub(q.at) >= GPS_REPLY_MS) {
+            crate::chan::GPS_ANS.signal(DebugAns::GpsSent { data: q.data, n: q.n });
+            crate::chan::TERM_WAKE.signal(());
+        }
+        // The 5 s counts go on through a standby too (GPS-26): 0 sentences there is the module asleep.
+        if powered && now.wrapping_sub(log_at) >= 5_000 {
             let f = nmea.fix(now);
             crate::bringup::linef(|b| {
                 let _ = ufmt::uwrite!(b, "gps: {} sentences, {} bytes in 5 s; fix {}D, {} used, {} in view", sentences, bytes, f.fix, f.used, f.view);
@@ -180,10 +241,14 @@ pub async fn task() {
         }
         if powered && fresh {
             let f = nmea.fix(now);
-            if f.has_fix() {
-                mgr.fix(now, ((f.speed_kn10 as u32 * 1852 + 5000) / 10_000) as u16);
+            let ignored = if f.has_fix() {
+                mgr.fix(now, ((f.speed_kn10 as u32 * 1852 + 5000) / 10_000) as u16)
             } else {
-                mgr.sentence(now);
+                mgr.sentence(now)
+            };
+            if ignored {
+                // Decision 143: NMEA still coming 2 s into a standby; the plan holds to its end all the same.
+                crate::bringup::line(b"gps: standby ignored: NMEA still coming");
             }
             let state = (f.has_fix(), f.fix);
             if state != last_state || now.wrapping_sub(fix_at) >= PUBLISH_MS {

@@ -40,6 +40,8 @@ pub enum Kind {
     RxBoth(Option<bool>),
     /// `gps`: the GPS module's last GGA sentence and its two heights (TERM-30).
     Gga,
+    /// `gps query N`, `gps standby N`: a CASIC sentence to the module and its TXT answer (TERM-36).
+    Gps { id: u8, arg: u16 },
     /// `bk settle [WAKE [SLEEP]]`: the BK4829 settle waits (TERM-31), set or asked.
     Settle(Option<ferrite_core::settle::Settle>),
     /// `mic`: a burst of PA0 (the mic level tap) readings, summed up (TERM-32).
@@ -107,6 +109,7 @@ impl Job {
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
             Kind::Gga => DebugReq::Gga,
+            Kind::Gps { id, arg } => DebugReq::Gps { id, arg },
             Kind::Settle(s) => DebugReq::Settle(s),
             Kind::Mic => DebugReq::Mic,
             Kind::TxTest(a) => DebugReq::TxTest(a),
@@ -285,6 +288,27 @@ impl Job {
                         Filters::Data => b"  data: TX HPF off, pre-emphasis and LPF on (REG_2B 2:0 = 100), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey (as an APRS burst)",
                         Filters::Voice => b"  voice: the chip's TX filters, MIC AGC and ALC as for speech; REG_7D 0x34",
                     });
+                    self.st = St::Over;
+                }
+                self.line += 1;
+                Step::Line
+            }
+            (Kind::Gps { id, arg }, DebugAns::GpsSent { data, n }) => {
+                if self.line == 0 {
+                    let mut b = [0u8; 18];
+                    let k = ferrite_core::gpspower::casic(id, arg, &mut b);
+                    out.push(b"  sent ");
+                    out.push(&b[..k - 2]);
+                    out.push(b" CR LF");
+                } else {
+                    if n > 0 {
+                        out.push(b"  answer: ");
+                        out.push(&data[..(n as usize).min(data.len())]);
+                    } else if id == ferrite_core::gpspower::CAS_STANDBY {
+                        out.push(b"  asleep if the cable log's 5 s counts drop to 0 sentences");
+                    } else {
+                        out.push(b"  no TXT answer from the module in 1.2 s");
+                    }
                     self.st = St::Over;
                 }
                 self.line += 1;

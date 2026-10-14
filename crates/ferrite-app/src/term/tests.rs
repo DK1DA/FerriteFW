@@ -1138,7 +1138,39 @@ fn regs(r: DebugReq) -> DebugAns {
         DebugReq::TxTest(ferrite_core::txtest::Ask::Set(a)) => DebugAns::TxTest(a),
         DebugReq::TxTest(ferrite_core::txtest::Ask::Show) => DebugAns::TxTest(None),
         DebugReq::Gga => gga(b"$GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57", 12),
+        // A module that answers its firmware version.
+        DebugReq::Gps { .. } => {
+            let s = b"$GPTXT,01,01,02,SW=URANUS5,V5.3.0.0*1D";
+            let mut data = [0u8; ferrite_core::msg::GGA_MAX];
+            data[..s.len()].copy_from_slice(s);
+            DebugAns::GpsSent { data, n: s.len() as u8 }
+        }
     }
+}
+
+/// TERM-36: `gps query N` sends CAS06 and shows the sentence sent and the module's TXT answer; `gps standby N`
+/// sends CAS12; anything else (another CAS number, CAS00 save, CAS01 baud, a bad argument) is refused before it
+/// reaches the firmware. The query reads (allowed for an unapproved Bluetooth device, TERM-25), standby writes.
+#[test]
+fn terminal_gps_casic() {
+    let mut r = Rig::main();
+    r.cmd("gps query");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Gps { id: 6, arg: 0 }]);
+    let raw = r.raw();
+    assert!(raw.contains("sent $PCAS06,0*1B CR LF"), "{raw}");
+    assert!(raw.contains("answer: $GPTXT,01,01,02,SW=URANUS5,V5.3.0.0*1D"), "{raw}");
+    r.send(b"\r");
+    r.cmd("gps standby 60");
+    let data = [0u8; ferrite_core::msg::GGA_MAX];
+    assert_eq!(r.serve(4, |_| DebugAns::GpsSent { data, n: 0 }), vec![DebugReq::Gps { id: 12, arg: 60 }]);
+    assert!(r.raw().contains("sent $PCAS12,60*28 CR LF"), "{}", r.raw());
+    for bad in ["gps query 3", "gps standby 0", "gps standby 70000", "gps baud 9600", "gps query 0 1"] {
+        r.send(b"\r");
+        r.cmd(bad);
+        assert!(r.serve(4, regs).is_empty(), "{bad}");
+    }
+    assert!(!super::cmd::writes(b"gps query 1"));
+    assert!(super::cmd::writes(b"gps standby 60"));
 }
 
 fn gga(s: &[u8], age_s: u32) -> DebugAns {

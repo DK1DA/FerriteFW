@@ -784,6 +784,13 @@ impl FakeRadio {
                 data[..s.len()].copy_from_slice(s);
                 DebugAns::Gga { data, n: s.len() as u8, age_s: 1 }
             }
+            // TERM-36: a module that answers a query with its firmware version, and nothing to a standby.
+            DebugReq::Gps { id, .. } => {
+                let s: &[u8] = if id == ferrite_core::gpspower::CAS_QUERY { b"$GPTXT,01,01,02,SW=URANUS5,V5.3.0.0*1D" } else { b"" };
+                let mut data = [0u8; ferrite_core::msg::GGA_MAX];
+                data[..s.len()].copy_from_slice(s);
+                DebugAns::GpsSent { data, n: s.len() as u8 }
+            }
             // TERM-27: a module that, like the radio's, says nothing back.
             DebugReq::Bt { .. } => DebugAns::Bt { data: [0; 48], n: 0 },
             // TERM-29: the fake path machine holds both band receive selects (or refuses, as the radio's).

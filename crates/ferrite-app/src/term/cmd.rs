@@ -1115,7 +1115,10 @@ pub fn writes(line: &[u8]) -> bool {
     let mut w = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty());
     let Some(c) = w.next() else { return false };
     let rest = w.count();
-    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"gps", b"mic"].iter().any(|r| same(c, r));
+    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"mic"].iter().any(|r| same(c, r));
+    // TERM-36: `gps` and `gps query` only read; `gps standby` puts the module to sleep.
+    let second = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1);
+    let reads = reads || same(c, b"gps") && second.is_none_or(|w| same(w, b"query"));
     let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx", b"txtest"].iter().any(|r| same(c, r)) && rest == 0;
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
@@ -1156,7 +1159,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"dump") => Ok(Done::Dump),
         _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
         _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
-        _ if same(c, b"gps") => Ok(Done::Debug(Job::new(Kind::Gga))),
+        _ if same(c, b"gps") => gps(&mut t),
         _ if same(c, b"mic") => Ok(Done::Debug(Job::new(Kind::Mic))),
         _ if same(c, b"txtest") => txtest(&mut t),
         _ if same(c, b"bk") => bk(&mut t),
@@ -1319,6 +1322,33 @@ fn rx(t: &mut Toks) -> Result<Done, Msg> {
         return Err(msg!("{}", USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::RxBoth(on))))
+}
+
+/// TERM-30, TERM-36: `gps` (the last GGA), `gps query [0|1|2|4|6]` (CAS06, the module's answer), `gps standby N`
+/// (CAS12 for N s): nothing else goes to the module ([`ferrite_core::gpspower::casic_refused`]).
+fn gps(t: &mut Toks) -> Result<Done, Msg> {
+    use ferrite_core::gpspower::{casic_refused, CAS_QUERY, CAS_STANDBY};
+    const USAGE: &str = "gps, gps query [0|1|2|4|6] (CAS06), gps standby N (CAS12, 1-65535 s)";
+    let (id, arg) = match t.next()? {
+        None => return Ok(Done::Debug(Job::new(Kind::Gga))),
+        Some(Tok::Word(w)) if same(w, b"query") => match t.next()? {
+            None => (CAS_QUERY, 0),
+            Some(Tok::Word(n)) => (CAS_QUERY, number(n).filter(|&n| n <= 9).ok_or_else(|| msg!("{}", USAGE))? as u16),
+            _ => return Err(msg!("{}", USAGE)),
+        },
+        Some(Tok::Word(w)) if same(w, b"standby") => match t.next()? {
+            Some(Tok::Word(n)) => (CAS_STANDBY, number(n).filter(|&n| n <= 65535).ok_or_else(|| msg!("{}", USAGE))? as u16),
+            _ => return Err(msg!("{}", USAGE)),
+        },
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    if let Some(why) = casic_refused(id, arg) {
+        return Err(msg!("refused: {}", why));
+    }
+    Ok(Done::Debug(Job::new(Kind::Gps { id, arg })))
 }
 
 /// TERM-27: `bt AT+VERS?`, one read-only query to the Bluetooth module.
@@ -1509,7 +1539,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 35] = [
+const HELP: [&str; 37] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
@@ -1539,6 +1569,8 @@ const HELP: [&str; 35] = [
     "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
     "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
     "  gps                    the GPS module's last GGA sentence, its age and heights",
+    "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)",
+    "  gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)",
     "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",
     "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal",
     "                         at that % on the next PTT key-up until release (tx builds)",

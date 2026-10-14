@@ -69,8 +69,10 @@ enum Module {
     Off,
     /// Powered and awake since then; `heard` once a sentence came this run.
     Running { since: u32, heard: bool },
-    /// In standby from `at` to `until` (its own wake).
-    Standby { at: u32, until: u32 },
+    /// In standby from `at` to `until` (its own wake). `ignored`: NMEA kept coming after the command (the module
+    /// didn't sleep, or woke at once): the plan holds to `until` all the same, so a module that won't sleep isn't
+    /// sent a standby every fix (GPS-26, decision 143).
+    Standby { at: u32, until: u32, ignored: bool },
     /// An unplanned wake: the byte went at `at`.
     Poked { at: u32 },
     /// The fallback: PA8 off since `at`, on again after [`CYCLE_OFF_MS`].
@@ -140,10 +142,11 @@ impl GpsManager {
                     self.wake_fallback(now, &mut out);
                 }
             }
-            Module::Standby { until, .. } => {
+            Module::Standby { until, ignored, .. } => {
                 if reached(now, until) {
-                    // Its own wake: NMEA should follow within a second (a hot start).
-                    self.module = Module::Running { since: until, heard: false };
+                    // Its own wake: NMEA should follow within a second (a hot start). One that never slept has
+                    // been heard all along.
+                    self.module = Module::Running { since: until, heard: ignored };
                 } else if (continuous || beacon_soon) && !keyed {
                     out.poke = true;
                     self.module = Module::Poked { at: now };
@@ -185,7 +188,7 @@ impl GpsManager {
         };
         let s = (next.wrapping_sub(now) / 1000).clamp(MIN_STANDBY_S, u16::MAX as u32);
         out.standby_s = Some(s as u16);
-        self.module = Module::Standby { at: now, until: now.wrapping_add(s * 1000) };
+        self.module = Module::Standby { at: now, until: now.wrapping_add(s * 1000), ignored: false };
         self.fix_at = None;
     }
 
@@ -213,23 +216,28 @@ impl GpsManager {
         }
     }
 
-    /// A sentence came from the module.
+    /// A sentence came from the module. True the first time one comes [`SETTLE_MS`] or more into a standby: the
+    /// module didn't sleep (or woke at once), for the cable log. That isn't taken for a wake: the standby's plan
+    /// holds to its end (decision 143; it used to read as "awake" and plan again at once).
     #[inline(never)] // in .slow_text (memory.x)
-    pub fn sentence(&mut self, now: u32) {
+    pub fn sentence(&mut self, now: u32) -> bool {
         self.cycled_silent = false;
         match self.module {
             Module::Poked { .. } => self.module = Module::Running { since: now, heard: true },
-            // Woken early (by something on its UART): awake now.
-            Module::Standby { at, .. } if now.wrapping_sub(at) >= SETTLE_MS => self.module = Module::Running { since: now, heard: true },
+            Module::Standby { at, until, ignored: false } if now.wrapping_sub(at) >= SETTLE_MS => {
+                self.module = Module::Standby { at, until, ignored: true };
+                return true;
+            }
             Module::Running { since, .. } => self.module = Module::Running { since, heard: true },
             _ => {}
         }
+        false
     }
 
-    /// A sentence with a fix: `speed_kmh` over ground.
+    /// A sentence with a fix: `speed_kmh` over ground. Returns [`GpsManager::sentence`]'s answer.
     #[inline(never)] // in .slow_text (memory.x)
-    pub fn fix(&mut self, now: u32, speed_kmh: u16) {
-        self.sentence(now);
+    pub fn fix(&mut self, now: u32, speed_kmh: u16) -> bool {
+        let ignored = self.sentence(now);
         if let Module::Running { .. } = self.module {
             self.fix_at.get_or_insert(now);
             self.misses = 0;
@@ -237,6 +245,7 @@ impl GpsManager {
                 self.moved_at = Some(now);
             }
         }
+        ignored
     }
 
     /// What it is doing, for the Status page and the terminal.
@@ -316,6 +325,46 @@ pub fn casic(id: u8, arg: u16, out: &mut [u8; 18]) -> usize {
 
 /// The standby command (CAS12).
 pub const CAS_STANDBY: u8 = 12;
+/// The product information query (CAS06, 2.7.7): 0 firmware version, 1 hardware model and serial, 2 working mode,
+/// 4 GNSS signals, 6 chip; the module answers with a TXT sentence.
+pub const CAS_QUERY: u8 = 6;
+
+/// What may be sent to the module (TERM-36): CAS06 queries (0, 1, 2, 4, 6) and CAS12 standby (1-65535 s), nothing
+/// else. Never CAS00 (saves the configuration to the module's flash) or CAS01 (its baud rate: a wrong one leaves
+/// the GPS silent), nor any other setting.
+pub fn casic_refused(id: u8, arg: u16) -> Option<&'static str> {
+    match (id, arg) {
+        (CAS_QUERY, 0 | 1 | 2 | 4 | 6) => None,
+        (CAS_QUERY, _) => Some("CAS06 takes 0, 1, 2, 4 or 6"),
+        (CAS_STANDBY, 1..) => None,
+        (CAS_STANDBY, _) => Some("standby needs 1 to 65535 s"),
+        _ => Some("only CAS06 queries and CAS12 standby go to the module"),
+    }
+}
+
+/// A sentence as text for the cable log (TERM-28): printable bytes as they are, CR and LF as `<CR>` `<LF>`, anything
+/// else as `<XX>`; cut at `out`'s length. Returns the length.
+pub fn shown(b: &[u8], out: &mut [u8]) -> usize {
+    let mut n = 0;
+    let mut put = |s: &[u8]| {
+        for &c in s {
+            if n < out.len() {
+                out[n] = c;
+                n += 1;
+            }
+        }
+    };
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for &c in b {
+        match c {
+            b'\r' => put(b"<CR>"),
+            b'\n' => put(b"<LF>"),
+            0x20..=0x7E => put(&[c]),
+            _ => put(&[b'<', HEX[(c >> 4) as usize], HEX[(c & 15) as usize], b'>']),
+        }
+    }
+    n
+}
 
 #[cfg(test)]
 mod tests {
@@ -352,6 +401,10 @@ mod tests {
         asleep_until: Option<u32>,
         fix_s: Option<u32>,
         poke_works: bool,
+        /// The module acts on CAS12 (false: it keeps sending, as on the radio Oct 13, 2026).
+        standby_works: bool,
+        /// Standbys the manager saw ignored.
+        ignored: u32,
         speed: u16,
         /// (time, standby seconds) for each CAS12 sent; power cycles; pokes.
         standbys: std::vec::Vec<(u32, u16)>,
@@ -362,7 +415,7 @@ mod tests {
 
     impl Sim {
         fn new(fix_s: Option<u32>) -> Sim {
-            Sim { m: GpsManager::new(), t: 0, powered: false, awake_at: None, asleep_until: None, fix_s, poke_works: true, speed: 0, standbys: std::vec::Vec::new(), cycles: 0, pokes: 0, keyed: false }
+            Sim { m: GpsManager::new(), t: 0, powered: false, awake_at: None, asleep_until: None, fix_s, poke_works: true, standby_works: true, ignored: 0, speed: 0, standbys: std::vec::Vec::new(), cycles: 0, pokes: 0, keyed: false }
         }
 
         /// Run to `end` ms in 100 ms looks.
@@ -382,7 +435,9 @@ mod tests {
                 self.cycles += out.cycled as u32;
                 if let Some(s) = out.standby_s {
                     self.standbys.push((now, s));
-                    (self.awake_at, self.asleep_until) = (None, Some(now + s as u32 * 1000));
+                    if self.standby_works {
+                        (self.awake_at, self.asleep_until) = (None, Some(now + s as u32 * 1000));
+                    }
                 }
                 if out.poke {
                     self.pokes += 1;
@@ -391,10 +446,11 @@ mod tests {
                     }
                 }
                 if let Some(a) = self.awake_at.filter(|_| self.powered && now.is_multiple_of(1000)) {
-                    match self.fix_s {
+                    let ignored = match self.fix_s {
                         Some(f) if now - a >= f * 1000 => self.m.fix(now, self.speed),
                         _ => self.m.sentence(now),
-                    }
+                    };
+                    self.ignored += ignored as u32;
                 }
             }
         }
@@ -525,6 +581,60 @@ mod tests {
         s.keyed = false;
         s.run(91_000, &on);
         assert_eq!(s.standbys.len(), 1);
+    }
+
+    /// GPS-26 (decision 143): a module that ignores CAS12 keeps sending; that is reported once a standby and not
+    /// taken for a wake, so the plan holds: outdoors one standby a minute (not one every fix), indoors the back-off
+    /// as before; the phase stays the standby's to its end, and no power cycle follows.
+    #[test]
+    fn ignored_standby_keeps_the_plan() {
+        let mut s = Sim::new(Some(2));
+        s.standby_works = false;
+        s.run(10 * 60_000, &on);
+        let n = s.standbys.len();
+        assert!((8..=10).contains(&n), "about one a minute after the ephemeris hold: {n} {:?}", s.standbys);
+        assert_eq!(s.ignored as usize, n, "each reported once");
+        for w in s.standbys.windows(2) {
+            assert!(w[1].0 - w[0].0 >= 60_000, "{:?}", w);
+        }
+        let (t0, _) = *s.standbys.last().unwrap();
+        assert!(matches!(s.m.phase(t0 + 5_000), GpsPhase::Standby(_)) || s.t < t0 + 5_000);
+        assert_eq!(s.cycles, 0);
+        let mut s = Sim::new(None);
+        s.standby_works = false;
+        s.run(30 * 60_000, &on);
+        let waits: std::vec::Vec<u16> = s.standbys.iter().map(|x| x.1).collect();
+        assert_eq!(&waits[..5], &[60, 120, 240, 480, 900]);
+        assert_eq!((s.ignored as usize, s.cycles), (s.standbys.len(), 0));
+    }
+
+    /// TERM-36: only CAS06 queries and CAS12 standby are let through, and the bytes are as the spec prints them
+    /// (`$PCAS06,0*1B` firmware version, 2.7.7).
+    #[test]
+    fn only_queries_and_standby_go_to_the_module() {
+        assert_eq!(cmd(CAS_QUERY, 0), "$PCAS06,0*1B");
+        assert_eq!(cmd(CAS_QUERY, 1), "$PCAS06,1*1A");
+        assert_eq!(cmd(CAS_QUERY, 2), "$PCAS06,2*19");
+        assert_eq!(cmd(CAS_QUERY, 4), "$PCAS06,4*1F");
+        assert_eq!(cmd(CAS_QUERY, 6), "$PCAS06,6*1D");
+        for a in [0, 1, 2, 4, 6] {
+            assert_eq!(casic_refused(CAS_QUERY, a), None);
+        }
+        assert!(casic_refused(CAS_QUERY, 3).is_some());
+        assert_eq!(casic_refused(CAS_STANDBY, 60), None);
+        assert_eq!(casic_refused(CAS_STANDBY, 65535), None);
+        assert!(casic_refused(CAS_STANDBY, 0).is_some());
+        for id in [0, 1, 2, 3, 4, 5, 10, 11, 15, 20] {
+            assert!(casic_refused(id, 0).is_some() && casic_refused(id, 9600).is_some(), "CAS{id:02}");
+        }
+        let mut b = [0u8; 18];
+        let n = casic(CAS_STANDBY, 60, &mut b);
+        assert_eq!(&b[..n], b"$PCAS12,60*28\r\n", "the exact bytes on the wire, CR LF last");
+        let mut o = [0u8; 40];
+        let k = shown(&b[..n], &mut o);
+        assert_eq!(&o[..k], b"$PCAS12,60*28<CR><LF>");
+        let k = shown(&[b'a', 0], &mut o);
+        assert_eq!(&o[..k], b"a<00>");
     }
 
     /// GPS off: PA8 off, and on again it is running.

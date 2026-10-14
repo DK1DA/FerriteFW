@@ -404,6 +404,9 @@ pub enum DebugReq {
     /// TERM-33 (decision 132, a bench test): the transmit test signal for the next PTT key-up, armed, disarmed or
     /// only asked. The Radio task of a receive-only build refuses it.
     TxTest(crate::txtest::Ask),
+    /// TERM-36 (a bench test): a CASIC sentence to the GPS module, `$PCAS<id>,<arg>`, which
+    /// [`crate::gpspower::casic_refused`] has passed (CAS06 queries, CAS12 standby); the GPS task sends it.
+    Gps { id: u8, arg: u16 },
 }
 
 /// The longest GGA sentence [`DebugAns::Gga`] carries: NMEA's 82 characters less CR LF.
@@ -433,9 +436,15 @@ pub enum DebugAns {
     TxSuite { section: u8, left_ms: u32 },
     /// TERM-30: the last GGA sentence from `$` to the checksum (`n` 0: none since boot), and its age in seconds.
     Gga { data: [u8; GGA_MAX], n: u8, age_s: u32 },
+    /// TERM-36: the CASIC sentence went to the module; the first TXT sentence it sent back within
+    /// [`GPS_REPLY_MS`] (from `$` to the checksum), `n` 0 for none.
+    GpsSent { data: [u8; GGA_MAX], n: u8 },
     /// Not done, and why.
     Refused(&'static str),
 }
+
+/// TERM-36: how long the GPS task waits for the module's TXT answer (within the terminal's 2 s).
+pub const GPS_REPLY_MS: u32 = 1200;
 
 /// TERM-27: a Bluetooth module query is sent only when it can't change the module (the user's rule, decision 79:
 /// a wrong `AT+BAUD=` leaves the radio's Bluetooth silent): `AT`, `AT+HELP`, or `AT+WORD?` (letters and digits).
