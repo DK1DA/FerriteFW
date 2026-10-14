@@ -26,6 +26,10 @@ impl Bus for Regs {
     fn read(&mut self, reg: u8) -> u16 {
         self.regs[reg as usize]
     }
+    /// Waits are logged as register 0xFF, so their place among the writes shows.
+    fn delay_us(&mut self, us: u32) {
+        self.writes.push((0xFF, us as u16));
+    }
 }
 
 /// Stock's start-up (function 0x08009D44 in the stock image), REG_40's read-modify-write resolved against its reset
@@ -62,8 +66,8 @@ fn tune_and_receive() {
     let w = &r.writes;
     // 145.5 MHz / 10 Hz = 14,550,000 = 0x00DE_03F0.
     assert_eq!(w[..2], [(0x38, 0x03F0), (0x39, 0x00DE)]);
-    assert_eq!(w[2..4], [(0x30, 0x0200), (0x30, 0xBFF1)], "stock's receive sequence");
-    assert_eq!(w[4], (0x43, 0x4008));
+    assert_eq!(w[2..5], [(0x30, 0x0200), (0xFF, 50), (0x30, 0xBFF1)], "stock's receive sequence, its 50 us between");
+    assert_eq!(w[5], (0x43, 0x4008));
     assert_eq!(r.regs[0x47] >> 8 & 15, 1);
     assert_eq!(r.regs[0x48] & 0x3FF, 0x3B << 4 | 15);
     assert_eq!(r.regs[0x2B], 0x0700);
@@ -179,7 +183,8 @@ fn sleep_and_wake_are_stocks() {
     bk.sleep();
     bk.wake();
     bk.rx_on();
-    assert_eq!(r.writes, [(0x30, 0), (0x37, 0x1D00), (0x37, 0x9D1F), (0x30, 0x0200), (0x30, 0xBFF1)]);
+    // Stock waits about 50 us between the two REG_30 writes (the TX audit, Oct 13, 2026).
+    assert_eq!(r.writes, [(0x30, 0), (0x37, 0x1D00), (0x37, 0x9D1F), (0x30, 0x0200), (0xFF, 50), (0x30, 0xBFF1)]);
 }
 
 /// The sleep in two halves, for a caller that waits between them: the same writes as [`Bk4829::sleep`].

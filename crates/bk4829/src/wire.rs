@@ -143,4 +143,7 @@ impl<K: OutPin, S: IoPin, D: Delay, C: OutPin> Bus for Chip<'_, K, S, D, C> {
     fn read(&mut self, reg: u8) -> u16 {
         self.wire.read(self.cs, reg)
     }
+    fn delay_us(&mut self, us: u32) {
+        self.wire.delay.delay_us(us)
+    }
 }

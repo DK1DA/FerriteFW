@@ -25,6 +25,9 @@ pub mod tx;
 pub trait Bus {
     fn write(&mut self, reg: u8, value: u16);
     fn read(&mut self, reg: u8) -> u16;
+    /// A short busy wait between writes where stock has one (microseconds). A bus with no delay of its own (a test
+    /// recorder) may leave it out.
+    fn delay_us(&mut self, _us: u32) {}
 }
 
 impl<B: Bus> Bus for &mut B {
@@ -34,7 +37,14 @@ impl<B: Bus> Bus for &mut B {
     fn read(&mut self, reg: u8) -> u16 {
         (**self).read(reg)
     }
+    fn delay_us(&mut self, us: u32) {
+        (**self).delay_us(us)
+    }
 }
+
+/// Stock's wait between its two REG_30 writes turning receive on (AF only, then the whole receive chain), about
+/// 50 us.
+pub const RX_ON_GAP_US: u32 = 50;
 
 /// Registers used by name.
 pub mod reg {
@@ -341,8 +351,11 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::AF_GAIN, AF_GAIN_RX);
     }
 
+    /// Receive on, as stock: REG_30 AF only, about 50 us ([`RX_ON_GAP_US`], the bus's busy wait), then the whole
+    /// receive chain.
     pub fn rx_on(&mut self) {
         self.write(reg::POWER, POWER_AF_ONLY);
+        self.bus.delay_us(RX_ON_GAP_US);
         self.write(reg::POWER, POWER_RX);
     }
 
