@@ -33,9 +33,8 @@ Ferrite replaces the RT-950 Pro's stock firmware with one that is open, RF-aware
 | [`assets/logo/`](assets/logo) | The logo: the toroid mark, lockups for dark and light backgrounds, the app icon (`ferrite-icon.svg`, a simplified one for 16-48 px, PNGs 16-1024 and `favicon.ico`), the social preview |
 | [`fonts/`](fonts) | Atkinson Hyperlegible and Barlow Semi Condensed (OFL; licences beside them) |
 
-The chip drivers and the digital modes are separate libraries, pinned by commit in `Cargo.toml`:
+The chip drivers are in [`drivers/`](drivers) (BK4829, SI4732, ST7789, W25Q, keypad and NMEA; the uradio repo until Oct 13, 2026, history kept). The digital modes are a separate library, pinned by commit in `Cargo.toml`:
 
-- [uradio](https://github.com/infamy/uradio): BK4829, SI4732, ST7789, W25Q, keypad and NMEA drivers.
 - [udigimodes](https://github.com/infamy/udigimodes): AFSK/APRS, POCSAG, DSC, FT8/FT4 and WSPR.
 
 ## Tasks
@@ -90,7 +89,7 @@ update. The day-one order is `../docs/bringup.md`; debugging on the radio (cable
 Transmit is built in milestone 4, after receive is proven on the radio. Until then it sits behind a feature: `cargo fw --features tx`
 adds it, and without the feature the build contains no transmit code at all, so bring-up builds cannot key the radio.
 
-uradio and udigimodes are private for now. Cargo fetches them with git, so your git credentials must reach them.
+udigimodes is private for now. Cargo fetches it with git, so your git credentials must reach it.
 CI uses a `DEPS_TOKEN` secret for this.
 
 ## Safety

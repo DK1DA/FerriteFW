@@ -1,5 +1,5 @@
 name: ci
-# Paused: uradio and udigimodes are private, and the DEPS_TOKEN secret that reads them is not set up yet.
+# Paused: udigimodes is private, and the DEPS_TOKEN secret that reads them is not set up yet.
 # To turn CI back on, add the secret and restore the triggers:
 #   on: [push, pull_request]
 on: workflow_dispatch
@@ -8,11 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # uradio and udigimodes are private: a token with read access to both (repository secret DEPS_TOKEN).
+      # udigimodes is private: a token with read access to it (repository secret DEPS_TOKEN).
       - run: git config --global url."https://x-access-token:${{ secrets.DEPS_TOKEN }}@github.com/".insteadOf "https://github.com/"
       # rust-toolchain.toml picks the pinned nightly and its components.
       - run: rustup show active-toolchain || rustup toolchain install
       - run: cargo test
+      - run: cargo test -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea --all-features  # the drivers with their tx and mock features
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo fw-clippy -- -D warnings
       - run: cargo fw-bringup  # the first image on a new radio; not in the per-change checks

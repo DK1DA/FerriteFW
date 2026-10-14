@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "crates/ferrite-store", "crates/ferrite-checks", "crates/ferrite-radio", "firmware", "sim", "sim-web"]
+members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "crates/ferrite-store", "crates/ferrite-checks", "crates/ferrite-radio", "firmware", "sim", "sim-web", "drivers/bus", "drivers/bk4829", "drivers/si4732", "drivers/st7789", "drivers/w25q", "drivers/keypad", "drivers/nmea"]
 # Plain `cargo test` / `cargo clippy` cover what runs on the PC; the firmware builds with `cargo fw` (radio only).
-default-members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "crates/ferrite-store", "crates/ferrite-checks", "crates/ferrite-radio", "sim"]
+default-members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "crates/ferrite-store", "crates/ferrite-checks", "crates/ferrite-radio", "sim", "drivers/bus", "drivers/bk4829", "drivers/si4732", "drivers/st7789", "drivers/w25q", "drivers/keypad", "drivers/nmea"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,13 +19,13 @@ ferrite-radio = { path = "crates/ferrite-radio" }
 ufmt = "0.2"
 embassy-sync = "0.8"
 
-# Chip drivers and digital modes: our own libraries, pinned to a commit.
-uradio-bus = { git = "https://github.com/infamy/uradio", rev = "" }
-bk4829 = { git = "https://github.com/infamy/uradio", rev = "" }
-si4732 = { git = "https://github.com/infamy/uradio", rev = "" }
-st7789 = { git = "https://github.com/infamy/uradio", rev = "" }
-w25q = { git = "https://github.com/infamy/uradio", rev = "" }
-keypad = { git = "https://github.com/infamy/uradio", rev = "" }
+# Chip drivers (drivers/, uradio until Oct 13, 2026), then the digital modes: our own library, pinned to a commit.
+uradio-bus = { path = "drivers/bus" }
+bk4829 = { path = "drivers/bk4829" }
+si4732 = { path = "drivers/si4732" }
+st7789 = { path = "drivers/st7789" }
+w25q = { path = "drivers/w25q" }
+keypad = { path = "drivers/keypad" }
 uafsk = { git = "https://github.com/infamy/udigimodes", rev = "" }
 upocsag = { git = "https://github.com/infamy/udigimodes", rev = "" }
 udsc = { git = "https://github.com/infamy/udigimodes", rev = "" }

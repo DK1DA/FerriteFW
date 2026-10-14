@@ -2,7 +2,7 @@
 name = "bk4829"
 version = "0.1.0"
 edition.workspace = true
-license.workspace = true
+license = "MIT"
 repository.workspace = true
 description = "BK4829 FM transceiver driver: 3-wire bus, stock's start-up, tuning, squelch, CTCSS/DCS, DTMF, FSK modem; transmit only with the tx feature"
 
@@ -12,3 +12,6 @@ tx = []
 
 [dependencies]
 uradio-bus = { path = "../bus" }
+
+[lints]
+workspace = true

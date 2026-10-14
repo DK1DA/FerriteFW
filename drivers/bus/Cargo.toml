@@ -2,10 +2,13 @@
 name = "uradio-bus"
 version = "0.1.0"
 edition.workspace = true
-license.workspace = true
+license = "MIT"
 repository.workspace = true
 description = "The minimal bus traits uradio's drivers are written against, and recording mocks for host tests"
 
 [features]
 # Recording mock buses for host tests (needs std).
 mock = []
+
+[lints]
+workspace = true

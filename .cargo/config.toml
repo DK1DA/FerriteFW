@@ -24,5 +24,5 @@ simw = ["run", "-p", "ferrite-sim", "--", "--window"]
 simweb = ["build", "-p", "ferrite-sim-web", "--target", "wasm32-unknown-unknown", "--profile", "wasm"]
 
 [net]
-# uradio and udigimodes are private for now: let git (and its credential helper) fetch them.
+# udigimodes is private for now: let git (and its credential helper) fetch it.
 git-fetch-with-cli = true
