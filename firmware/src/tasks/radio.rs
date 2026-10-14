@@ -1187,17 +1187,21 @@ impl Radio {
         // DAC off.
         // SND-13: with audio already playing (a slot heard, the broadcast, HF), key and refusal beeps are skipped:
         // muting the chip and switching the amp off cut the audio and sounded rough on the radio (Oct 13, 2026).
-        // The alert tone still sounds, over the audio, leaving the chips and the amp as they are.
+        // The alert tone still sounds: the radio audio (chips and SI4732) is muted under it and put back after,
+        // the amp left on.
         let playing = SPEAKER_ON.load(core::sync::atomic::Ordering::Relaxed);
         if playing && hz != ferrite_app::ALERT_HZ {
             return;
         }
-        if !playing {
-            for n in 0..2u8 {
-                if self.has(n) && self.tuned[n as usize].is_some() {
-                    self.chip(n).af_out(AfOut::Mute);
-                }
+        for n in 0..2u8 {
+            if self.has(n) && self.tuned[n as usize].is_some() {
+                self.chip(n).af_out(AfOut::Mute);
             }
+        }
+        // The SI4732 playing: the broadcast heard, or HF mode on the SI4732 (`hf`).
+        let si_playing = playing && self.si.mode().is_some() && self.hf.map_or(self.si_heard, |h| h.si);
+        if si_playing {
+            let _ = self.si.mute(true, &mut BusyDelay);
         }
         crate::hal::tone::start(hz as u32, self.beep_level);
         Timer::after_millis(30).await;
@@ -1210,6 +1214,13 @@ impl Radio {
         }
         Timer::after_millis(30).await;
         crate::hal::tone::stop();
+        if si_playing {
+            let _ = self.si.mute(false, &mut BusyDelay);
+        }
+        // The receive tick puts each chip's audio back; HF mode on chip 1 has no tick doing it (`hf`).
+        if playing && self.hf.is_some_and(|h| !h.si) {
+            self.chip(1).af_out(AfOut::Normal);
+        }
         log(b"beep hz ", hz as u32);
     }
 
