@@ -53,11 +53,18 @@ impl Radio {
         adc::init();
         let mic = adc::read(adc::CH_PA0);
         let changing = crate::chan::ACCESSORY.load(core::sync::atomic::Ordering::Relaxed) & ferrite_core::acc::CHANGING != 0;
-        let blocked = changing || self.path.keyed().is_none() && self.live.slots[self.active as usize].squelch_open;
+        // VOX-3, as stock (0x08025994): never while any audio plays (a slot heard, the broadcast, a beep: the
+        // speaker on, which also turns the tap off through PB8) or any slot's squelch is open; then the 1.5 s hold.
+        let audio = SPEAKER_ON.load(core::sync::atomic::Ordering::Relaxed) || self.si.mode().is_some();
+        let blocked = changing || self.path.keyed().is_none() && (audio || self.live.slots.iter().any(|s| s.squelch_open));
         self.live.tx.voice = self.tx.vox_det.step(mic, level, tail as u32 * 100, blocked, now);
     }
 
     pub(super) async fn tick(&mut self) {
+        // SAFE-14: the PTT inputs looked at every tick, so the guard learns they were let go after boot. Looked at
+        // only at key-up (as until Oct 13, 2026), PTT is pressed then and every key-up was refused on the radio.
+        #[cfg(feature = "tx")]
+        self.ptt_seen_released();
         self.mcu_temp();
         self.fm_poll();
         // SQL-1: the calibration's squelch tables, once the UI task has read them: every tuned chip again.

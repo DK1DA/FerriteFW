@@ -13,6 +13,17 @@ pub const HYSTERESIS: u16 = 8;
 /// No VOX until this long after boot (VOX-3).
 pub const BOOT_HOLD_MS: u32 = 5000;
 
+/// After anything that blocks VOX (receive audio, the broadcast, a beep) ends, this long before it samples again:
+/// stock's hold of 15 x 100 ms (0x08025994, traced Oct 13, 2026). The PA0 tap is an envelope that decays over
+/// seconds and is dead while the audio stage (PB8) is on, so a reading just after the audio stops is not speech.
+pub const HOLD_MS: u32 = 1500;
+
+/// Stock's VOX reading from a 12-bit PA0 conversion (0x0801645C): bits 11-4, so the thresholds below compare
+/// with 8-bit counts (VOX-14).
+pub fn reading(raw12: u16) -> u16 {
+    (raw12 >> 4) & 0xFF
+}
+
 /// The detector's state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Vox {
@@ -20,21 +31,28 @@ pub struct Vox {
     on: bool,
     /// When the level last stood above the off level (ms).
     last: u32,
+    /// No sampling before this (ms): [`HOLD_MS`] after the last block.
+    free_at: u32,
 }
 
 impl Vox {
     pub const fn new() -> Self {
-        Vox { on: false, last: 0 }
+        Vox { on: false, last: 0, free_at: 0 }
     }
 
-    /// One mic reading at `now` (ms since boot). `level` 1-9, or 0 for VOX off; `tail_ms` the hang time;
-    /// `blocked` while the slot receives or an accessory change is debounced (VOX-3). Returns whether speech is
-    /// on, the tail included.
-    pub fn step(&mut self, mic: u16, level: u8, tail_ms: u32, blocked: bool, now: u32) -> bool {
-        if level == 0 || blocked || now < BOOT_HOLD_MS {
-            *self = Vox::new();
+    /// One PA0 conversion (12-bit, as read) at `now` (ms since boot). `level` 1-9, or 0 for VOX off; `tail_ms`
+    /// the hang time; `blocked` while any audio plays or an accessory change is debounced (VOX-3), and
+    /// [`HOLD_MS`] after. Returns whether speech is on, the tail included.
+    pub fn step(&mut self, raw12: u16, level: u8, tail_ms: u32, blocked: bool, now: u32) -> bool {
+        if blocked {
+            *self = Vox { free_at: now.wrapping_add(HOLD_MS), ..Vox::new() };
             return false;
         }
+        if level == 0 || now < BOOT_HOLD_MS || (now.wrapping_sub(self.free_at) as i32) < 0 {
+            (self.on, self.last) = (false, 0);
+            return false;
+        }
+        let mic = reading(raw12);
         let t = threshold(level);
         let above = if self.on { mic + HYSTERESIS >= t } else { mic >= t };
         if above {
@@ -128,10 +146,10 @@ mod tests {
     #[test]
     fn speech_and_tail() {
         let mut v = Vox::new();
-        let t = threshold(5);
+        let t = threshold(5) << 4; // 12-bit, as PA0 reads
         assert!(!v.step(t - 1, 5, 2000, false, 6000), "below the threshold");
         assert!(v.step(t, 5, 2000, false, 6100), "at the threshold");
-        assert!(v.step(t - HYSTERESIS, 5, 2000, false, 6200), "hysteresis holds it");
+        assert!(v.step(t - (HYSTERESIS << 4), 5, 2000, false, 6200), "hysteresis holds it");
         assert!(v.step(0, 5, 2000, false, 8100), "the tail");
         assert!(!v.step(0, 5, 2000, false, 8200), "2 s below: off");
     }
@@ -144,5 +162,22 @@ mod tests {
         assert!(!v.step(500, 9, 2000, false, 4999), "within 5 s of boot");
         assert!(v.step(500, 9, 2000, false, 9000));
         assert!(!v.step(500, 9, 2000, true, 9100), "the slot receives: speech drops at once");
+        assert!(!v.step(500, 9, 2000, false, 9100 + HOLD_MS - 1), "stock's 1.5 s hold after the audio");
+        assert!(v.step(500, 9, 2000, false, 9100 + HOLD_MS));
+    }
+
+    /// VOX-14: stock compares bits 11-4 of the 12-bit reading. The noise floor and an envelope's decay (under
+    /// 300 raw on the black radio, Oct 13, 2026) never reach level 9's 21; the loud whistle seen (~800 raw = 49)
+    /// passes levels 7-9 only.
+    #[test]
+    fn stock_scaling() {
+        assert_eq!(reading(799), 49);
+        assert_eq!(reading(0xFFF), 255);
+        let mut v = Vox::new();
+        assert!(!v.step(48, 9, 2000, false, 9000), "a decaying envelope (48 raw = 3) is not speech");
+        assert!(!v.step(335, 9, 2000, false, 9020), "335 raw = 20: below level 9's 21");
+        assert!(v.step(336, 9, 2000, false, 9040), "336 raw = 21: level 9");
+        let mut v = Vox::new();
+        assert!(!v.step(799, 5, 2000, false, 9000), "the whistle (49) is below level 5's 61");
     }
 }

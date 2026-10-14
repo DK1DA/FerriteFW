@@ -233,6 +233,7 @@ pub fn short(r: Refusal) -> &'static str {
         Refusal::AmRxOnly => "AM is receive only",
         Refusal::Emergency => "emergency: PTT twice",
         Refusal::ReleasePtt => "release PTT first",
+        Refusal::PttAtBoot => "PTT held at power-on",
         Refusal::Hot => "transmitter cooling",
     }
 }
@@ -256,6 +257,7 @@ fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
         | Refusal::Unmeasured125
         | Refusal::Emergency
         | Refusal::ReleasePtt
+        | Refusal::PttAtBoot
         | Refusal::Hot => None,
     }
 }
@@ -603,6 +605,7 @@ impl View for TxRefused {
             Refusal::AmRxOnly => a.set(b"AM is receive only: the radio has no AM modulator."),
             Refusal::Emergency => a.set(b"An emergency frequency: only a person pressing PTT twice transmits here."),
             Refusal::ReleasePtt => a.set(b"The timeout ended the last transmission. Release PTT, then press it again."),
+            Refusal::PttAtBoot => a.set(b"PTT was held at power-on. Release every PTT, then press it again. (SAFE-14)"),
             Refusal::Hot => {
                 a.set(b"The transmitter is cooling after a long time keyed.");
                 more = b"It transmits again in a few minutes. (TX-31)";

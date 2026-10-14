@@ -113,6 +113,8 @@ pub enum Refusal {
     Emergency,
     /// The timeout ended the last transmission and PTT is still held (TX-30).
     ReleasePtt,
+    /// No PTT input has read released since power-on (SAFE-14).
+    PttAtBoot,
     /// The duty limit: the transmitter is cooling (TX-31).
     Hot,
 }

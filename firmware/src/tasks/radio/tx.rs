@@ -7,7 +7,7 @@ use super::*;
 impl Radio {
     /// TX-42: every PTT input (PTT A PE3, PTT B PE2, the connector's PE6; low when pressed) has read released
     /// since boot.
-    fn ptt_seen_released(&mut self) -> bool {
+    pub(super) fn ptt_seen_released(&mut self) -> bool {
         use crate::board::{KEY_PTT, KEY_SIDE1, KEY_SIDE2};
         let was = self.tx.ptt.seen(false);
         let ok = self.tx.ptt.seen(KEY_PTT.read() && KEY_SIDE1.read() && KEY_SIDE2.read()); // `ferrite_radio::ptt`
@@ -67,7 +67,7 @@ impl Radio {
             return self.refuse(slot, Refusal::Locked);
         };
         if !self.ptt_seen_released() {
-            return self.refuse(slot, Refusal::ReleasePtt);
+            return self.refuse(slot, Refusal::PttAtBoot);
         }
         let s = slot as usize % 4;
         let rx = if slot < SLOTS as u8 { self.slots[s].freq } else { f };
