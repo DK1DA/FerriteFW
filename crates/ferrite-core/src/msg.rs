@@ -388,32 +388,42 @@ pub struct TxLive {
 /// [`RadioCmd`]: an SI4732 command doesn't fit its 8 bytes, and these go one at a time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DebugReq {
+    #[cfg(feature = "bench")]
     /// `n` bytes (at most [`DEBUG_MEM`]) of MCU memory from `addr`; `words`: 32-bit reads (peripherals).
     Mem { addr: u32, n: u8, words: bool },
+    #[cfg(feature = "bench")]
     /// A BK4829 register (chip 0 VHF, 1 UHF/HF).
     BkRead { chip: u8, reg: u8 },
+    #[cfg(feature = "bench")]
     /// Write a BK4829 register, then read it back. Transmit and PA bits are refused (TERM-23).
     BkWrite { chip: u8, reg: u8, val: u16 },
+    #[cfg(feature = "bench")]
     /// An SI4732 command: its first `n` bytes, and `reply` bytes back (the status byte first).
     Si { cmd: [u8; 8], n: u8, reply: u8 },
+    #[cfg(feature = "bench")]
     /// A read-only query to the Bluetooth module (TERM-27): its first `n` bytes, sent with CR LF on USART1;
     /// [`bt_query_refused`] has passed it.
     Bt { text: [u8; 16], n: u8 },
+    #[cfg(feature = "bench")]
     /// TERM-29, the bench test of decision 114: hold both band receive selects on (`Some(true)`), back to one
     /// (`Some(false)`), or only ask (`None`). The Radio task refuses while keyed, in HF mode and while the
     /// crossband repeater runs.
     RxBoth(Option<bool>),
     /// TERM-30: the GPS module's last GGA sentence as received, answered where the terminal runs.
     Gga,
+    #[cfg(feature = "bench")]
     /// TERM-31, PWR-21 (decision 119, a bench test): the BK4829 wake and sleep settle waits, set (`Some`, each
     /// within [`crate::settle::MAX_MS`]) or only asked (`None`). RAM only.
     Settle(Option<crate::settle::Settle>),
+    #[cfg(feature = "bench")]
     /// TERM-32 (a bench test): a burst of PA0 readings ([`crate::vox::MIC_SAMPLES`] at [`crate::vox::MIC_PERIOD_US`]),
     /// summed up by the Radio task.
     Mic,
+    #[cfg(feature = "bench")]
     /// TERM-33 (decision 132, a bench test): the transmit test signal for the next PTT key-up, armed, disarmed or
     /// only asked. The Radio task of a receive-only build refuses it.
     TxTest(crate::txtest::Ask),
+    #[cfg(feature = "bench")]
     /// TERM-36 (a bench test): a CASIC sentence to the GPS module, `$PCAS<id>,<arg>`, which
     /// [`crate::gpspower::casic_refused`] has passed (CAS03 NMEA off or stock's on, CAS06 queries, CAS12 standby);
     /// the GPS task sends it ([`crate::gpspower::GpsBench`]). `quiet`: a standby with NMEA off first and not on after.
@@ -423,30 +433,41 @@ pub enum DebugReq {
 /// The longest GGA sentence [`DebugAns::Gga`] carries: NMEA's 82 characters less CR LF.
 pub const GGA_MAX: usize = 80;
 
-/// The most memory one [`DebugReq::Mem`] reads.
+/// The most memory one `DebugReq::Mem` reads (a bench build's).
+#[cfg(feature = "bench")]
 pub const DEBUG_MEM: usize = 64;
 
 /// The answer to a [`DebugReq`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DebugAns {
+    #[cfg(feature = "bench")]
     Mem { addr: u32, data: [u8; DEBUG_MEM], n: u8 },
+    #[cfg(feature = "bench")]
     Reg { chip: u8, reg: u8, val: u16 },
+    #[cfg(feature = "bench")]
     Si { data: [u8; 16], n: u8 },
+    #[cfg(feature = "bench")]
     /// What the Bluetooth module sent back within 500 ms (TERM-27).
     Bt { data: [u8; 48], n: u8 },
+    #[cfg(feature = "bench")]
     /// TERM-29: whether both band receive selects are held on now.
     RxBoth(bool),
+    #[cfg(feature = "bench")]
     /// TERM-31: the settle waits in force now.
     Settle(crate::settle::Settle),
+    #[cfg(feature = "bench")]
     /// TERM-32: the PA0 burst.
     Mic(crate::vox::MicCapture),
+    #[cfg(feature = "bench")]
     /// TERM-33: what is armed for the next PTT key-up now (None: nothing).
     TxTest(Option<crate::txtest::Arm>),
+    #[cfg(feature = "bench")]
     /// TERM-34: `txtest suite` running: the section (1-7; 0 the lead-in before the first, 8 holding the end tone
     /// until the release) and the ms left to the hold.
     TxSuite { section: u8, left_ms: u32 },
     /// TERM-30: the last GGA sentence from `$` to the checksum (`n` 0: none since boot), and its age in seconds.
     Gga { data: [u8; GGA_MAX], n: u8, age_s: u32 },
+    #[cfg(feature = "bench")]
     /// TERM-36: the CASIC sentence went to the module; the first TXT sentence it sent back within
     /// [`GPS_REPLY_MS`] (from `$` to the checksum), `n` 0 for none.
     GpsSent { data: [u8; GGA_MAX], n: u8 },
@@ -455,11 +476,13 @@ pub enum DebugAns {
 }
 
 /// TERM-36: how long the GPS task waits for the module's TXT answer (within the terminal's 2 s).
+#[cfg(feature = "bench")]
 pub const GPS_REPLY_MS: u32 = 1200;
 
 /// TERM-27: a Bluetooth module query is sent only when it can't change the module (the user's rule, decision 79:
 /// a wrong `AT+BAUD=` leaves the radio's Bluetooth silent): `AT`, `AT+HELP`, or `AT+WORD?` (letters and digits).
-/// Anything with `=`, anything else: refused.
+/// Anything with `=`, anything else: refused. A bench build's (decision 151).
+#[cfg(feature = "bench")]
 pub fn bt_query_refused(t: &[u8]) -> Option<&'static str> {
     if t.contains(&b'=') {
         return Some("'=' sets something on the module: only queries are sent");
@@ -480,7 +503,7 @@ pub fn bt_query_refused(t: &[u8]) -> Option<&'static str> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "bench"))]
 mod bt_query_tests {
     use super::bt_query_refused as r;
 
@@ -502,7 +525,8 @@ pub const BK_REG30_TX_BITS: u16 = 1 << 1 | 1 << 3;
 
 /// Why a terminal write to a BK4829 register is refused, in every build (TERM-23): transmit goes only through
 /// the Radio task's own checks, and the chip's GPIO outputs (REG_33, REG_34) are wired to who knows what on
-/// this board until the bench says (on the UV-K5 they switch the RF path).
+/// this board until the bench says (on the UV-K5 they switch the RF path). A bench build's (decision 151).
+#[cfg(feature = "bench")]
 pub fn bk_write_refused(reg: u8, val: u16) -> Option<&'static str> {
     match reg {
         0x30 if val & BK_REG30_TX_BITS != 0 => Some("REG_30 Tx DSP and PA Gain bits are never set from the terminal"),
@@ -626,6 +650,8 @@ pub struct Device {
     pub tx_built: bool,
     /// The `tx-dry` build: transmit with the PA drive held at 0 (LINK-35 tells the PC).
     pub tx_dry: bool,
+    /// The bench commands are in (the `bench` feature, TERM-38; LINK-35's bit 7).
+    pub bench: bool,
     pub selftest: SelfTest,
     pub link: LinkLive,
 }
@@ -754,7 +780,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "bench"))]
 mod debug_tests {
     use super::*;
 

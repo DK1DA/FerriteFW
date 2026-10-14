@@ -389,9 +389,9 @@ pub const TX_MUTE: u16 = 1 << 15;
 /// ALC off and the TX mute clear, so DAC1's test signal reaches the modulator without the voice processing.
 /// REG_7D[5:0] is the data key-up's [`ferrite_core::vox::MIC_DATA`] from [`tx_setup`]. Returns what was there.
 #[cfg(feature = "tx")]
-pub fn tx_test_filters<B: Bus>(bk: &mut Bk4829<B>, f: ferrite_core::txtest::Filters) -> TestRegs {
+pub fn tx_test_filters<B: Bus>(bk: &mut Bk4829<B>, f: ferrite_core::txfilters::Filters) -> TestRegs {
     let was = TestRegs { r2b: bk.read(bk4829::reg::AF_FILTERS), r19: bk.read(0x19), r7d: bk.read(bk4829::reg::MIC), r50: bk.read(0x50) };
-    let bits = if f == ferrite_core::txtest::Filters::Flat { TX_FILTERS_OFF } else { TX_HPF_OFF };
+    let bits = if f == ferrite_core::txfilters::Filters::Flat { TX_FILTERS_OFF } else { TX_HPF_OFF };
     bk.write(bk4829::reg::AF_FILTERS, (was.r2b & !TX_FILTERS_OFF) | bits);
     bk.write(0x19, was.r19 | MIC_AGC_OFF);
     bk.write(bk4829::reg::MIC, was.r7d | ALC_OFF);
@@ -418,21 +418,21 @@ pub fn tx_test_restore<B: Bus>(bk: &mut Bk4829<B>, r: &TestRegs) {
 /// (`BK4819_EnableTXLink`: VCO cal, AF DAC, disc mode, PLL, PA gain, TX DSP = 0xC3FA); its REG_50 TX mute around
 /// the switch (0xBB18/0x3B18) is left out, as stock's tone path leaves it. REG_47 is left at the key-up's 0x6142
 /// (no sidetone: the speaker is off for a data key-up).
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub fn afsk_bk_begin<B: Bus>(bk: &mut Bk4829<B>, hz: u16, gain: u8, narrow: bool) {
     bk.tx_on(bk4829::tx::Source::Tones, !narrow);
     bk.tones(hz as u32, gain, 0, 0);
 }
 
 /// `afsk-bk`'s tone change: REG_71 only (BD1EEA's `BK4819_AFSK_SetTone`), one bus write.
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub fn afsk_bk_tone<B: Bus>(bk: &mut Bk4829<B>, hz: u16) {
     bk.write(bk4829::reg::TONE1_FREQ, bk4829::tone_word(hz as u32));
 }
 
 /// `afsk-bk` stopped at the release, before the unkey's steps: tones off (REG_70 0), as the end tone leaves the
 /// chip at the unkey (`play_keyed`); REG_30 stays at tone transmit (mic off) until the unkey's REG_30 = 0.
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub fn afsk_bk_end<B: Bus>(bk: &mut Bk4829<B>) {
     bk.tone_tx(0);
 }
@@ -442,7 +442,7 @@ pub fn afsk_bk_end<B: Bus>(bk: &mut Bk4829<B>) {
 /// the CTCSS threshold the sub-tone steps rewrite) and the key-up's sub-tone (the slot's tone word and its REG_51
 /// gain, [`TxSetup`]). REG_08 (DCS's codeword, written in two halves) isn't kept: the key-up's DCS code is written
 /// again, and with no DCS the next receive tune sets it.
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SuiteRegs {
     pub filters: TestRegs,
@@ -455,7 +455,7 @@ pub struct SuiteRegs {
 
 /// The suite's start, on the keyed chip after the key-up's plan: what it will change read and kept, and the slot's
 /// sub-tone off (REG_51 0), so only section 6 sends one. `tone`, `tone_dev`: the key-up's [`TxSetup`] values.
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub fn suite_begin<B: Bus>(bk: &mut Bk4829<B>, tone: u16, tone_dev: u8) -> SuiteRegs {
     let filters = TestRegs { r2b: bk.read(bk4829::reg::AF_FILTERS), r19: bk.read(0x19), r7d: bk.read(bk4829::reg::MIC), r50: bk.read(0x50) };
     let r = SuiteRegs { filters, r40: bk.read(bk4829::reg::DEVIATION), r07: bk.read(bk4829::reg::CTC), r52: bk.read(bk4829::reg::CTCSS_THRESH), tone, tone_dev };
@@ -465,7 +465,7 @@ pub fn suite_begin<B: Bus>(bk: &mut Bk4829<B>, tone: u16, tone_dev: u8) -> Suite
 
 /// The TX audio set-up `f` from the key-up's registers: `voice` the four as they were, `flat` and `data` as
 /// [`tx_test_filters`] makes them from those (the same values whatever the step before set).
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 fn suite_filters<B: Bus>(bk: &mut Bk4829<B>, was: &TestRegs, f: ferrite_core::txtest::Filters) {
     use ferrite_core::txtest::Filters;
     if f == Filters::Voice {
@@ -486,7 +486,7 @@ fn suite_filters<B: Bus>(bk: &mut Bk4829<B>, was: &TestRegs, f: ferrite_core::tx
 /// [`Bk4829::tx_on`]), then the new sound: a generator tone at stock's gain, the flags' first tone (space at
 /// `afsk-bk`'s gain; the caller starts TMR5), or the sub-tone with `sub_dev` as its REG_51 gain (the calibration's
 /// byte for its kind). DAC1 and TMR5 are the caller's. `narrow`: the keyed slot's bandwidth.
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub fn suite_step<B: Bus>(bk: &mut Bk4829<B>, was: &SuiteRegs, prev: Option<&ferrite_core::txsuite::Step>, next: &ferrite_core::txsuite::Step, narrow: bool, sub_dev: u8) {
     use ferrite_core::txsuite::Src;
     use ferrite_core::txtest::{bk_gain, Filters, BK_SPACE_HZ, LEVEL_DEFAULT};
@@ -529,7 +529,7 @@ pub fn suite_step<B: Bus>(bk: &mut Bk4829<B>, was: &SuiteRegs, prev: Option<&fer
 /// The suite's end (the release, or any unkey), before the unkey's steps: the generator off (REG_70 0), the TX
 /// audio set-up, REG_40, REG_07 and REG_52 as the key-up left them, and the key-up's sub-tone again (REG_51 and
 /// REG_08 as [`tx_setup`] wrote them). REG_30 is left for the unkey's REG_30 = 0.
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub fn suite_end<B: Bus>(bk: &mut Bk4829<B>, was: &SuiteRegs) {
     bk.tone_tx(0);
     tx_test_restore(bk, &was.filters);

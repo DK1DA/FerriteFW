@@ -4,10 +4,14 @@
 //! Peripheral blocks take 32-bit reads only (`mem32`): some reads have side effects (a UART's data register gives
 //! up its byte), which the help says.
 
+#[cfg(feature = "bench")]
 use ferrite_core::memmap;
-use ferrite_core::msg::{DebugAns, DebugReq, DEBUG_MEM};
+use ferrite_core::msg::DebugAns;
+#[cfg(feature = "bench")]
+use ferrite_core::msg::{DebugReq, DEBUG_MEM};
 
-/// Answers a `mem` or `mem32` request, or says why not.
+/// Answers a `mem` or `mem32` request, or says why not. A bench build's (TERM-38).
+#[cfg(feature = "bench")]
 pub fn mem(r: DebugReq) -> DebugAns {
     let DebugReq::Mem { addr, n, words } = r else { return DebugAns::Refused("not a memory request") };
     let n = (n as usize).min(DEBUG_MEM);

@@ -350,6 +350,7 @@ pub const NMEA_OFF: &[u8] = b"$PCAS03,0,0,0,0,0,0,0,0*02\r\n";
 /// it would drop the RMC and GSV that Ferrite reads. The bench (GPS-31) says what this module does with it.
 pub const NMEA_STOCK: &[u8] = b"$PCAS03,5,0,0,0,0,3,7,60*35\r\n";
 
+#[cfg(feature = "bench")]
 /// What may be sent to the module (TERM-36): CAS03 NMEA off or stock's on, CAS06 queries (0, 1, 2, 4, 6) and
 /// CAS12 standby (1-65535 s), nothing else. Never CAS00 (saves the configuration to the module's flash) or CAS01
 /// (its baud rate: a wrong one leaves the GPS silent), nor any other setting.
@@ -365,11 +366,14 @@ pub fn casic_refused(id: u8, arg: u16) -> Option<&'static str> {
     }
 }
 
+#[cfg(feature = "bench")]
 /// A quiet standby (TERM-36): the CAS12 goes this long after NMEA off.
 pub const QUIET_GAP_MS: u32 = 100;
+#[cfg(feature = "bench")]
 /// A quiet standby: stock's NMEA on goes this long after the standby's end at the latest.
 pub const QUIET_RESTORE_MS: u32 = 3_000;
 
+#[cfg(feature = "bench")]
 /// What follows a bench standby's end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum After {
@@ -381,6 +385,7 @@ enum After {
     Restore,
 }
 
+#[cfg(feature = "bench")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Bench {
     #[default]
@@ -393,6 +398,7 @@ enum Bench {
     Standby { at: u32, until: u32, after: After, heard: bool },
 }
 
+#[cfg(feature = "bench")]
 /// The terminal's GPS bench test (TERM-36, GPS-31): from `gps nmea off` or a `gps standby` until NMEA is on again
 /// and the standby over, the power manager is held (nothing of its goes to the module, no power cycle) and no other
 /// terminal sentence is let through during a standby. Pure logic: the GPS task sends what it returns.
@@ -401,6 +407,7 @@ pub struct GpsBench {
     st: Bench,
 }
 
+#[cfg(feature = "bench")]
 impl GpsBench {
     pub const fn new() -> Self {
         GpsBench { st: Bench::Idle }
@@ -757,6 +764,7 @@ mod tests {
         assert_eq!((s.ignored as usize, s.cycles), (s.standbys.len(), 0));
     }
 
+    #[cfg(feature = "bench")]
     /// TERM-36: only CAS06 queries and CAS12 standby are let through, and the bytes are as the spec prints them
     /// (`$PCAS06,0*1B` firmware version, 2.7.7).
     #[test]
@@ -786,6 +794,7 @@ mod tests {
         assert_eq!(&o[..k], b"a<00>");
     }
 
+    #[cfg(feature = "bench")]
     /// TERM-36: NMEA off and stock's on are the exact bytes, each checksum the XOR between `$` and `*` (checked
     /// against the spec's own CAS03 example, 2.7.4, `*02`), CR LF last; CAS03 takes only 0 (off) and 1 (stock's).
     #[test]
@@ -817,6 +826,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "bench")]
     /// TERM-36: `gps nmea off` holds the manager until `gps nmea on`; a standby sent then keeps NMEA off after its
     /// end; nothing else goes to the module during a standby.
     #[test]
@@ -853,6 +863,7 @@ mod tests {
         assert!(!b.holds());
     }
 
+    #[cfg(feature = "bench")]
     /// TERM-36: `gps standby N quiet`: NMEA off, the CAS12 100 ms later, no NMEA on after it; stock's NMEA on once
     /// NMEA comes back, or N + 3 s after the CAS12; a power off ends the test.
     #[test]

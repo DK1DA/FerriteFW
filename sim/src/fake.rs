@@ -128,11 +128,14 @@ pub struct FakeRadio {
     scope_cfg: (u8, u8),
     /// Each slot's power level (0 Low, 1 Mid, 2 High; 3 = HF mode), for the duty limit's weighting (TX-38).
     power: [u8; 4],
+    #[cfg(feature = "bench")]
     /// The two BK4829s' registers, for the terminal's `bk` (TERM-21).
     bk: [[u16; 128]; 2],
+    #[cfg(feature = "bench")]
     /// The BK4829 settle waits the terminal sets (TERM-31); the fake has no chip power to wait on.
     settle: ferrite_core::settle::Settle,
     /// The transmit test armed from the terminal (TERM-33): kept and shown; the simulator sends no audio.
+    #[cfg(feature = "bench")]
     txtest: Option<ferrite_core::txtest::Arm>,
     /// Slots with monitor latched: squelch held open.
     monitor: u8,
@@ -198,8 +201,11 @@ impl FakeRadio {
             mode: Fake::Off,
             scope_cfg: (60, 10),
             power: [2; 4],
+            #[cfg(feature = "bench")]
             bk: fake_bk(),
+            #[cfg(feature = "bench")]
             settle: ferrite_core::settle::Settle::DEFAULT,
+            #[cfg(feature = "bench")]
             txtest: None,
             monitor: 0,
             mute: 0,
@@ -719,6 +725,7 @@ pub fn device_at(secs: u64) -> Device {
         spkmic: false,
         tx_built: true, // the fake radio transmits (into nothing)
         tx_dry: false,
+        bench: cfg!(feature = "bench"),
         selftest: SelfTest {
             idcode: ferrite_core::chipid::EXPECTED_PID,
             mcu_ok: true,
@@ -735,6 +742,7 @@ pub fn device_at(secs: u64) -> Device {
 }
 
 
+#[cfg(feature = "bench")]
 /// The fake BK4829s' registers: the ID in REG_00 and stock's receive-mode REG_30, the rest 0.
 fn fake_bk() -> [[u16; 128]; 2] {
     let mut r = [[0u16; 128]; 2];
@@ -751,8 +759,11 @@ impl FakeRadio {
     /// of each address, peripherals as 0, the GPIO input registers as a pattern; BK4829 registers from the fake
     /// register file (the same refusals as the radio); the SI4732 answers its status byte 0x80 and zeros.
     pub fn debug(&mut self, r: ferrite_core::msg::DebugReq) -> ferrite_core::msg::DebugAns {
-        use ferrite_core::msg::{bk_write_refused, DebugAns, DebugReq, DEBUG_MEM};
+        use ferrite_core::msg::{DebugAns, DebugReq};
+        #[cfg(feature = "bench")]
+        use ferrite_core::msg::{bk_write_refused, DEBUG_MEM};
         match r {
+            #[cfg(feature = "bench")]
             DebugReq::Mem { addr, n, words } => {
                 let mut data = [0u8; DEBUG_MEM];
                 let n = (n as usize).min(DEBUG_MEM);
@@ -766,7 +777,9 @@ impl FakeRadio {
                 }
                 DebugAns::Mem { addr, data, n: n as u8 }
             }
+            #[cfg(feature = "bench")]
             DebugReq::BkRead { chip, reg } => DebugAns::Reg { chip, reg, val: self.bk[chip as usize % 2][reg as usize % 128] },
+            #[cfg(feature = "bench")]
             DebugReq::BkWrite { chip, reg, val } => {
                 if let Some(why) = bk_write_refused(reg, val) {
                     return DebugAns::Refused(why);
@@ -774,6 +787,7 @@ impl FakeRadio {
                 self.bk[chip as usize % 2][reg as usize % 128] = val;
                 DebugAns::Reg { chip, reg, val }
             }
+            #[cfg(feature = "bench")]
             DebugReq::Si { reply, .. } => {
                 let mut data = [0u8; 16];
                 data[0] = 0x80;
@@ -786,6 +800,7 @@ impl FakeRadio {
                 data[..s.len()].copy_from_slice(s);
                 DebugAns::Gga { data, n: s.len() as u8, age_s: 1 }
             }
+            #[cfg(feature = "bench")]
             // TERM-36: a module that answers a query with its firmware version, and nothing to a standby.
             DebugReq::Gps { id, .. } => {
                 let s: &[u8] = if id == ferrite_core::gpspower::CAS_QUERY { b"$GPTXT,01,01,02,SW=URANUS5,V5.3.0.0*1D" } else { b"" };
@@ -793,20 +808,25 @@ impl FakeRadio {
                 data[..s.len()].copy_from_slice(s);
                 DebugAns::GpsSent { data, n: s.len() as u8 }
             }
+            #[cfg(feature = "bench")]
             // TERM-27: a module that, like the radio's, says nothing back.
             DebugReq::Bt { .. } => DebugAns::Bt { data: [0; 48], n: 0 },
+            #[cfg(feature = "bench")]
             // TERM-29: the fake path machine holds both band receive selects (or refuses, as the radio's).
             DebugReq::RxBoth(None) => DebugAns::RxBoth(self.path.both()),
+            #[cfg(feature = "bench")]
             DebugReq::RxBoth(Some(on)) => match self.path.set_both(on, &mut Steps::default()) {
                 Ok(()) => DebugAns::RxBoth(on),
                 Err(ferrite_core::path::Blocked::Keyed) => DebugAns::Refused("transmitting: try again after the unkey"),
                 Err(_) => DebugAns::Refused("an HF slot has the relay energised: tune VHF or UHF first"),
             },
+            #[cfg(feature = "bench")]
             // TERM-31: kept and answered, as the Radio task does.
             DebugReq::Settle(s) => {
                 self.settle = s.unwrap_or(self.settle);
                 DebugAns::Settle(self.settle)
             }
+            #[cfg(feature = "bench")]
             // TERM-32: the simulator has no mic: a quiet tap (all zero), as the radio reads at rest.
             // TERM-33: armed and shown as a tx build does; the simulator has no DAC, so nothing plays at a key-up.
             DebugReq::TxTest(ask) => {
@@ -815,6 +835,7 @@ impl FakeRadio {
                 }
                 DebugAns::TxTest(self.txtest)
             }
+            #[cfg(feature = "bench")]
             DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; ferrite_core::vox::MIC_SAMPLES], 32_000)),
         }
     }

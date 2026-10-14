@@ -38,7 +38,9 @@
 
 use crate::board::{ACC_ROUTE, AMP_EN, BK_CS, BK_SCK, BK_SDA, RELAY, REPEAT_AUDIO, RF_PINS, SI4732_ADDR, SI_IN, SI_RST, SI_SCL, SI_SDA};
 use crate::bus::{BusyDelay, Io, Out, SiBus};
-use crate::chan::{ALERTS, DEBUG_ANS, DEBUG_REQ, EVENTS, LIVE, RADIO, TERM_WAKE};
+use crate::chan::{ALERTS, EVENTS, LIVE, RADIO};
+#[cfg(feature = "bench")]
+use crate::chan::{DEBUG_ANS, DEBUG_REQ, TERM_WAKE};
 use crate::hal::gpio::Mode;
 use crate::hal::i2c::I2c;
 use crate::tasks::{check, CHECK_BK0, CHECK_BK1};
@@ -47,9 +49,13 @@ use bk4829::{int, AfOut, Bk4829};
 use embassy_futures::select::{select4, Either4};
 use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, mhz, Freq10};
-use ferrite_core::msg::{bk_write_refused, BroadcastCmd, DebugAns, DebugReq, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, Source, SLOTS};
+#[cfg(feature = "bench")]
+use ferrite_core::msg::{bk_write_refused, DebugAns, DebugReq};
+use ferrite_core::msg::{BroadcastCmd, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, Source, SLOTS};
 use ferrite_core::same_rx::{Assembler, Repeats, Step};
-use ferrite_core::path::{Blocked, Cause, Path, Rx, Sel, Steps};
+#[cfg(feature = "bench")]
+use ferrite_core::path::Blocked;
+use ferrite_core::path::{Cause, Path, Rx, Sel, Steps};
 use ferrite_radio::chip::{self as radio_chip, RxSetup};
 use ferrite_radio::Pin;
 use ferrite_core::rxsleep::{Action, Level, RxSleep};
@@ -70,6 +76,7 @@ use ferrite_core::{
 };
 
 mod cmd;
+#[cfg(feature = "bench")]
 mod debug;
 mod tune;
 mod tick;
@@ -82,9 +89,9 @@ mod scope;
 mod hw;
 #[cfg(feature = "tx")]
 mod tx;
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub mod afskbk;
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 mod suite;
 #[cfg(feature = "tx")]
 mod crossband;
@@ -399,19 +406,24 @@ struct Tx {
     timeout_s: u16,
     /// The keyed slot's bandwidth: stock keys through REG_30 0x0200 when wide (TX audit F3).
     narrow: bool,
-    /// TERM-33: the test signal armed for the next PTT key-up; while one plays, the chip whose registers the `flat`
-    /// or `data` set-up changed (and what they were), and whether the DSP task is playing it.
+    /// TERM-33: the test signal armed for the next PTT key-up (a bench build's, TERM-38); while one plays, or an
+    /// APRS burst (every build), the chip whose registers the `flat` or `data` set-up changed (and what they were),
+    /// and whether the DSP task is playing a test.
+    #[cfg(feature = "bench")]
     test: Option<ferrite_core::txtest::Arm>,
     test_regs: Option<(u8, radio_chip::TestRegs)>,
+    #[cfg(feature = "bench")]
     test_playing: bool,
     /// TERM-33 `afsk-bk` while it plays (`afskbk`).
+    #[cfg(feature = "bench")]
     bk: Option<afskbk::BkRun>,
     /// TERM-34 `txtest suite` while it runs (`suite`).
+    #[cfg(feature = "bench")]
     suite: Option<suite::SuiteRun>,
 }
 
-/// What woke the main loop for a transmit test (TERM-33, TERM-34; only the `tx` build has either).
-#[cfg_attr(not(feature = "tx"), allow(dead_code))]
+/// What woke the main loop for a transmit test (TERM-33, TERM-34; only a `tx` bench build has either).
+#[cfg_attr(not(all(feature = "tx", feature = "bench")), allow(dead_code))]
 enum TestEv {
     /// `afsk-bk`'s timer made a tone change.
     Edge,
@@ -654,10 +666,14 @@ pub async fn task() {
             mic: 5,
             timeout_s: 120,
             narrow: false,
+            #[cfg(feature = "bench")]
             test: None,
             test_regs: None,
+            #[cfg(feature = "bench")]
             test_playing: false,
+            #[cfg(feature = "bench")]
             bk: None,
+            #[cfg(feature = "bench")]
             suite: None,
         },
         #[cfg(feature = "tx")]
@@ -712,9 +728,9 @@ pub async fn task() {
         // TERM-33 `afsk-bk`: TMR5's tone changes, waited on only while one plays (`afskbk`); TERM-34: the suite's
         // next step at its time (`suite`). Each handled at once, with nothing else after it (no snapshot: nothing
         // the UI sees changes).
-        #[cfg(feature = "tx")]
+        #[cfg(all(feature = "tx", feature = "bench"))]
         let (bk_on, suite_at) = (r.afsk_bk_on(), r.suite_due());
-        #[cfg(feature = "tx")]
+        #[cfg(all(feature = "tx", feature = "bench"))]
         let test = async {
             let edge = async {
                 if bk_on {
@@ -734,11 +750,16 @@ pub async fn task() {
                 }
             }
         };
-        #[cfg(not(feature = "tx"))]
+        #[cfg(not(all(feature = "tx", feature = "bench")))]
         let test = core::future::pending::<TestEv>();
-        match select4(RADIO.receive(), Timer::at(wake), DEBUG_REQ.receive(), test).await {
+        // The terminal's requests to this task are all bench commands (TERM-38): a user build never waits on them.
+        #[cfg(feature = "bench")]
+        let debug = DEBUG_REQ.receive();
+        #[cfg(not(feature = "bench"))]
+        let debug = core::future::pending::<core::convert::Infallible>();
+        match select4(RADIO.receive(), Timer::at(wake), debug, test).await {
             Either4::Fourth(_ev) => {
-                #[cfg(feature = "tx")]
+                #[cfg(all(feature = "tx", feature = "bench"))]
                 match _ev {
                     TestEv::Edge => r.afsk_bk_edge(),
                     TestEv::Step => r.suite_next(),
@@ -747,6 +768,9 @@ pub async fn task() {
             }
             Either4::First(c) => r.cmd(c).await,
             Either4::Second(()) => r.tick().await,
+            #[cfg(not(feature = "bench"))]
+            Either4::Third(never) => match never {},
+            #[cfg(feature = "bench")]
             Either4::Third(d) => {
                 let a = match d {
                     DebugReq::RxBoth(on) => r.rx_both(on).await,

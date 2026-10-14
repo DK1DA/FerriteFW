@@ -14,6 +14,10 @@ path = "src/lib.rs"
 name = "ferrite-sim"
 path = "src/main.rs"
 
+[features]
+# The fake radio's answers to the terminal's bench commands (decision 151); the sims are user builds without it.
+bench = ["ferrite-core/bench", "ferrite-app/bench"]
+
 [dependencies]
 ferrite-core.workspace = true
 ferrite-app.workspace = true

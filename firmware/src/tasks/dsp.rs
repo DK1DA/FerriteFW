@@ -10,7 +10,7 @@
 //! - **Transmit:** the UI task keys slot C, then hands a frame to [`AFSK_TX`]; it is played from TX delay's
 //!   flags to the end (the flags cover the key-up), PC12 high meanwhile, and [`AFSK_DONE`] says it's out so the
 //!   UI task unkeys. Receiving pauses while it plays.
-//! - **Transmit test (TERM-33, TERM-34, `tx` builds):** the Radio task, after a PTT key-up with `txtest` armed,
+//! - **Transmit test (TERM-33, TERM-34, `tx` bench builds: tx-dry; TERM-38):** the Radio task, after a PTT key-up with `txtest` armed,
 //!   signals [`TXTEST`] with the generator to play (a test signal at the arming's level, made a sample at a time:
 //!   [`ferrite_core::txtest::Gen`]); a new generator while one plays takes over at the next half (the suite's
 //!   steps, DAC1 running throughout); None at the release stops it. Receiving pauses while it plays, as for AFSK.
@@ -49,7 +49,7 @@ pub static AFSK_TX: Signal<M, Frame> = Signal::new();
 pub static AFSK_DONE: Signal<M, bool> = Signal::new();
 /// TERM-33, TERM-34: the transmit test's generator to play now (Some, from the key-up; another Some takes over
 /// seamlessly) or to stop (None, at the release).
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Gen>> = Signal::new();
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
@@ -67,11 +67,11 @@ pub async fn task() {
     // What each side asks for, and what runs (DEC-18).
     let (mut aprs, mut pager, mut running) = (DecoderKind::Off, false, DecoderKind::Off);
     loop {
-        // TERM-33's signal only in a `tx` build: the receive build never waits on it, nor carries its generators.
-        #[cfg(feature = "tx")]
+        // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
+        #[cfg(all(feature = "tx", feature = "bench"))]
         let test = TXTEST.wait();
-        #[cfg(not(feature = "tx"))]
-        let test = core::future::pending::<Option<ferrite_core::txtest::Gen>>();
+        #[cfg(not(all(feature = "tx", feature = "bench")))]
+        let test = core::future::pending::<Option<core::convert::Infallible>>();
         match select4(DSP.receive(), audio::ADC_HALF.wait(), AFSK_TX.wait(), test).await {
             Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_))) => {
                 match cmd {
@@ -134,6 +134,9 @@ pub async fn task() {
                 });
             }
             Either4::Fourth(None) => {} // a stop with nothing playing
+            #[cfg(not(all(feature = "tx", feature = "bench")))]
+            Either4::Fourth(Some(never)) => match never {},
+            #[cfg(all(feature = "tx", feature = "bench"))]
             Either4::Fourth(Some(g)) => {
                 if capturing {
                     audio::capture_stop();
@@ -193,7 +196,7 @@ async fn play(f: &Frame) {
 /// TERM-33, TERM-34: the test signal out of DAC1 until [`TXTEST`] says stop (None); a new generator (Some) takes
 /// over from the next half filled, DAC1 still running (the suite's steps). Each generator loops or ends in silence
 /// by itself. Then a half of silence, and stopped once that has played.
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 async fn play_test(mut g: ferrite_core::txtest::Gen) {
     let fill = |half: usize, g: Option<&mut ferrite_core::txtest::Gen>| match g {
         Some(g) => {
@@ -226,6 +229,3 @@ async fn play_test(mut g: ferrite_core::txtest::Gen) {
     }
     audio::play_stop();
 }
-
-#[cfg(not(feature = "tx"))]
-async fn play_test(_: ferrite_core::txtest::Gen) {}

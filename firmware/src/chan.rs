@@ -8,13 +8,18 @@ use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use crate::ring::Ring;
 use core::sync::atomic::{AtomicBool, AtomicI16, AtomicU16, AtomicU32, AtomicU8};
-use ferrite_core::msg::{DebugAns, DebugReq, GGA_MAX, DspCmd, Event, GpsFix, GpsSky, LiveAll, RadioCmd, SameDecoded, StorageCmd};
+#[cfg(feature = "bench")]
+use ferrite_core::msg::{DebugAns, DebugReq};
+use ferrite_core::msg::{GGA_MAX, DspCmd, Event, GpsFix, GpsSky, LiveAll, RadioCmd, SameDecoded, StorageCmd};
 
 pub static RADIO: Channel<M, RadioCmd, 8> = Channel::new();
 pub static STORAGE: Channel<M, StorageCmd, 8> = Channel::new();
 pub static DSP: Channel<M, DspCmd, 4> = Channel::new();
 /// The terminal's BK4829 and SI4732 debug requests to the Radio task, and its answers (TERM-21): one at a time.
+/// A bench build's (TERM-38): every Radio task request is a bench command.
+#[cfg(feature = "bench")]
 pub static DEBUG_REQ: Channel<M, DebugReq, 1> = Channel::new();
+#[cfg(feature = "bench")]
 pub static DEBUG_ANS: Channel<M, DebugAns, 1> = Channel::new();
 
 /// Keys and the knob, from the input sampler to the UI.
@@ -76,7 +81,9 @@ pub static GGA: embassy_sync::blocking_mutex::Mutex<M, core::cell::RefCell<GgaCo
 /// TERM-36: a CASIC sentence for the GPS task to send (`$PCAS<id>,<arg>` and the quiet flag, already passed by
 /// `ferrite_core::gpspower::casic_refused`), from the UI task's terminal; and the GPS task's answer, which the UI task
 /// hands to the terminal.
+#[cfg(feature = "bench")]
 pub static GPS_SEND: Signal<M, (u8, u16, bool)> = Signal::new();
+#[cfg(feature = "bench")]
 pub static GPS_ANS: Signal<M, ferrite_core::msg::DebugAns> = Signal::new();
 
 /// [`GGA`]'s contents.

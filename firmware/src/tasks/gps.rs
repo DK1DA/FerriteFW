@@ -11,7 +11,7 @@
 //!   fixes: `$PCAS12,N` on USART3 TX (CASIC standby, it wakes itself N s later), a wake byte when a GPS screen
 //!   or a beacon needs it sooner, a PA8 power cycle when that brings no NMEA (to confirm on the radio). The UI
 //!   sends who needs a position ([`GPS_DEMAND`]); nothing goes to the module while keyed.
-//! - **The terminal's bench test (TERM-36, [`ferrite_core::gpspower::GpsBench`]):** `gps nmea off|on`, `gps standby
+//! - **The terminal's bench test (TERM-36, `ferrite_core::gpspower::GpsBench`; a bench build's, TERM-38):** `gps nmea off|on`, `gps standby
 //!   N [quiet]`, `gps query N`; from NMEA off or a standby until NMEA is on and the standby over, the manager is held
 //!   (nothing of its sent, no power cycle) and nothing else goes to the module during a standby.
 //! - **Parsing:** [`ferrite_core::gps::Nmea`] (about 260 B, here only). The fix goes to [`POSITION`] for the UI
@@ -31,8 +31,12 @@ use core::sync::atomic::Ordering::Relaxed;
 use embassy_time::{Instant, Timer};
 use ferrite_app::gpsdata::GpsCfg;
 use ferrite_core::gps::Nmea;
-use ferrite_core::gpspower::{casic, shown, GpsBench, GpsDemand, GpsManager, GpsOut, GpsPhase, CASIC_MAX, CAS_STANDBY, POKE};
-use ferrite_core::msg::{DebugAns, GpsFix, GpsSky, GGA_MAX, GPS_REPLY_MS};
+#[cfg(feature = "bench")]
+use ferrite_core::gpspower::GpsBench;
+use ferrite_core::gpspower::{casic, shown, GpsDemand, GpsManager, GpsOut, GpsPhase, CASIC_MAX, CAS_STANDBY, POKE};
+#[cfg(feature = "bench")]
+use ferrite_core::msg::{DebugAns, GGA_MAX, GPS_REPLY_MS};
+use ferrite_core::msg::{GpsFix, GpsSky};
 use ferrite_radio::gps::GpsPower;
 
 /// The ATGM336H's default rate.
@@ -79,6 +83,7 @@ fn send_casic(id: u8, arg: u16) {
 /// TERM-36: the terminal's CASIC sentence, sent now (checked again: only CAS03 NMEA off/on, CAS06 queries and CAS12
 /// standby, and nothing during a bench standby, [`GpsBench::command`]), or refused; the first TXT sentence within
 /// [`GPS_REPLY_MS`] is its answer (`Query` keeps the wait).
+#[cfg(feature = "bench")]
 #[inline(never)] // in .slow_text (memory.x)
 fn term_send(bench: &mut GpsBench, (id, arg, quiet): (u8, u16, bool), powered: bool, keyed: bool, now: u32) -> Option<Query> {
     let refuse = |why| {
@@ -110,6 +115,7 @@ fn term_send(bench: &mut GpsBench, (id, arg, quiet): (u8, u16, bool), powered: b
 }
 
 /// A terminal query waiting for its TXT answer.
+#[cfg(feature = "bench")]
 struct Query {
     at: u32,
     data: [u8; GGA_MAX],
@@ -174,7 +180,9 @@ pub async fn task() {
     let mut phase = GpsPhase::Off;
     let (mut fix_at, mut sky_at) = (0u32, 0u32);
     let mut last_state = (false, 0u8);
+    #[cfg(feature = "bench")]
     let mut query: Option<Query> = None;
+    #[cfg(feature = "bench")]
     let mut bench = GpsBench::new();
     // The cable log (TERM-28): sentences and bytes from the module per 5 s while powered, and the fix.
     let (mut sentences, mut bytes, mut log_at) = (0u32, 0u32, 0u32);
@@ -190,7 +198,10 @@ pub async fn task() {
         let (keyed, rx) = (rf & RF_BUSY_KEYED != 0, rf & RF_BUSY_RX != 0);
         // GPS-26: the manager's look (standby, wake byte, power cycle); nothing sent while keyed (GPS-32). Held
         // during the terminal's bench test (TERM-36): the module stays powered and gets nothing of the manager's.
+        #[cfg(feature = "bench")]
         let held = bench.holds();
+        #[cfg(not(feature = "bench"))]
+        let held = false;
         let (m, woke) = if held {
             (GpsOut { power: true, ..GpsOut::default() }, false)
         } else {
@@ -206,6 +217,7 @@ pub async fn task() {
             power.forced_low();
         }
         let out = power.step(now, cfg.on && m.power, cfg.powered(rx, keyed), keyed);
+        #[cfg(feature = "bench")]
         if out.pb10_low == Some(true) && bench.in_standby() {
             // TERM-36: a transmit during a bench standby holds the module's RX line low (a break), which may wake it.
             crate::bringup::line(b"gps: bench: PB10 low (keyed) during the standby");
@@ -222,10 +234,13 @@ pub async fn task() {
             crate::bringup::line(if want { b"gps: power on" } else { b"gps: power off" });
             (sentences, bytes, log_at) = (0, 0, now);
             if !want {
-                if bench.holds() {
-                    crate::bringup::line(b"gps: bench: test over (power off: the module's RAM settings are gone)");
+                #[cfg(feature = "bench")]
+                {
+                    if bench.holds() {
+                        crate::bringup::line(b"gps: bench: test over (power off: the module's RAM settings are gone)");
+                    }
+                    bench.off();
                 }
-                bench.off();
                 nmea.reset();
                 // GPS on but powered off for a while (GPS-4, the power cycle): the last fix stays, with its age.
                 tx.send(GpsFix { on: cfg.on, at_ms: now, ..GpsFix::default() });
@@ -235,10 +250,12 @@ pub async fn task() {
                 tx.send(GpsFix { on: true, at_ms: now, ..GpsFix::default() });
             }
         }
+        #[cfg(feature = "bench")]
         if let Some(c) = crate::chan::GPS_SEND.try_take() {
             query = term_send(&mut bench, c, powered, keyed, now);
         }
         // A quiet standby's CAS12 and its NMEA on at the latest (TERM-36); not while keyed (PB10 low).
+        #[cfg(feature = "bench")]
         if powered && !keyed {
             let was = bench.holds();
             if let Some((id, arg)) = bench.step(now) {
@@ -257,6 +274,7 @@ pub async fn task() {
                     keep_gga(&nmea, now);
                 }
                 // TERM-36: the module's answer to a query is a TXT sentence; the first one is kept.
+                #[cfg(feature = "bench")]
                 if let Some(q) = query.as_mut().filter(|q| q.n == 0 && done) {
                     let s = nmea.last();
                     if s.len() >= 5 && s[2..5] == *b"TXT" {
@@ -270,6 +288,7 @@ pub async fn task() {
                 fresh |= done;
             }
         }
+        #[cfg(feature = "bench")]
         if let Some(q) = query.take_if(|q| q.n > 0 || now.wrapping_sub(q.at) >= GPS_REPLY_MS) {
             crate::chan::GPS_ANS.signal(DebugAns::GpsSent { data: q.data, n: q.n });
             crate::chan::TERM_WAKE.signal(());
@@ -282,6 +301,7 @@ pub async fn task() {
             });
             (sentences, bytes, log_at) = (0, 0, now);
         }
+        #[cfg(feature = "bench")]
         if powered && fresh && bench.holds() && !keyed {
             // TERM-36: the first sentence in a bench standby (it woke, or never slept), and a quiet standby's NMEA on.
             let (first, on) = bench.heard(now);

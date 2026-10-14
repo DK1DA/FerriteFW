@@ -32,9 +32,13 @@ fn digits(b: &[u8]) -> Option<u32> {
     Some(b.iter().fold(0, |a, &c| a * 10 + (c - b'0') as u32))
 }
 
+/// The header's start. A named `static`: the Radio task parses headers, and a short unnamed literal can land in
+/// front of a table in the slow flash, where `slowcheck` takes it for a table read from interrupt context.
+static ZCZC: [u8; 5] = *b"ZCZC-";
+
 /// Parses a header, with or without the leading `ZCZC-` and the trailing dash. None if it isn't one.
 pub fn parse(h: &[u8]) -> Option<SameHeader> {
-    let h = h.strip_prefix(b"ZCZC-").unwrap_or(h);
+    let h = h.strip_prefix(&ZCZC[..]).unwrap_or(h);
     let h = h.strip_suffix(b"-").unwrap_or(h);
     // ORG-EEE-areas+TTTT-JJJHHMM-LLLLLLLL
     let plus = h.iter().position(|&c| c == b'+')?;

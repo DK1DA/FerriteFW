@@ -6,6 +6,11 @@ repository.workspace = true
 publish.workspace = true
 description = "Ferrite's logic, apart from any hardware: messages between tasks, frequencies, keys, the SPI flash map, the decoder slot"
 
+[features]
+# The bench builds' debug commands (decision 151): the transmit test generators (`txtest`, `txsuite`), the readable
+# memory map, the raw chip, GPS and Bluetooth requests between the terminal and the tasks. Off in user builds.
+bench = []
+
 [dependencies]
 uafsk.workspace = true
 upocsag.workspace = true

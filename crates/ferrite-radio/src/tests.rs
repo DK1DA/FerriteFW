@@ -681,7 +681,7 @@ fn keyed_tone_sequence_lead_in_and_deviation() {
 /// (REG_50[15]), touch nothing else, and the unkey's restore puts all four back as they were.
 #[test]
 fn tx_test_filters_and_restore() {
-    use ferrite_core::txtest::Filters;
+    use ferrite_core::txfilters::Filters;
     for (f, r2b, want2b) in [(Filters::Flat, 0x0000, 0x0007), (Filters::Data, 0x0000, 0x0004), (Filters::Data, 0x0703, 0x0704), (Filters::Flat, 0x0702, 0x0707)] {
         let mut b = bk();
         for (r, v) in [(reg::AF_FILTERS, r2b), (0x19, 0x1041), (reg::MIC, 0xE912), (0x50, 0xBB18)] {
@@ -708,11 +708,11 @@ fn tx_test_filters_and_restore() {
 }
 
 /// APRS-14 (decision 135): an APRS burst's key-up, on the recording bus: the data key-up's REG_7D 0x34, then the
-/// `data` set-up (`key_up_filters` for a data key-up): REG_2B[2:0] = 100, MIC AGC off (REG_19[15]), ALC off
+/// `data` set-up (`aprs_filters` for a data key-up, in every build): REG_2B[2:0] = 100, MIC AGC off (REG_19[15]), ALC off
 /// (REG_7D[6]), REG_50's TX mute clear; the unkey's restore puts the four back as the key-up found them.
 #[test]
 fn aprs_burst_takes_the_data_set_up() {
-    let f = ferrite_core::txtest::key_up_filters(true, None).expect("an APRS burst changes the set-up");
+    let f = ferrite_core::txfilters::aprs_filters(true).expect("an APRS burst changes the set-up");
     let mut b = bk();
     for (r, v) in [(reg::AF_FILTERS, 0x0000), (0x19, 0x1041), (reg::MIC, 0xE924), (0x50, 0x3B18)] {
         b.write(r, v);
@@ -727,9 +727,10 @@ fn aprs_burst_takes_the_data_set_up() {
     let bus = b.release();
     assert_eq!([bus.last(reg::AF_FILTERS), bus.last(0x19), bus.last(reg::MIC), bus.last(0x50)], [Some(0), Some(0x1041), Some(0xE934), Some(0x3B18)]);
     // A voice key-up changes none of it.
-    assert_eq!(ferrite_core::txtest::key_up_filters(false, None), None);
+    assert_eq!(ferrite_core::txfilters::aprs_filters(false), None);
 }
 
+#[cfg(feature = "bench")]
 /// TERM-33 `afsk-bk`: the begin switches the keyed chip to tone transmit through stock's step (REG_30 0x0200 wide
 /// or 0 narrow, then 0xC3FA: the mic ADC off) and only then sets tone 1 to the space tone at the gain (REG_71,
 /// REG_72 0, REG_70 0x8000 | gain << 8); a change writes REG_71 alone; the end turns the tones off (REG_70 0) and
@@ -1081,6 +1082,7 @@ fn retune_mutes_first() {
     assert_eq!(log.take()[0], (reg::AF_OUT, 0x6042));
 }
 
+#[cfg(feature = "bench")]
 /// TERM-34 (decision 139) `txtest suite` on the recording bus, for a key-up with no sub-tone, CTCSS and DCS: every
 /// step of the table in turn, then the hold, then the end. At each step the chip is on the mic (REG_30 0xC1FE) for
 /// DAC1's and the sub-tones' steps and in tone transmit (0xC3FA) for the generator's; REG_2B[2:0], MIC AGC and the

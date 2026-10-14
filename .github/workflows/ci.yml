@@ -13,12 +13,18 @@ jobs:
       # rust-toolchain.toml picks the pinned nightly and its components.
       - run: rustup show active-toolchain || rustup toolchain install
       - run: cargo test
+      # The bench commands (decision 151): the host crates with and without the `bench` feature.
+      - run: cargo test --features ferrite-app/bench,ferrite-radio/bench,ferrite-sim/bench
       - run: cargo test -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea --all-features  # the drivers with their tx and mock features
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --features ferrite-app/bench,ferrite-radio/bench,ferrite-sim/bench -- -D warnings
       - run: cargo fw-clippy -- -D warnings
-      - run: cargo fw-bringup  # the first image on a new radio; not in the per-change checks
-      - run: cargo fw --features tx
-      - run: cargo fw --features tx-dry  # the first transmit build on a radio: PA drive held at 0
+      - run: cargo fw-clippy --features tx -- -D warnings
+      - run: cargo fw-clippy --features tx-dry -- -D warnings  # tx + bench + dry
+      - run: cargo fw-clippy --features bench -- -D warnings
+      - run: cargo fw-bringup  # the first image on a new radio (bench commands in); not in the per-change checks
+      - run: cargo fw --features tx  # a user build: no bench commands
+      - run: cargo fw --features tx-dry  # the first transmit build on a radio: PA drive held at 0, bench commands in
       - run: cargo fw  # last, so the size below is the receive-only image's
       - name: Size, and no core::fmt in the image
         run: |

@@ -15,7 +15,7 @@ pub const MAX_BODY: usize = MAX_PAYLOAD + 4;
 /// The most bytes a frame takes on the wire: COBS adds one byte per 254, plus the delimiter.
 pub const MAX_WIRE: usize = MAX_BODY + MAX_BODY / 254 + 2;
 /// The build, as `HELLO` and `INFO` give it (LINK-35): what a bench tool checks before it keys (a `tx-dry` build
-/// holds the PA drive at 0).
+/// holds the PA drive at 0) and before it uses a bench command such as `txtest` ([`build::BENCH`], decision 151).
 pub mod build {
     /// Receive only: no transmit code (no `tx` feature).
     pub const RECEIVE: u8 = 0;
@@ -24,18 +24,28 @@ pub mod build {
     /// The whole transmit build with the PA drive held at 0 (`--features tx-dry`).
     pub const TX_DRY: u8 = 2;
 
-    /// The byte for a build with or without transmit, dry or not.
-    pub const fn of(tx: bool, dry: bool) -> u8 {
-        match (tx, dry) {
+    /// Bit 7: the bench commands are in (the `bench` cargo feature: the bring-up and tx-dry builds; TERM-38). The
+    /// low bits are the transmit kind above.
+    pub const BENCH: u8 = 0x80;
+
+    /// The byte for a build with or without transmit, dry or not, with or without the bench commands.
+    pub const fn of(tx: bool, dry: bool, bench: bool) -> u8 {
+        let kind = match (tx, dry) {
             (_, true) => TX_DRY,
             (true, false) => TX,
             (false, false) => RECEIVE,
-        }
+        };
+        kind | if bench { BENCH } else { 0 }
     }
 
-    /// Its name, as the tools print it.
+    /// Whether a build byte has the bench commands.
+    pub const fn bench(b: u8) -> bool {
+        b & BENCH != 0
+    }
+
+    /// Its transmit kind's name, as the tools print it (the bench bit aside).
     pub const fn name(b: u8) -> &'static str {
-        match b {
+        match b & !BENCH {
             RECEIVE => "receive",
             TX => "tx",
             TX_DRY => "tx-dry",

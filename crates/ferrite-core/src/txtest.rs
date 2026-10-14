@@ -24,6 +24,8 @@
 //! Each is at its nominal level times the arming's [`Arm::level`] percent ([`LEVEL_MIN`] to [`LEVEL_MAX`]).
 
 use crate::audio::{AFSK_AMP, DAC_HZ};
+/// The TX audio set-ups, shared with the APRS burst (every build): [`crate::txfilters::Filters`].
+pub use crate::txfilters::Filters;
 use udsp::trig::{ccos, cos_sin_phase, csin, phase_step};
 
 /// The DAC's rate the signals are made at (48 kHz).
@@ -104,35 +106,6 @@ impl Signal {
     /// settings; `suite` sets its own per step (shown as `data`, the set-up its markers use).
     pub fn default_filters(self) -> Filters {
         if self == Signal::AfskBk { Filters::Voice } else { Filters::Data }
-    }
-}
-
-/// The BK4829's TX audio set-up for a test key-up (`ferrite_radio::chip::tx_test_filters`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Filters {
-    /// The chip's voice settings, as an APRS burst goes out.
-    Voice,
-    /// REG_2B[2:0] = 111 (TX HPF, LPF and pre-emphasis off), MIC AGC and ALC off. Measured: the injection falls
-    /// 6 dB/octave above ~150 Hz.
-    Flat,
-    /// REG_2B[2:0] = 100 (TX HPF off; pre-emphasis and LPF on: the pre-emphasis cancels the injection's slope), MIC
-    /// AGC and ALC off. Measured: +-1 dB from 250 Hz to 2.5 kHz; the data setting.
-    Data,
-}
-
-impl Filters {
-    pub const ALL: [Filters; 3] = [Filters::Voice, Filters::Flat, Filters::Data];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Filters::Voice => "voice",
-            Filters::Flat => "flat",
-            Filters::Data => "data",
-        }
-    }
-
-    pub fn parse(w: &[u8]) -> Option<Filters> {
-        Filters::ALL.into_iter().find(|f| f.name().as_bytes().eq_ignore_ascii_case(w))
     }
 }
 

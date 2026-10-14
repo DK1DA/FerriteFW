@@ -25,6 +25,7 @@ pub mod layout;
 pub mod lease;
 pub mod link;
 pub mod mcutemp;
+#[cfg(feature = "bench")]
 pub mod memmap;
 pub mod msg;
 pub mod path;
@@ -38,9 +39,12 @@ pub mod sweephold;
 pub mod tonegen;
 pub mod tonehint;
 pub mod txcal;
+pub mod txfilters;
 pub mod txplan;
 pub mod txseq;
+#[cfg(feature = "bench")]
 pub mod txsuite;
+#[cfg(feature = "bench")]
 pub mod txtest;
 pub mod vox;
 pub mod watch;

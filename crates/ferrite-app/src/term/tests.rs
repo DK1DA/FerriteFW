@@ -1091,7 +1091,9 @@ fn split_across_the_relay_refused() {
 
 // ---- Debug commands (TERM-21 to TERM-24) ----
 
-use ferrite_core::msg::{DebugAns, DebugReq, DEBUG_MEM};
+use ferrite_core::msg::{DebugAns, DebugReq};
+#[cfg(feature = "bench")]
+use ferrite_core::msg::DEBUG_MEM;
 
 impl Rig<Sample> {
     /// Polls, answering each debug request with `f`; every request seen, in order.
@@ -1111,8 +1113,11 @@ impl Rig<Sample> {
 /// A made-up register file: each register reads as its number twice (REG_30 = 0x3030).
 fn regs(r: DebugReq) -> DebugAns {
     match r {
+        #[cfg(feature = "bench")]
         DebugReq::BkRead { chip, reg } => DebugAns::Reg { chip, reg, val: reg as u16 * 0x101 },
+        #[cfg(feature = "bench")]
         DebugReq::BkWrite { chip, reg, val } => DebugAns::Reg { chip, reg, val },
+        #[cfg(feature = "bench")]
         DebugReq::Mem { addr, n, .. } => {
             let mut data = [0u8; DEBUG_MEM];
             for (i, b) in data.iter_mut().enumerate() {
@@ -1120,24 +1125,32 @@ fn regs(r: DebugReq) -> DebugAns {
             }
             DebugAns::Mem { addr, data, n }
         }
+        #[cfg(feature = "bench")]
         DebugReq::Si { reply, .. } => {
             let mut data = [0u8; 16];
             data[0] = 0x80;
             DebugAns::Si { data, n: reply }
         }
+        #[cfg(feature = "bench")]
         // A module that answers its version.
         DebugReq::Bt { .. } => {
             let mut data = [0u8; 48];
             data[..8].copy_from_slice(b"V1.0\r\nOK");
             DebugAns::Bt { data, n: 8 }
         }
+        #[cfg(feature = "bench")]
         DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),
+        #[cfg(feature = "bench")]
         DebugReq::Settle(s) => DebugAns::Settle(s.unwrap_or(ferrite_core::settle::Settle::DEFAULT)),
-        // The ATGM336H sentence suspected on the black radio: field 9 low, field 11 empty.
+        #[cfg(feature = "bench")]
         DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
+        #[cfg(feature = "bench")]
         DebugReq::TxTest(ferrite_core::txtest::Ask::Set(a)) => DebugAns::TxTest(a),
+        #[cfg(feature = "bench")]
         DebugReq::TxTest(ferrite_core::txtest::Ask::Show) => DebugAns::TxTest(None),
+        // The ATGM336H sentence suspected on the black radio: field 9 low, field 11 empty.
         DebugReq::Gga => gga(b"$GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57", 12),
+        #[cfg(feature = "bench")]
         // A module that answers its firmware version.
         DebugReq::Gps { .. } => {
             let s = b"$GPTXT,01,01,02,SW=URANUS5,V5.3.0.0*1D";
@@ -1148,6 +1161,7 @@ fn regs(r: DebugReq) -> DebugAns {
     }
 }
 
+#[cfg(feature = "bench")]
 /// TERM-36: `gps query N` sends CAS06 and shows the sentence sent and the module's TXT answer; `gps standby N`
 /// sends CAS12; `gps nmea off|on` CAS03 (all off, stock's on); `gps standby N quiet` NMEA off then CAS12; anything else (another CAS number, CAS00 save, CAS01 baud, a bad argument) is refused before it
 /// reaches the firmware. The query reads (allowed for an unapproved Bluetooth device, TERM-25), standby writes.
@@ -1225,6 +1239,7 @@ fn gga_heights() {
     assert_eq!(h(b"GNGGA,1"), (None, None));
 }
 
+#[cfg(feature = "bench")]
 /// TERM-29: `rx both` and `rx one` ask the Radio task for the hold on both band receive selects and say what is
 /// on; `rx` asks; a refusal (keyed, HF mode) is shown as the Radio task gives it; bad words are refused here.
 #[test]
@@ -1253,6 +1268,7 @@ fn debug_rx_both() {
     assert!(!super::cmd::writes(b"rx") && super::cmd::writes(b"rx both"));
 }
 
+#[cfg(feature = "bench")]
 /// TERM-32: `mic` asks the Radio task for a PA0 burst and prints its summary in three lines; it only reads.
 #[test]
 fn debug_mic() {
@@ -1269,6 +1285,7 @@ fn debug_mic() {
     assert!(!super::cmd::writes(b"mic"));
 }
 
+#[cfg(feature = "bench")]
 /// TERM-33: `txtest MODE [FILTERS] [LEVEL]` arms, `txtest off` disarms, `txtest` alone asks (a read); the filters
 /// default to data (4fsk, sweep and afsk alike, as an APRS burst goes out); the level to 100 %, 10 to 150 taken, with or without the
 /// filters before it; `afsk-bk` takes a level but no filters word and shows its tone gain (66 at 100 %, 99 at 150);
@@ -1325,6 +1342,7 @@ fn debug_txtest() {
     assert!(!super::cmd::writes(b"txtest") && super::cmd::writes(b"txtest 4fsk") && super::cmd::writes(b"txtest off"));
 }
 
+#[cfg(feature = "bench")]
 /// TERM-34: `txtest suite` arms the suite (no filters word, no level: refused with either); the armed answer says
 /// what it runs; asked while it runs, the section and the time to the end tone, then the hold; the Radio task's
 /// refusal for a TX timeout too short prints as one.
@@ -1359,6 +1377,7 @@ fn debug_txtest_suite() {
     assert!(r.raw().contains("refused: the suite runs 60 s"), "{}", r.raw());
 }
 
+#[cfg(feature = "bench")]
 /// TERM-31: `bk settle` asks the waits, `bk settle N` sets both to N ms, `bk settle W S` each; 0 is stock's; out of
 /// range or extra words are refused here, before anything is sent. `bk settle` alone is a read (TERM-25).
 #[test]
@@ -1388,6 +1407,7 @@ fn debug_bk_settle() {
     assert!(!super::cmd::writes(b"bk settle") && super::cmd::writes(b"bk settle 2") && super::cmd::writes(b"bk 0 30"));
 }
 
+#[cfg(feature = "bench")]
 /// TERM-27: `bt` sends only queries; the answer prints as text (control bytes as dots); settings are refused
 /// before anything is sent.
 #[test]
@@ -1406,6 +1426,7 @@ fn debug_bt_queries_only() {
     }
 }
 
+#[cfg(feature = "bench")]
 /// TERM-23: a register read and a write print their value and bits; the read-back is shown.
 #[test]
 fn debug_bk_read_and_write() {
@@ -1419,6 +1440,7 @@ fn debug_bk_read_and_write() {
     assert!(r.raw().contains("bk1 REG_47 <- 0x6142, reads back 0x6142"), "{}", r.raw());
 }
 
+#[cfg(feature = "bench")]
 /// TERM-23: transmit and PA bits, and the GPIO registers, are refused before anything is asked.
 #[test]
 fn debug_bk_refuses_tx_and_gpio() {
@@ -1437,6 +1459,7 @@ fn debug_bk_refuses_tx_and_gpio() {
     assert!(r.bottom().contains("bk CHIP REG"), "{}", r.bottom());
 }
 
+#[cfg(feature = "bench")]
 /// TERM-23: `bk N dump` reads all 128 registers, one request at a time, eight to a line.
 #[test]
 fn debug_bk_dump() {
@@ -1451,6 +1474,7 @@ fn debug_bk_dump() {
     assert!(raw.contains("Enter or Esc returns"), "{raw}");
 }
 
+#[cfg(feature = "bench")]
 /// TERM-22: memory in 64-byte requests, 16 bytes a line with their characters; words for peripherals.
 #[test]
 fn debug_mem() {
@@ -1471,6 +1495,7 @@ fn debug_mem() {
     assert!(r.bottom().contains("word-aligned"), "{}", r.bottom());
 }
 
+#[cfg(feature = "bench")]
 /// TERM-22: an address outside the readable map (`ferrite_core::memmap`) is refused before anything goes to the
 /// radio, saying what can be read, all of it within the 80-column bottom row; the AT32's user system data at
 /// 1FFFF800 (STM32's option-byte address) reads.
@@ -1491,6 +1516,7 @@ fn debug_mem_refuses_unsafe_addresses() {
     assert_eq!(r.serve(6, regs), vec![DebugReq::Mem { addr: 0x1FFF_F800, n: 48, words: false }]);
 }
 
+#[cfg(feature = "bench")]
 /// TERM-22: `gpio` reads each port's input and output registers, A to E.
 #[test]
 fn debug_gpio() {
@@ -1503,6 +1529,7 @@ fn debug_gpio() {
     assert!(r.raw().contains("  PE  in "), "{}", r.raw());
 }
 
+#[cfg(feature = "bench")]
 /// TERM-24: SI4732 commands and properties go as typed; the reply starts with the status byte.
 #[test]
 fn debug_si() {
@@ -1516,27 +1543,66 @@ fn debug_si() {
     assert!(matches!(r.serve(4, regs)[0], DebugReq::Si { cmd: [0x10, 0, ..], n: 2, reply: 9 }));
 }
 
-/// TERM-21: no answer in 2 s ends the command; Esc stops one, and a late answer is dropped.
+/// TERM-21: no answer in 2 s ends the command; Esc stops one, and a late answer is dropped. (`gps`: in every build.)
 #[test]
 fn debug_no_answer_and_stop() {
     let mut r = Rig::main();
-    r.cmd("bk 0 30");
+    r.cmd("gps");
     assert!(r.term.debug_req().is_some());
     for _ in 0..25 {
         r.poll();
     }
     assert!(r.raw().contains("no answer"), "{}", r.raw());
     r.send(b"\r");
-    r.cmd("bk 0 30");
+    r.cmd("gps");
     assert!(r.term.debug_req().is_some());
     r.send(b"\x1b");
     for _ in 0..3 {
         r.poll();
     }
-    r.term.debug_answer(DebugAns::Reg { chip: 0, reg: 0x30, val: 1 });
+    r.term.debug_answer(gga(b"$GNGGA,1", 0));
     r.poll();
-    assert!(!r.raw().contains("REG_30 ="), "stopped: {}", r.raw());
+    assert!(!r.raw().contains("GGA, 0 s ago"), "stopped: {}", r.raw());
     assert!(matches!(r.term.con, Con::Done | Con::Off), "{:?}", r.term.con);
+}
+
+/// TERM-38 (decision 151): a user build (no `bench` feature) knows the bench commands by name and refuses each,
+/// typed or with arguments, saying a bench build has them; nothing goes to the firmware. `gps` alone (the last
+/// fix) is in every build, its CASIC sends aren't. The help says where the bench commands are.
+#[cfg(not(feature = "bench"))]
+#[test]
+fn user_build_refuses_bench_commands() {
+    let mut r = Rig::main();
+    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet"] {
+        r.cmd(c);
+        assert!(r.bottom().contains("not in this build: a bench build has it"), "{c}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{c}: nothing sent");
+    }
+    assert_eq!(super::cmd::BENCH_ONLY.len(), 9);
+    r.cmd("gps");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Gga], "gps alone is every build's");
+    r.send(b"\r");
+    r.cmd("help");
+    for _ in 0..4 {
+        r.poll();
+    }
+    let raw = r.raw();
+    assert!(raw.contains("not in this build; a bench build (bring-up, tx-dry) has them"), "{raw}");
+    assert!(!raw.contains("txtest suite           every transmit test"), "{raw}");
+}
+
+/// TERM-38: a bench build's help lists the bench commands.
+#[cfg(feature = "bench")]
+#[test]
+fn bench_build_lists_bench_commands() {
+    let mut r = Rig::main();
+    r.cmd("help");
+    for _ in 0..4 {
+        r.poll();
+    }
+    let raw = r.raw();
+    assert!(raw.contains("Bench builds only") && raw.contains("txtest suite") && raw.contains("bk settle 2 1"), "{raw}");
+    assert!(!raw.contains("not in this build"), "{raw}");
 }
 
 // ---- The channel list's tools (TERM-14), the radio's editor (TERM-17), colour (TERM-18) ----

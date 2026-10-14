@@ -384,7 +384,7 @@ impl Session {
         self.hellos = self.hellos.wrapping_add(1);
         o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
-        o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry)]); // LINK-35
+        o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry, dev.bench)]); // LINK-35
         Status::Ok
     }
 
@@ -652,7 +652,7 @@ fn info<S: ChannelStore>(app: &App, st: &S, dev: &Device, o: &mut Out) -> Status
     o.put(&(settings_record(app, &mut Window { b: &mut [], from: 0, n: 0 }) as u16).to_le_bytes());
     o.put(&[app.set.region]);
     o.text(app.set.callsign.as_bytes());
-    o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry)]); // LINK-35
+    o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry, dev.bench)]); // LINK-35
     Status::Ok
 }
 

@@ -133,12 +133,13 @@ fn hello_and_info() {
 }
 
 /// LINK-35: HELLO's answer ends with the build after the version, INFO's after the callsign: 0 receive, 1 tx,
-/// 2 tx-dry, from the firmware's features (`Device::tx_built`, `Device::tx_dry`).
+/// 2 tx-dry, from the firmware's features (`Device::tx_built`, `Device::tx_dry`), with bit 7 set when the bench
+/// commands are in (`Device::bench`, TERM-38).
 #[test]
 fn hello_and_info_give_the_build() {
-    for (tx, dry, b) in [(false, false, 0u8), (true, false, 1), (true, true, 2)] {
+    for (tx, dry, bench, b) in [(false, false, false, 0u8), (true, false, false, 1), (true, true, true, 0x82), (false, false, true, 0x80), (true, true, false, 2)] {
         let mut pc = Pc::new(true);
-        (pc.dev.tx_built, pc.dev.tx_dry) = (tx, dry);
+        (pc.dev.tx_built, pc.dev.tx_dry, pc.dev.bench) = (tx, dry, bench);
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
         assert_eq!(a[v..], [b], "HELLO, tx {tx} dry {dry}");
@@ -148,6 +149,8 @@ fn hello_and_info_give_the_build() {
         assert_eq!(a[c..], [b], "INFO");
     }
     assert_eq!(ferrite_core::link::build::name(2), "tx-dry");
+    assert_eq!(ferrite_core::link::build::name(0x82), "tx-dry");
+    assert!(ferrite_core::link::build::bench(0x82) && !ferrite_core::link::build::bench(1));
 }
 
 /// A damaged frame, an unknown type and a short payload are answered, not dropped.
@@ -684,6 +687,7 @@ fn terminal_commands_over_the_link() {
     assert_eq!(pc.ask(msg::MORE, &[]), (0, std::vec![0]), "nothing running");
 }
 
+#[cfg(feature = "bench")]
 /// LINK-34, TERM-21: a debug command over the link asks the firmware as the terminal's does; MORE says "still
 /// working" until the answer comes, then gives its lines. A new CMD ends one still running.
 #[test]
@@ -706,6 +710,21 @@ fn debug_commands_over_the_link() {
     assert!(pc.link.debug_req().is_none());
     // refused before anything is sent, as in the terminal (TERM-23: registers to 0x7F)
     assert_eq!(pc.ask(msg::CMD, b"bk 0 99").0, Status::Invalid as u8);
+}
+
+/// LINK-34, TERM-38: over the link a user build refuses the bench commands as its terminal does (Invalid, with the
+/// reason), sends nothing to the firmware, and still answers `gps` (the last fix).
+#[cfg(not(feature = "bench"))]
+#[test]
+fn bench_commands_refused_over_the_link() {
+    let mut pc = Pc::new(true);
+    for c in ["txtest suite", "bk 0 30", "mem 20000000", "gps standby 60"] {
+        let (s, why) = pc.cmd(c).unwrap_err();
+        assert!(s == Status::Invalid as u8 && why.contains("not in this build: a bench build has it"), "{c}: {why}");
+        assert!(pc.link.debug_req().is_none(), "{c}");
+    }
+    pc.ask(msg::CMD, b"gps");
+    assert_eq!(pc.link.debug_req(), Some(DebugReq::Gga));
 }
 
 /// LINK-34, LINK-30: on Bluetooth with a PIN lock, commands only after AUTH, as the terminal's PIN prompt.

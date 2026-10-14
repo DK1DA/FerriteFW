@@ -84,10 +84,13 @@ impl Vox {
     }
 }
 
+#[cfg(feature = "bench")]
 /// TERM-32: how many PA0 samples `mic` takes, and how far apart (8 kHz: 32 ms in all).
 pub const MIC_SAMPLES: usize = 256;
+#[cfg(feature = "bench")]
 pub const MIC_PERIOD_US: u32 = 125;
 
+#[cfg(feature = "bench")]
 /// TERM-32 (a bench test): a burst of PA0 readings summed up, to tell raw mic audio (it swings through its mean at
 /// the tone's frequency) from a level or envelope (it sits). 12-bit counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +106,7 @@ pub struct MicCapture {
     pub first: [u8; 16],
 }
 
+#[cfg(feature = "bench")]
 impl MicCapture {
     pub fn from_samples(s: &[u16], us: u32) -> Self {
         let (mut min, mut max, mut sum) = (u16::MAX, 0u16, 0u32);
@@ -135,6 +139,7 @@ impl MicCapture {
 #[cfg(test)]
 mod tests {
 
+    #[cfg(feature = "bench")]
     /// TERM-32: a 1 kHz sine at 8 kHz gives two crossings a cycle (about 1000 Hz); a steady level, none.
     #[test]
     fn mic_capture_tells_audio_from_a_level() {

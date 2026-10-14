@@ -1168,15 +1168,26 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"knob") => knob(app, st, &mut t),
         _ if same(c, b"help") || c == b"?" => Ok(Done::List(List::Help)),
         _ if same(c, b"dump") => Ok(Done::Dump),
-        _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
-        _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
         _ if same(c, b"gps") => gps(&mut t),
+        #[cfg(feature = "bench")]
+        _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
+        #[cfg(feature = "bench")]
+        _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
+        #[cfg(feature = "bench")]
         _ if same(c, b"mic") => Ok(Done::Debug(Job::new(Kind::Mic))),
+        #[cfg(feature = "bench")]
         _ if same(c, b"txtest") => txtest(&mut t),
+        #[cfg(feature = "bench")]
         _ if same(c, b"bk") => bk(&mut t),
+        #[cfg(feature = "bench")]
         _ if same(c, b"si") => si(&mut t),
+        #[cfg(feature = "bench")]
         _ if same(c, b"bt") => bt(&mut t),
+        #[cfg(feature = "bench")]
         _ if same(c, b"rx") => rx(&mut t),
+        // TERM-38 (decision 151): a user build knows the bench commands by name only.
+        #[cfg(not(feature = "bench"))]
+        _ if BENCH_ONLY.iter().any(|b| same(c, b.as_bytes())) => Err(not_in_build(c)),
         _ if same(c, b"load") => Ok(Done::Load),
         _ if same(c, b"clear") => {
             if !same(t.word("clear channels N: deletes every channel")?, b"channels") {
@@ -1238,8 +1249,22 @@ fn knob<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Ms
 
 // ---- Debug (TERM-21 to TERM-24) ----
 
-use super::debug::{Job, Kind, BK_REGS, MEM_MAX};
+use super::debug::{Job, Kind};
+#[cfg(feature = "bench")]
+use super::debug::{BK_REGS, MEM_MAX};
 
+/// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-dry, the `bench` cargo feature). A receive
+/// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
+/// is in every build, its `query`, `nmea` and `standby` are the bench's.
+pub const BENCH_ONLY: [&str; 9] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "txtest"];
+
+/// TERM-38: what a user build says to a bench command.
+#[cfg(not(feature = "bench"))]
+fn not_in_build(c: &[u8]) -> Msg {
+    msg!("{}: not in this build: a bench build has it", Bytes(c))
+}
+
+#[cfg(feature = "bench")]
 /// Hex, with or without 0x, up to 8 digits.
 fn hexnum(w: &[u8]) -> Option<u32> {
     let w = w.strip_prefix(b"0x").or_else(|| w.strip_prefix(b"0X")).unwrap_or(w);
@@ -1249,10 +1274,12 @@ fn hexnum(w: &[u8]) -> Option<u32> {
     w.iter().try_fold(0u32, |n, &c| Some(n << 4 | (c as char).to_digit(16)?))
 }
 
+#[cfg(feature = "bench")]
 fn hex_word(t: &mut Toks, what: &str) -> Result<u32, Msg> {
     hexnum(t.word(what)?).ok_or_else(|| msg!("{}", what))
 }
 
+#[cfg(feature = "bench")]
 fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
     let usage = if words { "mem32 ADDR [WORDS]: hex address, word-aligned; up to 256 words" } else { "mem ADDR [LEN]: hex address, up to 1024 bytes" };
     let addr = hex_word(t, usage)?;
@@ -1271,6 +1298,7 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
     Ok(Done::Debug(Job::new(Kind::Mem { addr, len: len as u16, words })))
 }
 
+#[cfg(feature = "bench")]
 fn bk(t: &mut Toks) -> Result<Done, Msg> {
     const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle";
     let chip = match t.word(USAGE)? {
@@ -1297,6 +1325,7 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
     }
 }
 
+#[cfg(feature = "bench")]
 /// TERM-33 (decision 132, a bench test): `txtest` asks what is armed, `txtest off` disarms, `txtest MODE [FILTERS]
 /// [LEVEL]` arms MODE (4fsk, sweep, afsk) for the next PTT key-up with the BK4829's TX audio `voice`, `flat` or
 /// `data` (the default, as an APRS burst goes out) at LEVEL percent of the mode's nominal (10 to 150,
@@ -1340,6 +1369,7 @@ fn txtest(t: &mut Toks) -> Result<Done, Msg> {
     Ok(Done::Debug(Job::new(Kind::TxTest(ask))))
 }
 
+#[cfg(feature = "bench")]
 /// TERM-31 (decision 119, a bench test): `bk settle` says the BK4829 settle waits in force, `bk settle N` sets both
 /// to N ms, `bk settle W S` the wake and the sleep wait apart; 0 to 20 ms, decimal; 0 is stock's (no wait).
 fn settle(t: &mut Toks) -> Result<Done, Msg> {
@@ -1359,6 +1389,7 @@ fn settle(t: &mut Toks) -> Result<Done, Msg> {
     Ok(Done::Debug(Job::new(Kind::Settle(set))))
 }
 
+#[cfg(feature = "bench")]
 /// TERM-29 (decision 114, a bench test): `rx both` holds both band receive selects on, `rx one` goes back to
 /// the normal one, `rx` alone says which. The Radio task refuses it while keyed, in HF mode and in crossband.
 fn rx(t: &mut Toks) -> Result<Done, Msg> {
@@ -1375,9 +1406,20 @@ fn rx(t: &mut Toks) -> Result<Done, Msg> {
     Ok(Done::Debug(Job::new(Kind::RxBoth(on))))
 }
 
+/// TERM-30, TERM-38: a user build's `gps`, the last GGA; the module's CASIC sends (TERM-36) are a bench build's.
+#[cfg(not(feature = "bench"))]
+fn gps(t: &mut Toks) -> Result<Done, Msg> {
+    match t.next()? {
+        None => Ok(Done::Debug(Job::new(Kind::Gga))),
+        Some(Tok::Word(w)) if [&b"query"[..], b"nmea", b"standby"].iter().any(|b| same(w, b)) => Err(msg!("gps {}: not in this build: a bench build has it", Bytes(w))),
+        _ => Err(msg!("gps: the last GGA sentence (gps query, nmea and standby are a bench build's)")),
+    }
+}
+
 /// TERM-30, TERM-36: `gps` (the last GGA), `gps query [0|1|2|4|6]` (CAS06, the module's answer), `gps nmea off`
 /// (CAS03, all NMEA off) and `gps nmea on` (stock's CAS03), `gps standby N [quiet]` (CAS12 for N s; quiet: NMEA off
 /// first, not on after): nothing else goes to the module ([`ferrite_core::gpspower::casic_refused`]).
+#[cfg(feature = "bench")]
 fn gps(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::gpspower::{casic_refused, CAS_NMEA, CAS_QUERY, CAS_STANDBY};
     const USAGE: &str = "gps, gps query [0|1|2|4|6] (CAS06), gps nmea off|on (CAS03), gps standby N [quiet] (CAS12, 1-65535 s)";
@@ -1417,6 +1459,7 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
     Ok(Done::Debug(Job::new(Kind::Gps { id, arg, quiet })))
 }
 
+#[cfg(feature = "bench")]
 /// TERM-27: `bt AT+VERS?`, one read-only query to the Bluetooth module.
 fn bt(t: &mut Toks) -> Result<Done, Msg> {
     const USAGE: &str = "bt AT, bt AT+HELP or bt AT+WORD? (queries only)";
@@ -1432,6 +1475,7 @@ fn bt(t: &mut Toks) -> Result<Done, Msg> {
     Ok(Done::Debug(Job::new(Kind::Bt { text, n: w.len() as u8 })))
 }
 
+#[cfg(feature = "bench")]
 fn si(t: &mut Toks) -> Result<Done, Msg> {
     const USAGE: &str = "si BYTES... [reply N], si prop P [V]: hex; the reply starts with the status byte";
     let mut cmd = [0u8; 8];
@@ -1566,7 +1610,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
     match l {
         List::Ui => crate::uistate::line(app, st, dev, live, i, out),
         List::UiKeys => crate::uistate::key_line(i, out),
-        List::Help => match HELP.get(i as usize) {
+        List::Help => match HELP.get(i as usize).or_else(|| HELP_BENCH.get((i as usize).wrapping_sub(HELP.len()))) {
             Some(h) => {
                 out.push(h.as_bytes());
                 true
@@ -1607,7 +1651,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
     }
 }
 
-const HELP: [&str; 40] = [
+const HELP: [&str; 19] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
@@ -1626,8 +1670,13 @@ const HELP: [&str; 40] = [
     "  dump                   everything, as these lines; save it with your terminal's log",
     "  load                   read a dump back: send the file, it ends at the line end",
     "  clear channels N       delete every channel (N: how many there are)",
+    "  gps                    the GPS module's last GGA sentence, its age and heights",
+];
+/// TERM-38: the bench commands' help in a bench build, or where they are in a user build.
+#[cfg(feature = "bench")]
+const HELP_BENCH: [&str; 21] = [
     "",
-    "Debug (hex addresses, registers and values; Esc stops):",
+    "Bench builds only (bring-up, tx-dry; hex addresses, registers and values; Esc stops):",
     "  mem 20000000 64        bytes of MCU memory (flash, RAM)",
     "  mem32 40010808 4       32-bit words: use this for peripheral registers",
     "  gpio                   ports A to E: input and output bits, 15 to 0",
@@ -1637,7 +1686,6 @@ const HELP: [&str; 40] = [
     "  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)",
     "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
     "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
-    "  gps                    the GPS module's last GGA sentence, its age and heights",
     "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)",
     "  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: stock's CAS03",
     "  gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)",
@@ -1648,6 +1696,12 @@ const HELP: [&str; 40] = [
     "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator",
     "  txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
+];
+#[cfg(not(feature = "bench"))]
+const HELP_BENCH: [&str; 3] = [
+    "",
+    "Bench commands: mem mem32 gpio bk si bt rx mic txtest, gps query|nmea|standby:",
+    "  not in this build; a bench build (bring-up, tx-dry) has them.",
 ];
 
 // ---- Slots (TERM-35) ----

@@ -3,7 +3,8 @@
 //! [`TICK_HZ`], 1.2 MHz (the 120 MHz timer clock / 100): exactly 1000 ticks a bit at 1200 Bd. The counter runs free
 //! over 16 bits (54.6 ms a turn) and channel 1's compare interrupt marks each tone change; the caller adds each
 //! change's ticks from its schedule (`ferrite_core::txtest::BkFlags`), so the changes never drift from the start,
-//! whenever the interrupt is served. Only the `tx` build has it, and only while an `afsk-bk` test plays.
+//! whenever the interrupt is served. Only a `tx` bench build has it (tx-dry, TERM-38), and only while an `afsk-bk`
+//! test plays.
 use super::regs::*;
 use super::{irq, modify, rd, wr};
 

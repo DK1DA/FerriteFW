@@ -17,14 +17,22 @@ pub const fn latch(prev: u8, now: u8) -> u8 {
     (now & NOW) | ((prev | now << EVER_SHIFT) & !NOW)
 }
 
+/// The inputs and their names (the text in the table itself, padded, and its length). A named `static`: the Radio
+/// task reads it, and only named statics stay in the firmware's fast flash (firmware/memory.x); short literals
+/// land among the slow part's tables, which `slowcheck` can't tell from a table read from interrupt context.
+static NAMES: [(u8, [u8; 8], u8); 3] = [(PTT_A, *b"PTT A   ", 5), (PTT_B, *b"PTT B   ", 5), (PTT_EXT, *b"side PTT", 8)];
+/// Between two names; a named `static` for the same reason.
+static SEP: [u8; 3] = *b" + ";
+
 /// The stuck inputs' names for the notice and the cable log ("PTT A", "PTT B", "side PTT", joined with " + ").
 pub fn names(mask: u8, out: &mut [u8]) -> usize {
     let mut n = 0;
-    for (bit, name) in [(PTT_A, &b"PTT A"[..]), (PTT_B, b"PTT B"), (PTT_EXT, b"side PTT")] {
+    for (bit, name, len) in NAMES.iter() {
+        let (bit, name) = (*bit, &name[..*len as usize]);
         if mask & bit == 0 {
             continue;
         }
-        let part: &[u8] = if n > 0 { b" + " } else { b"" };
+        let part: &[u8] = if n > 0 { &SEP } else { &[] };
         for &c in part.iter().chain(name) {
             if n < out.len() {
                 out[n] = c;

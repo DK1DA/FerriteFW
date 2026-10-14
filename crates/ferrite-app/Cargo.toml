@@ -6,6 +6,11 @@ repository.workspace = true
 publish.workspace = true
 description = "Ferrite's UI state machine: keys and the radio's snapshot in, radio commands and screen redraws out; shared by the firmware's UI task and the simulator"
 
+[features]
+# The terminal's bench commands (decision 151): `txtest`, `bk`, `si`, `mem`, `gpio`, `rx`, `mic`, `bt` and the raw
+# `gps` sends. Without it they are known by name only and refused ("not in this build").
+bench = ["ferrite-core/bench"]
+
 [dependencies]
 ufmt.workspace = true
 ferrite-core.workspace = true

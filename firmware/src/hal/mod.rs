@@ -7,7 +7,7 @@ pub mod adc;
 pub mod audio;
 pub mod backlight;
 pub mod clock;
-#[cfg(feature = "tx")]
+#[cfg(all(feature = "tx", feature = "bench"))]
 pub mod edge;
 pub mod gpio;
 pub mod i2c;

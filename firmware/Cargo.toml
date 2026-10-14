@@ -18,12 +18,17 @@ tx = ["bk4829/tx", "ferrite-radio/tx"]
 # The dry run (TX audit, section 6): the whole transmit build with the PA drive held at 0. Every key-up, unkey and
 # read-back runs, the cable log prints the drive it would have used ("tx pa N"), and DAC2 never leaves 0 nor PA5 its
 # GPIO low: `hal::pa::set` is the one place that drives it. `cargo fw --features tx-dry`; `tools/mkbtf.sh tx-dry`.
-tx-dry = ["tx"]
+tx-dry = ["tx", "bench"]
 # The first builds on a new radio (roadmap 1c): nothing is ever written to or erased from the SPI flash (settings
 # live in RAM for the power-on), any key held through the boot screen opens the key test, and the cable prints a
 # plain log (boot report, every raw key code, the receiver, faults) until a byte arrives, then the terminal takes
 # over. `cargo fw-bringup`; `tools/mkbtf.sh bringup` packs it.
-bringup = []
+bringup = ["bench"]
+# The bench commands (decision 151, Appendix "Build flavours"): `txtest` and its generators (the DSP task's test
+# playback, the suite, `afsk-bk` and its TMR5 bit clock), raw chip and memory access (`bk`, `si`, `mem`, `gpio`),
+# `rx both`, `mic`, the raw GPS sends and the Bluetooth queries. In the bring-up and tx-dry builds; the receive and
+# tx builds a user installs leave them out (their terminal says "not in this build").
+bench = ["ferrite-core/bench", "ferrite-app/bench", "ferrite-radio/bench"]
 
 [dependencies]
 ferrite-core.workspace = true

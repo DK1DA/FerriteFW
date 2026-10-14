@@ -6,14 +6,20 @@
 //! could key the transmitter (ferrite_core::msg::bk_write_refused).
 
 use super::cmd::Line;
-use ferrite_core::msg::{DebugAns, DebugReq, DEBUG_MEM};
+use ferrite_core::msg::{DebugAns, DebugReq};
+#[cfg(feature = "bench")]
+use ferrite_core::msg::DEBUG_MEM;
 
+#[cfg(feature = "bench")]
 /// GPIO port A's input data register; ports B to E follow every 0x400, the output register 4 bytes after.
 pub const GPIOA_IDR: u32 = 0x4001_0808;
+#[cfg(feature = "bench")]
 /// Ports A to E.
 pub const GPIO_PORTS: u16 = 5;
+#[cfg(feature = "bench")]
 /// BK4829 registers 0x00 to 0x7F.
 pub const BK_REGS: u16 = 0x80;
+#[cfg(feature = "bench")]
 /// The longest `mem` (bytes) and `mem32` (words) read.
 pub const MEM_MAX: u16 = 1024;
 /// A request not answered in this long ends the job (a chip that never answers, a build without the path).
@@ -22,31 +28,43 @@ pub const ANSWER_MS: u32 = 2000;
 /// What a debug command asks for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
+    #[cfg(feature = "bench")]
     /// `mem ADDR [LEN]` bytes, `mem32 ADDR [WORDS]` 32-bit words (`len` in bytes).
     Mem { addr: u32, len: u16, words: bool },
+    #[cfg(feature = "bench")]
     /// `gpio`: each port's input and output registers.
     Gpio,
+    #[cfg(feature = "bench")]
     /// `bk CHIP REG`.
     BkRead { chip: u8, reg: u8 },
+    #[cfg(feature = "bench")]
     /// `bk CHIP REG VALUE`.
     BkWrite { chip: u8, reg: u8, val: u16 },
+    #[cfg(feature = "bench")]
     /// `bk CHIP dump`: 0x00 to 0x7F.
     BkDump { chip: u8 },
+    #[cfg(feature = "bench")]
     /// `si BYTES...`, `si prop P [V]`: a command and how many bytes come back.
     Si { cmd: [u8; 8], n: u8, reply: u8 },
+    #[cfg(feature = "bench")]
     /// `bt AT+VERS?`: a read-only query to the Bluetooth module (TERM-27).
     Bt { text: [u8; 16], n: u8 },
+    #[cfg(feature = "bench")]
     /// `rx both`, `rx one`, `rx`: the bench test's hold on both band receive selects (TERM-29), or ask.
     RxBoth(Option<bool>),
     /// `gps`: the GPS module's last GGA sentence and its two heights (TERM-30).
     Gga,
+    #[cfg(feature = "bench")]
     /// `gps query N`, `gps nmea off|on`, `gps standby N [quiet]`: a CASIC sentence to the module and its TXT
     /// answer (TERM-36).
     Gps { id: u8, arg: u16, quiet: bool },
+    #[cfg(feature = "bench")]
     /// `bk settle [WAKE [SLEEP]]`: the BK4829 settle waits (TERM-31), set or asked.
     Settle(Option<ferrite_core::settle::Settle>),
+    #[cfg(feature = "bench")]
     /// `mic`: a burst of PA0 (the mic level tap) readings, summed up (TERM-32).
     Mic,
+    #[cfg(feature = "bench")]
     /// `txtest [MODE [FILTERS] [LEVEL]]`: the transmit test signal for the next PTT key-up (TERM-33).
     TxTest(ferrite_core::txtest::Ask),
 }
@@ -83,12 +101,14 @@ pub struct Job {
     /// Lines printed from the current answer.
     line: u8,
     /// `bk dump`: the current row of eight registers.
+    #[cfg(feature = "bench")]
     acc: [u16; 8],
 }
 
 impl Job {
     pub fn new(kind: Kind) -> Self {
-        Job { kind, done: 0, st: St::Ask, ans: None, line: 0, acc: [0; 8] }
+        Job { kind, done: 0, st: St::Ask, ans: None, line: 0, #[cfg(feature = "bench")]
+            acc: [0; 8] }
     }
 
     /// The next request for the firmware, once; `now` starts its answer time.
@@ -98,21 +118,33 @@ impl Job {
         }
         self.st = St::Wait(now);
         Some(match self.kind {
+            #[cfg(feature = "bench")]
             Kind::Mem { addr, len, words } => {
                 let n = (len - self.done).min(DEBUG_MEM as u16) as u8;
                 DebugReq::Mem { addr: addr + self.done as u32, n, words }
             }
+            #[cfg(feature = "bench")]
             Kind::Gpio => DebugReq::Mem { addr: GPIOA_IDR + self.done as u32 * 0x400, n: 8, words: true },
+            #[cfg(feature = "bench")]
             Kind::BkRead { chip, reg } => DebugReq::BkRead { chip, reg },
+            #[cfg(feature = "bench")]
             Kind::BkWrite { chip, reg, val } => DebugReq::BkWrite { chip, reg, val },
+            #[cfg(feature = "bench")]
             Kind::BkDump { chip } => DebugReq::BkRead { chip, reg: self.done as u8 },
+            #[cfg(feature = "bench")]
             Kind::Si { cmd, n, reply } => DebugReq::Si { cmd, n, reply },
+            #[cfg(feature = "bench")]
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
+            #[cfg(feature = "bench")]
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
             Kind::Gga => DebugReq::Gga,
+            #[cfg(feature = "bench")]
             Kind::Gps { id, arg, quiet } => DebugReq::Gps { id, arg, quiet },
+            #[cfg(feature = "bench")]
             Kind::Settle(s) => DebugReq::Settle(s),
+            #[cfg(feature = "bench")]
             Kind::Mic => DebugReq::Mic,
+            #[cfg(feature = "bench")]
             Kind::TxTest(a) => DebugReq::TxTest(a),
         })
     }
@@ -146,6 +178,7 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::Mem { len, words, .. }, DebugAns::Mem { addr, data, n }) => {
                 let k = self.line as usize * 16;
                 if k < n as usize {
@@ -157,6 +190,7 @@ impl Job {
                 self.st = if self.done < len && n > 0 { St::Ask } else { St::Over };
                 self.line(now, out)
             }
+            #[cfg(feature = "bench")]
             (Kind::Gpio, DebugAns::Mem { data, .. }) => {
                 let word = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
                 let (idr, odr) = (word(0) as u16, word(4) as u16);
@@ -168,6 +202,7 @@ impl Job {
                 self.st = if self.done < GPIO_PORTS { St::Ask } else { St::Over };
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::BkRead { .. }, DebugAns::Reg { chip, reg, val }) => {
                 put!(out, "  bk{} REG_", chip);
                 hex(reg as u32, 2, out);
@@ -178,6 +213,7 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::BkWrite { val, .. }, DebugAns::Reg { chip, reg, val: back }) => {
                 put!(out, "  bk{} REG_", chip);
                 hex(reg as u32, 2, out);
@@ -191,6 +227,7 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::BkDump { chip }, DebugAns::Reg { val, .. }) => {
                 self.acc[self.done as usize % 8] = val;
                 self.done += 1;
@@ -207,6 +244,7 @@ impl Job {
                 }
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::Bt { text, n: tn }, DebugAns::Bt { data, n }) => {
                 out.push(b"  bt ");
                 out.push(&text[..tn as usize]);
@@ -221,6 +259,7 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::RxBoth(_), DebugAns::RxBoth(on)) => {
                 out.push(if on {
                     b"  rx both: VHF RX (PB0) and UHF RX (PE12) held on, until rx one or a restart"
@@ -230,6 +269,7 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::Settle(_), DebugAns::Settle(s)) => {
                 put!(out, "  bk settle: wake {} ms, sleep {} ms", s.wake_ms, s.sleep_ms);
                 if s == ferrite_core::settle::Settle::STOCK {
@@ -238,6 +278,7 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::Mic, DebugAns::Mic(c)) => {
                 match self.line {
                     0 => put!(out, "  mic PA0: {} readings in {} us: min {}, max {}, mean {} (12-bit)", ferrite_core::vox::MIC_SAMPLES, c.us, c.min, c.max, c.mean),
@@ -253,6 +294,7 @@ impl Job {
                 self.line += 1;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::TxTest(_), DebugAns::TxSuite { section, left_ms }) => {
                 match section {
                     0 => put!(out, "  txtest suite running: the lead-in, {} s to the end tone", left_ms.div_ceil(1000)),
@@ -262,11 +304,13 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::TxTest(_), DebugAns::TxTest(None)) => {
                 out.push(b"  txtest: off (nothing armed; PTT transmits the mic as normal)");
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::TxTest(_), DebugAns::TxTest(Some(a))) => {
                 if self.line == 0 {
                     put!(out, "  txtest: {} at {} % armed for the next PTT key-up, from the key-up to the release; once", a.signal.name(), a.level);
@@ -294,6 +338,7 @@ impl Job {
                 self.line += 1;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::Gps { id, arg, quiet }, DebugAns::GpsSent { data, n }) => {
                 use ferrite_core::gpspower::{casic, CASIC_MAX, CAS_NMEA, CAS_STANDBY};
                 if self.line == 0 {
@@ -350,6 +395,7 @@ impl Job {
                 self.line += 1;
                 Step::Line
             }
+            #[cfg(feature = "bench")]
             (Kind::Si { cmd, n: cn, .. }, DebugAns::Si { data, n }) => {
                 out.push(b"  si");
                 for b in &cmd[..cn as usize] {
@@ -364,6 +410,7 @@ impl Job {
                 self.st = St::Over;
                 Step::Line
             }
+            #[cfg_attr(not(feature = "bench"), allow(unreachable_patterns))]
             _ => {
                 out.push(b"  unexpected answer");
                 self.st = St::Over;
@@ -419,6 +466,7 @@ fn metres(dm: Option<i32>, out: &mut Line) {
     }
 }
 
+#[cfg(feature = "bench")]
 /// `digits` hex digits of v, capitals.
 pub fn hex(v: u32, digits: u32, out: &mut Line) {
     for i in (0..digits).rev() {
@@ -426,6 +474,7 @@ pub fn hex(v: u32, digits: u32, out: &mut Line) {
     }
 }
 
+#[cfg(feature = "bench")]
 /// 16 bits in four groups, bit 15 first: "0001 0010 0011 0100".
 fn bits16(v: u16, out: &mut Line) {
     for i in (0..16).rev() {
@@ -436,6 +485,7 @@ fn bits16(v: u16, out: &mut Line) {
     }
 }
 
+#[cfg(feature = "bench")]
 /// One dump line: the address, then 16 bytes and their characters, or 4 words.
 fn mem_line(addr: u32, d: &[u8], words: bool, out: &mut Line) {
     out.push(b"  ");

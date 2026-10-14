@@ -9,6 +9,8 @@ description = "The firmware tasks' hardware steps apart from the MCU: the RF pat
 [features]
 # Transmit (the firmware's `tx`): the PA drive, keying and the keyed tones.
 tx = ["bk4829/tx"]
+# The bench builds' `txtest suite` register steps (decision 151).
+bench = ["ferrite-core/bench"]
 
 [dependencies]
 ferrite-core.workspace = true

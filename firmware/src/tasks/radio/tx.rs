@@ -112,14 +112,19 @@ impl Radio {
         // TERM-33: a PTT key-up with a test armed goes out as a data key-up (REG_7D 0x34, the audio stage after the
         // PA ramp, no end tone or ID) at the slot's power, still a person's (the emergency prompt holds); the
         // arming is used up only once the key-up is made.
+        #[cfg(feature = "bench")]
         let test = if data.is_none() { self.tx.test } else { None };
+        #[cfg(feature = "bench")]
+        let testing = test.is_some();
+        #[cfg(not(feature = "bench"))]
+        let testing = false; // TERM-38: `txtest` is a bench build's
         // TX audit F11: the UI's refusals made again here from the Radio task's own state. HF mode: AM on chip 1
         // is receive only; the SI4732's frequencies and modes (HF-24) and HF mode already left refuse.
         let hf = if home { None } else { Some(self.hf) };
         let req = Req {
             tx: f,
             rx,
-            kind: if data.is_some() || test.is_some() { TxKind::Data } else { TxKind::Voice },
+            kind: if data.is_some() || testing { TxKind::Data } else { TxKind::Voice },
             person: data.is_none(),
             confirmed, // only the emergency prompt's second PTT (TX-3, TX-35)
             am: if home { self.slots[s].am } else { self.hf.is_some_and(|h| h.mode == 2) },
@@ -164,12 +169,16 @@ impl Radio {
         let tone = self.tx.tone[s];
         // The keyed slot's bandwidth (HF mode's NFM is its mode 1).
         let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
-        let setup = self.tx_chip_setup(f, narrow, tone, data.is_some() || test.is_some());
+        let setup = self.tx_chip_setup(f, narrow, tone, data.is_some() || testing);
         radio_chip::tx_setup(&mut self.chip(n), &setup);
         // APRS-14 (decision 135): an APRS burst (a data key-up) goes out with the `data` TX audio set-up, as
         // `txtest`'s `data`; a test with `flat` or `data` its own; both put back at the unkey. `afsk-bk` and `voice`
         // leave the chip's voice settings.
-        if let Some(f) = ferrite_core::txtest::key_up_filters(data.is_some(), test) {
+        #[cfg(feature = "bench")]
+        let filters = ferrite_core::txtest::key_up_filters(data.is_some(), test);
+        #[cfg(not(feature = "bench"))]
+        let filters = ferrite_core::txfilters::aprs_filters(data.is_some());
+        if let Some(f) = filters {
             self.tx.test_regs = Some((n, radio_chip::tx_test_filters(&mut self.chip(n), f)));
         }
         self.tx.pa = pa;
@@ -195,6 +204,7 @@ impl Radio {
         // TERM-33: DAC1 plays the test from here to the release (PC12 high meanwhile, PB8 already on); `afsk-bk`
         // is the keyed chip's tone generator instead, timed by TMR5 (`afskbk`), DAC1 and PC12 untouched.
         // TERM-34: the suite runs step by step from here (`suite`), DAC1 and TMR5 as its steps ask.
+        #[cfg(feature = "bench")]
         if let Some(t) = test {
             self.tx.test = None;
             if t.signal == ferrite_core::txtest::Signal::Suite {
@@ -211,12 +221,16 @@ impl Radio {
 
     /// TERM-33: the test signal stopped (the DSP task puts DAC1 to mid-scale and PC12 low; `afsk-bk`'s timer
     /// stops and the tones go off); TERM-34: the suite ended and the registers it changed put back.
+    /// Nothing in a user build (TERM-38).
     fn test_audio_off(&mut self) {
-        self.suite_stop();
-        if core::mem::take(&mut self.tx.test_playing) {
-            crate::tasks::dsp::TXTEST.signal(None);
+        #[cfg(feature = "bench")]
+        {
+            self.suite_stop();
+            if core::mem::take(&mut self.tx.test_playing) {
+                crate::tasks::dsp::TXTEST.signal(None);
+            }
+            self.afsk_bk_stop();
         }
-        self.afsk_bk_stop();
     }
 
     /// The chip set-up for a key-up (TX-23; TX audit F1, F2, F7, F14): the calibration's sub-tone deviation at the

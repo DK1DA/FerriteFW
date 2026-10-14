@@ -5,7 +5,9 @@
 use crate::board::{LED_ACTIVE_HIGH, LED_GREEN, LED_RED, POWER_HOLD, POWER_SW};
 use crate::hal::backlight;
 use crate::bringup;
-use crate::chan::{Input, ALERTS, BT_IN, BT_LINK_ON, BT_ON, BT_OUT, CABLE_BAUD, DEBUG_ANS, DEBUG_REQ, INPUT, LINK_BAUD, LINK_HELLOS, LINK_ON, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
+use crate::chan::{Input, ALERTS, BT_IN, BT_LINK_ON, BT_ON, BT_OUT, CABLE_BAUD, INPUT, LINK_BAUD, LINK_HELLOS, LINK_ON, LIVE, RADIO, TERM_IN, TERM_OUT, TERM_WAKE};
+#[cfg(feature = "bench")]
+use crate::chan::{DEBUG_ANS, DEBUG_REQ};
 use crate::display::Screen;
 use crate::store;
 use crate::tasks::{check, CHECK_CAL, CHECK_FLASH, CHECK_MCU, CHECK_STATE, FAILED, PASSED, UNTESTED};
@@ -56,8 +58,9 @@ fn menu_state(i: &Input, held: &mut bool) {
     }
 }
 
-/// TERM-27: a `bt` query in progress. The link task keeps USART1 and PB9; this only borrows the module's rings
+/// TERM-27: a `bt` query in progress (a bench build's, TERM-38). The link task keeps USART1 and PB9; this only borrows the module's rings
 /// (`BT_OUT`, `BT_IN`) for the query, and holds 0 9 2 1 on for it when Bluetooth is off.
+#[cfg(feature = "bench")]
 struct BtQuery {
     text: [u8; 16],
     n: u8,
@@ -282,7 +285,7 @@ pub async fn task() {
     }
     app.redraw_all();
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
-    let mut dev = Device { tx_built: cfg!(feature = "tx"), tx_dry: cfg!(feature = "tx-dry"), battery_pct: 100, ..Default::default() };
+    let mut dev = Device { tx_built: cfg!(feature = "tx"), tx_dry: cfg!(feature = "tx-dry"), bench: cfg!(feature = "bench"), battery_pct: 100, ..Default::default() };
     let mut bat_logged = 0u32;
     // About and Self-test (SELF-5 to SELF-7): what the boot checks found. The BK4829s from the Radio task's
     // snapshot below; the SI4732 isn't tested at boot; the SSB patch store comes with the link's SSB_WRITE.
@@ -306,6 +309,7 @@ pub async fn task() {
     let mut gps = crate::tasks::gps::GpsUi::new();
     // Key codes down (mapped ones only): the app is ticked often while any is held.
     let mut down = 0u32;
+    #[cfg(feature = "bench")]
     let mut bt_q: Option<BtQuery> = None;
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
     // ... and over Bluetooth (roadmap 3d): one terminal and one link session, held by one port at a time.
@@ -336,10 +340,14 @@ pub async fn task() {
         }
         // A whole line waits until the store has caught up (TERM-13): the bytes after it stay in the ring.
         // The cable first, then Bluetooth (its bytes only while 0 9 2 1 has the module on).
-        BT_ON.store(app.settings().bt || bt_q.as_ref().is_some_and(|q| q.forced), Relaxed);
+        #[cfg(feature = "bench")]
+        let (bt_forced, bt_busy) = (bt_q.as_ref().is_some_and(|q| q.forced), bt_q.is_some());
+        #[cfg(not(feature = "bench"))]
+        let (bt_forced, bt_busy) = (false, false);
+        BT_ON.store(app.settings().bt || bt_forced, Relaxed);
         for (port, ring) in [(Port::Cable, &TERM_IN), (Port::Bt, &BT_IN)] {
             // While a `bt` query waits, the module's bytes are its answer, not a session's.
-            while !bringup::ON.load(Relaxed) && ports.ready() && !(port == Port::Bt && bt_q.is_some()) {
+            while !bringup::ON.load(Relaxed) && ports.ready() && !(port == Port::Bt && bt_busy) {
                 let Some(b) = ring.get() else { break };
                 match ports.route(&app, port, b, now_ms()) {
                     ferrite_app::ports::To::Kiss => aprs.kiss_in(b), // KISS has this port (chapter 26)
@@ -381,6 +389,7 @@ pub async fn task() {
         dev.spkmic = crate::chan::ACCESSORY.load(Relaxed) & ferrite_core::acc::ON != 0;
         if !bringup::ON.load(Relaxed) {
             // Debug commands (TERM-21): memory here, registers by the Radio task (it signals TERM_WAKE).
+            #[cfg(feature = "bench")]
             if let Ok(a) = DEBUG_ANS.try_receive() {
                 ports.debug_answer(a);
             }
@@ -414,6 +423,7 @@ pub async fn task() {
             };
             // TERM-27: the `bt` query: send once the module has power (20 ms after PB9, then the UART), collect for
             // 500 ms, answer.
+            #[cfg(feature = "bench")]
             if let Some(q) = bt_q.as_mut() {
                 if !q.sent && (!q.forced || q.at.elapsed() >= Duration::from_millis(150)) {
                     BT_IN.clear();
@@ -434,20 +444,26 @@ pub async fn task() {
                     }
                 }
             }
+            #[cfg(feature = "bench")]
             if let Some(a) = crate::chan::GPS_ANS.try_take() {
                 ports.debug_answer(a);
             }
             if let Some(r) = ports.debug_req() {
                 match r {
+                    #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Mem { .. } => ports.debug_answer(crate::debug::mem(r)),
                     ferrite_core::msg::DebugReq::Gga => ports.debug_answer(crate::debug::gga()),
                     // TERM-36: the GPS task sends it and answers through GPS_ANS (checked again there).
+                    #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Gps { id, arg, quiet } => crate::chan::GPS_SEND.signal((id, arg, quiet)),
+                    #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Bt { text, n } => {
                         let forced = !app.settings().bt;
                         bt_q = Some(BtQuery { text, n, forced, sent: false, at: Instant::now(), buf: [0; 48], got: 0 });
                     }
+                    #[cfg(feature = "bench")]
                     _ if DEBUG_REQ.try_send(r).is_err() => ports.debug_answer(ferrite_core::msg::DebugAns::Refused("the Radio task is busy")),
+                    #[cfg(feature = "bench")]
                     _ => {}
                 }
                 TERM_WAKE.signal(()); // print the answer, or wait for it, on the next turn
@@ -531,6 +547,7 @@ pub async fn task() {
         if aprs.busy() {
             period = period.min(20); // keying or playing an APRS frame: its unkey on time
         }
+        #[cfg(feature = "bench")]
         if bt_q.is_some() {
             period = period.min(10); // a `bt` query: send and collect on time (a timer, so the link task runs too)
         }
