@@ -1,5 +1,5 @@
-//! The terminal's debug commands (manual chapter 37, TERM-21 to TERM-24, TERM-27, TERM-29, TERM-31, TERM-32): MCU memory, the GPIO
-//! ports, BK4829 registers, SI4732 commands, the Bluetooth module's queries, the both-receive-selects bench test, the BK4829 settle waits (TERM-31) and the mic tap capture (TERM-32), for bring-up without a custom build each time. A command becomes a [`Job`]:
+//! The terminal's debug commands (manual chapter 37, TERM-21 to TERM-24, TERM-27, TERM-29, TERM-31 to TERM-33): MCU memory, the GPIO
+//! ports, BK4829 registers, SI4732 commands, the Bluetooth module's queries, the both-receive-selects bench test, the BK4829 settle waits (TERM-31) the mic tap capture (TERM-32) and the transmit test signal (TERM-33), for bring-up without a custom build each time. A command becomes a [`Job`]:
 //! the firmware takes its requests one at a time ([`crate::term::Term::debug_req`]), answers them
 //! ([`crate::term::Term::debug_answer`]), and the console prints the answers as lines. Memory is read by the
 //! firmware where the terminal runs; registers by the Radio task, which owns the chips and refuses writes that
@@ -44,6 +44,8 @@ pub enum Kind {
     Settle(Option<ferrite_core::settle::Settle>),
     /// `mic`: a burst of PA0 (the mic level tap) readings, summed up (TERM-32).
     Mic,
+    /// `txtest [MODE [FILTERS]]`: the transmit test signal for the next PTT key-up (TERM-33).
+    TxTest(ferrite_core::txtest::Ask),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -107,6 +109,7 @@ impl Job {
             Kind::Gga => DebugReq::Gga,
             Kind::Settle(s) => DebugReq::Settle(s),
             Kind::Mic => DebugReq::Mic,
+            Kind::TxTest(a) => DebugReq::TxTest(a),
         })
     }
 
@@ -242,6 +245,25 @@ impl Job {
                         }
                         self.st = St::Over;
                     }
+                }
+                self.line += 1;
+                Step::Line
+            }
+            (Kind::TxTest(_), DebugAns::TxTest(None)) => {
+                out.push(b"  txtest: off (nothing armed; PTT transmits the mic as normal)");
+                self.st = St::Over;
+                Step::Line
+            }
+            (Kind::TxTest(_), DebugAns::TxTest(Some(a))) => {
+                if self.line == 0 {
+                    put!(out, "  txtest: {} armed for the next PTT key-up, from the key-up to the release; once", a.signal.name());
+                } else {
+                    out.push(if a.flat {
+                        &b"  flat: TX HPF, LPF, pre-emphasis (REG_2B 2:0), MIC AGC (REG_19 15), ALC (REG_7D 6) off; REG_7D 0x34; put back at unkey"[..]
+                    } else {
+                        b"  voice: the chip's TX filters, MIC AGC and ALC as for speech; REG_7D 0x34, as an APRS burst"
+                    });
+                    self.st = St::Over;
                 }
                 self.line += 1;
                 Step::Line

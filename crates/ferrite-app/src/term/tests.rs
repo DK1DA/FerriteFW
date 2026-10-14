@@ -1135,6 +1135,8 @@ fn regs(r: DebugReq) -> DebugAns {
         DebugReq::Settle(s) => DebugAns::Settle(s.unwrap_or(ferrite_core::settle::Settle::DEFAULT)),
         // The ATGM336H sentence suspected on the black radio: field 9 low, field 11 empty.
         DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
+        DebugReq::TxTest(ferrite_core::txtest::Ask::Set(a)) => DebugAns::TxTest(a),
+        DebugReq::TxTest(ferrite_core::txtest::Ask::Show) => DebugAns::TxTest(None),
         DebugReq::Gga => gga(b"$GNGGA,143210.000,4525.2950,N,07541.8600,W,1,09,0.9,-12.3,M,,M,,*57", 12),
     }
 }
@@ -1221,6 +1223,39 @@ fn debug_mic() {
     assert!(raw.contains(" Hz if this is raw audio"), "{raw}");
     assert!(raw.contains("first 16 (8-bit):"), "{raw}");
     assert!(!super::cmd::writes(b"mic"));
+}
+
+/// TERM-33: `txtest MODE [FILTERS]` arms, `txtest off` disarms, `txtest` alone asks (a read); the filters default
+/// to flat for 4fsk and sweep, voice for afsk; anything else is refused before anything is sent; a receive-only
+/// build's refusal prints as one.
+#[test]
+fn debug_txtest() {
+    use ferrite_core::txtest::{Arm, Ask, Signal};
+    let mut r = Rig::main();
+    r.cmd("txtest");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Show)]);
+    assert!(r.raw().contains("txtest: off (nothing armed"), "{}", r.raw());
+    r.send(b"\r");
+    for (line, signal, flat) in [("txtest 4fsk", Signal::Fsk4, true), ("txtest SWEEP", Signal::Sweep, true), ("txtest afsk", Signal::Afsk, false), ("txtest afsk flat", Signal::Afsk, true), ("txtest 4fsk voice", Signal::Fsk4, false)] {
+        r.cmd(line);
+        assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal, flat })))], "{line}");
+        let raw = r.raw();
+        assert!(raw.contains(&std::format!("txtest: {} armed for the next PTT key-up", signal.name())), "{raw}");
+        assert!(raw.contains(if flat { "flat: TX HPF, LPF, pre-emphasis" } else { "voice: the chip's TX filters" }), "{line}: {raw}");
+        r.send(b"\r");
+    }
+    r.cmd("txtest off");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::TxTest(Ask::Set(None))]);
+    r.send(b"\r");
+    for bad in ["txtest fsk", "txtest 4fsk loud", "txtest sweep flat 2", "txtest off now"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("txtest 4fsk|sweep|afsk"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+    r.cmd("txtest 4fsk");
+    assert_eq!(r.serve(4, |_| DebugAns::Refused("the receive-only build has no transmit")), vec![DebugReq::TxTest(Ask::Set(Some(Arm { signal: Signal::Fsk4, flat: true })))]);
+    assert!(r.raw().contains("refused: the receive-only build has no transmit"), "{}", r.raw());
+    assert!(!super::cmd::writes(b"txtest") && super::cmd::writes(b"txtest 4fsk") && super::cmd::writes(b"txtest off"));
 }
 
 /// TERM-31: `bk settle` asks the waits, `bk settle N` sets both to N ms, `bk settle W S` each; 0 is stock's; out of

@@ -132,6 +132,8 @@ pub struct FakeRadio {
     bk: [[u16; 128]; 2],
     /// The BK4829 settle waits the terminal sets (TERM-31); the fake has no chip power to wait on.
     settle: ferrite_core::settle::Settle,
+    /// The transmit test armed from the terminal (TERM-33): kept and shown; the simulator sends no audio.
+    txtest: Option<ferrite_core::txtest::Arm>,
     /// Slots with monitor latched: squelch held open.
     monitor: u8,
     /// Quick mute (HOME-15): slots still received, never heard.
@@ -198,6 +200,7 @@ impl FakeRadio {
             power: [2; 4],
             bk: fake_bk(),
             settle: ferrite_core::settle::Settle::DEFAULT,
+            txtest: None,
             monitor: 0,
             mute: 0,
             fm: 9_810,
@@ -796,6 +799,13 @@ impl FakeRadio {
                 DebugAns::Settle(self.settle)
             }
             // TERM-32: the simulator has no mic: a quiet tap (all zero), as the radio reads at rest.
+            // TERM-33: armed and shown as a tx build does; the simulator has no DAC, so nothing plays at a key-up.
+            DebugReq::TxTest(ask) => {
+                if let ferrite_core::txtest::Ask::Set(a) = ask {
+                    self.txtest = a;
+                }
+                DebugAns::TxTest(self.txtest)
+            }
             DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; ferrite_core::vox::MIC_SAMPLES], 32_000)),
         }
     }

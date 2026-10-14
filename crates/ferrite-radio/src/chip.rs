@@ -321,3 +321,52 @@ pub fn tail(tx_tone: u16, phase: u8, dev: u8) -> bk4829::tx::Tail {
         ferrite_core::tonegen::TailKind::Shift(p) => Tail::Shift { phase: p },
     }
 }
+
+/// TERM-33's `flat` test key-up (decision 132): the four registers as they were, for [`tx_test_restore`].
+#[cfg(feature = "tx")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TestRegs {
+    pub r2b: u16,
+    pub r19: u16,
+    pub r7d: u16,
+    pub r50: u16,
+}
+
+/// REG_2B[2:0]: the TX HPF300, LPF1 and pre-emphasis, each 1 = off (the register table).
+#[cfg(feature = "tx")]
+pub const TX_FILTERS_OFF: u16 = 0b111;
+/// REG_19[15]: MIC AGC, 1 = off (the register table; the BK4819 app note turns it off for DMR).
+#[cfg(feature = "tx")]
+pub const MIC_AGC_OFF: u16 = 1 << 15;
+/// REG_7D[6]: the AF level controller (ALC), 1 = off. The BK4829's table has it here; the BK4819 app note's
+/// REG_4B[5] is the older chip's place for it, and REG_4B is left alone.
+#[cfg(feature = "tx")]
+pub const ALC_OFF: u16 = 1 << 6;
+/// REG_50[15]: AF TX mute. Kept clear: DAC1 reaches the modulator through the mic input, so this mute would silence
+/// the test signal with the mic (V0.29 sets it only around its internal FSK burst).
+#[cfg(feature = "tx")]
+pub const TX_MUTE: u16 = 1 << 15;
+
+/// TERM-33 `flat`, after [`tx_setup`] and before the key-up: the TX audio filters, MIC AGC and the ALC off and the
+/// TX mute clear, so DAC1's test signal reaches the modulator as it is. REG_7D[5:0] is the data key-up's
+/// [`ferrite_core::vox::MIC_DATA`] from [`tx_setup`]. Returns what was there.
+#[cfg(feature = "tx")]
+pub fn tx_test_flat<B: Bus>(bk: &mut Bk4829<B>) -> TestRegs {
+    let was = TestRegs { r2b: bk.read(bk4829::reg::AF_FILTERS), r19: bk.read(0x19), r7d: bk.read(bk4829::reg::MIC), r50: bk.read(0x50) };
+    bk.write(bk4829::reg::AF_FILTERS, was.r2b | TX_FILTERS_OFF);
+    bk.write(0x19, was.r19 | MIC_AGC_OFF);
+    bk.write(bk4829::reg::MIC, was.r7d | ALC_OFF);
+    if was.r50 & TX_MUTE != 0 {
+        bk.write(0x50, was.r50 & !TX_MUTE);
+    }
+    was
+}
+
+/// At the unkey of a `flat` test: the four registers as [`tx_test_flat`] found them.
+#[cfg(feature = "tx")]
+pub fn tx_test_restore<B: Bus>(bk: &mut Bk4829<B>, r: &TestRegs) {
+    bk.write(bk4829::reg::AF_FILTERS, r.r2b);
+    bk.write(0x19, r.r19);
+    bk.write(bk4829::reg::MIC, r.r7d);
+    bk.write(0x50, r.r50);
+}

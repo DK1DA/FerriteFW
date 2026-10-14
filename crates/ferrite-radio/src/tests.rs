@@ -604,6 +604,34 @@ fn tx_setup_writes_stocks_registers() {
     assert_eq!(bus.last(reg::MIC), Some(0xE934), "a data key-up: V0.29's 0x34");
 }
 
+/// TERM-33 (decision 132): a `flat` test key-up turns off the TX HPF/LPF/pre-emphasis (REG_2B[2:0]), MIC AGC
+/// (REG_19[15]) and the ALC (REG_7D[6]) on top of the data key-up's REG_7D 0x34, clears a TX mute (REG_50[15]),
+/// touches nothing else, and the unkey's restore puts all four back as they were.
+#[test]
+fn tx_test_flat_and_restore() {
+    let mut b = bk();
+    for (r, v) in [(reg::AF_FILTERS, 0x0000), (0x19, 0x1041), (reg::MIC, 0xE912), (0x50, 0xBB18)] {
+        b.write(r, v);
+    }
+    chip::tx_setup(&mut b, &chip::TxSetup { mic: ferrite_core::vox::MIC_DATA, ..setup(VHF, false, 0) });
+    let n0 = b.release();
+    let n = n0.writes.len();
+    let mut b = Bk4829::new(n0);
+    let was = chip::tx_test_flat(&mut b);
+    assert_eq!(was, chip::TestRegs { r2b: 0x0000, r19: 0x1041, r7d: 0xE934, r50: 0xBB18 });
+    let bus = b.release();
+    assert_eq!(bus.last(reg::AF_FILTERS), Some(0x0007));
+    assert_eq!(bus.last(0x19), Some(0x9041));
+    assert_eq!(bus.last(reg::MIC), Some(0xE974), "ALC off, 0x34 kept");
+    assert_eq!(bus.last(0x50), Some(0x3B18), "never muted: the DAC rides the mic input");
+    let touched: Vec<u8> = bus.writes[n..].iter().map(|w| w.0).collect();
+    assert!(touched.iter().all(|r| [reg::AF_FILTERS, 0x19, reg::MIC, 0x50].contains(r)), "{touched:?}");
+    let mut b = Bk4829::new(bus);
+    chip::tx_test_restore(&mut b, &was);
+    let bus = b.release();
+    assert_eq!([bus.last(reg::AF_FILTERS), bus.last(0x19), bus.last(reg::MIC), bus.last(0x50)], [Some(0), Some(0x1041), Some(0xE934), Some(0xBB18)]);
+}
+
 /// A chip tuned to 146.520 MHz with a REG_3B of its own, and what TX-7 expects of it.
 fn keyed_ready() -> (Bk4829<RecBus>, chip::TxExpect) {
     let f = mhz(146) + 52_000;

@@ -54,6 +54,7 @@ impl Radio {
         let now = now_ms() as u32;
         let mut st = Steps::default();
         if !on {
+            self.test_audio_off(); // TERM-33: the test signal ends at the release, before the unkey's steps
             let cfg = self.tx_cfg();
             self.tx.seq.release(&cfg, &mut self.path, now, &mut st);
             self.run(&st).await;
@@ -73,13 +74,17 @@ impl Radio {
         let home = slot < SLOTS as u8;
         let rx = if home { self.slots[s].freq } else { f };
         self.tx.data = data;
+        // TERM-33: a PTT key-up with a test armed goes out as a data key-up (REG_7D 0x34, the audio stage after the
+        // PA ramp, no end tone or ID) at the slot's power, still a person's (the emergency prompt holds); the
+        // arming is used up only once the key-up is made.
+        let test = if data.is_none() { self.tx.test } else { None };
         // TX audit F11: the UI's refusals made again here from the Radio task's own state. HF mode: AM on chip 1
         // is receive only; the SI4732's frequencies and modes (HF-24) and HF mode already left refuse.
         let hf = if home { None } else { Some(self.hf) };
         let req = Req {
             tx: f,
             rx,
-            kind: if data.is_some() { TxKind::Data } else { TxKind::Voice },
+            kind: if data.is_some() || test.is_some() { TxKind::Data } else { TxKind::Voice },
             person: data.is_none(),
             confirmed, // only the emergency prompt's second PTT (TX-3, TX-35)
             am: if home { self.slots[s].am } else { self.hf.is_some_and(|h| h.mode == 2) },
@@ -124,8 +129,11 @@ impl Radio {
         let tone = self.tx.tone[s];
         // The keyed slot's bandwidth (HF mode's NFM is its mode 1).
         let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
-        let setup = self.tx_chip_setup(f, narrow, tone, data.is_some());
+        let setup = self.tx_chip_setup(f, narrow, tone, data.is_some() || test.is_some());
         radio_chip::tx_setup(&mut self.chip(n), &setup);
+        if test.is_some_and(|t| t.flat) {
+            self.tx.test_regs = Some((n, radio_chip::tx_test_flat(&mut self.chip(n))));
+        }
         self.tx.pa = pa;
         self.tx.fault = false;
         self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
@@ -146,6 +154,20 @@ impl Radio {
         }
         self.live.tx.keyed = true;
         self.tx.chip = Some(n);
+        // TERM-33: DAC1 plays the test from here to the release (PC12 high meanwhile, PB8 already on).
+        if let Some(t) = test {
+            self.tx.test = None;
+            self.tx.test_playing = true;
+            crate::tasks::dsp::TXTEST.signal(Some(t.signal));
+            log(b"txtest playing ", t.signal as u32 + 1);
+        }
+    }
+
+    /// TERM-33: the test signal stopped (the DSP task puts DAC1 to mid-scale and PC12 low).
+    fn test_audio_off(&mut self) {
+        if core::mem::take(&mut self.tx.test_playing) {
+            crate::tasks::dsp::TXTEST.signal(None);
+        }
     }
 
     /// The chip set-up for a key-up (TX-23; TX audit F1, F2, F7, F14): the calibration's sub-tone deviation at the
@@ -270,6 +292,11 @@ impl Radio {
 
     /// After any unkey: the chips back to their slots on the next tick, the UI told.
     pub(super) fn unkeyed(&mut self) {
+        // TERM-33: a test's audio off and the `flat` registers back, on the chip that was keyed.
+        self.test_audio_off();
+        if let Some((n, r)) = self.tx.test_regs.take().filter(|(n, _)| self.has(*n)) {
+            radio_chip::tx_test_restore(&mut self.chip(n), &r);
+        }
         self.tuned = [None; 2];
         self.tx.chip = None;
         self.live.tx.keyed = false;

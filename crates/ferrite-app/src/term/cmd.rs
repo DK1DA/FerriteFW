@@ -1107,14 +1107,14 @@ fn set_line(app: &App, dev: &Device, p: &[u8], out: &mut Line) {
 /// Runs one line: typed after `:`, or read by `load` (`loading`: only the lines a dump holds).
 /// Whether a command line changes something (TERM-25: an unapproved Bluetooth device may only read). Reading
 /// is `get`, `help`, `dump`, `mem`/`mem32`, `gpio`, `gps`, `ch`, `zone` or `preset` with nothing more than a number
-/// (they show it), a bare `home` or `rx`, and `bk settle` alone; everything else, `home N`, the BK4829 and SI4732 commands included, counts
+/// (they show it), a bare `home`, `rx` or `txtest`, and `bk settle` alone; everything else, `home N`, the BK4829 and SI4732 commands included, counts
 /// as a write.
 pub fn writes(line: &[u8]) -> bool {
     let mut w = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty());
     let Some(c) = w.next() else { return false };
     let rest = w.count();
     let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"gps", b"mic"].iter().any(|r| same(c, r));
-    let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx"].iter().any(|r| same(c, r)) && rest == 0;
+    let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx", b"txtest"].iter().any(|r| same(c, r)) && rest == 0;
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"bk") && rest == 1 && line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1).is_some_and(|w| same(w, b"settle"));
     !(reads || shows)
@@ -1154,6 +1154,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
         _ if same(c, b"gps") => Ok(Done::Debug(Job::new(Kind::Gga))),
         _ if same(c, b"mic") => Ok(Done::Debug(Job::new(Kind::Mic))),
+        _ if same(c, b"txtest") => txtest(&mut t),
         _ if same(c, b"bk") => bk(&mut t),
         _ if same(c, b"si") => si(&mut t),
         _ if same(c, b"bt") => bt(&mut t),
@@ -1236,6 +1237,33 @@ fn bk(t: &mut Toks) -> Result<Done, Msg> {
         }
         _ => Err(msg!("{}", USAGE)),
     }
+}
+
+/// TERM-33 (decision 132, a bench test): `txtest` asks what is armed, `txtest off` disarms, `txtest MODE [FILTERS]`
+/// arms MODE (4fsk, sweep, afsk) for the next PTT key-up with the BK4829's TX audio `flat` or as for `voice` (the
+/// default: flat for 4fsk and sweep, voice for afsk). Anything else is refused here, before anything is sent.
+fn txtest(t: &mut Toks) -> Result<Done, Msg> {
+    use ferrite_core::txtest::{Arm, Ask, Signal};
+    const USAGE: &str = "txtest 4fsk|sweep|afsk [flat|voice], txtest off; txtest alone shows what is armed";
+    let ask = match t.next()? {
+        None => Ask::Show,
+        Some(Tok::Word(w)) if same(w, b"off") => Ask::Set(None),
+        Some(Tok::Word(w)) => {
+            let signal = Signal::parse(w).ok_or_else(|| msg!("{}", USAGE))?;
+            let flat = match t.next()? {
+                None => signal.flat_by_default(),
+                Some(Tok::Word(f)) if same(f, b"flat") => true,
+                Some(Tok::Word(f)) if same(f, b"voice") => false,
+                _ => return Err(msg!("{}", USAGE)),
+            };
+            Ask::Set(Some(Arm { signal, flat }))
+        }
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::TxTest(ask))))
 }
 
 /// TERM-31 (decision 119, a bench test): `bk settle` says the BK4829 settle waits in force, `bk settle N` sets both
@@ -1454,7 +1482,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, l: List, i: u
     }
 }
 
-const HELP: [&str; 29] = [
+const HELP: [&str; 31] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
@@ -1483,5 +1511,7 @@ const HELP: [&str; 29] = [
     "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
     "  gps                    the GPS module's last GGA sentence, its age and heights",
     "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",
+    "  txtest 4fsk|sweep|afsk [flat|voice]   bench test: that signal on the next PTT",
+    "                         key-up until release (tx builds); txtest off; txtest asks",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
 ];

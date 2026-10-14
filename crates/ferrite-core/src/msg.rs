@@ -401,6 +401,9 @@ pub enum DebugReq {
     /// TERM-32 (a bench test): a burst of PA0 readings ([`crate::vox::MIC_SAMPLES`] at [`crate::vox::MIC_PERIOD_US`]),
     /// summed up by the Radio task.
     Mic,
+    /// TERM-33 (decision 132, a bench test): the transmit test signal for the next PTT key-up, armed, disarmed or
+    /// only asked. The Radio task of a receive-only build refuses it.
+    TxTest(crate::txtest::Ask),
 }
 
 /// The longest GGA sentence [`DebugAns::Gga`] carries: NMEA's 82 characters less CR LF.
@@ -423,6 +426,8 @@ pub enum DebugAns {
     Settle(crate::settle::Settle),
     /// TERM-32: the PA0 burst.
     Mic(crate::vox::MicCapture),
+    /// TERM-33: what is armed for the next PTT key-up now (None: nothing).
+    TxTest(Option<crate::txtest::Arm>),
     /// TERM-30: the last GGA sentence from `$` to the checksum (`n` 0: none since boot), and its age in seconds.
     Gga { data: [u8; GGA_MAX], n: u8, age_s: u32 },
     /// Not done, and why.

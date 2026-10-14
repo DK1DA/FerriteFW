@@ -28,6 +28,7 @@ w25q = { path = "drivers/w25q" }
 keypad = { path = "drivers/keypad" }
 uafsk = { git = "https://github.com/infamy/udigimodes", rev = "" }
 upocsag = { git = "https://github.com/infamy/udigimodes", rev = "" }
+udsp = { git = "https://github.com/infamy/udigimodes", rev = "" }
 udsc = { git = "https://github.com/infamy/udigimodes", rev = "" }
 uaprs = { git = "https://github.com/infamy/udigimodes", rev = "", default-features = false }
 

@@ -42,6 +42,17 @@ impl Radio {
                 let us = cycles().wrapping_sub(start) / (SYSCLK_HZ / 1_000_000);
                 DebugAns::Mic(MicCapture::from_samples(&s, us))
             }
+            // TERM-33 (decision 132, a bench test): armed for the next PTT key-up, once; the key-up plays it.
+            #[cfg(feature = "tx")]
+            DebugReq::TxTest(ask) => {
+                if let ferrite_core::txtest::Ask::Set(a) = ask {
+                    self.tx.test = a;
+                    log(b"txtest armed ", a.map_or(0, |a| a.signal as u32 + 1));
+                }
+                DebugAns::TxTest(self.tx.test)
+            }
+            #[cfg(not(feature = "tx"))]
+            DebugReq::TxTest(_) => DebugAns::Refused("the receive-only build has no transmit: txtest needs a tx or tx-dry build"),
             DebugReq::Si { cmd, n, reply } => {
                 let (n, rn) = ((n as usize).min(8), (reply as usize).clamp(1, 16));
                 let mut data = [0u8; 16];

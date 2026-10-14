@@ -10,6 +10,7 @@ description = "Ferrite's logic, apart from any hardware: messages between tasks,
 uafsk.workspace = true
 upocsag.workspace = true
 udsc.workspace = true
+udsp.workspace = true
 
 [lints]
 workspace = true
