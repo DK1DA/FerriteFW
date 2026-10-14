@@ -292,10 +292,13 @@ mod tests {
         assert_eq!(t.check(&Req { rx: mhz(28) + 40_000, ..ok }, &p, 0), Err(Refusal::RelayMismatch));
         let sos = Req { extend: true, ..req(mhz(121) + 50_000) };
         assert_eq!(t.check(&sos, &p, 0), Err(Refusal::NotCalibrated), "airband is outside the TX hardware");
-        let sos = Req { extend: true, ..req(mhz(243)) };
+        let sos = Req { extend: true, ..req(mhz(406) + 2_500) };
         assert_eq!(t.check(&sos, &p, 0), Err(Refusal::Emergency));
         assert_eq!(t.check(&Req { confirmed: true, ..sos }, &p, 0), Ok(()));
         assert_eq!(t.check(&Req { confirmed: true, person: false, ..sos }, &p, 0), Err(Refusal::Emergency), "TX-35");
+        // 243.0 MHz: the 200-300 MHz path is locked until measured, second PTT or not (TX-10, TX audit M3).
+        let sos = Req { extend: true, confirmed: true, ..req(mhz(243)) };
+        assert_eq!(t.check(&sos, &p, 0), Err(Refusal::Unmeasured125));
     }
 
     #[test]

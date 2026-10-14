@@ -664,6 +664,15 @@ fn unmeasured_125m_refuses() {
     ptt(&mut t, false);
     // An automatic transmission is refused there too.
     assert!(!crate::screens::transmit::auto_tx(&mut t.app, 0, b"Beacon"));
+    // 243.0 MHz with Extend TX: the same uncapped 200-300 MHz path, refused before the emergency prompt (M3).
+    t.hold(Key::Exit);
+    t.app.set_region(Some(Region::Us), true);
+    tune(&mut t, mhz(243));
+    t.cmds();
+    ptt(&mut t, true);
+    assert_eq!(refused(&t), Some(Refusal::Unmeasured125));
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "never keyed");
+    ptt(&mut t, false);
     // 2 m still transmits.
     t.hold(Key::Exit);
     tune(&mut t, mhz(146) + 52_000);
