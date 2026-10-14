@@ -1746,7 +1746,7 @@ impl Term {
                 t.push(GROUPS[(self.g as usize).clamp(1, 9) - 1].0.as_bytes());
                 if self.sub != 0 {
                     put!(t, " > {} ", self.sub);
-                    t.push(groups::items(self.g, 0).get(self.sub as usize - 1).map_or("", |e| e.0).as_bytes());
+                    t.push(groups::items(self.g, 0).get(self.sub as usize - 1).map_or("", |e| e.name()).as_bytes());
                 }
                 w.bold(t.as_bytes());
                 w.s("      * = not the default".as_bytes());
@@ -1762,7 +1762,7 @@ impl Term {
                 w.at(3);
                 w.digit(i + 1);
                 w.at(6);
-                w.s(e.0.as_bytes());
+                w.s(e.name().as_bytes());
                 if self.sub == 0 && SUBS.iter().any(|(q, _)| *q == (self.g, i + 1)) {
                     w.s(b" >");
                 }
@@ -1775,7 +1775,7 @@ impl Term {
                                 v.push(digits(cx.store.count() as u32, &mut [0; 10]));
                                 v.push(b" channels");
                             }
-                            _ => v.set(e.1.as_bytes()),
+                            _ => v.set(e.value().as_bytes()),
                         }
                         false
                     }
@@ -1793,9 +1793,9 @@ impl Term {
             _ if b == n + 3 => {
                 if let Some(e) = list.get(self.set_sel as usize) {
                     w.s(b"  ");
-                    w.bold(e.0.as_bytes());
+                    w.bold(e.name().as_bytes());
                     w.s(b": ");
-                    w.s(e.2.as_bytes());
+                    w.s(e.help().as_bytes());
                 }
             }
             _ if b == n + 4 => {

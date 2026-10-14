@@ -899,8 +899,8 @@ fn path(t: &mut Toks) -> Result<([u8; 3], usize), Msg> {
 /// The item's name ("Theme").
 fn path_name(p: &[u8]) -> &'static str {
     match p {
-        [g, x] => groups::items(*g, 0)[*x as usize - 1].0,
-        [g, s, x] => groups::items(*g, *s)[*x as usize - 1].0,
+        [g, x] => groups::items(*g, 0)[*x as usize - 1].name(),
+        [g, s, x] => groups::items(*g, *s)[*x as usize - 1].name(),
         _ => "",
     }
 }
@@ -924,7 +924,7 @@ fn value(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> bool {
                 [g, s, x] => groups::items(*g, *s)[*x as usize - 1],
                 _ => return false,
             };
-            b.set(e.1.as_bytes());
+            b.set(e.value().as_bytes());
             false
         }
     }

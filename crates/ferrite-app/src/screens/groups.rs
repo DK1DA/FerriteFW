@@ -24,104 +24,127 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets::Row;
 use ufmt::uwrite;
 
-/// One item: name, value shown until it is wired (a list shows a summary), help line.
-pub(crate) type Entry = (&'static str, &'static str, &'static str);
+/// One item: name, value shown until it is wired (a list shows a summary) and help line, in one string as
+/// "name|value|help". One string per item, not three: 8 bytes of table per item instead of 24 (about 3 KB).
+#[derive(Clone, Copy)]
+pub struct Entry(&'static str);
+
+impl Entry {
+    fn parts(self) -> (&'static str, &'static str, &'static str) {
+        let (name, rest) = self.0.split_once('|').unwrap_or((self.0, ""));
+        let (value, help) = rest.split_once('|').unwrap_or((rest, ""));
+        (name, value, help)
+    }
+
+    pub fn name(self) -> &'static str {
+        self.parts().0
+    }
+
+    /// The value shown until the setting is wired (a list shows a summary).
+    pub fn value(self) -> &'static str {
+        self.parts().1
+    }
+
+    pub fn help(self) -> &'static str {
+        self.parts().2
+    }
+}
 
 /// SND-3: the beep volume (0 7 5 2), three DAC levels (decision 100).
 const BEEP_VOLS: [&str; 3] = ["Low", "Mid", "High"];
 const G1: [Entry; 8] = [
-    ("Watch", "A+B", "Which slots are heard besides the active one."),
-    ("Watch behaviour", "Heard", "Watched audio and pause time."),
-    ("Background job", "Off", "A zone scan or decoder on a watched slot."),
-    ("Scan target", "Current zone", "What SIDE2 scans."),
-    ("Resume", "5 s", "When a stopped scan moves on."),
-    ("Scan options", "Up, 1 s", "Direction, dwell, priority, inputs."),
-    ("Range presets", "4 presets", "Named ranges to scan."),
-    ("Skip list", "Empty", "Frequencies * skipped in this scan."),
+    Entry("Watch|A+B|Which slots are heard besides the active one."),
+    Entry("Watch behaviour|Heard|Watched audio and pause time."),
+    Entry("Background job|Off|A zone scan or decoder on a watched slot."),
+    Entry("Scan target|Current zone|What SIDE2 scans."),
+    Entry("Resume|5 s|When a stopped scan moves on."),
+    Entry("Scan options|Up, 1 s|Direction, dwell, priority, inputs."),
+    Entry("Range presets|4 presets|Named ranges to scan."),
+    Entry("Skip list|Empty|Frequencies * skipped in this scan."),
 ];
 const G2: [Entry; 5] = [
-    ("Browse", "", "Zones, all channels, nearby, recent."),
-    ("Add repeater", "", "Frequency, shift, tone, name."),
-    ("Zones", "", "Name, scan options, priority channels."),
-    ("Nearby", "Off", "Sort channels by distance."),
-    ("Channel display", "Name", "Name, number or frequency on home."),
+    Entry("Browse||Zones, all channels, nearby, recent."),
+    Entry("Add repeater||Frequency, shift, tone, name."),
+    Entry("Zones||Name, scan options, priority channels."),
+    Entry("Nearby|Off|Sort channels by distance."),
+    Entry("Channel display|Name|Name, number or frequency on home."),
 ];
 const G3: [Entry; 6] = [
-    ("FM broadcast", "", "Listen now; hold MENU there for its settings."),
-    ("Band scope", "60 bars", "Bars, step, speed, trigger, waterfall."),
-    ("Frequency counter", "", "Find a nearby transmitter's frequency."),
-    ("HF mode", "", "Below 64 MHz. Everything else pauses."),
-    ("Crossband repeater", "", "Repeat one slot's band on another's."),
-    ("Tone search", "", "Find the CTCSS or DCS in use."),
+    Entry("FM broadcast||Listen now; hold MENU there for its settings."),
+    Entry("Band scope|60 bars|Bars, step, speed, trigger, waterfall."),
+    Entry("Frequency counter||Find a nearby transmitter's frequency."),
+    Entry("HF mode||Below 64 MHz. Everything else pauses."),
+    Entry("Crossband repeater||Repeat one slot's band on another's."),
+    Entry("Tone search||Find the CTCSS or DCS in use."),
 ];
 const G4: [Entry; 9] = [
-    ("Event log", "", "Every decode and alert: the inbox."),
-    ("POCSAG", "439.9875", "Pager frequency, baud, capcodes."),
-    ("DSC", "Off", "Marine distress calls, receive only."),
-    ("AIS", "Off", "Ships near you."),
+    Entry("Event log||Every decode and alert: the inbox."),
+    Entry("POCSAG|439.9875|Pager frequency, baud, capcodes."),
+    Entry("DSC|Off|Marine distress calls, receive only."),
+    Entry("AIS|Off|Ships near you."),
     // 5 was "Sensor reader" (with the jamming alarm), dropped (decision 75); the number stays empty so the
     // rest of the group keeps its paths.
-    ("-", "", "Not used."),
-    ("Selcall, MDC1200", "Off", "Decode selcall and MDC1200 IDs."),
-    ("DTMF decode", "Off", "Show and log DTMF sequences."),
-    ("Popups", "On", "A 3 s toast for each decode."),
-    ("Weather alerts", "On", "SAME, location codes, tone, channel."),
+    Entry("-||Not used."),
+    Entry("Selcall, MDC1200|Off|Decode selcall and MDC1200 IDs."),
+    Entry("DTMF decode|Off|Show and log DTMF sequences."),
+    Entry("Popups|On|A 3 s toast for each decode."),
+    Entry("Weather alerts|On|SAME, location codes, tone, channel."),
 ];
 const G5: [Entry; 9] = [
-    ("Heard", "", "Stations heard, nearest first."),
-    ("Messages", "", "Messages sent to you and by you."),
-    ("APRS mode", "Off", "Slot C becomes the APRS slot."),
-    ("My station", "SSID 9", "SSID, symbol, comment, position."),
-    ("Beacon", "Off", "When to beacon: manual, timed, smart."),
-    ("Path", "WIDE1-1,WIDE2-1", "The digipeater path."),
-    ("Radio", "144.390", "APRS frequency, delays, levels."),
-    ("Digipeat", "Off", "Relay others' packets."),
+    Entry("Heard||Stations heard, nearest first."),
+    Entry("Messages||Messages sent to you and by you."),
+    Entry("APRS mode|Off|Slot C becomes the APRS slot."),
+    Entry("My station|SSID 9|SSID, symbol, comment, position."),
+    Entry("Beacon|Off|When to beacon: manual, timed, smart."),
+    Entry("Path|WIDE1-1,WIDE2-1|The digipeater path."),
+    Entry("Radio|144.390|APRS frequency, delays, levels."),
+    Entry("Digipeat|Off|Relay others' packets."),
     // 9 was KISS TNC alone; now the packet group (decision 77): KISS TNC moved to 0 5 9 1, the mailbox beside it.
-    ("Packet", "", "KISS TNC and the mailbox."),
+    Entry("Packet||KISS TNC and the mailbox."),
 ];
 const G6: [Entry; 9] = [
-    ("GPS", "On", "The GPS receiver."),
-    ("Position", "", "Fix, satellites, position, grid."),
-    ("Coordinate format", "Deg, min", "How positions are written."),
-    ("Units", "Metric", "Distance, altitude and speed units."),
-    ("Time zone", "UTC", "The clock's offset from UTC."),
-    ("Clock", "24 h", "12 or 24 h, from GPS; OK sets it by hand."),
-    ("Waypoints", "", "Marked places; go to one."),
-    ("GPS during RX/TX", "Always on", "Turn the GPS off around signals."),
-    ("Fixed position", "None", "Used when there is no fix."),
+    Entry("GPS|On|The GPS receiver."),
+    Entry("Position||Fix, satellites, position, grid."),
+    Entry("Coordinate format|Deg, min|How positions are written."),
+    Entry("Units|Metric|Distance, altitude and speed units."),
+    Entry("Time zone|UTC|The clock's offset from UTC."),
+    Entry("Clock|24 h|12 or 24 h, from GPS; OK sets it by hand."),
+    Entry("Waypoints||Marked places; go to one."),
+    Entry("GPS during RX/TX|Always on|Turn the GPS off around signals."),
+    Entry("Fixed position|None|Used when there is no fix."),
 ];
 const G7: [Entry; 9] = [
-    ("Theme", "Dark", "Dark, daylight or night red."),
-    ("Home layout", "Watch", "What home shows."),
-    ("Display", "Bars", "S-meter, power-on message, boot screen."),
-    ("Backlight", "15 s", "Timeout, brightness, wake."),
-    ("Sounds", "Beep on", "Key beep, volume, alert tones."),
-    ("LEDs", "RX, TX and heartbeat", "And a flash while the screen is dark."),
-    ("Battery Save", "Level 1", "Receiver sleep: longer life, slower."),
-    ("Auto power off", "Off", "Off after a time without key or signal."),
-    ("Menu timeout", "30 s", "An idle menu returns home."),
+    Entry("Theme|Dark|Dark, daylight or night red."),
+    Entry("Home layout|Watch|What home shows."),
+    Entry("Display|Bars|S-meter, power-on message, boot screen."),
+    Entry("Backlight|15 s|Timeout, brightness, wake."),
+    Entry("Sounds|Beep on|Key beep, volume, alert tones."),
+    Entry("LEDs|RX, TX and heartbeat|And a flash while the screen is dark."),
+    Entry("Battery Save|Level 1|Receiver sleep: longer life, slower."),
+    Entry("Auto power off|Off|Off after a time without key or signal."),
+    Entry("Menu timeout|30 s|An idle menu returns home."),
 ];
 const G8: [Entry; 9] = [
-    ("Timeout", "120 s", "Transmit timeout and its pre-alert."),
-    ("VOX", "Off", "Voice-operated transmit."),
-    ("Mic gain", "5", "Microphone level, 1-9."),
-    ("Tones sent", "1750 Hz", "Tone burst, subtone level."),
-    ("Tail elimination", "Off", "Squelch tail, end tone (roger beep)."),
-    ("DTMF", "100 ms", "Dialer, memories, timing, PTT ID."),
-    ("Callsign and ID", "Empty", "Your callsign, and CW ID."),
-    ("Busy lockout default", "Off", "For new channels and the VFO."),
-    ("Extend TX", "Off", "Transmit beyond the amateur bands."),
+    Entry("Timeout|120 s|Transmit timeout and its pre-alert."),
+    Entry("VOX|Off|Voice-operated transmit."),
+    Entry("Mic gain|5|Microphone level, 1-9."),
+    Entry("Tones sent|1750 Hz|Tone burst, subtone level."),
+    Entry("Tail elimination|Off|Squelch tail, end tone (roger beep)."),
+    Entry("DTMF|100 ms|Dialer, memories, timing, PTT ID."),
+    Entry("Callsign and ID|Empty|Your callsign, and CW ID."),
+    Entry("Busy lockout default|Off|For new channels and the VFO."),
+    Entry("Extend TX|Off|Transmit beyond the amateur bands."),
 ];
 const G9: [Entry; 9] = [
-    ("Keys and lock", "No auto lock", "Auto lock, lock covers, key test, shortcuts."),
-    ("Connections", "BT off", "Bluetooth, approved devices, link."),
-    ("PIN and lock", "Off", "PIN lock, channel-only mode, PIN."),
-    ("Region", "Not set", "Your amateur bands and defaults."),
-    ("Receiver", "Tail 150 ms", "Advanced squelch, tail, discriminator."),
-    ("SSB patch", "", "USB, LSB and CW in HF mode."),
-    ("Calibration and trims", "", "View calibration, trim crystal, battery."),
-    ("Setup and reset", "", "Run setup again, reset settings."),
-    ("About", "", "Version, identity, checks, battery."),
+    Entry("Keys and lock|No auto lock|Auto lock, lock covers, key test, shortcuts."),
+    Entry("Connections|BT off|Bluetooth, approved devices, link."),
+    Entry("PIN and lock|Off|PIN lock, channel-only mode, PIN."),
+    Entry("Region|Not set|Your amateur bands and defaults."),
+    Entry("Receiver|Tail 150 ms|Advanced squelch, tail, discriminator."),
+    Entry("SSB patch||USB, LSB and CW in HF mode."),
+    Entry("Calibration and trims||View calibration, trim crystal, battery."),
+    Entry("Setup and reset||Run setup again, reset settings."),
+    Entry("About||Version, identity, checks, battery."),
 ];
 
 /// The nine groups' items (MENU 0 1 to MENU 0 9).
@@ -132,152 +155,152 @@ const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS"
 /// The third-level lists, by group and item.
 pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ((1, 2), &[
-        ("Watched audio", "Heard", "Heard, muted, per slot."),
-        ("Pause time", "1 min", "# on home pauses watch this long."),
+        Entry("Watched audio|Heard|Heard, muted, per slot."),
+        Entry("Pause time|1 min|# on home pauses watch this long."),
     ]),
     ((1, 6), &[
-        ("Direction", "Up", "Scan up or down."),
-        ("Dwell", "1 s", "Wait before resuming."),
-        ("Scan inputs", "Off", "Also a channel's TX frequency."),
-        ("Return to", "Start", "Where a stopped scan returns."),
-        ("Priority check", "Every 2 s", "Look at the priority channels."),
+        Entry("Direction|Up|Scan up or down."),
+        Entry("Dwell|1 s|Wait before resuming."),
+        Entry("Scan inputs|Off|Also a channel's TX frequency."),
+        Entry("Return to|Start|Where a stopped scan returns."),
+        Entry("Priority check|Every 2 s|Look at the priority channels."),
     ]),
     // The FM screen's options (BCR-3): on the radio 0 3 1 opens the screen and its digits 1-5 reach these; the
     // terminal lists them here (TERM-12).
     ((3, 1), &[
-        ("Presets", "Empty", "20 stations."),
-        ("Step", "100 kHz", "Tuning step."),
-        ("AGC", "Auto", "Gain control."),
-        ("Radio monitor", "On", "A slot opening interrupts the broadcast."),
-        ("Sleep timer", "Off", "End the broadcast after a time."),
+        Entry("Presets|Empty|20 stations."),
+        Entry("Step|100 kHz|Tuning step."),
+        Entry("AGC|Auto|Gain control."),
+        Entry("Radio monitor|On|A slot opening interrupts the broadcast."),
+        Entry("Sleep timer|Off|End the broadcast after a time."),
     ]),
     ((3, 2), &[
-        ("Bars", "60", "Bars across; span is bars x step."),
-        ("Step", "25 kHz", "Distance between bars."),
-        ("Sweep speed", "1 ms", "Time on each point."),
-        ("Trigger", "Off", "Over the line: monitor or log."),
-        ("Waterfall row", "Off", "History under the scope."),
-        ("Open band scope", "", "Sweep around the active slot. Home: hold 1."),
+        Entry("Bars|60|Bars across; span is bars x step."),
+        Entry("Step|25 kHz|Distance between bars."),
+        Entry("Sweep speed|1 ms|Time on each point."),
+        Entry("Trigger|Off|Over the line: monitor or log."),
+        Entry("Waterfall row|Off|History under the scope."),
+        Entry("Open band scope||Sweep around the active slot. Home: hold 1."),
     ]),
     ((4, 2), &[
-        ("Decode", "Off", "Pagers on a slot tuned to the frequency."),
-        ("Frequency", "439.9875", "The pager channel; 512, 1200 and 2400 baud."),
-        ("Capcode filter", "None", "Only this capcode: OK types it, # clears it."),
+        Entry("Decode|Off|Pagers on a slot tuned to the frequency."),
+        Entry("Frequency|439.9875|The pager channel; 512, 1200 and 2400 baud."),
+        Entry("Capcode filter|None|Only this capcode: OK types it, # clears it."),
     ]),
-    ((4, 3), &[("DSC", "Off", "Decode DSC on channel 70."), ("Own MMSI", "None", "Your MMSI, receive only.")]),
-    ((4, 4), &[("AIS", "Off", "161.975 and 162.025, in turn."), ("Range filter", "25 nm", "Off, 5, 10, 25, 50 nm; needs a fix.")]),
+    ((4, 3), &[Entry("DSC|Off|Decode DSC on channel 70."), Entry("Own MMSI|None|Your MMSI, receive only.")]),
+    ((4, 4), &[Entry("AIS|Off|161.975 and 162.025, in turn."), Entry("Range filter|25 nm|Off, 5, 10, 25, 50 nm; needs a fix.")]),
     ((4, 9), &[
-        ("SAME", "On", "Decode weather alerts."),
-        ("Location codes", "None", "Up to 8 FIPS or CLC codes."),
-        ("Channel", "Auto", "The weather channel to watch."),
+        Entry("SAME|On|Decode weather alerts."),
+        Entry("Location codes|None|Up to 8 FIPS or CLC codes."),
+        Entry("Channel|Auto|The weather channel to watch."),
     ]),
     ((5, 4), &[
-        ("SSID", "9", "0-15 after your callsign."),
-        ("Symbol", "Car", "Your map symbol."),
-        ("Comment", "Empty", "Up to 40 characters."),
-        ("Position source", "GPS", "GPS, or the fixed position."),
-        ("Fixed position", "None", "Used without GPS."),
-        ("Ambiguity", "Exact", "Digits dropped from your position."),
-        ("Mic-E status", "En route", "Status in Mic-E beacons."),
+        Entry("SSID|9|0-15 after your callsign."),
+        Entry("Symbol|Car|Your map symbol."),
+        Entry("Comment|Empty|Up to 40 characters."),
+        Entry("Position source|GPS|GPS, or the fixed position."),
+        Entry("Fixed position|None|Used without GPS."),
+        Entry("Ambiguity|Exact|Digits dropped from your position."),
+        Entry("Mic-E status|En route|Status in Mic-E beacons."),
     ]),
     ((5, 5), &[
-        ("Mode", "Off", "Manual, timed, distance or smart."),
-        ("Smart settings", "Standard", "Rates, speeds, turn angle."),
-        ("After voice TX", "Off", "Beacon after you talk."),
-        ("Power", "Low", "Beacon and message power."),
+        Entry("Mode|Off|Manual, timed, distance or smart."),
+        Entry("Smart settings|Standard|Rates, speeds, turn angle."),
+        Entry("After voice TX|Off|Beacon after you talk."),
+        Entry("Power|Low|Beacon and message power."),
     ]),
-    ((5, 6), &[("Path", "WIDE1-1,WIDE2-1", "None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."), ("Custom path", "None", "Your own path, like WIDE2-2: OK types it.")]),
+    ((5, 6), &[Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."), Entry("Custom path|None|Your own path, like WIDE2-2: OK types it.")]),
     ((5, 7), &[
-        ("Frequency", "144.390", "The APRS channel."),
-        ("TX delay", "300 ms", "Carrier before data."),
-        ("TX level", "Mid", "Modulation level."),
-        ("RX level", "Auto", "Decoder input level."),
-        ("Mute speaker", "On", "Mute packets on the speaker."),
-        ("Ringer on message", "On", "Ring for a new message."),
-        ("Heard popup", "Off", "A toast per station heard."),
+        Entry("Frequency|144.390|The APRS channel."),
+        Entry("TX delay|300 ms|Carrier before data."),
+        Entry("TX level|Mid|Modulation level."),
+        Entry("RX level|Auto|Decoder input level."),
+        Entry("Mute speaker|On|Mute packets on the speaker."),
+        Entry("Ringer on message|On|Ring for a new message."),
+        Entry("Heard popup|Off|A toast per station heard."),
     ]),
     ((5, 8), &[
-        ("Digipeat", "Off", "Relay others' packets."),
-        ("Aliases", "WIDE1-1", "WIDE1-1, and your call if chosen."),
-        ("Wait", "0 s", "Delay before relaying, 0-5 s."),
+        Entry("Digipeat|Off|Relay others' packets."),
+        Entry("Aliases|WIDE1-1|WIDE1-1, and your call if chosen."),
+        Entry("Wait|0 s|Delay before relaying, 0-5 s."),
     ]),
     ((5, 9), &[
-        ("KISS TNC", "Off", "Raw KISS on the cable or Bluetooth."),
-        ("Mailbox", "Off", "Answer packet connects to your SSID."),
-        ("Mailbox SSID", "1", "The SSID callers connect to."),
-        ("Mailbox frequency", "None", "Where the mailbox listens."),
-        ("Bulletins", "On", "Callers may post bulletins."),
+        Entry("KISS TNC|Off|Raw KISS on the cable or Bluetooth."),
+        Entry("Mailbox|Off|Answer packet connects to your SSID."),
+        Entry("Mailbox SSID|1|The SSID callers connect to."),
+        Entry("Mailbox frequency|None|Where the mailbox listens."),
+        Entry("Bulletins|On|Callers may post bulletins."),
     ]),
     ((7, 3), &[
         // 1 was "Battery as": the bar shows an icon only, % and volts on Status (SBAR-19); S-meter took its row
-        ("S-meter", "Bars", "Bars or dBm."),
-        ("Power-on message", "Callsign", "Off, callsign or text."),
-        ("Boot screen", "Logo", "Logo, or the owner card."),
+        Entry("S-meter|Bars|Bars or dBm."),
+        Entry("Power-on message|Callsign|Off, callsign or text."),
+        Entry("Boot screen|Logo|Logo, or the owner card."),
     ]),
     ((7, 4), &[
-        ("Timeout", "1 min", "Backlight off after this."),
-        ("Brightness", "7", "1-10; night red keeps its own."),
-        ("On transmit", "On", "Light up while transmitting."),
-        ("Wake screen on", "Keys and RX", "What wakes the screen."),
-        ("Keypad light", "With screen", "Off, with the screen, on key press, always."),
+        Entry("Timeout|1 min|Backlight off after this."),
+        Entry("Brightness|7|1-10; night red keeps its own."),
+        Entry("On transmit|On|Light up while transmitting."),
+        Entry("Wake screen on|Keys and RX|What wakes the screen."),
+        Entry("Keypad light|With screen|Off, with the screen, on key press, always."),
     ]),
     ((7, 5), &[
-        ("Key beep", "On", "Beep on key presses."),
-        ("Beep volume", "3", "1-5."),
-        ("Alert tones", "On", "Tones for alerts."),
-        ("Arrival tone", "On", "A tone on reaching a waypoint."),
+        Entry("Key beep|On|Beep on key presses."),
+        Entry("Beep volume|3|1-5."),
+        Entry("Alert tones|On|Tones for alerts."),
+        Entry("Arrival tone|On|A tone on reaching a waypoint."),
     ]),
-    ((8, 1), &[("TX timeout", "120 s", "Transmit stops after this."), ("Pre-alert", "10 s", "Warning before the timeout.")]),
-    ((8, 2), &[("VOX", "Off", "Transmit when you talk."), ("Level", "5", "1-9; keys the active slot."), ("Tail", "2 s", "Hang time after speech.")]),
+    ((8, 1), &[Entry("TX timeout|120 s|Transmit stops after this."), Entry("Pre-alert|10 s|Warning before the timeout.")]),
+    ((8, 2), &[Entry("VOX|Off|Transmit when you talk."), Entry("Level|5|1-9; keys the active slot."), Entry("Tail|2 s|Hang time after speech.")]),
     ((8, 4), &[
-        ("Tone burst", "1750 Hz", "PTT + SIDE2 sends it."),
-        ("Subtone level", "Normal", "CTCSS/DCS strength: raise for a deaf repeater."),
+        Entry("Tone burst|1750 Hz|PTT + SIDE2 sends it."),
+        Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),
     ]),
     ((8, 5), &[
-        ("Mode", "Off", "Receive, transmit or both."),
-        ("Phase", "55 Hz", "55 Hz or a phase shift."),
+        Entry("Mode|Off|Receive, transmit or both."),
+        Entry("Phase|55 Hz|55 Hz or a phase shift."),
         // 3 was "Repeater tail delay", dropped (decision 63); the number stays empty so End tone keeps 0 8 5 4.
-        ("-", "", "Not used."),
-        ("End tone", "Off", "A short tone as you let go of PTT."),
+        Entry("-||Not used."),
+        Entry("End tone|Off|A short tone as you let go of PTT."),
     ]),
     ((8, 6), &[
-        ("Dialer", "", "Type and send DTMF."),
-        ("Memories", "", "16 stored sequences."),
-        ("Speed", "100 ms", "Each tone and each gap."),
-        ("PTT ID on VFOs", "Off", "Send the ID code at PTT."),
-        ("ID code", "Empty", "The radio's DTMF ID."),
-        ("Sidetone", "On", "Hear the digits you send."),
-        ("First digit delay", "300 ms", "Wait after key-up so a repeater opens."),
+        Entry("Dialer||Type and send DTMF."),
+        Entry("Memories||16 stored sequences."),
+        Entry("Speed|100 ms|Each tone and each gap."),
+        Entry("PTT ID on VFOs|Off|Send the ID code at PTT."),
+        Entry("ID code|Empty|The radio's DTMF ID."),
+        Entry("Sidetone|On|Hear the digits you send."),
+        Entry("First digit delay|300 ms|Wait after key-up so a repeater opens."),
     ]),
-    ((8, 7), &[("Callsign", "Empty", "For APRS, CW ID, power-on message."), ("CW ID", "Off", "Send your callsign in CW.")]),
+    ((8, 7), &[Entry("Callsign|Empty|For APRS, CW ID, power-on message."), Entry("CW ID|Off|Send your callsign in CW.")]),
     ((9, 1), &[
-        ("Auto lock", "Off", "Lock the keys after a time."),
-        ("Lock covers", "Keys", "Keys, or keys and PTT."),
-        ("Key test", "", "Each key's code, name and press."),
-        ("Shortcuts", "", "What holding each digit on home does."),
+        Entry("Auto lock|Off|Lock the keys after a time."),
+        Entry("Lock covers|Keys|Keys, or keys and PTT."),
+        Entry("Key test||Each key's code, name and press."),
+        Entry("Shortcuts||What holding each digit on home does."),
     ]),
     ((9, 2), &[
-        ("Bluetooth", "Off", "The Bluetooth link to the web app."),
-        ("Link status", "", "Cable and Bluetooth now."),
-        ("Debug console", "Off", "Off, cable or Bluetooth."),
-        ("Cable port", "Auto", "Link, terminal or KISS."),
-        ("Terminal colour", "Off", "ANSI colour on the cable terminal."),
-        ("Cable log", "Off", "Plain log on the cable at power on."),
+        Entry("Bluetooth|Off|The Bluetooth link to the web app."),
+        Entry("Link status||Cable and Bluetooth now."),
+        Entry("Debug console|Off|Off, cable or Bluetooth."),
+        Entry("Cable port|Auto|Link, terminal or KISS."),
+        Entry("Terminal colour|Off|ANSI colour on the cable terminal."),
+        Entry("Cable log|Off|Plain log on the cable at power on."),
     ]),
-    ((9, 3), &[("PIN lock", "Off", "Ask for the PIN at power on, or unlock too."), ("Channel-only mode", "Off", "Hide VFO and editing."), ("Change PIN", "None", "Type a new PIN; the old one first.")]),
+    ((9, 3), &[Entry("PIN lock|Off|Ask for the PIN at power on, or unlock too."), Entry("Channel-only mode|Off|Hide VFO and editing."), Entry("Change PIN|None|Type a new PIN; the old one first.")]),
     ((9, 5), &[
-        ("Advanced squelch", "", "Thresholds per band."),
-        ("Squelch tail", "150 ms", "Audio after the signal drops."),
-        ("Discriminator mode", "Off", "Flat audio for decoders."),
+        Entry("Advanced squelch||Thresholds per band."),
+        Entry("Squelch tail|150 ms|Audio after the signal drops."),
+        Entry("Discriminator mode|Off|Flat audio for decoders."),
     ]),
     ((9, 7), &[
-        ("Calibration", "", "The factory calibration, read only."),
-        ("Crystal trim", "0 ppm", "Centre a known signal."),
-        ("Battery reading trim", "+0.00 V", "Match the reading to a meter."),
+        Entry("Calibration||The factory calibration, read only."),
+        Entry("Crystal trim|0 ppm|Centre a known signal."),
+        Entry("Battery reading trim|+0.00 V|Match the reading to a meter."),
     ]),
     ((9, 8), &[
-        ("Run setup again", "", "The first-boot questions."),
-        ("Reset", "", "Everything but calibration."),
+        Entry("Run setup again||The first-boot questions."),
+        Entry("Reset||Everything but calibration."),
     ]),
 ];
 
@@ -1133,7 +1156,7 @@ impl View for Group {
             b.set(SHORT[(self.g as usize).clamp(1, 9) - 1].as_bytes());
         } else {
             // The list's own name, whole words that fit.
-            let n = items(self.g, 0).get(self.sub as usize - 1).map_or("", |e| e.0).as_bytes();
+            let n = items(self.g, 0).get(self.sub as usize - 1).map_or("", |e| e.name()).as_bytes();
             let cut = if n.len() <= 10 { n.len() } else { n[..11].iter().rposition(|&c| c == b' ').unwrap_or(10) };
             b.set(&n[..cut]);
         }
@@ -1204,7 +1227,7 @@ impl Group {
     fn turn(self, app: &mut App, d: i32) {
         let (p, pl) = self.path(self.row);
         if let Some(why) = greyed(app, &p[..pl]) {
-            app.show_toast(self.items()[self.row as usize].0.as_bytes(), why.as_bytes(), false);
+            app.show_toast(self.items()[self.row as usize].name().as_bytes(), why.as_bytes(), false);
         } else {
             let p = &p[..pl];
             // MENU-22: a radio-wide setting changed here offers "* Undo" (the slot's own items keep theirs).
@@ -1219,7 +1242,7 @@ impl Group {
         let list = self.items();
         app.new_page(lcd, hash(&(self.g, self.sub)));
         let mut count = Buf::<24>::new();
-        for (i, (name, val, _)) in list.iter().enumerate() {
+        for (i, (name, val)) in list.iter().map(|e| (e.name(), e.value())).enumerate() {
             let (p, pl) = self.path(i as u8);
             let mut v = Buf::<24>::new();
             let dot = match wired(app, cx.dev, &p[..pl], &mut v) {
@@ -1253,8 +1276,7 @@ impl Group {
         for x in &p[..pl] {
             let _ = uwrite!(path, " {}", x);
         }
-        let e = list.get(self.row as usize).copied().unwrap_or(("", "", ""));
-        let help = greyed(app, &p[..pl]).unwrap_or(e.2);
+        let help = greyed(app, &p[..pl]).unwrap_or(list.get(self.row as usize).map_or("", |e| e.help()));
         app.help_box(lcd, 226, 46, help.as_bytes(), path.as_bytes());
     }
 
@@ -1263,7 +1285,7 @@ impl Group {
         let (p, pl) = self.path(self.row);
         let p = &p[..pl];
         if let Some(why) = greyed(app, p) {
-            return app.show_toast(self.items()[self.row as usize].0.as_bytes(), why.as_bytes(), false);
+            return app.show_toast(self.items()[self.row as usize].name().as_bytes(), why.as_bytes(), false);
         }
         match p {
             [8, 7, 1] => {
@@ -1323,6 +1345,10 @@ mod shape_tests {
             assert!((1..=9).contains(&g) && (1..=9).contains(&s), "sub-list ({g}, {s})");
             assert!(s as usize <= GROUP_ITEMS[g as usize - 1].len(), "({g}, {s}) hangs off a row its group has");
             assert!(!items.is_empty() && items.len() <= 9, "({g}, {s}) has {} items", items.len());
+        }
+        // Each item is "name|value|help": three parts, a name always.
+        for e in GROUP_ITEMS.iter().copied().chain(SUBS.iter().map(|x| x.1)).flatten() {
+            assert!(e.0.matches('|').count() == 2 && !e.name().is_empty(), "item {:?}", e.0);
         }
     }
 }
