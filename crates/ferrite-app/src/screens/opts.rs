@@ -40,9 +40,11 @@ impl Of {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Act {
-    Do(Op),
+    /// A reference, not the `Op` itself: `Op` is about 96 bytes (it carries drafts and buffers) and every row would
+    /// be that size.
+    Do(&'static Op),
     /// Asks first (MENU-23).
-    Confirm(Op),
+    Confirm(&'static Op),
     Open(Dest),
     /// Show hidden channels in the lists, or not (a setting, kept).
     ShowHidden,
@@ -58,15 +60,15 @@ type Opt = (&'static str, Act, &'static str);
 
 /// The rows: label, action, help line.
 const LOG: [Opt; 3] = [
-    ("Mark all read", Act::Do(Op::ReadAll), "Clears the inbox count"),
-    ("Clear the log", Act::Confirm(Op::ClearLog), "Every event goes, unread ones too"),
+    ("Mark all read", Act::Do(&Op::ReadAll), "Clears the inbox count"),
+    ("Clear the log", Act::Confirm(&Op::ClearLog), "Every event goes, unread ones too"),
     ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DSC, AIS, popups"),
 ];
 const HEARD: [Opt; 5] = [
-    ("Beacon now", Act::Do(Op::BeaconNow), "Sends your position once (needs a callsign)"),
+    ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
     ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 5 1)"),
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
-    ("Clear the heard list", Act::Confirm(Op::ClearHeard), "Stations come back as they are heard"),
+    ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations come back as they are heard"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
 ];
 const MESSAGES: [Opt; 3] = [
@@ -75,20 +77,20 @@ const MESSAGES: [Opt; 3] = [
     ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
 ];
 const GPS: [Opt; 3] = [
-    ("Mark here", Act::Do(Op::MarkHere), "A waypoint at this fix"),
+    ("Mark here", Act::Do(&Op::MarkHere), "A waypoint at this fix"),
     ("Waypoints", Act::Open(Dest::Waypoints), "Distance and bearing to each"),
     ("GPS settings", Act::Open(Dest::Group(6)), "On or off, format, units, time zone"),
 ];
 const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, step, speed, trigger, waterfall")];
 const APRS_CARD: [Opt; 4] = [
-    ("Beacon now", Act::Do(Op::BeaconNow), "Sends your position once (needs a callsign)"),
+    ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
     ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 5 1)"),
     ("Heard list", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
 ];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
 const WAYPOINTS: [Opt; 4] = [
-    ("Mark here", Act::Do(Op::MarkHere), "A waypoint at this fix"),
+    ("Mark here", Act::Do(&Op::MarkHere), "A waypoint at this fix"),
     ("Add a grid square", Act::Grid, "A waypoint at a square's centre: FN31pr"),
     ("Arrival alarm", Act::Arrival, "Off, 50 m to 1 km from the one you go to"),
     ("GPS position", Act::Open(Dest::GpsPosition), "Fix, satellites, grid square"),
@@ -150,7 +152,7 @@ impl View for Options {
             }
             (Key::Menu, Short) => match act {
                 Act::Confirm(_) if !self.confirm => app.screen = Screen::Options(Options { confirm: true, ..self }),
-                Act::Do(op) | Act::Confirm(op) => {
+                Act::Do(&op) | Act::Confirm(&op) => {
                     app.back();
                     if store.data().request(op) {
                         if op == Op::ReadAll {
