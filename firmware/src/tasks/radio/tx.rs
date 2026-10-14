@@ -39,7 +39,7 @@ impl Radio {
             return false;
         };
         let high = self.tx.data.unwrap_or(self.tx.power[self.live.tx.slot as usize % 4]) == 2;
-        let want = radio_chip::TxExpect { freq, reg3b: self.tx.reg3b[n as usize] };
+        let want = radio_chip::TxExpect { freq, reg3b: self.tx.reg3b[n as usize], narrow: self.tx.narrow };
         match radio_chip::key_mic(&mut self.chip(n), high, &want) {
             Ok(()) => true,
             Err(r) => {
@@ -108,7 +108,8 @@ impl Radio {
         let tone = self.tx.tone[s];
         // The keyed slot's bandwidth (HF mode's NFM is its mode 1).
         let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
-        radio_chip::tx_setup(&mut self.chip(n), f, narrow, tone);
+        let setup = self.tx_chip_setup(f, narrow, tone, data.is_some());
+        radio_chip::tx_setup(&mut self.chip(n), &setup);
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, req.power));
         self.tx.fault = false;
         self.live.tx = TxLive { keyed: false, slot, mic: 0, refused: None, dtmf_sent: self.live.tx.dtmf_sent, voice: self.live.tx.voice };
@@ -129,6 +130,16 @@ impl Radio {
         }
         self.live.tx.keyed = true;
         self.tx.chip = Some(n);
+    }
+
+    /// The chip set-up for a key-up (TX-23; TX audit F1, F2, F7, F14): the calibration's sub-tone deviation at the
+    /// Subtone level (TONE-1, TONE-16), the mic gain (VOX-15) or V0.29's fixed 0x34 for a data burst (VOX-6). Notes
+    /// the bandwidth for the keying steps (F3). The calibration is there: `TxSeq::check` refused before this if not.
+    pub(super) fn tx_chip_setup(&mut self, freq: Freq10, narrow: bool, tone: u16, data: bool) -> radio_chip::TxSetup {
+        self.tx.narrow = narrow;
+        let tone_dev = self.tx.cal.map_or(0, |c| c.tone_dev(tone, self.tone_level));
+        let mic = if data { ferrite_core::vox::MIC_DATA } else { ferrite_core::vox::mic_reg(self.tx.mic) };
+        radio_chip::TxSetup { freq, narrow, tone, tone_dev, mic }
     }
 
     /// While keyed: the sequencer's own unkeys (timeout backstop, duty limit, battery under load).
@@ -167,11 +178,12 @@ impl Radio {
     }
 
     /// TONE-5: the tail at unkey, still keyed, for stock's 400 ms: the 55 Hz tone with no sub-tone, the phase
-    /// shift (0 8 5 2) on CTCSS, the 134.4 Hz turn-off code on DCS. The 55 Hz tone at the driver's sub-tone gain
-    /// (74, as its CTCSS) where stock takes the calibration's byte (0xF210 byte 1): to confirm on the bench.
+    /// shift (0 8 5 2) on CTCSS, the 134.4 Hz turn-off code on DCS. The 55 Hz tone at the calibration's CTCSS byte
+    /// (0xF210 byte 1), as stock (TX audit F7).
     pub(super) async fn tail_elim(&mut self) {
         let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
-        let kind = radio_chip::tail(self.tx.tone[self.tx.slot as usize % 4], self.tx.phase);
+        let dev = self.tx.cal.map_or(0, |c| c.tail_dev());
+        let kind = radio_chip::tail(self.tx.tone[self.tx.slot as usize % 4], self.tx.phase, dev);
         self.chip(n).tail_tx(Some(kind));
         Timer::after_millis(tonegen::TAIL_MS as u64).await;
         self.chip(n).tail_tx(None);
@@ -217,7 +229,8 @@ impl Radio {
             return;
         }
         let heard = dtmf.is_none() || self.tx.sidetone; // DTMF-8's setting; the burst is always heard
-        let (sending, mic_ok) = radio_chip::keyed_tone(&mut self.chip(n), hz, dtmf, heard);
+        let narrow = self.tx.narrow;
+        let (sending, mic_ok) = radio_chip::keyed_tone(&mut self.chip(n), hz, dtmf, heard, narrow);
         if !mic_ok {
             log(b"tx mic read-back failed, chip ", n as u32);
         }
@@ -229,7 +242,8 @@ impl Radio {
     pub(super) async fn play_keyed(&mut self, steps: impl Iterator<Item = tonegen::Step>) {
         use bk4829::tx::Source as TxSource;
         let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
-        self.chip(n).tx_on(TxSource::Tones);
+        let wide = !self.tx.narrow;
+        self.chip(n).tx_on(TxSource::Tones, wide);
         for (hz, ms) in steps {
             self.chip(n).tone_tx(hz as u32);
             Timer::after_millis(ms as u64).await;

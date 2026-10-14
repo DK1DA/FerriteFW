@@ -2,7 +2,7 @@
 //!
 //! The firmware decides whether and where it may transmit (band edges, licence, the PA path on the RF board); this
 //! module only does what it is told. [`Bk4829::tx_on`] keys the chip on the frequency already set;
-//! [`Bk4829::tx_off`] returns to receive.
+//! [`Bk4829::tx_off`] takes it out of transmit (receive is the next tune's).
 
 use crate::{int, reg, tone_word, Bk4829, Bus, Fsk};
 
@@ -10,7 +10,10 @@ use crate::{int, reg, tone_word, Bk4829, Bus, Fsk};
 /// (voice) or with the AF DAC (tones and data, microphone off).
 const POWER_TX_MIC: u16 = 0xC1FE;
 const POWER_TX_TONE: u16 = 0xC3FA;
-const POWER_RX: u16 = 0xBFF1;
+/// Stock's wait between the two REG_30 writes that key the chip (0x0801E5CC: a delay of 0x32), about 50 us.
+pub const TX_ON_GAP_US: u32 = 50;
+/// REG_40's low 12 bits at every key-up, stock's (0x0801E9E0): `(REG_40 & 0xF000) | 0x50A`.
+pub const TX_DEVIATION: u16 = 0x050A;
 
 /// Tone 1's gain for a transmitted single tone (tone burst, end tone, CW ID): stock V0.29's REG_70 0x9700
 /// (0x0801F33C: `(R & 0x7F) | 0x9700`, with REG_30 mode 4). V0.27 sent 0xBC00 (gain 0x3C, 0x0801EB8C), about 8 dB
@@ -41,18 +44,28 @@ pub enum Source {
 }
 
 impl<B: Bus> Bk4829<B> {
-    /// Key the transmitter (stock: REG_30 0, then the transmit value; the 0-to-1 of bit 15 recalibrates the VCO).
-    pub fn tx_on(&mut self, src: Source) {
-        self.write(reg::POWER, 0);
+    /// Key the transmitter as stock does (0x0801E5CC with mode 2, TX audit F3): REG_30 0x0200 on a wide channel or
+    /// 0 on a narrow one, about 50 us ([`TX_ON_GAP_US`], the bus's busy wait), then the transmit value (the 0-to-1
+    /// of bit 15 recalibrates the VCO). nicFW passes through 0x0200 too.
+    pub fn tx_on(&mut self, src: Source, wide: bool) {
+        self.write(reg::POWER, if wide { 0x0200 } else { 0 });
+        self.bus.delay_us(TX_ON_GAP_US);
         self.write(reg::POWER, if src == Source::Mic { POWER_TX_MIC } else { POWER_TX_TONE });
     }
 
-    /// Unkey: PA control off, then back to receive.
+    /// The start of stock's TX set-up (0x0801E5EA): REG_30 = 0, then about 50 us, before the frequency and the
+    /// rest are written.
+    pub fn tx_start(&mut self) {
+        self.write(reg::POWER, 0);
+        self.bus.delay_us(TX_ON_GAP_US);
+    }
+
+    /// Out of transmit as stock's unkey leaves it (0x0801D224, TX audit F4): PA control off, then REG_30 = 0. The
+    /// receive set-up (REG_30 0x0200, then 0xBFF1) is the next tune's, after the unkey wait and the paths.
     pub fn tx_off(&mut self) {
         let pa = self.read(reg::PA);
         self.write(reg::PA, pa & !0x80);
-        self.write(reg::POWER, 0x0200);
-        self.write(reg::POWER, POWER_RX);
+        self.write(reg::POWER, 0);
     }
 
     /// PA control output: `bias` 0-255 (0-3.2 V on PACTL), gains 0-7, `on` enables the output.
@@ -60,16 +73,25 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::PA, (bias as u16) << 8 | (on as u16) << 7 | (gain1 as u16 & 7) << 3 | (gain2 as u16 & 7));
     }
 
-    /// Deviation, 0-0xFFF (both voice and sub-tone).
-    pub fn deviation(&mut self, dev: u16) {
+    /// Transmit deviation as stock writes it at every key-up (0x0801E9E0, V0.27 and V0.29, TX audit F2): REG_40's
+    /// top four bits kept, the rest [`TX_DEVIATION`].
+    pub fn tx_deviation(&mut self) {
         let v = self.read(reg::DEVIATION);
-        self.write(reg::DEVIATION, (v & 0xF000) | 1 << 12 | (dev & 0x0FFF));
+        self.write(reg::DEVIATION, (v & 0xF000) | TX_DEVIATION);
     }
 
-    /// Microphone sensitivity 0-63 (0.5 dB steps).
+    /// Microphone sensitivity, REG_7D[5:0] (0.5 dB a step, 0x00 min to 0x3F max; the register table's field).
+    /// The rest of REG_7D stays.
     pub fn mic_gain(&mut self, g: u8) {
         let v = self.read(reg::MIC);
         self.write(reg::MIC, (v & !0x3F) | (g as u16 & 0x3F));
+    }
+
+    /// The transmitted sub-tone's deviation, REG_51[6:0] (stock: the calibration's 0xF210 byte 1 for CTCSS, byte
+    /// 2 for DCS). Call after [`Bk4829::ctcss_tx`] or [`Bk4829::dcs_tx`], which set the mode bits.
+    pub fn subtone_gain(&mut self, g: u8) {
+        let v = self.read(reg::SUBTONE);
+        self.write(reg::SUBTONE, (v & !0x7F) | (g as u16 & 0x7F));
     }
 
     /// Send a CTCSS tone (tenths of a Hz) with the transmission.

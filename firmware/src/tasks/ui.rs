@@ -138,6 +138,7 @@ pub async fn task() {
                 Fault::PaCurve => b"tx calibration: locked, a PA curve byte is 0x00 or 0xFF",
                 Fault::Windows => b"tx calibration: locked, TX windows blank or invalid",
                 Fault::Trim => b"tx calibration: locked, factory crystal trim not applied yet",
+                Fault::ToneGain => b"tx calibration: locked, a sub-tone gain byte is over 0x7F",
             });
         }
         crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));

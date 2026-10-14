@@ -20,6 +20,9 @@ const WINDOWS_AT: [usize; 4] = [0x230, 0x235, 0x23A, 0x240];
 /// 16-bit little-endian. Stock adds `(f / 100) * k / 435500` to every frequency it tunes, receive and transmit
 /// (0x0801DDD0), about 0.023 ppm a unit.
 const TRIM_AT: usize = 0x21B;
+/// TONE-1: the transmitted sub-tone's deviation, 0xF210 byte 1 for CTCSS (REG_51 = 0x9000 | b1, 0x0800A488; also
+/// the 55 Hz tail, 0x0801D078) and byte 2 for DCS (REG_51 = 0xA000 | b2, 0x0800D3E0), 7 bits each.
+const TONE_AT: usize = 0x211;
 pub const TRIM_MARKER: u8 = 0xA0;
 
 /// Why the calibration locks transmit (TX-13, TX-14, CAL-5, CAL-6): the Radio task gets no [`TxCal`], and every
@@ -38,6 +41,8 @@ pub enum Fault {
     /// radio would transmit off frequency by it: transmit is locked until it does (TX audit M4, a deviation from
     /// stock, which applies it). A radio without the marker (the black radio: 0xFF) is unaffected.
     Trim,
+    /// A sub-tone gain (0xF210 byte 1 or 2) doesn't fit REG_51's 7-bit field (TX-14); stock masks it with 0x7F.
+    ToneGain,
 }
 
 /// CAL-12: the factory crystal trim k when the sector marks one (0xF210 byte 11 = 0xA0), else None. Stock's loader
@@ -81,7 +86,13 @@ pub struct TxCal {
     hf: [[u8; 16]; 3],
     /// The enabled TX windows, low and high edge in MHz; (0, 0) for a window that is off.
     win: [(u16, u16); 4],
+    /// TONE-1: the sub-tone deviation bytes, CTCSS (0xF210 byte 1) and DCS (byte 2).
+    tone: [u8; 2],
 }
+
+/// TONE-16's step around the calibration's sub-tone level: stock's "high" adds 0x0F to the CTCSS byte and 0x14 to
+/// the DCS byte (0x0800A490, 0x0800D3EC, when its 0x20000C34+0x1A flag is set); Ferrite's Low takes the same off.
+pub const TONE_STEP: [u8; 2] = [0x0F, 0x14];
 
 const UHF: usize = 0;
 const VHF: usize = 1;
@@ -104,7 +115,11 @@ impl TxCal {
         if factory_trim(b).is_some_and(|k| k != 0) {
             return Err(Fault::Trim);
         }
-        let mut c = TxCal { pa: [[[0; 16]; 4]; 3], hf: [[0; 16]; 3], win: [(0, 0); 4] };
+        let tone = [b[TONE_AT], b[TONE_AT + 1]];
+        if tone.iter().any(|&g| g > 0x7F) {
+            return Err(Fault::ToneGain);
+        }
+        let mut c = TxCal { pa: [[[0; 16]; 4]; 3], hf: [[0; 16]; 3], win: [(0, 0); 4], tone };
         for (l, level) in c.pa.iter_mut().enumerate() {
             for (r, row) in level.iter_mut().enumerate() {
                 let at = 0x40 * l + 0x10 * r;
@@ -134,6 +149,24 @@ impl TxCal {
     /// (0x0800BD8C). Below 64 MHz the calibration has no window (TX-41): `txplan`'s HF windows alone decide there.
     pub fn in_window(&self, f: Freq10) -> bool {
         f < mhz(64) || self.win.iter().any(|&(lo, hi)| (mhz(lo as u32)..mhz(hi as u32)).contains(&f))
+    }
+
+    /// TONE-1, TONE-16: REG_51's gain for the sub-tone sent with `tone` (the tone word: bit 15 DCS) at the Subtone
+    /// level (0 Low, 1 Normal: the calibration's byte, 2 High: stock's step up), within the 7-bit field. Stock masks
+    /// the sum with 0x7F, which wraps a high byte to a low level; Ferrite stops at 0x7F.
+    pub fn tone_dev(&self, tone: u16, level: u8) -> u8 {
+        let k = (tone & 0x8000 != 0) as usize;
+        let (g, step) = (self.tone[k], TONE_STEP[k]);
+        match level {
+            0 => g.saturating_sub(step),
+            1 => g,
+            _ => (g + step).min(0x7F),
+        }
+    }
+
+    /// TONE-5: the 55 Hz tail's gain, the CTCSS byte as stock sends it (0x0801D078), whatever the Subtone level.
+    pub fn tail_dev(&self) -> u8 {
+        self.tone[0]
     }
 
     /// The PA drive for transmitting on `f` at Ferrite's `power` (0 Low, 1 Mid, 2 High), stock's lookup
@@ -318,6 +351,24 @@ mod tests {
         let mut b = sector(GAUGE_DEFAULT);
         b[TRIM_AT..TRIM_AT + 3].copy_from_slice(&[0x00, 0x2C, 0xFF]);
         assert!(TxCal::read(&b).is_ok(), "k without the marker: stock ignores it");
+    }
+
+    /// TONE-1, TONE-16, TONE-5, TX-14 (TX audit F7): the sub-tone's deviation from the calibration, the black
+    /// radio's 0x46 CTCSS and 0x3E DCS at Normal, stock's step for High, the same step down for Low, 7 bits at
+    /// most; the tail takes the CTCSS byte. A byte over 0x7F locks transmit.
+    #[test]
+    fn subtone_deviation_from_the_calibration() {
+        let c = TxCal::read(&sector(GAUGE_DEFAULT)).unwrap();
+        let dcs = 0x8000 | 0o23;
+        assert_eq!((c.tone_dev(885, 1), c.tone_dev(dcs, 1)), (0x46, 0x3E));
+        assert_eq!((c.tone_dev(885, 2), c.tone_dev(dcs, 2)), (0x46 + 0x0F, 0x3E + 0x14));
+        assert_eq!((c.tone_dev(885, 0), c.tone_dev(dcs, 0)), (0x46 - 0x0F, 0x3E - 0x14));
+        assert_eq!(c.tail_dev(), 0x46);
+        let mut b = sector(GAUGE_DEFAULT);
+        b[TONE_AT] = 0x7A;
+        assert_eq!(TxCal::read(&b).unwrap().tone_dev(885, 2), 0x7F, "never past the field (stock wraps)");
+        b[TONE_AT + 1] = 0x80;
+        assert_eq!(TxCal::read(&b).err(), Some(Fault::ToneGain));
     }
 
     /// CAL-14: the 1.25 m PA path (200-300 MHz, 243.0 MHz included) takes the Low curve at every level, so the

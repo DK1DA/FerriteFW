@@ -379,6 +379,10 @@ struct Tx {
     dtmf: (u8, u8),
     digits: [u8; 16],
     dialled: bool,
+    /// Mic gain 1-9 (0 8 3, VOX-15): REG_7D at each voice key-up.
+    mic: u8,
+    /// The keyed slot's bandwidth: stock keys through REG_30 0x0200 when wide (TX audit F3).
+    narrow: bool,
 }
 
 fn now_ms() -> u64 {
@@ -612,6 +616,8 @@ pub async fn task() {
             vox_det: ferrite_core::vox::Vox::new(),
             vox_at: 0,
             region: None,
+            mic: 5,
+            narrow: false,
         },
         #[cfg(feature = "tx")]
         xb: None,

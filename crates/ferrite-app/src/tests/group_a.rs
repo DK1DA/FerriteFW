@@ -51,9 +51,10 @@ fn start_up_sends_every_slot_whole() {
         assert!(v.contains(&RadioCmd::SlotParam { slot: s, param: Param::EndTone, value: 0 }), "slot {s} end tone");
         assert!(v.contains(&RadioCmd::SlotParam { slot: s, param: Param::Tail, value: 0 }), "slot {s} tail");
     }
-    // Seven radio-wide (with the beep volume and VOX, SND-3 and VOX-13), the tones' four (TxTones, the
-    // callsign's two chunks, DTMF timing); per slot: tune, ten parameters (split included), end tone and tail.
-    assert_eq!(v.len(), 11 + 3 * 13);
+    assert!(v.contains(&RadioCmd::MicGain(5)), "VOX-15: the default mic gain");
+    // Eight radio-wide (with the beep volume, the mic gain and VOX: SND-3, VOX-15, VOX-13), the tones' four (TxTones,
+    // the callsign's two chunks, DTMF timing); per slot: tune, ten parameters (split included), end tone and tail.
+    assert_eq!(v.len(), 12 + 3 * 13);
     // Stepping through channels faster than the commands drain: the slot goes out once, as it is now.
     let mut t = T::new();
     t.tap(Key::VfoMem);

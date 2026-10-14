@@ -7,6 +7,20 @@ pub fn threshold(level: u8) -> u16 {
     111 - 10 * level.clamp(1, 9) as u16
 }
 
+/// VOX-15: stock's default mic sensitivity, REG_7D[5:0] = 0x24 (0x0801DD90: Mic Gain setting 0, the default;
+/// setting 1 gives 0x2D and setting 2 the calibration's 0xF210 byte 0). The chip starts at 0x12, 9 dB lower.
+pub const MIC_STOCK: u8 = 0x24;
+
+/// VOX-6: REG_7D[5:0] for a data key-up (APRS), stock V0.29's 0x34 for the burst (0x0801F01C); the next key-up
+/// writes the mic gain again.
+pub const MIC_DATA: u8 = 0x34;
+
+/// VOX-15: REG_7D[5:0] (0.5 dB a step) for Mic gain 1-9 (0 8 3): stock's default 0x24 at 5, 1 dB a step around
+/// it (0x1C at 1, 0x2C at 9: stock's setting 1, 0x2D, is a step above 9).
+pub fn mic_reg(gain: u8) -> u8 {
+    (MIC_STOCK as i16 + (gain.clamp(1, 9) as i16 - 5) * 2) as u8
+}
+
 /// Stock's hysteresis: speech goes on above the threshold and stays on down to this many counts below it.
 pub const HYSTERESIS: u16 = 8;
 
@@ -179,5 +193,14 @@ mod tests {
         assert!(v.step(336, 9, 2000, false, 9040), "336 raw = 21: level 9");
         let mut v = Vox::new();
         assert!(!v.step(799, 5, 2000, false, 9000), "the whistle (49) is below level 5's 61");
+    }
+
+    /// VOX-15: Mic gain 5 (the default) writes stock's default REG_7D[5:0] 0x24; 1 dB a step, within the field.
+    #[test]
+    fn mic_gain_to_reg_7d() {
+        assert_eq!(mic_reg(5), MIC_STOCK);
+        assert_eq!((mic_reg(1), mic_reg(9)), (0x1C, 0x2C));
+        assert_eq!((mic_reg(0), mic_reg(12)), (0x1C, 0x2C), "clamped to 1-9");
+        assert!((1..=9).all(|g| mic_reg(g) <= 0x3F));
     }
 }

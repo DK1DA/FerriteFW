@@ -316,19 +316,38 @@ mod tx {
     use super::*;
     use bk4829::tx::{dtmf_pair, Source};
 
+    /// Keying as stock (0x0801E5CC, TX audit F3): REG_30 0x0200 (wide) or 0 (narrow), the 50 us gap, then the
+    /// transmit value; unkeying as stock's 0x0801D224 (F4): the PA output off, then REG_30 0.
     #[test]
     fn key_and_unkey() {
         let mut r = Regs::new();
         let mut bk = Bk4829::new(&mut r);
         bk.pa(0x80, 7, 7, true);
-        bk.tx_on(Source::Mic);
+        bk.tx_on(Source::Mic, true);
         bk.tx_off();
-        bk.tx_on(Source::Tones);
+        bk.tx_on(Source::Tones, false);
         assert_eq!(r.writes[0], (0x36, 0x80BF));
-        assert_eq!(r.writes[1..3], [(0x30, 0), (0x30, 0xC1FE)], "stock's voice transmit");
-        assert_eq!(r.writes[3], (0x36, 0x803F), "PA output off first");
-        assert_eq!(r.writes[4..6], [(0x30, 0x0200), (0x30, 0xBFF1)]);
-        assert_eq!(r.writes[6..8], [(0x30, 0), (0x30, 0xC3FA)], "stock's tone transmit");
+        assert_eq!(r.writes[1..4], [(0x30, 0x0200), (0xFF, 50), (0x30, 0xC1FE)], "stock's voice transmit, wide");
+        assert_eq!(r.writes[4], (0x36, 0x803F), "PA output off first");
+        assert_eq!(r.writes[5..6], [(0x30, 0)], "out of transmit, not into receive");
+        assert_eq!(r.writes[6..9], [(0x30, 0), (0xFF, 50), (0x30, 0xC3FA)], "stock's tone transmit, narrow");
+    }
+
+    /// TX audit F1, F2, F7: REG_7D's 6-bit mic field, REG_40 as stock's key-up writes it, REG_51's 7-bit gain.
+    #[test]
+    fn mic_deviation_and_subtone_gain() {
+        let mut r = Regs::new();
+        r.regs[0x7D] = 0xE912;
+        r.regs[0x40] = 0x34D2;
+        let mut bk = Bk4829::new(&mut r);
+        bk.mic_gain(0x24);
+        bk.tx_deviation();
+        bk.ctcss_tx(885);
+        bk.subtone_gain(0x46);
+        assert_eq!((r.regs[0x7D], r.regs[0x40], r.regs[0x51]), (0xE924, 0x350A, 0x9046), "stock's 0xE924, 0x350A");
+        let mut bk = Bk4829::new(&mut r);
+        bk.mic_gain(0x1C);
+        assert_eq!(r.regs[0x7D], 0xE91C, "bit 5 is the field's top bit");
     }
 
     #[test]

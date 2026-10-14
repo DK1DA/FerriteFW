@@ -193,21 +193,43 @@ pub fn si_input(am: bool) -> [bool; 2] {
     [am, am]
 }
 
-/// The transmitting chip's set-up before the path plan keys it (TX-23): AF muted, the TX frequency, the channel
-/// bandwidth and the sub-tone sent (the tone word: CTCSS in 0.1 Hz, bit 15 DCS, bit 14 inverted; 0 none). REG_43
-/// goes with every TX frequency as stock writes it (0x3028 wide, 0x4008 narrow; 0x0801DE38-0x0801DE52): with one
-/// chip awake at a time (decision 111), the TX chip of a cross-band split was last set for another slot, or holds
-/// the reset value 0x4048 (TX audit M7).
+/// What the transmitting chip is set to before the path plan keys it (TX-23).
 #[cfg(feature = "tx")]
-pub fn tx_setup<B: Bus>(bk: &mut Bk4829<B>, freq: Freq10, narrow: bool, tone: u16) {
-    bk.af_out(AfOut::Mute);
-    bk.set_freq(freq * 10);
-    bk.bandwidth(if narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
-    match tone {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TxSetup {
+    /// The TX frequency, 10 Hz units.
+    pub freq: Freq10,
+    pub narrow: bool,
+    /// The sub-tone sent: the tone word (CTCSS in 0.1 Hz, bit 15 DCS, bit 14 inverted; 0 none).
+    pub tone: u16,
+    /// Its deviation, REG_51[6:0] (TONE-1, TONE-16: `TxCal::tone_dev`).
+    pub tone_dev: u8,
+    /// REG_7D[5:0], the mic sensitivity (VOX-15: `vox::mic_reg`; a data key-up `vox::MIC_DATA`, VOX-6).
+    pub mic: u8,
+}
+
+/// The transmitting chip's set-up before the path plan keys it (TX-23), in stock's order (TX start 0x0801EAF8,
+/// TX audit F1, F2, F7, F14): out of receive (REG_30 0, stock's 50 us), REG_47 0x6142 (stock's AF route while
+/// keyed; nicFW writes 0x6042), the TX frequency, REG_43 with it (0x3028 wide, 0x4008 narrow; 0x0801DE38-0x0801DE52:
+/// with one chip awake at a time, decision 111, a cross-band split's TX chip was last set for another slot, M7),
+/// the sub-tone with the calibration's deviation, the mic gain (REG_7D), then stock's REG_40 deviation
+/// (`(R & 0xF000) | 0x50A`). The chip keeps its last receive mode bits (REG_31 scrambler off).
+#[cfg(feature = "tx")]
+pub fn tx_setup<B: Bus>(bk: &mut Bk4829<B>, s: &TxSetup) {
+    bk.tx_start();
+    bk.af_out(AfOut::Normal);
+    bk.set_freq(s.freq * 10);
+    bk.bandwidth(if s.narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
+    match s.tone {
         0 => bk.subtone_off(),
         t if t & 0x8000 != 0 => bk.dcs_tx(t & 0x3FFF, t & 0x4000 != 0),
         t => bk.ctcss_tx(t),
     }
+    if s.tone != 0 {
+        bk.subtone_gain(s.tone_dev);
+    }
+    bk.mic_gain(s.mic);
+    bk.tx_deviation();
 }
 
 /// REG_30 read back after a key-up with the microphone (TX-7): stock's transmit value.
@@ -220,6 +242,8 @@ pub const REG30_TX_MIC: u16 = 0xC1FE;
 pub struct TxExpect {
     pub freq: Freq10,
     pub reg3b: u16,
+    /// The keyed slot's bandwidth: stock keys through REG_30 0x0200 on wide, 0 on narrow (F3).
+    pub narrow: bool,
 }
 
 /// The register a TX-7 read-back found wrong.
@@ -242,7 +266,7 @@ pub enum ReadBack {
 /// state with the PA at zero.
 #[cfg(feature = "tx")]
 pub fn key_mic<B: Bus>(bk: &mut Bk4829<B>, high: bool, want: &TxExpect) -> Result<(), ReadBack> {
-    bk.tx_on(bk4829::tx::Source::Mic);
+    bk.tx_on(bk4829::tx::Source::Mic, !want.narrow);
     if bk.read(0x30) != REG30_TX_MIC {
         return Err(ReadBack::Power);
     }
@@ -263,9 +287,10 @@ pub fn key_mic<B: Bus>(bk: &mut Bk4829<B>, high: bool, want: &TxExpect) -> Resul
 
 /// While keyed (TONE-13, DTMF-7, DTMF-11): the tone burst or a DTMF symbol on the keyed chip, as stock sends any
 /// internal tone: the generator set, REG_30 to tone transmit (the microphone off) and the sidetone as asked; both
-/// None goes back to the microphone. Returns (a tone is sending, the microphone read-back is good).
+/// None goes back to the microphone with the key-up's AF route (REG_47 0x6142, F14). `narrow`: the keyed slot's
+/// bandwidth, for stock's REG_30 step (F3). Returns (a tone is sending, the microphone read-back is good).
 #[cfg(feature = "tx")]
-pub fn keyed_tone<B: Bus>(bk: &mut Bk4829<B>, hz: Option<u16>, dtmf: Option<char>, heard: bool) -> (bool, bool) {
+pub fn keyed_tone<B: Bus>(bk: &mut Bk4829<B>, hz: Option<u16>, dtmf: Option<char>, heard: bool, narrow: bool) -> (bool, bool) {
     use bk4829::tx::Source;
     let sending = match (hz, dtmf) {
         (Some(hz), _) => {
@@ -276,23 +301,23 @@ pub fn keyed_tone<B: Bus>(bk: &mut Bk4829<B>, hz: Option<u16>, dtmf: Option<char
         (None, None) => false,
     };
     if sending {
-        bk.tx_on(Source::Tones);
+        bk.tx_on(Source::Tones, !narrow);
         bk.sidetone(heard);
         return (true, true);
     }
     bk.tone_tx(0);
-    bk.sidetone(false);
-    bk.tx_on(Source::Mic);
+    bk.af_out(AfOut::Normal);
+    bk.tx_on(Source::Mic, !narrow);
     (false, bk.read(0x30) == REG30_TX_MIC)
 }
 
-/// The tail sent at the unkey (TONE-6, TONE-9): the 55 Hz tone at the driver's sub-tone gain (74, as its CTCSS)
-/// where stock takes the calibration's byte (bench-confirm), or REG_52's phase shift (the DCS turn-off code on DCS).
+/// The tail sent at the unkey (TONE-5, TONE-6, TONE-9): the 55 Hz tone at the calibration's CTCSS byte (`dev`,
+/// `TxCal::tail_dev`; stock 0x0801D078, TX audit F7), or REG_52's phase shift (the DCS turn-off code on DCS).
 #[cfg(feature = "tx")]
-pub fn tail(tx_tone: u16, phase: u8) -> bk4829::tx::Tail {
+pub fn tail(tx_tone: u16, phase: u8, dev: u8) -> bk4829::tx::Tail {
     use bk4829::tx::Tail;
     match ferrite_core::tonegen::tail_kind(tx_tone, phase) {
-        ferrite_core::tonegen::TailKind::Tone55 => Tail::Tone55 { dev: 74 },
+        ferrite_core::tonegen::TailKind::Tone55 => Tail::Tone55 { dev },
         ferrite_core::tonegen::TailKind::Shift(p) => Tail::Shift { phase: p },
     }
 }

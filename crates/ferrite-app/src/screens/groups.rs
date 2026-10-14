@@ -352,6 +352,7 @@ enum Tell {
     ScanTx,
     BeepVol,
     Vox,
+    MicGain,
     TxTones,
     SlotTones,
 }
@@ -408,7 +409,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 66] = [
+static SETTINGS: [Setting; 67] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -463,6 +464,7 @@ static SETTINGS: [Setting; 66] = [
     field!([8, 2, 1], vox: bool, Kind::Flip(&ON_OFF), Vox),
     field!([8, 2, 2], vox_level: u8, Kind::Level(1, 9, 1, vox_level_text), Vox),
     field!([8, 2, 3], vox_tail: u8, Kind::Round(VOX_TAILS.len() as u8, vox_tail_text), Vox),
+    field!([8, 3, 0], mic_gain: u8, Kind::Level(1, 9, 1, vox_level_text), MicGain),
     field!([8, 4, 2], special),
     field!([8, 5, 1], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
     field!([8, 5, 2], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
@@ -500,6 +502,7 @@ fn tell(app: &mut App, t: Tell) {
         Tell::ScanTx => app.out.push(RadioCmd::ScanTx(app.set.scan_tx)),
         Tell::BeepVol => app.out.push(RadioCmd::BeepVol(app.set.beep_vol)),
         Tell::Vox => app.send_vox(),
+        Tell::MicGain => app.out.push(RadioCmd::MicGain(app.set.mic_gain.clamp(1, 9))),
         Tell::TxTones => app.send_tx_tones(),
         Tell::SlotTones => app.send_slot_tones(),
     }

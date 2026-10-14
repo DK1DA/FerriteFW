@@ -94,6 +94,10 @@ impl Radio {
                 self.beep_level = [5, 7, 9][i];
             }
             #[cfg(feature = "tx")]
+            RadioCmd::MicGain(g) => self.tx.mic = g.clamp(1, 9),
+            #[cfg(not(feature = "tx"))]
+            RadioCmd::MicGain(_) => {}
+            #[cfg(feature = "tx")]
             RadioCmd::Vox { level, tail } => {
                 self.tx.vox = (level.min(9), tail.max(1));
                 if level == 0 {

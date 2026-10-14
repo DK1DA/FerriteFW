@@ -212,7 +212,8 @@ impl Radio {
         self.ldo_on(n);
         // Decision 95: the TX side's own bandwidth (stock takes the receiving channel's).
         let narrow = self.slots[to as usize].narrow;
-        radio_chip::tx_setup(&mut self.chip(n), f, narrow, tone);
+        let setup = self.tx_chip_setup(f, narrow, tone, false); // the user's mic gain, as stock's repeater
+        radio_chip::tx_setup(&mut self.chip(n), &setup);
         self.tuned[n as usize] = Some((to, f));
         self.maybe_awake |= 1 << n;
         self.tx.pa = self.tx.cal.map_or(0, |c| c.dac(f, power));

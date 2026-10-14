@@ -47,6 +47,9 @@ pub enum RadioCmd {
     /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 4 2; sent at start-up and when
     /// it changes).
     ToneLevel(u8),
+    /// Mic gain 1-9 (VOX-15, 0 8 3; sent at start-up and when it changes): REG_7D at every voice key-up
+    /// (`vox::mic_reg`).
+    MicGain(u8),
     /// The beep volume, 1-5 (SND-3, 0 7 5 2; sent at start-up and when it changes): every beep's tone gain.
     BeepVol(u8),
     /// VOX (VOX-1 to VOX-5, VOX-13, VOX-14; 0 8 2): level 1-9, or 0 for off, and the tail in 100 ms. The Radio

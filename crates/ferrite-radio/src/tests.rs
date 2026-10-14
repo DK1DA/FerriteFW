@@ -554,24 +554,54 @@ fn key_reads_back_before_the_pa() {
     }
 }
 
+fn setup(freq: Freq10, narrow: bool, tone: u16) -> chip::TxSetup {
+    chip::TxSetup { freq, narrow, tone, tone_dev: 0x46, mic: 0x24 }
+}
+
 /// TX-45 (TX audit M7): the TX set-up writes stock's REG_43 with every TX frequency (0x3028 wide, 0x4008 narrow), over
-/// whatever the chip held (here the reset value 0x4048, as a cross-band split's TX chip may), with the AF muted
-/// first and the sub-tone after.
+/// whatever the chip held (here the reset value 0x4048, as a cross-band split's TX chip may), out of receive
+/// first (REG_30 0) and the sub-tone after.
 #[test]
 fn tx_setup_writes_the_bandwidth() {
     for (narrow, r43) in [(false, 0x3028), (true, 0x4008)] {
         let mut b = bk();
         b.write(reg::RF_FILTER, 0x4048);
-        chip::tx_setup(&mut b, VHF, narrow, 885);
+        chip::tx_setup(&mut b, &setup(VHF, narrow, 885));
         let bus = b.release();
         assert_eq!(bus.last(reg::RF_FILTER), Some(r43));
         assert_eq!(bus.regs[reg::FREQ_LO as usize] as u32 | (bus.regs[reg::FREQ_HI as usize] as u32) << 16, VHF);
-        assert!(bus.first(reg::AF_OUT).unwrap() < bus.writes.iter().rposition(|w| w.0 == reg::RF_FILTER).unwrap(), "muted first");
+        assert!(bus.first(reg::POWER).unwrap() < bus.writes.iter().rposition(|w| w.0 == reg::RF_FILTER).unwrap(), "out of receive first");
         assert_eq!(bus.regs[reg::SUBTONE as usize] & 0x8000, 0x8000, "CTCSS sent");
     }
     let mut b = bk();
-    chip::tx_setup(&mut b, UHF, false, 0);
+    chip::tx_setup(&mut b, &setup(UHF, false, 0));
     assert_eq!(b.release().last(reg::RF_FILTER), Some(0x3028));
+}
+
+/// VOX-6, VOX-15, TONE-1, TX audit F1, F2, F7, F14: the key-up writes stock's registers from the start-up values:
+/// REG_7D 0xE912 to stock's default 0xE924 (bit 5 is the 6-bit field's top bit; Mic gain 5), REG_40 0x34D2 to
+/// stock's 0x350A, REG_47 0x6142 (stock's TX route), REG_51 with the calibration's CTCSS byte (0x9046 on the black
+/// radio) or its DCS byte in REG_51's low 7 bits, and REG_30 0 before any of them.
+#[test]
+fn tx_setup_writes_stocks_registers() {
+    let mut b = bk();
+    b.write(reg::MIC, 0xE912);
+    b.write(reg::DEVIATION, 0x34D2);
+    chip::tx_setup(&mut b, &setup(VHF, false, 885));
+    let bus = b.release();
+    assert_eq!(bus.last(reg::MIC), Some(0xE924));
+    assert_eq!(bus.last(reg::DEVIATION), Some(0x350A));
+    assert_eq!(bus.last(reg::AF_OUT), Some(0x6142));
+    assert_eq!(bus.last(reg::SUBTONE), Some(0x9046));
+    assert_eq!(bus.first(reg::POWER), bus.writes.iter().position(|w| w.0 == reg::POWER));
+    let p0 = bus.writes.iter().position(|w| *w == (reg::POWER, 0)).unwrap();
+    assert!(p0 < bus.first(reg::AF_OUT).unwrap() && p0 < bus.first(reg::FREQ_LO).unwrap(), "REG_30 0 first, as stock");
+    let mut b = bk();
+    b.write(reg::MIC, 0xE912);
+    chip::tx_setup(&mut b, &chip::TxSetup { tone: 0x8000 | 0o23, tone_dev: 0x3E, mic: ferrite_core::vox::MIC_DATA, ..setup(UHF, false, 0) });
+    let bus = b.release();
+    assert_eq!(bus.last(reg::SUBTONE).map(|v| v & 0x7F), Some(0x3E), "the DCS byte");
+    assert_eq!(bus.last(reg::MIC), Some(0xE934), "a data key-up: V0.29's 0x34");
 }
 
 /// A chip tuned to 146.520 MHz with a REG_3B of its own, and what TX-7 expects of it.
@@ -580,7 +610,7 @@ fn keyed_ready() -> (Bk4829<RecBus>, chip::TxExpect) {
     let mut b = bk();
     b.set_freq(f * 10);
     b.write(0x3B, 0x1234);
-    (b, chip::TxExpect { freq: f, reg3b: 0x1234 })
+    (b, chip::TxExpect { freq: f, reg3b: 0x1234, narrow: false })
 }
 
 /// TX-7: any one register wrong refuses the key-up, naming it, before REG_36's level is left standing: REG_30 not
@@ -617,7 +647,7 @@ fn any_wrong_read_back_refuses() {
 #[test]
 fn keyed_tones_switch_the_source() {
     let mut b = bk();
-    assert_eq!(chip::keyed_tone(&mut b, Some(1750), None, true), (true, true));
+    assert_eq!(chip::keyed_tone(&mut b, Some(1750), None, true, false), (true, true));
     let bus = b.release();
     let tone = bus.last(reg::POWER).unwrap();
     assert_ne!(tone, chip::REG30_TX_MIC, "tone transmit, not the microphone");
@@ -627,7 +657,7 @@ fn keyed_tones_switch_the_source() {
     assert_eq!(bus.last(reg::TONE), Some(0x9700));
     for d in ['5', 'A', 'D', '#'] {
         let mut b = bk();
-        assert_eq!(chip::keyed_tone(&mut b, None, Some(d), false), (true, true), "{d}");
+        assert_eq!(chip::keyed_tone(&mut b, None, Some(d), false, false), (true, true), "{d}");
         let bus = b.release();
         assert_eq!(bus.last(reg::POWER), Some(tone));
         assert_eq!(bus.last(reg::TONE), Some(0xC5C5));
@@ -635,9 +665,12 @@ fn keyed_tones_switch_the_source() {
         assert_eq!((bus.last(reg::TONE1_FREQ), bus.last(reg::TONE2_FREQ)), (Some(bk4829::tone_word(pair.0)), Some(bk4829::tone_word(pair.1))));
     }
     let mut b = bk();
-    assert_eq!(chip::keyed_tone(&mut b, None, None, false), (false, true));
+    assert_eq!(chip::keyed_tone(&mut b, None, None, false, true), (false, true));
     let bus = b.release();
     assert_eq!((bus.last(reg::TONE), bus.last(reg::POWER)), (Some(0), Some(chip::REG30_TX_MIC)));
+    assert_eq!(bus.last(reg::AF_OUT), Some(0x6142), "back to the key-up's AF route (F14)");
+    let n = bus.writes.len();
+    assert_eq!(bus.writes[n - 2..], [(reg::POWER, 0), (reg::POWER, chip::REG30_TX_MIC)], "narrow: through 0, as stock (F3)");
 }
 
 /// TONE-6, TONE-8 (tail elimination at the unkey): no tone sends the 55 Hz tail, DCS the 134.4 Hz turn-off code
@@ -645,12 +678,13 @@ fn keyed_tones_switch_the_source() {
 #[test]
 fn tail_follows_the_tone() {
     use bk4829::tx::Tail;
-    assert_eq!(chip::tail(0, 2), Tail::Tone55 { dev: 74 });
-    assert_eq!(chip::tail(0x8000 | 0o23, 2), Tail::Shift { phase: 0 });
-    assert_eq!(chip::tail(885, 2), Tail::Shift { phase: 2 });
-    assert_eq!(chip::tail(885, 0), Tail::Tone55 { dev: 74 });
+    // TONE-5, TX audit F7: the 55 Hz tone at the calibration's CTCSS byte, as stock (the black radio's 0x46).
+    assert_eq!(chip::tail(0, 2, 0x46), Tail::Tone55 { dev: 0x46 });
+    assert_eq!(chip::tail(0x8000 | 0o23, 2, 0x46), Tail::Shift { phase: 0 });
+    assert_eq!(chip::tail(885, 2, 0x46), Tail::Shift { phase: 2 });
+    assert_eq!(chip::tail(885, 0, 0x46), Tail::Tone55 { dev: 0x46 });
     let mut b = bk();
-    b.tail_tx(Some(chip::tail(885, 3)));
+    b.tail_tx(Some(chip::tail(885, 3, 0x46)));
     let r52 = b.release().last(reg::CTCSS_THRESH).unwrap();
     assert_eq!((r52 >> 15, r52 >> 13 & 3), (1, 3));
 }

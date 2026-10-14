@@ -158,6 +158,8 @@ pub struct Settings {
     pub vox: bool,
     pub vox_level: u8,
     pub vox_tail: u8,
+    /// 0 8 3 (VOX-15): Mic gain 1-9, 5 stock's default REG_7D.
+    pub mic_gain: u8,
     /// 0 3 1 5 (BCR-5): the broadcast's sleep timer, an index into [`SLEEP_TIMES`] (0 off).
     pub fm_sleep: u8,
     /// 0 7 4 2 (DISP-16, DISP-23): the screen's brightness, 1-10, and night red's own level (the item sets the one
@@ -358,6 +360,7 @@ impl Settings {
         vox: false,
         vox_level: 5,
         vox_tail: 3,
+        mic_gain: 5,
         fm_sleep: 0,
         brightness: 7,
         brightness_night: 3,
@@ -424,6 +427,9 @@ impl Settings {
         }
         if self.clock as usize >= CLOCKS.len() {
             self.clock = Self::DEFAULT.clock;
+        }
+        if !(1..=9).contains(&self.mic_gain) {
+            self.mic_gain = Self::DEFAULT.mic_gain;
         }
     }
 

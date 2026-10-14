@@ -1167,6 +1167,7 @@ impl App {
         self.out.push(RadioCmd::ScanTx(self.set.scan_tx));
         self.out.push(RadioCmd::ToneLevel(self.set.tone_level));
         self.out.push(RadioCmd::BeepVol(self.set.beep_vol.clamp(1, 3)));
+        self.out.push(RadioCmd::MicGain(self.set.mic_gain.clamp(1, 9)));
         self.send_vox();
         self.send_tx_tones();
     }
