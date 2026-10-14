@@ -1548,6 +1548,25 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
     }
 }
 
+/// Each chip: find the read alignment from its ID, then stock's start-up. Once at power-on; not inlined, so
+/// tools/slowcheck.py can tell its register tables (unnamed constants, in the slow flash) from the hot ones.
+#[inline(never)]
+fn start_chips(r: &mut Radio) {
+    for n in 0..2u8 {
+        let found = r.wire.detect(&mut r.cs[n as usize]).is_some();
+        if found {
+            r.chips |= 1 << n;
+            r.chip(n).init();
+            #[cfg(feature = "tx")]
+            {
+                r.tx.reg3b[n as usize] = r.chip(n).read(0x3B); // TX-7's reference
+            }
+            r.chip(n).sleep(); // until the engines give it a slot
+        }
+        check(Source::Radio, if n == 0 { CHECK_BK0 } else { CHECK_BK1 }, found);
+    }
+}
+
 #[embassy_executor::task]
 pub async fn task() {
     for p in AMP_EN {
@@ -1638,20 +1657,7 @@ pub async fn task() {
     let mut s = Steps::default();
     r.path.safe(now_ms() as u32, &mut s);
     r.run(&s).await;
-    // Each chip: find the read alignment from its ID, then stock's start-up.
-    for n in 0..2u8 {
-        let found = r.wire.detect(&mut r.cs[n as usize]).is_some();
-        if found {
-            r.chips |= 1 << n;
-            r.chip(n).init();
-            #[cfg(feature = "tx")]
-            {
-                r.tx.reg3b[n as usize] = r.chip(n).read(0x3B); // TX-7's reference
-            }
-            r.chip(n).sleep(); // until the engines give it a slot
-        }
-        check(Source::Radio, if n == 0 { CHECK_BK0 } else { CHECK_BK1 }, found);
-    }
+    start_chips(&mut r);
     r.live.chips = r.chips;
     for (i, sl) in r.live.slots.iter_mut().enumerate() {
         (sl.freq, sl.rssi) = (r.slots[i].freq, -121);

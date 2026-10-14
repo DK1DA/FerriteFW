@@ -22,7 +22,8 @@ struct Hw {
     rx: Pin,
 }
 
-const HW: [Hw; UART_COUNT] = [
+// A `static`: the receive interrupt reads it, and only named statics stay in the fast flash (memory.x).
+static HW: [Hw; UART_COUNT] = [
     Hw { base: USART1, en_reg: CRM_APB2EN, en_bit: CRM_APB2_USART1, apb2: true, irq: irq::USART1, tx: pin(GPIOA, 9), rx: pin(GPIOA, 10) },
     Hw { base: USART3, en_reg: CRM_APB1EN, en_bit: CRM_APB1_USART3, apb2: false, irq: irq::USART3, tx: pin(GPIOB, 10), rx: pin(GPIOB, 11) },
     Hw { base: UART4, en_reg: CRM_APB1EN, en_bit: CRM_APB1_UART4, apb2: false, irq: irq::UART4, tx: pin(GPIOC, 10), rx: pin(GPIOC, 11) },

@@ -6,7 +6,9 @@ use crate::hal::{clock, gpio, sys, time, tone};
 
 // RF: all active-high path selects, plus the PA drive (DAC2 output, held at 0 V as a GPIO). Only the Radio
 // task raises a receive path; no transmit path is raised in a build without the tx feature.
-pub const RF_PINS: [Pin; 7] = [
+// The pin tables are `static`s, not `const`s: the safe state and the Radio task read them, and only named statics
+// stay in the fast flash (unnamed constants go to the slow part: firmware/memory.x).
+pub static RF_PINS: [Pin; 7] = [
     pin(GPIOB, 0),  // VHF RX
     pin(GPIOB, 1),  // VHF TX
     pin(GPIOE, 12), // UHF RX
@@ -18,12 +20,12 @@ pub const RF_PINS: [Pin; 7] = [
 /// The band relay (Omron G6K): energised for chip 1's HF path below 64 MHz. Only the Radio task's path machine
 /// (ferrite_core::path) moves it.
 pub const RELAY: Pin = pin(GPIOC, 4);
-pub const BK_CS: [Pin; 2] = [pin(GPIOE, 8), pin(GPIOE, 15)]; // BK4829 #0 (VHF), #1 (UHF/HF)
+pub static BK_CS: [Pin; 2] = [pin(GPIOE, 8), pin(GPIOE, 15)]; // BK4829 #0 (VHF), #1 (UHF/HF)
 pub const BK_SCK: Pin = pin(GPIOE, 10);
 pub const BK_SDA: Pin = pin(GPIOE, 11);
 
 // Audio
-pub const AMP_EN: [Pin; 2] = [pin(GPIOB, 8), pin(GPIOE, 4)]; // (L) both
+pub static AMP_EN: [Pin; 2] = [pin(GPIOB, 8), pin(GPIOE, 4)]; // (L) both
 /// PA15: high in stock's receive, low while its crossband repeater transmits: believed to route the receiving
 /// chip's audio into the transmitting chip's mic input (`analysis/crossband_repeat.md` §5; to confirm on the
 /// bench). Driven only through the path machine's `Act::RepeatAudio` (XB-6, XB-8).
@@ -88,7 +90,7 @@ pub const KEY_SIDE2: Pin = pin(GPIOE, 6); // PTT, current VFO (connector PTT, L)
 pub const ENC_A: Pin = pin(GPIOB, 4);
 pub const ENC_B: Pin = pin(GPIOB, 5);
 
-const SAFE_LOW: [Pin; 9] = [
+static SAFE_LOW: [Pin; 9] = [
     RELAY,
     SI_IN[0],
     SI_IN[1],

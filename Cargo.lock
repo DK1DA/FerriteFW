@@ -1225,7 +1225,7 @@ dependencies = [
 [[package]]
 name = "uafsk"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=af1275795ac86415c4a5b7184345e4beb9cd96fc#af1275795ac86415c4a5b7184345e4beb9cd96fc"
+source = "git+https://github.com/infamy/udigimodes?rev=9d11d0f4ea006042f7485eb8c99910442130bdc2#9d11d0f4ea006042f7485eb8c99910442130bdc2"
 dependencies = [
  "udsp",
 ]
@@ -1233,7 +1233,7 @@ dependencies = [
 [[package]]
 name = "uaprs"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=af1275795ac86415c4a5b7184345e4beb9cd96fc#af1275795ac86415c4a5b7184345e4beb9cd96fc"
+source = "git+https://github.com/infamy/udigimodes?rev=9d11d0f4ea006042f7485eb8c99910442130bdc2#9d11d0f4ea006042f7485eb8c99910442130bdc2"
 dependencies = [
  "udsp",
 ]
@@ -1241,7 +1241,7 @@ dependencies = [
 [[package]]
 name = "udsc"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=af1275795ac86415c4a5b7184345e4beb9cd96fc#af1275795ac86415c4a5b7184345e4beb9cd96fc"
+source = "git+https://github.com/infamy/udigimodes?rev=9d11d0f4ea006042f7485eb8c99910442130bdc2#9d11d0f4ea006042f7485eb8c99910442130bdc2"
 dependencies = [
  "uafsk",
 ]
@@ -1249,7 +1249,7 @@ dependencies = [
 [[package]]
 name = "udsp"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=af1275795ac86415c4a5b7184345e4beb9cd96fc#af1275795ac86415c4a5b7184345e4beb9cd96fc"
+source = "git+https://github.com/infamy/udigimodes?rev=9d11d0f4ea006042f7485eb8c99910442130bdc2#9d11d0f4ea006042f7485eb8c99910442130bdc2"
 
 [[package]]
 name = "ufmt"
@@ -1287,7 +1287,7 @@ checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
 [[package]]
 name = "upocsag"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=af1275795ac86415c4a5b7184345e4beb9cd96fc#af1275795ac86415c4a5b7184345e4beb9cd96fc"
+source = "git+https://github.com/infamy/udigimodes?rev=9d11d0f4ea006042f7485eb8c99910442130bdc2#9d11d0f4ea006042f7485eb8c99910442130bdc2"
 
 [[package]]
 name = "uradio-bus"

@@ -104,8 +104,9 @@ pub fn beep_end<B: Bus>(bk: &mut Bk4829<B>, gain: u16, asleep: bool) {
     }
 }
 
-/// The weather channels, 162.400-162.550 MHz (WX-1).
-pub const WX: core::ops::RangeInclusive<Freq10> = mhz(162) + 40_000..=mhz(162) + 55_000;
+/// The weather channels, 162.400-162.550 MHz (WX-1). A `static`: the Radio task checks it every tick, and only named
+/// statics stay in the firmware's fast flash (unnamed constants go to the slow part: firmware/memory.x).
+pub static WX: core::ops::RangeInclusive<Freq10> = mhz(162) + 40_000..=mhz(162) + 55_000;
 
 /// The modem in its NOAA SAME receive mode (DEC-19; BK4819 application note, nobody's firmware uses it yet, so
 /// every value is bench-confirm, roadmap 6b): REG_58 receive mode 000 with bandwidth 010 and receive gain 3 (bits

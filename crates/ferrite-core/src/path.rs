@@ -54,8 +54,21 @@ impl Sel {
         Sel::rx(f).to_tx()
     }
 
+    fn to_rx(self) -> Sel {
+        match self {
+            Sel::VhfRx | Sel::VhfTx => Sel::VhfRx,
+            Sel::UhfRx | Sel::UhfTx => Sel::UhfRx,
+            Sel::HfRx | Sel::HfTx => Sel::HfRx,
+        }
+    }
+
     fn to_tx(self) -> Sel {
-        Sel::ALL[self as usize | 1]
+        // A match, not `ALL[..]`: no table to read (unnamed constant tables sit in the firmware's slow flash).
+        match self {
+            Sel::VhfRx | Sel::VhfTx => Sel::VhfTx,
+            Sel::UhfRx | Sel::UhfTx => Sel::UhfTx,
+            Sel::HfRx | Sel::HfTx => Sel::HfTx,
+        }
     }
 
     pub fn is_tx(self) -> bool {
@@ -366,7 +379,7 @@ impl Path {
             return Err(Blocked::Keyed);
         }
         let rx = match rx {
-            Rx::Bk(s) if s.is_tx() => Rx::Bk(Sel::ALL[s as usize & !1]), // never a TX select from here
+            Rx::Bk(s) if s.is_tx() => Rx::Bk(s.to_rx()), // never a TX select from here
             r => r,
         };
         if rx == self.rx {

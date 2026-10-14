@@ -73,7 +73,8 @@ pub const DUTY_FULL_MS: u32 = 120_000;
 pub const DUTY_DRAIN_DIV: u32 = 4;
 /// How fast keyed time fills the bucket per power level, in quarters: Low 1/4, Mid 1/2, High 1 (decided Oct 7,
 /// 2026; weights to confirm on the bench). Continuous transmit from cold: High 2 min, Mid 4 min, Low 8 min.
-pub const DUTY_WEIGHT: [u32; 3] = [1, 2, 4];
+/// A `static`: read at key-up by the Radio task, and only named statics stay in the firmware's fast flash.
+pub static DUTY_WEIGHT: [u32; 3] = [1, 2, 4];
 
 /// Why the sequencer unkeyed by itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

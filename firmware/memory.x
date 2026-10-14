@@ -44,10 +44,16 @@ ASSERT(__efast_gap2 <= ORIGIN(FLASH) + 0x7E0, ".fast_gap2 runs into the model ta
 /* The slow part of flash. The AT32F403A runs code at full speed only from the first 256 KB (0x08000000-0x0803FFFF,
  * zero-wait; docs/firmware-design.md, "MCU flash"). Everything that has to be fast stays in .text and .rodata at
  * the front: the vector table, interrupt handlers, the executors and time driver, the radio, DSP, input, storage,
- * link and GPS tasks, the drivers (the display bus too), core and compiler_builtins, the fault paths.
+ * link and GPS tasks, the drivers (the display bus too), core and compiler_builtins, the fault paths, and the
+ * named `static` tables they read.
  *
  * After them, in this order:
- *  - .slow_rodata: font and logo data (tools/mkassets.py), `slow!()` text and the info tables.
+ *  - .slow_rodata: every unnamed constant (all literal strings, `const` tables and match tables: the rule since
+ *    Oct 13, 2026), the UI's jump tables, font and logo data (tools/mkassets.py) and the other explicit
+ *    `.slow_rodata` statics. Fast code may read from here: a wait state or two per read, nothing more (the firmware
+ *    never writes the MCU flash, and no DMA reads it). Text read once per message is fine; a table read per
+ *    sample, per interrupt or per pass of the Radio task must be a named `static` instead, which stays fast.
+ *    tools/slowcheck.py fails on a table read from interrupt context unless its allow-list says why.
  *  - .slow_text: the UI's code, run only by the thread-mode UI task (drawing is bound by the bit-banged display
  *    bus): every function of ferrite-app and ferrite-ui, including generic instances made for them (their v0
  *    mangled names carry the crate as `11ferrite_app` / `10ferrite_ui`), and the UI task itself. Nothing on an
@@ -78,6 +84,16 @@ SECTIONS
   {
     __sslow_rodata = .;
     *(.slow_rodata .slow_rodata.*);
+    /* Every unnamed constant: with LTO and one codegen unit, each `const`, literal string and table the compiler
+     * doesn't name is `.rodata..Lanon.<hash>.<n>`, with no crate in the name to sort by, so they all come here.
+     * Named `static`s keep their own `.rodata.<symbol>` sections and stay fast: a table read per sample, per
+     * interrupt or per pass of the Radio task must be a `static` (tools/slowcheck.py fails on a table read from
+     * interrupt context in this section). */
+    *(.rodata..Lanon.*);
+    /* The UI's match jump tables (the code that reads them is slow anyway). */
+    *(.rodata..Lswitch.table.*11ferrite_app*);
+    *(.rodata..Lswitch.table.*10ferrite_ui*);
+    *(.rodata..Lswitch.table.*7ferrite5tasks2ui*);
     . = ALIGN(4);
     __eslow_rodata = .;
   } > FLASH
@@ -90,9 +106,11 @@ SECTIONS
     *(.text.*13ferrite_store*);
     *(.text.*7ferrite5tasks2ui*);
     /* The APRS task (run by the UI task) and the APRS library it parses and builds frames with; the modem
-     * (uafsk) stays fast: the DSP task runs it. */
+     * (uafsk) stays fast: the DSP task runs it. `5uaprs?*`, not `5uaprs*`: a core generic made for uaprs ends in
+     * `5uaprs` (its crate suffix) and LLVM's function merging can hand that one copy to fast callers (the Radio and
+     * DSP tasks' `RangeInclusive::contains`), so those stay fast. */
     *(.text.*7ferrite5tasks4aprs*);
-    *(.text.*5uaprs*);
+    *(.text.*5uaprs?*);
     /* The tone hint (TSRCH-12, -13): the Radio task's step for it and the heard-tone decode, at most once a
      * receive tick, never from an interrupt. */
     *(.text.*8tonehint*);

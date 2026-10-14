@@ -97,7 +97,8 @@ pub fn band_range(f: Freq10) -> Range<'static> {
     use crate::freq::mhz;
     // lo, hi, step (10 Hz units): HF, 6 m, airband, 2 m and VHF, marine, 1.25 m, UHF. 5 kHz on the VHF bands
     // covers both the 15 kHz and 12.5 kHz channel plans' usual frequencies (146.520, 145.500).
-    const BANDS: [(Freq10, Freq10, Freq10); 7] = [
+    // A `static`: the Radio task reads it, and only named statics stay in the firmware's fast flash (memory.x).
+    static BANDS: [(Freq10, Freq10, Freq10); 7] = [
         (mhz(1) + 80_000, mhz(30), 500),
         (mhz(50), mhz(54), 500),
         (mhz(108), mhz(137), 2_500),

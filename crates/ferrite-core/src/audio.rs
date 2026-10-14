@@ -30,15 +30,17 @@ pub const BLOCK_OUT: usize = BLOCK_IN / DECIM;
 /// Each half of the DAC's DMA buffer: 2.7 ms at 48 kHz.
 pub const BLOCK_DAC: usize = 128;
 
+const N_TAPS: usize = 15;
 /// The low-pass ahead of the 4:1 step: 15 taps (Blackman-windowed sinc, 4.5 kHz), Q15, summing to 1. Flat to
 /// within 1.1 dB across AFSK's tones (1200 Hz -0.3 dB, 2200 Hz -1.1 dB); what folds back onto 0-3 kHz (9 to
-/// 15 kHz) is 25 dB down or more.
-const TAPS: [i32; 15] = [0, -15, 43, 515, 1849, 4063, 6299, 7260, 6299, 4063, 1849, 515, 43, -15, 0];
+/// 15 kHz) is 25 dB down or more. A `static`: read per sample by the DSP task, and only named statics stay in
+/// the firmware's fast flash (unnamed constants go to the slow part: firmware/memory.x).
+static TAPS: [i32; N_TAPS] = [0, -15, 43, 515, 1849, 4063, 6299, 7260, 6299, 4063, 1849, 515, 43, -15, 0];
 
 /// The ADC side: DC removal, the low-pass and the 4:1 step, one block at a time. 36 bytes.
 pub struct Decim {
     /// The last [`TAPS`] inputs, centred, as a ring.
-    hist: [i16; TAPS.len()],
+    hist: [i16; N_TAPS],
     at: u8,
     /// Inputs since the last output.
     phase: u8,
@@ -54,7 +56,7 @@ impl Default for Decim {
 
 impl Decim {
     pub const fn new() -> Self {
-        Decim { hist: [0; TAPS.len()], at: 0, phase: 0, dc_q16: 2048 << 16 }
+        Decim { hist: [0; N_TAPS], at: 0, phase: 0, dc_q16: 2048 << 16 }
     }
 
     /// ADC counts (0-4095) in, decoder samples out through `out`, about one in four. The ADC's 12 bits become
@@ -65,7 +67,7 @@ impl Decim {
         self.dc_q16 += (x - self.dc_q16) >> 11;
         let s = ((x - self.dc_q16) >> 12).clamp(-32768, 32767) as i16;
         self.hist[self.at as usize] = s;
-        self.at = if self.at as usize + 1 == TAPS.len() { 0 } else { self.at + 1 };
+        self.at = if self.at as usize + 1 == N_TAPS { 0 } else { self.at + 1 };
         self.phase += 1;
         if self.phase as usize == DECIM {
             self.phase = 0;
@@ -74,7 +76,7 @@ impl Decim {
             let mut j = self.at as usize;
             for &t in TAPS.iter() {
                 acc += t * self.hist[j] as i32;
-                j = if j + 1 == TAPS.len() { 0 } else { j + 1 };
+                j = if j + 1 == N_TAPS { 0 } else { j + 1 };
             }
             out((acc >> 15).clamp(-32768, 32767) as i16);
         }
