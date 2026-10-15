@@ -57,11 +57,16 @@ def entry_ranges(t):
     tune(t)
     u = t.keys("1 0 STAR 5 MENU")
     t.check(u.toast and u.toast["head"] == "< 18 MHz" and "MENU 0 3 4" in u.toast["body"], "10.5 MHz", u.toast)
-    for f, mhz in (("7 0 0", "700.0"), ("1 4 0 0", "1400.0")):
-        tune(t)
-        u = t.keys(f"{f} MENU")
-        t.check(u.toast and u.toast["head"] == "Can't tune" and "756-1300" in u.toast["body"], f"{f}: refused", u.toast)
-        t.check(f" {mhz}" not in t.slot("A"), f"{f}: not tuned there", t.slot("A"))
+    tune(t)
+    u = t.keys("7 0 0 MENU")
+    t.check(u.toast and u.toast["head"] == "Can't tune" and "756-1300" in u.toast["body"], "7 0 0: refused", u.toast)
+    t.check(" 700.0" not in t.slot("A"), "7 0 0: not tuned there", t.slot("A"))
+    # Above 1300 MHz can't be typed (decision 154): * * exists only after 100-130, so after 140 the second * is
+    # ignored and the entry stays "140.".
+    tune(t)
+    u = t.keys("1 4 0 STAR STAR")
+    t.eq((u.id, u["entry"]["args"][0] if u["entry"] else None), ("Entry", "140."), "1 4 0 * *: the second * ignored")
+    t.home()
     for f, want in (("1 8", "18.00000"), ("6 2 9 STAR 9 9", "629.99000"), ("7 5 6", "756.00000")):
         t.home()
         u = t.keys(f"{f} MENU")

@@ -20,6 +20,8 @@ def hint_bars_and_names_fit(t):
     for seq in WALK:
         t.home()
         u = t.keys(seq, settle=0.25)
+        if not u.hints:  # a hold digit's naming popup hides the hint bar for a moment (the radio, not the sim)
+            u = t.wait(lambda u: u.hints, timeout=3, what=f"{seq}: the hint bar", every=0.1)
         seen.append(f"{u.id}:{u.title}")
         t.check(1 <= len(u.hints) <= 3, f"{seq}: one to three hint pairs", u.hints)
         keys = u.hint_keys()

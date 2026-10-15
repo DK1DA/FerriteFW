@@ -24,6 +24,8 @@ def scope_opens_and_closes(t):
     f0 = t.ui().active["freq"]
     u = t.press("1", long=True)
     t.eq(u.id, "Scope", "hold 1")
+    if not u.hints:  # the "Band scope" naming popup hides the hint bar for a moment
+        u = t.wait(lambda u: u.hints, timeout=3, what="the scope's hint bar", every=0.1)
     t.eq(u.hints, [("<>", "Marker"), ("SIDE1", "Listen"), ("OK", "Go")], "the scope's keys")
     u = t.keys("BACK")
     t.eq(u.id, "Home", "BACK")
