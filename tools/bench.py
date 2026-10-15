@@ -86,6 +86,7 @@ import argparse
 import atexit
 import contextlib
 import random
+import statistics
 import datetime
 import fnmatch
 import hashlib
@@ -1698,7 +1699,7 @@ def sweep_tests(ex, add, cfg=None):
                                              and abs(x["err_hz"]) <= tol, _f(x.get("hz"), "{:.2f} Hz")) for x in std],
                     f"{len(std)} CTCSS tones {std[0]['label']}-{std[-1]['label']} Hz, worst {_f(max(errs) if errs else None, '{:.3f}')} Hz off")
                 devs = [x["dev"] for x in std if x.get("dev")]
-                spread = (max(devs) / min(devs) - 1) if devs and len(devs) == len(std) else None
+                spread = _median_spread(devs) if devs and len(devs) == len(std) else None
                 add("ctcss_level" + sfx, [_chk(f"every CTCSS at one deviation (±{sc['spread']:.0%})",
                                                spread is not None and spread <= sc["spread"], _f(spread, "{:.1%}"))],
                     f"{len(devs)} CTCSS tones at {_f(min(devs) if devs else None)}-{_f(max(devs) if devs else None)} Hz deviation")
@@ -1717,7 +1718,7 @@ def sweep_tests(ex, add, cfg=None):
             std = [x for x in items if not x.get("typed")]
             devs = [x["dev"] for x in std if x.get("dev")]
             if std:
-                spread = (max(devs) / min(devs) - 1) if devs and len(devs) == len(std) else None
+                spread = _median_spread(devs) if devs and len(devs) == len(std) else None
                 add("dcs_level" + sfx, [_chk(f"every DCS code at one deviation (±{sc['spread']:.0%})",
                                              spread is not None and spread <= sc["spread"], _f(spread, "{:.1%}"))],
                     f"{len(devs)} DCS codes at {_f(min(devs) if devs else None)}-{_f(max(devs) if devs else None)} Hz deviation")
@@ -1778,6 +1779,13 @@ def sweep_tests(ex, add, cfg=None):
                 prev = m
             add("afsk_level_steps" + sfx, cs, "AFSK " + ", ".join(f"{x['level']} % {_f(x.get('mean'))} Hz"
                                                                for x in sorted(items, key=lambda x: x["level"])))
+
+
+def _median_spread(devs):
+    """The largest distance of any deviation from the median, as a fraction of it: "every one at one deviation
+    (±N %)" read as ±N % around the typical value (max/min - 1 is about twice as strict)."""
+    m = statistics.median(devs)
+    return max(abs(d - m) for d in devs) / m if m else None
 
 
 def rule_tests(session, runs):
