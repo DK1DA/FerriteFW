@@ -1,6 +1,7 @@
 """Home: the cards, their chips, the layouts, shortcuts, quick mute and the quick menu (chapter 6, HOME-*)."""
 import time
 
+from . import squelch
 from .core import test
 
 LAYOUTS = ["Watch", "Single + scope", "Watch + activity"]
@@ -132,22 +133,35 @@ def hash_opens_status(t):
     t.check(u.rows and u.rows[0]["name"] == "Transmit", "the Status page's rows", u.rows[:2])
 
 
-@test("HOME-10", "WATCH-6", pages=("Home", "Status"))
+@test("HOME-10", "WATCH-6", pages=("Home", "Quick", "Status"))
 def hash_pauses_watch_while_receiving(t):
-    """While a watched slot is receiving the hint bar says "# Pause" and # pauses watch instead of Status."""
+    """While a watched slot is receiving the hint bar says "# Pause" and # pauses watch instead of Status. Slot B is
+    made to receive by opening its squelch fully (level 0: the noise floor opens it), so no signal is needed."""
     t.set("0 1 1", "A+B+C")
-    t.home()
-    u = t.wait(lambda u: any(c["rx"] and not c["active"] for c in u.d["cards"]), timeout=20,
-               what="a watched slot receiving", every=0.2)
-    if u.hint("#") != "Pause":
-        u = t.ui(0)
-    t.need(any(c["rx"] and not c["active"] for c in u.d["cards"]), "the receiving slot went quiet")
-    t.eq(u.hint("#"), "Pause", "the hint bar")
-    u = t.keys("HASH")
-    t.eq(u.id, "Home", "# stays home")
-    t.check(u.toast and "paused" in u.toast["head"].lower(), "watch paused", u.toast)
-    st = t.keys("MENU 0 0")
-    t.has(st.row("Watch")["value"], "paused", "Status: Watch")
+    was = t.home().state["active"]
+    t.cmd("slot B active")
+    v0 = squelch.level(t)
+    try:
+        squelch.set_level(t, "0")
+        t.cmd("slot A active")
+        t.home()
+        u = t.wait(lambda u: any(c["rx"] and not c["active"] for c in u.d["cards"]), timeout=10,
+                   what="a watched slot receiving", every=0.2)
+        if u.hint("#") != "Pause":
+            u = t.ui(0)
+        t.need(any(c["rx"] and not c["active"] for c in u.d["cards"]), "the receiving slot went quiet")
+        t.eq(u.hint("#"), "Pause", "the hint bar")
+        u = t.keys("HASH")
+        t.eq(u.id, "Home", "# stays home")
+        t.check(u.toast and "paused" in u.toast["head"].lower(), "watch paused", u.toast)
+        st = t.keys("MENU 0 0")
+        t.has(st.row("Watch")["value"], "paused", "Status: Watch")
+    finally:
+        t.home()
+        t.cmd("slot B active")
+        squelch.set_level(t, v0)
+        t.cmd(f"slot {was} active")
+        t.home()
 
 
 @test("HOME-11", "NAV-5", pages=("Home",))
