@@ -67,10 +67,14 @@ impl Radio {
             DebugReq::TxTest(_) => DebugAns::Refused("the receive-only build has no transmit: txtest needs a tx or tx-dry build"),
             DebugReq::Si { cmd, n, reply } => {
                 let (n, rn) = ((n as usize).min(8), (reply as usize).clamp(1, 16));
+                // TERM-24: powered down (and in reset) outside FM broadcast and HF mode: nothing is sent then.
+                if self.si.mode().is_none() {
+                    return DebugAns::Refused("the SI4732 is powered down: FM broadcast or HF mode powers it up");
+                }
                 let mut data = [0u8; 16];
                 match self.si.command(&cmd[..n], &mut data[..rn], &mut BusyDelay) {
                     Ok(()) => DebugAns::Si { data, n: rn as u8 },
-                    Err(_) => DebugAns::Refused("the SI4732 didn't answer: it is held in reset until FM broadcast or HF mode starts it"),
+                    Err(_) => DebugAns::Refused("the SI4732 didn't answer the command"),
                 }
             }
             _ => DebugAns::Refused("not a Radio task request"),

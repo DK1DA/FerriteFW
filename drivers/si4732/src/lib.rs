@@ -345,6 +345,15 @@ impl<B: I2c> Si4732<B> {
         Ok(Some(Tune { freq: (r[2] as u16) << 8 | r[3] as u16, rssi: r[4], snr: r[5], valid: r[1] & 1 != 0 }))
     }
 
+    /// Stops a seek in progress (FM_TUNE_STATUS with CANCEL and INTACK, AN332): the receiver stays where the seek
+    /// had got to, which is returned. Harmless when no seek runs.
+    pub fn seek_cancel(&mut self, delay: &mut impl Delay) -> Result<Tune, Error> {
+        let mut r = [0u8; 8];
+        let op = self.op(FM_TUNE_STATUS)?;
+        self.command(&[op, 0x03], &mut r, delay)?; // CANCEL | INTACK
+        Ok(Tune { freq: (r[2] as u16) << 8 | r[3] as u16, rssi: r[4], snr: r[5], valid: r[1] & 1 != 0 })
+    }
+
     /// Signal quality now.
     pub fn rsq(&mut self, delay: &mut impl Delay) -> Result<Rsq, Error> {
         let mut r = [0u8; 6];

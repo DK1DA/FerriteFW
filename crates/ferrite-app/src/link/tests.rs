@@ -894,9 +894,10 @@ fn remote_keys_never_transmit() {
     assert!(!pc.app.remote_in, "never left on");
 }
 
-/// LINK-19, DISP-15.1: a remote key on a dark screen only wakes it, as the radio's keys do.
+/// LINK-19, DISP-15.1 (decision 162): a remote key on a dark screen lights it and acts (the PC or phone can't see
+/// the screen is dark), unlike the radio's own keys.
 #[test]
-fn remote_key_wakes_first() {
+fn remote_key_wakes_and_acts() {
     let mut pc = Pc::new(true);
     pc.app.set.backlight = 1;
     pc.app.backlight_out();
@@ -904,10 +905,8 @@ fn remote_key_wakes_first() {
     assert!(pc.app.dark());
     assert!(pc.ui().contains(" dark=1"));
     pc.keys("MENU");
-    assert_eq!(pc.app.screen(), Screen::Home, "woken, nothing else");
     assert!(!pc.app.dark());
-    pc.keys("MENU");
-    assert!(matches!(pc.app.screen(), Screen::Quick(_)));
+    assert!(matches!(pc.app.screen(), Screen::Quick(_)), "woken and acted");
 }
 
 /// LINK-19, TERM-37: the readback's lines on several screens: the screen line first, the hints last, the status

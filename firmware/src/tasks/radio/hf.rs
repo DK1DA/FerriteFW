@@ -6,6 +6,7 @@ impl Radio {
     /// HF mode on, retuned or off (HF-3, HF-4, HF-10, HF-11): the SI4732 below 18 MHz and for AM up to 30 MHz,
     /// chip 1 through the energised relay otherwise. Watch, scan and the other chip pause meanwhile (HF-8).
     pub(super) async fn hf(&mut self, freq: Freq10, mode: u8, on: bool) {
+        self.seek_cancel(); // HF-31: a retune or off ends a seek
         if !on {
             if self.hf.take().is_some_and(|h| h.si) {
                 let _ = broadcast(&mut self.si, BroadcastCmd::Off).await;
@@ -70,25 +71,72 @@ impl Radio {
         }
     }
 
-    /// HF-31: the SI4732's own seek from where it is (AM, below 30 MHz); the frequency it stops on is kept.
-    pub(super) async fn hf_seek(&mut self, up: bool) {
-        let Some(h) = self.hf.filter(|h| h.si) else { return };
-        let d = &mut BusyDelay;
-        if self.si.seek_start(up, d).is_err() {
+    /// HF-31: the SI4732's own seek from where it is (AM, below 30 MHz), started here and polled by the tick
+    /// ([`Radio::seek_poll`]): the task keeps taking commands meanwhile (MODE-7), and the frequency it stops on is
+    /// kept. A seek already running is cancelled first.
+    pub(super) fn hf_seek(&mut self, up: bool) {
+        self.seek_cancel();
+        if self.hf.is_none_or(|h| !h.si) || self.si.seek_start(up, &mut BusyDelay).is_err() {
             return;
         }
-        let t0 = now_ms();
-        let found = loop {
-            match self.si.tune_poll(d) {
-                Ok(Some(t)) => break Some(t.freq),
-                Ok(None) if now_ms() - t0 < 15_000 => Timer::after_millis(20).await,
-                _ => break None,
-            }
-        };
-        if let Some(khz) = found {
-            self.hf = Some(HfOn { freq: khz as Freq10 * 100, ..h });
-            log(b"hf seek khz ", khz as u32);
+        let now = now_ms() as u32;
+        self.seek = Some(SiSeek { hf: true, t0: now, poll_at: now.wrapping_add(SEEK_POLL_MS) });
+        log(b"hf seek start, up ", up as u32);
+    }
+
+    /// FM broadcast's seek (BCR-18), the same way: started here, polled by the tick.
+    pub(super) async fn bcast_seek(&mut self, up: bool) {
+        self.seek_cancel();
+        if self.hf.is_some() || broadcast(&mut self.si, BroadcastCmd::Seek { up }).await.is_err() {
+            return log(b"si FAILED, cmd ", 3);
         }
-        self.hf_poll();
+        let now = now_ms() as u32;
+        self.seek = Some(SiSeek { hf: false, t0: now, poll_at: now.wrapping_add(SEEK_POLL_MS) });
+    }
+
+    /// A seek running is stopped where it is (FM_TUNE_STATUS with CANCEL): any HF or broadcast command, a new seek,
+    /// power off.
+    pub(super) fn seek_cancel(&mut self) {
+        if self.seek.take().is_some() && self.si.mode().is_some() {
+            let _ = self.si.seek_cancel(&mut BusyDelay);
+            log(b"si seek cancelled", 0);
+        }
+    }
+
+    /// The tick's turn for a seek (every [`SEEK_POLL_MS`]): done, it is kept as HF mode's frequency or the
+    /// broadcast's station; with nothing found in [`SEEK_MAX_MS`] it is cancelled where it got to.
+    pub(super) fn seek_poll(&mut self) {
+        let Some(sk) = self.seek else { return };
+        let now = now_ms() as u32;
+        if now.wrapping_sub(sk.poll_at) > u32::MAX / 2 {
+            return; // not due
+        }
+        let d = &mut BusyDelay;
+        let found = match self.si.tune_poll(d) {
+            Ok(None) if now.wrapping_sub(sk.t0) < SEEK_MAX_MS => {
+                self.seek = Some(SiSeek { poll_at: now.wrapping_add(SEEK_POLL_MS), ..sk });
+                return;
+            }
+            Ok(None) => {
+                log(b"si seek timed out", 0);
+                self.si.seek_cancel(d).ok().map(|t| t.freq)
+            }
+            Ok(Some(t)) => Some(t.freq),
+            Err(_) => None,
+        };
+        self.seek = None;
+        if sk.hf {
+            if let (Some(h), Some(khz)) = (self.hf.filter(|h| h.si), found) {
+                self.hf = Some(HfOn { freq: khz as Freq10 * 100, ..h });
+                log(b"hf seek khz ", khz as u32);
+            }
+            self.hf_poll();
+        } else if let Some(f) = found.filter(|_| self.hf.is_none()) {
+            self.fm = Some(FmRx { freq: f, rds: si4732::rds::Rds::init(), poll_at: 0, rds_turn: false });
+            if matches!(self.live.mode, ModeLive::Fm { .. }) {
+                self.live.mode = ModeLive::Off; // nothing of the last station's RDS carries over
+            }
+            log(b"si seek ok, 10 khz ", f as u32);
+        }
     }
 }

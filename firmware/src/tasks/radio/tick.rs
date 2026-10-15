@@ -68,6 +68,7 @@ impl Radio {
         #[cfg(feature = "tx")]
         self.ptt_seen_released();
         self.mcu_temp();
+        self.seek_poll(); // HF-31: a seek runs here, never inside a command (MODE-7)
         self.fm_poll();
         // SQL-1: the calibration's squelch tables, once the UI task has read them: every tuned chip again.
         if let Some(c) = crate::chan::SQ_CAL.try_take() {
@@ -83,6 +84,8 @@ impl Radio {
         }
         #[cfg(feature = "tx")]
         self.vox_poll();
+        #[cfg(feature = "tx")]
+        self.dial_step(); // DTMF-1: the dialled sequence's next step
         if self.hf.is_some() {
             // Keyed from HF mode (HF-23): the keyed tick as from home (TX-30 backstop, TX-31 duty limit, TX-32
             // battery under load); the HF receiver's report waits for the unkey (TX audit M5).
@@ -90,7 +93,9 @@ impl Radio {
             if self.path.keyed().is_some() {
                 return self.tx_tick(now_ms() as u32).await;
             }
-            self.hf_poll();
+            if self.seek.is_none() {
+                self.hf_poll();
+            }
             return;
         }
         // The crossband repeater owns both chips while it runs (XB-13: no watch, scan or Battery Save); local PTT

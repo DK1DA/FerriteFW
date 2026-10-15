@@ -192,14 +192,12 @@ struct ChUndo {
     rx: Freq10,
 }
 
-/// Commands waiting for the Radio task: single commands in a ring, and whole slots to send, which are made
-/// from the slot when popped. A slot's frequency and nine settings are ten commands; sending a slot again
-/// before it has gone out costs nothing, so start-up (three slots) and fast channel stepping never overflow
-/// the ring.
+/// Commands waiting for the Radio task: single commands in [`ferrite_core::cmdq`]'s queue (order kept, a newer
+/// setting replacing a waiting one, MODE-6), and whole slots to send, which are made from the slot when popped. A
+/// slot's frequency and nine settings are ten commands; sending a slot again before it has gone out costs nothing,
+/// so start-up (three slots) and fast channel stepping never overflow the queue.
 struct Outbox {
-    q: [Option<RadioCmd>; 16],
-    head: u8,
-    len: u8,
+    q: ferrite_core::cmdq::CmdRing<16>,
     /// Slots whose full state is still to send, a bit each.
     sync: u8,
     /// The slot being sent and its next item (0 the frequency, then [`slot::params`], then the end tone and tail).
@@ -209,12 +207,8 @@ struct Outbox {
 
 impl Outbox {
     fn push(&mut self, c: RadioCmd) {
-        if self.len as usize == self.q.len() {
-            self.pop(); // full: the oldest goes (the caller drains after every input, so this is a backstop)
-        }
-        let i = (self.head as usize + self.len as usize) % self.q.len();
-        self.q[i] = Some(c);
-        self.len += 1;
+        // Full only if the Radio task stopped taking commands for long: the least important waiting one goes.
+        let _ = self.q.push(c);
     }
 
     /// The whole slot goes out (again, from the start if it is being sent).
@@ -226,13 +220,7 @@ impl Outbox {
     }
 
     fn pop(&mut self) -> Option<RadioCmd> {
-        if self.len == 0 {
-            return None;
-        }
-        let c = self.q[self.head as usize].take();
-        self.head = ((self.head as usize + 1) % self.q.len()) as u8;
-        self.len -= 1;
-        c
+        self.q.pop()
     }
 }
 
@@ -450,7 +438,7 @@ impl App {
             heard: [0; SLOTS],
             monitor: 0,
             mute: 0,
-            out: Outbox { q: [None; 16], head: 0, len: 0, sync: 0, cur: NO_SLOT, step: 0 },
+            out: Outbox { q: ferrite_core::cmdq::CmdRing::new(), sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
             text: Buf::new(),
             back: [None; BACK_DEPTH],
@@ -926,8 +914,9 @@ impl App {
             self.last_input = now;
             return;
         }
-        // A dark screen: the key only wakes it, and its release and holds are ignored; PTT acts at once.
-        if self.wake(now) && !matches!(key, Key::Ptt(_)) {
+        // A dark screen: the key only wakes it, and its release and holds are ignored; PTT acts at once. A remote
+        // key (LINK-19, DISP-*) wakes it and acts too: the PC or phone can't see that the screen is dark.
+        if self.wake(now) && !matches!(key, Key::Ptt(_)) && !self.remote_in {
             self.swallow(true);
             self.keys.down(key, now);
             return;
@@ -1009,8 +998,8 @@ impl App {
     /// Knob: +1 per click clockwise.
     pub fn knob(&mut self, d: i8, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
-        if self.wake(now) {
-            return;
+        if self.wake(now) && !self.remote_in {
+            return; // a remote knob step (LINK-19) wakes and acts, as a remote key
         }
         self.last_input = now;
         self.pressed = now;

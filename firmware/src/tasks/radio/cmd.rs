@@ -129,7 +129,9 @@ impl Radio {
                 self.apply(a).await;
             }
             RadioCmd::Squelch(l) => self.param(self.active, Param::Squelch, l as i32),
+            RadioCmd::Broadcast(BroadcastCmd::Seek { up }) => self.bcast_seek(up).await,
             RadioCmd::Broadcast(b) => {
+                self.seek_cancel(); // a station, AM or off ends a seek
                 // Errors: the UI shows no station. The cable log (TERM-28) says what the SI4732 did.
                 let r = broadcast(&mut self.si, b).await;
                 // BCR-2, BCR-5: FM's live report (frequency, signal, stereo, RDS) from here on; the tick polls it.
@@ -145,7 +147,7 @@ impl Radio {
                     (BroadcastCmd::Off, _) => log(b"si off", 0),
                     (BroadcastCmd::Fm(f), true) => log(b"si fm ok, 10 khz ", f as u32),
                     (BroadcastCmd::Am(k), true) => log(b"si am ok, khz ", k as u32),
-                    (BroadcastCmd::Seek { .. }, true) => log(b"si seek ok", 0),
+                    (BroadcastCmd::Seek { .. }, true) => {} // its own arm above
                     (_, false) => log(b"si FAILED, cmd ", match b { BroadcastCmd::Fm(_) => 1, BroadcastCmd::Am(_) => 2, _ => 3 }),
                 }
                 if r.is_ok() && b != BroadcastCmd::Off {
@@ -157,7 +159,7 @@ impl Radio {
             }
             RadioCmd::BcastSlot(s) => self.bcast_slot = s,
             RadioCmd::Hf { freq, mode, on } => self.hf(freq, mode, on).await,
-            RadioCmd::HfSeek { up } => self.hf_seek(up).await,
+            RadioCmd::HfSeek { up } => self.hf_seek(up),
             RadioCmd::Shutdown => {
                 // TX-33: power off while keyed (a pass of the repeater too) unkeys first: PA drive 0, the chip out
                 // of transmit, the unkey wait, every select off, before any chip sleeps or the SI4732 is touched
@@ -172,6 +174,7 @@ impl Radio {
                 for n in 0..2u8 {
                     self.tune_chip(n, None).await;
                 }
+                self.seek_cancel();
                 let _ = broadcast(&mut self.si, BroadcastCmd::Off).await;
                 let mut s = Steps::default();
                 self.path.safe(now_ms() as u32, &mut s);
@@ -206,7 +209,7 @@ impl Radio {
                 self.tx.digits[at..at + n].copy_from_slice(&keys[..n]);
             }
             #[cfg(feature = "tx")]
-            RadioCmd::DtmfSend { len } => self.dial(len).await,
+            RadioCmd::DtmfSend { len } => self.dial(len),
             // Nothing transmits in this build.
             #[cfg(not(feature = "tx"))]
             RadioCmd::TxTones { .. }

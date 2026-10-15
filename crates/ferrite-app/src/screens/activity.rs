@@ -297,7 +297,7 @@ impl App {
             self.start_cmds(want);
             self.radio.lease_at = self.now;
         } else if want != Mode::Off && self.now.wrapping_sub(self.radio.lease_at) >= ferrite_core::lease::RENEW_MS {
-            if self.out.len == 0 {
+            if self.out.q.is_empty() {
                 self.out.push(RadioCmd::Lease); // a queued command renews it as well (MODE-3)
             }
             self.radio.lease_at = self.now;

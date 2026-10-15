@@ -72,9 +72,8 @@ def pin_screen_type(t, pin):
 
 
 def power_on_pin(t, pin):
-    """The PIN at power on: BACK first (the boot's first key can go to waking the screen; BACK on an empty entry
-    deletes nothing), then the digits and OK."""
-    t.keys("BACK")
+    """The PIN at power on: the digits and OK (a remote key on a dark screen acts as well as waking it, LINK-19,
+    decision 162, so no waking key goes first)."""
     return pin_screen_type(t, pin)
 
 

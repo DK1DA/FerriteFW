@@ -118,6 +118,21 @@ fn am_seek_and_band_checks() {
     assert!(w.contains(&vec![0x42, 0x01]));
 }
 
+/// HF-31, MODE-7.1: a seek stopped part way (a new command in HF or FM broadcast) leaves the receiver where it got
+/// to.
+#[test]
+fn seek_cancel_sends_cancel_with_intack() {
+    let mut si = Si4732::new(chip(0, u32::MAX, None), ADDR);
+    let mut d = MockDelay::default();
+    assert_eq!(si.seek_cancel(&mut d), Err(Error::WrongMode));
+    si.power_up_start(Mode::Am).unwrap();
+    si.seek_start(false, &mut d).unwrap();
+    assert_eq!(si.tune_poll(&mut d).unwrap(), None);
+    assert_eq!(si.seek_cancel(&mut d).unwrap().freq, 0x2710);
+    let w = writes(&si.release().txns);
+    assert_eq!(w.last(), Some(&vec![0x42, 0x03]), "AM_TUNE_STATUS CANCEL | INTACK");
+}
+
 #[test]
 fn errors_and_timeouts() {
     // The chip flags SET_PROPERTY.

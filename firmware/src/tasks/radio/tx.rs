@@ -293,31 +293,57 @@ impl Radio {
     }
 
     /// DTMF-1, DTMF-3: the dialled sequence on the transmission just keyed: the first digit delay, then each
-    /// symbol on and off for the speed; then the UI is told and unkeys. The Radio task waits through it (at most
-    /// 1 s + 16 x 400 ms).
-    pub(super) async fn dial(&mut self, len: u8) {
+    /// symbol on and off for the speed; then the UI is told and unkeys. Started here and stepped by the tick
+    /// ([`Radio::dial_step`], at most 1 s + 16 x 400 ms), so an unkey or power off meanwhile is taken at once
+    /// (MODE-7); it ends with the transmission.
+    pub(super) fn dial(&mut self, len: u8) {
         if self.path.keyed().is_none() {
             return;
         }
         self.tx.dialled = true;
-        let (ms, delay) = (self.tx.dtmf.0 as u64, self.tx.dtmf.1 as u64 * 10);
-        Timer::after_millis(delay).await;
-        for k in 0..(len as usize).min(16) {
-            if self.path.keyed().is_none() {
-                return; // cut off (timeout, battery)
-            }
-            if let Some(c) = tonegen::dtmf_symbol(self.tx.digits[k]) {
-                self.keyed_tone(None, Some(c));
-                Timer::after_millis(ms).await;
-            }
-            if let Some(n) = self.path.keyed().map(|s| s.chip()).filter(|&n| self.has(n)) {
-                self.chip(n).tone_tx(0);
-            }
-            Timer::after_millis(ms).await;
+        let at = (now_ms() as u32).wrapping_add(self.tx.dtmf.1 as u32 * 10);
+        self.tx.dial = Some(Dial { k: 0, len: len.min(16), on: false, at });
+    }
+
+    /// When the dial's next step is due (the main loop's wait), while one runs.
+    pub(super) fn dial_due(&self) -> Option<u32> {
+        self.tx.dial.map(|d| d.at)
+    }
+
+    /// The dial's next step, when due: a symbol on, its off time, or the end.
+    pub(super) fn dial_step(&mut self) {
+        let Some(mut d) = self.tx.dial else { return };
+        let now = now_ms() as u32;
+        if now.wrapping_sub(d.at) > u32::MAX / 2 {
+            return; // not due
         }
-        self.keyed_tone(None, None);
-        self.live.tx.dtmf_sent = self.live.tx.dtmf_sent.wrapping_add(1);
-        log(b"tx dtmf sent ", len as u32);
+        if self.path.keyed().is_none() {
+            self.tx.dial = None; // cut off (unkey, timeout, battery)
+            return;
+        }
+        let ms = self.tx.dtmf.0 as u32;
+        let sym = (d.k < d.len).then(|| tonegen::dtmf_symbol(self.tx.digits[d.k as usize]));
+        match (d.on, sym) {
+            (false, Some(Some(c))) => {
+                self.keyed_tone(None, Some(c));
+                d.on = true;
+            }
+            (_, Some(_)) => {
+                if let Some(n) = self.path.keyed().map(|s| s.chip()).filter(|&n| self.has(n)) {
+                    self.chip(n).tone_tx(0);
+                }
+                (d.on, d.k) = (false, d.k + 1);
+            }
+            (_, None) => {
+                self.tx.dial = None;
+                self.keyed_tone(None, None);
+                self.live.tx.dtmf_sent = self.live.tx.dtmf_sent.wrapping_add(1);
+                log(b"tx dtmf sent ", d.len as u32);
+                return;
+            }
+        }
+        d.at = now.wrapping_add(ms);
+        self.tx.dial = Some(d);
     }
 
     /// While keyed (TONE-13, DTMF-7, DTMF-11): the tone burst or a DTMF symbol on the keyed chip, as stock sends any
@@ -364,6 +390,7 @@ impl Radio {
         }
         self.tuned = [None; 2];
         self.tx.chip = None;
+        self.tx.dial = None;
         self.live.tx.keyed = false;
         log(b"tx unkey", 0);
     }

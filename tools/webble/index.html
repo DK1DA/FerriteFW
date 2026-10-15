@@ -288,6 +288,10 @@ const Ferrite = (() => {
   const BLE_SERVICE = 0xFFE0, BLE_DATA = 0xFFE1;  // FF31 is never touched
   const CHUNK = 20;  // the ATT payload of the default 23-byte MTU
   const PACE_MS = 25;  // between chunks: 800 B/s, under the module's 9600-baud UART (960 B/s)
+  // TERM-2: the radio keeps the port for the link while frames or syncs come within 10 s (link.rs ACTIVE_MS);
+  // after a longer quiet a frame's bytes can go to the terminal and the frame is lost. A 0x00 sync goes before a
+  // frame sent after this much quiet (as tools/ferrite_link.py's QUIET_S).
+  const QUIET_MS = 5000;
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const enc = new TextEncoder();
@@ -432,6 +436,8 @@ const Ferrite = (() => {
       this.stats = { tx: 0, rx: 0, frames: 0, junk: 0 };
       this.onFrame = null;
       this.meter = new LinkMeter();
+      this.now = () => Date.now();  // replaced in the tests
+      this.sentAt = -Infinity;  // when the last frame or sync went
       transport.onData = (u8) => this.data(u8);
     }
     data(u8) {
@@ -472,6 +478,7 @@ const Ferrite = (() => {
       await sleep(300);
       this.deframer = new Deframer();
       await this.write(Uint8Array.of(0x00));
+      this.sentAt = this.now();
     }
     send(ty, payload = [], timeout = 4000) {
       this.seq = (this.seq + 1) & 0xFF;
@@ -483,7 +490,10 @@ const Ferrite = (() => {
         }, timeout);
         this.waiting.set(seq, { ty, resolve, timer });
       });
-      this.write(frame(ty, seq, payload)).catch(() => {});
+      const f = frame(ty, seq, payload);
+      const quiet = this.now() - this.sentAt >= QUIET_MS;
+      this.sentAt = this.now();
+      this.write(quiet ? Uint8Array.from([0, ...f]) : f).catch(() => {});
       return p;
     }
     ask(ty, payload = [], timeout = 4000) {
@@ -823,7 +833,7 @@ const Ferrite = (() => {
     }
   }
 
-  return { PROTOCOL, T, STATUS, KEY_CODES, BUILDS, CHUNK, PACE_MS, crc16, cobsEncode, cobsDecode, frame, parseFrame,
+  return { PROTOCOL, T, STATUS, KEY_CODES, BUILDS, CHUNK, PACE_MS, QUIET_MS, crc16, cobsEncode, cobsDecode, frame, parseFrame,
     Deframer, Link, LinkMeter, Radio, RadioError, parseUi, parseUiLine, BleTransport, FakeTransport, sleep };
 })();
 if (typeof module !== "undefined") module.exports = Ferrite;

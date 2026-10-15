@@ -262,6 +262,9 @@ struct Radio {
     /// The DAC beep's level (1-11, `hal::tone`), from the beep volume (SND-3: Low, Mid, High -> 5, 7, 9).
     beep_level: u8,
     hf: Option<HfOn>,
+    /// HF-31, BCR-18: an SI4732 seek running (HF mode's or FM broadcast's), polled by the tick (MODE-7: no command
+    /// waits for it).
+    seek: Option<SiSeek>,
     /// The frequency counter (TSRCH-10), while on.
     counter: Option<Counter>,
     /// The band scope (SCOPE-4), while it runs; its points per sweep and dwell (0.1 ms) from the last ScopeCfg.
@@ -287,6 +290,22 @@ struct XbRun {
     hop: u8,
     hop_t: u32,
 }
+
+/// An SI4732 seek in progress: whose (HF mode's, else the broadcast's), when it started and when its tune status is
+/// read next.
+#[derive(Clone, Copy)]
+struct SiSeek {
+    hf: bool,
+    t0: u32,
+    poll_at: u32,
+}
+
+/// The seek's tune status is read this often (HF-31).
+const SEEK_POLL_MS: u32 = 20;
+/// A seek that has found nothing by now is cancelled where it is (HF-31, BCR-18).
+const SEEK_MAX_MS: u32 = 15_000;
+/// A plain SI4732 tune, its power-up's ready: given up after this long (stock's tunes complete in under 100 ms).
+const SI_TUNE_MAX_MS: u64 = 500;
 
 /// The band scope sweeping (SCOPE-4, SCOPE-5): one chip, its audio off, one point per wait. As stock (V0.27
 /// 0x08023808 / 0x080235E8): the frequency (REG_38/39), REG_30 0x0200 then 0xBFF1 (the VCO recalibration), the
@@ -400,6 +419,8 @@ struct Tx {
     dtmf: (u8, u8),
     digits: [u8; 16],
     dialled: bool,
+    /// DTMF-1: the sequence being dialled ([`Radio::dial_step`]).
+    dial: Option<Dial>,
     /// Mic gain 1-9 (0 8 3, VOX-15): REG_7D at each voice key-up.
     mic: u8,
     /// TX-30: 0 8 1 1's timeout (s); the sequencer's backstop is [`TX_BACKSTOP_S`] after it.
@@ -420,6 +441,16 @@ struct Tx {
     /// TERM-34 `txtest suite` while it runs (`suite`).
     #[cfg(feature = "bench")]
     suite: Option<suite::SuiteRun>,
+}
+
+/// DTMF-1: the dialled digit (0-15) of `len`, whether its tone is on, and when the next step is due (ms).
+#[cfg(feature = "tx")]
+#[derive(Clone, Copy)]
+struct Dial {
+    k: u8,
+    len: u8,
+    on: bool,
+    at: u32,
 }
 
 /// What woke the main loop for a transmit test (TERM-33, TERM-34; only a `tx` bench build has either).
@@ -524,9 +555,10 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
         }
         BroadcastCmd::Fm(f) => (SiMode::Fm, Some(f)),
         BroadcastCmd::Am(f) => (SiMode::Am, Some(f)),
+        // MODE-7: only started here; the tick polls it (`Radio::seek_poll`).
         BroadcastCmd::Seek { up } => {
             si.seek_start(up, d)?;
-            (si.mode().unwrap_or(SiMode::Fm), None)
+            return Ok(0);
         }
     };
     if si.mode() != Some(mode) {
@@ -539,7 +571,11 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
         SI_RST.write(true);
         Timer::after_millis(10).await;
         si.power_up_start(mode)?;
+        let t0 = now_ms();
         while !si.ready()? {
+            if now_ms() - t0 > SI_TUNE_MAX_MS {
+                return Err(si4732::Error::Timeout);
+            }
             Timer::after_millis(5).await;
         }
         Timer::after_millis(500).await; // crystal
@@ -551,9 +587,14 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
     if let Some(f) = freq {
         si.tune_start(f, Sideband::Usb, d)?;
     }
+    // MODE-7: a plain tune completes in tens of ms; never longer than SI_TUNE_MAX_MS here.
+    let t0 = now_ms();
     loop {
         if let Some(t) = si.tune_poll(d)? {
             return Ok(t.freq);
+        }
+        if now_ms() - t0 > SI_TUNE_MAX_MS {
+            return Err(si4732::Error::Timeout);
         }
         Timer::after_millis(10).await;
     }
@@ -626,6 +667,7 @@ pub async fn task() {
         beep_gain: tonegen::beep_gain(3), // Mid
         beep_level: 7,
         hf: None,
+        seek: None,
         counter: None,
         scope: None,
         sweep_hold: SweepHold::new(),
@@ -657,6 +699,7 @@ pub async fn task() {
             dtmf: (100, 30),
             digits: [0; 16],
             dialled: false,
+            dial: None,
             chip: None,
             vox: (0, 20),
             vox_det: ferrite_core::vox::Vox::new(),
@@ -696,18 +739,29 @@ pub async fn task() {
     r.tick().await;
     let live = LIVE.sender();
     live.send(r.live);
+    // MODE-7: when the tick last ran; its next time counts from here, not from the last command, so a stream of
+    // commands never holds it off (the crossband repeater, watch and scans run on it).
+    let mut ticked = now_ms();
 
     loop {
         // Wake for the next command, the next Battery Save phase change, or (awake) the next tick.
         let mut at = r.save.deadline();
         // Broadcast FM's report (fm_poll) runs on the tick, also while Battery Save has the BK4829s asleep (BCR-19).
-        if !r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() {
-            at = at.min(now_ms() + if r.busy() { TICK_MS } else { POLL_MS });
+        let tick_at = (!r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() || r.seek.is_some())
+            .then(|| ticked + if r.busy() { TICK_MS } else { POLL_MS });
+        if let Some(t) = tick_at {
+            at = at.min(t);
         }
         // MODE-3: a held exclusive mode is checked by its lease's end at the latest.
         r.lease_check().await;
         if let Some(d) = r.lease.deadline() {
             at = at.min(d as u64 + 1);
+        }
+        // DTMF-1: the dial's next step on time.
+        #[cfg(feature = "tx")]
+        if let Some(d) = r.dial_due() {
+            let left = d.wrapping_sub(now_ms() as u32);
+            at = at.min(now_ms() + if left > u32::MAX / 2 { 0 } else { left as u64 });
         }
         // Never wait on a time already past: that wait fires at once, and this task runs above the UI.
         at = at.max(now_ms() + 1);
@@ -766,8 +820,18 @@ pub async fn task() {
                 }
                 continue;
             }
-            Either4::First(c) => r.cmd(c).await,
-            Either4::Second(()) => r.tick().await,
+            Either4::First(c) => {
+                r.cmd(c).await;
+                // MODE-7: commands are taken first, but the tick still runs on time between them.
+                if tick_at.is_some_and(|t| now_ms() >= t) {
+                    r.tick().await;
+                    ticked = now_ms();
+                }
+            }
+            Either4::Second(()) => {
+                r.tick().await;
+                ticked = now_ms();
+            }
             #[cfg(not(feature = "bench"))]
             Either4::Third(never) => match never {},
             #[cfg(feature = "bench")]

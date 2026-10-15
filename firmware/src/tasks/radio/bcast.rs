@@ -32,7 +32,7 @@ impl Radio {
         let now = now_ms() as u32;
         let Some(fm) = self.fm.as_mut() else { return };
         // MODE-5: home's strip sweeping beside the broadcast has the mode report (nothing shows the RDS meanwhile).
-        if self.hf.is_some() || self.scope.is_some() || now.wrapping_sub(fm.poll_at) > u32::MAX / 2 {
+        if self.hf.is_some() || self.scope.is_some() || self.seek.is_some() || now.wrapping_sub(fm.poll_at) > u32::MAX / 2 {
             return;
         }
         fm.poll_at = now.wrapping_add(100);

@@ -83,6 +83,29 @@ ok("deframer: any chunking, junk and bad CRCs dropped");
 }
 ok("parseUi as tools/ferrite_link.py parse_ui");
 
+// ---- TERM-2: a 0x00 sync before a frame sent after 5 s of quiet (as tools/ferrite_link.py) ----
+{
+  const sent = [];
+  const link = new F.Link({ write: async (b) => { sent.push([...b]); } });
+  let now = 1000;
+  link.now = () => now;
+  await link.sync();
+  sent.length = 0;
+  const f1 = [...F.frame(0x30, 1, [1, 2])];
+  link.send(0x30, [1, 2], 10).catch(() => {});
+  now += F.QUIET_MS - 1;
+  link.send(0x30, [1, 2], 10).catch(() => {});
+  now += F.QUIET_MS;
+  link.send(0x30, [1, 2], 10).catch(() => {});
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual(sent[0], f1, "right after the sync: no extra 0x00");
+  assert.equal(sent[1][0], f1[0], "within 5 s of the last frame: none");
+  assert.equal(sent[2][0], 0, "after 5 s of quiet: a 0x00 first");
+  assert.deepEqual(sent[2].slice(1), [...F.frame(0x30, 3, [1, 2])]);
+  link.close();
+}
+ok("a 0x00 sync before a frame after 5 s of quiet (TERM-2)");
+
 // ---- The fake radio: the page's client through 20-byte chunks both ways ----
 async function client(transport) {
   const link = new F.Link(transport);

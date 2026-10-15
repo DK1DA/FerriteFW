@@ -76,6 +76,30 @@ struct BtQuery {
     got: u8,
 }
 
+/// MODE-6: the App's commands to the Radio task, as many as its channel has room for, without waiting; the one
+/// refused is kept in `held` and goes first next time (the Radio task ignores what it doesn't run yet).
+fn to_radio(app: &mut App, held: &mut Option<RadioCmd>) {
+    while let Some(c) = held.take().or_else(|| app.pop_cmd()) {
+        if RADIO.try_send(c).is_err() {
+            *held = Some(c);
+            break;
+        }
+    }
+}
+
+/// MODE-6, TX-33: power off and reboot: what is waiting, then Shutdown, given at most 1 s (the Radio task takes a
+/// command at least every half second, MODE-7); the power goes regardless.
+async fn send_shutdown(app: &mut App, held: &mut Option<RadioCmd>) {
+    let t = Instant::now();
+    loop {
+        to_radio(app, held);
+        if held.is_none() && RADIO.try_send(RadioCmd::Shutdown).is_ok() || t.elapsed() >= Duration::from_secs(1) {
+            return;
+        }
+        Timer::after_millis(5).await;
+    }
+}
+
 #[embassy_executor::task]
 pub async fn task() {
     let mut lcd = Screen::new();
@@ -328,6 +352,8 @@ pub async fn task() {
     let mut aprs = super::aprs::Aprs::new();
     // SAME and the pager decoder (roadmap 6b).
     let mut decode = super::decode::Decode::new();
+    // MODE-6: the command taken from the App that the Radio task's channel had no room for; it goes first.
+    let mut held: Option<RadioCmd> = None;
     loop {
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
@@ -411,7 +437,7 @@ pub async fn task() {
             if ports.take_reboot() {
                 // LINK-24: the radio quiet, everything written (at most 3 s), the answer out, then a system
                 // reset: the stock bootloader listens for the updater first, as after hwtest's `reboot`.
-                RADIO.send(RadioCmd::Shutdown).await;
+                send_shutdown(&mut app, &mut held).await;
                 store.flush(&app);
                 store::wake(store);
                 let t = Instant::now();
@@ -505,9 +531,9 @@ pub async fn task() {
             aprs.poll(&mut app, store, &live, now_ms());
             decode.poll(&mut app, store, &live);
         }
-        while let Some(c) = app.pop_cmd() {
-            RADIO.send(c).await; // the Radio task ignores what it doesn't run yet
-        }
+        // MODE-6: never waiting on the Radio task: what its channel has no room for waits in the App's queue (and
+        // `held`), in order, and goes on the next turn (every 10 ms meanwhile).
+        to_radio(&mut app, &mut held);
         // Channel writes (save as channel, the channel editor, the browser) and the settings and slots (2 s after
         // their last change) queue for the Storage task.
         while let Some(w) = app.pop_write() {
@@ -526,7 +552,7 @@ pub async fn task() {
             if auto_off || POWER_SW.read() {
                 app.power_off();
                 app.render(&mut lcd, &live, &dev, store);
-                RADIO.send(RadioCmd::Shutdown).await;
+                send_shutdown(&mut app, &mut held).await;
                 // Everything queued, then the settings, written before the power goes (at most 3 s).
                 store.flush(&app);
                 store::wake(store);
@@ -575,6 +601,9 @@ pub async fn task() {
         let mut period = if down != 0 || ports.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
         if leds.next_ms != 0 {
             period = period.min(leds.next_ms as u64);
+        }
+        if held.is_some() {
+            period = period.min(10); // MODE-6: commands waiting for room on the Radio task's channel
         }
         if aprs.busy() {
             period = period.min(20); // keying or playing an APRS frame: its unkey on time

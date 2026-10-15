@@ -272,3 +272,25 @@ fn keypad_light_on_key_press() {
     t.knob(1);
     assert!(t.app.keypad_lit(), "the knob too");
 }
+
+/// LINK-19, DISP-15.1: a remote key or knob step on a dark screen lights it and acts (the PC or phone can't see the
+/// screen is dark); a key on the radio still only wakes it.
+#[test]
+fn remote_key_wakes_and_acts() {
+    use crate::remote::{Press, BY_BT};
+    let mut t = T::new();
+    t.app.set.backlight = 3;
+    t.wait(16_000);
+    assert!(t.app.dark());
+    let f = t.freq();
+    let up = (0..=ferrite_core::link::key::LAST_CODE).find(|&c| ferrite_core::keys::key(c) == Some(Key::Up)).unwrap();
+    t.app.remote_press(up, Press::Short, BY_BT, t.t, &store()).unwrap();
+    assert!(!t.app.dark(), "lit");
+    assert_ne!(t.freq(), f, "and the key acted");
+    t.wait(16_000);
+    assert!(t.app.dark());
+    let f = t.freq();
+    t.app.remote_knob(1, t.t, &store()).unwrap();
+    assert!(!t.app.dark());
+    assert_ne!(t.freq(), f, "the remote knob acts too");
+}

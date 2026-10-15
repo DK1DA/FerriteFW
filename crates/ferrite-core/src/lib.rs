@@ -13,6 +13,7 @@ extern crate std;
 pub mod acc;
 pub mod audio;
 pub mod chipid;
+pub mod cmdq;
 pub mod sha256;
 pub mod ssb;
 pub mod stuck;

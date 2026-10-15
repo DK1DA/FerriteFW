@@ -63,7 +63,7 @@ pub fn feed(app: &mut App, store: &impl ChannelStore) {
     let Some(mut f) = app.radio.feed else { return };
     let zone_pri = zone_cfg(app, f.slot, store).pri;
     for _ in 0..PER_TICK {
-        if app.out.len as usize + 2 + PRIO_MAX > app.out.q.len() {
+        if app.out.q.len() + 2 + PRIO_MAX > app.out.q.capacity() {
             break;
         }
         if f.chunk < CHUNKS {

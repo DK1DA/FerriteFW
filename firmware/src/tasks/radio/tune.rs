@@ -168,7 +168,7 @@ impl Radio {
                 false
             }
         };
-        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some() || self.scope.is_some() || xb
+        set.count_ones() > 1 || self.scans.iter().any(|s| s.running()) || self.path.keyed().is_some() || self.counter.is_some() || self.scope.is_some() || self.seek.is_some() || xb
     }
 
     /// A slot's setting from the UI; the chip it is on retunes on the next tick.
