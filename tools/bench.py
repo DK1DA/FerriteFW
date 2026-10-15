@@ -480,6 +480,11 @@ class Radio:
     # KEY (LINK-20), a step at a time so the bench's loop owns the timing.
     def key_on(self, slot_code):
         """(status, reason) of KEY on, or None when no answer came within KEY_ANSWER_S."""
+        if time.time() - self.last > 10:
+            # After a long quiet spell (a duty wait) the first frame went unanswered twice on the bench (Oct 14,
+            # 2026): wake the link with an INFO, answered, before the KEY on.
+            with contextlib.suppress(Exception):
+                self.link.ask(fl.INFO, timeout=2.0)
         self.last = time.time()
         seq = self.link.send(fl.KEY, bytes([fl.PTT, fl.PTT_ON, slot_code]))
         end = time.time() + KEY_ANSWER_S
