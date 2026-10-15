@@ -6,6 +6,8 @@ each run's numbers stored, compared with the previous run of the same configurat
     tools/bench.py --i-know-its-tx-dry                 # the default matrix: VHF wide, VHF NFM, UHF wide
     tools/bench.py --flash target/ferrite-txdry.btf    # flash first (flash.py --backup), wait for the boot, then run
     tools/bench.py --runs vhf-wide --refusals --keepalive --timeout --i-know-its-tx-dry
+    tools/bench.py --sweep ctcss,dcs [--from D365N] [--count N] [--items A,B] [--resume SESSION] [--dry-plan]
+                                                       # sweeps (below): one short key-up per value, duty-limited
     tools/bench.py --load DIR [--build LABEL]          # re-analyse saved captures (DIR searched for <run>.u8)
     tools/bench.py --selftest                          # a fake radio and synthetic IQ: the whole flow and the gates
     tools/bench.py --selftest --sim tcp:127.0.0.1:7300 # the same against the simulator's link (fake SDR)
@@ -35,13 +37,36 @@ Safety gates: nothing is keyed unless all of these hold, checked right before ev
     split (TX on the same frequency), power low, not scanning, not APRS, and it is the active slot;
   - on the cable, the KEY on is answered at once: a `tx` build holds every answer while keyed (TX-43) and a `tx-dry`
     build doesn't; no answer within 0.6 s means a real transmitter, so it unkeys at once and stops.
-  The refusal checks (--refusals) key on 160.000, 222.000 and 243.000 on purpose: those must be refused by the radio
-  (each with its reason); if one is not, the bench unkeys at once and fails the check. The other gates still hold.
+  The refusal checks (--refusals, --sweep refusals-wide) key on frequencies outside the band plan on purpose: those
+  must be refused by the radio (each with its reason); if one is not, the bench unkeys at once and fails the check.
+  Each is gated on its own frequency read back; the other gates still hold.
   KEY off is always sent in `finally` (and at exit), refused or not; Ctrl-C and SIGTERM end there too.
 
 Extra checks: --refusals (remote PTT refused out of band, with the expected reason; no carrier on the SDR),
---keepalive (keepalives stopped while keyed: the carrier must drop within 2.5 s of the last), --timeout (TX timeout
-30 s, keyed 45 s with keepalives: the carrier ~30 s; the timeout put back).
+--keepalive (keepalives for 1 s, then none: the carrier must drop within 2.5 s of the last), --timeout (TX timeout
+30 s, keyed up to 36 s with keepalives: the carrier ~30 s; the timeout put back).
+
+Sweeps (--sweep A,B or all; alone they run no suite): many values of one thing, one short key-up each on the sweep
+frequency (config sweeps.mhz, 145.495; --sweep-mhz 446.475), measured on the SDR as it goes:
+  refusals-wide  remote KEY on 43 frequencies at the band plan's edges and gaps (TX-1, TX-10, TX-35): refused with
+                 the reason the radio's region gives (ones it allows aren't probed), no carrier; never keyed (a key-up
+                 the radio accepts is unkeyed at once and fails); Extend TX must be off
+  ctcss          every CTCSS tone of slot.rs and typed 60.0/260.0 Hz: frequency within 0.2 Hz, one deviation
+  dcs            every DCS code, N and I, and typed D000N/D777I: decoded with its own polarity and never the other
+  endtones       each end tone (0 8 5 4), FM and NFM, on a real unkey: steps, levels (TONE-19.4), lead-in, hold
+  sublevel       Subtone level Low/Normal/High on 100.0 Hz and D023N: the deviation steps (TONE-16)
+  afsk-level     `txtest afsk data L`, L 10-150 %: deviation in proportion (TERM-33.6)
+One tone per key-up: the slot's tone can't change while keyed (TX-22), so a burst holds one item. Each item's
+result goes to <session>/sweeps.json as it comes: --resume SESSION takes over those that passed and runs the rest
+(the failures again); --from ITEM starts there (sweeps listed before its own are left out), --items A,B runs only
+those, --count N at most N a sweep. A sweep that didn't cover all its items records its rules as part (◐).
+
+Duty limit (config duty; DutyLimiter, the one place every key-up passes; a longer key-up is refused): a key-up at
+most 5 s with its 0.5 s unkey tail; a rest of 2x after it; at most 25 % of any 5 min keyed, else the next key-up
+waits and says so. The 60 s suite and the 30 s timeout test are exceptions (one continuous key-up each by what they
+measure): over 5 s, still rested 2x after and counted in the 5 min. Refusal probes don't wait (nothing goes out
+unless the radio is broken, and then it counts). Every key-up and key-down is in session.json's `duty` with its
+time; the totals print at the end and show on the page.
 
 Results: under --results (default ../bench-results, beside the ferrite checkout) one directory per session,
 <date-time>_<build>, holding session.json, one <run>.json per run (key numbers and curves), each run's sdrsuite
@@ -89,6 +114,8 @@ import sdrtx  # noqa: E402
 
 TX_TIMEOUT = "0 8 1 1"
 END_TONE = "0 8 5 4"
+SUBTONE_LEVEL = "0 8 4 2"
+EXTEND_TX = "0 8 9"
 KEY_ANSWER_S = 0.6  # TX-43: a tx-dry build answers KEY on at once; a tx build holds it while keyed
 
 DEFAULTS = {
@@ -113,8 +140,43 @@ DEFAULTS = {
     "sdr_tail_s": 3.0,
     "sdr_gain": 0.9,  # the R820T's lowest fixed gain: rtl_sdr -g 0 means AUTOMATIC, which saturated a UHF run (Oct 14, 2026)
     "sdr_ppm": 0,
-    "keepalive": {"alive_s": 3.0, "wait_s": 5.0, "max_drop_s": 2.5},
-    "timeout_test": {"set": "30 s", "expect_s": 30.0, "key_s": 45.0, "tol_s": 1.5},
+    # Keepalives for alive_s, then none: the carrier drops 2 s after the last one; KEY off at alive_s + wait_s (4 s:
+    # inside the duty limit's 5 s burst).
+    "keepalive": {"alive_s": 1.0, "wait_s": 3.0, "max_drop_s": 2.5},
+    # One key-up past the 30 s setting (a duty exception): the radio ends it at 30 s, KEY off at 36 s at the latest.
+    "timeout_test": {"set": "30 s", "expect_s": 30.0, "key_s": 36.0, "tol_s": 1.5},
+    # The bench's own transmit duty limit (Alex, Oct 14 2026), enforced in one place (DutyLimiter, which every
+    # key-up goes through): a key-up at most max_burst_s (its key time plus unkey_tail_s, the carrier hold after
+    # KEY off); then a rest of rest_factor times it; and at most window_frac of any window_s keyed, else the next
+    # key-up waits (printed). `exceptions` are the key-ups that can't be split by what they measure (the 60 s suite,
+    # the 30 s timeout): over max_burst_s, still rested after and counted. A refusal probe (a key-up the radio must
+    # refuse) waits for no rest unless probes_rest; it counts only if the radio keyed.
+    "duty": {"max_burst_s": 5.0, "rest_factor": 2.0, "window_s": 300.0, "window_frac": 0.25, "unkey_tail_s": 0.5,
+             "exceptions": ["suite", "timeout"], "probes_rest": False},
+    # --sweep: many values of one thing, a short key-up each on `mhz` (an approved test frequency), the SDR around
+    # each (lead_s before the key-up, tail_s after KEY off: the end tone and the 400 ms hold). Captures are kept
+    # only for items that fail unless keep_captures. `only`: a list of item labels to run (a partial sweep).
+    "sweeps": {
+        "mhz": 145.495, "lead_s": 1.0, "tail_s": 1.5, "keep_captures": False,
+        # every CTCSS tone of ferrite-app's slot.rs, then typed ones at TONE-15's ends
+        "ctcss": {"key_s": 2.0, "typed": [60.0, 260.0], "tol_hz": 0.2, "spread": 0.05},
+        # every DCS code of slot.rs, N then I, then typed ones (TONE-15)
+        "dcs": {"key_s": 2.0, "typed": ["D000N", "D777I"], "min_windows": 2, "spread": 0.10},
+        # remote KEY on each, expected refused with the reason the band plan (TX-1, TX-10, TX-35) gives for the
+        # radio's region; ones the region allows are not probed. Never keys: the radio refuses (or is unkeyed at once).
+        "refusals-wide": {"lead_s": 0.6, "tail_s": 0.8, "freqs": [
+            70.0, 121.475, 121.5, 121.525, 121.55, 136.0, 143.995, 146.0, 148.0, 150.0, 160.0, 174.0, 199.995, 200.0,
+            219.0, 219.995, 220.0, 222.0, 223.5, 224.995, 225.0, 242.975, 243.0, 243.025, 243.05, 260.0, 300.0, 380.0,
+            405.975, 406.0, 406.05, 406.1, 406.125, 406.15, 419.995, 420.0, 429.995, 440.0, 449.995, 450.0, 470.0,
+            520.0, 900.0]},
+        # each end tone (0 8 5 4) on a real unkey, wide and NFM: steps, levels (TONE-19.4), lead-in, hold
+        "endtones": {"key_s": 1.5, "modes": ["fm", "nfm"], "extra_tail_s": 0.5, "level_tol": 0.12,
+                     "hold_s": 0.40, "hold_tol_s": 0.05},
+        # Subtone level (0 8 4 2) Low, Normal, High on a CTCSS tone and a DCS code (TONE-16)
+        "sublevel": {"key_s": 2.0, "tones": ["100.0", "D023N"], "min_step": 0.05},
+        # `txtest afsk data LEVEL` at each level (TERM-33.6): deviation in proportion up to 100 %, rising above
+        "afsk-level": {"key_s": 3.0, "levels": [10, 25, 50, 75, 100, 125, 150], "tol": 0.05, "tol_hz": 30},
+    },
     "refusal_capture_s": 4.0,
     "results": os.path.join(ROOT, "bench-results"),
     "backup": os.path.join(ROOT, "backups", "blackradio", "flash.bin"),
@@ -196,6 +258,132 @@ class FakeClock:
 
     def sleep(self, s):
         self.t += max(s, 0)
+
+
+# ---- The duty limit: every key-up goes through it ----
+
+
+class DutyLimiter:
+    """The bench's transmit duty limit (config `duty`), so the tx-dry radio is never worked hard: a key-up is at most
+    `max_burst_s` counted (its key time plus `unkey_tail_s`, the carrier after KEY off); after it a rest of at least
+    `rest_factor` times what it counted, before the next key-up; and no window of `window_s` holds more than
+    `window_frac` of it keyed: the next key-up waits until it fits, and says so. `exceptions` (by kind: the 60 s
+    suite, the 30 s timeout test, each one continuous key-up by what it measures) may pass `max_burst_s`, never the
+    window's cap, and still rest after and count. A refusal probe (kind `probe`) waits for nothing unless
+    `probes_rest`: the radio must refuse it, and it counts only if the radio keyed. Every key-up and key-down is
+    logged (the session's `duty`). Times on the bench's clock (virtual in the selftest)."""
+
+    def __init__(self, dcfg, clock, out=say):
+        self.c = dict(DEFAULTS["duty"], **(dcfg or {}))
+        self.clock, self.out = clock, out
+        self.log, self.waits = [], []
+        self.t_start = clock.time()
+
+    @property
+    def cap_s(self):
+        return self.c["window_frac"] * self.c["window_s"]
+
+    def planned(self, key_s, extra_tail=0.0):
+        return key_s + self.c["unkey_tail_s"] + extra_tail
+
+    def spans(self):
+        return [(e["t_on"], e["t_on"] + e["counted_s"]) for e in self.log if e["counted_s"] > 0]
+
+    def keyed_in(self, a, b):
+        return sum(max(0.0, min(b, y) - max(a, x)) for x, y in self.spans())
+
+    def check_burst(self, planned_s, kind, purpose):
+        if planned_s > self.cap_s + 1e-9:
+            raise BenchError(f"duty: {purpose} would key {planned_s:.1f} s, over the window's cap of {self.cap_s:.0f} s "
+                             f"in {self.c['window_s'] / 60:g} min")
+        if planned_s > self.c["max_burst_s"] + 1e-9 and kind not in self.c["exceptions"]:
+            raise BenchError(f"duty: {purpose} would key {planned_s:.1f} s with the unkey tail, over the "
+                             f"{self.c['max_burst_s']:g} s burst limit (only {', '.join(self.c['exceptions'])} may: "
+                             "config duty.exceptions)")
+
+    def wait_needed(self, planned_s, t_key, kind):
+        """(seconds to wait, why) so a key-up of `planned_s` at `t_key` keeps the rest and the window."""
+        if kind == "probe" and not self.c["probes_rest"]:
+            return 0.0, ""
+        W, cap = self.c["window_s"], self.cap_s
+        last = next((e for e in reversed(self.log) if e["counted_s"] > 0), None)
+        rest = 0.0
+        if last:
+            rest = max(0.0, last["t_on"] + last["counted_s"] * (1 + self.c["rest_factor"]) - t_key)
+
+        def over(w):  # the window ending at this key-up's end is the fullest one holding it
+            return self.keyed_in(t_key + w + planned_s - W, t_key + w) + planned_s > cap + 1e-9
+
+        if not over(rest):
+            return rest, ("rest" if rest > 0 else "")
+        lo, hi = rest, rest + W
+        while hi - lo > 0.05:
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if over(mid) else (lo, mid)
+        return hi, "window"
+
+    def _sleep(self, w, why, purpose, planned_s, t_key):
+        if w <= 0:
+            return
+        if why == "window":
+            used = self.keyed_in(t_key + planned_s - self.c["window_s"], t_key)
+            self.out(f"  duty: {used:.1f} s keyed in the last {self.c['window_s'] / 60:g} min and {planned_s:.1f} s "
+                     f"more would pass the {self.cap_s:.0f} s cap ({self.c['window_frac']:.0%}): waiting {w:.0f} s")
+        elif w >= 1:
+            self.out(f"  duty: rest {w:.1f} s ({self.c['rest_factor']:g}x the last key-up)")
+        self.waits.append(dict(t=self.clock.time(), s=w, why=why, before=purpose))
+        self.clock.sleep(w)
+
+    def wait(self, planned_s, kind, purpose, lead=0.0):
+        """Before a capture starts: wait so the key-up `lead` s later fits (the SDR's lead overlaps the rest)."""
+        self.check_burst(planned_s, kind, purpose)
+        w, why = self.wait_needed(planned_s, self.clock.time() + lead, kind)
+        self._sleep(w, why, purpose, planned_s, self.clock.time() + lead)
+
+    def admit(self, planned_s, kind, purpose):
+        """Right before KEY on (the one place every key-up passes): the limits again, waiting if still needed."""
+        self.check_burst(planned_s, kind, purpose)
+        w, why = self.wait_needed(planned_s, self.clock.time(), kind)
+        self._sleep(w, why, purpose, planned_s, self.clock.time())
+
+    def record(self, purpose, kind, ev, t_sent, extra_tail=0.0):
+        """A key-up's log line: sent at t_sent, down at the radio's unkey or KEY off; counted with the unkey tail."""
+        t_end = ev.get("t_unkeyed") or ev.get("t_off") or self.clock.time()
+        keyed = ev.get("accepted") is not False  # refused: nothing went out; else from KEY on sent to the unkey
+        keyed_s = max(t_end - t_sent, 0.0) if keyed else 0.0
+        counted = keyed_s + self.c["unkey_tail_s"] + extra_tail if keyed_s > 0 else 0.0
+        e = dict(purpose=purpose, kind=kind, t_on=t_sent, t_off=ev.get("t_off"), t_end=t_end, keyed_s=keyed_s,
+                 counted_s=counted, refused=ev.get("refused"), unkeyed=ev.get("unkeyed"),
+                 key_up=datetime.datetime.fromtimestamp(t_sent).isoformat(timespec="milliseconds"),
+                 key_down=datetime.datetime.fromtimestamp(t_end).isoformat(timespec="milliseconds"))
+        self.log.append(e)
+        if counted > 0:
+            now = t_sent + counted
+            self.out(f"  duty: keyed {keyed_s:.1f} s (+{counted - keyed_s:.1f} s tail); "
+                     f"{self.keyed_in(now - self.c['window_s'], now):.1f} of {self.cap_s:.0f} s in the last "
+                     f"{self.c['window_s'] / 60:g} min; {sum(x['keyed_s'] for x in self.log):.0f} s keyed in all")
+        return e
+
+    def summary(self):
+        W = self.c["window_s"]
+        spans = self.spans()
+        peak = max((self.keyed_in(b - W, b) for _, b in spans), default=0.0)
+        wall = max(self.clock.time() - self.t_start, 1e-9)
+        counted = sum(e["counted_s"] for e in self.log)
+        return dict(limits=self.c, log=self.log, waits=self.waits, keyups=sum(1 for e in self.log if e["keyed_s"] > 0),
+                    keyed_s=sum(e["keyed_s"] for e in self.log), counted_s=counted, wall_s=wall, duty=counted / wall,
+                    peak_window_s=peak, peak_window_frac=peak / W, waited_s=sum(w["s"] for w in self.waits),
+                    longest_s=max((e["counted_s"] for e in self.log), default=0.0))
+
+    def report(self):
+        s = self.summary()
+        return (f"duty: {s['keyups']} key-ups, {s['keyed_s']:.0f} s keyed ({s['counted_s']:.0f} s with the unkey tails) "
+                f"over {s['wall_s'] / 60:.1f} min ({s['duty']:.0%}); fullest {W_txt(self.c)}: {s['peak_window_s']:.0f} s "
+                f"({s['peak_window_frac']:.0%}, cap {self.c['window_frac']:.0%}); waited {s['waited_s']:.0f} s")
+
+
+def W_txt(c):
+    return f"{c['window_s'] / 60:g} min"
 
 
 # ---- The radio over the link ----
@@ -612,6 +800,304 @@ def says_tx_dry(version):
     return bool(re.search(r"tx[ _-]?dry|\bdry\b", version or "", re.I))
 
 
+# ---- Sweeps (--sweep): many values of one thing, one short key-up each ----
+
+SWEEP_NAMES = ["refusals-wide", "ctcss", "dcs", "endtones", "sublevel", "afsk-level"]
+SLOT_RS = os.path.join(FERRITE, "crates", "ferrite-app", "src", "slot.rs")
+# 0 8 5 4's choices (ferrite-app settings.rs END_TONE_NAMES) and their steps in END_TONES
+ENDTONE_SETTINGS = [("Beep", "beep"), ("Two-tone up", "two-tone-up"), ("Two-tone down", "two-tone-down"),
+                    ("Chirp", "chirp"), ("Quindar", "quindar")]
+TONE_19_4 = {800: 1100, 1000: 1450, 1500: 2300, 2475: 2560}  # Hz deviation at REG_40 0x43C, wide FM; NFM halves it
+
+
+def tone_lists():
+    """The CTCSS tones (Hz) and DCS codes Ferrite offers: ferrite-app slot.rs's CTCSS and DCS arrays."""
+    src = open(SLOT_RS).read()
+
+    def arr(name):
+        m = re.search(rf"pub const {name}: \[u16; (\d+)\] = \[(.*?)\];", src, re.S)
+        if not m:
+            raise BenchError(f"no {name} array in {SLOT_RS}")
+        vals = [int(x, 0) for x in re.findall(r"0o[0-7]+|\d+", m.group(2))]
+        if len(vals) != int(m.group(1)):
+            raise BenchError(f"{SLOT_RS}: {name} has {len(vals)} values for [u16; {m.group(1)}]")
+        return vals
+
+    return [v / 10 for v in arr("CTCSS")], arr("DCS")
+
+
+def tone_word(t):
+    """A terminal tone word (off, 100.0, D023N, D023I) as SLOT gives it: 0.1 Hz, or bit 15 DCS, bit 14 inverted."""
+    if t.lower() == "off":
+        return 0
+    m = re.fullmatch(r"[Dd]([0-7]{3})([NIni])", t)
+    if m:
+        return 0x8000 | int(m.group(1), 8) | (0x4000 if m.group(2).upper() == "I" else 0)
+    return int(round(float(t) * 10))
+
+
+# The band plan as ferrite-core's txplan.rs (TX-1's table, the HF windows, the emergency frequencies) and the order
+# a remote KEY meets the checks (remote.rs: emergency first; then transmit.rs: band plan, then the 1.25 m lock).
+TX_HF = [(24.89, 24.99), (28.0, 29.7)]
+TX_BANDS = {"US": [(144, 148), (222, 225), (420, 450)], "CA": [(144, 148), (219, 225), (430, 450)],
+            "AU": [(144, 148), (420, 450)], "NZ": [(144, 148), (430, 440)], "ITU": [(144, 146), (430, 440)]}
+REGIONS = {0: ("no region set", "ITU"), 1: ("the US", "US"), 2: ("Canada", "CA"), 3: ("the UK", "ITU"),
+           4: ("Europe", "ITU"), 5: ("Australia", "AU"), 6: ("New Zealand", "NZ"), 7: ("Japan", "ITU"),
+           8: ("this region", "ITU")}
+
+
+def region_of(byte):
+    return REGIONS.get(byte or 0, REGIONS[0])
+
+
+def tx_expect(mhz, region_byte):
+    """Why a remote KEY on `mhz` is refused with Extend TX off: "emergency", "band plan" or "1.25 m" (words of the
+    radio's reasons), or None where it transmits."""
+    f = mhz10(mhz)
+
+    def r(lo, hi):
+        return mhz10(lo) <= f < mhz10(hi)
+
+    m = 2500  # ±25 kHz, inclusive (txplan::emergency)
+    if mhz10(406.0) - m <= f <= mhz10(406.1) + m or abs(f - mhz10(243.0)) <= m or abs(f - mhz10(121.5)) <= m:
+        return "emergency"
+    if not any(r(lo, hi) for lo, hi in TX_BANDS[region_of(region_byte)[1]] + TX_HF):
+        return "band plan"
+    if r(200, 300):
+        return "1.25 m"
+    return None
+
+
+def sweep_items(cfg, name):
+    """The sweep's items in order, each a dict with its `label` (what --from, --items and --resume name)."""
+    sw = cfg["sweeps"]
+    c = sw.get(name, {})
+    if name == "ctcss":
+        ctcss, _ = tone_lists()
+        items = [dict(label=f"{t:.1f}", tone=f"{t:.1f}", hz=t, typed=False) for t in ctcss]
+        items += [dict(label=f"{t:.1f}", tone=f"{t:.1f}", hz=float(t), typed=True) for t in c["typed"] if t not in ctcss]
+    elif name == "dcs":
+        _, dcs = tone_lists()
+        items = [dict(label=f"D{d:03o}{p}", tone=f"D{d:03o}{p}", code=d, inverted=p == "I", typed=False)
+                 for d in dcs for p in "NI"]
+        for t in c["typed"]:
+            m = re.fullmatch(r"D([0-7]{3})([NI])", t)
+            items.append(dict(label=t, tone=t, code=int(m.group(1), 8), inverted=m.group(2) == "I", typed=True))
+    elif name == "refusals-wide":
+        items = [dict(label=f"{f:.3f}", mhz=float(f)) for f in c["freqs"]]
+    elif name == "endtones":
+        items = [dict(label=f"{slug_}-{mode}", setting=nm, slug=slug_, mode=mode, steps=dict(END_TONES)[slug_])
+                 for mode in c["modes"] for nm, slug_ in ENDTONE_SETTINGS]
+    elif name == "sublevel":
+        items = []
+        for t in c["tones"]:
+            for lvl in ("Low", "Normal", "High"):
+                it = dict(label=f"{lvl}-{t}", level=lvl, tone=t)
+                m = re.fullmatch(r"D([0-7]{3})([NI])", t)
+                if m:
+                    it.update(code=int(m.group(1), 8), inverted=m.group(2) == "I")
+                else:
+                    it.update(hz=float(t))
+                items.append(it)
+    elif name == "afsk-level":
+        items = [dict(label=f"afsk-{lvl}", level=int(lvl)) for lvl in c["levels"]]
+    else:
+        raise BenchError(f"no sweep {name!r}; the sweeps: {', '.join(SWEEP_NAMES)}")
+    return items
+
+
+def sweep_key_s(cfg, name):
+    """(key-up seconds, extra unkey tail) of one item of a sweep, for the duty limit."""
+    c = cfg["sweeps"][name]
+    if name == "refusals-wide":
+        return KEY_ANSWER_S, 0.0
+    return c["key_s"], c.get("extra_tail_s", 0.0)
+
+
+def _keyed_dev(raw):
+    """The keyed part's deviation (Hz, offset removed, low-passed at 6 kHz as sdrsuite's) and where it is."""
+    k = sdrsuite.keyed(raw)
+    if k is None:
+        return None
+    dev, fs, off, i0, i1, snr, clip = k
+    return dict(dev=sdrtx.conv_same(dev, sdrtx.lowpass(6000, fs)), fs=fs, off=off, i0=i0, i1=i1, snr=float(snr),
+                clip=float(clip))
+
+
+def analyse_subtone(raw, item, tol_hz=0.2, min_windows=2):
+    """A CTCSS tone's frequency and deviation, or a DCS code's polarity (its own windows, none of the other
+    polarity's) and deviation, from the key-up's steady middle (0.4 s in, 0.5 s clear of the carrier's end: the
+    hold and any tail elimination)."""
+    k = _keyed_dev(raw)
+    if not k:
+        return dict(ok=False, why="no carrier on the SDR", text="no carrier on the SDR")
+    dev, fs = k["dev"], k["fs"]
+    base = dict(keyed_s=len(dev) / fs, snr_db=k["snr"], offset_hz=k["off"])
+    a, b = int(0.4 * fs), len(dev) - int(0.5 * fs)
+    if b - a < int(0.8 * fs):
+        return dict(base, ok=False, why=f"keyed only {len(dev) / fs:.2f} s", text=f"keyed only {len(dev) / fs:.2f} s")
+    x, fs2 = sdrsuite.sub_band(dev, fs, a, b)
+    if "hz" in item:
+        hz, d = sdrsuite.ctcss(x, fs2, 55, 265)
+        err = hz - item["hz"]
+        ok = abs(err) <= tol_hz
+        return dict(base, hz=hz, err_hz=err, dev=d, ok=ok, why="" if ok else f"{hz:.2f} Hz",
+                    text=f"{hz:.2f} Hz ({err:+.2f}), {d:.0f} Hz dev")
+    votes, baud, d, n = sdrsuite.dcs_votes(x, fs2)
+    own = votes.get((item["code"], item["inverted"]), 0)
+    other = votes.get((item["code"], not item["inverted"]), 0)
+    top = max(votes.items(), key=lambda kv: (kv[0][0] in sdrsuite.DCS_CODES, not kv[0][1], kv[1]))[0] if votes else None
+    name = f"D{top[0]:03o}{'I' if top[1] else 'N'}" if top else "none"
+    ok = own >= min_windows and other == 0
+    want = f"D{item['code']:03o}{'I' if item['inverted'] else 'N'}"
+    return dict(base, decoded=name, own=own, other=other, windows=n, baud=baud, dev=d, ok=ok,
+                why="" if ok else f"{own} windows {want}, {other} of the other polarity (decoded {name})",
+                text=f"{own} of {n} windows {want}, {other} other polarity (named {name}); {baud:.1f} bit/s, {d:.0f} Hz dev")
+
+
+def analyse_endtone(raw, item, sc):
+    """An end tone on a real unkey: its steps (frequency, length, deviation, the first one's start against its
+    steady level), the quiet before it (the silent lead-in) and the carrier after it (the 400 ms hold)."""
+    k = _keyed_dev(raw)
+    if not k:
+        return dict(ok=False, why="no carrier on the SDR", text="no carrier on the SDR")
+    dev, fs = k["dev"], k["fs"]
+    runs = carrier_runs(raw)
+    c_end = runs[-1][1] if runs else None
+    a = max(0, len(dev) - int(1.8 * fs))
+    seg = dev[a:] - np.median(dev[a:])
+    t_seg = (k["i0"] + 1 + a) / fs  # seg's start, s from the capture's start
+    steps = item["steps"]
+    m = sdrsuite.match_tones(seg, fs, [(str(hz), hz, ms) for hz, ms in steps])
+    out = dict(keyed_s=len(dev) / fs, snr_db=k["snr"], steps=[], mode=item["mode"])
+    nfm = item["mode"] == "nfm"
+    found = [x for x in m if x["found"]]
+    bad = []
+    for x in m:
+        st = dict(want_hz=x["want_hz"], want_ms=x["want_ms"], found=x["found"])
+        if x["found"]:
+            fig = TONE_19_4.get(x["want_hz"])
+            want_dev = fig * (0.5 if nfm else 1.0) if fig else None
+            st.update(hz=x["hz"], ms=x["ms"], dev=x["dev"], start=x["start"], want_dev=want_dev,
+                      hz_ok=abs(x["hz"] - x["want_hz"]) <= x["want_hz"] * RULE_TOL["endtone_hz_frac"],
+                      ms_ok=abs(x["ms"] - x["want_ms"]) <= RULE_TOL["endtone_ms"],
+                      dev_ok=None if want_dev is None else abs(x["dev"] / want_dev - 1) <= sc["level_tol"])
+            bad += [f"{x['want_hz']} Hz {w}" for w, okk in (("frequency", st["hz_ok"]), ("length", st["ms_ok"]),
+                                                            ("level", st["dev_ok"])) if okk is False]
+        else:
+            bad.append(f"{x['want_hz']} Hz not found")
+        out["steps"].append(st)
+    if found and len(found) == len(m):
+        first, last = found[0], found[-1]
+        out["hold_s"] = (c_end - (t_seg + last["t1"])) if c_end is not None else None
+        q0, q1 = int((first["t0"] - 0.17) * fs), int((first["t0"] - 0.03) * fs)
+        q = seg[max(q0, 0): max(q1, 0)]
+        out["lead_quiet"] = (float(np.sqrt(2 * np.mean((q - q.mean()) ** 2))) / max(first["dev"], 1e-9)
+                             if q0 >= 0 and len(q) > int(0.1 * fs) else None)
+        out["start_frac"] = first["start"] / max(first["dev"], 1e-9)
+        hold_ok = out["hold_s"] is not None and abs(out["hold_s"] - sc["hold_s"]) <= sc["hold_tol_s"]
+        lead_ok = out["lead_quiet"] is not None and out["lead_quiet"] < 0.25 and out["start_frac"] >= 0.8
+        if not hold_ok:
+            bad.append(f"hold {_f(out['hold_s'], '{:.3f} s')}")
+        if not lead_ok:
+            bad.append(f"lead-in quiet {_f(out['lead_quiet'], '{:.2f}')}, first step starts at {out['start_frac']:.0%}")
+    out["ok"] = not bad
+    out["why"] = "; ".join(bad)
+    out["text"] = (" ".join(f"{_f(st.get('hz'), '{:.0f}')}/{_f(st.get('ms'), '{:.0f}')}ms/{_f(st.get('dev'), '{:.0f}')}"
+                            for st in out["steps"])
+                   + f"; hold {_f(out.get('hold_s'), '{:.3f}')} s; lead-in quiet {_f(out.get('lead_quiet'), '{:.2f}')}"
+                   + f", starts at {_f(out.get('start_frac'), '{:.0%}')}")
+    return out
+
+
+def analyse_afsk(raw):
+    """`txtest afsk data LEVEL`'s mark and space deviation (sdrtx's afsk), 0.3 s in, 0.5 s clear of the end."""
+    k = _keyed_dev(raw)
+    if not k:
+        return dict(ok=False, why="no carrier on the SDR", text="no carrier on the SDR")
+    dev, fs = k["dev"], k["fs"]
+    a, b = int(0.3 * fs), len(dev) - int(0.5 * fs)
+    if b - a < int(1.0 * fs):
+        return dict(ok=False, why=f"keyed only {len(dev) / fs:.2f} s", text=f"keyed only {len(dev) / fs:.2f} s")
+    with quiet(os.devnull):
+        r = sdrtx.afsk(dev[a:b], fs)
+    mk, sp = r.get(1200) or 0.0, r.get(2200) or 0.0
+    ok = mk > 0 and sp > 0
+    return dict(keyed_s=len(dev) / fs, snr_db=k["snr"], mark=mk, space=sp, mean=(mk + sp) / 2, twist_db=r.get("twist"),
+                ok=ok, why="" if ok else "no AFSK found", text=f"mark {mk:.0f} Hz, space {sp:.0f} Hz")
+
+
+def load_resume(path):
+    """--resume: a session directory's (or its sweeps.json's) measured items, {sweep: {label: item}} (the sweep
+    takes over the ones that passed and runs the rest again)."""
+    p = path if path.endswith(".json") else os.path.join(path, "sweeps.json")
+    if not os.path.exists(p):
+        raise BenchError(f"--resume: no sweeps.json in {path}")
+    j = json.load(open(p))
+    sess = os.path.basename(os.path.dirname(os.path.abspath(p)))
+    out = {}
+    for name, sw in j.items():
+        for label, it in (sw.get("items") or {}).items():
+            out.setdefault(name, {})[label] = dict(it, session=it.get("session") or sess, resumed=True)
+    return out
+
+
+def sweep_selection(cfg, names, a):
+    """[(sweep, [items to run now])] for --sweep with --from / --items / --count (resume skips are done later):
+    sweeps before the one holding --from's label are left out; it starts there; those after run whole."""
+    sel = []
+    started = not a.sweep_from
+    only = set(x for x in (a.sweep_items or "").split(",") if x)
+    for name in names:
+        items = sweep_items(cfg, name)
+        labels = [i["label"] for i in items]
+        if not started:
+            if a.sweep_from not in labels:
+                continue
+            items = items[labels.index(a.sweep_from):]
+            started = True
+        conf_only = set(cfg["sweeps"].get(name, {}).get("only") or [])
+        if only or conf_only:
+            items = [i for i in items if i["label"] in (only | conf_only)]
+        sel.append((name, items))
+    if not started:
+        raise BenchError(f"--from {a.sweep_from}: no such item in {', '.join(names)}")
+    return sel
+
+
+def parse_sweeps(spec):
+    names = SWEEP_NAMES if spec == "all" else [x for x in spec.split(",") if x]
+    for n in names:
+        if n not in SWEEP_NAMES:
+            sys.exit(f"no sweep {n!r}; the sweeps: {', '.join(SWEEP_NAMES)} (or all)")
+    return names
+
+
+def estimate_sweep(cfg, name, n, overhead_s=1.5):
+    """(wall s, keyed s, counted s) of n items of a sweep at the duty limits, from a fresh limiter (the bench's own
+    simulated on a virtual clock): each item's set-up and analysis `overhead_s`, the SDR's lead, the key-up, the tail."""
+    clk = FakeClock()
+    d = DutyLimiter(cfg.get("duty"), clk, out=lambda *_: None)
+    sc = cfg["sweeps"]
+    lead = sc.get(name, {}).get("lead_s", sc["lead_s"])
+    tail = sc.get(name, {}).get("tail_s", sc["tail_s"])
+    key_s, extra = sweep_key_s(cfg, name)
+    probe = name == "refusals-wide"
+    t0 = clk.time()
+    for _ in range(n):
+        clk.sleep(overhead_s)
+        planned = d.planned(key_s, extra)
+        d.wait(planned, "probe" if probe else "burst", name, lead)
+        clk.sleep(lead)
+        d.admit(planned, "probe" if probe else "burst", name)
+        t = clk.time()
+        clk.sleep(key_s)
+        d.record(name, "probe" if probe else "burst", dict(accepted=not probe, t_on=t, t_off=clk.time()), t, extra)
+        clk.sleep(tail)
+    s = d.summary()
+    return clk.time() - t0, s["keyed_s"], s["counted_s"]
+
+
 # ---- The bench ----
 
 
@@ -630,6 +1116,9 @@ class Bench:
         self.restore_notes = []
         self.saved = None
         self.out = log or say
+        self.duty = DutyLimiter(cfg.get("duty"), self.clock, self.out)
+        self.info = {}
+        self.extra_settings = []  # settings a sweep changes, saved and put back (0 8 4 2)
 
     # -- gates --
     def gate(self, what, ok, detail=""):
@@ -711,8 +1200,10 @@ class Bench:
             sv["vfo"] = s
         sv["end_tone"] = self.setting(END_TONE)
         sv["timeout"] = self.setting(TX_TIMEOUT)
+        sv["extra"] = {p: self.setting(p) for p in self.extra_settings}
         self.saved = sv
-        self.out(f"saved: {s['line']}; active {sv['active']}; end tone {sv['end_tone']}; TX timeout {sv['timeout']}")
+        self.out(f"saved: {s['line']}; active {sv['active']}; end tone {sv['end_tone']}; TX timeout {sv['timeout']}"
+                 + "".join(f"; {p} {v}" for p, v in sv["extra"].items()))
         return sv
 
     def restore(self):
@@ -727,6 +1218,8 @@ class Bench:
         steps.append(("slot", " ".join(w for w in words if w)))
         steps.append(("end tone", f"set {END_TONE} {sv['end_tone']}"))
         steps.append(("TX timeout", f"set {TX_TIMEOUT} {sv['timeout']}"))
+        for p, v in (sv.get("extra") or {}).items():
+            steps.append((p, f"set {p} {v}"))
         if sv["active"]:
             steps.append(("active slot", f"slot {sv['active']} active"))
         for what, line in steps:
@@ -760,12 +1253,16 @@ class Bench:
             self.radio.term(f"set {TX_TIMEOUT} {self.cfg['timeout_raise']}")
 
     # -- keying --
-    def key_session(self, seconds, purpose, alive_s=None, stop_on_unkey=True):
+    def key_session(self, seconds, purpose, alive_s=None, stop_on_unkey=True, kind="burst", expect_refusal=False,
+                    extra_tail=0.0):
         """Key (LINK-20), keepalives every 0.5 s (only for the first `alive_s` s if given), KEY off after `seconds`;
-        always KEY off in `finally`. Times on the bench's clock."""
-        ev = dict(purpose=purpose, t_on=None, accepted=None, refused=None, t_last_alive=None, unkeyed=None,
+        always KEY off in `finally`. The duty limit admits it first and logs it after (kind: burst, suite, timeout,
+        probe). expect_refusal: a refusal probe, KEY off at once if the radio keys. Times on the bench's clock."""
+        ev = dict(purpose=purpose, kind=kind, t_on=None, accepted=None, refused=None, t_last_alive=None, unkeyed=None,
                   t_unkeyed=None, t_off=None, off_answered=None)
         c = self.clock
+        self.duty.admit(self.duty.planned(KEY_ANSWER_S if expect_refusal else seconds, extra_tail), kind, purpose)
+        t_sent = c.time()
         try:
             self.keyed = True
             r = self.radio.key_on(self.slot_code)
@@ -780,6 +1277,9 @@ class Bench:
                 return ev
             else:
                 ev["accepted"] = True
+            if expect_refusal:
+                self.out("  the radio KEYED a key-up it must refuse: KEY off at once")
+                return ev
             stop = ev["t_on"] + seconds
             while c.time() < stop:
                 if alive_s is None or c.time() < ev["t_on"] + alive_s:
@@ -793,9 +1293,12 @@ class Bench:
                         break
                 c.sleep(min(0.5, max(stop - c.time(), 0)))
         finally:
-            ev["off_answered"] = self.radio.key_off()
-            ev["t_off"] = c.time()
-            self.keyed = False
+            try:
+                ev["off_answered"] = self.radio.key_off()
+            finally:
+                ev["t_off"] = c.time()
+                self.keyed = False
+                ev["duty"] = self.duty.record(purpose, kind, ev, t_sent, extra_tail)
         return ev
 
     def emergency_unkey(self):
@@ -805,15 +1308,19 @@ class Bench:
             self.keyed = False
 
     # -- the steps --
-    def capture_keyed(self, mhz, key_s, path, purpose, alive_s=None, stop_on_unkey=True, lead=None, tail=None):
+    def capture_keyed(self, mhz, key_s, path, purpose, alive_s=None, stop_on_unkey=True, lead=None, tail=None,
+                      kind="burst", expect_refusal=False, extra_tail=0.0):
         lead = self.cfg["sdr_lead_s"] if lead is None else lead
         tail = self.cfg["sdr_tail_s"] if tail is None else tail
         total = lead + key_s + tail
+        # The duty limit's wait comes before the SDR starts (its lead overlaps the rest); key_session admits again.
+        self.duty.wait(self.duty.planned(KEY_ANSWER_S if expect_refusal else key_s, extra_tail), kind, purpose, lead)
         self.sdr.start(mhz, total, path)
         t0 = self.clock.time()
         try:
             self.clock.sleep(lead)
-            ev = self.key_session(key_s, purpose, alive_s=alive_s, stop_on_unkey=stop_on_unkey)
+            ev = self.key_session(key_s, purpose, alive_s=alive_s, stop_on_unkey=stop_on_unkey, kind=kind,
+                                  expect_refusal=expect_refusal, extra_tail=extra_tail)
             self.clock.sleep(max(t0 + total - self.clock.time(), 0))
             raw = self.sdr.finish()
         except BaseException:
@@ -831,7 +1338,7 @@ class Bench:
             raise BenchError(f"txtest suite not armed: {armed.strip()}")
         self.gate_key(self.cfg["test_freqs"], name)
         path = os.path.join(sess_dir, name + ".u8")
-        ev, raw = self.capture_keyed(mhz, self.cfg["suite_key_s"], path, name)
+        ev, raw = self.capture_keyed(mhz, self.cfg["suite_key_s"], path, name, kind="suite")
         if ev["refused"]:
             raise BenchError(f"{name}: KEY refused: {ev['refused']}")
         self.radio.term("txtest off")
@@ -840,7 +1347,6 @@ class Bench:
     def run_refusals(self, sess_dir):
         out = []
         L = self.slot_letter
-        allowed = [r["mhz"] for r in self.cfg["refusals"]]
         for r in self.cfg["refusals"]:
             f = r["mhz"]
             self.out(f"\n== refusal at {f:.3f} MHz (expect: {r['reason']})")
@@ -851,9 +1357,10 @@ class Bench:
                 res.update(ok=False, why=f"couldn't tune: {e}")
                 out.append(res)
                 continue
-            self.gate_key(allowed, f"refusal {f:.3f}")
+            self.gate_key([f], f"refusal {f:.3f}")
             path = os.path.join(sess_dir, f"refusal-{f:.3f}.u8")
-            ev, raw = self.capture_keyed(f, 1.0, path, f"refusal {f:.3f}", lead=1.5, tail=1.5)
+            ev, raw = self.capture_keyed(f, 1.0, path, f"refusal {f:.3f}", lead=1.5, tail=1.5, kind="probe",
+                                         expect_refusal=True)
             runs = carrier_runs(raw)
             reason_ok = bool(ev["refused"]) and r["reason"].lower() in ev["refused"].lower()
             res.update(refused=ev["refused"], accepted=ev["accepted"], carrier=[list(x) for x in runs],
@@ -895,7 +1402,7 @@ class Bench:
         try:
             self.gate_key(self.cfg["test_freqs"], "timeout")
             path = os.path.join(sess_dir, "timeout.u8")
-            ev, raw = self.capture_keyed(run["mhz"], tt["key_s"], path, "timeout", stop_on_unkey=False)
+            ev, raw = self.capture_keyed(run["mhz"], tt["key_s"], path, "timeout", stop_on_unkey=False, kind="timeout")
         finally:
             with contextlib.suppress(Exception):
                 self.radio.term(f"set {TX_TIMEOUT} {self.cfg['timeout_raise']}")
@@ -904,9 +1411,151 @@ class Bench:
         self.out(f"  {'pass' if res['ok'] else 'FAIL'}: {res['text']}")
         return res
 
+    # -- the sweeps (--sweep) --
+    def run_sweeps(self, sess_dir, selection, resume=None, count=None):
+        """Each selected sweep's items, one short key-up each through the duty limit; each item's result saved to
+        sweeps.json as it comes (what --resume reads); the extras' "sweep:NAME" each."""
+        out = {}
+        prog_path = os.path.join(sess_dir, "sweeps.json")
+        prog = {}
+        prior = load_resume(resume) if resume else {}
+        for name, items in selection:
+            sc = dict(self.cfg["sweeps"], **self.cfg["sweeps"].get(name, {}))
+            all_items = sweep_items(self.cfg, name)
+            labels = [i["label"] for i in all_items]
+            done = {k: v for k, v in prior.get(name, {}).items() if k in labels and v.get("ok")}  # failures run again
+            todo = [i for i in items if i["label"] not in done]
+            if count is not None:
+                todo = todo[:count]
+            res = dict(name=name, total=len(labels), resumed_from=os.path.basename(os.path.normpath(resume)) if resume else None)
+            self.out(f"\n== sweep {name}: {len(todo)} of its {len(labels)} items now"
+                     + (f" ({len(done)} from {res['resumed_from']})" if done else ""))
+            prog[name] = dict(items={})
+            now = {}
+            why_not = self.sweep_prepare(name, sc)
+            if why_not:
+                self.out(f"  not run: {why_not}")
+                res.update(ok=False, why=why_not, items=list(done.values()), complete=False, run=0)
+                out[f"sweep:{name}"] = res
+                continue
+            d = os.path.join(sess_dir, "sweeps", name)
+            os.makedirs(d, exist_ok=True)
+            try:
+                for it in todo:
+                    r = self.sweep_item(name, sc, it, d)
+                    r.update(label=it["label"], session=os.path.basename(os.path.normpath(sess_dir)))
+                    now[it["label"]] = r
+                    prog[name]["items"][it["label"]] = jsonable(r)
+                    json.dump(prog, open(prog_path, "w"), indent=1)
+                    self.out(f"  {it['label']:>14s}  {'ok  ' if r.get('ok') else 'FAIL'}  {r.get('text', '')}"
+                             + (f"  ({r['why']})" if r.get("why") and not r.get("ok") else ""))
+            finally:
+                self.sweep_finish(name, sc)
+                merged = dict(done, **now)
+                res.update(items=[merged[x] for x in labels if x in merged], run=len(now),
+                           complete=all(x in merged for x in labels))
+                res["ok"] = bool(res["items"]) and all(x.get("ok") for x in res["items"])
+                out[f"sweep:{name}"] = res
+                self.out(f"  sweep {name}: {sum(1 for x in res['items'] if x.get('ok'))} of {len(res['items'])} ok"
+                         + ("" if res["complete"] else f"; {len(labels) - len(res['items'])} items not yet run "
+                            f"(partial: --resume {sess_dir} to go on)"))
+        return out
+
+    def sweep_prepare(self, name, sc):
+        """Set-up before a sweep; a reason it can't run, or None."""
+        if name == "refusals-wide":
+            ext = self.setting(EXTEND_TX)
+            if ext.strip().lower() != "off":
+                return f"Extend TX (0 8 9) is {ext}: the band plan's refusals don't hold with it on"
+        self.setup_slot(sc["mhz"], "fm")
+        return None
+
+    def sweep_finish(self, name, sc):
+        with contextlib.suppress(Exception):
+            if name == "endtones":
+                self.radio.term(f"set {END_TONE} Off")
+            elif name == "sublevel" and self.saved and SUBTONE_LEVEL in (self.saved.get("extra") or {}):
+                self.radio.term(f"set {SUBTONE_LEVEL} {self.saved['extra'][SUBTONE_LEVEL]}")
+            elif name == "afsk-level":
+                self.radio.term("txtest off")
+
+    def sweep_item(self, name, sc, it, d):
+        L = self.slot_letter
+        path = os.path.join(d, slug(it["label"]) + ".u8")
+        lead, tail = sc["lead_s"], sc["tail_s"]
+        purpose = f"{name} {it['label']}"
+        if name == "refusals-wide":
+            f = it["mhz"]
+            want = tx_expect(f, self.info.get("region"))
+            if want is None:
+                return dict(ok=True, skipped=True, expect=None, text=f"allowed in {region_of(self.info.get('region'))[0]}: not probed")
+            try:
+                self.radio.term(f"slot {L} vfo {f:.5f} fm low tone off")
+            except TermError as e:
+                return dict(ok=False, expect=want, why=f"couldn't tune: {e}", text="couldn't tune")
+            st = self.radio.slot(self.slot_n)
+            if st["freq10"] != mhz10(f):
+                return dict(ok=False, expect=want, why=f"the slot reads {st['freq10'] / 1e5:.5f} MHz: not probed",
+                            text="not probed")
+            self.gate_key([f], purpose)
+            ev, raw = self.capture_keyed(f, KEY_ANSWER_S, path, purpose, lead=lead, tail=tail, kind="probe",
+                                         expect_refusal=True)
+            runs = carrier_runs(raw)
+            said = ev.get("refused") or ""
+            reason_ok = bool(said) and want in said.lower()
+            ok = reason_ok and not runs and not ev["accepted"]
+            why = ("the radio KEYED (unkeyed at once)" if ev["accepted"] else
+                   f"refused, but not for {want}: {said!r}" if not reason_ok else
+                   f"a carrier on the SDR: {runs}" if runs else "")
+            self.sweep_capture_done(path, sc, ok)
+            return dict(ok=ok, expect=want, refused=said, accepted=bool(ev["accepted"]), carrier=[list(x) for x in runs],
+                        why=why, text=f"{said.replace('invalid: ', '') or 'not refused'}; "
+                                      f"{'no carrier' if not runs else 'CARRIER'}")
+        mhz = sc["mhz"]
+        mode = it.get("mode", "fm")
+        tone = it.get("tone", "off")
+        try:
+            if name == "sublevel":
+                self.radio.term(f"set {SUBTONE_LEVEL} {it['level']}")
+            if name == "endtones":
+                self.radio.term(f"set {END_TONE} {it['setting']}")
+            self.radio.term(f"slot {L} vfo {mhz:.5f} {mode} low txtone {tone} rxtone off")
+            if name == "afsk-level":
+                armed = self.radio.term(f"txtest afsk data {it['level']}")
+                if "armed" not in armed:
+                    return dict(ok=False, why=f"txtest not armed: {armed.strip()}", text="not armed")
+        except TermError as e:
+            return dict(ok=False, why=str(e), text="refused by the terminal")
+        st = self.gate_key(self.cfg["test_freqs"], purpose)
+        if st["tx_tone"] != tone_word(tone):
+            return dict(ok=False, why=f"the slot's TX tone reads 0x{st['tx_tone']:04X}, not {tone}: not keyed",
+                        text="not keyed")
+        key_s, extra = sweep_key_s(self.cfg, name)
+        ev, raw = self.capture_keyed(mhz, key_s, path, purpose, lead=lead, tail=tail, kind="burst", extra_tail=extra)
+        if not ev.get("accepted"):
+            return dict(ok=False, why=f"KEY refused: {ev.get('refused')}", text="not keyed")
+        if name in ("ctcss", "dcs", "sublevel"):
+            r = analyse_subtone(raw, it, sc.get("tol_hz", 0.2), sc.get("min_windows", 2))
+        elif name == "endtones":
+            r = analyse_endtone(raw, it, sc)
+        else:
+            r = analyse_afsk(raw)
+        r.update({k: it[k] for k in ("hz", "code", "inverted", "typed", "level", "mode", "slug", "tone") if k in it})
+        self.sweep_capture_done(path, sc, r.get("ok"))
+        return r
+
+    def sweep_capture_done(self, path, sc, ok):
+        if ok and not sc.get("keep_captures"):
+            with contextlib.suppress(OSError):
+                os.remove(path)
+
     def on_air(self, sess_dir, runs, hello, info, flashed_dry=None):
         """Everything keyed, inside one save/restore; returns the captures and the extra checks' results."""
         caps, extras = [], {}
+        self.info = info or {}
+        selection = sweep_selection(self.cfg, parse_sweeps(self.a.sweep), self.a) if getattr(self.a, "sweep", None) else []
+        if any(n == "sublevel" for n, _ in selection):
+            self.extra_settings.append(SUBTONE_LEVEL)
         self.check_build(hello, info, flashed_dry)
         try:
             self.save_state()
@@ -918,6 +1567,9 @@ class Bench:
                 extras["keepalive"] = self.run_keepalive(sess_dir)
             if self.a.timeout:
                 extras["timeout"] = self.run_timeout(sess_dir)
+            if selection:
+                extras.update(self.run_sweeps(sess_dir, selection, getattr(self.a, "resume", None),
+                                              getattr(self.a, "count", None)))
         finally:
             self.emergency_unkey()
             self.restore()
@@ -993,6 +1645,127 @@ def _f(v, spec="{:.0f}"):
     return "-" if v is None else (spec.format(v) if isinstance(v, (int, float)) else str(v))
 
 
+def sweep_tests(ex, add, cfg=None):
+    """The sweeps' rule-tagged checks (session extras "sweep:NAME"); a sweep that didn't cover all its items names
+    its checks NAME~part (bench_rules: every rule part)."""
+    sc_all = (cfg or DEFAULTS)["sweeps"]
+    for key, sw in sorted(ex.items()):
+        if not key.startswith("sweep:") or not sw.get("items"):
+            continue
+        name = key[6:]
+        sc = dict(sc_all, **sc_all.get(name, {}))
+        sfx = "" if sw.get("complete") else "~part"
+        items = sw["items"]
+
+        def chk(it, what, ok, got):
+            return _chk(f"{it['label']}: {what}", ok, got)
+
+        if name == "refusals-wide":
+            for word, test in (("band plan", "refusal_wide_band_plan"), ("1.25 m", "refusal_wide_125m"),
+                               ("emergency", "refusal_wide_emergency")):
+                its = [x for x in items if x.get("expect") == word]
+                if not its:
+                    continue
+                cs = []
+                for x in its:
+                    said = x.get("refused") or ""
+                    cs += [chk(x, "remote KEY refused", "refused" in x and not x.get("accepted"), said or x.get("why")),
+                           chk(x, f"the reason names {word}", word in said.lower(), said),
+                           chk(x, "no carrier on the SDR", "carrier" in x and not x.get("carrier"), x.get("carrier"))]
+                add(test + sfx, cs, f"{len(its)} frequencies ({its[0]['label']}-{its[-1]['label']} MHz) refused "
+                                    f"\"{word}\", no carrier")
+        elif name == "ctcss":
+            std = [x for x in items if not x.get("typed")]
+            typed = [x for x in items if x.get("typed")]
+            tol = sc["tol_hz"]
+            if std:
+                errs = [abs(x["err_hz"]) for x in std if x.get("err_hz") is not None]
+                add("ctcss_freq" + sfx, [chk(x, f"CTCSS within {tol} Hz", x.get("err_hz") is not None
+                                             and abs(x["err_hz"]) <= tol, _f(x.get("hz"), "{:.2f} Hz")) for x in std],
+                    f"{len(std)} CTCSS tones {std[0]['label']}-{std[-1]['label']} Hz, worst {_f(max(errs) if errs else None, '{:.3f}')} Hz off")
+                devs = [x["dev"] for x in std if x.get("dev")]
+                spread = (max(devs) / min(devs) - 1) if devs and len(devs) == len(std) else None
+                add("ctcss_level" + sfx, [_chk(f"every CTCSS at one deviation (±{sc['spread']:.0%})",
+                                               spread is not None and spread <= sc["spread"], _f(spread, "{:.1%}"))],
+                    f"{len(devs)} CTCSS tones at {_f(min(devs) if devs else None)}-{_f(max(devs) if devs else None)} Hz deviation")
+            if typed:
+                add("ctcss_typed" + sfx, [chk(x, f"typed CTCSS within {tol} Hz", x.get("err_hz") is not None
+                                              and abs(x["err_hz"]) <= tol, _f(x.get("hz"), "{:.2f} Hz")) for x in typed],
+                    "typed " + ", ".join(f"{x['label']} Hz -> {_f(x.get('hz'), '{:.2f}')}" for x in typed))
+        elif name == "dcs":
+            for pol, test in ((False, "dcs_normal"), (True, "dcs_inverted")):
+                its = [x for x in items if not x.get("typed") and bool(x.get("inverted")) == pol]
+                if its:
+                    add(test + sfx, [chk(x, f"decodes {'inverted' if pol else 'normal'}, never the other polarity",
+                                         x.get("ok"), x.get("why") or x.get("decoded")) for x in its],
+                        f"{len(its)} DCS codes {'I' if pol else 'N'} ({its[0]['label']}-{its[-1]['label']}) "
+                        f"{sum(1 for x in its if x.get('ok'))} decoded {'inverted' if pol else 'normal'}")
+            std = [x for x in items if not x.get("typed")]
+            devs = [x["dev"] for x in std if x.get("dev")]
+            if std:
+                spread = (max(devs) / min(devs) - 1) if devs and len(devs) == len(std) else None
+                add("dcs_level" + sfx, [_chk(f"every DCS code at one deviation (±{sc['spread']:.0%})",
+                                             spread is not None and spread <= sc["spread"], _f(spread, "{:.1%}"))],
+                    f"{len(devs)} DCS codes at {_f(min(devs) if devs else None)}-{_f(max(devs) if devs else None)} Hz deviation")
+            typed = [x for x in items if x.get("typed")]
+            if typed:
+                add("dcs_typed" + sfx, [chk(x, "typed code decodes, its polarity only", x.get("ok"),
+                                            x.get("why") or x.get("decoded")) for x in typed],
+                    "typed " + ", ".join(f"{x['label']} {'ok' if x.get('ok') else 'FAIL'}" for x in typed))
+        elif name == "endtones":
+            steps, level, lead, hold = [], [], [], []
+            for x in items:
+                for st in x.get("steps") or [{"found": False, "want_hz": "?", "want_ms": "?"}]:
+                    w = f"{st['want_hz']} Hz"
+                    steps += [chk(x, f"{w} found, within 0.5 %", st.get("hz_ok"), _f(st.get("hz"), "{:.1f} Hz")),
+                              chk(x, f"{w} lasts {st['want_ms']} ms (±{RULE_TOL['endtone_ms']})", st.get("ms_ok"),
+                                  _f(st.get("ms"), "{:.0f} ms"))]
+                    if st.get("want_dev") or not st.get("found"):
+                        level.append(chk(x, f"{w} at about {_f(st.get('want_dev'))} Hz (±{sc['level_tol']:.0%})",
+                                         st.get("dev_ok"), _f(st.get("dev"), "{:.0f} Hz")))
+                lq, sf = x.get("lead_quiet"), x.get("start_frac")
+                lead.append(chk(x, "a silent lead-in, then the first step at full level from its start",
+                                lq is not None and lq < 0.25 and sf is not None and sf >= 0.8,
+                                f"quiet {_f(lq, '{:.2f}')}, starts at {_f(sf, '{:.0%}')}"))
+                hs = x.get("hold_s")
+                hold.append(chk(x, f"carrier held {sc['hold_s'] * 1000:.0f} ms (±{sc['hold_tol_s'] * 1000:.0f}) after it",
+                                hs is not None and abs(hs - sc["hold_s"]) <= sc["hold_tol_s"], _f(hs, "{:.3f} s")))
+            modes = sorted({x.get("mode") for x in items})
+            add("endtone_steps" + sfx, steps, f"{len(items)} end tones on a real unkey ({', '.join(modes)}): "
+                + " ".join(f"{x['label']} {'ok' if all(s.get('hz_ok') and s.get('ms_ok') for s in x.get('steps') or [{}]) else 'FAIL'}" for x in items))
+            add("endtone_level" + sfx, level, "levels: " + "; ".join(
+                f"{x['label']} " + "/".join(_f(s.get("dev")) for s in x.get("steps") or []) for x in items))
+            add("endtone_lead_in" + sfx, lead, "first step's start: " + " ".join(
+                f"{x['label']} {_f(x.get('start_frac'), '{:.0%}')}" for x in items))
+            add("endtone_hold" + sfx, hold, "hold after the tone: " + " ".join(
+                f"{x['label']} {_f(x.get('hold_s'), '{:.3f}')}" for x in items))
+        elif name == "sublevel":
+            cs = []
+            for t in sorted({x["tone"] for x in items}):
+                by = {x["level"]: x.get("dev") for x in items if x["tone"] == t}
+                lo, nm, hi = by.get("Low"), by.get("Normal"), by.get("High")
+                good = None not in (lo, nm, hi) and lo < nm * (1 - sc["min_step"]) and hi > nm * (1 + sc["min_step"])
+                cs.append(_chk(f"{t}: Low < Normal < High (steps over {sc['min_step']:.0%})", good,
+                               f"{_f(lo)} / {_f(nm)} / {_f(hi)} Hz"))
+            add("subtone_level" + sfx, cs, "Low/Normal/High: " + "; ".join(c["got"] for c in cs))
+        elif name == "afsk-level":
+            ref = next((x.get("mean") for x in items if x.get("level") == 100), None)
+            cs, prev = [], None
+            for x in sorted(items, key=lambda x: x["level"]):
+                lvl, m = x["level"], x.get("mean")
+                if lvl <= 100:
+                    want = ref * lvl / 100 if ref else None
+                    ok = m is not None and want is not None and abs(m - want) <= max(sc["tol"] * want, sc["tol_hz"])
+                    cs.append(chk(x, f"deviation {lvl} % of the 100 % one (±{sc['tol']:.0%} or {sc['tol_hz']} Hz)", ok,
+                                  f"{_f(m)} Hz, want {_f(want)}"))
+                else:
+                    cs.append(chk(x, "deviation above the level below it", m is not None and prev is not None and m > prev,
+                                  f"{_f(m)} Hz after {_f(prev)}"))
+                prev = m
+            add("afsk_level_steps" + sfx, cs, "AFSK " + ", ".join(f"{x['level']} % {_f(x.get('mean'))} Hz"
+                                                               for x in sorted(items, key=lambda x: x["level"])))
+
+
 def rule_tests(session, runs):
     """The rule-tagged checks of one session: session.json's extras (refusals, keepalive, timeout, reboot) and each
     suite run's metrics. Each: dict(name, rules, scope {rule: part|all}, result, checks, summary, why)."""
@@ -1041,6 +1814,7 @@ def rule_tests(session, runs):
     if rb:
         add("reboot", [_chk("HELLO again, home, `dump` unchanged", rb.get("ok"), rb.get("text"))],
             f"REBOOT: {rb.get('text')}")
+    sweep_tests(ex, add, session.get("cfg"))
 
     for j in runs:
         m, name, wide = j.get("metrics") or {}, j["run"], j.get("mode") == "fm"
@@ -1334,12 +2108,45 @@ def summary_page(session, sess_dir, runs, extras, meta):
             if k in extras:
                 r = extras[k]
                 parts.append(f"<div class=card><h3>{e(title)} {pill('pass' if r['ok'] else 'FAIL')}</h3><p>{e(r['text'])}</p></div>")
+        for k, sw in extras.items():
+            if not k.startswith("sweep:"):
+                continue
+            its = sw.get("items") or []
+            nok = sum(1 for x in its if x.get("ok"))
+            sub = (f"{nok} of {len(its)} items ok, {len(its)} of {sw.get('total')} items"
+                   + ("" if sw.get("complete") else " (partial)")
+                   + (f"; resumed from {sw['resumed_from']}" if sw.get("resumed_from") else "")
+                   + (f"; not run: {sw['why']}" if sw.get("why") else ""))
+            rows = "".join(f"<tr><td>{e(x.get('label', ''))}</td><td>{e(x.get('text', ''))}"
+                           f"{' <span class=muted>(' + e(x['why']) + ')</span>' if x.get('why') and not x.get('ok') else ''}"
+                           f"{' <span class=muted>' + e(x['session']) + '</span>' if x.get('resumed') else ''}</td>"
+                           f"<td>{pill('pass' if x.get('ok') else 'FAIL')}</td></tr>" for x in its)
+            parts.append(f"<div class=card><h3>Sweep {e(k[6:])} {pill('pass' if sw.get('ok') else 'FAIL')}</h3>"
+                         f"<p class=muted>{e(sub)}</p><details{' open' if nok < len(its) else ''}><summary>"
+                         f"{len(its)} items</summary><div class=wrap><table><tr><th>item</th><th>measured</th><th></th></tr>"
+                         f"{rows}</table></div></details></div>")
     if meta.get("ui"):
         import uitest
         parts.append(uitest.ui_section(meta["ui"]))
     if meta.get("reboot"):
         r = meta["reboot"]
         parts.append(f"<h2>Reboot check {pill('pass' if r['ok'] else 'FAIL')}</h2><div class=card><p>{e(r['text'])}</p></div>")
+    du = meta.get("duty")
+    if du and du.get("log"):
+        lim = du["limits"]
+        parts.append(
+            "<h2>Duty</h2><div class=card><div class=tiles>" + "".join(
+                f"<div class=tile><div class=k>{e(k)}</div><div class=v>{e(v)}</div></div>" for k, v in (
+                    ("Key-ups", str(du["keyups"])), ("Keyed", f"{du['keyed_s']:.0f} s ({du['counted_s']:.0f} s with tails)"),
+                    ("Over", f"{du['wall_s'] / 60:.1f} min, {du['duty']:.0%}"),
+                    (f"Fullest {lim['window_s'] / 60:g} min", f"{du['peak_window_s']:.0f} s ({du['peak_window_frac']:.0%}, cap {lim['window_frac']:.0%})"),
+                    ("Longest key-up", f"{du['longest_s']:.1f} s (limit {lim['max_burst_s']:g} s; {', '.join(lim['exceptions'])} excepted)"),
+                    ("Waited", f"{du['waited_s']:.0f} s"))) + "</div>"
+            + f"<details><summary>{len(du['log'])} key-ups and key-downs</summary><div class=wrap><table><tr><th>key-up</th>"
+              "<th>key-down</th><th>keyed</th><th>counted</th><th>what</th></tr>" + "".join(
+                f"<tr><td>{e(x['key_up'][11:])}</td><td>{e(x['key_down'][11:])}</td><td class=n>{x['keyed_s']:.1f}</td>"
+                f"<td class=n>{x['counted_s']:.1f}</td><td>{e(x['purpose'])}{' (refused)' if x.get('refused') else ''}</td></tr>"
+                for x in du["log"]) + "</table></div></details></div>")
     gl = meta.get("gates", [])
     if gl:
         seen, rows = set(), []
@@ -1457,8 +2264,42 @@ def plan(cfg, a, runs):
         p.append(f"timeout: `set {TX_TIMEOUT} {t['set']}`; key {t['key_s']} s with keepalives; carrier {t['expect_s']} ± {t['tol_s']} s; "
                  f"timeout back to {cfg['timeout_raise']} (then to the saved value)")
         total_key += t["key_s"]
+    sel = []
+    if getattr(a, "sweep", None):
+        try:
+            sel = sweep_selection(cfg, parse_sweeps(a.sweep), a)
+        except BenchError as e:
+            sys.exit(str(e))
+        sc = cfg["sweeps"]
+        for name, items in sel:
+            key_s, extra = sweep_key_s(cfg, name)
+            n = len(items) if a.count is None else min(len(items), a.count)
+            wall, keyed, counted = estimate_sweep(cfg, name, n)
+            what = {"refusals-wide": "`slot A vfo F fm low tone off`, remote KEY on: refused with the band plan's "
+                                     "reason for the radio's region (ones it allows aren't probed), no carrier; "
+                                     "KEY off at once if it keys",
+                    "ctcss": f"`slot A vfo {sc['mhz']:.3f} fm low txtone T rxtone off`: the tone within "
+                             f"{sc['ctcss']['tol_hz']} Hz, every tone at one deviation",
+                    "dcs": f"`... txtone DnnnN|I`: the code decoded with its own polarity only",
+                    "endtones": "`set 0 8 5 4 X`, FM then NFM: on the unkey each step's Hz, ms and level (TONE-19.4), "
+                                "the silent lead-in, the 400 ms hold",
+                    "sublevel": "`set 0 8 4 2 Low|Normal|High` on 100.0 and D023N: the deviation steps",
+                    "afsk-level": "`txtest afsk data L`: deviation in proportion to L"}[name]
+            p.append(f"sweep {name}: {n} items ({items[0]['label']} ... {items[-1]['label']}"
+                     + (f", --count {a.count}" if a.count is not None else "") + f"), key-ups of {key_s:g} s; {what}; "
+                     f"about {wall / 60:.0f} min, {keyed:.0f} s keyed ({counted:.0f} s with tails) at the duty limits")
+            total_key += keyed
+        if getattr(a, "resume", None):
+            p.append(f"--resume {a.resume}: items measured there are taken over, not run again")
+    d = cfg["duty"]
+    p.append(f"duty limit (DutyLimiter, every key-up): at most {d['max_burst_s']:g} s a key-up with its "
+             f"{d['unkey_tail_s']:g} s unkey tail ({', '.join(d['exceptions'])} excepted), then a rest of "
+             f"{d['rest_factor']:g}x; at most {d['window_frac']:.0%} of any {d['window_s'] / 60:g} min keyed (waits "
+             "printed); refusal probes " + ("rest too" if d["probes_rest"] else "don't wait") + "; every key-up "
+             "logged in session.json (duty)")
     p.append("restore (finally, whatever happened): KEY off, `txtest off`, the slot's VFO (freq, mode, power, tones), "
-             "end tone, TX timeout, the active slot; check the slot reads back as saved")
+             "end tone, TX timeout" + (", 0 8 4 2" if any(n == "sublevel" for n, _ in sel) else "")
+             + ", the active slot; check the slot reads back as saved")
     p.append(f"analyse each capture (sdrsuite), store under {cfg['results']}/<date-time>_<build>/, compare with the newest "
              "earlier run of the same configuration, write summary.html")
     say("dry plan (nothing is touched):")
@@ -1477,8 +2318,10 @@ class FakeRadio:
     BANDS = [(144.0, 148.0), (420.0, 450.0)]
 
     def __init__(self, clock, version="v0.1.0", rx_only=False, hold_answers=False, offset=0, cable=True,
-                 ignore_freq=False, stuck_power=None, fail_alive_after=None, build="not given"):
+                 ignore_freq=False, stuck_power=None, fail_alive_after=None, build="not given", region=2, leaky=(),
+                 dcs_bug=False):
         self.build = build
+        self.region, self.leaky, self.dcs_bug = region, set(leaky), dcs_bug
         self.clock, self.version, self.rx_only, self.hold, self.cable = clock, version, rx_only, hold_answers, cable
         self.ignore_freq, self.stuck_power, self.fail_alive_after = ignore_freq, stuck_power, fail_alive_after
         self.slots = [dict(ch=None, freq=146.52, mode="FM", power="low", tx="100.0", rx="off", offset=offset),
@@ -1486,7 +2329,8 @@ class FakeRadio:
                       dict(ch=None, freq=118.95, mode="AM", power="low", tx="off", rx="off", offset=0)]
         self.vfo_b = dict(ch=None, freq=446.0, mode="FM", power="low", tx="off", rx="off", offset=0)
         self.active = 0
-        self.set = {END_TONE: "Beep", TX_TIMEOUT: "60 s"}
+        self.set = {END_TONE: "Beep", TX_TIMEOUT: "60 s", SUBTONE_LEVEL: "Normal", EXTEND_TX: "Off"}
+        self.set0 = dict(self.set)
         self.txtest = None
         self.key = None  # dict(on, last, slot, kind)
         self.carriers = []  # (t_on, t_off, mhz, kind)
@@ -1501,7 +2345,7 @@ class FakeRadio:
         return dict(protocol=2, version=self.version, build=self.build, bench=self.build == "tx-dry")
 
     def info(self):
-        return dict(version=self.version, channels=21, zones=6, presets=4, region=2, callsign="TEST")
+        return dict(version=self.version, channels=21, zones=6, presets=4, region=self.region, callsign="TEST")
 
     def _line(self, n):
         s = self.slots[n]
@@ -1522,15 +2366,18 @@ class FakeRadio:
                 if int(re.match(r"\d+", self.set[TX_TIMEOUT]).group()) < 90:
                     raise TermError("txtest suite: the suite runs 60 s: set the TX timeout (0 8 1 1) to 90 s or more first")
                 self.txtest = "suite"
+            elif len(w) > 1 and w[1] == "afsk":
+                self.txtest = ("afsk", int(w[-1]) if w[-1].isdigit() else 100)
             elif len(w) > 1 and w[1] == "off":
                 self.txtest = None
             return f"  txtest: {'suite at 100 % armed for the next PTT key-up' if self.txtest else 'off (nothing armed)'}\n"
         if w[0] == "get":
             p = " ".join(w[1:])
-            return f"{p} {'End tone' if p == END_TONE else 'TX timeout'}: {self.set[p]}\n"
+            names = {END_TONE: "End tone", TX_TIMEOUT: "TX timeout", SUBTONE_LEVEL: "Subtone level", EXTEND_TX: "Extend TX"}
+            return f"{p} {names.get(p, 'x')}: {self.set[p]}\n"
         if w[0] == "set":
-            p = " ".join(w[1:5])
-            self.set[p] = " ".join(w[5:])
+            p = next(k for k in self.set if line.startswith(f"set {k} "))
+            self.set[p] = line[len(f"set {p} "):]
             return f"{p} x: {self.set[p]}\n"
         if w[0] == "slot":
             if len(w) == 1:
@@ -1569,17 +2416,16 @@ class FakeRadio:
     def slot(self, n):
         s = self.slots[n]
         return dict(active=self.active == n, channel=s["ch"], freq10=mhz10(s["freq"]), mode=["FM", "NFM", "AM"].index(s["mode"]),
-                    power=["low", "mid", "high"].index(s["power"]), rx_tone=0 if s["rx"] == "off" else 1,
-                    tx_tone=0 if s["tx"] == "off" else 1, offset=s["offset"], split=False, aprs=False, scanning=False)
+                    power=["low", "mid", "high"].index(s["power"]), rx_tone=tone_word(s["rx"]),
+                    tx_tone=tone_word(s["tx"]), offset=s["offset"], split=False, aprs=False, scanning=False)
 
     def _refuse(self, f):
-        if abs(f - 243.0) < 0.001 or abs(f - 121.5) < 0.001:
-            return "invalid: emergency frequency: only PTT on the radio, twice"
-        if 222 <= f <= 225:
-            return "invalid: 1.25 m locked"
-        if not any(a <= f <= b for a, b in self.BANDS):
-            return "invalid: outside the band plan"
-        return None
+        """The radio's reasons (remote.rs, transmit.rs) by the band plan; `leaky` frequencies a broken radio keys."""
+        if any(abs(f - x) < 1e-6 for x in self.leaky):
+            return None
+        why = tx_expect(f, self.region)
+        return {"emergency": "invalid: emergency frequency: only PTT on the radio, twice", "1.25 m": "invalid: 1.25 m locked",
+                "band plan": "invalid: outside the band plan", None: None}[why]
 
     def key_on(self, slot_code):
         self.calls.append("KEY on")
@@ -1588,7 +2434,10 @@ class FakeRadio:
         if why:
             return 9, why
         t = self.clock.time()
-        self.key = dict(on=t, last=t, mhz=s["freq"], kind="suite" if self.txtest else "carrier")
+        kind = "suite" if self.txtest == "suite" else "afsk" if self.txtest else "carrier"
+        sig = dict(kind=kind, tone=s["tx"], mode=s["mode"], level=self.set[SUBTONE_LEVEL], endtone=self.set[END_TONE],
+                   afsk=self.txtest[1] if kind == "afsk" else None, dcs_bug=self.dcs_bug)
+        self.key = dict(on=t, last=t, mhz=s["freq"], kind=kind, sig=sig)
         self.txtest = None
         return None if self.hold else (0, "")
 
@@ -1600,7 +2449,7 @@ class FakeRadio:
         tmo = int(re.match(r"\d+", self.set[TX_TIMEOUT]).group())
         end = min(k["last"] + 2.0, k["on"] + tmo)
         if t >= end:
-            self.carriers.append((k["on"], end, k["mhz"], k["kind"]))
+            self.carriers.append((k["on"], end, k["mhz"], k["kind"], dict(k["sig"], t_off=end)))
             self.key = None
             msg = "invalid: TX timeout" if end == k["on"] + tmo else "invalid: keepalive lost: unkeyed"
             self.unkey_msgs.append(msg)
@@ -1623,9 +2472,58 @@ class FakeRadio:
         self.calls.append("KEY off")
         self._check()
         if self.key:
-            self.carriers.append((self.key["on"], self.clock.time(), self.key["mhz"], self.key["kind"]))
+            k, t = self.key, self.clock.time()
+            # TX-47: a let-go unkey plays the end tone (a voice key-up, after a 200 ms lead-in), then holds 400 ms
+            seq = 0.0
+            if k["kind"] == "carrier" and k["sig"]["endtone"] != "Off":
+                seq = 0.2 + sum(ms for _, ms in dict(END_TONES)[dict(ENDTONE_SETTINGS)[k["sig"]["endtone"]]]) / 1000
+            hold = 0.0 if k["kind"] == "suite" else seq + 0.4
+            self.carriers.append((k["on"], t + hold, k["mhz"], k["kind"], dict(k["sig"], t_off=t)))
             self.key = None
         return True
+
+
+FAKE_SUB = dict(ctcss=800.0, dcs=700.0, ctcss_byte=0x40, dcs_byte=0x38)  # the fake's calibration
+
+
+def fake_dev(sig, tt, rel_off, rng):
+    """A fake key-up's deviation (Hz) at tt s after its key-up, KEY off at rel_off: the sub-tone at the fake's
+    calibration scaled by 0 8 4 2 (the byte +-0x0F CTCSS, +-0x14 DCS; `dcs_bug` sends a normal code inverted);
+    `txtest afsk data L` flags at L % of 3 kHz until KEY off, else a little room noise on the mic; after KEY off the
+    end tone's steps after a 200 ms lead-in at TONE-19.4's levels; NFM halves it all."""
+    out = np.zeros(len(tt))
+    before = tt < rel_off
+    if sig["kind"] == "afsk":
+        nb = int(max(tt.max(), 0) * 1200) + 2
+        flag = (0x7E >> (np.arange(nb) % 8)) & 1
+        hz = np.where((np.cumsum(flag == 0) % 2) == 0, 1200.0, 2200.0)
+        ph0 = np.concatenate([[0.0], np.cumsum(2 * np.pi * hz / 1200)])
+        b = np.clip(np.floor(tt * 1200).astype(int), 0, nb - 1)
+        out += np.where(before, sig["afsk"] / 100 * 3000 * np.sin(ph0[b] + 2 * np.pi * hz[b] * (tt - b / 1200)), 0)
+    else:
+        out += np.where(before, rng.normal(0, 15, len(tt)), 0)
+    tone = sig.get("tone") or "off"
+    if tone != "off":
+        m = re.fullmatch(r"D([0-7]{3})([NI])", tone)
+        if m:
+            k = {"Low": -1, "Normal": 0, "High": 1}[sig.get("level", "Normal")]
+            amp = FAKE_SUB["dcs"] * (FAKE_SUB["dcs_byte"] + 0x14 * k) / FAKE_SUB["dcs_byte"]
+            inv = m.group(2) == "I" or sig.get("dcs_bug", False)
+            w = sdrsuite.dcs_codeword(int(m.group(1), 8), inv)
+            bit = np.floor(tt * 134.4).astype(int) % 23
+            out += np.where((w >> bit) & 1, amp, -amp)
+        else:
+            k = {"Low": -1, "Normal": 0, "High": 1}[sig.get("level", "Normal")]
+            amp = FAKE_SUB["ctcss"] * (FAKE_SUB["ctcss_byte"] + 0x0F * k) / FAKE_SUB["ctcss_byte"]
+            out += amp * np.sin(2 * np.pi * float(tone) * tt)
+    if sig["kind"] == "carrier" and sig.get("endtone", "Off") != "Off":
+        t = rel_off + 0.2
+        for hz, ms in dict(END_TONES)[dict(ENDTONE_SETTINGS)[sig["endtone"]]]:
+            m = (tt >= t) & (tt < t + ms / 1000)
+            lvl = np.interp(hz, sorted(TONE_19_4), [TONE_19_4[f] for f in sorted(TONE_19_4)])
+            out[m] += lvl * np.sin(2 * np.pi * hz * (tt[m] - t))
+            t += ms / 1000
+    return out * (0.5 if sig.get("mode") == "NFM" else 1.0)
 
 
 class FakeSdr:
@@ -1645,16 +2543,27 @@ class FakeSdr:
             raw, _ = sdrsuite.synth_iq(self.rng, pre=on, hold=max(off - on - sdrsuite.SUITE_S, 0.2),
                                        post=max(self.seconds - off, 0.2))
         else:
+            # Each carrier's modulation (fake_dev) at 64 kS/s, held over each 16 samples at FS, FM onto the carrier
+            # 700 Hz off, phase-continuous; noise everywhere.
             n = int(self.seconds * fs)
+            fd = fs // sdrtx.DEC
+            td = self.t0 + np.arange(n // sdrtx.DEC + 1) / fd
+            dev = np.zeros(len(td))
+            on = np.zeros(len(td), bool)
+            for c in cs:
+                m = (td >= c[0]) & (td < c[1])
+                on |= m
+                if len(c) > 4 and m.any():
+                    dev[m] += fake_dev(c[4], td[m] - c[0], c[4].get("t_off", c[1]) - c[0], self.rng)
             raw = np.empty(2 * n, np.uint8)
-            chunk = 1 << 20
+            chunk, ph = 1 << 20, 0.0
             for a in range(0, n, chunk):
                 idx = np.arange(a, min(a + chunk, n))
-                t = idx / fs + self.t0
-                on = np.zeros(len(idx), bool)
-                for c in cs:
-                    on |= (t >= c[0]) & (t < c[1])
-                x = np.where(on, 60.0, 0.0) * np.exp(-2j * np.pi * sdrtx.OFF * idx / fs) \
+                j = idx // sdrtx.DEC
+                d = np.where(on[j], dev[j] + 700.0, 0.0) - sdrtx.OFF
+                p = ph + 2 * np.pi * np.cumsum(d) / fs
+                ph = p[-1] % (2 * np.pi)
+                x = np.where(on[j], 60.0, 0.0) * np.exp(1j * p) \
                     + self.rng.normal(0, 1.5, len(idx)) + 1j * self.rng.normal(0, 1.5, len(idx))
                 raw[2 * a: 2 * idx[-1] + 2: 2] = np.clip(np.round(x.real + 127.5), 0, 255)
                 raw[2 * a + 1: 2 * idx[-1] + 2: 2] = np.clip(np.round(x.imag + 127.5), 0, 255)
@@ -1686,10 +2595,20 @@ class SimSdr(FakeSdr):
 # ---- Main flows ----
 
 
+def merge(base, over):
+    """`over` into `base`: dicts merged key by key (so a config can change one sweep's one number), the rest replaced."""
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
 def load_cfg(path):
     cfg = json.loads(json.dumps(DEFAULTS))
     if path:
-        cfg.update(json.load(open(path)))
+        merge(cfg, json.load(open(path)))
     return cfg
 
 
@@ -1769,7 +2688,8 @@ def finish_report(runs, extras, page):
 
 
 def do_bench(cfg, a, radio=None, sdr=None, clock=None):
-    runs = pick_runs(cfg, a.runs)
+    # --sweep alone runs no 60 s suite (give --runs too for both)
+    runs = pick_runs(cfg, "none" if getattr(a, "sweep", None) and not a.runs else a.runs)
     clock = clock or Clock()
     image = sha = None
     if a.flash:
@@ -1786,20 +2706,23 @@ def do_bench(cfg, a, radio=None, sdr=None, clock=None):
         session, sess_dir = new_session(cfg, label)
         say(f"session {sess_dir}")
         meta = dict(build=build, source="on air", port=getattr(radio, "spec", "fake"), slot=cfg["slot"],
-                    commit=host_build(), kinds=["rf"],
+                    commit=host_build(), kinds=["rf"], cfg=dict(sweeps=cfg["sweeps"]),
                     sim=not isinstance(radio, Radio) or not radio.cable)  # selftest or simulator: never recorded
         try:
             caps, extras = bench.on_air(sess_dir, runs, hello, info, flashed_dry=image)
         except SafetyError as e:
             meta.update(gates=bench.gatelog, warnings=bench.warnings + [str(e)], restore_notes=bench.restore_notes,
-                        tx_dry=bench.tx_dry, refused=str(e))
+                        tx_dry=bench.tx_dry, refused=str(e), duty=bench.duty.summary())
             json.dump(jsonable(meta), open(os.path.join(sess_dir, "session.json"), "w"), indent=1)
             say(f"\n{e}")
             raise
-        meta.update(gates=bench.gatelog, warnings=bench.warnings, restore_notes=bench.restore_notes, tx_dry=bench.tx_dry)
+        meta.update(gates=bench.gatelog, warnings=bench.warnings, restore_notes=bench.restore_notes, tx_dry=bench.tx_dry,
+                    duty=bench.duty.summary())
     finally:
         bench.emergency_unkey()
         _CURRENT.remove(bench)
+        if bench.duty.log:
+            say(bench.duty.report())
     out = []
     for c in caps:
         out.append(analyse_run(cfg, a, c["run"], c["capture"], sess_dir, session, build, events=c["events"]))
@@ -2188,6 +3111,149 @@ def selftest_auto():
 # ---- Selftest ----
 
 
+def duty_ok(log, dcfg):
+    """(ok, worst window s, rests ok, bursts ok) of a duty log against its limits."""
+    lim = dict(DEFAULTS["duty"], **dcfg)
+    spans = [(e["t_on"], e["t_on"] + e["counted_s"], e) for e in log if e["counted_s"] > 0]
+    W = lim["window_s"]
+    worst = max((sum(max(0, min(b, y) - max(b - W, x)) for x, y, _ in spans) for _, b, _ in spans), default=0)
+    rests = all(n[0] >= p[0] + p[2]["counted_s"] * (1 + lim["rest_factor"]) - 1e-6 for p, n in zip(spans, spans[1:]))
+    bursts = all(e["counted_s"] <= lim["max_burst_s"] + 1e-6 or e["kind"] in lim["exceptions"] for _, _, e in spans)
+    return worst <= lim["window_frac"] * W + 1e-6 and rests and bursts, worst, rests, bursts
+
+
+def selftest_duty(check):
+    clk = FakeClock()
+    msgs = []
+    d = DutyLimiter({}, clk, out=msgs.append)
+    try:
+        d.check_burst(d.planned(5.0), "burst", "a 5 s key-up")
+        check("duty: a 5 s key-up (+0.5 s tail) is refused", False)
+    except BenchError as e:
+        check("duty: a 5 s key-up (+0.5 s tail) is refused", "burst limit" in str(e), str(e)[:70])
+    try:
+        d.check_burst(d.planned(63.5), "suite", "suite")
+        check("duty: the 60 s suite passes as an exception", True)
+    except BenchError as e:
+        check("duty: the 60 s suite passes as an exception", False, e)
+    for _ in range(40):  # 4.0 s key-ups back to back: the rest, then the 5-min cap
+        planned = d.planned(4.0)
+        d.wait(planned, "burst", "b", lead=1.0)
+        clk.sleep(1.0)
+        d.admit(planned, "burst", "b")
+        t = clk.time()
+        clk.sleep(4.0)
+        d.record("b", "burst", dict(accepted=True, t_on=t, t_off=clk.time()), t)
+        clk.sleep(1.5)
+    ok, worst, rests, bursts = duty_ok(d.log, {})
+    check("duty: 40 key-ups of 4 s: rest 2x after each, at most 75 s in any 5 min", ok,
+          f"fullest 5 min {worst:.1f} s; rests {rests}; bursts {bursts}")
+    check("duty: the rolling cap paused them (and said so)", any(w["why"] == "window" for w in d.waits)
+          and any("would pass the 75 s cap" in m for m in msgs), f"{sum(w['why'] == 'window' for w in d.waits)} pauses")
+    s = d.summary()
+    check("duty: overall at most 25 % once the cap holds", s["counted_s"] / s["wall_s"] <= 0.26,
+          f"{s['counted_s']:.0f} s over {s['wall_s']:.0f} s")
+    w, _ = d.wait_needed(d.planned(KEY_ANSWER_S), clk.time(), "probe")
+    check("duty: a refusal probe doesn't wait", w == 0, w)
+    t = clk.time() + 1000
+    d.record("suite", "suite", dict(accepted=True, t_on=t, t_off=t + 63.5), t)
+    clk.t = t + 63.5
+    w, why = d.wait_needed(d.planned(4.0), clk.time(), "burst")
+    check("duty: after the 64 s suite a rest of 2x it", w >= 2 * 64 - 1e-6, f"{w:.0f} s ({why})")
+    e = d.record("refused", "probe", dict(accepted=False, refused="x", t_on=t, t_off=t + 0.1), t)
+    check("duty: a refused key-up counts nothing", e["counted_s"] == 0)
+    ctcss, dcs = tone_lists()
+    check("tone lists from slot.rs: 50 CTCSS, 104 DCS (as sdrsuite's)", len(ctcss) == 50 and len(dcs) == 104
+          and dcs == sdrsuite.DCS_CODES and ctcss[0] == 67.0 and ctcss[-1] == 254.1, f"{len(ctcss)}, {len(dcs)}")
+    cases = [(146.52, 1, None), (222.0, 1, "1.25 m"), (219.5, 1, "band plan"), (219.5, 2, "1.25 m"),
+             (243.025, 1, "emergency"), (243.03, 1, "band plan"), (406.125, 1, "emergency"), (146.0, 3, "band plan"),
+             (425.0, 2, "band plan"), (425.0, 1, None), (121.5, 0, "emergency"), (28.4, 1, None)]
+    bad = [(f, r, tx_expect(f, r), w) for f, r, w in cases if tx_expect(f, r) != w]
+    check("band plan mirror (txplan.rs): the expected refusals", not bad, bad)
+
+
+def selftest_sweeps(cfg, args, check, tmp):
+    c2 = json.loads(json.dumps(cfg))
+    c2["duty"]["window_s"] = 60.0  # cap 15 s a minute: the sweeps meet it
+    sw = c2["sweeps"]
+    sw["ctcss"]["only"] = ["67.0", "100.0", "254.1", "60.0"]
+    sw["dcs"]["only"] = ["D023N", "D023I", "D754I", "D000N"]
+    sw["endtones"]["only"] = [f"{x}-fm" for _, x in ENDTONE_SETTINGS] + ["quindar-nfm"]
+    sw["afsk-level"]["only"] = ["afsk-50", "afsk-100", "afsk-150"]
+    clk = FakeClock()
+    r = FakeRadio(clk, version="v0.1.0 TX DRY")
+    before = json.dumps(r.slots), dict(r.set), r.active
+    out, extras, page, bench = do_bench(c2, args(sweep="all", build="selftest-sweeps"), radio=r, sdr=FakeSdr(r, clk),
+                                        clock=clk)
+    sess = os.path.dirname(page)
+    for name in SWEEP_NAMES:
+        x = extras.get(f"sweep:{name}") or {}
+        bad = [(i["label"], i.get("why")) for i in x.get("items", []) if not i.get("ok")]
+        check(f"sweep {name}: every item measured and within its limits", x.get("ok"),
+              f"{len(x.get('items', []))} items" + (f"; {bad[:3]}" if bad else ""))
+    rw = extras["sweep:refusals-wide"]
+    probed = [i for i in rw["items"] if i.get("expect")]
+    check("refusals-wide: whole, Canada's allowed ones not probed, the rest refused with no carrier",
+          rw["complete"] and len(probed) < len(rw["items"]) and all("refused" in i for i in probed),
+          f"{len(probed)} probed of {len(rw['items'])}")
+    res = json.load(open(os.path.join(sess, "bench", "results.json")))
+    rules = res["rules"]
+    want = {"TX-1.1": ("pass", "all"), "TX-10.1": ("pass", "all"), "TX-35.1": ("pass", "all"),
+            "TONE-1.1": ("pass", "part"), "TONE-20.1": ("pass", "part"), "TONE-20.2": ("pass", "part"),
+            "TONE-19.4": ("pass", "part"), "TONE-10.4": ("pass", "part"), "TONE-16": ("pass", "part"),
+            "TERM-33.6": ("pass", "part"), "TONE-15": ("pass", "part")}
+    got = {k: (rules.get(k, {}).get("result"), rules.get(k, {}).get("scope")) for k in want}
+    check("results.json: whole sweeps ✓ their rules, partial ones ◐", got == want,
+          {k: v for k, v in got.items() if v != want[k]})
+    du = json.load(open(os.path.join(sess, "session.json")))["duty"]
+    ok, worst, rests, bursts = duty_ok(du["log"], c2["duty"])
+    check("sweeps: every key-up logged, each within 5 s, rested 2x, the 60 s window's cap held", ok and du["log"]
+          and all(e["key_up"] and e["key_down"] for e in du["log"]), f"fullest {worst:.1f} s; rests {rests}; bursts {bursts}")
+    check("sweeps: the rolling cap paused them", any(w["why"] == "window" for w in du["waits"]),
+          f"{sum(w['why'] == 'window' for w in du['waits'])} pauses, {du['waited_s']:.0f} s")
+    check("sweeps: every KEY on has its KEY off; restored (slots, settings incl. 0 8 4 2, active slot)",
+          r.calls.count("KEY on") == r.calls.count("KEY off") and r.key is None
+          and (json.dumps(r.slots), dict(r.set), r.active) == before, dict(r.set))
+    check("sweeps.json written as it went", os.path.exists(os.path.join(sess, "sweeps.json")))
+    pg = open(page).read()
+    check("summary page: the sweeps and the duty", "Sweep ctcss" in pg and "<h2>Duty</h2>" in pg)
+    # --resume with --from and --count: ctcss left out (before --from's sweep), one more DCS item, the rest taken over
+    c3 = json.loads(json.dumps(c2))
+    c3["sweeps"]["dcs"]["only"] = ["D023N", "D023I", "D025N", "D754I", "D000N"]
+    clk = FakeClock()
+    r = FakeRadio(clk, version="v0.1.0 TX DRY")
+    _, ex2, page2, _ = do_bench(c3, args(sweep="ctcss,dcs", sweep_from="D025N", count=1, resume=sess,
+                                         build="selftest-resume"), radio=r, sdr=FakeSdr(r, clk), clock=clk)
+    d2 = ex2.get("sweep:dcs") or {}
+    labels = [i["label"] for i in d2.get("items", [])]
+    check("--resume --from D025N --count 1: ctcss left out, D025N run, four taken over in order",
+          "sweep:ctcss" not in ex2 and d2.get("run") == 1 and labels == ["D023N", "D023I", "D025N", "D754I", "D000N"]
+          and sum(1 for i in d2["items"] if i.get("resumed")) == 4, f"{labels}; run {d2.get('run')}")
+    # Faults: a radio that keys at 148.000 (unkeyed at once, the check fails) and one sending D023N inverted
+    c4 = json.loads(json.dumps(c2))
+    c4["sweeps"]["refusals-wide"]["freqs"] = [148.0, 160.0]
+    c4["sweeps"]["dcs"]["only"] = ["D023N", "D023I"]
+    clk = FakeClock()
+    r = FakeRadio(clk, version="v0.1.0 TX DRY", leaky=[148.0], dcs_bug=True)
+    _, ex3, page3, _ = do_bench(c4, args(sweep="refusals-wide,dcs", build="selftest-faults"), radio=r,
+                                sdr=FakeSdr(r, clk), clock=clk)
+    it = {i["label"]: i for i in ex3["sweep:refusals-wide"]["items"]}
+    k = r.calls.index("KEY on")
+    check("fault: a radio keying 148.000 fails the check, unkeyed at once", not it["148.000"]["ok"]
+          and "KEYED" in it["148.000"]["why"] and r.calls[k + 1] == "KEY off" and it["160.000"]["ok"], it["148.000"]["why"])
+    dd = {i["label"]: i for i in ex3["sweep:dcs"]["items"]}
+    rr = json.load(open(os.path.join(os.path.dirname(page3), "bench", "results.json")))["rules"]
+    check("fault: D023N sent inverted fails TONE-20.1, D023I still passes TONE-20.2", not dd["D023N"]["ok"]
+          and dd["D023I"]["ok"] and rr["TONE-20.1"]["result"] == "fail" and rr["TONE-20.2"]["result"] == "pass",
+          dd["D023N"].get("why"))
+    # --dry-plan with the estimates
+    with quiet(os.path.join(tmp, "plan.txt")):
+        plan(cfg, args(sweep="all"), [])
+    txt = open(os.path.join(tmp, "plan.txt")).read()
+    check("--dry-plan: each sweep with its time and keyed time at the limits",
+          all(f"sweep {n}:" in txt for n in SWEEP_NAMES) and "at the duty limits" in txt, os.path.join(tmp, "plan.txt"))
+
+
 def selftest(a):
     tmp = a.out or tempfile.mkdtemp(prefix="bench-selftest-")
     ok = True
@@ -2201,7 +3267,8 @@ def selftest(a):
 
     def args(**kw):
         d = dict(runs=None, refusals=False, keepalive=False, timeout=False, i_know_its_tx_dry=False, clear_offset=False,
-                 flash=None, build=None, keep_captures=True, verbose=False, load=None)
+                 flash=None, build=None, keep_captures=True, verbose=False, load=None, sweep=None, sweep_from=None,
+                 sweep_items=None, count=None, resume=None)
         d.update(kw)
         return argparse.Namespace(**d)
 
@@ -2216,7 +3283,7 @@ def selftest(a):
             do_bench(cfg, args(runs="vhf-wide", **a_kw), radio=r, sdr=FakeSdr(r, clk), clock=clk)
             check(what, False, "it keyed")
         except SafetyError as e:
-            restored = r.slots[0]["freq"] == 146.52 and r.set == {END_TONE: "Beep", TX_TIMEOUT: "60 s"} and r.txtest is None
+            restored = r.slots[0]["freq"] == 146.52 and r.set == r.set0 and r.txtest is None
             unkeyed = r.key is None and r.calls.count("KEY on") == r.calls.count("KEY off")
             check(what, expect_in in str(e) and restored and r.key is None and unkeyed,
                   f"{str(e)[:90]}; keyed {'KEY on' in r.calls}; restored {restored}")
@@ -2310,6 +3377,11 @@ def selftest(a):
                                                                                   "fsk4.errors": "CHANGED", "tone1k.tau_ms": "missing"}, flagged)
     say("\n== --auto: the selection rules on example diffs")
     check("--auto: each example diff picks the right side", selftest_auto())
+    say("\n== the duty limit (virtual clock)")
+    selftest_duty(check)
+    say("\n== sweeps: every sweep on the fake radio and SDR (a 60 s duty window, so its cap pauses them)")
+    selftest_sweeps(cfg, args, check, tmp)
+
     say("\n".join(["", "selftest:"] + lines))
     say("selftest: " + ("all pass" if ok else "FAILED") + f"\npage: {page}\npage: {page2}")
     return ok
@@ -2382,7 +3454,19 @@ def main():
     ap.add_argument("--results", help="results root")
     ap.add_argument("--refusals", action="store_true", help="remote key refused at 160, 222, 243 MHz; no RF")
     ap.add_argument("--keepalive", action="store_true", help="keepalives stopped while keyed: carrier drop <= 2.5 s")
-    ap.add_argument("--timeout", action="store_true", help="TX timeout 30 s, keyed 45 s: carrier ~30 s")
+    ap.add_argument("--timeout", action="store_true", help="TX timeout 30 s, keyed up to 36 s: carrier ~30 s")
+    ap.add_argument("--sweep", metavar="A,B|all", help="sweeps, in this order: " + ", ".join(SWEEP_NAMES)
+                    + " (alone: no suite runs; add --runs for them)")
+    ap.add_argument("--from", dest="sweep_from", metavar="ITEM", help="with --sweep: start at this item (e.g. 151.4, "
+                    "D365N, 243.000, quindar-nfm); sweeps listed before its own are left out")
+    ap.add_argument("--items", dest="sweep_items", metavar="A,B", help="with --sweep: only these items")
+    ap.add_argument("--count", type=int, help="with --sweep: at most N items of each sweep now")
+    ap.add_argument("--resume", metavar="SESSION", help="with --sweep: take over the items an earlier session "
+                    "passed (its sweeps.json) and run the rest")
+    ap.add_argument("--sweep-mhz", type=float, help="with --sweep: the test frequency the sweeps key on (an approved "
+                    "one; default 145.495)")
+    ap.add_argument("--keep-sweep-captures", action="store_true", help="keep every sweep item's .u8 (default: the "
+                    "failures only)")
     ap.add_argument("--flash", metavar="IMAGE", help="flash this tx-dry image first (flash.py --backup)")
     ap.add_argument("--i-know-its-tx-dry", action="store_true", help="the radio runs a tx-dry build (can't be read over the link)")
     ap.add_argument("--clear-offset", action="store_true", help="clear the VFO's repeater shift by a tune to 160 MHz and back")
@@ -2411,6 +3495,14 @@ def main():
     for k in ("port", "slot", "results"):
         if getattr(a, k):
             cfg[k] = getattr(a, k)
+    if a.sweep_mhz:
+        if a.sweep_mhz not in cfg["test_freqs"]:
+            sys.exit(f"--sweep-mhz {a.sweep_mhz}: not an approved test frequency ({', '.join(map(str, cfg['test_freqs']))})")
+        cfg["sweeps"]["mhz"] = a.sweep_mhz
+    if a.keep_sweep_captures:
+        cfg["sweeps"]["keep_captures"] = True
+    if (a.sweep_from or a.sweep_items or a.count is not None or a.resume) and not a.sweep:
+        sys.exit("--from, --items, --count and --resume go with --sweep")
     if a.selftest:
         sys.exit(0 if (selftest_sim(a) if a.sim else selftest(a)) else 1)
     if a.rule_results:
@@ -2422,7 +3514,7 @@ def main():
     if a.auto or a.all or a.ui or a.rf:
         sys.exit(do_auto(cfg, a))
     if a.dry_plan:
-        plan(cfg, a, pick_runs(cfg, a.runs))
+        plan(cfg, a, pick_runs(cfg, "none" if a.sweep and not a.runs else a.runs))
         return
     if a.load:
         do_load(cfg, a)

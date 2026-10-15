@@ -234,25 +234,27 @@ def sub_band(dev, fs, a, b, rate=2000):
     return sdrtx.conv_same(x, sdrtx.lowpass(300, fs / k, 255)), fs / k
 
 
-def ctcss(x, fs):
-    """The strongest tone 60-260 Hz: frequency (parabolic peak of a zero-padded FFT) and deviation (fitted)."""
+def ctcss(x, fs, lo=60, hi=260):
+    """The strongest tone `lo`-`hi` Hz: frequency (parabolic peak of a zero-padded FFT) and deviation (fitted)."""
     w = np.hanning(len(x))
     nf = 1 << 19
     sp = np.abs(np.fft.rfft((x - x.mean()) * w, nf))
     fr = np.fft.rfftfreq(nf, 1 / fs)
-    band = (fr > 60) & (fr < 260)
+    band = (fr > lo) & (fr < hi)
     j = int(np.argmax(sp * band))
     y0, y1, y2 = np.log(sp[j - 1 : j + 2] + 1e-12)
     f = fr[j] + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2) * (fr[1] - fr[0])
     return float(f), sdrtx.fit_amp(x - x.mean(), fs, f)
 
 
-def dcs(x, fs, baud=134.4):
+def dcs_votes(x, fs, baud=134.4):
     """DCS from the sub-audio band: the bit clock (the phase with the most open eye, the rate fitted +-1 %), the
-    deviation (median |level| at the bit centres) and the code: a 23-bit window that is a codeword with its 100
-    marker, normal when a 1 bit is positive deviation. Returns (code or None, inverted, baud, deviation Hz,
-    windows that decoded / windows)."""
-    x = x - np.median(x)
+    deviation (half the distance between the 1 and 0 levels' medians at the bit centres) and every 23-bit window
+    that is a codeword with its 100 marker, normal when a 1 bit is positive deviation. Returns ({(code, inverted):
+    windows}, baud, deviation Hz, windows). Centred on the mean, not the median: a codeword can be 7 ones and 16
+    zeros (D000N), whose median is the zeros' level. A codeword's rotations are other codes' too (023 N is also
+    047 I): a code's own polarity shows as its (code, inverted) among the votes, and the other polarity's absence."""
+    x = x - np.mean(x)
     best = None
     for b in baud * (1 + np.arange(-10, 11) * 1e-3):
         per = fs / b
@@ -271,12 +273,20 @@ def dcs(x, fs, baud=134.4):
             ww = (~w & 0x7FFFFF) if inv else w
             if ww & 0xE00 == 0x800 and dcs_codeword(ww & 0x1FF) == ww:
                 votes[(ww & 0x1FF, inv)] = votes.get((ww & 0x1FF, inv), 0) + 1
-    dev = float(np.median(np.abs(v)))
+    hi, lo = v[v > 0], v[v <= 0]
+    dev = (np.median(hi) - np.median(lo)) / 2 if len(hi) and len(lo) else float(np.median(np.abs(v)))
+    return votes, float(b), float(dev), max(len(bits) - 23, 0)
+
+
+def dcs(x, fs, baud=134.4):
+    """DCS from the sub-audio band (dcs_votes): (code or None, inverted, baud, deviation Hz, windows that decoded /
+    windows), the code named as the standard ones, normal first."""
+    votes, b, dev, n = dcs_votes(x, fs, baud)
     if not votes:
-        return None, False, float(b), dev, (0, len(bits) - 23)
+        return None, False, b, dev, (0, n)
     # Every rotation of the code decodes as often: standard codes first, then normal, then the most windows.
     (code, inv), k = max(votes.items(), key=lambda kv: (kv[0][0] in DCS_CODES, not kv[0][1], kv[1]))
-    return code, inv, float(b), dev, (k, len(bits) - 23)
+    return code, inv, b, dev, (k, n)
 
 
 def attack(env, fs, t_on):
@@ -297,6 +307,41 @@ def attack(env, fs, t_on):
     I = S - d
     k90 = np.nonzero(seg[int(0.006 * fs) :] >= 0.9 * S)[0] + int(0.006 * fs)
     return dict(tau_ms=tau * 1000, start=I / S if S else 0.0, steady=float(S), t90_ms=float(k90[0] / fs * 1000) if len(k90) else float("nan"))
+
+
+def match_tones(seg, fs, want):
+    """Steps `want` [(name, Hz, ms)] found in order in `seg` (an FM deviation, Hz) by sdrtones' tracker: each dict(name,
+    want_hz, want_ms, found) and, when found, its frequency (fitted over the run's middle), length (ms), median
+    deviation, the deviation 8 ms in from each end (start, end) and where it runs (t0, t1, s into seg)."""
+    found = sdrtones.steady_tones(seg, fs)
+    out, j = [], 0
+    for name, hz, ms in want:
+        while j < len(found) and abs(found[j][2] - hz) > 40:
+            j += 1
+        if j == len(found):
+            out.append(dict(name=name, want_hz=hz, want_ms=ms, found=False))
+            continue
+        t0, t1, f, d = found[j]
+        j += 1
+        # The tracker's runs are on 20 ms windows: the frequency fitted over the run's middle, the length from the
+        # tracker's rows (a row is the tone's while its 20 ms window is mostly the tone: from 10 ms before the
+        # start to 10 ms before the end, the run then ending a window later).
+        m0, m1 = int((t0 + 0.012) * fs), int((t1 - 0.022) * fs)
+        if m1 - m0 > int(0.02 * fs):
+            x = seg[m0:m1] - np.mean(seg[m0:m1])
+            nf = 1 << 20
+            sp = np.abs(np.fft.rfft(x * np.hanning(len(x)), nf))
+            fr = np.fft.rfftfreq(nf, 1 / fs)
+            band = np.abs(fr - f) < 40
+            jj = int(np.argmax(sp * band))
+            y0, y1, y2 = np.log(sp[jj - 1 : jj + 2] + 1e-12)
+            f = fr[jj] + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2) * (fr[1] - fr[0])
+        e = tone_env(seg, fs, f, 5)
+        a_, b_ = int((t0 + 0.01) * fs), int((t1 - 0.01) * fs)  # a 20 ms window is mostly the tone 10 ms in
+        s0, s1 = e[min(a_ + int(0.008 * fs), b_)], e[max(b_ - int(0.008 * fs), a_)]
+        out.append(dict(name=name, want_hz=hz, want_ms=ms, found=True, hz=float(f), ms=(b_ - a_) / fs * 1000,
+                        dev=float(d), start=float(s0), end=float(s1), t0=a_ / fs, t1=b_ / fs))
+    return out
 
 
 @contextlib.contextmanager
@@ -461,38 +506,18 @@ def _analyse(raw, out_dir, stem, mhz, R):
         S[5] = dict(steady=steady, attack=sw, env=env[t_on - int(0.05 * fs) :], tones=[])
         a1, b1 = at(5, 1.15), at(5, section_len(5))
         seg = dev6[a1:b1] - np.median(dev6[a1:b1])
-        found = sdrtones.steady_tones(seg, fs)
         want = [(name, hz, ms) for name, ts in END_TONES for hz, ms in ts]
-        j = 0
         print("  end tones (step: Hz, length, deviation at its start / median / end):")
-        for name, hz, ms in want:
-            while j < len(found) and abs(found[j][2] - hz) > 40:
-                j += 1
-            if j == len(found):
+        for x in match_tones(seg, fs, want):
+            name, hz, ms = x["name"], x["want_hz"], x["want_ms"]
+            if not x["found"]:
                 print(f"   {name:13s} {hz} Hz  NOT FOUND")
-                S[5]["tones"].append(dict(name=name, want_hz=hz, want_ms=ms, found=False))
-                continue
-            t0, t1, f, d = found[j]
-            j += 1
-            # The tracker's runs are on 20 ms windows: the frequency fitted over the run's middle, the length from the
-            # tracker's rows (a row is the tone's while its 20 ms window is mostly the tone: from 10 ms before the
-            # start to 10 ms before the end, the run then ending a window later).
-            m0, m1 = int((t0 + 0.012) * fs), int((t1 - 0.022) * fs)
-            if m1 - m0 > int(0.02 * fs):
-                x = seg[m0:m1] - np.mean(seg[m0:m1])
-                nf = 1 << 20
-                sp = np.abs(np.fft.rfft(x * np.hanning(len(x)), nf))
-                fr = np.fft.rfftfreq(nf, 1 / fs)
-                band = np.abs(fr - f) < 40
-                jj = int(np.argmax(sp * band))
-                y0, y1, y2 = np.log(sp[jj - 1 : jj + 2] + 1e-12)
-                f = fr[jj] + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2) * (fr[1] - fr[0])
-            e = tone_env(seg, fs, f, 5)
-            a_, b_ = int((t0 + 0.01) * fs), int((t1 - 0.01) * fs)  # a 20 ms window is mostly the tone 10 ms in
-            s0, s1 = e[min(a_ + int(0.008 * fs), b_)], e[max(b_ - int(0.008 * fs), a_)]
-            ln = (b_ - a_) / fs * 1000
-            print(f"   {name:13s} {f:7.1f} Hz ({f - hz:+.1f})  {ln:4.0f} ms (step {ms})  {s0:5.0f} / {d:5.0f} / {s1:5.0f} Hz")
-            S[5]["tones"].append(dict(name=name, want_hz=hz, want_ms=ms, found=True, hz=f, ms=ln, dev=d, start=s0, end=s1, t0=a_ / fs + 1.15))
+            else:
+                print(f"   {name:13s} {x['hz']:7.1f} Hz ({x['hz'] - hz:+.1f})  {x['ms']:4.0f} ms (step {ms})  "
+                      f"{x['start']:5.0f} / {x['dev']:5.0f} / {x['end']:5.0f} Hz")
+                x["t0"] += 1.15
+                x["t1"] += 1.15
+            S[5]["tones"].append(x)
     # 6: sub-tones.
     print("\n== 6: sub-tones alone (voice, DAC1 silent), at the calibration's gains")
     if 6 in mk:
