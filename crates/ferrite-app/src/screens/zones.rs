@@ -1,26 +1,41 @@
-//! Zones (MENU 0 2 3; manual chapters 10 and 14, CHAN-6, CHAN-11, CHAN-12; C11) and one zone's settings
-//! (A12): name, in "scan all", shown in ◀▶ on home, sort by distance, resume, dwell, priority 1
-//! and 2. The knob or ◀▶ change a setting at once (MENU-16, MENU-19); # resets it (MENU-18). # on the list
-//! makes a new zone, * deletes one after asking (CHAN-12: its channels go to no zone and stay in All).
+//! Zones (MENU 0 2 3; manual chapters 10 and 14, CHAN-6, CHAN-11, CHAN-12, CHAN-27 to CHAN-30; C11) and one zone's
+//! settings (A12): name, in "scan all", shown in ◀▶ on home, sort by distance, resume, dwell, priority 1 and 2. The
+//! knob or ◀▶ change a setting at once (MENU-16, MENU-19); # resets it (MENU-18). # on the list makes a new zone,
+//! \* deletes one after asking (CHAN-12: its channels go to no zone and stay in All).
+//!
+//! The page (CHAN-27, decision 155): a compact list, one line per zone (its name, chips for the active slot's zone,
+//! "in scan all" and hidden, its channel count), and under it a preview of the selected zone: its name and state,
+//! its first four channels (name, distance, frequency) and a footer. Location shows only where it exists (CHAN-29):
+//! with a GPS fix (or the fixed position) and a channel with a position, a pinned Nearby row heads the list with
+//! the nearest one's direction and distance, and a previewed channel with a position shows how far it is. Nothing
+//! switches by itself: the page only informs.
+//!
+//! Cost: a move redraws the two rows that changed and the preview; the preview is one pass over the zone's
+//! channels (the first four drawn, the rest for the bands they span). The Nearby row's nearest channel is found
+//! again only when the fix moved about 100 m or the channels changed ([`NearCache`], 12 bytes in the App).
 
 use super::lists::*;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::ChannelStore;
-use crate::data::{Op, ZoneCfg};
+use crate::chan::{Channel, ChannelStore, FLAG_HIDDEN, MAX_CHANNELS};
+use crate::data::{Op, Pos, ZoneCfg};
 use crate::keys::{KeyEvent, Press};
 use crate::slot::chan_label;
 use crate::{App, Screen, MENU_TIMEOUT_MS};
+use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
+use ferrite_ui::assets::{ICON_GPS, UI_12, UI_12B};
+use ferrite_ui::gfx::*;
 use ferrite_ui::panel::Panel;
 use ferrite_ui::text::Buf;
+use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Zones {
     pub cur: Cursor,
-    /// 0 the list (1 unused: deleting asks with the shared confirm), 2 + row: the zone editor (A12). One byte keeps the
-    /// state six bytes.
+    /// 0 the list on a zone, 1 the list on the Nearby row (CHAN-29; deleting asks with the shared confirm), 2 + row:
+    /// the zone editor (A12). One byte keeps the state six bytes.
     pub mode: u8,
 }
 
@@ -34,7 +49,462 @@ impl Zones {
         self.mode.checked_sub(2)
     }
 
+    /// On the Nearby row (while it shows).
+    pub fn on_nearby(self) -> bool {
+        self.mode == 1
+    }
 }
+
+// ---- the page's layout (240 x 320) ----
+
+/// The list: one-line rows of 21 px from [`LIST_Y`], seven above the preview (six zones under the Nearby row).
+pub(crate) const ZROW_H: i32 = 21;
+pub(crate) const ZROWS: u16 = 7;
+/// The preview panel: from under the list (y 188) to the hint bar.
+const PV_Y: i32 = LIST_Y + ZROWS as i32 * ZROW_H;
+pub(crate) const PV_ROWS: usize = 4;
+const PV_ROW_H: i32 = 18;
+const PV_HEAD_H: i32 = 20;
+/// Preview columns: the frequency right-aligned at 232 in a column for "439.9875" (8 characters), the distance
+/// left-aligned in a column for the widest place ("NW 23.4km", 9), the name in what is left, clipped.
+pub(crate) const FREQ_W: i32 = 8 * 7;
+pub(crate) const DIST_W: i32 = 9 * 7;
+const GAP: i32 = 6;
+/// Regions: the list rows are R_ROW..; the preview's header, four rows and footer follow them.
+const R_PV: usize = R_ROW + ZROWS as usize;
+
+/// The nearest channel with a position (CHAN-29): its number, distance (m) and bearing (degrees).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Near {
+    pub num: u16,
+    pub m: u32,
+    pub deg: u16,
+}
+
+/// The Nearby row's last answer and what it was found for (key 0: not yet; num `u16::MAX`: none). 12 bytes.
+#[derive(Clone, Copy, Debug)]
+pub struct NearCache {
+    key: u32,
+    m: u32,
+    num: u16,
+    deg: u16,
+}
+
+impl NearCache {
+    pub const NONE: NearCache = NearCache { key: 0, m: 0, num: u16::MAX, deg: 0 };
+
+    fn near(&self) -> Option<Near> {
+        (self.num != u16::MAX).then_some(Near { num: self.num, m: self.m, deg: self.deg })
+    }
+}
+
+/// What the Nearby answer depends on: the fix to about 100 m (0.001 degree), the records, show hidden.
+fn near_key(here: Pos, store: &impl ChannelStore, hidden: bool) -> u32 {
+    hash(&(here.lat / 10_000, here.lon / 10_000, store.data().version(), hidden))
+}
+
+/// The place the zones page measures from: the fix, or the fixed position standing in (GPS-3).
+pub(crate) fn here(store: &impl ChannelStore) -> Option<Pos> {
+    store.data().fix().map(|f| f.pos)
+}
+
+/// Whether a channel shows in the lists (CHAN-24: hidden ones only with "show hidden").
+fn listed(c: &Channel, hidden: bool) -> bool {
+    hidden || c.flags & FLAG_HIDDEN == 0
+}
+
+/// The `k` nearest listed channels with a position, by (distance, number), into `out`; how many have one. One
+/// pass over the channels, a record read each (CHAN-15, CHAN-29).
+pub(crate) fn nearest(store: &impl ChannelStore, here: Pos, hidden: bool, out: &mut [Option<Near>]) -> u16 {
+    out.iter_mut().for_each(|o| *o = None);
+    let mut n = 0u16;
+    for num in 0..MAX_CHANNELS {
+        if store.zone_of(num).is_none() {
+            continue;
+        }
+        let Some((c, p)) = store.located(num) else { continue };
+        if !listed(&c, hidden) {
+            continue;
+        }
+        n += 1;
+        let (m, deg) = dist_bearing(here, p);
+        let new = Near { num, m, deg };
+        // insert in order; a tie goes to the lower number, which came first
+        if let Some(i) = out.iter().position(|o| o.is_none_or(|o| (m, num) < (o.m, o.num))) {
+            for j in (i + 1..out.len()).rev() {
+                out[j] = out[j - 1];
+            }
+            out[i] = Some(new);
+        }
+    }
+    n
+}
+
+/// The Nearby row (CHAN-29): the nearest listed channel with a position, with a fix; None hides the row. Found
+/// again only when [`near_key`] changed.
+pub(crate) fn nearby(app: &mut App, store: &impl ChannelStore) -> Option<Near> {
+    let here = here(store)?;
+    let key = near_key(here, store, app.set.show_hidden);
+    if app.near.key != key {
+        let mut one = [None];
+        nearest(store, here, app.set.show_hidden, &mut one);
+        let n = one[0].unwrap_or(Near { num: u16::MAX, m: 0, deg: 0 });
+        app.near = NearCache { key, m: n.m, num: n.num, deg: n.deg };
+    }
+    app.near.near()
+}
+
+/// [`nearby`] without the App's cache (the readback, LINK-19): the cached answer when it is current.
+pub(crate) fn nearby_now(app: &App, store: &impl ChannelStore) -> Option<Near> {
+    let here = here(store)?;
+    if app.near.key == near_key(here, store, app.set.show_hidden) {
+        return app.near.near();
+    }
+    let mut one = [None];
+    nearest(store, here, app.set.show_hidden, &mut one);
+    one[0]
+}
+
+// ---- the list's rows ----
+
+/// A zone row's chips (CHAN-30): the active slot's zone, "in scan all", hidden from ◀▶.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Chip {
+    Slot(u8),
+    Scan,
+    Hidden,
+}
+
+impl Chip {
+    pub(crate) fn text(self) -> &'static str {
+        match self {
+            Chip::Slot(s) => ["A", "B", "C"][s as usize % 3],
+            Chip::Scan => "SCAN",
+            Chip::Hidden => "HID",
+        }
+    }
+}
+
+/// What a zone's row shows: name, chips, channel count, and whether it is empty (dimmed).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ZoneRow {
+    pub name: crate::chan::Name,
+    pub chips: [Option<Chip>; 3],
+    pub count: u16,
+}
+
+impl ZoneRow {
+    pub(crate) fn of(app: &App, store: &impl ChannelStore, z: u8) -> ZoneRow {
+        let c = store.data().zone_cfg(z);
+        let s = app.slot(app.active);
+        ZoneRow {
+            name: store.zone_name(z).unwrap_or_default(),
+            // only the active slot's: B and C on a zone say nothing here (decision 155)
+            chips: [(s.on_channel() && s.zone == z).then_some(Chip::Slot(app.active)), c.scan_all.then_some(Chip::Scan), (!c.shown).then_some(Chip::Hidden)],
+            count: store.zone_len(z),
+        }
+    }
+
+    /// "A SCAN HID": the chips as words (the readback).
+    pub(crate) fn chip_words(&self, b: &mut Buf<16>) {
+        for c in self.chips.iter().flatten() {
+            if !b.is_empty() {
+                b.push(b" ");
+            }
+            b.push(c.text().as_bytes());
+        }
+    }
+}
+
+/// A chip's width at UI_12B: text plus 4 px each side; the slot's has its dot too.
+fn chip_w(c: Chip) -> i32 {
+    text4_width(c.text().as_bytes(), &UI_12B) + 8 + if matches!(c, Chip::Slot(_)) { 9 } else { 0 }
+}
+
+/// A chip at x on the row at y (15 px tall, the 9 px capitals centred: DISP-19). The active slot's is filled in its
+/// colour with a dot ("● A"); SCAN is amber, HID dim, outlined. On a selected row they take the row's dark text.
+fn chip(lcd: &mut impl Panel, x: i32, y: i32, c: Chip, selected: bool, bg: u16) -> i32 {
+    let wd = chip_w(c);
+    let (cy, h) = (y + 3, 15);
+    match c {
+        Chip::Slot(s) => {
+            let (fill, fg) = if selected { (BLUE_FG, w::slot_colour(s)) } else { (w::slot_colour(s), BLUE_FG) };
+            lcd.fill_r(x, cy, wd, h, 2, fill);
+            lcd.fill_r(x + 4, cy + 5, 6, 6, 3, fg);
+            lcd.text4_rows(x + 13, cy + 12, c.text().as_bytes(), &UI_12B, fg, fill, cy + 1, cy + h - 1);
+        }
+        _ => {
+            let fg = if selected { BLUE_FG } else if c == Chip::Scan { AMBER } else { DIM };
+            lcd.text4_rows(x + 4, cy + 12, c.text().as_bytes(), &UI_12B, fg, bg, cy + 1, cy + h - 1);
+            lcd.frame_r(x, cy, wd, h, 2, fg);
+        }
+    }
+    wd
+}
+
+/// One zone's line (CHAN-27): name, chips after it, the count at the right; an empty zone dimmed. In bands, with its
+/// part of the scroll cue (DISP-25). The channel browser's zone list draws its zones with it too, `h` tall.
+pub(crate) fn zone_row(lcd: &mut impl Panel, y: i32, h: i32, r: &ZoneRow, selected: bool, cue: w::Cue) {
+    ferrite_ui::canvas::banded(lcd, 0, y, 240, h, BG, |b| {
+        let bg = if selected { BLUE } else { BG };
+        let grey = r.count == 0;
+        let (fg, sub) = if selected { (BLUE_FG, BLUE_FG) } else if grey { (DIM, DIM) } else { (TEXT, SUB) };
+        b.fill(0, y, 240, h, bg);
+        let base = y + h / 2 + 5;
+        let mut cnt = Buf::<8>::new();
+        let _ = uwrite!(cnt, "{}", r.count);
+        let cw = text4_width(cnt.as_bytes(), &UI_12);
+        b.text4_rows(232 - cw, base, cnt.as_bytes(), &UI_12, sub, bg, y, y + h);
+        // the chips keep their room; the name is clipped to what is left
+        let chips: i32 = r.chips.iter().flatten().map(|&c| chip_w(c) + 4).sum();
+        let room = 232 - cw - 8 - 8 - chips;
+        let name = w::fit(r.name.as_bytes(), &UI_12, room);
+        let mut x = 8 + b.text4_rows(8, base, name, &UI_12, fg, bg, y, y + h) + 6;
+        for &c in r.chips.iter().flatten() {
+            x += chip(b, x, y + (h - ZROW_H) / 2, c, selected, bg) + 4;
+        }
+        cue.draw(b);
+    });
+}
+
+/// The Nearby row (CHAN-29): the GPS mark in green, "Nearby", and only the nearest channel's place at the right.
+fn nearby_row(lcd: &mut impl Panel, y: i32, place: &[u8], selected: bool, cue: w::Cue) {
+    ferrite_ui::canvas::banded(lcd, 0, y, 240, ZROW_H, BG, |b| {
+        let bg = if selected { BLUE } else { BG };
+        let (fg, sub, mark) = if selected { (BLUE_FG, BLUE_FG, BLUE_FG) } else { (TEXT, SUB, GREEN) };
+        b.fill(0, y, 240, ZROW_H, bg);
+        let base = y + ZROW_H / 2 + 5;
+        b.mask4(8, y + 4, &ICON_GPS, mark, None, bg);
+        b.text4_rows(24, base, b"Nearby", &UI_12, fg, bg, y, y + ZROW_H);
+        let pw = text4_width(place, &UI_12);
+        b.text4_rows(232 - pw, base, place, &UI_12, sub, bg, y, y + ZROW_H);
+        cue.draw(b);
+    });
+}
+
+// ---- the preview ----
+
+/// One previewed channel: name, place (empty without a position or a fix) and frequency (CHAN-27, CHAN-28).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) struct PvRow {
+    pub name: crate::chan::Name,
+    pub place: Buf<12>,
+    pub freq: Buf<16>,
+}
+
+/// The preview of a zone or of Nearby: header (name in capitals, state), up to four rows, the footer, and whether
+/// the distance column shows (a row has a place).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) struct Preview {
+    pub head: crate::chan::Name,
+    pub state: Buf<24>,
+    pub rows: [Option<PvRow>; PV_ROWS],
+    pub foot: Buf<40>,
+}
+
+impl Preview {
+    pub(crate) fn dist_col(&self) -> bool {
+        self.rows.iter().flatten().any(|r| !r.place.is_empty())
+    }
+}
+
+/// The bands a zone spans, as the header names them (CHAN-27): in frequency order.
+const BAND_LABELS: [(&str, Freq10, Freq10); 9] = [
+    ("HF", 0, mhz(50)),
+    ("6m", mhz(50), mhz(54)),
+    ("air", mhz(108), mhz(137)),
+    ("2m", mhz(144), mhz(148)),
+    ("marine", mhz(156), mhz(163)),
+    ("1.25m", mhz(220), mhz(225)),
+    ("70cm", mhz(420), mhz(450)),
+    ("VHF", mhz(54), mhz(300)),
+    ("UHF", mhz(300), u32::MAX),
+];
+
+fn band_bit(f: Freq10) -> u16 {
+    // the first label that holds it: a ham or service band before the plain VHF and UHF
+    BAND_LABELS.iter().position(|&(_, lo, hi)| f >= lo && f < hi).map_or(0, |i| 1 << i)
+}
+
+/// "2m · 70cm": at most three, then "+N".
+fn bands_text(bits: u16, b: &mut Buf<24>) {
+    // frequency order: HF, 6m, VHF (54-300 outside the named bands sorts by its low edge), ...
+    const ORDER: [usize; 9] = [0, 1, 7, 2, 3, 4, 5, 6, 8];
+    let total = bits.count_ones();
+    for (shown, &i) in ORDER.iter().filter(|&&i| bits & 1 << i != 0).enumerate() {
+        if shown == 3 {
+            let _ = uwrite!(b, " +{}", total - 3);
+            break;
+        }
+        if shown > 0 {
+            b.push(" \u{b7} ".as_bytes());
+        }
+        b.push(BAND_LABELS[i].0.as_bytes());
+    }
+}
+
+fn caps(s: &[u8]) -> crate::chan::Name {
+    let mut n = crate::chan::Name::new();
+    for &c in s {
+        n.push(&[c.to_ascii_uppercase()]);
+    }
+    n
+}
+
+/// A previewed row for channel `c`: its place from `here` when both it and the fix have a position.
+fn pv_row(app: &App, store: &impl ChannelStore, c: &Channel, here: Option<Pos>, near: Option<Near>) -> PvRow {
+    let mut r = PvRow { name: crate::chan::Name::from(c.name()), ..PvRow::default() };
+    if r.name.is_empty() {
+        let mut l = Buf::<32>::new();
+        chan_label(c.num, &mut l);
+        r.name.set(l.as_bytes());
+    }
+    mhz_text(c.rx, &mut r.freq);
+    let place = match near {
+        Some(n) => Some((n.m, n.deg)),
+        None => here.zip(store.position(c.num)).map(|(h, p)| dist_bearing(h, p)),
+    };
+    if let Some((m, deg)) = place {
+        place_text(m, deg, app.set.units, &mut r.place);
+    }
+    r
+}
+
+/// The preview of zone `z` (CHAN-27): one pass over its channels in number order (CHAN-10): the first four listed
+/// ones drawn, every one counted for "+N more" and the bands. Header right: "scan on", else the bands; footer: "+N
+/// more", then the first priority channel while in scan, or "scan off".
+pub(crate) fn preview_zone(app: &App, store: &impl ChannelStore, z: u8) -> Preview {
+    let hidden = app.set.show_hidden;
+    let here = here(store);
+    let cfg = store.data().zone_cfg(z);
+    let mut p = Preview { head: caps(store.zone_name(z).unwrap_or_default().as_bytes()), ..Preview::default() };
+    let (mut bits, mut listed_n, mut filled) = (0u16, 0u16, 0usize);
+    for num in 0..MAX_CHANNELS {
+        if store.zone_of(num) != Some(z) {
+            continue;
+        }
+        let Some(c) = store.get(num) else { continue };
+        bits |= band_bit(c.rx);
+        if !listed(&c, hidden) {
+            continue;
+        }
+        listed_n += 1;
+        if filled < PV_ROWS {
+            p.rows[filled] = Some(pv_row(app, store, &c, here, None));
+            filled += 1;
+        }
+    }
+    if cfg.scan_all {
+        p.state.set(b"scan on");
+    } else if bits == 0 {
+        p.state.set(b"empty");
+    } else {
+        bands_text(bits, &mut p.state);
+    }
+    let more = listed_n.saturating_sub(filled as u16);
+    if more > 0 {
+        let _ = uwrite!(p.foot, "+{} more", more);
+    }
+    let tail: Option<Buf<24>> = if cfg.scan_all {
+        cfg.pri[0].and_then(|n| store.get(n)).map(|c| {
+            let mut t = Buf::<24>::from(b"priority: ".as_slice());
+            t.push(pv_row(app, store, &c, None, None).name.as_bytes());
+            t
+        })
+    } else {
+        Some(Buf::from(b"scan off".as_slice()))
+    };
+    if let Some(t) = tail {
+        if !p.foot.is_empty() {
+            p.foot.push(" \u{b7} ".as_bytes());
+        }
+        p.foot.push(t.as_bytes());
+    }
+    p
+}
+
+/// The preview of Nearby (CHAN-29): the four nearest channels with a position, "+N more" for the rest.
+pub(crate) fn preview_nearby(app: &App, store: &impl ChannelStore) -> Preview {
+    let mut p = Preview { head: crate::chan::Name::from(b"NEARBY".as_slice()), state: Buf::from(b"nearest first".as_slice()), ..Preview::default() };
+    let Some(here) = here(store) else { return p };
+    let mut best = [None; PV_ROWS];
+    let n = nearest(store, here, app.set.show_hidden, &mut best);
+    for (slot, b) in p.rows.iter_mut().zip(best) {
+        *slot = b.and_then(|b| store.get(b.num).map(|c| pv_row(app, store, &c, None, Some(b))));
+    }
+    let shown = p.rows.iter().flatten().count() as u16;
+    if n > shown {
+        let _ = uwrite!(p.foot, "+{} more", n - shown);
+    }
+    p
+}
+
+/// A preview row's columns (CHAN-27): the name from 8 to its end, the place from its x, the frequency from its x to
+/// 232; none overlaps, whatever the name's length (it is clipped) or the frequency's.
+pub(crate) fn pv_columns(r: &PvRow, dist_col: bool) -> (&[u8], i32, i32) {
+    let fw = text4_width(r.freq.as_bytes(), &UI_12);
+    let fx = 232 - fw.max(FREQ_W);
+    let dx = if dist_col { fx - GAP - DIST_W } else { fx };
+    (w::fit(r.name.as_bytes(), &UI_12, dx - GAP - 8), dx, 232 - fw)
+}
+
+fn pv_row_draw(lcd: &mut impl Panel, y: i32, r: Option<&PvRow>, dist_col: bool) {
+    ferrite_ui::canvas::banded(lcd, 0, y, 240, PV_ROW_H, SURFACE, |b| {
+        b.fill(0, y, 240, PV_ROW_H, SURFACE);
+        let Some(r) = r else { return };
+        let base = y + 13;
+        let (name, dx, fx) = pv_columns(r, dist_col);
+        b.text4_rows(8, base, name, &UI_12, TEXT, SURFACE, y, y + PV_ROW_H);
+        if dist_col && !r.place.is_empty() {
+            let place = w::fit(r.place.as_bytes(), &UI_12, fx - GAP - dx);
+            b.text4_rows(dx, base, place, &UI_12, GREEN, SURFACE, y, y + PV_ROW_H);
+        }
+        b.text4_rows(fx, base, r.freq.as_bytes(), &UI_12, SUB, SURFACE, y, y + PV_ROW_H);
+    });
+}
+
+impl App {
+    /// The preview panel (CHAN-27): each part redrawn when it changed.
+    fn preview(&mut self, lcd: &mut impl Panel, p: &Preview) {
+        if self.dirty(R_PV, hash(&(&p.head, &p.state))) {
+            ferrite_ui::canvas::banded(lcd, 0, PV_Y, 240, PV_HEAD_H, SURFACE, |b| {
+                b.fill(0, PV_Y, 240, PV_HEAD_H, SURFACE);
+                b.fill(0, PV_Y, 240, 1, LINE);
+                let sw = text4_width(p.state.as_bytes(), &UI_12);
+                b.text4_rows(232 - sw, PV_Y + 15, p.state.as_bytes(), &UI_12, SUB, SURFACE, PV_Y + 1, PV_Y + PV_HEAD_H);
+                let name = w::fit(p.head.as_bytes(), &UI_12, 232 - sw - 8 - 8);
+                b.text4_rows(8, PV_Y + 15, name, &UI_12, SUB, SURFACE, PV_Y + 1, PV_Y + PV_HEAD_H);
+            });
+        }
+        let dist = p.dist_col();
+        for (i, r) in p.rows.iter().enumerate() {
+            if self.dirty(R_PV + 1 + i, hash(&(r, dist))) {
+                pv_row_draw(lcd, PV_Y + PV_HEAD_H + i as i32 * PV_ROW_H, r.as_ref(), dist);
+            }
+        }
+        let fy = PV_Y + PV_HEAD_H + PV_ROWS as i32 * PV_ROW_H;
+        if self.dirty(R_PV + 1 + PV_ROWS, hash(&p.foot)) {
+            ferrite_ui::canvas::banded(lcd, 0, fy, 240, w::HINT_Y - fy, SURFACE, |b| {
+                b.fill(0, fy, 240, w::HINT_Y - fy, SURFACE);
+                b.text4_rows(8, fy + 14, w::fit(p.foot.as_bytes(), &UI_12, 224), &UI_12, DIM, SURFACE, fy, w::HINT_Y);
+            });
+        }
+    }
+}
+
+/// "6 zones · 21 ch": the zones shown and every channel stored.
+pub(crate) fn head_text(store: &impl ChannelStore) -> Buf<32> {
+    let n = (0..store.zones() as u16).filter(|&i| keep(store)(i)).count();
+    let mut l = Buf::<32>::new();
+    let _ = uwrite!(l, "{} {} \u{b7} {} ch", n, if n == 1 { "zone" } else { "zones" }, store.count());
+    l
+}
+
+/// The zone list's page: with the Nearby row, one row fewer for zones.
+pub(crate) fn zone_rows(near: bool) -> u16 {
+    if near { ZROWS - 1 } else { ZROWS }
+}
+
 
 /// The editor's rows: label and help (layout as data; values from [`value`]).
 const ROWS: [(&str, &str); 8] = [
@@ -89,6 +559,18 @@ fn value(store: &impl ChannelStore, z: u8, c: &ZoneCfg, row: usize, b: &mut Buf<
     };
 }
 
+/// The editor's rows, for the readback (LINK-19).
+pub(crate) const EDITOR_ROWS: usize = ROWS.len();
+
+/// Editor row `i`: its label, value and whether it differs from the default (MENU-12).
+pub(crate) fn editor_row(store: &impl ChannelStore, z: u8, i: usize) -> (&'static str, Buf<24>, bool) {
+    let c = store.data().zone_cfg(z);
+    let (mut v, mut dv) = (Buf::<24>::new(), Buf::<24>::new());
+    value(store, z, &c, i, &mut v);
+    value(store, z, &DEFAULT, i, &mut dv);
+    (ROWS[i].0, v, i > 0 && v != dv)
+}
+
 /// A setting stepped by d.
 fn change(store: &impl ChannelStore, z: u8, c: &mut ZoneCfg, row: usize, d: i32) {
     match row {
@@ -112,6 +594,32 @@ fn change(store: &impl ChannelStore, z: u8, c: &mut ZoneCfg, row: usize, d: i32)
     }
 }
 
+impl Zones {
+    /// One row up (-1) or down (+1) through the Nearby row (when it shows) and the zones, wrapping (CHAN-29).
+    fn step(self, near: bool, store: &impl ChannelStore, dir: i32) -> Zones {
+        let n = store.zones() as u16;
+        let k = keep(store);
+        let vis = zone_rows(near);
+        let first = (0..n).find(|&i| k(i));
+        let last = (0..n).rev().find(|&i| k(i));
+        if self.on_nearby() && near {
+            return match if dir > 0 { first } else { last } {
+                Some(i) => Zones { cur: Cursor { sel: i, top: self.cur.top }.shown(n, vis, &k), mode: 0 },
+                None => self,
+            };
+        }
+        if near && (dir < 0 && Some(self.cur.sel) == first || dir > 0 && Some(self.cur.sel) == last) {
+            return Zones { mode: 1, ..self };
+        }
+        Zones { cur: self.cur.step(dir, n, vis, &k).shown(n, vis, &k), mode: 0 }
+    }
+
+    /// The list as it shows now: off the Nearby row when it has gone.
+    fn settled(self, near: bool) -> Zones {
+        if self.on_nearby() && !near { Zones { mode: 0, ..self } } else { self }
+    }
+}
+
 impl View for Zones {
     fn name(self) -> &'static str {
         if self.edit().is_some() { "Zone editor" } else { "Zones" }
@@ -127,30 +635,34 @@ impl View for Zones {
 
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
-        let mut s = self;
-        let z = self.cur.sel as u8;
+        let near = self.edit().is_none() && nearby(app, store).is_some();
+        let mut s = self.settled(near);
+        let z = s.cur.sel as u8;
         let d = store.data();
-        match (e.key, e.press, self.edit()) {
+        match (e.key, e.press, s.edit()) {
             (Key::Up | Key::Down, Short | Repeat, _) => {
                 let dir = if e.key == Key::Up { -1 } else { 1 };
-                match self.edit() {
+                match s.edit() {
                     Some(r) => s.mode = 2 + (r as i32 + dir).rem_euclid(ROWS.len() as i32) as u8,
-                    None => s.cur = self.cur.step(dir, store.zones() as u16, ROWS1, &keep(store)),
+                    None => s = s.step(near, store, dir),
                 }
             }
+            // OK on Nearby: the channel browser's Nearby view (CHAN-29)
+            (Key::Menu, Short, None) if s.on_nearby() => return app.open_screen(Screen::Browse(super::browse::nearby_view(store, app.set.show_hidden))),
             (Key::Menu, Short, None) if store.zone_name(z).is_some() => s.mode = 2,
             (Key::Menu, Short, Some(0)) => return super::text::open(app, super::text::TextFor::Zone(z), store), // rename (A7)
             (Key::Hash, Short, None) => {
                 if d.request(Op::NewZone) {
                     let n = store.zones() as u16;
-                    s.cur = Cursor { sel: n - 1, top: self.cur.top }.shown(n, ROWS1, &keep(store));
-                    app.show_toast(b"New zone", store.zone_name((n - 1) as u8).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes(), false);
+                    s.cur = Cursor { sel: n - 1, top: s.cur.top }.shown(n, zone_rows(near), &keep(store));
+                    s.mode = 0;
+                    app.show_toast(b"New zone", store.zone_name((n - 1) as u8).unwrap_or_default().as_bytes(), false);
                 } else {
                     app.show_toast(b"No room", b"255 zones at most", false);
                 }
             }
             // CHAN-12, MENU-23: the shared confirm asks.
-            (Key::Star, Short, None) if store.zone_name(z).is_some() => return super::confirm::ask(app, super::confirm::Ask::DeleteZone(z)),
+            (Key::Star, Short, None) if !s.on_nearby() && store.zone_name(z).is_some() => return super::confirm::ask(app, super::confirm::Ask::DeleteZone(z)),
             (Key::Hash, Short, Some(r)) => {
                 // MENU-18: back to the default
                 let mut c = d.zone_cfg(z);
@@ -181,7 +693,14 @@ impl View for Zones {
                 store.data().request(Op::Zone(z, c));
             }
             Some(_) => {}
-            None => app.screen = Screen::Zones(Zones { cur: self.cur.step(d, store.zones() as u16, ROWS1, &keep(store)), ..self }),
+            None => {
+                let near = nearby(app, store).is_some();
+                let mut s = self.settled(near);
+                for _ in 0..d.unsigned_abs().min(255) {
+                    s = s.step(near, store, d.signum());
+                }
+                app.screen = Screen::Zones(s);
+            }
         }
     }
 
@@ -189,7 +708,12 @@ impl View for Zones {
         let store = cx.store;
         let data = store.data();
         app.page(lcd, self.edit().is_some());
-        if !app.gate((self, data.version())) {
+        // what the page shows besides its state: the records, the fix (to ~100 m), the active slot's zone, the units
+        // and "show hidden"
+        let s = app.slot(app.active);
+        let at = (app.active, s.on_channel().then_some(s.zone));
+        let fix = here(store).map(|p| (p.lat / 10_000, p.lon / 10_000));
+        if !app.gate((self, data.version(), fix, at, app.set.units, app.set.show_hidden)) {
             return;
         }
         let z = self.cur.sel as u8;
@@ -197,7 +721,7 @@ impl View for Zones {
             let c = data.zone_cfg(z);
             let mut r = Buf::<16>::new();
             let _ = uwrite!(r, "{} channels", store.zone_len(z));
-            app.list_head(lcd, store.zone_name(z).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes(), r.as_bytes());
+            app.list_head(lcd, store.zone_name(z).unwrap_or_default().as_bytes(), r.as_bytes());
             for (i, (label, _)) in ROWS.iter().enumerate() {
                 let mut v = Buf::<24>::new();
                 value(store, z, &c, i, &mut v);
@@ -210,25 +734,56 @@ impl View for Zones {
             app.help_box(lcd, 300 - 38, 34, ROWS[row as usize].1.as_bytes(), p.as_bytes());
             return;
         }
+        let near = nearby(app, store);
+        let s = self.settled(near.is_some());
         let n = store.zones() as u16;
-        let shown = (0..n).filter(|&i| keep(store)(i)).count();
-        let mut l = Buf::<16>::new();
-        let _ = uwrite!(l, "{} zones", shown);
-        app.list_head(lcd, l.as_bytes(), b"");
-        let rows = self.cur.rows(n, ROWS1, &keep(store), |row, i| {
-            let c = data.zone_cfg(i as u8);
-            let mut v = Buf::<16>::new();
-            let _ = uwrite!(v, "{}{}{} ch", if c.scan_all { "scan \u{b7} " } else { "" }, if c.shown { "" } else { "hidden \u{b7} " }, store.zone_len(i as u8));
-            app.row1(lcd, row, store.zone_name(i as u8).unwrap_or_else(|| crate::chan::Name::from(b"")).as_bytes(), v.as_bytes(), false, i == self.cur.sel, store.zone_len(i as u8) == 0);
+        let k = keep(store);
+        app.list_head(lcd, head_text(store).as_bytes(), b"");
+        let mut first = 0;
+        if let Some(nr) = near {
+            let mut place = Buf::<12>::new();
+            place_text(nr.m, nr.deg, app.set.units, &mut place);
+            if app.dirty(R_ROW, hash(&(1u8, &place, s.on_nearby()))) {
+                nearby_row(lcd, LIST_Y, place.as_bytes(), s.on_nearby(), app.cue());
+            }
+            first = 1;
+        }
+        let vis = zone_rows(near.is_some());
+        let cur = s.cur.shown(n, vis, &k);
+        let rows = cur.rows(n, vis, &k, |row, i| {
+            let r = ZoneRow::of(app, store, i as u8);
+            let sel = !s.on_nearby() && i == cur.sel;
+            let at = first + row;
+            if app.dirty(R_ROW + at, hash(&(2u8, &r, sel))) {
+                zone_row(lcd, LIST_Y + at as i32 * ZROW_H, ZROW_H, &r, sel, app.cue());
+            }
         });
-        app.rows_end(lcd, rows, ROWS1, ROW1_H);
-        app.list_cue(lcd, self.cur, n, ROWS1, ROW1_H, rows, &keep(store));
-        app.help_box(lcd, 300 - 38, 34, b"OK edits its scan options and priorities", b"MENU 0 2 3");
+        for i in first + rows..ZROWS as usize {
+            if app.dirty(R_ROW + i, 1) {
+                lcd.fill(0, LIST_Y + i as i32 * ZROW_H, 240, ZROW_H, BG);
+            }
+        }
+        let more = cur.more(n, vis, rows, &k);
+        app.scroll_cue(lcd, (first, vis as usize), LIST_Y + first as i32 * ZROW_H, vis as i32 * ZROW_H, more, cur.top as u32, vis as u32, n as u32);
+        if rows == 0 {
+            app.empty(lcd, b"No zones", b"# makes one");
+        } else {
+            app.drawn.hash[R_NOTE] = 0;
+        }
+        let p = if s.on_nearby() {
+            preview_nearby(app, store)
+        } else if rows > 0 {
+            preview_zone(app, store, cur.sel as u8)
+        } else {
+            Preview::default()
+        };
+        app.preview(lcd, &p);
     }
 
     fn hints(self, _: &App) -> Hints {
         match self.edit() {
             Some(_) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("#", "Reset")]),
+            None if self.on_nearby() => Hints::new(&[("OK", "Open"), ("#", "New"), ("BACK", "Back")]),
             None => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
         }
     }
@@ -238,3 +793,7 @@ impl View for Zones {
 pub(crate) fn after_delete(store: &impl ChannelStore) -> Zones {
     Zones { mode: 0, cur: Cursor::first(store.zones() as u16, &keep(store)) }
 }
+
+#[cfg(test)]
+#[path = "zones_tests.rs"]
+mod tests;

@@ -369,6 +369,29 @@ fn renumber_carries_the_position() {
     let _ = s.version();
 }
 
+/// CHAN-2, CHAN-29: a channel written with its position (the terminal's `ch N pos=`), then without: the record
+/// keeps the rest, `located` answers from the one record, and a plain write keeps the position.
+#[test]
+fn put_with_and_without_a_position() {
+    use ferrite_app::data::Pos;
+    let s = mount(seeded());
+    let c = s.by_num(11).unwrap().0;
+    let p = Pos { lat: 454_215_000, lon: -756_972_000 };
+    assert!(s.apply(ChanWrite::PutPos { ch: c, pos: Some(p) }));
+    assert_eq!(s.position(11), Some(p));
+    assert_eq!(s.located(11), Some((c, p)));
+    let renamed = { let mut r = c; r.set_name(b"Renamed"); r };
+    assert!(s.apply(ChanWrite::Put { ch: renamed, from: None }));
+    assert_eq!(s.position(11), Some(p), "a plain write keeps it");
+    assert!(s.apply(ChanWrite::PutPos { ch: renamed, pos: None }));
+    assert_eq!(s.position(11), None);
+    assert_eq!(s.located(11), None);
+    assert_eq!(s.by_num(11).unwrap().0.name(), b"Renamed");
+    let s = mount(unmount(s));
+    assert_eq!(s.position(11), None, "after a power cycle too");
+    index_agrees(&s);
+}
+
 #[test]
 fn first_boot_after_setup_seeds_the_regions_presets() {
     let s = mount(SimFlash::new());

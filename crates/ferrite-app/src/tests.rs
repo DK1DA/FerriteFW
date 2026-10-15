@@ -139,8 +139,9 @@ fn ram_is_small() {
     // padding, to 1360; remote keys (LINK-19: the keys the link holds, its long press and when the last went
     // down, 16 with its Option) and the readback's redraw count and time (8), to 1384; each group's and
     // third-level list's last item (MENU-24: 38 nibbles, 19 bytes), 24 with padding, to 1408 (who holds the remote
-    // keys, LINK-28's byte, fits in that padding)
-    assert!(n <= 1408, "App is {n} bytes");
+    // keys, LINK-28's byte, fits in that padding); the zones page's Nearby answer (CHAN-29: 12 bytes) and a queued
+    // channel write that carries a position (CHAN-2, `ch N pos=`: 4 bytes more), 24 with padding, to 1432
+    assert!(n <= 1432, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

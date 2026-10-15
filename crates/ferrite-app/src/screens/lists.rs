@@ -493,7 +493,7 @@ fn atan2_deg(x: i64, y: i64) -> u16 {
     ((deg + 50) / 100 % 360) as u16
 }
 
-/// "N", "NE" ... for a bearing.
+/// "N", "NE" ... for a bearing: eight 45-degree sectors centred on the points (N is 338-22).
 pub fn compass_name(deg: u16) -> &'static str {
     ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][((deg as u32 * 2 + 45) / 90 % 8) as usize]
 }
@@ -506,6 +506,35 @@ pub fn dist_text(m: u32, b: &mut Buf<12>) {
         1000..=9_949 => uwrite!(b, "{}.{} km", (m + 50) / 1000, (m + 50) % 1000 / 100),
         _ => uwrite!(b, "{} km", (m + 500) / 1000),
     };
+}
+
+/// A distance for a narrow column (the zones page, CHAN-28): at most three digits and never wrapping. Under 10:
+/// "0.4km", "2.3km"; under 100: "23.4km"; under 1000: "123km" (no decimal); then "far". In 0 6 4's units:
+/// Imperial gives miles the same way ("2.3mi"), Nautical nautical miles ("2.3nm").
+pub fn dist_short(m: u32, units: u8, b: &mut Buf<12>) {
+    b.clear();
+    // metres in one of the unit, x 1000
+    let (u, per) = match units {
+        1 => ("mi", 1_609_344u64),
+        2 => ("nm", 1_852_000),
+        _ => ("km", 1_000_000),
+    };
+    // tenths of the unit, rounded
+    let tenths = ((m as u64 * 10_000 + per / 2) / per) as u32;
+    let _ = if tenths < 1000 {
+        uwrite!(b, "{}.{}{}", tenths / 10, tenths % 10, u)
+    } else {
+        let whole = ((m as u64 * 1000 + per / 2) / per) as u32;
+        if whole < 1000 { uwrite!(b, "{}{}", whole, u) } else { uwrite!(b, "far") }
+    };
+}
+
+/// Where a channel is from the fix, compass letters first (CHAN-28): "NE 2.3km", "N 123km", "W far".
+pub fn place_text(m: u32, deg: u16, units: u8, b: &mut Buf<12>) {
+    let mut d = Buf::<12>::new();
+    dist_short(m, units, &mut d);
+    b.clear();
+    let _ = uwrite!(b, "{} {}", compass_name(deg), Txt(d.as_bytes()));
 }
 
 /// "now", "40 s", "12 min", "3 h", "1 h 20", "2 d".

@@ -417,7 +417,7 @@ def parse_ui(text):
     """`ui`'s lines as a dict: screen, state, bar, toast/popup, qmenu, cards, rows (and sel, the selected row),
     help, hints and the screen's own lines (value, ask, entry, ...) under their first word; `lines` is the text."""
     ui = {"lines": text.splitlines(), "cards": [], "rows": [], "qmenu": [], "toast": None, "popup": None, "sel": None,
-          "hints": []}
+          "hints": [], "pvrows": []}
     for line in ui["lines"]:
         kind, pos, kv = parse_ui_line(line)
         if kind == "screen":
@@ -428,6 +428,7 @@ def parse_ui(text):
             num, rest = (int(pos[0]), pos[1:]) if pos and pos[0].isdigit() else (None, pos)
             r = {"num": num, "name": rest[0] if rest else "", "value": rest[1] if len(rest) > 1 else "",
                  "sel": "sel" in rest[2:], "dot": "dot" in rest[2:], "grey": "grey" in rest[2:]}
+            r.update({k: v for k, v in kv.items() if k not in r})  # a screen's own fields (kind=, chips=)
             ui["rows"].append(r)
             if r["sel"]:
                 ui["sel"] = r
@@ -435,6 +436,9 @@ def parse_ui(text):
             ui[kind] = {"head": pos[0] if pos else "", "body": pos[1] if len(pos) > 1 else ""}
         elif kind == "qmenu":
             ui["qmenu"].append(pos)
+        elif kind == "pvrow":
+            ui.setdefault("pvrows", []).append({"name": pos[0] if pos else "", "place": pos[1] if len(pos) > 1 else "",
+                                                "freq": pos[2] if len(pos) > 2 else ""})
         elif kind == "hints":
             ui["hints"] = list(zip(pos[0::2], pos[1::2]))
         elif kind:

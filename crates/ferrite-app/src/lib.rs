@@ -368,6 +368,9 @@ pub struct App {
     /// Where BACK returns from screens opened with [`App::open`], newest last (MENU-24).
     back: [Option<Screen>; BACK_DEPTH],
     pub(crate) drawn: Drawn,
+    /// The zones page's Nearby row (CHAN-29): the nearest positioned channel, found again only when the fix moved
+    /// about 100 m or the channels changed. 12 bytes.
+    pub(crate) near: screens::zones::NearCache,
     /// Radio activity: transmit, the exclusive modes, scan hits, region ([`screens::activity`]).
     pub(crate) radio: screens::activity::RadioUi,
     /// Radio-wide settings: not the App's, only borrowed ([`settings`]).
@@ -447,6 +450,7 @@ impl App {
             write: None,
             text: Buf::new(),
             back: [None; BACK_DEPTH],
+            near: screens::zones::NearCache::NONE,
             drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false, qmenu_gone: false },
             radio: screens::activity::RadioUi::new(),
             set,
@@ -557,7 +561,16 @@ impl App {
     /// A channel changed outside the radio's own editor (the terminal: TERM-9): saved as an edit there is, and
     /// every slot on it follows at once.
     pub(crate) fn put_channel(&mut self, c: chan::Channel) {
-        self.write(ChanWrite::Put { ch: c, from: None });
+        self.put_channel_as(c, ChanWrite::Put { ch: c, from: None });
+    }
+
+    /// [`App::put_channel`] with its position set or cleared (the terminal's `ch N pos=`, CHAN-2).
+    pub(crate) fn put_channel_pos(&mut self, c: chan::Channel, pos: Option<data::Pos>) {
+        self.put_channel_as(c, ChanWrite::PutPos { ch: c, pos });
+    }
+
+    fn put_channel_as(&mut self, c: chan::Channel, w: ChanWrite) {
+        self.write(w);
         for i in 0..SLOTS {
             let s = &mut self.slots[i];
             if s.ch.is_some_and(|o| o.num == c.num) {

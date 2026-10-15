@@ -248,7 +248,9 @@ const BUDGET: &[(&str, u64)] = &[
     ("C5 APRS messages", 87000),
     ("C6 APRS message", 306000),
     ("C8 Channel browser", 68000),
-    ("C11 Zones", 65000),
+    // CHAN-27 (decision 155): each move redraws two lines and the preview (its header, four rows and footer, about
+    // 27,000 px), four moves in the run
+    ("C11 Zones", 195000),
     ("C12 Range presets", 87000),
     ("C13 Skip list", 87000),
     ("C14 Waypoints", 141000),

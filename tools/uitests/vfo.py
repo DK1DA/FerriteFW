@@ -7,7 +7,7 @@ def tune(t, f="146.52", rest="fm low tone 100.0 offset -0.6"):
     return t.home()
 
 
-@test("VFO-11", "VFO-24", "VFO-19", smoke=True)
+@test("VFO-11", "VFO-24", "VFO-19", smoke=True, pages=("Entry", "Home"))
 def star_enters_a_frequency(t):
     """A digit opens entry; * is the point; 146 * 52 * tunes 146.520 (the * after a decimal is OK); # does
     nothing in entry."""
@@ -23,7 +23,7 @@ def star_enters_a_frequency(t):
     t.eq(u.active["freq"], "146.52000", "tuned")
 
 
-@test("VFO-17")
+@test("VFO-17", pages=("Entry", "Home", "Quick"))
 def whole_frequency_goes_in_without_ok(t):
     """With a 5 kHz step 146.940 goes in at its last 0; five decimals always go in."""
     tune(t, "145.00")
@@ -38,7 +38,7 @@ def whole_frequency_goes_in_without_ok(t):
     t.eq((u.id, u.active.get("freq")), ("Home", "146.52345"), "five decimals go in")
 
 
-@test("VFO-12", "NAV-2")
+@test("VFO-12", "NAV-2", pages=("Home",))
 def off_step_is_tuned_as_typed(t):
     """146.5234 OK tunes exactly that (never snapped); the knob then steps from there by the step."""
     tune(t, "145.00")
@@ -50,7 +50,7 @@ def off_step_is_tuned_as_typed(t):
     t.eq(u.active["freq"], "146.52340", "▼ one step back")
 
 
-@test("VFO-14", "VFO-21")
+@test("VFO-14", "VFO-21", pages=("Entry", "Home"))
 def entry_ranges(t):
     """Below 18 MHz: "< 18 MHz: HF mode, MENU 0 3 4"; 630-756 and above 1300 MHz refused with the range;
     18, 630, 756 and 1300 MHz accepted."""
@@ -69,7 +69,7 @@ def entry_ranges(t):
     tune(t)
 
 
-@test("VFO-21")
+@test("VFO-21", pages=("Home",))
 def entry_range_edges(t):
     """630 and 1300 MHz, the range's own ends, tune when typed; four digits are airband (1 2 1 5 is 121.5,
     1 3 0 0 is 130.0, 1 0 5 0 is 105.0), and 1000-1300 MHz goes in only by * * on 100-130 (1 0 5 * * 0 is
@@ -82,7 +82,7 @@ def entry_range_edges(t):
     tune(t)
 
 
-@test("VFO-21", "KEY-9")
+@test("VFO-21", "KEY-9", pages=("Entry", "Home"))
 def four_digit_mhz_hints(t):
     """After 1 2 9 * the hint bar says "* again: 4-digit MHz"; after the second * it names the fourth digit's
     range, "0-9 1290-1299 MHz"; 1 2 9 * * 6 OK tunes 1296. Off 100-130 (146 *) the hint stays "* Point"."""
@@ -99,7 +99,7 @@ def four_digit_mhz_hints(t):
     tune(t)
 
 
-@test("NAV-2", "VFO-5")
+@test("NAV-2", "VFO-5", pages=("Home",))
 def knob_steps_and_bands(t):
     """VFO: knob and ▲▼ step by the step; ◀▶ step bands and come back."""
     u = tune(t)
@@ -116,7 +116,7 @@ def knob_steps_and_bands(t):
     t.eq(u.active["head"], h0, "◀: back to the band")
 
 
-@test("NAV-1", "VFO-23")
+@test("NAV-1", "VFO-23", pages=("Home",))
 def channel_mode_and_copy_to_vfo(t):
     """V/M: channel mode (header the channel number, hint "Zone"); knob steps channels; hold V/M on a channel
     copies it to the VFO ("Copied to VFO") and V/M goes back to the channel untouched."""
@@ -140,7 +140,7 @@ def channel_mode_and_copy_to_vfo(t):
     t.keys("VM")
 
 
-@test("VFO-9")
+@test("VFO-9", pages=("Home", "Save"))
 def hold_vm_saves_a_vfo(t):
     """Hold V/M on a VFO opens the save screen (BACK cancels, nothing saved); on a channel it does nothing.
     (On 18-64 MHz it saves an HF channel, CHAN-22/CHAN-26: not checked here.)"""
@@ -153,7 +153,7 @@ def hold_vm_saves_a_vfo(t):
     t.eq(t.cmd("dump").count("\nch "), n0, "nothing saved")
 
 
-@test("TX-36", "HF-30")
+@test("TX-36", "HF-30", pages=("Home",))
 def hf_starts_on_low(t):
     """Tuning onto an HF frequency (28.4 MHz) puts the power at Low, whatever it was."""
     t.cmd("slot A vfo 146.52 high")
@@ -163,7 +163,7 @@ def hf_starts_on_low(t):
     tune(t)
 
 
-@test("TX-9", "CAL-16", "MENU-14", "LINK-33")
+@test("TX-9", "CAL-16", "MENU-14", "LINK-33", pages=("Quick",))
 def power_capped_on_125m(t):
     """1.25 m: the card shows 0.25 W, quick settings' TX power is greyed with the reason, and `slot A high`
     (as the link's SLOT) is refused naming it."""
@@ -181,7 +181,7 @@ def power_capped_on_125m(t):
     tune(t)
 
 
-@test("TX-37", "LINK-33", "TERM-35")
+@test("TX-37", "LINK-33", "TERM-35", pages=("Home",))
 def split_and_tune_refusals(t):
     """`slot` refuses a split across 64 MHz and a frequency out of range with the reason, changing nothing;
     a good change shows on the card at once."""
@@ -196,7 +196,7 @@ def split_and_tune_refusals(t):
     tune(t)
 
 
-@test("EDIT-1", "EDIT-3", "EDIT-6")
+@test("EDIT-1", "EDIT-3", "EDIT-6", pages=("Edit", "Home"))
 def hold_slot_edits_in_place(t):
     """Hold SLOT: the edit screen, status bar "EDIT A", hint "<^v> Pick, Knob Change"; BACK ends it."""
     u = t.press("SLOT", long=True)
@@ -212,7 +212,7 @@ def hold_slot_edits_in_place(t):
     t.eq(u.id, "Home", "SLOT ends it")
 
 
-@test("EDIT-6", slow=True)
+@test("EDIT-6", slow=True, pages=("Edit", "Home"))
 def edit_ends_after_idle(t):
     """The slot editor ends by itself after 8 s idle."""
     u = t.press("SLOT", long=True)
@@ -247,7 +247,7 @@ BAND_CASES = [("21.2", "HF", "AM"), ("28.4", "HF", "AM"), ("51.0", "6 m", "FM"),
               ("146.52", "VHF", "FM"), ("156.8", "Marine", "FM"), ("223.5", "1.25 m", "FM"), ("446.0", "UHF", "FM")]
 
 
-@test("VFO-2", "VFO-4")
+@test("VFO-2", "VFO-4", pages=("Home", "Quick"))
 def band_follows_the_frequency(t):
     """The band comes from the frequency by a fixed table: tuning A into each band gives its name in the card's
     header and its default mode (FM, NFM or AM only), and 1.25 m its 0.25 W cap; the same frequency always gives

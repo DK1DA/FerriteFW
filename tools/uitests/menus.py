@@ -10,7 +10,7 @@ GROUPS = ["Watch and scan", "Channels", "Tools", "Decoders and alerts", "APRS", 
 CHIP_WORDS = re.compile(r"BK4829|SI4732|BT513|W25Q|AT32|ST7789", re.I)
 
 
-@test("MENU-1", "MENU-12", "KEY-9", smoke=True)
+@test("MENU-1", "MENU-12", "KEY-9", smoke=True, pages=("Advanced", "Quick"))
 def quick_settings_rows(t):
     """MENU on home: quick settings, nine fixed rows for the active slot then 0 Advanced; numbers 1-9, 0."""
     u = t.keys("MENU")
@@ -24,7 +24,7 @@ def quick_settings_rows(t):
     t.eq(u.id, "Advanced", "0 in quick settings opens")
 
 
-@test("MENU-2", "MENU-4", "SBAR-13", smoke=True)
+@test("MENU-2", "MENU-4", "SBAR-13", smoke=True, pages=("Advanced", "Status"))
 def advanced_groups(t):
     """MENU 0 and hold MENU on home: Advanced, Recent and the nine task-named groups; MENU 0 0 is Status."""
     u = t.keys("MENU 0")
@@ -41,7 +41,7 @@ def advanced_groups(t):
     t.eq(u.id, "Status", "MENU 0 0")
 
 
-@test("MENU-3", "MENU-4", "MENU-12", "MENU-15")
+@test("MENU-3", "MENU-4", "MENU-12", "MENU-15", pages=("Group",))
 def every_group_fits_and_names_its_path(t):
     """Each group: at most nine numbered rows, a help line with its MENU path, no chip names."""
     for g in range(1, 10):
@@ -62,7 +62,7 @@ def every_group_fits_and_names_its_path(t):
                 f"group {g}: help follows the row", u["help"])
 
 
-@test("MENU-3", "MENU-5")
+@test("MENU-3", "MENU-5", pages=("Group",))
 def third_level_and_no_deeper(t):
     """A group's third level (0 1 6 Scan options) opens by its digit; a digit inside it selects, never opens."""
     u = t.keys("MENU 0 1 6")
@@ -73,7 +73,7 @@ def third_level_and_no_deeper(t):
     t.eq(u["help"]["args"][0], "MENU 0 1 6 3", "selects row 3 (no fourth level)")
 
 
-@test("MENU-5", "MENU-6")
+@test("MENU-5", "MENU-6", pages=("Advanced", "Group", "Home", "Quick"))
 def fast_path_lands_where_slow_does(t):
     """MENU 0 7 1 typed at full speed and slowly lands on the same row; the same from another screen."""
     t.r.keys("MENU 0 7 1")
@@ -94,7 +94,7 @@ def fast_path_lands_where_slow_does(t):
     t.keys("SLOT SLOT")
 
 
-@test("MENU-7", "MENU-12", "MENU-15")
+@test("MENU-7", "MENU-12", "MENU-15", pages=("Group",))
 def row_names_match_the_settings_table(t):
     """The group rows for settings carry the same name `get` gives for their number (one table)."""
     checked = 0
@@ -110,7 +110,7 @@ def row_names_match_the_settings_table(t):
     t.note(f"{checked} settings compared")
 
 
-@test("MENU-8", "MENU-22")
+@test("MENU-8", "MENU-22", pages=("Advanced", "Group", "Quick"))
 def recent_and_undo(t):
     """A change: the hint bar offers * Undo and * undoes it; a kept change shows in Recent."""
     before = t.get("0 7 5 2")
@@ -138,7 +138,7 @@ def recent_and_undo(t):
     t.eq(u.names(), GROUPS, "the lists don't reorder")
 
 
-@test("MENU-14", "VFO-8")
+@test("MENU-14", "VFO-8", pages=("Home", "Quick"))
 def step_greyed_on_a_channel(t):
     """On a channel the quick Step row is greyed and says "VFO only" when the knob tries it; on the VFO it isn't."""
     u = t.keys("MENU")
@@ -158,7 +158,7 @@ def step_greyed_on_a_channel(t):
     t.keys("SLOT SLOT")
 
 
-@test("MENU-16", "KEY-19")
+@test("MENU-16", "KEY-19", pages=("Group",))
 def knob_and_arrows_change_live(t):
     """In a group: ▲▼ move, the knob changes the value at once, ◀▶ one step each way; hints name the knob."""
     u = t.keys("MENU 0 7 4 2")
@@ -179,7 +179,7 @@ def knob_and_arrows_change_live(t):
     t.eq(int(u.sel["value"]), v0, "back as it was")
 
 
-@test("MENU-17", "MENU-20")
+@test("MENU-17", "MENU-20", pages=("Quick", "Value"))
 def value_editor_back_restores_ok_keeps(t):
     """OK on Squelch opens its editor: knob, ◀▶ and digits change it; BACK restores, OK keeps."""
     u = t.keys("MENU")
@@ -208,7 +208,7 @@ def value_editor_back_restores_ok_keeps(t):
     t.eq(u.row("Squelch")["value"], v0, "put back")
 
 
-@test("MENU-17")
+@test("MENU-17", pages=("Quick", "Tones"))
 def tone_list_opens(t):
     """OK on Tones opens the tone picker (a screen of its own); BACK returns to quick settings."""
     u = t.keys("MENU 4")
@@ -219,7 +219,7 @@ def tone_list_opens(t):
     t.eq(u.id, "Quick", "BACK returns to quick settings")
 
 
-@test("MENU-18")
+@test("MENU-18", pages=("Group",))
 def hash_resets_to_default(t):
     """# on a highlighted row resets it to its default (the dot goes)."""
     u = t.keys("MENU 0 7 4 2")
@@ -236,7 +236,7 @@ def hash_resets_to_default(t):
     t.note(f"was {v0}")
 
 
-@test("MENU-19", "MENU-21")
+@test("MENU-19", "MENU-21", pages=("Group",))
 def change_takes_effect_and_is_kept(t):
     """A change takes effect at once: Theme in the menu shows in `get` with no save step."""
     u = t.keys("MENU 0 7 1")
@@ -252,7 +252,7 @@ def change_takes_effect_and_is_kept(t):
     t.set("0 7 1", v0)
 
 
-@test("MENU-24")
+@test("MENU-24", pages=("Advanced", "Group", "Home", "Quick", "Status"))
 def back_keeps_the_place(t):
     """BACK goes back one level keeping the place; each group remembers its last item while you are in the menu
     (going home forgets it); hold BACK goes home."""
@@ -279,7 +279,7 @@ def back_keeps_the_place(t):
     t.eq((u.id, u.sel and u.sel["name"]), ("Status", "Watch"), "BACK: Status, on Watch")
 
 
-@test("MENU-25")
+@test("MENU-25", pages=("Advanced", "Fm", "Options", "Scope", "Status"))
 def hold_menu_options(t):
     """Hold MENU on another screen opens its options (numbered, 0 the full menu), or "No options here"."""
     t.keys("MENU 0 0")
@@ -302,7 +302,7 @@ def hold_menu_options(t):
     t.eq(u.hint("0"), "Full menu", "FM's options name 0 the full menu")
 
 
-@test("MENU-28", slow=True)
+@test("MENU-28", slow=True, pages=("Group", "Home"))
 def idle_menu_returns_home(t):
     """An idle menu returns home after the menu timeout (0 7 9; 30 s by default, the only value for now)."""
     v = t.get("0 7 9")
@@ -313,7 +313,7 @@ def idle_menu_returns_home(t):
     t.eq(u.id, "Home", "home")
 
 
-@test("MENU-29")
+@test("MENU-29", pages=("Group",))
 def menu_never_stops_the_radio(t):
     """With the menu up, a scanning slot keeps scanning (slot line) and the cards' receivers keep running."""
     scanning = [L for L in "ABC" if "scanning" in t.slot(L)]
@@ -325,7 +325,7 @@ def menu_never_stops_the_radio(t):
         t.check("scanning" in t.slot(L), f"slot {L} still scanning under the menu", t.slot(L))
 
 
-@test("MENU-11")
+@test("MENU-11", pages=("Home", "Value"))
 def everyday_controls_off_the_menu(t):
     """Squelch, power, volume, scan and monitor are reachable from home keys: hold 3 squelch, hold 2 power,
     SIDE2 scan, SIDE1 monitor (volume is the knob on top)."""

@@ -8,6 +8,9 @@ manual's rules. The tests are in tools/uitests/*.py, each tagged with the rule I
     tools/uitest.py --port ble:walkie-talkie            # over Bluetooth (bleak; 0 9 2 1 on; slower: 9600 baud)
     tools/uitest.py --list                              # the tests and their rules
     tools/uitest.py -k quick --rules MENU-1,HOME-*      # a selection (name substring, rule globs, --module menus)
+    tools/uitest.py --sim auto --page zones,browse      # the tests that visit these screens (id or screen file)
+    tools/uitest.py --sim auto --check-pages            # run all; report tests whose pages= tags differ from what
+                                                        #   they visited (--fix-pages: write the tags from the run)
     tools/uitest.py --smoke                             # the short smoke set (bench.py runs it beside the SDR suite)
     tools/uitest.py --slow                              # also the tests that wait on timers (menu timeout, auto lock)
     tools/uitest.py --record                            # write a result row per rule into docs/test-plan/*.md
@@ -251,12 +254,45 @@ def dump_diff(a, b):
     return [f"- {x}" for x in la if x not in sb] + [f"+ {x}" for x in lb if x not in sa]
 
 
+# ---- Pages: the screens a test visits ----
+
+SCREENS_MOD = os.path.join(FERRITE, "crates", "ferrite-app", "src", "screens", "mod.rs")
+
+
+def screen_modules():
+    """{screen id: its file under crates/ferrite-app/src/screens/}: the `Screen` enum's variants (the readback's ids,
+    uistate.rs) and the module each comes from; Home is a plain variant (home.rs)."""
+    src = open(SCREENS_MOD).read()
+    body = src[src.index("pub enum Screen {"):]
+    body = body[:body.index("\n}")]
+    out = {"Home": "home"}
+    for m in re.finditer(r"^\s+(\w+)\((\w+)::\w+\),", body, re.M):
+        out[m.group(1)] = m.group(2)
+    return out
+
+
+def page_ids(names, mods=None):
+    """Screen ids for page names: an id in any case ("zones", "Browse"), or a screen file's stem ("groups" is Group,
+    "transmit" is Transmit, TxRefused and Emergency)."""
+    mods = mods or screen_modules()
+    ids = set()
+    for n in (x.strip() for x in names if x.strip()):
+        hit = {i for i in mods if i.lower() == n.lower()} or {i for i, m in mods.items() if m == n.lower()}
+        if not hit:
+            raise SystemExit(f"--page {n}: no such screen; screens: {', '.join(sorted(mods))}")
+        ids |= hit
+    return ids
+
+
 # ---- Running ----
 
 
 def select(tests, a, sim):
     out = []
+    pages = page_ids(a.page.split(",")) if getattr(a, "page", None) else None
     for t in tests:
+        if pages is not None and not pages & set(t.pages):
+            continue
         if a.k and not any(k.lower() in t.name.lower() for k in a.k.split(",")):
             continue
         if a.module and t.module not in a.module.split(","):
@@ -273,7 +309,7 @@ def run_one(r, state, tst, sim, build, a):
     base_nd = state.base_nd
     t = core.T(r, sim, build)
     t.state = state
-    res = dict(name=tst.name, module=tst.module, rules=tst.rules, where=tst.where, doc=tst.doc)
+    res = dict(name=tst.name, module=tst.module, rules=tst.rules, where=tst.where, doc=tst.doc, pages=list(tst.pages))
     t0 = time.time()
     if tst.where == "radio" and sim:
         res.update(result="skip", why="radio only: the simulator doesn't model it")
@@ -301,6 +337,7 @@ def run_one(r, state, tst, sim, build, a):
         res["result"] = "xfail" if res["result"] == "fail" else "xpass"
         res["known"] = tst.xfail
     res["secs"] = round(time.time() - t0, 2)
+    res["visited"] = sorted(t.visited)
     res["checks"] = t.checks
     res["notes"] = t.notes
     res["evidence"] = t.evidence[-3:]
@@ -459,6 +496,55 @@ def manual_rules(docs):
     return {r["id"] for r in rules}
 
 
+# ---- Checking the pages= tags against a run ----
+
+
+def page_report(summary):
+    """(bad, unchecked): tests whose tags differ from the screens they read back, as (module, name, tagged,
+    visited); and the tests the run couldn't check (skipped) with why."""
+    known = set(screen_modules())
+    bad, unchecked = [], []
+    for t in summary["tests"]:
+        tagged = set(t.get("pages") or ())
+        unknown = tagged - known
+        if t["result"] == "skip":
+            unchecked.append((t["module"], t["name"], sorted(tagged), t.get("why", "")))
+            if unknown:
+                bad.append((t["module"], t["name"], sorted(tagged), [f"unknown: {', '.join(sorted(unknown))}"]))
+            continue
+        visited = set(t.get("visited") or ())
+        if t["result"] in ("fail", "error") and visited <= tagged:
+            continue  # stopped early: what it reached is all tagged
+        if tagged != visited:
+            bad.append((t["module"], t["name"], sorted(tagged), sorted(visited)))
+    return bad, unchecked
+
+
+def fix_pages(summary):
+    """Writes each checked test's visited screens into its @test(... pages=(...)) in tools/uitests/<module>.py;
+    returns how many changed."""
+    n = 0
+    for t in summary["tests"]:
+        if t["result"] in ("skip", "fail", "error"):
+            continue
+        visited = sorted(t.get("visited") or ())
+        if visited == sorted(t.get("pages") or ()):
+            continue
+        path = os.path.join(HERE, "uitests", f"{t['module']}.py")
+        src = open(path).read()
+        m = re.search(r"^@test\((.*)\)\n((?:@.*\n)*)def " + re.escape(t["name"]) + r"\(", src, re.M)
+        if not m:
+            say(f"  {t['module']}.{t['name']}: no single-line @test to fix")
+            continue
+        args = re.sub(r",?\s*pages=\([^)]*\)", "", m.group(1)).strip()
+        tag = "pages=(" + ", ".join(f'"{p}"' for p in visited) + ("," if len(visited) == 1 else "") + ")"
+        new = f"@test({args}{', ' if args else ''}{tag})"
+        src = src[:m.start()] + new + "\n" + src[m.start(2):]
+        open(path, "w").write(src)
+        n += 1
+    return n
+
+
 # ---- Recording into the test plan ----
 
 
@@ -516,6 +602,12 @@ def main_args(argv=None):
     ap.add_argument("-k", help="tests whose name has one of these (comma list)")
     ap.add_argument("--module", help="tests in these modules (comma list: menus, home, keys, ...)")
     ap.add_argument("--rules", help="tests checking a rule matching one of these globs (MENU-*,HOME-17)")
+    ap.add_argument("--page", help="tests that visit these screens (comma list: readback ids or screen files, "
+                    "e.g. zones,browse)")
+    ap.add_argument("--check-pages", action="store_true", help="after the run: tests whose pages= tags differ from "
+                    "the screens they read back (exit 1 if any)")
+    ap.add_argument("--fix-pages", action="store_true", help="after the run: write the screens each test visited "
+                    "into its pages= tag")
     ap.add_argument("--smoke", action="store_true", help="the smoke set only")
     ap.add_argument("--slow", action="store_true", help="also the tests that wait on timers")
     ap.add_argument("--list", action="store_true", help="list the tests and the rules they check")
@@ -538,12 +630,18 @@ def main(argv=None):
         sel = select(tests, a, False)
         for t in sel:
             say(f"{t.module}.{t.name:40s} {', '.join(t.rules)}{'  [radio only]' if t.where == 'radio' else ''}"
-                f"{'  [slow]' if t.slow else ''}{'  [smoke]' if t.smoke else ''}")
+                f"{'  [slow]' if t.slow else ''}{'  [smoke]' if t.smoke else ''}"
+                f"  pages: {', '.join(t.pages) if t.pages else '(untagged)'}")
         ids = sorted({r for t in sel for r in t.rules}, key=rule_key)
         say(f"{len(sel)} tests, {len(ids)} rules: {' '.join(ids)}")
         unknown = [i for i in ids if i not in manual_rules(a.docs)]
         if unknown:
             say(f"rules the manual doesn't have: {' '.join(unknown)}")
+            return 1
+        known = set(screen_modules())
+        bad_pages = sorted({p for t in sel for p in t.pages if p not in known})
+        if bad_pages:
+            say(f"pages that aren't screens: {' '.join(bad_pages)}")
             return 1
         return 0
     proc = None
@@ -580,10 +678,25 @@ def main(argv=None):
     if summary["left_changed"]:
         say("left changed after the run:\n  " + "\n  ".join(summary["left_changed"]))
     say(f"results: {d}/results.json\npage: {page}")
+    pages_bad = False
+    if a.check_pages or a.fix_pages:
+        bad, unchecked = page_report(summary)
+        if a.fix_pages:
+            say(f"pages: {fix_pages(summary)} tags written from the run")
+        elif bad:
+            pages_bad = True
+            say(f"pages: {len(bad)} tests' tags differ from what they visited:")
+            for mod, name, tagged, visited in bad:
+                say(f"  {mod}.{name}: tagged {', '.join(tagged) or '(none)'}; visited {', '.join(visited) or '(none)'}")
+        else:
+            say(f"pages: every checked test's tags match what it visited ({len(summary['tests']) - len(unchecked)} tests)")
+        if unchecked:
+            say(f"pages: {len(unchecked)} not checked here (skipped): "
+                + "; ".join(f"{m}.{n} [{', '.join(p) or 'untagged'}]" for m, n, p, _ in unchecked))
     if a.record:
         done, missing = record(summary, a.docs)
         say(f"recorded {len(done)} rules into {a.docs}/test-plan" + (f"; no entry for {' '.join(missing)}" if missing else ""))
-    return 0 if not (c["fail"] or c["error"] or summary["left_changed"]) else 1
+    return 0 if not (c["fail"] or c["error"] or summary["left_changed"] or pages_bad) else 1
 
 
 if __name__ == "__main__":

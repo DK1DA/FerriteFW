@@ -257,3 +257,23 @@ fn shots_are_deterministic() {
     let n = jump_names().count();
     assert_eq!(shot_jump(n / 2), shot_jump(n / 2));
 }
+
+/// CHAN-27 to CHAN-30: the zones page with location (B active on Repeaters: its chip, the places in the preview),
+/// on the Nearby row (its preview), and with the GPS off and no fixed position (the plain list, no places).
+#[test]
+fn zones_page_matches_its_goldens() {
+    use ferrite_core::keys::Key;
+    let mut failures = Vec::new();
+    let mut r = Radio::new();
+    r.home();
+    r.press(Key::Slot); // B, on "Club repeater" in Repeaters
+    r.menu("0 2 3").press(Key::Down).wait(1000);
+    failures.extend(check("zones-located", &r.sim.screen_rgb()));
+    r.press(Key::Up).press(Key::Up).wait(1000);
+    failures.extend(check("zones-nearby", &r.sim.screen_rgb()));
+    r.sim.app_mut().settings_mut().gps_on = false; // no fix, no fixed position: no location anywhere
+    r.home();
+    r.menu("0 2 3").press(Key::Down).wait(1000);
+    failures.extend(check("zones-no-fix", &r.sim.screen_rgb()));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

@@ -144,6 +144,14 @@ impl<S: ChannelStore> ViewOf<'_, S> {
     }
 }
 
+/// The Nearby view (CHAN-15), opened from the zones page's Nearby row (CHAN-29).
+pub(crate) fn nearby_view(store: &impl ChannelStore, hidden: bool) -> Browse {
+    let mut b = Browse { view: V_NEARBY, ..Browse::new() };
+    let v = view_of(store, &b, hidden);
+    b.cur = Cursor::first(v.n(), &|i| v.keep(i));
+    b
+}
+
 fn view_of<'a, S: ChannelStore>(store: &'a S, b: &Browse, hidden: bool) -> ViewOf<'a, S> {
     ViewOf { store, view: b.view, zone: b.zone, hidden }
 }
@@ -429,9 +437,14 @@ fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: C
     let z = store.zones() as u16;
     let rows = cur.rows(picker_n(store), ROWS1, &|i| picker_keep(store, i), |row, i| {
         let mut v = Buf::<12>::new();
-        let name = if i < z {
-            let _ = uwrite!(v, "{}", store.zone_len(i as u8));
-            zone_name(store, i as u8)
+        let name: Buf<16> = if i < z {
+            // a zone as the zones page shows it: chips and count, dimmed when empty (CHAN-27, CHAN-30)
+            let r = super::zones::ZoneRow::of(app, store, i as u8);
+            let sel = i == cur.sel;
+            if app.dirty(R_ROW + row, hash(&(2u8, &r, sel))) {
+                super::zones::zone_row(lcd, LIST_Y + row as i32 * ROW1_H, ROW1_H, &r, sel, app.cue());
+            }
+            return;
         } else {
             let k = (i - z) as u8 + 1;
             let vw = ViewOf { store, view: k, zone: 0, hidden: true };

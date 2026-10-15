@@ -19,7 +19,7 @@ def mhz_of_slot(t, L):
     t.fail(f"slot {L}: no frequency in {t.slot(L)!r}")
 
 
-@test("BCR-21")
+@test("BCR-21", pages=("Home",))
 def slot_in_the_band_is_broadcast(t):
     """A VFO in 87.5-108.0 MHz (ends included) is a broadcast slot; just outside it, and tuned back out, it is a
     BK4829 slot again (the card's kind and header say which)."""
@@ -35,7 +35,7 @@ def slot_in_the_band_is_broadcast(t):
     t.check(a["head"] != "VFO · Broadcast", "tuned out: an ordinary slot", a["head"])
 
 
-@test("BCR-22")
+@test("BCR-22", pages=("Home", "Status"))
 def one_broadcast_slot_and_handover(t):
     """One slot plays broadcast at a time: the one that came into the band last. The other reads "FM on A"; when
     the playing slot leaves, the one still in the band takes the broadcast."""
@@ -57,7 +57,7 @@ def one_broadcast_slot_and_handover(t):
     t.eq(u.row("Broadcast")["value"], "FM 100.1 on B", "Status: the broadcast and its slot")
 
 
-@test("BCR-23", "BCR-15")
+@test("BCR-23", "BCR-15", pages=("Home", "Scan"))
 def broadcast_ignores_watch_and_drops_relay_slots(t):
     """The broadcast slot plays whatever Watch says (Off too); a slot needing the band relay (28 MHz) isn't
     listened to while it plays and its card says "Watch off: relay"."""
@@ -81,7 +81,7 @@ def broadcast_ignores_watch_and_drops_relay_slots(t):
         t.put_back(stopped)
 
 
-@test("BCR-25")
+@test("BCR-25", pages=("Fm", "Home"))
 def knob_tunes_and_arrows_seek_the_broadcast_card(t):
     """On the broadcast card the knob and ▲▼ tune by the FM step (0 3 1 2) and ◀▶ seek, the station found taken
     into the VFO; the FM screen tunes the same slot."""
@@ -111,7 +111,7 @@ def knob_tunes_and_arrows_seek_the_broadcast_card(t):
     t.check(abs(mhz_of_slot(t, "A") - (f1 + khz / 1000)) < 1e-4, "the FM screen's knob tunes slot A", t.slot("A"))
 
 
-@test("BCR-7")
+@test("BCR-7", pages=("Advanced", "Group"))
 def no_volume_setting(t):
     """The SI4732's volume is fixed (the knob on top is the volume): no volume setting in any menu group, only the
     beep volume (0 7 5 2)."""

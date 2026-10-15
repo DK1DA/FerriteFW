@@ -210,8 +210,14 @@ pub struct Sample {
     version: Cell<u32>,
     /// None: no fix (GPS searching).
     pub fix: Cell<Option<Fix>>,
+    /// Positions set or cleared since (`ChanWrite::PutPos`), over [`CHAN_POS`]; `no_positions` hides them all.
+    pos_set: [Cell<Option<PosSet>>; 8],
+    no_positions: Cell<bool>,
     pub call: Cell<Option<Buf<10>>>,
 }
+
+/// A channel's position as set since: its number and the position (None: cleared).
+type PosSet = (u16, Option<Pos>);
 
 fn txt<const N: usize>(s: &str) -> Buf<N> {
     Buf::from(s.as_bytes())
@@ -250,7 +256,20 @@ impl Sample {
             version: Cell::new(1),
             fix: Cell::new(Some(Fix { pos: HERE, three_d: true, alt_m: 74, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 9, age_s: 1, utc_s: 18 * 3600 + 32 * 60 + 5 })),
             call: Cell::new(Some(txt("VA7FER-9"))),
+            pos_set: core::array::from_fn(|_| Cell::new(None)),
+            no_positions: Cell::new(false),
         }
+    }
+
+    /// Every channel without a position (true), or the sample's again: the zones page's plain list (CHAN-29).
+    pub fn hide_positions(&self, on: bool) {
+        self.no_positions.set(on);
+        self.bump();
+    }
+
+    /// The sample's fix (Parliament Hill), as it starts.
+    pub fn sample_fix() -> Option<Fix> {
+        Sample::new().fix.get()
     }
 
     fn live(&self) -> impl Iterator<Item = Channel> + '_ {
@@ -279,6 +298,13 @@ impl Sample {
                 }
                 if let Some(c) = self.chans.iter().find(|c| c.get().is_none()) {
                     c.set(Some(ch));
+                }
+            }
+            ChanWrite::PutPos { ch, pos } => {
+                self.apply(ChanWrite::Put { ch, from: None });
+                let at = self.pos_set.iter().find(|c| c.get().is_some_and(|(n, _)| n == ch.num)).or_else(|| self.pos_set.iter().find(|c| c.get().is_none()));
+                if let Some(c) = at {
+                    c.set(Some((ch.num, pos)));
                 }
             }
             ChanWrite::Delete(n) => {
@@ -357,6 +383,12 @@ impl ChannelStore for Sample {
         self.nth(i, |_| true)
     }
     fn position(&self, num: u16) -> Option<Pos> {
+        if self.no_positions.get() {
+            return None;
+        }
+        if let Some((_, p)) = self.pos_set.iter().filter_map(Cell::get).find(|(n, _)| *n == num) {
+            return p;
+        }
         CHAN_POS.iter().find(|p| p.0 == num).map(|p| p.1)
     }
     fn data(&self) -> &dyn Data {

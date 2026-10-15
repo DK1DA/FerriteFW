@@ -3,7 +3,7 @@ from .core import test
 
 
 @test("WATCH-11", "SBAR-17", xfail="no toast and the Status Watch row still reads the watch set (\"A+B+C\") when "
-                                   "the relay cancels watch; the bar and cards are right (sim, Oct 14, 2026)")
+                                   "the relay cancels watch; the bar and cards are right (sim, Oct 14, 2026)", pages=("Home", "Status"))
 def relay_cancels_watch_and_says_so(t):
     """Watch A+B+C with the active slot tuned to 28 MHz (relay) and the others on VHF: watch is cancelled (no TW,
     the other cards say "relay"), a toast "Watch off: HF needs the relay", Status's Watch row "Off: HF needs the

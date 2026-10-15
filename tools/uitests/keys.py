@@ -10,7 +10,7 @@ WALK = ["MENU", "MENU 0", "MENU 0 1", "MENU 0 7", "MENU 0 7 5", "MENU 0 9 1", "M
         "1:long", "SIDE2:long", "VM:long"]
 
 
-@test("KEY-9", "SBAR-5", "MENU-16")
+@test("KEY-9", "SBAR-5", "MENU-16", pages=("Advanced", "Counter", "Crossband", "Edit", "Entry", "Fm", "Group", "Home", "Info", "Quick", "Save", "Scope", "Shortcut", "Status", "Text", "Tones", "Value", "Zones"))
 def hint_bars_and_names_fit(t):
     """Every screen walked: at most three hint pairs, the universal BACK last when shown; the status bar's
     screen name at most 8 characters (none on home); lists' hint bars name the knob."""
@@ -31,7 +31,7 @@ def hint_bars_and_names_fit(t):
     t.note("walked " + ", ".join(seen))
 
 
-@test("KEY-5")
+@test("KEY-5", pages=("Advanced", "Entry", "Home", "Quick"))
 def back_is_one_level(t):
     """A short BACK goes back one level (on home it does nothing); in entry it deletes a digit first."""
     u = t.keys("BACK")
@@ -52,7 +52,7 @@ def back_is_one_level(t):
     t.eq(u.id, "Home", "and then home")
 
 
-@test("SQL-11", "KEY-14")
+@test("SQL-11", "KEY-14", pages=("Home",))
 def monitor_while_locked(t):
     """Locked, SIDE1 still opens the monitor (and again closes it)."""
     was_muted = t.unmute()
@@ -70,7 +70,7 @@ def monitor_while_locked(t):
             t.keys("STAR")
 
 
-@test("KEY-13", "KEY-14", "SBAR-11", smoke=True)
+@test("KEY-13", "KEY-14", "SBAR-11", smoke=True, pages=("Home", "Quick"))
 def key_lock(t):
     """Hold # locks (padlock in the bar, toast); locked, keys and the knob give "Locked: hold # to unlock" and
     do nothing, hold * gives no quick menu; hold # unlocks."""
@@ -100,7 +100,7 @@ def key_lock(t):
         t.keys("STAR")
 
 
-@test("KEY-20", "KEY-15", slow=True)
+@test("KEY-20", "KEY-15", slow=True, pages=("Home",))
 def auto_lock(t):
     """Auto lock 30 s (0 9 1 1): with no key for 30 s the keys lock and the padlock shows."""
     t.set("0 9 1 1", "30 s")
@@ -111,7 +111,7 @@ def auto_lock(t):
     t.eq(t.ui().bar["lock"], 0, "hold # unlocks")
 
 
-@test("KEY-11", "KEY-21", "MENU-14")
+@test("KEY-11", "KEY-21", "MENU-14", pages=("ChEdit", "Home"))
 def digit_shortcuts_on_a_channel(t):
     """Hold 6 on a channel changes nothing and says VFO only; hold 7 and 8 open the channel's editor."""
     t.need("ch " in t.slot("B"), "slot B isn't on a channel")
@@ -126,7 +126,7 @@ def digit_shortcuts_on_a_channel(t):
     t.cmd("slot A active")
 
 
-@test("KEY-21", "HOME-8")
+@test("KEY-21", "HOME-8", pages=("Home", "Shortcut"))
 def shortcut_list_runs_a_row(t):
     """MENU 0 9 1 4: the shortcut list; a digit picks a row and OK runs it from home with its popup."""
     u = t.keys("MENU 0 9 1 4")
@@ -139,7 +139,7 @@ def shortcut_list_runs_a_row(t):
     t.eq(t.slot("A"), p0, "slot unchanged")
 
 
-@test("KEY-22", "NAV-3")
+@test("KEY-22", "NAV-3", pages=("Counter", "Home"))
 def side2_counter_and_big_steps(t):
     """SIDE2 held alone opens the frequency counter; held with the knob it's big steps (1 MHz) and never the
     counter."""
@@ -162,7 +162,7 @@ def side2_counter_and_big_steps(t):
     t.check(abs(float(t.ui(0.2).active["freq"]) - f0) < 1e-6, "and back", t.ui(0).active["freq"])
 
 
-@test("LINK-19", "KEY-3", "KEY-6", smoke=True)
+@test("LINK-19", "KEY-3", "KEY-6", smoke=True, pages=("Advanced", "Entry", "Home", "Quick"))
 def remote_keys_and_readback(t):
     """The link's keys: every key name answers (`ui keys`), short and long presses and down/up apart reach the
     screens as the keypad's do; keys typed fast are all taken."""

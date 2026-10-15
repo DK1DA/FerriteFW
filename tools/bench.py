@@ -10,7 +10,8 @@ each run's numbers stored, compared with the previous run of the same configurat
     tools/bench.py --selftest                          # a fake radio and synthetic IQ: the whole flow and the gates
     tools/bench.py --selftest --sim tcp:127.0.0.1:7300 # the same against the simulator's link (fake SDR)
     tools/bench.py --auto [--dry-plan]                 # what changed since the last on-radio runs decides: the UI
-                                                       # tests (tools/uitest.py), the SDR suite, both + a reboot check
+                                                       # tests (tools/uitest.py), the SDR suite, both + a reboot check;
+                                                       # only screen files (screens/<page>.rs): uitest.py --page <page>
     tools/bench.py --auto --all | --ui | --rf          # everything, or one side, forced
     tools/bench.py --auto --dry-plan --diff-files crates/ferrite-app/src/screens/home.rs   # a made-up change
 
@@ -1697,6 +1698,23 @@ CLASSES = [
 CLASS_ORDER = {"host": 0, "ui": 1, "rf": 2, "link": 3}
 
 
+# Screen files several screens share: a change there runs every UI test, not a page's.
+SHARED_SCREEN_FILES = {"mod", "shared", "lists", "forms", "parts", "table", "nav", "layouts"}
+
+
+def screen_pages(paths):
+    """The pages (screen file stems) when every changed UI file is one screen's own file
+    (crates/ferrite-app/src/screens/<page>.rs, not a shared one), else None: --auto then runs only the UI tests
+    that visit those screens (uitest.py --page)."""
+    pages = set()
+    for f in paths:
+        m = re.fullmatch(r"crates/ferrite-app/src/screens/(\w+)\.rs", f)
+        if not m or m.group(1) in SHARED_SCREEN_FILES or m.group(1).startswith("tests"):
+            return None
+        pages.add(m.group(1))
+    return sorted(pages) or None
+
+
 def classify(path):
     """(class, why) of one changed file; unknown files count as link (both sides and a reboot: the safe side)."""
     for glob, cls, why in CLASSES:
@@ -1791,6 +1809,11 @@ def decide(cfg, a):
                  what="the SDR suite on tx-dry + " + ("the UI tests" if ui_full else "the UI smoke set"),
                  why=f"radio/driver/DSP/TX/calibration changes ({names('rf')})"
                  + (f"; UI changes too ({names('ui')})" if ui_full else ""))
+    elif ui_full and screen_pages([f for k in cls for f, c, _ in cls[k] if c == "ui"]):
+        pages = screen_pages([f for k in cls for f, c, _ in cls[k] if c == "ui"])
+        d = dict(ui="full", pages=pages, rf=False, reboot=False,
+                 what=f"the UI tests that visit {', '.join(pages)} (--page) on the normal build only",
+                 why=f"only screen files changed ({names('ui')})")
     elif ui_full:
         d = dict(ui="full", rf=False, reboot=False, what="the UI tests on the normal build only (no TX, no SDR)",
                  why=f"UI/app-only changes ({names('ui')})")
@@ -1854,7 +1877,8 @@ def do_auto(cfg, a):
             say("")
             plan(cfg, a, pick_runs(cfg, a.runs))
         if d["ui"]:
-            say(f"UI: tools/uitest.py --port {cfg['port']}{' --smoke' if d['ui'] == 'smoke' else ''} (remote keys and readback; "
+            say(f"UI: tools/uitest.py --port {cfg['port']}{' --smoke' if d['ui'] == 'smoke' else ''}"
+                f"{' --page ' + ','.join(d['pages']) if d.get('pages') else ''} (remote keys and readback; "
                 "no PTT; settings and slots put back)")
         if d["reboot"]:
             say("reboot: LINK-24 restart, HELLO within 60 s, home on the screen, `dump` unchanged")
@@ -1878,8 +1902,13 @@ def do_auto(cfg, a):
         runs, extras = [], {}
     ui_summary = None
     if d["ui"]:
-        ua = uitest.main_args(["--port", cfg["port"]] + (["--smoke"] if d["ui"] == "smoke" else []))
+        ua = uitest.main_args(["--port", cfg["port"]] + (["--smoke"] if d["ui"] == "smoke" else [])
+                              + (["--page", ",".join(d["pages"])] if d.get("pages") else []))
         sel = uitest.select(uitest.load_tests(), ua, cfg["port"].startswith("tcp:"))
+        if d.get("pages") and not sel:
+            say(f"no UI test visits {', '.join(d['pages'])}: the full set instead")
+            ua = uitest.main_args(["--port", cfg["port"]])
+            sel = uitest.select(uitest.load_tests(), ua, cfg["port"].startswith("tcp:"))
         sim = cfg["port"].startswith("tcp:")
         ui_summary = uitest.run(ua, cfg["port"], sim, sel)
         if sess_dir is None:
@@ -1910,6 +1939,8 @@ def selftest_auto():
     """The selection rules on example diffs (no radio): each example's decision."""
     examples = [
         (["crates/ferrite-app/src/screens/home.rs", "crates/ferrite-ui/src/widgets.rs"], "ui", False, False),
+        (["crates/ferrite-app/src/screens/zones.rs", "crates/ferrite-app/src/screens/browse.rs"], ("ui", ["browse", "zones"]), False, False),
+        (["crates/ferrite-app/src/screens/zones.rs", "crates/ferrite-app/src/screens/lists.rs"], "ui", False, False),
         (["firmware/src/tasks/radio/tx.rs", "crates/ferrite-app/src/screens/home.rs"], "full", True, False),
         (["drivers/bk4829/src/lib.rs"], "smoke", True, False),
         (["crates/ferrite-core/src/txcal.rs"], "smoke", True, False),
@@ -1922,8 +1953,9 @@ def selftest_auto():
     for files, ui, rf, rb in examples:
         a = argparse.Namespace(all=False, ui=False, rf=False, since=None, diff_files=",".join(files))
         d = decide(dict(results="/nonexistent"), a)
+        ui, pages = ui if isinstance(ui, tuple) else (ui, None)
         want_ui = "full" if ui == "ui" else ui
-        good = (d["ui"], d["rf"], d["reboot"]) == (want_ui, rf, rb)
+        good = (d["ui"], d["rf"], d["reboot"], d.get("pages")) == (want_ui, rf, rb, pages)
         ok &= good
         say(f"  [{'pass' if good else 'FAIL'}] {', '.join(files)}: {d['what']}")
     return ok

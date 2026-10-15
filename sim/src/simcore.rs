@@ -251,6 +251,8 @@ pub struct SimCore {
     last_theme: u8,
     /// The fake GPS module under the power manager (GPS-26 to GPS-33), when asked for ([`SimCore::gps_model`]).
     gps: Option<crate::fakegps::FakeGps>,
+    /// 0 6 1 turned the sample's fix off (GPS-3: the fixed position or none stands in until it is on again).
+    gps_off: bool,
 }
 
 /// One render pass as [`SimCore::watch_passes`] records it.
@@ -396,6 +398,7 @@ impl SimCore {
             last_page: 0,
             last_theme: 0,
             gps: None,
+            gps_off: false,
         };
         if owner_card {
             ferrite_app::sample::owner_card(s.app.settings_mut());
@@ -559,6 +562,20 @@ impl SimCore {
                 store.set_time(u);
             }
             let secs = self.clock0 + now as u64 / 1000;
+            // GPS-3 as on the radio: the sample's fix while the GPS is on (0 6 1); off, the fixed position stands in
+            // (0 6 9), else there is none. So a test gives the simulator a place with `set 0 6 1 Off`, `set 0 6 9`.
+            // (A fix a test set itself is left alone while the GPS is on.)
+            let set = app.settings();
+            if !set.gps_on {
+                let fix = set.fixed_on.then_some(ferrite_app::data::Fix { pos: set.fixed, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: ferrite_app::gpsdata::FIXED_AGE, utc_s: 0 });
+                if store.extra.fix.get() != fix {
+                    store.extra.fix.set(fix);
+                }
+                self.gps_off = true;
+            } else if self.gps_off {
+                store.extra.fix.set(Sample::sample_fix());
+                self.gps_off = false;
+            }
             // As the firmware's GPS task: local time by 0 6 3's zone, `Z` when that is UTC (SBAR-2, GPS-8).
             let (min, utc) = ferrite_app::gpsdata::local_clock(secs as u32, app.settings().tz);
             (dev.clock_min, dev.utc) = (Some(min), utc);

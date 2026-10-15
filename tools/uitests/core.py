@@ -12,7 +12,10 @@ A test is a function taking the context `t`, tagged with the manual rule IDs it 
         t.check(len(u.rows) == 10, "nine rows and Advanced", u.rows)
 
 `where="radio"` marks a test the simulator can't model (it is skipped there); `slow=True` one that waits on a timer
-(run with --slow). Safe by construction: the context has no PTT and the link's remote keys never transmit
+(run with --slow). `pages=("Zones", "Browse")` names the screens the test visits (their readback ids, the `screen`
+line's first word): `tools/uitest.py --page zones` runs the tests that visit a page, and `--check-pages` runs the
+tests and reports any whose tags differ from the screens they actually read back (readbacks inside `t.home()`
+don't count); `--fix-pages` writes what they visited into the tags. Safe by construction: the context has no PTT and the link's remote keys never transmit
 (LINK-19); a setting a test changes is put back by the runner after it (from the snapshot taken at the start), and
 `t.set()` only takes settings outside UNSAFE.
 """
@@ -36,21 +39,23 @@ class Skip(Exception):
 
 
 class Test:
-    def __init__(self, fn, rules, where, slow, needs, smoke, xfail):
+    def __init__(self, fn, rules, where, slow, needs, smoke, xfail, pages):
         self.fn, self.rules, self.where, self.slow, self.needs, self.smoke = fn, list(rules), where, slow, needs, smoke
         self.xfail = xfail
+        self.pages = tuple(pages) if pages else ()
         self.name = fn.__name__
         self.module = fn.__module__.rsplit(".", 1)[-1]
         self.doc = (fn.__doc__ or "").strip().split("\n")[0]
 
 
-def test(*rules, where="both", slow=False, needs=None, smoke=False, xfail=None):
+def test(*rules, where="both", slow=False, needs=None, smoke=False, xfail=None, pages=None):
     """Register a test: the rule IDs it checks; where it runs (both, radio, sim); slow (waits on timers);
     needs: the build flavours it needs (("tx", "tx-dry") for a transmit build's screens), else any; smoke: in
     the short set bench.py runs beside the SDR suite; xfail: a known deviation from the rule (the reason): a
-    failure is reported as xfail (not a run failure, recorded ✗), a pass as xpass (fixed: drop the mark)."""
+    failure is reported as xfail (not a run failure, recorded ✗), a pass as xpass (fixed: drop the mark);
+    pages: the screens it visits, by readback id ("Home", "Quick", "Zones"), for --page."""
     def deco(fn):
-        REGISTRY.append(Test(fn, rules, where, slow, needs, smoke, xfail))
+        REGISTRY.append(Test(fn, rules, where, slow, needs, smoke, xfail, pages))
         return fn
     return deco
 
@@ -117,12 +122,16 @@ class T:
         self.r, self.sim, self.build, self.log = radio, sim, build, log
         self.checks, self.notes, self.last = [], [], None
         self.evidence = []  # the readbacks a check looked at (their lines), newest last
+        self.visited = set()  # the screens read back (--check-pages), outside home()
+        self._homing = False
 
     # -- keys and readback --
     def ui(self, settle=0.12):
         if settle:
             time.sleep(settle)
         self.last = U(self.r.ui())
+        if not self._homing and self.last.id:
+            self.visited.add(self.last.id)
         return self.last
 
     def keys(self, seq, settle=0.12):
@@ -147,7 +156,15 @@ class T:
                 self.fail(f"{what}: not within {timeout:g} s")
 
     def home(self):
-        """Home, unlocked, no quick menu: hold BACK (HOME-2), then BACK x4 if that wasn't enough."""
+        """Home, unlocked, no quick menu: hold BACK (HOME-2), then BACK x4 if that wasn't enough. Its readbacks
+        aren't pages the test visits."""
+        homing, self._homing = self._homing, True
+        try:
+            return self._home()
+        finally:
+            self._homing = homing
+
+    def _home(self):
         u = self.ui(0)
         if u.bar.get("lock"):
             self.r.press("HASH", long=True)

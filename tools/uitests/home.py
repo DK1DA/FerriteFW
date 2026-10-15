@@ -6,7 +6,7 @@ from .core import test
 LAYOUTS = ["Watch", "Single + scope", "Watch + activity"]
 
 
-@test("HOME-2", "KEY-5", smoke=True)
+@test("HOME-2", "KEY-5", smoke=True, pages=("Edit", "Entry", "Group", "Home", "Info", "Quick", "Scope", "Status"))
 def hold_back_goes_home(t):
     """Hold BACK goes home from a menu, a group, the Status page, entry, the scope and the editor."""
     for seq in ("MENU", "MENU 0 7 4", "MENU 0 0", "1 4", "SLOT:long", "MENU 0 9 9 RIGHT RIGHT"):
@@ -22,7 +22,7 @@ def hold_back_goes_home(t):
     t.eq(u.id, "Home", "hold BACK from the scope")
 
 
-@test("HOME-4", "VFO-20", smoke=True)
+@test("HOME-4", "VFO-20", smoke=True, pages=("Home", "Quick"))
 def active_card_fields(t):
     """The active card: letter, VFO/channel and band, frequency, mode chip (FM, FM-N, AM), tones, shift, power."""
     t.cmd("slot A vfo 146.52 fm low tone 100.0 offset -0.6")
@@ -44,7 +44,7 @@ def active_card_fields(t):
     t.cmd("slot A low")
 
 
-@test("HOME-4", "VFO-6")
+@test("HOME-4", "VFO-6", pages=("Home",))
 def tone_chip_both_ways(t):
     """The tone chip in 7 characters: T 100.0 both ways or sent only; R 88.5 heard only; T100.0* sent with a
     different heard tone; DCS as D023N; nothing with no tones."""
@@ -58,7 +58,7 @@ def tone_chip_both_ways(t):
         t.check(len(got) <= 7, f"{words}: 7 characters at most", got)
 
 
-@test("HOME-3")
+@test("HOME-3", pages=("Home", "Quick"))
 def layouts_keep_the_keys(t):
     """Each of the three layouts: MENU opens quick settings, SLOT moves the active slot, the cards stay A, B, C."""
     for lay in LAYOUTS:
@@ -74,7 +74,7 @@ def layouts_keep_the_keys(t):
         t.eq(u.state["active"], "A", f"{lay}: SLOT twice more")
 
 
-@test("HOME-5", "SBAR-16")
+@test("HOME-5", "SBAR-16", pages=("Quick", "Status"))
 def watch_cards_and_bar(t):
     """Watch A+B+C: TW (watch=3) on home only; A+B: DW (2); Off: nothing; the watched cards show a state."""
     for val, n in (("A+B+C", 3), ("A+B", 2), ("Off", 0)):
@@ -89,7 +89,7 @@ def watch_cards_and_bar(t):
         t.eq(u.bar["watch"], n, f"watch {val}: on the Status page too")
 
 
-@test("HOME-8", "KEY-3")
+@test("HOME-8", "KEY-3", pages=("Home",))
 def hold_digit_shortcuts(t):
     """Hold 4 (watch on/off) and hold 2 (TX power): a popup names it with the new value, at the long press;
     nothing opens and the release does nothing."""
@@ -122,7 +122,7 @@ def hold_digit_shortcuts(t):
     t.eq(t.ui(0.3).active["power"], p0, "power back")
 
 
-@test("HOME-10", "KEY-17", "SBAR-13")
+@test("HOME-10", "KEY-17", "SBAR-13", pages=("Status",))
 def hash_opens_status(t):
     """# on home opens the Status page (watch off, so nothing to pause)."""
     t.set("0 1 1", "Off")
@@ -132,7 +132,7 @@ def hash_opens_status(t):
     t.check(u.rows and u.rows[0]["name"] == "Transmit", "the Status page's rows", u.rows[:2])
 
 
-@test("HOME-10", "WATCH-6")
+@test("HOME-10", "WATCH-6", pages=("Home", "Status"))
 def hash_pauses_watch_while_receiving(t):
     """While a watched slot is receiving the hint bar says "# Pause" and # pauses watch instead of Status."""
     t.set("0 1 1", "A+B+C")
@@ -150,7 +150,7 @@ def hash_pauses_watch_while_receiving(t):
     t.has(st.row("Watch")["value"], "paused", "Status: Watch")
 
 
-@test("HOME-11", "NAV-5")
+@test("HOME-11", "NAV-5", pages=("Home",))
 def slot_cycles_cards_stay(t):
     """SLOT cycles A -> B -> C -> A; the cards stay stacked A, B, C, only the active one changes."""
     seen = []
@@ -162,7 +162,7 @@ def slot_cycles_cards_stay(t):
     t.eq(seen, ["B", "C", "A"], "SLOT order")
 
 
-@test("HOME-15", "KEY-18")
+@test("HOME-15", "KEY-18", pages=("Home",))
 def star_quick_mute(t):
     """* on home mutes the active slot (card says Muted, toast), * again unmutes; the slot keeps receiving."""
     was = t.unmute()
@@ -179,7 +179,7 @@ def star_quick_mute(t):
         t.keys("STAR")
 
 
-@test("HOME-17", "KEY-18")
+@test("HOME-17", "KEY-18", pages=("Home", "Scan"))
 def quick_menu(t):
     """Hold * on home: the quick menu (PTT A Reverse, PTT B Night red, PF1 GPS, PF2 Bluetooth, Knob
     Brightness); the knob changes the brightness, PF1 toggles GPS; BACK closes it. Not while scanning."""
@@ -211,7 +211,7 @@ def quick_menu(t):
     t.keys("SIDE2")
 
 
-@test("HOME-17")
+@test("HOME-17", pages=("Home",))
 def quick_menu_brightness_only_while_up(t):
     """The knob is the brightness only while the quick menu is up: after BACK it tunes again."""
     f0 = t.ui().active["freq"]

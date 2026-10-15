@@ -7,7 +7,7 @@
 
 use super::{blocked, mhz5, parse_mhz};
 use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
-use crate::data::{Op, RangePreset, ZoneCfg};
+use crate::data::{Op, Pos, RangePreset, ZoneCfg};
 use crate::screens::groups::{self, SUBS};
 use crate::screens::tones::{CTCSS_MAX, CTCSS_MIN};
 use crate::slot::{band_of, BAND_125M, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
@@ -330,6 +330,66 @@ fn freq(w: &[u8], what: &str) -> Result<Freq10, Msg> {
     }
 }
 
+/// Degrees x 1e7 as written: "45.4215", "-75.6972" (up to seven decimals, trailing zeros left off).
+fn deg_word(v: i32, out: &mut Line) {
+    if v < 0 {
+        out.push(b"-");
+    }
+    let a = v.unsigned_abs();
+    num(out, b"", a / 10_000_000);
+    let mut frac = a % 10_000_000;
+    if frac != 0 {
+        out.push(b".");
+        let mut d = 1_000_000;
+        while frac != 0 {
+            out.push(&[b'0' + (frac / d) as u8]);
+            frac %= d;
+            d /= 10;
+        }
+    }
+}
+
+/// A position as `pos=` writes it (CHAN-2, TERM-9): "45.4215,-75.6972".
+fn pos_word(p: Pos, out: &mut Line) {
+    deg_word(p.lat, out);
+    out.push(b",");
+    deg_word(p.lon, out);
+}
+
+/// "-75.6972" to degrees x 1e7, within +-max degrees; up to seven decimals.
+fn deg_val(w: &[u8], max: u32) -> Option<i32> {
+    let (neg, w) = match w.strip_prefix(b"-") {
+        Some(r) => (true, r),
+        None => (false, w.strip_prefix(b"+").unwrap_or(w)),
+    };
+    let (int, frac) = match w.iter().position(|&c| c == b'.') {
+        Some(i) => (&w[..i], &w[i + 1..]),
+        None => (w, &b""[..]),
+    };
+    if int.is_empty() || int.len() > 3 || frac.len() > 7 || !frac.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let deg = number(int)?;
+    let f = frac.iter().chain(core::iter::repeat_n(&b'0', 7 - frac.len())).fold(0u32, |n, &c| n * 10 + (c - b'0') as u32);
+    let v = deg as u64 * 10_000_000 + f as u64;
+    (v <= max as u64 * 10_000_000).then_some(if neg { -(v as i64) } else { v as i64 } as i32)
+}
+
+/// A position typed for `ch N pos=` or `set 0 6 9`: "45.4215,-75.6972" (degrees, north and east positive), a grid
+/// square ("FN25dk", its centre: GPS-21), or "none" (Ok(None)).
+fn pos_val(v: &[u8], what: &str) -> Result<Option<Pos>, Msg> {
+    if same(v, b"none") {
+        return Ok(None);
+    }
+    let bad = || msg!("{}: lat,lon in degrees (45.42,-75.69), a grid square, or none", what);
+    if let Some(i) = v.iter().position(|&c| c == b',') {
+        let lat = deg_val(&v[..i], 90).ok_or_else(bad)?;
+        let lon = deg_val(&v[i + 1..], 180).ok_or_else(bad)?;
+        return Ok(Some(Pos { lat, lon }));
+    }
+    crate::screens::lists::grid_pos(v).map(Some).ok_or_else(bad)
+}
+
 // ---- Values in a line ----
 
 /// "off", "100.0", "D023N".
@@ -508,6 +568,10 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
             out.push(w.as_bytes());
         }
     }
+    if let Some(p) = st.position(c.num) {
+        out.push(b" pos=");
+        pos_word(p, out);
+    }
 }
 
 /// One field of a channel from `key` and its value (a bare flag word is "on").
@@ -651,6 +715,18 @@ fn save<S: ChannelStore>(app: &mut App, st: &S, c: Channel) -> Msg {
     m
 }
 
+/// [`save`] with the channel's position set or cleared (CHAN-2: `pos=`); nothing written when both are as stored.
+fn save_pos<S: ChannelStore>(app: &mut App, st: &S, c: Channel, pos: Option<Pos>) -> Msg {
+    if st.by_num(c.num).map(|x| x.0) != Some(c) || st.position(c.num) != pos {
+        app.put_channel_pos(c, pos);
+    }
+    let mut m = msg!("Channel {} saved", c.num as u32 + 1);
+    if c.name().is_empty() {
+        m.push(b" (no name)");
+    }
+    m
+}
+
 fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let num = index(t.word("ch: which channel, e.g. ch 12")?, MAX_CHANNELS as u32, "ch")? as u16;
     let old = st.by_num(num).map(|x| x.0);
@@ -666,15 +742,21 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
             let rx = freq(t.word("ch: the RX frequency after the name, e.g. ch 12 \"Name\" 146.52")?, "rx")?;
             let mut c = Channel { num, zone: NO_ZONE, rx, name: [0; 16], cfg: DEFAULT_CFG, flags: 0, tones: 0 };
             c.set_name(name.as_bytes());
+            let mut pos = None;
             while let Some(tok) = t.next()? {
                 let Tok::Word(w) = tok else { return Err(msg!("ch: a name in quotes goes right after the number")) };
                 match w.iter().position(|&b| b == b'=') {
+                    Some(e) if same(&w[..e], b"pos") => pos = Some(pos_val(&w[e + 1..], "pos")?),
                     Some(e) => field(&mut c, &w[..e], Some(Tok::Word(&w[e + 1..])), st)?,
                     None => field(&mut c, w, None, st)?,
                 }
             }
             check(&c)?;
-            Ok(Done::Said(save(app, st, c)))
+            // A line without pos= keeps the position the channel has (the web app's import sets it).
+            Ok(Done::Said(match pos {
+                Some(p) => save_pos(app, st, c, p),
+                None => save(app, st, c),
+            }))
         }
         Some(Tok::Word(w)) if same(w, b"delete") => {
             old.ok_or_else(missing)?;
@@ -688,6 +770,14 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                 Some(e) => (&w[..e], Some(Tok::Word(&w[e + 1..]))),
                 None => (w, t.next()?),
             };
+            if same(key, b"pos") {
+                let Some(Tok::Word(v)) = v else { return Err(msg!("pos: latitude,longitude, a grid square, or none")) };
+                let p = pos_val(v, "pos")?;
+                if t.next()?.is_some() {
+                    return Err(msg!("ch: one field at a time, e.g. ch 12 pos=45.4215,-75.6972"));
+                }
+                return Ok(Done::Said(save_pos(app, st, c, p)));
+            }
             if band_of(c.rx) == Some(BAND_125M) && same(key, b"power") {
                 return Err(msg!("power: fixed at 0.25 W on 1.25 m"));
             }
@@ -948,6 +1038,25 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     }
     if let Some(why) = groups::greyed(app, p) {
         return Err(msg!("{}: {}", name, why));
+    }
+    if p == [6, 9] {
+        // GPS-3, GPS-21: the fixed position typed (its altitude kept): degrees, a grid square, or none.
+        let want = t.rest();
+        match pos_val(want, name)? {
+            Some(pos) => (app.set.fixed, app.set.fixed_on) = (pos, true),
+            None => app.set.fixed_on = false,
+        }
+        let mut m = Msg::new();
+        path_text(p, &mut m);
+        put!(m, " {}: ", name);
+        let mut l = Line::new();
+        if app.set.fixed_on {
+            pos_word(app.set.fixed, &mut l);
+        } else {
+            l.push(b"None");
+        }
+        m.push(l.as_bytes());
+        return Ok(Done::Said(m));
     }
     if !groups::is_settable(p) {
         return Err(msg!("{} can't be set yet: it keeps its default until its feature lands", name));

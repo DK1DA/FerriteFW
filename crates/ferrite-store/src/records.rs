@@ -156,6 +156,18 @@ pub fn ch_with_position(b: &[u8; CH_LEN], p: Pos) -> [u8; CH_LEN] {
     r
 }
 
+/// A record with no position (CHAN-2: the flag clear, latitude and longitude "none").
+pub fn ch_without_position(b: &[u8; CH_LEN]) -> [u8; CH_LEN] {
+    let mut r = *b;
+    r[20..24].copy_from_slice(&NO_POS.to_le_bytes());
+    r[24..28].copy_from_slice(&NO_POS.to_le_bytes());
+    let f = u16_at(&r, 16) & !HAS_POS;
+    r[16..18].copy_from_slice(&f.to_le_bytes());
+    let crc = crc16(&r[..62]);
+    r[62..64].copy_from_slice(&crc.to_le_bytes());
+    r
+}
+
 // ---- zones ----
 
 pub const ZONE_LEN: usize = 32;

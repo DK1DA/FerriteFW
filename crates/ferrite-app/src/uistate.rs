@@ -359,6 +359,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 q(l, &e.buf[..e.n as usize % (e.buf.len() + 1)]);
             }
         }
+        Screen::Zones(z) => zones_lines(app, cx, z, d),
         Screen::Text(_) => {
             if let Some(l) = d.ln() {
                 l.push(b"text ");
@@ -366,6 +367,88 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             }
         }
         _ => {}
+    }
+}
+
+/// The zones page (CHAN-27 to CHAN-30): `head`, the Nearby row and the zone rows on the page (`row 0 "name" "value"`
+/// with `kind=nearby` or `kind=zone` and `chips="A SCAN HID"`), the preview (`preview "NAME" "state"`, a `pvrow
+/// "name" "place" "freq"` per channel, `pvfoot "..."`); the zone editor's rows as a list's.
+fn zones_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, z: screens::zones::Zones, d: &mut Desc) {
+    use screens::zones::*;
+    let st = cx.store;
+    if let Some(r) = z.edit() {
+        for i in 0..EDITOR_ROWS {
+            let (label, v, dot) = editor_row(st, z.cur.sel as u8, i);
+            row(d, 0, label.as_bytes(), v.as_bytes(), i as u8 == r, dot, false);
+        }
+        return;
+    }
+    if let Some(l) = d.ln() {
+        l.push(b"head ");
+        q(l, head_text(st).as_bytes());
+    }
+    let near = nearby_now(app, st);
+    let on_near = z.on_nearby() && near.is_some();
+    if let Some(n) = near {
+        if let Some(l) = d.ln() {
+            let mut p = Buf::<12>::new();
+            crate::screens::lists::place_text(n.m, n.deg, app.settings().units, &mut p);
+            l.push(b"row 0 \"Nearby\" ");
+            q(l, p.as_bytes());
+            if on_near {
+                l.push(b" sel");
+            }
+            l.push(b" kind=nearby");
+        }
+    }
+    let n = st.zones() as u16;
+    let keep = |i: u16| st.zone_name(i as u8).is_some();
+    let vis = zone_rows(near.is_some());
+    let cur = z.cur.shown(n, vis, &keep);
+    cur.rows(n, vis, &keep, |_, i| {
+        let r = ZoneRow::of(app, st, i as u8);
+        if let Some(l) = d.ln() {
+            l.push(b"row 0 ");
+            q(l, r.name.as_bytes());
+            let _ = uwrite!(l, " \"{}\"", r.count);
+            if !on_near && i == cur.sel {
+                l.push(b" sel");
+            }
+            if r.count == 0 {
+                l.push(b" grey");
+            }
+            l.push(b" kind=zone");
+            let mut c = Buf::<16>::new();
+            r.chip_words(&mut c);
+            kq(l, "chips", c.as_bytes());
+        }
+    });
+    let p = if on_near {
+        preview_nearby(app, st)
+    } else if (0..n).any(keep) {
+        preview_zone(app, st, cur.sel as u8)
+    } else {
+        return;
+    };
+    if let Some(l) = d.ln() {
+        l.push(b"preview ");
+        q(l, p.head.as_bytes());
+        l.push(b" ");
+        q(l, p.state.as_bytes());
+    }
+    for r in p.rows.iter().flatten() {
+        if let Some(l) = d.ln() {
+            l.push(b"pvrow ");
+            q(l, r.name.as_bytes());
+            l.push(b" ");
+            q(l, r.place.as_bytes());
+            l.push(b" ");
+            q(l, r.freq.as_bytes());
+        }
+    }
+    if let Some(l) = d.ln() {
+        l.push(b"pvfoot ");
+        q(l, p.foot.as_bytes());
     }
 }
 

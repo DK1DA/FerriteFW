@@ -639,6 +639,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     async fn apply_async(&self, w: ChanWrite) -> Result {
         match w {
             ChanWrite::Put { ch, from } => self.put_channel(ch, from).await,
+            ChanWrite::PutPos { ch, pos } => self.put_channel_pos(ch, pos).await,
             ChanWrite::Delete(n) => self.delete(n).await,
             ChanWrite::DeleteZone(z) => self.delete_zone(z).await,
             ChanWrite::EraseAll => self.erase_channels().await,
@@ -661,6 +662,19 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             self.delete(f).await?;
         }
         Ok(())
+    }
+
+    /// A channel with its position set or cleared (CHAN-2; the terminal's `ch N pos=`).
+    async fn put_channel_pos(&self, ch: Channel, pos: Option<Pos>) -> Result {
+        if ch.num >= MAX_CHANNELS {
+            return Err(NorError);
+        }
+        let rec = ch_encode(&ch, &self.raw_ch(ch.num)?);
+        let rec = match pos {
+            Some(p) => ch_with_position(&rec, p),
+            None => ch_without_position(&rec),
+        };
+        self.write_ch(ch.num, &rec).await
     }
 
     async fn write_ch(&self, num: u16, rec: &[u8; CH_LEN]) -> Result {
@@ -1225,6 +1239,14 @@ impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
 
     fn position(&self, num: u16) -> Option<Pos> {
         ch_position(&self.read_ch(num))
+    }
+
+    fn located(&self, num: u16) -> Option<(Channel, Pos)> {
+        if self.zmap.get(num as usize)?.get() == EMPTY {
+            return None;
+        }
+        let r = self.read_ch(num);
+        Some((ch_decode(num, &r)?, ch_position(&r)?))
     }
 
     fn data(&self) -> &dyn Data {

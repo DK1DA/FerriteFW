@@ -6,7 +6,7 @@ import ferrite_link as fl
 from .core import test
 
 
-@test("BCR-1")
+@test("BCR-1", pages=("Fm", "Group"))
 def fm_broadcast_screen(t):
     """MENU 0 3 1 opens FM broadcast (◀▶ seek, OK presets); BACK leaves and the slots are as they were."""
     before = [t.slot(L) for L in "AB"]
@@ -18,7 +18,7 @@ def fm_broadcast_screen(t):
     t.eq([t.slot(L) for L in "AB"], before, "slots A and B unchanged")
 
 
-@test("KEY-5", "MENU-25")
+@test("KEY-5", "MENU-25", pages=("Home", "Scope"))
 def scope_opens_and_closes(t):
     """Hold 1: the band scope (◀▶ marker, SIDE1 listen, OK go); BACK leaves it and home tunes as before."""
     f0 = t.ui().active["freq"]
@@ -30,7 +30,7 @@ def scope_opens_and_closes(t):
     t.eq(u.active["freq"], f0, "the active slot as it was")
 
 
-@test("SCAN-2", "KEY-18", "SBAR-11")
+@test("SCAN-2", "KEY-18", "SBAR-11", pages=("Home", "Scan"))
 def side2_starts_and_stops_a_scan(t):
     """SIDE2 starts a scan on the active slot (the scan screen names its keys: SIDE2 Stop), SIDE2 stops it; the
     slot line says scanning meanwhile; the target follows 0 1 4."""
@@ -45,7 +45,7 @@ def side2_starts_and_stops_a_scan(t):
     t.note(f"target {target}")
 
 
-@test("XB-2", "XB-3")
+@test("XB-2", "XB-3", pages=("Crossband", "Group"))
 def crossband_start_page(t):
     """MENU 0 3 5: the crossband repeater's start page (knob changes, # starts, BACK leaves); nothing starts
     by opening it."""
@@ -57,7 +57,7 @@ def crossband_start_page(t):
     t.check(u.id != "Crossband", "BACK leaves", u.id)
 
 
-@test("GPS-23")
+@test("GPS-23", pages=("Group", "Text"))
 def clock_typed_by_hand(t):
     """OK on 0 6 6 types the date and time as 12 digits; a date that doesn't exist is refused."""
     u = t.keys("MENU 0 6 6")
@@ -125,7 +125,7 @@ def link_records_round_trip(t):
     t.check(not ok and "no such channel" in out, "DELETE removed it", out)
 
 
-@test("SND-5")
+@test("SND-5", pages=("Group",))
 def end_tone_is_a_transmit_setting(t):
     """The end tone is in the menus at 0 8 5 4 (Transmit) and in the channel editor's settings."""
     name, value, _ = t.get_full("0 8 5 4")

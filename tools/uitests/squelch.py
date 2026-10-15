@@ -35,7 +35,7 @@ def quiet_slot(t):
     return stopped
 
 
-@test("SQL-13")
+@test("SQL-13", pages=("Home", "Quick", "Squelch", "Value"))
 def level_zero_reads_open(t):
     """Level 0 is squelch off: the menus show it as "0 (open)"; SIDE1 + knob gets there with no OK (live)."""
     v0 = level(t)
@@ -55,7 +55,7 @@ def level_zero_reads_open(t):
         set_level(t, v0)
 
 
-@test("SQL-7", "SQL-13", where="radio")
+@test("SQL-7", "SQL-13", where="radio", pages=("Home", "Quick"))
 def level_change_is_live(t):
     """SIDE1 + knob changes the level live: at 0 the squelch opens on a quiet channel, back at 4 it closes, with
     no OK anywhere (the simulator doesn't model the squelch level: its carriers come and go by time)."""
@@ -79,7 +79,7 @@ def level_change_is_live(t):
         t.put_back(stopped)
 
 
-@test("SQL-9")
+@test("SQL-9", pages=("Home",))
 def side1_tap_latches_monitor(t):
     """SIDE1 tapped: the squelch opens (MON on the card) and stays open until SIDE1 is tapped again."""
     stopped = quiet_slot(t)
@@ -101,7 +101,7 @@ def side1_tap_latches_monitor(t):
 
 
 @test("SQL-9", xfail="SIDE1 held alone does nothing: only the tap (monitor latch) and SIDE1 + knob/arrows are "
-                     "built (home.rs; sim, Oct 14, 2026)")
+                     "built (home.rs; sim, Oct 14, 2026)", pages=("Home",))
 def side1_held_opens_while_held(t):
     """SIDE1 held: the squelch is open while it is held, and closes when it is let go."""
     stopped = quiet_slot(t)

@@ -65,6 +65,9 @@ pub enum ChanWrite {
     /// Write this channel at its number; `from` is the number it had when it was renumbered (that record is
     /// removed), None when it stays or is new.
     Put { ch: Channel, from: Option<u16> },
+    /// Write this channel at its number and set its position, or clear it with None (CHAN-2: the terminal's
+    /// `ch N pos=`, TERM-9).
+    PutPos { ch: Channel, pos: Option<Pos> },
     /// Remove a channel (CHAN-13, from the browser).
     Delete(u16),
     /// Remove a zone: its channels move to no zone and stay in All (CHAN-12).
@@ -192,6 +195,13 @@ pub trait ChannelStore {
     /// A channel's position, if it has one (CHAN-2, CHAN-15).
     fn position(&self, _num: u16) -> Option<Pos> {
         None
+    }
+
+    /// A channel and its position, when it has one (Nearby, the zones page: CHAN-15, CHAN-29). A store with records
+    /// answers from one record read.
+    fn located(&self, num: u16) -> Option<(Channel, Pos)> {
+        let p = self.position(num)?;
+        Some((self.get(num)?, p))
     }
 
     /// Recent (CHAN-25): the number of the r-th channel used, newest first; a store without the list has none.

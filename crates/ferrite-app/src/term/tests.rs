@@ -577,6 +577,8 @@ struct Blank {
     zones: RefCell<Vec<(Name, ZoneCfg)>>,
     presets: RefCell<Vec<RangePreset>>,
     busy: Cell<bool>,
+    /// Channel positions (CHAN-2), as `ch N pos=` sets them.
+    pos: RefCell<BTreeMap<u16, crate::data::Pos>>,
 }
 
 impl Apply for Blank {
@@ -588,6 +590,13 @@ impl Apply for Blank {
                     c.remove(&f);
                 }
                 c.insert(ch.num, ch);
+            }
+            ChanWrite::PutPos { ch, pos } => {
+                c.insert(ch.num, ch);
+                match pos {
+                    Some(p) => self.pos.borrow_mut().insert(ch.num, p),
+                    None => self.pos.borrow_mut().remove(&ch.num),
+                };
             }
             ChanWrite::Delete(n) => {
                 c.remove(&n);
@@ -621,6 +630,9 @@ impl ChannelStore for Blank {
     }
     fn by_number(&self, i: u16) -> Option<Channel> {
         self.chans.borrow().values().nth(i as usize).copied()
+    }
+    fn position(&self, num: u16) -> Option<crate::data::Pos> {
+        self.chans.borrow().contains_key(&num).then(|| self.pos.borrow().get(&num).copied()).flatten()
     }
     fn data(&self) -> &dyn Data {
         self
@@ -879,7 +891,7 @@ fn dump_format() {
         "set 0 6 6 24 h, GPS               # Clock",
         "zone 2 \"Repeaters\" scan=on shown=on distance=off resume=radio dwell=radio pri1=12",
         "preset 3 \"Airband\" 118.00000 137.00000 step=25kHz mode=AM resume=carrier",
-        "ch 12 \"Club repeater\" 443.47500 offset=+5.00000 mode=NFM txtone=100.0 rxtone=off power=low zone=2",
+        "ch 12 \"Club repeater\" 443.47500 offset=+5.00000 mode=NFM txtone=100.0 rxtone=off power=low zone=2 pos=45.4075605,-75.6628014",
         "ch 63 \"FRS 1\" 462.56250 offset=simplex mode=NFM tone=off power=low",
     ] {
         assert!(d.iter().any(|x| x == l), "missing: {l}");
@@ -2005,4 +2017,50 @@ fn settings_golden() {
         let line = want.lines().zip(out.lines()).position(|(a, b)| a != b).unwrap_or(0);
         panic!("settings differ from {} at line {} (written: {})", path.display(), line + 1, new.display());
     }
+}
+
+/// CHAN-2, TERM-12: a channel's position over the terminal: `ch N pos=lat,lon` (degrees), a grid square, or none;
+/// the `ch` line writes it back (so a dump and a load keep it), and a whole line without pos= keeps it.
+#[test]
+fn channel_position_over_the_terminal() {
+    use crate::data::Pos;
+    let mut r = Rig::main();
+    r.cmd("ch 12 pos=45.5,-75.25");
+    assert_eq!(r.store.position(11), Some(Pos { lat: 455_000_000, lon: -752_500_000 }), "{}", r.bottom());
+    r.send(b"\r");
+    r.cmd("ch 12");
+    assert!(r.raw().contains("zone=2 pos=45.5,-75.25"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("ch 12 pos=-33.8688197,151.2092955");
+    assert_eq!(r.store.position(11), Some(Pos { lat: -338_688_197, lon: 1_512_092_955 }), "seven decimals, south and east");
+    r.cmd("ch 12 pos none");
+    assert_eq!(r.store.position(11), None, "{}", r.bottom());
+    r.cmd("ch 300 \"Hill\" 146.94 offset=-0.6 pos=FN25dk");
+    assert_eq!(r.store.position(299), crate::screens::lists::grid_pos(b"FN25dk"), "{}", r.bottom());
+    r.cmd("ch 300 \"Hill\" 146.94 offset=-0.6 power=mid");
+    assert!(r.store.position(299).is_some(), "a whole line without pos= keeps the position");
+    for bad in ["ch 300 pos=91,0", "ch 300 pos=45,181", "ch 300 pos=45.12345678,1", "ch 300 pos=north", "ch 300 pos"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("pos"), "{bad}: {}", r.bottom());
+    }
+    assert!(r.store.position(299).is_some(), "refused lines change nothing");
+}
+
+/// GPS-3, GPS-21, TERM-12: `set 0 6 9` types the fixed position (degrees or a grid square), `none` clears it.
+#[test]
+fn fixed_position_over_the_terminal() {
+    use crate::data::Pos;
+    let mut r = Rig::main();
+    r.cmd("set 0 6 9 45.4215,-75.6972");
+    assert!(r.app.set.fixed_on, "{}", r.bottom());
+    assert_eq!(r.app.set.fixed, Pos { lat: 454_215_000, lon: -756_972_000 });
+    assert!(r.bottom().contains("0 6 9 Fixed position: 45.4215,-75.6972"), "{}", r.bottom());
+    r.cmd("get 0 6 9");
+    assert!(r.bottom().contains("FN25"), "{}", r.bottom());
+    r.cmd("set 0 6 9 FN31");
+    assert_eq!(Some(r.app.set.fixed), crate::screens::lists::grid_pos(b"FN31"));
+    r.cmd("set 0 6 9 here");
+    assert!(r.bottom().contains("a grid square, or none"), "{}", r.bottom());
+    r.cmd("set 0 6 9 None");
+    assert!(!r.app.set.fixed_on, "{}", r.bottom());
 }

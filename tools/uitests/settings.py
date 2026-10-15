@@ -21,7 +21,7 @@ def unbuilt_group(t, path):
 TYPED = {"0 4 2 2", "0 5 6 1", "0 5 6 2", "0 5 8 2", "0 4 2 3"}
 
 
-@test("MENU-5", "MENU-7", "MENU-12", "MENU-15", "MENU-16", "MENU-21")
+@test("MENU-5", "MENU-7", "MENU-12", "MENU-15", "MENU-16", "MENU-21", pages=("Fm", "Group", "Text"))
 def every_setting_reachable_and_live(t):
     """Each setting from the table (`dump`): MENU 0 and its number lands on its row (name as `get`, value,
     help with the path); the knob changes it at once (`get` has it), and back; # leaves defaults alone."""
@@ -81,7 +81,7 @@ def every_setting_reachable_and_live(t):
     t.check(not misrouted, "every typed path lands on its row", misrouted)
 
 
-@test("TX-2", "SETUP-8")
+@test("TX-2", "SETUP-8", pages=("ExtendTx", "Group", "Status"))
 def extend_tx_warns_first_and_shows_on_status(t):
     """Extend TX is off by default; turning it on (0 8 9) shows its warning first, where BACK keeps it off; its
     state is on the Status page, never in the status bar. The test never turns it on: OK on the warning would mark
@@ -114,7 +114,7 @@ def extend_tx_warns_first_and_shows_on_status(t):
     t.eq(set(u.bar), bar_keys, "the status bar has nothing for it")
 
 
-@test("TONE-9")
+@test("TONE-9", pages=("Group", "Quick"))
 def tail_elimination_is_a_transmit_setting(t):
     """Tail elimination lives in the Transmit group (0 8 5: mode, phase, end tone), receive-side muting beside it;
     it is not a squelch option (0 9 5 Receiver and the quick settings have no tail elimination row)."""
@@ -131,7 +131,7 @@ def tail_elimination_is_a_transmit_setting(t):
         t.check(not any("tail elim" in n.lower() for n in u.names()), f"{path}: no tail elimination row", u.names())
 
 
-@test("SETUP-1", "SETUP-4")
+@test("SETUP-1", "SETUP-4", pages=("Group", "Setup"))
 def setup_runs_from_the_menu(t):
     """MENU 0 9 8 1 runs setup: OK goes to the next page, BACK to the previous, BACK on the first page leaves it
     with nothing changed (only the welcome page is passed: no answer is given)."""

@@ -4,7 +4,7 @@ from .core import test
 BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt", "battery", "low", "cutoff", "clock", "utc"}
 
 
-@test("SBAR-14", "PWR-8", "SBAR-10")
+@test("SBAR-14", "PWR-8", "SBAR-10", pages=("Status",))
 def status_page_lists_states(t):
     """The Status page lists the states in words and follows them (Battery Save, GPS, VOX, Key lock); Battery
     Save shows there and never in the status bar."""
@@ -31,7 +31,7 @@ def status_page_lists_states(t):
     t.eq(u.bar["gps"], "off", "GPS off: no GPS icon")
 
 
-@test("SBAR-15", "SBAR-13")
+@test("SBAR-15", "SBAR-13", pages=("Gps", "Group", "Quick", "Status"))
 def status_rows_open_their_setting(t):
     """OK on a Status row opens that row's setting: Battery Save, VOX, GPS; BACK returns to the row."""
     for name, want in (("Battery Save", "Battery Save"), ("GPS", "GPS"), ("VOX", "VOX")):
@@ -46,7 +46,7 @@ def status_rows_open_their_setting(t):
         t.eq((u.id, u.sel and u.sel["name"]), ("Status", name), f"{name}: BACK to the row")
 
 
-@test("SBAR-11", "SBAR-4")
+@test("SBAR-11", "SBAR-4", pages=("Home", "Scan"))
 def bar_shows_lock_and_scan(t):
     """States that change what a key does are in the bar: the padlock while locked, SCN while the active slot
     scans; each appears only when it applies."""
@@ -64,7 +64,7 @@ def bar_shows_lock_and_scan(t):
     t.eq(u.bar["lock"], 0, "unlocked")
 
 
-@test("SBAR-19", "SBAR-9")
+@test("SBAR-19", "SBAR-9", pages=("Group", "Home", "Info", "Status"))
 def battery_icon_status_about(t):
     """The battery: an icon in the bar (always), the percentage on Status, the volts on About; no "Battery as"
     anywhere in Display."""
@@ -81,7 +81,7 @@ def battery_icon_status_about(t):
         t.check(not any("Battery as" in n for n in u.names()), f"{path}: no Battery as", u.names())
 
 
-@test("HELP-1", "SBAR-5")
+@test("HELP-1", "SBAR-5", pages=("Group", "Info"))
 def about_pages_go_round(t):
     """◀▶ on About go round its pages: About, Manual, Keys, Side+PTT, Hold 0-9, Menu nos, Self-test; the hint
     bar names the page ▶ goes to; every name fits 8 characters; BACK leaves."""
@@ -104,7 +104,7 @@ def about_pages_go_round(t):
     t.eq((u.id, u.sel and u.sel["name"]), ("Group", "About"), "BACK leaves to System, on About")
 
 
-@test("BOOT-11")
+@test("BOOT-11", pages=("Info",))
 def about_rows(t):
     """About: version, MCU, SPI flash, calibration, the transmit state, self-test, battery, MCU temp, uptime,
     SSB patch (installed or the path to install it)."""
@@ -118,7 +118,7 @@ def about_rows(t):
     t.note(f"About: {[(r['name'], r['value']) for r in u.rows]}")
 
 
-@test("SBAR-7")
+@test("SBAR-7", pages=("Status",))
 def gps_icon_follows_the_fix(t):
     """The GPS icon shows only with GPS on: outline (gps=searching) while it searches, solid (gps=fix) with a
     fix, none (gps=off) with GPS off; the Status page's GPS row says the same."""
@@ -139,7 +139,7 @@ def gps_icon_follows_the_fix(t):
     t.check(u.bar["gps"] in ("searching", "fix"), "outline or solid", u.bar)
 
 
-@test("BOOT-8", "SELF-2", "BACKUP-4")
+@test("BOOT-8", "SELF-2", "BACKUP-4", pages=("Info", "Status"))
 def transmit_lock_follows_the_checks(t):
     """Transmit is Ready only when the MCU and calibration checks pass (Self-test page), and About and Status say
     the same; the calibration page's CRC at install matches while it reads Valid, and a lock names its reason."""
@@ -170,7 +170,7 @@ def transmit_lock_follows_the_checks(t):
     t.note(f"transmit {tx!r}, calibration {cal!r}, checks {checks}")
 
 
-@test("UPD-8", "SAFE-2")
+@test("UPD-8", "SAFE-2", pages=("Group", "Info"))
 def no_pending_update_on_a_clean_radio(t):
     """About on a radio with nothing at 0x300000: no "pending stock update" line; there is no update screen in
     the menus (System has no update row)."""
@@ -182,7 +182,7 @@ def no_pending_update_on_a_clean_radio(t):
     t.check(not any("update" in r["name"].lower() for r in u.rows), "System: no update row", u.names())
 
 
-@test("GPS-28", where="radio", slow=True)
+@test("GPS-28", where="radio", slow=True, pages=("Gps",))
 def gps_screen_keeps_the_module_running(t):
     """With the GPS position page (0 6 2) open the module keeps running: its sentences keep coming (the terminal's
     `gps` age stays a few seconds) for two minutes; no standby while the page is open."""
