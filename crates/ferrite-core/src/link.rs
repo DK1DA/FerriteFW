@@ -375,8 +375,10 @@ pub struct BtPace {
 }
 
 impl BtPace {
-    /// One notification's worth, then a 30 ms gap: about 390 B/s at 9600 (a burst is on the wire 21 ms).
-    pub const DEFAULT: BtPace = BtPace { burst: 20, gap_ms: 30 };
+    /// One notification's worth, then a 50 ms gap: about 280 B/s at 9600 (a burst is on the wire 21 ms). The BT513
+    /// sends what piled up only after its UART has been quiet for between 30 and 40 ms, and then only the last
+    /// notification's worth: 30 ms lost every UI readback on the bench, 40 ms lost none (LINK-36).
+    pub const DEFAULT: BtPace = BtPace { burst: 20, gap_ms: 50 };
     /// The longest gap `bt pace` takes.
     pub const MAX_GAP_MS: u16 = 1_000;
 
@@ -456,8 +458,8 @@ mod tests {
     /// full gap; B 0 is unpaced; `bt pace`'s limits; the rate it allows at 9600.
     #[test]
     fn bt_pace_bursts_and_gaps() {
-        let p = BtPace::DEFAULT;
-        assert_eq!((p.burst, p.gap_ms), (20, 30));
+        assert_eq!((BtPace::DEFAULT.burst, BtPace::DEFAULT.gap_ms), (20, 50));
+        let p = BtPace::new(20, 30).unwrap();
         let mut s = BtPacer::default();
         assert_eq!(s.allow(p, 0), 20);
         s.sent(p, 12, 0);
@@ -484,8 +486,9 @@ mod tests {
         let q = BtPace::new(255, 1_000).unwrap();
         assert_eq!(BtPace::unpack(q.pack()), q);
         assert_eq!(BtPace::unpack(p.pack()), p);
-        // Rates at 9600: 960 B/s unpaced, about 393 B/s by default, about 650 with a 10 ms gap.
+        // Rates at 9600: 960 B/s unpaced, about 282 B/s by default, 393 with a 30 ms gap, about 650 with 10 ms.
         assert_eq!(off.bytes_per_s(BT_BAUD), 960);
+        assert_eq!(BtPace::DEFAULT.bytes_per_s(BT_BAUD), 282);
         assert_eq!(p.bytes_per_s(BT_BAUD), 393);
         assert_eq!(BtPace::new(20, 10).unwrap().bytes_per_s(BT_BAUD), 648);
     }

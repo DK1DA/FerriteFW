@@ -1469,7 +1469,7 @@ fn debug_bt_pace() {
     let mut r = Rig::main();
     r.cmd("bt stat");
     assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 0, pace: None }]);
-    assert!(r.raw().contains("pace: 20 B bursts, 30 ms gaps (~393 B/s)"), "{}", r.raw());
+    assert!(r.raw().contains("pace: 20 B bursts, 50 ms gaps (~282 B/s)"), "{}", r.raw());
     r.send(b"\r");
     r.cmd("bt pace 20 10");
     assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 0, pace: BtPace::new(20, 10) }]);

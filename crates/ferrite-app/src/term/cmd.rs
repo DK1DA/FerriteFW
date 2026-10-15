@@ -1571,7 +1571,7 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 /// TERM-27: `bt AT+VERS?`, one read-only query to the Bluetooth module.
 fn bt(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bt AT, bt AT+HELP or bt AT+WORD? (queries only); bt stat; bt baud 9600; bt pace 20 30";
+    const USAGE: &str = "bt AT, bt AT+HELP or bt AT+WORD? (queries only); bt stat; bt baud 9600; bt pace 20 50";
     let Some(Tok::Word(w)) = t.next()? else { return Err(msg!("{}", USAGE)) };
     // `bt stat`: USART1's counters; `bt baud N`: USART1 at N for this power-on (the MCU's side; the module untouched).
     if same(w, b"stat") && t.clone().next()?.is_none() {
