@@ -325,7 +325,7 @@ fn index(w: &[u8], max: u32, what: &str) -> Result<u32, Msg> {
 /// "146.52", "146.520 00" (one word here): MHz from 0.15 MHz (HF channels, CHAN-26) up to 1300 MHz.
 fn freq(w: &[u8], what: &str) -> Result<Freq10, Msg> {
     match parse_mhz(w) {
-        Some(f) if w.iter().all(|c| c.is_ascii_digit() || *c == b'.') && (crate::chan::CH_LO..mhz(1300)).contains(&f) => Ok(f),
+        Some(f) if w.iter().all(|c| c.is_ascii_digit() || *c == b'.') && (crate::chan::CH_LO..=mhz(1300)).contains(&f) => Ok(f),
         _ => Err(msg!("{}: MHz from 0.15 to 1300, e.g. 146.52", what)),
     }
 }

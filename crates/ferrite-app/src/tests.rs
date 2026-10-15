@@ -137,8 +137,9 @@ fn ram_is_small() {
     // padding, to 1336; remote PTT (LINK-20: the transmission, its keepalive and why it ended, the local PTTs held
     // and cut), 16 with padding, to 1352; a remote key-up's release as a cut (LINK-20, TX-47: a byte), 8 with
     // padding, to 1360; remote keys (LINK-19: the keys the link holds, its long press and when the last went
-    // down, 16 with its Option) and the readback's redraw count and time (8), to 1384
-    assert!(n <= 1384, "App is {n} bytes");
+    // down, 16 with its Option) and the readback's redraw count and time (8), to 1384; each group's and
+    // third-level list's last item (MENU-24: 38 nibbles, 19 bytes), 24 with padding, to 1408
+    assert!(n <= 1408, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -283,6 +284,163 @@ fn power_capped_on_125m() {
     assert!(t.app.greyed(Item::Power).is_some());
 }
 
+/// TX-36: tuning onto HF (18-64 MHz) puts the power at Low, whatever it was: typed, by the knob across 64 MHz
+/// and by ◀▶ onto an HF band; retuning within HF keeps what it was raised to; leaving HF changes nothing.
+#[test]
+fn hf_starts_on_low() {
+    let mut t = T::new();
+    let type_in = |t: &mut T, s: &str| {
+        for c in s.chars() {
+            t.tap(if c == '*' { Key::Star } else { Key::Digit(c as u8 - b'0') });
+        }
+        t.tap(Key::Menu);
+    };
+    let high = |t: &mut T| {
+        let a = t.app.active();
+        let mut c = t.app.slot(a).cfg;
+        c.power = 2;
+        t.app.set_vfo_cfg(a, c);
+    };
+    let power = |t: &T| t.app.slot(t.app.active()).cfg().power;
+    high(&mut t);
+    type_in(&mut t, "28*4");
+    assert_eq!((t.freq(), power(&t)), (mhz(28) + 40_000, 0), "typed onto 28.4 MHz: Low");
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::SlotParam { param: Param::Power, value: 0, .. })), "sent");
+    high(&mut t);
+    type_in(&mut t, "29*6");
+    assert_eq!(power(&t), 2, "within HF: kept");
+    type_in(&mut t, "146*52");
+    assert_eq!(power(&t), 2, "leaving HF: kept");
+    // the knob across 64 MHz
+    type_in(&mut t, "64");
+    t.knob(-1);
+    assert!(t.freq() < mhz(64));
+    assert_eq!(power(&t), 0, "knob onto HF: Low");
+    assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::SlotParam { param: Param::Power, value: 0, .. })));
+    // ◀▶ onto an HF band
+    type_in(&mut t, "146*52");
+    high(&mut t);
+    for _ in 0..slot::BANDS.len() {
+        t.tap(Key::Left);
+        if t.freq() < mhz(64) {
+            break;
+        }
+    }
+    assert!(t.freq() < mhz(64));
+    assert_eq!(power(&t), 0, "◀ onto an HF band: Low");
+}
+
+/// MENU-24: each group (and third-level list) remembers its last item for the visit to the menu: back in it
+/// from MENU 0 it opens there; a number path picks by number and that is its last item; home forgets them.
+#[test]
+fn groups_remember_their_last_item() {
+    use crate::screens::groups::Group;
+    let mut t = T::new();
+    let row = |t: &T| match t.app.screen() {
+        Screen::Group(g) => (g.g, g.sub, g.row),
+        s => panic!("{s:?}"),
+    };
+    t.hold(Key::Menu); // MENU 0
+    t.tap(Key::Digit(7));
+    assert_eq!(row(&t), (7, 0, 0), "first time: row 1");
+    t.tap(Key::Down);
+    t.tap(Key::Down);
+    t.tap(Key::Exit);
+    t.tap(Key::Digit(7));
+    assert_eq!(row(&t), (7, 0, 2), "again: on its last item");
+    t.tap(Key::Exit);
+    t.tap(Key::Digit(6));
+    assert_eq!(row(&t), (6, 0, 0), "another group keeps its own");
+    // a number path (0 7 5: Sounds) picks by number, and that is group 7's last item; a third-level list too
+    t.tap(Key::Exit);
+    for d in [7, 5] {
+        t.tap(Key::Digit(d));
+    }
+    t.tap(Key::Down);
+    t.tap(Key::Exit);
+    assert_eq!(row(&t), (7, 0, 4), "BACK: group 7 on Sounds");
+    t.tap(Key::Digit(5));
+    assert_eq!(row(&t), (7, 5, 1), "Sounds on its last item");
+    t.tap(Key::Exit);
+    t.tap(Key::Exit);
+    assert_eq!(Group::reopen(&t.app, 7, 0).row, 4, "group 7 on Sounds, the last item opened");
+    // home forgets
+    t.hold(Key::Exit);
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(7));
+    assert_eq!(row(&t), (7, 0, 0), "after home: row 1");
+}
+
+/// HOME-8, WATCH-7: hold 4 turns watch off, and on again as the set it was (A+B+C stays A+B+C), also after
+/// watch was turned off in the menu.
+#[test]
+fn hold_4_restores_the_watch_set() {
+    let mut t = T::new();
+    t.app.set_watch(2);
+    t.hold(Key::Digit(4));
+    assert_eq!(t.app.watch, 0, "off");
+    t.hold(Key::Digit(4));
+    assert_eq!(t.app.watch, 2, "back on as A+B+C");
+    assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"A+B+C"), "the popup names it");
+    t.app.change(Item::Watch, -2); // MENU 7: off
+    t.hold(Key::Digit(4));
+    assert_eq!(t.app.watch, 2, "off in the menu, hold 4: A+B+C again");
+    t.app.set_watch(1);
+    t.hold(Key::Digit(4));
+    t.hold(Key::Digit(4));
+    assert_eq!(t.app.watch, 1, "A+B stays A+B");
+}
+
+/// TONE-16: MENU 0 8 4 opens Tones sent; 2 there is Subtone level, and the knob steps it (Low, Normal, High)
+/// and tells the Radio task; the tone burst's row is greyed (1750 Hz, not a setting yet).
+/// MENU-24 with SBAR-15: a group opened to a setting (the Status page's VOX row) is on that setting, whatever
+/// the group remembers; plain menu navigation still brings the remembered row back.
+#[test]
+fn status_link_opens_its_setting_not_the_remembered_row() {
+    use crate::screens::status::Status;
+    let mut t = T::new();
+    let row = |t: &T| match t.app.screen() {
+        Screen::Group(g) => (g.g, g.sub, g.row),
+        s => panic!("{s:?}"),
+    };
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(8));
+    t.tap(Key::Digit(2)); // VOX's list
+    t.tap(Key::Down);
+    t.tap(Key::Down); // Tail
+    assert_eq!(row(&t), (8, 2, 2));
+    t.tap(Key::Exit);
+    t.tap(Key::Exit);
+    t.tap(Key::Digit(0)); // MENU 0 0: Status
+    assert!(matches!(t.app.screen(), Screen::Status(_)), "{:?}", t.app.screen());
+    t.app.screen = Screen::Status(Status { row: 18, from_menu: true }); // the VOX row
+    t.tap(Key::Menu);
+    assert_eq!(row(&t), (8, 2, 0), "the VOX setting, not Tail");
+    t.tap(Key::Exit);
+    t.tap(Key::Exit);
+    t.tap(Key::Digit(8));
+    t.tap(Key::Digit(2));
+    assert_eq!(row(&t), (8, 2, 2), "by the menu: Tail, remembered");
+}
+
+#[test]
+fn subtone_level_from_its_path() {
+    use crate::screens::groups::Group;
+    let mut t = T::new();
+    t.hold(Key::Menu);
+    for d in [8, 4, 2] {
+        t.tap(Key::Digit(d));
+    }
+    assert!(matches!(t.app.screen(), Screen::Group(Group { g: 8, sub: 4, row: 1 })), "{:?}", t.app.screen());
+    t.cmds();
+    t.knob(1);
+    assert_eq!(t.app.set.tone_level, 2, "High");
+    assert!(t.cmds().contains(&RadioCmd::ToneLevel(2)), "told to the Radio task");
+    t.knob(-2);
+    assert_eq!(t.app.set.tone_level, 0, "Low");
+    assert!(crate::screens::groups::greyed(&t.app, &[8, 4, 1]).is_some());
+}
+
 #[test]
 fn menu_zero_and_status() {
     let mut t = T::new();
@@ -324,6 +482,34 @@ fn key_lock() {
     assert_eq!((t.freq(), t.app.screen()), (f, Screen::Home), "KEY-14: other keys do nothing");
     t.hold(Key::Hash);
     assert!(!t.app.locked());
+}
+
+/// SQL-11, KEY-14: locked, SIDE1 still latches the monitor (and again releases it), and SIDE1 + knob or ▲▼
+/// still set the squelch; SIDE1 + ◀▶ (the clarifier) and the knob alone stay locked.
+#[test]
+fn monitor_and_squelch_while_locked() {
+    let mut t = T::new();
+    let (s, f) = (store(), t.freq());
+    t.hold(Key::Hash);
+    assert!(t.app.locked());
+    t.cmds();
+    t.tap(Key::Side(1));
+    assert!(t.cmds().contains(&RadioCmd::Monitor { slot: 0, on: true }), "SIDE1: monitor on");
+    t.tap(Key::Side(1));
+    assert!(t.cmds().contains(&RadioCmd::Monitor { slot: 0, on: false }), "SIDE1 again: off");
+    let sq = t.app.slot(0).cfg().squelch;
+    t.app.key_down(Key::Side(1), t.t, &s);
+    t.knob(1);
+    t.app.key_down(Key::Up, t.t, &s);
+    t.app.key_up(Key::Up, t.t + 100, &s);
+    t.app.key_down(Key::Right, t.t + 150, &s);
+    t.app.key_up(Key::Right, t.t + 250, &s);
+    assert_eq!(t.app.slot(0).clar, 0, "no clarifier while locked");
+    t.app.key_up(Key::Side(1), t.t + 300, &s);
+    assert_eq!(t.app.slot(0).cfg().squelch, sq + 2, "SIDE1 + knob and SIDE1 + ▲: squelch");
+    t.knob(2);
+    assert_eq!(t.freq(), f, "the knob alone: locked");
+    assert!(t.app.locked());
 }
 
 #[test]

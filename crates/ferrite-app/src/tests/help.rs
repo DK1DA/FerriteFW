@@ -37,8 +37,13 @@ fn about_pages_go_round() {
         Page::About,
     ];
     for p in order {
+        // the hint bar names the page ▶ goes to (its status bar name or its title)
+        let h = t.app.screen().hints(&t.app);
+        let label = h.as_slice()[0].1;
         t.tap(Key::Right);
         assert_eq!(page(&t), p);
+        let name = t.app.screen().name();
+        assert!(label == name || label == crate::screens::short_title(name), "{p:?}: the hint said {label:?}, the page is {name:?}");
     }
     t.tap(Key::Left);
     assert_eq!(page(&t), Page::Checks, "◀ goes back");

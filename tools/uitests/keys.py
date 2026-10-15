@@ -52,8 +52,7 @@ def back_is_one_level(t):
     t.eq(u.id, "Home", "and then home")
 
 
-@test("SQL-11", "KEY-14", xfail="SIDE1 does nothing while locked (lib.rs: \"SIDE1 does nothing on screen yet\") "
-                              "(sim, Oct 14, 2026)")
+@test("SQL-11", "KEY-14")
 def monitor_while_locked(t):
     """Locked, SIDE1 still opens the monitor (and again closes it)."""
     was_muted = t.unmute()

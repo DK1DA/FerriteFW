@@ -69,8 +69,7 @@ def entry_ranges(t):
     tune(t)
 
 
-@test("VFO-21", xfail="the edges: 630.000 is refused (629.99 is the top) and 1000-1300 MHz can't be typed as "
-                      "digits (1 2 9 9 tunes 129.9, 1 3 0 0 tunes 130) (sim, Oct 14, 2026)")
+@test("VFO-21")
 def entry_range_edges(t):
     """630 and 1300 MHz, the range's own ends, tune when typed (1 0 5 0 too: above 1000 MHz receive only)."""
     for f, want in (("6 3 0", "630.00000"), ("1 3 0 0", "1300.00000"), ("1 0 5 0", "1050.00000")):
@@ -134,7 +133,7 @@ def hold_vm_saves_a_vfo(t):
     t.eq(t.cmd("dump").count("\nch "), n0, "nothing saved")
 
 
-@test("TX-36", "HF-30", xfail="HF keeps High: tuning onto 28.4 MHz from High stays High (sim, Oct 14, 2026)")
+@test("TX-36", "HF-30")
 def hf_starts_on_low(t):
     """Tuning onto an HF frequency (28.4 MHz) puts the power at Low, whatever it was."""
     t.cmd("slot A vfo 146.52 high")

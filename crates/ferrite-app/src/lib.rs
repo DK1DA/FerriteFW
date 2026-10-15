@@ -275,9 +275,14 @@ pub struct App {
     pub(crate) day_theme: u8,
     /// Index into Watch's values: off, A+B, A+B+C.
     watch: u8,
+    /// The watch set hold 4 turns back on (WATCH-7, HOME-8): the last one that wasn't off.
+    pub(crate) watch_on: u8,
     /// Battery Save: 0 off, 1-3.
     bsave: u8,
     locked: bool,
+    /// MENU-24: each group's (and third-level list's) last item, a nibble each ([`screens::groups::memo`]), for
+    /// this visit to the menu: going home forgets them, so the menu starts on row 1 again.
+    pub(crate) group_rows: [u8; screens::groups::MEMO_BYTES],
     inbox: u8,
     /// An unread alert (the bar's alert mark); [`ALERT_WAIT`]: one came in while the crossband repeater ran,
     /// shown as a banner, and its screen opens when the repeater stops (XB-19).
@@ -393,8 +398,10 @@ impl App {
             ptt_block: 0,
             day_theme: 0,
             watch: 1,
+            watch_on: 1,
             bsave: 1,
             locked: false,
+            group_rows: [0; screens::groups::MEMO_BYTES],
             inbox: 0,
             alert: 0,
             vox_on: false,
@@ -647,7 +654,8 @@ impl App {
             }
             return;
         }
-        self.slots[slot as usize].vfo = f;
+        let from = core::mem::replace(&mut self.slots[slot as usize].vfo, f);
+        self.hf_starts_low(slot, from); // TX-36
         self.send_slot(slot);
     }
 
@@ -666,7 +674,15 @@ impl App {
 
     /// Watch: 0 off, 1 A+B, 2 A+B+C (setup, or the simulator's sample).
     pub fn set_watch(&mut self, v: u8) {
-        self.watch = v % 3;
+        self.put_watch(v % 3);
+    }
+
+    /// Watch to v (0-2), told to the Radio task; a set that isn't off is the one hold 4 turns back on (WATCH-7).
+    fn put_watch(&mut self, v: u8) {
+        self.watch = v;
+        if v != 0 {
+            self.watch_on = v;
+        }
         self.out.push(RadioCmd::Watch(self.watch_mask()));
     }
 
@@ -974,8 +990,8 @@ impl App {
         self.pressed = now;
         self.out.push(RadioCmd::Activity);
         self.sweep_hold();
-        if self.locked {
-            return self.locked_toast();
+        if self.locked && !self.side1_squelch() {
+            return self.locked_toast(); // KEY-14; SIDE1 + knob, the squelch, still works (SQL-11)
         }
         if screens::qmenu::knob(self, d as i32) {
             return; // HOME-17: brightness while the quick menu is up
@@ -1111,9 +1127,13 @@ impl App {
             _ => {}
         }
         if self.locked {
-            // KEY-14: PTT and SIDE1 still work (PTT through key_down/key_up; SIDE1 does nothing on screen yet).
-            if !matches!(e.key, Key::Ptt(_) | Key::Side(1)) {
-                self.locked_toast();
+            // KEY-14, SQL-11: PTT (through key_down/key_up), SIDE1 (monitor: the screen's own SIDE1) and SIDE1 +
+            // ▲▼ (squelch, as SIDE1 + knob: [`App::knob`]) still work; SIDE1 + ◀▶ (the clarifier, a retune) doesn't.
+            match (e.key, e.press) {
+                (Key::Ptt(_), _) => {}
+                (Key::Side(1), _) => self.screen.key(self, e, store),
+                (Key::Up | Key::Down, Short | Repeat) if self.side1_squelch() => self.screen.key(self, e, store),
+                _ => self.locked_toast(),
             }
             return;
         }
@@ -1137,6 +1157,7 @@ impl App {
     pub fn go_home(&mut self) {
         self.screen = Screen::Home;
         self.back = [None; BACK_DEPTH];
+        self.group_rows = [0; screens::groups::MEMO_BYTES]; // MENU-24: remembered for one visit to the menu
         self.reconcile_mode(); // MODE-1: a scope, search or repeater stops with its screen, before what follows
     }
 
@@ -1176,6 +1197,11 @@ impl App {
             }
             _ => self.go_home(), // home by BACK too stops what the screens started
         }
+    }
+
+    /// SIDE1 held on home or the squelch screen: the knob and ▲▼ set the squelch (SQL-10), locked too (SQL-11).
+    fn side1_squelch(&self) -> bool {
+        self.keys.is_held(Key::Side(1)) && matches!(self.screen, Screen::Home | Screen::Squelch(_))
     }
 
     fn locked_toast(&mut self) {
@@ -1321,6 +1347,20 @@ impl App {
     }
 
     /// The slot's frequency and every setting, to the Radio task (made when popped: [`App::pop_cmd`]).
+    /// TX-36: a slot's VFO tuned onto HF (18-64 MHz) from above it starts transmit on Low, whatever the power was
+    /// (nothing on the radio measures the antenna match; the PA is most at risk there). Retuning within HF keeps
+    /// what the user raised it to. Call after the VFO moved from `from`; true when the power dropped (the caller
+    /// sends the slot).
+    pub(crate) fn hf_starts_low(&mut self, slot: u8, from: Freq10) -> bool {
+        let s = &mut self.slots[slot as usize % SLOTS];
+        let hf = |f: Freq10| f < crate::chan::HF_TOP;
+        let drop = s.vfo_mode && hf(s.vfo) && !hf(from) && s.cfg.power != 0;
+        if drop {
+            s.cfg.power = 0;
+        }
+        drop
+    }
+
     pub(crate) fn send_slot(&mut self, slot: u8) {
         self.slots[slot as usize % SLOTS].clar = 0; // VFO-22: a retune clears the clarifier (the Radio task's too)
         self.out.sync(slot);
@@ -1421,10 +1461,7 @@ impl App {
         let a = self.active;
         self.keep_undo();
         match item {
-            Item::Watch => {
-                self.watch = (self.watch as i32 + d).rem_euclid(3) as u8;
-                self.out.push(RadioCmd::Watch(self.watch_mask()));
-            }
+            Item::Watch => self.put_watch((self.watch as i32 + d).rem_euclid(3) as u8),
             Item::BatterySave => {
                 self.bsave = (self.bsave as i32 + d).rem_euclid(4) as u8;
                 self.out.push(RadioCmd::BatterySave(level(self.bsave)));
@@ -1630,8 +1667,7 @@ impl App {
             }
             self.send_slot(u.slot);
             if u.watch != self.watch {
-                self.watch = u.watch;
-                self.out.push(RadioCmd::Watch(self.watch_mask()));
+                self.put_watch(u.watch);
             }
             if u.bsave != self.bsave {
                 self.bsave = u.bsave;

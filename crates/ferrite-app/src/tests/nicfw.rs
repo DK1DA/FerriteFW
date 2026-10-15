@@ -87,13 +87,57 @@ fn receive_to_1300() {
     type_in(&mut t, "129**6000"); // the second * takes the point away: a fourth MHz digit
     assert_eq!(t.app.slot(0).vfo, mhz(1296), "{:?}", t.app.screen());
     assert!(ferrite_core::freq::receivable(mhz(1296)) && !ferrite_core::freq::receivable(mhz(700)));
-    assert!(!ferrite_core::freq::receivable(mhz(1300)));
+    assert!(ferrite_core::freq::receivable(mhz(1300)) && !ferrite_core::freq::receivable(mhz(1300) + 1), "1300 is in");
+    assert!(ferrite_core::freq::receivable(mhz(630)) && !ferrite_core::freq::receivable(mhz(630) + 1), "630 is in");
     for r in ferrite_core::txplan::Region::ALL {
         assert!(ferrite_core::txplan::check(mhz(1296), r, true).is_err(), "{r:?}: no transmit above 1000 MHz");
     }
     // airband entry is unchanged: 118 then 950
     type_in(&mut t, "118950");
     assert_eq!(t.app.slot(0).vfo, mhz(118) + 95_000);
+}
+
+/// VFO-21: 1000-1300 MHz typed as digits: a fourth digit making 1000-1300 waits as a MHz digit (OK or \* takes
+/// it), and a fifth puts the point back after the third, so airband and broadcast FM type as before. 630 and
+/// 1300, the range's own ends, tune.
+#[test]
+fn entry_four_mhz_digits_and_the_ends() {
+    let menu = |t: &mut T| t.tap(Key::Menu);
+    let mut t = T::new();
+    t.app.slots[0].vfo_mode = true;
+    for (typed, want) in [("1300", mhz(1300)), ("1050", mhz(1050)), ("1299", mhz(1299)), ("630", mhz(630))] {
+        type_in(&mut t, typed);
+        menu(&mut t);
+        assert_eq!((t.app.slot(0).vfo, matches!(t.app.screen(), Screen::Home)), (want, true), "{typed} OK: {:?}", t.app.screen());
+    }
+    // 1 3 0 5 can't be 1305: 130.5 at once (airband)
+    type_in(&mut t, "1305");
+    menu(&mut t);
+    assert_eq!(t.app.slot(0).vfo, mhz(130) + 50_000);
+    // a fifth digit: 1 2 9 6 1 is 129.61; 1 1 8 1 0 0 goes in by itself as 118.100
+    type_in(&mut t, "12961");
+    menu(&mut t);
+    assert_eq!(t.app.slot(0).vfo, mhz(129) + 61_000);
+    type_in(&mut t, "118100");
+    assert_eq!((t.app.slot(0).vfo, matches!(t.app.screen(), Screen::Home)), (mhz(118) + 10_000, true));
+    // \* after the pending fourth digit is the point: 1 2 9 6 \* 2 \* is 1296.2 (VFO-24)
+    type_in(&mut t, "1296*2*");
+    assert_eq!((t.app.slot(0).vfo, matches!(t.app.screen(), Screen::Home)), (mhz(1296) + 20_000, true));
+    // BACK takes the pending digit off: 1 0 5 0 BACK 3 OK... 1053
+    type_in(&mut t, "1050");
+    t.tap(Key::Exit);
+    type_in(&mut t, "3");
+    menu(&mut t);
+    assert_eq!(t.app.slot(0).vfo, mhz(1053));
+    // 630.01 and 1300.01 are refused
+    for typed in ["630*01", "1300*01"] {
+        let before = t.app.slot(0).vfo;
+        type_in(&mut t, typed);
+        menu(&mut t);
+        assert!(matches!(t.app.screen(), Screen::Entry(_)), "{typed}: refused, {:?}", t.app.screen());
+        assert_eq!(t.app.slot(0).vfo, before);
+        t.hold(Key::Exit);
+    }
 }
 
 /// VFO-22 (nicFW's clarifier): SIDE1 + ◀▶ move the active slot's receive offset 100 Hz, within ±2.5 kHz; the

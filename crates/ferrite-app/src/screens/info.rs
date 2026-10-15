@@ -226,7 +226,7 @@ pub(crate) fn def(p: Page) -> PageDef {
             title: "About",
             rows: &ABOUT,
             note: "Updating: hold PF1 + PF2 while switching on, then use the web flasher.",
-            hints: &[(ARROWS_LR, "Help"), ("BACK", "Back")],
+            hints: &[(ARROWS_LR, "Manual"), ("BACK", "Back")], // HELP-1: the page ▶ goes to
         },
         Page::Checks => PageDef {
             title: "Self-test",

@@ -628,10 +628,15 @@ fn step(app: &mut App, d: i32, big: bool, store: &impl ChannelStore) {
         let step = if big { 100_000 } else { fm_step.unwrap_or(STEPS[s.cfg.step as usize % STEPS.len()].0 as i32) };
         // Plain steps from where it is (146.520 stays on its 5 kHz raster with a 12.5 kHz step); snapping to
         // the step is for typed entry (VFO-12). Kept inside what the chips tune.
-        let f = (s.vfo as i32 + d * step).clamp(mhz(1) as i32 + 80_000, mhz(1300) as i32 - 1) as Freq10;
+        let f = (s.vfo as i32 + d * step).clamp(mhz(1) as i32 + 80_000, mhz(1300) as i32) as Freq10;
+        let from = s.vfo;
         (s.vfo, s.clar) = (f, 0); // VFO-22: a retune clears the clarifier
         s.mem[band_near(f)] = f;
-        app.out.push(RadioCmd::TuneSlot { slot: a as u8, freq: f });
+        if app.hf_starts_low(a as u8, from) {
+            app.send_slot(a as u8); // TX-36: the power went to Low with it
+        } else {
+            app.out.push(RadioCmd::TuneSlot { slot: a as u8, freq: f });
+        }
     }
 }
 
@@ -655,7 +660,7 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
             app.send_slot(a as u8);
         }
     } else {
-        let b = band_near(s.vfo);
+        let (b, from) = (band_near(s.vfo), s.vfo);
         s.mem[b] = s.vfo;
         let nb = (b as i32 + d).rem_euclid(BANDS.len() as i32) as usize;
         s.vfo = s.mem[nb];
@@ -665,6 +670,7 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
         if s.cfg.offset != 0 && !s.cfg.split {
             s.cfg.offset = s.cfg.offset.signum() * BANDS[nb].shift; // a split's TX stays where it is
         }
+        app.hf_starts_low(a as u8, from); // TX-36
         app.send_slot(a as u8);
     }
 }

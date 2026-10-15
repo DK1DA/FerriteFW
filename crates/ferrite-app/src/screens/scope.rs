@@ -135,8 +135,9 @@ fn listen(app: &mut App, f: Freq10) {
 /// The active slot's VFO on f (OK, PTT while listening).
 fn tune(app: &mut App, f: Freq10) {
     let a = app.active as usize;
-    app.slots[a].vfo = f;
+    let from = core::mem::replace(&mut app.slots[a].vfo, f);
     app.slots[a].vfo_mode = true;
+    app.hf_starts_low(a as u8, from); // TX-36
 }
 
 /// A typed centre (SCOPE-3): sweep around it, the marker in the middle.

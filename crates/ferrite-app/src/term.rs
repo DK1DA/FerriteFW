@@ -882,7 +882,7 @@ impl Term {
             }
             F::Rx => {
                 let step = STEPS[crate::slot::band_step(band_near(c.rx), app.set.region()) as usize].0 as i32;
-                n.rx = (c.rx as i32 + d * step).clamp(crate::chan::CH_LO as i32, mhz(1300) as i32 - 1) as Freq10; // CHAN-22
+                n.rx = (c.rx as i32 + d * step).clamp(crate::chan::CH_LO as i32, mhz(1300) as i32) as Freq10; // CHAN-22
             }
             F::Tx if c.cfg.split => {
                 let step = STEPS[crate::slot::band_step(band_near(c.cfg.offset.max(0) as Freq10), app.set.region()) as usize].0 as i32;

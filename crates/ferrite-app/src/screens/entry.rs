@@ -1,6 +1,8 @@
 //! Direct entry (manual chapters 6, 9 and 10; NAV-4, VFO-11 to VFO-14): a digit on home opens it with that
-//! digit. In VFO mode it is a frequency, \* the point (the point comes by itself after three MHz digits; a
-//! second \* after 100-130 takes it away again, for a fourth MHz digit: 1 2 9 \* \* 6 is 1296 MHz, VFO-21), and
+//! digit. In VFO mode it is a frequency, \* the point (the point comes by itself after three MHz digits, except
+//! that a fourth digit making 1000-1300 waits as a MHz digit until a fifth comes: 1 2 9 6 OK is 1296 MHz, 1 2 9 6 1
+//! is 129.61; a second \* after 100-130 takes the point away again, for a fourth MHz digit: 1 2 9 \* \* 6 is
+//! 1296 MHz, VFO-21), and
 //! \* after a digit past the point is OK (146 \* 52 \*, VFO-24);
 //! the screen shows the digits, the band, the frequency it snaps to on the step, and whether transmit is
 //! allowed there or why not. In channel mode it is a channel number, shown with its name or "empty". OK goes
@@ -52,7 +54,7 @@ pub struct Entry {
 
 /// Home VFOs tune 18 MHz and up (VFO-14), to what the chips reach.
 const LO: Freq10 = mhz(18);
-const HI: Freq10 = mhz(1300) - 1;
+const HI: Freq10 = mhz(1300);
 
 impl Entry {
     pub fn new(to: EntryFor, first: Option<u8>) -> Self {
@@ -97,6 +99,13 @@ impl Entry {
         e
     }
 
+    /// VFO-21: whether a fourth digit after three MHz digits (no point, typed as 1 0 5) could be a fourth MHz
+    /// digit: the four make 1000-1300 MHz.
+    fn four_digits(&self, c: u8) -> bool {
+        let v = self.buf[..3].iter().chain([&c]).fold(0u32, |a, &c| a * 10 + (c.wrapping_sub(b'0')) as u32);
+        (1000..=1300).contains(&v)
+    }
+
     fn typed(&self) -> &[u8] {
         &self.buf[..self.n as usize]
     }
@@ -122,10 +131,23 @@ impl Entry {
                 return;
             }
             if !point && self.n > 0 && (self.n as usize) < self.buf.len() {
+                self.wide |= self.n == 4; // \* after a pending fourth MHz digit keeps it: 1 2 9 6 \* is 1296.
                 self.buf[self.n as usize] = c;
                 self.n += 1;
             }
             return;
+        }
+        if !point && !self.wide && self.n == 3 && self.four_digits(c) {
+            // VFO-21: 1 0 5 0 could be 1050 MHz: the fourth digit stays a MHz digit until a fifth comes, and OK or \*
+            // takes 1050 (a fifth digit puts the point back after the third: 1 1 8 1 0 0 is 118.100).
+            self.buf[3] = c;
+            self.n = 4;
+            return;
+        }
+        if !point && !self.wide && self.n == 4 {
+            self.buf[4] = self.buf[3]; // a fifth digit after a pending fourth MHz digit: 1 1 8 1 is 118.1 after all
+            self.buf[3] = b'.';
+            self.n = 5;
         }
         let mhz_digits = if self.wide { 4 } else { 3 };
         if !point && self.n == mhz_digits {
@@ -395,7 +417,9 @@ pub(crate) fn tune_vfo(app: &mut App, slot: u8, f: Freq10) {
             s.cfg.offset = s.cfg.offset.signum() * BANDS[new].shift;
         }
     }
+    let from = s.vfo;
     (s.vfo, s.mem[new], s.vfo_mode) = (f, f, true);
+    app.hf_starts_low(slot, from); // TX-36
     app.send_slot(slot);
 }
 

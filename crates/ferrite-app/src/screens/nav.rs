@@ -310,7 +310,7 @@ pub const ALL: [Dest; 66] = {
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 57] = [
+pub const MENU0: [(&[u8], Dest); 58] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -347,6 +347,7 @@ pub const MENU0: [(&[u8], Dest); 57] = [
     (&[7, 5], Dest::Sub(7, 5)),
     (&[8, 1], Dest::Sub(8, 1)),
     (&[8, 2], Dest::Sub(8, 2)),
+    (&[8, 4], Dest::Sub(8, 4)), // Tones sent: tone burst, subtone level (TONE-16)
     (&[8, 5], Dest::Sub(8, 5)),
     (&[8, 6], Dest::Sub(8, 6)),
     (&[8, 6, 1], Dest::DtmfDialer),
@@ -433,6 +434,8 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::HfRecent => Screen::Recall(super::recall::Recall { fm: false, cur: Default::default() }),
         Dest::FmPresets => Screen::Recall(super::recall::Recall { fm: true, cur: Default::default() }),
         // D: system and modes
+        // A group opened to a setting (the Status page, a shortcut) is on row 1; plain menu navigation brings
+        // back the remembered row afterwards ([`super::groups::restore_row`], MENU-24).
         Dest::Group(g) => Screen::Group(super::groups::Group { g: g.clamp(1, 9), sub: 0, row: 0 }),
         Dest::Sub(g, m) => Screen::Group(super::groups::Group { g, sub: m, row: 0 }),
         Dest::Setup => Screen::Setup(super::setup::Setup::new(false)),
@@ -491,10 +494,10 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
         2 => cycle(app, Item::Power),
         3 => app.open(Dest::Value(Item::Squelch)),
         4 => {
-            // WATCH-7
-            let v = if app.watch == 0 { 1 } else { 0 };
-            app.change(Item::Watch, v - app.watch as i32);
-            app.show_toast(b"Watch", if v == 0 { b"off" } else { b"A+B" }, false);
+            // WATCH-7: off, or back on as the set it was (A+B or A+B+C)
+            let v = if app.watch == 0 { app.watch_on.clamp(1, 2) } else { 0 };
+            app.change(Item::Watch, v as i32 - app.watch as i32);
+            app.show_toast(b"Watch", [b"off" as &[u8], b"A+B", b"A+B+C"][v as usize], false);
         }
         5 => app.open(Dest::Tones),
         6 => cycle(app, Item::Step), // VFO only (VFO-8): on a channel the toast says so

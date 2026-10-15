@@ -326,6 +326,36 @@ impl Group {
 
     fn set_row(self, app: &mut App, row: u8) {
         app.screen = Screen::Group(Group { row, ..self });
+        if let Some(i) = memo(self.g, self.sub) {
+            let b = &mut app.group_rows[i / 2];
+            *b = if i % 2 == 0 { *b & 0xF0 | row & 0x0F } else { *b & 0x0F | row << 4 }; // MENU-24
+        }
+    }
+
+    /// MENU-24: a group (or third-level list) opens on its last item.
+    pub(crate) fn reopen(app: &App, g: u8, sub: u8) -> Self {
+        let row = memo(g, sub).map_or(0, |i| app.group_rows[i / 2] >> (i % 2 * 4) & 0x0F);
+        let n = items(g, sub).len() as u8;
+        Group { g, sub, row: if row < n { row } else { 0 } }
+    }
+}
+
+/// MENU-24: a group (or third-level list) just opened by plain menu navigation (MENU 0's digit or OK, a group's
+/// row) goes to its remembered row; one opened to a setting (the Status page, a shortcut) keeps that setting.
+pub(crate) fn restore_row(app: &mut App) {
+    if let Screen::Group(g) = app.screen {
+        app.screen = Screen::Group(Group::reopen(app, g.g, g.sub));
+    }
+}
+
+/// The nine groups and the third-level lists: where each keeps its last item (MENU-24).
+pub(crate) const MEMO_BYTES: usize = (9 + SUBS.len()).div_ceil(2);
+
+/// A group's (g 1-9, sub 0) or third-level list's place in [`App`]'s `group_rows`, in nibbles.
+pub(crate) fn memo(g: u8, sub: u8) -> Option<usize> {
+    match sub {
+        0 => (1..=9).contains(&g).then(|| g as usize - 1),
+        _ => SUBS.iter().position(|(p, _)| *p == (g, sub)).map(|i| 9 + i),
     }
 }
 
@@ -341,6 +371,7 @@ pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [4, 9, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
         [4, 5] | [8, 5, 3] => Some("not used"),
+        [8, 4, 1] => Some("1750 Hz for now"), // the burst's frequency isn't a setting yet (TONE-16's list opens)
         _ => None,
     }
 }
@@ -1176,6 +1207,7 @@ impl Group {
             _ => {
                 if let Some(d) = nav::menu0(p) {
                     app.open(d);
+                    restore_row(app); // MENU-24: a third-level list on its last item
                 } else if ok && !change(app, p, 1) {
                     let mut b = Buf::<20>::new();
                     b.push(b"MENU 0");

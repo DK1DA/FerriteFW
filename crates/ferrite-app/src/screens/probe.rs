@@ -272,7 +272,7 @@ pub struct Counter {
 /// band relay, which the counter never moves (SAFE-20).
 pub fn countable(f: Freq10) -> bool {
     use ferrite_core::freq::mhz;
-    (mhz(64)..=mhz(1300)).contains(&f) && !(mhz(630)..mhz(756)).contains(&f)
+    (mhz(64)..=mhz(1300)).contains(&f) && !(mhz(630) + 1..mhz(756)).contains(&f)
 }
 
 /// MENU 0 3 3 (TSRCH-6).

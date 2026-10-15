@@ -80,6 +80,7 @@ impl View for Advanced {
         let open = |app: &mut App, r: u8| {
             app.screen = Screen::Advanced(Advanced { row: r, from_quick });
             app.open(Dest::Group(r + 1));
+            super::groups::restore_row(app); // MENU-24: on its last item this visit
         };
         match (e.key, e.press) {
             (Key::Up, Short | Repeat) => app.screen = Screen::Advanced(Advanced { row: step(app, row, -1), from_quick }),

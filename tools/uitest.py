@@ -503,7 +503,7 @@ def start_sim(secs=3600):
             break
         except OSError:
             time.sleep(0.1)
-    time.sleep(0.5)
+    time.sleep(2.5)  # the link answers once the simulated radio has booted (0.5 s timed out HELLO)
     return p, f"tcp:127.0.0.1:{port}"
 
 

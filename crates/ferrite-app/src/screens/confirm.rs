@@ -269,7 +269,7 @@ pub(crate) fn reset_all(app: &mut App, store: &impl ChannelStore) {
 /// not touched here (PIN-8).
 pub(crate) fn reset_settings(app: &mut App) {
     *app.set = crate::settings::Settings { setup_done: app.set.setup_done, ..crate::settings::Settings::DEFAULT };
-    app.watch = 1;
+    (app.watch, app.watch_on) = (1, 1);
     app.bsave = 1;
     app.recent = [None; 3];
     app.undo = None;

@@ -158,7 +158,7 @@ pub fn counter_chip(f: Freq10) -> Option<u8> {
     use crate::freq::mhz;
     match f {
         f if (mhz(64)..mhz(300)).contains(&f) => Some(0),
-        f if (mhz(300)..mhz(630)).contains(&f) || (mhz(756)..=mhz(1300)).contains(&f) => Some(1),
+        f if (mhz(300)..=mhz(630)).contains(&f) || (mhz(756)..=mhz(1300)).contains(&f) => Some(1),
         _ => None,
     }
 }
