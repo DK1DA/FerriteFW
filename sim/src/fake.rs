@@ -812,6 +812,12 @@ impl FakeRadio {
             // TERM-27: a module that, like the radio's, says nothing back.
             DebugReq::Bt { .. } => DebugAns::Bt { data: [0; 48], n: 0 },
             #[cfg(feature = "bench")]
+            // TERM-27, LINK-36: the module off, at the default pace (or the one just set).
+            DebugReq::BtStat { pace, .. } => DebugAns::BtStat(ferrite_core::msg::BtStats {
+                pace: pace.unwrap_or_default(),
+                ..Default::default()
+            }),
+            #[cfg(feature = "bench")]
             // TERM-29: the fake path machine holds both band receive selects (or refuses, as the radio's).
             DebugReq::RxBoth(None) => DebugAns::RxBoth(self.path.both()),
             #[cfg(feature = "bench")]
