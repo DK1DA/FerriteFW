@@ -1571,11 +1571,22 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
 #[cfg(feature = "bench")]
 /// TERM-27: `bt AT+VERS?`, one read-only query to the Bluetooth module.
 fn bt(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bt AT, bt AT+HELP or bt AT+WORD? (queries only); bt stat; bt baud 9600";
+    const USAGE: &str = "bt AT, bt AT+HELP or bt AT+WORD? (queries only); bt stat; bt baud 9600; bt pace 20 30";
     let Some(Tok::Word(w)) = t.next()? else { return Err(msg!("{}", USAGE)) };
     // `bt stat`: USART1's counters; `bt baud N`: USART1 at N for this power-on (the MCU's side; the module untouched).
     if same(w, b"stat") && t.clone().next()?.is_none() {
-        return Ok(Done::Debug(Job::new(Kind::BtStat(0))));
+        return Ok(Done::Debug(Job::new(Kind::BtStat(0, None))));
+    }
+    // `bt pace B G`: LINK-36's bursts of B bytes and G ms gaps, in RAM until a restart (B 0: unpaced).
+    if same(w, b"pace") {
+        const PACE: &str = "bt pace B G: bursts of B bytes (0 to 255, 0: unpaced), G ms apart (0 to 1000)";
+        let mut num = || match t.next() {
+            Ok(Some(Tok::Word(n))) => number(n),
+            _ => None,
+        };
+        let p = num().zip(num()).and_then(|(b, g)| ferrite_core::link::BtPace::new(b, g));
+        let Some(p) = p.filter(|_| matches!(t.next(), Ok(None))) else { return Err(msg!("{}", PACE)) };
+        return Ok(Done::Debug(Job::new(Kind::BtStat(0, Some(p)))));
     }
     if same(w, b"baud") {
         const RATES: &str = "bt baud 9600, 19200, 38400, 57600 or 115200 (USART1 only: the module is never told)";
@@ -1584,7 +1595,7 @@ fn bt(t: &mut Toks) -> Result<Done, Msg> {
             _ => None,
         };
         let Some(r) = r.filter(|_| matches!(t.next(), Ok(None))) else { return Err(msg!("{}", RATES)) };
-        return Ok(Done::Debug(Job::new(Kind::BtStat(r))));
+        return Ok(Done::Debug(Job::new(Kind::BtStat(r, None))));
     }
     if t.next()?.is_some() || w.len() > 16 {
         return Err(msg!("{}", USAGE));
@@ -1796,7 +1807,7 @@ const HELP: [&str; 19] = [
 ];
 /// TERM-38: the bench commands' help in a bench build, or where they are in a user build.
 #[cfg(feature = "bench")]
-const HELP_BENCH: [&str; 22] = [
+const HELP_BENCH: [&str; 23] = [
     "",
     "Bench builds only (bring-up, tx-dry; hex addresses, registers and values; Esc stops):",
     "  mem 20000000 64        bytes of MCU memory (flash, RAM)",
@@ -1807,6 +1818,7 @@ const HELP_BENCH: [&str; 22] = [
     "  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property",
     "  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)",
     "  bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)",
+    "  bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)",
     "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
     "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
     "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)",

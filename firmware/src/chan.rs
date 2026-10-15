@@ -129,3 +129,6 @@ pub static BT_LINK_ON: AtomicBool = AtomicBool::new(false);
 /// changes it for this power-on (the MCU's side only: nothing is ever sent to the module to change its rate); the
 /// Link task restarts USART1 when it differs from the running one.
 pub static BT_RATE: AtomicU32 = AtomicU32::new(ferrite_core::link::BT_BAUD);
+/// LINK-36's Bluetooth pacing ([`ferrite_core::link::BtPace`] packed): bursts and gaps for the BT513. A bench
+/// build's `bt pace B G` changes it in RAM; the Link task reads it every turn.
+pub static BT_PACE: AtomicU32 = AtomicU32::new(ferrite_core::link::BtPace::DEFAULT.pack());

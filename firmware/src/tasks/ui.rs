@@ -466,9 +466,12 @@ pub async fn task() {
                     #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Gps { id, arg, quiet } => crate::chan::GPS_SEND.signal((id, arg, quiet)),
                     #[cfg(feature = "bench")]
-                    ferrite_core::msg::DebugReq::BtStat { baud } => {
+                    ferrite_core::msg::DebugReq::BtStat { baud, pace } => {
                         if baud != 0 {
                             crate::chan::BT_RATE.store(baud, Relaxed); // the Link task restarts USART1 at it
+                        }
+                        if let Some(p) = pace {
+                            crate::chan::BT_PACE.store(p.pack(), Relaxed); // LINK-36: the Link task's next turn
                         }
                         let st = crate::hal::uart::stats(crate::report::UART_BT);
                         let (framing, overrun) = crate::hal::uart::errors(crate::report::UART_BT);
@@ -482,6 +485,7 @@ pub async fn task() {
                             dropped: st.dropped,
                             baud: rate,
                             on,
+                            pace: ferrite_core::link::BtPace::unpack(crate::chan::BT_PACE.load(Relaxed)),
                         }));
                     }
                     #[cfg(feature = "bench")]

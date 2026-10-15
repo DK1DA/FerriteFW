@@ -406,8 +406,9 @@ pub enum DebugReq {
     Bt { text: [u8; 16], n: u8 },
     #[cfg(feature = "bench")]
     /// TERM-27: USART1's counters and rate (`bt stat`); with `baud` not 0, USART1 restarted at that rate first, for
-    /// this power-on (`bt baud N`: the MCU's side only, nothing is sent to the module).
-    BtStat { baud: u32 },
+    /// this power-on (`bt baud N`: the MCU's side only, nothing is sent to the module); with `pace`, LINK-36's
+    /// Bluetooth pacing set to it first, in RAM (`bt pace B G`).
+    BtStat { baud: u32, pace: Option<crate::link::BtPace> },
     #[cfg(feature = "bench")]
     /// TERM-29, the bench test of decision 114: hold both band receive selects on (`Some(true)`), back to one
     /// (`Some(false)`), or only ask (`None`). The Radio task refuses while keyed, in HF mode and while the
@@ -503,6 +504,8 @@ pub struct BtStats {
     pub dropped: u32,
     pub baud: u32,
     pub on: bool,
+    /// LINK-36's pacing in use.
+    pub pace: crate::link::BtPace,
 }
 
 /// The rates `bt baud N` takes (TERM-27): the module's resting 9600 and the usual others, the MCU's side only.

@@ -1151,7 +1151,7 @@ fn regs(r: DebugReq) -> DebugAns {
             DebugAns::Bt { data, n: 8 }
         }
         #[cfg(feature = "bench")]
-        DebugReq::BtStat { baud } => DebugAns::BtStat(ferrite_core::msg::BtStats { rx: 12, tx: 340, framing: 1, overrun: 0, dropped: 0, baud: if baud == 0 { 9600 } else { baud }, on: true }),
+        DebugReq::BtStat { baud, pace } => DebugAns::BtStat(ferrite_core::msg::BtStats { rx: 12, tx: 340, framing: 1, overrun: 0, dropped: 0, baud: if baud == 0 { 9600 } else { baud }, on: true, pace: pace.unwrap_or_default() }),
         #[cfg(feature = "bench")]
         DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),
         #[cfg(feature = "bench")]
@@ -1447,17 +1447,37 @@ fn debug_bt_queries_only() {
 fn debug_bt_stat_and_baud() {
     let mut r = Rig::main();
     r.cmd("bt stat");
-    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 0 }]);
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 0, pace: None }]);
     assert!(r.raw().contains("bt: USART1 9600 baud, module on"), "{}", r.raw());
     assert!(r.raw().contains("in 12 out 340 bytes, framing 1, overrun 0"), "{}", r.raw());
     r.send(b"\r");
     r.cmd("bt baud 115200");
-    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 115_200 }]);
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 115_200, pace: None }]);
     r.send(b"\r");
-    for bad in ["bt baud 12345", "bt baud", "bt baud 9600 x", "bt stat x"] {
+    for bad in ["bt baud 12345", "bt baud", "bt baud 9600 x", "bt stat x", "bt pace", "bt pace 20", "bt pace 256 30", "bt pace 20 1001", "bt pace 20 30 x", "bt pace x 30"] {
         r.cmd(bad);
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
+}
+
+#[cfg(feature = "bench")]
+/// LINK-36, TERM-27: `bt stat` shows the Bluetooth pacing; `bt pace B G` sets it (RAM only), `bt pace 0 0` sends
+/// back to back.
+#[test]
+fn debug_bt_pace() {
+    use ferrite_core::link::BtPace;
+    let mut r = Rig::main();
+    r.cmd("bt stat");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 0, pace: None }]);
+    assert!(r.raw().contains("pace: 20 B bursts, 30 ms gaps (~393 B/s)"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bt pace 20 10");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 0, pace: BtPace::new(20, 10) }]);
+    assert!(r.raw().contains("pace: 20 B bursts, 10 ms gaps (~648 B/s)"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bt pace 0 0");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 0, pace: BtPace::new(0, 0) }]);
+    assert!(r.raw().contains("pace: off, back to back (~960 B/s)"), "{}", r.raw());
 }
 
 #[cfg(feature = "bench")]

@@ -50,8 +50,8 @@ pub enum Kind {
     /// `bt AT+VERS?`: a read-only query to the Bluetooth module (TERM-27).
     Bt { text: [u8; 16], n: u8 },
     #[cfg(feature = "bench")]
-    /// `bt stat`, `bt baud N` (0: only ask): USART1's counters and rate (TERM-27).
-    BtStat(u32),
+    /// `bt stat`, `bt baud N` (0: only ask), `bt pace B G`: USART1's counters, rate and pacing (TERM-27, LINK-36).
+    BtStat(u32, Option<ferrite_core::link::BtPace>),
     #[cfg(feature = "bench")]
     /// `rx both`, `rx one`, `rx`: the bench test's hold on both band receive selects (TERM-29), or ask.
     RxBoth(Option<bool>),
@@ -139,7 +139,7 @@ impl Job {
             #[cfg(feature = "bench")]
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
             #[cfg(feature = "bench")]
-            Kind::BtStat(baud) => DebugReq::BtStat { baud },
+            Kind::BtStat(baud, pace) => DebugReq::BtStat { baud, pace },
             #[cfg(feature = "bench")]
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
             Kind::Gga => DebugReq::Gga,
@@ -265,9 +265,11 @@ impl Job {
                 Step::Line
             }
             #[cfg(feature = "bench")]
-            (Kind::BtStat(_), DebugAns::BtStat(b)) => {
+            (Kind::BtStat(..), DebugAns::BtStat(b)) => {
                 match self.line {
                     0 => put!(out, "  bt: USART1 {} baud, module {}", b.baud, if b.on { "on (PB9 high)" } else { "off" }),
+                    1 if b.pace.burst == 0 => put!(out, "  pace: off, back to back (~{} B/s)", b.pace.bytes_per_s(b.baud)),
+                    1 => put!(out, "  pace: {} B bursts, {} ms gaps (~{} B/s)", b.pace.burst, b.pace.gap_ms, b.pace.bytes_per_s(b.baud)),
                     _ => {
                         put!(out, "  in {} out {} bytes, framing {}, overrun {}, dropped {}", b.rx, b.tx, b.framing, b.overrun, b.dropped);
                         self.st = St::Over;

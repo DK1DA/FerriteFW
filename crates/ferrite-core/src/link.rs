@@ -362,12 +362,133 @@ pub fn build(ty: u8, seq: u8, payload: &[u8], out: &mut [u8]) -> Option<usize> {
 /// programming (most likely the vendor's app sets the module to 115200 first: its FF31 handshake carries a rate byte).
 pub const BT_BAUD: u32 = 9_600;
 
+/// Bluetooth transmit pacing (LINK-36, decision 156): bursts of `burst` bytes to the BT513, each followed by
+/// `gap_ms` quiet, counted from the burst's last byte handed to USART1. The module forwards what USART1 gives it as
+/// 20-byte BLE notifications, one or so per connection event (7.5-50 ms), so 9600 baud sent back to back (960 B/s)
+/// fills its buffer and it drops bytes: a 224-byte readback chunk arrived as 6 bytes (Oct 14, 2026). Stock never
+/// paces (its USART1 writers poll TDBE byte after byte), but sends only short KISS frames that way. `burst` 0: no
+/// pacing. The cable is never paced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BtPace {
+    pub burst: u8,
+    pub gap_ms: u16,
+}
+
+impl BtPace {
+    /// One notification's worth, then a 30 ms gap: about 390 B/s at 9600 (a burst is on the wire 21 ms).
+    pub const DEFAULT: BtPace = BtPace { burst: 20, gap_ms: 30 };
+    /// The longest gap `bt pace` takes.
+    pub const MAX_GAP_MS: u16 = 1_000;
+
+    /// From `bt pace B G`: B 0 (no pacing) to 255 bytes, G 0 to [`Self::MAX_GAP_MS`]; None outside.
+    pub fn new(burst: u32, gap_ms: u32) -> Option<BtPace> {
+        (burst <= 255 && gap_ms <= Self::MAX_GAP_MS as u32).then_some(BtPace { burst: burst as u8, gap_ms: gap_ms as u16 })
+    }
+
+    /// Packed for one atomic word (the Link task reads it each turn).
+    pub const fn pack(self) -> u32 {
+        (self.burst as u32) << 16 | self.gap_ms as u32
+    }
+
+    pub const fn unpack(w: u32) -> BtPace {
+        BtPace { burst: (w >> 16) as u8, gap_ms: w as u16 }
+    }
+
+    /// Bytes a second it lets through at `baud` (8N1: 10 bits a byte), rounded down.
+    pub fn bytes_per_s(self, baud: u32) -> u32 {
+        if baud == 0 {
+            return 0;
+        }
+        if self.burst == 0 {
+            return baud / 10;
+        }
+        let byte_us = 10_000_000 / baud;
+        let period_us = self.burst as u32 * byte_us + self.gap_ms as u32 * 1_000;
+        (self.burst as u64 * 1_000_000 / period_us as u64) as u32
+    }
+}
+
+impl Default for BtPace {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// LINK-36's state: what is left of the burst, and when the next one may start (the last byte's time plus the gap).
+/// A burst cut short by an empty ring is topped up again only after a full gap, so short replies sent close together
+/// never add up to more than one burst at the module.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BtPacer {
+    left: u8,
+    next_ms: u64,
+}
+
+impl BtPacer {
+    /// How many bytes may go at `now_ms` (`usize::MAX` without pacing).
+    pub fn allow(&mut self, pace: BtPace, now_ms: u64) -> usize {
+        if pace.burst == 0 {
+            return usize::MAX;
+        }
+        if now_ms >= self.next_ms {
+            self.left = pace.burst;
+        }
+        self.left.min(pace.burst) as usize
+    }
+
+    /// `n` bytes went at `now_ms` (n at most what [`Self::allow`] gave).
+    pub fn sent(&mut self, pace: BtPace, n: usize, now_ms: u64) {
+        if pace.burst == 0 || n == 0 {
+            return;
+        }
+        self.left = self.left.saturating_sub(n.min(255) as u8);
+        self.next_ms = now_ms + pace.gap_ms as u64;
+    }
+}
+
 /// Cable rates `BAUD` may ask for (LINK-11); the radio takes one only if its UART reaches it within 2 %.
 pub const RATES: [u32; 4] = [115_200, 230_400, 460_800, 921_600];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// LINK-36: bursts of B bytes, then G ms of quiet from the last byte; a short burst is topped up only after a
+    /// full gap; B 0 is unpaced; `bt pace`'s limits; the rate it allows at 9600.
+    #[test]
+    fn bt_pace_bursts_and_gaps() {
+        let p = BtPace::DEFAULT;
+        assert_eq!((p.burst, p.gap_ms), (20, 30));
+        let mut s = BtPacer::default();
+        assert_eq!(s.allow(p, 0), 20);
+        s.sent(p, 12, 0);
+        assert_eq!(s.allow(p, 1), 8, "the rest of the burst");
+        s.sent(p, 8, 9);
+        assert_eq!(s.allow(p, 10), 0, "the gap");
+        assert_eq!(s.allow(p, 38), 0, "still 1 ms short");
+        assert_eq!(s.allow(p, 39), 20, "30 ms after the last byte");
+        // A short reply, then another soon after: the second only tops up the same burst.
+        let mut s = BtPacer::default();
+        let n = s.allow(p, 100).min(6);
+        s.sent(p, n, 100);
+        assert_eq!(s.allow(p, 110), 14);
+        assert_eq!(s.allow(p, 130), 20, "a full gap since: a fresh burst");
+        // Unpaced.
+        let off = BtPace::new(0, 0).unwrap();
+        let mut s = BtPacer::default();
+        assert_eq!(s.allow(off, 0), usize::MAX);
+        s.sent(off, 500, 0);
+        assert_eq!(s.allow(off, 0), usize::MAX);
+        // Limits and packing.
+        assert_eq!(BtPace::new(256, 30), None);
+        assert_eq!(BtPace::new(20, 1_001), None);
+        let q = BtPace::new(255, 1_000).unwrap();
+        assert_eq!(BtPace::unpack(q.pack()), q);
+        assert_eq!(BtPace::unpack(p.pack()), p);
+        // Rates at 9600: 960 B/s unpaced, about 393 B/s by default, about 650 with a 10 ms gap.
+        assert_eq!(off.bytes_per_s(BT_BAUD), 960);
+        assert_eq!(p.bytes_per_s(BT_BAUD), 393);
+        assert_eq!(BtPace::new(20, 10).unwrap().bytes_per_s(BT_BAUD), 648);
+    }
 
     #[test]
     fn crc_check_value() {

@@ -3,11 +3,13 @@
 //! UI task, which runs them next to the App ([`ferrite_app::ports`] decides which), and what they send comes
 //! back here. This task owns both UARTs and the module's power: the cable's rate changes `BAUD` agrees (LINK-11)
 //! happen here, after the answer has gone; Bluetooth runs at the module's resting 9600 (LINK-25), its bytes sent
-//! only when USART1 can take one without waiting (about 1 ms each).
+//! only when USART1 can take one without waiting (about 1 ms each), in bursts with gaps the module can forward over
+//! BLE (LINK-36).
 
 use crate::board::BT_PWR;
 use ferrite_radio::bt::BtPower;
-use crate::chan::{BT_IN, BT_LINK_ON, BT_ON, BT_OUT, BT_RATE, CABLE_BAUD, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
+use ferrite_core::link::{BtPace, BtPacer};
+use crate::chan::{BT_IN, BT_LINK_ON, BT_ON, BT_OUT, BT_PACE, BT_RATE, CABLE_BAUD, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::hal::uart;
 use crate::report::{UART_BT, UART_CPS};
 use crate::ring::Ring;
@@ -42,8 +44,10 @@ struct Port {
     /// The link holds the port: its binary frames can't carry XON/XOFF.
     link: &'static AtomicBool,
     held: bool,
-    /// The cable: sends nothing while keyed (TX-43). Bluetooth: only what USART1 takes without waiting.
+    /// The cable: sends nothing while keyed (TX-43). Bluetooth: only what USART1 takes without waiting, paced.
     cable: bool,
+    /// Bluetooth's bursts and gaps (LINK-36); the cable's is never asked.
+    pacer: BtPacer,
 }
 
 impl Port {
@@ -78,16 +82,22 @@ impl Port {
     }
 
     /// Up to [`CHUNK`] bytes out. True if any went. The cable asks before each byte: nothing goes while
-    /// keyed (TX-43), and the rest waits in the ring.
+    /// keyed (TX-43), and the rest waits in the ring. Bluetooth sends no more than its burst has left, and nothing
+    /// in a gap (LINK-36): the gap is waited out by the loop's 1 ms turns, never in here.
     fn send(&mut self) -> bool {
+        let (pace, now) = (BtPace::unpack(BT_PACE.load(Relaxed)), Instant::now().as_millis());
+        let most = if self.cable { CHUNK } else { self.pacer.allow(pace, now).min(CHUNK) };
         let mut n = 0;
-        while n < CHUNK {
+        while n < most {
             if !self.may_send() || !self.cable && !uart::tx_free(self.uart) {
                 break;
             }
             let Some(b) = self.tx.get() else { break };
             uart::write(self.uart, &[b]);
             n += 1;
+        }
+        if !self.cable {
+            self.pacer.sent(pace, n, now);
         }
         if n > 0 && self.tx.count() == 0 {
             TERM_WAKE.signal(()); // room again: the terminal may have rows waiting
@@ -154,8 +164,8 @@ fn bt_log_line(was: &UartStats, now: &UartStats) {
 #[embassy_executor::task]
 pub async fn task() {
     uart::init(UART_CPS, BAUD); // every boot starts at 115200 (LINK-10)
-    let mut cable = Port { uart: UART_CPS, rx: &TERM_IN, tx: &TERM_OUT, link: &LINK_ON, held: false, cable: true };
-    let mut bt = Port { uart: UART_BT, rx: &BT_IN, tx: &BT_OUT, link: &BT_LINK_ON, held: false, cable: false };
+    let mut cable = Port { uart: UART_CPS, rx: &TERM_IN, tx: &TERM_OUT, link: &LINK_ON, held: false, cable: true, pacer: BtPacer::default() };
+    let mut bt = Port { uart: UART_BT, rx: &BT_IN, tx: &BT_OUT, link: &BT_LINK_ON, held: false, cable: false, pacer: BtPacer::default() };
     // 0 9 2 1 and PB9 (`ferrite_radio::bt`, host-tested).
     let mut bt_pw = BtPower::default();
     // Whose turn it is to send when both ports have bytes waiting.
