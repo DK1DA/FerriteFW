@@ -159,7 +159,7 @@ def status_page(t):
 def hears(t, L, timeout=2.5):
     """Inside a key-up: the receiving radio's slot L opens its squelch (rx=1) within `timeout`, else the test is
     skipped: the radios don't hear each other (closer, or the other way round)."""
-    u, at = t.poll(t.rx, lambda u: u.cards.get(L, {}).get("rx") == 1, timeout)
+    u, at = t.poll(t.rx, lambda u: u.cards.get(L, {}).get("rx") == 1, timeout, light=True)
     t.need(u is not None, f"the receiving radio's slot {L} never opened on the other radio's carrier "
                           f"(a metre apart? {t.rx.raw().cards.get(L)})")
     return u, at
@@ -167,7 +167,7 @@ def hears(t, L, timeout=2.5):
 
 def closes(t, L, timeout=3.0):
     """After the unkey: slot L's squelch closes (rx=0) within `timeout`; (readback, time) or (None, None)."""
-    return t.poll(t.rx, lambda u: u.cards.get(L, {}).get("rx") == 0, timeout)
+    return t.poll(t.rx, lambda u: u.cards.get(L, {}).get("rx") == 0, timeout, light=True)
 
 
 def state(u, L):

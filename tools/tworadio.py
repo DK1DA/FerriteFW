@@ -415,6 +415,29 @@ class Keyer:
 # ---- The test's view of each radio, and the context ----
 
 
+class Light:
+    """ferrite_link's status() dict seen as the full readback's U for the fields both have: `.id`, `.state` (keyed
+    "-" or a letter, remote 0/1, mode), `.cards[L]` (state, rx 1 while its squelch is open, meter, active), `["xb"]`
+    (running 0/1, state, passes), `.whole` (always: one line)."""
+
+    whole = True
+
+    def __init__(self, d):
+        self.d = d
+        self.id = d.get("screen") or ""
+        self.state = dict(keyed=d.get("keyed") or "-", remote=int(bool(d.get("remote"))), mode=d.get("mode"),
+                          active=d.get("active"))
+        self.cards = {L: dict(state=c.get("state", ""), meter=c.get("meter", 0),
+                              rx=int(str(c.get("state", "")).startswith("RX")), active=int(L == d.get("active")))
+                      for L, c in (d.get("slots") or {}).items()}
+        x = d.get("xb")
+        self.xb = dict(running=1, **x) if x else dict(running=0)
+        self.lines = [repr(d)]
+
+    def __getitem__(self, k):
+        return self.xb if k == "xb" else self.d[k]
+
+
 class Side:
     """One radio as a test drives it: readback, keys, terminal lines, settings (put back by the runner)."""
 
@@ -438,24 +461,27 @@ class Side:
         return u
 
     def state(self):
-        """The radio's state, light: `radio.status()` (LINK-19's compact readback, what=2: one short line, a dict with
-        keyed, remote, mode, cards {L: {state, rx, meter}}, xb {running, state, passes, ...}) when the radio has it,
-        else the full readback (a U, which answers the same keys). The one place the Bluetooth radio's polls go
-        light: over Bluetooth the full readback is ~230 bytes and a MORE (about 1 s at ~280 B/s, more on a busy
-        radio), the light one ~80."""
+        """The radio's state, light: ferrite_link's `Radio.status()` (LINK-19's compact readback, UI what=2: one
+        ~80-byte line, no MORE) when the firmware has it, else the full readback (~730 bytes in 4 chunks, ~2.9 s over
+        Bluetooth). Either answers `.id`, `.state` (keyed, remote, mode), `.cards[L]` (state, rx, meter) and
+        `["xb"]` (running, state, passes): the polls on state go through here; a test that needs frequencies, rows
+        or toasts reads `raw()`/`ui()`."""
         st = getattr(self.radio, "status", None)
-        if st is not None and getattr(self.radio, "has_status", True):
-            self.ctx.pump()
-            try:
-                d = st()
-            except fl.RadioError as e:
-                if e.args and e.args[0] == 3:  # bad argument: firmware without the compact readback
-                    self.radio.has_status = False
-                    return self.raw()
-                raise
-            self.ctx.pump()
-            return d
-        return self.raw()
+        if st is None or not getattr(self.radio, "has_status", True):
+            return self.raw()
+        self.ctx.pump()
+        c = self.ctx.clock
+        t0 = c.time()
+        try:
+            d = st()
+        except fl.RadioError as e:
+            if getattr(e, "status", None) == 3:  # bad argument: firmware before the compact readback
+                self.radio.has_status = False
+                return self.raw()
+            raise
+        self.rb = 0.8 * self.rb + 0.2 * (c.time() - t0)
+        self.ctx.pump()
+        return Light(d)
 
     def ui(self, timeout=1.0):
         """A settled readback: two whole ones in a row agreeing on the screen, toast, quick menu and hints."""
