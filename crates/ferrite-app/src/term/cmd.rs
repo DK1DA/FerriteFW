@@ -170,6 +170,8 @@ pub enum List {
     Ui,
     /// The key names `key` and the link's `KEY` take (`ui keys`).
     UiKeys,
+    /// The compact status line (`ui status`, the link's `UI` what=2, LINK-19).
+    UiStatus,
 }
 
 // ---- Words ----
@@ -1272,7 +1274,8 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"ui") => match t.next()? {
             None => Ok(Done::List(List::Ui)),
             Some(Tok::Word(w)) if same(w, b"keys") => Ok(Done::List(List::UiKeys)),
-            _ => Err(msg!("ui, or ui keys")),
+            Some(Tok::Word(w)) if same(w, b"status") => Ok(Done::List(List::UiStatus)),
+            _ => Err(msg!("ui, ui keys or ui status")),
         },
         _ if same(c, b"key") => key(app, st, &mut t),
         _ if same(c, b"knob") => knob(app, st, &mut t),
@@ -1804,6 +1807,11 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
     match l {
         List::Ui => crate::uistate::line(app, st, dev, live, i, out),
         List::UiKeys => crate::uistate::key_line(i, out),
+        List::UiStatus if i == 0 => {
+            crate::uistate::status_line(app, live, out);
+            true
+        }
+        List::UiStatus => false,
         List::Help => match HELP.get(i as usize).or_else(|| HELP_BENCH.get((i as usize).wrapping_sub(HELP.len()))) {
             Some(h) => {
                 out.push(h.as_bytes());

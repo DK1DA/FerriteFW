@@ -18,6 +18,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT keys "MENU 0 8 2 1 OK" [--long]   # remote keys (LINK-19); NAME:long|down|up
     python3 tools/ferrite_link.py PORT knob +3                    # knob steps (LINK-19)
     python3 tools/ferrite_link.py PORT ui [keys]                  # what the screen shows (LINK-19's readback)
+    python3 tools/ferrite_link.py PORT status                     # the compact one-line status (LINK-19, what=2)
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
 
 PORT is a serial device (the programming cable, 115200 8N1), tcp:HOST:PORT for the simulator
@@ -50,7 +51,9 @@ once). A PTT pressed on the radio ends the remote transmission (the radio's oper
 keys (long press, lights, wake, lock). Names: MENU (OK), BACK (EXIT), UP, DOWN, LEFT, RIGHT, SLOT (ABC), VM, 0-9,
 STAR (*), HASH (#), SIDE1 (PF1), SIDE2 (PF2); `ui keys` lists them with their stock codes. A key is a short press,
 NAME:long a long one (held 750 ms), NAME:down / NAME:up hold and let go. Never the PTTs: a remote key never transmits, but for the crossband repeater's # on its start page (XB-20.2).
-`ui` prints what the screen shows (the screen, status bar, home cards or list rows, hints, toast).
+`ui` prints what the screen shows (the screen, status bar, home cards or list rows, hints, toast). `status` prints
+the compact status, one short line (`st scr=Home act=A keyed=- remote=0 mode=off A=RX/20 B=-/0 C=-/0 xb=0`): the
+facts tests poll, cheap on Bluetooth where the whole readback takes seconds.
 
 As a library (the test runner's):
 
@@ -555,6 +558,14 @@ class Radio:
     def ui(self):
         return parse_ui(self.ui_text())
 
+    def status_text(self):
+        """The compact status line (LINK-19, UI what=2), without its newline."""
+        return self.ui_text(2).strip()
+
+    def status(self):
+        """The compact status as a dict (parse_status): screen, active, keyed, remote, mode, slots, xb."""
+        return parse_status(self.status_text())
+
     def cmd(self, line):
         """A terminal command line (LINK-34); its output."""
         out, rest = [], self._ok(CMD, line.encode("ascii"))
@@ -565,6 +576,33 @@ class Radio:
             if len(rest) == 1:
                 time.sleep(0.05)
             rest = self._ok(MORE)
+
+
+def parse_status(line):
+    """The compact status line (LINK-19, UI what=2) as a dict:
+    {"screen": "Home", "active": "A", "keyed": None or "A"/"B"/"C"/"HF", "remote": bool, "mode": "off"|"xb"|...,
+     "slots": {"A": {"state": "RX", "meter": 20}, ...}, "xb": None or {"state": N, "passes": N}}.
+    A slot's state is its card's word as the full readback's `card ... state="..."` has it ("idle", "RX", "heard",
+    "RX muted", "MON", "scanning", ...): the line's `-` is "idle" and `_` a space."""
+    words = line.split()
+    if not words or words[0] != "st":
+        raise ValueError(f"not a status line: {line!r}")
+    kv = dict(w.split("=", 1) for w in words[1:])
+    slots = {}
+    for s in "ABC":
+        if s in kv:
+            st, _, m = kv[s].rpartition("/")
+            slots[s] = {"state": "idle" if st == "-" else st.replace("_", " "), "meter": int(m)}
+    xb = kv.get("xb", "0").split(",")
+    return {
+        "screen": kv.get("scr"),
+        "active": kv.get("act"),
+        "keyed": None if kv.get("keyed", "-") == "-" else kv["keyed"],
+        "remote": kv.get("remote") == "1",
+        "mode": kv.get("mode"),
+        "slots": slots,
+        "xb": {"state": int(xb[1]), "passes": int(xb[2])} if xb[0] == "1" and len(xb) == 3 else None,
+    }
 
 
 def text(b):
@@ -620,7 +658,7 @@ def run(link, a):
         link.ok(AUTH, a.pin.encode("ascii"))
     if a.cmd == "key":
         return remote_ptt(link, a.seconds, a.slot)
-    if a.cmd in ("keys", "knob", "ui"):
+    if a.cmd in ("keys", "knob", "ui", "status"):
         r = Radio.__new__(Radio)  # this session, already past HELLO and AUTH
         r.port, r.link = link.p, link
         try:
@@ -628,6 +666,8 @@ def run(link, a):
                 r.keys(" ".join(a.args), long=a.long)
             elif a.cmd == "knob":
                 r.knob(int(a.args[0]))
+            elif a.cmd == "status":
+                print(r.status_text())
             else:
                 sys.stdout.write(r.ui_text(1 if a.args[:1] == ["keys"] else 0))
         except RadioError as e:

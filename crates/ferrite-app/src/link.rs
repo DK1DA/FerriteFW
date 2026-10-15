@@ -298,9 +298,10 @@ impl Session {
                 Status::Ok
             }
             // LINK-19: what the screen shows, as the terminal's `ui` (or `ui keys`) prints it.
+            // what=2: the compact one-line status (`ui status`), for a slow link.
             msg::UI => match p.first().copied().unwrap_or(0) {
-                w @ (0 | 1) => {
-                    self.run = Run::List(if w == 0 { List::Ui } else { List::UiKeys }, 0);
+                w @ (0..=2) => {
+                    self.run = Run::List([List::Ui, List::UiKeys, List::UiStatus][w as usize], 0);
                     self.more(app, st, dev, live, &mut o);
                     Status::Ok
                 }

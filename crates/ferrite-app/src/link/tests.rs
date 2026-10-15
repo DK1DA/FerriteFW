@@ -1098,3 +1098,78 @@ fn xb_over_bluetooth_needs_the_pin() {
     assert!(bt.ui().contains(" by=cmd:bt "));
     assert!(crate::term::cmd::writes(b"xb start") && crate::term::cmd::writes(b"xb stop") && !crate::term::cmd::writes(b"xb"));
 }
+
+// ---- The compact status (LINK-19, UI what=2) ----
+
+/// The full readback's and the compact status's lines for `live` (as the terminal's `ui` and `ui status`).
+fn full_and_status(pc: &Pc, live: &LiveAll) -> (std::string::String, std::string::String) {
+    use crate::term::cmd::{list_line, Line, List};
+    let mut l = Line::new();
+    let (mut full, mut i) = (std::string::String::new(), 0);
+    while list_line(&pc.app, &pc.st, &pc.dev, live, List::Ui, i, &mut l) {
+        full.push_str(text(l.as_bytes()));
+        full.push('\n');
+        i += 1;
+    }
+    assert!(list_line(&pc.app, &pc.st, &pc.dev, live, List::UiStatus, 0, &mut l));
+    let st = std::string::String::from(text(l.as_bytes()));
+    assert!(!list_line(&pc.app, &pc.st, &pc.dev, live, List::UiStatus, 1, &mut l), "one line");
+    (full, st)
+}
+
+/// Each slot's state word and meter in the status line are its home card's `state="..."` and `meter=` (`-` for
+/// idle, spaces as `_`); the line stays short (here at most 90 bytes; 140 at the very most: one answer).
+fn status_matches_cards(full: &str, st: &str) {
+    assert!(st.len() <= 90, "{} bytes: {st}", st.len());
+    let kv: std::collections::HashMap<&str, &str> = st.split(' ').skip(1).filter_map(|w| w.split_once('=')).collect();
+    for card in full.lines().filter(|l| l.starts_with("card ")) {
+        let s = &card[5..6];
+        let state = card.split("state=\"").nth(1).unwrap().split('"').next().unwrap();
+        let meter = card.split(" meter=").nth(1).unwrap().split(' ').next().unwrap();
+        let want = std::format!("{}/{}", if state == "idle" { "-".into() } else { state.replace(' ', "_") }, meter);
+        assert_eq!(kv[s], want, "slot {s}: {card}\n{st}");
+    }
+    let state = full.lines().find(|l| l.starts_with("state ")).unwrap();
+    for k in ["keyed", "remote", "mode"] {
+        assert!(state.contains(&std::format!(" {k}={}", kv[k])), "{k}: {state}\n{st}");
+    }
+    assert!(state.contains(&std::format!(" active={}", kv["act"])), "{state}\n{st}");
+    assert!(full.starts_with(&std::format!("screen {} ", kv["scr"])), "{st}");
+}
+
+/// LINK-19 (what=2), TERM-37: the compact status is one short line in one answer (no MORE), the terminal's
+/// `ui status` the same; its values are the full readback's: the screen, the active slot, keyed, remote PTT, the
+/// mode, each slot's card state word and meter (RX, heard, MON, off, idle as `-`), and the repeater's state and
+/// passes while it runs.
+#[test]
+fn ui_status_line() {
+    let mut pc = Pc::tx();
+    let (s, a) = pc.ask(msg::UI, &[2]);
+    assert_eq!((s, a[0]), (0, 0), "one answer, nothing more");
+    let line = text(&a[1..]);
+    assert_eq!(line, "st scr=Home act=A keyed=- remote=0 mode=off A=-/20 B=-/20 C=off/20 xb=0\n", "LiveAll::default(): rssi 0 dBm, a full meter");
+    assert_eq!(pc.cmd("ui status").unwrap(), line, "the terminal's ui status");
+    let (full, st) = full_and_status(&pc, &LiveAll::default());
+    status_matches_cards(&full, &st);
+    // Receiving on A, a tone heard on B, C monitored.
+    let mut live = LiveAll::default();
+    live.slots[0].squelch_open = true;
+    live.slots[0].rssi = -60;
+    live.slots[1].heard_tone = 885;
+    live.slots[1].rssi = -100;
+    live.slots[2].rssi = -130;
+    pc.app.monitor = 1 << 2;
+    let (full, st) = full_and_status(&pc, &live);
+    assert!(st.contains(" A=RX/17 ") && st.contains(" B=heard/") && st.contains(" C=MON/0 "), "{st}");
+    status_matches_cards(&full, &st);
+    pc.app.monitor = 0;
+    // The crossband repeater running: its state and passes.
+    assert!(pc.cmd("xb start").is_ok());
+    live.mode = ferrite_core::msg::ModeLive::Xb(ferrite_core::msg::XbLive { state: 1, passes: 3, ..Default::default() });
+    let (full, st) = full_and_status(&pc, &live);
+    assert!(st.starts_with("st scr=Crossband ") && st.contains(" mode=xb ") && st.ends_with(" xb=1,1,3"), "{st}");
+    status_matches_cards(&full, &st);
+    assert!(full.contains("xb running=1 state=1 ") && full.contains(" passes=3 "), "{full}");
+    let (s, _) = pc.ask(msg::UI, &[3]);
+    assert_eq!(s, Status::BadArg as u8);
+}

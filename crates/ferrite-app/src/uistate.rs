@@ -22,6 +22,8 @@
 //!   the rest.
 //! - `hints "KEY" "label" ...`: the hint bar's pairs (under a toast, what it will show again).
 //!
+//! [`status_line`] is the compact one-line status (`UI` what=2, `ui status`).
+//!
 //! Strings are in double quotes, `"` and `\` escaped with `\`; the arrows are `^ v < >`.
 
 use crate::chan::ChannelStore;
@@ -111,6 +113,62 @@ fn letter(s: u8) -> u8 {
     b'A' + s
 }
 
+/// ` keyed=A remote=0 mode=off`: the slot transmitting (`-` none), remote PTT and the exclusive mode (MODE-1).
+fn keyed_remote_mode(app: &App, l: &mut Line) {
+    match app.radio.keyed {
+        Some(s) if (s as usize) < SLOTS => {
+            let _ = uwrite!(l, " keyed={}", letter(s) as char);
+        }
+        Some(_) => l.push(b" keyed=HF"),
+        None => l.push(b" keyed=-"),
+    }
+    kn(l, "remote", app.remote_keyed() as u32);
+    use screens::activity::Mode;
+    l.push(b" mode=");
+    l.push(match app.radio.mode {
+        Mode::Off => b"off".as_slice(),
+        Mode::Scope => b"scope",
+        Mode::Strip => b"strip",
+        Mode::Tone => b"tone",
+        Mode::Counter => b"counter",
+        Mode::Fm => b"fm",
+        Mode::Hf => b"hf",
+        Mode::Xb => b"xb",
+    });
+}
+
+/// The compact status (LINK-19, `UI` what=2; the terminal's `ui status`): one short line for a slow link
+/// (Bluetooth, LINK-36), the facts tests poll, the same values as the full readback:
+/// `st scr=Home act=A keyed=- remote=0 mode=off A=RX/20 B=heard/12 C=-/0 xb=0`. Per slot its card's state word
+/// (`-` for idle, spaces as `_`: `RX_muted`) and its meter; `xb=1,STATE,PASSES` while the repeater runs. About
+/// 70-85 bytes, 140 at the very most: always one answer.
+pub fn status_line(app: &App, live: &LiveAll, l: &mut Line) {
+    l.clear();
+    l.push(b"st scr=");
+    l.push(id(app.screen).as_bytes());
+    let _ = uwrite!(l, " act={}", letter(app.active) as char);
+    keyed_remote_mode(app, l);
+    for s in 0..SLOTS as u8 {
+        let _ = uwrite!(l, " {}=", letter(s) as char);
+        match app.state(s, live).0 {
+            "idle" => l.push(b"-"),
+            w => {
+                for &c in w.as_bytes() {
+                    l.push(&[if c == b' ' { b'_' } else { c }]);
+                }
+            }
+        }
+        let _ = uwrite!(l, "/{}", w::meter_level(live.slots[s as usize].rssi));
+    }
+    match live.mode {
+        ferrite_core::msg::ModeLive::Xb(x) if screens::xb::running(app) => {
+            let _ = uwrite!(l, " xb=1,{},{}", x.state, x.passes);
+        }
+        _ if screens::xb::running(app) => l.push(b" xb=1,0,0"),
+        _ => l.push(b" xb=0"),
+    }
+}
+
 fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
     let sc = app.screen;
     if let Some(l) = d.ln() {
@@ -129,26 +187,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "dark", app.dark() as u32);
         kn(l, "locked", app.locked as u32);
         let _ = uwrite!(l, " active={}", letter(app.active) as char);
-        match app.radio.keyed {
-            Some(s) if (s as usize) < SLOTS => {
-                let _ = uwrite!(l, " keyed={}", letter(s) as char);
-            }
-            Some(_) => l.push(b" keyed=HF"),
-            None => l.push(b" keyed=-"),
-        }
-        kn(l, "remote", app.remote_keyed() as u32);
-        use screens::activity::Mode;
-        l.push(b" mode=");
-        l.push(match app.radio.mode {
-            Mode::Off => b"off".as_slice(),
-            Mode::Scope => b"scope",
-            Mode::Strip => b"strip",
-            Mode::Tone => b"tone",
-            Mode::Counter => b"counter",
-            Mode::Fm => b"fm",
-            Mode::Hf => b"hf",
-            Mode::Xb => b"xb",
-        });
+        keyed_remote_mode(app, l);
         kn(l, "fm", app.radio.fm_on as u32);
     }
     if let Some(l) = d.ln() {
