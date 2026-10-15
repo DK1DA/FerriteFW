@@ -85,6 +85,7 @@ Needs numpy and matplotlib (the project's .venv), pyserial for the cable, rtl_sd
 import argparse
 import atexit
 import contextlib
+import random
 import datetime
 import fnmatch
 import hashlib
@@ -159,9 +160,9 @@ DEFAULTS = {
     "sweeps": {
         "mhz": 145.495, "lead_s": 1.0, "tail_s": 1.5, "keep_captures": False,
         # every CTCSS tone of ferrite-app's slot.rs, then typed ones at TONE-15's ends
-        "ctcss": {"key_s": 2.0, "typed": [60.0, 260.0], "tol_hz": 0.2, "spread": 0.05},
+        "ctcss": {"spot": 4, "key_s": 2.0, "typed": [60.0, 260.0], "tol_hz": 0.2, "spread": 0.05},
         # every DCS code of slot.rs, N then I, then typed ones (TONE-15)
-        "dcs": {"key_s": 2.0, "typed": ["D000N", "D777I"], "min_windows": 2, "spread": 0.10},
+        "dcs": {"spot": 4, "key_s": 2.0, "typed": ["D000N", "D777I"], "min_windows": 2, "spread": 0.10},
         # remote KEY on each, expected refused with the reason the band plan (TX-1, TX-10, TX-35) gives for the
         # radio's region; ones the region allows are not probed. Never keys: the radio refuses (or is unkeyed at once).
         "refusals-wide": {"lead_s": 0.6, "tail_s": 0.8, "freqs": [
@@ -171,7 +172,10 @@ DEFAULTS = {
             520.0, 900.0]},
         # each end tone (0 8 5 4) on a real unkey, wide and NFM: steps, levels (TONE-19.4), lead-in, hold
         "endtones": {"key_s": 1.5, "modes": ["fm", "nfm"], "extra_tail_s": 0.5, "level_tol": 0.12,
-                     "hold_s": 0.40, "hold_tol_s": 0.05},
+                     # TX-47.2: 400 ms hold, PA drive 0, then the 100 ms unkey wait before the chip leaves transmit.
+                     # On tx-dry the PA drive is 0 throughout, so the SDR sees the chip's leak to the chip's exit:
+                     # 500 ms (measured 0.495-0.505 s on all 10 end tones, Oct 14, 2026).
+                     "hold_s": 0.50, "hold_tol_s": 0.05},
         # Subtone level (0 8 4 2) Low, Normal, High on a CTCSS tone and a DCS code (TONE-16)
         "sublevel": {"key_s": 2.0, "tones": ["100.0", "D023N"], "min_step": 0.05},
         # `txtest afsk data LEVEL` at each level (TERM-33.6): deviation in proportion up to 100 %, rising above
@@ -1064,6 +1068,11 @@ def sweep_selection(cfg, names, a):
         conf_only = set(cfg["sweeps"].get(name, {}).get("only") or [])
         if only or conf_only:
             items = [i for i in items if i["label"] in (only | conf_only)]
+        spot = cfg["sweeps"].get(name, {}).get("spot")
+        if spot and not getattr(a, "exhaustive", False) and not (only or a.sweep_from or a.resume):
+            # The chip's own tone and code hardware passed whole once (Oct 14, 2026); later runs spot-check a few at
+            # random (Alex); every item only with --exhaustive.
+            items = sorted(random.sample(items, min(spot, len(items))), key=lambda i: labels.index(i["label"]))
         sel.append((name, items))
     if not started:
         raise BenchError(f"--from {a.sweep_from}: no such item in {', '.join(names)}")
@@ -3460,6 +3469,8 @@ def main():
     ap.add_argument("--refusals", action="store_true", help="remote key refused at 160, 222, 243 MHz; no RF")
     ap.add_argument("--keepalive", action="store_true", help="keepalives stopped while keyed: carrier drop <= 2.5 s")
     ap.add_argument("--timeout", action="store_true", help="TX timeout 30 s, keyed up to 36 s: carrier ~30 s")
+    ap.add_argument("--exhaustive", action="store_true", help="with --sweep: every item of the ctcss and dcs sweeps "
+                    "(a level beyond the full test; without it they spot-check SPOT random items)")
     ap.add_argument("--sweep", metavar="A,B|all", help="sweeps, in this order: " + ", ".join(SWEEP_NAMES)
                     + " (alone: no suite runs; add --runs for them)")
     ap.add_argument("--from", dest="sweep_from", metavar="ITEM", help="with --sweep: start at this item (e.g. 151.4, "
