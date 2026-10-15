@@ -30,6 +30,10 @@ UNSAFE = {"0 8 2 1", "0 5 5 1", "0 5 5 3", "0 5 8 1", "0 8 7 2", "0 9 2 4", "0 5
           "0 7 8", "0 9 2 1", "0 9 3 1", "0 9 3 2"}
 
 
+# How long `T.stable` reads back for a settled screen before it takes the last readback as it is.
+STABLE_S = 1.0
+
+
 class Fail(Exception):
     pass
 
@@ -75,6 +79,16 @@ class U:
 
     def __getitem__(self, k):
         return self.d.get(k)
+
+    @property
+    def whole(self):
+        """The readback ran to its end: the hints line is always the last (uistate.rs)."""
+        return bool(self.lines) and self.lines[0].startswith("screen ") and self.lines[-1].split(" ", 1)[0] == "hints"
+
+    @property
+    def settled(self):
+        """What a key changes and a test reads at once: the screen line, toast or popup, quick menu, hint bar."""
+        return tuple(ln for ln in self.lines if ln.split(" ", 1)[0] in ("screen", "toast", "popup", "qmenu", "hints"))
 
     def row(self, name):
         for r in self.rows:
@@ -124,15 +138,39 @@ class T:
         self.evidence = []  # the readbacks a check looked at (their lines), newest last
         self.visited = set()  # the screens read back (--check-pages), outside home()
         self._homing = False
+        self._rb_s = 0.03  # how long a readback takes (a running average; `ui` starts that much early)
 
     # -- keys and readback --
     def ui(self, settle=0.12):
+        """The screen read back `settle` s after the last key, once it has settled (`stable`). The first of
+        `stable`'s readbacks starts one readback's time early, so the one returned is taken no sooner than before
+        and a settled screen costs no extra time."""
         if settle:
-            time.sleep(settle)
-        self.last = U(self.r.ui())
+            time.sleep(max(0.0, settle - self._rb_s))
+        self.last = self.stable()
         if not self._homing and self.last.id:
             self.visited.add(self.last.id)
         return self.last
+
+    def stable(self, timeout=STABLE_S):
+        """A readback that is whole and settled: read until two in a row agree on the screen, its toast or popup,
+        the quick menu and the hint bar (`U.settled`), each whole (`U.whole`), or `timeout` s pass (then the
+        last). The radio describes the screen afresh for each page of an answer and takes remote keys on its next
+        tick, so one readback can show the previous screen, or end early (a toast going between pages drops the
+        last line, the hints) or mix two screens; the second readback is the only cost when nothing moves."""
+        end = time.time() + timeout
+        prev = None
+        while True:
+            t0 = time.time()
+            u = U(self.r.ui())
+            self._rb_s = 0.8 * self._rb_s + 0.2 * min(time.time() - t0, 0.1)
+            if u.whole and prev is not None and u.settled == prev.settled:
+                return u
+            if time.time() > end:
+                return u
+            if prev is not None or not u.whole:
+                time.sleep(0.02)  # it is moving: let it get on
+            prev = u if u.whole else None
 
     def keys(self, seq, settle=0.12):
         self.r.keys(seq)
