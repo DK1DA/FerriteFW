@@ -11,7 +11,8 @@ use std::os::fd::FromRawFd;
 pub enum Port {
     /// The master side, and the slave kept open so the master never reads EIO while no program has it.
     Pty { master: File, _slave: File, name: String, pending: Vec<u8> },
-    Tcp { listener: TcpListener, client: Option<TcpStream>, port: u16, pending: Vec<u8> },
+    /// `bt`: the BT513's serial side (a phone's link or terminal) instead of the cable.
+    Tcp { listener: TcpListener, client: Option<TcpStream>, port: u16, pending: Vec<u8>, bt: bool },
 }
 
 impl Port {
@@ -38,15 +39,26 @@ impl Port {
 
     /// A TCP port on localhost; one client at a time.
     pub fn tcp(port: u16) -> std::io::Result<Port> {
+        Self::tcp_on(port, false)
+    }
+
+    /// A TCP port on localhost standing in for Bluetooth (`--bt-tcp PORT`): what a phone sends over the BT513
+    /// and what the radio sends back, as `ferrite_link.py tcp:...` on the cable's side does for the cable.
+    pub fn tcp_bt(port: u16) -> std::io::Result<Port> {
+        Self::tcp_on(port, true)
+    }
+
+    fn tcp_on(port: u16, bt: bool) -> std::io::Result<Port> {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         listener.set_nonblocking(true)?;
-        Ok(Port::Tcp { listener, client: None, port, pending: Vec::new() })
+        Ok(Port::Tcp { listener, client: None, port, pending: Vec::new(), bt })
     }
 
     /// How to connect, for the console.
     pub fn describe(&self) -> String {
         match self {
             Port::Pty { name, .. } => format!("Terminal: screen {name} 115200   (press Enter; Ctrl-A K leaves screen)"),
+            Port::Tcp { port, bt: true, .. } => format!("Bluetooth: tcp:127.0.0.1:{port}"),
             Port::Tcp { port, .. } => format!("Terminal: stty raw -echo; nc 127.0.0.1 {port}; stty sane   (press Enter)"),
         }
     }
@@ -65,7 +77,9 @@ impl Port {
                 pending.extend(sim.term_take());
                 send(master, pending);
             }
-            Port::Tcp { listener, client, pending, .. } => {
+            Port::Tcp { listener, client, pending, bt, .. } => {
+                let bt = *bt;
+                let take = |sim: &mut SimCore| if bt { sim.bt_take() } else { sim.term_take() };
                 if client.is_none() {
                     if let Ok((c, _)) = listener.accept() {
                         let _ = c.set_nonblocking(true);
@@ -74,7 +88,7 @@ impl Port {
                     }
                 }
                 let Some(c) = client else {
-                    sim.term_take(); // nobody on the cable: the output goes nowhere
+                    take(sim); // nobody on the cable: the output goes nowhere
                     return;
                 };
                 loop {
@@ -84,6 +98,7 @@ impl Port {
                             pending.clear();
                             return;
                         }
+                        Ok(n) if bt => sim.bt_feed(&buf[..n]),
                         Ok(n) => sim.term_feed(&buf[..n]),
                         Err(e) if e.kind() == ErrorKind::WouldBlock => break,
                         Err(_) => {
@@ -92,7 +107,7 @@ impl Port {
                         }
                     }
                 }
-                pending.extend(sim.term_take());
+                pending.extend(take(sim));
                 send(c, pending);
             }
         }

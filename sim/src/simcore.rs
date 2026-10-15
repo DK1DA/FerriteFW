@@ -625,6 +625,9 @@ impl SimCore {
         if self.live() && (!self.term_in.is_empty() || !self.bt_in.is_empty() || self.ports.busy()) {
             self.term_pump(); // a load or a dump goes on between frames
         }
+        if self.ports.take_reboot() {
+            self.restart(); // LINK-24: REBOOT's answer has gone out; the radio restarts
+        }
         if self.lcd.pixels > 0 {
             self.last_px = self.lcd.pixels;
         }
@@ -887,6 +890,26 @@ impl SimCore {
         }
     }
 
+    /// LINK-24's restart, as the firmware's REBOOT does it: what is pending is written, then a fresh boot from
+    /// what the flash kept (RAM gone, the link sessions start over). The stock bootloader's 200 ms listen has
+    /// nothing to stand in for: the boot screen follows at once. What the cable was already sent stays queued.
+    fn restart(&mut self) {
+        if !self.booting {
+            self.store.flush(&self.app);
+        }
+        let flash = std::mem::replace(&mut self.store, FlashStore::mount(SimFlash::new(), Sample::new())).into_parts().0;
+        self.store = FlashStore::mount(flash, Sample::new());
+        self.radio = FakeRadio::new();
+        self.app = power_on(&self.store, &mut self.radio);
+        (self.off, self.off_at, self.booting, self.boot_end) = (false, None, true, self.now + BOOT_MS);
+        self.ports = Ports::new();
+        self.ports.set_cable_max_baud(921_600);
+        self.term_in.clear();
+        self.bt_in.clear();
+        self.draw_boot();
+        self.last_key = String::from("restart");
+    }
+
     /// One of the simulator's stand-ins for what the radio would report (most are ignored while booting or off).
     pub fn event(&mut self, e: Event) {
         let live = self.live();
@@ -1097,6 +1120,17 @@ impl SimCore {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    /// The UI readback (LINK-19, `ui`), as the link sends it.
+    pub fn readback(&self) -> String {
+        let (mut out, mut l, mut i) = (String::new(), ferrite_app::term::cmd::Line::new(), 0);
+        while ferrite_app::uistate::line(&self.app, &self.store, &self.dev, &self.radio.live, i, &mut l) {
+            out.push_str(&String::from_utf8_lossy(l.as_bytes()));
+            out.push('\n');
+            i += 1;
+        }
+        out
+    }
+
     /// The screen alone, 240 x 320, 0xRRGGBB (not dimmed when dark): for the goldens.
     pub fn screen_rgb(&self) -> Vec<u32> {
         let mut v = Vec::with_capacity((W * H) as usize);

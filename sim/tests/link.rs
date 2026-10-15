@@ -55,3 +55,29 @@ fn link_over_the_cable() {
     sim.step(t);
     assert!(!sim.term_take().is_empty(), "the terminal answered");
 }
+
+/// LINK-24.1 in the simulator (what `tools/uitest.py`'s restarts use): REBOOT is answered, then the simulated
+/// radio restarts from what its flash kept: the boot screen, then home with the settings as they were; the link
+/// starts over (HELLO again).
+#[test]
+fn reboot_restarts_the_simulator() {
+    let mut sim = SimCore::new(1, false);
+    let mut t = 0;
+    while t < 6000 {
+        t += 20;
+        sim.step(t);
+    }
+    ask(&mut sim, &mut t, msg::HELLO, 1, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    sim.app_mut().settings_mut().brightness = 3;
+    assert_eq!(ask(&mut sim, &mut t, msg::REBOOT, 2, &[])[0], 0, "answered first");
+    assert!(sim.booting(), "restarting");
+    while t < 12_000 {
+        t += 20;
+        sim.step(t);
+    }
+    assert!(!sim.booting());
+    assert_eq!(sim.screen_name(), "Home");
+    assert_eq!(sim.app().settings().brightness, 3, "the settings kept");
+    let a = ask(&mut sim, &mut t, msg::HELLO, 3, &[PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&a[..2], &[0, PROTOCOL]);
+}

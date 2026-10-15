@@ -57,10 +57,18 @@ fn main() {
         }
         .expect("a cable");
         println!("{}", cable.describe());
+        // `--bt-tcp PORT`: Bluetooth's serial side on a second TCP port (a phone's link or terminal).
+        let mut bt = arg("--bt-tcp").and_then(|s| s.parse::<u16>().ok()).map(|p| termport::Port::tcp_bt(p).expect("a Bluetooth port"));
+        if let Some(b) = &bt {
+            println!("{}", b.describe());
+        }
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < secs {
             sim.step(start.elapsed().as_millis() as u32);
             cable.pump(&mut sim);
+            if let Some(b) = &mut bt {
+                b.pump(&mut sim);
+            }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         return;
