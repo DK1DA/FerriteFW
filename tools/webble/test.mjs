@@ -127,6 +127,56 @@ ok("fake radio: HELLO, INFO, UI with MORE, keys, knob, CMD, PTT, chunked writes"
 }
 ok("fake radio: the PIN lock (LINK-30)");
 
+// ---- The Link panel (BLE MTU test): the meter, big readback and write test against the fake radio ----
+{
+  const t = new F.FakeTransport();
+  const { link, radio } = await client(t);
+  await radio.hello();
+  const b = await radio.bigReadback();
+  assert.ok(b.ok && !b.error && b.junk === 0, JSON.stringify(b));
+  assert.ok(b.notes > 10 && b.largest === 20 && b.bytes > 500, "MTU 23: 20-byte notifications only");
+  const m = link.meter.summary();
+  assert.deepEqual([m.largest, m.mtu, m.hist[0][1] === m.count], [20, 23, true]);
+  assert.match(m.mtuText, /^at least 23 \(only/);
+  assert.ok(m.gaps > 0 && m.gapMin >= 0 && m.gapMedian >= m.gapMin && m.bps > 0 && m.nps > 0);
+  const w = await radio.writeTest();
+  assert.deepEqual(w.map((r) => [r.size, r.ok]), [[20, true], [100, false], [244, false]]);
+  assert.equal((await radio.hello()).protocol, 2, "the link still works after the zeros");
+  link.meter.reset();
+  assert.equal(link.meter.summary().count, 0);
+}
+ok("link panel, fake MTU 23: 20-byte notifications, MTU at least 23, writes over 20 refused");
+{
+  const t = new F.FakeTransport({ mtu: 247 });
+  const { link, radio } = await client(t);
+  assert.equal(await t.connect(), "fake radio (MTU 247)");
+  await radio.hello();
+  const b = await radio.bigReadback();
+  assert.ok(b.ok, JSON.stringify(b));
+  assert.ok(b.largest > 100 && b.largest <= 244, `largest ${b.largest}`);
+  assert.equal(b.notes, b.frames, "one notification per reply frame");
+  const m = link.meter.summary();
+  assert.equal(m.mtu, m.largest + 3);
+  assert.equal(m.mtuText, `at least ${m.largest + 3}`);
+  assert.ok(m.hist[2][1] >= 1 && m.hist[3][1] === 0, JSON.stringify(m.hist));
+  const w = await radio.writeTest([20, 100, 244, 245]);
+  assert.deepEqual(w.map((r) => [r.size, r.ok]), [[20, true], [100, true], [244, true], [245, false]]);
+  assert.match(w[3].error, /MTU-3/);
+  assert.equal((await radio.info()).callsign, "N0CALL", "zeros are only separators to the radio");
+  assert.ok(t.writes.filter((n) => n > F.CHUNK).every((n) => n === 100 || n === 244), "only the raw test writes exceed 20");
+}
+ok("link panel, fake MTU 247: big notifications, inferred MTU, write sizes up to 244 taken");
+{
+  // The page script (not the core) at least compiles.
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((x) => x[1]);
+  assert.equal(scripts.length, 2);
+  new Function(scripts[1]);
+  assert.match(html, /bt pace 0 0/);
+  assert.match(html, /adb reverse tcp:8000 tcp:8000/);
+  assert.ok(!/FF31\b[^\n]*getCharacteristic|0xFF31|getCharacteristic\((?!BLE_DATA)/.test(html), "only FFE1 is asked for");
+}
+ok("page script compiles; the panel's how-to text is there; only FFE1 is used");
+
 // ---- The simulator, through 20-byte paced chunks ----
 const simArg = process.argv.indexOf("--sim");
 if (simArg > 0) {

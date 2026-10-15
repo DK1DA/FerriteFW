@@ -6,10 +6,22 @@
 <title>Ferrite Bluetooth</title>
 <!--
   Ferrite over Bluetooth: the link protocol (manual chapter 29, Appendix G) on the BT513's FFE0/FFE1 transparent
-  UART, from Chrome's Web Bluetooth. Self-contained, no build step. Web Bluetooth needs a secure context, so serve it
-  from localhost:   cd tools/webble && python3 -m http.server 8000   then open http://localhost:8000/
+  UART, from Chrome's Web Bluetooth. Self-contained, no build step.
+
+  How to open it. Web Bluetooth needs a secure context (https, or http://localhost) and Chrome (desktop or Android).
+    On the Mac:       cd tools/webble && python3 -m http.server 8000   then open http://localhost:8000/
+    On an Android phone (Chrome), from the same server on the Mac, over USB debugging:
+                      adb reverse tcp:8000 tcp:8000   then open http://localhost:8000/ in the phone's Chrome
+                      (localhost counts as secure; a LAN address like http://192.168.x.y:8000 does not, and Chrome
+                      then has no navigator.bluetooth). Location and Nearby devices permissions on for Chrome.
+    Not from a claude.ai artifact: the artifact runs in a cross-origin iframe, and Web Bluetooth inside an iframe
+    needs the embedder to grant it (allow="bluetooth"); without that grant navigator.bluetooth is missing or
+    requestDevice is refused. Use localhost.
   Without a radio:  http://localhost:8000/?fake   (a fake radio in the page, through the same framing and chunking;
-  ?fake&pin adds a PIN lock, PIN 1234).
+  ?fake&pin adds a PIN lock, PIN 1234; ?fake&mtu=247 sends its notifications in MTU-3 = 244-byte pieces and refuses
+  raw writes over 244, for checking the Link panel).
+  The Link panel measures the BLE MTU (Web Bluetooth can neither request nor read it): the largest notification seen
+  is MTU-3 at most. For that the radio must send unpaced: over the cable, `bt pace 0 0` (bench build).
   Never touches FF31 (the module's control characteristic) and never sets anything on the module.
   window.ferrite: a small API for browser automation (see the bottom of the script).
 -->
@@ -98,6 +110,19 @@ button:disabled { opacity: .45; cursor: default; }
 #out { font-size: 12px; white-space: pre-wrap; max-height: 260px; overflow: auto; background: var(--bg); padding: 6px; border-radius: 4px; margin: 8px 0 0; min-height: 40px; }
 #cmdline { flex: 1; min-width: 160px; font-family: ui-monospace, monospace; }
 #log { font-size: 11px; white-space: pre-wrap; max-height: 180px; overflow: auto; margin: 0; color: var(--muted); }
+/* The Link panel (BLE MTU test). */
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 8px 0 0; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+.hist { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) 3.5em; gap: 3px 8px; align-items: center; margin: 8px 0 0; font: 12px ui-monospace, Menlo, monospace; max-width: 420px; }
+.hist .barbg { height: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
+.hist .barbg i { display: block; height: 100%; background: var(--accent); }
+.hist .n { text-align: right; }
+.ok { color: var(--ok); } .bad { color: var(--bad); }
+#linkres { font: 11px/1.35 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); padding: 6px; border-radius: 4px; margin: 8px 0 0; max-height: 220px; overflow: auto; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+details ol { margin: 6px 0; padding-left: 20px; font-size: 12px; }
+code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--bg); padding: 0 3px; border-radius: 3px; }
 dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
 </style>
 </head>
@@ -117,6 +142,40 @@ dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--pa
       <span id="stats"></span>
     </div>
     <p class="hint" id="envhint">Radio: MENU 0 9 2 1 Bluetooth on. The module advertises as "walkie-talkie". About 0.8 KB/s each way (the module's UART runs at 9600), so a screen readback takes a second or so.</p>
+    <details>
+      <summary>Opening this page on an Android phone</summary>
+      <ol>
+        <li>Web Bluetooth needs Chrome and a secure context: https or http://localhost. A LAN address (http://192.168.x.y:8000) is not secure, so Chrome hides Bluetooth there.</li>
+        <li>On the Mac: <code>cd tools/webble &amp;&amp; python3 -m http.server 8000</code>.</li>
+        <li>Phone on USB with debugging on: <code>adb reverse tcp:8000 tcp:8000</code>, then open <code>http://localhost:8000/</code> in the phone's Chrome. Allow Nearby devices (and Location on older Android) for Chrome.</li>
+        <li>Not from a claude.ai artifact: it runs in a cross-origin iframe, and Bluetooth in an iframe needs the page around it to grant <code>allow="bluetooth"</code>; without that, Chrome refuses it.</li>
+      </ol>
+    </details>
+  </section>
+
+  <section id="linkpanel">
+    <h2>Link (BLE MTU test)</h2>
+    <p class="hint">For the test the radio must send unpaced: over the cable run <code>bt pace 0 0</code> (bench build). Web Bluetooth can't ask for or read the MTU, so it is measured: no notification is longer than MTU-3.</p>
+    <div class="row">
+      <button id="bigread" disabled>Big readback</button>
+      <button id="writetest" disabled>Write test</button>
+      <button id="meterreset">Reset</button>
+      <button id="copyres" class="primary">Copy results</button>
+      <span id="copied" class="hint"></span>
+    </div>
+    <dl class="kv">
+      <dt>Largest notification</dt><dd id="lk-largest">—</dd>
+      <dt>Inferred MTU</dt><dd id="lk-mtu">—</dd>
+      <dt>Notifications</dt><dd id="lk-count">—</dd>
+      <dt>Last 3 s</dt><dd id="lk-rate">—</dd>
+      <dt>Gap (in bursts)</dt><dd id="lk-gap">—</dd>
+      <dt>Big readback</dt><dd id="lk-big">not run</dd>
+      <dt>Write test</dt><dd id="lk-write">not run</dd>
+    </dl>
+    <div class="hist" id="lk-hist" aria-label="Notification sizes"></div>
+    <p class="hint">Gaps are between notifications less than 250 ms apart: the smallest is about the connection interval (Chrome may deliver a few at once, which reads as 0). A write size the browser takes may still be cut to MTU-3 by the phone; the notification sizes are the firm measure.</p>
+    <pre id="linkres"></pre>
+    <p class="hint mono" id="ua"></p>
   </section>
 
   <div class="cols">
@@ -321,6 +380,46 @@ const Ferrite = (() => {
     }
   }
 
+  /** Notification sizes and times, for the Link panel: Web Bluetooth can't read the MTU, but no notification is
+   *  longer than MTU-3, so the largest seen says "MTU at least largest+3". Gaps between notifications inside a burst
+   *  (under BURST_GAP_MS) show the connection interval. */
+  const HIST = [["<=20", 20], ["21-100", 100], ["101-244", 244], [">244", Infinity]];
+  const BURST_GAP_MS = 250;
+  class LinkMeter {
+    constructor(now = () => (globalThis.performance ? performance.now() : Date.now())) { this.now = now; this.reset(); }
+    reset() { this.count = 0; this.bytes = 0; this.largest = 0; this.hist = HIST.map(() => 0); this.recent = []; }
+    note(n) {
+      this.count++; this.bytes += n;
+      if (n > this.largest) this.largest = n;
+      this.hist[HIST.findIndex(([, top]) => n <= top)]++;
+      this.recent.push([this.now(), n]);
+      if (this.recent.length > 4000) this.recent.splice(0, 1000);
+    }
+    /** Sizes of the notifications since the count was `n0` (as far back as `recent` reaches). */
+    sizesSince(n0) { return this.recent.slice(Math.max(0, this.recent.length - (this.count - n0))).map(([, n]) => n); }
+    mtuText() {
+      if (!this.largest) return "no notifications yet";
+      if (this.largest <= 20) return `at least ${this.largest + 3} (only <=20-byte notifications so far: the default 23, or the radio is paced)`;
+      return `at least ${this.largest + 3}`;
+    }
+    summary(windowMs = 3000) {
+      const t = this.now();
+      const win = this.recent.filter(([at]) => t - at <= windowMs);
+      const wb = win.reduce((a, [, n]) => a + n, 0);
+      const gaps = [];
+      const r = this.recent.slice(-500);
+      for (let i = 1; i < r.length; i++) { const g = r[i][0] - r[i - 1][0]; if (g < BURST_GAP_MS) gaps.push(g); }
+      gaps.sort((a, b) => a - b);
+      return {
+        count: this.count, bytes: this.bytes, largest: this.largest, mtu: this.largest ? this.largest + 3 : null,
+        mtuText: this.mtuText(), hist: HIST.map(([label], i) => [label, this.hist[i]]),
+        windowS: windowMs / 1000, bps: Math.round(wb * 1000 / windowMs), nps: +(win.length * 1000 / windowMs).toFixed(1),
+        gaps: gaps.length, gapMin: gaps.length ? +gaps[0].toFixed(1) : null,
+        gapMedian: gaps.length ? +gaps[gaps.length >> 1].toFixed(1) : null,
+      };
+    }
+  }
+
   /** The link over a transport ({write(Uint8Array): Promise, onData: (Uint8Array) => void}). Requests go one at a
    *  time (LINK-23) through ask(); send() goes at once (remote PTT's keepalives don't wait behind a readback). */
   class Link {
@@ -332,10 +431,12 @@ const Ferrite = (() => {
       this.chain = Promise.resolve();
       this.stats = { tx: 0, rx: 0, frames: 0, junk: 0 };
       this.onFrame = null;
+      this.meter = new LinkMeter();
       transport.onData = (u8) => this.data(u8);
     }
     data(u8) {
       this.stats.rx += u8.length;
+      this.meter.note(u8.length);
       for (const f of this.deframer.push(u8)) {
         this.stats.frames++;
         if (this.onFrame) this.onFrame(f);
@@ -352,6 +453,18 @@ const Ferrite = (() => {
     async write(bytes) {
       this.stats.tx += bytes.length;
       await this.t.write(bytes);
+    }
+    /** One write of `bytes` as it is (no 20-byte chunking): throws if the transport refuses it (too long). */
+    async writeRaw(bytes) {
+      if (!this.t.writeRaw) throw new Error("this transport has no raw writes");
+      this.stats.tx += bytes.length;
+      await this.t.writeRaw(bytes);
+    }
+    /** fn() in the request queue: nothing else goes out of ask() while it runs. */
+    exclusive(fn) {
+      const r = this.chain.then(fn, fn);
+      this.chain = r.catch(() => {});
+      return r;
     }
     /** Ctrl-C (closes the terminal if this port has it), then a 0x00: the port is the link's (TERM-2). */
     async sync() {
@@ -463,6 +576,40 @@ const Ferrite = (() => {
     /** What the screen shows, as the radio's text (what 1: the key names). */
     async uiText(what = 0) { return this.more(await this.ok(T.UI, [what])); }
     async ui() { return parseUi(await this.uiText(0)); }
+    /** The Link panel's big readback: a UI readback (0x33 what=0 and its MOREs), timed. ok: every frame's CRC
+     *  held (a bad one is dropped, so its request times out) and nothing in between was junk. */
+    async bigReadback() {
+      const l = this.link, m = l.meter;
+      const n0 = m.count, rx0 = l.stats.rx, f0 = l.stats.frames, j0 = l.deframer.junk, t0 = m.now();
+      let text = null, error = null;
+      try { text = await this.uiText(0); } catch (e) { error = e.message; }
+      const ms = m.now() - t0;
+      const sizes = m.sizesSince(n0);
+      const junk = l.deframer.junk - j0;
+      const bytes = l.stats.rx - rx0;
+      return { ok: !error && junk === 0, error, ms: Math.round(ms), bytes, frames: l.stats.frames - f0, junk,
+        notes: sizes.length, largest: sizes.length ? Math.max(...sizes) : 0, chars: text ? text.length : 0,
+        bps: ms > 0 ? Math.round(bytes * 1000 / ms) : 0 };
+    }
+    /** The Link panel's write test: one write without response of each size, all 0x00 (COBS frame separators: an
+     *  empty frame, which the radio ignores), as it is. A size the browser refuses throws (too big for the MTU, or
+     *  over Web Bluetooth's 512); one it takes may still have been cut to MTU-3 by the OS, so this only hints. */
+    async writeTest(sizes = [20, 100, 244]) {
+      return this.link.exclusive(async () => {
+        const out = [];
+        for (const n of sizes) {
+          const t0 = Date.now();
+          try {
+            await this.link.writeRaw(new Uint8Array(n));
+            out.push({ size: n, ok: true, ms: Date.now() - t0 });
+          } catch (e) {
+            out.push({ size: n, ok: false, error: e.message || String(e) });
+          }
+          await sleep(Math.ceil(n * 1000 / 960) + 60);  // the module's 9600-baud UART drains it
+        }
+        return out;
+      });
+    }
     /** A terminal command line (LINK-34): its output. */
     async cmd(line) { return this.more(await this.ok(T.CMD, ascii(line))); }
     // Remote PTT (LINK-20): straight out, not behind a readback in the queue.
@@ -555,8 +702,19 @@ const Ferrite = (() => {
           await sleep(PACE_MS);
         }
       };
-      this.q = this.q.then(run, run);
-      return this.q;
+      const r = this.q.then(run, run);
+      this.q = r.catch(() => {});
+      return r;
+    }
+    /** One writeValueWithoutResponse of `bytes`, unchunked (the Link panel's write test); queued like write(). */
+    writeRaw(bytes) {
+      const run = async () => {
+        if (!this.ch.writeValueWithoutResponse) throw new Error("no writeValueWithoutResponse in this browser");
+        await this.ch.writeValueWithoutResponse(bytes);
+      };
+      const r = this.q.then(run, run);
+      this.q = r.catch(() => {});
+      return r;
     }
     async close() {
       try { if (this.ch) await this.ch.stopNotifications(); } catch { /* gone already */ }
@@ -565,7 +723,8 @@ const Ferrite = (() => {
   }
 
   /** A fake radio in the page (?fake): the same framing and 20-byte chunking both ways, a home screen and a quick
-   *  menu that the keys move through, CMD echo, remote PTT, and a PIN lock (?fake&pin: PIN 1234). */
+   *  menu that the keys move through, CMD echo, remote PTT, and a PIN lock (?fake&pin: PIN 1234). ?fake&mtu=247:
+   *  its notifications are up to MTU-3 bytes and raw writes over MTU-3 are refused, as a browser would. */
   class FakeTransport {
     constructor(opts = {}) {
       this.onData = null; this.onClose = null;
@@ -573,10 +732,18 @@ const Ferrite = (() => {
       this.pin = opts.pin ? "1234" : null;
       this.authed = !this.pin;
       this.build = opts.build === undefined ? 0x82 : opts.build;
+      this.mtu = Math.max(23, Math.min(517, opts.mtu || 23));
+      this.note = this.mtu - 3;
       this.screen = "Home"; this.sel = 0; this.sq = 4; this.keyed = false; this.pending = []; this.writes = [];
       this.rows = ["Squelch", "TX power", "Mode", "Tones", "Offset", "Step", "Watch", "Channel", "Battery Save", "Advanced settings"];
     }
-    async connect() { return "fake radio"; }
+    async connect() { return this.mtu === 23 ? "fake radio" : `fake radio (MTU ${this.mtu})`; }
+    async writeRaw(bytes) {
+      if (bytes.length > this.note) throw new Error(`value longer than MTU-3 (fake MTU ${this.mtu})`);
+      this.writes.push(bytes.length);
+      for (const f of this.rx.push(bytes)) this.answer(f);
+      await sleep(2);
+    }
     async close() { if (this.onClose) this.onClose(); }
     async write(bytes) {
       for (let i = 0; i < bytes.length; i += CHUNK) {
@@ -589,8 +756,8 @@ const Ferrite = (() => {
     reply(f, status, rest = []) {
       const out = frame(f.ty | ANSWER, f.seq, [status, ...rest]);
       setTimeout(async () => {
-        for (let i = 0; i < out.length; i += CHUNK) {
-          if (this.onData) this.onData(out.slice(i, i + CHUNK));
+        for (let i = 0; i < out.length; i += this.note) {
+          if (this.onData) this.onData(out.slice(i, i + this.note));
           await sleep(3);
         }
       }, 5);
@@ -657,7 +824,7 @@ const Ferrite = (() => {
   }
 
   return { PROTOCOL, T, STATUS, KEY_CODES, BUILDS, CHUNK, PACE_MS, crc16, cobsEncode, cobsDecode, frame, parseFrame,
-    Deframer, Link, Radio, RadioError, parseUi, parseUiLine, BleTransport, FakeTransport, sleep };
+    Deframer, Link, LinkMeter, Radio, RadioError, parseUi, parseUiLine, BleTransport, FakeTransport, sleep };
 })();
 if (typeof module !== "undefined") module.exports = Ferrite;
 /* ferrite-core:end */
@@ -692,7 +859,7 @@ if (typeof module !== "undefined") module.exports = Ferrite;
   async function connect() {
     try {
       setStatus("Connecting…");
-      transport = fake ? new Ferrite.FakeTransport({ pin: params.has("pin"), build: params.has("rx") ? 0 : 0x82 }) : new Ferrite.BleTransport();
+      transport = fake ? new Ferrite.FakeTransport({ pin: params.has("pin"), build: params.has("rx") ? 0 : 0x82, mtu: parseInt(params.get("mtu"), 10) || 23 }) : new Ferrite.BleTransport();
       const name = await transport.connect();
       transport.onClose = () => { if (connected) { log("disconnected"); teardown(); } };
       link = new Ferrite.Link(transport);
@@ -911,8 +1078,82 @@ if (typeof module !== "undefined") module.exports = Ferrite;
   $("disconnect").addEventListener("click", disconnect);
   $("refresh").addEventListener("click", readScreen);
   $("live").addEventListener("change", () => scheduleLive());
-  if (fake) $("envhint").textContent = "Fake radio (?fake): no Bluetooth; the same framing, 20-byte chunks and API." + (params.has("pin") ? " PIN 1234." : "");
-  else if (!navigator.bluetooth) $("envhint").innerHTML = '<span class="warn">No Web Bluetooth here: use Chrome, from http://localhost (python3 -m http.server in tools/webble) or https.</span>';
+  if (fake) $("envhint").textContent = "Fake radio (?fake): no Bluetooth; the same framing, 20-byte chunks and API." + (params.has("pin") ? " PIN 1234." : "") + (params.get("mtu") ? ` Notifications up to MTU-3 (mtu=${params.get("mtu")}).` : "");
+  else if (!navigator.bluetooth) $("envhint").innerHTML = `<span class="warn">No Web Bluetooth here${window.isSecureContext ? "" : " (not a secure context)"}${window.top !== window ? " (inside an iframe that doesn't grant it)" : ""}: use Chrome, from http://localhost (python3 -m http.server in tools/webble; on a phone, adb reverse tcp:8000 tcp:8000) or https.</span>`;
+
+  // ---- The Link panel: notification sizes, rates, gaps; big readback; write test; results text ----
+  const lk = { big: null, write: null };
+  $("ua").textContent = navigator.userAgent;
+  function linkText() {
+    const m = link ? link.meter.summary() : null;
+    const L = [`Ferrite BLE link test ${new Date().toISOString()}`, `Browser: ${navigator.userAgent}`];
+    L.push(`Radio: ${info ? `${info.version}, ${info.build}${info.bench ? " (bench)" : ""}` : "not connected"}${fake ? `, fake (MTU ${transport ? transport.mtu : "?"})` : ""}`);
+    if (m) {
+      L.push(`Notifications: ${m.count} (${m.bytes} B), largest ${m.largest} B -> MTU ${m.mtuText}`);
+      L.push(`Sizes: ${m.hist.map(([k, n]) => `${k}: ${n}`).join(", ")}`);
+      L.push(`Last ${m.windowS} s: ${m.bps} B/s, ${m.nps} notifications/s; gaps in bursts: min ${m.gapMin ?? "-"} ms, median ${m.gapMedian ?? "-"} ms (${m.gaps} gaps)`);
+    }
+    const b = lk.big;
+    L.push(`Big readback: ${b ? bigText(b) : "not run"}`);
+    L.push(`Write test: ${lk.write ? writeText(lk.write) : "not run"}`);
+    return L.join("\n");
+  }
+  const bigText = (b) => `${b.ok ? "ok" : "BAD"} ${b.bytes} B in ${b.ms} ms (${b.bps} B/s), ${b.notes} notifications, largest ${b.largest} B, ${b.frames} frames${b.junk ? `, ${b.junk} bad` : ""}${b.error ? `: ${b.error}` : ", CRC ok"}`;
+  const writeText = (w) => w.map((r) => `${r.size} ${r.ok ? "taken" : `refused (${r.error})`}`).join(", ");
+  function linkPanel() {
+    $("bigread").disabled = $("writetest").disabled = !connected;
+    if (link) {
+      const m = link.meter.summary();
+      $("lk-largest").textContent = m.count ? `${m.largest} bytes` : "—";
+      $("lk-mtu").textContent = m.mtuText;
+      $("lk-count").textContent = `${m.count} (${m.bytes} B)`;
+      $("lk-rate").textContent = `${m.bps} B/s, ${m.nps} notifications/s`;
+      $("lk-gap").textContent = m.gaps ? `min ${m.gapMin} ms, median ${m.gapMedian} ms (${m.gaps})` : "—";
+      const top = Math.max(1, ...m.hist.map(([, n]) => n));
+      $("lk-hist").innerHTML = m.hist.map(([k, n]) => `<span>${esc(k)}</span><span class="barbg"><i style="width:${(n * 100 / top).toFixed(1)}%"></i></span><span class="n">${n}</span>`).join("");
+    }
+    $("linkres").textContent = linkText();
+  }
+  setInterval(linkPanel, 500);
+  linkPanel();
+  async function bigReadback() {
+    if (!radio || reading) return null;
+    reading = true;
+    $("lk-big").textContent = "running…";
+    try {
+      lk.big = await radio.bigReadback();
+      $("lk-big").innerHTML = `<span class="${lk.big.ok ? "ok" : "bad"}">${esc(bigText(lk.big))}</span>`;
+      log(`big readback: ${bigText(lk.big)}`);
+      return lk.big;
+    } finally { reading = false; linkPanel(); }
+  }
+  async function writeTest() {
+    if (!radio) return null;
+    if (ptt.keyed) { $("lk-write").textContent = "not while keyed"; return null; }
+    $("lk-write").textContent = "running…";
+    lk.write = await radio.writeTest([20, 100, 244]);
+    $("lk-write").innerHTML = lk.write.map((r) => `<span class="${r.ok ? "ok" : "bad"}">${r.size} ${r.ok ? "taken" : "refused"}</span>`).join(", ");
+    log(`write test: ${writeText(lk.write)}`);
+    linkPanel();
+    return lk.write;
+  }
+  async function copyResults() {
+    const t = linkText();
+    try { await navigator.clipboard.writeText(t); $("copied").textContent = "Copied."; } catch {
+      const ta = document.createElement("textarea");
+      ta.value = t; document.body.appendChild(ta); ta.select();
+      let done = false;
+      try { done = document.execCommand("copy"); } catch { /* no clipboard */ }
+      ta.remove();
+      $("copied").textContent = done ? "Copied." : "Copy failed: select the text below.";
+    }
+    setTimeout(() => { $("copied").textContent = ""; }, 3000);
+    return t;
+  }
+  $("bigread").addEventListener("click", bigReadback);
+  $("writetest").addEventListener("click", writeTest);
+  $("meterreset").addEventListener("click", () => { if (link) link.meter.reset(); lk.big = lk.write = null; $("lk-big").textContent = $("lk-write").textContent = "not run"; linkPanel(); });
+  $("copyres").addEventListener("click", copyResults);
 
   // ---- window.ferrite: for browser automation ----
   const need = () => { if (!radio) throw new Error("not connected"); return radio; };
@@ -938,6 +1179,12 @@ if (typeof module !== "undefined") module.exports = Ferrite;
     },
     arm: (on = true) => { $("arm").checked = !!on; $("arm").dispatchEvent(new Event("change")); },
     status: () => ({ connected, fake, info, keyed: ptt.keyed, stats: link ? { ...link.stats } : null }),
+    /** The Link panel: meter summary, big readback, write test, the results text (also copied). */
+    linkStats: () => (link ? link.meter.summary() : null),
+    bigReadback,
+    writeTest,
+    linkText,
+    copyResults,
     core: Ferrite,
   };
 })();
