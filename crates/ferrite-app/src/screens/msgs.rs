@@ -261,6 +261,26 @@ impl Compose {
     }
 }
 
+impl Compose {
+    /// What compose shows, for the UI readback (LINK-19): the recipient, the count against the 67 (TEXT-5), the
+    /// message as drawn (the word being predicted in it), and which field has the cursor (0 to, 1 text).
+    pub(crate) fn shown(self, app: &App, store: &impl ChannelStore) -> (Buf<16>, Buf<12>, Buf<84>, u8) {
+        let me = self.resolved(store);
+        let d = store.data().draft();
+        let keys = app.text;
+        let head = text_of(store, me);
+        let full = full_of(store, me);
+        let (word, _, drop) = if app.set.predictive && !keys.is_empty() { pending(keys.as_bytes(), head.as_bytes(), me) } else { (Buf::new(), true, 0) };
+        let mut c = Buf::<12>::new();
+        let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX);
+        let mut all = Buf::<84>::from(&head.as_bytes()[..head.len() - drop]);
+        all.push(word.as_bytes());
+        all.push(&full.as_bytes()[head.len().min(full.len())..]);
+        let to = if me.quick_edit_on() { Buf::new() } else { Buf::from(d.to.as_bytes()) };
+        (to, c, all, me.field)
+    }
+}
+
 /// Quick message `i` (TEXT-7): the owner's, kept with the APRS store, or the factory text.
 pub(crate) fn quick_text(store: &impl ChannelStore, i: usize) -> Buf<67> {
     store.data().quick(i).unwrap_or_else(|| Buf::from(crate::words::quick(i)))

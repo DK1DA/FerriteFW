@@ -418,6 +418,110 @@ impl Hf {
     }
 }
 
+/// The options page's values (HF-14), as drawn and read back.
+fn option_values(h: &HfMem) -> [Buf<24>; 6] {
+    let mut vals = [Buf::<24>::new(); 6];
+    vals[0].set(STEP_NAMES[h.rx()][h.step as usize % 4].as_bytes());
+    vals[1].set(h.bw_text().as_bytes());
+    agc_text(h.agc, &mut vals[2]);
+    vals[3].set(ON_OFF[h.lna as usize].as_bytes());
+    if h.ssb() {
+        let _ = uwrite!(vals[4], "{}{} Hz", if h.bfo > 0 { "+" } else { "" }, h.bfo);
+    } else {
+        vals[4].set(b"SSB only");
+    }
+    let n = h.recent.iter().filter(|&&r| r != 0).count();
+    let _ = uwrite!(vals[5], "{} >", n);
+    vals
+}
+
+/// The signal under the meter (HF-15): the S-meter on chip 1, the SNR on the SI4732.
+fn signal_text(chip1: bool, rssi: i16, snr: u8) -> Buf<24> {
+    let mut t = Buf::<24>::new();
+    if chip1 {
+        t.set(w::s_text(rssi).as_bytes());
+    } else {
+        let _ = uwrite!(t, "SNR {} dB", snr);
+    }
+    t
+}
+
+/// What HF mode shows (HF-15), for the UI readback (LINK-19): the same values its `render` draws.
+pub(crate) struct Shown {
+    pub loading: Option<u8>,
+    pub menu: Option<(u8, [Buf<24>; 6])>,
+    pub band: &'static str,
+    pub rx: &'static str,
+    pub mode: &'static str,
+    pub step: &'static str,
+    pub bw: &'static str,
+    pub bfo: Buf<16>,
+    pub signal: Buf<24>,
+    pub entry: Buf<24>,
+    pub tx: bool,
+    pub seeking: bool,
+}
+
+/// The options' names, for the readback's rows.
+pub(crate) fn option_names() -> impl Iterator<Item = &'static str> {
+    OPTIONS.iter().map(|o| o.0)
+}
+
+impl Hf {
+    /// The typed frequency as the screen shows it ("Go to 7074 kHz"), empty when nothing is typed.
+    fn entry_text(self, app: &App) -> Buf<24> {
+        let mut ent = Buf::<24>::new();
+        if self.n > 0 {
+            let mut digits = [0u8; 10];
+            let mut v = app.radio.hf_entry;
+            let mut k = self.n as usize;
+            while k > 0 {
+                k -= 1;
+                digits[k] = b'0' + (v % 10) as u8;
+                v /= 10;
+            }
+            let n = self.n as usize;
+            let int = if self.point > 0 { n + 1 - self.point as usize } else { n };
+            ent.push(b"Go to ");
+            ent.push(&digits[..int]);
+            if self.point > 0 {
+                ent.push(b".");
+                ent.push(&digits[int..n]);
+            }
+            ent.push(if self.point > 0 { b" MHz" } else { b" kHz" });
+        }
+        ent
+    }
+
+    /// The screen's values (HF-15) for the readback.
+    pub(crate) fn shown(self, app: &App, live: &LiveAll) -> Shown {
+        let h = app.set.hf;
+        let pct = loading(live);
+        let (rssi, snr) = match live.mode {
+            ModeLive::Hf { rssi, snr, .. } => (rssi, snr),
+            _ => (-127, 0),
+        };
+        let mut bfo = Buf::<16>::new();
+        if h.ssb() {
+            let _ = uwrite!(bfo, "BFO {}{}", if h.bfo > 0 { "+" } else { "" }, h.bfo);
+        }
+        Shown {
+            loading: (!self.loaded && app.radio.ssb_patch && pct < 100).then_some(pct),
+            menu: self.menu.then(|| (self.row, option_values(&h))),
+            band: h.band().map_or("", |b| BANDS[b].0),
+            rx: if h.chip1() { "CHIP 1" } else { "SI4732" },
+            mode: mode_name(h.mode),
+            step: STEP_NAMES[h.rx()][h.step as usize % 4],
+            bw: h.bw_text(),
+            bfo,
+            signal: signal_text(h.chip1(), rssi, snr),
+            entry: self.entry_text(app),
+            tx: h.can_tx(),
+            seeking: app.radio.hf_seeking,
+        }
+    }
+}
+
 impl View for Hf {
     /// KEY-19: ◀▶ step the HF band (and the option on its menu).
     fn own_arrows(self) -> bool {
@@ -607,18 +711,7 @@ impl View for Hf {
         let h = app.set.hf;
         let rx = h.rx();
         if self.menu {
-            let mut vals = [Buf::<24>::new(); 6];
-            vals[0].set(STEP_NAMES[rx][h.step as usize % 4].as_bytes());
-            vals[1].set(h.bw_text().as_bytes());
-            agc_text(h.agc, &mut vals[2]);
-            vals[3].set(ON_OFF[h.lna as usize].as_bytes());
-            if h.ssb() {
-                let _ = uwrite!(vals[4], "{}{} Hz", if h.bfo > 0 { "+" } else { "" }, h.bfo);
-            } else {
-                vals[4].set(b"SSB only");
-            }
-            let n = h.recent.iter().filter(|&&r| r != 0).count();
-            let _ = uwrite!(vals[5], "{} >", n);
+            let vals = option_values(&h);
             for (i, ((name, _), v)) in OPTIONS.iter().zip(&vals).enumerate() {
                 let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: i as u8 == self.row, grey: i == 4 && !h.ssb() };
                 app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
@@ -659,37 +752,13 @@ impl View for Hf {
         // dBuV = dBm + 107; the bar spans 0-70 dBuV.
         let lit = ((rssi + 107).clamp(0, 70) as u32 * w::METER_SEGS as u32 / 70) as u8;
         if app.dirty(R_SUB, hash(&(rssi, snr, chip1))) {
-            let mut t = Buf::<24>::new();
-            if chip1 {
-                t.set(w::s_text(rssi).as_bytes());
-            } else {
-                let _ = uwrite!(t, "SNR {} dB", snr);
-            }
+            let t = signal_text(chip1, rssi, snr);
             w::meter(lcd, 12, 140, None, lit, GREEN, BG);
             w::field(lcd, 214, 18, 132, 150, 146, Align::Right, b"", &UI_12, TEXT, BG);
             w::field(lcd, 12, 220, 152, 170, 166, Align::Left, t.as_bytes(), &UI_12, SUB, BG);
         }
         // Typing a frequency.
-        let mut ent = Buf::<24>::new();
-        if self.n > 0 {
-            let mut digits = [0u8; 10];
-            let mut v = app.radio.hf_entry;
-            let mut k = self.n as usize;
-            while k > 0 {
-                k -= 1;
-                digits[k] = b'0' + (v % 10) as u8;
-                v /= 10;
-            }
-            let n = self.n as usize;
-            let int = if self.point > 0 { n + 1 - self.point as usize } else { n };
-            ent.push(b"Go to ");
-            ent.push(&digits[..int]);
-            if self.point > 0 {
-                ent.push(b".");
-                ent.push(&digits[int..n]);
-            }
-            ent.push(if self.point > 0 { b" MHz" } else { b" kHz" });
-        }
+        let ent = self.entry_text(app);
         if app.dirty(R_NOTE, hash(&ent)) {
             w::field(lcd, 12, 220, 178, 196, 192, Align::Left, ent.as_bytes(), &UI_12B, AMBER, BG);
         }

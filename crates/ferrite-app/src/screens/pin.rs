@@ -98,6 +98,35 @@ impl Pin {
     }
 
     /// Seconds still to wait (PIN-3).
+    /// The line under the boxes (PIN-3): the wait after three wrong PINs, or the attempts left; amber once one
+    /// was wrong.
+    fn note(self, app: &App) -> (Buf<32>, bool) {
+        let wait = self.waiting(app);
+        let mut line = Buf::<32>::new();
+        if wait > 0 {
+            let _ = uwrite!(line, "Wait {} s", wait);
+            return (line, true);
+        }
+        if !self.new_pin() {
+            let left = TRIES - app.set.pin_misses;
+            let _ = uwrite!(line, "{} attempt{} left", left, if left == 1 { "" } else { "s" });
+            return (line, left < TRIES);
+        }
+        (line, false)
+    }
+
+    /// What the screen shows, for the UI readback (LINK-19): the heading, how many digits are typed (never the
+    /// digits), and the line under them.
+    pub(crate) fn shown(self, app: &App) -> (&'static str, u8, Buf<32>) {
+        let head = match self.purpose {
+            AGAIN.. => "New PIN again",
+            SET.. => "New PIN",
+            CHANGE | OFF => "Current PIN",
+            _ => "Enter PIN",
+        };
+        (head, self.n, self.note(app).0)
+    }
+
     fn waiting(self, app: &App) -> u16 {
         if app.set.pin_wait == 0 {
             return 0;
@@ -336,19 +365,8 @@ impl View for Pin {
                 });
             }
         }
-        let wait = self.waiting(app);
-        let mut line = Buf::<32>::new();
-        let mut c = SUB;
-        if wait > 0 {
-            let _ = uwrite!(line, "Wait {} s", wait);
-            c = AMBER;
-        } else if !set {
-            let left = TRIES - app.set.pin_misses;
-            let _ = uwrite!(line, "{} attempt{} left", left, if left == 1 { "" } else { "s" });
-            if left < TRIES {
-                c = AMBER;
-            }
-        }
+        let (line, amber) = self.note(app);
+        let c = if amber { AMBER } else { SUB };
         if app.dirty(R_NOTE, hash(&(line, c))) {
             w::field(lcd, 10, 220, 156, 174, 170, Align::Center, line.as_bytes(), &UI_12, c, BG);
         }

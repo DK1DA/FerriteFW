@@ -252,7 +252,7 @@ pub fn short(r: Refusal) -> &'static str {
 }
 
 /// The screen and menu path that fix a refusal (TX-20), if one does.
-fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
+pub(crate) fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
     match r {
         Refusal::OutOfBand if app.set.region().is_none() => Some(("MENU 0 9 4", "Region", Dest::Group(9))),
         Refusal::OutOfBand => Some(("MENU 0 8 9", "Extend TX", Dest::Group(8))),

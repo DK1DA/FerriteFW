@@ -178,11 +178,7 @@ impl View for Fm {
         };
         let f = app.fm_freq();
         // BCR-27: the slot playing it, when one does.
-        let mut title = Buf::<24>::new();
-        title.set(b"FM broadcast");
-        if let Some(s) = app.bcast_slot() {
-            let _ = uwrite!(title, " \u{b7} slot {}", w::LETTERS[s as usize % 3] as char);
-        }
+        let title = title_text(app);
         if app.dirty(R_FREQ, hash(&(f, stereo, title))) {
             w::field(lcd, 10, 150, 24, 42, 38, Align::Left, title.as_bytes(), &UI_12, SUB, BG);
             ferrite_ui::canvas::banded(lcd, 160, 24, 72, 18, BG, |lcd| {
@@ -203,15 +199,7 @@ impl View for Fm {
         // when there is no radio text; and the preset this frequency is stored in. Without RDS, no empty box.
         let text = rds_text(&ps, &rt);
         let is_rt = !crate::bcast::trim(&rt).is_empty();
-        let data = cx.store.data();
-        let mut pre = Buf::<24>::new();
-        if let Some(i) = (0..super::recall::FM_PLACES as u8).find(|&i| data.fm_preset(i).is_some_and(|p| p.freq == f)) {
-            let _ = uwrite!(pre, "Preset {}", i + 1);
-            if let Some(p) = data.fm_preset(i).filter(|p| !p.name.is_empty()) {
-                pre.push(" \u{b7} ".as_bytes());
-                pre.push(p.name.as_bytes());
-            }
-        }
+        let pre = preset_text(cx.store.data(), f);
         if app.dirty(R_INFO, hash(&(text, pre))) {
             ferrite_ui::canvas::banded(lcd, 0, 108, 240, 80, BG, |lcd| {
                 if text.is_empty() {
@@ -238,18 +226,8 @@ impl View for Fm {
             w::meter(lcd, 20, 216, None, lit, GREEN, BG);
         }
         // Radio monitor (BCR-4): which slots still watch, and whether one is interrupting now.
-        let heard = app.rx_mask & (app.watch_mask() | 1 << app.active);
-        let mut m = Buf::<40>::new();
-        let mut c = SUB;
-        if !app.set.fm_monitor {
-            m.set(b"Monitor off: slots not heard");
-        } else if heard != 0 {
-            let s = heard.trailing_zeros() as usize;
-            let _ = uwrite!(m, "Slot {} heard: broadcast paused", w::LETTERS[s % 3] as char);
-            c = AMBER;
-        } else {
-            m.set(b"Monitor: the slots keep watching");
-        }
+        let (m, paused) = monitor_text(app);
+        let c = if paused { AMBER } else { SUB };
         if app.dirty(R_NOTE, hash(&(m, c))) {
             w::field(lcd, 10, 220, 238, 256, 252, Align::Center, m.as_bytes(), &UI_12, c, BG);
         }
@@ -260,6 +238,79 @@ impl View for Fm {
             Hints::new(&[("Knob", "Change"), ("0", "Full menu"), ("BACK", "Back")])
         } else {
             Hints::new(&[(ARROWS_LR, "Seek"), ("OK", "Presets"), ("BACK", "Back")]) // hold MENU: options, as everywhere
+        }
+    }
+}
+
+/// The screen's title line (BCR-27): "FM broadcast", with the slot playing it when one does.
+fn title_text(app: &App) -> Buf<24> {
+    let mut title = Buf::<24>::new();
+    title.set(b"FM broadcast");
+    if let Some(s) = app.bcast_slot() {
+        let _ = uwrite!(title, " \u{b7} slot {}", w::LETTERS[s as usize % 3] as char);
+    }
+    title
+}
+
+/// The preset this frequency is stored in ("Preset 3 · CBC"), or nothing.
+fn preset_text(data: &dyn crate::data::Data, f: u16) -> Buf<24> {
+    let mut pre = Buf::<24>::new();
+    if let Some(i) = (0..super::recall::FM_PLACES as u8).find(|&i| data.fm_preset(i).is_some_and(|p| p.freq == f)) {
+        let _ = uwrite!(pre, "Preset {}", i + 1);
+        if let Some(p) = data.fm_preset(i).filter(|p| !p.name.is_empty()) {
+            pre.push(" \u{b7} ".as_bytes());
+            pre.push(p.name.as_bytes());
+        }
+    }
+    pre
+}
+
+/// Radio monitor's line (BCR-4), and whether a slot heard has paused the broadcast.
+fn monitor_text(app: &App) -> (Buf<40>, bool) {
+    let heard = app.rx_mask & (app.watch_mask() | 1 << app.active);
+    let mut m = Buf::<40>::new();
+    if !app.set.fm_monitor {
+        m.set(b"Monitor off: slots not heard");
+    } else if heard != 0 {
+        let s = heard.trailing_zeros() as usize;
+        let _ = uwrite!(m, "Slot {} heard: broadcast paused", w::LETTERS[s % 3] as char);
+        return (m, true);
+    } else {
+        m.set(b"Monitor: the slots keep watching");
+    }
+    (m, false)
+}
+
+/// What the FM screen shows (BCR-2, BCR-26, BCR-27, BCR-4), for the UI readback (LINK-19).
+pub(crate) struct Shown {
+    pub title: Buf<24>,
+    pub freq: Buf<8>,
+    pub stereo: bool,
+    pub dbuv: u8,
+    pub snr: u8,
+    pub rds: Buf<64>,
+    pub preset: Buf<24>,
+    pub monitor: Buf<40>,
+}
+
+impl Fm {
+    pub(crate) fn shown(app: &App, data: &dyn crate::data::Data, live: &LiveAll) -> Shown {
+        let (ps, rt, rssi, snr, stereo) = match live.mode {
+            ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if app.radio.fm_on => (ps, rt, rssi, snr, stereo),
+            _ => ([b' '; 8], [0; 64], 0, 0, false),
+        };
+        let f = app.fm_freq();
+        let mut freq = Buf::<8>::new();
+        fm_mhz(f, &mut freq);
+        Shown {
+            title: title_text(app),
+            freq,
+            stereo,
+            dbuv: rssi,
+            snr,
+            rds: Buf::from(rds_text(&ps, &rt)),
+            preset: preset_text(data, f),
+            monitor: monitor_text(app).0,
         }
     }
 }

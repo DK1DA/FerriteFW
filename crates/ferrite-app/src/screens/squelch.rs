@@ -33,6 +33,20 @@ pub fn step(app: &mut App, d: i32) {
     }
 }
 
+impl Squelch {
+    /// SQL-12's line: the noise floor, and the signal above it while the squelch is open (empty until read).
+    pub(crate) fn floor_text(self, rssi: i16, open: bool) -> Buf<40> {
+        let mut fl = Buf::<40>::new();
+        if self.floor != 0 {
+            let _ = ufmt::uwrite!(fl, "Noise floor {} dBm", self.floor);
+            if open && rssi > self.floor {
+                let _ = ufmt::uwrite!(fl, ", signal +{} dB", rssi - self.floor);
+            }
+        }
+        fl
+    }
+}
+
 impl View for Squelch {
     fn name(self) -> &'static str {
         "Squelch"
@@ -89,13 +103,7 @@ impl View for Squelch {
             w::meter(lcd, 20, 204, None, lit, if lv.squelch_open { GREEN } else { DIM }, BG);
         }
         // SQL-12: the floor and how far the signal is above it
-        let mut fl = Buf::<40>::new();
-        if self.floor != 0 {
-            let _ = ufmt::uwrite!(fl, "Noise floor {} dBm", self.floor);
-            if lv.squelch_open && lv.rssi > self.floor {
-                let _ = ufmt::uwrite!(fl, ", signal +{} dB", lv.rssi - self.floor);
-            }
-        }
+        let fl = self.floor_text(lv.rssi, lv.squelch_open);
         if app.dirty(4, hash(&fl)) {
             w::field(lcd, 8, 224, 216, 234, 229, Align::Left, fl.as_bytes(), &UI_12, SUB, BG);
         }

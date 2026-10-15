@@ -439,43 +439,12 @@ impl View for Setup {
                 }
             }
             Ask::Summary => {
-                let s = *app.set;
-                let mut tz = Buf::<16>::new();
-                s.tz_text(&mut tz);
-                if s.clock_gps {
-                    tz.push(b", from GPS");
-                }
-                let mut home = Buf::<32>::new();
-                let _ = uwrite!(home, "{} \u{b7} {}", LAYOUTS[s.layout as usize % 3], THEMES[s.theme as usize % 3]);
-                let mut bs = Buf::<16>::new();
-                app.item_text(Item::BatterySave, true, &mut bs);
-                let mut ch = Buf::<16>::new();
                 let n = cx.store.count();
-                if n == 0 {
-                    ch.set(b"none yet");
-                } else {
-                    let _ = uwrite!(ch, "{}", n);
-                }
-                let call: &[u8] = if s.callsign.is_empty() { b"none" } else { s.callsign.as_bytes() };
-                let rows: [(&str, &[u8]); 7] = [
-                    ("Callsign", call),
-                    ("Region", s.region_name().as_bytes()),
-                    ("Extend TX", ON_OFF[s.extend_tx as usize].as_bytes()),
-                    ("Time zone", tz.as_bytes()),
-                    ("Home", home.as_bytes()),
-                    ("Battery Save", bs.as_bytes()),
-                    ("Channels", ch.as_bytes()),
-                ];
-                for (i, (l, v)) in rows.iter().enumerate() {
+                let (vals, note) = summary(app, n);
+                for (i, (l, v)) in SUMMARY.iter().zip(&vals).enumerate() {
                     let c = if i == 6 && n == 0 { SUB } else { TEXT };
-                    app.kv(lcd, i, 53 + 24 * i as i32, 24, &w::KV_STATUS, l.as_bytes(), v, c, false);
+                    app.kv(lcd, i, 53 + 24 * i as i32, 24, &w::KV_STATUS, l.as_bytes(), v.as_bytes(), c, false);
                 }
-                // SETUP-10: the transmit state, no channels yet and how to add them.
-                let mut note = Buf::<160>::new();
-                if s.callsign.is_empty() {
-                    note.push(b"No callsign: automatic transmissions stay off. ");
-                }
-                note.push(b"Add channels with hold 9 on a VFO, or load them with the web app. Run setup again: MENU 0 9 8 1.");
                 if app.dirty(R_HELP, hash(&note)) {
                     w::wrap(lcd, 10, 220, 222, 299, 236, 15, note.as_bytes(), &UI_12, SUB, BG);
                 }
@@ -491,6 +460,93 @@ impl View for Setup {
         } else {
             Hints::new(&[("OK", "Next"), ("BACK", "Previous"), ("#", "Skip")])
         }
+    }
+}
+
+/// The summary's rows (SETUP-10).
+const SUMMARY: [&str; 7] = ["Callsign", "Region", "Extend TX", "Time zone", "Home", "Battery Save", "Channels"];
+
+/// The summary's values and its note (SETUP-10: the transmit state, no channels yet and how to add them), with
+/// `n` channels stored.
+fn summary(app: &App, n: u16) -> ([Buf<32>; 7], Buf<160>) {
+    let s = *app.set;
+    let mut v = [Buf::<32>::new(); 7];
+    v[0].set(if s.callsign.is_empty() { b"none".as_slice() } else { s.callsign.as_bytes() });
+    v[1].set(s.region_name().as_bytes());
+    v[2].set(ON_OFF[s.extend_tx as usize].as_bytes());
+    let mut tz = Buf::<16>::new();
+    s.tz_text(&mut tz);
+    v[3].set(tz.as_bytes());
+    if s.clock_gps {
+        v[3].push(b", from GPS");
+    }
+    let _ = uwrite!(v[4], "{} \u{b7} {}", LAYOUTS[s.layout as usize % 3], THEMES[s.theme as usize % 3]);
+    let mut bs = Buf::<16>::new();
+    app.item_text(Item::BatterySave, true, &mut bs);
+    v[5].set(bs.as_bytes());
+    if n == 0 {
+        v[6].set(b"none yet");
+    } else {
+        let _ = uwrite!(v[6], "{}", n);
+    }
+    let mut note = Buf::<160>::new();
+    if s.callsign.is_empty() {
+        note.push(b"No callsign: automatic transmissions stay off. ");
+    }
+    note.push(b"Add channels with hold 9 on a VFO, or load them with the web app. Run setup again: MENU 0 9 8 1.");
+    (v, note)
+}
+
+/// A row of a setup page for the readback: name, value, focused.
+pub(crate) type RowOut<'a> = &'a mut dyn FnMut(&[u8], &[u8], bool);
+
+impl Setup {
+    /// What the page shows, for the UI readback (LINK-19): its heading, then each choice or field as a row
+    /// (name, value, focused) through `row`, and the summary's note; `n` channels stored. Returns the page (1-8),
+    /// how many pages, the heading and the note.
+    pub(crate) fn shown(self, app: &App, n: u16, row: RowOut) -> (u8, u8, &'static str, Buf<160>) {
+        let mut note = Buf::<160>::new();
+        match self.ask() {
+            Ask::Nothing => {}
+            Ask::Callsign => row(b"Callsign", app.set.callsign.as_bytes(), true),
+            Ask::Region => {
+                for i in 0..REGION_ROWS {
+                    row(REGION_LIST[i as usize].as_bytes(), if app.set.region == i + 1 { b"chosen" } else { b"" }, self.row == i);
+                }
+                row(b"Extend TX", ON_OFF[app.set.extend_tx as usize].as_bytes(), self.row == REGION_ROWS);
+            }
+            Ask::Owner => {
+                for (i, name) in OWNER.iter().enumerate() {
+                    row(name.as_bytes(), app.set.owner[i].as_bytes(), self.row as usize == i);
+                }
+            }
+            Ask::Time => {
+                let st = *app.set;
+                let mut tz = Buf::<16>::new();
+                st.tz_text(&mut tz);
+                let vals: [&[u8]; 3] = [tz.as_bytes(), CLOCKS[st.clock as usize % 2].as_bytes(), UNITS[st.units as usize % 3].as_bytes()];
+                for (i, (name, v)) in ["Time zone", "Clock", "Units"].iter().zip(vals).enumerate() {
+                    row(name.as_bytes(), v, self.row as usize == i);
+                }
+            }
+            Ask::Look => {
+                row(b"Home", LAYOUTS[app.set.layout as usize % 3].as_bytes(), self.row == 0);
+                row(b"Theme", THEMES[app.set.theme as usize % 3].as_bytes(), self.row == 1);
+            }
+            Ask::BatterySave => {
+                for (i, (name, on, _)) in SAVE.iter().enumerate() {
+                    row(name.as_bytes(), if app.bsave as usize == i { b"chosen" } else { on.as_bytes() }, self.row as usize == i);
+                }
+            }
+            Ask::Summary => {
+                let (vals, n2) = summary(app, n);
+                for (l, v) in SUMMARY.iter().zip(&vals) {
+                    row(l.as_bytes(), v.as_bytes(), false);
+                }
+                note = n2;
+            }
+        }
+        (self.page + 1, PAGES.len() as u8, PAGES[self.page as usize].0, note)
     }
 }
 

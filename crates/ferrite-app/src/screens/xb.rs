@@ -504,6 +504,19 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
     }
     strip(app, lcd, 6, x, c.side1, c.side2, passing);
     // Four cells, each always in its place (XB-17): passes, duty, next ID, last pass ("now" while passing).
+    let v = cells(&c, x);
+    let cells = CELLS.iter().zip(v.iter().map(|b| b.as_bytes()));
+    for (i, (l, val)) in cells.enumerate() {
+        let (col, row) = (i as i32 % 2, i as i32 / 2);
+        app.grid_cell(lcd, 7 + i, 6 + col * 116, 210 + row * 34, 112, 30, l, val, false, false);
+    }
+}
+
+/// The running page's four cells (XB-17): their labels, then their values from the repeater's report.
+pub(crate) const CELLS: [&[u8]; 4] = [b"Passes", b"Duty, 10 min", b"Next ID", b"Last pass"];
+
+pub(crate) fn cells(c: &XbCfg, x: &XbLive) -> [Buf<16>; 4] {
+    let passing = matches!(x.state, 1 | 2);
     let mut v = [Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new()];
     let _ = uwrite!(v[0], "{} \u{b7} {} min", x.passes, x.busy_s / 60);
     let _ = uwrite!(v[1], "{}% of {}%", x.duty, DUTY_LIMIT);
@@ -522,12 +535,26 @@ fn render_running(app: &mut App, lcd: &mut impl Panel, x: &XbLive) {
     } else {
         v[3].set(b"none yet");
     }
-    let labels: [&[u8]; 4] = [b"Passes", b"Duty, 10 min", b"Next ID", b"Last pass"];
-    let cells = labels.iter().zip(v.iter().map(|b| b.as_bytes()));
-    for (i, (l, val)) in cells.enumerate() {
-        let (col, row) = (i as i32 % 2, i as i32 / 2);
-        app.grid_cell(lcd, 7 + i, 6 + col * 116, 210 + row * 34, 112, 30, l, val, false, false);
+    v
+}
+
+/// The start page for the readback (LINK-19): each side's slot, the grid's six settings and XB-2's four checks
+/// (0 ok, 1 warning, 2 fails), as drawn.
+pub(crate) fn start_shown(app: &App, batt: u8) -> ([u8; 2], [Buf<16>; 6], [(u8, Buf<40>); 4]) {
+    let c = app.set.xb;
+    let mut grid = [Buf::<16>::new(); 6];
+    for (i, v) in grid.iter_mut().enumerate() {
+        grid_value(&c, i, v);
     }
+    let mut out = [(Check::Ok, Buf::new()); 4];
+    checks(app, batt, &mut out);
+    let checks = out.map(|(k, t)| (k as u8, t));
+    ([c.side1, c.side2], grid, checks)
+}
+
+/// The grid's labels.
+pub(crate) fn grid_names() -> &'static [&'static str; 6] {
+    &GRID
 }
 
 /// "A → B" with a drawn arrow; returns its width.

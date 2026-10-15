@@ -56,21 +56,33 @@ pub(crate) fn card_kind(app: &App, s: u8) -> u8 {
 /// BCR-26: a slot in the broadcast band: the frequency with the stereo pilot and SNR, the RDS text (the radio text
 /// whole, wrapped on the large card; else the station name) and the signal. A slot in the band while another has
 /// the broadcast says where it plays instead (BCR-22).
-fn bcast_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8, y: i32, big: bool) {
+/// A broadcast card's report (BCR-26), as drawn and read back (LINK-19): the stereo pilot, the signal (dBuV) and
+/// SNR while this slot plays, the RDS text (or, while another slot has the broadcast, where it plays), whether
+/// that is radio text, and whether it is that note.
+pub(crate) fn bcast_shown(app: &App, live: &LiveAll, s: u8) -> (bool, u8, u8, Buf<64>, bool, bool) {
     use crate::bcast::{rds_text, trim};
-    let p = s as usize;
-    let f = (app.tuned_freq(s) / 1000) as u16;
     let mine = app.bcast_slot() == Some(s);
     let (ps, rt, rssi, snr, stereo) = match live.mode {
         ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if mine && app.radio.fm_on => (ps, rt, rssi, snr, stereo),
         _ => ([b' '; 8], [0; 64], 0, 0, false),
     };
-    let mut note = Buf::<24>::new();
-    if let Some(b) = app.bcast_slot().filter(|_| !mine) {
-        let _ = uwrite!(note, "Broadcast plays on {}", w::LETTERS[b as usize % 3] as char);
+    match app.bcast_slot().filter(|_| !mine) {
+        Some(b) => {
+            let mut note = Buf::<64>::new();
+            let _ = uwrite!(note, "Broadcast plays on {}", w::LETTERS[b as usize % 3] as char);
+            (stereo, rssi, snr, note, true, true)
+        }
+        None => (stereo, rssi, snr, Buf::from(rds_text(&ps, &rt)), !trim(&rt).is_empty(), false),
     }
-    let (text, is_rt) = if note.is_empty() { (rds_text(&ps, &rt), !trim(&rt).is_empty()) } else { (note.as_bytes(), true) };
-    let tc = if note.is_empty() { TEXT } else { DIM };
+}
+
+fn bcast_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8, y: i32, big: bool) {
+    let p = s as usize;
+    let f = (app.tuned_freq(s) / 1000) as u16;
+    let mine = app.bcast_slot() == Some(s);
+    let (stereo, rssi, snr, shown, is_rt, note) = bcast_shown(app, live, s);
+    let text = shown.as_bytes();
+    let tc = if note { DIM } else { TEXT };
     let mut fb = Buf::<8>::new();
     super::fm::fm_mhz(f, &mut fb);
     let mut snr_t = Buf::<16>::new();

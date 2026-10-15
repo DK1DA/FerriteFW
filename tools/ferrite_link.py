@@ -436,6 +436,8 @@ def parse_ui(text):
             ui[kind] = {"head": pos[0] if pos else "", "body": pos[1] if len(pos) > 1 else ""}
         elif kind == "qmenu":
             ui["qmenu"].append(pos)
+        elif kind == "bcast":
+            ui.setdefault("bcast", {})[pos[0] if pos else ""] = {"rds": pos[1] if len(pos) > 1 else "", **kv}
         elif kind == "pvrow":
             ui.setdefault("pvrows", []).append({"name": pos[0] if pos else "", "place": pos[1] if len(pos) > 1 else "",
                                                 "freq": pos[2] if len(pos) > 2 else ""})

@@ -245,21 +245,9 @@ fn tile(lcd: &mut impl Panel, k: i32, label: &[u8], value: &[u8], c: u16) {
 fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fix>, dev: &Device) {
     let gps = dev.gps;
     let seen = data.sats();
-    let (units, fmt, h12) = (app.set.units, app.set.coord_fmt, app.set.clock == 1);
+    let (units, fmt) = (app.set.units, app.set.coord_fmt);
     // Status line (GPS-15): fix, satellites, accuracy; the fix's age at the right, amber once stale (GPS-2).
-    let mut l = Buf::<40>::new();
-    let mut age = Buf::<12>::new();
-    match (gps, fix) {
-        (GpsState::Off, _) => l.set(b"GPS off"),
-        (_, None) => {
-            let _ = uwrite!(l, "Searching \u{b7} {} in view", seen);
-        }
-        (_, Some(f)) => {
-            let m = ((f.hdop_x10 as u32 * 5 + 5) / 10).max(1);
-            let _ = uwrite!(l, "{} fix \u{b7} {}/{} sats \u{b7} \u{b1}{} m", if f.three_d { "3D" } else { "2D" }, f.used, seen, m);
-            let _ = uwrite!(age, "{} s", f.age_s);
-        }
-    }
+    let (l, age) = status_line(gps, fix, seen);
     let stale = fix.is_some_and(|f| f.age_s > 10);
     if app.dirty(R_TOP, hash(&(l.as_bytes(), age.as_bytes(), stale))) {
         // the age gets just its own width at the right, and the status text is fitted to what is left, so
@@ -291,55 +279,26 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
     // large and the coordinates small under it.
     if app.dirty(R_ROW, hash(&(f.pos, fmt))) {
         ferrite_ui::canvas::banded(lcd, 0, 42, 240, 64, BG, |lcd| {
-            let (mut la, mut lo) = (Buf::<24>::new(), Buf::<24>::new());
+            let (big, small) = position_lines(f, fmt);
             if fmt == 3 {
-                coord(f.pos.lat, "N", "S", 1, &mut la);
-                coord(f.pos.lon, "E", "W", 1, &mut lo);
-                lcd.text4(10, 72, &grid(f.pos), &NAME_26, TEXT, BG);
-                let mut both = Buf::<48>::new();
-                both.push(la.as_bytes());
-                both.push(b"  ");
-                both.push(lo.as_bytes());
-                lcd.text4_rows(10, 98, w::fit(both.as_bytes(), &UI_12, 222), &UI_12, SUB, BG, 84, 104);
+                lcd.text4(10, 72, big.as_bytes(), &NAME_26, TEXT, BG);
+                lcd.text4_rows(10, 98, w::fit(small.as_bytes(), &UI_12, 222), &UI_12, SUB, BG, 84, 104);
             } else {
-                coord(f.pos.lat, "N", "S", fmt, &mut la);
-                coord(f.pos.lon, "E", "W", fmt, &mut lo);
-                lcd.text4_rows(10, 67, w::fit(la.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 42, 74);
-                lcd.text4_rows(10, 97, w::fit(lo.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 74, 106);
+                lcd.text4_rows(10, 67, w::fit(big.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 42, 74);
+                lcd.text4_rows(10, 97, w::fit(small.as_bytes(), &NAME_22, 224), &NAME_22, TEXT, BG, 74, 106);
             }
         });
     }
     // Six tiles (GPS-15, GPS-16, GPS-17).
     let moving = f.speed_kmh >= MOVING_KMH;
-    let clock = dev.clock_min;
-    let tiles: [(&[u8], u8); 6] = [(b"Grid", 0), (b"Altitude", 1), (b"Speed", 2), (b"Course", 3), (b"Local time", 4), (b"UTC", 5)];
-    for (k, (label, what)) in tiles.into_iter().enumerate() {
-        let mut v = Buf::<40>::new();
-        match what {
-            0 => v.set(&grid(f.pos)),
-            1 => alt_u(f.alt_m, units, &mut v),
-            2 => speed_u(f.speed_kmh, units, &mut v),
-            3 if !moving => v.set(b"stopped"),
-            3 => {
-                let _ = uwrite!(v, "{} {}\u{b0}", compass_name(f.heading), f.heading);
-            }
-            // the radio's clock, as the status bar shows it (GPS-7: local time from GPS and the time zone)
-            4 => match clock {
-                Some(m) => hhmm(m as u32 * 60, h12, &mut v),
-                None => v.set(b"--:--"),
-            },
-            _ => {
-                hhmm(f.utc_s, false, &mut v);
-                v.push(b" Z");
-            }
-        }
+    for (k, (label, what)) in TILES.into_iter().enumerate() {
+        let v = tile_value(app, f, dev, what);
         if app.dirty(R_ROW + 1 + k, hash(&(v.as_bytes(), k))) {
             tile(lcd, k as i32, label, v.as_bytes(), if what == 3 && !moving { SUB } else { TEXT });
         }
     }
     // The nearest waypoint (GPS-15): name, distance and bearing, a small arrow.
-    let n = data.waypoints();
-    let near = (0..n).filter_map(|i| data.waypoint(i)).map(|wp| (dist_bearing(f.pos, wp.pos), wp)).min_by_key(|((m, _), _)| *m);
+    let near = nearest(data, f);
     let key = near.map(|((m, d), wp)| (m, d, wp.name));
     if app.dirty(R_NOTE, hash(&(key, units))) {
         let y = NEAR_Y;
@@ -347,9 +306,7 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
             lcd.text4_rows(14, y + 15, b"Nearest waypoint", &UI_12, SUB, BG, y + 1, y + 18);
             match near {
                 Some(((m, deg), wp)) => {
-                    let mut d = Buf::<16>::new();
-                    dist_u(m, units, &mut d);
-                    let _ = uwrite!(d, " {}", compass_name(deg));
+                    let d = near_text(m, deg, units);
                     let dw = text4_width(d.as_bytes(), &UI_12B);
                     // the arrow keeps 6 px from the frame, the distance 8 px from the arrow
                     lcd.text4_rows(14, y + 37, w::fit(wp.name.as_bytes(), &UI_15B, 176 - dw), &UI_15B, TEXT, BG, y + 19, y + 46);
@@ -363,6 +320,111 @@ fn position(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<Fi
             lcd.frame_r(6, y, 228, 47, 2, LINE);
         });
     }
+}
+
+/// The status line (GPS-15) and the fix's age.
+fn status_line(gps: GpsState, fix: Option<Fix>, seen: u8) -> (Buf<40>, Buf<12>) {
+    let mut l = Buf::<40>::new();
+    let mut age = Buf::<12>::new();
+    match (gps, fix) {
+        (GpsState::Off, _) => l.set(b"GPS off"),
+        (_, None) => {
+            let _ = uwrite!(l, "Searching \u{b7} {} in view", seen);
+        }
+        (_, Some(f)) => {
+            let m = ((f.hdop_x10 as u32 * 5 + 5) / 10).max(1);
+            let _ = uwrite!(l, "{} fix \u{b7} {}/{} sats \u{b7} \u{b1}{} m", if f.three_d { "3D" } else { "2D" }, f.used, seen, m);
+            let _ = uwrite!(age, "{} s", f.age_s);
+        }
+    }
+    (l, age)
+}
+
+/// The position large (GPS-15.2), in 0 6 3's format: latitude and longitude; with Grid square the square, and
+/// both coordinates (degrees and minutes) small under it.
+fn position_lines(f: Fix, fmt: u8) -> (Buf<48>, Buf<48>) {
+    let (mut la, mut lo) = (Buf::<24>::new(), Buf::<24>::new());
+    if fmt == 3 {
+        coord(f.pos.lat, "N", "S", 1, &mut la);
+        coord(f.pos.lon, "E", "W", 1, &mut lo);
+        let mut both = Buf::<48>::from(la.as_bytes());
+        both.push(b"  ");
+        both.push(lo.as_bytes());
+        (Buf::from(&grid(f.pos)), both)
+    } else {
+        coord(f.pos.lat, "N", "S", fmt, &mut la);
+        coord(f.pos.lon, "E", "W", fmt, &mut lo);
+        (Buf::from(la.as_bytes()), Buf::from(lo.as_bytes()))
+    }
+}
+
+/// The six tiles (GPS-15.3): label and which.
+const TILES: [(&[u8], u8); 6] = [(b"Grid", 0), (b"Altitude", 1), (b"Speed", 2), (b"Course", 3), (b"Local time", 4), (b"UTC", 5)];
+
+fn tile_value(app: &App, f: Fix, dev: &Device, what: u8) -> Buf<40> {
+    let (units, h12) = (app.set.units, app.set.clock == 1);
+    let mut v = Buf::<40>::new();
+    match what {
+        0 => v.set(&grid(f.pos)),
+        1 => alt_u(f.alt_m, units, &mut v),
+        2 => speed_u(f.speed_kmh, units, &mut v),
+        3 if f.speed_kmh < MOVING_KMH => v.set(b"stopped"),
+        3 => {
+            let _ = uwrite!(v, "{} {}\u{b0}", compass_name(f.heading), f.heading);
+        }
+        // the radio's clock, as the status bar shows it (GPS-7: local time from GPS and the time zone)
+        4 => match dev.clock_min {
+            Some(m) => hhmm(m as u32 * 60, h12, &mut v),
+            None => v.set(b"--:--"),
+        },
+        _ => {
+            hhmm(f.utc_s, false, &mut v);
+            v.push(b" Z");
+        }
+    }
+    v
+}
+
+/// The nearest waypoint (GPS-15.4): its distance and bearing, and the waypoint.
+fn nearest(data: &dyn Data, f: Fix) -> Option<((u32, u16), crate::data::Waypoint)> {
+    (0..data.waypoints()).filter_map(|i| data.waypoint(i)).map(|wp| (dist_bearing(f.pos, wp.pos), wp)).min_by_key(|((m, _), _)| *m)
+}
+
+/// "1.2 km NE".
+fn near_text(m: u32, deg: u16, units: u8) -> Buf<16> {
+    let mut d = Buf::<16>::new();
+    dist_u(m, units, &mut d);
+    let _ = uwrite!(d, " {}", compass_name(deg));
+    d
+}
+
+/// The position page for the UI readback (LINK-19): the status line and age; with a fix the position's two
+/// lines, the six tiles and the nearest waypoint (its name, "1.2 km NE" and the bearing), as drawn.
+pub(crate) struct PosShown {
+    pub status: Buf<40>,
+    pub age: Buf<12>,
+    pub fix: Option<(Buf<48>, Buf<48>, [Buf<40>; 6])>,
+    pub near: Option<(Buf<16>, Buf<16>, u16)>,
+}
+
+pub(crate) fn position_shown(app: &App, data: &dyn Data, dev: &Device) -> PosShown {
+    let fix = data.fix().filter(|_| dev.gps == GpsState::Fix);
+    let (status, age) = status_line(dev.gps, fix, data.sats());
+    let fix_lines = fix.map(|f| {
+        let (a, b) = position_lines(f, app.set.coord_fmt);
+        let mut t = [Buf::<40>::new(); 6];
+        for (i, (_, what)) in TILES.iter().enumerate() {
+            t[i] = tile_value(app, f, dev, *what);
+        }
+        (a, b, t)
+    });
+    let near = fix.and_then(|f| nearest(data, f)).map(|((m, deg), wp)| (Buf::from(wp.name.as_bytes()), near_text(m, deg, app.set.units), deg));
+    PosShown { status, age, fix: fix_lines, near }
+}
+
+/// The tiles' labels.
+pub(crate) fn tile_names() -> impl Iterator<Item = &'static [u8]> {
+    TILES.iter().map(|t| t.0)
 }
 
 // ---- the satellites page (C17, GPS-18) ----

@@ -51,7 +51,7 @@ pub(crate) type InfoRow = (&'static str, Val<()>);
 pub(crate) struct PageDef {
     pub title: &'static str,
     pub rows: &'static [InfoRow],
-    note: &'static str,
+    pub note: &'static str,
     hints: &'static [(&'static str, &'static str)],
 }
 

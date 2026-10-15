@@ -6,14 +6,20 @@
 //! it costs no RAM, and a page of an answer is the next lines. The lines, in this order:
 //!
 //! - `screen ID "Name" title="..."`: the screen (ID is stable: its variant), its name and the status bar's title.
-//! - `state frame=N ago=MS dark=0 locked=0 active=A keyed=- remote=0`: redraws that changed something, the time
-//!   since the last, the backlight off, the key lock, the active slot, the slot transmitting, remote PTT.
+//! - `state frame=N ago=MS dark=0 locked=0 active=A keyed=- remote=0 mode=off fm=0`: redraws that changed
+//!   something, the time since the last, the backlight off, the key lock, the active slot, the slot transmitting,
+//!   remote PTT, the exclusive mode running (MODE-1: off, scope, strip, tone, counter, fm, hf, xb) and whether
+//!   broadcast FM plays.
 //! - `bar lock=0 scan=0 watch=0 inbox=0 alert=0 gps=fix bt=0 battery=80 low=0 clock=14:32`: the status bar.
 //! - `toast "head" "body"` or `popup "head" "body"` while one shows; `qmenu "PTT A" "Reverse" "off"` per row of the
 //!   quick menu while it is up.
-//! - The screen's own lines: home's `card` per slot; a list's `row N "name" "value"` (with `sel`, `dot` changed
-//!   from its default, `grey`), its `help`; an editor's `value`; a question's `ask`; and so on. A screen without
-//!   its own lines yet shows only the rest.
+//! - The screen's own lines: home's `card` per slot (a broadcast card followed by its `bcast` report: the RDS
+//!   text, `stereo`, `dbuv`, `snr`); a list's `row N "name" "value"` (with `sel`, `dot` changed from its default, `grey`), its `help`; an
+//!   editor's `value`; a question's `ask`; the squelch screen's `squelch`; the PIN entry's `pin` (digits as
+//!   stars); FM's `fm`, HF mode's `hf`, the band scope's `scope`, crossband's `xb`
+//!   with its `check`s, setup's `setup`, compose's `compose`, the GPS position page's `gps`, `pos` and `near`
+//!   (their option pages, grids and tiles as rows); and so on. A screen without its own lines yet shows only
+//!   the rest.
 //! - `hints "KEY" "label" ...`: the hint bar's pairs (under a toast, what it will show again).
 //!
 //! Strings are in double quotes, `"` and `\` escaped with `\`; the arrows are `^ v < >`.
@@ -131,6 +137,19 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             None => l.push(b" keyed=-"),
         }
         kn(l, "remote", app.remote_keyed() as u32);
+        use screens::activity::Mode;
+        l.push(b" mode=");
+        l.push(match app.radio.mode {
+            Mode::Off => b"off".as_slice(),
+            Mode::Scope => b"scope",
+            Mode::Strip => b"strip",
+            Mode::Tone => b"tone",
+            Mode::Counter => b"counter",
+            Mode::Fm => b"fm",
+            Mode::Hf => b"hf",
+            Mode::Xb => b"xb",
+        });
+        kn(l, "fm", app.radio.fm_on as u32);
     }
     if let Some(l) = d.ln() {
         let b = app.status_bar(cx.live, cx.dev);
@@ -232,6 +251,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         Screen::Home => {
             for s in 0..SLOTS as u8 {
                 card(app, cx, s, d);
+                bcast_line(app, cx, s, d);
             }
         }
         Screen::Quick(qk) => {
@@ -298,6 +318,9 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 let p = info::def(i.page);
                 let t = screens::table::Table { rows: p.rows, go: &[], y: 0, h: 0, style: w::KV_STATUS };
                 table(app, cx, &t, None, d);
+                if !p.note.is_empty() {
+                    help(d, p.title.as_bytes(), p.note.as_bytes()); // the page's note under its rows
+                }
             }
         }
         Screen::Value(v) => {
@@ -336,6 +359,10 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 l.push(b"refused");
                 slot_word(l, t.slot);
                 kq(l, "why", transmit::short(t.why).as_bytes());
+                if let Some((path, name, _)) = transmit::fix(app, t.why) {
+                    kq(l, "fix", path.as_bytes()); // TX-20: the menu path that fixes it, and what it is
+                    kq(l, "fixes", name.as_bytes());
+                }
             }
         }
         Screen::Transmit(t) => {
@@ -366,7 +393,210 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 q(l, app.text.as_bytes());
             }
         }
+        Screen::Fm(f) if f.menu => {
+            for (i, (name, ..)) in fm::OPTIONS.iter().enumerate() {
+                let mut v = Buf::<24>::new();
+                fm::option_text(app, cx.dev, i as u8, &mut v);
+                row(d, i as u8 + 1, name.as_bytes(), v.as_bytes(), i as u8 == f.row, false, false);
+            }
+            row(d, 0, b"Full menu", b">", false, false, false);
+        }
+        Screen::Fm(_) => {
+            if let Some(l) = d.ln() {
+                let f = fm::Fm::shown(app, cx.store.data(), cx.live);
+                l.push(b"fm freq=");
+                l.push(f.freq.as_bytes());
+                kq(l, "title", f.title.as_bytes());
+                kn(l, "stereo", f.stereo as u32);
+                kn(l, "dbuv", f.dbuv as u32);
+                kn(l, "snr", f.snr as u32);
+                kq(l, "rds", f.rds.as_bytes());
+                kq(l, "preset", f.preset.as_bytes());
+                kq(l, "monitor", f.monitor.as_bytes());
+            }
+        }
+        Screen::Hf(h) => hf_lines(app, cx, h, d),
+        Screen::Pin(p) => {
+            // PIN-2, PIN-3: the heading, a star per digit typed (never the digits), the wait or attempts left
+            if let Some(l) = d.ln() {
+                let (head, n, note) = p.shown(app);
+                l.push(b"pin ");
+                q(l, head.as_bytes());
+                kq(l, "typed", &b"******"[..(n as usize).min(6)]);
+                kq(l, "note", note.as_bytes());
+            }
+        }
+        Screen::Squelch(sq) => {
+            // SQL-7, SQL-12: the level, open or closed, the live signal and the noise floor beside it
+            if let Some(l) = d.ln() {
+                let lv = cx.live.slots[app.active as usize];
+                let _ = uwrite!(l, "squelch level={}", app.sq_level(app.active));
+                kn(l, "open", lv.squelch_open as u32);
+                kq(l, "s", w::s_text(lv.rssi).as_bytes());
+                kq(l, "floor", sq.floor_text(lv.rssi, lv.squelch_open).as_bytes());
+            }
+        }
+        Screen::Scope(sc) => {
+            if let Some(l) = d.ln() {
+                l.push(b"scope centre=");
+                mhz(l, app.radio.centre);
+                kn(l, "step", scope::step_of(app) as u32 * 10);
+                let n = scope::bars_n(app);
+                kn(l, "bars", n as u32);
+                if let ferrite_core::msg::ModeLive::Scope { bars, n: swept, sweeps, .. } = cx.live.mode {
+                    let swept = (swept as usize).min(n);
+                    kn(l, "swept", swept as u32);
+                    kn(l, "blank", bars[..swept].iter().filter(|&&b| b == 0).count() as u32);
+                    kn(l, "sweeps", sweeps as u32);
+                }
+                l.push(b" marker=");
+                mhz(l, scope::bar_freq(app.radio.centre, scope::step_of(app), n, sc.marker as i32));
+                kn(l, "listen", sc.listen as u32);
+            }
+        }
+        Screen::Crossband(c) => xb_lines(app, cx, c, d),
+        Screen::Setup(s) => {
+            let mut rows = [(Buf::<20>::new(), Buf::<32>::new(), false); 10];
+            let mut k = 0;
+            let (page, of, head, note) = s.shown(app, cx.store.count(), &mut |name, v, sel| {
+                if k < rows.len() {
+                    rows[k] = (Buf::from(name), Buf::from(v), sel);
+                    k += 1;
+                }
+            });
+            if let Some(l) = d.ln() {
+                let _ = uwrite!(l, "setup page={} of={}", page, of);
+                kq(l, "head", head.as_bytes());
+            }
+            for (name, v, sel) in &rows[..k] {
+                row(d, 0, name.as_bytes(), v.as_bytes(), *sel, false, false);
+            }
+            if !note.is_empty() {
+                help(d, b"summary", note.as_bytes());
+            }
+        }
+        Screen::Compose(c) => {
+            if let Some(l) = d.ln() {
+                let (to, count, text, field) = c.shown(app, cx.store);
+                l.push(b"compose");
+                kq(l, "to", to.as_bytes());
+                kq(l, "count", count.as_bytes());
+                kq(l, "text", text.as_bytes());
+                kn(l, "field", field as u32);
+            }
+        }
+        Screen::Gps(g) if g.page == gps::Page::Position => {
+            let p = gps::position_shown(app, cx.store.data(), cx.dev);
+            if let Some(l) = d.ln() {
+                l.push(b"gps ");
+                q(l, p.status.as_bytes());
+                kq(l, "age", p.age.as_bytes());
+            }
+            if let Some((a, b, tiles)) = &p.fix {
+                if let Some(l) = d.ln() {
+                    l.push(b"pos ");
+                    q(l, a.as_bytes());
+                    l.push(b" ");
+                    q(l, b.as_bytes());
+                }
+                for (name, v) in gps::tile_names().zip(tiles) {
+                    row(d, 0, name, v.as_bytes(), false, false, false);
+                }
+                if let Some(l) = d.ln() {
+                    l.push(b"near ");
+                    match &p.near {
+                        Some((name, dist, deg)) => {
+                            q(l, name.as_bytes());
+                            l.push(b" ");
+                            q(l, dist.as_bytes());
+                            kn(l, "deg", *deg as u32);
+                        }
+                        None => l.push(b"\"\" \"None: # marks one here\""),
+                    }
+                }
+            }
+        }
         _ => {}
+    }
+}
+
+/// HF mode (HF-15): `hf loading=N` while the SSB patch loads; its options page as rows; else `hf freq=MHz
+/// band="31 m" rx="SI4732" mode="AM" step="5 kHz" bw="6 kHz" bfo="" signal="SNR 12 dB" entry="" tx=0 seek=0`.
+fn hf_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, h: screens::hf::Hf, d: &mut Desc) {
+    let v = h.shown(app, cx.live);
+    if let Some(pct) = v.loading {
+        if let Some(l) = d.ln() {
+            l.push(b"hf");
+            kn(l, "loading", pct as u32);
+        }
+        return;
+    }
+    if let Some((sel, vals)) = &v.menu {
+        for (i, (name, val)) in screens::hf::option_names().zip(vals).enumerate() {
+            row(d, i as u8 + 1, name.as_bytes(), val.as_bytes(), i as u8 == *sel, false, false);
+        }
+        row(d, 0, b"Full menu", b">", false, false, false);
+        return;
+    }
+    if let Some(l) = d.ln() {
+        l.push(b"hf freq=");
+        mhz(l, app.settings().hf.freq);
+        kq(l, "band", v.band.as_bytes());
+        kq(l, "rx", v.rx.as_bytes());
+        kq(l, "mode", v.mode.as_bytes());
+        kq(l, "step", v.step.as_bytes());
+        kq(l, "bw", v.bw.as_bytes());
+        kq(l, "bfo", v.bfo.as_bytes());
+        kq(l, "signal", v.signal.as_bytes());
+        kq(l, "entry", v.entry.as_bytes());
+        kn(l, "tx", v.tx as u32);
+        kn(l, "seek", v.seeking as u32);
+    }
+}
+
+/// The crossband repeater (XB-2, XB-17): `xb running=0 cell=N`, each side (`row 0 "Side 1" "A 145.49500"`), the
+/// grid as rows and XB-2's checks (`check ok|warn|fail "text"`); running, `xb running=1 state=N` and the four
+/// cells as rows.
+fn xb_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, c: screens::xb::Crossband, d: &mut Desc) {
+    use screens::xb;
+    if xb::running(app) {
+        let x = match cx.live.mode {
+            ferrite_core::msg::ModeLive::Xb(x) => x,
+            _ => Default::default(),
+        };
+        if let Some(l) = d.ln() {
+            l.push(b"xb running=1");
+            kn(l, "state", x.state as u32);
+        }
+        let cfg = app.settings().xb;
+        for (name, v) in xb::CELLS.iter().zip(xb::cells(&cfg, &x)) {
+            row(d, 0, name, v.as_bytes(), false, false, false);
+        }
+        return;
+    }
+    let (sides, grid, checks) = xb::start_shown(app, cx.dev.battery_pct);
+    if let Some(l) = d.ln() {
+        l.push(b"xb running=0");
+        kn(l, "cell", c.cell as u32);
+    }
+    for (i, s) in sides.iter().enumerate() {
+        if let Some(l) = d.ln() {
+            let _ = uwrite!(l, "row 0 \"Side {}\" \"{} ", i + 1, letter(*s) as char);
+            mhz(l, app.slot(*s).freq());
+            l.push(b"\"");
+            if c.cell == i as u8 {
+                l.push(b" sel");
+            }
+        }
+    }
+    for (i, (name, v)) in xb::grid_names().iter().zip(&grid).enumerate() {
+        row(d, 0, name.as_bytes(), v.as_bytes(), c.cell as usize == 2 + i, false, false);
+    }
+    for (k, t) in &checks {
+        if let Some(l) = d.ln() {
+            l.push(["check ok ", "check warn ", "check fail "][*k as usize % 3].as_bytes());
+            q(l, t.as_bytes());
+        }
     }
 }
 
@@ -506,6 +736,21 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
         2 => b" kind=broadcast",
         _ => b" kind=slot",
     });
+}
+
+/// A broadcast card's report after its `card` line (BCR-26): `bcast A "RDS text" stereo=1 dbuv=48 snr=24` (the
+/// text empty: "No RDS"; while another slot plays it, where it plays).
+fn bcast_line<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
+    if screens::home::card_kind(app, s) != 2 {
+        return;
+    }
+    let Some(l) = d.ln() else { return };
+    let (stereo, rssi, snr, text, _, _) = screens::home::bcast_shown(app, cx.live, s);
+    let _ = uwrite!(l, "bcast {} ", letter(s) as char);
+    q(l, text.as_bytes());
+    kn(l, "stereo", stereo as u32);
+    kn(l, "dbuv", rssi as u32);
+    kn(l, "snr", snr as u32);
 }
 
 /// The screen's stable id: its [`Screen`] variant.
