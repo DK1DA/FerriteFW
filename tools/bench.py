@@ -51,6 +51,10 @@ checkout's git hash (marked "host"). Each run is compared with the newest earlie
 configuration (run name, frequency, mode); changes beyond the tolerances (config `tolerances`: [glob, abs|rel|exact,
 value], first match wins) are flagged; an `info` tolerance shows the change but never flags it. --config FILE.json overrides any default (see DEFAULTS).
 
+Rules: bench/results.json (uitest's shape) holds each check tagged with the manual rules whose stated numbers it
+measures (rule_tests(): "all" or "part" of a rule); --record puts them (and a --auto run's UI results) into the
+test plan with tools/record_results.py; --rule-results SESSION writes the file for an older session.
+
 Needs numpy and matplotlib (the project's .venv), pyserial for the cable, rtl_sdr for a capture.
 """
 import argparse
@@ -949,6 +953,232 @@ def analyse_timeout(raw, ev, tt):
                      + (f"; the radio said: {ev['unkeyed']}" if ev.get("unkeyed") else ""))
 
 
+# ---- The manual's rules: what each measurement checks (bench/results.json, tools/record_results.py) ----
+#
+# A check is tagged with a rule only where it measures a number or outcome the rule states; "part" marks a rule
+# the check covers only in part (recorded ◐ on a pass), "all" one it covers as the rule states it (✓). The rest of
+# the suite's numbers (REG_40 steps, 4FSK, jitter, carrier offset) are regression numbers with no rule figure: they
+# stay in the run comparison and are not tagged.
+
+END_TONES = [  # TONE-10's list: (slug, [(Hz, ms), ...])
+    ("beep", [(1000, 150)]),
+    ("two-tone-up", [(800, 100), (1200, 100)]),
+    ("two-tone-down", [(1200, 100), (800, 100)]),
+    ("chirp", [(1000, 60), (1250, 60), (1500, 60)]),
+    ("quindar", [(2475, 250)]),
+]
+SUITE_SUBTONES = [67.0, 100.0, 151.4, 250.3]  # TERM-34 section 6, then DCS 023 normal
+RULE_TOL = dict(
+    endtone_hz_frac=0.005,  # the generator's tone, ±0.5 %
+    endtone_ms=15,          # the analysis' edges are 5 ms steps; a tone's swell blurs its start
+    swell_tau_ms=(80, 20),  # TONE-10: time constant about 80 ms
+    swell_t90_ms=(190, 40),  # TONE-10: 90 % at about 190 ms
+    afsk_dev=(3000, 300),   # APRS-14: about 3 kHz (wide)
+    afsk_twist_db=1.0,      # APRS-14: twist -0.2 dB measured; within ±1 dB
+    afsk_half=0.1,          # TERM-34: the 50 % flags at half the 100 % deviation, ±10 %
+    data_flat_db=1.0,       # TERM-33: `data` flat within 1 dB from 250 Hz to 2.5 kHz (against 1 kHz)
+    stock_tone=0.05,        # TONE-19: stock's 0x50A, 1000 Hz 2.43 kHz and 2475 Hz 4.30 kHz, ±5 %
+    ctcss_hz=0.2,
+    ctcss_spread=0.05,      # one calibration byte: every CTCSS at the same deviation, ±5 %
+    keepalive_cut_s=2.4,    # LINK-20: the carrier ends 2 s after the last keepalive, "not 2.4 s and more"
+)
+
+
+def _chk(what, ok, got=""):
+    return dict(what=what, ok=bool(ok), got=got)
+
+
+def _f(v, spec="{:.0f}"):
+    return "-" if v is None else (spec.format(v) if isinstance(v, (int, float)) else str(v))
+
+
+def rule_tests(session, runs):
+    """The rule-tagged checks of one session: session.json's extras (refusals, keepalive, timeout, reboot) and each
+    suite run's metrics. Each: dict(name, rules, scope {rule: part|all}, result, checks, summary, why)."""
+    tests = []
+
+    def add(name, rules, checks, summary, scope="part"):
+        ok = all(c["ok"] for c in checks)
+        bad = [c for c in checks if not c["ok"]]
+        tests.append(dict(name=name, module="bench", rules=list(rules),
+                          scope={r: (scope[r] if isinstance(scope, dict) else scope) for r in rules},
+                          result="pass" if ok and checks else "fail", checks=checks, summary=summary,
+                          why="; ".join(f"{c['what']}: got {c['got']}" for c in bad[:3])))
+
+    ex = session.get("extras") or {}
+    refusal_rules = [  # (expected reason word, test name, rules)
+        ("band plan", "refusal_band_plan", ["TX-1", "SAFE-12"]),
+        ("1.25 m", "refusal_125m", ["TX-10", "SAFE-12"]),
+        ("emergency", "refusal_emergency", ["TX-35", "SAFE-12"]),
+    ]
+    for r in ex.get("refusals") or []:
+        for word, name, rules in refusal_rules:
+            if word in (r.get("expect") or ""):
+                said = r.get("refused") or ""
+                add(name, rules, [_chk(f"remote KEY on {r['mhz']:.3f} MHz refused", not r.get("accepted"),
+                                       said or "keyed"),
+                                  _chk(f"the reason names {word}", word in said, said),
+                                  _chk("no carrier on the SDR", not r.get("carrier"), r.get("carrier"))],
+                    f"{r['mhz']:.3f} MHz refused \"{said.replace('invalid: ', '')}\", no carrier")
+    ka = ex.get("keepalive")
+    if ka:
+        drop = ka.get("drop_s")
+        lim = RULE_TOL["keepalive_cut_s"]
+        add("keepalive_cut", ["LINK-20", "TX-47"],
+            [_chk("keyed and on the SDR", drop is not None, ka.get("text")),
+             _chk(f"carrier ends under {lim} s after the last keepalive (a cut: no 400 ms hold)",
+                  drop is not None and 0 < drop < lim, _f(drop, "{:.2f} s"))],
+            f"carrier ended {_f(drop, '{:.2f}')} s after the last keepalive")
+    tt = ex.get("timeout")
+    if tt:
+        cs = tt.get("carrier_s")
+        add("tx_timeout", ["TX-30", "SAFE-17"],
+            [_chk("carrier about 30 s at the 30 s setting (±1.5 s)", cs is not None and abs(cs - 30.0) <= 1.5,
+                  _f(cs, "{:.2f} s")),
+             _chk("the radio ended it as a timeout", "timeout" in (tt.get("unkeyed") or ""), tt.get("unkeyed"))],
+            f"30 s timeout: carrier {_f(cs, '{:.1f}')} s, \"{(tt.get('unkeyed') or '').replace('invalid: ', '')}\"")
+    rb = session.get("reboot")
+    if rb:
+        add("reboot", ["LINK-24"], [_chk("HELLO again, home, `dump` unchanged", rb.get("ok"), rb.get("text"))],
+            f"REBOOT: {rb.get('text')}")
+
+    for j in runs:
+        m, name, wide = j.get("metrics") or {}, j["run"], j.get("mode") == "fm"
+        if not m.get("markers_found"):
+            add(f"suite@{name}", ["TERM-34"], [_chk("the suite's markers on the SDR", False, m.get("markers_found"))],
+                "no markers", "all")
+            continue
+        d100 = [m.get("afsk.dac100.mark_dev"), m.get("afsk.dac100.space_dev")]
+        d50 = [m.get("afsk.dac50.mark_dev"), m.get("afsk.dac50.space_dev")]
+        sections = {1: "sweep.data.low_hz", 2: "sweep.voice.low_hz", 3: "afsk.dac100.mark_dev",
+                    4: "reg40.0x43C.dev", 5: "tone1k.steady_dev", 6: "ctcss.100.0.hz", 7: "fsk4.symbols"}
+        half = (sum(d50) / sum(d100)) if None not in d100 + d50 and sum(d100) else None
+        add(f"suite@{name}", ["TERM-34"],
+            [_chk("all 7 section markers found", m.get("markers_found") == 7, m.get("markers_found")),
+             _chk("the 1 kHz hold after the last step", m.get("hold") == "yes", m.get("hold")),
+             _chk("every section measured", all(m.get(k) is not None for k in sections.values()),
+                  ", ".join(str(n) for n, k in sections.items() if m.get(k) is None) or "all"),
+             _chk("section 3's 50 % flags at half the 100 % deviation (±10 %)",
+                  half is not None and abs(half - 0.5) <= 0.5 * RULE_TOL["afsk_half"], _f(half, "{:.3f}"))],
+            f"{name}: 7 markers, hold, every section measured; AFSK 50 % at {_f(half, '{:.2f}')} of 100 %", "all")
+        # TERM-33's `data` set-up: flat within 1 dB from 250 Hz to 2.5 kHz (the sweep against its 1 kHz point)
+        c = (j.get("curves") or {}).get("sweep", {}).get("data")
+        if c:
+            pts = [(f, db) for f, db in zip(c["freqs"], c["db"]) if 250 <= f <= 2500 and db is not None]
+            ref = next((db for f, db in zip(c["freqs"], c["db"]) if abs(f - 1000) < 1), None)
+            if pts and ref is not None:
+                worst = max(pts, key=lambda p: abs(p[1] - ref))
+                add(f"data_flat@{name}", ["TERM-33"],
+                    [_chk("`data` sweep within ±1 dB of 1 kHz from 250 Hz to 2.5 kHz",
+                          abs(worst[1] - ref) <= RULE_TOL["data_flat_db"], f"{worst[1] - ref:+.2f} dB at {worst[0]:.0f} Hz")],
+                    f"{name}: `data` {min(p[1] for p in pts) - ref:+.1f} to {max(p[1] for p in pts) - ref:+.1f} dB, 250 Hz-2.5 kHz")
+        # TONE-10: the end tones' frequencies and lengths, and the first tone's swell
+        checks, found = [], []
+        for slug_, steps in END_TONES:
+            for hz, ms in steps:
+                k = f"endtone.{slug_}.{hz}"
+                got_hz, got_ms = m.get(k + ".hz"), m.get(k + ".ms")
+                checks.append(_chk(f"{slug_} {hz} Hz", m.get(k + ".found") == "yes" and got_hz is not None
+                                   and abs(got_hz - hz) <= hz * RULE_TOL["endtone_hz_frac"], _f(got_hz, "{:.1f} Hz")))
+                checks.append(_chk(f"{slug_} {hz} Hz lasts {ms} ms (±{RULE_TOL['endtone_ms']})", got_ms is not None
+                                   and abs(got_ms - ms) <= RULE_TOL["endtone_ms"], _f(got_ms, "{:.0f} ms")))
+                found.append(f"{hz}/{_f(got_ms)}")
+        tau, t90 = m.get("tone1k.tau_ms"), m.get("tone1k.t90_ms")
+        checks.append(_chk("swell time constant about 80 ms", tau is not None
+                           and abs(tau - RULE_TOL["swell_tau_ms"][0]) <= RULE_TOL["swell_tau_ms"][1], _f(tau, "{:.0f} ms")))
+        checks.append(_chk("90 % at about 190 ms", t90 is not None
+                           and abs(t90 - RULE_TOL["swell_t90_ms"][0]) <= RULE_TOL["swell_t90_ms"][1], _f(t90, "{:.0f} ms")))
+        add(f"end_tones@{name}", ["TONE-10"], checks,
+            f"{name}: end tones Hz/ms {' '.join(found)}; swell τ {_f(tau)} ms, 90 % {_f(t90)} ms")
+        if wide:
+            # APRS-14: the beacon's AFSK level (section 3 runs at it), wide FM
+            mean = sum(d100) / 2 if None not in d100 else None
+            tw = m.get("afsk.dac100.twist_db")
+            add(f"afsk_level@{name}", ["APRS-14"],
+                [_chk("AFSK deviation about 3.0 kHz (±0.3)", mean is not None
+                      and abs(mean - RULE_TOL["afsk_dev"][0]) <= RULE_TOL["afsk_dev"][1], _f(mean, "{:.0f} Hz")),
+                 _chk("twist within ±1 dB", tw is not None and abs(tw) <= RULE_TOL["afsk_twist_db"], _f(tw, "{:+.2f} dB"))],
+                f"{name}: AFSK {_f(d100[0])}/{_f(d100[1])} Hz, twist {_f(tw, '{:+.2f}')} dB")
+            # TONE-19's stock figures (the suite's section 5 plays at stock's REG_40 0x50A)
+            a, q = m.get("endtone.beep.1000.dev"), m.get("endtone.quindar.2475.dev")
+            add(f"stock_tone_level@{name}", ["TONE-19"],
+                [_chk("1000 Hz at 0x50A about 2.43 kHz (±5 %)", a is not None and abs(a / 2430 - 1) <= RULE_TOL["stock_tone"], _f(a, "{:.0f} Hz")),
+                 _chk("2475 Hz at 0x50A about 4.30 kHz (±5 %)", q is not None and abs(q / 4300 - 1) <= RULE_TOL["stock_tone"], _f(q, "{:.0f} Hz"))],
+                f"{name}: stock's 0x50A: 1000 Hz {_f(a)} Hz, 2475 Hz {_f(q)} Hz (Ferrite's 0x43C levels not in the suite)")
+        # TONE-1 (generator sub-tones at one calibration deviation) and TONE-20 (D023N goes out normal)
+        hz = {t: m.get(f"ctcss.{t:.1f}.hz") for t in SUITE_SUBTONES}
+        dev = [m.get(f"ctcss.{t:.1f}.dev") for t in SUITE_SUBTONES]
+        spread = (max(dev) / min(dev) - 1) if None not in dev and min(dev) > 0 else None
+        add(f"subtones@{name}", ["TONE-1"],
+            [_chk(f"CTCSS {t} Hz (±{RULE_TOL['ctcss_hz']})", v is not None and abs(v - t) <= RULE_TOL["ctcss_hz"],
+                  _f(v, "{:.2f} Hz")) for t, v in hz.items()]
+            + [_chk("every CTCSS at one deviation (±5 %)", spread is not None and spread <= RULE_TOL["ctcss_spread"],
+                    _f(spread, "{:.1%}")),
+               _chk("DCS on the air", m.get("dcs.code") not in (None, "none"), m.get("dcs.code"))],
+            f"{name}: CTCSS 67.0-250.3 Hz at {_f(dev[1])} Hz, DCS {m.get('dcs.code')} at {_f(m.get('dcs.dev'))} Hz "
+            "(the calibration byte isn't read back)")
+        add(f"dcs_polarity@{name}", ["TONE-20"],
+            [_chk("D023N decodes as 023 normal", m.get("dcs.code") == "023 N", m.get("dcs.code"))],
+            f"{name}: D023N decoded {m.get('dcs.code')} (transmit side only)")
+    return tests
+
+
+def rule_summary(sess_dir):
+    """bench/results.json for a session, in uitest's shape (tool, started, port, sim, build, version, commit, label,
+    counts, rules {rule: result, test, why, scope, note}, tests), from session.json and the <run>.json files."""
+    session = json.load(open(os.path.join(sess_dir, "session.json")))
+    runs = []
+    for r in session.get("runs") or []:
+        p = os.path.join(sess_dir, r + ".json")
+        if os.path.exists(p):
+            runs.append(json.load(open(p)))
+    tests = rule_tests(session, runs)
+    rules = {}
+    for t in tests:
+        for rid in t["rules"]:
+            x = rules.setdefault(rid, dict(result="pass", test=[], why="", scope="all", notes=[]))
+            x["test"].append(t["name"])
+            if t["result"] != "pass":
+                x["result"] = "fail"
+                x["why"] = x["why"] or (f"{t['name'].split('@')[1]}: " if "@" in t["name"] else "") + t["why"]
+            if t["scope"][rid] == "part":
+                x["scope"] = "part"
+            x["notes"].append(t["summary"])
+    for x in rules.values():
+        names = []
+        for n in x["test"]:
+            base = n.split("@")[0]
+            if base not in names:
+                names.append(base)
+        runs_ = [n.split("@")[1] for n in x["test"] if "@" in n]
+        x["test"] = ", ".join(names)
+        x["runs"] = list(dict.fromkeys(runs_))
+        notes = list(dict.fromkeys(x.pop("notes")))
+        # one run's numbers stand for the rest (each run passed or the why says which failed)
+        x["note"] = notes[0] + (f"; the same checks on {', '.join(list(dict.fromkeys(runs_))[1:])}"
+                                if len(runs_) > 1 else "") if runs_ else "; ".join(notes)
+    b = session.get("build") or {}
+    stamp = os.path.basename(os.path.normpath(sess_dir))[:15]
+    port = session.get("port")
+    sim = bool(session.get("sim")) or str(port or "").startswith("tcp:") or port == "fake"
+    commit = session.get("commit") or b.get("host")
+    return dict(tool="bench.py", started=datetime.datetime.strptime(stamp, "%Y%m%d-%H%M%S").isoformat()
+                if re.match(r"\d{8}-\d{6}$", stamp) else None,
+                port=port, sim=sim, source=session.get("source"), build="tx-dry" if session.get("tx_dry") else None,
+                version=b.get("version"), commit=commit, label=b.get("label"),
+                counts={k: sum(1 for t in tests if t["result"] == k) for k in ("pass", "fail")},
+                rules=rules, tests=tests)
+
+
+def write_rule_results(sess_dir):
+    s = rule_summary(sess_dir)
+    d = os.path.join(sess_dir, "bench")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "results.json")
+    json.dump(jsonable(s), open(p, "w"), indent=1, ensure_ascii=False)
+    return p, s
+
+
 # ---- Analysis, storage, the page ----
 
 
@@ -1160,9 +1390,17 @@ def write_session(cfg, sess_dir, session, runs, extras, meta):
     meta = dict(meta, session=session, runs=[j["run"] for j in runs], extras=extras,
                 flagged={j["run"]: [r[0] for r in j.get("comparison", []) if r[5] in ("CHANGED", "missing")] for j in runs})
     json.dump(jsonable(meta), open(os.path.join(sess_dir, "session.json"), "w"), indent=1)
+    write_rule_results(sess_dir)
     page = os.path.join(sess_dir, "summary.html")
     open(page, "w").write(summary_page(session, sess_dir, runs, jsonable(extras), meta))
     return page
+
+
+def record_session(sess_dir, docs):
+    """--record: the session's bench and UI results into the test plan (tools/record_results.py)."""
+    import record_results
+    for line in record_results.record_paths([sess_dir], docs):
+        say(line)
 
 
 def new_session(cfg, label):
@@ -1567,7 +1805,8 @@ def do_bench(cfg, a, radio=None, sdr=None, clock=None):
         session, sess_dir = new_session(cfg, label)
         say(f"session {sess_dir}")
         meta = dict(build=build, source="on air", port=getattr(radio, "spec", "fake"), slot=cfg["slot"],
-                    commit=host_build(), kinds=["rf"])
+                    commit=host_build(), kinds=["rf"],
+                    sim=not isinstance(radio, Radio) or not radio.cable)  # selftest or simulator: never recorded
         try:
             caps, extras = bench.on_air(sess_dir, runs, hello, info, flashed_dry=image)
         except SafetyError as e:
@@ -1928,10 +2167,14 @@ def do_auto(cfg, a):
         bad |= not rb["ok"]
     meta["decision"] = {k: d[k] for k in ("what", "why", "files", "head")}
     json.dump(jsonable(meta), open(os.path.join(sess_dir, "session.json"), "w"), indent=1)
+    if d["rf"] or d["reboot"]:
+        write_rule_results(sess_dir)
     page_meta = dict(meta, ui=ui_summary) if ui_summary else meta
     page = os.path.join(sess_dir, "summary.html")
     open(page, "w").write(summary_page(os.path.basename(sess_dir), sess_dir, runs, jsonable(extras), page_meta))
     say(f"\npage: {page}")
+    if getattr(a, "record", False):
+        record_session(sess_dir, a.docs)
     return 1 if bad else 0
 
 
@@ -2177,6 +2420,11 @@ def main():
     ap.add_argument("--rf", action="store_true", help="with --auto: the SDR suite on tx-dry (+ the UI smoke set)")
     ap.add_argument("--since", metavar="COMMIT", help="with --auto: diff from this commit, not the last runs'")
     ap.add_argument("--diff-files", metavar="A,B,...", help="with --auto: decide as if these files had changed")
+    ap.add_argument("--record", action="store_true", help="after the run: each rule its checks name gets a result "
+                    "row in docs/test-plan/*.md (tools/record_results.py; on-air runs only)")
+    ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
+    ap.add_argument("--rule-results", nargs="+", metavar="SESSION", help="(re)write bench/results.json for saved "
+                    "sessions from their session.json and <run>.json (nothing keyed)")
     a = ap.parse_args()
     cfg = load_cfg(a.config)
     for k in ("port", "slot", "results"):
@@ -2184,6 +2432,12 @@ def main():
             cfg[k] = getattr(a, k)
     if a.selftest:
         sys.exit(0 if (selftest_sim(a) if a.sim else selftest(a)) else 1)
+    if a.rule_results:
+        for d in a.rule_results:
+            p, s = write_rule_results(d)
+            say(f"{p}: " + ", ".join(f"{k} {'pass' if v['result'] == 'pass' else 'FAIL'}"
+                                     + (" (part)" if v["scope"] == "part" else "") for k, v in sorted(s["rules"].items())))
+        return
     if a.auto or a.all or a.ui or a.rf:
         sys.exit(do_auto(cfg, a))
     if a.dry_plan:
@@ -2203,6 +2457,8 @@ def main():
         sys.exit(2)
     except KeyboardInterrupt:
         sys.exit("stopped (unkeyed and restored)")
+    if a.record:
+        record_session(os.path.dirname(page), a.docs)
     bad = any(not j["ok"] for j in out) or any(not all_ok(v) for v in extras.values())
     sys.exit(1 if bad else 0)
 

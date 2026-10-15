@@ -25,9 +25,9 @@ changes a setting that could transmit or take the cable away (uitests/core.py UN
 
 Results: <results>/<date-time>_<build>/ui/results.json (each test: rules, pass/fail/skip, the checks, the readback
 lines it looked at), ui/summary.html. --session DIR puts them under an existing session (bench.py does). With
---record each rule a run covered gets a row in its test-plan entry (date, firmware = build + commit, ✓/✗, a short
-note); entries not covered are never touched. Simulator runs are never recorded into the real test plan: --record
-on the simulator needs --docs pointing at a copy.
+--record each rule a run covered gets a row in its test-plan entry (date, firmware = commit + build, ✓/◐/✗, a short
+note; tools/record_results.py, which replaces the rule's older automated row and never touches rows written by
+hand); entries not covered are never touched. Simulator runs are never recorded.
 """
 import argparse
 import datetime
@@ -548,20 +548,11 @@ def fix_pages(summary):
 # ---- Recording into the test plan ----
 
 
-def record(summary, docs):
+def record(results_json, docs):
+    """--record: tools/record_results.py on this run (a newer automated row replaces older ones; hand rows kept)."""
     sys.path.insert(0, HERE)
-    import testplan
-    date = datetime.date.today().strftime("%b %-d, %Y")
-    fw = f"{summary['commit']} ({summary['build']}{', sim' if summary['sim'] else ''})"
-    rows = []
-    for rid, x in sorted(summary["rules"].items()):
-        if x["result"] == "skip":
-            continue
-        mark = "✓" if x["result"] in ("pass", "xpass") else "✗"
-        note = f"uitest {x['test']}" + (f": {x['why']}" if x["result"] != "pass" and x.get("why") else "")
-        rows.append((rid, date, fw, mark, note))
-    done, missing = testplan.record_results(rows, docs)
-    return done, missing
+    import record_results
+    return record_results.record_paths([results_json], docs)
 
 
 # ---- The simulator ----
@@ -652,8 +643,8 @@ def main(argv=None):
             proc, port = start_sim()
         else:
             port = a.sim
-    if a.record and sim and os.path.realpath(a.docs) == os.path.realpath(os.path.join(ROOT, "docs")):
-        sys.exit("--record on the simulator: give --docs a copy (simulator runs never go into the real test plan)")
+    if a.record and sim:
+        sys.exit("--record on the simulator: simulator runs are never recorded (the test plan holds radio results)")
     sel = select(tests, a, sim)
     try:
         summary = run(a, port, sim, sel)
@@ -694,8 +685,8 @@ def main(argv=None):
             say(f"pages: {len(unchecked)} not checked here (skipped): "
                 + "; ".join(f"{m}.{n} [{', '.join(p) or 'untagged'}]" for m, n, p, _ in unchecked))
     if a.record:
-        done, missing = record(summary, a.docs)
-        say(f"recorded {len(done)} rules into {a.docs}/test-plan" + (f"; no entry for {' '.join(missing)}" if missing else ""))
+        for line in record(os.path.join(d, "results.json"), a.docs):
+            say(line)
     return 0 if not (c["fail"] or c["error"] or summary["left_changed"] or pages_bad) else 1
 
 

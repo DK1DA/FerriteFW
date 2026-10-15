@@ -614,48 +614,7 @@ def write_auto(docs, rules, entries, covered):
     (docs / "test-auto.md").write_text("\n".join(out))
 
 
-# ---- Recording results (tools/uitest.py --record) ----
-
-def record_results(rows, docs=DOCS):
-    """Append result rows to the entries' Results tables in docs/test-plan/*.md: rows are (rule, date, firmware,
-    mark, note). An entry without a Results table gets one; a lone placeholder row (| | | ☐ | |) is replaced.
-    Entries not named in rows are never touched. Returns (rules recorded, rules without an entry)."""
-    docs = pathlib.Path(docs)
-    want = {}
-    for rid, *cells in rows:
-        want.setdefault(rid, []).append("| " + " | ".join(c.replace("|", "\\|") for c in cells) + " |")
-    done = set()
-    for f in sorted((docs / "test-plan").glob("*.md")):
-        lines = f.read_text().split("\n")
-        out, i, changed = [], 0, False
-        while i < len(lines):
-            m = ENTRY.match(lines[i])
-            if not m or m.group(1) not in want:
-                out.append(lines[i])
-                i += 1
-                continue
-            rid = m.group(1)
-            j = i + 1
-            while j < len(lines) and not lines[j].startswith("#"):
-                j += 1
-            body = lines[i:j]
-            while body and not body[-1].strip():
-                body.pop()
-            tail = lines[i + len(body):j]
-            if any(x.startswith("Results:") for x in body):
-                body = [x for x in body if not re.match(r"^\|\s*\|\s*\|\s*☐\s*\|\s*\|\s*$", x)]
-                if not body[-1].startswith("|"):
-                    body += ["| Date | Firmware | Result | Notes |", "| --- | --- | --- | --- |"]
-                body += want[rid]
-            else:
-                body += ["Results:", "| Date | Firmware | Result | Notes |", "| --- | --- | --- | --- |"] + want[rid]
-            out += body + (tail if tail else [""])
-            done.add(rid)
-            changed = True
-            i = j
-        if changed:
-            f.write_text("\n".join(out))
-    return sorted(done), sorted(set(want) - done)
+# Recording radio results into the entries: tools/record_results.py (uitest.py --record, bench.py --record).
 
 
 ID_PAT = None
