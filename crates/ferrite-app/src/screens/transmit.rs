@@ -617,7 +617,7 @@ impl View for TxRefused {
             Refusal::ReceiveOnlyHere => {
                 a.set(b"Receive only here: below 18 MHz, USB, LSB and CW are on the SI4732.");
             }
-            Refusal::Crossband => a.set(b"The crossband repeater is running. BACK on its screen stops it."),
+            Refusal::Crossband => a.set(b"The crossband repeater is running. Any key on its screen stops it."),
             Refusal::Unmeasured125 => {
                 a.set(b"Transmit on 200-300 MHz (1.25 m, 243.0) is locked until its 0.25 W limit is measured on the bench.");
                 more = b"Receive works as usual. (TX-10)";

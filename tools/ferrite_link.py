@@ -49,7 +49,7 @@ once). A PTT pressed on the radio ends the remote transmission (the radio's oper
 `keys` and `knob` (LINK-19) press the keypad, the side keys and the knob as a person would: the same path as the
 keys (long press, lights, wake, lock). Names: MENU (OK), BACK (EXIT), UP, DOWN, LEFT, RIGHT, SLOT (ABC), VM, 0-9,
 STAR (*), HASH (#), SIDE1 (PF1), SIDE2 (PF2); `ui keys` lists them with their stock codes. A key is a short press,
-NAME:long a long one (held 750 ms), NAME:down / NAME:up hold and let go. Never the PTTs: a remote key never transmits.
+NAME:long a long one (held 750 ms), NAME:down / NAME:up hold and let go. Never the PTTs: a remote key never transmits, but for the crossband repeater's # on its start page (XB-20.2).
 `ui` prints what the screen shows (the screen, status bar, home cards or list rows, hints, toast).
 
 As a library (the test runner's):

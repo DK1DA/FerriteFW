@@ -1235,6 +1235,7 @@ pub fn writes(line: &[u8]) -> bool {
     let shows = [&b"ch"[..], b"zone", b"preset"].iter().any(|r| same(c, r)) && rest <= 1 || [&b"home"[..], b"rx", b"txtest"].iter().any(|r| same(c, r)) && rest == 0;
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
+    let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
     let shows = shows || same(c, b"bk") && rest == 1 && line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1).is_some_and(|w| same(w, b"settle"));
     !(reads || shows)
 }
@@ -1275,6 +1276,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         },
         _ if same(c, b"key") => key(app, st, &mut t),
         _ if same(c, b"knob") => knob(app, st, &mut t),
+        _ if same(c, b"xb") => xb(app, &mut t),
         _ if same(c, b"help") || c == b"?" => Ok(Done::List(List::Help)),
         _ if same(c, b"dump") => Ok(Done::Dump),
         _ if same(c, b"gps") => gps(&mut t),
@@ -1353,6 +1355,65 @@ fn knob<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Ms
     match app.remote_knob(if neg { -n } else { n }, now, st) {
         Ok(()) => Ok(Done::Said(msg!("knob {}{}", if neg { "-" } else { "+" }, n as u32))),
         Err(r) => Err(msg!("knob: {}", r.text())),
+    }
+}
+
+// ---- The crossband repeater (XB-20) ----
+
+/// `xb`, `xb start`, `xb stop` (XB-20, decision 161): the crossband repeater's state; started as its # starts it
+/// (XB-2's checks, its screen opened from home if it isn't up); stopped as a key stops it. Who ran it is logged
+/// (XB-20.6: the terminal, or the link's port).
+fn xb(app: &mut App, t: &mut Toks) -> Result<Done, Msg> {
+    use crate::screens::xb;
+    use crate::{Dest, Screen};
+    let by = xb::BY_CMD | app.cmd_by;
+    let sides = |app: &App| {
+        let c = app.set.xb;
+        let mut m = Msg::new();
+        for (i, s) in [c.side1, c.side2].into_iter().enumerate() {
+            put!(m, "{}{} {}", if i == 0 { "" } else { " <-> " }, ["A", "B", "C"][s as usize % 3], Bytes(mhz5(app.slot(s).freq()).as_bytes()));
+        }
+        m
+    };
+    match t.next()? {
+        None => {
+            let m = sides(app);
+            if xb::running(app) {
+                Ok(Done::Said(msg!("Crossband: running, {}, started by {}", Bytes(m.as_bytes()), xb::by_word(app.radio.xb_by))))
+            } else {
+                Ok(Done::Said(msg!("Crossband: off ({})", Bytes(m.as_bytes()))))
+            }
+        }
+        Some(Tok::Word(w)) if same(w, b"start") => {
+            if xb::running(app) {
+                return Err(msg!("xb start: already running; xb stop stops it"));
+            }
+            if app.radio.keyed.is_some() || app.remote_keyed() {
+                return Err(msg!("xb start: transmitting: send it after the unkey"));
+            }
+            if app.screen().modal() {
+                return Err(msg!("xb start: not now: the radio shows {}", app.screen().name()));
+            }
+            if app.set.chan_only {
+                return Err(msg!("xb start: channel-only mode (PIN-5): no repeater"));
+            }
+            if !matches!(app.screen(), Screen::Crossband(_)) {
+                app.go_home(); // XB-20.4: its screen up while it runs, home under it
+                app.open(Dest::Crossband);
+            }
+            match xb::try_start(app, by) {
+                Ok(()) => Ok(Done::Said(msg!("Crossband started: {}", Bytes(sides(app).as_bytes())))),
+                Err(why) => Err(msg!("xb start: can't start: {}", Bytes(why.as_bytes()))),
+            }
+        }
+        Some(Tok::Word(w)) if same(w, b"stop") => {
+            if !xb::running(app) {
+                return Err(msg!("xb stop: the repeater isn't running"));
+            }
+            xb::stop(app, by, xb::XB_CMD);
+            Ok(Done::Said(msg!("Crossband stopped")))
+        }
+        _ => Err(msg!("xb, xb start or xb stop: the crossband repeater")),
     }
 }
 
@@ -1784,7 +1845,7 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
     }
 }
 
-const HELP: [&str; 19] = [
+const HELP: [&str; 20] = [
     "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
     "",
     "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
@@ -1804,6 +1865,7 @@ const HELP: [&str; 19] = [
     "  load                   read a dump back: send the file, it ends at the line end",
     "  clear channels N       delete every channel (N: how many there are)",
     "  gps                    the GPS module's last GGA sentence, its age and heights",
+    "  xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it",
 ];
 /// TERM-38: the bench commands' help in a bench build, or where they are in a user build.
 #[cfg(feature = "bench")]

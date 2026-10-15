@@ -952,3 +952,149 @@ fn ui_readback_screens() {
     assert_eq!(pc.cmd("knob +3").unwrap(), "knob +3\n");
     assert!(pc.cmd("knob 0").is_err() && pc.cmd("knob -21").is_err());
 }
+
+// ---- The crossband repeater from the link (XB-20, decision 161) ----
+
+use crate::screens::activity::Mode;
+use crate::screens::xb::{XbLog, BY_CMD, BY_KEYS, BY_REMOTE, XB_CMD, XB_KEY};
+
+impl Pc {
+    fn xb_running(&self) -> bool {
+        self.app.radio.mode == Mode::Xb
+    }
+
+    fn xb_cmd(c: &[RadioCmd]) -> Option<bool> {
+        c.iter().rev().find_map(|c| match c {
+            RadioCmd::Crossband(x) => Some(x.is_some()),
+            _ => None,
+        })
+    }
+}
+
+/// XB-20.1, XB-20.4, XB-20.6, LINK-34: `xb start` over the link opens the repeater's screen from wherever the radio
+/// is (home under it) and starts it as # does; the readback says it runs and who started it; `xb` tells; `xb stop`
+/// stops it; each is logged with who and why. Refusals say why and start nothing.
+#[test]
+fn xb_command_starts_and_stops_the_repeater() {
+    let mut pc = Pc::tx();
+    let before = *pc.app.settings();
+    pc.keys("MENU 0 7"); // somewhere in the menus
+    assert_eq!(pc.cmd("xb").unwrap(), "Crossband: off (A 146.52000 <-> B 443.47500)\n");
+    assert_eq!(pc.cmd("xb stop").unwrap_err().1, "xb stop: the repeater isn't running");
+    let s = pc.cmd("xb start").unwrap();
+    assert!(s.starts_with("Crossband started: A 146.52000 <-> B "), "{s}");
+    assert!(pc.xb_running() && matches!(pc.app.screen(), Screen::Crossband(_)), "its screen is up: {:?}", pc.app.screen());
+    assert_eq!(Pc::xb_cmd(&pc.cmds()), Some(true), "the Radio task told to start");
+    assert_eq!(pc.app.take_xb_log(), Some(XbLog { on: true, by: BY_CMD | crate::remote::BY_CABLE, why: 0 }));
+    let ui = pc.ui();
+    assert!(ui.starts_with("screen Crossband"), "{ui}");
+    assert!(ui.contains("xb running=1 state=0 by=cmd:cable side1=A side2=B pass=0 passes=0 listen=0 ab=0 ba=0"), "{ui}");
+    assert!(ui.contains("hints \"Any key\" \"Stop\" \"SIDE1\" \"Listen\""), "{ui}");
+    assert!(pc.cmd("xb").unwrap().starts_with("Crossband: running, A 146.52000 <-> B "), "xb tells");
+    assert!(pc.cmd("xb start").unwrap_err().1.contains("already running"));
+    assert_eq!(pc.cmd("xb stop").unwrap(), "Crossband stopped\n");
+    assert!(!pc.xb_running());
+    assert_eq!(Pc::xb_cmd(&pc.cmds()), Some(false), "the Radio task told to stop");
+    assert_eq!(pc.app.take_xb_log(), Some(XbLog { on: false, by: BY_CMD | crate::remote::BY_CABLE, why: XB_CMD }));
+    assert!(pc.ui().contains("xb running=0"), "back on the start page");
+    // XB-20.7, XB-1: nothing of it is kept in the settings (never on at power-up).
+    assert_eq!(*pc.app.settings(), before);
+    // XB-2 through the command: refused with the start page's reason (here the region forbids transmitting).
+    pc.app.set_region(None, false);
+    let (s, why) = pc.cmd("xb start").unwrap_err();
+    assert!(s == Status::Invalid as u8 && why.starts_with("xb start: can't start: "), "{why}");
+    assert!(!pc.xb_running() && pc.app.take_xb_log().is_none(), "nothing started, nothing logged");
+    pc.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
+    // Not while transmitting (remote PTT here), nor in channel-only mode.
+    pc.app.go_home();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    assert!(pc.cmd("xb start").unwrap_err().1.contains("transmitting"));
+    pc.ptt(Ptt::Off);
+    pc.app.set.chan_only = true;
+    assert!(pc.cmd("xb start").unwrap_err().1.contains("channel-only"));
+    pc.app.set.chan_only = false;
+    // A receive-only build: refused as # is (decision 93).
+    pc.app.radio.tx_built = false;
+    assert!(pc.cmd("xb start").unwrap_err().1.contains("can't start"));
+    assert!(!pc.xb_running());
+}
+
+/// XB-20.2, LINK-19: remote keys start the repeater with # on its start page, as the radio's keys do (the one thing
+/// a remote key may start that transmits); XB-20.5: any remote key but SIDE1 then stops it, and does nothing else.
+#[test]
+fn remote_keys_start_and_stop_the_repeater() {
+    let mut pc = Pc::tx();
+    pc.keys("MENU 0 3 5");
+    assert!(matches!(pc.app.screen(), Screen::Crossband(_)));
+    pc.keys("#");
+    assert!(pc.xb_running(), "{}", pc.ui());
+    assert!(pc.ui().contains(" by=keys:cable "), "{}", pc.ui());
+    assert_eq!(pc.app.take_xb_log(), Some(XbLog { on: true, by: BY_REMOTE | crate::remote::BY_CABLE, why: 0 }));
+    // SIDE1 held listens (XB-15) and doesn't stop it.
+    assert_eq!(pc.press("SIDE1", key::DOWN).0, 0);
+    assert!(pc.xb_running() && pc.ui().contains(" listen=1 "), "{}", pc.ui());
+    let c = pc.cmds();
+    assert!(c.contains(&RadioCmd::Monitor { slot: 0, on: true }) && c.contains(&RadioCmd::Monitor { slot: 1, on: true }), "{c:?}");
+    assert_eq!(pc.press("SIDE1", key::UP).0, 0);
+    assert!(pc.ui().contains(" listen=0 ") && pc.cmds().contains(&RadioCmd::Monitor { slot: 0, on: false }));
+    // A digit stops it; nothing else happens (no frequency entry, the start page stays up).
+    pc.keys("5");
+    assert!(!pc.xb_running());
+    assert!(matches!(pc.app.screen(), Screen::Crossband(_)), "{:?}", pc.app.screen());
+    assert_eq!(pc.app.take_xb_log(), Some(XbLog { on: false, by: BY_REMOTE | crate::remote::BY_CABLE, why: XB_KEY }));
+    assert!(pc.ui().contains("toast \"Repeater stopped\" \"from the link\""), "{}", pc.ui());
+}
+
+/// XB-20.5: a key on the radio stops a repeater the link started, lit or dark, locked or not, and the press does
+/// nothing else; PTT talks through it (XB-14) and SIDE1 listens (XB-15) without stopping it.
+#[test]
+fn a_radio_key_stops_a_remote_repeater() {
+    let mut pc = Pc::tx();
+    for (locked, dark) in [(false, false), (true, false), (false, true), (true, true)] {
+        pc.app.go_home();
+        pc.cmd("xb start").unwrap();
+        assert!(pc.xb_running());
+        pc.app.take_xb_log();
+        if locked {
+            pc.app.locked = true;
+        }
+        if dark {
+            pc.app.set.backlight = 1;
+            pc.app.backlight_out();
+            pc.pass(100, &LiveAll::default());
+            assert!(pc.app.dark());
+        }
+        pc.key(Key::Side(1));
+        assert!(pc.xb_running(), "SIDE1 doesn't stop it (locked {locked}, dark {dark})");
+        pc.cmds();
+        pc.key(Key::Ptt(PTT_A));
+        assert!(pc.xb_running(), "PTT talks through it (XB-14)");
+        pc.cmds();
+        pc.key(Key::Menu);
+        assert!(!pc.xb_running(), "MENU stops it (locked {locked}, dark {dark})");
+        assert_eq!(pc.app.take_xb_log(), Some(XbLog { on: false, by: BY_KEYS, why: XB_KEY }));
+        assert!(matches!(pc.app.screen(), Screen::Crossband(_)), "the press did nothing else: {:?}", pc.app.screen());
+        assert!(!pc.app.dark(), "and woke the screen");
+        pc.app.locked = false;
+        pc.app.set.backlight = 0;
+    }
+}
+
+/// XB-20.3, LINK-30: on Bluetooth with a PIN lock, `xb start` and remote keys only after AUTH; `xb start` counts as a
+/// write and `xb` alone as a read (TERM-25).
+#[test]
+fn xb_over_bluetooth_needs_the_pin() {
+    let mut bt = Pc::new(false);
+    bt.app.radio.tx_built = true;
+    bt.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
+    (bt.app.set.pin, bt.app.set.pin_len, bt.app.set.pin_mode) = (1234, 4, 1);
+    assert_eq!(bt.ask(msg::CMD, b"xb start").0, Status::NotAuthorised as u8);
+    assert_eq!(bt.ask(msg::KEY, &[key_code(b"#").unwrap(), key::SHORT]).0, Status::NotAuthorised as u8);
+    assert!(bt.app.radio.mode != Mode::Xb);
+    assert_eq!(bt.ask(msg::AUTH, b"1234").0, 0);
+    bt.app.go_home();
+    assert!(bt.cmd("xb start").is_ok());
+    assert_eq!(bt.app.take_xb_log(), Some(XbLog { on: true, by: BY_CMD | crate::remote::BY_BT, why: 0 }));
+    assert!(bt.ui().contains(" by=cmd:bt "));
+    assert!(crate::term::cmd::writes(b"xb start") && crate::term::cmd::writes(b"xb stop") && !crate::term::cmd::writes(b"xb"));
+}

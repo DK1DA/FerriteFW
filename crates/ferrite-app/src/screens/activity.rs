@@ -100,6 +100,11 @@ pub struct RadioUi {
     /// MODE-1: the crossband repeater was started with # (XB-1) and not stopped; it runs while its screen is
     /// up (or under one it opened).
     pub xb_on: bool,
+    /// XB-20.6: who started the repeater running now ([`super::xb::by_word`]), with [`super::xb::LISTEN`] set while
+    /// SIDE1 is held (XB-15; one byte: the App's RAM budget); the start or stop not yet in the cable log (a stop
+    /// with who and why is put here before the reconciler's stop).
+    pub xb_by: u8,
+    pub xb_log: Option<super::xb::XbLog>,
     /// MODE-4: the active slot's frequency as last seen, and when it last changed (home's strip waits for the
     /// knob to rest). None until first seen, which isn't a change.
     pub seen_freq: Option<Freq10>,
@@ -135,6 +140,8 @@ impl RadioUi {
             hits_seen: 0,
             dtmf_seen: 0,
             xb_on: false,
+            xb_by: 0,
+            xb_log: None,
             seen_freq: None,
             freq_at: 0,
             lease_at: 0,
@@ -331,7 +338,10 @@ impl App {
             Mode::Counter => self.out.push(RadioCmd::Counter(true)),
             Mode::Fm => {} // the broadcast's start is the reconciler's (MODE-5)
             Mode::Hf => super::hf::send(self),
-            Mode::Xb => super::xb::send_start(self),
+            Mode::Xb => {
+                super::xb::send_start(self);
+                self.radio.xb_log = Some(super::xb::XbLog { on: true, by: self.radio.xb_by, why: 0 }); // XB-20.6
+            }
         }
     }
 
@@ -353,7 +363,16 @@ impl App {
             Mode::Counter => self.out.push(RadioCmd::Counter(false)),
             Mode::Fm => {} // the broadcast's stop is the reconciler's (MODE-5)
             Mode::Hf => self.out.push(RadioCmd::Hf { freq: self.set.hf.freq, mode: self.set.hf.mode, on: false }),
-            Mode::Xb => self.out.push(RadioCmd::Crossband(None)),
+            Mode::Xb => {
+                self.out.push(RadioCmd::Crossband(None));
+                if self.radio.xb_by & super::xb::LISTEN != 0 {
+                    super::xb::listen(self, false); // XB-15: no monitor left on
+                }
+                // XB-20.6: who stopped it and why, if said; else its screen closed (hold BACK, a reset, ...)
+                if !self.radio.xb_log.is_some_and(|l| !l.on) {
+                    self.radio.xb_log = Some(super::xb::XbLog { on: false, by: super::xb::BY_KEYS, why: super::xb::XB_SCREEN });
+                }
+            }
         }
     }
 
@@ -379,6 +398,7 @@ impl App {
         if let (Mode::Xb, ferrite_core::msg::ModeLive::Xb(x)) = (self.radio.mode, live.mode) {
             if let Some(why) = ferrite_core::xb::Stop::from_code(x.stopped) {
                 self.radio.xb_on = false;
+                self.radio.xb_log = Some(super::xb::XbLog { on: false, by: super::xb::BY_KEYS, why: super::xb::XB_REFUSED | x.stopped });
                 self.reconcile_mode();
                 self.show_toast(b"Can't start:", why.text().as_bytes(), false);
             }

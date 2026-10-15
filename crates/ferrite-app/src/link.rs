@@ -334,7 +334,10 @@ impl Session {
     /// refusals), then its first output.
     fn command<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, p: &[u8], o: &mut Out) -> Status {
         self.run = Run::Off;
-        let r = match cmd::run(app, st, dev, p, false) {
+        app.cmd_by = self.by; // XB-20.6: `xb start` over the link logs which port
+        let ran = cmd::run(app, st, dev, p, false);
+        app.cmd_by = crate::remote::BY_TERM;
+        let r = match ran {
             Ok(Done::Nothing) => Run::Off,
             Ok(Done::Said(m)) => {
                 o.put(&[0]);

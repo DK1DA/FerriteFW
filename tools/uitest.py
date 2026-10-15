@@ -27,8 +27,10 @@ A run: connect (HELLO), read the build flavour (receive, tx, tx-dry), snapshot e
 snapshot and anything changed is put back (`set`, `slot`, V/M for a slot that was on a channel). At the end the
 whole `dump` is compared again and any difference is reported (and fails the run).
 
-Safe by construction: remote keys never transmit (LINK-19), and no test changes a setting that could transmit or
-take the cable away (uitests/core.py UNSAFE). Remote PTT (KEY 0x80) is sent only by `T.keyup_refused`, for the
+Safe by construction: remote keys never transmit (LINK-19) but for the crossband repeater's # (XB-20.2), which only
+the crossband tests press, and only on tx-dry (PA held at 0) with both sides on 145.495 and 446.475 MHz
+(needs=("tx-dry", ...)); no test changes a setting that could transmit or take the cable away (uitests/core.py
+UNSAFE). Remote PTT (KEY 0x80) is sent only by `T.keyup_refused`, for the
 checks that a key-up is refused (needs=("keyup",)): on a tx-dry build (PA held at 0) or the simulator, never a real
 transmit build, KEY off at once whatever the answer; a key-up that isn't refused fails the test.
 

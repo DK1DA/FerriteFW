@@ -612,6 +612,13 @@ pub async fn task() {
             Either4::Third(_) => {} // the tick, or bytes for the terminal
         }
         app.tick(now_ms(), &live, store);
+        if let Some(e) = app.take_xb_log() {
+            // XB-20.6: every crossband start and stop, with who and why, in the cable log
+            bringup::linef(|b| {
+                b.push(b"xb: ");
+                e.text(b);
+            });
+        }
     }
 }
 

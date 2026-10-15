@@ -314,8 +314,8 @@ impl App {
     /// LINK-19: a keypad or side key from the link (stock's `code`), through the same path as the keypad
     /// ([`App::key_down`], [`App::key_up`], the long press, the lights, the wake and the lock). A remote key never
     /// transmits: it is refused while the radio transmits (DTMF and the tone burst are keys then), and any
-    /// transmission it would start (PTT's paths, the dialer, a message, a beacon, the repeater) is refused while
-    /// it is handled ([`App::remote_tx_refused`]). The PTTs are not keys here (LINK-20 is remote PTT).
+    /// transmission it would start (PTT's paths, the dialer, a message, a beacon) is refused while it is handled; the
+    /// crossband repeater's # starts it (XB-20.2) ([`App::remote_tx_refused`]). The PTTs are not keys here (LINK-20 is remote PTT).
     ///
     /// `by` is who presses: while another holds keys, a press is `busy` (LINK-28).
     pub fn remote_press(&mut self, code: u8, how: Press, by: u8, now: u32, store: &impl ChannelStore) -> Result<(), KeyRefusal> {
@@ -422,14 +422,19 @@ impl App {
         }
     }
 
+    /// Who presses the remote keys held now (or last): [`BY_CABLE`], [`BY_BT`], [`BY_TERM`].
+    pub(crate) fn rkeys_by(&self) -> u8 {
+        self.rkeys.by
+    }
+
     /// A key event from the tracker (a long press, a repeat) is a remote key's.
     pub(crate) fn remote_held(&self, k: Key) -> bool {
         code_of(k).is_some_and(|c| self.rkeys.held & 1 << c != 0)
     }
 
     /// LINK-19: a remote key is being handled and would start a transmission: refused, with a toast. Every
-    /// key-up a key can make (PTT's, the dialer's, a message sent, a beacon now, the crossband repeater) asks
-    /// this first.
+    /// key-up a key can make (PTT's, the dialer's, a message sent, a beacon now) asks this first. The crossband
+    /// repeater is the exception: remote keys start it as the radio's do (XB-20.2, decision 161).
     pub(crate) fn remote_tx_refused(&mut self) -> bool {
         if self.remote_in {
             self.show_toast(b"Remote keys", b"never transmit", false);

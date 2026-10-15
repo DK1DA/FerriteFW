@@ -555,7 +555,8 @@ fn hf_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, h: screens::hf::Hf, d: &mut 
 }
 
 /// The crossband repeater (XB-2, XB-17): `xb running=0 cell=N`, each side (`row 0 "Side 1" "A 145.49500"`), the
-/// grid as rows and XB-2's checks (`check ok|warn|fail "text"`); running, `xb running=1 state=N` and the four
+/// grid as rows and XB-2's checks (`check ok|warn|fail "text"`); running, `xb running=1 state=N by=WHO side1=A
+/// side2=B pass=S passes=N listen=0|1 ab=N ba=N` (XB-20.6, XB-15, XB-16: the strip's columns each way) and the four
 /// cells as rows.
 fn xb_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, c: screens::xb::Crossband, d: &mut Desc) {
     use screens::xb;
@@ -564,11 +565,18 @@ fn xb_lines<S: ChannelStore>(app: &App, cx: &Cx<S>, c: screens::xb::Crossband, d
             ferrite_core::msg::ModeLive::Xb(x) => x,
             _ => Default::default(),
         };
+        let cfg = app.settings().xb;
         if let Some(l) = d.ln() {
+            // XB-20.6: who started it; XB-15: SIDE1 listening; XB-16: the strip's columns each way
             l.push(b"xb running=1");
             kn(l, "state", x.state as u32);
+            let _ = uwrite!(l, " by={} side1={} side2={}", xb::by_word(app.radio.xb_by), letter(cfg.side1) as char, letter(cfg.side2) as char);
+            kn(l, "pass", x.pass_s as u32);
+            kn(l, "passes", x.passes as u32);
+            kn(l, "listen", (app.radio.xb_by & xb::LISTEN != 0) as u32);
+            kn(l, "ab", x.strip.iter().filter(|&&v| v > 0).count() as u32);
+            kn(l, "ba", x.strip.iter().filter(|&&v| v < 0).count() as u32);
         }
-        let cfg = app.settings().xb;
         for (name, v) in xb::CELLS.iter().zip(xb::cells(&cfg, &x)) {
             row(d, 0, name, v.as_bytes(), false, false, false);
         }

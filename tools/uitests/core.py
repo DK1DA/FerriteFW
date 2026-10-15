@@ -17,7 +17,8 @@ a factory reset allowed, a flash around the run, ...), skipped (saying which) wh
 line's first word): `tools/uitest.py --page zones` runs the tests that visit a page, and `--check-pages` runs the
 tests and reports any whose tags differ from the screens they actually read back (readbacks inside `t.home()`
 don't count); `--fix-pages` writes what they visited into the tags. Safe by construction: the context has no PTT and the link's remote keys never transmit
-(LINK-19); a setting a test changes is put back by the runner after it (from the snapshot taken at the start), and
+(LINK-19) but for the crossband repeater (XB-20), which only modes.py's crossband tests start, on tx-dry, both sides
+on the approved test frequencies; a setting a test changes is put back by the runner after it (from the snapshot taken at the start), and
 `t.set()` only takes settings outside UNSAFE.
 """
 import re

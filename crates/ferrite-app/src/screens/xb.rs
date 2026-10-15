@@ -5,6 +5,11 @@
 //! timeout). Local PTT transmits on its own slot and the repeater carries on after (XB-14); each side is simplex
 //! (XB-18). MENU 0 3 5. The radio side is the `tx` build's (`ferrite_core::xb`, decision 93); a refusal from the
 //! radio comes back in `XbLive::stopped` and the screen goes back to its start page saying why.
+//!
+//! XB-20 (decision 161): the link starts and stops it too, in every build: `xb start` / `xb stop` (the terminal
+//! and the link's `CMD`), and remote keys' # on the start page, through the same checks as the radio's #
+//! ([`try_start`]). While it runs any key but PTT and SIDE1 stops it ([`key_stops`]), the radio's or a remote one,
+//! and every start and stop is logged with who did it ([`XbLog`]: the cable log and the readback).
 
 use super::activity::{mmss, Mode};
 use super::parts;
@@ -169,6 +174,90 @@ pub(crate) fn running(app: &App) -> bool {
     app.radio.mode == Mode::Xb
 }
 
+/// Who started or stopped the repeater (XB-20.6), a byte: [`BY_KEYS`] the radio's own keys, or [`BY_REMOTE`] (remote
+/// keys) or [`BY_CMD`] (`xb start` / `xb stop`) with the port in the low bits ([`crate::remote::BY_CABLE`],
+/// [`crate::remote::BY_BT`], [`crate::remote::BY_TERM`]).
+pub const BY_KEYS: u8 = 0;
+pub const BY_REMOTE: u8 = 0x10;
+pub const BY_CMD: u8 = 0x20;
+/// In [`crate::screens::activity::RadioUi::xb_by`]: SIDE1 held, listening (XB-15).
+pub const LISTEN: u8 = 0x80;
+
+/// The readback's and the log's word for who: `radio`, `keys:cable`, `cmd:bt`, ...
+pub fn by_word(by: u8) -> &'static str {
+    match by & !LISTEN {
+        0x10 => "keys:cable",
+        0x11 => "keys:bt",
+        0x12 => "keys:term",
+        0x20 => "cmd:cable",
+        0x21 => "cmd:bt",
+        0x22 => "cmd:term",
+        _ => "radio",
+    }
+}
+
+/// Why it stopped, for the log: a key ([`XB_KEY`]), `xb stop` ([`XB_CMD`]), its screen closed ([`XB_SCREEN`]), or
+/// the radio refused it (`XB_REFUSED | ferrite_core::xb::Stop` code).
+pub const XB_KEY: u8 = 0;
+pub const XB_CMD: u8 = 1;
+pub const XB_SCREEN: u8 = 2;
+pub const XB_REFUSED: u8 = 0x80;
+
+/// A start or a stop for the cable log (XB-20.6): the firmware takes it with [`App::take_xb_log`] and prints it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct XbLog {
+    pub on: bool,
+    pub by: u8,
+    pub why: u8,
+}
+
+impl XbLog {
+    /// The cable log's text after "xb: ".
+    pub fn text(self, b: &mut Buf<96>) {
+        if self.on {
+            b.push(b"started by ");
+        } else {
+            b.push(b"stopped by ");
+        }
+        b.push(by_word(self.by).as_bytes());
+        if !self.on {
+            b.push(b": ");
+            b.push(match self.why {
+                XB_KEY => b"a key".as_slice(),
+                XB_CMD => b"xb stop",
+                XB_SCREEN => b"its screen closed",
+                w => ferrite_core::xb::Stop::from_code(w & !XB_REFUSED).map_or(b"refused".as_slice(), |s| s.text().as_bytes()),
+            });
+        }
+    }
+}
+
+impl App {
+    /// XB-20.6: the last start or stop of the crossband repeater not yet logged.
+    pub fn take_xb_log(&mut self) -> Option<XbLog> {
+        self.radio.xb_log.take()
+    }
+}
+
+/// XB-20.5: while the repeater runs, any key but PTT (XB-14) and SIDE1 (XB-15) stops it, the radio's or a remote one,
+/// lit or dark, locked or not; that press does nothing else (true: it was taken).
+pub(crate) fn key_stops(app: &mut App, k: Key) -> bool {
+    if !running(app) || matches!(k, Key::Ptt(_) | Key::Side(1)) {
+        return false;
+    }
+    let by = if app.remote_in { BY_REMOTE | app.rkeys_by() } else { BY_KEYS };
+    stop(app, by, XB_KEY);
+    true
+}
+
+/// Stops the repeater (the reconciler unkeys first, XB-14), saying who and why for the log.
+pub(crate) fn stop(app: &mut App, by: u8, why: u8) {
+    app.radio.xb_on = false;
+    app.radio.xb_log = Some(XbLog { on: false, by, why }); // the reconciler's stop keeps it
+    app.show_toast(b"Repeater stopped", if by & BY_REMOTE != 0 || by & BY_CMD != 0 { b"from the link" } else { b"" }, false);
+    app.reconcile_mode();
+}
+
 impl View for Crossband {
     /// KEY-19: ◀▶▲▼ move between the start screen's cells.
     fn own_arrows(self) -> bool {
@@ -190,15 +279,7 @@ impl View for Crossband {
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
         use Press::*;
         if running(app) {
-            match (e.key, e.press) {
-                (Key::Exit, Short) => {
-                    app.radio.xb_on = false; // XB-14: the Radio task unkeys first
-                    app.show_toast(b"Repeater stopped", b"", false);
-                }
-                (Key::Menu, Short) => app.show_toast(b"Stop it first", b"to change settings", false),
-                _ => {}
-            }
-            return;
+            return; // XB-20.5: every key but PTT and SIDE1 stopped it as it went down ([`key_stops`])
         }
         // Start page: ◀▶ along a row, ▲▼ between the sides and the grid's two rows.
         const NEXT: [[u8; 4]; 8] = [
@@ -219,7 +300,11 @@ impl View for Crossband {
             (Key::Right, Short | Repeat) => app.screen = to(1),
             (Key::Up, Short | Repeat) => app.screen = to(2),
             (Key::Down, Short | Repeat) => app.screen = to(3),
-            (Key::Hash, Short) => start(app),
+            (Key::Hash, Short) => {
+                // XB-20.2: remote keys start it as the radio's do (LINK-19's one exception to "never transmit")
+                let by = if app.remote_in { BY_REMOTE | app.rkeys_by() } else { BY_KEYS };
+                let _ = try_start(app, by);
+            }
             (Key::Exit, Short) => app.back(),
             _ => {}
         }
@@ -236,6 +321,14 @@ impl View for Crossband {
     fn ptt(self, app: &mut App, down: bool) {
         if down {
             super::nav::transmit(app);
+        }
+    }
+
+    /// XB-15: SIDE1 held listens to the receiving side (the Radio task's monitor on both sides, its speaker
+    /// whatever the Speaker setting); let go, off again.
+    fn raw(self, app: &mut App, key: Option<Key>, _code: Option<u8>, down: bool) {
+        if key == Some(Key::Side(1)) && (running(app) && down || !down && app.radio.xb_by & LISTEN != 0) {
+            listen(app, down);
         }
     }
 
@@ -258,24 +351,35 @@ impl View for Crossband {
 
     fn hints(self, app: &App) -> Hints {
         if running(app) {
-            Hints::new(&[("BACK", "Stop"), ("SIDE1", "Listen"), ("OK", "Options")])
+            Hints::new(&[("Any key", "Stop"), ("SIDE1", "Listen")])
         } else {
             Hints::new(&[("Knob", "Change"), ("#", "Start"), ("BACK", "Back")])
         }
     }
 }
 
-/// # on the start page: refuse saying why (XB-2), or start.
-fn start(app: &mut App) {
-    if app.remote_tx_refused() {
-        return; // LINK-19: the repeater transmits on its own once started
+/// XB-15: the monitor on both sides (the receiving one's audio to the speaker), or off.
+pub(crate) fn listen(app: &mut App, on: bool) {
+    app.radio.xb_by = app.radio.xb_by & !LISTEN | if on { LISTEN } else { 0 };
+    let c = app.set.xb;
+    for slot in [c.side1, c.side2] {
+        app.out.push(RadioCmd::Monitor { slot, on });
     }
+}
+
+/// # on the start page, remote keys' # or `xb start` (XB-20): refuse saying why (XB-2), or start; `by` is who, for
+/// the log. The start page must be up.
+pub(crate) fn try_start(app: &mut App, by: u8) -> Result<(), Buf<40>> {
     let mut out = [(Check::Ok, Buf::new()); 4];
     // The battery line is a warning only; its level doesn't matter here.
     if let Some(i) = checks(app, 100, &mut out) {
-        return app.show_toast(b"Can't start:", out[i].1.as_bytes(), false);
+        app.show_toast(b"Can't start:", out[i].1.as_bytes(), false);
+        return Err(out[i].1);
     }
     app.radio.xb_on = true; // MODE-2: the reconciler starts it
+    app.radio.xb_by = by;
+    app.reconcile_mode();
+    Ok(())
 }
 
 /// The repeater's start: the region and Extend TX for the Radio task's own checks on every pass (decision 93),

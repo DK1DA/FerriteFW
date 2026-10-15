@@ -531,7 +531,7 @@ def xb_checks(u):
 def crossband_start_checks(t):
     """The crossband start page checks transmit on each side's receive frequency: a side with a shift warns
     "Simplex: shifts are ignored" and the check is on the receive frequency; a side outside the band plan
-    (160.000 MHz) fails, naming the side, and # can't start it (from the PC it never starts at all: LINK-19). On
+    (160.000 MHz) fails, naming the side, and # can't start it (a remote # meets the same checks: XB-20.2). On
     1.25 m the band plan allows it; the 0.25 W cap is the Radio task's (not on the start page)."""
     t.cmd("slot A vfo 145.495 offset -0.6")
     t.cmd("slot B vfo 446.475 offset off")
@@ -556,6 +556,75 @@ def crossband_start_checks(t):
     t.cmd("slot A vfo 222.000 offset off")
     u = t.keys("MENU 0 3 5")
     t.note(f"222.000 MHz: {xb_checks(u)}")
+
+
+def xb_line(u):
+    return u["xb"] or {}
+
+
+def xb_sides(t):
+    """The repeater's sides on the two approved test frequencies (A 145.495, B 446.475, no tones, low power), so a
+    start from the PC can only ever relay there; the runner puts the slots back."""
+    t.cmd("slot A vfo 145.495 fm low tone off offset off")
+    t.cmd("slot B vfo 446.475 fm low tone off offset off")
+
+
+@test("XB-20.1", "XB-20.2", "XB-20.4", "XB-20.5", needs=("tx-dry", "keyup"), pages=("Crossband", "Home"))
+def crossband_from_the_link(t):
+    """`xb start` from home opens the repeater's screen and starts it (`xb running=1`, by=cmd:...); `xb` says so;
+    SIDE1 held listens without stopping it (listen=1); a digit stops it and does nothing else (the start page stays,
+    a toast); remote keys' # on the start page starts it again (by=keys:...), and `xb stop` stops it. On the radio
+    only on tx-dry (PA held at 0) and on the two approved test frequencies."""
+    xb_sides(t)
+    t.home()
+    ok, out = t.cmd_err("xb start")
+    t.check(ok, "xb start", out)
+    u = t.ui()
+    t.eq(u.id, "Crossband", "its screen is up (XB-20.4)")
+    x = xb_line(u)
+    t.eq(x.get("running"), 1, "running")
+    t.check(str(x.get("by", "")).startswith("cmd:"), "started by the command (XB-20.6's by=)", x)
+    t.eq(u.hint("Any key"), "Stop", "any key stops")
+    t.check(t.cmd("xb").startswith("Crossband: running"), "xb tells", t.cmd("xb"))
+    u = t.keys("SIDE1:down")
+    t.eq(xb_line(u).get("listen"), 1, "SIDE1 held: listening (XB-15)")
+    t.eq(xb_line(u).get("running"), 1, "SIDE1 doesn't stop it")
+    u = t.keys("SIDE1:up")
+    t.eq(xb_line(u).get("listen"), 0, "let go: not listening")
+    u = t.keys("5")
+    t.eq(xb_line(u).get("running"), 0, "a digit stops it (XB-20.5)")
+    t.eq(u.id, "Crossband", "and does nothing else: the start page")
+    t.check(u.toast and u.toast["head"] == "Repeater stopped", "a toast says so", u.toast)
+    u = t.keys("HASH")
+    x = xb_line(u)
+    t.eq(x.get("running"), 1, "remote keys' # starts it (XB-20.2)")
+    t.check(str(x.get("by", "")).startswith("keys:"), "started by remote keys", x)
+    t.check(t.cmd("xb stop").startswith("Crossband stopped"), "xb stop", None)
+    t.eq(xb_line(t.ui()).get("running"), 0, "stopped")
+    ok, out = t.cmd_err("xb stop")
+    t.check(not ok and "isn't running" in out, "xb stop again: refused", out)
+    t.home()
+
+
+@test("XB-20.6", needs=("tx-dry", "cablelog"), where="radio", pages=("Crossband", "Home"))
+def crossband_starts_and_stops_logged(t):
+    """Over Bluetooth with the cable log on: `xb start` logs "xb: started by cmd:bt", a remote digit "xb: stopped by
+    keys:bt: a key", a remote # "xb: started by keys:bt" and `xb stop` "xb: stopped by cmd:bt: xb stop"."""
+    import re
+    xb_sides(t)
+    t.home()
+    log = t.cable_log()
+    steps = (("cmd", "xb start", r"xb: started by cmd:bt"), ("keys", "5", r"xb: stopped by keys:bt: a key"),
+             ("keys", "HASH", r"xb: started by keys:bt"), ("cmd", "xb stop", r"xb: stopped by cmd:bt: xb stop"))
+    for how, what, want in steps:
+        t0 = time.time()
+        if how == "cmd":
+            t.cmd(what)
+        else:
+            t.keys(what)
+        t.check(log.wait(re.escape(want), t0, 5), f"{what}: {want!r} in the cable log",
+                [ln for _, ln in log.since(t0)][-6:])
+    t.home()
 
 
 @test("HF-19", pages=("Group", "Hf"))

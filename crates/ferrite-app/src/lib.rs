@@ -307,6 +307,9 @@ pub struct App {
     /// handled now (it never transmits: [`App::remote_tx_refused`]).
     pub(crate) rkeys: remote::RemoteKeys,
     pub(crate) remote_in: bool,
+    /// Who runs the command line now (LINK-34's `CMD` sets it for its line): [`remote::BY_CABLE`], [`remote::BY_BT`],
+    /// else [`remote::BY_TERM`] (the terminal); `xb start` logs it (XB-20.6).
+    pub(crate) cmd_by: u8,
     /// Redraws that changed something, and when the last was (the link's UI readback: LINK-19).
     pub(crate) frames: u32,
     pub(crate) drawn_at: u32,
@@ -416,6 +419,7 @@ impl App {
             virtual_ptt: false,
             rkeys: remote::RemoteKeys::default(),
             remote_in: false,
+            cmd_by: remote::BY_TERM,
             frames: 0,
             drawn_at: 0,
             local_ptt: 0,
@@ -913,6 +917,15 @@ impl App {
 
     pub fn key_down(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        // XB-20.5: a key (not PTT or SIDE1) stops a running crossband repeater, lit or dark, locked or not, and does
+        // nothing else: it wakes the screen and its release and holds are ignored, as a waking key's.
+        if screens::xb::key_stops(self, key) {
+            self.wake(now);
+            self.swallow(true);
+            self.keys.down(key, now);
+            self.last_input = now;
+            return;
+        }
         // A dark screen: the key only wakes it, and its release and holds are ignored; PTT acts at once.
         if self.wake(now) && !matches!(key, Key::Ptt(_)) {
             self.swallow(true);
