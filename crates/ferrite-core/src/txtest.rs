@@ -554,7 +554,7 @@ mod tests {
     extern crate std;
     use std::vec::Vec;
 
-    /// TERM-33: PRBS9 repeats after 511 bits, not before, and is balanced (256 ones).
+    /// TERM-33.2: PRBS9 repeats after 511 bits, not before, and is balanced (256 ones).
     #[test]
     fn prbs9_period() {
         let mut p = Prbs9::default();
@@ -566,7 +566,7 @@ mod tests {
         }
     }
 
-    /// TERM-33: M17's dibit map, and the four levels all used by the PRBS.
+    /// TERM-33.2: M17's dibit map, and the four levels all used by the PRBS.
     #[test]
     fn symbol_levels() {
         assert_eq!([level(0, 1), level(0, 0), level(1, 0), level(1, 1)], [3, 1, -1, -3]);
@@ -581,7 +581,7 @@ mod tests {
         assert!(n.iter().all(|&c| c > 100), "{n:?}");
     }
 
-    /// TERM-33: the RRC taps are symmetric, sum to SPS, peak at the centre (1 - a + 4a/pi of the unit pulse), and
+    /// TERM-33.2: the RRC taps are symmetric, sum to SPS, peak at the centre (1 - a + 4a/pi of the unit pulse), and
     /// match the continuous formula; through a matched RRC the symbol centres come out at the levels (no ISI).
     #[test]
     fn rrc_shape() {
@@ -629,7 +629,7 @@ mod tests {
         }
     }
 
-    /// TERM-33: the sweep's 23 third-octave tones from 50 Hz to 8 kHz, each about 2^(1/3) above the last, its
+    /// TERM-33.3: the sweep's 23 third-octave tones from 50 Hz to 8 kHz, each about 2^(1/3) above the last, its
     /// timeline (the 1 kHz marker, then tone, gap, tone...), and a tone's samples at the right frequency and level.
     #[test]
     fn sweep_list_and_timing() {
@@ -658,7 +658,7 @@ mod tests {
         assert!((peak - SWEEP_AMP * 866 / 1000).abs() < 20, "{peak}");
     }
 
-    /// TERM-33: AFSK flags: seven bits of space, one of mark, at 1200 baud (40 samples a bit), phase-continuous.
+    /// TERM-33.4: AFSK flags: seven bits of space, one of mark, at 1200 baud (40 samples a bit), phase-continuous.
     #[test]
     fn afsk_flags() {
         let mut a = Afsk::default();
@@ -697,7 +697,7 @@ mod tests {
         assert!(Gen::new(Signal::Suite, 100).is_none(), "the suite's DAC parts come step by step");
     }
 
-    /// TERM-33: 4FSK polarity. The DAC-to-air chain inverts, so the generator sends +3 as a negative swing: the
+    /// TERM-33.2: 4FSK polarity. The DAC-to-air chain inverts, so the generator sends +3 as a negative swing: the
     /// preamble's first symbol (+3) comes out negative at its centre, the second (-3) positive (and `rrc_shape`'s
     /// matched-filter round trip checks every PRBS symbol negated).
     #[test]
@@ -709,7 +709,7 @@ mod tests {
         assert!(x[TAPS / 2 + SPS] > (FSK_AMP / 2) as i16, "{}", x[TAPS / 2 + SPS]);
     }
 
-    /// TERM-33: the level scales every signal's amplitude by its percent (10 to 150), and 100 is the nominal.
+    /// TERM-33.6: the level scales every signal's amplitude by its percent (10 to 150), and 100 is the nominal.
     #[test]
     fn level_scaling() {
         let peak = |s: Signal, level: u8, n: usize| {
@@ -746,7 +746,7 @@ mod tests {
             .collect()
     }
 
-    /// TERM-33 `afsk-bk`: the tone changes ([`toggle_bit`]) and the tone after each ([`bk_tone`]) are NRZI flags
+    /// TERM-33.5 `afsk-bk`: the tone changes ([`toggle_bit`]) and the tone after each ([`bk_tone`]) are NRZI flags
     /// bit for bit (a change at each flag's first and last bit, the start on space), and the same pattern as the
     /// DAC generator's (`afsk`, sampled mid-bit), so the two modes compare on the air.
     #[test]
@@ -779,7 +779,7 @@ mod tests {
         }
     }
 
-    /// TERM-33 `afsk-bk`: the bit clock is exact in the long run. At 1.2 MHz (the timer's: 120 MHz / 100) a bit is
+    /// TERM-33.5 `afsk-bk`: the bit clock is exact in the long run. At 1.2 MHz (the timer's: 120 MHz / 100) a bit is
     /// exactly 1000 ticks; at 1 MHz the 833.33 us bits are 833 or 834 ticks, never off the ideal by a tick or more,
     /// and after 1200 bits exactly 1 s; after 10 million bits (2.3 hours) still exact, through the 2^32 wrap.
     #[test]
@@ -815,7 +815,7 @@ mod tests {
         assert_eq!(t as u64, (n * 1_000_000 / 1200) % (1 << 32));
     }
 
-    /// TERM-33 `afsk-bk`: the schedule the timer interrupt follows is the changes' bits on the bit clock: at
+    /// TERM-33.5 `afsk-bk`: the schedule the timer interrupt follows is the changes' bits on the bit clock: at
     /// 1.2 MHz bits 7, 8, 15, 16 ... times 1000 ticks; the 7-bit gap and the 1-bit gap alternate. The gain: 66 at
     /// 100 %, scaled by the level and rounded, inside REG_70's 7 bits.
     #[test]
@@ -832,7 +832,7 @@ mod tests {
         assert_eq!((bk_gain(0), bk_gain(255)), (1, 127));
     }
 
-    /// APRS-14 (decision 135), TERM-33: an APRS burst's key-up takes the `data` set-up whatever else is armed (a
+    /// APRS-14.3 (decision 135), TERM-33.8: an APRS burst's key-up takes the `data` set-up whatever else is armed (a
     /// data key-up never plays a test); a test key-up its filters, none for `voice` or `afsk-bk`; a voice key-up none.
     #[test]
     fn key_up_set_up() {

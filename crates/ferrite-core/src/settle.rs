@@ -46,6 +46,7 @@ impl Settle {
 mod tests {
     use super::*;
 
+    /// PWR-21.3, PWR-21.4: the wait is a time left to count down, never a busy wait; 2 ms by default, 0 stock's.
     #[test]
     fn wake_left_counts_down_from_the_wake() {
         let s = Settle::DEFAULT;
@@ -57,6 +58,7 @@ mod tests {
         assert_eq!(Settle::STOCK.wake_left(100, 100), 0, "0: stock's, no wait");
     }
 
+    /// PWR-21.4: the terminal takes 0 to 20 ms each way.
     #[test]
     fn terminal_range() {
         assert_eq!(Settle::new(0, 0), Some(Settle::STOCK));

@@ -53,7 +53,7 @@ fn start_up_sends_every_slot_whole() {
     }
     assert!(v.contains(&RadioCmd::MicGain(5)), "VOX-15: the default mic gain");
     assert!(v.contains(&RadioCmd::TxTimeout(120)), "TX-30: the default timeout");
-    // Nine radio-wide (with the beep volume, the mic gain, the timeout and VOX: SND-3, VOX-15, TX-30, VOX-13), the
+    // Nine radio-wide (with the beep volume, the mic gain, the timeout and VOX: SND-3, VOX-15, TX-30.1, VOX-13), the
     // tones' four (TxTones, the callsign's two chunks, DTMF timing); per slot: tune, ten parameters (split
     // included), end tone, tail and receive-only (CHAN-4, TX audit F11).
     assert_eq!(v.len(), 13 + 3 * 14);
@@ -398,8 +398,8 @@ fn add_repeater() {
     assert_eq!((c.rx, c.cfg.offset, c.cfg.tx_tone), (mhz(146) + 94_000, -60_000, 1000));
 }
 
-/// MENU-23, BOOT-14, PIN-7: the reset says what goes, OK, then hold # for 3 s; BACK steps back; everything
-/// goes and setup runs again.
+/// MENU-23, BOOT-14.1, BOOT-14.3, BOOT-14.5, PIN-7: the reset says what goes, OK, then hold # for 3 s; BACK steps back;
+/// everything goes and setup runs again.
 #[test]
 fn confirm_reset() {
     let mut t = T::new();

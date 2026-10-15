@@ -130,8 +130,8 @@ fn keypad_light() {
     assert!(!t.app.keypad_lit());
 }
 
-/// DISP-15: 0 7 4 4 decides whether receive and transmit wake the screen and hold it lit; keys always do. Auto
-/// power off still counts them whatever it says. Broadcast FM never wakes it.
+/// DISP-15.1, DISP-15.3, DISP-15.4, DISP-15.5, DISP-15.6: 0 7 4 4 decides whether receive and transmit wake the screen
+/// and hold it lit; keys always do. Auto power off still counts them whatever it says. Broadcast FM never wakes it.
 #[test]
 fn wake_screen_on() {
     let mut t = T::new();
@@ -169,7 +169,7 @@ fn wake_screen_on() {
     assert!(!t.app.leds(&t.live, &dev(90, false)).green, "no receive LED for broadcast");
 }
 
-/// DISP-15, PWR-17: with keys only waking the screen, a slot receiving still holds auto power off off.
+/// DISP-15.6, PWR-17: with keys only waking the screen, a slot receiving still holds auto power off off.
 #[test]
 fn auto_off_counts_receive_whatever_wakes() {
     let mut t = T::new();
@@ -208,7 +208,7 @@ fn backlight_on_transmit() {
     assert!(t.app.backlight_duty() > 0, "back at unkey");
 }
 
-/// DISP-16, DISP-23: 0 7 4 2's levels 1-10 as PWM duty, rising, 10 full on, 0 while dark; night red keeps its own
+/// DISP-16.1, DISP-23: 0 7 4 2's levels 1-10 as PWM duty, rising, 10 full on, 0 while dark; night red keeps its own
 /// level, and 0 7 4 2 sets the one for the theme in use.
 #[test]
 fn brightness_levels() {

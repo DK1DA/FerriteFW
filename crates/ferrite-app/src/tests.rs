@@ -129,13 +129,13 @@ fn ram_is_small() {
     // only the border (DISP-25: 3 x 4 bytes, +8 with the packing) to 1248; the scroll cue as drawn, so a row
     // redrawn beside it draws its part too instead of blanking it (DISP-25: 4 x 2 bytes) to 1256; the modes by
     // state (MODE-1 to MODE-4: the repeater started, the active frequency and when it last moved, the lease's
-    // renewal and the Radio task's drop count) and the knob's last step (HOME-13), 32 with padding, to 1288; the
+    // renewal and the Radio task's drop count) and the knob's last step (HOME-13.1), 32 with padding, to 1288; the
     // broadcast slot, the slots in the band, the station sent and a seek landing (BCR-22, BCR-25), 8 to 1296;
-    // quick mute (HOME-15, a byte), auto off's own activity time and the last key for the keypad light (DISP-15,
+    // quick mute (HOME-15, a byte), auto off's own activity time and the last key for the keypad light (DISP-15.6,
     // DISP-22: 2 x 4), 16 with padding, to 1312; the quick menu (HOME-17: its last input and the rows as drawn,
     // 12 with its Option), the PTTs it holds dead, the theme before night red and its repaint flag, 24 with
-    // padding, to 1336; remote PTT (LINK-20: the transmission, its keepalive and why it ended, the local PTTs held
-    // and cut), 16 with padding, to 1352; a remote key-up's release as a cut (LINK-20, TX-47: a byte), 8 with
+    // padding, to 1336; remote PTT (LINK-20.4: the transmission, its keepalive and why it ended, the local PTTs held
+    // and cut), 16 with padding, to 1352; a remote key-up's release as a cut (LINK-20.4, TX-47.3: a byte), 8 with
     // padding, to 1360; remote keys (LINK-19: the keys the link holds, its long press and when the last went
     // down, 16 with its Option) and the readback's redraw count and time (8), to 1384; each group's and
     // third-level list's last item (MENU-24: 38 nibbles, 19 bytes), 24 with padding, to 1408 (who holds the remote
@@ -584,7 +584,7 @@ fn shortcuts_and_menu_paths() {
     assert_eq!(t.app.screen(), Screen::Home);
 }
 
-/// KEY-7: PTT transmits from any screen, going home first; locked too (KEY-14).
+/// KEY-7.3: PTT transmits from any screen, going home first; locked too (KEY-14).
 #[test]
 fn ptt_from_any_screen() {
     let mut t = T::new();

@@ -94,8 +94,8 @@ fn heard_slot_never_becomes_active() {
     assert_eq!(t.app.active(), 0, "a screen open: the same");
 }
 
-/// HOME-15, WATCH-3: A muted with \* while A and B both receive: A shows RX muted and keeps its S-meter, B's audio
-/// plays (a muted active slot takes no priority); \* again and A has the speaker back.
+/// HOME-15, WATCH-3.2, WATCH-3.3: A muted with \* while A and B both receive: A shows RX muted and keeps its S-meter,
+/// B's audio plays (a muted active slot takes no priority); \* again and A has the speaker back.
 #[test]
 fn muted_active_slot_lets_watched_be_heard() {
     let mut t = T::new();

@@ -27,6 +27,12 @@ The hand-kept steps live in docs/test-plan/<chapter>.md, one entry per rule:
 Method is one or more of host, sim, radio, bench, n/a (a moved or retired rule). --init never rewrites an entry
 that exists; edit them by hand.
 
+A rule that mixed several claims is split into sub-rules (decision 160): TX-30.1, TX-30.2, ... on lines nested under
+the parent (`>     - **TX-30.1** ...`), each checkable by one method, with its own entry and tests. The parent stays
+as the group's heading (its references stay valid) but isn't itself a check: its result is the children's roll-up
+(✓ only when every child is ✓ or covered by an automated test alone, ✗ if any is ✗, ◐ if any has a result, else ☐).
+A test should name the sub-rules it checks; one still naming a split parent is reported (re-point it).
+
 Every radio or bench entry also has a How: line, right after Method:, saying who can run the radio step:
 
     How: auto-radio — what the PC script does     (remote keys + UI readback + the terminal and link tools)
@@ -44,12 +50,24 @@ FERRITE = HERE.parent
 WORK = FERRITE.parent
 DOCS = WORK / "docs"
 
-RULE = re.compile(r"^> - \*\*([A-Z]+)-(\d+)\*\*\s*(.*)$")
+RULE = re.compile(r"^>\s+- \*\*([A-Z]+)-(\d+)(?:\.(\d+))?\*\*\s*(.*)$")
 CHAPTER = re.compile(r"^## (?:(\d+[a-z]?)\. |Appendix ([A-Z])\. )(.*)$")
 
 
 def slug(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+
+def rule_key(rid):
+    """Sort key for rule IDs: (prefix, number, sub-number), TX-30 before TX-30.1 before TX-31."""
+    p, _, n = rid.partition("-")
+    a, _, b = n.partition(".")
+    return p, int(a) if a.isdigit() else 0, int(b) if b.isdigit() else -1
+
+
+def entry_anchor(rid):
+    """The GitHub anchor of an entry's heading (### TX-30.1 -> tx-301)."""
+    return re.sub(r"[^a-z0-9-]", "", rid.lower())
 
 
 # ---- the manual ----
@@ -83,10 +101,12 @@ def parse_manual(path):
             continue
         m = RULE.match(line)
         if m:
-            p, n, text = m.groups()
+            p, n, k, text = m.groups()
             text = text.strip()
             retired = bool(re.match(r"\(?(Moved to|Retired|Dropped)", text, re.I))
-            rules.append({"id": f"{p}-{n}", "prefix": p, "num": int(n), "text": text, "chap": chap["key"],
+            rid = f"{p}-{n}" + (f".{k}" if k else "")
+            rules.append({"id": rid, "prefix": p, "num": int(n), "sub": int(k) if k else None,
+                          "parent": f"{p}-{n}" if k else None, "text": text, "chap": chap["key"],
                           "retired": retired})
         elif section == "Status" and "bench" in line.lower() and line.startswith("- "):
             status[chap["key"]].append(line[2:].strip())
@@ -97,13 +117,18 @@ def parse_manual(path):
 
 def id_pattern(prefixes):
     alt = "|".join(sorted(prefixes, key=len, reverse=True))
-    return re.compile(rf"\b({alt})-(\d+)(?:\s*(?:–|—|\.\.|to)\s*(?:({alt})-)?(\d+))?\b")
+    return re.compile(rf"\b({alt})-(\d+)(?:\.(\d+)\b)?(?:\s*(?:–|—|\.\.|to)\s*(?:({alt})-)?(\d+))?\b")
 
 
 def ids_in(text, pat):
     out = set()
     for m in pat.finditer(text):
-        p, a, p2, b = m.groups()
+        p, a, k, p2, b = m.groups()
+        if k is not None:  # a sub-rule (TX-30.1); no ranges of them
+            out.add(f"{p}-{a}.{k}")
+            if b is not None and p2:
+                out.add(f"{p2}-{b}")
+            continue
         a = int(a)
         if b is not None and (p2 is None or p2 == p) and int(b) >= a and int(b) - a <= 40:
             out.update(f"{p}-{k}" for k in range(a, int(b) + 1))
@@ -159,7 +184,7 @@ def scan_tests(roots, pat):
 
 # ---- the hand-kept entries ----
 
-ENTRY = re.compile(r"^### ([A-Z]+-\d+)\s*$")
+ENTRY = re.compile(r"^### ([A-Z]+-\d+(?:\.\d+)?)\s*$")
 
 
 def parse_sources(d):
@@ -328,7 +353,11 @@ def main():
     for t in tests:
         for i in t["ids"]:
             covered.setdefault(i, []).append(t)
-    stale = sorted({i for i in covered if i not in by_id}, key=lambda s: (s.split("-")[0], int(s.split("-")[1])))
+    stale = sorted({i for i in covered if i not in by_id}, key=rule_key)
+    kids = children(rules)
+    # tests that still name a split parent (each should name the sub-rules it checks)
+    parent_cites = sorted({(i, t["file"], t["line"], t["name"]) for i in covered if i in kids for t in covered[i]},
+                          key=lambda x: (rule_key(x[0]), x[1], x[2]))
     src = a.docs / "test-plan"
     src.mkdir(exist_ok=True)
 
@@ -336,7 +365,7 @@ def main():
         entries = parse_sources(src)
         added = 0
         for ch in chapters:
-            missing = [r for r in rules if r["chap"] == ch["key"] and r["id"] not in entries]
+            missing = [r for r in rules if r["chap"] == ch["key"] and r["id"] not in entries and r["id"] not in kids]
             if not missing:
                 continue
             f = src / f"{ch['key']}.md"
@@ -360,9 +389,12 @@ def main():
         print(f"added {added} draft entries to {src}")
 
     entries = parse_sources(src)
-    live = [r for r in rules if not r["retired"]]
+    live = [r for r in rules if not r["retired"] and r["id"] not in kids]  # the checks: a split parent isn't one
     auto = [r for r in live if r["id"] in covered]
-    none = [r for r in rules if r["id"] not in covered and r["id"] not in entries]
+    none = [r for r in rules if r["id"] not in covered and r["id"] not in entries and r["id"] not in kids]
+    status_of = {r["id"]: rule_status(r["id"], entries, covered) for r in rules if r["id"] not in kids}
+    for pid in kids:
+        status_of[pid] = roll_up([status_of.get(k, "") for k in kids[pid]])
     methods = {}
     for r in rules:
         for m in [x.strip() for x in entries.get(r["id"], {}).get("method", "").split(",") if x.strip()]:
@@ -380,8 +412,17 @@ def main():
                   + " ".join(f"{i} ({covered[i][0]['file']}:{covered[i][0]['line']})" for i in stale))
         if dups:
             print(f"rule IDs used twice in the manual ({len(dups)}): " + " ".join(dups))
+        if kids:
+            print(f"split rules: {len(kids)} parents with {sum(len(v) for v in kids.values())} sub-rules")
+        if parent_cites:
+            print(f"tests that still name a split parent ({len(parent_cites)}; name the sub-rules instead): "
+                  + " ".join(f"{i} ({f.split('/')[-1]}:{n} {t})" for i, f, n, t in parent_cites))
         sys.exit(1 if none or stale or dups else 0)
 
+    checks = [r for r in live if needs_radio(entries.get(r["id"], {}))]
+    tally = {m: sum(1 for r in checks if status_of[r["id"]] == m) for m in ("✓", "◐", "✗", "☐")}
+    tally["☐"] += sum(1 for r in checks if status_of[r["id"]] not in ("✓", "◐", "✗", "☐"))
+    groups = {m: sum(1 for p in kids if status_of[p] == m) for m in ("✓", "◐", "✗", "☐")}
     out = ["# Ferrite test plan", "",
            "Generated by `ferrite/tools/testplan.py` from [the manual](manual.md)'s numbered rules, the tests in "
            "ferrite and udigimodes (a test covers a rule when the rule's ID is in its doc comment, name "
@@ -394,6 +435,13 @@ def main():
            "- Entries by method: " + ", ".join(f"{k} {v}" for k, v in sorted(methods.items())) + ".",
            f"- Rules with neither a test nor an entry: {len(none)}"
            + (": " + " ".join(r["id"] for r in none) if none else "") + ".",
+           f"- Radio and bench checks by their latest result: ✓ {tally['✓']}, ◐ {tally['◐']}, ✗ {tally['✗']}, "
+           f"☐ {tally['☐']} (of {len(checks)}).",
+           f"- Split rules (decision 160): {len(kids)} parents with {sum(len(v) for v in kids.values())} sub-rules, "
+           f"each sub-rule one check; a parent is its sub-rules' roll-up: ✓ {groups['✓']}, ◐ {groups['◐']}, "
+           f"✗ {groups['✗']}, ☐ {groups['☐']}."
+           + (f" Tests still naming a split parent: {len(parent_cites)}: "
+              + ", ".join(f"{i} (`{t}`)" for i, f, n, t in parent_cites) if parent_cites else ""),
            f"- Rule IDs used twice in the manual: {len(dups)}" + (": " + " ".join(dups) if dups else "") + ".",
            f"- Rules cited by tests that the manual doesn't have: {len(stale)}"
            + (": " + ", ".join(f"{i} (`{covered[i][0]['file']}:{covered[i][0]['line']}`)" for i in stale)
@@ -404,7 +452,7 @@ def main():
         rs = [r for r in rules if r["chap"] == ch["key"]]
         if not rs:
             continue
-        n_auto = sum(1 for r in rs if r["id"] in covered)
+        n_auto = sum(1 for r in rs if r["id"] in covered and r["id"] not in kids)
         out += [f"## {ch['label']}", "",
                 f"{len(rs)} rules, {n_auto} automated. Entries: [`test-plan/{ch['key']}.md`]"
                 f"(test-plan/{ch['key']}.md).", "",
@@ -417,19 +465,26 @@ def main():
             steps = e.get("steps", "")
             if steps.startswith("Automated:"):
                 steps = ""
-            link = f"[steps](test-plan/{e['file']}#{r['id'].lower()})" if e and steps else ""
-            res = e.get("results", [])
-            if res:
-                last = res[-1]
-                result = f"{last[2] if len(last) > 2 else ''} {last[0]}".strip()
-            elif any(m in e.get("method", "") for m in ("radio", "bench", "review")):
-                result = "☐"
-            elif ts:
-                result = "auto"
+            link = f"[steps](test-plan/{e['file']}#{entry_anchor(r['id'])})" if e and steps else ""
+            if r["id"] in kids:
+                result = f"{status_of[r['id']]} (its {len(kids[r['id']])} sub-rules)"
+                method = "split"
+                link = ""
             else:
-                result = ""
+                res = e.get("results", [])
+                if res:
+                    last = res[-1]
+                    result = f"{last[2] if len(last) > 2 else ''} {last[0]}".strip()
+                elif any(m in e.get("method", "") for m in ("radio", "bench", "review")):
+                    result = "☐"
+                elif ts:
+                    result = "auto"
+                else:
+                    result = ""
+                method = e.get("method", "")
             what = cell(r["text"])
-            out.append(f"| [{r["id"]}](manual.html#{r["id"]}) | {what} | {e.get('method', '')} | {by} | {link} | {result} |")
+            label = f"↳ [{r['id']}](manual.html#{r['id']})" if r["parent"] else f"[{r['id']}](manual.html#{r['id']})"
+            out.append(f"| {label} | {what} | {method} | {by} | {link} | {result} |")
         out.append("")
     hows, no_how = how_counts(rules, entries)
     out.insert(out.index("## Summary") + 2,
@@ -443,6 +498,41 @@ def main():
           + (f", without How {len(no_how)}" if no_how else ""))
     print(f"wrote {a.docs / 'test-plan.md'}: {len(rules)} rules, {len(auto)} automated ({pct:.0f}%), "
           f"{len(none)} without test or entry, {len(stale)} stale tags")
+
+
+# ---- Split rules: the parents and their roll-up ----
+
+def children(rules):
+    """{parent id: [sub-rule ids]} for the rules split into sub-rules."""
+    kids = {}
+    for r in rules:
+        if r.get("parent"):
+            kids.setdefault(r["parent"], []).append(r["id"])
+    return kids
+
+
+def rule_status(rid, entries, covered):
+    """A leaf rule's status: ✓ ◐ ✗ from its latest radio/bench/review result, ☐ when one is due and missing,
+    "auto" when automated tests alone carry it, "" when nothing does."""
+    e = entries.get(rid, {})
+    lr = last_result(e)
+    if lr in ("✓", "◐", "✗"):
+        return lr
+    if lr or any(m in e.get("method", "") for m in ("radio", "bench", "review")):
+        return "☐"
+    return "auto" if rid in covered else ""
+
+
+def roll_up(marks):
+    """A split parent's status from its sub-rules': ✗ if any ✗; ✓ when every one is ✓ (or automated alone);
+    ◐ if any has a result; else ☐."""
+    if any(m == "✗" for m in marks):
+        return "✗"
+    if marks and all(m in ("✓", "auto") for m in marks):
+        return "✓" if "✓" in marks else "auto"
+    if any(m in ("✓", "◐") for m in marks):
+        return "◐"
+    return "☐"
 
 
 # ---- How: the by-hand list and the PC's list ----
@@ -564,7 +654,7 @@ def scan_uitests(d=HERE / "uitests"):
             args, name = m.groups()
             known = re.search(r"xfail=", args)
             where = re.search(r'where="(\w+)"', args)
-            for rid in re.findall(r'"([A-Z]+-\d+)"', args):
+            for rid in re.findall(r'"([A-Z]+-\d+(?:\.\d+)?)"', args):
                 out.setdefault(rid, []).append((f"{f.stem}.{name}", "known" if known else (where.group(1) if where else "")))
     return out
 
@@ -603,7 +693,7 @@ def write_auto(docs, rules, entries, covered):
         out.append("")
     others = sorted((rid for rid in ui if rid not in {r["id"] for r in rules if (entries.get(r["id"]) or {}) and
                                                          how_of(entries[r["id"]])[0] in ("auto-radio", "auto-sdr", "host-covered")}),
-                    key=lambda x: (x.split("-")[0], int(x.split("-")[1])))
+                    key=rule_key)
     if others:
         out += [f"## Also checked by a UI test: {len(others)}", "",
                 "Rules whose entry isn't an auto entry above (host, sim or hands) that `tools/uitest.py` checks on the radio too.", "",

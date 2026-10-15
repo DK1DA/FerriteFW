@@ -63,9 +63,9 @@ fn pa_up(e: &Ev) -> bool {
     matches!(e, Ev::Pa(v) if *v > 0)
 }
 
-/// TX-23, TX-27, SAFE-11: a key-up carried out on the pins in the planned order: PA drive 0, the receive select
-/// cleared, the TX select, the chip keyed (its read-back), then the PA ramped up to the calibrated level in equal
-/// steps 1 ms apart; never two selects on, never the PA up without its chip keyed.
+/// TX-23.1, TX-23.2, TX-27, SAFE-11: a key-up carried out on the pins in the planned order: PA drive 0, the receive
+/// select cleared, the TX select, the chip keyed (its read-back), then the PA ramped up to the calibrated level in
+/// equal steps 1 ms apart; never two selects on, never the PA up without its chip keyed.
 #[test]
 fn key_up_order_on_the_pins() {
     let (mut path, mut seq, mut hw, st) = receiving(VHF);
@@ -84,7 +84,7 @@ fn key_up_order_on_the_pins() {
     assert!(hw.at(|e| *e == Ev::Pin(Pin::Amp(0), false)).is_some(), "muted while keyed: the speaker off");
 }
 
-/// TX-26, TX-47, TONE-8, TX-28: the unkey on the pins in stock's order: end tone, CW ID, the audio stage (PB8) on
+/// TX-26, TX-47.2, TONE-8, TX-28: the unkey on the pins in stock's order: end tone, CW ID, the audio stage (PB8) on
 /// and tail elimination while still keyed, then PA drive 0, at least 100 ms, the chip out of transmit, then the
 /// TX select clear and the receive path back (TX audit F4, F6).
 #[test]
@@ -109,7 +109,7 @@ fn unkey_order_on_the_pins() {
     assert!(hw.time(unkey) - hw.time(zero) >= UNKEY_WAIT_MS as u32, "the unkey wait before the chip leaves transmit");
 }
 
-/// TX-7, TX-23 (the read-back before the PA ramp), SAFE-11: a key-up whose read-back fails stops the plan there: no
+/// TX-7.2, TX-23.1 (the read-back before the PA ramp), SAFE-11: a key-up whose read-back fails stops the plan there: no
 /// PA ramp, the fault reported for the caller's safe state.
 #[test]
 fn failed_read_back_never_ramps() {
@@ -499,7 +499,8 @@ fn beep_never_keys_and_restores() {
     assert_eq!(b.release().writes.last(), Some(&(reg::POWER, 0xBFF1)), "receive again");
 }
 
-/// SQL-15, SQL-16: the squelch thresholds go to REG_78 and REG_4F as computed (stock's 0x0801E64C), and nothing else.
+/// SQL-15, SQL-16.1, SQL-16.3: the squelch thresholds go to REG_78 and REG_4F as computed (stock's 0x0801E64C), and
+/// nothing else.
 #[test]
 fn squelch_writes_stocks_registers() {
     let mut b = bk();
@@ -507,7 +508,7 @@ fn squelch_writes_stocks_registers() {
     assert_eq!(b.release().writes, [(reg::SQ_RSSI, 0x5955), (reg::SQ_NOISE, 0x2827)]);
 }
 
-/// TSRCH-10: the counter's chips sit mid-band, chip 0 below 300 MHz and chip 1 above, each in its own front end,
+/// TSRCH-10.1: the counter's chips sit mid-band, chip 0 below 300 MHz and chip 1 above, each in its own front end,
 /// and use stock's frequency scan (REG_32 0x8245 on, 0x8244 off; the reading from REG_0D/0E in 10 Hz units).
 #[test]
 fn counter_uses_stocks_frequency_scan() {
@@ -539,7 +540,7 @@ fn same_modem_setup() {
     assert!(chip::WX.contains(&(mhz(162) + 55_000)) && !chip::WX.contains(&(mhz(162) + 56_000)));
 }
 
-/// TX-7, TX-23 (the chip keyed with its read-back before the PA): key with the microphone (REG_30 0xC1FE), read
+/// TX-7.1, TX-23.1 (the chip keyed with its read-back before the PA): key with the microphone (REG_30 0xC1FE), read
 /// back REG_30, the frequency (REG_38/39) and REG_3B, then stock's REG_36 (0x7F High, 0x57 otherwise) and its
 /// read-back; all match: keyed.
 #[test]
@@ -578,8 +579,8 @@ fn tx_setup_writes_the_bandwidth() {
     assert_eq!(b.release().last(reg::RF_FILTER), Some(0x3028));
 }
 
-/// TX-46, VOX-6, VOX-15, TONE-1, TX audit F1, F2, F7, F14: the key-up writes stock's registers from the start-up values:
-/// REG_7D 0xE912 to stock's default 0xE924 (bit 5 is the 6-bit field's top bit; Mic gain 5), REG_40 0x34D2 to
+/// TX-46, VOX-6, VOX-15, TONE-1.2, TX audit F1, F2, F7, F14: the key-up writes stock's registers from the start-up
+/// values: REG_7D 0xE912 to stock's default 0xE924 (bit 5 is the 6-bit field's top bit; Mic gain 5), REG_40 0x34D2 to
 /// stock's 0x350A, REG_47 0x6142 (stock's TX route), REG_51 with the calibration's CTCSS byte (0x9046 on the black
 /// radio) or its DCS byte in REG_51's low 7 bits, and REG_30 0 before any of them.
 #[test]
@@ -604,8 +605,8 @@ fn tx_setup_writes_stocks_registers() {
     assert_eq!(bus.last(reg::MIC), Some(0xE934), "a data key-up: V0.29's 0x34");
 }
 
-/// TONE-20 (decision 140): a DCS transmission as stock V0.27's 0x0800D3CC, on the recording bus: REG_51 0xA000 for a
-/// normal code and 0x8000 for an inverted one (bit 13, "transmit negative code", set for normal), with the
+/// TONE-20.1, TONE-20.2 (decision 140): a DCS transmission as stock V0.27's 0x0800D3CC, on the recording bus: REG_51
+/// 0xA000 for a normal code and 0x8000 for an inverted one (bit 13, "transmit negative code", set for normal), with the
 /// calibration's DCS byte, REG_07 the 134.4 Hz bit rate, and the same normal codeword in both (D023: 0x0813, then
 /// 0x8763). Bit 13 clear with the normal codeword went out as 047N, 023 inverted, on the bench.
 #[test]
@@ -621,10 +622,10 @@ fn dcs_tx_polarity_is_stocks() {
     }
 }
 
-/// TONE-20 (decision 142): DCS receive as stock V0.27 (0x0800A50C -> 0x0800D3CC): tuning a D023N slot writes REG_51
-/// 0xA000 (bit 13 set), D023I 0x8000, both with the normal codeword (0x0813, 0x8763); and the squelch decision, as
-/// stock's 0x0801EAC4, opens a normal code only on REG_0C bit 14 and an inverted one only on bit 15 (on air Ferrite's
-/// D023N opened to a stock radio's D023I too). CTCSS opens on bit 10 alone, no tone always.
+/// TONE-20.3, TONE-20.4 (decision 142): DCS receive as stock V0.27 (0x0800A50C -> 0x0800D3CC): tuning a D023N slot
+/// writes REG_51 0xA000 (bit 13 set), D023I 0x8000, both with the normal codeword (0x0813, 0x8763); and the squelch
+/// decision, as stock's 0x0801EAC4, opens a normal code only on REG_0C bit 14 and an inverted one only on bit 15 (on
+/// air Ferrite's D023N opened to a stock radio's D023I too). CTCSS opens on bit 10 alone, no tone always.
 #[test]
 fn dcs_rx_polarity_is_stocks() {
     for (inverted, r51) in [(false, 0xA000 | 51), (true, 0x8000 | 51)] {
@@ -650,7 +651,7 @@ fn dcs_rx_polarity_is_stocks() {
     assert!(chip::tone_heard(0, &none));
 }
 
-/// TONE-10, TONE-19 (decision 141): a keyed tone sequence (end tone, CW ID) starts silent: the tone off, REG_40 at
+/// TONE-10.4, TONE-19.3 (decision 141): a keyed tone sequence (end tone, CW ID) starts silent: the tone off, REG_40 at
 /// the tones' 0x43C (top four bits kept), then tone transmit through stock's REG_30 step; the caller then waits
 /// `TONE_LEAD_MS` for the generator to settle. The end puts the tone off and REG_40 back to stock's 0x50A.
 #[test]
@@ -675,10 +676,10 @@ fn keyed_tone_sequence_lead_in_and_deviation() {
     assert_eq!(bus.writes[n - 2..], [(reg::TONE, 0), (reg::DEVIATION, 0x350A)]);
 }
 
-/// TERM-33 (decision 132): a `flat` test key-up turns off the TX HPF/LPF/pre-emphasis (REG_2B[2:0] = 111), a
-/// `data` one only the TX HPF (REG_2B[2:0] = 100 exactly, whatever was there; the other bits kept); both turn off
-/// MIC AGC (REG_19[15]) and the ALC (REG_7D[6]) on top of the data key-up's REG_7D 0x34, clear a TX mute
-/// (REG_50[15]), touch nothing else, and the unkey's restore puts all four back as they were.
+/// TERM-33.9, TERM-33.11, TERM-33.12 (decision 132): a `flat` test key-up turns off the TX HPF/LPF/pre-emphasis
+/// (REG_2B[2:0] = 111), a `data` one only the TX HPF (REG_2B[2:0] = 100 exactly, whatever was there; the other bits
+/// kept); both turn off MIC AGC (REG_19[15]) and the ALC (REG_7D[6]) on top of the data key-up's REG_7D 0x34, clear a
+/// TX mute (REG_50[15]), touch nothing else, and the unkey's restore puts all four back as they were.
 #[test]
 fn tx_test_filters_and_restore() {
     use ferrite_core::txfilters::Filters;
@@ -707,7 +708,7 @@ fn tx_test_filters_and_restore() {
     }
 }
 
-/// APRS-14 (decision 135): an APRS burst's key-up, on the recording bus: the data key-up's REG_7D 0x34, then the
+/// APRS-14.3 (decision 135): an APRS burst's key-up, on the recording bus: the data key-up's REG_7D 0x34, then the
 /// `data` set-up (`aprs_filters` for a data key-up, in every build): REG_2B[2:0] = 100, MIC AGC off (REG_19[15]), ALC off
 /// (REG_7D[6]), REG_50's TX mute clear; the unkey's restore puts the four back as the key-up found them.
 #[test]
@@ -731,7 +732,7 @@ fn aprs_burst_takes_the_data_set_up() {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-33 `afsk-bk`: the begin switches the keyed chip to tone transmit through stock's step (REG_30 0x0200 wide
+/// TERM-33.5 `afsk-bk`: the begin switches the keyed chip to tone transmit through stock's step (REG_30 0x0200 wide
 /// or 0 narrow, then 0xC3FA: the mic ADC off) and only then sets tone 1 to the space tone at the gain (REG_71,
 /// REG_72 0, REG_70 0x8000 | gain << 8); a change writes REG_71 alone; the end turns the tones off (REG_70 0) and
 /// leaves REG_30 at tone transmit for the unkey; REG_47 (the key-up's AF route), REG_50, REG_2B, REG_7D and
@@ -777,7 +778,7 @@ fn keyed_ready() -> (Bk4829<RecBus>, chip::TxExpect) {
     (b, chip::TxExpect { freq: f, reg3b: 0x1234, narrow: false })
 }
 
-/// TX-7: any one register wrong refuses the key-up, naming it, before REG_36's level is left standing: REG_30 not
+/// TX-7.2: any one register wrong refuses the key-up, naming it, before REG_36's level is left standing: REG_30 not
 /// keyed, the synthesized frequency not the one written, REG_3B changed since start-up, REG_36 not taking. The
 /// caller then goes to the safe state with the PA at zero (`failed_read_back_never_ramps`).
 #[test]
@@ -805,9 +806,9 @@ fn any_wrong_read_back_refuses() {
     assert_eq!(chip::key_mic(&mut b, false, &want), Err(ReadBack::Bias));
 }
 
-/// TONE-13, TONE-19, DTMF-7, DTMF-8, DTMF-11: while keyed a tone burst or a DTMF symbol (A-D too) switches REG_30 to tone
-/// transmit (stock's mode 4, the microphone off) with the sidetone as asked and the tones' REG_40; letting go returns
-/// to the microphone with its read-back and stock's REG_40.
+/// TONE-13, TONE-19.1, TONE-19.3, DTMF-7, DTMF-8, DTMF-11: while keyed a tone burst or a DTMF symbol (A-D too) switches
+/// REG_30 to tone transmit (stock's mode 4, the microphone off) with the sidetone as asked and the tones' REG_40;
+/// letting go returns to the microphone with its read-back and stock's REG_40.
 #[test]
 fn keyed_tones_switch_the_source() {
     let mut b = bk();
@@ -878,8 +879,8 @@ fn gps_pb10_before_the_key_up() {
     assert_eq!(g.step(30, true, true, false).pb10_low, None);
 }
 
-/// TX-43 (TX audit F9): the cable sends nothing while keyed, except in the `tx-dry` build (the bench reads the
-/// chips over it with the PA drive at 0). SND-14: nothing at all with a speaker mic connected (PC10 is its bias).
+/// TX-43.1, TX-43.2 (TX audit F9): the cable sends nothing while keyed, except in the `tx-dry` build (the bench reads
+/// the chips over it with the PA drive at 0). SND-14: nothing at all with a speaker mic connected (PC10 is its bias).
 #[test]
 fn cable_held_while_keyed() {
     use crate::cable::may_send;
@@ -891,7 +892,7 @@ fn cable_held_while_keyed() {
     }
 }
 
-/// GPS-1, GPS-4, GPS-25: powered with 0 6 1; off at once for a signal 0 6 8 covers, and back on only after
+/// GPS-1.1, GPS-1.2, GPS-4, GPS-25: powered with 0 6 1; off at once for a signal 0 6 8 covers, and back on only after
 /// `QUIET_MS` (2 s) without one, so a burst of short signals doesn't cycle it; 0 6 1 off keeps it off.
 #[test]
 fn gps_power_around_signals() {
@@ -945,7 +946,7 @@ fn spi_flash_guard() {
     assert!(!program_ok(&[], 0x02_D000, 16) && !erase_ok(&[], 0x02_D000), "bring-up: nowhere");
 }
 
-/// SAFE-14, BOOT-3, KEY-8, TX-19, TX-42 (the released-once part): a PTT held at power-on keeps transmit shut until
+/// SAFE-14.1, BOOT-3, KEY-8, TX-19, TX-42 (the released-once part): a PTT held at power-on keeps transmit shut until
 /// every PTT input has read released once; after that it stays open for the power-on.
 #[test]
 fn ptt_held_at_power_on() {
@@ -1024,8 +1025,8 @@ impl Log {
 
 const RX: RxSetup = RxSetup { freq: VHF, narrow: false, am: false, rx_tone: 0, rx_tail: false };
 
-/// PWR-21 (decision 119): from sleep, REG_37's supplies on, the wake settle, then the receive set-up with the AF
-/// route muted before anything else and receive on (REG_30) last; the wake time is kept.
+/// PWR-21.1, PWR-21.5 (decision 119): from sleep, REG_37's supplies on, the wake settle, then the receive set-up with
+/// the AF route muted before anything else and receive on (REG_30) last; the wake time is kept.
 #[test]
 fn wake_settles_before_the_receive_setup() {
     use ferrite_core::settle::Settle;
@@ -1041,8 +1042,8 @@ fn wake_settles_before_the_receive_setup() {
     assert_eq!(w.iter().filter(|e| e.0 == WAIT).count(), 1);
 }
 
-/// PWR-21: a chip whose supplies came on a tick early (the hop's `due`), or that is long awake, is tuned with no
-/// wait and no second REG_37 write; one woken 1 ms ago waits the rest; 0 is stock's: no wait at all.
+/// PWR-21.2, PWR-21.4: a chip whose supplies came on a tick early (the hop's `due`), or that is long awake, is tuned
+/// with no wait and no second REG_37 write; one woken 1 ms ago waits the rest; 0 is stock's: no wait at all.
 #[test]
 fn wake_settle_counts_from_the_early_wake() {
     use ferrite_core::settle::Settle;
@@ -1060,7 +1061,7 @@ fn wake_settle_counts_from_the_early_wake() {
     assert!(!w.iter().any(|e| e.0 == WAIT), "stock's: back to back");
 }
 
-/// PWR-21: to sleep, the AF route muted, REG_30 off, the sleep settle, then REG_37's supplies off; with 0 the same
+/// PWR-21.1: to sleep, the AF route muted, REG_30 off, the sleep settle, then REG_37's supplies off; with 0 the same
 /// writes with no wait (stock's REG_30 0 then REG_37 0x1D00, after the mute).
 #[test]
 fn sleep_mutes_then_settles() {
@@ -1073,7 +1074,7 @@ fn sleep_mutes_then_settles() {
     assert_eq!(log.take(), [(reg::AF_OUT, 0x6042), (reg::POWER, 0), (reg::LDO, 0x1D00)]);
 }
 
-/// PWR-21: a receiving chip retuned (scan, a new frequency) is muted before its frequency changes.
+/// PWR-21.1: a receiving chip retuned (scan, a new frequency) is muted before its frequency changes.
 #[test]
 fn retune_mutes_first() {
     let log = Log::default();

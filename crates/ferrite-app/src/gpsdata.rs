@@ -420,7 +420,7 @@ mod tests {
     }
 
     /// GPS-26 to GPS-28: who needs the module: GPS off, a GPS screen or the alarm, smart beaconing, the next
-    /// timed beacon (APRS mode on only); GPS-34: the position or satellites page asks for GSV every fix.
+    /// timed beacon (APRS mode on only); GPS-34.3: the position or satellites page asks for GSV every fix.
     #[test]
     fn demand_from_the_app() {
         struct D(crate::aprs::AprsCfg, Option<u32>);
@@ -446,7 +446,7 @@ mod tests {
         assert!(demand(&app, &smart, false, 0).track);
         app.open(crate::screens::nav::Dest::GpsPosition);
         assert!(demand(&app, &smart, false, 0).watch, "the GPS screen");
-        // GPS-34: the position and satellites pages show satellites in view: GSV every fix; the waypoints don't.
+        // GPS-34.3: the position and satellites pages show satellites in view: GSV every fix; the waypoints don't.
         assert!(demand(&app, &smart, false, 0).sky, "the position page");
         app.screen = crate::Screen::Gps(crate::screens::gps::Gps::new(crate::screens::gps::Page::Satellites));
         assert!(demand(&app, &smart, false, 0).sky, "the satellites page");

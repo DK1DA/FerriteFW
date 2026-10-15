@@ -260,9 +260,9 @@ fn writes_one_port_at_a_time() {
     assert_eq!(r.ask(Port::Bt, msg::WRITE, &w), Status::Busy as u8);
 }
 
-/// LINK-20, LINK-28: one keyer at a time. The cable's session keys; Bluetooth's key-up and keepalives are refused
-/// and don't hold it; Bluetooth's session starting over leaves the cable's transmission alone; `KEY` off from either
-/// port unkeys.
+/// LINK-20.5, LINK-20.6, LINK-28: one keyer at a time. The cable's session keys; Bluetooth's key-up and keepalives are
+/// refused and don't hold it; Bluetooth's session starting over leaves the cable's transmission alone; `KEY` off from
+/// either port unkeys.
 #[test]
 fn one_remote_keyer() {
     use ferrite_core::link::{key, Ptt};

@@ -215,7 +215,7 @@ fn skipped_channels_are_never_stops() {
     assert!(!set.has(2), "channel 3 has Skip: never a stop");
 }
 
-/// The reset clears settings, channels and the rest, but never the SSB patch (HF-21, as SAFE-9).
+/// The reset clears settings, channels and the rest, but never the SSB patch (HF-21, as SAFE-9.1).
 #[test]
 fn reset_keeps_the_ssb_patch() {
     use ferrite_core::layout::SSB_PATCH;
@@ -271,7 +271,7 @@ fn radio_refusal_shows_the_refused_screen() {
     r.expect_text("Can't transmit");
 }
 
-/// A speaker mic plugged into the side connector shows on the Status page, and taken out again (SND-12).
+/// A speaker mic plugged into the side connector shows on the Status page, and taken out again (SND-12.6).
 #[test]
 fn speaker_mic_on_status_page() {
     let mut r = Radio::new();

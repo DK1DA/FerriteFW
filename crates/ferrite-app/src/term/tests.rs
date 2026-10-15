@@ -336,7 +336,7 @@ fn only_changed_rows_are_sent() {
     assert!(r.vt.raw.len() - before > 1000, "Ctrl-L redraws everything");
 }
 
-/// TERM-4: a full sink holds rows back; later polls finish the page.
+/// TERM-4.1: a full sink holds rows back; later polls finish the page.
 #[test]
 fn never_overfills_the_sink() {
     let mut r = Rig::new();
@@ -731,7 +731,7 @@ fn command_line_set_and_get() {
     assert_eq!(r.app.set.backlight, bl, "a refused value changes nothing");
 }
 
-/// TERM-12, DISP-15, DISP-16, DISP-22, DISP-23, DISP-26, DISP-17: every light setting takes `set` by the value
+/// TERM-12, DISP-15.1, DISP-16.1, DISP-22, DISP-23, DISP-26, DISP-17.3: every light setting takes `set` by the value
 /// the radio shows (0 7 4 1 to 0 7 4 5 and 0 7 6), for testing the lights over the cable. Brightness stops at 1
 /// and 10, so `set` walks it both ways; a refused level lists 10 to 1 and changes nothing.
 #[test]
@@ -1176,9 +1176,11 @@ fn regs(r: DebugReq) -> DebugAns {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-36: `gps query N` sends CAS06 and shows the sentence sent and the module's TXT answer; `gps standby N`
-/// sends CAS12; `gps nmea off|on` CAS03 (all off, Ferrite's set on, GPS-34); `gps standby N quiet` NMEA off then CAS12; anything else (another CAS number, CAS00 save, CAS01 baud, a bad argument) is refused before it
-/// reaches the firmware. The query reads (allowed for an unapproved Bluetooth device, TERM-25), standby writes.
+/// TERM-36.1, TERM-36.2, TERM-36.3, TERM-36.4, TERM-36.6, TERM-36.9: `gps query N` sends CAS06 and shows the sentence
+/// sent and the module's TXT answer; `gps standby N` sends CAS12; `gps nmea off|on` CAS03 (all off, Ferrite's set on,
+/// GPS-34.1); `gps standby N quiet` NMEA off then CAS12; anything else (another CAS number, CAS00 save, CAS01 baud, a
+/// bad argument) is refused before it reaches the firmware. The query reads (allowed for an unapproved Bluetooth
+/// device, TERM-25), standby writes.
 #[test]
 fn terminal_gps_casic() {
     let mut r = Rig::main();
@@ -1192,7 +1194,8 @@ fn terminal_gps_casic() {
     let data = [0u8; ferrite_core::msg::GGA_MAX];
     assert_eq!(r.serve(4, |_| DebugAns::GpsSent { data, n: 0 }), vec![DebugReq::Gps { id: 12, arg: 60, quiet: false }]);
     assert!(r.raw().contains("sent $PCAS12,60*28 CR LF"), "{}", r.raw());
-    // TERM-36: NMEA off and Ferrite's set on (CAS03, GPS-34), and the quiet standby (NMEA off, then CAS12).
+    // TERM-36.1, TERM-36.2, TERM-36.3, TERM-36.4, TERM-36.6, TERM-36.9: NMEA off and Ferrite's set on (CAS03,
+    // GPS-34.1), and the quiet standby (NMEA off, then CAS12).
     for (c, want, shown) in [
         ("gps nmea off", DebugReq::Gps { id: 3, arg: 0, quiet: false }, "sent $PCAS03,0,0,0,0,0,0,0,0*02 CR LF"),
         ("gps nmea on", DebugReq::Gps { id: 3, arg: 1, quiet: false }, "sent $PCAS03,1,0,5,5,1,0,0,0*02 CR LF"),
@@ -1254,8 +1257,8 @@ fn gga_heights() {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-29: `rx both` and `rx one` ask the Radio task for the hold on both band receive selects and say what is
-/// on; `rx` asks; a refusal (keyed, HF mode) is shown as the Radio task gives it; bad words are refused here.
+/// TERM-29.1, TERM-29.2: `rx both` and `rx one` ask the Radio task for the hold on both band receive selects and say
+/// what is on; `rx` asks; a refusal (keyed, HF mode) is shown as the Radio task gives it; bad words are refused here.
 #[test]
 fn debug_rx_both() {
     let mut r = Rig::main();
@@ -1300,10 +1303,11 @@ fn debug_mic() {
 }
 
 #[cfg(feature = "bench")]
-/// TERM-33: `txtest MODE [FILTERS] [LEVEL]` arms, `txtest off` disarms, `txtest` alone asks (a read); the filters
-/// default to data (4fsk, sweep and afsk alike, as an APRS burst goes out); the level to 100 %, 10 to 150 taken, with or without the
-/// filters before it; `afsk-bk` takes a level but no filters word and shows its tone gain (66 at 100 %, 99 at 150);
-/// anything else is refused before anything is sent; a receive-only build's refusal prints as one.
+/// TERM-33.1, TERM-33.6, TERM-33.9, TERM-33.14: `txtest MODE [FILTERS] [LEVEL]` arms, `txtest off` disarms, `txtest`
+/// alone asks (a read); the filters default to data (4fsk, sweep and afsk alike, as an APRS burst goes out); the level
+/// to 100 %, 10 to 150 taken, with or without the filters before it; `afsk-bk` takes a level but no filters word and
+/// shows its tone gain (66 at 100 %, 99 at 150); anything else is refused before anything is sent; a receive-only
+/// build's refusal prints as one.
 #[test]
 fn debug_txtest() {
     use ferrite_core::txtest::{Arm, Ask, Filters, Signal};

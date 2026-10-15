@@ -171,6 +171,7 @@ pub fn nearest(f: Freq10, region: Region) -> TxBand {
 mod tests {
     use super::*;
 
+    /// TX-1.1: the region's band plan: inside it transmit is allowed, outside it refused.
     #[test]
     fn region_plans() {
         assert_eq!(check(mhz(146) + 52_000, Region::Us, false), Ok(()));
@@ -193,8 +194,8 @@ mod tests {
         assert_eq!(check(mhz(162) + 55_000, Region::Us, true), Ok(()), "above 64 MHz Extend still widens");
     }
 
-    /// CAL-15, TX-10: no transmit anywhere on the 200-300 MHz PA path until its power ceiling is measured: the
-    /// 1.25 m band and 243.0 MHz alike (TX audit M3); the edges are the path's.
+    /// CAL-15, TX-10.1, TX-10.2: no transmit anywhere on the 200-300 MHz PA path until its power ceiling is measured:
+    /// the 1.25 m band and 243.0 MHz alike (TX audit M3); the edges are the path's.
     #[test]
     fn unmeasured_125m_is_locked() {
         assert!(locked_125m(mhz(223) + 50_000));

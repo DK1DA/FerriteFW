@@ -356,7 +356,7 @@ mod tests {
         assert_eq!(gate(Err(Fault::Blank), false, CalCrc::Changed).err(), Some(Fault::Mcu), "the MCU first");
     }
 
-    /// CAL-11, TX-1, TX-14: the windows as stock checks them (low <= f < high, whole MHz from BCD), the black
+    /// CAL-11, TX-1.2, TX-14: the windows as stock checks them (low <= f < high, whole MHz from BCD), the black
     /// radio's four; below 64 MHz no window applies (TX-41).
     #[test]
     fn tx_windows_as_stock() {
@@ -428,8 +428,8 @@ mod tests {
         assert!(TxCal::read(&b).is_ok(), "k without the marker: stock ignores it");
     }
 
-    /// TONE-1, TONE-16, TONE-5, TX-14 (TX audit F7): the sub-tone's deviation from the calibration, the black
-    /// radio's 0x46 CTCSS and 0x3E DCS at Normal, stock's step for High, the same step down for Low, 7 bits at
+    /// TONE-1.2, TONE-1.3, TONE-16, TONE-5, TX-14 (TX audit F7): the sub-tone's deviation from the calibration, the
+    /// black radio's 0x46 CTCSS and 0x3E DCS at Normal, stock's step for High, the same step down for Low, 7 bits at
     /// most; the tail takes the CTCSS byte. A byte over 0x7F locks transmit.
     #[test]
     fn subtone_deviation_from_the_calibration() {

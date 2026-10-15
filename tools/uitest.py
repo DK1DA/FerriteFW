@@ -486,7 +486,8 @@ def bench_css():
 
 def rule_key(rid):
     p, _, n = rid.partition("-")
-    return p, int(n) if n.isdigit() else 0
+    a, _, b = n.partition(".")  # a sub-rule, TX-30.1 (decision 160)
+    return p, int(a) if a.isdigit() else 0, int(b) if b.isdigit() else -1
 
 
 def manual_rules(docs):

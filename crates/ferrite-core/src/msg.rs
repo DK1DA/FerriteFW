@@ -801,7 +801,7 @@ mod tests {
         // modes share one slot in it, the largest being the band scope's 240 bars (SCOPE-9: 308 bytes, about
         // 0.45 KB more over the three copies than with 56 bars; accepted Oct 6, 2026).
         // The tone hint's heard tone (TSRCH-13: 2 bytes a slot, 4 with alignment) took it from 312 to 324; the stuck
-        // PTT bits (SAFE-14, one byte, 4 with alignment) to 328.
+        // PTT bits (SAFE-14.1, one byte, 4 with alignment) to 328.
         assert!(core::mem::size_of::<LiveAll>() <= 328, "{}", core::mem::size_of::<LiveAll>());
         // Each reader of the GPS watch keeps a copy of the fix; the sky list only the UI.
         assert!(core::mem::size_of::<GpsFix>() <= 32);

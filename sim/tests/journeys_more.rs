@@ -173,9 +173,9 @@ fn gps_power_backoff_and_beacon_wake() {
     assert!(seen, "Status: {}", r.text());
 }
 
-/// GPS-34: the fake module gets Ferrite's NMEA set once heard after power-on and after every wake, the sky variant
-/// (GSV every fix) while the position or satellites page is open and the normal one (GSV every 5th) after; GGA every
-/// second keeps the manager's wakes and standbys as before.
+/// GPS-34.1, GPS-34.2, GPS-34.3, GPS-34.6: the fake module gets Ferrite's NMEA set once heard after power-on and after
+/// every wake, the sky variant (GSV every fix) while the position or satellites page is open and the normal one (GSV
+/// every 5th) after; GGA every second keeps the manager's wakes and standbys as before.
 #[test]
 fn gps_nmea_set_follows_wakes_and_screens() {
     let mut r = Radio::new();

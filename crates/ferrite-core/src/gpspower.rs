@@ -862,7 +862,7 @@ mod tests {
     }
 
     #[cfg(feature = "bench")]
-    /// TERM-36: only CAS06 queries and CAS12 standby are let through, and the bytes are as the spec prints them
+    /// TERM-36.6: only CAS06 queries and CAS12 standby are let through, and the bytes are as the spec prints them
     /// (`$PCAS06,0*1B` firmware version, 2.7.7).
     #[test]
     fn only_queries_and_standby_go_to_the_module() {
@@ -892,7 +892,7 @@ mod tests {
     }
 
     #[cfg(feature = "bench")]
-    /// TERM-36, GPS-34: CAS03 takes only 0 (off), 1 (Ferrite's set) and 2 (its sky variant).
+    /// TERM-36.3, GPS-34.1, GPS-34.3: CAS03 takes only 0 (off), 1 (Ferrite's set) and 2 (its sky variant).
     #[test]
     fn nmea_off_and_ferrites_set() {
         assert_eq!(casic_refused(CAS_NMEA, 0), None);
@@ -910,7 +910,7 @@ mod tests {
     }
 
     #[cfg(feature = "bench")]
-    /// TERM-36: `gps nmea off` holds the manager until `gps nmea on`; a standby sent then keeps NMEA off after its
+    /// TERM-36.5: `gps nmea off` holds the manager until `gps nmea on`; a standby sent then keeps NMEA off after its
     /// end; nothing else goes to the module during a standby.
     #[test]
     fn bench_nmea_off_standby_on() {
@@ -947,7 +947,7 @@ mod tests {
     }
 
     #[cfg(feature = "bench")]
-    /// TERM-36: `gps standby N quiet`: NMEA off, the CAS12 100 ms later, no NMEA on after it; the NMEA set once
+    /// TERM-36.4: `gps standby N quiet`: NMEA off, the CAS12 100 ms later, no NMEA on after it; the NMEA set once
     /// NMEA comes back, or N + 3 s after the CAS12; a power off ends the test.
     #[test]
     fn bench_quiet_standby() {
@@ -983,10 +983,10 @@ mod tests {
         std::format!("{cs:02X}").into_bytes() == s[star + 1..star + 3]
     }
 
-    /// GPS-34, TERM-36: NMEA off, Ferrite's set and its sky variant are these exact bytes (CAS03 field order GGA,
-    /// GLL, GSA, GSV, RMC, VTG, ZDA, ANT, CASIC 2.7.4; the same order stock's `$PCAS03,5,0,0,0,0,3,7,60*35` uses for
-    /// the GGA, VTG and ZDA its own parser reads), each checksum the XOR between `$` and `*` (checked against the
-    /// spec's own example, `*02`), CR LF last.
+    /// GPS-34.1, GPS-34.3, TERM-36.3: NMEA off, Ferrite's set and its sky variant are these exact bytes (CAS03 field
+    /// order GGA, GLL, GSA, GSV, RMC, VTG, ZDA, ANT, CASIC 2.7.4; the same order stock's `$PCAS03,5,0,0,0,0,3,7,60*35`
+    /// uses for the GGA, VTG and ZDA its own parser reads), each checksum the XOR between `$` and `*` (checked against
+    /// the spec's own example, `*02`), CR LF last.
     #[test]
     fn nmea_set_bytes() {
         assert!(xor_ok(b"$PCAS03,1,1,1,1,1,1,1,1,0,1,0,0,1,0*02"), "the spec's example");
@@ -1007,9 +1007,10 @@ mod tests {
         assert!(!set_off(b"GNGGA,1") && !set_off(b"GPGSV,1") && !set_off(b"GNGSA,1") && !set_off(b"GPTXT,01") && !set_off(b"GN"));
     }
 
-    /// GPS-34: the set goes once the module is heard after a power-up and after each wake (never during standby or
-    /// before it answers), again when the sky variant changes, never while keyed (the next look sends it); a module
-    /// that keeps sending GLL, VTG or ZDA 2 s after it is sent it again, three times a wake at most.
+    /// GPS-34.1, GPS-34.2, GPS-34.4, GPS-34.5: the set goes once the module is heard after a power-up and after each
+    /// wake (never during standby or before it answers), again when the sky variant changes, never while keyed (the
+    /// next look sends it); a module that keeps sending GLL, VTG or ZDA 2 s after it is sent it again, three times a
+    /// wake at most.
     #[test]
     fn nmea_set_after_every_wake() {
         let mut m = GpsManager::new();

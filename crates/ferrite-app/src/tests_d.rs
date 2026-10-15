@@ -477,7 +477,7 @@ fn hf_bands_remember_their_vfo() {
     assert_eq!(t.app.set.hf.freq, f31);
 }
 
-/// PIN-6, BOOT-14: MENU held at power on is the reset, before the PIN, which it clears. The
+/// PIN-6, BOOT-14.2: MENU held at power on is the reset, before the PIN, which it clears. The
 /// questions can't be skipped past the PIN: hold BACK, PTT and the menu timeout do nothing; BACK on the first
 /// goes on to the PIN.
 #[test]

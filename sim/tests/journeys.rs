@@ -86,7 +86,7 @@ fn slot_changes_the_active_slot() {
     assert_eq!(r.sim.app().active(), 0);
 }
 
-/// A watched slot that is heard plays and is highlighted, and the active slot never moves by itself (WATCH-3,
+/// A watched slot that is heard plays and is highlighted, and the active slot never moves by itself (WATCH-3.2,
 /// WATCH-4, WATCH-5, decision 81).
 #[test]
 fn watched_slot_heard_active_stays() {
@@ -112,7 +112,7 @@ fn watch_on_and_off() {
 }
 
 /// SIDE1 held and the knob set the squelch from home; SIDE1 tapped latches the monitor, shown as MON on the
-/// card (SQL-9, SQL-10, SQL-14, MENU-11).
+/// card (SQL-9.2, SQL-10, SQL-14, MENU-11).
 #[test]
 fn squelch_and_monitor() {
     let mut r = Radio::new();
@@ -149,7 +149,7 @@ fn band_scope() {
     r.run("press BACK; expect screen \"Home\"");
 }
 
-/// The frequency counter: SIDE2 held alone opens it when it comes up (KEY-22, TSRCH-10).
+/// The frequency counter: SIDE2 held alone opens it when it comes up (KEY-22, TSRCH-10.1).
 #[test]
 fn frequency_counter() {
     let mut r = Radio::new();
@@ -157,7 +157,7 @@ fn frequency_counter() {
     r.expect_screen("Frequency counter");
 }
 
-/// AM is receive only: PTT on an airband frequency is refused and says why (TX-20, VFO-4).
+/// AM is receive only: PTT on an airband frequency is refused and says why (TX-20.1, VFO-4).
 #[test]
 fn transmit_refused_on_am() {
     let mut r = Radio::new();
@@ -166,7 +166,7 @@ fn transmit_refused_on_am() {
     r.run("up PTT; press BACK; wait 200ms; expect screen \"Home\"");
 }
 
-/// PTT A on 2 m transmits on the active slot through its shift, and the watched slots pause (KEY-7, TX-1,
+/// PTT A on 2 m transmits on the active slot through its shift, and the watched slots pause (KEY-7.1, TX-1.1,
 /// WATCH-16).
 #[test]
 fn transmit_on_two_metres() {
@@ -178,7 +178,7 @@ fn transmit_on_two_metres() {
     assert!(!r.sim.radio().live.tx.keyed);
 }
 
-/// An emergency frequency needs PTT twice (TX-29, TX-30): the first press warns.
+/// An emergency frequency needs PTT twice (TX-29, TX-3.1): the first press warns.
 #[test]
 fn emergency_needs_ptt_twice() {
     let mut r = Radio::new();
@@ -279,8 +279,8 @@ fn pocsag_and_popups_settings() {
     r.run("menu 0 4 8; press OK; expect text \"Popups Off\"");
 }
 
-/// GPS: the position page shows the fix; F5 cycles off, searching, fix, and the Status page follows (GPS-15,
-/// SBAR-14).
+/// GPS: the position page shows the fix; F5 cycles off, searching, fix, and the Status page follows (GPS-15.1,
+/// GPS-15.2, SBAR-14).
 #[test]
 fn gps_position_and_status() {
     let mut r = Radio::new();
@@ -299,7 +299,7 @@ fn hf_mode() {
     assert_ne!(r.sim.app().settings().hf.freq, 958_000, "seek moved");
 }
 
-/// FM broadcast opens from 0 3 1 on the SI4732 (BCR-1, BCR-2).
+/// FM broadcast opens from 0 3 1 on the SI4732 (BCR-1, BCR-2.1).
 #[test]
 fn fm_broadcast() {
     let mut r = Radio::new();
@@ -463,7 +463,7 @@ fn zones_and_zone_editor() {
     r.run("press OK; expect screen \"Zone editor\"; expect text \"Scan all\"; expect text \"Priority 1\"");
 }
 
-/// An automatic transmission (a beacon) keys the radio briefly and returns to home by itself (TX-1, APRS-20).
+/// An automatic transmission (a beacon) keys the radio briefly and returns to home by itself (TX-1.1, APRS-20).
 #[test]
 fn automatic_beacon_transmits() {
     let mut r = Radio::new();
@@ -485,7 +485,7 @@ fn home_layouts() {
     }
 }
 
-/// The strip beside a broadcast (MODE-5, BCR-29, HOME-14, BCR-26; decision 115): on single + scope with B playing
+/// The strip beside a broadcast (MODE-5, BCR-29.2, HOME-14, BCR-26.7; decision 115): on single + scope with B playing
 /// broadcast, B made active shows its signal, SNR and stereo pilot with the strip plainly off; back on A, the strip
 /// sweeps around 146.520 while B's broadcast plays on (its line says FM, or muted while A's call has the speaker).
 #[test]

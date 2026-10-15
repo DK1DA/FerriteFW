@@ -188,7 +188,7 @@ fn clarifier() {
     assert_eq!(t.app.slot(0).clar, 0);
 }
 
-/// SQL-12: the squelch editor's noise floor follows the signal while the squelch is closed.
+/// SQL-12.1: the squelch editor's noise floor follows the signal while the squelch is closed.
 #[test]
 fn squelch_noise_floor() {
     let mut t = T::new();

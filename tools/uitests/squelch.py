@@ -79,7 +79,7 @@ def level_change_is_live(t):
         t.put_back(stopped)
 
 
-@test("SQL-9", pages=("Home",))
+@test("SQL-9.2", pages=("Home",))
 def side1_tap_latches_monitor(t):
     """SIDE1 tapped: the squelch opens (MON on the card) and stays open until SIDE1 is tapped again."""
     stopped = quiet_slot(t)
@@ -100,7 +100,7 @@ def side1_tap_latches_monitor(t):
         t.put_back(stopped)
 
 
-@test("SQL-9", xfail="SIDE1 held alone does nothing: only the tap (monitor latch) and SIDE1 + knob/arrows are "
+@test("SQL-9.1", xfail="SIDE1 held alone does nothing: only the tap (monitor latch) and SIDE1 + knob/arrows are "
                      "built (home.rs; sim, Oct 14, 2026)", pages=("Home",))
 def side1_held_opens_while_held(t):
     """SIDE1 held: the squelch is open while it is held, and closes when it is let go."""

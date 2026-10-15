@@ -117,8 +117,8 @@ fn subtones() {
     assert_eq!(w[7], (0x07, 0x21CD), "stock's 55 Hz tail word");
 }
 
-/// TONE-20 (decision 142): DCS receive as stock V0.27's 0x0800D3CC: REG_51 0xA000 (normal) or 0x8000 (inverted)
-/// with the normal codeword for both; REG_0C bit 14 reads as the positive code, bit 15 as the negative.
+/// TONE-20.3, TONE-20.4 (decision 142): DCS receive as stock V0.27's 0x0800D3CC: REG_51 0xA000 (normal) or 0x8000
+/// (inverted) with the normal codeword for both; REG_0C bit 14 reads as the positive code, bit 15 as the negative.
 #[test]
 fn dcs_rx_matches_stock() {
     for (inverted, r51) in [(false, 0xA000 | 51), (true, 0x8000 | 51)] {
@@ -216,7 +216,7 @@ fn sleep_in_two_halves() {
 }
 
 /// Everything a receive-only build has, called in turn: REG_30 never gets a transmit bit (PA gain, MIC ADC,
-/// transmit DSP), REG_51 never its transmit enable except in DCS receive's stock values (TONE-20, decision 142:
+/// transmit DSP), REG_51 never its transmit enable except in DCS receive's stock values (TONE-20.3, decision 142:
 /// stock writes its transmit REG_51 on receive too; bit 15 only picks the sub-tone source and cannot key the chip,
 /// which REG_30 does), REG_36 (PA) never written.
 #[test]
@@ -401,7 +401,7 @@ mod tx {
         }
     }
 
-    /// The tones' REG_40 (TONE-19) and back to stock's, the top four bits kept.
+    /// The tones' REG_40 (TONE-19.3) and back to stock's, the top four bits kept.
     #[test]
     fn tone_deviation_and_back() {
         let mut r = Regs::new();

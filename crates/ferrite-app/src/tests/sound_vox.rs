@@ -94,10 +94,10 @@ fn vox_keys_the_active_slot() {
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
 }
 
-/// VOX-3 (stock's UI mode 0, 0x08025994): VOX keys only from home. A menu, the quick menu or any other screen
-/// tells the Radio task to block it (the detector reset; it samples 1.5 s after home again, `Vox::step`), and
-/// speech reported then keys nothing, so MENU 0 8 2 is reachable and VOX can be turned off there. Home again: it
-/// keys; its own Transmit screen holds it, and silence still releases it.
+/// VOX-3.1, VOX-3.5 (stock's UI mode 0, 0x08025994): VOX keys only from home. A menu, the quick menu or any other
+/// screen tells the Radio task to block it (the detector reset; it samples 1.5 s after home again, `Vox::step`), and
+/// speech reported then keys nothing, so MENU 0 8 2 is reachable and VOX can be turned off there. Home again: it keys;
+/// its own Transmit screen holds it, and silence still releases it.
 #[test]
 fn vox_only_from_home() {
     use crate::screens::nav::Dest;
@@ -140,8 +140,8 @@ fn vox_only_from_home() {
     assert!(!t.app.vox_screen());
 }
 
-/// TX-35, VOX-4 (TX audit F11): VOX never keys an emergency frequency, nor answers its prompt: a toast says why,
-/// and speech that comes and goes never acts as the second PTT.
+/// TX-35.4, TX-35.5, VOX-4 (TX audit F11): VOX never keys an emergency frequency, nor answers its prompt: a toast says
+/// why, and speech that comes and goes never acts as the second PTT.
 #[test]
 fn vox_never_on_an_emergency_frequency() {
     let mut t = T::new();

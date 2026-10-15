@@ -97,7 +97,7 @@ mod tests {
         (d, r)
     }
 
-    /// SND-12: the boot check, two readings 50 ms apart, needs both low.
+    /// SND-12.1: the boot check, two readings 50 ms apart, needs both low.
     #[test]
     fn boot_check() {
         let (d, r) = booted(true, true);
@@ -111,8 +111,8 @@ mod tests {
         assert_eq!(BOOT_POLLS as u32 * POLL_MS, 50);
     }
 
-    /// SND-12: four low readings in a row connect it, four high ones remove it (40 ms at 10 ms polls), as stock's
-    /// count; VOX-3: meanwhile it is changing.
+    /// SND-12.1: four low readings in a row connect it, four high ones remove it (40 ms at 10 ms polls), as stock's
+    /// count; VOX-3.4: meanwhile it is changing.
     #[test]
     fn four_polls_change_it() {
         let (mut d, _) = booted(false, false);
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(d.pack(), 0);
     }
 
-    /// SND-12: a bounce (a reading back at the state) starts the count again, as stock clears it.
+    /// SND-12.1: a bounce (a reading back at the state) starts the count again, as stock clears it.
     #[test]
     fn a_bounce_starts_again() {
         let (mut d, _) = booted(false, false);

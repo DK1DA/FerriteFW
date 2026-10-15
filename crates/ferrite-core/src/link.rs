@@ -536,7 +536,7 @@ mod tests {
         assert!(n <= MAX_WIRE);
     }
 
-    /// LINK-20: remote PTT's `KEY` payloads encode and decode, framed too; malformed ones don't decode.
+    /// LINK-20.1: remote PTT's `KEY` payloads encode and decode, framed too; malformed ones don't decode.
     #[test]
     fn remote_ptt_payloads() {
         for p in [Ptt::On(key::ACTIVE), Ptt::On(0), Ptt::On(1), Ptt::On(2), Ptt::Alive, Ptt::Off] {

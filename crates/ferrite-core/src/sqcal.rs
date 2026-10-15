@@ -122,7 +122,7 @@ mod tests {
         SqCal::parse(&b)
     }
 
-    /// SQL-1, SQL-15, SQL-16: stock's thresholds for this radio's calibration. 443.475 at level 4: open 0x5F - 6,
+    /// SQL-1, SQL-15, SQL-16.1: stock's thresholds for this radio's calibration. 443.475 at level 4: open 0x5F - 6,
     /// close 0x5B - 6 (about -115.5 and -117.5 dBm), noise 40 with 1 of hysteresis; at the power-on 0x4846 UHF
     /// stayed open.
     #[test]
@@ -148,7 +148,7 @@ mod tests {
         }
     }
 
-    /// SQL-16: a blank sector keeps stock's compiled-in tables.
+    /// SQL-16.4: a blank sector keeps stock's compiled-in tables.
     #[test]
     fn blank_sector_uses_stocks_defaults() {
         let c = SqCal::parse(&[0xFF; READ_LEN]);

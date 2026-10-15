@@ -155,7 +155,7 @@ mod tests {
 
     use super::*;
 
-    /// VOX-14: stock's thresholds, 101 at level 1 down to 21 at level 9.
+    /// VOX-14.1: stock's thresholds, 101 at level 1 down to 21 at level 9.
     #[test]
     fn thresholds_are_stocks() {
         assert_eq!(threshold(1), 21);
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(threshold(9), 101);
     }
 
-    /// VOX-2, VOX-5, VOX-14: on at the threshold, held down to 8 counts below it, off after the tail.
+    /// VOX-2, VOX-5, VOX-14.1: on at the threshold, held down to 8 counts below it, off after the tail.
     #[test]
     fn speech_and_tail() {
         let mut v = Vox::new();
@@ -175,7 +175,7 @@ mod tests {
         assert!(!v.step(0, 5, 2000, false, 8200), "2 s below: off");
     }
 
-    /// VOX-1, VOX-3: off at level 0, during the first 5 s and while receiving.
+    /// VOX-1, VOX-3.2, VOX-3.3: off at level 0, during the first 5 s and while receiving.
     #[test]
     fn never_while_off_booting_or_receiving() {
         let mut v = Vox::new();
@@ -187,7 +187,7 @@ mod tests {
         assert!(v.step(500, 1, 2000, false, 9100 + HOLD_MS));
     }
 
-    /// VOX-14: stock compares bits 11-4 of the 12-bit reading. The noise floor and an envelope's decay (under
+    /// VOX-14.1: stock compares bits 11-4 of the 12-bit reading. The noise floor and an envelope's decay (under
     /// 300 raw on the black radio, Oct 13, 2026) never reach level 1's 21; the loud whistle seen (~800 raw = 49)
     /// passes levels 1-3 only.
     #[test]

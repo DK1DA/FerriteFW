@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(b.as_bytes(), b"242 ft");
     }
 
-    /// GPS-15: the coordinate formats of 0 6 3.
+    /// GPS-15.2: the coordinate formats of 0 6 3.
     #[test]
     fn coordinate_formats() {
         let c = |v, f| {

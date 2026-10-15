@@ -295,7 +295,7 @@ mod tests {
         assert_ne!(region_row(&app).as_bytes(), b"Not set");
     }
 
-    /// SND-12: the speaker mic row follows the input task's detect.
+    /// SND-12.6: the speaker mic row follows the input task's detect.
     #[test]
     fn speaker_mic_row() {
         let app = App::new(crate::tests::set(), crate::tests::alert());

@@ -251,7 +251,7 @@ fn si_input_pins_belong_to_the_radio_task() {
     only(files_using("firmware/src", "SI_IN"), &["firmware/src/board.rs", RADIO], "PA7/PC5 (SI_IN)");
 }
 
-/// GPS-1, GPS-22: the GPS task owns the module's power (PA8) and its TX pin PB10 (driven low while keyed); only
+/// GPS-1.1, GPS-22: the GPS task owns the module's power (PA8) and its TX pin PB10 (driven low while keyed); only
 /// the board's safe state and the UART driver's pin table name them too.
 #[test]
 fn gps_pins_belong_to_the_gps_task() {

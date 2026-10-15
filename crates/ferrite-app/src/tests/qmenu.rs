@@ -129,7 +129,7 @@ fn pf1_gps_and_pf2_bluetooth() {
     assert_eq!((t.app.set.bt, t.app.screen()), (bt, Screen::Home));
 }
 
-/// HOME-17, DISP-16, DISP-22, DISP-23: the knob steps the brightness for the theme in use, 1-10 with no wrap, live
+/// HOME-17, DISP-16.3, DISP-22, DISP-23: the knob steps the brightness for the theme in use, 1-10 with no wrap, live
 /// (both lights), and doesn't tune; saved as any setting is.
 #[test]
 fn knob_is_brightness() {
@@ -339,8 +339,8 @@ fn both_ptts_in_the_box() {
     up(&mut t, Key::Ptt(PTT_A));
 }
 
-/// HOME-17, KEY-7: the side connector's PTT isn't one of the box's keys: it closes the box and transmits on the
-/// active slot as usual. VOX doesn't: the box isn't home, so VOX is held while it is up (VOX-3, decision 145) and
+/// HOME-17, KEY-7.4, KEY-7.6: the side connector's PTT isn't one of the box's keys: it closes the box and transmits on
+/// the active slot as usual. VOX doesn't: the box isn't home, so VOX is held while it is up (VOX-3.1, decision 145) and
 /// keys only once it has closed.
 #[test]
 fn external_ptt_and_vox_close_it_and_key() {

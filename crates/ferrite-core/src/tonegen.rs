@@ -180,8 +180,10 @@ mod tests {
     extern crate std;
     use std::vec::Vec;
 
+    /// TONE-10.2: the end tones as listed (Beep, Two-tone up and down, Chirp, Quindar), their lengths, all in the
+    /// voice band.
     #[test]
-    fn end_tones_are_tone_10() {
+    fn end_tones_as_listed() {
         let ms = |i: usize| END_TONES[i].iter().map(|s| s.1 as u32).sum::<u32>();
         assert!(END_TONES[0].is_empty());
         assert_eq!((ms(1), ms(2), ms(3), ms(4), ms(5)), (150, 200, 200, 180, 250));

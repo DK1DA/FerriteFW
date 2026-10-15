@@ -665,7 +665,7 @@ mod tests {
         p
     }
 
-    /// SAFE-24, TERM-29: both band selects held: set together, a VHF-UHF hop toggles nothing, Battery Save's sleep
+    /// SAFE-24, TERM-29.1: both band selects held: set together, a VHF-UHF hop toggles nothing, Battery Save's sleep
     /// leaves them, off clears only the other one; never the relay.
     #[test]
     fn both_held_hops_toggle_nothing() {
@@ -821,7 +821,7 @@ mod tests {
         assert!(p.relay());
     }
 
-    /// TX-23, TX-26, TX-29 (`may_sleep`, TX audit F12): the key-up and unkey plans.
+    /// TX-23.1, TX-26, TX-29 (`may_sleep`, TX audit F12): the key-up and unkey plans.
     #[test]
     fn key_up_and_unkey_orders() {
         let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::VhfRx), Cause::ActiveSlot, 0, s).unwrap());

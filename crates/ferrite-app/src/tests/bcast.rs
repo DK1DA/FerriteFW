@@ -98,8 +98,8 @@ fn handover_between_slots() {
     assert!(c.contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_100))), "{c:?}");
 }
 
-/// BCR-24, BCR-26: the card says FM while the broadcast plays, muted while a slot heard has the speaker (the Radio task
-/// decides, 2 s after: ferrite-core's watch tests); BCR-15: a slot needing the relay says so.
+/// BCR-24, BCR-26.4, BCR-26.5: the card says FM while the broadcast plays, muted while a slot heard has the speaker
+/// (the Radio task decides, 2 s after: ferrite-core's watch tests); BCR-15: a slot needing the relay says so.
 #[test]
 fn card_states() {
     let mut t = ready();
@@ -127,7 +127,7 @@ fn star_mutes_the_broadcast() {
     assert!(t.cmds().contains(&RadioCmd::Mute(0)));
 }
 
-/// BCR-26, BCR-30: the radio text (all 64 characters), else the station name, else nothing.
+/// BCR-26.3, BCR-30: the radio text (all 64 characters), else the station name, else nothing.
 #[test]
 fn rds_text_rule() {
     let mut rt = [0u8; 64];
@@ -230,7 +230,7 @@ fn out_of_range_agc_and_clock_do_not_overflow() {
     assert_eq!((s.fm_agc, s.clock), (crate::settings::AGC_MAX, 1), "in range: kept");
 }
 
-/// TX-24, BCR-29: PTT on another slot stops the broadcast before the key-up and starts it again after.
+/// TX-24, BCR-29.3: PTT on another slot stops the broadcast before the key-up and starts it again after.
 #[test]
 fn transmit_switches_the_receiver_away_and_back() {
     let mut t = ready();
@@ -249,7 +249,7 @@ fn transmit_switches_the_receiver_away_and_back() {
     assert_eq!(t.app.radio.mode, Mode::Fm);
 }
 
-/// MODE-5, BCR-29, HOME-14 (decision 115): on single + scope with another slot playing broadcast, home's strip sweeps
+/// MODE-5, BCR-29.2, HOME-14 (decision 115): on single + scope with another slot playing broadcast, home's strip sweeps
 /// around the active slot and the broadcast keeps playing beside it: the knob stops and restarts the strip only
 /// (MODE-4), never the broadcast; the strip tells the Radio task it is the strip (it looks at the slot's own
 /// frequency). The broadcast slot made active stops the strip and keeps the broadcast; so does an active slot

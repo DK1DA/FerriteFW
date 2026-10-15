@@ -302,8 +302,8 @@ fn baud_within_the_uart() {
     assert_eq!(pc.link.take_baud(), None);
 }
 
-/// LINK-24: REBOOT on the cable is answered, then handed to the caller once; never while transmitting; on
-/// Bluetooth with the PIN lock on, only after AUTH (LINK-30).
+/// LINK-24.1, LINK-24.2, LINK-24.3: REBOOT on the cable is answered, then handed to the caller once; never while
+/// transmitting; on Bluetooth with the PIN lock on, only after AUTH (LINK-30).
 #[test]
 fn reboot_to_the_bootloader() {
     let mut pc = Pc::new(true);
@@ -389,8 +389,8 @@ fn text(a: &[u8]) -> &str {
     core::str::from_utf8(a).unwrap()
 }
 
-/// LINK-20: KEY on keys the active slot through the PTT path (the Transmit screen, marked Remote), keepalives
-/// hold it, KEY off unkeys; then a keepalive says it isn't keyed, and KEY off is always ok.
+/// LINK-20.1, LINK-20.4, LINK-20.6, LINK-20.12: KEY on keys the active slot through the PTT path (the Transmit screen,
+/// marked Remote), keepalives hold it, KEY off unkeys; then a keepalive says it isn't keyed, and KEY off is always ok.
 #[test]
 fn remote_ptt_keys_and_unkeys() {
     let mut pc = Pc::tx();
@@ -428,7 +428,7 @@ fn remote_ptt_keys_and_unkeys() {
     }
 }
 
-/// LINK-20: no keepalive for 2 s, no transmit, and the carrier drops at once (a cut, TX-47: no 400 ms hold); the
+/// LINK-20.4: no keepalive for 2 s, no transmit, and the carrier drops at once (a cut, TX-47.3: no 400 ms hold); the
 /// PC hears why.
 #[test]
 fn remote_ptt_keepalive_timeout() {
@@ -446,7 +446,7 @@ fn remote_ptt_keepalive_timeout() {
     assert_eq!((s, text(&a)), (Status::Invalid as u8, RemoteEnd::Keepalive.text()));
 }
 
-/// LINK-20, LINK-28: the session closing or moving port ends a remote transmission, as a cut (TX-47).
+/// LINK-20.5, LINK-28: the session closing or moving port ends a remote transmission, as a cut (TX-47.4).
 #[test]
 fn remote_ptt_ends_with_the_session() {
     let mut pc = Pc::tx();
@@ -458,7 +458,7 @@ fn remote_ptt_ends_with_the_session() {
     assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::Session.text());
 }
 
-/// LINK-20: the radio's own refusals come back as `invalid` with the reason; the Radio task's stops too.
+/// LINK-20.2, LINK-20.7: the radio's own refusals come back as `invalid` with the reason; the Radio task's stops too.
 #[test]
 fn remote_ptt_refusals_pass_through() {
     let mut pc = Pc::new(true); // a receive-only build
@@ -480,7 +480,7 @@ fn remote_ptt_refusals_pass_through() {
     pc.pass(100, &live);
     assert!(!pc.app.remote_keyed());
     assert_eq!(text(&pc.ptt(Ptt::Alive).1), "transmitter cooling");
-    // the transmit timeout (TX-30)
+    // the transmit timeout (TX-30.3)
     let mut pc = Pc::tx();
     assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
     let limit = pc.app.set.tx_timeout_s() * 1000;
@@ -494,8 +494,8 @@ fn remote_ptt_refusals_pass_through() {
     assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::Timeout.text());
 }
 
-/// LINK-20, TX-35: a remote key-up never transmits on an emergency frequency, never opens the second-PTT prompt,
-/// and never answers one a person opened.
+/// LINK-20.9, LINK-20.10, TX-35.1, TX-35.5: a remote key-up never transmits on an emergency frequency, never opens the
+/// second-PTT prompt, and never answers one a person opened.
 #[test]
 fn remote_ptt_never_on_an_emergency_frequency() {
     let mut pc = Pc::tx();
@@ -516,7 +516,7 @@ fn remote_ptt_never_on_an_emergency_frequency() {
     assert!(!pc.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. } | RadioCmd::TxPlan { .. })));
 }
 
-/// LINK-20: the radio's operator wins. A local PTT during a remote transmission ends it and keys nothing until let
+/// LINK-20.8: the radio's operator wins. A local PTT during a remote transmission ends it and keys nothing until let
 /// go; a remote key-up is refused while a local PTT is held; after, PTT keys as usual.
 #[test]
 fn remote_ptt_local_ptt_wins() {
@@ -542,7 +542,7 @@ fn remote_ptt_local_ptt_wins() {
     pc.ptt(Ptt::Off);
 }
 
-/// LINK-20, TX-43: `KEY` is answered without room for the largest answer and with the store busy (on the cable its
+/// LINK-20.15, TX-43.1: `KEY` is answered without room for the largest answer and with the store busy (on the cable its
 /// answers wait in the send ring while keyed), so keepalives keep coming in.
 #[test]
 fn remote_ptt_answered_with_a_full_ring() {
@@ -577,7 +577,7 @@ fn remote_ptt_answered_with_a_full_ring() {
     assert!(pc.app.remote_keyed(), "the keepalive counted: 1 s since it");
 }
 
-/// LINK-20, LINK-30: on Bluetooth with a PIN lock, `KEY` only after `AUTH`.
+/// LINK-20.14, LINK-30: on Bluetooth with a PIN lock, `KEY` only after `AUTH`.
 #[test]
 fn remote_ptt_needs_the_pin_on_bluetooth() {
     let mut bt = Pc::tx();
@@ -894,7 +894,7 @@ fn remote_keys_never_transmit() {
     assert!(!pc.app.remote_in, "never left on");
 }
 
-/// LINK-19, DISP-15: a remote key on a dark screen only wakes it, as the radio's keys do.
+/// LINK-19, DISP-15.1: a remote key on a dark screen only wakes it, as the radio's keys do.
 #[test]
 fn remote_key_wakes_first() {
     let mut pc = Pc::new(true);

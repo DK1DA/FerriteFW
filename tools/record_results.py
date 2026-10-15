@@ -20,6 +20,13 @@ only the newest automated row is kept: a newer run replaces the older automated 
 rewrites its row only if the row changed), an older run changes nothing. Rows written by hand (any other note) are never touched. Rows stay in date order, so
 the entry's last row is its latest result. A rule's How doesn't matter: a host-covered rule gets its radio
 confirmation the same way. Rules without an entry are reported.
+
+Split rules (decision 160): a rule split into sub-rules (TX-30 -> TX-30.1, ...) gets no rows itself. A run's rules
+are read from its tests with today's tags, so an older run lands on the sub-rules: a uitest by the rules its test is
+tagged with now (tools/uitests; a test that was itself split into narrower tests is re-read check by check,
+CHECK_SPLITS: which of its checks belong to which rule, and a rule none of whose checks ran gets no row), a bench
+check by tools/bench_rules.py's RULE_TAGS (the table bench.py writes with). What can't be re-pointed is reported,
+never recorded on the parent.
 """
 import argparse
 import datetime
@@ -30,11 +37,26 @@ import re
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import bench_rules  # noqa: E402
+import testplan  # noqa: E402
 ROOT = HERE.parent.parent
 RESULTS = ROOT / "bench-results"
 DOCS = ROOT / "docs"
 
-ENTRY = re.compile(r"^### ([A-Z]+-\d+)\s*$")
+ENTRY = re.compile(r"^### ([A-Z]+-\d+(?:\.\d+)?)\s*$")
+
+# uitests split into narrower ones after they ran: the old test's checks (by the start of their "what") per rule.
+CHECK_SPLITS = {
+    ("uitest", "relay_cancels_watch_and_says_so"): {  # now relay_cancels_watch, relay_cancel_toast, _status_row
+        "WATCH-11.1": ["watch on: TW", "A tuned to 28.4 MHz", "cancelled: no TW or DW", "the other cards say relay",
+                       "back on 2 m: watch resumes", "B watched again"],
+        "WATCH-11.2": ["a toast: Watch off"],
+        "WATCH-11.3": ["Status's Watch row"],
+        "SBAR-17": ["Status's Watch row"],
+    },
+}
+UI_ORDER = {"fail": 4, "error": 4, "xfail": 3, "xpass": 2, "pass": 2, "skip": 1}
 AUTO = re.compile(r"^(uitest|bench) \S")
 RUN = re.compile(r"run (\d{8}-\d{6})")
 PLACEHOLDER = re.compile(r"^\|\s*\|\s*\|\s*☐\s*\|\s*\|\s*$")
@@ -110,13 +132,87 @@ def radio_run(r):
     return True, ""
 
 
-def rows_of(r, stamp):
+def split_rules(docs):
+    """{split parent: [its sub-rules]} from the manual."""
+    rules, _, _ = testplan.parse_manual(pathlib.Path(docs) / "manual.md")
+    return testplan.children(rules)
+
+
+def ui_tags():
+    """{uitest name: [the rules it is tagged with now]}."""
+    out = {}
+    for rid, tests in testplan.scan_uitests().items():
+        for name, _ in tests:
+            out.setdefault(name.split(".")[-1], []).append(rid)
+    return out
+
+
+def ui_rules(r, kids, tags, lost):
+    """A uitest run's {rule: result, test, why}, rebuilt from its tests as uitest.py does (the worst result per
+    rule, the first test on a tie), with split parents re-pointed to their sub-rules (`lost` gets what can't be)."""
+    if not r.get("tests"):
+        return {rid: x for rid, x in r.get("rules", {}).items() if rid not in kids or lost.append((rid, x["test"]))}
+    rules = {}
+
+    def put(rid, res, name, why):
+        prev = rules.get(rid)
+        if prev is None or UI_ORDER.get(res, 4) > UI_ORDER.get(prev["result"], 4):
+            rules[rid] = dict(result=res, test=name, why=why)
+
+    for t in r["tests"]:
+        name, res, why = t["name"], t["result"], t.get("why", "")
+        split = CHECK_SPLITS.get(("uitest", name))
+        if split:
+            for rid, starts in split.items():
+                cs = [c for c in t.get("checks", []) if any(c["what"].startswith(w) for w in starts)]
+                if not cs:
+                    continue  # the run never reached its checks
+                bad = [c for c in cs if not c["ok"]]
+                if not bad:
+                    put(rid, "pass", name, "")
+                else:
+                    w = bad[0]["what"]
+                    put(rid, res if res in ("fail", "error", "xfail") else "fail", name,
+                        why if w in why else f"{w}: got {bad[0].get('got')}")
+            continue
+        for rid in t.get("rules", []):
+            if rid not in kids:
+                put(rid, res, name, why)
+                continue
+            subs = [x for x in tags.get(name, []) if x in kids[rid]]
+            if not subs:
+                lost.append((rid, name))
+            for x in subs:
+                put(x, res, name, why)
+    return rules
+
+
+def bench_rules_of(r, kids, lost):
+    """A bench run's {rule: result, test, why, scope, note}, its checks re-tagged with today's RULE_TAGS (a check the
+    table doesn't know keeps its own tags; one of those naming a split parent goes to `lost`)."""
+    if not r.get("tests"):
+        return {rid: x for rid, x in r.get("rules", {}).items()
+                if rid not in kids or lost.append((rid, x.get("test", "")))}
+    tests = []
+    for t in r["tests"]:
+        scope = bench_rules.tags(t["name"]) or {rid: s for rid, s in (t.get("scope") or {}).items()
+                                                if rid not in kids or lost.append((rid, t["name"].split("@")[0]))}
+        tests.append(dict(t, rules=list(scope), scope=scope))
+    return bench_rules.per_rule(tests)
+
+
+def rows_of(r, stamp, kids=None, tags=None, lost=None):
     """[(rule, tool, stamp, row text)] for one results.json."""
     date = datetime.datetime.strptime(stamp[:8], "%Y%m%d").strftime("%b %-d, %Y")
     fw = f"{r.get('commit') or '?'} ({r.get('build') or '?'})"
     tool = "uitest" if r.get("tool") == "uitest.py" else "bench"
+    kids, lost = kids or {}, lost if lost is not None else []
+    if tool == "uitest":
+        rules = ui_rules(r, kids, tags if tags is not None else ui_tags(), lost)
+    else:
+        rules = bench_rules_of(r, kids, lost)
     out = []
-    for rid, x in sorted(r.get("rules", {}).items()):
+    for rid, x in sorted(rules.items()):
         res = x.get("result")
         if res == "skip":
             continue
@@ -215,6 +311,7 @@ def record_paths(paths, docs=DOCS, root=RESULTS, newest=False, dry=False):
     """Record the given sessions or results.json files (all under root when none); returns report lines."""
     say = []
     rows = []
+    kids, tags = split_rules(docs), ui_tags()
     for stamp, kind, f in find_results(paths, root, newest):
         r = json.load(open(f))
         ok, why = radio_run(r)
@@ -223,9 +320,13 @@ def record_paths(paths, docs=DOCS, root=RESULTS, newest=False, dry=False):
             if paths:
                 say.append(f"skipped {name} {kind}: {why}")
             continue
-        rs = rows_of(r, stamp)
+        lost = []
+        rs = rows_of(r, stamp, kids, tags, lost)
         rows += rs
         say.append(f"{name} {kind}: {len(rs)} rules")
+        for rid, test in sorted(set(lost)):
+            say.append(f"  {rid} ({test}): a split rule, and the test names none of its sub-rules"
+                       + (" (rewrite it: bench.py --rule-results)" if kind == "bench" else "") + "; not recorded")
     changed, same, missing = apply(rows, docs, dry)
     say.append(f"{'would record' if dry else 'recorded'} {len(changed)} rules into {docs}/test-plan"
                f" ({len(same)} already up to date)" + (f"; no entry for {' '.join(missing)}" if missing else ""))

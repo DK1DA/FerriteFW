@@ -47,14 +47,14 @@ fn refused(t: &T) -> Option<Refusal> {
     }
 }
 
-/// TX-22, TX-25: PTT keys the active slot and shows the Transmit screen; PTT up unkeys and goes home.
+/// TX-22.2, TX-25: PTT keys the active slot and shows the Transmit screen; PTT up unkeys and goes home.
 #[test]
 fn ptt_keys_and_unkeys() {
     let mut t = ready();
     ptt(&mut t, true);
     assert!(matches!(t.app.screen(), Screen::Transmit(_)));
     assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: true }));
-    t.tap(Key::Menu); // TX-22: MENU does nothing while keyed
+    t.tap(Key::Menu); // TX-22.3: MENU does nothing while keyed
     assert!(matches!(t.app.screen(), Screen::Transmit(_)));
     ptt(&mut t, false);
     assert_eq!(t.app.screen(), Screen::Home);
@@ -76,7 +76,7 @@ fn ptt_up_unkeys_wherever_the_screen_went() {
     assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }));
 }
 
-/// TX-20: out of the region's band: refused with the reason and the fix; OK goes there, BACK closes.
+/// TX-20.1: out of the region's band: refused with the reason and the fix; OK goes there, BACK closes.
 #[test]
 fn out_of_band_is_refused_with_the_fix() {
     let mut t = ready();
@@ -125,7 +125,7 @@ fn radio_refusal_shows() {
     assert_eq!(refused(&t), Some(Refusal::Locked));
 }
 
-/// TX-30: unkey at the timeout (0 8 1 1, 120 s by default), home with a toast.
+/// TX-30.3: unkey at the timeout (0 8 1 1, 120 s by default), home with a toast.
 #[test]
 fn timeout_unkeys() {
     let mut t = ready();
@@ -136,7 +136,8 @@ fn timeout_unkeys() {
     assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }));
 }
 
-/// TX-30 (TX audit F10): 0 8 1 1 sets the timeout the UI unkeys at, and goes to the Radio task for its backstop.
+/// TX-30.3, TX-30.4 (TX audit F10): 0 8 1 1 sets the timeout the UI unkeys at, and goes to the Radio task for its
+/// backstop.
 #[test]
 fn timeout_follows_the_setting() {
     let mut t = ready();
@@ -151,12 +152,12 @@ fn timeout_follows_the_setting() {
     assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }));
 }
 
-/// TX-3: on an emergency frequency the first PTT only prompts; a second within 5 s transmits.
+/// TX-3.1, TX-3.2: on an emergency frequency the first PTT only prompts; a second within 5 s transmits.
 #[test]
 fn emergency_frequency_needs_ptt_twice() {
     let mut t = ready();
     t.app.set_region(Some(Region::Us), true);
-    tune(&mut t, mhz(406) + 2_500); // EPIRB (243.0 is on the 1.25 m PA path, locked by TX-10 for now)
+    tune(&mut t, mhz(406) + 2_500); // EPIRB (243.0 is on the 1.25 m PA path, locked by TX-10.2 for now)
     ptt(&mut t, true);
     assert!(matches!(t.app.screen(), Screen::Emergency(_)));
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
@@ -167,7 +168,7 @@ fn emergency_frequency_needs_ptt_twice() {
     assert!(matches!(t.app.screen(), Screen::Transmit(_)));
     let c = t.cmds();
     assert!(c.contains(&RadioCmd::Transmit { slot: 0, on: true }));
-    // TX-35, TX audit F11: the plan says a person confirmed it, for the Radio task's own check.
+    // TX-35.6, TX audit F11: the plan says a person confirmed it, for the Radio task's own check.
     assert!(c.iter().any(|c| matches!(c, RadioCmd::TxPlan { confirmed: true, .. })));
     ptt(&mut t, false);
     // Unanswered: home after 5 s.
@@ -177,7 +178,7 @@ fn emergency_frequency_needs_ptt_twice() {
     assert_eq!(t.app.screen(), Screen::Home);
 }
 
-/// TX-35: automatic transmissions are refused on an emergency frequency, with a toast.
+/// TX-35.2, TX-35.3, TX-35.5: automatic transmissions are refused on an emergency frequency, with a toast.
 #[test]
 fn automatic_tx_refused_on_emergency() {
     let mut t = ready();
@@ -189,7 +190,7 @@ fn automatic_tx_refused_on_emergency() {
     assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"emergency frequency"));
 }
 
-/// TX-12: the level name only; 1.25 m shows its cap.
+/// TX-12.1: the level name only; 1.25 m shows its cap.
 #[test]
 fn power_level_names() {
     let mut t = ready();
@@ -401,8 +402,8 @@ fn frequency_counter() {
     assert!(t.cmds().contains(&RadioCmd::Counter(false)), "TSRCH-8: it only ever received");
 }
 
-/// TSRCH-10, TSRCH-11: only 64–1300 MHz outside 630–756 counts; # freezes the reading while the list keeps
-/// filling, and OK copies the held frequency.
+/// TSRCH-10.1, TSRCH-10.2, TSRCH-11: only 64–1300 MHz outside 630–756 counts; # freezes the reading while the list
+/// keeps filling, and OK copies the held frequency.
 #[test]
 fn counter_range_and_hold() {
     let mut t = T::new();
@@ -673,7 +674,7 @@ fn no_callsign_fix_is_the_callsign_page() {
     assert_eq!(t.app.screen(), Screen::Home, "back where it was");
 }
 
-/// TX-10 (safety): 1.25 m never keys until its 0.25 W ceiling is measured; PTT shows why. Receive is unaffected.
+/// TX-10.1 (safety): 1.25 m never keys until its 0.25 W ceiling is measured; PTT shows why. Receive is unaffected.
 #[test]
 fn unmeasured_125m_refuses() {
     let mut t = ready();
@@ -702,7 +703,7 @@ fn unmeasured_125m_refuses() {
     ptt(&mut t, false);
 }
 
-/// TX-20: a slot in AM refuses PTT ("AM is receive only": no AM modulator); the fix is MENU 3, Mode.
+/// TX-20.1: a slot in AM refuses PTT ("AM is receive only": no AM modulator); the fix is MENU 3, Mode.
 #[test]
 fn am_is_receive_only() {
     let mut t = ready();
@@ -769,7 +770,8 @@ fn busy_lockout_on_off() {
     }
 }
 
-/// KEY-7: PTT B transmits on slot B even when A is the active slot; the connector's PTT keys the active slot.
+/// KEY-7.2, KEY-7.4: PTT B transmits on slot B even when A is the active slot; the connector's PTT keys the active
+/// slot.
 #[test]
 fn ptt_b_keys_slot_b() {
     let mut t = ready();
@@ -787,7 +789,7 @@ fn ptt_b_keys_slot_b() {
     t.app.key_up(Key::PTT, t.t + 300, &s);
 }
 
-/// KEY-7 (decision 77): PTT A keys the active slot, as nicFW's PTT does; there is no PTT C.
+/// KEY-7.1, KEY-7.5 (decision 77): PTT A keys the active slot, as nicFW's PTT does; there is no PTT C.
 #[test]
 fn ptt_a_keys_the_active_slot() {
     let mut t = ready();
@@ -1101,7 +1103,8 @@ fn scope_live(t: &mut T, centre: Freq10, at: usize, peak: u8, sweeps: u8, open: 
     t.wait(100);
 }
 
-/// SCOPE-3, SCOPE-12: SIDE1 listens to the marker and PTT then transmits there; PTT while sweeping doesn't.
+/// SCOPE-3, SCOPE-12.1, SCOPE-12.2: SIDE1 listens to the marker and PTT then transmits there; PTT while sweeping
+/// doesn't.
 #[test]
 fn scope_listen_and_talk() {
     let mut t = ready();
@@ -1262,8 +1265,8 @@ fn dialer_sends_then_unkeys() {
     assert!(!matches!(t.app.screen(), Screen::Transmit(_)), "back to the dialer");
 }
 
-/// TONE-5 to TONE-10, VOX-10, VOX-12, DTMF-3, DTMF-8: the Transmit group's settings go to the Radio task as they
-/// change; CW ID needs a callsign; a channel's own end tone and tail win over the radio's.
+/// TONE-5 to TONE-9, TONE-10.1, VOX-10, VOX-12, DTMF-3, DTMF-8: the Transmit group's settings go to the Radio task
+/// as they change; CW ID needs a callsign; a channel's own end tone and tail win over the radio's.
 #[test]
 fn transmit_tones_reach_the_radio() {
     let mut t = ready();
@@ -1497,7 +1500,7 @@ fn every_way_out_of_a_mode_stops_it() {
                 assert_eq!(sent, 1, "{m:?}, {out:?}: the stop command, once");
             } else {
                 // still running: only on its own screen (no timeout there; the scope refuses PTT unless listening,
-                // SCOPE-12), and nothing stopped
+                // SCOPE-12.2), and nothing stopped
                 assert_eq!((t.app.radio.mode, sent), (m, 0), "{m:?}, {out:?}");
                 assert!(t.app.screen() == shown && matches!(out, Out::Timeout | Out::Ptt), "{m:?}, {out:?}: running behind another screen");
             }
@@ -1643,8 +1646,9 @@ fn modes_hold_a_lease() {
     assert!(!t.cmds().contains(&RadioCmd::Lease), "no mode, no lease");
 }
 
-/// HOME-13 (UI backlog 6): while the knob turns, home redraws only the active slot's part; the other slots, the
-/// activity rows and the strip wait, and draw once the knob rests, to the same picture a full redraw gives.
+/// HOME-13.1, HOME-13.2, HOME-13.3 (UI backlog 6): while the knob turns, home redraws only the active slot's part; the
+/// other slots, the activity rows and the strip wait, and draw once the knob rests, to the same picture a full redraw
+/// gives.
 #[test]
 fn knob_holds_the_heavier_redraws() {
     struct Count(FrameBuffer, Vec<(i32, i32, i32, i32)>);
@@ -1694,12 +1698,12 @@ fn knob_holds_the_heavier_redraws() {
     }
 }
 
-/// MODE-1, MODE-2, MODE-5, BCR-29, TX-24: random use (keys, the knob, layouts, screens opened, timeouts, PTT, slots
-/// tuned in and out of the broadcast band) never leaves the radio in
-/// a mode the app doesn't want: after every step the mode is the wanted one; home on the plain layout with no
-/// mode screen under it is normal receive; and the commands sent, played on a model of the Radio task, never
-/// start a mode over another and end in the mode the app thinks runs. The broadcast runs beside nothing but home's
-/// strip, and only with the active slot a normal one (MODE-5); never while keyed.
+/// MODE-1, MODE-2, MODE-5, BCR-29.1, BCR-29.3, TX-24: random use (keys, the knob, layouts, screens opened, timeouts,
+/// PTT, slots tuned in and out of the broadcast band) never leaves the radio in a mode the app doesn't want: after
+/// every step the mode is the wanted one; home on the plain layout with no mode screen under it is normal receive; and
+/// the commands sent, played on a model of the Radio task, never start a mode over another and end in the mode the app
+/// thinks runs. The broadcast runs beside nothing but home's strip, and only with the active slot a normal one
+/// (MODE-5); never while keyed.
 #[test]
 fn random_use_keeps_modes_in_step() {
     const KEYS: [Key; 16] = [
@@ -1866,7 +1870,7 @@ fn random_use_keeps_modes_in_step() {
     assert!(beside > 0, "the strip swept beside a broadcast");
 }
 
-/// SAFE-14: a PTT held from boot for over 1 s (the Radio task's `TxLive::ptt_stuck`) shows "PTT stuck" with the
+/// SAFE-14.2: a PTT held from boot for over 1 s (the Radio task's `TxLive::ptt_stuck`) shows "PTT stuck" with the
 /// inputs' names as a popup in the middle, kept up while held, over another toast, and 2 s after the release.
 #[test]
 fn ptt_stuck_notice() {
@@ -1901,7 +1905,7 @@ fn ptt_stuck_notice() {
     assert!(shown(&t).is_none());
 }
 
-/// SAFE-14: booted with PTT A held: home's first draw already has the "PTT stuck" popup on the panel, in the
+/// SAFE-14.2: booted with PTT A held: home's first draw already has the "PTT stuck" popup on the panel, in the
 /// middle of the screen (the hint bar's toast wasn't seen on the radio, Oct 13, 2026).
 #[test]
 fn ptt_stuck_on_screen_at_boot() {

@@ -355,7 +355,7 @@ mod tests {
         let ok = req(mhz(146) + 52_000);
         assert_eq!(t.check(&ok, &p, 0), Ok(()));
         assert_eq!(t.check(&Req { am: true, ..ok }, &p, 0), Err(Refusal::AmRxOnly));
-        // TX audit F11: the UI's refusals made again in the Radio task (TX-20, TX-21, TX-24, HF-24, CHAN-4).
+        // TX audit F11: the UI's refusals made again in the Radio task (TX-20.1, TX-21, TX-24, HF-24, CHAN-4).
         assert_eq!(t.check(&Req { rx_only: true, ..ok }, &p, 0), Err(Refusal::RxOnlyChannel));
         assert_eq!(t.check(&Req { busy: true, ..ok }, &p, 0), Err(Refusal::Busy));
         assert_eq!(t.check(&Req { hf_si: true, ..req(mhz(28) + 40_000) }, &p, 0), Err(Refusal::ReceiveOnlyHere));
@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(t.check(&sos, &p, 0), Err(Refusal::Emergency));
         assert_eq!(t.check(&Req { confirmed: true, ..sos }, &p, 0), Ok(()));
         assert_eq!(t.check(&Req { confirmed: true, person: false, ..sos }, &p, 0), Err(Refusal::Emergency), "TX-35");
-        // 243.0 MHz: the 200-300 MHz path is locked until measured, second PTT or not (TX-10, TX audit M3).
+        // 243.0 MHz: the 200-300 MHz path is locked until measured, second PTT or not (TX-10.2, TX audit M3).
         let sos = Req { extend: true, confirmed: true, ..req(mhz(243)) };
         assert_eq!(t.check(&sos, &p, 0), Err(Refusal::Unmeasured125));
     }
@@ -414,8 +414,8 @@ mod tests {
         assert!(s.is_empty());
     }
 
-    /// TX-47 (TX audit F5): stock's 400 ms carrier hold at every unkey, voice or data, tail or not (the tail plays
-    /// inside it); a cut drops at once.
+    /// TX-47.1, TX-47.4 (TX audit F5): stock's 400 ms carrier hold at every unkey, voice or data, tail or not (the tail
+    /// plays inside it); a cut drops at once.
     #[test]
     fn carrier_held_400_ms_at_every_unkey() {
         let mut t = TxSeq::new();
@@ -438,9 +438,9 @@ mod tests {
         assert!(!s.as_slice().iter().take_while(|x| **x != Act::PaZero).any(|x| matches!(x, Act::Wait(_))), "a cut: no hold");
     }
 
-    /// LINK-20, TX-47: a remote key-up lost (no keepalive, the session gone) is a cut: no end tone, CW ID or carrier
-    /// hold before the PA goes to 0 (the bench measured 2.72 s from the last keepalive with the hold); its PTT counts
-    /// as up, so the next key-up is allowed.
+    /// LINK-20.4, LINK-20.5, TX-47.3, TX-47.4: a remote key-up lost (no keepalive, the session gone) is a cut: no end
+    /// tone, CW ID or carrier hold before the PA goes to 0 (the bench measured 2.72 s from the last keepalive with the
+    /// hold); its PTT counts as up, so the next key-up is allowed.
     #[test]
     fn remote_loss_is_a_cut() {
         let mut t = TxSeq::new();

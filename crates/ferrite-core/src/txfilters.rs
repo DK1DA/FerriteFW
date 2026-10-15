@@ -42,7 +42,7 @@ pub fn aprs_filters(aprs: bool) -> Option<Filters> {
 mod tests {
     use super::*;
 
-    /// APRS-14 (decision 135): an APRS burst keys with the `data` TX audio set-up in every build, a voice key-up
+    /// APRS-14.3 (decision 135): an APRS burst keys with the `data` TX audio set-up in every build, a voice key-up
     /// with the chip's voice settings (none changed); `txtest` adds its own only in a bench build (decision 151).
     #[test]
     fn aprs_bursts_use_the_data_setup() {

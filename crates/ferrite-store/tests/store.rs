@@ -336,8 +336,8 @@ fn settings_reset_erases_every_channel() {
     index_agrees(&s);
 }
 
-/// BOOT-14: the reset wipes every record area but the settings and calibration, and is a first boot again: the
-/// next save after setup seeds as on a new radio. Outside the US and Canada no WX zone.
+/// BOOT-14.3, BOOT-14.4, BOOT-14.5: the reset wipes every record area but the settings and calibration, and is a first
+/// boot again: the next save after setup seeds as on a new radio. Outside the US and Canada no WX zone.
 #[test]
 fn reset_wipes_and_seeds_again() {
     let s = mount(seeded());
@@ -566,7 +566,7 @@ fn fake_patch() -> (ferrite_core::ssb::Patch, Vec<u8>) {
     (ferrite_core::ssb::Patch { len: p.len() as u32, sha: ferrite_core::sha256::sha256(&p) }, p)
 }
 
-/// HF-18, HF-20, HF-21 (SAFE-9): the patch installs into SSB_PATCH and checks; the same patch again writes
+/// HF-18, HF-20, HF-21 (SAFE-9.1): the patch installs into SSB_PATCH and checks; the same patch again writes
 /// nothing; a reformat (a foreign header) keeps it; a patch that doesn't match its header is refused before
 /// anything is erased; nothing outside SSB_PATCH changes.
 #[test]

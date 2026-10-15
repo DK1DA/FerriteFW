@@ -294,8 +294,8 @@ mod tests {
         assert_eq!(o.audio, None, "B muted, A closed");
     }
 
-    /// HOME-15, WATCH-3: a muted active slot is never heard and takes no audio priority: a watched slot open
-    /// beside it plays. On a shared chip it keeps only its dwell, so the slot sharing it still gets turns; it
+    /// HOME-15, WATCH-3.3, WATCH-3.4: a muted active slot is never heard and takes no audio priority: a watched slot
+    /// open beside it plays. On a shared chip it keeps only its dwell, so the slot sharing it still gets turns; it
     /// still listens (its squelch is reported as open).
     #[test]
     fn muted_slot_never_blocks() {
@@ -333,7 +333,7 @@ mod tests {
         assert!(!w.tick(32_000, &c, [false; 2], false).paused, "a key resumes");
     }
 
-    /// WATCH-11: a watch set needing different relay states cancels watch until the set agrees again.
+    /// WATCH-11.1: a watch set needing different relay states cancels watch until the set agrees again.
     #[test]
     fn relay_mismatch_cancels() {
         let mut w = Watch::new();
@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(h.next(9_020, &Out::default(), 0), None);
     }
 
-    /// PWR-21: the chip the hop turns to by the next tick is named a tick early, never while a chip is heard or
+    /// PWR-21.2: the chip the hop turns to by the next tick is named a tick early, never while a chip is heard or
     /// only one has a slot; in a 10 ms tick run it is named on exactly the tick before each hop.
     #[test]
     fn hop_due_a_tick_early() {

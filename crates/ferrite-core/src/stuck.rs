@@ -47,7 +47,7 @@ pub fn names(mask: u8, out: &mut [u8]) -> usize {
 mod tests {
     use super::*;
 
-    /// SAFE-14: what was stuck since boot stays in the high nibble after the release; the low nibble follows now.
+    /// SAFE-14.2: what was stuck since boot stays in the high nibble after the release; the low nibble follows now.
     #[test]
     fn latch_keeps_what_was_stuck() {
         let v = latch(0, PTT_A);
