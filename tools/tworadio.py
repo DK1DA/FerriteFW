@@ -832,6 +832,23 @@ class Run:
             raise SafetyError("refused: " + "; ".join(bad) + " (LINK-35: both radios must run tx-dry, 0x82): "
                               "nothing was changed or keyed")
 
+    MIN_BATTERY_PCT = 30  # Alex, Oct 14, 2026: the black radio reached 7.0 V, near the cut-off, during a run
+
+    def battery_check(self):
+        """Both radios' batteries from the status bar readback: no key-up below MIN_BATTERY_PCT, low or cut-off
+        (a low battery refuses or cuts transmit, which would read as a test failure)."""
+        bad = []
+        for role, x in self.radios.items():
+            if not hasattr(x, "ui"):
+                continue  # the selftest's fakes
+            bar = (x.ui().get("bar") or {})
+            pct, low, cut = int(bar.get("battery", 100)), int(bar.get("low", 0)), int(bar.get("cutoff", 0))
+            self.log(f"battery: {role} {pct}%{' LOW' if low else ''}{' CUT-OFF' if cut else ''}")
+            if pct < self.MIN_BATTERY_PCT or low or cut:
+                bad.append(f"the {role} radio's battery is at {pct}%{' (low)' if low else ''}{' (cut-off)' if cut else ''}")
+        if bad:
+            raise SafetyError("refused: " + "; ".join(bad) + f": charge it to at least {self.MIN_BATTERY_PCT}% first")
+
     def ctx(self):
         return Ctx(self)
 
@@ -976,6 +993,7 @@ class Run:
 
     def run(self, tests):
         self.verify()
+        self.battery_check()
         c = self.ctx()
         self.snapshot()
         results = []
