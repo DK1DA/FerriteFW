@@ -5,9 +5,12 @@ readback in the radio's own line format, SLOT, KEY's remote PTT), and models onl
 as the manual's rules say the firmware does it: squelch on a carrier from the other radio, tone squelch and the tone
 hint (TSRCH-12 to TSRCH-15), watch and quick mute with the speaker, the broadcast slot's FM/muted, busy lockout, the
 backlight and its wake, Battery Save's hold and cycle on REG_30, a channel scan of a zone with the resume rules,
-scan inputs, \\* and # skips and PTT on a hit, the zones page's delete. `bugs` breaks one thing on purpose, so the
-selftest sees the test that must catch it fail. The air carries each keyed radio's carrier on its transmit
-frequency with its tone, until 400 ms after KEY off (TX-47's hold) or at once on a lost keepalive.
+scan inputs, \\* and # skips and PTT on a hit, the zones page's delete, the crossband repeater (XB-*: `xb`, its
+start page and grid by keys and knob, passes with the tone gate, hang, timeout, the pass's end with the end tone
+and the CW ID, any key stopping it, SIDE1 listening, the strip and cells, never on after a restart). `bugs` breaks
+one thing on purpose, so the selftest sees the test that must catch it fail. The air carries each keyed radio's
+carrier on its transmit frequency with its tone, until 400 ms after KEY off (TX-47's hold) or at once on a lost
+keepalive, and the repeater's output; `FakeAirSdr` renders it as an RTL-SDR capture would (bench.py's fake_dev).
 
     tools/tworadio.py --selftest          # the whole run, the gates, the duty limit, restore, the results' shape
     tools/tworadio.py --selftest --sim    # two simulators: connect, the gates refuse, a fixture made and removed
@@ -29,7 +32,29 @@ DEFAULTS = {
     "0 1 5": ("Resume", "5 s"), "0 1 6 3": ("Scan inputs", "Off"), "0 1 6 4": ("Return to", "Start"),
     "0 1 6 5": ("Priority check", "Every 2 s"), "0 7 2": ("Home layout", "Watch"), "0 7 4 1": ("Timeout", "1 min"),
     "0 7 4 4": ("Wake screen on", "Keys and RX"), "0 7 7": ("Battery Save", "Off"), "0 8 5 4": ("End tone", "Off"),
+    "0 8 7 1": ("Callsign", "Empty"), "0 9 3 1": ("PIN lock", "Off"),
 }
+XB_TIMEOUTS = (30, 60, 120, 180, 300, 600)
+XB_HANGS = (0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0)
+XB_NEXT = [(0, 1, 0, 2), (0, 1, 1, 4), (2, 3, 0, 5), (2, 4, 0, 6), (3, 4, 1, 7), (5, 6, 2, 5), (5, 7, 3, 6),
+           (6, 7, 4, 7)]
+MORSE = {"A": ".-", "B": "-...", "C": "-.-.", "D": "-..", "E": ".", "F": "..-.", "G": "--.", "H": "....", "I": "..",
+         "J": ".---", "K": "-.-", "L": ".-..", "M": "--", "N": "-.", "O": "---", "P": ".--.", "Q": "--.-", "R": ".-.",
+         "S": "...", "T": "-", "U": "..-", "V": "...-", "W": ".--", "X": "-..-", "Y": "-.--", "Z": "--..", "0": "-----",
+         "1": ".----", "2": "..---", "3": "...--", "4": "....-", "5": ".....", "6": "-....", "7": "--...",
+         "8": "---..", "9": "----.", "/": "-..-."}
+
+
+def cw_elements(text, t0, dit=0.06):
+    """The CW ID's tone elements (start, end) from t0 at 20 wpm (VOX-12)."""
+    out, t = [], t0
+    for ch in text.upper():
+        for e in MORSE.get(ch, ""):
+            n = dit * (3 if e == "-" else 1)
+            out.append((t, t + n))
+            t += n + dit
+        t += 2 * dit
+    return out, t
 
 
 def f10(mhz):
@@ -57,19 +82,23 @@ class Air:
     """Each keyed radio's carrier: its frequency and tone, until its end (None while keyed)."""
 
     def __init__(self, clock):
-        self.clock, self.tx = clock, {}
+        self.clock, self.tx, self.log = clock, {}, []
 
-    def key(self, who, freq, tone):
-        self.tx[who] = dict(freq=freq, tone=tone, start=self.clock.time(), end=None, id=object())
+    def key(self, who, freq, tone, at=None):
+        c = dict(freq=freq, tone=tone, start=self.clock.time() if at is None else at, end=None, id=object())
+        self.tx[who] = c
+        self.log.append(c)
+        return c
 
-    def unkey(self, who, hold):
+    def unkey(self, who, hold, at=None):
         c = self.tx.get(who)
         if c and c["end"] is None:
-            c["end"] = self.clock.time() + hold
+            c["end"] = (self.clock.time() if at is None else at) + hold
 
     def carrier(self, freq, me, now):
         for who, c in self.tx.items():
-            if who != me and c["freq"] == freq and c["start"] <= now and (c["end"] is None or now < c["end"]):
+            if who.split(":")[0] != me.split(":")[0] and c["freq"] == freq and c["start"] <= now \
+                    and (c["end"] is None or now < c["end"]):
                 return c
         return None
 
@@ -116,6 +145,8 @@ class FakeFerrite:
         self.t = clock.time()
         self.log = []  # every request, for the selftest's checks
         self.refused_until = 0.0
+        self.xbcfg = dict(side1=0, side2=1, power="Low", timeout=180, hang=1.0, gate=True, id=False, speaker=False)
+        self.xb = None
 
     # ---- the world ----
 
@@ -154,6 +185,9 @@ class FakeFerrite:
             self.keyed = None
             self.unkey_msgs.append("invalid: keepalive lost")
             self.stack = [x for x in self.stack if x[0] != "Transmit"]
+        if self.xb:
+            self.xb_step()  # XB-13: watch and scan pause while it runs
+            return
         audible = []
         for i, s in enumerate(self.slots):
             lv = self.live[i]
@@ -295,9 +329,9 @@ class FakeFerrite:
         keyed = "ABC"[self.keyed["slot"]] if self.keyed else "-"
         out = [f'screen {sid} {q(sid)} title=""',
                f"state frame=1 ago=0 dark={dark} locked=0 active={'ABC'[self.active]} keyed={keyed} "
-               f"remote={int(self.keyed is not None)}",
-               f"bar lock=0 scan={int(any(self.scan))} watch=0 inbox=0 alert=0 gps=off bt=0 battery=80 low=0 cutoff=0 "
-               "clock=- utc=0"]
+               f"remote={int(self.keyed is not None)} mode={'xb' if self.xb else 'off'} fm=0",
+               f"bar lock=0 scan={int(any(self.scan))} watch={self.bar_watch(sid)} inbox=0 alert=0 gps=off bt=0 "
+               "battery=80 low=0 cutoff=0 clock=- utc=0"]
         if self.toast and now < self.toast[2]:
             out.append(f"toast {q(self.toast[0])} {q(self.toast[1])}")
         hints = [("MENU", "Menu")]
@@ -322,6 +356,8 @@ class FakeFerrite:
             out.append(f"transmit slot={keyed} remote=1 dial=0 secs=0")
         elif sid == "Confirm":
             out.append('ask "Delete zone?" goes="" kept=""')
+        elif sid == "Crossband":
+            hints = self.xb_lines(out, self.stack[-1][1])
         elif sid == "Scan":
             sc = self.scan[self.active]
             hints = ([("*", "Skip"), ("#", "Skip always"), ("^v", "Go on")] if sc and sc["state"] != "walk"
@@ -365,20 +401,253 @@ class FakeFerrite:
                     mode=0, power=["low", "mid", "high"].index(s["power"]), rx_tone=0, tx_tone=0, offset=s["offset"],
                     split=False, aprs=False, scanning=self.scan[n] is not None)
 
+    # ---- the crossband repeater (chapter 19, XB-20) ----
+
+    @property
+    def callsign(self):
+        c = self.set["0 8 7 1"]
+        return "" if c == "Empty" else c
+
+    def port_word(self):
+        return "bt" if self.ble else "cable"
+
+    def bar_watch(self, sid):
+        """SBAR-16: DW/TW where watch matters (home); never while the repeater runs."""
+        if sid != "Home" or self.xb:
+            return 0
+        n = len(self.watch_set() | {self.active})
+        return n if self.set["0 1 1"] != "Off" and n >= 2 else 0
+
+    def xb_side(self, k):
+        return self.slots[self.xbcfg["side1" if k == 0 else "side2"]]
+
+    def xb_grid(self):
+        c = self.xbcfg
+        to = c["timeout"]
+        return [("Power", c["power"]), ("Timeout", f"{to} s" if to < 60 else f"{to // 60} min"),
+                ("Hang", f"{c['hang']:.1f} s"), ("Tone gate", "On" if c["gate"] else "Off (carrier)"),
+                ("ID", "CW 10 m" if c["id"] else "Off"), ("Speaker", "On" if c["speaker"] else "Off")]
+
+    def xb_why_not(self):
+        """XB-2's refusal, or None."""
+        f1, f2 = self.xb_side(0)["freq"], self.xb_side(1)["freq"]
+        if (f1 >= 30_000_000) == (f2 >= 30_000_000):
+            return "one chip"
+        if self.build not in ("tx", "tx-dry") or not all(any(lo <= f <= hi for lo, hi in TX_BANDS) for f in (f1, f2)):
+            return "Side 1 can't transmit there"
+        if self.xbcfg["id"] and not self.callsign:
+            return "ID needs a callsign (setup)"
+        return None
+
+    def xb_lines(self, out, data):
+        x, now = self.xb, self.t
+        if x:
+            st = x["state"]
+            passing = st in (1, 2, 3)
+            pass_s = int(now - x["pass_start"]) if passing else x["last_len"]
+            out.append(f"xb running=1 state={st} by={x['by']} side1=A side2=B pass={pass_s} passes={x['passes']} "
+                       f"listen={x['listen']} ab={len(x['strip'][0])} ba={len(x['strip'][1])}")
+            busy = x["busy"] + (now - x["pass_start"] if passing else 0)
+            out.append(f'row 0 "Passes" "{x["passes"]} · {int(busy) // 60} min"')
+            out.append(f'row 0 "Duty, 10 min" "{int(busy * 100 / 600)}% of 50%"')
+            nid = 0 if x["last_id"] is None else max(0, 600 - (now - x["last_id"]))
+            nxt = f"CW in {-(-int(nid) // 60)} min" if self.xbcfg["id"] else "Off"
+            out.append(f'row 0 "Next ID" "{nxt}"')
+            last = "now" if passing else "none yet" if x["last_end"] is None else f"{int(now - x['last_end'])} s ago"
+            out.append(f'row 0 "Last pass" "{last}"')
+            return [("Any key", "Stop"), ("SIDE1", "Listen")]
+        cell = data["cell"]
+        out.append(f"xb running=0 cell={cell}")
+        for k in range(2):
+            sl = self.xbcfg["side1" if k == 0 else "side2"]
+            out.append(f'row 0 "Side {k + 1}" "{"ABC"[sl]} {mhz5(self.slots[sl]["freq"])}"'
+                       + (" sel" if cell == k else ""))
+        for i, (n, v) in enumerate(self.xb_grid()):
+            out.append(f'row 0 {q(n)} {q(v)}' + (" sel" if cell == 2 + i else ""))
+        why = self.xb_why_not()
+        out.append(f'check {"fail" if why else "ok"} {q(why or "two chips")}')
+        return [("Knob", "Change"), ("#", "Start"), ("BACK", "Back")]
+
+    def xb_knob(self, cell, d):
+        c = self.xbcfg
+        if cell == 2:
+            c["power"] = "Mid" if d > 0 else "Low"
+        elif cell == 3:
+            i = XB_TIMEOUTS.index(c["timeout"]) if c["timeout"] in XB_TIMEOUTS else 3
+            c["timeout"] = XB_TIMEOUTS[max(0, min(len(XB_TIMEOUTS) - 1, i + d))]
+        elif cell == 4:
+            i = XB_HANGS.index(c["hang"]) if c["hang"] in XB_HANGS else 2
+            c["hang"] = XB_HANGS[max(0, min(len(XB_HANGS) - 1, i + d))]
+        elif cell in (5, 6, 7):
+            k = {5: "gate", 6: "id", 7: "speaker"}[cell]
+            c[k] = not c[k]
+
+    def xb_start(self, by):
+        why = self.xb_why_not()
+        if why:
+            self.toast = ("Can't start:", why, self.t + 2)
+            return why
+        self.xb = dict(state=0, by=by, since=[None, None], lock=None, passes=0, busy=0.0, strip=[set(), set()],
+                       last_end=None, last_len=0, last_id=None, listen=0, pass_start=None, drop=None, frm=0)
+        if self.screen() != "Crossband":
+            self.stack = [("Home", None), ("Crossband", dict(cell=0))]
+        return None
+
+    def xb_stop(self, by):
+        x = self.xb
+        if x["state"] in (1, 2, 3):
+            self.xb_end(cut=True)
+        self.xb = None
+        self.toast = ("Repeater stopped", "from the link" if by.startswith(("keys", "cmd")) else "", self.t + 2)
+
+    def xb_heard(self, k):
+        s = self.xb_side(k)
+        c = self.air.carrier(s["freq"], self.name, self.t)
+        if c is None:
+            return None
+        if self.xbcfg["gate"] and s["rxtone"] != "off" and not self.tone_match(s["rxtone"], c["tone"]):
+            return None
+        return c
+
+    def xb_step(self):
+        x, now, cfg = self.xb, self.t, self.xbcfg
+        heard = [self.xb_heard(0), self.xb_heard(1)]
+        if x["state"] in (1, 2, 3):
+            heard[1 - x["frm"]] = None  # XB-5: the transmitting side's input is ignored
+        for k in (0, 1):
+            if heard[k] is None:
+                x["since"][k] = None
+                if x["lock"] == k:
+                    x["lock"] = None  # XB-9: the timed-out side's signal dropped
+            elif x["since"][k] is None:
+                x["since"][k] = now
+        st = x["state"]
+        if st == 0:
+            for k in (0, 1):
+                if heard[k] is not None and x["lock"] != k and now - x["since"][k] >= 0.03:
+                    self.xb_pass(k, heard[k])
+                    break
+        elif st in (1, 2, 3):
+            k = x["frm"]
+            if heard[k] is not None:
+                x["drop"], x["state"] = None, k + 1
+                if now - x["pass_start"] >= cfg["timeout"]:
+                    self.xb_end(timed_out=True)
+            else:
+                x["drop"] = now if x["drop"] is None else x["drop"]
+                hang = 0.0 if "xb_no_hang" in self.bugs else cfg["hang"]
+                if now - x["drop"] >= 0.1 + hang - 1e-9:
+                    self.xb_end()
+                elif now - x["drop"] >= 0.1:
+                    x["state"] = 3
+        elif st == 4 and x["lock"] is None:
+            x["state"] = 0
+
+    def xb_pass(self, k, c):
+        x, now = self.xb, self.t
+        out = self.xb_side(1 - k)
+        tone = c["tone"] if "xb_wrong_tone" in self.bugs else out["txtone"]
+        self.air.key(self.name + ":xb", out["freq"], tone, at=now)
+        x.update(state=k + 1, frm=k, pass_start=now, drop=None)
+        x["passes"] += 1
+        x["strip"][k].add(int(now // 60))
+
+    def xb_end(self, timed_out=False, cut=False):
+        x, now = self.xb, self.t
+        c = self.air.tx.get(self.name + ":xb")
+        hold = 0.5  # 400 ms carrier hold, the 100 ms unkey wait
+        if c is not None and not cut and not timed_out:
+            t = now
+            et = self.set["0 8 5 4"]
+            if et != "Off":
+                c["endtone"], c["t_off"] = et, now
+                slug = dict(bench.ENDTONE_SETTINGS)[et]
+                t += 0.2 + sum(ms for _, ms in dict(bench.END_TONES)[slug]) / 1000
+            if self.xbcfg["id"] and self.callsign and (x["last_id"] is None or now - x["last_id"] >= 600):
+                c["cw"], t = cw_elements(self.callsign, t + 0.2)
+                x["last_id"] = now
+            hold += t - now
+        self.air.unkey(self.name + ":xb", hold, at=now)
+        x["busy"] += now - x["pass_start"]
+        x["last_len"], x["last_end"] = int(now - x["pass_start"]), now
+        x["state"], x["drop"] = (4, None) if timed_out else (0, None)
+        if timed_out:
+            x["lock"] = x["frm"]
+
+    def restart(self):
+        """REBOOT: the radio comes back home; the repeater is never on at power-up (XB-1)."""
+        self._req("REBOOT")
+        if self.keyed:
+            self.air.unkey(self.name, 0.0)
+            self.keyed = None
+        if self.xb and "xb_on_at_boot" not in self.bugs:
+            if self.xb["state"] in (1, 2, 3):
+                self.xb_end(cut=True)
+            self.xb = None
+        self.clock.sleep(6.0)
+        self.advance()
+        if not self.xb:
+            self.stack = [("Home", None)]
+        self.toast = None
+
+    def cmd_xb(self, w):
+        sides = f"A {mhz5(self.xb_side(0)['freq'])} <-> B {mhz5(self.xb_side(1)['freq'])}"
+        by = f"cmd:{self.port_word()}"
+        if len(w) == 1:
+            return (f"Crossband: running, {sides}, started by {self.xb['by']}" if self.xb
+                    else f"Crossband: off ({sides})")
+        if w[1] == "start":
+            if self.xb:
+                self.err("xb start: already running; xb stop stops it")
+            if self.keyed:
+                self.err("xb start: transmitting: send it after the unkey")
+            self.stack = [("Home", None), ("Crossband", dict(cell=0))]
+            why = self.xb_start(by)
+            if why:
+                self.err(f"xb start: can't start: {why}")
+            return f"Crossband started: {sides}"
+        if w[1] == "stop":
+            if not self.xb:
+                self.err("xb stop: the repeater isn't running")
+            self.xb_stop(by)
+            return "Crossband stopped"
+        self.err("xb, xb start or xb stop: the crossband repeater")
+
     # ---- keys ----
 
     def keys(self, seq, long=False):
         for word in seq.split():
             name, _, how = word.partition(":")
-            self.press(name, long=(how or ("long" if long else "short")) == "long")
+            how = how.lower() or ("long" if long else "short")
+            self.press(name, long=how == "long", how=how)
 
-    def press(self, name, long=False):
-        self._req(f"KEY {name}{':long' if long else ''}")
+    def press(self, name, long=False, how=None):
+        how = how or ("long" if long else "short")
+        self._req(f"KEY {name}:{how}")
         if self.keyed:
             raise fl.RadioError(9, b"transmitting: remote keys wait for the unkey")
         self.last_key = self.t
         name = name.upper()
+        if name == "#":
+            name = "HASH"
         sid, data = self.stack[-1]
+        if self.xb:
+            # XB-20.5: any key but SIDE1 stops it and does nothing else; SIDE1 held listens (XB-15)
+            if name in ("SIDE1", "PF1"):
+                if how in ("down", "up"):
+                    self.xb["listen"] = int(how == "down")
+                return
+            if how != "up" and "xb_key_ignored" not in self.bugs:
+                self.xb_stop(f"keys:{self.port_word()}")
+            return
+        if how == "up":
+            return
+        if sid == "Crossband" and name in ("LEFT", "RIGHT", "UP", "DOWN"):
+            data["cell"] = XB_NEXT[data["cell"]][("LEFT", "RIGHT", "UP", "DOWN").index(name)]
+            return
+        if sid == "Crossband" and name == "HASH":
+            self.xb_start(f"keys:{self.port_word()}")
+            return
         if name == "BACK" and long:
             self.stack = [("Home", None)]
             return
@@ -392,6 +661,10 @@ class FakeFerrite:
             self.stack.append(("Advanced", None))
         elif sid == "Advanced" and name == "0":
             self.stack.append(("Status", None))
+        elif sid == "Advanced" and name == "3":
+            self.stack.append(("Tools", None))
+        elif sid == "Tools" and name == "5":
+            self.stack.append(("Crossband", dict(cell=0)))
         elif sid == "Advanced" and name == "2":
             self.stack.append(("Group", None))
         elif sid == "Group" and name == "3":
@@ -488,6 +761,10 @@ class FakeFerrite:
 
     def knob(self, n):
         self._req("KNOB")
+        sid, data = self.stack[-1]
+        if sid == "Crossband" and not self.xb:
+            for _ in range(abs(n)):
+                self.xb_knob(data["cell"], 1 if n > 0 else -1)
 
     # ---- the terminal ----
 
@@ -548,6 +825,8 @@ class FakeFerrite:
             if "resume" in kv:
                 z["resume"] = kv["resume"]
             return f"Zone {n} saved"
+        if w[0] == "xb":
+            return self.cmd_xb(w)
         if w[0] == "bk" and len(w) == 3:
             return f"  bk{w[1]} REG_{w[2].upper()} = 0x{self.reg30():04X}   ...\n"
         self.err(f"{w[0]}: no such command")
@@ -681,8 +960,68 @@ class FakeFerrite:
 
     def state(self):
         return json.dumps(dict(slots=self.slots, active=self.active, set=self.set, channels=self.channels,
-                               zones=self.zones, mute=sorted(self.mute), scan=[bool(x) for x in self.scan]),
+                               zones=self.zones, mute=sorted(self.mute), scan=[bool(x) for x in self.scan],
+                               xbcfg=self.xbcfg, xb=bool(self.xb)),
                           sort_keys=True, default=str)
+
+
+# ---- the SDR ----
+
+
+class FakeAirSdr(bench.FakeSdr):
+    """An RTL-SDR on the fake air: every carrier keyed on the tuned frequency (the radios' key-ups and the
+    repeater's output) with its tone (CTCSS or DCS, bench.fake_dev), the end tone at its unkey and the CW ID's 700 Hz
+    elements, FM onto the carrier as bench.FakeSdr renders a bare one."""
+
+    def __init__(self, air, clock, seed=11, radios=()):
+        super().__init__(None, clock, seed)
+        self.air, self.r, self.radios = air, self, list(radios)
+
+    @property
+    def carriers(self):
+        out = []
+        for c in self.air.log:
+            end = c["end"] if c["end"] is not None else self.t0 + self.seconds + 1.0
+            sig = dict(kind="carrier", tone=c["tone"], t_off=c.get("t_off", end), endtone=c.get("endtone", "Off"),
+                       mode="FM", cw=c.get("cw"))
+            out.append((c["start"], end, c["freq"] / 1e5, "carrier", sig))
+        return out
+
+    def finish(self):
+        import numpy as np
+        import sdrtx
+        for r in self.radios:
+            r.advance()  # each fake radio's world up to now: the repeater's pass ends as it would have
+        fs = sdrtx.FS
+        cs = [c for c in self.carriers
+              if c[1] > self.t0 and c[0] < self.t0 + self.seconds and abs(c[2] - self.mhz) < 0.01]
+        n = int(self.seconds * fs)
+        fd = fs // sdrtx.DEC
+        td = self.t0 + np.arange(n // sdrtx.DEC + 1) / fd
+        dev = np.zeros(len(td))
+        on = np.zeros(len(td), bool)
+        for c in cs:
+            m = (td >= c[0]) & (td < c[1])
+            on |= m
+            if m.any():
+                dev[m] += bench.fake_dev(c[4], td[m] - c[0], c[4]["t_off"] - c[0], self.rng)
+            for a, b in c[4].get("cw") or ():
+                k = (td >= a) & (td < b) & m
+                dev[k] += 1000.0 * np.sin(2 * np.pi * 700.0 * (td[k] - a))
+        raw = np.empty(2 * n, np.uint8)
+        chunk, ph = 1 << 20, 0.0
+        for a in range(0, n, chunk):
+            idx = np.arange(a, min(a + chunk, n))
+            j = idx // sdrtx.DEC
+            d = np.where(on[j], dev[j] + 700.0, 0.0) - sdrtx.OFF
+            p = ph + 2 * np.pi * np.cumsum(d) / fs
+            ph = p[-1] % (2 * np.pi)
+            x = np.where(on[j], 60.0, 0.0) * np.exp(1j * p) \
+                + self.rng.normal(0, 1.5, len(idx)) + 1j * self.rng.normal(0, 1.5, len(idx))
+            raw[2 * a: 2 * idx[-1] + 2: 2] = np.clip(np.round(x.real + 127.5), 0, 255)
+            raw[2 * a + 1: 2 * idx[-1] + 2: 2] = np.clip(np.round(x.imag + 127.5), 0, 255)
+        raw.tofile(self.path)
+        return raw
 
 
 # ---- the selftest ----
@@ -695,7 +1034,16 @@ def world(bugs_rx=(), bugs_tx=(), ble_rx=False, build_tx="tx-dry", build_rx="tx-
     rx = FakeFerrite("clear", clk, air, spec="ble:fake" if ble_rx else None, build=build_rx, ble=ble_rx, bugs=bugs_rx)
     rx.slots[2]["freq"] = f10(100.5)  # C on a broadcast station (the audio probe)
     rx.vfo[2]["freq"] = f10(100.5)
+    rx.set["0 8 7 1"] = "VA3FAK"  # the repeater's ID (XB-12) needs the callsign set on the radio
     return clk, air, tx, rx
+
+
+def fake_run(tr, a, clk, air, tx, rx, quiet, **kw):
+    """A Run on the fake pair with the fake SDR on the air and the captures in a temporary directory."""
+    run = tr.Run(args(tr, **kw), dict(tx=tx, rx=rx), clk, threaded=False, log=quiet)
+    run.sdr = FakeAirSdr(air, clk, radios=(tx, rx))
+    run.cap_dir = tempfile.mkdtemp(prefix="tworadio-selftest-caps-")
+    return run
 
 
 def args(tr, **kw):
@@ -722,10 +1070,13 @@ def selftest(a, tr):
     # 1. The whole run on a fake pair: every test passes, everything is put back, the duty limit held.
     clk, air, tx, rx = world()
     before = (tx.state(), rx.state())
-    run = tr.Run(args(tr), dict(tx=tx, rx=rx), clk, threaded=False, log=quiet)
+    run = fake_run(tr, a, clk, air, tx, rx, quiet)
     results, left = run.run(tests)
-    bad = [f"{r['name']}: {r['result']}: {r.get('why')}" for r in results if r["result"] != "pass"]
-    check("every two-radio test passes on the fake pair", not bad, "; ".join(bad)[:900])
+    long_names = {t.name for t in tests if t.long}
+    bad = [f"{r['name']}: {r['result']}: {r.get('why')}" for r in results
+           if r["result"] != "pass" and not (r["name"] in long_names and r["result"] == "skip")]
+    check("every two-radio test passes on the fake pair (the long ones skip without --long)", not bad,
+          "; ".join(bad)[:900])
     check("nothing left changed (the run's own check)", not left, left)
     check("both fakes as they were (slots, settings, channels, zones, mute)", (tx.state(), rx.state()) == before,
           "" if (tx.state(), rx.state()) == before else f"{tx.state()[:300]} / {rx.state()[:300]}")
@@ -744,9 +1095,31 @@ def selftest(a, tr):
     check("the transmitting radio keyed only 145.495 and 446.475",
           all(e["purpose"] for e in d.log) and all(g["ok"] for g in run.keyers["tx"].gatelog),
           [g for g in run.keyers["tx"].gatelog if not g["ok"]])
-    rxk = [k for k in run.keyers["rx"].keyups]
+    rxk = [k for k in run.keyers["rx"].keyups if k.kind in ("probe", "burst")]
     check("the receiving radio keyed twice: the busy probe (refused) and SCAN-19's PTT",
           [(k.kind, k.accepted) for k in rxk] == [("probe", False), ("burst", True)], [(k.kind, k.accepted) for k in rxk])
+    relays = [k for k in run.keyers["rx"].keyups if k.kind == "relay"]
+    dr = run.duty["rx"]
+    check("crossband: each pass the repeater made is on its own duty log (kind relay), within 5 s with its tail",
+          len(relays) >= 8 and all(e["counted_s"] <= 5.0 + 1e-6 for e in dr.log if e["kind"] == "relay"),
+          (len(relays), max((e["counted_s"] for e in dr.log), default=0)))
+    check("crossband: the repeater's duty at most 25 % of any 5 min", dr.summary()["peak_window_frac"] <= 0.25 + 1e-6,
+          f"{dr.summary()['peak_window_frac']:.0%}")
+    check("crossband: no repeater left running, its grid put back",
+          not rx.xb and rx.xbcfg == json.loads(before[1])["xbcfg"], (bool(rx.xb), rx.xbcfg))
+    caps = [c for r in results for c in r.get("captures", [])]
+    check("the SDR captures of passing tests are removed", not caps and not os.listdir(run.cap_dir), caps[:3])
+
+    # 1b. The long ones (--long): XB-9's timeout and XB-12's ID, the duty limit's timeout exception on both radios.
+    clk, air, tx, rx = world()
+    run = fake_run(tr, a, clk, air, tx, rx, quiet, long=True)
+    res, left = run.run([t for t in tests if t.long])
+    check("--long: the long crossband tests pass", all(r["result"] == "pass" for r in res) and not left,
+          [(r["name"], r["result"], r.get("why")) for r in res])
+    kinds = sorted({e["kind"] for d in run.duty.values() for e in d.log if e["counted_s"] > 5.0})
+    check("--long: only the timeout exception passes 5 s", kinds in ([], ["timeout"]), kinds)
+    plan_long = tr.plan_lines(tests, args(tr, long=True, sdr=True))
+    check("--dry-plan --long: the long tests are planned", any("a_pass_times_out" in x for x in plan_long), "")
 
     # 2. Results in uitest's shape; never recorded (a selftest), and what record_results would write for a radio run.
     started = __import__("datetime").datetime.now()
@@ -772,9 +1145,13 @@ def selftest(a, tr):
                             ("follow", "watched_slot_plays_and_active_stays", "rx"),
                             ("no_busy", "busy_lockout_refuses_ptt", "rx"),
                             ("hint_sticks", "tone_hint_clears", "rx"),
-                            ("resume_3s", "resume_rules", "rx")):
+                            ("resume_3s", "resume_rules", "rx"),
+                            ("xb_wrong_tone", "relays_2m_to_70cm", "rx"),
+                            ("xb_no_hang", "hang_and_carrier_hold_on_air", "rx"),
+                            ("xb_key_ignored", "a_key_or_xb_stop_cuts_a_pass", "rx"),
+                            ("xb_on_at_boot", "never_on_after_a_restart", "rx")):
         clk, air, tx, rx = world(bugs_rx=(bug,))
-        run = tr.Run(args(tr), dict(tx=tx, rx=rx), clk, threaded=False, log=quiet)
+        run = fake_run(tr, a, clk, air, tx, rx, quiet)
         res, left = run.run([t for t in tests if t.name == name])
         r = res[0]
         extra = ""
@@ -878,7 +1255,7 @@ def selftest_sim(a, tr):
 
     procs = []
     try:
-        p1, spec1 = tr.uitest.start_sim(600)
+        p1, spec1, _bt = tr.uitest.start_sim(600)  # the cable port; its Bluetooth one unused
         procs.append(p1)
         exe = os.path.join(tr.FERRITE, "target", "debug", "ferrite-sim")
         port2 = tr.uitest.free_port()
@@ -971,6 +1348,49 @@ def selftest_sim(a, tr):
         diff = tr.uitest.dump_diff(dump0, dump1)
         check("the simulator's dump is the same after (channels, zone, settings, slots put back)", not diff, diff[:6])
         check("no restore notes", not notes, notes)
+        # The crossband fixture against the simulator's own firmware code: the start page by MENU 0 3 5, its grid by
+        # the cells and the knob, `xb start` and its readback, SIDE1 held, a remote key stopping it, the grid put back.
+        from tworadio_tests import crossband as trx
+        dump0 = rx.cmd("dump")
+        c = run.ctx()
+        xr = {}
+
+        def xbody(t):
+            trx.setup(t, hang="0.0 s", timeout="30 s", ident="Off", gate="Off (carrier)")
+            xr["grid"] = trx.cells(t.rx.ui())
+            u = trx.start(t)
+            xr["run"] = trx.xb(u)
+            xr["screen"], xr["hints"] = u.id, u.hints
+            xr["xb"] = t.rx.cmd("xb").strip()
+            xr["listen"] = trx.xb(t.rx.keys("SIDE1:down")).get("listen")
+            xr["unlisten"] = trx.xb(t.rx.keys("SIDE1:up")).get("listen")
+            u = t.rx.keys("5")
+            xr["stopped"] = (trx.xb(u).get("running"), u.id)
+            u = trx.start(t, keys=True)
+            xr["by_keys"] = trx.xb(u).get("by")
+            trx.stop(t)
+
+        try:
+            xbody(c)
+        except (tr.Fail, tr.Skip) as e:
+            xr["error"] = str(e)
+        finally:
+            notes = []
+            for fn in reversed(c.defers):
+                fn()
+            run.restore(c, notes)
+        check("crossband on the simulator: the grid set by keys and the knob", not xr.get("error") and
+              xr.get("grid", {}).get("Hang") == "0.0 s" and xr["grid"].get("Timeout") == "30 s", xr)
+        check("crossband on the simulator: xb start, its screen and readback (by cmd:cable), xb says running",
+              xr.get("run", {}).get("running") == 1 and xr["run"].get("by") == "cmd:cable" and xr.get("screen") ==
+              "Crossband" and ("Any key", "Stop") in xr.get("hints", []) and xr.get("xb", "").startswith(
+                  "Crossband: running"), xr)
+        check("crossband on the simulator: SIDE1 held listens; a remote key stops it; # starts it by keys",
+              (xr.get("listen"), xr.get("unlisten"), xr.get("stopped"), xr.get("by_keys")) ==
+              (1, 0, (0, "Crossband"), "keys:cable"), xr)
+        diff = tr.uitest.dump_diff(dump0, rx.cmd("dump"))
+        check("crossband on the simulator: the grid and slots put back (dump the same), no notes", not diff and
+              not notes, (diff[:6], notes))
         tx.close()
         rx.close()
     finally:

@@ -12,6 +12,9 @@ the link). The checks that needed the clear radio keying into Ferrite, run by th
     tools/tworadio.py ... --record                             # a result row per rule into docs/test-plan/*.md
     tools/tworadio.py --selftest                               # two fake radios on a fake air, a virtual clock
     tools/tworadio.py --selftest --sim                         # two simulators (tcp): connect, the gates, restore
+    tools/tworadio.py --tx PORT --rx ble:UUID --module crossband --sdr [--long]
+                                                               # the crossband repeater (chapter 19): RX repeats,
+                                                               # TX keys its input, the RTL-SDR watches its output
 
 Safety, as tools/bench.py's (nothing keys unless all hold, checked right before every KEY on):
   - both radios say they run tx-dry with the bench bit in HELLO's LINK-35 build byte (0x82; decision 151), or the
@@ -29,6 +32,18 @@ Safety, as tools/bench.py's (nothing keys unless all hold, checked right before 
   - KEY off in `finally` for every key-up, and to both radios at the end (and on Ctrl-C, SIGTERM, exit).
 The receiving radio keys only in TX-20.2/TX-21's refusal probe (busy lockout: must be refused; KEY off at once if
 not) and SCAN-19's PTT on a scan hit.
+
+The crossband tests (tools/tworadio_tests/crossband.py) make the receiving radio a crossband repeater (XB-*,
+started with `xb start` or remote keys, XB-20): its slot A on 145.495, B on 446.475, power Low (read back before it
+starts), so it transmits only on an approved frequency, on the tx-dry build, and only while the transmitting radio
+keys its input. Each of those key-ups is admitted on the receiving radio's DutyLimiter too (its relay: the key-up
+plus the hang and the carrier hold, kind "relay"), and recorded there; the repeater is stopped (`xb stop`, hold
+BACK) after every test and at the end. --sdr: an RTL-SDR (bench.py's Sdr, fixed gain 0.9 dB) on the repeater's
+output frequency for the tests that measure the air (carrier, sub-tone, hang, the cut, the CW ID); without it they
+are skipped. Times on the air are compared inside one capture (a carrier's length), never against the PC's clock
+(rtl_sdr starts up to a second late). --long: the tests that need a key-up over the 5 s burst limit (XB-9's 30 s
+pass timeout, XB-12's ID with its 10 minutes): one continuous key-up each, bench.py's "timeout" exception (rested 2x
+after, counted in the 5 min window); without --long they are skipped.
 
 Each test starts from home on both radios; the settings it changes (`side.set`) and the slots (`slot` lines, the
 scans that ran) are put back after it, channels and a zone it made are deleted; at the end both radios are compared
@@ -85,6 +100,7 @@ import signal  # noqa: E402
 import struct  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
+import shutil  # noqa: E402
 import traceback  # noqa: E402
 
 sys.path.insert(0, HERE)
@@ -123,7 +139,7 @@ class LinkRadio(fl.Radio):
     shares the link)."""
 
     def __init__(self, spec, pin=None):
-        self.spec = spec
+        self.spec, self.pin = spec, pin
         self.ble, self.sim = spec.startswith("ble:"), spec.startswith("tcp:")
         self.cable = not (self.ble or self.sim)
         self.lock = threading.RLock()
@@ -185,6 +201,26 @@ class LinkRadio(fl.Radio):
                 if t == fl.KEY | 0x80 and status != 0:
                     return fl.why(status, rest)
         return None
+
+    def restart(self, settle=4.0, timeout=30.0):
+        """REBOOT (LINK-24: the radio saves, resets into the stock bootloader, which starts Ferrite after its 200 ms
+        listen), then HELLO again until it answers (as uitest.py's Radio.reopen, without the boot capture)."""
+        with self.lock:
+            self.link.ok(fl.REBOOT)
+            with contextlib.suppress(OSError):
+                self.port.close()
+            time.sleep(settle)
+            end = time.time() + timeout
+            while True:
+                try:
+                    fresh = fl.Radio(self.spec, pin=self.pin, name=b"tworadio.py")
+                    break
+                except (fl.RadioError, TimeoutError, OSError, SystemExit):
+                    if time.time() > end:
+                        raise TimeoutError("no HELLO from the radio after the restart")
+                    time.sleep(1.0)
+            self.port, self.link, self.build, self.bench = fresh.port, fresh.link, fresh.build, fresh.bench
+            self.last = time.time()
 
     def key_off(self):
         with self.lock:
@@ -296,9 +332,17 @@ class Keyer:
                 k.unkeyed, k.t_unkeyed = u, now
 
     @contextlib.contextmanager
-    def keyup(self, seconds, purpose, kind="burst", expect_refusal=False, scan_freqs=None):
+    def keyup(self, seconds, purpose, kind="burst", expect_refusal=False, scan_freqs=None, relay=None):
+        """`relay` (keyer, extra s, kind): the other radio repeats this key-up (the crossband repeater, XB-*): its
+        transmission, this key-up's length plus `extra` (the hang and the pass's end) and that radio's unkey tail,
+        is admitted on its own DutyLimiter first and recorded there after (kind "relay", or the kind given)."""
         k = KeyUp(purpose, "probe" if expect_refusal else kind)
         planned = self.duty.planned(KEY_ANSWER_CABLE_S if expect_refusal else seconds)
+        rk = None
+        if relay is not None:
+            rkeyer, extra, rkind = relay
+            rk = KeyUp(f"relays: {purpose}", rkind)
+            rkeyer.duty.admit(rkeyer.duty.planned(seconds + extra), rkind, f"{rkeyer.role}: relays {purpose}")
         self.duty.admit(planned, k.kind, f"{self.role}: {purpose}")
         self.gate(purpose, scan_freqs)  # right before KEY on, after any duty wait
         k.t_sent = self.clock.time()
@@ -334,6 +378,14 @@ class Keyer:
             self._off(k)
             self.active = None
             k.duty = self.duty.record(f"{self.role}: {purpose}", k.kind, k.ev(), k.t_sent)
+            if rk is not None:
+                # The repeater's pass: from this KEY on to this key-up's end and the extra (hang, the pass's end).
+                rkeyer, extra, _ = relay
+                rk.accepted = bool(k.accepted) and not expect_refusal
+                rk.t_sent, rk.t_on = k.t_sent, k.t_on
+                rk.t_off = (k.t_unkeyed or k.t_off or self.clock.time()) + extra
+                rk.duty = rkeyer.duty.record(f"{rkeyer.role}: relays {purpose}", rk.kind, rk.ev(), k.t_sent)
+                rkeyer.keyups.append(rk)
 
     def emergency_off(self):
         with contextlib.suppress(Exception):
@@ -472,6 +524,7 @@ class Ctx:
         self.rx = Side(self, "rx", run.radios["rx"], run.keyers["rx"])
         self.tx.rb, self.rx.rb = run.rb["tx"], run.rb["rx"]
         self.checks, self.notes, self.evidence, self.defers = [], [], [], []
+        self.captures = []
         self.last = None
 
     def pump(self):
@@ -492,6 +545,43 @@ class Ctx:
 
     def key(self, seconds, purpose, kind="burst"):
         return self.run.keyers["tx"].keyup(seconds, purpose, kind)
+
+    @contextlib.contextmanager
+    def relay(self, seconds, purpose, extra, kind="burst", relay_kind="relay"):
+        """A key-up of the transmitting radio that the receiving radio repeats (its crossband repeater): both radios'
+        duty limits admit it; `extra` is how much longer the repeater stays keyed (its hang and pass end). The
+        key-up runs its whole length: the body's end waits for its deadline (an exception ends it at once)."""
+        with self.run.keyers["tx"].keyup(seconds, purpose, kind, relay=(self.run.keyers["rx"], extra, relay_kind)) as k:
+            yield k
+            if k.deadline is not None:
+                self.sleep(max(0.0, k.deadline - self.now() + 0.05))
+
+    @contextlib.contextmanager
+    def capture(self, mhz, seconds, what, lead=1.0, key=None):
+        """The SDR (--sdr) on `mhz` for `seconds` from now; the body runs `lead` s in (rtl_sdr's start-up), and after
+        it the capture is waited for: `cap.raw` (u8 IQ), `cap.path`. Skips the test without --sdr. `key` (seconds,
+        extra[, the relay's kind]): the key-up the body will make, relayed: both duty limits are waited for before
+        the capture starts, so no rest falls inside it."""
+        sdr = self.run.sdr
+        self.need(sdr is not None, "needs the SDR on the output (--sdr)")
+        if key:
+            s, ex = key[0], key[1]
+            kt = self.run.keyers
+            kt["rx"].duty.wait(kt["rx"].duty.planned(s + ex), key[2] if len(key) > 2 else "relay", what, lead)
+            kt["tx"].duty.wait(kt["tx"].duty.planned(s), "timeout" if s > 4.5 else "burst", what, lead)
+        path = os.path.join(self.run.capdir(), f"{self.run.test_name}-{len(self.captures)}-{bench.slug(what)}.u8")
+        cap = type("Capture", (), {})()
+        cap.mhz, cap.path, cap.what, cap.raw = float(mhz), path, what, None
+        t0 = self.now()
+        sdr.start(float(mhz), seconds, path)
+        self.captures.append(path)
+        try:
+            self.sleep(lead)
+            yield cap
+            self.sleep(t0 + seconds - self.now() + 0.1)
+            cap.raw = sdr.finish()
+        finally:
+            sdr.stop()
 
     def rx_probe(self, purpose):
         return self.run.keyers["rx"].keyup(0.0, purpose, expect_refusal=True)
@@ -648,6 +738,18 @@ class Run:
         self.rb = {r: (1.0 if getattr(radios[r], "ble", False) else 0.05) for r in radios}
         self.snap = {}
         self.stopped = None
+        self.sdr = None  # --sdr: bench.Sdr (or the selftest's fake)
+        self.cap_dir = None
+        self.test_name = ""
+
+    def capdir(self):
+        """Where this run's SDR captures go: kept for the tests that fail, removed for those that pass."""
+        if self.cap_dir is None:
+            root = getattr(self.a, "results", None) or RESULTS
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            self.cap_dir = os.path.join(root, f"{stamp}_tworadio-captures")
+        os.makedirs(self.cap_dir, exist_ok=True)
+        return self.cap_dir
 
     def verify(self):
         """Both radios say tx-dry with the bench bit (LINK-35), else nothing goes on."""
@@ -675,6 +777,10 @@ class Run:
         put = []
         for role in ("tx", "rx"):
             side = getattr(ctx, role)
+            # The crossband repeater never runs past a test (XB-20): stopped before anything is put back.
+            ok, out = side.cmd_err("xb stop")
+            if ok:
+                put.append(f"{role} crossband stopped")
             for path, v in reversed(list(self.changed[role].items())):
                 ok, out = side.cmd_err(f"set {path} {v}")
                 if ok:
@@ -695,7 +801,13 @@ class Run:
                    pages=[])
         t0 = self.clock.time()
         n0 = {r: len(k.keyups) for r, k in self.keyers.items()}
+        self.test_name = tst.name
         try:
+            if tst.long and not getattr(self.a, "long", False):
+                raise Skip("keys longer than the 5 s burst limit (one continuous key-up, the duty limit's "
+                           "\"timeout\" exception): --long runs it")
+            if tst.sdr and self.sdr is None:
+                raise Skip("measures the repeater's output on the air: --sdr (an RTL-SDR on the output frequency)")
             if tst.fast and not t.rx.fast:
                 raise Skip(f"times to tenths of a second: the receiving radio's readback takes {t.rx.rb:.1f} s "
                            "(Bluetooth); run it with --swap (the cable radio receiving)")
@@ -726,6 +838,13 @@ class Run:
             put = self.restore(t, notes)
             self.rb = {"tx": t.tx.rb, "rx": t.rx.rb}
         res["secs"] = round(self.clock.time() - t0, 2)
+        if t.captures:
+            if res["result"] in ("fail", "error"):
+                res["captures"] = [c for c in t.captures if os.path.exists(c)]
+            else:
+                for c in t.captures:
+                    with contextlib.suppress(OSError):
+                        os.remove(c)
         res["checks"], res["notes"], res["evidence"] = t.checks, t.notes, t.evidence[-3:]
         if res["result"] in ("fail", "error") and t.last is not None and t.last.lines not in t.evidence:
             res["evidence"] = (t.evidence + [t.last.lines])[-3:]
@@ -859,24 +978,35 @@ def plan_lines(tests, a):
            "answered within 0.6 s (cable) / 2 s (Bluetooth); keepalives 0.5 s; KEY off at each key-up's deadline and "
            "in finally; bench.py's DutyLimiter per radio", ""]
     total_keyed = {"tx": 0.0, "rx": 0.0}
-    skipped = []
+    skipped, nosdr = [], []
     for t in tests:
         if t.fast and ble_rx:
             skipped.append(t)
             continue
         t0 = clk.time()
         clk.sleep(per_test + t.idle)
+        if t.long and not getattr(a, "long", False):
+            skipped.append(t)
+            continue
+        if t.sdr and not getattr(a, "sdr", False):
+            nosdr.append(t)
         for role, ks in (("tx", t.keyups), ("rx", t.rx_keys)):
-            for s in ks:
+            for i, s in enumerate(ks):
                 d = duty[role]
                 probe = s < 1.0 and role == "rx"
-                kind = "probe" if probe else "burst"
+                kind = "probe" if probe else ("timeout" if s > 4.5 else "burst")
+                ex = t.relays[min(i, len(t.relays) - 1)] if t.relays and role == "tx" else None
+                if ex is not None:  # the repeater's pass: admitted on the receiving radio's limit too
+                    duty["rx"].admit(duty["rx"].planned(s + ex), "timeout" if s + ex > 4.5 else "relay", t.name)
                 planned = d.planned(KEY_ANSWER_CABLE_S if probe else s)
                 d.admit(planned, kind, t.name)
                 ts = clk.time()
                 clk.sleep(0.6 if probe else s)
                 ev = dict(accepted=not probe, t_off=clk.time(), t_unkeyed=None)
                 d.record(t.name, kind, ev, ts)
+                if ex is not None:
+                    duty["rx"].record(t.name, "relay", dict(accepted=True, t_off=ts + s + ex, t_unkeyed=None), ts)
+                    total_keyed["rx"] += s + ex
                 clk.sleep(per_key)
                 total_keyed[role] += 0.0 if probe else s
         wall = clk.time() - t0
@@ -884,16 +1014,24 @@ def plan_lines(tests, a):
         out.append(f"  {t.module}.{t.name:38s} {', '.join(r for r in t.rules if r not in t.part)}{part}")
         out.append(f"      {len(t.keyups)} key-ups, {sum(t.keyups):.1f} s keyed"
                    + (f"; RX keys {len(t.rx_keys)}x ({'probe' if all(x < 1 for x in t.rx_keys) else sum(t.rx_keys)})"
-                      if t.rx_keys else "") + f"; about {wall / 60:.1f} min" + ("  [fast: cable RX]" if t.fast else ""))
+                      if t.rx_keys else "")
+                   + (f"; RX repeats each (+{', '.join(f'{x:g}' for x in t.relays)} s)" if t.relays else "")
+                   + f"; about {wall / 60:.1f} min" + ("  [fast: cable RX]" if t.fast else "")
+                   + ("  [SDR]" if t.sdr else "") + ("  [long]" if t.long else ""))
     wall = clk.time() - duty["tx"].t_start
     out.append("")
     if skipped:
-        out.append(f"skipped with RX on Bluetooth (fast; --swap runs them): {', '.join(t.name for t in skipped)}")
+        out.append(f"skipped (fast with RX on Bluetooth: --swap runs them; long: --long): "
+                   f"{', '.join(t.name for t in skipped)}")
+    if nosdr:
+        out.append(f"skipped without --sdr (planned here as if it were there): {', '.join(t.name for t in nosdr)}")
     rules = sorted({r for t in tests if t not in skipped for r in t.rules}, key=uitest.rule_key)
     out.append(f"rules: {len(rules)}: {' '.join(rules)}")
     out.append(f"estimated: about {wall / 60:.0f} min; keyed {total_keyed['tx']:.0f} s by TX "
-               f"({duty['tx'].summary()['keyups']} key-ups) and {total_keyed['rx']:.1f} s by RX")
+               f"({duty['tx'].summary()['keyups']} key-ups) and {total_keyed['rx']:.1f} s by RX (its probes, PTT and "
+               "crossband passes)")
     out.append("TX " + duty["tx"].report())
+    out.append("RX " + duty["rx"].report())
     return out
 
 
@@ -921,7 +1059,7 @@ def main_args(argv=None):
     ap.add_argument("--pin-tx", help="the TX radio's PIN (Bluetooth with a PIN lock)")
     ap.add_argument("--pin-rx", help="the RX radio's PIN")
     ap.add_argument("-k", help="tests whose name has one of these (comma list)")
-    ap.add_argument("--module", help="tests in these modules (receive, busy, watch, tones, scan)")
+    ap.add_argument("--module", help="tests in these modules (receive, busy, watch, tones, scan, crossband)")
     ap.add_argument("--rules", help="tests checking a rule matching one of these globs")
     ap.add_argument("--list", action="store_true", help="the tests, their rules and key-ups")
     ap.add_argument("--dry-plan", action="store_true", help="the plan with its keyed time; touches nothing")
@@ -934,6 +1072,10 @@ def main_args(argv=None):
     ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
     ap.add_argument("--stop", action="store_true", help="stop at the first failure")
     ap.add_argument("--verbose", "-v", action="store_true", help="print the readback of a failure")
+    ap.add_argument("--sdr", action="store_true", help="an RTL-SDR on the crossband repeater's output (bench.py's "
+                    "Sdr, fixed gain 0.9 dB): the tests that measure the air")
+    ap.add_argument("--long", action="store_true", help="also the tests with one key-up over the 5 s burst limit "
+                    "(XB-9's 30 s pass timeout, XB-12's ID): the duty limit's timeout exception")
     return ap.parse_args(argv)
 
 
@@ -950,7 +1092,8 @@ def main(argv=None):
     if a.list:
         for t in tests:
             say(f"{t.module}.{t.name:40s} {', '.join(t.rules)}" + (f"  [part: {', '.join(t.part)}]" if t.part else "")
-                + f"  key-ups {t.keyups}" + (f" rx {t.rx_keys}" if t.rx_keys else "") + ("  [fast]" if t.fast else ""))
+                + f"  key-ups {t.keyups}" + (f" rx {t.rx_keys}" if t.rx_keys else "") + ("  [fast]" if t.fast else "")
+                + ("  [sdr]" if t.sdr else "") + ("  [long]" if t.long else ""))
         ids = sorted({r for t in tests for r in t.rules}, key=uitest.rule_key)
         say(f"{len(tests)} tests, {len(ids)} rules: {' '.join(ids)}")
         unknown = [i for i in ids if i not in uitest.manual_rules(a.docs)]
@@ -987,6 +1130,11 @@ def main(argv=None):
         say(f"TX {tx_spec}: Ferrite {radios['tx'].version}, {radios['tx'].build}{' bench' if radios['tx'].bench else ''}")
         say(f"RX {rx_spec}: Ferrite {radios['rx'].version}, {radios['rx'].build}{' bench' if radios['rx'].bench else ''}")
         run = Run(a, radios, bench.Clock(), threaded=True)
+        if a.sdr:
+            if not shutil.which("rtl_sdr"):
+                raise SafetyError("--sdr: rtl_sdr not found (brew install librtlsdr): nothing was changed or keyed")
+            run.sdr = bench.Sdr(dict(sdr_gain=bench.DEFAULTS["sdr_gain"], sdr_ppm=bench.DEFAULTS["sdr_ppm"]),
+                                run.clock)
         atexit.register(lambda: [k.emergency_off() for k in run.keyers.values()])
         started = datetime.datetime.now()
         results, left = run.run(tests)

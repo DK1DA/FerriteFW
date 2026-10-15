@@ -33,9 +33,10 @@ BCAST = "100.5"  # a broadcast FM slot: the receiving radio's audio probe (BCR-2
 
 
 class Test:
-    def __init__(self, fn, rules, part, keyups, idle, fast, rx_keys):
+    def __init__(self, fn, rules, part, keyups, idle, fast, rx_keys, relays=(), sdr=False, long=False):
         self.fn, self.rules, self.part = fn, list(rules), list(part)
         self.keyups, self.idle, self.fast, self.rx_keys = list(keyups), idle, fast, list(rx_keys)
+        self.relays, self.sdr, self.long = list(relays), sdr, long
         self.name = fn.__name__
         self.module = fn.__module__.rsplit(".", 1)[-1]
         self.doc = (fn.__doc__ or "").strip().split("\n")[0]
@@ -45,13 +46,16 @@ class Test:
         return sum(self.keyups) + sum(self.rx_keys)
 
 
-def test(*rules, part=(), keyups=(), idle=0.0, fast=False, rx_keys=()):
+def test(*rules, part=(), keyups=(), idle=0.0, fast=False, rx_keys=(), relays=(), sdr=False, long=False):
     """Register a test: the rules it checks (all of `part` among them: those it checks only part of), the key-ups
     of the transmitting radio it plans (seconds each), the seconds it waits without keying, `fast` (needs the
     receiving radio's readback quick: the cable), `rx_keys` (key-ups of the receiving radio, seconds each:
-    refusal probes count 0.6)."""
+    refusal probes count 0.6). Crossband: `relays` (how much longer than each key-up the receiving radio's
+    repeater stays keyed, for the plan; one value for all), `sdr` (measures the air: skipped without --sdr),
+    `long` (a key-up over the 5 s burst limit: skipped without --long)."""
     def deco(fn):
-        REGISTRY.append(Test(fn, list(rules) + [p for p in part if p not in rules], part, keyups, idle, fast, rx_keys))
+        REGISTRY.append(Test(fn, list(rules) + [p for p in part if p not in rules], part, keyups, idle, fast, rx_keys,
+                             relays, sdr, long))
         return fn
     return deco
 
