@@ -1925,6 +1925,19 @@ def rule_summary(sess_dir):
     """bench/results.json for a session, in uitest's shape (tool, started, port, sim, build, version, commit, label,
     counts, rules {rule: result, test, why, scope, note}, tests), from session.json and the <run>.json files."""
     session = json.load(open(os.path.join(sess_dir, "session.json")))
+    # A session stopped by a safety check (or one that crashed on the way out) has no extras, but its sweeps.json
+    # holds every item measured: rebuild the sweep extras from it, whole only if every item is there.
+    sp = os.path.join(sess_dir, "sweeps.json")
+    if os.path.exists(sp):
+        ex = dict(session.get("extras") or {})
+        for name, sw in json.load(open(sp)).items():
+            got = list((sw.get("items") or {}).values())
+            if f"sweep:{name}" in ex or not got or name not in SWEEP_NAMES:
+                continue
+            want = {i["label"] for i in sweep_items(session.get("cfg") or DEFAULTS, name)}
+            ex[f"sweep:{name}"] = dict(name=name, total=len(want), items=got, complete=want <= {i["label"] for i in got},
+                                       ok=all(i.get("ok") for i in got))
+        session["extras"] = ex
     runs = []
     for r in session.get("runs") or []:
         p = os.path.join(sess_dir, r + ".json")
