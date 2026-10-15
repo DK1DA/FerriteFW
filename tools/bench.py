@@ -2512,7 +2512,7 @@ class FakeRadio:
             seq = 0.0
             if k["kind"] == "carrier" and k["sig"]["endtone"] != "Off":
                 seq = 0.2 + sum(ms for _, ms in dict(END_TONES)[dict(ENDTONE_SETTINGS)[k["sig"]["endtone"]]]) / 1000
-            hold = 0.0 if k["kind"] == "suite" else seq + 0.4
+            hold = 0.0 if k["kind"] == "suite" else seq + 0.5  # TX-47.2 on tx-dry: 400 ms hold + 100 ms unkey wait
             self.carriers.append((k["on"], t + hold, k["mhz"], k["kind"], dict(k["sig"], t_off=t)))
             self.key = None
         return True
