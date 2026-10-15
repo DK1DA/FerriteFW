@@ -186,7 +186,7 @@ def update_keeps_the_spi_flash(t):
     if p == "before":
         save(t, "update", now)
         t.note("readings kept: flash, then --flash after")
-        return
+        t.need(False, "--flash before: readings saved; the check runs with --flash after")
     b = before.get("update")
     t.need(b, "no update readings from before")
     t.need(now["about"].get("Version") != b["about"].get("Version"), "the same firmware: nothing was flashed")
@@ -206,7 +206,7 @@ def bundled_patch_installed(t):
     now = readings(t)
     if p == "before":
         save(t, "patch", now)
-        return
+        t.need(False, "--flash before: readings saved; the check runs with --flash after")
     b = before.get("patch")
     t.need(b and b["about"].get("SSB patch") != "Installed", "the patch was installed before (flash a radio "
            "without it, with --ssb-from)")
@@ -233,7 +233,7 @@ def first_install(t):
         given = {x.strip() for x in (getattr(t.opts, "with_", "") or "").split(",") if x.strip()}
         save(t, "first", {"note": "a first install: run --flash after once setup is done"}
              if "first-install" in given else None)
-        return
+        t.need(False, "--flash before: readings saved; the check runs with --flash after")
     t.need(before.get("first"), "no first-install marker from --flash before")
     t.need(t.ui().id in ("Setup", "Home"), "not on setup or home")
     now = readings(t)
