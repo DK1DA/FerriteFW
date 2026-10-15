@@ -105,7 +105,7 @@ DEFAULTS = {
     "suite_key_s": 63.5,  # the suite's 59.95 s and ~3.5 s of the 1 kHz hold
     "sdr_lead_s": 2.0,
     "sdr_tail_s": 3.0,
-    "sdr_gain": 0,
+    "sdr_gain": 0.9,  # the R820T's lowest fixed gain: rtl_sdr -g 0 means AUTOMATIC, which saturated a UHF run (Oct 14, 2026)
     "sdr_ppm": 0,
     "keepalive": {"alive_s": 3.0, "wait_s": 5.0, "max_drop_s": 2.5},
     "timeout_test": {"set": "30 s", "expect_s": 30.0, "key_s": 45.0, "tol_s": 1.5},
