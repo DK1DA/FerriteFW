@@ -170,6 +170,47 @@ class T:
             return True
         return False
 
+    def stop_scans(self, keep=()):
+        """Stop the scans running on the slots (but those in `keep`), so their audio and their scan stops leave
+        the other cards alone (the simulator's sample scans C). Returns the slots stopped: give them to
+        `restart_scans` at the end (the runner's restore doesn't compare "scanning")."""
+        stopped = []
+        active = self.ui(0).state.get("active", "A")
+        for L in "ABC":
+            if L in keep or "scanning" not in self.slot(L):
+                continue
+            self.cmd(f"slot {L} active")
+            self.home()
+            self.press("SIDE2", settle=0.3)
+            self.home()
+            if "scanning" not in self.slot(L):
+                stopped.append(L)
+        self.cmd(f"slot {active} active")
+        self.home()
+        return stopped
+
+    def restart_scans(self, slots):
+        """SIDE2 on each slot `stop_scans` stopped, then the active slot as it was."""
+        if not slots:
+            return
+        active = self.ui(0).state.get("active", "A")
+        for L in slots:
+            self.cmd(f"slot {L} active")
+            self.home()
+            self.press("SIDE2", settle=0.3)
+            self.home()
+        self.cmd(f"slot {active} active")
+        self.home()
+
+    def put_back(self, stopped):
+        """The slots as at the run's start (the runner's snapshot), then the scans `stop_scans` stopped."""
+        notes = []
+        self.home()
+        self.state.restore_slots(notes)
+        self.restart_scans(stopped)
+        for n in notes:
+            self.note(n)
+
     def screen(self, want, u=None):
         u = u or self.last or self.ui()
         self.eq(u.id, want, "the screen")

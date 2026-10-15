@@ -52,11 +52,14 @@ def every_group_fits_and_names_its_path(t):
         t.eq([r["num"] for r in u.rows], list(range(1, len(u.rows) + 1)), f"group {g}: rows numbered")
         t.check(all(r["name"] for r in u.rows), f"group {g}: every row named", u.names())
         t.check(not any(CHIP_WORDS.search(n) for n in u.names()), f"group {g}: no chip names", u.names())
+        # The group opens on row 1, or on the row it was last left on (MENU-24): the help names the selected row.
         h = u["help"]
-        t.check(h and h["args"][0] == f"MENU 0 {g} 1", f"group {g}: help names the path of row 1", h)
+        n = u.sel["num"] if u.sel else 1
+        t.check(h and h["args"][0] == f"MENU 0 {g} {n}", f"group {g}: help names the selected row's path", h)
         u = t.keys("DOWN")
-        t.check(u["help"]["args"][0] == f"MENU 0 {g} 2" or len(u.rows) == 1, f"group {g}: help follows the row",
-                u["help"])
+        n2 = u.sel["num"] if u.sel else 1
+        t.check(u["help"]["args"][0] == f"MENU 0 {g} {n2}" and (n2 != n or len(u.rows) == 1),
+                f"group {g}: help follows the row", u["help"])
 
 
 @test("MENU-3", "MENU-5")

@@ -134,7 +134,7 @@ def hold_vm_saves_a_vfo(t):
     t.eq(t.cmd("dump").count("\nch "), n0, "nothing saved")
 
 
-@test("TX-36", xfail="HF keeps High: tuning onto 28.4 MHz from High stays High (sim, Oct 14, 2026)")
+@test("TX-36", "HF-30", xfail="HF keeps High: tuning onto 28.4 MHz from High stays High (sim, Oct 14, 2026)")
 def hf_starts_on_low(t):
     """Tuning onto an HF frequency (28.4 MHz) puts the power at Low, whatever it was."""
     t.cmd("slot A vfo 146.52 high")
@@ -220,3 +220,38 @@ def channel_edges_over_the_terminal(t):
         t.cmd_err(f"ch {n} delete")
     ok, out = t.cmd_err(f"ch {n}")
     t.check(not ok and "no such channel" in out, "deleted", out)
+
+
+# VFO-2's band table as the UI shows it (slot.rs BANDS): a frequency in each band, its name and default mode
+# (wide FM in the Americas, AU and NZ; NFM elsewhere; AM on HF and airband).
+BAND_CASES = [("21.2", "HF", "AM"), ("28.4", "HF", "AM"), ("51.0", "6 m", "FM"), ("121.5", "Airband", "AM"),
+              ("146.52", "VHF", "FM"), ("156.8", "Marine", "FM"), ("223.5", "1.25 m", "FM"), ("446.0", "UHF", "FM")]
+
+
+@test("VFO-2", "VFO-4")
+def band_follows_the_frequency(t):
+    """The band comes from the frequency by a fixed table: tuning A into each band gives its name in the card's
+    header and its default mode (FM, NFM or AM only), and 1.25 m its 0.25 W cap; the same frequency always gives
+    the same band."""
+    region = t.get("0 9 4")
+    wide = region in ("USA", "Canada", "Americas", "Australia", "New Zealand", "US", "AU", "NZ")
+    for f, band, mode in BAND_CASES:
+        t.cmd(f"slot A vfo {f}")
+        u = t.ui()
+        a = u.active
+        t.eq(a["head"], f"VFO · {band}", f"{f} MHz: the band")
+        want = mode if mode == "AM" or wide else "FM-N"
+        t.eq(a["mode"], want, f"{f} MHz: the band's mode ({region})")
+        t.eq(a["power"], "0.25 W" if band == "1.25 m" else "LOW", f"{f} MHz: the power chip")
+    t.note(f"region {region}")
+    # The mode list on a home VFO: FM, NFM and AM only (USB, LSB, CW are HF mode's).
+    t.cmd("slot A vfo 146.52 fm")
+    t.home()
+    u = t.keys("MENU 3")
+    t.eq(u.sel and u.sel["name"], "Mode", "MENU 3")
+    seen = []
+    for _ in range(4):
+        seen.append(u.sel["value"])
+        u = t.knob(+1)
+    t.eq(sorted(set(seen)), ["AM", "FM", "NFM"], f"the knob goes round FM, NFM and AM ({seen})")
+    tune(t)

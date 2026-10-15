@@ -79,3 +79,72 @@ def every_setting_reachable_and_live(t):
            + (f"; typed paths landing elsewhere (reached with OK): {', '.join(misrouted)}" if misrouted else "")
            + (f"; in groups not built yet (\"setting comes next\"): {', '.join(unbuilt)}" if unbuilt else ""))
     t.check(not misrouted, "every typed path lands on its row", misrouted)
+
+
+@test("TX-2", "SETUP-8")
+def extend_tx_warns_first_and_shows_on_status(t):
+    """Extend TX is off by default; turning it on (0 8 9) shows its warning first, where BACK keeps it off; its
+    state is on the Status page, never in the status bar. The test never turns it on: OK on the warning would mark
+    it seen for good (a flag no `set` puts back), so only the warning and BACK are checked."""
+    name, v0, nd = t.get_full("0 8 9")
+    t.eq(name, "Extend TX", "0 8 9")
+    t.need(v0 == "Off", f"Extend TX is {v0} on this radio")
+    t.check(not nd, "off is the default", t.cmd("get 0 8 9"))
+    u = t.keys("MENU 0 0")
+    t.eq(u.row("Extend TX")["value"], "Off", "Status shows it")
+    bar_keys = set(u.bar)
+    t.home()
+    u = t.keys("MENU 0 8 9")
+    t.eq(u.sel and u.sel["name"], "Extend TX", "MENU 0 8 9")
+    u = t.knob(+1)
+    if u.id != "ExtendTx":
+        # Seen before on this radio (the flag persists): the knob turned it on; put it back off.
+        t.eq(u.sel and u.sel["value"], "On", "warned before: the knob turns it on")
+        u = t.knob(-1)
+        t.eq(t.get("0 8 9"), "Off", "and off again")
+        t.need(False, "the warning was seen before on this radio (it shows once)")
+    t.eq(u.hints, [("OK", "Turn on"), ("BACK", "Keep off")], "the warning: OK turns on, BACK keeps off")
+    t.eq(t.get("0 8 9"), "Off", "still off while the warning shows")
+    u = t.keys("BACK")
+    t.eq((u.id, u.sel and u.sel["name"], u.sel and u.sel["value"]), ("Group", "Extend TX", "Off"),
+         "BACK: back on the row, still off")
+    t.eq(t.get("0 8 9"), "Off", "the setting is off")
+    t.home()
+    u = t.keys("MENU 0 0")
+    t.eq(set(u.bar), bar_keys, "the status bar has nothing for it")
+
+
+@test("TONE-9")
+def tail_elimination_is_a_transmit_setting(t):
+    """Tail elimination lives in the Transmit group (0 8 5: mode, phase, end tone), receive-side muting beside it;
+    it is not a squelch option (0 9 5 Receiver and the quick settings have no tail elimination row)."""
+    u = t.keys("MENU 0 8 5")
+    t.eq(u.title, "Tail", "MENU 0 8 5: its own group")
+    t.check(u["help"]["args"][0].startswith("MENU 0 8 5 "), "its rows are MENU 0 8 5 N", u["help"])
+    names = u.names()
+    t.check({"Mode", "Phase", "End tone"} <= set(names), "mode, phase and end tone", names)
+    u = t.keys("BACK")
+    t.eq((u.title, u.sel and u.sel["name"]), ("Transmit", "Tail elimination"), "in the Transmit group")
+    for path in ("MENU 0 9 5", "MENU"):
+        t.home()
+        u = t.keys(path)
+        t.check(not any("tail elim" in n.lower() for n in u.names()), f"{path}: no tail elimination row", u.names())
+
+
+@test("SETUP-1", "SETUP-4")
+def setup_runs_from_the_menu(t):
+    """MENU 0 9 8 1 runs setup: OK goes to the next page, BACK to the previous, BACK on the first page leaves it
+    with nothing changed (only the welcome page is passed: no answer is given)."""
+    call = t.get("0 8 7 1")
+    u = t.keys("MENU 0 9 8 1")
+    t.eq(u.id, "Setup", "MENU 0 9 8 1")
+    t.eq(u.hints, [("OK", "Next"), ("BACK", "Previous"), ("#", "Skip")], "OK next, BACK previous, # skips")
+    f0 = u.state["frame"]
+    u = t.keys("MENU")
+    t.eq(u.id, "Setup", "OK on the welcome page: the next page")
+    t.check(u.state["frame"] != f0, "a new page drawn", u.state)
+    u = t.keys("BACK")
+    t.eq(u.id, "Setup", "BACK: the previous page (the welcome)")
+    u = t.keys("BACK")
+    t.eq((u.id, u.sel and u.sel["name"]), ("Group", "Run setup again"), "BACK on the first page leaves setup")
+    t.eq(t.get("0 8 7 1"), call, "the callsign untouched")

@@ -119,3 +119,89 @@ def about_rows(t):
     t.check(u.row("Transmit")["value"], "the transmit state", u.row("Transmit"))
     t.check(u.row("SSB patch")["value"], "the SSB patch state", u.row("SSB patch"))
     t.note(f"About: {[(r['name'], r['value']) for r in u.rows]}")
+
+
+@test("SBAR-7")
+def gps_icon_follows_the_fix(t):
+    """The GPS icon shows only with GPS on: outline (gps=searching) while it searches, solid (gps=fix) with a
+    fix, none (gps=off) with GPS off; the Status page's GPS row says the same."""
+    u = t.keys("MENU 0 0")
+    row = u.row("GPS")["value"]
+    gps = u.bar["gps"]
+    want = "off" if row.startswith("Off") else "fix" if row.startswith("Fix") else "searching"
+    t.eq(gps, want, f"the bar's icon for GPS {row!r}")
+    t.eq(t.get("0 6 1") == "Off", gps == "off", "the icon is off exactly when GPS is off")
+    if t.sim:
+        t.note("GPS off and on: the simulator's GPS ignores 0 6 1 (radio only)")
+        return
+    t.set("0 6 1", "Off")
+    u = t.ui(0.8)
+    t.eq((u.bar["gps"], u.row("GPS")["value"]), ("off", "Off"), "GPS off: no icon")
+    t.set("0 6 1", "On")
+    u = t.wait(lambda u: u.bar["gps"] != "off", timeout=5, what="GPS on: the icon back")
+    t.check(u.bar["gps"] in ("searching", "fix"), "outline or solid", u.bar)
+
+
+@test("BOOT-8", "SELF-2", "BACKUP-4")
+def transmit_lock_follows_the_checks(t):
+    """Transmit is Ready only when the MCU and calibration checks pass (Self-test page), and About and Status say
+    the same; the calibration page's CRC at install matches while it reads Valid, and a lock names its reason."""
+    u = t.keys("MENU 0 9 9")
+    tx = u.row("Transmit")["value"]
+    cal = u.row("Calibration")["value"]
+    u = t.keys("LEFT")
+    t.eq(u.title, "Checks", "◀ from About: the self-test page")
+    checks = {r["name"]: r["value"] for r in u.rows}
+    t.check({"MCU", "Calibration"} <= set(checks), "the MCU and calibration checks", checks)
+    passed = checks["MCU"] == "OK" and checks["Calibration"] == "OK"
+    if tx == "Ready":
+        t.check(passed, "Ready: the MCU and calibration checks passed", checks)
+    else:
+        t.check(len(tx) > 5 and tx != "Locked", "locked: the reason in words", tx)
+    if not passed:
+        t.check(tx != "Ready", "a failed MCU or calibration check locks transmit", (tx, checks))
+    t.home()
+    u = t.keys("MENU 0 0")
+    t.eq(u.row("Transmit")["value"], tx, "Status says what About says")
+    t.home()
+    u = t.keys("MENU 0 9 7 1 MENU")
+    t.eq(u.id, "Info", "OK on 0 9 7 1: the calibration page")
+    page = {r["name"]: r["value"] for r in u.rows}
+    t.eq(page.get("Status"), cal, "its status is About's")
+    if cal == "Valid":
+        t.eq(page.get("CRC at install"), "Matches", "valid: the CRC recorded at install matches")
+    t.note(f"transmit {tx!r}, calibration {cal!r}, checks {checks}")
+
+
+@test("UPD-8", "SAFE-2")
+def no_pending_update_on_a_clean_radio(t):
+    """About on a radio with nothing at 0x300000: no "pending stock update" line; there is no update screen in
+    the menus (System has no update row)."""
+    u = t.keys("MENU 0 9 9")
+    t.check(not any("pending" in (r["name"] + r["value"]).lower() or "update" in r["name"].lower() for r in u.rows),
+            "no pending-update line", [(r["name"], r["value"]) for r in u.rows])
+    t.home()
+    u = t.keys("MENU 0 9")
+    t.check(not any("update" in r["name"].lower() for r in u.rows), "System: no update row", u.names())
+
+
+@test("GPS-28", where="radio", slow=True)
+def gps_screen_keeps_the_module_running(t):
+    """With the GPS position page (0 6 2) open the module keeps running: its sentences keep coming (the terminal's
+    `gps` age stays a few seconds) for two minutes; no standby while the page is open."""
+    t.need(t.get("0 6 1") != "Off", "GPS is off")
+    import re
+    import time
+    u = t.keys("MENU 0 6 2")
+    t.eq(u.id, "Gps", "MENU 0 6 2")
+    worst = 0
+    end = time.time() + 120
+    while time.time() < end:
+        out = t.cmd("gps")
+        m = re.search(r"(\d+) s ago", out)
+        t.check(m, "the GGA sentence and its age", out)
+        worst = max(worst, int(m.group(1)))
+        t.check(worst <= 5, "a sentence within 5 s all along (no standby)", out)
+        time.sleep(10)
+    t.eq(t.ui().id, "Gps", "still on the page")
+    t.note(f"oldest sentence seen: {worst} s")
