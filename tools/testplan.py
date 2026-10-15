@@ -40,8 +40,13 @@ Every radio or bench entry also has a How: line, right after Method:, saying who
     How: host-covered — the tests, what to confirm (host/sim tests carry it; one quick batched pass on the radio)
     How: hands: NEED — what to do, what to look for (a person: a place, equipment, a physical action, judgement)
 
-From these the tool also writes docs/test-by-hand.md (the hands entries as short sessions, grouped by NEED)
-and docs/test-auto.md (what the PC will run, for scripting).
+A hands entry also names its hand check, the one physical action that covers it, on a `Hand check: NAME` line;
+the checks (session, minutes, setup, what to do) are in docs/test-plan/hand-checks.md. Several entries share a check
+when the same action covers them (the emergency double PTT, switching on holding PTT, keying the clear radio...).
+
+From these the tool also writes docs/test-by-hand.md (each hand check once, with the rules it covers and what to
+look for in each, by session, the most rules per minute first) and docs/test-auto.md (what the PC will run, for
+scripting). tools/record_hand.py records a check's result into every entry it covers.
 """
 import argparse, pathlib, re, sys
 
@@ -204,9 +209,9 @@ def parse_sources(d):
             if line.startswith("## ") or line.startswith("# "):
                 cur = None
                 continue
-            m = re.match(r"^(Method|How|Equipment|Steps|Pass):\s*(.*)$", line)
+            m = re.match(r"^(Method|How|Hand check|Equipment|Steps|Pass):\s*(.*)$", line)
             if m:
-                cur[m.group(1).lower()] = m.group(2).strip()
+                cur[m.group(1).lower().replace(" ", "_")] = m.group(2).strip()
                 in_results = False
             elif line.startswith("Results:"):
                 in_results = True
@@ -492,8 +497,12 @@ def main():
                + (f"; without a How: line {len(no_how)}: " + " ".join(no_how) if no_how else "")
                + ". By-hand checklist: [test-by-hand.md](test-by-hand.md); for the PC: [test-auto.md](test-auto.md).")
     (a.docs / "test-plan.md").write_text("\n".join(out))
-    write_by_hand(a.docs, rules, entries)
+    n_checks, n_hand, minutes, unknown, unused, without = write_by_hand(a.docs, rules, entries)
     write_auto(a.docs, rules, entries, covered)
+    print(f"by hand: {n_checks} checks covering {n_hand} rules, about {minutes} min"
+          + (f"; unknown hand checks {unknown}" if unknown else "")
+          + (f"; hand checks nothing uses {unused}" if unused else "")
+          + (f"; hands entries without a Hand check {without}" if without else ""))
     print("by How: " + ", ".join(f"{k} {v}" for k, v in hows.items())
           + (f", without How {len(no_how)}" if no_how else ""))
     print(f"wrote {a.docs / 'test-plan.md'}: {len(rules)} rules, {len(auto)} automated ({pct:.0f}%), "
@@ -539,25 +548,82 @@ def roll_up(marks):
 
 HOWS = ("auto-radio", "auto-sdr", "host-covered", "hands")
 
-# The hands sessions, in the order to do them: (key words in the NEED, title, minutes per item).
+# The hands sessions: (key, title, kind). A hand check names its session (docs/test-plan/hand-checks.md). The bench
+# sessions come first, then those needing equipment, each kind ordered by the rules still to do per minute; the
+# places and times last, in this order.
 SESSIONS = [
-    (("power and held keys",), None, "At the bench: power switch and keys only a hand can press", 2),
-    (("looks", "sound"), None, "At the bench: looks and sound", 2),
-    (("clear radio",), {"SQL", "HOME", "MODE", "WATCH", "BCR", "SND", "DISP", "TX"},
-     "With the clear radio, 1: squelch, home, watch and broadcast", 3),
-    (("clear radio",), {"SCAN", "KEY", "TSRCH"}, "With the clear radio, 2: scanning, tone search and the counter", 3),
-    (("clear radio",), {"XB", "TONE"}, "With the clear radio, 3: crossband, DCS and the tail", 4),
-    (("clear radio",), None, "With the clear radio, 4: APRS, decoders and alerts", 3),
-    (("speaker mic",), None, "With the speaker mic", 5),
-    (("phone",), None, "With a phone (Bluetooth)", 4),
-    (("dummy load", "power meter"), None, "With the tx build into a dummy load and power meter", 5),
-    (("meter", "bench supply", "battery run"), None, "With a meter and the bench supply (or a battery run)", 5),
-    (("oscilloscope",), None, "With an oscilloscope", 5),
-    (("signal generator",), None, "With a signal generator", 10),
-    (("outdoors",), None, "Outdoors with GPS (a walk, then a drive)", 3),
-    (("restore day",), None, "Restore day (back to stock and return)", 30),
-    (("real same",), None, "When a real SAME test comes (weekly, no fixed time)", 0),
+    ("bench", "At the bench: the radio, the cable and the SDR (tx-dry)", "bench"),
+    ("mic", "At the bench with the speaker mic", "bench"),
+    ("clear-rx", "At the bench with the clear radio: receiving", "bench"),
+    ("clear-more", "At the bench with the clear radio: scanning, crossband and data", "bench"),
+    ("supply", "With the bench supply and a meter", "equipment"),
+    ("load", "With the tx build into a dummy load and power meter", "equipment"),
+    ("scope", "With an oscilloscope", "equipment"),
+    ("siggen", "With a signal generator", "equipment"),
+    ("chrome", "On the Mac in Chrome", "equipment"),
+    ("sky", "GPS under the sky, a walk and a drive", "place"),
+    ("restore", "Restore day (back to stock and return)", "place"),
+    ("same", "When a real SAME test comes (weekly, no fixed time)", "place"),
 ]
+HAND_CHECKS = "hand-checks.md"
+CHECK_HEAD = re.compile(r"^### ([A-Z][A-Z0-9-]*)\s*$")
+
+
+def parse_hand_checks(path):
+    """{name: {session, minutes, unattended, setup, do}} from docs/test-plan/hand-checks.md, in file order."""
+    out = {}
+    if not path.exists():
+        return out
+    cur = None
+    for line in path.read_text().splitlines():
+        m = CHECK_HEAD.match(line)
+        if m and not ENTRY.match(line):
+            cur = out.setdefault(m.group(1), {"name": m.group(1), "session": "", "minutes": 0, "unattended": 0,
+                                              "setup": "", "do": ""})
+            continue
+        if line.startswith("#"):
+            cur = None
+            continue
+        m = re.match(r"^(Session|Minutes|Unattended|Setup|Do):\s*(.*)$", line)
+        if cur is not None and m:
+            k, v = m.group(1).lower(), m.group(2).strip()
+            cur[k] = int(v) if k in ("minutes", "unattended") and v.isdigit() else v
+    return out
+
+
+def hand_items(rules, entries):
+    """[(rule, entry, need, what)] for the hands entries, in manual order."""
+    out = []
+    for r in rules:
+        e = entries.get(r["id"])
+        if not e or not needs_radio(e):
+            continue
+        k, rest = how_of(e)
+        if k != "hands":
+            continue
+        need, _, what = rest.partition(" — ")
+        out.append((r, e, need.strip(), (what or rest).strip()))
+    return out
+
+
+def hand_plan(docs, rules, entries):
+    """The hand checks with their rules: (checks {name: check + "items"}, unknown [(rule, name)], unused [name],
+    without [rule ids]). A hands entry without a Hand check line is its own check, in the "other" session."""
+    checks = parse_hand_checks(docs / "test-plan" / HAND_CHECKS)
+    for c in checks.values():
+        c["items"] = []
+    unknown, without = [], []
+    for item in hand_items(rules, entries):
+        r, e, need, what = item
+        name = e.get("hand_check", "")
+        if name and name in checks:
+            checks[name]["items"].append(item)
+            continue
+        (unknown.append((r["id"], name)) if name else without.append(r["id"]))
+        checks[r["id"]] = {"name": r["id"], "session": "other", "minutes": 5, "unattended": 0,
+                           "setup": need, "do": what, "items": [item]}
+    unused = [n for n, c in checks.items() if not c["items"]]
+    return {n: c for n, c in checks.items() if c["items"]}, unknown, unused, without
 
 
 def how_of(e):
@@ -597,52 +663,97 @@ def last_result(e):
     return {"pass": "✓", "partial": "◐", "fail": "✗"}.get(mark, mark)
 
 
+def n_of(n, word):
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
 def write_by_hand(docs, rules, entries):
-    groups = {s[2]: [] for s in SESSIONS}
-    other = []
-    for r in rules:
-        e = entries.get(r["id"])
-        if not e or not needs_radio(e):
-            continue
-        k, rest = how_of(e)
-        if k != "hands":
-            continue
-        need, _, what = rest.partition(" — ")
-        item = (r, e, need.strip(), (what or rest).strip())
-        for words, prefixes, title, _ in SESSIONS:
-            if any(w in need.lower() for w in words) and (prefixes is None or r["prefix"] in prefixes):
-                groups[title].append(item)
-                break
-        else:
-            other.append(item)
-    total = sum(len(v) for v in groups.values()) + len(other)
+    checks, unknown, unused, without = hand_plan(docs, rules, entries)
+    titles = {k: (t, kind) for k, t, kind in SESSIONS}
+    by_session = {}
+    for c in checks.values():
+        by_session.setdefault(c["session"] if c["session"] in titles else "other", []).append(c)
+
+    def todo(c):
+        return [i for i in c["items"] if last_result(i[1]) != "✓"]
+
+    def mins(cs):
+        return sum(c["minutes"] for c in cs if todo(c))
+
+    def rate(key):
+        cs = by_session[key]
+        n = sum(len(todo(c)) for c in cs)
+        return n / max(mins(cs), 1)
+
+    order = []
+    for kind in ("bench", "equipment"):
+        keys = [k for k, _, kd in SESSIONS if kd == kind and k in by_session]
+        order += sorted(keys, key=lambda k: (-rate(k), [s[0] for s in SESSIONS].index(k)))
+    order += [k for k, _, kd in SESSIONS if kd == "place" and k in by_session]
+    order += ["other"] if "other" in by_session else []
+    n_rules = sum(len(c["items"]) for c in checks.values())
+    n_todo = sum(len(todo(c)) for c in checks.values())
+    live = [c for c in checks.values() if todo(c)]
+    total = mins(live)
+    unatt = sum(c["unattended"] for c in live)
     out = ["# Testing by hand", "",
-           "Generated by `ferrite/tools/testplan.py` from the `How: hands` lines in [`test-plan/`](test-plan/). "
-           "Don't edit this file: edit the entries, then run the tool. These are the radio checks that need a "
-           "person (a place, equipment, a physical action or judgement); everything else the PC runs "
-           "([test-auto.md](test-auto.md)). Record each result in the rule's entry (date, firmware, ✓/◐/✗, a note).",
-           "", f"{total} checks in {sum(1 for v in groups.values() if v) + bool(other)} sessions.", ""]
-    for words, prefixes, title, mins in SESSIONS:
-        items = groups[title]
-        if not items:
-            continue
-        todo = [i for i in items if last_result(i[1]) != "✓"]
-        done = [i for i in items if last_result(i[1]) == "✓"]
-        est = f", about {max(5, round(len(todo) * mins / 5) * 5)} min" if mins and todo else ""
-        out += [f"## {title}: {len(todo)} to do{est}", ""]
-        for r, e, need, what in todo:
-            lr = last_result(e)
-            extra = f" ({need})" if need and not any(w in need.lower() for w in words) or (
-                need and need.lower() not in title.lower() and len(words) > 1) else ""
-            out.append(f"- [ ] [{r['id']}](manual.html#{r['id']}){extra}: {what}"
-                       + (f" (last: {lr})" if lr else ""))
-        if done:
-            out += ["", "Already passed (recheck only after a change): "
-                    + ", ".join(f"[{r['id']}](manual.html#{r['id']})" for r, *_ in done) + "."]
-        out.append("")
-    if other:
-        out += ["## Other", ""] + [f"- [ ] [{r['id']}](manual.html#{r['id']}) ({n}): {w}" for r, e, n, w in other] + [""]
+           "Generated by `ferrite/tools/testplan.py` from the `How: hands` entries in [`test-plan/`](test-plan/) and "
+           "their hand checks ([`test-plan/hand-checks.md`](test-plan/hand-checks.md)). Don't edit this file: edit "
+           "those, then run the tool. These are the radio checks that need a person (a place, equipment, a physical "
+           "action, the clear radio, eyes or ears); everything else the PC runs ([test-auto.md](test-auto.md)). Each "
+           "check is one action done once, with every rule it covers looked at during it. Record it once for all of "
+           "them: `tools/record_hand.py CHECK ✓ \"note\"` (a rule that differs: add `RULE=✗:\"why\"`; one rule "
+           "alone: `tools/record_hand.py RULE ◐ \"note\"`), or edit the entries' Results tables by hand.", "",
+           f"{len(checks)} checks covering {n_rules} rules ({n_todo} without a pass yet), in "
+           f"{sum(1 for k in order if any(todo(c) for c in by_session[k]))} sessions: about {total} min of a "
+           f"person's time" + (f", plus {unatt} min the radio sits unattended" if unatt else "") + ".", ""]
+    if unknown or without or unused:
+        out += ["Plan problems: "
+                + "; ".join(x for x in (
+                    "unknown hand checks: " + ", ".join(f"{r} → {n}" for r, n in unknown) if unknown else "",
+                    "hands entries without a Hand check: " + ", ".join(without) if without else "",
+                    "hand checks nothing points at: " + ", ".join(unused) if unused else "") if x) + ".", ""]
+    out += ["| # | Session | Checks | Rules to do | Minutes |", "| --- | --- | --- | --- | --- |"]
+    for i, k in enumerate(order, 1):
+        cs = by_session[k]
+        title = titles.get(k, ("Other (no hand check)", ""))[0]
+        un = sum(c["unattended"] for c in cs if todo(c))
+        out.append(f"| {i} | [{title}](#session-{i}) | {sum(1 for c in cs if todo(c))} of {len(cs)} | "
+                   f"{sum(len(todo(c)) for c in cs)} | {mins(cs)}" + (f" (+{un} unattended)" if un else "") + " |")
+    out.append("")
+    for i, k in enumerate(order, 1):
+        cs = by_session[k]
+        title = titles.get(k, ("Other (no hand check)", ""))[0]
+        live = [c for c in cs if todo(c)]
+        out += [f'<a id="session-{i}"></a>', "",
+                f"## {i}. {title}: {n_of(len(live), 'check')}, {n_of(sum(len(todo(c)) for c in live), 'rule')}, "
+                f"about {mins(cs)} min",
+                ""]
+        for c in live:
+            t = todo(c)
+            done = [x for x in c["items"] if x not in t]
+            out += [f"### {c['name']}: {n_of(len(t), 'rule')}" + (f" (+{len(done)} passed)" if done else "")
+                    + f", {c['minutes']} min"
+                    + (f" (+{c['unattended']} unattended)" if c["unattended"] else ""), ""]
+            if c["setup"]:
+                out += [f"Setup: {c['setup']}", ""]
+            if c["do"]:
+                out += [f"Do: {c['do']}", ""]
+            out.append("Look for:")
+            out.append("")
+            for r, e, need, what in c["items"]:
+                lr = last_result(e)
+                box = "- [x]" if lr == "✓" else "- [ ]"
+                out.append(f"{box} [{r['id']}](manual.html#{r['id']}): {what}"
+                           + (" (passed: rechecked on the way)" if lr == "✓" else f" (last: {lr})" if lr else ""))
+            out += ["", f"Record: `tools/record_hand.py {c['name']} ✓ \"note\"`", ""]
+        passed = [c for c in cs if not todo(c)]
+        if passed:
+            out += ["Already passed (recheck only after a change): "
+                    + ", ".join(f"{c['name']} (" + ", ".join(f"[{r['id']}](manual.html#{r['id']})"
+                                                           for r, *_ in c["items"]) + ")" for c in passed) + ".", ""]
     (docs / "test-by-hand.md").write_text("\n".join(out))
+    return len(checks), n_rules, total, unknown, unused, without
 
 
 def scan_uitests(d=HERE / "uitests"):
