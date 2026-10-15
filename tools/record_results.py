@@ -129,6 +129,8 @@ def radio_run(r):
     port = str(r.get("port") or "")
     if r.get("sim") or port.startswith("tcp:") or port == "fake":
         return False, "simulator or selftest"
+    if r.get("tool") == "tworadio.py" and r.get("stopped"):
+        return False, f"stopped early ({r['stopped'][:80]})"
     if r.get("tool") == "bench.py" and r.get("source") != "on air":
         return False, "not on air (a re-analysis)"
     return True, ""

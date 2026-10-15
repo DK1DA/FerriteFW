@@ -17,7 +17,7 @@ import contextlib
 import bench
 import sdrtones
 
-from .core import UHF, VHF, rx_quiet, test, tx_on
+from .core import UHF, VHF, need_slot, rx_quiet, test, tx_on
 
 # The start page's cells (screens/xb.rs): 0 side 1, 1 side 2, then the grid; NEXT[cell] = (left, right, up, down).
 GRID = {"Power": 2, "Timeout": 3, "Hang": 4, "Tone gate": 5, "ID": 6, "Speaker": 7}
@@ -117,13 +117,17 @@ def setup(t, hang="1.0 s", gate="On", ident="Off", timeout=None, txtones=("off",
     end tone as asked (0 8 5 4: Off where a carrier's length is measured), the grid as asked, power Low and the
     pre-flight checks passing. The grid is put back after the test (deferred)."""
     rx_quiet(t, watch=watch)
-    t.rx.cmd(f"slot A vfo {VHF} fm low txtone {txtones[0]} rxtone {rxtones[0]} offset off")
-    t.rx.cmd(f"slot B vfo {UHF} fm low txtone {txtones[1]} rxtone {rxtones[1]} offset off")
+    # Each side read back as set (the line `slot` answers): a side that didn't take stops the test here, before
+    # anything keys (Oct 14, 2026: passes=0 all module long, the repeater's sides on the radio's own slots).
+    for L, mhz, i in (("A", VHF, 0), ("B", UHF, 1)):
+        line = t.rx.cmd(f"slot {L} vfo {mhz} fm low txtone {txtones[i]} rxtone {rxtones[i]} offset off")
+        need_slot(t, t.rx, L, mhz, txtones[i], rxtones[i], line=line.strip(), what=f"the repeater's side {i + 1}")
     t.rx.set("0 8 5 4", endtone)
     u = page(t)
     g = cells(u)
-    t.check(g.get("Side 1", "").startswith("A ") and g.get("Side 2", "").startswith("B "),
-            "the repeater's sides are slots A and B", (g.get("Side 1"), g.get("Side 2")))
+    want = (f"A {float(VHF):.5f}", f"B {float(UHF):.5f}")
+    t.check((g.get("Side 1"), g.get("Side 2")) == want, f"the repeater's sides are A {VHF} and B {UHF} (its start page)",
+            (g.get("Side 1"), g.get("Side 2")))
     orig = {k: g[k] for k in GRID if k in g}
     t.defer(lambda: restore_grid(t, orig))
     for name, want in (("Hang", hang), ("Tone gate", gate), ("ID", ident), ("Timeout", timeout)):
@@ -143,10 +147,27 @@ def start(t, keys=False):
         t.rx.keys("HASH")
     else:
         out = t.rx.cmd("xb start").strip()
-        t.check(out.startswith("Crossband started: A 145.49500 <-> B 446.47500"), "xb start starts it", out)
+        t.check(out.startswith(f"Crossband started: {SIDES}"), "xb start starts it", out)
     u, _ = t.poll(t.rx, lambda u: xb(u).get("running") == 1, 2.0)
     t.check(u is not None, "the repeater runs (its readback: xb running=1)", xb(t.rx.raw()))
+    sides_running(t)
     return u
+
+
+SIDES = f"A {float(VHF):.5f} <-> B {float(UHF):.5f}"
+
+
+def sides_running(t):
+    """`xb` on the repeater: running on A 145.495 <-> B 446.475 (one short terminal line, light over Bluetooth)."""
+    out = t.rx.cmd("xb").strip()
+    t.check(out.startswith(f"Crossband: running, {SIDES}"), f"xb: running, {SIDES}", out)
+
+
+def keyer_on(t, mhz, txtone="off"):
+    """Right before a key-up into the repeater: the transmitting radio on `mhz` (read back) and the repeater still
+    running on its sides (`xb`), so a set-up that didn't take fails the test before anything keys."""
+    tx_on(t, mhz, txtone)
+    sides_running(t)
 
 
 def stop(t):
@@ -156,9 +177,10 @@ def stop(t):
 
 def until_ready(t, passes, timeout=5.0):
     """After a key-up: the pass over (state 0) with `passes` counted."""
-    u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 0 and xb(u).get("passes") == passes, timeout, every=0.1)
-    t.check(u is not None, f"the pass ends, {passes} passes counted", xb(t.rx.raw()))
-    return u
+    u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 0 and xb(u).get("passes") == passes, timeout, every=0.1,
+                  light=True)
+    t.check(u is not None, f"the pass ends, {passes} passes counted", xb(t.rx.state()))
+    return t.rx.raw() if isinstance(u, dict) else u
 
 
 # ---- the air ----
@@ -237,7 +259,7 @@ def relay_one_way(t, key_mhz, out_mhz, state, txtones, item, what):
     setup(t, txtones=txtones)
     u0 = start(t)
     p0 = xb(u0).get("passes", 0)
-    tx_on(t, key_mhz)
+    keyer_on(t, key_mhz)
     extra = 1.0 + END
     with t.capture(out_mhz, cap_s(t, 3, extra), what, key=(3, extra)) as cap:
         with t.relay(3, what, extra=extra):
@@ -245,7 +267,7 @@ def relay_one_way(t, key_mhz, out_mhz, state, txtones, item, what):
             t.check(u is not None, "a pass starts", xb(t.rx.raw()))
             t.eq(xb(u).get("state"), state, f"the pass's direction ({'side 1 to 2' if state == 1 else 'side 2 to 1'})")
             t.eq(cells(u).get("Last pass"), "now", "Last pass: now while passing (XB-17)")
-            got = t.samples(t.rx, max(0.3, at + 1.8 - t.now()))
+            got = t.samples(t.rx, max(0.3, at + 1.8 - t.now()), light=True)
             states = sorted({xb(x).get("state") for _, x in got})
             t.check(states == [state], "one direction all through the key-up (XB-5)", states)
     u = until_ready(t, p0 + 1)
@@ -293,27 +315,27 @@ def tone_gate_opens_only_on_its_tone(t):
     The 30 ms of open squelch before a pass is the host tests' (a_pass_with_hang_and_id)."""
     setup(t, rxtones=("88.5", "off"))
     p = xb(start(t)).get("passes", 0)
-    tx_on(t, VHF)
+    keyer_on(t, VHF)
     with t.relay(2, "no tone into a side gated on 88.5", extra=1.0 + END):
-        t.poll(t.rx, lambda u: False, 0.3)
-        got = t.samples(t.rx, 1.2)
+        t.sleep(0.3)
+        got = t.samples(t.rx, 1.2, light=True)
     states = sorted({xb(u).get("state") for _, u in got})
     t.check(states == [0], "no tone: no pass (state 0 all through)", states)
     t.sleep(1.5)
     t.eq(xb(t.rx.ui()).get("passes"), p, "no tone: no pass counted")
-    tx_on(t, VHF, "88.5")
+    keyer_on(t, VHF, "88.5")
     with t.relay(2, "88.5 into a side gated on 88.5", extra=1.0 + END):
-        u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 1, 1.5)
-        t.check(u is not None, "88.5: a pass starts (state 1)", xb(t.rx.raw()))
+        u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 1, 1.5, light=True)
+        t.check(u is not None, "88.5: a pass starts (state 1)", xb(t.rx.state()))
     p += 1
     until_ready(t, p)
     stop(t)
     u = put(t, page(t), "Tone gate", "Off (carrier)")
     p = xb(start(t)).get("passes", 0)
-    tx_on(t, VHF)
+    keyer_on(t, VHF)
     with t.relay(2, "no tone, the tone gate off", extra=1.0 + END):
-        u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 1, 1.5)
-        t.check(u is not None, "the tone gate off: a carrier with no tone passes", xb(t.rx.raw()))
+        u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 1, 1.5, light=True)
+        t.check(u is not None, "the tone gate off: a carrier with no tone passes", xb(t.rx.state()))
     until_ready(t, p + 1)
 
 
@@ -330,15 +352,15 @@ def hang_and_carrier_hold_on_air(t):
         else:
             setup(t, hang=hang)
         start(t)
-        tx_on(t, VHF)
+        keyer_on(t, VHF)
         h = value_num(hang)
         extra = h + END
         with t.capture(UHF, cap_s(t, 1.8, extra), f"hang {hang}", key=(1.8, extra)) as cap:
             with t.relay(1.8, f"a pass with hang {hang}", extra=extra):
-                t.poll(t.rx, lambda u: xb(u).get("state") == 1, 1.5)
+                t.poll(t.rx, lambda u: xb(u).get("state") == 1, 1.5, light=True)
             if h:
-                u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 3, 1.5)
-                t.check(u is not None, "after the key-up: the hang (state 3)", xb(t.rx.raw()))
+                u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 3, 1.5, light=True)
+                t.check(u is not None, "after the key-up: the hang (state 3)", xb(t.rx.state()))
         lengths[hang] = longest(cap)
         t.note(f"hang {hang}: output carrier {lengths[hang]:.2f} s")
     d = lengths["0.0 s"] - 1.8
@@ -354,7 +376,7 @@ def end_tone_on_the_output(t):
     1000 Hz beep before it drops, as the transmitting slot's end tone at an unkey (XB-8)."""
     setup(t, hang="0.0 s", endtone="Beep")
     start(t)
-    tx_on(t, VHF)
+    keyer_on(t, VHF)
     extra = 0.8
     with t.capture(UHF, cap_s(t, 2, extra), "end tone Beep", key=(2, extra)) as cap:
         with t.relay(2, "a pass with the end tone on", extra=extra):
@@ -367,12 +389,12 @@ def end_tone_on_the_output(t):
 def cut(t, how, what):
     """A pass cut by the repeater's own stop while the other radio still keys: the output carrier ends long before
     an uncut pass would (3 s + hang 1.0 + its end: about 4.5 s), the readback stopped."""
-    tx_on(t, VHF)
+    keyer_on(t, VHF)
     extra = 1.0 + END
     with t.capture(UHF, cap_s(t, 3, extra), what, key=(3, extra)) as cap:
         with t.relay(3, what, extra=extra) as k:
-            u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 1, 2.0)
-            t.check(u is not None, "a pass starts", xb(t.rx.raw()))
+            u, _ = t.poll(t.rx, lambda u: xb(u).get("state") == 1, 2.0, light=True)
+            t.check(u is not None, "a pass starts", xb(t.rx.state()))
             t.sleep(0.5)
             if how == "key":
                 u = t.rx.keys("5")
@@ -433,7 +455,7 @@ def a_pass_times_out(t):
     unchanged, state 4); once it drops the repeater is ready. With the SDR the output carrier is 29.5 to 31.5 s."""
     setup(t, hang="0.0 s", timeout="30 s")
     p = xb(start(t)).get("passes", 0)
-    tx_on(t, VHF)
+    keyer_on(t, VHF)
     cm = t.capture(UHF, cap_s(t, 34, 0.5), "a 30 s timeout", key=(34, 0.0, "timeout")) if t.run.sdr else \
         contextlib.nullcontext()
     with cm as cap:
@@ -466,7 +488,7 @@ def id_after_the_first_pass(t):
     u = start(t)
     p = xb(u).get("passes", 0)
     t.check(cells(u).get("Next ID", "").startswith("CW in"), "Next ID counts down (XB-17)", cells(u).get("Next ID"))
-    tx_on(t, VHF)
+    keyer_on(t, VHF)
     id_s = 1.5 + 0.9 * len(call)
     with t.capture(UHF, cap_s(t, 1, id_s + END), "the first pass with the ID", key=(1, id_s + END, "timeout")) as cap:
         with t.relay(1, "the first pass (ID due)", extra=id_s + END, relay_kind="timeout"):

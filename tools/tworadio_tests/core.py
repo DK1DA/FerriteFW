@@ -62,16 +62,52 @@ def test(*rules, part=(), keyups=(), idle=0.0, fast=False, rx_keys=(), relays=()
 
 # ---- set-ups ----
 
+def slot_is(line, mhz, txtone="off", rxtone="off", power="low"):
+    """Whether a `slot` line (the terminal's, as `slot L ...` answers) has slot L on its VFO at `mhz`, at `power`,
+    with those tones: "" if so, else what differs."""
+    m = re.match(r"\s*([ABC])\*?\s+(vfo|ch \d+.*?|aprs)\s+(\d+\.\d+)\s*(.*)$", line or "")
+    if not m:
+        return f"can't read {line!r}"
+    kv = dict(re.findall(r"(\w+)=(\S+)", m.group(4)))
+    tx, rx = kv.get("txtone", kv.get("tone")), kv.get("rxtone", kv.get("tone"))
+    bad = []
+    if m.group(2) != "vfo":
+        bad.append(f"on {m.group(2)}, not its VFO")
+    if abs(float(m.group(3)) - float(mhz)) > 1e-6:
+        bad.append(f"{m.group(3)} MHz, not {float(mhz):.5f}")
+    if kv.get("power") != power:
+        bad.append(f"power {kv.get('power')}")
+    if (tx, rx) != (txtone, rxtone):
+        bad.append(f"tones tx {tx} rx {rx}, not tx {txtone} rx {rxtone}")
+    if "offset" in kv or "tx" in kv:
+        bad.append("a shift or split")
+    return "; ".join(bad)
+
+
+def need_slot(t, side, L, mhz, txtone="off", rxtone="off", line=None, what=""):
+    """Slot L read back as set (the `slot L ...` answer, or `slot L`): else the test fails before any keying."""
+    line = line if line is not None else side.slot(L)
+    bad = slot_is(line, mhz, txtone, rxtone)
+    t.check(not bad, f"the {side.role} radio's slot {L} took {float(mhz):.3f} tx {txtone} rx {rxtone}"
+            + (f" ({what})" if what else ""), f"{line.strip()}: {bad}" if bad else None)
+
+
 def tx_on(t, mhz, txtone="off"):
-    """The transmitting radio's slot A on its VFO at an approved frequency, low power, sending `txtone`, active."""
-    t.tx.cmd(f"slot A vfo {mhz} fm low txtone {txtone} rxtone off offset off")
+    """The transmitting radio's slot A on its VFO at an approved frequency, low power, sending `txtone`, active;
+    read back (the line `slot` answers, and the active slot), so a setting that didn't take stops the test before
+    it keys."""
+    line = t.tx.cmd(f"slot A vfo {mhz} fm low txtone {txtone} rxtone off offset off")
     t.tx.cmd("slot A active")
     t.tx.home()
+    need_slot(t, t.tx, "A", mhz, txtone, "off", line=line.strip(), what="the key-up's slot")
+    now = t.tx.slot("A")
+    t.check(now.startswith("A*"), "the transmitting radio's slot A is active", now)
 
 
 def rx_vfo(t, L, mhz, tone="off", active=False):
-    """The receiving radio's slot L on its VFO at `mhz` (both tones `tone`)."""
-    t.rx.cmd(f"slot {L} vfo {mhz} fm low tone {tone} offset off")
+    """The receiving radio's slot L on its VFO at `mhz` (both tones `tone`), read back."""
+    line = t.rx.cmd(f"slot {L} vfo {mhz} fm low tone {tone} offset off")
+    need_slot(t, t.rx, L, mhz, tone, tone, line=line.strip())
     if active:
         t.rx.cmd(f"slot {L} active")
 

@@ -147,6 +147,7 @@ class FakeFerrite:
         self.refused_until = 0.0
         self.xbcfg = dict(side1=0, side2=1, power="Low", timeout=180, hang=1.0, gate=True, id=False, speaker=False)
         self.xb = None
+        self.fail_after = None  # a fault: after this many more requests every one times out (a stalled link)
 
     # ---- the world ----
 
@@ -310,6 +311,11 @@ class FakeFerrite:
 
     def _req(self, what):
         self.advance()
+        if self.fail_after is not None:
+            self.fail_after -= 1
+            if self.fail_after < 0:
+                self.clock.sleep(6.0 if self.ble else 2.0)
+                raise TimeoutError(f"no answer to 0x33 (fake {self.name}: stalled, {what})")
         self.log.append(what)
         self.clock.sleep(self.lat)
         self.advance()
@@ -872,6 +878,9 @@ class FakeFerrite:
                 k += 1
                 s["offset"] = 0 if w[k] in ("off", "simplex") else f10(w[k])
             elif x[0].isdigit():
+                if "sides_ignored" in self.bugs:  # a fault: the line answered, the slot left as it was
+                    k += 1
+                    continue
                 if s["ch"] is not None:
                     self.err(f"slot {w[1]}: the slot is on a channel: add vfo to tune its VFO")
                 s["freq"] = f10(x)
@@ -1159,6 +1168,39 @@ def selftest(a, tr):
             k = run.keyers["rx"].keyups[0]
             extra = f"; the probe keyed and was unkeyed at once: {k.accepted and k.t_off is not None}"
         check(f"bug {bug}: {name} fails", r["result"] == "fail" and not air.keyed(), f"{r['result']}: {r.get('why')}{extra}")
+
+    # 3b. A set-up that didn't take: the repeater's sides left on the radio's own slots. The test fails at its
+    # set-up's readback, before anything keys.
+    clk, air, tx, rx = world(bugs_rx=("sides_ignored",))
+    run = fake_run(tr, a, clk, air, tx, rx, quiet)
+    res, left = run.run([t for t in tests if t.name == "relays_2m_to_70cm"])
+    r = res[0]
+    check("fault: the repeater's sides don't take: the test fails before any key-up",
+          r["result"] == "fail" and "side 1" in r.get("why", "") and "KEY on" not in tx.log + rx.log,
+          f"{r['result']}: {r.get('why')}")
+
+    # 3c. A Bluetooth time-out mid-run: the run stops at once (KEY off to both, no later test), and is not recorded.
+    pick = [t for t in tests if t.name in ("receive_shows_rx_and_meter", "busy_lockout_refuses_ptt",
+                                           "receiving_wakes_the_screen")]
+    clk, air, tx, rx = world(ble_rx=True)
+    fake_run(tr, a, clk, air, tx, rx, quiet).run(pick[:1])
+    n1 = len(rx.log)
+    clk, air, tx, rx = world(ble_rx=True)
+    run = fake_run(tr, a, clk, air, tx, rx, quiet)
+    rx.fail_after = n1 + 8  # in the second test
+    res, left = run.run(pick)
+    check("fault: a Bluetooth time-out mid-run stops the run in that test (no later test run)",
+          len(res) == 2 and res[-1]["result"] == "error" and "link lost" in res[-1].get("why", "")
+          and (run.stopped or "").startswith("link lost") and run.link_lost == "rx",
+          (len(res), [(x["name"], x["result"], x.get("why")) for x in res], run.stopped))
+    check("fault: after the time-out, KEY off to both and the air quiet",
+          not air.keyed() and not tx.keyed and "KEY off" in tx.log[len(tx.log) - tx.log[::-1].index("KEY on"):],
+          (air.keyed(), tx.log[-3:]))
+    check("fault: what couldn't be put back is reported", any("rx: not put back" in x for x in left), left)
+    summ = tr.summary_of(args(tr), run, res, left, __import__("datetime").datetime.now(), False)
+    summ.update(port="tx=/dev/x rx=ble:y", sim=False)
+    check("fault: a run stopped on a link error is never recorded", not record_results.radio_run(summ)[0],
+          record_results.radio_run(summ))
 
     # 4. The gates: nothing keyed, nothing changed.
     clk, air, tx, rx = world(build_rx="tx")

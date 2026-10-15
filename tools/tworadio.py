@@ -50,6 +50,13 @@ scans that ran) are put back after it, channels and a zone it made are deleted; 
 with their snapshots and anything left changed is reported (and fails the run). The receiving radio's quick mute and
 the transmitting radio's end tone (0 8 5 4 Off for the run) are put back too.
 
+A link that times out (or a port that fails) on either radio stops the whole run in that test: KEY off to both,
+what can be put back is (a radio whose link is gone is reported, not retried), and the run's results are kept but
+never recorded (a stopped run). Bluetooth requests take ferrite_link's slower time-out (6 s); polls over Bluetooth
+leave 0.25 s between reads, and the crossband polls go through Side.state (the compact readback when the firmware
+has it). Set-ups read back what they set (each `slot` line, the repeater's `xb` sides) and fail the test before
+anything keys when it didn't take.
+
 Results: <results>/<date-time>_tworadio-<label>/tworadio/results.json in tools/uitest.py's shape (each test: rules,
 pass/fail/skip, checks, readback lines; each rule's result, "part" for a test that checks part of it) and
 summary.html; `--record` (or tools/record_results.py) writes a row per rule into its test-plan entry. Simulator and
@@ -130,6 +137,18 @@ class Skip(Exception):
     pass
 
 
+class LinkLost(Exception):
+    """A radio's link timed out (or its port failed): every later test would meet the same, so the run stops at once
+    (KEY off to both, what can be put back is, the results kept but never recorded). `res`: the test's result."""
+
+    def __init__(self, role, err, res=None):
+        self.role, self.err, self.res = role, err, res
+        super().__init__(f"the {role} radio's link: {type(err).__name__}: {err}")
+
+
+LINK_ERRORS = (TimeoutError, OSError)
+
+
 # ---- A radio over the link ----
 
 
@@ -180,7 +199,7 @@ class LinkRadio(fl.Radio):
             self._nudge()
             if time.time() - self.last > 10:
                 with contextlib.suppress(Exception):  # wake the link first (bench.py, Oct 14, 2026)
-                    self.link.ask(fl.INFO, timeout=2.0)
+                    self.link.ask(fl.INFO)  # the port's own time-out (6 s on Bluetooth, 2 s on the cable)
             seq = self.link.send(fl.KEY, bytes([fl.PTT, fl.PTT_ON, slot_code]))
             self.last = time.time()
             end = time.time() + self.answer_s
@@ -271,9 +290,10 @@ class Keyer:
         r = self.radio
         self.need(f"{purpose}: a tx-dry bench build (LINK-35)", r.build == "tx-dry" and r.bench,
                   f"the radio says {r.build}{' (bench)' if r.bench else ''}")
-        act = [n for n in range(3) if r.slot_bin(n)["active"]]
+        bins = [r.slot_bin(n) for n in range(3)]  # three SLOT reads, the active one among them (Bluetooth: fewer)
+        act = [n for n in range(3) if bins[n]["active"]]
         self.need(f"{purpose}: one active slot", len(act) == 1, str(act))
-        s = r.slot_bin(act[0])
+        s = bins[act[0]]
         tx = s["offset"] if s["split"] else s["freq10"] + s["offset"]
         self.need(f"{purpose}: power low", s["power"] == 0, ["low", "mid", "high"][s["power"] % 3])
         self.need(f"{purpose}: not the APRS slot", not s["aprs"])
@@ -416,6 +436,26 @@ class Side:
         self.ctx.last = u
         self.ctx.pump()
         return u
+
+    def state(self):
+        """The radio's state, light: `radio.status()` (LINK-19's compact readback, what=2: one short line, a dict with
+        keyed, remote, mode, cards {L: {state, rx, meter}}, xb {running, state, passes, ...}) when the radio has it,
+        else the full readback (a U, which answers the same keys). The one place the Bluetooth radio's polls go
+        light: over Bluetooth the full readback is ~230 bytes and a MORE (about 1 s at ~280 B/s, more on a busy
+        radio), the light one ~80."""
+        st = getattr(self.radio, "status", None)
+        if st is not None and getattr(self.radio, "has_status", True):
+            self.ctx.pump()
+            try:
+                d = st()
+            except fl.RadioError as e:
+                if e.args and e.args[0] == 3:  # bad argument: firmware without the compact readback
+                    self.radio.has_status = False
+                    return self.raw()
+                raise
+            self.ctx.pump()
+            return d
+        return self.raw()
 
     def ui(self, timeout=1.0):
         """A settled readback: two whole ones in a row agreeing on the screen, toast, quick menu and hints."""
@@ -589,12 +629,14 @@ class Ctx:
     def rx_keyup(self, seconds, purpose, scan_freqs=None):
         return self.run.keyers["rx"].keyup(seconds, purpose, scan_freqs=scan_freqs)
 
-    def poll(self, side, pred, timeout, every=0.0):
-        """Readbacks until pred holds: (readback, its time) or (None, None) after `timeout` s."""
+    def poll(self, side, pred, timeout, every=0.0, light=False):
+        """Readbacks until pred holds: (readback, its time) or (None, None) after `timeout` s. `light`: the radio's
+        compact state (Side.state) where pred needs no more (the crossband line, the cards' rx/state)."""
         end = self.clock.time() + timeout
+        every = every or (0.25 if getattr(side.radio, "ble", False) else 0.02)  # Bluetooth: no back-to-back reads
         while True:
             t0 = self.clock.time()
-            u = side.raw()
+            u = side.state() if light else side.raw()
             at = (t0 + self.clock.time()) / 2
             try:
                 ok = pred(u)
@@ -604,15 +646,16 @@ class Ctx:
                 return u, at
             if self.clock.time() >= end:
                 return None, None
-            self.sleep(every or 0.02)
+            self.sleep(every)
 
-    def samples(self, side, secs, every=0.0):
+    def samples(self, side, secs, every=0.0, light=False):
         out, end = [], self.clock.time() + secs
+        every = every or (0.25 if getattr(side.radio, "ble", False) else 0.02)
         while self.clock.time() < end:
             t0 = self.clock.time()
-            u = side.raw()
+            u = side.state() if light else side.raw()
             out.append(((t0 + self.clock.time()) / 2, u))
-            self.sleep(every or 0.02)
+            self.sleep(every)
         return out
 
     # -- checks --
@@ -738,6 +781,7 @@ class Run:
         self.rb = {r: (1.0 if getattr(radios[r], "ble", False) else 0.05) for r in radios}
         self.snap = {}
         self.stopped = None
+        self.link_lost = None  # the role whose link timed out, when that stopped the run
         self.sdr = None  # --sdr: bench.Sdr (or the selftest's fake)
         self.cap_dir = None
         self.test_name = ""
@@ -773,26 +817,44 @@ class Run:
         self.log(f"snapshot: tx {' | '.join(self.snap['tx'])}")
         self.log(f"          rx {' | '.join(self.snap['rx'])}")
 
-    def restore(self, ctx, notes):
+    def restore(self, ctx, notes, roles=("tx", "rx")):
+        """Each radio's settings and slots put back; a radio whose link fails is left (noted), the other still done."""
         put = []
-        for role in ("tx", "rx"):
-            side = getattr(ctx, role)
-            # The crossband repeater never runs past a test (XB-20): stopped before anything is put back.
-            ok, out = side.cmd_err("xb stop")
-            if ok:
-                put.append(f"{role} crossband stopped")
-            for path, v in reversed(list(self.changed[role].items())):
-                ok, out = side.cmd_err(f"set {path} {v}")
-                if ok:
-                    put.append(f"{role} {path} -> {v}")
-                else:
-                    notes.append(f"{role} {path}: can't put back {v!r}: {out}")
-            self.changed[role].clear()
+        for role in roles:
             try:
-                side.home()
-                put += [f"{role} {x}" for x in restore_slots(side, self.snap[role], notes)]
-            except Exception as e:
-                notes.append(f"{role} slots: {type(e).__name__}: {e}")
+                put += self._restore_one(ctx, role, notes)
+            except LINK_ERRORS as e:
+                notes.append(f"{role}: not put back: {type(e).__name__}: {e}")
+        return put
+
+    def _restore_one(self, ctx, role, notes):
+        put = []
+        side = getattr(ctx, role)
+        # The crossband repeater never runs past a test (XB-20): stopped, and read back stopped, before anything
+        # is put back. Slots put back under a running repeater would move its sides (Oct 14, 2026: `xb` read
+        # "A 146.49500 <-> B 146.52000", the snapshot's slots, while it ran).
+        ok, out = side.cmd_err("xb stop")
+        if ok:
+            put.append(f"{role} crossband stopped")
+        ok, out = side.cmd_err("xb")
+        if ok and not out.strip().startswith("Crossband: off"):
+            notes.append(f"{role}: the crossband repeater still runs after xb stop ({out.strip()}): its slots "
+                         "and settings left as they are")
+            return put
+        for path, v in reversed(list(self.changed[role].items())):
+            ok, out = side.cmd_err(f"set {path} {v}")
+            if ok:
+                put.append(f"{role} {path} -> {v}")
+            else:
+                notes.append(f"{role} {path}: can't put back {v!r}: {out}")
+        self.changed[role].clear()
+        try:
+            side.home()
+            put += [f"{role} {x}" for x in restore_slots(side, self.snap[role], notes)]
+        except LINK_ERRORS:
+            raise
+        except Exception as e:
+            notes.append(f"{role} slots: {type(e).__name__}: {e}")
         return put
 
     def run_one(self, tst):
@@ -802,6 +864,7 @@ class Run:
         t0 = self.clock.time()
         n0 = {r: len(k.keyups) for r, k in self.keyers.items()}
         self.test_name = tst.name
+        lost = None
         try:
             if tst.long and not getattr(self.a, "long", False):
                 raise Skip("keys longer than the 5 s burst limit (one continuous key-up, the duty limit's "
@@ -821,7 +884,10 @@ class Run:
             res.update(result="fail", why=str(e))
         except SafetyError:
             raise
-        except (fl.RadioError, TimeoutError, OSError, BenchError) as e:
+        except LINK_ERRORS as e:  # a link timed out: every later test would too; the run stops after this one
+            lost = LinkLost(self.role_of(e), e)
+            res.update(result="error", why=f"link lost: {lost}")
+        except (fl.RadioError, BenchError) as e:
             res.update(result="error", why=f"{type(e).__name__}: {e}")
         except Exception as e:  # a bug in the test: shown with its place
             res.update(result="error", why=f"{type(e).__name__}: {e}", trace=traceback.format_exc(limit=-3))
@@ -830,12 +896,22 @@ class Run:
                 if k.active is not None:
                     k.emergency_off()
             notes = []
-            for fn in reversed(t.defers):
-                try:
-                    fn()
-                except Exception as e:
-                    notes.append(f"clean-up: {type(e).__name__}: {e}")
-            put = self.restore(t, notes)
+            if lost is None:
+                for fn in reversed(t.defers):
+                    try:
+                        fn()
+                    except LINK_ERRORS as e:
+                        notes.append(f"clean-up: {type(e).__name__}: {e}")
+                        lost = LinkLost(self.role_of(e), e)
+                        break
+                    except Exception as e:
+                        notes.append(f"clean-up: {type(e).__name__}: {e}")
+            # After a lost link only the slots and settings (no clean-ups: they read back, on the slow link); the
+            # run's own end puts back what it can.
+            put = self.restore(t, notes) if lost is None else []
+            if lost is None and any(": not put back: " in n for n in notes):
+                lost = LinkLost("rx" if any(n.startswith("rx: not put back") for n in notes) else "tx",
+                                TimeoutError(next(n for n in notes if ": not put back: " in n)))
             self.rb = {"tx": t.tx.rb, "rx": t.rx.rb}
         res["secs"] = round(self.clock.time() - t0, 2)
         if t.captures:
@@ -855,7 +931,22 @@ class Run:
             res["restored"] = put
         if notes:
             res["restore_notes"] = notes
+        if lost is not None:
+            lost.res = res
+            raise lost
         return res
+
+    def role_of(self, err):
+        """Which radio's link `err` came from: the deepest frame of its traceback whose `self` is a radio (its
+        LinkRadio, Link or port); else the one on Bluetooth."""
+        found, tb = None, err.__traceback__
+        while tb is not None:
+            me = tb.tb_frame.f_locals.get("self")
+            for role, r in self.radios.items():
+                if me is not None and me in (r, getattr(r, "link", None), getattr(r, "port", None)):
+                    found = role
+            tb = tb.tb_next
+        return found or next((r for r, x in self.radios.items() if getattr(x, "ble", False)), "rx")
 
     def run(self, tests):
         self.verify()
@@ -874,6 +965,17 @@ class Run:
                 except SafetyError as e:  # a gate refused or a KEY went unanswered: KEY off was sent; no more keying
                     self.stopped = str(e)
                     self.log(f"\nSTOPPED in {tst.name}: {e}")
+                    break
+                except LinkLost as e:  # a link timed out: KEY off to both now; the tests after it would only fail
+                    for k in self.keyers.values():
+                        k.emergency_off()
+                    self.stopped = f"link lost in {tst.name}: {e}"
+                    self.link_lost = e.role
+                    if e.res is not None:
+                        results.append(e.res)
+                    self.log(f"  [ERROR] {tst.module}.{tst.name}: {e}")
+                    self.log(f"\nSTOPPED in {tst.name}: {e}; KEY off sent to both; {len(tests) - len(results)} "
+                             "tests not run. The results are kept but not recorded.")
                     break
                 results.append(res)
                 mark = {"pass": "pass", "fail": "FAIL", "error": "ERROR", "skip": "skip"}[res["result"]]
@@ -896,6 +998,8 @@ class Run:
             try:
                 self.restore(c, notes)
                 for role in ("tx", "rx"):
+                    if any(n.startswith(f"{role}: not put back") for n in notes):
+                        continue
                     now = slot_lines(getattr(c, role))
                     sf = uitest.slot_fields
                     for w, h in zip(self.snap.get(role, []), now):
@@ -1141,6 +1245,9 @@ def main(argv=None):
     except SafetyError as e:
         say(f"\nSTOPPED: {e}")
         return 2
+    except LINK_ERRORS as e:  # before the tests (HELLO, the snapshot) or in the final restore
+        say(f"\nSTOPPED: a link failed: {type(e).__name__}: {e}; KEY off sent to both; nothing recorded")
+        return 2
     except KeyboardInterrupt:
         say("\ninterrupted: KEY off sent to both radios")
         return 130
@@ -1173,7 +1280,9 @@ def main(argv=None):
     if run.stopped:
         say(f"STOPPED by a safety check: {run.stopped}")
     say(f"results: {path}\npage: {page}")
-    if a.record:
+    if a.record and run.stopped:
+        say("not recorded: the run stopped early (a stopped run's rows would stand for tests it never ran)")
+    elif a.record:
         import record_results
         for line in record_results.record_paths([path], a.docs):
             say(line)

@@ -14,13 +14,18 @@ def receive_shows_rx_and_meter(t):
     tx_on(t, VHF)
     u = t.rx.home()
     t.need(u.cards["A"]["rx"] == 0, f"{VHF} MHz is busy here before the key-up: {u.cards['A']}")
-    with t.key(3, "a carrier on A"):
+    with t.key(3, "a carrier on A") as k:
+        # The transmitting radio first, right after KEY on: read after the receiving radio's (on Bluetooth that
+        # takes 2 to 3 s) it came after the key-up's own end, and `keyed=-` was the truth (Oct 14, 2026).
+        v = t.tx.raw()
+        on = k.t_off is None
+        t.check(on, "the transmitting radio's readback inside its key-up", f"KEY off sent {k.t_off}")
+        t.eq(v.state.get("keyed"), "A", "the transmitting radio: keyed on A")
+        t.eq(v.state.get("remote"), 1, "the transmitting radio: keyed remotely (LINK-20)")
+        t.eq(v.id, "Transmit", "the transmitting radio shows its transmit screen (TX)")
         u, _ = hears(t, "A")
         t.eq(state(u, "A"), "RX", "A's card: RX")
         t.check(u.cards["A"]["meter"] > 0, "A's S-meter shows the signal", u.cards["A"])
-        v = t.tx.raw()
-        t.eq(v.state.get("keyed"), "A", "the transmitting radio: keyed on A")
-        t.eq(v.id, "Transmit", "the transmitting radio shows its transmit screen (TX)")
     u, _ = closes(t, "A")
     t.check(u is not None, "RX goes after the unkey", t.rx.raw().cards["A"])
     t.eq(u.cards["A"]["meter"], 0, "the S-meter drops")
