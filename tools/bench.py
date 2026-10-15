@@ -1717,6 +1717,8 @@ def load_cfg(path):
 def pick_runs(cfg, names):
     if not names:
         return cfg["runs"]
+    if names == "none":  # only the extra checks (--refusals/--keepalive/--timeout): no 60 s suite keying
+        return []
     by = {r["name"]: r for r in cfg["runs"]}
     out = []
     for n in names.split(","):
