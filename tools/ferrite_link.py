@@ -263,12 +263,20 @@ class Link:
         self.p.read()
         self.p.buf.clear()
         self.p.write(b"\x00")  # TERM-2: a 0x00 gives the cable to the link
+        self.sent_at = time.time()
+
+    # TERM-2: the radio keeps the port for the link while frames or syncs come within 10 s (link.rs ACTIVE_MS);
+    # after a longer quiet, in auto, a frame's bytes go to the terminal until its closing 0x00 and the frame is
+    # lost. A sync before a frame sent after this much quiet gives the port back first.
+    QUIET_S = 5.0
 
     def send(self, ty, payload=b""):
         """One request, not waiting for its answer; its seq."""
         self.seq = (self.seq + 1) & 0xFF
         body = bytes([ty, self.seq]) + payload
-        self.p.write(cobs_encode(body + struct.pack("<H", crc16(body))) + b"\x00")
+        sync = b"\x00" if time.time() - self.sent_at >= self.QUIET_S else b""
+        self.p.write(sync + cobs_encode(body + struct.pack("<H", crc16(body))) + b"\x00")
+        self.sent_at = time.time()
         return self.seq
 
     def answers(self):

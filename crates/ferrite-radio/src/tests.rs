@@ -906,6 +906,18 @@ fn gps_power_around_signals() {
     assert_eq!(g.step(20_000, false, true, false).power, None);
 }
 
+/// GPS-1.1, GPS-1.2: 0 6 1 Off then On powers the module at once; the firmware's `allowed` (`GpsCfg::powered`) is
+/// false while GPS is off, which isn't a signal, so it doesn't start GPS-4's 2 s wait (the bench: PA8 still
+/// high 1 s after On).
+#[test]
+fn gps_on_powers_at_once() {
+    let mut g = GpsPower::default();
+    assert_eq!(g.step(5_000, true, true, false).power, Some(true));
+    assert_eq!(g.step(6_000, false, false, false).power, Some(false));
+    assert_eq!(g.step(9_000, false, false, false).power, None);
+    assert_eq!(g.step(9_010, true, true, false).power, Some(true), "On: powered on the first look");
+}
+
 /// LINK-14, LINK-25 (decision 76): PB9 follows 0 9 2 1, and while Bluetooth is on it is set again after each
 /// transmission, as stock; never while it is off.
 #[test]

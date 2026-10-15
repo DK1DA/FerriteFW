@@ -4,6 +4,7 @@ SAFE-6, KISS-6, TERM-4.3): the tests drive the radio on the cable as always and 
 --sim auto, which the test turns on). PIN-lock checks set a PIN by keys (restart.py's helpers; --with pin on the
 radio) and turn the lock off after.
 """
+import re
 import struct
 import time
 
@@ -235,11 +236,13 @@ def bt_terminal_and_link(t):
 
 @test("LINK-36", needs=("bt", "bench"), where="radio", pages=())
 def bt_paced_readback_arrives_whole(t):
-    """Bluetooth sends in paced bursts (`bt pace`, default 20 B and a 30 ms gap): a whole UI readback arrives over
-    Bluetooth and `bt stat`'s out count grows by what was sent; back to back (`bt pace 0 0`) the BT513 drops it
-    (no whole answer); the pace put back, it arrives whole again; the cable answers all along."""
-    pace = t.cmd("bt pace")
-    t.check("pace" in pace, "bt pace reads", pace)
+    """Bluetooth sends in paced bursts (`bt pace B G`, default 20 B and a 50 ms gap): a whole UI readback arrives
+    over Bluetooth; back to back (`bt pace 0 0`) the BT513 drops it (no whole answer); the pace put back, it
+    arrives whole again; the cable answers all along. `bt stat` reads the pace (`bt pace` alone is a usage error)."""
+    stat = t.cmd("bt stat")
+    m = re.search(r"pace: (\d+) B bursts, (\d+) ms gaps", stat)
+    t.check(m, "bt stat reads the pace", stat)
+    burst, gap = (m.group(1), m.group(2)) if m else ("20", "50")
     bt = t.bt()
     t.check(bt.ui()["screen"]["id"], "the readback whole over Bluetooth", "")
     try:
@@ -252,7 +255,7 @@ def bt_paced_readback_arrives_whole(t):
         t.check(not whole, "unpaced: the readback doesn't arrive whole", whole)
         t.check(t.cmd("get 0 7 1"), "the cable answers meanwhile", "")
     finally:
-        t.cmd("bt pace 20 30")
+        t.cmd(f"bt pace {burst} {gap}")
     t.close_bt()
     bt = t.bt()
     t.check(bt.ui()["screen"]["id"], "paced again: whole", "")

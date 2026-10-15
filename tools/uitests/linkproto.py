@@ -46,8 +46,9 @@ def one_request_in_flight_no_xon_xoff(t):
 @test("LINK-11", pages=())
 def baud_switch_and_fallback(t):
     """BAUD after HELLO: 230400 is taken, both switch and a HELLO at the new rate keeps it; BAUD 115200 goes back;
-    a BAUD without a HELLO at the new rate within 1 s falls back to 115200. On the radio's 8 MHz clock 460800 and
-    921600 are refused (out of the UART's 2 %)."""
+    a BAUD without a HELLO at the new rate within 1 s falls back to 115200. On the radio's 120 MHz clock (PWR-9,
+    APB 60 MHz) 460800 and 921600 are within the UART's 2 % and taken too (each left to fall back: the cable
+    adapter isn't asked to run them)."""
     link, port = t.r.link, t.r.port
     hello = bytes([fl.PROTOCOL]) + bytes(8) + b"uitest.py"
 
@@ -72,7 +73,9 @@ def baud_switch_and_fallback(t):
         t.eq(link.ask(fl.HELLO, hello)[0], 0, "no HELLO at 230400: back at 115200")
         if not t.sim:
             for rate in (460800, 921600):
-                t.check(baud(rate) != 0, f"{rate}: refused on the 8 MHz clock", rate)
+                t.eq(baud(rate), 0, f"{rate}: taken on the 120 MHz clock")
+                time.sleep(1.6)  # no HELLO at the new rate: back at 115200
+                t.eq(link.ask(fl.HELLO, hello)[0], 0, f"no HELLO at {rate}: back at 115200")
     finally:
         port.baud(115200)
         time.sleep(1.5)

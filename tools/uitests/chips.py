@@ -190,7 +190,10 @@ def squelch_registers_from_calibration(t):
 @test("WATCH-8", "PWR-19", needs=("bench",), where="radio", pages=("Home",))
 def watched_chips_follow_battery_save(t):
     """Battery Save Level 1 and watch A+B (A on 2 m, B on 70 cm): each watched chip goes through the sleep cycle
-    (REG_30 0 and 0xBFF1 both seen over a few seconds); never both receiving in the same read pair."""
+    (REG_30 0 and 0xBFF1 both seen over a few seconds). One chip awake at a time (WATCH-2, PWR-7) isn't checked
+    here: each `bk` read is a link round trip (about 150 ms on the cable), longer than the hop's 70 ms
+    dwell, so a read pair spans hops and both read awake (4 of 16 on the bench) without the two ever overlapping.
+    That check needs both chips' REG_30 read in one Radio-task request."""
     t.bench()
     stopped = quiet(t, watch="A+B", bsave="Level 1")
     try:
@@ -203,8 +206,8 @@ def watched_chips_follow_battery_save(t):
             vals = {v[c] for _, v in s}
             t.check(AWAKE in vals and 0 in vals, f"chip {c}: awake and asleep in turn", sorted(vals))
         both = sum(1 for _, v in s if v == (AWAKE, AWAKE))
-        t.check(both <= len(s) // 10, "the two never receiving together (a read pair can straddle a switch)",
-                (both, len(s)))
+        pair = statistics.median(s[i + 1][0] - s[i][0] for i in range(len(s) - 1)) * 1000
+        t.note(f"{len(s)} read pairs, one every {pair:.0f} ms; {both} read both awake (pairs span hops: not checked)")
     finally:
         t.put_back(stopped)
 
@@ -454,7 +457,8 @@ def gps_commands_refused_during_a_standby(t):
         t.cmd("gps nmea off")
         t.cmd("gps standby 60")
         ok, out = t.cmd_err("gps query 0")
-        t.check(not ok, "gps query 0 refused during the standby", out)
+        # The terminal prints its refusal as text ("refused: a bench standby is running: ..."); CMD itself succeeds.
+        t.check(not ok or "refused" in out.lower(), "gps query 0 refused during the standby", out)
     finally:
         t.set("0 6 1", "Off")
         time.sleep(1)

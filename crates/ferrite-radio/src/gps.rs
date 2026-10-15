@@ -40,7 +40,9 @@ impl GpsPower {
             out.pb10_low = Some(keyed);
             self.tx_low = keyed;
         }
-        if !allowed {
+        // Only a signal holds it off for QUIET_MS; 0 6 1 off is no signal (its `allowed` is false too), so On
+        // powers the module at once (GPS-1.1).
+        if on && !allowed {
             self.busy_at = now;
         }
         let want = on && (!self.powered && now.wrapping_sub(self.busy_at) >= QUIET_MS || self.powered && allowed);
