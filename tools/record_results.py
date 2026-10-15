@@ -7,15 +7,17 @@ Results table in docs/test-plan/*.md (date, firmware = commit + build, ✓/◐/�
     tools/record_results.py SESSION_DIR|results.json ...    # these
     tools/record_results.py --dry-run             # say what would change, write nothing
 
-Reads <session>/ui/results.json (tools/uitest.py) and <session>/bench/results.json (tools/bench.py: each check
+Reads <session>/ui/results.json (tools/uitest.py), <session>/tworadio/results.json (tools/tworadio.py: the same
+shape, a rule a test checks only part of marked "part") and <session>/bench/results.json (tools/bench.py: each check
 tagged with the rules it measures; `bench.py --rule-results SESSION` writes it for an older session). Only radio
 runs are recorded: a simulator or selftest run (sim true, a tcp: port) and a re-analysis of saved captures (bench
 --load) are skipped, so a simulator pass never lands as a radio pass.
 
-The rows: uitest pass ✓, fail or error ✗, a known deviation (xfail) ◐, skipped not recorded; bench pass ✓ where
+The rows: uitest pass ✓, fail or error ✗, a known deviation (xfail) ◐, skipped not recorded; tworadio the same,
+with a pass of a test that checks only part of the rule ◐ ("covers part of the rule"); bench pass ✓ where
 the check covers the rule as stated and ◐ where it covers part of it (the note says so; ✓ when the entry's last
 result before it is a ✓, which a part check can confirm but not take away), fail ✗. An automated
-row's note starts with its tool ("uitest NAME", "bench NAME") and ends "; run YYYYMMDD-HHMMSS". Per rule and tool
+row's note starts with its tool ("uitest NAME", "tworadio NAME", "bench NAME") and ends "; run YYYYMMDD-HHMMSS". Per rule and tool
 only the newest automated row is kept: a newer run replaces the older automated rows (the same run again
 rewrites its row only if the row changed), an older run changes nothing. Rows written by hand (any other note) are never touched. Rows stay in date order, so
 the entry's last row is its latest result. A rule's How doesn't matter: a host-covered rule gets its radio
@@ -57,7 +59,7 @@ CHECK_SPLITS = {
     },
 }
 UI_ORDER = {"fail": 4, "error": 4, "xfail": 3, "xpass": 2, "pass": 2, "skip": 1}
-AUTO = re.compile(r"^(uitest|bench) \S")
+AUTO = re.compile(r"^(uitest|tworadio|bench) \S")
 RUN = re.compile(r"run (\d{8}-\d{6})")
 PLACEHOLDER = re.compile(r"^\|\s*\|\s*\|\s*☐\s*\|\s*\|\s*$")
 HEAD = ["| Date | Firmware | Result | Notes |", "| --- | --- | --- | --- |"]
@@ -97,7 +99,7 @@ def find_results(paths, root, newest):
         if p.is_file():
             sess.append(p)
             continue
-        for kind in ("ui", "bench"):
+        for kind in ("ui", "tworadio", "bench"):
             f = p / kind / "results.json"
             if f.exists():
                 sess.append(f)
@@ -138,13 +140,33 @@ def split_rules(docs):
     return testplan.children(rules)
 
 
-def ui_tags():
-    """{uitest name: [the rules it is tagged with now]}."""
+def ui_tags(d=None):
+    """{uitest name: [the rules it is tagged with now]} (tools/uitests, or another directory of tests)."""
     out = {}
-    for rid, tests in testplan.scan_uitests().items():
+    for rid, tests in (testplan.scan_uitests(d) if d else testplan.scan_uitests()).items():
         for name, _ in tests:
             out.setdefault(name.split(".")[-1], []).append(rid)
     return out
+
+
+def tworadio_tags():
+    """{two-radio test name: [the rules it is tagged with now]} (tools/tworadio_tests)."""
+    return ui_tags(HERE / "tworadio_tests")
+
+
+def tworadio_rules(r, kids, tags, lost):
+    """A tworadio run's {rule: result, test, why, scope}: ui_rules' worst result per rule, re-pointed to today's
+    tags; scope "part" when no test that ran checks the whole rule (each test's `part` list)."""
+    rules = ui_rules(r, kids, tags, lost)
+    tests = r.get("tests") or []
+    for rid, x in rules.items():
+        if tests:
+            full = any(rid in tags.get(t["name"], t.get("rules", [])) and rid not in t.get("part", [])
+                       and t.get("result") != "skip" for t in tests)
+        else:
+            full = (r.get("rules", {}).get(rid) or {}).get("scope") != "part"
+        x["scope"] = "all" if full else "part"
+    return rules
 
 
 def ui_rules(r, kids, tags, lost):
@@ -205,10 +227,12 @@ def rows_of(r, stamp, kids=None, tags=None, lost=None):
     """[(rule, tool, stamp, row text)] for one results.json."""
     date = datetime.datetime.strptime(stamp[:8], "%Y%m%d").strftime("%b %-d, %Y")
     fw = f"{r.get('commit') or '?'} ({r.get('build') or '?'})"
-    tool = "uitest" if r.get("tool") == "uitest.py" else "bench"
+    tool = {"uitest.py": "uitest", "tworadio.py": "tworadio"}.get(r.get("tool"), "bench")
     kids, lost = kids or {}, lost if lost is not None else []
     if tool == "uitest":
         rules = ui_rules(r, kids, tags if tags is not None else ui_tags(), lost)
+    elif tool == "tworadio":
+        rules = tworadio_rules(r, kids, tags if tags is not None else tworadio_tags(), lost)
     else:
         rules = bench_rules_of(r, kids, lost)
     out = []
@@ -221,6 +245,11 @@ def rows_of(r, stamp, kids=None, tags=None, lost=None):
             mark = {"pass": "✓", "xpass": "✓", "xfail": "◐"}.get(res, "✗")
             note = f"uitest {x['test']}" + (f": known deviation: {why}" if res == "xfail" else
                                             f": {why}" if res not in ("pass", "xpass") and why else "")
+        elif tool == "tworadio":
+            part = x.get("scope") == "part"
+            mark = {"pass": "◐" if part else "✓", "xpass": "✓", "xfail": "◐"}.get(res, "✗")
+            note = f"tworadio {x['test']}" + (f": {why}" if res not in ("pass", "xpass") and why else "") + (
+                " (covers part of the rule)" if part and res == "pass" else "")
         else:
             part = x.get("scope") == "part"
             mark = "✗" if res != "pass" else ("◐" if part else "✓")
@@ -299,9 +328,10 @@ def entry_with(body, new):
         k = len(rows)
         while k > 0 and date_key(cells(rows[k - 1])[0]) > d:
             k -= 1
-        if " | ◐ | bench " in row and "(covers part of the rule)" in row and k and cells(rows[k - 1])[2] == "✓":
+        m = re.search(r" \| ◐ \| (bench|tworadio) ", row)
+        if m and "(covers part of the rule)" in row and k and cells(rows[k - 1])[2] == "✓":
             # a check of part of the rule passed after a full pass: it confirms, it doesn't take the ✓ away
-            row = row.replace(" | ◐ | bench ", " | ✓ | bench ", 1).replace(
+            row = row.replace(m.group(0), f" | ✓ | {m.group(1)} ", 1).replace(
                 "(covers part of the rule)", "(covers part of the rule; confirms the ✓ before)", 1)
         rows.insert(k, row)
     return body[:r0] + head + rows + body[r1:]
@@ -311,7 +341,7 @@ def record_paths(paths, docs=DOCS, root=RESULTS, newest=False, dry=False):
     """Record the given sessions or results.json files (all under root when none); returns report lines."""
     say = []
     rows = []
-    kids, tags = split_rules(docs), ui_tags()
+    kids, tags, tw_tags = split_rules(docs), ui_tags(), tworadio_tags()
     for stamp, kind, f in find_results(paths, root, newest):
         r = json.load(open(f))
         ok, why = radio_run(r)
@@ -321,7 +351,7 @@ def record_paths(paths, docs=DOCS, root=RESULTS, newest=False, dry=False):
                 say.append(f"skipped {name} {kind}: {why}")
             continue
         lost = []
-        rs = rows_of(r, stamp, kids, tags, lost)
+        rs = rows_of(r, stamp, kids, tw_tags if kind == "tworadio" else tags, lost)
         rows += rs
         say.append(f"{name} {kind}: {len(rs)} rules")
         for rid, test in sorted(set(lost)):
