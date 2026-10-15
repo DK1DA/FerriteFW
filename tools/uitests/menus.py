@@ -221,6 +221,9 @@ def hash_resets_to_default(t):
     """# on a highlighted row resets it to its default (the dot goes)."""
     u = t.keys("MENU 0 7 4 2")
     v0 = u.sel["value"]
+    # Start from the default (the radio may have it set off-default, and a step could land on the default).
+    if u.sel["dot"]:
+        u = t.keys("HASH")
     u = t.knob(-2)
     t.check(u.sel["dot"], "changed: the dot shows", u.sel)
     u = t.keys("HASH")
