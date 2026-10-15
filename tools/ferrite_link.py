@@ -143,6 +143,8 @@ class BlePort:
         self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
         self._thread.start()
         self._rx, self._lock, self._got = bytearray(), threading.Lock(), threading.Event()
+        self.rx_total, self.rx_mark, self.last_rx, self.dropped_at = 0, 0, None, None
+        self.slow = True  # paced at ~280 B/s by the radio (LINK-36): answers take longer than on the cable
         self.buf = bytearray()
         self.client = None
         self.client = self._run(self._connect(target, timeout), timeout + 15)
@@ -160,7 +162,7 @@ class BlePort:
         dev = await BleakScanner.find_device_by_filter(match, timeout=timeout)
         if dev is None:
             raise OSError(f"no Bluetooth device {target!r} found in {timeout:.0f} s (0 9 2 1 on? in range?)")
-        client = BleakClient(dev)
+        client = BleakClient(dev, disconnected_callback=self._gone)
         await client.connect()
         await client.start_notify(BLE_DATA, self._notify)
         return client
@@ -168,7 +170,23 @@ class BlePort:
     def _notify(self, _char, data):
         with self._lock:
             self._rx += data
+            self.rx_total += len(data)
+            self.last_rx = time.time()
         self._got.set()
+
+    def _gone(self, _client):
+        """The Bluetooth connection itself dropped (not just a slow answer): remembered for the time-out message."""
+        self.dropped_at = time.time()
+        print("ble: disconnected", file=sys.stderr)
+
+    def diagnose(self, since):
+        """Why an answer didn't come: the connection dropped, or it's up and the radio was silent or still sending."""
+        if self.dropped_at:
+            return f"Bluetooth disconnected {time.time() - self.dropped_at:.1f} s ago"
+        if self.last_rx is None or self.last_rx < since:
+            return "Bluetooth still connected; the radio sent nothing since the request"
+        return (f"Bluetooth still connected; the radio was still sending ({self.rx_total - self.rx_mark} bytes since "
+                f"the request, the last {time.time() - self.last_rx:.1f} s ago): slow, not dropped")
 
     def write(self, b):
         for i in range(0, len(b), BLE_CHUNK):
@@ -268,8 +286,14 @@ class Link:
             out.append((f[0], f[1], f[2], f[3:-2]))
         return out
 
-    def ask(self, ty, payload=b"", timeout=2.0, retry_pending=30):
+    def ask(self, ty, payload=b"", timeout=None, retry_pending=30):
+        slow = getattr(self.p, "slow", False)
+        if timeout is None:
+            timeout = 6.0 if slow else 2.0  # Bluetooth: a 224-byte chunk is ~0.8 s idle, over 2 s on a busy radio
         for _ in range(retry_pending + 1):
+            t0 = time.time()
+            if slow:
+                self.p.rx_mark = self.p.rx_total
             seq = self.send(ty, payload)
             end = time.time() + timeout
             pending = False
@@ -282,7 +306,8 @@ class Link:
                             break
                         return status, rest
             if not pending:
-                raise TimeoutError(f"no answer to 0x{ty:02X}")
+                why = f" ({self.p.diagnose(t0)})" if hasattr(self.p, "diagnose") else ""
+                raise TimeoutError(f"no answer to 0x{ty:02X} in {timeout:.0f} s{why}")
         raise TimeoutError("the radio is still asking its owner")
 
     def ok(self, ty, payload=b""):
