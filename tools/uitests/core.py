@@ -12,7 +12,8 @@ A test is a function taking the context `t`, tagged with the manual rule IDs it 
         t.check(len(u.rows) == 10, "nine rows and Advanced", u.rows)
 
 `where="radio"` marks a test the simulator can't model (it is skipped there); `slow=True` one that waits on a timer
-(run with --slow). `pages=("Zones", "Browse")` names the screens the test visits (their readback ids, the `screen`
+(run with --slow); `needs=` the build flavours or the things it needs (CAPS below: a bench build, a Bluetooth link,
+a factory reset allowed, a flash around the run, ...), skipped (saying which) when the run doesn't have them. `pages=("Zones", "Browse")` names the screens the test visits (their readback ids, the `screen`
 line's first word): `tools/uitest.py --page zones` runs the tests that visit a page, and `--check-pages` runs the
 tests and reports any whose tags differ from the screens they actually read back (readbacks inside `t.home()`
 don't count); `--fix-pages` writes what they visited into the tags. Safe by construction: the context has no PTT and the link's remote keys never transmit
@@ -28,6 +29,52 @@ REGISTRY = []
 # link (cable port, KISS, cable log, terminal colour) or the radio off (auto power off), or need the radio's owner.
 UNSAFE = {"0 8 2 1", "0 5 5 1", "0 5 5 3", "0 5 8 1", "0 8 7 2", "0 9 2 4", "0 5 9 1", "0 9 2 6", "0 9 2 5",
           "0 7 8", "0 9 2 1", "0 9 3 1", "0 9 3 2"}
+
+
+# What a test may need beyond a build flavour (needs=("bench",), needs=("tx-dry", "reset")): the tag, whether the
+# simulator provides it, and what gives it on the radio. A build flavour in needs= is one the build must be.
+BUILDS = ("receive", "tx", "tx-dry")
+CAPS = {
+    "bench": (False, "a bench build (tx-dry or bring-up): bk, gpio, mem, si, rx (TERM-38)"),
+    "keyup": (True, "a tx-dry build (PA held at 0) for remote key-ups that must be refused"),
+    "bt": (True, "a Bluetooth link beside the cable: --bt ble:walkie-talkie (0 9 2 1 on)"),
+    "cablelog": (False, "keys over Bluetooth (--port ble:...) and the cable log on --cablelog PORT"),
+    "flash": (False, "a flash around the run: --flash before, tools/flash.py, --flash after"),
+    "reset": (True, "a factory reset (0 9 8 2) allowed: --with reset (the test reloads the dump after)"),
+    "fm-station": (False, "a local FM station with RDS and stereo pilot: --with fm-station"),
+    "signal": (False, "a signal to receive (a second radio or a strong local one): --with signal"),
+    "fix": (True, "a GPS fix (the simulator has one): --with fix outdoors"),
+    "pin": (True, "a PIN may be set by keys (it stays set, the lock off, after: Change PIN has no none): --with pin"),
+}
+
+
+def unmet(needs, build, sim, bench, opts):
+    """Why a test with these needs can't run here ("" when it can)."""
+    if not needs:
+        return ""
+    builds = [n for n in needs if n in BUILDS]
+    if builds and build not in builds and not ("keyup" in needs and sim):
+        return f"needs a {' or '.join(builds)} build (this is {build})"
+    given = {x.strip() for x in (getattr(opts, "with_", "") or "").split(",") if x.strip()}
+    for n in needs:
+        if n in BUILDS:
+            continue
+        sim_has, what = CAPS[n]
+        if n == "bench":
+            ok = bench and not sim
+        elif n == "keyup":
+            ok = sim or build == "tx-dry"
+        elif n == "bt":
+            ok = bool(getattr(opts, "bt", None))
+        elif n == "cablelog":
+            ok = bool(getattr(opts, "cablelog", None)) and not sim
+        elif n == "flash":
+            ok = bool(getattr(opts, "flash", None)) and not sim
+        else:
+            ok = (sim and sim_has) or n in given
+        if not ok:
+            return f"needs {what}"
+    return ""
 
 
 # How long `T.stable` reads back for a settled screen before it takes the last readback as it is.
@@ -54,7 +101,8 @@ class Test:
 
 def test(*rules, where="both", slow=False, needs=None, smoke=False, xfail=None, pages=None):
     """Register a test: the rule IDs it checks; where it runs (both, radio, sim); slow (waits on timers);
-    needs: the build flavours it needs (("tx", "tx-dry") for a transmit build's screens), else any; smoke: in
+    needs: the build flavours it needs (("tx", "tx-dry") for a transmit build's screens), else any, and the CAPS
+    it needs (("bench",), ("keyup",), ("bt",), ...); smoke: in
     the short set bench.py runs beside the SDR suite; xfail: a known deviation from the rule (the reason): a
     failure is reported as xfail (not a run failure, recorded ✗), a pass as xpass (fixed: drop the mark);
     pages: the screens it visits, by readback id ("Home", "Quick", "Zones"), for --page."""
@@ -75,6 +123,7 @@ class U:
         self.toast, self.popup, self.qmenu = d["toast"], d["popup"], d["qmenu"]
         self.bar, self.state = d.get("bar", {}), d.get("state", {})
         self.cards = {c["slot"]: c for c in d["cards"]}
+        self.bcast = d.get("bcast", {})  # a broadcast card's report by slot: rds, stereo, dbuv, snr (BCR-26)
         self.lines = d["lines"]
 
     def __getitem__(self, k):
@@ -134,6 +183,8 @@ class T:
 
     def __init__(self, radio, sim, build, log=print):
         self.r, self.sim, self.build, self.log = radio, sim, build, log
+        self.opts = None  # the run's options (uitest.py's argparse namespace)
+        self._bt = None
         self.checks, self.notes, self.last = [], [], None
         self.evidence = []  # the readbacks a check looked at (their lines), newest last
         self.visited = set()  # the screens read back (--check-pages), outside home()
@@ -330,3 +381,217 @@ class T:
         """A precondition the radio's state doesn't meet: the test is skipped, not failed."""
         if not cond:
             raise Skip(why)
+
+    # -- restarts, Bluetooth, the bench commands, remote key-ups, owner settings --
+    def restart(self, capture=0.0):
+        """Restart the radio over the link (REBOOT, LINK-24: into the stock bootloader, which starts Ferrite again
+        after its 200 ms listen) and connect again. `capture` s: the cable's boot report read first, without a
+        byte sent (radio only; the simulator returns ""). Returns the readback once home or setup shows."""
+        from ferrite_link import REBOOT
+        self.r._ok(REBOOT)
+        text = self.r.reopen(capture=0 if self.sim else capture)
+        self.boot_text = text
+        u = self.wait(lambda u: u.id not in ("", "Boot") and u.whole, timeout=15, what="the radio up again")
+        return u
+
+    def bt(self):
+        """A second link on Bluetooth (--bt; the simulator's own with --sim auto), past HELLO; closed after the
+        test. Bluetooth must be on (0 9 2 1): the simulator turns it on for the test; on the radio it's the owner's."""
+        if self._bt is None:
+            import ferrite_link as fl
+            spec = getattr(self.opts, "bt", None)
+            self.need(spec, "no --bt link")
+            if self.get("0 9 2 1") != "On":
+                self.need(self.sim, "Bluetooth is off (0 9 2 1): the owner turns it on")
+                self.owner_set("0 9 2 1", "On")
+            self.need(self.get("0 9 3 1") == "Off", "a PIN lock is on: Bluetooth asks for the PIN (bt_raw)")
+            self._bt = fl.Radio(spec, name=b"uitest.py bt")
+        return self._bt
+
+    def bt_raw(self):
+        """A Bluetooth link without HELLO's AUTH (a PIN lock may be on): `.link` to ask what a test wants."""
+        self.need(getattr(self.opts, "bt", None), "no --bt link")
+        if self.get("0 9 2 1") != "On":
+            self.need(self.sim, "Bluetooth is off (0 9 2 1): the owner turns it on")
+            self.owner_set("0 9 2 1", "On")
+        self.close_bt()
+        self._bt = BtRaw(self.opts.bt)
+        return self._bt
+
+    def bt_port(self):
+        """Bluetooth's serial side bare (no HELLO: the terminal is Enter's), as a phone's terminal app has it."""
+        import ferrite_link as fl
+        self.need(getattr(self.opts, "bt", None), "no --bt link")
+        if self.get("0 9 2 1") != "On":
+            self.need(self.sim, "Bluetooth is off (0 9 2 1): the owner turns it on")
+            self.owner_set("0 9 2 1", "On")
+        self.close_bt()
+        self._bt = fl.Port(self.opts.bt)
+        self._bt.buf = getattr(self._bt, "buf", bytearray())
+        return self._bt
+
+    def close_bt(self):
+        """The Bluetooth link closed (a connection ends; the next bt() is a new one)."""
+        if self._bt is not None:
+            try:
+                self._bt.close()
+            except OSError:
+                pass
+            self._bt = None
+
+    def cable_log(self):
+        """The cable log (0 9 2 6, TERM-28) read from --cablelog without a byte sent (the first byte would end it),
+        while the keys and readback go over Bluetooth (--port ble:...): turned on for the test, off after."""
+        self.need(getattr(self.opts, "cablelog", None), "no --cablelog PORT")
+        if getattr(self, "_log", None) is None:
+            self._log = CableLog(self.opts.cablelog)
+            self.owner_set("0 9 2 6", "On")
+            time.sleep(0.5)
+        return self._log
+
+    def end_test(self):
+        """After a test (the runner): Bluetooth and the cable log closed, the owner settings it changed put back."""
+        if getattr(self, "_log", None) is not None:
+            self._log.close()
+            self._log = None
+        self.close_bt()
+        for path, value in reversed(getattr(self, "_owner", [])):
+            try:
+                self.cmd(f"set {path} {value}")
+            except Exception as e:  # noqa: BLE001 (the runner's restore reports what is left)
+                self.note(f"{path}: couldn't put back {value!r}: {e}")
+        self._owner = []
+
+    def owner_set(self, path, value):
+        """A setting UNSAFE keeps from tests (Bluetooth, the PIN lock), changed where the test needs it and put back
+        after it whatever happens (the cable is never asked for the PIN: TERM-3). Only the settings named here."""
+        allowed = {"0 9 2 1": self.sim, "0 9 3 1": True, "0 9 3 3": True, "0 9 2 6": True}
+        if not allowed.get(path):
+            raise Fail(f"{path} is never changed by a test here")
+        if not hasattr(self, "_owner"):
+            self._owner = []
+        was = self.get(path)
+        if not any(p == path for p, _ in self._owner):
+            self._owner.append((path, was))
+        ok, out = self.cmd_err(f"set {path} {value}")
+        if not ok:
+            self.fail(f"set {path} {value}: {out}")
+
+    def bench(self):
+        self.need(self.r.bench and not self.sim, "not a bench build: bk, gpio, mem are in tx-dry and bring-up")
+
+    def bk(self, chip, reg):
+        """A BK4829 register by `bk` (bench builds): its value."""
+        out = self.cmd(f"bk {chip} {reg:x}")
+        m = re.search(r"REG_[0-9A-Fa-f]+ = 0x([0-9A-Fa-f]{4})", out)
+        if not m:
+            self.fail(f"bk {chip} {reg:x}: {out!r}")
+        return int(m.group(1), 16)
+
+    def gpio(self):
+        """`gpio` (bench builds): {"A": (in, out), ...} as 16-bit numbers."""
+        out = self.cmd("gpio")
+        ports = {}
+        for m in re.finditer(r"P([A-E])\s+in ([01 ]{19})\s+out ([01 ]{19})", out):
+            ports[m.group(1)] = (int(m.group(2).replace(" ", ""), 2), int(m.group(3).replace(" ", ""), 2))
+        if len(ports) != 5:
+            self.fail(f"gpio: {out!r}")
+        return ports
+
+    def pin(self, name, which=1):
+        """A pin's output (which=1) or input (which=0) level by `gpio`: pin("PC4")."""
+        return self.gpio()[name[1]][which] >> int(name[2:]) & 1
+
+    def mem32(self, addr, n=1):
+        out = self.cmd(f"mem32 {addr:08X} {n}")
+        words = []
+        for line in out.splitlines():
+            parts = line.split()
+            if parts and re.fullmatch(r"[0-9A-Fa-f]{8}", parts[0]):
+                words += [int(w, 16) for w in parts[1:] if re.fullmatch(r"[0-9A-Fa-f]{8}", w)]
+        if len(words) < n:
+            self.fail(f"mem32 {addr:08X} {n}: {out!r}")
+        return words[:n]
+
+    def keyup_refused(self, slot="active"):
+        """A remote key-up that must be refused (LINK-20): only on a tx-dry build (PA held at 0) or the simulator.
+        KEY on, then KEY off at once whatever came back; (refused, the reason). A key-up that keyed fails the
+        test after the KEY off."""
+        import ferrite_link as fl
+        if not (self.sim or self.build == "tx-dry"):
+            raise Fail("a remote key-up only on a tx-dry build or the simulator")
+        if not self.sim:
+            # The bench's keying frequencies only (tools/bench.py test_freqs), simplex, whatever the check expects.
+            line = self.slot(self.ui(0).state.get("active", "A") if slot == "active" else slot.upper())
+            m = re.search(r" (\d+\.\d+)\s", line + " ")
+            if not m or m.group(1) not in ("145.49500", "446.47500") or "split" in line or (
+                    "offset=" in line and "offset=off" not in line and "offset=+0.00000" not in line):
+                raise Fail(f"a remote key-up on the radio only on 145.495 or 446.475 MHz, simplex: {line!r}")
+        link = self.r.link
+        status, rest = None, b""
+        try:
+            status, rest = link.ask(fl.KEY, bytes([fl.PTT, fl.PTT_ON, fl.SLOTS[slot]]), timeout=1.0)
+        finally:
+            for _ in range(3):
+                try:
+                    link.ask(fl.KEY, bytes([fl.PTT, fl.PTT_OFF]), timeout=1.0)
+                    break
+                except TimeoutError:
+                    continue
+        if status == 0:
+            self.fail("the remote key-up keyed (KEY off sent at once)")
+        return True, rest.decode("ascii", "replace")
+
+
+class BtRaw:
+    """A Bluetooth link past HELLO only (no AUTH): what a phone would see with a PIN lock on."""
+
+    def __init__(self, spec):
+        import ferrite_link as fl
+        self.port = fl.Port(spec)
+        self.link = fl.Link(self.port)
+        self.hello = self.link.ask(fl.HELLO, bytes([fl.PROTOCOL]) + bytes(8) + b"uitest.py bt")
+
+    def close(self):
+        self.port.close()
+
+
+class CableLog:
+    """The cable's log lines as they come (a reader thread; nothing is ever written to the port): (time, line)."""
+
+    def __init__(self, port):
+        import threading
+        import serial
+        self.ser = serial.Serial(port, 115200, timeout=0.1)
+        self.lines, self._buf, self._stop = [], b"", False
+        self._t = threading.Thread(target=self._run, daemon=True)
+        self._t.start()
+
+    def _run(self):
+        while not self._stop:
+            b = self.ser.read(4096)
+            if not b:
+                continue
+            self._buf += b
+            while b"\n" in self._buf:
+                line, _, self._buf = self._buf.partition(b"\n")
+                self.lines.append((time.time(), line.decode("ascii", "replace").rstrip("\r")))
+
+    def since(self, t0):
+        return [(ts, ln) for ts, ln in list(self.lines) if ts >= t0]
+
+    def wait(self, pattern, t0, timeout):
+        """The first line from t0 on matching the regex, within `timeout` s, or None."""
+        end = time.time() + timeout
+        while True:
+            for ts, ln in self.since(t0):
+                if re.search(pattern, ln):
+                    return ts, ln
+            if time.time() > end:
+                return None
+            time.sleep(0.1)
+
+    def close(self):
+        self._stop = True
+        self._t.join(timeout=1)
+        self.ser.close()

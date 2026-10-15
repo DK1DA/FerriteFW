@@ -14,14 +14,23 @@ manual's rules. The tests are in tools/uitests/*.py, each tagged with the rule I
     tools/uitest.py --smoke                             # the short smoke set (bench.py runs it beside the SDR suite)
     tools/uitest.py --slow                              # also the tests that wait on timers (menu timeout, auto lock)
     tools/uitest.py --record                            # write a result row per rule into docs/test-plan/*.md
+    tools/uitest.py --with reset,fm-station             # also the tests that need these (needs=, uitests/core.py
+                                                        #   CAPS: a factory reset, a local FM station, ...)
+    tools/uitest.py --bt ble:walkie-talkie              # a Bluetooth link beside the cable (0 9 2 1 on): needs=("bt",)
+    tools/uitest.py --port ble:walkie-talkie --cablelog /dev/cu.usbserial-114220   # keys over Bluetooth while the
+                                                        #   cable carries the cable log (0 9 2 6): needs=("cablelog",)
+    tools/uitest.py --flash before --module install     # around a flash (tools/flash.py): what the install and
+    tools/uitest.py --flash after --module install      #   update checks compare (needs=("flash",))
 
 A run: connect (HELLO), read the build flavour (receive, tx, tx-dry), snapshot every setting (`dump`) and the slots
 (`slot`), then each test from home (hold BACK); after each test the settings and slots are compared with the
 snapshot and anything changed is put back (`set`, `slot`, V/M for a slot that was on a channel). At the end the
 whole `dump` is compared again and any difference is reported (and fails the run).
 
-Safe by construction: no remote PTT (KEY 0x80) is ever sent, remote keys never transmit (LINK-19), and no test
-changes a setting that could transmit or take the cable away (uitests/core.py UNSAFE).
+Safe by construction: remote keys never transmit (LINK-19), and no test changes a setting that could transmit or
+take the cable away (uitests/core.py UNSAFE). Remote PTT (KEY 0x80) is sent only by `T.keyup_refused`, for the
+checks that a key-up is refused (needs=("keyup",)): on a tx-dry build (PA held at 0) or the simulator, never a real
+transmit build, KEY off at once whatever the answer; a key-up that isn't refused fails the test.
 
 Results: <results>/<date-time>_<build>/ui/results.json (each test: rules, pass/fail/skip, the checks, the readback
 lines it looked at), ui/summary.html. --session DIR puts them under an existing session (bench.py does). With
@@ -81,9 +90,39 @@ class Radio(fl.Radio):
     """ferrite_link's Radio, keeping the cable: the link lets it go 10 s after the last frame (TERM-2)."""
 
     def __init__(self, port, pin=None):
-        self.spec = port
+        self.spec, self.pin = port, pin
         super().__init__(port, pin=pin, name=b"uitest.py")
         self.last = time.time()
+
+    def reopen(self, settle=3.0, capture=0.0, timeout=25.0):
+        """After a restart (REBOOT): the port closed, `capture` s of what the cable says read without a byte sent
+        (the boot report: the stock bootloader's 200 ms listen must hear nothing, so the first write waits), then
+        HELLO again until the radio answers. Returns the captured text (the simulator says nothing there)."""
+        try:
+            self.port.close()
+        except OSError:
+            pass
+        text = b""
+        if capture and not self.spec.startswith(("tcp:", "ble:")):
+            import serial
+            end = time.time() + capture
+            with serial.Serial(self.spec, 115200, timeout=0.1) as s:
+                while time.time() < end:
+                    text += s.read(4096)
+        else:
+            time.sleep(settle)
+        end = time.time() + timeout
+        while True:
+            try:
+                fresh = fl.Radio(self.spec, pin=self.pin, name=b"uitest.py")
+                break
+            except (fl.RadioError, TimeoutError, OSError, SystemExit):
+                if time.time() > end:
+                    raise TimeoutError("no HELLO from the radio after the restart")
+                time.sleep(1.0)
+        self.port, self.link, self.build, self.bench = fresh.port, fresh.link, fresh.build, fresh.bench
+        self.last = time.time()
+        return text.decode("ascii", "replace")
 
     def _ok(self, ty, payload=b"", busy_s=3.0):
         if time.time() - self.last > 8:
@@ -205,6 +244,11 @@ class State:
                     self.r.press("VM")
                     time.sleep(0.15)
                     h = slot_fields(self.r.cmd(f"slot {L}").strip())
+                    if h["ch"] is not None and h["ch"] != w["ch"]:
+                        # On another channel (its last one was lost, as after a reset): type its number (NAV-4).
+                        self.r.keys(" ".join(str(w["ch"])) + " MENU")
+                        time.sleep(0.3)
+                        h = slot_fields(self.r.cmd(f"slot {L}").strip())
                     if h["ch"] != w["ch"]:
                         notes.append(f"slot {L}: was on channel {w['ch']}, now {h['line']}")
                         continue
@@ -308,7 +352,8 @@ def select(tests, a, sim):
 def run_one(r, state, tst, sim, build, a):
     base_nd = state.base_nd
     t = core.T(r, sim, build)
-    t.state = state
+    t.state, t.opts = state, a
+    unmet = core.unmet(tst.needs, build, sim, r.bench, a)
     res = dict(name=tst.name, module=tst.module, rules=tst.rules, where=tst.where, doc=tst.doc, pages=list(tst.pages))
     t0 = time.time()
     if tst.where == "radio" and sim:
@@ -317,8 +362,8 @@ def run_one(r, state, tst, sim, build, a):
         res.update(result="skip", why="simulator only")
     elif tst.slow and not a.slow:
         res.update(result="skip", why="slow (waits on a timer): --slow")
-    elif tst.needs and build not in tst.needs:
-        res.update(result="skip", why=f"needs a {' or '.join(tst.needs)} build (this is {build})")
+    elif unmet:
+        res.update(result="skip", why=unmet)
     else:
         try:
             t.home()
@@ -333,6 +378,8 @@ def run_one(r, state, tst, sim, build, a):
         except Exception as e:  # a bug in the test: shown with its place
             res.update(result="error", why=f"{type(e).__name__}: {e}",
                        trace=traceback.format_exc(limit=-3))
+        finally:
+            t.end_test()
     if tst.xfail and res["result"] in ("fail", "pass"):
         res["result"] = "xfail" if res["result"] == "fail" else "xpass"
         res["known"] = tst.xfail
@@ -573,9 +620,9 @@ def start_sim(secs=3600):
     b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)
     if b.returncode != 0 or not os.path.exists(exe):
         sys.exit("can't build the simulator")
-    port = free_port()
-    p = subprocess.Popen([exe, "--term-headless", str(secs), "--term-tcp", str(port)], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
+    port, bt = free_port(), free_port()
+    p = subprocess.Popen([exe, "--term-headless", str(secs), "--term-tcp", str(port), "--bt-tcp", str(bt)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(50):
         try:
             socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
@@ -583,7 +630,7 @@ def start_sim(secs=3600):
         except OSError:
             time.sleep(0.1)
     time.sleep(2.5)  # the link answers once the simulated radio has booted (0.5 s timed out HELLO)
-    return p, f"tcp:127.0.0.1:{port}"
+    return p, f"tcp:127.0.0.1:{port}", f"tcp:127.0.0.1:{bt}"
 
 
 def main_args(argv=None):
@@ -610,6 +657,19 @@ def main_args(argv=None):
     ap.add_argument("--expect-build", choices=["receive", "tx", "tx-dry"], help="warn when the radio runs another")
     ap.add_argument("--record", action="store_true", help="a result row per rule into the test plan")
     ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
+    ap.add_argument("--with", dest="with_", default="", help="also run the tests needing these (comma list: "
+                    "uitests/core.py CAPS, e.g. reset,fm-station,signal)")
+    ap.add_argument("--bt", help="a Bluetooth link beside the cable for needs=(\"bt\",) tests: ble:NAME (the radio's "
+                    "0 9 2 1 on) or tcp:HOST:PORT (a simulator's --bt-tcp; --sim auto starts one)")
+    ap.add_argument("--cablelog", metavar="PORT", help="the cable, read without a byte sent, for the cable log "
+                    "(0 9 2 6) while --port ble:... has the keys: needs=(\"cablelog\",) tests")
+    ap.add_argument("--flash", choices=["before", "after"], help="the install and update checks around a flash: "
+                    "`before` keeps what they compare (--flash-state), `after` compares (needs=(\"flash\",))")
+    ap.add_argument("--flash-state", default=os.path.join(RESULTS, "flash-state.json"),
+                    help="where --flash before keeps its readings (default %(default)s)")
+    ap.add_argument("--backup", default=os.path.join(ROOT, "backups", "blackradio", "flash.bin"),
+                    help="this radio's whole-flash backup, read (never written) for the calibration bytes that "
+                    "squelch checks compare with (default %(default)s)")
     ap.add_argument("--stop", action="store_true", help="stop at the first failure")
     ap.add_argument("--verbose", "-v", action="store_true", help="print the readback of a failure")
     return ap.parse_args(argv)
@@ -641,7 +701,8 @@ def main(argv=None):
     if a.sim:
         sim = True
         if a.sim == "auto":
-            proc, port = start_sim()
+            proc, port, sim_bt = start_sim()
+            a.bt = a.bt or sim_bt
         else:
             port = a.sim
     if a.record and sim:
