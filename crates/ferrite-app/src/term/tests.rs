@@ -1139,6 +1139,8 @@ fn regs(r: DebugReq) -> DebugAns {
             DebugAns::Bt { data, n: 8 }
         }
         #[cfg(feature = "bench")]
+        DebugReq::BtStat { baud } => DebugAns::BtStat(ferrite_core::msg::BtStats { rx: 12, tx: 340, framing: 1, overrun: 0, dropped: 0, baud: if baud == 0 { 9600 } else { baud }, on: true }),
+        #[cfg(feature = "bench")]
         DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),
         #[cfg(feature = "bench")]
         DebugReq::Settle(s) => DebugAns::Settle(s.unwrap_or(ferrite_core::settle::Settle::DEFAULT)),
@@ -1422,6 +1424,26 @@ fn debug_bt_queries_only() {
     for bad in ["bt AT+BAUD=9600", "bt AT+RST", "bt AT+NAME=Ferrite"] {
         r.cmd(bad);
         assert!(r.bottom().contains("refused"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+}
+
+#[cfg(feature = "bench")]
+/// TERM-27: `bt stat` shows USART1's rate, the module's power and the byte and error counts; `bt baud N` restarts
+/// USART1 at one of the listed rates (the MCU's side: nothing goes to the module), anything else is refused.
+#[test]
+fn debug_bt_stat_and_baud() {
+    let mut r = Rig::main();
+    r.cmd("bt stat");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 0 }]);
+    assert!(r.raw().contains("bt: USART1 9600 baud, module on"), "{}", r.raw());
+    assert!(r.raw().contains("in 12 out 340 bytes, framing 1, overrun 0"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bt baud 115200");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::BtStat { baud: 115_200 }]);
+    r.send(b"\r");
+    for bad in ["bt baud 12345", "bt baud", "bt baud 9600 x", "bt stat x"] {
+        r.cmd(bad);
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
 }

@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ferrite Bluetooth</title>
+<!--
+  Ferrite over Bluetooth: the link protocol (manual chapter 29, Appendix G) on the BT513's FFE0/FFE1 transparent
+  UART, from Chrome's Web Bluetooth. Self-contained, no build step. Web Bluetooth needs a secure context, so serve it
+  from localhost:   cd tools/webble && python3 -m http.server 8000   then open http://localhost:8000/
+  Without a radio:  http://localhost:8000/?fake   (a fake radio in the page, through the same framing and chunking;
+  ?fake&pin adds a PIN lock, PIN 1234).
+  Never touches FF31 (the module's control characteristic) and never sets anything on the module.
+  window.ferrite: a small API for browser automation (see the bottom of the script).
+-->
+<style>
+:root {
+  --bg: #f4f4f2; --panel: #ffffff; --ink: #1b1b1b; --muted: #666; --line: #d8d8d4;
+  --accent: #c2410c; --ok: #15803d; --bad: #b91c1c; --key: #2a2d33; --keyink: #f2f2f0;
+  --scr: #0d0f12; --scrink: #e8e8e6; --scrsub: #8a9099; --scrsel: #1d4ed8; --scrline: #2a2e35;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141414; --panel: #1d1d1d; --ink: #e8e8e6; --muted: #999; --line: #333;
+    --accent: #f97316; --ok: #4ade80; --bad: #f87171; --key: #33373e; --keyink: #f2f2f0;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141414; --panel: #1d1d1d; --ink: #e8e8e6; --muted: #999; --line: #333;
+  --accent: #f97316; --ok: #4ade80; --bad: #f87171; --key: #33373e; --keyink: #f2f2f0;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+h1 { font-size: 18px; margin: 0; }
+h1 small { color: var(--muted); font-weight: normal; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; min-width: 0; }
+section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .45; cursor: default; }
+#status { font-weight: 600; }
+#status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+.mono, #stats, #raw, #out, #log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+#stats { color: var(--muted); font-size: 12px; }
+.cols { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+/* The radio's screen: 240 x 320 portrait, drawn at 1.25x. */
+.screenwrap { display: grid; justify-items: center; gap: 4px; }
+.screenwrap .size { color: var(--muted); font-size: 11px; }
+#screen { width: 300px; height: 400px; background: var(--scr); color: var(--scrink); border-radius: 6px; overflow: hidden;
+  display: grid; grid-template-rows: auto auto 1fr auto; font: 13px/1.3 ui-monospace, Menlo, monospace; position: relative; }
+#screen .bar { display: flex; justify-content: space-between; padding: 4px 8px; color: var(--scrsub); border-bottom: 1px solid var(--scrline); font-size: 11px; }
+#screen .bar b { color: var(--scrink); }
+#screen .title { padding: 4px 8px; font-weight: 700; }
+#screen .body { overflow: hidden; padding: 0 6px; display: grid; align-content: start; gap: 4px; }
+#screen .card { border: 1px solid var(--scrline); border-radius: 4px; padding: 4px 6px; }
+#screen .card.active { border-color: #3b82f6; }
+#screen .card .head { display: flex; justify-content: space-between; color: var(--scrsub); font-size: 11px; }
+#screen .card .freq { font-size: 20px; font-weight: 700; letter-spacing: .02em; }
+#screen .card .sub { color: var(--scrsub); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#screen .meter { height: 4px; background: var(--scrline); border-radius: 2px; margin-top: 3px; }
+#screen .meter i { display: block; height: 100%; background: #22c55e; border-radius: 2px; }
+#screen .r { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; padding: 2px 4px; border-radius: 3px; white-space: nowrap; }
+#screen .r span { overflow: hidden; text-overflow: ellipsis; }
+#screen .r.sel { background: var(--scrsel); }
+#screen .r.grey { color: var(--scrsub); }
+#screen .r .n, #screen .r .v { color: var(--scrsub); }
+#screen .r.sel .n, #screen .r.sel .v { color: var(--scrink); }
+#screen .line { color: var(--scrsub); font-size: 12px; white-space: pre-wrap; }
+#screen .hints { display: flex; justify-content: space-between; gap: 6px; padding: 4px 8px; border-top: 1px solid var(--scrline); font-size: 11px; }
+#screen .hints b { margin-right: 3px; }
+#screen .overlay { position: absolute; left: 20px; right: 20px; top: 140px; background: #1f2937; border: 1px solid #4b5563;
+  border-radius: 6px; padding: 8px; text-align: center; }
+#screen .overlay b { display: block; }
+#raw { font-size: 11px; white-space: pre-wrap; max-height: 220px; overflow: auto; margin: 8px 0 0; background: var(--bg); padding: 6px; border-radius: 4px; }
+/* The keypad, laid out like the radio. */
+.radio { display: grid; grid-template-columns: auto 1fr; gap: 12px; }
+.side { display: grid; gap: 8px; align-content: start; }
+.side button { font-size: 12px; padding: 8px 6px; }
+.pad { display: grid; gap: 8px; max-width: 300px; }
+.nav { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 8px; align-items: stretch; }
+.nav .stack { display: grid; gap: 8px; }
+.dpad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 2px; background: var(--key); border-radius: 10px; padding: 4px; }
+.digits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.k { background: var(--key); color: var(--keyink); border: 0; border-radius: 8px; padding: 9px 4px; font-weight: 700; touch-action: manipulation; }
+.k small { display: block; font-weight: 400; font-size: 9px; opacity: .7; }
+.dpad .k { padding: 6px 2px; border-radius: 6px; }
+.k:active { filter: brightness(1.4); }
+.knob { display: flex; gap: 6px; align-items: center; }
+.long.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+#ptt { width: 100%; padding: 14px; font-weight: 700; border-radius: 8px; }
+#ptt.keyed { background: var(--bad); color: #fff; border-color: var(--bad); }
+.warn { color: var(--bad); font-size: 12px; }
+.hint { color: var(--muted); font-size: 12px; }
+#out { font-size: 12px; white-space: pre-wrap; max-height: 260px; overflow: auto; background: var(--bg); padding: 6px; border-radius: 4px; margin: 8px 0 0; min-height: 40px; }
+#cmdline { flex: 1; min-width: 160px; font-family: ui-monospace, monospace; }
+#log { font-size: 11px; white-space: pre-wrap; max-height: 180px; overflow: auto; margin: 0; color: var(--muted); }
+dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ferrite over Bluetooth <small>link protocol on the BT513 (FFE0/FFE1), Chrome Web Bluetooth</small></h1>
+
+  <section>
+    <h2>Connection</h2>
+    <div class="row">
+      <button id="connect" class="primary">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <span id="status">Not connected</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <span id="ident" class="mono"></span>
+      <span id="stats"></span>
+    </div>
+    <p class="hint" id="envhint">Radio: MENU 0 9 2 1 Bluetooth on. The module advertises as "walkie-talkie". About 0.8 KB/s each way (the module's UART runs at 9600), so a screen readback takes a second or so.</p>
+  </section>
+
+  <div class="cols">
+    <section>
+      <h2>Screen</h2>
+      <div class="screenwrap">
+        <div id="screen" aria-label="The radio's screen, 240 by 320"><div class="bar"><span>—</span></div><div class="title">Not connected</div><div class="body"></div><div class="hints"></div></div>
+        <span class="size">240 × 320 (drawn from the UI readback, LINK-19)</span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="refresh" disabled>Read screen</button>
+        <label><input type="checkbox" id="live" checked> Live (after each key, and every 3 s)</label>
+      </div>
+      <pre id="raw"></pre>
+    </section>
+
+    <div style="display:grid; gap:12px; min-width:0">
+      <section>
+        <h2>Keys</h2>
+        <div class="radio">
+          <div class="side">
+            <button class="k" data-key="SIDE1" title="SIDE1 (PF1)">SIDE1<small>PF1</small></button>
+            <button class="k" data-key="SIDE2" title="SIDE2 (PF2)">SIDE2<small>PF2</small></button>
+          </div>
+          <div class="pad">
+            <div class="knob">
+              <span class="hint">Knob</span>
+              <button data-knob="-5">−5</button><button data-knob="-1">−1</button>
+              <button data-knob="1">+1</button><button data-knob="5">+5</button>
+              <button id="long" class="long" title="The next key is a long press (held 750 ms)">Long</button>
+            </div>
+            <div class="nav">
+              <div class="stack">
+                <button class="k" data-key="MENU">MENU<small>OK</small></button>
+                <button class="k" data-key="SLOT">A/B/C<small>SLOT</small></button>
+              </div>
+              <div class="dpad">
+                <span></span><button class="k" data-key="UP" aria-label="Up">▲</button><span></span>
+                <button class="k" data-key="LEFT" aria-label="Left">◀</button><span></span><button class="k" data-key="RIGHT" aria-label="Right">▶</button>
+                <span></span><button class="k" data-key="DOWN" aria-label="Down">▼</button><span></span>
+              </div>
+              <div class="stack">
+                <button class="k" data-key="BACK">BACK<small>EXIT</small></button>
+                <button class="k" data-key="VM">V/M</button>
+              </div>
+            </div>
+            <div class="digits">
+              <button class="k" data-key="1">1<small>!&lt;</small></button><button class="k" data-key="2">2<small>ABC</small></button><button class="k" data-key="3">3<small>DEF</small></button>
+              <button class="k" data-key="4">4<small>GHI</small></button><button class="k" data-key="5">5<small>JKL</small></button><button class="k" data-key="6">6<small>MNO</small></button>
+              <button class="k" data-key="7">7<small>PQRS</small></button><button class="k" data-key="8">8<small>TUV</small></button><button class="k" data-key="9">9<small>WXYZ</small></button>
+              <button class="k" data-key="STAR">*</button><button class="k" data-key="0">0</button><button class="k" data-key="HASH">#</button>
+            </div>
+          </div>
+        </div>
+        <p class="hint">A click is a short press; Long makes the next one a long press. Remote keys never transmit (LINK-19).</p>
+      </section>
+
+      <section>
+        <h2>Remote PTT (LINK-20)</h2>
+        <div class="row">
+          <label><input type="checkbox" id="arm"> Arm</label>
+          <label>Slot <select id="pttslot"><option value="255">active</option><option value="1">B</option></select></label>
+          <span id="pttstate" class="hint">Disarmed.</span>
+        </div>
+        <div style="margin-top:8px"><button id="ptt" disabled>Hold to transmit</button></div>
+        <p class="warn">Only on a tx-dry build (INFO's build byte; the PA is held at 0): refused otherwise. A keepalive every 0.5 s while held; KEY off on release, when the window loses focus, and on disconnect.</p>
+      </section>
+
+      <section>
+        <h2>Command (CMD, LINK-34)</h2>
+        <form id="cmdform" class="row">
+          <input id="cmdline" placeholder="get 0 9 2 1   slot   ui keys   help" autocomplete="off" spellcheck="false">
+          <button id="cmdgo" type="submit" disabled>Run</button>
+        </form>
+        <pre id="out"></pre>
+      </section>
+    </div>
+  </div>
+
+  <section>
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<dialog id="pindlg">
+  <form method="dialog" id="pinform">
+    <p>The radio's PIN lock is on: give its PIN (LINK-30). Wrong ones count on the radio.</p>
+    <div class="row"><input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off"><button class="primary" value="ok">AUTH</button><button value="cancel" formnovalidate>Cancel</button></div>
+  </form>
+</dialog>
+
+<script>
+/* ferrite-core:begin  (the protocol client: also run by test.mjs under node, against the simulator) */
+const Ferrite = (() => {
+  const PROTOCOL = 2;
+  const T = { HELLO: 0x01, INFO: 0x02, AUTH: 0x04, READ: 0x10, WRITE: 0x11, DELETE: 0x12, BEGIN: 0x13, END: 0x14,
+    SLOT: 0x16, BAUD: 0x20, REBOOT: 0x21, KEY: 0x30, CMD: 0x31, MORE: 0x32, UI: 0x33 };
+  const ANSWER = 0x80;
+  const STATUS = ["ok", "bad frame", "unknown type", "bad argument", "refused", "not authorised (AUTH first)",
+    "pending", "busy", "not found", "invalid", "cancelled"];
+  // Stock key codes (Appendix G), the names tools/ferrite_link.py takes.
+  const KEY_CODES = { MENU: 6, OK: 6, BACK: 9, EXIT: 9, UP: 7, DOWN: 8, LEFT: 4, RIGHT: 5, SLOT: 3, ABC: 3, VM: 2,
+    "V/M": 2, 0: 17, 1: 10, 2: 11, 3: 12, 4: 14, 5: 15, 6: 16, 7: 18, 8: 19, 9: 20, STAR: 13, "*": 13, HASH: 21,
+    "#": 21, SIDE1: 0, PF1: 0, SIDE2: 1, PF2: 1 };
+  const ACT = { up: 0, down: 1, short: 2, long: 3 };
+  const PTT = 0x80, KNOB = 0x81, PTT_OFF = 0, PTT_ON = 1, PTT_ALIVE = 2, ACTIVE = 0xFF;
+  const LONG_HOLD_MS = 750;
+  const BUILDS = { 0: "receive", 1: "tx", 2: "tx-dry" };
+  const BLE_SERVICE = 0xFFE0, BLE_DATA = 0xFFE1;  // FF31 is never touched
+  const CHUNK = 20;  // the ATT payload of the default 23-byte MTU
+  const PACE_MS = 25;  // between chunks: 800 B/s, under the module's 9600-baud UART (960 B/s)
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const enc = new TextEncoder();
+  const dec = new TextDecoder("utf-8");
+  const ascii = (s) => Array.from(enc.encode(String(s)));
+
+  /** CRC-16/CCITT-FALSE: poly 0x1021, initial 0xFFFF. */
+  function crc16(data) {
+    let crc = 0xFFFF;
+    for (const b of data) {
+      crc ^= b << 8;
+      for (let i = 0; i < 8; i++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+    }
+    return crc;
+  }
+
+  function cobsEncode(src) {
+    const out = [0];
+    let codeAt = 0, code = 1;
+    for (const b of src) {
+      if (b === 0) {
+        out[codeAt] = code; codeAt = out.length; code = 1; out.push(0);
+      } else {
+        out.push(b); code++;
+        if (code === 0xFF) { out[codeAt] = code; codeAt = out.length; code = 1; out.push(0); }
+      }
+    }
+    out[codeAt] = code;
+    return out;
+  }
+
+  function cobsDecode(src) {
+    const out = [];
+    let i = 0;
+    while (i < src.length) {
+      const code = src[i];
+      if (code === 0 || i + code > src.length) throw new Error("bad COBS");
+      for (let k = i + 1; k < i + code; k++) out.push(src[k]);
+      i += code;
+      if (code < 0xFF && i < src.length) out.push(0);
+    }
+    return out;
+  }
+
+  /** A frame on the wire: COBS(type, seq, payload, CRC-16 LE) then 0x00. */
+  function frame(ty, seq, payload = []) {
+    const body = [ty & 0xFF, seq & 0xFF, ...payload];
+    const c = crc16(body);
+    return Uint8Array.from([...cobsEncode([...body, c & 0xFF, c >> 8]), 0]);
+  }
+
+  /** A frame's bytes between delimiters: {ty, seq, payload} or null (terminal text, damage, a bad CRC). */
+  function parseFrame(raw) {
+    let f;
+    try { f = cobsDecode(raw); } catch { return null; }
+    if (f.length < 4) return null;
+    const crc = f[f.length - 2] | (f[f.length - 1] << 8);
+    if (crc16(f.slice(0, -2)) !== crc) return null;
+    return { ty: f[0], seq: f[1], payload: f.slice(2, -2) };
+  }
+
+  /** Bytes in any chunking -> whole frames. */
+  class Deframer {
+    constructor() { this.buf = []; this.junk = 0; }
+    push(bytes) {
+      const out = [];
+      for (const b of bytes) {
+        if (b === 0) {
+          if (this.buf.length) {
+            const f = parseFrame(this.buf);
+            if (f) out.push(f); else this.junk++;
+          }
+          this.buf = [];
+        } else if (this.buf.length < 1024) {
+          this.buf.push(b);
+        } else {
+          this.buf = []; this.junk++;
+        }
+      }
+      return out;
+    }
+  }
+
+  class RadioError extends Error {
+    constructor(status, rest = []) {
+      const s = STATUS[status] || `status ${status}`;
+      super(status === 9 && rest.length ? `${s}: ${dec.decode(Uint8Array.from(rest))}` : s);
+      this.status = status;
+      this.rest = rest;
+    }
+  }
+
+  /** The link over a transport ({write(Uint8Array): Promise, onData: (Uint8Array) => void}). Requests go one at a
+   *  time (LINK-23) through ask(); send() goes at once (remote PTT's keepalives don't wait behind a readback). */
+  class Link {
+    constructor(transport) {
+      this.t = transport;
+      this.seq = 0;
+      this.waiting = new Map();
+      this.deframer = new Deframer();
+      this.chain = Promise.resolve();
+      this.stats = { tx: 0, rx: 0, frames: 0, junk: 0 };
+      this.onFrame = null;
+      transport.onData = (u8) => this.data(u8);
+    }
+    data(u8) {
+      this.stats.rx += u8.length;
+      for (const f of this.deframer.push(u8)) {
+        this.stats.frames++;
+        if (this.onFrame) this.onFrame(f);
+        if (!(f.ty & ANSWER)) continue;
+        const w = this.waiting.get(f.seq);
+        if (w && w.ty === (f.ty & 0x7F)) {
+          this.waiting.delete(f.seq);
+          clearTimeout(w.timer);
+          w.resolve({ status: f.payload[0], rest: f.payload.slice(1) });
+        }
+      }
+      this.stats.junk = this.deframer.junk;
+    }
+    async write(bytes) {
+      this.stats.tx += bytes.length;
+      await this.t.write(bytes);
+    }
+    /** Ctrl-C (closes the terminal if this port has it), then a 0x00: the port is the link's (TERM-2). */
+    async sync() {
+      await this.write(Uint8Array.of(0x03));
+      await sleep(300);
+      this.deframer = new Deframer();
+      await this.write(Uint8Array.of(0x00));
+    }
+    send(ty, payload = [], timeout = 4000) {
+      this.seq = (this.seq + 1) & 0xFF;
+      const seq = this.seq;
+      const p = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.waiting.delete(seq);
+          reject(new Error(`no answer to 0x${ty.toString(16).padStart(2, "0")}`));
+        }, timeout);
+        this.waiting.set(seq, { ty, resolve, timer });
+      });
+      this.write(frame(ty, seq, payload)).catch(() => {});
+      return p;
+    }
+    ask(ty, payload = [], timeout = 4000) {
+      const run = () => this.send(ty, payload, timeout);
+      const r = this.chain.then(run, run);
+      this.chain = r.catch(() => {});
+      return r;
+    }
+    close() {
+      for (const w of this.waiting.values()) clearTimeout(w.timer);
+      this.waiting.clear();
+    }
+  }
+
+  const text = (b, i = 0) => {
+    const n = b[i] || 0;
+    return [dec.decode(Uint8Array.from(b.slice(i + 1, i + 1 + n))), i + 1 + n];
+  };
+  const u16 = (b, i) => b[i] | (b[i + 1] << 8);
+
+  /** The radio as a client uses it: HELLO, INFO, AUTH, keys, knob, the UI readback, CMD, remote PTT. */
+  class Radio {
+    constructor(link) { this.link = link; this.build = null; this.bench = false; }
+    async ok(ty, payload = [], busyMs = 3000) {
+      const end = Date.now() + busyMs;
+      for (;;) {
+        const { status, rest } = await this.link.ask(ty, payload);
+        if (status === 0) return rest;
+        if (status !== 7 || Date.now() > end) throw new RadioError(status, rest);
+        await sleep(60);
+      }
+    }
+    async hello(name = "webble") {
+      const r = await this.ok(T.HELLO, [PROTOCOL, 0, 0, 0, 0, 0, 0, 0, 0, ...ascii(name)]);
+      const [version, i] = text(r, 3);
+      const b = r.length > i ? r[i] : null;
+      if (b !== null) { this.build = BUILDS[b & 0x7F] || `unknown ${b}`; this.bench = !!(b & 0x80); }
+      return { protocol: r[0], maxPayload: r[1], mayGo: !!r[2], version, build: this.build, bench: this.bench };
+    }
+    async info() {
+      const r = await this.ok(T.INFO);
+      const [version, i] = text(r, 0);
+      const info = { version, channels: u16(r, i), zones: r[i + 2], presets: r[i + 3], settingsLen: u16(r, i + 4), region: r[i + 6] };
+      const [callsign, j] = text(r, i + 7);
+      info.callsign = callsign;
+      const b = r.length > j ? r[j] : null;
+      info.build = b === null ? "not given" : BUILDS[b & 0x7F] || `unknown ${b}`;
+      info.bench = b !== null && !!(b & 0x80);
+      if (b !== null) { this.build = info.build; this.bench = info.bench; }
+      return info;
+    }
+    async auth(pin) { await this.ok(T.AUTH, ascii(pin), 0); }
+    static code(name) {
+      const c = KEY_CODES[String(name).toUpperCase()];
+      if (c === undefined) throw new Error(`no key ${name}`);
+      return c;
+    }
+    /** A key: how = short, long (held 750 ms: resolves once let go), down or up. */
+    async press(name, how = "short") {
+      const a = ACT[how];
+      if (a === undefined) throw new Error(`press: short, long, down or up, not ${how}`);
+      await this.ok(T.KEY, [Radio.code(name), a]);
+      if (how === "long") await sleep(LONG_HOLD_MS + 50);
+    }
+    /** "MENU 0 8 2 1 OK"; NAME:long, NAME:down, NAME:up. */
+    async keys(seq) {
+      for (const w of String(seq).split(/\s+/).filter(Boolean)) {
+        const [name, how] = w.split(":");
+        await this.press(name, (how || "short").toLowerCase());
+      }
+    }
+    async knob(steps) {
+      steps = Math.trunc(steps);
+      while (steps) {
+        const n = Math.max(-20, Math.min(20, steps));
+        await this.ok(T.KEY, [KNOB, n & 0xFF]);
+        steps -= n;
+      }
+    }
+    async more(first) {
+      const out = [];
+      let rest = first;
+      for (;;) {
+        out.push(dec.decode(Uint8Array.from(rest.slice(1))));
+        if (rest[0] === 0) return out.join("");
+        if (rest.length === 1) await sleep(60);  // the radio is still working (a debug command)
+        rest = await this.ok(T.MORE);
+      }
+    }
+    /** What the screen shows, as the radio's text (what 1: the key names). */
+    async uiText(what = 0) { return this.more(await this.ok(T.UI, [what])); }
+    async ui() { return parseUi(await this.uiText(0)); }
+    /** A terminal command line (LINK-34): its output. */
+    async cmd(line) { return this.more(await this.ok(T.CMD, ascii(line))); }
+    // Remote PTT (LINK-20): straight out, not behind a readback in the queue.
+    pttOn(slot = ACTIVE) { return this.link.send(T.KEY, [PTT, PTT_ON, slot], 2000); }
+    pttAlive() { return this.link.send(T.KEY, [PTT, PTT_ALIVE], 2000); }
+    pttOff() { return this.link.send(T.KEY, [PTT, PTT_OFF], 2000); }
+  }
+
+  /** One `ui` line: [kind, positional strings, {key: value}] (tools/ferrite_link.py parse_ui_line). */
+  function parseUiLine(line) {
+    const pos = [], kv = {};
+    let i = 0;
+    const n = line.length;
+    const quoted = (i) => {
+      let out = "";
+      i++;
+      while (i < n && line[i] !== '"') {
+        if (line[i] === "\\" && i + 1 < n) i++;
+        out += line[i++];
+      }
+      return [out, i + 1];
+    };
+    while (i < n) {
+      if (line[i] === " ") { i++; continue; }
+      if (line[i] === '"') { const [v, j] = quoted(i); pos.push(v); i = j; continue; }
+      let j = i;
+      while (j < n && !' ="'.includes(line[j])) j++;
+      const word = line.slice(i, j);
+      if (j < n && line[j] === "=") {
+        let v;
+        if (j + 1 < n && line[j + 1] === '"') { [v, i] = quoted(j + 1); } else {
+          let k = j + 1;
+          while (k < n && line[k] !== " ") k++;
+          v = line.slice(j + 1, k); i = k;
+        }
+        kv[word] = /^-?\d+$/.test(v) ? parseInt(v, 10) : v;
+      } else { pos.push(word); i = j; }
+    }
+    return [pos[0] || "", pos.slice(1), kv];
+  }
+
+  /** `ui`'s lines as an object (tools/ferrite_link.py parse_ui). */
+  function parseUi(textIn) {
+    const ui = { lines: textIn.split("\n").filter((l) => l.length), cards: [], rows: [], qmenu: [], toast: null, popup: null, sel: null, hints: [], other: [] };
+    for (const line of ui.lines) {
+      const [kind, pos, kv] = parseUiLine(line);
+      if (kind === "screen") ui.screen = { id: pos[0] || "", name: pos[1] || "", ...kv };
+      else if (kind === "card") ui.cards.push({ slot: pos[0] || "", ...kv });
+      else if (kind === "row") {
+        const hasNum = pos.length && /^\d+$/.test(pos[0]);
+        const rest = hasNum ? pos.slice(1) : pos;
+        const r = { num: hasNum ? parseInt(pos[0], 10) : null, name: rest[0] || "", value: rest[1] || "",
+          sel: rest.slice(2).includes("sel"), dot: rest.slice(2).includes("dot"), grey: rest.slice(2).includes("grey") };
+        ui.rows.push(r);
+        if (r.sel) ui.sel = r;
+      } else if (kind === "toast" || kind === "popup") ui[kind] = { head: pos[0] || "", body: pos[1] || "" };
+      else if (kind === "qmenu") ui.qmenu.push(pos);
+      else if (kind === "hints") { for (let k = 0; k + 1 < pos.length; k += 2) ui.hints.push([pos[k], pos[k + 1]]); }
+      else if (kind === "state" || kind === "bar") ui[kind] = kv;
+      else if (kind) { ui[kind] = pos.length || !Object.keys(kv).length ? { args: pos, ...kv } : kv; ui.other.push(line); }
+    }
+    return ui;
+  }
+
+  /** Web Bluetooth: service FFE0, characteristic FFE1 (write without response, notify). Nothing else is asked for:
+   *  FF31 is never touched. Writes in 20-byte chunks, paced. */
+  class BleTransport {
+    constructor() { this.onData = null; this.onClose = null; this.device = null; this.ch = null; this.q = Promise.resolve(); }
+    async connect() {
+      if (!globalThis.navigator || !navigator.bluetooth) throw new Error("no Web Bluetooth here: Chrome, from http://localhost or https");
+      this.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [BLE_SERVICE] }] });
+      this.device.addEventListener("gattserverdisconnected", () => this.onClose && this.onClose());
+      const server = await this.device.gatt.connect();
+      const svc = await server.getPrimaryService(BLE_SERVICE);
+      this.ch = await svc.getCharacteristic(BLE_DATA);
+      this.ch.addEventListener("characteristicvaluechanged", (e) => {
+        const v = e.target.value;
+        if (this.onData) this.onData(new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice());
+      });
+      await this.ch.startNotifications();
+      return this.device.name || "Bluetooth";
+    }
+    write(bytes) {
+      // Serialised: chunks from two writes never interleave.
+      const run = async () => {
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          const part = bytes.slice(i, i + CHUNK);
+          if (this.ch.writeValueWithoutResponse) await this.ch.writeValueWithoutResponse(part);
+          else await this.ch.writeValue(part);
+          await sleep(PACE_MS);
+        }
+      };
+      this.q = this.q.then(run, run);
+      return this.q;
+    }
+    async close() {
+      try { if (this.ch) await this.ch.stopNotifications(); } catch { /* gone already */ }
+      if (this.device && this.device.gatt.connected) this.device.gatt.disconnect();
+    }
+  }
+
+  /** A fake radio in the page (?fake): the same framing and 20-byte chunking both ways, a home screen and a quick
+   *  menu that the keys move through, CMD echo, remote PTT, and a PIN lock (?fake&pin: PIN 1234). */
+  class FakeTransport {
+    constructor(opts = {}) {
+      this.onData = null; this.onClose = null;
+      this.rx = new Deframer();
+      this.pin = opts.pin ? "1234" : null;
+      this.authed = !this.pin;
+      this.build = opts.build === undefined ? 0x82 : opts.build;
+      this.screen = "Home"; this.sel = 0; this.sq = 4; this.keyed = false; this.pending = []; this.writes = [];
+      this.rows = ["Squelch", "TX power", "Mode", "Tones", "Offset", "Step", "Watch", "Channel", "Battery Save", "Advanced settings"];
+    }
+    async connect() { return "fake radio"; }
+    async close() { if (this.onClose) this.onClose(); }
+    async write(bytes) {
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        const part = bytes.slice(i, i + CHUNK);
+        this.writes.push(part.length);
+        for (const f of this.rx.push(part)) this.answer(f);
+        await sleep(2);
+      }
+    }
+    reply(f, status, rest = []) {
+      const out = frame(f.ty | ANSWER, f.seq, [status, ...rest]);
+      setTimeout(async () => {
+        for (let i = 0; i < out.length; i += CHUNK) {
+          if (this.onData) this.onData(out.slice(i, i + CHUNK));
+          await sleep(3);
+        }
+      }, 5);
+    }
+    uiPages() {
+      const bar = `bar lock=0 scan=0 watch=0 inbox=0 alert=0 gps=- bt=1 battery=80 low=0 cutoff=0 clock=12:34 utc=0`;
+      let t;
+      if (this.screen === "Home") {
+        t = [`screen Home "Home" title=""`, `state frame=1 ago=0 dark=0 locked=0 active=A keyed=${this.keyed ? "A" : "-"} remote=${this.keyed ? 1 : 0}`, bar,
+          `card A active=1 head="VFO · VHF" state="${this.keyed ? "TX" : "idle"}" freq=145.49500 name="" mode="FM" tone="" shift="" power="LOW" s="S0" meter=0 rx=0 scan=0 kind=slot`,
+          `card B active=0 head="CH 012 · UHF" state="idle" freq=446.47500 name="Club rpt" mode="NFM" tone="T 100.0" shift="+5M" power="LOW" s="S0" meter=0 rx=0 scan=0 kind=slot`,
+          `card C active=0 head="VFO · Airband" state="idle" freq=118.95000 name="" mode="AM" tone="" shift="" power="LOW" s="S3" meter=4 rx=1 scan=0 kind=slot`,
+          `hints "SLOT" "A·B·C" "OK" "Quick" "<>" "Band"`];
+      } else {
+        t = [`screen Quick "Quick" title="Quick"`, `state frame=2 ago=0 dark=0 locked=0 active=A keyed=- remote=0`, bar,
+          ...this.rows.map((r, i) => `row ${(i + 1) % 10} "${r}" "${i === 0 ? this.sq : ""}"${i === this.sel ? " sel" : ""}`),
+          `hints "^v" "Move" "Knob" "Change" "BACK" "Back"`];
+      }
+      const s = Array.from(enc.encode(t.join("\n") + "\n"));
+      const pages = [];
+      for (let i = 0; i < s.length; i += 200) pages.push(s.slice(i, i + 200));
+      return pages;
+    }
+    answer(f) {
+      const p = f.payload;
+      const go = () => this.authed;
+      switch (f.ty) {
+        case T.HELLO: return this.reply(f, 0, [PROTOCOL, 240, go() ? 1 : 0, 8, ...ascii("fake 0.1"), this.build]);
+        case T.AUTH:
+          if (this.authed) return this.reply(f, 0);
+          if (String.fromCharCode(...p) === this.pin) { this.authed = true; return this.reply(f, 0); }
+          return this.reply(f, 4);
+        default:
+          if (!go()) return this.reply(f, 5);
+      }
+      switch (f.ty) {
+        case T.INFO: return this.reply(f, 0, [8, ...ascii("fake 0.1"), 21, 0, 3, 2, 44, 1, 1, 6, ...ascii("N0CALL"), this.build]);
+        case T.UI: this.pending = this.uiPages(); return this.reply(f, 0, [this.pending.length > 1 ? 1 : 0, ...this.pending.shift()]);
+        case T.MORE: {
+          const pg = this.pending.shift();
+          return this.reply(f, 0, pg ? [this.pending.length ? 1 : 0, ...pg] : [0]);
+        }
+        case T.CMD: return this.reply(f, 0, [0, ...ascii(`fake radio: ${String.fromCharCode(...p)}\n`)]);
+        case T.KEY: {
+          const [k, a, slot] = p;
+          if (k === PTT) {
+            if (a === PTT_ON) { if (this.build & 0x7F) { this.keyed = true; return this.reply(f, 0, [slot === 1 ? 1 : 0]); } return this.reply(f, 9, ascii("receive-only build")); }
+            if (a === PTT_ALIVE) return this.keyed ? this.reply(f, 0) : this.reply(f, 9, ascii("not keyed"));
+            this.keyed = false;
+            return this.reply(f, 0);
+          }
+          if (k === KNOB) { if (this.screen !== "Home" && this.sel === 0) this.sq = Math.max(0, Math.min(9, this.sq + ((a << 24) >> 24))); return this.reply(f, 0); }
+          if (a === ACT.short || a === ACT.down) {
+            if (k === KEY_CODES.MENU && this.screen === "Home") { this.screen = "Quick"; this.sel = 0; }
+            else if (k === KEY_CODES.BACK) this.screen = "Home";
+            else if (k === KEY_CODES.UP && this.screen !== "Home") this.sel = (this.sel + this.rows.length - 1) % this.rows.length;
+            else if (k === KEY_CODES.DOWN && this.screen !== "Home") this.sel = (this.sel + 1) % this.rows.length;
+          }
+          return this.reply(f, 0);
+        }
+        default: return this.reply(f, 2);
+      }
+    }
+  }
+
+  return { PROTOCOL, T, STATUS, KEY_CODES, BUILDS, CHUNK, PACE_MS, crc16, cobsEncode, cobsDecode, frame, parseFrame,
+    Deframer, Link, Radio, RadioError, parseUi, parseUiLine, BleTransport, FakeTransport, sleep };
+})();
+if (typeof module !== "undefined") module.exports = Ferrite;
+/* ferrite-core:end */
+</script>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  const fake = params.has("fake");
+  let transport = null, link = null, radio = null, info = null, connected = false;
+  let liveTimer = null, reading = false, longNext = false;
+  const ptt = { keyed: false, timer: null, ended: null };
+
+  function log(s) {
+    const t = new Date().toTimeString().slice(0, 8);
+    $("log").textContent = `${t} ${s}\n` + $("log").textContent.slice(0, 8000);
+  }
+  function setStatus(s, cls = "") { $("status").textContent = s; $("status").className = cls; }
+  function enable(on) {
+    connected = on;
+    $("connect").disabled = on; $("disconnect").disabled = !on; $("refresh").disabled = !on; $("cmdgo").disabled = !on;
+    $("ptt").disabled = !on || !$("arm").checked;
+  }
+  function stats() {
+    if (!link) return;
+    const s = link.stats;
+    $("stats").textContent = `out ${s.tx} B, in ${s.rx} B, ${s.frames} frames${s.junk ? `, ${s.junk} not frames` : ""}`;
+  }
+  setInterval(stats, 500);
+
+  async function connect() {
+    try {
+      setStatus("Connecting…");
+      transport = fake ? new Ferrite.FakeTransport({ pin: params.has("pin"), build: params.has("rx") ? 0 : 0x82 }) : new Ferrite.BleTransport();
+      const name = await transport.connect();
+      transport.onClose = () => { if (connected) { log("disconnected"); teardown(); } };
+      link = new Ferrite.Link(transport);
+      radio = new Ferrite.Radio(link);
+      await link.sync();
+      let h = await radio.hello();
+      if (!h.mayGo) {
+        const pin = await askPin();
+        if (pin === null) throw new Error("PIN not given");
+        await radio.auth(pin);
+        log("AUTH ok");
+      }
+      info = await radio.info();
+      enable(true);
+      setStatus(`Connected: ${name}`, "ok");
+      $("ident").textContent = `${info.version} · ${info.build}${info.bench ? " (bench)" : ""} · ${info.callsign || "no callsign"} · ${info.channels} channels`;
+      log(`HELLO protocol ${h.protocol}, payload ${h.maxPayload}; INFO ${JSON.stringify(info)}`);
+      await readScreen();
+      scheduleLive();
+    } catch (e) {
+      log(`connect: ${e.message}`);
+      setStatus(`Not connected: ${e.message}`, "bad");
+      await teardown();
+    }
+  }
+
+  function askPin() {
+    return new Promise((resolve) => {
+      const d = $("pindlg");
+      $("pin").value = "";
+      d.onclose = () => resolve(d.returnValue === "ok" ? $("pin").value : null);
+      d.showModal();
+      $("pin").focus();
+    });
+  }
+
+  async function teardown() {
+    await pttUp("disconnect");
+    clearTimeout(liveTimer);
+    const t = transport;
+    enable(false);
+    if (link) link.close();
+    transport = null; link = null; radio = null;
+    if (t) { try { await t.close(); } catch { /* gone */ } }
+    if (!$("status").classList.contains("bad")) setStatus("Not connected");
+  }
+
+  async function disconnect() {
+    await pttUp("disconnect");
+    await teardown();
+  }
+
+  // ---- The screen ----
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  function draw(ui) {
+    const bar = ui.bar || {};
+    const st = ui.state || {};
+    const flags = [bar.lock ? "LOCK" : "", bar.scan ? "SCAN" : "", bar.bt ? "BT" : "", bar.gps && bar.gps !== "-" ? "GPS" : "", st.keyed && st.keyed !== "-" ? `TX ${st.keyed}` : ""].filter(Boolean).join(" ");
+    let body = "";
+    if (ui.cards.length) {
+      for (const c of ui.cards) {
+        const m = Math.max(0, Math.min(100, (Number(c.meter) || 0) * 100 / 15));
+        body += `<div class="card${c.active ? " active" : ""}"><div class="head"><span>${esc(c.slot)} ${esc(c.head || "")}</span><span>${esc(c.state || "")}</span></div>
+          <div class="freq">${esc(c.freq || "")}</div><div class="sub">${esc([c.name, c.mode, c.tone, c.shift, c.power, c.s].filter(Boolean).join(" · "))}</div>
+          <div class="meter"><i style="width:${m}%"></i></div></div>`;
+      }
+    } else if (ui.rows.length) {
+      for (const r of ui.rows) {
+        body += `<div class="r${r.sel ? " sel" : ""}${r.grey ? " grey" : ""}"><span class="n">${r.num === null ? "" : r.num}</span><span>${esc(r.name)}</span><span class="v">${esc(r.value)}${r.dot ? " •" : ""}</span></div>`;
+      }
+    }
+    for (const l of ui.other) body += `<div class="line">${esc(l)}</div>`;
+    const over = ui.popup || ui.toast;
+    const hints = ui.hints.map(([k, v]) => `<span><b>${esc(k)}</b>${esc(v)}</span>`).join("");
+    $("screen").innerHTML = `<div class="bar"><span>${esc(flags)}</span><b>${esc(bar.clock || "")}</b><span>${bar.battery === undefined ? "" : esc(bar.battery) + "%"}</span></div>
+      <div class="title">${esc((ui.screen && (ui.screen.title || ui.screen.name)) || "")}</div><div class="body">${body}</div><div class="hints">${hints}</div>
+      ${over ? `<div class="overlay"><b>${esc(over.head)}</b>${esc(over.body)}</div>` : ""}`;
+  }
+
+  async function readScreen() {
+    if (!radio || reading) return null;
+    reading = true;
+    try {
+      const t = await radio.uiText(0);
+      $("raw").textContent = t;
+      const ui = Ferrite.parseUi(t);
+      draw(ui);
+      return ui;
+    } catch (e) {
+      log(`ui: ${e.message}`);
+      return null;
+    } finally {
+      reading = false;
+    }
+  }
+
+  function scheduleLive(ms = 3000) {
+    clearTimeout(liveTimer);
+    if (!connected || !$("live").checked) return;
+    liveTimer = setTimeout(async () => {
+      if (!ptt.keyed) await readScreen();  // the line kept clear while keyed
+      scheduleLive();
+    }, ms);
+  }
+
+  // ---- Keys ----
+  async function key(name) {
+    if (!radio) return;
+    const how = longNext ? "long" : "short";
+    longNext = false;
+    $("long").classList.remove("on");
+    try {
+      await radio.press(name, how);
+      log(`key ${name} ${how}`);
+    } catch (e) { log(`key ${name}: ${e.message}`); }
+    if ($("live").checked) { await readScreen(); scheduleLive(); }
+  }
+  async function knob(n) {
+    if (!radio) return;
+    try { await radio.knob(n); log(`knob ${n > 0 ? "+" : ""}${n}`); } catch (e) { log(`knob: ${e.message}`); }
+    if ($("live").checked) { await readScreen(); scheduleLive(); }
+  }
+  document.querySelectorAll("[data-key]").forEach((b) => b.addEventListener("click", () => key(b.dataset.key)));
+  document.querySelectorAll("[data-knob]").forEach((b) => b.addEventListener("click", () => knob(parseInt(b.dataset.knob, 10))));
+  $("long").addEventListener("click", () => { longNext = !longNext; $("long").classList.toggle("on", longNext); });
+
+  // ---- Remote PTT (LINK-20): armed, tx-dry only, keepalives while held, KEY off on every way out ----
+  function pttRefusal() {
+    if (!connected || !radio) return "not connected";
+    if (!$("arm").checked) return "not armed";
+    if (!info || info.build !== "tx-dry") return `refused: the radio runs a ${info ? info.build : "unknown"} build; remote PTT only on tx-dry (no real-power TX yet)`;
+    return null;
+  }
+  async function pttDown() {
+    const why = pttRefusal();
+    if (why) { $("pttstate").textContent = why; log(`PTT ${why}`); return false; }
+    if (ptt.keyed) return true;
+    ptt.keyed = true; ptt.ended = null;
+    $("ptt").classList.add("keyed");
+    $("pttstate").textContent = "Keying…";
+    const slot = parseInt($("pttslot").value, 10);
+    ptt.timer = setInterval(async () => {
+      if (!ptt.keyed || !radio) return;
+      try {
+        const a = await radio.pttAlive();
+        if (a.status !== 0 && ptt.keyed) {
+          ptt.ended = new Ferrite.RadioError(a.status, a.rest).message;
+          $("pttstate").textContent = `The radio unkeyed: ${ptt.ended}`;
+          log(`PTT ended: ${ptt.ended}`);
+          await pttUp("ended");
+        }
+      } catch (e) { log(`keepalive: ${e.message}`); }
+    }, 500);
+    try {
+      const a = await radio.pttOn(slot);
+      if (a.status !== 0) {
+        const m = new Ferrite.RadioError(a.status, a.rest).message;
+        $("pttstate").textContent = `Refused: ${m}`;
+        log(`PTT refused: ${m}`);
+        await pttUp("refused");
+        return false;
+      }
+      if (ptt.keyed) { $("pttstate").textContent = `Keyed: slot ${"ABC"[a.rest[0]] || "?"}`; log("PTT keyed"); }
+      return true;
+    } catch (e) {
+      log(`PTT: ${e.message}`);
+      await pttUp("no answer");
+      return false;
+    }
+  }
+  async function pttUp(why = "release") {
+    const was = ptt.keyed;
+    ptt.keyed = false;
+    clearInterval(ptt.timer); ptt.timer = null;
+    $("ptt").classList.remove("keyed");
+    if (!was || !radio) return;
+    try {
+      const a = await radio.pttOff();
+      log(`KEY off (${why}): ${a.status === 0 ? "ok" : a.status}`);
+    } catch (e) { log(`KEY off (${why}): ${e.message}`); }
+    if (!ptt.ended) $("pttstate").textContent = `Unkeyed (${why}).`;
+  }
+  $("arm").addEventListener("change", () => {
+    $("ptt").disabled = !connected || !$("arm").checked;
+    $("pttstate").textContent = $("arm").checked ? "Armed: hold the button to transmit." : "Disarmed.";
+    if (!$("arm").checked) pttUp("disarmed");
+  });
+  const pb = $("ptt");
+  pb.addEventListener("pointerdown", (e) => { pb.setPointerCapture(e.pointerId); pttDown(); });
+  for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) pb.addEventListener(ev, () => pttUp("release"));
+  pb.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); pttDown(); } });
+  pb.addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") pttUp("release"); });
+  window.addEventListener("blur", () => pttUp("window blur"));
+  document.addEventListener("visibilitychange", () => { if (document.hidden) pttUp("hidden"); });
+  window.addEventListener("pagehide", () => pttUp("page closed"));
+
+  // ---- CMD ----
+  const hist = [];
+  let hi = 0;
+  $("cmdform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const line = $("cmdline").value.trim();
+    if (!line || !radio) return;
+    hist.push(line); hi = hist.length;
+    $("cmdline").value = "";
+    $("out").textContent += `> ${line}\n`;
+    try { $("out").textContent += await radio.cmd(line); } catch (err) { $("out").textContent += `${err.message}\n`; }
+    $("out").scrollTop = $("out").scrollHeight;
+  });
+  $("cmdline").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowUp" && hi > 0) { $("cmdline").value = hist[--hi]; e.preventDefault(); }
+    if (e.key === "ArrowDown" && hi < hist.length) { $("cmdline").value = hist[++hi] || ""; e.preventDefault(); }
+  });
+
+  $("connect").addEventListener("click", connect);
+  $("disconnect").addEventListener("click", disconnect);
+  $("refresh").addEventListener("click", readScreen);
+  $("live").addEventListener("change", () => scheduleLive());
+  if (fake) $("envhint").textContent = "Fake radio (?fake): no Bluetooth; the same framing, 20-byte chunks and API." + (params.has("pin") ? " PIN 1234." : "");
+  else if (!navigator.bluetooth) $("envhint").innerHTML = '<span class="warn">No Web Bluetooth here: use Chrome, from http://localhost (python3 -m http.server in tools/webble) or https.</span>';
+
+  // ---- window.ferrite: for browser automation ----
+  const need = () => { if (!radio) throw new Error("not connected"); return radio; };
+  window.ferrite = {
+    /** Opens the device chooser (Web Bluetooth needs a user gesture: call from a click, or use ?fake). */
+    connect,
+    disconnect,
+    /** A key: name as tools/ferrite_link.py (MENU, BACK, UP, ..., 0-9, STAR, HASH, SIDE1, SIDE2); how short|long|down|up. */
+    press: (name, how = "short") => need().press(name, how),
+    keys: (seq) => need().keys(seq),
+    knob: (steps) => need().knob(steps),
+    /** The screen parsed ({screen, bar, cards, rows, sel, hints, toast, ...}); it also redraws the page's view. */
+    ui: () => { need(); return readScreen(); },
+    uiText: (what = 0) => need().uiText(what),
+    cmd: (line) => need().cmd(line),
+    info: () => need().info(),
+    /** Remote PTT for `ms` (default 1000): armed and tx-dry only; keepalives every 0.5 s; KEY off at the end, always. */
+    ptt: async (ms = 1000) => {
+      if (!(await pttDown())) return { keyed: false, why: $("pttstate").textContent };
+      await Ferrite.sleep(ms);
+      await pttUp("api");
+      return { keyed: true, ended: ptt.ended };
+    },
+    arm: (on = true) => { $("arm").checked = !!on; $("arm").dispatchEvent(new Event("change")); },
+    status: () => ({ connected, fake, info, keyed: ptt.keyed, stats: link ? { ...link.stats } : null }),
+    core: Ferrite,
+  };
+})();
+</script>
+</body>
+</html>

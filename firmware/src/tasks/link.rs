@@ -2,15 +2,17 @@
 //! terminal (manual chapter 37), the link protocol (chapter 29) or KISS (chapter 26): received bytes go to the
 //! UI task, which runs them next to the App ([`ferrite_app::ports`] decides which), and what they send comes
 //! back here. This task owns both UARTs and the module's power: the cable's rate changes `BAUD` agrees (LINK-11)
-//! happen here, after the answer has gone; Bluetooth stays at 115200 (LINK-25).
+//! happen here, after the answer has gone; Bluetooth runs at the module's resting 9600 (LINK-25), its bytes sent
+//! only when USART1 can take one without waiting (about 1 ms each).
 
 use crate::board::BT_PWR;
 use ferrite_radio::bt::BtPower;
-use crate::chan::{BT_IN, BT_LINK_ON, BT_ON, BT_OUT, CABLE_BAUD, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
+use crate::chan::{BT_IN, BT_LINK_ON, BT_ON, BT_OUT, BT_RATE, CABLE_BAUD, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::hal::uart;
 use crate::report::{UART_BT, UART_CPS};
 use crate::ring::Ring;
 use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use crate::report::UartStats;
 use embassy_time::{Duration, Instant, Timer};
 
 const BAUD: u32 = 115_200;
@@ -26,9 +28,11 @@ const XOFF: u8 = 0x13;
 const XON: u8 = 0x11;
 /// A new rate stays only if a `HELLO` arrives at it within this long (LINK-11).
 const BAUD_PROOF: Duration = Duration::from_secs(1);
-/// The module's power settles before its UART is used (stock powers PB9 and starts USART1 together; a short
+/// The module's power settles before its UART is used (stock starts USART1, then powers PB9 with no wait; a short
 /// wait costs nothing).
 const BT_POWER_MS: u64 = 20;
+/// The cable log's Bluetooth counters (TERM-28): a line this often while bytes move.
+const BT_LOG_MS: u64 = 5_000;
 
 /// One port's bytes between its UART and the UI task's rings.
 struct Port {
@@ -38,7 +42,7 @@ struct Port {
     /// The link holds the port: its binary frames can't carry XON/XOFF.
     link: &'static AtomicBool,
     held: bool,
-    /// The cable: sends nothing while keyed (TX-43).
+    /// The cable: sends nothing while keyed (TX-43). Bluetooth: only what USART1 takes without waiting.
     cable: bool,
 }
 
@@ -78,7 +82,7 @@ impl Port {
     fn send(&mut self) -> bool {
         let mut n = 0;
         while n < CHUNK {
-            if !self.may_send() {
+            if !self.may_send() || !self.cable && !uart::tx_free(self.uart) {
                 break;
             }
             let Some(b) = self.tx.get() else { break };
@@ -113,18 +117,38 @@ fn cable_quiet(quiet: bool) {
     }
 }
 
-/// 0 9 2 1: the module powered (PB9, active high) and USART1 at 115200, or both off with the TX pin let go so a
-/// powered-down module isn't fed (LINK-25: the MCU never configures the module; the rate is fixed).
+/// 0 9 2 1: the module powered (PB9, active high) and USART1 at its rate (9600, LINK-25), or both off with the TX
+/// pin let go so a powered-down module isn't fed (the MCU never configures the module).
 fn bt_power(on: bool) {
     if on {
         BT_PWR.write(true);
-        uart::init(UART_BT, BAUD);
+        uart::init(UART_BT, BT_RATE.load(Relaxed));
     } else {
         uart::deinit(UART_BT);
         BT_PWR.write(false);
         BT_IN.clear();
         BT_OUT.clear();
     }
+}
+
+/// TERM-28: "bt: in 12 out 340 (+12/+340), framing 0, overrun 0, 9600 baud, module on" (the change in the last 5 s
+/// in brackets).
+fn bt_log_line(was: &UartStats, now: &UartStats) {
+    let (fe, ov) = uart::errors(UART_BT);
+    crate::bringup::linef(|b| {
+        let _ = ufmt::uwrite!(
+            b,
+            "bt: in {} out {} (+{}/+{}), framing {}, overrun {}, {} baud, module {}",
+            now.rx_bytes,
+            now.tx_bytes,
+            now.rx_bytes.wrapping_sub(was.rx_bytes),
+            now.tx_bytes.wrapping_sub(was.tx_bytes),
+            fe,
+            ov,
+            uart::rate(UART_BT),
+            if BT_PWR.out_level() { "on" } else { "off" }
+        );
+    });
 }
 
 #[embassy_executor::task]
@@ -140,6 +164,8 @@ pub async fn task() {
     let mut probation: Option<(Instant, u16)> = None;
     // SND-14: PC10 held high while a speaker mic is connected.
     let mut quiet = false;
+    // The cable log's Bluetooth counters: when last looked at, and what they were.
+    let mut bt_log = (Instant::now(), uart::stats(UART_BT));
     loop {
         if spkmic() != quiet {
             quiet = !quiet;
@@ -159,6 +185,19 @@ pub async fn task() {
             BT_PWR.write(true);
         }
         let bt_on = bt_pw.on;
+        // A bench `bt baud N`: USART1 restarted at the new rate (the MCU's side only).
+        if bt_on && uart::rate(UART_BT) != BT_RATE.load(Relaxed) {
+            uart::flush(UART_BT);
+            uart::init(UART_BT, BT_RATE.load(Relaxed));
+        }
+        // TERM-28: Bluetooth's byte counts on the cable log every 5 s while they move.
+        if bt_log.0.elapsed() >= Duration::from_millis(BT_LOG_MS) {
+            let now = uart::stats(UART_BT);
+            if now.rx_bytes != bt_log.1.rx_bytes || now.tx_bytes != bt_log.1.tx_bytes || now.line_errors != bt_log.1.line_errors {
+                bt_log_line(&bt_log.1, &now);
+            }
+            bt_log = (Instant::now(), now);
+        }
         let mut got = cable.receive();
         if bt_on {
             got |= bt.receive();

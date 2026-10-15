@@ -2120,7 +2120,7 @@ def selftest_sim(a):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="JSON overriding any of DEFAULTS")
-    ap.add_argument("--port", help="the cable (default from the config), or tcp:HOST:PORT for the simulator")
+    ap.add_argument("--port", help="the cable (default from the config), tcp:HOST:PORT for the simulator, or ble:NAME_OR_ADDRESS for Bluetooth")
     ap.add_argument("--slot", help="the slot to use (A)")
     ap.add_argument("--runs", help="comma list of run names (default: all in the config)")
     ap.add_argument("--results", help="results root")

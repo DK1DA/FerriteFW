@@ -50,6 +50,9 @@ pub enum Kind {
     /// `bt AT+VERS?`: a read-only query to the Bluetooth module (TERM-27).
     Bt { text: [u8; 16], n: u8 },
     #[cfg(feature = "bench")]
+    /// `bt stat`, `bt baud N` (0: only ask): USART1's counters and rate (TERM-27).
+    BtStat(u32),
+    #[cfg(feature = "bench")]
     /// `rx both`, `rx one`, `rx`: the bench test's hold on both band receive selects (TERM-29), or ask.
     RxBoth(Option<bool>),
     /// `gps`: the GPS module's last GGA sentence and its two heights (TERM-30).
@@ -135,6 +138,8 @@ impl Job {
             Kind::Si { cmd, n, reply } => DebugReq::Si { cmd, n, reply },
             #[cfg(feature = "bench")]
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
+            #[cfg(feature = "bench")]
+            Kind::BtStat(baud) => DebugReq::BtStat { baud },
             #[cfg(feature = "bench")]
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
             Kind::Gga => DebugReq::Gga,
@@ -257,6 +262,18 @@ impl Job {
                     }
                 }
                 self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::BtStat(_), DebugAns::BtStat(b)) => {
+                match self.line {
+                    0 => put!(out, "  bt: USART1 {} baud, module {}", b.baud, if b.on { "on (PB9 high)" } else { "off" }),
+                    _ => {
+                        put!(out, "  in {} out {} bytes, framing {}, overrun {}, dropped {}", b.rx, b.tx, b.framing, b.overrun, b.dropped);
+                        self.st = St::Over;
+                    }
+                }
+                self.line += 1;
                 Step::Line
             }
             #[cfg(feature = "bench")]

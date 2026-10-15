@@ -2,28 +2,36 @@
 //! what runs on them: the terminal ([`Term`]), the link protocol ([`Session`]) and the KISS TNC. The firmware
 //! and the simulators feed both ports' bytes through here, so both run the same rules.
 //!
-//! - **One terminal and one link session**, held by one port at a time (RAM: the terminal and the session are
-//!   about 2 KB together, so there is no second set). The cable always wins: physical access (LINK-7), and the
-//!   way back if a phone left a session open. Bluetooth takes them when the cable has neither open; while the
-//!   cable has them, Bluetooth's terminal and link bytes are dropped.
+//! - **A link session on each port, at the same time** (LINK-28, decision 152): the cable's and Bluetooth's sessions
+//!   are independent (their frames, `HELLO`, PIN, running `CMD`, write session). What they share is made safe here:
+//!   writes are serialised (a `WRITE`, `DELETE` or `BEGIN` from one port while the other is mid-write answers
+//!   `busy`), remote PTT has one keyer at a time (the other port's key-up and keepalives are refused; either may
+//!   send `KEY` off), and the firmware's debug requests go one at a time.
+//! - **One terminal**, held by one port at a time (RAM: a second VT100 screen state isn't worth it; the link's `CMD`
+//!   runs the same command lines on either port). The cable always wins: physical access (LINK-7), and the way
+//!   back if a phone left it open. Bluetooth takes it when the cable's terminal is closed; while the cable has
+//!   it, Bluetooth's terminal bytes are dropped. A link session never takes or blocks the terminal.
 //! - **KISS** needs neither, so it runs on its port alongside the other one (KISS-6): the cable by 0 9 2 4 on
 //!   KISS or 0 5 9 1 on Cable, Bluetooth by 0 5 9 1 on Bluetooth. Its bytes go back to the caller.
 //! - **Trust:** the cable is trusted (TERM-3, LINK-7). On Bluetooth, while the radio's PIN lock is on, the
-//!   terminal and the link each ask for the PIN first (LINK-30); `BAUD` can't change the rate (LINK-25).
+//!   terminal and the link each ask for the PIN first (LINK-30); `BAUD` never applies to it (LINK-15, LINK-25).
 //! - **A Bluetooth connection** ends when it has been quiet for [`BT_IDLE_MS`]: the module tells the radio
 //!   nothing about connects (it is a transparent bridge, LINK-25), so silence is the only sign the phone left.
-//!   Its terminal closes, and the PIN it gave ends with it.
+//!   Its terminal closes, its link session starts over, and the PIN it gave ends with it.
 
 use crate::chan::ChannelStore;
 use crate::link::{self, Route, Session};
 use crate::term::{Sink, Term};
 use crate::App;
-use ferrite_core::msg::{Device, LiveAll};
+use ferrite_core::msg::{DebugAns, DebugReq, Device, LiveAll};
 
-/// Bluetooth's only rate (LINK-25, decision 79).
-pub const BT_BAUD: u32 = 115_200;
+/// Bluetooth's only rate (LINK-25, decision 152): the module's resting 9600.
+pub use ferrite_core::link::BT_BAUD;
 /// A Bluetooth connection is taken as over after this long with no byte from it.
 pub const BT_IDLE_MS: u32 = 120_000;
+/// A debug request waits this long for the firmware's answer before another may go (the asking command gives up
+/// after [`crate::term::debug::ANSWER_MS`]).
+const DEBUG_WAIT_MS: u32 = 2_500;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Port {
@@ -31,30 +39,49 @@ pub enum Port {
     Bt,
 }
 
+impl Port {
+    /// The port's index in [`Ports::links`]: 0 the cable, 1 Bluetooth.
+    pub const fn i(self) -> usize {
+        match self {
+            Port::Cable => 0,
+            Port::Bt => 1,
+        }
+    }
+}
+
 /// Where a byte from a port goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum To {
     Term,
-    Link,
+    /// That port's link session.
+    Link(Port),
     /// The KISS TNC has this port (KISS-6): the caller's KISS decoder.
     Kiss,
-    /// The other port holds the terminal and the link: dropped.
+    /// The cable holds the terminal: a Bluetooth terminal byte, dropped.
     Drop,
+}
+
+/// Who asked the debug request in flight (TERM-21, LINK-34).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Asker {
+    Term,
+    Link(usize),
 }
 
 pub struct Ports {
     pub term: Term,
-    pub link: Session,
+    /// One link session per port (LINK-28): the cable's (trusted) and Bluetooth's.
+    pub links: [Session; 2],
+    /// Which port holds the terminal now.
     owner: Port,
-    /// The cable's fastest rate (LINK-11), given back to the session when the cable takes it again.
-    cable_max: u32,
     /// When Bluetooth last sent a byte, and whether it has since the connection started.
     bt_last: u32,
     bt_seen: bool,
-    /// Bluetooth bytes dropped while the cable held the terminal or the link.
+    /// Bluetooth terminal bytes dropped while the cable held the terminal.
     pub dropped: u32,
-    /// The last debug request came from a command run over the link (LINK-34), not the terminal.
-    dbg_link: bool,
+    /// The debug request in flight: who asked, and when.
+    dbg: Option<(Asker, u32)>,
+    now: u32,
 }
 
 impl Default for Ports {
@@ -65,41 +92,46 @@ impl Default for Ports {
 
 impl Ports {
     pub const fn new() -> Self {
-        Ports { term: Term::new(), link: Session::new(true), owner: Port::Cable, cable_max: BT_BAUD, bt_last: 0, bt_seen: false, dropped: 0, dbg_link: false }
+        let mut bt = Session::new(false);
+        bt.set_max_baud(0); // LINK-15: `BAUD` never applies to Bluetooth
+        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, dropped: 0, dbg: None, now: 0 }
     }
 
     /// The fastest cable rate the caller's UART runs within 2 % (LINK-11).
     pub fn set_cable_max_baud(&mut self, b: u32) {
-        self.cable_max = b;
-        if self.owner == Port::Cable {
-            self.link.set_max_baud(b);
-        }
+        self.links[0].set_max_baud(b);
     }
 
-    /// Which port holds the terminal and the link now.
+    /// Which port holds the terminal now.
     pub fn owner(&self) -> Port {
         self.owner
     }
 
-    /// Takes another byte now (TERM-4, TERM-13: a whole line or frame waits for the store).
+    /// `port` takes another byte now (TERM-4, TERM-13: a whole line or frame waits for the store).
+    pub fn ready_for(&self, port: Port) -> bool {
+        self.links[port.i()].ready() && (self.owner != port || self.term.ready())
+    }
+
+    /// Both ports take another byte now.
     pub fn ready(&self) -> bool {
-        self.term.ready() && self.link.ready()
+        self.term.ready() && self.links.iter().all(|l| l.ready())
     }
 
-    /// The terminal or the link is in use on the owner's port.
-    fn held(&self, now: u32) -> bool {
-        self.term.on() || self.link.active(now) || self.link.progress().is_some()
+    /// The terminal or a session has work waiting: poll again soon.
+    pub fn busy(&self) -> bool {
+        self.term.busy() || !self.ready()
     }
 
+    /// The terminal moves to `port`: a fresh one (the other port's closes).
     fn switch(&mut self, port: Port) {
         self.owner = port;
         self.term = Term::new();
         self.term.set_bluetooth(port == Port::Bt);
-        self.link.set_port(port == Port::Cable, if port == Port::Cable { self.cable_max } else { BT_BAUD });
     }
 
-    /// Where byte `b` from `port` goes (TERM-2 on the cable; auto on Bluetooth). It may move the terminal and the
-    /// link to `port`: always for the cable, for Bluetooth when the cable has neither in use.
+    /// Where byte `b` from `port` goes (TERM-2 on the cable; auto on Bluetooth). A terminal byte may move the
+    /// terminal to `port`: always for the cable, for Bluetooth when the cable's terminal is closed. Link frames go
+    /// to the port's own session (LINK-28).
     pub fn route(&mut self, app: &App, port: Port, b: u8, now: u32) -> To {
         if port == Port::Bt {
             (self.bt_last, self.bt_seen) = (now, true);
@@ -111,84 +143,110 @@ impl Ports {
         if kiss {
             return To::Kiss;
         }
-        if port != self.owner {
-            if port == Port::Bt && self.held(now) {
-                self.dropped = self.dropped.wrapping_add(1);
-                return To::Drop;
-            }
-            self.switch(port);
-        }
         let mode = if port == Port::Cable { app.set.cable_port } else { 0 };
-        match link::route(mode, self.link.active(now), b) {
-            Route::Link => To::Link,
-            Route::Term => To::Term,
+        match link::route(mode, self.links[port.i()].active(now), b) {
+            Route::Link => To::Link(port),
             Route::Drop => To::Kiss,
+            Route::Term => {
+                if port != self.owner {
+                    if port == Port::Bt && self.term.on() {
+                        self.dropped = self.dropped.wrapping_add(1);
+                        return To::Drop;
+                    }
+                    self.switch(port);
+                }
+                To::Term
+            }
         }
     }
 
-    /// A routed byte to the terminal or the link (call the App's `pop_write` after each: a channel edit writes
-    /// one channel per key).
+    /// A routed byte to the terminal or a link session (call the App's `pop_write` after each: a channel edit
+    /// writes one channel per key).
     pub fn feed<S: ChannelStore>(&mut self, app: &mut App, store: &S, to: To, b: u8, now: u32) {
         match to {
             To::Term => self.term.feed(app, b, now, store),
-            To::Link => self.link.feed(b, now),
+            To::Link(p) => self.links[p.i()].feed(b, now),
             To::Kiss | To::Drop => {}
         }
     }
 
-    /// The terminal redrawn and a waiting link frame answered, into the owner's output. Ends a Bluetooth
-    /// connection gone quiet; a Bluetooth terminal asks for the PIN while the PIN lock is on (LINK-30).
+    /// The terminal redrawn into its port's output and each session's waiting frame answered into its own. Ends a
+    /// Bluetooth connection gone quiet; a Bluetooth terminal asks for the PIN while the PIN lock is on (LINK-30).
     #[allow(clippy::too_many_arguments)]
     pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, now: u32, cable: &mut impl Sink, bt: &mut impl Sink) {
+        self.now = now;
         if self.bt_seen && (now.wrapping_sub(self.bt_last) >= BT_IDLE_MS || !app.set.bt) {
             self.bt_seen = false;
             if self.owner == Port::Bt {
                 self.switch(Port::Cable);
             }
+            self.links[1].set_port(false, 0); // LINK-29: the next connection starts over (its PIN too)
         }
         self.term.set_pin_needed(self.owner == Port::Bt && app.pin_required());
         match self.owner {
-            Port::Cable => {
-                self.term.poll(app, store, dev, live, now, cable);
-                self.link.poll(app, store, dev, live, now, cable);
-            }
-            Port::Bt => {
-                self.term.poll(app, store, dev, live, now, bt);
-                self.link.poll(app, store, dev, live, now, bt);
-            }
+            Port::Cable => self.term.poll(app, store, dev, live, now, cable),
+            Port::Bt => self.term.poll(app, store, dev, live, now, bt),
         }
+        // LINK-28: writes one port at a time; each session hears whether the other is mid-write.
+        let writing = [self.links[0].writing(), self.links[1].writing()];
+        self.links[0].set_other_writing(writing[1]);
+        self.links[1].set_other_writing(writing[0]);
+        self.links[0].poll(app, store, dev, live, now, cable);
+        self.links[1].poll(app, store, dev, live, now, bt);
     }
 
-    /// A debug command's next request for the firmware (TERM-21), from the terminal or from a command run over the
-    /// link (LINK-34): one at a time. Answer with [`Ports::debug_answer`].
-    pub fn debug_req(&mut self) -> Option<ferrite_core::msg::DebugReq> {
-        if let Some(r) = self.term.debug_req() {
-            self.dbg_link = false;
-            return Some(r);
+    /// A debug command's next request for the firmware (TERM-21), from the terminal or from a command run over
+    /// either link session (LINK-34): one in flight at a time. Answer with [`Ports::debug_answer`].
+    pub fn debug_req(&mut self) -> Option<DebugReq> {
+        if self.dbg.is_some_and(|(_, at)| self.now.wrapping_sub(at) < DEBUG_WAIT_MS) {
+            return None;
         }
-        let r = self.link.debug_req()?;
-        self.dbg_link = true;
+        self.dbg = None;
+        let (who, r) = if let Some(r) = self.term.debug_req() {
+            (Asker::Term, r)
+        } else if let Some(r) = self.links[0].debug_req() {
+            (Asker::Link(0), r)
+        } else {
+            (Asker::Link(1), self.links[1].debug_req()?)
+        };
+        self.dbg = Some((who, self.now));
         Some(r)
     }
 
     /// The firmware's answer to the last [`Ports::debug_req`], to whichever asked.
-    pub fn debug_answer(&mut self, a: ferrite_core::msg::DebugAns) {
-        if self.dbg_link {
-            self.link.debug_answer(a);
-        } else {
-            self.term.debug_answer(a);
+    pub fn debug_answer(&mut self, a: DebugAns) {
+        match self.dbg.take() {
+            Some((Asker::Term, _)) => self.term.debug_answer(a),
+            Some((Asker::Link(i), _)) => self.links[i].debug_answer(a),
+            None => {}
         }
     }
 
-    /// A rate agreed by `BAUD` for the cable's UART, once (LINK-11); Bluetooth's never changes (LINK-25).
+    /// A rate agreed by the cable's `BAUD` for its UART, once (LINK-11); Bluetooth's never changes (LINK-15).
     pub fn take_baud(&mut self) -> Option<u32> {
-        let b = self.link.take_baud();
-        b.filter(|_| self.owner == Port::Cable)
+        let _ = self.links[1].take_baud();
+        self.links[0].take_baud()
+    }
+
+    /// `REBOOT` accepted on either port, once (LINK-24).
+    pub fn take_reboot(&mut self) -> bool {
+        let c = self.links[0].take_reboot();
+        self.links[1].take_reboot() || c
+    }
+
+    /// The cable session's `HELLO`s (LINK-11: a new rate stays once one arrives at it).
+    pub fn hellos(&self) -> u16 {
+        self.links[0].hellos()
+    }
+
+    /// A write session's progress on either port (only one writes at a time), for the Link page (LINK-9).
+    pub fn progress(&self) -> Option<u8> {
+        self.links.iter().find_map(|l| l.progress())
     }
 
     /// The link protocol is running on `port` now (TERM-2: for its flow control and the Link status page).
     pub fn link_on(&self, port: Port, now: u32) -> bool {
-        self.owner == port && self.link.active(now)
+        self.links[port.i()].active(now)
     }
 
     /// A Bluetooth device is connected, as far as the radio can tell: Bluetooth is on and the device has sent

@@ -138,7 +138,8 @@ fn ram_is_small() {
     // and cut), 16 with padding, to 1352; a remote key-up's release as a cut (LINK-20, TX-47: a byte), 8 with
     // padding, to 1360; remote keys (LINK-19: the keys the link holds, its long press and when the last went
     // down, 16 with its Option) and the readback's redraw count and time (8), to 1384; each group's and
-    // third-level list's last item (MENU-24: 38 nibbles, 19 bytes), 24 with padding, to 1408
+    // third-level list's last item (MENU-24: 38 nibbles, 19 bytes), 24 with padding, to 1408 (who holds the remote
+    // keys, LINK-28's byte, fits in that padding)
     assert!(n <= 1408, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");

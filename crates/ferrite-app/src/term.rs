@@ -1324,7 +1324,7 @@ impl Term {
             w.s(c);
         }
         w.s(b"   RT-950 Pro");
-        let link = b"cable 115200";
+        let link: &[u8] = if self.bt { b"bluetooth 9600" } else { b"cable 115200" };
         w.at((self.cols as u16).saturating_sub(link.len() as u16) / 2 + 8);
         w.s(link);
         let mut t = Buf::<8>::new();

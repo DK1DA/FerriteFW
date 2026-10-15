@@ -23,12 +23,20 @@ use ferrite_core::link::key;
 use ferrite_core::msg::SLOTS;
 use ferrite_core::txplan::{self, Refusal};
 
-/// A remote transmission holding the key: the PTT it pressed (`Key::Ptt` code), the slot keyed, the last keepalive.
+/// Who presses remote keys or keys remotely (LINK-28: a link session on each port at once): the cable's session,
+/// Bluetooth's, or the terminal's `key` command.
+pub const BY_CABLE: u8 = 0;
+pub const BY_BT: u8 = 1;
+pub const BY_TERM: u8 = 2;
+
+/// A remote transmission holding the key: the PTT it pressed (`Key::Ptt` code), the slot keyed, the last keepalive,
+/// and who keyed it ([`BY_CABLE`], [`BY_BT`]): the only one whose keepalives count (LINK-20, LINK-28).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Remote {
     pub ptt: u8,
     pub slot: u8,
     pub last: u32,
+    pub by: u8,
 }
 
 /// Why a remote transmission ended, told to the PC at its next keepalive.
@@ -65,6 +73,9 @@ impl RemoteEnd {
     }
 }
 
+/// The answer to a remote key-up or keepalive while the other port's session holds the key (LINK-28).
+pub const OTHER_PORT: &str = "keyed from the other port";
+
 /// A local PTT's bit in [`App::local_ptt`] and [`App::ptt_cut`]: A, B, the side connector.
 pub(crate) fn bit(k: u8) -> u8 {
     match k {
@@ -80,9 +91,10 @@ impl App {
         self.remote.is_some()
     }
 
-    /// `KEY` on: key `slot` (`key::ACTIVE` or 0-2) as its PTT would, with every check. Ok: the slot keyed; Err: why
-    /// not, for the PC (the radio shows a refusal as a PTT's: the refused screen, or the toast VOX gets).
-    pub fn remote_key(&mut self, slot: u8, now: u32, store: &impl ChannelStore) -> Result<u8, &'static str> {
+    /// `KEY` on from `by`: key `slot` (`key::ACTIVE` or 0-2) as its PTT would, with every check. Ok: the slot keyed;
+    /// Err: why not, for the PC (the radio shows a refusal as a PTT's: the refused screen, or the toast VOX gets).
+    /// One keyer at a time (LINK-28): refused while the other port's session holds the key.
+    pub fn remote_key(&mut self, slot: u8, by: u8, now: u32, store: &impl ChannelStore) -> Result<u8, &'static str> {
         self.now = now;
         // The PTT that keys it (KEY-7): PTT B keys B; PTT A and the side connector the active slot. A or C keys only
         // while it is the active slot, since the radio has no PTT for it otherwise.
@@ -94,6 +106,9 @@ impl App {
             _ => return Err("no such slot"),
         };
         if let Some(r) = self.remote {
+            if r.by != by {
+                return Err(OTHER_PORT);
+            }
             if r.slot == s {
                 self.remote = Some(Remote { last: now, ..r }); // a repeated key-up is a keepalive
                 return Ok(s);
@@ -115,7 +130,7 @@ impl App {
         if matches!(self.screen, Screen::Compose(_)) || self.aprs_slot(s) {
             return Err("APRS: no voice there");
         }
-        self.remote = Some(Remote { ptt, slot: s, last: now });
+        self.remote = Some(Remote { ptt, slot: s, last: now, by });
         self.remote_ended = None;
         self.press(Key::Ptt(ptt), true, now, store);
         if self.radio.keyed == Some(s) {
@@ -131,9 +146,11 @@ impl App {
         Err(why)
     }
 
-    /// `KEY` keepalive: Ok while the remote transmission holds; Err with why it ended once it has.
-    pub fn remote_keepalive(&mut self, now: u32) -> Result<(), &'static str> {
+    /// `KEY` keepalive from `by`: Ok while its remote transmission holds; Err with why it ended once it has. The
+    /// other port's keepalives don't hold it (LINK-28).
+    pub fn remote_keepalive(&mut self, by: u8, now: u32) -> Result<(), &'static str> {
         match &mut self.remote {
+            Some(r) if r.by != by => Err(OTHER_PORT),
             Some(r) => {
                 r.last = now;
                 Ok(())
@@ -159,6 +176,17 @@ impl App {
             _ => return,
         };
         self.show_toast(b"Remote PTT ended", body, false);
+    }
+
+    /// `by`'s session closed or started over (LINK-20, LINK-28): the remote transmission it keyed ends as a cut, and
+    /// the keys it holds are let go. The other port's are left alone.
+    pub fn remote_session_closed(&mut self, by: u8, now: u32, store: &impl ChannelStore) {
+        if self.remote.is_some_and(|r| r.by == by) {
+            self.remote_unkey(RemoteEnd::Session, now, store);
+        }
+        if self.rkeys.by == by {
+            self.remote_keys_release(now, store);
+        }
     }
 
     /// Every tick: no keepalive for 2 s ends it; so does the transmission ending on the radio.
@@ -278,6 +306,8 @@ pub struct RemoteKeys {
     long: Option<(u8, u32)>,
     /// When the last remote key went down (a key held [`key::HOLD_MAX_MS`] is let go).
     since: u32,
+    /// Who holds them ([`BY_CABLE`], [`BY_BT`], [`BY_TERM`]): another may press only once they are let go.
+    by: u8,
 }
 
 impl App {
@@ -286,12 +316,17 @@ impl App {
     /// transmits: it is refused while the radio transmits (DTMF and the tone burst are keys then), and any
     /// transmission it would start (PTT's paths, the dialer, a message, a beacon, the repeater) is refused while
     /// it is handled ([`App::remote_tx_refused`]). The PTTs are not keys here (LINK-20 is remote PTT).
-    pub fn remote_press(&mut self, code: u8, how: Press, now: u32, store: &impl ChannelStore) -> Result<(), KeyRefusal> {
+    ///
+    /// `by` is who presses: while another holds keys, a press is `busy` (LINK-28).
+    pub fn remote_press(&mut self, code: u8, how: Press, by: u8, now: u32, store: &impl ChannelStore) -> Result<(), KeyRefusal> {
         let k = match ferrite_core::keys::key(code) {
             Some(k) if code <= key::LAST_CODE && !matches!(k, Key::Ptt(_)) => k,
             _ => return Err(KeyRefusal::Invalid("no such key: stock key codes 0-21")),
         };
         let bit = 1u32 << code;
+        if self.rkeys.held != 0 && self.rkeys.by != by {
+            return Err(KeyRefusal::Busy);
+        }
         if how == Press::Up {
             if self.rkeys.held & bit != 0 {
                 self.remote_up(code, now, store);
@@ -314,7 +349,7 @@ impl App {
             return Err(KeyRefusal::Invalid("held on the radio"));
         }
         self.rkeys.held |= bit;
-        self.rkeys.since = now;
+        (self.rkeys.since, self.rkeys.by) = (now, by);
         self.remote_in = true;
         self.key_down(k, now, store);
         self.remote_in = false;

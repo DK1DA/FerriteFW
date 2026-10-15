@@ -30,11 +30,15 @@ const TICK_HELD_MS: u64 = 20;
 const TICK_IDLE_MS: u64 = 250;
 
 /// A port's output for the terminal and the link: its transmit ring, emptied by the Link task (the cable's
-/// `TERM_OUT`, Bluetooth's `BT_OUT`).
-struct Out(&'static crate::ring::Ring<'static>);
+/// `TERM_OUT`, Bluetooth's `BT_OUT`). `Out(ring, false)`: held (the cable while its log has it, TERM-28): no
+/// room, so nothing is written and the cable's terminal and session wait.
+struct Out(&'static crate::ring::Ring<'static>, bool);
 
 impl Sink for Out {
     fn room(&self) -> usize {
+        if !self.1 {
+            return 0;
+        }
         self.0.room() as usize
     }
     fn put(&mut self, b: &[u8]) {
@@ -312,8 +316,9 @@ pub async fn task() {
     #[cfg(feature = "bench")]
     let mut bt_q: Option<BtQuery> = None;
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
-    // ... and over Bluetooth (roadmap 3d): one terminal and one link session, held by one port at a time.
-    // The link protocol on the same cable (chapter 29), trusted as the cable is (LINK-7); TERM-2 routes the bytes.
+    // ... and over Bluetooth (roadmap 3d): one terminal, held by one port at a time, and a link session on each
+    // port (LINK-28). The link protocol on the cable (chapter 29) is trusted as the cable is (LINK-7); TERM-2
+    // routes the bytes.
     let mut ports = Ports::new();
     let fastest = ferrite_core::link::RATES.iter().copied().filter(|&r| crate::hal::uart::rate_ok(crate::report::UART_CPS, r)).max();
     ports.set_cable_max_baud(fastest.unwrap_or(115_200));
@@ -339,7 +344,8 @@ pub async fn task() {
             logged.1 = Instant::now();
         }
         // A whole line waits until the store has caught up (TERM-13): the bytes after it stay in the ring.
-        // The cable first, then Bluetooth (its bytes only while 0 9 2 1 has the module on).
+        // The cable first, then Bluetooth (its bytes only while 0 9 2 1 has the module on). The cable's wait while
+        // its log has it (TERM-28: the first byte ends the log, above); Bluetooth's never do.
         #[cfg(feature = "bench")]
         let (bt_forced, bt_busy) = (bt_q.as_ref().is_some_and(|q| q.forced), bt_q.is_some());
         #[cfg(not(feature = "bench"))]
@@ -347,7 +353,8 @@ pub async fn task() {
         BT_ON.store(app.settings().bt || bt_forced, Relaxed);
         for (port, ring) in [(Port::Cable, &TERM_IN), (Port::Bt, &BT_IN)] {
             // While a `bt` query waits, the module's bytes are its answer, not a session's.
-            while !bringup::ON.load(Relaxed) && ports.ready() && !(port == Port::Bt && bt_busy) {
+            let held = port == Port::Cable && bringup::ON.load(Relaxed) || port == Port::Bt && bt_busy;
+            while !held && ports.ready_for(port) {
                 let Some(b) = ring.get() else { break };
                 match ports.route(&app, port, b, now_ms()) {
                     ferrite_app::ports::To::Kiss => aprs.kiss_in(b), // KISS has this port (chapter 26)
@@ -387,7 +394,7 @@ pub async fn task() {
         dev.mcu_temp = (t != i16::MIN).then(|| ferrite_core::mcutemp::whole(t));
         // SND-12: the speaker mic, as the input task debounced it.
         dev.spkmic = crate::chan::ACCESSORY.load(Relaxed) & ferrite_core::acc::ON != 0;
-        if !bringup::ON.load(Relaxed) {
+        {
             // Debug commands (TERM-21): memory here, registers by the Radio task (it signals TERM_WAKE).
             #[cfg(feature = "bench")]
             if let Ok(a) = DEBUG_ANS.try_receive() {
@@ -395,11 +402,13 @@ pub async fn task() {
             }
             // The terminal redrawn and one waiting link request answered when the port and the store have room
             // (LINK-1), on the port that holds them.
-            ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT), &mut Out(&BT_OUT));
+            // The cable's output waits while its log has it (TERM-28); Bluetooth's sessions run regardless.
+            let cable_free = !bringup::ON.load(Relaxed);
+            ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT, cable_free), &mut Out(&BT_OUT, true));
             if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)
             }
-            if ports.link.take_reboot() {
+            if ports.take_reboot() {
                 // LINK-24: the radio quiet, everything written (at most 3 s), the answer out, then a system
                 // reset: the stock bootloader listens for the updater first, as after hwtest's `reboot`.
                 RADIO.send(RadioCmd::Shutdown).await;
@@ -412,14 +421,14 @@ pub async fn task() {
                 Timer::after_millis(50).await; // the answer's bytes leave the UART
                 cortex_m::peripheral::SCB::sys_reset();
             }
-            LINK_HELLOS.store(ports.link.hellos(), Relaxed);
+            LINK_HELLOS.store(ports.hellos(), Relaxed);
             LINK_ON.store(ports.link_on(Port::Cable, now_ms()), Relaxed);
             BT_LINK_ON.store(ports.link_on(Port::Bt, now_ms()), Relaxed);
             dev.bt = ports.bt_connected(&app, now_ms());
             dev.link = ferrite_core::msg::LinkLive {
                 cable: ports.link_on(Port::Cable, now_ms()),
                 baud_100: (CABLE_BAUD.load(Relaxed) / 100) as u16,
-                write_pct: ports.link.progress(),
+                write_pct: ports.progress(),
             };
             // TERM-27: the `bt` query: send once the module has power (20 ms after PB9, then the UART), collect for
             // 500 ms, answer.
@@ -456,6 +465,25 @@ pub async fn task() {
                     // TERM-36: the GPS task sends it and answers through GPS_ANS (checked again there).
                     #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Gps { id, arg, quiet } => crate::chan::GPS_SEND.signal((id, arg, quiet)),
+                    #[cfg(feature = "bench")]
+                    ferrite_core::msg::DebugReq::BtStat { baud } => {
+                        if baud != 0 {
+                            crate::chan::BT_RATE.store(baud, Relaxed); // the Link task restarts USART1 at it
+                        }
+                        let st = crate::hal::uart::stats(crate::report::UART_BT);
+                        let (framing, overrun) = crate::hal::uart::errors(crate::report::UART_BT);
+                        let rate = if baud != 0 { baud } else { crate::hal::uart::rate(crate::report::UART_BT) };
+                        let on = crate::board::BT_PWR.out_level();
+                        ports.debug_answer(ferrite_core::msg::DebugAns::BtStat(ferrite_core::msg::BtStats {
+                            rx: st.rx_bytes,
+                            tx: st.tx_bytes,
+                            framing,
+                            overrun,
+                            dropped: st.dropped,
+                            baud: rate,
+                            on,
+                        }));
+                    }
                     #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Bt { text, n } => {
                         let forced = !app.settings().bt;
@@ -540,7 +568,7 @@ pub async fn task() {
         let leds = app.leds(&live, &dev);
         LED_RED.write(leds.red == LED_ACTIVE_HIGH);
         LED_GREEN.write(leds.green == LED_ACTIVE_HIGH);
-        let mut period = if down != 0 || ports.term.busy() || !ports.link.ready() { TICK_HELD_MS } else { TICK_IDLE_MS };
+        let mut period = if down != 0 || ports.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
         if leds.next_ms != 0 {
             period = period.min(leds.next_ms as u64);
         }

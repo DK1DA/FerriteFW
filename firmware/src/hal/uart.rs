@@ -36,6 +36,12 @@ static RX: [Ring<'static>; UART_COUNT] = [Ring::new(&BUF_BT), Ring::new(&BUF_GPS
 static RX_BYTES: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
 static LINE_ERRORS: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
 static TX_BYTES: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
+/// The line errors by kind (STS bits 1 framing, 3 overrun; noise is the rest of `LINE_ERRORS`): a wrong rate shows as
+/// framing errors, a receiver too slow to empty the data register as overruns.
+static FRAMING: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
+static OVERRUN: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
+/// The rate each port was last started at (0: never), for the bench's `bt stat`.
+static RATE: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
 
 pub fn init(id: usize, baud: u32) {
     let u = &HW[id];
@@ -47,6 +53,7 @@ pub fn init(id: usize, baud: u32) {
     u.rx.config(Mode::InPu);
     let clk = if u.apb2 { clock::APB2_HZ } else { clock::APB1_HZ };
     wr(u.base + USART_BAUDR, (clk + baud / 2) / baud);
+    RATE[id].store(baud, Relaxed);
     rd(u.base + USART_STS);
     rd(u.base + USART_DT);
     wr(u.base + USART_CTRL1, USART_CTRL1_UEN | USART_CTRL1_TEN | USART_CTRL1_REN | USART_CTRL1_RDBFIEN);
@@ -102,6 +109,23 @@ pub fn write(id: usize, data: &[u8]) {
     }
 }
 
+/// The transmit data register is free: a byte written now goes without waiting. Bluetooth's 9600 baud takes about
+/// 1 ms a byte, too long to wait for in a polled loop that shares its executor (TERM-4), so it sends only then.
+pub fn tx_free(id: usize) -> bool {
+    let base = HW[id].base;
+    rd(base + USART_CTRL1) & USART_CTRL1_UEN != 0 && rd(base + USART_STS) & USART_STS_TDBE != 0
+}
+
+/// The rate the port was last started at (0: never).
+pub fn rate(id: usize) -> u32 {
+    RATE[id].load(Relaxed)
+}
+
+/// Framing and overrun errors so far.
+pub fn errors(id: usize) -> (u32, u32) {
+    (FRAMING[id].load(Relaxed), OVERRUN[id].load(Relaxed))
+}
+
 pub fn getc(id: usize) -> Option<u8> {
     RX[id].get()
 }
@@ -128,6 +152,12 @@ pub fn isr(id: usize) {
         let b = rd(base + USART_DT) as u8; // STS then DT read clears the flags
         if sts & USART_STS_ERR != 0 {
             LINE_ERRORS[id].fetch_add(1, Relaxed);
+            if sts & USART_STS_FERR != 0 {
+                FRAMING[id].fetch_add(1, Relaxed);
+            }
+            if sts & USART_STS_ROERR != 0 {
+                OVERRUN[id].fetch_add(1, Relaxed);
+            }
         }
         if sts & USART_STS_RDBF != 0 {
             RX_BYTES[id].fetch_add(1, Relaxed);

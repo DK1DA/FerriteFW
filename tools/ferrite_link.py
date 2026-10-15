@@ -20,8 +20,13 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT ui [keys]                  # what the screen shows (LINK-19's readback)
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
 
-PORT is a serial device (the programming cable, 115200 8N1), or tcp:HOST:PORT for the simulator:
-`cargo run -p ferrite-sim -- --term-headless 120 --term-tcp 7300`, then `tcp:127.0.0.1:7300`.
+PORT is a serial device (the programming cable, 115200 8N1), tcp:HOST:PORT for the simulator
+(`cargo run -p ferrite-sim -- --term-headless 120 --term-tcp 7300`, then `tcp:127.0.0.1:7300`), or ble:NAME_OR_ADDRESS
+for the radio's Bluetooth (0 9 2 1 on; the BT513 advertises as "walkie-talkie"; on macOS the address is the
+CoreBluetooth UUID): `ble:walkie-talkie`. Needs bleak (`pip install bleak`). The link runs on service FFE0,
+characteristic FFE1 (write without response, notify), in 20-byte writes paced for the module's 9600-baud UART
+(LINK-25): about 0.8 KB/s each way, so a UI readback takes a second or so. FF31 (the module's own control) is never
+touched. The cable's session and a Bluetooth one run at the same time (LINK-28).
 
 Frames: COBS(type, seq, payload, CRC-16/CCITT-FALSE little-endian) then 0x00. Each request is answered with
 type | 0x80, the same seq, and a payload starting with a status byte.
@@ -50,7 +55,7 @@ NAME:long a long one (held 750 ms), NAME:down / NAME:up hold and let go. Never t
 As a library (the test runner's):
 
     from ferrite_link import Radio
-    with Radio("tcp:127.0.0.1:7300") as r:      # or "/dev/cu.usbserial-114220", pin="1234" on Bluetooth
+    with Radio("tcp:127.0.0.1:7300") as r:      # or "/dev/cu.usbserial-114220", or "ble:walkie-talkie" (pin="1234")
         r.keys("MENU 0 7")                      # or r.press("MENU"), r.press("HASH", long=True)
         r.knob(+2)
         ui = r.ui()                             # {"screen": {...}, "rows": [...], "sel": {...}, "hints": [...]}
@@ -121,7 +126,82 @@ def cobs_decode(src):
     return bytes(out)
 
 
-class Port:
+BLE_DATA = "0000ffe1-0000-1000-8000-00805f9b34fb"  # FFE1: the BT513's transparent UART (FF31 never touched)
+BLE_CHUNK = 20  # the ATT payload of the default 23-byte MTU
+BLE_PACE = 0.025  # seconds between chunks: 800 B/s, under the module's 9600-baud UART (960 B/s)
+
+
+class BlePort:
+    """The radio over Bluetooth: FFE1 writes (without response, 20 bytes, paced) and notifications, through bleak on
+    its own thread and event loop so the callers stay synchronous. `target`: the advertised name or the address."""
+
+    def __init__(self, target, timeout=15.0):
+        import asyncio
+        import threading
+        self._asyncio = asyncio
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+        self._rx, self._lock, self._got = bytearray(), threading.Lock(), threading.Event()
+        self.buf = bytearray()
+        self.client = None
+        self.client = self._run(self._connect(target, timeout), timeout + 15)
+
+    def _run(self, coro, timeout=10.0):
+        return self._asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout)
+
+    async def _connect(self, target, timeout):
+        from bleak import BleakClient, BleakScanner
+
+        def match(dev, adv):
+            names = {dev.name or "", getattr(adv, "local_name", None) or ""}
+            return dev.address.lower() == target.lower() or target in names
+
+        dev = await BleakScanner.find_device_by_filter(match, timeout=timeout)
+        if dev is None:
+            raise OSError(f"no Bluetooth device {target!r} found in {timeout:.0f} s (0 9 2 1 on? in range?)")
+        client = BleakClient(dev)
+        await client.connect()
+        await client.start_notify(BLE_DATA, self._notify)
+        return client
+
+    def _notify(self, _char, data):
+        with self._lock:
+            self._rx += data
+        self._got.set()
+
+    def write(self, b):
+        for i in range(0, len(b), BLE_CHUNK):
+            self._run(self.client.write_gatt_char(BLE_DATA, bytes(b[i:i + BLE_CHUNK]), response=False))
+            time.sleep(BLE_PACE)
+
+    def read(self):
+        self._got.wait(0.05)
+        with self._lock:
+            out = bytes(self._rx)
+            self._rx.clear()
+            self._got.clear()
+        return out
+
+    def baud(self, rate):
+        pass  # Bluetooth's rate is the module's (LINK-15)
+
+    def close(self):
+        try:
+            if self.client is not None:
+                self._run(self.client.disconnect())
+        finally:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+
+
+def Port(spec):  # noqa: N802 (a class once; callers construct it)
+    """The transport for PORT: ble:NAME_OR_ADDRESS, tcp:HOST:PORT, or a serial device."""
+    if spec.startswith("ble:"):
+        return BlePort(spec[4:])
+    return StreamPort(spec)
+
+
+class StreamPort:
     def __init__(self, spec):
         if spec.startswith("tcp:"):
             _, host, port = spec.split(":")

@@ -5,6 +5,7 @@ manual's rules. The tests are in tools/uitests/*.py, each tagged with the rule I
     tools/uitest.py --sim tcp:127.0.0.1:7300           # against the simulator (the reference)
     tools/uitest.py --sim auto                          # start a headless simulator for the run, then stop it
     tools/uitest.py                                     # against the radio on the cable (port from --port)
+    tools/uitest.py --port ble:walkie-talkie            # over Bluetooth (bleak; 0 9 2 1 on; slower: 9600 baud)
     tools/uitest.py --list                              # the tests and their rules
     tools/uitest.py -k quick --rules MENU-1,HOME-*      # a selection (name substring, rule globs, --module menus)
     tools/uitest.py --smoke                             # the short smoke set (bench.py runs it beside the SDR suite)
@@ -509,7 +510,7 @@ def start_sim(secs=3600):
 
 def main_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", default=DEFAULT_PORT, help="the cable (default %(default)s)")
+    ap.add_argument("--port", default=DEFAULT_PORT, help="the cable (default %(default)s), or ble:NAME_OR_ADDRESS for Bluetooth")
     ap.add_argument("--sim", metavar="tcp:HOST:PORT|auto", help="the simulator's link instead of the radio")
     ap.add_argument("--pin", help="the radio's PIN (Bluetooth with a PIN lock)")
     ap.add_argument("-k", help="tests whose name has one of these (comma list)")

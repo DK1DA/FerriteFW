@@ -1,0 +1,170 @@
+// Tests for the Web Bluetooth page's protocol client (tools/webble/index.html, the ferrite-core block), under node:
+//
+//   node tools/webble/test.mjs                              # framing (against tools/ferrite_link.py) and the fake radio
+//   node tools/webble/test.mjs --sim tcp:127.0.0.1:7300     # also against the simulator, in 20-byte chunks
+//
+// The simulator: cargo run -p ferrite-sim -- --term-headless 600 --term-tcp 7300 (its TCP port is the cable).
+import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createConnection } from "node:net";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import assert from "node:assert/strict";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const html = readFileSync(join(here, "index.html"), "utf8");
+const src = html.slice(html.indexOf("/* ferrite-core:begin"), html.indexOf("/* ferrite-core:end */"));
+const module = { exports: null };
+new Function("module", src)(module);
+const F = module.exports;
+let passed = 0;
+const ok = (name) => { passed++; console.log(`ok   ${name}`); };
+
+// ---- Framing ----
+assert.equal(F.crc16(Array.from(Buffer.from("123456789"))), 0x29B1, "CRC-16/CCITT-FALSE check value");
+ok("crc16 check value");
+
+for (const n of [0, 1, 5, 253, 254, 255, 300, 600]) {
+  const data = Array.from({ length: n }, (_, i) => (i * 37 + 11) % 7 === 0 ? 0 : (i * 13 + 1) & 0xFF);
+  const enc = F.cobsEncode(data);
+  assert.ok(!enc.includes(0), "no 0x00 inside");
+  assert.deepEqual(F.cobsDecode(enc), data, `round trip ${n}`);
+}
+const ones = Array(600).fill(1);
+assert.deepEqual(F.cobsDecode(F.cobsEncode(ones)), ones);
+ok("COBS round trips (runs past 254)");
+
+// The same bytes as the reference PC side.
+const py = `
+import sys, struct
+sys.path.insert(0, ${JSON.stringify(join(here, ".."))})
+from ferrite_link import cobs_encode, crc16
+for ty, seq, p in [(0x01, 1, bytes([2]) + bytes(8) + b"webble"), (0x30, 200, bytes([0x80, 2])), (0x31, 7, bytes(range(256)))]:
+    body = bytes([ty, seq]) + p
+    print((cobs_encode(body + struct.pack("<H", crc16(body))) + b"\\x00").hex())
+`;
+const ref = execFileSync("python3", ["-c", py], { encoding: "utf8" }).trim().split("\n");
+const mine = [
+  F.frame(0x01, 1, [2, 0, 0, 0, 0, 0, 0, 0, 0, ...Buffer.from("webble")]),
+  F.frame(0x30, 200, [0x80, 2]),
+  F.frame(0x31, 7, Array.from({ length: 256 }, (_, i) => i)),
+].map((u) => Buffer.from(u).toString("hex"));
+assert.deepEqual(mine, ref);
+ok("frames match tools/ferrite_link.py byte for byte");
+
+{
+  const d = new F.Deframer();
+  const a = F.frame(0xB3, 9, [0, 0, ...Buffer.from("screen Home\n")]);
+  const b = F.frame(0x81, 10, [0, 2, 240, 1]);
+  const wire = [...Buffer.from("junk text\r\n"), 0, ...a, ...b];
+  const got = [];
+  for (let i = 0; i < wire.length; i += 7) got.push(...d.push(Uint8Array.from(wire.slice(i, i + 7))));
+  assert.equal(got.length, 2);
+  assert.equal(got[0].ty, 0xB3);
+  assert.equal(got[1].seq, 10);
+  assert.equal(d.junk, 1, "the terminal text isn't a frame");
+  const bad = Array.from(F.frame(0x81, 1, [0]));
+  bad[2] ^= 0x40;
+  assert.equal(new F.Deframer().push(Uint8Array.from(bad)).length, 0, "a bad CRC is dropped");
+}
+ok("deframer: any chunking, junk and bad CRCs dropped");
+
+{
+  const ui = F.parseUi('screen Quick "Quick" title="Quick"\nbar lock=0 battery=82 clock=0:00\nrow 1 "Squelch" "4" sel\nrow 2 "TX power" "Low"\nrow 3 "Mode" "FM" dot\nhints "^v" "Move" "BACK" "Back"\ntoast "Saved" "ch 12"\n');
+  assert.equal(ui.screen.id, "Quick");
+  assert.equal(ui.bar.battery, 82);
+  assert.equal(ui.rows.length, 3);
+  assert.deepEqual([ui.sel.num, ui.sel.name, ui.sel.value], [1, "Squelch", "4"]);
+  assert.ok(ui.rows[2].dot);
+  assert.deepEqual(ui.hints, [["^v", "Move"], ["BACK", "Back"]]);
+  assert.deepEqual(ui.toast, { head: "Saved", body: "ch 12" });
+  const [k, pos, kv] = F.parseUiLine('card A active=1 head="VFO \\"x\\"" freq=146.52000');
+  assert.deepEqual([k, pos, kv.active, kv.head, kv.freq], ["card", ["A"], 1, 'VFO "x"', "146.52000"]);
+}
+ok("parseUi as tools/ferrite_link.py parse_ui");
+
+// ---- The fake radio: the page's client through 20-byte chunks both ways ----
+async function client(transport) {
+  const link = new F.Link(transport);
+  const radio = new F.Radio(link);
+  await link.sync();
+  return { link, radio };
+}
+{
+  const t = new F.FakeTransport();
+  const { radio } = await client(t);
+  const h = await radio.hello();
+  assert.deepEqual([h.protocol, h.maxPayload, h.mayGo, h.version, h.build, h.bench], [2, 240, true, "fake 0.1", "tx-dry", true]);
+  const info = await radio.info();
+  assert.deepEqual([info.channels, info.zones, info.presets, info.settingsLen, info.callsign, info.build], [21, 3, 2, 300, "N0CALL", "tx-dry"]);
+  let ui = await radio.ui();
+  assert.equal(ui.screen.id, "Home");
+  assert.equal(ui.cards.length, 3);
+  await radio.keys("MENU DOWN DOWN");
+  ui = await radio.ui();
+  assert.equal(ui.screen.id, "Quick");
+  assert.equal(ui.sel.name, "Mode", "two pages through MORE");
+  await radio.keys("UP UP");
+  await radio.knob(-3);
+  assert.equal((await radio.ui()).sel.value, "1");
+  assert.equal(await radio.cmd("get 0 9 2 1"), "fake radio: get 0 9 2 1\n");
+  assert.ok(t.writes.every((n) => n <= F.CHUNK), "every write within the 20-byte ATT payload");
+  const on = await radio.pttOn();
+  assert.equal(on.status, 0);
+  assert.equal((await radio.pttAlive()).status, 0);
+  assert.equal((await radio.pttOff()).status, 0);
+  assert.equal((await radio.pttAlive()).status, 9, "not keyed after off");
+  await assert.rejects(radio.press("NOPE"), /no key/);
+}
+ok("fake radio: HELLO, INFO, UI with MORE, keys, knob, CMD, PTT, chunked writes");
+{
+  const { radio } = await client(new F.FakeTransport({ pin: true }));
+  assert.equal((await radio.hello()).mayGo, false);
+  await assert.rejects(radio.info(), (e) => e.status === 5);
+  await assert.rejects(radio.auth("1111"), (e) => e.status === 4);
+  await radio.auth("1234");
+  assert.equal((await radio.info()).callsign, "N0CALL");
+}
+ok("fake radio: the PIN lock (LINK-30)");
+
+// ---- The simulator, through 20-byte paced chunks ----
+const simArg = process.argv.indexOf("--sim");
+if (simArg > 0) {
+  const [, host, port] = process.argv[simArg + 1].split(":");
+  const sock = createConnection({ host, port: Number(port) });
+  await new Promise((r, j) => { sock.once("connect", r); sock.once("error", j); });
+  const tcp = {
+    onData: null,
+    writes: [],
+    async write(bytes) {
+      for (let i = 0; i < bytes.length; i += F.CHUNK) {
+        const part = bytes.slice(i, i + F.CHUNK);
+        this.writes.push(part.length);
+        sock.write(part);
+        await F.sleep(F.PACE_MS);
+      }
+    },
+  };
+  sock.on("data", (b) => tcp.onData && tcp.onData(new Uint8Array(b)));
+  const { radio } = await client(tcp);
+  const h = await radio.hello("webble test");
+  assert.equal(h.protocol, 2);
+  const info = await radio.info();
+  assert.ok(info.channels >= 0 && info.version.length > 0);
+  await radio.press("BACK", "long");
+  let ui = await radio.ui();
+  assert.equal(ui.screen.id, "Home", JSON.stringify(ui.screen));
+  await radio.keys("MENU");
+  ui = await radio.ui();
+  assert.equal(ui.screen.id, "Quick");
+  assert.ok(ui.rows.length >= 5 && ui.sel, "rows and a selection");
+  await radio.press("BACK", "long");
+  assert.equal((await radio.ui()).screen.id, "Home");
+  assert.match(await radio.cmd("get 0 9 2 1"), /0 9 2 1 Bluetooth/);
+  assert.match(await radio.uiText(1), /SIDE1 0 PF1/);
+  assert.ok(tcp.writes.every((n) => n <= F.CHUNK));
+  sock.destroy();
+  ok(`simulator ${process.argv[simArg + 1]}: HELLO, INFO (${info.version}, ${info.build}), UI, keys, CMD in 20-byte chunks`);
+}
+console.log(`${passed} passed`);
+process.exit(0);

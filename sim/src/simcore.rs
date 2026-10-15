@@ -598,14 +598,14 @@ impl SimCore {
                 self.ports.debug_answer(radio.debug(r)); // TERM-21: the fake radio answers at once
             }
             let _ = self.ports.take_baud(); // a pseudo-terminal keeps no rate
-            if let Some(p) = self.ports.link.progress() {
+            if let Some(p) = self.ports.progress() {
                 dev.link.write_pct = Some(p);
             }
             while let Some(w) = app.pop_write() {
                 store.apply(w);
             }
         }
-        if self.live() && (!self.term_in.is_empty() || !self.bt_in.is_empty() || self.ports.term.busy() || !self.ports.link.ready()) {
+        if self.live() && (!self.term_in.is_empty() || !self.bt_in.is_empty() || self.ports.busy()) {
             self.term_pump(); // a load or a dump goes on between frames
         }
         if self.lcd.pixels > 0 {
@@ -732,7 +732,7 @@ impl SimCore {
     fn term_pump(&mut self) {
         for _ in 0..400 {
             for port in [Port::Cable, Port::Bt] {
-                while self.ports.ready() {
+                while self.ports.ready_for(port) {
                     let q = if port == Port::Cable { &mut self.term_in } else { &mut self.bt_in };
                     let Some(b) = q.pop_front() else { break };
                     match self.ports.route(&self.app, port, b, self.now) {

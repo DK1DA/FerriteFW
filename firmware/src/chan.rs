@@ -125,3 +125,7 @@ pub static BT_IN: Ring<'static> = Ring::new(&BT_IN_BUF);
 pub static BT_OUT: Ring<'static> = Ring::new(&BT_OUT_BUF);
 pub static BT_ON: AtomicBool = AtomicBool::new(false);
 pub static BT_LINK_ON: AtomicBool = AtomicBool::new(false);
+/// USART1's rate (LINK-25): the module's resting 9600 ([`ferrite_core::link::BT_BAUD`]). A bench build's `bt baud N`
+/// changes it for this power-on (the MCU's side only: nothing is ever sent to the module to change its rate); the
+/// Link task restarts USART1 when it differs from the running one.
+pub static BT_RATE: AtomicU32 = AtomicU32::new(ferrite_core::link::BT_BAUD);

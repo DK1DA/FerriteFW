@@ -65,8 +65,13 @@ pub struct Session {
     /// `REBOOT` was accepted: the caller restarts once the answer has gone (LINK-24).
     reboot: bool,
     hellos: u16,
-    /// The session moved port (LINK-28): a remote transmission it keyed ends at the next poll (LINK-20).
-    closed: bool,
+    /// Who this session is for remote PTT and keys: [`crate::remote::BY_CABLE`] (trusted) or [`crate::remote::BY_BT`].
+    by: u8,
+    /// The session started over (a new connection, LINK-29), as `by` was: a remote transmission it keyed and keys it
+    /// held end at the next poll (LINK-20).
+    closed: Option<u8>,
+    /// The other port's session is mid-write (LINK-28): this one's writes answer `busy` until it is done.
+    other_writing: bool,
     /// A terminal command's output still to send (LINK-34), and the time for its debug requests.
     run: Run,
     now: u32,
@@ -104,25 +109,40 @@ impl Session {
             baud: None,
             reboot: false,
             hellos: 0,
-            closed: false,
+            by: if trusted { crate::remote::BY_CABLE } else { crate::remote::BY_BT },
+            closed: None,
+            other_writing: false,
             run: Run::Off,
             now: 0,
         }
     }
 
-    /// The fastest cable rate the caller's UART can run (LINK-11): `BAUD` above it is refused.
-    pub fn set_max_baud(&mut self, b: u32) {
+    /// The fastest cable rate the caller's UART can run (LINK-11): `BAUD` above it is refused (0: every rate, as on
+    /// Bluetooth, LINK-15).
+    pub const fn set_max_baud(&mut self, b: u32) {
         self.max_baud = b;
     }
 
-    /// The session moves to another port (the cable or Bluetooth: [`crate::ports`]): a frame half received and a
-    /// PIN given stay with the old one. `max_baud` is the new port's (Bluetooth: 115200 only, LINK-25).
+    /// The session starts over for a new connection on `trusted`'s port (the cable, or Bluetooth: [`crate::ports`],
+    /// LINK-29): a frame half received, a PIN given and a running command go; so does a remote transmission it keyed
+    /// (LINK-20). `max_baud` is the port's (Bluetooth: 0, `BAUD` never applies: LINK-15).
     pub fn set_port(&mut self, trusted: bool, max_baud: u32) {
         (self.rn, self.overflow, self.have) = (0, false, false);
         (self.trusted, self.pin_ok) = (trusted, false);
         (self.seen, self.baud, self.max_baud) = (false, None, max_baud);
-        self.closed = true;
+        self.closed = Some(self.by);
+        self.by = if trusted { crate::remote::BY_CABLE } else { crate::remote::BY_BT };
         self.run = Run::Off;
+    }
+
+    /// A write is under way: a write session (`BEGIN` .. `END`) or a record half assembled (LINK-28).
+    pub fn writing(&self) -> bool {
+        self.session || self.asm_len > 0
+    }
+
+    /// LINK-28: the other port's session is mid-write (set by [`crate::ports::Ports`] before each poll).
+    pub fn set_other_writing(&mut self, w: bool) {
+        self.other_writing = w;
     }
 
     /// This session may do anything a session may (LINK-7, LINK-30): the cable, Bluetooth with no PIN lock on, or
@@ -193,10 +213,9 @@ impl Session {
         if self.session && now.wrapping_sub(self.last) >= SESSION_MS {
             self.end(app);
         }
-        // LINK-20: remote PTT ends with the session that keyed it.
-        if core::mem::take(&mut self.closed) {
-            app.remote_unkey(RemoteEnd::Session, now, store);
-            app.remote_keys_release(now, store); // LINK-19: and every key it held
+        // LINK-20: remote PTT ends with the session that keyed it, and every key it held (LINK-19).
+        if let Some(by) = self.closed.take() {
+            app.remote_session_closed(by, now, store);
         }
         // `KEY` never waits for the store, nor for room for the largest answer: its answers are a few bytes, and on
         // the cable they wait in the send ring while keyed (TX-43), so keepalives must still be handled then.
@@ -271,7 +290,7 @@ impl Session {
                 self.reboot = true;
                 Status::Ok
             }
-            msg::KEY => key(app, st, now, p, &mut o),
+            msg::KEY => key(app, st, self.by, now, p, &mut o),
             msg::SLOT => slot(app, st, p, &mut o),
             msg::CMD => self.command(app, st, dev, live, p, &mut o),
             msg::MORE => {
@@ -403,10 +422,14 @@ impl Session {
         }
     }
 
-    /// Whether this session's writes go ahead (LINK-9: refused after BACK until `END`).
+    /// Whether this session's writes go ahead (LINK-9: refused after BACK until `END`; LINK-28: `busy` while the
+    /// other port's session is mid-write).
     fn may_write(&mut self, _app: &mut App) -> Status {
         if self.cancelled {
             return Status::Cancelled;
+        }
+        if self.other_writing {
+            return Status::Busy;
         }
         Status::Ok
     }
@@ -531,16 +554,16 @@ impl Out<'_> {
 }
 
 /// `KEY`: a keypad or side key, or the knob (LINK-19), or remote PTT (LINK-20).
-fn key<S: ChannelStore>(app: &mut App, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
+fn key<S: ChannelStore>(app: &mut App, st: &S, by: u8, now: u32, p: &[u8], o: &mut Out) -> Status {
     use crate::remote::{KeyRefusal, Press};
     use ferrite_core::link::key as k;
     let res = match (p.first().copied(), p.get(1).copied(), p.len()) {
         (Some(c), Some(a), 2) if c <= k::LAST_CODE => match Press::of(a) {
-            Some(how) => keypad(app, st, |app| app.remote_press(c, how, now, st)),
+            Some(how) => keypad(app, st, |app| app.remote_press(c, how, by, now, st)),
             None => Err(KeyRefusal::Invalid("")),
         },
         (Some(k::KNOB), Some(n), 2) => keypad(app, st, |app| app.remote_knob(n as i8, now, st)),
-        (Some(k::PTT), ..) => return remote_ptt(app, st, now, p, o),
+        (Some(k::PTT), ..) => return remote_ptt(app, st, by, now, p, o),
         _ => return Status::BadArg,
     };
     match res {
@@ -564,15 +587,18 @@ fn keypad<S: ChannelStore>(app: &mut App, st: &S, f: impl FnOnce(&mut App) -> Re
 }
 
 /// `KEY` (LINK-20): remote PTT.
-fn remote_ptt<S: ChannelStore>(app: &mut App, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
+///
+/// LINK-28: one keyer at a time. `on` and keepalives from the port that didn't key are refused; `off` from either
+/// port unkeys (stopping a transmission is always allowed).
+fn remote_ptt<S: ChannelStore>(app: &mut App, st: &S, by: u8, now: u32, p: &[u8], o: &mut Out) -> Status {
     let res = match Ptt::decode(p) {
         None => return Status::BadArg,
         Some(Ptt::Off) => {
             app.remote_unkey(RemoteEnd::Off, now, st);
             return Status::Ok;
         }
-        Some(Ptt::On(slot)) => app.remote_key(slot, now, st).map(|s| o.put(&[s])),
-        Some(Ptt::Alive) => app.remote_keepalive(now),
+        Some(Ptt::On(slot)) => app.remote_key(slot, by, now, st).map(|s| o.put(&[s])),
+        Some(Ptt::Alive) => app.remote_keepalive(by, now),
     };
     match res {
         Ok(()) => Status::Ok,

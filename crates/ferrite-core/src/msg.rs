@@ -405,6 +405,10 @@ pub enum DebugReq {
     /// [`bt_query_refused`] has passed it.
     Bt { text: [u8; 16], n: u8 },
     #[cfg(feature = "bench")]
+    /// TERM-27: USART1's counters and rate (`bt stat`); with `baud` not 0, USART1 restarted at that rate first, for
+    /// this power-on (`bt baud N`: the MCU's side only, nothing is sent to the module).
+    BtStat { baud: u32 },
+    #[cfg(feature = "bench")]
     /// TERM-29, the bench test of decision 114: hold both band receive selects on (`Some(true)`), back to one
     /// (`Some(false)`), or only ask (`None`). The Radio task refuses while keyed, in HF mode and while the
     /// crossband repeater runs.
@@ -450,6 +454,9 @@ pub enum DebugAns {
     /// What the Bluetooth module sent back within 500 ms (TERM-27).
     Bt { data: [u8; 48], n: u8 },
     #[cfg(feature = "bench")]
+    /// TERM-27: `bt stat`.
+    BtStat(BtStats),
+    #[cfg(feature = "bench")]
     /// TERM-29: whether both band receive selects are held on now.
     RxBoth(bool),
     #[cfg(feature = "bench")]
@@ -483,6 +490,25 @@ pub const GPS_REPLY_MS: u32 = 1200;
 /// a wrong `AT+BAUD=` leaves the radio's Bluetooth silent): `AT`, `AT+HELP`, or `AT+WORD?` (letters and digits).
 /// Anything with `=`, anything else: refused. A bench build's (decision 151).
 #[cfg(feature = "bench")]
+/// USART1, the Bluetooth module's UART (TERM-27's `bt stat`): bytes each way and line errors since boot, the rate it
+/// runs at (0: never started), and whether the module is powered (PB9).
+#[cfg(feature = "bench")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BtStats {
+    pub rx: u32,
+    pub tx: u32,
+    pub framing: u32,
+    pub overrun: u32,
+    /// Bytes the receive ring had no room for.
+    pub dropped: u32,
+    pub baud: u32,
+    pub on: bool,
+}
+
+/// The rates `bt baud N` takes (TERM-27): the module's resting 9600 and the usual others, the MCU's side only.
+#[cfg(feature = "bench")]
+pub const BT_BENCH_RATES: [u32; 5] = [9_600, 19_200, 38_400, 57_600, 115_200];
+
 pub fn bt_query_refused(t: &[u8]) -> Option<&'static str> {
     if t.contains(&b'=') {
         return Some("'=' sets something on the module: only queries are sent");
