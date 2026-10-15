@@ -26,13 +26,13 @@ fn course_stopped_when_still() {
     r.run("menu 0 6 2; wait 500ms; expect text \"0 km/h\"; expect text \"stopped\"");
 }
 
-/// In HF mode hold V/M saves the frequency as a channel, and recalling that channel opens HF mode on it
+/// In HF mode hold 9 saves the frequency as a channel, and recalling that channel opens HF mode on it
 /// (HF-26).
 #[test]
 fn hf_channels() {
     let mut r = Radio::new();
     r.run("menu 0 3 4; wait 9s; expect screen \"HF mode\"; expect text \"9.580\"");
-    r.run("hold VM; expect text \"Save this HF frequency\"; expect text \"CH 005\"; press OK; wait 500ms");
+    r.run("hold 9; expect text \"Save this HF frequency\"; expect text \"CH 005\"; press OK; wait 500ms");
     r.home();
     r.press(Key::VfoMem).wait(300); // A to channel mode
     r.run("type 5; press OK; wait 9s; expect screen \"HF mode\"; expect text \"9.580\"");

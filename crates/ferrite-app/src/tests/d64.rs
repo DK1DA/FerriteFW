@@ -41,7 +41,8 @@ fn tone_search_hash_saves() {
     }
 }
 
-/// PIN-5: channel-only mode refuses V/M and MENU 0; hold # leaves it (the PIN first when one is set), never the
+/// PIN-5, KEY-23: channel-only mode refuses V/M, hold 9 (copy) and MENU 0, while hold V/M (the zone list) still
+/// opens; hold # leaves it (the PIN first when one is set), never the
 /// key lock.
 #[test]
 fn channel_only_mode() {
@@ -54,6 +55,11 @@ fn channel_only_mode() {
     assert!(t.app.slot(0).on_channel(), "slots with a channel go to it");
     t.tap(Key::VfoMem);
     assert!(t.app.slot(0).on_channel(), "no V/M");
+    t.hold(Key::Digit(9));
+    assert_eq!(t.app.screen(), Screen::Home, "no copy to the VFO");
+    t.hold(Key::VfoMem);
+    assert!(matches!(t.app.screen(), Screen::Zones(_)), "zone browsing works: {:?}", t.app.screen());
+    t.tap(Key::Exit);
     t.hold(Key::Menu);
     assert_eq!(t.app.screen(), Screen::Home, "no MENU 0");
     t.tap(Key::Menu);

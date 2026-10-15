@@ -9,9 +9,9 @@
 //!
 //! | From | Keys | Goes to |
 //! | --- | --- | --- |
-//! | Home | hold 0-9 ([`hold_digit`]: runs [`shortcut`] at the long press, a popup names it, HOME-8, KEY-11) | 0 home channel, 1 band scope, 2 TX power, 3 squelch, 4 watch, 5 tones, 6 step, 7 shift, 8 offset, 9 zones |
+//! | Home | hold 0-9 ([`hold_digit`]: runs [`shortcut`] at the long press, a popup names it, HOME-8, KEY-11) | 0 home channel, 1 band scope, 2 TX power, 3 squelch, 4 watch, 5 tones, 6 step, 7 shift, 8 offset, 9 copy (KEY-23: a VFO to [`Dest::SaveChannel`], a channel to "Copy to VFO?") |
 //! | Home | a digit (NAV-4, VFO-11) | [`Dest::Entry`] with the digit |
-//! | Home | hold V/M on a VFO (VFO-9) | [`Dest::SaveChannel`] |
+//! | Home | hold V/M (KEY-23) | [`Dest::Zones`] |
 //! | Home | hold SLOT / MENU / hold MENU / # | edit in place (on a channel: [`Dest::ChannelEdit`]) / quick / advanced / Status |
 //! | Home | SIDE2 (SCAN-1) / SIDE1 + knob (SQL-10) | [`Dest::Scan`] / [`Dest::Squelch`] |
 //! | Any screen | PTT down (KEY-7) | home, then [`Dest::Transmit`], or [`Dest::TxRefused`] (TX-20) or [`Dest::Emergency`] (TX-3); PTT up: home ([`super::View::ptt`]) |
@@ -58,7 +58,7 @@ pub enum Dest {
     Text(super::text::TextFor),
     /// A8: latitude, longitude, altitude.
     PositionEntry,
-    /// A9: save the VFO as a channel (hold V/M, MENU 8 on a VFO).
+    /// A9: save the VFO as a channel (hold 9, MENU 8 on a VFO).
     SaveChannel,
     /// A10: add a repeater (MENU 0 2 2).
     AddRepeater,
@@ -475,7 +475,10 @@ pub fn hold_digit(app: &mut App, d: u8, store: &impl ChannelStore) {
     // a shortcut that opens a screen gets just its name.
     match app.toast.filter(|t| !t.center && Some(t.until) != prev) {
         Some(t) => app.show_popup(t.head.as_bytes(), t.body.as_bytes()),
-        None if app.screen != before => app.show_popup(super::shortcut::SHORTCUTS[d as usize % 10].as_bytes(), b""),
+        // a confirm (hold 9's "Copy to VFO?", KEY-23) names itself: no popup over its title
+        None if app.screen != before && !matches!(app.screen, Screen::Confirm(_)) => {
+            app.show_popup(super::shortcut::name(app, d).as_bytes(), b"")
+        }
         None => {}
     }
 }
@@ -485,7 +488,8 @@ pub fn hold_digit(app: &mut App, d: u8, store: &impl ChannelStore) {
 pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
     let on_ch = app.slot(app.active).on_channel();
     // Channel-only mode (PIN-5): shortcuts that change a value are refused; those that open a view still work.
-    if app.set.chan_only && matches!(d, 0 | 2..=8) {
+    // Copy (9) is refused too: it saves a channel or leaves the channel for the VFO.
+    if app.set.chan_only && matches!(d, 0 | 2..=9) {
         return app.show_toast(b"Channel-only", b"hold # to leave", false);
     }
     match d {
@@ -514,7 +518,9 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
         }
         8 if on_ch => offset_cell(app), // Dest::ChannelEdit
         8 => app.open(Dest::Value(Item::Offset)),
-        _ => app.open(Dest::Zones),
+        // KEY-23: copy, one idea both ways. On a channel "Copy to VFO?" (VFO-23), on a VFO the save form (VFO-9).
+        9 if on_ch => super::confirm::ask(app, super::confirm::Ask::CopyToVfo),
+        _ => app.open(Dest::SaveChannel),
     }
 }
 

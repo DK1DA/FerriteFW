@@ -475,7 +475,7 @@ impl View for Setup {
                 if s.callsign.is_empty() {
                     note.push(b"No callsign: automatic transmissions stay off. ");
                 }
-                note.push(b"Add channels with hold V/M on a VFO, or load them with the web app. Run setup again: MENU 0 9 8 1.");
+                note.push(b"Add channels with hold 9 on a VFO, or load them with the web app. Run setup again: MENU 0 9 8 1.");
                 if app.dirty(R_HELP, hash(&note)) {
                     w::wrap(lcd, 10, 220, 222, 299, 236, 15, note.as_bytes(), &UI_12, SUB, BG);
                 }

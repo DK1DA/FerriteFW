@@ -7,8 +7,8 @@
 //!
 //! Keys (HF-12, HF-13): knob or ▲▼ tune by the step (SIDE2 + knob: 1 MHz), ◀▶ band, * mode (a point while
 //! typing, then OK once a digit follows it, VFO-24), digits a frequency (kHz, or MHz with a point; OK enters), # the recent list, hold MENU the options,
-//! BACK leaves HF mode, one level back; hold V/M saves it as a channel (CHAN-26). SLOT, V/M and SIDE2 alone do
-//! nothing here. PTT transmits on the HF frequency without going home
+//! BACK leaves HF mode, one level back; hold 9 saves it as a channel (CHAN-26, KEY-23). SLOT, V/M (held too)
+//! and SIDE2 alone do nothing here. PTT transmits on the HF frequency without going home
 //! (HF-23), and refuses on the SI4732's frequencies and modes (HF-24).
 
 use super::activity::Mode;
@@ -529,12 +529,15 @@ impl View for Hf {
             // HF-31: hold 3 seeks up, hold 1 down (nicFW's tuner keys), with the SI4732's own seek.
             (Key::Digit(d @ (1 | 3)), Long) => seek(app, d == 3),
             (Key::Hash, Short) => app.open(Dest::HfRecent),
-            // CHAN-26: hold V/M saves the HF frequency and mode as a channel, as on a home VFO
-            (Key::VfoMem, Long) => {
+            // CHAN-26, KEY-23: hold 9 saves the HF frequency and mode as a channel, as on a home VFO
+            (Key::Digit(9), Long) => {
                 app.open(Dest::SaveChannel);
                 app.screen = Screen::Save(super::save::Save::hf());
             }
-            (Key::Slot | Key::VfoMem, Short) | (Key::Side(2), Short) => app.show_toast(b"Not in HF mode", b"BACK leaves", false), // HF-13
+            // HF-13; hold V/M too (KEY-23: no zones in HF mode)
+            (Key::Slot | Key::VfoMem, Short) | (Key::VfoMem, Long) | (Key::Side(2), Short) => {
+                app.show_toast(b"Not in HF mode", b"BACK leaves", false)
+            }
             (Key::Exit, Short) => app.back(), // HF-4: BACK leaves HF mode, one level back
             _ => {}
         }

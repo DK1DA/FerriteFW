@@ -55,7 +55,8 @@ fn hf_channels_open_hf_mode() {
     assert!(!t.app.slot(0).ch.is_some_and(|c| c.is_hf()), "the slot stays where it was");
 }
 
-/// CHAN-26: hold V/M in HF mode saves its frequency and mode as a channel, and comes back to HF mode.
+/// CHAN-26, HF-26, KEY-23: hold 9 in HF mode saves its frequency and mode as a channel, and comes back to HF
+/// mode; hold V/M there does nothing but say why (HF-13).
 #[test]
 fn hf_mode_saves_a_channel() {
     let mut t = T::new();
@@ -66,6 +67,9 @@ fn hf_mode_saves_a_channel() {
     t.live.mode = ferrite_core::msg::ModeLive::Hf { freq: 1_420_000, rssi: -90, snr: 10, si4732: true, loading: 255 };
     t.wait(200);
     t.hold(Key::VfoMem);
+    assert!(matches!(t.app.screen(), Screen::Hf(_)), "hold V/M: no zones in HF mode");
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Not in HF mode"));
+    t.hold(Key::Digit(9));
     assert!(matches!(t.app.screen(), Screen::Save(s) if s.kind == Save::hf().kind), "the save form, for HF");
     t.tap(Key::Up); // Save (the last row)
     t.tap(Key::Menu);

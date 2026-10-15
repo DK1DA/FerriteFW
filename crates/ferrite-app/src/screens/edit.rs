@@ -98,7 +98,7 @@ impl View for Edit {
             let (x, y) = (7 + (i as i32 % 3) * 77, 85 + (i as i32 / 3) * 36);
             app.grid_cell(lcd, i, x, y, 72, 31, item.label().as_bytes(), v.as_bytes(), focused, grey);
         }
-        // The note under the grid: why the focused setting is greyed (EDIT-7), or what hold V/M does.
+        // The note under the grid: why the focused setting is greyed (EDIT-7), or what hold 9 does.
         let why = app.greyed(GRID[cell as usize]);
         let vfo = !app.slots[a as usize].on_channel();
         if app.dirty(R_NOTE, hash(&(why, vfo))) {
@@ -110,7 +110,7 @@ impl View for Edit {
                     b.push(t.as_bytes());
                     w::field(lcd, 7, 226, 190, 207, 202, Align::Left, b.as_bytes(), &UI_12, AMBER, BG);
                 }
-                None if vfo => w::key_line(lcd, 7, 233, 202, "Hold V/M", "save as a channel", BG),
+                None if vfo => w::key_line(lcd, 7, 233, 202, "Hold 9", "save as a channel", BG),
                 None => w::key_line(lcd, 7, 233, 202, "Hold 0", "jumps to the home channel", BG),
             }
         }

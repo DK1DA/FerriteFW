@@ -64,14 +64,14 @@ fn frequency_entry_refuses_the_gap() {
     assert_ne!(r.sim.app().slot(0).freq(), mhz(700));
 }
 
-/// V/M flips the active slot between its VFO and its channel; hold V/M on a channel copies it to the VFO
-/// (VFO-9, VFO-23).
+/// V/M flips the active slot between its VFO and its channel; hold 9 on a channel asks, then copies it to the
+/// VFO (VFO-9, VFO-23, KEY-23).
 #[test]
 fn vfo_and_channel() {
     let mut r = Radio::new();
     r.run("press VM; expect text \"Calling 2 m\"");
     assert!(r.sim.app().slot(0).on_channel());
-    r.run("hold VM; expect text \"Copied to VFO\"");
+    r.run("hold 9; expect text \"Copy to VFO?\"; press OK; expect text \"Copied to VFO\"");
     assert!(!r.sim.app().slot(0).on_channel());
 }
 
@@ -455,11 +455,11 @@ fn clock_set_by_hand() {
     r.run("type 202610081230; press OK; wait 500ms; expect text \"Clock set\"; home; expect text \"12:30\"");
 }
 
-/// Hold 9 opens the zones; OK edits one, with its scan and priority options (KEY-11, chapter 10, SCAN-12).
+/// Hold V/M opens the zones (KEY-23); OK edits one, with its scan and priority options (KEY-11, chapter 10, SCAN-12).
 #[test]
 fn zones_and_zone_editor() {
     let mut r = Radio::new();
-    r.run("hold 9; expect screen \"Zones\"; expect text \"6 zones\"; expect text \"Repeaters\"");
+    r.run("hold VM; expect screen \"Zones\"; expect text \"6 zones\"; expect text \"Repeaters\"");
     r.run("press OK; expect screen \"Zone editor\"; expect text \"Scan all\"; expect text \"Priority 1\"");
 }
 

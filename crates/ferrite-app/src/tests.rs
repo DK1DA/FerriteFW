@@ -540,8 +540,8 @@ fn side2_scans_the_active_slot() {
 #[test]
 fn shortcuts_and_menu_paths() {
     let mut t = T::new();
-    // KEY-11: 1 opens the scope, 3/5/8 their editors, 9 the zones; BACK comes home.
-    for (d, name) in [(1, "Scope"), (3, "Value editor"), (5, "Tone picker"), (8, "Value editor"), (9, "Zones")] {
+    // KEY-11: 1 opens the scope, 3/5/8 their editors, 9 on a VFO the save form (KEY-23); BACK comes home.
+    for (d, name) in [(1, "Scope"), (3, "Value editor"), (5, "Tone picker"), (8, "Value editor"), (9, "Save as channel")] {
         t.hold(Key::Digit(d));
         assert_eq!(t.app.screen().name(), name, "hold {d}");
         t.tap(Key::Exit);

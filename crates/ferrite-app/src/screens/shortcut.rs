@@ -32,8 +32,17 @@ pub(crate) const SHORTCUTS: [&str; 10] = [
     "Step",
     "Shift",
     "Offset",
-    "Zones",
+    "Copy VFO/channel",
 ];
+
+/// The popup's name for a shortcut that opened a screen (HOME-8): 9 says which way it copies (KEY-23).
+pub(crate) fn name(app: &App, d: u8) -> &'static str {
+    match d % 10 {
+        9 if app.slot(app.active()).on_channel() => "Copy to VFO",
+        9 => "Save as channel",
+        d => SHORTCUTS[d as usize],
+    }
+}
 
 impl View for Shortcut {
     fn name(self) -> &'static str {
@@ -91,6 +100,7 @@ impl View for Shortcut {
                     _ => b"Simplex",
                 }),
                 8 => app.item_text(Item::Offset, true, &mut v),
+                9 => v.set(if app.slot(app.active()).on_channel() { b"to VFO" } else { b"to channel" }), // KEY-23
                 _ => {}
             }
             let grey = d == 6 && app.greyed(Item::Step).is_some(); // VFO-8: step is VFO only

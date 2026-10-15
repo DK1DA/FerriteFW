@@ -123,7 +123,8 @@ fn status_row_opens_its_setting() {
 fn toast_replaces_the_hint_bar() {
     let mut r = Radio::new();
     r.press(Key::Slot); // B, on a channel
-    r.hold(Key::VfoMem); // copy to VFO: a toast
+    r.hold(Key::Digit(9)); // copy to VFO: asked, then a toast (KEY-23)
+    r.press(Key::Menu);
     let items = r.sim.screen_texts();
     let toast = items.iter().find(|t| t.s.contains("Copied")).expect("the toast");
     assert!(toast.y0 >= 300, "the toast is in the hint bar's rows: {}", toast.y0);

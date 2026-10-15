@@ -116,10 +116,11 @@ def knob_steps_and_bands(t):
     t.eq(u.active["head"], h0, "◀: back to the band")
 
 
-@test("NAV-1", "VFO-23", pages=("Home",))
+@test("NAV-1", "VFO-23", "KEY-23", pages=("Confirm", "Home"))
 def channel_mode_and_copy_to_vfo(t):
-    """V/M: channel mode (header the channel number, hint "Zone"); knob steps channels; hold V/M on a channel
-    copies it to the VFO ("Copied to VFO") and V/M goes back to the channel untouched."""
+    """V/M: channel mode (header the channel number, hint "Zone"); knob steps channels; hold 9 on a channel asks
+    "Copy to VFO?" (BACK cancels), OK copies it to the VFO ("Copied to VFO") and V/M goes back to the channel
+    untouched."""
     tune(t)
     u = t.keys("VM")
     a = u.active
@@ -131,7 +132,13 @@ def channel_mode_and_copy_to_vfo(t):
     u = t.knob(-1)
     t.eq(u.active["head"], ch0, "knob back")
     name, freq, mode = u.active["name"], u.active["freq"], u.active["mode"]
-    u = t.press("VM", long=True)
+    u = t.press("9", long=True)
+    t.eq((u.id, u.hint("OK")), ("Confirm", "Copy"), "hold 9 on a channel asks")
+    t.check('ask "Copy to VFO?"' in u.text(), "the question", u.text())
+    u = t.keys("BACK")
+    t.eq((u.id, u.active["head"]), ("Home", ch0), "BACK: still on the channel")
+    u = t.press("9", long=True)
+    u = t.keys("MENU")
     t.check(u.toast and u.toast["head"] == "Copied to VFO", "the toast", u.toast)
     t.check(u.active["head"].startswith("VFO"), "the slot is on its VFO", u.active["head"])
     t.eq((u.active["freq"], u.active["mode"]), (freq, mode), "with the channel's frequency and mode")
@@ -140,17 +147,35 @@ def channel_mode_and_copy_to_vfo(t):
     t.keys("VM")
 
 
-@test("VFO-9", pages=("Home", "Save"))
-def hold_vm_saves_a_vfo(t):
-    """Hold V/M on a VFO opens the save screen (BACK cancels, nothing saved); on a channel it does nothing.
+@test("VFO-9", "KEY-23", pages=("Home", "Save"))
+def hold_9_saves_a_vfo(t):
+    """Hold 9 on a VFO opens the save screen (BACK cancels, nothing saved).
     (On 18-64 MHz it saves an HF channel, CHAN-22/CHAN-26: not checked here.)"""
     tune(t)
     n0 = t.cmd("dump").count("\nch ")
-    u = t.press("VM", long=True)
-    t.eq(u.id, "Save", "hold V/M on a VFO")
+    u = t.press("9", long=True)
+    t.eq(u.id, "Save", "hold 9 on a VFO")
     u = t.keys("BACK")
     t.eq(u.id, "Home", "BACK cancels")
     t.eq(t.cmd("dump").count("\nch "), n0, "nothing saved")
+
+
+@test("KEY-23", pages=("Home", "Zones"))
+def hold_vm_opens_zones(t):
+    """Hold V/M opens the zone list in VFO mode and in channel mode alike; the slot stays where it was."""
+    tune(t)
+    u = t.press("VM", long=True)
+    t.eq(u.id, "Zones", "hold V/M on a VFO")
+    u = t.home()
+    t.check(u.active["head"].startswith("VFO"), "still on the VFO", u.active["head"])
+    u = t.keys("VM")
+    ch = u.active["head"]
+    t.check(ch[:3].isdigit(), "V/M: a channel", ch)
+    u = t.press("VM", long=True)
+    t.eq(u.id, "Zones", "hold V/M on a channel")
+    u = t.home()
+    t.eq(u.active["head"], ch, "still on the channel")
+    tune(t)
 
 
 @test("TX-36", "HF-30", pages=("Home",))

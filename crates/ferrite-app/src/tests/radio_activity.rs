@@ -216,7 +216,7 @@ fn scan_screen() {
 }
 
 /// SCAN-23 (nicFW's smart scan list): a frequency scan counts each stop; OK lists the hits; OK there tunes the
-/// VFO, hold V/M saves it.
+/// VFO, hold 9 saves it (KEY-23); hold V/M does nothing there.
 #[test]
 fn scan_hit_list() {
     let mut t = T::new();
@@ -237,14 +237,17 @@ fn scan_hit_list() {
     t.tap(Key::Menu);
     assert_eq!((t.app.screen(), t.freq()), (Screen::Home, b), "OK: the VFO on the second hit");
     assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: false }));
-    // hold V/M on a hit: the save form
+    // hold 9 on a hit: the save form; hold V/M: nothing
     t.live.slots[0] = SlotLive { freq: b, ..Default::default() };
     t.wait(100);
     t.tap(Key::Side(2));
     t.live.slots[0] = SlotLive { freq: a, last_hit: a, scanning: true, hits: 1, ..Default::default() };
     t.wait(100);
     t.tap(Key::Menu);
+    let list = t.app.screen();
     t.hold(Key::VfoMem);
+    assert_eq!(t.app.screen(), list, "hold V/M: still the list");
+    t.hold(Key::Digit(9));
     assert_eq!((t.app.screen().name(), t.freq()), ("Save as channel", a));
 }
 

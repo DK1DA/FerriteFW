@@ -34,6 +34,8 @@ pub enum Ask {
     DeletePreset(u8),
     /// The tone hint's tone is the RX tone now: set it as the TX tone too (TSRCH-16, as tone search's TSRCH-4).
     ToneTx(u16),
+    /// Hold 9 on a channel (KEY-23): the active slot's channel to its VFO (VFO-23).
+    CopyToVfo,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -68,6 +70,12 @@ pub(crate) fn words(ask: Ask) -> (&'static str, &'static str, &'static str, &'st
         Ask::DeleteZone(_) => ("Delete this zone?", "", "Its channels: they move to no zone and stay in All.", "Delete"),
         Ask::DeletePreset(_) => ("Delete this range?", "Its skipped frequencies too.", "Every other range preset, and the channels.", "Delete"),
         Ask::ToneTx(_) => ("Set the TX tone too?", "", "The RX tone is already set. BACK leaves TX as it is.", "Set"),
+        Ask::CopyToVfo => (
+            "Copy to VFO?",
+            "The VFO's frequency and settings: the channel's take their place.",
+            "The channel, untouched: V/M goes back to it.",
+            "Copy",
+        ),
     }
 }
 
@@ -140,6 +148,11 @@ impl View for Confirm {
                     super::probe::set_tone(app, a, t, true);
                     super::probe::applied(app, a, b"RX and TX tone set");
                 }
+                // VFO-23, KEY-23: home, then the copy and its toast.
+                Ask::CopyToVfo => {
+                    app.back();
+                    super::home::copy_to_vfo(app);
+                }
             },
             (Key::Exit, Press::Short) if matches!(self.ask, Ask::ToneTx(_)) => {
                 super::probe::applied(app, app.active, b"RX tone set");
@@ -177,22 +190,29 @@ impl View for Confirm {
         if self.since != 0 {
             title = ["Resetting in 3 s", "Resetting in 2 s", "Resetting in 1 s"][(app.now.wrapping_sub(self.since) / 1000).min(2) as usize];
         }
-        // What it names: the channel, the zone, the tone.
+        // What it names: the channel (the one to delete, or the active slot's for the copy), the zone, the tone.
         let mut what = Buf::<40>::new();
+        let chan = match self.ask {
+            Ask::DeleteChannel(n) => Some(n),
+            Ask::CopyToVfo => app.slot(app.active).ch.filter(|_| app.slot(app.active).on_channel()).map(|c| c.num),
+            _ => None,
+        };
         match self.ask {
-            Ask::DeleteChannel(n) => {
-                let mut l = Buf::<32>::new();
-                chan_label(n, &mut l);
-                what.push(l.as_bytes());
-                if let Some((c, _)) = cx.store.by_num(n) {
-                    what.push(" \u{b7} ".as_bytes());
-                    what.push(c.name());
-                    // The frequency only when it fits whole: a cut-off number is worse than none.
-                    let mut full = what;
-                    full.push(" \u{b7} ".as_bytes());
-                    full.push(w::freq3(c.rx).as_bytes());
-                    if ferrite_ui::gfx::text4_width(full.as_bytes(), &UI_12B) <= 208 {
-                        what = full;
+            Ask::DeleteChannel(_) | Ask::CopyToVfo => {
+                if let Some(n) = chan {
+                    let mut l = Buf::<32>::new();
+                    chan_label(n, &mut l);
+                    what.push(l.as_bytes());
+                    if let Some((c, _)) = cx.store.by_num(n) {
+                        what.push(" \u{b7} ".as_bytes());
+                        what.push(c.name());
+                        // The frequency only when it fits whole: a cut-off number is worse than none.
+                        let mut full = what;
+                        full.push(" \u{b7} ".as_bytes());
+                        full.push(w::freq3(c.rx).as_bytes());
+                        if ferrite_ui::gfx::text4_width(full.as_bytes(), &UI_12B) <= 208 {
+                            what = full;
+                        }
                     }
                 }
             }
@@ -210,7 +230,7 @@ impl View for Confirm {
         }
         if app.dirty(R_TOP, hash(&(self.ask, what, title))) {
             lcd.fill(0, 21, 240, 279, BG);
-            let col = if matches!(self.ask, Ask::ToneTx(_)) { TEXT } else { AMBER };
+            let col = if matches!(self.ask, Ask::ToneTx(_) | Ask::CopyToVfo) { TEXT } else { AMBER };
             w::field(lcd, 12, 216, 36, 54, 50, Align::Left, title.as_bytes(), &UI_12B, col, BG);
             let mut y = 64;
             if !what.is_empty() {
@@ -240,6 +260,7 @@ impl View for Confirm {
             "Reset" if self.ask == (Ask::Reset { armed: true }) => Hints::new(&[("Hold #", "Reset"), ("BACK", "Cancel")]),
             "Reset" => Hints::new(&[("OK", "Next"), ("BACK", "Cancel")]),
             "Set" => Hints::new(&[("OK", "Set"), ("BACK", "Cancel")]),
+            "Copy" => Hints::new(&[("OK", "Copy"), ("BACK", "Cancel")]),
             _ => Hints::new(&[("OK", "Delete"), ("BACK", "Cancel")]),
         }
     }

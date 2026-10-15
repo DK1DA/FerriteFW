@@ -1,8 +1,8 @@
-//! Save the VFO as a channel (hold V/M on a VFO, MENU 8 on a VFO; manual chapters 9 and 10, VFO-9, CHAN-22)
+//! Save the VFO as a channel (hold 9 on a VFO, MENU 8 on a VFO; manual chapters 9 and 10, VFO-9, CHAN-22)
 //! and Add repeater (MENU 0 2 2; chapter 10, MENU-10): one form. Save shows the number (the first free one
 //! after the slot's last channel), the zone (the one being browsed) and the name; Add repeater asks the
 //! frequency, shift and tone first and ends on the channel editor. The knob or ◀▶ change a row, OK on the
-//! name or frequency types it, OK elsewhere saves. Hold V/M in HF mode saves its frequency and mode as an HF
+//! name or frequency types it, OK elsewhere saves. Hold 9 in HF mode saves its frequency and mode as an HF
 //! channel (CHAN-26), with the same rows.
 
 use super::chedit::ChEdit;
@@ -90,7 +90,7 @@ impl Save {
         Save { kind: if repeater { Kind::Repeater } else { Kind::Vfo }, row: 0, num: UNSET, zone: NO_ZONE, freq: 0, offset: 0, tone: 0 }
     }
 
-    /// Hold V/M in HF mode (CHAN-26).
+    /// Hold 9 in HF mode (CHAN-26).
     pub fn hf() -> Self {
         Save { kind: Kind::Hf, ..Save::new(false) }
     }
@@ -140,7 +140,7 @@ impl Save {
     /// Why it can't be saved, if it can't.
     fn refuse(self, app: &App) -> Option<&'static str> {
         if self.kind == Kind::Repeater && self.freq_of(app) < crate::chan::HF_TOP {
-            Some("Below 64 MHz: save it from HF mode (hold V/M there).") // CHAN-26
+            Some("Below 64 MHz: save it from HF mode (hold 9 there).") // CHAN-26
         } else if self.num >= MAX_CHANNELS {
             Some("No free channel number: all 1000 are used.")
         } else {

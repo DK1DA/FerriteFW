@@ -6,7 +6,7 @@
 //! scan still running (it shows on the card).
 //!
 //! A frequency scan keeps its last 16 hits with how often each stopped it (SCAN-23, nicFW's smart scan list):
-//! OK opens the list, where OK tunes the slot's VFO to one and hold V/M saves it as a channel.
+//! OK opens the list, where OK tunes the slot's VFO to one and hold 9 saves it as a channel (KEY-23).
 
 use super::activity::Hit;
 use super::shared::*;
@@ -85,8 +85,8 @@ fn list_key(s: Scan, app: &mut App, e: KeyEvent) {
                 app.show_toast(b"VFO set", fq.as_bytes(), false);
             }
         }
-        // hold V/M: the save form (VFO-9) on the hit, as on home
-        (Key::VfoMem, Press::Long) => {
+        // hold 9: the save form (VFO-9) on the hit, as on a home VFO (KEY-23); hold V/M does nothing here
+        (Key::Digit(9), Press::Long) => {
             if tune_hit(app, s) {
                 app.open(super::nav::Dest::SaveChannel);
             }
@@ -293,7 +293,7 @@ impl View for Scan {
 
     fn hints(self, app: &App) -> Hints {
         if self.list {
-            return Hints::new(&[("OK", "Tune"), ("Hold V/M", "Save"), ("BACK", "Back")]);
+            return Hints::new(&[("OK", "Tune"), ("Hold 9", "Save"), ("BACK", "Back")]);
         }
         if app.scan_hit[self.slot as usize] != 0 && app.slot(self.slot).on_channel() {
             Hints::new(&[("*", "Skip"), ("#", "Skip always"), (ARROWS_UD, "Go on")])
@@ -330,7 +330,7 @@ fn hit_list(s: Scan, app: &mut App, lcd: &mut impl Panel) {
         }
         app.row1(lcd, k as usize, name.as_bytes(), v.as_bytes(), false, h.what != 0 && i == s.sel as usize, false);
     }
-    app.help_box(lcd, 300 - 38, 34, b"OK tunes the VFO there; hold V/M saves it.", b"");
+    app.help_box(lcd, 300 - 38, 34, b"OK tunes the VFO there; hold 9 saves it.", b"");
 }
 
 /// SCAN-17: # on a hit sets the channel's Skip flag (CHAN-4), so no scan stops there again, and the scan goes

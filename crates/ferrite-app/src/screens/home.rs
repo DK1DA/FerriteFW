@@ -198,11 +198,11 @@ impl View for Home {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let big = app.keys.is_held(Key::Side(2));
-        // PIN-5: channel-only mode: no V/M, editing, settings or MENU 0.
+        // PIN-5: channel-only mode: no V/M, editing, settings or MENU 0 (hold V/M, the zone list, still opens).
         // A digit on a VFO slot would open frequency entry, which channel-only mode hides too.
         if (matches!(
             (e.key, e.press),
-            (Key::VfoMem, _) | (Key::Slot | Key::Menu, Long) | (Key::Menu, Short) | (Key::Star, Long) | (Key::Side(2), LongUp)
+            (Key::VfoMem, Short) | (Key::Slot | Key::Menu, Long) | (Key::Menu, Short) | (Key::Star, Long) | (Key::Side(2), LongUp)
         ) || matches!((e.key, e.press), (Key::Digit(_), Short)) && !app.slots[app.active as usize].on_channel())
             && app.chan_only_refuse()
         {
@@ -251,13 +251,7 @@ impl View for Home {
             (Key::Slot, Long) if app.slots[app.active as usize].on_channel() => app.screen = Screen::ChEdit(super::chedit::ChEdit { cell: 0 }), // EDIT-2
             (Key::Slot, Long) => app.screen = Screen::Edit(super::edit::Edit { cell: 0 }), // EDIT-1
             (Key::VfoMem, Short) => toggle_vfo(app, store),
-            (Key::VfoMem, Long) => {
-                if app.slots[app.active as usize].vfo_mode {
-                    app.open(Dest::SaveChannel); // VFO-9
-                } else {
-                    copy_to_vfo(app); // VFO-23
-                }
-            }
+            (Key::VfoMem, Long) => app.open(Dest::Zones), // KEY-26: the zone list, in VFO and channel mode alike
             (Key::Hash, Short) => {
                 if app.watched_rx() {
                     // HOME-10, WATCH-6
@@ -676,9 +670,9 @@ fn group(app: &mut App, d: i32, store: &impl ChannelStore) {
 }
 
 /// V/M: VFO <-> channel (only with channels stored).
-/// VFO-23 (nicFW's "Chan 2 VFO"): hold V/M on a channel puts the slot's VFO on it, frequency and settings
+/// VFO-23 (nicFW's "Chan 2 VFO"): hold 9 on a channel, then OK, puts the slot's VFO on it, frequency and settings
 /// (shift or split, tones, mode, power, step, busy lock), and switches to the VFO. The channel is untouched.
-fn copy_to_vfo(app: &mut App) {
+pub(crate) fn copy_to_vfo(app: &mut App) {
     let a = app.active as usize;
     let s = &mut app.slots[a];
     let Some(c) = s.ch.filter(|_| !s.vfo_mode) else { return };

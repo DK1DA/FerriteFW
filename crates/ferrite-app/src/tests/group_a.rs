@@ -330,7 +330,7 @@ fn text_entry_callsign_and_save_name() {
     assert_eq!(t.app.callsign(), b"A7");
     assert!(t.writes().is_empty());
     // Save as channel: the name stays in the form until it saves.
-    t.hold(Key::VfoMem);
+    t.hold(Key::Digit(9));
     assert!(matches!(t.app.screen(), Screen::Save(_)));
     t.tap(Key::Down);
     t.tap(Key::Down); // Name
@@ -344,11 +344,11 @@ fn text_entry_callsign_and_save_name() {
     assert_eq!(t.app.callsign(), b"A7", "the callsign is untouched");
 }
 
-/// VFO-9, CHAN-22: hold V/M saves the VFO as a channel at the first free number; below 64 MHz it can't.
+/// VFO-9, CHAN-22, KEY-23: hold 9 saves the VFO as a channel at the first free number; below 64 MHz it can't.
 #[test]
 fn save_as_channel() {
     let mut t = T::new();
-    t.hold(Key::VfoMem);
+    t.hold(Key::Digit(9));
     assert!(matches!(t.app.screen(), Screen::Save(_)));
     t.tap(Key::Down);
     t.tap(Key::Down); // Name
@@ -366,7 +366,7 @@ fn save_as_channel() {
     // 6 m: refused
     t.digits("52*525");
     t.tap(Key::Menu);
-    t.hold(Key::VfoMem);
+    t.hold(Key::Digit(9));
     t.tap(Key::Up);
     t.tap(Key::Menu);
     assert!(t.writes().is_empty());
@@ -524,7 +524,7 @@ fn shortcut_release_does_not_leak() {
     t.wait(100);
     assert!(matches!(t.app.screen(), Screen::Value(_)));
     assert_eq!(t.app.slot(0).cfg().squelch, sq, "the release typed nothing");
-    // Hold 5: tones; hold 9: zones; hold 8 on a VFO: the offset editor. Each stays open after the release.
+    // Hold 5: tones; hold 9 on a VFO: the save form; hold 8 on a VFO: the offset editor. Each stays open after the release.
     for d in [5, 9, 8] {
         t.app.go_home();
         t.app.key_down(Key::Digit(d), t.t, &s);
@@ -533,7 +533,8 @@ fn shortcut_release_does_not_leak() {
         assert_ne!(open, Screen::Home, "hold {d}");
         t.app.key_up(Key::Digit(d), t.t, &s);
         t.wait(100);
-        assert_eq!(t.app.screen(), open, "hold {d}: the release leaves it");
+        // the screen, not its state: the save form fills in its number and frequency once it is up
+        assert_eq!(t.app.screen().name(), open.name(), "hold {d}: the release leaves it");
     }
 }
 
@@ -674,21 +675,50 @@ fn unreceivable_frequency_is_refused() {
     assert!(ferrite_core::freq::receivable(ferrite_core::freq::mhz(446)) && !ferrite_core::freq::receivable(ferrite_core::freq::mhz(700)));
 }
 
-/// VFO-23: hold V/M on a channel copies it to the slot's VFO (nicFW's "Chan 2 VFO"); the channel is untouched.
+/// VFO-23, KEY-23: hold 9 on a channel asks "Copy to VFO?"; BACK cancels, OK copies it to the slot's VFO
+/// (nicFW's "Chan 2 VFO"); the channel is untouched.
 #[test]
-fn hold_vm_copies_channel_to_vfo() {
+fn hold_9_copies_channel_to_vfo() {
+    use crate::screens::confirm::{Ask, Confirm};
     let mut t = T::new();
     t.tap(Key::VfoMem);
     assert!(t.app.slot(0).on_channel());
     let ch = t.app.slot(0).ch.unwrap();
+    t.hold(Key::Digit(9));
+    assert!(matches!(t.app.screen(), Screen::Confirm(Confirm { ask: Ask::CopyToVfo, .. })), "{:?}", t.app.screen());
+    assert_eq!(crate::screens::confirm::words(Ask::CopyToVfo).0, "Copy to VFO?");
+    t.tap(Key::Exit);
+    assert_eq!(t.app.screen(), Screen::Home, "BACK cancels");
+    assert!(t.app.slot(0).on_channel(), "still on the channel");
+    t.hold(Key::Digit(9));
     t.cmds();
-    t.hold(Key::VfoMem);
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen(), Screen::Home);
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Copied to VFO"));
     let s = t.app.slot(0);
     assert!(s.vfo_mode && s.vfo == ch.rx, "on the VFO at the channel's frequency");
     assert_eq!((s.cfg.offset, s.cfg.tx_tone, s.cfg.mode), (ch.cfg.offset, ch.cfg.tx_tone, ch.cfg.mode));
     assert!(t.cmds().contains(&RadioCmd::TuneSlot { slot: 0, freq: ch.rx }));
     t.tap(Key::VfoMem);
     assert_eq!(t.app.slot(0).ch.unwrap().rx, ch.rx, "V/M goes back to the same channel");
+}
+
+/// KEY-23: hold V/M opens the zone list in VFO and channel mode alike (one meaning); hold 9 no longer does.
+#[test]
+fn hold_vm_opens_zones_in_both_modes() {
+    let mut t = T::new();
+    assert!(!t.app.slot(0).on_channel());
+    t.hold(Key::VfoMem);
+    assert!(matches!(t.app.screen(), Screen::Zones(_)), "VFO: {:?}", t.app.screen());
+    t.app.go_home();
+    t.tap(Key::VfoMem);
+    assert!(t.app.slot(0).on_channel());
+    t.hold(Key::VfoMem);
+    assert!(matches!(t.app.screen(), Screen::Zones(_)), "channel: {:?}", t.app.screen());
+    assert!(t.app.slot(0).on_channel(), "the slot stays where it was");
+    t.app.go_home();
+    t.hold(Key::Digit(9));
+    assert!(!matches!(t.app.screen(), Screen::Zones(_)), "hold 9 is copy now");
 }
 
 /// TEXT-12: ◀▶ move the cursor in a name; letters, spaces and BACK work at it; OK keeps the whole name.

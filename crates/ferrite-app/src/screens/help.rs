@@ -27,7 +27,7 @@ pub(crate) const HOME_KEYS: [Row; 15] = [
     ("SLOT", "Next slot, A-B-C"),
     ("Hold SLOT", "Edit the slot"),
     ("V/M", "VFO or channel"),
-    ("Hold V/M", "Save VFO as channel"),
+    ("Hold V/M", "Zones"),
     ("MENU", "Quick settings"),
     ("Hold MENU", "Advanced settings"),
     ("MENU 0", "Menu by number"),

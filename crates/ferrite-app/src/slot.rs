@@ -414,7 +414,7 @@ impl Item {
             Item::Offset => "Simplex, + or -, or Split: a TX freq. Hold 7.",
             Item::Step => "How far a VFO tunes. Home: hold 6.",
             Item::Watch => "Listen on two or three slots. Home: hold 4.",
-            Item::Channel if vfo => "Save this VFO as a channel. Home: hold V/M.",
+            Item::Channel if vfo => "Save this VFO as a channel. Home: hold 9.",
             Item::Channel => "Edit this channel: name, zone, number, flags.",
             Item::BatterySave => "Receiver sleep: deeper saves more, hears later.",
             Item::Advanced => "Everything else, in nine groups.",
