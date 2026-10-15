@@ -172,3 +172,39 @@ fn gps_power_backoff_and_beacon_wake() {
     }
     assert!(seen, "Status: {}", r.text());
 }
+
+/// GPS-34: the fake module gets Ferrite's NMEA set once heard after power-on and after every wake, the sky variant
+/// (GSV every fix) while the position or satellites page is open and the normal one (GSV every 5th) after; GGA every
+/// second keeps the manager's wakes and standbys as before.
+#[test]
+fn gps_nmea_set_follows_wakes_and_screens() {
+    let mut r = Radio::new();
+    r.sim.gps_model(Some(false));
+    coarse(&mut r, 5_000, |_| {});
+    let g = r.sim.gps().unwrap();
+    assert_eq!(g.sets().iter().map(|s| s.1).collect::<Vec<_>>(), ["$PCAS03,1,0,5,5,1,0,0,0*02"], "{:?}", g.log);
+    assert!(g.log.iter().position(|s| s.1 == "power on") < g.log.iter().position(|s| s.1.starts_with("$PCAS03")), "after power-on");
+    // Through the cold start and the ephemeris hold to the first standby: GSV every 5th report.
+    let gsv0 = g.gsv;
+    coarse(&mut r, 100_000, |_| {});
+    let g = r.sim.gps().unwrap();
+    assert!(!g.standbys().is_empty(), "standby as before: {:?}", g.log);
+    assert!((g.gsv - gsv0) * 4 < 100, "GSV every 5th: {}", g.gsv - gsv0);
+    // Each wake from standby: the set again.
+    coarse(&mut r, 5 * 60_000, |_| {});
+    let g = r.sim.gps().unwrap();
+    let (sets, standbys) = (g.sets().len(), g.standbys().len());
+    assert!(standbys >= 4 && sets >= standbys, "a set after every wake: {sets} sets, {standbys} standbys: {:?}", g.log);
+    // The position page: the sky variant (the byte wakes the module first if it sleeps); home: the normal one.
+    r.run("menu 0 6 2");
+    coarse(&mut r, 6_000, |_| {});
+    let g = r.sim.gps().unwrap();
+    assert_eq!(g.sets().last().unwrap().1, "$PCAS03,1,0,1,1,1,0,0,0*02", "{:?}", &g.log[g.log.len().saturating_sub(4)..]);
+    let gsv0 = g.gsv;
+    coarse(&mut r, 10_000, |_| {});
+    assert!(r.sim.gps().unwrap().gsv - gsv0 >= 9, "GSV every report on the position page");
+    // Home: the module goes back to its standbys, and its next wake (a minute at most) gets the normal set.
+    r.home();
+    coarse(&mut r, 70_000, |_| {});
+    assert_eq!(r.sim.gps().unwrap().sets().last().unwrap().1, "$PCAS03,1,0,5,5,1,0,0,0*02");
+}

@@ -17,6 +17,9 @@
 //!   radio which of the two works).
 //! - **Transmit:** nothing is sent to the module while keyed (PB10 is held low then, GPS-22): a standby, a wake
 //!   byte or a power cycle due then waits for the unkey (GPS-32).
+//! - **Ferrite's NMEA set (GPS-34, [`NmeaSet`]):** once the module is heard after each power-up and wake, `$PCAS03`
+//!   cuts its output to what the parser reads: GGA and RMC every fix, GSV and GSA every 5th, or every fix while a
+//!   screen that shows satellites is open; nothing else.
 
 /// The module's self-wake every minute while nothing else asks (GPS-26).
 pub const WAKE_EVERY_MS: u32 = 60_000;
@@ -59,6 +62,8 @@ pub struct GpsDemand {
     pub track: bool,
     /// The next timed beacon, in the manager's milliseconds.
     pub beacon_at: Option<u32>,
+    /// A screen that shows satellites (GPS position or satellites page) is open: GSV and GSA every fix (GPS-34).
+    pub sky: bool,
 }
 
 /// What the module is doing, as the manager sees it.
@@ -264,6 +269,11 @@ impl GpsManager {
     pub fn misses(&self) -> u8 {
         self.misses
     }
+
+    /// Running and heard since its power-up or wake: the module takes commands (GPS-34's set goes then).
+    pub fn awake(&self) -> bool {
+        matches!(self.module, Module::Running { heard: true, .. })
+    }
 }
 
 /// What the managed module is doing (GPS-26), for the Status page and the terminal's "Radio now".
@@ -304,15 +314,20 @@ impl GpsPhase {
     }
 }
 
-/// The longest CASIC sentence sent, CR LF included ([`NMEA_STOCK`], 29 bytes).
+/// The longest CASIC sentence sent, CR LF included (the CAS03 sentences, 28 bytes).
 pub const CASIC_MAX: usize = 32;
 
 /// A CASIC command (CASIC protocol 2.7) and CR LF into `out`, the checksum the XOR of everything between `$` and `*`:
-/// `$PCASnn,arg*CS` for one number, or for [`CAS_NMEA`] one of the two fixed sentences (`arg` 0 [`NMEA_OFF`], else
-/// [`NMEA_STOCK`]). Returns the length. Only what [`casic_refused`] passed is ever sent.
+/// `$PCASnn,arg*CS` for one number, or for [`CAS_NMEA`] one of the fixed sentences (`arg` 0 [`NMEA_OFF`], 2
+/// [`NMEA_SKY`], else [`NMEA_SET`]). Returns the length. Only what [`casic_refused`] passed, or GPS-34's set, is
+/// ever sent.
 pub fn casic(id: u8, arg: u16, out: &mut [u8; CASIC_MAX]) -> usize {
     if id == CAS_NMEA {
-        let s = if arg == 0 { NMEA_OFF } else { NMEA_STOCK };
+        let s = match arg {
+            0 => NMEA_OFF,
+            2 => NMEA_SKY,
+            _ => NMEA_SET,
+        };
         out[..s.len()].copy_from_slice(s);
         return s.len();
     }
@@ -338,26 +353,108 @@ pub const CAS_STANDBY: u8 = 12;
 /// 4 GNSS signals, 6 chip; the module answers with a TXT sentence.
 pub const CAS_QUERY: u8 = 6;
 /// The NMEA output command (CAS03, 2.7.4: `nGGA,nGLL,nGSA,nGSV,nRMC,nVTG,nZDA,nANT,...`, each 0-9 = every n-th
-/// fix, 0 none, empty kept). The terminal sends one of two fixed sentences, both RAM only (no CAS00, so the
-/// module's flash keeps its own; a power cycle restores it). Arg 0 is [`NMEA_OFF`], 1 [`NMEA_STOCK`].
+/// fix, 0 none, empty kept). Only fixed sentences go, all RAM only (never CAS00, so the module's flash keeps its
+/// own; a power cycle restores it). Arg 0 is [`NMEA_OFF`], 1 [`NMEA_SET`], 2 [`NMEA_SKY`].
 pub const CAS_NMEA: u8 = 3;
 /// TERM-36: every NMEA sentence off (the eight fields stock names, GGA to ANT; the rest left as they are).
 /// Other AT6558 users found the chip acts on CASIC commands reliably only with its NMEA output off.
 pub const NMEA_OFF: &[u8] = b"$PCAS03,0,0,0,0,0,0,0,0*02\r\n";
-/// TERM-36: stock's own CAS03, exactly as V0.27 sends it at GPS power-up and after each TXT (0x0800CDE0: the
-/// text at 0x0800CE46, its checksum and CR LF added there). Read as CAS03 it asks GGA every 5th fix, VTG every
-/// 3rd, ZDA every 7th, ANT "60" (out of the spec's 0-9) and GLL, GSA, GSV, RMC off; a module that acted on all of
-/// it would drop the RMC and GSV that Ferrite reads. The bench (GPS-31) says what this module does with it.
-pub const NMEA_STOCK: &[u8] = b"$PCAS03,5,0,0,0,0,3,7,60*35\r\n";
+/// GPS-34: Ferrite's set: GGA and RMC every fix, GSA and GSV every 5th, GLL, VTG, ZDA and the antenna TXT off (the
+/// fields after ANT, off by default, left as they are). GSA stays because the parser takes 2D/3D and the satellites
+/// used in the fix from it (the sky plot's filled ones). Stock V0.27 sends `$PCAS03,5,0,0,0,0,3,7,60*35` instead
+/// (0x0800CDE0, at GPS power-up and on each TXT): GGA every 5th, VTG every 3rd, ZDA every 7th, RMC and GSV off.
+pub const NMEA_SET: &[u8] = b"$PCAS03,1,0,5,5,1,0,0,0*02\r\n";
+/// GPS-34: the set while a screen that shows satellites is open: GSA and GSV every fix too.
+pub const NMEA_SKY: &[u8] = b"$PCAS03,1,0,1,1,1,0,0,0*02\r\n";
+/// GPS-34: a set not taken is sent again this many times a wake at most.
+pub const NMEA_TRIES: u8 = 3;
+
+/// GPS-34: a sentence the set turns off (GLL, VTG or ZDA, any talker; `s` as [`crate::gps::Nmea::last`] keeps
+/// it): coming [`SETTLE_MS`] or more after the set, the module didn't take it. TXT isn't one: a query's answer and
+/// the module's start-up text are TXT too.
+pub fn set_off(s: &[u8]) -> bool {
+    s.len() >= 5 && matches!(&s[2..5], b"GLL" | b"VTG" | b"ZDA")
+}
+
+/// What [`NmeaSet::stray`] makes of a sentence the set turns off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stray {
+    /// Nothing (no set sent yet, or still settling).
+    None,
+    /// Not taken: sent again at the next look.
+    Again,
+    /// Not taken [`NMEA_TRIES`] times: left as it is until the next wake (once a wake, for the cable log).
+    GaveUp,
+}
+
+/// GPS-34: Ferrite's NMEA set, sent once the module is heard after each power-up, power cycle and wake (its CASIC
+/// settings live in RAM), and again when the wanted variant changes; nothing while keyed (GPS-32), the next look
+/// sends it. Pure logic: the GPS task and the simulator's fake module send what it returns.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NmeaSet {
+    /// The variant sent this wake (true: [`NMEA_SKY`]) and when.
+    sent: Option<(bool, u32)>,
+    /// Sent again this wake for a sentence it turns off.
+    tries: u8,
+}
+
+impl NmeaSet {
+    pub const fn new() -> Self {
+        NmeaSet { sent: None, tries: 0 }
+    }
+
+    /// One look at `now`: `sky` the variant wanted ([`GpsDemand::sky`]), `awake` [`GpsManager::awake`]. Returns
+    /// the variant to send now (CAS03 arg 1, or 2 for sky). Anything but awake (off, standby, a wake not yet heard)
+    /// forgets what was sent: the next wake gets the set again.
+    #[inline(never)] // in .slow_text (memory.x)
+    pub fn step(&mut self, now: u32, sky: bool, awake: bool, keyed: bool) -> Option<bool> {
+        if !awake {
+            *self = NmeaSet::new();
+            return None;
+        }
+        if keyed || self.sent.is_some_and(|(s, _)| s == sky) {
+            return None;
+        }
+        self.sent = Some((sky, now));
+        Some(sky)
+    }
+
+    /// A sentence the set turns off ([`set_off`]) came at `now`.
+    #[inline(never)] // in .slow_text (memory.x)
+    pub fn stray(&mut self, now: u32) -> Stray {
+        match self.sent {
+            Some((_, at)) if now.wrapping_sub(at) >= SETTLE_MS && self.tries < NMEA_TRIES => {
+                self.tries += 1;
+                if self.tries < NMEA_TRIES {
+                    self.sent = None;
+                    Stray::Again
+                } else {
+                    Stray::GaveUp
+                }
+            }
+            _ => Stray::None,
+        }
+    }
+
+    /// The terminal's bench test sent `$PCAS<id>,<arg>` itself (TERM-36): NMEA off or a standby leaves no set; the
+    /// set (1, 2) is the one sent.
+    pub fn bench_sent(&mut self, id: u8, arg: u16, now: u32) {
+        match (id, arg) {
+            (CAS_NMEA, 1 | 2) => self.sent = Some((arg == 2, now)),
+            (CAS_NMEA, _) | (CAS_STANDBY, _) => self.sent = None,
+            _ => {}
+        }
+    }
+}
 
 #[cfg(feature = "bench")]
-/// What may be sent to the module (TERM-36): CAS03 NMEA off or stock's on, CAS06 queries (0, 1, 2, 4, 6) and
+/// What may be sent to the module (TERM-36): CAS03 NMEA off or Ferrite's set (GPS-34), CAS06 queries (0, 1, 2, 4, 6) and
 /// CAS12 standby (1-65535 s), nothing else. Never CAS00 (saves the configuration to the module's flash) or CAS01
 /// (its baud rate: a wrong one leaves the GPS silent), nor any other setting.
 pub fn casic_refused(id: u8, arg: u16) -> Option<&'static str> {
     match (id, arg) {
-        (CAS_NMEA, 0 | 1) => None,
-        (CAS_NMEA, _) => Some("CAS03 is only NMEA off (0) or stock's on (1)"),
+        (CAS_NMEA, 0..=2) => None,
+        (CAS_NMEA, _) => Some("CAS03 is only NMEA off (0) or Ferrite's set (1, 2 sky)"),
         (CAS_QUERY, 0 | 1 | 2 | 4 | 6) => None,
         (CAS_QUERY, _) => Some("CAS06 takes 0, 1, 2, 4 or 6"),
         (CAS_STANDBY, 1..) => None,
@@ -370,7 +467,7 @@ pub fn casic_refused(id: u8, arg: u16) -> Option<&'static str> {
 /// A quiet standby (TERM-36): the CAS12 goes this long after NMEA off.
 pub const QUIET_GAP_MS: u32 = 100;
 #[cfg(feature = "bench")]
-/// A quiet standby: stock's NMEA on goes this long after the standby's end at the latest.
+/// A quiet standby: the NMEA set (GPS-34) goes this long after the standby's end at the latest.
 pub const QUIET_RESTORE_MS: u32 = 3_000;
 
 #[cfg(feature = "bench")]
@@ -381,7 +478,7 @@ enum After {
     Idle,
     /// NMEA stays off (a standby sent after `gps nmea off`).
     Quiet,
-    /// A quiet standby: stock's NMEA on once NMEA comes back, or [`QUIET_RESTORE_MS`] after the end.
+    /// A quiet standby: the NMEA set (GPS-34) once NMEA comes back, or [`QUIET_RESTORE_MS`] after the end.
     Restore,
 }
 
@@ -464,7 +561,7 @@ impl GpsBench {
     }
 
     /// A sentence came from the module at `now`. The first [`SETTLE_MS`] or more into a bench standby: its seconds
-    /// since the CAS12 (for the cable log), and for a quiet standby stock's NMEA on to send now (the module woke,
+    /// since the CAS12 (for the cable log), and for a quiet standby the NMEA set (GPS-34) to send now (the module woke,
     /// or never slept).
     #[inline(never)] // in .slow_text (memory.x)
     pub fn heard(&mut self, now: u32) -> (Option<u32>, Option<(u8, u16)>) {
@@ -545,9 +642,9 @@ mod tests {
         assert_eq!(cmd(12, 65535).len(), 16);
     }
 
-    const ON: GpsDemand = GpsDemand { on: true, watch: false, track: false, beacon_at: None };
+    const ON: GpsDemand = GpsDemand { on: true, watch: false, track: false, beacon_at: None, sky: false };
 
-    /// A fake ATGM336H for the tests: sentences every second while awake, a fix `fix_s` seconds into each wake
+    /// A fake ATGM336H for the tests: sentences every second while awake (GGA, which GPS-34's set keeps every fix), a fix `fix_s` seconds into each wake
     /// (None: indoors), standby by CAS12 with its own wake, a wake byte that works or not.
     struct Sim {
         m: GpsManager,
@@ -795,27 +892,13 @@ mod tests {
     }
 
     #[cfg(feature = "bench")]
-    /// TERM-36: NMEA off and stock's on are the exact bytes, each checksum the XOR between `$` and `*` (checked
-    /// against the spec's own CAS03 example, 2.7.4, `*02`), CR LF last; CAS03 takes only 0 (off) and 1 (stock's).
+    /// TERM-36, GPS-34: CAS03 takes only 0 (off), 1 (Ferrite's set) and 2 (its sky variant).
     #[test]
-    fn nmea_off_and_stocks_on() {
-        let xor = |s: &[u8]| {
-            let star = s.iter().position(|&c| c == b'*').unwrap();
-            let cs = s[1..star].iter().fold(0u8, |a, &c| a ^ c);
-            std::format!("{cs:02X}").into_bytes() == s[star + 1..star + 3]
-        };
-        assert!(xor(b"$PCAS03,1,1,1,1,1,1,1,1,0,1,0,0,1,0*02"), "the spec's example");
-        let mut b = [0u8; CASIC_MAX];
-        let n = casic(CAS_NMEA, 0, &mut b);
-        assert_eq!(&b[..n], b"$PCAS03,0,0,0,0,0,0,0,0*02\r\n");
-        assert!(xor(&b[..n]));
-        let n = casic(CAS_NMEA, 1, &mut b);
-        assert_eq!(&b[..n], b"$PCAS03,5,0,0,0,0,3,7,60*35\r\n", "stock V0.27's (0x0800CDE0)");
-        assert!(xor(&b[..n]));
-        assert!(NMEA_OFF.len() <= CASIC_MAX && NMEA_STOCK.len() <= CASIC_MAX);
+    fn nmea_off_and_ferrites_set() {
         assert_eq!(casic_refused(CAS_NMEA, 0), None);
         assert_eq!(casic_refused(CAS_NMEA, 1), None);
-        for a in [2, 9, 60, 9600] {
+        assert_eq!(casic_refused(CAS_NMEA, 2), None);
+        for a in [3, 9, 60, 9600] {
             assert!(casic_refused(CAS_NMEA, a).is_some(), "CAS03 {a}");
         }
         // Never a save (CAS00), a baud rate (CAS01), nor any other setting, whatever the argument.
@@ -864,7 +947,7 @@ mod tests {
     }
 
     #[cfg(feature = "bench")]
-    /// TERM-36: `gps standby N quiet`: NMEA off, the CAS12 100 ms later, no NMEA on after it; stock's NMEA on once
+    /// TERM-36: `gps standby N quiet`: NMEA off, the CAS12 100 ms later, no NMEA on after it; the NMEA set once
     /// NMEA comes back, or N + 3 s after the CAS12; a power off ends the test.
     #[test]
     fn bench_quiet_standby() {
@@ -891,6 +974,89 @@ mod tests {
         assert!(!b.holds());
         assert_eq!(b.step(100), None);
         assert!(core::mem::size_of::<GpsBench>() <= 16);
+    }
+
+    /// The checksum is the XOR of everything between `$` and `*`.
+    fn xor_ok(s: &[u8]) -> bool {
+        let star = s.iter().position(|&c| c == b'*').unwrap();
+        let cs = s[1..star].iter().fold(0u8, |a, &c| a ^ c);
+        std::format!("{cs:02X}").into_bytes() == s[star + 1..star + 3]
+    }
+
+    /// GPS-34, TERM-36: NMEA off, Ferrite's set and its sky variant are these exact bytes (CAS03 field order GGA,
+    /// GLL, GSA, GSV, RMC, VTG, ZDA, ANT, CASIC 2.7.4; the same order stock's `$PCAS03,5,0,0,0,0,3,7,60*35` uses for
+    /// the GGA, VTG and ZDA its own parser reads), each checksum the XOR between `$` and `*` (checked against the
+    /// spec's own example, `*02`), CR LF last.
+    #[test]
+    fn nmea_set_bytes() {
+        assert!(xor_ok(b"$PCAS03,1,1,1,1,1,1,1,1,0,1,0,0,1,0*02"), "the spec's example");
+        assert!(xor_ok(b"$PCAS03,5,0,0,0,0,3,7,60*35"), "stock V0.27's (0x0800CDE0)");
+        let mut b = [0u8; CASIC_MAX];
+        for (arg, want) in [(0, &b"$PCAS03,0,0,0,0,0,0,0,0*02\r\n"[..]), (1, b"$PCAS03,1,0,5,5,1,0,0,0*02\r\n"), (2, b"$PCAS03,1,0,1,1,1,0,0,0*02\r\n")] {
+            let n = casic(CAS_NMEA, arg, &mut b);
+            assert_eq!(&b[..n], want, "CAS03 arg {arg}");
+            assert!(xor_ok(&b[..n]));
+        }
+        // Field by field: GGA 1, GLL 0, GSA 5|1, GSV 5|1, RMC 1, VTG 0, ZDA 0, ANT 0.
+        for (s, n) in [(NMEA_SET, b'5'), (NMEA_SKY, b'1')] {
+            let f: std::vec::Vec<&[u8]> = s[8..s.len() - 5].split(|&c| c == b',').collect();
+            assert_eq!(f, [&b"1"[..], b"0", &[n], &[n], b"1", b"0", b"0", b"0"]);
+            assert!(s.len() <= CASIC_MAX);
+        }
+        assert!(set_off(b"GNGLL,4525.2950,N*00") && set_off(b"GNVTG,1") && set_off(b"GPZDA,1"));
+        assert!(!set_off(b"GNGGA,1") && !set_off(b"GPGSV,1") && !set_off(b"GNGSA,1") && !set_off(b"GPTXT,01") && !set_off(b"GN"));
+    }
+
+    /// GPS-34: the set goes once the module is heard after a power-up and after each wake (never during standby or
+    /// before it answers), again when the sky variant changes, never while keyed (the next look sends it); a module
+    /// that keeps sending GLL, VTG or ZDA 2 s after it is sent it again, three times a wake at most.
+    #[test]
+    fn nmea_set_after_every_wake() {
+        let mut m = GpsManager::new();
+        let mut n = NmeaSet::new();
+        let d = ON;
+        m.step(0, &d, false);
+        m.powered(0, true);
+        assert_eq!(n.step(100, false, m.awake(), false), None, "powered, not heard yet");
+        m.sentence(900);
+        assert!(m.awake());
+        assert_eq!(n.step(950, false, m.awake(), false), Some(false), "heard: the set");
+        assert_eq!(n.step(1000, false, m.awake(), false), None, "once");
+        assert_eq!(n.step(1050, true, m.awake(), true), None, "keyed: waits");
+        assert_eq!(n.step(1100, true, m.awake(), false), Some(true), "a satellites screen: the sky variant");
+        assert_eq!(n.step(1150, false, m.awake(), false), Some(false), "closed: back");
+        // Strays: none while settling; then sent again twice, then left (once reported).
+        assert_eq!(n.stray(2000), Stray::None, "a GLL on its way already");
+        assert_eq!(n.stray(3200), Stray::Again);
+        assert_eq!(n.step(3250, false, m.awake(), false), Some(false));
+        assert_eq!(n.stray(5300), Stray::Again);
+        assert_eq!(n.step(5350, false, m.awake(), false), Some(false));
+        assert_eq!(n.stray(7400), Stray::GaveUp);
+        assert_eq!(n.stray(9000), Stray::None, "reported once");
+        assert_eq!(n.step(9050, false, m.awake(), false), None);
+        // A wake: forgotten in standby, sent again once heard (tries afresh).
+        m.module = Module::Standby { at: 10_000, until: 70_000, ignored: false };
+        assert_eq!(n.step(10_050, false, m.awake(), false), None);
+        m.step(70_000, &d, false);
+        assert!(!m.awake(), "its own wake, not heard yet");
+        assert_eq!(n.step(70_050, false, m.awake(), false), None);
+        m.sentence(70_900);
+        assert_eq!(n.step(70_950, false, m.awake(), false), Some(false));
+        assert_eq!(n.stray(73_000), Stray::Again, "tries afresh this wake");
+        // Power off and on (GPS-4, the fallback's cycle): again once heard.
+        m.powered(80_000, false);
+        assert_eq!(n.step(80_050, false, m.awake(), false), None);
+        m.powered(80_500, true);
+        m.sentence(81_000);
+        assert_eq!(n.step(81_050, false, m.awake(), false), Some(false));
+        // The bench: its NMEA off or a standby leaves no set; its set is the one sent.
+        n.bench_sent(CAS_NMEA, 0, 82_000);
+        assert_eq!(n.step(82_050, false, m.awake(), false), Some(false));
+        n.bench_sent(CAS_NMEA, 2, 83_000);
+        assert_eq!(n.step(83_050, true, m.awake(), false), None);
+        n.bench_sent(CAS_QUERY, 0, 84_000);
+        assert_eq!(n.step(84_050, true, m.awake(), false), None);
+        assert!(core::mem::size_of::<NmeaSet>() <= 12);
     }
 
     /// GPS off: PA8 off, and on again it is running.

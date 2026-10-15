@@ -430,7 +430,7 @@ pub enum DebugReq {
     TxTest(crate::txtest::Ask),
     #[cfg(feature = "bench")]
     /// TERM-36 (a bench test): a CASIC sentence to the GPS module, `$PCAS<id>,<arg>`, which
-    /// [`crate::gpspower::casic_refused`] has passed (CAS03 NMEA off or stock's on, CAS06 queries, CAS12 standby);
+    /// [`crate::gpspower::casic_refused`] has passed (CAS03 NMEA off or Ferrite's set (GPS-34), CAS06 queries, CAS12 standby);
     /// the GPS task sends it ([`crate::gpspower::GpsBench`]). `quiet`: a standby with NMEA off first and not on after.
     Gps { id: u8, arg: u16, quiet: bool },
 }

@@ -11,6 +11,9 @@
 //!   fixes: `$PCAS12,N` on USART3 TX (CASIC standby, it wakes itself N s later), a wake byte when a GPS screen
 //!   or a beacon needs it sooner, a PA8 power cycle when that brings no NMEA (to confirm on the radio). The UI
 //!   sends who needs a position ([`GPS_DEMAND`]); nothing goes to the module while keyed.
+//! - **The NMEA set (GPS-34, [`ferrite_core::gpspower::NmeaSet`]):** once the module is heard after each power-up
+//!   and wake, `$PCAS03` cuts its output to GGA and RMC every fix and GSV and GSA every 5th (every fix while the
+//!   position or satellites page is open); a module still sending GLL, VTG or ZDA 2 s later is sent it again.
 //! - **The terminal's bench test (TERM-36, `ferrite_core::gpspower::GpsBench`; a bench build's, TERM-38):** `gps nmea off|on`, `gps standby
 //!   N [quiet]`, `gps query N`; from NMEA off or a standby until NMEA is on and the standby over, the manager is held
 //!   (nothing of its sent, no power cycle) and nothing else goes to the module during a standby.
@@ -33,7 +36,7 @@ use ferrite_app::gpsdata::GpsCfg;
 use ferrite_core::gps::Nmea;
 #[cfg(feature = "bench")]
 use ferrite_core::gpspower::GpsBench;
-use ferrite_core::gpspower::{casic, shown, GpsDemand, GpsManager, GpsOut, GpsPhase, CASIC_MAX, CAS_STANDBY, POKE};
+use ferrite_core::gpspower::{casic, set_off, shown, GpsDemand, GpsManager, GpsOut, GpsPhase, NmeaSet, Stray, CASIC_MAX, CAS_NMEA, CAS_STANDBY, POKE};
 #[cfg(feature = "bench")]
 use ferrite_core::msg::{DebugAns, GGA_MAX, GPS_REPLY_MS};
 use ferrite_core::msg::{GpsFix, GpsSky};
@@ -85,7 +88,7 @@ fn send_casic(id: u8, arg: u16) {
 /// [`GPS_REPLY_MS`] is its answer (`Query` keeps the wait).
 #[cfg(feature = "bench")]
 #[inline(never)] // in .slow_text (memory.x)
-fn term_send(bench: &mut GpsBench, (id, arg, quiet): (u8, u16, bool), powered: bool, keyed: bool, now: u32) -> Option<Query> {
+fn term_send(bench: &mut GpsBench, set: &mut NmeaSet, (id, arg, quiet): (u8, u16, bool), powered: bool, keyed: bool, now: u32) -> Option<Query> {
     let refuse = |why| {
         crate::bringup::linef(|l| {
             let _ = ufmt::uwrite!(l, "gps: bench: refused: {}", why);
@@ -109,6 +112,7 @@ fn term_send(bench: &mut GpsBench, (id, arg, quiet): (u8, u16, bool), powered: b
                 });
             }
             send_casic(id, arg);
+            set.bench_sent(id, arg, now);
             Some(Query { at: now, data: [0; GGA_MAX], n: 0 })
         }
     }
@@ -178,6 +182,7 @@ pub async fn task() {
     let mut power = GpsPower::default();
     let (mut mgr, mut demand) = (GpsManager::new(), GpsDemand::default());
     let mut phase = GpsPhase::Off;
+    let mut set = NmeaSet::new();
     let (mut fix_at, mut sky_at) = (0u32, 0u32);
     let mut last_state = (false, 0u8);
     #[cfg(feature = "bench")]
@@ -252,7 +257,7 @@ pub async fn task() {
         }
         #[cfg(feature = "bench")]
         if let Some(c) = crate::chan::GPS_SEND.try_take() {
-            query = term_send(&mut bench, c, powered, keyed, now);
+            query = term_send(&mut bench, &mut set, c, powered, keyed, now);
         }
         // A quiet standby's CAS12 and its NMEA on at the latest (TERM-36); not while keyed (PB10 low).
         #[cfg(feature = "bench")]
@@ -260,9 +265,18 @@ pub async fn task() {
             let was = bench.holds();
             if let Some((id, arg)) = bench.step(now) {
                 send_casic(id, arg);
+                set.bench_sent(id, arg, now);
             }
             if was && !bench.holds() {
                 crate::bringup::line(b"gps: bench: over, back to the power manager");
+            }
+        }
+        // GPS-34: Ferrite's NMEA set once the module is heard after a power-up or wake, and the sky variant as the
+        // position or satellites page opens and closes; not while keyed (GPS-32: the next look), nor while the bench
+        // holds the module.
+        if powered && !held {
+            if let Some(sky) = set.step(now, demand.sky, mgr.awake(), keyed) {
+                send_casic(CAS_NMEA, 1 + sky as u16);
             }
         }
         let mut fresh = false;
@@ -272,6 +286,13 @@ pub async fn task() {
                 let done = nmea.feed(c);
                 if done && nmea.last_is_gga() {
                     keep_gga(&nmea, now);
+                }
+                if done && !held && set_off(nmea.last()) {
+                    match set.stray(now) {
+                        Stray::Again => crate::bringup::line(b"gps: NMEA set not taken (GLL/VTG/ZDA still coming): again"),
+                        Stray::GaveUp => crate::bringup::line(b"gps: NMEA set not taken 3 times: left until the next wake"),
+                        Stray::None => {}
+                    }
                 }
                 // TERM-36: the module's answer to a query is a TXT sentence; the first one is kept.
                 #[cfg(feature = "bench")]
@@ -312,6 +333,7 @@ pub async fn task() {
             }
             if let Some((id, arg)) = on {
                 send_casic(id, arg);
+                set.bench_sent(id, arg, now);
                 crate::bringup::line(b"gps: bench: over, back to the power manager");
             }
         }

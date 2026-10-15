@@ -46,9 +46,12 @@ pub fn cfg(set: &crate::settings::Settings) -> GpsCfg {
 
 /// Who needs the GPS module awake now (GPS-26 to GPS-28), for the GPS task's power manager: GPS on (0 6 1); a GPS
 /// screen open (position, satellites, waypoints, go to) or the arrival alarm armed (`alarm`); smart or distance
-/// beaconing; the next timed beacon, `now_ms` plus its seconds (APRS mode on).
+/// beaconing; the next timed beacon, `now_ms` plus its seconds (APRS mode on). `sky` (GPS-34): the position or
+/// satellites page is open, the two that show satellites in view (from GSV and GSA).
 pub fn demand(app: &crate::App, data: &dyn Data, alarm: bool, now_ms: u32) -> GpsDemand {
+    use crate::screens::gps::Page;
     let watch = alarm || matches!(app.screen(), crate::Screen::Gps(_));
+    let sky = matches!(app.screen(), crate::Screen::Gps(g) if matches!(g.page, Page::Position | Page::Satellites));
     let (mut track, mut beacon_at) = (false, None);
     if app.aprs_on() {
         let c = data.aprs_cfg();
@@ -56,7 +59,7 @@ pub fn demand(app: &crate::App, data: &dyn Data, alarm: bool, now_ms: u32) -> Gp
         // Due now or overdue (waiting for a fix, the relay or a callsign) holds nothing: the minute wakes bring the fix.
         beacon_at = data.beacon().next_s.filter(|&s| s > 0).map(|s| now_ms.wrapping_add(s.saturating_mul(1000)));
     }
-    GpsDemand { on: app.settings().gps_on, watch, track, beacon_at }
+    GpsDemand { on: app.settings().gps_on, watch, track, beacon_at, sky }
 }
 
 /// The arrival alarm's radius in metres, 0 when off (0 6 7, GPS-12).
@@ -417,7 +420,7 @@ mod tests {
     }
 
     /// GPS-26 to GPS-28: who needs the module: GPS off, a GPS screen or the alarm, smart beaconing, the next
-    /// timed beacon (APRS mode on only).
+    /// timed beacon (APRS mode on only); GPS-34: the position or satellites page asks for GSV every fix.
     #[test]
     fn demand_from_the_app() {
         struct D(crate::aprs::AprsCfg, Option<u32>);
@@ -435,7 +438,7 @@ mod tests {
         let mut app = crate::App::new(crate::tests::set(), crate::tests::alert());
         let timed = D(crate::aprs::AprsCfg { beacon: 2 + 3, ..crate::aprs::AprsCfg::DEFAULT }, Some(400)); // 10 minutes
         let d = demand(&app, &timed, false, 1000);
-        assert_eq!(d, GpsDemand { on: true, watch: false, track: false, beacon_at: None }, "APRS mode off: no beacon");
+        assert_eq!(d, GpsDemand { on: true, watch: false, track: false, beacon_at: None, sky: false }, "APRS mode off: no beacon");
         app.set_aprs_mode(true);
         assert_eq!(demand(&app, &timed, false, 1000).beacon_at, Some(401_000));
         assert!(demand(&app, &timed, true, 1000).watch, "the arrival alarm");
@@ -443,6 +446,13 @@ mod tests {
         assert!(demand(&app, &smart, false, 0).track);
         app.open(crate::screens::nav::Dest::GpsPosition);
         assert!(demand(&app, &smart, false, 0).watch, "the GPS screen");
+        // GPS-34: the position and satellites pages show satellites in view: GSV every fix; the waypoints don't.
+        assert!(demand(&app, &smart, false, 0).sky, "the position page");
+        app.screen = crate::Screen::Gps(crate::screens::gps::Gps::new(crate::screens::gps::Page::Satellites));
+        assert!(demand(&app, &smart, false, 0).sky, "the satellites page");
+        app.open(crate::screens::nav::Dest::Waypoints);
+        let d = demand(&app, &smart, false, 0);
+        assert!(d.watch && !d.sky, "the waypoints: running, GSV every 5th");
         app.settings_mut().gps_on = false;
         assert!(!demand(&app, &smart, false, 0).on);
     }

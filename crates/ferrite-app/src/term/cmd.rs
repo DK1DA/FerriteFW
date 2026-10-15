@@ -1526,7 +1526,7 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
 }
 
 /// TERM-30, TERM-36: `gps` (the last GGA), `gps query [0|1|2|4|6]` (CAS06, the module's answer), `gps nmea off`
-/// (CAS03, all NMEA off) and `gps nmea on` (stock's CAS03), `gps standby N [quiet]` (CAS12 for N s; quiet: NMEA off
+/// (CAS03, all NMEA off) and `gps nmea on` (Ferrite's NMEA set, GPS-34), `gps standby N [quiet]` (CAS12 for N s; quiet: NMEA off
 /// first, not on after): nothing else goes to the module ([`ferrite_core::gpspower::casic_refused`]).
 #[cfg(feature = "bench")]
 fn gps(t: &mut Toks) -> Result<Done, Msg> {
@@ -1822,7 +1822,7 @@ const HELP_BENCH: [&str; 23] = [
     "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
     "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
     "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)",
-    "  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: stock's CAS03",
+    "  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set",
     "  gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)",
     "  gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s",
     "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",

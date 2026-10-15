@@ -1177,7 +1177,7 @@ fn regs(r: DebugReq) -> DebugAns {
 
 #[cfg(feature = "bench")]
 /// TERM-36: `gps query N` sends CAS06 and shows the sentence sent and the module's TXT answer; `gps standby N`
-/// sends CAS12; `gps nmea off|on` CAS03 (all off, stock's on); `gps standby N quiet` NMEA off then CAS12; anything else (another CAS number, CAS00 save, CAS01 baud, a bad argument) is refused before it
+/// sends CAS12; `gps nmea off|on` CAS03 (all off, Ferrite's set on, GPS-34); `gps standby N quiet` NMEA off then CAS12; anything else (another CAS number, CAS00 save, CAS01 baud, a bad argument) is refused before it
 /// reaches the firmware. The query reads (allowed for an unapproved Bluetooth device, TERM-25), standby writes.
 #[test]
 fn terminal_gps_casic() {
@@ -1192,10 +1192,10 @@ fn terminal_gps_casic() {
     let data = [0u8; ferrite_core::msg::GGA_MAX];
     assert_eq!(r.serve(4, |_| DebugAns::GpsSent { data, n: 0 }), vec![DebugReq::Gps { id: 12, arg: 60, quiet: false }]);
     assert!(r.raw().contains("sent $PCAS12,60*28 CR LF"), "{}", r.raw());
-    // TERM-36: NMEA off and stock's on (CAS03), and the quiet standby (NMEA off, then CAS12).
+    // TERM-36: NMEA off and Ferrite's set on (CAS03, GPS-34), and the quiet standby (NMEA off, then CAS12).
     for (c, want, shown) in [
         ("gps nmea off", DebugReq::Gps { id: 3, arg: 0, quiet: false }, "sent $PCAS03,0,0,0,0,0,0,0,0*02 CR LF"),
-        ("gps nmea on", DebugReq::Gps { id: 3, arg: 1, quiet: false }, "sent $PCAS03,5,0,0,0,0,3,7,60*35 CR LF"),
+        ("gps nmea on", DebugReq::Gps { id: 3, arg: 1, quiet: false }, "sent $PCAS03,1,0,5,5,1,0,0,0*02 CR LF"),
         ("gps standby 40 quiet", DebugReq::Gps { id: 12, arg: 40, quiet: true }, "sent $PCAS03,0,0,0,0,0,0,0,0*02 CR LF, 100 ms later $PCAS12,40*2A CR LF"),
     ] {
         r.send(b"\r");

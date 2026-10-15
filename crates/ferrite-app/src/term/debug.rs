@@ -376,11 +376,11 @@ impl Job {
                         out.push(b"  answer: ");
                         out.push(&data[..(n as usize).min(data.len())]);
                     } else if quiet {
-                        out.push(b"  NMEA on (stock's CAS03) once NMEA comes back, or the standby + 3 s: cable log");
+                        out.push(b"  the NMEA set (GPS-34) once NMEA comes back, or the standby + 3 s: cable log");
                     } else if id == CAS_NMEA && arg == 0 {
                         out.push(b"  NMEA off if the cable log's 5 s counts drop to 0 sentences (gps nmea on undoes)");
                     } else if id == CAS_NMEA {
-                        out.push(b"  NMEA back if the cable log's 5 s counts climb again (stock's CAS03)");
+                        out.push(b"  NMEA back if the cable log's 5 s counts climb again (Ferrite's set, GPS-34)");
                     } else if id == CAS_STANDBY {
                         out.push(b"  asleep if the cable log's 5 s counts drop to 0 sentences");
                     } else {

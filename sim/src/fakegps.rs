@@ -5,10 +5,11 @@
 //!
 //! The module: a fix [`HOT_MS`] into a wake from standby (VCC kept: a hot start) or [`COLD_MS`] after power-on
 //! (the backup supply is unknown, so the worst case), none at all indoors; `$PCAS12,N` puts it in standby and it
-//! wakes itself N s later; the wake byte wakes it (to confirm on the radio, GPS-31) unless told otherwise.
+//! wakes itself N s later; the wake byte wakes it (to confirm on the radio, GPS-31) unless told otherwise. It
+//! takes GPS-34's `$PCAS03` set (in RAM: gone at power-off) and sends its GSV as the set says ([`FakeGps::gsv`]).
 
 use ferrite_app::gpsdata::RECENT_MS;
-use ferrite_core::gpspower::{casic, GpsDemand, GpsManager, GpsPhase, CAS_STANDBY};
+use ferrite_core::gpspower::{casic, GpsDemand, GpsManager, GpsPhase, NmeaSet, CAS_NMEA, CAS_STANDBY};
 use ferrite_core::msg::GpsState;
 
 /// A fix this long into a wake from standby (the datasheet's hot start, 1 s or less, plus margin).
@@ -28,6 +29,12 @@ pub struct FakeGps {
     asleep_until: Option<u32>,
     last_sentence: u32,
     last_fix: Option<u32>,
+    /// GPS-34: the firmware's side of the NMEA set, and the module's: its own output (None) or the set's GSV rate.
+    nmea: NmeaSet,
+    pub gsv_every: Option<u8>,
+    /// GSV groups the module has sent (a report a second, every one or every 5th as the set says).
+    pub gsv: u32,
+    reports: u32,
     /// What went to the module, and when (ms): the CAS12 sentences, "wake byte", "power on", "power off".
     pub log: Vec<(u32, String)>,
 }
@@ -40,7 +47,7 @@ impl Default for FakeGps {
 
 impl FakeGps {
     pub fn new() -> Self {
-        FakeGps { mgr: GpsManager::new(), indoor: false, poke_wakes: true, powered: false, awake: None, asleep_until: None, last_sentence: 0, last_fix: None, log: Vec::new() }
+        FakeGps { mgr: GpsManager::new(), indoor: false, poke_wakes: true, powered: false, awake: None, asleep_until: None, last_sentence: 0, last_fix: None, nmea: NmeaSet::new(), gsv_every: None, gsv: 0, reports: 0, log: Vec::new() }
     }
 
     /// One look at `now` (ms), as the firmware's GPS task makes them.
@@ -57,6 +64,9 @@ impl FakeGps {
             if !out.power && !d.on {
                 self.last_fix = None;
             }
+            if !out.power {
+                self.gsv_every = None;
+            }
         }
         if let Some(s) = out.standby_s {
             let mut b = [0u8; ferrite_core::gpspower::CASIC_MAX];
@@ -70,9 +80,20 @@ impl FakeGps {
                 (self.asleep_until, self.awake) = (None, Some((now, HOT_MS)));
             }
         }
-        // A report a second while awake.
+        // GPS-34: the set once heard after a power-up or wake, the sky variant with the position or satellites page.
+        if let Some(sky) = self.nmea.step(now, d.sky, self.mgr.awake(), keyed).filter(|_| self.powered) {
+            let mut b = [0u8; ferrite_core::gpspower::CASIC_MAX];
+            let n = casic(CAS_NMEA, 1 + sky as u16, &mut b);
+            self.log.push((now, String::from_utf8_lossy(&b[..n - 2]).into_owned()));
+            if self.awake.is_some() {
+                self.gsv_every = Some(if sky { 1 } else { 5 });
+            }
+        }
+        // A report a second while awake: GGA and RMC each time, GSV as the set says.
         if let Some((at, fix_ms)) = self.awake.filter(|_| self.powered && now.wrapping_sub(self.last_sentence) >= 1000) {
             self.last_sentence = now;
+            self.gsv += self.reports.is_multiple_of(self.gsv_every.unwrap_or(1) as u32) as u32;
+            self.reports += 1;
             if !self.indoor && now - at >= fix_ms {
                 self.mgr.fix(now, 0);
                 self.last_fix = Some(now);
@@ -98,6 +119,11 @@ impl FakeGps {
     /// The module is in standby now.
     pub fn asleep(&self) -> bool {
         self.asleep_until.is_some()
+    }
+
+    /// The CAS03 sets sent (GPS-34): (ms, the sentence).
+    pub fn sets(&self) -> Vec<(u32, &str)> {
+        self.log.iter().filter(|(_, s)| s.starts_with("$PCAS03,")).map(|(t, s)| (*t, s.as_str())).collect()
     }
 
     /// The CAS12 standbys sent: (ms, seconds).
