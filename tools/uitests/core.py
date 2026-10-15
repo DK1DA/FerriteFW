@@ -41,6 +41,7 @@ CAPS = {
     "bt": (True, "a Bluetooth link beside the cable: --bt ble:walkie-talkie (0 9 2 1 on)"),
     "cablelog": (False, "keys over Bluetooth (--port ble:...) and the cable log on --cablelog PORT"),
     "flash": (False, "a flash around the run: --flash before, tools/flash.py, --flash after"),
+    "first-install": (True, "--flash before marks a first install (a radio new to Ferrite or wiped): --with first-install"),
     "reset": (True, "a factory reset (0 9 8 2) allowed: --with reset (the test reloads the dump after)"),
     "fm-station": (False, "a local FM station with RDS and stereo pilot: --with fm-station"),
     "signal": (False, "a signal to receive (a second radio or a strong local one): --with signal"),

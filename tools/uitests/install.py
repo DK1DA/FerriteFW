@@ -228,7 +228,11 @@ def first_install(t):
     layout header); no pending update (0x300000 intact: UPD-8)."""
     p, before = phase(t)
     if p == "before":
-        save(t, "first", {"note": "a first install: run --flash after once setup is done"})
+        # Only a real first install counts (the radio wiped or new to Ferrite): a plain update keeps the channels,
+        # so an update must not mark itself as one (Oct 14, 2026: an update recorded five false fails).
+        given = {x.strip() for x in (getattr(t.opts, "with_", "") or "").split(",") if x.strip()}
+        save(t, "first", {"note": "a first install: run --flash after once setup is done"}
+             if "first-install" in given else None)
         return
     t.need(before.get("first"), "no first-install marker from --flash before")
     t.need(t.ui().id in ("Setup", "Home"), "not on setup or home")
