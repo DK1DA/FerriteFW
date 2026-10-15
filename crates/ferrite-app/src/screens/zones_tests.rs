@@ -279,10 +279,31 @@ fn preview_of_a_zone() {
     assert!(rows.iter().all(|r| !r.contains("\"\" \"")), "each has a place: {rows:?}");
     assert!(rows.iter().all(|r| !r.contains('+') && !r.contains("CH ")), "no shift signs, no numbers: {rows:?}");
     assert!(rows[1].starts_with("pvrow \"Club repeater\" \"SE "), "{}", rows[1]);
-    assert!(ui.contains(&"pvfoot \"+1 more \u{b7} priority: Club repeater\"".to_string()), "{ui:?}");
+    assert!(ui.contains(&"pvfoot \"+1 more \u{b7} \u{2605} Club repeater\"".to_string()), "{ui:?}");
     t.tap(Key::Down); // Empty
     assert!(t.ui().contains(&"preview \"EMPTY\" \"empty\"".to_string()), "{:?}", t.ui());
     assert!(!t.ui().iter().any(|l| l.starts_with("pvrow")));
+}
+
+/// CHAN-27 (decision 157): the footer marks the priority channel with a star, not the word, so "+N more · ★ NAME"
+/// fits 240 px whole (the footer's 224 px from x 8) with a 12-character name, and with a full 16 and three-digit "more".
+#[test]
+fn preview_footer_fits_a_priority_name() {
+    let mut t = T::new();
+    t.put(11, 1, mhz(443) + 47_500, "Hilltop Rptr", None); // the Repeaters zone's priority 1, 12 characters
+    let p = preview_zone(&t.app, &t.s, 1);
+    assert_eq!(s(p.foot.as_bytes()), "+1 more \u{b7} \u{2605} Hilltop Rptr");
+    assert!(UI_12.has('\u{2605}'), "the star is in the footer's font");
+    assert!(text4_width(p.foot.as_bytes(), &UI_12) <= 224, "fits: {}", text4_width(p.foot.as_bytes(), &UI_12));
+    t.open();
+    t.tap(Key::Down);
+    assert!(t.lcd.texts.iter().any(|x| x.4 == s(p.foot.as_bytes())), "drawn whole: {:?}", t.lcd.texts);
+    // A full 16-character name, and the most "more" a zone can have (1000 channels, four previewed).
+    t.put(11, 1, mhz(443) + 47_500, "WWWWWWWWWWWWWWWW", None);
+    let p = preview_zone(&t.app, &t.s, 1);
+    assert_eq!(s(p.foot.as_bytes()), "+1 more \u{b7} \u{2605} WWWWWWWWWWWWWWWW");
+    let worst = "+996 more \u{b7} \u{2605} WWWWWWWWWWWWWWWW";
+    assert!(text4_width(worst.as_bytes(), &UI_12) <= 224, "fits: {worst}");
 }
 
 /// CHAN-27: a preview row's name, place and frequency stay in their columns, at 240 px, whatever the name's length

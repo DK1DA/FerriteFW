@@ -34,6 +34,14 @@ def check(d, n):
     d.line([(n * .15, n * .52), (n * .40, n * .76), (n * .86, n * .26)], fill=255, width=int(n * .14), joint="curve")
 
 
+def star(d, n):
+    """A five-pointed star (★), point up: the text fonts' drawn glyph for the priority channel (decision 157)."""
+    c, ro, ri = n / 2, n / 2, n / 2 * 0.42
+    pts = [(c + (ro if i % 2 == 0 else ri) * math.sin(math.radians(i * 36)),
+            c + 0.06 * n - (ro if i % 2 == 0 else ri) * math.cos(math.radians(i * 36))) for i in range(10)]
+    d.polygon(pts, fill=255)
+
+
 def dot(d, n):
     d.ellipse([n * .25, n * .25, n * .75, n * .75], outline=255, width=int(n * .1))
 

@@ -372,7 +372,8 @@ fn pv_row(app: &App, store: &impl ChannelStore, c: &Channel, here: Option<Pos>, 
 
 /// The preview of zone `z` (CHAN-27): one pass over its channels in number order (CHAN-10): the first four listed
 /// ones drawn, every one counted for "+N more" and the bands. Header right: "scan on", else the bands; footer: "+N
-/// more", then the first priority channel while in scan, or "scan off".
+/// more", then "★ NAME" for the first priority channel while in scan (the star, not the word "priority", so a full
+/// name fits 240 px without scrolling: decision 157), or "scan off".
 pub(crate) fn preview_zone(app: &App, store: &impl ChannelStore, z: u8) -> Preview {
     let hidden = app.set.show_hidden;
     let here = here(store);
@@ -407,7 +408,7 @@ pub(crate) fn preview_zone(app: &App, store: &impl ChannelStore, z: u8) -> Previ
     }
     let tail: Option<Buf<24>> = if cfg.scan_all {
         cfg.pri[0].and_then(|n| store.get(n)).map(|c| {
-            let mut t = Buf::<24>::from(b"priority: ".as_slice());
+            let mut t = Buf::<24>::from("\u{2605} ".as_bytes());
             t.push(pv_row(app, store, &c, None, None).name.as_bytes());
             t
         })

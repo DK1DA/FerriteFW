@@ -154,7 +154,8 @@ def zones_list_rows_and_chips(t):
 def zones_preview_with_places(t):
     """With a position: the Nearby row gives only the nearest channel's place; the preview names the zone in
     capitals with its bands, its first four channels as name, place (only those with a position) and frequency, no
-    channel numbers or shift signs, then "+1 more · scan off". Imperial units give miles the same way."""
+    channel numbers or shift signs, then "+1 more · scan off"; in scan, the footer marks its priority channel with
+    a star, a 16-character name whole (decision 157). Imperial units give miles the same way."""
     f = Fixture(t)
     try:
         f.located()
@@ -167,6 +168,11 @@ def zones_preview_with_places(t):
         t.eq([(r["name"], r["place"], r["freq"]) for r in u["pvrows"]], want, "the first four: name, place, frequency")
         t.eq(u["pvfoot"]["args"], ["+1 more · scan off"], "the footer")
         t.check(not any("+" in r["freq"] or "-" in r["freq"] for r in u["pvrows"]), "no shift signs", u["pvrows"])
+        t.cmd(f'zone {f.zone} "{ZONE}" scan=on pri1=995')
+        u = t.ui()
+        t.eq(u["preview"]["args"], [ZONE.upper(), "scan on"], "in scan: the preview's header")
+        t.eq(u["pvfoot"]["args"], ["+1 more · ★ UITEST LONG NAME"], "in scan: the priority channel, starred")
+        t.cmd(f'zone {f.zone} "{ZONE}" scan=off pri1=none')
         f.located("Imperial")
         u = t.ui()
         t.eq(nearby(u)["value"], "N 1.4mi", "Nearby in miles")

@@ -27,6 +27,20 @@ CALL = " #*-/?0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00b7"  # callsigns on the bo
 DIG = " -.0123456789"  # frequencies
 WORDMARK = " EFIRT"
 
+# Characters the font files lack, drawn from tools/art.py at the font's cap height, centred in its advance; only
+# in the fonts named (they cost flash in every font they are in). ★ marks a zone's priority channel (decision 157).
+DRAWN = {"\u2605": art.star}
+DRAWN_IN = ("ui_12", "ui_12b")
+
+
+def add_drawn(f):
+    """The DRAWN characters into font f: a square mask the height of its capitals, sitting on the baseline."""
+    cap = -f.glyphs["H"][2]
+    adv = f.glyphs["M"][0]
+    for ch, shape in DRAWN.items():
+        f.glyphs[ch] = (adv, (adv - cap) // 2, -cap, art.mask(cap, shape), cap, cap)
+
+
 # Font and logo data goes to its own section, which the firmware's linker script places after all code and
 # other constants (firmware/memory.x): code stays in the fast first 256 KB as the image grows.
 SLOW = ".slow_rodata"
@@ -98,6 +112,8 @@ def main():
     total = 0
     for name, ttf, px, chars, tab, use in FONT_LIST:
         f = Font(os.path.join(FONTS, ttf), px, chars, tab)
+        if name in DRAWN_IN:
+            add_drawn(f)
         rs.append(f.rust_source(name, SLOW))
         total += f.size_bytes()
     for name, size, shape, packed_rle in MASK_LIST:
