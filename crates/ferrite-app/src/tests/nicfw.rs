@@ -97,40 +97,54 @@ fn receive_to_1300() {
     assert_eq!(t.app.slot(0).vfo, mhz(118) + 95_000);
 }
 
-/// VFO-21: 1000-1300 MHz typed as digits: a fourth digit making 1000-1300 waits as a MHz digit (OK or \* takes
-/// it), and a fifth puts the point back after the third, so airband and broadcast FM type as before. 630 and
-/// 1300, the range's own ends, tune.
+/// VFO-21: four digits are three MHz digits and a decimal (1 2 1 5 is 121.5, airband), so 1000-1300 MHz goes
+/// in only by \* \* on 100-130 (1 2 9 \* \* 6 is 1296), with a hint at each step: "* again: 4-digit MHz" after
+/// the first \*, the fourth digit's range after the second (each fits the hint bar, KEY-9). 630 and 1300, the range's own ends, tune.
 #[test]
 fn entry_four_mhz_digits_and_the_ends() {
     let menu = |t: &mut T| t.tap(Key::Menu);
+    let hints = |t: &T| t.app.screen().hints(&t.app).as_slice().to_vec();
     let mut t = T::new();
     t.app.slots[0].vfo_mode = true;
-    for (typed, want) in [("1300", mhz(1300)), ("1050", mhz(1050)), ("1299", mhz(1299)), ("630", mhz(630))] {
+    for (typed, want) in [
+        ("1215", mhz(121) + 50_000),
+        ("1300", mhz(130)),
+        ("1050", mhz(105)),
+        ("130**0", mhz(1300)),
+        ("105**0", mhz(1050)),
+        ("630", mhz(630)),
+    ] {
         type_in(&mut t, typed);
         menu(&mut t);
         assert_eq!((t.app.slot(0).vfo, matches!(t.app.screen(), Screen::Home)), (want, true), "{typed} OK: {:?}", t.app.screen());
     }
-    // 1 3 0 5 can't be 1305: 130.5 at once (airband)
-    type_in(&mut t, "1305");
-    menu(&mut t);
-    assert_eq!(t.app.slot(0).vfo, mhz(130) + 50_000);
-    // a fifth digit: 1 2 9 6 1 is 129.61; 1 1 8 1 0 0 goes in by itself as 118.100
-    type_in(&mut t, "12961");
-    menu(&mut t);
-    assert_eq!(t.app.slot(0).vfo, mhz(129) + 61_000);
-    type_in(&mut t, "118100");
-    assert_eq!((t.app.slot(0).vfo, matches!(t.app.screen(), Screen::Home)), (mhz(118) + 10_000, true));
-    // \* after the pending fourth digit is the point: 1 2 9 6 \* 2 \* is 1296.2 (VFO-24)
-    type_in(&mut t, "1296*2*");
+    // The hints: "129." asks for \* again, "129" after it names 1290-1299; elsewhere the usual ones.
+    type_in(&mut t, "129");
+    assert_eq!(hints(&t)[0], ("*", "Point"));
+    type_in(&mut t, "*");
+    assert_eq!(hints(&t)[0], ("*", "again: 4-digit MHz"));
+    let fits = |t: &mut T| {
+        let h = hints(t);
+        let w = ferrite_ui::widgets::hint_width(&mut ferrite_ui::fb::FrameBuffer::new(), &h);
+        assert!(w <= 224, "KEY-9: {h:?} is {w} px");
+    };
+    fits(&mut t);
+    type_in(&mut t, "*");
+    assert_eq!(hints(&t)[0], ("0-9", "1290-1299 MHz"));
+    fits(&mut t);
+    type_in(&mut t, "6");
+    assert_eq!(hints(&t)[0], ("*", "Point"));
+    // \* after the fourth MHz digit is the point: 1 2 9 \* \* 6 \* 2 \* is 1296.2 (VFO-24)
+    type_in(&mut t, "*2*");
     assert_eq!((t.app.slot(0).vfo, matches!(t.app.screen(), Screen::Home)), (mhz(1296) + 20_000, true));
-    // BACK takes the pending digit off: 1 0 5 0 BACK 3 OK... 1053
-    type_in(&mut t, "1050");
-    t.tap(Key::Exit);
-    type_in(&mut t, "3");
-    menu(&mut t);
-    assert_eq!(t.app.slot(0).vfo, mhz(1053));
+    type_in(&mut t, "130**");
+    assert_eq!(hints(&t)[0], ("0", "1300 MHz"));
+    t.hold(Key::Exit);
+    type_in(&mut t, "146*");
+    assert_eq!(hints(&t)[0], ("*", "Point"), "no * again off 100-130");
+    t.hold(Key::Exit);
     // 630.01 and 1300.01 are refused
-    for typed in ["630*01", "1300*01"] {
+    for typed in ["630*01", "130**0*01"] {
         let before = t.app.slot(0).vfo;
         type_in(&mut t, typed);
         menu(&mut t);

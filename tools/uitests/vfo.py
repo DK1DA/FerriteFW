@@ -71,11 +71,31 @@ def entry_ranges(t):
 
 @test("VFO-21")
 def entry_range_edges(t):
-    """630 and 1300 MHz, the range's own ends, tune when typed (1 0 5 0 too: above 1000 MHz receive only)."""
-    for f, want in (("6 3 0", "630.00000"), ("1 3 0 0", "1300.00000"), ("1 0 5 0", "1050.00000")):
+    """630 and 1300 MHz, the range's own ends, tune when typed; four digits are airband (1 2 1 5 is 121.5,
+    1 3 0 0 is 130.0, 1 0 5 0 is 105.0), and 1000-1300 MHz goes in only by * * on 100-130 (1 0 5 * * 0 is
+    1050, above 1000 MHz receive only)."""
+    for f, want in (("6 3 0", "630.00000"), ("1 3 0 STAR STAR 0", "1300.00000"), ("1 0 5 STAR STAR 0", "1050.00000"),
+                    ("1 2 1 5", "121.50000"), ("1 3 0 0", "130.00000"), ("1 0 5 0", "105.00000")):
         tune(t)
         u = t.keys(f"{f} MENU")
         t.eq((u.id, (u.cards.get("A") or {}).get("freq")), ("Home", want), f"{f}: tuned")
+    tune(t)
+
+
+@test("VFO-21", "KEY-9")
+def four_digit_mhz_hints(t):
+    """After 1 2 9 * the hint bar says "* again: 4-digit MHz"; after the second * it names the fourth digit's
+    range, "0-9 1290-1299 MHz"; 1 2 9 * * 6 OK tunes 1296. Off 100-130 (146 *) the hint stays "* Point"."""
+    tune(t)
+    u = t.keys("1 2 9 STAR")
+    t.eq((u.id, u.hint("*")), ("Entry", "again: 4-digit MHz"), "129.: * again")
+    u = t.keys("STAR")
+    t.eq(u.hint("0-9"), "1290-1299 MHz", "129 after * *: the fourth digit's range")
+    u = t.keys("6 MENU")
+    t.eq((u.id, (u.cards.get("A") or {}).get("freq")), ("Home", "1296.00000"), "1 2 9 * * 6 OK")
+    tune(t)
+    u = t.keys("1 4 6 STAR")
+    t.eq(u.hint("*"), "Point", "146.: no * again")
     tune(t)
 
 
@@ -123,7 +143,7 @@ def channel_mode_and_copy_to_vfo(t):
 @test("VFO-9")
 def hold_vm_saves_a_vfo(t):
     """Hold V/M on a VFO opens the save screen (BACK cancels, nothing saved); on a channel it does nothing.
-    (VFO-9's "on 18-64 MHz it refuses" predates HF channels, CHAN-22/CHAN-26: the radio saves one; not checked.)"""
+    (On 18-64 MHz it saves an HF channel, CHAN-22/CHAN-26: not checked here.)"""
     tune(t)
     n0 = t.cmd("dump").count("\nch ")
     u = t.press("VM", long=True)

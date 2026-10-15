@@ -1,8 +1,7 @@
 //! Direct entry (manual chapters 6, 9 and 10; NAV-4, VFO-11 to VFO-14): a digit on home opens it with that
-//! digit. In VFO mode it is a frequency, \* the point (the point comes by itself after three MHz digits, except
-//! that a fourth digit making 1000-1300 waits as a MHz digit until a fifth comes: 1 2 9 6 OK is 1296 MHz, 1 2 9 6 1
-//! is 129.61; a second \* after 100-130 takes the point away again, for a fourth MHz digit: 1 2 9 \* \* 6 is
-//! 1296 MHz, VFO-21), and
+//! digit. In VFO mode it is a frequency, \* the point (the point comes by itself after three MHz digits, so
+//! 1 2 1 5 is 121.5; a second \* after 100-130 takes the point away again, for a fourth MHz digit: 1 2 9 \* \* 6
+//! is 1296 MHz, the only way to type 1000-1300 MHz, with hints for both steps, VFO-21), and
 //! \* after a digit past the point is OK (146 \* 52 \*, VFO-24);
 //! the screen shows the digits, the band, the frequency it snaps to on the step, and whether transmit is
 //! allowed there or why not. In channel mode it is a channel number, shown with its name or "empty". OK goes
@@ -52,6 +51,41 @@ pub struct Entry {
     pub wide: bool,
 }
 
+/// VFO-21: the hint after \* \* on 100-130: what the fourth MHz digit makes.
+const WIDE: [&str; 31] = [
+    "1000-1009 MHz",
+    "1010-1019 MHz",
+    "1020-1029 MHz",
+    "1030-1039 MHz",
+    "1040-1049 MHz",
+    "1050-1059 MHz",
+    "1060-1069 MHz",
+    "1070-1079 MHz",
+    "1080-1089 MHz",
+    "1090-1099 MHz",
+    "1100-1109 MHz",
+    "1110-1119 MHz",
+    "1120-1129 MHz",
+    "1130-1139 MHz",
+    "1140-1149 MHz",
+    "1150-1159 MHz",
+    "1160-1169 MHz",
+    "1170-1179 MHz",
+    "1180-1189 MHz",
+    "1190-1199 MHz",
+    "1200-1209 MHz",
+    "1210-1219 MHz",
+    "1220-1229 MHz",
+    "1230-1239 MHz",
+    "1240-1249 MHz",
+    "1250-1259 MHz",
+    "1260-1269 MHz",
+    "1270-1279 MHz",
+    "1280-1289 MHz",
+    "1290-1299 MHz",
+    "1300 MHz",
+];
+
 /// Home VFOs tune 18 MHz and up (VFO-14), to what the chips reach.
 const LO: Freq10 = mhz(18);
 const HI: Freq10 = mhz(1300);
@@ -99,11 +133,14 @@ impl Entry {
         e
     }
 
-    /// VFO-21: whether a fourth digit after three MHz digits (no point, typed as 1 0 5) could be a fourth MHz
-    /// digit: the four make 1000-1300 MHz.
-    fn four_digits(&self, c: u8) -> bool {
-        let v = self.buf[..3].iter().chain([&c]).fold(0u32, |a, &c| a * 10 + (c.wrapping_sub(b'0')) as u32);
-        (1000..=1300).contains(&v)
+    /// The three digits typed first, as a number (VFO-21's 100-130 for a fourth MHz digit).
+    fn three(&self) -> u32 {
+        self.buf[..3].iter().fold(0u32, |a, &c| a * 10 + (c.wrapping_sub(b'0')) as u32)
+    }
+
+    /// VFO-21: "129." typed (the point by \* on 100-130): a second \* takes it away for a fourth MHz digit.
+    fn wide_next(&self) -> bool {
+        self.freq_mode() && !self.wide && self.n == 4 && self.buf[3] == b'.' && (100..=130).contains(&self.three())
     }
 
     fn typed(&self) -> &[u8] {
@@ -125,29 +162,15 @@ impl Entry {
         }
         if c == b'.' {
             // VFO-21: a second * right after the point on 100-130 takes it away, for 1000-1300 MHz
-            let three = self.buf[..3].iter().fold(0u32, |a, &c| a * 10 + (c.wrapping_sub(b'0')) as u32);
-            if point && !self.wide && self.n == 4 && self.buf[3] == b'.' && (100..=130).contains(&three) {
+            if self.wide_next() {
                 (self.n, self.wide) = (3, true);
                 return;
             }
             if !point && self.n > 0 && (self.n as usize) < self.buf.len() {
-                self.wide |= self.n == 4; // \* after a pending fourth MHz digit keeps it: 1 2 9 6 \* is 1296.
                 self.buf[self.n as usize] = c;
                 self.n += 1;
             }
             return;
-        }
-        if !point && !self.wide && self.n == 3 && self.four_digits(c) {
-            // VFO-21: 1 0 5 0 could be 1050 MHz: the fourth digit stays a MHz digit until a fifth comes, and OK or \*
-            // takes 1050 (a fifth digit puts the point back after the third: 1 1 8 1 0 0 is 118.100).
-            self.buf[3] = c;
-            self.n = 4;
-            return;
-        }
-        if !point && !self.wide && self.n == 4 {
-            self.buf[4] = self.buf[3]; // a fifth digit after a pending fourth MHz digit: 1 1 8 1 is 118.1 after all
-            self.buf[3] = b'.';
-            self.n = 5;
         }
         let mhz_digits = if self.wide { 4 } else { 3 };
         if !point && self.n == mhz_digits {
@@ -392,6 +415,12 @@ impl View for Entry {
         let back = if self.n == 0 { ("BACK", "Back") } else { ("BACK", "Delete") };
         if self.accepts_star() {
             Hints::new(&[("*/OK", "Go"), back]) // VFO-24
+        } else if self.wide_next() {
+            Hints::new(&[("*", "again: 4-digit MHz"), back]) // VFO-21: "129." on 100-130
+        } else if self.freq_mode() && self.wide && self.n == 3 {
+            // VFO-21: "129" after \* \*: the fourth MHz digit's range (130 has only 1300 in reach)
+            let range = WIDE[(self.three() as usize).saturating_sub(100).min(WIDE.len() - 1)];
+            Hints::new(&[(if self.three() == 130 { "0" } else { "0-9" }, range), back])
         } else if self.freq_mode() {
             Hints::new(&[("*", "Point"), ("OK", "Go"), back])
         } else {

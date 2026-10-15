@@ -254,16 +254,22 @@ def change_takes_effect_and_is_kept(t):
 
 @test("MENU-24")
 def back_keeps_the_place(t):
-    """BACK goes back one level keeping the place; each group remembers its last item; hold BACK goes home."""
+    """BACK goes back one level keeping the place; each group remembers its last item while you are in the menu
+    (going home forgets it); hold BACK goes home."""
     u = t.keys("MENU 0 7 5")
     t.eq((u.id, u.title), ("Group", "Sounds"), "MENU 0 7 5 opens the Sounds group")
     u = t.keys("BACK")
     t.eq((u.title, u.sel and u.sel["name"]), ("Display", "Sounds"), "BACK: Display, on Sounds")
     u = t.keys("BACK")
     t.eq((u.id, u.sel and u.sel["name"]), ("Advanced", "Display, sound, power"), "BACK: Advanced, on group 7")
-    # MENU-24's "each group remembers its last item" isn't built: a group reopens on row 1 (sim and radio).
+    # Each group remembers its last item while you stay in the menu; going home forgets it.
+    u = t.keys("7")
+    t.eq((u.title, u.sel and u.sel["name"]), ("Display", "Sounds"), "7 again: Display, still on Sounds")
     u = t.press("BACK", long=True)
     t.eq(u.id, "Home", "hold BACK")
+    u = t.keys("MENU 0 7")
+    t.eq((u.title, u.sel and u.sel["num"]), ("Display", 1), "a new visit: row 1")
+    u = t.press("BACK", long=True)
     # From the Status page: BACK returns there.
     t.keys("MENU 0 0")
     u = t.keys("DOWN DOWN DOWN DOWN DOWN MENU")

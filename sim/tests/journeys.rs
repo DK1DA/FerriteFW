@@ -161,7 +161,7 @@ fn frequency_counter() {
 #[test]
 fn transmit_refused_on_am() {
     let mut r = Radio::new();
-    r.run("type 121.5; press OK; wait 300ms; down PTT; wait 300ms");
+    r.run("type 1215; press OK; wait 300ms; down PTT; wait 300ms");
     r.expect_screen("Transmit refused").expect_text("AM is receive only");
     r.run("up PTT; press BACK; wait 200ms; expect screen \"Home\"");
 }
@@ -182,7 +182,7 @@ fn transmit_on_two_metres() {
 #[test]
 fn emergency_needs_ptt_twice() {
     let mut r = Radio::new();
-    r.run("type 121.0; press OK; wait 300ms; down PTT; wait 300ms; up PTT; wait 200ms");
+    r.run("type 1210; press OK; wait 300ms; down PTT; wait 300ms; up PTT; wait 200ms");
     assert!(!r.sim.radio().live.tx.keyed);
     assert_ne!(r.screen(), "Transmit");
 }

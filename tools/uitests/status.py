@@ -97,10 +97,7 @@ def about_pages_go_round(t):
         label = cur.hint("<>")
         if label not in (nxt.name, nxt.title):
             odd.append(f"{cur.title}: hint {label!r}, next {nxt.name!r}")
-    # About's hint reads "Help" for the Manual page (the help pages' first): the only one not named after it.
-    t.check(odd in ([], ["About: hint 'Help', next 'Manual'"]), "each hint names the next page", odd)
-    if odd:
-        t.note(odd[0])
+    t.eq(odd, [], "each hint names the next page")
     u = t.keys("LEFT")
     t.eq(u.title, "Checks", "◀ goes back")
     u = t.keys("BACK")
