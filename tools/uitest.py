@@ -336,7 +336,10 @@ def page_ids(names, mods=None):
 def select(tests, a, sim):
     out = []
     pages = page_ids(a.page.split(",")) if getattr(a, "page", None) else None
+    only = set(a.only.split(",")) if getattr(a, "only", None) else None
     for t in tests:
+        if only is not None and f"{t.module}.{t.name}" not in only:
+            continue
         if pages is not None and not pages & set(t.pages):
             continue
         if a.k and not any(k.lower() in t.name.lower() for k in a.k.split(",")):
@@ -617,13 +620,14 @@ def free_port():
     return p
 
 
-def start_sim(secs=3600, quiet=True):
+def start_sim(secs=3600, quiet=True, build=True):
     exe = os.path.join(FERRITE, "target", "debug", "ferrite-sim")
-    if not quiet:
-        say("building the simulator (cargo build -p ferrite-sim) ...")
-    b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)
-    if b.returncode != 0 or not os.path.exists(exe):
-        sys.exit("can't build the simulator")
+    if build:
+        if not quiet:
+            say("building the simulator (cargo build -p ferrite-sim) ...")
+        b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)
+        if b.returncode != 0 or not os.path.exists(exe):
+            sys.exit("can't build the simulator")
     port, bt = free_port(), free_port()
     p = subprocess.Popen([exe, "--term-headless", str(secs), "--term-tcp", str(port), "--bt-tcp", str(bt)],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -637,73 +641,106 @@ def start_sim(secs=3600, quiet=True):
     return p, f"tcp:127.0.0.1:{port}", f"tcp:127.0.0.1:{bt}"
 
 
-def shards(sel, n):
-    """The selected tests split by module (one module = one shard, never split) into at most n groups, balanced
-    by test count; modules that share radio state (zones.py's channels 991-995) are listed in SHARE and stay together."""
-    mods = {}
+def units(sel):
+    """The -j work units: one test each, except modules that share radio state (SHARE), which go as one unit."""
+    out, groups = [], {}
     for t in sel:
-        mods.setdefault(t.module, []).append(t)
-    groups = {}
-    for m in mods:
-        groups.setdefault(next((g for g in SHARE if m in g), (m,)), []).extend(mods[m])
-    bins = [[] for _ in range(max(1, min(n, len(groups))))]
-    for g, ts in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        min(bins, key=lambda b: sum(len(x) for _, x in b)).append((g, ts))
-    return [b for b in bins if b]
+        g = next((g for g in SHARE if t.module in g), None)
+        if g:
+            groups.setdefault(g, []).append(t)
+        else:
+            out.append([t])
+    return out + list(groups.values())
 
 
-SHARE = [("zones",)]  # groups of modules that must run in one shard (channels 991-995 etc.)
+SHARE = [("zones",)]  # groups of modules that must run in one unit (channels 991-995 etc.)
+
+
+def last_times():
+    """Each test's seconds in the newest few results (to schedule the slowest first); 5 s when unknown."""
+    import glob
+    times = {}
+    for f in sorted(glob.glob(os.path.join(RESULTS, "*", "ui", "results.json")), key=os.path.getmtime)[-6:]:
+        try:
+            for x in json.load(open(f)).get("tests", []):
+                if x.get("secs"):
+                    times[(x.get("module"), x.get("name"))] = x["secs"]
+        except (OSError, ValueError):
+            pass
+    return times
 
 
 def run_parallel(a, sel):
-    """--sim auto -j N: one headless simulator and one uitest subprocess per shard, results merged."""
+    """--sim auto -j N: N headless simulators kept up for the run; N workers take units (a test, or a SHARE group)
+    from one queue, slowest first by the last runs' times, each running a uitest subprocess on its own simulator."""
     import tempfile
+    import threading
     tmp = tempfile.mkdtemp(prefix="uitest-j-")
     order = {(t.module, t.name): i for i, t in enumerate(sel)}
-    work, procs = [], []
-    try:
-        for i, b in enumerate(shards(sel, a.jobs)):
-            mods = [m for g, _ in b for m in g]
-            sim_proc, port, bt = start_sim(quiet=True)
+    times = last_times()
+    queue = sorted(units(sel), key=lambda u: -sum(times.get((t.module, t.name), 5) for t in u))
+    lock, done, procs = threading.Lock(), [], []
+    b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)  # once, before the workers start
+    if b.returncode != 0:
+        sys.exit("can't build the simulator")
+
+    def worker(w):
+        sim_proc, port, bt = start_sim(quiet=True, build=False)
+        with lock:
             procs.append(sim_proc)
-            cmd = [sys.executable, os.path.abspath(__file__), "--sim", port, "--bt", bt, "--module", ",".join(mods),
-                   "--session", os.path.join(tmp, f"s{i}"), "--results", tmp]
-            for flag, opt in (("k", "-k"), ("rules", "--rules"), ("page", "--page"), ("build", "--build"),
-                              ("commit", "--commit"), ("expect_build", "--expect-build"), ("with_", "--with")):
+        k = 0
+        while True:
+            with lock:
+                if not queue:
+                    return
+                u = queue.pop(0)
+            k += 1
+            tag = f"w{w}-{k}"
+            cmd = [sys.executable, os.path.abspath(__file__), "--sim", port, "--bt", bt,
+                   "--only", ",".join(f"{t.module}.{t.name}" for t in u),
+                   "--session", os.path.join(tmp, tag), "--results", tmp]
+            for flag, opt in (("page", "--page"), ("build", "--build"), ("commit", "--commit"),
+                              ("expect_build", "--expect-build"), ("with_", "--with")):
                 if getattr(a, flag, None):
                     cmd += [opt, getattr(a, flag)]
             for flag in ("smoke", "slow", "stop", "verbose"):
                 if getattr(a, flag, False):
                     cmd.append("--" + flag)
-            log = open(os.path.join(tmp, f"s{i}.log"), "w")
-            work.append((i, mods, subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT), log))
+            out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
+            with lock:
+                done.append((tag, [t.name for t in u], out))
+
+    try:
+        threads = [threading.Thread(target=worker, args=(w,)) for w in range(max(1, min(a.jobs, len(queue))))]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
         merged = None
-        for i, mods, p, log in work:
-            p.wait()
-            log.close()
-            lines = open(log.name).read().splitlines()
-            rj = os.path.join(tmp, f"s{i}", "ui", "results.json")
+        rank = {"fail": 4, "error": 4, "xfail": 3, "xpass": 2, "pass": 2, "skip": 1}
+        for tag, names, out in done:
+            lines = out.splitlines()
+            rj = os.path.join(tmp, tag, "ui", "results.json")
             if not os.path.exists(rj):
-                say(f"shard {i} ({','.join(mods)}) gave no results; its output ends:\n  " + "\n  ".join(lines[-8:]))
+                say(f"unit {','.join(names)} gave no results; its output ends:\n  " + "\n  ".join(lines[-8:]))
                 continue
-            keep = [x for x in lines if x.startswith("  [") or (a.verbose and not x.startswith(("ui tests:", "results:", "page:")))
-                    or x.startswith(("warning", "left changed"))]
-            for x in keep:
-                say(x)
+            for x in lines:
+                if x.startswith("  [") or x.startswith(("warning", "left changed")) or (
+                        a.verbose and not x.startswith(("ui tests:", "results:", "page:"))):
+                    say(x)
             sm = json.load(open(rj))
             if merged is None:
                 merged = sm
-                merged["left_changed"] = [f"[{','.join(mods)}] {x}" for x in sm["left_changed"]]
-            else:
-                merged["tests"] += sm["tests"]
-                merged["left_changed"] += [f"[{','.join(mods)}] {x}" for x in sm["left_changed"]]
-                for rid, v in sm["rules"].items():
-                    prev = merged["rules"].get(rid)
-                    rank = {"fail": 4, "error": 4, "xfail": 3, "xpass": 2, "pass": 2, "skip": 1}
-                    if prev is None or rank[v["result"]] > rank[prev["result"]]:
-                        merged["rules"][rid] = v
+                merged["left_changed"] = [f"[{names[0]}] {x}" for x in sm["left_changed"]]
+                continue
+            merged["tests"] += sm["tests"]
+            merged["left_changed"] += [f"[{names[0]}] {x}" for x in sm["left_changed"]]
+            for rid, v in sm["rules"].items():
+                prev = merged["rules"].get(rid)
+                if prev is None or rank[v["result"]] > rank[prev["result"]]:
+                    merged["rules"][rid] = v
         if merged is None:
-            sys.exit("no shard produced results")
+            sys.exit("no unit produced results")
         merged["tests"].sort(key=lambda r: order.get((r["module"], r["name"]), 1 << 30))
         merged["counts"] = {k: sum(1 for x in merged["tests"] if x["result"] == k)
                             for k in ("pass", "fail", "error", "skip", "xfail", "xpass")}
@@ -723,6 +760,7 @@ def main_args(argv=None):
     ap.add_argument("--pin", help="the radio's PIN (Bluetooth with a PIN lock)")
     ap.add_argument("-k", help="tests whose name has one of these (comma list)")
     ap.add_argument("--module", help="tests in these modules (comma list: menus, home, keys, ...)")
+    ap.add_argument("--only", help=argparse.SUPPRESS)  # exact module.name list (the -j workers)
     ap.add_argument("--rules", help="tests checking a rule matching one of these globs (MENU-*,HOME-17)")
     ap.add_argument("--page", help="tests that visit these screens (comma list: readback ids or screen files, "
                     "e.g. zones,browse)")

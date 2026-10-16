@@ -316,13 +316,25 @@ def idle_menu_returns_home(t):
 @test("MENU-29", pages=("Group",))
 def menu_never_stops_the_radio(t):
     """With the menu up, a scanning slot keeps scanning (slot line) and the cards' receivers keep running."""
-    scanning = [L for L in "ABC" if "scanning" in t.slot(L)]
-    t.need(scanning, "no slot is scanning")
-    t.keys("MENU 0 7")
     import time
-    time.sleep(1.0)
-    for L in scanning:
-        t.check("scanning" in t.slot(L), f"slot {L} still scanning under the menu", t.slot(L))
+    scanning = [L for L in "ABC" if "scanning" in t.slot(L)]
+    started = False
+    if not scanning:  # run alone (uitest -j): start a scan on the active slot (SIDE2, MENU-11), stop it after
+        t.home()
+        t.keys("SIDE2")
+        time.sleep(0.5)
+        scanning = [L for L in "ABC" if "scanning" in t.slot(L)]
+        started = bool(scanning)
+    t.need(scanning, "no slot is scanning")
+    try:
+        t.keys("MENU 0 7")
+        time.sleep(1.0)
+        for L in scanning:
+            t.check("scanning" in t.slot(L), f"slot {L} still scanning under the menu", t.slot(L))
+    finally:
+        if started:
+            t.home()
+            t.keys("SIDE2")
 
 
 @test("MENU-11", pages=("Home", "Value"))
