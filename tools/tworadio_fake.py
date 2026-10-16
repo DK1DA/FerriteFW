@@ -189,6 +189,9 @@ class FakeFerrite:
         if self.xb:
             self.xb_step()  # XB-13: watch and scan pause while it runs
             return
+        if self.screen() == "ToneSearch":
+            self.tsearch_step(self.stack[-1][1])  # TSRCH-3: its own exclusive mode; watch and scans pause
+            return
         audible = []
         for i, s in enumerate(self.slots):
             lv = self.live[i]
@@ -364,6 +367,11 @@ class FakeFerrite:
             out.append('ask "Delete zone?" goes="" kept=""')
         elif sid == "Crossband":
             hints = self.xb_lines(out, self.stack[-1][1])
+        elif sid == "ToneSearch":
+            d = self.stack[-1][1]
+            on = self.air.carrier(self.slots[d["slot"]]["freq"], self.name, now) is not None
+            out.append(f'tsearch slot={"ABC"[d["slot"]]} found={q(d["found"])} open={int(on)} '
+                       f's="{"S9" if on else "S1"}" ask=0 hits={q(",".join(d["hits"]))}')
         elif sid == "Scan":
             sc = self.scan[self.active]
             hints = ([("*", "Skip"), ("#", "Skip always"), ("^v", "Go on")] if sc and sc["state"] != "walk"
@@ -671,6 +679,8 @@ class FakeFerrite:
             self.stack.append(("Tools", None))
         elif sid == "Tools" and name == "5":
             self.stack.append(("Crossband", dict(cell=0)))
+        elif sid == "Tools" and name == "6":
+            self.stack.append(("ToneSearch", dict(slot=self.active, found="", since=None, hits=[])))
         elif sid == "Advanced" and name == "2":
             self.stack.append(("Group", None))
         elif sid == "Group" and name == "3":
@@ -701,6 +711,21 @@ class FakeFerrite:
             self.stack.pop()
         elif sid == "Scan":
             self.scan_key(name)
+
+    def tsearch_step(self, d):
+        """Tone search (TSRCH-3): the slot's carrier read for 0.3 s (two agreeing detector reads) gives its tone, as
+        the card would show it ("T 88.5", "D023N"); it stays after the carrier."""
+        c = self.air.carrier(self.slots[d["slot"]]["freq"], self.name, self.t)
+        if c is None or c["tone"] in (None, "off", ""):
+            d["since"] = None
+            return
+        d["since"] = self.t if d["since"] is None else d["since"]
+        if self.t - d["since"] >= 0.3:
+            word = c["tone"] if c["tone"].startswith("D") else f"T {c['tone']}"
+            if word != d["found"]:
+                d["found"] = word
+                d["hits"].insert(0, word)
+                del d["hits"][3:]
 
     def scan_key(self, name):
         """The scan screen: \\* skips the hit for this scan, # for every scan (the channel's Skip flag), SIDE2 stops."""
@@ -1058,6 +1083,7 @@ def fake_run(tr, a, clk, air, tx, rx, quiet, **kw):
 def args(tr, **kw):
     a = tr.main_args([])
     a.commit, a.build = "selftest", "selftest"
+    a.journal = os.path.join(tempfile.mkdtemp(prefix="tworadio-selftest-journal-"), "pending.json")
     for k, v in kw.items():
         setattr(a, k, v)
     return a
@@ -1168,6 +1194,19 @@ def selftest(a, tr):
             k = run.keyers["rx"].keyups[0]
             extra = f"; the probe keyed and was unkeyed at once: {k.accepted and k.t_off is not None}"
         check(f"bug {bug}: {name} fails", r["result"] == "fail" and not air.keyed(), f"{r['result']}: {r.get('why')}{extra}")
+
+    # 3a. A run killed after a test changed a setting (pkill: no restore ran): the next run puts it back before
+    # its snapshot, so the radio's own value is restored, not the test's (Oct 15, 2026: watch left Off).
+    clk, air, tx, rx = world()
+    jr = os.path.join(tempfile.mkdtemp(prefix="tworadio-selftest-journal-"), "pending.json")
+    run = fake_run(tr, a, clk, air, tx, rx, quiet, journal=jr)
+    was = rx.set.get("0 1 1", DEFAULTS["0 1 1"][1])
+    run.ctx().rx.set("0 1 1", "Off")  # the test's change; then the process dies
+    check("killed: the change is on disk", os.path.exists(jr) and "Off" == rx.set.get("0 1 1"), (jr, rx.set.get("0 1 1")))
+    run2 = fake_run(tr, a, clk, air, tx, rx, quiet, journal=jr)
+    run2.run([])
+    check("killed: the next run puts it back before its snapshot, and the journal goes",
+          rx.set.get("0 1 1", DEFAULTS["0 1 1"][1]) == was and not os.path.exists(jr), (rx.set.get("0 1 1"), was))
 
     # 3b. A set-up that didn't take: the repeater's sides left on the radio's own slots. The test fails at its
     # set-up's readback, before anything keys.

@@ -1,4 +1,4 @@
-"""Tone squelch and the tone hint (chapters 16, 22: TONE-20.4, TSRCH-12, TSRCH-14, TSRCH-15).
+"""Tone squelch, the tone hint and tone search (chapters 16, 22: TONE-20.4, TSRCH-3, TSRCH-12, TSRCH-14, TSRCH-15).
 
 The card's state reads "heard" while the tone hint shows (TSRCH-13: a carrier the slot's tone squelch keeps shut,
 its tone measured); with a broadcast slot on C its card reads muted while a slot has the speaker, so "opens" is
@@ -146,3 +146,23 @@ def one_measurement_per_carrier(t):
     got, _ = burst(t, 3, "88.5 into a slot with no receive tone")
     t.check(all(state(u, "A") == "RX" for _, u in got), "no receive tone: nothing measured (RX)",
             [state(u, "A") for _, u in got])
+
+
+@test("TSRCH-3", part=("TSRCH-2",), keyups=(4, 4, 4), idle=10)
+def tone_search_finds_the_tone(t):
+    """Tone search (MENU 0 3 6) on A at 145.495; the other radio sends 88.5 there: the screen's result (the
+    readback's `tsearch found=`) reads "T 88.5" within 3 s of the carrier, with no RX tone on the slot and with
+    one (T 100.0, which the search must not just repeat); then D023N. The receiving session (Oct 15, 2026) found
+    nothing: the Radio task dropped the screen's command."""
+    rx_quiet(t)
+    for rxtone, sent, want in (("off", "88.5", "T 88.5"), ("100.0", "88.5", "T 88.5"), ("off", "D023N", "D023N")):
+        rx_vfo(t, "A", VHF, tone=rxtone, active=True)
+        t.rx.home()
+        u = t.rx.keys("MENU 0 3 6")
+        t.need(u.id == "ToneSearch", f"MENU 0 3 6 isn't tone search: {u.id}")
+        t.eq((u["tsearch"] or {}).get("found"), "", f"rx tone {rxtone}: searching before the carrier")
+        tx_on(t, VHF, sent)
+        with t.key(4, f"{sent} into tone search (rx tone {rxtone})"):
+            got, at = t.poll(t.rx, lambda u: (u["tsearch"] or {}).get("found") == want, 3.5)
+            t.check(got is not None, f"rx tone {rxtone}: {sent} found", t.rx.raw()["tsearch"])
+        t.rx.home()

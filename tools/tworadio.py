@@ -531,7 +531,9 @@ class Side:
         ok, out = self.cmd_err(f"set {path} {value}")
         if not ok:
             raise Fail(f"{self.role}: set {path} {value}: {out}")
-        changed.setdefault(path, was)
+        if path not in changed:
+            changed[path] = was
+            self.ctx.run.journal_save()  # on disk before the test goes on: a killed run is put back by the next one
 
     def slot(self, L):
         return self.cmd(f"slot {L}").strip()
@@ -811,6 +813,55 @@ class Run:
         self.sdr = None  # --sdr: bench.Sdr (or the selftest's fake)
         self.cap_dir = None
         self.test_name = ""
+        self.base_changed = {}
+        # What the run changed, also on disk, by radio (not role): a run killed before its restore (pkill, a closed
+        # terminal) is put back by the next run before its snapshot. Oct 15, 2026: a killed run left the black
+        # radio's watch Off (0 1 1), and the next run's snapshot took Off as the radio's own, so every restore
+        # after it put Off back.
+        self.journal = getattr(a, "journal", None) or os.path.join(getattr(a, "results", None) or RESULTS,
+                                                                   ".tworadio-pending.json")
+
+    def radio_key(self, role):
+        """The radio behind a role, as the journal names it: the cable's port name changes with the USB socket."""
+        spec = getattr(self.radios[role], "spec", None) or role
+        return "cable" if spec.startswith("/dev/") else spec
+
+    def journal_save(self):
+        """The settings changed and not yet put back, per radio, to disk (removed when there are none)."""
+        pend = {}
+        for role, ch in self.changed.items():
+            both = dict(ch, **{k: v for k, v in (self.base_changed if role == "tx" else {}).items() if k not in ch})
+            if both:
+                pend[self.radio_key(role)] = both
+        with contextlib.suppress(OSError):
+            if pend:
+                os.makedirs(os.path.dirname(self.journal) or ".", exist_ok=True)
+                with open(self.journal, "w") as f:
+                    json.dump(pend, f)
+            elif os.path.exists(self.journal):
+                os.remove(self.journal)
+
+    def journal_replay(self, ctx):
+        """Settings a killed run left changed on these radios, put back before the snapshot; [what was put]."""
+        try:
+            with open(self.journal) as f:
+                pend = json.load(f)
+        except (OSError, ValueError):
+            return []
+        put = []
+        for role in self.radios:
+            for path, v in reversed(list(pend.pop(self.radio_key(role), {}).items())):
+                ok, out = getattr(ctx, role).cmd_err(f"set {path} {v}")
+                put.append(f"{role} {path} -> {v}" + ("" if ok else f" (refused: {out.strip()})"))
+        with contextlib.suppress(OSError):
+            if pend:  # another radio's, kept for when it is back
+                with open(self.journal, "w") as f:
+                    json.dump(pend, f)
+            else:
+                os.remove(self.journal)
+        if put:
+            self.log("put back from an interrupted run: " + "; ".join(put))
+        return put
 
     def capdir(self):
         """Where this run's SDR captures go: kept for the tests that fail, removed for those that pass."""
@@ -863,11 +914,18 @@ class Run:
     def restore(self, ctx, notes, roles=("tx", "rx")):
         """Each radio's settings and slots put back; a radio whose link fails is left (noted), the other still done."""
         put = []
-        for role in roles:
+        stop = None
+        # The cable radio first: a dead Bluetooth link's time-outs never hold up the healthy one (Oct 15, 2026).
+        for role in sorted(roles, key=lambda r: bool(getattr(self.radios[r], "ble", False))):
             try:
                 put += self._restore_one(ctx, role, notes)
             except LINK_ERRORS as e:
                 notes.append(f"{role}: not put back: {type(e).__name__}: {e}")
+            except KeyboardInterrupt as e:  # SIGTERM mid-restore: the other radio still put back, then stop
+                notes.append(f"{role}: not put back: interrupted")
+                stop = e
+        if stop is not None:
+            raise stop
         return put
 
     def _restore_one(self, ctx, role, notes):
@@ -891,6 +949,7 @@ class Run:
             else:
                 notes.append(f"{role} {path}: can't put back {v!r}: {out}")
         self.changed[role].clear()
+        self.journal_save()
         try:
             side.home()
             put += [f"{role} {x}" for x in restore_slots(side, self.snap[role], notes)]
@@ -995,6 +1054,7 @@ class Run:
         self.verify()
         self.battery_check()
         c = self.ctx()
+        self.journal_replay(c)
         self.snapshot()
         results = []
         left = []
@@ -1003,6 +1063,7 @@ class Run:
             c.tx.set(END_TONE, "Off")
             self.base_changed = dict(self.changed["tx"])
             self.changed["tx"].clear()
+            self.journal_save()
             for tst in tests:
                 try:
                     res = self.run_one(tst)
@@ -1038,9 +1099,12 @@ class Run:
             for k in self.keyers.values():
                 k.emergency_off()  # KEY off to both, whatever happened
             notes = []
-            self.changed["tx"].update(getattr(self, "base_changed", {}))
+            self.changed["tx"].update(self.base_changed)
             try:
                 self.restore(c, notes)
+                if not any(n.startswith("tx: not put back") for n in notes):
+                    self.base_changed = {}
+                    self.journal_save()
                 for role in ("tx", "rx"):
                     if any(n.startswith(f"{role}: not put back") for n in notes):
                         continue

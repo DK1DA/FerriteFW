@@ -7,7 +7,7 @@ so a PTT on any hit transmits only there), two receive-only quiet channels, and 
 0 1 4). Settings for the test: scan inputs off, priority check off, the resume rule; scan target (Current zone) and
 Return to (Start) at their defaults (not settable yet).
 """
-from .core import UHF, VHF, Channels, left, rx_quiet, stopped_at, test, tx_on
+from .core import UHF, VHF, Channels, left, rx_quiet, state, stopped_at, test, tx_on
 
 ZONE_CHANS = (
     (981, "TR 2M", VHF, ""),
@@ -86,10 +86,15 @@ def resume_rules(t):
     with t.key(4.5, "resume: 3 s"):
         u, st = stopped_at(t, "A", VHF, 1.2)
         t.need(u is not None, "the scan never stopped on the carrier")
-        g, gt = left(t, "A", VHF, 3.2)
-        t.check(g is not None, "3 s: the scan goes on with the carrier still there", t.rx.raw().cards["A"])
+        # The scan leaves for only one lap of the zone (~280 ms on the radio) and stops on the same carrier again:
+        # the compact readback's state word ("scanning" while it steps) catches the lap where a frequency read
+        # (left(), ~100 ms a readback) missed it (the two-radio run, Oct 15, 2026).
+        g, gt = t.poll(t.rx, lambda u: state(u, "A") == "scanning", max(0.2, st + 3.8 - t.now()), light=True)
+        t.check(g is not None, "3 s: the scan goes on with the carrier still there", state(t.rx.state(), "A"))
         if g is not None:
             t.check(2.5 <= gt - st <= 3.8, "3 s after the stop", f"{gt - st:.2f} s")
+            a, _ = t.poll(t.rx, lambda u: state(u, "A") == "RX", 1.0, light=True)
+            t.check(a is not None, "and stops on the carrier again", state(t.rx.state(), "A"))
 
     t.rx.set("0 1 5", "5 s")
     start_scan(t, ch)

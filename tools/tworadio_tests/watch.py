@@ -48,14 +48,19 @@ def watched_slot_plays_and_active_stays(t):
 @test("BCR-24", keyups=(3,), idle=6, fast=True)
 def broadcast_mutes_at_once_and_returns(t):
     """The broadcast plays on C; the other radio keys on the active A: the broadcast card reads muted as A opens
-    (within 0.3 s of the first readback showing RX), and FM again 2 s after A's audio ends (after A's squelch
-    closes and its 150 ms tail: 1.6 to 2.6 s)."""
+    (in the same readback as A's first RX: the Radio task mutes it in the tick A opens, one snapshot), and FM
+    again 2 s after A's audio ends (after A's squelch closes and its 150 ms tail: 1.6 to 2.6 s). Timed from the
+    next readback, as until Oct 15, 2026, "at once" read one poll late: 0.50 s on the full readback, 0.34 s on
+    the compact one over Bluetooth (its 0.25 s between reads)."""
     watch_setup(t)
     tx_on(t, VHF)
     with t.key(3, "a carrier on A"):
-        _, at = hears(t, "A")
-        m, mt = heard(t, 1.0)
-        t.check(m is not None and mt - at <= 0.3, "muted at once", None if m is None else f"{mt - at:.2f} s")
+        u, _ = hears(t, "A")
+        first = state(u, "C")
+        if first != "muted":
+            m, _ = heard(t, 1.0)
+            first = f"{first}, then {'muted' if m is not None else state(t.rx.state(), 'C')}"
+        t.check(first == "muted", "muted at once: in the readback where A first reads RX", first)
     c, ct = closes(t, "A", 3.0)
     t.need(c is not None, "A didn't close after the unkey")
     f, ft = t.poll(t.rx, lambda u: state(u, "C") == "FM", 4.0)
