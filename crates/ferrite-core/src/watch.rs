@@ -28,6 +28,10 @@ pub const ACTIVE_DWELL_MS: u32 = 150;
 pub const WATCHED_DWELL_MS: u32 = 70;
 /// A slot that closes keeps its chip this long (the reply after the squelch tail).
 pub const HOLD_MS: u32 = 2_000;
+/// A chip given the receive path back (or a new slot) reads its squelch shut until it has woken, tuned and passed
+/// its open delay: a closing read this soon after tells nothing about a slot that was open (HOME-15: the muted
+/// active slot's card flickered to Muted on every hop back; to confirm on the bench).
+pub const REACQUIRE_MS: u32 = 60;
 
 /// What the engine is told each tick.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -41,6 +45,8 @@ pub struct Cfg {
     pub muted: u8,
     /// Slots not listened to at all, the active one too (BCR-23).
     pub off: u8,
+    /// Slots whose squelch is held open (a latched monitor, SQL-14).
+    pub held: u8,
 }
 
 /// What to do now.
@@ -56,7 +62,7 @@ pub struct Out {
     pub paused: bool,
 }
 
-/// The engine (36 bytes).
+/// The engine (44 bytes).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Watch {
     on: [Option<u8>; 2],
@@ -67,6 +73,9 @@ pub struct Watch {
     /// Closed within [`HOLD_MS`], a bit per slot.
     recent: u8,
     pause_until: Option<u32>,
+    /// Each chip listened to at the last turn, and since when (its [`REACQUIRE_MS`]).
+    listening: [bool; 2],
+    got: [u32; 2],
 }
 
 fn after(now: u32, t: u32) -> bool {
@@ -75,7 +84,7 @@ fn after(now: u32, t: u32) -> bool {
 
 impl Watch {
     pub const fn new() -> Self {
-        Watch { on: [None; 2], since: [0; 2], open: 0, closed_at: [0; SLOTS], recent: 0, pause_until: None }
+        Watch { on: [None; 2], since: [0; 2], open: 0, closed_at: [0; SLOTS], recent: 0, pause_until: None, listening: [false; 2], got: [0; 2] }
     }
 
     /// Pause for `secs` (WATCH-6, WATCH-16); 0 resumes now.
@@ -102,7 +111,14 @@ impl Watch {
         for (n, s) in self.on.into_iter().enumerate() {
             let Some(s) = s else { continue };
             if !listened[n] {
+                self.listening[n] = false;
                 continue;
+            }
+            if !self.listening[n] {
+                (self.listening[n], self.got[n]) = (true, now);
+            }
+            if self.open(s) && !sq[n] && now.wrapping_sub(self.got[n]) < REACQUIRE_MS {
+                continue; // still reacquiring: no news yet
             }
             if self.open(s) && !sq[n] {
                 self.closed_at[s as usize] = now;
@@ -131,12 +147,14 @@ impl Watch {
             (set, out.paused) = (1 << active & !c.off, true);
         }
         self.open &= set;
+        // SQL-14, WATCH-3.2: a latched monitor holds its slot open for the turn, as stock's squelch 0 never hops.
+        let open = self.open | c.held & set;
         for n in 0..2u8 {
             let mine = |s: u8| set & 1 << s != 0 && band(c.freq[s as usize]).1 == n;
             let cur = self.on[n as usize].filter(|&s| mine(s));
             let next = match cur {
                 // Open, or closed within the hold: it keeps the chip (a muted slot only for its dwell, HOME-15).
-                Some(s) if (self.open | self.recent) & !c.muted & 1 << s != 0 => Some(s),
+                Some(s) if (open | self.recent) & !c.muted & 1 << s != 0 => Some(s),
                 Some(s) => {
                     let dwell = if s == active { ACTIVE_DWELL_MS } else { WATCHED_DWELL_MS };
                     if now.wrapping_sub(self.since[n as usize]) < dwell {
@@ -149,15 +167,13 @@ impl Watch {
             };
             if next != self.on[n as usize] {
                 self.since[n as usize] = now;
+                self.got[n as usize] = now; // retuned to another slot: reacquiring
             }
             self.on[n as usize] = next;
         }
         out.chip = self.on;
-        out.audio = if self.open(active) && c.muted & 1 << active == 0 {
-            Some(active)
-        } else {
-            (0..SLOTS as u8).find(|&s| s != active && self.open(s) && c.muted & 1 << s == 0)
-        };
+        let heard = |s: u8| open & 1 << s != 0 && c.muted & 1 << s == 0;
+        out.audio = if heard(active) { Some(active) } else { (0..SLOTS as u8).find(|&s| s != active && heard(s)) };
         out
     }
 }
@@ -267,7 +283,7 @@ mod tests {
 
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {
-        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0 }
+        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0 }
     }
 
     /// WATCH-2, WATCH-17: slots sharing a chip take turns on it, 150 ms on the active slot and 70 ms on each
@@ -291,7 +307,7 @@ mod tests {
     #[test]
     fn band_crossing_takes_the_other_chip_at_once() {
         let mut w = Watch::new();
-        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0 };
+        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0, held: 0 };
         assert_eq!(w.tick(0, &c, [false; 2], false).chip, [Some(0), None]);
         c.freq[0] = mhz(446) + 47_500;
         assert_eq!(w.tick(10, &c, [false; 2], false).chip, [None, Some(0)], "70 cm: chip 1 in the same turn");
@@ -499,7 +515,7 @@ mod tests {
     /// alternates the receive path, and A's squelch reads open throughout, also while chip 1 has the path.
     #[test]
     fn muted_slot_stays_open_across_the_hop() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0 };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0 };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let mut path = None;
         let mut paths = [0u32; 2];
@@ -517,5 +533,47 @@ mod tests {
             assert_eq!(out.audio, None, "muted: never heard");
         }
         assert!(paths[0] > 0 && paths[1] > 0, "the hop still gives B its turns: {paths:?}");
+    }
+
+    /// HOME-15, WATCH-3.3, WATCH-17: as above, but as on the radio a chip given the path back reads its squelch
+    /// shut for its first ticks (woken, tuned, the open delay): A must stay open through that, not flicker to
+    /// Muted each hop.
+    #[test]
+    fn muted_slot_stays_open_through_the_chips_reacquire() {
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0 };
+        let (mut w, mut hop) = (Watch::new(), Hop::new());
+        let (mut path, mut got) = (None, 0u32);
+        for t in (0..3_000u32).step_by(10) {
+            let listened = [path == Some(0), path == Some(1)];
+            // chip 0 reads open only once it has had the path 40 ms (the reacquire)
+            let sq = [listened[0] && t >= got + 40, false];
+            let out = w.turn(t, &c, sq, listened, false);
+            let was = path;
+            path = hop.next(t, &out, c.active);
+            if path == Some(0) && was != Some(0) {
+                got = t + 10;
+            }
+            if t >= 300 {
+                assert!(w.open(0), "A open at {t} ms (path {path:?})");
+            }
+        }
+    }
+
+    /// WATCH-3.2, SQL-14: a latched monitor holds the active slot open (`held`), as stock's squelch 0 never hops:
+    /// the path stays on A's chip and B (the other chip) is never listened to, so it is never heard.
+    #[test]
+    fn monitored_active_slot_holds_the_path() {
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0, off: 0, held: 0b001 };
+        let (mut w, mut hop) = (Watch::new(), Hop::new());
+        let mut path = None;
+        for t in (0..2_000u32).step_by(10) {
+            let listened = [path == Some(0), path == Some(1)];
+            let sq = [false, listened[1]]; // A's channel empty, B's carrier there
+            let out = w.turn(t, &c, sq, listened, false);
+            path = hop.next(t, &out, c.active);
+            assert_eq!(path, Some(0), "the path stays on A at {t} ms");
+            assert_eq!(out.audio, Some(0), "A's audio at {t} ms");
+            assert!(awake(&out, path, 0) == [true, false], "B's chip asleep");
+        }
     }
 }

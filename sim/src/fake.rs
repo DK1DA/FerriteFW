@@ -637,7 +637,7 @@ impl FakeRadio {
             }
             _ => 0,
         };
-        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off };
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off, held: self.monitor };
         let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
         // BCR-24: the broadcast plays while no slot is heard, and 2 s after one goes quiet; a muted broadcast slot
         // never plays (HOME-15).
