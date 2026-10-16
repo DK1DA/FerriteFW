@@ -167,6 +167,7 @@ def main():
     ap.add_argument("file", help=".btf to send, or a raw .bin to pack first")
     ap.add_argument("--wait", type=float, default=30, help="seconds to wait for the bootloader")
     ap.add_argument("--dry-run", action="store_true", help="check the file and stop")
+    ap.add_argument("--progress", action="store_true", help="show a progress line per block (off: quiet until done)")
     ap.add_argument("--backup", metavar="FLASH.BIN",
                     help="the whole-SPI-flash backup taken with the hwtest image (required for Ferrite images)")
     ap.add_argument("--ssb-from", metavar="STOCK.BTF",
@@ -230,9 +231,10 @@ def main():
             if r != ACK:
                 sys.exit(f"\nblock {seq}: {RESULTS.get(r, 'no reply') if r is not None else 'no reply'}; "
                          "the radio stays in the bootloader, run this again")
-            print(f"\r{(seq + 1) * 100 // len(blocks):3d}%  block {seq + 1}/{len(blocks)}", end="", flush=True)
+            if a.progress:
+                print(f"\r{(seq + 1) * 100 // len(blocks):3d}%  block {seq + 1}/{len(blocks)}", end="", flush=True)
         r = command(port, CMD_END)
-        print(f"\ndone in {time.monotonic() - t0:.0f} s{'' if r == ACK else ' (no reply to end; check the radio)'}; "
+        print(f"{chr(10) if a.progress else ''}done in {time.monotonic() - t0:.0f} s{'' if r == ACK else ' (no reply to end; check the radio)'}; "
               "the radio restarts into the new image")
 
 
