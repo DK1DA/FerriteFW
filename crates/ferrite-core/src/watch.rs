@@ -91,8 +91,19 @@ impl Watch {
     /// A tick: `sq` is each chip's squelch since the last one (for the slot it was on), `keyed` any slot
     /// transmitting.
     pub fn tick(&mut self, now: u32, c: &Cfg, sq: [bool; 2], keyed: bool) -> Out {
+        self.turn(now, c, sq, [true; 2], keyed)
+    }
+
+    /// [`Watch::tick`] where only the chips in `listened` were heard since the last turn (the Radio task's: the
+    /// one whose receive path [`Hop`] selected). A chip not listened to tells nothing, so its slot keeps its last
+    /// squelch state: a muted active slot (HOME-15) receiving on one band while the hop gives the other band's
+    /// watched slot its dwell reads RX muted throughout, not Muted on every hop (the two-radio run, Oct 15, 2026).
+    pub fn turn(&mut self, now: u32, c: &Cfg, sq: [bool; 2], listened: [bool; 2], keyed: bool) -> Out {
         for (n, s) in self.on.into_iter().enumerate() {
             let Some(s) = s else { continue };
+            if !listened[n] {
+                continue;
+            }
             if self.open(s) && !sq[n] {
                 self.closed_at[s as usize] = now;
                 self.recent |= 1 << s;
@@ -467,5 +478,29 @@ mod tests {
         assert!(!b.tick(4_900, false));
         assert!(b.tick(4_950, false), "2 s after the last");
         assert!(b.tick(9_000, false));
+    }
+
+    /// HOME-15, WATCH-2: A (2 m, chip 0) active and muted with a carrier, B (70 cm, chip 1) watched: the hop
+    /// alternates the receive path, and A's squelch reads open throughout, also while chip 1 has the path.
+    #[test]
+    fn muted_slot_stays_open_across_the_hop() {
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0 };
+        let (mut w, mut hop) = (Watch::new(), Hop::new());
+        let mut path = None;
+        let mut paths = [0u32; 2];
+        for t in (0..2_000u32).step_by(10) {
+            let listened = [path == Some(0), path == Some(1)];
+            let sq = [listened[0], false]; // A's carrier, heard only while chip 0 has the path
+            let out = w.turn(t, &c, sq, listened, false);
+            path = hop.next(t, &out, c.active);
+            if let Some(p) = path {
+                paths[p as usize] += 1;
+            }
+            if t >= 100 {
+                assert!(w.open(0), "A open at {t} ms (path {path:?})");
+            }
+            assert_eq!(out.audio, None, "muted: never heard");
+        }
+        assert!(paths[0] > 0 && paths[1] > 0, "the hop still gives B its turns: {paths:?}");
     }
 }

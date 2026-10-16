@@ -144,6 +144,7 @@ impl Radio {
         // 1. What each chip heard for the slot it was on: the carrier squelch (watch) and the tone (audio); for a
         // scan's fast step, the RSSI over the floor (SCAN-21).
         let mut sq = [false; 2];
+        let mut heard = [false; 2]; // the chips read this tick: the others keep their slot's last state (HOME-15)
         let mut toned = [false; 2];
         let mut scan_open = [false; SLOTS];
         for n in 0..2u8 {
@@ -159,6 +160,7 @@ impl Radio {
                 *fl += (rssi - *fl) / 8; // a slow average of the quiet RSSI
             }
             sq[n as usize] = open;
+            heard[n as usize] = true;
             // TSRCH-12: while the tone hint probes, the detectors scan: their reading, not a match, so the audio
             // stays shut this tick.
             let probing = self.hints[s as usize].probing();
@@ -184,7 +186,7 @@ impl Radio {
         let asleep = if self.save.asleep() { !self.kept() } else { 0 };
         let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep };
         let keyed = self.path.keyed().is_some();
-        let out = self.watcher.tick(now, &cfg, sq, keyed);
+        let out = self.watcher.turn(now, &cfg, sq, heard, keyed);
         // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
         self.hint_tick(now, listening, &sq, &toned, out.audio);
         // 3. Scans step while their slot has a chip, on the answer from that chip.
@@ -268,6 +270,9 @@ impl Radio {
         // Battery Save: anything open or scanning keeps the receivers awake. Broadcast doesn't (BCR-19): the
         // BK4829s keep the level's cycle for the slots watched, and the sleep step leaves the SI4732 playing.
         let busy = self.live.slots.iter().any(|s| s.squelch_open || s.scanning);
+        // SQL-8: the squelch opening or closing holds the receiver on for 10 s.
+        let a = self.save.squelch(now_ms(), self.live.slots.iter().any(|s| s.squelch_open));
+        self.apply(a).await;
         let a = self.save.tick(now_ms(), busy);
         self.apply(a).await;
     }

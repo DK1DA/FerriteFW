@@ -48,12 +48,14 @@ pub struct RxSleep {
     /// End of the current phase, or of the hold; ms.
     until: u64,
     recent_until: u64,
+    /// The squelch as last told ([`RxSleep::squelch`]): its opening and its closing are activity (SQL-8).
+    sq: bool,
 }
 
 impl RxSleep {
     /// Starts awake, as after activity.
     pub fn new(level: Level, now: u64) -> Self {
-        RxSleep { level, asleep: false, until: now + HOLD_MS, recent_until: now + HOLD_MS + RECENT_MS }
+        RxSleep { level, asleep: false, until: now + HOLD_MS, recent_until: now + HOLD_MS + RECENT_MS, sq: false }
     }
 
     pub fn level(&self) -> Level {
@@ -79,14 +81,26 @@ impl RxSleep {
         if was { Action::Wake } else { Action::None }
     }
 
+    /// SQL-8: any slot's squelch, each receive tick before [`RxSleep::tick`]. Opening or closing is activity: the
+    /// receiver is held on for [`HOLD_MS`] after the squelch closes. Until Oct 15, 2026 nothing told it: an open
+    /// squelch only counted as busy, which left a 300 ms on-phase after the close and the chip back in its cycle
+    /// at once (the two-radio run's REG_30 reads).
+    pub fn squelch(&mut self, now: u64, open: bool) -> Action {
+        if open == self.sq {
+            return Action::None;
+        }
+        self.sq = open;
+        self.activity(now)
+    }
+
     /// Call at least by [`RxSleep::deadline`]. `busy`: something needs the receiver on all the time.
     pub fn tick(&mut self, now: u64, busy: bool) -> Action {
         let Some((on, off)) = timing(self.level) else {
             return self.wake_if_asleep();
         };
         if busy {
-            // Stay awake while busy, and start a fresh on-phase when it ends.
-            self.until = now + on as u64;
+            // Stay awake while busy, and at least a fresh on-phase when it ends (never cutting a hold short).
+            self.until = self.until.max(now + on as u64);
             return self.wake_if_asleep();
         }
         if now < self.until {
@@ -195,5 +209,28 @@ mod tests {
         let mut s = RxSleep::new(Level::Off, 0);
         run(&mut s, 0, 3 * HOLD_MS, false);
         assert_eq!(s.deadline(), None);
+    }
+
+    /// SQL-8: opening or closing the squelch holds the receiver on for 10 s; an open squelch (busy) keeps it awake.
+    /// Out of the hold and into the level's cycle first, as on the radio (the two-radio run, Oct 15, 2026: the chip
+    /// went straight back to its cycle when the squelch closed).
+    #[test]
+    fn squelch_close_holds_ten_seconds() {
+        let mut s = RxSleep::new(Level::L1, 0);
+        let t0 = HOLD_MS + RECENT_MS + 1_000;
+        run(&mut s, 0, t0, false);
+        while !s.asleep() {
+            s.tick(s.deadline().unwrap(), false);
+        }
+        let t = s.deadline().unwrap(); // woken by the cycle, the carrier there
+        assert_eq!(s.tick(t, false), Action::Wake);
+        assert_eq!(s.squelch(t + 10, true), Action::None);
+        assert_eq!(run(&mut s, t + 10, 4_000, true), 4_000, "awake while open");
+        let closed = t + 4_010;
+        assert_eq!(s.squelch(closed, false), Action::None);
+        assert_eq!(run(&mut s, closed, HOLD_MS, false), HOLD_MS, "held 10 s after the close");
+        let a = run(&mut s, closed + HOLD_MS, 5_000, false);
+        assert!(a < 5_000, "then the cycle again: {a}");
+        assert_eq!(s.squelch(closed + HOLD_MS + 5_000, false), Action::None, "no change, no activity");
     }
 }

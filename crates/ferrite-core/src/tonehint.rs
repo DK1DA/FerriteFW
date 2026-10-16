@@ -71,11 +71,15 @@ impl Hint {
     pub fn tick(&mut self, now: u32, freq: Freq10, rx_tone: u16, carrier: bool, toned: bool, eligible: bool) -> Act {
         let mut act = Act::None;
         if (freq, rx_tone) != (self.freq, self.tone) {
+            let retuned = freq != self.freq;
             (self.freq, self.tone, self.heard) = (freq, rx_tone, 0);
+            let measured = matches!(self.phase, Phase::Probing(_) | Phase::Done);
             if self.probing() {
                 act = Act::Restore;
             }
-            self.phase = Phase::Idle;
+            // TSRCH-15: a new receive tone clears the hint (TSRCH-14) but the carrier was measured already: no second
+            // measurement until it drops. A new frequency is another carrier.
+            self.phase = if measured && !retuned { Phase::Done } else { Phase::Idle };
         }
         if self.heard != 0 {
             if carrier {
@@ -254,6 +258,39 @@ mod tests {
         let mut h = shown();
         h.tick(900, F, T100, true, true, true);
         assert_eq!(h.heard, 0, "the tones match");
+    }
+
+    /// TSRCH-15: the receive tone changed under a measured carrier clears the hint and measures nothing more
+    /// while that carrier lasts (the two-radio run, Oct 15, 2026: 107.2 set mid-carrier, the hint came back);
+    /// the next carrier is measured. A new frequency is a new carrier.
+    #[test]
+    fn tone_change_keeps_one_measurement() {
+        const T107: u16 = 1072;
+        let mut h = Hint::new();
+        h.tick(0, F, T100, true, false, true);
+        h.tick(500, F, T100, true, false, true);
+        h.found(800, 885);
+        h.tick(900, F, T107, true, false, true);
+        assert_eq!(h.heard, 0, "cleared");
+        for t in (1000..5000).step_by(100) {
+            assert_eq!(h.tick(t, F, T107, true, false, true), Act::None, "same carrier at {t}");
+        }
+        h.tick(5100, F, T107, false, false, true);
+        h.tick(6000, F, T107, true, false, true);
+        assert_eq!(h.tick(6500, F, T107, true, false, true), Act::Start, "the next carrier");
+        // a tone change mid-probe ends it, and the carrier isn't probed again
+        let mut h = Hint::new();
+        h.tick(0, F, T100, true, false, true);
+        h.tick(500, F, T100, true, false, true);
+        assert_eq!(h.tick(600, F, T107, true, false, true), Act::Restore);
+        assert_eq!(h.tick(1200, F, T107, true, false, true), Act::None);
+        // a new frequency: measured again
+        let mut h = Hint::new();
+        h.tick(0, F, T100, true, false, true);
+        h.tick(500, F, T100, true, false, true);
+        h.found(800, 885);
+        h.tick(900, F + 500, T100, true, false, true);
+        assert_eq!(h.tick(1400, F + 500, T100, true, false, true), Act::Start);
     }
 
     /// TSRCH-14: a retune or tone change during the probe puts the detector back; a chip retune just ends it.
