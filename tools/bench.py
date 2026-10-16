@@ -13,6 +13,9 @@ each run's numbers stored, compared with the previous run of the same configurat
                                                        # a suite of checks by name (tools/benchtests/): around a
                                                        # key-up, by readback, terminal and SDR (its docstring)
     tools/bench.py --selftest                          # a fake radio and synthetic IQ: the whole flow and the gates
+    tools/bench.py --suite modes-on-air [--tests vox,dtmf] [--kiss-ble ble:NAME] [--slow] [--no-audio] [--dry-plan]
+                                                       # VOX by the Mac's speaker, DTMF, APRS, KISS, GPS, watch, HF,
+                                                       # broadcast, end tone (tools/benchtests/modes_on_air.py)
     tools/bench.py --selftest --sim tcp:127.0.0.1:7300 # the same against the simulator's link (fake SDR)
     tools/bench.py --auto [--dry-plan]                 # what changed since the last on-radio runs decides: the UI
                                                        # tests (tools/uitest.py), the SDR suite, both + a reboot check;
@@ -3545,6 +3548,10 @@ def main():
     ap.add_argument("--record", action="store_true", help="after the run: each rule its checks name gets a result "
                     "row in docs/test-plan/*.md (tools/record_results.py; on-air runs only)")
     ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
+    ap.add_argument("--kiss-ble", metavar="ble:NAME", help="with --suite modes-on-air: KISS frames over Bluetooth "
+                    "(0 5 9 1 Bluetooth while the test runs; the cable stays the link)")
+    ap.add_argument("--slow", action="store_true", help="with --suite modes-on-air: also GPS-33's 4-minute test")
+    ap.add_argument("--no-audio", action="store_true", help="with --suite modes-on-air: no tone from the Mac's speaker")
     ap.add_argument("--rule-results", nargs="+", metavar="SESSION", help="(re)write bench/results.json for saved "
                     "sessions from their session.json and <run>.json (nothing keyed)")
     a = ap.parse_args()

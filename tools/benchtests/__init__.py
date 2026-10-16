@@ -9,6 +9,7 @@ import importlib
 # name -> module (append new suites here)
 SUITES = {
     "tx-behaviour": "benchtests.tx_behaviour",
+    "modes-on-air": "benchtests.modes_on_air",
 }
 
 

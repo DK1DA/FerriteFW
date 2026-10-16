@@ -77,6 +77,41 @@ RULE_TAGS = {
     "txb_rx_both_kept": {"SAFE-24": "part"},  # the hold kept across a key-up, refused on HF; not both watched
     "txb_broadcast_muted_keyed": {"TX-24": "part"},  # the state while keyed, not its order before the carrier
     "txb_trim_follows": {"CAL-13": "part"},  # the chip and the carrier follow the trim; the check's use not probed
+    # --suite modes-on-air (tools/benchtests/modes_on_air.py)
+    "vox_tail": {"VOX-5": "all"},  # carrier end = envelope fall + tail + the 0.5 s unkey hold, after a Mac tone
+    "vox_active_slot": {"VOX-13": "part"},  # keys the active slot (B); its levels sentence is VOX-14's
+    "vox_levels": {"VOX-14.2": "all", "VOX-13": "part"},  # one loudness, levels 1-9: keys up to a level, none above
+    "vox_thresholds": {"VOX-14.1": "part"},  # the last level that keys against the `mic` reading (±1); not each threshold
+    "vox_home_only": {"VOX-3.1": "part"},  # quick settings, menu, 0 8 2, frequency entry: not every screen
+    "vox_hold": {"VOX-3.5": "part"},  # after a menu closes; not after audio ends
+    "vox_blocked": {"VOX-3.2": "part"},  # the broadcast and an open monitor; not a beep or a slot heard
+    "vox_boot": {"VOX-3.3": "part"},  # from REBOOT sent (the boot moment itself isn't seen)
+    "dtmf_dial": {"DTMF-1": "part"},  # the dialer's digits on air; the chapter 15 checks by the TX rules' tests
+    "dtmf_timing": {"DTMF-3": "part"},  # three speed/delay pairs; live digits (DTMF-7) not timed
+    "dtmf_pairs": {"DTMF-2": "part"},  # both tones of each pair, the mic tone absent; the generator itself unseen
+    "tone11_no_end_after_dtmf": {"TONE-11": "part"},
+    "ptt_id": {"DTMF-4": "all"},  # the code after key-up before the mic opens, and before the drop
+    "end_tone_order": {"TONE-8": "part"},  # after KEY off, before the drop, mic muted; CW ID and tail order not
+    "tone11_no_end_after_afsk": {"TONE-11": "part"},
+    "reg40_end_tone": {"TONE-19.3": "part"},  # the end tone only (not CW ID, DTMF or a beep)
+    "aprs_tx_delay": {"APRS-14.1": "part"},  # the delay before the first flag; DAC1 itself isn't seen
+    "aprs_beacon_on_c": {"APRS-20": "part"},  # C's frequency; the power can't be measured on tx-dry
+    "aprs_after_voice": {"APRS-27": "all"},
+    "aprs_spacing": {"APRS-9": "part"},  # two automatic beacons 30 s apart; the PTT exception not tried
+    "aprs_compose": {"APRS-18": "part"},  # remote PTT only
+    "gps33_no_position": {"GPS-33": "part"},  # no position: skipped with the toast; the fix-too-old path not
+    "kiss_frames": {"KISS-2": "part"},  # on air, TX delay by command, no 30 s spacing; caps and busy not tried
+    "kiss_no_pin": {"KISS-7": "part"},
+    "gps_pb10": {"GPS-5": "all", "GPS-22": "part"},  # 22: not the before-key-up drive or the refused hand-back
+    "gps_during_tx": {"GPS-14.1": "all"},
+    "watch_relay_keyup": {"WATCH-12": "part"},  # never at key-up or in the unkey wait; the band changes not
+    "watch_pause_after_tx": {"WATCH-16": "part"},  # paused while keyed, back after 30 s; a key press ending it not
+    "hf_refused_while_keyed": {"HF-2": "part"},  # while a chip transmits; not with the crossband repeater
+    "hf_receive_only": {"HF-24": "part"},  # AM below 18 MHz; USB, LSB and CW not tried
+    "hf_chip1_refusal": {"HF-23": "part"},  # the refusal at 40 MHz, still in HF mode; the HF key-up needs a decision
+    "bcast_muted_keyed": {"BCR-16": "part"},  # the SI4732 muted; its input switch isn't read
+    "bcast_resumes": {"BCR-29.3": "all"},
+    "bcast_card_keyed": {"BCR-26.4": "part"},  # during a remote key-up only
 }
 
 
