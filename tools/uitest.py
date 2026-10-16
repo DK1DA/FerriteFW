@@ -620,7 +620,7 @@ def free_port():
     return p
 
 
-def start_sim(secs=3600, quiet=True, build=True):
+def start_sim(secs=3600, quiet=True, build=True, ports=None):
     exe = os.path.join(FERRITE, "target", "debug", "ferrite-sim")
     if build:
         if not quiet:
@@ -628,7 +628,7 @@ def start_sim(secs=3600, quiet=True, build=True):
         b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)
         if b.returncode != 0 or not os.path.exists(exe):
             sys.exit("can't build the simulator")
-    port, bt = free_port(), free_port()
+    port, bt = ports or (free_port(), free_port())
     p = subprocess.Popen([exe, "--term-headless", str(secs), "--term-tcp", str(port), "--bt-tcp", str(bt)],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(50):
@@ -679,13 +679,40 @@ def run_parallel(a, sel):
     order = {(t.module, t.name): i for i, t in enumerate(sel)}
     times = last_times()
     queue = sorted(units(sel), key=lambda u: -sum(times.get((t.module, t.name), 5) for t in u))
+    total = len(queue)
     lock, done, procs = threading.Lock(), [], []
     b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)  # once, before the workers start
     if b.returncode != 0:
         sys.exit("can't build the simulator")
 
+    base = free_port()
+    taken = set()
+
+    def ports():
+        # distinct ports for every simulator: free_port() alone can hand two workers the same one
+        with lock:
+            out = []
+            p = base
+            while len(out) < 2:
+                p += 1
+                if p in taken:
+                    continue
+                try:
+                    with socket.socket() as sk:
+                        sk.bind(("127.0.0.1", p))
+                except OSError:
+                    continue
+                taken.add(p)
+                out.append(p)
+            return tuple(out)
+
     def worker(w):
-        sim_proc, port, bt = start_sim(quiet=True, build=False)
+        try:
+            sim_proc, port, bt = start_sim(quiet=True, build=False, ports=ports())
+        except BaseException as e:  # noqa: BLE001 (a worker that can't start says so; the others go on)
+            with lock:
+                done.append((f"w{w}-start", [f"worker {w} start"], f"worker {w}: {e!r}"))
+            return
         with lock:
             procs.append(sim_proc)
         k = 0
@@ -706,7 +733,8 @@ def run_parallel(a, sel):
             for flag in ("smoke", "slow", "stop", "verbose"):
                 if getattr(a, flag, False):
                     cmd.append("--" + flag)
-            out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
+            r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            out = r.stdout + ("" if r.returncode in (0, 1) else f"\n(exit {r.returncode})")
             with lock:
                 done.append((tag, [t.name for t in u], out))
 
@@ -739,6 +767,9 @@ def run_parallel(a, sel):
                 prev = merged["rules"].get(rid)
                 if prev is None or rank[v["result"]] > rank[prev["result"]]:
                     merged["rules"][rid] = v
+        ran = sum(1 for tag, _, _ in done if not tag.endswith("-start"))
+        if ran < total:
+            say(f"warning: {total - ran} of {total} units never ran (see the worker lines above)")
         if merged is None:
             sys.exit("no unit produced results")
         merged["tests"].sort(key=lambda r: order.get((r["module"], r["name"]), 1 << 30))

@@ -43,12 +43,12 @@ def frequency_setting_typed(t):
     t.eq(t.get("0 5 7 1"), old, "set puts it back")
 
 
-@test("MENU-5", "MENU-7", "MENU-12", "MENU-15", "MENU-16", "MENU-21", pages=("Fm", "Group", "Text"))
-def every_setting_reachable_and_live(t):
-    """Each setting from the table (`dump`): MENU 0 and its number lands on its row (name as `get`, value,
-    help with the path); the knob changes it at once (`get` has it), and back; # leaves defaults alone."""
-    paths = [p for p in t.state.paths if p not in UNSAFE]
-    t.check(len(paths) >= 40, "the settings table", len(paths))
+GROUPS = "13456789"  # the settings table's top-level groups (MENU 0 G); one test each, so -j runs them side by side
+
+
+def walk(t, paths):
+    """Each setting in paths (from the table, `dump`): MENU 0 and its number lands on its row (name as `get`,
+    value, help with the path); the knob changes it at once (`get` has it), and back; # leaves defaults alone."""
     changed = unchanged = 0
     odd, via, misrouted, unbuilt = [], [], [], []
     for path in paths:
@@ -101,6 +101,28 @@ def every_setting_reachable_and_live(t):
            + (f"; typed paths landing elsewhere (reached with OK): {', '.join(misrouted)}" if misrouted else "")
            + (f"; in groups not built yet (\"setting comes next\"): {', '.join(unbuilt)}" if unbuilt else ""))
     t.check(not misrouted, "every typed path lands on its row", misrouted)
+
+
+def settings_group_test(g):
+    def fn(t):
+        paths = [p for p in t.state.paths if p not in UNSAFE and p.startswith(f"0 {g} ")]
+        t.check(paths, f"settings in MENU 0 {g}", len(paths))
+        walk(t, paths)
+    fn.__name__ = f"settings_0_{g}_reachable_and_live"
+    fn.__doc__ = f"MENU 0 {g}'s settings: each reached by its number and changed live by the knob, then back (walk())."
+    return test("MENU-5", "MENU-7", "MENU-12", "MENU-15", "MENU-16", "MENU-21", pages=("Fm", "Group", "Text"))(fn)
+
+
+for _g in GROUPS:
+    settings_group_test(_g)
+
+
+@test("MENU-5", "MENU-7", pages=("Group",))
+def settings_in_other_groups_reachable_and_live(t):
+    """Settings outside GROUPS (a group added later): walked the same way, so none goes untested; and the table
+    as a whole still has its settings."""
+    t.check(len([p for p in t.state.paths if p not in UNSAFE]) >= 40, "the settings table", len(t.state.paths))
+    walk(t, [p for p in t.state.paths if p not in UNSAFE and p.split()[1] not in GROUPS])
 
 
 @test("TX-2", "SETUP-8", pages=("ExtendTx", "Group", "Status"))
