@@ -139,6 +139,8 @@ pub struct FakeRadio {
     txtest: Option<ferrite_core::txtest::Arm>,
     /// Slots with monitor latched: squelch held open.
     monitor: u8,
+    /// Slots with receive priority (APRS-21.1, [`RadioCmd::Awake`]).
+    prio: u8,
     /// Quick mute (HOME-15): slots still received, never heard.
     mute: u8,
     fm: u16,
@@ -208,6 +210,7 @@ impl FakeRadio {
             #[cfg(feature = "bench")]
             txtest: None,
             monitor: 0,
+            prio: 0,
             mute: 0,
             fm: 9_810,
             fm_t0: None,
@@ -310,6 +313,7 @@ impl FakeRadio {
                 }
             }
             RadioCmd::Watch(m) => self.watch = m,
+            RadioCmd::Awake(m) => self.prio = m,
             RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::RxTone, .. } => self.hint = self.hint.filter(|h| h.0 != slot),
             RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::Power, value } => self.power[slot as usize % 4] = value.clamp(0, 2) as u8,
             RadioCmd::PauseWatch(secs) => {
@@ -637,7 +641,7 @@ impl FakeRadio {
             }
             _ => 0,
         };
-        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off, held: self.monitor };
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off, held: self.monitor, prio: self.prio };
         let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
         // BCR-24: the broadcast plays while no slot is heard, and 2 s after one goes quiet; a muted broadcast slot
         // never plays (HOME-15).

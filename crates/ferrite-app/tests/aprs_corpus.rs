@@ -98,7 +98,7 @@ fn loopback_beacon_through_dac_and_adc() {
     tx.beacon_now();
     let fix = Fix { pos: Pos { lat: 454_252_000, lon: -756_901_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 8, age_s: 0, utc_s: 0 };
     let mut out = [0u8; FRAME_MAX];
-    let t = tx.tick(0, true, true, b"VE3XYZ-7", Some(fix), &AprsCfg::DEFAULT, &mut out);
+    let t = tx.tick(0, ferrite_app::aprs_live::Sending::All, true, b"VE3XYZ-7", Some(fix), &AprsCfg::DEFAULT, &mut out);
     assert_eq!(t.what, "Beacon");
     // DAC codes as the ADC would read them back (12 bits both ways), with the line's DC bias.
     let adc: Vec<u16> = uafsk::Modulator::new(&out[..t.len], afsk_tx(300)).map(to_dac).chain(std::iter::repeat_n(2048, 4800)).collect();

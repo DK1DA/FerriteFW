@@ -246,6 +246,9 @@ struct Radio {
     woke: [Option<u32>; 2],
     /// Slots whose chip stays awake (APRS mode's C: [`RadioCmd::Awake`], decision 111).
     keep: u8,
+    /// The APRS slot (C while APRS mode, KISS or beacons hold it: [`RadioCmd::AprsSlot`]): its chip listens with
+    /// the squelch's open delay at 0 (SQL-17, decision 181).
+    aprs_slots: u8,
     /// Each chip's noise floor (dBm), a slow average of its RSSI with the squelch closed (the fast pass's
     /// reference).
     floor: [i16; 2],
@@ -666,6 +669,7 @@ pub async fn task() {
         settle: Settle::DEFAULT,
         woke: [None; 2],
         keep: 0,
+        aprs_slots: 0,
         floor: [-125; 2],
         monitor: 0,
         user_mute: 0,

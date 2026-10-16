@@ -62,6 +62,7 @@ impl Radio {
             }
             RadioCmd::Watch(m) => self.watch_set = m,
             RadioCmd::Awake(m) => self.keep = m,
+            RadioCmd::AprsSlot(m) => self.aprs_slots = m,
             RadioCmd::PauseWatch(secs) => self.watcher.pause(now, secs),
             RadioCmd::Scan { slot, on } => self.scan(slot, on),
             RadioCmd::ScanSkip { slot } => {

@@ -3,6 +3,8 @@
 //! to us into the inbox and the log, acks), and once a second it may give a frame to send (an ack, a digipeat,
 //! one of ours, a beacon), which goes out as a data transmission on slot C:
 //!
+//! 0. APRS-10, APRS-29 (decision 181): the frame waits for a clear moment on the APRS frequency (p-persistence on
+//!    C's squelch, [`ClearWait`]) for up to 5 s, else it isn't sent;
 //! 1. [`transmit::data_key`]: the automatic transmission's checks (TX-35, APRS-8, APRS-10), then the data key-up
 //!    at the APRS power (0 5 5 4, default Low);
 //! 2. once the Radio task says slot C is keyed, the frame to the DSP task ([`AFSK_TX`]), which plays it from the TX
@@ -11,14 +13,15 @@
 //!    unkeys after a timeout.
 //!
 //! The decoder runs while APRS mode is on (APRS-16), and without it while a slot on a channel flagged APRS is
-//! the active one (APRS-22: decode only, nothing sent). Bluetooth KISS waits for roadmap 3d. The digipeater
+//! the active one (APRS-22: decode only, nothing sent). With APRS mode off and automatic beacons on (APRS-29),
+//! beacons alone go out, on C. Bluetooth KISS waits for roadmap 3d. The digipeater
 //! follows 0 5 8 (off by default, APRS-12, APRS-26).
 
 use super::dsp::{Frame, AFSK_DONE, AFSK_TX, APRS_RX};
 use crate::chan::DSP;
 use crate::store::Store;
 use ferrite_app::aprs_live::uaprs::kiss;
-use ferrite_app::aprs_live::FRAME_MAX;
+use ferrite_app::aprs_live::{Clear, ClearWait, Sending, FRAME_MAX};
 use ferrite_app::data::{Data, Event, Src};
 use ferrite_app::screens::transmit;
 use ferrite_app::App;
@@ -37,6 +40,8 @@ const TXDELAY_10MS: u8 = 30;
 
 enum Tx {
     Idle,
+    /// [`Aprs::frame`] (a `what`) waits for a clear moment (APRS-10, APRS-29).
+    Clearing { what: &'static str },
     /// Keyed for [`Aprs::frame`], waiting for the Radio task.
     Keying { at_ms: u32 },
     Playing { at_ms: u32 },
@@ -54,13 +59,14 @@ pub struct Aprs {
     params: kiss::Params,
     kiss_q: Option<Frame>,
     access: kiss::Access,
+    clear: ClearWait,
     seed: u32,
 }
 
 impl Aprs {
     pub fn new() -> Self {
         let params = kiss::Params { tx_delay: TXDELAY_10MS, ..kiss::Params::default() };
-        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), seed: 0x2545_F491 }
+        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), clear: ClearWait::default(), seed: 0x2545_F491 }
     }
 
     /// A byte from the KISS port, the cable or Bluetooth (KISS-6; TERM-2's route on the cable).
@@ -105,6 +111,7 @@ impl Aprs {
         // Frames heard (APRS-3, APRS-6).
         while let Ok(f) = APRS_RX.try_receive() {
             if kiss_on {
+                extra.kiss_heard(); // APRS-17.2: the KISS card's count
                 let out = if kiss_cable { &crate::chan::TERM_OUT } else { &crate::chan::BT_OUT };
                 kiss::encode(0, f.bytes(), |b| {
                     out.put(b); // KISS-4; a full ring drops the rest of the frame
@@ -125,6 +132,22 @@ impl Aprs {
             }
         }
         match &self.tx {
+            &Tx::Clearing { what } => {
+                let busy = live.slots[SLOT_C as usize].squelch_open;
+                let r = self.random();
+                match self.clear.poll(now_ms, busy, r) {
+                    Clear::Wait => {}
+                    Clear::Send => {
+                        self.tx = if transmit::data_key(app, SLOT_C, extra.cfg().power, what.as_bytes()) { Tx::Keying { at_ms: now_ms } } else { Tx::Idle };
+                    }
+                    Clear::GiveUp => {
+                        let w = what.as_bytes();
+                        transmit::not_sent(app, w, b"channel busy");
+                        store.log(&log_event(app.aprs_freq(), w, b"not sent: channel busy"));
+                        self.tx = Tx::Idle;
+                    }
+                }
+            }
             Tx::Keying { at_ms } => {
                 if live.tx.keyed && live.tx.slot == SLOT_C {
                     AFSK_TX.signal(self.frame);
@@ -147,6 +170,7 @@ impl Aprs {
                 if self.access.may_send(&self.params, now_ms, busy, r) {
                     self.frame = self.kiss_q.take().unwrap();
                     if transmit::data_key(app, SLOT_C, extra.cfg().power, b"KISS") {
+                        extra.kiss_sent(); // APRS-17.2
                         self.tx = Tx::Keying { at_ms: now_ms };
                     }
                 }
@@ -156,7 +180,14 @@ impl Aprs {
                 let relay_ok = txplan::relay_ok(app.tuned_freq(app.active()), app.aprs_freq());
                 let cfg = extra.cfg();
                 let mut out = [0u8; FRAME_MAX];
-                let t = extra.aprs.tick(now_s, on, relay_ok, me.as_bytes(), extra.fix(), &cfg, &mut out);
+                let send = if on {
+                    Sending::All
+                } else if app.beacons_on() {
+                    Sending::Beacons // APRS-29
+                } else {
+                    Sending::Nothing
+                };
+                let t = extra.aprs.tick(now_s, send, relay_ok, me.as_bytes(), extra.fix(), &cfg, &mut out);
                 for (peer, text, st) in t.states.into_iter().flatten() {
                     store.message_state(peer.as_bytes(), text.as_bytes(), st);
                 }
@@ -164,11 +195,10 @@ impl Aprs {
                     extra.changed();
                 }
                 if t.len > 0 {
-                    if transmit::data_key(app, SLOT_C, cfg.power, t.what.as_bytes()) {
-                        self.frame = Frame { len: t.len as u16, txdelay_10ms: self.params.tx_delay, b: [0; FRAME_MAX] };
-                        self.frame.b[..t.len].copy_from_slice(&out[..t.len]);
-                        self.tx = Tx::Keying { at_ms: now_ms };
-                    }
+                    self.frame = Frame { len: t.len as u16, txdelay_10ms: self.params.tx_delay, b: [0; FRAME_MAX] };
+                    self.frame.b[..t.len].copy_from_slice(&out[..t.len]);
+                    self.clear.start(now_ms);
+                    self.tx = Tx::Clearing { what: t.what };
                 } else if let Some(why) = match t.what {
                     "Beacon: no position" => Some(&b"no position"[..]),
                     "Beacon: old fix" => Some(&b"fix too old"[..]),

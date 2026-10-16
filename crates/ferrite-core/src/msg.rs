@@ -36,9 +36,13 @@ pub enum RadioCmd {
     Active(u8),
     /// The watch set, a bit per slot (0 = watch off).
     Watch(u8),
-    /// Slots whose chip stays awake whatever the hop and Battery Save do, a bit per slot: APRS mode's C, for its
-    /// decoder (APRS-16, PWR-4, decision 111).
+    /// Slots whose chip stays awake whatever the hop and Battery Save do, a bit per slot: APRS mode's (or KISS's)
+    /// C, for its decoder (APRS-16, PWR-4, decision 111); also the slots with receive priority on their chip
+    /// (APRS-21.1, decision 181).
     Awake(u8),
+    /// The APRS slot, a bit per slot (C while APRS mode, KISS or beacons hold it): its squelch listens with the
+    /// open delay at 0 (SQL-17, decision 181).
+    AprsSlot(u8),
     /// Start or stop scanning in a slot.
     Scan { slot: u8, on: bool },
     /// Channel scans also listen on each channel's transmit frequency when it has a shift or split (SCAN-22,

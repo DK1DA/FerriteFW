@@ -36,7 +36,9 @@ impl Shot {
             if self.t.is_multiple_of(1000) {
                 let a = &mut self.app;
                 let ok = ferrite_core::txplan::relay_ok(a.tuned_freq(a.active()), a.aprs_freq());
-                let n = self.store.aprs_tick(self.t / 1000, a.aprs_on(), ok);
+                // APRS-29: beacons alone run the beacon's timer too (the card's countdown).
+                let on = a.aprs_on() || a.aprs_holder() == Some(ferrite_app::aprs::Holder::Beacon);
+                let n = self.store.aprs_tick(self.t / 1000, on, ok);
                 if let Some((from, text)) = n.inbound {
                     a.notify(from.as_bytes(), text.as_bytes(), false);
                 }
@@ -130,4 +132,26 @@ pub fn run(scale: u32) {
     s.store.request(Op::BeaconNow);
     s.run(2000);
     s.save("aprsmode-beacon-waiting");
+
+    // APRS-17 (decision 181): the card for each holder. A back on 2 m; APRS mode off with beacons every 10 min
+    // left on: beacons alone hold C ("APRS Beacon", the countdown), small and large.
+    s.app.set_vfo(0, 14_652_000);
+    s.press(Key::Exit, 800);
+    s.keys(&[Key::Menu, D(0), D(5), D(3)]);
+    s.app.knob(-1, s.t, &s.store);
+    s.press(Key::Exit, 800);
+    s.run(4000);
+    s.save("aprsbeacon-card");
+    s.keys(&[Key::Slot, Key::Slot]); // C
+    s.save("aprsbeacon-card-big");
+    // KISS on Bluetooth: "APRS KISS", the port and the frames counted.
+    s.app.settings_mut().bt = true;
+    s.app.settings_mut().kiss_port = 2;
+    for sent in [true, false, false, true, false] {
+        s.store.kiss_frame(sent);
+    }
+    s.run(4000);
+    s.save("aprskiss-card-big");
+    s.keys(&[Key::Slot]); // A
+    s.save("aprskiss-card");
 }

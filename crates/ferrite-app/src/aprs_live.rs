@@ -82,6 +82,63 @@ pub struct Rx {
     pub changed: bool,
 }
 
+/// What the APRS task may send (APRS-22, APRS-29).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sending {
+    /// Nothing: APRS mode off, no beacons (APRS-22 only decodes).
+    Nothing,
+    /// Beacons only: APRS mode off, automatic beacons on (APRS-29): no acks, messages or digipeats.
+    Beacons,
+    /// Everything: APRS mode on.
+    All,
+}
+
+/// APRS-10, APRS-29 (decision 181): a frame waits for a clear moment on the APRS frequency (p-persistence on C's
+/// squelch) at most this long, then it isn't sent.
+pub const CLEAR_WAIT_MS: u32 = 5_000;
+
+/// APRS-10, APRS-29: a frame waiting to go, sent in the first clear moment within [`CLEAR_WAIT_MS`] (the KISS
+/// TNC's p-persistence, `uaprs::kiss::Access`, at its defaults: persistence 63, 100 ms slots).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ClearWait {
+    since: Option<u32>,
+    access: uaprs::kiss::Access,
+}
+
+/// [`ClearWait::poll`]'s answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clear {
+    Wait,
+    Send,
+    /// Busy for the whole window: not sent.
+    GiveUp,
+}
+
+impl ClearWait {
+    /// A frame is waiting since `now_ms`.
+    pub fn start(&mut self, now_ms: u32) {
+        *self = ClearWait { since: Some(now_ms), access: uaprs::kiss::Access::default() };
+    }
+
+    pub fn waiting(&self) -> bool {
+        self.since.is_some()
+    }
+
+    /// Each turn while a frame waits: `busy` C's squelch, `random` a fresh random byte.
+    pub fn poll(&mut self, now_ms: u32, busy: bool, random: u8) -> Clear {
+        let Some(t) = self.since else { return Clear::Wait };
+        if self.access.may_send(&uaprs::kiss::Params::default(), now_ms, busy, random) {
+            self.since = None;
+            Clear::Send
+        } else if now_ms.wrapping_sub(t) >= CLEAR_WAIT_MS {
+            self.since = None;
+            Clear::GiveUp
+        } else {
+            Clear::Wait
+        }
+    }
+}
+
 /// What a second did.
 #[derive(Clone, Copy, Default)]
 pub struct Tick {
@@ -406,13 +463,19 @@ impl AprsLive {
 
     // ---- transmit ----
 
-    /// A second of the APRS task. `on`: APRS mode (APRS-15); `relay_ok`: slot C can transmit with the band relay
+    /// A second of the APRS task. `send`: what may go (APRS mode: all, APRS-15; beacons alone: beacons, APRS-29;
+    /// else nothing, APRS-22); `relay_ok`: slot C can transmit with the band relay
     /// where the active slot holds it (APRS-20); `me` our callsign (APRS-8); `fix` the GPS's (beacons, APRS-24).
     /// A frame to send is written to `out`; the caller keys slot C, plays it, unkeys.
-    pub fn tick(&self, now_s: u32, on: bool, relay_ok: bool, me: &[u8], fix: Option<Fix>, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX]) -> Tick {
+    pub fn tick(&self, now_s: u32, send: Sending, relay_ok: bool, me: &[u8], fix: Option<Fix>, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX]) -> Tick {
         self.now_s.set(now_s);
         let mut t = Tick::default();
-        if !on {
+        if send == Sending::Beacons {
+            // APRS-29: beacons alone answer nothing: acks owed and a digipeat waiting are dropped.
+            self.acks.iter().for_each(|a| a.set(None));
+            self.digi.set(None);
+        }
+        if send == Sending::Nothing {
             // Without APRS mode nothing is sent (APRS-22 only decodes): acks owed meanwhile are dropped, so
             // turning the mode on later doesn't send stale ones.
             self.acks.iter().for_each(|a| a.set(None));
@@ -439,6 +502,8 @@ impl AprsLive {
         let auto_ok = self.last_auto.get().is_none_or(|l| now_s.wrapping_sub(l) >= AUTO_GAP_S);
         let mut info = [0u8; INFO_MAX];
         // Acks first (they're owed), then a digipeat, then ours, then the beacon: one transmission a second.
+        // Beacons alone (APRS-29): only the beacon.
+        let all = send == Sending::All;
         if let Some(c) = self.acks.iter().find(|c| c.get().is_some()) {
             let a = c.get().unwrap();
             c.set(None);
@@ -456,7 +521,7 @@ impl AprsLive {
             }
             // Over the rate: dropped, not delayed (the next station will carry it).
         }
-        for c in &self.out {
+        for c in self.out.iter().filter(|_| all) {
             let Some(mut o) = c.get().filter(|o| o.tries < TRIES && now_s >= o.next_s) else { continue };
             if o.tries > 0 && !auto_ok {
                 continue;
@@ -619,7 +684,7 @@ mod tests {
         let cfg = AprsCfg::DEFAULT;
         let long = [b'x'; 200];
         assert!(a.send(b"VE3KPW-9", &long));
-        let t = a.tick(0, true, true, b"VE3XYZ-7", None, &cfg, &mut out);
+        let t = a.tick(0, Sending::All, true, b"VE3XYZ-7", None, &cfg, &mut out);
         assert_eq!(t.what, "Message");
         let g = Frame::parse(&out[..t.len]).unwrap();
         assert_eq!((g.src.call(), g.src.ssid), (&b"VE3XYZ"[..], 7), "our callsign and SSID");
@@ -631,7 +696,7 @@ mod tests {
         assert!(!text.is_empty() && text.len() <= 67, "message text {} long", text.len());
         let a = AprsLive::new(); // a beacon alone (the message above would still be retrying)
         a.beacon_now();
-        let t = a.tick(400, true, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+        let t = a.tick(400, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
         assert_eq!(t.what, "Beacon");
         let g = Frame::parse(&out[..t.len]).unwrap();
         assert_eq!(g.src.call(), b"VE3XYZ");
@@ -652,6 +717,53 @@ mod tests {
         }
     }
 
+    /// APRS-29 (decision 181): beacons alone (APRS mode off) send the beacon and nothing else: a message to us isn't
+    /// acked, our own messages wait, a digipeat isn't sent.
+    #[test]
+    fn beacons_alone_send_only_beacons() {
+        let a = AprsLive::new();
+        let cfg = AprsCfg { beacon: 4, ..AprsCfg::DEFAULT }; // every 5 min
+        let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ   :On my way{12");
+        a.receive(&f[..n], 100, b"VE3XYZ", &cfg);
+        assert!(a.send(b"VE3KPW-9", b"QSL"));
+        let mut out = [0u8; FRAME_MAX];
+        let t = a.tick(100, Sending::Beacons, true, b"VE3XYZ", Some(fix()), &cfg, &mut out);
+        assert_eq!(t.what, "Beacon", "the beacon, not the ack or the message");
+        for s in 101..131 {
+            assert_eq!(a.tick(s, Sending::Beacons, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "{s}: nothing else");
+        }
+        // APRS mode on later: the ack owed meanwhile was dropped; our message goes.
+        assert_eq!(a.tick(131, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Message");
+        // Nothing at all without APRS mode or beacons (APRS-22).
+        let b = AprsLive::new();
+        b.beacon_now();
+        assert_eq!(b.tick(0, Sending::Nothing, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0);
+    }
+
+    /// APRS-10, APRS-29 (decision 181): a frame goes in the first clear moment (p-persistence on C's squelch) and
+    /// never while C is busy; busy for the whole 5 s window, it isn't sent.
+    #[test]
+    fn frame_waits_for_a_clear_moment() {
+        let mut w = ClearWait::default();
+        assert_eq!(w.poll(0, false, 0), Clear::Wait, "nothing waiting");
+        w.start(1_000);
+        assert!(w.waiting());
+        for t in (1_000..3_000).step_by(10) {
+            assert_eq!(w.poll(t, true, 0), Clear::Wait, "busy at {t}");
+        }
+        // Clear: a try each 100 ms slot at 64/256; with these draws the third slot sends.
+        assert_eq!(w.poll(3_000, false, 200), Clear::Wait);
+        assert_eq!(w.poll(3_050, false, 0), Clear::Wait, "within the slot");
+        assert_eq!(w.poll(3_100, false, 100), Clear::Wait);
+        assert_eq!(w.poll(3_200, false, 10), Clear::Send);
+        assert!(!w.waiting());
+        w.start(10_000);
+        for t in (10_000..15_000).step_by(10) {
+            assert_eq!(w.poll(t, true, 0), Clear::Wait, "busy at {t}");
+        }
+        assert_eq!(w.poll(15_000, true, 0), Clear::GiveUp, "busy for 5 s: not sent");
+    }
+
     #[test]
     fn message_to_us_is_acked_once() {
         let a = AprsLive::new();
@@ -659,7 +771,7 @@ mod tests {
         let rx = a.receive(&f[..n], 100, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert_eq!(rx.inbound.unwrap().1.as_bytes(), b"On my way");
         let mut out = [0u8; FRAME_MAX];
-        let t = a.tick(100, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
+        let t = a.tick(100, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
         assert_eq!(t.what, "Ack");
         let g = Frame::parse(&out[..t.len]).unwrap();
         assert_eq!(g.info, b":VE3KPW-9 :ack12");
@@ -667,7 +779,7 @@ mod tests {
         // The same message again (its sender didn't hear our ack): acked again, no second inbox entry.
         let rx = a.receive(&f[..n], 130, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert!(rx.inbound.is_none());
-        assert_eq!(a.tick(131, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).what, "Ack");
+        assert_eq!(a.tick(131, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).what, "Ack");
         // Not to us: nothing.
         let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VA3ABC   :Hi{3");
         assert!(a.receive(&f[..n], 140, b"VE3XYZ", &AprsCfg::DEFAULT).inbound.is_none());
@@ -679,23 +791,23 @@ mod tests {
         let mut out = [0u8; FRAME_MAX];
         let cfg = AprsCfg::DEFAULT;
         assert!(a.send(b"VE3KPW-9", b"QSL"));
-        let t = a.tick(0, true, true, b"VE3XYZ", None, &cfg, &mut out);
+        let t = a.tick(0, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out);
         assert_eq!(t.what, "Message");
         assert_eq!(Frame::parse(&out[..t.len]).unwrap().info, b":VE3KPW-9 :QSL{1");
-        assert_eq!(a.tick(10, true, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "next try 30 s on");
-        let t = a.tick(30, true, true, b"VE3XYZ", None, &cfg, &mut out);
+        assert_eq!(a.tick(10, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "next try 30 s on");
+        let t = a.tick(30, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out);
         assert_eq!(t.what, "Message");
         assert!(matches!(t.states[0], Some((_, _, MsgState::Retrying(2)))));
         let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ   :ack1");
         let rx = a.receive(&f[..n], 40, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert!(matches!(rx.state, Some((_, _, MsgState::Acked))));
-        assert_eq!(a.tick(200, true, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "acked: no more tries");
+        assert_eq!(a.tick(200, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "acked: no more tries");
         // Never acked: five tries, then failed.
         a.send(b"VA3ABC", b"Anyone?");
         let mut tries = 0;
         let mut failed = false;
         for s in 300..1_200 {
-            let t = a.tick(s, true, true, b"VE3XYZ", None, &cfg, &mut out);
+            let t = a.tick(s, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out);
             tries += (t.what == "Message") as u32;
             failed |= t.states.iter().flatten().any(|s| s.2 == MsgState::Failed);
         }
@@ -709,10 +821,10 @@ mod tests {
         let mut out = [0u8; FRAME_MAX];
         let cfg = AprsCfg::DEFAULT;
         a.beacon_now();
-        let t = a.tick(0, true, false, b"VE3XYZ", Some(fix()), &cfg, &mut out);
+        let t = a.tick(0, Sending::All, false, b"VE3XYZ", Some(fix()), &cfg, &mut out);
         assert_eq!(t.len, 0);
         assert!(a.beacon(&cfg).waiting, "APRS-20: waits for the relay");
-        let t = a.tick(1, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out);
+        let t = a.tick(1, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out);
         assert_eq!(t.what, "Beacon");
         let g = Frame::parse(&out[..t.len]).unwrap();
         assert_eq!(g.dest.call(), b"APZFER");
@@ -721,9 +833,9 @@ mod tests {
             other => panic!("{other:?}"),
         }
         a.beacon_now();
-        assert_eq!(a.tick(2, true, true, b"VE3XYZ", None, &cfg, &mut out).what, "Beacon: no position");
+        assert_eq!(a.tick(2, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out).what, "Beacon: no position");
         a.beacon_now();
-        assert_eq!(a.tick(3, true, true, b"", Some(fix()), &cfg, &mut out).len, 0, "APRS-8: no callsign, nothing sent");
+        assert_eq!(a.tick(3, Sending::All, true, b"", Some(fix()), &cfg, &mut out).len, 0, "APRS-8: no callsign, nothing sent");
     }
 
     /// GPS-33: a timed beacon with a fix older than its interval waits up to 2 minutes for a fresh one and goes on
@@ -735,24 +847,24 @@ mod tests {
         let mut out = [0u8; FRAME_MAX];
         let cfg = AprsCfg { beacon: 2, ..AprsCfg::DEFAULT }; // every minute
         let old = Some(Fix { age_s: 90, ..fix() });
-        assert_eq!(a.tick(100, true, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: waiting for a fix");
-        assert_eq!(a.tick(150, true, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: waiting for a fix");
-        assert_eq!(a.tick(151, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon", "a fresh fix: sent");
+        assert_eq!(a.tick(100, Sending::All, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: waiting for a fix");
+        assert_eq!(a.tick(150, Sending::All, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: waiting for a fix");
+        assert_eq!(a.tick(151, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon", "a fresh fix: sent");
         // The next: the module never finds the sky again.
         let mut skipped = 0;
         let mut sent = 0;
         for s in 211..340 {
-            let w = a.tick(s, true, true, b"VE3XYZ", old, &cfg, &mut out).what;
+            let w = a.tick(s, Sending::All, true, b"VE3XYZ", old, &cfg, &mut out).what;
             skipped += (w == "Beacon: old fix") as u32;
             sent += (w == "Beacon") as u32;
         }
         assert_eq!((skipped, sent), (1, 0), "skipped once after 2 minutes, then the schedule's next");
-        assert_eq!(a.tick(400, true, true, b"VE3XYZ", None, &cfg, &mut out).what, "Beacon: waiting for a fix", "no position: waits too");
+        assert_eq!(a.tick(400, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out).what, "Beacon: waiting for a fix", "no position: waits too");
         // The fixed position stands in as itself.
         let fixed = Some(Fix { age_s: crate::gpsdata::FIXED_AGE, ..fix() });
-        assert_eq!(a.tick(401, true, true, b"VE3XYZ", fixed, &cfg, &mut out).what, "Beacon");
+        assert_eq!(a.tick(401, Sending::All, true, b"VE3XYZ", fixed, &cfg, &mut out).what, "Beacon");
         a.beacon_now();
-        assert_eq!(a.tick(440, true, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: old fix", "beacon now: at once");
+        assert_eq!(a.tick(440, Sending::All, true, b"VE3XYZ", old, &cfg, &mut out).what, "Beacon: old fix", "beacon now: at once");
     }
 
     const DIGI: AprsCfg = AprsCfg { digi: crate::aprs::DIGI_ON, ..AprsCfg::DEFAULT };
@@ -763,21 +875,21 @@ mod tests {
         let mut out = [0u8; FRAME_MAX];
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b">Walking");
         a.receive(&f[..n], 10, b"VE3XYZ", &DIGI);
-        let t = a.tick(10, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
+        let t = a.tick(10, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
         assert_eq!(t.what, "Digipeat");
         let g = Frame::parse(&out[..t.len]).unwrap();
         assert!(g.digis()[0].repeated && g.digis()[0].call() == b"VE3XYZ");
         assert!(!g.digis()[1].repeated);
         // The same frame again within 30 s, or one already past WIDE1: not repeated.
         a.receive(&f[..n], 20, b"VE3XYZ", &DIGI);
-        assert_eq!(a.tick(20, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
+        assert_eq!(a.tick(20, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1*", b"WIDE2-1"], b">Later");
         a.receive(&f[..n], 50, b"VE3XYZ", &DIGI);
-        assert_eq!(a.tick(50, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
+        assert_eq!(a.tick(50, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
         // Off by default (APRS-12).
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b">Again");
         a.receive(&f[..n], 90, b"VE3XYZ", &AprsCfg::DEFAULT);
-        assert_eq!(a.tick(90, true, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
+        assert_eq!(a.tick(90, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
     }
 
     /// APRS-26: our callsign as an alias when asked, and 0 5 8 3's wait before relaying.
@@ -787,12 +899,12 @@ mod tests {
         let mut out = [0u8; FRAME_MAX];
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"VE3XYZ", b"WIDE2-1"], b">To me");
         a.receive(&f[..n], 10, b"VE3XYZ", &DIGI);
-        assert_eq!(a.tick(10, true, true, b"VE3XYZ", None, &DIGI, &mut out).len, 0, "my call isn't an alias by default");
+        assert_eq!(a.tick(10, Sending::All, true, b"VE3XYZ", None, &DIGI, &mut out).len, 0, "my call isn't an alias by default");
         let cfg = AprsCfg { digi: crate::aprs::DIGI_ON | crate::aprs::DIGI_MYCALL | 3 << 4, ..AprsCfg::DEFAULT };
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"VE3XYZ", b"WIDE2-1"], b">To me again");
         a.receive(&f[..n], 40, b"VE3XYZ", &cfg);
-        assert_eq!(a.tick(41, true, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "waits 3 s");
-        let t = a.tick(43, true, true, b"VE3XYZ", None, &cfg, &mut out);
+        assert_eq!(a.tick(41, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "waits 3 s");
+        let t = a.tick(43, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out);
         assert_eq!(t.what, "Digipeat");
         assert!(Frame::parse(&out[..t.len]).unwrap().digis()[0].repeated);
     }
@@ -805,7 +917,7 @@ mod tests {
             let a = AprsLive::new();
             let cfg = AprsCfg { path: k, ..AprsCfg::DEFAULT };
             a.beacon_now();
-            let t = a.tick(1, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out);
+            let t = a.tick(1, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out);
             assert_eq!(t.what, "Beacon");
             let g = Frame::parse(&out[..t.len]).unwrap();
             assert_eq!(g.digis().len(), want);
@@ -822,11 +934,11 @@ mod tests {
         let mut out = [0u8; FRAME_MAX];
         let cfg = AprsCfg { beacon: 1, after_voice: true, ..AprsCfg::DEFAULT }; // manual beacons only
         a.after_voice();
-        assert_eq!(a.tick(100, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
+        assert_eq!(a.tick(100, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
         a.after_voice();
-        assert_eq!(a.tick(110, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "30 s spacing");
-        assert_eq!(a.tick(131, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
-        assert_eq!(a.tick(170, true, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "once per transmission");
+        assert_eq!(a.tick(110, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "30 s spacing");
+        assert_eq!(a.tick(131, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).what, "Beacon");
+        assert_eq!(a.tick(170, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "once per transmission");
     }
 
     #[test]

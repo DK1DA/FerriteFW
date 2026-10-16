@@ -265,10 +265,48 @@ const LOADED: u8 = 1;
 const DIRTY: u8 = 2;
 /// A voice transmission ended (APRS-27); the next tick asks for the beacon.
 const AFTER_VOICE: u8 = 4;
-/// C was the APRS slot at the last tick (KISS-9: KISS turning on or off moves it, from any path that sets it).
-const C_APRS: u8 = 8;
-const TOAST_HEAD: &[u8] = b"APRS mode:";
-const TOAST_BODY: &[u8] = b"off at MENU 0 5 3";
+/// What held C at the last tick, [`Holder::bits`] (KISS-9, APRS-29: KISS or beacons turning on or off move it, from
+/// any path that sets them).
+const HELD: u8 = 0x30;
+
+/// What holds slot C as the APRS slot (APRS-19, KISS-9, APRS-29), in this precedence when more than one does:
+/// APRS mode, then KISS, then beacons. Only the first two give C receive priority on its chip (APRS-21.1,
+/// decision 181); beacons alone lock C and send on it, nothing more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Holder {
+    Mode,
+    Kiss,
+    Beacon,
+}
+
+impl Holder {
+    /// As toasts and the lock's reason say it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Holder::Mode => "APRS mode",
+            Holder::Kiss => "KISS",
+            Holder::Beacon => "Beacons",
+        }
+    }
+
+    /// The readback's word (`holder=`).
+    pub fn word(self) -> &'static str {
+        match self {
+            Holder::Mode => "mode",
+            Holder::Kiss => "kiss",
+            Holder::Beacon => "beacon",
+        }
+    }
+
+    fn bits(h: Option<Holder>) -> u8 {
+        (match h {
+            None => 0,
+            Some(Holder::Mode) => 1,
+            Some(Holder::Kiss) => 2,
+            Some(Holder::Beacon) => 3,
+        }) << 4
+    }
+}
 
 impl App {
     /// APRS mode is on (0 5 3).
@@ -283,8 +321,34 @@ impl App {
         !self.set.aprs_mode && !s.vfo_mode && s.ch.is_some_and(|c| c.flags & crate::chan::FLAG_APRS != 0)
     }
 
-    /// Slot C is the APRS slot: APRS mode is on (APRS-15), or KISS is (KISS-9: its frames go out there).
+    /// Automatic beacons are on (0 5 5 1 timed, distance or smart; APRS-24): with APRS mode off they still hold C
+    /// (APRS-29). Manual ("Beacon now" only) doesn't.
+    pub fn beacons_on(&self) -> bool {
+        self.aprs.mode() >= TIMED as u8
+    }
+
+    /// What holds slot C as the APRS slot, if anything: APRS mode (APRS-15), KISS (KISS-9: its frames go out
+    /// there) or automatic beacons (APRS-29), in that precedence.
+    pub fn aprs_holder(&self) -> Option<Holder> {
+        if self.set.aprs_mode {
+            Some(Holder::Mode)
+        } else if self.set.kiss_on() {
+            Some(Holder::Kiss)
+        } else if self.beacons_on() {
+            Some(Holder::Beacon)
+        } else {
+            None
+        }
+    }
+
+    /// Slot C is the APRS slot: APRS mode, KISS or beacons hold it (APRS-15, KISS-9, APRS-29).
     pub fn aprs_c(&self) -> bool {
+        self.aprs_holder().is_some()
+    }
+
+    /// C has receive priority on its chip (APRS-21.1, decision 181): APRS mode or KISS hold it. Beacons alone
+    /// don't: C is then an ordinary watched slot.
+    pub fn aprs_prio(&self) -> bool {
         self.set.aprs_mode || self.set.kiss_on()
     }
 
@@ -293,25 +357,31 @@ impl App {
         s == APRS_SLOT && self.aprs_c()
     }
 
-    /// KISS-9: where KISS is turned off (0 9 2 4 when the cable port carries it, else 0 5 9 1).
-    pub(crate) fn kiss_off_at(&self) -> &'static [u8] {
-        if self.set.kiss_port == 0 { b"off at MENU 0 9 2 4" } else { b"off at MENU 0 5 9 1" }
-    }
-
-    /// Why the APRS slot can't change (APRS-19; KISS-9 when KISS alone holds it).
+    /// Why the APRS slot can't change (APRS-19, KISS-9, APRS-29): what holds it, nothing more (decision 181).
     pub(crate) fn aprs_holds(&self) -> &'static str {
-        if self.set.aprs_mode { "APRS mode: MENU 0 5 3" } else if self.set.kiss_port == 0 { "KISS on: MENU 0 9 2 4" } else { "KISS on: MENU 0 5 9 1" }
+        match self.aprs_holder() {
+            Some(Holder::Kiss) => "Slot C held by KISS",
+            Some(Holder::Beacon) => "Slot C held by beacons",
+            _ => "Slot C held by APRS mode",
+        }
     }
 
-    /// The settings were loaded and C sent as they say: no KISS toast for what was already so (KISS-9).
+    /// The settings were loaded and C sent as they say: no toast for what was already so (KISS-9).
     pub(crate) fn c_settled(&mut self) {
-        self.aprs_st = if self.aprs_c() { self.aprs_st | C_APRS } else { self.aprs_st & !C_APRS };
+        self.aprs_st = self.aprs_st & !HELD | Holder::bits(self.aprs_holder());
     }
 
-    /// C becomes the APRS slot or goes back (APRS-15, APRS-16, KISS-9): it stops scanning, retunes, and is watched
-    /// and kept awake while it is.
+    /// The APRS-slot commands for the Radio task: C kept awake with receive priority (APRS mode, KISS:
+    /// APRS-21.1), and C as the APRS slot (any holder: its squelch's open delay 0, SQL-17).
+    pub(crate) fn send_aprs_slot(&mut self) {
+        self.out.push(RadioCmd::Awake((self.aprs_prio() as u8) << APRS_SLOT));
+        self.out.push(RadioCmd::AprsSlot((self.aprs_c() as u8) << APRS_SLOT));
+    }
+
+    /// C becomes the APRS slot or goes back, or what holds it changes (APRS-15, APRS-16, KISS-9, APRS-29): it
+    /// stops scanning, retunes, and is watched while it is, kept awake with priority while APRS mode or KISS hold
+    /// it.
     fn c_follow(&mut self) {
-        let on = self.aprs_c();
         self.c_settled();
         if self.scan_mask & 1 << APRS_SLOT != 0 {
             self.scan_mask &= !(1 << APRS_SLOT);
@@ -319,7 +389,7 @@ impl App {
         }
         self.send_slot(APRS_SLOT);
         self.out.push(RadioCmd::Watch(self.watch_mask()));
-        self.out.push(RadioCmd::Awake((on as u8) << APRS_SLOT));
+        self.send_aprs_slot();
     }
 
     pub fn aprs_cfg(&self) -> AprsCfg {
@@ -357,8 +427,10 @@ impl App {
             let mut f = Buf::<20>::new();
             let _ = uwrite!(f, "C on {}", Txt(crate::slot::mhz3(self.aprs_freq()).as_bytes()));
             self.show_toast(b"APRS mode on", f.as_bytes(), false);
-        } else if self.aprs_c() {
-            self.show_toast(b"APRS mode off", b"KISS keeps C", false); // KISS-9
+        } else if let Some(h) = self.aprs_holder() {
+            let mut b = Buf::<24>::new();
+            let _ = uwrite!(b, "C held by {}", h.name());
+            self.show_toast(b"APRS mode off", b.as_bytes(), false); // KISS-9, APRS-29
         } else {
             self.show_toast(b"APRS mode off", b"slot C restored", false);
         }
@@ -443,22 +515,17 @@ impl App {
         (0..APRS_SLOT).find(|&s| listening & 1 << s != 0 && ferrite_core::freq::band(self.tuned_freq(s)).1 == 0)
     }
 
-    /// APRS-19: the APRS slot can't be changed; the toast says how to get it back. True when refused.
+    /// APRS-19: the APRS slot can't be changed; the toast names what holds it (KISS-9, APRS-29; decision 181).
+    /// True when refused.
     pub(crate) fn aprs_refuse(&mut self, s: u8) -> bool {
-        if !self.aprs_slot(s) {
-            return false;
-        }
-        if self.set.aprs_mode {
-            self.show_toast(TOAST_HEAD, TOAST_BODY, false);
-        } else {
-            self.show_toast(b"KISS on:", self.kiss_off_at(), false); // KISS-9
-        }
+        let Some(h) = self.aprs_holder().filter(|_| s == APRS_SLOT) else { return false };
+        self.show_toast(b"Slot C held by", h.name().as_bytes(), false);
         true
     }
 
     /// The reset: APRS settings back to their defaults (the store's went with [`crate::data::Op::Wipe`]).
     pub(crate) fn reset_aprs(&mut self) {
-        (self.aprs, self.aprs_st) = (AprsCfg::DEFAULT, LOADED | self.aprs_st & C_APRS);
+        (self.aprs, self.aprs_st) = (AprsCfg::DEFAULT, LOADED | self.aprs_st & HELD);
         self.send_slot(APRS_SLOT);
     }
 
@@ -474,11 +541,14 @@ impl App {
                 }
             }
         }
-        // KISS-9: KISS turned on or off (the menu, `set`, a settings write): C follows.
-        if self.aprs_c() != (self.aprs_st & C_APRS != 0) {
+        // KISS-9, APRS-29: KISS or beacons turned on or off (the menu, `set`, a settings write): C follows, and
+        // the toast names what holds it now.
+        if Holder::bits(self.aprs_holder()) != self.aprs_st & HELD {
             self.c_follow();
-            let (head, body): (&[u8], &[u8]) = if self.aprs_c() { (b"KISS on", b"C is the APRS slot") } else { (b"KISS off", b"slot C restored") };
-            self.show_toast(head, body, false);
+            match self.aprs_holder() {
+                Some(h) => self.show_toast(b"Slot C held by", h.name().as_bytes(), false),
+                None => self.show_toast(b"Slot C", b"restored", false),
+            }
         }
         if self.aprs_st & DIRTY != 0 {
             data.request(crate::data::Op::AprsCfg(self.aprs)); // NoData (the radio until the APRS store): kept in RAM

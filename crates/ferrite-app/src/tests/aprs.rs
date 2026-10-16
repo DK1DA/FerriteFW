@@ -126,7 +126,7 @@ fn aprs_slot_is_locked() {
     a.app.knob(1, a.t, &a.s);
     assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::TuneSlot { .. } | RadioCmd::SlotParam { .. })), "nothing changed C");
     assert!(a.app.greyed(Item::Power).is_some() && a.app.greyed(Item::Watch).is_none());
-    // Hold MENU on it: its options (APRS-17).
+    // Hold MENU on it: its options (APRS-17.1).
     a.press(Key::Menu, 800);
     assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == crate::screens::opts::Of::AprsCard));
     // Off: C changes again.
@@ -152,13 +152,13 @@ fn kiss_on_makes_c_the_aprs_slot() {
     assert!(a.app.aprs_slot(APRS_SLOT) && !a.app.aprs_on(), "C is the APRS slot, APRS mode still off");
     let c = a.cmds();
     assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: 14_439_000 }), "tuned to APRS: {c:?}");
-    assert!(c.contains(&RadioCmd::Watch(0b100)) && c.contains(&RadioCmd::Awake(0b100)));
+    assert!(c.contains(&RadioCmd::Watch(0b100)) && c.contains(&RadioCmd::Awake(0b100)) && c.contains(&RadioCmd::AprsSlot(0b100)));
     assert_eq!(crate::screens::transmit::tx_freq(&a.app, APRS_SLOT), 14_439_000, "frames go out on the APRS frequency");
     // Locked as APRS-19, with KISS's message.
     a.tap(Key::Slot);
     a.tap(Key::Slot);
     assert_eq!(a.app.active(), 2);
-    assert_eq!(a.app.greyed(Item::Power), Some("KISS on: MENU 0 5 9 1"));
+    assert_eq!(a.app.greyed(Item::Power), Some("Slot C held by KISS"));
     a.cmds();
     a.tap(Key::Up);
     assert!(a.app.toast_up());
@@ -179,11 +179,68 @@ fn kiss_on_makes_c_the_aprs_slot() {
     a.app.set.cable_port = 3;
     a.tick();
     assert!(a.app.aprs_slot(APRS_SLOT));
-    assert_eq!(a.app.greyed(Item::Power), Some("KISS on: MENU 0 9 2 4"));
+    assert_eq!(a.app.greyed(Item::Power), Some("Slot C held by KISS"));
     a.mode(true);
     a.app.set.cable_port = 0;
     a.tick();
     assert!(a.app.aprs_slot(APRS_SLOT), "APRS mode still has C");
+}
+
+/// APRS-29, APRS-21.1, APRS-19, KISS-9 (decision 181): automatic beacons with APRS mode off hold C as the APRS slot
+/// (tuned to the APRS frequency, watched, locked; the lock names what holds C, nothing more) but give it no receive
+/// priority (not kept awake); manual beacons don't hold it. APRS mode and KISS give priority. The holder's
+/// precedence is APRS mode, KISS, beacons.
+#[test]
+fn beacons_alone_hold_c_without_priority() {
+    use crate::aprs::Holder;
+    let mut a = A::new();
+    let own = a.app.slot(APRS_SLOT).freq();
+    a.app.set_watch(0);
+    a.cmds();
+    a.app.set_aprs(AprsCfg { beacon: 1, ..a.app.aprs_cfg() }); // manual: only "Beacon now"
+    a.tick();
+    assert_eq!(a.app.aprs_holder(), None, "manual beacons don't hold C");
+    a.app.set_aprs(AprsCfg { beacon: 5, ..a.app.aprs_cfg() }); // every 10 min
+    a.tick();
+    assert_eq!(a.app.aprs_holder(), Some(Holder::Beacon));
+    assert!(a.app.aprs_slot(APRS_SLOT) && !a.app.aprs_prio() && !a.app.aprs_on());
+    let c = a.cmds();
+    assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: 14_439_000 }), "tuned to APRS: {c:?}");
+    assert!(c.contains(&RadioCmd::Watch(0b100)), "an ordinary watched slot: {c:?}");
+    assert!(c.contains(&RadioCmd::Awake(0)) && c.contains(&RadioCmd::AprsSlot(0b100)), "no priority, but the APRS slot: {c:?}");
+    assert!(a.app.toast_up());
+    a.tap(Key::Slot);
+    a.tap(Key::Slot);
+    assert_eq!(a.app.active(), 2);
+    assert_eq!(a.app.greyed(Item::Power), Some("Slot C held by beacons"));
+    a.cmds();
+    a.tap(Key::Up);
+    assert!(a.app.toast_up());
+    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::TuneSlot { .. })), "C stays put");
+    // APRS mode on: it holds C (first in precedence) with priority; off again, beacons still hold it, no priority.
+    a.mode(true);
+    assert_eq!(a.app.aprs_holder(), Some(Holder::Mode));
+    assert!(a.cmds().contains(&RadioCmd::Awake(0b100)));
+    assert_eq!(a.app.greyed(Item::Power), Some("Slot C held by APRS mode"));
+    a.mode(false);
+    assert_eq!(a.app.aprs_holder(), Some(Holder::Beacon));
+    assert!(a.cmds().contains(&RadioCmd::Awake(0)));
+    // KISS on beside the beacons: KISS holds C, with priority; off, the beacons again.
+    a.app.set.bt = true;
+    a.app.set.kiss_port = 2;
+    a.tick();
+    assert_eq!(a.app.aprs_holder(), Some(Holder::Kiss));
+    assert!(a.cmds().contains(&RadioCmd::Awake(0b100)), "KISS: priority");
+    a.app.set.kiss_port = 0;
+    a.tick();
+    assert_eq!(a.app.aprs_holder(), Some(Holder::Beacon));
+    assert!(a.cmds().contains(&RadioCmd::Awake(0)));
+    // Beacons off: C comes back.
+    a.app.set_aprs(AprsCfg { beacon: 0, ..a.app.aprs_cfg() });
+    a.tick();
+    assert_eq!(a.app.aprs_holder(), None);
+    let c = a.cmds();
+    assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: own }) && c.contains(&RadioCmd::AprsSlot(0)), "{c:?}");
 }
 
 /// APRS-18: with the APRS slot (C) active, PTT A opens compose from any screen without keying; in compose PTT
@@ -216,7 +273,7 @@ fn ptt_on_aprs_slot_composes_and_ptt_sends() {
     a.app.key_up(Key::Ptt(1), a.t + 100, &a.s);
 }
 
-/// Beacon mode, power and on/off (0 5 5 1, 0 5 5 4, APRS-17).
+/// Beacon mode, power and on/off (0 5 5 1, 0 5 5 4, APRS-17.1).
 #[test]
 fn beacon_settings() {
     let mut a = A::new();
@@ -372,7 +429,7 @@ fn engine_timeline() {
     }
 }
 
-/// APRS-17, APRS-20: the card's lines.
+/// APRS-17.2, APRS-20: the card's lines.
 #[test]
 fn card_text() {
     let mut a = A::new();

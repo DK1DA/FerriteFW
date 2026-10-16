@@ -826,6 +826,27 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
         kq(l, "last", last.as_bytes());
         kq(l, "beacon", beacon.as_bytes());
         kn(l, "heard", data.stations() as u32);
+        // APRS-17 (decision 181): what holds C, the beacon power, the beacon's countdown "m:ss" or why there is
+        // none (`next`, only while automatic beacons are on); KISS's port and counts; beacons' bottom line.
+        // Short, as the line holds 256 bytes and `last` may take 80.
+        if let Some(k) = app.aprs_card(data) {
+            l.push(b" holder=");
+            l.push(k.holder.word().as_bytes());
+            kq(l, "power", k.power.as_bytes());
+            if !k.next.is_empty() {
+                kq(l, "next", k.next.as_bytes());
+            }
+            match k.holder {
+                crate::aprs::Holder::Kiss => {
+                    let (sent, heard) = data.kiss_counts();
+                    kq(l, "port", k.right.as_bytes());
+                    kn(l, "sent", sent as u32);
+                    kn(l, "frames", heard as u32);
+                }
+                crate::aprs::Holder::Beacon => kq(l, "line", k.line.as_bytes()),
+                crate::aprs::Holder::Mode => {}
+            }
+        }
     }
     let (mut m, mut t, mut o) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
     mode_chip(&cfg, &mut m);

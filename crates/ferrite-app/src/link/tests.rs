@@ -1213,7 +1213,7 @@ fn ui_status_line() {
     assert_eq!(s, Status::BadArg as u8);
 }
 
-/// LINK-19, APRS-17: the APRS card's readback gives what the card shows (the last heard line, the beacon line, the
+/// LINK-19, APRS-17.4: the APRS card's readback gives what the card shows (the last heard line, the beacon line, the
 /// stations heard), not the mode, tone and shift of C's own VFO put aside (it read mode="AM", Oct 15, 2026).
 #[test]
 fn ui_aprs_card_reads_its_text() {

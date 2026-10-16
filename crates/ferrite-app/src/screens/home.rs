@@ -141,45 +141,66 @@ fn bcast_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8, y: i32
     }
 }
 
-/// APRS-17: slot C in APRS mode is the APRS card: the frequency, stations heard, the last station or message and
-/// the beacon ("beacon waiting: HF" while the relay is the other way, APRS-20). Below the header, which says APRS.
+/// APRS-17 (decision 181): slot C while it is the APRS slot is the APRS card ([`crate::aprs_card`]): the
+/// frequency, the holder's fact right of it (stations heard, the KISS port, the beacon's countdown), the bottom
+/// line (the last station, the KISS counts, the beacon's interval and position) and the beacon power. The large
+/// card adds the beacon row ("Next beacon in 4 min"; "Beacon waiting: HF" while the relay is the other way,
+/// APRS-20). Below the header, which names the holder.
 fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32, big: bool) {
     let p = s as usize;
     let f = app.aprs_freq();
-    let mut heard = Buf::<16>::new();
-    let _ = uwrite!(heard, "{} heard", data.stations());
-    let mut last = Buf::<80>::new();
-    crate::aprs::last_text(data, &mut last);
-    let mut beacon = Buf::<28>::new();
-    app.beacon_text(data, &mut beacon);
-    let waiting = data.beacon().waiting;
+    let Some(k) = app.aprs_card(data) else { return };
+    let rc = if k.right_warn { AMBER } else if k.countdown { VIOLET } else { TEXT };
+    let lc = if k.line_warn { AMBER } else { SUB };
+    let pw = k.power.as_bytes();
+    let pw_w = text4_width(pw, &UI_12);
     app.drawn.meter[p] = None;
     if big {
+        let mut beacon = Buf::<28>::new();
+        app.beacon_text(data, &mut beacon);
+        let waiting = data.beacon().waiting;
         if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, 1u8)), true) {
             redraw_box!(clear, lcd, (15, y + 28, 211, 49, SURFACE), {
                 w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
             });
         }
-        if app.dirty(R_INFO + p, hash(&last)) {
-            w::field(lcd, 15, 211, y + 80, y + 98, y + 94, Align::Left, w::fit(last.as_bytes(), &UI_12, 211), &UI_12, TEXT, SURFACE);
+        // The bottom line's facts, the power at the right.
+        if app.dirty(R_INFO + p, hash(&(&k.line, lc, pw))) {
+            lcd.fill(14, y + 80, 212, 19, SURFACE);
+            let lw = 211 - pw_w - 8;
+            w::field(lcd, 15, lw, y + 80, y + 98, y + 94, Align::Left, w::fit(k.line.as_bytes(), &UI_12, lw), &UI_12, lc, SURFACE);
+            w::field(lcd, 226 - pw_w, pw_w, y + 80, y + 98, y + 94, Align::Right, pw, &UI_12, SUB, SURFACE);
         }
-        if app.dirty(R_SUB + p, hash(&(&beacon, &heard, waiting))) {
+        // The beacon row, the holder's fact at the right; with beacons alone, "Next beacon in" and the countdown.
+        if k.holder == crate::aprs::Holder::Beacon && !waiting {
+            beacon.set(if k.countdown { b"Next beacon in" } else { b"Next beacon" });
+        }
+        if app.dirty(R_SUB + p, hash(&(&beacon, &k.right, waiting, rc))) {
             lcd.fill(14, y + 102, 212, 20, SURFACE);
             let c = if waiting { AMBER } else { SUB };
-            w::field(lcd, 15, 140, y + 103, y + 120, y + 117, Align::Left, beacon.as_bytes(), &UI_12, c, SURFACE);
-            w::field(lcd, 155, 71, y + 103, y + 120, y + 117, Align::Right, heard.as_bytes(), &UI_12B, TEXT, SURFACE);
+            let rw = text4_width(k.right.as_bytes(), &UI_12B).min(100);
+            let bw = 211 - rw - 8;
+            w::field(lcd, 15, bw, y + 103, y + 120, y + 117, Align::Left, w::fit(beacon.as_bytes(), &UI_12, bw), &UI_12, c, SURFACE);
+            w::field(lcd, 226 - rw, rw, y + 103, y + 120, y + 117, Align::Right, k.right.as_bytes(), &UI_12B, rc, SURFACE);
         }
     } else {
-        if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, &heard, 1u8)), true) {
-            redraw_box!(clear, lcd, (15, y + 25, 211, 24, SURFACE), {
+        if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, &k.right, k.countdown, rc, 1u8)), true) {
+            redraw_box!(clear, lcd, (15, y + 24, 211, 26, SURFACE), {
                 w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
-                w::field(lcd, 130, 96, y + 29, y + 47, y + 45, Align::Right, heard.as_bytes(), &UI_12, TEXT, SURFACE);
+                if k.countdown {
+                    // Two lines: a small "next in" over the countdown, bold, in C's colour.
+                    w::field(lcd, 150, 76, y + 24, y + 34, y + 33, Align::Right, b"next in", &UI_12, SUB, SURFACE);
+                    w::field(lcd, 150, 76, y + 34, y + 50, y + 48, Align::Right, k.right.as_bytes(), &UI_15B, rc, SURFACE);
+                } else {
+                    w::field(lcd, 130, 96, y + 29, y + 47, y + 45, Align::Right, k.right.as_bytes(), &UI_12B, rc, SURFACE);
+                }
             });
         }
-        let (line, c) = if waiting { (beacon.as_bytes(), AMBER) } else { (last.as_bytes(), SUB) };
-        if app.dirty(R_SUB + p, hash(&(line, c))) {
+        if app.dirty(R_SUB + p, hash(&(&k.line, lc, pw))) {
             ferrite_ui::canvas::banded(lcd, 15, y + 51, 211, 15, SURFACE, |lcd| {
-                w::field(lcd, 15, 211, y + 51, y + 65, y + 61, Align::Left, w::fit(line, &UI_12, 211), &UI_12, c, SURFACE);
+                let lw = 211 - pw_w - 8;
+                w::field(lcd, 15, lw, y + 51, y + 65, y + 61, Align::Left, w::fit(k.line.as_bytes(), &UI_12, lw), &UI_12, lc, SURFACE);
+                w::field(lcd, 226 - pw_w, pw_w, y + 51, y + 65, y + 61, Align::Right, pw, &UI_12, SUB, SURFACE);
             });
         }
     }
@@ -224,6 +245,12 @@ impl View for Home {
         if app.aprs_slot(app.active) {
             match (e.key, e.press) {
                 (Key::Menu, Long) => return app.open_screen(super::opts::Of::AprsCard.screen()),
+                // APRS-17 (decision 181): OK (MENU) on the APRS slot opens its page on the row the hint bar names,
+                // one more OK runs it; 0 there is still the full menu (MENU-25), so MENU 0 paths work as ever.
+                (Key::Menu, Short) => {
+                    let row = if app.aprs_holder() == Some(crate::aprs::Holder::Beacon) { super::opts::APRS_ROW_BEACON_NOW } else { super::opts::APRS_ROW_HEARD };
+                    return app.open_screen(Screen::Options(super::opts::Options { of: super::opts::Of::AprsCard, row, confirm: false }));
+                }
                 // the shortcuts that don't touch the slot (scope, watch) still run
                 (Key::Digit(1 | 4), Long) => {}
                 (Key::Up | Key::Down | Key::Left | Key::Right, Short | Repeat)
@@ -372,7 +399,11 @@ impl View for Home {
         let group = if app.slots[app.active as usize].on_channel() { "Zone" } else { "Band" };
         let mid = if app.watched_rx() { ("#", "Pause") } else { ("OK", "Quick") };
         if app.aprs_slot(app.active) {
-            return Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), mid, ("Hold MENU", "APRS")]); // APRS-17
+            // APRS-17 (decision 181): OK leads to the heard list, or with beacons alone to Beacon now; # pauses
+            // watch while a watched slot is receiving (WATCH-6), else hold MENU is the APRS page.
+            let ok = if app.aprs_holder() == Some(crate::aprs::Holder::Beacon) { ("OK", "Beacon now") } else { ("OK", "Heard") };
+            let third = if app.watched_rx() { ("#", "Pause") } else { ("Hold MENU", "APRS") };
+            return Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), ok, third]);
         }
         let a = app.active;
         let group = if app.bcast_slot() == Some(a) && !app.slots[a as usize].on_channel() { "Seek" } else { group }; // BCR-25
@@ -469,7 +500,20 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
         // state or an RX tag), never less than 120 px; clipped at a character, never wrapped.
         let hw = if wide { 226 - ww - 34 } else { (226 - 6 - head_right_w(big, state, &clr) - 34).max(120) };
         let sx = 34 + hw;
-        w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, SUB, SURFACE);
+        let hb_ = head.as_bytes();
+        let split = hb_.iter().position(|&c| c == b' ').and_then(|i| hb_[i + 1..].iter().position(|&c| c == b' ').map(|j| i + 1 + j));
+        if let Some(n) = split.filter(|_| aprs) {
+            // APRS-17: the holder ("APRS Mode") bold in C's colour, " · VHF" as any header; with APRS-21's amber
+            // "VHF shared" beside it the band goes, as that names it.
+            let (word, rest) = hb_.split_at(n);
+            let rest = if clr.is_empty() { rest } else { b"" };
+            let ww0 = text4_width(word, &UI_12B).min(hw);
+            lcd.fill(34, hy, hw, 17, SURFACE);
+            w::field(lcd, 34, ww0, hy, hy + 17, hb, Align::Left, w::fit(word, &UI_12B, ww0), &UI_12B, VIOLET, SURFACE);
+            w::field(lcd, 34 + ww0, hw - ww0, hy, hy + 17, hb, Align::Left, w::fit(rest, &UI_12, hw - ww0), &UI_12, SUB, SURFACE);
+        } else {
+            w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, SUB, SURFACE);
+        }
         if wide {
             let top = if big { y + 6 } else { hy };
             ferrite_ui::canvas::banded(lcd, 226 - ww, top, ww + 2, 18, SURFACE, |lcd| {

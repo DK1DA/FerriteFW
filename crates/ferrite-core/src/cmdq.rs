@@ -53,6 +53,7 @@ pub fn key(c: &RadioCmd) -> Option<u16> {
         RadioCmd::SweepHold => 13,
         RadioCmd::Lease => 14,
         RadioCmd::Same(_) => 15,
+        RadioCmd::AprsSlot(_) => 16,
         RadioCmd::TuneSlot { slot, .. } => 0x100 | slot as u16,
         RadioCmd::SlotParam { slot, param, .. } => 0x200 | (slot as u16) << 5 | param as u16,
         _ => return None,

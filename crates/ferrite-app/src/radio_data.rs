@@ -20,6 +20,8 @@ pub struct RadioData {
     pub gps: GpsData,
     draft: Cell<Draft>,
     ver: Cell<u32>,
+    /// KISS frames sent and heard since power-on (APRS-17).
+    kiss: Cell<(u16, u16)>,
 }
 
 impl Default for RadioData {
@@ -37,6 +39,7 @@ impl RadioData {
             gps: GpsData::new(),
             draft: Cell::new(Draft { to: Buf::new(), text: Buf::new() }),
             ver: Cell::new(0),
+            kiss: Cell::new((0, 0)),
         }
     }
 
@@ -57,6 +60,20 @@ impl RadioData {
 
     pub fn cfg(&self) -> AprsCfg {
         self.cfg.get()
+    }
+
+    /// A KISS frame from the client went out (APRS-17's count; the APRS task calls it at the key-up).
+    pub fn kiss_sent(&self) {
+        let (s, h) = self.kiss.get();
+        self.kiss.set((s.saturating_add(1), h));
+        self.changed();
+    }
+
+    /// A frame heard went to the KISS client (APRS-17's count).
+    pub fn kiss_heard(&self) {
+        let (s, h) = self.kiss.get();
+        self.kiss.set((s, h.saturating_add(1)));
+        self.changed();
     }
 
     /// Something the lists show moved on.
@@ -88,6 +105,10 @@ impl Data for RadioData {
 
     fn beacon(&self) -> Beacon {
         self.aprs.beacon(&self.cfg.get())
+    }
+
+    fn kiss_counts(&self) -> (u16, u16) {
+        self.kiss.get()
     }
 
     fn draft(&self) -> Draft {
@@ -162,7 +183,7 @@ mod tests {
         assert!(d.request(Op::Draft(Draft { to: Buf::from(b"VE3KPW"), text: Buf::from(b"Hi") })));
         assert!(d.request(Op::Send));
         let mut out = [0u8; crate::aprs_live::FRAME_MAX];
-        let t = d.aprs.tick(0, true, true, b"VE3XYZ", d.fix(), &d.cfg(), &mut out);
+        let t = d.aprs.tick(0, crate::aprs_live::Sending::All, true, b"VE3XYZ", d.fix(), &d.cfg(), &mut out);
         assert_eq!(t.what, "Message");
     }
 }

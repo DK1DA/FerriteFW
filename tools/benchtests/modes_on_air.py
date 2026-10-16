@@ -2139,12 +2139,19 @@ class FakeModesRadio(B.FakeRadio):
         if w[0] == "set" and line.startswith(f"set {S['vox']} Off") and self.vkey and self.vkey["kind"] == "vox":
             self._end(self.clock.time())
         if w[0] == "slot" and len(w) > 2 and w[1].upper() == "C" and self._c_aprs():
-            raise B.TermError("slot C: APRS mode holds slot C: MENU 0 5 3 (APRS-19)")
+            raise B.TermError(f"slot C: slot C held by {self._c_aprs()}")
         return out
 
     def _c_aprs(self):
-        """C is the APRS slot: APRS mode, or KISS on (KISS-9)."""
-        return self.set[S["aprs_mode"]] == "On" or self.set[S["kiss"]] != "Off"
+        """What holds C as the APRS slot (decision 181): APRS mode (APRS-19), KISS (KISS-9) or automatic beacons
+        (APRS-29), as the firmware's lock message names it; None when nothing does."""
+        if self.set[S["aprs_mode"]] == "On":
+            return "APRS mode (APRS-19)"
+        if self.set[S["kiss"]] != "Off":
+            return "KISS (KISS-9)"
+        if self.set[S["beacon_mode"]] not in ("Off", "Manual"):
+            return "beacons (APRS-29)"
+        return None
 
     def slot(self, n):
         self._advance()

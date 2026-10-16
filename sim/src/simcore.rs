@@ -541,7 +541,8 @@ impl SimCore {
             if now / 1000 != self.aprs_s {
                 self.aprs_s = now / 1000;
                 let relay_ok = ferrite_core::txplan::relay_ok(app.tuned_freq(app.active()), app.aprs_freq());
-                let n = store.extra.aprs_tick(self.aprs_s, app.aprs_on(), relay_ok);
+                // APRS-29: beacons alone run the beacon's timer too (the card's countdown).
+                let n = store.extra.aprs_tick(self.aprs_s, app.aprs_on() || app.aprs_holder() == Some(ferrite_app::aprs::Holder::Beacon), relay_ok);
                 if let Some((from, text)) = n.inbound {
                     app.notify(from.as_bytes(), text.as_bytes(), false); // APRS-6
                     store.message_in(true, from.as_bytes(), text.as_bytes(), 0);

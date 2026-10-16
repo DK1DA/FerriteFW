@@ -962,6 +962,7 @@ mod radio_activity;
 mod bcast;
 mod lights;
 mod aprs;
+mod aprs_card;
 mod d64;
 /// Decision 72: the nicFW gaps (HF channels, 1000-1300 MHz, the clarifier, grid entry).
 mod nicfw;

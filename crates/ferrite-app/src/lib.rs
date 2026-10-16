@@ -20,6 +20,7 @@
 extern crate std;
 
 pub mod aprs;
+pub mod aprs_card;
 pub mod bcast;
 pub mod aprs_live;
 pub mod chan;

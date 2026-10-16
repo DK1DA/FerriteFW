@@ -393,6 +393,11 @@ pub trait Data {
     fn beacon(&self) -> Beacon {
         Beacon::default()
     }
+    /// KISS frames since power-on (APRS-17's KISS card: "Sent 3 · Heard 14"): sent from the client, and heard
+    /// (decoded and passed to it). RAM only.
+    fn kiss_counts(&self) -> (u16, u16) {
+        (0, 0)
+    }
 
     /// APRS messages, newest first, inbox and sent together.
     fn messages(&self) -> u16 {

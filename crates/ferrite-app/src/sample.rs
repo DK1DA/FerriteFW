@@ -206,6 +206,8 @@ pub struct Sample {
     /// A waypoint typed as a grid square (GPS-21): one, first in the list.
     wp_typed: Cell<Option<(Pos, Buf<16>)>>,
     skips_gone: Cell<u32>,
+    /// KISS frames sent and heard (APRS-17's KISS card): the simulators' KISS port counts them.
+    kiss: Cell<(u16, u16)>,
     heard_cleared: Cell<bool>,
     version: Cell<u32>,
     /// None: no fix (GPS searching).
@@ -252,6 +254,7 @@ impl Sample {
             wp_saved: Cell::new(None),
             wp_typed: Cell::new(None),
             skips_gone: Cell::new(0),
+            kiss: Cell::new((0, 0)),
             heard_cleared: Cell::new(false),
             version: Cell::new(1),
             fix: Cell::new(Some(Fix { pos: HERE, three_d: true, alt_m: 74, speed_kmh: 0, heading: 0, hdop_x10: 9, used: 9, age_s: 1, utc_s: 18 * 3600 + 32 * 60 + 5 })),
@@ -259,6 +262,14 @@ impl Sample {
             pos_set: core::array::from_fn(|_| Cell::new(None)),
             no_positions: Cell::new(false),
         }
+    }
+
+    /// The simulators' KISS port: a frame from the client sent (`sent`) or one heard passed to it (APRS-17's
+    /// KISS card counts them).
+    pub fn kiss_frame(&self, sent: bool) {
+        let (s, h) = self.kiss.get();
+        self.kiss.set(if sent { (s.saturating_add(1), h) } else { (s, h.saturating_add(1)) });
+        self.bump();
     }
 
     /// Every channel without a position (true), or the sample's again: the zones page's plain list (CHAN-29).
@@ -454,6 +465,9 @@ impl Data for Sample {
     }
     fn beacon(&self) -> Beacon {
         self.aprs.beacon()
+    }
+    fn kiss_counts(&self) -> (u16, u16) {
+        self.kiss.get()
     }
 
     fn waypoints(&self) -> u16 {

@@ -218,7 +218,7 @@ impl Radio {
         }
         // 3. The watch turn, on the frequencies the scans just stepped to.
         let asleep = if self.save.asleep() { !self.kept() } else { 0 };
-        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep, held: self.monitor };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep, held: self.monitor, prio: self.kept() };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.turn(now, &cfg, sq, heard, keyed);
         // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
@@ -251,11 +251,11 @@ impl Radio {
                 self.select_rx(f, Cause::Auto).await;
             }
         }
-        // SQL-17: a chip on a scanning slot's step or priority look opens at once; ordinary receive keeps stock's
-        // open delay.
+        // SQL-17: a chip on a scanning slot's step or priority look, or on the APRS slot (decision 181: it must
+        // catch a packet's carrier within its turn), opens at once; ordinary receive keeps stock's open delay.
         for n in 0..2u8 {
             if let Some((s, _)) = self.tuned[n as usize] {
-                let fast = self.scans.get(s as usize).is_some_and(|sc| sc.listening());
+                let fast = self.scans.get(s as usize).is_some_and(|sc| sc.listening()) || self.aprs_slots & 1 << s != 0;
                 self.open_delay(n, fast);
             }
         }
@@ -265,9 +265,13 @@ impl Radio {
         let monitor_active = self.monitor & !self.user_mute & 1 << self.active != 0; // HOME-15: muted, not heard
         let audio = if monitor_active { Some(self.active) } else { out.audio };
         let audio_chip = audio.and_then(heard_chip).filter(|&n| monitor_active || toned[n as usize]);
+        // APRS-21.1, APRS-16: a priority slot holding its chip for a packet with nothing on the speaker (muted, or
+        // another slot's tone) still sends its audio to the decoder (EARO, PA2); the speaker stays off. Not beside a
+        // broadcast, whose audio shares the speaker's path.
+        let decode_chip = audio_chip.or(out.hold.filter(|_| self.si.mode().is_none()));
         for n in 0..2u8 {
             if self.tuned[n as usize].is_some() {
-                self.chip(n).af_out(if Some(n) == audio_chip { AfOut::Normal } else { AfOut::Mute });
+                self.chip(n).af_out(if Some(n) == decode_chip { AfOut::Normal } else { AfOut::Mute });
             }
         }
         self.bcast_audio(now, audio_chip.is_some());

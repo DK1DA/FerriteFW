@@ -82,6 +82,10 @@ const GPS: [Opt; 3] = [
     ("GPS settings", Act::Open(Dest::Group(6)), "On or off, format, units, time zone"),
 ];
 const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, step, speed, trigger, waterfall")];
+/// APRS-17 (decision 181): OK on home with the APRS slot active opens this page on its "Beacon now" row (beacons
+/// alone hold C) or its "Heard list" row (APRS mode, KISS).
+pub(crate) const APRS_ROW_BEACON_NOW: u8 = 0;
+pub(crate) const APRS_ROW_HEARD: u8 = 2;
 const APRS_CARD: [Opt; 4] = [
     ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
     ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 5 1)"),

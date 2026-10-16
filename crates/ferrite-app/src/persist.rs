@@ -239,7 +239,7 @@ impl App {
         }
         self.out.push(RadioCmd::Active(self.active));
         self.out.push(RadioCmd::Watch(self.watch_mask()));
-        self.out.push(RadioCmd::Awake((self.aprs_c() as u8) << crate::aprs::APRS_SLOT));
+        self.send_aprs_slot();
         self.c_settled();
         self.send_radio_settings();
         self.out.push(RadioCmd::BatterySave(crate::level(self.bsave)));
