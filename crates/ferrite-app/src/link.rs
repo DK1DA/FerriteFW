@@ -255,7 +255,12 @@ impl Session {
     fn handle<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, now: u32, ty: u8, p: &[u8], a: &mut [u8; MAX_PAYLOAD]) -> usize {
         let mut o = Out { a, n: 1 };
         let s = match ty {
-            msg::HELLO => self.hello(app, dev, p, &mut o),
+            msg::HELLO => {
+                // LINK-20.5: a HELLO is the session starting over: a remote transmission it keyed ends now, as a
+                // cut (no keepalive wait, no 400 ms hold), and the keys it holds are let go.
+                app.remote_session_closed(self.by, now, st);
+                self.hello(app, dev, p, &mut o)
+            }
             msg::AUTH => self.auth(app, p),
             // LINK-30: on Bluetooth with the PIN lock on, nothing else until AUTH.
             _ if !self.authorised(app) => Status::NotAuthorised,
@@ -285,7 +290,7 @@ impl Session {
                 }
                 None => Status::BadArg,
             },
-            msg::REBOOT if app.radio.keyed.is_some() => Status::Busy,
+            msg::REBOOT if app.radio.keyed.is_some() || live.tx.keyed => Status::Busy, // LINK-24.3: a data key-up too
             msg::REBOOT => {
                 self.reboot = true;
                 Status::Ok

@@ -328,6 +328,12 @@ impl Settings {
         self.kiss_port == 2
     }
 
+    /// KISS is on, on the cable or on Bluetooth (with Bluetooth on): the KISS task's test (KISS-6), and what makes
+    /// slot C the APRS slot (KISS-9).
+    pub fn kiss_on(&self) -> bool {
+        self.kiss_on_cable() || self.kiss_on_bt() && self.bt
+    }
+
     pub const DEFAULT: Settings = Settings {
         callsign: Text::EMPTY,
         owner: [Text::EMPTY; 3],

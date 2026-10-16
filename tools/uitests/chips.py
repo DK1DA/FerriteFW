@@ -522,10 +522,12 @@ def brightness_duty_table(t):
 @test("DISP-15.5", needs=("bench",), where="radio", slow=True, pages=("Home",))
 def broadcast_never_wakes_the_screen(t):
     """A broadcast slot playing, the timeout at 10 s: the screen goes dark and stays dark (broadcast isn't
-    receiving); the green LED (PC14) stays off."""
+    receiving); the green LED (PC14) stays off. LEDs on "RX and TX" for the test: the default heartbeat flashes the
+    green LED on a dark screen every 5 s (DISP-21), which is not receiving."""
     t.bench()
     stopped = quiet(t)
     try:
+        t.set("0 7 6", "RX and TX")
         t.set("0 7 4 1", "10 s")
         t.cmd("slot A vfo 100.1")
         t.cmd("slot A active")

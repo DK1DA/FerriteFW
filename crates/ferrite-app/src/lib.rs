@@ -1296,9 +1296,9 @@ impl App {
         }
     }
 
-    /// The watched slots: Watch's, and C while APRS mode has it (APRS-16).
+    /// The watched slots: Watch's, and C while it is the APRS slot (APRS-16, KISS-9).
     pub(crate) fn watch_mask(&self) -> u8 {
-        [0, 0b011, 0b111][self.watch as usize % 3] | (self.set.aprs_mode as u8) << aprs::APRS_SLOT
+        [0, 0b011, 0b111][self.watch as usize % 3] | (self.aprs_c() as u8) << aprs::APRS_SLOT
     }
 
     /// The radio-wide settings the Radio task keeps: scan inputs (0 1 6 3, SCAN-22) and the subtone level
@@ -1469,7 +1469,7 @@ impl App {
         match item {
             // APRS-19: nothing on the APRS slot changes
             Item::Watch | Item::BatterySave | Item::Channel | Item::Advanced => None,
-            _ if self.aprs_slot(self.active) => Some("APRS mode: MENU 0 5 3"),
+            _ if self.aprs_slot(self.active) => Some(self.aprs_holds()),
             Item::Step if s.on_channel() => Some("VFO only"), // VFO-8
             Item::Power if self.capped(self.active) => Some("Fixed at 0.25 W on 1.25 m"),
             _ => None,

@@ -139,7 +139,7 @@ pub fn tone_probe<B: Bus>(bk: &mut Bk4829<B>) {
 }
 
 /// What the scan detectors heard as a tone word (CHAN-3's form; TSRCH-13), from [`Bk4829::subtone_scan`]: CTCSS
-/// snapped to the nearest of `ctcss` within 1 Hz (else to 0.1 Hz, 60-260 Hz only); DCS matched against `dcs` in
+/// snapped to the nearest of `ctcss` within 1 Hz or 1 %, the larger (else to 0.1 Hz, 60-260 Hz only); DCS matched against `dcs` in
 /// any of its 23 rotations, normal before inverted (the complement). None if nothing usable.
 #[inline(never)] // in .slow_text (memory.x): once per probe
 pub fn heard_tone(ctcss_dhz: Option<u16>, dcs_word: Option<u32>, ctcss: &[u16], dcs: &[u16]) -> Option<u16> {
@@ -159,7 +159,7 @@ pub fn heard_tone(ctcss_dhz: Option<u16>, dcs_word: Option<u32>, ctcss: &[u16], 
     }
     let d = ctcss_dhz.filter(|d| (600..=2600).contains(d))?;
     let near = ctcss.iter().copied().min_by_key(|&t| t.abs_diff(d));
-    Some(near.filter(|t| t.abs_diff(d) <= 10).unwrap_or(d))
+    Some(near.filter(|&t| t.abs_diff(d) <= (t / 100).max(10)).unwrap_or(d))
 }
 
 /// A local beep's start on a chip (SND-11, stock 0x0801EB8C): woken first if it was asleep, tone 1 at `tone_gain`

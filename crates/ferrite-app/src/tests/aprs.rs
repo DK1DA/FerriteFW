@@ -136,6 +136,56 @@ fn aprs_slot_is_locked() {
     assert!(a.cmds().iter().any(|c| matches!(c, RadioCmd::TuneSlot { slot: 2, .. })));
 }
 
+/// KISS-9 (decision 173): KISS on (Bluetooth with Bluetooth on, or the cable) makes C the APRS slot with APRS mode
+/// off: tuned to the APRS frequency, watched and awake, locked with KISS's message, a data key-up's frequency the
+/// APRS one; KISS off gives C back unless APRS mode is on.
+#[test]
+fn kiss_on_makes_c_the_aprs_slot() {
+    let mut a = A::new();
+    let own = a.app.slot(APRS_SLOT).freq();
+    a.app.set_watch(0);
+    a.cmds();
+    assert!(!a.app.aprs_slot(APRS_SLOT));
+    a.app.set.bt = true;
+    a.app.set.kiss_port = 2; // 0 5 9 1 on Bluetooth
+    a.tick();
+    assert!(a.app.aprs_slot(APRS_SLOT) && !a.app.aprs_on(), "C is the APRS slot, APRS mode still off");
+    let c = a.cmds();
+    assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: 14_439_000 }), "tuned to APRS: {c:?}");
+    assert!(c.contains(&RadioCmd::Watch(0b100)) && c.contains(&RadioCmd::Awake(0b100)));
+    assert_eq!(crate::screens::transmit::tx_freq(&a.app, APRS_SLOT), 14_439_000, "frames go out on the APRS frequency");
+    // Locked as APRS-19, with KISS's message.
+    a.tap(Key::Slot);
+    a.tap(Key::Slot);
+    assert_eq!(a.app.active(), 2);
+    assert_eq!(a.app.greyed(Item::Power), Some("KISS on: MENU 0 5 9 1"));
+    a.cmds();
+    a.tap(Key::Up);
+    assert!(a.app.toast_up());
+    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::TuneSlot { .. })), "C stays put");
+    // APRS mode on and off again while KISS holds C: C stays APRS.
+    a.mode(true);
+    a.mode(false);
+    assert!(a.app.aprs_slot(APRS_SLOT));
+    // Bluetooth off: KISS over Bluetooth is off too, and C comes back.
+    a.cmds();
+    a.app.set.bt = false;
+    a.tick();
+    let c = a.cmds();
+    assert!(!a.app.aprs_slot(APRS_SLOT));
+    assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: own }) && c.contains(&RadioCmd::Watch(0)), "{c:?}");
+    // The cable's KISS (0 9 2 4) does it too, and APRS mode keeps C when KISS goes off.
+    a.app.set.kiss_port = 0;
+    a.app.set.cable_port = 3;
+    a.tick();
+    assert!(a.app.aprs_slot(APRS_SLOT));
+    assert_eq!(a.app.greyed(Item::Power), Some("KISS on: MENU 0 9 2 4"));
+    a.mode(true);
+    a.app.set.cable_port = 0;
+    a.tick();
+    assert!(a.app.aprs_slot(APRS_SLOT), "APRS mode still has C");
+}
+
 /// APRS-18: with the APRS slot (C) active, PTT A opens compose from any screen without keying; in compose PTT
 /// sends. PTT B keys B as ever.
 #[test]
@@ -462,4 +512,23 @@ fn custom_path() {
     let c = a.app.aprs_cfg();
     assert!(c.custom_text().is_empty());
     assert_eq!(c.path, PATH_DEFAULT, "forgetting the path in use goes back to the default");
+}
+
+/// SETUP-13 (decision 174): a callsign over 6 characters (VE7TEST) is kept for CW ID, but APRS refuses to send with
+/// it (an AX.25 address holds 6: it went out as VE7TES); a KISS frame, which carries the client's own addresses, goes.
+#[test]
+fn long_callsign_refuses_aprs_not_kiss() {
+    let mut a = A::new();
+    a.app.radio.tx_built = true;
+    a.app.set_region(Some(Region::Us), false);
+    a.mode(true);
+    a.app.set_callsign(b"VE7TEST");
+    a.cmds();
+    assert!(!crate::screens::transmit::data_key(&mut a.app, APRS_SLOT, 0, b"Beacon"), "refused");
+    assert!(a.app.toast_up());
+    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::TransmitData { on: true, .. })));
+    assert!(crate::screens::transmit::data_key(&mut a.app, APRS_SLOT, 0, b"KISS"), "KISS goes");
+    a.cmds();
+    a.app.set_callsign(b"VE7TES");
+    assert!(crate::screens::transmit::data_key(&mut a.app, APRS_SLOT, 0, b"Beacon"), "6 is fine");
 }

@@ -94,8 +94,7 @@ impl Aprs {
         extra.set_callsign(app.callsign());
         // KISS-6: the cable (0 9 2 4 on KISS, or 0 5 9 1 on Cable) or Bluetooth (0 5 9 1, with Bluetooth on).
         let kiss_cable = app.settings().kiss_on_cable();
-        let kiss_bt = app.settings().kiss_on_bt() && app.settings().bt;
-        let kiss_on = kiss_cable || kiss_bt;
+        let kiss_on = app.settings().kiss_on(); // KISS-9: C is the APRS slot meanwhile (`App::aprs_c`)
         let on = app.aprs_on();
         let decode = on || kiss_on || app.aprs_flag_decode(); // APRS-22
         if decode != self.on && DSP.try_send(DspCmd::Decoder(if decode { DecoderKind::Afsk } else { DecoderKind::Off })).is_ok() {

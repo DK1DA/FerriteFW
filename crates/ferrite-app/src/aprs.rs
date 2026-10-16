@@ -265,6 +265,8 @@ const LOADED: u8 = 1;
 const DIRTY: u8 = 2;
 /// A voice transmission ended (APRS-27); the next tick asks for the beacon.
 const AFTER_VOICE: u8 = 4;
+/// C was the APRS slot at the last tick (KISS-9: KISS turning on or off moves it, from any path that sets it).
+const C_APRS: u8 = 8;
 const TOAST_HEAD: &[u8] = b"APRS mode:";
 const TOAST_BODY: &[u8] = b"off at MENU 0 5 3";
 
@@ -281,9 +283,43 @@ impl App {
         !self.set.aprs_mode && !s.vfo_mode && s.ch.is_some_and(|c| c.flags & crate::chan::FLAG_APRS != 0)
     }
 
+    /// Slot C is the APRS slot: APRS mode is on (APRS-15), or KISS is (KISS-9: its frames go out there).
+    pub fn aprs_c(&self) -> bool {
+        self.set.aprs_mode || self.set.kiss_on()
+    }
+
     /// Slot `s` is the APRS slot now.
     pub fn aprs_slot(&self, s: u8) -> bool {
-        s == APRS_SLOT && self.set.aprs_mode
+        s == APRS_SLOT && self.aprs_c()
+    }
+
+    /// KISS-9: where KISS is turned off (0 9 2 4 when the cable port carries it, else 0 5 9 1).
+    pub(crate) fn kiss_off_at(&self) -> &'static [u8] {
+        if self.set.kiss_port == 0 { b"off at MENU 0 9 2 4" } else { b"off at MENU 0 5 9 1" }
+    }
+
+    /// Why the APRS slot can't change (APRS-19; KISS-9 when KISS alone holds it).
+    pub(crate) fn aprs_holds(&self) -> &'static str {
+        if self.set.aprs_mode { "APRS mode: MENU 0 5 3" } else if self.set.kiss_port == 0 { "KISS on: MENU 0 9 2 4" } else { "KISS on: MENU 0 5 9 1" }
+    }
+
+    /// The settings were loaded and C sent as they say: no KISS toast for what was already so (KISS-9).
+    pub(crate) fn c_settled(&mut self) {
+        self.aprs_st = if self.aprs_c() { self.aprs_st | C_APRS } else { self.aprs_st & !C_APRS };
+    }
+
+    /// C becomes the APRS slot or goes back (APRS-15, APRS-16, KISS-9): it stops scanning, retunes, and is watched
+    /// and kept awake while it is.
+    fn c_follow(&mut self) {
+        let on = self.aprs_c();
+        self.c_settled();
+        if self.scan_mask & 1 << APRS_SLOT != 0 {
+            self.scan_mask &= !(1 << APRS_SLOT);
+            self.out.push(RadioCmd::Scan { slot: APRS_SLOT, on: false }); // C stops scanning to listen to APRS
+        }
+        self.send_slot(APRS_SLOT);
+        self.out.push(RadioCmd::Watch(self.watch_mask()));
+        self.out.push(RadioCmd::Awake((on as u8) << APRS_SLOT));
     }
 
     pub fn aprs_cfg(&self) -> AprsCfg {
@@ -316,17 +352,13 @@ impl App {
     /// APRS mode on or off (0 5 3, APRS-15, APRS-16): C tunes to APRS and is watched, or goes back as it was.
     pub(crate) fn set_aprs_mode(&mut self, on: bool) {
         self.set.aprs_mode = on;
-        if self.scan_mask & 1 << APRS_SLOT != 0 {
-            self.scan_mask &= !(1 << APRS_SLOT);
-            self.out.push(RadioCmd::Scan { slot: APRS_SLOT, on: false }); // C stops scanning to listen to APRS
-        }
-        self.send_slot(APRS_SLOT);
-        self.out.push(RadioCmd::Watch(self.watch_mask()));
-        self.out.push(RadioCmd::Awake((self.set.aprs_mode as u8) << APRS_SLOT));
+        self.c_follow();
         if on {
             let mut f = Buf::<20>::new();
             let _ = uwrite!(f, "C on {}", Txt(crate::slot::mhz3(self.aprs_freq()).as_bytes()));
             self.show_toast(b"APRS mode on", f.as_bytes(), false);
+        } else if self.aprs_c() {
+            self.show_toast(b"APRS mode off", b"KISS keeps C", false); // KISS-9
         } else {
             self.show_toast(b"APRS mode off", b"slot C restored", false);
         }
@@ -336,7 +368,7 @@ impl App {
     pub(crate) fn set_aprs(&mut self, c: AprsCfg) {
         self.aprs = c;
         self.aprs_st |= DIRTY;
-        if self.set.aprs_mode {
+        if self.aprs_c() {
             self.send_slot(APRS_SLOT);
         }
     }
@@ -402,9 +434,9 @@ impl App {
     }
 
     /// APRS-21: the slot that shares chip 0 (64–300 MHz) with the APRS slot, so the two take turns on it: A or B
-    /// when it listens there (active or watched). None when C has the chip to itself, or APRS mode is off.
+    /// when it listens there (active or watched). None when C has the chip to itself, or isn't the APRS slot.
     pub fn aprs_shared(&self) -> Option<u8> {
-        if !self.aprs_on() || ferrite_core::freq::band(self.aprs_freq()).1 != 0 {
+        if !self.aprs_c() || ferrite_core::freq::band(self.aprs_freq()).1 != 0 {
             return None;
         }
         let listening = self.watch_mask() | 1 << self.active;
@@ -416,13 +448,17 @@ impl App {
         if !self.aprs_slot(s) {
             return false;
         }
-        self.show_toast(TOAST_HEAD, TOAST_BODY, false);
+        if self.set.aprs_mode {
+            self.show_toast(TOAST_HEAD, TOAST_BODY, false);
+        } else {
+            self.show_toast(b"KISS on:", self.kiss_off_at(), false); // KISS-9
+        }
         true
     }
 
     /// The reset: APRS settings back to their defaults (the store's went with [`crate::data::Op::Wipe`]).
     pub(crate) fn reset_aprs(&mut self) {
-        (self.aprs, self.aprs_st) = (AprsCfg::DEFAULT, LOADED);
+        (self.aprs, self.aprs_st) = (AprsCfg::DEFAULT, LOADED | self.aprs_st & C_APRS);
         self.send_slot(APRS_SLOT);
     }
 
@@ -433,10 +469,16 @@ impl App {
             let c = data.aprs_cfg();
             if c != self.aprs {
                 self.aprs = c;
-                if self.set.aprs_mode {
+                if self.aprs_c() {
                     self.send_slot(APRS_SLOT);
                 }
             }
+        }
+        // KISS-9: KISS turned on or off (the menu, `set`, a settings write): C follows.
+        if self.aprs_c() != (self.aprs_st & C_APRS != 0) {
+            self.c_follow();
+            let (head, body): (&[u8], &[u8]) = if self.aprs_c() { (b"KISS on", b"C is the APRS slot") } else { (b"KISS off", b"slot C restored") };
+            self.show_toast(head, body, false);
         }
         if self.aprs_st & DIRTY != 0 {
             data.request(crate::data::Op::AprsCfg(self.aprs)); // NoData (the radio until the APRS store): kept in RAM

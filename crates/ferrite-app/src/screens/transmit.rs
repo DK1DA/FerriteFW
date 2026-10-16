@@ -189,6 +189,8 @@ pub fn auto_tx(app: &mut App, slot: u8, what: &[u8]) -> bool {
         b"emergency frequency"
     } else if app.set.callsign.as_bytes().is_empty() {
         b"no callsign set"
+    } else if app.set.callsign.as_bytes().len() > AX25_CALL && what != b"KISS" {
+        b"callsign over 6" // SETUP-13: AX.25 carries 6; KISS frames carry the client's own addresses
     } else if let Some(r) = refusal(app, slot) {
         short(r).as_bytes()
     } else {
@@ -200,6 +202,9 @@ pub fn auto_tx(app: &mut App, slot: u8, what: &[u8]) -> bool {
     app.show_toast(h.as_bytes(), why, false);
     false
 }
+
+/// SETUP-13: an AX.25 address holds 6 characters of callsign (the SSID apart).
+pub const AX25_CALL: usize = 6;
 
 /// APRS-7, APRS-20: a data transmission on `slot` (the APRS task's frame): an automatic one's checks (TX-35,
 /// [`auto_tx`]), then the plan and the data key-up at `power` (0 5 5 4). No screen opens (the card shows it).

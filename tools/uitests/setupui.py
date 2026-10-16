@@ -90,8 +90,6 @@ def about_rows(t):
     return a
 
 
-@test("BOOT-14.4", "BOOT-14.5", "SAFE-9.1", "SAFE-14.5", "SETUP-3", needs=("reset",), pages=(
-    "Confirm", "Group", "Home", "Info", "Setup"))
 def dump_lines(d):
     """A dump's command lines as the link sends them (comments, blank lines and `end` left out; a `set` line's
     trailing `# name` dropped)."""

@@ -425,8 +425,8 @@ fn tone_probe_and_restore() {
     }
 }
 
-/// TSRCH-13: what the detectors read becomes a tone word: CTCSS snapped to the standard tone within 1 Hz (REG_68's
-/// conversion truncates, 88.5 can read 88.4), else kept to 0.1 Hz; out of 60-260 Hz ignored; DCS in any rotation,
+/// TSRCH-3, TSRCH-13: what the detectors read becomes a tone word: CTCSS snapped to the standard tone within 1 Hz or
+/// 1 % (REG_68 at the BK4829's scale, rounded), else kept to 0.1 Hz; out of 60-260 Hz ignored; DCS in any rotation,
 /// with its polarity (the complement is inverted), and a DCS reading wins over a CTCSS one.
 #[test]
 fn heard_tone_decodes() {
@@ -435,6 +435,10 @@ fn heard_tone_decodes() {
     assert_eq!(chip::heard_tone(Some(884), None, &CT, &DC), Some(885));
     assert_eq!(chip::heard_tone(Some(1003), None, &CT, &DC), Some(1000));
     assert_eq!(chip::heard_tone(Some(1300), None, &CT, &DC), Some(1300), "off the list: as read");
+    // TSRCH-3: 1 % at the top of the table (162.2 read 1.5 Hz off still snaps); the clear radio's 88.5 through the
+    // BK4829's REG_68 scale (87.3 with the BK4819's) comes back 88.5.
+    assert_eq!(chip::heard_tone(Some(1607), None, &CT, &DC), Some(1622));
+    assert_eq!(chip::heard_tone(Some(bk4829::scan_dhz(1803)), None, &CT, &DC), Some(885));
     assert_eq!(chip::heard_tone(Some(550), None, &CT, &DC), None, "the 55 Hz tail is no tone");
     assert_eq!(chip::heard_tone(None, None, &CT, &DC), None);
     let w = bk4829::dcs_codeword(0o114, false);

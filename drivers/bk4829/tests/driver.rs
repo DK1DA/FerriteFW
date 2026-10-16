@@ -473,3 +473,13 @@ mod tx {
         );
     }
 }
+
+/// TSRCH-3: REG_68's CTCSS reading at the BK4829's scale (88.5 Hz read 87.3 at the BK4819's 20.64888): rounded to
+/// 0.1 Hz; bit 15 and the bits above 12 are not the count.
+#[test]
+fn scan_reading_scale() {
+    assert_eq!(bk4829::scan_dhz(1803), 885);
+    assert_eq!(bk4829::scan_dhz(0x6000 | 1803), 885);
+    assert_eq!(bk4829::scan_dhz(1365), 670);
+    assert_eq!(bk4829::scan_dhz(5101), 2503);
+}

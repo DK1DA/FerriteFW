@@ -531,7 +531,7 @@ impl<B: Bus> Bk4829<B> {
     /// or the 23-bit word. None while scanning.
     pub fn subtone_scan(&mut self) -> (Option<u16>, Option<u32>) {
         let c = self.read(0x68);
-        let ctcss = (c & 0x8000 == 0).then(|| ((c as u32 & 0x1FFF) * 1_000_000 / 2_064_888) as u16);
+        let ctcss = (c & 0x8000 == 0).then(|| scan_dhz(c));
         let hi = self.read(reg::CDCSS_HI);
         let dcs = if hi & 0x8000 == 0 {
             let lo = self.read(reg::CDCSS_LO);
@@ -660,3 +660,13 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::FSK_MODE, 0);
     }
 }
+
+/// REG_68's CTCSS reading (bits 0-12) in tenths of a Hz, rounded. The BK4819's scale (20.64888 per Hz, the CTC1
+/// word's) read 1.3 % low on the BK4829: the clear radio's 88.5 Hz came back as 87.3 (TSRCH-3, Oct 15, 2026), so the
+/// scan detector counts at about 20.38 per Hz. Bench-confirm across the table (67.0 and 250.3 at least).
+pub fn scan_dhz(reg68: u16) -> u16 {
+    (((reg68 as u32 & 0x1FFF) * 10_000 + SCAN_PER_HZ_X1000 / 2) / SCAN_PER_HZ_X1000) as u16
+}
+
+/// The scan detector's counts per Hz, times 1000 (see [`scan_dhz`]).
+pub const SCAN_PER_HZ_X1000: u32 = 20_380;

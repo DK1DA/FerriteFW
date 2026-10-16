@@ -495,8 +495,15 @@ class T:
         self.need(getattr(self.opts, "cablelog", None), "no --cablelog PORT")
         if getattr(self, "_log", None) is None:
             self._log = CableLog(self.opts.cablelog)
+            # Off, then On: a byte on the cable ends the log (TERM-28) while the setting stays On, and setting On
+            # again then changes nothing, so the log stayed silent (cablelog.gps_quiet_standby, Oct 15, 2026).
+            self.owner_set("0 9 2 6", "Off")
+            time.sleep(0.3)
+            t0 = time.time()
             self.owner_set("0 9 2 6", "On")
-            time.sleep(0.5)
+            # The receiver is logged once a second: a quiet log after 3 s is the cable, not the test's subject.
+            self.need(self._log.wait(r".", t0, 3.0), f"no cable log lines on {self.opts.cablelog} within 3 s of "
+                      "0 9 2 6 On: is the cable on that port at 115200 and nothing else writing to it?")
         return self._log
 
     def end_test(self):

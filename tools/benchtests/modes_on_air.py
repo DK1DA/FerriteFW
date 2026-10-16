@@ -21,8 +21,9 @@ gain; everything this suite changes saved first and put back in `finally` (VOX o
 
 Key-ups the radio makes itself are watched over the link's compact status (LINK-19, `keyed=`): one longer than
 admitted is stopped at once (the tone killed, VOX off, KEY off). APRS and KISS key on the APRS frequency (0 5 7 1),
-which the suite sets to 145.495 by keys (the terminal can't set it) and reads back with `get 0 5 7 1` before any
-beacon or frame (and slot C over SLOT); it is put back after. HF transmit is never keyed: HF-22, HF-23's key-up
+which must read 145.495 (`get 0 5 7 1`) before any beacon or frame (and slot C over SLOT): left alone when it
+does, else typed by keys once (the terminal can't set it) and put back after, else the test says to set it by hand.
+They need a callsign of 6 characters at most (AX.25 carries 6, SETUP-13). KISS on makes C the APRS slot (KISS-9). HF transmit is never keyed: HF-22, HF-23's key-up
 and HF-25 need an HF test frequency approved first (a decision); only the refusals run.
 
 The speaker (VOX, and the mic tone the DTMF, end tone and PTT ID checks listen for): a sine written to a WAV and
@@ -60,7 +61,8 @@ S = dict(
     vox="0 8 2 1", vox_level="0 8 2 2", vox_tail="0 8 2 3", dtmf_speed="0 8 6 3", ptt_id="0 8 6 4",
     id_code="0 8 6 5", dtmf_delay="0 8 6 7", aprs_mode="0 5 3", beacon_mode="0 5 5 1", after_voice="0 5 5 3",
     beacon_power="0 5 5 4", aprs_freq="0 5 7 1", tx_delay="0 5 7 2", pos_source="0 5 4 4", fixed="0 5 4 5",
-    kiss="0 5 9 1", watch="0 1 1", gps_rxtx="0 6 8", bluetooth="0 9 2 1", end_tone=B.END_TONE,
+    kiss="0 5 9 1", watch="0 1 1", gps_rxtx="0 6 8", bluetooth="0 9 2 1", end_tone=B.END_TONE, gps="0 6 1",
+    bsave="0 7 7",
 )
 
 DEFAULTS = {
@@ -76,12 +78,13 @@ DEFAULTS = {
     "vox_tail_tol_s": 0.35,
     "boot_hold_s": 5.0,  # VOX-3.3
     "vox_screens": [  # VOX-3.1: screens that hold VOX (keys from home; the readback id the screen must have)
-        ["MENU", "Quick"], ["MENU 0", "Menu"], ["MENU 0 8 2", "Group"], ["1", "Entry"]],
+        ["MENU", "Quick"], ["MENU 0", "Advanced"], ["MENU 0 8 2", "Group"], ["1", "Entry"]],  # MENU 0: the full menu's id is Advanced
     "dtmf_digits": "1593",
     "dtmf_runs": [[50, 0], [100, 300], [200, 1000]],  # (speed ms, first digit delay ms)
     "dtmf_ms_tol": 12,
     "dtmf_delay_tol": 60,
     "dialer_keys": "MENU 0 8 6 1",  # opens the dialer (DTMF-13); digits, then MENU sends
+    "dialer_id": "Dtmf",  # the dialer's readback id
     "id_code": "246",
     "aprs_freq_keys": "MENU 0 5 7 1",  # opens 0 5 7 1's entry; digits with STAR for the point, MENU takes it
     "beacon_now_keys": "MENU 0 5 1 MENU:long",  # the heard list's options (MENU-25): row 1 is Beacon now
@@ -234,10 +237,16 @@ class LinkRadio(B.Radio):
     def status(self):
         return fl.parse_status(self.ui_text(2).strip())
 
-    def reboot(self):
-        """LINK-24: into the stock bootloader, which starts Ferrite again; then HELLO again (the time it answered)."""
+    def reboot(self, after=None):
+        """LINK-24: into the stock bootloader, which starts Ferrite again; then HELLO again (the time it answered).
+        `after()` runs as soon as REBOOT is answered. A refusal (busy while transmitting, LINK-24.3) is an error."""
+        s, rest = None, b""
         with contextlib.suppress(Exception):
-            self._ask(fl.REBOOT)
+            s, rest = self._ask(fl.REBOOT)
+        if s not in (None, 0):
+            raise B.BenchError(f"REBOOT refused: {fl.why(s, rest)}")
+        if after:
+            after()
         self.close()
         end = time.time() + 30
         while time.time() < end:
@@ -275,6 +284,15 @@ def parse_bk(out):
     if not m:
         raise B.BenchError(f"bk: can't read {out[:120]!r}")
     return int(m.group(1), 16)
+
+
+def si_prop(out, prop):
+    """`si prop P`'s answer (TERM-24): "si 13 00 PP PP -> SS RR VV VV", GET_PROPERTY's status, a reserved byte, then
+    the value. None if it can't be read."""
+    m = re.search(r"->\s*([0-9A-Fa-f]{2})\s+[0-9A-Fa-f]{2}\s+([0-9A-Fa-f]{2})\s+([0-9A-Fa-f]{2})", out)
+    if not m or int(m.group(1), 16) & 0x40:  # ERR set
+        return None
+    return int(m.group(2), 16) << 8 | int(m.group(3), 16)
 
 
 def parse_mic(out):
@@ -739,8 +757,16 @@ class Modes:
     def tail_s(self, tail):
         return float(tail.split()[0])
 
+    def hold_s(self):
+        """TX-47.2: the carrier held past the unkey (0.5 s on tx-dry); the status reads keyed through it."""
+        return self.cfg["sweeps"]["endtones"].get("hold_s", 0.5)
+
     def vox_planned(self, tone_s, tail):
-        return tone_s + (self.cal.get("decay_s") or 0) + self.tail_s(tail) + 0.3 + self.b.duty.c["unkey_tail_s"]
+        """A VOX key-up's longest length: the tone, the envelope's fall, the tail, the unkey's carrier hold and a
+        0.3 s margin, plus the duty limit's unkey tail. Admitted whole (the run admitted it without the
+        hold and stopped it before the tail ended)."""
+        return (tone_s + (self.cal.get("decay_s") or 0) + self.tail_s(tail) + self.hold_s() + 0.3
+                + self.b.duty.c["unkey_tail_s"])
 
     def tone_for(self, tail, want=2.0):
         """The longest tone up to `want` s whose VOX key-up fits the duty limit's burst."""
@@ -858,7 +884,7 @@ class Modes:
         hold = self.mc["vox_hold_s"]
         keyed_want = 0.8
         tone = 1.0 + hold + keyed_want
-        planned = keyed_want + (self.cal["decay_s"] or 0) + self.tail_s(tail) + 0.3 + self.b.duty.c["unkey_tail_s"] + 0.4
+        planned = keyed_want + (self.cal["decay_s"] or 0) + self.tail_s(tail) + self.hold_s() + 0.3 + self.b.duty.c["unkey_tail_s"] + 0.4
         self.tune("A", self.f_lo)
         self.home()
         self.gate("A", "vox hold")
@@ -923,16 +949,19 @@ class Modes:
         self.vox_on(tail=tail)
         self.clock.sleep(3.0)  # the store writes the slot and VOX before the restart
         keyed_want = 0.5
-        planned = keyed_want + 0.6 + (self.cal["decay_s"] or 0) + self.tail_s(tail) + 0.3 + self.b.duty.c["unkey_tail_s"]
+        planned = (keyed_want + 0.6 + (self.cal["decay_s"] or 0) + self.tail_s(tail) + self.hold_s() + 0.3
+                   + self.b.duty.c["unkey_tail_s"])
         tone = 4.5 + hold + keyed_want + 4.0
         path = os.path.join(self.d, "vox-boot.u8")
         mark = {}
 
         def start():
-            self.audio.play(self.mc["mic_tone_hz"], tone, self.cal["db_key"])
-            self.clock.sleep(0.5)
+            # REBOOT first and the tone from its answer on: a tone started before it lets VOX key the radio, and a
+            # keyed radio refuses REBOOT (LINK-24.3). The tone plays through the restart.
+            if self.keyed_now():
+                raise B.BenchError("keyed before the restart (the last key-up's tail?): not restarting")
             mark["reboot"] = self.clock.time()
-            mark["hello"] = self.r.reboot()
+            mark["hello"] = self.r.reboot(after=lambda: self.audio.play(self.mc["mic_tone_hz"], tone, self.cal["db_key"]))
             if mark["hello"] - mark["reboot"] > 4.5:
                 self.audio.stop()
                 raise Skip("the radio took over 4.5 s to answer after the restart: the tone was cut")
@@ -948,11 +977,16 @@ class Modes:
                                    cap_s=planned + 1.0, tick=tick)
         self.r.term(f"set {S['vox']} Off")
         runs = B.carrier_runs(raw)
-        first = ev["t_capture"] + runs[0][0] if runs else None
-        dt = first - mark["reboot"] if first else None
+        # Only carriers that start at REBOOT or later: the capture's lead can hold the tail of the key-up before
+        # (the run counted one 0.86 s before REBOOT).
+        t_rb = mark["reboot"] - ev["t_capture"] if "reboot" in mark else 0.0
+        before = [r for r in runs if r[0] < t_rb - 0.05]
+        after = [r for r in runs if r[0] >= t_rb - 0.05]
+        dt = after[0][0] - t_rb if after else None
         ok = self.add("vox_boot", [_chk(f"no carrier within {hold} s of the restart", dt is None or dt >= hold, _s(dt)),
-                                   _chk("then VOX keys (the tone reaches it)", dt is not None, runs)],
-                      f"first carrier {_s(dt)} after REBOOT (HELLO again {mark.get('hello', 0) - mark.get('reboot', 0):.1f} s after)")
+                                   _chk("then VOX keys (the tone reaches it)", dt is not None, after)],
+                      f"first carrier {_s(dt)} after REBOOT (HELLO again {mark.get('hello', 0) - mark.get('reboot', 0):.1f} s after)"
+                      + (f"; {len(before)} carrier(s) before REBOOT not counted" if before else ""))
         self.keep(path, ok)
 
     # -- DTMF and the end tone (the mic tone shows the mic muted) --
@@ -962,6 +996,7 @@ class Modes:
         self.setv(S["dtmf_speed"], f"{speed} ms")
         self.setv(S["dtmf_delay"], f"{delay} ms")
         self.r.keys(self.mc["dialer_keys"])
+        sid = self.ui().get("screen", {}).get("id")
         self.r.keys(" ".join(digits))
         planned = (delay + 2 * speed * len(digits)) / 1000 + 0.6 + self.b.duty.c["unkey_tail_s"]
 
@@ -973,6 +1008,9 @@ class Modes:
         ev, raw = self.radio_keyup(purpose, planned, start, mhz=mhz, path=path, lead=0.8)
         if self.audio:
             self.audio.stop()
+        ev["dialer"] = sid
+        if not ev["accepted"]:  # a refusal says why in a toast
+            ev["toast"] = self.ui().get("toast")
         return ev, raw
 
     def t_dtmf(self):
@@ -1006,6 +1044,13 @@ class Modes:
             dev, fs, on, runs = air(raw)
             got = dtmf_decode(dev, fs)
             s = "".join(g[0] for g in got)
+            # Which step failed: the dialer not open, Send not keyed (status), no carrier, or nothing decoded.
+            if ev.get("dialer") != self.mc["dialer_id"]:
+                s = f"(the dialer didn't open: `{self.mc['dialer_keys']}` gave {ev.get('dialer')})"
+            elif not ev["accepted"]:
+                s = f"(Send didn't key: {ev.get('toast') or 'no toast'})"
+            elif not runs:
+                s = "(keyed by the status, no carrier on the SDR)"
             decoded_all.append((speed, delay, s))
             ok = s == digits
             r = dict(speed=speed, delay=delay, decoded=s)
@@ -1104,7 +1149,18 @@ class Modes:
         e = env_ms(dev, fs, 1000)
         c = []
         t_off = ev["t_off"] - ev["t_capture"] if ev.get("t_off") else None
-        beep = np.nonzero(e > 0.5 * (e.max() if len(e) else 0))[0]
+        # The beep: 1000 Hz standing well over its own level in the keyed part before KEY off (the mic tone's
+        # leakage, noise), inside the carrier. Half the capture's peak alone (the run) took noise for it
+        # when the beep was weak: "-2.52 s after KEY off".
+        beep = np.array([], int)
+        if runs and t_off is not None and len(e):
+            a, b = int(runs[0][0] * 1000) + 100, int((t_off - 0.1) * 1000)
+            base = float(np.percentile(e[a:b], 90)) if b > a else 0.0
+            ms = np.arange(len(e)) / 1000
+            inside = np.zeros(len(e), bool)
+            for r0, r1 in runs:
+                inside |= (ms >= r0 + 0.01) & (ms < r1 - 0.01)
+            beep = np.nonzero(inside & (e > max(300.0, 3 * base)))[0]
         if len(beep) and runs:
             b0, b1 = beep[0] / 1000, beep[-1] / 1000
             c.append(_chk("the end tone after KEY off", t_off is not None and b0 >= t_off - 0.05, f"{b0 - (t_off or 0):.2f} s"))
@@ -1141,6 +1197,18 @@ class Modes:
         """TONE-19.3 (part: the end tone): `bk 0 40` read again and again from KEY off: 0x43C (low 12 bits) while
         the end tone plays, 0x50A before KEY off and after it."""
         self.setv(S["end_tone"], "Quindar")
+        et = self.get(S["end_tone"])
+        if not et.lower().startswith("quindar"):
+            raise Skip(f"the end tone reads {et!r}, not Quindar")
+        tone_s = sum(ms for _, ms in dict(B.END_TONES)["quindar"]) / 1000
+        # Reads fast enough to land inside the tone at least once: twice in its length.
+        t_r = self.clock.time()
+        for _ in range(4):
+            parse_bk(self.r.term("bk 0 40"))
+        every = (self.clock.time() - t_r) / 4
+        if every > tone_s / 2:
+            raise Skip(f"`bk 0 40` takes {every * 1000:.0f} ms a read over this link: too slow for the {tone_s * 1000:.0f} ms "
+                       "Quindar tone (run it on the cable)")
         self.tune("A", self.f_lo)
         self.home()
         self.gate("A", "reg40")
@@ -1167,7 +1235,13 @@ class Modes:
             reads.append((self.clock.time() - ev["t_off"], "after off", parse_bk(self.r.term("bk 0 40")) & 0xFFF))
             self.clock.sleep(0.04)
         late = parse_bk(self.r.term("bk 0 40")) & 0xFFF
-        tone = [v for t, k, v in reads if k == "after off" and 0.15 <= t <= 0.6]
+        tone = [v for t, k, v in reads if k == "after off" and t <= 1.0]  # the tone's start after KEY off varies
+        first = min((t for t, k, _ in reads if k == "after off"), default=None)
+        if 0x43C not in tone and (first is None or first > tone_s + self.hold_s()):
+            # The cable sends nothing while the radio is keyed (TX-43), the end tone and the carrier hold included:
+            # the first answer came after the tone, so it can't be read this way.
+            raise Skip(f"the first `bk 0 40` after KEY off answered {_s(first)} after it, past the Quindar tone and the "
+                       "carrier hold (the cable waits while keyed, TX-43): not readable over this link")
         self.add("reg40_end_tone", [_chk("keyed (voice): 0x50A", any(v == 0x50A for _, k, v in reads if k == "keyed"),
                                          [hex(v) for _, k, v in reads if k == "keyed"]),
                                     _chk("0x43C read while the end tone plays", 0x43C in tone, [hex(v) for v in tone]),
@@ -1182,28 +1256,49 @@ class Modes:
         self.r.keys(" ".join("STAR" if ch == "." else ch for ch in w) + " MENU")
         self.home()
 
+    def aprs_freq_ready(self):
+        """The APRS frequency (0 5 7 1) on 145.495. The terminal can't set it (`set` says it keeps its default) and
+        the entry by keys didn't take on the radio (the frequency picker in ui-backlog will fix it): left
+        alone when it already reads 145.495 (the radios were left so), else the keys tried once, else a hand step."""
+        def reads():
+            m = re.match(r"[\d.]+", self.get(S["aprs_freq"]))
+            return float(m.group()) if m else None
+        if reads() is not None and abs(reads() - self.f_lo) < 1e-6:
+            return
+        if "aprs_freq" not in self.saved:
+            self.saved["aprs_freq"] = self.get(S["aprs_freq"])
+        self.type_freq(self.mc["aprs_freq_keys"], self.f_lo)
+        now = reads()
+        if now is None or abs(now - self.f_lo) > 1e-6:
+            raise Skip(f"the APRS frequency reads {now} after the keys {self.mc['aprs_freq_keys']!r}: set MENU 0 5 7 1 "
+                       f"to {self.f_lo:.3f} on the radio by hand, then run it again")
+
+    def ax25_call(self, what):
+        """The callsign for AX.25 (INFO's): 6 characters at most, or the test can't run (SETUP-13: APRS refuses a
+        longer one, and an AX.25 address holds 6; VE7TEST went out as VE7TES)."""
+        call = self.b.info.get("callsign")
+        if not call:
+            raise Skip(f"no callsign set ({what})")
+        if len(call) > 6:
+            raise Skip(f"the callsign {call} is over 6 characters: AX.25 carries 6 (SETUP-13); set a 6-character "
+                       "call at MENU 0 8 7 1 for the APRS and KISS tests")
+        return call
+
     def aprs_setup(self):
         """APRS mode on, the APRS frequency 145.495 (by keys; read back), a callsign and a position; slot C gated."""
-        info = self.b.info
-        if not info.get("callsign"):
-            raise Skip("no callsign set (APRS-8)")
+        call = self.ax25_call("APRS-8")
         src = self.get(S["pos_source"])
         if src.lower().startswith("fixed") and self.get(S["fixed"]).lower() == "none":
             raise Skip("position source Fixed with no fixed position")
         if src.lower().startswith("gps") and "fix" not in self.r.term("gps").lower():
             raise Skip("no GPS fix and no fixed position: set 0 5 4 4 Fixed and 0 5 4 5 on the radio, or run by a window")
-        if "aprs_freq" not in self.saved:
-            self.saved["aprs_freq"] = self.get(S["aprs_freq"])
-        self.type_freq(self.mc["aprs_freq_keys"], self.f_lo)
-        now = self.get(S["aprs_freq"])
-        if abs(float(re.match(r"[\d.]+", now).group()) - self.f_lo) > 1e-6:
-            raise Skip(f"the APRS frequency reads {now} after the keys {self.mc['aprs_freq_keys']!r}: not keyed")
+        self.aprs_freq_ready()
         self.setv(S["beacon_mode"], "Off")
         self.setv(S["after_voice"], "Off")
         self.setv(S["beacon_power"], "Low")
         self.setv(S["aprs_mode"], "On")
         self.gate("C", "aprs: slot C", allow_aprs=True)
-        return info["callsign"]
+        return call
 
     def check_frame(self, f, call):
         p = ax25_parse(f["frame"])
@@ -1332,12 +1427,8 @@ class Modes:
             raise Skip("--slow (about 4 minutes)")
         if "fix" in self.r.term("gps").lower() and "no fix" not in self.r.term("gps").lower():
             raise Skip("the GPS has a fix (run it indoors)")
-        call = self.b.info.get("callsign")
-        if not call:
-            raise Skip("no callsign")
-        self.type_freq(self.mc["aprs_freq_keys"], self.f_lo)
-        if abs(float(re.match(r"[\d.]+", self.get(S["aprs_freq"])).group()) - self.f_lo) > 1e-6:
-            raise Skip("the APRS frequency didn't take 145.495")
+        self.ax25_call("GPS-33")
+        self.aprs_freq_ready()
         self.setv(S["pos_source"], "GPS")
         self.setv(S["aprs_mode"], "On")
         self.gate("C", "gps33", allow_aprs=True)
@@ -1367,62 +1458,60 @@ class Modes:
                  + ("keyed" if keyed else "no key-up"))
 
     def t_kiss(self):
-        """KISS-2 (part), KISS-7 (part): KISS on Bluetooth (0 5 9 1; the cable stays the link): a frame from the PC
-        goes out on the APRS frequency (145.495) with the TX delay its KISS command set; a second 6 s later goes out
-        too (exempt from APRS-9's 30 s); the frames decode byte for byte. No PIN asked (none is sent)."""
+        """KISS-2 (part), KISS-7 (part), KISS-9: KISS on Bluetooth (0 5 9 1; the cable stays the link): slot C is the
+        APRS slot on the APRS frequency (145.495) without APRS mode; a frame from the PC goes out there with the TX
+        delay its KISS command set; a second 6 s later goes out too (exempt from APRS-9's 30 s); the frames decode
+        byte for byte. No PIN asked (none is sent). Each frame is its own capture, watched over the status (a data
+        key-up reads keyed=C): the one 12.8 s capture around both ran ~32 s (the duty waits and the
+        status watch, which never saw a data key-up then, inside it) and rtl_sdr was killed."""
         if not self.kiss_port:
             raise Skip("--kiss-ble ble:NAME (KISS over Bluetooth; the cable stays the link)")
-        call = self.b.info.get("callsign")
-        if not call:
-            raise Skip("no callsign (KISS-2)")
-        if "aprs_freq" not in self.saved:
-            self.saved["aprs_freq"] = self.get(S["aprs_freq"])
-        self.type_freq(self.mc["aprs_freq_keys"], self.f_lo)
-        if abs(float(re.match(r"[\d.]+", self.get(S["aprs_freq"])).group()) - self.f_lo) > 1e-6:
-            raise Skip("the APRS frequency didn't take 145.495")
+        call = self.ax25_call("KISS-2")
+        self.aprs_freq_ready()
         self.setv(S["bluetooth"], "On")
         self.setv(S["kiss"], "Bluetooth")
         port = self.kiss_port() if callable(self.kiss_port) else self.kiss_port
         frames = [ax25_frame("APZFER", call, ["WIDE1-1"], f">bench KISS {i}".encode()) for i in (1, 2)]
         txd = self.mc["kiss_txdelay_ms"]
-        path = os.path.join(self.d, "kiss.u8")
+        got, evs, t_sent = [], [], []
         try:
+            self.gate("C", "kiss: slot C (KISS-9)", allow_aprs=True)
             port.write(kiss_wrap(0x01, bytes([txd // 10])))
             self.clock.sleep(0.5)
-            evs = []
-            t0 = None
-            total = 0.8 + 2.5 + 6.0 + 2.5 + 1.0
-            self.b.duty.wait(2.5, "burst", "kiss 1", 0.8)
-            self.b.sdr.start(self.f_lo, total, path)
-            t0 = self.clock.time()
-            self.clock.sleep(0.8)
             for i, fr in enumerate(frames):
-                ev, _ = self.radio_keyup(f"kiss {i + 1}", 2.5, lambda fr=fr: port.write(kiss_wrap(0x00, fr)))
+                if t_sent:  # the second 6 s after the first (or as soon after as the duty limit lets it)
+                    self.clock.sleep(max(t_sent[0] + 6.0 - self.clock.time(), 0))
+                path = os.path.join(self.d, f"kiss-{i + 1}.u8")
+                planned = 2.5
+
+                def send(fr=fr):
+                    t_sent.append(self.clock.time())
+                    port.write(kiss_wrap(0x00, fr))
+
+                ev, raw = self.radio_keyup(f"kiss {i + 1}", planned, send, mhz=self.f_lo, path=path, lead=0.8,
+                                           total_s=0.8 + planned + 1.5)
                 evs.append(ev)
-                self.clock.sleep(max(t0 + 0.8 + 6.0 * (i + 1) - self.clock.time(), 0))
-            self.clock.sleep(max(t0 + total - self.clock.time(), 0))
-            raw = self.b.sdr.finish()
-        except BaseException:
-            self.b.sdr.stop()
-            raise
+                dev, fs, on, runs = air(raw)
+                for g in afsk_decode(dev, fs, runs):
+                    got.append(dict(g, t_abs=ev["t_capture"] + g["t_flag"], t_carrier=runs[0][0] if runs else None))
+                self.keep(path, any(g["frame"] == fr for g in got))
         finally:
             with contextlib.suppress(Exception):
                 self.r.term(f"set {S['kiss']} Off")
-        dev, fs, on, runs = air(raw)
-        got = afsk_decode(dev, fs, runs)
         gotb = [g["frame"] for g in got]
-        c = [_chk(f"frame {i + 1} on 145.495, byte for byte", fr in gotb, len(gotb)) for i, fr in enumerate(frames)]
+        c = [_chk(f"frame {i + 1} keyed slot C (status keyed=C, KISS-9)", ev["accepted"] and ev.get("slot") == "C",
+                  ev.get("slot") or "not keyed") for i, ev in enumerate(evs)]
+        c += [_chk(f"frame {i + 1} on 145.495, byte for byte", fr in gotb, len(gotb)) for i, fr in enumerate(frames)]
         if len(got) == 2:
             c.append(_chk("the second under 30 s after the first (KISS-2: exempt from APRS-9)",
-                          got[1]["t_flag"] - got[0]["t_flag"] < 30, _s(got[1]["t_flag"] - got[0]["t_flag"])))
-        if got and runs:
-            d = (got[0]["t_data"] - runs[0][0]) * 1000
+                          got[1]["t_abs"] - got[0]["t_abs"] < 30, _s(got[1]["t_abs"] - got[0]["t_abs"])))
+        if got and got[0]["t_carrier"] is not None:
+            d = (got[0]["t_data"] - got[0]["t_carrier"]) * 1000
             c.append(_chk(f"TX delay {txd} ms from the KISS command (carrier to the frame, ±{self.mc['tx_delay_tol_ms']})",
                           abs(d - txd) <= self.mc["tx_delay_tol_ms"] + 20, f"{d:.0f} ms"))
-        ok = self.add("kiss_frames", c, f"{len(got)} of 2 KISS frames on the air")
+        self.add("kiss_frames", c, f"{len(got)} of 2 KISS frames on the air")
         self.add("kiss_no_pin", [_chk("frames went out with no PIN or session (KISS-7)", bool(got), len(got))],
                  "no AUTH sent; frames on air")
-        self.keep(path, ok)
 
     # -- GPS, watch, HF, broadcast: remote key-ups with readings while keyed --
     def keyed_readings(self, purpose, key_s, mhz, readers, after_s=0.6, slot="A"):
@@ -1470,6 +1559,15 @@ class Modes:
         """GPS-5, GPS-22 (part), GPS-14.1: a remote key-up: PB10 (USART3 TX to the GPS) reads low while keyed and
         idles high again after; PA8 (the GPS's power) on throughout with GPS during RX/TX Always on; the NMEA keeps
         coming (`gps`'s age stays under 2 s while keyed)."""
+        # GPS-14.1 is about the module's power while keyed, so the GPS must be on (0 6 1; put back after). PA8 then
+        # reads on, standby or not (VCC kept, GPS-26); the run had it off and read PA8 0 throughout.
+        if not self.get(S["gps"]).lower().startswith("on"):
+            self.setv(S["gps"], "On")
+        end = self.clock.time() + 5.0
+        while pin(parse_gpio(self.r.term("gpio")), "PA8", 1) != 1:
+            if self.clock.time() > end:
+                raise Skip("GPS on (0 6 1), but PA8 (the GPS's power) still reads off after 5 s")
+            self.clock.sleep(0.5)
         self.tune("A", self.f_lo)
         self.home()
         self.gate("A", "gps pins")
@@ -1488,10 +1586,13 @@ class Modes:
                               _chk("PB10 low while keyed", pb10[1] == 0, pb10),
                               _chk("PB10 high again after the unkey", pb10[3] == 1, pb10)], f"PB10 {pb10} (before, keyed, unkey, after)")
         ages = vals["age"]
-        self.add("gps_during_tx", [_chk("GPS during RX/TX reads Always on", rxtx.lower() == "always on", rxtx),
-                                   _chk("PA8 (GPS power) on throughout", all(x == pa8[0] for x in pa8) and pa8[0] == 1, pa8),
-                                   _chk("NMEA still coming while keyed (age under 2 s)", ages[1] is not None and ages[1] < 2.0, ages)],
-                 f"PA8 {pa8}, NMEA age {ages}")
+        c = [_chk("GPS during RX/TX reads Always on", rxtx.lower() == "always on", rxtx),
+             _chk("PA8 (GPS power) on throughout", all(x == pa8[0] for x in pa8) and pa8[0] == 1, pa8)]
+        # The NMEA only when it was flowing before the key-up: in the power manager's standby (GPS-26) none comes.
+        flowing = ages[0] is not None and ages[0] < 2.0
+        if flowing:
+            c.append(_chk("NMEA still coming while keyed (age under 2 s)", ages[1] is not None and ages[1] < 2.0, ages))
+        self.add("gps_during_tx", c, f"PA8 {pa8}, NMEA age {ages}" + ("" if flowing else " (no NMEA before the key-up: standby, not checked)"))
 
     def t_watch_relay(self):
         """WATCH-12: `gpio` PC4 (the band relay) before, while keyed, in the unkey wait and after: unchanged, on
@@ -1514,6 +1615,8 @@ class Modes:
         self.tune("B", self.f_hi, active=False)
         self.tune("A", self.f_lo)
         self.setv(S["watch"], "A+B")
+        # Battery Save off (put back after): asleep, B's chip reads REG_30 0 whatever the watch does.
+        self.setv(S["bsave"], "Off")
         self.home()
         self.gate("A", "watch pause")
         # Watch is paused 30 s after any key-up (this rule): the last one's end + 32 s before the baseline.
@@ -1550,9 +1653,15 @@ class Modes:
         sid = []
 
         def try_hf():
-            self.r.keys(self.mc["hf_keys"])
+            # Remote keys are refused `invalid` while the radio transmits ("remote keys wait for the unkey",
+            # LINK-19): that refusal is the reason; a key the radio took is checked on its screen.
+            try:
+                self.r.keys(self.mc["hf_keys"])
+                refused = ""
+            except B.TermError as e:
+                refused = str(e)
             u = self.ui()
-            sid.append((u.get("screen", {}).get("id"), (u.get("toast") or {})))
+            sid.append((u.get("screen", {}).get("id"), (u.get("toast") or {}), refused))
 
         planned = self.b.duty.planned(3.0)
         self.b.duty.admit(planned, "burst", "hf-2")
@@ -1569,16 +1678,17 @@ class Modes:
             e2["t_off"] = self.clock.time()
             self.b.keyed = False
             self.b.duty.record("hf-2", "burst", e2, t_sent)
-        scr, toast = sid[0]
+        scr, toast, refused = sid[0]
         self.add("hf_refused_while_keyed", [_chk("keyed", e2["accepted"]),
-                                            _chk("HF mode didn't open", scr != "HF", scr),
-                                            _chk("a reason shown", bool(toast.get("head") or toast.get("body")), toast)],
-                 f"screen {scr}, toast {toast}")
+                                            _chk("HF mode didn't open", scr != "Hf", scr),
+                                            _chk("a reason given (the keys' refusal, or a toast)",
+                                                 bool(refused or toast.get("head") or toast.get("body")), refused or toast)],
+                 f"screen {scr}, " + (f"keys refused: {refused}" if refused else f"toast {toast}"))
         self.home()
         # HF-24: HF mode at a SI4732 frequency
         self.r.keys(self.mc["hf_keys"])
         u = self.ui()
-        if u.get("screen", {}).get("id") != "HF":
+        if u.get("screen", {}).get("id") != "Hf":
             self.add("hf_receive_only", [_chk("HF mode opens", False, u.get("screen"))], "HF mode didn't open")
             return
         st = self.status()
@@ -1609,7 +1719,7 @@ class Modes:
             sid2 = self.ui().get("screen", {}).get("id")
             self.add("hf_chip1_refusal", [_chk("refused", not ev.get("accepted"), said or "KEYED"),
                                           _chk("the band plan's reason", "band plan" in said.lower(), said),
-                                          _chk("still in HF mode (doesn't go home first)", sid2 == "HF", sid2)],
+                                          _chk("still in HF mode (doesn't go home first)", sid2 == "Hf", sid2)],
                      f"40.000 MHz: {said!r}")
         self.home()
 
@@ -1623,12 +1733,13 @@ class Modes:
         self.clock.sleep(1.5)
 
         def card():
-            u = self.ui()
-            return next((x.get("state") for x in u.get("cards", []) if x.get("slot") == "B"), None)
+            # The compact status's per-slot state (LINK-19): the cards' words, read on any screen (the full
+            # readback has no cards on the Transmit screen, so it gave None while keyed).
+            return (self.status().get("slots", {}).get("B") or {}).get("state")
 
         def mute():
-            m = re.findall(r"\b([0-9A-Fa-f]{4})\b", self.r.term("si prop 4001").split("4001", 1)[-1])
-            return int(m[-1], 16) & 3 if m else None
+            v = si_prop(self.r.term("si prop 4001"), 0x4001)  # RX_HARD_MUTE: bits 0-1 the two sides
+            return None if v is None else v & 3
 
         vals, ev, runs = self.keyed_readings("broadcast", 3.0, self.f_lo, {"card": card, "mute": mute}, after_s=1.5)
         cd, mu = vals["card"], vals["mute"]
@@ -1889,7 +2000,7 @@ class FakeModesRadio(B.FakeRadio):
                          S["beacon_mode"]: "Off", S["after_voice"]: "Off", S["beacon_power"]: "Low",
                          S["aprs_freq"]: "144.390", S["tx_delay"]: "300 ms", S["pos_source"]: "Fixed",
                          S["fixed"]: "49.2827 -123.1207", S["kiss"]: "Off", S["watch"]: "Off", S["gps_rxtx"]: "Always on",
-                         S["bluetooth"]: "Off"})
+                         S["bluetooth"]: "Off", S["gps"]: "Off", S["bsave"]: "Level 1"})
         self.set0 = dict(self.set)
         self.screen, self.entry = ["Home"], ""
         self.hf_mhz, self.monitor = 9.58, False
@@ -1990,9 +2101,10 @@ class FakeModesRadio(B.FakeRadio):
         if w[0] == "gpio":
             keyed = bool(self.key or self.vkey)
             pb = 0 if keyed else 1 << 10
+            pa8 = (1 << 8) if self.set[S["gps"]] == "On" else 0  # the GPS's power follows 0 6 1
             row = lambda v: " ".join(f"{v:016b}"[i:i + 4] for i in range(0, 16, 4))  # noqa: E731
             return "".join(f"P{p}  in {row(i)}  out {row(o)}\n" for p, i, o in (
-                ("A", 1 << 8, 1 << 8), ("B", pb, 0), ("C", 0, 1 << 4), ("D", 0, 0), ("E", 0, 0)))
+                ("A", pa8, pa8), ("B", pb, 0), ("C", 0, 1 << 4), ("D", 0, 0), ("E", 0, 0)))
         if w[0] == "bk":
             reg = int(w[2], 16)
             v = 0
@@ -2006,7 +2118,7 @@ class FakeModesRadio(B.FakeRadio):
             return f"  REG_{reg:02X} = 0x{v:04X}\n"
         if w[0] == "si":
             muted = bool(self.key or self.vkey) and 87.5 <= self.slots[1]["freq"] <= 108
-            return f"  si prop 4001: {3 if muted else 0:04X}\n"
+            return f"si 13 00 40 01 -> 80 00 00 {3 if muted else 0:02X}\n"
         if w[0] == "gps":
             return "  gps: $GPGGA,... no fix, age 0.4 s\n"
         if w[0] == "set" and line.startswith(f"set {S['aprs_freq']} "):
@@ -2026,20 +2138,27 @@ class FakeModesRadio(B.FakeRadio):
             self.sched = None
         if w[0] == "set" and line.startswith(f"set {S['vox']} Off") and self.vkey and self.vkey["kind"] == "vox":
             self._end(self.clock.time())
-        if w[0] == "slot" and len(w) > 2 and w[1].upper() == "C" and self.set[S["aprs_mode"]] == "On":
+        if w[0] == "slot" and len(w) > 2 and w[1].upper() == "C" and self._c_aprs():
             raise B.TermError("slot C: APRS mode holds slot C: MENU 0 5 3 (APRS-19)")
         return out
+
+    def _c_aprs(self):
+        """C is the APRS slot: APRS mode, or KISS on (KISS-9)."""
+        return self.set[S["aprs_mode"]] == "On" or self.set[S["kiss"]] != "Off"
 
     def slot(self, n):
         self._advance()
         d = super().slot(n)
-        if n == 2 and self.set[S["aprs_mode"]] == "On":
+        if n == 2 and self._c_aprs():
             d.update(freq10=B.mhz10(float(self.set[S["aprs_freq"]])), aprs=True, channel=None, offset=0, power=0)
         return d
 
     def keys(self, seq):
         for word in seq.split():
             self._advance()
+            if self.key or self.vkey and self.vkey["kind"] in ("vox", "dial"):
+                # LINK-19 as the firmware has it: keys are refused while a voice key-up holds the radio
+                raise B.TermError("0x30: invalid: transmitting: remote keys wait for the unkey")
             name, _, how = word.partition(":")
             self._key(name.upper(), how)
             self.clock.sleep(0.12)
@@ -2065,16 +2184,12 @@ class FakeModesRadio(B.FakeRadio):
                 self.entry = k
             return
         if top == "Quick" and k == "0":
-            self.screen[-1], self.entry = "Menu", ""
+            self.screen[-1], self.entry = "Advanced", ""  # the full menu's readback id
             return
-        if top == "Menu":
+        if top == "Advanced":
             if k.isdigit():
                 self.entry += k
-                leaf = {"8 6 1": "Dialer", "5 7 1": "FreqEdit", "3 4": "HF", "5 1": "Heard"}.get(" ".join(self.entry))
-                if leaf == "HF" and (self.key or self.vkey):
-                    self.toast = {"head": "HF mode", "body": "not while transmitting"}
-                    self.screen, self.entry = ["Home"], ""
-                    return
+                leaf = {"8 6 1": "Dtmf", "5 7 1": "FreqEdit", "3 4": "Hf", "5 1": "Heard"}.get(" ".join(self.entry))
                 if leaf:
                     self.screen[-1], self.entry = leaf, ""
                 elif " ".join(self.entry) == "8 2":
@@ -2087,16 +2202,16 @@ class FakeModesRadio(B.FakeRadio):
             self.screen.pop()
             self._beacon(self.clock.time() + 0.2)
             return
-        if top in ("Dialer", "FreqEdit", "HF", "Entry"):
+        if top in ("Dtmf", "FreqEdit", "Hf", "Entry"):
             if k.isdigit() or k == "STAR":
                 self.entry += "." if k == "STAR" else k
-            elif k == "MENU" and top == "Dialer":
+            elif k == "MENU" and top == "Dtmf":
                 self._dial(self.entry)
             elif k == "MENU" and top == "FreqEdit":
                 self.set[S["aprs_freq"]] = f"{float(self.entry):.3f}"
                 self.screen.pop()
                 self.entry = ""
-            elif k == "MENU" and top == "HF":
+            elif k == "MENU" and top == "Hf":
                 self.hf_mhz = float(self.entry)
                 self.entry = ""
 
@@ -2108,17 +2223,24 @@ class FakeModesRadio(B.FakeRadio):
         t, self.toast = self.toast, None
         u = {"screen": {"id": self.screen[-1]}, "cards": [{"slot": "A", "state": "RX"}, {"slot": "B", "state": bstate}],
              "toast": t, "sel": sel, "rows": []}
-        if self.screen[-1] == "HF":
+        if self.screen[-1] == "Hf":
             u["hf"] = {"args": [f"{self.hf_mhz:.3f}"]}
         return u
 
     def status(self):
         self._advance()
         k = self.key and "ABC"[self.active] or (self.vkey and self.vkey["slot"])
+        b = self.slots[1]
+        bstate = ("off" if (self.key or self.vkey) else "FM") if 87.5 <= b["freq"] <= 108 else "idle"
         return {"screen": self.screen[-1], "active": "ABC"[self.active], "keyed": k or None, "remote": bool(self.key),
-                "mode": "off", "slots": {}, "xb": None}
+                "mode": "off", "slots": {"A": {"state": "idle", "meter": 0}, "B": {"state": bstate, "meter": 0}},
+                "xb": None}
 
-    def reboot(self):
+    def reboot(self, after=None):
+        if self.key or self.vkey:
+            raise B.BenchError("REBOOT refused: busy")  # LINK-24.3
+        if after:
+            after()
         self.key = self.vkey = None
         self.screen = ["Home"]
         self.clock.sleep(1.2)
@@ -2129,7 +2251,7 @@ class FakeModesRadio(B.FakeRadio):
     # -- key-ups --
     def key_on(self, slot_code):
         self._advance()
-        if self.screen[-1] == "HF":
+        if self.screen[-1] == "Hf":
             self.calls.append("KEY on")
             if self.hf_mhz < 18:
                 return 9, "invalid: Receive only here"

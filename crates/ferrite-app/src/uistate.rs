@@ -116,8 +116,11 @@ fn letter(s: u8) -> u8 {
 }
 
 /// ` keyed=A remote=0 mode=off`: the slot transmitting (`-` none), remote PTT and the exclusive mode (MODE-1).
-fn keyed_remote_mode(app: &App, l: &mut Line) {
-    match app.radio.keyed {
+/// A data key-up (APRS, KISS: the UI's own `keyed` is voice only) counts too, from the Radio task's live state
+/// (LINK-19), so a test sees and times every transmission.
+fn keyed_remote_mode(app: &App, live: &LiveAll, l: &mut Line) {
+    let keyed = app.radio.keyed.or(live.tx.keyed.then_some(live.tx.slot));
+    match keyed {
         Some(s) if (s as usize) < SLOTS => {
             let _ = uwrite!(l, " keyed={}", letter(s) as char);
         }
@@ -149,7 +152,7 @@ pub fn status_line(app: &App, live: &LiveAll, l: &mut Line) {
     l.push(b"st scr=");
     l.push(id(app.screen).as_bytes());
     let _ = uwrite!(l, " act={}", letter(app.active) as char);
-    keyed_remote_mode(app, l);
+    keyed_remote_mode(app, live, l);
     for s in 0..SLOTS as u8 {
         let _ = uwrite!(l, " {}=", letter(s) as char);
         match app.state(s, live).0 {
@@ -189,7 +192,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "dark", app.dark() as u32);
         kn(l, "locked", app.locked as u32);
         let _ = uwrite!(l, " active={}", letter(app.active) as char);
-        keyed_remote_mode(app, l);
+        keyed_remote_mode(app, cx.live, l);
         kn(l, "fm", app.radio.fm_on as u32);
     }
     if let Some(l) = d.ln() {
@@ -811,20 +814,35 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
     l.push(b" freq=");
     mhz(l, app.shown_freq(s, cx.live));
     kq(l, "name", app.chan_name(s, cx.live).as_bytes());
+    let kind = screens::home::card_kind(app, s);
+    if kind == 1 {
+        // APRS-17: the APRS card shows no mode, tone or shift chips, but the last heard and the beacon lines and
+        // the stations heard; C's own VFO (AM, say) is put aside meanwhile, so its chips would mislead.
+        let data = cx.store.data();
+        let mut last = Buf::<80>::new();
+        crate::aprs::last_text(data, &mut last);
+        let mut beacon = Buf::<28>::new();
+        app.beacon_text(data, &mut beacon);
+        kq(l, "last", last.as_bytes());
+        kq(l, "beacon", beacon.as_bytes());
+        kn(l, "heard", data.stations() as u32);
+    }
     let (mut m, mut t, mut o) = (Buf::<16>::new(), Buf::<16>::new(), Buf::<16>::new());
     mode_chip(&cfg, &mut m);
     card_tone(&cfg, &mut t);
     shift_chip(&cfg, &mut o);
-    kq(l, "mode", m.as_bytes());
-    kq(l, "tone", t.as_bytes());
-    kq(l, "shift", o.as_bytes());
-    let pw: &[u8] = if app.capped(s) { b"0.25 W" } else { [b"LOW".as_slice(), b"MID", b"HIGH"][cfg.power as usize % 3] };
-    kq(l, "power", pw);
+    if kind != 1 {
+        kq(l, "mode", m.as_bytes());
+        kq(l, "tone", t.as_bytes());
+        kq(l, "shift", o.as_bytes());
+        let pw: &[u8] = if app.capped(s) { b"0.25 W" } else { [b"LOW".as_slice(), b"MID", b"HIGH"][cfg.power as usize % 3] };
+        kq(l, "power", pw);
+    }
     kq(l, "s", w::s_text(lv.rssi).as_bytes());
     kn(l, "meter", w::meter_level(lv.rssi) as u32);
     kn(l, "rx", lv.squelch_open as u32);
     kn(l, "scan", lv.scanning as u32);
-    l.push(match screens::home::card_kind(app, s) {
+    l.push(match kind {
         1 => b" kind=aprs".as_slice(),
         2 => b" kind=broadcast",
         _ => b" kind=slot",

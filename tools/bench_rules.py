@@ -51,11 +51,11 @@ RULE_TAGS = {
     # --suite tx-behaviour (tools/benchtests/tx_behaviour.py): around a key-up, by readback, terminal and SDR
     "txb_transmit_screen": {"LINK-20.12": "all", "TX-22.2": "part", "TX-12.2": "part"},  # the readback has no
     # frequency, power word, meter or tone line: those fields of TX-22.2, and TX-12.2's power name, aren't seen
-    "txb_menu_does_nothing_keyed": {"MENU-30": "all"},
+    "txb_menu_does_nothing_keyed": {"LINK-37": "all"},
     "txb_red_led": {"TX-22.1": "all", "DISP-17.1": "all"},
     "txb_red_led_off_setting": {"DISP-17.3": "all"},
     "txb_backlight_on_transmit": {"DISP-26": "all"},
-    "txb_wake_on_transmit": {"DISP-15.4": "all"},
+    "txb_wake_on_transmit": {"DISP-15.2": "part"},
     "txb_tx_bandwidth": {"TX-45": "all"},
     "txb_cable_while_keyed": {"TX-43.2": "all", "LINK-12": "part"},  # LINK-12: queuing is the tx build's
     "txb_gps_query_keyed": {"TERM-36.8": "all"},

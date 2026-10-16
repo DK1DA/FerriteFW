@@ -356,8 +356,15 @@ impl View for Setup {
                 let mode = self.flags & DIGITS;
                 if app.dirty(R_ROW, hash(&(call, mode))) {
                     text_box(lcd, 120, 46, b"Callsign", call.as_bytes(), true, true);
-                    let tip: &[u8] = if mode != 0 { "digits \u{b7} * letters".as_bytes() } else { "digits type \u{b7} * letters/digits".as_bytes() };
-                    w::field(lcd, 10, 220, 170, 186, 182, Align::Left, tip, &UI_12, SUB, BG);
+                    let long = call.as_bytes().len() > super::transmit::AX25_CALL;
+                    let tip: &[u8] = if long {
+                        b"over 6 characters: no APRS" // SETUP-13: CW ID sends it whole, AX.25 can't
+                    } else if mode != 0 {
+                        "digits \u{b7} * letters".as_bytes()
+                    } else {
+                        "digits type \u{b7} * letters/digits".as_bytes()
+                    };
+                    w::field(lcd, 10, 220, 170, 186, 182, Align::Left, tip, &UI_12, if long { AMBER } else { SUB }, BG);
                     w::key_line(lcd, 10, 230, 200, "\x1b", "delete", BG);
                 }
             }

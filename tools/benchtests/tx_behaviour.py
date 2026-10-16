@@ -18,13 +18,14 @@ Safety, as bench.py's own (and through its code: Bench.check_build, Bench.gate, 
     CW ID (about 4.5 s of carrier for VE7TEST), counted whole as the "timeout" kind; the rest after it still holds);
   - right before every KEY on the keyed slot is read back (SLOT, LINK-33): its transmit frequency (after any shift
     or split) 145.495 or 446.475 MHz (config test_freqs; 145.575, split_freqs, only for split_tx's split TX), power low, not scanning, not the APRS slot; a
-    refusal probe (a key-up the radio must refuse: out of band, HF, 640 MHz, the band edge, 1.25 m, emergency) is
+    refusal probe (a key-up the radio must refuse: out of band, HF, 600 MHz, the band edge, 1.25 m, emergency) is
     gated on its own frequency read back and KEY off goes at once if the radio keys it (the test fails);
   - KEY on must be answered within 0.6 s on the cable (a tx build holds its answers while keyed, TX-43): else KEY
     off and the run stops;
   - keepalives every 0.5 s on their own thread; KEY off at each key-up's deadline from that thread whatever the
     test is doing, and in `finally` always, and at exit;
-  - Extend TX (0 8 9) is turned on only for the 222 MHz and 406.025 MHz refusal probes, and back off in `finally`.
+  - Extend TX (0 8 9) changes only on the radio (the link can't set it): the 222 MHz and 406.025 MHz refusal probes
+    run only when it was turned on by hand before the run (EXTEND_HAND), else they skip or are left out.
 Everything a test changes (slots A, B and C, settings, the key lock, `rx both`, txtest) is put back after it, and
 the whole radio checked against its snapshot at the end.
 
@@ -66,10 +67,19 @@ SCREEN_TIMEOUT, ON_TRANSMIT, WAKE_ON = "0 7 4 1", "0 7 4 3", "0 7 4 4"
 BATTERY_SAVE = "0 7 7"
 TRIM = "0 9 7 2"
 EXTEND_TX = bench.EXTEND_TX
+# Extend TX changes only on the radio, on its own screen (`set 0 8 9` is refused over the link): a hand step.
+EXTEND_HAND = "Extend TX is off: turn it on on the radio (MENU 0 8 9, its warning, OK) for this test, off after"
+PAST_TX = 600.0  # tunable (receive reaches 630 MHz) but past every transmit range, Extend TX's included (TX-5)
 END_TONE = bench.END_TONE
 WAKE_VALUES = ["Keys", "Keys and RX", "Keys, RX and TX"]
 C1DT = 0x40013434  # the backlight timer's compare (DISP-26)
 PATH_PINS = ["PB0", "PB1", "PE12", "PE7", "PE13", "PE14"]  # VHF RX/TX, UHF RX/TX, HF RX/TX (board.rs)
+
+
+def _need_extend(r):
+    """The Extend TX probes run only with Extend TX already on (set by hand: EXTEND_HAND)."""
+    if r.get(EXTEND_TX) != "On":
+        raise Skip(EXTEND_HAND)
 
 
 class Skip(Exception):
@@ -694,21 +704,28 @@ def transmit_screen(r):
     return f"Transmit screen remote=1, slot A, {tx1.get('secs')}->{tx2.get('secs')} s; carrier {s:.1f} s"
 
 
-@test("txb_menu_does_nothing_keyed", {"MENU-30": "all"}, 1, 3.0, 6, sdr=False)
+@test("txb_menu_does_nothing_keyed", {"LINK-37": "all"}, 1, 3.0, 6, sdr=False)
 def menu_does_nothing_keyed(r):
-    """Keyed over the link, MENU pressed remotely: the screen stays the Transmit screen, no quick menu."""
+    """Keyed over the link, MENU pressed remotely: refused `invalid` ("remote keys wait for the unkey", LINK-37), the
+    screen stays the Transmit screen, no quick menu. MENU-30 itself (MENU on the radio does nothing) is a person's
+    key: the host tests and a hand check have it."""
     r.setup()
     with r.keyup(3.0, "MENU while keyed") as k:
         r.check(k.accepted, "keyed", k.refused)
         r.sleep(0.6)
         u1 = r.ui()
-        r.press("MENU", settle=0.4)
+        try:
+            r.press("MENU", settle=0.4)
+            why = None
+        except fl.RadioError as e:
+            why = str(e)
         u2 = r.ui()
         r.hold(k)
     r.check(u1["id"] == "Transmit", "the Transmit screen before MENU", u1["id"])
+    r.check(why is not None and "unkey" in why, "MENU from the link refused while keyed (LINK-37)", why or "taken")
     r.check(u2["id"] == "Transmit" and not u2["qmenu"], "MENU while keyed: still the Transmit screen, no quick menu",
             f"{u2['id']} qmenu={u2['qmenu']}")
-    return f"MENU while keyed: {u2['id']}"
+    return f"MENU while keyed: {why}; {u2['id']}"
 
 
 @test("txb_red_led", {"TX-22.1": "all", "DISP-17.1": "all"}, 1, 3.0, 8, sdr=False)
@@ -774,9 +791,12 @@ def backlight_on_transmit(r):
     return "; ".join(f"{v}: {b:#x} -> {[hex(x) for x in d]} -> {a:#x}" for v, (b, d, a) in res.items())
 
 
-@test("txb_wake_on_transmit", {"DISP-15.4": "all"}, 3, 6.0, 60, sdr=False)
+@test("txb_wake_on_transmit", {"DISP-15.2": "part"}, 3, 6.0, 60, sdr=False)
 def wake_on_transmit(r):
-    """The screen dark (0 7 4 1 at 10 s), a remote key-up: lit only with 0 7 4 4 "Keys, RX and TX"."""
+    """The screen dark (0 7 4 1 at 10 s), a remote key-up: lit with every 0 7 4 4 value. A remote KEY is a PTT press
+    (LINK-20.1), and a key wakes the screen either way, PTT included (DISP-15.2); one from the link acts as well
+    (decision 162). DISP-15.4 (a transmission no key started) is the host test's (tests/lights.rs) and needs a
+    data or VOX key-up on the radio."""
     r.setup()
     r.set(SCREEN_TIMEOUT, "10 s")
     got = {}
@@ -798,8 +818,7 @@ def wake_on_transmit(r):
             r.hold(k)
         got[v] = lit
         r.check(k.accepted, f"{v}: keyed", k.refused)
-        want = v == "Keys, RX and TX"
-        r.check(lit == want, f"{v}: {'lit' if want else 'stays dark'} at a key-up no key started", f"lit={lit}")
+        r.check(lit, f"{v}: lit by the remote PTT press", f"lit={lit}")
     return "; ".join(f"{v}: {'lit' if x else 'dark'}" for v, x in got.items())
 
 
@@ -849,8 +868,12 @@ def gps_query_keyed(r):
     r.sleep(0.8)
     ok_after, out_after = r.cmd_err("gps query 0")
     r.check(k.accepted, "keyed", k.refused)
-    r.check(not ok_keyed, "refused while keyed", out_keyed.strip()[:80])
-    r.check(ok_after, "answered after the unkey", out_after.strip()[:80])
+    # The refusal may come back as the command's error or as its output line ("gps: bench: refused: transmitting:
+    # PB10 is held low (GPS-22)"): either way it names the transmission.
+    refused = not ok_keyed or "refused" in out_keyed.lower()
+    r.check(refused and ("transmitting" in out_keyed.lower() or "GPS-22" in out_keyed), "refused while keyed (GPS-22)",
+            out_keyed.strip()[:80])
+    r.check(ok_after and "refused" not in out_after.lower(), "answered after the unkey", out_after.strip()[:80])
     return f"keyed: {out_keyed.strip().splitlines()[0][:50]}; after: {(out_after.strip().splitlines() or [''])[0][:50]}"
 
 
@@ -929,7 +952,8 @@ def ptt_slots(r):
 
 @test("txb_reboot_refused_keyed", {"LINK-24.3": "all"}, 1, 3.5, 10)
 def reboot_refused_keyed(r):
-    """REBOOT while keyed: answered invalid, still keyed (readback and an unbroken carrier)."""
+    """REBOOT while keyed: answered busy (Appendix G's REBOOT row: `busy` while transmitting), still keyed (readback
+    and an unbroken carrier)."""
     r.setup()
     with r.capture(VHF, 6.0, "reboot keyed", key_s=3.5) as cap:
         with r.keyup(3.5, "REBOOT while keyed") as k:
@@ -942,7 +966,7 @@ def reboot_refused_keyed(r):
             r.hold(k)
     secs, runs = carrier_s(cap.raw)
     r.check(k.accepted, "keyed", k.refused)
-    r.check(s == 9, "REBOOT answered invalid", why)
+    r.check(s == 7, "REBOOT answered busy", why)
     r.check((u.get("state") or {}).get("keyed") == "A" and u["id"] == "Transmit", "still keyed after it",
             f"{u['id']} {u.get('state')}")
     r.check(len(runs) == 1 and secs >= 3.0, "one unbroken carrier for the key-up", f"{runs}")
@@ -1126,37 +1150,39 @@ def refusals_hf(r):
 
 @test("txb_refusal_640", {"TX-5": "all"}, 1, 0.0, 6)
 def refusal_640(r):
-    """A remote key-up on 640 MHz (past the BK4829's transmit range): refused, no carrier."""
+    """A remote key-up on 600 MHz: tunable (receive goes to 630 MHz) but past every transmit range, Extend TX's
+    400-520 MHz included: refused, no carrier. (640 MHz, its first frequency, can't be tuned at all.)"""
     r.home()
-    k, runs, u, why = _probe(r, 640.0, "refusal 640.000")
+    k, runs, u, why = _probe(r, PAST_TX, f"refusal {PAST_TX:.3f}")
     if why:
         raise Skip(why)
-    _refused(r, "640.000 MHz", k, runs, u)
-    return f"640.000: {k.refused}"
+    _refused(r, f"{PAST_TX:.3f} MHz", k, runs, u)
+    return f"{PAST_TX:.3f}: {k.refused}"
 
 
 @test("txb_refusal_band_edge", {"TX-6": "part"}, 2, 0.0, 12)
 def refusal_band_edge(r):
-    """The 144 MHz edge, inside half a bandwidth: 144.002 simplex, and 144.600 with a -0.598 MHz shift (TX
-    144.002): refused, no carrier."""
+    """The 144 MHz edge, checked on the final TX frequency, the carrier only (decision 97, as stock and nicFW; no
+    half-bandwidth margin): 143.995 simplex, and 144.600 with a -0.605 MHz shift (TX 143.995): refused, no carrier.
+    (144.002 is inside the band and keys, as stock.)"""
     r.home()
     out = []
-    for f, off in ((144.002, None), (144.6, -0.598)):
+    for f, off in ((143.995, None), (144.6, -0.605)):
         k, runs, u, why = _probe(r, f, f"edge {f:.3f}{'' if off is None else f' {off:+.3f}'}", offset=off)
         if why:
             r.check(False, f"{f:.3f} probed", why)
             continue
-        _refused(r, f"TX 144.002 ({f:.3f}{'' if off is None else f' {off:+.3f}'})", k, runs, u)
+        _refused(r, f"TX 143.995 ({f:.3f}{'' if off is None else f' {off:+.3f}'})", k, runs, u)
         out.append(f"{f:.3f}{'' if off is None else f'{off:+.3f}'}: {k.refused}")
     return "; ".join(out)
 
 
 @test("txb_refusal_125m_extend", {"SAFE-12.4": "all"}, 1, 0.0, 8)
 def refusal_125m_extend(r):
-    """Extend TX on, a remote key-up on 222.000 MHz: still refused "1.25 m locked", no carrier."""
+    """Extend TX on, a remote key-up on 222.000 MHz: still refused "1.25 m locked", no carrier. Extend TX changes
+    only on the radio (`set 0 8 9 On` is refused over the link): a hand step, so the test skips unless it is on."""
     r.home()
-    r.set(EXTEND_TX, "On")
-    r.extend_on = True
+    _need_extend(r)
     k, runs, u, why = _probe(r, 222.0, "222.000 Extend TX on")
     if why:
         raise Skip(why)
@@ -1166,13 +1192,14 @@ def refusal_125m_extend(r):
 
 @test("txb_refusal_emergency_toast", {"LINK-20.9": "all"}, 2, 0.0, 12)
 def refusal_emergency_toast(r):
-    """Remote key-ups on 243.000 MHz and (Extend TX on) 406.025 MHz: refused, no carrier, a toast and no prompt."""
+    """Remote key-ups on 243.000 MHz and (Extend TX on) 406.025 MHz: refused, no carrier, a toast and no prompt.
+    Extend TX is set by hand on the radio (the link can't): without it, 406.025 is left out and said so."""
     r.home()
     out = []
     for f, ext in ((243.0, False), (406.025, True)):
-        if ext:
-            r.set(EXTEND_TX, "On")
-            r.extend_on = True
+        if ext and r.get(EXTEND_TX) != "On":
+            out.append(f"{f:.3f} left out: {EXTEND_HAND}")
+            continue
         k, runs, u, why = _probe(r, f, f"emergency {f:.3f}")
         if why:
             r.check(False, f"{f:.3f} probed", why)
@@ -1619,8 +1646,7 @@ class FakeRadio(bench.FakeRadio):
             return (f"  txtest: {w[1]} at {lvl} % armed for the next PTT key-up, from the key-up to the release; once\n"
                     f"  {filt}: the chip's filters ...\n")
         if w[0] == "set" and line.startswith(f"set {EXTEND_TX} "):
-            self.set[EXTEND_TX] = line.split()[-1]
-            return f"{EXTEND_TX} Extend TX: {self.set[EXTEND_TX]}\n"
+            raise TermError(f"{line}: Extend TX changes only on the radio, on its own screen there")
         if w[0] == "set":
             p = next((k for k in self.set if line.startswith(f"set {k} ")), None)
             if p is None:
@@ -1726,7 +1752,7 @@ class FakeRadio(bench.FakeRadio):
 
     def _dark(self):
         t = int(re.match(r"\d+", self.set[SCREEN_TIMEOUT]).group()) * (60 if "min" in self.set[SCREEN_TIMEOUT] else 1)
-        lit_by_tx = self.key and (self.set[WAKE_ON] == "Keys, RX and TX" or "wake" in self.bugs)
+        lit_by_tx = self.key and "wake" not in self.bugs  # a remote KEY is a PTT press (DISP-15.2)
         return 0 if (lit_by_tx or self.clock.time() - self.last_key < t) else 1
 
     def ui_text(self, what=0):
@@ -1758,8 +1784,9 @@ class FakeRadio(bench.FakeRadio):
         self.last_key = self.clock.time()
         if self.key:
             if name == "MENU" and "menu" in self.bugs:
-                self.screen = "Quick"
-            return
+                self.screen = "Quick"  # taken while keyed
+                return
+            raise fl.RadioError(9, b"transmitting: remote keys wait for the unkey")  # LINK-37
         n = name.upper()
         if n == "VM" and not self.locked and self.screen == "Home" and self.active in self.ch_mem:
             vfo = dict(self.slots[self.active])
@@ -1785,7 +1812,7 @@ class FakeRadio(bench.FakeRadio):
     def reboot(self):
         self.calls.append("REBOOT")
         if self.key and "reboot" not in self.bugs:
-            return 9, "invalid: transmitting"
+            return 7, "busy"
         if not self.key:
             self.last_id = None  # power-on: the ID's timer starts again
             self.screen, self.rxboth = "Home", False
@@ -1815,10 +1842,10 @@ class FakeRadio(bench.FakeRadio):
             why = None
         elif f < 64:
             why = "invalid: HF transmit: only 24.89-24.99 and 28.0-29.7 MHz"
-        elif f > 600:
+        elif f >= PAST_TX:
             why = "invalid: the transmitter can't tune it"
-        elif 144.0 <= f < 144.0125 or 148.0 - 0.0125 < f <= 148.0:
-            why = "invalid: outside the band plan (the edge)"
+        elif 143.9 <= f < 144.0 or 148.0 < f <= 148.1:
+            why = "invalid: outside the band plan (the edge: the carrier only, decision 97)"
         elif 200 <= f < 300 and not (abs(f - 243.0) <= 0.025):
             why = "invalid: 1.25 m locked"
         else:
@@ -1918,6 +1945,7 @@ def selftest(cfg, args, check, tmp):
     c2["results"] = os.path.join(tmp, "results-txb")
     clk = bench.FakeClock()
     r = FakeRadio(clk)
+    r.set[EXTEND_TX] = "On"  # the hand step (EXTEND_HAND) done before the run
     before = json.dumps(r.slots), dict(r.set), r.active
     a = args(build="selftest-txb", tests=None)
     ex, page, rig = run(c2, a, radio=r, sdr=FakeSdr(r, clk), clock=clk, threaded=False)
@@ -1958,12 +1986,12 @@ def selftest(cfg, args, check, tmp):
               it[0]["why"][:90] if it else "not run")
     # A radio that keys a refusal probe: the probe is unkeyed at once and fails.
     clk = bench.FakeClock()
-    rl = FakeRadio(clk, leaky=[640.0])
+    rl = FakeRadio(clk, leaky=[PAST_TX])
     rl.slots[0]["freq"] = 146.52
     ex = _quiet_run(c2, args, "leaky", "refusal_640", rl, clk)
     it = ex[f"suite:{SUITE}"]["items"]
     k_on = rl.calls.index("KEY on") if "KEY on" in rl.calls else -1
-    check(f"suite {SUITE}: a radio that keys 640 MHz: KEY off at once, the test fails",
+    check(f"suite {SUITE}: a radio that keys {PAST_TX:.0f} MHz: KEY off at once, the test fails",
           it and it[0]["result"] == "fail" and k_on >= 0 and rl.calls[k_on + 1] == "KEY off", it[0]["why"][:80] if it else "")
     # The gate: an unapproved frequency is never keyed.
     clk = bench.FakeClock()

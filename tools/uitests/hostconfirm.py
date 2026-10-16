@@ -168,7 +168,7 @@ def battery_save_off_keeps_the_receiver_on(t):
 @test("PWR-3", "PWR-5", needs=("bench",), where="radio", pages=("Home",))
 def key_wakes_then_the_sleep_registers(t):
     """Battery Save Level 1, watch off, A on 2 m: a key press holds the VHF chip receiving for 10 s, then it cycles
-    about 300 ms on, 300 ms off (PWR-3); asleep, REG_30 0 with REG_37 0x1D00, awake REG_37 0x9D1F (PWR-5)."""
+    about 300 ms on, 300 ms off (PWR-3); REG_37 reads 0x1D00 and 0x9D1F in turn, nothing else (PWR-5)."""
     t.bench()
     stopped = quiet(t, bsave="Level 1")
     try:
@@ -192,24 +192,21 @@ def key_wakes_then_the_sleep_registers(t):
         med = statistics.median(runs[1:]) * 1000 if len(runs) > 2 else None
         t.note(f"runs {[round(r * 1000) for r in runs]} ms, a read every {rt * 1000:.0f} ms")
         t.check(med is not None and abs(med - 300) <= max(150, 2000 * rt), "about 300 ms on, 300 ms off", med)
-        pairs = []
-        end = time.time() + 5
-        while time.time() < end:
-            a, r30, b = t.bk(0, 0x37), t.bk(0, 0x30), t.bk(0, 0x37)
-            if a == b:
-                pairs.append((r30, a))
-        sleep37 = {r37 for r30, r37 in pairs if r30 == 0}
-        wake37 = {r37 for r30, r37 in pairs if r30 == AWAKE}
-        t.eq(sorted(sleep37), [ASLEEP_37], "asleep: REG_37 0x1D00")
-        t.eq(sorted(wake37), [AWAKE_37], "awake: REG_37 0x9D1F")
+        # REG_37 alone through whole phases: a REG_37, REG_30, REG_37 triple takes longer over the link than a
+        # 300 ms phase, so it straddled the sleep and woke halves and never saw 0x1D00 (Oct 15, 2026). The sleep
+        # writes REG_30 0, waits the settle, then REG_37 0x1D00 (PWR-21, host-tested in ferrite-radio).
+        s37 = samples(lambda: t.bk(0, 0x37), 6)
+        seen = sorted({v for _, v in s37})
+        t.note(f"REG_37 read {len(s37)} times: {[f'0x{v:04X}' for v in seen]}")
+        t.eq(seen, sorted([ASLEEP_37, AWAKE_37]), "REG_37: 0x1D00 asleep and 0x9D1F awake in turn, nothing else")
     finally:
         t.put_back(stopped)
 
 
 @test("BCR-20", needs=("bench",), where="radio", pages=("Home", "Fm", "Hf"))
 def si_inputs_on_each_receiver(t):
-    """PA7/PC5: 1/0 while the BK4829 radio has the antenna (home on 2 m), 0/0 for FM broadcast, 1/1 for HF mode's
-    AM (the LNA path)."""
+    """PA7/PC5: 1/0 while the BK4829 radio has the antenna once the SI4732 has been used (0/0 from boot until then,
+    as stock), 0/0 for FM broadcast, 1/1 for HF mode's AM (the LNA path)."""
     t.bench()
     from .modes import HfVfo, hf_mode, hf_type
     stopped = quiet(t)
@@ -218,11 +215,16 @@ def si_inputs_on_each_receiver(t):
         t.cmd("slot A active")
         t.home()
         time.sleep(0.5)
-        t.eq((t.pin("PA7"), t.pin("PC5")), (1, 0), "home on 2 m: PA7/PC5 1/0")
+        # Boot drives both low and they stay so until the SI4732 is first used, as stock (its master init; 1/0
+        # only on leaving broadcast): 0/0 before any broadcast since power-on, 1/0 after.
+        first = (t.pin("PA7"), t.pin("PC5"))
+        t.check(first in ((1, 0), (0, 0)), "home on 2 m: PA7/PC5 1/0 (0/0 before the SI4732's first use)", first)
         t.keys("MENU 0 3 1")
         time.sleep(1.0)
         t.eq((t.pin("PA7"), t.pin("PC5")), (0, 0), "FM broadcast: PA7/PC5 0/0")
         t.home()
+        time.sleep(0.5)
+        t.eq((t.pin("PA7"), t.pin("PC5")), (1, 0), "home after FM: PA7/PC5 1/0")
         vfo = HfVfo(t)
         try:
             hf_type(t, 9.58)

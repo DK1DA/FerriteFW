@@ -121,19 +121,22 @@ def quick_menu_knob_is_brightness(t):
 
 @test("DISP-15.1", slow=True, pages=("Home",))
 def backlight_timeout_and_wake(t):
-    """The backlight goes off after the timeout (10 s here): `dark=1`; a remote key wakes it and does nothing
-    else, a knob step likewise; "Never" (always on) never goes dark."""
+    """The backlight goes off after the timeout (10 s here): `dark=1`; a remote key wakes it, and a remote knob step
+    wakes it and tunes too (decision 162: the PC can't see the screen is dark, so a key from the link acts);
+    "Never" (always on) never goes dark. A key on the radio that only wakes it can't be driven from here: a hand
+    check (the host tests have it)."""
     t.set("0 7 4 1", "10 s")
     t.set("0 7 4 4", "Keys")  # nothing heard wakes it meanwhile (the simulator's slots hear a lot)
     t.home()
     u = t.wait(lambda u: u.state.get("dark") == 1, timeout=16, what="dark after 10 s", every=1.0)
+    u = t.keys("BACK")
+    t.eq((u.state["dark"], u.id), (0, "Home"), "a remote key wakes it")
+    u = t.wait(lambda u: u.state.get("dark") == 1, timeout=16, what="dark again", every=1.0)
     f0 = u.active["freq"]
-    u = t.keys("UP")
-    t.eq(u.state["dark"], 0, "a key wakes it")
-    t.eq((u.id, u.active["freq"]), ("Home", f0), "and does nothing else (the frequency as it was)")
-    t.wait(lambda u: u.state.get("dark") == 1, timeout=16, what="dark again", every=1.0)
     u = t.knob(1)
-    t.eq((u.state["dark"], u.active["freq"]), (0, f0), "a knob step wakes it, tuning nothing")
+    t.eq(u.state["dark"], 0, "a remote knob step wakes it")
+    t.check(u.active["freq"] != f0, "and tunes, as from the link (decision 162)", (f0, u.active["freq"]))
+    t.knob(-1)
     t.set("0 7 4 1", "Never")
     t.home()
     time.sleep(13)

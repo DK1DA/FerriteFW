@@ -458,6 +458,20 @@ fn remote_ptt_ends_with_the_session() {
     assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::Session.text());
 }
 
+/// LINK-20.5: a new `HELLO` on the session that keyed is the session starting over: the transmission ends at once,
+/// as a cut (no wait for the keepalive to lapse, no 400 ms hold).
+#[test]
+fn remote_ptt_ends_with_a_new_hello() {
+    let mut pc = Pc::tx();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    pc.cmds();
+    pc.pass(500, &LiveAll::default());
+    assert_eq!(pc.ask(msg::HELLO, &[PROTOCOL]).0, Status::Ok as u8);
+    assert!(!pc.app.remote_keyed(), "unkeyed by the HELLO itself");
+    assert!(cut(&pc.cmds()), "as a cut");
+    assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::Session.text());
+}
+
 fn refusal_beeps(v: &[RadioCmd]) -> usize {
     v.iter().filter(|c| matches!(c, RadioCmd::Beep { hz, .. } if *hz == crate::REFUSED_HZ)).count()
 }
@@ -1197,4 +1211,47 @@ fn ui_status_line() {
     assert!(full.contains("xb running=1 state=1 ") && full.contains(" passes=3 "), "{full}");
     let (s, _) = pc.ask(msg::UI, &[3]);
     assert_eq!(s, Status::BadArg as u8);
+}
+
+/// LINK-19, APRS-17: the APRS card's readback gives what the card shows (the last heard line, the beacon line, the
+/// stations heard), not the mode, tone and shift of C's own VFO put aside (it read mode="AM", Oct 15, 2026).
+#[test]
+fn ui_aprs_card_reads_its_text() {
+    let mut pc = Pc::tx();
+    pc.app.set_aprs_mode(true);
+    let (full, _) = full_and_status(&pc, &LiveAll::default());
+    let c = full.lines().find(|l| l.starts_with("card C ")).unwrap();
+    assert!(c.contains(" kind=aprs") && c.contains(" last=\"") && c.contains(" beacon=\"") && c.contains(" heard="), "{c}");
+    assert!(!c.contains(" mode=") && !c.contains(" tone="), "{c}");
+}
+
+/// LINK-19: a data key-up (APRS, KISS) shows as keyed in the readback, from the Radio task's live state: the UI's
+/// own `keyed` is voice only, so a test couldn't see a KISS frame's carrier (Oct 15, 2026).
+#[test]
+fn ui_status_shows_data_key_ups() {
+    let pc = Pc::tx();
+    let mut live = LiveAll::default();
+    live.tx.keyed = true;
+    live.tx.slot = 2;
+    let (full, st) = full_and_status(&pc, &live);
+    assert!(st.contains(" keyed=C remote=0 "), "{st}");
+    assert!(full.contains(" keyed=C "), "{full}");
+}
+
+/// LINK-37 (decision 175): while the radio transmits, remote keys and knob steps are refused `invalid` (the screen
+/// stays the Transmit screen, nothing tuned); remote PTT's own keepalive and KEY off go on; after the unkey keys work.
+#[test]
+fn remote_keys_wait_for_the_unkey() {
+    let mut pc = Pc::tx();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    pc.cmds();
+    let (s, why) = pc.press("MENU", key::SHORT);
+    assert_eq!((s, why.as_str()), (Status::Invalid as u8, "transmitting: remote keys wait for the unkey"));
+    let (s, a) = pc.ask(msg::KEY, &[key::KNOB, 1]);
+    assert_eq!((s, text(&a)), (Status::Invalid as u8, "transmitting: remote keys wait for the unkey"));
+    assert!(matches!(pc.app.screen(), Screen::Transmit(_)));
+    assert!(!pc.cmds().iter().any(|c| matches!(c, RadioCmd::TuneSlot { .. })), "nothing tuned");
+    assert_eq!(pc.ptt(Ptt::Alive).0, Status::Ok as u8, "the keepalive goes on");
+    assert_eq!(pc.ptt(Ptt::Off).0, Status::Ok as u8);
+    assert_eq!(pc.press("BACK", key::SHORT).0, Status::Ok as u8, "after the unkey keys work");
 }

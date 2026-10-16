@@ -107,7 +107,7 @@ impl App {
                 return Err("channel-only mode: only the active slot can change (PIN-5)");
             }
             if self.aprs_slot(s) {
-                return Err("APRS mode holds slot C: MENU 0 5 3 (APRS-19)");
+                return Err(if self.set.aprs_mode { "APRS mode holds slot C: MENU 0 5 3 (APRS-19)" } else { "KISS holds slot C as the APRS slot (KISS-9)" });
             }
             if self.scan_mask & 1 << s != 0 {
                 return Err("the slot is scanning: SIDE2 stops it");
