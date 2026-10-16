@@ -59,7 +59,7 @@ def chip_by_frequency(t):
         t.put_back(stopped)
 
 
-@test("VFO-15", "WATCH-10", needs=("bench",), where="radio", pages=("Home", "Scan"))
+@test("VFO-15", "WATCH-10", "SAFE-20", "SAFE-11", needs=("bench",), where="radio", pages=("Home", "Scan"))
 def relay_follows_the_active_slot(t):
     """The relay (PC4) follows the active slot only: A on 28.4 MHz active, set; B (2 m) active, clear; A again,
     set; a scan running on B meanwhile never moves it."""
@@ -294,7 +294,7 @@ def si_input_pins_by_mode(t):
 SI_DOWN = "refused: the SI4732 is powered down: FM broadcast or HF mode powers it up"  # TERM-24, decision 162
 
 
-@test("HF-3", "HF-4", "TERM-24", needs=("bench",), where="radio", pages=("Hf", "Home"))
+@test("HF-3", "HF-4", "TERM-24", "HF-11", "SAFE-23", needs=("bench",), where="radio", pages=("Hf", "Home"))
 def hf_mode_relay_and_si(t):
     """Entering HF mode the SI4732 powers up (`si 10 00` answers) and the relay follows the receiver (released for
     the SI4732, energised on chip 1, HF-11); leaving, the SI4732 is off (its answer says so) and PC4 follows the
@@ -358,7 +358,7 @@ def battery_save_beside_the_si4732(t):
         t.put_back(stopped)
 
 
-@test("TSRCH-10.2", "SCOPE-5", needs=("bench",), where="radio", pages=("Counter", "Home", "Scope"))
+@test("TSRCH-10.2", "SCOPE-5", "SAFE-20", needs=("bench",), where="radio", pages=("Counter", "Home", "Scope"))
 def modes_never_move_the_relay(t):
     """PC4 before, during and after the frequency counter and the band scope, with A on 2 m and on 28.4 MHz:
     unchanged throughout (SAFE-20)."""

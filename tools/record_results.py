@@ -29,6 +29,12 @@ tagged with now (tools/uitests; a test that was itself split into narrower tests
 CHECK_SPLITS: which of its checks belong to which rule, and a rule none of whose checks ran gets no row), a bench
 check by tools/bench_rules.py's RULE_TAGS (the table bench.py writes with). What can't be re-pointed is reported,
 never recorded on the parent.
+
+Tags added later (backfill): a radio run's passed uitest or tworadio test also credits the rules its test is tagged
+with now but wasn't when it ran (`late`), when the test's checks already observed them: the row's note says
+"confirmed by NAME in run STAMP (tag added later)". Only a pass counts (never a fail, error, skip or xfail), and a
+row the run recorded under its own tags wins over a late one. A tworadio test's `part=` is read from today's source
+for those rules.
 """
 import argparse
 import datetime
@@ -156,14 +162,27 @@ def tworadio_tags():
     return ui_tags(HERE / "tworadio_tests")
 
 
+def tworadio_parts(d=HERE / "tworadio_tests"):
+    """{two-radio test name: [the rules its `part=` names now]}."""
+    out = {}
+    for f in sorted(pathlib.Path(d).glob("*.py")):
+        for m in re.finditer(r"^@test\((.*?)\)\s*\ndef (\w+)", f.read_text(), re.S | re.M):
+            p = re.search(r"part=\(([^)]*)\)", m.group(1))
+            if p:
+                out[m.group(2)] = re.findall(r'"([A-Z]+-\d+(?:\.\d+)?)"', p.group(1))
+    return out
+
+
 def tworadio_rules(r, kids, tags, lost):
     """A tworadio run's {rule: result, test, why, scope}: ui_rules' worst result per rule, re-pointed to today's
     tags; scope "part" when no test that ran checks the whole rule (each test's `part` list)."""
     rules = ui_rules(r, kids, tags, lost)
     tests = r.get("tests") or []
+    parts = tworadio_parts()
     for rid, x in rules.items():
         if tests:
-            full = any(rid in tags.get(t["name"], t.get("rules", [])) and rid not in t.get("part", [])
+            part_of = lambda t: t.get("part", []) + (parts.get(t["name"], []) if x.get("late") else [])  # noqa: E731
+            full = any(rid in tags.get(t["name"], t.get("rules", [])) and rid not in part_of(t)
                        and t.get("result") != "skip" for t in tests)
         else:
             full = (r.get("rules", {}).get(rid) or {}).get("scope") != "part"
@@ -182,6 +201,8 @@ def ui_rules(r, kids, tags, lost):
         prev = rules.get(rid)
         if prev is None or UI_ORDER.get(res, 4) > UI_ORDER.get(prev["result"], 4):
             rules[rid] = dict(result=res, test=name, why=why)
+
+    late = []  # (rule, test): tagged since the run, credited after the run's own tags (a pass only)
 
     for t in r["tests"]:
         name, res, why = t["name"], t["result"], t.get("why", "")
@@ -210,6 +231,12 @@ def ui_rules(r, kids, tags, lost):
                 lost.append((rid, name))
             for x in subs:
                 put(x, res, name, why)
+        if res == "pass":
+            had = set(t.get("rules", [])) | {x for p in t.get("rules", []) if p in kids for x in kids[p]}
+            late += [(rid, name) for rid in tags.get(name, []) if rid not in had and rid not in kids]
+    for rid, name in late:
+        if rid not in rules:
+            rules[rid] = dict(result="pass", test=name, why="", late=True)
     return rules
 
 
@@ -245,14 +272,15 @@ def rows_of(r, stamp, kids=None, tags=None, lost=None):
         if res == "skip":
             continue
         why = (x.get("why") or "").strip()
+        later = f": confirmed by {x['test']} in run {stamp} (tag added later)" if x.get("late") else ""
         if tool == "uitest":
             mark = {"pass": "✓", "xpass": "✓", "xfail": "◐"}.get(res, "✗")
-            note = f"uitest {x['test']}" + (f": known deviation: {why}" if res == "xfail" else
+            note = f"uitest {x['test']}{later}" + (f": known deviation: {why}" if res == "xfail" else
                                             f": {why}" if res not in ("pass", "xpass") and why else "")
         elif tool == "tworadio":
             part = x.get("scope") == "part"
             mark = {"pass": "◐" if part else "✓", "xpass": "✓", "xfail": "◐"}.get(res, "✗")
-            note = f"tworadio {x['test']}" + (f": {why}" if res not in ("pass", "xpass") and why else "") + (
+            note = f"tworadio {x['test']}{later}" + (f": {why}" if res not in ("pass", "xpass") and why else "") + (
                 " (covers part of the rule)" if part and res == "pass" else "")
         else:
             part = x.get("scope") == "part"

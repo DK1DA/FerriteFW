@@ -277,7 +277,7 @@ BAND_CASES = [("21.2", "HF", "AM"), ("28.4", "HF", "AM"), ("51.0", "6 m", "FM"),
               ("146.52", "VHF", "FM"), ("156.8", "Marine", "FM"), ("223.5", "1.25 m", "FM"), ("446.0", "UHF", "FM")]
 
 
-@test("VFO-2", "VFO-4", pages=("Home", "Quick"))
+@test("VFO-2", "VFO-4", "SETUP-7", pages=("Home", "Quick"))
 def band_follows_the_frequency(t):
     """The band comes from the frequency by a fixed table: tuning A into each band gives its name in the card's
     header and its default mode (FM, NFM or AM only), and 1.25 m its 0.25 W cap; the same frequency always gives

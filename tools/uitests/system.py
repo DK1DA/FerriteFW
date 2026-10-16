@@ -22,7 +22,7 @@ def bench_commands_refused_in_a_user_build(t):
     t.has(h, "not in this build", "help")
 
 
-@test("LINK-35", "LINK-34", pages=("Group", "Info"))
+@test("LINK-35", "LINK-34", "LINK-1", pages=("Group", "Info"))
 def info_and_terminal_over_the_link(t):
     """INFO gives the version (About's), the build flavour (HELLO's) and the region and callsign; CMD runs a
     terminal line on the link session and gives its output (`get` as the menu shows it)."""

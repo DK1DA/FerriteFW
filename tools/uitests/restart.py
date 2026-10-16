@@ -43,7 +43,7 @@ def restart_lands_home(t):
     t.check("MCU: ok" in text and "SPI flash: ok" in text, "both checks pass", text[-600:])
 
 
-@test("BOOT-7", pages=("Home", "Info"))
+@test("BOOT-7", "TX-14", "CAL-5", "CAL-6", "CAL-7", "CAL-1", "SAFE-1", pages=("Home", "Info"))
 def restart_checks_calibration(t):
     """At boot the calibration is checked (programmed, PA bytes, order, crystal trim, tone gains, TX windows, the CRC
     recorded at install): the boot report says "Calibration: ok" and "calibration crc: same as recorded", the

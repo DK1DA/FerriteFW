@@ -149,7 +149,7 @@ def write_back(t, d0, tries=3):
     return bad
 
 
-@test("BOOT-14.4", "BOOT-14.5", "SAFE-9.1", "SAFE-14.5", "SETUP-3", needs=("reset",), pages=(
+@test("BOOT-14.4", "BOOT-14.5", "SAFE-9.1", "SAFE-14.5", "SETUP-3", "PIN-8", needs=("reset",), pages=(
     "Confirm", "Group", "Home", "Info", "Setup"))
 def reset_then_setup(t):
     """The reset (MENU 0 9 8 2: OK, hold # 3 s) by remote keys: setup's first page follows, with no region until

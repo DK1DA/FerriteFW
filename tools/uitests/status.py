@@ -139,7 +139,7 @@ def gps_icon_follows_the_fix(t):
     t.check(u.bar["gps"] in ("searching", "fix"), "outline or solid", u.bar)
 
 
-@test("BOOT-8", "SELF-2", "BACKUP-4", pages=("Info", "Status"))
+@test("BOOT-8", "SELF-2", "BACKUP-4", "TX-15", pages=("Info", "Status"))
 def transmit_lock_follows_the_checks(t):
     """Transmit is Ready only when the MCU and calibration checks pass (Self-test page), and About and Status say
     the same; the calibration page's CRC at install matches while it reads Valid, and a lock names its reason."""
@@ -170,7 +170,7 @@ def transmit_lock_follows_the_checks(t):
     t.note(f"transmit {tx!r}, calibration {cal!r}, checks {checks}")
 
 
-@test("UPD-8", "SAFE-2", pages=("Group", "Info"))
+@test("UPD-8", "SAFE-2", "UPD-7", pages=("Group", "Info"))
 def no_pending_update_on_a_clean_radio(t):
     """About on a radio with nothing at 0x300000: no "pending stock update" line; there is no update screen in
     the menus (System has no update row)."""

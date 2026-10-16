@@ -74,7 +74,7 @@ def reads(t, secs, every=0.25):
     return out
 
 
-@test("SQL-8", keyups=(4,), idle=30)
+@test("SQL-8", "PWR-3", "PWR-4", part=("PWR-3", "PWR-4"), keyups=(4,), idle=30)
 def battery_save_holds_the_receiver(t):
     """Battery Save Level 1, watch off, A on 2 m: idle past the 10 s hold the VHF chip cycles (REG_30 reads its
     receive value only part of the time, `bk 0 30`); the other radio keys 4 s: awake throughout; after the

@@ -8,7 +8,7 @@ import ferrite_link as fl
 from .core import test
 
 
-@test("LINK-23", pages=("Home",))
+@test("LINK-23", "LINK-1", pages=("Home",))
 def one_request_in_flight_no_xon_xoff(t):
     """Requests back to back, each sent after the last answer, all answered in order; payload bytes 0x11 and 0x13
     (XON and XOFF) pass inside frames: knob +17 and -19 tune exactly 17 and 19 steps."""

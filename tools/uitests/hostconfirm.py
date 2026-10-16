@@ -1,0 +1,335 @@
+"""One radio confirmation for rules whose logic the host and simulator tests carry (`How: host-covered` in the test
+plan): readback, the terminal and the link only. Nothing here keys or writes a register; settings a test changes
+are put back by the runner, the channel one makes is deleted, and the one restart (the option bytes before and after
+a REBOOT, LINK-24) lands home as `restart_lands_home` does.
+
+    tools/uitest.py --port PORT --backup ../backups/blackradio/flash.bin -k hostconfirm    # (--bt, --pin for XB-20.3)
+"""
+import hashlib
+import os
+import re
+import statistics
+import struct
+import time
+
+import ferrite_link as fl
+from .chips import AWAKE, QUIET_UHF, QUIET_VHF, cal_sector, quiet, samples, set_squelch, sq_regs, squelch_level
+from .core import test
+from .restart import clear_pin_lock, pin_lock, set_pin_lock, the_pin  # noqa: F401 (clear_pin_lock: pin_lock's)
+
+ASLEEP_37, AWAKE_37 = 0x1D00, 0x9D1F  # PWR-5
+TARGET = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "target")
+
+
+def mem(t, addr, n):
+    """`mem ADDR N` (bench builds, TERM-22) as bytes."""
+    out = t.cmd(f"mem {addr:08X} {n}")
+    data = bytearray()
+    for line in out.splitlines():
+        parts = line.replace(":", " ").split()
+        if not parts or not re.fullmatch(r"[0-9A-Fa-f]{8}", parts[0]):
+            continue
+        for w in parts[1:17]:
+            if not re.fullmatch(r"[0-9A-Fa-f]{2}", w):
+                break
+            data.append(int(w, 16))
+    if len(data) < n:
+        t.fail(f"mem {addr:08X} {n}: {out[:200]!r}")
+    return bytes(data[:n])
+
+
+def boot_flash(t):
+    """The MCU's option bytes (user system data, 48 B), the stock bootloader (0x08000000, 12 KB) as a SHA-256 and the
+    marker sector's first 16 bytes (0x080F0000)."""
+    usd = mem(t, 0x1FFFF800, 48)
+    h = hashlib.sha256()
+    for a in range(0x08000000, 0x08003000, 1024):
+        h.update(mem(t, a, 1024))
+    return usd, h.hexdigest()[:16], mem(t, 0x080F0000, 16)
+
+
+@test("INST-4", "LINK-24.4", "UPD-6", "SAFE-3", needs=("bench",), where="radio", pages=("Home",))
+def option_bytes_and_boot_flash_unchanged(t):
+    """The option bytes (`mem 1FFFF800 48`), the stock bootloader and the marker sector read the same before and after
+    a REBOOT (LINK-24); each option-byte half-word is erased (0xFFFF) or a byte and its complement, as the factory
+    and the stock bootloader leave them (nothing half-written)."""
+    t.bench()
+    t.need(t.get("0 9 3 1") == "Off", "a PIN lock is on: the restart asks for it")
+    before = boot_flash(t)
+    usd = before[0]
+    bad = [i for i in range(0, 48, 2) if (usd[i], usd[i + 1]) != (0xFF, 0xFF) and usd[i] ^ usd[i + 1] != 0xFF]
+    t.eq(bad, [], "every option-byte half-word erased or a byte and its complement")
+    t.note(f"option bytes {usd.hex()}; bootloader sha256 {before[1]}; marker {before[2][:4]!r}")
+    u = t.restart()
+    t.eq(u.id, "Home", "home after the REBOOT")
+    after = boot_flash(t)
+    t.eq(after[0].hex(), before[0].hex(), "the option bytes unchanged after the REBOOT")
+    t.eq(after[1], before[1], "the bootloader unchanged")
+    t.eq(after[2].hex(), before[2].hex(), "the marker sector unchanged")
+    t.check(after[2][:4] in (b"UV85", b"BJ90", b"\xff\xff\xff\xff"), "the marker sector is stock's or erased",
+            after[2][:4])
+
+
+@test("UPD-1", "UPD-3", needs=("bench",), where="radio", pages=("Info",))
+def installed_image_matches_its_btf(t):
+    """The installed image is the .BTF's, unpacked (first 1 KB plain, the rest decrypted with the zero key, the last
+    block plain: UPD-3): its first, a middle and its last 1 KB read back from 0x08003000 the same, it is at most
+    948 KB and ends below the 0x080F0000 marker sector (UPD-1). Skipped when target/ has no .BTF of the commit
+    the radio runs (About's version)."""
+    t.bench()
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import btf
+    u = t.keys("MENU 0 9 9")
+    version = (u.row("Version") or {}).get("value", "")
+    m = re.search(r"([0-9a-f]{7,})", version)
+    t.need(m, f"About's version names no commit ({version!r})")
+    commit = m.group(1)[:7]
+    img = None
+    for name in ("ferrite-txdry.btf", "ferrite-tx.btf", "ferrite.btf"):
+        p = os.path.join(TARGET, name)
+        if os.path.exists(p):
+            cand = btf.unpack(open(p, "rb").read())
+            cand = cand[0] if isinstance(cand, tuple) else cand
+            if commit.encode() in cand:
+                img = cand
+                break
+    t.need(img is not None, f"no .BTF of {commit} in {TARGET}")
+    img = img.rstrip(b"\xff")
+    t.check(len(img) <= 948 * 1024, "the image is at most 948 KB", len(img))
+    t.check(0x08003000 + len(img) <= 0x080F0000, "it ends below the marker sector", hex(0x08003000 + len(img)))
+    last = (len(img) - 1) // 1024 * 1024
+    for off, what in ((0, "the first 1 KB (plain in the .BTF)"), (last // 2 // 1024 * 1024, "a middle 1 KB"),
+                      (last, "the last 1 KB")):
+        want = img[off:off + 1024]
+        n = (len(want) + 15) // 16 * 16  # whole lines: a short last line's characters could read as hex
+        t.eq(mem(t, 0x08003000 + off, n)[:len(want)].hex(), want.hex(), f"{what} as installed")
+    t.note(f"{commit}: {len(img)} bytes")
+
+
+BUILT = {fl.HELLO, fl.INFO, fl.AUTH, fl.READ, fl.WRITE, fl.DELETE, fl.BEGIN, fl.END, fl.SLOT, fl.BAUD, fl.REBOOT,
+         fl.KEY, fl.CMD, fl.MORE, fl.UI}
+
+
+@test("LINK-3", "SAFE-5", "TERM-8", pages=("Home",))
+def link_has_no_calibration_write(t):
+    """Every link message type the radio doesn't have answers "unknown type" (no CAL_WRITE or any other way to the
+    calibration sector or the update area); READ takes the four record kinds only; the terminal has no command that
+    reaches SPI flash."""
+    link = t.r.link
+    known = []
+    for ty in range(0x00, 0x80):
+        if ty in BUILT:
+            continue
+        s, _ = link.ask(ty, b"", timeout=1.0)
+        if s != 2:
+            known.append((hex(ty), s))
+    t.eq(known, [], "every other type: unknown type")
+    for kind in (0, 5, 6, 0x80, 0xFF):
+        s, why = link.ask(fl.READ, struct.pack("<BH", kind, 0), timeout=1.0)
+        t.check(s != 0, f"READ kind {kind}: refused", (s, why))
+    for c in ("flash", "erase", "spi", "cal", "calibration", "write", "update"):
+        ok, out = t.cmd_err(c)
+        t.check(not ok or "no such command" in out, f"`{c}`: no such command", out)
+
+
+@test("SND-2", needs=("bench",), where="radio", pages=("Home",))
+def receive_level_is_stocks(t):
+    """REG_48 (the receive audio level into the volume knob) is stock's 0xB2BF on the chip in use, VHF and UHF."""
+    t.bench()
+    stopped = quiet(t)
+    try:
+        t.cmd("slot A active")
+        for mhz, chip in ((QUIET_VHF, 0), (QUIET_UHF, 1)):
+            t.cmd(f"slot A vfo {mhz}")
+            time.sleep(0.6)
+            t.eq(f"{t.bk(chip, 0x48):04X}", "B2BF", f"{mhz} MHz: chip {chip} REG_48")
+    finally:
+        t.put_back(stopped)
+
+
+@test("PWR-1", needs=("bench",), where="radio", pages=("Home",))
+def battery_save_off_keeps_the_receiver_on(t):
+    """Battery Save Off, watch off, A on 2 m: past the 10 s a key holds, the VHF chip still reads receiving (REG_30
+    0xBFF1) every time. The levels' own timings start 30 min after the last activity (PWR-3): host-tested."""
+    t.bench()
+    stopped = quiet(t, bsave="Off")
+    try:
+        t.cmd(f"slot A vfo {QUIET_VHF}")
+        t.cmd("slot A active")
+        t.home()
+        time.sleep(11)
+        vals = {v for _, v in samples(lambda: t.bk(0, 0x30), 3)}
+        t.eq(sorted(vals), [AWAKE], "Off: awake throughout")
+    finally:
+        t.put_back(stopped)
+
+
+@test("PWR-3", "PWR-5", needs=("bench",), where="radio", pages=("Home",))
+def key_wakes_then_the_sleep_registers(t):
+    """Battery Save Level 1, watch off, A on 2 m: a key press holds the VHF chip receiving for 10 s, then it cycles
+    about 300 ms on, 300 ms off (PWR-3); asleep, REG_30 0 with REG_37 0x1D00, awake REG_37 0x9D1F (PWR-5)."""
+    t.bench()
+    stopped = quiet(t, bsave="Level 1")
+    try:
+        t.cmd(f"slot A vfo {QUIET_VHF}")
+        t.cmd("slot A active")
+        t.home()
+        t.press("BACK")  # a key: no change on home
+        t0 = time.time()
+        s = samples(lambda: t.bk(0, 0x30), 13.5)
+        held = [v for at, v in s if at - t0 <= 9.5]
+        late = [(at, v) for at, v in s if at - t0 >= 10.5]
+        t.check(held and all(v == AWAKE for v in held), "held receiving for 10 s after the key", sorted(set(held)))
+        t.check({0, AWAKE} <= {v for _, v in late}, "then asleep and awake in turn", sorted({v for _, v in late}))
+        runs, cur, start = [], None, None
+        for at, v in late:
+            if v != cur:
+                if cur is not None:
+                    runs.append(at - start)
+                cur, start = v, at
+        rt = statistics.median(s[i + 1][0] - s[i][0] for i in range(len(s) - 1))
+        med = statistics.median(runs[1:]) * 1000 if len(runs) > 2 else None
+        t.note(f"runs {[round(r * 1000) for r in runs]} ms, a read every {rt * 1000:.0f} ms")
+        t.check(med is not None and abs(med - 300) <= max(150, 2000 * rt), "about 300 ms on, 300 ms off", med)
+        pairs = []
+        end = time.time() + 5
+        while time.time() < end:
+            a, r30, b = t.bk(0, 0x37), t.bk(0, 0x30), t.bk(0, 0x37)
+            if a == b:
+                pairs.append((r30, a))
+        sleep37 = {r37 for r30, r37 in pairs if r30 == 0}
+        wake37 = {r37 for r30, r37 in pairs if r30 == AWAKE}
+        t.eq(sorted(sleep37), [ASLEEP_37], "asleep: REG_37 0x1D00")
+        t.eq(sorted(wake37), [AWAKE_37], "awake: REG_37 0x9D1F")
+    finally:
+        t.put_back(stopped)
+
+
+@test("BCR-20", needs=("bench",), where="radio", pages=("Home", "Fm", "Hf"))
+def si_inputs_on_each_receiver(t):
+    """PA7/PC5: 1/0 while the BK4829 radio has the antenna (home on 2 m), 0/0 for FM broadcast, 1/1 for HF mode's
+    AM (the LNA path)."""
+    t.bench()
+    from .modes import HfVfo, hf_mode, hf_type
+    stopped = quiet(t)
+    try:
+        t.cmd(f"slot A vfo {QUIET_VHF}")
+        t.cmd("slot A active")
+        t.home()
+        time.sleep(0.5)
+        t.eq((t.pin("PA7"), t.pin("PC5")), (1, 0), "home on 2 m: PA7/PC5 1/0")
+        t.keys("MENU 0 3 1")
+        time.sleep(1.0)
+        t.eq((t.pin("PA7"), t.pin("PC5")), (0, 0), "FM broadcast: PA7/PC5 0/0")
+        t.home()
+        vfo = HfVfo(t)
+        try:
+            hf_type(t, 9.58)
+            hf_mode(t, "AM")
+            time.sleep(0.5)
+            t.eq((t.pin("PA7"), t.pin("PC5")), (1, 1), "HF AM: PA7/PC5 1/1")
+        finally:
+            vfo.restore()
+        time.sleep(0.5)
+        t.eq((t.pin("PA7"), t.pin("PC5")), (1, 0), "home again: 1/0")
+    finally:
+        t.put_back(stopped)
+
+
+SQ_CH = 990
+
+
+@test("SQL-6", needs=("bench",), where="radio", pages=("Home", "Quick"))
+def channel_squelch_override(t):
+    """A channel with its own squelch (squelch=7) sets the chip's thresholds (REG_78) for 7 whatever the slot's
+    level; the same channel at Global uses the slot's level. Thresholds as stock computes them from this radio's
+    calibration (--backup)."""
+    t.bench()
+    cal = cal_sector(t)
+    ok, out = t.cmd_err(f"ch {SQ_CH}")
+    t.need(not ok or "UITEST" in out or "empty" in out.lower() or "no channel" in out.lower(),
+           f"channel {SQ_CH} is in use: {out!r}")
+    stopped = quiet(t)
+    t.cmd("slot A active")
+    t.home()
+    level = squelch_level(t)
+    t.home()
+    f10 = round(float(QUIET_VHF) * 100_000)
+    try:
+        t.cmd(f'ch {SQ_CH} "UITEST SQL" {QUIET_VHF} squelch={7 if level != 7 else 2}')
+        own = 7 if level != 7 else 2
+        u = t.ui()
+        if u.active.get("head", "").startswith("VFO"):
+            t.keys("VM")
+        t.keys(" ".join(str(SQ_CH)) + " MENU")
+        u = t.home()
+        t.eq(u.active.get("name"), "UITEST SQL", f"A on channel {SQ_CH}")
+        time.sleep(0.4)
+        t.eq(f"{t.bk(0, 0x78):04X}", f"{sq_regs(cal, f10, own)[0]:04X}", f"the channel's level {own}, not the slot's {level}")
+        t.cmd(f'ch {SQ_CH} "UITEST SQL" {QUIET_VHF} squelch=global')
+        t.home()
+        t.keys("VM")
+        t.keys(" ".join(str(SQ_CH)) + " MENU")
+        u = t.home()
+        time.sleep(0.4)
+        t.has(t.cmd(f"ch {SQ_CH}"), "squelch=global", "the channel at Global")
+        t.eq(f"{t.bk(0, 0x78):04X}", f"{sq_regs(cal, f10, level)[0]:04X}", f"Global: the slot's level {level}")
+    finally:
+        u = t.home()
+        if not u.active.get("head", "").startswith("VFO"):
+            t.keys("VM")
+        t.home()
+        t.cmd_err(f"ch {SQ_CH} delete")
+        set_squelch(t, level)
+        t.put_back(stopped)
+
+
+@test("TSRCH-8", "DEC-1", "SAFE-16", pages=("Counter", "Home"))
+def counter_and_decoders_never_key(t):
+    """The frequency counter (hold SIDE2) and a decoder running (the pager, 0 4 2 1) only receive: the radio's own
+    keyed state stays idle throughout (`status`)."""
+    t.home()
+    u = t.press("SIDE2", long=True)
+    t.eq(u.id, "Counter", "hold SIDE2: the counter")
+    keyed = set()
+    end = time.time() + 3
+    while time.time() < end:
+        keyed.add(fl.parse_status(t.r.status_text())["keyed"])
+    t.eq(keyed, {None}, "the counter: never keyed")
+    t.home()
+    t.set("0 4 2 1", "On")
+    end = time.time() + 3
+    keyed = set()
+    while time.time() < end:
+        keyed.add(fl.parse_status(t.r.status_text())["keyed"])
+    t.eq(keyed, {None}, "the pager decoding: never keyed")
+
+
+@test("TERM-36.6", needs=("bench",), where="radio", pages=("Home",))
+def gps_never_saves_or_changes_baud(t):
+    """Only queries and standby go to the GPS module: `gps baud 9600`, `gps query 3` and `gps nmea 2` are refused
+    (never CAS00, its flash, or CAS01, its baud rate)."""
+    t.bench()
+    for line in ("gps baud 9600", "gps query 3", "gps nmea 2"):
+        ok, out = t.cmd_err(line)
+        t.check(not ok or "refused" in out.lower() or "gps " in out.lower() and "usage" in out.lower(),
+                f"`{line}`: refused", out)
+
+
+@test("XB-20.3", needs=("bt", "pin"), pages=("Group", "Pin"))
+def xb_needs_the_pin_over_bluetooth(t):
+    """PIN lock on: over Bluetooth before AUTH `xb start`, and `xb` alone, are not authorised (the repeater stays
+    off); past AUTH `xb` reads its state. Nothing is started."""
+    with pin_lock(t):
+        set_pin_lock(t)
+        raw = t.bt_raw()
+        t.eq(raw.link.ask(fl.CMD, b"xb start")[0], 5, "xb start before AUTH: not authorised")
+        t.eq(raw.link.ask(fl.CMD, b"xb")[0], 5, "xb before AUTH: not authorised")
+        t.check("running" not in t.cmd("xb").lower() or "not running" in t.cmd("xb").lower(),
+                "the repeater still off (the cable's xb)", t.cmd("xb"))
+        t.eq(raw.link.ask(fl.AUTH, the_pin(t).encode())[0], 0, "AUTH with the PIN")
+        s, rest = raw.link.ask(fl.CMD, b"xb")
+        t.eq(s, 0, "past AUTH: xb reads")
+        t.close_bt()
+
