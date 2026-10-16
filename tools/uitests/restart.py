@@ -97,7 +97,9 @@ def set_pin_lock(t):
 
 
 def clear_pin_lock(t):
-    """PIN lock off by keys: OK steps the lock's modes on to Off, which asks the PIN."""
+    """PIN lock off by keys: OK steps the lock's modes on to Off, which asks the PIN. After a restart (or an error
+    in the middle of one) the radio is waited for first (T.resync), and the PIN at power on typed."""
+    t.resync(timeout=40, what="the radio before turning the PIN lock off")
     for _ in range(3):
         u = t.ui()
         if u.id != "Pin" or not (u["pin"] or {}).get("args", [""])[0] == "Enter PIN":
@@ -118,6 +120,7 @@ def clear_pin_lock(t):
             t.keys("MENU 0 9 3 1")
     t.home()
     if t.get("0 9 3 1") != "Off":
+        t.log(f"    PIN lock left {t.get('0 9 3 1')!r}: MENU 0 9 3 1, OK to Off, then the PIN {the_pin(t)}")
         t.note(f"PIN lock left {t.get('0 9 3 1')!r} (PIN {the_pin(t)})")
 
 
@@ -134,8 +137,15 @@ class pin_lock:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
-        clear_pin_lock(self.t)
+    def __exit__(self, ty, val, tb):
+        for i in range(2):
+            try:
+                clear_pin_lock(self.t)
+                break
+            except Exception as e:  # noqa: BLE001 (tried again; the test's own error, if any, is the one shown)
+                self.t.log(f"    turning the PIN lock off: {e}" + (" (trying again)" if i == 0 else ""))
+                if i == 1 and ty is None:
+                    raise
         return False
 
 

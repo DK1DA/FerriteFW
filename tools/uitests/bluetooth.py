@@ -149,16 +149,27 @@ def bt_wrong_pins_count_with_the_keypads(t):
 @test("LINK-24.2", needs=("bt", "pin"), pages=("Group", "Home", "Pin"))
 def bt_reboot_needs_the_pin(t):
     """REBOOT over Bluetooth with a PIN lock on: not authorised until AUTH; after it the radio restarts (and asks
-    for its PIN at power on)."""
+    for its PIN at power on). The restart drops the Bluetooth connection, often before REBOOT's answer is out (the
+    link is paced, LINK-36): a drop or no answer then is the restart. Bluetooth connects again once the module
+    advertises: a new session, not authorised until AUTH. The PIN lock goes back off after (pin_lock)."""
     with pin_lock(t):
         set_pin_lock(t)
         raw = t.bt_raw()
         t.eq(raw.link.ask(fl.REBOOT)[0], 5, "REBOOT before AUTH: not authorised")
         t.eq(raw.link.ask(fl.AUTH, the_pin(t).encode())[0], 0, "AUTH")
-        t.eq(raw.link.ask(fl.REBOOT)[0], 0, "REBOOT: answered")
+        try:
+            t.eq(raw.link.ask(fl.REBOOT)[0], 0, "REBOOT: answered")
+        except (TimeoutError, OSError) as e:
+            t.note(f"REBOOT over Bluetooth: no answer before the link dropped ({e}): the restart")
         t.close_bt()
         t.r.reopen()
         u = t.wait(lambda u: u.id == "Pin", timeout=15, what="restarted: the PIN asked at power on")
+        raw = t.bt_raw_again(timeout=20)
+        s, rest = raw.hello
+        t.eq(s, 0, "HELLO over Bluetooth after the restart")
+        t.eq(rest[2], 0, "a new Bluetooth session: not authorised until AUTH (LINK-30)")
+        t.eq(raw.link.ask(fl.AUTH, the_pin(t).encode())[0], 0, "AUTH again")
+        t.close_bt()
         t.wait(lambda u: not (u["pin"] or {}).get("note", "").startswith("Wait"), timeout=35, what="no wait left",
                every=2.0)
         power_on_pin(t, the_pin(t))

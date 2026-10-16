@@ -402,6 +402,48 @@ class T:
         u = self.wait(lambda u: u.id not in ("", "Boot") and u.whole, timeout=15, what="the radio up again")
         return u
 
+    def resync(self, timeout=30.0, what="the radio answering again"):
+        """After a restart (a REBOOT, the factory reset): the readback polled until a whole screen past boot comes
+        back. Just after a restart the cable's bytes go to the terminal until a 0x00 sync (TERM-2) and a CMD is
+        never sent twice by the link, so this goes first; if the readback doesn't answer, the port is opened again
+        (HELLO until it answers). Returns the readback."""
+        from ferrite_link import RadioError
+        end = time.time() + timeout
+        reopened, last = False, None
+        while True:
+            try:
+                u = U(self.r.ui())
+                if u.id not in ("", "Boot") and u.whole:
+                    return self.ui()
+                last = f"screen {u.id or '?'}"
+            except (TimeoutError, OSError, RadioError) as e:
+                last = e
+                if not reopened and hasattr(self.r, "reopen"):
+                    reopened = True
+                    try:
+                        self.r.reopen(settle=1.0, timeout=max(2.0, end - time.time()))
+                    except (TimeoutError, OSError) as e2:
+                        last = e2
+                    continue
+            if time.time() > end:
+                self.fail(f"{what}: not within {timeout:g} s ({last})")
+            time.sleep(0.5)
+
+    def bt_raw_again(self, timeout=20.0):
+        """A new Bluetooth link (bt_raw) after the radio restarted: the connection dropped with the restart and the
+        module advertises again, so it's tried every 2 s for `timeout` s."""
+        self.close_bt()
+        end, last = time.time() + timeout, None
+        while True:
+            try:
+                self._bt = BtRaw(self.opts.bt)
+                return self._bt
+            except (TimeoutError, OSError) as e:
+                last = e
+            if time.time() > end:
+                self.fail(f"Bluetooth again after the restart: no connection in {timeout:g} s ({last})")
+            time.sleep(2.0)
+
     def bt(self):
         """A second link on Bluetooth (--bt; the simulator's own with --sim auto), past HELLO; closed after the
         test. Bluetooth must be on (0 9 2 1): the simulator turns it on for the test; on the radio it's the owner's."""
@@ -558,7 +600,11 @@ class BtRaw:
         import ferrite_link as fl
         self.port = fl.Port(spec)
         self.link = fl.Link(self.port)
-        self.hello = self.link.ask(fl.HELLO, bytes([fl.PROTOCOL]) + bytes(8) + b"uitest.py bt")
+        try:
+            self.hello = self.link.ask(fl.HELLO, bytes([fl.PROTOCOL]) + bytes(8) + b"uitest.py bt")
+        except BaseException:
+            self.close()
+            raise
 
     def close(self):
         self.port.close()
