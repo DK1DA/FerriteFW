@@ -48,6 +48,35 @@ RULE_TAGS = {
     "endtone_hold": {"TONE-10.5": "all", "TX-47.1": "part", "LINK-20.6": "part"},  # 400 ms carrier after the tone
     "subtone_level": {"TONE-16": "part"},  # Low < Normal < High in even steps; the bytes aren't read back
     "afsk_level_steps": {"TERM-33.6": "part"},  # DAC AFSK at 10-150 %; afsk-bk's tone gain not swept
+    # --suite tx-behaviour (tools/benchtests/tx_behaviour.py): around a key-up, by readback, terminal and SDR
+    "txb_transmit_screen": {"LINK-20.12": "all", "TX-22.2": "part", "TX-12.2": "part"},  # the readback has no
+    # frequency, power word, meter or tone line: those fields of TX-22.2, and TX-12.2's power name, aren't seen
+    "txb_menu_does_nothing_keyed": {"MENU-30": "all"},
+    "txb_red_led": {"TX-22.1": "all", "DISP-17.1": "all"},
+    "txb_red_led_off_setting": {"DISP-17.3": "all"},
+    "txb_backlight_on_transmit": {"DISP-26": "all"},
+    "txb_wake_on_transmit": {"DISP-15.4": "all"},
+    "txb_tx_bandwidth": {"TX-45": "all"},
+    "txb_cable_while_keyed": {"TX-43.2": "all", "LINK-12": "part"},  # LINK-12: queuing is the tx build's
+    "txb_gps_query_keyed": {"TERM-36.8": "all"},
+    "txb_ptt_from_screens": {"KEY-7.3": "all", "TX-18": "part"},  # TX-18: PTT B and the side connector not keyed
+    "txb_ptt_slots": {"KEY-7.5": "all", "LINK-20.1": "all"},
+    "txb_reboot_refused_keyed": {"LINK-24.3": "all"},
+    "txb_session_end_unkeys": {"LINK-20.5": "part"},  # the other port's refusal needs Bluetooth
+    "txb_key_off_end_tone": {"LINK-20.6": "all"},
+    "txb_txtest_armed_and_used": {"TERM-33.1": "part"},  # off after a restart not run
+    "txb_txtest_filters": {"TERM-33.9": "all", "TERM-33.12": "all"},
+    "txb_txtest_until_release": {"TERM-33.7": "part", "LINK-20.13": "all"},  # 4 s key-ups, not 10 s (duty)
+    "txb_refusals_hf": {"TX-4": "part"},  # 28 MHz's allowed side not keyed (not an approved frequency)
+    "txb_refusal_640": {"TX-5": "all"},
+    "txb_refusal_band_edge": {"TX-6": "part"},  # the 144 MHz edge, simplex and shifted; reverse and trims not
+    "txb_refusal_125m_extend": {"SAFE-12.4": "all"},
+    "txb_refusal_emergency_toast": {"LINK-20.9": "all"},
+    "txb_relay_still": {"WATCH-12": "part"},  # (2) only: no relay change while keyed or in the unkey wait
+    "txb_battery_save_pins": {"TX-29": "part"},  # the pins while keyed; the chips' sleep and the unkey wait not
+    "txb_rx_both_kept": {"SAFE-24": "part"},  # the hold kept across a key-up, refused on HF; not both watched
+    "txb_broadcast_muted_keyed": {"TX-24": "part"},  # the state while keyed, not its order before the carrier
+    "txb_trim_follows": {"CAL-13": "part"},  # the chip and the carrier follow the trim; the check's use not probed
 }
 
 

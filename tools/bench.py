@@ -9,6 +9,9 @@ each run's numbers stored, compared with the previous run of the same configurat
     tools/bench.py --sweep ctcss,dcs [--from D365N] [--count N] [--items A,B] [--resume SESSION] [--dry-plan]
                                                        # sweeps (below): one short key-up per value, duty-limited
     tools/bench.py --load DIR [--build LABEL]          # re-analyse saved captures (DIR searched for <run>.u8)
+    tools/bench.py --suite tx-behaviour [--tests A,B] [--dry-plan]
+                                                       # a suite of checks by name (tools/benchtests/): around a
+                                                       # key-up, by readback, terminal and SDR (its docstring)
     tools/bench.py --selftest                          # a fake radio and synthetic IQ: the whole flow and the gates
     tools/bench.py --selftest --sim tcp:127.0.0.1:7300 # the same against the simulator's link (fake SDR)
     tools/bench.py --auto [--dry-plan]                 # what changed since the last on-radio runs decides: the UI
@@ -110,6 +113,7 @@ FERRITE = os.path.dirname(HERE)
 ROOT = os.path.dirname(FERRITE)
 sys.path.insert(0, HERE)
 import bench_rules  # noqa: E402
+import benchtests  # noqa: E402
 import ferrite_link as fl  # noqa: E402
 import sdrsuite  # noqa: E402
 import sdrtx  # noqa: E402
@@ -1839,6 +1843,8 @@ def rule_tests(session, runs):
         add("reboot", [_chk("HELLO again, home, `dump` unchanged", rb.get("ok"), rb.get("text"))],
             f"REBOOT: {rb.get('text')}")
     sweep_tests(ex, add, session.get("cfg"))
+    for mod in benchtests.all_modules():  # the --suite runs' checks (extras "suite:NAME")
+        mod.tests_of(ex, add)
 
     for j in runs:
         m, name, wide = j.get("metrics") or {}, j["run"], j.get("mode") == "fm"
@@ -2146,7 +2152,7 @@ def summary_page(session, sess_dir, runs, extras, meta):
                 r = extras[k]
                 parts.append(f"<div class=card><h3>{e(title)} {pill('pass' if r['ok'] else 'FAIL')}</h3><p>{e(r['text'])}</p></div>")
         for k, sw in extras.items():
-            if not k.startswith("sweep:"):
+            if not k.startswith(("sweep:", "suite:")):
                 continue
             its = sw.get("items") or []
             nok = sum(1 for x in its if x.get("ok"))
@@ -2158,7 +2164,8 @@ def summary_page(session, sess_dir, runs, extras, meta):
                            f"{' <span class=muted>(' + e(x['why']) + ')</span>' if x.get('why') and not x.get('ok') else ''}"
                            f"{' <span class=muted>' + e(x['session']) + '</span>' if x.get('resumed') else ''}</td>"
                            f"<td>{pill('pass' if x.get('ok') else 'FAIL')}</td></tr>" for x in its)
-            parts.append(f"<div class=card><h3>Sweep {e(k[6:])} {pill('pass' if sw.get('ok') else 'FAIL')}</h3>"
+            parts.append(f"<div class=card><h3>{'Sweep' if k.startswith('sweep:') else 'Suite'} {e(k[6:])} "
+                         f"{pill('pass' if sw.get('ok') else 'FAIL')}</h3>"
                          f"<p class=muted>{e(sub)}</p><details{' open' if nok < len(its) else ''}><summary>"
                          f"{len(its)} items</summary><div class=wrap><table><tr><th>item</th><th>measured</th><th></th></tr>"
                          f"{rows}</table></div></details></div>")
@@ -3305,7 +3312,7 @@ def selftest(a):
     def args(**kw):
         d = dict(runs=None, refusals=False, keepalive=False, timeout=False, i_know_its_tx_dry=False, clear_offset=False,
                  flash=None, build=None, keep_captures=True, verbose=False, load=None, sweep=None, sweep_from=None,
-                 sweep_items=None, count=None, resume=None)
+                 sweep_items=None, count=None, resume=None, tests=None)
         d.update(kw)
         return argparse.Namespace(**d)
 
@@ -3418,6 +3425,9 @@ def selftest(a):
     selftest_duty(check)
     say("\n== sweeps: every sweep on the fake radio and SDR (a 60 s duty window, so its cap pauses them)")
     selftest_sweeps(cfg, args, check, tmp)
+    for mod in benchtests.all_modules():
+        say(f"\n== suite {mod.SUITE} (bench.py --suite {mod.SUITE}): every test on a fake radio and SDR")
+        mod.selftest(cfg, args, check, tmp)
 
     say("\n".join(["", "selftest:"] + lines))
     say("selftest: " + ("all pass" if ok else "FAILED") + f"\npage: {page}\npage: {page2}")
@@ -3482,6 +3492,11 @@ def selftest_sim(a):
     return ok
 
 
+if __name__ == "__main__":
+    # The suites (tools/benchtests/) `import bench`: this same module, not a second copy (one SafetyError, one Radio).
+    sys.modules.setdefault("bench", sys.modules[__name__])
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="JSON overriding any of DEFAULTS")
@@ -3506,6 +3521,9 @@ def main():
                     "one; default 145.495)")
     ap.add_argument("--keep-sweep-captures", action="store_true", help="keep every sweep item's .u8 (default: the "
                     "failures only)")
+    ap.add_argument("--suite", metavar="NAME", help="a suite of on-air checks by name (tools/benchtests/: "
+                    + ", ".join(benchtests.names()) + "); with --dry-plan its plan; alone, no suite runs or sweeps")
+    ap.add_argument("--tests", metavar="A,B", help="with --suite: only these tests (names as --dry-plan lists them)")
     ap.add_argument("--flash", metavar="IMAGE", help="flash this tx-dry image first (flash.py --backup)")
     ap.add_argument("--i-know-its-tx-dry", action="store_true", help="the radio runs a tx-dry build (can't be read over the link)")
     ap.add_argument("--clear-offset", action="store_true", help="clear the VFO's repeater shift by a tune to 160 MHz and back")
@@ -3550,6 +3568,26 @@ def main():
             say(f"{p}: " + ", ".join(f"{k} {'pass' if v['result'] == 'pass' else 'FAIL'}"
                                      + (" (part)" if v["scope"] == "part" else "") for k, v in sorted(s["rules"].items())))
         return
+    if a.tests and not a.suite:
+        sys.exit("--tests goes with --suite")
+    if a.suite:
+        mod = benchtests.load(a.suite)
+        if a.dry_plan:
+            mod.plan(cfg, a)
+            return
+        def on_term_suite(*_):
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, on_term_suite)
+        try:
+            extras, page, _ = mod.run(cfg, a)
+        except SafetyError:
+            sys.exit(2)
+        except KeyboardInterrupt:
+            sys.exit("stopped (unkeyed and restored)")
+        if a.record:
+            record_session(os.path.dirname(page), a.docs)
+        sys.exit(0 if all(all_ok(v) for v in extras.values()) else 1)
     if a.auto or a.all or a.ui or a.rf:
         sys.exit(do_auto(cfg, a))
     if a.dry_plan:
