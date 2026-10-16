@@ -257,6 +257,12 @@ class T:
 
     def _home(self):
         u = self.ui(0)
+        pin = getattr(self.opts, "pin", None)
+        if u.id == "Pin" and pin:
+            # A test that restarted the radio with a PIN set leaves it on PIN entry (Oct 15, 2026: every later test
+            # failed "can't get home (on Pin)"): unlock with the run's --pin.
+            self.r.keys(" ".join(pin))
+            u = self.press("OK")
         if u.bar.get("lock"):
             self.r.press("HASH", long=True)
         for _ in range(2):
