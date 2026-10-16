@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The test plan: every numbered rule in docs/manual.md, the automated tests that cover it, and the manual
+"""The test plan: every numbered rule in docs/manual/ (the chapter files), the automated tests that cover it, and the manual
 (radio or bench) steps for the rest.
 
     python3 tools/testplan.py              # writes ../docs/test-plan.md
@@ -77,11 +77,18 @@ def entry_anchor(rid):
 
 # ---- the manual ----
 
+def read_manual(path):
+    """The book: the chapter files docs/manual/NN-*.md, A-*.md in order (path is the docs/manual.md index)."""
+    d = pathlib.Path(path).with_suffix("")
+    pat = re.compile(r"^(?:\d\d[a-z]?|[A-Z])-.*\.md$")
+    return "".join(f.read_text() for f in sorted(d.iterdir()) if pat.match(f.name))
+
+
 def parse_manual(path):
     rules, chapters, status = [], [], {}
     chap = None
     section = ""
-    for line in path.read_text().splitlines():
+    for line in read_manual(path).splitlines():
         m = CHAPTER.match(line)
         if m:
             num, app, title = m.groups()
