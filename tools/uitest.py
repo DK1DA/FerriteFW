@@ -417,10 +417,11 @@ def run(a, port, sim, tests, sess_dir=None, log=say):
     info = r.link.ok(fl.INFO)
     version, _ = fl.text(info)
     commit = a.commit or host_commit()
-    log(f"radio: Ferrite {version}, build {build}{' (simulator)' if sim else ''}; host commit {commit}")
+    vlog = log if a.verbose else (lambda *_: None)  # quiet by default: the header lines are --verbose detail
+    vlog(f"radio: Ferrite {version}, build {build}{' (simulator)' if sim else ''}; host commit {commit}")
     state = State(r)
     state.base_nd = state.nondefault()
-    log(f"snapshot: {len(state.paths)} settings, slots {' | '.join(state.slots)}")
+    vlog(f"snapshot: {len(state.paths)} settings, slots {' | '.join(state.slots)}")
     results = []
     started = datetime.datetime.now()
     try:
@@ -432,7 +433,7 @@ def run(a, port, sim, tests, sess_dir=None, log=say):
             log(f"  [{mark:5s}] {tst.module}.{tst.name} ({', '.join(tst.rules)}) {res['secs']:.1f} s"
                 + (f": {res.get('why')}" if res["result"] not in ("pass", "xpass") else "")
                 + (f" [known: {res['known']}]" if res.get("known") else "")
-                + (f"  [restored: {'; '.join(res['restored'])}]" if res.get("restored") else "")
+                + (f"  [restored: {'; '.join(res['restored'])}]" if res.get("restored") and a.verbose else "")
                 + (f"  [NOT restored: {'; '.join(res['restore_notes'])}]" if res.get("restore_notes") else ""))
             if res["result"] in ("fail", "error") and a.verbose:
                 for line in (res["evidence"][-1] if res["evidence"] else []):
@@ -616,9 +617,10 @@ def free_port():
     return p
 
 
-def start_sim(secs=3600):
+def start_sim(secs=3600, quiet=True):
     exe = os.path.join(FERRITE, "target", "debug", "ferrite-sim")
-    say("building the simulator (cargo build -p ferrite-sim) ...")
+    if not quiet:
+        say("building the simulator (cargo build -p ferrite-sim) ...")
     b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)
     if b.returncode != 0 or not os.path.exists(exe):
         sys.exit("can't build the simulator")
@@ -633,6 +635,85 @@ def start_sim(secs=3600):
             time.sleep(0.1)
     time.sleep(2.5)  # the link answers once the simulated radio has booted (0.5 s timed out HELLO)
     return p, f"tcp:127.0.0.1:{port}", f"tcp:127.0.0.1:{bt}"
+
+
+def shards(sel, n):
+    """The selected tests split by module (one module = one shard, never split) into at most n groups, balanced
+    by test count; modules that share radio state (zones.py's channels 991-995) are listed in SHARE and stay together."""
+    mods = {}
+    for t in sel:
+        mods.setdefault(t.module, []).append(t)
+    groups = {}
+    for m in mods:
+        groups.setdefault(next((g for g in SHARE if m in g), (m,)), []).extend(mods[m])
+    bins = [[] for _ in range(max(1, min(n, len(groups))))]
+    for g, ts in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        min(bins, key=lambda b: sum(len(x) for _, x in b)).append((g, ts))
+    return [b for b in bins if b]
+
+
+SHARE = [("zones",)]  # groups of modules that must run in one shard (channels 991-995 etc.)
+
+
+def run_parallel(a, sel):
+    """--sim auto -j N: one headless simulator and one uitest subprocess per shard, results merged."""
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="uitest-j-")
+    order = {(t.module, t.name): i for i, t in enumerate(sel)}
+    work, procs = [], []
+    try:
+        for i, b in enumerate(shards(sel, a.jobs)):
+            mods = [m for g, _ in b for m in g]
+            sim_proc, port, bt = start_sim(quiet=True)
+            procs.append(sim_proc)
+            cmd = [sys.executable, os.path.abspath(__file__), "--sim", port, "--bt", bt, "--module", ",".join(mods),
+                   "--session", os.path.join(tmp, f"s{i}"), "--results", tmp]
+            for flag, opt in (("k", "-k"), ("rules", "--rules"), ("page", "--page"), ("build", "--build"),
+                              ("commit", "--commit"), ("expect_build", "--expect-build"), ("with_", "--with")):
+                if getattr(a, flag, None):
+                    cmd += [opt, getattr(a, flag)]
+            for flag in ("smoke", "slow", "stop", "verbose"):
+                if getattr(a, flag, False):
+                    cmd.append("--" + flag)
+            log = open(os.path.join(tmp, f"s{i}.log"), "w")
+            work.append((i, mods, subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT), log))
+        merged = None
+        for i, mods, p, log in work:
+            p.wait()
+            log.close()
+            lines = open(log.name).read().splitlines()
+            rj = os.path.join(tmp, f"s{i}", "ui", "results.json")
+            if not os.path.exists(rj):
+                say(f"shard {i} ({','.join(mods)}) gave no results; its output ends:\n  " + "\n  ".join(lines[-8:]))
+                continue
+            keep = [x for x in lines if x.startswith("  [") or (a.verbose and not x.startswith(("ui tests:", "results:", "page:")))
+                    or x.startswith(("warning", "left changed"))]
+            for x in keep:
+                say(x)
+            sm = json.load(open(rj))
+            if merged is None:
+                merged = sm
+                merged["left_changed"] = [f"[{','.join(mods)}] {x}" for x in sm["left_changed"]]
+            else:
+                merged["tests"] += sm["tests"]
+                merged["left_changed"] += [f"[{','.join(mods)}] {x}" for x in sm["left_changed"]]
+                for rid, v in sm["rules"].items():
+                    prev = merged["rules"].get(rid)
+                    rank = {"fail": 4, "error": 4, "xfail": 3, "xpass": 2, "pass": 2, "skip": 1}
+                    if prev is None or rank[v["result"]] > rank[prev["result"]]:
+                        merged["rules"][rid] = v
+        if merged is None:
+            sys.exit("no shard produced results")
+        merged["tests"].sort(key=lambda r: order.get((r["module"], r["name"]), 1 << 30))
+        merged["counts"] = {k: sum(1 for x in merged["tests"] if x["result"] == k)
+                            for k in ("pass", "fail", "error", "skip", "xfail", "xpass")}
+        merged["port"] = f"auto -j {a.jobs}"
+        return merged
+    finally:
+        for sp in procs:
+            sp.terminate()
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main_args(argv=None):
@@ -673,7 +754,10 @@ def main_args(argv=None):
                     help="this radio's whole-flash backup, read (never written) for the calibration bytes that "
                     "squelch checks compare with (default %(default)s)")
     ap.add_argument("--stop", action="store_true", help="stop at the first failure")
-    ap.add_argument("--verbose", "-v", action="store_true", help="print the readback of a failure")
+    ap.add_argument("--verbose", "-v", action="store_true", help="full output: header lines, restore detail, "
+                    "the readback of a failure (default: one line per test and the summary)")
+    ap.add_argument("-j", "--jobs", type=int, default=1, help="with --sim auto: run the modules in N parallel "
+                    "simulators (a module is never split); default 1")
     return ap.parse_args(argv)
 
 
@@ -703,15 +787,18 @@ def main(argv=None):
     if a.sim:
         sim = True
         if a.sim == "auto":
-            proc, port, sim_bt = start_sim()
-            a.bt = a.bt or sim_bt
+            if a.jobs > 1:
+                port = "auto -j %d" % a.jobs
+            else:
+                proc, port, sim_bt = start_sim(quiet=not a.verbose)
+                a.bt = a.bt or sim_bt
         else:
             port = a.sim
     if a.record and sim:
         sys.exit("--record on the simulator: simulator runs are never recorded (the test plan holds radio results)")
     sel = select(tests, a, sim)
     try:
-        summary = run(a, port, sim, sel)
+        summary = run_parallel(a, sel) if a.sim == "auto" and a.jobs > 1 else run(a, port, sim, sel)
     finally:
         if proc:
             proc.terminate()

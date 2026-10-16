@@ -247,7 +247,16 @@ class TermError(BenchError):
     pass
 
 
+VERBOSE = False  # --verbose: every line; by default say() drops the per-step chatter matched by DETAIL
+# Per-step detail: the per-key-up duty lines, test/step headers, calibration, save/restore notes. Safety messages
+# (refusals, "KEY ... not answered", "KEYED a key-up it must refuse", stopped, errors) never match these.
+DETAIL = re.compile(r"^(duty: (keyed|rest|[\d.]+ s keyed in the last)|== |calibrat|saved:|restored:|radio: |"
+                    r"analysing |re-analysing |answer: |sent \$|snapshot: |battery: [a-z]+ \d+%$)")
+
+
 def say(*a):
+    if not VERBOSE and a and isinstance(a[0], str) and DETAIL.match(a[0].lstrip()):
+        return
     print(*a, flush=True)
 
 
@@ -1474,8 +1483,9 @@ class Bench:
                     now[it["label"]] = r
                     prog[name]["items"][it["label"]] = jsonable(r)
                     json.dump(prog, open(prog_path, "w"), indent=1)
-                    self.out(f"  {it['label']:>14s}  {'ok  ' if r.get('ok') else 'FAIL'}  {r.get('text', '')}"
-                             + (f"  ({r['why']})" if r.get("why") and not r.get("ok") else ""))
+                    if VERBOSE or not r.get("ok"):  # quiet: an item that passed has its line in the results files
+                        self.out(f"  {it['label']:>14s}  {'ok  ' if r.get('ok') else 'FAIL'}  {r.get('text', '')}"
+                                 + (f"  ({r['why']})" if r.get("why") and not r.get("ok") else ""))
             finally:
                 self.sweep_finish(name, sc)
                 merged = dict(done, **now)
@@ -3103,6 +3113,7 @@ def do_auto(cfg, a):
             ua = uitest.main_args(["--port", cfg["port"]])
             sel = uitest.select(uitest.load_tests(), ua, cfg["port"].startswith("tcp:"))
         sim = cfg["port"].startswith("tcp:")
+        ua.verbose = VERBOSE
         ui_summary = uitest.run(ua, cfg["port"], sim, sel)
         if sess_dir is None:
             label = f"{ui_summary['version']}-{ui_summary['commit']}-{ui_summary['build']}"
@@ -3535,7 +3546,8 @@ def main():
     ap.add_argument("--clear-offset", action="store_true", help="clear the VFO's repeater shift by a tune to 160 MHz and back")
     ap.add_argument("--build", help="the build's label for the results (default: version + image or host git hash)")
     ap.add_argument("--no-keep-captures", dest="keep_captures", action="store_false", help="delete the .u8 after analysis")
-    ap.add_argument("--verbose", action="store_true", help="sdrsuite's full report on the terminal too")
+    ap.add_argument("--verbose", action="store_true", help="everything on the terminal: per-step lines (duty, headers, calibration, restore), sdrsuite's "
+                    "full report (default: one line per test and the summary; safety messages always print)")
     ap.add_argument("--dry-plan", action="store_true", help="print the plan; touch nothing")
     ap.add_argument("--load", nargs="+", metavar="DIR|RUN=FILE", help="re-analyse saved captures")
     ap.add_argument("--selftest", action="store_true", help="fake radio + synthetic IQ: the whole flow and the gates")
@@ -3558,6 +3570,8 @@ def main():
     ap.add_argument("--rule-results", nargs="+", metavar="SESSION", help="(re)write bench/results.json for saved "
                     "sessions from their session.json and <run>.json (nothing keyed)")
     a = ap.parse_args()
+    global VERBOSE
+    VERBOSE = a.verbose
     cfg = load_cfg(a.config)
     for k in ("port", "slot", "results"):
         if getattr(a, k):

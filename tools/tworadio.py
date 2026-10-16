@@ -894,7 +894,8 @@ class Run:
                 continue  # the selftest's fakes
             bar = (x.ui().get("bar") or {})
             pct, low, cut = int(bar.get("battery", 100)), int(bar.get("low", 0)), int(bar.get("cutoff", 0))
-            self.log(f"battery: {role} {pct}%{' LOW' if low else ''}{' CUT-OFF' if cut else ''}")
+            if low or cut or getattr(self.a, "verbose", False):  # quiet by default; a low battery always prints
+                self.log(f"battery: {role} {pct}%{' LOW' if low else ''}{' CUT-OFF' if cut else ''}")
             if pct < self.MIN_BATTERY_PCT or low or cut:
                 bad.append(f"the {role} radio's battery is at {pct}%{' (low)' if low else ''}{' (cut-off)' if cut else ''}")
         if bad:
@@ -908,8 +909,9 @@ class Run:
         for role in self.radios:
             side = getattr(c, role)
             self.snap[role] = slot_lines(side)
-        self.log(f"snapshot: tx {' | '.join(self.snap['tx'])}")
-        self.log(f"          rx {' | '.join(self.snap['rx'])}")
+        if getattr(self.a, "verbose", False):
+            self.log(f"snapshot: tx {' | '.join(self.snap['tx'])}")
+            self.log(f"          rx {' | '.join(self.snap['rx'])}")
 
     def restore(self, ctx, notes, roles=("tx", "rx")):
         """Each radio's settings and slots put back; a radio whose link fails is left (noted), the other still done."""
@@ -1283,7 +1285,8 @@ def main_args(argv=None):
     ap.add_argument("--record", action="store_true", help="a result row per rule into the test plan")
     ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
     ap.add_argument("--stop", action="store_true", help="stop at the first failure")
-    ap.add_argument("--verbose", "-v", action="store_true", help="print the readback of a failure")
+    ap.add_argument("--verbose", "-v", action="store_true", help="full output: the radios' header and snapshot lines, a failure's readback "
+                    "(default: one line per test and the summary; safety messages always print)")
     ap.add_argument("--sdr", action="store_true", help="an RTL-SDR on the crossband repeater's output (bench.py's "
                     "Sdr, fixed gain 0.9 dB): the tests that measure the air")
     ap.add_argument("--long", action="store_true", help="also the tests with one key-up over the 5 s burst limit "
@@ -1339,8 +1342,9 @@ def main(argv=None):
     try:
         radios["tx"] = LinkRadio(tx_spec, pins[0])
         radios["rx"] = LinkRadio(rx_spec, pins[1])
-        say(f"TX {tx_spec}: Ferrite {radios['tx'].version}, {radios['tx'].build}{' bench' if radios['tx'].bench else ''}")
-        say(f"RX {rx_spec}: Ferrite {radios['rx'].version}, {radios['rx'].build}{' bench' if radios['rx'].bench else ''}")
+        if a.verbose:
+            say(f"TX {tx_spec}: Ferrite {radios['tx'].version}, {radios['tx'].build}{' bench' if radios['tx'].bench else ''}")
+            say(f"RX {rx_spec}: Ferrite {radios['rx'].version}, {radios['rx'].build}{' bench' if radios['rx'].bench else ''}")
         run = Run(a, radios, bench.Clock(), threaded=True)
         if a.sdr:
             if not shutil.which("rtl_sdr"):
