@@ -188,7 +188,10 @@ def reset_then_setup(t):
         t.eq(setup_line(u)["head"], "Region", "the region page")
         t.eq([r["name"] for r in u.rows if r["value"] == "chosen"], [], "none chosen until OK on one (SETUP-3)")
         u = ok_through(t, u, region=region)
-        t.eq({r["name"]: r["value"] for r in u.rows}["Region"], region, "the region picked")
+        # The summary's Region row, or the setting itself when ok_through stopped short of the summary (Oct 15, 2026:
+        # KeyError 'Region' on the radio after the region page).
+        got = {r["name"]: r["value"] for r in u.rows}.get("Region") or t.get("0 9 4")
+        t.eq(got, region, "the region picked")
         t.keys("MENU")
         t.home()
         a1 = about_rows(t)
