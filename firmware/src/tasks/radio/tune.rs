@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// The fast scan's own wake (SCAN-21, decision 164) is off: see `scan_due`.
+const SCAN_WAKE_OFF: bool = true;
+
 impl Radio {
     pub(super) fn chip(&mut self, n: u8) -> Bk4829<bk4829::wire::Chip<'_, Out, Io, BusyDelay, Out>> {
         Bk4829::new(self.wire.chip(&mut self.cs[n as usize]))
@@ -163,6 +166,12 @@ impl Radio {
     /// 1 ms (decision 163). The main loop also ignores a due time the last tick didn't move whatever the reason
     /// (`ferrite_core::scan::tick_wake`, decision 165): these returns are the first guard, not the only one.
     pub(super) fn scan_due(&self, now: u64) -> Option<u64> {
+        // Switched off (Oct 15, 2026): with this wake the radio hung in a range scan on two builds (no
+        // key, no link, a power cycle needed); a build without it ran the same test (27.2 steps/s). Back to the 10 ms
+        // tick until the hang is understood (SCAN-21 stays open).
+        if SCAN_WAKE_OFF {
+            return None;
+        }
         #[cfg(feature = "tx")]
         if self.xb.is_some() {
             return None;
