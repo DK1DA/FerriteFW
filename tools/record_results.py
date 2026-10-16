@@ -185,6 +185,8 @@ def ui_rules(r, kids, tags, lost):
 
     for t in r["tests"]:
         name, res, why = t["name"], t["result"], t.get("why", "")
+        if res == "error":
+            continue  # the test or a tool broke before it judged the radio (e.g. rtl_sdr): not a radio result
         split = CHECK_SPLITS.get(("uitest", name))
         if split:
             for rid, starts in split.items():
