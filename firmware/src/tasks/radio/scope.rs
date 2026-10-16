@@ -64,6 +64,7 @@ impl Radio {
         self.tuned[chip as usize] = None;
         self.tune_chip(chip, Some((SCOPE_SLOT, if freq != 0 { freq } else { back }))).await;
         self.chip(chip).af_out(AfOut::Mute);
+        self.open_delay(chip, false); // SQL-17: listening is ordinary receive
         if freq != 0 {
             self.select_rx(freq, Cause::Auto).await;
         } else {
@@ -139,6 +140,7 @@ impl Radio {
             sc.look -= 1;
             let back = if self.chip(chip).status().squelch_open {
                 (sc.listen, sc.closed, sc.look) = (self.slots[sc.home.unwrap_or(0) as usize % SLOTS].rx_freq(), 0, 0);
+                self.open_delay(chip, false); // SQL-17: held on the call, ordinary receive
                 false
             } else {
                 sc.look == 0
@@ -179,6 +181,7 @@ impl Radio {
                 (sc.since, sc.look) = (0, LOOK_WAITS);
                 let f = self.slots[s as usize % SLOTS].rx_freq();
                 self.scope = Some(sc);
+                self.open_delay(chip, true); // SQL-17: the look hears a carrier at once
                 let mut bk = self.chip(chip);
                 bk.set_freq(f * 10);
                 bk.rx_on();

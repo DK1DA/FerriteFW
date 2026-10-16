@@ -429,6 +429,12 @@ impl<B: Bus> Bk4829<B> {
         self.modify(reg::SQ_GLITCH_OPEN, 0x00FF, sq.glitch_open as u16);
     }
 
+    /// The squelch's open delay, REG_4E[13:11] (0-7; the start-up table's 0x3815 has 7, the longest): how long
+    /// the open conditions must hold before the squelch reads open. The glitch threshold below is kept.
+    pub fn open_delay(&mut self, d: u8) {
+        self.modify(reg::SQ_GLITCH_OPEN, 0x3800, (d as u16 & 7) << 11);
+    }
+
     /// RSSI, half dB: dBm = value / 2 - 160.
     pub fn rssi(&mut self) -> u16 {
         self.read(reg::RSSI) & 0x1FF

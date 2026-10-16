@@ -50,6 +50,15 @@ impl Radio {
         }
     }
 
+    /// SQL-17 (decision 166): chip `n`'s squelch open delay, 0 while it listens to a scan step or the strip's look
+    /// (`fast`), stock's 7 for ordinary receive; written only when it changes.
+    pub(super) fn open_delay(&mut self, n: u8, fast: bool) {
+        if self.has(n) && self.open_fast[n as usize] != Some(fast) {
+            self.open_fast[n as usize] = Some(fast);
+            radio_chip::open_delay(&mut self.chip(n), fast);
+        }
+    }
+
     /// [`Radio::tune_chip`] up to the settle wait: None if nothing changes, else the wait. Asleep: muted and REG_30
     /// off (`chip::sleep_begin`), the wait is the sleep settle. Awake: REG_37's supplies on unless they are on
     /// already (woken a tick early by the hop, or awake), the wait is what is left of the wake settle.
@@ -69,6 +78,7 @@ impl Radio {
         if want.is_none() {
             self.maybe_awake &= !(1 << n);
             self.sq_regs[n as usize] = None; // written again on waking
+            self.open_fast[n as usize] = None; // SQL-17: likewise
             self.woke[n as usize] = None;
             radio_chip::sleep_begin(&mut self.chip(n));
             return Some(self.settle.sleep_ms as u32);

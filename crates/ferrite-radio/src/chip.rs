@@ -122,6 +122,17 @@ pub fn squelch<B: Bus>(bk: &mut Bk4829<B>, regs: (u16, u16)) {
     bk.write(bk4829::reg::SQ_NOISE, regs.1);
 }
 
+/// SQL-17 (decision 166): ordinary receive's squelch open delay, REG_4E[13:11]: stock's 7, from its start-up table's
+/// 0x3815 (0x08009E94), which stock never changes.
+pub const OPEN_DELAY_RX: u8 = 7;
+
+/// SQL-17: the open delay for a chip that listens to a scan step or the strip's look (`fast`: 0, so a carrier reads
+/// open within the step; the delay at 7 kept a channel scan from ever stopping on the radio, Oct 15, 2026) or for
+/// ordinary receive (stock's 7, its debounce kept).
+pub fn open_delay<B: Bus>(bk: &mut Bk4829<B>, fast: bool) {
+    bk.open_delay(if fast { 0 } else { OPEN_DELAY_RX });
+}
+
 /// The tone hint's probe (TSRCH-12): the detectors measure whatever is on air; audio stays as it is (muted).
 pub fn tone_probe<B: Bus>(bk: &mut Bk4829<B>) {
     bk.subtone_scan_on();

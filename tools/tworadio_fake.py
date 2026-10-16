@@ -258,7 +258,7 @@ class FakeFerrite:
         if not pos:
             return
         idx = next((k for k, p in enumerate(pos) if p[1] == n0), 0)
-        self.scan[i] = dict(pos=pos, idx=idx, state="walk", t_next=self.t + 0.05, stop=None, drop=None, start=n0,
+        self.scan[i] = dict(pos=pos, idx=idx, state="walk", t_next=self.t + 0.07, stop=None, drop=None, start=n0,
                             zone=zone, skips=set())
 
     def scan_step(self, i, c):
@@ -289,7 +289,7 @@ class FakeFerrite:
     def next_pos(self, i):
         sc = self.scan[i]
         sc["idx"] = (sc["idx"] + 1) % len(sc["pos"])
-        sc["state"], sc["t_next"] = "walk", self.t + 0.05
+        sc["state"], sc["t_next"] = "walk", self.t + 0.07
 
     def end_scan(self, i, on_ch):
         self.scan[i] = None
@@ -718,7 +718,7 @@ class FakeFerrite:
             self.toast = (f"{n:03d} skipped", "for every scan", self.t + 2)
             sc["pos"] = [p for p in sc["pos"] if p[1] != n] or sc["pos"]
             sc["idx"] = sc["idx"] % len(sc["pos"])
-            sc["state"], sc["t_next"] = "walk", self.t + 0.05
+            sc["state"], sc["t_next"] = "walk", self.t + 0.07
         elif name == "SIDE2":
             self.scan[a] = None
             self.stack = [("Home", None)]

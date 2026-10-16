@@ -182,14 +182,10 @@ impl Radio {
         }
         // SAME on a weather channel's chip (DEC-19).
         self.same_tick(now);
-        // 2. The watch turn.
-        let asleep = if self.save.asleep() { !self.kept() } else { 0 };
-        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep };
-        let keyed = self.path.keyed().is_some();
-        let out = self.watcher.turn(now, &cfg, sq, heard, keyed);
-        // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
-        self.hint_tick(now, listening, &sq, &toned, out.audio);
-        // 3. Scans step while their slot has a chip, on the answer from that chip.
+        // 2. Scans step while their slot has a chip, on the answer from that chip. Before the watch turn, so the
+        // turn gives a step to the other band that band's chip in this tick (decision 166): after it, as until Oct
+        // 15, 2026, the old band's chip was tuned to the new frequency for a tick and the right one a tick late,
+        // so a 70 cm channel after a 2 m one had 10 ms less of its step, from a chip just woken.
         for i in 0..SLOTS {
             if !self.scans[i].running() || !self.tuned.iter().any(|t| t.is_some_and(|(s, _)| s as usize == i)) {
                 continue;
@@ -210,12 +206,20 @@ impl Radio {
             if o.hit.is_some() {
                 sl.hits = sl.hits.saturating_add(1);
                 sl.last_hit = sl.freq;
+                log([b"scan hit A ", b"scan hit B ", b"scan hit C "][i % 3], sl.freq); // its frequency, 10 Hz
             }
             sl.skips = self.scans[i].skips.max(sl.skips);
             if o.ended {
                 sl.scanning = false;
             }
         }
+        // 3. The watch turn, on the frequencies the scans just stepped to.
+        let asleep = if self.save.asleep() { !self.kept() } else { 0 };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep };
+        let keyed = self.path.keyed().is_some();
+        let out = self.watcher.turn(now, &cfg, sq, heard, keyed);
+        // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
+        self.hint_tick(now, listening, &sq, &toned, out.audio);
         // The channel the channel scans need next, for the UI to answer (LiveAll::want).
         self.live.set_want(self.chans.want(&self.scans));
         // 4. The path on the chip to listen to now, and that chip on the slot the engine names; the other asleep
@@ -242,6 +246,14 @@ impl Radio {
         if let Some(n) = path {
             if let Some((_, f)) = self.tuned[n as usize] {
                 self.select_rx(f, Cause::Auto).await;
+            }
+        }
+        // SQL-17: a chip on a scanning slot's step or priority look opens at once; ordinary receive keeps stock's
+        // open delay.
+        for n in 0..2u8 {
+            if let Some((s, _)) = self.tuned[n as usize] {
+                let fast = self.scans.get(s as usize).is_some_and(|sc| sc.listening());
+                self.open_delay(n, fast);
             }
         }
         // 5. Audio (WATCH-3): the slot the engine picks, if its tone matches; a latched monitor on the active

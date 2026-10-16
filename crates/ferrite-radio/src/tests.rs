@@ -508,6 +508,21 @@ fn squelch_writes_stocks_registers() {
     assert_eq!(b.release().writes, [(reg::SQ_RSSI, 0x5955), (reg::SQ_NOISE, 0x2827)]);
 }
 
+/// SQL-17: a scan step or the strip's look sets REG_4E's open delay to 0, ordinary receive back to stock's 7
+/// (0x3815, its start-up value); the glitch threshold in the low byte is kept.
+#[test]
+fn open_delay_fast_for_scans_stock_otherwise() {
+    let mut b = bk();
+    b.write(reg::SQ_GLITCH_OPEN, 0x3815);
+    chip::open_delay(&mut b, true);
+    let mut r = b.release();
+    assert_eq!(r.last(reg::SQ_GLITCH_OPEN), Some(0x0015));
+    r.writes.clear();
+    let mut b = Bk4829::new(r);
+    chip::open_delay(&mut b, false);
+    assert_eq!(b.release().writes, [(reg::SQ_GLITCH_OPEN, 0x3815)], "stock's start-up value again");
+}
+
 /// TSRCH-10.1: the counter's chips sit mid-band, chip 0 below 300 MHz and chip 1 above, each in its own front end,
 /// and use stock's frequency scan (REG_32 0x8245 on, 0x8244 off; the reading from REG_0D/0E in 10 Hz units).
 #[test]

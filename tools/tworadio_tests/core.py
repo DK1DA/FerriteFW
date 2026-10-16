@@ -283,7 +283,7 @@ class Channels:
 
 def stopped_at(t, L, mhz, timeout):
     """A scanning slot L stopped on `mhz`: its card on that frequency with the squelch open, or on it for three
-    readbacks over at least 0.5 s (a channel scan steps every 50 ms). (readback, time) or (None, None)."""
+    readbacks over at least 0.5 s (a channel scan steps every 70 ms). (readback, time) or (None, None)."""
     want = f"{float(mhz):.5f}"
     end = t.now() + timeout
     streak = []

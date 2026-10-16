@@ -198,6 +198,9 @@ struct Radio {
     /// each chip was last given (REG_78, REG_4F), so a retune writes them only when they change.
     sqcal: ferrite_core::sqcal::SqCal,
     sq_regs: [Option<(u16, u16)>; 2],
+    /// SQL-17: each chip's squelch open delay as last written (true: 0, for a scan step or the strip's look; false:
+    /// stock's 7); None after a sleep or a scope start, so the next look or tick writes it.
+    open_fast: [Option<bool>; 2],
     /// When the battery was last read (PWR-20).
     bat_at: Option<u32>,
     si: Si4732<SiBus>,
@@ -335,8 +338,10 @@ struct ScopeRun {
 
 /// MODE-5: the strip looks at its slot's own frequency every this many points (8 x 10 ms at the strip's dwell)...
 const LOOK_EVERY: u8 = 8;
-/// ...for two dwells, stock's 10-20 ms settle after a retune before the squelch poll (`analysis/watch.md` §2).
-const LOOK_WAITS: u8 = 2;
+/// ...for seven dwells (70 ms, stock's watch dwell, `analysis/watch.md` §2), the chip's open delay at 0 (SQL-17).
+/// Two (20 ms, stock's settle alone) never heard a carrier on the radio, open delay 0 or not (Oct 15, 2026):
+/// the squelch needs some 40 ms after a retune (decision 166).
+const LOOK_WAITS: u8 = 7;
 /// The hold ends after this many closed polls in a row: stock's 100 ms receive-end debounce at the 10 ms tick.
 const HOLD_CLOSED: u8 = 10;
 
@@ -638,6 +643,7 @@ pub async fn task() {
         bat_at: None,
         sqcal: ferrite_core::sqcal::SqCal::DEFAULT,
         sq_regs: [None; 2],
+        open_fast: [None; 2],
         path: Path::new(),
         muted: false,
         si_used: false,

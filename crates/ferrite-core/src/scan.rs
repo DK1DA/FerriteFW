@@ -17,15 +17,17 @@
 
 use crate::freq::Freq10;
 
-/// How long each step listens before going on (to confirm on the bench).
-pub const STEP_MS: u32 = 50;
+/// How long each step listens before going on (SCAN-20.1, decision 166): stock's 70 ms watch dwell. A carrier
+/// counts as a hit from half of it on, the chip's squelch settled after the retune: with 50 ms (a hit from 25 ms)
+/// the radio never stopped on a 70 cm channel a band away (Oct 15, 2026).
+pub const STEP_MS: u32 = 70;
 /// A range scan's fast pass: how long each step reads the RSSI before going on (to confirm on the bench; the
 /// target is at least nicFW's 30 steps a second, SCAN-21).
 pub const FAST_STEP_MS: u32 = 15;
 /// After the carrier drops on a hit, it waits this long before going on (to confirm on the bench).
 pub const RESUME_WAIT_MS: u32 = 2_000;
-/// How long a priority look listens on each priority channel.
-pub const PRIO_DWELL_MS: u32 = 50;
+/// How long a priority look listens on each priority channel (SCAN-20.1: a step's).
+pub const PRIO_DWELL_MS: u32 = STEP_MS;
 /// Nuisance skips held for one scan (SCAN-11).
 pub const NUISANCE: usize = 8;
 
@@ -284,6 +286,12 @@ impl Scan {
 
     pub fn stop(&mut self) {
         self.st = St::Off;
+    }
+
+    /// SQL-17: a step or a priority look listens now (the chip's squelch open delay at 0); false off, and on a
+    /// hit or in its resume wait (ordinary receive, the open delay stock's).
+    pub fn listening(&self) -> bool {
+        self.look.is_some() || matches!(self.st, St::Step(_) | St::Confirm(_))
     }
 
     fn skipped(&self, i: u16) -> bool {
@@ -858,6 +866,24 @@ mod tests {
         t
     }
 
+    /// SCAN-20.1 (decision 166): a step listens 70 ms and a carrier counts from 35 ms after its retune, the chip's
+    /// squelch settled; SQL-17: `listening` (the open delay at 0) on a step and a priority look, not on a hit.
+    #[test]
+    fn step_listens_70_ms_and_open_delay_follows() {
+        let mut s = Scan { resume: Resume::Drop, prio_ms: 1_000, ..Scan::new() };
+        assert!(!s.listening(), "off");
+        s.start(0, 0);
+        assert!(s.listening(), "a step");
+        assert_eq!(s.tick(&Chans, 30, true), Out::default(), "open 30 ms after the retune: not yet a hit");
+        assert_eq!(s.tick(&Chans, 60, false), Out::default(), "still listening at 60 ms");
+        assert_eq!(s.tick(&Chans, 70, false).tune, Some(mhz(146) + 1_250), "on after 70 ms");
+        assert_eq!(s.tick(&Chans, 100, true).hit, None);
+        assert_eq!(s.tick(&Chans, 105, true).hit, Some(1), "open 35 ms after its retune: a hit");
+        assert!(!s.listening(), "on a hit: ordinary receive");
+        s.tick(&Chans, 1_000, true);
+        assert!(s.listening(), "a priority look from the hit");
+    }
+
     #[test]
     fn range_list() {
         let skipped = [mhz(146) + 2_500];
@@ -977,7 +1003,7 @@ mod tests {
 
     /// SCAN-21: a Radio task ticking every 10 ms (its tick taking 2 ms) and also at each fast step's end (`due`)
     /// steps every FAST_STEP_MS plus the tick's own time (about 58 a second); on the 10 ms tick alone a step waits
-    /// for the second tick past its 15 ms (24 ms, 41 a second, before any false alarm's 50 ms confirm).
+    /// for the second tick past its 15 ms (24 ms, 41 a second, before any false alarm's 70 ms confirm).
     #[test]
     fn fast_pass_ticks_on_its_due_time() {
         let (_, with, gap) = run_loop(2, |_| true, |_| {});
@@ -1029,7 +1055,7 @@ mod tests {
         let r = Range { lo: mhz(146), hi: mhz(147), step: 1_250, skipped: &skipped };
         let mut s = Scan { fast: true, resume: Resume::Drop, ..Scan::new() };
         s.start(0, 0);
-        // An empty band: one step per FAST_STEP_MS (about 3x the 50 ms dwell).
+        // An empty band: one step per FAST_STEP_MS (about 4x the 70 ms dwell).
         let mut t = 0;
         let mut steps = 0;
         while t < 1_000 {

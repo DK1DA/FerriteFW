@@ -285,6 +285,21 @@ mod tests {
         assert_eq!(w.tick(220, &c, [false; 2], false).chip[1], Some(1), "alone on its chip");
     }
 
+    /// Decision 166: a slot whose frequency crosses to the other band (a scan step from 2 m to 70 cm) has that
+    /// band's chip in the turn that is given the new frequency, and the old chip none; the Radio task steps the
+    /// scans before the turn, so the right chip is tuned in the step's own tick.
+    #[test]
+    fn band_crossing_takes_the_other_chip_at_once() {
+        let mut w = Watch::new();
+        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0 };
+        assert_eq!(w.tick(0, &c, [false; 2], false).chip, [Some(0), None]);
+        c.freq[0] = mhz(446) + 47_500;
+        assert_eq!(w.tick(10, &c, [false; 2], false).chip, [None, Some(0)], "70 cm: chip 1 in the same turn");
+        let mut h = Hop::new();
+        let o = w.tick(20, &c, [false; 2], false);
+        assert_eq!(h.next(20, &o, 0), Some(1), "and the path with it");
+    }
+
     #[test]
     fn open_slot_keeps_the_chip_and_audio_priority() {
         let mut w = Watch::new();
