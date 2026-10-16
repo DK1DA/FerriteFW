@@ -173,8 +173,10 @@ fn key_as(app: &mut App, slot: u8, confirmed: bool) {
     }
 }
 
-/// The refused screen (TX-20; the beep is the Radio task's), over the screen BACK returns to.
+/// The refused screen (TX-20) and the refusal beep (SND-4), over the screen BACK returns to: a PTT's refusal and
+/// a remote key-up's alike (LINK-20.3).
 pub fn refuse(app: &mut App, slot: u8, why: Refusal) {
+    app.beep_refused();
     app.open(Dest::TxRefused);
     app.screen = Screen::TxRefused(TxRefused { why, slot });
 }
@@ -350,6 +352,7 @@ impl View for Transmit {
         // The Radio task refused (its own checks: calibration, read-back, battery under load).
         if let Some(r) = live.tx.refused.filter(|_| live.tx.slot == self.slot && app.radio.keyed.is_some()) {
             app.radio.keyed = None;
+            app.beep_refused(); // SND-4: the Radio task's refusals beep as the UI's do
             app.screen = Screen::TxRefused(TxRefused { why: r, slot: self.slot });
             return;
         }

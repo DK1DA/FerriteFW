@@ -272,6 +272,16 @@ impl Scan {
         }
     }
 
+    /// SCAN-21: when the fast step now on ends (`FAST_STEP_MS` after it began), for the Radio task to tick on that
+    /// moment rather than at its next 10 ms tick, which cost up to a whole tick and the tick's own time a step (27
+    /// steps a second on the radio, Oct 15, 2026). None when no fast step runs.
+    pub fn due(&self) -> Option<u32> {
+        match self.st {
+            St::Step(since) if self.fast && self.look.is_none() => Some(since.wrapping_add(FAST_STEP_MS)),
+            _ => None,
+        }
+    }
+
     pub fn stop(&mut self) {
         self.st = St::Off;
     }
@@ -919,6 +929,35 @@ mod tests {
         s.start(1, 0);
         walk(&mut s, &Chans, 0, 100, |_| false);
         assert_eq!(s.ptt(), 1);
+    }
+
+    /// SCAN-21: a Radio task ticking every 10 ms (its tick taking 2 ms) and also at each fast step's end (`due`)
+    /// steps every FAST_STEP_MS plus the tick's own time (about 58 a second); on the 10 ms tick alone a step waits
+    /// for the second tick past its 15 ms (24 ms, 41 a second, before any false alarm's 50 ms confirm).
+    #[test]
+    fn fast_pass_ticks_on_its_due_time() {
+        let skipped = [];
+        let r = Range { lo: mhz(430), hi: mhz(450), step: 1_250, skipped: &skipped };
+        let run = |use_due: bool| {
+            let mut s = Scan { fast: true, resume: Resume::Drop, ..Scan::new() };
+            s.start(0, 0);
+            let (mut t, mut ticked, mut steps) = (0u32, 0u32, 0u32);
+            while t < 1_000 {
+                let next = ticked + 10;
+                t = match s.due().filter(|_| use_due) {
+                    Some(d) if d < next => d.max(t + 1),
+                    _ => next.max(t + 1),
+                };
+                steps += s.tick(&r, t, false).tune.is_some() as u32;
+                t += 2; // the tick's own time (the retune and the reads)
+                ticked = t;
+            }
+            steps
+        };
+        let (with, without) = (run(true), run(false));
+        assert!(with >= 1_000 / (FAST_STEP_MS + 2) - 1, "{with} steps a second ticking on the due time");
+        assert!(without <= 1_000 / 24 + 1, "{without}: on the 10 ms tick alone a step waits for its second tick");
+        assert_eq!(Scan::new().due(), None, "nothing running: nothing due");
     }
 
     #[test]

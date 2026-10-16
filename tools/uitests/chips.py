@@ -291,6 +291,9 @@ def si_input_pins_by_mode(t):
     del u
 
 
+SI_DOWN = "refused: the SI4732 is powered down: FM broadcast or HF mode powers it up"  # TERM-24, decision 162
+
+
 @test("HF-3", "HF-4", "TERM-24", needs=("bench",), where="radio", pages=("Hf", "Home"))
 def hf_mode_relay_and_si(t):
     """Entering HF mode the SI4732 powers up (`si 10 00` answers) and the relay follows the receiver (released for
@@ -304,7 +307,7 @@ def hf_mode_relay_and_si(t):
         t.cmd("slot A active")
         t.home()
         off = t.cmd_err("si 10 00")
-        t.check(not off[0] or "not" in off[1].lower(), "the SI4732 off at home: the answer says so", off)
+        t.check(off[1].strip() == SI_DOWN, "the SI4732 off at home: the answer says so (TERM-24)", off)
         vfo = HfVfo(t)
         try:
             hf_type(t, 9.58)
@@ -324,7 +327,7 @@ def hf_mode_relay_and_si(t):
         t.home()
         time.sleep(0.5)
         ok, out = t.cmd_err("si 10 00")
-        t.check(not ok or "not" in out.lower() or "off" in out.lower(), "left: the SI4732 off", out)
+        t.check(out.strip() == SI_DOWN, "left: the SI4732 off (TERM-24)", out)
         t.eq(t.pin("PC4"), 1, "PC4 follows the active slot (28.4) again")
     finally:
         t.put_back(stopped)

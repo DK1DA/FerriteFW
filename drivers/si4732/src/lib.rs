@@ -321,14 +321,29 @@ impl<B: I2c> Si4732<B> {
         }
     }
 
-    /// Starts a seek up or down (wrapping at the band edges); poll [`Si4732::tune_poll`]. FM and AM only.
-    pub fn seek_start(&mut self, up: bool, delay: &mut impl Delay) -> Result<(), Error> {
-        let arg = if up { 0x0C } else { 0x04 }; // SEEKUP (3) | WRAP (2)
+    /// Starts a seek up or down within the seek band (FM_/AM_SEEK_BAND_BOTTOM/TOP); poll [`Si4732::tune_poll`].
+    /// FM and AM only. With `wrap` it goes on from the other edge at a band edge; without, it stops at the edge
+    /// (the result there has no valid station). The chip's AM seek band is 520-1710 kHz until
+    /// [`Si4732::am_seek_band`] sets it: a seek started outside it jumps to its edge (HF-31, Oct 15, 2026).
+    pub fn seek_start(&mut self, up: bool, wrap: bool, delay: &mut impl Delay) -> Result<(), Error> {
+        let arg = (up as u8) << 3 | (wrap as u8) << 2; // SEEKUP (3) | WRAP (2)
         match self.mode {
             Some(Mode::Fm) => self.command(&[FM_SEEK_START, arg], &mut [], delay),
             Some(Mode::Am) => self.command(&[FM_SEEK_START + AM, arg, 0, 0, 0, 0], &mut [], delay),
             _ => Err(Error::WrongMode),
         }
+    }
+
+    /// The AM seek band (kHz, `lo` <= `hi`, both 149-30000): AM_SEEK_BAND_BOTTOM and _TOP.
+    pub fn am_seek_band(&mut self, lo: u16, hi: u16, delay: &mut impl Delay) -> Result<(), Error> {
+        if self.mode != Some(Mode::Am) {
+            return Err(Error::WrongMode);
+        }
+        if !(149..=30000).contains(&lo) || !(lo..=30000).contains(&hi) {
+            return Err(Error::OutOfBand);
+        }
+        self.set_property(prop::AM_SEEK_BAND_BOTTOM, lo, delay)?;
+        self.set_property(prop::AM_SEEK_BAND_TOP, hi, delay)
     }
 
     /// The tune or seek's result once it has completed (the seek-tune-complete interrupt), else None.

@@ -197,6 +197,22 @@ def bt_text(port, send, wait=0.6):
     return out.decode("ascii", "replace")
 
 
+ESC_SEQ = re.compile(r"\x1b(\[[0-9;?]*[A-Za-z]|[78()=>][0-9A-Za-z]?)")
+
+
+def bt_until(port, send, want, wait=4.0):
+    """Send, then read until every string in `want` shows in the text with the VT100 escapes taken out (Bluetooth
+    sends in paced bursts, so a whole terminal screen takes a few seconds); returns that plain text."""
+    port.write(send)
+    end, out = time.time() + wait, b""
+    while time.time() < end:
+        out += port.read()
+        plain = ESC_SEQ.sub("", out.decode("ascii", "replace"))
+        if all(w in plain for w in want):
+            break
+    return ESC_SEQ.sub("", out.decode("ascii", "replace"))
+
+
 @test("LINK-25", "TERM-4.3", needs=("bt",), pages=("Home", "Scan"))
 def bt_terminal_and_link(t):
     """HELLO and INFO answer over Bluetooth; Enter there opens the terminal (its header says bluetooth), which
@@ -210,8 +226,9 @@ def bt_terminal_and_link(t):
         t.keys("SIDE2")
         t.home()  # the scan goes on; home's card shows where it is
     try:
-        head = bt_text(raw, b"\x03\r", wait=1.0)
-        t.check("bluetooth" in head.lower(), "Enter on Bluetooth: the terminal", head[-300:])
+        want = ("Ferrite 0.1.0", "bluetooth", "Press Enter for the menu")
+        head = bt_until(raw, b"\x03\r", want)  # the top line names the port; the banner under it (TERM-11, TERM-20)
+        t.check(all(w in head for w in want), "Enter on Bluetooth: the terminal's top line and banner", head[-300:])
         steps = set()
         end = time.time() + 4
         while time.time() < end:

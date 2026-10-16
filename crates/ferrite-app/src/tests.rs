@@ -140,8 +140,10 @@ fn ram_is_small() {
     // down, 16 with its Option) and the readback's redraw count and time (8), to 1384; each group's and
     // third-level list's last item (MENU-24: 38 nibbles, 19 bytes), 24 with padding, to 1408 (who holds the remote
     // keys, LINK-28's byte, fits in that padding); the zones page's Nearby answer (CHAN-29: 12 bytes) and a queued
-    // channel write that carries a position (CHAN-2, `ch N pos=`: 4 bytes more), 24 with padding, to 1432
-    assert!(n <= 1432, "App is {n} bytes");
+    // channel write that carries a position (CHAN-2, `ch N pos=`: 4 bytes more), 24 with padding, to 1432; the
+    // refusal beeps sent (SND-4, the readback's `beeps=`: a byte) and a hash of the callsign CW ID has (VOX-12: 4,
+    // sent again when the setting's differs), 8 with padding, to 1440
+    assert!(n <= 1440, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

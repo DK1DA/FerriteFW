@@ -661,6 +661,28 @@ fn fonts_cover_group_b() {
     }
 }
 
+/// VOX-12, XB-12: a callsign typed on setup's callsign page (MENU 0 8 7 1) reaches the Radio task for CW ID at
+/// once (`CwCall`), as the text editor's does; before, it went only at power-on (the crossband CW ID sent nothing
+/// until a restart, Oct 15, 2026). Each change goes again; nothing changed, nothing sent.
+#[test]
+fn callsign_change_reaches_the_radio() {
+    let mut t = ready();
+    t.app.set.callsign = crate::settings::Text::EMPTY;
+    t.wait(200);
+    t.cmds();
+    crate::screens::setup::callsign(&mut t.app);
+    t.tap(Key::Digit(2)); // A (multi-tap, KEY-12)
+    t.wait(1_500);
+    t.tap(Key::Digit(3)); // D
+    t.wait(200);
+    assert_eq!(t.app.set.callsign.as_bytes(), b"AD");
+    let calls: Vec<RadioCmd> = t.cmds().into_iter().filter(|c| matches!(c, RadioCmd::CwCall { .. })).collect();
+    assert_eq!(calls.last(), Some(&RadioCmd::CwCall { chunk: 1, text: [0; 5] }), "{calls:?}");
+    assert!(calls.contains(&RadioCmd::CwCall { chunk: 0, text: [b'A', b'D', 0, 0, 0] }), "{calls:?}");
+    t.wait(500);
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::CwCall { .. })), "unchanged: nothing sent again");
+}
+
 /// A transmit refused for no callsign: OK opens just the callsign page (not the whole setup), and leaving it
 /// returns to where the refusal came over.
 #[test]

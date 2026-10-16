@@ -398,6 +398,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 l.push(b"refused");
                 slot_word(l, t.slot);
                 kq(l, "why", transmit::short(t.why).as_bytes());
+                kn(l, "beeps", app.refusal_beeps as u32); // SND-4: refusal beeps sent since power-on
                 if let Some((path, name, _)) = transmit::fix(app, t.why) {
                     kq(l, "fix", path.as_bytes()); // TX-20: the menu path that fixes it, and what it is
                     kq(l, "fixes", name.as_bytes());

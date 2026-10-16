@@ -295,6 +295,13 @@ pub struct App {
     /// handled now (it never transmits: [`App::remote_tx_refused`]).
     pub(crate) rkeys: remote::RemoteKeys,
     pub(crate) remote_in: bool,
+    /// Refusal beeps sent since power-on (SND-4), wrapping: the refused screen's readback shows it (`beeps=`), as
+    /// the 80 ms beep is too short to catch with `gpio` samples over the link.
+    pub(crate) refusal_beeps: u8,
+    /// A hash of the callsign the Radio task has for CW ID ([`App::send_tx_tones`]): [`App::tick`] sends it again
+    /// whenever the setting's differs, whatever changed it (setup's callsign page typed into the setting and sent
+    /// nothing: CW ID kept the old one until a restart, XB-12 on the radio, Oct 15, 2026).
+    pub(crate) cw_sent: u32,
     /// Who runs the command line now (LINK-34's `CMD` sets it for its line): [`remote::BY_CABLE`], [`remote::BY_BT`],
     /// else [`remote::BY_TERM`] (the terminal); `xb start` logs it (XB-20.6).
     pub(crate) cmd_by: u8,
@@ -407,6 +414,8 @@ impl App {
             virtual_ptt: false,
             rkeys: remote::RemoteKeys::default(),
             remote_in: false,
+            refusal_beeps: 0,
+            cw_sent: 0,
             cmd_by: remote::BY_TERM,
             frames: 0,
             drawn_at: 0,
@@ -1062,6 +1071,9 @@ impl App {
             self.set_undo = None;
         }
         self.alert_tone();
+        if screens::shared::hash(&self.set.callsign) != self.cw_sent {
+            self.send_tx_tones(); // VOX-12, XB-12: CW ID sends the callsign as it is now
+        }
         self.vox_tick(live, now, store);
         if self.paused_until.is_some_and(|t| after(now, t)) {
             (self.paused_until, self.tx_pause) = (None, false);
@@ -1230,6 +1242,7 @@ impl App {
 
     /// The short refusal beep (SND-4, TEXT-5), from the BK4829's tone generator (SND-11).
     pub(crate) fn beep_refused(&mut self) {
+        self.refusal_beeps = self.refusal_beeps.wrapping_add(1);
         self.out.push(RadioCmd::Beep { hz: REFUSED_HZ, ms: REFUSED_MS });
     }
 
@@ -1313,6 +1326,7 @@ impl App {
     pub(crate) fn send_tx_tones(&mut self) {
         let s = &self.set;
         self.out.push(RadioCmd::TxTones { phase: s.tail_phase % 4, cw: s.cw_id % 3, sidetone: s.dtmf_sidetone });
+        self.cw_sent = screens::shared::hash(&s.callsign);
         let call = s.callsign.as_bytes();
         for chunk in 0..2u8 {
             let mut text = [0u8; 5];

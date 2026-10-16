@@ -23,23 +23,24 @@ def am_slot(t):
 @test("LINK-20.3", "SND-4", needs=("keyup",), pages=("Home", "TxRefused"))
 def remote_keyup_refusal_shows(t):
     """A refused remote key-up shows on the radio as a PTT's does: the TX refused screen with the reason (and the
-    menu path that fixes it where one does), never the Transmit screen; a refused transmit beeps (the amp, PE4,
-    on a bench build). Here: AM on 145.495 MHz (and 160 MHz out of band in the simulator)."""
+    menu path that fixes it where one does), never the Transmit screen; a refused transmit beeps once (SND-4): the
+    refused screen's readback counts the refusal beeps (`beeps=`; the 80 ms beep is over before a `gpio` sample
+    over the link can catch PE4). Here: AM on 145.495 MHz (and 160 MHz out of band in the simulator)."""
     stopped = t.stop_scans()
     try:
         am_slot(t)
-        beep = []
         refused, why = t.keyup_refused()
-        if t.r.bench and not t.sim:
-            for _ in range(4):
-                beep.append(t.pin("PE4"))
         u = t.wait(lambda u: u.id == "TxRefused", timeout=2, what="the refused screen")
         r = refused_line(u)
         t.eq(r.get("why"), "AM is receive only", "the reason")
         t.eq(u.state["keyed"], "-", "nothing keyed")
         t.check(why, "the link answer says why too", why)
-        if beep:
-            t.check(1 in beep, "the amp on for the refusal's beep (PE4)", beep)
+        before = int(r.get("beeps", -1))
+        t.check(before >= 1, "the refusal beeped (SND-4)", r)
+        t.home()
+        t.keyup_refused()
+        u = t.wait(lambda u: u.id == "TxRefused", timeout=2, what="again: the refused screen")
+        t.eq(int(refused_line(u).get("beeps", -1)), (before + 1) % 256, "one beep per refusal")
         if t.sim:
             t.home()
             t.cmd("slot A vfo 160.000 fm offset off")

@@ -107,14 +107,23 @@ fn am_seek_and_band_checks() {
     si.power_up_start(Mode::Am).unwrap();
     assert_eq!(si.tune_start(100, Sideband::Usb, &mut d), Err(Error::OutOfBand));
     assert_eq!(si.tune_start(31000, Sideband::Usb, &mut d), Err(Error::OutOfBand));
-    si.seek_start(true, &mut d).unwrap();
+    assert_eq!(si.am_seek_band(100, 30000, &mut d), Err(Error::OutOfBand));
+    assert_eq!(si.am_seek_band(150, 30001, &mut d), Err(Error::OutOfBand));
+    si.am_seek_band(150, 30000, &mut d).unwrap();
+    si.seek_start(true, true, &mut d).unwrap();
+    si.seek_start(true, false, &mut d).unwrap();
+    si.seek_start(false, false, &mut d).unwrap();
     assert!(si.tune_poll(&mut d).unwrap().is_some());
     assert_eq!(si.rds_read(&mut d), Err(Error::WrongMode));
     assert_eq!(si.patch_record(&[0; 8], &mut d), Err(Error::WrongMode));
     si.set_property(prop::AM_SEEK_FREQ_SPACING, 9, &mut d).unwrap();
     let w = writes(&si.release().txns);
     assert_eq!(w[0], vec![0x01, 0x11, 0x05]);
-    assert_eq!(w[1], vec![0x41, 0x0C, 0, 0, 0, 0], "AM_SEEK_START up, wrap");
+    assert_eq!(w[1], vec![0x12, 0, 0x34, 0x00, 0x00, 150], "AM_SEEK_BAND_BOTTOM 150 kHz");
+    assert_eq!(w[2], vec![0x12, 0, 0x34, 0x01, 0x75, 0x30], "AM_SEEK_BAND_TOP 30000 kHz");
+    assert_eq!(w[3], vec![0x41, 0x0C, 0, 0, 0, 0], "AM_SEEK_START up, wrap");
+    assert_eq!(w[4], vec![0x41, 0x08, 0, 0, 0, 0], "HF-31: up, stopping at the band edge (no WRAP)");
+    assert_eq!(w[5], vec![0x41, 0x00, 0, 0, 0, 0], "down, no WRAP");
     assert!(w.contains(&vec![0x42, 0x01]));
 }
 
@@ -126,7 +135,7 @@ fn seek_cancel_sends_cancel_with_intack() {
     let mut d = MockDelay::default();
     assert_eq!(si.seek_cancel(&mut d), Err(Error::WrongMode));
     si.power_up_start(Mode::Am).unwrap();
-    si.seek_start(false, &mut d).unwrap();
+    si.seek_start(false, true, &mut d).unwrap();
     assert_eq!(si.tune_poll(&mut d).unwrap(), None);
     assert_eq!(si.seek_cancel(&mut d).unwrap().freq, 0x2710);
     let w = writes(&si.release().txns);

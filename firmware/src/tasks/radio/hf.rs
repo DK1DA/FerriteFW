@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// HF-31: the SI4732's AM seek band in HF mode (kHz): HF mode's bottom (150 kHz) to the SI4732's top (30 MHz).
+const HF_SEEK_KHZ: (u16, u16) = (150, 30_000);
+
 impl Radio {
     /// HF mode on, retuned or off (HF-3, HF-4, HF-10, HF-11): the SI4732 below 18 MHz and for AM up to 30 MHz,
     /// chip 1 through the energised relay otherwise. Watch, scan and the other chip pause meanwhile (HF-8).
@@ -73,10 +76,17 @@ impl Radio {
 
     /// HF-31: the SI4732's own seek from where it is (AM, below 30 MHz), started here and polled by the tick
     /// ([`Radio::seek_poll`]): the task keeps taking commands meanwhile (MODE-7), and the frequency it stops on is
-    /// kept. A seek already running is cancelled first.
+    /// kept. A seek already running is cancelled first. The seek band is HF mode's SI4732 range ([`HF_SEEK_KHZ`];
+    /// the chip's own default, 520-1710 kHz, sent a seek up from 9.4 MHz to 1.71 MHz on the radio, Oct 15, 2026),
+    /// and it stops at the band edge rather than wrapping round.
     pub(super) fn hf_seek(&mut self, up: bool) {
         self.seek_cancel();
-        if self.hf.is_none_or(|h| !h.si) || self.si.seek_start(up, &mut BusyDelay).is_err() {
+        if self.hf.is_none_or(|h| !h.si) {
+            return;
+        }
+        let d = &mut BusyDelay;
+        let (lo, hi) = HF_SEEK_KHZ;
+        if self.si.am_seek_band(lo, hi, d).and_then(|_| self.si.seek_start(up, false, d)).is_err() {
             return;
         }
         let now = now_ms() as u32;

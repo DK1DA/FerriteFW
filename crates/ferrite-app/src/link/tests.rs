@@ -458,6 +458,32 @@ fn remote_ptt_ends_with_the_session() {
     assert_eq!(text(&pc.ptt(Ptt::Alive).1), RemoteEnd::Session.text());
 }
 
+fn refusal_beeps(v: &[RadioCmd]) -> usize {
+    v.iter().filter(|c| matches!(c, RadioCmd::Beep { hz, .. } if *hz == crate::REFUSED_HZ)).count()
+}
+
+/// SND-4, LINK-20.3: a refused remote key-up beeps as a PTT's refusal does (the beep was missing for both: the
+/// radio's PE4 never came on, Oct 15, 2026), once, and the refused screen's readback counts it (`beeps=`); a
+/// refusal by the Radio task after the key-up beeps too.
+#[test]
+fn remote_keyup_refusal_beeps() {
+    let mut pc = Pc::tx();
+    let a0 = pc.app.active as usize;
+    (pc.app.slots[a0].vfo, pc.app.slots[a0].vfo_mode) = (ferrite_core::freq::mhz(160), true);
+    pc.cmds();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, Status::Invalid as u8);
+    assert_eq!(refusal_beeps(&pc.cmds()), 1, "one refusal beep");
+    assert_eq!(pc.app.refusal_beeps, 1);
+    let mut pc = Pc::tx();
+    assert_eq!(pc.ptt(Ptt::On(key::ACTIVE)).0, 0);
+    pc.cmds();
+    let mut live = LiveAll::default();
+    live.tx.refused = Some(ferrite_core::txplan::Refusal::Hot);
+    pc.pass(100, &live);
+    assert!(matches!(pc.app.screen(), Screen::TxRefused(_)));
+    assert_eq!(refusal_beeps(&pc.cmds()), 1, "the Radio task's refusal beeps once");
+}
+
 /// LINK-20.2, LINK-20.7: the radio's own refusals come back as `invalid` with the reason; the Radio task's stops too.
 #[test]
 fn remote_ptt_refusals_pass_through() {

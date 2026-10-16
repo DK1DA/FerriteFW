@@ -87,8 +87,9 @@ def squelch_screen_floor(t):
 @test("TX-12.1", pages=("Home", "Quick"))
 def power_shows_level_names(t):
     """Power shows as its level name only: LOW, MID or HIGH on the cards and the quick menu's TX power row (no
-    watts); on 1.25 m the capped power itself, "0.25 W"."""
-    t.cmd("slot A vfo 146.52")
+    watts); on 1.25 m the capped power itself, "0.25 W" (TX-9). Slot A made active first: the cards read are the
+    active slot's (a run that starts on B read B's LOW on 1.25 m)."""
+    t.cmd("slot A vfo 146.52 active")
     for i in range(3):
         u = t.home()
         p = u.active["power"]

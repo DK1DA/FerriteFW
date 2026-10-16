@@ -557,7 +557,7 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
         BroadcastCmd::Am(f) => (SiMode::Am, Some(f)),
         // MODE-7: only started here; the tick polls it (`Radio::seek_poll`).
         BroadcastCmd::Seek { up } => {
-            si.seek_start(up, d)?;
+            si.seek_start(up, true, d)?; // BCR-18: the broadcast band wraps round
             return Ok(0);
         }
     };
@@ -749,8 +749,11 @@ pub async fn task() {
         // move goes past and the wait fires every 1 ms, starving the UI and the link).
         let mut at = r.save.deadline().filter(|_| r.hf.is_none()).unwrap_or(u64::MAX);
         // Broadcast FM's report (fm_poll) runs on the tick, also while Battery Save has the BK4829s asleep (BCR-19).
-        let tick_at = (!r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() || r.seek.is_some())
-            .then(|| ticked + if r.busy() { TICK_MS } else { POLL_MS });
+        // SCAN-21: a fast scan step's end ticks on time too (on the 10 ms tick alone a step waited for the next).
+        let tick_at = (!r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() || r.seek.is_some()).then(|| {
+            let t = ticked + if r.busy() { TICK_MS } else { POLL_MS };
+            r.scan_due(now_ms()).map_or(t, |d| t.min(d))
+        });
         if let Some(t) = tick_at {
             at = at.min(t);
         }

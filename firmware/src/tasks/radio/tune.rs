@@ -155,6 +155,30 @@ impl Radio {
         self.keep & (self.watch_set | 1 << self.active) & !self.bcast_off()
     }
 
+    /// SCAN-21: the soonest end of a fast scan step on a slot with a chip (`now_ms` time), for the main loop to
+    /// tick on it rather than on the next 10 ms tick (`Scan::due`). The step's 15 ms counts from the tick that
+    /// tuned it, so a step takes 15 ms plus that tick's retune and reads: about 17 ms, 55-60 steps a second.
+    /// None while the tick doesn't step scans (the scope, the counter, keyed, the crossband repeater): a due time
+    /// it never moves would go past and wake the task every 1 ms (decision 163).
+    pub(super) fn scan_due(&self, now: u64) -> Option<u64> {
+        #[cfg(feature = "tx")]
+        if self.xb.is_some() {
+            return None;
+        }
+        if self.scope.is_some() || self.counter.is_some() || self.path.keyed().is_some() {
+            return None;
+        }
+        let tuned = |i: usize| self.tuned.iter().any(|t| t.is_some_and(|(s, _)| s as usize == i));
+        (0..SLOTS)
+            .filter(|&i| tuned(i))
+            .filter_map(|i| self.scans[i].due())
+            .map(|d| {
+                let left = d.wrapping_sub(now as u32);
+                now + if left > u32::MAX / 2 { 0 } else { left as u64 }
+            })
+            .min()
+    }
+
     /// Something running that keeps the engines ticking fast: a slot sharing the chips, or a scan.
     pub(super) fn busy(&self) -> bool {
         let set = self.watch_set | 1 << self.active;

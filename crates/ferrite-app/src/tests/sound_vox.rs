@@ -8,6 +8,18 @@ fn beeps(v: &[RadioCmd], hz: u16) -> usize {
     v.iter().filter(|c| matches!(c, RadioCmd::Beep { hz: h, .. } if *h == hz)).count()
 }
 
+/// SND-4: a refused PTT beeps once (the low refusal beep, not a key beep) and shows the reason.
+#[test]
+fn refused_ptt_beeps() {
+    let mut t = T::new();
+    let a = t.app.active as usize;
+    (t.app.slots[a].vfo, t.app.slots[a].vfo_mode) = (ferrite_core::freq::mhz(160), true);
+    t.cmds();
+    t.tap(Key::Ptt(0));
+    assert!(matches!(t.app.screen(), Screen::TxRefused(_)), "the reason shows");
+    assert_eq!(beeps(&t.cmds(), crate::REFUSED_HZ), 1, "one refusal beep");
+}
+
 /// SND-3: a key beep on each key press while 0 7 5 1 is on, none while it is off; PTT never beeps. 0 7 5 2 sends
 /// the volume to the Radio task.
 #[test]
