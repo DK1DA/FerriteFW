@@ -5,6 +5,11 @@ use super::*;
 /// The fast scan's own wake (SCAN-21, decision 164) is off: see `scan_due`.
 const SCAN_WAKE_OFF: bool = true;
 
+/// PWR-21.6: while FM broadcast plays, a BK4829 put to sleep keeps its REG_37 supplies on (REG_30 off only), so the
+/// watch hop's and Battery Save's sleeps and wakes don't click in the broadcast; false puts back PWR-5's full sleep
+/// everywhere. The supplies go off once the broadcast stops ([`Radio::ldo_release`]).
+const BCAST_LDO_ON: bool = true;
+
 impl Radio {
     pub(super) fn chip(&mut self, n: u8) -> Bk4829<bk4829::wire::Chip<'_, Out, Io, BusyDelay, Out>> {
         Bk4829::new(self.wire.chip(&mut self.cs[n as usize]))
@@ -79,10 +84,16 @@ impl Radio {
             self.maybe_awake &= !(1 << n);
             self.sq_regs[n as usize] = None; // written again on waking
             self.open_fast[n as usize] = None; // SQL-17: likewise
-            self.woke[n as usize] = None;
             radio_chip::sleep_begin(&mut self.chip(n));
+            // PWR-21.6: beside a broadcast the supplies stay on (no settle to wait: REG_37 isn't written).
+            if BCAST_LDO_ON && self.woke[n as usize].is_some() && self.si.mode().is_some() && self.hf.is_none() {
+                self.ldo_kept |= 1 << n;
+                return Some(0);
+            }
+            self.woke[n as usize] = None;
             return Some(self.settle.sleep_ms as u32);
         }
+        self.ldo_kept &= !(1 << n);
         self.maybe_awake |= 1 << n;
         let (settle, woke) = (self.settle, self.woke[n as usize]);
         let (at, left) = radio_chip::wake_start(&mut self.chip(n), settle, woke, now_ms() as u32);
@@ -95,7 +106,9 @@ impl Radio {
     #[inline(never)]
     fn tune_finish(&mut self, n: u8) {
         let Some((s, f)) = self.tuned[n as usize] else {
-            self.chip(n).ldo_sleep();
+            if self.ldo_kept & 1 << n == 0 {
+                self.chip(n).ldo_sleep();
+            }
             return;
         };
         let slot = match s {
@@ -122,11 +135,30 @@ impl Radio {
     /// PWR-21: chip `n`'s REG_37 supplies on now if they are off, without receive (the hop's early wake, and a
     /// key-up's chip); the wake settle counts from here.
     pub(super) fn ldo_on(&mut self, n: u8) {
+        self.ldo_kept &= !(1 << n);
         if self.woke[n as usize].is_none() {
             self.chip(n).wake();
             self.woke[n as usize] = Some(now_ms() as u32);
         }
         self.maybe_awake |= 1 << n;
+    }
+
+    /// SCAN-21 (decision 189): the slots running a range scan's fast pass (not a channel scan): the watch keeps
+    /// their chip on them and the receive path with them but for the other chip's short turns.
+    pub(super) fn range_scans(&self) -> u8 {
+        (0..SLOTS).filter(|&i| self.scans[i].running() && self.scans[i].fast && !self.chans.is_on(i)).fold(0u8, |m, i| m | 1 << i)
+    }
+
+    /// PWR-21.6: the broadcast has stopped, so the chips asleep with their supplies kept on get PWR-5's full sleep
+    /// (REG_37's supplies off; REG_30 went off when they slept).
+    pub(super) fn ldo_release(&mut self) {
+        for n in 0..2u8 {
+            if self.ldo_kept & 1 << n != 0 && self.tuned[n as usize].is_none() {
+                self.chip(n).ldo_sleep();
+                self.woke[n as usize] = None;
+            }
+        }
+        self.ldo_kept = 0;
     }
 
     /// Battery Save's phase change: both chips sleep together (WATCH-8), but for one a kept slot has (APRS mode's

@@ -195,6 +195,13 @@ pub async fn task() {
         }
         crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));
     }
+    // PWR-22: the battery gauge for the percentage, in every build (read only; stock's defaults if blank or unread).
+    let gauge = {
+        use ferrite_core::txcal::{Gauge, READ_LEN};
+        let mut b = [0xFFu8; READ_LEN];
+        let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
+        if read { Gauge::parse(&b) } else { Gauge::defaults() }
+    };
     let set = store::settings();
     store.load_settings(set);
     let level = ferrite_app::lights::BRIGHTNESS[set.brightness() as usize - 1]; // 0 7 4 2 from here on
@@ -322,6 +329,7 @@ pub async fn task() {
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
     let mut dev = Device { tx_built: cfg!(feature = "tx"), tx_dry: cfg!(feature = "tx-dry"), bench: cfg!(feature = "bench"), battery_pct: 100, ..Default::default() };
     let mut bat_logged = 0u32;
+    let mut battery = ferrite_core::battery::Battery::default();
     // About and Self-test (SELF-5 to SELF-7): what the boot checks found. The BK4829s from the Radio task's
     // snapshot below; the SI4732 isn't tested at boot; the SSB patch store comes with the link's SSB_WRITE.
     {
@@ -400,15 +408,19 @@ pub async fn task() {
         }
         // Every pass, bring-up log or not (inside the `!bringup::ON` branch they never updated About). PWR-20: the battery from the Radio task's PA1 reading, with the user trim (10 mV steps).
         let raw = crate::chan::BATTERY_RAW.load(Relaxed);
-        if raw != 0 {
+        // PWR-22: the percentage on this radio's gauge, averaged, held while keyed and after, slow to rise.
+        let shown = battery.update(&gauge, raw, now_ms(), live.tx.keyed);
+        if let Some(s) = shown {
             let mv = ferrite_core::txcal::battery_mv(raw) as i32 + dev.selftest.battery_trim as i32 * 10;
             dev.battery_mv = mv.max(0) as u16;
-            dev.battery_pct = ferrite_core::txcal::Gauge::defaults().percent(raw);
-            // The cable log (TERM-28): the battery every 10 s (no charger-detect input is known on this board).
+            (dev.battery_pct, dev.battery_low, dev.battery_cutoff) = (s.pct, s.low, s.cutoff);
+            // The cable log (TERM-28): the battery every 10 s (no charger-detect input is known on this board):
+            // the reading now, the averaged one the % comes from, and the %.
             if now_ms().wrapping_sub(bat_logged) >= 10_000 {
                 bat_logged = now_ms();
                 bringup::linef(|b| {
-                    let _ = ufmt::uwrite!(b, "battery {} mV, {}%, PA1 {}", dev.battery_mv, dev.battery_pct, raw);
+                    let avg = ferrite_core::txcal::battery_mv(s.raw);
+                    let _ = ufmt::uwrite!(b, "battery {} mV, avg {} mV, {}%, PA1 {} avg {}", ferrite_core::txcal::battery_mv(raw), avg, s.pct, raw, s.raw);
                 });
                 // SBAR-20: the MCU temperature's raw counts and what they give.
                 let t = crate::chan::MCU_TEMP.load(Relaxed);

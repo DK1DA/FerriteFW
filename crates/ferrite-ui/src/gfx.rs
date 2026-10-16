@@ -29,6 +29,17 @@ pub const DIM: u16 = rgb565(0x5A, 0x61, 0x6B);
 pub const WHITE: u16 = 0xFFFF;
 pub const BLACK: u16 = 0x0000;
 
+// Role tokens (DISP-9, DISP-18): drawn as the token beside them in dark, daylight and night red, their own colour
+// in cyberpunk. Their values only name them: a theme always maps them ([`crate::theme::map`]).
+/// A card's frequency digits (TEXT).
+pub const FREQ: u16 = TEXT - 1;
+/// Key names in the hint bar and the key card, and the status bar's clock (TEXT).
+pub const KEYS: u16 = TEXT - 2;
+/// The status bar's and the hint bar's rules (LINE).
+pub const RULE: u16 = LINE + 1;
+/// The battery icon's fill (GREEN).
+pub const BATT: u16 = GREEN + 1;
+
 pub enum Align {
     Left,
     Center,
@@ -127,6 +138,11 @@ pub fn text4_ink(s: &[u8], f: &Font4) -> Option<(i32, i32)> {
 
 pub trait Gfx: Panel {
     fn fill(&mut self, mut x: i32, mut y: i32, mut w: i32, mut h: i32, c: u16) {
+        if w > 2 && h > 2 && crate::theme::outlined(c) {
+            // DISP-18: night red draws a dim fill as a red outline, black inside
+            self.fill(x + 1, y + 1, w - 2, h - 2, BLACK);
+            return self.frame(x, y, w, h, c);
+        }
         if x < 0 {
             w += x;
             x = 0;
@@ -182,6 +198,11 @@ pub trait Gfx: Panel {
 
     /// Filled rectangle with rounded corners (radius r).
     fn fill_r(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, c: u16) {
+        if w > 2 && h > 2 && crate::theme::outlined(c) {
+            // DISP-18: an empty meter segment or a track in night red: a red outline, black inside
+            self.fill_r(x + 1, y + 1, w - 2, h - 2, (r - 1).max(0), BLACK);
+            return self.frame_r(x, y, w, h, r.min(w / 2).min(h / 2).max(0), c);
+        }
         let r = r.min(w / 2).min(h / 2).max(0);
         for dy in 0..r {
             // the circle's half-width at the middle of row dy, in half pixels: (2u)^2 <= (2r)^2 - (2r - 2dy - 1)^2
@@ -243,7 +264,8 @@ pub trait Gfx: Panel {
     /// neighbours.
     fn text4_rows(&mut self, x: i32, baseline: i32, s: &[u8], f: &Font4, fg: u16, bg: u16, y0: i32, y1: i32) -> i32 {
         // themed before blending, so the anti-aliasing runs between the colours actually shown
-        let (fg, bg) = (crate::theme::map(fg), crate::theme::map(bg));
+        let bg = crate::theme::map_bg(bg);
+        let fg = crate::theme::ink_on(crate::theme::map(fg), bg); // DISP-18: black on night red's solid red
         let mut lut = [0u16; 16];
         for (a, v) in lut.iter_mut().enumerate() {
             *v = blend(bg, fg, a as u8);
@@ -307,7 +329,8 @@ pub trait Gfx: Panel {
         if x1 <= x0 || y1 <= y0 {
             return;
         }
-        let (c1, bg, m2) = (crate::theme::map(c1), crate::theme::map(bg), m2.map(|(m, c)| (m, crate::theme::map(c))));
+        let bg = crate::theme::map_bg(bg);
+        let (c1, m2) = (crate::theme::ink_on(crate::theme::map(c1), bg), m2.map(|(m, c)| (m, crate::theme::ink_on(crate::theme::map(c), bg))));
         let mut lut = [0u16; 16];
         for (a, v) in lut.iter_mut().enumerate() {
             *v = blend(bg, c1, a as u8);

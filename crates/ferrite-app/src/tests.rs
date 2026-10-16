@@ -142,8 +142,9 @@ fn ram_is_small() {
     // keys, LINK-28's byte, fits in that padding); the zones page's Nearby answer (CHAN-29: 12 bytes) and a queued
     // channel write that carries a position (CHAN-2, `ch N pos=`: 4 bytes more), 24 with padding, to 1432; the
     // refusal beeps sent (SND-4, the readback's `beeps=`: a byte) and a hash of the callsign CW ID has (VOX-12: 4,
-    // sent again when the setting's differs), 8 with padding, to 1440
-    assert!(n <= 1440, "App is {n} bytes");
+    // sent again when the setting's differs), 8 with padding, to 1440; the status bar as drawn holds the callsign
+    // shown in the clock's place without a time (SBAR-2: 6 characters and a length), 16 with padding, to 1456
+    assert!(n <= 1456, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -1113,6 +1114,38 @@ fn theme_change_redraws_everything() {
     t.app.settings_mut().theme = ferrite_ui::theme::DARK;
     t.render(&mut fb);
     assert_eq!(fb.at(120, 310), BG);
+}
+
+/// DISP-18 (strict night red): home is red or black only, nothing between but text's anti-aliasing (no dim fills,
+/// no dim text); and the active card's heavier outline follows SLOT without leaving a stale ring behind (a whole
+/// redraw draws the same pixels).
+#[test]
+fn night_red_is_red_or_black() {
+    for layout in 0..3u8 {
+        let mut t = T::new();
+        t.app.settings_mut().theme = ferrite_ui::theme::NIGHT_RED;
+        t.app.settings_mut().layout = layout;
+        let mut fb = FrameBuffer::new();
+        t.render(&mut fb);
+        let (red, black) = (ferrite_ui::theme::NIGHT_INK, ferrite_ui::gfx::BLACK);
+        let mut other = 0;
+        for &c in &fb.px {
+            assert_eq!(c & 0x07FF, 0, "red only");
+            other += (c != red && c != black) as usize;
+        }
+        // text's anti-aliased edges are the only levels: a few per cent of the screen at most (layout 1's strip
+        // is the scope's gradient, which keeps its red levels)
+        assert!(layout == 1 || other * 100 / fb.px.len() < 6, "layout {layout}: {other} pixels neither red nor black");
+        for _ in 0..3 {
+            t.tap(Key::Slot);
+            t.render(&mut fb);
+            let mut whole = FrameBuffer::new();
+            t.app.redraw_all();
+            t.render(&mut whole);
+            let diff = fb.px.iter().zip(&whole.px).filter(|(a, b)| a != b).count();
+            assert_eq!(diff, 0, "layout {layout}, active {}: the redraw after SLOT left {diff} stale pixels", t.app.active);
+        }
+    }
 }
 
 /// KEY-19: ◀▶ do what the knob does on screens that don't give them a job of their own; the ones that do keep it.

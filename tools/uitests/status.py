@@ -1,7 +1,7 @@
 """The status bar and the Status page (chapter 8, SBAR-*), About and its help pages (HELP-*)."""
 from .core import test
 
-BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt", "battery", "low", "cutoff", "clock", "utc"}
+BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt", "battery", "low", "cutoff", "clock", "utc", "call"}
 
 
 @test("SBAR-14", "PWR-8", "SBAR-10", pages=("Status",))
@@ -83,14 +83,14 @@ def battery_icon_status_about(t):
 
 @test("HELP-1", "SBAR-5", pages=("Group", "Info"))
 def about_pages_go_round(t):
-    """◀▶ on About go round its pages: About, Manual, Keys, Side+PTT, Hold 0-9, Menu nos, Self-test; the hint
+    """◀▶ on About go round its pages: About, Manual, Keys, Side+PTT, Holds, Menu nos, Self-test; the hint
     bar names the page ▶ goes to; every name fits 8 characters; BACK leaves."""
     u = t.keys("MENU 0 9 9")
     pages = [u]
     for _ in range(7):
         pages.append(t.keys("RIGHT"))
     titles = [p.title for p in pages]
-    t.eq(titles, ["About", "Manual", "Keys", "Side+PTT", "Hold 0-9", "Menu nos", "Checks", "About"], "the pages")
+    t.eq(titles, ["About", "Manual", "Keys", "Side+PTT", "Holds", "Menu nos", "Checks", "About"], "the pages")
     t.check(all(len(x) <= 8 for x in titles), "names fit 8 characters", titles)
     odd = []
     for cur, nxt in zip(pages, pages[1:]):

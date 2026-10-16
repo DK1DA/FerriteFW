@@ -67,7 +67,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     if let Some(clear) = app.dirty_shape(2, hash(&(f, name)), name.is_empty()) {
         redraw_box!(clear, lcd, (8, 42, 224, 52, BG), {
             if name.is_empty() {
-                w::freq_centred(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, TEXT, SUB, BG); // HOME-3: centred
+                w::freq_centred(lcd, 8, 232, 88, f, &DIG_46, &DIG_28, FREQ, SUB, BG); // HOME-3: centred
             } else {
                 // 26 px when the whole name fits, else 22 px (HOME-4a).
                 let nb = name.as_bytes();
@@ -230,12 +230,12 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         if !app.dirty(R_FRAME + p, hash(&(s, border))) {
             // unchanged
         } else if drawn_before && app.drawn.card[p] == geom {
-            lcd.frame_r(6, y, 228, h, 3, border); // the border's colour alone (DISP-25)
+            w::card_border(lcd, 6, y, 228, h, border, active, BG); // the border's colour alone (DISP-25)
         } else {
             app.drawn.card[p] = geom;
             lcd.fill(6, y, 228, h, BG);
             lcd.fill_r(6, y, 228, h, 3, SURFACE);
-            lcd.frame_r(6, y, 228, h, 3, border);
+            w::card_border(lcd, 6, y, 228, h, border, active, BG);
             for r in [R_HEAD, R_FREQ, R_INFO, R_SUB] {
                 app.drawn.hash[r + p] = 0;
             }
@@ -252,7 +252,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             heard_text(lv.heard_tone, app.slots[s as usize].cfg().rx_tone, &mut stt); // TSRCH-13, in a wider field
         }
         if app.dirty(R_HEAD + p, hash(&(head, stt, active))) {
-            w::badge(lcd, 14, y + 5, s, active, SURFACE);
+            w::badge(lcd, 14, y + 5, s, active, BG);
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
             // HOME-4a: the state's own width (at least 40 px), so a zone name in the header has the rest
             let sw = if state == "heard" || state.len() > 8 { (text4_width(stt.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { (text4_width(stt.as_bytes(), f) + 6).clamp(40, 72) };

@@ -462,8 +462,21 @@ impl App {
     /// 0 5 7 1 by the knob: 5 kHz steps from where it is, within chip 0's range.
     pub(crate) fn step_aprs_freq(&mut self, d: i32) {
         let f = (self.aprs_freq() as i64 + d as i64 * 500).clamp(F_MIN as i64, F_MAX as i64) as Freq10;
+        let _ = self.set_aprs_freq(f); // clamped and on the grid already
+    }
+
+    /// 0 5 7 1 typed (MENU-31, TERM-12): 64-300 MHz on the 5 kHz grid it is stored in; the region's own frequency
+    /// is kept as "the region's" (f5k 0), as the knob does.
+    pub(crate) fn set_aprs_freq(&mut self, f: Freq10) -> Result<(), &'static str> {
+        if !(F_MIN..=F_MAX).contains(&f) {
+            return Err("Out of range: APRS takes 64-300 MHz");
+        }
+        if !f.is_multiple_of(500) {
+            return Err("Off the grid: APRS takes 5 kHz steps");
+        }
         let f5k = if f == region_freq(self.set.region()) { 0 } else { (f / 500) as u16 };
         self.set_aprs(AprsCfg { f5k, ..self.aprs });
+        Ok(())
     }
 
     /// 0 5 5 1 by the knob.

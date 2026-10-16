@@ -186,7 +186,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ]),
     ((4, 2), &[
         Entry("Decode|Off|Pagers on a slot tuned to the frequency."),
-        Entry("Frequency|439.9875|The pager channel; 512, 1200 and 2400 baud."),
+        Entry("Frequency|439.9875|The pager channel, any baud; OK types it."),
         Entry("Capcode filter|None|Only this capcode: OK types it, # clears it."),
     ]),
     ((4, 3), &[Entry("DSC|Off|Decode DSC on channel 70."), Entry("Own MMSI|None|Your MMSI, receive only.")]),
@@ -213,7 +213,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ]),
     ((5, 6), &[Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."), Entry("Custom path|None|Your own path, like WIDE2-2: OK types it.")]),
     ((5, 7), &[
-        Entry("Frequency|144.390|The APRS channel."),
+        Entry("Frequency|144.390|The APRS channel; OK types it."),
         Entry("TX delay|300 ms|Carrier before data."),
         Entry("TX level|Mid|Modulation level."),
         Entry("RX level|Auto|Decoder input level."),
@@ -441,7 +441,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 68] = [
+static SETTINGS: [Setting; 69] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -466,6 +466,7 @@ static SETTINGS: [Setting; 68] = [
     field!([5, 5, 4], special),
     field!([5, 6, 1], special),
     field!([5, 6, 2], special),
+    field!([5, 7, 1], special), // MENU-31: typed as a frequency
     field!([5, 8, 1], special),
     field!([5, 8, 2], special),
     field!([5, 8, 3], special),
@@ -1204,6 +1205,9 @@ impl Group {
                 app.text = Buf::from(app.aprs_custom_path());
                 app.open(Dest::Text(super::text::TextFor::AprsPath));
             }
+            // MENU-31: a frequency setting opens the frequency entry box; the knob still steps it.
+            [5, 7, 1] => super::entry::open_setting(app, super::entry::FreqSet::Aprs),
+            [4, 2, 2] => super::entry::open_setting(app, super::entry::FreqSet::Pager),
             _ => {
                 if let Some(d) = nav::menu0(p) {
                     app.open(d);

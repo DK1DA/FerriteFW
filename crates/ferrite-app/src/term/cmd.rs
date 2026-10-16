@@ -1083,6 +1083,18 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
             app.set.pocsag_cap = v;
         }
         [5, 6, 2] if same(want, b"none") => groups::reset(app, p),
+        // MENU-31: a frequency setting typed in MHz, with the entry box's checks
+        [5, 7, 1] | [4, 2, 2] => {
+            let fs = if p == [5, 7, 1] { crate::screens::entry::FreqSet::Aprs } else { crate::screens::entry::FreqSet::Pager };
+            let f = ferrite_core::freq::parse(want).ok_or_else(|| msg!("{}: a frequency in MHz, e.g. 145.495", name))?;
+            let now = if p == [5, 7, 1] { app.aprs_freq() } else { app.set.pocsag_freq };
+            // `get` and `dump` show 3 decimals: the value as shown is the value kept (439.987 stays 439.9875)
+            if ferrite_ui::widgets::freq3(now).as_bytes() != want {
+                if let Err(why) = fs.set_setting(app, f) {
+                    return Err(msg!("{}: {}", name, why));
+                }
+            }
+        }
         [5, 6, 2] => {
             let mut up = Buf::<24>::new();
             for &c in want {
@@ -1095,7 +1107,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         }
         _ => {}
     }
-    if matches!(p, [4, 2, 3] | [5, 6, 2]) {
+    if matches!(p, [4, 2, 3] | [5, 6, 2] | [5, 7, 1] | [4, 2, 2]) {
         let mut v = Buf::<24>::new();
         value(app, dev, p, &mut v);
         let mut m = Msg::new();

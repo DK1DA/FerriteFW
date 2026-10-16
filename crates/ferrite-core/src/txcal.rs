@@ -251,12 +251,6 @@ impl Gauge {
 
     /// Transmit allowed on this reading (the 12-bit PA1 conversion): at or above the first threshold (the
     /// cut-off, about 6.2 V) and not above the seventh (about 9 V, stock's level 7).
-    /// PWR-20's level 0-6 for the PA1 reading: thresholds at or below it (stock's gauge), as a percentage.
-    pub fn percent(&self, adc: u16) -> u8 {
-        let v = (adc >> 4).min(255) as u8;
-        (self.0[..6].iter().filter(|&&t| v >= t).count() * 100 / 6) as u8
-    }
-
     /// Stock's defaults, for builds that don't read the calibration (the receive-only build reads no PA curves).
     pub const fn defaults() -> Gauge {
         Gauge(GAUGE_DEFAULT)
@@ -505,8 +499,7 @@ mod battery_tests {
     fn battery_reading() {
         assert_eq!(battery_mv(172 << 4), 8290);
         let g = Gauge::defaults();
-        assert_eq!(g.percent(172 << 4), 100);
-        assert_eq!(g.percent(0x80 << 4), 0);
-        assert_eq!(g.percent(0x93 << 4), 66);
+        assert!(crate::battery::percent(&g, 172 << 4) >= 90, "PWR-22: 8.29 V is over 90 %");
+        assert_eq!(crate::battery::percent(&g, 0x80 << 4), 0);
     }
 }

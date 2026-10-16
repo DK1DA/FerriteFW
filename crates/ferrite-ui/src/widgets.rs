@@ -100,16 +100,30 @@ fn badge_now(lcd: &mut impl Panel, x: i32, y: i32, slot: u8, filled: bool, bg: u
     }
 }
 
-/// An outlined tag ("RX", "EDIT") ending at x_right; returns its width.
+/// An outlined tag ("RX", "EDIT") ending at x_right; returns its width. Night red fills it, black text on solid
+/// red (DISP-18: a filled highlight, where the other themes have the outline's colour).
 pub fn tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16, bg: u16) -> i32 {
     // 15 px tall so the 9 px capitals sit 2 px from the top and bottom inside (DISP-19)
     let w = text4_width(s, &UI_12B) + 10;
     let x = x_right - w;
+    let night = crate::theme::get() == crate::theme::NIGHT_RED;
     crate::canvas::banded(lcd, x, y, w, 16, bg, |b| {
-        field(b, x, w, y, y + 15, y + 12, Align::Center, s, &UI_12B, c, bg);
+        let back = if night { c } else { bg };
+        field(b, x, w, y, y + 15, y + 12, Align::Center, s, &UI_12B, c, back);
         b.frame_r(x, y, w, 15, 1, c);
     });
     w
+}
+
+/// A card's border, radius 3. Night red, where every border is the same red, draws the active card's 2 px
+/// (DISP-18: a heavier outline marks it), the second line just outside, in the gap around the card, so the card's
+/// content keeps its room; an inactive card's gap is `around` (the screen's ground).
+#[allow(clippy::too_many_arguments)]
+pub fn card_border(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, c: u16, active: bool, around: u16) {
+    lcd.frame_r(x, y, w, h, 3, c);
+    if crate::theme::get() == crate::theme::NIGHT_RED {
+        lcd.frame_r(x - 1, y - 1, w + 2, h + 2, 4, if active { c } else { around });
+    }
 }
 
 /// An outlined chip ("FM-N", "T 100.0"); returns its width.
@@ -247,6 +261,8 @@ pub fn meter(lcd: &mut impl Panel, x: i32, y: i32, old: Option<u8>, lit: u8, on:
 }
 
 fn meter_segs(lcd: &mut impl Panel, x: i32, y: i32, a: u8, b: u8, lit: u8, on: u16) {
+    // DISP-18: night red outlines a DIM fill, which would read as empty: lit segments are solid there
+    let on = if crate::theme::outlined(on) { SUB } else { on };
     for i in a..b.min(METER_SEGS) {
         lcd.fill_r(x + i as i32 * 10, y, 8, 8, 1, if i < lit { on } else { LINE });
     }
@@ -287,7 +303,7 @@ pub fn key_label(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: 
             _ => (part, None),
         };
         if draw {
-            px += lcd.text4_rows(px, baseline, text, &UI_12B, TEXT, bg, y0, y1);
+            px += lcd.text4_rows(px, baseline, text, &UI_12B, KEYS, bg, y0, y1);
         } else {
             px += text4_width(text, &UI_12B);
         }
@@ -295,7 +311,7 @@ pub fn key_label(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: 
             if draw {
                 lcd.fill(px, y0, 7, y1 - y0, bg);
                 let dir = [0, 1, 3, 2][(c - 0x18) as usize];
-                lcd.tri(px, baseline - 7, 6, dir, TEXT);
+                lcd.tri(px, baseline - 7, 6, dir, KEYS);
             }
             px += 7;
         }
@@ -338,7 +354,7 @@ pub fn hint_bar(lcd: &mut impl Panel, items: &[(&str, &str)]) {
 
 fn hint_bar_now(lcd: &mut impl Panel, items: &[(&str, &str)]) {
     let base = HINT_Y + 15; // text rows HINT_Y + 2 .. HINT_Y + 19
-    lcd.fill(0, HINT_Y, 240, 1, LINE);
+    lcd.fill(0, HINT_Y, 240, 1, RULE);
     lcd.fill(0, HINT_Y + 1, 240, 1, BG);
     lcd.fill(0, HINT_Y + 19, 240, 1, BG);
     let n = items.len().min(HINT_MAX);
@@ -757,6 +773,9 @@ pub struct StatusBar {
     pub alert: bool,
     pub clock: Option<u16>,
     pub utc: bool,
+    /// The callsign, drawn in the clock's place while there's no time (SBAR-2); empty with none set. The slot holds
+    /// 6 characters (AX.25's, SETUP-13), so a longer callsign keeps its first 6.
+    pub call: Buf<6>,
     pub gps: GpsState,
     pub bt: bool,
     /// 0-4 bars.
@@ -783,13 +802,13 @@ impl StatusBar {
     /// Draws what differs from `old` (everything with None).
     pub fn draw(&self, lcd: &mut impl Panel, old: Option<&StatusBar>) {
         if old.is_none() {
-            lcd.fill(0, SBAR_H - 1, 240, 1, LINE);
+            lcd.fill(0, SBAR_H - 1, 240, 1, RULE);
         }
         // Each half drawn off-screen and sent once (DISP-25): it was blanked and drawn, which flickered.
         if old.is_none_or(|o| !self.left_eq(o)) {
             crate::canvas::banded(lcd, 0, 0, 98, SBAR_H - 1, BG, |b| self.draw_left(b));
         }
-        if old.is_none_or(|o| (o.clock, o.utc) != (self.clock, self.utc)) {
+        if old.is_none_or(|o| (o.clock, o.utc, o.call) != (self.clock, self.utc, self.call)) {
             let mut b = Buf::<8>::new();
             let t = match self.clock {
                 Some(m) => {
@@ -799,10 +818,11 @@ impl StatusBar {
                     }
                     b.as_bytes()
                 }
-                None => b"--:--",
+                // SBAR-2: no time, the callsign in its place (cut to the slot), or nothing.
+                None => self.call.as_bytes(),
             };
-            // 98..142: wide enough for `14:32Z` (41 px), still centred on 120 (SBAR-2).
-            field(lcd, 98, 44, 0, SBAR_H - 1, 14, Align::Center, t, &UI_12B, TEXT, BG);
+            // 98..142: wide enough for `14:32Z` (41 px) or a 6-character callsign, still centred on 120 (SBAR-2).
+            field(lcd, 98, 44, 0, SBAR_H - 1, 14, Align::Center, t, &UI_12B, KEYS, BG);
         }
         if old.is_none_or(|o| !self.right_eq(o)) {
             crate::canvas::banded(lcd, 142, 0, 98, SBAR_H - 1, BG, |b| self.draw_right(b));
@@ -863,7 +883,7 @@ impl StatusBar {
         lcd.fill(142, 0, 98, SBAR_H - 1, BG);
         // Battery at the right edge (SBAR-9): body 17 x 10 and a nub.
         let c = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { SUB };
-        let fillc = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { GREEN };
+        let fillc = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { BATT };
         if !(self.battery_cutoff && self.blink_off) {
             lcd.frame_r(212, 5, 17, 10, 1, c);
             lcd.fill(229, 8, 2, 4, c);

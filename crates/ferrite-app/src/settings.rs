@@ -85,7 +85,7 @@ pub const CLOCKS: [&str; 2] = ["24 h", "12 h"];
 pub const AGC_MAX: u8 = 10;
 pub const UNITS: [&str; 3] = ["Metric", "Imperial", "Nautical"];
 pub const LAYOUTS: [&str; 3] = ["Watch", "Single + scope", "Watch + activity"];
-pub const THEMES: [&str; 3] = ["Dark", "Daylight", "Night red"];
+pub const THEMES: [&str; 4] = ["Dark", "Daylight", "Night red", "Cyberpunk"];
 pub const PIN_MODES: [&str; 3] = ["Off", "At power on", "Power on + unlock"];
 pub const ON_OFF: [&str; 2] = ["Off", "On"];
 /// Power-on message (0 7 3 2): what the logo screen shows under the version (BOOT-9).

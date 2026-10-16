@@ -95,7 +95,7 @@ fn shot_jump(i: usize) -> Vec<u32> {
     r.sim.screen_rgb()
 }
 
-/// Home in layout `layout` (0-2) and theme `theme` (0 dark, 1 daylight, 2 night red).
+/// Home in layout `layout` (0-2) and theme `theme` (0 dark, 1 daylight, 2 night red, 3 cyberpunk).
 fn shot_home(layout: u8, theme: u8) -> Vec<u32> {
     let mut r = Radio::new();
     r.sim.app_mut().settings_mut().theme = theme;
@@ -125,7 +125,7 @@ fn every_screen_matches_its_golden() {
 fn home_layouts_and_themes_match_their_goldens() {
     let mut failures = Vec::new();
     for layout in 0..3u8 {
-        for (theme, tname) in ["dark", "daylight", "night"].iter().enumerate() {
+        for (theme, tname) in ["dark", "daylight", "night", "cyber"].iter().enumerate() {
             let name = format!("home-layout{layout}-{tname}");
             failures.extend(check(&name, &shot_home(layout, theme as u8)));
         }

@@ -2043,3 +2043,91 @@ fn squelch_readback_follows_the_signal() {
     assert!(l.contains("open=1") && !l.contains("s=\"S1\"") && l.contains("signal +"), "{l}");
     t.app.key_up(Key::Side(1), t.t, &s);
 }
+
+/// SBAR-2: with no time source the callsign stands in the clock's place (nothing with none set); a clock wins
+/// over it; the readback's `bar` carries it as `call`.
+#[test]
+fn bar_callsign_without_a_clock() {
+    let t = ready();
+    let none = Device::default();
+    assert_eq!(none.clock_min, None);
+    assert!(t.app.status_bar(&t.live, &none).call.is_empty(), "no callsign set: nothing");
+    t.app.set.set_callsign(b"ve7abc");
+    assert_eq!(t.app.status_bar(&t.live, &none).call.as_bytes(), b"VE7ABC");
+    let timed = Device { clock_min: Some(600), ..Default::default() };
+    let sb = t.app.status_bar(&t.live, &timed);
+    assert!(sb.call.is_empty(), "a clock wins");
+    assert!(line_of(&t, "bar ").contains(" clock=- utc=0 call=\"VE7ABC\""), "{}", line_of(&t, "bar "));
+    // drawn centred where the clock goes
+    let mut fb = FrameBuffer::new();
+    t.app.status_bar(&t.live, &none).draw(&mut fb, None);
+    let lit = (98..142).filter(|&x| (2..18).any(|y| fb.at(x, y) == ferrite_ui::theme::map(ferrite_ui::gfx::TEXT))).count();
+    assert!(lit > 20, "the callsign drawn in the clock's slot ({lit} columns)");
+}
+
+/// MENU-31: OK (or its digit) on a frequency setting opens the frequency entry box; the digits as on home, OK or a
+/// whole frequency keeps it and BACK returns to the list; a frequency outside the setting's range is refused with the
+/// digits left to fix. 0 5 7 1 (APRS) and 0 4 2 2 (pager); a range preset's edges the same way.
+#[test]
+fn frequency_settings_open_the_entry_box() {
+    use crate::screens::entry::{EntryFor, FreqSet};
+    let mut t = ready();
+    menu0(&mut t, &[5, 7, 1]);
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::Setting(FreqSet::Aprs)), "{:?}", t.app.screen());
+    for d in [1, 4, 5, 4, 9, 5] {
+        t.tap(Key::Digit(d));
+    }
+    if matches!(t.app.screen(), Screen::Entry(_)) {
+        t.tap(Key::Menu);
+    }
+    assert_eq!(t.app.aprs_freq(), mhz(145) + 49_500);
+    assert!(matches!(t.app.screen(), Screen::Group(_)), "back on the list: {:?}", t.app.screen());
+    // out of range: refused, the entry stays with its digits
+    t.hold(Key::Exit);
+    menu0(&mut t, &[5, 7, 1]);
+    for d in [4, 4, 6] {
+        t.tap(Key::Digit(d));
+    }
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.n == 3), "refused: still typing ({:?})", t.app.screen());
+    assert_eq!(t.app.aprs_freq(), mhz(145) + 49_500, "unchanged");
+    // off the 5 kHz grid
+    for _ in 0..3 {
+        t.tap(Key::Exit);
+    }
+    for d in [1, 4, 4, 3, 9, 1] {
+        t.tap(Key::Digit(d));
+    }
+    t.tap(Key::Menu);
+    assert_eq!(t.app.aprs_freq(), mhz(145) + 49_500, "144.391 is off the grid");
+    // the pager
+    t.hold(Key::Exit);
+    menu0(&mut t, &[4, 2, 2]);
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::Setting(FreqSet::Pager)));
+    for d in [4, 3, 9, 9, 8, 7, 5] {
+        t.tap(Key::Digit(d));
+    }
+    if matches!(t.app.screen(), Screen::Entry(_)) {
+        t.tap(Key::Menu);
+    }
+    assert_eq!(t.app.set.pocsag_freq, mhz(439) + 98_750);
+    // BACK on an empty box leaves without a change
+    t.hold(Key::Exit);
+    menu0(&mut t, &[4, 2, 2]);
+    t.tap(Key::Exit);
+    assert!(matches!(t.app.screen(), Screen::Group(_)));
+    assert_eq!(t.app.set.pocsag_freq, mhz(439) + 98_750);
+}
+
+/// MENU-31: a range preset's edges take a typed frequency with the knob's checks: start under end, 18-1300 MHz,
+/// never across 18 or 64 MHz (SCAN-14).
+#[test]
+fn range_edges_typed() {
+    use crate::screens::entry::range_edge;
+    let p = crate::data::RangePreset { name: Buf::new(), start: mhz(144), end: mhz(148), step: 0, mode: 0, narrow: false, skips: 0, resume: 0 };
+    assert_eq!(range_edge(p, true, mhz(145)).map(|q| q.start), Ok(mhz(145)));
+    assert_eq!(range_edge(p, false, mhz(150)).map(|q| q.end), Ok(mhz(150)));
+    assert!(range_edge(p, true, mhz(149)).is_err(), "start over end");
+    assert!(range_edge(p, false, mhz(1400)).is_err(), "over 1300");
+    assert!(range_edge(p, true, mhz(50)).is_err(), "across 64 MHz");
+}

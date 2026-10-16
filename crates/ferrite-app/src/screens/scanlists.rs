@@ -129,6 +129,12 @@ impl View for ScanLists {
             // MENU-23: the shared confirm asks.
             (Key::Star, Short, Page::Presets) if n > 0 => return super::confirm::ask(app, super::confirm::Ask::DeletePreset(self.cur.sel as u8)),
             (Key::Menu, Short, Page::Edit(0)) => return super::text::open(app, super::text::TextFor::Preset(self.cur.sel as u8), store),
+            // MENU-31: OK on an edge types it in the frequency entry box; the knob and ◀▶ still step it.
+            (Key::Menu, Short, Page::Edit(r @ (1 | 2))) => {
+                let i = self.cur.sel as u8;
+                let fs = if r == 1 { super::entry::FreqSet::RangeStart(i) } else { super::entry::FreqSet::RangeEnd(i) };
+                return super::entry::open_setting(app, fs);
+            }
             // C13: OK lets one back in, # clears them all (RAM only, this scan: no confirm).
             (Key::Menu, Short, Page::Skips) if n > 0 => {
                 d.request(Op::Unskip(self.cur.sel));
@@ -296,6 +302,7 @@ impl View for ScanLists {
     fn hints(self, _: &App) -> Hints {
         match self.page {
             Page::Presets => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
+            Page::Edit(1 | 2) => Hints::new(&[("OK", "Type"), ("Knob", "Change"), ("BACK", "Done")]), // MENU-31
             Page::Edit(_) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("BACK", "Done")]),
             Page::Skips => Hints::new(&[("OK", "Unskip"), ("#", "Clear all"), ("BACK", "Back")]),
         }

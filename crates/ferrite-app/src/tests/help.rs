@@ -2,7 +2,7 @@
 //! key card's rows fitting one line each.
 
 use super::T;
-use crate::screens::help::{Help, ACTION_W, ACTION_X, HOME_KEYS, MENU_NOS, SIDE_KEYS};
+use crate::screens::help::{Help, ACTION_W, ACTION_X, HOLD_KEYS, HOME_KEYS, MENU_NOS, SIDE_KEYS};
 use crate::screens::info::{Info, Page};
 use crate::screens::nav::Dest;
 use crate::screens::shortcut::SHORTCUTS;
@@ -118,7 +118,8 @@ fn key_rows_fit_one_line() {
     }
 }
 
-/// HELP-4: the hold digits come from the shortcut list's own table (MENU 0 9 1 4, KEY-21), one row each.
+/// HELP-1, HELP-4: the Holds page lists the hold digits from the shortcut list's own table (MENU 0 9 1 4, KEY-21),
+/// then hold * and hold #, one row each; its name fits the status bar unshortened.
 #[test]
 fn help_digits_are_the_shortcut_table() {
     let mut t = T::new();
@@ -133,5 +134,10 @@ fn help_digits_are_the_shortcut_table() {
         assert!(text4_width(s.as_bytes(), &UI_12) <= ACTION_W, "{s} fits");
     }
     assert_eq!(SHORTCUTS.len(), 10);
+    assert_eq!(HOLD_KEYS.map(|r| r.0), ["*", "#"]);
+    for (_, a) in HOLD_KEYS {
+        assert!(text4_width(a.as_bytes(), &UI_12) <= ACTION_W, "{a} fits");
+    }
+    assert_eq!(crate::screens::short_title("Holds"), "Holds");
 }
 

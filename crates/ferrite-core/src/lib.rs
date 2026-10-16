@@ -12,6 +12,7 @@ extern crate std;
 
 pub mod acc;
 pub mod audio;
+pub mod battery;
 pub mod chipid;
 pub mod cmdq;
 pub mod sha256;

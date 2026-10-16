@@ -244,6 +244,8 @@ struct Radio {
     /// When each chip's REG_37 supplies came on (ms), None while they are off: what is left of the wake settle
     /// counts from here, so a chip woken a tick early by the hop is tuned at once.
     woke: [Option<u32>; 2],
+    /// PWR-21.6: chips asleep beside a broadcast with their REG_37 supplies left on (bit per chip).
+    ldo_kept: u8,
     /// Slots whose chip stays awake (APRS mode's C: [`RadioCmd::Awake`], decision 111).
     keep: u8,
     /// The APRS slot (C while APRS mode, KISS or beacons hold it: [`RadioCmd::AprsSlot`]): its chip listens with
@@ -668,6 +670,7 @@ pub async fn task() {
         maybe_awake: 0,
         settle: Settle::DEFAULT,
         woke: [None; 2],
+        ldo_kept: 0,
         keep: 0,
         aprs_slots: 0,
         floor: [-125; 2],

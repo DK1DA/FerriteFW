@@ -39,6 +39,107 @@ pub enum EntryFor {
     SplitTx,
     /// The band scope's centre (SCOPE-3).
     ScopeCentre,
+    /// A setting that holds a frequency (MENU-31): OK keeps it when it is in the setting's range.
+    Setting(FreqSet),
+}
+
+/// The settings that hold a frequency, each typed in this one entry box (MENU-31), and by the terminal's `set`
+/// with the same checks (TERM-12).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FreqSet {
+    /// 0 5 7 1, the APRS frequency (64-300 MHz, 5 kHz steps).
+    Aprs,
+    /// 0 4 2 2, the pager frequency (136-520 MHz).
+    Pager,
+    /// A range preset's start or end (0 1 7, A11; 18-1300 MHz).
+    RangeStart(u8),
+    RangeEnd(u8),
+}
+
+impl FreqSet {
+    /// The settings among them (not a store's record): [`FreqSet::set`] without the store, for the terminal.
+    pub fn set_setting(self, app: &mut App, f: Freq10) -> Result<(), &'static str> {
+        match self {
+            FreqSet::Aprs => app.set_aprs_freq(f),
+            FreqSet::Pager if !(mhz(136)..=mhz(520)).contains(&f) => Err("Out of range: pagers take 136-520 MHz"),
+            FreqSet::Pager => {
+                app.set.pocsag_freq = f; // saved with the settings, as the knob's change
+                Ok(())
+            }
+            _ => Err("Not a setting: a range edge is in the store"),
+        }
+    }
+}
+
+/// MENU-31: a range preset with its start (or end) at `f`, with the knob's checks: 18-1300 MHz, start under end,
+/// never across 18 or 64 MHz (SCAN-14).
+pub(crate) fn range_edge(mut p: crate::data::RangePreset, start: bool, f: Freq10) -> Result<crate::data::RangePreset, &'static str> {
+    if !(LO..=HI).contains(&f) {
+        return Err("Out of range: ranges take 18-1300 MHz");
+    }
+    if start {
+        p.start = f;
+    } else {
+        p.end = f;
+    }
+    if p.start >= p.end {
+        return Err("Start under end: the range runs upward");
+    }
+    if [mhz(18), mhz(64)].iter().any(|&e| p.start < e && p.end > e) {
+        return Err("Can't span 18 or 64 MHz: one side only");
+    }
+    Ok(p)
+}
+
+/// MENU-31: the entry box for a frequency setting, empty (the setting's value shows under it), BACK returning to
+/// the screen that opened it.
+pub(crate) fn open_setting(app: &mut App, fs: FreqSet) {
+    app.open_screen(Screen::Entry(Entry::new(EntryFor::Setting(fs), None)));
+}
+
+impl FreqSet {
+    /// The entry's heading.
+    pub fn label(self) -> &'static [u8] {
+        match self {
+            FreqSet::Aprs => b"APRS frequency, MHz",
+            FreqSet::Pager => b"Pager frequency, MHz",
+            FreqSet::RangeStart(_) => b"Range start, MHz",
+            FreqSet::RangeEnd(_) => b"Range end, MHz",
+        }
+    }
+
+    /// What it takes, for the entry's row.
+    pub fn takes(self) -> &'static str {
+        match self {
+            FreqSet::Aprs => "64-300 MHz, 5k",
+            FreqSet::Pager => "136-520 MHz",
+            FreqSet::RangeStart(_) | FreqSet::RangeEnd(_) => "18-1300 MHz",
+        }
+    }
+
+    /// The value now.
+    pub fn current(self, app: &App, store: &impl ChannelStore) -> Option<Freq10> {
+        match self {
+            FreqSet::Aprs => Some(app.aprs_freq()),
+            FreqSet::Pager => Some(app.set.pocsag_freq),
+            FreqSet::RangeStart(i) => store.data().preset(i).map(|p| p.start),
+            FreqSet::RangeEnd(i) => store.data().preset(i).map(|p| p.end),
+        }
+    }
+
+    /// Sets it to `f`, or says why not as "head: body" (nothing changes then).
+    pub fn set(self, app: &mut App, store: &impl ChannelStore, f: Freq10) -> Result<(), &'static str> {
+        match self {
+            FreqSet::Aprs | FreqSet::Pager => self.set_setting(app, f),
+            FreqSet::RangeStart(i) | FreqSet::RangeEnd(i) => {
+                let data = store.data();
+                let Some(p) = data.preset(i) else { return Err("No preset: deleted meanwhile") };
+                let p = range_edge(p, matches!(self, FreqSet::RangeStart(_)), f)?;
+                data.request(crate::data::Op::Preset(i, p));
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -333,6 +434,7 @@ impl View for Entry {
                     EntryFor::Repeater => b"Repeater output, MHz",
                     EntryFor::SplitTx => b"Split: TX frequency, MHz",
                     EntryFor::ScopeCentre => b"Scope centre, MHz",
+                    EntryFor::Setting(fs) => fs.label(),
                 };
                 w::field(lcd, 28, 204, 24, 41, 37, Align::Left, what, &UI_12, SUB, BG);
                 // As home shows a frequency: MHz and three decimals big, the 10 Hz digits small, so the size never
@@ -353,7 +455,16 @@ impl View for Entry {
         // The rows under it: what the digits mean.
         let mut rows: [(&[u8], Buf<40>, u16); 4] = [(b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT)];
         let mut note: &[u8] = b"";
-        if self.freq_mode() {
+        if let EntryFor::Setting(fs) = self.to {
+            // MENU-31: what the setting holds now and what it takes; no band, step or transmit rows
+            rows[0].0 = b"Now";
+            match fs.current(app, cx.store) {
+                Some(f) => rows[0].1.set(w::freq3(f).as_bytes()),
+                None => rows[0].1.set(b"-"),
+            }
+            rows[1].0 = b"Takes";
+            rows[1].1.set(fs.takes().as_bytes());
+        } else if self.freq_mode() {
             if let Some(f) = self.freq() {
                 // VFO-12: tuned exactly as typed; the step row says whether it sits on the step's grid.
                 rows[0].0 = b"Band";
@@ -473,6 +584,16 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
         return;
     }
     let Some(f) = e.freq() else { return };
+    if let EntryFor::Setting(fs) = e.to {
+        // MENU-31: the setting's own range; a refusal leaves the digits on show to fix
+        return match fs.set(app, store, f) {
+            Ok(()) => app.back(),
+            Err(why) => {
+                let (head, body) = why.split_once(": ").unwrap_or((why, ""));
+                app.show_toast(head.as_bytes(), body.as_bytes(), false)
+            }
+        };
+    }
     if let Some(why) = refuse(f) {
         // VFO-21: the entry stays open with its digits, so they can be fixed
         let (head, body) = why.split_once(": ").unwrap_or((why, ""));
@@ -510,6 +631,6 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
                 app.screen = super::scope::recentre(app, s, f);
             }
         }
-        EntryFor::Channel => {}
+        EntryFor::Channel | EntryFor::Setting(_) => {}
     }
 }

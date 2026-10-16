@@ -192,9 +192,11 @@ impl App {
             alert: self.alert & crate::ALERT_UNREAD != 0,
             clock: dev.clock_min,
             utc: dev.utc,
+            // SBAR-2: the callsign stands in for a clock with no time source.
+            call: if dev.clock_min.is_none() { Buf::from(self.set.callsign.as_bytes()) } else { Buf::new() },
             gps: dev.gps,
             bt: dev.bt,
-            battery: ((dev.battery_pct as u32 + 12) / 25).clamp(1, 4) as u8,
+            battery: ferrite_core::battery::bars(dev.battery_pct), // SBAR-9: stock's bars, at the thresholds
             battery_low: dev.battery_low,
             battery_cutoff: dev.battery_cutoff,
             blink_off: dev.battery_cutoff && (self.now / 500) % 2 == 1,

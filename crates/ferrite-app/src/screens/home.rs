@@ -161,7 +161,7 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
         let waiting = data.beacon().waiting;
         if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, 1u8)), true) {
             redraw_box!(clear, lcd, (15, y + 28, 211, 49, SURFACE), {
-                w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+                w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, FREQ, SUB, SURFACE);
             });
         }
         // The bottom line's facts, the power at the right.
@@ -443,7 +443,7 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
     } else if drawn_before && app.drawn.card[p] == geom {
         // Only the border's colour changed (RX, idle): redraw the border alone. Redrawing the whole card blanked
         // its content, which flickered on the radio (DISP-25).
-        lcd.frame_r(6, y, 228, h, 3, border);
+        w::card_border(lcd, 6, y, 228, h, border, big, BG);
     } else {
         app.drawn.card[p] = geom;
         // The background only where the rounded corners leave it showing (3 px squares), not the whole card.
@@ -451,7 +451,7 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
             lcd.fill(cx, cy, 3, 3, BG);
         }
         lcd.fill_r(6, y, 228, h, 3, SURFACE);
-        lcd.frame_r(6, y, 228, h, 3, border);
+        w::card_border(lcd, 6, y, 228, h, border, big, BG);
         for r in [R_HEAD, R_FREQ, R_INFO, R_SUB] {
             app.drawn.hash[r + p] = 0;
         }
@@ -494,7 +494,7 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
     let wide = !ht.is_empty();
     let ww = if wide { (text4_width(ht.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { 0 };
     if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, &ht))) {
-        w::badge(lcd, 14, hy + 1, s, big, SURFACE);
+        w::badge(lcd, 14, hy + 1, s, big, BG);
         lcd.fill(28, hy, 6, 17, SURFACE);
         // HOME-4a: the header takes what the state beside it leaves (a 16-character zone name fits beside an idle
         // state or an RX tag), never less than 120 px; clipped at a character, never wrapped.
@@ -553,7 +553,7 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
         if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, name)), name.is_empty()) {
             redraw_box!(clear, lcd, (15, y + 28, 211, 49, SURFACE), {
                 if name.is_empty() {
-                    w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, TEXT, SUB, SURFACE);
+                    w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, FREQ, SUB, SURFACE);
                 } else {
                     // 26 px when the whole name fits (13 characters), else 22 px (16 always fit).
                     let nb = name.as_bytes();

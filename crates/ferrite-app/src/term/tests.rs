@@ -785,7 +785,7 @@ fn set_short_forms() {
     assert_eq!(r.app.set.brightness_night, 1, "Night red has its own level");
     let (theme, bs) = (r.app.set.theme, r.app.bsave);
     for (cmd, says) in [
-        ("set 0 7 1 d", "Theme: one of Night red, Dark, Daylight"),
+        ("set 0 7 1 d", "Theme: one of Night red, Cyberpunk, Dark, Daylight"),
         ("set 0 7 7 level", "Battery Save: one of"),
         ("set 0 7 7 4", "Battery Save: one of"),
         ("set 0 7 4 1 7", "Timeout: one of"),
@@ -2087,4 +2087,21 @@ fn fixed_position_over_the_terminal() {
     assert!(r.bottom().contains("a grid square, or none"), "{}", r.bottom());
     r.cmd("set 0 6 9 None");
     assert!(!r.app.set.fixed_on, "{}", r.bottom());
+}
+
+/// MENU-31, TERM-12: `set` takes a frequency setting typed in MHz, with the entry box's checks.
+#[test]
+fn set_frequency_settings() {
+    let mut r = Rig::main();
+    r.cmd("set 0 5 7 1 145.495");
+    assert!(r.bottom().contains("0 5 7 1 Frequency: 145.495"), "{}", r.bottom());
+    assert_eq!(r.app.aprs_freq(), ferrite_core::freq::mhz(145) + 49_500);
+    r.cmd("set 0 5 7 1 446.000");
+    assert!(r.bottom().contains("APRS takes 64-300 MHz"), "{}", r.bottom());
+    assert_eq!(r.app.aprs_freq(), ferrite_core::freq::mhz(145) + 49_500, "a refusal changes nothing");
+    r.cmd("set 0 4 2 2 439.9875");
+    assert!(r.bottom().contains("0 4 2 2 Frequency: 439.987"), "{}", r.bottom());
+    assert_eq!(r.app.set.pocsag_freq, ferrite_core::freq::mhz(439) + 98_750);
+    r.cmd("set 0 4 2 2 439.987"); // as `get` and `dump` show it: kept, not cut to 439.98700
+    assert_eq!(r.app.set.pocsag_freq, ferrite_core::freq::mhz(439) + 98_750);
 }

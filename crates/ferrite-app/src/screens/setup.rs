@@ -431,7 +431,7 @@ impl View for Setup {
                     w::field(lcd, 10, 220, 196, 212, 208, Align::Center, LAYOUTS[layout as usize % 3].as_bytes(), &UI_12, TEXT, BG);
                 }
                 if app.dirty(R_ROW + 1, hash(&(theme, row == 1))) {
-                    choice(lcd, 222, 23, b"Theme", THEMES[theme as usize % 3].as_bytes(), row == 1);
+                    choice(lcd, 222, 23, b"Theme", THEMES[theme as usize % THEMES.len()].as_bytes(), row == 1);
                 }
             }
             Ask::BatterySave => {
@@ -487,7 +487,7 @@ fn summary(app: &App, n: u16) -> ([Buf<32>; 7], Buf<160>) {
     if s.clock_gps {
         v[3].push(b", from GPS");
     }
-    let _ = uwrite!(v[4], "{} \u{b7} {}", LAYOUTS[s.layout as usize % 3], THEMES[s.theme as usize % 3]);
+    let _ = uwrite!(v[4], "{} \u{b7} {}", LAYOUTS[s.layout as usize % 3], THEMES[s.theme as usize % THEMES.len()]);
     let mut bs = Buf::<16>::new();
     app.item_text(Item::BatterySave, true, &mut bs);
     v[5].set(bs.as_bytes());
@@ -538,7 +538,7 @@ impl Setup {
             }
             Ask::Look => {
                 row(b"Home", LAYOUTS[app.set.layout as usize % 3].as_bytes(), self.row == 0);
-                row(b"Theme", THEMES[app.set.theme as usize % 3].as_bytes(), self.row == 1);
+                row(b"Theme", THEMES[app.set.theme as usize % THEMES.len()].as_bytes(), self.row == 1);
             }
             Ask::BatterySave => {
                 for (i, (name, on, _)) in SAVE.iter().enumerate() {

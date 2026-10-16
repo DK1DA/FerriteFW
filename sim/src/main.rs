@@ -505,8 +505,8 @@ fn main() {
     themed(scale);
 }
 
-/// A few screens in night red and daylight (0 7 1): boot, home, quick settings, transmit, refused, scope and the
-/// shortcut popup, as `<name>-night.png` / `<name>-day.png`.
+/// A few screens in night red, daylight and cyberpunk (0 7 1): boot, home, quick settings, transmit, refused, scope
+/// and the shortcut popup, as `<name>-night.png` / `<name>-day.png` / `<name>-cyber.png`.
 fn themed(scale: u32) {
     let checks = [
         Check { label: "MCU", value: "AT32F403A", state: State::Ok },
@@ -516,7 +516,7 @@ fn themed(scale: u32) {
         Check { label: "SI4732", value: "not tested", state: State::Off },
         Check { label: "Calibration", value: "", state: State::Pending },
     ];
-    for (theme, suffix) in [(ferrite_ui::theme::NIGHT_RED, "night"), (ferrite_ui::theme::DAYLIGHT, "day")] {
+    for (theme, suffix) in [(ferrite_ui::theme::NIGHT_RED, "night"), (ferrite_ui::theme::DAYLIGHT, "day"), (ferrite_ui::theme::CYBERPUNK, "cyber")] {
         let name = |n: &str| format!("{n}-{suffix}");
         let mut fb = FrameBuffer::new();
         ferrite_ui::theme::set(theme);

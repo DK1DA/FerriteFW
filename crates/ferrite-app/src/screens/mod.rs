@@ -442,7 +442,6 @@ pub(crate) fn short_title(name: &str) -> &str {
         "Self-test" => "Checks",
         "Home keys" => "Keys", // HELP-3
         "Side keys" => "Side+PTT",
-        "Shortcuts" => "Hold 0-9", // HELP-4
         "Menu numbers" => "Menu nos", // HELP-5
         n => n,
     }

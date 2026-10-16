@@ -140,7 +140,7 @@ pub fn banded<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, mu
     }
     let w = w.min(BAND_PX as i32);
     let rows = (BAND_PX as i32 / w).max(1);
-    let bg = crate::theme::map(bg);
+    let bg = crate::theme::map_bg(bg);
     let mut buf = [0u16; BAND_PX];
     let mut by = y;
     while by < y + h {

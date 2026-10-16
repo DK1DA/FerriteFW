@@ -18,7 +18,29 @@ def unbuilt_group(t, path):
 
 
 # Settings typed or picked on a page of their own (OK opens them): the knob doesn't step them in the group.
-TYPED = {"0 4 2 2", "0 5 6 1", "0 5 6 2", "0 5 8 2", "0 4 2 3"}
+TYPED = {"0 4 2 2", "0 5 6 1", "0 5 6 2", "0 5 7 1", "0 5 8 2", "0 4 2 3"}
+
+
+@test("MENU-31", "TERM-12", pages=("Entry", "Group"))
+def frequency_setting_typed(t):
+    """MENU 0 5 7 1 opens the frequency entry box; 1 4 5 4 9 5 types 145.495 and keeps it (back on the list);
+    446 is refused with its digits left; the terminal's `set 0 5 7 1` takes MHz too."""
+    old = t.get("0 5 7 1")
+    t.home()
+    u = t.keys("MENU 0 5 7 1")
+    t.eq(u.id, "Entry", "the frequency entry box")
+    u = t.keys("1 4 5 4 9 5", settle=0.3)
+    if u.id == "Entry":
+        u = t.keys("MENU", settle=0.3)
+    t.eq(u.id, "Group", "kept: back on the list")
+    t.eq(t.get("0 5 7 1"), "145.495", "the setting has it")
+    t.home()
+    u = t.keys("MENU 0 5 7 1 4 4 6 MENU", settle=0.3)
+    t.eq(u.id, "Entry", "446 refused: still typing")
+    t.eq(t.get("0 5 7 1"), "145.495", "unchanged")
+    t.home()
+    t.set("0 5 7 1", old)
+    t.eq(t.get("0 5 7 1"), old, "set puts it back")
 
 
 @test("MENU-5", "MENU-7", "MENU-12", "MENU-15", "MENU-16", "MENU-21", pages=("Fm", "Group", "Text"))
@@ -42,7 +64,7 @@ def every_setting_reachable_and_live(t):
                 continue
             misrouted.append(f"{path} -> {(u['help'] or {}).get('args', ['?'])[0]}")
             u = t.keys(p[3], settle=0.15)  # unbuilt_group left it on the opened group
-        if path in TYPED and u.id == "Text":
+        if path in TYPED and u.id in ("Text", "Entry"):
             via.append(f"{path} {name} (typed)")
             continue
         if u.id != "Group":

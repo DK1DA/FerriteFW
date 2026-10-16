@@ -239,8 +239,8 @@ pub(crate) fn def(p: Page) -> PageDef {
             let (title, hints): (_, &'static [(&str, &str)]) = match h {
                 Help::Manual => ("Manual", &[(ARROWS_LR, "Keys"), ("BACK", "Back")]),
                 Help::HomeKeys => ("Home keys", &[(ARROWS_LR, "Side keys"), ("BACK", "Back")]),
-                Help::SideKeys => ("Side keys", &[(ARROWS_LR, "Shortcuts"), ("BACK", "Back")]),
-                Help::Digits => ("Shortcuts", &[(ARROWS_LR, "Menu numbers"), ("BACK", "Back")]),
+                Help::SideKeys => ("Side keys", &[(ARROWS_LR, "Holds"), ("BACK", "Back")]),
+                Help::Digits => ("Holds", &[(ARROWS_LR, "Menu numbers"), ("BACK", "Back")]),
                 Help::MenuNos => ("Menu numbers", &[(ARROWS_LR, "Self-test"), ("BACK", "Back")]),
             };
             PageDef { title, rows: &NONE, note: "", hints }
