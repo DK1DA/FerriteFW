@@ -1049,6 +1049,39 @@ mod tests {
         assert!(steps >= 1_000 / 23 - 1 && gap >= MIN_GAP_MS, "{steps} steps, gap {gap}");
     }
 
+    /// SCAN-21 as built (`SCAN_WAKE_OFF` in the Radio task: the step-end wake hung the radio, decision 165), re-
+    /// measured Oct 15, 2026 with the 70 ms step (decision 166): the 10 ms tick alone, counted from each tick's end,
+    /// the scan's time its start. A step leaves on the first tick at least FAST_STEP_MS after the tick that tuned
+    /// it: with a tick costing under 5 ms that is the second tick, 20 ms plus two ticks' cost (2 ms: 24 ms, 41 a
+    /// second); 5 ms or more, the first (10 + cost). A false alarm (over the floor, no carrier) holds its step for
+    /// the 70 ms squelch check. Watch off, so the scan has its chip throughout: with a watched slot on the other
+    /// band the hop takes the chip away (150 ms of A's, 70 ms of B's) and the rate falls to 24-30 a second, which
+    /// is what the radio measured (27.2, 27.5).
+    #[test]
+    fn fast_pass_on_the_ten_ms_tick() {
+        let skipped = [];
+        let r = Range { lo: mhz(430), hi: mhz(450), step: 1_250, skipped: &skipped };
+        let rate = |cost: u64, every: u32| {
+            let mut s = Scan { fast: true, resume: Resume::Drop, ..Scan::new() };
+            s.start(0, 0);
+            let (mut started, mut ticked, mut steps) = (0u64, 0u64, 0u32);
+            while ticked < 10_000 {
+                let t = tick_wake(started, ticked, 10, None).max(ticked + 1);
+                started = t;
+                let over = s.check() == Check::Rssi && every > 0 && steps % every == every - 1;
+                steps += s.tick(&r, t as u32, over).tune.is_some() as u32;
+                ticked = t + cost;
+            }
+            steps / 10
+        };
+        for (cost, want) in [(1, 45), (2, 41), (3, 38), (4, 35), (5, 66)] {
+            assert_eq!(rate(cost, 0), want, "a quiet band, a tick of {cost} ms");
+        }
+        // One false alarm in 20 steps: each costs a 70 ms step, still over 30 a second at 2 ms a tick.
+        let fa = rate(2, 20);
+        assert!((30..41).contains(&fa), "{fa} steps a second with a false alarm in 20");
+    }
+
     #[test]
     fn fast_pass_confirms_with_the_squelch() {
         let skipped = [];

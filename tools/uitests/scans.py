@@ -46,10 +46,13 @@ def preset_editor_refuses_a_span_across_64(t):
 @test("SCAN-21", where="radio", pages=("Home", "Scan"))
 def range_scan_fast_pass_rate(t):
     """A band scan over a quiet stretch of 70 cm (nothing to stop on) steps at least 30 times a second (each step
-    reads the RSSI for 15 ms), measured from the active card's frequency over 4 s. Radio only: the simulator's bands
-    are full of stations."""
+    reads the RSSI for 15 ms), measured from the active card's frequency over 4 s, watch off (the runner puts it
+    back): a watched slot on the other band takes the chip for its turns and the rate falls to about 27 (the host
+    model, scan.rs `fast_pass_on_the_ten_ms_tick`; the radio's 27.2 and 27.5, Oct 15, 2026). Radio only: the
+    simulator's bands are full of stations."""
     stopped = t.stop_scans()
     try:
+        t.set("0 1 1", "Off")
         t.cmd("slot A vfo 433.0")
         t.cmd("slot A active")
         u = t.home()
