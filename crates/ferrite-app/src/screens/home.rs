@@ -429,7 +429,7 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
     }
     // Header: letter, VFO/CH/SCAN and band, the state at the right (HOME-4, HOME-5).
     let mut head = Buf::<32>::new();
-    app.head_text(s, live, &mut head);
+    app.head_text(s, live, cx.store, &mut head);
     let cfg = *app.slots[s as usize].cfg();
     if big && cfg.split && !lv.scanning {
         // A split's TX frequency takes the band's place in the header: its chip slot only says SPLIT.
@@ -465,7 +465,10 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
     if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, &ht))) {
         w::badge(lcd, 14, hy + 1, s, big, SURFACE);
         lcd.fill(28, hy, 6, 17, SURFACE);
-        let hw = if wide { 226 - ww - 34 } else { 120 };
+        // HOME-4a: the header takes what the state beside it leaves (a 16-character zone name fits beside an idle
+        // state or an RX tag), never less than 120 px; clipped at a character, never wrapped.
+        let hw = if wide { 226 - ww - 34 } else { (226 - 6 - head_right_w(big, state, &clr) - 34).max(120) };
+        let sx = 34 + hw;
         w::field(lcd, 34, hw, hy, hy + 17, hb, Align::Left, w::fit(head.as_bytes(), &UI_12, hw), &UI_12, SUB, SURFACE);
         if wide {
             let top = if big { y + 6 } else { hy };
@@ -473,22 +476,21 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
                 w::field(lcd, 226 - ww, ww, hy, hy + 17, hb, Align::Right, ht.as_bytes(), &UI_12, sc, SURFACE);
             });
         } else if big {
-            ferrite_ui::canvas::banded(lcd, 154, y + 6, 74, 18, SURFACE, |lcd| {
+            ferrite_ui::canvas::banded(lcd, sx, y + 6, 228 - sx, 18, SURFACE, |lcd| {
                 let tagged = matches!(state, "RX" | "MON" | "FM");
                 if tagged {
                     w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
                 } else if state != "idle" {
-                    w::field(lcd, 154, 72, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
+                    w::field(lcd, sx, 226 - sx, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
                 }
                 if !clr.is_empty() && (tagged || state == "idle") {
                     let right = if tagged { 194 } else { 226 };
-                    w::field(lcd, 154, right - 154, y + 7, y + 24, y + 20, Align::Right, clr.as_bytes(), &UI_12, AMBER, SURFACE);
+                    w::field(lcd, sx, right - sx, y + 7, y + 24, y + 20, Align::Right, clr.as_bytes(), &UI_12, AMBER, SURFACE);
                 }
             });
         } else {
-            let f = if state == "RX" { &UI_12B } else { &UI_12 };
-            let (t, c): (&[u8], u16) = if state == "idle" && !clr.is_empty() { (clr.as_bytes(), AMBER) } else { (state.as_bytes(), sc) };
-            w::field(lcd, 154, 72, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
+            let (t, c, f) = compact_state(state, &clr, sc);
+            w::field(lcd, sx, 226 - sx, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
         }
     }
     if aprs {
@@ -697,6 +699,27 @@ pub(crate) fn copy_to_vfo(app: &mut App) {
     app.show_toast(b"Copied to VFO", b"V/M: channel", false);
 }
 
+/// A compact card's header state: the clarifier in amber when idle with one, else the state (RX in bold).
+fn compact_state<'a>(state: &'a str, clr: &'a Buf<16>, sc: u16) -> (&'a [u8], u16, &'static ferrite_ui::font4::Font4) {
+    let f = if state == "RX" { &UI_12B } else { &UI_12 };
+    if state == "idle" && !clr.is_empty() { (clr.as_bytes(), AMBER, f) } else { (state.as_bytes(), sc, f) }
+}
+
+/// How wide the header's right side draws (HOME-4a): the state (a tag on the large card for RX, MON, FM; idle shows
+/// nothing there) and the clarifier or APRS note beside it, so the header can take the rest.
+pub(crate) fn head_right_w(big: bool, state: &str, clr: &Buf<16>) -> i32 {
+    if !big {
+        let (t, _, f) = compact_state(state, clr, 0);
+        return text4_width(t, f);
+    }
+    let cw = if clr.is_empty() { 0 } else { text4_width(clr.as_bytes(), &UI_12) };
+    match state {
+        "RX" | "MON" | "FM" => (text4_width(state.as_bytes(), &UI_12B) + 10).max(if cw > 0 { 32 + cw } else { 0 }),
+        "idle" => cw,
+        _ => text4_width(state.as_bytes(), &UI_12),
+    }
+}
+
 /// The first channel in a zone a home slot can sit on: not an HF channel (CHAN-26).
 fn first_slot_channel(store: &impl ChannelStore, z: u8) -> Option<u16> {
     (0..store.zone_len(z)).find(|&i| store.zone_at(z, i).is_some_and(|c| !c.is_hf()))
@@ -756,5 +779,25 @@ mod tests {
         // Reverse: it sends the RX tone and listens for the TX one.
         assert_eq!(show(0, d023n, true), "D023N");
         assert_eq!(show(d023n, 0, true), "R D023N");
+    }
+
+    /// HOME-4a (decision 178): "012 · " and a 16-character zone name fit the header whole beside the idle and the
+    /// tagged states (RX, MON, FM) on the large card and beside the compact cards' states; with a clarifier or the
+    /// APRS note beside a tag, the header keeps at least 120 px and the name is clipped at a character.
+    #[test]
+    fn zone_name_fits_the_card_header() {
+        let head = "999 \u{b7} WWWWWWWWWWWWWWWW";
+        let hw = |big: bool, state: &str, clr: &[u8]| (226 - 6 - super::head_right_w(big, state, &Buf::from(clr)) - 34).max(120);
+        let need = text4_width(head.as_bytes(), &UI_12);
+        for st in ["idle", "RX", "MON", "FM"] {
+            assert!(need <= hw(true, st, b""), "large card, {st}: {need} > {}", hw(true, st, b""));
+        }
+        // ("scanning" heads "SCAN · band": no zone name)
+        for st in ["idle", "RX", "TX", "MON"] {
+            assert!(need <= hw(false, st, b""), "compact card, {st}: {need} > {}", hw(false, st, b""));
+        }
+        assert!(hw(true, "RX", b"VHF shared") >= 120 && hw(false, "idle", b"CLR +2.5") >= 120);
+        // the single + scope layout's header (26..232 beside the state)
+        assert!(need <= (232 - 6 - super::head_right_w(true, "RX", &Buf::new()) - 26).max(140));
     }
 }

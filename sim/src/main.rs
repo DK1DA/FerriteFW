@@ -438,7 +438,7 @@ fn main() {
         ("browse-actions", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Menu, 100)]),
         ("browse-delete", Dest::Browse, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Up, 100), (Key::Menu, 100)]),
         ("zones", Dest::Zones, &[(Key::Down, 100)]),
-        ("zone-edit", Dest::Zones, &[(Key::Down, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Down, 100), (Key::Down, 100), (Key::Down, 100)]),
+        ("zone-edit", Dest::Zones, &[(Key::Down, 100), (Key::Slot, 100), (Key::Down, 100), (Key::Down, 100), (Key::Down, 100), (Key::Down, 100)]),
         ("zone-delete", Dest::Zones, &[(Key::Down, 100), (Key::Down, 100), (Key::Star, 100)]),
         ("range-presets", Dest::RangePresets, &[(Key::Down, 100)]),
         ("range-preset", Dest::RangePresets, &[(Key::Down, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Down, 100)]),

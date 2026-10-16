@@ -801,7 +801,7 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
     let _ = uwrite!(l, "card {}", letter(s) as char);
     kn(l, "active", (s == app.active) as u32);
     let mut head = Buf::<32>::new();
-    app.head_text(s, cx.live, &mut head);
+    app.head_text(s, cx.live, cx.store, &mut head);
     kq(l, "head", head.as_bytes());
     let state = app.state(s, cx.live).0;
     kq(l, "state", state.as_bytes());

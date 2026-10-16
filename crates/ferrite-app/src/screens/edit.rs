@@ -73,11 +73,11 @@ impl View for Edit {
         let (live, cell) = (cx.live, self.cell);
         let a = app.active;
         let mut head = Buf::<32>::new();
-        app.head_text(a, live, &mut head);
+        app.head_text(a, live, cx.store, &mut head);
         if app.dirty(R_TOP, hash(&(a, head))) {
             w::badge(lcd, 7, 26, a, true, BG);
             w::field(lcd, 21, 6, 25, 42, 38, Align::Left, b"", &UI_12, SUB, BG);
-            w::field(lcd, 27, 150, 25, 42, 38, Align::Left, head.as_bytes(), &UI_12, SUB, BG);
+            w::field(lcd, 27, 160, 25, 42, 38, Align::Left, w::fit(head.as_bytes(), &UI_12, 160), &UI_12, SUB, BG); // HOME-4a
             w::tag(lcd, 232, 25, b"EDIT", BLUE, BG); // EDIT-1
         }
         let f = app.shown_freq(a, live);

@@ -324,7 +324,7 @@ fn zone_delete_keeps_channels() {
 fn zone_editor_changes_live_and_resets() {
     let mut t = T::new();
     t.open(Dest::Zones);
-    t.tap(Key::Menu); // Local
+    t.tap(Key::Slot); // Local's editor (decision 178)
     assert_eq!(t.name(), "Zone editor");
     t.tap(Key::Down); // Scan all
     assert!(!t.s.zone_cfg(0).scan_all);
@@ -568,7 +568,7 @@ fn hints_fit() {
         (Dest::AprsHeard, &[(Key::Menu, 100), (Key::Menu, 800)]),
         (Dest::AprsMessages, &[(Key::Menu, 100), (Key::Menu, 100), (Key::Menu, 100)]),
         (Dest::Browse, &[(Key::Menu, 100), (Key::Menu, 100), (Key::Down, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Exit, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Exit, 100), (Key::Up, 100), (Key::Up, 100), (Key::Up, 100), (Key::Menu, 100)]),
-        (Dest::Zones, &[(Key::Star, 100), (Key::Exit, 100), (Key::Menu, 100)]),
+        (Dest::Zones, &[(Key::Star, 100), (Key::Exit, 100), (Key::Slot, 100)]),
         (Dest::RangePresets, &[(Key::Star, 100), (Key::Exit, 100), (Key::Menu, 100)]),
         (Dest::SkipList, &[]),
         (Dest::GpsPosition, &[(Key::Right, 100)]),
@@ -634,7 +634,7 @@ fn rename_goes_to_its_own_record() {
     // A zone, from the zone editor's first row.
     t.open(Dest::Zones);
     t.tap(Key::Down); // Repeaters
-    t.tap(Key::Menu); // its editor, Name row
+    t.tap(Key::Slot); // its editor, Name row
     t.tap(Key::Menu);
     assert_eq!(t.app.text.as_bytes(), b"Repeaters");
     t.type_ab();

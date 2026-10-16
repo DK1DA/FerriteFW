@@ -356,7 +356,7 @@ fn preview_columns_never_overflow() {
 }
 
 /// CHAN-29: ▲▼ go through the Nearby row and the zones, wrapping; OK on Nearby opens the browser's Nearby view;
-/// without the row, ▲ on the first zone wraps to the last. MENU, # and \* stay the list's (C11).
+/// without the row, ▲ on the first zone wraps to the last. SLOT, # and \* stay the list's (C11).
 #[test]
 fn keys_through_the_nearby_row() {
     let mut t = T::new();
@@ -395,10 +395,110 @@ fn keys_through_the_nearby_row() {
     assert!(t.zones().on_nearby());
     t.app.knob(2, t.t, &t.s);
     assert_eq!(t.zones().cur.sel, 1);
-    // MENU on a zone: its editor; # a new zone
-    t.tap(Key::Menu);
+    // SLOT on a zone: its editor (decision 178)
+    t.tap(Key::Slot);
     assert_eq!(t.app.screen().name(), "Zone editor");
     assert!(t.ui().iter().any(|l| l.starts_with("row 0 \"Scan all\" \"On\"")), "{:?}", t.ui());
+}
+
+fn toast(t: &T) -> Option<String> {
+    t.ui().into_iter().find(|l| l.starts_with("toast "))
+}
+
+/// CHAN-27, NAV-1 (decision 178): OK on a zone puts the active slot on its first listed channel in number order
+/// (CHAN-10) in channel mode and goes home, where ◀▶ go on to the next zone; the hint bar says OK Use, SLOT Edit.
+#[test]
+fn ok_on_a_zone_puts_the_slot_on_it() {
+    let mut t = T::new();
+    t.open();
+    assert_eq!(t.app.screen().hints(&t.app).as_slice(), [("OK", "Use"), ("SLOT", "Edit"), ("#", "New")]);
+    assert!(!t.app.slot(0).on_channel(), "A starts on its VFO");
+    t.tap(Key::Down); // Repeaters
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Home), "home: {}", t.app.screen().name());
+    let s = *t.app.slot(0);
+    assert!(s.on_channel());
+    assert_eq!((s.zone, s.ch.map(|c| c.num)), (1, Some(9)), "the zone's first channel, North hill");
+    assert_eq!(toast(&t).as_deref(), Some("toast \"Slot A\" \"Repeaters\""));
+    t.tap(Key::Right); // NAV-1: the next zone with channels (Empty is skipped)
+    assert_eq!(t.app.slot(0).zone, 3);
+}
+
+/// CHAN-27 (decision 178): the slot keeps the channel it last used in that zone (its zone and position, kept while it
+/// is on its VFO); another zone starts at its first channel; hidden channels are passed (CHAN-24) unless shown.
+#[test]
+fn ok_keeps_the_slots_channel_in_that_zone() {
+    let mut t = T::new();
+    t.app.set_channel(0, 1, 2, &t.s); // Downtown DCS
+    t.app.slots[0].vfo_mode = true;
+    t.open();
+    t.tap(Key::Down);
+    t.tap(Key::Menu);
+    let s = *t.app.slot(0);
+    assert_eq!((s.on_channel(), s.zone, s.pos), (true, 1, 2), "back on Downtown DCS");
+    // a channel hidden: OK on its zone passes it
+    t.s.data().request(Op::Hide(0, true));
+    t.open();
+    t.tap(Key::Menu); // Local
+    assert_eq!(t.app.slot(0).ch.map(|c| c.num), Some(1), "Calling 2 m is hidden: Calling 70 cm");
+    t.app.set.show_hidden = true;
+    t.app.slots[0].zone = 1;
+    t.open();
+    t.tap(Key::Menu);
+    assert_eq!(t.app.slot(0).ch.map(|c| c.num), Some(0), "shown with show hidden");
+}
+
+/// CHAN-27 (decision 178): OK on an empty zone says so and stays on the page; the slot is untouched.
+#[test]
+fn ok_on_an_empty_zone_says_so() {
+    let mut t = T::new();
+    t.open();
+    t.tap(Key::Down);
+    t.tap(Key::Down); // Empty
+    let before = (t.app.slot(0).vfo_mode, t.app.slot(0).vfo, t.app.slot(0).ch);
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen().name(), "Zones");
+    assert_eq!(toast(&t).as_deref(), Some("toast \"No channels\" \"in this zone\""));
+    assert_eq!((t.app.slot(0).vfo_mode, t.app.slot(0).vfo, t.app.slot(0).ch), before);
+}
+
+/// CHAN-27, EDIT-6 (decision 178): SLOT on a zone opens its editor and SLOT (or BACK) leaves it; on the Nearby row
+/// SLOT does nothing.
+#[test]
+fn slot_key_opens_the_zone_editor() {
+    let mut t = T::new();
+    t.open();
+    t.tap(Key::Slot);
+    assert_eq!(t.app.screen().name(), "Zone editor");
+    assert_eq!(t.app.active, 0, "SLOT here doesn't change the active slot");
+    t.tap(Key::Slot);
+    assert_eq!((t.app.screen().name(), t.zones().cur.sel), ("Zones", 0));
+    t.tap(Key::Up);
+    assert!(t.zones().on_nearby());
+    t.tap(Key::Slot);
+    assert!(t.zones().on_nearby() && t.zones().edit().is_none());
+}
+
+/// CHAN-27, APRS-19 (decision 178): with APRS mode on and C active, OK on a zone gives APRS-19's refusal and stays;
+/// channel-only mode (PIN-5, CHAN-16) still lets OK pick a zone.
+#[test]
+fn ok_refused_on_the_aprs_slot_and_allowed_channel_only() {
+    let mut t = T::new();
+    t.app.set_aprs_mode(true);
+    t.app.active = 2;
+    let before = (t.app.slot(2).vfo_mode, t.app.slot(2).vfo, t.app.slot(2).ch);
+    t.open();
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen().name(), "Zones");
+    assert!(toast(&t).is_some_and(|l| l.contains("APRS")), "{:?}", toast(&t));
+    assert_eq!((t.app.slot(2).vfo_mode, t.app.slot(2).vfo, t.app.slot(2).ch), before, "C untouched");
+    t.app.set_aprs_mode(false);
+    t.app.active = 0;
+    t.app.set.chan_only = true;
+    t.open();
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Home));
+    assert!(t.app.slot(0).on_channel());
 }
 
 /// A move redraws the two rows that changed and the preview; the header, the other rows and the hint bar stay.

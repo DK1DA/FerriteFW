@@ -45,11 +45,12 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         ht.set(state.as_bytes());
     }
     let mut h = Buf::<32>::new();
-    app.head_text(a, live, &mut h);
+    app.head_text(a, live, cx.store, &mut h);
     if app.dirty(1, hash(&(a, &h, state, &ht))) {
         w::badge(lcd, 8, 25, a, true, BG);
         let ww = (text4_width(ht.as_bytes(), &UI_12) + 2).max(HEARD_W);
-        let hw = if ht.is_empty() { 140 } else { 232 - ww - 26 };
+        // HOME-4a: the header takes what the state leaves (a 16-character zone name fits), at least 140 px
+        let hw = if ht.is_empty() { (232 - 6 - super::home::head_right_w(true, state, &Buf::new()) - 26).max(140) } else { 232 - ww - 26 };
         w::field(lcd, 26, hw, 22, 40, 36, Align::Left, w::fit(h.as_bytes(), &UI_12, hw), &UI_12, SUB, BG);
         canvas::banded(lcd, 26 + hw, 22, 240 - 26 - hw, 20, BG, |lcd| {
             if !ht.is_empty() {
@@ -57,7 +58,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
             } else if matches!(state, "RX" | "MON" | "FM") {
                 w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
             } else if state != "idle" {
-                w::field(lcd, 166, 66, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
+                w::field(lcd, 26 + hw, 206 - hw, 22, 40, 36, Align::Right, state.as_bytes(), &UI_12, sc, BG);
             }
         });
     }
@@ -241,7 +242,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             app.drawn.hash[16 + p] = 0;
         }
         let mut head = Buf::<32>::new();
-        app.head_text(s, live, &mut head);
+        app.head_text(s, live, cx.store, &mut head);
         let mut stt = Buf::<24>::new();
         stt.set(state.as_bytes());
         if state == "RX" {
@@ -252,9 +253,10 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         }
         if app.dirty(R_HEAD + p, hash(&(head, stt, active))) {
             w::badge(lcd, 14, y + 5, s, active, SURFACE);
-            let sw = if state == "heard" || state.len() > 8 { (text4_width(stt.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { 72 };
-            w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, Align::Left, w::fit(head.as_bytes(), &UI_12, 192 - sw), &UI_12, SUB, SURFACE);
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
+            // HOME-4a: the state's own width (at least 40 px), so a zone name in the header has the rest
+            let sw = if state == "heard" || state.len() > 8 { (text4_width(stt.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { (text4_width(stt.as_bytes(), f) + 6).clamp(40, 72) };
+            w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, Align::Left, w::fit(head.as_bytes(), &UI_12, 192 - sw), &UI_12, SUB, SURFACE);
             w::field(lcd, 226 - sw, sw, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);
         }
         let f = app.shown_freq(s, live);

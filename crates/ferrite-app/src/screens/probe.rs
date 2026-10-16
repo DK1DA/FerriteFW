@@ -30,10 +30,10 @@ use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
 /// The slot card both screens open with: letter, VFO/channel and band, S-meter text; the frequency.
-fn slot_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8) {
+fn slot_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, store: &impl ChannelStore, s: u8) {
     let lv = live.slots[s as usize];
     let mut head = Buf::<32>::new();
-    app.head_text(s, live, &mut head);
+    app.head_text(s, live, store, &mut head);
     let st = w::s_text(lv.rssi);
     let (y, h) = (25, 70);
     if app.dirty(1, 1) {
@@ -43,7 +43,7 @@ fn slot_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8) {
     }
     if app.dirty(2, hash(&(head, st, lv.squelch_open))) {
         w::badge(lcd, 14, y + 8, s, true, SURFACE);
-        w::field(lcd, 34, 140, y + 7, y + 24, y + 20, Align::Left, head.as_bytes(), &UI_12, SUB, SURFACE);
+        w::field(lcd, 34, 140, y + 7, y + 24, y + 20, Align::Left, w::fit(head.as_bytes(), &UI_12, 140), &UI_12, SUB, SURFACE);
         let c = if lv.squelch_open { GREEN } else { DIM };
         w::field(lcd, 174, 52, y + 7, y + 24, y + 20, Align::Right, st.as_bytes(), &UI_12B, c, SURFACE);
     }
@@ -178,7 +178,7 @@ impl View for ToneSearch {
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        slot_card(app, lcd, cx.live, self.slot);
+        slot_card(app, lcd, cx.live, cx.store, self.slot);
         // The result, or "searching" and the time (TSRCH-2).
         let t = self.shown(app, cx.live);
         let secs = app.now.wrapping_sub(app.radio.t0) / 1000;

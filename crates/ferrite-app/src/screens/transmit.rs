@@ -399,7 +399,7 @@ impl View for Transmit {
         if hf {
             head.set(b"HF mode");
         } else {
-            app.head_text(s, live, &mut head);
+            app.head_text(s, live, cx.store, &mut head);
             // On a channel: its name in place of the band, "012 Club repeater" (HOME-4's short number).
             let name = app.chan_name(s, live);
             if !name.is_empty() {

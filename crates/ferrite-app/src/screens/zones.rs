@@ -1,7 +1,8 @@
 //! Zones (MENU 0 2 3; manual chapters 10 and 14, CHAN-6, CHAN-11, CHAN-12, CHAN-27 to CHAN-30; C11) and one zone's
 //! settings (A12): name, in "scan all", shown in ◀▶ on home, sort by distance, resume, dwell, priority 1 and 2. The
-//! knob or ◀▶ change a setting at once (MENU-16, MENU-19); # resets it (MENU-18). # on the list makes a new zone,
-//! \* deletes one after asking (CHAN-12: its channels go to no zone and stay in All).
+//! knob or ◀▶ change a setting at once (MENU-16, MENU-19); # resets it (MENU-18). On the list OK puts the active
+//! slot on the zone and goes home (decision 178), SLOT opens the zone's editor, # makes a new zone, \* deletes one
+//! after asking (CHAN-12: its channels go to no zone and stay in All).
 //!
 //! The page (CHAN-27, decision 155): a compact list, one line per zone (its name, chips for the active slot's zone,
 //! "in scan all" and hidden, its channel count), and under it a preview of the selected zone: its name and state,
@@ -65,6 +66,9 @@ const PV_Y: i32 = LIST_Y + ZROWS as i32 * ZROW_H;
 pub(crate) const PV_ROWS: usize = 4;
 const PV_ROW_H: i32 = 18;
 const PV_HEAD_H: i32 = 20;
+/// The preview's header band (CHAN-27, decision 178): LINE, the theme's strongest neutral fill, between the list's
+/// BG and the channels' SURFACE, so the three parts read apart in every theme.
+pub(crate) const PV_BAND: u16 = LINE;
 /// Preview columns: the frequency right-aligned at 232 in a column for "439.9875" (8 characters), the distance
 /// left-aligned in a column for the widest place ("NW 23.4km", 9), the name in what is left, clipped.
 pub(crate) const FREQ_W: i32 = 8 * 7;
@@ -468,13 +472,15 @@ impl App {
     /// The preview panel (CHAN-27): each part redrawn when it changed.
     fn preview(&mut self, lcd: &mut impl Panel, p: &Preview) {
         if self.dirty(R_PV, hash(&(&p.head, &p.state))) {
-            ferrite_ui::canvas::banded(lcd, 0, PV_Y, 240, PV_HEAD_H, SURFACE, |b| {
-                b.fill(0, PV_Y, 240, PV_HEAD_H, SURFACE);
-                b.fill(0, PV_Y, 240, 1, LINE);
+            // A filled band (decision 178): the list (BG) above it and the channels (SURFACE) under it can't be
+            // mistaken for each other; a DIM rule on its top edge ends the list.
+            ferrite_ui::canvas::banded(lcd, 0, PV_Y, 240, PV_HEAD_H, PV_BAND, |b| {
+                b.fill(0, PV_Y, 240, PV_HEAD_H, PV_BAND);
+                b.fill(0, PV_Y, 240, 2, DIM);
                 let sw = text4_width(p.state.as_bytes(), &UI_12);
-                b.text4_rows(232 - sw, PV_Y + 15, p.state.as_bytes(), &UI_12, SUB, SURFACE, PV_Y + 1, PV_Y + PV_HEAD_H);
-                let name = w::fit(p.head.as_bytes(), &UI_12, 232 - sw - 8 - 8);
-                b.text4_rows(8, PV_Y + 15, name, &UI_12, SUB, SURFACE, PV_Y + 1, PV_Y + PV_HEAD_H);
+                b.text4_rows(232 - sw, PV_Y + 16, p.state.as_bytes(), &UI_12, SUB, PV_BAND, PV_Y + 2, PV_Y + PV_HEAD_H);
+                let name = w::fit(p.head.as_bytes(), &UI_12B, 232 - sw - 8 - 8);
+                b.text4_rows(8, PV_Y + 16, name, &UI_12B, TEXT, PV_BAND, PV_Y + 2, PV_Y + PV_HEAD_H);
             });
         }
         let dist = p.dist_col();
@@ -650,7 +656,10 @@ impl View for Zones {
             }
             // OK on Nearby: the channel browser's Nearby view (CHAN-29)
             (Key::Menu, Short, None) if s.on_nearby() => return app.open_screen(Screen::Browse(super::browse::nearby_view(store, app.set.show_hidden))),
-            (Key::Menu, Short, None) if store.zone_name(z).is_some() => s.mode = 2,
+            // OK on a zone: the active slot takes it and home shows it (CHAN-27, decision 178)
+            (Key::Menu, Short, None) if store.zone_name(z).is_some() => return accept(app, store, z),
+            // SLOT on a zone: its editor (A12); SLOT edits, as hold SLOT on home and EDIT-6
+            (Key::Slot, Short, None) if !s.on_nearby() && store.zone_name(z).is_some() => s.mode = 2,
             (Key::Menu, Short, Some(0)) => return super::text::open(app, super::text::TextFor::Zone(z), store), // rename (A7)
             (Key::Hash, Short, None) => {
                 if d.request(Op::NewZone) {
@@ -678,7 +687,8 @@ impl View for Zones {
                 }
                 d.request(Op::Zone(z, c));
             }
-            (Key::Exit, Short, Some(_)) => s.mode = 0,
+            // BACK, or SLOT again (EDIT-6): back to the list on the zone
+            (Key::Exit | Key::Slot, Short, Some(_)) => s.mode = 0,
             (Key::Exit, Short, None) => return app.back(),
             _ => return,
         }
@@ -785,9 +795,49 @@ impl View for Zones {
         match self.edit() {
             Some(_) => Hints::new(&[(ARROWS_UD, "Move"), ("Knob", "Change"), ("#", "Reset")]),
             None if self.on_nearby() => Hints::new(&[("OK", "Open"), ("#", "New"), ("BACK", "Back")]),
-            None => Hints::new(&[("OK", "Edit"), ("#", "New"), ("*", "Delete")]),
+            None => Hints::new(&[("OK", "Use"), ("SLOT", "Edit"), ("#", "New")]), // KEY-9: three; \* still deletes (CHAN-12)
         }
     }
+}
+
+/// Where OK on zone `z` puts the active slot (CHAN-27, decision 178): its position in the zone. The slot's own last
+/// channel there when it was last on this zone (`zone` and `pos` stay while it is on its VFO), else the zone's first
+/// channel a slot can sit on in number order (CHAN-10): listed (CHAN-24: hidden ones only with "show hidden") and
+/// not an HF channel (CHAN-26). None: no such channel.
+pub(crate) fn accept_pos(app: &App, store: &impl ChannelStore, z: u8) -> Option<u16> {
+    let hidden = app.set.show_hidden;
+    let usable = |p: u16| store.zone_at(z, p).is_some_and(|c| !c.is_hf() && listed(&c, hidden));
+    let s = app.slot(app.active);
+    if s.zone == z && s.ch.is_some() && usable(s.pos) {
+        return Some(s.pos);
+    }
+    (0..store.zone_len(z)).find(|&p| usable(p))
+}
+
+/// OK on zone `z` (CHAN-27, decision 178): the active slot goes to channel mode on [`accept_pos`] and the page goes
+/// home, where ◀▶ and the knob go on from there (NAV-1). The APRS slot refuses (APRS-19, KISS-9) and an empty zone
+/// says so; both stay on the page. A retune ends a scan on the slot, as ◀▶ on home does; a slot already on that
+/// channel is left as it is.
+fn accept(app: &mut App, store: &impl ChannelStore, z: u8) {
+    let a = app.active;
+    if app.aprs_refuse(a) {
+        return;
+    }
+    let Some(pos) = accept_pos(app, store, z) else {
+        return if store.zone_len(z) == 0 {
+            app.show_toast(b"No channels", b"in this zone", false)
+        } else {
+            app.show_toast(b"No channels", b"HF or hidden only", false)
+        };
+    };
+    let s = *app.slot(a);
+    if !(s.on_channel() && s.zone == z && s.pos == pos) {
+        app.set_channel(a, z, pos, store);
+    }
+    app.go_home();
+    let mut h = Buf::<20>::new();
+    let _ = uwrite!(h, "Slot {}", w::LETTERS[a as usize] as char);
+    app.show_toast(h.as_bytes(), store.zone_name(z).unwrap_or_default().as_bytes(), false);
 }
 
 /// After the shared confirm deleted a zone: the list again from its first zone.

@@ -139,7 +139,7 @@ pub fn tone_probe<B: Bus>(bk: &mut Bk4829<B>) {
 }
 
 /// What the scan detectors heard as a tone word (CHAN-3's form; TSRCH-13), from [`Bk4829::subtone_scan`]: CTCSS
-/// snapped to the nearest of `ctcss` within 1 Hz or 1 %, the larger (else to 0.1 Hz, 60-260 Hz only); DCS matched against `dcs` in
+/// (60-260 Hz only) snapped to the nearest of `ctcss` ([`snap_ctcss`]); DCS matched against `dcs` in
 /// any of its 23 rotations, normal before inverted (the complement). None if nothing usable.
 #[inline(never)] // in .slow_text (memory.x): once per probe
 pub fn heard_tone(ctcss_dhz: Option<u16>, dcs_word: Option<u32>, ctcss: &[u16], dcs: &[u16]) -> Option<u16> {
@@ -158,8 +158,20 @@ pub fn heard_tone(ctcss_dhz: Option<u16>, dcs_word: Option<u32>, ctcss: &[u16], 
         }
     }
     let d = ctcss_dhz.filter(|d| (600..=2600).contains(d))?;
-    let near = ctcss.iter().copied().min_by_key(|&t| t.abs_diff(d));
-    Some(near.filter(|&t| t.abs_diff(d) <= (t / 100).max(10)).unwrap_or(d))
+    snap_ctcss(d, ctcss)
+}
+
+/// A CTCSS reading (0.1 Hz) snapped to the nearest tone of `ctcss` (TSRCH-13, decision 179): the detector's reading
+/// wanders about ±1.4 % carrier to carrier, so no fixed window fits. Refused (None) only in the middle fifth between
+/// two tones: more than 2/5 of their gap from the nearer (88.5 read 87.3 or 89.6 snaps; 90.0, between 88.5 and 91.5,
+/// is no tone). Past either end of the table the gap is the one to the inner neighbour.
+fn snap_ctcss(d: u16, ctcss: &[u16]) -> Option<u16> {
+    let near = ctcss.iter().copied().min_by_key(|&t| (t.abs_diff(d), t))?;
+    // the neighbour across the reading, else (past an end) the next one inward
+    let across = |up: bool| ctcss.iter().copied().filter(move |&t| if up { t > near } else { t < near });
+    let other = if d >= near { across(true).min().or_else(|| across(false).max()) } else { across(false).max().or_else(|| across(true).min()) };
+    let gap = other.map_or(u16::MAX, |o| o.abs_diff(near)) as u32;
+    (near.abs_diff(d) as u32 * 5 <= gap * 2).then_some(near)
 }
 
 /// A local beep's start on a chip (SND-11, stock 0x0801EB8C): woken first if it was asleep, tone 1 at `tone_gain`

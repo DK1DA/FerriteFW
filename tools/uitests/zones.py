@@ -120,14 +120,14 @@ def nearby(u):
 @test("CHAN-27", "CHAN-30", pages=("Confirm", "Zones"))
 def zones_list_rows_and_chips(t):
     """One line per zone: name, chips, channel count; SCAN and HID chips from the zone's settings; the active slot's
-    chip only on the zone its channel is in (none for a VFO); the hint bar keeps OK Edit, # New, * Delete."""
+    chip only on the zone its channel is in (none for a VFO); the hint bar says OK Use, SLOT Edit, # New (decision 178)."""
     f = Fixture(t)
     try:
         u = f.open()
         r = zone_row(u, ZONE)
         t.eq((r["value"], r["chips"]), ("5", ""), "the test zone: 5 channels, no chips")
         t.check(re.match(r"\d+ zones? · \d+ ch$", u["head"]["args"][0]), "the header counts zones and channels", u["head"])
-        t.eq([k for k, _ in u.hints], ["OK", "#", "*"], "the hint bar")
+        t.eq(u.hints, [("OK", "Use"), ("SLOT", "Edit"), ("#", "New")], "the hint bar")
         t.cmd(f'zone {f.zone} "{ZONE}" scan=on shown=off')
         u = t.ui()
         t.eq(zone_row(u, ZONE)["chips"], "SCAN HID", "in scan all and hidden from ◀▶")
@@ -217,15 +217,17 @@ def zones_nearby_row_only_with_a_position(t):
 
 @test("CHAN-12", "CHAN-27", pages=("Zones", "Confirm"))
 def zones_editor_and_delete_keep_their_keys(t):
-    """OK on a zone opens its editor (BACK returns to the list on it); \\* asks before deleting it (BACK keeps it,
-    OK deletes it and its channels stay, in no zone)."""
+    """SLOT on a zone opens its editor (decision 178; SLOT again or BACK returns to the list on it); \\* asks before
+    deleting it (BACK keeps it, OK deletes it and its channels stay, in no zone)."""
     f = Fixture(t)
     try:
         u = f.open()
-        u = t.keys("MENU")
-        t.eq(u.name, "Zone editor", "OK on a zone")
+        u = t.keys("SLOT")
+        t.eq(u.name, "Zone editor", "SLOT on a zone")
         t.check(any(r["name"] == "Scan all" for r in u.rows), "its rows read back", u.rows)
-        u = t.keys("BACK")
+        u = t.keys("SLOT")
+        t.eq((u.name, u.sel and u.sel["name"]), ("Zones", ZONE), "SLOT again: the list, on the zone")
+        u = t.keys("SLOT BACK")
         t.eq((u.name, u.sel and u.sel["name"]), ("Zones", ZONE), "BACK: the list, on the zone")
         u = t.keys("STAR")
         t.eq(u.id, "Confirm", "* asks first")
@@ -238,4 +240,54 @@ def zones_editor_and_delete_keep_their_keys(t):
         t.check("zone=" not in t.cmd("ch 991"), "in no zone", t.cmd("ch 991"))
         f.zone = None  # gone already
     finally:
+        f.close()
+
+
+def put_back(t, letter, before):
+    """The slot as it was before a test moved it: its VFO (V/M), or its channel (OK on its zone, then ▲▼ to it)."""
+    if re.search(r"\bch \d+", t.slot(letter)) and " vfo " in f" {before} ":
+        t.home()
+        t.keys("VM")
+        return
+    m = re.search(r"\bch (\d+)", before)
+    if not m:
+        return
+    zm = re.search(r"zone=(\d+)", t.cmd(f"ch {m.group(1)}"))
+    name = zm and re.search(r'"([^"]*)"', t.cmd(f"zone {zm.group(1)}"))
+    if not name:
+        t.note(f"slot {letter}: not put back on ch {m.group(1)} (no zone)")
+        return
+    t.home()
+    u = t.keys("MENU 0 2 3")
+    for _ in range(260):
+        if u.sel and u.sel.get("kind") == "zone" and u.sel["name"] == name.group(1):
+            break
+        u = t.keys("DOWN")
+    t.keys("MENU")
+    for _ in range(260):
+        if re.search(rf"\bch {m.group(1)}\b", t.slot(letter)):
+            return
+        t.keys("DOWN")
+    t.note(f"slot {letter}: not put back on ch {m.group(1)}")
+
+
+@test("CHAN-27", "NAV-1", "HOME-4a", pages=("Zones", "Home"))
+def zones_ok_puts_the_slot_on_the_zone(t):
+    """OK on a zone (decision 178): the active slot goes to channel mode on the zone's first channel in number order
+    (991) and the page goes home, the card's header naming the zone ("991 · UITEST Z", HOME-4a). The slot is put
+    back after."""
+    f = Fixture(t)
+    letter, before = None, ""
+    try:
+        u = f.open()
+        letter = u.state.get("active", "A")
+        before = t.slot(letter)
+        t.need("aprs" not in before, "the active slot is the APRS slot (APRS-19)")
+        u = t.keys("MENU")
+        t.eq(u.id, "Home", "OK on a zone: home")
+        t.check(re.search(r"\bch 991\b", t.slot(letter)), "the slot on the zone's first channel", t.slot(letter))
+        t.eq(u.active.get("head"), "991 · " + ZONE, "the header names the zone")
+    finally:
+        if letter:
+            put_back(t, letter, before)
         f.close()

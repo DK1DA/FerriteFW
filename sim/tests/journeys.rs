@@ -455,12 +455,14 @@ fn clock_set_by_hand() {
     r.run("type 202610081230; press OK; wait 500ms; expect text \"Clock set\"; home; expect text \"12:30\"");
 }
 
-/// Hold V/M opens the zones (KEY-23); OK edits one, with its scan and priority options (KEY-11, chapter 10, SCAN-12).
+/// Hold V/M opens the zones (KEY-23); SLOT edits one, with its scan and priority options (KEY-11, chapter 10,
+/// SCAN-12); OK puts the active slot on it and goes home (CHAN-27, decision 178).
 #[test]
 fn zones_and_zone_editor() {
     let mut r = Radio::new();
     r.run("hold VM; expect screen \"Zones\"; expect text \"6 zones\"; expect text \"Repeaters\"");
-    r.run("press OK; expect screen \"Zone editor\"; expect text \"Scan all\"; expect text \"Priority 1\"");
+    r.run("press SLOT; expect screen \"Zone editor\"; expect text \"Scan all\"; expect text \"Priority 1\"");
+    r.run("press SLOT; expect screen \"Zones\"; press OK; expect screen \"Home\"; expect text \"Slot A\"");
 }
 
 /// An automatic transmission (a beacon) keys the radio briefly and returns to home by itself (TX-1.1, APRS-20).

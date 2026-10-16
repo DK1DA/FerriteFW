@@ -434,9 +434,7 @@ fn heard_tone_decodes() {
     const DC: [u16; 3] = [0o023, 0o114, 0o754];
     assert_eq!(chip::heard_tone(Some(884), None, &CT, &DC), Some(885));
     assert_eq!(chip::heard_tone(Some(1003), None, &CT, &DC), Some(1000));
-    assert_eq!(chip::heard_tone(Some(1300), None, &CT, &DC), Some(1300), "off the list: as read");
-    // TSRCH-3: 1 % at the top of the table (162.2 read 1.5 Hz off still snaps); the clear radio's 88.5 through the
-    // BK4829's REG_68 scale (87.3 with the BK4819's) comes back 88.5.
+    assert_eq!(chip::heard_tone(Some(1300), None, &CT, &DC), None, "midway between 100.0 and 162.2: no tone");
     assert_eq!(chip::heard_tone(Some(1607), None, &CT, &DC), Some(1622));
     assert_eq!(chip::heard_tone(Some(bk4829::scan_dhz(1803)), None, &CT, &DC), Some(885));
     assert_eq!(chip::heard_tone(Some(550), None, &CT, &DC), None, "the 55 Hz tail is no tone");
@@ -447,6 +445,35 @@ fn heard_tone_decodes() {
     assert_eq!(chip::heard_tone(None, Some(rot), &CT, &DC), Some(0x8000 | 0o114), "rotated");
     let inv = bk4829::dcs_codeword(0o023, true);
     assert_eq!(chip::heard_tone(Some(885), Some(inv), &CT, &DC), Some(0x8000 | 0x4000 | 0o023), "D023I");
+}
+
+/// TSRCH-3, TSRCH-13 (decision 179): the reading wanders about ±1.4 % carrier to carrier, so a CTCSS reading snaps
+/// to the nearest table tone: the clear radio's 88.5 read "T 87.3" and "T 89.6", both 88.5; refused only in the
+/// middle fifth between two tones. Past the ends the inner gap counts.
+#[test]
+fn heard_ctcss_snaps_to_the_nearest_tone() {
+    let ct = &ferrite_app_ctcss();
+    let snap = |d: u16| chip::heard_tone(Some(d), None, ct, &[]);
+    assert_eq!(snap(873), Some(885));
+    assert_eq!(snap(896), Some(885));
+    assert_eq!(snap(662), Some(670));
+    assert_eq!(snap(2470), Some(2503), "250.3 read 1.3 % low");
+    assert_eq!(snap(2535), Some(2541), "253.5 is nearest 254.1 (the table's last tone)");
+    assert_eq!(snap(900), None, "midway between 88.5 and 91.5");
+    assert_eq!(snap(2590), None, "past 254.1 by more than 2/5 of the gap to 250.3");
+    assert_eq!(snap(608), None, "60.8: 6.2 Hz under 67.0, past 2/5 of the 2.3 Hz gap");
+    for &t in ct.iter() {
+        assert_eq!(snap(t), Some(t), "{t} exact");
+    }
+}
+
+/// The 50 standard CTCSS tones (ferrite-app's `slot::CTCSS`, which this crate doesn't depend on).
+fn ferrite_app_ctcss() -> [u16; 50] {
+    [
+        670, 693, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974, 1000, 1035, 1072, 1109, 1148, 1188, 1230, 1273, 1318,
+        1365, 1413, 1462, 1514, 1567, 1598, 1622, 1655, 1679, 1713, 1738, 1773, 1799, 1835, 1862, 1899, 1928, 1966, 1995,
+        2035, 2065, 2107, 2181, 2257, 2291, 2336, 2418, 2503, 2541,
+    ]
 }
 
 /// TSRCH-13: the DCS match reads the code out of each rotation instead of building every code's word; for every

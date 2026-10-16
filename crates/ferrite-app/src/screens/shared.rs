@@ -249,8 +249,9 @@ impl App {
 
     // ---- slot texts (home cards, edit header) ----
 
-    /// "VFO · VHF", "CH 012 · UHF", "SCAN · Airband".
-    pub(crate) fn head_text(&self, s: u8, live: &LiveAll, b: &mut Buf<32>) {
+    /// "VFO · VHF", "012 · Repeaters", "SCAN · Airband" (HOME-4a): a channel names its zone where a VFO names its
+    /// band (decision 178); a channel in no zone keeps the band.
+    pub(crate) fn head_text(&self, s: u8, live: &LiveAll, store: &impl ChannelStore, b: &mut Buf<32>) {
         let sl = &self.slots[s as usize];
         let lv = &live.slots[s as usize];
         b.clear();
@@ -264,8 +265,14 @@ impl App {
             b.push(b"VFO");
         }
         b.push(" \u{b7} ".as_bytes());
-        // BCR-21: a slot in the broadcast band says so where the band goes
-        b.push(if self.in_bcast_band(s) && !lv.scanning { b"Broadcast".as_slice() } else { band_name(self.shown_freq(s, live)).as_bytes() });
+        let zone = sl.ch.filter(|_| sl.on_channel() && !lv.scanning && !self.aprs_slot(s)).and_then(|c| store.zone_name(c.zone));
+        if self.in_bcast_band(s) && !lv.scanning {
+            b.push(b"Broadcast"); // BCR-21: a slot in the broadcast band says so where the band goes
+        } else if let Some(z) = zone {
+            b.push(z.as_bytes());
+        } else {
+            b.push(band_name(self.shown_freq(s, live)).as_bytes());
+        }
     }
 
     /// A channel slot's name, the cards' main line in channel mode (HOME-4); empty for a VFO, a scan or a
