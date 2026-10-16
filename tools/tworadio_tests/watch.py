@@ -16,8 +16,10 @@ def watch_setup(t):
 
 
 def heard(t, timeout=1.5):
-    """The broadcast card reads muted (a slot has the speaker) within `timeout`: (readback, time)."""
-    return t.poll(t.rx, lambda u: state(u, "C") == "muted", timeout)
+    """The broadcast card reads muted (a slot has the speaker) within `timeout`: (readback, time). The compact
+    readback, as `hears` polls: timed against a full readback (~730 bytes) its time was a readback late (BCR-24
+    read 0.50 s on the cable, Oct 15, 2026)."""
+    return t.poll(t.rx, lambda u: state(u, "C") == "muted", timeout, light=True)
 
 
 @test("WATCH-4", "WATCH-5", "BCR-26.5", part=("WATCH-3.2",), keyups=(4,), idle=5)

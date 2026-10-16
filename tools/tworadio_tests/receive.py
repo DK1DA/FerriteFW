@@ -8,12 +8,14 @@ from .core import VHF, closes, hears, rx_quiet, rx_vfo, state, test, tx_on
 @test("HOME-6", keyups=(3,), idle=4)
 def receive_shows_rx_and_meter(t):
     """The other radio keys on the receiving radio's active A: A's card reads RX with the S-meter up; the
-    transmitting radio shows its transmit screen (TX, keyed=A); after the unkey both are back (RX gone, meter 0)."""
+    transmitting radio shows its transmit screen (TX, keyed=A); after the unkey both are back (RX gone, the meter
+    back to its idle reading before the key-up: the noise floor, S1 on the black radio, not necessarily 0)."""
     rx_quiet(t)
     rx_vfo(t, "A", VHF, active=True)
     tx_on(t, VHF)
     u = t.rx.home()
     t.need(u.cards["A"]["rx"] == 0, f"{VHF} MHz is busy here before the key-up: {u.cards['A']}")
+    idle = u.cards["A"]["meter"]
     with t.key(3, "a carrier on A") as k:
         # The transmitting radio first, right after KEY on: read after the receiving radio's (on Bluetooth that
         # takes 2 to 3 s) it came after the key-up's own end, and `keyed=-` was the truth (Oct 14, 2026).
@@ -25,10 +27,10 @@ def receive_shows_rx_and_meter(t):
         t.eq(v.id, "Transmit", "the transmitting radio shows its transmit screen (TX)")
         u, _ = hears(t, "A")
         t.eq(state(u, "A"), "RX", "A's card: RX")
-        t.check(u.cards["A"]["meter"] > 0, "A's S-meter shows the signal", u.cards["A"])
+        t.check(u.cards["A"]["meter"] > idle, "A's S-meter shows the signal", f"{u.cards['A']} (idle {idle})")
     u, _ = closes(t, "A")
     t.check(u is not None, "RX goes after the unkey", t.rx.raw().cards["A"])
-    t.eq(u.cards["A"]["meter"], 0, "the S-meter drops")
+    t.check(u.cards["A"]["meter"] <= idle, f"the S-meter drops back to its idle reading ({idle})", u.cards["A"]["meter"])
     t.eq(t.tx.raw().state.get("keyed"), "-", "the transmitting radio is back to receive")
 
 
