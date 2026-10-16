@@ -17,7 +17,7 @@ Safety, as bench.py's own (and through its code: Bench.check_build, Bench.gate, 
     5 min; one exception, by Alex's OK of Oct 15, 2026: cw_id's first key-up, 1 s keyed then the end tone and the
     CW ID (about 4.5 s of carrier for VE7TEST), counted whole as the "timeout" kind; the rest after it still holds);
   - right before every KEY on the keyed slot is read back (SLOT, LINK-33): its transmit frequency (after any shift
-    or split) 145.495, 446.475 or 145.575 MHz (config test_freqs), power low, not scanning, not the APRS slot; a
+    or split) 145.495 or 446.475 MHz (config test_freqs; 145.575, split_freqs, only for split_tx's split TX), power low, not scanning, not the APRS slot; a
     refusal probe (a key-up the radio must refuse: out of band, HF, 640 MHz, the band edge, 1.25 m, emergency) is
     gated on its own frequency read back and KEY off goes at once if the radio keys it (the test fails);
   - KEY on must be answered within 0.6 s on the cable (a tx build holds its answers while keyed, TX-43): else KEY
@@ -180,6 +180,7 @@ class Rig:
         self.cfg, self.a, self.radio, self.sdr, self.clock, self.threaded, self.out = cfg, a, radio, sdr, clock, threaded, log
         self.b = bench.Bench(cfg, a, radio=radio, sdr=sdr, clock=clock, log=log)
         self.approved = {mhz10(f) for f in cfg["test_freqs"]}
+        self.approved_split = {mhz10(f) for f in cfg.get("split_freqs", [])}
         self.active_key = None
         self._off_lock = threading.Lock()
         self.changed = {}  # setting -> its value before the run
@@ -326,7 +327,7 @@ class Rig:
         return self.radio.slot(0)
 
     # -- keying --
-    def gate(self, purpose, n, probe_mhz=None):
+    def gate(self, purpose, n, probe_mhz=None, split_ok=False):
         st = self.radio.slot(n)
         tx = st["offset"] if st["split"] else st["freq10"] + st["offset"]
         g = self.b.gate
@@ -338,7 +339,8 @@ class Rig:
             g(f"{purpose}: the probe's frequency read back", tx == mhz10(probe_mhz),
               f"{tx / 1e5:.5f} MHz, the probe {probe_mhz:.5f}")
         else:
-            g(f"{purpose}: transmit frequency approved", tx in self.approved,
+            ok = tx in self.approved or (split_ok and st["split"] and tx in self.approved_split)
+            g(f"{purpose}: transmit frequency approved", ok,
               f"{tx / 1e5:.5f} MHz; allowed {', '.join(f'{f:.3f}' for f in self.cfg['test_freqs'])}")
         return st
 
@@ -387,7 +389,7 @@ class Rig:
                 k.unkeyed, k.t_unkeyed = u, now
 
     @contextlib.contextmanager
-    def keyup(self, seconds, purpose, slot="active", probe_mhz=None, kind="burst", extra_tail=0.0):
+    def keyup(self, seconds, purpose, slot="active", probe_mhz=None, kind="burst", extra_tail=0.0, split_ok=False):
         """The one way this suite keys. slot: "active", "a", "b" or "c". probe_mhz: a key-up the radio must refuse,
         gated on that frequency read back; KEY off at once if it keys. kind: the DutyLimiter's (a duty exception,
         "timeout", only for the CW ID's one key-up); extra_tail: the carrier the radio adds after KEY off past the
@@ -402,7 +404,7 @@ class Rig:
                 raise BenchError("no active slot")
         else:
             n = "abc".index(slot)
-        self.gate(purpose, n, probe_mhz)  # right before KEY on, after any duty wait
+        self.gate(purpose, n, probe_mhz, split_ok)  # right before KEY on, after any duty wait
         k.t_sent = self.now()
         stop, th = threading.Event(), None
         self.active_key = k
@@ -1315,7 +1317,7 @@ def split_tx(r):
     if not ok:
         return f"the split didn't take: {line}; not keyed"
     with r.capture(SPLIT_TX, 1.0 + 2.5 + 1.5, "split TX", key_s=2.5) as cap:
-        with r.keyup(2.5, "split TX") as k:
+        with r.keyup(2.5, "split TX", split_ok=True) as k:
             r.hold(k)
     tx_s, tx_runs = carrier_s(cap.raw)
     rx_s, rx_runs = carrier_s(recentre(cap.raw, SPLIT_TX, VHF))
