@@ -15,7 +15,9 @@
 //!   quick menu while it is up.
 //! - The screen's own lines: home's `card` per slot (a broadcast card followed by its `bcast` report: the RDS
 //!   text, `stereo`, `dbuv`, `snr`); a list's `row N "name" "value"` (with `sel`, `dot` changed from its default, `grey`), its `help`; an
-//!   editor's `value`; a question's `ask`; the squelch screen's `squelch`; the PIN entry's `pin` (digits as
+//!   editor's `value`; a question's `ask`; the squelch screen's `squelch`; tone search's `tsearch` (the tone found,
+//!   the slot's signal, the hits) and the counter's `counter` (frequency and level); a card's `hint` while it shows
+//!   a tone hint; the PIN entry's `pin` (digits as
 //!   stars); FM's `fm`, HF mode's `hf`, the band scope's `scope`, crossband's `xb`
 //!   with its `check`s, setup's `setup`, compose's `compose`, the GPS position page's `gps`, `pos` and `near`
 //!   (their option pages, grids and tiles as rows); and so on. A screen without its own lines yet shows only
@@ -466,6 +468,42 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 kq(l, "note", note.as_bytes());
             }
         }
+        Screen::ToneSearch(ts) => {
+            // TSRCH-2: the tone found ("" while searching), the slot's signal, the question, the last hits
+            if let Some(l) = d.ln() {
+                let mut t = Buf::<16>::new();
+                crate::slot::tone_text(ts.shown(app, cx.live), &mut t);
+                l.push(b"tsearch");
+                slot_word(l, ts.slot);
+                kq(l, "found", t.as_bytes());
+                let lv = cx.live.slots[ts.slot as usize];
+                kn(l, "open", lv.squelch_open as u32);
+                kq(l, "s", w::s_text(lv.rssi).as_bytes());
+                kn(l, "ask", ts.ask_tx as u32);
+                l.push(b" hits=");
+                let mut hits = Buf::<64>::new();
+                for h in app.radio.hits.iter().filter(|h| h.what != 0) {
+                    crate::slot::tone_text(h.what as u16, &mut t);
+                    if !hits.is_empty() {
+                        hits.push(b",");
+                    }
+                    hits.push(t.as_bytes());
+                }
+                q(l, hits.as_bytes());
+            }
+        }
+        Screen::Counter(c) => {
+            // TSRCH-6, TSRCH-11: the frequency (0 while listening) and level shown, live or the last hit's, held
+            if let Some(l) = d.ln() {
+                let (f, rssi, now) = c.shown(app, cx.live);
+                l.push(b"counter freq=");
+                mhz(l, f);
+                kq(l, "s", if f == 0 { Buf::new() } else { w::s_text(rssi) }.as_bytes());
+                kn(l, "meter", if f == 0 { 0 } else { w::meter_level(rssi) as u32 });
+                kn(l, "live", now as u32);
+                kn(l, "hold", c.hold as u32);
+            }
+        }
         Screen::Squelch(sq) => {
             // SQL-7, SQL-12: the level, open or closed, the live signal and the noise floor beside it
             if let Some(l) = d.ln() {
@@ -762,7 +800,14 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
     let mut head = Buf::<32>::new();
     app.head_text(s, cx.live, &mut head);
     kq(l, "head", head.as_bytes());
-    kq(l, "state", app.state(s, cx.live).0.as_bytes());
+    let state = app.state(s, cx.live).0;
+    kq(l, "state", state.as_bytes());
+    if state == "heard" {
+        // TSRCH-13: the tone hint as the card draws it ("Heard 88.5")
+        let mut h = Buf::<24>::new();
+        screens::shared::heard_text(lv.heard_tone, cfg.rx_tone, &mut h);
+        kq(l, "hint", h.as_bytes());
+    }
     l.push(b" freq=");
     mhz(l, app.shown_freq(s, cx.live));
     kq(l, "name", app.chan_name(s, cx.live).as_bytes());

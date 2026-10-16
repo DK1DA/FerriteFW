@@ -114,6 +114,14 @@ fn found(live: &LiveAll) -> u16 {
     }
 }
 
+impl ToneSearch {
+    /// The tone the screen shows as found (0: searching): the search's, or while asking about TX the one set
+    /// (the UI readback reads it too, LINK-19).
+    pub(crate) fn shown(self, app: &App, live: &LiveAll) -> u16 {
+        if self.ask_tx { app.radio.hits[0].what as u16 } else { found(live) }
+    }
+}
+
 /// One tone on a slot, live, without saving a channel's record (TSRCH-9; the tone hint's too, TSRCH-16).
 pub(crate) fn set_tone(app: &mut App, slot: u8, t: u16, tx: bool) {
     let c = app.slots[slot as usize].cfg_mut();
@@ -172,7 +180,7 @@ impl View for ToneSearch {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         slot_card(app, lcd, cx.live, self.slot);
         // The result, or "searching" and the time (TSRCH-2).
-        let t = if self.ask_tx { app.radio.hits[0].what as u16 } else { found(cx.live) };
+        let t = self.shown(app, cx.live);
         let secs = app.now.wrapping_sub(app.radio.t0) / 1000;
         let (mut d, mut kind) = (Buf::<16>::new(), Buf::<16>::new());
         if t != 0 {
@@ -281,6 +289,18 @@ pub fn open_counter(app: &mut App) -> Screen {
     Screen::Counter(Counter { hold: false, held: 0, held_rssi: 0 })
 }
 
+impl Counter {
+    /// What the screen shows: frequency (0: listening), level, and whether it is the live reading (else the last
+    /// hit's); the held one while held (TSRCH-11). The UI readback reads it too (LINK-19).
+    pub(crate) fn shown(self, app: &App, live: &LiveAll) -> (Freq10, i16, bool) {
+        let (f, rssi, now) = match live.mode {
+            ModeLive::Probe { freq, rssi, .. } if countable(freq) => (freq, rssi, true),
+            _ => (app.radio.hits[0].what, app.radio.hits[0].rssi(), false),
+        };
+        if self.hold { (self.held, self.held_rssi, now) } else { (f, rssi, now) }
+    }
+}
+
 impl View for Counter {
     fn name(self) -> &'static str {
         "Frequency counter"
@@ -326,11 +346,7 @@ impl View for Counter {
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        let (f, rssi, live) = match cx.live.mode {
-            ModeLive::Probe { freq, rssi, .. } if countable(freq) => (freq, rssi, true),
-            _ => (app.radio.hits[0].what, app.radio.hits[0].rssi(), false),
-        };
-        let (f, rssi) = if self.hold { (self.held, self.held_rssi) } else { (f, rssi) };
+        let (f, rssi, live) = self.shown(app, cx.live);
         if app.dirty(1, hash(&self.hold)) {
             w::field(lcd, 8, 170, 22, 40, 35, Align::Left, b"Strongest nearby signal", &UI_12, SUB, BG);
             ferrite_ui::canvas::banded(lcd, 178, 22, 62, 18, BG, |lcd| {

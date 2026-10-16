@@ -5,6 +5,7 @@ use crate::screens::activity::Mode;
 use crate::screens::nav::Dest;
 use ferrite_core::msg::{BroadcastCmd, ModeLive, XbCfg, XbLive};
 use ferrite_core::txplan::{Refusal, Region};
+use std::string::String;
 
 fn ready() -> T {
     let mut t = T::new();
@@ -1949,4 +1950,92 @@ fn ptt_stuck_on_screen_at_boot() {
     t.render(&mut fb);
     let bare = (x + 8..x + w - 8).step_by(4).flat_map(|px| (y + 4..y + h - 4).step_by(4).map(move |py| (px, py))).filter(|&(px, py)| fb.at(px, py) == TOAST).count();
     assert!(bare < toast / 2, "{bare}");
+}
+
+/// The UI readback's lines (LINK-19), as the link's `UI` and the terminal's `ui` give them.
+fn readback(t: &T) -> Vec<String> {
+    let (s, dev) = (store(), Device::default());
+    let mut l = crate::term::cmd::Line::new();
+    (0..)
+        .map_while(|i| crate::uistate::line(&t.app, &s, &dev, &t.live, i, &mut l).then(|| String::from_utf8_lossy(l.as_bytes()).into_owned()))
+        .collect()
+}
+
+fn line_of(t: &T, head: &str) -> String {
+    readback(t).into_iter().find(|l| l.starts_with(head)).unwrap_or_else(|| panic!("no {head} line: {:?}", readback(t)))
+}
+
+/// TSRCH-2, LINK-19: tone search's readback: "" while searching, then the tone found, the slot's signal and the
+/// hits (the receiving session, Oct 15, 2026: the result could only be read off the screen).
+#[test]
+fn tone_search_readback() {
+    let mut t = T::new();
+    t.open(Dest::ToneSearch);
+    t.wait(100);
+    let l = line_of(&t, "tsearch ");
+    assert!(l.starts_with("tsearch slot=A found=\"\" open=0"), "{l}");
+    t.live.slots[0].squelch_open = true;
+    t.live.slots[0].rssi = -60;
+    t.live.mode = ModeLive::Probe { freq: 0, rssi: -60, tone: 885 };
+    t.wait(100);
+    let l = line_of(&t, "tsearch ");
+    assert!(l.contains("found=\"T 88.5\" open=1") && l.contains(" ask=0") && l.contains("hits=\"T 88.5\""), "{l}");
+    t.live.mode = ModeLive::Probe { freq: 0, rssi: -60, tone: 0x8000 | 0o23 };
+    t.wait(100);
+    assert!(line_of(&t, "tsearch ").contains("hits=\"D023N,T 88.5\""), "{}", line_of(&t, "tsearch "));
+    t.tap(Key::Menu);
+    assert!(line_of(&t, "tsearch ").contains("found=\"D023N\"") && line_of(&t, "tsearch ").contains(" ask=1"));
+}
+
+/// TSRCH-6, TSRCH-11, LINK-19: the counter's readback: the frequency and level shown, live, then held.
+#[test]
+fn counter_readback() {
+    let mut t = T::new();
+    menu0(&mut t, &[3, 3]);
+    t.wait(100);
+    assert!(line_of(&t, "counter ").starts_with("counter freq=0.00000 s=\"\" meter=0"), "{}", line_of(&t, "counter "));
+    t.live.mode = ModeLive::Probe { freq: mhz(147) + 15_000, rssi: -60, tone: 0 };
+    t.wait(100);
+    let l = line_of(&t, "counter ");
+    assert!(l.starts_with("counter freq=147.15000 s=") && l.contains(" live=1 hold=0"), "{l}");
+    t.tap(Key::Hash);
+    t.live.mode = ModeLive::Probe { freq: mhz(446) + 6_250, rssi: -40, tone: 0 };
+    t.wait(100);
+    assert!(line_of(&t, "counter ").starts_with("counter freq=147.15000") && line_of(&t, "counter ").ends_with("hold=1"));
+}
+
+/// TSRCH-13, LINK-19: a card showing a tone hint says what it reads ("Heard 88.5", TONE-20.5's two forms).
+#[test]
+fn card_hint_readback() {
+    let mut t = T::new();
+    t.live.slots[0].squelch_open = true;
+    t.wait(100);
+    assert!(!line_of(&t, "card A").contains("hint="));
+    t.live.slots[0].heard_tone = 885;
+    t.wait(100);
+    assert!(line_of(&t, "card A").contains("state=\"heard\" hint=\"Heard 88.5\""), "{}", line_of(&t, "card A"));
+    t.live.slots[0].heard_tone = 0x8000 | 0o47;
+    t.wait(100);
+    assert!(line_of(&t, "card A").contains("hint=\"Heard D047N/D023I\""), "{}", line_of(&t, "card A"));
+}
+
+/// SQL-12.2, LINK-19: the squelch screen's readback follows the live signal while SIDE1 is held (the receiving
+/// session's probe read it closed throughout: its two reads fell before and after the other radio's carrier, keyed
+/// over Bluetooth seconds late).
+#[test]
+fn squelch_readback_follows_the_signal() {
+    let mut t = T::new();
+    let s = store();
+    t.app.key_down(Key::Side(1), t.t, &s);
+    t.knob(1);
+    t.knob(-1);
+    t.live.slots[0].rssi = -121;
+    t.wait(200);
+    assert!(line_of(&t, "squelch ").contains("open=0 s=\"S1\""), "{}", line_of(&t, "squelch "));
+    t.live.slots[0].squelch_open = true;
+    t.live.slots[0].rssi = -70;
+    t.wait(100);
+    let l = line_of(&t, "squelch ");
+    assert!(l.contains("open=1") && !l.contains("s=\"S1\"") && l.contains("signal +"), "{l}");
+    t.app.key_up(Key::Side(1), t.t, &s);
 }
