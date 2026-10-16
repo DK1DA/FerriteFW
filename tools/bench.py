@@ -130,7 +130,9 @@ KEY_ANSWER_S = 0.6  # TX-43: a tx-dry build answers KEY on at once; a tx build h
 DEFAULTS = {
     "port": "/dev/cu.usbserial-114220",
     "slot": "A",
-    "test_freqs": [145.495, 446.475],  # MHz; the only frequencies the bench keys on (user approved, Oct 13 2026)
+    # MHz; the only frequencies the bench keys on (user approved: 145.495 and 446.475 Oct 13 2026, 145.575 Oct 15
+    # 2026 for a same-band split's TX, VFO-16)
+    "test_freqs": [145.495, 145.575, 446.475],  # first and last: the VHF and UHF picks (modes_on_air)
     "runs": [
         {"name": "vhf-wide", "mhz": 145.495, "mode": "fm"},
         {"name": "vhf-nfm", "mhz": 145.495, "mode": "nfm"},

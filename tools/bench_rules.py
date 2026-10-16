@@ -112,6 +112,12 @@ RULE_TAGS = {
     "bcast_muted_keyed": {"BCR-16": "part"},  # the SI4732 muted; its input switch isn't read
     "bcast_resumes": {"BCR-29.3": "all"},
     "bcast_card_keyed": {"BCR-26.4": "part"},  # during a remote key-up only
+    # --suite tx-behaviour, added Oct 15, 2026
+    "txb_split_tx": {"VFO-16": "part"},  # a same-band split set over the terminal; MENU 5 and RX UHF/TX VHF not
+    # TX-26: the end tone, the CW ID, then the drop, while keyed; the tail tone, PA drive 0 and the paths aren't seen.
+    # TX-40: the first unkey after a restart IDs, the next inside 10 min doesn't; the 10 min mark, data and the
+    # cut-offs (timeout, battery, duty) not run
+    "txb_cw_id": {"TX-26": "part", "TX-40": "part"},
 }
 
 

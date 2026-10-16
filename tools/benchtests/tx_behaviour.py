@@ -14,11 +14,12 @@ broadcast's mute, the receive selects).
 Safety, as bench.py's own (and through its code: Bench.check_build, Bench.gate, DutyLimiter, Sdr):
   - the build must say tx-dry with the bench bit (LINK-35) or the run stops before anything changes;
   - every key-up passes the DutyLimiter (at most 5 s with its 0.5 s unkey tail, a rest of 2x, at most 25 % of any
-    5 min; this suite asks for no exception: its longest key-up is 4 s);
+    5 min; one exception, by Alex's OK of Oct 15, 2026: cw_id's first key-up, 1 s keyed then the end tone and the
+    CW ID (about 4.5 s of carrier for VE7TEST), counted whole as the "timeout" kind; the rest after it still holds);
   - right before every KEY on the keyed slot is read back (SLOT, LINK-33): its transmit frequency (after any shift
-    or split) 145.495 or 446.475 MHz, power low, not scanning, not the APRS slot; a refusal probe (a key-up the
-    radio must refuse: out of band, HF, 640 MHz, the band edge, 1.25 m, emergency) is gated on its own frequency
-    read back and KEY off goes at once if the radio keys it (the test fails);
+    or split) 145.495, 446.475 or 145.575 MHz (config test_freqs), power low, not scanning, not the APRS slot; a
+    refusal probe (a key-up the radio must refuse: out of band, HF, 640 MHz, the band edge, 1.25 m, emergency) is
+    gated on its own frequency read back and KEY off goes at once if the radio keys it (the test fails);
   - KEY on must be answered within 0.6 s on the cable (a tx build holds its answers while keyed, TX-43): else KEY
     off and the run stops;
   - keepalives every 0.5 s on their own thread; KEY off at each key-up's deadline from that thread whatever the
@@ -27,11 +28,12 @@ Safety, as bench.py's own (and through its code: Bench.check_build, Bench.gate, 
 Everything a test changes (slots A, B and C, settings, the key lock, `rx both`, txtest) is put back after it, and
 the whole radio checked against its snapshot at the end.
 
-Not here, and why (report): TX-31.1/SAFE-17.2/TX-44.1 need long high-duty keying (Alex's OK; 28.400 MHz not an
-approved frequency); TX-26/TX-40 (CW ID: its tail takes a key-up past the 5 s burst); TX-30.2 (a 20 s key-up and the
-pre-alert isn't in the readback); VFO-16 (a split needs two approved frequencies in one band); TX-34/WATCH-16 (the
-readback doesn't show the watch's pause); TERM-4.4 (Bluetooth); LINK-20.11/TX-35.x/SAFE-15 (APRS, KISS, VOX: the
-other suites); TX-12.3 (a tone at the mic).
+cw_id restarts the radio (LINK-24's REBOOT, never keyed) so its first unkey is the first since power-on (TX-40).
+
+Not here, and why (report): TX-31.1/SAFE-17.2 (not yet: Alex, Oct 15, 2026)/TX-44.1 need long high-duty keying;
+28.400 MHz isn't an approved frequency; TX-30.2 (a 20 s key-up and the pre-alert isn't in the readback);
+TX-34/WATCH-16 (the readback doesn't show the watch's pause); TERM-4.4 (Bluetooth); LINK-20.11/TX-35.x/SAFE-15
+(APRS, KISS, VOX: the other suites); TX-12.3 (a tone at the mic).
 """
 import atexit
 import contextlib
@@ -49,10 +51,16 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import bench  # noqa: E402
 import ferrite_link as fl  # noqa: E402
+import sdrtones  # noqa: E402
+import sdrtx  # noqa: E402
 from bench import BenchError, SafetyError, TermError, mhz10  # noqa: E402
 
 SUITE = "tx-behaviour"
 VHF, UHF = 145.495, 446.475
+SPLIT_TX = 145.575  # VFO-16's same-band split: RX 145.495, TX here (approved Oct 15, 2026)
+CALLSIGN, CW_ID = "0 8 7 1", "0 8 7 2"
+CW_HZ, CW_DIT_S = 700, 0.060  # VOX-12: 700 Hz at 20 wpm (tonegen::CW_HZ, dit_ms(20))
+TONE_LEAD_S = 0.2  # tonegen::TONE_LEAD_MS: the silent lead-in before the end tone or the CW ID
 LEDS = "0 7 6"
 SCREEN_TIMEOUT, ON_TRANSMIT, WAKE_ON = "0 7 4 1", "0 7 4 3", "0 7 4 4"
 BATTERY_SAVE = "0 7 7"
@@ -379,13 +387,15 @@ class Rig:
                 k.unkeyed, k.t_unkeyed = u, now
 
     @contextlib.contextmanager
-    def keyup(self, seconds, purpose, slot="active", probe_mhz=None):
+    def keyup(self, seconds, purpose, slot="active", probe_mhz=None, kind="burst", extra_tail=0.0):
         """The one way this suite keys. slot: "active", "a", "b" or "c". probe_mhz: a key-up the radio must refuse,
-        gated on that frequency read back; KEY off at once if it keys."""
+        gated on that frequency read back; KEY off at once if it keys. kind: the DutyLimiter's (a duty exception,
+        "timeout", only for the CW ID's one key-up); extra_tail: the carrier the radio adds after KEY off past the
+        0.5 s unkey tail (the end tone and the CW ID), counted by the DutyLimiter."""
         probe = probe_mhz is not None
-        kind = "probe" if probe else "burst"
+        kind = "probe" if probe else kind
         k = KeyUp(purpose, kind)
-        self.b.duty.admit(self.b.duty.planned(bench.KEY_ANSWER_S if probe else seconds), kind, purpose)
+        self.b.duty.admit(self.b.duty.planned(bench.KEY_ANSWER_S if probe else seconds, extra_tail), kind, purpose)
         if slot == "active":
             n = next((i for i in range(3) if self.radio.slot(i)["active"]), None)
             if n is None:
@@ -426,7 +436,7 @@ class Rig:
             self._off(k)
             self.active_key = None
             self.b.keyed = False
-            k.duty = self.b.duty.record(purpose, kind, k.ev(), k.t_sent)
+            k.duty = self.b.duty.record(purpose, kind, k.ev(), k.t_sent, extra_tail=extra_tail if k.accepted else 0.0)
             self.cur.setdefault("keyups", []).append(dict(purpose=purpose, accepted=k.accepted, refused=k.refused,
                                                           unkeyed=k.unkeyed, keyed_s=round(k.duty["keyed_s"], 2)))
 
@@ -436,11 +446,11 @@ class Rig:
             self.until(k.deadline + 0.05)
 
     @contextlib.contextmanager
-    def capture(self, mhz, seconds, what, lead=1.0, key_s=None):
-        """The SDR on mhz for `seconds` from now; the body runs `lead` s in; cap.raw after. key_s: the key-up the
-        body will make, so the duty wait comes before the SDR starts."""
+    def capture(self, mhz, seconds, what, lead=1.0, key_s=None, kind="burst", extra_tail=0.0):
+        """The SDR on mhz for `seconds` from now; the body runs `lead` s in; cap.raw after. key_s (kind, extra_tail):
+        the key-up the body will make, so the duty wait comes before the SDR starts."""
         if key_s:
-            self.b.duty.wait(self.b.duty.planned(key_s), "burst", what, lead)
+            self.b.duty.wait(self.b.duty.planned(key_s, extra_tail), kind, what, lead)
         d = os.path.join(self.sess_dir, "captures")
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, f"{self.cur['name']}-{len(self.cur.setdefault('captures', []))}-{bench.slug(what)}.u8")
@@ -456,6 +466,27 @@ class Rig:
             cap.raw = self.sdr.finish()
         finally:
             self.sdr.stop()
+
+    def restart(self):
+        """LINK-24's REBOOT, never keyed (the radio refuses it keyed anyway, LINK-24.3): the radio saves what is
+        pending and restarts through the bootloader; HELLO again within 60 s and the build checked again."""
+        self.need(self.active_key is None, "a restart while keyed")
+        s, why = self.radio.reboot()
+        if s != 0:
+            raise Skip(f"REBOOT refused: {why}")
+        self.sleep(3.0)
+        end = self.now() + 60
+        while True:
+            try:
+                hello = self.radio.hello()
+                break
+            except Exception as e:  # noqa: BLE001  (the bootloader, then the radio starting)
+                if self.now() > end:
+                    raise Stop(f"no HELLO within 60 s of the restart: {e}") from e
+                self.sleep(2.0)
+        self.b.check_build(hello, self.radio.info(), None)
+        self.sleep(2.0)
+        return hello
 
     # -- checks --
     def check(self, cond, what, got=""):
@@ -576,6 +607,55 @@ def modulation_tail(raw, before_end_s=(1.1, 0.6)):
 def offset_hz(raw):
     k = bench._keyed_dev(raw)
     return None if not k else k["off"]
+
+
+def recentre(raw, from_mhz, to_mhz, chunk=1 << 20):
+    """A capture made on from_mhz (rtl_sdr's u8 IQ) as if made on to_mhz: everything moved by (from - to) MHz, so
+    another frequency inside the same capture (within about +-250 kHz of it) can be measured as the bench measures
+    its own (carrier_runs, _keyed_dev)."""
+    n = len(raw) // 2
+    out = np.empty(2 * n, np.uint8)
+    w = 2 * np.pi * (from_mhz - to_mhz) * 1e6 / sdrtx.FS
+    for a in range(0, n, chunk):
+        b = min(a + chunk, n)
+        seg = raw[2 * a: 2 * b].astype(np.float64) - 127.5
+        x = (seg[0::2] + 1j * seg[1::2]) * np.exp(1j * w * np.arange(a, b))
+        out[2 * a: 2 * b: 2] = np.clip(np.round(x.real + 127.5), 0, 255)
+        out[2 * a + 1: 2 * b: 2] = np.clip(np.round(x.imag + 127.5), 0, 255)
+    return out
+
+
+MORSE = dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/", (
+    ".- -... -.-. -.. . ..-. --. .... .. .--- -.- .-.. -- -. --- .--. --.- .-. ... - ..- ...- .-- -..- -.-- --.. "
+    "----- .---- ..--- ...-- ....- ..... -.... --... ---.. ----. -..-.").split()))
+
+
+def cw_steps(text, dit=CW_DIT_S):
+    """tonegen::Cw in seconds: (key down?, s) with the gaps, a dit inside a character, 3 between, none after the
+    last element; characters CW can't send are skipped."""
+    out = []
+    els = [[3 if e == "-" else 1 for e in MORSE[c]] for c in text.upper() if c in MORSE]
+    for i, ch in enumerate(els):
+        for j, e in enumerate(ch):
+            out.append((True, e * dit))
+            if j < len(ch) - 1:
+                out.append((False, dit))
+            elif i < len(els) - 1:
+                out.append((False, 3 * dit))
+    return out
+
+
+def tail_tones(raw, secs):
+    """The steady tones in the keyed part's last `secs` s: (start, end, Hz, dev) with start/end in s from the
+    capture's start (as carrier_runs), and the carrier's runs."""
+    k = bench._keyed_dev(raw)
+    if not k:
+        return [], []
+    dev, fs = k["dev"], k["fs"]
+    a = max(0, len(dev) - int(secs * fs))
+    seg = dev[a:] - np.median(dev[a:])
+    t_seg = (k["i0"] + 1 + a) / fs
+    return [(t0 + t_seg, t1 + t_seg, f, d) for t0, t1, f, d in sdrtones.steady_tones(seg, fs)], bench.carrier_runs(raw)
 
 
 # ---- The tests ----
@@ -1220,6 +1300,90 @@ def trim_follows(r):
     return f"trim +2 ppm moved the carrier {d if d is None else round(d)} Hz"
 
 
+@test("txb_split_tx", {"VFO-16": "part"}, 1, 2.5, 10)
+def split_tx(r):
+    """A same-band split set over the terminal (`slot A split 145.575` on A's 145.495 VFO): read back RX 145.495
+    and TX 145.575 (split); one remote key-up, gated on that TX: the carrier on 145.575 on the SDR and none on
+    145.495 (the same capture moved 80 kHz); slot A put back (`offset off`) after."""
+    r.setup()
+    r.cmd(f"slot A split {SPLIT_TX:.5f}")
+    st = r.radio.slot(0)
+    line = r.cmd("slot A").strip()
+    ok = st["split"] and st["freq10"] == mhz10(VHF) and st["offset"] == mhz10(SPLIT_TX)
+    r.check(ok, f"read back: RX {VHF:.3f}, TX {SPLIT_TX:.3f} (split)", line)
+    r.check(f"tx={SPLIT_TX:.5f}" in line, "the slot line says tx=", line)
+    if not ok:
+        return f"the split didn't take: {line}; not keyed"
+    with r.capture(SPLIT_TX, 1.0 + 2.5 + 1.5, "split TX", key_s=2.5) as cap:
+        with r.keyup(2.5, "split TX") as k:
+            r.hold(k)
+    tx_s, tx_runs = carrier_s(cap.raw)
+    rx_s, rx_runs = carrier_s(recentre(cap.raw, SPLIT_TX, VHF))
+    r.check(k.accepted, "the remote key-up keyed", k.refused)
+    r.check(1.8 <= tx_s <= 3.6, f"the carrier on the TX frequency {SPLIT_TX:.3f} MHz", f"{tx_s:.2f} s {tx_runs}")
+    r.check(not rx_runs, f"nothing on the RX frequency {VHF:.3f} MHz", f"{rx_s:.2f} s {rx_runs}")
+    return f"{line}; carrier {tx_s:.1f} s on {SPLIT_TX:.3f}, {rx_s:.1f} s on {VHF:.3f}"
+
+
+CW_CALL_EST = "VE7TEST"  # the plan's estimate (the black radio's callsign); the test reads the radio's own
+
+
+def _cw_s(call):
+    return sum(s for _, s in cw_steps(call))
+
+
+@test("txb_cw_id", {"TX-26": "part", "TX-40": "part"}, 2, 1.0 + 0.35 + _cw_s(CW_CALL_EST) + 1.0 + 0.35, 40)
+def cw_id(r):
+    """CW ID every 10 min (0 8 7 2) with the radio's callsign (0 8 7 1) and the Beep end tone, after a restart
+    (REBOOT, not keyed: the ID's timer starts at power-on). The first remote unkey: the end tone, then the
+    callsign's 700 Hz elements (20 wpm), then the carrier drops (the 400 ms hold) with nothing after; the one key-up
+    past the 5 s burst (the duty exception). A second key-up straight after: the end tone and no ID."""
+    call = r.get(CALLSIGN)
+    r.need(call and call != "Empty", "no callsign on the radio (0 8 7 1)")
+    steps = cw_steps(call)
+    els = sum(1 for on, _ in steps if on)
+    cw_s = sum(s for _, s in steps)
+    beep = dict(bench.END_TONES)["beep"]
+    tone_s = TONE_LEAD_S + sum(ms for _, ms in beep) / 1000
+    r.restart()
+    r.setup()
+    r.set(END_TONE, "Beep")
+    r.set(CW_ID, "Every 10 min")
+    extra = tone_s + cw_s
+    with r.capture(VHF, 1.0 + 1.0 + extra + 0.5 + 1.0, "first unkey: end tone, CW ID", key_s=1.0, kind="timeout",
+                   extra_tail=extra) as cap:
+        with r.keyup(1.0, "CW ID (first unkey after power-on)", kind="timeout", extra_tail=extra) as k:
+            r.hold(k)
+        r.sleep(extra + 0.3)
+    tones, runs = tail_tones(cap.raw, extra + 1.0)
+    end = [t for t in tones if abs(t[2] - 1000) < 60]
+    cw = [t for t in tones if abs(t[2] - CW_HZ) < 60]
+    r.check(k.accepted, "the first key-up keyed", k.refused)
+    r.check(bool(end), "the end tone (1000 Hz) at the unkey", [round(t[2]) for t in tones][:8])
+    r.check(abs(len(cw) - els) <= 1, f"the CW ID: {CW_HZ} Hz elements, {els} for {call}", len(cw))
+    r.check(bool(end and cw) and end[-1][1] <= cw[0][0] + 0.02, "the end tone, then the CW ID",
+            f"end tone {end[-1][:2] if end else None}, CW from {cw[0][0] if cw else None}")
+    gaps = [round(b[0] - a[0], 3) for a, b in zip(cw, cw[1:])]
+    r.check(bool(gaps) and abs(min(gaps) - 2 * CW_DIT_S) <= 0.025, "20 wpm: elements 120 ms apart at the closest",
+            min(gaps) if gaps else None)
+    hold = runs[-1][1] - cw[-1][1] if (runs and cw) else None
+    r.check(hold is not None and 0.3 <= hold <= 0.75, "then the carrier drops (the 400 ms hold, tx-dry 0.5 s)",
+            None if hold is None else f"{hold:.2f} s after the last element")
+    r.check(len(runs) == 1, "one carrier: the ID inside the key-up, nothing keyed after", runs)
+    with r.capture(VHF, 1.0 + 1.0 + tone_s + 0.5 + 1.5, "second unkey: no ID", key_s=1.0, extra_tail=tone_s) as cap2:
+        with r.keyup(1.0, "CW ID (second unkey, inside 10 min)", extra_tail=tone_s) as k2:
+            r.hold(k2)
+    tones2, runs2 = tail_tones(cap2.raw, 2.5)
+    cw2 = [t for t in tones2 if abs(t[2] - CW_HZ) < 60]
+    s2 = max((b - a for a, b in runs2), default=0.0)
+    r.check(k2.accepted, "the second key-up keyed", k2.refused)
+    r.check(any(abs(t[2] - 1000) < 60 for t in tones2), "the end tone at the second unkey", len(tones2))
+    r.check(not cw2, "no CW ID at the second unkey (inside 10 min)", len(cw2))
+    r.check(0.8 <= s2 <= 1.0 + tone_s + 0.9, "the second carrier without the ID's length", f"{s2:.2f} s")
+    return (f"{call}: end tone then {len(cw)} CW elements, drop {hold if hold is None else round(hold, 2)} s after; "
+            f"second unkey {len(cw2)} CW elements, carrier {s2:.2f} s")
+
+
 # ---- The run ----
 
 
@@ -1372,6 +1536,9 @@ def plan(cfg, a):
     bench.say(f"  port {cfg['port']}; keys only on {', '.join(f'{f:.3f}' for f in cfg['test_freqs'])} MHz (refusal "
               "probes on their own frequency, KEY off at once if keyed); HELLO's build byte must say tx-dry + bench")
     bench.say("  save: slots A, B, C (their VFOs), the active slot, the end tone (set Off for the run)")
+    if any(t["fn"] is cw_id for t in tests):
+        bench.say("  cw_id restarts the radio first (REBOOT, never keyed; settings are saved before the restart, "
+                  "LINK-24.1), then sets 0 8 7 2 and the end tone and puts both back")
     for i, t in enumerate(tests, 1):
         rules = ", ".join(f"{k}{'' if v == 'all' else ' (part)'}" for k, v in t["rules"].items())
         bench.say(f" {i:2d}. {t['fn'].__name__} [{rules}]: {t['doc']} — {t['keyups']} key-up"
@@ -1379,7 +1546,8 @@ def plan(cfg, a):
     wall, keyed, counted = estimate(cfg, tests)
     d = cfg["duty"]
     bench.say(f"  duty: every key-up through the DutyLimiter: at most {d['max_burst_s']:g} s with the "
-              f"{d['unkey_tail_s']:g} s tail (the longest here 4 s), rest {d['rest_factor']:g}x, at most "
+              f"{d['unkey_tail_s']:g} s tail (the longest 4 s, but cw_id's first: its ID past the burst, the "
+              f"timeout exception), rest {d['rest_factor']:g}x, at most "
               f"{d['window_frac']:.0%} of {d['window_s'] / 60:g} min")
     bench.say("  restore after each test and at the end: KEY off, txtest off, rx one, Extend TX off, the key lock, "
               "the settings and slots it changed; the slots checked against the snapshot")
@@ -1394,16 +1562,21 @@ def plan(cfg, a):
 class FakeRadio(bench.FakeRadio):
     """bench's FakeRadio plus: the readback and remote keys (a few screens), `gpio`, `bk`, `mem32`, `si`, `gps
     query`, `rx both`, txtest's signals and filters, REBOOT and HELLO while keyed, keying a named slot, the crystal
-    trim. `bugs`: names of behaviours to break (the selftest's negative checks)."""
+    trim, a split (`slot A split F`; split_to: a radio that stores another TX than asked), the CW ID (0 8 7 2's
+    every 10 min from power-on, VOX-12) after the end tone. `bugs`: names of behaviours to break (the selftest's
+    negative checks)."""
 
-    def __init__(self, clock, bugs=(), **kw):
+    def __init__(self, clock, bugs=(), split_to=None, **kw):
         kw.setdefault("version", "v0.1.0 TX DRY")
         kw.setdefault("build", "tx-dry")
         super().__init__(clock, **kw)
         self.bugs = set(bugs)
+        self.split_to = split_to
+        self.last_id = None  # the last CW ID (the clock's s); None since power-on
         self.slots[2] = dict(ch=None, freq=446.0, mode="FM", power="low", tx="off", rx="off", offset=0)
         self.set.update({LEDS: "RX, TX and heartbeat", SCREEN_TIMEOUT: "1 min", ON_TRANSMIT: "On",
-                         WAKE_ON: "Keys and RX", BATTERY_SAVE: "Level 1", TRIM: "0 ppm"})
+                         WAKE_ON: "Keys and RX", BATTERY_SAVE: "Level 1", TRIM: "0 ppm", CALLSIGN: "VE7TEST",
+                         CW_ID: "Off"})
         self.set0 = dict(self.set)
         self.screen, self.locked, self.toast, self.last_key = "Home", False, None, clock.time()
         self.rxboth = False
@@ -1423,6 +1596,11 @@ class FakeRadio(bench.FakeRadio):
         if w[0] == "slot" and len(w) >= 3 and w[2] == "offset":
             s = self.slots["ABC".index(w[1].upper())]
             s["offset"] = 0 if w[3] == "off" else mhz10(float(w[3]))
+            s.pop("split", None)
+            return self._line("ABC".index(w[1].upper()))
+        if w[0] == "slot" and len(w) == 4 and w[2] == "split":
+            s = self.slots["ABC".index(w[1].upper())]
+            s["split"], s["offset"] = True, mhz10(self.split_to or float(w[3]))
             return self._line("ABC".index(w[1].upper()))
         if w[0] == "slot" and len(w) >= 3 and re.fullmatch(r"\d+(\.\d+)?", w[2] if w[2] != "vfo" else (w[3] if len(w) > 3 else "")):
             f = float(w[3] if w[2] == "vfo" else w[2])
@@ -1509,6 +1687,21 @@ class FakeRadio(bench.FakeRadio):
             return "".join(f"  P{p}  in {b16(0)}   out {b16(out[p])}\n" for p in "ABCDE")
         raise TermError(f"{line}: ?")
 
+    def _line(self, n):
+        s = self.slots[n]
+        if not s.get("split"):
+            return super()._line(n)
+        off, s["offset"] = s["offset"], 0  # the line shows a split's TX as tx=, not an offset
+        try:
+            return super()._line(n).rstrip("\n") + f" tx={off / 1e5:.5f}\n"
+        finally:
+            s["offset"] = off
+
+    def slot(self, n):
+        st = super().slot(n)
+        st["split"] = bool(self.slots[n].get("split"))
+        return st
+
     def _bk(self, reg):
         k = self.key
         if reg == 0x43:
@@ -1591,6 +1784,9 @@ class FakeRadio(bench.FakeRadio):
         self.calls.append("REBOOT")
         if self.key and "reboot" not in self.bugs:
             return 9, "invalid: transmitting"
+        if not self.key:
+            self.last_id = None  # power-on: the ID's timer starts again
+            self.screen, self.rxboth = "Home", False
         return 0, ""
 
     def hello(self):
@@ -1610,6 +1806,8 @@ class FakeRadio(bench.FakeRadio):
         if n == 2 and self.active != 2:
             return 9, "invalid: C keys only as the active slot"
         f = s["freq"] + s["offset"] / 1e5
+        if s.get("split"):
+            f = s["freq"] if "split-rx" in self.bugs else s["offset"] / 1e5
         why = None
         if any(abs(f - x) < 1e-6 for x in self.leaky):
             why = None
@@ -1643,25 +1841,71 @@ class FakeRadio(bench.FakeRadio):
 
     def key_off(self):
         was = self.key
+        if was:
+            self._check()
+            was = self.key
+        t = self.clock.time()
+        mode = self.set[CW_ID]
+        due = bool(was) and was["kind"] == "carrier" and mode != "Off" and self.set[CALLSIGN] != "Empty" and (
+            mode == "On unkey" or "cw-every" in self.bugs or self.last_id is None or t - self.last_id >= 600)
         r = super().key_off()
         if was:
             self.screen = "Home"
+        if due:
+            # VOX-12/TX-26: after the end tone (or the silent lead-in alone), the callsign at 700 Hz, then the hold.
+            on, end, mhz, kind, sig = self.carriers[-1]
+            endtone = sig["endtone"]
+            seq = TONE_LEAD_S + (sum(ms for _, ms in dict(bench.END_TONES)[dict(bench.ENDTONE_SETTINGS)[endtone]])
+                                 / 1000 if endtone != "Off" else 0.0)
+            steps = cw_steps(self.set[CALLSIGN])
+            cw_s = sum(x for _, x in steps)
+            self.carriers[-1] = (on, t + seq + cw_s + 0.5, mhz, kind, dict(sig, cw_t0=t - on + seq, cw=steps))
+            self.last_id = t
         return r
 
 
 class FakeSdr(bench.FakeSdr):
-    """bench's FakeSdr; the carrier's offset moved by the fake radio's crystal trim (sig trim_hz)."""
+    """bench's FakeSdr; the carrier's offset moved by the fake radio's crystal trim (sig trim_hz); the CW ID's 700 Hz
+    elements (sig cw_t0, cw); a carrier up to 300 kHz off the capture's frequency in it at its offset (a split's
+    other side)."""
 
-    def finish(self):
+    def _one(self):
         orig = bench.fake_dev
 
         def dev(sig, tt, rel_off, rng):
-            return orig(sig, tt, rel_off, rng) + sig.get("trim_hz", 0.0)
+            out = orig(sig, tt, rel_off, rng) + sig.get("trim_hz", 0.0)
+            if sig.get("cw"):
+                t = sig["cw_t0"]
+                for on, d in sig["cw"]:
+                    if on:
+                        m = (tt >= t) & (tt < t + d)
+                        out[m] += 1200.0 * np.sin(2 * np.pi * CW_HZ * tt[m])
+                    t += d
+            return out
         bench.fake_dev = dev
         try:
             return super().finish()
         finally:
             bench.fake_dev = orig
+
+    def finish(self):
+        raw = self._one()
+        t0, t1, mhz = self.t0, self.t0 + self.seconds, self.mhz
+        near = sorted({round(c[2], 5) for c in self.r.carriers
+                       if c[1] > t0 and c[0] < t1 and 0.01 <= abs(c[2] - mhz) <= 0.3})
+        if not near:
+            return raw
+        saved = self.r.carriers
+        x = raw.astype(np.float64) - 127.5
+        try:
+            for m in near:
+                self.r.carriers, self.mhz = [c for c in saved if abs(c[2] - m) < 0.01], m
+                x += recentre(self._one(), m, mhz).astype(np.float64) - 127.5
+        finally:
+            self.r.carriers, self.mhz = saved, mhz
+        raw = np.clip(np.round(x + 127.5), 0, 255).astype(np.uint8)
+        raw.tofile(self.path)
+        return raw
 
 
 def selftest(cfg, args, check, tmp):
@@ -1688,7 +1932,11 @@ def selftest(cfg, args, check, tmp):
     ok, worst, rests, bursts = bench.duty_ok(rig.b.duty.log, c2["duty"])
     check(f"suite {SUITE}: duty limits held (burst, rest, 25 % window)", ok, f"worst window {worst:.1f} s")
     keyed_f = {round(c[2], 3) for c in r.carriers}
-    check(f"suite {SUITE}: carriers only on the approved frequencies", keyed_f <= {VHF, UHF}, keyed_f)
+    check(f"suite {SUITE}: carriers only on the approved frequencies", keyed_f <= {VHF, UHF, SPLIT_TX}, keyed_f)
+    over = [e for e in rig.b.duty.log if e["counted_s"] > c2["duty"]["max_burst_s"] + 1e-6]
+    check(f"suite {SUITE}: one key-up past the burst limit, the CW ID's, as the timeout exception",
+          len(over) == 1 and over[0]["kind"] == "timeout" and "CW ID" in over[0]["purpose"],
+          [(e["purpose"], e["kind"], round(e["counted_s"], 1)) for e in over])
     res = json.load(open(os.path.join(os.path.dirname(page), "bench", "results.json")))
     want = set().union(*(t["rules"] for t in TESTS))
     check(f"suite {SUITE}: results.json carries each test's rules", want <= set(res["rules"]),
@@ -1696,7 +1944,8 @@ def selftest(cfg, args, check, tmp):
     # Broken radios: the test that measures it fails (and nothing else breaks the run).
     for bug, label in (("led", "red_led"), ("menu", "menu_does_nothing_keyed"), ("gps", "gps_query_keyed"),
                        ("reboot", "reboot_refused_keyed"), ("session", "session_end_unkeys"),
-                       ("relay", "relay_still"), ("wake", "wake_on_transmit")):
+                       ("relay", "relay_still"), ("wake", "wake_on_transmit"), ("split-rx", "split_tx"),
+                       ("cw-every", "cw_id")):
         clk = bench.FakeClock()
         rb = FakeRadio(clk, bugs=[bug])
         c3 = copy.deepcopy(c2)
@@ -1722,6 +1971,29 @@ def selftest(cfg, args, check, tmp):
         check(f"suite {SUITE}: a slot off the approved frequencies isn't keyed", "KEY on" not in rg.calls, rg.calls[-4:])
     except SafetyError as e:
         check(f"suite {SUITE}: a slot off the approved frequencies isn't keyed", "KEY on" not in rg.calls, str(e)[:80])
+    # A split whose TX isn't approved is never keyed: the test (its read-back) and the gate itself.
+    clk = bench.FakeClock()
+    rs = FakeRadio(clk, split_to=145.600)
+    ex = _quiet_run(c2, args, "split-unapproved", "split_tx", rs, clk)
+    it = ex[f"suite:{SUITE}"]["items"]
+    check(f"suite {SUITE}: a split that stores TX 145.600: split_tx fails, nothing keyed",
+          it and it[0]["result"] == "fail" and "KEY on" not in rs.calls, it[0]["why"][:80] if it else "not run")
+    clk = bench.FakeClock()
+    rs = FakeRadio(clk)
+    rig = Rig(c2, args(build="selftest-txb-gate", tests=None), rs, FakeSdr(rs, clk), clk, threaded=False,
+              log=lambda *_: None)
+    rig.b.check_build(rs.hello(), rs.info(), None)
+    rig.cur = dict(name="gate", checks=[])
+    rs.active = 0
+    rs.term("slot A vfo 145.49500 fm low tone off")
+    rs.term("slot A split 145.60000")
+    try:
+        with rig.keyup(2.0, "split TX gate"):
+            pass
+        check(f"suite {SUITE}: the gate refuses a split to 145.600 (TX unapproved)", False, "it keyed")
+    except SafetyError as e:
+        check(f"suite {SUITE}: the gate refuses a split to 145.600 (TX unapproved)", "KEY on" not in rs.calls,
+              str(e)[:80])
     return page
 
 
