@@ -496,7 +496,8 @@ def id_after_the_first_pass(t):
         t.sleep(id_s)
     cw = [n for f, n in tail_tones(cap, id_s + 2) if abs(f - CW_HZ) < 60]
     t.check(len(cw) >= 3, f"the CW ID at the pass's end: {CW_HZ} Hz elements", len(cw))
-    u = until_ready(t, p + 1, timeout=id_s + 3)
+    until_ready(t, p + 1, timeout=id_s + 3)
+    u = t.rx.ui()  # the start page's cells: the full readback (until_ready's light status has no rows)
     t.check(cells(u).get("Next ID", "").startswith("CW in 1"), "Next ID: about 10 min after the ID",
             cells(u).get("Next ID"))
     with t.capture(UHF, cap_s(t, 1, 0.6), "a second pass", key=(1, 0.6)) as cap:

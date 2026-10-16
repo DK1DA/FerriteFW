@@ -546,7 +546,9 @@ class Sdr:
             self.p.wait(timeout=max(left, 0) + 20)
         except subprocess.TimeoutExpired:
             self.p.kill()
-            raise BenchError("rtl_sdr didn't finish")
+            err = self.p.stderr.read().decode(errors="replace").strip().replace("\n", " | ")[-300:]
+            raise BenchError(f"rtl_sdr didn't finish ({os.path.getsize(self.path) if os.path.exists(self.path) else 0}"
+                             f" bytes written): {err}")
         if not os.path.exists(self.path) or os.path.getsize(self.path) < 1000:
             raise BenchError(f"rtl_sdr wrote nothing: {self.p.stderr.read().decode(errors='replace')[-300:]}")
         self.p = None
