@@ -370,9 +370,8 @@ impl View for Pin {
         if app.dirty(R_NOTE, hash(&(line, c))) {
             w::field(lcd, 10, 220, 156, 174, 170, Align::Center, line.as_bytes(), &UI_12, c, BG);
         }
-        if !set && app.dirty(R_HELP, 1) {
-            w::wrap(lcd, 16, 208, 200, 260, 214, 15, b"Forgot it? Hold MENU while switching on: the reset clears the PIN and everything else.", &UI_12, SUB, BG);
-        }
+        // No "forgot it" hint on the screen (Alex, Oct 15, 2026): the way out (hold MENU at power on, PIN-6) is in the
+        // manual only.
     }
 
     fn hints(self, _: &App) -> Hints {
