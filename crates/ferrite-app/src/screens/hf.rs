@@ -285,8 +285,11 @@ fn loading(live: &LiveAll) -> u8 {
     }
 }
 
-/// A seek that has found nothing by this gives up (the receiver stays where it stopped).
-const SEEK_MS: u32 = 15_000;
+/// A seek that has found nothing by this gives up (the receiver stays where it stopped). Longer than the Radio
+/// task's own limit (15 s, then cancelled where it got to, which it reports): giving up first, as at 15 s, missed
+/// that report, so the screen kept the old frequency while the receiver sat elsewhere, and the next seek took
+/// the stale report as its landing (HF-31 on the radio, Oct 15, 2026: down from 9.4 "landed" on 10.94 MHz).
+const SEEK_MS: u32 = 17_000;
 
 /// HF-31: seek is the SI4732's, in AM: below 30 MHz, not in SSB or CW (the patch has no seek).
 fn seek(app: &mut App, up: bool) {
@@ -377,11 +380,15 @@ pub struct Hf {
     /// Typing a frequency (`RadioUi::hf_entry`): how many digits, and the digits after the point + 1 (0: no point).
     pub n: u8,
     pub point: u8,
+    /// The HF receiver's frequency (kHz: seeks land on whole kHz) as the Radio task last reported it before a
+    /// seek: a seek lands when the report moves off it (HF-31), not when it differs from the screen's, which a
+    /// stale report always did. Here, not in `RadioUi`, as the screen's state has room for it (App RAM).
+    pub heard: u16,
 }
 
 impl Hf {
     pub fn new() -> Self {
-        Hf { loaded: false, menu: false, row: 0, n: 0, point: 0 }
+        Hf { loaded: false, menu: false, row: 0, n: 0, point: 0, heard: 0 }
     }
 
     fn put(self, app: &mut App) {
@@ -671,21 +678,31 @@ impl View for Hf {
     }
 
     fn tick(self, app: &mut App, live: &LiveAll) {
+        let heard = match live.mode {
+            ModeLive::Hf { freq, .. } => freq,
+            _ => 0,
+        };
+        let khz = (heard / 100).min(u16::MAX as u32) as u16;
+        let mut me = self;
         if app.radio.hf_seeking {
-            // The seek's landing: the frequency is kept, and its band VFO and recent list follow as for tuning.
-            if let ModeLive::Hf { freq, .. } = live.mode {
-                if freq != 0 && freq != app.set.hf.freq {
-                    app.set.hf.freq = freq;
-                    (app.radio.hf_seeking, app.radio.hf_tuned_at, app.radio.hf_counted) = (false, app.now, false);
-                }
+            // The seek's landing: the receiver's report moves off where it was before the seek; the frequency is
+            // kept, and its band VFO and recent list follow as for tuning.
+            if heard != 0 && khz != self.heard {
+                (app.set.hf.freq, me.heard) = (heard, khz);
+                (app.radio.hf_seeking, app.radio.hf_tuned_at, app.radio.hf_counted) = (false, app.now, false);
             }
             if app.now.wrapping_sub(app.radio.hf_tuned_at) >= SEEK_MS {
                 app.radio.hf_seeking = false;
             }
+        } else {
+            me.heard = khz;
         }
         if !self.loaded && !(app.radio.ssb_patch && loading(live) < 100) {
-            Hf { loaded: true, ..self }.put(app);
+            me.loaded = true;
             app.radio.hf_tuned_at = app.now;
+        }
+        if me != self {
+            me.put(app);
         }
         if self.loaded && !app.radio.hf_counted && app.now.wrapping_sub(app.radio.hf_tuned_at) >= USED_MS {
             remember(&mut app.set.hf);

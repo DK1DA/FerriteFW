@@ -222,14 +222,14 @@ def hf_seek(t):
         f0 = hf_line(t.ui())["freq"]
         u = t.press("3", long=True, settle=0.05)
         t.check(hf_line(u)["seek"] == 1 or hf_line(u)["freq"] != f0, "hold 3: seeking (or landed already)", hf_line(u))
-        u = t.wait(lambda u: hf_line(u).get("seek") == 0, timeout=17, what="the seek ends (a station or 15 s)")
+        u = t.wait(lambda u: hf_line(u).get("seek") == 0, timeout=19, what="the seek ends (a station or 15 s)")
         f1 = hf_line(u)["freq"]
         t.note(f"seek up from {f0}: stopped at {f1}")
         t.check(float(f1) >= float(f0), "up: the frequency it stopped on is above (or it gave up there)", (f0, f1))
         time.sleep(0.5)
         t.eq(hf_line(t.ui())["freq"], f1, "HF mode keeps the frequency it stopped on")
         u = t.press("1", long=True)
-        u = t.wait(lambda u: hf_line(u).get("seek") == 0, timeout=17, what="the seek down ends")
+        u = t.wait(lambda u: hf_line(u).get("seek") == 0, timeout=19, what="the seek down ends")
         t.check(float(hf_line(u)["freq"]) <= float(f1), "down: below", hf_line(u))
         if hf_mode(t, "USB") is not None:
             u = t.press("3", long=True)

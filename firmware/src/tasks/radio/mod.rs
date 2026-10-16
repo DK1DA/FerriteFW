@@ -742,6 +742,8 @@ pub async fn task() {
     // MODE-7: when the tick last ran; its next time counts from here, not from the last command, so a stream of
     // commands never holds it off (the crossband repeater, watch and scans run on it).
     let mut ticked = now_ms();
+    // When the last tick began: a scan step's due time at or before it was one that tick didn't move (decision 165).
+    let mut started = ticked;
 
     loop {
         // Wake for the next command, the next Battery Save phase change, or (awake) the next tick. HF mode's tick
@@ -749,10 +751,12 @@ pub async fn task() {
         // move goes past and the wait fires every 1 ms, starving the UI and the link).
         let mut at = r.save.deadline().filter(|_| r.hf.is_none()).unwrap_or(u64::MAX);
         // Broadcast FM's report (fm_poll) runs on the tick, also while Battery Save has the BK4829s asleep (BCR-19).
-        // SCAN-21: a fast scan step's end ticks on time too (on the 10 ms tick alone a step waited for the next).
+        // SCAN-21: a fast scan step's end ticks on time too (on the 10 ms tick alone a step waited for the next), but
+        // only a due time still ahead of the last tick's start, and never within MIN_GAP_MS of its end
+        // (`scan::tick_wake`, decision 165: a due time the tick didn't move woke it every 1 ms and hung the radio).
         let tick_at = (!r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() || r.seek.is_some()).then(|| {
-            let t = ticked + if r.busy() { TICK_MS } else { POLL_MS };
-            r.scan_due(now_ms()).map_or(t, |d| t.min(d))
+            let period = if r.busy() { TICK_MS } else { POLL_MS };
+            ferrite_core::scan::tick_wake(started, ticked, period, r.scan_due(now_ms()))
         });
         if let Some(t) = tick_at {
             at = at.min(t);
@@ -829,11 +833,13 @@ pub async fn task() {
                 r.cmd(c).await;
                 // MODE-7: commands are taken first, but the tick still runs on time between them.
                 if tick_at.is_some_and(|t| now_ms() >= t) {
+                    started = now_ms();
                     r.tick().await;
                     ticked = now_ms();
                 }
             }
             Either4::Second(()) => {
+                started = now_ms();
                 r.tick().await;
                 ticked = now_ms();
             }

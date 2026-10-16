@@ -275,7 +275,22 @@ fn hf_seek() {
     t.hold(Key::Digit(1));
     assert_eq!(seeks(&mut t), [RadioCmd::HfSeek { up: false }]);
     t.wait(200);
-    assert_eq!(t.app.set.hf.freq, 958_000);
+    assert_eq!(t.app.set.hf.freq, 1_173_500, "the report from before the seek is no landing (HF-31, Oct 15)");
+    t.live.mode = ModeLive::Hf { freq: 702_000, rssi: -70, snr: 20, si4732: true, loading: 255 };
+    t.wait(200);
+    assert_eq!(t.app.set.hf.freq, 702_000, "the station below it stopped on");
+    // Nothing found: the Radio task cancels at 15 s where it got to and reports that; the screen still takes it,
+    // so the next seek starts from where the receiver is.
+    t.hold(Key::Digit(3));
+    assert_eq!(seeks(&mut t), [RadioCmd::HfSeek { up: true }]);
+    t.wait(15_000);
+    t.live.mode = ModeLive::Hf { freq: 1_094_000, rssi: -110, snr: 0, si4732: true, loading: 255 };
+    t.wait(200);
+    assert_eq!(t.app.set.hf.freq, 1_094_000, "the 15 s cancel's frequency is kept");
+    t.hold(Key::Digit(1));
+    assert_eq!(seeks(&mut t), [RadioCmd::HfSeek { up: false }]);
+    t.wait(200);
+    assert_eq!(t.app.set.hf.freq, 1_094_000, "seeking down: not yet landed");
     t.app.set.hf.mode = 3; // USB
     t.hold(Key::Digit(3));
     assert!(seeks(&mut t).is_empty(), "no seek in SSB");

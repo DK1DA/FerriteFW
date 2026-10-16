@@ -158,11 +158,16 @@ impl Radio {
     /// SCAN-21: the soonest end of a fast scan step on a slot with a chip (`now_ms` time), for the main loop to
     /// tick on it rather than on the next 10 ms tick (`Scan::due`). The step's 15 ms counts from the tick that
     /// tuned it, so a step takes 15 ms plus that tick's retune and reads: about 17 ms, 55-60 steps a second.
-    /// None while the tick doesn't step scans (the scope, the counter, keyed, the crossband repeater): a due time
-    /// it never moves would go past and wake the task every 1 ms (decision 163).
+    /// None while the tick doesn't step scans (HF mode, Battery Save asleep with no kept slot, the scope, the
+    /// counter, keyed, the crossband repeater): a due time it never moves would go past and wake the task every
+    /// 1 ms (decision 163). The main loop also ignores a due time the last tick didn't move whatever the reason
+    /// (`ferrite_core::scan::tick_wake`, decision 165): these returns are the first guard, not the only one.
     pub(super) fn scan_due(&self, now: u64) -> Option<u64> {
         #[cfg(feature = "tx")]
         if self.xb.is_some() {
+            return None;
+        }
+        if self.hf.is_some() || self.save.asleep() && self.kept() == 0 {
             return None;
         }
         if self.scope.is_some() || self.counter.is_some() || self.path.keyed().is_some() {

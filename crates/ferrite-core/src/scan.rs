@@ -430,6 +430,25 @@ impl Scan {
     }
 }
 
+/// The least time the Radio task leaves between the end of a tick and the next one woken by a scan step's end
+/// ([`tick_wake`]): the tasks below it (the UI, the link) always get this much.
+pub const MIN_GAP_MS: u64 = 2;
+
+/// SCAN-21 (decision 165): when the Radio task ticks next, in its ms clock. `period` after the last tick ended
+/// (`ticked`), or sooner at a fast step's end (`due`: [`Scan::due`] in the same clock), but only while that due
+/// time is still ahead of the last tick's start (`started`). A due time the last tick had already reached and left
+/// where it was is stale: that tick returned before stepping the scan (HF mode, Battery Save asleep, the scope,
+/// the counter, keyed, the crossband repeater, or any other early return), and waking on it again ran a whole tick
+/// every 1 ms on the Radio task's interrupt executor, above the UI and the link (the radio hung in a range scan,
+/// Oct 15, 2026). Never sooner than [`MIN_GAP_MS`] after the last tick ended.
+pub fn tick_wake(started: u64, ticked: u64, period: u64, due: Option<u64>) -> u64 {
+    let next = ticked + period.max(MIN_GAP_MS);
+    match due {
+        Some(d) if d > started => next.min(d.max(ticked + MIN_GAP_MS)),
+        _ => next,
+    }
+}
+
 /// Channel numbers 0-999 (shown 1-1000): what a channel scan's positions are.
 pub const MAX_CHANNELS: u16 = 1000;
 /// The bitmap's size: a bit per channel number.
@@ -931,33 +950,77 @@ mod tests {
         assert_eq!(s.ptt(), 1);
     }
 
+    /// The Radio task's main loop over [`tick_wake`] for 1 s of time: each tick takes `cost` ms and steps the scan
+    /// only when `steps(t)` (the tick returned early otherwise); `setup` runs on the scan first. Returns (ticks,
+    /// steps, the least gap between a tick's end and the next tick).
+    fn run_loop(cost: u64, steps: impl Fn(u64) -> bool, setup: impl FnOnce(&mut Scan)) -> (u32, u32, u64) {
+        let skipped = [];
+        let r = Range { lo: mhz(430), hi: mhz(450), step: 1_250, skipped: &skipped };
+        let mut s = Scan { fast: true, resume: Resume::Drop, ..Scan::new() };
+        s.start(0, 1_000);
+        setup(&mut s);
+        let (mut started, mut ticked) = (1_000u64, 1_000u64);
+        let (mut ticks, mut stepped, mut gap) = (0u32, 0u32, u64::MAX);
+        while ticked < 2_000 {
+            let due = s.due().map(|d| d as u64);
+            // The firmware's floor (never a wait on a time already past) is 1 ms after now = `ticked`.
+            let t = tick_wake(started, ticked, 10, due).max(ticked + 1);
+            gap = gap.min(t - ticked);
+            (started, ticks) = (t, ticks + 1);
+            if steps(t) {
+                stepped += s.tick(&r, t as u32, false).tune.is_some() as u32;
+            }
+            ticked = t + cost;
+        }
+        (ticks, stepped, gap)
+    }
+
     /// SCAN-21: a Radio task ticking every 10 ms (its tick taking 2 ms) and also at each fast step's end (`due`)
     /// steps every FAST_STEP_MS plus the tick's own time (about 58 a second); on the 10 ms tick alone a step waits
     /// for the second tick past its 15 ms (24 ms, 41 a second, before any false alarm's 50 ms confirm).
     #[test]
     fn fast_pass_ticks_on_its_due_time() {
-        let skipped = [];
-        let r = Range { lo: mhz(430), hi: mhz(450), step: 1_250, skipped: &skipped };
-        let run = |use_due: bool| {
-            let mut s = Scan { fast: true, resume: Resume::Drop, ..Scan::new() };
-            s.start(0, 0);
-            let (mut t, mut ticked, mut steps) = (0u32, 0u32, 0u32);
-            while t < 1_000 {
-                let next = ticked + 10;
-                t = match s.due().filter(|_| use_due) {
-                    Some(d) if d < next => d.max(t + 1),
-                    _ => next.max(t + 1),
-                };
-                steps += s.tick(&r, t, false).tune.is_some() as u32;
-                t += 2; // the tick's own time (the retune and the reads)
-                ticked = t;
-            }
-            steps
-        };
-        let (with, without) = (run(true), run(false));
+        let (_, with, gap) = run_loop(2, |_| true, |_| {});
         assert!(with >= 1_000 / (FAST_STEP_MS + 2) - 1, "{with} steps a second ticking on the due time");
-        assert!(without <= 1_000 / 24 + 1, "{without}: on the 10 ms tick alone a step waits for its second tick");
+        assert!(gap >= MIN_GAP_MS);
         assert_eq!(Scan::new().due(), None, "nothing running: nothing due");
+        assert_eq!(tick_wake(0, 2, 10, None), 12, "no scan: the 10 ms tick");
+    }
+
+    /// SCAN-21, decision 165: whatever the tick does, the loop never runs it more often than its period, plus once per
+    /// fast step the tick takes; a due time the tick didn't move is never woken on twice. The 1 ms loop this
+    /// replaced (a due time in the past, `min`ed into every wait) is checked to spin in the same model.
+    #[test]
+    fn scan_due_never_spins_the_radio_task() {
+        // The tick never steps the scan (HF mode, Battery Save asleep, scope, counter, keyed, crossband): the
+        // 10 ms tick alone, not one tick a ms.
+        let (ticks, steps, gap) = run_loop(1, |_| false, |_| {});
+        assert_eq!(steps, 0);
+        assert!(ticks <= 1_000 / 11 + 2, "{ticks} ticks a second with a stale due time");
+        assert!(gap >= MIN_GAP_MS);
+        // The same with the earlier wake (the due time `min`ed in whether or not it was past): a tick every 2 ms.
+        let (mut ticked, mut ticks) = (1_000u64, 0);
+        let due = 1_015u64;
+        while ticked < 2_000 {
+            let t = (ticked + 10).min(due).max(ticked + 1);
+            (ticked, ticks) = (t + 1, ticks + 1);
+        }
+        assert!(ticks >= 450, "{ticks}: the old wake spins");
+        // Excluded for a while (keyed for 300 ms, say), then stepped again: the scan goes on at full speed after.
+        let (_, steps, gap) = run_loop(2, |t| !(1_200..1_500).contains(&t), |_| {});
+        assert!(steps >= 700 / (FAST_STEP_MS + 2) - 2, "{steps} steps in the 700 ms it ran");
+        assert!(gap >= MIN_GAP_MS);
+        // A due time already in the past when the loop starts (the step began 1 s ago, the slot only now has a
+        // chip): one tick steps it, then the usual pace.
+        let (ticks, steps, _) = run_loop(2, |_| true, |s| s.restep(0));
+        assert!(steps >= 1_000 / (FAST_STEP_MS + 2) - 1 && ticks <= 2 * steps + 2, "{ticks} ticks, {steps} steps");
+        // The scan stops: nothing due, the 10 ms tick.
+        let (ticks, steps, _) = run_loop(2, |_| true, |s| s.stop());
+        assert_eq!(steps, 0);
+        assert!(ticks <= 1_000 / 12 + 1, "{ticks}");
+        // A tick slower than a fast step (20 ms): the next one still waits MIN_GAP_MS.
+        let (_, steps, gap) = run_loop(20, |_| true, |_| {});
+        assert!(steps >= 1_000 / 23 - 1 && gap >= MIN_GAP_MS, "{steps} steps, gap {gap}");
     }
 
     #[test]
