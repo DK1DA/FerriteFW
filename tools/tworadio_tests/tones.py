@@ -152,10 +152,12 @@ def one_measurement_per_carrier(t):
 def tone_search_finds_the_tone(t):
     """Tone search (MENU 0 3 6) on A at 145.495; the other radio sends 88.5 there: the screen's result (the
     readback's `tsearch found=`) reads "T 88.5" within 3 s of the carrier, with no RX tone on the slot and with
-    one (T 100.0, which the search must not just repeat); then D023N. The receiving session (Oct 15, 2026) found
+    one (T 100.0, which the search must not just repeat); 67.0 and 250.3, the table's ends (decision 177's scale);
+    then D023N. The receiving session (Oct 15, 2026) found
     nothing: the Radio task dropped the screen's command."""
     rx_quiet(t)
-    for rxtone, sent, want in (("off", "88.5", "T 88.5"), ("100.0", "88.5", "T 88.5"), ("off", "D023N", "D023N")):
+    for rxtone, sent, want in (("off", "88.5", "T 88.5"), ("100.0", "88.5", "T 88.5"), ("off", "67.0", "T 67.0"),
+                               ("off", "250.3", "T 250.3"), ("off", "D023N", "D023N")):
         rx_vfo(t, "A", VHF, tone=rxtone, active=True)
         t.rx.home()
         u = t.rx.keys("MENU 0 3 6")
