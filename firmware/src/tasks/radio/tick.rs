@@ -102,6 +102,10 @@ impl Radio {
         // holds it (XB-14), and that transmission runs as any other.
         #[cfg(feature = "tx")]
         if let Some(held) = self.xb.as_ref().map(|x| x.rep.held()) {
+            // XB-13: Battery Save stepped as busy, so its receivers stay awake and its deadline stays ahead (decision
+            // 163: left unstepped, it went past 10 s after the start and the Radio task woke every 1 ms).
+            let a = self.save.tick(now_ms(), true);
+            self.apply(a).await;
             let now = now_ms() as u32;
             if !held {
                 return self.xb_tick(now).await;

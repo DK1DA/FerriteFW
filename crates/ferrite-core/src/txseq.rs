@@ -201,12 +201,13 @@ impl TxSeq {
     }
 
     /// The crossband repeater's key-up (XB-6, XB-10): the same checks (region, calibration, relay, battery, the duty
-    /// limit weighted by power), then the path machine's crossband key-up, the receiving chip left in receive.
+    /// limit weighted by power), then the path machine's crossband key-up, the receiving chip left in receive:
+    /// `r.rx` is the receiving side's frequency, its receiver selected first (XB-5, decision 163).
     /// Send it as voice that no person keyed (`person: false`): it relays voice, gets the CW ID when the
     /// repeater asks for it, and is refused on an emergency frequency.
     pub fn key_xb(&mut self, r: &Req, path: &mut Path, now: u32, out: &mut Steps) -> Result<(), Refusal> {
         self.check(r, path, now)?;
-        path.key_up_xb(Sel::tx(r.tx), out).map_err(|b| match b {
+        path.key_up_xb(Sel::rx(r.rx), Sel::tx(r.tx), now, out).map_err(|b| match b {
             Blocked::Keyed => Refusal::InProgress,
             Blocked::NeedsRelay | Blocked::TooOften => Refusal::RelayMismatch,
         })?;
@@ -525,5 +526,38 @@ mod tests {
             assert_eq!(t.tick(&cfg, true, &mut p, full - 4, &mut Steps::default()), None, "power {power}");
             assert_eq!(t.tick(&cfg, true, &mut p, full, &mut Steps::default()), Some(Event::Hot), "power {power}");
         }
+    }
+
+    /// XB-5, decision 163, the radio's failing order (black radio, Oct 15, 2026, cable log "xb refused 12"): an
+    /// open heard on side A (145.495), the receive path hopped to side B (446.475) before the engine's detect
+    /// time ran out, then the key: it keys B's chip with A's receiver selected, never RelayMismatch. The pass
+    /// listens on A until its squelch ends it, and the receive path hops again after.
+    #[test]
+    fn crossband_keys_after_the_hop_moved_away() {
+        use crate::msg::XbCfg;
+        use crate::xb::{Cmd, Repeater, DETECT_MS};
+        let f = [mhz(145) + 49_500, mhz(446) + 47_500];
+        let mut path = rx_on(f[0]);
+        let mut t = TxSeq::new();
+        let mut rep = Repeater::new(XbCfg { hang_ds: 0, flags: 0, ..XbCfg::DEFAULT }, 0);
+        assert_eq!(rep.tick(0, [Some(true), None]), None, "side A opens");
+        path.rx(Rx::Bk(Sel::rx(f[1])), Cause::Auto, 10, &mut Steps::default()).unwrap(); // the hop to B
+        assert_eq!(rep.tick(10, [None, Some(false)]), None);
+        assert_eq!(rep.tick(DETECT_MS + 10, [None, Some(false)]), Some(Cmd::Key { from: 0 }), "A's open, remembered");
+        assert_eq!(path.rx_now(), Rx::Bk(Sel::UhfRx), "listening to B, whose chip transmits");
+        let r = Req { tx: f[1], rx: f[0], person: false, power: 0, ..req(f[1]) };
+        let mut s = Steps::default();
+        assert_eq!(t.key_xb(&r, &mut path, 40, &mut s), Ok(()));
+        assert_eq!((path.rx_now(), path.keyed(), path.keyed_xb()), (Rx::Bk(Sel::VhfRx), Some(Sel::UhfTx), true));
+        // The pass follows A's squelch (XB-7): it closes, the pass ends, and the hop to B works again.
+        let mut now = 50;
+        while !matches!(rep.tick(now, [Some(false), None]), Some(Cmd::Unkey { .. })) {
+            assert!(now < 1_000, "the pass never ended");
+            now += 10;
+        }
+        let cfg = Cfg { timeout_s: 0, prealert_s: 0, end_tone: false, cw_id: false, cw_each: true, tail: false };
+        t.release(&cfg, &mut path, now, &mut Steps::default());
+        assert!(path.keyed().is_none() && rep.from().is_none());
+        assert_eq!(path.rx(Rx::Bk(Sel::rx(f[1])), Cause::Auto, now, &mut Steps::default()), Ok(()), "hopping resumes");
     }
 }

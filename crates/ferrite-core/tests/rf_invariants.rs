@@ -268,6 +268,7 @@ fn crossband_sequences_keep_the_rules() {
                 }
             };
             let keyed_before = path.keyed().is_some();
+            let mut keyed_now = false;
             match rep.tick(now, heard) {
                 Some(Cmd::Key { from }) => {
                     let to = 1 - from as usize;
@@ -290,8 +291,11 @@ fn crossband_sequences_keep_the_rules() {
                         power: rng.next(2) as u8,
                     };
                     match seq.key_xb(&r, &mut path, now, &mut s) {
-                        Ok(()) => keys += 1,
-                        Err(_) => {
+                        Ok(()) => (keys, keyed_now) = (keys + 1, true),
+                        // XB-5 (decision 163): the receive path may be on the other side's chip after a hop; the
+                        // key-up moves it to the receiving side, never refusing for that.
+                        Err(e) => {
+                            assert_ne!(e, ferrite_core::txplan::Refusal::RelayMismatch, "{what}: a pass refused for the hop");
                             refused += 1;
                             rep.refused(now);
                         }
@@ -308,12 +312,15 @@ fn crossband_sequences_keep_the_rules() {
                     }
                 }
             }
+            assert!(!s.as_slice().iter().any(|a| matches!(a, Act::Relay(r) if *r != relay)), "{what}: the relay moved");
+            pins.run(&s, keyed_before || keyed_now || path.keyed().is_some(), &what);
             if rng.next(500) == 0 {
+                // Its own plan, as the Radio task runs it (one plan holds 16 steps).
+                let mut s = Steps::default();
                 seq.safe(&mut path, now, &mut s);
                 rep.cut(now);
+                pins.run(&s, false, &what);
             }
-            assert!(!s.as_slice().iter().any(|a| matches!(a, Act::Relay(r) if *r != relay)), "{what}: the relay moved");
-            pins.run(&s, keyed_before || path.keyed().is_some(), &what);
             assert_eq!(pins.relay, relay, "{what}: the relay moved");
             if path.keyed().is_none() {
                 assert!(pins.chip_tx == [false; 2] && !pins.pa && !pins.repeat, "{what}: unkeyed with RF or the repeat audio on");

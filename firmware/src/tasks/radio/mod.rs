@@ -744,8 +744,10 @@ pub async fn task() {
     let mut ticked = now_ms();
 
     loop {
-        // Wake for the next command, the next Battery Save phase change, or (awake) the next tick.
-        let mut at = r.save.deadline();
+        // Wake for the next command, the next Battery Save phase change, or (awake) the next tick. HF mode's tick
+        // never steps Battery Save, so its deadline isn't waited on there (decision 163: a deadline the tick doesn't
+        // move goes past and the wait fires every 1 ms, starving the UI and the link).
+        let mut at = r.save.deadline().filter(|_| r.hf.is_none()).unwrap_or(u64::MAX);
         // Broadcast FM's report (fm_poll) runs on the tick, also while Battery Save has the BK4829s asleep (BCR-19).
         let tick_at = (!r.save.asleep() || r.kept() != 0 || r.hf.is_some() || r.fm.is_some() || r.seek.is_some())
             .then(|| ticked + if r.busy() { TICK_MS } else { POLL_MS });

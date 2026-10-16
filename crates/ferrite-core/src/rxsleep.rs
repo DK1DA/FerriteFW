@@ -107,9 +107,12 @@ impl RxSleep {
         }
     }
 
-    /// When the next phase change is due (ms); the Radio task sleeps until then or a command.
-    pub fn deadline(&self) -> u64 {
-        self.until
+    /// When the next phase change is due (ms); the Radio task sleeps until then or a command. None at level Off:
+    /// nothing changes, and [`RxSleep::tick`] never moves a deadline there, so a time reported then would be past
+    /// 10 s after the last activity and wake the Radio task every 1 ms (decision 163). A caller that stops ticking
+    /// (HF mode) must not wait on it either; the crossband repeater ticks it busy (XB-13), which keeps it ahead.
+    pub fn deadline(&self) -> Option<u64> {
+        timing(self.level).map(|_| self.until)
     }
 }
 
@@ -153,7 +156,7 @@ mod tests {
         let t = HOLD_MS + RECENT_MS + 10;
         run(&mut s, HOLD_MS, t - HOLD_MS, false);
         while !s.asleep() {
-            s.tick(s.deadline(), false);
+            s.tick(s.deadline().unwrap(), false);
         }
         assert_eq!(s.activity(t + 5_000), Action::Wake);
         assert_eq!(s.tick(t + 5_010, false), Action::None, "held after activity");
@@ -170,10 +173,27 @@ mod tests {
     fn turning_it_off_wakes_the_receiver() {
         let mut s = RxSleep::new(Level::L2, 0);
         while !s.asleep() {
-            s.tick(s.deadline(), false);
+            s.tick(s.deadline().unwrap(), false);
         }
-        let now = s.deadline() - 1;
+        let now = s.deadline().unwrap() - 1;
         assert_eq!(s.set_level(Level::Off, now), Action::Wake);
         assert!(!s.asleep());
+    }
+
+    /// XB-13, decision 163: ticked busy every 10 ms (the crossband repeater's receivers awake), the deadline stays
+    /// ahead of now, so the Radio task's wait is never already past (on the radio it was 10 s stale and the task
+    /// woke every 1 ms, starving the UI and the link). At level Off there is no deadline at all.
+    #[test]
+    fn busy_keeps_the_deadline_ahead() {
+        for level in [Level::L1, Level::L2, Level::L3] {
+            let mut s = RxSleep::new(level, 0);
+            for now in (0..3 * HOLD_MS).step_by(10) {
+                assert_eq!(s.tick(now, true), Action::None);
+                assert!(s.deadline().is_some_and(|d| d > now), "{level:?} at {now}");
+            }
+        }
+        let mut s = RxSleep::new(Level::Off, 0);
+        run(&mut s, 0, 3 * HOLD_MS, false);
+        assert_eq!(s.deadline(), None);
     }
 }

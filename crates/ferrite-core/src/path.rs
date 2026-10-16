@@ -475,15 +475,21 @@ impl Path {
     /// path and the chip are set (TX-23), the one difference kept (a hot switch otherwise). Both band receive
     /// selects held (SAFE-24): the transmitting chip's band select is cleared first, so only the receiving one is
     /// on, as without the hold.
-    pub fn key_up_xb(&mut self, tx: Sel, out: &mut Steps) -> Result<(), Blocked> {
+    ///
+    /// `rx` is the receiving side's select (XB-5): the repeater hops its receive path between the sides while
+    /// ready, and the engine keys on an open it heard on one side while the path may already be on the other's
+    /// chip (the TX chip). So the receive path goes to `rx` first (no relay move: refused before any pin if `rx`
+    /// needs the other relay state), then the other chip keys; the pass listens on `rx` until it ends (decision
+    /// 163; black radio, Oct 15, 2026: every pass refused as RelayMismatch).
+    pub fn key_up_xb(&mut self, rx: Sel, tx: Sel, now: u32, out: &mut Steps) -> Result<(), Blocked> {
         if self.tx.is_some() {
             return Err(Blocked::Keyed);
         }
-        let tx = tx.to_tx();
-        let Rx::Bk(rx) = self.rx else { return Err(Blocked::NeedsRelay) };
+        let (rx, tx) = (rx.to_rx(), tx.to_tx());
         if rx.chip() == tx.chip() || tx.relay() != self.relay || rx.relay() != self.relay {
             return Err(Blocked::NeedsRelay);
         }
+        self.rx(Rx::Bk(rx), Cause::Auto, now, out)?; // the same relay state: only the receive selects change
         if self.both_live() {
             out.push(Act::Sel(other(rx), false));
         }
@@ -718,7 +724,7 @@ mod tests {
         let mut p = both_on();
         p.rx(Rx::Bk(Sel::UhfRx), Cause::Auto, 0, &mut Steps::default()).unwrap();
         let mut s = Steps::default();
-        p.key_up_xb(Sel::VhfTx, &mut s).unwrap();
+        p.key_up_xb(Sel::UhfRx, Sel::VhfTx, 0, &mut s).unwrap();
         assert_eq!(s.as_slice()[..2], [Act::Sel(Sel::VhfRx, false), Act::PaZero]);
         assert!(!s.as_slice().contains(&Act::Sel(Sel::UhfRx, false)), "the receiving select stays (XB-6)");
         let mut s = Steps::default();
@@ -874,9 +880,10 @@ mod tests {
     fn crossband_keeps_the_receiver() {
         let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
         let mut s = Steps::default();
-        assert_eq!(p.key_up_xb(Sel::UhfTx, &mut s), Err(Blocked::NeedsRelay), "never the receiving chip");
-        assert_eq!(p.key_up_xb(Sel::HfTx, &mut s), Err(Blocked::NeedsRelay), "never the relay");
-        p.key_up_xb(Sel::VhfTx, &mut s).unwrap();
+        assert_eq!(p.key_up_xb(Sel::UhfRx, Sel::UhfTx, 0, &mut s), Err(Blocked::NeedsRelay), "never the receiving chip");
+        assert_eq!(p.key_up_xb(Sel::UhfRx, Sel::HfTx, 0, &mut s), Err(Blocked::NeedsRelay), "never the relay");
+        assert!(s.is_empty(), "refused before any pin");
+        p.key_up_xb(Sel::UhfRx, Sel::VhfTx, 0, &mut s).unwrap();
         // Decision 95, stock's order: the PA up, then 10-20 ms (PTT state 1), then the repeat audio.
         assert_eq!(
             s.as_slice(),
@@ -902,15 +909,49 @@ mod tests {
         assert!(p.keyed().is_none() && !p.keyed_xb());
         // Without the sequencer's call first, the unkey does the RX end itself.
         let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
-        p.key_up_xb(Sel::VhfTx, &mut Steps::default()).unwrap();
+        p.key_up_xb(Sel::UhfRx, Sel::VhfTx, 0, &mut Steps::default()).unwrap();
         let mut s = Steps::default();
         p.unkey(0, &mut s);
         assert_eq!(s.as_slice()[..2], [Act::RepeatAudio(false), Act::Sel(Sel::UhfRx, false)]);
         // The safe state from a crossband pass puts the mic back too.
         p.rx(Rx::Bk(Sel::UhfRx), Cause::Auto, 0, &mut Steps::default()).unwrap();
-        p.key_up_xb(Sel::VhfTx, &mut Steps::default()).unwrap();
+        p.key_up_xb(Sel::UhfRx, Sel::VhfTx, 0, &mut Steps::default()).unwrap();
         let mut s = Steps::default();
         p.safe(0, &mut s);
         assert!(s.as_slice().contains(&Act::RepeatAudio(false)));
+    }
+
+    /// XB-5, decision 163 (black radio, Oct 15, 2026: "xb refused 12"): the repeater hops its receive path, and
+    /// the engine keys on an open heard on side A while the path already listens to side B, whose chip is the one
+    /// to transmit. The key-up moves the receive path to A first, then keys B's chip: never refused for that.
+    #[test]
+    fn crossband_keys_from_the_side_heard_while_hopped_away() {
+        for both in [false, true] {
+            // Listening to UHF (side B, the hop) when VHF's (side A's) open passes: UHF's chip transmits.
+            let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
+            if both {
+                p.set_both(true, &mut Steps::default()).unwrap();
+            }
+            let mut s = Steps::default();
+            p.key_up_xb(Sel::VhfRx, Sel::UhfTx, 10, &mut s).unwrap();
+            let a = s.as_slice();
+            assert_eq!(p.rx_now(), Rx::Bk(Sel::VhfRx), "the pass listens on the side it repeats (XB-7)");
+            assert_eq!(p.keyed(), Some(Sel::UhfTx));
+            let pa0 = a.iter().position(|x| *x == Act::PaZero).unwrap();
+            assert!(both || a[..pa0].contains(&Act::Sel(Sel::VhfRx, true)), "the receiving select first: {a:?}");
+            assert!(a[..pa0].contains(&Act::Sel(Sel::UhfRx, false)), "the TX chip's receive select off: {a:?}");
+            assert!(!a.iter().any(|x| matches!(x, Act::Relay(_))), "never the relay (XB-2)");
+            assert_eq!(a[a.len() - 4..], [Act::ChipTx(1), Act::PaRamp, Act::Wait(XB_AUDIO_DELAY_MS), Act::RepeatAudio(true)]);
+            // The pass ends; the receive path is free to hop again.
+            let mut s = Steps::default();
+            p.unkey(0, &mut s);
+            assert!(p.keyed().is_none() && !p.keyed_xb());
+            p.rx(Rx::Bk(Sel::UhfRx), Cause::Auto, 0, &mut Steps::default()).unwrap();
+        }
+        // TX-37 kept: a receiving side on the relay (HF) is refused before any pin.
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
+        let mut s = Steps::default();
+        assert_eq!(p.key_up_xb(Sel::HfRx, Sel::UhfTx, 0, &mut s), Err(Blocked::NeedsRelay));
+        assert!(s.is_empty() && p.rx_now() == Rx::Bk(Sel::UhfRx));
     }
 }

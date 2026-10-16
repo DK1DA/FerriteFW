@@ -172,7 +172,10 @@ impl Radio {
     }
 
     /// A pass: the other side's chip keyed on its own receive frequency (XB-18) with its tone, at the repeater's
-    /// power (XB-3: Low or Mid), through the sequencer's checks; the receiving chip stays in receive (XB-6).
+    /// power (XB-3: Low or Mid), through the sequencer's checks; the receiving chip stays in receive (XB-6). The
+    /// engine may key on an open it heard on `from` while the hop has the receive path on the other side (whose
+    /// chip transmits): the key-up selects `from`'s receiver first (XB-5, decision 163), and the tick listens
+    /// there until the pass ends, then hops again.
     async fn xb_key(&mut self, x: &mut XbRun, from: u8, now: u32) {
         if let Some(c) = crate::chan::TX_CAL.try_take() {
             (self.tx.cal, self.tx.gauge) = c;
