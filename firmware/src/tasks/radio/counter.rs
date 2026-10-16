@@ -1,4 +1,4 @@
-//! The frequency counter.
+//! The frequency counter and tone search (chapter 22).
 
 use super::*;
 
@@ -61,5 +61,51 @@ impl Radio {
             }
         }
         self.counter = Some(c);
+    }
+
+    /// Tone search on or off (TSRCH-1, TSRCH-3): an exclusive mode like the counter; watch and scans pause. Off,
+    /// the engines tune the chips again, so the slot's own tone detector is back (`tune_finish`).
+    pub(super) fn tone_search(&mut self, slot: u8, on: bool) {
+        self.tuned = [None; 2]; // tuned below, or by the engines afterwards
+        let slot = slot.min(SLOTS as u8 - 1);
+        self.tsearch = on.then_some((slot, ferrite_core::tonesearch::Search::new()));
+        let f = self.slots[slot as usize].rx_freq();
+        self.live.mode = if on { ModeLive::Probe { freq: f, rssi: -127, tone: 0 } } else { ModeLive::Off };
+        speaker(false);
+        log(b"tone search ", on as u32);
+    }
+
+    /// Tone search's tick: the slot's own chip on its frequency (its band's, as the watch picks), the other asleep,
+    /// the sub-tone detectors in scan (`tone_probe`, the tone hint's, TSRCH-12); each tick's reading goes to
+    /// `tonesearch::Search`, which keeps one when the next agrees with the carrier there. The audio stays muted.
+    /// The slot's card follows its squelch and signal (TSRCH-2).
+    pub(super) async fn tsearch_tick(&mut self) {
+        let Some((s, mut srch)) = self.tsearch else { return };
+        let a = self.save.tick(now_ms(), true); // awake throughout, as the counter
+        self.apply(a).await;
+        let f = self.slots[s as usize].rx_freq();
+        let n = ferrite_core::freq::band(f).1;
+        if !self.has(n) {
+            return;
+        }
+        if self.tuned[n as usize] != Some((s, f)) {
+            self.tune_chip(1 - n, None).await;
+            self.tune_chip(n, Some((s, f))).await;
+            self.select_rx(f, Cause::ActiveSlot).await;
+            self.chip(n).af_out(AfOut::Mute);
+            radio_chip::tone_probe(&mut self.chip(n));
+            return;
+        }
+        let mut bk = self.chip(n);
+        let (rssi, st) = (bk.rssi_dbm(), bk.status());
+        let (c, d) = bk.subtone_scan();
+        let word = radio_chip::heard_tone(c, d, &ferrite_app::slot::CTCSS, &ferrite_app::slot::DCS);
+        if srch.step(st.squelch_open, word) {
+            log(b"tone found ", srch.found as u32);
+        }
+        let sl = &mut self.live.slots[s as usize];
+        (sl.rssi, sl.squelch_open) = (if st.squelch_open { rssi } else { rssi.min(-121) }, st.squelch_open);
+        self.live.mode = ModeLive::Probe { freq: f, rssi, tone: srch.found };
+        self.tsearch = Some((s, srch));
     }
 }

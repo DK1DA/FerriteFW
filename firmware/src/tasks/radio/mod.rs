@@ -270,6 +270,8 @@ struct Radio {
     seek: Option<SiSeek>,
     /// The frequency counter (TSRCH-10), while on.
     counter: Option<Counter>,
+    /// Tone search (TSRCH-1 to TSRCH-3), while on: the slot searched and what was found.
+    tsearch: Option<(u8, ferrite_core::tonesearch::Search)>,
     /// The band scope (SCOPE-4), while it runs; its points per sweep and dwell (0.1 ms) from the last ScopeCfg.
     scope: Option<ScopeRun>,
     /// SCOPE-14: the sweep waits after a key or knob step, so the UI handles it first.
@@ -675,6 +677,7 @@ pub async fn task() {
         hf: None,
         seek: None,
         counter: None,
+        tsearch: None,
         scope: None,
         sweep_hold: SweepHold::new(),
         scope_cfg: (60, 100, false),

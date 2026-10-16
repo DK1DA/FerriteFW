@@ -235,8 +235,8 @@ impl Radio {
                 }
             }
             RadioCmd::ScopeListen { freq, mode } => self.scope_listen(freq, mode).await,
-            // Tone search: its own exclusive mode, after 2d (chapter 22).
-            RadioCmd::ToneSearch { .. } => {}
+            // Tone search: its own exclusive mode (TSRCH-3); until Oct 15, 2026 this dropped it.
+            RadioCmd::ToneSearch { slot, on } => self.tone_search(slot, on),
             #[cfg(feature = "tx")]
             RadioCmd::Crossband(c) => self.crossband(c).await,
             // XB-2: no transmit in this build; the UI refuses first, and the radio says so too.

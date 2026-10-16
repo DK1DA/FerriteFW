@@ -40,6 +40,7 @@ pub mod sweephold;
 pub mod tonegen;
 pub mod tonehint;
 pub mod txcal;
+pub mod tonesearch;
 pub mod txfilters;
 pub mod txplan;
 pub mod txseq;

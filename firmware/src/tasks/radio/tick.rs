@@ -134,6 +134,9 @@ impl Radio {
         if self.counter.is_some() {
             return self.counter_tick(now).await;
         }
+        if self.tsearch.is_some() {
+            return self.tsearch_tick().await;
+        }
         // Keyed: the chips and paths are the transmission's (TX-29); only the sequencer's timeout, duty limit
         // and battery under load run.
         #[cfg(feature = "tx")]

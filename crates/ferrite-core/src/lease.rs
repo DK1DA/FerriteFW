@@ -1,5 +1,5 @@
-//! MODE-3: the Radio task's lease on an exclusive mode (band scope or home's strip, frequency counter, FM
-//! broadcast, HF mode, crossband). The UI renews it while it wants the mode ([`crate::msg::RadioCmd::Lease`], or
+//! MODE-3: the Radio task's lease on an exclusive mode (band scope or home's strip, frequency counter, tone
+//! search, FM broadcast, HF mode, crossband). The UI renews it while it wants the mode ([`crate::msg::RadioCmd::Lease`], or
 //! any command that starts or retunes the mode); when no renewal arrives for [`WINDOW_MS`] the Radio task stops
 //! the mode by itself and goes back to normal receive, so no app bug and no starved UI can leave the radio
 //! stuck out of receive.
@@ -19,9 +19,10 @@ pub enum Held {
     Broadcast,
     Hf,
     Crossband,
+    ToneSearch,
 }
 
-const HELD: [Held; 5] = [Held::Scope, Held::Counter, Held::Broadcast, Held::Hf, Held::Crossband];
+const HELD: [Held; 6] = [Held::Scope, Held::Counter, Held::Broadcast, Held::Hf, Held::Crossband, Held::ToneSearch];
 
 impl Held {
     /// The command that stops it, as the UI would send it.
@@ -32,6 +33,7 @@ impl Held {
             Held::Broadcast => RadioCmd::Broadcast(BroadcastCmd::Off),
             Held::Hf => RadioCmd::Hf { freq: 0, mode: 0, on: false },
             Held::Crossband => RadioCmd::Crossband(None),
+            Held::ToneSearch => RadioCmd::ToneSearch { slot: 0, on: false },
         }
     }
 }
@@ -78,6 +80,8 @@ impl Lease {
             RadioCmd::Hf { on: false, .. } => self.stop(Held::Hf),
             RadioCmd::Crossband(Some(_)) => self.start(Held::Crossband, now),
             RadioCmd::Crossband(None) => self.stop(Held::Crossband),
+            RadioCmd::ToneSearch { on: true, .. } => self.start(Held::ToneSearch, now),
+            RadioCmd::ToneSearch { on: false, .. } => self.stop(Held::ToneSearch),
             // The input task's, not the UI's: no sign the UI is running.
             RadioCmd::Accessory(_) => {}
             _ => self.renew(now),
@@ -151,6 +155,7 @@ mod tests {
             (RadioCmd::Counter(true), Held::Counter),
             (RadioCmd::Broadcast(BroadcastCmd::Fm(10_110)), Held::Broadcast),
             (RadioCmd::Hf { freq: 707_500, mode: 2, on: true }, Held::Hf),
+            (RadioCmd::ToneSearch { slot: 1, on: true }, Held::ToneSearch),
         ];
         for (c, h) in starts {
             l.note(&c, 100);
