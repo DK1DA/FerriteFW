@@ -89,6 +89,13 @@ fn to_radio(app: &mut App, held: &mut Option<RadioCmd>) {
 
 /// MODE-6, TX-33: power off and reboot: what is waiting, then Shutdown, given at most 1 s (the Radio task takes a
 /// command at least every half second, MODE-7); the power goes regardless.
+/// PWR-17, TX-33: a power-off step in the cable log: `power off: saving at 123456 ms`.
+fn power_log(what: &str) {
+    bringup::linef(|b| {
+        let _ = ufmt::uwrite!(b, "power off: {} at {} ms", what, now_ms());
+    });
+}
+
 async fn send_shutdown(app: &mut App, held: &mut Option<RadioCmd>) {
     let t = Instant::now();
     loop {
@@ -550,15 +557,34 @@ pub async fn task() {
                 Timer::after_millis(50).await;
             }
             if auto_off || POWER_SW.read() {
+                // TX-33, PWR-17: each step in the cable log with the time (ms since boot; the Radio task's
+                // "shutdown" lines carry the same clock), so the order and the 3 s can be judged off the radio.
+                power_log(if auto_off { "auto off" } else { "switch off" });
                 app.power_off();
                 app.render(&mut lcd, &live, &dev, store);
                 send_shutdown(&mut app, &mut held).await;
+                power_log("radio told");
+                // TX-33: power is released only after the safe state; the Radio task clears its keyed flag when
+                // its unkey is done (at most 1 s: the unkey wait is far shorter).
+                let t = Instant::now();
+                if crate::chan::RF_STATE.load(Relaxed) & crate::chan::RF_BUSY_KEYED != 0 {
+                    while crate::chan::RF_STATE.load(Relaxed) & crate::chan::RF_BUSY_KEYED != 0 && t.elapsed() < Duration::from_secs(1) {
+                        Timer::after_millis(5).await;
+                    }
+                    power_log("radio unkeyed");
+                }
                 // Everything queued, then the settings, written before the power goes (at most 3 s).
                 store.flush(&app);
                 store::wake(store);
+                power_log("saving");
                 let t = Instant::now();
                 while !store.idle() && t.elapsed() < Duration::from_secs(3) {
                     Timer::after_millis(10).await;
+                }
+                power_log(if store.idle() { "saved" } else { "save cut at 3 s" });
+                power_log("off");
+                if bringup::ON.load(Relaxed) {
+                    Timer::after_millis(20).await; // the last lines out on the cable before the power goes
                 }
                 POWER_HOLD.write(false);
                 Timer::after_millis(500).await;

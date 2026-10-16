@@ -164,12 +164,15 @@ impl Radio {
                 // TX-33: power off while keyed (a pass of the repeater too) unkeys first: PA drive 0, the chip out
                 // of transmit, the unkey wait, every select off, before any chip sleeps or the SI4732 is touched
                 // (TX audit M6). Stock unkeys nothing at power off (PE0, the save, then PA11 cleared).
+                // Each step in the cable log at its time (ms since boot, as the UI's "power off" lines).
+                log(b"shutdown: start at ms ", now_ms() as u32);
                 #[cfg(feature = "tx")]
                 if self.path.keyed().is_some() || self.tx.seq.keyed() {
                     let mut s = Steps::default();
                     self.tx.seq.safe(&mut self.path, now_ms() as u32, &mut s);
                     self.run(&s).await;
                     self.unkeyed();
+                    log(b"shutdown: unkeyed at ms ", now_ms() as u32);
                 }
                 for n in 0..2u8 {
                     self.tune_chip(n, None).await;
@@ -180,6 +183,7 @@ impl Radio {
                 self.path.safe(now_ms() as u32, &mut s);
                 self.run(&s).await;
                 speaker(false);
+                log(b"shutdown: chips off at ms ", now_ms() as u32);
             }
             RadioCmd::Counter(on) => self.counter(on),
             RadioCmd::Lease => {} // MODE-3: renewed above (`Lease::note`)
