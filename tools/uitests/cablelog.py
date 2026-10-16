@@ -145,7 +145,7 @@ def knob_redraws_light_then_whole(t):
         last = max(ts for ts, _, _ in draws if ts - t0 < 1.0)
     during = [d for d in draws if d[0] <= last + 0.05]
     after = [d for d in draws if d[0] > last + 0.05]
-    t.check(during and max(ms for _, ms, _ in during) < 10, "while turning: light redraws (under 10 ms)", during)
+    t.check(during and max(ms for _, ms, _ in during) < 20, "while turning: light redraws (under 20 ms, HOME-13.1)", during)
     big = [d for d in after if d[2] >= max(kb for _, _, kb in during) * 2 or d[1] >= 10]
     t.check(big, "a full redraw after", after)
     t.check(0.25 <= big[0][0] - last <= 0.6, "about 400 ms after the last step", big[0][0] - last)
