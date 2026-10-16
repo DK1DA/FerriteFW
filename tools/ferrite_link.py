@@ -301,7 +301,8 @@ class Link:
         slow = getattr(self.p, "slow", False)
         if timeout is None:
             timeout = 6.0 if slow else 2.0  # Bluetooth: a 224-byte chunk is ~0.8 s idle, over 2 s on a busy radio
-        for _ in range(retry_pending + 1):
+        resynced = False
+        for _ in range(retry_pending + 2):
             t0 = time.time()
             if slow:
                 self.p.rx_mark = self.p.rx_total
@@ -317,6 +318,14 @@ class Link:
                             break
                         return status, rest
             if not pending:
+                # A frame sent just after the radio restarted (or after 10 s of quiet) can go to the terminal (TERM-2):
+                # a read-only request with nothing back is sent once more after a 0x00 sync. Never a KEY, CMD, MORE
+                # or write: repeating those would act twice or skip a chunk.
+                if not resynced and ty in (HELLO, INFO, UI):
+                    resynced = True
+                    self.p.write(b"\x00")
+                    self.sent_at = time.time()
+                    continue
                 why = f" ({self.p.diagnose(t0)})" if hasattr(self.p, "diagnose") else ""
                 raise TimeoutError(f"no answer to 0x{ty:02X} in {timeout:.0f} s{why}")
         raise TimeoutError("the radio is still asking its owner")
