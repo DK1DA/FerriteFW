@@ -11,6 +11,9 @@ pub const CLOSED_MS: u32 = 500;
 pub const PROBE_MS: u32 = 1200;
 /// The hint stays this long after the carrier was last heard (TSRCH-14).
 pub const KEEP_MS: u32 = 30_000;
+/// A measured carrier counts as dropped once its squelch has stayed shut this long (TSRCH-15): the slot's own retune
+/// (a new receive tone tunes the chip again) shuts the squelch for a few hundred ms under a carrier still there.
+pub const DROP_MS: u32 = 1_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Phase {
@@ -20,8 +23,9 @@ enum Phase {
     Closed(u32),
     /// The detectors scan since then (ms).
     Probing(u32),
-    /// Measured (or given up) for this carrier: nothing more until it drops (TSRCH-15).
-    Done,
+    /// Measured (or given up) for this carrier: nothing more until it drops (TSRCH-15); since when the squelch
+    /// has been shut, if it is.
+    Done(Option<u32>),
 }
 
 /// What the Radio task does to the slot's chip.
@@ -73,13 +77,13 @@ impl Hint {
         if (freq, rx_tone) != (self.freq, self.tone) {
             let retuned = freq != self.freq;
             (self.freq, self.tone, self.heard) = (freq, rx_tone, 0);
-            let measured = matches!(self.phase, Phase::Probing(_) | Phase::Done);
+            let measured = matches!(self.phase, Phase::Probing(_) | Phase::Done(_));
             if self.probing() {
                 act = Act::Restore;
             }
             // TSRCH-15: a new receive tone clears the hint (TSRCH-14) but the carrier was measured already: no second
             // measurement until it drops. A new frequency is another carrier.
-            self.phase = if measured && !retuned { Phase::Done } else { Phase::Idle };
+            self.phase = if measured && !retuned { Phase::Done(None) } else { Phase::Idle };
         }
         if self.heard != 0 {
             if carrier {
@@ -95,14 +99,16 @@ impl Hint {
                     self.phase = Phase::Idle;
                     act = Act::Restore;
                 } else if now.wrapping_sub(t) >= PROBE_MS {
-                    self.phase = Phase::Done;
+                    self.phase = Phase::Done(None);
                     act = Act::Restore;
                 }
                 return act;
             }
             _ if toned && carrier => {
                 self.heard = 0; // the tones match now
-                if self.phase != Phase::Done {
+                if let Phase::Done(gone) = &mut self.phase {
+                    *gone = None;
+                } else {
                     self.phase = Phase::Idle;
                 }
             }
@@ -112,7 +118,15 @@ impl Hint {
                 self.phase = Phase::Probing(now);
                 act = Act::Start;
             }
-            Phase::Done if !carrier => self.phase = Phase::Idle,
+            // TSRCH-15: the carrier dropped once the squelch has stayed shut DROP_MS (a retune's gap is not a drop).
+            Phase::Done(gone) => {
+                self.phase = match (carrier, gone) {
+                    (true, _) => Phase::Done(None),
+                    (false, None) => Phase::Done(Some(now)),
+                    (false, Some(t)) if now.wrapping_sub(t) >= DROP_MS => Phase::Idle,
+                    (false, g) => Phase::Done(g),
+                };
+            }
             _ => {}
         }
         act
@@ -132,7 +146,7 @@ impl Hint {
         if !self.probing() {
             return Act::None;
         }
-        self.phase = Phase::Done;
+        self.phase = Phase::Done(None);
         self.heard = if word == self.tone { 0 } else { word };
         self.seen = now;
         Act::Restore
@@ -216,14 +230,42 @@ mod tests {
             assert_eq!(h.tick(t, F, T100, true, false, true), Act::None, "same carrier at {t}");
         }
         h.tick(5100, F, T100, false, false, true);
-        h.tick(6000, F, T100, true, false, true);
-        assert_eq!(h.tick(6500, F, T100, true, false, true), Act::Start, "a new carrier");
+        h.tick(6100, F, T100, false, false, true);
+        h.tick(6200, F, T100, true, false, true);
+        assert_eq!(h.tick(6700, F, T100, true, false, true), Act::Start, "a new carrier");
         for (tone, ok) in [(0, true), (T100, false)] {
             let mut h = Hint::new();
             for t in (0..3000).step_by(100) {
                 assert_eq!(h.tick(t, F, tone, true, false, ok), Act::None);
             }
         }
+    }
+
+    /// TSRCH-15: the retune a new receive tone causes shuts the squelch for a moment under the measured carrier
+    /// (the two-radio run, Oct 15, 2026: `idle`, `RX`, then `heard` again): that is no drop, so no second
+    /// measurement; a real drop (DROP_MS shut) is.
+    #[test]
+    fn retune_gap_is_not_a_drop() {
+        const T107: u16 = 1072;
+        let mut h = Hint::new();
+        h.tick(0, F, T100, true, false, true);
+        h.tick(500, F, T100, true, false, true);
+        h.found(800, 885);
+        h.tick(900, F, T107, true, false, true);
+        h.tick(910, F, T107, false, false, true); // the chip tuned again: the squelch shut
+        h.tick(1200, F, T107, false, false, true);
+        for t in (1300..5000).step_by(10) {
+            assert_eq!(h.tick(t, F, T107, true, false, true), Act::None, "same carrier at {t}");
+        }
+        assert_eq!(h.heard, 0);
+        h.tick(5000, F, T107, false, false, true);
+        h.tick(5000 + DROP_MS - 10, F, T107, false, false, true);
+        h.tick(5000 + DROP_MS - 5, F, T107, true, false, true);
+        assert_eq!(h.tick(6600, F, T107, true, false, true), Act::None, "a gap under DROP_MS: same carrier");
+        h.tick(7000, F, T107, false, false, true);
+        h.tick(7000 + DROP_MS, F, T107, false, false, true);
+        h.tick(8100, F, T107, true, false, true);
+        assert_eq!(h.tick(8600, F, T107, true, false, true), Act::Start, "dropped: the next carrier");
     }
 
     /// TSRCH-14: the hint lasts 30 s after the carrier was last heard, and goes at once on a retune, a new
@@ -276,8 +318,9 @@ mod tests {
             assert_eq!(h.tick(t, F, T107, true, false, true), Act::None, "same carrier at {t}");
         }
         h.tick(5100, F, T107, false, false, true);
-        h.tick(6000, F, T107, true, false, true);
-        assert_eq!(h.tick(6500, F, T107, true, false, true), Act::Start, "the next carrier");
+        h.tick(6100, F, T107, false, false, true);
+        h.tick(6200, F, T107, true, false, true);
+        assert_eq!(h.tick(6700, F, T107, true, false, true), Act::Start, "the next carrier");
         // a tone change mid-probe ends it, and the carrier isn't probed again
         let mut h = Hint::new();
         h.tick(0, F, T100, true, false, true);

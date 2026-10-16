@@ -168,8 +168,8 @@ pub(crate) fn row_value(app: &App, item: Item) -> Buf<32> {
     v.set(t.as_bytes());
     if item == Item::Tones && heard(app) != 0 {
         // TSRCH-16: "T 100.0, heard 88.5"
-        let mut h = Buf::<16>::new();
-        super::shared::heard_text(heard(app), &mut h);
+        let mut h = Buf::<24>::new();
+        super::shared::heard_text(heard(app), app.slot(app.active).cfg().rx_tone, &mut h);
         v.push(b", heard");
         v.push(&h.as_bytes()[5..]);
     }

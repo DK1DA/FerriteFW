@@ -328,14 +328,26 @@ impl App {
     }
 }
 
-/// The tone hint on a card (TSRCH-13): "Heard 88.5", "Heard D023I". At most 11 characters (77 px at UI_12), so a
-/// card's state field widens to [`HEARD_W`] for it.
-pub(crate) fn heard_text(t: u16, b: &mut Buf<16>) {
+/// The tone hint on a card (TSRCH-13): "Heard 88.5", "Heard D023I". A DCS code read on air is also the other
+/// polarity's code that sends the same bits (TONE-20.5: D023I is D047N), so both show, the one with the slot's
+/// own code number (`own`, its receive tone) first, else the normal one: "Heard D023I/D047N" on a D023N slot. At
+/// most 17 characters (120 px at UI_12), so a card's state field widens to fit it ([`HEARD_W`] at least).
+pub(crate) fn heard_text(t: u16, own: u16, b: &mut Buf<24>) {
     let mut tone = Buf::<16>::new();
     crate::slot::tone_text(t, &mut tone);
     let tb = tone.as_bytes();
     b.set(b"Heard ");
-    b.push(tb.strip_prefix(b"T ").unwrap_or(tb));
+    let Some(other) = ferrite_core::dcs::twin(t, &crate::slot::DCS) else {
+        b.push(tb.strip_prefix(b"T ").unwrap_or(tb));
+        return;
+    };
+    let mut ob = Buf::<16>::new();
+    crate::slot::tone_text(other, &mut ob);
+    let mine = own & crate::slot::DCS_FLAG != 0 && other & 0x1FF == own & 0x1FF;
+    let (first, second) = if mine { (ob.as_bytes(), tb) } else { (tb, ob.as_bytes()) };
+    b.push(first);
+    b.push(b"/");
+    b.push(second);
 }
 
 /// The state field's width for a tone hint (TSRCH-13): 11 characters.

@@ -38,9 +38,9 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     let f = app.shown_freq(a, live);
     let (state, sc) = app.state(a, live);
     // TSRCH-13: a tone hint takes the state's place, in a wider field; so does a long state (BCR-15).
-    let mut ht = Buf::<16>::new();
+    let mut ht = Buf::<24>::new();
     if state == "heard" {
-        heard_text(lv.heard_tone, &mut ht);
+        heard_text(lv.heard_tone, app.slots[a as usize].cfg().rx_tone, &mut ht);
     } else if state.len() > 8 {
         ht.set(state.as_bytes());
     }
@@ -242,17 +242,17 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         }
         let mut head = Buf::<32>::new();
         app.head_text(s, live, &mut head);
-        let mut stt = Buf::<16>::new();
+        let mut stt = Buf::<24>::new();
         stt.set(state.as_bytes());
         if state == "RX" {
             stt.push(b" ");
             stt.push(w::s_text(lv.rssi).as_bytes());
         } else if state == "heard" {
-            heard_text(lv.heard_tone, &mut stt); // TSRCH-13, in a wider field
+            heard_text(lv.heard_tone, app.slots[s as usize].cfg().rx_tone, &mut stt); // TSRCH-13, in a wider field
         }
         if app.dirty(R_HEAD + p, hash(&(head, stt, active))) {
             w::badge(lcd, 14, y + 5, s, active, SURFACE);
-            let sw = if state == "heard" { HEARD_W } else if state.len() > 8 { text4_width(stt.as_bytes(), &UI_12) + 2 } else { 72 };
+            let sw = if state == "heard" || state.len() > 8 { (text4_width(stt.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { 72 };
             w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, Align::Left, w::fit(head.as_bytes(), &UI_12, 192 - sw), &UI_12, SUB, SURFACE);
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
             w::field(lcd, 226 - sw, sw, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);

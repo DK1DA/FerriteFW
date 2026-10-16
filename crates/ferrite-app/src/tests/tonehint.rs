@@ -5,7 +5,7 @@ use super::{store, T};
 use crate::chan::ChannelStore;
 use crate::screens::confirm::{Ask, Confirm};
 use crate::screens::quick::Quick;
-use crate::screens::shared::{heard_text, HEARD_W};
+use crate::screens::shared::heard_text;
 use crate::slot::{CTCSS, DCS, DCS_FLAG, DCS_INV};
 use crate::Screen;
 use ferrite_core::keys::Key;
@@ -17,19 +17,35 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::theme::map;
 
 /// TSRCH-13: "Heard 88.5" and "Heard D023I"; every standard tone and code, both polarities, fits the card's
-/// widened state field on one line.
+/// state field on one line with the head text still readable (the widest, "Heard D023I/D047N", leaves "VFO · VHF").
 #[test]
 fn heard_text_fits() {
-    let mut b = Buf::<16>::new();
-    heard_text(885, &mut b);
+    let mut b = Buf::<24>::new();
+    heard_text(885, 1000, &mut b);
     assert_eq!(b.as_bytes(), b"Heard 88.5");
-    heard_text(DCS_FLAG | DCS_INV | 0o023, &mut b);
-    assert_eq!(b.as_bytes(), b"Heard D023I");
     let all = CTCSS.iter().copied().chain(DCS.iter().flat_map(|&c| [DCS_FLAG | c, DCS_FLAG | DCS_INV | c]));
+    let mut widest = 0;
     for t in all.chain([2541, 1300]) {
-        heard_text(t, &mut b);
-        assert!(text4_width(b.as_bytes(), &UI_12) <= HEARD_W, "{:?} is too wide", core::str::from_utf8(b.as_bytes()));
+        heard_text(t, 0, &mut b);
+        widest = widest.max(text4_width(b.as_bytes(), &UI_12));
     }
+    let head = text4_width("VFO \u{b7} VHF".as_bytes(), &UI_12);
+    assert!(widest + 2 + head <= 226 - 34, "the widest hint ({widest} px) leaves the head ({head} px) room");
+}
+
+/// TONE-20.5: a DCS code heard is also the other polarity's code sending the same bits: both show, the one with
+/// the slot's own code number first (the receiving session, Oct 15, 2026: D023I sent to a D023N slot read
+/// "Heard D047N").
+#[test]
+fn heard_dcs_names_both_polarities() {
+    let mut b = Buf::<24>::new();
+    let (d023n, d047n) = (DCS_FLAG | 0o023, DCS_FLAG | 0o047);
+    heard_text(d047n, d023n, &mut b);
+    assert_eq!(b.as_bytes(), b"Heard D023I/D047N", "on a D023N slot: its own code first");
+    heard_text(d047n, 1000, &mut b);
+    assert_eq!(b.as_bytes(), b"Heard D047N/D023I", "on a CTCSS slot: the normal code first");
+    heard_text(DCS_FLAG | DCS_INV | 0o023, d047n, &mut b);
+    assert_eq!(b.as_bytes(), b"Heard D047N/D023I", "on a D047N slot");
 }
 
 /// TSRCH-13: a hint replaces the slot's state on its card, in amber, in all three home layouts; it changes no
