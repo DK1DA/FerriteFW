@@ -18,7 +18,7 @@ from .core import test
 from .restart import clear_pin_lock, pin_lock, set_pin_lock, the_pin  # noqa: F401 (clear_pin_lock: pin_lock's)
 
 ASLEEP_37, AWAKE_37 = 0x1D00, 0x9D1F  # PWR-5
-TARGET = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "target")
+TARGET = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "target")
 
 
 def mem(t, addr, n):
