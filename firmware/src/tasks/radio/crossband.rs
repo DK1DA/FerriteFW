@@ -74,7 +74,9 @@ impl Radio {
         }
         let keyed_chip = self.path.keyed().map(|s| s.chip());
         // Each side's chip on its slot (the transmitting one stays as keyed: simplex, the same frequency).
-        for s in x.sides {
+        // By index: `for s in x.sides` left core's array IntoIter::next in slow flash in the tx build (slowcheck).
+        for i in 0..2 {
+            let s = x.sides[i];
             let n = Sel::rx(self.slots[s as usize].freq).chip();
             if keyed_chip != Some(n) {
                 self.tune_chip(n, Some((s, self.slots[s as usize].rx_freq()))).await;
