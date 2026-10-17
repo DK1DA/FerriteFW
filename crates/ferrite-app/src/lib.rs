@@ -278,6 +278,9 @@ pub struct App {
     alert: u8,
     /// VOX keyed the active slot and holds it (VOX-13).
     vox_on: bool,
+    /// Dry TX (TX-48, 0 8 9 2): the PA drive held at 0 on every key-up of a `tx` build. Not a setting: off at
+    /// every power-on and never stored, changed only on the radio's own menu (never by the link or terminal).
+    dry_tx: bool,
     /// VOX's flags: [`VOX_REFUSED`], speech refused on an emergency frequency (TX-35: the toast once per burst);
     /// [`VOX_SENT`] and [`VOX_SCREEN`], whether the screen lets VOX sample as last sent to the Radio task (VOX-3,
     /// [`App::vox_screen`]). One byte: the App's RAM budget (`ram_is_small`).
@@ -407,6 +410,7 @@ impl App {
             inbox: 0,
             alert: 0,
             vox_on: false,
+            dry_tx: false,
             vox_bits: 0,
             remote: None,
             remote_ended: None,
@@ -898,6 +902,16 @@ impl App {
     /// The callsign, for the boot screen (empty until set).
     pub fn callsign(&self) -> &[u8] {
         self.set.callsign.as_bytes()
+    }
+
+    /// Dry TX is on (TX-48): the firmware holds the PA drive at 0 while it is.
+    pub fn dry_tx(&self) -> bool {
+        self.dry_tx
+    }
+
+    /// Dry TX on or off: only the radio's menu calls this (TX-48).
+    pub(crate) fn set_dry_tx(&mut self, on: bool) {
+        self.dry_tx = on;
     }
 
     /// The radio-wide settings.

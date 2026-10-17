@@ -1,7 +1,7 @@
 """The status bar and the Status page (chapter 8, SBAR-*), About and its help pages (HELP-*)."""
 from .core import test
 
-BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt", "battery", "low", "cutoff", "clock", "utc", "call"}
+BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt", "battery", "low", "cutoff", "dry", "clock", "utc", "call"}  # dry: SBAR-22
 
 
 @test("SBAR-14", "PWR-8", "SBAR-10", pages=("Status",))

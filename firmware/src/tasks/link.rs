@@ -9,7 +9,7 @@
 use crate::board::BT_PWR;
 use ferrite_radio::bt::BtPower;
 use ferrite_core::link::{BtPace, BtPacer};
-use crate::chan::{BT_IN, BT_LINK_ON, BT_ON, BT_OUT, BT_PACE, BT_RATE, CABLE_BAUD, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
+use crate::chan::{BT_IN, BT_LINK_ON, BT_ON, BT_OUT, BT_PACE, BT_RATE, CABLE_BAUD, DRY_TX, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::hal::uart;
 use crate::report::{UART_BT, UART_CPS};
 use crate::ring::Ring;
@@ -54,7 +54,7 @@ impl Port {
     /// Whether a byte may go now (TX-43: never on the cable while keyed, but in the `tx-dry` build; SND-14: never
     /// on the cable with a speaker mic connected).
     fn may_send(&self) -> bool {
-        !self.cable || ferrite_radio::cable::may_send(RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0, cfg!(feature = "tx-dry"), spkmic())
+        !self.cable || ferrite_radio::cable::may_send(RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0, cfg!(feature = "tx-dry") || DRY_TX.load(Relaxed), spkmic())
     }
 
     /// Received bytes into the UI's ring (only what it has room for: the rest waits in the UART's ring, never

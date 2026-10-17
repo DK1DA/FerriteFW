@@ -114,7 +114,8 @@ class FakeFerrite:
         self.name, self.clock, self.air = name, clock, air
         self.spec = spec or f"fake:{name}"
         self.ble, self.sim, self.cable = ble, False, not ble
-        self.build, self.bench, self.version = build, bench_bit, "v0.1.0-fake"
+        self.build, self.bench, self.version = build, bench_bit and build != "tx+dry", "v0.1.0-fake"
+        self.dry_tx = build == "tx+dry"  # TX-48: Dry TX on a tx build; a test turns it off "on the radio"
         self.answer_s = 2.0 if ble else 0.6
         self.lat = 0.5 if ble else 0.02
         self.bugs, self.hold = set(bugs), hold_answers
@@ -340,7 +341,7 @@ class FakeFerrite:
                f"state frame=1 ago=0 dark={dark} locked=0 active={'ABC'[self.active]} keyed={keyed} "
                f"remote={int(self.keyed is not None)} mode={'xb' if self.xb else 'off'} fm=0",
                f"bar lock=0 scan={int(any(self.scan))} watch={self.bar_watch(sid)} inbox=0 alert=0 gps=off bt=0 "
-               "battery=80 low=0 cutoff=0 clock=- utc=0"]
+               f"battery=80 low=0 cutoff=0 dry={int(self.dry_tx)} clock=- utc=0"]
         if self.toast and now < self.toast[2]:
             out.append(f"toast {q(self.toast[0])} {q(self.toast[1])}")
         hints = [("MENU", "Menu")]
@@ -447,7 +448,7 @@ class FakeFerrite:
         f1, f2 = self.xb_side(0)["freq"], self.xb_side(1)["freq"]
         if (f1 >= 30_000_000) == (f2 >= 30_000_000):
             return "one chip"
-        if self.build not in ("tx", "tx-dry") or not all(any(lo <= f <= hi for lo, hi in TX_BANDS) for f in (f1, f2)):
+        if self.build not in ("tx", "tx-dry", "tx+dry") or not all(any(lo <= f <= hi for lo, hi in TX_BANDS) for f in (f1, f2)):
             return "Side 1 can't transmit there"
         if self.xbcfg["id"] and not self.callsign:
             return "ID needs a callsign (setup)"
@@ -957,7 +958,7 @@ class FakeFerrite:
             self.end_scan(i, n)
         s = self.slots[i]
         f = self.tx_freq(s)
-        if self.build not in ("tx", "tx-dry"):
+        if self.build not in ("tx", "tx-dry", "tx+dry"):
             return 9, "invalid: receive-only build"
         if not any(lo <= f <= hi for lo, hi in TX_BANDS):
             return 9, "invalid: outside the band plan"
@@ -1266,6 +1267,31 @@ def selftest(a, tr):
             check(f"gate: {what} refused", False, "it keyed")
         except tr.SafetyError as e:
             check(f"gate: {what} refused, KEY on never sent", want in str(e) and "KEY on" not in tx.log, str(e)[:100])
+    # TX-48: a tx build reporting Dry TX (tx+dry, no bench bit) keys; turned off on the radio, it is refused.
+    clk, air, tx, rx = world(build_tx="tx+dry")
+    tx.slots[0]["freq"] = f10(145.495)
+    k = tr.Keyer(tx, "tx", bench.DutyLimiter(None, clk, out=quiet), clk, quiet, threaded=False)
+    try:
+        with k.keyup(2, "dry tx"):
+            pass
+        check("gate: a tx build reporting Dry TX (tx+dry) is accepted and keyed", "KEY on" in tx.log, tx.log[-3:])
+    except tr.SafetyError as e:
+        check("gate: a tx build reporting Dry TX (tx+dry) is accepted and keyed", False, str(e)[:100])
+    tx.dry_tx = False
+    try:
+        with k.keyup(2, "dry tx off"):
+            pass
+        check("gate: Dry TX turned off on the radio is refused", False, "it keyed")
+    except tr.SafetyError as e:
+        check("gate: Dry TX turned off on the radio is refused, KEY on never sent again",
+              "Dry TX still on" in str(e) and tx.log.count("KEY on") == 1, str(e)[:100])
+    clk, air, tx, rx = world(build_rx="tx+dry")
+    run = tr.Run(args(tr), dict(tx=tx, rx=rx), clk, threaded=False, log=quiet)
+    try:
+        run.verify()
+        check("gate: verify accepts a tx-dry radio and a tx+dry one (TX-48)", True)
+    except tr.SafetyError as e:
+        check("gate: verify accepts a tx-dry radio and a tx+dry one (TX-48)", False, str(e)[:100])
     clk, air, tx, rx = world(hold_tx=True)
     tx.slots[0]["freq"] = f10(145.495)
     k = tr.Keyer(tx, "tx", bench.DutyLimiter(None, clk, out=quiet), clk, quiet, threaded=False)

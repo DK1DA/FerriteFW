@@ -8,8 +8,8 @@
 //!   speaker mics take their mic bias from that pin, so serial data on it (or a UART idling in AF) leaves the mic
 //!   without a steady bias.
 
-/// Whether the cable may send a byte now. `dry`: the `tx-dry` build (PA drive held at 0), where the bench reads
-/// the chips over the cable while keyed (`research/tx-vs-stock.md` section 6), so keying holds nothing; `spkmic`: a
+/// Whether the cable may send a byte now. `dry`: the PA drive held at 0 (the `tx-dry` build, or Dry TX on: TX-48),
+/// where the bench reads the chips over the cable while keyed (`research/tx-vs-stock.md` section 6), so keying holds nothing; `spkmic`: a
 /// speaker mic is connected (`ferrite_core::acc::ON`): never, in any build.
 pub fn may_send(keyed: bool, dry: bool, spkmic: bool) -> bool {
     !spkmic && (dry || !keyed)

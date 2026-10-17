@@ -61,6 +61,10 @@ pub static GPS_PHASE: AtomicU32 = AtomicU32::new(0);
 /// What the radio is doing, for the GPS task (GPS-4, GPS-22): set by the Radio task with each snapshot.
 pub static RF_STATE: AtomicU8 = AtomicU8::new(0);
 pub const RF_BUSY_KEYED: u8 = 1;
+/// Dry TX (TX-48): the PA drive held at 0 on every key-up of a `tx` build. Written only by the UI task, from the
+/// App's switch, before it hands the Radio task any command ([`crate::tasks::ui`]'s `to_radio`); read by
+/// [`crate::hal::pa::set`] and the cable's keyed send rule. False at every power-on: never stored.
+pub static DRY_TX: AtomicBool = AtomicBool::new(false);
 /// GPS-22 (TX audit F15): the Radio task drove PB10 low itself just before a key-up; the GPS task takes the pin
 /// back from there (`GpsPower::forced_low`).
 pub static PB10_FORCED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);

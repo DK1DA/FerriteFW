@@ -37,7 +37,9 @@ Safety gates: nothing is keyed unless all of these hold, checked right before ev
     decision 151; a radio that says receive or tx is refused outright, --i-know-its-tx-dry or not), or its version
     string says so ("dry"/"TX DRY"), or --flash flashed an image with the "TX DRY" boot line in it in this same
     invocation. Firmware from before the build byte doesn't say it, so without one of these the bench refuses,
-    unless --i-know-its-tx-dry is given (a warning is printed and recorded);
+    unless --i-know-its-tx-dry is given (a warning is printed and recorded). A full-power `tx` build is accepted
+    only while it says tx+dry (Dry TX on, MENU 0 8 9 2; TX-48: build byte 0x03, no bench bit): its bar must still
+    say dry=1 before every KEY on, and what needs txtest (the suites, the AFSK level sweep) is skipped, said why;
   - the build transmits at all (`txtest` isn't refused as a receive-only build);
   - the slot is on its VFO at one of the approved test frequencies (config `test_freqs`), with no offset and no
     split (TX on the same frequency), power low, not scanning, not APRS, and it is the active slot;
@@ -1149,6 +1151,8 @@ class Bench:
         self.gatelog = []
         self.warnings = []
         self.tx_dry = None  # how it is known, or None
+        self.bench = True  # the bench commands (txtest) are in: False on a tx build with Dry TX on (TX-48)
+        self.live_dry = False  # a tx build with Dry TX on: the bar's dry=1 is checked before every KEY on (TX-48)
         self.restore_notes = []
         self.saved = None
         self.out = log or say
@@ -1165,9 +1169,17 @@ class Bench:
     def check_build(self, hello, info, flashed_dry=None):
         ver = info.get("version") or hello.get("version")
         said = hello.get("build", "not given")
-        if said not in ("not given", "tx-dry"):
-            # LINK-35 (decision 151): the radio names its build; a receive or full-power tx build is never keyed.
-            self.gate("tx-dry build", False, f"the radio says it runs a {said} build (LINK-35): flash a tx-dry image")
+        if said not in ("not given", "tx-dry", "tx+dry"):
+            # LINK-35 (decision 151): the radio names its build; a receive or full-power tx build is never keyed,
+            # unless Dry TX is on (TX-48: it then says tx+dry).
+            self.gate("tx-dry build", False, f"the radio says it runs a {said} build (LINK-35): flash a tx-dry image"
+                      + (", or turn Dry TX on on the radio (MENU 0 8 9 2; TX-48)" if said == "tx" else ""))
+        if said == "tx+dry":
+            # TX-48: a full-power tx build with Dry TX on. No bench commands (no txtest): the suites skip.
+            self.bench, self.live_dry = False, True
+            self.tx_dry = "the radio says so (LINK-35 build byte: tx with Dry TX on, TX-48)"
+            self.gate("tx-dry build", True, self.tx_dry)
+            return
         if said == "tx-dry":
             self.gate("a bench build (txtest is in it)", hello.get("bench"),
                       "the build byte says tx-dry without the bench bit (0x80): txtest isn't in it")
@@ -1209,6 +1221,11 @@ class Bench:
         self.gate(f"{purpose}: not scanning", not st["scanning"])
         self.gate(f"{purpose}: slot {self.slot_letter} active", st["active"])
         self.gate(f"{purpose}: tx-dry", self.tx_dry is not None, self.tx_dry or "")
+        if self.live_dry:
+            # TX-48: Dry TX can be turned off on the radio at any time: its bar must still say dry=1.
+            bar = fl.parse_ui(self.radio.term("ui")).get("bar") or {}
+            self.gate(f"{purpose}: Dry TX still on (TX-48)", bar.get("dry") == 1,
+                      f"the radio's bar says dry={bar.get('dry')}: Dry TX was turned off on the radio")
         return st
 
     # -- the radio's state --
@@ -1246,7 +1263,7 @@ class Bench:
         sv = self.saved
         if not sv:
             return
-        steps = [("txtest off", "txtest off")]
+        steps = [("txtest off", "txtest off")] if self.bench else []
         v = sv["vfo"]
         words = [f"slot {self.slot_letter} vfo {v['freq']}", v.get("mode", "").lower(), v.get("power", "")]
         if v.get("txtone"):
@@ -1557,6 +1574,8 @@ class Bench:
             if name == "endtones":
                 self.radio.term(f"set {END_TONE} {it['setting']}")
             self.radio.term(f"slot {L} vfo {mhz:.5f} {mode} low txtone {tone} rxtone off")
+            if name == "afsk-level" and not self.bench:
+                return dict(ok=True, skipped=True, expect=None, text="skipped: needs txtest, a bench build's (Dry TX on a tx build)")
             if name == "afsk-level":
                 armed = self.radio.term(f"txtest afsk data {it['level']}")
                 if "armed" not in armed:
@@ -1597,6 +1616,11 @@ class Bench:
         try:
             self.save_state()
             for run in runs:
+                if not self.bench:  # TX-48: a tx build with Dry TX on has no txtest
+                    w = f"{run['name']}: skipped: the suite needs txtest, a bench build's (this is a tx build with Dry TX on)"
+                    self.warnings.append(w)
+                    self.out(w)
+                    continue
                 caps.append(self.run_suite(run, sess_dir))
             if self.a.refusals:
                 extras["refusals"] = self.run_refusals(sess_dir)
@@ -2297,7 +2321,8 @@ def plan(cfg, a, runs):
     if a.flash:
         p.append(f"flash: check {a.flash} has the TX DRY boot line; flash.py {cfg['port']} {a.flash} --backup {cfg['backup']}; "
                  "wait for HELLO (up to 90 s)")
-    p.append("connect: HELLO (the LINK-35 build byte: tx-dry with the bench bit, else refused), INFO (version), "
+    p.append("connect: HELLO (the LINK-35 build byte: tx-dry with the bench bit, or tx+dry: Dry TX on, TX-48; else "
+             "refused), INFO (version), "
              "`txtest` (a transmit build?)")
     p.append("gate: tx-dry known: version says dry / flashed a TX DRY image here / --i-know-its-tx-dry"
              + (" [given: a warning will be printed]" if a.i_know_its_tx_dry else " [not given]"))
@@ -2379,8 +2404,10 @@ class FakeRadio:
 
     def __init__(self, clock, version="v0.1.0", rx_only=False, hold_answers=False, offset=0, cable=True,
                  ignore_freq=False, stuck_power=None, fail_alive_after=None, build="not given", region=2, leaky=(),
-                 dcs_bug=False):
+                 dcs_bug=False, dry_off_after=None):
         self.build = build
+        # TX-48: a tx+dry fake's Dry TX goes off (on the radio) after this many `ui` reads
+        self.dry_off_after, self.ui_reads = dry_off_after, 0
         self.region, self.leaky, self.dcs_bug = region, set(leaky), dcs_bug
         self.clock, self.version, self.rx_only, self.hold, self.cable = clock, version, rx_only, hold_answers, cable
         self.ignore_freq, self.stuck_power, self.fail_alive_after = ignore_freq, stuck_power, fail_alive_after
@@ -2404,6 +2431,12 @@ class FakeRadio:
     def hello(self):
         return dict(protocol=2, version=self.version, build=self.build, bench=self.build == "tx-dry")
 
+    def dry(self):
+        """The PA held at 0 now: the tx-dry build, or a tx build with Dry TX on until it is turned off (TX-48)."""
+        if self.build == "tx+dry":
+            return self.dry_off_after is None or self.ui_reads <= self.dry_off_after
+        return self.build == "tx-dry"
+
     def info(self):
         return dict(version=self.version, channels=21, zones=6, presets=4, region=self.region, callsign="TEST")
 
@@ -2419,6 +2452,11 @@ class FakeRadio:
         if self.key:
             raise TermError(f"{line}: transmitting: nothing changes while keyed (TX-22)")
         w = line.split()
+        if w[0] == "ui":
+            self.ui_reads += 1
+            return f"screen Home \"Home\"\nbar lock=0 scan=0 bt=0 cutoff=0 dry={int(self.dry())}\n"
+        if w[0] == "txtest" and self.build == "tx+dry":
+            raise TermError("txtest: no such command (a bench build's: TERM-38)")
         if w[0] == "txtest":
             if self.rx_only:
                 raise TermError("txtest: the receive-only build has no transmit: txtest needs a tx or tx-dry build")
@@ -3358,6 +3396,22 @@ def selftest(a):
           {"i_know_its_tx_dry": True}, "says it runs a tx build")
     gated("gate: the radio says receive (LINK-35)", {"build": "receive"}, {"i_know_its_tx_dry": True},
           "says it runs a receive build")
+    # TX-48: a tx build with Dry TX on (LINK-35's tx+dry) keys without the bench bit; the suite skips (no txtest);
+    # one with Dry TX turned off on the way is refused before its next key-up.
+    clk = FakeClock()
+    r = FakeRadio(clk, build="tx+dry")
+    try:
+        caps, extras = Bench(cfg, args(runs="vhf-wide", keepalive=True), radio=r, sdr=FakeSdr(r, clk), clock=clk).on_air(
+            tmp, pick_runs(cfg, "vhf-wide"), r.hello(), r.info())
+        check("gate: a tx build reporting Dry TX (tx+dry) is accepted and keyed; the suite skips without txtest",
+              "KEY on" in r.calls and not caps and "keepalive" in extras and r.key is None and "txtest suite" not in r.calls,
+              f"caps {len(caps)}; keyed {'KEY on' in r.calls}")
+    except Exception as e:  # noqa: BLE001 - the selftest reports it
+        check("gate: a tx build reporting Dry TX (tx+dry) is accepted", False, str(e)[:120])
+    gated("gate: a tx build not reporting Dry TX is refused (TX-48)", {"build": "tx"}, {}, "turn Dry TX on")
+    r = gated("gate: Dry TX turned off on the radio before the key-up -> refused (TX-48)",
+              {"build": "tx+dry", "dry_off_after": 0}, {"keepalive": True}, "Dry TX still on")
+    check("  ... and never keyed", r is not None and "KEY on" not in r.calls, r and r.calls[-4:])
     gated("gate: frequency not approved (the radio ignores the tune)", {"version": "v0.1.0-txdry", "ignore_freq": True}, {},
           "frequency approved")
     gated("gate: power not low", {"stuck_power": "high"}, {"i_know_its_tx_dry": True}, "power low")

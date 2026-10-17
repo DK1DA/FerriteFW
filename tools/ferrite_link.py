@@ -658,8 +658,14 @@ BENCH_BIT = 0x80  # LINK-35: bit 7 of the build byte marks a bench build (decisi
 
 def build_name(rest):
     """LINK-35: the build byte after HELLO's version or INFO's callsign (absent before Oct 13, 2026): its flavour,
-    bit 7 (a bench build) masked off; build_bench() says whether it is set."""
-    return {0: "receive", 1: "tx", 2: "tx-dry"}.get(rest[0] & 0x7F, f"unknown {rest[0]}") if rest else "not given"
+    bit 7 (a bench build) masked off; build_bench() says whether it is set. "tx+dry" (3): a full-power tx build with
+    Dry TX on (TX-48), the PA drive held at 0 until it is turned off on the radio; build_dry() covers both dry kinds."""
+    return {0: "receive", 1: "tx", 2: "tx-dry", 3: "tx+dry"}.get(rest[0] & 0x7F, f"unknown {rest[0]}") if rest else "not given"
+
+
+def build_dry(rest):
+    """LINK-35, TX-48: the PA drive is held at 0 now (a tx-dry build, or a tx build with Dry TX on)."""
+    return build_name(rest) in ("tx-dry", "tx+dry")
 
 
 def build_bench(rest):

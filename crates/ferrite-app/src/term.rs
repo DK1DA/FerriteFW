@@ -239,7 +239,7 @@ const HELP_EDIT: [&str; 3] = [
 const HELP_SETTINGS: [&str; 3] = [
     "The radio's MENU 0 settings, with the same numbers. <- -> change, Enter opens a list.",
     "* marks a value that isn't the default; # puts it back. Settings not built yet show their default.",
-    "A few (PIN, region, Extend TX) change only on the radio, where they have their own screen.",
+    "A few (PIN, region, Extend TX, Dry TX) change only on the radio, where they have their own screen.",
 ];
 const HELP_MONITOR: [&str; 1] = ["The event log, newest at the bottom, then the slots receiving now. Esc goes back."];
 const HELP_OTHER: [&str; 1] = ["Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves the terminal."];
@@ -2020,9 +2020,10 @@ fn flags(c: &Channel, app: &App, w: &mut W) {
 // ---- Helpers ----
 
 /// Settings the terminal leaves to the radio: they open their own screens there (the PIN, Extend TX's warning)
-/// or the cable may not change them (the region: TERM-7).
+/// or the cable may not change them (the region: TERM-7; Dry TX, TX-48: the PC never decides whether a key-up has
+/// power).
 fn blocked(p: &[u8]) -> bool {
-    matches!(p, [9, 3] | [9, 3, 1] | [8, 9] | [9, 4])
+    matches!(p, [9, 3] | [9, 3, 1] | [8, 9] | [8, 9, 1] | [8, 9, 2] | [9, 4])
 }
 
 /// "0.1.0" from "v0.1.0".

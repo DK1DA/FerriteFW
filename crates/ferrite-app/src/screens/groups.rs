@@ -135,7 +135,7 @@ const G8: [Entry; 9] = [
     Entry("DTMF|100 ms|Dialer, memories, timing, PTT ID."),
     Entry("Callsign and ID|Empty|Your callsign, and CW ID."),
     Entry("Busy lockout default|Off|For new channels and the VFO."),
-    Entry("Extend TX|Off|Transmit beyond the amateur bands."),
+    Entry("Extend TX|Off|Beyond the amateur bands; Dry TX."),
 ];
 const G9: [Entry; 9] = [
     Entry("Keys and lock|No auto lock|Auto lock, lock covers, key test, shortcuts."),
@@ -155,7 +155,7 @@ pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
     ((1, 2), &[
         Entry("Watched audio|Heard|Heard, muted, per slot."),
         Entry("Pause time|1 min|# on home pauses watch this long."),
@@ -275,6 +275,8 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         Entry("First digit delay|300 ms|Wait after key-up so a repeater opens."),
     ]),
     ((8, 7), &[Entry("Callsign|Empty|For APRS, CW ID, power-on message."), Entry("CW ID|Off|Send your callsign in CW.")]),
+    // TX-48: Dry TX is a switch for this power-on, not a stored setting; the radio's menu is its only way in.
+    ((8, 9), &[Entry("Extend TX|Off|Transmit beyond the amateur bands."), Entry("Dry TX|Off|Key with no RF out: bench tests.")]),
     ((9, 1), &[
         Entry("Auto lock|Off|Lock the keys after a time."),
         Entry("Lock covers|Keys|Keys, or keys and PTT."),
@@ -371,6 +373,9 @@ pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [4, 9, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
         [4, 5] | [8, 5, 3] => Some("not used"),
+        [8, 9, 2] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
+        [8, 9, 2] if app.radio.tx_dry => Some("always on: tx-dry build"),
+        [8, 9, 2] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
         [8, 4, 1] => Some("1750 Hz for now"), // the burst's frequency isn't a setting yet (TONE-16's list opens)
         _ => None,
     }
@@ -675,9 +680,13 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(if s.callsign.is_empty() { b"Empty".as_slice() } else { s.callsign.as_bytes() });
             !s.callsign.is_empty()
         }
-        [8, 9] => {
+        [8, 9] | [8, 9, 1] => {
             pick(b, &ON_OFF, s.extend_tx as u8);
             s.extend_tx
+        }
+        [8, 9, 2] => {
+            pick(b, &ON_OFF, app.dry_tx() as u8);
+            app.dry_tx()
         }
         [9, 4] => {
             b.set(s.region_name().as_bytes());
@@ -885,7 +894,10 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [8, 2] => return change(app, &[8, 2, 1], d),
         // VOX-10: CW ID needs a callsign
         [8, 7, 2] if s.callsign.as_bytes().is_empty() => app.show_toast(b"CW ID", b"set a callsign first", false),
-        [8, 9] => set_extend(app, !app.set.extend_tx),
+        [8, 9] | [8, 9, 1] => set_extend(app, !app.set.extend_tx),
+        // TX-48: the radio's own keys only, never the link's remote keys (also greyed for them).
+        [8, 9, 2] if !app.remote_in => app.set_dry_tx(!app.dry_tx()),
+        [8, 9, 2] => return false,
         [9, 3, 2] if !s.chan_only => app.set_chan_only(), // PIN-5: leaving is hold #
         [9, 3] | [9, 3, 1] => {
             let m = cycle(s.pin_mode, d, PIN_MODES.len());
@@ -930,7 +942,9 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         }
         [6, 9] => s.fixed_on = false,
         [6, 6] => (s.clock, s.clock_gps) = (d.clock, d.clock_gps),
-        [8, 9] => s.extend_tx = false,
+        [8, 9] | [8, 9, 1] => s.extend_tx = false,
+        [8, 9, 2] if !app.remote_in => app.set_dry_tx(false), // TX-48: # by the radio's own keys only
+        [8, 9, 2] => {}
         [3, 2, 3] => s.scope_dwell = d.scope_dwell,
         [5, 3] if s.aprs_mode != d.aprs_mode => app.set_aprs_mode(d.aprs_mode),
         [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
@@ -1114,7 +1128,8 @@ impl Group {
             let p = &p[..pl];
             // MENU-22: a radio-wide setting changed here offers "* Undo" (the slot's own items keep theirs).
             let was = shown(app, p);
-            if change(app, p, d) && !matches!(p, [1, 1] | [7, 7]) && shown(app, p) != was {
+            // Dry TX (TX-48) isn't a setting: no undo either.
+            if change(app, p, d) && !matches!(p, [1, 1] | [7, 7] | [8, 9, 2]) && shown(app, p) != was {
                 app.keep_set_undo(p, d, was);
             }
         }
@@ -1187,7 +1202,6 @@ impl Group {
                 app.text = Buf::from(app.set.pon_text.as_bytes());
                 app.open(Dest::Text(super::text::TextFor::PowerOn));
             }
-            [8, 9] if ok => set_extend(app, !app.set.extend_tx),
             // OK types the capcode (DEC-4), the clock (GPS-23) or the custom path (APRS-26); the knob still
             // changes 0 6 6's format.
             [4, 2, 3] => {

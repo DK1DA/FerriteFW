@@ -310,7 +310,7 @@ pub const ALL: [Dest; 66] = {
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 58] = [
+pub const MENU0: [(&[u8], Dest); 59] = [
     (&[1, 2], Dest::Sub(1, 2)),
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 7], Dest::RangePresets),
@@ -353,6 +353,7 @@ pub const MENU0: [(&[u8], Dest); 58] = [
     (&[8, 6, 1], Dest::DtmfDialer),
     (&[8, 6, 2], Dest::DtmfMemories),
     (&[8, 7], Dest::Sub(8, 7)),
+    (&[8, 9], Dest::Sub(8, 9)), // Extend TX, Dry TX (TX-48)
     (&[9, 1], Dest::Sub(9, 1)),
     (&[9, 1, 3], Dest::KeyTest),
     (&[9, 1, 4], Dest::ShortcutMap),

@@ -10,6 +10,13 @@ use crate::freq::Freq10;
 use crate::path::{Act, Blocked, Path, Sel, Steps};
 use crate::txplan::{self, Refusal, Region};
 
+/// The PA drive actually written for a wanted value `v` (TX-23): 0 when dry, from the `tx-dry` build or Dry TX
+/// on in a `tx` build (TX-48). The firmware's one PA choke point (`hal::pa::set`) goes through it, on every
+/// key-up and every ramp step.
+pub const fn pa_drive(v: u8, dry: bool) -> u8 {
+    if dry { 0 } else { v }
+}
+
 /// What is being sent: the end tone follows voice only (TONE-11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -321,6 +328,16 @@ mod tests {
     use super::*;
     use crate::freq::mhz;
     use crate::path::{Cause, Rx};
+
+    /// TX-48: with Dry TX on (or the tx-dry build) every PA drive written is 0, whatever the ramp asks for; off,
+    /// the wanted value goes through.
+    #[test]
+    fn dry_holds_the_pa_at_zero() {
+        for v in [0u8, 1, 80, 200, 255] {
+            assert_eq!(pa_drive(v, true), 0, "dry, {v}");
+            assert_eq!(pa_drive(v, false), v, "not dry, {v}");
+        }
+    }
 
     fn req(tx: Freq10) -> Req {
         Req {

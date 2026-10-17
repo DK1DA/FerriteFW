@@ -285,6 +285,9 @@ pub(crate) fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, 
 
 // ---- Transmit ----
 
+/// TX-48: the Transmit screen's note while the PA drive is held at 0.
+pub const DRY_NOTE: &[u8] = b"Dry TX: no RF";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Transmit {
     /// The slot keyed (3 = HF mode).
@@ -466,11 +469,20 @@ impl View for Transmit {
             w::field(lcd, 168, 58, y + 127, y + 144, y + 140, Align::Right, b.as_bytes(), &UI_12, TEXT, SURFACE);
         }
         let mv = cx.dev.battery_mv as u32;
-        if app.dirty(8, hash(&mv)) {
+        // TX-48: with the PA drive held at 0 (Dry TX, or the tx-dry build) the row says so first; the battery
+        // isn't under a real load then, so it keeps only its volts.
+        let dry = app.dry_tx() || app.radio.tx_dry;
+        if app.dirty(8, hash(&(mv, dry))) {
             let mut b = Buf::<32>::new();
-            let _ = uwrite!(b, "Battery under load {}.{} V", mv / 1000, mv % 1000 / 100);
             let c = if cx.dev.battery_low { AMBER } else { SUB };
-            w::field(lcd, 15, 211, y + 144, y + 161, y + 157, Align::Left, b.as_bytes(), &UI_12, c, SURFACE);
+            if dry {
+                let _ = uwrite!(b, "{}.{} V", mv / 1000, mv % 1000 / 100);
+                w::field(lcd, 15, 130, y + 144, y + 161, y + 157, Align::Left, DRY_NOTE, &UI_12B, AMBER, SURFACE);
+                w::field(lcd, 145, 81, y + 144, y + 161, y + 157, Align::Right, b.as_bytes(), &UI_12, c, SURFACE);
+            } else {
+                let _ = uwrite!(b, "Battery under load {}.{} V", mv / 1000, mv % 1000 / 100);
+                w::field(lcd, 15, 211, y + 144, y + 161, y + 157, Align::Left, b.as_bytes(), &UI_12, c, SURFACE);
+            }
         }
         // The other slots, one row each in their fixed places: watched ones pause while transmitting (TX-34).
         if app.dirty(9, hash(&(s, app.watch))) {

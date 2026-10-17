@@ -17,8 +17,9 @@ the link). The checks that needed the clear radio keying into Ferrite, run by th
                                                                # TX keys its input, the RTL-SDR watches its output
 
 Safety, as tools/bench.py's (nothing keys unless all hold, checked right before every KEY on):
-  - both radios say they run tx-dry with the bench bit in HELLO's LINK-35 build byte (0x82; decision 151), or the
-    run stops before anything is changed (no --i-know flag: a tx build would transmit at full drive);
+  - both radios say they run tx-dry with the bench bit in HELLO's LINK-35 build byte (0x82; decision 151), or a tx
+    build with Dry TX on (tx+dry, 0x03; TX-48: its bar must still say dry=1 before every KEY on), or the run stops
+    before anything is changed (no --i-know flag: a tx build without Dry TX would transmit at full drive);
   - the keyed slot (the active one, read with SLOT, LINK-33) transmits on 145.495 or 446.475 MHz exactly (its
     frequency plus its shift, or its split), at power low, not the APRS slot, not scanning (SCAN-19's test alone
     keys a scanning slot, and only when every channel of its test zone transmits on an approved frequency or not at
@@ -256,6 +257,12 @@ class LinkRadio(fl.Radio):
 # ---- Keying: the gates, the duty limit, keepalives, KEY off ----
 
 
+def dry_ok(r):
+    """LINK-35, TX-48: the PA drive is held at 0: a tx-dry bench build (0x82), or a full-power tx build with Dry TX
+    on (tx+dry, 0x03: no bench bit, and nothing here needs a bench command). A plain tx build is never keyed."""
+    return r.build == "tx+dry" or r.build == "tx-dry" and r.bench
+
+
 class KeyUp:
     def __init__(self, purpose, kind):
         self.purpose, self.kind = purpose, kind
@@ -288,8 +295,13 @@ class Keyer:
 
     def gate(self, purpose, scan_freqs=None):
         r = self.radio
-        self.need(f"{purpose}: a tx-dry bench build (LINK-35)", r.build == "tx-dry" and r.bench,
+        self.need(f"{purpose}: a tx-dry bench build or Dry TX on (LINK-35, TX-48)", dry_ok(r),
                   f"the radio says {r.build}{' (bench)' if r.bench else ''}")
+        if r.build == "tx+dry":
+            # TX-48: Dry TX can be turned off on the radio at any time: its bar must still say dry=1.
+            bar = fl.parse_ui(r.ui_text()).get("bar") or {}
+            self.need(f"{purpose}: Dry TX still on (TX-48)", bar.get("dry") == 1,
+                      f"the radio's bar says dry={bar.get('dry')}: Dry TX was turned off on the radio")
         bins = [r.slot_bin(n) for n in range(3)]  # three SLOT reads, the active one among them (Bluetooth: fewer)
         act = [n for n in range(3) if bins[n]["active"]]
         self.need(f"{purpose}: one active slot", len(act) == 1, str(act))
@@ -873,15 +885,16 @@ class Run:
         return self.cap_dir
 
     def verify(self):
-        """Both radios say tx-dry with the bench bit (LINK-35), else nothing goes on."""
+        """Both radios say tx-dry with the bench bit, or tx+dry (a tx build with Dry TX on: TX-48), in LINK-35's
+        build byte, else nothing goes on."""
         bad = [f"the {r} radio ({x.spec}) says it runs a {x.build} build{' with' if x.bench else ' without'} the bench "
-               "bit" for r, x in self.radios.items() if not (x.build == "tx-dry" and x.bench)]
+               "bit" for r, x in self.radios.items() if not dry_ok(x)]
         for k in self.keyers.values():
-            k.gatelog.append(dict(radio=k.role, gate="a tx-dry bench build (LINK-35)",
-                                  ok=k.radio.build == "tx-dry" and k.radio.bench, detail=k.radio.build))
+            k.gatelog.append(dict(radio=k.role, gate="a tx-dry bench build or Dry TX on (LINK-35, TX-48)",
+                                  ok=dry_ok(k.radio), detail=k.radio.build))
         if bad:
-            raise SafetyError("refused: " + "; ".join(bad) + " (LINK-35: both radios must run tx-dry, 0x82): "
-                              "nothing was changed or keyed")
+            raise SafetyError("refused: " + "; ".join(bad) + " (LINK-35: both radios must run tx-dry, 0x82, or a tx "
+                              "build with Dry TX on, MENU 0 8 9 2, TX-48): nothing was changed or keyed")
 
     MIN_BATTERY_PCT = 30  # Alex, Oct 14, 2026: the black radio reached 7.0 V, near the cut-off, during a run
 

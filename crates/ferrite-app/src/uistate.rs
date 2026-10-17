@@ -10,7 +10,7 @@
 //!   something, the time since the last, the backlight off, the key lock, the active slot, the slot transmitting,
 //!   remote PTT, the exclusive mode running (MODE-1: off, scope, strip, tone, counter, fm, hf, xb) and whether
 //!   broadcast FM plays.
-//! - `bar lock=0 scan=0 watch=0 inbox=0 alert=0 gps=fix bt=0 battery=80 low=0 clock=14:32 utc=0 call=""`: the status bar
+//! - `bar lock=0 scan=0 watch=0 inbox=0 alert=0 gps=fix bt=0 battery=80 low=0 cutoff=0 dry=0 clock=14:32 utc=0 call=""`: the status bar
 //!   (`call` the callsign drawn in the clock's place with no time, SBAR-2).
 //! - `toast "head" "body"` or `popup "head" "body"` while one shows; `qmenu "PTT A" "Reverse" "off"` per row of the
 //!   quick menu while it is up.
@@ -213,6 +213,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "battery", cx.dev.battery_pct as u32);
         kn(l, "low", b.battery_low as u32);
         kn(l, "cutoff", b.battery_cutoff as u32);
+        kn(l, "dry", b.dry as u32); // TX-48, SBAR-22
         match b.clock {
             Some(m) => {
                 let _ = uwrite!(l, " clock={}:{}{}", m / 60, (m % 60) / 10, m % 10);
@@ -420,6 +421,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 kn(l, "remote", app.remote_keyed() as u32);
                 kn(l, "dial", t.dial as u32);
                 kn(l, "secs", app.now.wrapping_sub(app.radio.t0) / 1000);
+                kn(l, "dry", (app.dry_tx() || app.radio.tx_dry) as u32); // TX-48: "Dry TX: no RF" shown
             }
         }
         Screen::Emergency(e) => {

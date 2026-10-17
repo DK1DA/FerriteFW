@@ -988,6 +988,12 @@ fn path(t: &mut Toks) -> Result<([u8; 3], usize), Msg> {
     p[0] = digit(t, 9)?;
     p[1] = digit(t, groups::items(p[0], 0).len())?;
     if SUBS.iter().any(|(q, _)| *q == (p[0], p[1])) {
+        // TX-48: 0 8 9 alone still names Extend TX, as before Dry TX joined it in a list (0 8 9 1, 0 8 9 2).
+        let n = groups::items(p[0], p[1]).len() as u32;
+        let mut peek = *t;
+        if (p[0], p[1]) == (8, 9) && !peek.word("").ok().and_then(number).is_some_and(|d| (1..=n).contains(&d)) {
+            return Ok((p, 2));
+        }
         p[2] = digit(t, groups::items(p[0], p[1]).len())?;
         return Ok((p, 3));
     }

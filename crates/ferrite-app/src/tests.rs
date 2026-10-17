@@ -143,8 +143,9 @@ fn ram_is_small() {
     // channel write that carries a position (CHAN-2, `ch N pos=`: 4 bytes more), 24 with padding, to 1432; the
     // refusal beeps sent (SND-4, the readback's `beeps=`: a byte) and a hash of the callsign CW ID has (VOX-12: 4,
     // sent again when the setting's differs), 8 with padding, to 1440; the status bar as drawn holds the callsign
-    // shown in the clock's place without a time (SBAR-2: 6 characters and a length), 16 with padding, to 1456
-    assert!(n <= 1456, "App is {n} bytes");
+    // shown in the clock's place without a time (SBAR-2: 6 characters and a length), 16 with padding, to 1456;
+    // Dry TX (TX-48: the switch, its bar mark, and 0 8 9's list's remembered row) 8 with padding, to 1464
+    assert!(n <= 1464, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

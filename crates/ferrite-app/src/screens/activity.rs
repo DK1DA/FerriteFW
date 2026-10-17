@@ -66,6 +66,8 @@ pub struct RadioUi {
     /// From the last [`Device`] drawn: the build can transmit, the battery is above the cut-off, the SSB patch
     /// is installed (PTT and HF mode's keys arrive without the Device).
     pub tx_built: bool,
+    /// The `tx-dry` build (Dry TX is always on there: TX-48).
+    pub tx_dry: bool,
     pub batt_cut: bool,
     pub ssb_patch: bool,
     /// The slot keyed (3 = HF), if any.
@@ -130,6 +132,7 @@ impl RadioUi {
     pub const fn new() -> Self {
         RadioUi {
             tx_built: false,
+            tx_dry: false,
             batt_cut: false,
             ssb_patch: false,
             keyed: None,
@@ -228,6 +231,7 @@ impl App {
     /// The radio-wide state that gates transmit, remembered from what is drawn (PTT arrives without it).
     pub(crate) fn note_device(&mut self, dev: &Device) {
         self.radio.tx_built = dev.tx_built;
+        self.radio.tx_dry = dev.tx_dry;
         self.radio.batt_cut = dev.battery_cutoff;
         self.radio.ssb_patch = dev.selftest.ssb_patch;
     }

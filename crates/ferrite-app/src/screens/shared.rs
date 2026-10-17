@@ -201,6 +201,7 @@ impl App {
             battery_cutoff: dev.battery_cutoff,
             blink_off: dev.battery_cutoff && (self.now / 500) % 2 == 1,
             alerts_paused: hf && self.set.same_on(),
+            dry: self.dry_tx(), // SBAR-22, TX-48
         }
     }
 

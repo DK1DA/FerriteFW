@@ -796,6 +796,27 @@ fn set_short_forms() {
     assert_eq!((r.app.set.theme, r.app.bsave), (theme, bs), "a refused short form changes nothing");
 }
 
+/// TX-48: Dry TX changes only on the radio: `set` (typed, or a `term` line over the link) refuses it on and off,
+/// and `get` reads it; a bare 0 8 9 is still Extend TX.
+#[test]
+fn dry_tx_only_on_the_radio() {
+    let mut r = Rig::main();
+    r.app.radio.tx_built = true;
+    for c in ["set 0 8 9 2 On", "set 0 8 9 2 Off", "set 0 8 9 1 On", "set 0 8 9 On"] {
+        r.cmd(c);
+        assert!(r.bottom().contains("changes only on the radio"), "{c}: {}", r.bottom());
+        assert!(!r.app.dry_tx() && !r.app.set.extend_tx, "{c}");
+    }
+    r.app.set_dry_tx(true);
+    r.cmd("set 0 8 9 2 Off");
+    assert!(r.bottom().contains("Dry TX changes only on the radio"), "{}", r.bottom());
+    assert!(r.app.dry_tx(), "still on");
+    r.cmd("get 0 8 9 2");
+    assert!(r.bottom().contains("Dry TX: On"), "{}", r.bottom());
+    r.cmd("get 0 8 9");
+    assert!(r.bottom().contains("0 8 9 Extend TX: Off"), "{}", r.bottom());
+}
+
 /// Every refusal says what was wrong and how to put it right; nothing changes.
 #[test]
 fn command_errors() {

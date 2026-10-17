@@ -412,7 +412,7 @@ impl Session {
         self.hellos = self.hellos.wrapping_add(1);
         o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
-        o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry, dev.bench)]); // LINK-35
+        o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         Status::Ok
     }
 
@@ -687,7 +687,7 @@ fn info<S: ChannelStore>(app: &App, st: &S, dev: &Device, o: &mut Out) -> Status
     o.put(&(settings_record(app, &mut Window { b: &mut [], from: 0, n: 0 }) as u16).to_le_bytes());
     o.put(&[app.set.region]);
     o.text(app.set.callsign.as_bytes());
-    o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry, dev.bench)]); // LINK-35
+    o.put(&[ferrite_core::link::build::of(dev.tx_built, dev.tx_dry, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
     Status::Ok
 }
 
@@ -741,7 +741,7 @@ fn settings_record(app: &App, w: &mut Window) -> usize {
 }
 
 /// Settings the link never changes (LINK-5): the region, Extend TX, the PIN, setup, the cable port (the link
-/// would lose its own port) and the spare bytes. A written record keeps the radio's. The callsign is written, in
+/// would lose its own port) and the spare bytes. Dry TX (TX-48) isn't in the record at all. A written record keeps the radio's. The callsign is written, in
 /// capitals as on the radio (LINK-26, decision 77: as nicFW's RMS writes it).
 fn keep_protected(new: &mut Settings, old: &Settings) {
     let call = new.callsign;

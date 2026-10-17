@@ -786,6 +786,8 @@ pub struct StatusBar {
     pub blink_off: bool,
     /// Weather alerts paused (HF mode with SAME on): a slashed bell after the inbox (SBAR-18).
     pub alerts_paused: bool,
+    /// Dry TX on (TX-48, SBAR-22): "DRY" left of the Bluetooth and GPS marks.
+    pub dry: bool,
 }
 
 impl StatusBar {
@@ -795,8 +797,8 @@ impl StatusBar {
     }
 
     fn right_eq(&self, o: &Self) -> bool {
-        (self.gps, self.bt, self.battery, self.battery_low, self.battery_cutoff, self.blink_off)
-            == (o.gps, o.bt, o.battery, o.battery_low, o.battery_cutoff, o.blink_off)
+        (self.gps, self.bt, self.battery, self.battery_low, self.battery_cutoff, self.blink_off, self.dry)
+            == (o.gps, o.bt, o.battery, o.battery_low, o.battery_cutoff, o.blink_off, o.dry)
     }
 
     /// Draws what differs from `old` (everything with None).
@@ -902,6 +904,12 @@ impl StatusBar {
                 lcd.fill_r(x + 3, 7, 6, 6, 3, SUB);
             }
         }
+        // SBAR-22: Dry TX in amber (night red's red, cyberpunk's magenta), a word as DISP-10 asks: 151..175 at most.
+        if self.dry {
+            let w = text4_width(b"DRY", &UI_12B);
+            x -= w + 4;
+            field(lcd, x, w, 0, SBAR_H - 1, 14, Align::Left, b"DRY", &UI_12B, AMBER, BG);
+        }
     }
 }
 
@@ -968,6 +976,31 @@ mod tests {
         let b = StatusBar { clock: Some(14 * 60 + 33), ..a };
         b.draw(&mut lcd, Some(&a));
         assert!(lcd.1 > 0 && lcd.1 <= 44 * 19, "only the clock (its 44 px field): {} px", lcd.1);
+    }
+
+    /// SBAR-22, TX-48: Dry TX's "DRY" sits left of the GPS and Bluetooth marks, inside the right half, in every
+    /// theme; night red stays red or black (DISP-18).
+    #[test]
+    fn status_bar_dry_mark() {
+        for t in [crate::theme::DARK, crate::theme::DAYLIGHT, crate::theme::NIGHT_RED, crate::theme::CYBERPUNK] {
+            crate::theme::set(t);
+            let off = StatusBar { gps: GpsState::Fix, bt: true, battery: 4, ..Default::default() };
+            let on = StatusBar { dry: true, ..off };
+            let (mut a, mut b) = (FrameBuffer::new(), FrameBuffer::new());
+            off.draw(&mut a, None);
+            on.draw(&mut b, None);
+            let diff: std::vec::Vec<(i32, i32)> =
+                (0..SBAR_H).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| a.at(x, y) != b.at(x, y)).collect();
+            assert!(!diff.is_empty(), "theme {t}: DRY drawn");
+            assert!(diff.iter().all(|&(x, _)| (142..212 - 16 - 17).contains(&x)), "theme {t}: inside 142..179");
+            if t == crate::theme::NIGHT_RED {
+                assert!(diff.iter().all(|&(x, y)| b.at(x, y) & 0x07FF == 0), "night red: red or black only");
+            }
+            // Turning it off redraws the right half only.
+            off.draw(&mut b, Some(&on));
+            assert!(b.px == a.px, "theme {t}: off again as before");
+        }
+        crate::theme::set(crate::theme::DARK);
     }
 
     #[test]

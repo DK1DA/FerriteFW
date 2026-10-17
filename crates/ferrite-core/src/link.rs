@@ -23,19 +23,30 @@ pub mod build {
     pub const TX: u8 = 1;
     /// The whole transmit build with the PA drive held at 0 (`--features tx-dry`).
     pub const TX_DRY: u8 = 2;
+    /// The full-power `tx` build with Dry TX on (TX-48): the PA drive held at 0 until it is turned off on the radio
+    /// or the radio is powered off. Never with the bench bit (the `tx` build has no bench commands).
+    pub const TX_DRY_ON: u8 = 3;
 
     /// Bit 7: the bench commands are in (the `bench` cargo feature: the bring-up and tx-dry builds; TERM-38). The
     /// low bits are the transmit kind above.
     pub const BENCH: u8 = 0x80;
 
-    /// The byte for a build with or without transmit, dry or not, with or without the bench commands.
-    pub const fn of(tx: bool, dry: bool, bench: bool) -> u8 {
-        let kind = match (tx, dry) {
-            (_, true) => TX_DRY,
-            (true, false) => TX,
-            (false, false) => RECEIVE,
+    /// The byte for a build with or without transmit, a dry build or not, Dry TX on or not (TX-48: counts only in
+    /// a full-power `tx` build), with or without the bench commands.
+    pub const fn of(tx: bool, dry: bool, dry_on: bool, bench: bool) -> u8 {
+        let kind = match (tx, dry, dry_on) {
+            (_, true, _) => TX_DRY,
+            (true, false, true) => TX_DRY_ON,
+            (true, false, false) => TX,
+            (false, false, _) => RECEIVE,
         };
         kind | if bench { BENCH } else { 0 }
+    }
+
+    /// Whether the PA drive is held at 0 now: a `tx-dry` build, or a `tx` build with Dry TX on (TX-48). What a
+    /// bench tool needs before it keys.
+    pub const fn dry(b: u8) -> bool {
+        matches!(b & !BENCH, TX_DRY | TX_DRY_ON)
     }
 
     /// Whether a build byte has the bench commands.
@@ -49,6 +60,7 @@ pub mod build {
             RECEIVE => "receive",
             TX => "tx",
             TX_DRY => "tx-dry",
+            TX_DRY_ON => "tx+dry",
             _ => "unknown",
         }
     }

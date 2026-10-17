@@ -2,6 +2,7 @@
 //! mode, the alert and the advanced menu's groups.
 
 use super::*;
+use crate::persist::{Persist, Sink};
 use crate::screens::groups::Group;
 use crate::screens::nav::Dest;
 use crate::screens::hf::Hf;
@@ -105,12 +106,13 @@ fn setup_at_first_boot() {
 fn extend_tx_warns_once() {
     let mut t = T::new();
     menu0(&mut t, &[8]);
-    t.tap(Key::Digit(9));
+    t.tap(Key::Digit(9)); // the list: Extend TX, Dry TX (TX-48)
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 9, row: 0 }));
     t.knob(1);
     assert!(matches!(t.app.screen(), Screen::ExtendTx(_)));
     t.tap(Key::Exit); // keep off
     assert!(!t.app.settings().extend_tx);
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 0, row: 8 }));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 9, row: 0 }));
     t.knob(1);
     t.tap(Key::Menu); // turn on
     assert!(t.app.settings().extend_tx);
@@ -118,6 +120,78 @@ fn extend_tx_warns_once() {
     t.knob(1); // on again: no warning the second time
     assert!(t.app.settings().extend_tx);
     assert!(matches!(t.app.screen(), Screen::Group(_)));
+}
+
+/// TX-48, SBAR-22: Dry TX (0 8 9 2) turns on and off on the radio's menu, at once (no warning), shows "DRY" in the
+/// status bar and "Dry TX: no RF" on the Transmit screen's readback, has no undo, and is never stored: what is
+/// saved (settings and state) is the same on or off, and the next power-on starts with it off.
+#[test]
+fn dry_tx_switch() {
+    struct V(Vec<u8>);
+    impl Sink for V {
+        fn put(&mut self, b: &[u8]) {
+            self.0.extend_from_slice(b);
+        }
+    }
+    let save = |t: &T| {
+        let mut v = V(Vec::new());
+        t.app.save_state(&mut v);
+        t.app.settings().save(&mut v);
+        v.0
+    };
+    let mut t = T::new();
+    t.app.radio.tx_built = true;
+    let dev = Device { tx_built: true, ..Default::default() };
+    let before = save(&t);
+    assert!(!t.app.dry_tx(), "off at power-on");
+    assert!(!t.app.status_bar(&t.live, &dev).dry);
+    menu0(&mut t, &[8, 9]);
+    t.tap(Key::Digit(2));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 9, row: 1 }));
+    t.knob(1);
+    assert!(t.app.dry_tx(), "on, no warning");
+    assert!(t.app.status_bar(&t.live, &dev).dry, "SBAR-22: DRY in the bar");
+    assert_eq!(save(&t), before, "not stored");
+    t.tap(Key::Star); // no undo: still on
+    assert!(t.app.dry_tx());
+    // A power cycle: a new App from what was saved starts off.
+    let t2 = T::new();
+    assert!(!t2.app.dry_tx(), "off at every power-on");
+    t.tap(Key::Menu); // OK flips it too
+    assert!(!t.app.dry_tx());
+    t.knob(1);
+    t.tap(Key::Hash); // # resets it to off
+    assert!(!t.app.dry_tx());
+    // A receive-only build: greyed, nothing changes.
+    t.app.radio.tx_built = false;
+    t.knob(1);
+    assert!(!t.app.dry_tx(), "no transmit in this build");
+}
+
+/// TX-48: the Transmit screen says "Dry TX: no RF" while keyed with Dry TX on, and the readback says dry=1.
+#[test]
+fn dry_tx_on_the_transmit_screen() {
+    let mut t = T::new();
+    t.app.radio.tx_built = true;
+    t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
+    t.app.set_dry_tx(true);
+    let s = store();
+    t.app.key_down(Key::PTT, t.t, &s);
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)));
+    let dev = Device { tx_built: true, ..Default::default() };
+    let mut fb = FrameBuffer::new();
+    t.app.render(&mut fb, &t.live, &dev, &s);
+    let on = fb.px.clone();
+    t.app.set_dry_tx(false);
+    t.app.render(&mut fb, &t.live, &dev, &s);
+    assert!(fb.px != on, "the Dry TX row is redrawn as the battery row");
+    t.app.set_dry_tx(true);
+    let mut l = crate::term::cmd::Line::new();
+    let r: Vec<std::string::String> = (0..)
+        .map_while(|i| crate::uistate::line(&t.app, &s, &dev, &t.live, i, &mut l).then(|| std::string::String::from_utf8_lossy(l.as_bytes()).into_owned()))
+        .collect();
+    assert!(r.iter().any(|x| x.starts_with("transmit") && x.contains(" dry=1")), "{r:?}");
+    assert!(r.iter().any(|x| x.starts_with("bar") && x.contains(" dry=1")), "{r:?}");
 }
 
 /// PIN-1 to PIN-3, KEY-16: set a PIN; at power on nothing else works until it's right (hold BACK and PTT

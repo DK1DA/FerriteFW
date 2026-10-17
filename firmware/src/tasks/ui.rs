@@ -78,7 +78,9 @@ struct BtQuery {
 
 /// MODE-6: the App's commands to the Radio task, as many as its channel has room for, without waiting; the one
 /// refused is kept in `held` and goes first next time (the Radio task ignores what it doesn't run yet).
+/// TX-48: Dry TX's switch goes to the PA's choke point first, so no key-up reaches the Radio task ahead of it.
 fn to_radio(app: &mut App, held: &mut Option<RadioCmd>) {
+    crate::chan::DRY_TX.store(app.dry_tx(), core::sync::atomic::Ordering::SeqCst);
     while let Some(c) = held.take().or_else(|| app.pop_cmd()) {
         if RADIO.try_send(c).is_err() {
             *held = Some(c);
