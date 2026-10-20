@@ -3,8 +3,11 @@
 //! is written once per redraw, so the panel never shows a blank between two layers. On the radio's bus that
 //! blank flickers (found on the black radio, Oct 12, 2026).
 //!
-//! The band is on the stack: [`BAND_PX`] pixels (3.75 KB). The drawing runs once per band, so a taller region costs
-//! drawing time, not bus time.
+//! The band is on the stack: [`BAND_PX`] pixels (3.75 KB), in a function never inlined ([`band_out`],
+//! [`band_over`]), so it is there only while a band is drawn: inlined, every drawing function that calls these kept
+//! its own copy for its whole run, and a redraw nests several (render, the screen, a card, a widget: ~30 KB of
+//! stack measured on the radio, SBAR-23). The drawing runs once per band, so a taller region costs drawing time,
+//! not bus time.
 use crate::panel::Panel;
 
 /// Pixels in one band: 240 x 8.
@@ -138,6 +141,16 @@ pub fn banded<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, mu
         crate::gfx::Gfx::fill(lcd, x, y, w, h, bg);
         return draw(&mut thru(lcd));
     }
+    band_out(lcd, x, y, w, h, bg, &mut draw);
+    if cfg!(feature = "std") {
+        let mut band = Band { buf: &mut [], x, y, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
+        draw(&mut band);
+    }
+}
+
+/// [`banded`]'s bands: the buffer lives in this frame alone.
+#[inline(never)]
+fn band_out<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, draw: &mut dyn FnMut(&mut Band)) {
     let w = w.min(BAND_PX as i32);
     let rows = (BAND_PX as i32 / w).max(1);
     let bg = crate::theme::map_bg(bg);
@@ -155,10 +168,6 @@ pub fn banded<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, mu
         lcd.push_buf(&buf[..n]);
         by += bh;
     }
-    if cfg!(feature = "std") {
-        let mut band = Band { buf: &mut [], x, y, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
-        draw(&mut band);
-    }
 }
 
 /// As [`banded`], for a shape drawn over what is already on screen (a popup with rounded corners): only the
@@ -170,6 +179,12 @@ pub fn banded_over<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, mut dr
     if lcd.offscreen() {
         return draw(&mut thru(lcd));
     }
+    band_over(lcd, x, y, w, h, &mut draw);
+}
+
+/// [`banded_over`]'s bands: the buffer and mask live in this frame alone.
+#[inline(never)]
+fn band_over<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, draw: &mut dyn FnMut(&mut Band)) {
     let w = w.min(BAND_PX as i32);
     let rows = (BAND_PX as i32 / w).max(1);
     let mut buf = [0u16; BAND_PX];
