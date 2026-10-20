@@ -423,6 +423,11 @@ pub async fn task() {
             // the reading now, the averaged one the % comes from, and the %.
             if now_ms().wrapping_sub(bat_logged) >= 10_000 {
                 bat_logged = now_ms();
+                // SBAR-23: the stack's high-water mark (a walk of up to its whole size, so only every 10 s).
+                dev.stack_free = crate::hal::sys::stack_free();
+                bringup::linef(|b| {
+                    let _ = ufmt::uwrite!(b, "stack free {} B", dev.stack_free);
+                });
                 bringup::linef(|b| {
                     let avg = ferrite_core::txcal::battery_mv(s.raw);
                     let _ = ufmt::uwrite!(b, "battery {} mV, avg {} mV, {}%, PA1 {} avg {}", ferrite_core::txcal::battery_mv(raw), avg, s.pct, raw, s.raw);

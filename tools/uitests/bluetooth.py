@@ -23,20 +23,21 @@ def status_of(link, ty, payload=b""):
 
 @test("SBAR-8", needs=("bt",), pages=("Home",))
 def bt_icon_while_connected(t):
-    """The Bluetooth icon shows while a device is connected (it has sent something in the last 2 minutes) and not
-    otherwise: a HELLO over Bluetooth brings it; Bluetooth off (the simulator) or 2 minutes quiet (the radio,
-    --slow) takes it away."""
+    """The Bluetooth icon is grey while Bluetooth is on and blue while a device is connected (it has sent something
+    in the last 2 minutes): a HELLO over Bluetooth makes it blue; Bluetooth off (the simulator) takes it away, 2
+    minutes quiet (the radio, --slow) turns it grey (bar bt_on=1 bt=0)."""
     bt = t.bt()
     u = t.wait(lambda u: u.bar.get("bt") == 1, timeout=3, what="the icon with a device connected")
     t.eq(u.bar["bt"], 1, "connected: the icon")
     if t.sim:
         t.owner_set("0 9 2 1", "Off")
         u = t.ui(0.3)
-        t.eq(u.bar["bt"], 0, "Bluetooth off: no icon")
+        t.eq((u.bar["bt_on"], u.bar["bt"]), (0, 0), "Bluetooth off: no icon")
         return
     t.need(t.opts.slow, "the 2 minutes' quiet: --slow")
     t.close_bt()
-    u = t.wait(lambda u: u.bar.get("bt") == 0, timeout=130, what="2 minutes quiet: the icon goes", every=5.0)
+    u = t.wait(lambda u: u.bar.get("bt") == 0, timeout=130, what="2 minutes quiet: the icon turns grey", every=5.0)
+    t.eq(u.bar.get("bt_on"), 1, "still on: the grey icon")
     del bt
 
 

@@ -683,6 +683,8 @@ pub struct Device {
     pub battery_cutoff: bool,
     /// The MCU's die temperature in whole °C (chapter 8, [`crate::mcutemp`]); None until read.
     pub mcu_temp: Option<i8>,
+    /// SBAR-23: the main stack's bytes never used since boot (its high-water mark), 0 not measured yet.
+    pub stack_free: u32,
     /// A speaker mic is in the side connector (SND-12, [`crate::acc`]): the Status page shows it.
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).

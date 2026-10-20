@@ -36,9 +36,10 @@ fn up(t: &mut T, k: Key) {
     t.app.tick(t.t, &t.live, &store());
 }
 
-/// The state the box shows on row `i` (0 PTT A ... 4 the knob).
+/// The state the box shows for key `i` (0 PTT A, 1 PTT B, 2 PF1, 3 PF2, 4 the knob), whose row is one lower
+/// (HOME-17.1: the knob's row is first).
 fn shown(t: &T, i: usize) -> String {
-    String::from_utf8(lines(&t.app)[i].2.as_bytes().to_vec()).unwrap()
+    String::from_utf8(lines(&t.app)[(i + 1) % 5].2.as_bytes().to_vec()).unwrap()
 }
 
 fn keyed(c: &[RadioCmd]) -> bool {
@@ -465,4 +466,12 @@ fn a_shortcut_popup_goes_when_the_box_opens() {
     t.app.drawn.sbar = None;
     t.render(&mut fresh);
     assert_eq!((0..fb.px.len()).filter(|&i| fb.px[i] != fresh.px[i]).count(), 0);
+}
+
+/// HOME-17.1: the knob's row is first (the knob sits on top of the radio), then the side keys top to bottom.
+#[test]
+fn knob_row_first() {
+    let t = T::new();
+    let keys: std::vec::Vec<&str> = lines(&t.app).iter().map(|l| l.0).collect();
+    assert_eq!(keys, ["Knob", "PTT A", "PTT B", "PF1", "PF2"]);
 }

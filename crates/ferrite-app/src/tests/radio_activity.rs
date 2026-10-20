@@ -2253,3 +2253,49 @@ fn aprs_address_takes_the_ssid_setting() {
     t.app.set.set_callsign(b"");
     assert!(t.app.aprs_call().is_empty(), "no callsign, no address");
 }
+
+/// SBAR-8: Bluetooth on with nothing connected shows a grey icon, connected a blue one, off none; in night red
+/// (only red) connected is the rune cut out of a filled badge.
+#[test]
+fn bluetooth_icon_on_and_connected() {
+    use ferrite_ui::gfx::{BG, BLUE, SUB};
+    let t = ready();
+    // pixels of colour `c` in the icon's place (None: any but the ground)
+    let icon = |t: &T, dev: &Device, c: Option<u16>| {
+        let mut fb = FrameBuffer::new();
+        t.app.status_bar(&t.live, dev).draw(&mut fb, None);
+        let bg = ferrite_ui::theme::map(BG);
+        (194..210)
+            .flat_map(|x| (2..18).map(move |y| (x, y)))
+            .filter(|&(x, y)| c.map_or(fb.at(x, y) != bg, |c| fb.at(x, y) == ferrite_ui::theme::map(c)))
+            .count()
+    };
+    let off = Device::default();
+    t.app.set.bt = false;
+    assert_eq!(icon(&t, &off, None), 0, "off: no icon");
+    t.app.set.bt = true;
+    assert!(icon(&t, &off, Some(SUB)) > 0 && icon(&t, &off, Some(BLUE)) == 0, "on, nothing connected: grey");
+    let on = Device { bt: true, ..Default::default() };
+    assert!(icon(&t, &on, Some(BLUE)) > 0 && icon(&t, &on, Some(SUB)) == 0, "connected: blue");
+    assert!(line_of(&t, "bar ").contains(" bt_on=1 bt=0 "), "{}", line_of(&t, "bar "));
+    ferrite_ui::theme::set(ferrite_ui::theme::NIGHT_RED);
+    let (badge, rune) = (icon(&t, &on, None), icon(&t, &off, None));
+    ferrite_ui::theme::set(0);
+    assert!(badge > rune + 40, "night red: connected is a filled badge ({badge} lit vs {rune})");
+}
+
+/// SBAR-23: Status's Stack free row: "Not measured yet" until the firmware's first reading, then KB with a tenth.
+#[test]
+fn status_stack_free_row() {
+    use crate::screens::status::PAGE;
+    let t = ready();
+    let i = PAGE.rows.iter().position(|r| r.0 == "Stack free").expect("the row");
+    let shown = |free: u32| {
+        let dev = Device { stack_free: free, ..Default::default() };
+        let mut b = Buf::<40>::new();
+        (PAGE.rows[i].1)(&crate::screens::table::Ctx { app: &t.app, live: &t.live, dev: &dev, x: &() }, &mut b);
+        std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap()
+    };
+    assert_eq!(shown(0), "Not measured yet");
+    assert_eq!(shown(52_428), "51.1 KB");
+}

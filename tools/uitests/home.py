@@ -193,24 +193,24 @@ def star_quick_mute(t):
         t.keys("STAR")
 
 
-@test("HOME-17", "KEY-18", pages=("Home", "Scan"))
+@test("HOME-17", "HOME-17.1", "KEY-18", pages=("Home", "Scan"))
 def quick_menu(t):
     """Hold * on home: the quick menu (PTT A Reverse, PTT B Night red, PF1 GPS, PF2 Bluetooth, Knob
     Brightness); the knob changes the brightness, PF1 toggles GPS; BACK closes it. Not while scanning."""
     u = t.press("STAR", long=True)
-    t.eq([q[:2] for q in u.qmenu], [["PTT A", "Reverse"], ["PTT B", "Night red"], ["PF1", "GPS"],
-                                     ["PF2", "Bluetooth"], ["Knob", "Brightness"]], "the quick menu")
-    b0 = int(u.qmenu[4][2])
-    g0 = u.qmenu[2][2]
+    t.eq([q[:2] for q in u.qmenu], [["Knob", "Brightness"], ["PTT A", "Reverse"], ["PTT B", "Night red"],
+                                     ["PF1", "GPS"], ["PF2", "Bluetooth"]], "the quick menu, the knob first (HOME-17.1)")
+    b0 = int(u.qmenu[0][2])
+    g0 = u.qmenu[3][2]
     u = t.knob(-1)
-    t.eq(int(u.qmenu[4][2]), b0 - 1, "the knob: brightness")
+    t.eq(int(u.qmenu[0][2]), b0 - 1, "the knob: brightness")
     t.eq(t.get("0 7 4 2"), str(b0 - 1), "the setting follows")
     u = t.knob(+1)
-    t.eq(int(u.qmenu[4][2]), b0, "and back")
+    t.eq(int(u.qmenu[0][2]), b0, "and back")
     u = t.keys("SIDE1")
-    t.check(u.qmenu and u.qmenu[2][2] != g0, "PF1 toggled GPS", u.qmenu)
+    t.check(u.qmenu and u.qmenu[3][2] != g0, "PF1 toggled GPS", u.qmenu)
     u = t.keys("SIDE1")
-    t.eq(u.qmenu[2][2], g0, "PF1 again: GPS back")
+    t.eq(u.qmenu[3][2], g0, "PF1 again: GPS back")
     u = t.keys("BACK")
     t.eq(u.qmenu, [], "BACK closes it")
     t.eq(u.id, "Home", "still home")

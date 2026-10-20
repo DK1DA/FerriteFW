@@ -39,7 +39,7 @@ fn on_off(b: &mut Buf<40>, on: bool) -> u16 {
 }
 
 /// The Status page's rows (SBAR-14) and where OK on each goes (SBAR-15).
-const ROWS: [(&str, Val<()>); 21] = [
+const ROWS: [(&str, Val<()>); 22] = [
     // SBAR-14: why transmit is locked, if it is (BOOT-11).
     ("Transmit", |c, b| match super::info::tx_lock(c.dev) {
         None => {
@@ -191,6 +191,15 @@ const ROWS: [(&str, Val<()>); 21] = [
             TEXT
         }
     }),
+    // SBAR-23: the main stack's room never used since boot, for the RAM budget.
+    ("Stack free", |c, b| {
+        if c.dev.stack_free == 0 {
+            b.set(b"Not measured yet");
+            return SUB;
+        }
+        let _ = uwrite!(b, "{}.{} KB", c.dev.stack_free / 1024, c.dev.stack_free % 1024 * 10 / 1024);
+        TEXT
+    }),
     ("Key lock", |c, b| on_off(b, c.app.locked)),
     // VOX-1: VOX shows here when on.
     ("VOX", |c, b| on_off(b, c.app.set.vox)),
@@ -211,7 +220,7 @@ const ROWS: [(&str, Val<()>); 21] = [
     ("Mailbox", |_, b| on_off(b, false)),
 ];
 
-const GO: [Go; 21] = [
+const GO: [Go; 22] = [
     Go::Open(Dest::Group(8)),
     Go::Open(Dest::Group(9)),
     Go::Open(Dest::Group(8)),
@@ -229,6 +238,7 @@ const GO: [Go; 21] = [
     Go::Later,
     Go::Later,
     Go::Later, // MCU temperature: nothing to set
+    Go::Later, // Stack free: nothing to set
     Go::Later,
     Go::Open(Dest::Sub(8, 2)),
     Go::Open(Dest::Sub(4, 9)),

@@ -195,6 +195,7 @@ impl App {
             // SBAR-2: the callsign stands in for a clock with no time source.
             call: if dev.clock_min.is_none() { Buf::from(self.set.callsign.as_bytes()) } else { Buf::new() },
             gps: dev.gps,
+            bt_on: self.set.bt, // SBAR-8
             bt: dev.bt,
             battery: ferrite_core::battery::bars(dev.battery_pct), // SBAR-9: stock's bars, at the thresholds
             battery_low: dev.battery_low,

@@ -777,6 +777,8 @@ pub struct StatusBar {
     /// 6 characters (AX.25's, SETUP-13), so a longer callsign keeps its first 6.
     pub call: Buf<6>,
     pub gps: GpsState,
+    /// SBAR-8: Bluetooth on (0 9 2 1), and a device connected.
+    pub bt_on: bool,
     pub bt: bool,
     /// 0-4 bars.
     pub battery: u8,
@@ -797,8 +799,8 @@ impl StatusBar {
     }
 
     fn right_eq(&self, o: &Self) -> bool {
-        (self.gps, self.bt, self.battery, self.battery_low, self.battery_cutoff, self.blink_off, self.dry)
-            == (o.gps, o.bt, o.battery, o.battery_low, o.battery_cutoff, o.blink_off, o.dry)
+        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_cutoff, self.blink_off, self.dry)
+            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_cutoff, o.blink_off, o.dry)
     }
 
     /// Draws what differs from `old` (everything with None).
@@ -893,9 +895,16 @@ impl StatusBar {
             lcd.fill(214, 7, bars * 13 / 4, 6, fillc);
         }
         let mut x = 212;
-        if self.bt {
+        // SBAR-8: on with nothing connected grey, connected blue; night red has only red, so there connected is the
+        // rune cut out of a filled badge and on the rune alone.
+        if self.bt_on || self.bt {
             x -= 16;
-            lcd.mask4(x, 4, &ICON_BT, BLUE, None, BG);
+            if crate::theme::get() == crate::theme::NIGHT_RED && self.bt {
+                lcd.fill_r(x - 1, 3, 13, 13, 2, BLUE);
+                lcd.mask4(x, 4, &ICON_BT, BG, None, BLUE);
+            } else {
+                lcd.mask4(x, 4, &ICON_BT, if self.bt { BLUE } else { SUB }, None, BG);
+            }
         }
         if self.gps != GpsState::Off {
             x -= 17;

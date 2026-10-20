@@ -153,12 +153,13 @@ pub(crate) fn lines(app: &App) -> [Line; ROWS] {
     let level = app.set.brightness();
     let mut b = Buf::<4>::new();
     let _ = uwrite!(b, "{}", level);
+    // HOME-17.1: the knob's row first (it sits on top of the radio), then the side keys top to bottom
     [
+        ("Knob", "Brightness", b, TEXT, level),
         ("PTT A", "Reverse", rev.0, rev.1, rev.2),
         ("PTT B", "Night red", night.0, night.1, night.2),
         ("PF1", "GPS", gps.0, gps.1, gps.2),
         ("PF2", "Bluetooth", bt.0, bt.1, bt.2),
-        ("Knob", "Brightness", b, TEXT, level),
     ]
 }
 

@@ -729,6 +729,7 @@ pub fn device_at(secs: u64) -> Device {
         battery_low: false,
         battery_cutoff: false,
         mcu_temp: Some(31),
+        stack_free: 0, // SBAR-23: the radio measures it; the simulator has no stack to paint
         spkmic: false,
         tx_built: true, // the fake radio transmits (into nothing)
         bench: cfg!(feature = "bench"),

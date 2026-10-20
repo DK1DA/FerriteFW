@@ -167,14 +167,14 @@ fn quick_menu_on_hold_star() {
         v.sort_by_key(|t| t.y0);
         v.into_iter().map(|t| t.s).collect::<Vec<_>>()
     };
-    assert_eq!(rows(&mut r), ["off", "off", "on", "off", "7"], "reverse, night red, GPS, Bluetooth, brightness");
+    assert_eq!(rows(&mut r), ["7", "off", "off", "on", "off"], "brightness, reverse, night red, GPS, Bluetooth (HOME-17.1)");
     r.take_cmds();
     r.down(Key::Ptt(ferrite_core::keys::PTT_A)).wait(1500);
     r.expect_screen("Home");
     assert!(!keyed(&mut r), "PTT A in the menu never keys");
     r.up(Key::Ptt(ferrite_core::keys::PTT_A)).wait(100);
     r.press(Key::Side(1)).press(Key::Side(2)).knob(2).wait(300);
-    assert_eq!(rows(&mut r), ["on", "off", "off", "on", "9"]);
+    assert_eq!(rows(&mut r), ["9", "on", "off", "off", "on"]);
     // PTT B: night red, and back.
     r.down(Key::Ptt(ferrite_core::keys::PTT_B)).wait(300);
     assert_eq!(r.sim.app().settings().theme, 2, "night red");
