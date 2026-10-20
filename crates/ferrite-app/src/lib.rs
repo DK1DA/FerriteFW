@@ -350,11 +350,11 @@ pub struct App {
     rx_mask: u8,
     scan_mask: u8,
     relay_mask: u8,
-    /// Where each scanning slot is stopped on a hit (squelch open, or still on its last hit in the resume wait);
-    /// 0 when it isn't. PTT transmits there (SCAN-19).
     /// The tone hint per slot (TSRCH-13, TSRCH-16): the tone word the Radio task heard, kept from the last tick
     /// for the quick settings' Tones row.
     pub(crate) heard: [u16; SLOTS],
+    /// Where each scanning slot is stopped on a hit (held there, through the resume wait); 0 when it isn't, or
+    /// only passing a busy step. PTT transmits there (SCAN-19).
     scan_hit: [Freq10; SLOTS],
     /// Slots with monitor latched (SIDE1 tap): MON on the card.
     pub(crate) monitor: u8,
@@ -664,18 +664,27 @@ impl App {
             return;
         }
         if s.on_channel() {
-            // the slot's zone first, then the zones added to the scan (SCAN-3)
-            let zones = core::iter::once(s.zone).chain((0..10u8).filter(|z| self.radio.zones & 1 << z != 0));
-            for z in zones {
-                if let Some(pos) = (0..store.zone_len(z)).find(|&i| store.zone_at(z, i).is_some_and(|c| c.rx == f)) {
-                    return self.set_channel(slot, z, pos, store);
-                }
+            if let Some((z, pos)) = self.scan_chan(slot, f, store) {
+                self.set_channel(slot, z, pos, store);
             }
             return;
         }
         let from = core::mem::replace(&mut self.slots[slot as usize].vfo, f);
         self.hf_starts_low(slot, from); // TX-36
         self.send_slot(slot);
+    }
+
+    /// A channel scan's channel on `f` as (zone, position): the slot's zone first, then the zones added to the
+    /// scan (SCAN-3).
+    pub(crate) fn scan_chan(&self, slot: u8, f: Freq10, store: &impl ChannelStore) -> Option<(u8, u16)> {
+        let s = self.slots[slot as usize % SLOTS];
+        let zones = core::iter::once(s.zone).chain((0..10u8).filter(|z| self.radio.zones & 1 << z != 0));
+        for z in zones {
+            if let Some(pos) = (0..store.zone_len(z)).find(|&i| store.zone_at(z, i).is_some_and(|c| c.rx == f)) {
+                return Some((z, pos));
+            }
+        }
+        None
     }
 
     /// Put a slot on a channel (setup, or the simulator's sample): channel mode at that zone position.
@@ -1055,7 +1064,7 @@ impl App {
             scan |= (s.scanning as u8) << i;
             relay |= (s.relay as u8) << i;
             self.heard[i] = s.heard_tone;
-            self.scan_hit[i] = if s.scanning && (s.squelch_open || s.last_hit != 0 && s.freq == s.last_hit) { s.freq } else { 0 };
+            self.scan_hit[i] = if s.scanning && s.held { s.freq } else { 0 };
         }
         // CHAN-25: Recent gets a channel when you tune to it (the active slot's), transmit on it, or a slot on it
         // opens squelch.

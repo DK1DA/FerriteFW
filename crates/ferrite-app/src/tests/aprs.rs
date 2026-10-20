@@ -588,4 +588,7 @@ fn long_callsign_refuses_aprs_not_kiss() {
     a.cmds();
     a.app.set_callsign(b"VE7TES");
     assert!(crate::screens::transmit::data_key(&mut a.app, APRS_SLOT, 0, b"Beacon"), "6 is fine");
+    a.cmds();
+    a.app.set_callsign(b"VE7TES-9");
+    assert!(crate::screens::transmit::data_key(&mut a.app, APRS_SLOT, 0, b"Beacon"), "an SSID typed in isn't counted (APRS-30)");
 }

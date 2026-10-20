@@ -566,9 +566,12 @@ impl FakeRadio {
         if let Some(f) = o.tune {
             s.freq = f;
         }
+        s.held = self.scans[i].on_hit();
+        s.chan = if self.chans.is_on(i) { self.chans.chan(&self.scans[i]) + 1 } else { 0 };
         if o.hit.is_some() {
             s.hits = s.hits.saturating_add(1);
             s.last_hit = s.freq;
+            s.hit_chan = s.chan;
         }
         s.skips = self.scans[i].skips.max(s.skips);
         if o.ended {

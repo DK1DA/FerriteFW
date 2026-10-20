@@ -48,7 +48,16 @@ pub struct AprsCfg {
     /// The custom path (0 5 6 2, APRS-26) as typed, like `WIDE1-1,WIDE2-2`, zero-padded; used when
     /// [`AprsCfg::path`] is [`PATH_CUSTOM`]. Checked by [`path_ok`] before it is kept.
     pub custom: [u8; CUSTOM_LEN],
+    /// Our SSID (0 5 4 1, APRS-30): 0-15, sent after the callsign; 0 sends the bare callsign.
+    pub ssid: u8,
 }
+
+/// APRS-30: the SSID by default (decision 191: a handheld), and what each number means by convention.
+pub const SSID_DEFAULT: u8 = 7;
+pub const SSID_NAMES: [&str; 16] = [
+    "Primary", "Vehicle", "Mobile", "Camper", "Home", "Portable", "Special", "Human", "BBS", "I-Gate", "Weather",
+    "Satellite", "Digipeater", "Experiment", "Truck", "Emergency",
+];
 
 /// The custom path's room: two entries of up to 9 characters would be 19, so two short ones (WIDE1-1,WIDE2-2).
 pub const CUSTOM_LEN: usize = 16;
@@ -68,7 +77,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN] };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {
@@ -397,6 +406,18 @@ impl App {
     }
 
     /// The APRS frequency: 0 5 7 1, or the region's.
+    /// APRS-30: our APRS address: the callsign without any SSID typed into it, then 0 5 4 1's (none for 0).
+    /// Empty without a callsign.
+    pub fn aprs_call(&self) -> Buf<10> {
+        let c = self.callsign();
+        let base = &c[..c.iter().position(|&b| b == b'-').unwrap_or(c.len())];
+        let mut b = Buf::from(base);
+        if !base.is_empty() && self.aprs.ssid != 0 {
+            let _ = ufmt::uwrite!(b, "-{}", self.aprs.ssid);
+        }
+        b
+    }
+
     pub fn aprs_freq(&self) -> Freq10 {
         match self.aprs.f5k {
             0 => region_freq(self.set.region()),

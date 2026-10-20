@@ -405,6 +405,13 @@ impl View for Entry {
             (Key::Star, Press::Short) if s.accepts_star() => return commit(s, app, store),
             (Key::Star, Press::Short) => s.push(b'.'),
             (Key::Exit, Press::Short) if s.n == 0 => return app.back(),
+            // APRS-15.1: # with nothing typed puts the APRS frequency back on the region's (MENU-18's #, here too)
+            (Key::Hash, Press::Short) if s.n == 0 && s.to == EntryFor::Setting(FreqSet::Aprs) => {
+                app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() });
+                let f = crate::slot::mhz3(app.aprs_freq());
+                app.show_toast(b"Region default", f.as_bytes(), false);
+                return app.back();
+            }
             (Key::Exit, Press::Short) => {
                 s.n -= 1;
                 let auto = if s.wide { 4 } else { 3 };
@@ -532,6 +539,8 @@ impl View for Entry {
             // VFO-21: "129" after \* \*: the fourth MHz digit's range (130 has only 1300 in reach)
             let range = WIDE[(self.three() as usize).saturating_sub(100).min(WIDE.len() - 1)];
             Hints::new(&[(if self.three() == 130 { "0" } else { "0-9" }, range), back])
+        } else if self.n == 0 && self.to == EntryFor::Setting(FreqSet::Aprs) {
+            Hints::new(&[("#", "Region default"), ("OK", "Go"), back]) // APRS-15.1
         } else if self.freq_mode() {
             Hints::new(&[("*", "Point"), ("OK", "Go"), back])
         } else {

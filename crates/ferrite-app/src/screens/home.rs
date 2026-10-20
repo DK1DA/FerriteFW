@@ -548,7 +548,7 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
     let f = app.shown_freq(s, live);
     // Channel mode puts the name first, the frequency small under it (HOME-4); a VFO, a scan or a channel
     // without a name shows the frequency large.
-    let name = app.chan_name(s, live);
+    let name = app.card_name(s, live, cx.store);
     if big {
         if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, name)), name.is_empty()) {
             redraw_box!(clear, lcd, (15, y + 28, 211, 49, SURFACE), {
@@ -632,7 +632,12 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
             if lv.hits > 0 && lv.last_hit != f {
                 let mut b = Buf::<16>::new();
                 b.set(b"last ");
-                b.push(w::freq3(lv.last_hit).as_bytes());
+                let hn = app.hit_name(s, live, cx.store); // HOME-4.1: a channel scan's hit by name
+                if hn.is_empty() {
+                    b.push(w::freq3(lv.last_hit).as_bytes());
+                } else {
+                    b.push(hn.as_bytes());
+                }
                 cols[1] = b;
             }
         } else {

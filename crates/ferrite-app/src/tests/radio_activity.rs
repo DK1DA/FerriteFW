@@ -263,7 +263,7 @@ fn scan_direction() {
     t.cmds();
     t.tap(Key::Down);
     assert!(t.cmds().contains(&RadioCmd::ScanDir { slot: 0, up: false, resume: false }));
-    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, squelch_open: true, rssi: -80, ..Default::default() };
+    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, held: true, squelch_open: true, rssi: -80, ..Default::default() };
     t.wait(100);
     t.tap(Key::Up);
     assert!(t.cmds().contains(&RadioCmd::ScanDir { slot: 0, up: true, resume: true }));
@@ -280,7 +280,7 @@ fn scan_skip_for_good() {
     t.app.set_channel(0, z, 0, &st);
     let c = st.zone_at(z, 1).unwrap();
     t.tap(Key::Side(2));
-    t.live.slots[0] = SlotLive { freq: c.rx, scanning: true, squelch_open: true, rssi: -80, ..Default::default() };
+    t.live.slots[0] = SlotLive { freq: c.rx, scanning: true, held: true, squelch_open: true, rssi: -80, ..Default::default() };
     t.wait(100);
     t.cmds();
     t.tap(Key::Hash);
@@ -292,7 +292,7 @@ fn scan_skip_for_good() {
     // A band scan (VFO) keeps no list.
     let mut t = T::new();
     t.tap(Key::Side(2));
-    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, squelch_open: true, ..Default::default() };
+    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, held: true, squelch_open: true, ..Default::default() };
     t.wait(100);
     t.tap(Key::Hash);
     assert!(t.app.pop_write().is_none());
@@ -306,7 +306,7 @@ fn ptt_while_scanning() {
     let mut t = ready();
     let f0 = t.freq();
     t.tap(Key::Side(2));
-    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, squelch_open: true, rssi: -80, ..Default::default() };
+    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, held: true, squelch_open: true, rssi: -80, ..Default::default() };
     t.wait(100);
     t.cmds();
     ptt(&mut t, true);
@@ -2130,4 +2130,126 @@ fn range_edges_typed() {
     assert!(range_edge(p, true, mhz(149)).is_err(), "start over end");
     assert!(range_edge(p, false, mhz(1400)).is_err(), "over 1300");
     assert!(range_edge(p, true, mhz(50)).is_err(), "across 64 MHz");
+}
+
+/// A zone of the test store with two named channels, and the slot put on its first.
+fn on_named_zone(t: &mut T) -> (crate::chan::Channel, crate::chan::Channel) {
+    let st = store();
+    let z = (0..16)
+        .find(|&z| st.zone_len(z) > 1 && (0..2).all(|i| st.zone_at(z, i).is_some_and(|c| !c.name().is_empty())))
+        .expect("a zone with two named channels");
+    t.app.set_channel(0, z, 0, &st);
+    (st.zone_at(z, 0).unwrap(), st.zone_at(z, 1).unwrap())
+}
+
+/// HOME-4.1: while a channel list scans, the card names the channel it is on and its last hit by name; a band
+/// scan keeps the frequency.
+#[test]
+fn channel_scan_card_shows_names() {
+    let mut t = T::new();
+    let (a, b) = on_named_zone(&mut t);
+    t.live.slots[0] = SlotLive { freq: b.rx, scanning: true, chan: b.num + 1, hits: 1, last_hit: a.rx, hit_chan: a.num + 1, ..Default::default() };
+    assert_eq!(t.app.card_name(0, &t.live, &store()).as_bytes(), b.name(), "the step by name");
+    assert_eq!(t.app.hit_name(0, &t.live, &store()).as_bytes(), a.name(), "the last hit by name");
+    t.live.slots[0] = SlotLive { freq: mhz(146) + 94_000, scanning: true, ..Default::default() };
+    assert!(t.app.card_name(0, &t.live, &store()).is_empty(), "a band scan: the frequency");
+}
+
+/// SCAN-23.1: a hit keeps how long its last stop lasted; a new stop starts it again.
+#[test]
+fn scan_hit_length() {
+    let mut t = T::new();
+    t.tap(Key::Side(2));
+    let f = mhz(146) + 94_000;
+    t.live.slots[0] = SlotLive { freq: f, last_hit: f, scanning: true, held: true, squelch_open: true, rssi: -80, hits: 1, ..Default::default() };
+    t.wait(5000);
+    t.live.slots[0].squelch_open = false;
+    t.wait(1000);
+    let l = t.app.radio.hits[0].len_s();
+    assert!((4..=5).contains(&l), "a 5 s over: {l}");
+    t.live.slots[0] = SlotLive { freq: f, last_hit: f, scanning: true, held: true, squelch_open: true, rssi: -80, hits: 2, ..Default::default() };
+    t.wait(1000);
+    assert!(t.app.radio.hits[0].len_s() <= 1, "a new stop starts again");
+    assert_eq!(t.app.radio.hits[0].n, 2);
+    let mut b = Buf::<16>::new();
+    crate::screens::scan::span(14, &mut b);
+    assert_eq!(b.as_bytes(), b"14 s");
+    crate::screens::scan::span(0, &mut b);
+    assert_eq!(b.as_bytes(), b"<1 s");
+}
+
+/// SCAN-23.2: on a channel scan OK opens the hit list too, rows by channel name, and OK there puts the slot on
+/// that channel.
+#[test]
+fn channel_scan_hit_list() {
+    let mut t = T::new();
+    let (_, b) = on_named_zone(&mut t);
+    t.tap(Key::Side(2));
+    t.live.slots[0] = SlotLive { freq: b.rx, last_hit: b.rx, scanning: true, held: true, squelch_open: true, rssi: -80, hits: 1, ..Default::default() };
+    t.wait(200);
+    t.live.slots[0].squelch_open = false;
+    t.wait(100);
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Scan(s) if s.list), "OK: the hit list");
+    t.cmds();
+    t.tap(Key::Menu);
+    assert_eq!(t.app.screen(), Screen::Home);
+    let sl = *t.app.slot(0);
+    assert!(sl.on_channel() && sl.ch.is_some_and(|c| c.num == b.num), "on the hit's channel, not a VFO: {sl:?}");
+    assert!(t.cmds().contains(&RadioCmd::Scan { slot: 0, on: false }));
+}
+
+/// SCAN-19.1 (the Oct 19 flicker): a scan only counts as stopped on a hit while the Radio task holds it
+/// there; passing its last hit's frequency again, or a busy step it doesn't stop on, isn't one, so the hint bar
+/// and PTT keep to the scanning case.
+#[test]
+fn passing_a_hit_is_not_a_stop() {
+    let mut t = T::new();
+    t.tap(Key::Side(2));
+    let f = mhz(146) + 94_000;
+    t.live.slots[0] = SlotLive { freq: f, last_hit: f, scanning: true, hits: 1, ..Default::default() };
+    t.wait(100);
+    assert_eq!(t.app.scan_hit[0], 0, "back on the last hit's frequency, not held");
+    t.live.slots[0].squelch_open = true;
+    t.wait(100);
+    assert_eq!(t.app.scan_hit[0], 0, "a busy step the scan passes");
+    t.live.slots[0].held = true;
+    t.wait(100);
+    assert_eq!(t.app.scan_hit[0], f, "held: stopped on it");
+}
+
+/// APRS-15.1: in 0 5 7 1's entry box, # with nothing typed puts the APRS frequency back on the region's.
+#[test]
+fn aprs_frequency_back_to_the_region() {
+    use crate::screens::entry::{EntryFor, FreqSet};
+    let mut t = ready();
+    let region = t.app.aprs_freq();
+    assert!(t.app.set_aprs_freq(mhz(145) + 49_500).is_ok());
+    menu0(&mut t, &[5, 7, 1]);
+    assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::Setting(FreqSet::Aprs)));
+    t.tap(Key::Hash);
+    assert_eq!((t.app.aprs_freq(), t.app.aprs_cfg().f5k), (region, 0), "the region's again");
+    assert!(matches!(t.app.screen(), Screen::Group(_)), "back on the list: {:?}", t.app.screen());
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Region default"));
+}
+
+/// APRS-30: our APRS address is the callsign (without any SSID typed into it) and 0 5 4 1's SSID, 7 by
+/// default (decision 191); 0 sends the bare callsign. The knob steps it, # puts back 7, the row names it.
+#[test]
+fn aprs_address_takes_the_ssid_setting() {
+    let mut t = ready();
+    t.app.set.set_callsign(b"VE3KPW");
+    assert_eq!(t.app.aprs_call().as_bytes(), b"VE3KPW-7");
+    t.app.set.set_callsign(b"VE3KPW-9");
+    assert_eq!(t.app.aprs_call().as_bytes(), b"VE3KPW-7", "the setting wins over one typed in");
+    t.app.set_aprs(crate::aprs::AprsCfg { ssid: 0, ..t.app.aprs_cfg() });
+    assert_eq!(t.app.aprs_call().as_bytes(), b"VE3KPW");
+    let dev = Default::default();
+    let mut b = Buf::<24>::new();
+    crate::screens::groups::change(&mut t.app, &[5, 4, 1], -1);
+    assert_eq!(t.app.aprs_cfg().ssid, 15, "the knob wraps");
+    assert_eq!(crate::screens::groups::wired(&t.app, &dev, &[5, 4, 1], &mut b), Some(true));
+    assert_eq!(b.as_bytes(), b"15 Emergency");
+    t.app.set.set_callsign(b"");
+    assert!(t.app.aprs_call().is_empty(), "no callsign, no address");
 }

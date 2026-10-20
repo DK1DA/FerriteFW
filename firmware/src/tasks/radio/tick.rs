@@ -206,9 +206,12 @@ impl Radio {
                 self.slots[i].freq = f;
                 sl.freq = f;
             }
+            sl.held = self.scans[i].on_hit();
+            sl.chan = if self.chans.is_on(i) { self.chans.chan(&self.scans[i]) + 1 } else { 0 };
             if o.hit.is_some() {
                 sl.hits = sl.hits.saturating_add(1);
                 sl.last_hit = sl.freq;
+                sl.hit_chan = sl.chan;
                 log([b"scan hit A ", b"scan hit B ", b"scan hit C "][i % 3], sl.freq); // its frequency, 10 Hz
             }
             sl.skips = self.scans[i].skips.max(sl.skips);

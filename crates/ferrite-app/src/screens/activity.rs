@@ -24,19 +24,26 @@ pub enum Mode {
     Xb,
 }
 
-/// One remembered hit: what (a frequency, or a tone word), when (s, wrapping), how strong (dBm), how many
-/// times (SCAN-23's count; it fits the padding).
+/// One remembered hit: what (a frequency, or a tone word), when it was last heard and when that stop began
+/// (s, wrapping: its length, SCAN-23.1), how strong (dBm), how many times (SCAN-23's count).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Hit {
     pub what: u32,
     pub at_s: u16,
+    pub from_s: u16,
     pub dbm: i8,
     pub n: u8,
 }
 
 impl Hit {
     pub fn new(what: u32, now: u32, rssi: i16) -> Self {
-        Hit { what, at_s: (now / 1000) as u16, dbm: rssi.clamp(-128, 0) as i8, n: 1 }
+        let at_s = (now / 1000) as u16;
+        Hit { what, at_s, from_s: at_s, dbm: rssi.clamp(-128, 0) as i8, n: 1 }
+    }
+
+    /// How long its last stop lasted (SCAN-23.1), in seconds.
+    pub fn len_s(&self) -> u32 {
+        self.at_s.wrapping_sub(self.from_s) as u32
     }
 
     pub fn age_ms(&self, now: u32) -> u32 {
@@ -51,7 +58,7 @@ impl Hit {
 /// The last hits the probe and scan screens show.
 pub const HITS: usize = 3;
 /// The hits kept: a range scan's hit list (SCAN-23, nicFW's smart scan list), the counter's and tone search's
-/// last few. 8 bytes each.
+/// last few. 12 bytes each.
 pub const HIT_LIST: usize = 16;
 
 /// Activity buckets per slot for the watch + activity layout: 32 of 1.875 s, the last minute.
@@ -139,7 +146,7 @@ impl RadioUi {
             mode: Mode::Off,
             t0: 0,
             centre: 0,
-            hits: [Hit { what: 0, at_s: 0, dbm: 0, n: 0 }; HIT_LIST],
+            hits: [Hit { what: 0, at_s: 0, from_s: 0, dbm: 0, n: 0 }; HIT_LIST],
             hits_seen: 0,
             dtmf_seen: 0,
             xb_on: false,
@@ -172,19 +179,20 @@ impl RadioUi {
         if h.what == 0 {
             return;
         }
-        let n = match self.hits.iter().position(|o| o.what == h.what) {
-            Some(0) if !again => self.hits[0].n,
+        // the same stop going on keeps its count and its start; a new one starts its length again
+        let (n, from_s) = match self.hits.iter().position(|o| o.what == h.what) {
+            Some(0) if !again => (self.hits[0].n, self.hits[0].from_s),
             Some(i) => {
                 let n = self.hits[i].n.saturating_add(1);
                 self.hits.copy_within(0..i, 1);
-                n
+                (n, h.from_s)
             }
             None => {
                 self.hits.copy_within(0..HIT_LIST - 1, 1);
-                1
+                (1, h.from_s)
             }
         };
-        self.hits[0] = Hit { n, ..h };
+        self.hits[0] = Hit { n, from_s, ..h };
     }
 
     pub fn clear_hits(&mut self) {

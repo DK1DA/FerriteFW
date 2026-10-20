@@ -197,7 +197,8 @@ const MAILBOX: [InfoRow; 4] = [
         if a.set.callsign.is_empty() {
             return fixed(b, "Needs a callsign", AMBER);
         }
-        b.set(a.set.callsign.as_bytes());
+        let c = a.set.callsign.as_bytes();
+        b.set(c.split(|&x| x == b'-').next().unwrap_or(c)); // without an SSID typed into it (APRS-30)
         b.push(b"-1");
         TEXT
     }),

@@ -296,6 +296,18 @@ impl App {
         n
     }
 
+    /// The card's name: [`Self::chan_name`], or while a channel list scans the name of the channel it is on
+    /// (HOME-4.1), read from the store as the scan screen's hits are.
+    pub(crate) fn card_name(&self, s: u8, live: &LiveAll, store: &impl ChannelStore) -> Buf<16> {
+        let lv = &live.slots[s as usize];
+        if lv.scanning { num_name(lv.chan, store) } else { self.chan_name(s, live) }
+    }
+
+    /// A channel scan's last hit by name (HOME-4.1); empty for a band scan or a channel without a name.
+    pub(crate) fn hit_name(&self, s: u8, live: &LiveAll, store: &impl ChannelStore) -> Buf<16> {
+        num_name(live.slots[s as usize].hit_chan, store)
+    }
+
     /// The slot's frequency, or the scan's current step while it scans.
     pub(crate) fn shown_freq(&self, s: u8, live: &LiveAll) -> u32 {
         let lv = &live.slots[s as usize];
@@ -367,3 +379,12 @@ pub(crate) fn heard_text(t: u16, own: u16, b: &mut Buf<24>) {
 
 /// The state field's width for a tone hint (TSRCH-13): 11 characters.
 pub(crate) const HEARD_W: i32 = 80;
+
+/// The name of channel `n` - 1 (the snapshot's numbering: 0 is none).
+fn num_name(n: u16, store: &impl ChannelStore) -> Buf<16> {
+    let mut b = Buf::new();
+    if let Some(c) = n.checked_sub(1).and_then(|n| store.get(n)) {
+        b.set(c.name());
+    }
+    b
+}

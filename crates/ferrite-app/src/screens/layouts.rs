@@ -63,7 +63,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         });
     }
     // Channel mode: the name large, the frequency small under it (HOME-4).
-    let name = app.chan_name(a, live);
+    let name = app.card_name(a, live, cx.store);
     if let Some(clear) = app.dirty_shape(2, hash(&(f, name)), name.is_empty()) {
         redraw_box!(clear, lcd, (8, 42, 224, 52, BG), {
             if name.is_empty() {
@@ -261,7 +261,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         }
         let f = app.shown_freq(s, live);
         // Channel mode: the name at the left, the frequency small at the right (HOME-4).
-        let name = app.chan_name(s, live);
+        let name = app.card_name(s, live, cx.store);
         let sl = *app.slot(s);
         let mut right = Buf::<16>::new();
         if lv.scanning {
@@ -293,7 +293,12 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
             cols[0].set(crate::slot::MODES[cfg.mode as usize % 6].as_bytes());
             if lv.hits > 0 && lv.last_hit != f {
                 cols[1].set(b"last ");
-                cols[1].push(w::freq3(lv.last_hit).as_bytes());
+                let hn = app.hit_name(s, live, cx.store); // HOME-4.1: a channel scan's hit by name
+                if hn.is_empty() {
+                    cols[1].push(w::freq3(lv.last_hit).as_bytes());
+                } else {
+                    cols[1].push(hn.as_bytes());
+                }
             }
         } else if super::home::card_kind(app, s) == 2 {
             // BCR-26: FM, as much of the RDS text as fits, the stereo pilot

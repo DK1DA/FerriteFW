@@ -97,7 +97,8 @@ impl Aprs {
     /// One turn of the UI task's loop.
     pub fn poll(&mut self, app: &mut App, store: &Store, live: &LiveAll, now_ms: u32) {
         let extra = &store.extra;
-        extra.set_callsign(app.callsign());
+        let me = app.aprs_call(); // APRS-30: callsign and SSID
+        extra.set_callsign(me.as_bytes());
         // KISS-6: the cable (0 9 2 4 on KISS, or 0 5 9 1 on Cable) or Bluetooth (0 5 9 1, with Bluetooth on).
         let kiss_cable = app.settings().kiss_on_cable();
         let kiss_on = app.settings().kiss_on(); // KISS-9: C is the APRS slot meanwhile (`App::aprs_c`)
@@ -107,7 +108,6 @@ impl Aprs {
             self.on = decode;
         }
         let now_s = now_ms / 1000;
-        let me: Buf<10> = Buf::from(app.callsign());
         // Frames heard (APRS-3, APRS-6).
         while let Ok(f) = APRS_RX.try_receive() {
             if kiss_on {

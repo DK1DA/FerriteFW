@@ -92,7 +92,7 @@ pub enum Job {
 }
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
-/// bytes), then the settings added later (path, digipeater, beacon after voice, one spare: [`APRS_MORE`]), then
+/// bytes), then the settings added later (path, digipeater, beacon after voice, the SSID: [`APRS_MORE`]), then
 /// the custom path (0 5 6 2, zero-padded: [`APRS_PATH`]). A record from before them is shorter and reads them as
 /// their defaults.
 const QUICK_LEN: usize = 68;
@@ -233,6 +233,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 cfg.path = if m[0] < cfg.path_choices() { m[0] } else { cfg.path };
                 cfg.digi = m[1] & 0x73;
                 cfg.after_voice = m[2] == 1;
+                // APRS-30: the spare byte; erased (0xFF, a record from before it) reads as the default
+                cfg.ssid = if m[3] < 16 { m[3] } else { ferrite_app::aprs::SSID_DEFAULT };
             }
             self.aprs.set(cfg);
             self.extra.request(Op::AprsCfg(cfg)); // the APRS task's copy
@@ -988,7 +990,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let c = self.aprs.get();
         p[..2].copy_from_slice(&c.f5k.to_le_bytes());
         (p[2], p[3]) = (c.beacon, c.power);
-        (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2]) = (c.path, c.digi, c.after_voice as u8);
+        (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2], p[APRS_MORE + 3]) = (c.path, c.digi, c.after_voice as u8, c.ssid);
         p[APRS_PATH..APRS_PAYLOAD].copy_from_slice(&c.custom);
         for i in 0..ferrite_app::words::QUICK {
             let t = match q {

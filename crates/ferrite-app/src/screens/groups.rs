@@ -197,7 +197,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
         Entry("Channel|Auto|The weather channel to watch."),
     ]),
     ((5, 4), &[
-        Entry("SSID|9|0-15 after your callsign."),
+        Entry("SSID|7 Human|0-15 after your callsign."),
         Entry("Symbol|Car|Your map symbol."),
         Entry("Comment|Empty|Up to 40 characters."),
         Entry("Position source|GPS|GPS, or the fixed position."),
@@ -213,7 +213,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
     ]),
     ((5, 6), &[Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."), Entry("Custom path|None|Your own path, like WIDE2-2: OK types it.")]),
     ((5, 7), &[
-        Entry("Frequency|144.390|The APRS channel; OK types it."),
+        Entry("Frequency|144.390|OK types it; # the region's."),
         Entry("TX delay|300 ms|Carrier before data."),
         Entry("TX level|Mid|Modulation level."),
         Entry("RX level|Auto|Decoder input level."),
@@ -446,7 +446,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 69] = [
+static SETTINGS: [Setting; 70] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -466,6 +466,7 @@ static SETTINGS: [Setting; 69] = [
     field!([4, 8, 0], popups: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([4, 9, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([5, 3, 0], special),
+    field!([5, 4, 1], special), // APRS-30
     field!([5, 5, 1], special),
     field!([5, 5, 3], special),
     field!([5, 5, 4], special),
@@ -713,6 +714,13 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             app.beacon_mode_text(b);
             app.aprs_cfg().beacon != 0
         }
+        [5, 4, 1] => {
+            // APRS-30: the number and its conventional name
+            let n = app.aprs_cfg().ssid;
+            let _ = uwrite!(b, "{} ", n);
+            b.push(crate::aprs::SSID_NAMES[n as usize % 16].as_bytes());
+            n != crate::aprs::SSID_DEFAULT
+        }
         [5, 5, 4] => {
             pick(b, &crate::aprs::POWERS, app.aprs_cfg().power);
             app.aprs_cfg().power != 0
@@ -874,6 +882,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             app.set_aprs_mode(on); // APRS-15
         }
         [5, 5, 1] => app.step_beacon(d),
+        [5, 4, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: cycle(app.aprs_cfg().ssid, d, 16), ..app.aprs_cfg() }),
         [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
         [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
         [5, 6, 1] => {
@@ -948,6 +957,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [3, 2, 3] => s.scope_dwell = d.scope_dwell,
         [5, 3] if s.aprs_mode != d.aprs_mode => app.set_aprs_mode(d.aprs_mode),
         [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
+        [5, 4, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: crate::aprs::SSID_DEFAULT, ..app.aprs_cfg() }),
         [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
         [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: false, ..app.aprs_cfg() }),
         [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { path: crate::aprs::PATH_DEFAULT, ..app.aprs_cfg() }),

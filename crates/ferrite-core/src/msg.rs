@@ -335,9 +335,15 @@ pub struct SlotLive {
     /// A carrier above the squelch (the BK4829's RSSI and noise squelch), whatever tone it carries.
     pub squelch_open: bool,
     pub scanning: bool,
+    /// The scan is stopped on a hit (held there until it resumes), not just passing a busy step.
+    pub held: bool,
     /// Scan hits so far, and the last one.
     pub hits: u8,
     pub last_hit: Freq10,
+    /// A channel scan's step and its last hit as channel numbers plus 1 (0: none, or a band scan), so the UI
+    /// can show their names (HOME-4.1).
+    pub chan: u16,
+    pub hit_chan: u16,
     /// Not watched: it needs the other band relay state (WATCH-11).
     pub relay: bool,
     /// Nuisance skips in this scan (SCAN-11).

@@ -818,7 +818,7 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
     }
     l.push(b" freq=");
     mhz(l, app.shown_freq(s, cx.live));
-    kq(l, "name", app.chan_name(s, cx.live).as_bytes());
+    kq(l, "name", app.card_name(s, cx.live, cx.store).as_bytes());
     let kind = screens::home::card_kind(app, s);
     if kind == 1 {
         // APRS-17: the APRS card shows no mode, tone or shift chips, but the last heard and the beacon lines and

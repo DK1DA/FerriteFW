@@ -5,8 +5,9 @@
 //! zones 0-9 from the set (SCAN-3), SIDE2 stops (SCAN-1), BACK goes back (home: SIDE2 starts it there) with the
 //! scan still running (it shows on the card).
 //!
-//! A frequency scan keeps its last 16 hits with how often each stopped it (SCAN-23, nicFW's smart scan list):
-//! OK opens the list, where OK tunes the slot's VFO to one and hold 9 saves it as a channel (KEY-23).
+//! A scan keeps its last 16 hits with how often each stopped it and how long its last stop lasted (SCAN-23):
+//! OK opens the list, where OK tunes the slot's VFO to one and hold 9 saves it as a channel (KEY-23); on a
+//! channel scan the rows are the channels' names and OK puts the slot on the channel.
 
 use super::activity::Hit;
 use super::shared::*;
@@ -58,21 +59,47 @@ fn listed(app: &App) -> u8 {
     app.radio.hits.iter().take_while(|h| h.what != 0).count() as u8
 }
 
-/// OK in the hit list: the scan stops and the slot's VFO goes to the hit (a channel slot moves to its VFO, as
-/// the counter's OK does). True when there was one.
-fn tune_hit(app: &mut App, s: Scan) -> bool {
+/// OK in the hit list: the scan stops and the slot's VFO goes to the hit; a channel scan's slot goes to the
+/// hit's channel instead (SCAN-23.2). True when there was one.
+fn tune_hit(app: &mut App, s: Scan, store: &impl ChannelStore) -> bool {
     let f = app.radio.hits[s.sel as usize % super::activity::HIT_LIST].what;
     if f == 0 {
         return false;
     }
     app.out.push(RadioCmd::Scan { slot: s.slot, on: false });
-    app.set_vfo(s.slot, f);
+    match app.scan_chan(s.slot, f, store).filter(|_| app.slot(s.slot).on_channel()) {
+        Some((z, pos)) => app.set_channel(s.slot, z, pos, store),
+        None => app.set_vfo(s.slot, f),
+    }
     app.go_home();
     true
 }
 
+/// A hit's channel name on a channel scan (SCAN-23.2); empty on a band scan, or for a channel without one.
+fn hit_chan_name(app: &App, slot: u8, f: u32, store: &impl ChannelStore) -> Buf<16> {
+    let mut b = Buf::new();
+    if app.slot(slot).on_channel() {
+        if let Some(c) = app.scan_chan(slot, f, store).and_then(|(z, p)| store.zone_at(z, p)) {
+            b.set(c.name());
+        }
+    }
+    b
+}
+
+/// A stop's length (SCAN-23.1): "<1 s", "14 s", "3 min".
+pub fn span(s: u32, b: &mut Buf<16>) {
+    b.clear();
+    if s == 0 {
+        b.set(b"<1 s");
+    } else if s < 60 {
+        let _ = uwrite!(b, "{} s", s);
+    } else {
+        let _ = uwrite!(b, "{} min", s / 60);
+    }
+}
+
 /// The hit list's keys (SCAN-23).
-fn list_key(s: Scan, app: &mut App, e: KeyEvent) {
+fn list_key(s: Scan, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
     let n = listed(app).max(1);
     match (e.key, e.press) {
         (Key::Up | Key::Down, Press::Short | Press::Repeat) => {
@@ -80,14 +107,22 @@ fn list_key(s: Scan, app: &mut App, e: KeyEvent) {
             app.screen = crate::Screen::Scan(Scan { sel: (s.sel + d) % n, ..s });
         }
         (Key::Menu, Press::Short) => {
-            if tune_hit(app, s) {
-                let fq = w::freq3(app.slot(s.slot).freq());
-                app.show_toast(b"VFO set", fq.as_bytes(), false);
+            let chan = app.slot(s.slot).on_channel();
+            if tune_hit(app, s, store) {
+                if chan {
+                    let sl = *app.slot(s.slot);
+                    let name = sl.ch.map_or(Buf::<16>::new(), |c| Buf::from(c.name()));
+                    app.show_toast(b"Channel", name.as_bytes(), false);
+                } else {
+                    let fq = w::freq3(app.slot(s.slot).freq());
+                    app.show_toast(b"VFO set", fq.as_bytes(), false);
+                }
             }
         }
-        // hold 9: the save form (VFO-9) on the hit, as on a home VFO (KEY-23); hold V/M does nothing here
-        (Key::Digit(9), Press::Long) => {
-            if tune_hit(app, s) {
+        // hold 9: the save form (VFO-9) on the hit, as on a home VFO (KEY-23); hold V/M does nothing here. A
+        // channel scan's hits are channels already.
+        (Key::Digit(9), Press::Long) if !app.slot(s.slot).on_channel() => {
+            if tune_hit(app, s, store) {
                 app.open(super::nav::Dest::SaveChannel);
             }
         }
@@ -107,11 +142,11 @@ impl View for Scan {
 
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         if self.list {
-            return list_key(self, app, e);
+            return list_key(self, app, e, store);
         }
         let s = self.slot;
         match (e.key, e.press) {
-            (Key::Menu, Press::Short) if !app.slot(s).on_channel() => {
+            (Key::Menu, Press::Short) => {
                 if listed(app) == 0 {
                     return app.show_toast(b"No hits yet", b"", false);
                 }
@@ -158,7 +193,7 @@ impl View for Scan {
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         app.page(lcd, self.list);
         if self.list {
-            return hit_list(self, app, lcd);
+            return hit_list(self, app, lcd, cx.store);
         }
         let s = self.slot;
         let lv = cx.live.slots[s as usize];
@@ -260,7 +295,7 @@ impl View for Scan {
         for (i, (l, v)) in rows.iter().enumerate() {
             app.kv(lcd, 4 + i, 122 + 18 * i as i32, 18, &w::KV_STATUS, l, v, TEXT, false);
         }
-        // The last hits: how long ago, what, how strong.
+        // The last hits: how long ago, what (a channel scan's by name), how long it lasted (SCAN-23.1), how strong.
         if app.dirty(10, 1) {
             w::field(lcd, 8, 224, 214, 230, 226, Align::Left, b"Last hits", &UI_12B, SUB, BG);
         }
@@ -268,24 +303,26 @@ impl View for Scan {
             let hit = app.radio.hits[i];
             let mut a = Buf::<16>::new();
             let mut what = Buf::<32>::new();
+            let mut len = Buf::<16>::new();
             let mut sig = Buf::<4>::new();
             if hit.what != 0 {
                 ago(hit.age_ms(app.now), &mut a);
-                what.push(w::freq3(hit.what).as_bytes());
-                if sl.on_channel() {
-                    if let Some(c) = channel_on(cx.store, sl.zone, hit.what) {
-                        what.push(" \u{b7} ".as_bytes());
-                        what.push(c.name());
-                    }
+                let name = hit_chan_name(app, s, hit.what, cx.store);
+                if name.is_empty() {
+                    what.push(w::freq3(hit.what).as_bytes());
+                } else {
+                    what.push(name.as_bytes());
                 }
+                span(hit.len_s(), &mut len);
                 sig = w::s_text(hit.rssi());
             } else if i == 0 {
                 what.set(b"None yet");
             }
             let y = 232 + 18 * i as i32;
-            if app.dirty(11 + i, hash(&(a, what, sig))) {
-                w::field(lcd, 8, 52, y, y + 18, y + 13, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
-                w::field(lcd, 60, 140, y, y + 18, y + 13, Align::Left, what.as_bytes(), &UI_12, TEXT, BG);
+            if app.dirty(11 + i, hash(&(a, what, len, sig))) {
+                w::field(lcd, 8, 46, y, y + 18, y + 13, Align::Left, a.as_bytes(), &UI_12, SUB, BG);
+                w::field(lcd, 54, 104, y, y + 18, y + 13, Align::Left, w::fit(what.as_bytes(), &UI_12, 104), &UI_12, TEXT, BG);
+                w::field(lcd, 158, 40, y, y + 18, y + 13, Align::Right, len.as_bytes(), &UI_12, SUB, BG);
                 w::field(lcd, 200, 32, y, y + 18, y + 13, Align::Right, sig.as_bytes(), &UI_12B, GREEN, BG);
             }
         }
@@ -300,15 +337,17 @@ impl View for Scan {
         } else if app.scan_hit[self.slot as usize] != 0 {
             Hints::new(&[("*", "Skip"), (ARROWS_UD, "Go on"), ("SIDE2", "Stop")])
         } else if app.slot(self.slot).on_channel() {
-            Hints::new(&[(ARROWS_UD, "Direction"), ("0-9", "Zones"), ("SIDE2", "Stop")])
+            // SCAN-23.2: OK for the hits here too; ▲▼ still set the direction, unlabelled for room
+            Hints::new(&[("0-9", "Zones"), ("OK", "Hits"), ("SIDE2", "Stop")])
         } else {
             Hints::new(&[(ARROWS_UD, "Direction"), ("OK", "Hits"), ("SIDE2", "Stop")])
         }
     }
 }
 
-/// SCAN-23: the hits, newest first, each with how often it stopped the scan and when it last did.
-fn hit_list(s: Scan, app: &mut App, lcd: &mut impl Panel) {
+/// SCAN-23: the hits, newest first, each with how often it stopped the scan, how long its last stop lasted
+/// (SCAN-23.1) and when that was; a channel scan's by name (SCAN-23.2).
+fn hit_list(s: Scan, app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore) {
     let n = listed(app);
     let mut r = Buf::<16>::new();
     let _ = uwrite!(r, "{} of {}", n, super::activity::HIT_LIST);
@@ -318,19 +357,26 @@ fn hit_list(s: Scan, app: &mut App, lcd: &mut impl Panel) {
     for k in 0..9u8 {
         let i = (top + k) as usize;
         let h = app.radio.hits.get(i).copied().unwrap_or_default();
-        let (mut name, mut v) = (Buf::<16>::new(), Buf::<16>::new());
+        let (mut name, mut v) = (Buf::<16>::new(), Buf::<24>::new());
         if h.what != 0 {
-            name.set(w::freq3(h.what).as_bytes());
-            let mut a = Buf::<16>::new();
+            name = hit_chan_name(app, s.slot, h.what, store);
+            if name.is_empty() {
+                name.set(w::freq3(h.what).as_bytes());
+            }
+            let (mut a, mut l) = (Buf::<16>::new(), Buf::<16>::new());
             ago(h.age_ms(app.now), &mut a);
+            span(h.len_s(), &mut l);
             let _ = uwrite!(v, "{}x  ", h.n);
+            v.push(l.as_bytes());
+            v.push(b"  ");
             v.push(a.as_bytes());
         } else if i == 0 {
             name.set(b"None yet");
         }
         app.row1(lcd, k as usize, name.as_bytes(), v.as_bytes(), false, h.what != 0 && i == s.sel as usize, false);
     }
-    app.help_box(lcd, 300 - 38, 34, b"OK tunes the VFO there; hold 9 saves it.", b"");
+    let help: &[u8] = if app.slot(s.slot).on_channel() { b"OK goes to that channel." } else { b"OK tunes the VFO there; hold 9 saves it." };
+    app.help_box(lcd, 300 - 38, 34, help, b"");
 }
 
 /// SCAN-17: # on a hit sets the channel's Skip flag (CHAN-4), so no scan stops there again, and the scan goes
