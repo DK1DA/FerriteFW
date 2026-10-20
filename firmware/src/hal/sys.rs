@@ -26,6 +26,7 @@ pub fn flash_kb() -> u32 {
     rd16(DEV_FLASH_KB) as u32
 }
 
+/// SELF-8: the 96-bit factory unique ID (stock V0.27 and V0.29 read it there; hardware.md), lowest word first.
 pub fn uid() -> [u32; 3] {
     [rd(DEV_UID), rd(DEV_UID + 4), rd(DEV_UID + 8)]
 }
@@ -91,6 +92,11 @@ extern "C" {
 
 fn stack_bottom() -> usize {
     core::ptr::addr_of!(_stack_end) as usize
+}
+
+/// SELF-9.2: the statics' RAM (.data, .bss, .uninit: from the start of SRAM to the stack's lowest address).
+pub fn statics() -> u32 {
+    (stack_bottom() - 0x2000_0000) as u32
 }
 
 /// Fill the unused part of the main stack with a pattern. Once, early in main.

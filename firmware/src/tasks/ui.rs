@@ -351,6 +351,9 @@ pub async fn task() {
     }
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
     let mut dev = Device { tx_built: cfg!(feature = "tx"), bench: cfg!(feature = "bench"), battery_pct: 100, ..Default::default() };
+    dev.ram_statics = crate::hal::sys::statics(); // SELF-9.2
+    // SELF-9.1: the idle time counted by the thread executor's sleep, and when it was last read.
+    let mut idle_mark = (crate::IDLE_US.load(Relaxed), Instant::now());
     let mut bat_logged = 0u32;
     let mut battery = ferrite_core::battery::Battery::default();
     // About and Self-test (SELF-5 to SELF-7): what the boot checks found. The BK4829s from the Radio task's
@@ -358,6 +361,7 @@ pub async fn task() {
     {
         let t = &mut dev.selftest;
         t.idcode = crate::hal::sys::idcode();
+        t.uid = crate::hal::sys::uid(); // SELF-8
         t.mcu_ok = t.idcode == chipid::EXPECTED_PID;
         if let Some((id, size)) = flash {
             (t.flash_id, t.flash_mb) = (id, (size >> 20) as u8);
@@ -443,8 +447,15 @@ pub async fn task() {
                 bat_logged = now_ms();
                 // SBAR-23: the stack's high-water mark (a walk of up to its whole size, so only every 10 s).
                 dev.stack_free = crate::hal::sys::stack_free();
+                // SELF-9.1: CPU = the share of these 10 s the thread executor wasn't asleep (the interrupt executors
+                // and handlers run in its waking time, so they count as busy).
+                let idle = crate::IDLE_US.load(Relaxed);
+                let us = idle_mark.1.elapsed().as_micros().max(1) as u32;
+                let asleep = idle.wrapping_sub(idle_mark.0).min(us);
+                dev.cpu_pct = Some((100 - asleep as u64 * 100 / us as u64) as u8);
+                idle_mark = (idle, Instant::now());
                 bringup::linef(|b| {
-                    let _ = ufmt::uwrite!(b, "stack free {} B", dev.stack_free);
+                    let _ = ufmt::uwrite!(b, "stack free {} B, cpu {}%", dev.stack_free, dev.cpu_pct.unwrap_or(0));
                 });
                 bringup::linef(|b| {
                     let avg = ferrite_core::txcal::battery_mv(s.raw);

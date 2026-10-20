@@ -335,18 +335,18 @@ fn channel_only_mode() {
     r.run("hold HASH; wait 300ms; press OK; expect screen \"Quick\"");
 }
 
-/// The Status page lists every state in words, including the MCU temperature, with a scroll cue for the rows
-/// below (SBAR-13, SBAR-14, SBAR-20, DISP-24, HOME-10).
+/// The Status page lists every state in words, with a scroll cue for the rows below (SBAR-13, SBAR-14, DISP-24,
+/// HOME-10); the live numbers (MCU temp, stack) are System's (SELF-9).
 #[test]
 fn status_page() {
     let mut r = Radio::new();
     r.run("press HASH; expect screen \"Status\"; expect text \"Transmit Ready\"; expect text \"Region Canada\"");
-    // The rows below the page: the MCU temperature is further down.
-    // The list wraps at its end; 16 rows down shows the last rows.
-    for _ in 0..16 {
+    // The rows below the page: 19 rows down is the last of its 20 (the list wraps at its end).
+    for _ in 0..19 {
         r.press(Key::Down);
     }
-    r.expect_text("MCU temperature").expect_text("31");
+    r.expect_text("Mailbox");
+    assert!(!r.sim.screen_text().contains("MCU temperature"), "MCU temp is System's now");
 }
 
 /// Quick settings: MENU on home, nine rows for the active slot, 0 opens advanced (MENU-1).

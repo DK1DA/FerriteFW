@@ -22,12 +22,13 @@ fn page(t: &T) -> Page {
     }
 }
 
-/// HELP-1: ▶ from About goes through the Help pages to the self-test and round to About; ◀ goes back.
+/// HELP-1, SELF-9: ▶ from About goes through System and the Help pages to the self-test and round to About; ◀ goes back.
 #[test]
 fn about_pages_go_round() {
     let mut t = T::new();
     t.open(Dest::About);
     let order = [
+        Page::System,
         Page::Help(Help::Manual),
         Page::Help(Help::HomeKeys),
         Page::Help(Help::SideKeys),
@@ -57,7 +58,7 @@ fn help_pages_draw_and_hints_fit() {
     let mut t = T::new();
     let mut fb = FrameBuffer::new();
     t.open(Dest::About);
-    for _ in 0..7 {
+    for _ in 0..8 {
         t.tap(Key::Right);
         t.render(&mut fb);
         let lit = (21..300).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| fb.at(x, y) != ferrite_ui::gfx::BG).count();
@@ -89,6 +90,7 @@ fn manual_qr_is_scannable() {
         t.app.settings_mut().theme = theme;
         let mut fb = FrameBuffer::new();
         t.open(Dest::About);
+        t.tap(Key::Right); // System (SELF-9)
         t.tap(Key::Right);
         t.render(&mut fb);
         let side = (QR_SIZE + 8) * 5;
@@ -125,8 +127,8 @@ fn help_digits_are_the_shortcut_table() {
     let mut t = T::new();
     let mut fb = FrameBuffer::new();
     t.open(Dest::About);
-    for _ in 0..4 {
-        t.tap(Key::Right);
+    for _ in 0..5 {
+        t.tap(Key::Right); // System (SELF-9), then the Help pages
     }
     assert_eq!(page(&t), Page::Help(Help::Digits));
     t.render(&mut fb);

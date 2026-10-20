@@ -133,12 +133,12 @@ fn home_layouts_and_themes_match_their_goldens() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// HELP-1 to HELP-5: About's Help pages, ▶ by ▶ from About: the manual's QR code and the key card pages.
+/// HELP-1 to HELP-5, SELF-9: About's pages, ▶ by ▶ from About: System, the manual's QR code and the key card pages.
 #[test]
 fn help_pages_match_their_goldens() {
     let about = jump_names().position(|n| n.ends_with("About")).expect("About in the jump list");
     let mut failures = Vec::new();
-    for (i, name) in ["manual", "home-keys", "side-keys", "shortcuts", "menu-numbers"].iter().enumerate() {
+    for (i, name) in ["system", "manual", "home-keys", "side-keys", "shortcuts", "menu-numbers"].iter().enumerate() {
         let mut r = Radio::new();
         r.sim.jump(about);
         r.wait(200);

@@ -2284,18 +2284,30 @@ fn bluetooth_icon_on_and_connected() {
     assert!(badge > rune + 40, "night red: connected is a filled badge ({badge} lit vs {rune})");
 }
 
-/// SBAR-23: Status's Stack free row: "Not measured yet" until the firmware's first reading, then KB with a tenth.
+/// SBAR-23, SELF-9.1, SELF-9.2, SELF-8: System's live rows ("Measuring" until the firmware's first 10 s), and About's
+/// unique ID on two rows.
 #[test]
-fn status_stack_free_row() {
-    use crate::screens::status::PAGE;
+fn system_and_about_rows() {
+    use crate::screens::info::{def, Page};
     let t = ready();
-    let i = PAGE.rows.iter().position(|r| r.0 == "Stack free").expect("the row");
-    let shown = |free: u32| {
-        let dev = Device { stack_free: free, ..Default::default() };
+    let show = |p: Page, label: &str, row: usize, dev: &Device| {
+        let rows = def(p).rows;
+        let i = rows.iter().position(|r| r.0 == label).expect("the row") + row;
         let mut b = Buf::<40>::new();
-        (PAGE.rows[i].1)(&crate::screens::table::Ctx { app: &t.app, live: &t.live, dev: &dev, x: &() }, &mut b);
+        (rows[i].1)(&crate::screens::table::Ctx { app: &t.app, live: &t.live, dev, x: &() }, &mut b);
         std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap()
     };
-    assert_eq!(shown(0), "Not measured yet");
-    assert_eq!(shown(52_428), "51.1 KB");
+    let none = Device::default();
+    for l in ["CPU", "RAM", "Stack free"] {
+        assert_eq!(show(Page::System, l, 0, &none), "Measuring", "{l}");
+    }
+    let dev = Device { stack_free: 52_428, ram_statics: 30_272, cpu_pct: Some(7), ..Default::default() };
+    assert_eq!(show(Page::System, "Stack free", 0, &dev), "51.1 KB");
+    assert_eq!(show(Page::System, "CPU", 0, &dev), "7 %");
+    assert_eq!(show(Page::System, "RAM", 0, &dev), "45 of 96 KB", "96 KB less the stack never used");
+    assert_eq!(show(Page::About, "Unique ID", 0, &none), "Not read");
+    let mut id = Device::default();
+    id.selftest.uid = [0x3F2A_91C0, 0x7D44_0E18, 0xA2B6_5C93];
+    assert_eq!(show(Page::About, "Unique ID", 0, &id), "3F2A 91C0 7D44");
+    assert_eq!(show(Page::About, "Unique ID", 1, &id), "0E18 A2B6 5C93");
 }

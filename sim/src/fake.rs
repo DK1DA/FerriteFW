@@ -729,11 +729,15 @@ pub fn device_at(secs: u64) -> Device {
         battery_low: false,
         battery_cutoff: false,
         mcu_temp: Some(31),
-        stack_free: 0, // SBAR-23: the radio measures it; the simulator has no stack to paint
+        // SBAR-23, SELF-9.1, SELF-9.2: sample numbers, as the radio's (the simulator has no stack to paint or idle to count)
+        stack_free: 52_000,
+        ram_statics: 30_272,
+        cpu_pct: Some(6),
         spkmic: false,
         tx_built: true, // the fake radio transmits (into nothing)
         bench: cfg!(feature = "bench"),
         selftest: SelfTest {
+            uid: [0x3F2A_91C0, 0x7D44_0E18, 0xA2B6_5C93], // SELF-8: a sample
             idcode: ferrite_core::chipid::EXPECTED_PID,
             mcu_ok: true,
             flash_id: 0xEF_4016,

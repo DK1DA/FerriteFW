@@ -1,5 +1,5 @@
 //! The system's read-only pages, one module because they are one pattern (a title, label + value rows, a note
-//! at the foot): About and its self-test detail (D7; chapter 36, SELF-5 to SELF-7), calibration (D8; CAL-5 to
+//! at the foot): About, System (SELF-9) and the self-test detail (D7; chapter 36, SELF-5 to SELF-8), calibration (D8; CAL-5 to
 //! CAL-7), advanced squelch (D10; SQL-1, SQL-2: read only for now), SSB patch status (D16; HF-20, SELF-6), the
 //! SSB patch confirm at boot (D15; INST-12), add a device (D19), power off (D22; PWR-17), empty battery
 //! (D23; PWR-16) and the mailbox (D24; chapter 38, no menu number yet).
@@ -28,6 +28,8 @@ use ufmt::uwrite;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Page {
     About,
+    /// SELF-9: the live numbers, after About.
+    System,
     Checks,
     /// HELP-1: the Help pages between About and the self-test.
     Help(Help),
@@ -103,7 +105,7 @@ fn volts(b: &mut Buf<40>, mv: u16) {
     let _ = uwrite!(b, "{}.{} V", mv / 1000, Zero((mv % 1000 / 10) as u32, 2));
 }
 
-const ABOUT: [InfoRow; 10] = [
+const ABOUT: [InfoRow; 9] = [
     // SELF-5: version and build (the git commit; "+" built from uncommitted changes).
     ("Version", |_, b| {
         let _ = uwrite!(b, "{} {}", VERSION, ferrite_core::build());
@@ -120,6 +122,9 @@ const ABOUT: [InfoRow; 10] = [
             }
         }
     }),
+    // SELF-8: the MCU's 96-bit factory unique ID, as 24 hex digits on two rows (it doesn't fit one).
+    ("Unique ID", |Ctx { dev: d, .. }, b| uid_half(b, d, 0)),
+    ("", |Ctx { dev: d, .. }, b| uid_half(b, d, 1)),
     ("SPI flash", |Ctx { dev: d, .. }, b| {
         let t = &d.selftest;
         if t.flash_id == 0 {
@@ -140,24 +145,69 @@ const ABOUT: [InfoRow; 10] = [
         let _ = uwrite!(b, "{} of {} passed", ok, c.len());
         if failed { RED } else { TEXT }
     }),
-    ("Battery", |Ctx { dev: d, .. }, b| {
-        volts(b, d.battery_mv); // the trim is on Calibration and trims
+    ("SSB patch", |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, "Installed", TEXT) } else { fixed(b, "Not installed", SUB) }),
+];
+
+/// Half `h` of the unique ID: "3F2A 91C0 7D44" (12 hex digits as three groups), "Not read" while all zero.
+fn uid_half(b: &mut Buf<40>, d: &Device, h: usize) -> u16 {
+    let u = d.selftest.uid;
+    if u == [0; 3] {
+        return if h == 0 { fixed(b, "Not read", SUB) } else { TEXT };
+    }
+    // the 96 bits as 6 groups of 16, lowest word first, each word's high half first
+    let g = [u[0] >> 16, u[0] & 0xFFFF, u[1] >> 16, u[1] & 0xFFFF, u[2] >> 16, u[2] & 0xFFFF];
+    let _ = uwrite!(b, "{:04X} {:04X} {:04X}", g[3 * h], g[3 * h + 1], g[3 * h + 2]);
+    TEXT
+}
+
+/// SELF-9: the live numbers, on the page after About (they change; About's don't).
+const SYSTEM: [InfoRow; 6] = [
+    // SELF-9.1: the share of the last 10 s the MCU was awake.
+    ("CPU", |Ctx { dev: d, .. }, b| match d.cpu_pct {
+        Some(p) => {
+            let _ = uwrite!(b, "{} %", p);
+            TEXT
+        }
+        None => fixed(b, "Measuring", SUB),
+    }),
+    // SELF-9.2: the statics and the stack's peak, of the 96 KB.
+    ("RAM", |Ctx { dev: d, .. }, b| {
+        if d.ram_statics == 0 || d.stack_free == 0 {
+            return fixed(b, "Measuring", SUB);
+        }
+        let used = 96 * 1024 - d.stack_free;
+        let _ = uwrite!(b, "{} of 96 KB", (used + 512) / 1024);
         TEXT
     }),
-    // SBAR-20: the MCU's die temperature (the Radio task reads it every 10 s).
-    ("MCU temp", |Ctx { dev: d, .. }, b| match d.mcu_temp {
-        Some(c) => {
-            let _ = uwrite!(b, "{} \u{b0}C", c);
+    // SBAR-23: the stack's room never used since power-on.
+    ("Stack free", |Ctx { dev: d, .. }, b| {
+        if d.stack_free == 0 {
+            return fixed(b, "Measuring", SUB);
+        }
+        let _ = uwrite!(b, "{}.{} KB", d.stack_free / 1024, d.stack_free % 1024 * 10 / 1024);
+        TEXT
+    }),
+    // SBAR-20: the MCU's die temperature (the Radio task reads it every 10 s), in 0 6 4's units.
+    ("MCU temp", |Ctx { app: a, dev: d, .. }, b| match d.mcu_temp {
+        Some(t) if a.set.units == 1 => {
+            let _ = uwrite!(b, "{} \u{b0}F", t as i32 * 9 / 5 + 32);
+            TEXT
+        }
+        Some(t) => {
+            let _ = uwrite!(b, "{} \u{b0}C", t);
             TEXT
         }
         None => fixed(b, "Not read yet", SUB),
+    }),
+    ("Battery", |Ctx { dev: d, .. }, b| {
+        volts(b, d.battery_mv); // the trim is on Calibration and trims
+        TEXT
     }),
     ("Uptime", |Ctx { app: a, .. }, b| {
         let m = a.now / 60_000;
         let _ = uwrite!(b, "{} h {} min", m / 60, m % 60);
         TEXT
     }),
-    ("SSB patch", |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, "Installed", TEXT) } else { fixed(b, "Not installed", SUB) }),
 ];
 
 const CHECKS: [InfoRow; 6] = [
@@ -209,8 +259,9 @@ const MAILBOX: [InfoRow; 4] = [
 const NONE: [InfoRow; 0] = [];
 
 /// HELP-1: About's pages in ◀▶ order; ▶ goes on, ◀ back, round.
-const CYCLE: [Page; 7] = [
+const CYCLE: [Page; 8] = [
     Page::About,
+    Page::System,
     Page::Help(Help::Manual),
     Page::Help(Help::HomeKeys),
     Page::Help(Help::SideKeys),
@@ -227,7 +278,13 @@ pub(crate) fn def(p: Page) -> PageDef {
             title: "About",
             rows: &ABOUT,
             note: "Updating: hold PF1 + PF2 while switching on, then use the web flasher.",
-            hints: &[(ARROWS_LR, "Manual"), ("BACK", "Back")], // HELP-1: the page ▶ goes to
+            hints: &[(ARROWS_LR, "System"), ("BACK", "Back")], // HELP-1: the page ▶ goes to
+        },
+        Page::System => PageDef {
+            title: "System",
+            rows: &SYSTEM,
+            note: "Live: CPU is the share of the last 10 s the MCU was awake; RAM is the statics and the stack's peak since power-on.",
+            hints: &[(ARROWS_LR, "Manual"), ("BACK", "Back")],
         },
         Page::Checks => PageDef {
             title: "Self-test",

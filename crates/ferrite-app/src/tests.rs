@@ -420,7 +420,7 @@ fn status_link_opens_its_setting_not_the_remembered_row() {
     t.tap(Key::Exit);
     t.tap(Key::Digit(0)); // MENU 0 0: Status
     assert!(matches!(t.app.screen(), Screen::Status(_)), "{:?}", t.app.screen());
-    t.app.screen = Screen::Status(Status { row: 19, from_menu: true }); // the VOX row
+    t.app.screen = Screen::Status(Status { row: 17, from_menu: true }); // the VOX row
     t.tap(Key::Menu);
     assert_eq!(row(&t), (8, 2, 0), "the VOX setting, not Tail");
     t.tap(Key::Exit);

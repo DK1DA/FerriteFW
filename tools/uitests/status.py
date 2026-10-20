@@ -1,4 +1,6 @@
 """The status bar and the Status page (chapter 8, SBAR-*), About and its help pages (HELP-*)."""
+import re
+
 from .core import test
 
 BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt_on", "bt", "battery", "low", "cutoff", "dry", "clock", "utc", "call"}  # dry: SBAR-22; bt_on: SBAR-8
@@ -66,31 +68,31 @@ def bar_shows_lock_and_scan(t):
 
 @test("SBAR-19", "SBAR-9", pages=("Group", "Home", "Info", "Status"))
 def battery_icon_status_about(t):
-    """The battery: an icon in the bar (always), the percentage on Status, the volts on About; no "Battery as"
+    """The battery: an icon in the bar (always), the percentage on Status, the volts on System (SELF-9); no "Battery as"
     anywhere in Display."""
     u = t.ui()
     t.check(isinstance(u.bar.get("battery"), int), "the bar always has the battery", u.bar)
     u = t.keys("MENU 0 0")
     t.check(u.row("Battery")["value"].endswith("%"), "Status: %", u.row("Battery"))
     t.home()
-    u = t.keys("MENU 0 9 9")
-    t.check(u.row("Battery")["value"].endswith("V"), "About: volts", u.row("Battery"))
+    u = t.keys("MENU 0 9 9 RIGHT")
+    t.check(u.row("Battery")["value"].endswith("V"), "System: volts", u.row("Battery"))
     for path in ("MENU 0 7", "MENU 0 7 3"):
         t.home()
         u = t.keys(path)
         t.check(not any("Battery as" in n for n in u.names()), f"{path}: no Battery as", u.names())
 
 
-@test("HELP-1", "SBAR-5", pages=("Group", "Info"))
+@test("HELP-1", "SBAR-5", "SELF-9", pages=("Group", "Info"))
 def about_pages_go_round(t):
-    """◀▶ on About go round its pages: About, Manual, Keys, Side+PTT, Holds, Menu nos, Self-test; the hint
+    """◀▶ on About go round its pages: About, System, Manual, Keys, Side+PTT, Holds, Menu nos, Self-test; the hint
     bar names the page ▶ goes to; every name fits 8 characters; BACK leaves."""
     u = t.keys("MENU 0 9 9")
     pages = [u]
-    for _ in range(7):
+    for _ in range(8):
         pages.append(t.keys("RIGHT"))
     titles = [p.title for p in pages]
-    t.eq(titles, ["About", "Manual", "Keys", "Side+PTT", "Holds", "Menu nos", "Checks", "About"], "the pages")
+    t.eq(titles, ["About", "System", "Manual", "Keys", "Side+PTT", "Holds", "Menu nos", "Checks", "About"], "the pages")
     t.check(all(len(x) <= 8 for x in titles), "names fit 8 characters", titles)
     odd = []
     for cur, nxt in zip(pages, pages[1:]):
@@ -104,18 +106,22 @@ def about_pages_go_round(t):
     t.eq((u.id, u.sel and u.sel["name"]), ("Group", "About"), "BACK leaves to System, on About")
 
 
-@test("BOOT-11", pages=("Info",))
+@test("BOOT-11", "SELF-8", "SELF-9", pages=("Info",))
 def about_rows(t):
-    """About: version, MCU, SPI flash, calibration, the transmit state, self-test, battery, MCU temp, uptime,
-    SSB patch (installed or the path to install it)."""
+    """About: version, MCU, the unique ID (two rows), SPI flash, calibration, the transmit state, self-test, SSB
+    patch (installed or the path to install it); System (▶): CPU, RAM, stack free, MCU temp, battery, uptime."""
     u = t.keys("MENU 0 9 9")
-    want = ["Version", "MCU", "SPI flash", "Calibration", "Transmit", "Self-test", "Battery", "MCU temp", "Uptime",
-            "SSB patch"]
+    want = ["Version", "MCU", "Unique ID", "", "SPI flash", "Calibration", "Transmit", "Self-test", "SSB patch"]
     t.eq(u.names(), want, "the About rows")
+    t.check(re.fullmatch(r"[0-9A-F]{4} [0-9A-F]{4} [0-9A-F]{4}|Not read", u.row("Unique ID")["value"] or ""),
+            "the unique ID's first half", u.row("Unique ID"))
     t.check(u.row("Version")["value"].startswith("v"), "the version", u.row("Version"))
     t.check(u.row("Transmit")["value"], "the transmit state", u.row("Transmit"))
     t.check(u.row("SSB patch")["value"], "the SSB patch state", u.row("SSB patch"))
     t.note(f"About: {[(r['name'], r['value']) for r in u.rows]}")
+    u = t.keys("RIGHT")
+    t.eq(u.names(), ["CPU", "RAM", "Stack free", "MCU temp", "Battery", "Uptime"], "the System rows")
+    t.note(f"System: {[(r['name'], r['value']) for r in u.rows]}")
 
 
 @test("SBAR-7", pages=("Status",))

@@ -685,6 +685,10 @@ pub struct Device {
     pub mcu_temp: Option<i8>,
     /// SBAR-23: the main stack's bytes never used since boot (its high-water mark), 0 not measured yet.
     pub stack_free: u32,
+    /// SELF-9.2: the statics' bytes (fixed at build time), 0 unknown (the simulators).
+    pub ram_statics: u32,
+    /// SELF-9.1: the share of the last 10 s the MCU was awake, %; None until the first 10 s.
+    pub cpu_pct: Option<u8>,
     /// A speaker mic is in the side connector (SND-12, [`crate::acc`]): the Status page shows it.
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).
@@ -728,6 +732,8 @@ pub struct SelfTest {
     pub ssb_patch: bool,
     /// Battery reading trim in 10 mV (0 9 7 3).
     pub battery_trim: i8,
+    /// SELF-8: the MCU's 96-bit factory unique ID, lowest word first; zeros until read.
+    pub uid: [u32; 3],
 }
 
 /// The link (chapter 29): cable, and a write session's progress.
