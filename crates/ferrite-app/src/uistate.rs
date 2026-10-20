@@ -421,7 +421,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 kn(l, "remote", app.remote_keyed() as u32);
                 kn(l, "dial", t.dial as u32);
                 kn(l, "secs", app.now.wrapping_sub(app.radio.t0) / 1000);
-                kn(l, "dry", (app.dry_tx() || app.radio.tx_dry) as u32); // TX-48: "Dry TX: no RF" shown
+                kn(l, "dry", app.dry_tx() as u32); // TX-48: "Dry TX: no RF" shown
             }
         }
         Screen::Emergency(e) => {

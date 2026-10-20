@@ -328,8 +328,11 @@ pub async fn task() {
         app.ask_pin();
     }
     app.redraw_all();
+    if cfg!(all(feature = "tx", feature = "bench")) {
+        app.dry_at_boot(); // TX-48.1: the bench build starts every power-on with Dry TX on
+    }
     // Radio-wide state for the status bar and Status page; GPS, battery and the link fill it in later.
-    let mut dev = Device { tx_built: cfg!(feature = "tx"), tx_dry: cfg!(feature = "tx-dry"), bench: cfg!(feature = "bench"), battery_pct: 100, ..Default::default() };
+    let mut dev = Device { tx_built: cfg!(feature = "tx"), bench: cfg!(feature = "bench"), battery_pct: 100, ..Default::default() };
     let mut bat_logged = 0u32;
     let mut battery = ferrite_core::battery::Battery::default();
     // About and Self-test (SELF-5 to SELF-7): what the boot checks found. The BK4829s from the Radio task's
@@ -753,8 +756,8 @@ fn boot_report(flash: Option<(u32, u32)>, checks: &[Check], key_seen: bool) {
             let _ = ufmt::uwrite!(b, "Ferrite {} {}", VERSION, ferrite_core::build());
         }
     });
-    if cfg!(feature = "tx-dry") {
-        bringup::line(b"TX DRY: PA drive held at 0");
+    if cfg!(all(feature = "tx", feature = "bench")) {
+        bringup::line(b"TX BENCH: Dry TX on at power-on"); // TX-48.1; bench.py --flash looks for it in the image
     }
     bringup::linef(|b| {
         b.push(b"MCU idcode ");

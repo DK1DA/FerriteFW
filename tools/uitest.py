@@ -806,7 +806,7 @@ def main_args(argv=None):
     ap.add_argument("--session", help="an existing session directory to write ui/ into")
     ap.add_argument("--build", help="the build's label for the results directory")
     ap.add_argument("--commit", help="the firmware's commit (default: the host checkout's)")
-    ap.add_argument("--expect-build", choices=["receive", "tx", "tx-dry"], help="warn when the radio runs another")
+    ap.add_argument("--expect-build", choices=["receive", "tx", "tx-dry", "tx+dry"], help="warn when the radio runs another")
     ap.add_argument("--record", action="store_true", help="a result row per rule into the test plan")
     ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
     ap.add_argument("--with", dest="with_", default="", help="also run the tests needing these (comma list: "

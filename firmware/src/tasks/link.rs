@@ -51,10 +51,10 @@ struct Port {
 }
 
 impl Port {
-    /// Whether a byte may go now (TX-43: never on the cable while keyed, but in the `tx-dry` build; SND-14: never
+    /// Whether a byte may go now (TX-43: never on the cable while keyed, but with Dry TX on; SND-14: never
     /// on the cable with a speaker mic connected).
     fn may_send(&self) -> bool {
-        !self.cable || ferrite_radio::cable::may_send(RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0, cfg!(feature = "tx-dry") || DRY_TX.load(Relaxed), spkmic())
+        !self.cable || ferrite_radio::cable::may_send(RF_STATE.load(Relaxed) & RF_BUSY_KEYED != 0, DRY_TX.load(Relaxed), spkmic())
     }
 
     /// Received bytes into the UI's ring (only what it has room for: the rest waits in the UART's ring, never

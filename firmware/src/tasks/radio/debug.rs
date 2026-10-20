@@ -64,7 +64,7 @@ impl Radio {
                 DebugAns::TxTest(self.tx.test)
             }
             #[cfg(not(feature = "tx"))]
-            DebugReq::TxTest(_) => DebugAns::Refused("the receive-only build has no transmit: txtest needs a tx or tx-dry build"),
+            DebugReq::TxTest(_) => DebugAns::Refused("the receive-only build has no transmit: txtest needs the tx-bench build"),
             DebugReq::Si { cmd, n, reply } => {
                 let (n, rn) = ((n as usize).min(8), (reply as usize).clamp(1, 16));
                 // TERM-24: powered down (and in reset) outside FM broadcast and HF mode: nothing is sent then.

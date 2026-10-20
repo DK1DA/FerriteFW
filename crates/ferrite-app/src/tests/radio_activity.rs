@@ -2249,7 +2249,7 @@ fn aprs_address_takes_the_ssid_setting() {
     crate::screens::groups::change(&mut t.app, &[5, 4, 1], -1);
     assert_eq!(t.app.aprs_cfg().ssid, 15, "the knob wraps");
     assert_eq!(crate::screens::groups::wired(&t.app, &dev, &[5, 4, 1], &mut b), Some(true));
-    assert_eq!(b.as_bytes(), b"15 Emergency");
+    assert_eq!(b.as_bytes(), b"15 Generic");
     t.app.set.set_callsign(b"");
     assert!(t.app.aprs_call().is_empty(), "no callsign, no address");
 }

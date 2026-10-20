@@ -731,7 +731,6 @@ pub fn device_at(secs: u64) -> Device {
         mcu_temp: Some(31),
         spkmic: false,
         tx_built: true, // the fake radio transmits (into nothing)
-        tx_dry: false,
         bench: cfg!(feature = "bench"),
         selftest: SelfTest {
             idcode: ferrite_core::chipid::EXPECTED_PID,

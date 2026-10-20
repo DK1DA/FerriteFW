@@ -133,38 +133,38 @@ fn hello_and_info() {
 }
 
 /// LINK-35: HELLO's answer ends with the build after the version, INFO's after the callsign: 0 receive, 1 tx,
-/// 2 tx-dry, 3 tx with Dry TX on (TX-48), from the firmware's features (`Device::tx_built`, `Device::tx_dry`) and
-/// the switch, with bit 7 set when the bench commands are in (`Device::bench`, TERM-38).
+/// 3 tx with Dry TX on (TX-48), from the firmware's features (`Device::tx_built`) and the switch, with bit 7 set when
+/// the bench commands are in (`Device::bench`, TERM-38): the tx-bench build answers 0x83 from power-on (TX-48.1).
+/// 2 is the retired tx-dry build's (decision 193), still named for an older radio.
 #[test]
 fn hello_and_info_give_the_build() {
     use ferrite_core::link::build;
-    for (tx, dry, on, bench, b) in [
-        (false, false, false, false, 0u8),
-        (true, false, false, false, 1),
-        (true, true, false, true, 0x82),
-        (false, false, false, true, 0x80),
-        (true, true, false, false, 2),
-        (true, false, true, false, 3),   // TX-48: a tx build with Dry TX on
-        (true, true, true, true, 0x82),  // a tx-dry build stays tx-dry
-        (false, false, true, false, 0), // no transmit: nothing to hold
+    for (tx, on, bench, b) in [
+        (false, false, false, 0u8),
+        (true, false, false, 1),
+        (false, false, true, 0x80),
+        (true, true, false, 3),     // TX-48: a tx build with Dry TX on
+        (true, true, true, 0x83),   // TX-48.1: the tx-bench build as it starts
+        (true, false, true, 0x81),  // ... with Dry TX turned off by hand
+        (false, true, false, 0),    // no transmit: nothing to hold
     ] {
         let mut pc = Pc::new(true);
-        (pc.dev.tx_built, pc.dev.tx_dry, pc.dev.bench) = (tx, dry, bench);
+        (pc.dev.tx_built, pc.dev.bench) = (tx, bench);
         pc.app.set_dry_tx(on);
-        assert_eq!(build::dry(b), dry || tx && on, "dry {b:#x}");
+        assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b], "HELLO, tx {tx} dry {dry} on {on}");
+        assert_eq!(a[v..], [b], "HELLO, tx {tx} on {on} bench {bench}");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 7;
         let c = v + 1 + a[v] as usize;
         assert_eq!(a[c..], [b], "INFO");
     }
-    assert_eq!(ferrite_core::link::build::name(2), "tx-dry");
-    assert_eq!(ferrite_core::link::build::name(0x82), "tx-dry");
-    assert!(ferrite_core::link::build::bench(0x82) && !ferrite_core::link::build::bench(1));
-    assert_eq!(build::name(3), "tx+dry");
-    assert!(build::dry(3) && build::dry(0x82) && !build::dry(1) && !build::dry(0x81) && !build::dry(0));
+    assert_eq!(build::name(2), "tx-dry");
+    assert_eq!(build::name(0x82), "tx-dry");
+    assert!(build::bench(0x83) && !build::bench(1));
+    assert_eq!(build::name(0x83), "tx+dry");
+    assert!(build::dry(3) && build::dry(0x83) && build::dry(0x82) && !build::dry(1) && !build::dry(0x81) && !build::dry(0));
 }
 
 /// A damaged frame, an unknown type and a short payload are answered, not dropped.

@@ -97,7 +97,7 @@ def bt_needs_the_pin_with_a_lock(t):
                 t.r.link.write(fl.CHANNEL, 0, rec)
                 t.r.link.ask(fl.END)
         t.eq(raw.link.read(fl.CHANNEL, 0), rec, "channel 1 unchanged")
-        if t.sim or t.build == "tx-dry":
+        if t.sim or t.build in ("tx-dry", "tx+dry"):
             s, why = raw.link.ask(fl.KEY, bytes([fl.PTT, fl.PTT_ON, fl.ACTIVE]), timeout=1.0)
             raw.link.ask(fl.KEY, bytes([fl.PTT, fl.PTT_OFF]))
             t.check(s == 9 and b"AM" in why, "past the PIN: KEY meets the transmit checks (AM refused)", (s, why))

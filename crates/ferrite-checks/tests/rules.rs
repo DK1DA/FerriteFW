@@ -105,7 +105,7 @@ fn transmit_is_a_feature() {
 }
 
 /// TERM-38 (decision 151): the bench commands are the `bench` cargo feature, never a default. The firmware's
-/// `bringup` and `tx-dry` turn it on and its plain `tx` doesn't, so the receive and tx images a user installs have
+/// `bringup` and `tx-bench` turn it on and its plain `tx` doesn't, so the receive and tx images a user installs have
 /// none of it; no other manifest turns it on but by forwarding a `bench` feature of its own (the sims' is off), and
 /// the transmit test generators, the readable memory map and the TMR5 bit clock are compiled out without it.
 #[test]
@@ -116,7 +116,7 @@ fn bench_is_a_feature() {
     };
     let fw = section("firmware/Cargo.toml");
     let line = |name: &str| fw.lines().find(|l| l.starts_with(&format!("{name} = "))).unwrap_or_default().to_string();
-    assert!(line("tx-dry").contains("\"bench\"") && line("bringup").contains("\"bench\""), "tx-dry and bringup are bench builds");
+    assert!(line("tx-bench").contains("\"bench\"") && line("bringup").contains("\"bench\""), "tx-bench and bringup are bench builds");
     assert!(!line("tx").contains("bench"), "the tx build a user installs has no bench commands");
     let mut on = Vec::new();
     walk(&root(), &mut |p| {
@@ -124,14 +124,14 @@ fn bench_is_a_feature() {
             let m = std::fs::read_to_string(p).unwrap_or_default();
             // Feature lists and dependency lines (`bench = false` on a [[bin]] is cargo's own benchmark switch).
             for l in m.lines().filter(|l| l.contains("bench") && !l.trim_start().starts_with('#') && l.trim() != "bench = false") {
-                let forwarding = l.starts_with("bench = [") || l.starts_with("tx-dry = [") || l.starts_with("bringup = [");
+                let forwarding = l.starts_with("bench = [") || l.starts_with("tx-bench = [") || l.starts_with("bringup = [");
                 if !forwarding || l.trim_start().starts_with("default") {
                     on.push(format!("{}: {l}", p.display()));
                 }
             }
         }
     });
-    assert!(on.is_empty(), "only a crate's own bench (or tx-dry, bringup) feature may turn bench on: {on:?}");
+    assert!(on.is_empty(), "only a crate's own bench (or tx-bench, bringup) feature may turn bench on: {on:?}");
     let core = code(&root().join("crates/ferrite-core/src/lib.rs"));
     for m in ["pub mod txtest;", "pub mod txsuite;", "pub mod memmap;"] {
         let before = core.split(m).next().unwrap_or("");

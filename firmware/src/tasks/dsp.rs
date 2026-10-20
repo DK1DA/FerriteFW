@@ -10,7 +10,7 @@
 //! - **Transmit:** the UI task keys slot C, then hands a frame to [`AFSK_TX`]; it is played from TX delay's
 //!   flags to the end (the flags cover the key-up), PC12 high meanwhile, and [`AFSK_DONE`] says it's out so the
 //!   UI task unkeys. Receiving pauses while it plays.
-//! - **Transmit test (TERM-33, TERM-34, `tx` bench builds: tx-dry; TERM-38):** the Radio task, after a PTT key-up with `txtest` armed,
+//! - **Transmit test (TERM-33, TERM-34, the tx-bench build; TERM-38):** the Radio task, after a PTT key-up with `txtest` armed,
 //!   signals [`TXTEST`] with the generator to play (a test signal at the arming's level, made a sample at a time:
 //!   [`ferrite_core::txtest::Gen`]); a new generator while one plays takes over at the next half (the suite's
 //!   steps, DAC1 running throughout); None at the release stops it. Receiving pauses while it plays, as for AFSK.

@@ -687,8 +687,6 @@ pub struct Device {
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).
     pub tx_built: bool,
-    /// The `tx-dry` build: transmit with the PA drive held at 0 (LINK-35 tells the PC).
-    pub tx_dry: bool,
     /// The bench commands are in (the `bench` feature, TERM-38; LINK-35's bit 7).
     pub bench: bool,
     pub selftest: SelfTest,
@@ -811,8 +809,9 @@ mod tests {
         // modes share one slot in it, the largest being the band scope's 240 bars (SCOPE-9: 308 bytes, about
         // 0.45 KB more over the three copies than with 56 bars; accepted Oct 6, 2026).
         // The tone hint's heard tone (TSRCH-13: 2 bytes a slot, 4 with alignment) took it from 312 to 324; the stuck
-        // PTT bits (SAFE-14.1, one byte, 4 with alignment) to 328.
-        assert!(core::mem::size_of::<LiveAll>() <= 328, "{}", core::mem::size_of::<LiveAll>());
+        // PTT bits (SAFE-14.1, one byte, 4 with alignment) to 328; a scan's held flag and its step's and last hit's
+        // channel numbers (SCAN-19.1, HOME-4.1: 5 bytes a slot, 4 more with the padding, 22 in 24) to 340.
+        assert!(core::mem::size_of::<LiveAll>() <= 340, "{}", core::mem::size_of::<LiveAll>());
         // Each reader of the GPS watch keeps a copy of the fix; the sky list only the UI.
         assert!(core::mem::size_of::<GpsFix>() <= 32);
         assert!(core::mem::size_of::<GpsSky>() <= 81);

@@ -471,9 +471,9 @@ impl View for Transmit {
             w::field(lcd, 168, 58, y + 127, y + 144, y + 140, Align::Right, b.as_bytes(), &UI_12, TEXT, SURFACE);
         }
         let mv = cx.dev.battery_mv as u32;
-        // TX-48: with the PA drive held at 0 (Dry TX, or the tx-dry build) the row says so first; the battery
+        // TX-48: with the PA drive held at 0 (Dry TX) the row says so first; the battery
         // isn't under a real load then, so it keeps only its volts.
-        let dry = app.dry_tx() || app.radio.tx_dry;
+        let dry = app.dry_tx();
         if app.dirty(8, hash(&(mv, dry))) {
             let mut b = Buf::<32>::new();
             let c = if cx.dev.battery_low { AMBER } else { SUB };

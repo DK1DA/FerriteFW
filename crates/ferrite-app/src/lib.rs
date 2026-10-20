@@ -923,6 +923,11 @@ impl App {
         self.dry_tx = on;
     }
 
+    /// TX-48.1: the tx-bench build starts every power-on with Dry TX on (the firmware calls this at boot).
+    pub fn dry_at_boot(&mut self) {
+        self.dry_tx = true;
+    }
+
     /// The radio-wide settings.
     pub fn settings(&self) -> &Settings {
         self.set

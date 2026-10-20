@@ -1666,7 +1666,7 @@ fn user_build_refuses_bench_commands() {
         r.poll();
     }
     let raw = r.raw();
-    assert!(raw.contains("not in this build; a bench build (bring-up, tx-dry) has them"), "{raw}");
+    assert!(raw.contains("not in this build; a bench build (bring-up, tx-bench) has them"), "{raw}");
     assert!(!raw.contains("txtest suite           every transmit test"), "{raw}");
 }
 

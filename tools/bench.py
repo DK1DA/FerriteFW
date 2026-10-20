@@ -4,7 +4,7 @@ each run's numbers stored, compared with the previous run of the same configurat
 
     tools/bench.py --dry-plan                          # what it would do; touches nothing
     tools/bench.py --i-know-its-tx-dry                 # the default matrix: VHF wide, VHF NFM, UHF wide
-    tools/bench.py --flash target/ferrite-txdry.btf    # flash first (flash.py --backup), wait for the boot, then run
+    tools/bench.py --flash target/ferrite-txbench.btf    # flash first (flash.py --backup), wait for the boot, then run
     tools/bench.py --runs vhf-wide --refusals --keepalive --timeout --i-know-its-tx-dry
     tools/bench.py --sweep ctcss,dcs [--from D365N] [--count N] [--items A,B] [--resume SESSION] [--dry-plan]
                                                        # sweeps (below): one short key-up per value, duty-limited
@@ -812,12 +812,13 @@ def previous_run(cfg, run, before_session):
 
 
 def image_is_tx_dry(path):
-    """Whether an image (.btf or raw .bin) carries the tx-dry build's boot line."""
+    """Whether an image (.btf or raw .bin) is a bench transmit build that starts dry: the tx-bench build's boot
+    line (TX-48.1: Dry TX on at power-on), or an older tx-dry image's."""
     data = open(path, "rb").read()
     if path.lower().endswith(".btf"):
         import btf
         data = btf.unpack(data)[0]
-    return b"TX DRY" in data, hashlib.sha256(data).hexdigest()[:10]
+    return b"TX BENCH" in data or b"TX DRY" in data, hashlib.sha256(data).hexdigest()[:10]
 
 
 def host_build():
@@ -1171,12 +1172,14 @@ class Bench:
         said = hello.get("build", "not given")
         if said not in ("not given", "tx-dry", "tx+dry"):
             # LINK-35 (decision 151): the radio names its build; a receive or full-power tx build is never keyed,
-            # unless Dry TX is on (TX-48: it then says tx+dry).
-            self.gate("tx-dry build", False, f"the radio says it runs a {said} build (LINK-35): flash a tx-dry image"
-                      + (", or turn Dry TX on on the radio (MENU 0 8 9 2; TX-48)" if said == "tx" else ""))
+            # unless Dry TX is on (TX-48: it then says tx+dry; the tx-bench build starts so, TX-48.1).
+            self.gate("tx-dry build", False, f"the radio says it runs a {said} build (LINK-35): turn Dry TX on on "
+                      "the radio (MENU 0 8 9 2; TX-48)" if said == "tx" else
+                      f"the radio says it runs a {said} build (LINK-35): flash a tx-bench image")
         if said == "tx+dry":
-            # TX-48: a full-power tx build with Dry TX on. No bench commands (no txtest): the suites skip.
-            self.bench, self.live_dry = False, True
+            # TX-48: Dry TX on. The tx-bench build (decision 193) has the bench commands too (the bench bit); a
+            # plain tx build doesn't (no txtest): its suites skip.
+            self.bench, self.live_dry = bool(hello.get("bench")), True
             self.tx_dry = "the radio says so (LINK-35 build byte: tx with Dry TX on, TX-48)"
             self.gate("tx-dry build", True, self.tx_dry)
             return
@@ -2292,10 +2295,10 @@ def new_session(cfg, label):
 def do_flash(cfg, a, image):
     dry, sha = image_is_tx_dry(image)
     if not dry:
-        raise SafetyError(f"{image} is not a tx-dry image (no TX DRY boot line in it): build it with tools/mkbtf.sh tx-dry")
+        raise SafetyError(f"{image} is not a tx-bench image (no TX BENCH boot line in it): build it with tools/mkbtf.sh tx-bench")
     if not os.path.exists(cfg["backup"]):
         raise BenchError(f"no flash backup at {cfg['backup']}")
-    say(f"flashing {image} (tx-dry, sha256 {sha}) with flash.py --backup {cfg['backup']}")
+    say(f"flashing {image} (tx-bench, sha256 {sha}) with flash.py --backup {cfg['backup']}")
     r = subprocess.run([sys.executable, os.path.join(HERE, "flash.py"), cfg["port"], image, "--backup", cfg["backup"]])
     if r.returncode != 0:
         raise BenchError(f"flash.py failed ({r.returncode})")
@@ -3512,11 +3515,11 @@ def selftest_sim(a):
     cfg["results"] = os.path.join(tmp, "results")
     radio = Radio(a.sim)
     h = radio.hello_ans
-    if h.get("build") != "tx-dry" or not h.get("bench"):
+    if h.get("build") not in ("tx-dry", "tx+dry") or not h.get("bench"):
         # Decision 151: the simulators run without the bench feature (no txtest), and say so in LINK-35's byte.
         say(f"selftest --sim: skipped: the simulator says it is a {h.get('build')} build"
-            f"{' with' if h.get('bench') else ' without'} the bench feature; the bench needs a tx-dry bench build "
-            "(txtest). The plain --selftest covers the flow and the gates.")
+            f"{' with' if h.get('bench') else ' without'} the bench feature; the bench needs a bench build (tx-bench) "
+            "(txtest), with Dry TX on. The plain --selftest covers the flow and the gates.")
         radio.close()
         return True
     ok = True

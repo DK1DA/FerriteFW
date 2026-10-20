@@ -52,11 +52,12 @@ pub struct AprsCfg {
     pub ssid: u8,
 }
 
-/// APRS-30: the SSID by default (decision 191: a handheld), and what each number means by convention.
+/// APRS-30: the SSID by default (decision 191: a handheld), and what each number means by aprs.org's convention
+/// (aprs.org/aprs11/SSIDs.txt), shortened to fit the row.
 pub const SSID_DEFAULT: u8 = 7;
 pub const SSID_NAMES: [&str; 16] = [
-    "Primary", "Vehicle", "Mobile", "Camper", "Home", "Portable", "Special", "Human", "BBS", "I-Gate", "Weather",
-    "Satellite", "Digipeater", "Experiment", "Truck", "Emergency",
+    "Primary", "Generic", "Generic", "Generic", "Generic", "Phone/net", "Special", "Handheld", "Boat/RV",
+    "Mobile", "I-Gate/net", "Balloon/air", "Tracker", "Weather", "Truck", "Generic",
 ];
 
 /// The custom path's room: two entries of up to 9 characters would be 19, so two short ones (WIDE1-1,WIDE2-2).

@@ -35,9 +35,12 @@ UNSAFE = {"0 8 2 1", "0 5 5 1", "0 5 5 3", "0 5 8 1", "0 8 7 2", "0 9 2 4", "0 5
 # What a test may need beyond a build flavour (needs=("bench",), needs=("tx-dry", "reset")): the tag, whether the
 # simulator provides it, and what gives it on the radio. A build flavour in needs= is one the build must be.
 BUILDS = ("receive", "tx", "tx-dry")
+# "tx-dry" in needs= means a transmit build with the PA drive held at 0 now: Dry TX on (LINK-35 "tx+dry"; the
+# tx-bench build starts so, TX-48.1, decision 193), or an older radio's tx-dry build.
+DRY = ("tx-dry", "tx+dry")
 CAPS = {
-    "bench": (False, "a bench build (tx-dry or bring-up): bk, gpio, mem, si, rx (TERM-38)"),
-    "keyup": (True, "a tx-dry build (PA held at 0) for remote key-ups that must be refused"),
+    "bench": (False, "a bench build (tx-bench or bring-up): bk, gpio, mem, si, rx (TERM-38)"),
+    "keyup": (True, "Dry TX on (the tx-bench build at power-on; PA held at 0) for remote key-ups that must be refused"),
     "bt": (True, "a Bluetooth link beside the cable: --bt ble:walkie-talkie (0 9 2 1 on)"),
     "cablelog": (False, "keys over Bluetooth (--port ble:...) and the cable log on --cablelog PORT"),
     "flash": (False, "a flash around the run: --flash before, tools/flash.py, --flash after"),
@@ -55,7 +58,7 @@ def unmet(needs, build, sim, bench, opts):
     if not needs:
         return ""
     builds = [n for n in needs if n in BUILDS]
-    if builds and build not in builds and not ("keyup" in needs and sim):
+    if builds and build not in builds and not ("tx-dry" in builds and build in DRY) and not ("keyup" in needs and sim):
         return f"needs a {' or '.join(builds)} build (this is {build})"
     given = {x.strip() for x in (getattr(opts, "with_", "") or "").split(",") if x.strip()}
     for n in needs:
@@ -65,7 +68,7 @@ def unmet(needs, build, sim, bench, opts):
         if n == "bench":
             ok = bench and not sim
         elif n == "keyup":
-            ok = sim or build == "tx-dry"
+            ok = sim or build in DRY
         elif n == "bt":
             ok = bool(getattr(opts, "bt", None))
         elif n == "cablelog":
@@ -571,12 +574,12 @@ class T:
         return words[:n]
 
     def keyup_refused(self, slot="active"):
-        """A remote key-up that must be refused (LINK-20): only on a tx-dry build (PA held at 0) or the simulator.
+        """A remote key-up that must be refused (LINK-20): only with Dry TX on (PA held at 0) or the simulator.
         KEY on, then KEY off at once whatever came back; (refused, the reason). A key-up that keyed fails the
         test after the KEY off."""
         import ferrite_link as fl
-        if not (self.sim or self.build == "tx-dry"):
-            raise Fail("a remote key-up only on a tx-dry build or the simulator")
+        if not (self.sim or self.build in DRY):
+            raise Fail("a remote key-up only with Dry TX on (tx-bench at power-on) or the simulator")
         if not self.sim:
             # The bench's keying frequencies only (tools/bench.py test_freqs), simplex, whatever the check expects.
             line = self.slot(self.ui(0).state.get("active", "A") if slot == "active" else slot.upper())

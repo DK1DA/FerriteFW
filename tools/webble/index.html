@@ -241,7 +241,7 @@ dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--pa
           <span id="pttstate" class="hint">Disarmed.</span>
         </div>
         <div style="margin-top:8px"><button id="ptt" disabled>Hold to transmit</button></div>
-        <p class="warn">Only on a tx-dry build (INFO's build byte; the PA is held at 0): refused otherwise. A keepalive every 0.5 s while held; KEY off on release, when the window loses focus, and on disconnect.</p>
+        <p class="warn">Only with Dry TX on (INFO's build byte says tx-dry or tx+dry; the PA is held at 0): refused otherwise. A keepalive every 0.5 s while held; KEY off on release, when the window loses focus, and on disconnect.</p>
       </section>
 
       <section>
@@ -284,7 +284,7 @@ const Ferrite = (() => {
   const ACT = { up: 0, down: 1, short: 2, long: 3 };
   const PTT = 0x80, KNOB = 0x81, PTT_OFF = 0, PTT_ON = 1, PTT_ALIVE = 2, ACTIVE = 0xFF;
   const LONG_HOLD_MS = 750;
-  const BUILDS = { 0: "receive", 1: "tx", 2: "tx-dry" };
+  const BUILDS = { 0: "receive", 1: "tx", 2: "tx-dry", 3: "tx+dry" };
   const BLE_SERVICE = 0xFFE0, BLE_DATA = 0xFFE1;  // FF31 is never touched
   const CHUNK = 20;  // the ATT payload of the default 23-byte MTU
   const PACE_MS = 25;  // between chunks: 800 B/s, under the module's 9600-baud UART (960 B/s)
@@ -996,11 +996,11 @@ if (typeof module !== "undefined") module.exports = Ferrite;
   document.querySelectorAll("[data-knob]").forEach((b) => b.addEventListener("click", () => knob(parseInt(b.dataset.knob, 10))));
   $("long").addEventListener("click", () => { longNext = !longNext; $("long").classList.toggle("on", longNext); });
 
-  // ---- Remote PTT (LINK-20): armed, tx-dry only, keepalives while held, KEY off on every way out ----
+  // ---- Remote PTT (LINK-20): armed, Dry TX only, keepalives while held, KEY off on every way out ----
   function pttRefusal() {
     if (!connected || !radio) return "not connected";
     if (!$("arm").checked) return "not armed";
-    if (!info || info.build !== "tx-dry") return `refused: the radio runs a ${info ? info.build : "unknown"} build; remote PTT only on tx-dry (no real-power TX yet)`;
+    if (!info || !["tx-dry", "tx+dry"].includes(info.build)) return `refused: the radio runs a ${info ? info.build : "unknown"} build; remote PTT only with Dry TX on (no real-power TX from here)`;
     return null;
   }
   async function pttDown() {
@@ -1180,7 +1180,7 @@ if (typeof module !== "undefined") module.exports = Ferrite;
     uiText: (what = 0) => need().uiText(what),
     cmd: (line) => need().cmd(line),
     info: () => need().info(),
-    /** Remote PTT for `ms` (default 1000): armed and tx-dry only; keepalives every 0.5 s; KEY off at the end, always. */
+    /** Remote PTT for `ms` (default 1000): armed and Dry TX only; keepalives every 0.5 s; KEY off at the end, always. */
     ptt: async (ms = 1000) => {
       if (!(await pttDown())) return { keyed: false, why: $("pttstate").textContent };
       await Ferrite.sleep(ms);

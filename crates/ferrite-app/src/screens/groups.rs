@@ -197,7 +197,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
         Entry("Channel|Auto|The weather channel to watch."),
     ]),
     ((5, 4), &[
-        Entry("SSID|7 Human|0-15 after your callsign."),
+        Entry("SSID|7 Handheld|0-15 after your callsign."),
         Entry("Symbol|Car|Your map symbol."),
         Entry("Comment|Empty|Up to 40 characters."),
         Entry("Position source|GPS|GPS, or the fixed position."),
@@ -374,7 +374,6 @@ pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
         [4, 9, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
         [4, 5] | [8, 5, 3] => Some("not used"),
         [8, 9, 2] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
-        [8, 9, 2] if app.radio.tx_dry => Some("always on: tx-dry build"),
         [8, 9, 2] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
         [8, 4, 1] => Some("1750 Hz for now"), // the burst's frequency isn't a setting yet (TONE-16's list opens)
         _ => None,

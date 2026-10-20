@@ -1444,7 +1444,7 @@ use super::debug::{Job, Kind};
 #[cfg(feature = "bench")]
 use super::debug::{BK_REGS, MEM_MAX};
 
-/// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-dry, the `bench` cargo feature). A receive
+/// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-bench, the `bench` cargo feature). A receive
 /// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
 /// is in every build, its `query`, `nmea` and `standby` are the bench's.
 pub const BENCH_ONLY: [&str; 9] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "txtest"];
@@ -1897,7 +1897,7 @@ const HELP: [&str; 20] = [
 #[cfg(feature = "bench")]
 const HELP_BENCH: [&str; 23] = [
     "",
-    "Bench builds only (bring-up, tx-dry; hex addresses, registers and values; Esc stops):",
+    "Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):",
     "  mem 20000000 64        bytes of MCU memory (flash, RAM)",
     "  mem32 40010808 4       32-bit words: use this for peripheral registers",
     "  gpio                   ports A to E: input and output bits, 15 to 0",
@@ -1924,7 +1924,7 @@ const HELP_BENCH: [&str; 23] = [
 const HELP_BENCH: [&str; 3] = [
     "",
     "Bench commands: mem mem32 gpio bk si bt rx mic txtest, gps query|nmea|standby:",
-    "  not in this build; a bench build (bring-up, tx-dry) has them.",
+    "  not in this build; a bench build (bring-up, tx-bench) has them.",
 ];
 
 // ---- Slots (TERM-35) ----
