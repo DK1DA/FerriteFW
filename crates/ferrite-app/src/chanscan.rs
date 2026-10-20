@@ -59,6 +59,7 @@ fn stop(app: &App, slot: u8, store: &impl ChannelStore, n: u16) -> Option<bool> 
 
 /// Sends the next part of a channel scan being started: bitmap chunks (the first resets the Radio task's set),
 /// the priority channels as they are found, then the resume rule and the start.
+#[inline(never)] // SBAR-23: its chunk buffers in its own frame
 pub fn feed(app: &mut App, store: &impl ChannelStore) {
     let Some(mut f) = app.radio.feed else { return };
     let zone_pri = zone_cfg(app, f.slot, store).pri;

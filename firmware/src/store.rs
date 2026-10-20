@@ -160,6 +160,7 @@ pub static WAKE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// Starts the flash and makes the store (not mounted yet: the caller awaits `mount_async`); the chip's JEDEC ID
 /// and size, or None when it didn't answer (the self-test's SPI flash check).
+#[inline(never)] // SBAR-23: the store is built on this frame's stack before it moves to its static
 pub fn make() -> (Option<(u32, u32)>, &'static Store) {
     let (spi, id) = match W25q::new(Flash::new(), &mut BusyDelay, WRITE_OK) {
         Ok(mut f) => {

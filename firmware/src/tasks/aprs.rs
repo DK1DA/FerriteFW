@@ -95,6 +95,7 @@ impl Aprs {
     }
 
     /// One turn of the UI task's loop.
+    #[inline(never)] // its frames and buffers in its own stack frame, not the UI task's (SBAR-23)
     pub fn poll(&mut self, app: &mut App, store: &Store, live: &LiveAll, now_ms: u32) {
         let extra = &store.extra;
         let me = app.aprs_call(); // APRS-30: callsign and SSID

@@ -43,6 +43,14 @@ impl Decode {
         }
     }
 
+    /// The waiting SAME header (ALERTS), handled in this frame, not the UI task's (SBAR-23).
+    #[inline(never)]
+    pub fn take_alert(app: &mut App, store: &Store) {
+        if let Ok(a) = crate::chan::ALERTS.try_receive() {
+            Self::alert(app, store, &a);
+        }
+    }
+
     /// A SAME header from the Radio task (ALERTS): the alert, and its record in the event log.
     pub fn alert(app: &mut App, store: &Store, a: &SameDecoded) {
         app.same_alert(&a.header, a.slot, a.freq);

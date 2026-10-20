@@ -1071,6 +1071,7 @@ impl Term {
     }
 
     /// Sends what changed while the sink has room: the goodbye, a clear, then each row whose text changed.
+    #[inline(never)] // its own stack frame, not the caller's for its whole run (SBAR-23)
     pub fn poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, dev: &Device, live: &LiveAll, now: u32, out: &mut impl Sink) {
         self.now = now;
         if self.esc == Seq::Started && now.wrapping_sub(self.esc_at) >= ESC_MS {

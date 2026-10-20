@@ -109,6 +109,60 @@ async fn send_shutdown(app: &mut App, held: &mut Option<RadioCmd>) {
     }
 }
 
+/// The calibration sector's tables for the Radio task and the battery gauge, from one read (read only, chapter
+/// 35): the squelch tables (SQL-1, every build), the PA curves, TX windows and battery gauge (the `tx` build; the
+/// cable log says why transmit is locked, if it is), and the gauge for the percentage (PWR-22). Its own frame
+/// (never inlined), so the sector's copy isn't held in the UI task's frame for the whole power-on (SBAR-23).
+#[inline(never)]
+fn read_calibration(store: &store::Store, flash: bool, cal_ok: bool, mcu_ok: bool, cal_crc: ferrite_core::txcal::CalCrc) -> ferrite_core::txcal::Gauge {
+    use ferrite_core::sqcal::{self, SqCal};
+    use ferrite_core::txcal::{Gauge, READ_LEN};
+    const { assert!(sqcal::READ_LEN <= READ_LEN) };
+    let mut b = [0xFFu8; READ_LEN];
+    let read = flash && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
+    let sq: &[u8; sqcal::READ_LEN] = b[..sqcal::READ_LEN].try_into().unwrap_or(&[0xFF; sqcal::READ_LEN]);
+    crate::chan::SQ_CAL.signal(if read { SqCal::parse(sq) } else { SqCal::DEFAULT });
+    #[cfg(feature = "tx")]
+    {
+        use ferrite_core::txcal::{gate, Fault, TxCal};
+        // TX-13 to TX-15 (TX audit F8): the MCU check, the CRC since install, then the sector itself.
+        let tx = gate(if read && cal_ok { TxCal::read(&b) } else { Err(Fault::Blank) }, mcu_ok, cal_crc);
+        if let Err(f) = tx {
+            bringup::line(match f {
+                Fault::Blank => b"tx calibration: locked, sector blank or unread",
+                Fault::PaCurve => b"tx calibration: locked, a PA curve byte is 0x00 or 0xFF",
+                Fault::Windows => b"tx calibration: locked, TX windows blank or invalid",
+                Fault::Trim => b"tx calibration: locked, factory crystal trim not applied yet",
+                Fault::ToneGain => b"tx calibration: locked, a sub-tone gain byte is over 0x7F",
+                Fault::LevelOrder => b"tx calibration: locked, PA curves not Low < Mid < High",
+                Fault::Mcu => b"tx calibration: locked, the MCU isn't an AT32F403AVGT7",
+                Fault::Changed => b"tx calibration: locked, the sector changed since recorded (or unchecked)",
+            });
+        }
+        crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));
+    }
+    #[cfg(not(feature = "tx"))]
+    let _ = (cal_ok, mcu_ok, cal_crc);
+    if read { Gauge::parse(&b) } else { Gauge::defaults() }
+}
+
+/// SBAR-23: a future polled from a function never inlined, so its locals (a start-up step's buffers) live in that
+/// frame while it runs, not in the UI task's frame for the whole power-on.
+struct OwnFrame<F>(F);
+
+impl<F: core::future::Future> core::future::Future for OwnFrame<F> {
+    type Output = F::Output;
+    #[inline(never)]
+    fn poll(self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> core::task::Poll<F::Output> {
+        // SAFETY: a plain projection to the only field, which is never moved out of the pinned wrapper.
+        unsafe { self.map_unchecked_mut(|s| &mut s.0) }.poll(cx)
+    }
+}
+
+fn own_frame<F: core::future::Future>(f: F) -> OwnFrame<F> {
+    OwnFrame(f)
+}
+
 #[embassy_executor::task]
 pub async fn task() {
     let mut lcd = Screen::new();
@@ -149,7 +203,7 @@ pub async fn task() {
     // are the defaults, in RAM for this power-on.
     let (flash, store) = store::make();
     if !cfg!(feature = "bringup") {
-        store.mount_async().await;
+        own_frame(store.mount_async()).await;
     }
     check(Source::Storage, CHECK_FLASH, flash.is_some());
     // Calibration present: the factory sector isn't blank (read only, CAL-1). Its CRC check comes with 1b.
@@ -160,50 +214,14 @@ pub async fn task() {
         && cal.iter().any(|&b| b != 0);
     check(Source::Storage, CHECK_CAL, cal_ok);
     // CAL-7: the sector's CRC against the one the layout header recorded (recorded on the first boot that checks).
-    let cal_crc = if cal_ok && !cfg!(feature = "bringup") { store.check_cal().await } else { ferrite_core::txcal::CalCrc::Unknown };
+    let cal_crc = if cal_ok && !cfg!(feature = "bringup") { own_frame(store.check_cal()).await } else { ferrite_core::txcal::CalCrc::Unknown };
     bringup::line(match cal_crc {
         ferrite_core::txcal::CalCrc::Same => b"calibration crc: same as recorded",
         ferrite_core::txcal::CalCrc::Recorded => b"calibration crc: recorded now",
         ferrite_core::txcal::CalCrc::Changed => b"calibration crc: CHANGED since recorded",
         ferrite_core::txcal::CalCrc::Unknown => b"calibration crc: not checked",
     });
-    // SQL-1: the squelch tables for the Radio task, in every build (read only; stock's defaults if blank or unread).
-    {
-        use ferrite_core::sqcal::{SqCal, READ_LEN};
-        let mut b = [0xFFu8; READ_LEN];
-        let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
-        crate::chan::SQ_CAL.signal(if read { SqCal::parse(&b) } else { SqCal::DEFAULT });
-    }
-    // The `tx` build: the PA curves, TX windows and battery gauge for the Radio task (read only, chapter 35); the
-    // cable log says why transmit is locked, if it is.
-    #[cfg(feature = "tx")]
-    {
-        use ferrite_core::txcal::{gate, Fault, Gauge, TxCal, READ_LEN};
-        let mut b = [0xFFu8; READ_LEN];
-        let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
-        // TX-13 to TX-15 (TX audit F8): the MCU check, the CRC since install, then the sector itself.
-        let tx = gate(if read && cal_ok { TxCal::read(&b) } else { Err(Fault::Blank) }, mcu_ok, cal_crc);
-        if let Err(f) = tx {
-            bringup::line(match f {
-                Fault::Blank => b"tx calibration: locked, sector blank or unread",
-                Fault::PaCurve => b"tx calibration: locked, a PA curve byte is 0x00 or 0xFF",
-                Fault::Windows => b"tx calibration: locked, TX windows blank or invalid",
-                Fault::Trim => b"tx calibration: locked, factory crystal trim not applied yet",
-                Fault::ToneGain => b"tx calibration: locked, a sub-tone gain byte is over 0x7F",
-                Fault::LevelOrder => b"tx calibration: locked, PA curves not Low < Mid < High",
-                Fault::Mcu => b"tx calibration: locked, the MCU isn't an AT32F403AVGT7",
-                Fault::Changed => b"tx calibration: locked, the sector changed since recorded (or unchecked)",
-            });
-        }
-        crate::chan::TX_CAL.signal((tx.ok(), Gauge::parse(&b)));
-    }
-    // PWR-22: the battery gauge for the percentage, in every build (read only; stock's defaults if blank or unread).
-    let gauge = {
-        use ferrite_core::txcal::{Gauge, READ_LEN};
-        let mut b = [0xFFu8; READ_LEN];
-        let read = flash.is_some() && ferrite_store::Nor::read(&mut *store.nor(), ferrite_core::layout::CALIBRATION.start, &mut b).is_ok();
-        if read { Gauge::parse(&b) } else { Gauge::defaults() }
-    };
+    let gauge = read_calibration(store, flash.is_some(), cal_ok, mcu_ok, cal_crc);
     let set = store::settings();
     store.load_settings(set);
     let level = ferrite_app::lights::BRIGHTNESS[set.brightness() as usize - 1]; // 0 7 4 2 from here on
@@ -283,7 +301,7 @@ pub async fn task() {
     match (ssb_bundle(), cfg!(feature = "bringup")) {
         (None, _) => bringup::line(b"ssb: no patch bundled with this image"),
         (Some(_), true) => bringup::line(b"ssb: patch bundled; not installed (bring-up build stores nothing)"),
-        (Some((p, patch)), false) => bringup::line(match store.ssb_install(p, patch, ferrite_core::ssb::SOURCE_FLASHER).await {
+        (Some((p, patch)), false) => bringup::line(match own_frame(store.ssb_install(p, patch, ferrite_core::ssb::SOURCE_FLASHER)).await {
             Ok(true) => b"ssb: patch installed and verified",
             Ok(false) => b"ssb: patch already installed",
             Err(_) => b"ssb: install FAILED",
@@ -661,10 +679,12 @@ pub async fn task() {
             period = period.min(10); // a `bt` query: send and collect on time (a timer, so the link task runs too)
         }
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
-        match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.receive()).await {
+        // SBAR-23: the alerts' arm waits for one to be there, and the alert (~3 KB) is taken in its handler: carried
+        // in this select's result it sized a temporary in the UI task's frame for every pass.
+        match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.ready_to_receive()).await {
             Either4::First(l) => live = l,
             // WX-4: a decoded SAME header opens the alert over any screen.
-            Either4::Fourth(a) => super::decode::Decode::alert(&mut app, store, &a),
+            Either4::Fourth(()) => super::decode::Decode::take_alert(&mut app, store),
             Either4::Second(Input::Key(keypad::Event::Press(code))) => {
                 log_input(&Input::Key(keypad::Event::Press(code)));
                 app.raw_key(code, true); // every code, mapped or not: the key test names them (KEY-2)
