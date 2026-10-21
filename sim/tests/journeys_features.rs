@@ -294,17 +294,6 @@ fn power_capped_on_125m() {
     r.expect_text("TX power 0.25 W");
 }
 
-/// With no ID code, PTT ID is greyed and says why; one radio-wide ID code (0 8 6 5) and the VFOs' choice
-/// (0 8 6 4) (DTMF-5, DTMF-6).
-#[test]
-fn ptt_id_needs_a_code() {
-    let mut r = Radio::new();
-    r.run("menu 0 8 6; expect text \"ID code Empty\"; expect text \"PTT ID on VFOs Off\"");
-    r.run("press 4; knob 1; expect text \"PTT ID on VFOs Off\"");
-    let t = r.text().to_lowercase();
-    assert!(t.contains("code"), "it says why:\n{t}");
-}
-
 /// CW ID (0 8 7 2): off, every 10 min or on unkey; the choice and the callsign go to the Radio task; with no
 /// callsign it stays off and says why (VOX-16).
 #[test]

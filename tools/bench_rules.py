@@ -90,7 +90,6 @@ RULE_TAGS = {
     "dtmf_timing": {"DTMF-3": "part"},  # three speed/delay pairs; live digits (DTMF-7) not timed
     "dtmf_pairs": {"DTMF-2": "part"},  # both tones of each pair, the mic tone absent; the generator itself unseen
     "tone11_no_end_after_dtmf": {"TONE-11": "part"},
-    "ptt_id": {"DTMF-4": "all"},  # the code after key-up before the mic opens, and before the drop
     "end_tone_order": {"TONE-8": "part"},  # after KEY off, before the drop, mic muted; CW ID and tail order not
     "tone11_no_end_after_afsk": {"TONE-11": "part"},
     "reg40_end_tone": {"TONE-19.3": "part"},  # the end tone only (not CW ID, DTMF or a beep)

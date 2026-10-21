@@ -150,7 +150,7 @@ pub enum RadioCmd {
     /// The crossband repeater: start with these settings, or stop (XB-14).
     Crossband(Option<XbCfg>),
     /// The Transmit group's radio-wide tone settings (sent at start-up and when one changes): 0 8 5 2's tail
-    /// phase (0 55 Hz, 1-3 120°/180°/240°), 0 8 7 2's CW ID (0 off, 1 every 10 min, 2 on unkey) and 0 8 6 6's
+    /// phase (0 55 Hz, 1-3 120°/180°/240°), 0 8 7 2's CW ID (0 off, 1 every 10 min, 2 on unkey) and 0 8 6 4's
     /// DTMF sidetone. A slot's end tone and tail come with it ([`Param::EndTone`], [`Param::Tail`]).
     TxTones { phase: u8, cw: u8, sidetone: bool },
     /// The callsign for CW ID, 5 bytes a chunk (chunk 0: bytes 0-4, 1: 5-9; 0 pads the end). Sent with

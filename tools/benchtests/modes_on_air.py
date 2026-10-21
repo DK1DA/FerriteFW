@@ -26,7 +26,7 @@ does, else typed by keys once (the terminal can't set it) and put back after, el
 They need a callsign of 6 characters at most (AX.25 carries 6, SETUP-13). KISS on makes C the APRS slot (KISS-9). HF transmit is never keyed: HF-22, HF-23's key-up
 and HF-25 need an HF test frequency approved first (a decision); only the refusals run.
 
-The speaker (VOX, and the mic tone the DTMF, end tone and PTT ID checks listen for): a sine written to a WAV and
+The speaker (VOX, and the mic tone the DTMF and end tone checks listen for): a sine written to a WAV and
 played with macOS `afplay` (no Python audio package needed). Put the Mac's speaker about 10 cm from the radio's
 mic, the Mac's volume at about 60 %. The suite calibrates first, without keying: VOX off, a tone at rising
 levels, the radio's `mic` (TERM-32: the PA0 envelope VOX reads) after each; it picks the levels and the VOX level
@@ -58,8 +58,8 @@ import sdrsuite
 import sdrtx
 
 S = dict(
-    vox="0 8 2 1", vox_level="0 8 2 2", vox_tail="0 8 2 3", dtmf_speed="0 8 6 3", ptt_id="0 8 6 4",
-    id_code="0 8 6 5", dtmf_delay="0 8 6 7", aprs_mode="0 5 3", beacon_mode="0 5 5 1", after_voice="0 5 5 3",
+    vox="0 8 2 1", vox_level="0 8 2 2", vox_tail="0 8 2 3", dtmf_speed="0 8 6 3",
+    dtmf_delay="0 8 6 5", aprs_mode="0 5 3", beacon_mode="0 5 5 1", after_voice="0 5 5 3",
     beacon_power="0 5 5 4", aprs_freq="0 5 7 1", tx_delay="0 5 7 2", pos_source="0 5 4 4", fixed="0 5 4 5",
     kiss="0 5 9 1", watch="0 1 1", gps_rxtx="0 6 8", bluetooth="0 9 2 1", end_tone=B.END_TONE, gps="0 6 1",
     bsave="0 7 7",
@@ -85,7 +85,6 @@ DEFAULTS = {
     "dtmf_delay_tol": 60,
     "dialer_keys": "MENU 0 8 6 1",  # opens the dialer (DTMF-13); digits, then MENU sends
     "dialer_id": "Dtmf",  # the dialer's readback id
-    "id_code": "246",
     "aprs_freq_keys": "MENU 0 5 7 1",  # opens 0 5 7 1's entry; digits with STAR for the point, MENU takes it
     "beacon_now_keys": "MENU 0 5 1 MENU:long",  # the heard list's options (MENU-25): row 1 is Beacon now
     "tx_delay_tol_ms": 60,
@@ -1091,48 +1090,6 @@ class Modes:
         if no_end:
             self.add("tone11_no_end_after_dtmf", no_end, "no end tone after DTMF dialling")
 
-    def t_ptt_id(self):
-        """DTMF-4: PTT ID both (0 8 6 4) with an ID code (0 8 6 5): a remote key-up shows the code after the carrier
-        starts and before the mic tone; and again after KEY off, before the carrier drops."""
-        try:
-            self.setv(S["id_code"], self.mc["id_code"])
-            self.setv(S["ptt_id"], "Both")
-        except B.TermError as e:
-            raise Skip(f"the terminal can't set the ID code or PTT ID: {e}")
-        self.setv(S["end_tone"], "Off")
-        self.tune("A", self.f_lo)
-        self.home()
-        self.gate("A", "ptt id")
-        code = self.mc["id_code"]
-        self.mic_tone_then(2.5, 1.0, "ptt id", 0.8, 6.0)
-        path = os.path.join(self.d, "ptt-id.u8")
-        key_s = 2.5
-        ev, raw = self.b.capture_keyed(self.f_lo, key_s, path, "ptt id", lead=0.8, tail=2.0, extra_tail=1.0)
-        if self.audio:
-            self.audio.stop()
-        dev, fs, on, runs = air(raw)
-        got = dtmf_decode(dev, fs)
-        s = "".join(g[0] for g in got)
-        t_off = ev["t_off"] - ev["t_capture"] if ev.get("t_off") else None
-        start = [g for g in got if t_off is None or g[1] < t_off - 0.3]
-        end = [g for g in got if t_off is not None and g[1] >= t_off - 0.3]
-        c = [_chk("the code at the start", "".join(g[0] for g in start) == code, "".join(g[0] for g in start)),
-             _chk("the code at the end", "".join(g[0] for g in end) == code, "".join(g[0] for g in end))]
-        if runs and end:
-            c.append(_chk("the end code before the carrier drops", end[-1][2] <= runs[-1][1], f"{runs[-1][1] - end[-1][2]:.2f} s"))
-        if runs and start:
-            c.append(_chk("the start code after the key-up", start[0][1] >= runs[0][0], f"{start[0][1] - runs[0][0]:.2f} s"))
-        if self.audio and start:
-            e = env_ms(dev, fs, self.mc["mic_tone_hz"])
-            a = int(runs[0][0] * 1000) + 20
-            b = int(start[-1][2] * 1000)
-            pre = float(np.percentile(e[a:b], 90)) if b > a else 0.0
-            after = float(np.median(e[b + 100: b + 600])) if len(e) > b + 600 else 0.0
-            c.append(_chk("the mic opens only after the start code", pre < 0.2 * max(after, 1) and after > 150,
-                          f"{pre:.0f} Hz before, {after:.0f} Hz after"))
-        ok = self.add("ptt_id", c, f"decoded {s!r} (code {code})")
-        self.keep(path, ok)
-
     def t_end_tone_order(self):
         """TONE-8 (part), TONE-11 (part): end tone Beep, a remote key-up with the mic tone: after KEY off the end
         tone, no mic tone while it plays, then the carrier drops."""
@@ -1829,7 +1786,6 @@ TESTS = [
     ("vox_blocked", "t_vox_blocked", "vox", "audio", 30, 0, "the tone under the broadcast and an open monitor: no key-up"),
     ("vox_boot", "t_vox_boot", "vox", "audio", 45, 4, "the tone through a restart: no carrier for 5 s, then VOX keys"),
     ("dtmf", "t_dtmf", "dtmf", "", 60, 8, "mic tone on a voice key-up; dial 1593 at 50/0, 100/300, 200/1000 ms: digits, timing, pairs, mic muted, no end tone"),
-    ("ptt_id", "t_ptt_id", "dtmf", "", 20, 3.5, "PTT ID both, code 246: at the start (before the mic) and the end (before the drop)"),
     ("end_tone", "t_end_tone_order", "tone", "", 30, 5, "end tone Beep after KEY off, before the drop, mic muted; none after txtest afsk"),
     ("reg40", "t_reg40", "tone", "", 15, 2.3, "bk 0 40 while keyed (0x50A), during the Quindar end tone (0x43C), after (0x50A)"),
     ("aprs_beacon", "t_aprs_beacon", "aprs", "", 30, 2, "Beacon now with C on 145.495, A on 446.475: frame, TX delay, C's frequency"),
@@ -1996,7 +1952,7 @@ class FakeModesRadio(B.FakeRadio):
         super().__init__(clock, version=version, build="tx-dry", **kw)
         self.audio, self.callsign = audio, callsign
         self.set.update({S["vox"]: "Off", S["vox_level"]: "5", S["vox_tail"]: "2 s", S["dtmf_speed"]: "100 ms",
-                         S["ptt_id"]: "Off", S["id_code"]: "Empty", S["dtmf_delay"]: "300 ms", S["aprs_mode"]: "Off",
+                         S["dtmf_delay"]: "300 ms", S["aprs_mode"]: "Off",
                          S["beacon_mode"]: "Off", S["after_voice"]: "Off", S["beacon_power"]: "Low",
                          S["aprs_freq"]: "144.390", S["tx_delay"]: "300 ms", S["pos_source"]: "Fixed",
                          S["fixed"]: "49.2827 -123.1207", S["kiss"]: "Off", S["watch"]: "Off", S["gps_rxtx"]: "Always on",
@@ -2271,8 +2227,6 @@ class FakeModesRadio(B.FakeRadio):
         r = super().key_on(slot_code)
         if self.key:
             self.key["t_voice"] = self.clock.time()
-            if self.set[S["ptt_id"]] in ("Start", "Both") and self.set[S["id_code"]] != "Empty":
-                self.key["id_start"] = self.clock.time() + 0.05
         return r
 
     def key_off(self):
@@ -2283,16 +2237,8 @@ class FakeModesRadio(B.FakeRadio):
             parts = []
             mic_from = t
             sp = int(self.set[S["dtmf_speed"]].split()[0]) / 1000
-            code = self.set[S["id_code"]]
-            if k.get("id_start"):
-                parts.append(self._dtmf_fn(code, k["id_start"], sp))
-                mic_from = k["id_start"] + 2 * sp * len(code)
-            else:
-                mic_from = k["on"]
+            mic_from = k["on"]
             end = t
-            if self.set[S["ptt_id"]] in ("End", "Both") and code != "Empty":
-                parts.append(self._dtmf_fn(code, t + 0.05, sp))
-                end = t + 0.05 + 2 * sp * len(code)
             parts.append(self._voice_window(mic_from, t))
             et = self.set[S["end_tone"]]
             if k["kind"] == "carrier" and et != "Off":
@@ -2509,7 +2455,7 @@ def selftest(cfg, args_fn, check, tmp):
 # Names this suite's checks carry (bench_rules.RULE_TAGS has them).
 TAGS = {k: v for k, v in bench_rules.RULE_TAGS.items() if k in {
     "vox_tail", "vox_active_slot", "vox_levels", "vox_thresholds", "vox_home_only", "vox_hold", "vox_blocked", "vox_boot",
-    "dtmf_dial", "dtmf_timing", "dtmf_pairs", "tone11_no_end_after_dtmf", "ptt_id", "end_tone_order",
+    "dtmf_dial", "dtmf_timing", "dtmf_pairs", "tone11_no_end_after_dtmf", "end_tone_order",
     "tone11_no_end_after_afsk", "reg40_end_tone", "aprs_tx_delay", "aprs_beacon_on_c", "aprs_after_voice",
     "aprs_spacing", "aprs_compose", "gps33_no_position", "kiss_frames", "kiss_no_pin", "gps_pb10", "gps_during_tx",
     "watch_relay_keyup", "watch_pause_after_tx", "hf_refused_while_keyed", "hf_receive_only", "hf_chip1_refusal",

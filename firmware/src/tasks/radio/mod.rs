@@ -410,7 +410,7 @@ struct Tx {
     tail: [bool; 4],
     slot: u8,
     /// 0 8 5 2's phase (0 55 Hz, 1-3 the CTCSS phase shifts), 0 8 7 2's CW ID (0 off, 1 every 10 min, 2 on unkey)
-    /// with the callsign (0 8 7 1; empty: no ID, VOX-10), 0 8 6 6's DTMF sidetone (DTMF-8).
+    /// with the callsign (0 8 7 1; empty: no ID, VOX-10), 0 8 6 4's DTMF sidetone (DTMF-8).
     phase: u8,
     cw: u8,
     cw_call: [u8; 10],

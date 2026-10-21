@@ -129,7 +129,7 @@ const G8: [Entry; 9] = [
     Entry("Mic gain|5|Higher is louder on air: 1-9."),
     Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),
     Entry("Tail elimination|Off|Squelch tail, end tone (roger beep)."),
-    Entry("DTMF|100 ms|Dialer, memories, timing, PTT ID."),
+    Entry("DTMF|100 ms|Dialer, memories, timing."),
     Entry("Callsign and ID|Empty|Your callsign, and CW ID."),
     Entry("Busy lockout default|Off|For new channels and the VFO."),
     Entry("Extend TX|Off|Beyond the amateur bands; Dry TX."),
@@ -260,8 +260,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         Entry("Dialer||Type and send DTMF."),
         Entry("Memories||16 stored sequences."),
         Entry("Speed|100 ms|Each tone and each gap."),
-        Entry("PTT ID on VFOs|Off|Send the ID code at PTT."),
-        Entry("ID code|Empty|The radio's DTMF ID."),
         Entry("Sidetone|On|Hear the digits you send."),
         Entry("First digit delay|300 ms|Wait after key-up so a repeater opens."),
     ]),
@@ -500,9 +498,9 @@ static SETTINGS: [Setting; 71] = [
     field!([8, 5, 3], end_tone: u8, Kind::Pick(&END_TONE_NAMES), SlotTones),
     // 50-200 ms in 10 ms steps (DTMF-3)
     field!([8, 6, 3], dtmf_ms: u8, Kind::Level(50, 200, 10, dtmf_ms_text), TxTones),
-    field!([8, 6, 6], dtmf_sidetone: bool, Kind::Flip(&ON_OFF), TxTones),
+    field!([8, 6, 4], dtmf_sidetone: bool, Kind::Flip(&ON_OFF), TxTones),
     // 0-1000 ms in 50 ms steps (DTMF-3)
-    field!([8, 6, 7], dtmf_delay: u8, Kind::Level(0, 100, 5, dtmf_delay_text), TxTones),
+    field!([8, 6, 5], dtmf_delay: u8, Kind::Level(0, 100, 5, dtmf_delay_text), TxTones),
     field!([8, 7, 2], cw_id: u8, Kind::Pick(&CW_ID_MODES), TxTones),
     field!([9, 1, 1], auto_lock: u8, Kind::Round(AUTO_LOCK_TIMES.len() as u8, auto_lock_text), Nothing), // KEY-20
     field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),

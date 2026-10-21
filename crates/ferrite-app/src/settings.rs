@@ -226,7 +226,7 @@ pub struct Settings {
     pub auto_off: u8,
     /// 0 9 1 1: auto key lock (KEY-20, [`AUTO_LOCK_TIMES`] index; 0 off).
     pub auto_lock: u8,
-    /// 0 8 6 6: hear the DTMF digits sent, at beep volume.
+    /// 0 8 6 4: hear the DTMF digits sent, at beep volume.
     pub dtmf_sidetone: bool,
     /// 0 7 5 4: a tone on arriving at a waypoint.
     pub arrival_tone: bool,
@@ -258,7 +258,7 @@ pub struct Settings {
     pub end_tone: u8,
     /// 0 8 6 3: DTMF speed, ms each tone and each gap (50-200, DTMF-3).
     pub dtmf_ms: u8,
-    /// 0 8 6 7: DTMF first digit delay in 10 ms (0-100: 0-1000 ms, DTMF-3).
+    /// 0 8 6 5: DTMF first digit delay in 10 ms (0-100: 0-1000 ms, DTMF-3).
     pub dtmf_delay: u8,
     /// 0 8 7 2: CW ID ([`CW_ID_MODES`]: off, every 10 min, on unkey; VOX-12).
     pub cw_id: u8,
