@@ -8,8 +8,9 @@
     python3 tools/sizemap.py new.json --diff old.json # the same between two saved trees (no ELF needed)
 
 The tree is region (section) > crate > file or module > function or symbol. Code is attributed by its DWARF line
-rows (arm-none-eabi-addr2line, innermost inlined frame), so inlined code counts in the file it came from; code with
-no line row falls back to its symbol. Named constants go by symbol (fonts and images by name); unnamed constants
+rows (arm-none-eabi-addr2line -i): inlined code counts in the file it came from, except the standard library's, which
+counts where it was used (`opt.map(..)` in home.rs is home.rs bytes; --innermost puts it under core). Code with no
+line row falls back to its symbol. Named constants go by symbol (fonts and images by name); unnamed constants
 (literal strings, const tables) are split at every address the code or data points to and go to the file that
 refers to them. What is left shows as "other", so the leaves add up to the image size exactly (the check line).
 The release ELF is shared by every build: the script tells which one it is by comparing it with target/*.bin.
@@ -204,7 +205,7 @@ def font_notes():
 
 
 # ---- attribution -----------------------------------------------------------------------------------------------------
-def analyse(elf):
+def analyse(elf, innermost=False):
     im = Image(elf)
     n = im.n
     leaves, lkey = [], {}
@@ -226,7 +227,7 @@ def analyse(elf):
         s = im.sec_at(o)
         return REGION.get(s["name"], s["name"]) if s else "padding"
 
-    # code: DWARF line rows, innermost inlined frame
+    # code: DWARF line rows and their inlined frames (addr2line -i, innermost first)
     starts, ranges, prev = set(), [], None
     for l in run("arm-none-eabi-objdump", "--dwarf=decodedline", elf).splitlines():
         p = l.split()
@@ -238,19 +239,25 @@ def analyse(elf):
     rows = sorted({r for r in ranges if im.off(r[0]) is not None})
     out = run("arm-none-eabi-addr2line", "-e", elf, "-f", "-i", "-a", "-C",
               inp="\n".join(f"{a:#x}" for a, _ in rows) + "\n").splitlines()
-    frame, i = {}, 0
+    frames, i = {}, 0
     while i < len(out):
         if out[i].startswith("0x"):
-            a = int(out[i], 16)
-            if i + 2 < len(out) and not out[i + 1].startswith("0x"):
-                frame[a] = (out[i + 1], out[i + 2].rsplit(":", 1)[0])
+            a, fs = int(out[i], 16), []
             i += 1
-            while i < len(out) and not out[i].startswith("0x"):
-                i += 1
+            while i + 1 < len(out) and not out[i].startswith("0x"):
+                fs.append((out[i], out[i + 1].rsplit(":", 1)[0]))
+                i += 2
+            if fs:
+                frames[a] = fs
         else:
             i += 1
-    for path in {p for _f, p in frame.values()}:  # learns where the udigimodes crates are
+    for path in {p for fs in frames.values() for _f, p in fs}:  # learns where the udigimodes crates are
         file_node(path)
+    # std code inlined into ours (Option::map, slice indexing, min, ...) counts where it was used: the innermost
+    # frame outside the standard library, unless innermost is asked for or the code is std's own
+    frame = {}
+    for a, fs in frames.items():
+        frame[a] = fs[0] if innermost else next((f for f in fs if file_node(f[1])[0] != STD), fs[0])
     # symbols
     fnotes = font_notes()
     syms, named = [], bytearray(n)
@@ -547,6 +554,8 @@ def main():
     ap.add_argument("--json", metavar="FILE", help="also write the full tree as JSON")
     ap.add_argument("--diff", metavar="OLD.json", help="print the biggest changes from OLD.json to this build")
     ap.add_argument("--min", type=int, default=64, help="leaves under this many bytes merge in the map (64)")
+    ap.add_argument("--innermost", action="store_true",
+                    help="count inlined std code (Option::map, indexing, ...) under std, not where it was used")
     ap.add_argument("--top", type=int, default=25, help="rows per --diff section (25)")
     a = ap.parse_args()
     if a.build:
@@ -555,7 +564,7 @@ def main():
     if a.input.endswith(".json"):
         doc = json.load(open(a.input))
     else:
-        tree, meta = analyse(a.input)
+        tree, meta = analyse(a.input, a.innermost)
         build = which_build(meta.pop("img"))
         if a.build and build != a.build:
             print(f"warning: the ELF does not match target/{BUILDS[a.build][1]}", file=sys.stderr)
