@@ -16,9 +16,13 @@ pub fn line(s: &[u8]) {
     if !ON.load(Relaxed) {
         return;
     }
-    for &c in s.iter().chain(b"\r\n") {
-        TERM_OUT.put(c);
-    }
+    // Tasks on every executor write lines into the one single-producer ring: a line goes in whole, with interrupts
+    // off, so two never interleave (the cable log showed "ddraw 14 ms" halves, Oct 20, 2026). At most ~100 bytes.
+    critical_section::with(|_| {
+        for &c in s.iter().chain(b"\r\n") {
+            TERM_OUT.put(c);
+        }
+    });
     TERM_WAKE.signal(());
 }
 

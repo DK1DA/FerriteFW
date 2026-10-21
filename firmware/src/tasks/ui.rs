@@ -689,6 +689,10 @@ pub async fn task() {
         if bt_q.is_some() {
             period = period.min(10); // a `bt` query: send and collect on time (a timer, so the link task runs too)
         }
+        // LINK-38: one yield a pass. During a scan the Radio task publishes on every step, so `live_rx.changed()` is
+        // ready at once and an await on it never gives up the CPU: the Link task (same executor) starved, the cable
+        // and Bluetooth stopped answering and the cable log stopped, until the scan ended (Oct 20, 2026).
+        embassy_futures::yield_now().await;
         let wait = select(Timer::after(Duration::from_millis(period)), TERM_WAKE.wait());
         // SBAR-23: the alerts' arm waits for one to be there, and the alert (~3 KB) is taken in its handler: carried
         // in this select's result it sized a temporary in the UI task's frame for every pass.
