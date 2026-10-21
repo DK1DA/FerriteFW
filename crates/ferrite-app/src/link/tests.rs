@@ -69,8 +69,27 @@ impl Pc {
         }
     }
 
-    /// A whole record, read in parts.
+    /// A whole record: the settings and APRS by `READ` in parts, a channel, zone or preset by `READ_MANY` of its
+    /// index alone (LINK-21, LINK-40).
     fn read(&mut self, w: u8, idx: u16) -> Result<Vec<u8>, u8> {
+        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET) {
+            return self.read_parts(w, idx);
+        }
+        let mut p = std::vec![w];
+        p.extend_from_slice(&idx.to_le_bytes());
+        p.extend_from_slice(&1u16.to_le_bytes());
+        let (s, a) = self.ask(msg::READ_MANY, &p);
+        if s != 0 {
+            return Err(s);
+        }
+        match a.get(2..5) {
+            Some(h) if u16::from_le_bytes([h[0], h[1]]) == idx => Ok(a[5..5 + h[2] as usize].to_vec()),
+            _ => Err(Status::NotFound as u8),
+        }
+    }
+
+    /// A whole record by `READ`, in parts.
+    fn read_parts(&mut self, w: u8, idx: u16) -> Result<Vec<u8>, u8> {
         let mut rec = Vec::new();
         loop {
             let off = rec.len() as u16;
@@ -90,8 +109,18 @@ impl Pc {
         }
     }
 
-    /// A whole record, written in parts of `part` bytes; the last part's answer.
+    /// A whole record: a channel, zone or preset by `WRITE_MANY` of it alone, (status, a refusal's reason);
+    /// anything else by `WRITE` in parts of `part` bytes, the last part's answer (LINK-21, LINK-41).
     fn write(&mut self, w: u8, idx: u16, rec: &[u8], part: usize) -> (u8, Vec<u8>) {
+        if matches!(w, what::CHANNEL | what::ZONE | what::PRESET) {
+            let (s, a) = self.write_many(w, &[(idx, rec.to_vec())]);
+            return (s, a.get(1..).unwrap_or_default().to_vec());
+        }
+        self.write_parts(w, idx, rec, part)
+    }
+
+    /// A whole record by `WRITE`, in parts of `part` bytes; the last part's answer.
+    fn write_parts(&mut self, w: u8, idx: u16, rec: &[u8], part: usize) -> (u8, Vec<u8>) {
         let mut last = (0, Vec::new());
         for (k, chunk) in rec.chunks(part).enumerate() {
             let mut p = std::vec![w];
@@ -219,6 +248,25 @@ fn only_records_are_written() {
     let mut pc = Pc::new(true);
     let (s, _) = pc.write(9, 0, &[0; 8], 240);
     assert_eq!(s, Status::Refused as u8);
+}
+
+/// LINK-21, LINK-40, LINK-41: `READ` and `WRITE` take the settings and the APRS record only; a channel, zone or
+/// preset (one frame each) goes by `READ_MANY`/`WRITE_MANY`: `READ` of one answers `bad argument` (as an unknown
+/// kind), `WRITE` `refused` (LINK-3), changing nothing.
+#[test]
+fn read_write_are_for_large_records() {
+    let mut pc = Pc::new(true);
+    let c = pc.st.by_number(0).unwrap();
+    let rec = pc.read(what::CHANNEL, c.num).unwrap();
+    for w in [what::CHANNEL, what::ZONE, what::PRESET] {
+        assert_eq!(pc.read_parts(w, 0), Err(Status::BadArg as u8), "READ of {w}");
+    }
+    let mut new = rec.clone();
+    new[7] = b'Z';
+    assert_eq!(pc.write_parts(what::CHANNEL, c.num, &new, 240).0, Status::Refused as u8);
+    assert_eq!(pc.read(what::CHANNEL, c.num).unwrap(), rec, "unchanged");
+    assert!(pc.read_parts(what::SETTINGS, 0).is_ok());
+    assert!(pc.read_parts(what::APRS, 0).is_ok());
 }
 
 /// LINK-5, LINK-7: the settings read without the PIN, write back in parts, and the protected ones
@@ -1444,7 +1492,7 @@ fn used_maps_channels() {
     assert_eq!(pc.ask(msg::USED, &[]).0, Status::BadArg as u8);
 }
 
-/// LINK-40: `READ_MANY` gives every channel, zone and preset `READ` does, byte for byte, whole records several to a
+/// LINK-40: `READ_MANY` gives every channel, zone and preset one at a time does, byte for byte, whole records several to a
 /// frame, empty numbers skipped; the next index goes on where it stopped.
 #[test]
 fn read_many_matches_read() {

@@ -85,6 +85,7 @@ USED, READ_MANY, WRITE_MANY, LOG_READ = 0x15, 0x17, 0x18, 0x40  # LINK-39 - LINK
 LOG_SOURCES = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"]  # LINK-42's source byte
 SUBSCRIBE, EVENT, HEARD, MSGS, MSG_SEND = 0x50, 0x51, 0x52, 0x53, 0x54  # LINK-43 - LINK-48
 SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
+ONE_FRAME = (CHANNEL, ZONE, PRESET)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
 # SUBSCRIBE's mask and flags, EVENT's kinds (Appendix G)
 SUB_HEARD, SUB_MSGS, SUB_UI, RENEW = 1, 2, 4, 1
 EV_HEARD, EV_MSG, EV_MSG_STATE, EV_UI = 1, 2, 3, 4
@@ -357,6 +358,13 @@ class Link:
         return rest
 
     def read(self, what, idx):
+        """One record: a channel, zone or preset by READ_MANY of its index alone (LINK-21, LINK-40); the settings
+        and APRS records by READ, in parts."""
+        if what in ONE_FRAME:
+            got = [r for i, r in self.read_many(what, idx, 1)[0] if i == idx]
+            if not got:
+                sys.exit(f"0x{READ_MANY:02X}: {STATUS[8]}")
+            return got[0]
         rec = bytearray()
         while True:
             a = self.ok(READ, struct.pack("<BHHB", what, idx, len(rec), 200))
@@ -366,6 +374,10 @@ class Link:
                 return bytes(rec)
 
     def write(self, what, idx, rec, part=200):
+        """One record: a channel, zone or preset by WRITE_MANY (LINK-41); the settings and APRS by WRITE, in parts."""
+        if what in ONE_FRAME:
+            self.write_many(what, [(idx, rec)])
+            return
         for off in range(0, max(len(rec), 1), part):
             self.ok(WRITE, struct.pack("<BHHH", what, idx, off, len(rec)) + rec[off:off + part])
 

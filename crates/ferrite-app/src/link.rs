@@ -315,13 +315,13 @@ impl Session {
             // LINK-30: on Bluetooth with the PIN lock on, nothing else until AUTH.
             _ if !self.authorised(app) => Status::NotAuthorised,
             msg::INFO => info(app, st, dev, &mut o),
-            msg::READ => read(app, st, p, &mut o),
+            msg::READ => read(app, p, &mut o),
             msg::USED => used(st, p, &mut o),
-            msg::READ_MANY => read_many(app, st, p, &mut o),
+            msg::READ_MANY => read_many(st, p, &mut o),
             msg::LOG_READ => log_read(st, p, &mut o),
             msg::WRITE | msg::DELETE | msg::BEGIN | msg::WRITE_MANY => match self.may_write(app) {
                 Status::Ok => match ty {
-                    msg::WRITE => self.write(app, st, p, &mut o),
+                    msg::WRITE => self.write(app, p, &mut o),
                     msg::WRITE_MANY => self.write_many(p),
                     msg::DELETE => self.delete(app, st, p),
                     _ => self.begin(app, p),
@@ -413,7 +413,7 @@ impl Session {
             Ok(Done::Dump) => Run::Dump(DumpPos::default()),
             Ok(Done::Debug(j)) => Run::Debug(j),
             Ok(Done::Load) => {
-                o.put(b"load: not over the link; WRITE the records, or load in the terminal");
+                o.put(b"load: not over the link; write the records, or load in the terminal");
                 return Status::Invalid;
             }
             Err(m) => {
@@ -515,7 +515,7 @@ impl Session {
         (self.session, self.cancelled, self.asm_len) = (false, false, 0);
     }
 
-    fn write<S: ChannelStore>(&mut self, app: &mut App, st: &S, p: &[u8], o: &mut Out) -> Status {
+    fn write(&mut self, app: &mut App, p: &[u8], o: &mut Out) -> Status {
         if p.len() < 7 {
             return Status::BadArg;
         }
@@ -535,7 +535,13 @@ impl Session {
             return Status::Ok;
         }
         self.asm_len = 0;
-        let s = apply(app, st, w, idx, &self.asm[..total as usize], o);
+        let rec = &self.asm[..total as usize];
+        // LINK-21, LINK-3: the records bigger than a frame; a channel, zone or preset goes by `WRITE_MANY`
+        let s = match w {
+            what::SETTINGS if idx == 0 => apply_settings(app, rec),
+            what::APRS if idx == 0 => sub::aprs_apply(app, rec, o), // LINK-43
+            _ => Status::Refused,
+        };
         if s == Status::Ok && self.session {
             self.done = self.done.saturating_add(1);
         }
@@ -564,7 +570,7 @@ impl Session {
         Status::Ok
     }
 
-    /// The next record of a `WRITE_MANY`, applied as a `WRITE` of it would be (LINK-22's checks, LINK-9's count):
+    /// The next record of a `WRITE_MANY`, applied (LINK-22's checks, LINK-9's count):
     /// None while more follow; else the answer's length: the status, how many were applied, and a refusal's
     /// reason.
     fn many_step<S: ChannelStore>(&mut self, app: &mut App, st: &S, a: &mut [u8; MAX_PAYLOAD]) -> Option<usize> {
@@ -911,12 +917,9 @@ fn name_of<const N: usize>(b: &[u8]) -> Option<Buf<N>> {
     Some(Buf::from(&b[..n]))
 }
 
-/// Record `idx` of `w`, as `READ` gives it, into `win`: `not found` when there is none.
-fn record<S: ChannelStore>(app: &App, st: &S, w: u8, idx: u16, win: &mut Window) -> Status {
+/// Channel, zone or preset `idx`, as `READ_MANY` gives it, into `win`: `not found` when there is none.
+fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status {
     match w {
-        what::SETTINGS if idx == 0 => {
-            settings_record(app, win);
-        }
         what::CHANNEL => match st.get(idx) {
             Some(c) => channel_save(&c, win),
             None => return Status::NotFound,
@@ -929,22 +932,23 @@ fn record<S: ChannelStore>(app: &App, st: &S, w: u8, idx: u16, win: &mut Window)
             Some(pr) => preset_save(&pr, win),
             None => return Status::NotFound,
         },
-        what::APRS if idx == 0 => sub::aprs_record(app, win), // LINK-43
         _ => return Status::BadArg,
     }
     Status::Ok
 }
 
-fn read<S: ChannelStore>(app: &App, st: &S, p: &[u8], o: &mut Out) -> Status {
+fn read(app: &App, p: &[u8], o: &mut Out) -> Status {
     if p.len() < 6 {
         return Status::BadArg;
     }
     let (w, idx, off, len) = (p[0], le16(&p[1..]), le16(&p[3..]) as usize, (p[5] as usize).min(MAX_PAYLOAD - 3));
     let mut buf = [0u8; MAX_PAYLOAD];
     let mut win = Window { b: &mut buf[..len], from: off, n: 0 };
-    let s = record(app, st, w, idx, &mut win);
-    if s != Status::Ok {
-        return s;
+    match w {
+        // LINK-21: the records bigger than a frame; a channel, zone or preset goes by `READ_MANY`
+        what::SETTINGS if idx == 0 => _ = settings_record(app, &mut win),
+        what::APRS if idx == 0 => sub::aprs_record(app, &mut win), // LINK-43
+        _ => return Status::BadArg,
     }
     let total = win.n;
     if off > total {
@@ -996,7 +1000,7 @@ fn used<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
 
 /// `READ_MANY` (LINK-40): from `first`, `count` indexes on, each record held as a whole, as many as fit; the
 /// index to go on from first.
-fn read_many<S: ChannelStore>(app: &App, st: &S, p: &[u8], o: &mut Out) -> Status {
+fn read_many<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
     if p.len() < 5 {
         return Status::BadArg;
     }
@@ -1010,7 +1014,7 @@ fn read_many<S: ChannelStore>(app: &App, st: &S, p: &[u8], o: &mut Out) -> Statu
     while i < end {
         if held(st, w, i) {
             let mut win = Window { b: &mut buf, from: 0, n: 0 };
-            if record(app, st, w, i, &mut win) == Status::Ok {
+            if record(st, w, i, &mut win) == Status::Ok {
                 let k = win.n;
                 if o.n + 3 + k > MAX_PAYLOAD {
                     break;
@@ -1069,23 +1073,27 @@ fn log_read<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
     Status::Ok
 }
 
-/// A whole record written: checked like the radio's own editors (LINK-5), then saved the same way.
+/// The settings record written (`WRITE`): the protected ones keep the radio's (LINK-5).
+fn apply_settings(app: &mut App, rec: &[u8]) -> Status {
+    let old = *app.set;
+    let mut new = old;
+    new.load(&mut Rd { b: rec, n: 0 });
+    new.sanitize();
+    keep_protected(&mut new, &old);
+    *app.set = new;
+    app.send_radio_settings();
+    Status::Ok
+}
+
+/// A channel, zone or preset written (`WRITE_MANY`): checked like the radio's own editors (LINK-5), then saved the
+/// same way.
+#[inline(never)] // one copy, not one in `many_step` (flash)
 fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o: &mut Out) -> Status {
     let invalid = |o: &mut Out, why: &[u8]| {
         o.put(why);
         Status::Invalid
     };
     match w {
-        what::SETTINGS if idx == 0 => {
-            let old = *app.set;
-            let mut new = old;
-            new.load(&mut Rd { b: rec, n: 0 });
-            new.sanitize();
-            keep_protected(&mut new, &old);
-            *app.set = new;
-            app.send_radio_settings();
-            Status::Ok
-        }
         what::CHANNEL if idx < MAX_CHANNELS => {
             let mut c = Channel { num: idx, zone: NO_ZONE, rx: 0, name: [0; 16], cfg: SlotCfg::default(), flags: 0, tones: 0 };
             let mut r = Rd { b: rec, n: 0 };
@@ -1177,7 +1185,6 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             request(st, Op::PutPreset(idx as u8, p))
         }
         what::ZONE | what::PRESET => Status::NotFound,
-        what::APRS if idx == 0 => sub::aprs_apply(app, rec, o), // LINK-43
         _ => Status::Refused, // nothing else is written over the link (LINK-3)
     }
 }

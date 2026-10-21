@@ -51,9 +51,8 @@ def bt_reads_and_writes_without_pin(t):
     rec = bt.link.read(fl.CHANNEL, 0)
     s, _ = bt.link.ask(fl.BEGIN, struct.pack("<H", 1))
     t.eq(s, 0, "a write session from Bluetooth")
-    for off in range(0, len(rec), 200):
-        s, rest = bt.link.ask(fl.WRITE, struct.pack("<BHHH", fl.CHANNEL, 0, off, len(rec)) + rec[off:off + 200])
-        t.eq(s, 0, "the channel written back")
+    s, rest = bt.link.ask(fl.WRITE_MANY, bytes([fl.CHANNEL]) + struct.pack("<HB", 0, len(rec)) + rec)
+    t.eq(s, 0, "the channel written back")
     t.eq(bt.link.ask(fl.END)[0], 0, "the session ends")
     t.eq(bt.link.read(fl.CHANNEL, 0), rec, "channel 1 as it was")
     u = t.ui()
@@ -89,7 +88,7 @@ def bt_needs_the_pin_with_a_lock(t):
         bad = bytearray(rec)
         bad[3:7] = struct.pack("<I", 2_000_000_000)  # 20 GHz: no band has it
         try:
-            s, why = raw.link.ask(fl.WRITE, struct.pack("<BHHH", fl.CHANNEL, 0, 0, len(bad)) + bytes(bad[:200]))
+            s, why = raw.link.ask(fl.WRITE_MANY, bytes([fl.CHANNEL]) + struct.pack("<HB", 0, len(bad)) + bytes(bad))
             t.check(s != 0, "a channel outside every band: refused", (s, why))
         finally:
             raw.link.ask(fl.END)
@@ -192,8 +191,7 @@ def a_session_on_each_port(t):
         s, _ = bt.link.ask(fl.BEGIN, struct.pack("<H", 1))
         t.eq(s, 7, "Bluetooth's: busy meanwhile")
     finally:
-        for off in range(0, len(rec), 200):
-            t.r.link.ask(fl.WRITE, struct.pack("<BHHH", fl.CHANNEL, 0, off, len(rec)) + rec[off:off + 200])
+        t.r.link.ask(fl.WRITE_MANY, bytes([fl.CHANNEL]) + struct.pack("<HB", 0, len(rec)) + rec)
         t.r.link.ask(fl.END)
     s, _ = bt.link.ask(fl.BEGIN, struct.pack("<H", 1))
     t.eq(s, 0, "the cable's ended: Bluetooth's taken")

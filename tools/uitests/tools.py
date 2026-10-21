@@ -75,10 +75,11 @@ def clock_typed_by_hand(t):
     t.check(u.id != "Text", "a good date is taken", (u.id, u.toast))
 
 
-@test("LINK-21", "LINK-22")
+@test("LINK-21", "LINK-22", "LINK-40", "LINK-41")
 def link_records_round_trip(t):
-    """The link's READ gives channel 12 as `ch 12` shows it and the settings with the PIN as zeros; a channel
-    written over the link reads back; a bad one is refused `invalid` with the reason; delete removes it."""
+    """The link's READ_MANY gives channel 12 as `ch 12` shows it, READ the settings with the PIN as zeros; READ
+    of a channel answers bad argument and WRITE refused (channels go by READ_MANY/WRITE_MANY only); a channel written by
+    WRITE_MANY reads back; a bad one is refused `invalid` with the reason; delete removes it."""
     link = t.r.link
 
     def ask(ty, payload):
@@ -95,12 +96,19 @@ def link_records_round_trip(t):
             if len(rec) >= total:
                 return bytes(rec)
 
-    rec = read(fl.CHANNEL, 11)
+    def write_one(n, rec):
+        return ask(fl.WRITE_MANY, bytes([fl.CHANNEL]) + struct.pack("<HB", n, len(rec)) + bytes(rec))
+
+    got = [r for i, r in link.read_many(fl.CHANNEL, 11, 1)[0] if i == 11]
+    t.need(got, "channel 12 in use")
+    rec = got[0]
     num, zone, rx, name = fl.channel_fields(rec)
-    t.has(t.cmd("ch 12"), f'"{name}"', "READ channel 12's name")
+    t.has(t.cmd("ch 12"), f'"{name}"', "READ_MANY channel 12's name")
     t.eq(f"{rx / 100000:.5f}", t.cmd("ch 12").split('"')[2].split()[0], "and its frequency")
     st = read(fl.SETTINGS, 0)
     t.check(len(st) > 16, "the settings record", len(st))
+    s, a = ask(fl.READ, struct.pack("<BHHB", fl.CHANNEL, 11, 0, 200))
+    t.eq(s, 3, "READ of a channel: bad argument (LINK-21)")
     n = 989
     ok, out = t.cmd_err(f"ch {n + 1}")
     t.need(not ok and "no such channel" in out, f"channel {n + 1} in use: {out}")
@@ -111,15 +119,19 @@ def link_records_round_trip(t):
         s, a = ask(fl.BEGIN, struct.pack("<H", 1))
         t.check(s == 0, "BEGIN", fl.why(s, a))
         s, a = ask(fl.WRITE, struct.pack("<BHHH", fl.CHANNEL, n, 0, len(new)) + bytes(new))
-        t.check(s == 0, "WRITE channel 990", fl.why(s, a))
+        t.eq(s, 4, "WRITE of a channel: refused (LINK-21, LINK-3)")
+        ok, out = t.cmd_err(f"ch {n + 1}")
+        t.check(not ok and "no such channel" in out, "the refused WRITE wrote nothing", out)
+        s, a = write_one(n, new)
+        t.check(s == 0, "WRITE_MANY channel 990", fl.why(s, a[1:]))
         ask(fl.END, b"")
         t.has(t.cmd(f"ch {n + 1}"), "UITEST LINK", "channel 990 reads back on the terminal")
         bad = bytearray(new)
         bad[3:7] = struct.pack("<I", 70000000)  # 700 MHz: no chip receives it
         ask(fl.BEGIN, struct.pack("<H", 1))
-        s, a = ask(fl.WRITE, struct.pack("<BHHH", fl.CHANNEL, n, 0, len(bad)) + bytes(bad))
+        s, a = write_one(n, bad)
         ask(fl.END, b"")
-        t.check(s == 9 and a, "700 MHz refused as invalid with a reason", fl.why(s, a))
+        t.check(s == 9 and a[1:], "700 MHz refused as invalid with a reason", fl.why(s, a[1:]))
         t.has(t.cmd(f"ch {n + 1}"), "UITEST LINK", "the refused write changed nothing")
     finally:
         link.ask(fl.DELETE, struct.pack("<BH", fl.CHANNEL, n))
