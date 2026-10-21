@@ -506,6 +506,11 @@ impl Term {
         let rx = s.freq().clamp(mhz(64), mhz(1300)); // CHAN-22
         let zone = if self.zone == super::ALL { NO_ZONE } else { self.zone };
         let c = Channel { num, zone, rx, name: [0; 16], cfg: *s.cfg(), flags: 0, tones: 0 };
+        if let Err(r) = crate::chfield::check_edit(&c) {
+            let mut m = Msg::new();
+            r.line(&mut m);
+            return self.tell(m.as_bytes(), true); // the slot's TX wouldn't fit a channel (CHAN-22, TX-37)
+        }
         app.put_channel(c);
         (self.edit, self.field) = (Some(c), 0);
         self.vis_ok = false;

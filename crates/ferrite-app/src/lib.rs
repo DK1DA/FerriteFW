@@ -25,6 +25,7 @@ pub mod bcast;
 pub mod aprs_live;
 pub mod chan;
 pub mod chanscan;
+pub mod chfield;
 pub mod data;
 pub mod gpsdata;
 pub mod keys;
@@ -1455,6 +1456,12 @@ impl App {
             self.relay_toast();
             return false;
         }
+        let mut c = *s.cfg();
+        (c.split, c.offset) = (true, tx as i32);
+        if let Err(r) = self.channel_ok(a, c) {
+            self.refusal_toast(r);
+            return false;
+        }
         self.keep_undo();
         let c = self.slots[a as usize].cfg_mut();
         (c.split, c.offset) = (true, tx as i32);
@@ -1477,6 +1484,10 @@ impl App {
             self.relay_toast();
             return false;
         }
+        if let Err(r) = self.channel_ok(a, c) {
+            self.refusal_toast(r);
+            return false;
+        }
         self.keep_undo();
         *self.slots[a as usize].cfg_mut() = c;
         self.out.push(RadioCmd::SlotParam { slot: a, param, value });
@@ -1485,6 +1496,24 @@ impl App {
         }
         self.save_channel(a, None);
         true
+    }
+
+    /// A slot on a channel keeps that channel's rules ([`chfield::check_edit`]) with config `c`; a VFO has none.
+    fn channel_ok(&self, slot: u8, c: SlotCfg) -> Result<(), chfield::Refusal> {
+        let s = &self.slots[slot as usize];
+        match s.ch.filter(|_| s.on_channel()) {
+            Some(ch) => chfield::check_edit(&chan::Channel { cfg: c, ..ch }),
+            None => Ok(()),
+        }
+    }
+
+    /// A channel field's refusal as a toast: its label and why ("Offset", "TX outside 64 to 1000 MHz"); TX-37's
+    /// as [`App::relay_toast`].
+    pub(crate) fn refusal_toast(&mut self, r: chfield::Refusal) {
+        match r.field() {
+            Some(f) => self.show_toast(f.label(false).as_bytes(), r.why().as_bytes(), false),
+            None => self.relay_toast(),
+        }
     }
 
     /// TX-37's refusal when a shift or split is set (the full sentence is on the TX refused screen).
@@ -1510,6 +1539,7 @@ impl App {
             Item::Watch | Item::BatterySave | Item::Channel | Item::Advanced => None,
             _ if self.aprs_slot(self.active) => Some(self.aprs_holds()),
             Item::Step if s.on_channel() => Some("VFO only"), // VFO-8
+            Item::Power if self.rx_only(self.active) => Some(chfield::Refusal::RxOnly.why()), // CHAN-4, EDIT-7
             Item::Power if self.capped(self.active) => Some("Fixed at 0.25 W on 1.25 m"),
             _ => None,
         }
@@ -1559,6 +1589,11 @@ impl App {
                         *c = old; // TX-37: a shift that crosses the relay boundary isn't kept
                         self.relay_toast();
                         return;
+                    }
+                    let new = *c;
+                    if let Err(r) = self.channel_ok(a, new) {
+                        *self.slots[a as usize].cfg_mut() = old; // a channel's own rules (CHAN-22)
+                        return self.refusal_toast(r);
                     }
                     let value = if param == Param::Squelch { self.sq_level(a) as i32 } else { value };
                     self.out.push(RadioCmd::SlotParam { slot: a, param, value });

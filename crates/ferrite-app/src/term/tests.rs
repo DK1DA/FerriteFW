@@ -3,6 +3,8 @@
 use ufmt::uwrite;
 use super::*;
 use crate::sample::Sample;
+use crate::slot::{band_of, BAND_125M};
+use ferrite_core::freq::mhz;
 use std::string::String;
 use std::vec;
 use std::vec::Vec;
@@ -1115,6 +1117,85 @@ fn editor_split() {
     assert!(c.cfg.split, "{:?}", c.cfg);
     assert_eq!(c.cfg.offset, 14_439_000);
     assert!(r.vt.has("Split 144.390") && r.vt.has("144.39000 MHz, split"), "{}", r.vt.text());
+}
+
+/// The last `ch N` line the console printed.
+fn ch_shown(r: &Rig<Sample>, n: u16) -> String {
+    let raw = r.raw();
+    let at = raw.rfind(&std::format!("ch {} \"", n)).expect("shown");
+    raw[at..].split(['\r', '\n']).next().unwrap().into()
+}
+
+/// CHAN-32, decision 223: `ch` changes one field with the editors' rules (crate::chfield): Skip and Priority exclude
+/// each other (decision 63, CHAN-24); a simplex channel above 1000 MHz is kept, a shift that puts TX there isn't
+/// (CHAN-22, VFO-21); power goes by the TX band (TX-9): capped with TX on 1.25 m, free with only RX there, a channel
+/// retuned onto 1.25 m keeps its stored power and shows `power=low`; an RX-only channel's power is refused (CHAN-4).
+#[test]
+fn ch_field_rules() {
+    let mut r = Rig::main();
+    r.cmd("ch 330 \"Scan\" 146.52 skip");
+    r.cmd("ch 330 priority");
+    let c = r.store.by_num(329).unwrap().0;
+    assert_eq!((c.scan(), c.flags & FLAG_SKIP), (2, 0), "priority replaces skip");
+    r.cmd("ch 330 skip off");
+    assert_eq!(r.store.by_num(329).unwrap().0.scan(), 2, "skip off leaves priority");
+    r.cmd("ch 330");
+    let l = ch_shown(&r, 330);
+    assert!(l.ends_with(" priority") && !l.contains("skip"), "{l}");
+    r.send(b"\r");
+    r.cmd("ch 331 \"Hi\" 1296.0");
+    assert!(r.store.by_num(330).is_some(), "receive only up there: {}", r.bottom());
+    r.cmd("ch 331 offset=+5");
+    assert!(r.bottom().contains("offset: TX outside 64 to 1000 MHz"), "{}", r.bottom());
+    r.cmd("ch 332 \"Odd\" 223.5 tx=446.0");
+    r.cmd("ch 332 power high");
+    assert_eq!(r.store.by_num(331).unwrap().0.cfg.power, 2, "TX on 70 cm: {}", r.bottom());
+    r.cmd("ch 333 \"Cap\" 446.0 tx=223.5");
+    r.cmd("ch 333 power high");
+    assert!(r.bottom().contains("power: fixed at 0.25 W on 1.25 m; use power=low"), "{}", r.bottom());
+    r.cmd("ch 334 \"Mv\" 446.0 power=high");
+    r.cmd("ch 334 rx=223.5");
+    let c = r.store.by_num(333).unwrap().0;
+    assert_eq!((c.rx, c.cfg.power), (22_350_000, 2), "kept: TX-9 caps it: {}", r.bottom());
+    r.cmd("ch 334");
+    assert!(ch_shown(&r, 334).contains(" power=low"), "as it transmits");
+    r.send(b"\r");
+    r.cmd("ch 335 \"RO\" 146.52 rxonly");
+    r.cmd("ch 335 power high");
+    assert!(r.bottom().contains("power: this channel is RX only"), "{}", r.bottom());
+}
+
+/// CHAN-32, decision 223: the terminal's editor with the radio's rules: # on Squelch is Global (SQL-6, MENU-18), one
+/// Scan row (decision 63), Offset onto Split keeps today's TX and opens the TX row (VFO-16), typed RX checked whole
+/// (CHAN-26: NFM isn't an HF channel's mode).
+#[test]
+fn editor_shared_rules() {
+    let mut r = Rig::main();
+    r.cmd("ch 340 \"Ed\" 146.52 squelch=7");
+    let open = |r: &mut Rig<Sample>, f: F| {
+        r.term.edit = r.store.get(339);
+        r.term.field = FIELDS.iter().position(|x| *x == f).unwrap() as u8;
+        r.term.go(Page::Edit);
+        r.poll();
+    };
+    open(&mut r, F::It(Item::Squelch));
+    r.send(b"#");
+    assert_eq!(r.store.get(339).unwrap().cfg.squelch, crate::slot::SQ_GLOBAL);
+    open(&mut r, F::Scan);
+    r.send(b"\x1b[C");
+    assert!(r.vt.has("Skip"), "{}", r.vt.text());
+    r.send(b"\x1b[C");
+    assert_eq!(r.store.get(339).unwrap().flags & (FLAG_SKIP | FLAG_PRIORITY), FLAG_PRIORITY);
+    open(&mut r, F::It(Item::Offset));
+    r.send(b"\x1b[D");
+    assert_eq!(FIELDS[r.term.field as usize], F::Tx, "typing the TX now");
+    r.send(b"\x1b");
+    let c = r.store.get(339).unwrap();
+    assert!(c.cfg.split && c.cfg.offset == c.rx as i32, "split on today's TX: {:?}", c.cfg);
+    open(&mut r, F::Rx);
+    r.send(b"\r7.1\r");
+    assert!(r.vt.has("Mode: an HF channel is AM"), "{}", r.vt.text());
+    assert_eq!(r.store.get(339).unwrap().rx, 14_652_000);
 }
 
 /// TX-37 from the cable: a channel line whose split TX needs the other relay state is refused, typed or loaded.

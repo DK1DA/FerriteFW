@@ -10,7 +10,8 @@ use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIO
 use crate::data::{Op, Pos, RangePreset, ZoneCfg};
 use crate::screens::groups::{self, SUBS};
 use crate::screens::tones::{CTCSS_MAX, CTCSS_MIN};
-use crate::slot::{band_of, BAND_125M, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
+use crate::chfield::{self, ChField, Refusal};
+use crate::slot::{Item, SLOT_MODES, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SQ_GLOBAL, STEPS, STEP_12K5};
 use crate::App;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::Device;
@@ -589,7 +590,7 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     offset_kv(g.split, g.offset, out);
     mode_word(g.mode, out);
     tones(g.tx_tone, g.rx_tone, out);
-    power_word(g.power, out);
+    power_word(chfield::power(c), out); // as it transmits: Low on 1.25 m (TX-9)
     if c.zone != NO_ZONE && c.zone < st.zones() {
         num(out, b" zone=", c.zone as u32 + 1);
     }
@@ -616,11 +617,11 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     }
     for (on, w) in [
         (g.reverse, "reverse"),
-        (c.flags & FLAG_SKIP != 0, "skip"),
+        (c.scan() == 1, "skip"),
         (c.flags & FLAG_APRS != 0, "aprs"),
         (c.flags & FLAG_RX_ONLY != 0, "rxonly"),
         (c.flags & FLAG_HIDDEN != 0, "hidden"),
-        (c.flags & FLAG_PRIORITY != 0, "priority"),
+        (c.scan() == 2, "priority"),
     ] {
         if on {
             out.push(b" ");
@@ -642,7 +643,14 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
             Some(Tok::Word(w)) => on_off(w, what)?,
             Some(Tok::Quoted(_)) => return Err(msg!("{}: on or off", what)),
         };
-        c.flags = if on { c.flags | bit } else { c.flags & !bit };
+        // Skip and Priority exclude each other (decision 63): one on puts the channel there, off only leaves it
+        let s = [FLAG_SKIP, FLAG_PRIORITY].iter().position(|&b| b == bit).map(|i| i as u8 + 1);
+        match s {
+            Some(s) if on => c.set_scan(s),
+            Some(s) if c.scan() == s => c.set_scan(0),
+            Some(_) => {}
+            None => c.flags = if on { c.flags | bit } else { c.flags & !bit },
+        }
         Ok(())
     };
     match k {
@@ -728,38 +736,29 @@ fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -
     Ok(())
 }
 
-/// What the radio's channel editor would refuse (CHAN-22, TX-9, TERM-7).
+/// What the radio's channel editor would refuse (CHAN-22, TX-9, TERM-7): [`chfield::check`] for a whole channel.
 pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
-    if !crate::chan::rx_ok(c.rx) {
-        return Err(msg!("rx: 0.15-64 MHz (HF), 64-630 or 756-1300 MHz"));
+    match chfield::check(c) {
+        Err(Refusal::Relay | Refusal::TxRange) if c.cfg.split && c.cfg.offset <= 0 => Err(msg!("offset=split needs its TX frequency: tx=146.52")),
+        r => r.map_err(refusal),
     }
-    if c.is_hf() {
-        // CHAN-26: HF mode's frequency and mode, simplex
-        if !crate::screens::hf::channel_mode_ok(c.rx, c.cfg.mode) {
-            return Err(msg!("mode: an HF channel is AM, USB, LSB or CW (FM from 18 MHz)"));
-        }
-        if c.cfg.offset != 0 || c.cfg.split {
-            return Err(msg!("offset: an HF channel is simplex"));
-        }
-        return Ok(());
+}
+
+/// A refusal headed by its field's key ("power: fixed at 0.25 W on 1.25 m; use power=low").
+fn refusal(r: Refusal) -> Msg {
+    let key = match r.field() {
+        Some(ChField::Rx) => "rx: ",
+        Some(ChField::It(Item::Mode)) => "mode: ",
+        Some(ChField::It(Item::Offset)) => "offset: ",
+        Some(ChField::It(Item::Power)) => "power: ",
+        Some(_) => "name: ",
+        None => "",
+    };
+    let mut m = msg!("{}{}", key, r.why());
+    if r == Refusal::Capped {
+        m.push(b"; use power=low");
     }
-    if c.cfg.mode as usize >= SLOT_MODES {
-        return Err(msg!("mode: USB, LSB and CW are for HF channels"));
-    }
-    if c.cfg.split && c.cfg.offset <= 0 {
-        return Err(msg!("offset=split needs its TX frequency: tx=146.52"));
-    }
-    if !ferrite_core::txplan::relay_ok(c.cfg.rx_of(c.rx), c.cfg.tx_of(c.rx)) {
-        return Err(msg!("Split TX needs the HF relay: not allowed with this RX frequency")); // TX-37
-    }
-    let tx = c.cfg.tx_of(c.rx) as i64;
-    if !(mhz(64) as i64..mhz(1000) as i64).contains(&tx) {
-        return Err(msg!("offset: TX outside 64 to 1000 MHz")); // never TX above 1000
-    }
-    if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) && c.cfg.power != 0 { // the cap goes by the TX band
-        return Err(msg!("power: fixed at 0.25 W on 1.25 m; use power=low"));
-    }
-    Ok(())
+    m
 }
 
 /// Saves a channel (TERM-9) unless the store already holds it exactly: a load of the same dump writes nothing.
@@ -837,14 +836,12 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                 }
                 return Ok(Done::Said(save_pos(app, st, c, p)));
             }
-            if band_of(c.rx) == Some(BAND_125M) && same(key, b"power") {
-                return Err(msg!("power: fixed at 0.25 W on 1.25 m"));
-            }
+            let was = c;
             field(&mut c, key, v, st)?;
             if t.next()?.is_some() {
                 return Err(msg!("ch: one field at a time"));
             }
-            check(&c)?;
+            chfield::check_change(&was, &c).map_err(refusal)?; // as the editors change a field
             Ok(Done::Said(save(app, st, c)))
         }
     }
