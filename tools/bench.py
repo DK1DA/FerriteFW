@@ -38,7 +38,8 @@ Safety gates: nothing is keyed unless all of these hold, checked right before ev
     string says so ("dry"/"TX DRY"), or --flash flashed an image with the "TX DRY" boot line in it in this same
     invocation. Firmware from before the build byte doesn't say it, so without one of these the bench refuses,
     unless --i-know-its-tx-dry is given (a warning is printed and recorded). A full-power `tx` build is accepted
-    only while it says tx+dry (Dry TX on, MENU 0 8 9 2; TX-48: build byte 0x03, no bench bit): its bar must still
+    only while it says tx+dry (Dry TX on, MENU 0 8 9 2, or --dry-on, which turns it on from the PC: TX-48.2; TX-48:
+    build byte 0x03, no bench bit): its bar must still
     say dry=1 before every KEY on, and what needs txtest (the suites, the AFSK level sweep) is skipped, said why;
   - the build transmits at all (`txtest` isn't refused as a receive-only build);
   - the slot is on its VFO at one of the approved test frequencies (config `test_freqs`), with no offset and no
@@ -1170,6 +1171,12 @@ class Bench:
     def check_build(self, hello, info, flashed_dry=None):
         ver = info.get("version") or hello.get("version")
         said = hello.get("build", "not given")
+        if said == "tx" and getattr(self.a, "dry_on", False):
+            # TX-48.2: the PC may turn Dry TX on (never off); the radio must then say tx+dry, checked below as usual.
+            self.radio.term("set 0 8 9 2 On")
+            hello = self.radio.hello()
+            said = hello.get("build", "not given")
+            self.out(f"Dry TX turned on from the PC (--dry-on, TX-48.2): the radio now says {said}")
         if said not in ("not given", "tx-dry", "tx+dry"):
             # LINK-35 (decision 151): the radio names its build; a receive or full-power tx build is never keyed,
             # unless Dry TX is on (TX-48: it then says tx+dry; the tx-bench build starts so, TX-48.1).
@@ -2455,6 +2462,9 @@ class FakeRadio:
         if self.key:
             raise TermError(f"{line}: transmitting: nothing changes while keyed (TX-22)")
         w = line.split()
+        if line == "set 0 8 9 2 On" and self.build in ("tx", "tx+dry"):
+            self.build = "tx+dry"  # TX-48.2: on from the PC
+            return "0 8 9 2 Dry TX: On\n"
         if w[0] == "ui":
             self.ui_reads += 1
             return f"screen Home \"Home\"\nbar lock=0 scan=0 bt=0 cutoff=0 dry={int(self.dry())}\n"
@@ -3368,7 +3378,7 @@ def selftest(a):
         say(lines[-1])
 
     def args(**kw):
-        d = dict(runs=None, refusals=False, keepalive=False, timeout=False, i_know_its_tx_dry=False, clear_offset=False,
+        d = dict(runs=None, refusals=False, keepalive=False, timeout=False, i_know_its_tx_dry=False, dry_on=False, clear_offset=False,
                  flash=None, build=None, keep_captures=True, verbose=False, load=None, sweep=None, sweep_from=None,
                  sweep_items=None, count=None, resume=None, tests=None)
         d.update(kw)
@@ -3412,6 +3422,16 @@ def selftest(a):
     except Exception as e:  # noqa: BLE001 - the selftest reports it
         check("gate: a tx build reporting Dry TX (tx+dry) is accepted", False, str(e)[:120])
     gated("gate: a tx build not reporting Dry TX is refused (TX-48)", {"build": "tx"}, {}, "turn Dry TX on")
+    # TX-48.2: --dry-on turns Dry TX on from the PC, then the tx+dry gate applies as usual.
+    clk = FakeClock()
+    r = FakeRadio(clk, build="tx")
+    try:
+        b = Bench(cfg, args(runs="vhf-wide", dry_on=True), radio=r, sdr=FakeSdr(r, clk), clock=clk)
+        b.check_build(r.hello(), r.info())
+        check("gate: --dry-on turns Dry TX on (TX-48.2) and the tx+dry gate passes",
+              "set 0 8 9 2 On" in r.calls and r.build == "tx+dry" and b.live_dry, r.calls)
+    except Exception as e:  # noqa: BLE001 - the selftest reports it
+        check("gate: --dry-on turns Dry TX on (TX-48.2) and the tx+dry gate passes", False, str(e)[:120])
     r = gated("gate: Dry TX turned off on the radio before the key-up -> refused (TX-48)",
               {"build": "tx+dry", "dry_off_after": 0}, {"keepalive": True}, "Dry TX still on")
     check("  ... and never keyed", r is not None and "KEY on" not in r.calls, r and r.calls[-4:])
@@ -3599,6 +3619,8 @@ def main():
                     + ", ".join(benchtests.names()) + "); with --dry-plan its plan; alone, no suite runs or sweeps")
     ap.add_argument("--tests", metavar="A,B", help="with --suite: only these tests (names as --dry-plan lists them)")
     ap.add_argument("--flash", metavar="IMAGE", help="flash this tx-dry image first (flash.py --backup)")
+    ap.add_argument("--dry-on", action="store_true",
+                    help="a tx build with Dry TX off: turn it on from the PC first (TX-48.2; only the radio turns it off)")
     ap.add_argument("--i-know-its-tx-dry", action="store_true", help="the radio runs a tx-dry build (can't be read over the link)")
     ap.add_argument("--clear-offset", action="store_true", help="clear the VFO's repeater shift by a tune to 160 MHz and back")
     ap.add_argument("--build", help="the build's label for the results (default: version + image or host git hash)")

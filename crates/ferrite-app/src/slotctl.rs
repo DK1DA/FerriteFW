@@ -148,10 +148,17 @@ impl App {
         // Each field through the keypad's path, on `s` as the active slot (they all act on the active one).
         let was = self.active;
         self.active = s;
-        if ch.power.is_some() {
-            if let Some(why) = self.greyed(Item::Power).filter(|_| ch.power != Some(self.slots[s as usize].cfg().power)) {
+        if ch.power.is_some() && ch.power != Some(self.slots[s as usize].cfg().power) {
+            // 1.25 m: fixed at 0.25 W (TX-10), judged on the frequency and shift the whole change leaves the slot on
+            // (TERM-15.1), not the one it is on now.
+            let rx = ch.freq.unwrap_or_else(|| self.tuned_freq(s));
+            let mut c = self.tuned_cfg(s);
+            if let Some((v, split)) = ch.offset {
+                (c.offset, c.split) = (v, split);
+            }
+            if crate::slot::band_of(c.tx_of(rx)) == Some(crate::slot::BAND_125M) {
                 self.active = was;
-                return Err(why); // 1.25 m: fixed at 0.25 W (TX-10)
+                return Err("Fixed at 0.25 W on 1.25 m");
             }
         }
         if ch.vfo && !self.slots[s as usize].vfo_mode {

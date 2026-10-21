@@ -279,9 +279,9 @@ All settings are at their defaults.
 :_ :get 0 1 6 5_ 0 1 6 5 Priority check: Every 2 s
 :_ :get 0 1 7_ 0 1 7 Range presets: 4 presets
 :_ :get 0 1 8_ 0 1 8 Skip list: Empty
-:_ :get 0 2 1_ 0 2 1 Browse:
-:_ :get 0 2 2_ 0 2 2 Add repeater:
-:_ :get 0 2 3_ 0 2 3 Zones:
+:_ :get 0 2 1_ 0 2 1 Browse: a page on the radio, not a setting
+:_ :get 0 2 2_ 0 2 2 Add repeater: a page on the radio, not a setting
+:_ :get 0 2 3_ 0 2 3 Zones: a page on the radio, not a setting
 :_ :get 0 2 4_ 0 2 4 Nearby: Off
 :_ :get 0 2 5_ 0 2 5 Channel display: Name
 :_ :get 0 3 1_ a menu number from MENU, e.g. 0 7 1 (Theme)
@@ -296,12 +296,12 @@ All settings are at their defaults.
 :_ :get 0 3 2 3_ 0 3 2 3 Sweep speed: 10.0 ms
 :_ :get 0 3 2 4_ 0 3 2 4 Trigger: Off
 :_ :get 0 3 2 5_ 0 3 2 5 Waterfall row: Off
-:_ :get 0 3 2 6_ 0 3 2 6 Open band scope:
-:_ :get 0 3 3_ 0 3 3 Frequency counter:
-:_ :get 0 3 4_ 0 3 4 HF mode:
-:_ :get 0 3 5_ 0 3 5 Crossband repeater:
-:_ :get 0 3 6_ 0 3 6 Tone search:
-:_ :get 0 4 1_ 0 4 1 Event log:
+:_ :get 0 3 2 6_ 0 3 2 6 Open band scope: a page on the radio, not a setting
+:_ :get 0 3 3_ 0 3 3 Frequency counter: a page on the radio, not a setting
+:_ :get 0 3 4_ 0 3 4 HF mode: a page on the radio, not a setting
+:_ :get 0 3 5_ 0 3 5 Crossband repeater: a page on the radio, not a setting
+:_ :get 0 3 6_ 0 3 6 Tone search: a page on the radio, not a setting
+:_ :get 0 4 1_ 0 4 1 Event log: a page on the radio, not a setting
 :_ :get 0 4 2_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 2 1_ 0 4 2 1 Decode: Off
 :_ :get 0 4 2 2_ 0 4 2 2 Frequency: 439.987
@@ -312,7 +312,7 @@ All settings are at their defaults.
 :_ :get 0 4 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 4 1_ 0 4 4 1 AIS: Off
 :_ :get 0 4 4 2_ 0 4 4 2 Range filter: 25 nm
-:_ :get 0 4 5_ 0 4 5 -:
+:_ :get 0 4 5_ 0 4 5 -: a page on the radio, not a setting
 :_ :get 0 4 6_ 0 4 6 Selcall, MDC1200: Off
 :_ :get 0 4 7_ 0 4 7 DTMF decode: Off
 :_ :get 0 4 8_ 0 4 8 Popups: On
@@ -320,8 +320,8 @@ All settings are at their defaults.
 :_ :get 0 4 9 1_ 0 4 9 1 SAME: On
 :_ :get 0 4 9 2_ 0 4 9 2 Location codes: None
 :_ :get 0 4 9 3_ 0 4 9 3 Channel: Auto
-:_ :get 0 5 1_ 0 5 1 Heard:
-:_ :get 0 5 2_ 0 5 2 Messages:
+:_ :get 0 5 1_ 0 5 1 Heard: a page on the radio, not a setting
+:_ :get 0 5 2_ 0 5 2 Messages: a page on the radio, not a setting
 :_ :get 0 5 3_ 0 5 3 APRS mode: Off
 :_ :get 0 5 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 5 4 1_ 0 5 4 1 SSID: 7 Handheld
@@ -358,12 +358,12 @@ All settings are at their defaults.
 :_ :get 0 5 9 4_ 0 5 9 4 Mailbox frequency: None
 :_ :get 0 5 9 5_ 0 5 9 5 Bulletins: On
 :_ :get 0 6 1_ 0 6 1 GPS: On
-:_ :get 0 6 2_ 0 6 2 Position:
+:_ :get 0 6 2_ 0 6 2 Position: a page on the radio, not a setting
 :_ :get 0 6 3_ 0 6 3 Coordinate format: Deg, min
 :_ :get 0 6 4_ 0 6 4 Units: Metric
 :_ :get 0 6 5_ 0 6 5 Time zone: UTC
 :_ :get 0 6 6_ 0 6 6 Clock: 24 h, GPS
-:_ :get 0 6 7_ 0 6 7 Waypoints:
+:_ :get 0 6 7_ 0 6 7 Waypoints: a page on the radio, not a setting
 :_ :get 0 6 8_ 0 6 8 GPS during RX/TX: Always on
 :_ :get 0 6 9_ 0 6 9 Fixed position: None
 :_ :get 0 7 1_ 0 7 1 Theme: Dark
@@ -396,16 +396,16 @@ All settings are at their defaults.
 :_ :get 0 8 2 3_ 0 8 2 3 Tail: 2 s
 :_ :get 0 8 3_ 0 8 3 Mic gain: 5
 :_ :get 0 8 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 4 1_ 0 8 4 1 -:
+:_ :get 0 8 4 1_ 0 8 4 1 -: a page on the radio, not a setting
 :_ :get 0 8 4 2_ 0 8 4 2 Subtone level: Normal
 :_ :get 0 8 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 5 1_ 0 8 5 1 Mode: Off
 :_ :get 0 8 5 2_ 0 8 5 2 Phase: 55 Hz
-:_ :get 0 8 5 3_ 0 8 5 3 -:
+:_ :get 0 8 5 3_ 0 8 5 3 -: a page on the radio, not a setting
 :_ :get 0 8 5 4_ 0 8 5 4 End tone: Off
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 6 1_ 0 8 6 1 Dialer:
-:_ :get 0 8 6 2_ 0 8 6 2 Memories:
+:_ :get 0 8 6 1_ 0 8 6 1 Dialer: a page on the radio, not a setting
+:_ :get 0 8 6 2_ 0 8 6 2 Memories: a page on the radio, not a setting
 :_ :get 0 8 6 3_ 0 8 6 3 Speed: 100 ms
 :_ :get 0 8 6 4_ 0 8 6 4 PTT ID on VFOs: Off
 :_ :get 0 8 6 5_ 0 8 6 5 ID code: Empty
@@ -421,11 +421,11 @@ All settings are at their defaults.
 :_ :get 0 9 1_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 1 1_ 0 9 1 1 Auto lock: Off
 :_ :get 0 9 1 2_ 0 9 1 2 Lock covers: Keys
-:_ :get 0 9 1 3_ 0 9 1 3 Key test:
-:_ :get 0 9 1 4_ 0 9 1 4 Shortcuts:
+:_ :get 0 9 1 3_ 0 9 1 3 Key test: a page on the radio, not a setting
+:_ :get 0 9 1 4_ 0 9 1 4 Shortcuts: a page on the radio, not a setting
 :_ :get 0 9 2_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 2 1_ 0 9 2 1 Bluetooth: Off
-:_ :get 0 9 2 2_ 0 9 2 2 Link status:
+:_ :get 0 9 2 2_ 0 9 2 2 Link status: a page on the radio, not a setting
 :_ :get 0 9 2 3_ 0 9 2 3 Debug console: Off
 :_ :get 0 9 2 4_ 0 9 2 4 Cable port: Auto
 :_ :get 0 9 2 5_ 0 9 2 5 Terminal colour: Off
@@ -436,7 +436,7 @@ All settings are at their defaults.
 :_ :get 0 9 3 3_ 0 9 3 3 Change PIN: None
 :_ :get 0 9 4_ 0 9 4 Region: Not set
 :_ :get 0 9 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 9 5 1_ 0 9 5 1 Advanced squelch:
+:_ :get 0 9 5 1_ 0 9 5 1 Advanced squelch: a page on the radio, not a setting
 :_ :get 0 9 5 2_ 0 9 5 2 Squelch tail: 150 ms
 :_ :get 0 9 5 3_ 0 9 5 3 Discriminator mode: Off
 :_ :get 0 9 6_ 0 9 6 SSB patch: Not installed
@@ -445,8 +445,8 @@ All settings are at their defaults.
 :_ :get 0 9 7 2_ 0 9 7 2 Crystal trim: 0 ppm
 :_ :get 0 9 7 3_ 0 9 7 3 Battery reading trim: +0.00 V
 :_ :get 0 9 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 9 8 1_ 0 9 8 1 Run setup again:
-:_ :get 0 9 8 2_ 0 9 8 2 Reset:
+:_ :get 0 9 8 1_ 0 9 8 1 Run setup again: a page on the radio, not a setting
+:_ :get 0 9 8 2_ 0 9 8 2 Reset: a page on the radio, not a setting
 :_ :get 0 9 9_ 0 9 9 About: v0.1.0
 -- knob and #
 change [1, 1] 1: true Some(true) A+B+C [Watch(7)] Home
@@ -2543,9 +2543,9 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 1 6 5_ 0 1 6 5 Priority check: Every 4 s (not the default)
 :_ :get 0 1 7_ 0 1 7 Range presets: 4 presets
 :_ :get 0 1 8_ 0 1 8 Skip list: Empty
-:_ :get 0 2 1_ 0 2 1 Browse:
-:_ :get 0 2 2_ 0 2 2 Add repeater:
-:_ :get 0 2 3_ 0 2 3 Zones:
+:_ :get 0 2 1_ 0 2 1 Browse: a page on the radio, not a setting
+:_ :get 0 2 2_ 0 2 2 Add repeater: a page on the radio, not a setting
+:_ :get 0 2 3_ 0 2 3 Zones: a page on the radio, not a setting
 :_ :get 0 2 4_ 0 2 4 Nearby: Off
 :_ :get 0 2 5_ 0 2 5 Channel display: Name
 :_ :get 0 3 1_ a menu number from MENU, e.g. 0 7 1 (Theme)
@@ -2560,12 +2560,12 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 3 2 3_ 0 3 2 3 Sweep speed: 10.0 ms
 :_ :get 0 3 2 4_ 0 3 2 4 Trigger: Monitor (not the default)
 :_ :get 0 3 2 5_ 0 3 2 5 Waterfall row: Off
-:_ :get 0 3 2 6_ 0 3 2 6 Open band scope:
-:_ :get 0 3 3_ 0 3 3 Frequency counter:
-:_ :get 0 3 4_ 0 3 4 HF mode:
-:_ :get 0 3 5_ 0 3 5 Crossband repeater:
-:_ :get 0 3 6_ 0 3 6 Tone search:
-:_ :get 0 4 1_ 0 4 1 Event log:
+:_ :get 0 3 2 6_ 0 3 2 6 Open band scope: a page on the radio, not a setting
+:_ :get 0 3 3_ 0 3 3 Frequency counter: a page on the radio, not a setting
+:_ :get 0 3 4_ 0 3 4 HF mode: a page on the radio, not a setting
+:_ :get 0 3 5_ 0 3 5 Crossband repeater: a page on the radio, not a setting
+:_ :get 0 3 6_ 0 3 6 Tone search: a page on the radio, not a setting
+:_ :get 0 4 1_ 0 4 1 Event log: a page on the radio, not a setting
 :_ :get 0 4 2_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 2 1_ 0 4 2 1 Decode: Off
 :_ :get 0 4 2 2_ 0 4 2 2 Frequency: 440.012 (not the default)
@@ -2576,7 +2576,7 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 4 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 4 1_ 0 4 4 1 AIS: Off
 :_ :get 0 4 4 2_ 0 4 4 2 Range filter: 25 nm
-:_ :get 0 4 5_ 0 4 5 -:
+:_ :get 0 4 5_ 0 4 5 -: a page on the radio, not a setting
 :_ :get 0 4 6_ 0 4 6 Selcall, MDC1200: Off
 :_ :get 0 4 7_ 0 4 7 DTMF decode: Off
 :_ :get 0 4 8_ 0 4 8 Popups: On
@@ -2584,8 +2584,8 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 4 9 1_ 0 4 9 1 SAME: On
 :_ :get 0 4 9 2_ 0 4 9 2 Location codes: 1 code (not the default)
 :_ :get 0 4 9 3_ 0 4 9 3 Channel: Auto
-:_ :get 0 5 1_ 0 5 1 Heard:
-:_ :get 0 5 2_ 0 5 2 Messages:
+:_ :get 0 5 1_ 0 5 1 Heard: a page on the radio, not a setting
+:_ :get 0 5 2_ 0 5 2 Messages: a page on the radio, not a setting
 :_ :get 0 5 3_ 0 5 3 APRS mode: Off
 :_ :get 0 5 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 5 4 1_ 0 5 4 1 SSID: 10 I-Gate/net (not the default)
@@ -2622,12 +2622,12 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 5 9 4_ 0 5 9 4 Mailbox frequency: None
 :_ :get 0 5 9 5_ 0 5 9 5 Bulletins: On
 :_ :get 0 6 1_ 0 6 1 GPS: On
-:_ :get 0 6 2_ 0 6 2 Position:
+:_ :get 0 6 2_ 0 6 2 Position: a page on the radio, not a setting
 :_ :get 0 6 3_ 0 6 3 Coordinate format: Deg, min
 :_ :get 0 6 4_ 0 6 4 Units: Metric
 :_ :get 0 6 5_ 0 6 5 Time zone: UTC+3:30 (not the default)
 :_ :get 0 6 6_ 0 6 6 Clock: 12 h, GPS (not the default)
-:_ :get 0 6 7_ 0 6 7 Waypoints:
+:_ :get 0 6 7_ 0 6 7 Waypoints: a page on the radio, not a setting
 :_ :get 0 6 8_ 0 6 8 GPS during RX/TX: Off on both (not the default)
 :_ :get 0 6 9_ 0 6 9 Fixed position: JJ00aa (not the default)
 :_ :get 0 7 1_ 0 7 1 Theme: Dark
@@ -2660,16 +2660,16 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 8 2 3_ 0 8 2 3 Tail: 5 s (not the default)
 :_ :get 0 8 3_ 0 8 3 Mic gain: 8 (not the default)
 :_ :get 0 8 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 4 1_ 0 8 4 1 -:
+:_ :get 0 8 4 1_ 0 8 4 1 -: a page on the radio, not a setting
 :_ :get 0 8 4 2_ 0 8 4 2 Subtone level: High (not the default)
 :_ :get 0 8 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 5 1_ 0 8 5 1 Mode: Transmit (not the default)
 :_ :get 0 8 5 2_ 0 8 5 2 Phase: 240?? (not the default)
-:_ :get 0 8 5 3_ 0 8 5 3 -:
+:_ :get 0 8 5 3_ 0 8 5 3 -: a page on the radio, not a setting
 :_ :get 0 8 5 4_ 0 8 5 4 End tone: Chirp (not the default)
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 6 1_ 0 8 6 1 Dialer:
-:_ :get 0 8 6 2_ 0 8 6 2 Memories:
+:_ :get 0 8 6 1_ 0 8 6 1 Dialer: a page on the radio, not a setting
+:_ :get 0 8 6 2_ 0 8 6 2 Memories: a page on the radio, not a setting
 :_ :get 0 8 6 3_ 0 8 6 3 Speed: 120 ms (not the default)
 :_ :get 0 8 6 4_ 0 8 6 4 PTT ID on VFOs: Off
 :_ :get 0 8 6 5_ 0 8 6 5 ID code: Empty
@@ -2685,11 +2685,11 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 9 1_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 1 1_ 0 9 1 1 Auto lock: 2 min (not the default)
 :_ :get 0 9 1 2_ 0 9 1 2 Lock covers: Keys
-:_ :get 0 9 1 3_ 0 9 1 3 Key test:
-:_ :get 0 9 1 4_ 0 9 1 4 Shortcuts:
+:_ :get 0 9 1 3_ 0 9 1 3 Key test: a page on the radio, not a setting
+:_ :get 0 9 1 4_ 0 9 1 4 Shortcuts: a page on the radio, not a setting
 :_ :get 0 9 2_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 2 1_ 0 9 2 1 Bluetooth: Off
-:_ :get 0 9 2 2_ 0 9 2 2 Link status:
+:_ :get 0 9 2 2_ 0 9 2 2 Link status: a page on the radio, not a setting
 :_ :get 0 9 2 3_ 0 9 2 3 Debug console: Off
 :_ :get 0 9 2 4_ 0 9 2 4 Cable port: Terminal (not the default)
 :_ :get 0 9 2 5_ 0 9 2 5 Terminal colour: Off
@@ -2700,7 +2700,7 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 9 3 3_ 0 9 3 3 Change PIN: Set (not the default)
 :_ :get 0 9 4_ 0 9 4 Region: Canada
 :_ :get 0 9 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 9 5 1_ 0 9 5 1 Advanced squelch:
+:_ :get 0 9 5 1_ 0 9 5 1 Advanced squelch: a page on the radio, not a setting
 :_ :get 0 9 5 2_ 0 9 5 2 Squelch tail: 150 ms
 :_ :get 0 9 5 3_ 0 9 5 3 Discriminator mode: Off
 :_ :get 0 9 6_ 0 9 6 SSB patch: Not installed
@@ -2709,8 +2709,8 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 9 7 2_ 0 9 7 2 Crystal trim: 0 ppm
 :_ :get 0 9 7 3_ 0 9 7 3 Battery reading trim: +0.00 V
 :_ :get 0 9 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 9 8 1_ 0 9 8 1 Run setup again:
-:_ :get 0 9 8 2_ 0 9 8 2 Reset:
+:_ :get 0 9 8 1_ 0 9 8 1 Run setup again: a page on the radio, not a setting
+:_ :get 0 9 8 2_ 0 9 8 2 Reset: a page on the radio, not a setting
 :_ :get 0 9 9_ 0 9 9 About: v0.1.0
 -- knob and #
 change [1, 1] 1: true Some(false) A+B [Watch(7)] Home
@@ -4799,9 +4799,9 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 1 6 5_ 0 1 6 5 Priority check: Every 250 s (not the default)
 :_ :get 0 1 7_ 0 1 7 Range presets: 4 presets
 :_ :get 0 1 8_ 0 1 8 Skip list: Empty
-:_ :get 0 2 1_ 0 2 1 Browse:
-:_ :get 0 2 2_ 0 2 2 Add repeater:
-:_ :get 0 2 3_ 0 2 3 Zones:
+:_ :get 0 2 1_ 0 2 1 Browse: a page on the radio, not a setting
+:_ :get 0 2 2_ 0 2 2 Add repeater: a page on the radio, not a setting
+:_ :get 0 2 3_ 0 2 3 Zones: a page on the radio, not a setting
 :_ :get 0 2 4_ 0 2 4 Nearby: Off
 :_ :get 0 2 5_ 0 2 5 Channel display: Name
 :_ :get 0 3 1_ a menu number from MENU, e.g. 0 7 1 (Theme)
@@ -4816,12 +4816,12 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 3 2 3_ 0 3 2 3 Sweep speed: 10.0 ms (not the default)
 :_ :get 0 3 2 4_ 0 3 2 4 Trigger: Monitor (not the default)
 :_ :get 0 3 2 5_ 0 3 2 5 Waterfall row: Off
-:_ :get 0 3 2 6_ 0 3 2 6 Open band scope:
-:_ :get 0 3 3_ 0 3 3 Frequency counter:
-:_ :get 0 3 4_ 0 3 4 HF mode:
-:_ :get 0 3 5_ 0 3 5 Crossband repeater:
-:_ :get 0 3 6_ 0 3 6 Tone search:
-:_ :get 0 4 1_ 0 4 1 Event log:
+:_ :get 0 3 2 6_ 0 3 2 6 Open band scope: a page on the radio, not a setting
+:_ :get 0 3 3_ 0 3 3 Frequency counter: a page on the radio, not a setting
+:_ :get 0 3 4_ 0 3 4 HF mode: a page on the radio, not a setting
+:_ :get 0 3 5_ 0 3 5 Crossband repeater: a page on the radio, not a setting
+:_ :get 0 3 6_ 0 3 6 Tone search: a page on the radio, not a setting
+:_ :get 0 4 1_ 0 4 1 Event log: a page on the radio, not a setting
 :_ :get 0 4 2_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 2 1_ 0 4 2 1 Decode: Off
 :_ :get 0 4 2 2_ 0 4 2 2 Frequency: 439.987
@@ -4832,7 +4832,7 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 4 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 4 1_ 0 4 4 1 AIS: Off
 :_ :get 0 4 4 2_ 0 4 4 2 Range filter: 25 nm
-:_ :get 0 4 5_ 0 4 5 -:
+:_ :get 0 4 5_ 0 4 5 -: a page on the radio, not a setting
 :_ :get 0 4 6_ 0 4 6 Selcall, MDC1200: Off
 :_ :get 0 4 7_ 0 4 7 DTMF decode: Off
 :_ :get 0 4 8_ 0 4 8 Popups: On
@@ -4840,8 +4840,8 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 4 9 1_ 0 4 9 1 SAME: On
 :_ :get 0 4 9 2_ 0 4 9 2 Location codes: None
 :_ :get 0 4 9 3_ 0 4 9 3 Channel: Auto
-:_ :get 0 5 1_ 0 5 1 Heard:
-:_ :get 0 5 2_ 0 5 2 Messages:
+:_ :get 0 5 1_ 0 5 1 Heard: a page on the radio, not a setting
+:_ :get 0 5 2_ 0 5 2 Messages: a page on the radio, not a setting
 :_ :get 0 5 3_ 0 5 3 APRS mode: Off
 :_ :get 0 5 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 5 4 1_ 0 5 4 1 SSID: 7 Handheld
@@ -4878,12 +4878,12 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 5 9 4_ 0 5 9 4 Mailbox frequency: None
 :_ :get 0 5 9 5_ 0 5 9 5 Bulletins: On
 :_ :get 0 6 1_ 0 6 1 GPS: On
-:_ :get 0 6 2_ 0 6 2 Position:
+:_ :get 0 6 2_ 0 6 2 Position: a page on the radio, not a setting
 :_ :get 0 6 3_ 0 6 3 Coordinate format: Deg, min, sec (not the default)
 :_ :get 0 6 4_ 0 6 4 Units: Imperial (not the default)
 :_ :get 0 6 5_ 0 6 5 Time zone: UTC+5:30 (not the default)
 :_ :get 0 6 6_ 0 6 6 Clock: 24 h, GPS
-:_ :get 0 6 7_ 0 6 7 Waypoints:
+:_ :get 0 6 7_ 0 6 7 Waypoints: a page on the radio, not a setting
 :_ :get 0 6 8_ 0 6 8 GPS during RX/TX: Off on transmit (not the default)
 :_ :get 0 6 9_ 0 6 9 Fixed position: None
 :_ :get 0 7 1_ 0 7 1 Theme: Night red (not the default)
@@ -4916,16 +4916,16 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 8 2 3_ 0 8 2 3 Tail: 3 s (not the default)
 :_ :get 0 8 3_ 0 8 3 Mic gain: 5
 :_ :get 0 8 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 4 1_ 0 8 4 1 -:
+:_ :get 0 8 4 1_ 0 8 4 1 -: a page on the radio, not a setting
 :_ :get 0 8 4 2_ 0 8 4 2 Subtone level: Normal (not the default)
 :_ :get 0 8 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 5 1_ 0 8 5 1 Mode: Transmit (not the default)
 :_ :get 0 8 5 2_ 0 8 5 2 Phase: 180?? (not the default)
-:_ :get 0 8 5 3_ 0 8 5 3 -:
+:_ :get 0 8 5 3_ 0 8 5 3 -: a page on the radio, not a setting
 :_ :get 0 8 5 4_ 0 8 5 4 End tone: Chirp (not the default)
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 6 1_ 0 8 6 1 Dialer:
-:_ :get 0 8 6 2_ 0 8 6 2 Memories:
+:_ :get 0 8 6 1_ 0 8 6 1 Dialer: a page on the radio, not a setting
+:_ :get 0 8 6 2_ 0 8 6 2 Memories: a page on the radio, not a setting
 :_ :get 0 8 6 3_ 0 8 6 3 Speed: 200 ms (not the default)
 :_ :get 0 8 6 4_ 0 8 6 4 PTT ID on VFOs: Off
 :_ :get 0 8 6 5_ 0 8 6 5 ID code: Empty
@@ -4941,11 +4941,11 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 9 1_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 1 1_ 0 9 1 1 Auto lock: Off (not the default)
 :_ :get 0 9 1 2_ 0 9 1 2 Lock covers: Keys
-:_ :get 0 9 1 3_ 0 9 1 3 Key test:
-:_ :get 0 9 1 4_ 0 9 1 4 Shortcuts:
+:_ :get 0 9 1 3_ 0 9 1 3 Key test: a page on the radio, not a setting
+:_ :get 0 9 1 4_ 0 9 1 4 Shortcuts: a page on the radio, not a setting
 :_ :get 0 9 2_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 9 2 1_ 0 9 2 1 Bluetooth: Off
-:_ :get 0 9 2 2_ 0 9 2 2 Link status:
+:_ :get 0 9 2 2_ 0 9 2 2 Link status: a page on the radio, not a setting
 :_ :get 0 9 2 3_ 0 9 2 3 Debug console: Off
 :_ :get 0 9 2 4_ 0 9 2 4 Cable port: Terminal (not the default)
 :_ :get 0 9 2 5_ 0 9 2 5 Terminal colour: Off
@@ -4956,7 +4956,7 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 9 3 3_ 0 9 3 3 Change PIN: None
 :_ :get 0 9 4_ 0 9 4 Region: Not set
 :_ :get 0 9 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 9 5 1_ 0 9 5 1 Advanced squelch:
+:_ :get 0 9 5 1_ 0 9 5 1 Advanced squelch: a page on the radio, not a setting
 :_ :get 0 9 5 2_ 0 9 5 2 Squelch tail: 150 ms
 :_ :get 0 9 5 3_ 0 9 5 3 Discriminator mode: Off
 :_ :get 0 9 6_ 0 9 6 SSB patch: Not installed
@@ -4965,8 +4965,8 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 9 7 2_ 0 9 7 2 Crystal trim: 0 ppm
 :_ :get 0 9 7 3_ 0 9 7 3 Battery reading trim: +0.00 V
 :_ :get 0 9 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 9 8 1_ 0 9 8 1 Run setup again:
-:_ :get 0 9 8 2_ 0 9 8 2 Reset:
+:_ :get 0 9 8 1_ 0 9 8 1 Run setup again: a page on the radio, not a setting
+:_ :get 0 9 8 2_ 0 9 8 2 Reset: a page on the radio, not a setting
 :_ :get 0 9 9_ 0 9 9 About: v0.1.0
 -- knob and #
 change [1, 1] 1: true Some(true) A+B+C [Watch(7)] Home

@@ -10,7 +10,7 @@ import os
 import segno
 
 # Placeholder until the own domain is chosen (decision 98): change it here and run this again.
-MANUAL_URL = "https://ferrite.example/manual"
+MANUAL_URL = "https://ferritefw.dev/manual"
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "crates", "ferrite-ui", "src", "qr.rs")
 

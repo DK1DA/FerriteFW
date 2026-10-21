@@ -3,6 +3,7 @@
 use super::*;
 use crate::term::cmd::{self, Done, Line, List};
 use ferrite_core::freq::mhz;
+use std::format;
 
 fn run(app: &mut App, line: &str) -> Result<Done, std::string::String> {
     cmd::run(app, &store(), &Device::default(), line.as_bytes(), false).map_err(|m| std::string::String::from_utf8_lossy(m.as_bytes()).into())
@@ -37,6 +38,23 @@ fn slot_lists_and_shows() {
     assert!(said(&mut t.app, "slot b").starts_with("B  vfo "));
     assert!(!cmd::writes(b"slot") && !cmd::writes(b"slot A") && cmd::writes(b"slot A nfm") && cmd::writes(b"slot B active"));
     assert_eq!(drain(&mut t.app), (Vec::new(), Vec::new()));
+}
+
+/// TERM-35.1: power in a combined `slot` change is judged on the frequency the change leaves: from 1.25 m, a new
+/// 2 m frequency with a power word goes in; onto 1.25 m with another power is refused whole.
+#[test]
+fn slot_power_checked_on_the_new_frequency() {
+    let mut t = T::new();
+    said(&mut t.app, "slot A 223.53");
+    let p = t.app.slot_state(0).power;
+    let other = ["low", "mid", "high"][(p as usize + 1) % 3];
+    assert!(refused(&mut t.app, &format!("slot A {other}")).contains("0.25 W"), "1.25 m keeps its power");
+    let s = said(&mut t.app, &format!("slot A 145.495 fm {other}"));
+    assert!(s.contains(&format!("power={other}")), "off 1.25 m, the power word goes in: {s}");
+    let before = t.app.slot_state(0);
+    let back = ["low", "mid", "high"][p as usize];
+    assert!(refused(&mut t.app, &format!("slot A 223.53 {back}")).contains("0.25 W"));
+    assert_eq!(t.app.slot_state(0).freq, before.freq, "refused whole: the frequency didn't change");
 }
 
 /// TERM-35: a VFO slot takes a frequency, mode, power and tones as the keypad sets them (VFO entry, quick

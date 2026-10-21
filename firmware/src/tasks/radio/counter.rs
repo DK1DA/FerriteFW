@@ -99,6 +99,7 @@ impl Radio {
         let mut bk = self.chip(n);
         let (rssi, st) = (bk.rssi_dbm(), bk.status());
         let (c, d) = bk.subtone_scan();
+        let c = srch.average(st.squelch_open, c); // TSRCH-3.1: CTCSS snapped from the mean of four reads
         let word = radio_chip::heard_tone(c, d, &ferrite_app::slot::CTCSS, &ferrite_app::slot::DCS);
         if srch.step(st.squelch_open, word) {
             log(b"tone found ", srch.found as u32);

@@ -681,7 +681,8 @@ impl Data for Blank {
     }
 }
 
-/// TERM-12: `:` opens the command line on the bottom row; set and get use the menu's numbers and values.
+/// TERM-12, TERM-12.1: `:` opens the command line on the bottom row; set and get use the menu's numbers and values;
+/// a page row reads as a page.
 #[test]
 fn command_line_set_and_get() {
     let mut r = Rig::main();
@@ -691,6 +692,9 @@ fn command_line_set_and_get() {
     r.poll();
     assert_eq!(r.app.set.theme, 2, "set by the value the radio shows, any case");
     assert!(r.bottom().contains("0 7 1 Theme: Night red"), "{}", r.bottom());
+    // TERM-12.1: a row that is a page, not a setting, says so rather than an empty value.
+    r.cmd("get 0 5 1");
+    assert!(r.bottom().contains("0 5 1 Heard: a page on the radio, not a setting"), "{}", r.bottom());
     r.cmd("get 0 7 1");
     assert!(r.bottom().contains("Theme: Night red (not the default)"), "{}", r.bottom());
     // Up brings the last command back; Esc closes the line without running it.
@@ -796,25 +800,31 @@ fn set_short_forms() {
     assert_eq!((r.app.set.theme, r.app.bsave), (theme, bs), "a refused short form changes nothing");
 }
 
-/// TX-48: Dry TX changes only on the radio: `set` (typed, or a `term` line over the link) refuses it on and off,
-/// and `get` reads it; a bare 0 8 9 is still Extend TX.
+/// TX-48, TX-48.2: `set` (typed, or a `term` line over the link) turns Dry TX on but never off, and `get` reads it;
+/// Extend TX stays radio-only; a bare 0 8 9 is still Extend TX; a receive-only build refuses it.
 #[test]
-fn dry_tx_only_on_the_radio() {
+fn dry_tx_on_from_the_pc_never_off() {
     let mut r = Rig::main();
     r.app.radio.tx_built = true;
-    for c in ["set 0 8 9 2 On", "set 0 8 9 2 Off", "set 0 8 9 1 On", "set 0 8 9 On"] {
+    for c in ["set 0 8 9 2 Off", "set 0 8 9 1 On", "set 0 8 9 On"] {
         r.cmd(c);
-        assert!(r.bottom().contains("changes only on the radio"), "{c}: {}", r.bottom());
+        assert!(r.bottom().contains("only on the radio"), "{c}: {}", r.bottom());
         assert!(!r.app.dry_tx() && !r.app.set.extend_tx, "{c}");
     }
-    r.app.set_dry_tx(true);
+    r.cmd("set 0 8 9 2 On");
+    assert!(r.bottom().contains("Dry TX: On"), "{}", r.bottom());
+    assert!(r.app.dry_tx(), "on from the PC");
     r.cmd("set 0 8 9 2 Off");
-    assert!(r.bottom().contains("Dry TX changes only on the radio"), "{}", r.bottom());
+    assert!(r.bottom().contains("Dry TX goes off only on the radio"), "{}", r.bottom());
     assert!(r.app.dry_tx(), "still on");
     r.cmd("get 0 8 9 2");
     assert!(r.bottom().contains("Dry TX: On"), "{}", r.bottom());
     r.cmd("get 0 8 9");
     assert!(r.bottom().contains("0 8 9 Extend TX: Off"), "{}", r.bottom());
+    let mut rx = Rig::main();
+    rx.app.radio.tx_built = false;
+    rx.cmd("set 0 8 9 2 On");
+    assert!(!rx.app.dry_tx() && rx.bottom().contains("only on the radio"), "{}", rx.bottom());
 }
 
 /// Every refusal says what was wrong and how to put it right; nothing changes.

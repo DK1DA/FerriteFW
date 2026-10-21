@@ -239,7 +239,7 @@ const HELP_EDIT: [&str; 3] = [
 const HELP_SETTINGS: [&str; 3] = [
     "The radio's MENU 0 settings, with the same numbers. <- -> change, Enter opens a list.",
     "* marks a value that isn't the default; # puts it back. Settings not built yet show their default.",
-    "A few (PIN, region, Extend TX, Dry TX) change only on the radio, where they have their own screen.",
+    "A few (PIN, region, Extend TX) change only on the radio, where they have their own screen; Dry TX goes off only there.",
 ];
 const HELP_MONITOR: [&str; 1] = ["The event log, newest at the bottom, then the slots receiving now. Esc goes back."];
 const HELP_OTHER: [&str; 1] = ["Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves the terminal."];

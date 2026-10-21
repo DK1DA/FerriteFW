@@ -3,7 +3,8 @@
 //! pack sags under the PA) and rises only on a sustained increase (charging), so the number never jumps about.
 //!
 //! The six thresholds (t0 the transmit cut-off .. t5 stock's full icon) keep the percentages a 2S Li-ion pack has
-//! at stock's default voltages (6.2, 6.5, 6.8, 7.1, 7.3, 7.7 V), and 8.4 V (4.2 V a cell) is 100 %; between knots
+//! at stock's default voltages (6.2, 6.5, 6.8, 7.1, 7.3, 7.7 V), and 8.1 V is 100 % (a full pack at rest under the
+//! receiver's load: the charger stops at 8.4 V, but the pack settles to about 8.14 V within minutes); between knots
 //! the percentage is linear. So a radio whose calibration moved its thresholds moves its curve with them, about
 //! 7.4 V reads half, and the icon's steps (stock's bars, [`bars`]) fall exactly on the thresholds.
 
@@ -11,8 +12,9 @@ use crate::txcal::Gauge;
 
 /// The percentage at t0..t5, then at [`FULL_MV`].
 pub const KNOT_PCT: [u8; 7] = [0, 5, 15, 30, 45, 65, 100];
-/// A full 2S Li-ion pack, mV.
-pub const FULL_MV: u32 = 8400;
+/// A full 2S Li-ion pack at rest under the receiver's load, mV (Alex measured 8.14 V on a full charge, Oct 16, 2026;
+/// decision 199). The charger's 8.4 V cut-off isn't where a full pack sits, so it would never read 100.
+pub const FULL_MV: u32 = 8100;
 /// The reading for [`FULL_MV`] on the 12-bit PA1 scale (48.2 mV per step of the reading >> 4).
 const FULL_RAW: u32 = FULL_MV * 160 / 482;
 /// A new reading is taken at most this often (the Radio task reads PA1 every 2 s).
@@ -22,7 +24,7 @@ pub const HOLD_MS: u32 = 10_000;
 /// A higher reading shows only once it has lasted this long (charging, not a recovery blip).
 pub const RISE_MS: u32 = 60_000;
 
-/// The percentage for a 12-bit PA1 reading on this gauge: 0 at or below the cut-off, 100 at 8.4 V and over.
+/// The percentage for a 12-bit PA1 reading on this gauge: 0 at or below the cut-off, 100 at 8.1 V and over.
 pub fn percent(g: &Gauge, raw: u16) -> u8 {
     let raw = raw as u32;
     let mut x = [0u32; 7];
@@ -127,8 +129,8 @@ mod tests {
         (mv * 160 / 482) as u16
     }
 
-    /// PWR-22: the knots sit on the calibrated thresholds; 0 at the cut-off, about half at 7.4 V, 100 at 8.4 V; the
-    /// percentage never falls as the voltage rises.
+    /// PWR-22, PWR-22.1: the knots sit on the calibrated thresholds; 0 at the cut-off, about half at 7.4 V, 100 at 8.1 V
+    /// (a full pack at rest, 8.14 V, reads 100) and flat above; the percentage never falls as the voltage rises.
     #[test]
     fn percent_on_the_thresholds() {
         let g = Gauge::defaults();
@@ -137,6 +139,8 @@ mod tests {
         }
         assert_eq!(percent(&g, raw_mv(6000)), 0);
         assert_eq!(percent(&g, raw_mv(8400)), 100);
+        assert_eq!(percent(&g, raw_mv(8140)), 100, "Alex's full pack at rest");
+        assert!(percent(&g, raw_mv(8000)) < 100, "below 8.1 V isn't full");
         assert_eq!(percent(&g, raw_mv(9000)), 100);
         let half = percent(&g, raw_mv(7400));
         assert!((45..=55).contains(&half), "7.4 V: {half}");

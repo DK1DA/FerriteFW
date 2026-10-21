@@ -1038,6 +1038,14 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     let (p, n) = path(t)?;
     let p = &p[..n];
     let name = path_name(p);
+    if p == [8, 9, 2] && app.radio.tx_built {
+        // TX-48.2: the PC may turn Dry TX on (it only takes power away), never off.
+        if same(t.rest(), b"on") {
+            app.set_dry_tx(true);
+            return Ok(Done::Said(msg!("0 8 9 2 Dry TX: On")));
+        }
+        return Err(msg!("Dry TX goes off only on the radio, on its own screen there (the PC can turn it on)"));
+    }
     if blocked(p) {
         return Err(msg!("{} changes only on the radio, on its own screen there", name));
     }
@@ -1216,6 +1224,9 @@ fn get(app: &App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     let mut m = Msg::new();
     path_text(p, &mut m);
     put!(m, " {}: {}", path_name(p), Bytes(v.as_bytes()));
+    if v.as_bytes().is_empty() && !groups::is_settable(p) {
+        m.push(b"a page on the radio, not a setting"); // TERM-12.1: e.g. 0 5 1, the heard list
+    }
     if changed {
         m.push(b" (not the default)");
     }
