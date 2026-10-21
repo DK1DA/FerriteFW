@@ -214,7 +214,7 @@ impl<'a> Toks<'a> {
                 j += if s[j] == b'\\' { 2 } else { 1 };
             }
             if j >= s.len() {
-                return Err(msg!("a name has no closing quote: end it with \""));
+                return Err(msg!("a name has no closing quote"));
             }
             self.i = j + 1;
             return Ok(Some(Tok::Quoted(&s[start..j])));
@@ -603,7 +603,7 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
 
 /// One field of a channel from `key` and its value (a bare flag word is "on").
 fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -> Result<(), Msg> {
-    let k = FIELDS.iter().position(|f| same(key, f.as_bytes())).ok_or_else(|| msg!("{}: no such field; the fields are name, rx, offset, mode, bw, tone, power, zone, ...", Bytes(key)))?;
+    let k = FIELDS.iter().position(|f| same(key, f.as_bytes())).ok_or_else(|| msg!("{}: no such field; help lists them", Bytes(key)))?;
     let flag = |c: &mut Channel, bit: u8, v: Option<Tok>, what: &str| -> Result<(), Msg> {
         let on = match v {
             None => true,
@@ -712,7 +712,7 @@ pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
         return Ok(());
     }
     if c.cfg.mode as usize >= SLOT_MODES {
-        return Err(msg!("mode: USB, LSB and CW are for HF channels, below 64 MHz"));
+        return Err(msg!("mode: USB, LSB and CW are for HF channels"));
     }
     if c.cfg.split && c.cfg.offset <= 0 {
         return Err(msg!("offset=split needs its TX frequency: tx=146.52"));
@@ -722,7 +722,7 @@ pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
     }
     let tx = c.cfg.tx_of(c.rx) as i64;
     if !(mhz(64) as i64..mhz(1000) as i64).contains(&tx) {
-        return Err(msg!("offset: the TX frequency would be outside 64 to 1000 MHz")); // never TX above 1000
+        return Err(msg!("offset: TX outside 64 to 1000 MHz")); // never TX above 1000
     }
     if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) && c.cfg.power != 0 { // the cap goes by the TX band
         return Err(msg!("power: fixed at 0.25 W on 1.25 m; use power=low"));
@@ -757,16 +757,16 @@ fn save_pos<S: ChannelStore>(app: &mut App, st: &S, c: Channel, pos: Option<Pos>
 fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let num = index(t.word("ch: which channel, e.g. ch 12")?, MAX_CHANNELS as u32, "ch")? as u16;
     let old = st.by_num(num).map(|x| x.0);
-    let missing = || msg!("ch {}: no such channel; make it with ch {} \"Name\" 146.52", num as u32 + 1, num as u32 + 1);
+    let missing = || msg!("ch {}: no such channel", num as u32 + 1);
     if t.clone().next()?.is_some() && super::list::radio_channel(app) == Some(num) {
-        return Err(msg!("Channel {} is open in the radio's editor: change it there or close it", num as u32 + 1)); // TERM-17
+        return Err(msg!("Channel {} is open in the radio's editor", num as u32 + 1)); // TERM-17
     }
     match t.next()? {
         None => old.map(|_| Done::List(List::Show(num))).ok_or_else(missing),
         // A whole channel: name, RX, then fields; the rest at their defaults.
         Some(Tok::Quoted(q)) => {
             let name: Buf<16> = unquote(q, "name")?;
-            let rx = freq(t.word("ch: the RX frequency after the name, e.g. ch 12 \"Name\" 146.52")?, "rx")?;
+            let rx = freq(t.word("ch: the RX MHz after the name")?, "rx")?;
             let mut c = Channel { num, zone: NO_ZONE, rx, name: [0; 16], cfg: DEFAULT_CFG, flags: 0, tones: 0 };
             c.set_name(name.as_bytes());
             let mut pos = None;
@@ -801,7 +801,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                 let Some(Tok::Word(v)) = v else { return Err(msg!("pos: latitude,longitude, a grid square, or none")) };
                 let p = pos_val(v, "pos")?;
                 if t.next()?.is_some() {
-                    return Err(msg!("ch: one field at a time, e.g. ch 12 pos=45.4215,-75.6972"));
+                    return Err(msg!("ch: one field at a time"));
                 }
                 return Ok(Done::Said(save_pos(app, st, c, p)));
             }
@@ -810,7 +810,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
             }
             field(&mut c, key, v, st)?;
             if t.next()?.is_some() {
-                return Err(msg!("ch: one field at a time, e.g. ch 12 power high"));
+                return Err(msg!("ch: one field at a time"));
             }
             check(&c)?;
             Ok(Done::Said(save(app, st, c)))
@@ -906,7 +906,7 @@ fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u8, same_as_stored: bo
         return Ok(Done::Said(msg!("{} {} unchanged", cap, n as u32 + 1)));
     }
     if !st.data().request(op) {
-        return Err(msg!("{} {}: the radio couldn't take it now (full, or busy writing); try again", what, n as u32 + 1));
+        return Err(msg!("{} {}: the radio is full or busy; try again", what, n as u32 + 1));
     }
     Ok(Done::Said(msg!("{} {} saved", cap, n as u32 + 1)))
 }
@@ -1069,13 +1069,13 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
             app.set_dry_tx(true);
             return Ok(Done::Said(msg!("0 8 9 2 Dry TX: On")));
         }
-        return Err(msg!("Dry TX goes off only on the radio, on its own screen there (the PC can turn it on)"));
+        return Err(msg!("Dry TX goes off only on the radio"));
     }
     if blocked(p) {
-        return Err(msg!("{} changes only on the radio, on its own screen there", name));
+        return Err(msg!("{} changes only on the radio", name));
     }
     if super::list::radio_setting(app).is_some_and(|(q, ql)| &q[..ql] == p) {
-        return Err(msg!("{} is open on the radio's menu: change it there, or move off it", name)); // TERM-17
+        return Err(msg!("{} is open on the radio's menu", name)); // TERM-17
     }
     if let Some(why) = groups::greyed(app, p) {
         return Err(msg!("{}: {}", name, why));
@@ -1100,11 +1100,11 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         return Ok(Done::Said(m));
     }
     if !groups::is_settable(p) {
-        return Err(msg!("{} can't be set yet: it keeps its default until its feature lands", name));
+        return Err(msg!("{} can't be set yet", name));
     }
     let want = t.rest();
     if want.is_empty() {
-        return Err(msg!("set needs a value after the number, e.g. set 0 7 1 Dark"));
+        return Err(msg!("set needs a value, e.g. set 0 7 1 Dark"));
     }
     // Typed values (DEC-4's capcode, APRS-26's custom path): taken as written, "None" clears.
     match p {
@@ -1308,9 +1308,9 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
     let c = match t.next()? {
         None => return Ok(Done::Nothing),
         Some(Tok::Word(c)) => c,
-        Some(Tok::Quoted(_)) => return Err(msg!("a command first, e.g. set, ch, zone; help lists them")),
+        Some(Tok::Quoted(_)) => return Err(msg!("a command first; help lists them")),
     };
-    let only_typed = |what: &str| -> Result<Done, Msg> { Err(msg!("{} can't be in a load: it reads set, zone, preset, ch and home lines", what)) };
+    let only_typed = |what: &str| -> Result<Done, Msg> { Err(msg!("{} can't be in a load", what)) };
     match () {
         _ if same(c, b"set") => set(app, dev, &mut t),
         _ if same(c, b"ch") => ch(app, st, &mut t),
@@ -1646,7 +1646,7 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
     match t.next()? {
         None => Ok(Done::Debug(Job::new(Kind::Gga))),
         Some(Tok::Word(w)) if [&b"query"[..], b"nmea", b"standby"].iter().any(|b| same(w, b)) => Err(msg!("gps {}: not in this build: a bench build has it", Bytes(w))),
-        _ => Err(msg!("gps: the last GGA sentence (gps query, nmea and standby are a bench build's)")),
+        _ => Err(msg!("gps alone: query, nmea and standby need a bench build")),
     }
 }
 

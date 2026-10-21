@@ -393,7 +393,7 @@ impl Term {
             }
         };
         match self.ask {
-            Ask::Find => out.push("Find (name or MHz; Enter alone finds the last again): ".as_bytes()),
+            Ask::Find => out.push("Find (name or MHz): ".as_bytes()),
             Ask::Move => {
                 out.push(b"Move ");
                 what(out);
@@ -402,7 +402,7 @@ impl Term {
             Ask::Copy => {
                 out.push(b"Copy ");
                 what(out);
-                out.push(" to free numbers from (Enter: the first free): ".as_bytes());
+                out.push(" to free numbers from (Enter: first free): ".as_bytes());
             }
             Ask::Renumber => {
                 out.push("Renumber ".as_bytes());
@@ -434,7 +434,7 @@ impl Term {
                 };
                 match z {
                     Some(z) => self.begin(app, Op::Move(z), st),
-                    None => self.tell("No such zone: a zone's number (1 is the first) or name, or none".as_bytes(), true),
+                    None => self.tell("No such zone: a number, a name, or none".as_bytes(), true),
                 }
             }
             Ask::Copy => {
@@ -459,7 +459,7 @@ impl Term {
         }
         let t = self.find;
         if t.is_empty() {
-            return self.tell("Find what? Type part of a name or a frequency".as_bytes(), true);
+            return self.tell("Find what? Part of a name or MHz".as_bytes(), true);
         }
         if self.sort == 0 {
             let n = list_len(self.zone, st);
@@ -526,7 +526,7 @@ impl Term {
         // TERM-17: not a channel open in the radio's editor.
         if let Some(r) = radio_channel(app).filter(|&r| single == Some(r) || single.is_none() && self.marked(r)) {
             let mut m = Msg::new();
-            put!(m, "Channel {} is open in the radio's editor: close it there first", r as u32 + 1);
+            put!(m, "Channel {} is open in the radio's editor", r as u32 + 1);
             return self.tell(m.as_bytes(), true);
         }
         if let Op::Renumber(from) = op {

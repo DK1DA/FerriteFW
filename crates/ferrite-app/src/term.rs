@@ -218,31 +218,30 @@ const H_SETTINGS: [(&str, &str); 6] = [
 const H_BACK: [(&str, &str); 1] = [("Esc", "Back")];
 
 const HELP_MAIN: [&str; 3] = [
-    "Arrows move, Enter opens, a digit jumps (the same numbers as the radio's menu).",
-    ": opens the command line on any page; :help lists the commands, :dump and :load back up.",
-    "Ctrl-L redraws the screen, Ctrl-C leaves the terminal.",
+    "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).",
+    ": opens the command line; :help lists the commands.",
+    "Ctrl-L redraws, Ctrl-C leaves.",
 ];
-const HELP_CHANNELS: [&str; 7] = [
-    "Up/Dn move, PgUp/PgDn page, Home/End jump to the ends, Enter edits a channel.",
-    "Z shows the next zone, then channels with no zone, then all channels. S sorts by the next column.",
-    "/ finds a name or frequency (Enter alone finds the same again). N makes a new channel.",
-    "Space marks a channel (*), A marks the whole list, U clears the marks.",
-    "D deletes, M moves to a zone, C copies to free numbers, R renumbers: the marked channels,",
-    "or the selected one when none are marked. Delete asks first. Esc stops a change part way.",
-    "A channel open in the radio's own editor isn't changed here: the radio's copy shows.",
+const HELP_CHANNELS: [&str; 6] = [
+    "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one.",
+    "Z: the next zone, then no zone, then all. S sorts by the next column.",
+    "/ finds a name or MHz (Enter alone: the same again).",
+    "Space marks a channel (*), A marks all, U clears the marks.",
+    "D delete, M move to a zone, C copy, R renumber: the marked channels, else the selected one.",
+    "Delete asks first; Esc stops a change part way.",
 ];
 const HELP_EDIT: [&str; 3] = [
-    "<- -> change a field at once: it saves as on the radio, and the radio's screen follows.",
-    "Enter types the name or the RX frequency (MHz). # puts a field back to its default.",
-    "Frequencies run from 64 to 1000 MHz; 1.25 m power stays at 0.25 W.",
+    "<- -> change a field; it saves at once.",
+    "Enter types the name or a frequency (MHz). # resets a field.",
+    "1.25 m power stays at 0.25 W.",
 ];
 const HELP_SETTINGS: [&str; 3] = [
-    "The radio's MENU 0 settings, with the same numbers. <- -> change, Enter opens a list.",
-    "* marks a value that isn't the default; # puts it back. Settings not built yet show their default.",
-    "A few (PIN, region, Extend TX) change only on the radio, where they have their own screen; Dry TX goes off only there.",
+    "MENU 0's settings and numbers. <- -> change, Enter opens a list.",
+    "* marks a value that isn't the default; # puts it back.",
+    "PIN, region and Extend TX change only on the radio; Dry TX goes off only there.",
 ];
-const HELP_MONITOR: [&str; 1] = ["The event log, newest at the bottom, then the slots receiving now. Esc goes back."];
-const HELP_OTHER: [&str; 1] = ["Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves the terminal."];
+const HELP_MONITOR: [&str; 1] = ["The event log (newest last), then the slots receiving now."];
+const HELP_OTHER: [&str; 1] = ["Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."];
 
 pub struct Term {
     page: Page,
@@ -957,7 +956,7 @@ impl Term {
                     return self.say("Split TX needs the HF relay: not allowed with this RX frequency".as_bytes(), true); // TX-37
                 }
                 Some(f) if (mhz(64)..mhz(1000)).contains(&f) => (n.cfg.split, n.cfg.offset) = (true, f as i32),
-                _ => return self.say("TX: a frequency from 64 to 1000 MHz, e.g. 146.52".as_bytes(), true),
+                _ => return self.say("TX: 64 to 1000 MHz, e.g. 146.52".as_bytes(), true),
             },
             _ => return,
         }
@@ -967,7 +966,7 @@ impl Term {
     fn save(&mut self, app: &mut App, n: Channel) {
         if list::radio_channel(app) == Some(n.num) {
             // TERM-17: the radio's editor has it; its copy wins and shows here.
-            return self.say("Open in the radio's editor: showing its copy; change it there or close it".as_bytes(), true);
+            return self.say("Open in the radio's editor: change it there".as_bytes(), true);
         }
         if Some(n) != self.edit {
             app.put_channel(n);
@@ -1036,11 +1035,11 @@ impl Term {
     fn settings_change(&mut self, app: &mut App, d: i32) {
         let (p, pl) = self.path(self.set_sel);
         if list::radio_setting(app) == Some((p, pl)) {
-            return self.say("Open on the radio's menu: change it there, or move off it".as_bytes(), true); // TERM-17
+            return self.say("Open on the radio's menu: change it there".as_bytes(), true); // TERM-17
         }
         let p = &p[..pl];
         if blocked(p) {
-            return self.say("Change this one on the radio: it needs its own screen there".as_bytes(), true);
+            return self.say("Change this one on the radio".as_bytes(), true);
         }
         if let Some(why) = groups::greyed(app, p) {
             return self.say(why.as_bytes(), true);
@@ -1048,7 +1047,7 @@ impl Term {
         if groups::change(app, p, d) {
             self.say(b"Changed", false);
         } else {
-            self.say("Not settable yet: it shows its default until its feature lands".as_bytes(), true);
+            self.say("Not settable yet".as_bytes(), true);
         }
     }
 
@@ -1213,7 +1212,7 @@ impl Term {
                 }
                 out.put(b"\x1b[0m\x1b[2J\x1b[H");
                 if let Body::Load { .. } = b {
-                    out.put("Load: send the dump now (paste it, or your terminal's send-file). Each line is checked\r\nas the radio checks it; a line that fails is skipped and named. It ends at the line\r\n\"end\" or Ctrl-D; Ctrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n".as_bytes());
+                    out.put("Load: send the dump now. A bad line is skipped and named. It ends at \"end\" or Ctrl-D;\r\nCtrl-C stops. Use XON/XOFF flow control, or a short delay per line.\r\n\r\n".as_bytes());
                 }
                 self.con = Con::Run(b);
                 self.console(app, store, dev, live, out);
@@ -1308,7 +1307,7 @@ impl Term {
                     w.s(b" ");
                     w.bold(if self.page == Page::Mail { b"Mail" } else { b"TNC" });
                 } else if b == 3 {
-                    w.s("  Not built yet: the packet mailbox and TNC come with manual chapter 38.".as_bytes());
+                    w.s("  Not built yet (manual chapter 38).".as_bytes());
                 }
             }
             Page::About => about(b, cx, w),
@@ -1714,7 +1713,7 @@ impl Term {
                 0 => {
                     w.s(b" ");
                     w.bold(b"Settings");
-                    w.s("   the same numbers as MENU 0 on the radio".as_bytes());
+                    w.s("   as MENU 0 on the radio".as_bytes());
                 }
                 2..=10 => {
                     let i = b - 2;
@@ -1868,7 +1867,7 @@ impl Term {
             w.at(32);
             w.s(w::s_text(l.rssi).as_bytes());
         } else if k == 0 {
-            w.s("  Nothing yet: decodes, alerts and signals show here as they come.".as_bytes());
+            w.s("  Nothing yet.".as_bytes());
         }
     }
 }
