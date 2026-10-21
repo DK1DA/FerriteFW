@@ -1,18 +1,22 @@
 //! Text formatting without `core::fmt`: a fixed buffer that `ufmt::uwrite!` writes into, and the few
 //! printf conversions ufmt lacks (decimal widths, `%+d`, `%-5s`). Hex with zero padding is ufmt's `{:04X}`.
 use core::convert::Infallible;
+use core::mem::MaybeUninit;
 use ufmt::{uDisplay, uWrite, Formatter};
 
 /// A fixed buffer for formatted text: what does not fit is cut off, as `snprintf` does.
+///
+/// `new` leaves the bytes unwritten (zeroing them at every construction cost about 4 KB of flash over the UI's
+/// buffers): the invariant is `n <= N` and `b[..n]` written, and only those bytes are ever read.
 #[derive(Clone, Copy)]
 pub struct Buf<const N: usize> {
-    b: [u8; N],
+    b: [MaybeUninit<u8>; N],
     n: usize,
 }
 
 impl<const N: usize> Buf<N> {
     pub const fn new() -> Self {
-        Buf { b: [0; N], n: 0 }
+        Buf { b: [MaybeUninit::uninit(); N], n: 0 }
     }
 
     pub fn clear(&mut self) {
@@ -20,7 +24,8 @@ impl<const N: usize> Buf<N> {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        &self.b[..self.n]
+        // SAFETY: n <= N and b[..n] are written (push keeps both), so this is in bounds and initialised.
+        unsafe { core::slice::from_raw_parts(self.b.as_ptr().cast::<u8>(), self.n) }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -32,15 +37,24 @@ impl<const N: usize> Buf<N> {
     }
 
     pub fn push(&mut self, s: &[u8]) {
-        let take = s.len().min(N - self.n);
-        self.b[self.n..self.n + take].copy_from_slice(&s[..take]);
-        self.n += take;
+        push(&mut self.b, &mut self.n, s);
     }
 
     pub fn set(&mut self, s: &[u8]) {
         self.n = 0;
         self.push(s);
     }
+}
+
+/// The one copy of `push` for every size: appends what of s fits after b[..n], keeping n <= b.len().
+#[inline(never)]
+fn push(b: &mut [MaybeUninit<u8>], n: &mut usize, s: &[u8]) {
+    let at = (*n).min(b.len());
+    let take = s.len().min(b.len() - at);
+    // SAFETY: at + take <= b.len() and take <= s.len(); u8 and MaybeUninit<u8> share a layout; s cannot overlap b
+    // (s is shared, b is borrowed mutably).
+    unsafe { core::ptr::copy_nonoverlapping(s.as_ptr(), b.as_mut_ptr().add(at).cast::<u8>(), take) };
+    *n = at + take;
 }
 
 impl<const N: usize> PartialEq for Buf<N> {
@@ -191,5 +205,24 @@ mod tests {
         let mut small = Buf::<4>::new();
         assert_eq!(v!(small, "{}", "abcdefgh"), b"abcd"); // truncation
         assert_eq!(v!(small, "{}", 123456), b"1234");
+    }
+
+    #[test]
+    fn buf_basics() {
+        let mut b = Buf::<5>::new();
+        assert!(b.is_empty());
+        b.push(b"abc");
+        b.push(b"defg"); // cut off at 5
+        assert_eq!((b.as_bytes(), b.len()), (&b"abcde"[..], 5));
+        b.push(b"x"); // full: nothing more
+        assert_eq!(b.as_bytes(), b"abcde");
+        let c = b; // Copy
+        b.set(b"ab");
+        assert!(b == Buf::from(b"ab"));
+        assert!(b != c);
+        assert_eq!(c.as_bytes(), b"abcde");
+        b.clear();
+        assert!(b == Buf::default());
+        assert_eq!(Buf::<0>::from(b"a").as_bytes(), b"");
     }
 }
