@@ -108,7 +108,7 @@ def installed_image_matches_its_btf(t):
 
 
 BUILT = {fl.HELLO, fl.INFO, fl.AUTH, fl.READ, fl.WRITE, fl.DELETE, fl.BEGIN, fl.END, fl.SLOT, fl.BAUD, fl.REBOOT,
-         fl.KEY, fl.CMD, fl.MORE, fl.UI}
+         fl.KEY, fl.CMD, fl.MORE, fl.UI, fl.USED, fl.READ_MANY, fl.WRITE_MANY, fl.LOG_READ}
 
 
 @test("LINK-3", "SAFE-5", "TERM-8", pages=("Home",))
@@ -128,6 +128,10 @@ def link_has_no_calibration_write(t):
     for kind in (0, 5, 6, 0x80, 0xFF):
         s, why = link.ask(fl.READ, struct.pack("<BH", kind, 0), timeout=1.0)
         t.check(s != 0, f"READ kind {kind}: refused", (s, why))
+        for ty, p in ((fl.USED, bytes([kind])), (fl.READ_MANY, struct.pack("<BHH", kind, 0, 1)),
+                      (fl.WRITE_MANY, struct.pack("<BHB", kind, 0, 1) + b"\x00")):
+            s, why = link.ask(ty, p, timeout=1.0)  # LINK-39 - LINK-41: the three record kinds only
+            t.check(s != 0, f"0x{ty:02X} kind {kind}: refused", (s, why))
     for c in ("flash", "erase", "spi", "cal", "calibration", "write", "update"):
         ok, out = t.cmd_err(c)
         t.check(not ok or "no such command" in out, f"`{c}`: no such command", out)
