@@ -172,6 +172,8 @@ pub async fn task() {
     let mut bt_turn = false;
     // A rate change on probation: its deadline and the HELLO count when it was made.
     let mut probation: Option<(Instant, u16)> = None;
+    // The cable's framing errors when last looked at (LINK-11.1).
+    let mut framing = uart::errors(UART_CPS).0;
     // SND-14: PC10 held high while a speaker mic is connected.
     let mut quiet = false;
     // The cable log's Bluetooth counters: when last looked at, and what they were.
@@ -234,6 +236,20 @@ pub async fn task() {
                 }
                 CABLE_BAUD.store(rate, Relaxed);
                 probation = Some((Instant::now() + BAUD_PROOF, LINK_HELLOS.load(Relaxed)));
+            }
+        }
+        // LINK-11.1: above 115200, a framing error means the other end talks another rate (a PC opening the cable
+        // at 115200 after a session that didn't put the rate back): back to 115200 at once.
+        let f = uart::errors(UART_CPS).0;
+        if f != framing {
+            framing = f;
+            if CABLE_BAUD.load(Relaxed) != BAUD {
+                uart::init(UART_CPS, BAUD);
+                if quiet {
+                    uart::tx_pin_quiet(UART_CPS);
+                }
+                CABLE_BAUD.store(BAUD, Relaxed);
+                probation = None;
             }
         }
         if let Some((until, hellos)) = probation {
