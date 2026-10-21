@@ -5,18 +5,20 @@
 # them sat in the fast flash (10.5 KB, 8.7 KB of it used only by slow UI code), and they can't be moved by name
 # because interrupt code uses some of them. Off, the fast code is a little bigger but makes fewer calls, and the
 # slow UI code grows instead (fast-flash audit, Oct 13, 2026).
+# MIR optimisation at level 1 (less MIR inlining, LLVM still inlines) and core's `optimize_for_size` feature (the
+# aliases below) save 3.7 KB together (size review, Oct 20, 2026).
 [target.thumbv7em-none-eabihf]
 rustflags = ["-C", "link-arg=-Tlink.x", "-C", "target-cpu=cortex-m4", "-Zlocation-detail=none",
              "-Zunstable-options", "-Cpanic=immediate-abort", "-C", "link-arg=--icf=all",
-             "-C", "llvm-args=-enable-machine-outliner=never"]
+             "-C", "llvm-args=-enable-machine-outliner=never", "-Zmir-opt-level=1"]
 
 [alias]
 # The firmware image: target/thumbv7em-none-eabihf/release/ferrite
-fw = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core"]
-fw-clippy = ["clippy", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core"]
+fw = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "-Zbuild-std-features=optimize_for_size"]
+fw-clippy = ["clippy", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "-Zbuild-std-features=optimize_for_size"]
 # The bring-up image: no SPI flash writes, key test on a held key, a log on the cable, the bench commands
 # (firmware/Cargo.toml: `bringup` turns on `bench`)
-fw-bringup = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "--features", "bringup"]
+fw-bringup = ["build", "--release", "-p", "ferrite", "--target", "thumbv7em-none-eabihf", "-Zbuild-std=core", "-Zbuild-std-features=optimize_for_size", "--features", "bringup"]
 # Screens rendered on the PC: target/sim/*.png
 sim = ["run", "-p", "ferrite-sim", "--"]
 # The interactive simulator: a window driven by the keyboard and a fake radio
