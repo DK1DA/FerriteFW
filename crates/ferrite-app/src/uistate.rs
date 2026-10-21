@@ -862,8 +862,8 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
         kq(l, "mode", m.as_bytes());
         kq(l, "tone", t.as_bytes());
         kq(l, "shift", o.as_bytes());
-        let pw: &[u8] = if app.capped(s) { b"0.25 W" } else { [b"LOW".as_slice(), b"MID", b"HIGH"][cfg.power as usize % 3] };
-        kq(l, "power", pw);
+        // HOME-4.2: the chip as drawn, "No TX" where PTT can never transmit
+        kq(l, "power", crate::screens::transmit::power_name(app, s).as_bytes());
     }
     kq(l, "s", w::s_text(lv.rssi).as_bytes());
     kn(l, "meter", w::meter_level(lv.rssi) as u32);

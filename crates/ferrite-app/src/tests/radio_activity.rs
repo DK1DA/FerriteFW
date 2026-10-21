@@ -285,7 +285,8 @@ fn power_level_names() {
 }
 
 /// HOME-4.2: where PTT can never transmit (out of the band plan, AM, a receive-only build) the power chip says
-/// "No TX" and hold 2 says why instead of changing the power; a passing refusal (busy) keeps the level.
+/// "No TX" and hold 2 says why instead of changing the power; a passing refusal (busy) keeps the level. The UI
+/// readback (LINK-19) reports the chip as drawn.
 #[test]
 fn rx_only_power_chip() {
     use crate::screens::transmit::{power_name, tx_block};
@@ -294,6 +295,7 @@ fn rx_only_power_chip() {
     tune(&mut t, mhz(121) + 50_000); // airband: AM, outside the plan
     assert!(tx_block(&t.app, 0).is_some());
     assert_eq!(power_name(&t.app, 0), "No TX");
+    assert!(line_of(&t, "card A").contains("power=\"No TX\""), "the readback says what the chip shows");
     let p = t.app.slot(0).cfg().power;
     t.hold(Key::Digit(2));
     assert_eq!(t.app.slot(0).cfg().power, p, "hold 2 changes nothing there");
