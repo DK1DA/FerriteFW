@@ -1662,10 +1662,12 @@ impl App {
         // VOX-3: speech keys only from home; a release always goes through.
         let voice = live.tx.voice && self.set.vox && !self.aprs_slot(self.active) && (screen_ok || self.vox_on);
         // TX-35 (TX audit F11): VOX is automatic, so never on an emergency frequency: a toast, not the prompt.
-        if voice && !self.vox_on && self.radio.keyed.is_none() && ferrite_core::txplan::emergency(screens::transmit::tx_freq(self, self.active)) {
+        // APRS-21.3: nor on the APRS frequency while C is the APRS slot (data only).
+        let emergency = ferrite_core::txplan::emergency(screens::transmit::tx_freq(self, self.active));
+        if voice && !self.vox_on && self.radio.keyed.is_none() && (emergency || self.aprs_voice_gate(self.active)) {
             if self.vox_bits & VOX_REFUSED == 0 {
                 self.vox_bits |= VOX_REFUSED;
-                self.show_toast(b"No VOX", b"emergency frequency", false);
+                self.show_toast(b"No VOX", if emergency { b"emergency frequency" as &[u8] } else { b"APRS frequency" }, false);
             }
             return;
         }

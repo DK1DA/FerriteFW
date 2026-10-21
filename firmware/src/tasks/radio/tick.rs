@@ -221,7 +221,7 @@ impl Radio {
         }
         // 3. The watch turn, on the frequencies the scans just stepped to.
         let asleep = if self.save.asleep() { !self.kept() } else { 0 };
-        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep, held: self.monitor, prio: self.kept(), scan: self.range_scans() };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep, held: self.monitor, prio: self.kept(), aprs: self.aprs_slots, scan: self.range_scans() };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.turn(now, &cfg, sq, heard, keyed);
         // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
@@ -288,6 +288,15 @@ impl Radio {
             sl.squelch_open = open;
             sl.heard_tone = self.hints[i].heard;
             sl.relay = out.cancelled && self.watch_set & 1 << i != 0 && Sel::rx(self.slots[i].freq).relay() != active_relay;
+        }
+        // APRS-21.2: a slot deferring to the APRS slot shows its signal (the watch already gave it its squelch).
+        if let Some(p) = out.defer_to {
+            let rssi = self.live.slots[p as usize].rssi;
+            for (i, sl) in self.live.slots.iter_mut().enumerate() {
+                if out.defer & 1 << i != 0 {
+                    sl.rssi = rssi;
+                }
+            }
         }
         // Battery Save: anything open or scanning keeps the receivers awake. Broadcast doesn't (BCR-19): the
         // BK4829s keep the level's cycle for the slots watched, and the sleep step leaves the SI4732 playing.

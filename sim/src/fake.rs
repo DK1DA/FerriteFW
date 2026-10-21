@@ -141,6 +141,8 @@ pub struct FakeRadio {
     monitor: u8,
     /// Slots with receive priority (APRS-21.1, [`RadioCmd::Awake`]).
     prio: u8,
+    /// The APRS slot ([`RadioCmd::AprsSlot`]): other slots on its frequency defer to it (APRS-21.2).
+    aprs_slot: u8,
     /// Quick mute (HOME-15): slots still received, never heard.
     mute: u8,
     fm: u16,
@@ -211,6 +213,7 @@ impl FakeRadio {
             txtest: None,
             monitor: 0,
             prio: 0,
+            aprs_slot: 0,
             mute: 0,
             fm: 9_810,
             fm_t0: None,
@@ -314,6 +317,7 @@ impl FakeRadio {
             }
             RadioCmd::Watch(m) => self.watch = m,
             RadioCmd::Awake(m) => self.prio = m,
+            RadioCmd::AprsSlot(m) => self.aprs_slot = m,
             RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::RxTone, .. } => self.hint = self.hint.filter(|h| h.0 != slot),
             RadioCmd::SlotParam { slot, param: ferrite_core::msg::Param::Power, value } => self.power[slot as usize % 4] = value.clamp(0, 2) as u8,
             RadioCmd::PauseWatch(secs) => {
@@ -644,7 +648,7 @@ impl FakeRadio {
             }
             _ => 0,
         };
-        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off, held: self.monitor, prio: self.prio, scan: (0..3).filter(|&i| self.scans[i].running() && self.scans[i].fast).fold(0, |m, i| m | 1 << i) };
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off, held: self.monitor, prio: self.prio, aprs: self.aprs_slot, scan: (0..3).filter(|&i| self.scans[i].running() && self.scans[i].fast).fold(0, |m, i| m | 1 << i) };
         let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
         // BCR-24: the broadcast plays while no slot is heard, and 2 s after one goes quiet; a muted broadcast slot
         // never plays (HOME-15).

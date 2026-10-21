@@ -570,6 +570,23 @@ fn remote_ptt_never_on_an_emergency_frequency() {
     assert!(!pc.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. } | RadioCmd::TxPlan { .. })));
 }
 
+/// APRS-21.3: a remote key-up on A on the APRS frequency while C is the APRS slot is refused (data only: PTT on
+/// the radio, twice), and opens no prompt.
+#[test]
+fn remote_ptt_never_on_the_aprs_frequency() {
+    let mut pc = Pc::tx();
+    pc.app.set_region(Some(ferrite_core::txplan::Region::Us), true);
+    pc.app.set_aprs_mode(true);
+    let a0 = pc.app.active as usize;
+    (pc.app.slots[a0].vfo, pc.app.slots[a0].vfo_mode) = (pc.app.aprs_freq(), true);
+    pc.cmds();
+    let (s, a) = pc.ptt(Ptt::On(key::ACTIVE));
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(text(&a).starts_with("APRS frequency"), "{}", text(&a));
+    assert!(!pc.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. } | RadioCmd::TxPlan { .. })));
+    assert!(!matches!(pc.app.screen(), Screen::Emergency(_)), "no prompt");
+}
+
 /// LINK-20.8: the radio's operator wins. A local PTT during a remote transmission ends it and keys nothing until let
 /// go; a remote key-up is refused while a local PTT is held; after, PTT keys as usual.
 #[test]

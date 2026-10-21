@@ -179,6 +179,88 @@ fn emergency_frequency_needs_ptt_twice() {
     assert_eq!(t.app.screen(), Screen::Home);
 }
 
+/// APRS-21.3, TX-35.7, TX-3: while C is the APRS slot, voice PTT on A on the APRS frequency only prompts ("APRS frequency:
+/// data only"); a second PTT within 5 s transmits, unanswered it goes home. The power chip keeps its level (a
+/// passing gate, not "No TX", HOME-4.2). With APRS off, or A elsewhere, PTT keys at once. VOX never keys there.
+#[test]
+fn aprs_frequency_voice_needs_ptt_twice() {
+    let mut t = ready();
+    t.app.set_aprs_mode(true);
+    let f = t.app.aprs_freq();
+    tune(&mut t, f);
+    assert!(t.app.aprs_voice_gate(0) && !t.app.aprs_voice_gate(2), "A gated, C (the APRS slot) not");
+    assert_ne!(crate::screens::transmit::power_name(&t.app, 0), "No TX", "a passing gate: the level stays");
+    t.cmds();
+    ptt(&mut t, true);
+    assert!(matches!(t.app.screen(), Screen::Emergency(e) if e.aprs), "{:?}", t.app.screen());
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
+    ptt(&mut t, false);
+    assert!(matches!(t.app.screen(), Screen::Emergency(_)), "the first release does nothing");
+    t.wait(2000);
+    ptt(&mut t, true);
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)));
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: true }));
+    ptt(&mut t, false);
+    ptt(&mut t, true);
+    ptt(&mut t, false);
+    t.wait(5200);
+    assert_eq!(t.app.screen(), Screen::Home, "unanswered: home after 5 s");
+    // Another frequency: no prompt.
+    tune(&mut t, mhz(146) + 52_000);
+    t.cmds();
+    ptt(&mut t, true);
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: true }), "146.52: keys at once");
+    ptt(&mut t, false);
+    t.wait(500);
+    // APRS off: the APRS frequency is an ordinary one.
+    t.app.set_aprs_mode(false);
+    tune(&mut t, f);
+    assert!(!t.app.aprs_voice_gate(0));
+    t.cmds();
+    ptt(&mut t, true);
+    assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: true }), "APRS off: keys at once");
+    ptt(&mut t, false);
+    t.wait(500);
+    // VOX there: a toast, never a key-up.
+    t.app.set_aprs_mode(true);
+    crate::screens::groups::change(&mut t.app, &[8, 2, 1], 1);
+    t.cmds();
+    for _ in 0..3 {
+        t.live.tx.voice = true;
+        t.wait(200);
+        t.live.tx.voice = false;
+        t.wait(200);
+    }
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
+    assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"APRS frequency"));
+    // The prompt's words fit: the title on the dialog's bar (210 px), the text in its two lines (204 px each).
+    use ferrite_ui::gfx::text4_width;
+    use ferrite_ui::assets::{UI_12, UI_12B};
+    assert!(text4_width(b"APRS frequency: data only", &UI_12B) <= 210);
+    assert!(text4_width(b"144.390 MHz carries APRS packets; voice blocks them.", &UI_12) <= 2 * 204 - 40);
+}
+
+/// APRS-21.2: A on the APRS frequency while C is the APRS slot reads "APRS on C" until C receives, then RX; on
+/// another frequency, or with APRS off, its own state.
+#[test]
+fn a_slot_on_the_aprs_frequency_says_aprs_on_c() {
+    let mut t = ready();
+    t.app.set_aprs_mode(true);
+    let f = t.app.aprs_freq();
+    tune(&mut t, f);
+    assert!(t.app.defers_to_c(0) && !t.app.defers_to_c(2));
+    assert_eq!(t.app.state(0, &t.live).0, "APRS on C");
+    t.live.slots[0].squelch_open = true;
+    assert_eq!(t.app.state(0, &t.live).0, "RX", "C receives: A shows it");
+    t.live.slots[0].squelch_open = false;
+    t.app.set_aprs_mode(false);
+    assert!(!t.app.defers_to_c(0));
+    assert_ne!(t.app.state(0, &t.live).0, "APRS on C");
+    t.app.set_aprs_mode(true);
+    tune(&mut t, mhz(146) + 52_000);
+    assert_ne!(t.app.state(0, &t.live).0, "APRS on C");
+}
+
 /// TX-35.2, TX-35.3, TX-35.5: automatic transmissions are refused on an emergency frequency, with a toast.
 #[test]
 fn automatic_tx_refused_on_emergency() {
