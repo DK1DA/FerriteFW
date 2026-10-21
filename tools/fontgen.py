@@ -48,8 +48,8 @@ class Font:
     def width(self, s):
         return sum(self.glyphs.get(c, self.glyphs.get("?", (0,)))[0] for c in s)
 
-    def size_bytes(self):
-        return sum(7 + (w * h + 1) // 2 for _, _, _, _, w, h in self.glyphs.values())
+    def size_bytes(self, rle=None):
+        return sum(7 + (len(rle(a, w, h)) if rle and w else (w * h + 1) // 2) for _, _, _, a, w, h in self.glyphs.values())
 
     def c_source(self, name, header=True):
         chars = sorted(self.glyphs, key=ord)
@@ -93,17 +93,23 @@ class Font:
             recs.append((off, w, h, x, y, adv))
         return first, recs, bytes(bits)
 
-    def rust_source(self, name, section=None):
+    def rust_source(self, name, section=None, rle=None):
         """Rust statics: the sorted code points, a glyph record per code point, the 4-bit pixels.
-        `section`: a linker section for the data on the radio (host builds ignore it)."""
+        `section`: a linker section for the data on the radio (host builds ignore it). `rle`: an encoder
+        (mkassets.rle) to store each glyph run-length encoded, its rows decoded in turn (font4.rs)."""
         codes = sorted(self.glyphs, key=ord)
         bits, recs = bytearray(), []
         for ch in codes:
             adv, x, y, a, w, h = self.glyphs[ch]
             off = len(bits)
-            for i in range(0, len(a), 2):
-                bits.append(a[i] << 4 | (a[i + 1] if i + 1 < len(a) else 0))
+            if rle:
+                if w:
+                    bits += rle(a, w, h)
+            else:
+                for i in range(0, len(a), 2):
+                    bits.append(a[i] << 4 | (a[i + 1] if i + 1 < len(a) else 0))
             recs.append((off, w, h, x, y, adv))
+        assert not rle or max(r[1] for r in recs) <= 64, f"{name}: run-length glyphs must be at most 64 px wide"
         assert len(bits) < 65536, f"{name}: glyph offsets must fit u16"
         assert max(ord(c) for c in codes) < 65536, f"{name}: code points must fit u16"
         up = name.upper()
@@ -112,12 +118,13 @@ class Font:
         g = [f"    Glyph4 {{ off: {o}, w: {w}, h: {h}, x: {x}, y: {y}, adv: {a} }}, // {ch!r}"
              for (o, w, h, x, y, a), ch in zip(recs, codes)]
         cp = [", ".join(f"0x{ord(c):02X}" for c in codes[i:i + 16]) + "," for i in range(0, len(codes), 16)]
-        return "\n".join([f"// {name}: {self.ttf.split('/')[-1]}, {self.px} px, {len(codes)} characters",
+        return "\n".join([f"// {name}: {self.ttf.split('/')[-1]}, {self.px} px, {len(codes)} characters"
+                          + (", run-length encoded" if rle else ""),
                           *attr, f"static {up}_BITS: [u8; {len(bits)}] = [", *("    " + r for r in rows), "];",
                           *attr, f"static {up}_GLYPHS: [Glyph4; {len(recs)}] = [", *g, "];",
                           *attr, f"static {up}_CODES: [u16; {len(codes)}] = [", *("    " + r for r in cp), "];",
                           f"pub static {up}: Font4 = Font4 {{ line_h: {self.ascent + self.descent}, ascent: {self.ascent}, "
-                          f"codes: &{up}_CODES, glyphs: &{up}_GLYPHS, bits: &{up}_BITS }};", ""])
+                          f"rle: {str(bool(rle)).lower()}, codes: &{up}_CODES, glyphs: &{up}_GLYPHS, bits: &{up}_BITS }};", ""])
 
 
 def rgb565(c):

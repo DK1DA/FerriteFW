@@ -342,54 +342,10 @@ impl View for Home {
         step(app, d, big, store);
     }
 
+    /// Home is drawn on the panel and, under a closing quick menu, in a canvas's bands (qmenu::repaint): through a
+    /// [`canvas::direct`] band both ways, so its drawing (the cards, the other two layouts) is compiled once.
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
-        // HOME-3: the other two layouts draw differently; the keys are the same.
-        match app.set.layout {
-            1 => return super::layouts::single(app, lcd, cx),
-            2 => return super::layouts::activity(app, lcd, cx),
-            _ => {}
-        }
-        // The large card moved (SLOT): the gaps between cards moved too, so clear them and draw every card again;
-        // otherwise slivers of the old large card stay behind (HOME-11). Only the gaps: each card paints its own
-        // rectangle (clearing the whole area first was one of five passes over it, slow on the radio's bus).
-        // The gaps are drawn top to bottom with the cards, each just before the card under it, so the screen changes
-        // as one wipe: drawing every gap first cut the old large card in half with a dark line (on the radio, Oct 12,
-        // 2026).
-        let gaps = app.dirty(R_NOTE, hash(&app.active));
-        if gaps {
-            app.drawn.hash[R_FRAME..=R_SUB + 2].fill(0);
-            app.drawn.meter = [None; SLOTS];
-        }
-        let mut top = 21;
-        for s in 0..SLOTS as u8 {
-            let p = s as usize;
-            let (y, h) = card(s, app.active);
-            if gaps {
-                lcd.fill(0, top, 240, y - top, BG);
-                lcd.fill(0, y, 6, h, BG);
-                lcd.fill(234, y, 6, h, BG);
-                top = y + h;
-            }
-            let geom = hash(&(s, y, h, card_kind(app, s))) | 1;
-            if app.drawn.hash[R_FRAME + p] != 0 && app.drawn.card[p] == geom {
-                // HOME-13: while the knob turns only the active card follows; the others wait in place.
-                if s == app.active || !app.held(R_FRAME + p) {
-                    draw_card(app, lcd, cx, s);
-                }
-                continue;
-            }
-            // DISP-25: a card in a new place or size (SLOT moved the large card, a scan began) is drawn whole in
-            // bands, frame and content, so the panel goes from the old picture to the new with no blank card
-            // between. Each band runs the card's drawing afresh: what it has drawn is forgotten before each.
-            let (hash0, meter0) = (app.drawn.hash, app.drawn.meter);
-            canvas::banded(lcd, 6, y, 228, h, BG, |b| {
-                (app.drawn.hash, app.drawn.meter) = (hash0, meter0);
-                draw_card(app, b, cx, s);
-            });
-        }
-        if gaps {
-            lcd.fill(0, top, 240, 300 - top, BG);
-        }
+        render(app, &mut canvas::direct(lcd), cx);
     }
 
     fn hints(self, app: &App) -> Hints {
@@ -411,6 +367,57 @@ impl View for Home {
     }
 }
 
+/// [`Home`]'s drawing, on the panel or in a band.
+fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
+    // HOME-3: the other two layouts draw differently; the keys are the same.
+    match app.set.layout {
+        1 => return super::layouts::single(app, lcd, cx),
+        2 => return super::layouts::activity(app, lcd, cx),
+        _ => {}
+    }
+    // The large card moved (SLOT): the gaps between cards moved too, so clear them and draw every card again;
+    // otherwise slivers of the old large card stay behind (HOME-11). Only the gaps: each card paints its own
+    // rectangle (clearing the whole area first was one of five passes over it, slow on the radio's bus).
+    // The gaps are drawn top to bottom with the cards, each just before the card under it, so the screen changes
+    // as one wipe: drawing every gap first cut the old large card in half with a dark line (on the radio, Oct 12,
+    // 2026).
+    let gaps = app.dirty(R_NOTE, hash(&app.active));
+    if gaps {
+        app.drawn.hash[R_FRAME..=R_SUB + 2].fill(0);
+        app.drawn.meter = [None; SLOTS];
+    }
+    let mut top = 21;
+    for s in 0..SLOTS as u8 {
+        let p = s as usize;
+        let (y, h) = card(s, app.active);
+        if gaps {
+            lcd.fill(0, top, 240, y - top, BG);
+            lcd.fill(0, y, 6, h, BG);
+            lcd.fill(234, y, 6, h, BG);
+            top = y + h;
+        }
+        let geom = hash(&(s, y, h, card_kind(app, s))) | 1;
+        if app.drawn.hash[R_FRAME + p] != 0 && app.drawn.card[p] == geom {
+            // HOME-13: while the knob turns only the active card follows; the others wait in place.
+            if s == app.active || !app.held(R_FRAME + p) {
+                draw_card(app, lcd, cx, s);
+            }
+            continue;
+        }
+        // DISP-25: a card in a new place or size (SLOT moved the large card, a scan began) is drawn whole in
+        // bands, frame and content, so the panel goes from the old picture to the new with no blank card
+        // between. Each band runs the card's drawing afresh: what it has drawn is forgotten before each.
+        let (hash0, meter0) = (app.drawn.hash, app.drawn.meter);
+        canvas::banded(lcd, 6, y, 228, h, BG, |b| {
+            (app.drawn.hash, app.drawn.meter) = (hash0, meter0);
+            draw_card(app, b, cx, s);
+        });
+    }
+    if gaps {
+        lcd.fill(0, top, 240, 300 - top, BG);
+    }
+}
+
 /// HOME-15: \* mutes or unmutes the active slot: it still receives (state, S-meter, the green LED), but its audio
 /// never reaches the speaker and never holds it from a watched slot. RAM only; it stays with the slot until \* again.
 fn quick_mute(app: &mut App) {
@@ -425,7 +432,7 @@ fn quick_mute(app: &mut App) {
 }
 
 /// Card `s` of the cards layout: its frame when it changed, and every part of it that changed.
-fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s: u8) {
+fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, s: u8) {
     let live = cx.live;
     // Fixed order A, B, C: the card's region index is its slot.
     let p = s as usize;

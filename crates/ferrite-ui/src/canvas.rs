@@ -120,14 +120,33 @@ impl Panel for Band<'_> {
         }
     }
 
+    /// Off the screen, except a [`direct`] band over the panel itself: drawing through it is drawing on the panel.
     fn offscreen(&self) -> bool {
-        true
+        match &self.fwd {
+            Some(p) if self.thru => p.offscreen(),
+            _ => true,
+        }
+    }
+
+    fn input_pending(&self) -> bool {
+        match &self.fwd {
+            Some(p) if self.thru => p.input_pending(),
+            _ => false,
+        }
     }
 }
 
 /// Inside another canvas's band: draw straight into it (a second band on the stack would cost 3.75 KB more).
 fn thru(lcd: &mut dyn Panel) -> Band<'_> {
     Band { buf: &mut [], x: 0, y: 0, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: true, mask: None }
+}
+
+/// A band that passes everything straight to `lcd`, the panel or another band, and is what `lcd` is (on screen
+/// or off): drawing code that runs both on the panel and inside a canvas takes a `&mut Band` and is compiled once,
+/// not once per panel type (home: 14.8 KB, size review Oct 20, 2026). Each call goes through `lcd`'s
+/// vtable, once per primitive (a fill, a text row, a band), never per pixel.
+pub fn direct(lcd: &mut dyn Panel) -> Band<'_> {
+    thru(lcd)
 }
 
 /// Draw the region (x, y, w, h) with `draw`, band by band, each band sent to `lcd` once. `draw` paints the whole

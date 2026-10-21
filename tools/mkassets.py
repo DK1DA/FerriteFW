@@ -23,7 +23,6 @@ WORD = "BarlowSemiCondensed-SemiBold.ttf"
 # fails ferrite-ui's and ferrite-app's tests (they check every string literal), so add it here and regenerate.
 ASCII = "".join(chr(c) for c in range(0x20, 0x7F))
 TEXT = ASCII + "\u00b7\u00b0\u00b1"  # the middle dot separates values ("VFO · VHF"), the degree sign bearings ("NE 48°"), plus-minus GPS accuracy ("±5 m"); arrows and marks are drawn shapes
-CALL = " #*-/?0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00b7"  # callsigns on the boot screen; the sim's key legends
 DIG = " -.0123456789"  # frequencies
 WORDMARK = " EFIRT"
 
@@ -49,8 +48,7 @@ FONT_LIST = [  # name, file, px, chars, tabular, use
     ("ui_12", REG, 12, TEXT, False, "status bar, hints, labels, lists, values"),
     ("ui_12b", BOLD, 12, TEXT, False, "emphasis: clock, keys in hints, tags"),
     ("ui_15b", BOLD, 15, TEXT, False, "headings: setup pages, alerts; the callsign on the boot screen"),
-    ("call_35", BOLD, 35, CALL, False, "the callsign on the owner card (10 characters fit)"),
-    ("name_26", BOLD, 26, TEXT, False, "channel names on the large home card when they fit (13 characters)"),
+    ("name_26", BOLD, 26, TEXT, False, "channel names on the large home card when they fit (13 characters); the callsign on the owner card"),
     ("name_22", BOLD, 22, TEXT, False, "channel names on the home cards (16 characters fit the large card)"),
     ("dig_46", NUM, 46, DIG, True, "active slot frequency"),
     ("dig_28", NUM, 28, DIG, True, "active slot last digits"),
@@ -58,6 +56,9 @@ FONT_LIST = [  # name, file, px, chars, tabular, use
     ("dig_17", NUM, 17, DIG, True, "watched slot last digits"),
     ("word_40", WORD, 40, WORDMARK, False, "FERRITE wordmark, boot screen"),
 ]
+# The big fonts, run-length encoded (as the logo; font4.rs decodes a glyph's rows in turn): 6.2 KB smaller. The 12
+# and 15 px fonts stay plain: their glyphs are mostly literal pixels and would grow (size review, Oct 20, 2026).
+RLE_FONTS = ("name_26", "name_22", "dig_46", "dig_28", "word_40")
 MASK_LIST = [  # name, size, shape, run-length encoded
     ("logo112_ring", 112, art.toroid_ring, True), ("logo112_wind", 112, art.toroid_wind, True),
     ("icon_lock", 14, art.lock, False), ("icon_gps", 12, art.gps, False), ("icon_bt", 11, art.bt, False),
@@ -114,8 +115,8 @@ def main():
         f = Font(os.path.join(FONTS, ttf), px, chars, tab)
         if name in DRAWN_IN:
             add_drawn(f)
-        rs.append(f.rust_source(name, SLOW))
-        total += f.size_bytes()
+        rs.append(f.rust_source(name, SLOW, rle if name in RLE_FONTS else None))
+        total += f.size_bytes(rle if name in RLE_FONTS else None)
     for name, size, shape, packed_rle in MASK_LIST:
         a = art.mask(size, shape)
         up = name.upper()

@@ -129,7 +129,7 @@ fn card_static(lcd: &mut impl Panel, b: &BootInfo, o: &Owner) {
     if let Some(call) = b.callsign {
         let mut up = [0u8; 16];
         let k = upper(call, &mut up);
-        lcd.text4(12, 70, fit(&up[..k], &CALL_35, COL), &CALL_35, TEXT, BG);
+        lcd.text4(12, 66, fit(&up[..k], &NAME_26, COL), &NAME_26, TEXT, BG); // 13 characters fit (decision 220)
     }
     lcd.text4(12, 93, fit(o.name, &UI_12B, COL), &UI_12B, TEXT, BG);
     if !o.phone.is_empty() || !o.email.is_empty() {
