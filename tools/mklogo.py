@@ -54,7 +54,7 @@ for name, c in (("dark", DARK), ("light", LIGHT)):
 # Social preview, 1280 x 640 (GitHub's size): lockup centred, tagline under it, on the dark theme's background.
 c = DARK
 d1, w1 = text_path("FERRITE", "BarlowSemiCondensed-SemiBold.ttf", 150, 0, 0, tracking=6)
-tag = "Open firmware for the Radtel RT-950 Pro"
+tag = "New firmware for the Radtel RT-950 Pro"
 d2, w2 = text_path(tag, "AtkinsonHyperlegible-Regular.ttf", 40, 0, 0)
 ms = 1.75  # mark 210 px
 lock_w = 120 * ms + 36 + w1
