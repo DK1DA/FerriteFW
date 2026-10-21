@@ -437,6 +437,31 @@ fn tone(w: &[u8], what: &str) -> Result<u16, Msg> {
     }
 }
 
+/// `slot`'s tone argument (TONE-2.1): one word as [`tone`] reads it ("off", "100.0", "D023N"), or a mode and a
+/// value: "ctcss 100.0", "dcs-n 023", "dcs-i 023" ("off" alone is the Off mode).
+fn tone_arg(t: &mut Toks, what: &str) -> Result<u16, Msg> {
+    use crate::screens::tones::MODE_NAMES;
+    const HELP: &str = ": off, 100.0, D023N, or a mode and value (ctcss 100.0, dcs-n 023, dcs-i 023)";
+    let missing = || msg!("{}{}", what, HELP);
+    let w = t.word(what).map_err(|_| missing())?;
+    let Some(m) = MODE_NAMES.iter().skip(1).position(|n| same(w, n.as_bytes())) else { return tone(w, what) };
+    let v = t.word(what).map_err(|_| missing())?;
+    let bad = || msg!("{}: {} takes {}", what, MODE_NAMES[m + 1], if m == 0 { "a tone, e.g. 100.0" } else { "an octal code, e.g. 023" });
+    if m == 0 {
+        if v.first().is_some_and(|c| c.eq_ignore_ascii_case(&b'D')) {
+            return Err(bad());
+        }
+        return tone(v, what);
+    }
+    let code = v.strip_prefix(b"D").or_else(|| v.strip_prefix(b"d")).unwrap_or(v);
+    if code.len() != 3 {
+        return Err(bad());
+    }
+    let mut d = [b'D', 0, 0, 0, if m == 1 { b'N' } else { b'I' }];
+    d[1..4].copy_from_slice(code);
+    tone(&d, what).map_err(|_| bad())
+}
+
 /// "simplex", "+0.60000", "-5.00000".
 fn offset_word(o: i32, out: &mut Line) {
     if o == 0 {
@@ -1941,7 +1966,8 @@ const HELP_BENCH: [&str; 3] = [
 // ---- Slots (TERM-35) ----
 
 /// `slot`, `slot X`, `slot X [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [active]`: the
-/// slots' working fields, read or changed as the keypad would ([`crate::slotctl`]); a refusal changes nothing.
+/// slots' working fields, read or changed as the keypad would ([`crate::slotctl`]); a refusal changes nothing. T is
+/// one word (off, 100.0, D023N) or a mode and a value (ctcss 100.0, dcs-n 023, dcs-i 023; TONE-2.1).
 fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
     const USAGE: &str = "slot A|B|C [vfo] [FREQ] [fm|nfm|am] [low|mid|high] [tone T] [rxtone T] [txtone T] [offset off|+N|-N] [split TX] [active]";
     let s = match t.next()? {
@@ -1961,12 +1987,12 @@ fn slot<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Ms
         } else if same(w, b"active") {
             c.active = true;
         } else if same(w, b"tone") {
-            let v = tone(t.word("tone: off, 100.0 or D023N")?, "tone")?;
+            let v = tone_arg(t, "tone")?;
             (c.rx_tone, c.tx_tone) = (Some(v), Some(v));
         } else if same(w, b"rxtone") {
-            c.rx_tone = Some(tone(t.word("rxtone: off, 100.0 or D023N")?, "rxtone")?);
+            c.rx_tone = Some(tone_arg(t, "rxtone")?);
         } else if same(w, b"txtone") {
-            c.tx_tone = Some(tone(t.word("txtone: off, 100.0 or D023N")?, "txtone")?);
+            c.tx_tone = Some(tone_arg(t, "txtone")?);
         } else if same(w, b"offset") {
             let v = t.word("offset: off, or MHz with a sign, e.g. -0.6")?;
             c.offset = Some((if same(v, b"off") { 0 } else { offset(v)? }, false));
