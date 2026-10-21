@@ -183,65 +183,42 @@ const MAIN: [(&str, Page); 7] = [
     ("About", Page::About),
 ];
 
-// The bottom line's keys per page (TERM-11), and each page's help (TERM-16): kept in the slow flash.
-const H_TYPE: [(&str, &str); 3] = [("Enter", "Save"), ("Backspace", "Delete"), ("Esc", "Cancel")];
-const H_HELP: [(&str, &str); 1] = [("Esc", "Close help")];
-const H_SPLASH: [(&str, &str); 3] = [("Enter", "Menu"), ("?", "Help"), ("Ctrl-C", "Leave")];
-const H_MAIN: [(&str, &str); 6] = [
-    ("Up/Dn", "Move"),
-    ("Enter", "Open"),
-    ("1-7", "Jump"),
-    (":", "Command"),
-    ("?", "Help"),
-    ("Ctrl-C", "Leave"),
-];
-const H_CHANNELS: [(&str, &str); 7] = [
-    ("Enter", "Edit"),
-    ("N", "New"),
-    ("D", "Delete"),
-    ("M", "Move"),
-    ("/", "Find"),
-    ("Z", "Zone"),
-    ("Esc", "Back"),
-];
-const H_EDIT: [(&str, &str); 5] =
-    [("Up/Dn", "Field"), ("<- ->", "Change"), ("Enter", "Type"), ("#", "Default"), ("Esc", "Back")];
-const H_ZONES: [(&str, &str); 3] = [("Up/Dn", "Move"), ("Enter", "Channels"), ("Esc", "Back")];
-const H_SETTINGS: [(&str, &str); 6] = [
-    ("Up/Dn", "Move"),
-    ("<- ->", "Change"),
-    ("Enter", "Open"),
-    ("1-9", "Jump"),
-    ("#", "Default"),
-    ("Esc", "Back"),
-];
-const H_BACK: [(&str, &str); 1] = [("Esc", "Back")];
-
-const HELP_MAIN: [&str; 3] = [
-    "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).",
-    ": opens the command line; :help lists the commands.",
+// The bottom line's keys per page (TERM-11), each "key=what" and |-separated, and each page's help (TERM-16),
+// one line per \n: single strings in the slow flash, no tables of pointers.
+const H_TYPE: &str = "Enter=Save|Backspace=Delete|Esc=Cancel";
+const H_HELP: &str = "Esc=Close help";
+const H_SPLASH: &str = "Enter=Menu|?=Help|Ctrl-C=Leave";
+const H_MAIN: &str = "Up/Dn=Move|Enter=Open|1-7=Jump|:=Command|?=Help|Ctrl-C=Leave";
+const H_CHANNELS: &str = "Enter=Edit|N=New|D=Delete|M=Move|/=Find|Z=Zone|Esc=Back";
+const H_EDIT: &str = "Up/Dn=Field|<- ->=Change|Enter=Type|#=Default|Esc=Back";
+const H_ZONES: &str = "Up/Dn=Move|Enter=Channels|Esc=Back";
+const H_SETTINGS: &str = "Up/Dn=Move|<- ->=Change|Enter=Open|1-9=Jump|#=Default|Esc=Back";
+const H_BACK: &str = "Esc=Back";
+const HELP_MAIN: &str = concat!(
+    "Arrows move, Enter opens, a digit jumps (the radio's menu numbers).\n",
+    ": opens the command line; :help lists the commands.\n",
     "Ctrl-L redraws, Ctrl-C leaves.",
-];
-const HELP_CHANNELS: [&str; 6] = [
-    "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one.",
-    "Z: the next zone, then no zone, then all. S sorts by the next column.",
-    "/ finds a name or MHz (Enter alone: the same again).",
-    "Space marks a channel (*), A marks all, U clears the marks.",
-    "D delete, M move to a zone, C copy, R renumber: the marked channels, else the selected one.",
+);
+const HELP_CHANNELS: &str = concat!(
+    "Arrows, PgUp/PgDn and Home/End move; Enter edits a channel; N makes a new one.\n",
+    "Z: the next zone, then no zone, then all. S sorts by the next column.\n",
+    "/ finds a name or MHz (Enter alone: the same again).\n",
+    "Space marks a channel (*), A marks all, U clears the marks.\n",
+    "D delete, M move to a zone, C copy, R renumber: the marked channels, else the selected one.\n",
     "Delete asks first; Esc stops a change part way.",
-];
-const HELP_EDIT: [&str; 3] = [
-    "<- -> change a field; it saves at once.",
-    "Enter types the name or a frequency (MHz). # resets a field.",
+);
+const HELP_EDIT: &str = concat!(
+    "<- -> change a field; it saves at once.\n",
+    "Enter types the name or a frequency (MHz). # resets a field.\n",
     "1.25 m power stays at 0.25 W.",
-];
-const HELP_SETTINGS: [&str; 3] = [
-    "MENU 0's settings and numbers. <- -> change, Enter opens a list.",
-    "* marks a value that isn't the default; # puts it back.",
+);
+const HELP_SETTINGS: &str = concat!(
+    "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n",
+    "* marks a value that isn't the default; # puts it back.\n",
     "PIN, region and Extend TX change only on the radio; Dry TX goes off only there.",
-];
-const HELP_MONITOR: [&str; 1] = ["The event log (newest last), then the slots receiving now."];
-const HELP_OTHER: [&str; 1] = ["Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves."];
+);
+const HELP_MONITOR: &str = "The event log (newest last), then the slots receiving now.";
+const HELP_OTHER: &str = "Enter opens the menu. Ctrl-L redraws, Ctrl-C leaves.";
 
 pub struct Term {
     page: Page,
@@ -1361,47 +1338,49 @@ impl Term {
             w.fill();
             return;
         }
-        let keys: &[(&str, &str)] = if self.line.is_some() {
-            &H_TYPE
+        let keys = if self.line.is_some() {
+            H_TYPE
         } else if self.help {
-            &H_HELP
+            H_HELP
         } else {
             match self.page {
-                Page::Off | Page::Splash => &H_SPLASH,
-                Page::Main => &H_MAIN,
-                Page::Channels => &H_CHANNELS,
-                Page::Edit => &H_EDIT,
-                Page::Zones => &H_ZONES,
-                Page::Settings => &H_SETTINGS,
-                Page::Monitor | Page::Mail | Page::Tnc | Page::About => &H_BACK,
+                Page::Off | Page::Splash => H_SPLASH,
+                Page::Main => H_MAIN,
+                Page::Channels => H_CHANNELS,
+                Page::Edit => H_EDIT,
+                Page::Zones => H_ZONES,
+                Page::Settings => H_SETTINGS,
+                Page::Monitor | Page::Mail | Page::Tnc | Page::About => H_BACK,
             }
         };
         w.rev();
         w.s(b" ");
-        for (k, l) in keys {
-            w.bold(k.as_bytes());
+        let mut i = 0;
+        while let Some(kl) = piece(keys.as_bytes(), b'|', i) {
+            w.bold(piece(kl, b'=', 0).unwrap_or_default());
             w.s(b" ");
-            w.s(l.as_bytes());
+            w.s(piece(kl, b'=', 1).unwrap_or_default());
             w.s(b"   ");
+            i += 1;
         }
         w.fill();
     }
 
     fn help_row(&self, b: u8, w: &mut W) {
-        let lines: &[&str] = match self.page {
-            Page::Main => &HELP_MAIN,
-            Page::Channels => &HELP_CHANNELS,
-            Page::Edit => &HELP_EDIT,
-            Page::Settings => &HELP_SETTINGS,
-            Page::Monitor => &HELP_MONITOR,
-            _ => &HELP_OTHER,
+        let lines = match self.page {
+            Page::Main => HELP_MAIN,
+            Page::Channels => HELP_CHANNELS,
+            Page::Edit => HELP_EDIT,
+            Page::Settings => HELP_SETTINGS,
+            Page::Monitor => HELP_MONITOR,
+            _ => HELP_OTHER,
         };
         if b == 1 {
             w.s(b" ");
             w.bold(b"Help");
-        } else if let Some(l) = (b as usize).checked_sub(3).and_then(|i| lines.get(i)) {
+        } else if let Some(l) = (b as usize).checked_sub(3).and_then(|i| piece(lines.as_bytes(), b'\n', i)) {
             w.s(b"  ");
-            w.s(l.as_bytes());
+            w.s(l);
         }
     }
 
@@ -2024,6 +2003,15 @@ fn flags(c: &Channel, app: &App, w: &mut W) {
 /// power).
 fn blocked(p: &[u8]) -> bool {
     matches!(p, [9, 3] | [9, 3, 1] | [8, 9] | [8, 9, 1] | [8, 9, 2] | [9, 4])
+}
+
+/// The `i`-th piece of `t` cut at each `sep` (a page's hints and help lines).
+#[inline(never)]
+fn piece(mut t: &[u8], sep: u8, i: usize) -> Option<&[u8]> {
+    for _ in 0..i {
+        t = &t[t.iter().position(|&c| c == sep)? + 1..];
+    }
+    Some(&t[..t.iter().position(|&c| c == sep).unwrap_or(t.len())])
 }
 
 /// "0.1.0" from "v0.1.0".

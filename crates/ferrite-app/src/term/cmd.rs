@@ -1900,9 +1900,9 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
             true
         }
         List::UiStatus => false,
-        List::Help => match HELP.get(i as usize).or_else(|| HELP_BENCH.get((i as usize).wrapping_sub(HELP.len()))) {
+        List::Help => match super::piece(HELP.as_bytes(), b'\n', i as usize).or_else(|| super::piece(HELP_BENCH.as_bytes(), b'\n', (i as usize).wrapping_sub(HELP_LINES))) {
             Some(h) => {
-                out.push(h.as_bytes());
+                out.push(h);
                 true
             }
             None => false,
@@ -1941,61 +1941,70 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
     }
 }
 
-const HELP: [&str; 20] = [
-    "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
-    "",
-    "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
-    "  get 0 7 1   get        one setting; every setting not at its default",
-    "  ch 12                  channel 12, as its ch line",
-    "  slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,",
-    "                         slot B active, slot A offset off|-0.6, slot A split 446.0:",
-    "                         as the keys would (a channel slot: add vfo)",
-    "  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone",
-    "                         power zone step squelch busy reverse skip aprs rxonly hidden priority",
-    "  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel",
-    "  ch 12 delete           delete channel 12",
-    "  zone 2 \"Repeaters\"     a zone (made in order); fields scan shown resume ...",
-    "  preset 1 \"2 m\" 144 148 a range preset; fields step mode bw",
-    "  home 12   home none    the home channel",
-    "  dump                   everything, as these lines; save it with your terminal's log",
-    "  load                   read a dump back: send the file, it ends at the line end",
-    "  clear channels N       delete every channel (N: how many there are)",
-    "  gps                    the GPS module's last GGA sentence, its age and heights",
+const HELP: &str = concat!(
+    "Commands: type : then one of these, and Enter. A dump is made of the same lines.\n",
+    "\n",
+    "  set 0 7 1 Dark         a setting, by its number in the radio's menu\n",
+    "  get 0 7 1   get        one setting; every setting not at its default\n",
+    "  ch 12                  channel 12, as its ch line\n",
+    "  slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,\n",
+    "                         slot B active, slot A offset off|-0.6, slot A split 446.0:\n",
+    "                         as the keys would (a channel slot: add vfo)\n",
+    "  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone\n",
+    "                         power zone step squelch busy reverse skip aprs rxonly hidden priority\n",
+    "  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel\n",
+    "  ch 12 delete           delete channel 12\n",
+    "  zone 2 \"Repeaters\"     a zone (made in order); fields scan shown resume ...\n",
+    "  preset 1 \"2 m\" 144 148 a range preset; fields step mode bw\n",
+    "  home 12   home none    the home channel\n",
+    "  dump                   everything, as these lines; save it with your terminal's log\n",
+    "  load                   read a dump back: send the file, it ends at the line end\n",
+    "  clear channels N       delete every channel (N: how many there are)\n",
+    "  gps                    the GPS module's last GGA sentence, its age and heights\n",
     "  xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it",
-];
+);
+/// The lines in [`HELP`].
+const HELP_LINES: usize = {
+    let (h, mut i, mut n) = (HELP.as_bytes(), 0, 1);
+    while i < h.len() {
+        n += (h[i] == b'\n') as usize;
+        i += 1;
+    }
+    n
+};
 /// TERM-38: the bench commands' help in a bench build, or where they are in a user build.
 #[cfg(feature = "bench")]
-const HELP_BENCH: [&str; 23] = [
-    "",
-    "Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):",
-    "  mem 20000000 64        bytes of MCU memory (flash, RAM)",
-    "  mem32 40010808 4       32-bit words: use this for peripheral registers",
-    "  gpio                   ports A to E: input and output bits, 15 to 0",
-    "  bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)",
-    "  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)",
-    "  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property",
-    "  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)",
-    "  bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)",
-    "  bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)",
-    "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
-    "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
-    "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)",
-    "  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set",
-    "  gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)",
-    "  gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s",
-    "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",
-    "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal",
-    "                         at that % on the next PTT key-up until release (tx builds)",
-    "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator",
-    "  txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)",
+const HELP_BENCH: &str = concat!(
+    "\n",
+    "Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):\n",
+    "  mem 20000000 64        bytes of MCU memory (flash, RAM)\n",
+    "  mem32 40010808 4       32-bit words: use this for peripheral registers\n",
+    "  gpio                   ports A to E: input and output bits, 15 to 0\n",
+    "  bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)\n",
+    "  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)\n",
+    "  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property\n",
+    "  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)\n",
+    "  bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)\n",
+    "  bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)\n",
+    "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one\n",
+    "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)\n",
+    "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)\n",
+    "  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set\n",
+    "  gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)\n",
+    "  gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s\n",
+    "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up\n",
+    "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal\n",
+    "                         at that % on the next PTT key-up until release (tx builds)\n",
+    "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator\n",
+    "  txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)\n",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
-];
+);
 #[cfg(not(feature = "bench"))]
-const HELP_BENCH: [&str; 3] = [
-    "",
-    "Bench commands: mem mem32 gpio bk si bt rx mic txtest, gps query|nmea|standby:",
+const HELP_BENCH: &str = concat!(
+    "\n",
+    "Bench commands: mem mem32 gpio bk si bt rx mic txtest, gps query|nmea|standby:\n",
     "  not in this build; a bench build (bring-up, tx-bench) has them.",
-];
+);
 
 // ---- Slots (TERM-35) ----
 
