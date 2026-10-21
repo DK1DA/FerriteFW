@@ -3,7 +3,6 @@
 use ufmt::uwrite;
 use super::*;
 use crate::sample::Sample;
-use crate::slot::{band_of, BAND_125M};
 use ferrite_core::freq::mhz;
 use std::string::String;
 use std::vec;
