@@ -688,6 +688,7 @@ fn info<S: ChannelStore>(app: &App, st: &S, dev: &Device, o: &mut Out) -> Status
     o.put(&[app.set.region]);
     o.text(app.set.callsign.as_bytes());
     o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
+    o.put(&ferrite_core::uid::bytes(dev.selftest.uid)); // LINK-35.1: the unique ID, zeros until read
     Status::Ok
 }
 

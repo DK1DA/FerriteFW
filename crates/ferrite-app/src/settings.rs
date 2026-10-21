@@ -237,8 +237,9 @@ pub struct Settings {
     /// Cable log (0 9 2 6, TERM-28): the plain log on the cable in the normal build, until a byte arrives. Its
     /// bit was Follow's (0 1 2 2, dropped in decision 81), so the saved flag bits after it keep their places.
     pub cable_log: bool,
-    /// Spare: was Follow return (0 1 2 3), dropped in decision 81.
-    pub spare_flag2: bool,
+    /// 0 5 4 4: APRS beacons send the fixed position even with a GPS fix (APRS-31; the bit was Follow return's,
+    /// dropped in decision 81, so an old record reads GPS).
+    pub aprs_fixed: bool,
     /// 0 1 6 3: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
     /// split (SCAN-22).
     pub scan_tx: bool,
@@ -410,7 +411,7 @@ impl Settings {
         show_hidden: false,
         chan_only: false,
         cable_log: false,
-        spare_flag2: false,
+        aprs_fixed: false,
         scan_tx: false,
         tone_level: 1,
         scan_resume: 5,

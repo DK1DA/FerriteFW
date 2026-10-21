@@ -2331,6 +2331,7 @@ fn system_and_about_rows() {
     assert_eq!(show(Page::About, "Unique ID", 0, &none), "Not read");
     let mut id = Device::default();
     id.selftest.uid = [0x3F2A_91C0, 0x7D44_0E18, 0xA2B6_5C93];
-    assert_eq!(show(Page::About, "Unique ID", 0, &id), "3F2A 91C0 7D44");
-    assert_eq!(show(Page::About, "Unique ID", 1, &id), "0E18 A2B6 5C93");
+    // SELF-8: the 96 bits as 20 base32 digits, two rows of two groups of five
+    assert_eq!(show(Page::About, "Unique ID", 0, &id), "R28JM FRR1S");
+    assert_eq!(show(Page::About, "Unique ID", 1, &id), "27V4T WPTH0");
 }

@@ -139,7 +139,7 @@ fn flags_round_trip_around_the_spare_bits() {
     for (h, c, x) in [(true, false, true), (false, true, false), (true, true, true)] {
         let a = crate::settings::Settings { show_hidden: h, chan_only: c, scan_tx: x, ..d };
         let b = load(&save(&a));
-        assert_eq!((b.show_hidden, b.chan_only, b.scan_tx, b.cable_log, b.spare_flag2), (h, c, x, false, false));
+        assert_eq!((b.show_hidden, b.chan_only, b.scan_tx, b.cable_log, b.aprs_fixed), (h, c, x, false, false));
     }
     // TERM-28: Cable log is off by default, 0 9 2 6 toggles it, and it keeps its bit.
     assert!(!d.cable_log);

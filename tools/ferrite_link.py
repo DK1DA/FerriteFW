@@ -673,6 +673,19 @@ def build_bench(rest):
     return bool(rest and rest[0] & BENCH_BIT)
 
 
+UID_DIGITS = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # Crockford base32 (ferrite_core::uid)
+
+
+def uid_text(b):
+    """LINK-35.1, SELF-8: INFO's last 12 bytes (the unique ID as the MCU stores it) as About shows them: 20 base32
+    digits in groups of five; None when absent (older firmware) or all zero (not read)."""
+    if len(b) != 12 or not any(b):
+        return None
+    n = int.from_bytes(b, "big") << 4
+    t = "".join(UID_DIGITS[(n >> (5 * (19 - i))) & 31] for i in range(20))
+    return " ".join(t[i:i + 5] for i in range(0, 20, 5))
+
+
 def run(link, a):
     hello = link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + b"ferrite_link.py")
     if not hello[2]:
@@ -732,8 +745,9 @@ def run(link, a):
         ver, r = text(r)
         chans, zones, presets, slen, region = struct.unpack("<HBBHB", r[:7])
         call, rest = text(r[7:])
+        uid = uid_text(rest[1:13])
         print(f"firmware {ver} ({build_name(rest)}{', bench' if build_bench(rest) else ''}); {chans} channels, {zones} zones, {presets} presets; "
-              f"settings {slen} B; region {region}; callsign {call or '-'}")
+              f"settings {slen} B; region {region}; callsign {call or '-'}; unique ID {uid or 'not given'}")
     elif a.cmd == "read-settings":
         rec = link.read(SETTINGS, 0)
         open(a.args[0], "wb").write(rec)

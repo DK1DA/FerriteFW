@@ -188,7 +188,7 @@ impl Aprs {
                 } else {
                     Sending::Nothing
                 };
-                let t = extra.aprs.tick(now_s, send, relay_ok, me.as_bytes(), extra.fix(), &cfg, &mut out);
+                let t = extra.aprs.tick(now_s, send, relay_ok, me.as_bytes(), app.beacon_fix(extra.fix()), &cfg, &mut out);
                 for (peer, text, st) in t.states.into_iter().flatten() {
                     store.message_state(peer.as_bytes(), text.as_bytes(), st);
                 }

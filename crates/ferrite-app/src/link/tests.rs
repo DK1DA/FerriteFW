@@ -115,7 +115,8 @@ impl Pc {
     }
 }
 
-/// LINK-1, LINK-2: HELLO and INFO answer; every frame is acknowledged with its type and seq.
+/// LINK-1, LINK-2, LINK-35.1: HELLO and INFO answer (INFO ending with the unique ID); every frame is acknowledged
+/// with its type and seq.
 #[test]
 fn hello_and_info() {
     let mut pc = Pc::new(true);
@@ -123,10 +124,13 @@ fn hello_and_info() {
     assert_eq!(s, Status::Ok as u8);
     assert_eq!(&a[..3], &[PROTOCOL, MAX_PAYLOAD as u8, 1], "protocol, max payload, may write");
     assert_eq!(&a[4..4 + a[3] as usize], VERSION.as_bytes());
+    pc.dev.selftest.uid = [0x3F2A_91C0, 0x7D44_0E18, 0xA2B6_5C93];
     let (s, a) = pc.ask(msg::INFO, &[]);
     assert_eq!(s, 0);
     let v = a[0] as usize;
     assert_eq!(u16::from_le_bytes([a[1 + v], a[2 + v]]), pc.st.count());
+    // LINK-35.1: the last 12 bytes are the unique ID as the MCU stores it
+    assert_eq!(a[a.len() - 12..], ferrite_core::uid::bytes(pc.dev.selftest.uid));
     assert_eq!(pc.link.hellos(), 1);
     assert!(pc.link.active(pc.now));
     assert!(!pc.link.active(pc.now + ACTIVE_MS));
@@ -158,7 +162,8 @@ fn hello_and_info_give_the_build() {
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 7;
         let c = v + 1 + a[v] as usize;
-        assert_eq!(a[c..], [b], "INFO");
+        assert_eq!(a[c], b, "INFO");
+        assert_eq!(a[c + 1..], [0; 12], "LINK-35.1: the unique ID follows, zeros until read");
     }
     assert_eq!(build::name(2), "tx-dry");
     assert_eq!(build::name(0x82), "tx-dry");

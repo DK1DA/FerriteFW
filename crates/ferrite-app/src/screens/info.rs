@@ -148,15 +148,18 @@ const ABOUT: [InfoRow; 9] = [
     ("SSB patch", |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, "Installed", TEXT) } else { fixed(b, "Not installed", SUB) }),
 ];
 
-/// Half `h` of the unique ID: "3F2A 91C0 7D44" (12 hex digits as three groups), "Not read" while all zero.
+/// Half `h` of the unique ID (SELF-8): "R28JM FRR1S", ten of its 20 base32 digits in two groups of five
+/// (`ferrite_core::uid::text`), "Not read" while all zero.
 fn uid_half(b: &mut Buf<40>, d: &Device, h: usize) -> u16 {
     let u = d.selftest.uid;
     if u == [0; 3] {
         return if h == 0 { fixed(b, "Not read", SUB) } else { TEXT };
     }
-    // the 96 bits as 6 groups of 16, lowest word first, each word's high half first
-    let g = [u[0] >> 16, u[0] & 0xFFFF, u[1] >> 16, u[1] & 0xFFFF, u[2] >> 16, u[2] & 0xFFFF];
-    let _ = uwrite!(b, "{:04X} {:04X} {:04X}", g[3 * h], g[3 * h + 1], g[3 * h + 2]);
+    let t = ferrite_core::uid::text(u);
+    let half = &t[10 * h..10 * h + 10];
+    b.push(&half[..5]);
+    b.push(b" ");
+    b.push(&half[5..]);
     TEXT
 }
 

@@ -50,6 +50,7 @@ pub mod txseq;
 pub mod txsuite;
 #[cfg(feature = "bench")]
 pub mod txtest;
+pub mod uid;
 pub mod vox;
 pub mod watch;
 pub mod xb;

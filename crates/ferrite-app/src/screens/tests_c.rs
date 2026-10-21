@@ -1006,3 +1006,36 @@ fn aprs_weather_station() {
     t.tap(Key::Menu);
     t.draw(); // renders without a panic
 }
+
+/// GPS-35: the position editor's From GPS row keeps the current fix as the fixed position (position and altitude);
+/// with no fix, or only the fixed position standing in, it says so and changes nothing. APRS-31: 0 5 4 5 opens the
+/// same editor, and 0 5 4 4 (Fixed) makes beacons send it even with a fix.
+#[test]
+fn fixed_position_from_the_gps_fix() {
+    let mut t = T::new();
+    t.open(Dest::PositionEntry);
+    for _ in 0..4 {
+        t.tap(Key::Down);
+    }
+    assert!(matches!(t.app.screen(), Screen::PosEntry(p) if p.row == 4), "{:?}", t.app.screen());
+    let f = t.s.fix().unwrap();
+    t.tap(Key::Menu);
+    assert!(t.app.set.fixed_on);
+    assert_eq!((t.app.set.fixed, t.app.set.fixed_alt as i32), (f.pos, f.alt_m), "the fix, kept");
+    // no fix, and the fixed position standing in for one: refused, nothing changes
+    let was = t.app.set.fixed;
+    t.s.fix.set(None);
+    t.tap(Key::Menu);
+    t.s.fix.set(Some(crate::data::Fix { age_s: crate::gpsdata::FIXED_AGE, pos: crate::data::Pos { lat: 1, lon: 2 }, ..f }));
+    t.tap(Key::Menu);
+    assert_eq!(t.app.set.fixed, was, "only a real fix is kept");
+    // APRS-31: the beacon's source
+    let gps = Some(crate::data::Fix { pos: crate::data::Pos { lat: 5, lon: 6 }, ..f });
+    assert_eq!(t.app.beacon_fix(gps).unwrap().pos, crate::data::Pos { lat: 5, lon: 6 }, "GPS: the fix");
+    t.app.set.aprs_fixed = true;
+    let b = t.app.beacon_fix(gps).unwrap();
+    assert_eq!((b.pos, b.age_s), (was, crate::gpsdata::FIXED_AGE), "Fixed: the fixed position, even with a fix");
+    t.app.set.fixed_on = false;
+    assert_eq!(t.app.beacon_fix(gps).unwrap().pos, crate::data::Pos { lat: 5, lon: 6 }, "no fixed position: the fix");
+    assert_eq!(crate::screens::nav::menu0(&[5, 4, 5]), Some(Dest::PositionEntry));
+}

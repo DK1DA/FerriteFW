@@ -1493,6 +1493,16 @@ impl App {
     }
 
     /// Why an item can't be changed on the active slot right now (MENU-14, EDIT-7), if it can't.
+    /// APRS-31: the position a beacon sends: the fixed one (0 6 9) when 0 5 4 4 says so and one is set, else `gps`
+    /// (the receiver's fix, which already falls back to the fixed position without one, GPS-3).
+    pub fn beacon_fix(&self, gps: Option<data::Fix>) -> Option<data::Fix> {
+        if self.set.aprs_fixed && self.set.fixed_on {
+            let s = &self.set;
+            return Some(data::Fix { pos: s.fixed, three_d: false, alt_m: s.fixed_alt as i32, speed_kmh: 0, heading: 0, hdop_x10: 0, used: 0, age_s: gpsdata::FIXED_AGE, utc_s: 0 });
+        }
+        gps
+    }
+
     pub fn greyed(&self, item: Item) -> Option<&'static str> {
         let s = &self.slots[self.active as usize];
         match item {

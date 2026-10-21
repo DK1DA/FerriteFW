@@ -1080,7 +1080,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     if let Some(why) = groups::greyed(app, p) {
         return Err(msg!("{}: {}", name, why));
     }
-    if p == [6, 9] {
+    if p == [6, 9] || p == [5, 4, 5] {
         // GPS-3, GPS-21: the fixed position typed (its altitude kept): degrees, a grid square, or none.
         let want = t.rest();
         match pos_val(want, name)? {

@@ -4,7 +4,8 @@
 //! leaves; # clears the fixed position (none); BACK deletes a digit, or leaves when nothing is typed. A typed row
 //! is checked (degrees, minutes and seconds in range) before it is kept; each kept row is saved at once.
 //! The fourth row is the grid square: OK on it types one (4 or 6 characters, multi-tap capitals and digits as a
-//! callsign is typed), and the position becomes the square's centre (GPS-21, as nicFW takes a grid).
+//! callsign is typed), and the position becomes the square's centre (GPS-21, as nicFW takes a grid). The fifth,
+//! From GPS: OK keeps the receiver's current fix as the fixed position (GPS-35), refused without one.
 
 use super::lists::grid;
 use super::shared::ARROWS_UD;
@@ -12,6 +13,8 @@ use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
 use crate::settings::COORD_FORMATS;
+use crate::data::Fix;
+use crate::gpsdata::FIXED_AGE;
 use crate::{App, Screen, MENU_TIMEOUT_MS};
 use ferrite_core::keys::Key;
 use ferrite_ui::panel::Panel;
@@ -20,7 +23,7 @@ use ufmt::uwrite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PosEntry {
-    /// 0 latitude, 1 longitude, 2 altitude, 3 grid square.
+    /// 0 latitude, 1 longitude, 2 altitude, 3 grid square, 4 from GPS.
     pub row: u8,
     /// The digits typed on that row, two to a byte, and how many (0: the row shows its saved value).
     buf: [u8; 5],
@@ -159,6 +162,11 @@ fn row_text(app: &App, s: PosEntry, row: u8, b: &mut Buf<24>) {
     b.push(if v < 0 { neg } else { pos }.as_bytes());
 }
 
+/// The receiver's own fix now, not the fixed position standing in for one (GPS-35).
+fn gps_fix(store: &impl ChannelStore) -> Option<Fix> {
+    store.data().fix().filter(|f| f.age_s != FIXED_AGE)
+}
+
 /// Keeps the typed row, if it is whole and in range; false (with a toast) if not.
 fn keep(app: &mut App, s: PosEntry) -> bool {
     if s.n == 0 {
@@ -209,12 +217,32 @@ impl View for PosEntry {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let mut s = self;
+        if s.row == 4 {
+            // GPS-35: the current fix becomes the fixed position
+            match (e.key, e.press) {
+                (Key::Menu, Short) => match gps_fix(store) {
+                    Some(f) => {
+                        let set = &mut app.set;
+                        (set.fixed, set.fixed_alt, set.fixed_on) = (f.pos, f.alt_m.clamp(i16::MIN as i32, i16::MAX as i32) as i16, true);
+                        app.show_toast(b"Fixed position", &grid(f.pos), false);
+                    }
+                    None => app.show_toast(b"No GPS fix", b"wait for a lock", false),
+                },
+                (Key::Up | Key::Down, Short | Repeat) => {
+                    s.row = if e.key == Key::Up { 3 } else { 0 };
+                    app.screen = Screen::PosEntry(s);
+                }
+                (Key::Exit, Short) => app.back(),
+                _ => {}
+            }
+            return;
+        }
         if s.row == 3 {
             // GPS-21: the grid row types a square in text entry
             match (e.key, e.press) {
                 (Key::Menu, Short) => return super::text::open(app, super::text::TextFor::GridFixed, store),
                 (Key::Up | Key::Down, Short | Repeat) => {
-                    s.row = if e.key == Key::Up { 2 } else { 0 };
+                    s.row = if e.key == Key::Up { 2 } else { 4 };
                     app.screen = Screen::PosEntry(s);
                 }
                 (Key::Hash, Short) => {
@@ -242,8 +270,8 @@ impl View for PosEntry {
                 if !keep(app, s) {
                     return;
                 }
-                let d = if e.key == Key::Up { 3 } else { 1 };
-                s = PosEntry { row: (s.row + d) % 4, buf: [0; 5], n: 0 };
+                let d = if e.key == Key::Up { 4 } else { 1 };
+                s = PosEntry { row: (s.row + d) % 5, buf: [0; 5], n: 0 };
             }
             (Key::Menu, Short) => {
                 if keep(app, s) {
@@ -266,7 +294,7 @@ impl View for PosEntry {
         app.screen = Screen::PosEntry(s);
     }
 
-    fn render(self, app: &mut App, lcd: &mut impl Panel, _: &Cx<impl ChannelStore>) {
+    fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         app.page(lcd, 0u8);
         app.list_head(lcd, b"Fixed position", COORD_FORMATS[app.set.coord_fmt as usize % COORD_FORMATS.len()].as_bytes());
         for (i, label) in ROWS.iter().enumerate() {
@@ -281,7 +309,17 @@ impl View for PosEntry {
             g.set(b"-");
         }
         app.row1(lcd, 3, b"Grid square", g.as_bytes(), false, self.row == 3, false);
-        let note: &[u8] = if self.row == 3 {
+        let mut f = Buf::<24>::new();
+        match gps_fix(cx.store) {
+            Some(x) => {
+                let _ = uwrite!(f, "{} fix", if x.three_d { "3D" } else { "2D" });
+            }
+            None => f.set(b"No fix"),
+        }
+        app.row1(lcd, 4, b"From GPS", f.as_bytes(), false, self.row == 4, false);
+        let note: &[u8] = if self.row == 4 {
+            b"OK keeps the current GPS fix as the fixed position."
+        } else if self.row == 3 {
             b"OK types a grid square: its centre is used. # clears it."
         } else {
             b"Used when there is no GPS fix (APRS, Nearby). # clears it."
@@ -292,6 +330,9 @@ impl View for PosEntry {
     fn hints(self, _: &App) -> Hints {
         if self.row == 3 {
             return Hints::new(&[(ARROWS_UD, "Row"), ("OK", "Type it"), ("#", "Clear")]);
+        }
+        if self.row == 4 {
+            return Hints::new(&[(ARROWS_UD, "Row"), ("OK", "Use fix")]);
         }
         let star = match self.row {
             0 => "N/S",

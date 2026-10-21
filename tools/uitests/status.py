@@ -113,8 +113,8 @@ def about_rows(t):
     u = t.keys("MENU 0 9 9")
     want = ["Version", "MCU", "Unique ID", "", "SPI flash", "Calibration", "Transmit", "Self-test", "SSB patch"]
     t.eq(u.names(), want, "the About rows")
-    t.check(re.fullmatch(r"[0-9A-F]{4} [0-9A-F]{4} [0-9A-F]{4}|Not read", u.row("Unique ID")["value"] or ""),
-            "the unique ID's first half", u.row("Unique ID"))
+    t.check(re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{5} [0-9A-HJKMNP-TV-Z]{5}|Not read", u.row("Unique ID")["value"] or ""),
+            "the unique ID's first half (base32)", u.row("Unique ID"))
     t.check(u.row("Version")["value"].startswith("v"), "the version", u.row("Version"))
     t.check(u.row("Transmit")["value"], "the transmit state", u.row("Transmit"))
     t.check(u.row("SSB patch")["value"], "the SSB patch state", u.row("SSB patch"))

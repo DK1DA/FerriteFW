@@ -197,7 +197,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         Entry("SSID|7 Handheld|0-15 after your callsign."),
         Entry("Symbol|Car|Your map symbol."),
         Entry("Comment|Empty|Up to 40 characters."),
-        Entry("Position source|GPS|GPS, or the fixed position."),
+        Entry("Position source|GPS|GPS, or always the fixed position."),
         Entry("Fixed position|None|Used without GPS."),
         Entry("Ambiguity|Exact|Digits dropped from your position."),
         Entry("Mic-E status|En route|Status in Mic-E beacons."),
@@ -434,7 +434,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 70] = [
+static SETTINGS: [Setting; 71] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -455,6 +455,7 @@ static SETTINGS: [Setting; 70] = [
     field!([4, 8, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([5, 3, 0], special),
     field!([5, 4, 1], special), // APRS-30
+    field!([5, 4, 4], special), // APRS-31
     field!([5, 5, 1], special),
     field!([5, 5, 3], special),
     field!([5, 5, 4], special),
@@ -628,7 +629,12 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             resume_text(b, s.scan_resume);
             s.scan_resume != Settings::DEFAULT.scan_resume
         }
-        [6, 9] => {
+        // APRS-31: the beacon's position source; 0 5 4 5 is 0 6 9's fixed position
+        [5, 4, 4] => {
+            b.set(if s.aprs_fixed { b"Fixed" } else { b"GPS" });
+            s.aprs_fixed
+        }
+        [6, 9] | [5, 4, 5] => {
             if s.fixed_on {
                 b.set(&super::lists::grid(s.fixed));
             } else {
@@ -871,6 +877,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         }
         [5, 5, 1] => app.step_beacon(d),
         [5, 4, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: cycle(app.aprs_cfg().ssid, d, 16), ..app.aprs_cfg() }),
+        [5, 4, 4] => s.aprs_fixed = !s.aprs_fixed,
         [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
         [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
         [5, 6, 1] => {
@@ -937,7 +944,8 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
             s.tone_level = d.tone_level;
             app.out.push(RadioCmd::ToneLevel(d.tone_level));
         }
-        [6, 9] => s.fixed_on = false,
+        [6, 9] | [5, 4, 5] => s.fixed_on = false,
+        [5, 4, 4] => s.aprs_fixed = false,
         [6, 6] => (s.clock, s.clock_gps) = (d.clock, d.clock_gps),
         [8, 9] | [8, 9, 1] => s.extend_tx = false,
         [8, 9, 2] if !app.remote_in => app.set_dry_tx(false), // TX-48: # by the radio's own keys only
