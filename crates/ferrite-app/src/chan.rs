@@ -112,11 +112,13 @@ impl Channel {
         self.tones = self.tones & !0x18 | v.min(TAILS.len() as u8 - 1) << 3;
     }
 
-    /// A new name: up to 16 bytes, the rest zeroed.
+    /// A new name: up to 16 bytes, the rest zeroed; a character outside the name set becomes '-' (CHAN-31). Every
+    /// way a name gets in comes through here: text entry, the terminal's editor, `ch`, `load`, the link, the store.
     pub fn set_name(&mut self, s: &[u8]) {
         self.name = [0; 16];
-        let n = s.len().min(16);
-        self.name[..n].copy_from_slice(&s[..n]);
+        for (d, &c) in self.name.iter_mut().zip(s) {
+            *d = ferrite_core::name::map_name(c);
+        }
     }
 }
 

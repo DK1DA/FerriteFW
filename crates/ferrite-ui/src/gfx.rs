@@ -466,8 +466,10 @@ mod tests {
         let s = "Ch 012\u{B7}gy".as_bytes(); // the UTF-8 middle dot draws its own glyph
         text_like_reference(s, &codes, &UI_12B, 20);
         // the run-length fonts (each character keeps its place in its glyph's rows), a line partly off the left
-        text_like_reference(s, &codes, &NAME_22, -9);
-        text_like_reference(s, &codes, &NAME_26, 3);
+        // (the name fonts have the name set, CHAN-31: a '-' for the middle dot)
+        let nc: [u32; 9] = core::array::from_fn(|i| b"Ch 012-gy"[i] as u32);
+        text_like_reference(b"Ch 012-gy", &nc, &NAME_22, -9);
+        text_like_reference(b"Ch 012-gy", &nc, &NAME_26, 3);
         let d: [u32; 7] = core::array::from_fn(|i| b"146.520"[i] as u32);
         text_like_reference(b"146.520", &d, &DIG_46, 1);
         text_like_reference(b"146.520", &d, &DIG_28, 5);

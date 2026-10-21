@@ -49,11 +49,12 @@ pub enum TextFor {
     AprsPath,
 }
 
-/// What a text takes: any text, capitals and digits (a callsign, a grid square), digits only, or a path
-/// (capitals and digits with # typing the comma between entries).
+/// What a text takes: any text, a channel name (the name set, CHAN-31), capitals and digits (a callsign, a grid
+/// square), digits only, or a path (capitals and digits with # typing the comma between entries).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Any,
+    Name,
     Caps,
     Digits,
     Path,
@@ -116,6 +117,7 @@ impl TextFor {
             TextFor::Callsign | TextFor::GridFixed | TextFor::GridWaypoint => Kind::Caps,
             TextFor::Capcode | TextFor::Clock => Kind::Digits,
             TextFor::AprsPath => Kind::Path,
+            TextFor::ChannelName | TextFor::Channel(_) | TextFor::SaveName => Kind::Name,
             _ => Kind::Any,
         }
     }
@@ -130,6 +132,8 @@ impl TextFor {
 pub(crate) const UPPER: [&[u8]; 10] = [b"0", b".-/1", b"ABC2", b"DEF3", b"GHI4", b"JKL5", b"MNO6", b"PQRS7", b"TUV8", b"WXYZ9"];
 pub(crate) const LOWER: [&[u8]; 10] = [b"0", b".-/1", b"abc2", b"def3", b"ghi4", b"jkl5", b"mno6", b"pqrs7", b"tuv8", b"wxyz9"];
 const SYMBOLS: [&[u8]; 10] = [b"0", b".,?!", b"-/_'", b"()&+", b"@#*=", b":;%\"", b"<>[]", b"$^~|", b"{}\\`", b"0123"];
+/// A channel name's symbols (CHAN-31): only those the name set has, on the keys that type them in [`SYMBOLS`].
+const NAME_SYMBOLS: [&[u8]; 10] = [b"0", b".!", b"-/_'", b"()&+", b"#", b"5", b"6", b"7", b"8", b"9"];
 const DIGITS: [&[u8]; 10] = [b"0", b"1", b"2", b"3", b"4", b"5", b"6", b"7", b"8", b"9"];
 pub(crate) const MODES: [&str; 4] = ["ABC", "abc", "123", "Sym"];
 /// A key tapped again within this steps through its letters.
@@ -153,6 +157,11 @@ impl Text {
         Text { to, mode, last: 0, tail: 0, at: 0 }
     }
 
+    /// The layout the keys type in ([`legend`]): a channel name's symbols in place of the full set (CHAN-31).
+    fn keys(self) -> u8 {
+        if self.mode == 3 && self.to.kind() == Kind::Name { 4 } else { self.mode }
+    }
+
     /// The mode * goes to: KEY-12's case and symbols; a callsign has capitals and digits only (SETUP-12).
     fn next_mode(self) -> u8 {
         if self.to.kind() == Kind::Digits {
@@ -172,9 +181,9 @@ pub(crate) fn open(app: &mut App, to: TextFor, store: &impl ChannelStore) {
     app.open(super::nav::Dest::Text(to));
 }
 
-/// The characters key d types in a mode.
+/// The characters key d types in a mode (4: a channel name's symbols, CHAN-31).
 pub(crate) fn legend(mode: u8, d: u8) -> &'static [u8] {
-    [UPPER, LOWER, DIGITS, SYMBOLS][mode as usize % 4][d as usize % 10]
+    [UPPER, LOWER, DIGITS, SYMBOLS, NAME_SYMBOLS][mode as usize % 5][d as usize % 10]
 }
 
 /// One digit key into a text: a new character, or the next one on the same key within [`TAP_MS`]. Returns
@@ -235,14 +244,14 @@ impl View for Text {
                 s.last = 0;
             }
             (Key::Digit(d), Press::Short) => {
-                (s.last, s.at) = tap(&mut app.text, max, s.mode, d, s.last, s.at, app.now);
+                (s.last, s.at) = tap(&mut app.text, max, s.keys(), d, s.last, s.at, app.now);
             }
             (Key::Star, Press::Short) => {
                 // KEY-12: case and symbols; a callsign has capitals and digits only (SETUP-12).
                 s.mode = self.next_mode();
                 s.last = 0;
             }
-            (Key::Hash, Press::Short) if matches!(self.to.kind(), Kind::Any | Kind::Path) => {
+            (Key::Hash, Press::Short) if matches!(self.to.kind(), Kind::Any | Kind::Name | Kind::Path) => {
                 if app.text.len() < max {
                     app.text.push(if self.to.kind() == Kind::Path { b"," } else { b" " });
                 }
@@ -282,7 +291,7 @@ impl View for Text {
             });
         }
         if app.dirty(R_HELP, hash(&(self.mode, self.to))) {
-            let m = self.mode;
+            let m = self.keys();
             let (star, hash_): (&[u8], &[u8]) = if self.to.kind() == Kind::Digits {
                 (b"", b"")
             } else if self.to.callsign() {
@@ -398,4 +407,28 @@ fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
         }
     }
     app.back();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CHAN-31: a channel name's symbols page types only the name set's symbols, every one of them; other text
+    /// (a zone's name, the power-on message) keeps the full symbols page.
+    #[test]
+    fn chan_31_name_symbols() {
+        use ferrite_core::name::{name_char, NAME_SYMBOLS};
+        for to in [TextFor::ChannelName, TextFor::Channel(3), TextFor::SaveName] {
+            let t = Text { mode: 3, ..Text::new(to) };
+            assert_eq!(t.keys(), 4);
+            let all: std::vec::Vec<u8> = (0..10).flat_map(|d| legend(t.keys(), d).iter().copied()).collect();
+            assert!(all.iter().all(|&c| name_char(c)), "{to:?}");
+            assert!(NAME_SYMBOLS.iter().all(|c| all.contains(c) || *c == b' '), "{to:?}: a symbol missing");
+        }
+        for to in [TextFor::Zone(0), TextFor::PowerOn] {
+            let t = Text { mode: 3, ..Text::new(to) };
+            assert_eq!(t.keys(), 3);
+            assert!(legend(t.keys(), 4).contains(&b'@'));
+        }
+    }
 }

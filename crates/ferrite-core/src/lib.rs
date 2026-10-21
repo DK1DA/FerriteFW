@@ -32,6 +32,7 @@ pub mod mcutemp;
 #[cfg(feature = "bench")]
 pub mod memmap;
 pub mod msg;
+pub mod name;
 pub mod path;
 pub mod rxsleep;
 pub mod same;
