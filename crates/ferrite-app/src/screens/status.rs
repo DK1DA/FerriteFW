@@ -215,7 +215,7 @@ const GO: [Go; 20] = [
     Go::Later,
     Go::Later,
     Go::Open(Dest::Sub(8, 2)),
-    Go::Open(Dest::Sub(4, 9)),
+    Go::Open(Dest::Sub(4, 8)),
     Go::Open(Dest::Mailbox),
 ];
 

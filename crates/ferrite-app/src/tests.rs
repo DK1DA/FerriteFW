@@ -398,8 +398,6 @@ fn hold_4_restores_the_watch_set() {
     assert_eq!(t.app.watch, 1, "A+B stays A+B");
 }
 
-/// TONE-16: MENU 0 8 4 opens Tones sent; 2 there is Subtone level, and the knob steps it (Low, Normal, High)
-/// and tells the Radio task; 1 is empty: the tone burst is 1750 Hz only, not a setting (TONE-13.1, decision 198).
 /// MENU-24 with SBAR-15: a group opened to a setting (the Status page's VOX row) is on that setting, whatever
 /// the group remembers; plain menu navigation still brings the remembered row back.
 #[test]
@@ -430,22 +428,38 @@ fn status_link_opens_its_setting_not_the_remembered_row() {
     assert_eq!(row(&t), (8, 2, 2), "by the menu: Tail, remembered");
 }
 
+/// TONE-16: MENU 0 8 4 is Subtone level itself, a single setting like Mic gain; the knob steps it (Low, Normal,
+/// High) and tells the Radio task. TONE-13.1: the tone burst is 1750 Hz only, no setting in the Transmit group.
 #[test]
 fn subtone_level_from_its_path() {
     use crate::screens::groups::Group;
     let mut t = T::new();
     t.hold(Key::Menu);
-    for d in [8, 4, 2] {
+    for d in [8, 4] {
         t.tap(Key::Digit(d));
     }
-    assert!(matches!(t.app.screen(), Screen::Group(Group { g: 8, sub: 4, row: 1 })), "{:?}", t.app.screen());
+    assert!(matches!(t.app.screen(), Screen::Group(Group { g: 8, sub: 0, row: 3 })), "{:?}", t.app.screen());
     t.cmds();
     t.knob(1);
     assert_eq!(t.app.set.tone_level, 2, "High");
     assert!(t.cmds().contains(&RadioCmd::ToneLevel(2)), "told to the Radio task");
     t.knob(-2);
     assert_eq!(t.app.set.tone_level, 0, "Low");
-    assert_eq!(crate::screens::groups::greyed(&t.app, &[8, 4, 1]), Some("not used"), "0 8 4 1 is empty (decision 198)");
+    let tx = crate::screens::groups::items(8, 0);
+    assert!(tx.iter().all(|e| !e.name().contains("burst")), "no tone burst setting");
+}
+
+/// MENU-6.1: before the first release a dropped item leaves no empty number: every group and list is filled
+/// from 1 with real items.
+#[test]
+fn menu_numbers_have_no_gaps() {
+    use crate::screens::groups::{items, GROUP_ITEMS, SUBS};
+    for (g, list) in GROUP_ITEMS.iter().enumerate() {
+        assert!(list.iter().all(|e| e.name() != "-" && !e.name().is_empty()), "0 {}: an empty number", g + 1);
+    }
+    for ((g, m), _) in SUBS {
+        assert!(items(g, m).iter().all(|e| e.name() != "-" && !e.name().is_empty()), "0 {g} {m}: an empty number");
+    }
 }
 
 #[test]

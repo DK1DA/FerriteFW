@@ -138,14 +138,14 @@ pub struct Settings {
     pub cable_port: u8,
     /// 0 5 9 1: the KISS TNC's port, an index into [`KISS_PORTS`] (KISS-6).
     pub kiss_port: u8,
-    /// 0 4 9 1 (US and Canada only).
+    /// 0 4 8 1 (US and Canada only).
     pub same: bool,
     /// 0 4 2 (DEC-4, DEC-18): the pager decoder on or off, its frequency, and the one capcode it keeps (0: every
     /// capcode).
     pub pocsag_on: bool,
     pub pocsag_freq: Freq10,
     pub pocsag_cap: u32,
-    /// 0 4 8 (DEC-7): a toast for each decoder hit (pages and the other decoders); off, they only go to the
+    /// 0 4 7 (DEC-7): a toast for each decoder hit (pages and the other decoders); off, they only go to the
     /// event log and the inbox count.
     pub popups: bool,
     /// 0 7 5 1-3 (SND-3, SND-6): key beep, beep volume (1-5, relative to voice: the knob scales both) and alert
@@ -195,7 +195,7 @@ pub struct Settings {
     pub fixed_on: bool,
     pub fixed: crate::data::Pos,
     pub fixed_alt: i16,
-    /// 0 4 9 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
+    /// 0 4 8 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
     pub same_codes: [u32; SAME_CODES],
     /// Band scope (0 3 2): bars (an index into [`SCOPE_BAR_COUNTS`]), step (into the tuning step list), dwell
     /// per point in 0.1 ms (1-40), trigger action ([`SCOPE_TRIGGERS`]), the trigger line (0 none, 1-9: hold a
@@ -242,7 +242,7 @@ pub struct Settings {
     /// 0 1 6 3: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
     /// split (SCAN-22).
     pub scan_tx: bool,
-    /// 0 8 4 2: the CTCSS/DCS level sent, around the calibration's ([`TONE_LEVELS`]; TONE-16).
+    /// 0 8 4: the CTCSS/DCS level sent, around the calibration's ([`TONE_LEVELS`]; TONE-16).
     pub tone_level: u8,
     /// 0 1 5: the radio's resume rule (SCAN-5), as `scan::Resume::from_code`: 1-10 s, 11 carrier drop, 12 stop
     /// on hit. Zones and range presets can have their own.
@@ -253,7 +253,7 @@ pub struct Settings {
     pub tail_mode: u8,
     /// 0 8 5 2: its phase ([`TAIL_PHASES`]: 55 Hz, 120°, 180°, 240°; the phases on CTCSS only, TONE-5).
     pub tail_phase: u8,
-    /// 0 8 5 4: the end tone ([`END_TONE_NAMES`]; 0 off), a channel's own over it (TONE-10).
+    /// 0 8 5 3: the end tone ([`END_TONE_NAMES`]; 0 off), a channel's own over it (TONE-10).
     pub end_tone: u8,
     /// 0 8 6 3: DTMF speed, ms each tone and each gap (50-200, DTMF-3).
     pub dtmf_ms: u8,
@@ -278,12 +278,12 @@ pub const ARRIVAL_M: [u16; 6] = [0, 50, 100, 200, 500, 1000];
 pub const TAIL_MODES: [&str; 4] = ["Off", "Receive", "Transmit", "Both"];
 /// 0 8 5 2's values (TONE-5).
 pub const TAIL_PHASES: [&str; 4] = ["55 Hz", "120\u{b0}", "180\u{b0}", "240\u{b0}"];
-/// 0 8 5 4's values (TONE-10), as `tonegen::END_TONES`.
+/// 0 8 5 3's values (TONE-10), as `tonegen::END_TONES`.
 pub const END_TONE_NAMES: [&str; 6] = ["Off", "Beep", "Two-tone up", "Two-tone down", "Chirp", "Quindar"];
 /// 0 8 7 2's values (VOX-12).
 pub const CW_ID_MODES: [&str; 3] = ["Off", "Every 10 min", "On unkey"];
 
-/// 0 8 4 2's values (TONE-16).
+/// 0 8 4's values (TONE-16).
 /// 0 8 2 3's VOX tails, in 100 ms (VOX-5: 2 s by default, as nicFW's VOX Tail).
 pub const VOX_TAILS: [u8; 6] = [5, 10, 15, 20, 30, 50];
 /// 0 3 1 5's sleep times in minutes (BCR-5: off, 15-120 min).

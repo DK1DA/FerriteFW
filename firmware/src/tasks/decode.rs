@@ -1,6 +1,6 @@
 //! The decoders' side of the UI task (manual chapters 23 and 27; roadmap 6b), beside the APRS task:
 //!
-//! - **SAME:** tells the Radio task whether weather alerts are on (0 4 9 1, US and Canada only: WX-3); its BK4829
+//! - **SAME:** tells the Radio task whether weather alerts are on (0 4 8 1, US and Canada only: WX-3); its BK4829
 //!   receiver then listens on any slot tuned to a weather channel (DEC-19). A header it decodes comes back on
 //!   `ALERTS`: the alert screen (WX-4) and an event log record (INBOX-6).
 //! - **POCSAG:** asks the DSP task for the pager decoder while POCSAG is on and a slot sits on its frequency

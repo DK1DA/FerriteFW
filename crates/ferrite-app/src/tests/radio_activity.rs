@@ -1331,7 +1331,7 @@ fn transmit_tones_reach_the_radio() {
     t.app.knob(1, t.t, &store());
     assert_eq!(t.app.set.cw_id, 1);
     assert!(t.cmds().contains(&RadioCmd::TxTones { phase: 0, cw: 1, sidetone: true }));
-    // 0 8 5 4: every slot's end tone follows (Beep = END_TONES[1]).
+    // 0 8 5 3: every slot's end tone follows (Beep = END_TONES[1]).
     t.app.set.end_tone = 1;
     t.app.send_slot_tones();
     let c = t.cmds();
@@ -1404,15 +1404,15 @@ fn clock_set_by_hand() {
     assert_eq!(t.app.take_clock_set(), None);
 }
 
-/// DEC-7: 0 4 8 Popups is a real setting, # puts it back on.
+/// DEC-7: 0 4 7 Popups is a real setting, # puts it back on.
 #[test]
 fn popups_setting() {
     use crate::screens::groups::{change, reset};
     let mut t = T::new();
     assert!(t.app.set.popups, "on by default");
-    change(&mut t.app, &[4, 8], 1);
+    change(&mut t.app, &[4, 7], 1);
     assert!(!t.app.set.popups);
-    reset(&mut t.app, &[4, 8]);
+    reset(&mut t.app, &[4, 7]);
     assert!(t.app.set.popups);
 }
 

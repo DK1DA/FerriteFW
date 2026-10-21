@@ -7,7 +7,7 @@ use crate::freq::Freq10;
 /// One step of a tone sequence: Hz (0 = silence) and how long, ms.
 pub type Step = (u16, u16);
 
-/// The end tone choices (TONE-10), index as 0 8 5 4's list: 0 off.
+/// The end tone choices (TONE-10), index as 0 8 5 3's list: 0 off.
 pub const END_TONES: [&[Step]; 6] = [
     &[],
     &[(1000, 150)],                           // Beep

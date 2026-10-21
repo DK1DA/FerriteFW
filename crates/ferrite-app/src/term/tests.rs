@@ -723,7 +723,7 @@ fn command_line_set_and_get() {
     assert!(r.bottom().contains("one or two entries"), "{}", r.bottom());
     r.cmd("set 0 5 6 2 None");
     assert!(r.app.aprs_cfg().custom_text().is_empty());
-    r.cmd("set 0 4 8 off");
+    r.cmd("set 0 4 7 off");
     assert!(!r.app.set.popups);
     // A wired value (the backlight timeout) is matched too, and a wrong one lists the choices and changes
     // nothing (on the radio, Oct 12, 2026, it listed them run together and left the timeout one step on).

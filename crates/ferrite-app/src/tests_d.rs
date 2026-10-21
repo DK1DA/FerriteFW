@@ -408,12 +408,12 @@ fn groups_change_values() {
     assert_eq!(t.app.settings().theme, 1);
     t.tap(Key::Hash);
     assert_eq!(t.app.settings().theme, 0);
-    menu0(&mut t, &[4, 9]);
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 4, sub: 0, row: 8 }), "greyed: not opened");
+    menu0(&mut t, &[4, 8]);
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 4, sub: 0, row: 7 }), "greyed: not opened");
     assert_eq!(toast_head(&t), "Weather alerts");
     t.app.set.region = 2; // Canada
-    t.tap(Key::Digit(9));
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 4, sub: 9, row: 0 }));
+    t.tap(Key::Digit(8));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 4, sub: 8, row: 0 }));
     // every group and list draws
     let mut fb = FrameBuffer::new();
     for (g, n) in crate::screens::groups::GROUP_ITEMS.iter().enumerate() {
@@ -470,7 +470,7 @@ fn same_header_raises_the_alert() {
     assert!(!t.app.same_alert(&parse(b"ZCZC-WXR-RWT-024031+0015-2761200-KLWX/NWS-").unwrap(), 0, 16_240_000));
     assert_eq!(t.app.screen(), Screen::Home);
     assert!(t.app.toast_up());
-    // SAME off (MENU 0 4 9 1): nothing.
+    // SAME off (MENU 0 4 8 1): nothing.
     t.app.settings_mut().same = false;
     assert!(!t.app.same_alert(&h, 2, 16_255_000));
 }

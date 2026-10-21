@@ -79,14 +79,11 @@ const G3: [Entry; 6] = [
     Entry("Crossband repeater||Repeat one slot's band on another's."),
     Entry("Tone search||Find the CTCSS or DCS in use."),
 ];
-const G4: [Entry; 9] = [
+const G4: [Entry; 8] = [
     Entry("Event log||Every decode and alert: the inbox."),
     Entry("POCSAG|439.9875|Pager frequency, baud, capcodes."),
     Entry("DSC|Off|Marine distress calls, receive only."),
     Entry("AIS|Off|Ships near you."),
-    // 5 was "Sensor reader" (with the jamming alarm), dropped (decision 75); the number stays empty so the
-    // rest of the group keeps its paths.
-    Entry("-||Not used."),
     Entry("Selcall, MDC1200|Off|Decode selcall and MDC1200 IDs."),
     Entry("DTMF decode|Off|Show and log DTMF sequences."),
     Entry("Popups|On|A 3 s toast for each decode."),
@@ -130,7 +127,7 @@ const G8: [Entry; 9] = [
     Entry("Timeout|120 s|Transmit timeout and its pre-alert."),
     Entry("VOX|Off|Voice-operated transmit."),
     Entry("Mic gain|5|Higher is louder on air: 1-9."),
-    Entry("Tones sent|Normal|Subtone level."),
+    Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),
     Entry("Tail elimination|Off|Squelch tail, end tone (roger beep)."),
     Entry("DTMF|100 ms|Dialer, memories, timing, PTT ID."),
     Entry("Callsign and ID|Empty|Your callsign, and CW ID."),
@@ -155,7 +152,7 @@ pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
     ((1, 2), &[
         Entry("Watched audio|Heard|Heard, muted, per slot."),
         Entry("Pause time|1 min|# on home pauses watch this long."),
@@ -191,7 +188,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
     ]),
     ((4, 3), &[Entry("DSC|Off|Decode DSC on channel 70."), Entry("Own MMSI|None|Your MMSI, receive only.")]),
     ((4, 4), &[Entry("AIS|Off|161.975 and 162.025, in turn."), Entry("Range filter|25 nm|Off, 5, 10, 25, 50 nm; needs a fix.")]),
-    ((4, 9), &[
+    ((4, 8), &[
         Entry("SAME|On|Decode weather alerts."),
         Entry("Location codes|None|Up to 8 FIPS or CLC codes."),
         Entry("Channel|Auto|The weather channel to watch."),
@@ -254,16 +251,9 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
     ]),
     ((8, 1), &[Entry("TX timeout|120 s|Transmit stops after this."), Entry("Pre-alert|10 s|Warning before the timeout.")]),
     ((8, 2), &[Entry("VOX|Off|Transmit when you talk."), Entry("Level|5|Higher needs a louder voice: 1 keys easiest."), Entry("Tail|2 s|Hang time after speech.")]),
-    ((8, 4), &[
-        // 1 was "Tone burst", dropped (decision 198: 1750 Hz only, PTT + SIDE2); Subtone level keeps 0 8 4 2.
-        Entry("-||Not used."),
-        Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),
-    ]),
     ((8, 5), &[
         Entry("Mode|Off|Receive, transmit or both."),
         Entry("Phase|55 Hz|55 Hz or a phase shift."),
-        // 3 was "Repeater tail delay", dropped (decision 63); the number stays empty so End tone keeps 0 8 5 4.
-        Entry("-||Not used."),
         Entry("End tone|Off|A short tone as you let go of PTT."),
     ]),
     ((8, 6), &[
@@ -372,8 +362,7 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 /// Why an item can't be used here, if it can't (MENU-14).
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
-        [4, 9, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
-        [4, 5] | [8, 4, 1] | [8, 5, 3] => Some("not used"),
+        [4, 8, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
         [8, 9, 2] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
         [8, 9, 2] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
         _ => None,
@@ -462,8 +451,8 @@ static SETTINGS: [Setting; 70] = [
     field!([4, 2, 1], pocsag_on: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([4, 2, 2], special),
     field!([4, 2, 3], special),
-    field!([4, 8, 0], popups: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([4, 9, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([4, 7, 0], popups: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([4, 8, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([5, 3, 0], special),
     field!([5, 4, 1], special), // APRS-30
     field!([5, 5, 1], special),
@@ -504,10 +493,10 @@ static SETTINGS: [Setting; 70] = [
     field!([8, 2, 2], vox_level: u8, Kind::Level(1, 9, 1, vox_level_text), Vox),
     field!([8, 2, 3], vox_tail: u8, Kind::Round(VOX_TAILS.len() as u8, vox_tail_text), Vox),
     field!([8, 3, 0], mic_gain: u8, Kind::Level(1, 9, 1, vox_level_text), MicGain),
-    field!([8, 4, 2], special),
+    field!([8, 4, 0], special),
     field!([8, 5, 1], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
     field!([8, 5, 2], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
-    field!([8, 5, 4], end_tone: u8, Kind::Pick(&END_TONE_NAMES), SlotTones),
+    field!([8, 5, 3], end_tone: u8, Kind::Pick(&END_TONE_NAMES), SlotTones),
     // 50-200 ms in 10 ms steps (DTMF-3)
     field!([8, 6, 3], dtmf_ms: u8, Kind::Level(50, 200, 10, dtmf_ms_text), TxTones),
     field!([8, 6, 6], dtmf_sidetone: bool, Kind::Flip(&ON_OFF), TxTones),
@@ -647,7 +636,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             }
             s.fixed_on
         }
-        [4, 9, 2] => {
+        [4, 8, 2] => {
             let n = s.same_codes.iter().filter(|&&c| c != 0).count();
             if n == 0 {
                 b.set(b"None");
@@ -806,7 +795,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.push(b"-9");
             false
         }
-        [8, 4, 2] => {
+        [8, 4] => {
             pick(b, &crate::settings::TONE_LEVELS, s.tone_level);
             s.tone_level != 1
         }
@@ -850,7 +839,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [1, 1] => app.change(Item::Watch, d),
         // 1-10 s, carrier drop, stop on hit (SCAN-5); the next scan takes it
         [1, 5] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
-        [8, 4, 2] => {
+        [8, 4] => {
             s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
             app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
         }
@@ -944,7 +933,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
         [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
         [1, 5] => s.scan_resume = d.scan_resume,
-        [8, 4, 2] => {
+        [8, 4] => {
             s.tone_level = d.tone_level;
             app.out.push(RadioCmd::ToneLevel(d.tone_level));
         }

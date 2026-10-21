@@ -270,13 +270,13 @@ fn crossband_setup_screen() {
     r.run("event crossband; expect text \"VHF and UHF, two chips\"; expect text \"ID off\"; expect text \"Simplex\"");
 }
 
-/// POCSAG: 0 4 2 decode off by default; Popups (0 4 8) on by default (DEC-4, DEC-7).
+/// POCSAG: 0 4 2 decode off by default; Popups (0 4 7) on by default (DEC-4, DEC-7).
 #[test]
 fn pocsag_and_popups_settings() {
     let mut r = Radio::new();
     r.run("menu 0 4 2; expect text \"Decode Off\"; expect text \"Capcode filter None\"");
     r.run("menu 0 4; expect text \"Popups On\"");
-    r.run("menu 0 4 8; press OK; expect text \"Popups Off\"");
+    r.run("menu 0 4 7; press OK; expect text \"Popups Off\"");
 }
 
 /// GPS: the position page shows the fix; F5 cycles off, searching, fix, and the Status page follows (GPS-15.1,
@@ -386,7 +386,7 @@ fn channel_browser() {
 #[test]
 fn terminal_get() {
     let mut r = Radio::new();
-    r.sim.term_feed(b"\r:get 0 4 8\r");
+    r.sim.term_feed(b"\r:get 0 4 7\r");
     r.wait(400);
     let out = String::from_utf8_lossy(&r.sim.term_take()).into_owned();
     assert!(out.contains("On"), "{out}");
@@ -420,7 +420,7 @@ fn pocsag_page_with_popups() {
 #[test]
 fn pocsag_page_without_popups() {
     let mut r = Radio::new();
-    r.run("menu 0 4 2 1; press OK; menu 0 4 8; press OK; expect text \"Popups Off\"");
+    r.run("menu 0 4 2 1; press OK; menu 0 4 7; press OK; expect text \"Popups Off\"");
     r.run("home; press SLOT; press VM; type 439987; press OK; wait 1s");
     for _ in 0..21 {
         r.wait(1000);

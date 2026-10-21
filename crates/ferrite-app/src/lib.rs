@@ -737,7 +737,7 @@ impl App {
         self.clock_set.take()
     }
 
-    /// A decoder's hit (DEC-7): the inbox count, and a toast only while Popups (0 4 8) is on.
+    /// A decoder's hit (DEC-7): the inbox count, and a toast only while Popups (0 4 7) is on.
     pub fn notify_decode(&mut self, head: &[u8], body: &[u8]) {
         if self.set.popups {
             self.notify(head, body, false);
@@ -1331,7 +1331,7 @@ impl App {
     }
 
     /// The radio-wide settings the Radio task keeps: scan inputs (0 1 6 3, SCAN-22) and the subtone level
-    /// (0 8 4 2, TONE-16).
+    /// (0 8 4, TONE-16).
     pub(crate) fn send_radio_settings(&mut self) {
         self.out.push(RadioCmd::ScanTx(self.set.scan_tx));
         self.out.push(RadioCmd::ToneLevel(self.set.tone_level));
@@ -1367,7 +1367,7 @@ impl App {
         self.out.push(RadioCmd::DtmfTiming { ms: s.dtmf_ms.clamp(50, 200), delay_10ms: s.dtmf_delay.min(100) });
     }
 
-    /// Each slot's end tone and tail again (0 8 5 1 or 0 8 5 4 changed, or a channel's own; a slot's full sync
+    /// Each slot's end tone and tail again (0 8 5 1 or 0 8 5 3 changed, or a channel's own; a slot's full sync
     /// carries them too).
     pub(crate) fn send_slot_tones(&mut self) {
         for slot in 0..SLOTS as u8 {
@@ -1386,7 +1386,7 @@ impl App {
         let ch = self.slots[slot as usize % SLOTS].ch.filter(|_| !self.slots[slot as usize % SLOTS].vfo_mode);
         let end = match ch.map_or(0, |c| c.end_tone()) {
             0 => self.set.end_tone % 6,
-            e => e - 1, // Off, then the presets in 0 8 5 4's order
+            e => e - 1, // Off, then the presets in 0 8 5 3's order
         };
         let tail = match ch.map_or(0, |c| c.tail()) {
             0 => self.set.tail_mode & 3,

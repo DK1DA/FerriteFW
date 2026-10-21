@@ -186,7 +186,7 @@ pub fn run(scale: u32) {
     s.keys(&[D(4), D(5), D(2), D(5)]);
     s.save("position-entry");
     s.home();
-    s.menu0(&[4, 9, 2]);
+    s.menu0(&[4, 8, 2]);
     s.keys(&[Key::Down, Key::Menu, D(0), D(5), D(3)]);
     s.save("location-codes");
     s.home();

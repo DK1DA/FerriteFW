@@ -48,7 +48,7 @@ pub enum RadioCmd {
     /// Channel scans also listen on each channel's transmit frequency when it has a shift or split (SCAN-22,
     /// 0 1 6 3; sent at start-up and when it changes).
     ScanTx(bool),
-    /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 4 2; sent at start-up and when
+    /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 4; sent at start-up and when
     /// it changes).
     ToneLevel(u8),
     /// The transmit timeout in seconds, 30-600 (TX-30, 0 8 1 1; sent at start-up and when it changes): the UI
@@ -133,7 +133,7 @@ pub enum RadioCmd {
     /// MODE-3: the UI still wants the exclusive mode running (sent at least every [`crate::lease::RENEW_MS`]
     /// while one runs); without it for [`crate::lease::WINDOW_MS`] the Radio task stops the mode itself.
     Lease,
-    /// SAME weather alerts on or off (0 4 9 1 and the region, WX-3): the BK4829's SAME receiver runs on the chip of
+    /// SAME weather alerts on or off (0 4 8 1 and the region, WX-3): the BK4829's SAME receiver runs on the chip of
     /// any slot tuned to a weather channel (DEC-19).
     Same(bool),
     /// HF mode: enter on a frequency and mode (as [`Param::Mode`]), retune, or leave (HF-3, HF-4). Entering
@@ -217,7 +217,7 @@ pub enum Param {
     Split,
     /// The clarifier: a receive-only offset in Hz, -2500 to 2500 (VFO-22); never moves the transmit frequency.
     Clarifier,
-    /// The end tone this slot sends (TONE-10, the channel's over 0 8 5 4 already resolved): an index into
+    /// The end tone this slot sends (TONE-10, the channel's over 0 8 5 3 already resolved): an index into
     /// `tonegen::END_TONES`, 0 off.
     EndTone,
     /// Tail elimination on this slot (TONE-5 to TONE-7, the channel's over 0 8 5 1 already resolved): bit 0 on

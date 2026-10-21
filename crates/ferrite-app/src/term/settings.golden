@@ -49,12 +49,11 @@ wired [4, 4, 1]: None
 wired [4, 4, 2]: None 
 wired [4, 5]: None 
 wired [4, 6]: None 
-wired [4, 7]: None 
-wired [4, 8]: Some(false) On
-wired [4, 9]: None 
-wired [4, 9, 1]: Some(false) On
-wired [4, 9, 2]: Some(false) None
-wired [4, 9, 3]: None 
+wired [4, 7]: Some(false) On
+wired [4, 8]: None 
+wired [4, 8, 1]: Some(false) On
+wired [4, 8, 2]: Some(false) None
+wired [4, 8, 3]: None 
 wired [5, 1]: None 
 wired [5, 2]: None 
 wired [5, 3]: Some(false) Off
@@ -130,14 +129,11 @@ wired [8, 2, 1]: Some(false) Off
 wired [8, 2, 2]: Some(false) 5
 wired [8, 2, 3]: Some(false) 2 s
 wired [8, 3]: Some(false) 5
-wired [8, 4]: None 
-wired [8, 4, 1]: None 
-wired [8, 4, 2]: Some(false) Normal
+wired [8, 4]: Some(false) Normal
 wired [8, 5]: None 
 wired [8, 5, 1]: Some(false) Off
 wired [8, 5, 2]: Some(false) 55 Hz
-wired [8, 5, 3]: None 
-wired [8, 5, 4]: Some(false) Off
+wired [8, 5, 3]: Some(false) Off
 wired [8, 6]: None 
 wired [8, 6, 1]: None 
 wired [8, 6, 2]: None 
@@ -204,7 +200,7 @@ set 0 3 2 5 Off                   # Waterfall row
 set 0 4 2 1 Off                   # Decode
 set 0 4 2 2 439.987               # Frequency
 set 0 4 2 3 None                  # Capcode filter
-set 0 4 8 On                      # Popups
+set 0 4 7 On                      # Popups
 set 0 5 3 Off                     # APRS mode
 set 0 5 4 1 7 Handheld            # SSID
 set 0 5 5 1 Off                   # Mode
@@ -243,10 +239,10 @@ set 0 8 2 1 Off                   # VOX
 set 0 8 2 2 5                     # Level
 set 0 8 2 3 2 s                   # Tail
 set 0 8 3 5                       # Mic gain
-set 0 8 4 2 Normal                # Subtone level
+set 0 8 4 Normal                  # Subtone level
 set 0 8 5 1 Off                   # Mode
 set 0 8 5 2 55 Hz                 # Phase
-set 0 8 5 4 Off                   # End tone
+set 0 8 5 3 Off                   # End tone
 set 0 8 6 3 100 ms                # Speed
 set 0 8 6 6 On                    # Sidetone
 set 0 8 6 7 300 ms                # First digit delay
@@ -312,14 +308,13 @@ All settings are at their defaults.
 :_ :get 0 4 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 4 1_ 0 4 4 1 AIS: Off
 :_ :get 0 4 4 2_ 0 4 4 2 Range filter: 25 nm
-:_ :get 0 4 5_ 0 4 5 -: a page on the radio, not a setting
-:_ :get 0 4 6_ 0 4 6 Selcall, MDC1200: Off
-:_ :get 0 4 7_ 0 4 7 DTMF decode: Off
-:_ :get 0 4 8_ 0 4 8 Popups: On
-:_ :get 0 4 9_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 4 9 1_ 0 4 9 1 SAME: On
-:_ :get 0 4 9 2_ 0 4 9 2 Location codes: None
-:_ :get 0 4 9 3_ 0 4 9 3 Channel: Auto
+:_ :get 0 4 5_ 0 4 5 Selcall, MDC1200: Off
+:_ :get 0 4 6_ 0 4 6 DTMF decode: Off
+:_ :get 0 4 7_ 0 4 7 Popups: On
+:_ :get 0 4 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
+:_ :get 0 4 8 1_ 0 4 8 1 SAME: On
+:_ :get 0 4 8 2_ 0 4 8 2 Location codes: None
+:_ :get 0 4 8 3_ 0 4 8 3 Channel: Auto
 :_ :get 0 5 1_ 0 5 1 Heard: a page on the radio, not a setting
 :_ :get 0 5 2_ 0 5 2 Messages: a page on the radio, not a setting
 :_ :get 0 5 3_ 0 5 3 APRS mode: Off
@@ -395,14 +390,11 @@ All settings are at their defaults.
 :_ :get 0 8 2 2_ 0 8 2 2 Level: 5
 :_ :get 0 8 2 3_ 0 8 2 3 Tail: 2 s
 :_ :get 0 8 3_ 0 8 3 Mic gain: 5
-:_ :get 0 8 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 4 1_ 0 8 4 1 -: a page on the radio, not a setting
-:_ :get 0 8 4 2_ 0 8 4 2 Subtone level: Normal
+:_ :get 0 8 4_ 0 8 4 Subtone level: Normal
 :_ :get 0 8 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 5 1_ 0 8 5 1 Mode: Off
 :_ :get 0 8 5 2_ 0 8 5 2 Phase: 55 Hz
-:_ :get 0 8 5 3_ 0 8 5 3 -: a page on the radio, not a setting
-:_ :get 0 8 5 4_ 0 8 5 4 End tone: Off
+:_ :get 0 8 5 3_ 0 8 5 3 End tone: Off
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 6 1_ 0 8 6 1 Dialer: a page on the radio, not a setting
 :_ :get 0 8 6 2_ 0 8 6 2 Memories: a page on the radio, not a setting
@@ -799,48 +791,41 @@ change [4, 6] -2: false None  [] Home
 change [4, 6] 3: false None  [] Home
 change [4, 6] 0: false None  [] Home
 reset [4, 6]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 7] 1: false None  [] Home
-change [4, 7] -1: false None  [] Home
-change [4, 7] 2: false None  [] Home
-change [4, 7] -2: false None  [] Home
-change [4, 7] 3: false None  [] Home
-change [4, 7] 0: false None  [] Home
+change [4, 7] 1: true Some(true) Off [] Home
+change [4, 7] -1: true Some(false) On [] Home
+change [4, 7] 2: true Some(true) Off [] Home
+change [4, 7] -2: true Some(false) On [] Home
+change [4, 7] 3: true Some(true) Off [] Home
+change [4, 7] 0: true Some(false) On [] Home
 reset [4, 7]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 8] 1: true Some(true) Off [] Home
-change [4, 8] -1: true Some(false) On [] Home
-change [4, 8] 2: true Some(true) Off [] Home
-change [4, 8] -2: true Some(false) On [] Home
-change [4, 8] 3: true Some(true) Off [] Home
-change [4, 8] 0: true Some(false) On [] Home
+change [4, 8] 1: false None  [] Home
+change [4, 8] -1: false None  [] Home
+change [4, 8] 2: false None  [] Home
+change [4, 8] -2: false None  [] Home
+change [4, 8] 3: false None  [] Home
+change [4, 8] 0: false None  [] Home
 reset [4, 8]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 9] 1: false None  [] Home
-change [4, 9] -1: false None  [] Home
-change [4, 9] 2: false None  [] Home
-change [4, 9] -2: false None  [] Home
-change [4, 9] 3: false None  [] Home
-change [4, 9] 0: false None  [] Home
-reset [4, 9]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 9, 1] 1: true Some(true) Off [] Home
-change [4, 9, 1] -1: true Some(false) On [] Home
-change [4, 9, 1] 2: true Some(true) Off [] Home
-change [4, 9, 1] -2: true Some(false) On [] Home
-change [4, 9, 1] 3: true Some(true) Off [] Home
-change [4, 9, 1] 0: true Some(false) On [] Home
-reset [4, 9, 1]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 9, 2] 1: false Some(false) None [] Home
-change [4, 9, 2] -1: false Some(false) None [] Home
-change [4, 9, 2] 2: false Some(false) None [] Home
-change [4, 9, 2] -2: false Some(false) None [] Home
-change [4, 9, 2] 3: false Some(false) None [] Home
-change [4, 9, 2] 0: false Some(false) None [] Home
-reset [4, 9, 2]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 9, 3] 1: false None  [] Home
-change [4, 9, 3] -1: false None  [] Home
-change [4, 9, 3] 2: false None  [] Home
-change [4, 9, 3] -2: false None  [] Home
-change [4, 9, 3] 3: false None  [] Home
-change [4, 9, 3] 0: false None  [] Home
-reset [4, 9, 3]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [4, 8, 1] 1: true Some(true) Off [] Home
+change [4, 8, 1] -1: true Some(false) On [] Home
+change [4, 8, 1] 2: true Some(true) Off [] Home
+change [4, 8, 1] -2: true Some(false) On [] Home
+change [4, 8, 1] 3: true Some(true) Off [] Home
+change [4, 8, 1] 0: true Some(false) On [] Home
+reset [4, 8, 1]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [4, 8, 2] 1: false Some(false) None [] Home
+change [4, 8, 2] -1: false Some(false) None [] Home
+change [4, 8, 2] 2: false Some(false) None [] Home
+change [4, 8, 2] -2: false Some(false) None [] Home
+change [4, 8, 2] 3: false Some(false) None [] Home
+change [4, 8, 2] 0: false Some(false) None [] Home
+reset [4, 8, 2]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [4, 8, 3] 1: false None  [] Home
+change [4, 8, 3] -1: false None  [] Home
+change [4, 8, 3] 2: false None  [] Home
+change [4, 8, 3] -2: false None  [] Home
+change [4, 8, 3] 3: false None  [] Home
+change [4, 8, 3] 0: false None  [] Home
+reset [4, 8, 3]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
 change [5, 1] 1: false None  [] Home
 change [5, 1] -1: false None  [] Home
 change [5, 1] 2: false None  [] Home
@@ -1366,27 +1351,13 @@ change [8, 3] -2: true Some(false) 5 [MicGain(5)] Home
 change [8, 3] 3: true Some(true) 8 [MicGain(8)] Home
 change [8, 3] 0: true Some(true) 8 [MicGain(8)] Home
 reset [8, 3]: [MicGain(5)] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4] 1: false None  [] Home
-change [8, 4] -1: false None  [] Home
-change [8, 4] 2: false None  [] Home
-change [8, 4] -2: false None  [] Home
-change [8, 4] 3: false None  [] Home
-change [8, 4] 0: false None  [] Home
-reset [8, 4]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4, 1] 1: false None  [] Home
-change [8, 4, 1] -1: false None  [] Home
-change [8, 4, 1] 2: false None  [] Home
-change [8, 4, 1] -2: false None  [] Home
-change [8, 4, 1] 3: false None  [] Home
-change [8, 4, 1] 0: false None  [] Home
-reset [8, 4, 1]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4, 2] 1: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] -1: true Some(false) Normal [ToneLevel(1)] Home
-change [8, 4, 2] 2: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] -2: true Some(true) Low [ToneLevel(0)] Home
-change [8, 4, 2] 3: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] 0: true Some(true) High [ToneLevel(2)] Home
-reset [8, 4, 2]: [ToneLevel(1)] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [8, 4] 1: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] -1: true Some(false) Normal [ToneLevel(1)] Home
+change [8, 4] 2: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] -2: true Some(true) Low [ToneLevel(0)] Home
+change [8, 4] 3: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] 0: true Some(true) High [ToneLevel(2)] Home
+reset [8, 4]: [ToneLevel(1)] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
 change [8, 5] 1: false None  [] Home
 change [8, 5] -1: false None  [] Home
 change [8, 5] 2: false None  [] Home
@@ -1408,20 +1379,13 @@ change [8, 5, 2] -2: true Some(false) 55 Hz [TxTones { phase: 0, cw: 0, sidetone
 change [8, 5, 2] 3: true Some(true) 240° [TxTones { phase: 3, cw: 0, sidetone: true }, CwCall { chunk: 0, text: [0, 0, 0, 0, 0] }, CwCall { chunk: 1, text: [0, 0, 0, 0, 0] }, DtmfTiming { ms: 100, delay_10ms: 30 }] Home
 change [8, 5, 2] 0: true Some(true) 240° [TxTones { phase: 3, cw: 0, sidetone: true }, CwCall { chunk: 0, text: [0, 0, 0, 0, 0] }, CwCall { chunk: 1, text: [0, 0, 0, 0, 0] }, DtmfTiming { ms: 100, delay_10ms: 30 }] Home
 reset [8, 5, 2]: [TxTones { phase: 0, cw: 0, sidetone: true }, CwCall { chunk: 0, text: [0, 0, 0, 0, 0] }, CwCall { chunk: 1, text: [0, 0, 0, 0, 0] }, DtmfTiming { ms: 100, delay_10ms: 30 }] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 5, 3] 1: false None  [] Home
-change [8, 5, 3] -1: false None  [] Home
-change [8, 5, 3] 2: false None  [] Home
-change [8, 5, 3] -2: false None  [] Home
-change [8, 5, 3] 3: false None  [] Home
-change [8, 5, 3] 0: false None  [] Home
-reset [8, 5, 3]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 5, 4] 1: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] -1: true Some(false) Off [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 2: true Some(true) Two-tone up [SlotParam { slot: 0, param: EndTone, value: 2 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 2 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 2 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] -2: true Some(false) Off [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 3: true Some(true) Two-tone down [SlotParam { slot: 0, param: EndTone, value: 3 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 3 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 3 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 0: true Some(true) Two-tone down [SlotParam { slot: 0, param: EndTone, value: 3 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 3 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 3 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-reset [8, 5, 4]: [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [8, 5, 3] 1: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] -1: true Some(false) Off [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 2: true Some(true) Two-tone up [SlotParam { slot: 0, param: EndTone, value: 2 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 2 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 2 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] -2: true Some(false) Off [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 3: true Some(true) Two-tone down [SlotParam { slot: 0, param: EndTone, value: 3 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 3 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 3 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 0: true Some(true) Two-tone down [SlotParam { slot: 0, param: EndTone, value: 3 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 3 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 3 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+reset [8, 5, 3]: [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 0, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 0, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 100, dtmf_delay: 30, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
 change [8, 6] 1: false None  [] Home
 change [8, 6] -1: false None  [] Home
 change [8, 6] 2: false None  [] Home
@@ -1850,20 +1814,20 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 2 3 2_ 0 4 2 3 Capcode filter: 2
 :_ :set 0 4 2 3 10_ 0 4 2 3 Capcode filter: 10
 :_ :set 0 4 2 3 none_ 0 4 2 3 Capcode filter: None
-:_ :set 0 4 8 xyzzy_ Popups: one of On, Off
-:_ :set 0 4 8 on_ 0 4 8 Popups: On
-:_ :set 0 4 8 off_ 0 4 8 Popups: Off
-:_ :set 0 4 8 1_ Popups: one of Off, On
-:_ :set 0 4 8 2_ Popups: one of Off, On
-:_ :set 0 4 8 10_ Popups: one of Off, On
-:_ :set 0 4 8 none_ Popups: one of Off, On
-:_ :set 0 4 9 1 xyzzy_ SAME: US and Canada only
-:_ :set 0 4 9 1 on_ SAME: US and Canada only
-:_ :set 0 4 9 1 off_ SAME: US and Canada only
-:_ :set 0 4 9 1 1_ SAME: US and Canada only
-:_ :set 0 4 9 1 2_ SAME: US and Canada only
-:_ :set 0 4 9 1 10_ SAME: US and Canada only
-:_ :set 0 4 9 1 none_ SAME: US and Canada only
+:_ :set 0 4 7 xyzzy_ Popups: one of On, Off
+:_ :set 0 4 7 on_ 0 4 7 Popups: On
+:_ :set 0 4 7 off_ 0 4 7 Popups: Off
+:_ :set 0 4 7 1_ Popups: one of Off, On
+:_ :set 0 4 7 2_ Popups: one of Off, On
+:_ :set 0 4 7 10_ Popups: one of Off, On
+:_ :set 0 4 7 none_ Popups: one of Off, On
+:_ :set 0 4 8 1 xyzzy_ SAME: US and Canada only
+:_ :set 0 4 8 1 on_ SAME: US and Canada only
+:_ :set 0 4 8 1 off_ SAME: US and Canada only
+:_ :set 0 4 8 1 1_ SAME: US and Canada only
+:_ :set 0 4 8 1 2_ SAME: US and Canada only
+:_ :set 0 4 8 1 10_ SAME: US and Canada only
+:_ :set 0 4 8 1 none_ SAME: US and Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_ 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_ 0 5 3 APRS mode: Off
@@ -2130,13 +2094,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 3 2_ 0 8 3 Mic gain: 2
 :_ :set 0 8 3 10_ Mic gain: one of 9, 8, 7, 6, 5, 4, 3, 2, 1
 :_ :set 0 8 3 none_ Mic gain: one of 9, 8, 7, 6, 5, 4, 3, 2, 1
-:_ :set 0 8 4 2 xyzzy_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 on_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 off_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 1_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 2_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 10_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 none_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 xyzzy_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 on_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 off_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 1_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 2_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 10_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 none_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 5 1 xyzzy_ Mode: one of Off, Receive, Transmit, Both
 :_ :set 0 8 5 1 on_ Mode: one of Off, Receive, Transmit, Both
 :_ :set 0 8 5 1 off_ 0 8 5 1 Mode: Off
@@ -2151,13 +2115,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 5 2 2_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 5 2 10_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 5 2 none_ Phase: one of 55 Hz, 120??, 180??, 240??
-:_ :set 0 8 5 4 xyzzy_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 on_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 off_ 0 8 5 4 End tone: Off
-:_ :set 0 8 5 4 1_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 2_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 10_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 none_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 xyzzy_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 on_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 off_ 0 8 5 3 End tone: Off
+:_ :set 0 8 5 3 1_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 2_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 10_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 none_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
 :_ :set 0 8 6 3 xyzzy_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1
 :_ :set 0 8 6 3 on_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1
 :_ :set 0 8 6 3 off_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1
@@ -2273,12 +2237,11 @@ wired [4, 4, 1]: None
 wired [4, 4, 2]: None 
 wired [4, 5]: None 
 wired [4, 6]: None 
-wired [4, 7]: None 
-wired [4, 8]: Some(false) On
-wired [4, 9]: None 
-wired [4, 9, 1]: Some(false) On
-wired [4, 9, 2]: Some(true) 1 code
-wired [4, 9, 3]: None 
+wired [4, 7]: Some(false) On
+wired [4, 8]: None 
+wired [4, 8, 1]: Some(false) On
+wired [4, 8, 2]: Some(true) 1 code
+wired [4, 8, 3]: None 
 wired [5, 1]: None 
 wired [5, 2]: None 
 wired [5, 3]: Some(false) Off
@@ -2354,14 +2317,11 @@ wired [8, 2, 1]: Some(false) Off
 wired [8, 2, 2]: Some(true) 9
 wired [8, 2, 3]: Some(true) 5 s
 wired [8, 3]: Some(true) 8
-wired [8, 4]: None 
-wired [8, 4, 1]: None 
-wired [8, 4, 2]: Some(true) High
+wired [8, 4]: Some(true) High
 wired [8, 5]: None 
 wired [8, 5, 1]: Some(true) Transmit
 wired [8, 5, 2]: Some(true) 240°
-wired [8, 5, 3]: None 
-wired [8, 5, 4]: Some(true) Chirp
+wired [8, 5, 3]: Some(true) Chirp
 wired [8, 6]: None 
 wired [8, 6, 1]: None 
 wired [8, 6, 2]: None 
@@ -2428,8 +2388,8 @@ set 0 3 2 5 Off                   # Waterfall row
 set 0 4 2 1 Off                   # Decode
 set 0 4 2 2 440.012               # Frequency
 set 0 4 2 3 1234                  # Capcode filter
-set 0 4 8 On                      # Popups
-set 0 4 9 1 On                    # SAME
+set 0 4 7 On                      # Popups
+set 0 4 8 1 On                    # SAME
 set 0 5 3 Off                     # APRS mode
 set 0 5 4 1 10 I-Gate/net         # SSID
 set 0 5 5 1 Every 5 min           # Mode
@@ -2468,10 +2428,10 @@ set 0 8 2 1 Off                   # VOX
 set 0 8 2 2 9                     # Level
 set 0 8 2 3 5 s                   # Tail
 set 0 8 3 8                       # Mic gain
-set 0 8 4 2 High                  # Subtone level
+set 0 8 4 High                    # Subtone level
 set 0 8 5 1 Transmit              # Mode
 set 0 8 5 2 240°                 # Phase
-set 0 8 5 4 Chirp                 # End tone
+set 0 8 5 3 Chirp                 # End tone
 set 0 8 6 3 120 ms                # Speed
 set 0 8 6 6 On                    # Sidetone
 set 0 8 6 7 500 ms                # First digit delay
@@ -2519,10 +2479,10 @@ set 0 8 1 1 180 s                 # TX timeout
 set 0 8 2 2 9                     # Level
 set 0 8 2 3 5 s                   # Tail
 set 0 8 3 8                       # Mic gain
-set 0 8 4 2 High                  # Subtone level
+set 0 8 4 High                    # Subtone level
 set 0 8 5 1 Transmit              # Mode
 set 0 8 5 2 240°                 # Phase
-set 0 8 5 4 Chirp                 # End tone
+set 0 8 5 3 Chirp                 # End tone
 set 0 8 6 3 120 ms                # Speed
 set 0 8 6 7 500 ms                # First digit delay
 set 0 9 1 1 2 min                 # Auto lock
@@ -2576,14 +2536,13 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 4 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 4 1_ 0 4 4 1 AIS: Off
 :_ :get 0 4 4 2_ 0 4 4 2 Range filter: 25 nm
-:_ :get 0 4 5_ 0 4 5 -: a page on the radio, not a setting
-:_ :get 0 4 6_ 0 4 6 Selcall, MDC1200: Off
-:_ :get 0 4 7_ 0 4 7 DTMF decode: Off
-:_ :get 0 4 8_ 0 4 8 Popups: On
-:_ :get 0 4 9_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 4 9 1_ 0 4 9 1 SAME: On
-:_ :get 0 4 9 2_ 0 4 9 2 Location codes: 1 code (not the default)
-:_ :get 0 4 9 3_ 0 4 9 3 Channel: Auto
+:_ :get 0 4 5_ 0 4 5 Selcall, MDC1200: Off
+:_ :get 0 4 6_ 0 4 6 DTMF decode: Off
+:_ :get 0 4 7_ 0 4 7 Popups: On
+:_ :get 0 4 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
+:_ :get 0 4 8 1_ 0 4 8 1 SAME: On
+:_ :get 0 4 8 2_ 0 4 8 2 Location codes: 1 code (not the default)
+:_ :get 0 4 8 3_ 0 4 8 3 Channel: Auto
 :_ :get 0 5 1_ 0 5 1 Heard: a page on the radio, not a setting
 :_ :get 0 5 2_ 0 5 2 Messages: a page on the radio, not a setting
 :_ :get 0 5 3_ 0 5 3 APRS mode: Off
@@ -2659,14 +2618,11 @@ Ferrite 0.1.0   N0CALL   RT-950 Pro      cable 115200                   14:32   
 :_ :get 0 8 2 2_ 0 8 2 2 Level: 9 (not the default)
 :_ :get 0 8 2 3_ 0 8 2 3 Tail: 5 s (not the default)
 :_ :get 0 8 3_ 0 8 3 Mic gain: 8 (not the default)
-:_ :get 0 8 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 4 1_ 0 8 4 1 -: a page on the radio, not a setting
-:_ :get 0 8 4 2_ 0 8 4 2 Subtone level: High (not the default)
+:_ :get 0 8 4_ 0 8 4 Subtone level: High (not the default)
 :_ :get 0 8 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 5 1_ 0 8 5 1 Mode: Transmit (not the default)
 :_ :get 0 8 5 2_ 0 8 5 2 Phase: 240?? (not the default)
-:_ :get 0 8 5 3_ 0 8 5 3 -: a page on the radio, not a setting
-:_ :get 0 8 5 4_ 0 8 5 4 End tone: Chirp (not the default)
+:_ :get 0 8 5 3_ 0 8 5 3 End tone: Chirp (not the default)
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 6 1_ 0 8 6 1 Dialer: a page on the radio, not a setting
 :_ :get 0 8 6 2_ 0 8 6 2 Memories: a page on the radio, not a setting
@@ -3063,48 +3019,41 @@ change [4, 6] -2: false None  [] Home
 change [4, 6] 3: false None  [] Home
 change [4, 6] 0: false None  [] Home
 reset [4, 6]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
-change [4, 7] 1: false None  [] Home
-change [4, 7] -1: false None  [] Home
-change [4, 7] 2: false None  [] Home
-change [4, 7] -2: false None  [] Home
-change [4, 7] 3: false None  [] Home
-change [4, 7] 0: false None  [] Home
+change [4, 7] 1: true Some(true) Off [] Home
+change [4, 7] -1: true Some(false) On [] Home
+change [4, 7] 2: true Some(true) Off [] Home
+change [4, 7] -2: true Some(false) On [] Home
+change [4, 7] 3: true Some(true) Off [] Home
+change [4, 7] 0: true Some(false) On [] Home
 reset [4, 7]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
-change [4, 8] 1: true Some(true) Off [] Home
-change [4, 8] -1: true Some(false) On [] Home
-change [4, 8] 2: true Some(true) Off [] Home
-change [4, 8] -2: true Some(false) On [] Home
-change [4, 8] 3: true Some(true) Off [] Home
-change [4, 8] 0: true Some(false) On [] Home
+change [4, 8] 1: false None  [] Home
+change [4, 8] -1: false None  [] Home
+change [4, 8] 2: false None  [] Home
+change [4, 8] -2: false None  [] Home
+change [4, 8] 3: false None  [] Home
+change [4, 8] 0: false None  [] Home
 reset [4, 8]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
-change [4, 9] 1: false None  [] Home
-change [4, 9] -1: false None  [] Home
-change [4, 9] 2: false None  [] Home
-change [4, 9] -2: false None  [] Home
-change [4, 9] 3: false None  [] Home
-change [4, 9] 0: false None  [] Home
-reset [4, 9]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
-change [4, 9, 1] 1: true Some(true) Off [] Home
-change [4, 9, 1] -1: true Some(false) On [] Home
-change [4, 9, 1] 2: true Some(true) Off [] Home
-change [4, 9, 1] -2: true Some(false) On [] Home
-change [4, 9, 1] 3: true Some(true) Off [] Home
-change [4, 9, 1] 0: true Some(false) On [] Home
-reset [4, 9, 1]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
-change [4, 9, 2] 1: false Some(true) 1 code [] Home
-change [4, 9, 2] -1: false Some(true) 1 code [] Home
-change [4, 9, 2] 2: false Some(true) 1 code [] Home
-change [4, 9, 2] -2: false Some(true) 1 code [] Home
-change [4, 9, 2] 3: false Some(true) 1 code [] Home
-change [4, 9, 2] 0: false Some(true) 1 code [] Home
-reset [4, 9, 2]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
-change [4, 9, 3] 1: false None  [] Home
-change [4, 9, 3] -1: false None  [] Home
-change [4, 9, 3] 2: false None  [] Home
-change [4, 9, 3] -2: false None  [] Home
-change [4, 9, 3] 3: false None  [] Home
-change [4, 9, 3] 0: false None  [] Home
-reset [4, 9, 3]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
+change [4, 8, 1] 1: true Some(true) Off [] Home
+change [4, 8, 1] -1: true Some(false) On [] Home
+change [4, 8, 1] 2: true Some(true) Off [] Home
+change [4, 8, 1] -2: true Some(false) On [] Home
+change [4, 8, 1] 3: true Some(true) Off [] Home
+change [4, 8, 1] 0: true Some(false) On [] Home
+reset [4, 8, 1]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
+change [4, 8, 2] 1: false Some(true) 1 code [] Home
+change [4, 8, 2] -1: false Some(true) 1 code [] Home
+change [4, 8, 2] 2: false Some(true) 1 code [] Home
+change [4, 8, 2] -2: false Some(true) 1 code [] Home
+change [4, 8, 2] 3: false Some(true) 1 code [] Home
+change [4, 8, 2] 0: false Some(true) 1 code [] Home
+reset [4, 8, 2]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
+change [4, 8, 3] 1: false None  [] Home
+change [4, 8, 3] -1: false None  [] Home
+change [4, 8, 3] 2: false None  [] Home
+change [4, 8, 3] -2: false None  [] Home
+change [4, 8, 3] 3: false None  [] Home
+change [4, 8, 3] 0: false None  [] Home
+reset [4, 8, 3]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 18, clock: 1, clock_gps: true, units: 0, layout: 2, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 1, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 3, alert_tones: true, vox: false, vox_level: 9, vox_tail: 5, mic_gain: 8, tx_timeout: 6, fm_sleep: 0, brightness: 10, brightness_night: 3, tx_light: true, wake_on: 0, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: true, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 7, keypad_light: 0, leds: 1, auto_off: 4, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 3, arrival: 0 } aprs AprsCfg { f5k: 28881, beacon: 4, power: 0, path: 0, digi: 48, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 10 }
 change [5, 1] 1: false None  [] Home
 change [5, 1] -1: false None  [] Home
 change [5, 1] 2: false None  [] Home
@@ -3630,27 +3579,13 @@ change [8, 3] -2: true Some(true) 7 [MicGain(7)] Home
 change [8, 3] 3: true Some(true) 9 [MicGain(9)] Home
 change [8, 3] 0: true Some(true) 9 [MicGain(9)] Home
 reset [8, 3]: [MicGain(5)] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4] 1: false None  [] Home
-change [8, 4] -1: false None  [] Home
-change [8, 4] 2: false None  [] Home
-change [8, 4] -2: false None  [] Home
-change [8, 4] 3: false None  [] Home
-change [8, 4] 0: false None  [] Home
-reset [8, 4]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4, 1] 1: false None  [] Home
-change [8, 4, 1] -1: false None  [] Home
-change [8, 4, 1] 2: false None  [] Home
-change [8, 4, 1] -2: false None  [] Home
-change [8, 4, 1] 3: false None  [] Home
-change [8, 4, 1] 0: false None  [] Home
-reset [8, 4, 1]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 2, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4, 2] 1: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] -1: true Some(false) Normal [ToneLevel(1)] Home
-change [8, 4, 2] 2: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] -2: true Some(true) Low [ToneLevel(0)] Home
-change [8, 4, 2] 3: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] 0: true Some(true) High [ToneLevel(2)] Home
-reset [8, 4, 2]: [ToneLevel(1)] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [8, 4] 1: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] -1: true Some(false) Normal [ToneLevel(1)] Home
+change [8, 4] 2: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] -2: true Some(true) Low [ToneLevel(0)] Home
+change [8, 4] 3: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] 0: true Some(true) High [ToneLevel(2)] Home
+reset [8, 4]: [ToneLevel(1)] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 2, tail_phase: 3, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
 change [8, 5] 1: false None  [] Home
 change [8, 5] -1: false None  [] Home
 change [8, 5] 2: false None  [] Home
@@ -3672,20 +3607,13 @@ change [8, 5, 2] -2: true Some(true) 240° [TxTones { phase: 3, cw: 0, sidetone:
 change [8, 5, 2] 3: true Some(true) 180° [TxTones { phase: 2, cw: 0, sidetone: true }, CwCall { chunk: 0, text: [78, 48, 67, 65, 76] }, CwCall { chunk: 1, text: [76, 0, 0, 0, 0] }, DtmfTiming { ms: 120, delay_10ms: 50 }] Home
 change [8, 5, 2] 0: true Some(true) 180° [TxTones { phase: 2, cw: 0, sidetone: true }, CwCall { chunk: 0, text: [78, 48, 67, 65, 76] }, CwCall { chunk: 1, text: [76, 0, 0, 0, 0] }, DtmfTiming { ms: 120, delay_10ms: 50 }] Home
 reset [8, 5, 2]: [TxTones { phase: 0, cw: 0, sidetone: true }, CwCall { chunk: 0, text: [78, 48, 67, 65, 76] }, CwCall { chunk: 1, text: [76, 0, 0, 0, 0] }, DtmfTiming { ms: 120, delay_10ms: 50 }] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 5, 3] 1: false None  [] Home
-change [8, 5, 3] -1: false None  [] Home
-change [8, 5, 3] 2: false None  [] Home
-change [8, 5, 3] -2: false None  [] Home
-change [8, 5, 3] 3: false None  [] Home
-change [8, 5, 3] 0: false None  [] Home
-reset [8, 5, 3]: [] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 4, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 5, 4] 1: true Some(true) Quindar [SlotParam { slot: 0, param: EndTone, value: 5 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 5 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 5 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] -1: true Some(true) Chirp [SlotParam { slot: 0, param: EndTone, value: 4 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 4 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 4 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 2: true Some(false) Off [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] -2: true Some(true) Chirp [SlotParam { slot: 0, param: EndTone, value: 4 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 4 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 4 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 3: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 0: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-reset [8, 5, 4]: [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [8, 5, 3] 1: true Some(true) Quindar [SlotParam { slot: 0, param: EndTone, value: 5 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 5 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 5 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] -1: true Some(true) Chirp [SlotParam { slot: 0, param: EndTone, value: 4 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 4 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 4 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 2: true Some(false) Off [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] -2: true Some(true) Chirp [SlotParam { slot: 0, param: EndTone, value: 4 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 4 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 4 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 3: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 0: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+reset [8, 5, 3]: [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Settings { callsign: Text([78, 48, 67, 65, 76, 76, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 2, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 1, pin: 0, pin_len: 4, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 2, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 3, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [12345, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 3, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 120, dtmf_delay: 50, cw_id: 0, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
 change [8, 6] 1: false None  [] Home
 change [8, 6] -1: false None  [] Home
 change [8, 6] 2: false None  [] Home
@@ -4114,20 +4042,20 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 4 2 3 2_ 0 4 2 3 Capcode filter: 2
 :_ :set 0 4 2 3 10_ 0 4 2 3 Capcode filter: 10
 :_ :set 0 4 2 3 none_ 0 4 2 3 Capcode filter: None
-:_ :set 0 4 8 xyzzy_ Popups: one of On, Off
-:_ :set 0 4 8 on_ 0 4 8 Popups: On
-:_ :set 0 4 8 off_ 0 4 8 Popups: Off
-:_ :set 0 4 8 1_ Popups: one of Off, On
-:_ :set 0 4 8 2_ Popups: one of Off, On
-:_ :set 0 4 8 10_ Popups: one of Off, On
-:_ :set 0 4 8 none_ Popups: one of Off, On
-:_ :set 0 4 9 1 xyzzy_ SAME: US and Canada only
-:_ :set 0 4 9 1 on_ SAME: US and Canada only
-:_ :set 0 4 9 1 off_ SAME: US and Canada only
-:_ :set 0 4 9 1 1_ SAME: US and Canada only
-:_ :set 0 4 9 1 2_ SAME: US and Canada only
-:_ :set 0 4 9 1 10_ SAME: US and Canada only
-:_ :set 0 4 9 1 none_ SAME: US and Canada only
+:_ :set 0 4 7 xyzzy_ Popups: one of On, Off
+:_ :set 0 4 7 on_ 0 4 7 Popups: On
+:_ :set 0 4 7 off_ 0 4 7 Popups: Off
+:_ :set 0 4 7 1_ Popups: one of Off, On
+:_ :set 0 4 7 2_ Popups: one of Off, On
+:_ :set 0 4 7 10_ Popups: one of Off, On
+:_ :set 0 4 7 none_ Popups: one of Off, On
+:_ :set 0 4 8 1 xyzzy_ SAME: US and Canada only
+:_ :set 0 4 8 1 on_ SAME: US and Canada only
+:_ :set 0 4 8 1 off_ SAME: US and Canada only
+:_ :set 0 4 8 1 1_ SAME: US and Canada only
+:_ :set 0 4 8 1 2_ SAME: US and Canada only
+:_ :set 0 4 8 1 10_ SAME: US and Canada only
+:_ :set 0 4 8 1 none_ SAME: US and Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_ 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_ 0 5 3 APRS mode: Off
@@ -4394,13 +4322,13 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 8 3 2_ 0 8 3 Mic gain: 2
 :_ :set 0 8 3 10_ Mic gain: one of 9, 8, 7, 6, 5, 4, 3, 2, 1
 :_ :set 0 8 3 none_ Mic gain: one of 9, 8, 7, 6, 5, 4, 3, 2, 1
-:_ :set 0 8 4 2 xyzzy_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 on_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 off_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 1_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 2_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 10_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 none_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 xyzzy_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 on_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 off_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 1_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 2_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 10_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 none_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 5 1 xyzzy_ Mode: one of Off, Receive, Transmit, Both
 :_ :set 0 8 5 1 on_ Mode: one of Off, Receive, Transmit, Both
 :_ :set 0 8 5 1 off_ 0 8 5 1 Mode: Off
@@ -4415,13 +4343,13 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 8 5 2 2_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 5 2 10_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 5 2 none_ Phase: one of 55 Hz, 120??, 180??, 240??
-:_ :set 0 8 5 4 xyzzy_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 on_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 off_ 0 8 5 4 End tone: Off
-:_ :set 0 8 5 4 1_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 2_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 10_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 none_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 xyzzy_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 on_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 off_ 0 8 5 3 End tone: Off
+:_ :set 0 8 5 3 1_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 2_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 10_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 none_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
 :_ :set 0 8 6 3 xyzzy_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1
 :_ :set 0 8 6 3 on_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1
 :_ :set 0 8 6 3 off_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1
@@ -4537,12 +4465,11 @@ wired [4, 4, 1]: None
 wired [4, 4, 2]: None 
 wired [4, 5]: None 
 wired [4, 6]: None 
-wired [4, 7]: None 
-wired [4, 8]: Some(false) On
-wired [4, 9]: None 
-wired [4, 9, 1]: Some(false) On
-wired [4, 9, 2]: Some(false) None
-wired [4, 9, 3]: None 
+wired [4, 7]: Some(false) On
+wired [4, 8]: None 
+wired [4, 8, 1]: Some(false) On
+wired [4, 8, 2]: Some(false) None
+wired [4, 8, 3]: None 
 wired [5, 1]: None 
 wired [5, 2]: None 
 wired [5, 3]: Some(false) Off
@@ -4618,14 +4545,11 @@ wired [8, 2, 1]: Some(false) Off
 wired [8, 2, 2]: Some(true) 9
 wired [8, 2, 3]: Some(true) 3 s
 wired [8, 3]: Some(false) 5
-wired [8, 4]: None 
-wired [8, 4, 1]: None 
-wired [8, 4, 2]: Some(true) Normal
+wired [8, 4]: Some(true) Normal
 wired [8, 5]: None 
 wired [8, 5, 1]: Some(true) Transmit
 wired [8, 5, 2]: Some(true) 180°
-wired [8, 5, 3]: None 
-wired [8, 5, 4]: Some(true) Chirp
+wired [8, 5, 3]: Some(true) Chirp
 wired [8, 6]: None 
 wired [8, 6, 1]: None 
 wired [8, 6, 2]: None 
@@ -4692,7 +4616,7 @@ set 0 3 2 5 Off                   # Waterfall row
 set 0 4 2 1 Off                   # Decode
 set 0 4 2 2 439.987               # Frequency
 set 0 4 2 3 None                  # Capcode filter
-set 0 4 8 On                      # Popups
+set 0 4 7 On                      # Popups
 set 0 5 3 Off                     # APRS mode
 set 0 5 4 1 7 Handheld            # SSID
 set 0 5 5 1 Off                   # Mode
@@ -4731,10 +4655,10 @@ set 0 8 2 1 Off                   # VOX
 set 0 8 2 2 9                     # Level
 set 0 8 2 3 3 s                   # Tail
 set 0 8 3 5                       # Mic gain
-set 0 8 4 2 Normal                # Subtone level
+set 0 8 4 Normal                  # Subtone level
 set 0 8 5 1 Transmit              # Mode
 set 0 8 5 2 180°                 # Phase
-set 0 8 5 4 Chirp                 # End tone
+set 0 8 5 3 Chirp                 # End tone
 set 0 8 6 3 200 ms                # Speed
 set 0 8 6 6 On                    # Sidetone
 set 0 8 6 7 1000 ms               # First digit delay
@@ -4774,10 +4698,10 @@ set 0 7 6 RX and TX               # LEDs
 set 0 7 8 Off                     # Auto power off
 set 0 8 2 2 9                     # Level
 set 0 8 2 3 3 s                   # Tail
-set 0 8 4 2 Normal                # Subtone level
+set 0 8 4 Normal                  # Subtone level
 set 0 8 5 1 Transmit              # Mode
 set 0 8 5 2 180°                 # Phase
-set 0 8 5 4 Chirp                 # End tone
+set 0 8 5 3 Chirp                 # End tone
 set 0 8 6 3 200 ms                # Speed
 set 0 8 6 7 1000 ms               # First digit delay
 set 0 8 7 2 Every 10 min          # CW ID
@@ -4832,14 +4756,13 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 4 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 4 4 1_ 0 4 4 1 AIS: Off
 :_ :get 0 4 4 2_ 0 4 4 2 Range filter: 25 nm
-:_ :get 0 4 5_ 0 4 5 -: a page on the radio, not a setting
-:_ :get 0 4 6_ 0 4 6 Selcall, MDC1200: Off
-:_ :get 0 4 7_ 0 4 7 DTMF decode: Off
-:_ :get 0 4 8_ 0 4 8 Popups: On
-:_ :get 0 4 9_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 4 9 1_ 0 4 9 1 SAME: On
-:_ :get 0 4 9 2_ 0 4 9 2 Location codes: None
-:_ :get 0 4 9 3_ 0 4 9 3 Channel: Auto
+:_ :get 0 4 5_ 0 4 5 Selcall, MDC1200: Off
+:_ :get 0 4 6_ 0 4 6 DTMF decode: Off
+:_ :get 0 4 7_ 0 4 7 Popups: On
+:_ :get 0 4 8_ a menu number from MENU, e.g. 0 7 1 (Theme)
+:_ :get 0 4 8 1_ 0 4 8 1 SAME: On
+:_ :get 0 4 8 2_ 0 4 8 2 Location codes: None
+:_ :get 0 4 8 3_ 0 4 8 3 Channel: Auto
 :_ :get 0 5 1_ 0 5 1 Heard: a page on the radio, not a setting
 :_ :get 0 5 2_ 0 5 2 Messages: a page on the radio, not a setting
 :_ :get 0 5 3_ 0 5 3 APRS mode: Off
@@ -4915,14 +4838,11 @@ set 0 9 2 4 Terminal              # Cable port
 :_ :get 0 8 2 2_ 0 8 2 2 Level: 9 (not the default)
 :_ :get 0 8 2 3_ 0 8 2 3 Tail: 3 s (not the default)
 :_ :get 0 8 3_ 0 8 3 Mic gain: 5
-:_ :get 0 8 4_ a menu number from MENU, e.g. 0 7 1 (Theme)
-:_ :get 0 8 4 1_ 0 8 4 1 -: a page on the radio, not a setting
-:_ :get 0 8 4 2_ 0 8 4 2 Subtone level: Normal (not the default)
+:_ :get 0 8 4_ 0 8 4 Subtone level: Normal (not the default)
 :_ :get 0 8 5_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 5 1_ 0 8 5 1 Mode: Transmit (not the default)
 :_ :get 0 8 5 2_ 0 8 5 2 Phase: 180?? (not the default)
-:_ :get 0 8 5 3_ 0 8 5 3 -: a page on the radio, not a setting
-:_ :get 0 8 5 4_ 0 8 5 4 End tone: Chirp (not the default)
+:_ :get 0 8 5 3_ 0 8 5 3 End tone: Chirp (not the default)
 :_ :get 0 8 6_ a menu number from MENU, e.g. 0 7 1 (Theme)
 :_ :get 0 8 6 1_ 0 8 6 1 Dialer: a page on the radio, not a setting
 :_ :get 0 8 6 2_ 0 8 6 2 Memories: a page on the radio, not a setting
@@ -5319,48 +5239,41 @@ change [4, 6] -2: false None  [] Home
 change [4, 6] 3: false None  [] Home
 change [4, 6] 0: false None  [] Home
 reset [4, 6]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 7] 1: false None  [] Home
-change [4, 7] -1: false None  [] Home
-change [4, 7] 2: false None  [] Home
-change [4, 7] -2: false None  [] Home
-change [4, 7] 3: false None  [] Home
-change [4, 7] 0: false None  [] Home
+change [4, 7] 1: true Some(true) Off [] Home
+change [4, 7] -1: true Some(false) On [] Home
+change [4, 7] 2: true Some(true) Off [] Home
+change [4, 7] -2: true Some(false) On [] Home
+change [4, 7] 3: true Some(true) Off [] Home
+change [4, 7] 0: true Some(false) On [] Home
 reset [4, 7]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 8] 1: true Some(true) Off [] Home
-change [4, 8] -1: true Some(false) On [] Home
-change [4, 8] 2: true Some(true) Off [] Home
-change [4, 8] -2: true Some(false) On [] Home
-change [4, 8] 3: true Some(true) Off [] Home
-change [4, 8] 0: true Some(false) On [] Home
+change [4, 8] 1: false None  [] Home
+change [4, 8] -1: false None  [] Home
+change [4, 8] 2: false None  [] Home
+change [4, 8] -2: false None  [] Home
+change [4, 8] 3: false None  [] Home
+change [4, 8] 0: false None  [] Home
 reset [4, 8]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 9] 1: false None  [] Home
-change [4, 9] -1: false None  [] Home
-change [4, 9] 2: false None  [] Home
-change [4, 9] -2: false None  [] Home
-change [4, 9] 3: false None  [] Home
-change [4, 9] 0: false None  [] Home
-reset [4, 9]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 9, 1] 1: true Some(true) Off [] Home
-change [4, 9, 1] -1: true Some(false) On [] Home
-change [4, 9, 1] 2: true Some(true) Off [] Home
-change [4, 9, 1] -2: true Some(false) On [] Home
-change [4, 9, 1] 3: true Some(true) Off [] Home
-change [4, 9, 1] 0: true Some(false) On [] Home
-reset [4, 9, 1]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 9, 2] 1: false Some(false) None [] Home
-change [4, 9, 2] -1: false Some(false) None [] Home
-change [4, 9, 2] 2: false Some(false) None [] Home
-change [4, 9, 2] -2: false Some(false) None [] Home
-change [4, 9, 2] 3: false Some(false) None [] Home
-change [4, 9, 2] 0: false Some(false) None [] Home
-reset [4, 9, 2]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [4, 9, 3] 1: false None  [] Home
-change [4, 9, 3] -1: false None  [] Home
-change [4, 9, 3] 2: false None  [] Home
-change [4, 9, 3] -2: false None  [] Home
-change [4, 9, 3] 3: false None  [] Home
-change [4, 9, 3] 0: false None  [] Home
-reset [4, 9, 3]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [4, 8, 1] 1: true Some(true) Off [] Home
+change [4, 8, 1] -1: true Some(false) On [] Home
+change [4, 8, 1] 2: true Some(true) Off [] Home
+change [4, 8, 1] -2: true Some(false) On [] Home
+change [4, 8, 1] 3: true Some(true) Off [] Home
+change [4, 8, 1] 0: true Some(false) On [] Home
+reset [4, 8, 1]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [4, 8, 2] 1: false Some(false) None [] Home
+change [4, 8, 2] -1: false Some(false) None [] Home
+change [4, 8, 2] 2: false Some(false) None [] Home
+change [4, 8, 2] -2: false Some(false) None [] Home
+change [4, 8, 2] 3: false Some(false) None [] Home
+change [4, 8, 2] 0: false Some(false) None [] Home
+reset [4, 8, 2]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [4, 8, 3] 1: false None  [] Home
+change [4, 8, 3] -1: false None  [] Home
+change [4, 8, 3] 2: false None  [] Home
+change [4, 8, 3] -2: false None  [] Home
+change [4, 8, 3] 3: false None  [] Home
+change [4, 8, 3] 0: false None  [] Home
+reset [4, 8, 3]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 250, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 250, clock: 0, clock_gps: true, units: 250, layout: 250, theme: 250, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 250, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 250, alert_tones: true, vox: false, vox_level: 250, vox_tail: 250, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 0, brightness_night: 99, tx_light: true, wake_on: 250, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 250, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 250, keypad_light: 250, leds: 250, auto_off: 250, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 250, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
 change [5, 1] 1: false None  [] Home
 change [5, 1] -1: false None  [] Home
 change [5, 1] 2: false None  [] Home
@@ -5886,27 +5799,13 @@ change [8, 3] -2: true Some(false) 5 [MicGain(5)] Home
 change [8, 3] 3: true Some(true) 8 [MicGain(8)] Home
 change [8, 3] 0: true Some(true) 8 [MicGain(8)] Home
 reset [8, 3]: [MicGain(5)] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4] 1: false None  [] Home
-change [8, 4] -1: false None  [] Home
-change [8, 4] 2: false None  [] Home
-change [8, 4] -2: false None  [] Home
-change [8, 4] 3: false None  [] Home
-change [8, 4] 0: false None  [] Home
-reset [8, 4]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4, 1] 1: false None  [] Home
-change [8, 4, 1] -1: false None  [] Home
-change [8, 4, 1] 2: false None  [] Home
-change [8, 4, 1] -2: false None  [] Home
-change [8, 4, 1] 3: false None  [] Home
-change [8, 4, 1] 0: false None  [] Home
-reset [8, 4, 1]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 250, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 4, 2] 1: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] -1: true Some(false) Normal [ToneLevel(1)] Home
-change [8, 4, 2] 2: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] -2: true Some(true) Low [ToneLevel(0)] Home
-change [8, 4, 2] 3: true Some(true) High [ToneLevel(2)] Home
-change [8, 4, 2] 0: true Some(true) High [ToneLevel(2)] Home
-reset [8, 4, 2]: [ToneLevel(1)] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [8, 4] 1: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] -1: true Some(false) Normal [ToneLevel(1)] Home
+change [8, 4] 2: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] -2: true Some(true) Low [ToneLevel(0)] Home
+change [8, 4] 3: true Some(true) High [ToneLevel(2)] Home
+change [8, 4] 0: true Some(true) High [ToneLevel(2)] Home
+reset [8, 4]: [ToneLevel(1)] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 250, tail_phase: 250, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
 change [8, 5] 1: false None  [] Home
 change [8, 5] -1: false None  [] Home
 change [8, 5] 2: false None  [] Home
@@ -5928,20 +5827,13 @@ change [8, 5, 2] -2: true Some(true) 180° [TxTones { phase: 2, cw: 1, sidetone:
 change [8, 5, 2] 3: true Some(true) 120° [TxTones { phase: 1, cw: 1, sidetone: true }, CwCall { chunk: 0, text: [0, 0, 0, 0, 0] }, CwCall { chunk: 1, text: [0, 0, 0, 0, 0] }, DtmfTiming { ms: 200, delay_10ms: 100 }] Home
 change [8, 5, 2] 0: true Some(true) 120° [TxTones { phase: 1, cw: 1, sidetone: true }, CwCall { chunk: 0, text: [0, 0, 0, 0, 0] }, CwCall { chunk: 1, text: [0, 0, 0, 0, 0] }, DtmfTiming { ms: 200, delay_10ms: 100 }] Home
 reset [8, 5, 2]: [TxTones { phase: 0, cw: 1, sidetone: true }, CwCall { chunk: 0, text: [0, 0, 0, 0, 0] }, CwCall { chunk: 1, text: [0, 0, 0, 0, 0] }, DtmfTiming { ms: 200, delay_10ms: 100 }] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 5, 3] 1: false None  [] Home
-change [8, 5, 3] -1: false None  [] Home
-change [8, 5, 3] 2: false None  [] Home
-change [8, 5, 3] -2: false None  [] Home
-change [8, 5, 3] 3: false None  [] Home
-change [8, 5, 3] 0: false None  [] Home
-reset [8, 5, 3]: [] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 250, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
-change [8, 5, 4] 1: true Some(true) Quindar [SlotParam { slot: 0, param: EndTone, value: 5 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 5 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 5 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] -1: true Some(true) Chirp [SlotParam { slot: 0, param: EndTone, value: 4 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 4 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 4 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 2: true Some(false) Off [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] -2: true Some(true) Chirp [SlotParam { slot: 0, param: EndTone, value: 4 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 4 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 4 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 3: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-change [8, 5, 4] 0: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
-reset [8, 5, 4]: [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
+change [8, 5, 3] 1: true Some(true) Quindar [SlotParam { slot: 0, param: EndTone, value: 5 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 5 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 5 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] -1: true Some(true) Chirp [SlotParam { slot: 0, param: EndTone, value: 4 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 4 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 4 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 2: true Some(false) Off [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] -2: true Some(true) Chirp [SlotParam { slot: 0, param: EndTone, value: 4 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 4 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 4 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 3: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+change [8, 5, 3] 0: true Some(true) Beep [SlotParam { slot: 0, param: EndTone, value: 1 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 1 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 1 }, SlotParam { slot: 2, param: Tail, value: 0 }] Home
+reset [8, 5, 3]: [SlotParam { slot: 0, param: EndTone, value: 0 }, SlotParam { slot: 0, param: Tail, value: 0 }, SlotParam { slot: 1, param: EndTone, value: 0 }, SlotParam { slot: 1, param: Tail, value: 0 }, SlotParam { slot: 2, param: EndTone, value: 0 }, SlotParam { slot: 2, param: Tail, value: 0 }] Settings { callsign: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), owner: [Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], boot_card: false, pon: 1, pon_text: Text([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), region: 0, extend_tx: false, extend_warned: false, tz: 14, clock: 0, clock_gps: true, units: 0, layout: 0, theme: 0, pin_mode: 0, pin: 0, pin_len: 0, pin_misses: 0, pin_wait: 0, bt: false, cable_port: 250, kiss_port: 0, same: true, pocsag_on: false, pocsag_freq: 43998750, pocsag_cap: 0, popups: true, key_beep: true, beep_vol: 2, alert_tones: true, vox: false, vox_level: 5, vox_tail: 3, mic_gain: 5, tx_timeout: 4, fm_sleep: 0, brightness: 7, brightness_night: 99, tx_light: true, wake_on: 1, spare_temp: 0, fm_freq: 10110, fm_step: 1, fm_agc: 0, fm_monitor: true, setup_done: false, home_ch: None, xb: XbCfg { side1: 0, side2: 1, power: 0, timeout_10s: 18, hang_ds: 10, flags: 1 }, hf: HfMem { freq: 958000, mode: 2, step: 1, bw: 0, agc: 0, lna: false, bfo: 0, recent: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], band_bfo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, coord_fmt: 1, fixed_on: false, fixed: Pos { lat: 0, lon: 0 }, fixed_alt: 0, same_codes: [0, 0, 0, 0, 0, 0, 0, 0], scope_bars: 1, scope_step: 11, scope_dwell: 100, scope_trig: 0, scope_line: 0, scope_wf: false, scope_mode: 0, term_colour: false, aprs_mode: false, predictive: true, spare_tokens: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], backlight: 5, keypad_light: 1, leds: 2, auto_off: 0, auto_lock: 250, dtmf_sidetone: true, arrival_tone: true, show_hidden: false, chan_only: false, cable_log: false, spare_flag2: false, scan_tx: false, tone_level: 1, scan_resume: 5, scan_prio: 2, tail_mode: 0, tail_phase: 0, end_tone: 0, dtmf_ms: 250, dtmf_delay: 250, cw_id: 250, gps_on: true, gps_rxtx: 0, arrival: 0 } aprs AprsCfg { f5k: 0, beacon: 0, power: 0, path: 2, digi: 0, after_voice: false, custom: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], ssid: 7 }
 change [8, 6] 1: false None  [] Home
 change [8, 6] -1: false None  [] Home
 change [8, 6] 2: false None  [] Home
@@ -6370,20 +6262,20 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 2 3 2_ 0 4 2 3 Capcode filter: 2
 :_ :set 0 4 2 3 10_ 0 4 2 3 Capcode filter: 10
 :_ :set 0 4 2 3 none_ 0 4 2 3 Capcode filter: None
-:_ :set 0 4 8 xyzzy_ Popups: one of On, Off
-:_ :set 0 4 8 on_ 0 4 8 Popups: On
-:_ :set 0 4 8 off_ 0 4 8 Popups: Off
-:_ :set 0 4 8 1_ Popups: one of Off, On
-:_ :set 0 4 8 2_ Popups: one of Off, On
-:_ :set 0 4 8 10_ Popups: one of Off, On
-:_ :set 0 4 8 none_ Popups: one of Off, On
-:_ :set 0 4 9 1 xyzzy_ SAME: US and Canada only
-:_ :set 0 4 9 1 on_ SAME: US and Canada only
-:_ :set 0 4 9 1 off_ SAME: US and Canada only
-:_ :set 0 4 9 1 1_ SAME: US and Canada only
-:_ :set 0 4 9 1 2_ SAME: US and Canada only
-:_ :set 0 4 9 1 10_ SAME: US and Canada only
-:_ :set 0 4 9 1 none_ SAME: US and Canada only
+:_ :set 0 4 7 xyzzy_ Popups: one of On, Off
+:_ :set 0 4 7 on_ 0 4 7 Popups: On
+:_ :set 0 4 7 off_ 0 4 7 Popups: Off
+:_ :set 0 4 7 1_ Popups: one of Off, On
+:_ :set 0 4 7 2_ Popups: one of Off, On
+:_ :set 0 4 7 10_ Popups: one of Off, On
+:_ :set 0 4 7 none_ Popups: one of Off, On
+:_ :set 0 4 8 1 xyzzy_ SAME: US and Canada only
+:_ :set 0 4 8 1 on_ SAME: US and Canada only
+:_ :set 0 4 8 1 off_ SAME: US and Canada only
+:_ :set 0 4 8 1 1_ SAME: US and Canada only
+:_ :set 0 4 8 1 2_ SAME: US and Canada only
+:_ :set 0 4 8 1 10_ SAME: US and Canada only
+:_ :set 0 4 8 1 none_ SAME: US and Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_ 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_ 0 5 3 APRS mode: Off
@@ -6650,13 +6542,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 3 2_ 0 8 3 Mic gain: 2
 :_ :set 0 8 3 10_ Mic gain: one of 9, 8, 7, 6, 5, 4, 3, 2, 1
 :_ :set 0 8 3 none_ Mic gain: one of 9, 8, 7, 6, 5, 4, 3, 2, 1
-:_ :set 0 8 4 2 xyzzy_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 on_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 off_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 1_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 2_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 10_ Subtone level: one of High, Normal, Low
-:_ :set 0 8 4 2 none_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 xyzzy_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 on_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 off_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 1_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 2_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 10_ Subtone level: one of High, Normal, Low
+:_ :set 0 8 4 none_ Subtone level: one of High, Normal, Low
 :_ :set 0 8 5 1 xyzzy_ Mode: one of Off, Receive, Transmit, Both
 :_ :set 0 8 5 1 on_ Mode: one of Off, Receive, Transmit, Both
 :_ :set 0 8 5 1 off_ 0 8 5 1 Mode: Off
@@ -6671,13 +6563,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 8 5 2 2_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 5 2 10_ Phase: one of 55 Hz, 120??, 180??, 240??
 :_ :set 0 8 5 2 none_ Phase: one of 55 Hz, 120??, 180??, 240??
-:_ :set 0 8 5 4 xyzzy_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 on_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 off_ 0 8 5 4 End tone: Off
-:_ :set 0 8 5 4 1_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 2_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 10_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
-:_ :set 0 8 5 4 none_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 xyzzy_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 on_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 off_ 0 8 5 3 End tone: Off
+:_ :set 0 8 5 3 1_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 2_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 10_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
+:_ :set 0 8 5 3 none_ End tone: one of Off, Beep, Two-tone up, Two-tone down, Chirp, Quindar
 :_ :set 0 8 6 3 xyzzy_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1
 :_ :set 0 8 6 3 on_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1
 :_ :set 0 8 6 3 off_ Speed: one of 200 ms, 190 ms, 180 ms, 170 ms, 160 ms, 150 ms, 140 ms, 130 ms, 1

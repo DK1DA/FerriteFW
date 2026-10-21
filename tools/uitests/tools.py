@@ -129,9 +129,9 @@ def link_records_round_trip(t):
 
 @test("SND-5", pages=("Group",))
 def end_tone_is_a_transmit_setting(t):
-    """The end tone is in the menus at 0 8 5 4 (Transmit) and in the channel editor's settings."""
-    name, value, _ = t.get_full("0 8 5 4")
-    t.eq(name, "End tone", "0 8 5 4")
-    u = t.keys("MENU 0 8 5 4")
+    """The end tone is in the menus at 0 8 5 3 (Transmit) and in the channel editor's settings."""
+    name, value, _ = t.get_full("0 8 5 3")
+    t.eq(name, "End tone", "0 8 5 3")
+    u = t.keys("MENU 0 8 5 3")
     t.eq((u.title, u.sel and u.sel["name"], u.sel and u.sel["value"]), ("Tail", "End tone", value),
-         "MENU 0 8 5 4 reaches it")
+         "MENU 0 8 5 3 reaches it")

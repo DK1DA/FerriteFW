@@ -49,7 +49,7 @@ after, counted in the 5 min window); without --long they are skipped.
 Each test starts from home on both radios; the settings it changes (`side.set`) and the slots (`slot` lines, the
 scans that ran) are put back after it, channels and a zone it made are deleted; at the end both radios are compared
 with their snapshots and anything left changed is reported (and fails the run). The receiving radio's quick mute and
-the transmitting radio's end tone (0 8 5 4 Off for the run) are put back too.
+the transmitting radio's end tone (0 8 5 3 Off for the run) are put back too.
 
 A link that times out (or a port that fails) on either radio stops the whole run in that test: KEY off to both,
 what can be put back is (a radio whose link is gone is reported, not retried), and the run's results are kept but
@@ -123,7 +123,7 @@ APPROVED = {bench.mhz10(f) for f in bench.DEFAULTS["test_freqs"]}  # 145.495, 44
 RESULTS = os.path.join(ROOT, "bench-results")
 KEY_ANSWER_CABLE_S = bench.KEY_ANSWER_S  # 0.6 s: TX-43
 KEY_ANSWER_BLE_S = 2.0
-END_TONE = bench.END_TONE  # 0 8 5 4
+END_TONE = bench.END_TONE  # 0 8 5 3
 
 
 def say(*a):
