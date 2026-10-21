@@ -268,8 +268,8 @@ pub fn region_freq(r: Option<Region>) -> Freq10 {
 }
 
 /// The frequency's range on 0 5 7 1: chip 0's (APRS-21).
-const F_MIN: Freq10 = mhz(64);
-const F_MAX: Freq10 = mhz(300);
+pub(crate) const F_MIN: Freq10 = mhz(64);
+pub(crate) const F_MAX: Freq10 = mhz(300);
 
 const LOADED: u8 = 1;
 const DIRTY: u8 = 2;

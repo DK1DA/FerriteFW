@@ -82,6 +82,10 @@ pub struct Ports {
     /// The debug request in flight: who asked, and when.
     dbg: Option<(Asker, u32)>,
     now: u32,
+    /// Live View (LINK-47): what the PC has of the UI, for the one session that has it (the newest subscription;
+    /// one at a time, 1.4 KB).
+    ui: ferrite_core::liveview::Track,
+    ui_owner: Option<usize>,
 }
 
 impl Default for Ports {
@@ -94,7 +98,7 @@ impl Ports {
     pub const fn new() -> Self {
         let mut bt = Session::new(false);
         bt.set_max_baud(0); // LINK-15: `BAUD` never applies to Bluetooth
-        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, dropped: 0, dbg: None, now: 0 }
+        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, dropped: 0, dbg: None, now: 0, ui: ferrite_core::liveview::Track::new(), ui_owner: None }
     }
 
     /// The fastest cable rate the caller's UART runs within 2 % (LINK-11).
@@ -119,7 +123,7 @@ impl Ports {
 
     /// The terminal or a session has work waiting: poll again soon.
     pub fn busy(&self) -> bool {
-        self.term.busy() || !self.ready()
+        self.term.busy() || !self.ready() || self.links.iter().any(|l| l.events_waiting())
     }
 
     /// The terminal moves to `port`: a fresh one (the other port's closes).
@@ -193,6 +197,23 @@ impl Ports {
         self.links[1].set_other_writing(writing[0]);
         self.links[0].poll(app, store, dev, live, now, cable);
         self.links[1].poll(app, store, dev, live, now, bt);
+        // LINK-46, LINK-47: events for subscribed sessions; the Live View to the newest subscription's port.
+        for i in 0..2 {
+            if self.links[i].ui_starting() && self.ui_owner != Some(i) {
+                if let Some(o) = self.ui_owner {
+                    self.links[o].ui_drop();
+                }
+                self.ui_owner = Some(i);
+            }
+        }
+        if self.ui_owner.is_some_and(|o| !self.links[o].ui_wanted()) {
+            self.ui_owner = None;
+        }
+        let ui = &mut self.ui;
+        let owner = self.ui_owner;
+        let [c, b] = &mut self.links;
+        c.events(app, store, dev, live, now, if owner == Some(0) { Some(&mut *ui) } else { None }, cable);
+        b.events(app, store, dev, live, now, if owner == Some(1) { Some(ui) } else { None }, bt);
     }
 
     /// A debug command's next request for the firmware (TERM-21), from the terminal or from a command run over

@@ -114,6 +114,51 @@ pub mod msg {
     /// status bar, the home cards or the list's rows, the hint bar, a toast), `MORE` for the rest. An optional
     /// byte: 0 the state, 1 the key names (`ui keys`).
     pub const UI: u8 = 0x33;
+    /// Events this session wants pushed (LINK-46): a [`super::event`] mask (0 ends them), then optionally the UI's
+    /// least gap in 100 ms units and flags ([`super::event::RENEW`]). Answer: the mask, the Live View dictionary's
+    /// version, the next UI sequence number.
+    pub const SUBSCRIBE: u8 = 0x50;
+    /// Radio to PC only, unasked: a frame of this type (below 0x80: the radio sends no requests, so it is never an
+    /// answer) with the session's own event counter as its seq, the payload an [`super::event`] kind and its bytes
+    /// (LINK-46). Sent by the PC as a request: answered `unknown type` as any other.
+    pub const EVENT: u8 = 0x51;
+    /// The APRS heard list (LINK-44): from an index (u8); the count, then as many stations as fit.
+    pub const HEARD: u8 = 0x52;
+    /// APRS messages, in and out, newest first (LINK-44): from an index (u16); the count (u16), then as many as fit.
+    pub const MSGS: u8 = 0x53;
+    /// Send an APRS message (LINK-45): to (length, text), the message (length, text); queued as the radio's
+    /// compose queues it.
+    pub const MSG_SEND: u8 = 0x54;
+}
+
+/// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
+pub mod event {
+    /// Mask bits.
+    pub const SUB_HEARD: u8 = 1;
+    pub const SUB_MSGS: u8 = 2;
+    pub const SUB_UI: u8 = 4;
+    /// `SUBSCRIBE`'s flags bit: keep the Live View stream as it is (a keepalive); without it a UI subscription starts
+    /// over with the whole state.
+    pub const RENEW: u8 = 1;
+    /// Kinds: a station heard (the count, then the station as `HEARD` gives it).
+    pub const HEARD: u8 = 1;
+    /// A new message, in or out (the count, then the message as `MSGS` gives it).
+    pub const MSG: u8 = 2;
+    /// A message's state changed: acked, retrying, failed, read.
+    pub const MSG_STATE: u8 = 3;
+    /// Live View: the UI's compact state or what changed ([`crate::liveview`]).
+    pub const UI: u8 = 4;
+    /// The UI's least gap by default: Bluetooth 500 ms, the cable 200 ms; at least 100 ms.
+    pub const UI_GAP_BT_MS: u32 = 500;
+    pub const UI_GAP_CABLE_MS: u32 = 200;
+    /// Events' bytes a second at most, and the most saved up: Bluetooth leaves room for the answers in its ~280
+    /// (LINK-36).
+    pub const RATE_BT: u32 = 200;
+    pub const RATE_CABLE: u32 = 4000;
+    pub const BURST: u32 = 300;
+    /// Events stop when the session has sent nothing for this long ([`super::msg::SUBSCRIBE`] with
+    /// [`RENEW`] keeps them going).
+    pub const QUIET_MS: u32 = 10_000;
 }
 
 /// `SLOT`'s mask (LINK-33): which fields follow, in this order.
@@ -235,6 +280,8 @@ pub mod what {
     pub const ZONE: u8 = 3;
     /// A range preset by number.
     pub const PRESET: u8 = 4;
+    /// The APRS settings, one record (index 0; LINK-43): MENU 0 5's that aren't in the settings record.
+    pub const APRS: u8 = 5;
 }
 
 /// The first byte of every answer.

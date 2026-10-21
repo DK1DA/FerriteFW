@@ -27,6 +27,7 @@ pub mod keys;
 pub mod layout;
 pub mod lease;
 pub mod link;
+pub mod liveview;
 pub mod mcutemp;
 #[cfg(feature = "bench")]
 pub mod memmap;

@@ -19,6 +19,11 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT knob +3                    # knob steps (LINK-19)
     python3 tools/ferrite_link.py PORT ui [keys]                  # what the screen shows (LINK-19's readback)
     python3 tools/ferrite_link.py PORT status                     # the compact one-line status (LINK-19, what=2)
+    python3 tools/ferrite_link.py PORT aprs-cfg                   # the APRS settings record (LINK-43)
+    python3 tools/ferrite_link.py PORT heard                      # the APRS heard list (LINK-44)
+    python3 tools/ferrite_link.py PORT msgs                       # APRS messages in and out, newest first (LINK-44)
+    python3 tools/ferrite_link.py PORT msg-send CALL "TEXT"       # queue an APRS message as compose does (LINK-45)
+    python3 tools/ferrite_link.py PORT subscribe [heard,msgs,ui] [--seconds N] [--screen]   # print pushed events
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
 
 PORT is a serial device (the programming cable, 115200 8N1), tcp:HOST:PORT for the simulator
@@ -73,7 +78,11 @@ import time
 PROTOCOL = 2
 HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD, MORE, UI = (
     0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32, 0x33)
-SETTINGS, CHANNEL, ZONE, PRESET = 1, 2, 3, 4
+SUBSCRIBE, EVENT, HEARD, MSGS, MSG_SEND = 0x50, 0x51, 0x52, 0x53, 0x54  # LINK-43 - LINK-48
+SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
+# SUBSCRIBE's mask and flags, EVENT's kinds (Appendix G)
+SUB_HEARD, SUB_MSGS, SUB_UI, RENEW = 1, 2, 4, 1
+EV_HEARD, EV_MSG, EV_MSG_STATE, EV_UI = 1, 2, 3, 4
 # KEY's remote PTT (Appendix G): key 0x80, then the action (0 off, 1 on + slot, 2 keepalive); slot 0xFF: the active one
 PTT, PTT_OFF, PTT_ON, PTT_ALIVE, ACTIVE = 0x80, 0, 1, 2, 0xFF
 SLOTS = {"active": ACTIVE, "a": 0, "b": 1, "c": 2}
@@ -257,6 +266,7 @@ class StreamPort:
 class Link:
     def __init__(self, port):
         self.p, self.seq = port, 0
+        self.events = []  # EVENT frames (LINK-46) as they arrive: (event counter, payload)
         # Ctrl-C closes the terminal if it has the cable (TERM-2; nothing otherwise); its goodbye text is dropped.
         self.p.write(b"\x03")
         time.sleep(0.3)
@@ -293,6 +303,9 @@ class Link:
             except ValueError:
                 continue  # terminal text, or a damaged frame
             if len(f) < 5 or crc16(f[:-2]) != struct.unpack("<H", f[-2:])[0]:
+                continue
+            if f[0] == EVENT:  # pushed by the radio, not an answer (LINK-46): its type has no 0x80 bit
+                self.events.append((f[1], bytes(f[2:-2])))
                 continue
             out.append((f[0], f[1], f[2], f[3:-2]))
         return out
@@ -633,6 +646,182 @@ def channel_fields(rec):
     return num, zone, rx, name
 
 
+SYMS = ["Car", "Home", "Digi", "WX", "HT", "iGate", "Truck", "Boat"]
+MSG_STATES = ["unread", "read", "pending", "acked", "retrying", "failed"]
+
+
+def parse_station(b):
+    """LINK-44: one station record; (dict, the rest)."""
+    flags = b[0]
+    call, b = text(b[1:])
+    sym, ago, times = struct.unpack("<BIH", b[:7])
+    b = b[7:]
+    st = {"call": call, "sym": SYMS[sym] if sym < len(SYMS) else sym, "ago_s": ago, "times": times}
+    if flags & 1:
+        lat, lon = struct.unpack("<ii", b[:8])
+        st["pos"], b = (lat / 1e7, lon / 1e7), b[8:]
+    if flags & 2:
+        st["course"], b = struct.unpack("<HH", b[:4]), b[4:]
+    if flags & 4:
+        st["alt_m"], b = struct.unpack("<i", b[:4])[0], b[4:]
+    st["via"], b = text(b)
+    st["comment"], b = text(b)
+    return st, b
+
+
+def parse_message(b):
+    """LINK-44: one message record; (dict, the rest)."""
+    inbound, state, tries, ago = struct.unpack("<BBBI", b[:7])
+    peer, b = text(b[7:])
+    body, b = text(b)
+    st = MSG_STATES[state] if state < len(MSG_STATES) else str(state)
+    if state == 4:
+        st += f" {tries}"
+    return {"in": bool(inbound), "peer": peer, "text": body, "ago_s": ago, "state": st}, b
+
+
+def aprs_cfg(rec):
+    """LINK-43: the APRS record."""
+    f5k, beacon, power, path, digi, after, ssid = struct.unpack("<HBBBBBB", rec[:8])
+    return {"freq_mhz": f5k * 0.005 if f5k else "region's", "beacon_mode": beacon & 0x7F, "beacon_paused": bool(beacon & 0x80),
+            "power": ["low", "mid", "high"][power], "path": path, "digipeater": bool(digi & 1), "digi_mycall": bool(digi & 2),
+            "digi_wait_s": digi >> 4 & 7, "beacon_after_voice": bool(after), "ssid": ssid,
+            "custom_path": rec[8:24].split(b"\x00")[0].decode("ascii", "replace")}
+
+
+# Live View (LINK-47, LINK-48; ferrite_core::liveview): the text dictionary, byte k (1-31) for entry k - 1.
+LV_DICT_VERSION = 1
+LV_DICT = [b"row ", b'" "', b" sel", b" dot", b" grey", b"card ", b" active=", b' head="', b'" state="', b" freq=",
+           b' name="', b'" mode="', b'" tone="', b'" shift="', b'" power="', b'" s="S', b'" meter=', b" rx=", b" scan=",
+           b" kind=slot", b'hints "', b"screen ", b'" title="', b"bar lock=", b" watch=", b" inbox=", b" battery=",
+           b" clock=", b"state dark=", b" keyed=", b'qmenu "']
+
+
+def lv_decode(b):
+    return b"".join(LV_DICT[c - 1] if 1 <= c <= 31 else bytes([c]) for c in b)
+
+
+def lv_tokens(line):
+    """A line's tokens: split at the spaces outside double quotes (backslash escapes inside them)."""
+    out, start, quoted, esc = [], 0, False, False
+    for i, c in enumerate(line):
+        if esc:
+            esc = False
+        elif quoted and c == 0x5C:
+            esc = True
+        elif c == 0x22:
+            quoted = not quoted
+        elif c == 0x20 and not quoted:
+            out.append(line[start:i])
+            start = i + 1
+    out.append(line[start:])
+    return out
+
+
+def lv_key(t):
+    for i, c in enumerate(t):
+        if c in (0x3D, 0x22):
+            return t[:i + 1] if c == 0x3D and i > 0 else None
+    return None
+
+
+def fnv1a(h, b):
+    for c in b:
+        h = ((h ^ c) * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+class LiveView:
+    """A Live View client (the reference for Console): apply() each UI event's payload after its kind byte; False
+    means ask for the whole state again (SUBSCRIBE without RENEW)."""
+
+    def __init__(self):
+        self.lines, self.last = [], None
+
+    def apply(self, ev):
+        seq, flags, check, n = ev[0], ev[1], struct.unpack("<H", ev[2:4])[0], ev[4]
+        if flags & 1:
+            self.lines = []
+        elif self.last is None or (self.last + 1) & 0xFF != seq:
+            return False  # lost or late
+        self.lines = (self.lines + [b""] * n)[:n]
+        i, ops = 0, ev[5:]
+        while i < len(ops):
+            op, ln = ops[i] >> 6, ops[i] & 0x3F
+            if op == 0:
+                k = ops[i + 1]
+                self.lines[ln] = lv_decode(ops[i + 2:i + 2 + k])
+                i += 2 + k
+                continue
+            if op == 2:
+                count, at = len(lv_tokens(self.lines[ln])), i + 1
+            else:
+                count, at = ops[i + 1], i + 2
+            entries, i = ops[at], at + 1
+            toks = (lv_tokens(self.lines[ln]) + [b""] * count)[:count]
+            for _ in range(entries):
+                idx, k = ops[i], ops[i + 1]
+                v = lv_decode(ops[i + 2:i + 2 + k])
+                i += 2 + k
+                j = idx & 0x7F
+                toks[j] = ((lv_key(toks[j]) or b"") + v) if idx & 0x80 else v
+            self.lines[ln] = b" ".join(toks)
+        self.last = seq
+        if not flags & 2:
+            h = 0x811C9DC5
+            for line in self.lines:
+                h = fnv1a(fnv1a(h, line), b"\n")
+            if h & 0xFFFF != check:
+                return False
+        return True
+
+    def text(self):
+        return "".join(line.decode("utf-8", "replace") + "\n" for line in self.lines)
+
+
+def subscribe(link, what, seconds, screen):
+    """LINK-46: subscribe, then print each event for `seconds`, renewing every 5 s; the UI's bytes a second."""
+    mask = sum({"heard": SUB_HEARD, "msgs": SUB_MSGS, "ui": SUB_UI}[w] for w in what)
+    r = link.ok(SUBSCRIBE, bytes([mask]))
+    if mask & SUB_UI and r[1] != LV_DICT_VERSION:
+        sys.exit(f"Live View dictionary {r[1]}: this tool knows {LV_DICT_VERSION}")
+    lv, t0, renew, ui_bytes, ui_n = LiveView(), time.time(), time.time(), 0, 0
+    try:
+        while time.time() - t0 < seconds:
+            link.answers()
+            while link.events:
+                _, p = link.events.pop(0)
+                kind, body = p[0], p[1:]
+                if kind == EV_HEARD:
+                    st, _ = parse_station(body[1:])
+                    print(f"heard {st['call']} ({st['sym']}, {st['times']}x, via {st['via'] or 'direct'}) {st.get('pos', 'no position')}; {body[0]} in the list")
+                elif kind in (EV_MSG, EV_MSG_STATE):
+                    m, _ = parse_message(body[2:])
+                    what_ = "message" if kind == EV_MSG else "message state"
+                    print(f"{what_}: {'from' if m['in'] else 'to'} {m['peer']}: {m['text']!r} [{m['state']}]")
+                elif kind == EV_UI:
+                    ui_bytes, ui_n = ui_bytes + len(p) + 6, ui_n + 1
+                    if not lv.apply(body):
+                        print("ui: lost one: asking for the whole state")
+                        link.ok(SUBSCRIBE, bytes([mask]))
+                        continue
+                    if screen and not body[1] & 2:
+                        sys.stdout.write("\x1b[H\x1b[2J" + lv.text())
+                    elif not screen:
+                        print(f"ui #{body[0]}: {len(p) + 6} B{' (whole)' if body[1] & 1 else ''}{' ...' if body[1] & 2 else ''}")
+            if time.time() - renew >= 5:
+                link.ok(SUBSCRIBE, bytes([mask, 0, RENEW]))  # a keepalive: events stop after 10 s quiet
+                renew = time.time()
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
+    link.ok(SUBSCRIBE, bytes([0]))
+    if mask & SUB_UI:
+        dt = max(time.time() - t0, 0.001)
+        print(f"ui: {ui_n} updates, {ui_bytes} B on the wire, {ui_bytes / dt:.1f} B/s")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("port")
@@ -645,6 +834,7 @@ def main():
                     help="key: the active slot (PTT A), b (PTT B), or a/c only while active")
     ap.add_argument("--pin", help="the radio's PIN, for Bluetooth while a PIN lock is on (LINK-30)")
     ap.add_argument("--long", action="store_true", help="keys: every key a long press")
+    ap.add_argument("--screen", action="store_true", help="subscribe ui: redraw the screen's text on each update")
     a = ap.parse_args()
     port = Port(a.port)
     try:
@@ -784,6 +974,42 @@ def run(link, a):
         link.p.baud(rate)
         link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + b"ferrite_link.py")  # within 1 s, or the radio goes back
         print(f"now at {rate}")
+    elif a.cmd == "aprs-cfg":
+        rec = link.read(APRS, 0)
+        for k, v in aprs_cfg(rec).items():
+            print(f"{k}: {v}")
+    elif a.cmd == "heard":
+        i, n = 0, None
+        while n is None or i < n:
+            r = link.ok(HEARD, bytes([i]))
+            n, rest = r[0], r[1:]
+            if not rest:
+                break
+            while rest:
+                st, rest = parse_station(rest)
+                pos = "%.5f %.5f" % st["pos"] if "pos" in st else "no position"
+                print(f"{st['call']:<10} {st['sym']:<5} {st['ago_s']:>6} s ago  x{st['times']:<3} {pos:<22} via {st['via'] or 'direct'}  {st['comment']}")
+                i += 1
+        print(f"{n} heard")
+    elif a.cmd == "msgs":
+        i, n = 0, None
+        while n is None or i < n:
+            r = link.ok(MSGS, struct.pack("<H", i))
+            n, rest = struct.unpack("<H", r[:2])[0], r[2:]
+            if not rest:
+                break
+            while rest:
+                m, rest = parse_message(rest)
+                print(f"{'from' if m['in'] else 'to':<4} {m['peer']:<9} {m['ago_s']:>6} s ago  [{m['state']}] {m['text']}")
+                i += 1
+        print(f"{n} messages")
+    elif a.cmd == "msg-send":
+        to, body = a.args[0].encode("ascii"), a.args[1].encode("ascii")
+        r = link.ok(MSG_SEND, bytes([len(to)]) + to + bytes([len(body)]) + body)
+        print("queued: " + ("APRS mode is on, it goes out now" if r[0] else "it waits for APRS mode (MENU 0 5 3)"))
+    elif a.cmd == "subscribe":
+        what = (a.args[0] if a.args else "heard,msgs,ui").split(",")
+        return subscribe(link, what, a.seconds if a.seconds != 5.0 else 3600, a.screen)
     elif a.cmd == "reboot":
         link.ok(REBOOT)  # LINK-24: answered, then the radio saves, goes quiet and resets into the bootloader
         print("restarting: the bootloader listens about 200 ms (run flash.py now, or it starts Ferrite again)")
