@@ -17,7 +17,7 @@ use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, 
 use crate::screens::advanced::GROUPS;
 use crate::screens::groups::{self, SUBS};
 use crate::settings::CABLE_PORTS;
-use crate::slot::{band_near, band_of, mode_chip, tone_text, Item, BANDS, BAND_125M, STEPS};
+use crate::slot::{band_near, mode_chip, tone_text, Item, BANDS, STEPS};
 use crate::App;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::gpspower::GpsPhase;
@@ -209,8 +209,7 @@ const HELP_CHANNELS: &str = concat!(
 );
 const HELP_EDIT: &str = concat!(
     "<- -> change a field; it saves at once.\n",
-    "Enter types the name or a frequency (MHz). # resets a field.\n",
-    "1.25 m power stays at 0.25 W.",
+    "Enter types the name or a frequency (MHz). # resets a field.",
 );
 const HELP_SETTINGS: &str = concat!(
     "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n",
@@ -871,9 +870,6 @@ impl Term {
                 self.line = Some(Buf::new());
                 return self.say("Split: type the TX frequency, then Enter".as_bytes(), false);
             }
-            F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => {
-                return self.say("Power: fixed at 0.25 W on 1.25 m".as_bytes(), true); // TX-9, TERM-7
-            }
             F::It(Item::Power) if c.flags & FLAG_RX_ONLY != 0 => {
                 return self.say("Power: this channel is RX only".as_bytes(), true);
             }
@@ -896,7 +892,6 @@ impl Term {
     fn default(&mut self, app: &mut App, c: Channel, f: F) {
         let mut n = c;
         match f {
-            F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => return,
             F::It(it) => {
                 let shift = BANDS[band_near(c.rx)].shift;
                 it.set(&mut n.cfg, it.default_of(), shift);
@@ -1517,11 +1512,7 @@ impl Term {
                 tone_text(c.cfg.tx_tone, &mut v);
                 w.s(if v.is_empty() { b"-" } else { v.as_bytes() });
                 w.at(65);
-                if band_of(c.rx) == Some(BAND_125M) {
-                    w.s(b"0.25W");
-                } else {
-                    item(Item::Power, &c, w);
-                }
+                item(Item::Power, &c, w);
                 w.at(71);
                 flags(&c, cx.app, w);
                 if sel {
@@ -1604,7 +1595,6 @@ impl Term {
                         w.s(mhz5(c.cfg.tx_of(c.rx)).as_bytes());
                         w.s(if c.cfg.split { b" MHz, split" } else { b" MHz" });
                     }
-                    (F::It(Item::Power), _) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => w.s(b"0.25 W"),
                     (F::It(it), _) => {
                         let mut v = Buf::<16>::new();
                         it.text(&c.cfg, true, &mut v);

@@ -623,7 +623,7 @@ const WARNING: [(&str, u16); 4] = [
     ("Transmit wherever the radio can, not only on your region's amateur bands.", TEXT),
     ("This may be illegal where you are, and it can interfere with services people rely on.", AMBER),
     ("You are responsible for every transmission.", TEXT),
-    ("Emergency frequencies still ask for a second PTT; 1.25 m stays at 0.25 W.", SUB),
+    ("Emergency frequencies still ask for a second PTT.", SUB),
 ];
 
 impl View for ExtendTx {

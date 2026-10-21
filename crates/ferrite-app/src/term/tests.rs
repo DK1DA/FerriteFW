@@ -405,13 +405,8 @@ fn channels_list_and_edit() {
     assert_eq!(FIELDS[r.term.field as usize], F::It(Item::Power));
     r.send(b"\x1b[C");
     let after = r.store.by_num(first.num).unwrap().0;
-    if band_of(first.rx) == Some(BAND_125M) {
-        assert_eq!(after.cfg.power, first.cfg.power, "1.25 m power can't change (TERM-7)");
-        assert!(r.vt.has("fixed at 0.25 W"));
-    } else {
-        assert_eq!(after.cfg.power, (first.cfg.power + 1) % 3, "saved in the store");
-        assert!(r.vt.has("Saved"));
-    }
+    assert_eq!(after.cfg.power, (first.cfg.power + 1) % 3, "saved in the store");
+    assert!(r.vt.has("Saved"));
 }
 
 /// A typed frequency is checked (CHAN-22, TERM-7); a typed name is saved; Esc cancels typing.
@@ -861,7 +856,7 @@ fn command_errors() {
     assert_eq!(r.store.count(), 21);
 }
 
-/// `ch`: one field at a time, a whole channel, show, delete; the 1.25 m cap holds (TERM-7).
+/// `ch`: one field at a time, a whole channel, show, delete; 1.25 m takes any power (TERM-7, TX-9).
 #[test]
 fn command_channels() {
     let mut r = Rig::main();
@@ -875,12 +870,11 @@ fn command_channels() {
     r.cmd("ch 300 \"Test\" 146.6 offset=-0.6 tone=100.0 power=mid zone=1 skip squelch=6");
     let t = r.store.by_num(299).expect("made").0;
     assert_eq!((t.rx, t.cfg.offset, t.cfg.tx_tone, t.cfg.power, t.zone, t.flags & FLAG_SKIP, t.cfg.squelch), (14_660_000, -60_000, 1000, 1, 0, FLAG_SKIP, 6));
+    // TX-9: 1.25 m takes any level, as stock.
     r.cmd("ch 301 \"Two20\" 223.5 power=high");
-    assert!(r.bottom().contains("fixed at 0.25 W on 1.25 m"), "{}", r.bottom());
-    assert!(r.store.by_num(300).is_none(), "refused whole");
-    r.cmd("ch 301 \"Two20\" 223.5");
+    assert_eq!(r.store.by_num(300).expect("made").0.cfg.power, 2);
     r.cmd("ch 301 power mid");
-    assert!(r.bottom().contains("fixed at 0.25 W"), "{}", r.bottom());
+    assert_eq!(r.store.by_num(300).unwrap().0.cfg.power, 1);
     // Show: the console, then Enter goes back to the page.
     r.cmd("ch 300");
     assert!(r.raw().contains("ch 300 \"Test\" 146.60000 offset=-0.60000 mode=NFM tone=100.0 power=mid zone=1 squelch=6 skip"), "{}", r.raw());
@@ -1014,7 +1008,7 @@ fn dump_load_1000_channels() {
     assert_eq!(DEFAULT_CFG.squelch, 4);
 }
 
-/// TERM-13: a bad line is named and skipped whole; the rest goes in; region and the 1.25 m cap hold (TERM-7).
+/// TERM-13: a bad line is named and skipped whole; the rest goes in; region holds, 1.25 m power goes in (TERM-7).
 #[test]
 fn load_reports_bad_lines() {
     let mut r = Rig::main();
@@ -1027,17 +1021,17 @@ fn load_reports_bad_lines() {
     for l in [
         "line 4: Region changes only on the radio",
         "line 5: tone: 999.0 Hz is outside 60.0 to 260.0 Hz",
-        "line 6: power: fixed at 0.25 W on 1.25 m",
         "line 7: bogus: no such field",
         "line 8: zone 9: zones are made in order",
         "line 9: dump can't be in a load",
         "line 10: too long",
-        "Done: 11 lines read, 2 applied, 7 refused.",
+        "Done: 11 lines read, 3 applied, 6 refused.",
     ] {
         assert!(raw.contains(l), "{l}\n{raw}");
     }
     assert_eq!(r.app.set.theme, 1);
-    assert!(r.store.by_num(4).is_none() && r.store.by_num(5).is_none() && r.store.by_num(6).is_none());
+    assert!(r.store.by_num(4).is_none() && r.store.by_num(6).is_none());
+    assert_eq!(r.store.by_num(5).expect("1.25 m at high, TX-9").0.cfg.power, 2);
     assert_eq!(r.store.by_num(7).unwrap().0.cfg.power, 2);
     assert!(r.store.by_num(8).is_none(), "nothing after end");
     assert_eq!(r.app.set.region, crate::tests::set().region);
@@ -1081,9 +1075,9 @@ fn command_split_and_global() {
     r.cmd("ch 312 \"NoTx\" 446.0 offset=split");
     assert!(r.bottom().contains("needs its TX frequency"), "{}", r.bottom());
     assert!(r.store.by_num(311).is_none());
-    // TX on 1.25 m: power is capped by the TX band even with RX on 70 cm.
+    // TX on 1.25 m with RX on 70 cm: any level (TX-9).
     r.cmd("ch 313 \"Odd\" 446.0 tx=223.5 power=high");
-    assert!(r.bottom().contains("fixed at 0.25 W"), "{}", r.bottom());
+    assert_eq!(r.store.by_num(312).expect("made").0.cfg.power, 2);
     // The ch line, and back.
     r.cmd("ch 310");
     assert!(r.raw().contains("ch 310 \"Cross\" 446.00000 offset=split tx=146.52000 mode=NFM"), "{}", r.raw());

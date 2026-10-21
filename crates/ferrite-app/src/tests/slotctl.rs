@@ -40,21 +40,20 @@ fn slot_lists_and_shows() {
     assert_eq!(drain(&mut t.app), (Vec::new(), Vec::new()));
 }
 
-/// TERM-35.1: power in a combined `slot` change is judged on the frequency the change leaves: from 1.25 m, a new
-/// 2 m frequency with a power word goes in; onto 1.25 m with another power is refused whole.
+/// TERM-35, TX-9: power on 1.25 m is set like any band's, alone or in a combined change.
 #[test]
-fn slot_power_checked_on_the_new_frequency() {
+fn slot_power_on_125m() {
     let mut t = T::new();
     said(&mut t.app, "slot A 223.53");
     let p = t.app.slot_state(0).power;
     let other = ["low", "mid", "high"][(p as usize + 1) % 3];
-    assert!(refused(&mut t.app, &format!("slot A {other}")).contains("0.25 W"), "1.25 m keeps its power");
-    let s = said(&mut t.app, &format!("slot A 145.495 fm {other}"));
-    assert!(s.contains(&format!("power={other}")), "off 1.25 m, the power word goes in: {s}");
-    let before = t.app.slot_state(0);
+    let s = said(&mut t.app, &format!("slot A {other}"));
+    assert!(s.contains(&format!("power={other}")), "1.25 m takes the level: {s}");
     let back = ["low", "mid", "high"][p as usize];
-    assert!(refused(&mut t.app, &format!("slot A 223.53 {back}")).contains("0.25 W"));
-    assert_eq!(t.app.slot_state(0).freq, before.freq, "refused whole: the frequency didn't change");
+    let s = said(&mut t.app, &format!("slot A 145.495 fm {back}"));
+    assert!(s.contains(&format!("power={back}")), "{s}");
+    let s = said(&mut t.app, &format!("slot A 223.53 {other}"));
+    assert!(s.contains(&format!("power={other}")), "{s}");
 }
 
 /// TERM-35: a VFO slot takes a frequency, mode, power and tones as the keypad sets them (VFO entry, quick
@@ -155,7 +154,7 @@ fn slot_on_a_channel() {
 }
 
 /// TERM-35: refusals change nothing and say why: frequencies no chip tunes, bad words, the APRS slot,
-/// channel-only mode, transmitting, 1.25 m power.
+/// channel-only mode, transmitting.
 #[test]
 fn slot_refusals() {
     let mut t = T::new();
@@ -175,7 +174,5 @@ fn slot_refusals() {
     t.app.radio.keyed = Some(0);
     assert!(refused(&mut t.app, "slot B nfm").contains("transmitting"));
     t.app.radio.keyed = None;
-    said(&mut t.app, "slot B 223.5");
-    assert!(refused(&mut t.app, "slot B high").contains("0.25 W"), "TX-10");
     assert!(drain(&mut t.app).1.is_empty());
 }

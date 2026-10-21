@@ -277,8 +277,9 @@ fn quick_settings() {
     assert_eq!(t.app.screen(), Screen::Home);
 }
 
+/// TX-9: 1.25 m's power is chosen like any band's (stock's levels on the 200-300 MHz PA path).
 #[test]
-fn power_capped_on_125m() {
+fn power_levels_on_125m() {
     let mut t = T::new();
     for _ in 0..2 {
         t.tap(Key::Right); // VHF -> Marine -> 1.25 m
@@ -287,8 +288,8 @@ fn power_capped_on_125m() {
     t.tap(Key::Menu);
     t.tap(Key::Down); // TX power
     t.knob(2);
-    assert_eq!(t.app.slot(0).cfg().power, 0, "fixed at 0.25 W on 1.25 m");
-    assert!(t.app.greyed(Item::Power).is_some());
+    assert_eq!(t.app.slot(0).cfg().power, 2, "High on 1.25 m");
+    assert!(t.app.greyed(Item::Power).is_none());
 }
 
 /// TX-36: tuning onto HF (18-64 MHz) puts the power at Low, whatever it was: typed, by the knob across 64 MHz
@@ -1267,7 +1268,7 @@ fn chip_slots_never_move() {
     // The widest text each slot shows fits it.
     use ferrite_ui::assets::UI_12;
     use ferrite_ui::gfx::text4_width;
-    for (s, (_, w)) in [("FM-N", SLOT_MODE), ("T 254.1", SLOT_TONE), ("R-12.5M", SLOT_SHIFT), ("R SPLIT", SLOT_SHIFT), ("0.25 W", SLOT_POWER)] {
+    for (s, (_, w)) in [("FM-N", SLOT_MODE), ("T 254.1", SLOT_TONE), ("R-12.5M", SLOT_SHIFT), ("R SPLIT", SLOT_SHIFT), ("No TX", SLOT_POWER)] {
         assert!(text4_width(s.as_bytes(), &UI_12) <= w - 4, "{s} fits its slot");
     }
     assert!(SLOT_POWER.0 + SLOT_POWER.1 == 226 && SLOT_SHIFT.0 + SLOT_SHIFT.1 < SLOT_POWER.0);

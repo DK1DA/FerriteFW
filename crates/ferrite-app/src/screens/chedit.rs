@@ -264,7 +264,6 @@ impl View for ChEdit {
             let mut v = Buf::<16>::new();
             let mut grey = false;
             match c {
-                Cell::It(Item::Power) if app.capped(a) => v.set(b"0.25 W"),
                 Cell::It(it) => {
                     it.text(&ch.cfg, false, &mut v);
                     grey = app.greyed(it).is_some();

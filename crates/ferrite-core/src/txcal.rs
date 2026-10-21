@@ -162,16 +162,18 @@ impl TxCal {
             let at = 0x190 + 0x10 * l;
             row.copy_from_slice(&b[at..at + 16]);
         }
-        // The entries the lookup can reach on the amateur bands: UHF 0-12, VHF 0-15, HF 0-11, every level.
+        // The entries the lookup can reach where transmit is allowed: UHF 0-12, VHF 0-15, 200-300 0-11 (200-260
+        // MHz), HF 0-11, every level.
         let bad = |v: &[u8]| v.iter().any(|&x| x == 0 || x == 0xFF);
-        let reached = c.pa.iter().any(|l| bad(&l[UHF][..13]) || bad(&l[VHF])) || c.hf.iter().any(|r| bad(&r[..12]));
+        let reached = c.pa.iter().any(|l| bad(&l[UHF][..13]) || bad(&l[VHF]) || bad(&l[R200][..12]))
+            || c.hf.iter().any(|r| bad(&r[..12]));
         if reached {
             return Err(Fault::PaCurve);
         }
         // TX-14, CAL-6 (TX audit F8): Low < Mid < High at every entry those rows reach (stock's order: 0 High).
         let rising = |a: &[u8], b: &[u8], n: usize| a[..n].iter().zip(&b[..n]).all(|(x, y)| x < y);
         let ordered = |row: usize, n: usize| rising(&c.pa[2][row], &c.pa[1][row], n) && rising(&c.pa[1][row], &c.pa[0][row], n);
-        if !ordered(UHF, 13) || !ordered(VHF, 16) || !rising(&c.hf[2], &c.hf[1], 12) || !rising(&c.hf[1], &c.hf[0], 12) {
+        if !ordered(UHF, 13) || !ordered(VHF, 16) || !ordered(R200, 12) || !rising(&c.hf[2], &c.hf[1], 12) || !rising(&c.hf[1], &c.hf[0], 12) {
             return Err(Fault::LevelOrder);
         }
         if b[WINDOWS_AT[0]] == 0xFF {
@@ -184,9 +186,10 @@ impl TxCal {
     }
 
     /// CAL-11, TX-1: `f` lies in one of this radio's enabled TX windows, low <= f < high as stock checks it
-    /// (0x0800BD8C). Below 64 MHz the calibration has no window (TX-41): `txplan`'s HF windows alone decide there.
+    /// (0x0800BD8C). 18-64 MHz is a window on any valid sector (TX-41): stock's loader replaces the windows with
+    /// 18-64 MHz in its HF work mode (settings +0x62 == 0), so the sector's own windows never hold HF.
     pub fn in_window(&self, f: Freq10) -> bool {
-        f < mhz(64) || self.win.iter().any(|&(lo, hi)| (mhz(lo as u32)..mhz(hi as u32)).contains(&f))
+        (mhz(18)..mhz(64)).contains(&f) || self.win.iter().any(|&(lo, hi)| (mhz(lo as u32)..mhz(hi as u32)).contains(&f))
     }
 
     /// TONE-1, TONE-16: REG_51's gain for the sub-tone sent with `tone` (the tone word: bit 15 DCS) at the Subtone
@@ -222,9 +225,8 @@ impl TxCal {
             400.. => p[UHF][((mhz - 400) / 10) as usize],
             350..=399 => p[R350][((mhz - 350) / 5) as usize],
             300..=349 => p[R350][0],
-            // CAL-14, TX-9: the 200-300 MHz PA path (1.25 m, and 243.0 MHz) takes the Low curve whatever the
-            // level; the bench-measured 0.25 W ceiling clamps it further once known (TX-10).
-            200..=299 => self.pa[2][R200][(((mhz - 200) / 5) as usize).min(15)],
+            // CAL-14, TX-9: the 200-300 MHz PA path (1.25 m, and 243.0 MHz) at the chosen level, as stock.
+            200..=299 => p[R200][(((mhz - 200) / 5) as usize).min(15)],
             130..=199 => p[VHF][(((mhz - 130) / 3) as usize).min(15)],
             18..=63 => self.hf[level][(((mhz - 15) / 5) as usize).min(11)],
             // Below 18 MHz and 64-130 MHz: stock takes entry 0 of the High VHF row whatever the level; refused here.
@@ -350,8 +352,8 @@ mod tests {
         assert_eq!(gate(Err(Fault::Blank), false, CalCrc::Changed).err(), Some(Fault::Mcu), "the MCU first");
     }
 
-    /// CAL-11, TX-1.2, TX-14: the windows as stock checks them (low <= f < high, whole MHz from BCD), the black
-    /// radio's four; below 64 MHz no window applies (TX-41).
+    /// CAL-11, TX-1.2, TX-14, TX-41: the windows as stock checks them (low <= f < high, whole MHz from BCD), the
+    /// black radio's four; 18-64 MHz as stock's HF work mode replaces them, whatever the sector's windows say.
     #[test]
     fn tx_windows_as_stock() {
         let c = TxCal::read(&sector(GAUGE_DEFAULT)).unwrap();
@@ -369,6 +371,10 @@ mod tests {
             (mhz(520), false),
             (mhz(28) + 40_000, true),
             (mhz(52), true),
+            (mhz(27) + 18_500, true),
+            (mhz(18), true),
+            (mhz(18) - 1, false),
+            (mhz(64), false),
         ] {
             assert_eq!(c.in_window(f), inside, "{f}");
         }
@@ -440,22 +446,29 @@ mod tests {
         assert_eq!(TxCal::read(&b).err(), Some(Fault::ToneGain));
     }
 
-    /// CAL-14: the 1.25 m PA path (200-300 MHz, 243.0 MHz included) takes the Low curve at every level, so the
-    /// emergency frequency's double PTT can't drive it at High.
+    /// CAL-14, TX-9: the 1.25 m PA path (200-300 MHz, 243.0 MHz included) at the chosen level, as stock's lookup
+    /// ((MHz-200)/5 on the level's 200-300 row); a hole or a level out of order in its reached entries locks.
     #[test]
-    fn band_125m_low_curve_only() {
+    fn band_125m_levels_as_stock() {
         let c = TxCal::parse(&sector(GAUGE_DEFAULT)).unwrap();
-        for f in [mhz(223) + 50_000, mhz(243), mhz(299)] {
-            let low = c.dac(f, 0);
-            assert!(low.is_some());
-            assert_eq!(c.dac(f, 1), low);
-            assert_eq!(c.dac(f, 2), low);
+        for (f, i) in [(mhz(223) + 50_000, 4), (mhz(243), 8), (mhz(259), 11)] {
+            assert_eq!(c.dac(f, 2), Some(curve(0, R200, i)), "{f}: High");
+            assert_eq!(c.dac(f, 1), Some(curve(1, R200, i)), "{f}: Mid");
+            assert_eq!(c.dac(f, 0), Some(curve(2, R200, i)), "{f}: Low");
         }
-        assert_ne!(c.dac(mhz(146), 2), c.dac(mhz(146), 0), "other bands keep their levels");
+        let mut b = sector(GAUGE_DEFAULT);
+        b[0x80 + 0x10 * R200 + 4] = 0xFF;
+        assert_eq!(TxCal::read(&b).err(), Some(Fault::PaCurve), "a hole in Low 200-300 at 220 MHz");
+        let mut b = sector(GAUGE_DEFAULT);
+        b[0x40 + 0x10 * R200 + 4] = b[0x10 * R200 + 4];
+        assert_eq!(TxCal::read(&b).err(), Some(Fault::LevelOrder), "Mid = High at 220 MHz");
+        let mut b = sector(GAUGE_DEFAULT);
+        b[0x10 * R200 + 12] = 0xFF;
+        assert!(TxCal::read(&b).is_ok(), "260 MHz up isn't reached");
     }
 
     /// TX-8, CAL-8, CAL-9, TX-11, CAL-10: the PA drive comes only from the band's calibration curve at the chosen
-    /// level (1.25 m: the Low curve, CAL-14), by stock's lookup (High is stock's row 0, Low its row 2), and never
+    /// level (1.25 m too, CAL-14), by stock's lookup (High is stock's row 0, Low its row 2), and never
     /// reads past its row's 16 entries; outside every row the lookup refuses (TX audit F16).
     #[test]
     fn lookup_as_stock() {
@@ -466,9 +479,9 @@ mod tests {
         assert_eq!(c.dac(mhz(146) + 52_000, 0), at(2, VHF, 5), "Low is stock's level 2");
         assert_eq!(c.dac(mhz(446), 1), at(1, UHF, 4), "UHF entry (446-400)/10 = 4, Mid");
         assert_eq!(c.dac(mhz(190), 2), at(0, VHF, 15), "175-200 MHz: entry 15");
-        assert_eq!(c.dac(mhz(223) + 50_000, 2), at(2, R200, 4), "1.25 m: the Low curve (CAL-14)");
+        assert_eq!(c.dac(mhz(223) + 50_000, 2), at(0, R200, 4), "1.25 m: High (CAL-14)");
         assert_eq!(c.dac(mhz(28) + 40_000, 2), Some(hf_curve(0, 2)), "10 m: HF entry (28-15)/5 = 2");
-        assert_eq!(c.dac(mhz(290), 2), at(2, R200, 15), "280-300: the row's last entry, not the next row");
+        assert_eq!(c.dac(mhz(290), 2), at(0, R200, 15), "280-300: the row's last entry, not the next row");
         assert_eq!(c.dac(mhz(559), 2), at(0, UHF, 15), "the UHF row's last entry");
         for f in [mhz(70), mhz(129) + 99_999, mhz(17) + 99_999, mhz(1), mhz(560), mhz(600)] {
             assert_eq!(c.dac(f, 2), None, "{f}: outside every row (stock: High VHF entry 0, or past the row)");

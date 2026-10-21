@@ -158,7 +158,7 @@ fn timeout_follows_the_setting() {
 fn emergency_frequency_needs_ptt_twice() {
     let mut t = ready();
     t.app.set_region(Some(Region::Us), true);
-    tune(&mut t, mhz(406) + 2_500); // EPIRB (243.0 is on the 1.25 m PA path, locked by TX-10.2 for now)
+    tune(&mut t, mhz(406) + 2_500); // EPIRB (243.0: band_125m_and_hf_key_as_stock)
     ptt(&mut t, true);
     assert!(matches!(t.app.screen(), Screen::Emergency(_)));
     assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })));
@@ -273,15 +273,13 @@ fn automatic_tx_refused_on_emergency() {
     assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"emergency frequency"));
 }
 
-/// TX-12.1: the level name only; 1.25 m shows its cap (while it is still locked for the bench, TX-10, it can't
-/// transmit at all: "No TX", HOME-4.2).
+/// TX-12.1: the level name only, 1.25 m too (TX-9: no cap).
 #[test]
 fn power_level_names() {
     let mut t = ready();
     assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "LOW");
     tune(&mut t, mhz(223) + 50_000);
-    let want = if ferrite_core::txplan::locked_125m(mhz(223) + 50_000) { "No TX" } else { "0.25 W" };
-    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), want);
+    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "LOW");
 }
 
 /// HOME-4.2: where PTT can never transmit (out of the band plan, AM, a receive-only build) the power chip says
@@ -804,32 +802,34 @@ fn no_callsign_fix_is_the_callsign_page() {
     assert_eq!(t.app.screen(), Screen::Home, "back where it was");
 }
 
-/// TX-10.1 (safety): 1.25 m never keys until its 0.25 W ceiling is measured; PTT shows why. Receive is unaffected.
+/// TX-9, TX-10.4, TX-10.5, TX-3 (decision 224: as stock): 1.25 m keys at the slot's level like any band; 243.0
+/// MHz (Extend TX) takes the emergency double PTT; 6 m keys in the US, CB only with Extend TX (TX-4, TX-41).
 #[test]
-fn unmeasured_125m_refuses() {
+fn band_125m_and_hf_key_as_stock() {
     let mut t = ready();
+    t.app.slots[0].cfg.power = 2;
     tune(&mut t, mhz(223) + 50_000);
+    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "HIGH", "the level, no cap");
     t.cmds();
     ptt(&mut t, true);
-    assert_eq!(refused(&t), Some(Refusal::Unmeasured125));
-    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "never keyed");
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)), "{:?}", t.app.screen());
+    let c = t.cmds();
+    assert!(c.contains(&RadioCmd::Transmit { slot: 0, on: true }));
     ptt(&mut t, false);
-    // An automatic transmission is refused there too.
-    assert!(!crate::screens::transmit::auto_tx(&mut t.app, 0, b"Beacon"));
-    // 243.0 MHz with Extend TX: the same uncapped 200-300 MHz path, refused before the emergency prompt (M3).
     t.hold(Key::Exit);
+    // 6 m in the US: allowed without Extend TX; CB refused without it.
+    tune(&mut t, mhz(52) + 52_500);
+    assert_eq!(crate::screens::transmit::refusal(&t.app, 0), None);
+    tune(&mut t, mhz(27) + 18_500);
+    assert_eq!(crate::screens::transmit::refusal(&t.app, 0), Some(Refusal::OutOfBand));
+    // Extend TX: CB opens; 243.0 MHz prompts for the second PTT.
     t.app.set_region(Some(Region::Us), true);
+    assert_eq!(crate::screens::transmit::refusal(&t.app, 0), None, "CB with Extend TX, as stock");
     tune(&mut t, mhz(243));
     t.cmds();
     ptt(&mut t, true);
-    assert_eq!(refused(&t), Some(Refusal::Unmeasured125));
-    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "never keyed");
-    ptt(&mut t, false);
-    // 2 m still transmits.
-    t.hold(Key::Exit);
-    tune(&mut t, mhz(146) + 52_000);
-    ptt(&mut t, true);
-    assert!(matches!(t.app.screen(), Screen::Transmit(_)));
+    assert!(matches!(t.app.screen(), Screen::Emergency(_)), "{:?}", t.app.screen());
+    assert!(!t.cmds().iter().any(|c| matches!(c, RadioCmd::Transmit { on: true, .. })), "the first PTT only prompts");
     ptt(&mut t, false);
 }
 
@@ -1081,13 +1081,12 @@ fn split_tx() {
     // RX retune: TX stays.
     tune(&mut t, 44_610_000);
     assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 0), 14_652_000);
-    // TX goes by its own band: 2 m is allowed in the US with no 1.25 m cap.
+    // TX goes by its own band: 2 m is allowed in the US.
     assert_eq!(super::super::screens::transmit::refusal(&t.app, 0), None);
-    assert!(!t.app.capped(0));
-    // A split TX on 1.25 m (223.5) is capped even though RX is on 2 m.
+    // A split TX on 1.25 m (223.5) with RX on 2 m.
     tune(&mut t, 14_652_000);
     t.app.slots[0].cfg.offset = 22_350_000;
-    assert!(t.app.capped(0), "the cap follows the TX band");
+    assert_eq!(super::super::screens::transmit::refusal(&t.app, 0), None, "1.25 m transmits (TX-10.4)");
     // Reverse: transmit on RX, listen on the split TX.
     t.app.slots[0].cfg.reverse = true;
     assert_eq!(super::super::screens::transmit::tx_freq(&t.app, 0), 14_652_000);

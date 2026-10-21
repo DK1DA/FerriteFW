@@ -286,12 +286,12 @@ fn monitor_on_the_card_only() {
     assert!(mon.iter().all(|t| t.y0 >= 20), "MON not in the bar");
 }
 
-/// 1.25 m is capped: its power shows 0.25 W and the knob can't raise it (TX-9, its display).
+/// 1.25 m's power is chosen like any band's: the knob raises it to High (TX-9).
 #[test]
-fn power_capped_on_125m() {
+fn power_levels_on_125m() {
     let mut r = Radio::new();
-    r.run("type 2235; press OK; wait 300ms; press OK; expect text \"TX power 0.25 W\"; press DOWN; knob 2");
-    r.expect_text("TX power 0.25 W");
+    r.run("type 2235; press OK; wait 300ms; press OK; expect text \"TX power Low\"; press DOWN; knob 2");
+    r.expect_text("TX power High");
 }
 
 /// CW ID (0 8 7 2): off, every 10 min or on unkey; the choice and the callsign go to the Radio task; with no

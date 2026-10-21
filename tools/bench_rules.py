@@ -17,7 +17,6 @@ No numpy here: record_results.py imports it.
 RULE_TAGS = {
     # session extras: the refusals, the keepalive, the timeout, the reboot (LINK-20.2: every check, these three of it)
     "refusal_band_plan": {"TX-1.1": "all", "SAFE-12.1": "all", "LINK-20.2": "part"},
-    "refusal_125m": {"TX-10.1": "all", "SAFE-12.2": "all", "LINK-20.2": "part"},
     "refusal_emergency": {"TX-35.1": "all", "LINK-20.9": "part"},  # LINK-20.9 also wants the toast
     "keepalive_cut": {"LINK-20.4": "all", "TX-47.3": "all", "SAFE-14.6": "all"},
     "tx_timeout": {"TX-30.3": "all", "SAFE-17.1": "all", "LINK-20.7": "part"},  # LINK-20.7: the timeout of its stops
@@ -33,7 +32,6 @@ RULE_TAGS = {
     "dcs_polarity": {"TONE-20.1": "all"},
     # the sweeps (bench.py --sweep): refusals-wide, ctcss, dcs, endtones, sublevel, afsk-level
     "refusal_wide_band_plan": {"TX-1.1": "all", "SAFE-12.1": "all", "LINK-20.2": "part"},
-    "refusal_wide_125m": {"TX-10.1": "all", "SAFE-12.2": "all", "LINK-20.2": "part"},
     "refusal_wide_emergency": {"TX-35.1": "all", "LINK-20.9": "part"},  # LINK-20.9 also wants the toast
     "ctcss_freq": {"TONE-1.1": "all"},  # all 50 tones within 0.2 Hz (the entry's figure)
     "ctcss_level": {"TONE-1.2": "part"},  # one deviation for all 50; the calibration byte isn't read back
@@ -67,10 +65,9 @@ RULE_TAGS = {
     "txb_txtest_armed_and_used": {"TERM-33.1": "part"},  # off after a restart not run
     "txb_txtest_filters": {"TERM-33.9": "all", "TERM-33.12": "all"},
     "txb_txtest_until_release": {"TERM-33.7": "part", "LINK-20.13": "all"},  # 4 s key-ups, not 10 s (duty)
-    "txb_refusals_hf": {"TX-4": "part"},  # 28 MHz's allowed side not keyed (not an approved frequency)
+    "txb_refusals_hf": {"TX-4": "part"},  # the bands' allowed side not keyed (not an approved frequency)
     "txb_refusal_640": {"TX-5": "all"},
     "txb_refusal_band_edge": {"TX-6": "part"},  # the 144 MHz edge, simplex and shifted; reverse and trims not
-    "txb_refusal_125m_extend": {"SAFE-12.4": "all"},
     "txb_refusal_emergency_toast": {"LINK-20.9": "all"},
     "txb_relay_still": {"WATCH-12": "part"},  # (2) only: no relay change while keyed or in the unkey wait
     "txb_battery_save_pins": {"TX-29": "part"},  # the pins while keyed; the chips' sleep and the unkey wait not

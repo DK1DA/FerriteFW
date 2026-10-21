@@ -10,7 +10,7 @@ use crate::chan::{Channel, ChannelStore, Name, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIO
 use crate::data::{Op, Pos, RangePreset, ZoneCfg};
 use crate::screens::groups::{self, SUBS};
 use crate::screens::tones::{CTCSS_MAX, CTCSS_MIN};
-use crate::slot::{band_of, BAND_125M, DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
+use crate::slot::{DCS_FLAG, DCS_INV, DEFAULT_CFG, MODES, SLOT_MODES, SQ_GLOBAL, STEPS, STEP_12K5};
 use crate::App;
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::msg::Device;
@@ -756,9 +756,6 @@ pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
     if !(mhz(64) as i64..mhz(1000) as i64).contains(&tx) {
         return Err(msg!("offset: TX outside 64 to 1000 MHz")); // never TX above 1000
     }
-    if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) && c.cfg.power != 0 { // the cap goes by the TX band
-        return Err(msg!("power: fixed at 0.25 W on 1.25 m; use power=low"));
-    }
     Ok(())
 }
 
@@ -836,9 +833,6 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                     return Err(msg!("ch: one field at a time"));
                 }
                 return Ok(Done::Said(save_pos(app, st, c, p)));
-            }
-            if band_of(c.rx) == Some(BAND_125M) && same(key, b"power") {
-                return Err(msg!("power: fixed at 0.25 W on 1.25 m"));
             }
             field(&mut c, key, v, st)?;
             if t.next()?.is_some() {

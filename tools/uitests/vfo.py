@@ -197,22 +197,21 @@ def hf_starts_on_low(t):
     tune(t)
 
 
-@test("TX-9", "CAL-16", "MENU-14", "LINK-33", pages=("Quick",))
-def power_capped_on_125m(t):
-    """1.25 m: the card shows 0.25 W, quick settings' TX power is greyed with the reason, and `slot A high`
-    (as the link's SLOT) is refused naming it."""
-    t.cmd("slot A vfo 223.5")
-    u = t.home()
-    t.check(u.active["power"] in ("0.25 W", "No TX"), "the card: 0.25 W, or No TX while 1.25 m is locked (TX-10)",
-            u.active["power"])
+@test("TX-9", "LINK-33", pages=("Quick",))
+def power_levels_on_125m(t):
+    """1.25 m: power is set like any band's, as stock (no cap since Oct 21, 2026): quick settings' TX power isn't
+    greyed, and `slot A high` (as the link's SLOT) goes in; the card shows HIGH, or No TX where the region has no
+    1.25 m (HOME-4.2)."""
+    t.cmd("slot A vfo 223.5 low")
     u = t.keys("MENU")
     p = u.row("TX power")
-    t.check(p["grey"], "TX power greyed", p)
-    u = t.keys("2")
-    u = t.knob(+1)
-    t.check(u.toast and "0.25 W" in u.toast["head"] + u.toast["body"], "the reason", u.toast)
+    t.check(not p["grey"], "TX power not greyed", p)
+    t.home()
     ok, why = t.cmd_err("slot A high")
-    t.check(not ok and "0.25 W" in why, "`slot A high` refused", why)
+    t.check(ok, "`slot A high` goes in", why)
+    u = t.home()
+    t.check(u.active["power"] in ("HIGH", "No TX"), "the card: HIGH, or No TX outside the region's bands",
+            u.active["power"])
     tune(t)
 
 
@@ -285,7 +284,7 @@ BAND_CASES = [("21.2", "HF", "AM"), ("28.4", "HF", "AM"), ("51.0", "6 m", "FM"),
 @test("VFO-2", "VFO-4", "SETUP-7", pages=("Home", "Quick"))
 def band_follows_the_frequency(t):
     """The band comes from the frequency by a fixed table: tuning A into each band gives its name in the card's
-    header and its default mode (FM, NFM or AM only), and 1.25 m its 0.25 W cap; the same frequency always gives
+    header and its default mode (FM, NFM or AM only), and the power chip its level; the same frequency always gives
     the same band."""
     region = t.get("0 9 4")
     wide = region in ("USA", "Canada", "Americas", "Australia", "New Zealand", "US", "AU", "NZ")
@@ -296,7 +295,7 @@ def band_follows_the_frequency(t):
         t.eq(a["head"], f"VFO · {band}", f"{f} MHz: the band")
         want = mode if mode == "AM" or wide else "FM-N"
         t.eq(a["mode"], want, f"{f} MHz: the band's mode ({region})")
-        want = "0.25 W" if band == "1.25 m" else "LOW"
+        want = "LOW"
         t.check(a["power"] in (want, "No TX"), f"{f} MHz: the power chip ({want}, or No TX where it can't transmit)",
                 a["power"])
     t.note(f"region {region}")

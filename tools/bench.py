@@ -57,7 +57,7 @@ Extra checks: --refusals (remote PTT refused out of band, with the expected reas
 
 Sweeps (--sweep A,B or all; alone they run no suite): many values of one thing, one short key-up each on the sweep
 frequency (config sweeps.mhz, 145.495; --sweep-mhz 446.475), measured on the SDR as it goes:
-  refusals-wide  remote KEY on 43 frequencies at the band plan's edges and gaps (TX-1, TX-10, TX-35): refused with
+  refusals-wide  remote KEY on 43 frequencies at the band plan's edges and gaps (TX-1, TX-35): refused with
                  the reason the radio's region gives (ones it allows aren't probed), no carrier; never keyed (a key-up
                  the radio accepts is unkeyed at once and fails); Extend TX must be off
   ctcss          every CTCSS tone of slot.rs and typed 60.0/260.0 Hz: frequency within 0.2 Hz, one deviation
@@ -145,7 +145,6 @@ DEFAULTS = {
     "aliases": {"wide": "vhf-wide", "nfm": "vhf-nfm", "uhf": "uhf-wide"},  # --load: older capture names
     "refusals": [
         {"mhz": 160.000, "reason": "outside the band plan"},
-        {"mhz": 222.000, "reason": "1.25 m"},
         {"mhz": 243.000, "reason": "emergency"},
     ],
     "timeout_min_s": 90,
@@ -177,7 +176,7 @@ DEFAULTS = {
         "ctcss": {"spot": 4, "key_s": 2.0, "typed": [60.0, 260.0], "tol_hz": 0.2, "spread": 0.05},
         # every DCS code of slot.rs, N then I, then typed ones (TONE-15)
         "dcs": {"spot": 4, "key_s": 2.0, "typed": ["D000N", "D777I"], "min_windows": 2, "spread": 0.10},
-        # remote KEY on each, expected refused with the reason the band plan (TX-1, TX-10, TX-35) gives for the
+        # remote KEY on each, expected refused with the reason the band plan (TX-1, TX-35) gives for the
         # radio's region; ones the region allows are not probed. Never keys: the radio refuses (or is unkeyed at once).
         "refusals-wide": {"lead_s": 0.6, "tail_s": 0.8, "freqs": [
             70.0, 121.475, 121.5, 121.525, 121.55, 136.0, 143.995, 146.0, 148.0, 150.0, 160.0, 174.0, 199.995, 200.0,
@@ -871,9 +870,10 @@ def tone_word(t):
     return int(round(float(t) * 10))
 
 
-# The band plan as ferrite-core's txplan.rs (TX-1's table, the HF windows, the emergency frequencies) and the order
-# a remote KEY meets the checks (remote.rs: emergency first; then transmit.rs: band plan, then the 1.25 m lock).
-TX_HF = [(24.89, 24.99), (28.0, 29.7)]
+# The band plan as ferrite-core's txplan.rs (TX-1's table, the 18-64 MHz bands of TX-4, the emergency frequencies)
+# and the order a remote KEY meets the checks (remote.rs: emergency first; then transmit.rs: the band plan). 1.25 m
+# transmits like any band since Oct 21, 2026 (TX-9, TX-10: as stock).
+TX_HF = [(18.068, 18.168), (21.0, 21.45), (24.89, 24.99), (28.0, 29.7)]
 TX_BANDS = {"US": [(144, 148), (222, 225), (420, 450)], "CA": [(144, 148), (219, 225), (430, 450)],
             "AU": [(144, 148), (420, 450)], "NZ": [(144, 148), (430, 440)], "ITU": [(144, 146), (430, 440)]}
 REGIONS = {0: ("no region set", "ITU"), 1: ("the US", "US"), 2: ("Canada", "CA"), 3: ("the UK", "ITU"),
@@ -886,8 +886,8 @@ def region_of(byte):
 
 
 def tx_expect(mhz, region_byte):
-    """Why a remote KEY on `mhz` is refused with Extend TX off: "emergency", "band plan" or "1.25 m" (words of the
-    radio's reasons), or None where it transmits."""
+    """Why a remote KEY on `mhz` is refused with Extend TX off: "emergency" or "band plan" (words of the radio's
+    reasons), or None where it transmits."""
     f = mhz10(mhz)
 
     def r(lo, hi):
@@ -896,10 +896,10 @@ def tx_expect(mhz, region_byte):
     m = 2500  # ±25 kHz, inclusive (txplan::emergency)
     if mhz10(406.0) - m <= f <= mhz10(406.1) + m or abs(f - mhz10(243.0)) <= m or abs(f - mhz10(121.5)) <= m:
         return "emergency"
-    if not any(r(lo, hi) for lo, hi in TX_BANDS[region_of(region_byte)[1]] + TX_HF):
+    plan = region_of(region_byte)[1]
+    six = (50, 54) if plan in ("US", "CA", "AU", "NZ") or region_byte == 7 else (50, 52)  # 6 m: 50-54 in Japan too
+    if not any(r(lo, hi) for lo, hi in TX_BANDS[plan] + TX_HF + [six]):
         return "band plan"
-    if r(200, 300):
-        return "1.25 m"
     return None
 
 
@@ -1732,8 +1732,7 @@ def sweep_tests(ex, add, cfg=None):
             return _chk(f"{it['label']}: {what}", ok, got)
 
         if name == "refusals-wide":
-            for word, test in (("band plan", "refusal_wide_band_plan"), ("1.25 m", "refusal_wide_125m"),
-                               ("emergency", "refusal_wide_emergency")):
+            for word, test in (("band plan", "refusal_wide_band_plan"), ("emergency", "refusal_wide_emergency")):
                 its = [x for x in items if x.get("expect") == word]
                 if not its:
                     continue
@@ -1860,7 +1859,6 @@ def rule_tests(session, runs):
     ex = session.get("extras") or {}
     refusal_rules = [  # (expected reason word, test name)
         ("band plan", "refusal_band_plan"),
-        ("1.25 m", "refusal_125m"),
         ("emergency", "refusal_emergency"),
     ]
     for r in ex.get("refusals") or []:
@@ -2535,7 +2533,7 @@ class FakeRadio:
         if any(abs(f - x) < 1e-6 for x in self.leaky):
             return None
         why = tx_expect(f, self.region)
-        return {"emergency": "invalid: emergency frequency: only PTT on the radio, twice", "1.25 m": "invalid: 1.25 m locked",
+        return {"emergency": "invalid: emergency frequency: only PTT on the radio, twice",
                 "band plan": "invalid: outside the band plan", None: None}[why]
 
     def key_on(self, slot_code):
@@ -3277,7 +3275,9 @@ def selftest_duty(check):
     ctcss, dcs = tone_lists()
     check("tone lists from slot.rs: 50 CTCSS, 104 DCS (as sdrsuite's)", len(ctcss) == 50 and len(dcs) == 104
           and dcs == sdrsuite.DCS_CODES and ctcss[0] == 67.0 and ctcss[-1] == 254.1, f"{len(ctcss)}, {len(dcs)}")
-    cases = [(146.52, 1, None), (222.0, 1, "1.25 m"), (219.5, 1, "band plan"), (219.5, 2, "1.25 m"),
+    cases = [(146.52, 1, None), (222.0, 1, None), (219.5, 1, "band plan"), (219.5, 2, None), (222.0, 3, "band plan"),
+             (51.0, 3, None), (53.0, 3, "band plan"), (53.0, 1, None), (53.0, 7, None), (27.185, 1, "band plan"),
+             (21.2, 4, None), (18.1, 1, None),
              (243.025, 1, "emergency"), (243.03, 1, "band plan"), (406.125, 1, "emergency"), (146.0, 3, "band plan"),
              (425.0, 2, "band plan"), (425.0, 1, None), (121.5, 0, "emergency"), (28.4, 1, None)]
     bad = [(f, r, tx_expect(f, r), w) for f, r, w in cases if tx_expect(f, r) != w]
@@ -3310,7 +3310,7 @@ def selftest_sweeps(cfg, args, check, tmp):
           f"{len(probed)} probed of {len(rw['items'])}")
     res = json.load(open(os.path.join(sess, "bench", "results.json")))
     rules = res["rules"]
-    want = {"TX-1.1": ("pass", "all"), "TX-10.1": ("pass", "all"), "TX-35.1": ("pass", "all"),
+    want = {"TX-1.1": ("pass", "all"), "TX-35.1": ("pass", "all"),
             "TONE-1.1": ("pass", "part"), "TONE-20.1": ("pass", "part"), "TONE-20.2": ("pass", "part"),
             "TONE-19.4": ("pass", "part"), "TONE-10.4": ("pass", "part"), "TONE-16": ("pass", "part"),
             "TERM-33.6": ("pass", "part"), "TONE-15": ("pass", "part")}
@@ -3484,7 +3484,7 @@ def selftest(a):
     check("suite run: all seven markers measured", j["metrics"].get("markers_found") == 7, j["metrics"].get("markers_found"))
     check("suite run: DCS 023 N decoded", j["metrics"].get("dcs.code") == "023 N", j["metrics"].get("dcs.code"))
     check("suite run: 4FSK no errors", j["metrics"].get("fsk4.errors") == 0, j["metrics"].get("fsk4.errors"))
-    check("refusals: all three refused with their reasons, no carrier", all(x["ok"] for x in extras["refusals"]),
+    check("refusals: both refused with their reasons, no carrier", all(x["ok"] for x in extras["refusals"]),
           [x.get("refused") for x in extras["refusals"]])
     check("keepalive: dropped within 2.5 s", extras["keepalive"]["ok"], extras["keepalive"]["text"])
     check("timeout: carrier ~30 s", extras["timeout"]["ok"], extras["timeout"]["text"])
@@ -3598,7 +3598,7 @@ def main():
     ap.add_argument("--slot", help="the slot to use (A)")
     ap.add_argument("--runs", help="comma list of run names (default: all in the config)")
     ap.add_argument("--results", help="results root")
-    ap.add_argument("--refusals", action="store_true", help="remote key refused at 160, 222, 243 MHz; no RF")
+    ap.add_argument("--refusals", action="store_true", help="remote key refused at 160, 243 MHz; no RF")
     ap.add_argument("--keepalive", action="store_true", help="keepalives stopped while keyed: carrier drop <= 2.5 s")
     ap.add_argument("--timeout", action="store_true", help="TX timeout 30 s, keyed up to 36 s: carrier ~30 s")
     ap.add_argument("--exhaustive", action="store_true", help="with --sweep: every item of the ctcss and dcs sweeps "
