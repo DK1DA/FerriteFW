@@ -1271,9 +1271,10 @@ def rx_both_kept(r):
     r.check(ok, "C on 28.400 MHz (no key-up)", out.strip()[:60])
     r.activate("C")
     ok, out = r.cmd_err("rx both")
-    if ok:
+    refused = not ok or out.strip().startswith("refused")  # the bench command answers its refusal as text
+    if not refused:
         r.cmd_err("rx one")
-    r.check(not ok, "`rx both` refused with an HF slot active", out.strip()[:80])
+    r.check(refused and "HF slot" in out, "`rx both` refused with an HF slot active", out.strip()[:80])
     return f"rx both {p0} -> after unkey {p1}; HF: {out.strip()[:40]}"
 
 
@@ -1287,6 +1288,15 @@ def broadcast_muted_keyed(r):
     u = r.ui()
     b = next((c for c in u["cards"] if c.get("slot") == "B"), {})
     r.need(b.get("kind") == "broadcast", f"B on 100.1 MHz isn't a broadcast card ({b})")
+    # the card shows before the SI4732 has powered up: wait until it answers a property read
+    end = r.now() + 6.0
+    while True:
+        try:
+            r.si_prop(0x4001)
+            break
+        except BenchError:
+            r.need(r.now() < end, "the SI4732 didn't power up within 6 s of the broadcast card")
+            r.sleep(0.5)
 
     def muted():
         return (r.si_prop(0x4001) or 0) & 3 == 3 or r.si_prop(0x4000) == 0
@@ -1312,7 +1322,10 @@ def trim_follows(r):
     r.setup()
     got = {}
     for v in ("0 ppm", "+2 ppm"):
-        r.set(TRIM, v)
+        try:
+            r.set(TRIM, v)
+        except TermError as e:
+            r.need(False, f"crystal trim isn't settable yet ({str(e)[:70]})")
         with r.capture(VHF, 4.5, f"trim {v}", key_s=2.5) as cap:
             with r.keyup(2.5, f"trim {v}") as k:
                 r.sleep(0.6)

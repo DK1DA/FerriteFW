@@ -259,6 +259,10 @@ pub async fn task() {
         if let Some(c) = crate::chan::GPS_SEND.try_take() {
             query = term_send(&mut bench, &mut set, c, powered, keyed, now);
         }
+        // TERM-36.4: a bench command taken just now holds the module from here on, this pass included (the NMEA set
+        // below used to go right after a quiet standby's NMEA off).
+        #[cfg(feature = "bench")]
+        let held = held || bench.holds();
         // A quiet standby's CAS12 and its NMEA on at the latest (TERM-36); not while keyed (PB10 low).
         #[cfg(feature = "bench")]
         if powered && !keyed {
