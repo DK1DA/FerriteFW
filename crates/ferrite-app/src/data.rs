@@ -109,7 +109,7 @@ pub struct Station {
     pub msg_min: Option<u16>,
 }
 
-/// A message's state (APRS-6, APRS-13).
+/// A message's state (APRS-6, APRS-13, APRS-34).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MsgState {
     Unread,
@@ -119,6 +119,8 @@ pub enum MsgState {
     /// Retrying, with the count so far.
     Retrying(u8),
     Failed,
+    /// The recipient rejected it (APRS-34): ended at once, like an ack.
+    Rejected,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]

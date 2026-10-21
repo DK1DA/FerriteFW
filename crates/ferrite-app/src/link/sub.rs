@@ -75,6 +75,7 @@ fn state_byte(s: MsgState) -> (u8, u8) {
         MsgState::Acked => (3, 0),
         MsgState::Retrying(n) => (4, n),
         MsgState::Failed => (5, 0),
+        MsgState::Rejected => (6, 0), // APRS-34: a new value, so older readers see an unknown state
     }
 }
 
@@ -319,7 +320,8 @@ fn station_len(s: &Station) -> usize {
     1 + 1 + s.call.len() + 1 + 4 + 2 + if s.pos.is_some() { 8 } else { 0 } + if s.course.is_some() { 4 } else { 0 } + if s.alt_m.is_some() { 4 } else { 0 } + 1 + s.via.len() + 1 + s.comment.len()
 }
 
-/// A message (LINK-44): flags (1 in, to us), state (0 unread, 1 read, 2 pending, 3 acked, 4 retrying, 5 failed),
+/// A message (LINK-44): flags (1 in, to us), state (0 unread, 1 read, 2 pending, 3 acked, 4 retrying, 5 failed,
+/// 6 rejected: APRS-34),
 /// tries so far (retrying), age (u32 s), peer (length, text: from, or to), text (length, text).
 pub(super) fn message(o: &mut Out, m: &Message) {
     let (s, tries) = state_byte(m.state);

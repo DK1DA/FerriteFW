@@ -80,7 +80,7 @@ pub enum Job {
     /// An event for the log ([`logs::event_job`]), stamped when it is written.
     Log([u8; logs::EVENT_JOB]),
     /// An APRS message: one for us (unread), or ours (pending).
-    Msg { inbound: bool, peer: Buf<10>, text: Buf<67>, ago_s: u32 },
+    Msg { inbound: bool, peer: Buf<10>, text: Buf<67>, id: Buf<5>, ago_s: u32 },
     /// Our message to `peer` with `text` moved on (tried again, acked, failed).
     MsgState { peer: Buf<10>, text: Buf<67>, state: MsgState },
     /// Event (`log`) or message `seq` read.
@@ -100,6 +100,8 @@ const APRS_MORE: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
 const APRS_PATH: usize = APRS_MORE + 4;
 const APRS_PAYLOAD: usize = APRS_PATH + ferrite_app::aprs::CUSTOM_LEN;
 const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
+/// APRS-32: the stored messages [`FlashStore::message_heard`] looks through, newest first.
+pub const HEARD_CHECK: u16 = 16;
 /// The store's clock starts here when nothing is stored and no clock is set: about UTC when Ferrite was written
 /// (Sep 2026), so a GPS fix later moves it by a plausible amount rather than decades.
 const TIME0: u32 = 1_790_000_000;
@@ -390,8 +392,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 let mut r = logs::event_rec(&j, self.now_s());
                 self.events.append(&self.f, &mut r).await.is_ok()
             }
-            Job::Msg { inbound, peer, text, ago_s } => {
-                let mut r = logs::msg_rec(inbound, &peer, &text, self.now_s().saturating_sub(ago_s));
+            Job::Msg { inbound, peer, text, id, ago_s } => {
+                let mut r = logs::msg_rec(inbound, &peer, &text, &id, self.now_s().saturating_sub(ago_s));
                 self.msgs.append(&self.f, &mut r).await.is_ok()
             }
             Job::MsgState { peer, text, state } => self.msg_state_async(peer, text, state).await.is_ok(),
@@ -959,7 +961,21 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// An APRS message: for us (`inbound`, unread) or ours (pending, the APRS task tries it); `ago_s` dates it
     /// back from now (the simulator's sample).
     pub fn message_in(&self, inbound: bool, peer: &[u8], text: &[u8], ago_s: u32) -> bool {
-        self.ok() && self.submit(Job::Msg { inbound, peer: Buf::from(peer), text: Buf::from(text), ago_s })
+        self.ok() && self.submit(Job::Msg { inbound, peer: Buf::from(peer), text: Buf::from(text), id: Buf::new(), ago_s })
+    }
+
+    /// A message to us with its sender's message number `id` (empty: none), kept for APRS-32's check after a power
+    /// cycle ([`FlashStore::message_heard`]).
+    pub fn message_to_us(&self, peer: &[u8], text: &[u8], id: &[u8]) -> bool {
+        self.ok() && self.submit(Job::Msg { inbound: true, peer: Buf::from(peer), text: Buf::from(text), id: Buf::from(id), ago_s: 0 })
+    }
+
+    /// APRS-32: the message to us from `peer` numbered `id` with `text` is among the newest [`HEARD_CHECK`] stored
+    /// (a sender's retry heard again after a power cycle, which the APRS task's RAM table has forgotten). False
+    /// without a number: those are told apart in RAM only.
+    pub fn message_heard(&self, peer: &[u8], id: &[u8], text: &[u8]) -> bool {
+        let (peer, id, text) = (Buf::from(peer), Buf::from(id), Buf::from(text));
+        !id.is_empty() && (0..self.msgs.len().min(HEARD_CHECK)).any(|i| self.msgs.read(&self.f, i).is_some_and(|b| logs::msg_same(&b, &peer, &id, &text)))
     }
 
     /// A waypoint (the simulator's sample; the link's `WAYPOINT` later, GPS-13).

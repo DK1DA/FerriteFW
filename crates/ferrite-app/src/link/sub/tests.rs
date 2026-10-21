@@ -315,3 +315,11 @@ fn live_view_events() {
     }
     assert_eq!(scr.0, compacted(&pc));
 }
+
+/// APRS-34, LINK-44: a rejected message reads as state 6, a value of its own (0-5 keep their meaning, so an
+/// older reader shows it as an unknown state rather than another one).
+#[test]
+fn rejected_state_byte() {
+    assert_eq!(state_byte(MsgState::Rejected), (6, 0));
+    assert_eq!(state_byte(MsgState::Failed), (5, 0));
+}

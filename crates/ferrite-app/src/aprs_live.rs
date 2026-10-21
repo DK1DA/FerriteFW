@@ -2,16 +2,19 @@
 //! for the modulator out. The heard list (APRS-3, APRS-4: RAM only), messages to us acked (APRS-6), ours tried
 //! on APRS-13's schedule until an ack, beacons by the beacon mode (APRS-24) and after voice (APRS-27), the
 //! fill-in digipeater (APRS-12, APRS-26: off unless asked), the path (0 5 6 1), APRS-9's 30 s spacing and
-//! APRS-20's wait for the band relay. Pure logic: the firmware's UI
-//! task feeds it frames and ticks it once a second (the store and the App are there); the host tests run the
-//! same code on recorded audio. The simulators keep their made-up traffic (`sample::aprs`).
+//! APRS-20's wait for the band relay; a message heard again stored once (APRS-32), queries answered (APRS-33,
+//! APRS-35), rejections (APRS-34). Pure logic: the firmware's UI task feeds it frames and ticks it once a second
+//! (the store and the App are there); the host tests run the same code on recorded audio. The simulators keep
+//! their made-up traffic (`sample::aprs`).
 //!
 //! Frames are the AX.25 bytes without the FCS, as `uafsk`'s demodulator gives them and its modulator takes them.
 
 use crate::aprs::{beacon_due, retry_wait, AprsCfg, LastBeacon, HEARD_MAX, INFO_MAX, TRIES};
 use crate::data::{Beacon, Fix, MsgState, Pos, Station, Sym};
 use core::cell::Cell;
+use ferrite_core::liveview::{fnv, FNV0};
 use ferrite_ui::text::Buf;
+use ufmt::uwrite;
 /// The APRS library, for the firmware's KISS TNC (chapter 26).
 pub use uaprs;
 use uaprs::ax25::{Address, Frame};
@@ -26,8 +29,18 @@ pub const FRAME_MAX: usize = 328;
 const OUT: usize = 4;
 const ACKS: usize = 4;
 const DUPES: usize = 16;
-/// The messages to us remembered (sender, number), so a repeat is acked again without a second inbox entry.
-const SEEN: usize = 4;
+/// APRS-32: the messages to us remembered, 8 bytes each (a key of the sender, the number and the text, and when
+/// first heard), so a repeat is acked again without a second inbox entry or ring; 24 entries, 192 bytes.
+const SEEN: usize = 24;
+/// APRS-32: a message without a number heard again within this long is the same one (a second digipeater's copy).
+const SEEN_PLAIN_S: u32 = 30;
+/// APRS-35: general queries (`?APRS?`) answered at most this often, after a random wait of
+/// [`GENERAL_WAIT_S`] plus up to [`GENERAL_SPREAD_S`]; an answer not sent within [`QUERY_TTL_S`] of its time is
+/// dropped.
+const GENERAL_GAP_S: u32 = 300;
+const GENERAL_WAIT_S: u32 = 5;
+const GENERAL_SPREAD_S: u32 = 56;
+const QUERY_TTL_S: u32 = 120;
 /// APRS-9: automatic transmissions at least this far apart; a message's first try (PTT's or Send's), acks,
 /// digipeats and KISS frames are exempt.
 const AUTO_GAP_S: u32 = 30;
@@ -65,6 +78,32 @@ struct Out {
     next_s: u32,
 }
 
+/// APRS-33: what a directed query gets.
+#[derive(Clone, Copy)]
+enum Answer {
+    /// Our position report (`?APRSP`, `?APRS?`).
+    Position,
+    /// Our status report (`?APRSS`).
+    Status,
+    /// A message back, without a number (`?APRSD`, `?APRSH`, `?APRST`, `?PING?`, `?VER`).
+    Text(Buf<67>),
+}
+
+#[derive(Clone, Copy)]
+struct Query {
+    to: Buf<10>,
+    answer: Answer,
+    at_s: u32,
+}
+
+/// APRS-35: a general query (`?APRS?`) to answer at `due_s`, with its footprint (centre in millionths of a
+/// degree, radius in metres) if it gave one.
+#[derive(Clone, Copy)]
+struct General {
+    due_s: u32,
+    foot: Option<((i32, i32), u32)>,
+}
+
 #[derive(Clone, Copy)]
 struct AckDue {
     peer: Buf<10>,
@@ -76,7 +115,9 @@ struct AckDue {
 pub struct Rx {
     /// A message to us (APRS-6): notify, save, log.
     pub inbound: Option<(Buf<10>, Buf<67>)>,
-    /// One of ours moved on: acked or rejected (failed), for the store.
+    /// Its message number (empty: none), for the store's check after a power cycle (APRS-32).
+    pub inbound_id: Buf<5>,
+    /// One of ours moved on: acked or rejected (APRS-34), for the store.
     pub state: Option<(Buf<10>, Buf<67>, MsgState)>,
     /// The heard list changed.
     pub changed: bool,
@@ -151,7 +192,7 @@ pub struct Tick {
     pub changed: bool,
 }
 
-/// The APRS task's state: about 3.3 KB on the radio (4 KB on a 64-bit PC, where text lengths are 8 bytes), most
+/// The APRS task's state: about 3.5 KB on the radio (4.3 KB on a 64-bit PC, where text lengths are 8 bytes), most
 /// of it the heard list ([`HEARD_MAX`] stations of about 110 bytes, each with its 40-character comment for
 /// APRS-23) and the digipeater's waiting frame.
 pub struct AprsLive {
@@ -159,7 +200,12 @@ pub struct AprsLive {
     out: [Cell<Option<Out>>; OUT],
     next_id: Cell<u8>,
     acks: [Cell<Option<AckDue>>; ACKS],
-    seen: [Cell<Option<(Buf<10>, Buf<5>)>>; SEEN],
+    seen: [Cell<(u32, u32)>; SEEN],
+    seen_at: Cell<u8>,
+    /// APRS-33: a directed query's answer waiting, a general query's, and when the last general one went.
+    query: Cell<Option<Query>>,
+    general: Cell<Option<General>>,
+    last_general: Cell<Option<u32>>,
     dupes: [Cell<(u16, u32)>; DUPES],
     dupe_at: Cell<u8>,
     /// A frame to digipeat, waiting for its turn, and the second it may go (0 5 8 3's wait).
@@ -191,7 +237,11 @@ impl AprsLive {
             out: [const { Cell::new(None) }; OUT],
             next_id: Cell::new(1),
             acks: [const { Cell::new(None) }; ACKS],
-            seen: [const { Cell::new(None) }; SEEN],
+            seen: [const { Cell::new((0, 0)) }; SEEN],
+            seen_at: Cell::new(0),
+            query: Cell::new(None),
+            general: Cell::new(None),
+            last_general: Cell::new(None),
             dupes: [const { Cell::new((0, 0)) }; DUPES],
             dupe_at: Cell::new(0),
             digi: Cell::new(None),
@@ -245,6 +295,8 @@ impl AprsLive {
         self.clear_heard();
         self.out.iter().for_each(|o| o.set(None));
         self.acks.iter().for_each(|a| a.set(None));
+        self.query.set(None);
+        self.general.set(None);
         self.beacon_last.set(None);
         self.after_voice.set(false);
         self.fix_wait.set(None);
@@ -358,7 +410,14 @@ impl AprsLive {
                 self.hear(h);
                 rx.changed = true;
                 if my.is_some_and(|me| Address::from_text(m.addressee).is_some_and(|a| a.same(&me))) {
-                    self.to_us(&call, m, &mut rx);
+                    self.to_us(&call, m, &f, dupe, now_s, &mut rx);
+                }
+            }
+            Ok(Packet::Other { kind: b'?', data }) => {
+                self.hear(h);
+                rx.changed = true;
+                if my.is_some() && !dupe {
+                    self.general_query(data, &f, now_s);
                 }
             }
             Ok(_) | Err(_) => {
@@ -369,26 +428,28 @@ impl AprsLive {
         rx
     }
 
-    fn to_us(&self, from: &Buf<10>, m: parse::Message, rx: &mut Rx) {
+    fn to_us(&self, from: &Buf<10>, m: parse::Message, f: &Frame, dupe: bool, now_s: u32, rx: &mut Rx) {
         match m.kind {
             MessageKind::Message => {
-                let id = m.id.map(Buf::<5>::from);
-                let repeat = id.is_some_and(|i| self.seen.iter().any(|s| s.get() == Some((*from, i))));
-                if let Some(i) = id {
-                    self.owe_ack(from, &i);
-                    if !repeat {
-                        for k in (1..SEEN).rev() {
-                            self.seen[k].set(self.seen[k - 1].get());
-                        }
-                        self.seen[0].set(Some((*from, i)));
-                    }
-                }
-                if !repeat {
-                    rx.inbound = Some((*from, Buf::from(&m.text[..m.text.len().min(67)])));
+                // APRS-6, APRS-32: every copy with a number is acked (its sender retries because it missed ours).
+                if let Some(i) = m.id {
+                    self.owe_ack(from, &Buf::from(i));
                 }
                 // APRS 1.1 reply-ack: it also acknowledges one of ours.
                 if let Some(a) = m.reply_ack {
                     self.acked(from, a, MsgState::Acked, rx);
+                }
+                // APRS-33: a query is answered (once for the copies digipeaters repeat), not kept as a message.
+                if let Some(a) = self.directed(m.text, f) {
+                    if let Some(answer) = a.filter(|_| !dupe && self.query.get().is_none()) {
+                        self.query.set(Some(Query { to: *from, answer, at_s: now_s }));
+                    }
+                    return;
+                }
+                let text = Buf::<67>::from(&m.text[..m.text.len().min(67)]);
+                if !self.seen_before(from, m.id, &text, now_s) {
+                    rx.inbound = Some((*from, text));
+                    rx.inbound_id = Buf::from(m.id.unwrap_or(b""));
                 }
             }
             MessageKind::Ack => {
@@ -396,12 +457,116 @@ impl AprsLive {
                     self.acked(from, a, MsgState::Acked, rx);
                 }
             }
+            // APRS-34: rejected ("rejNN", or "rejNN}AA" from a reply-ack station): ended at once, no more tries.
             MessageKind::Rej => {
                 if let Some(a) = m.id {
-                    self.acked(from, a, MsgState::Failed, rx);
+                    self.acked(from, a, MsgState::Rejected, rx);
                 }
             }
         }
+    }
+
+    /// APRS-32: whether this message to us was heard before: the same sender, number and text (a retry), or
+    /// without a number the same sender and text within [`SEEN_PLAIN_S`]. A new one is remembered, the oldest
+    /// entry making room.
+    fn seen_before(&self, from: &Buf<10>, id: Option<&[u8]>, text: &Buf<67>, now_s: u32) -> bool {
+        let k = fnv(fnv(fnv(fnv(FNV0, from.as_bytes()), &[0]), id.unwrap_or(b"")), &[0]);
+        let mut k = fnv(k, text.as_bytes()) & !1 | id.is_some() as u32;
+        if k >> 1 == 0 {
+            k |= 2; // 0 is an empty entry
+        }
+        let hit = self.seen.iter().any(|c| {
+            let (key, at) = c.get();
+            key == k && (id.is_some() || now_s.wrapping_sub(at) < SEEN_PLAIN_S)
+        });
+        if !hit {
+            let i = self.seen_at.get() as usize;
+            self.seen[i].set((k, now_s));
+            self.seen_at.set(((i + 1) % SEEN) as u8);
+        }
+        hit
+    }
+
+    /// APRS-33: a message to us that is a query: None when it isn't one, Some(None) for one we don't answer
+    /// (`?APRSM`, `?APRSO`, `?WX?`, `?IGATE?`...), else the answer.
+    fn directed(&self, text: &[u8], f: &Frame) -> Option<Option<Answer>> {
+        let t = trim(text);
+        let is = |q: &[u8]| t.eq_ignore_ascii_case(q);
+        let starts = |q: &[u8]| t.len() >= q.len() && t[..q.len()].eq_ignore_ascii_case(q);
+        if t.first() != Some(&b'?') {
+            return None;
+        }
+        let mut b = Buf::<67>::new();
+        Some(Some(if is(b"?APRSP") || is(b"?APRS?") {
+            Answer::Position
+        } else if is(b"?APRSS") {
+            Answer::Status
+        } else if is(b"?APRSD") {
+            b.push(b"Directs=");
+            for h in self.heard.iter().filter_map(|h| h.get()).filter(|h| h.via.is_empty()) {
+                if b.len() + 1 + h.call.len() > 67 {
+                    break;
+                }
+                b.push(b" ");
+                b.push(h.call.as_bytes());
+            }
+            Answer::Text(b)
+        } else if starts(b"?APRSH") {
+            let call = trim(&t[6..]);
+            if call.is_empty() {
+                return Some(None);
+            }
+            let up = |c: &[u8]| -> Buf<10> {
+                let mut u = Buf::<10>::new();
+                c.iter().for_each(|&x| u.push(&[x.to_ascii_uppercase()]));
+                u
+            };
+            let call = up(call);
+            match self.heard.iter().filter_map(|h| h.get()).find(|h| h.call.as_bytes().eq_ignore_ascii_case(call.as_bytes())) {
+                Some(h) => {
+                    let min = self.now_s.get().saturating_sub(h.at_s) / 60;
+                    b.push(h.call.as_bytes());
+                    let _ = uwrite!(b, " heard {}x, last {} min ago", h.times, min);
+                }
+                None => {
+                    b.push(call.as_bytes());
+                    b.push(b" not heard");
+                }
+            }
+            Answer::Text(b)
+        } else if is(b"?APRST") || is(b"?PING?") {
+            trace(f, &mut b);
+            Answer::Text(b)
+        } else if is(b"?VER") || is(b"?VER?") {
+            b.push(b"Ferrite ");
+            b.push(ferrite_core::VERSION.as_bytes());
+            Answer::Text(b)
+        } else if starts(b"?APRS") || is(b"?WX?") || is(b"?IGATE?") {
+            return Some(None);
+        } else {
+            return None;
+        }))
+    }
+
+    /// APRS-35: a general query heard (the information field after its `?`): `APRS?`, optionally with a
+    /// footprint `lat,lon,radius` (degrees, miles); answered with our position after a random wait, at most once
+    /// per [`GENERAL_GAP_S`]. Other general queries (`?WX?`, `?IGATE?`) aren't ours to answer.
+    fn general_query(&self, data: &[u8], f: &Frame, now_s: u32) {
+        let Some(rest) = data.strip_prefix(b"APRS?") else { return };
+        if self.general.get().is_some() || self.last_general.get().is_some_and(|l| now_s.wrapping_sub(l) < GENERAL_GAP_S) {
+            return;
+        }
+        let rest = trim(rest);
+        let foot = if rest.is_empty() {
+            None
+        } else {
+            match footprint(rest) {
+                Some(p) => Some(p),
+                None => return, // a footprint we can't read: not meant for everyone
+            }
+        };
+        let h = fnv(fnv(FNV0, f.src.call()), f.info) ^ now_s;
+        self.general.set(Some(General { due_s: now_s + GENERAL_WAIT_S + h % GENERAL_SPREAD_S, foot }));
     }
 
     fn acked(&self, from: &Buf<10>, id: &[u8], state: MsgState, rx: &mut Rx) {
@@ -470,6 +635,17 @@ impl AprsLive {
     pub fn tick(&self, now_s: u32, send: Sending, relay_ok: bool, me: &[u8], fix: Option<Fix>, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX]) -> Tick {
         self.now_s.set(now_s);
         let mut t = Tick::default();
+        // APRS-33: queries are answered only in APRS mode with automatic beacons on, and not long after they came.
+        if send != Sending::All || !cfg.beacons_on() {
+            self.query.set(None);
+            self.general.set(None);
+        }
+        if self.query.get().is_some_and(|q| now_s.wrapping_sub(q.at_s) > QUERY_TTL_S) {
+            self.query.set(None);
+        }
+        if self.general.get().is_some_and(|g| now_s > g.due_s + QUERY_TTL_S) {
+            self.general.set(None);
+        }
         if send == Sending::Beacons {
             // APRS-29: beacons alone answer nothing: acks owed and a digipeat waiting are dropped.
             self.acks.iter().for_each(|a| a.set(None));
@@ -526,6 +702,14 @@ impl AprsLive {
             if o.tries > 0 && !auto_ok {
                 continue;
             }
+            let id = num(o.id);
+            let Some(n) = uaprs::build::message(o.peer.as_bytes(), o.text.as_bytes(), Some(id.as_bytes()), &mut info) else {
+                // Text APRS can't carry (`|`, `~`, `{`): failed at once rather than five silent tries.
+                c.set(None);
+                push_state(&mut t, (o.peer, o.text, MsgState::Failed));
+                t.changed = true;
+                continue;
+            };
             o.tries += 1;
             o.next_s = now_s + retry_wait(o.tries) as u32;
             c.set(Some(o));
@@ -533,10 +717,30 @@ impl AprsLive {
                 self.last_auto.set(Some(now_s));
                 push_state(&mut t, (o.peer, o.text, MsgState::Retrying(o.tries)));
             }
-            let id = num(o.id);
-            if let Some(n) = uaprs::build::message(o.peer.as_bytes(), o.text.as_bytes(), Some(id.as_bytes()), &mut info) {
-                t.changed = true;
-                return self.framed(my, &info[..n], "Message", cfg, out, t);
+            t.changed = true;
+            return self.framed(my, &info[..n], "Message", cfg, out, t);
+        }
+        // APRS-33: a query's answer, an automatic transmission (APRS-9's spacing).
+        if all && auto_ok {
+            if let Some(q) = self.query.take() {
+                let n = match q.answer {
+                    Answer::Position => fresh(fix, cfg).and_then(|f| position_info(&f, &mut info)),
+                    Answer::Status => status_info(&mut info),
+                    Answer::Text(b) => uaprs::build::message(q.to.as_bytes(), b.as_bytes(), None, &mut info),
+                };
+                if let Some(n) = n {
+                    self.last_auto.set(Some(now_s));
+                    return self.framed(my, &info[..n], "Query reply", cfg, out, t);
+                }
+            }
+            if let Some(g) = self.general.get().filter(|g| now_s >= g.due_s) {
+                self.general.set(None);
+                let f = fresh(fix, cfg).filter(|f| g.foot.is_none_or(|(c, r)| within(c, (f.pos.lat / 10, f.pos.lon / 10), r)));
+                if let Some(n) = f.and_then(|f| position_info(&f, &mut info)) {
+                    self.last_auto.set(Some(now_s));
+                    self.last_general.set(Some(now_s));
+                    return self.framed(my, &info[..n], "Query reply", cfg, out, t);
+                }
             }
         }
         let beacon = beacon || self.after_voice.get() && auto_ok;
@@ -544,8 +748,7 @@ impl AprsLive {
             // GPS-33: never a fix older than the beacon interval as current (the fixed position stands in as
             // itself, GPS-3). An automatic beacon waits for a fresh fix, then is skipped (the caller logs it); one
             // asked for now is refused at once.
-            let max_s = cfg.every_min().map_or(u32::MAX, |m| m as u32 * 60);
-            let Some(f) = fix.filter(|f| f.age_s == crate::gpsdata::FIXED_AGE || f.age_s as u32 <= max_s) else {
+            let Some(f) = fresh(fix, cfg) else {
                 if !self.beacon_now.get() {
                     let since = *self.fix_wait.get().get_or_insert(now_s);
                     self.fix_wait.set(Some(since));
@@ -564,18 +767,7 @@ impl AprsLive {
             self.beacon_now.set(false);
             self.beacon_last.set(Some(LastBeacon::new(now_s, Some(f))));
             self.last_auto.set(Some(now_s));
-            let r = uaprs::build::Report {
-                lat: f.pos.lat / 10,
-                lon: f.pos.lon / 10,
-                table: b'/',
-                code: b'[',
-                course_speed: (f.speed_kmh > 0).then(|| (f.heading.clamp(1, 360), (f.speed_kmh as u32 * 1000 / 1852) as u16)),
-                altitude: f.three_d.then_some(f.alt_m * 10_000 / 3048),
-                messaging: true,
-                timestamp: None,
-                comment: b"",
-            };
-            if let Some(n) = uaprs::build::position(&r, &mut info) {
+            if let Some(n) = position_info(&f, &mut info) {
                 t.changed = true;
                 return self.framed(my, &info[..n], "Beacon", cfg, out, t);
             }
@@ -594,6 +786,120 @@ impl AprsLive {
         let len = Frame::new(me, dest, &path[..names.len().min(2)], info).and_then(|f| f.write(out)).unwrap_or(0);
         Tick { len, what, ..t }
     }
+}
+
+/// GPS-33: the fix a beacon (or a query's answer, APRS-33) may send: never one older than the beacon interval as
+/// current; the fixed position stands in as itself (GPS-3).
+fn fresh(fix: Option<Fix>, cfg: &AprsCfg) -> Option<Fix> {
+    let max_s = cfg.every_min().map_or(u32::MAX, |m| m as u32 * 60);
+    fix.filter(|f| f.age_s == crate::gpsdata::FIXED_AGE || f.age_s as u32 <= max_s)
+}
+
+/// Our position report: the beacon's, and a position query's answer (APRS-33).
+fn position_info(f: &Fix, info: &mut [u8]) -> Option<usize> {
+    let r = uaprs::build::Report {
+        lat: f.pos.lat / 10,
+        lon: f.pos.lon / 10,
+        table: b'/',
+        code: b'[',
+        course_speed: (f.speed_kmh > 0).then(|| (f.heading.clamp(1, 360), (f.speed_kmh as u32 * 1000 / 1852) as u16)),
+        altitude: f.three_d.then_some(f.alt_m * 10_000 / 3048),
+        messaging: true,
+        timestamp: None,
+        comment: b"",
+    };
+    uaprs::build::position(&r, info)
+}
+
+/// APRS-33: our status report, `>Ferrite v0.1.0` (no status text is set on the radio).
+fn status_info(info: &mut [u8]) -> Option<usize> {
+    let v = ferrite_core::VERSION.as_bytes();
+    let n = 9 + v.len();
+    let o = info.get_mut(..n)?;
+    o[..9].copy_from_slice(b">Ferrite ");
+    o[9..].copy_from_slice(v);
+    Some(n)
+}
+
+/// APRS-33's trace answer (`?APRST`, `?PING?`): the query's path as heard, `FROM>TO,DIGI1,DIGI2*` (the last
+/// digipeater that repeated it marked, as TNC2 text does).
+fn trace(f: &Frame, b: &mut Buf<67>) {
+    let put = |b: &mut Buf<67>, a: &Address| {
+        a.emit(&mut |c| {
+            b.push(&[c]);
+        })
+    };
+    put(b, &f.src);
+    b.push(b">");
+    put(b, &f.dest);
+    let last = f.digis().iter().rposition(|d| d.repeated);
+    for (i, d) in f.digis().iter().enumerate() {
+        b.push(b",");
+        put(b, d);
+        if Some(i) == last {
+            b.push(b"*");
+        }
+    }
+}
+
+/// APRS-35: a general query's footprint, `lat,lon,radius` (decimal degrees, miles; e.g. `34.02,-117.15,0200`):
+/// the centre in millionths of a degree and the radius in metres.
+fn footprint(t: &[u8]) -> Option<((i32, i32), u32)> {
+    let mut it = t.split(|&c| c == b',');
+    let (lat, lon, r) = (degrees(trim(it.next()?))?, degrees(trim(it.next()?))?, trim(it.next()?));
+    if it.next().is_some() || r.is_empty() || r.len() > 5 || !r.iter().all(u8::is_ascii_digit) || lat.abs() > 90_000_000 || lon.abs() > 180_000_000 {
+        return None;
+    }
+    let miles = r.iter().fold(0u32, |v, &c| v * 10 + (c - b'0') as u32);
+    Some(((lat, lon), miles * 1609))
+}
+
+/// Whether `p` is within `r_m` metres of `c` (millionths of a degree): flat earth around `c`, its latitude's
+/// cosine by Bhaskara's approximation (within 0.2 %), ample for a footprint of miles.
+fn within(c: (i32, i32), p: (i32, i32), r_m: u32) -> bool {
+    let x = (c.0 / 1_000_000) as i64; // whole degrees
+    let cos_q16 = (32_400 - 4 * x * x) * 65_536 / (32_400 + x * x);
+    let mut dlon = (p.1 as i64 - c.1 as i64) % 360_000_000;
+    if dlon > 180_000_000 {
+        dlon -= 360_000_000;
+    } else if dlon < -180_000_000 {
+        dlon += 360_000_000;
+    }
+    // 0.111195 m per millionth of a degree of latitude.
+    let ny = (p.0 as i64 - c.0 as i64) * 111_195 / 1_000_000;
+    let nx = dlon * 111_195 / 1_000_000 * cos_q16 / 65_536;
+    ny * ny + nx * nx <= (r_m as i64) * (r_m as i64)
+}
+
+/// Decimal degrees (`-117.15`) in millionths.
+fn degrees(t: &[u8]) -> Option<i32> {
+    let (neg, t) = match t.split_first() {
+        Some((b'-', r)) => (true, r),
+        _ => (false, t),
+    };
+    let (whole, frac) = match t.iter().position(|&c| c == b'.') {
+        Some(i) => (&t[..i], &t[i + 1..]),
+        None => (t, &b""[..]),
+    };
+    if whole.is_empty() || whole.len() > 3 || frac.len() > 6 || !whole.iter().chain(frac).all(u8::is_ascii_digit) {
+        return None;
+    }
+    let mut v = whole.iter().fold(0i32, |v, &c| v * 10 + (c - b'0') as i32);
+    for i in 0..6 {
+        v = v * 10 + frac.get(i).map_or(0, |&c| (c - b'0') as i32);
+    }
+    Some(if neg { -v } else { v })
+}
+
+/// Spaces off both ends.
+fn trim(mut t: &[u8]) -> &[u8] {
+    while let Some((b' ', r)) = t.split_first() {
+        t = r;
+    }
+    while let Some((b' ', r)) = t.split_last() {
+        t = r;
+    }
+    t
 }
 
 fn push_state(t: &mut Tick, s: (Buf<10>, Buf<67>, MsgState)) {
@@ -941,10 +1247,230 @@ mod tests {
         assert_eq!(a.tick(170, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0, "once per transmission");
     }
 
+    /// The information field of the frame `tick` wrote.
+    fn sent(out: &[u8; FRAME_MAX], t: &Tick) -> std::vec::Vec<u8> {
+        Frame::parse(&out[..t.len]).unwrap().info.to_vec()
+    }
+
+    /// APRS-32: a message to us heard again (the sender's retries, a second digipeater's copy) is acked every
+    /// time but goes to the inbox once and rings once; the same number with other text, another sender's same
+    /// number, and a message without a number after 30 s are new ones.
+    #[test]
+    fn repeats_acked_every_time_stored_once() {
+        let a = AprsLive::new();
+        let cfg = AprsCfg::DEFAULT;
+        let mut out = [0u8; FRAME_MAX];
+        let me = b"VE3XYZ-7";
+        // A retry 30 s later, then the same frame through two digipeaters.
+        let copies: [(&[&[u8]], u32); 4] = [(&[b"WIDE1-1", b"WIDE2-1"], 100), (&[b"WIDE1-1", b"WIDE2-1"], 130), (&[b"VE3RPT*", b"WIDE2-1"], 131), (&[b"VE3RPT", b"VE3DIG*"], 133)];
+        let mut stored = 0;
+        for (path, s) in copies {
+            let (f, n) = frame(b"VE3KPW-9", b"APDR16", path, b":VE3XYZ-7 :Running late{AB12}");
+            let rx = a.receive(&f[..n], s, me, &cfg);
+            if let Some((from, text)) = rx.inbound {
+                assert_eq!((from.as_bytes(), text.as_bytes(), rx.inbound_id.as_bytes()), (&b"VE3KPW-9"[..], &b"Running late"[..], &b"AB12"[..]));
+                stored += 1;
+            }
+            let t = a.tick(s, Sending::All, true, me, None, &cfg, &mut out);
+            assert_eq!((t.what, sent(&out, &t)), ("Ack", b":VE3KPW-9 :ackAB12".to_vec()), "{s}: acked again");
+        }
+        assert_eq!(stored, 1, "one inbox entry, one ring");
+        // A reply-ack retry keys on its own number (MM of {MM}AA).
+        for s in [200, 230] {
+            let (f, n) = frame(b"VE3KPW-9", b"APDR16", &[], b":VE3XYZ-7 :Here now{7}3");
+            assert_eq!(a.receive(&f[..n], s, me, &cfg).inbound.is_some(), s == 200);
+        }
+        // The same number with other text (a sender that started counting again), another sender's same number.
+        let (f, n) = frame(b"VE3KPW-9", b"APDR16", &[], b":VE3XYZ-7 :Something else{AB12}");
+        assert!(a.receive(&f[..n], 300, me, &cfg).inbound.is_some());
+        let (f, n) = frame(b"VA3RTX", b"APK004", &[], b":VE3XYZ-7 :Running late{AB12}");
+        assert!(a.receive(&f[..n], 301, me, &cfg).inbound.is_some());
+        // Without a number: the same text within 30 s is the same message, later a new one.
+        let (f, n) = frame(b"VA3RTX", b"APK004", &[b"WIDE1-1"], b":VE3XYZ-7 :QRV?");
+        let (g, m) = frame(b"VA3RTX", b"APK004", &[b"VE3RPT*"], b":VE3XYZ-7 :QRV?");
+        assert!(a.receive(&f[..n], 400, me, &cfg).inbound.is_some_and(|i| i.1.as_bytes() == b"QRV?"));
+        assert!(a.receive(&g[..m], 410, me, &cfg).inbound.is_none(), "a digipeater's copy");
+        assert!(a.receive(&f[..n], 431, me, &cfg).inbound.is_some(), "30 s on: new");
+        assert!(a.receive(&f[..n], 431, me, &cfg).inbound_id.is_empty());
+    }
+
+    const QUERIES: AprsCfg = AprsCfg { beacon: 9, ..AprsCfg::DEFAULT }; // timed beacons, hourly
+
+    /// A directed query from VE3KPW-9 at `s` (by `path`), and the frame that answers it in the next minute.
+    fn ask(a: &AprsLive, text: &[u8], path: &[&[u8]], s: u32) -> Option<(&'static str, std::vec::Vec<u8>)> {
+        let mut info = b":VE3XYZ-7 :".to_vec();
+        info.extend_from_slice(text);
+        let (f, n) = frame(b"VE3KPW-9", b"APDR16", path, &info);
+        let rx = a.receive(&f[..n], s, b"VE3XYZ-7", &QUERIES);
+        assert!(rx.inbound.is_none(), "a query isn't kept as a message");
+        let mut out = [0u8; FRAME_MAX];
+        (s..s + 60).find_map(|s| {
+            let t = a.tick(s, Sending::All, true, b"VE3XYZ-7", Some(fix()), &QUERIES, &mut out);
+            (t.len > 0).then(|| (t.what, sent(&out, &t)))
+        })
+    }
+
+    /// APRS-33: each directed query's answer, exactly: ?APRSP and ?APRS? our position, ?APRSS a status naming the
+    /// firmware, ?APRSD the stations heard direct, ?APRSH a station's count, ?APRST and ?PING? the path as heard,
+    /// ?VER the version; the others aren't answered (nor kept as messages). A numbered query is acked too.
+    #[test]
+    fn directed_queries_answered() {
+        let a = AprsLive::new();
+        a.beacon_last.set(Some(LastBeacon::new(0, Some(fix())))); // the hourly beacon not due
+        let cfg = QUERIES;
+        let (f, n) = frame(b"VE3OCB-7", b"APRS", &[], b"!4525.51N/07554.20W>Mobile");
+        a.receive(&f[..n], 0, b"VE3XYZ-7", &cfg);
+        let (f, n) = frame(b"VA3ABC", b"APRS", &[b"VE3RPT*"], b">Via a digi");
+        a.receive(&f[..n], 10, b"VE3XYZ-7", &cfg);
+        let reply = |w: &[u8]| Some(("Query reply", w.to_vec()));
+        let pos = b"=4525.51N/07541.41W[";
+        assert_eq!(ask(&a, b"?APRSP", &[], 100), reply(pos));
+        assert_eq!(ask(&a, b"?APRS?", &[], 200), reply(pos));
+        let ver = std::format!("Ferrite {}", ferrite_core::VERSION);
+        assert_eq!(ask(&a, b"?APRSS", &[], 300), reply(std::format!(">{ver}").as_bytes()));
+        assert_eq!(ask(&a, b"?APRSD", &[], 400), reply(b":VE3KPW-9 :Directs= VE3KPW-9 VE3OCB-7"));
+        assert_eq!(ask(&a, b"?APRSH VE3OCB-7", &[], 500), reply(b":VE3KPW-9 :VE3OCB-7 heard 1x, last 8 min ago"));
+        assert_eq!(ask(&a, b"?APRSH N0CALL", &[], 600), reply(b":VE3KPW-9 :N0CALL not heard"));
+        assert_eq!(ask(&a, b"?APRST", &[b"VE3RPT*", b"WIDE2-1"], 700), reply(b":VE3KPW-9 :VE3KPW-9>APDR16,VE3RPT*,WIDE2-1"));
+        assert_eq!(ask(&a, b"?PING?", &[b"WIDE1-1*"], 800), reply(b":VE3KPW-9 :VE3KPW-9>APDR16,WIDE1-1*"));
+        assert_eq!(ask(&a, b"?VER", &[], 900), reply(std::format!(":VE3KPW-9 :{ver}").as_bytes()));
+        assert_eq!(ask(&a, b"?APRSM", &[], 1000), None, "messages waiting: not answered");
+        assert_eq!(ask(&a, b"?APRSO", &[], 1100), None);
+        // Numbered: acked first, then answered.
+        let (f, n) = frame(b"VE3KPW-9", b"APDR16", &[], b":VE3XYZ-7 :?APRSP{5");
+        a.receive(&f[..n], 1200, b"VE3XYZ-7", &cfg);
+        let mut out = [0u8; FRAME_MAX];
+        let t = a.tick(1200, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+        assert_eq!(sent(&out, &t), b":VE3KPW-9 :ack5");
+        let t = a.tick(1201, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+        assert_eq!((t.what, sent(&out, &t)), ("Query reply", pos.to_vec()));
+        // Plain text starting with ? is a message.
+        let (f, n) = frame(b"VE3KPW-9", b"APDR16", &[], b":VE3XYZ-7 :?? where are you");
+        assert!(a.receive(&f[..n], 1300, b"VE3XYZ-7", &cfg).inbound.is_some());
+    }
+
+    /// APRS-33 with APRS-9: answers are automatic transmissions, 30 s apart; one waits at a time (a second query
+    /// meanwhile, or a digipeater's copy, isn't answered); no position without a fresh fix; none at all without a
+    /// callsign (APRS-8), without APRS mode, or without automatic beacons, and one waiting is dropped then.
+    #[test]
+    fn query_answers_follow_the_transmit_rules() {
+        let mut out = [0u8; FRAME_MAX];
+        let me = b"VE3XYZ-7";
+        let q = |path: &[&[u8]], text: &[u8]| {
+            let mut info = b":VE3XYZ-7 :".to_vec();
+            info.extend_from_slice(text);
+            frame(b"VE3KPW-9", b"APDR16", path, &info)
+        };
+        let a = AprsLive::new();
+        a.beacon_last.set(Some(LastBeacon::new(0, Some(fix())))); // the hourly beacon not due
+        let (f, n) = q(&[], b"?VER");
+        a.receive(&f[..n], 100, me, &QUERIES);
+        assert_eq!(a.tick(100, Sending::All, true, me, None, &QUERIES, &mut out).what, "Query reply");
+        let (f, n) = q(&[], b"?APRSS");
+        a.receive(&f[..n], 105, me, &QUERIES);
+        let (g, m) = q(&[b"VE3RPT*"], b"?APRSS");
+        a.receive(&g[..m], 107, me, &QUERIES); // the same query through a digipeater
+        let (h, k) = q(&[], b"?APRSD");
+        a.receive(&h[..k], 108, me, &QUERIES); // one waits already
+        let sends: std::vec::Vec<u32> = (108..200).filter(|&s| a.tick(s, Sending::All, true, me, None, &QUERIES, &mut out).len > 0).collect();
+        assert_eq!(sends, [130], "30 s after the last, once");
+        // No fresh fix: a position query goes unanswered.
+        let (f, n) = q(&[], b"?APRSP");
+        a.receive(&f[..n], 300, me, &QUERIES);
+        let old = Some(Fix { age_s: 4_000, ..fix() }); // older than the hourly beacon interval (GPS-33)
+        assert_eq!(a.tick(300, Sending::All, true, me, old, &QUERIES, &mut out).len, 0);
+        // No callsign: nothing heard as ours, nothing sent.
+        let b = AprsLive::new();
+        let (f, n) = q(&[], b"?VER");
+        assert!(b.receive(&f[..n], 100, b"", &QUERIES).inbound.is_none());
+        assert_eq!(b.tick(100, Sending::All, true, b"", None, &QUERIES, &mut out).len, 0);
+        // Without APRS mode, or with beacons off or manual: not answered, and not later either.
+        for (send, cfg) in [(Sending::Beacons, QUERIES), (Sending::Nothing, QUERIES), (Sending::All, AprsCfg::DEFAULT), (Sending::All, AprsCfg { beacon: 1, ..AprsCfg::DEFAULT })] {
+            let b = AprsLive::new();
+            b.receive(&f[..n], 100, me, &cfg);
+            assert_eq!(b.tick(100, send, true, me, Some(fix()), &cfg, &mut out).what, if send == Sending::Beacons { "Beacon" } else { "" });
+            for s in 101..200 {
+                assert_ne!(b.tick(s, Sending::All, true, me, Some(fix()), &QUERIES, &mut out).what, "Query reply", "{send:?} {s}");
+            }
+        }
+    }
+
+    /// APRS-35: a general query (`?APRS?` heard on air) is answered with our position after a random 5-60 s, at
+    /// most once in 5 minutes; with a footprint only when we are inside it.
+    #[test]
+    fn general_query_rate_limited() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let me = b"VE3XYZ-7";
+        let cfg = QUERIES;
+        let mut answers = std::vec::Vec::new();
+        let (f, n) = frame(b"VE3OCB", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b"?APRS?");
+        let (g, m) = frame(b"VA3ABC", b"APRS", &[b"WIDE2-2"], b"?APRS? 45.42,-75.69,0010");
+        let (h, k) = frame(b"W6XYZ", b"APRS", &[], b"?APRS? 34.02,-117.15,0200");
+        a.beacon_last.set(Some(LastBeacon::new(0, Some(fix()))));
+        for s in 0..1500u32 {
+            match s {
+                100 | 200 | 380 => _ = a.receive(&f[..n], s, me, &cfg),
+                700 => _ = a.receive(&h[..k], s, me, &cfg), // far away
+                800 => _ = a.receive(&g[..m], s, me, &cfg),
+                _ => {}
+            }
+            let t = a.tick(s, Sending::All, true, me, Some(fix()), &cfg, &mut out);
+            if t.len > 0 {
+                assert_eq!((t.what, sent(&out, &t)), ("Query reply", b"=4525.51N/07541.41W[".to_vec()));
+                answers.push(s);
+            }
+        }
+        assert_eq!(answers.len(), 2, "{answers:?}");
+        assert!((105..=160).contains(&answers[0]), "{answers:?}: a random wait");
+        assert!((805..=860).contains(&answers[1]), "{answers:?}: the 200 and 380 queries within 5 min, the 700 one outside its footprint");
+        assert_eq!(footprint(b"34.02,-117.15,0200"), Some(((34_020_000, -117_150_000), 200 * 1609)));
+        assert_eq!(footprint(b"34.02,-117.15"), None);
+        // About 45.4 km east of Ottawa at 45.42 N (0.58 degrees of longitude): inside 30 miles, outside 25.
+        assert!(within((45_420_000, -75_690_000), (45_420_000, -75_110_000), 30 * 1609));
+        assert!(!within((45_420_000, -75_690_000), (45_420_000, -75_110_000), 25 * 1609));
+    }
+
+    /// APRS-34: a rejection of one of ours ("rejNN", or "rejNN}" from a reply-ack station) ends it at once as
+    /// rejected: no more tries. Another station's rejection, or one for a number we don't have waiting, changes
+    /// nothing.
+    #[test]
+    fn rejected_stops_retries() {
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg::DEFAULT;
+        for rej in [&b":VE3XYZ   :rej1"[..], b":VE3XYZ   :rej1}", b":VE3XYZ   :rej1}45"] {
+            let a = AprsLive::new();
+            assert!(a.send(b"VE3KPW-9", b"QSL"));
+            assert_eq!(a.tick(0, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out).what, "Message");
+            let (f, n) = frame(b"VA3RTX", b"APRS", &[], rej);
+            assert!(a.receive(&f[..n], 5, b"VE3XYZ", &cfg).state.is_none(), "not from the recipient");
+            let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b":VE3XYZ   :rej9");
+            assert!(a.receive(&f[..n], 6, b"VE3XYZ", &cfg).state.is_none(), "not our number");
+            let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], rej);
+            let rx = a.receive(&f[..n], 10, b"VE3XYZ", &cfg);
+            assert!(matches!(rx.state, Some((p, t, MsgState::Rejected)) if p.as_bytes() == b"VE3KPW-9" && t.as_bytes() == b"QSL"), "{:?}", core::str::from_utf8(rej));
+            assert!(rx.inbound.is_none());
+            for s in 11..600 {
+                assert_eq!(a.tick(s, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "no more tries");
+            }
+        }
+    }
+
+    /// APRS-13: a message whose text APRS can't carry (`|`, `~`, `{`) fails at once instead of five silent tries.
+    #[test]
+    fn unsendable_text_fails_at_once() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        assert!(a.send(b"VE3KPW-9", b"a{b"));
+        let t = a.tick(0, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
+        assert_eq!(t.len, 0);
+        assert!(matches!(t.states[0], Some((_, _, MsgState::Failed))));
+    }
+
     #[test]
     fn size() {
         let n = core::mem::size_of::<AprsLive>();
         std::println!("AprsLive: {n} B, heard entry {} B, out {} B", core::mem::size_of::<Option<Heard>>(), core::mem::size_of::<Option<Out>>());
-        assert!(n <= 4_200, "{n}");
+        assert!(n <= 4_400, "{n}");
     }
 }

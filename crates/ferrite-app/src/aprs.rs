@@ -147,6 +147,12 @@ impl AprsCfg {
     pub fn smart(&self) -> bool {
         self.mode() as usize == SMART
     }
+
+    /// Automatic beacons (timed, distance or smart; not manual or off): APRS-29's beacons alone, and APRS-33's
+    /// query answers.
+    pub fn beacons_on(&self) -> bool {
+        self.mode() as usize >= TIMED
+    }
 }
 
 /// The paths offered (0 5 6 1, APRS-26): name and entries; the custom path (0 5 6 2) is [`PATH_CUSTOM`].
@@ -334,7 +340,7 @@ impl App {
     /// Automatic beacons are on (0 5 5 1 timed, distance or smart; APRS-24): with APRS mode off they still hold C
     /// (APRS-29). Manual ("Beacon now" only) doesn't.
     pub fn beacons_on(&self) -> bool {
-        self.aprs.mode() >= TIMED as u8
+        self.aprs.beacons_on()
     }
 
     /// What holds slot C as the APRS slot, if anything: APRS mode (APRS-15), KISS (KISS-9: its frames go out
