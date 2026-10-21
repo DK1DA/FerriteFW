@@ -77,6 +77,8 @@ pub struct Session {
     now: u32,
     /// A `WRITE_MANY` being applied (LINK-41).
     many: Option<Many>,
+    /// Events pushed to this session (LINK-46).
+    sub: sub::Sub,
 }
 
 /// A `WRITE_MANY` under way (LINK-41): its records wait in `asm` (what's after the `what` byte), applied one a
@@ -129,6 +131,7 @@ impl Session {
             run: Run::Off,
             now: 0,
             many: None,
+            sub: sub::Sub::new(),
         }
     }
 
@@ -149,6 +152,7 @@ impl Session {
         self.by = if trusted { crate::remote::BY_CABLE } else { crate::remote::BY_BT };
         self.run = Run::Off;
         self.many = None;
+        self.unsubscribe(); // LINK-46: events end with the connection
     }
 
     /// A write is under way: a write session (`BEGIN` .. `END`) or a record half assembled (LINK-28).
@@ -304,6 +308,7 @@ impl Session {
                 // LINK-20.5: a HELLO is the session starting over: a remote transmission it keyed ends now, as a
                 // cut (no keepalive wait, no 400 ms hold), and the keys it holds are let go.
                 app.remote_session_closed(self.by, now, st);
+                self.unsubscribe(); // LINK-46
                 self.hello(app, dev, p, &mut o)
             }
             msg::AUTH => self.auth(app, p),
@@ -361,6 +366,10 @@ impl Session {
                 }
                 _ => Status::BadArg,
             },
+            msg::SUBSCRIBE => self.subscribe(st, now, p, &mut o),
+            msg::HEARD => sub::heard(st, p, &mut o),
+            msg::MSGS => sub::msgs(st, p, &mut o),
+            msg::MSG_SEND => sub::msg_send(app, st, dev, p, &mut o),
             _ => Status::UnknownType,
         };
         o.a[0] = s as u8;
@@ -920,6 +929,7 @@ fn record<S: ChannelStore>(app: &App, st: &S, w: u8, idx: u16, win: &mut Window)
             Some(pr) => preset_save(&pr, win),
             None => return Status::NotFound,
         },
+        what::APRS if idx == 0 => sub::aprs_record(app, win), // LINK-43
         _ => return Status::BadArg,
     }
     Status::Ok
@@ -1167,9 +1177,12 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             request(st, Op::PutPreset(idx as u8, p))
         }
         what::ZONE | what::PRESET => Status::NotFound,
+        what::APRS if idx == 0 => sub::aprs_apply(app, rec, o), // LINK-43
         _ => Status::Refused, // nothing else is written over the link (LINK-3)
     }
 }
+
+mod sub;
 
 #[cfg(test)]
 mod tests;

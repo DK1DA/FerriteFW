@@ -131,6 +131,8 @@ SECTIONS
     *(.text.*4core3str8converts9from_utf8*);
     *(.text.*12ferrite_core4freq6format*);
     *(.text.*12ferrite_core4freq8put_uint*);
+    /* Live View's compact form and deltas (LINK-47): the link sessions', in the UI task. */
+    *(.text.*12ferrite_core8liveview*);
     *(.text.*4chip10heard_tone*);
     /* FM broadcast's report (at most ten times a second) and its watch mask (BCR-2, BCR-23): the Radio task's,
      * never from an interrupt. */

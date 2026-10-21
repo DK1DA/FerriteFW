@@ -108,13 +108,14 @@ def installed_image_matches_its_btf(t):
 
 
 BUILT = {fl.HELLO, fl.INFO, fl.AUTH, fl.READ, fl.WRITE, fl.DELETE, fl.BEGIN, fl.END, fl.SLOT, fl.BAUD, fl.REBOOT,
-         fl.KEY, fl.CMD, fl.MORE, fl.UI, fl.USED, fl.READ_MANY, fl.WRITE_MANY, fl.LOG_READ}
+         fl.KEY, fl.CMD, fl.MORE, fl.UI, fl.USED, fl.READ_MANY, fl.WRITE_MANY, fl.LOG_READ,
+         fl.SUBSCRIBE, fl.HEARD, fl.MSGS, fl.MSG_SEND}  # EVENT (0x51): radio to PC only
 
 
 @test("LINK-3", "SAFE-5", "TERM-8", pages=("Home",))
 def link_has_no_calibration_write(t):
     """Every link message type the radio doesn't have answers "unknown type" (no CAL_WRITE or any other way to the
-    calibration sector or the update area); READ takes the four record kinds only; the terminal has no command that
+    calibration sector or the update area); READ takes the five record kinds only (5 the APRS settings, LINK-43); the terminal has no command that
     reaches SPI flash."""
     link = t.r.link
     known = []
@@ -125,7 +126,7 @@ def link_has_no_calibration_write(t):
         if s != 2:
             known.append((hex(ty), s))
     t.eq(known, [], "every other type: unknown type")
-    for kind in (0, 5, 6, 0x80, 0xFF):
+    for kind in (0, 6, 0x80, 0xFF):
         s, why = link.ask(fl.READ, struct.pack("<BH", kind, 0), timeout=1.0)
         t.check(s != 0, f"READ kind {kind}: refused", (s, why))
         for ty, p in ((fl.USED, bytes([kind])), (fl.READ_MANY, struct.pack("<BHH", kind, 0, 1)),
