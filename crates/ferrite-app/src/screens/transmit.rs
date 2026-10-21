@@ -62,24 +62,8 @@ pub fn ptt_refusal(app: &App, slot: u8) -> Option<Refusal> {
     if app.radio.batt_cut {
         return Some(Refusal::Battery);
     }
-    // CHAN-4 (safety): a receive-only channel never transmits.
-    if app.rx_only(slot) {
-        return Some(Refusal::RxOnlyChannel);
-    }
-    // TX-20: the BK4829 has no AM modulator.
-    if slot < SLOTS as u8 && app.tuned_cfg(slot).mode == 2 {
-        return Some(Refusal::AmRxOnly);
-    }
-    if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
+    if let Some(r) = tx_block(app, slot) {
         return Some(r);
-    }
-    if txplan::locked_125m(tx_freq(app, slot)) {
-        return Some(Refusal::Unmeasured125); // TX-10: safety, until the bench measures the 0.25 W ceiling
-    }
-    // TX-37: the band relay never switches at key-up. A split (or a VFO retuned under one) whose TX needs the
-    // other relay state from RX is refused here, as a backstop to the check when it is set.
-    if slot < SLOTS as u8 && !txplan::relay_ok(app.tuned_cfg(slot).rx_of(app.tuned_freq(slot)), tx_freq(app, slot)) {
-        return Some(Refusal::RelayMismatch);
     }
     // TX-21: busy lockout, on or off as nicFW: refuse while the squelch is open.
     if slot < SLOTS as u8 && app.rx_mask & 1 << slot != 0 && app.tuned_cfg(slot).busy != 0 {
@@ -298,8 +282,41 @@ pub struct Transmit {
     pub dial: bool,
 }
 
-/// The level name (TX-12): LOW, MID, HIGH; "0.25 W" on 1.25 m, the capped power itself.
+/// HOME-4.2: why PTT can never transmit on this slot where it is now, whatever happens meanwhile: a receive-only
+/// build or channel, AM, outside the band plan or the calibration, 1.25 m still locked, the relay. The checks in
+/// [`ptt_refusal`] that pass with time (busy, battery, cooling, keyed elsewhere) aren't these.
+pub fn tx_block(app: &App, slot: u8) -> Option<Refusal> {
+    if !app.radio.tx_built {
+        return Some(Refusal::RxOnlyBuild);
+    }
+    // CHAN-4 (safety): a receive-only channel never transmits.
+    if app.rx_only(slot) {
+        return Some(Refusal::RxOnlyChannel);
+    }
+    // TX-20: the BK4829 has no AM modulator.
+    if slot < SLOTS as u8 && app.tuned_cfg(slot).mode == 2 {
+        return Some(Refusal::AmRxOnly);
+    }
+    if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
+        return Some(r);
+    }
+    if txplan::locked_125m(tx_freq(app, slot)) {
+        return Some(Refusal::Unmeasured125); // TX-10: safety, until the bench measures the 0.25 W ceiling
+    }
+    // TX-37: the band relay never switches at key-up. A split (or a VFO retuned under one) whose TX needs the
+    // other relay state from RX is refused here, as a backstop to the check when it is set.
+    if slot < SLOTS as u8 && !txplan::relay_ok(app.tuned_cfg(slot).rx_of(app.tuned_freq(slot)), tx_freq(app, slot)) {
+        return Some(Refusal::RelayMismatch);
+    }
+    None
+}
+
+/// The level name (TX-12): LOW, MID, HIGH; "0.25 W" on 1.25 m, the capped power itself; "No TX" where PTT
+/// can't transmit (HOME-4.2).
 pub fn power_name(app: &App, slot: u8) -> &'static str {
+    if tx_block(app, slot).is_some() {
+        return "No TX";
+    }
     if slot < SLOTS as u8 && app.capped(slot) {
         return "0.25 W";
     }

@@ -471,6 +471,8 @@ fn pin_at_unlock() {
 #[test]
 fn shortcut_map() {
     let mut t = T::new();
+    t.app.radio.tx_built = true; // hold 2 sets power where the slot can transmit (HOME-4.2)
+    t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
     let s = store();
     t.app.key_down(Key::Digit(2), t.t, &s);
     t.wait(800);

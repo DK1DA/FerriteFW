@@ -191,13 +191,36 @@ fn automatic_tx_refused_on_emergency() {
     assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"emergency frequency"));
 }
 
-/// TX-12.1: the level name only; 1.25 m shows its cap.
+/// TX-12.1: the level name only; 1.25 m shows its cap (while it is still locked for the bench, TX-10, it can't
+/// transmit at all: "No TX", HOME-4.2).
 #[test]
 fn power_level_names() {
     let mut t = ready();
     assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "LOW");
     tune(&mut t, mhz(223) + 50_000);
-    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "0.25 W");
+    let want = if ferrite_core::txplan::locked_125m(mhz(223) + 50_000) { "No TX" } else { "0.25 W" };
+    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), want);
+}
+
+/// HOME-4.2: where PTT can never transmit (out of the band plan, AM, a receive-only build) the power chip says
+/// "No TX" and hold 2 says why instead of changing the power; a passing refusal (busy) keeps the level.
+#[test]
+fn rx_only_power_chip() {
+    use crate::screens::transmit::{power_name, tx_block};
+    let mut t = ready();
+    assert_eq!(power_name(&t.app, 0), "LOW");
+    tune(&mut t, mhz(121) + 50_000); // airband: AM, outside the plan
+    assert!(tx_block(&t.app, 0).is_some());
+    assert_eq!(power_name(&t.app, 0), "No TX");
+    let p = t.app.slot(0).cfg().power;
+    t.hold(Key::Digit(2));
+    assert_eq!(t.app.slot(0).cfg().power, p, "hold 2 changes nothing there");
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"No TX"), "it says why");
+    tune(&mut t, mhz(146) + 52_000);
+    assert_eq!(power_name(&t.app, 0), "LOW", "back in the plan");
+    t.app.radio.tx_built = false;
+    assert_eq!(power_name(&t.app, 0), "No TX", "a receive-only build");
+    assert!(ferrite_ui::gfx::text4_width(b"No TX", &ferrite_ui::assets::UI_12) <= ferrite_ui::widgets::SLOT_POWER.1 - 6, "fits the chip: {}", ferrite_ui::gfx::text4_width(b"No TX", &ferrite_ui::assets::UI_12));
 }
 
 /// SCAN-1, SCAN-11: SIDE2 starts and shows the scan; * skips a hit; SIDE2 stops.
@@ -740,7 +763,7 @@ fn am_is_receive_only() {
     ptt(&mut t, false);
 }
 
-/// CHAN-4 (safety): a channel with "RX only" on (the channel editor's cell) refuses PTT and automatic
+/// CHAN-4 (safety): a channel with "No TX" on (the channel editor's cell) refuses PTT and automatic
 /// transmissions with the reason; the fix opens the channel editor. Off again, it transmits.
 #[test]
 fn rx_only_channel_refuses() {

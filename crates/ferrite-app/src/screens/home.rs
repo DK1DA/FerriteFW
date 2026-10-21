@@ -569,17 +569,14 @@ fn draw_card(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, s:
         mode_chip(&cfg, &mut m);
         card_tone(&cfg, &mut t);
         shift_chip(&cfg, &mut o);
-        if app.capped(s) {
-            pw.set(b"0.25 W");
-        } else {
-            pw.set([b"LOW".as_slice(), b"MID", b"HIGH"][cfg.power as usize % 3]);
-        }
-        if app.dirty(R_INFO + p, hash(&(m, t, o, pw))) {
+        pw.set(super::transmit::power_name(app, s).as_bytes()); // HOME-4.2: "No TX" where PTT can't transmit
+        let pc = if super::transmit::tx_block(app, s).is_some() { AMBER } else { TEXT };
+        if app.dirty(R_INFO + p, hash(&(m, t, o, pw, pc))) {
             let cy = y + CHIP_Y;
             w::chip_slot(lcd, w::SLOT_MODE, cy, m.as_bytes(), TEXT, LINE, SURFACE);
             w::chip_slot(lcd, w::SLOT_TONE, cy, t.as_bytes(), TEXT, LINE, SURFACE);
             w::chip_slot(lcd, w::SLOT_SHIFT, cy, o.as_bytes(), TEXT, LINE, SURFACE);
-            w::chip_slot(lcd, w::SLOT_POWER, cy, pw.as_bytes(), TEXT, LINE, SURFACE);
+            w::chip_slot(lcd, w::SLOT_POWER, cy, pw.as_bytes(), pc, LINE, SURFACE);
         }
         // S-meter: only the segments that changed (HOME-6, HOME-7).
         let lit = w::meter_level(lv.rssi);

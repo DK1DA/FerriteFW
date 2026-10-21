@@ -496,7 +496,11 @@ pub fn shortcut(app: &mut App, d: u8, store: &impl ChannelStore) {
     match d {
         0 => home_channel(app, store),
         1 => app.open(Dest::BandScope), // SCOPE-1
-        2 => cycle(app, Item::Power),
+        // HOME-4.2: where PTT can't transmit, hold 2 says why instead of changing a power that isn't used
+        2 => match super::transmit::tx_block(app, app.active) {
+            Some(r) => app.show_toast(b"No TX", super::transmit::short(r).as_bytes(), false),
+            None => cycle(app, Item::Power),
+        },
         3 => app.open(Dest::Value(Item::Squelch)),
         4 => {
             // WATCH-7: off, or back on as the set it was (A+B or A+B+C)
