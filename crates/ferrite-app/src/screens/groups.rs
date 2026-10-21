@@ -465,8 +465,7 @@ static SETTINGS: [Setting; 71] = [
     field!([5, 8, 3], special),
     field!([5, 9, 1], kiss_port: u8, Kind::Pick(&crate::settings::KISS_PORTS), Nothing),
     field!([6, 1, 0], gps_on: bool, Kind::Flip(&ON_OFF), Nothing),
-    // The knob steps it on the radio; the terminal doesn't take it.
-    Setting { term: false, ..field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing) },
+    field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing),
     field!([6, 4, 0], units: u8, Kind::Pick(&UNITS), Nothing),
     field!([6, 5, 0], tz: u8, Kind::Round(TIME_ZONES.len() as u8, zone_text), Nothing),
     field!([6, 6, 0], special),
@@ -516,6 +515,18 @@ fn row(p: &[u8]) -> Option<&'static Setting> {
 /// The settings the terminal's `set` takes and `dump` writes, in menu order (TERM-12, TERM-13).
 pub(crate) fn settable() -> impl Iterator<Item = &'static [u8]> + Clone {
     SETTINGS.iter().filter(|r| r.term).map(|r| r.path())
+}
+
+/// VOX-10: what the knob shows (and the terminal and link say) when CW ID is turned on with no callsign.
+pub(crate) const CW_ID_NO_CALL: &str = "set a callsign first";
+
+/// Why the knob won't step this setting now, in the radio's own words (its toast), when it says so; the terminal's
+/// `set` (and so the link's `CMD`) gives the same reason instead of a bare "one of".
+pub(crate) fn refusal(app: &App, p: &[u8]) -> Option<&'static str> {
+    match p {
+        [8, 7, 2] if app.set.callsign.as_bytes().is_empty() => Some(CW_ID_NO_CALL), // VOX-10
+        _ => None,
+    }
 }
 
 /// Whether the terminal's `set` takes this path.
@@ -895,7 +906,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [7, 4, 2] => *s.brightness_mut() = (s.brightness() as i32 + d).clamp(1, 10) as u8, // DISP-16, DISP-23
         [8, 2] => return change(app, &[8, 2, 1], d),
         // VOX-10: CW ID needs a callsign
-        [8, 7, 2] if s.callsign.as_bytes().is_empty() => app.show_toast(b"CW ID", b"set a callsign first", false),
+        [8, 7, 2] if s.callsign.as_bytes().is_empty() => app.show_toast(b"CW ID", CW_ID_NO_CALL.as_bytes(), false),
         [8, 9] | [8, 9, 1] => set_extend(app, !app.set.extend_tx),
         // TX-48: the radio's own keys only, never the link's remote keys (also greyed for them).
         [8, 9, 2] if !app.remote_in => app.set_dry_tx(!app.dry_tx()),

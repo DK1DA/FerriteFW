@@ -1307,3 +1307,44 @@ fn remote_keys_wait_for_the_unkey() {
     assert_eq!(pc.ptt(Ptt::Off).0, Status::Ok as u8);
     assert_eq!(pc.press("BACK", key::SHORT).0, Status::Ok as u8, "after the unkey keys work");
 }
+
+/// LINK-5 (MENU 0 6 3): a settings record written over the link keeps its coordinate format; it isn't one of the
+/// protected settings.
+#[test]
+fn settings_write_keeps_coord_format() {
+    let mut pc = Pc::new(true);
+    let rec = pc.read(what::SETTINGS, 0).unwrap();
+    let mut s = Settings::DEFAULT;
+    s.load(&mut Rd { b: &rec, n: 0 });
+    for f in 0..crate::settings::COORD_FORMATS.len() as u8 {
+        s.coord_fmt = f;
+        let mut out = std::vec![0u8; RECORD_MAX];
+        let mut w = Window { b: &mut out, from: 0, n: 0 };
+        s.save(&mut w);
+        let n = w.n;
+        assert_eq!(pc.ask(msg::BEGIN, &1u16.to_le_bytes()).0, 0);
+        assert_eq!(pc.write(what::SETTINGS, 0, &out[..n], 100).0, 0);
+        assert_eq!(pc.ask(msg::END, &[]).0, 0);
+        assert_eq!(pc.app.set.coord_fmt, f, "written");
+        let back = pc.read(what::SETTINGS, 0).unwrap();
+        let mut b = Settings::DEFAULT;
+        b.load(&mut Rd { b: &back, n: 0 });
+        assert_eq!(b.coord_fmt, f, "reads back");
+    }
+}
+
+/// VOX-10, LINK-34: CW ID turned on with no callsign, over the link's `CMD` (the terminal's `set`), says what the
+/// radio's knob says ("set a callsign first"), not a bare "one of Off"; Off still sets, and with a callsign it
+/// turns on.
+#[test]
+fn cw_id_without_callsign_says_why() {
+    let mut pc = Pc::new(true);
+    assert!(pc.app.set.callsign.as_bytes().is_empty());
+    let (s, a) = pc.ask(msg::CMD, b"set 0 8 7 2 On unkey");
+    assert_eq!(s, Status::Invalid as u8);
+    assert_eq!(std::str::from_utf8(&a).unwrap(), "CW ID: set a callsign first");
+    assert_eq!(pc.ask(msg::CMD, b"set 0 8 7 2 Off").0, 0, "Off is what it is");
+    pc.app.set.set_callsign(b"N0CALL");
+    assert_eq!(pc.ask(msg::CMD, b"set 0 8 7 2 On unkey").0, 0);
+    assert_eq!(pc.app.set.cw_id, 2);
+}

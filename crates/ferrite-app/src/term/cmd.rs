@@ -1154,6 +1154,13 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         put!(m, " {}: {}", name, Bytes(v.as_bytes()));
         return Ok(Done::Said(m));
     }
+    if let Some(why) = groups::refusal(app, p) {
+        let mut v = Buf::<24>::new();
+        value(app, dev, p, &mut v);
+        if !same(v.as_bytes(), want) {
+            return Err(msg!("{}: {}", name, why)); // VOX-10: the radio's toast, not "one of Off"
+        }
+    }
     match walk(app, dev, p, name, want) {
         // Not one of the values as written: an unambiguous short form names the one meant (`set 0 7 7 1` for
         // "Level 1"); the walk again with that value, so it changes exactly as if typed in full.
