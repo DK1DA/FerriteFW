@@ -101,8 +101,9 @@ pub enum RadioCmd {
     /// Channel `num`'s transmit frequency when it has a shift or split, after its [`RadioCmd::ScanEntry`]
     /// (SCAN-22, only while 0 1 6 3 is on).
     ScanEntryTx { num: u16, tx: Freq10 },
-    /// While keyed: the tone burst (PTT + SIDE2) for as long as SIDE2 is held (TONE-13).
-    ToneBurst { on: bool },
+    /// While keyed: the tone burst (PTT + SIDE2) for as long as SIDE2 is held (TONE-13), at `hz`, 0 8 4 1's
+    /// frequency (TONE-13.1).
+    ToneBurst { on: bool, hz: u16 },
     /// While keyed: a DTMF digit ('0'-'9', '*', '#', 'A'-'D') sent live for as long as its key is held (DTMF-7,
     /// DTMF-11).
     Dtmf { key: u8, on: bool },

@@ -191,7 +191,7 @@ impl Radio {
             RadioCmd::Same(on) => self.same_on = on,
             RadioCmd::Beep { hz, ms } => self.beep(hz, ms).await,
             #[cfg(feature = "tx")]
-            RadioCmd::ToneBurst { on } => self.keyed_tone(if on { Some(1750) } else { None }, None),
+            RadioCmd::ToneBurst { on, hz } => self.keyed_tone(on.then_some(hz), None),
             #[cfg(feature = "tx")]
             RadioCmd::Dtmf { key, on } => self.keyed_tone(None, if on { tonegen::dtmf_symbol(key) } else { None }),
             // Without the `tx` build nothing is keyed, so there is nothing to send them on.

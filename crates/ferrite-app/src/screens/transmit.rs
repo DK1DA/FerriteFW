@@ -350,7 +350,7 @@ impl View for Transmit {
         match key {
             Some(Key::Side(2)) => {
                 app.keys.used(Key::Side(2)); // a tone burst, not the counter (KEY-22)
-                app.out.push(RadioCmd::ToneBurst { on: down })
+                app.out.push(RadioCmd::ToneBurst { on: down, hz: app.set.burst_hz() })
             }
             Some(Key::Digit(d)) => app.out.push(RadioCmd::Dtmf { key: b'0' + d, on: down }),
             Some(Key::Star) => app.out.push(RadioCmd::Dtmf { key: b'*', on: down }),

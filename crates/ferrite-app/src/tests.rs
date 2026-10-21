@@ -399,7 +399,7 @@ fn hold_4_restores_the_watch_set() {
 }
 
 /// TONE-16: MENU 0 8 4 opens Tones sent; 2 there is Subtone level, and the knob steps it (Low, Normal, High)
-/// and tells the Radio task; the tone burst's row is greyed (1750 Hz, not a setting yet).
+/// and tells the Radio task.
 /// MENU-24 with SBAR-15: a group opened to a setting (the Status page's VOX row) is on that setting, whatever
 /// the group remembers; plain menu navigation still brings the remembered row back.
 #[test]
@@ -445,7 +445,7 @@ fn subtone_level_from_its_path() {
     assert!(t.cmds().contains(&RadioCmd::ToneLevel(2)), "told to the Radio task");
     t.knob(-2);
     assert_eq!(t.app.set.tone_level, 0, "Low");
-    assert!(crate::screens::groups::greyed(&t.app, &[8, 4, 1]).is_some());
+    assert!(crate::screens::groups::greyed(&t.app, &[8, 4, 1]).is_none(), "the tone burst row is a setting (TONE-13.1)");
 }
 
 #[test]

@@ -1988,7 +1988,7 @@ fn settings_golden() {
                     &mut s.backlight, &mut s.wake_on, &mut s.keypad_light, &mut s.leds, &mut s.auto_off,
                     &mut s.auto_lock, &mut s.tail_mode, &mut s.tail_phase, &mut s.end_tone, &mut s.cw_id,
                     &mut s.gps_rxtx, &mut s.coord_fmt, &mut s.units, &mut s.theme, &mut s.layout, &mut s.pon,
-                    &mut s.cable_port, &mut s.kiss_port, &mut s.tz,
+                    &mut s.cable_port, &mut s.kiss_port, &mut s.tz, &mut s.tone_burst,
                 ] {
                     *v = 250;
                 }

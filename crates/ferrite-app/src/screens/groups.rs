@@ -375,7 +375,6 @@ pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
         [4, 5] | [8, 5, 3] => Some("not used"),
         [8, 9, 2] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
         [8, 9, 2] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
-        [8, 4, 1] => Some("1750 Hz for now"), // the burst's frequency isn't a setting yet (TONE-16's list opens)
         _ => None,
     }
 }
@@ -445,7 +444,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 70] = [
+static SETTINGS: [Setting; 71] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -504,6 +503,7 @@ static SETTINGS: [Setting; 70] = [
     field!([8, 2, 2], vox_level: u8, Kind::Level(1, 9, 1, vox_level_text), Vox),
     field!([8, 2, 3], vox_tail: u8, Kind::Round(VOX_TAILS.len() as u8, vox_tail_text), Vox),
     field!([8, 3, 0], mic_gain: u8, Kind::Level(1, 9, 1, vox_level_text), MicGain),
+    field!([8, 4, 1], special),
     field!([8, 4, 2], special),
     field!([8, 5, 1], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
     field!([8, 5, 2], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
@@ -806,6 +806,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.push(b"-9");
             false
         }
+        [8, 4, 1] => {
+            pick(b, &crate::settings::TONE_BURST_NAMES, s.burst_index() as u8);
+            s.burst_index() != 2
+        }
         [8, 4, 2] => {
             pick(b, &crate::settings::TONE_LEVELS, s.tone_level);
             s.tone_level != 1
@@ -850,6 +854,8 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [1, 1] => app.change(Item::Watch, d),
         // 1-10 s, carrier drop, stop on hit (SCAN-5); the next scan takes it
         [1, 5] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
+        // TONE-13.1: stepped in order and stored rotated by two (Settings::burst_index)
+        [8, 4, 1] => s.tone_burst = ((s.burst_index() as i32 + d).clamp(0, 3) as u8 + 2) % 4,
         [8, 4, 2] => {
             s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
             app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
@@ -944,6 +950,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
         [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
         [1, 5] => s.scan_resume = d.scan_resume,
+        [8, 4, 1] => s.tone_burst = d.tone_burst,
         [8, 4, 2] => {
             s.tone_level = d.tone_level;
             app.out.push(RadioCmd::ToneLevel(d.tone_level));
