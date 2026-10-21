@@ -176,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     spare_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, cable_log, spare_flag2, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, tone_burst, mic_gain, tx_timeout });
+} bits { show_hidden, chan_only, cable_log, spare_flag2, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp, mic_gain, tx_timeout });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -302,18 +302,17 @@ mod tests {
 
     /// Decision 112: the byte that held 0 9 7 4's MCU temperature offset (SBAR-21, withdrawn) stays where it was,
     /// so the record keeps its layout (settings added since come after it: 0 8 3's mic gain); an old offset still
-    /// in it reads as one of the tone burst frequencies (TONE-13.1) and changes nothing else.
+    /// in it loads into the spare and changes nothing.
     #[test]
     fn old_mcu_temp_offset_is_ignored() {
         let mut v = Vec2(std::vec::Vec::new());
         Settings::DEFAULT.save(&mut v);
         let n = v.0.len() - AFTER_SPARE;
-        assert_eq!(v.0[n - 1], 0, "the tone burst byte, 0 for 1750 Hz");
+        assert_eq!(v.0[n - 1], 0, "the spare");
         v.0[n - 1] = (-5i8) as u8; // an offset of -5 saved by the firmware that had it
         let mut b = Settings::DEFAULT;
         b.load(&mut SliceSource(&v.0));
-        assert_eq!(Settings { tone_burst: 0, ..b }, Settings::DEFAULT);
-        assert!(crate::settings::TONE_BURSTS.contains(&b.burst_hz()), "it reads as a tone burst frequency (TONE-13.1)");
+        assert_eq!(Settings { spare_temp: 0, ..b }, Settings::DEFAULT);
     }
 
     /// The bytes saved after the spare: 0 8 3's mic gain, 0 8 1 1's timeout.

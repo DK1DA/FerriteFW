@@ -753,6 +753,7 @@ fn keep_protected(new: &mut Settings, old: &Settings) {
     new.cable_port = old.cable_port;
     new.kiss_port = old.kiss_port; // KISS-7: turning KISS on is the owner's consent, made on the radio
     new.spare_tokens = [0; 32];
+    new.spare_temp = 0;
 }
 
 fn channel_save(c: &Channel, s: &mut dyn PSink) {

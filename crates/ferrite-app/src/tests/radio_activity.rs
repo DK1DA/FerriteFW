@@ -1215,46 +1215,6 @@ fn scope_centre_on_strongest_and_typed() {
     assert!(t.cmds().iter().any(|c| matches!(c, RadioCmd::Sweep { centre: 44_600_000, on: true, .. })));
 }
 
-/// TONE-13.1: the burst goes out at 0 8 4 1's frequency: 1750 Hz by default (and from a stored 0, the old spare
-/// byte), the knob steps 1000, 1450, 1750, 2100 Hz and stops at the ends, the next burst uses the new one, and #
-/// on the row puts 1750 Hz back.
-#[test]
-fn burst_follows_its_setting() {
-    use crate::screens::groups::Group;
-    let mut t = ready();
-    assert_eq!((t.app.set.tone_burst, t.app.set.burst_hz()), (0, 1750), "the default, from a zero byte");
-    t.hold(Key::Menu);
-    for d in [8, 4, 1] {
-        t.tap(Key::Digit(d));
-    }
-    assert!(matches!(t.app.screen(), Screen::Group(Group { g: 8, sub: 4, row: 0 })), "{:?}", t.app.screen());
-    let mut seen = std::vec::Vec::new();
-    for _ in 0..4 {
-        t.knob(-1);
-        seen.push(t.app.set.burst_hz());
-    }
-    assert_eq!(seen, [1450, 1000, 1000, 1000], "down to 1000 Hz, and it stops there");
-    for _ in 0..5 {
-        t.knob(1);
-    }
-    assert_eq!(t.app.set.burst_hz(), 2100, "up to 2100 Hz, and it stops there");
-    t.knob(-1);
-    assert_eq!(t.app.set.burst_hz(), 1750);
-    t.knob(-1);
-    assert_eq!(t.app.set.burst_hz(), 1450);
-    t.hold(Key::Exit);
-    ptt(&mut t, true);
-    t.cmds();
-    t.tap(Key::Side(2));
-    let c = t.cmds();
-    assert!(c.contains(&RadioCmd::ToneBurst { on: true, hz: 1450 }), "the burst at the new frequency: {c:?}");
-    ptt(&mut t, false);
-    for v in 0..=255u8 {
-        t.app.set.tone_burst = v;
-        assert!(crate::settings::TONE_BURSTS.contains(&t.app.set.burst_hz()), "any stored byte is a frequency");
-    }
-}
-
 /// TONE-13, DTMF-7: while keyed, SIDE2 sends the tone burst as long as it is held, and the digits send DTMF live.
 #[test]
 fn burst_and_dtmf_while_keyed() {
@@ -1263,7 +1223,7 @@ fn burst_and_dtmf_while_keyed() {
     t.cmds();
     t.tap(Key::Side(2));
     let c = t.cmds();
-    assert!(c.contains(&RadioCmd::ToneBurst { on: true, hz: 1750 }) && c.contains(&RadioCmd::ToneBurst { on: false, hz: 1750 }), "{c:?}");
+    assert!(c.contains(&RadioCmd::ToneBurst { on: true }) && c.contains(&RadioCmd::ToneBurst { on: false }), "{c:?}");
     t.tap(Key::Digit(5));
     t.tap(Key::Hash);
     let c = t.cmds();

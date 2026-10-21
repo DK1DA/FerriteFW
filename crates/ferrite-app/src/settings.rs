@@ -172,10 +172,10 @@ pub struct Settings {
     pub tx_light: bool,
     /// 0 7 4 4 (DISP-15): what wakes the screen ([`WAKE_ON`]): 0 keys, 1 and receive, 2 and transmit.
     pub wake_on: u8,
-    /// 0 8 4 1: the tone burst's frequency, as [`Settings::burst_index`] reads it (TONE-13.1). The byte held 0 9 7 4's
-    /// MCU temperature offset (SBAR-21) until decision 112 dropped it; 0, what that left on most radios, is
-    /// 1750 Hz.
-    pub tone_burst: u8,
+    /// Unused, kept so the record's length stays and a later field doesn't read an old value: it held 0 9 7 4's
+    /// MCU temperature offset (SBAR-21) until decision 112 dropped it. Never read; whatever an older record left
+    /// there has no effect.
+    pub spare_temp: u8,
     /// FM broadcast: frequency in 10 kHz, step index, AGC (0 auto, else gain dB + 1), radio monitor (0 3 1).
     pub fm_freq: u16,
     pub fm_step: u8,
@@ -289,22 +289,6 @@ pub const VOX_TAILS: [u8; 6] = [5, 10, 15, 20, 30, 50];
 /// 0 3 1 5's sleep times in minutes (BCR-5: off, 15-120 min).
 pub const SLEEP_TIMES: [u8; 7] = [0, 15, 30, 45, 60, 90, 120];
 pub const TONE_LEVELS: [&str; 3] = ["Low", "Normal", "High"];
-/// 0 8 4 1's tone burst frequencies, Hz (TONE-13.1), and their names.
-pub const TONE_BURSTS: [u16; 4] = [1000, 1450, 1750, 2100];
-pub const TONE_BURST_NAMES: [&str; 4] = ["1000 Hz", "1450 Hz", "1750 Hz", "2100 Hz"];
-
-impl Settings {
-    /// 0 8 4 1's place in [`TONE_BURSTS`]: the stored byte is that index rotated by two, so 0 is 1750 Hz and any
-    /// byte is a valid choice (TONE-13.1). The same rotation stores an index back.
-    pub fn burst_index(&self) -> usize {
-        (self.tone_burst as usize + 2) % TONE_BURSTS.len()
-    }
-
-    /// The tone burst's frequency, Hz.
-    pub fn burst_hz(&self) -> u16 {
-        TONE_BURSTS[self.burst_index()]
-    }
-}
 
 /// 0 7 4 1's values, seconds (0 never).
 pub const BACKLIGHT_TIMES: [u16; 9] = [0, 5, 10, 15, 30, 60, 120, 300, 600];
@@ -391,7 +375,7 @@ impl Settings {
         brightness_night: 3,
         tx_light: true,
         wake_on: 1,
-        tone_burst: 0,
+        spare_temp: 0,
         fm_freq: 10_110,
         fm_step: 1,
         fm_agc: 0,
