@@ -130,7 +130,7 @@ const G8: [Entry; 9] = [
     Entry("Timeout|120 s|Transmit timeout and its pre-alert."),
     Entry("VOX|Off|Voice-operated transmit."),
     Entry("Mic gain|5|Higher is louder on air: 1-9."),
-    Entry("Tones sent|1750 Hz|Tone burst, subtone level."),
+    Entry("Tones sent|Normal|Subtone level."),
     Entry("Tail elimination|Off|Squelch tail, end tone (roger beep)."),
     Entry("DTMF|100 ms|Dialer, memories, timing, PTT ID."),
     Entry("Callsign and ID|Empty|Your callsign, and CW ID."),
@@ -255,7 +255,8 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
     ((8, 1), &[Entry("TX timeout|120 s|Transmit stops after this."), Entry("Pre-alert|10 s|Warning before the timeout.")]),
     ((8, 2), &[Entry("VOX|Off|Transmit when you talk."), Entry("Level|5|Higher needs a louder voice: 1 keys easiest."), Entry("Tail|2 s|Hang time after speech.")]),
     ((8, 4), &[
-        Entry("Tone burst|1750 Hz|PTT + SIDE2 sends it."),
+        // 1 was "Tone burst", dropped (decision 198: 1750 Hz only, PTT + SIDE2); Subtone level keeps 0 8 4 2.
+        Entry("-||Not used."),
         Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),
     ]),
     ((8, 5), &[
@@ -372,10 +373,9 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [4, 9, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
-        [4, 5] | [8, 5, 3] => Some("not used"),
+        [4, 5] | [8, 4, 1] | [8, 5, 3] => Some("not used"),
         [8, 9, 2] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
         [8, 9, 2] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
-        [8, 4, 1] => Some("1750 Hz for now"), // the burst's frequency isn't a setting yet (TONE-16's list opens)
         _ => None,
     }
 }
