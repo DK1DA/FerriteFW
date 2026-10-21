@@ -79,12 +79,13 @@ pub fn ch_decode(num: u16, b: &[u8; CH_LEN]) -> Option<Channel> {
         0 => SQ_GLOBAL,
         s => (s - 1).min(9),
     };
-    let mut name = [0u8; 16];
-    name.copy_from_slice(&b[32..48]);
     let ui = (flags & UI_FLAGS) as u8 | if flags & PRIORITY != 0 { ferrite_app::chan::FLAG_PRIORITY } else { 0 };
     // Byte 31 (decision 86): end tone bits 0-2, tail bits 3-4; 0 (every record before it) is Global for both,
     // and so is a value out of range.
-    let mut c = Channel { num, zone: b[18], rx, name, cfg, flags: ui, tones: b[31] & 0x1F };
+    let mut c = Channel { num, zone: b[18], rx, name: [0; 16], cfg, flags: ui, tones: b[31] & 0x1F };
+    // A name stored before CHAN-31 reads in the name set, as it would be written now.
+    let name = &b[32..48];
+    c.set_name(&name[..name.iter().position(|&x| x == 0).unwrap_or(16)]);
     c.tones = c.end_tone() | c.tail() << 3;
     Some(c)
 }

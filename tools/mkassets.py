@@ -23,6 +23,11 @@ WORD = "BarlowSemiCondensed-SemiBold.ttf"
 # fails ferrite-ui's and ferrite-app's tests (they check every string literal), so add it here and regenerate.
 ASCII = "".join(chr(c) for c in range(0x20, 0x7F))
 TEXT = ASCII + "\u00b7\u00b0\u00b1"  # the middle dot separates values ("VFO · VHF"), the degree sign bearings ("NE 48°"), plus-minus GPS accuracy ("±5 m"); arrows and marks are drawn shapes
+# Channel names (CHAN-31, decision 221): letters, digits, space and a few symbols; every way a name gets in maps
+# to it (ferrite_core::name). The name fonts are cut to it: name_22 also draws the GPS screen's coordinates
+# (GPS-15), so it keeps the degree sign and the seconds' double quote.
+NAME = "".join(sorted(set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -./_#+&()'!")))
+NAME_GPS = NAME + '"\u00b0'
 DIG = " -.0123456789"  # frequencies
 WORDMARK = " EFIRT"
 
@@ -48,8 +53,8 @@ FONT_LIST = [  # name, file, px, chars, tabular, use
     ("ui_12", REG, 12, TEXT, False, "status bar, hints, labels, lists, values"),
     ("ui_12b", BOLD, 12, TEXT, False, "emphasis: clock, keys in hints, tags"),
     ("ui_15b", BOLD, 15, TEXT, False, "headings: setup pages, alerts; the callsign on the boot screen"),
-    ("name_26", BOLD, 26, TEXT, False, "channel names on the large home card when they fit (13 characters); the callsign on the owner card"),
-    ("name_22", BOLD, 22, TEXT, False, "channel names on the home cards (16 characters fit the large card)"),
+    ("name_26", BOLD, 26, NAME, False, "channel names on the large home card when they fit (13 characters); the callsign on the owner card; the GPS screen's grid square"),
+    ("name_22", BOLD, 22, NAME_GPS, False, "channel names on the home cards (16 characters fit the large card); the GPS screen's position"),
     ("dig_46", NUM, 46, DIG, True, "active slot frequency"),
     ("dig_28", NUM, 28, DIG, True, "active slot last digits"),
     ("dig_26", NUM, 26, DIG, True, "watched slot frequency"),

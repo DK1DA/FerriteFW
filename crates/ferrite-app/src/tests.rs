@@ -904,6 +904,35 @@ fn fonts_have_every_character_the_ui_draws() {
     }
 }
 
+/// CHAN-31: the name fonts hold every character a channel name may (`ferrite_core::name`), the 22 px one also the
+/// GPS screen's degree sign and double quote (GPS-15), and the sample channels' names are in the set.
+#[test]
+fn chan_31_name_fonts_have_the_name_set() {
+    use ferrite_core::name::name_char;
+    use ferrite_ui::assets::{NAME_22, NAME_26};
+    let set: std::vec::Vec<u8> = (0..=255u8).filter(|&c| name_char(c)).collect();
+    for &c in &set {
+        assert!(NAME_26.has(c as char) && NAME_22.has(c as char), "name fonts lack {:?}", c as char);
+    }
+    assert!(NAME_22.has('\u{b0}') && NAME_22.has('"'), "the GPS screen's position");
+    // cut to the set: nothing else (the 22 px: the GPS screen's two)
+    assert_eq!(NAME_26.glyphs.len(), set.len());
+    assert_eq!(NAME_22.glyphs.len(), set.len() + 2);
+    let st = crate::sample::Sample::new();
+    let mut n = 0;
+    for num in 0..crate::chan::MAX_CHANNELS {
+        if let Some(c) = st.get(num) {
+            assert!(c.name().iter().all(|&b| name_char(b)), "sample channel {num}: {:?}", c.name());
+            n += 1;
+        }
+    }
+    assert!(n > 10);
+    // and a name typed or loaded with others in it maps them to '-'
+    let mut c = st.get((0..crate::chan::MAX_CHANNELS).find(|&i| st.get(i).is_some()).unwrap()).unwrap();
+    c.set_name("Caf\u{e9} @ 5*".as_bytes());
+    assert_eq!(c.name(), b"Caf-- - 5-");
+}
+
 /// The string literals of a Rust source, escapes decoded; comments and char literals skipped.
 fn string_literals(src: &str) -> Vec<std::string::String> {
     let b: Vec<char> = src.chars().collect();

@@ -218,7 +218,8 @@ fn errors_are_answered() {
     assert_eq!((f.ty, f.seq, f.payload[0]), (msg::INFO | wire::ANSWER, 9, Status::BadFrame as u8));
 }
 
-/// LINK-2, LINK-5: a channel reads, writes back changed, and a bad one is refused with the reason.
+/// LINK-2, LINK-5, CHAN-31: a channel reads, writes back changed (a name mapped to the name set), and a bad one is
+/// refused with the reason.
 #[test]
 fn channel_round_trip_and_checks() {
     let mut pc = Pc::new(true);
@@ -228,6 +229,10 @@ fn channel_round_trip_and_checks() {
     rec[7] = b'Z';
     assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, 0);
     assert_eq!(pc.st.get(c.num).unwrap().name[0], b'Z');
+    // CHAN-31: printable characters outside the name set are mapped to '-', not refused
+    rec[7..10].copy_from_slice(b"@*?");
+    assert_eq!(pc.write(what::CHANNEL, c.num, &rec, 240).0, 0);
+    assert_eq!(&pc.st.get(c.num).unwrap().name[..3], b"---");
     let mut bad = rec.clone();
     bad[3..7].copy_from_slice(&70_000_000u32.to_le_bytes()); // 700 MHz: no chip receives it
     let (s, why) = pc.write(what::CHANNEL, c.num, &bad, 240);

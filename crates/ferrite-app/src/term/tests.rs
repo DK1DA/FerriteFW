@@ -871,7 +871,7 @@ fn command_channels() {
     let c = r.store.by_num(11).unwrap().0;
     assert_eq!((c.cfg.tx_tone, c.cfg.rx_tone), (DCS_FLAG | DCS_INV | 0o023, DCS_FLAG | DCS_INV | 0o023));
     r.cmd("ch 12 name \"Club \\\"north\\\"\"");
-    assert_eq!(r.store.by_num(11).unwrap().0.name(), b"Club \"north\"");
+    assert_eq!(r.store.by_num(11).unwrap().0.name(), b"Club -north-"); // CHAN-31: '"' is not a name character
     r.cmd("ch 300 \"Test\" 146.6 offset=-0.6 tone=100.0 power=mid zone=1 skip squelch=6");
     let t = r.store.by_num(299).expect("made").0;
     assert_eq!((t.rx, t.cfg.offset, t.cfg.tx_tone, t.cfg.power, t.zone, t.flags & FLAG_SKIP, t.cfg.squelch), (14_660_000, -60_000, 1000, 1, 0, FLAG_SKIP, 6));
