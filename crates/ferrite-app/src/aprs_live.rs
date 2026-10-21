@@ -2,10 +2,10 @@
 //! for the modulator out. The heard list (APRS-3, APRS-4: RAM only), messages to us acked (APRS-6), ours tried
 //! on APRS-13's schedule until an ack, beacons by the beacon mode (APRS-24) and after voice (APRS-27), the
 //! fill-in digipeater (APRS-12, APRS-26: off unless asked), the path (0 5 6 1), APRS-9's 30 s spacing and
-//! APRS-20's wait for the band relay; a message heard again stored once (APRS-32), queries answered (APRS-33),
-//! rejections (APRS-34). Pure logic: the firmware's UI
-//! task feeds it frames and ticks it once a second (the store and the App are there); the host tests run the
-//! same code on recorded audio. The simulators keep their made-up traffic (`sample::aprs`).
+//! APRS-20's wait for the band relay; a message heard again stored once (APRS-32), queries answered (APRS-33,
+//! APRS-35), rejections (APRS-34). Pure logic: the firmware's UI task feeds it frames and ticks it once a second
+//! (the store and the App are there); the host tests run the same code on recorded audio. The simulators keep
+//! their made-up traffic (`sample::aprs`).
 //!
 //! Frames are the AX.25 bytes without the FCS, as `uafsk`'s demodulator gives them and its modulator takes them.
 
@@ -34,7 +34,7 @@ const DUPES: usize = 16;
 const SEEN: usize = 24;
 /// APRS-32: a message without a number heard again within this long is the same one (a second digipeater's copy).
 const SEEN_PLAIN_S: u32 = 30;
-/// APRS-33: general queries (`?APRS?`) answered at most this often, after a random wait of
+/// APRS-35: general queries (`?APRS?`) answered at most this often, after a random wait of
 /// [`GENERAL_WAIT_S`] plus up to [`GENERAL_SPREAD_S`]; an answer not sent within [`QUERY_TTL_S`] of its time is
 /// dropped.
 const GENERAL_GAP_S: u32 = 300;
@@ -96,7 +96,7 @@ struct Query {
     at_s: u32,
 }
 
-/// APRS-33: a general query (`?APRS?`) to answer at `due_s`, with its footprint (centre in millionths of a
+/// APRS-35: a general query (`?APRS?`) to answer at `due_s`, with its footprint (centre in millionths of a
 /// degree, radius in metres) if it gave one.
 #[derive(Clone, Copy)]
 struct General {
@@ -548,7 +548,7 @@ impl AprsLive {
         }))
     }
 
-    /// APRS-33: a general query heard (the information field after its `?`): `APRS?`, optionally with a
+    /// APRS-35: a general query heard (the information field after its `?`): `APRS?`, optionally with a
     /// footprint `lat,lon,radius` (degrees, miles); answered with our position after a random wait, at most once
     /// per [`GENERAL_GAP_S`]. Other general queries (`?WX?`, `?IGATE?`) aren't ours to answer.
     fn general_query(&self, data: &[u8], f: &Frame, now_s: u32) {
@@ -842,7 +842,7 @@ fn trace(f: &Frame, b: &mut Buf<67>) {
     }
 }
 
-/// APRS-33: a general query's footprint, `lat,lon,radius` (decimal degrees, miles; e.g. `34.02,-117.15,0200`):
+/// APRS-35: a general query's footprint, `lat,lon,radius` (decimal degrees, miles; e.g. `34.02,-117.15,0200`):
 /// the centre in millionths of a degree and the radius in metres.
 fn footprint(t: &[u8]) -> Option<((i32, i32), u32)> {
     let mut it = t.split(|&c| c == b',');
@@ -1395,7 +1395,7 @@ mod tests {
         }
     }
 
-    /// APRS-33: a general query (`?APRS?` heard on air) is answered with our position after a random 5-60 s, at
+    /// APRS-35: a general query (`?APRS?` heard on air) is answered with our position after a random 5-60 s, at
     /// most once in 5 minutes; with a footprint only when we are inside it.
     #[test]
     fn general_query_rate_limited() {
@@ -1456,7 +1456,7 @@ mod tests {
         }
     }
 
-    /// APRS-11: a message whose text APRS can't carry (`|`, `~`, `{`) fails at once instead of five silent tries.
+    /// APRS-13: a message whose text APRS can't carry (`|`, `~`, `{`) fails at once instead of five silent tries.
     #[test]
     fn unsendable_text_fails_at_once() {
         let a = AprsLive::new();
