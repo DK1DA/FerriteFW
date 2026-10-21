@@ -61,6 +61,21 @@ fn slot_sets_a_vfo_as_the_keypad() {
     assert!(said(&mut t.app, "slot B rxtone D023N txtone off").contains("txtone=off rxtone=D023N"));
 }
 
+/// TERM-35.2, TONE-2.1: a tone from the terminal as a mode and a value too: `ctcss 88.5`, `dcs-n 023`, `dcs-i 754`;
+/// a value that isn't the mode's is refused and nothing changes.
+#[test]
+fn slot_tone_as_mode_and_value() {
+    let mut t = T::new();
+    assert!(said(&mut t.app, "slot B txtone ctcss 88.5 rxtone dcs-i 754").contains("txtone=88.5 rxtone=D754I"));
+    assert!(said(&mut t.app, "slot B tone DCS-N 023").contains("tone=D023N"));
+    assert!(said(&mut t.app, "slot B rxtone off").contains("rxtone=off"));
+    let before = t.app.slot_state(1);
+    assert!(refused(&mut t.app, "slot B txtone ctcss D023N").contains("CTCSS takes a tone"));
+    assert!(refused(&mut t.app, "slot B txtone dcs-n 100.0").contains("DCS-N takes an octal code"));
+    assert!(refused(&mut t.app, "slot B txtone dcs-i 089").contains("DCS-I takes an octal code"));
+    assert_eq!(t.app.slot_state(1), before, "a refusal changes nothing");
+}
+
 /// TERM-35, LINK-33: the offset from the PC, MENU 5's path: a VFO's -0.6 MHz shift cleared with `offset off`
 /// (the Radio task told, no channel written), set to any amount with a sign, and a split's TX frequency; a shift
 /// that needs the other band relay (TX-37), 100 MHz or more, or a split no chip tunes is refused, nothing changed.

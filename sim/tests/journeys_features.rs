@@ -90,14 +90,14 @@ fn tuning_steps() {
     assert!(f(&r) > mhz(150), "▶ to the next band up: {}", f(&r));
 }
 
-/// RX and TX tones are set apart in the tone picker (VFO-6, TONE-17's page of the picker).
+/// RX and TX tones are set apart in the tone picker (VFO-6, TONE-17's page of the picker): ▶ gives RX a mode (TONE-2.1), the knob its value.
 #[test]
 fn rx_and_tx_tones_apart() {
     let mut r = Radio::new();
     let tones = |r: &Radio| (r.sim.app().slot(0).cfg().rx_tone, r.sim.app().slot(0).cfg().tx_tone);
     let (rx0, tx0) = tones(&r);
     r.run("hold 5; expect screen \"Tone picker\"; expect text \"RX tone\"; expect text \"TX tone\"; press UP");
-    r.knob(3).press(Key::Menu).wait(200);
+    r.press(Key::Right).knob(3).press(Key::Menu).wait(200);
     let (rx1, tx1) = tones(&r);
     assert!(rx1 != rx0 && tx1 == tx0, "only the RX tone changed: rx {rx0}->{rx1}, tx {tx0}->{tx1}");
 }

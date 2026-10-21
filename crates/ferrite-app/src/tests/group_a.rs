@@ -241,7 +241,7 @@ fn value_editor() {
     assert!(count_px(&fb, 44, 206, |c| c == BLUE) > 300, "the box and the levels");
 }
 
-/// TONE-2: RX and TX apart; digits type a tone; BACK puts both back.
+/// TONE-2, TONE-2.1: RX and TX apart; digits type a tone; ▶ to DCS-N starts at D023; BACK puts both back.
 #[test]
 fn tone_picker() {
     let mut t = T::new();
@@ -253,7 +253,8 @@ fn tone_picker() {
     assert_eq!(t.app.slot(0).cfg().tx_tone, 885);
     assert!(t.cmds().contains(&RadioCmd::SlotParam { slot: 0, param: Param::TxTone, value: 885 }));
     t.tap(Key::Up); // RX
-    t.knob(51); // past the 50 CTCSS tones: the first DCS code
+    t.tap(Key::Right);
+    t.tap(Key::Right); // Off, CTCSS, DCS-N: its first code
     assert_eq!(t.app.slot(0).cfg().rx_tone, DCS_FLAG | 0o023);
     assert_eq!(t.app.slot(0).cfg().tx_tone, 885, "TX untouched");
     t.wait(2000);
@@ -282,10 +283,59 @@ fn custom_tones() {
     t.wait(2000);
     t.digits("2700");
     assert_ne!(t.app.slot(0).cfg().tx_tone, 2700, "above 260.0 Hz: no");
-    t.knob(100); // into the DCS codes
+    t.tap(Key::Right); // the mode: DCS-N
     t.wait(2000);
     t.digits("024");
     assert_eq!(t.app.slot(0).cfg().tx_tone & !crate::slot::DCS_INV, DCS_FLAG | 0o024, "D024 is not standard, but taken");
+}
+
+/// TONE-2.1: each tone is a mode and a value. ◀▶ go round Off, CTCSS, DCS-N, DCS-I; a new mode starts at its
+/// first value (no value remembered per mode), DCS-N and DCS-I keep the code; the knob steps the value within the
+/// mode only, wrapping there, and does nothing on Off; ▲▼ still pick RX or TX; the hint bar names ◀▶ Mode.
+#[test]
+fn tone_picker_mode_then_value() {
+    use crate::screens::tones::{mode_of, MODE_NAMES};
+    use crate::slot::DCS_INV;
+    let mut t = T::new();
+    t.tap(Key::Menu);
+    t.tap(Key::Digit(4));
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Tones(_)));
+    let tx = |t: &T| t.app.slot(0).cfg().tx_tone;
+    assert_eq!(tx(&t), 0, "TX starts off");
+    t.knob(3);
+    assert_eq!(tx(&t), 0, "the knob does nothing on Off");
+    t.tap(Key::Right);
+    assert_eq!(tx(&t), 670, "CTCSS: its first tone");
+    t.knob(-1);
+    assert_eq!(tx(&t), 2541, "the knob wraps within CTCSS, never into DCS");
+    t.knob(1);
+    t.knob(1);
+    assert_eq!(tx(&t), 693);
+    t.tap(Key::Right);
+    assert_eq!(tx(&t), DCS_FLAG | 0o023, "DCS-N: its first code");
+    t.knob(1);
+    assert_eq!(tx(&t), DCS_FLAG | 0o025);
+    t.knob(-2);
+    assert_eq!(tx(&t), DCS_FLAG | 0o754, "the knob wraps within DCS-N");
+    t.tap(Key::Right);
+    assert_eq!(tx(&t), DCS_FLAG | DCS_INV | 0o754, "DCS-I keeps the code");
+    t.tap(Key::Left);
+    assert_eq!(tx(&t), DCS_FLAG | 0o754, "and back");
+    t.tap(Key::Left);
+    assert_eq!(tx(&t), 670, "CTCSS again starts at its first: 69.3 isn't remembered");
+    t.tap(Key::Left);
+    assert_eq!(tx(&t), 0, "Off");
+    t.tap(Key::Left);
+    assert_eq!(tx(&t), DCS_FLAG | DCS_INV | 0o023, "◀ from Off wraps to DCS-I");
+    assert_eq!(MODE_NAMES[mode_of(tx(&t)) as usize], "DCS-I");
+    assert_eq!(t.app.screen().hints(&t.app).as_slice().get(1).map(|h| h.1), Some("Mode"), "◀▶ Mode in the hint bar");
+    t.tap(Key::Up);
+    t.tap(Key::Right);
+    assert_eq!(t.app.slot(0).cfg().rx_tone, 670, "▲: RX, its own mode");
+    assert_eq!(tx(&t), DCS_FLAG | DCS_INV | 0o023, "TX untouched");
+    t.tap(Key::Exit);
+    assert_eq!((t.app.slot(0).cfg().rx_tone, tx(&t)), (0, 0), "BACK restores both (MENU-20)");
 }
 
 /// KEY-12: multi-tap, case, space, delete; OK names the channel.

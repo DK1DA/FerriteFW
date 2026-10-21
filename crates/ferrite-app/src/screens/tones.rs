@@ -1,7 +1,7 @@
-//! The tone picker (OK on MENU 4 or on the tone cell; manual chapters 16 and 11, TONE-2, MENU-17): the RX and
-//! TX tones apart, each off, one of the 50 CTCSS tones, or one of the 104 DCS codes normal or inverted, so
-//! every cross mode is just a pair. ▲▼ pick RX or TX; the knob or ◀▶ step through the list, live; digits type
-//! a tone (885 is 88.5 Hz, 1000 is 100.0 Hz) or, on a DCS code, the code in octal; # turns it off; OK keeps;
+//! The tone picker (OK on MENU 4 or on the tone cell; manual chapters 16 and 11, TONE-2, TONE-2.1, MENU-17): the
+//! RX and TX tones apart, each a mode (Off, CTCSS, DCS-N, DCS-I) and a value in it, so every cross mode is just a
+//! pair. ▲▼ pick RX or TX; ◀▶ change the mode; the knob steps the value within the mode, live; digits type a
+//! tone (885 is 88.5 Hz, 1000 is 100.0 Hz) or, on a DCS code, the code in octal; # turns it off; OK keeps;
 //! BACK puts both back (MENU-20). Typed tones need not be on the lists (TONE-15, as nicFW): any CTCSS from
 //! 60.0 to 260.0 Hz and any DCS code D000-D777.
 //!
@@ -37,8 +37,54 @@ pub struct Tones {
 }
 
 const TYPE_MS: u32 = 1500;
-/// Off, 50 CTCSS, 104 DCS normal, 104 DCS inverted.
-const ALL: i32 = 1 + 50 + 104 + 104;
+
+/// The tone modes, in ◀▶'s order (TONE-2.1): stock's and nicFW's names, CTCSS and DCS normal or inverted.
+pub const MODE_NAMES: [&str; 4] = ["Off", "CTCSS", "DCS-N", "DCS-I"];
+
+/// A tone word's mode: 0 off, 1 CTCSS, 2 DCS normal, 3 DCS inverted.
+pub fn mode_of(t: u16) -> u8 {
+    match t {
+        0 => 0,
+        _ if t & DCS_FLAG == 0 => 1,
+        _ if t & DCS_INV == 0 => 2,
+        _ => 3,
+    }
+}
+
+/// The tone after a change to mode `m` (TONE-2.1): no value is remembered per mode, so a new mode starts at its
+/// first value (67.0 Hz, D023), except DCS-N and DCS-I, which keep the code and flip its polarity.
+pub fn with_mode(t: u16, m: u8) -> u16 {
+    match (mode_of(t), m) {
+        (a, b) if a == b => t,
+        (2 | 3, 2) => t & !DCS_INV,
+        (2 | 3, 3) => t | DCS_INV,
+        (_, 1) => CTCSS[0],
+        (_, 2) => DCS_FLAG | crate::slot::DCS[0],
+        (_, 3) => DCS_FLAG | DCS_INV | crate::slot::DCS[0],
+        _ => 0,
+    }
+}
+
+/// Where a mode's values start in [`tone_at`]'s order, and how many it has: the knob wraps within them.
+fn mode_range(m: u8) -> (i32, i32) {
+    match m {
+        1 => (1, 50),
+        2 => (51, 104),
+        3 => (155, 104),
+        _ => (0, 1),
+    }
+}
+
+/// `t` stepped `d` values within its own mode (TONE-2.1); off stays off. A custom tone (TONE-15) sits after the
+/// standard one below it: down steps to that one, not past it.
+pub fn step_in_mode(t: u16, d: i32) -> u16 {
+    let (lo, n) = mode_range(mode_of(t));
+    if t == 0 {
+        return 0;
+    }
+    let i = tone_index(t) + if tone_custom(t) && d < 0 { 1 } else { 0 };
+    tone_at(lo + (i - lo + d).rem_euclid(n))
+}
 
 impl Tones {
     pub fn new(app: &App) -> Self {
@@ -153,7 +199,7 @@ impl View for Tones {
         Some(MENU_TIMEOUT_MS)
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+    fn key(self, app: &mut App, e: KeyEvent, st: &impl ChannelStore) {
         use Press::*;
         let mut s = self;
         let rx = self.row == 0;
@@ -161,6 +207,16 @@ impl View for Tones {
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => {
                 s.row = (s.row % n + if e.key == Key::Down { 1 } else { n - 1 }) % n;
+                s.nt = 0;
+            }
+            (Key::Left | Key::Right, Short | Repeat) if self.row >= 2 => {
+                return self.knob(app, if e.key == Key::Right { 1 } else { -1 }, st);
+            }
+            // TONE-2.1: ◀▶ change the mode, the value starts again in it
+            (Key::Left | Key::Right, Short | Repeat) => {
+                let t = get(app, rx);
+                let m = (mode_of(t) as i32 + if e.key == Key::Right { 1 } else { -1 }).rem_euclid(4) as u8;
+                set(app, rx, with_mode(t, m));
                 s.nt = 0;
             }
             (Key::Hash, Short) if self.row >= 2 => set_ch(app, self.row, 0), // Global
@@ -198,10 +254,11 @@ impl View for Tones {
             return set_ch(app, self.row, (v as i32 + d).rem_euclid(n as i32) as u8);
         }
         let rx = self.row == 0;
-        let t = get(app, rx);
-        // A custom tone sits after the standard one below it (tone_index): down steps to that one, not past it.
-        let i = tone_index(t) + if tone_custom(t) && d < 0 { 1 } else { 0 };
-        set(app, rx, tone_at(i + d));
+        set(app, rx, step_in_mode(get(app, rx), d)); // TONE-2.1: the value, within the mode
+    }
+
+    fn own_arrows(self) -> bool {
+        true // TONE-2.1: ◀▶ change the mode (on the second page they are the knob)
     }
 
     fn render(self, app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
@@ -232,8 +289,22 @@ impl View for Tones {
             }
         }
         let t = if self.row == 0 { rx } else { tx };
+        // TONE-2.1: the modes (◀▶) over the values in this one (the knob). Each drawn off screen, in one pass (DISP-25);
+        // the value box reaches down to 212, where the second page's taller picker ends.
+        let m = mode_of(t);
+        if app.dirty(R_INFO, hash(&(page, m))) {
+            let names: [&[u8]; 4] = MODE_NAMES.map(|n| n.as_bytes());
+            ferrite_ui::canvas::banded(lcd, 8, 122, 224, 17, BG, |lcd| w::chips_sel(lcd, 8, 122, 224, &names, Some(m as usize), BG));
+        }
         if app.dirty(R_SUB, hash(&(page, t))) {
-            picker(lcd, 40, 122, 160, 5, 18, tone_index(t), ALL, |i, b| text(tone_at(i), b), BG);
+            ferrite_ui::canvas::banded(lcd, 40, 140, 160, 72, BG, |lcd| {
+                if m == 0 {
+                    w::field(lcd, 40, 160, 146, 200, 177, Align::Center, b"No tone", &UI_12, DIM, BG);
+                } else {
+                    let (lo, n) = mode_range(m);
+                    picker(lcd, 40, 146, 160, 3, 18, tone_index(t) - lo, n, |i, b| text(tone_at(lo + i), b), BG);
+                }
+            });
         }
         let mut typed = Buf::<32>::new();
         if self.nt > 0 && app.now.wrapping_sub(self.at) <= TYPE_MS {
@@ -249,7 +320,10 @@ impl View for Tones {
 
     fn hints(self, app: &App) -> Hints {
         let rows = if self.row < 2 && rows(app) == 2 { "RX/TX" } else { "Row" };
-        if app.undo.is_some() {
+        if self.row < 2 {
+            // TONE-2.1: ◀▶ Mode always shows on the tone rows; Undo takes OK's place once there is one
+            Hints::new(&[(ARROWS_UD, rows), (ARROWS_LR, "Mode"), if app.undo.is_some() { ("*", "Undo") } else { ("OK", "Keep") }])
+        } else if app.undo.is_some() {
             Hints::new(&[(ARROWS_UD, rows), ("*", "Undo"), ("OK", "Keep")])
         } else {
             Hints::new(&[(ARROWS_UD, rows), ("Knob", "Change"), ("OK", "Keep")])
