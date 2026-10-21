@@ -18,8 +18,10 @@ const GAUGE_AT: usize = 0x200;
 const WINDOWS_AT: [usize; 4] = [0x230, 0x235, 0x23A, 0x240];
 /// The factory crystal trim (CAL-12): 0xF210 byte 11 = [`TRIM_MARKER`] marks it valid, bytes 12-13 hold k, signed
 /// 16-bit little-endian. Stock adds `(f / 100) * k / 435500` to every frequency it tunes, receive and transmit
-/// (0x0801DDD0), about 0.023 ppm a unit.
-const TRIM_AT: usize = 0x21B;
+/// (0x0801DDD0), about 0.023 ppm a unit ([`trimmed`]).
+pub(crate) const TRIM_AT: usize = 0x21B;
+/// CAL-6, CAL-18: the largest factory trim taken, 20 ppm (k / 43.55 ppm); a bigger one is invalid.
+pub const TRIM_MAX: i16 = 871;
 /// TONE-1: the transmitted sub-tone's deviation, 0xF210 byte 1 for CTCSS (REG_51 = 0x9000 | b1, 0x0800A488; also
 /// the 55 Hz tail, 0x0801D078) and byte 2 for DCS (REG_51 = 0xA000 | b2, 0x0800D3E0), 7 bits each.
 const TONE_AT: usize = 0x211;
@@ -37,9 +39,9 @@ pub enum Fault {
     /// never has: CAL-4), an enable byte other than 0x00, 0x01 or 0xFF, or an enabled window that isn't BCD with
     /// low < high (TX-14).
     Windows,
-    /// A factory crystal trim is set (0xF210 byte 11 = 0xA0 and k not 0). Ferrite doesn't apply it yet, so this
-    /// radio would transmit off frequency by it: transmit is locked until it does (TX audit M4, a deviation from
-    /// stock, which applies it). A radio without the marker (the black radio: 0xFF) is unaffected.
+    /// The factory crystal trim is marked (0xF210 byte 11 = 0xA0) but over ±20 ppm ([`TRIM_MAX`], CAL-6): not a
+    /// value a factory writes. Stock would apply it; Ferrite locks transmit and receives untrimmed. A trim within
+    /// the limit is applied (CAL-12, [`trimmed`]); a radio without the marker (both radios here: 0xFF) has none.
     Trim,
     /// A sub-tone gain (0xF210 byte 1 or 2) doesn't fit REG_51's 7-bit field (TX-14); stock masks it with 0x7F.
     ToneGain,
@@ -77,10 +79,23 @@ pub fn gate(cal: Result<TxCal, Fault>, mcu_ok: bool, crc: CalCrc) -> Result<TxCa
     cal
 }
 
-/// CAL-12: the factory crystal trim k when the sector marks one (0xF210 byte 11 = 0xA0), else None. Stock's loader
-/// skips 0xF210 on a blank sector, so a blank one has none.
-pub fn factory_trim(b: &[u8; READ_LEN]) -> Option<i16> {
+/// CAL-12: the factory crystal trim k when the sector marks one (0xF210 byte 11 = 0xA0), else None, whatever its
+/// size (CAL-6 checks that). Stock's loader skips 0xF210 on a blank sector, so a blank one has none. `b` is the
+/// sector from 0x00F000, at least to 0xF21D.
+pub fn factory_trim(b: &[u8]) -> Option<i16> {
     (b[BLANK_AT] != 0xFF && b[TRIM_AT] == TRIM_MARKER).then(|| i16::from_le_bytes([b[TRIM_AT + 1], b[TRIM_AT + 2]]))
+}
+
+/// CAL-12: the factory trim to apply: k within ±[`TRIM_MAX`], else 0 (none marked, or invalid: CAL-6).
+pub fn valid_trim(b: &[u8]) -> i16 {
+    factory_trim(b).filter(|k| k.unsigned_abs() <= TRIM_MAX as u16).unwrap_or(0)
+}
+
+/// CAL-12: the word REG_38/39 gets for tuning `f` with the crystal trim `k`, stock's formula exactly (0x0801DDD0):
+/// `f + (f / 100) * k / 435500`, a 64-bit product divided rounding toward zero. k = 0 is `f` itself. The user trim
+/// (MENU 0 9 7 2, not built yet) adds to k when it is.
+pub fn trimmed(f: Freq10, k: i16) -> Freq10 {
+    (f as i64 + (f / 100) as i64 * k as i64 / 435_500) as Freq10
 }
 
 /// A BCD byte's value, None if a digit is over 9.
@@ -120,6 +135,8 @@ pub struct TxCal {
     win: [(u16, u16); 4],
     /// TONE-1: the sub-tone deviation bytes, CTCSS (0xF210 byte 1) and DCS (byte 2).
     tone: [u8; 2],
+    /// CAL-12: the factory crystal trim k (0 for none), for the transmit frequency ([`TxCal::tx_word`]).
+    trim: i16,
 }
 
 /// TONE-16's step around the calibration's sub-tone level: stock's "high" adds 0x0F to the CTCSS byte and 0x14 to
@@ -139,19 +156,19 @@ impl TxCal {
 
     /// The curves and windows, or why transmit is locked: the sector blank (CAL-5), a curve the radio's bands use
     /// holding a 0 or 0xFF (CAL-6's plausibility), the TX windows blank or invalid (TX-14), a factory crystal
-    /// trim Ferrite doesn't apply yet ([`Fault::Trim`]).
+    /// trim over ±20 ppm ([`Fault::Trim`]).
     pub fn read(b: &[u8; READ_LEN]) -> Result<TxCal, Fault> {
         if b[BLANK_AT] == 0xFF {
             return Err(Fault::Blank);
         }
-        if factory_trim(b).is_some_and(|k| k != 0) {
+        if factory_trim(b).is_some_and(|k| k.unsigned_abs() > TRIM_MAX as u16) {
             return Err(Fault::Trim);
         }
         let tone = [b[TONE_AT], b[TONE_AT + 1]];
         if tone.iter().any(|&g| g > 0x7F) {
             return Err(Fault::ToneGain);
         }
-        let mut c = TxCal { pa: [[[0; 16]; 4]; 3], hf: [[0; 16]; 3], win: [(0, 0); 4], tone };
+        let mut c = TxCal { pa: [[[0; 16]; 4]; 3], hf: [[0; 16]; 3], win: [(0, 0); 4], tone, trim: valid_trim(b) };
         for (l, level) in c.pa.iter_mut().enumerate() {
             for (r, row) in level.iter_mut().enumerate() {
                 let at = 0x40 * l + 0x10 * r;
@@ -202,6 +219,13 @@ impl TxCal {
         }
     }
 
+    /// CAL-12, CAL-13: the REG_38/39 word for transmitting on `f`, the factory trim applied; the TX-7 read-back
+    /// expects it. The TX checks (windows, region plan, PA row) take `f` itself: the trim corrects the crystal so
+    /// that the carrier lands on `f`.
+    pub fn tx_word(&self, f: Freq10) -> Freq10 {
+        trimmed(f, self.trim)
+    }
+
     /// TONE-5: the 55 Hz tail's gain, the CTCSS byte as stock sends it (0x0801D078), whatever the Subtone level.
     pub fn tail_dev(&self) -> u8 {
         self.tone[0]
@@ -212,12 +236,14 @@ impl TxCal {
     /// row's last entry, 300-350 MHz the 350 row's first), except that 280-300 MHz takes the 200 row's last entry
     /// where stock reads past it. None outside every row's span (TX-11, CAL-10, TX audit F16): below 18 MHz,
     /// 64-130 MHz (stock falls back to High VHF entry 0) and 560 MHz up (stock reads past the UHF row); `txplan`
-    /// refuses those first, and the lookup refuses them too.
+    /// refuses those first, and the lookup refuses them too. None also for an entry the factory left unprogrammed
+    /// (0x00 or 0xFF, CAL-10): both radios' 200-300 MHz rows end at 260 MHz (entries 13-15 0xFF, which stock would
+    /// send to the DAC as full drive) and their UHF rows at 520 MHz.
     pub fn dac(&self, f: Freq10, power: u8) -> Option<u8> {
         let level = 2 - power.min(2) as usize; // stock's order: 0 is High
         let mhz = f / 100_000;
         let p = &self.pa[level];
-        Some(match mhz {
+        let v = match mhz {
             560.. => return None,
             400.. => p[UHF][((mhz - 400) / 10) as usize],
             350..=399 => p[R350][((mhz - 350) / 5) as usize],
@@ -229,7 +255,8 @@ impl TxCal {
             18..=63 => self.hf[level][(((mhz - 15) / 5) as usize).min(11)],
             // Below 18 MHz and 64-130 MHz: stock takes entry 0 of the High VHF row whatever the level; refused here.
             _ => return None,
-        })
+        };
+        (v != 0 && v != 0xFF).then_some(v)
     }
 }
 
@@ -403,23 +430,54 @@ mod tests {
         assert!(TxCal::parse(&sector(GAUGE_DEFAULT)).is_some());
     }
 
-    /// CAL-19, CAL-12, TX audit M4: a factory crystal trim (marker 0xA0, k not 0) locks transmit until Ferrite applies it;
-    /// the marker with k = 0, or no marker (the black radio's 0xFF), changes nothing.
+    /// CAL-12, CAL-6 (decision 222, TX audit M4): a factory crystal trim (marker 0xA0) within ±20 ppm is applied to
+    /// the transmit word; one over 20 ppm locks transmit; no marker (both radios' 0xFF) or k without it is none.
     #[test]
-    fn factory_trim_locks() {
+    fn factory_trim_applies() {
         let b = sector(GAUGE_DEFAULT);
         assert_eq!(factory_trim(&b), None, "the black radio: no marker");
-        assert!(TxCal::read(&b).is_ok());
+        assert_eq!(TxCal::read(&b).unwrap().tx_word(mhz(446)), mhz(446));
         let mut b = sector(GAUGE_DEFAULT);
         b[TRIM_AT..TRIM_AT + 3].copy_from_slice(&[0xA0, 0x2C, 0xFF]); // k = -212, about -4.9 ppm
         assert_eq!(factory_trim(&b), Some(-212));
-        assert_eq!(TxCal::read(&b).err(), Some(Fault::Trim));
-        b[TRIM_AT + 1..TRIM_AT + 3].fill(0);
-        assert_eq!(factory_trim(&b), Some(0));
-        assert!(TxCal::read(&b).is_ok(), "marker with k = 0: no trim to apply");
+        let c = TxCal::read(&b).unwrap();
+        // 446.000 MHz: 44_600_000 + 446_000 * -212 / 435_500 = 44_600_000 - 217 (2.17 kHz low).
+        assert_eq!(c.tx_word(mhz(446)), mhz(446) - 217);
+        assert_eq!(c.tx_word(mhz(146) + 52_000), mhz(146) + 52_000 - 71, "-71.3 rounds toward zero");
+        b[TRIM_AT + 1..TRIM_AT + 3].copy_from_slice(&TRIM_MAX.to_le_bytes());
+        assert!(TxCal::read(&b).is_ok(), "20 ppm: the limit is in");
+        b[TRIM_AT + 1..TRIM_AT + 3].copy_from_slice(&(-TRIM_MAX - 1).to_le_bytes());
+        assert_eq!(TxCal::read(&b).err(), Some(Fault::Trim), "over 20 ppm: locked");
+        assert_eq!(valid_trim(&b), 0, "and receive runs untrimmed");
         let mut b = sector(GAUGE_DEFAULT);
         b[TRIM_AT..TRIM_AT + 3].copy_from_slice(&[0x00, 0x2C, 0xFF]);
-        assert!(TxCal::read(&b).is_ok(), "k without the marker: stock ignores it");
+        assert_eq!(valid_trim(&b), 0, "k without the marker: stock ignores it");
+    }
+
+    /// CAL-12: stock's formula, one unit about 0.023 ppm: +100 at 435.5 MHz is +1 kHz, -100 at 145.5 MHz -334 Hz.
+    #[test]
+    fn trim_formula_as_stock() {
+        assert_eq!(trimmed(mhz(435) + 50_000, 100), mhz(435) + 50_000 + 100);
+        assert_eq!(trimmed(mhz(145) + 50_000, -100), mhz(145) + 50_000 - 33);
+        assert_eq!(trimmed(mhz(1300), TRIM_MAX), mhz(1300) + 2_600, "20 ppm at the top of receive, no overflow");
+        assert_eq!(trimmed(mhz(18), 0), mhz(18));
+    }
+
+    /// CAL-10 (decision 222): an entry the factory left 0xFF is refused, never sent to the DAC: the radios' 200-300
+    /// MHz Low row (0xF0A0) ends at 260 MHz and their UHF rows at 520 MHz, with 0xFF after.
+    #[test]
+    fn unprogrammed_entries_refused() {
+        let mut b = sector(GAUGE_DEFAULT);
+        b[0xA0..0xB0].copy_from_slice(&[0x7D, 0x7D, 0x7D, 0x7D, 0x7D, 0x7D, 0x7D, 0x7D, 0x7D, 0x7D, 0x7D, 0x7D, 0x64, 0xFF, 0xFF, 0xFF]);
+        b[0x0D..0x10].fill(0xFF);
+        let c = TxCal::read(&b).unwrap();
+        assert_eq!(c.dac(mhz(223) + 50_000, 0), Some(0x7D));
+        assert_eq!(c.dac(mhz(262), 0), Some(0x64));
+        for f in [mhz(265), mhz(280), mhz(299)] {
+            assert_eq!(c.dac(f, 0), None, "{f}: 0xFF, stock's full drive");
+        }
+        assert_eq!(c.dac(mhz(529), 2), Some(curve(0, UHF, 12)));
+        assert_eq!(c.dac(mhz(530), 2), None);
     }
 
     /// TONE-1.2, TONE-1.3, TONE-16, TONE-5, TX-14 (TX audit F7): the sub-tone's deviation from the calibration, the

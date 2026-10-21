@@ -121,7 +121,8 @@ impl Radio {
             _ => SlotRx { freq: f, am: self.hf.is_some_and(|h| h.mode == 2), ..SlotRx::DEFAULT },
         };
         // Stock's modes 6 and 7, the sub-tone detector, muted until the audio decision (`ferrite_radio::chip`).
-        let setup = RxSetup { freq: f, narrow: slot.narrow, am: slot.am, rx_tone: slot.rx_tone, rx_tail: slot.rx_tail };
+        // CAL-12: the chip tunes the word with the factory crystal trim; everything else keeps `f`.
+        let setup = RxSetup { freq: self.sqcal.rx_word(f), narrow: slot.narrow, am: slot.am, rx_tone: slot.rx_tone, rx_tail: slot.rx_tail };
         radio_chip::tune_rest(&mut self.chip(n), &setup);
         // SQL-1: stock's thresholds for this frequency and the slot's level (stock writes them at each receive
         // setup); only when they differ from what the chip has.

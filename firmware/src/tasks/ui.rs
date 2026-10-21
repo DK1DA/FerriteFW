@@ -132,7 +132,7 @@ fn read_calibration(store: &store::Store, flash: bool, cal_ok: bool, mcu_ok: boo
                 Fault::Blank => b"tx calibration: locked, sector blank or unread",
                 Fault::PaCurve => b"tx calibration: locked, a PA curve byte is 0x00 or 0xFF",
                 Fault::Windows => b"tx calibration: locked, TX windows blank or invalid",
-                Fault::Trim => b"tx calibration: locked, factory crystal trim not applied yet",
+                Fault::Trim => b"tx calibration: locked, factory crystal trim over 20 ppm",
                 Fault::ToneGain => b"tx calibration: locked, a sub-tone gain byte is over 0x7F",
                 Fault::LevelOrder => b"tx calibration: locked, PA curves not Low < Mid < High",
                 Fault::Mcu => b"tx calibration: locked, the MCU isn't an AT32F403AVGT7",

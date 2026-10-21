@@ -88,8 +88,9 @@ impl Radio {
         let Some(sc) = self.scope.as_ref() else { return };
         if let Some(f) = Self::scope_freq(sc, sc.i) {
             let chip = sc.chip;
+            let w = self.sqcal.rx_word(f); // CAL-12
             let mut bk = self.chip(chip);
-            bk.set_freq(f * 10);
+            bk.set_freq(w * 10);
             bk.rx_on();
         }
     }
@@ -182,8 +183,9 @@ impl Radio {
                 let f = self.slots[s as usize % SLOTS].rx_freq();
                 self.scope = Some(sc);
                 self.open_delay(chip, true); // SQL-17: the look hears a carrier at once
+                let w = self.sqcal.rx_word(f); // CAL-12
                 let mut bk = self.chip(chip);
-                bk.set_freq(f * 10);
+                bk.set_freq(w * 10);
                 bk.rx_on();
                 return;
             }
