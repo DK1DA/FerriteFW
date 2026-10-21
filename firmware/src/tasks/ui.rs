@@ -163,6 +163,9 @@ fn own_frame<F: core::future::Future>(f: F) -> OwnFrame<F> {
     OwnFrame(f)
 }
 
+/// LINK-38: the shortest gap between two redraws driven by live changes alone (20 a second).
+const FRAME_MIN_MS: u32 = 50;
+
 #[embassy_executor::task]
 pub async fn task() {
     let mut lcd = Screen::new();
@@ -396,6 +399,8 @@ pub async fn task() {
     let mut decode = super::decode::Decode::new();
     // MODE-6: the command taken from the App that the Radio task's channel had no room for; it goes first.
     let mut held: Option<RadioCmd> = None;
+    // LINK-38: when the screen was last drawn, and whether input since wants it drawn now.
+    let (mut last_draw, mut urgent) = (0u32, true);
     loop {
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
@@ -652,8 +657,17 @@ pub async fn task() {
             }
         }
         gps.step(&mut app, store, &mut dev);
+        // LINK-38: a redraw for live changes alone at most every FRAME_MIN_MS. During a scan the Radio task reports
+        // every step and each scan page redraw is ~14 KB (12-17 ms): back to back they left the Link task (same
+        // executor) a turn only between draws, too little to answer the link or carry the cable log. Keys and the
+        // knob still draw at once.
+        let since = now_ms().wrapping_sub(last_draw);
+        let draw = urgent || since >= FRAME_MIN_MS;
         let (c0, b0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed));
-        app.render(&mut lcd, &live, &dev, store);
+        if draw {
+            app.render(&mut lcd, &live, &dev, store);
+            (last_draw, urgent) = (now_ms(), false);
+        }
         // Cable log turned on or off in the menu (0 9 2 6; the bring-up build ignores it: always on).
         if !cfg!(feature = "bringup") && app.settings().cable_log != cable_log {
             cable_log = app.settings().cable_log;
@@ -676,6 +690,9 @@ pub async fn task() {
         LED_RED.write(leds.red == LED_ACTIVE_HIGH);
         LED_GREEN.write(leds.green == LED_ACTIVE_HIGH);
         let mut period = if down != 0 || ports.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
+        if !draw {
+            period = period.min((FRAME_MIN_MS - since) as u64); // the frame held back, drawn on time
+        }
         if leds.next_ms != 0 {
             period = period.min(leds.next_ms as u64);
         }
@@ -699,8 +716,12 @@ pub async fn task() {
         match select4(live_rx.changed(), INPUT.receive(), wait, ALERTS.ready_to_receive()).await {
             Either4::First(l) => live = l,
             // WX-4: a decoded SAME header opens the alert over any screen.
-            Either4::Fourth(()) => super::decode::Decode::take_alert(&mut app, store),
+            Either4::Fourth(()) => {
+                urgent = true;
+                super::decode::Decode::take_alert(&mut app, store)
+            }
             Either4::Second(Input::Key(keypad::Event::Press(code))) => {
+                urgent = true;
                 log_input(&Input::Key(keypad::Event::Press(code)));
                 app.raw_key(code, true); // every code, mapped or not: the key test names them (KEY-2)
                 if let Some(k) = keys::key(code) {
@@ -709,6 +730,7 @@ pub async fn task() {
                 }
             }
             Either4::Second(Input::Key(keypad::Event::Release(code))) => {
+                urgent = true;
                 log_input(&Input::Key(keypad::Event::Release(code)));
                 app.raw_key(code, false);
                 if let Some(k) = keys::key(code) {
@@ -718,6 +740,7 @@ pub async fn task() {
             }
             Either4::Second(Input::Key(_)) => {} // the sampler's own long press and repeat are off
             Either4::Second(Input::Knob(d)) => {
+                urgent = true;
                 log_input(&Input::Knob(d));
                 app.knob(d, now_ms(), store)
             }
