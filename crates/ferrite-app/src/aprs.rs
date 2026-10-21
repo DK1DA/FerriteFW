@@ -524,8 +524,8 @@ impl App {
         let b = self.aprs.beacon;
         let beacon = if self.aprs.mode() != 0 {
             b | BEACON_PAUSED
-        } else if b & 0x0F != 0 {
-            b & 0x0F
+        } else if b & !BEACON_PAUSED != 0 {
+            b & !BEACON_PAUSED // the paused mode back, distance (10 km is 16) and smart (17) included
         } else {
             BEACON_ON
         };

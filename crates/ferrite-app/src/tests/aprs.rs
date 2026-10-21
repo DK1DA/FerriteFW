@@ -290,6 +290,14 @@ fn beacon_settings() {
     assert_eq!(a.app.aprs_cfg().mode(), 0);
     a.app.toggle_beacon();
     assert_eq!(a.app.aprs_cfg().mode(), 1, "on again in its mode");
+    // Modes past 15 (every 10 km, smart) come back too.
+    for m in [16, 17] {
+        a.app.set_aprs(AprsCfg { beacon: m, ..a.app.aprs_cfg() });
+        a.app.toggle_beacon();
+        assert_eq!(a.app.aprs_cfg().mode(), 0);
+        a.app.toggle_beacon();
+        assert_eq!(a.app.aprs_cfg().mode(), m, "mode {m} back after a pause");
+    }
     a.app.set_aprs(AprsCfg { power: 2, ..a.app.aprs_cfg() });
     a.mode(true);
     assert!(a.cmds().contains(&RadioCmd::SlotParam { slot: 2, param: Param::Power, value: 2 }));
