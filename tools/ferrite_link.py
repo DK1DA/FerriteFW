@@ -862,7 +862,7 @@ def run(link, a):
         print(f"{len(got)} held: {' '.join(str(i + base) for i in got)}")
     elif a.cmd == "readmany":
         what = WHATS[(a.args or ["channel"])[0]]
-        first = int(a.args[1]) - (1 if what == CHANNEL else 0) if len(a.args) > 1 else 0
+        first = max(0, int(a.args[1]) - (1 if what == CHANNEL else 0)) if len(a.args) > 1 else 0
         count = int(a.args[2]) if len(a.args) > 2 else None
         recs, asks = link.read_many(what, first, count)
         for i, rec in recs:
