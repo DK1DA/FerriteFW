@@ -149,6 +149,61 @@ fn messages_keep_their_state() {
     assert_eq!(s.messages(), 2);
 }
 
+/// APRS-34: a rejected message stays rejected across a power cycle, told apart from failed, and nothing moves it
+/// on after.
+#[test]
+fn rejected_message_kept() {
+    let s = mount(SimFlash::new());
+    s.request(Op::Draft(Draft { to: Buf::from(b"VA3RTX"), text: Buf::from(b"Net at 8?") }));
+    assert!(s.request(Op::Send));
+    s.message_state(b"VA3RTX", b"Net at 8?", MsgState::Rejected);
+    s.message_state(b"VA3RTX", b"Net at 8?", MsgState::Failed);
+    let s = cycle(s);
+    assert_eq!(s.message(0).unwrap().state, MsgState::Rejected);
+}
+
+/// APRS-32: after a power cycle the APRS task's RAM table is empty, so a sender's retry of a message already
+/// stored is found in the store (by sender, number and text) and not stored or rung again; the APRS task still
+/// acks it. Another number, other text, and a message without a number are new.
+#[test]
+fn retry_after_power_cycle_stored_once() {
+    use ferrite_app::aprs_live::uaprs::ax25::{Address, Frame};
+    use ferrite_app::aprs_live::{AprsLive, Sending, FRAME_MAX};
+    let frame = |info: &[u8]| {
+        let mut b = [0u8; FRAME_MAX];
+        let path = [Address::from_text(b"WIDE1-1").unwrap()];
+        let n = Frame::new(Address::from_text(b"VE3KPW-9").unwrap(), Address::from_text(b"APDR16").unwrap(), &path, info).unwrap().write(&mut b).unwrap();
+        b[..n].to_vec()
+    };
+    let me = b"VA7FER-9";
+    let cfg = AprsCfg::DEFAULT;
+    // What the firmware's APRS task does with a message to us: the RAM table, then the store.
+    let hear = |s: &Store, a: &AprsLive, info: &[u8], now: u32| -> bool {
+        let rx = a.receive(&frame(info), now, me, &cfg);
+        match rx.inbound {
+            Some((from, text)) if !s.message_heard(from.as_bytes(), rx.inbound_id.as_bytes(), text.as_bytes()) => s.message_to_us(from.as_bytes(), text.as_bytes(), rx.inbound_id.as_bytes()),
+            _ => false,
+        }
+    };
+    let s = mount(SimFlash::new());
+    s.message_in(true, b"VE3KPW-9", b"Running late", 0); // from before APRS-32: no number kept
+    let a = AprsLive::new();
+    assert!(hear(&s, &a, b":VA7FER-9 :Running late{AB12}", 100));
+    assert!(!hear(&s, &a, b":VA7FER-9 :Running late{AB12}", 130), "the RAM table");
+    assert_eq!(s.messages(), 2);
+    let s = cycle(s);
+    let a = AprsLive::new();
+    assert!(!hear(&s, &a, b":VA7FER-9 :Running late{AB12}", 5), "the store");
+    let mut out = [0u8; FRAME_MAX];
+    let t = a.tick(5, Sending::All, true, me, None, &cfg, &mut out);
+    assert_eq!((t.what, Frame::parse(&out[..t.len]).unwrap().info), ("Ack", &b":VE3KPW-9 :ackAB12"[..]), "acked all the same");
+    assert!(hear(&s, &a, b":VA7FER-9 :Running late{AB13}", 6), "another number");
+    assert!(hear(&s, &a, b":VA7FER-9 :Other text{AB12}", 7), "other text");
+    assert!(hear(&s, &a, b":VA7FER-9 :Running late", 8), "no number: RAM only");
+    assert_eq!(s.messages(), 5);
+    assert!(s.message(0).is_some_and(|m| m.inbound && m.text.as_bytes() == b"Running late" && m.state == MsgState::Unread));
+}
+
 #[test]
 fn waypoints_list_newest_first_and_move_down_on_delete() {
     let s = mount(SimFlash::new());

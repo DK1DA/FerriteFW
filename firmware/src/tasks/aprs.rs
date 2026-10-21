@@ -22,8 +22,8 @@ use crate::chan::DSP;
 use crate::store::Store;
 use ferrite_app::aprs_live::uaprs::kiss;
 use ferrite_app::aprs_live::{Clear, ClearWait, Sending, FRAME_MAX};
-use ferrite_app::data::{Data, Event, Src};
-use ferrite_app::screens::transmit;
+use ferrite_app::data::{Data, Event, MsgState, Src};
+use ferrite_app::screens::{msgs, transmit};
 use ferrite_app::App;
 use ferrite_core::msg::{DecoderKind, DspCmd, LiveAll};
 use ferrite_core::txplan;
@@ -120,13 +120,17 @@ impl Aprs {
                 crate::chan::TERM_WAKE.signal(());
             }
             let rx = extra.aprs.receive(f.bytes(), now_s, me.as_bytes(), &extra.cfg());
-            if let Some((from, text)) = rx.inbound {
+            // APRS-32: a retry heard again after a power cycle is in the store already (acked all the same).
+            if let Some((from, text)) = rx.inbound.filter(|(f, t)| !store.message_heard(f.as_bytes(), rx.inbound_id.as_bytes(), t.as_bytes())) {
                 app.notify(from.as_bytes(), text.as_bytes(), false);
-                store.message_in(true, from.as_bytes(), text.as_bytes(), 0);
+                store.message_to_us(from.as_bytes(), text.as_bytes(), rx.inbound_id.as_bytes());
                 store.log(&log_event(app.aprs_freq(), from.as_bytes(), text.as_bytes())); // INBOX-6
             }
             if let Some((peer, text, st)) = rx.state {
                 store.message_state(peer.as_bytes(), text.as_bytes(), st);
+                if st == MsgState::Rejected {
+                    msgs::rejected(app, peer.as_bytes()); // APRS-34
+                }
             }
             if rx.changed || rx.state.is_some() {
                 extra.changed();

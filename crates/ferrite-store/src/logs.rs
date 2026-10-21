@@ -286,19 +286,28 @@ pub fn event_decode(b: &[u8; REC as usize], now: u32) -> Event {
 // ---- APRS messages ----
 
 /// Where a message's body ends; 96 (tries, one bit cleared per try) and 97 (bit 0 cleared: acked, bit 1:
-/// failed) are programmed later.
+/// failed, bit 2: rejected, APRS-34) are programmed later. A message to us keeps its sender's message number at
+/// 89..94 (zero-padded; all zero without one, as in records from before APRS-32).
 pub const MSG_END: usize = 96;
 const TRIES: usize = 96;
 const FINAL: usize = 97;
+const NUMBER: core::ops::Range<usize> = 89..94;
 
-pub fn msg_rec(inbound: bool, peer: &Buf<10>, txt: &Buf<67>, t: u32) -> [u8; REC as usize] {
+pub fn msg_rec(inbound: bool, peer: &Buf<10>, txt: &Buf<67>, id: &Buf<5>, t: u32) -> [u8; REC as usize] {
     let mut r = [0xFFu8; REC as usize];
     r[4..8].copy_from_slice(&t.to_le_bytes());
     r[BODY..MSG_END].fill(0);
     r[11] = inbound as u8;
     put(&mut r[12..22], peer);
     put(&mut r[22..89], txt);
+    put(&mut r[NUMBER], id);
     r
+}
+
+/// APRS-32: whether record `b` is the message to us from `peer` with number `id` and text `txt` (a retry heard
+/// again after a power cycle).
+pub fn msg_same(b: &[u8; REC as usize], peer: &Buf<10>, id: &Buf<5>, txt: &Buf<67>) -> bool {
+    b[11] != 0 && !id.is_empty() && text::<5>(&b[NUMBER]) == *id && text::<10>(&b[12..22]) == *peer && text::<67>(&b[22..89]) == *txt
 }
 
 pub fn msg_decode(b: &[u8; REC as usize], now: u32) -> Message {
@@ -308,6 +317,8 @@ pub fn msg_decode(b: &[u8; REC as usize], now: u32) -> Message {
         if b[READ] == 0xFF { MsgState::Unread } else { MsgState::Read }
     } else if b[FINAL] & 1 == 0 {
         MsgState::Acked
+    } else if b[FINAL] & 4 == 0 {
+        MsgState::Rejected
     } else if b[FINAL] & 2 == 0 {
         MsgState::Failed
     } else if tries >= 2 {
@@ -323,6 +334,7 @@ pub fn msg_state_byte(state: MsgState) -> Option<(usize, u8)> {
     match state {
         MsgState::Acked => Some((FINAL, !1)),
         MsgState::Failed => Some((FINAL, !2)),
+        MsgState::Rejected => Some((FINAL, !4)),
         MsgState::Retrying(n) => Some((TRIES, 0xFFu8.checked_shl(n.min(8) as u32).unwrap_or(0))),
         MsgState::Pending => Some((TRIES, 0xFE)),
         MsgState::Read => Some((READ, 0)),

@@ -56,7 +56,16 @@ fn state_text(m: &Message, b: &mut Buf<16>) -> u16 {
             b.set(b"failed");
             RED
         }
+        MsgState::Rejected => {
+            b.set(b"rejected");
+            RED
+        }
     }
+}
+
+/// APRS-34: one of ours was rejected by `peer`: said in a toast (an ack only moves the state).
+pub fn rejected(app: &mut App, peer: &[u8]) {
+    app.show_toast(b"Message rejected", peer, false);
 }
 
 /// A draft addressed to `to` (empty: a new message), then compose.
@@ -166,7 +175,7 @@ impl View for Msgs {
                     right: time.as_bytes(),
                     sub: m.text.as_bytes(),
                     sub_right: st.as_bytes(),
-                    sub_c: if m.state == MsgState::Failed { c } else { 0 },
+                    sub_c: if matches!(m.state, MsgState::Failed | MsgState::Rejected) { c } else { 0 },
                     dot: m.state == MsgState::Unread,
                     selected: i == self.cur.sel,
                     ..Row2::default()
