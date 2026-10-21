@@ -101,7 +101,8 @@ def power_shows_level_names(t):
         t.press("2", long=True)  # hold 2: the next power level (KEY-20)
     t.cmd("slot A vfo 223.5")
     u = t.home()
-    t.eq(u.active["power"], "0.25 W", "1.25 m: the capped power")
+    # HOME-4.2: the card says "No TX" while 1.25 m is locked (TX-10, until the bench measures the cap).
+    t.check(u.active["power"] in ("0.25 W", "No TX"), "1.25 m: the capped power, or No TX while locked", u.active["power"])
     u = t.keys("MENU")
     t.eq(u.row("TX power")["value"], "0.25 W", "and the quick menu says it")
 

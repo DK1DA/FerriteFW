@@ -189,7 +189,11 @@ def hf_starts_on_low(t):
     t.cmd("slot A vfo 146.52 high")
     t.eq(t.ui().active["power"], "HIGH", "High on 2 m")
     u = t.keys("2 8 STAR 4 MENU")
-    t.eq((u.active["freq"], u.active["power"]), ("28.40000", "LOW"), "28.4 MHz: Low")
+    t.eq(u.active["freq"], "28.40000", "28.4 MHz")
+    # The card says "No TX" where this region can't transmit (HOME-4.2); the level itself shows in quick settings.
+    t.check(u.active["power"] in ("LOW", "No TX"), "28.4 MHz: the card", u.active["power"])
+    t.eq(t.keys("MENU").row("TX power")["value"], "Low", "28.4 MHz: Low")
+    t.home()
     tune(t)
 
 
@@ -199,7 +203,8 @@ def power_capped_on_125m(t):
     (as the link's SLOT) is refused naming it."""
     t.cmd("slot A vfo 223.5")
     u = t.home()
-    t.eq(u.active["power"], "0.25 W", "the card")
+    t.check(u.active["power"] in ("0.25 W", "No TX"), "the card: 0.25 W, or No TX while 1.25 m is locked (TX-10)",
+            u.active["power"])
     u = t.keys("MENU")
     p = u.row("TX power")
     t.check(p["grey"], "TX power greyed", p)
@@ -291,7 +296,9 @@ def band_follows_the_frequency(t):
         t.eq(a["head"], f"VFO · {band}", f"{f} MHz: the band")
         want = mode if mode == "AM" or wide else "FM-N"
         t.eq(a["mode"], want, f"{f} MHz: the band's mode ({region})")
-        t.eq(a["power"], "0.25 W" if band == "1.25 m" else "LOW", f"{f} MHz: the power chip")
+        want = "0.25 W" if band == "1.25 m" else "LOW"
+        t.check(a["power"] in (want, "No TX"), f"{f} MHz: the power chip ({want}, or No TX where it can't transmit)",
+                a["power"])
     t.note(f"region {region}")
     # The mode list on a home VFO: FM, NFM and AM only (USB, LSB, CW are HF mode's).
     t.cmd("slot A vfo 146.52 fm")
