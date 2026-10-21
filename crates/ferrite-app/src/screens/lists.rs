@@ -563,19 +563,80 @@ pub fn clock_text(now_min: Option<u16>, ago_s: u32, b: &mut Buf<12>) {
     }
 }
 
-/// Coordinates in degrees and decimal minutes (0 6 3's default): "45 25.290 N 75 41.832 W".
-pub fn pos_text(p: Pos, b: &mut Buf<32>) {
+/// A position on one line in 0 6 3's format (GPS-15.3), compact to fit a list row: "45°25.290'N 75°41.832'W"
+/// (DDM, the default), "45.42150°N 75.69720°W", "45°25'17"N 75°41'50"W" (DMS to the second), or the grid square
+/// ("FN25dk"). The GPS page shows each coordinate in full ([`coord`]).
+pub fn pos_text(p: Pos, fmt: u8, b: &mut Buf<32>) {
     b.clear();
+    if fmt == 3 {
+        b.push(&grid(p));
+        return;
+    }
     for (v, pos, neg) in [(p.lat, "N", "S"), (p.lon, "E", "W")] {
-        let a = (v as i64).unsigned_abs();
-        let deg = a / 10_000_000;
-        let milli_min = (a % 10_000_000) * 60 / 10_000; // thousandths of a minute
         if !b.is_empty() {
             b.push(b" ");
         }
-        let f = milli_min % 1000;
-        let _ = uwrite!(b, "{} {}.{}{}{} {}", deg as u32, (milli_min / 1000) as u32, (f / 100) as u32, (f / 10 % 10) as u32, (f % 10) as u32, if v >= 0 { pos } else { neg });
+        let a = (v as i64).unsigned_abs();
+        let deg = (a / 10_000_000) as u32;
+        let h = if v >= 0 { pos } else { neg };
+        let _ = match fmt {
+            0 => {
+                let f = (a % 10_000_000 / 100) as u32;
+                uwrite!(b, "{}.{}{}\u{b0}{}", deg, Z5(f), f, h)
+            }
+            2 => {
+                let s = ((a % 10_000_000) * 3600 / 10_000_000) as u32; // whole seconds
+                uwrite!(b, "{}\u{b0}{}{}'{}{}\"{}", deg, z(s / 60), s / 60, z(s % 60), s % 60, h)
+            }
+            _ => {
+                let mm = ((a % 10_000_000) * 60_000 / 10_000_000) as u32; // thousandths of a minute
+                let (mi, f) = (mm / 1000, mm % 1000);
+                uwrite!(b, "{}\u{b0}{}{}.{}{}{}'{}", deg, z(mi), mi, f / 100, f / 10 % 10, f % 10, h)
+            }
+        };
     }
+}
+
+/// One coordinate in the 0 6 3 format: "45.42150° N", "45°25.290' N", "45°25'17.4\" N".
+pub(crate) fn coord(v: i32, pos: &str, neg: &str, fmt: u8, b: &mut Buf<24>) {
+    b.clear();
+    let a = (v as i64).unsigned_abs();
+    let deg = (a / 10_000_000) as u32;
+    let h = if v >= 0 { pos } else { neg };
+    let _ = match fmt {
+        0 => {
+            let f = (a % 10_000_000 / 100) as u32; // 5 decimals
+            uwrite!(b, "{}.{}{}\u{b0} {}", deg, Z5(f), f, h)
+        }
+        2 => {
+            let ds = (a % 10_000_000) * 36_000 / 10_000_000; // tenths of a second
+            let (mi, se) = ((ds / 600) as u32, (ds % 600) as u32);
+            uwrite!(b, "{}\u{b0}{}{}'{}{}.{}\" {}", deg, z(mi), mi, z(se / 10), se / 10, se % 10, h)
+        }
+        _ => {
+            let mm = (a % 10_000_000) * 60_000 / 10_000_000; // thousandths of a minute
+            let (mi, f) = ((mm / 1000) as u32, (mm % 1000) as u32);
+            uwrite!(b, "{}\u{b0}{}{}.{}{}{}' {}", deg, z(mi), mi, f / 100, f / 10 % 10, f % 10, h)
+        }
+    };
+}
+
+/// Zeros in front of a five-digit fraction.
+struct Z5(u32);
+impl ufmt::uDisplay for Z5 {
+    fn fmt<W: ufmt::uWrite + ?Sized>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error> {
+        let mut d = 10_000;
+        while d > 1 && self.0 < d {
+            f.write_str("0")?;
+            d /= 10;
+        }
+        Ok(())
+    }
+}
+
+/// "0" before a single digit.
+pub(crate) fn z(v: u32) -> &'static str {
+    if v < 10 { "0" } else { "" }
 }
 
 /// The Maidenhead grid square, six characters ("FN25dk").
@@ -686,8 +747,14 @@ mod tests {
         clock_text(Some(14 * 60 + 32), 22 * 60, &mut b);
         assert_eq!(s(&b), "14:10");
         let mut p = Buf::<32>::new();
-        pos_text(HERE, &mut p);
-        assert_eq!(p.as_bytes(), b"45 25.290 N 75 41.832 W");
+        pos_text(HERE, 1, &mut p);
+        assert_eq!(p.as_bytes(), "45\u{b0}25.290'N 75\u{b0}41.832'W".as_bytes(), "GPS-15.3: DDM, with its symbols");
+        pos_text(HERE, 0, &mut p);
+        assert_eq!(p.as_bytes(), "45.42150\u{b0}N 75.69720\u{b0}W".as_bytes());
+        pos_text(HERE, 2, &mut p);
+        assert_eq!(p.as_bytes(), "45\u{b0}25'17\"N 75\u{b0}41'49\"W".as_bytes(), "DMS to the whole second (49.9 s reads 49)");
+        pos_text(HERE, 3, &mut p);
+        assert_eq!(p.as_bytes(), b"FN25dk", "the grid square, six characters");
         let mut f = Buf::<16>::new();
         mhz_text(14_439_000, &mut f);
         assert_eq!(f.as_bytes(), b"144.390");

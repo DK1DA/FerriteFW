@@ -314,7 +314,7 @@ pub const SCOPE_BAR_COUNTS: [u8; 4] = [30, 60, 120, 240];
 pub const SCOPE_TRIGGERS: [&str; 3] = ["Off", "Monitor", "Log"];
 
 /// 0 6 3's values.
-pub const COORD_FORMATS: [&str; 4] = ["Degrees", "Deg, min", "Deg, min, sec", "Grid square"];
+pub const COORD_FORMATS: [&str; 4] = ["Decimal", "DDM", "DMS", "Grid square"];
 /// Up to 8 SAME location codes (WX-10).
 pub const SAME_CODES: usize = 8;
 

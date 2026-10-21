@@ -171,47 +171,6 @@ fn alt_u(m: i32, units: u8, b: &mut Buf<40>) {
     let _ = if units == 1 { uwrite!(b, "{} ft", m * 3281 / 1000) } else { uwrite!(b, "{} m", m) };
 }
 
-/// One coordinate in the 0 6 3 format: "45.42150° N", "45°25.290' N", "45°25'17.4\" N".
-fn coord(v: i32, pos: &str, neg: &str, fmt: u8, b: &mut Buf<24>) {
-    b.clear();
-    let a = (v as i64).unsigned_abs();
-    let deg = (a / 10_000_000) as u32;
-    let h = if v >= 0 { pos } else { neg };
-    let _ = match fmt {
-        0 => {
-            let f = (a % 10_000_000 / 100) as u32; // 5 decimals
-            uwrite!(b, "{}.{}{}\u{b0} {}", deg, Z5(f), f, h)
-        }
-        2 => {
-            let ds = (a % 10_000_000) * 36_000 / 10_000_000; // tenths of a second
-            let (mi, se) = ((ds / 600) as u32, (ds % 600) as u32);
-            uwrite!(b, "{}\u{b0}{}{}'{}{}.{}\" {}", deg, z(mi), mi, z(se / 10), se / 10, se % 10, h)
-        }
-        _ => {
-            let mm = (a % 10_000_000) * 60_000 / 10_000_000; // thousandths of a minute
-            let (mi, f) = ((mm / 1000) as u32, (mm % 1000) as u32);
-            uwrite!(b, "{}\u{b0}{}{}.{}{}{}' {}", deg, z(mi), mi, f / 100, f / 10 % 10, f % 10, h)
-        }
-    };
-}
-
-/// Zeros in front of a five-digit fraction.
-struct Z5(u32);
-impl ufmt::uDisplay for Z5 {
-    fn fmt<W: ufmt::uWrite + ?Sized>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error> {
-        let mut d = 10_000;
-        while d > 1 && self.0 < d {
-            f.write_str("0")?;
-            d /= 10;
-        }
-        Ok(())
-    }
-}
-
-/// "0" before a single digit.
-fn z(v: u32) -> &'static str {
-    if v < 10 { "0" } else { "" }
-}
 
 /// A time of day from seconds: "14:32", or "2:32 pm" with the 12 h clock.
 fn hhmm(t: u32, h12: bool, b: &mut Buf<40>) {
@@ -532,7 +491,7 @@ fn waypoints(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, fix: Option<F
     let rows = cur.rows(n, ROWS2, &ALL, |row, i| {
         if let Some(wp) = data.waypoint(i) {
             let (mut d, mut p) = (Buf::<16>::new(), Buf::<32>::new());
-            pos_text(wp.pos, &mut p);
+            pos_text(wp.pos, app.set.coord_fmt, &mut p);
             let arrow = fix.map(|f| {
                 let (m, deg) = dist_bearing(f.pos, wp.pos);
                 dist_u(m, units, &mut d);

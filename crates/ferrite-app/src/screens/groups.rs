@@ -104,7 +104,7 @@ const G5: [Entry; 9] = [
 const G6: [Entry; 9] = [
     Entry("GPS|On|The GPS receiver."),
     Entry("Position||Fix, satellites, position, grid."),
-    Entry("Coordinate format|Deg, min|How positions are written."),
+    Entry("Coordinate format|DDM|Decimal, DDM, DMS or grid square."),
     Entry("Units|Metric|Distance, altitude and speed units."),
     Entry("Time zone|UTC|The clock's offset from UTC."),
     Entry("Clock|24 h|12 or 24 h, from GPS; OK sets it by hand."),

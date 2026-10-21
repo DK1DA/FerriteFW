@@ -31,9 +31,10 @@ pub struct PosEntry {
 }
 
 const ROWS: [&str; 3] = ["Latitude", "Longitude", "Altitude"];
-/// Templates per format (Degrees, Deg-min, DMS; Grid types as Deg-min): # is a digit.
-const LAT: [&[u8]; 3] = [b"##.#####", b"## ##.###", b"## ## ##.#"];
-const LON: [&[u8]; 3] = [b"###.#####", b"### ##.###", b"### ## ##.#"];
+/// Templates per format (Decimal, DDM, DMS; Grid types as DDM): # is a digit, the rest shown as is, with the
+/// GPS page's symbols (GPS-15.3).
+const LAT: [&[u8]; 3] = ["##.#####\u{b0}".as_bytes(), "##\u{b0}##.###'".as_bytes(), "##\u{b0}##'##.#\"".as_bytes()];
+const LON: [&[u8]; 3] = ["###.#####\u{b0}".as_bytes(), "###\u{b0}##.###'".as_bytes(), "###\u{b0}##'##.#\"".as_bytes()];
 /// Altitude: up to 5 digits of metres.
 const ALT_DIGITS: u8 = 5;
 

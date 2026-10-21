@@ -172,7 +172,7 @@ const ROWS: [(&str, Val<Station>); 8] = [
     ("Position", |c, b| match c.x.pos {
         Some(p) => {
             let mut pb = Buf::<32>::new();
-            pos_text(p, &mut pb);
+            pos_text(p, c.app.set.coord_fmt, &mut pb);
             text(b, pb.as_bytes())
         }
         None => text(b, b"none"),

@@ -358,7 +358,7 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
     }
     if let Some(p) = e.pos {
         let mut pb = Buf::<32>::new();
-        pos_text(p, &mut pb);
+        pos_text(p, app.set.coord_fmt, &mut pb);
         add("Position", pb.as_bytes());
         if let Some(f) = cx.store.data().fix() {
             let (m, deg) = dist_bearing(f.pos, p);
