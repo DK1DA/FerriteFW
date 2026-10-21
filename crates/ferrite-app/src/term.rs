@@ -14,12 +14,14 @@
 //! streams lines and then waits for Enter. Not yet: marking or colour (TERM-14, 18).
 
 use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE};
+pub(crate) use crate::chfield::parse_mhz;
+use crate::chfield::{ChField as F, Ctx, Op};
 use crate::screens::advanced::GROUPS;
 use crate::screens::groups::{self, SUBS};
 use crate::settings::CABLE_PORTS;
-use crate::slot::{band_near, band_of, mode_chip, tone_text, Item, BANDS, BAND_125M, STEPS};
+use crate::slot::{mode_chip, tone_text, Item};
 use crate::App;
-use ferrite_core::freq::{mhz, Freq10};
+use ferrite_core::freq::Freq10;
 use ferrite_core::gpspower::GpsPhase;
 use ferrite_core::msg::{Device, GpsState, LiveAll, SLOTS};
 use ferrite_core::VERSION;
@@ -137,20 +139,8 @@ fn cmd_trim(s: &[u8]) -> &[u8] {
     &s[a..b]
 }
 
-/// The channel editor's fields, in order (the radio's editor: EDIT-2, CHAN-4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum F {
-    Name,
-    Zone,
-    Rx,
-    /// Split's TX frequency (typed; ◀▶ steps it while split).
-    Tx,
-    It(Item),
-    Flag(u8, &'static str),
-    Home,
-}
-
-const FIELDS: [F; 17] = [
+/// The channel editor's fields, in order (the radio's editor: EDIT-2, CHAN-4), with their rules in [`crate::chfield`].
+const FIELDS: [F; 16] = [
     F::Name,
     F::Zone,
     F::Rx,
@@ -162,11 +152,10 @@ const FIELDS: [F; 17] = [
     F::It(Item::Power),
     F::It(Item::Squelch),
     F::It(Item::BusyLock),
-    F::Flag(FLAG_SKIP, "Skip"),
-    F::Flag(FLAG_APRS, "APRS"),
-    F::Flag(FLAG_RX_ONLY, "RX only"),
-    F::Flag(FLAG_HIDDEN, "Hidden"),
-    F::Flag(FLAG_PRIORITY, "Priority"),
+    F::Scan,
+    F::Flag(FLAG_APRS),
+    F::Flag(FLAG_RX_ONLY),
+    F::Flag(FLAG_HIDDEN),
     F::Home,
 ];
 
@@ -847,95 +836,44 @@ impl Term {
 
     /// ◀▶ on a field: the same steps and checks as the radio's channel editor (TERM-6, TERM-7).
     fn change<S: ChannelStore>(&mut self, app: &mut App, c: Channel, f: F, d: i32, store: &S) {
-        let mut n = c;
         match f {
             F::Name => return self.say("Enter types the name (16 characters)".as_bytes(), false),
-            F::Zone => {
-                let z = store.zones() as i32 + 1;
-                let i = if c.zone == NO_ZONE { z - 1 } else { c.zone as i32 };
-                let k = (i + d).rem_euclid(z);
-                n.zone = if k == z - 1 { NO_ZONE } else { k as u8 };
-            }
-            F::Rx => {
-                let step = STEPS[crate::slot::band_step(band_near(c.rx), app.set.region()) as usize].0 as i32;
-                n.rx = (c.rx as i32 + d * step).clamp(crate::chan::CH_LO as i32, mhz(1300) as i32) as Freq10; // CHAN-22
-            }
-            F::Tx if c.cfg.split => {
-                let step = STEPS[crate::slot::band_step(band_near(c.cfg.offset.max(0) as Freq10), app.set.region()) as usize].0 as i32;
-                n.cfg.offset = (c.cfg.offset + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1);
-            }
-            F::Tx => return self.say("TX: Enter types a TX frequency (split)".as_bytes(), false),
-            F::It(Item::Offset) if (Item::Offset.get(&c.cfg).0 + d).rem_euclid(4) == 3 => {
-                // Split needs its frequency: the TX row, typing
-                self.field = FIELDS.iter().position(|x| *x == F::Tx).unwrap_or(0) as u8;
-                self.line = Some(Buf::new());
-                return self.say("Split: type the TX frequency, then Enter".as_bytes(), false);
-            }
-            F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => {
-                return self.say("Power: fixed at 0.25 W on 1.25 m".as_bytes(), true); // TX-9, TERM-7
-            }
-            F::It(Item::Power) if c.flags & FLAG_RX_ONLY != 0 => {
-                return self.say("Power: this channel is RX only".as_bytes(), true);
-            }
-            F::It(it) => {
-                let shift = BANDS[band_near(c.rx)].shift;
-                let v = it.get(&c.cfg).0 + d;
-                it.set(&mut n.cfg, v, shift);
-            }
-            F::Flag(bit, _) => n.flags ^= bit,
-            F::Home => {
-                let on = app.set.home_ch != Some(c.num);
-                app.set.home_ch = if on { Some(c.num) } else { app.set.home_ch.filter(|&h| h != c.num) };
-                return self.say(if on { "Home channel: hold 0 on home jumps here".as_bytes() } else { "No longer the home channel".as_bytes() }, false);
-            }
+            F::Tx if !c.cfg.split => return self.say("TX: Enter types a TX frequency (split)".as_bytes(), false),
+            _ => {}
         }
-        self.save(app, n);
+        self.apply(app, c, f, Op::Step(d), store.zones());
+        if f == F::It(Item::Offset) && self.edit.is_some_and(|n| n.cfg.split && !c.cfg.split) {
+            // Split on today's TX, as the radio's knob: the TX row, typing another
+            self.field = FIELDS.iter().position(|x| *x == F::Tx).unwrap_or(0) as u8;
+            self.line = Some(Buf::new());
+            self.say("Split: type the TX frequency, then Enter".as_bytes(), false);
+        }
     }
 
     /// # on a field: its default (MENU-18).
     fn default(&mut self, app: &mut App, c: Channel, f: F) {
-        let mut n = c;
-        match f {
-            F::It(Item::Power) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => return,
-            F::It(it) => {
-                let shift = BANDS[band_near(c.rx)].shift;
-                it.set(&mut n.cfg, it.default_of(), shift);
-            }
-            F::Flag(bit, _) => n.flags &= !bit,
-            F::Home => {
-                if app.set.home_ch == Some(c.num) {
-                    app.set.home_ch = None;
-                }
-                return;
-            }
-            _ => return,
-        }
-        self.save(app, n);
+        self.apply(app, c, f, Op::Reset, 0);
     }
 
-    /// A typed value: the name, or the receive frequency in MHz.
+    /// A typed value: the name, or the RX or split TX frequency in MHz.
     fn commit(&mut self, app: &mut App, s: &[u8]) {
         let Some(c) = self.edit else { return };
-        let mut n = c;
-        match FIELDS[self.field as usize % FIELDS.len()] {
-            F::Name => {
-                if s.iter().any(|b| !(0x20..0x7F).contains(b)) {
-                    return self.say("Name: letters, digits and punctuation only".as_bytes(), true);
-                }
-                n.set_name(s);
-            }
-            F::Rx => match parse_mhz(s) {
-                Some(f) if crate::chan::rx_ok(f) => n.rx = f, // CHAN-22, CHAN-26
-                _ => return self.say("RX: 0.15-64 (HF), 64-630 or 756-1300 MHz, e.g. 146.52".as_bytes(), true),
-            },
-            F::Tx => match parse_mhz(s) {
-                Some(f) if !ferrite_core::txplan::relay_ok(n.rx, f) => {
-                    return self.say("Split TX needs the HF relay: not allowed with this RX frequency".as_bytes(), true); // TX-37
-                }
-                Some(f) if (mhz(64)..mhz(1000)).contains(&f) => (n.cfg.split, n.cfg.offset) = (true, f as i32),
-                _ => return self.say("TX: 64 to 1000 MHz, e.g. 146.52".as_bytes(), true),
-            },
-            _ => return,
+        let f = FIELDS[self.field as usize % FIELDS.len()];
+        self.apply(app, c, f, Op::Typed(s), 0);
+    }
+
+    /// A field's change through its rules: saved, Home set, or the refusal said.
+    fn apply(&mut self, app: &mut App, c: Channel, f: F, op: Op, zones: u8) {
+        let (mut n, mut home) = (c, app.set.home_ch);
+        if let Err(r) = f.change(&mut n, &mut home, op, Ctx { zones, region: app.set.region() }) {
+            let mut m = Buf::<96>::new();
+            r.line(&mut m);
+            return self.say(m.as_bytes(), true);
+        }
+        if home != app.set.home_ch {
+            app.set.home_ch = home;
+            let on = home == Some(c.num);
+            return self.say(if on { "Home channel: hold 0 on home jumps here".as_bytes() } else { "No longer the home channel".as_bytes() }, false);
         }
         self.save(app, n);
     }
@@ -1517,8 +1455,8 @@ impl Term {
                 tone_text(c.cfg.tx_tone, &mut v);
                 w.s(if v.is_empty() { b"-" } else { v.as_bytes() });
                 w.at(65);
-                if band_of(c.rx) == Some(BAND_125M) {
-                    w.s(b"0.25W");
+                if crate::chfield::capped(&c) {
+                    w.s(b"0.25W"); // by the TX band (TX-9)
                 } else {
                     item(Item::Power, &c, w);
                 }
@@ -1574,16 +1512,7 @@ impl Term {
                 let f = FIELDS[i as usize];
                 let sel = i == self.field;
                 w.at(3);
-                w.s(match f {
-                    F::Name => "Name",
-                    F::Zone => "Zone",
-                    F::Rx => "RX",
-                    F::Tx => "TX",
-                    F::It(it) => it.name(),
-                    F::Flag(_, l) => l,
-                    F::Home => "Home",
-                }
-                .as_bytes());
+                w.s(f.label(true).as_bytes());
                 w.at(21);
                 if sel {
                     w.rev();
@@ -1594,7 +1523,6 @@ impl Term {
                         w.s(l.as_bytes());
                         w.s(b"_");
                     }
-                    (F::Name, _) => w.s(c.name()),
                     (F::Zone, _) => w.s(zone_name(c.zone, cx.store).as_bytes()),
                     (F::Rx, _) => {
                         w.s(mhz5(c.rx).as_bytes());
@@ -1604,14 +1532,11 @@ impl Term {
                         w.s(mhz5(c.cfg.tx_of(c.rx)).as_bytes());
                         w.s(if c.cfg.split { b" MHz, split" } else { b" MHz" });
                     }
-                    (F::It(Item::Power), _) if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) => w.s(b"0.25 W"),
-                    (F::It(it), _) => {
+                    (_, _) => {
                         let mut v = Buf::<16>::new();
-                        it.text(&c.cfg, true, &mut v);
+                        f.text(&c, cx.app.set.home_ch, true, &mut v);
                         w.s(v.as_bytes());
                     }
-                    (F::Flag(bit, _), _) => w.s(if c.flags & bit != 0 { b"On" } else { b"Off" }),
-                    (F::Home, _) => w.s(if cx.app.set.home_ch == Some(c.num) { b"Yes" } else { b"No" }),
                 }
                 w.s(b" ");
                 if sel {
@@ -2024,31 +1949,6 @@ fn mhz5(f: Freq10) -> Buf<12> {
     let mut b = Buf::new();
     put!(b, "{}.{}", f / 100_000, Zero(f % 100_000, 5));
     b
-}
-
-/// "146.52" or "146.520 00" typed: MHz to 10 Hz steps.
-fn parse_mhz(s: &[u8]) -> Option<Freq10> {
-    let (mut int, mut frac, mut places, mut dot, mut any) = (0u32, 0u32, 0u32, false, false);
-    for &c in s {
-        match c {
-            b'0'..=b'9' if !dot => {
-                int = int.checked_mul(10)?.checked_add((c - b'0') as u32)?;
-                any = true;
-            }
-            b'0'..=b'9' if places < 5 => {
-                frac = frac * 10 + (c - b'0') as u32;
-                places += 1;
-                any = true;
-            }
-            b'0'..=b'9' | b' ' => {}
-            b'.' | b',' if !dot => dot = true,
-            _ => return None,
-        }
-    }
-    if !any || int > 9_999 {
-        return None;
-    }
-    Some(int * 100_000 + frac * 10u32.pow(5 - places))
 }
 
 /// "12 s ago", "3 min ago", "2 h ago".

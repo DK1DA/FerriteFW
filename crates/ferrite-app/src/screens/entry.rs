@@ -617,6 +617,11 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
             if f < crate::chan::HF_TOP {
                 return app.show_toast(b"Below 64 MHz", b"save it in HF mode", false); // CHAN-26
             }
+            // The channel's own rules (CHAN-22: a TX apart from RX within 64-1000 MHz)
+            let ch = app.slots[app.active as usize].ch;
+            if let Some(Err(r)) = ch.map(|c| crate::chfield::check_edit(&crate::chan::Channel { rx: f, ..c })) {
+                return app.refusal_toast(r);
+            }
             super::chedit::edit(app, |c| c.rx = f);
             app.back();
         }

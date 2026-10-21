@@ -215,6 +215,50 @@ fn channel_editor() {
     assert!(t.app.slot(0).on_channel());
 }
 
+/// CHAN-32, decision 223: the channel editor keeps the shared channel rules (crate::chfield). An RX-only channel's
+/// power is greyed with the reason and the knob leaves it (CHAN-4, EDIT-7); the knob steps RX over 630-756 MHz
+/// (CHAN-22); a shift that would put TX above 1000 MHz is refused with a toast and nothing saved (CHAN-22); typed RX
+/// likewise.
+#[test]
+fn channel_editor_shared_rules() {
+    use crate::chan::{Channel, FLAG_RX_ONLY};
+    use crate::screens::entry::{Entry, EntryFor};
+    use ferrite_core::freq::mhz;
+    let mut t = T::new();
+    t.tap(Key::VfoMem);
+    t.hold(Key::Slot);
+    let c = t.app.slot(0).ch.unwrap();
+    t.app.slots[0].ch = Some(Channel { flags: c.flags | FLAG_RX_ONLY, ..c });
+    t.app.screen = Screen::ChEdit(ChEdit { cell: 7 }); // Power
+    let p = t.app.slot(0).cfg().power;
+    t.knob(1);
+    assert_eq!(t.app.slot(0).cfg().power, p, "RX only: unchanged");
+    assert_eq!(t.app.greyed(Item::Power), Some("this channel is RX only"));
+    t.app.slots[0].ch = Some(Channel { rx: mhz(630), ..c });
+    t.app.screen = Screen::ChEdit(ChEdit { cell: 2 });
+    t.knob(1);
+    assert_eq!(t.app.slot(0).ch.unwrap().rx, mhz(756), "over the gap");
+    t.app.slots[0].ch = Some(Channel { rx: mhz(999) + 90_000, ..c });
+    t.app.screen = Screen::ChEdit(ChEdit { cell: crate::screens::chedit::OFFSET_CELL });
+    t.writes();
+    t.knob(1);
+    assert_eq!(t.app.slot(0).cfg().offset, 0, "+5 MHz would TX at 1004.9");
+    assert!(t.writes().is_empty());
+    assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Offset" && x.body.as_bytes() == b"TX outside 64 to 1000 MHz"));
+    // Typed: a simplex channel above 1000 MHz is receive only and kept (VFO-21); with a shift it isn't.
+    t.app.slots[0].ch = Some(Channel { rx: mhz(446), cfg: crate::slot::SlotCfg { offset: 500_000, ..c.cfg }, ..c });
+    t.app.screen = Screen::Entry(Entry::new(EntryFor::ChannelFreq, None));
+    t.digits("129**6");
+    t.tap(Key::Menu);
+    assert_eq!(t.app.slot(0).ch.unwrap().rx, mhz(446), "TX 1301 MHz: refused");
+    assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"TX outside 64 to 1000 MHz"));
+    t.app.slots[0].ch = Some(Channel { rx: mhz(446), ..c });
+    t.app.screen = Screen::Entry(Entry::new(EntryFor::ChannelFreq, None));
+    t.digits("129**6");
+    t.tap(Key::Menu);
+    assert_eq!(t.app.slot(0).ch.unwrap().rx, mhz(1296), "simplex: kept");
+}
+
 /// MENU-17, MENU-20, SQL-7: the bigger editor changes live; BACK puts the old value back, OK keeps.
 #[test]
 fn value_editor() {

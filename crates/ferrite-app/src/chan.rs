@@ -52,7 +52,8 @@ pub const FLAG_RX_ONLY: u8 = 4;
 /// Left out of the channel lists unless "show hidden" is on (their options); still reachable by number and
 /// scanned (decision 63).
 pub const FLAG_HIDDEN: u8 = 0x40;
-/// Checked during scans only (not while just receiving, decision 64) at the priority interval, besides the zone's priority channels (decision 63).
+/// Checked during scans only (not while just receiving, decision 64) at the priority interval, besides the zone's
+/// priority channels (decision 63).
 pub const FLAG_PRIORITY: u8 = 0x80;
 
 /// Channel numbers 0-999 (shown 1-1000).
@@ -92,6 +93,16 @@ impl Channel {
     /// Left out of every scan (CHAN-4, SCAN-9).
     pub fn skip(&self) -> bool {
         self.flags & FLAG_SKIP != 0
+    }
+
+    /// In scans (0), skipped (1) or priority (2): Skip and Priority exclude each other (decision 63), and a record
+    /// with both reads as Priority.
+    pub fn scan(&self) -> u8 {
+        if self.flags & FLAG_PRIORITY != 0 { 2 } else { (self.flags & FLAG_SKIP != 0) as u8 }
+    }
+
+    pub fn set_scan(&mut self, v: u8) {
+        self.flags = self.flags & !(FLAG_SKIP | FLAG_PRIORITY) | [0, FLAG_SKIP, FLAG_PRIORITY][v as usize % 3];
     }
 
     /// The end tone ([`END_TONES`] index; 0 Global): out of range reads as Global.

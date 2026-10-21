@@ -12,11 +12,11 @@ use super::nav::Dest;
 use super::shared::*;
 use super::text::TextFor;
 use super::{Cx, Hints, View};
-use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, MAX_CHANNELS, NO_ZONE};
+use crate::chan::{Channel, ChannelStore, FLAG_APRS, FLAG_RX_ONLY, MAX_CHANNELS};
+use crate::chfield::{ChField, Ctx, Op};
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{chan_label, Item, STEPS, band_near};
+use crate::slot::{chan_label, Item};
 use crate::{App, Screen, EDIT_IDLE_MS};
-use ferrite_core::freq::mhz;
 use ferrite_core::keys::Key;
 use ferrite_ui::assets::*;
 use ferrite_ui::gfx::*;
@@ -31,31 +31,28 @@ pub struct ChEdit {
     pub cell: u8,
 }
 
-/// A grid cell: a slot setting, a channel flag, the number, Home.
+/// A cell: a channel field ([`crate::chfield`]: its steps, text and checks), or the number (moves the channel to
+/// the next free one: the editor's own).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cell {
-    It(Item),
-    Flag(u8, &'static str),
-    /// In scans, skipped, or priority (decision 63): Skip and Priority exclude each other.
-    Scan,
+    F(ChField),
     Number,
-    Home,
 }
 
 /// The twelve settings (EDIT-2; chapter 10's list), row by row.
 const CELLS: [Cell; 12] = [
-    Cell::It(Item::Mode),
-    Cell::It(Item::RxTone),
-    Cell::It(Item::Tones),
-    Cell::It(Item::Offset),
-    Cell::It(Item::Power),
-    Cell::It(Item::Squelch),
-    Cell::It(Item::BusyLock),
-    Cell::Scan,
-    Cell::Flag(FLAG_APRS, "APRS"),
-    Cell::Flag(FLAG_RX_ONLY, "RX only"),
+    Cell::F(ChField::It(Item::Mode)),
+    Cell::F(ChField::It(Item::RxTone)),
+    Cell::F(ChField::It(Item::Tones)),
+    Cell::F(ChField::It(Item::Offset)),
+    Cell::F(ChField::It(Item::Power)),
+    Cell::F(ChField::It(Item::Squelch)),
+    Cell::F(ChField::It(Item::BusyLock)),
+    Cell::F(ChField::Scan),
+    Cell::F(ChField::Flag(FLAG_APRS)),
+    Cell::F(ChField::Flag(FLAG_RX_ONLY)),
     Cell::Number,
-    Cell::Home,
+    Cell::F(ChField::Home),
 ];
 
 const ZONE: u8 = 0;
@@ -71,11 +68,8 @@ const GY: i32 = 108;
 impl Cell {
     fn label(self) -> &'static str {
         match self {
-            Cell::It(i) => i.label(),
-            Cell::Flag(_, l) => l,
-            Cell::Scan => "Scan",
+            Cell::F(f) => f.label(false),
             Cell::Number => "Number",
-            Cell::Home => "Home",
         }
     }
 }
@@ -99,6 +93,24 @@ pub(crate) fn edit(app: &mut App, f: impl FnOnce(&mut Channel)) {
         app.send_slot(a);
     }
     app.save_channel(a, (c.num != old.num).then_some(old.num));
+}
+
+/// A field's change through its rules ([`crate::chfield`]): kept and saved (EDIT-4), Home set (CHAN-18), or the
+/// refusal as a toast.
+fn apply(app: &mut App, store: &impl ChannelStore, f: ChField, op: Op) {
+    let Some(mut c) = app.slots[app.active as usize].ch else { return };
+    let mut home = app.set.home_ch;
+    if let Err(r) = f.change(&mut c, &mut home, op, Ctx { zones: store.zones(), region: app.set.region() }) {
+        return app.refusal_toast(r);
+    }
+    if home != app.set.home_ch {
+        set_home(app, home.is_some());
+    }
+    let moved = app.slots[app.active as usize].ch.is_some_and(|o| o.zone != c.zone);
+    edit(app, |x| *x = c);
+    if moved {
+        place(app, store);
+    }
 }
 
 /// Where the channel now sits in its zone (by number, CHAN-10), counting the others in the store.
@@ -167,10 +179,8 @@ impl View for ChEdit {
             }
             (Key::Hash, Short) => match self.at() {
                 // MENU-18: back to the default
-                Some(Cell::It(i)) => app.reset(i),
-                Some(Cell::Flag(bit, _)) => edit(app, |c| c.flags &= !bit),
-                Some(Cell::Scan) => edit(app, |c| c.flags &= !(FLAG_SKIP | FLAG_PRIORITY)),
-                Some(Cell::Home) => set_home(app, false),
+                Some(Cell::F(ChField::It(i))) => app.reset(i),
+                Some(Cell::F(f)) => apply(app, store, f, Op::Reset),
                 _ => {}
             },
             (Key::Menu, Short) => match cell {
@@ -182,7 +192,7 @@ impl View for ChEdit {
                     app.screen = Screen::Entry(Entry::new(EntryFor::ChannelFreq, None));
                 }
                 _ => {
-                    if let Some(Cell::It(i)) = self.at() {
+                    if let Some(Cell::F(ChField::It(i))) = self.at() {
                         app.open(Dest::value(i)); // MENU-17
                     }
                 }
@@ -193,44 +203,20 @@ impl View for ChEdit {
 
     fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
         let Some(ch) = app.slots[app.active as usize].ch else { return };
-        match self.cell {
-            ZONE => {
-                // Every zone, then none (CHAN-10): the channel moves (EDIT-5).
-                let n = store.zones() as i32 + 1;
-                let i = if ch.zone == NO_ZONE { n - 1 } else { ch.zone as i32 };
-                let k = (i + d).rem_euclid(n);
-                let z = if k == n - 1 { NO_ZONE } else { k as u8 };
-                edit(app, |c| c.zone = z);
-                place(app, store);
-            }
-            NAME => {}
-            FREQ => {
-                let step = STEPS[crate::slot::band_step(band_near(ch.rx), app.set.region()) as usize].0 as i32;
-                let f = (ch.rx as i32 + d * step).clamp(mhz(64) as i32, mhz(1000) as i32 - 1) as u32; // CHAN-22
-                edit(app, |c| c.rx = f);
-            }
-            _ => match self.at() {
-                Some(Cell::It(i)) => app.change(i, d),
-                Some(Cell::Flag(bit, _)) => edit(app, |c| c.flags ^= bit),
-                Some(Cell::Scan) => edit(app, |c| {
-                    // In scans -> Skip -> Priority, and back the other way.
-                    let i = if c.flags & FLAG_PRIORITY != 0 { 2 } else { (c.flags & FLAG_SKIP != 0) as i32 };
-                    let n = (i + d).rem_euclid(3);
-                    c.flags = (c.flags & !(FLAG_SKIP | FLAG_PRIORITY)) | [0, FLAG_SKIP, FLAG_PRIORITY][n as usize];
-                }),
-                Some(Cell::Home) => set_home(app, app.set.home_ch != Some(ch.num)),
-                Some(Cell::Number) => {
-                    // The next free number that way (EDIT-5: renumbering moves the channel).
-                    let free = (1..MAX_CHANNELS as i32)
-                        .map(|k| (ch.num as i32 + d.signum() * k).rem_euclid(MAX_CHANNELS as i32) as u16)
-                        .find(|&n| store.by_num(n).is_none());
-                    if let Some(n) = free {
-                        edit(app, |c| c.num = n);
-                        place(app, store);
-                    }
+        match self.at() {
+            Some(Cell::F(ChField::It(i))) => app.change(i, d), // the slot's setting, through the channel's rules
+            Some(Cell::F(f)) => apply(app, store, f, Op::Step(d)),
+            Some(Cell::Number) => {
+                // The next free number that way (EDIT-5: renumbering moves the channel).
+                let free = (1..MAX_CHANNELS as i32)
+                    .map(|k| (ch.num as i32 + d.signum() * k).rem_euclid(MAX_CHANNELS as i32) as u16)
+                    .find(|&n| store.by_num(n).is_none());
+                if let Some(n) = free {
+                    edit(app, |c| c.num = n);
+                    place(app, store);
                 }
-                None => {}
-            },
+            }
+            None => {}
         }
     }
 
@@ -259,31 +245,19 @@ impl View for ChEdit {
             w::freq(lcd, 7, 232, 102, ch.rx, &DIG_46, &DIG_28, TEXT, SUB, BG);
             lcd.fill(7, 104, 225, 2, if cell == FREQ { BLUE } else { BG });
         }
-        let home = app.set.home_ch == Some(ch.num);
         for (i, c) in CELLS.into_iter().enumerate() {
             let mut v = Buf::<16>::new();
             let mut grey = false;
             match c {
-                Cell::It(Item::Power) if app.capped(a) => v.set(b"0.25 W"),
-                Cell::It(it) => {
-                    it.text(&ch.cfg, false, &mut v);
-                    grey = app.greyed(it).is_some();
+                Cell::F(f) => {
+                    f.text(&ch, app.set.home_ch, false, &mut v);
+                    if let ChField::It(it) = f {
+                        grey = app.greyed(it).is_some();
+                    }
                 }
-                Cell::Flag(bit, _) => v.set(if ch.flags & bit != 0 { b"On" } else { b"Off" }),
-                Cell::Scan => v.set(if ch.flags & FLAG_PRIORITY != 0 {
-                    b"Priority".as_slice()
-                } else if ch.flags & FLAG_SKIP != 0 {
-                    b"Skip"
-                } else {
-                    b"In scans"
-                }),
                 Cell::Number => {
                     let _ = uwrite!(v, "{}", Zero(ch.num as u32 + 1, 3));
                 }
-                Cell::Home => v.set(if home { b"Yes" } else { b"No" }),
-            }
-            if c == Cell::It(Item::Power) && ch.flags & FLAG_RX_ONLY != 0 {
-                grey = true;
             }
             let (x, y) = (GX + (i as i32 % 3) * 77, GY + (i as i32 / 3) * 34);
             app.grid_cell(lcd, i, x, y, 72, 29, c.label().as_bytes(), v.as_bytes(), cell == GRID0 + i as u8, grey);
@@ -295,18 +269,14 @@ impl View for ChEdit {
             (ZONE, _) => note.set(b"Knob: move the channel to another zone"),
             (NAME, _) => note.set(b"OK: type the name (16 characters)"),
             (FREQ, _) => note.set("Knob: step \u{b7} OK: type it".as_bytes()),
-            (_, Some(Cell::It(Item::Power))) if ch.flags & FLAG_RX_ONLY != 0 => {
-                note.set(b"Power: this channel is RX only");
-                col = AMBER;
-            }
-            (_, Some(Cell::It(it))) if app.greyed(it).is_some() => {
+            (_, Some(Cell::F(ChField::It(it)))) if app.greyed(it).is_some() => {
                 note.set(it.label().as_bytes());
                 note.push(b": ");
                 note.push(app.greyed(it).unwrap_or("").as_bytes());
                 col = AMBER;
             }
             (_, Some(Cell::Number)) => note.set(b"Knob: the next free number moves it"),
-            (_, Some(Cell::Home)) => note.set(b"Hold 0 on home jumps to the home channel"),
+            (_, Some(Cell::F(ChField::Home))) => note.set(b"Hold 0 on home jumps to the home channel"),
             _ => {}
         }
         if app.dirty(R_HELP, hash(&(note, col))) {
@@ -327,8 +297,14 @@ impl View for ChEdit {
 }
 
 impl ChEdit {
+    /// The focused cell: zone, name and frequency above the grid's.
     fn at(self) -> Option<Cell> {
-        self.cell.checked_sub(GRID0).and_then(|i| CELLS.get(i as usize)).copied()
+        match self.cell {
+            ZONE => Some(Cell::F(ChField::Zone)),
+            NAME => Some(Cell::F(ChField::Name)),
+            FREQ => Some(Cell::F(ChField::Rx)),
+            c => CELLS.get((c - GRID0) as usize).copied(),
+        }
     }
 }
 
