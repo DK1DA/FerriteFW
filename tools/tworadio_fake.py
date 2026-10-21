@@ -838,7 +838,7 @@ class FakeFerrite:
             if self.keyed:
                 self.err("transmitting")
             if p in ("0 1 2 2", "0 1 4", "0 1 6 4"):  # as the firmware (Oct 14, 2026)
-                self.err(f"{DEFAULTS[p][0]} can't be set yet: it keeps its default until its feature lands")
+                self.err(f"{DEFAULTS[p][0]} can't be set yet")
             self.set[p] = line[len(f"set {p} "):].strip()
             return f"{p} {DEFAULTS[p][0]}: {self.set[p]}"
         if w[0] == "ch":
@@ -924,7 +924,7 @@ class FakeFerrite:
         n = int(w[1])
         if len(w) == 2:
             if n not in self.channels:
-                self.err(f'ch {n}: no such channel; make it with ch {n} "Name" 146.52')
+                self.err(f'ch {n}: no such channel')
             return self.ch_line(n)
         if w[2] == "delete":
             self.channels.pop(n, None)

@@ -214,7 +214,7 @@ impl<'a> Toks<'a> {
                 j += if s[j] == b'\\' { 2 } else { 1 };
             }
             if j >= s.len() {
-                return Err(msg!("a name has no closing quote: end it with \""));
+                return Err(msg!("a name has no closing quote"));
             }
             self.i = j + 1;
             return Ok(Some(Tok::Quoted(&s[start..j])));
@@ -316,6 +316,14 @@ fn quoted(name: &[u8], out: &mut Line) {
     out.push(b"\"");
 }
 
+/// A line's start: `ch 12 "Name"`, `zone 2 "Repeaters"`, `preset 1 "2 m"` (`n` 0-based).
+#[inline(never)]
+fn head(what: &[u8], n: u16, name: &[u8], out: &mut Line) {
+    num(out, what, n as u32 + 1);
+    out.push(b" ");
+    quoted(name, out);
+}
+
 /// A channel or zone number as written, 1-based, to the radio's 0-based one.
 fn index(w: &[u8], max: u32, what: &str) -> Result<u32, Msg> {
     match number(w) {
@@ -407,6 +415,33 @@ fn tone_word(t: u16, out: &mut Line) {
     }
 }
 
+/// " tone=100.0", or " txtone=100.0 rxtone=off" when they differ: the channel and slot lines' tones.
+#[inline(never)]
+fn tones(tx: u16, rx: u16, out: &mut Line) {
+    if rx == tx {
+        out.push(b" tone=");
+    } else {
+        out.push(b" txtone=");
+        tone_word(tx, out);
+        out.push(b" rxtone=");
+    }
+    tone_word(rx, out);
+}
+
+/// " mode=NFM".
+#[inline(never)]
+fn mode_word(m: u8, out: &mut Line) {
+    out.push(b" mode=");
+    out.push(MODES[m as usize % MODES.len()].as_bytes());
+}
+
+/// " power=high".
+#[inline(never)]
+fn power_word(p: u8, out: &mut Line) {
+    out.push(b" power=");
+    out.push(POWERS[p as usize % 3].as_bytes());
+}
+
 fn tone(w: &[u8], what: &str) -> Result<u16, Msg> {
     if same(w, b"off") || same(w, b"none") {
         return Ok(0);
@@ -460,6 +495,18 @@ fn tone_arg(t: &mut Toks, what: &str) -> Result<u16, Msg> {
     let mut d = [b'D', 0, 0, 0, if m == 1 { b'N' } else { b'I' }];
     d[1..4].copy_from_slice(code);
     tone(&d, what).map_err(|_| bad())
+}
+
+/// " tx=146.52000" (split), or " offset=+0.60000".
+#[inline(never)]
+fn offset_kv(split: bool, o: i32, out: &mut Line) {
+    if split {
+        out.push(b" tx=");
+        out.push(mhz5(o.max(0) as Freq10).as_bytes());
+    } else {
+        out.push(b" offset=");
+        offset_word(o, out);
+    }
 }
 
 /// "simplex", "+0.60000", "-5.00000".
@@ -532,32 +579,17 @@ const TAIL_WORDS: [&str; 3] = ["global", "off", "on"];
 /// defaults. Every field `load` reads back is here, so a dump and a load give the same channel.
 fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     let g = &c.cfg;
-    num(out, b"ch ", c.num as u32 + 1);
-    out.push(b" ");
-    quoted(c.name(), out);
+    head(b"ch ", c.num, c.name(), out);
     out.push(b" ");
     out.push(mhz5(c.rx).as_bytes());
     if g.split {
         // Split: TX is a frequency of its own (MENU 5's 4th choice)
-        out.push(b" offset=split tx=");
-        out.push(mhz5(g.offset.max(0) as Freq10).as_bytes());
-    } else {
-        out.push(b" offset=");
-        offset_word(g.offset, out);
+        out.push(b" offset=split");
     }
-    out.push(b" mode=");
-    out.push(MODES[g.mode as usize % MODES.len()].as_bytes());
-    if g.rx_tone == g.tx_tone {
-        out.push(b" tone=");
-        tone_word(g.tx_tone, out);
-    } else {
-        out.push(b" txtone=");
-        tone_word(g.tx_tone, out);
-        out.push(b" rxtone=");
-        tone_word(g.rx_tone, out);
-    }
-    out.push(b" power=");
-    out.push(POWERS[g.power as usize % 3].as_bytes());
+    offset_kv(g.split, g.offset, out);
+    mode_word(g.mode, out);
+    tones(g.tx_tone, g.rx_tone, out);
+    power_word(g.power, out);
     if c.zone != NO_ZONE && c.zone < st.zones() {
         num(out, b" zone=", c.zone as u32 + 1);
     }
@@ -603,7 +635,7 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
 
 /// One field of a channel from `key` and its value (a bare flag word is "on").
 fn field<S: ChannelStore>(c: &mut Channel, key: &[u8], v: Option<Tok>, st: &S) -> Result<(), Msg> {
-    let k = FIELDS.iter().position(|f| same(key, f.as_bytes())).ok_or_else(|| msg!("{}: no such field; the fields are name, rx, offset, mode, bw, tone, power, zone, ...", Bytes(key)))?;
+    let k = FIELDS.iter().position(|f| same(key, f.as_bytes())).ok_or_else(|| msg!("{}: no such field; help lists them", Bytes(key)))?;
     let flag = |c: &mut Channel, bit: u8, v: Option<Tok>, what: &str| -> Result<(), Msg> {
         let on = match v {
             None => true,
@@ -712,7 +744,7 @@ pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
         return Ok(());
     }
     if c.cfg.mode as usize >= SLOT_MODES {
-        return Err(msg!("mode: USB, LSB and CW are for HF channels, below 64 MHz"));
+        return Err(msg!("mode: USB, LSB and CW are for HF channels"));
     }
     if c.cfg.split && c.cfg.offset <= 0 {
         return Err(msg!("offset=split needs its TX frequency: tx=146.52"));
@@ -722,7 +754,7 @@ pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
     }
     let tx = c.cfg.tx_of(c.rx) as i64;
     if !(mhz(64) as i64..mhz(1000) as i64).contains(&tx) {
-        return Err(msg!("offset: the TX frequency would be outside 64 to 1000 MHz")); // never TX above 1000
+        return Err(msg!("offset: TX outside 64 to 1000 MHz")); // never TX above 1000
     }
     if band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M) && c.cfg.power != 0 { // the cap goes by the TX band
         return Err(msg!("power: fixed at 0.25 W on 1.25 m; use power=low"));
@@ -757,16 +789,16 @@ fn save_pos<S: ChannelStore>(app: &mut App, st: &S, c: Channel, pos: Option<Pos>
 fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg> {
     let num = index(t.word("ch: which channel, e.g. ch 12")?, MAX_CHANNELS as u32, "ch")? as u16;
     let old = st.by_num(num).map(|x| x.0);
-    let missing = || msg!("ch {}: no such channel; make it with ch {} \"Name\" 146.52", num as u32 + 1, num as u32 + 1);
+    let missing = || msg!("ch {}: no such channel", num as u32 + 1);
     if t.clone().next()?.is_some() && super::list::radio_channel(app) == Some(num) {
-        return Err(msg!("Channel {} is open in the radio's editor: change it there or close it", num as u32 + 1)); // TERM-17
+        return Err(msg!("Channel {} is open in the radio's editor", num as u32 + 1)); // TERM-17
     }
     match t.next()? {
         None => old.map(|_| Done::List(List::Show(num))).ok_or_else(missing),
         // A whole channel: name, RX, then fields; the rest at their defaults.
         Some(Tok::Quoted(q)) => {
             let name: Buf<16> = unquote(q, "name")?;
-            let rx = freq(t.word("ch: the RX frequency after the name, e.g. ch 12 \"Name\" 146.52")?, "rx")?;
+            let rx = freq(t.word("ch: the RX MHz after the name")?, "rx")?;
             let mut c = Channel { num, zone: NO_ZONE, rx, name: [0; 16], cfg: DEFAULT_CFG, flags: 0, tones: 0 };
             c.set_name(name.as_bytes());
             let mut pos = None;
@@ -801,7 +833,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
                 let Some(Tok::Word(v)) = v else { return Err(msg!("pos: latitude,longitude, a grid square, or none")) };
                 let p = pos_val(v, "pos")?;
                 if t.next()?.is_some() {
-                    return Err(msg!("ch: one field at a time, e.g. ch 12 pos=45.4215,-75.6972"));
+                    return Err(msg!("ch: one field at a time"));
                 }
                 return Ok(Done::Said(save_pos(app, st, c, p)));
             }
@@ -810,7 +842,7 @@ fn ch<S: ChannelStore>(app: &mut App, st: &S, t: &mut Toks) -> Result<Done, Msg>
             }
             field(&mut c, key, v, st)?;
             if t.next()?.is_some() {
-                return Err(msg!("ch: one field at a time, e.g. ch 12 power high"));
+                return Err(msg!("ch: one field at a time"));
             }
             check(&c)?;
             Ok(Done::Said(save(app, st, c)))
@@ -852,9 +884,7 @@ fn secs(w: &[u8], max: u32, what: &str) -> Result<u8, Msg> {
 
 fn zone_line<S: ChannelStore>(z: u8, st: &S, out: &mut Line) {
     let c = st.data().zone_cfg(z);
-    num(out, b"zone ", z as u32 + 1);
-    out.push(b" ");
-    quoted(st.zone_label(z, b"", b"").as_bytes(), out);
+    head(b"zone ", z as u16, st.zone_label(z, b"", b"").as_bytes(), out);
     let o = |b: bool| if b { "on" } else { "off" };
     for (k, b) in [(" scan=", c.scan_all), (" shown=", c.shown), (" distance=", c.by_distance)] {
         out.push(k.as_bytes());
@@ -906,7 +936,7 @@ fn put<S: ChannelStore>(st: &S, cap: &str, what: &str, n: u8, same_as_stored: bo
         return Ok(Done::Said(msg!("{} {} unchanged", cap, n as u32 + 1)));
     }
     if !st.data().request(op) {
-        return Err(msg!("{} {}: the radio couldn't take it now (full, or busy writing); try again", what, n as u32 + 1));
+        return Err(msg!("{} {}: the radio is full or busy; try again", what, n as u32 + 1));
     }
     Ok(Done::Said(msg!("{} {} saved", cap, n as u32 + 1)))
 }
@@ -939,17 +969,14 @@ fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
 }
 
 fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
-    num(out, b"preset ", i as u32 + 1);
-    out.push(b" ");
-    quoted(p.name.as_bytes(), out);
+    head(b"preset ", i as u16, p.name.as_bytes(), out);
     out.push(b" ");
     out.push(mhz5(p.start).as_bytes());
     out.push(b" ");
     out.push(mhz5(p.end).as_bytes());
     out.push(b" step=");
     step_word(p.step, out);
-    out.push(b" mode=");
-    out.push(MODES[p.mode as usize % MODES.len()].as_bytes());
+    mode_word(p.mode, out);
     if p.resume != 0 {
         out.push(b" resume=");
         resume_word(p.resume, out);
@@ -1069,13 +1096,13 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
             app.set_dry_tx(true);
             return Ok(Done::Said(msg!("0 8 9 2 Dry TX: On")));
         }
-        return Err(msg!("Dry TX goes off only on the radio, on its own screen there (the PC can turn it on)"));
+        return Err(msg!("Dry TX goes off only on the radio"));
     }
     if blocked(p) {
-        return Err(msg!("{} changes only on the radio, on its own screen there", name));
+        return Err(msg!("{} changes only on the radio", name));
     }
     if super::list::radio_setting(app).is_some_and(|(q, ql)| &q[..ql] == p) {
-        return Err(msg!("{} is open on the radio's menu: change it there, or move off it", name)); // TERM-17
+        return Err(msg!("{} is open on the radio's menu", name)); // TERM-17
     }
     if let Some(why) = groups::greyed(app, p) {
         return Err(msg!("{}: {}", name, why));
@@ -1100,11 +1127,11 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         return Ok(Done::Said(m));
     }
     if !groups::is_settable(p) {
-        return Err(msg!("{} can't be set yet: it keeps its default until its feature lands", name));
+        return Err(msg!("{} can't be set yet", name));
     }
     let want = t.rest();
     if want.is_empty() {
-        return Err(msg!("set needs a value after the number, e.g. set 0 7 1 Dark"));
+        return Err(msg!("set needs a value, e.g. set 0 7 1 Dark"));
     }
     // Typed values (DEC-4's capcode, APRS-26's custom path): taken as written, "None" clears.
     match p {
@@ -1308,9 +1335,9 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
     let c = match t.next()? {
         None => return Ok(Done::Nothing),
         Some(Tok::Word(c)) => c,
-        Some(Tok::Quoted(_)) => return Err(msg!("a command first, e.g. set, ch, zone; help lists them")),
+        Some(Tok::Quoted(_)) => return Err(msg!("a command first; help lists them")),
     };
-    let only_typed = |what: &str| -> Result<Done, Msg> { Err(msg!("{} can't be in a load: it reads set, zone, preset, ch and home lines", what)) };
+    let only_typed = |what: &str| -> Result<Done, Msg> { Err(msg!("{} can't be in a load", what)) };
     match () {
         _ if same(c, b"set") => set(app, dev, &mut t),
         _ if same(c, b"ch") => ch(app, st, &mut t),
@@ -1646,7 +1673,7 @@ fn gps(t: &mut Toks) -> Result<Done, Msg> {
     match t.next()? {
         None => Ok(Done::Debug(Job::new(Kind::Gga))),
         Some(Tok::Word(w)) if [&b"query"[..], b"nmea", b"standby"].iter().any(|b| same(w, b)) => Err(msg!("gps {}: not in this build: a bench build has it", Bytes(w))),
-        _ => Err(msg!("gps: the last GGA sentence (gps query, nmea and standby are a bench build's)")),
+        _ => Err(msg!("gps alone: query, nmea and standby need a bench build")),
     }
 }
 
@@ -1873,9 +1900,9 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
             true
         }
         List::UiStatus => false,
-        List::Help => match HELP.get(i as usize).or_else(|| HELP_BENCH.get((i as usize).wrapping_sub(HELP.len()))) {
+        List::Help => match super::piece(HELP.as_bytes(), b'\n', i as usize).or_else(|| super::piece(HELP_BENCH.as_bytes(), b'\n', (i as usize).wrapping_sub(HELP_LINES))) {
             Some(h) => {
-                out.push(h.as_bytes());
+                out.push(h);
                 true
             }
             None => false,
@@ -1914,61 +1941,70 @@ pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrit
     }
 }
 
-const HELP: [&str; 20] = [
-    "Commands: type : then one of these, and Enter. A dump is made of the same lines.",
-    "",
-    "  set 0 7 1 Dark         a setting, by its number in the radio's menu",
-    "  get 0 7 1   get        one setting; every setting not at its default",
-    "  ch 12                  channel 12, as its ch line",
-    "  slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,",
-    "                         slot B active, slot A offset off|-0.6, slot A split 446.0:",
-    "                         as the keys would (a channel slot: add vfo)",
-    "  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone",
-    "                         power zone step squelch busy reverse skip aprs rxonly hidden priority",
-    "  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel",
-    "  ch 12 delete           delete channel 12",
-    "  zone 2 \"Repeaters\"     a zone (made in order); fields scan shown resume ...",
-    "  preset 1 \"2 m\" 144 148 a range preset; fields step mode bw",
-    "  home 12   home none    the home channel",
-    "  dump                   everything, as these lines; save it with your terminal's log",
-    "  load                   read a dump back: send the file, it ends at the line end",
-    "  clear channels N       delete every channel (N: how many there are)",
-    "  gps                    the GPS module's last GGA sentence, its age and heights",
+const HELP: &str = concat!(
+    "Commands: type : then one of these, and Enter. A dump is made of the same lines.\n",
+    "\n",
+    "  set 0 7 1 Dark         a setting, by its number in the radio's menu\n",
+    "  get 0 7 1   get        one setting; every setting not at its default\n",
+    "  ch 12                  channel 12, as its ch line\n",
+    "  slot, slot A           the slots now; slot A 146.52 nfm high tone 100.0, slot A vfo,\n",
+    "                         slot B active, slot A offset off|-0.6, slot A split 446.0:\n",
+    "                         as the keys would (a channel slot: add vfo)\n",
+    "  ch 12 power high       one field: name rx offset tx mode bw tone rxtone txtone\n",
+    "                         power zone step squelch busy reverse skip aprs rxonly hidden priority\n",
+    "  ch 12 \"Name\" 146.52 offset=+0.6 tone=100.0 ...   a whole channel\n",
+    "  ch 12 delete           delete channel 12\n",
+    "  zone 2 \"Repeaters\"     a zone (made in order); fields scan shown resume ...\n",
+    "  preset 1 \"2 m\" 144 148 a range preset; fields step mode bw\n",
+    "  home 12   home none    the home channel\n",
+    "  dump                   everything, as these lines; save it with your terminal's log\n",
+    "  load                   read a dump back: send the file, it ends at the line end\n",
+    "  clear channels N       delete every channel (N: how many there are)\n",
+    "  gps                    the GPS module's last GGA sentence, its age and heights\n",
     "  xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it",
-];
+);
+/// The lines in [`HELP`].
+const HELP_LINES: usize = {
+    let (h, mut i, mut n) = (HELP.as_bytes(), 0, 1);
+    while i < h.len() {
+        n += (h[i] == b'\n') as usize;
+        i += 1;
+    }
+    n
+};
 /// TERM-38: the bench commands' help in a bench build, or where they are in a user build.
 #[cfg(feature = "bench")]
-const HELP_BENCH: [&str; 23] = [
-    "",
-    "Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):",
-    "  mem 20000000 64        bytes of MCU memory (flash, RAM)",
-    "  mem32 40010808 4       32-bit words: use this for peripheral registers",
-    "  gpio                   ports A to E: input and output bits, 15 to 0",
-    "  bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)",
-    "  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)",
-    "  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property",
-    "  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)",
-    "  bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)",
-    "  bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)",
-    "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one",
-    "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)",
-    "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)",
-    "  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set",
-    "  gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)",
-    "  gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s",
-    "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up",
-    "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal",
-    "                         at that % on the next PTT key-up until release (tx builds)",
-    "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator",
-    "  txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)",
+const HELP_BENCH: &str = concat!(
+    "\n",
+    "Bench builds only (bring-up, tx-bench; hex addresses, registers and values; Esc stops):\n",
+    "  mem 20000000 64        bytes of MCU memory (flash, RAM)\n",
+    "  mem32 40010808 4       32-bit words: use this for peripheral registers\n",
+    "  gpio                   ports A to E: input and output bits, 15 to 0\n",
+    "  bk 0 30   bk 0 dump    a BK4829 register, or all of them (0 VHF, 1 UHF/HF)\n",
+    "  bk 1 47 6142           write one, then read it back (no TX/PA bits, no GPIO)\n",
+    "  si 10 00   si prop 4001 [0003]   an SI4732 command; get or set a property\n",
+    "  bt AT+VERS?            ask the Bluetooth module (AT, AT+HELP, AT+WORD? only)\n",
+    "  bt stat, bt baud N     USART1's byte and error counts; its rate (the MCU's side)\n",
+    "  bt pace B G            Bluetooth sends B-byte bursts G ms apart (RAM only)\n",
+    "  rx both   rx one       bench test: VHF and UHF receive selects both on, or one\n",
+    "  bk settle 2 1          bench test: BK4829 wake and sleep waits, ms (0 stock's)\n",
+    "  gps query [0|1|2|4|6]  ask the GPS module (CAS06: 0 firmware, 1 hardware, 6 chip)\n",
+    "  gps nmea off   on      bench test: CAS03, all NMEA off (RAM only); on: Ferrite's set\n",
+    "  gps standby 60         bench test: CAS12, the module asleep 60 s (cable log)\n",
+    "  gps standby 60 quiet   bench test: NMEA off, CAS12; NMEA on after the wake or 63 s\n",
+    "  mic                    bench test: 32 ms of the mic tap (PA0) at 8 kHz, summed up\n",
+    "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal\n",
+    "                         at that % on the next PTT key-up until release (tx builds)\n",
+    "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator\n",
+    "  txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)\n",
     "  The radio's own logic may rewrite a register you set (a tune, Battery Save).",
-];
+);
 #[cfg(not(feature = "bench"))]
-const HELP_BENCH: [&str; 3] = [
-    "",
-    "Bench commands: mem mem32 gpio bk si bt rx mic txtest, gps query|nmea|standby:",
+const HELP_BENCH: &str = concat!(
+    "\n",
+    "Bench commands: mem mem32 gpio bk si bt rx mic txtest, gps query|nmea|standby:\n",
     "  not in this build; a bench build (bring-up, tx-bench) has them.",
-];
+);
 
 // ---- Slots (TERM-35) ----
 
@@ -2026,36 +2062,21 @@ pub fn slot_line<S: ChannelStore>(app: &App, st: &S, s: u8, out: &mut Line) {
     out.push(&[b'A' + s, if g.active { b'*' } else { b' ' }, b' ']);
     match g.channel {
         Some(n) => {
-            num(out, b"ch ", n as u32 + 1);
-            out.push(b" ");
-            if let Some((c, _)) = st.by_num(n) {
-                quoted(c.name(), out);
-                out.push(b" ");
+            match st.by_num(n) {
+                Some((c, _)) => head(b"ch ", n, c.name(), out),
+                None => num(out, b"ch ", n as u32 + 1),
             }
+            out.push(b" ");
         }
         None if g.aprs => out.push(b"aprs "),
         None => out.push(b"vfo "),
     }
     out.push(mhz5(g.freq).as_bytes());
-    out.push(b" mode=");
-    out.push(MODES[g.mode as usize % MODES.len()].as_bytes());
-    out.push(b" power=");
-    out.push(POWERS[g.power as usize % 3].as_bytes());
-    if g.rx_tone == g.tx_tone {
-        out.push(b" tone=");
-        tone_word(g.tx_tone, out);
-    } else {
-        out.push(b" txtone=");
-        tone_word(g.tx_tone, out);
-        out.push(b" rxtone=");
-        tone_word(g.rx_tone, out);
-    }
-    if g.split {
-        out.push(b" tx=");
-        out.push(mhz5(g.offset.max(0) as Freq10).as_bytes());
-    } else if g.offset != 0 {
-        out.push(b" offset=");
-        offset_word(g.offset, out);
+    mode_word(g.mode, out);
+    power_word(g.power, out);
+    tones(g.tx_tone, g.rx_tone, out);
+    if g.split || g.offset != 0 {
+        offset_kv(g.split, g.offset, out);
     }
     if g.scanning {
         out.push(b" scanning");

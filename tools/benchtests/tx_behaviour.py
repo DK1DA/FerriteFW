@@ -1659,7 +1659,7 @@ class FakeRadio(bench.FakeRadio):
             return (f"  txtest: {w[1]} at {lvl} % armed for the next PTT key-up, from the key-up to the release; once\n"
                     f"  {filt}: the chip's filters ...\n")
         if w[0] == "set" and line.startswith(f"set {EXTEND_TX} "):
-            raise TermError(f"{line}: Extend TX changes only on the radio, on its own screen there")
+            raise TermError(f"{line}: Extend TX changes only on the radio")
         if w[0] == "set":
             p = next((k for k in self.set if line.startswith(f"set {k} ")), None)
             if p is None:
