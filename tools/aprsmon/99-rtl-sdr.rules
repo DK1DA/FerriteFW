@@ -1,0 +1,2 @@
+# Lets the aprsmon service (not only a logged-in seat) open the RTL-SDR.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0666"
