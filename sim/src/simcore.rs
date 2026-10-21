@@ -430,7 +430,7 @@ impl SimCore {
     fn draw_boot(&mut self) {
         let set = *self.app.settings();
         ferrite_ui::theme::set(set.theme); // the boot screen in the saved theme (0 7 1)
-        boot::draw(&mut self.lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &CHECKS });
+        boot::draw(&mut self.lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &CHECKS, note: None });
     }
 
     /// The status bar clock: `utc_secs` is UTC now (seconds since 1970).

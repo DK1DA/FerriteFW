@@ -1,4 +1,5 @@
-//! The boot screen: logo, wordmark, version, callsign, and the self-test as a bar and one status line (BOOT-9).
+//! The boot screen: logo, wordmark, version and callsign, nothing else while the start-up is quick (BOOT-9,
+//! decision 215: no progress bar, no "Self-test n of m"); a step that takes long gets one line naming it ([`BootInfo::note`]).
 //! A failed check shows on the same screen, in red, naming the check; the radio then waits for a key (BOOT-10).
 //! With the boot screen set to the owner card (MENU 0 7 3 3, SETUP-11), the card fills the screen instead and
 //! the wordmark, version and self-test shrink to its bottom line (BootC mock-up, less its small logo); a failed
@@ -43,6 +44,8 @@ pub struct BootInfo<'a> {
     /// The owner card, when the boot screen is set to it (MENU 0 7 3 3); None: the logo.
     pub owner: Option<Owner<'a>>,
     pub checks: &'a [Check],
+    /// A slow step's line ("Checking GPS…", "Installing SSB patch"); None: the status line stays empty.
+    pub note: Option<&'a [u8]>,
 }
 
 /// The text column's width, 12 px margins.
@@ -90,16 +93,12 @@ fn paint(lcd: &mut impl Panel, b: &BootInfo, full: bool) {
             lcd.text4_aligned(120, 243, Align::Center, fit(l, &UI_15B, COL), &UI_15B, TEXT, BG);
         }
     }
-    let bar = if n > 0 { done * 120 / n } else { 120 };
-    lcd.fill(60, 264, bar, 4, if failed.is_some() { RED } else { BLUE });
-    lcd.fill(60 + bar, 264, 120 - bar, 4, LINE);
+    let _ = (done, n);
     let mut line = Buf::<31>::new();
     let (text, col): (&[u8], u16) = if let Some(c) = failed {
         (v!(line, "{}: {}", c.label, if c.value.is_empty() { "failed" } else { c.value }), RED)
-    } else if done < n {
-        (v!(line, "Self-test {} of {}", done, n), SUB)
     } else {
-        (b"Ready", SUB)
+        (b.note.unwrap_or(b""), SUB)
     };
     // Each line paints its own full width (no blank first).
     crate::widgets::field(lcd, 0, 240, 276, 298, 290, Align::Center, text, &UI_12, col, BG);
@@ -115,15 +114,12 @@ fn card(lcd: &mut impl Panel, b: &BootInfo, o: &Owner, done: i32, n: i32, full: 
     }
     // The bottom line: wordmark and version, the self-test on the right (the version gives way); the bar.
     let x = 12 + crate::gfx::text4_width(b"FERRITE", &UI_12B);
-    let mut line = Buf::<31>::new();
-    // Short form on the card: the bar shows progress, so "3/5" is enough.
-    let status: &[u8] = if done < n { v!(line, "{}/{}", done, n) } else { b"Ready" };
+    // A slow step's note on the right (the version gives way); nothing while the start-up is quick (decision 215).
+    let _ = (done, n);
+    let status: &[u8] = b.note.unwrap_or(b"");
     let right = 228 - crate::gfx::text4_width(status, &UI_12);
     crate::widgets::field(lcd, x + 6, 222 - x, 265, 281, 277, Align::Left, fit(b.version.as_bytes(), &UI_12, right - x - 8), &UI_12, SUB, BG);
-    lcd.text4(right, 277, status, &UI_12, SUB, BG);
-    let bar = if n > 0 { done * COL / n } else { COL };
-    lcd.fill(12, 289, bar, 3, BLUE);
-    lcd.fill(12 + bar, 289, COL - bar, 3, LINE);
+    crate::widgets::field(lcd, right, 228 - right, 265, 281, 277, Align::Left, status, &UI_12, SUB, BG);
 }
 
 /// The card's fixed part: drawn once.

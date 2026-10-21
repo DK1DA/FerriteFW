@@ -91,7 +91,7 @@ fn main() {
         Check { label: "SI4732", value: "not tested", state: State::Off },
         Check { label: "Calibration", value: "", state: State::Pending },
     ];
-    let info = BootInfo { version: VERSION, callsign: Some(b"VA7FER"), line: Some(b"VA7FER"), owner: None, checks: &checks };
+    let info = BootInfo { version: VERSION, callsign: Some(b"VA7FER"), line: Some(b"VA7FER"), owner: None, checks: &checks, note: None };
     let mut fb = FrameBuffer::new();
     boot::draw(&mut fb, &info);
     save(&fb, "boot", scale);
@@ -520,7 +520,7 @@ fn themed(scale: u32) {
         let name = |n: &str| format!("{n}-{suffix}");
         let mut fb = FrameBuffer::new();
         ferrite_ui::theme::set(theme);
-        boot::draw(&mut fb, &BootInfo { version: VERSION, callsign: Some(b"VA7FER"), line: Some(b"VA7FER"), owner: None, checks: &checks });
+        boot::draw(&mut fb, &BootInfo { version: VERSION, callsign: Some(b"VA7FER"), line: Some(b"VA7FER"), owner: None, checks: &checks, note: None });
         save(&fb, &name("boot"), scale);
         let store = fake::store();
         let mut radio = fake::FakeRadio::new();

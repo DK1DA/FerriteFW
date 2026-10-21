@@ -641,7 +641,7 @@ fn owner_card_from_setup_to_boot() {
     assert_eq!(b.as_bytes(), b"Owner card");
     let draw = |s: &crate::settings::Settings| {
         let mut fb = FrameBuffer::new();
-        boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &[] });
+        boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &[], note: None });
         fb
     };
     let fb = draw(t.app.settings());
@@ -668,7 +668,7 @@ fn owner_card_clips_and_yields_to_a_failure() {
     let ok = [Check { label: "MCU", value: "", state: State::Ok }];
     let mut fb = FrameBuffer::new();
     fb.px.fill(0x1234);
-    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &ok });
+    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &ok, note: None });
     for y in 0..280 {
         for x in (0..12).chain(229..240) {
             assert_eq!(fb.at(x, y), BG, "ink outside the column at {x},{y}");
@@ -676,7 +676,7 @@ fn owner_card_clips_and_yields_to_a_failure() {
     }
     assert!(count_px(&fb, 80, 96, |c| c != BG) > 100, "the unknown characters drew as '?'");
     let fail = [Check { label: "MCU", value: "", state: State::Fail }];
-    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &fail });
+    boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &fail, note: None });
     assert_eq!(count_px(&fb, 22, 34, |c| c != BG), 0, "a failure: the logo screen, not the card");
 }
 
@@ -766,10 +766,10 @@ fn boot_progress_updates_match_a_full_draw() {
         }
         let mut checks = [Check { label: "MCU", value: "", state: State::Pending }; 6];
         let mut fb = FrameBuffer::new();
-        boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &checks });
+        boot::draw(&mut fb, &BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &checks, note: None });
         for i in 0..checks.len() {
             checks[i].state = if i == 4 { State::Off } else { State::Ok };
-            let info = BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &checks };
+            let info = BootInfo { version: "v0.1.0", callsign: s.boot_callsign(), line: s.boot_line(), owner: s.boot_owner(), checks: &checks, note: None };
             boot::update(&mut fb, &info);
             let mut fresh = FrameBuffer::new();
             boot::draw(&mut fresh, &info);

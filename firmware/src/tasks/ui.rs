@@ -253,11 +253,26 @@ pub async fn task() {
                 _ => State::Pending,
             };
         }
-        let info = BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: set.boot_owner(), checks: &checks };
+        // BOOT-9 (decision 215): the screen names a check only once start-up has taken half a second.
+        let mut note = ferrite_ui::text::Buf::<31>::new();
+        if start.elapsed() >= Duration::from_millis(500) {
+            if let Some(c) = checks.iter().find(|c| c.state == State::Pending) {
+                let _ = ufmt::uwrite!(note, "Checking {}\u{2026}", c.label);
+            }
+        }
+        let info = BootInfo {
+            version: VERSION,
+            callsign: set.boot_callsign(),
+            line: set.boot_line(),
+            owner: set.boot_owner(),
+            checks: &checks,
+            note: (!note.is_empty()).then_some(note.as_bytes()),
+        };
         let mut states = [0u8; 8];
         for (d, c) in states.iter_mut().zip(checks.iter()) {
             *d = c.state as u8 + 1;
         }
+        states[7] = !note.is_empty() as u8; // the note's coming and going redraws the line
         let now = (boot::shows_card(&info), states);
         match shown {
             Some((card_shown, _)) if card_shown == now.0 && shown != Some(now) => boot::update(&mut lcd, &info),
@@ -287,7 +302,7 @@ pub async fn task() {
     }
     if checks.iter().any(|c| c.state == State::Fail) {
         // The failed check stays on screen until a key.
-        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: None, checks: &checks });
+        boot::draw(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner: None, checks: &checks, note: None });
         while !matches!(INPUT.receive().await, Input::Key(keypad::Event::Press(_))) {}
     }
 
@@ -304,11 +319,26 @@ pub async fn task() {
     match (ssb_bundle(), cfg!(feature = "bringup")) {
         (None, _) => bringup::line(b"ssb: no patch bundled with this image"),
         (Some(_), true) => bringup::line(b"ssb: patch bundled; not installed (bring-up build stores nothing)"),
-        (Some((p, patch)), false) => bringup::line(match own_frame(store.ssb_install(p, patch, ferrite_core::ssb::SOURCE_FLASHER)).await {
-            Ok(true) => b"ssb: patch installed and verified",
-            Ok(false) => b"ssb: patch already installed",
-            Err(_) => b"ssb: install FAILED",
-        }),
+        (Some((p, patch)), false) => {
+            // BOOT-9 (decision 215): an install that takes a while is named on the boot screen, still up; one that
+            // finds the patch already there is over in a moment and shows nothing.
+            let mut install = core::pin::pin!(own_frame(store.ssb_install(p, patch, ferrite_core::ssb::SOURCE_FLASHER)));
+            let r = match select(&mut install, Timer::after_millis(300)).await {
+                Either::First(r) => r,
+                Either::Second(()) => {
+                    let failed = checks.iter().any(|c| c.state == State::Fail);
+                    let owner = if failed { None } else { set.boot_owner() };
+                    let note = Some(b"Installing SSB patch".as_slice());
+                    boot::update(&mut lcd, &BootInfo { version: VERSION, callsign: set.boot_callsign(), line: set.boot_line(), owner, checks: &checks, note });
+                    install.await
+                }
+            };
+            bringup::line(match r {
+                Ok(true) => b"ssb: patch installed and verified",
+                Ok(false) => b"ssb: patch already installed",
+                Err(_) => b"ssb: install FAILED",
+            })
+        }
     }
     let ssb_ok = !cfg!(feature = "bringup") && store.ssb_check().is_ok_and(|p| p.is_some());
     if ssb_ok {
