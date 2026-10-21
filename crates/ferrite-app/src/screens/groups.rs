@@ -796,9 +796,9 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(cal_text(dev.selftest.cal).as_bytes());
             false
         }
+        // APRS-30: the address beacons send, callsign and 0 5 4 1's SSID (it said "-9" whatever the SSID)
         [5, 4] if !s.callsign.is_empty() => {
-            b.set(s.callsign.as_bytes());
-            b.push(b"-9");
+            b.set(app.aprs_call().as_bytes());
             false
         }
         [8, 4] => {

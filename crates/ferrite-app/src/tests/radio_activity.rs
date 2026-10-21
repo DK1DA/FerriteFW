@@ -2355,6 +2355,10 @@ fn aprs_address_takes_the_ssid_setting() {
     assert_eq!(t.app.aprs_cfg().ssid, 15, "the knob wraps");
     assert_eq!(crate::screens::groups::wired(&t.app, &dev, &[5, 4, 1], &mut b), Some(true));
     assert_eq!(b.as_bytes(), b"15 Generic");
+    // the 0 5 4 row in the APRS group shows the address beacons send (it said "-9" whatever the SSID)
+    t.app.set_aprs(crate::aprs::AprsCfg { ssid: 7, ..t.app.aprs_cfg() });
+    crate::screens::groups::wired(&t.app, &dev, &[5, 4], &mut b);
+    assert_eq!(b.as_bytes(), b"VE3KPW-7");
     t.app.set.set_callsign(b"");
     assert!(t.app.aprs_call().is_empty(), "no callsign, no address");
 }
@@ -2410,10 +2414,9 @@ fn system_and_about_rows() {
     assert_eq!(show(Page::System, "Stack free", 0, &dev), "51.1 KB");
     assert_eq!(show(Page::System, "CPU", 0, &dev), "7 %");
     assert_eq!(show(Page::System, "RAM", 0, &dev), "45 of 96 KB", "96 KB less the stack never used");
-    assert_eq!(show(Page::About, "Unique ID", 0, &none), "Not read");
+    assert_eq!(show(Page::About, "ID", 0, &none), "Not read");
     let mut id = Device::default();
     id.selftest.uid = [0x3F2A_91C0, 0x7D44_0E18, 0xA2B6_5C93];
-    // SELF-8: the 96 bits as 20 base32 digits, two rows of two groups of five
-    assert_eq!(show(Page::About, "Unique ID", 0, &id), "R28JM FRR1S");
-    assert_eq!(show(Page::About, "Unique ID", 1, &id), "27V4T WPTH0");
+    // SELF-8: the 96 bits as 20 base32 digits, one row of four groups of five
+    assert_eq!(show(Page::About, "ID", 0, &id), "R28JM FRR1S 27V4T WPTH0", "one row");
 }

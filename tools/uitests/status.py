@@ -108,13 +108,13 @@ def about_pages_go_round(t):
 
 @test("BOOT-11", "SELF-8", "SELF-9", pages=("Info",))
 def about_rows(t):
-    """About: version, MCU, the unique ID (two rows), SPI flash, calibration, the transmit state, self-test, SSB
+    """About: version, MCU, the unique ID (one row, base32), SPI flash, calibration, the transmit state, self-test, SSB
     patch (installed or the path to install it); System (▶): CPU, RAM, stack free, MCU temp, battery, uptime."""
     u = t.keys("MENU 0 9 9")
-    want = ["Version", "MCU", "Unique ID", "", "SPI flash", "Calibration", "Transmit", "Self-test", "SSB patch"]
+    want = ["Version", "MCU", "ID", "SPI flash", "Calibration", "Transmit", "Self-test", "SSB patch"]
     t.eq(u.names(), want, "the About rows")
-    t.check(re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{5} [0-9A-HJKMNP-TV-Z]{5}|Not read", u.row("Unique ID")["value"] or ""),
-            "the unique ID's first half (base32)", u.row("Unique ID"))
+    t.check(re.fullmatch(r"(?:[0-9A-HJKMNP-TV-Z]{5} ){3}[0-9A-HJKMNP-TV-Z]{5}|Not read", u.row("ID")["value"] or ""),
+            "the unique ID, base32 on one row", u.row("ID"))
     t.check(u.row("Version")["value"].startswith("v"), "the version", u.row("Version"))
     t.check(u.row("Transmit")["value"], "the transmit state", u.row("Transmit"))
     t.check(u.row("SSB patch")["value"], "the SSB patch state", u.row("SSB patch"))

@@ -105,7 +105,7 @@ fn volts(b: &mut Buf<40>, mv: u16) {
     let _ = uwrite!(b, "{}.{} V", mv / 1000, Zero((mv % 1000 / 10) as u32, 2));
 }
 
-const ABOUT: [InfoRow; 9] = [
+const ABOUT: [InfoRow; 8] = [
     // SELF-5: version and build (the git commit; "+" built from uncommitted changes).
     ("Version", |_, b| {
         let _ = uwrite!(b, "{} {}", VERSION, ferrite_core::build());
@@ -122,9 +122,8 @@ const ABOUT: [InfoRow; 9] = [
             }
         }
     }),
-    // SELF-8: the MCU's 96-bit factory unique ID, as 24 hex digits on two rows (it doesn't fit one).
-    ("Unique ID", |Ctx { dev: d, .. }, b| uid_half(b, d, 0)),
-    ("", |Ctx { dev: d, .. }, b| uid_half(b, d, 1)),
+    // SELF-8: the MCU's 96-bit factory unique ID, 20 base32 digits on one row ("ID": the label leaves it room).
+    ("ID", |Ctx { dev: d, .. }, b| uid_text(b, d)),
     ("SPI flash", |Ctx { dev: d, .. }, b| {
         let t = &d.selftest;
         if t.flash_id == 0 {
@@ -148,18 +147,20 @@ const ABOUT: [InfoRow; 9] = [
     ("SSB patch", |Ctx { dev: d, .. }, b| if d.selftest.ssb_patch { fixed(b, "Installed", TEXT) } else { fixed(b, "Not installed", SUB) }),
 ];
 
-/// Half `h` of the unique ID (SELF-8): "R28JM FRR1S", ten of its 20 base32 digits in two groups of five
+/// The unique ID (SELF-8): "R28JM FRR1S 27V4T WPTH0", its 20 base32 digits in four groups of five
 /// (`ferrite_core::uid::text`), "Not read" while all zero.
-fn uid_half(b: &mut Buf<40>, d: &Device, h: usize) -> u16 {
+fn uid_text(b: &mut Buf<40>, d: &Device) -> u16 {
     let u = d.selftest.uid;
     if u == [0; 3] {
-        return if h == 0 { fixed(b, "Not read", SUB) } else { TEXT };
+        return fixed(b, "Not read", SUB);
     }
     let t = ferrite_core::uid::text(u);
-    let half = &t[10 * h..10 * h + 10];
-    b.push(&half[..5]);
-    b.push(b" ");
-    b.push(&half[5..]);
+    for (i, g) in t.chunks(5).enumerate() {
+        if i > 0 {
+            b.push(b" ");
+        }
+        b.push(g);
+    }
     TEXT
 }
 
