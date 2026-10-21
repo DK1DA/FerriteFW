@@ -114,6 +114,10 @@ fn the_log_wraps_a_sector_at_a_time() {
     assert_eq!(s.event(0).unwrap().id, cap + 39, "newest first");
     assert_eq!(s.event(n as u16 - 1).unwrap().id, cap + 40 - n, "oldest last, no gaps");
     assert!(s.event(n as u16).is_none());
+    // LINK-42: each keeps its sequence number (the link's LOG_READ goes on from one), newest first.
+    assert_eq!(s.event_seq(0), Some(cap + 39));
+    assert_eq!(s.event_seq(n as u16 - 1), Some(cap + 40 - n));
+    assert_eq!(s.event_seq(n as u16), None);
 }
 
 #[test]

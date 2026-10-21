@@ -1348,3 +1348,250 @@ fn cw_id_without_callsign_says_why() {
     assert_eq!(pc.ask(msg::CMD, b"set 0 8 7 2 On unkey").0, 0);
     assert_eq!(pc.app.set.cw_id, 2);
 }
+
+impl Pc {
+    /// `READ_MANY` over every index of `w`: (index, record) for each one held, and the requests it took.
+    fn read_all(&mut self, w: u8, count: u16) -> (Vec<(u16, Vec<u8>)>, usize) {
+        let (mut got, mut asks, mut first) = (Vec::new(), 0, 0u16);
+        loop {
+            let mut p = std::vec![w];
+            p.extend_from_slice(&first.to_le_bytes());
+            p.extend_from_slice(&count.saturating_sub(first).to_le_bytes());
+            let (s, a) = self.ask(msg::READ_MANY, &p);
+            asks += 1;
+            assert_eq!(s, 0);
+            let next = u16::from_le_bytes([a[0], a[1]]);
+            let mut r = &a[2..];
+            while !r.is_empty() {
+                let (i, l) = (u16::from_le_bytes([r[0], r[1]]), r[2] as usize);
+                got.push((i, r[3..3 + l].to_vec()));
+                r = &r[3 + l..];
+            }
+            assert!(next > first || next >= count, "it moves on");
+            if next >= count {
+                return (got, asks);
+            }
+            first = next;
+        }
+    }
+
+    /// `WRITE_MANY`: (index, record) pairs in one frame; (status, the rest).
+    fn write_many(&mut self, w: u8, recs: &[(u16, Vec<u8>)]) -> (u8, Vec<u8>) {
+        let mut p = std::vec![w];
+        for (i, r) in recs {
+            p.extend_from_slice(&i.to_le_bytes());
+            p.push(r.len() as u8);
+            p.extend_from_slice(r);
+        }
+        self.ask_long(msg::WRITE_MANY, &p)
+    }
+
+    /// As [`Pc::ask`], polling as long as the radio takes (a `WRITE_MANY` applies a record a pass).
+    fn ask_long(&mut self, ty: u8, payload: &[u8]) -> (u8, Vec<u8>) {
+        self.seq = self.seq.wrapping_add(1);
+        let mut w = [0u8; MAX_WIRE];
+        let n = wire::build(ty, self.seq, payload, &mut w).unwrap();
+        self.raw(&w[..n]);
+        let mut out = Wire(Vec::new());
+        for _ in 0..64 {
+            self.now += 10;
+            self.link.poll(&mut self.app, &self.st, &self.dev, &LiveAll::default(), self.now, &mut out);
+            while let Some(wr) = self.app.pop_write() {
+                self.st.apply(wr);
+            }
+            if !out.0.is_empty() {
+                break;
+            }
+        }
+        let k = out.0.len() - 1;
+        let f = wire::parse(&mut out.0[..k]).unwrap();
+        assert_eq!((f.ty, f.seq), (ty | wire::ANSWER, self.seq));
+        (f.payload[0], f.payload[1..].to_vec())
+    }
+}
+
+/// A channel record for number `n` (0-based) at `mhz10` (10 Hz units), named `name`.
+fn chan_rec(n: u16, rx: u32, name: &[u8]) -> Vec<u8> {
+    let mut c = Channel { num: n, zone: NO_ZONE, rx, name: [0; 16], cfg: SlotCfg::default(), flags: 0, tones: 0 };
+    c.set_name(name);
+    let mut out = std::vec![0u8; 64];
+    let mut w = Window { b: &mut out, from: 0, n: 0 };
+    channel_save(&c, &mut w);
+    let n = w.n;
+    out.truncate(n);
+    out
+}
+
+/// LINK-39: `USED` gives a bit for every channel number, set where a channel is; zones and presets all set.
+#[test]
+fn used_maps_channels() {
+    let mut pc = Pc::new(true);
+    let (s, a) = pc.ask(msg::USED, &[what::CHANNEL]);
+    assert_eq!(s, 0);
+    assert_eq!(u16::from_le_bytes([a[0], a[1]]), MAX_CHANNELS);
+    assert_eq!(a.len(), 2 + MAX_CHANNELS.div_ceil(8) as usize);
+    let mut n = 0;
+    for i in 0..MAX_CHANNELS {
+        let bit = a[2 + i as usize / 8] >> (i % 8) & 1 != 0;
+        assert_eq!(bit, pc.st.get(i).is_some(), "channel {i}");
+        n += bit as u16;
+    }
+    assert_eq!(n, pc.st.count());
+    let (s, a) = pc.ask(msg::USED, &[what::ZONE]);
+    assert_eq!((s, u16::from_le_bytes([a[0], a[1]])), (0, pc.st.zones() as u16));
+    assert!((0..pc.st.zones()).all(|i| a[2 + i as usize / 8] >> (i % 8) & 1 != 0));
+    assert_eq!(pc.ask(msg::USED, &[what::SETTINGS]).0, Status::BadArg as u8);
+    assert_eq!(pc.ask(msg::USED, &[]).0, Status::BadArg as u8);
+}
+
+/// LINK-40: `READ_MANY` gives every channel, zone and preset `READ` does, byte for byte, whole records several to a
+/// frame, empty numbers skipped; the next index goes on where it stopped.
+#[test]
+fn read_many_matches_read() {
+    let mut pc = Pc::new(true);
+    for (w, count) in [(what::CHANNEL, MAX_CHANNELS), (what::ZONE, pc.st.zones() as u16), (what::PRESET, pc.st.data().presets() as u16)] {
+        let (got, asks) = pc.read_all(w, count);
+        let want: Vec<(u16, Vec<u8>)> = (0..count).filter_map(|i| pc.read(w, i).ok().map(|r| (i, r))).collect();
+        assert_eq!(got, want, "what {w}");
+        if w == what::CHANNEL {
+            assert!(asks <= want.len().div_ceil(5), "{asks} requests for {} channels", want.len());
+        }
+    }
+    // A range: only what's in it; the end past 999 is cut.
+    let mut p = std::vec![what::CHANNEL];
+    p.extend_from_slice(&990u16.to_le_bytes());
+    p.extend_from_slice(&100u16.to_le_bytes());
+    let (s, a) = pc.ask(msg::READ_MANY, &p);
+    assert_eq!((s, u16::from_le_bytes([a[0], a[1]])), (0, MAX_CHANNELS));
+    assert_eq!(pc.ask(msg::READ_MANY, &[what::SETTINGS, 0, 0, 1, 0]).0, Status::BadArg as u8);
+}
+
+/// LINK-41, LINK-22, LINK-9: `WRITE_MANY` applies several channels from one frame, each with a `WRITE`'s checks,
+/// and counts each on the progress screen; a refusal stops it there, saying how many went before it and why;
+/// a malformed frame changes nothing.
+#[test]
+fn write_many_channels() {
+    let mut pc = Pc::new(true);
+    let base = pc.st.free_num(500).unwrap();
+    let recs: Vec<(u16, Vec<u8>)> = (0..5).map(|k| (base + k, chan_rec(base + k, 14_652_000 + k as u32 * 2500, b"MANY"))).collect();
+    assert_eq!(pc.ask(msg::BEGIN, &5u16.to_le_bytes()).0, 0);
+    let (s, a) = pc.write_many(what::CHANNEL, &recs);
+    assert_eq!((s, a.as_slice()), (0, &[5u8][..]));
+    assert_eq!(pc.link.progress(), Some(100), "each counted (LINK-9)");
+    assert_eq!(pc.ask(msg::END, &[]).0, 0);
+    for (i, r) in &recs {
+        assert_eq!(pc.read(what::CHANNEL, *i).unwrap(), *r, "channel {i} written");
+    }
+    // The third refused (no such zone): two applied, the reason, the rest not.
+    let mut bad = recs.clone();
+    for (k, (_, r)) in bad.iter_mut().enumerate() {
+        r[11] = b'0' + k as u8; // the names change: MANY0, MANY1, ...
+    }
+    bad[2].1[2] = 200; // zone 200
+    let (s, a) = pc.write_many(what::CHANNEL, &bad);
+    assert_eq!(s, Status::Invalid as u8);
+    assert_eq!(a[0], 2, "two went before it");
+    assert_eq!(std::str::from_utf8(&a[1..]).unwrap(), "zone: no such zone");
+    assert_eq!(pc.read(what::CHANNEL, bad[1].0).unwrap(), bad[1].1);
+    assert_eq!(pc.read(what::CHANNEL, bad[3].0).unwrap(), recs[3].1, "not reached");
+    // Malformed (a length past the end): nothing at all.
+    let mut p = std::vec![what::CHANNEL];
+    p.extend_from_slice(&bad[0].0.to_le_bytes());
+    p.push(60);
+    p.extend_from_slice(&bad[0].1);
+    assert_eq!(pc.ask(msg::WRITE_MANY, &p).0, Status::BadArg as u8);
+    assert_eq!(pc.ask(msg::WRITE_MANY, &[what::SETTINGS, 0, 0, 1, 0]).0, Status::BadArg as u8);
+    assert_eq!(pc.ask(msg::WRITE_MANY, &[what::CHANNEL]).0, Status::BadArg as u8);
+}
+
+/// LINK-41, LINK-28: while a `WRITE_MANY` waits for the store, the port takes no other frame, and it counts as
+/// writing for the other port.
+#[test]
+fn write_many_holds_the_port() {
+    let mut pc = Pc::new(true);
+    let base = pc.st.free_num(600).unwrap();
+    let recs: Vec<(u16, Vec<u8>)> = (0..3).map(|k| (base + k, chan_rec(base + k, 43_500_000, b"HOLD"))).collect();
+    let mut p = std::vec![what::CHANNEL];
+    for (i, r) in &recs {
+        p.extend_from_slice(&i.to_le_bytes());
+        p.push(r.len() as u8);
+        p.extend_from_slice(r);
+    }
+    let mut w = [0u8; MAX_WIRE];
+    let n = wire::build(msg::WRITE_MANY, 9, &p, &mut w).unwrap();
+    pc.raw(&w[..n]);
+    let mut out = Wire(Vec::new());
+    pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now, &mut out);
+    assert!(out.0.is_empty() && !pc.link.ready() && pc.link.writing(), "one applied, two to go");
+    pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now, &mut out);
+    assert!(out.0.is_empty(), "the store hasn't taken the first yet");
+    for _ in 0..4 {
+        while let Some(wr) = pc.app.pop_write() {
+            pc.st.apply(wr);
+        }
+        pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now, &mut out);
+    }
+    let k = out.0.len() - 1;
+    let f = wire::parse(&mut out.0[..k]).unwrap();
+    assert_eq!((f.ty, f.seq, f.payload), (msg::WRITE_MANY | wire::ANSWER, 9, &[0u8, 3][..]));
+    assert!(pc.link.ready() && !pc.link.writing());
+}
+
+/// LINK-42, INBOX-6, INBOX-11: `LOG_READ` gives the event log newest first, in parts, from a sequence number, with
+/// each event's age, source, frequency, flags, position, name and text as the log screen has them.
+#[test]
+fn log_read_newest_first() {
+    use ferrite_core::link::{LOG_FIXED, LOG_POS, LOG_UNREAD};
+    let mut pc = Pc::new(true);
+    let kept = pc.st.data().events();
+    assert!(kept >= 3, "the sample has events");
+    let (mut before, mut seen, mut asks) = (u32::MAX, Vec::new(), 0);
+    loop {
+        let mut p = before.to_le_bytes().to_vec();
+        p.push(2); // at most 2 a request, so it takes parts
+        let (s, a) = pc.ask(msg::LOG_READ, &p);
+        assert_eq!(s, 0);
+        asks += 1;
+        let top = u32::from_le_bytes([a[0], a[1], a[2], a[3]]);
+        assert_eq!((top, u16::from_le_bytes([a[4], a[5]])), (kept as u32, kept));
+        let n = a[6];
+        assert!(n <= 2);
+        let mut r = &a[7..];
+        for _ in 0..n {
+            let seq = u32::from_le_bytes([r[0], r[1], r[2], r[3]]);
+            let ago = u32::from_le_bytes([r[4], r[5], r[6], r[7]]);
+            let (src, slot, flags) = (r[8], r[9], r[10]);
+            let freq = u32::from_le_bytes([r[11], r[12], r[13], r[14]]);
+            let id = u32::from_le_bytes([r[15], r[16], r[17], r[18]]);
+            let mut k = LOG_FIXED;
+            let pos = (flags & LOG_POS != 0).then(|| {
+                k += 8;
+                crate::data::Pos { lat: i32::from_le_bytes([r[23], r[24], r[25], r[26]]), lon: i32::from_le_bytes([r[27], r[28], r[29], r[30]]) }
+            });
+            let name = r[k + 1..k + 1 + r[k] as usize].to_vec();
+            k += 1 + r[k] as usize;
+            let text = r[k + 1..k + 1 + r[k] as usize].to_vec();
+            k += 1 + r[k] as usize;
+            let i = (kept as u32 - 1 - seq) as u16;
+            let e = pc.st.data().event(i).unwrap();
+            assert_eq!((ago, src, slot, freq, id, pos), (e.ago_s, e.src as u8, e.slot, e.freq, e.id, e.pos), "event {i}");
+            assert_eq!(flags & LOG_UNREAD != 0, e.unread);
+            assert_eq!((name.as_slice(), text.as_slice()), (e.name.as_bytes(), e.text.as_bytes()));
+            seen.push(seq);
+            before = seq;
+            r = &r[k..];
+        }
+        assert!(r.is_empty());
+        if n == 0 {
+            break;
+        }
+    }
+    let want: Vec<u32> = (0..kept as u32).rev().collect();
+    assert_eq!(seen, want, "newest first, each once");
+    assert_eq!(asks, (kept as usize).div_ceil(2) + 1);
+    // As many as fit: one request has them all when they are short, and none from below the oldest.
+    let (_, a) = pc.ask(msg::LOG_READ, &u32::MAX.to_le_bytes());
+    assert!(a[6] >= 2);
+    assert_eq!(pc.ask(msg::LOG_READ, &0u32.to_le_bytes()).1[6], 0);
+    assert_eq!(pc.ask(msg::LOG_READ, &[1, 2]).0, Status::BadArg as u8);
+}

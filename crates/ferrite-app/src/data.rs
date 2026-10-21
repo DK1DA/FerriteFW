@@ -374,6 +374,11 @@ pub trait Data {
     fn event(&self, _i: u16) -> Option<Event> {
         None
     }
+    /// Event `i`'s sequence number (newest first, as [`Data::event`]): one more for each event ever logged, so the
+    /// link's `LOG_READ` (LINK-42) can go on from where it was while new ones arrive. By default the count.
+    fn event_seq(&self, i: u16) -> Option<u32> {
+        (i < self.events()).then(|| (self.events() - 1 - i) as u32)
+    }
 
     /// APRS heard, newest first; the station callsign and SSID this radio sends as (APRS-8: None = none set).
     fn stations(&self) -> u16 {

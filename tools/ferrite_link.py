@@ -10,6 +10,9 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT read-channel 12            # channel 12 as shown on the radio (1-1000)
     python3 tools/ferrite_link.py PORT write-channel 12 --name "Club rpt" [--rx 146.94]
     python3 tools/ferrite_link.py PORT delete-channel 12
+    python3 tools/ferrite_link.py PORT used [channel|zone|preset]  # which numbers hold a record (LINK-39)
+    python3 tools/ferrite_link.py PORT readmany [channel|zone|preset] [FIRST [COUNT]]  # whole records, several a frame (LINK-40)
+    python3 tools/ferrite_link.py PORT log [N]                    # the event log, newest first (LINK-42)
     python3 tools/ferrite_link.py PORT baud 230400
     python3 tools/ferrite_link.py PORT reboot                     # into the bootloader, for flash.py
     python3 tools/ferrite_link.py PORT term "LINE" ["LINE" ...]   # terminal command lines over the link (LINK-34)
@@ -73,7 +76,10 @@ import time
 PROTOCOL = 2
 HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD, MORE, UI = (
     0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32, 0x33)
+USED, READ_MANY, WRITE_MANY, LOG_READ = 0x15, 0x17, 0x18, 0x40  # LINK-39 - LINK-42
 SETTINGS, CHANNEL, ZONE, PRESET = 1, 2, 3, 4
+WHATS = {"channel": CHANNEL, "zone": ZONE, "preset": PRESET}
+LOG_SOURCES = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"]  # LINK-42's source byte
 # KEY's remote PTT (Appendix G): key 0x80, then the action (0 off, 1 on + slot, 2 keepalive); slot 0xFF: the active one
 PTT, PTT_OFF, PTT_ON, PTT_ALIVE, ACTIVE = 0x80, 0, 1, 2, 0xFF
 SLOTS = {"active": ACTIVE, "a": 0, "b": 1, "c": 2}
@@ -349,6 +355,78 @@ class Link:
     def write(self, what, idx, rec, part=200):
         for off in range(0, max(len(rec), 1), part):
             self.ok(WRITE, struct.pack("<BHHH", what, idx, off, len(rec)) + rec[off:off + part])
+
+    def used(self, what):
+        """LINK-39: the indexes of `what` that hold a record."""
+        a = self.ok(USED, bytes([what]))
+        n = struct.unpack("<H", a[:2])[0]
+        return [i for i in range(n) if a[2 + i // 8] >> (i % 8) & 1]
+
+    def read_many(self, what, first=0, count=None):
+        """LINK-40: every record held from `first`, `count` indexes on (default: to the end; channels are 0-999):
+        [(index, record)], and the requests it took."""
+        if count is None:
+            count = (1000 if what == CHANNEL else 256) - first
+        out, asks, end = [], 0, first + count
+        while first < end:
+            a = self.ok(READ_MANY, struct.pack("<BHH", what, first, min(end - first, 0xFFFF)))
+            asks += 1
+            nxt, r = struct.unpack("<H", a[:2])[0], a[2:]
+            while r:
+                i, n = struct.unpack("<HB", r[:3])
+                out.append((i, bytes(r[3:3 + n])))
+                r = r[3 + n:]
+            if nxt <= first:
+                break  # the radio's last index (zones and presets end where they end)
+            first = nxt
+        return out, asks
+
+    def write_many(self, what, recs):
+        """LINK-41: (index, record) pairs, as many as fit in one frame each; raises on a refusal with how many went."""
+        frame, sent = bytearray([what]), 0
+
+        def flush():
+            nonlocal sent
+            if len(frame) > 1:
+                s, rest = self.ask(WRITE_MANY, bytes(frame))
+                if s != 0:
+                    done = rest[0] if rest and s in (7, 9, 10) else 0
+                    sys.exit(f"WRITE_MANY: {sent + done} written, then {why(s, rest[1:])}")
+                sent += rest[0]
+            del frame[1:]
+
+        for i, rec in recs:
+            item = struct.pack("<HB", i, len(rec)) + rec
+            if len(frame) + len(item) > 240:
+                flush()
+            frame += item
+        flush()
+        return sent
+
+    def log(self, most=0):
+        """LINK-42: the event log newest first, `most` records (0: all): dicts."""
+        out, before = [], 0xFFFFFFFF
+        while True:
+            a = self.ok(LOG_READ, struct.pack("<I", before))
+            top, kept, n = struct.unpack("<IHB", a[:7])
+            r = a[7:]
+            for _ in range(n):
+                seq, ago, src, slot, flags, freq, ident, x, y = struct.unpack("<IIBBBIIHH", r[:23])
+                r = r[23:]
+                pos = None
+                if flags & 2:
+                    lat, lon = struct.unpack("<ii", r[:8])
+                    pos, r = (lat / 1e7, lon / 1e7), r[8:]
+                name, r = text(r)
+                txt, r = text(r)
+                out.append({"seq": seq, "ago_s": ago, "src": LOG_SOURCES[src] if src < len(LOG_SOURCES) else src,
+                            "slot": slot, "unread": bool(flags & 1), "freq": freq, "id": ident, "x": x, "y": y,
+                            "pos": pos, "name": name, "text": txt})
+                before = seq
+                if most and len(out) >= most:
+                    return out
+            if n == 0:
+                return out
 
 
 def why(status, rest):
@@ -777,6 +855,28 @@ def run(link, a):
         n = int(a.args[0]) - 1
         link.ok(DELETE, struct.pack("<BH", CHANNEL, n))
         print(f"channel {n + 1} deleted")
+    elif a.cmd == "used":
+        what = WHATS[(a.args or ["channel"])[0]]
+        got = link.used(what)
+        base = 1 if what == CHANNEL else 0
+        print(f"{len(got)} held: {' '.join(str(i + base) for i in got)}")
+    elif a.cmd == "readmany":
+        what = WHATS[(a.args or ["channel"])[0]]
+        first = int(a.args[1]) - (1 if what == CHANNEL else 0) if len(a.args) > 1 else 0
+        count = int(a.args[2]) if len(a.args) > 2 else None
+        recs, asks = link.read_many(what, first, count)
+        for i, rec in recs:
+            if what == CHANNEL:
+                num, zone, rx, name = channel_fields(rec)
+                print(f"channel {i + 1}: {name!r} {rx / 100000:.5f} MHz zone {zone if zone != 255 else 'none'}")
+            else:
+                print(f"{i}: {rec.hex()}")
+        print(f"{len(recs)} records in {asks} requests")
+    elif a.cmd == "log":
+        for e in link.log(int(a.args[0]) if a.args else 0):
+            where = f" {e['pos'][0]:.5f},{e['pos'][1]:.5f}" if e["pos"] else ""
+            print(f"#{e['seq']} {e['ago_s']} s ago {e['src']} {e['freq'] / 100000:.5f} MHz slot {'ABC'[e['slot']] if e['slot'] < 3 else e['slot']}"
+                  f"{' unread' if e['unread'] else ''} id {e['id']}{where} {e['name']!r} {e['text']!r}")
     elif a.cmd == "baud":
         rate = int(a.args[0])
         link.ok(BAUD, struct.pack("<I", rate))

@@ -1266,6 +1266,9 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     fn event(&self, i: u16) -> Option<Event> {
         self.events.read(&self.f, i).map(|b| logs::event_decode(&b, self.now_s()))
     }
+    fn event_seq(&self, i: u16) -> Option<u32> {
+        self.events.seq(i)
+    }
     fn stations(&self) -> u16 {
         self.extra.stations()
     }

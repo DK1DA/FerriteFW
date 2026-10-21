@@ -75,6 +75,20 @@ pub struct Session {
     /// A terminal command's output still to send (LINK-34), and the time for its debug requests.
     run: Run,
     now: u32,
+    /// A `WRITE_MANY` being applied (LINK-41).
+    many: Option<Many>,
+}
+
+/// A `WRITE_MANY` under way (LINK-41): its records wait in `asm` (what's after the `what` byte), applied one a
+/// pass, as each may queue the one channel write the App holds; its answer goes when the last is applied or one
+/// is refused. Its frame's seq, `what`, the records' length, the next one's offset, and how many are done.
+#[derive(Clone, Copy, Debug)]
+struct Many {
+    seq: u8,
+    what: u8,
+    len: u8,
+    at: u8,
+    done: u8,
 }
 
 /// What a terminal command run over the link still has to say (LINK-34): made a line at a time, as the terminal's
@@ -114,6 +128,7 @@ impl Session {
             other_writing: false,
             run: Run::Off,
             now: 0,
+            many: None,
         }
     }
 
@@ -133,11 +148,12 @@ impl Session {
         self.closed = Some(self.by);
         self.by = if trusted { crate::remote::BY_CABLE } else { crate::remote::BY_BT };
         self.run = Run::Off;
+        self.many = None;
     }
 
     /// A write is under way: a write session (`BEGIN` .. `END`) or a record half assembled (LINK-28).
     pub fn writing(&self) -> bool {
-        self.session || self.asm_len > 0
+        self.session || self.asm_len > 0 || self.many.is_some()
     }
 
     /// LINK-28: the other port's session is mid-write (set by [`crate::ports::Ports`] before each poll).
@@ -219,8 +235,12 @@ impl Session {
         }
         // `KEY` never waits for the store, nor for room for the largest answer: its answers are a few bytes, and on
         // the cable they wait in the send ring while keyed (TX-43), so keepalives must still be handled then.
-        let key = self.rn >= 2 && self.rx[0] >= 2 && self.rx[1] == msg::KEY;
+        let key = self.many.is_none() && self.rn >= 2 && self.rx[0] >= 2 && self.rx[1] == msg::KEY;
         if !self.have || !key && (out.room() < MAX_WIRE || app.write_pending() || store.data().busy()) {
+            return;
+        }
+        if self.many.is_some() {
+            self.many_poll(app, store, now, out); // LINK-41: the frame was taken already; `have` holds the port
             return;
         }
         let mut ans = [0u8; MAX_PAYLOAD];
@@ -236,11 +256,26 @@ impl Session {
                 let pl = f.payload.len();
                 p[..pl].copy_from_slice(f.payload);
                 (self.last, self.seen) = (now, true);
-                (ty, seq, self.handle(app, store, dev, live, now, ty, &p[..pl], &mut ans))
+                let len = self.handle(app, store, dev, live, now, ty, &p[..pl], &mut ans);
+                match &mut self.many {
+                    Some(m) => {
+                        m.seq = seq;
+                        match self.many_step(app, store, &mut ans) {
+                            Some(len) => (ty, seq, len),
+                            None => return, // more records: the next passes (LINK-41)
+                        }
+                    }
+                    None => (ty, seq, len),
+                }
             }
         };
+        self.send(ty, seq, &ans[..len], out);
+    }
+
+    /// The answer out, and the port takes the next frame.
+    fn send(&mut self, ty: u8, seq: u8, ans: &[u8], out: &mut impl Sink) {
         let mut w = [0u8; MAX_WIRE];
-        if let Some(k) = wire::build(ty | wire::ANSWER, seq, &ans[..len], &mut w) {
+        if let Some(k) = wire::build(ty | wire::ANSWER, seq, ans, &mut w) {
             // Only a `KEY` answer can find too little room (the send ring full of them while keyed, TX-43): it is
             // dropped whole, never cut, and the request has still been acted on.
             if out.room() >= k {
@@ -248,6 +283,16 @@ impl Session {
             }
         }
         (self.have, self.rn) = (false, 0);
+    }
+
+    /// A `WRITE_MANY`'s next record (LINK-41), and its answer once the last is applied or one is refused.
+    fn many_poll<S: ChannelStore>(&mut self, app: &mut App, store: &S, now: u32, out: &mut impl Sink) {
+        self.last = now;
+        let seq = self.many.map_or(0, |m| m.seq);
+        let mut ans = [0u8; MAX_PAYLOAD];
+        if let Some(len) = self.many_step(app, store, &mut ans) {
+            self.send(msg::WRITE_MANY, seq, &ans[..len], out);
+        }
     }
 
     /// One request: its answer's payload into `a` (status first); the length.
@@ -266,9 +311,13 @@ impl Session {
             _ if !self.authorised(app) => Status::NotAuthorised,
             msg::INFO => info(app, st, dev, &mut o),
             msg::READ => read(app, st, p, &mut o),
-            msg::WRITE | msg::DELETE | msg::BEGIN => match self.may_write(app) {
+            msg::USED => used(st, p, &mut o),
+            msg::READ_MANY => read_many(app, st, p, &mut o),
+            msg::LOG_READ => log_read(st, p, &mut o),
+            msg::WRITE | msg::DELETE | msg::BEGIN | msg::WRITE_MANY => match self.may_write(app) {
                 Status::Ok => match ty {
                     msg::WRITE => self.write(app, st, p, &mut o),
+                    msg::WRITE_MANY => self.write_many(p),
                     msg::DELETE => self.delete(app, st, p),
                     _ => self.begin(app, p),
                 },
@@ -482,6 +531,57 @@ impl Session {
             self.done = self.done.saturating_add(1);
         }
         s
+    }
+
+    /// `WRITE_MANY` (LINK-41): what, then records as `READ_MANY` gives them. The whole frame is checked first (a
+    /// malformed one changes nothing); then the records wait in `asm` for [`Session::many_step`]. A `WRITE` half
+    /// assembled is dropped.
+    fn write_many(&mut self, p: &[u8]) -> Status {
+        let Some((&w, recs)) = p.split_first() else { return Status::BadArg };
+        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET) {
+            return Status::BadArg; // the settings are one record, larger than a frame: WRITE
+        }
+        let mut r = recs;
+        while let Some(&l) = r.get(2) {
+            let Some(rest) = r.get(3 + l as usize..) else { return Status::BadArg };
+            r = rest;
+        }
+        if !r.is_empty() || recs.is_empty() {
+            return Status::BadArg;
+        }
+        self.asm[..recs.len()].copy_from_slice(recs);
+        self.asm_len = 0;
+        self.many = Some(Many { seq: 0, what: w, len: recs.len() as u8, at: 0, done: 0 });
+        Status::Ok
+    }
+
+    /// The next record of a `WRITE_MANY`, applied as a `WRITE` of it would be (LINK-22's checks, LINK-9's count):
+    /// None while more follow; else the answer's length: the status, how many were applied, and a refusal's
+    /// reason.
+    fn many_step<S: ChannelStore>(&mut self, app: &mut App, st: &S, a: &mut [u8; MAX_PAYLOAD]) -> Option<usize> {
+        let mut m = self.many?;
+        let mut o = Out { a, n: 2 };
+        let s = if self.cancelled {
+            Status::Cancelled
+        } else {
+            let at = m.at as usize;
+            let (idx, l) = (le16(&self.asm[at..]), self.asm[at + 2] as usize);
+            let s = apply(app, st, m.what, idx, &self.asm[at + 3..at + 3 + l], &mut o);
+            if s == Status::Ok {
+                (m.done, m.at) = (m.done + 1, (at + 3 + l) as u8);
+                if self.session {
+                    self.done = self.done.saturating_add(1);
+                }
+            }
+            s
+        };
+        if s == Status::Ok && m.at < m.len {
+            self.many = Some(m);
+            return None;
+        }
+        self.many = None;
+        (o.a[0], o.a[1]) = (s as u8, m.done);
+        Some(if s == Status::Invalid { o.n } else { 2 })
     }
 
     fn delete<S: ChannelStore>(&mut self, app: &mut App, st: &S, p: &[u8]) -> Status {
@@ -802,6 +902,29 @@ fn name_of<const N: usize>(b: &[u8]) -> Option<Buf<N>> {
     Some(Buf::from(&b[..n]))
 }
 
+/// Record `idx` of `w`, as `READ` gives it, into `win`: `not found` when there is none.
+fn record<S: ChannelStore>(app: &App, st: &S, w: u8, idx: u16, win: &mut Window) -> Status {
+    match w {
+        what::SETTINGS if idx == 0 => {
+            settings_record(app, win);
+        }
+        what::CHANNEL => match st.get(idx) {
+            Some(c) => channel_save(&c, win),
+            None => return Status::NotFound,
+        },
+        what::ZONE => match st.zone_name(idx as u8).filter(|_| idx < st.zones() as u16) {
+            Some(n) => zone_save(n.as_bytes(), &st.data().zone_cfg(idx as u8), win),
+            None => return Status::NotFound,
+        },
+        what::PRESET => match st.data().preset(idx as u8).filter(|_| idx < 256) {
+            Some(pr) => preset_save(&pr, win),
+            None => return Status::NotFound,
+        },
+        _ => return Status::BadArg,
+    }
+    Status::Ok
+}
+
 fn read<S: ChannelStore>(app: &App, st: &S, p: &[u8], o: &mut Out) -> Status {
     if p.len() < 6 {
         return Status::BadArg;
@@ -809,23 +932,9 @@ fn read<S: ChannelStore>(app: &App, st: &S, p: &[u8], o: &mut Out) -> Status {
     let (w, idx, off, len) = (p[0], le16(&p[1..]), le16(&p[3..]) as usize, (p[5] as usize).min(MAX_PAYLOAD - 3));
     let mut buf = [0u8; MAX_PAYLOAD];
     let mut win = Window { b: &mut buf[..len], from: off, n: 0 };
-    match w {
-        what::SETTINGS if idx == 0 => {
-            settings_record(app, &mut win);
-        }
-        what::CHANNEL => match st.get(idx) {
-            Some(c) => channel_save(&c, &mut win),
-            None => return Status::NotFound,
-        },
-        what::ZONE => match st.zone_name(idx as u8).filter(|_| idx < st.zones() as u16) {
-            Some(n) => zone_save(n.as_bytes(), &st.data().zone_cfg(idx as u8), &mut win),
-            None => return Status::NotFound,
-        },
-        what::PRESET => match st.data().preset(idx as u8).filter(|_| idx < 256) {
-            Some(pr) => preset_save(&pr, &mut win),
-            None => return Status::NotFound,
-        },
-        _ => return Status::BadArg,
+    let s = record(app, st, w, idx, &mut win);
+    if s != Status::Ok {
+        return s;
     }
     let total = win.n;
     if off > total {
@@ -834,6 +943,119 @@ fn read<S: ChannelStore>(app: &App, st: &S, p: &[u8], o: &mut Out) -> Status {
     let got = len.min(total - off);
     o.put(&(total as u16).to_le_bytes());
     o.put(&buf[..got]);
+    Status::Ok
+}
+
+/// How many indexes `w` has: channels 0-999, the zones and presets there are. None for the settings.
+fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
+    match w {
+        what::CHANNEL => Some(MAX_CHANNELS),
+        what::ZONE => Some(st.zones() as u16),
+        what::PRESET => Some(st.data().presets() as u16),
+        _ => None,
+    }
+}
+
+/// Whether index `i` of `w` holds a record; a channel from the store's zone map (RAM on the radio), without
+/// reading it.
+fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
+    match w {
+        what::CHANNEL => st.zone_of(i).is_some(),
+        what::ZONE => st.zone_name(i as u8).is_some(),
+        _ => st.data().preset(i as u8).is_some(),
+    }
+}
+
+/// `USED` (LINK-39): the index count, then the bitmap of the ones holding a record.
+fn used<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    let Some(w) = p.first().copied() else { return Status::BadArg };
+    let Some(n) = indexes(st, w) else { return Status::BadArg };
+    o.put(&n.to_le_bytes());
+    let mut byte = 0u8;
+    for i in 0..n {
+        if held(st, w, i) {
+            byte |= 1 << (i % 8);
+        }
+        if i % 8 == 7 || i + 1 == n {
+            o.put(&[byte]);
+            byte = 0;
+        }
+    }
+    Status::Ok
+}
+
+/// `READ_MANY` (LINK-40): from `first`, `count` indexes on, each record held as a whole, as many as fit; the
+/// index to go on from first.
+fn read_many<S: ChannelStore>(app: &App, st: &S, p: &[u8], o: &mut Out) -> Status {
+    if p.len() < 5 {
+        return Status::BadArg;
+    }
+    let (w, first, count) = (p[0], le16(&p[1..]), le16(&p[3..]));
+    let Some(n) = indexes(st, w) else { return Status::BadArg };
+    let end = (first as u32 + count as u32).min(n as u32) as u16;
+    let next = o.n;
+    o.put(&[0, 0]);
+    let mut i = first;
+    let mut buf = [0u8; MAX_PAYLOAD];
+    while i < end {
+        if held(st, w, i) {
+            let mut win = Window { b: &mut buf, from: 0, n: 0 };
+            if record(app, st, w, i, &mut win) == Status::Ok {
+                let k = win.n;
+                if o.n + 3 + k > MAX_PAYLOAD {
+                    break;
+                }
+                o.put(&i.to_le_bytes());
+                o.put(&[k as u8]);
+                o.put(&buf[..k]);
+            }
+        }
+        i += 1;
+    }
+    o.a[next..next + 2].copy_from_slice(&i.max(first).to_le_bytes());
+    Status::Ok
+}
+
+/// `LOG_READ` (LINK-42): the event log (INBOX-6) newest first, from below the sequence number `before`.
+fn log_read<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    use ferrite_core::link::{LOG_FIXED, LOG_POS, LOG_UNREAD};
+    let Some(b) = p.get(..4) else { return Status::BadArg };
+    let before = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    let most = p.get(4).copied().filter(|&m| m > 0).unwrap_or(u8::MAX);
+    let d = st.data();
+    let kept = d.events();
+    let top = d.event_seq(0).map_or(0, |s| s.wrapping_add(1));
+    o.put(&top.to_le_bytes());
+    o.put(&kept.to_le_bytes());
+    let count = o.n;
+    o.put(&[0]);
+    let (mut i, mut n) = (top.saturating_sub(before).min(kept as u32) as u16, 0u8);
+    while i < kept && n < most {
+        if let (Some(e), Some(seq)) = (d.event(i), d.event_seq(i)) {
+            let (nm, tx) = (e.name.as_bytes(), e.text.as_bytes());
+            let k = LOG_FIXED + if e.pos.is_some() { 8 } else { 0 } + 2 + nm.len() + tx.len();
+            if o.n + k > MAX_PAYLOAD {
+                break;
+            }
+            o.put(&seq.to_le_bytes());
+            o.put(&e.ago_s.to_le_bytes());
+            let flags = if e.unread { LOG_UNREAD } else { 0 } | if e.pos.is_some() { LOG_POS } else { 0 };
+            o.put(&[e.src as u8, e.slot, flags]);
+            o.put(&e.freq.to_le_bytes());
+            o.put(&e.id.to_le_bytes());
+            o.put(&e.x.to_le_bytes());
+            o.put(&e.y.to_le_bytes());
+            if let Some(ps) = e.pos {
+                o.put(&ps.lat.to_le_bytes());
+                o.put(&ps.lon.to_le_bytes());
+            }
+            o.text(nm);
+            o.text(tx);
+            n += 1;
+        }
+        i += 1;
+    }
+    o.a[count] = n;
     Status::Ok
 }
 

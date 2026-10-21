@@ -90,6 +90,22 @@ pub mod msg {
     pub const BEGIN: u8 = 0x13;
     /// The write session ends.
     pub const END: u8 = 0x14;
+    /// Which indexes hold a record (LINK-39): what; the answer is the index count (u16), then a bitmap, index i at
+    /// bit `i % 8` of byte `i / 8`.
+    pub const USED: u8 = 0x15;
+    /// Whole records from an index on (LINK-40): what, first index (u16), count (u16). The answer is the next index
+    /// to ask from (u16), then each record held, as many as fit: index (u16), length (u8), the record; empty
+    /// indexes are skipped.
+    pub const READ_MANY: u8 = 0x17;
+    /// Several whole records in one frame (LINK-41): what, then each record as `READ_MANY` gives them (index,
+    /// length, record). Applied in order, each as a `WRITE` of it would be; the answer's first byte after the
+    /// status is how many were applied (a refusal is the next one's).
+    pub const WRITE_MANY: u8 = 0x18;
+    /// The event log, newest first (LINK-42): before (u32: records with a lower sequence number; 0xFFFFFFFF from
+    /// the newest), then optionally the most to send (u8, 0: as many as fit). The answer: the next sequence number
+    /// (u32), the records held (u16), how many follow (u8), then each ([`LOG_FIXED`] bytes, the position if it
+    /// has one, then the name and the text, each a length and the bytes).
+    pub const LOG_READ: u8 = 0x40;
     /// A slot's working fields, read or changed as the keypad would (LINK-33): the slot (0-2), then optionally a
     /// [`super::slot`] mask and its fields in bit order. The answer is the slot as it is after.
     pub const SLOT: u8 = 0x16;
@@ -115,6 +131,14 @@ pub mod msg {
     /// byte: 0 the state, 1 the key names (`ui keys`).
     pub const UI: u8 = 0x33;
 }
+
+/// A `LOG_READ` record's fixed part (LINK-42): sequence number (u32), seconds ago (u32), source (u8), slot (u8),
+/// flags (u8: [`LOG_UNREAD`], [`LOG_POS`]), frequency (u32, 10 Hz), id (u32), x (u16), y (u16).
+pub const LOG_FIXED: usize = 23;
+/// A `LOG_READ` record's flags: not yet read on the radio.
+pub const LOG_UNREAD: u8 = 1;
+/// The record has a position: latitude and longitude (i32 each, degrees x 1e7) follow the fixed part.
+pub const LOG_POS: u8 = 2;
 
 /// `SLOT`'s mask (LINK-33): which fields follow, in this order.
 pub mod slot {
