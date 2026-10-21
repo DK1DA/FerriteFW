@@ -70,11 +70,19 @@ impl Radio {
         self.mcu_temp();
         self.seek_poll(); // HF-31: a seek runs here, never inside a command (MODE-7)
         self.fm_poll();
-        // SQL-1: the calibration's squelch tables, once the UI task has read them: every tuned chip again.
+        // SQL-1: the calibration's squelch tables, once the UI task has read them: every tuned chip again; with
+        // a factory crystal trim (CAL-12), its frequency too.
         if let Some(c) = crate::chan::SQ_CAL.try_take() {
+            let retune = c.trim() != self.sqcal.trim();
             self.sqcal = c;
             for n in 0..2u8 {
                 if let Some((s, f)) = self.tuned[n as usize] {
+                    if retune && self.path.keyed().is_none() {
+                        let w = self.sqcal.rx_word(f);
+                        let mut bk = self.chip(n);
+                        bk.set_freq(w * 10);
+                        bk.rx_on();
+                    }
                     let level = self.slots.get(s as usize).map_or(self.slots[self.active as usize].sq, |sl| sl.sq);
                     let regs = self.sqcal.regs(f, level);
                     radio_chip::squelch(&mut self.chip(n), regs);

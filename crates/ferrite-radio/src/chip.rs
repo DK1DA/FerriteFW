@@ -10,7 +10,7 @@ use ferrite_core::settle::Settle;
 /// What a chip needs to receive a slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RxSetup {
-    /// Where the chip tunes (the clarifier already applied), 10 Hz units.
+    /// Where the chip tunes (the clarifier and the factory crystal trim already applied, CAL-12), 10 Hz units.
     pub freq: Freq10,
     pub narrow: bool,
     /// AM (receive only, TX-20).
@@ -232,7 +232,7 @@ pub fn si_input(am: bool) -> [bool; 2] {
 #[cfg(feature = "tx")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TxSetup {
-    /// The TX frequency, 10 Hz units.
+    /// The TX frequency's REG_38/39 word (the factory crystal trim applied, CAL-12), 10 Hz units.
     pub freq: Freq10,
     pub narrow: bool,
     /// The sub-tone sent: the tone word (CTCSS in 0.1 Hz, bit 15 DCS, bit 14 inverted; 0 none).
@@ -272,7 +272,7 @@ pub fn tx_setup<B: Bus>(bk: &mut Bk4829<B>, s: &TxSetup) {
 pub const REG30_TX_MIC: u16 = 0xC1FE;
 
 /// What the keyed chip must hold before the PA is driven (TX-7): the TX frequency word Ferrite wrote (10 Hz units,
-/// REG_38/39) and REG_3B (the crystal register Ferrite never writes: the value read after the chip's start-up).
+/// REG_38/39, trimmed: CAL-13) and REG_3B (the crystal register Ferrite never writes: the value read after the chip's start-up).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TxExpect {
     pub freq: Freq10,

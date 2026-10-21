@@ -62,6 +62,8 @@ impl Radio {
             return false;
         };
         let high = self.tx.data.unwrap_or(self.tx.power[self.live.tx.slot as usize % 4]) == 2;
+        // CAL-12, CAL-13: the chip holds the trimmed word (`tx_chip_setup`).
+        let freq = self.tx.cal.map_or(freq, |c| c.tx_word(freq));
         let want = radio_chip::TxExpect { freq, reg3b: self.tx.reg3b[n as usize], narrow: self.tx.narrow };
         match radio_chip::key_mic(&mut self.chip(n), high, &want) {
             Ok(()) => true,
@@ -240,6 +242,7 @@ impl Radio {
         self.tx.narrow = narrow;
         let tone_dev = self.tx.cal.map_or(0, |c| c.tone_dev(tone, self.tone_level));
         let mic = if data { ferrite_core::vox::MIC_DATA } else { ferrite_core::vox::mic_reg(self.tx.mic) };
+        let freq = self.tx.cal.map_or(freq, |c| c.tx_word(freq)); // CAL-12: the factory crystal trim
         radio_chip::TxSetup { freq, narrow, tone, tone_dev, mic }
     }
 
