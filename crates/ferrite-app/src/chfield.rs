@@ -7,7 +7,7 @@
 //! TX-37); a refusal names its field, so each caller heads it its own way ("Power: ...", `power: ...`).
 
 use crate::chan::{rx_ok, Channel, FLAG_APRS, FLAG_HIDDEN, FLAG_PRIORITY, FLAG_RX_ONLY, FLAG_SKIP, NO_ZONE};
-use crate::slot::{band_near, band_of, band_step, Item, BANDS, BAND_125M, SLOT_MODES, STEPS};
+use crate::slot::{band_near, band_step, Item, BANDS, SLOT_MODES, STEPS};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
@@ -53,8 +53,6 @@ pub enum Refusal {
     Relay,
     /// CHAN-22: a TX apart from RX (offset or split) stays within 64-1000 MHz.
     TxRange,
-    /// TX-9: no more than Low (0.25 W) on 1.25 m, by the band it transmits on.
-    Capped,
     /// CHAN-4: a receive-only channel has no power to set.
     RxOnly,
     /// CHAN-31: printable ASCII in (other characters map to '-').
@@ -74,7 +72,7 @@ impl Refusal {
             Refusal::HfMode | Refusal::NotHf => ChField::It(Item::Mode),
             Refusal::HfSimplex | Refusal::TxRange => ChField::It(Item::Offset),
             Refusal::Relay => return None,
-            Refusal::Capped | Refusal::RxOnly => ChField::It(Item::Power),
+            Refusal::RxOnly => ChField::It(Item::Power),
             Refusal::NameChars | Refusal::NameLong => ChField::Name,
         })
     }
@@ -87,14 +85,13 @@ impl Refusal {
             Refusal::NotHf => "USB, LSB and CW are for HF channels",
             Refusal::Relay => "Split TX needs the HF relay: not allowed with this RX frequency",
             Refusal::TxRange => "TX outside 64 to 1000 MHz",
-            Refusal::Capped => "fixed at 0.25 W on 1.25 m",
             Refusal::RxOnly => "this channel is RX only",
             Refusal::NameChars => "letters, digits and punctuation only",
             Refusal::NameLong => "16 characters at most",
         }
     }
 
-    /// "Head: why" with the field's label (the editors' "Power: fixed at 0.25 W on 1.25 m"), or the sentence alone.
+    /// "Head: why" with the field's label (the editors' "Power: this channel is RX only"), or the sentence alone.
     pub fn line<const N: usize>(self, out: &mut Buf<N>) {
         out.clear();
         if let Some(f) = self.field() {
@@ -105,14 +102,8 @@ impl Refusal {
     }
 }
 
-/// TX-9: the channel transmits on 1.25 m, so at 0.25 W whatever its power says (a split's TX band, not RX's).
-pub fn capped(c: &Channel) -> bool {
-    band_of(c.cfg.tx_of(c.rx)) == Some(BAND_125M)
-}
-
 /// A channel the radio can hold, as any edit leaves it (CHAN-22, CHAN-23, CHAN-26, TX-37). A TX apart from RX
 /// (an offset or split) stays within 64-1000 MHz; a simplex channel above 1000 MHz is receive only (VFO-21).
-/// A power above Low on 1.25 m is kept (TX-9 caps it at TX); only raising it is refused ([`check_change`]).
 pub fn check_edit(c: &Channel) -> Result<(), Refusal> {
     if !rx_ok(c.rx) {
         return Err(Refusal::RxRange);
@@ -140,32 +131,17 @@ pub fn check_edit(c: &Channel) -> Result<(), Refusal> {
 }
 
 /// A change from `old` to `new` (an editor's step, # or typed value, `ch N key value`): [`check_edit`], and a power
-/// changed on a receive-only channel (CHAN-4), or raised above Low on 1.25 m (TX-9), refused.
+/// changed on a receive-only channel (CHAN-4) refused.
 pub fn check_change(old: &Channel, new: &Channel) -> Result<(), Refusal> {
-    if new.cfg.power != old.cfg.power {
-        if new.flags & FLAG_RX_ONLY != 0 {
-            return Err(Refusal::RxOnly);
-        }
-        if capped(new) && new.cfg.power != 0 {
-            return Err(Refusal::Capped);
-        }
+    if new.cfg.power != old.cfg.power && new.flags & FLAG_RX_ONLY != 0 {
+        return Err(Refusal::RxOnly);
     }
     check_edit(new)
 }
 
-/// A whole channel written at once (`ch N "name" ...`, `load`, the link: TERM-7, LINK-22): [`check_edit`], and its
-/// power no more than Low on 1.25 m (TX-9).
+/// A whole channel written at once (`ch N "name" ...`, `load`, the link: TERM-7, LINK-22): [`check_edit`].
 pub fn check(c: &Channel) -> Result<(), Refusal> {
-    check_edit(c)?;
-    if capped(c) && c.cfg.power != 0 {
-        return Err(Refusal::Capped);
-    }
-    Ok(())
-}
-
-/// The power a channel transmits with: Low on 1.25 m (TX-9), else its own. What every caller shows.
-pub fn power(c: &Channel) -> u8 {
-    if capped(c) { 0 } else { c.cfg.power }
+    check_edit(c)
 }
 
 /// `f` stepped `d` times by its band's step in the region (VFO-18), kept to the part of the range it is in: an HF
@@ -213,12 +189,11 @@ impl ChField {
         }
     }
 
-    /// The value as text: an item long or short ([`Item::text`]; power as it transmits, "0.25 W" on 1.25 m), a flag
+    /// The value as text: an item long or short ([`Item::text`]; power as set), a flag
     /// On/Off, the scan choice, Home Yes/No, the name. Zone, RX and TX are each caller's own (zone names, digits).
     pub fn text(self, c: &Channel, home: Option<u16>, long: bool, b: &mut Buf<16>) {
         b.clear();
         match self {
-            ChField::It(Item::Power) if capped(c) => b.set(b"0.25 W"),
             ChField::It(it) => it.text(&c.cfg, long, b),
             ChField::Flag(bit) => b.set(if c.flags & bit != 0 { b"On" } else { b"Off" }),
             ChField::Scan => b.set(SCAN_TEXT[c.scan() as usize].as_bytes()),

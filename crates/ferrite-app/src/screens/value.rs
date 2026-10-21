@@ -51,7 +51,6 @@ pub(crate) fn text_of(app: &App, item: Item, i: i32, b: &mut Buf<16>) {
         Item::BatterySave => {
             let _ = uwrite!(b, "Level {}", i);
         }
-        Item::Power if app.capped(app.active) => b.set(b"0.25 W"),
         _ => {
             let mut c = *app.slots[app.active as usize].cfg();
             let shift = BANDS[band_near(app.slots[app.active as usize].freq())].shift;

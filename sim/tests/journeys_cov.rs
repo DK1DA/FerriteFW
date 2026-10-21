@@ -129,17 +129,11 @@ fn home_channel_is_one_number_apart_from_priority() {
     assert_eq!(r.sim.app().slot(r.sim.app().active()).ch.filter(|_| r.sim.app().slot(r.sim.app().active()).on_channel()).map(|c| c.num), Some(2), "hold 0: the home channel");
 }
 
-/// A setting that doesn't apply is greyed and says why when selected: in edit in place on 1.25 m, the
-/// focused Power cell's note says it's fixed; in quick settings on a channel, turning Step says "VFO only"
-/// (EDIT-7).
+/// A setting that doesn't apply is greyed and says why when selected: in quick settings on a channel, turning
+/// Step says "VFO only" (EDIT-7).
 #[test]
 fn greyed_settings_say_why() {
     let mut r = Radio::new();
-    r.home();
-    r.run("type 2235; press OK; wait 500ms; hold SLOT; wait 300ms");
-    r.run("press DOWN; press RIGHT; wait 300ms"); // the middle row's middle cell: Power
-    let seen = r.has("Power: Fixed at 0.25 W");
-    assert!(seen, "the focused greyed cell says why:\n{}", r.text());
     r.home();
     r.press(Key::VfoMem).wait(300); // slot A to channel mode
     r.run("type 1; press OK; wait 300ms; press OK; wait 300ms"); // quick settings

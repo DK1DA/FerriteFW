@@ -51,7 +51,7 @@ pub struct Req {
     pub extend: bool,
     /// The calibration sector and the MCU check passed (TX-13 to TX-15).
     pub cal_ok: bool,
-    /// The calibration's TX windows hold `tx` (CAL-11, `TxCal::in_window`; always true below 64 MHz, TX-41).
+    /// The calibration's TX windows hold `tx` (CAL-11, `TxCal::in_window`; 18-64 MHz as stock's HF mode, TX-41).
     pub cal_window: bool,
     /// The battery is above the cut-off.
     pub batt_ok: bool,
@@ -167,9 +167,6 @@ impl TxSeq {
         // TX-1, CAL-11: the region plan (or Extend TX's hardware range) ∩ this radio's calibration windows.
         if !r.cal_window {
             return Err(Refusal::NotCalibrated);
-        }
-        if txplan::locked_125m(r.tx) {
-            return Err(Refusal::Unmeasured125);
         }
         if !txplan::relay_ok(r.rx, r.tx) {
             return Err(Refusal::RelayMismatch);
@@ -384,7 +381,9 @@ mod tests {
         assert_eq!(t.check(&Req { batt_ok: false, ..ok }, &p, 0), Err(Refusal::Battery));
         assert_eq!(t.check(&req(mhz(162) + 55_000), &p, 0), Err(Refusal::OutOfBand));
         assert_eq!(t.check(&Req { extend: true, ..req(mhz(162) + 55_000) }, &p, 0), Ok(()));
-        assert_eq!(t.check(&req(mhz(223) + 50_000), &p, 0), Err(Refusal::Unmeasured125));
+        assert_eq!(t.check(&req(mhz(223) + 50_000), &p, 0), Ok(()), "TX-10.4: 1.25 m as any band");
+        assert_eq!(t.check(&req(mhz(52) + 52_500), &p, 0), Ok(()), "TX-4: 6 m");
+        assert_eq!(t.check(&Req { extend: true, ..req(mhz(27) + 18_500) }, &p, 0), Ok(()), "TX-41: CB with Extend TX");
         assert_eq!(t.check(&Req { rx: mhz(28) + 40_000, ..ok }, &p, 0), Err(Refusal::RelayMismatch));
         let sos = Req { extend: true, ..req(mhz(121) + 50_000) };
         assert_eq!(t.check(&sos, &p, 0), Err(Refusal::NotCalibrated), "airband is outside the TX hardware");
@@ -392,9 +391,10 @@ mod tests {
         assert_eq!(t.check(&sos, &p, 0), Err(Refusal::Emergency));
         assert_eq!(t.check(&Req { confirmed: true, ..sos }, &p, 0), Ok(()));
         assert_eq!(t.check(&Req { confirmed: true, person: false, ..sos }, &p, 0), Err(Refusal::Emergency), "TX-35");
-        // 243.0 MHz: the 200-300 MHz path is locked until measured, second PTT or not (TX-10.2, TX audit M3).
-        let sos = Req { extend: true, confirmed: true, ..req(mhz(243)) };
-        assert_eq!(t.check(&sos, &p, 0), Err(Refusal::Unmeasured125));
+        // TX-3, TX-10.5: 243.0 MHz on the open 200-300 MHz path: the double PTT, as the other emergency frequencies.
+        let sos = Req { extend: true, ..req(mhz(243)) };
+        assert_eq!(t.check(&sos, &p, 0), Err(Refusal::Emergency));
+        assert_eq!(t.check(&Req { confirmed: true, ..sos }, &p, 0), Ok(()));
     }
 
     #[test]

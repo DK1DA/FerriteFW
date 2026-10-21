@@ -198,8 +198,7 @@ const HELP_CHANNELS: &str = concat!(
 );
 const HELP_EDIT: &str = concat!(
     "<- -> change a field; it saves at once.\n",
-    "Enter types the name or a frequency (MHz). # resets a field.\n",
-    "1.25 m power stays at 0.25 W.",
+    "Enter types the name or a frequency (MHz). # resets a field.",
 );
 const HELP_SETTINGS: &str = concat!(
     "MENU 0's settings and numbers. <- -> change, Enter opens a list.\n",
@@ -1455,11 +1454,7 @@ impl Term {
                 tone_text(c.cfg.tx_tone, &mut v);
                 w.s(if v.is_empty() { b"-" } else { v.as_bytes() });
                 w.at(65);
-                if crate::chfield::capped(&c) {
-                    w.s(b"0.25W"); // by the TX band (TX-9)
-                } else {
-                    item(Item::Power, &c, w);
-                }
+                item(Item::Power, &c, w);
                 w.at(71);
                 flags(&c, cx.app, w);
                 if sel {

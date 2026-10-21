@@ -1,4 +1,4 @@
-//! Where transmit is allowed (manual chapter 15): each region's amateur bands (TX-1), the HF windows (TX-4), the
+//! Where transmit is allowed (manual chapter 15): each region's amateur bands (TX-1), the bands in 18-64 MHz (TX-4), the
 //! emergency frequencies (TX-3) and the reasons a transmission is refused (TX-20). Plain tables and checks, so
 //! the UI can say why before keying and the Radio task can apply the same rules when it keys (TX-17).
 
@@ -52,8 +52,23 @@ const fn b(name: &'static str, lo: Freq10, hi: Freq10) -> TxBand {
     TxBand { name, lo, hi }
 }
 
-/// 12 m and 10 m, the same everywhere (TX-4).
-const HF: [TxBand; 2] = [b("12 m", mhz(24) + 89_000, mhz(24) + 99_000), b("10 m", mhz(28), mhz(29) + 70_000)];
+/// A region's amateur bands in 18-64 MHz (TX-4), as stock's HF work mode allows transmit on all of 18-64 MHz:
+/// 17 m, 15 m, 12 m and 10 m everywhere, and 6 m by the region's allocation: 50-54 MHz in the Americas, Australia,
+/// New Zealand and Japan, 50-52 MHz in the UK, Europe and elsewhere (IARU Region 1's common part).
+pub fn hf(r: Region) -> &'static [TxBand] {
+    const HF4: [TxBand; 4] = [
+        b("17 m", mhz(18) + 6_800, mhz(18) + 16_800),
+        b("15 m", mhz(21), mhz(21) + 45_000),
+        b("12 m", mhz(24) + 89_000, mhz(24) + 99_000),
+        b("10 m", mhz(28), mhz(29) + 70_000),
+    ];
+    const W54: [TxBand; 5] = [HF4[0], HF4[1], HF4[2], HF4[3], b("6 m", mhz(50), mhz(54))];
+    const W52: [TxBand; 5] = [HF4[0], HF4[1], HF4[2], HF4[3], b("6 m", mhz(50), mhz(52))];
+    match r {
+        Region::Us | Region::Canada | Region::Australia | Region::NewZealand | Region::Japan => &W54,
+        Region::Uk | Region::Europe | Region::Other => &W52,
+    }
+}
 
 /// A region's VHF/UHF amateur bands (TX-1's table): 2 m, 1.25 m where it exists, 70 cm.
 pub fn bands(r: Region) -> &'static [TxBand] {
@@ -102,8 +117,6 @@ pub enum Refusal {
     ReceiveOnlyHere,
     /// The crossband repeater is running (XB-14).
     Crossband,
-    /// 1.25 m before its 0.25 W ceiling is measured on the bench (TX-10).
-    Unmeasured125,
     /// The TX frequency needs the band relay in the other state from RX (a split or shift across 64 MHz): the
     /// relay is never switched at key-up (TX-37, as nicFW refuses it).
     RelayMismatch,
@@ -127,34 +140,17 @@ pub fn relay_ok(rx: Freq10, tx: Freq10) -> bool {
     crate::freq::needs_relay(rx) == crate::freq::needs_relay(tx)
 }
 
-/// TX-10: 1.25 m transmits only once the PA drive ceiling that holds it to 0.25 W (TX-9) has been measured into
-/// a dummy load. Until then this stays false and every transmission there is refused, by the UI and (once
-/// transmit is built) the Radio task alike. Set it in the same change that adds the measured ceiling.
-pub const CAP_125M_MEASURED: bool = false;
-
-/// The 1.25 m band as TX-9 draws it for the cap: 200-300 MHz.
-pub fn is_125m(f: Freq10) -> bool {
-    (mhz(200)..mhz(300)).contains(&f)
-}
-
-/// TX-10: transmit anywhere on the 200-300 MHz PA path (the 1.25 m band, and 243.0 MHz) is held back until the
-/// ceiling is measured: nothing there is capped yet, and the path's Low curve alone isn't 0.25 W (TX audit M3).
-/// Once measured, the 0.25 W cap (TX-9) covers the whole path and 243.0 MHz takes the emergency double PTT (TX-3).
-pub fn locked_125m(f: Freq10) -> bool {
-    !CAP_125M_MEASURED && is_125m(f)
-}
-
-/// Where transmit may go: the region's bands (or, with Extend TX, any band the hardware covers) and the HF
-/// windows. Extend TX never reaches below 64 MHz: the calibration has no HF window, so HF stays on the amateur
-/// windows (TX-41). The calibration's own windows are intersected after this, in the Radio task's sequencer
-/// (`TxCal::in_window`, `txseq::Req::cal_window`): the UI doesn't read them.
+/// Where transmit may go: the region's bands (TX-1) and its amateur bands in 18-64 MHz (TX-4), or, with Extend TX,
+/// any frequency the hardware covers as stock's windows draw it (TX-41): all of 18-64 MHz as stock's HF work mode,
+/// 136-174, 200-260 and 400-520 MHz. The calibration's own windows are intersected after this, in the Radio task's
+/// sequencer (`TxCal::in_window`, `txseq::Req::cal_window`): the UI doesn't read them.
 pub fn check(f: Freq10, region: Region, extend: bool) -> Result<(), Refusal> {
-    if extend && f >= mhz(64) {
-        // Calibration ∩ hardware: the TX chips' ranges (6 m and below 24 MHz stay locked, TX-4).
-        let hw = (mhz(136)..mhz(174)).contains(&f) || (mhz(200)..mhz(260)).contains(&f) || (mhz(400)..mhz(520)).contains(&f);
-        return if hw || HF.iter().any(|b| (b.lo..b.hi).contains(&f)) { Ok(()) } else { Err(Refusal::NotCalibrated) };
+    if extend {
+        // Calibration ∩ hardware: the TX chips' ranges; 18-64 MHz is stock's HF-mode window (CB included).
+        let hw = [(18, 64), (136, 174), (200, 260), (400, 520)].iter().any(|&(lo, hi)| (mhz(lo)..mhz(hi)).contains(&f));
+        return if hw { Ok(()) } else { Err(Refusal::NotCalibrated) };
     }
-    if bands(region).iter().chain(HF.iter()).any(|b| (b.lo..b.hi).contains(&f)) {
+    if bands(region).iter().chain(hf(region)).any(|b| (b.lo..b.hi).contains(&f)) {
         Ok(())
     } else {
         Err(Refusal::OutOfBand)
@@ -164,7 +160,7 @@ pub fn check(f: Freq10, region: Region, extend: bool) -> Result<(), Refusal> {
 /// The region's band nearest f, for "outside the 70 cm band in Canada (430-450)".
 pub fn nearest(f: Freq10, region: Region) -> TxBand {
     let d = |b: &TxBand| if f < b.lo { b.lo - f } else { f.saturating_sub(b.hi) };
-    *bands(region).iter().chain(HF.iter()).min_by_key(|b| d(b)).unwrap_or(&HF[1])
+    *bands(region).iter().chain(hf(region)).min_by_key(|b| d(b)).unwrap_or(&hf(region)[3])
 }
 
 #[cfg(test)]
@@ -179,31 +175,43 @@ mod tests {
         assert_eq!(check(mhz(420) + 50_000, Region::Us, false), Ok(()));
         assert_eq!(check(mhz(147), Region::Uk, false), Err(Refusal::OutOfBand));
         assert_eq!(check(mhz(28) + 40_000, Region::Japan, false), Ok(()));
-        assert_eq!(check(mhz(52), Region::Us, true), Err(Refusal::OutOfBand), "6 m locked");
         assert_eq!(check(mhz(162) + 55_000, Region::Us, true), Ok(()));
         assert_eq!(nearest(mhz(420) + 50_000, Region::Canada).name, "70 cm");
     }
 
-    /// TX-4, TX-41: below 64 MHz only 12 m and 10 m transmit, Extend TX or not; CB and 15 m never; 6 m locked.
+    /// TX-9, TX-10.4, TX-10.5, SAFE-12.4: 1.25 m transmits like any band where the region has it (the US 222-225,
+    /// Canada 219-225); Extend TX opens stock's 200-260 MHz window, 243.0 MHz included (its double PTT is TX-3's, in
+    /// the sequencer), and stops at 260 MHz.
     #[test]
-    fn extend_stops_at_64_mhz() {
-        assert_eq!(check(mhz(27) + 18_500, Region::Us, true), Err(Refusal::OutOfBand), "CB, even with Extend TX");
-        assert_eq!(check(mhz(21) + 20_000, Region::Us, true), Err(Refusal::OutOfBand), "15 m");
-        assert_eq!(check(mhz(28) + 40_000, Region::Us, true), Ok(()), "10 m stays open");
-        assert_eq!(check(mhz(24) + 94_000, Region::Uk, true), Ok(()), "12 m stays open");
-        assert_eq!(check(mhz(162) + 55_000, Region::Us, true), Ok(()), "above 64 MHz Extend still widens");
+    fn band_125m_as_stock() {
+        assert_eq!(check(mhz(223) + 50_000, Region::Us, false), Ok(()));
+        assert_eq!(check(mhz(219) + 50_000, Region::Canada, false), Ok(()));
+        assert_eq!(check(mhz(219) + 50_000, Region::Us, false), Err(Refusal::OutOfBand));
+        assert_eq!(check(mhz(223) + 50_000, Region::Uk, false), Err(Refusal::OutOfBand), "no 1.25 m in the UK");
+        assert_eq!(check(mhz(243), Region::Us, true), Ok(()));
+        assert_eq!(check(mhz(200), Region::Uk, true), Ok(()));
+        assert_eq!(check(mhz(260), Region::Us, true), Err(Refusal::NotCalibrated), "stock's window ends at 260");
     }
 
-    /// CAL-15, TX-10.1, TX-10.2: no transmit anywhere on the 200-300 MHz PA path until its power ceiling is measured:
-    /// the 1.25 m band and 243.0 MHz alike (TX audit M3); the edges are the path's.
+    /// TX-4, TX-41, SAFE-12.4: the region's amateur bands in 18-64 MHz (17 m to 6 m, 6 m by the region's allocation); with
+    /// Extend TX, all of 18-64 MHz as stock's HF work mode, CB included; below 18 MHz never.
     #[test]
-    fn unmeasured_125m_is_locked() {
-        assert!(locked_125m(mhz(223) + 50_000));
-        assert!(locked_125m(mhz(243)), "243.0 MHz: on the same uncapped path");
-        assert!(locked_125m(mhz(200)) && locked_125m(mhz(300) - 1));
-        assert!(!locked_125m(mhz(200) - 1) && !locked_125m(mhz(300)));
-        assert!(!locked_125m(mhz(146) + 52_000) && !locked_125m(mhz(446)));
-        assert!(is_125m(mhz(243)), "the 0.25 W cap will apply there too");
+    fn hf_as_stock() {
+        for f in [mhz(18) + 10_000, mhz(21) + 20_000, mhz(24) + 94_000, mhz(28) + 40_000, mhz(51)] {
+            assert_eq!(check(f, Region::Uk, false), Ok(()), "{f}");
+        }
+        assert_eq!(check(mhz(52) + 52_500, Region::Us, false), Ok(()), "6 m: 50-54 in the US");
+        assert_eq!(check(mhz(53), Region::Japan, false), Ok(()), "and Japan");
+        assert_eq!(check(mhz(52) + 52_500, Region::Europe, false), Err(Refusal::OutOfBand), "50-52 in Europe");
+        assert_eq!(check(mhz(27) + 18_500, Region::Us, false), Err(Refusal::OutOfBand), "CB: Extend TX only");
+        assert_eq!(check(mhz(21) + 45_000, Region::Us, false), Err(Refusal::OutOfBand), "15 m's top edge");
+        assert_eq!(check(mhz(27) + 18_500, Region::Us, true), Ok(()), "CB with Extend TX, as stock");
+        assert_eq!(check(mhz(18), Region::Us, true), Ok(()));
+        assert_eq!(check(mhz(64) - 1, Region::Us, true), Ok(()));
+        assert_eq!(check(mhz(18) - 1, Region::Us, true), Err(Refusal::NotCalibrated), "below 18 MHz: never");
+        assert_eq!(check(mhz(64), Region::Us, true), Err(Refusal::NotCalibrated), "64-136 MHz: never");
+        assert_eq!(check(mhz(121) + 50_000, Region::Us, true), Err(Refusal::NotCalibrated), "airband");
+        assert_eq!(nearest(mhz(55), Region::Us).name, "6 m");
     }
 
     #[test]

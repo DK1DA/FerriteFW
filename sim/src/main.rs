@@ -315,8 +315,7 @@ fn main() {
     app.key_up(Key::PTT, t + 200, &store);
     shot!(300, "tx-refused-relay");
     home(&mut app, &mut t);
-    // Emergency: 406.025 (EPIRB) with Extend TX on; the first PTT only prompts. (243.000 is on the 1.25 m PA
-    // path, which TX-10 keeps locked until its ceiling is measured.)
+    // Emergency: 406.025 (EPIRB) with Extend TX on; the first PTT only prompts.
     app.set_region(Some(ferrite_core::txplan::Region::Canada), true);
     app.set_vfo_cfg(0, ferrite_app::slot::DEFAULT_CFG); // simplex: the offset would move it off 406.025
     app.set_vfo(0, 40_602_500);

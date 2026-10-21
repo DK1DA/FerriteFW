@@ -87,8 +87,8 @@ def squelch_screen_floor(t):
 @test("TX-12.1", pages=("Home", "Quick"))
 def power_shows_level_names(t):
     """Power shows as its level name only: LOW, MID or HIGH on the cards and the quick menu's TX power row (no
-    watts); on 1.25 m the capped power itself, "0.25 W" (TX-9). Slot A made active first: the cards read are the
-    active slot's (a run that starts on B read B's LOW on 1.25 m)."""
+    watts), 1.25 m too (TX-9: no cap). Slot A made active first: the cards read are the active slot's (a run that
+    starts on B read B's LOW on 1.25 m)."""
     t.cmd("slot A vfo 146.52 active")
     for i in range(3):
         u = t.home()
@@ -99,12 +99,13 @@ def power_shows_level_names(t):
                 u.row("TX power"))
         t.home()
         t.press("2", long=True)  # hold 2: the next power level (KEY-20)
-    t.cmd("slot A vfo 223.5")
+    t.cmd("slot A vfo 223.5 mid")
     u = t.home()
-    # HOME-4.2: the card says "No TX" while 1.25 m is locked (TX-10, until the bench measures the cap).
-    t.check(u.active["power"] in ("0.25 W", "No TX"), "1.25 m: the capped power, or No TX while locked", u.active["power"])
+    # HOME-4.2: "No TX" where the region has no 1.25 m.
+    t.check(u.active["power"] in ("MID", "No TX"), "1.25 m: the level, or No TX outside the region's bands",
+            u.active["power"])
     u = t.keys("MENU")
-    t.eq(u.row("TX power")["value"], "0.25 W", "and the quick menu says it")
+    t.eq(u.row("TX power")["value"], "Mid", "and the quick menu says it")
 
 
 @test("DISP-16.3", pages=("Home",))

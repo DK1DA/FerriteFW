@@ -532,7 +532,7 @@ def crossband_start_checks(t):
     """The crossband start page checks transmit on each side's receive frequency: a side with a shift warns
     "Simplex: shifts are ignored" and the check is on the receive frequency; a side outside the band plan
     (160.000 MHz) fails, naming the side, and # can't start it (a remote # meets the same checks: XB-20.2). On
-    1.25 m the band plan allows it; the 0.25 W cap is the Radio task's (not on the start page)."""
+    1.25 m the band plan allows it."""
     t.cmd("slot A vfo 145.495 offset -0.6")
     t.cmd("slot B vfo 446.475 offset off")
     u = t.keys("MENU 0 3 5")

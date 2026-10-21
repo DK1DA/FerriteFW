@@ -137,7 +137,7 @@ pub fn chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], fg: u16, bg: u16) ->
 /// The big card's chip row in fixed slots (HOME-4): mode, tone, shift and power each keep their own x and width, so
 /// a value coming or going never moves its neighbours; power is pinned to the right edge. Widths fit the widest
 /// text each can show in UI_12 (7 px a character, 4 px padding each side): "FM-N", "T 254.1", "R-12.5M" (a
-/// reversed shift) and "0.25 W". x..x+w, all inside 15..226.
+/// reversed shift) and "No TX". x..x+w, all inside 15..226.
 pub const SLOT_MODE: (i32, i32) = (15, 36);
 pub const SLOT_TONE: (i32, i32) = (54, 57);
 pub const SLOT_SHIFT: (i32, i32) = (114, 57);

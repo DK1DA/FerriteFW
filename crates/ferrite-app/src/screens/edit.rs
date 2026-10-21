@@ -7,7 +7,7 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::slot::{Item, GRID};
+use crate::slot::GRID;
 use crate::{App, Screen, EDIT_IDLE_MS};
 use ferrite_core::keys::Key;
 use ferrite_ui::assets::*;
@@ -88,11 +88,7 @@ impl View for Edit {
         let cfg = *app.slots[a as usize].cfg();
         for (i, item) in GRID.into_iter().enumerate() {
             let mut v = Buf::<16>::new();
-            if item == Item::Power && app.capped(a) {
-                v.set(b"0.25 W");
-            } else {
-                item.text(&cfg, false, &mut v);
-            }
+            item.text(&cfg, false, &mut v);
             let focused = i as u8 == cell;
             let grey = app.greyed(item).is_some();
             let (x, y) = (7 + (i as i32 % 3) * 77, 85 + (i as i32 / 3) * 36);

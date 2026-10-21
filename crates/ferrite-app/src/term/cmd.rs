@@ -590,7 +590,7 @@ fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     offset_kv(g.split, g.offset, out);
     mode_word(g.mode, out);
     tones(g.tx_tone, g.rx_tone, out);
-    power_word(chfield::power(c), out); // as it transmits: Low on 1.25 m (TX-9)
+    power_word(c.cfg.power, out);
     if c.zone != NO_ZONE && c.zone < st.zones() {
         num(out, b" zone=", c.zone as u32 + 1);
     }
@@ -744,7 +744,7 @@ pub(crate) fn check(c: &Channel) -> Result<(), Msg> {
     }
 }
 
-/// A refusal headed by its field's key ("power: fixed at 0.25 W on 1.25 m; use power=low").
+/// A refusal headed by its field's key ("power: this channel is RX only").
 fn refusal(r: Refusal) -> Msg {
     let key = match r.field() {
         Some(ChField::Rx) => "rx: ",
@@ -754,11 +754,7 @@ fn refusal(r: Refusal) -> Msg {
         Some(_) => "name: ",
         None => "",
     };
-    let mut m = msg!("{}{}", key, r.why());
-    if r == Refusal::Capped {
-        m.push(b"; use power=low");
-    }
-    m
+    msg!("{}{}", key, r.why())
 }
 
 /// Saves a channel (TERM-9) unless the store already holds it exactly: a load of the same dump writes nothing.

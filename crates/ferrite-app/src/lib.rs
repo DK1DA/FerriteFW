@@ -56,7 +56,7 @@ use ferrite_ui::text::Buf;
 use keys::{KeyEvent, KeyTracker, Press};
 use screens::nav::Dest;
 use screens::shared::REGIONS;
-use slot::{band_near, Item, SlotCfg, BANDS, BAND_125M, DEFAULT_CFG, SQ_GLOBAL};
+use slot::{band_near, Item, SlotCfg, BANDS, DEFAULT_CFG, SQ_GLOBAL};
 
 pub use ferrite_ui::panel::Panel;
 pub use screens::Screen;
@@ -534,7 +534,6 @@ impl App {
             }
             k => {
                 let (param, value) = slot::params(&self.tuned_cfg(slot))[k as usize - 1];
-                let value = if param == Param::Power && self.capped(slot) { 0 } else { value };
                 let value = if param == Param::Squelch { self.sq_level(slot) as i32 } else { value };
                 RadioCmd::SlotParam { slot, param, value }
             }
@@ -1441,12 +1440,6 @@ impl App {
         self.show_toast(b"Clarifier", b.as_bytes(), false);
     }
 
-    /// 1.25 m: transmit power fixed at 0.25 W (the Radio task enforces it too). By the band it transmits on:
-    /// a split's TX band, not RX's.
-    fn capped(&self, slot: u8) -> bool {
-        slot::band_of(self.tuned_cfg(slot).tx_of(self.tuned_freq(slot))) == Some(BAND_125M)
-    }
-
     /// Split on the active slot: transmit on `tx` whatever RX is tuned to (MENU 5's 4th choice). Refused (false,
     /// with a toast) when TX needs the band relay in the other state from RX (TX-37).
     pub(crate) fn set_split(&mut self, tx: Freq10) -> bool {
@@ -1540,7 +1533,6 @@ impl App {
             _ if self.aprs_slot(self.active) => Some(self.aprs_holds()),
             Item::Step if s.on_channel() => Some("VFO only"), // VFO-8
             Item::Power if self.rx_only(self.active) => Some(chfield::Refusal::RxOnly.why()), // CHAN-4, EDIT-7
-            Item::Power if self.capped(self.active) => Some("Fixed at 0.25 W on 1.25 m"),
             _ => None,
         }
     }
@@ -1797,7 +1789,6 @@ impl App {
             }
             Item::Channel => b.set(if s.on_channel() { b"Edit" } else { b"Save as channel" }),
             Item::Advanced => b.set(b">"),
-            Item::Power if self.capped(self.active) => b.set(b"0.25 W"),
             // A channel on Global: the level in use; "Global (4)" where there is room.
             Item::Squelch if s.cfg().squelch >= SQ_GLOBAL => {
                 b.clear();

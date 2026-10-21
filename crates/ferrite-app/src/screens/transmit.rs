@@ -235,7 +235,6 @@ pub fn short(r: Refusal) -> &'static str {
         Refusal::RxOnlyBuild => "receive-only build",
         Refusal::ReceiveOnlyHere => "receive only here",
         Refusal::Crossband => "repeater running",
-        Refusal::Unmeasured125 => "1.25 m locked",
         Refusal::RelayMismatch => "TX needs the HF relay",
         Refusal::AmRxOnly => "AM is receive only",
         Refusal::Emergency => "emergency: PTT twice",
@@ -262,7 +261,6 @@ pub(crate) fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, 
         Refusal::InProgress
         | Refusal::ReceiveOnlyHere
         | Refusal::Crossband
-        | Refusal::Unmeasured125
         | Refusal::Emergency
         | Refusal::ReleasePtt
         | Refusal::PttAtBoot
@@ -285,7 +283,7 @@ pub struct Transmit {
 }
 
 /// HOME-4.2: why PTT can never transmit on this slot where it is now, whatever happens meanwhile: a receive-only
-/// build or channel, AM, outside the band plan or the calibration, 1.25 m still locked, the relay. The checks in
+/// build or channel, AM, outside the band plan or the calibration, the relay. The checks in
 /// [`ptt_refusal`] that pass with time (busy, battery, cooling, keyed elsewhere) aren't these.
 pub fn tx_block(app: &App, slot: u8) -> Option<Refusal> {
     if !app.radio.tx_built {
@@ -302,9 +300,6 @@ pub fn tx_block(app: &App, slot: u8) -> Option<Refusal> {
     if let Err(r) = txplan::check(tx_freq(app, slot), app.set.tx_region(), app.set.extend_tx) {
         return Some(r);
     }
-    if txplan::locked_125m(tx_freq(app, slot)) {
-        return Some(Refusal::Unmeasured125); // TX-10: safety, until the bench measures the 0.25 W ceiling
-    }
     // TX-37: the band relay never switches at key-up. A split (or a VFO retuned under one) whose TX needs the
     // other relay state from RX is refused here, as a backstop to the check when it is set.
     if slot < SLOTS as u8 && !txplan::relay_ok(app.tuned_cfg(slot).rx_of(app.tuned_freq(slot)), tx_freq(app, slot)) {
@@ -313,14 +308,10 @@ pub fn tx_block(app: &App, slot: u8) -> Option<Refusal> {
     None
 }
 
-/// The level name (TX-12): LOW, MID, HIGH; "0.25 W" on 1.25 m, the capped power itself; "No TX" where PTT
-/// can't transmit (HOME-4.2).
+/// The level name (TX-12): LOW, MID, HIGH; "No TX" where PTT can't transmit (HOME-4.2).
 pub fn power_name(app: &App, slot: u8) -> &'static str {
     if tx_block(app, slot).is_some() {
         return "No TX";
-    }
-    if slot < SLOTS as u8 && app.capped(slot) {
-        return "0.25 W";
     }
     let p = if slot < SLOTS as u8 { app.slot(slot).cfg().power } else { 0 };
     ["LOW", "MID", "HIGH"][p as usize % 3]
@@ -461,7 +452,7 @@ impl View for Transmit {
         let pw = power_name(app, s);
         if app.dirty(5, hash(&(m, tone, pw))) {
             // Fixed slots (HOME-4): the tone being sent is the red chip; power is pinned right, wide enough for
-            // "0.25 W".
+            // "No TX".
             let cy = y + 89;
             w::chip_slot(lcd, w::SLOT_MODE, cy, m.as_bytes(), TEXT, LINE, SURFACE);
             w::chip_slot(lcd, w::SLOT_TONE, cy, tone.as_bytes(), RED, RED, SURFACE);
@@ -659,10 +650,6 @@ impl View for TxRefused {
                 a.set(b"Receive only here: below 18 MHz, USB, LSB and CW are on the SI4732.");
             }
             Refusal::Crossband => a.set(b"The crossband repeater is running. Any key on its screen stops it."),
-            Refusal::Unmeasured125 => {
-                a.set(b"Transmit on 200-300 MHz (1.25 m, 243.0) is locked until its 0.25 W limit is measured on the bench.");
-                more = b"Receive works as usual. (TX-10)";
-            }
             Refusal::RelayMismatch => {
                 a.set(b"Split TX needs the HF relay: not allowed with this RX frequency.");
                 more = b"Keep RX and TX on the same side of 64 MHz.";

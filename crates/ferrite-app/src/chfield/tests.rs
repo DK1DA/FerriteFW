@@ -102,25 +102,14 @@ fn offset_and_split() {
     assert_eq!(Refusal::Relay.field(), None, "a sentence of its own");
 }
 
-/// CHAN-32, TX-9: on 1.25 m (by the TX band) power shows 0.25 W and can't be raised; a stored one above Low is kept;
-/// a whole channel written with it is refused.
+/// CHAN-32, TX-9 (decision 224): on 1.25 m power steps and shows like any band, and a whole channel may say High.
 #[test]
-fn power_capped_on_125m() {
-    let mut c = ch(mhz(223) + 50_000);
-    let mut b = Buf::new();
-    ChField::It(Item::Power).text(&c, None, false, &mut b);
-    assert_eq!(b.as_bytes(), b"0.25 W");
-    assert_eq!(step(ChField::It(Item::Power), c, 1), Err(Refusal::Capped));
-    c.cfg.power = 2;
-    assert_eq!(check_edit(&c), Ok(()), "kept: TX caps it");
-    assert_eq!(check(&c), Err(Refusal::Capped), "a whole channel can't say high");
-    assert_eq!(power(&c), 0);
-    assert_eq!(step(ChField::It(Item::Power), c, 1).unwrap().cfg.power, 0, "lowering is fine");
-    let mut split = ch(mhz(446));
-    split.cfg.split = true;
-    split.cfg.offset = (mhz(223) + 50_000) as i32;
-    assert!(capped(&split), "by the TX band");
-    assert!(!capped(&Channel { rx: mhz(223) + 50_000, cfg: crate::slot::SlotCfg { split: true, offset: mhz(446) as i32, ..DEFAULT_CFG }, ..c }));
+fn power_free_on_125m() {
+    let c = ch(mhz(223) + 50_000);
+    assert_eq!(step(ChField::It(Item::Power), c, 1).unwrap().cfg.power, c.cfg.power + 1);
+    let mut h = c;
+    h.cfg.power = 2;
+    assert_eq!(check(&h), Ok(()));
 }
 
 /// CHAN-32, CHAN-4, EDIT-7: a receive-only channel's power doesn't change; the flag itself toggles.

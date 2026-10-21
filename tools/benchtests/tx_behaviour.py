@@ -18,14 +18,14 @@ Safety, as bench.py's own (and through its code: Bench.check_build, Bench.gate, 
     CW ID (about 4.5 s of carrier for VE7TEST), counted whole as the "timeout" kind; the rest after it still holds);
   - right before every KEY on the keyed slot is read back (SLOT, LINK-33): its transmit frequency (after any shift
     or split) 145.495 or 446.475 MHz (config test_freqs; 145.575, split_freqs, only for split_tx's split TX), power low, not scanning, not the APRS slot; a
-    refusal probe (a key-up the radio must refuse: out of band, HF, 600 MHz, the band edge, 1.25 m, emergency) is
+    refusal probe (a key-up the radio must refuse: out of band, HF, 600 MHz, the band edge, emergency) is
     gated on its own frequency read back and KEY off goes at once if the radio keys it (the test fails);
   - KEY on must be answered within 0.6 s on the cable (a tx build holds its answers while keyed, TX-43): else KEY
     off and the run stops;
   - keepalives every 0.5 s on their own thread; KEY off at each key-up's deadline from that thread whatever the
     test is doing, and in `finally` always, and at exit;
-  - Extend TX (0 8 9) changes only on the radio (the link can't set it): the 222 MHz and 406.025 MHz refusal probes
-    run only when it was turned on by hand before the run (EXTEND_HAND), else they skip or are left out.
+  - Extend TX (0 8 9) changes only on the radio (the link can't set it): the 406.025 MHz refusal probe
+    runs only when it was turned on by hand before the run (EXTEND_HAND), else it is left out.
 Everything a test changes (slots A, B and C, settings, the key lock, `rx both`, txtest) is put back after it, and
 the whole radio checked against its snapshot at the end.
 
@@ -74,12 +74,6 @@ END_TONE = bench.END_TONE
 WAKE_VALUES = ["Keys", "Keys and RX", "Keys, RX and TX"]
 C1DT = 0x40013434  # the backlight timer's compare (DISP-26)
 PATH_PINS = ["PB0", "PB1", "PE12", "PE7", "PE13", "PE14"]  # VHF RX/TX, UHF RX/TX, HF RX/TX (board.rs)
-
-
-def _need_extend(r):
-    """The Extend TX probes run only with Extend TX already on (set by hand: EXTEND_HAND)."""
-    if r.get(EXTEND_TX) != "On":
-        raise Skip(EXTEND_HAND)
 
 
 class Skip(Exception):
@@ -1134,11 +1128,14 @@ def _refused(r, label, k, runs, u, word=None):
 
 @test("txb_refusals_hf", {"TX-4": "part"}, 3, 0.0, 20)
 def refusals_hf(r):
-    """Remote key-ups on 21.200 (below 24 MHz), 27.185 (CB) and 50.100 MHz (6 m): refused, no carrier (28 MHz's
-    allowed side isn't keyed: not an approved frequency)."""
+    """Extend TX off, remote key-ups on 19.000 (between 17 m and 15 m), 27.185 (CB) and 60.000 MHz (above 6 m):
+    outside every region's 18-64 MHz amateur bands, refused, no carrier (the bands' allowed side isn't keyed: not
+    an approved frequency). With Extend TX on all of 18-64 MHz transmits, as stock (TX-41): skipped then."""
     r.home()
+    if r.get(EXTEND_TX) != "Off":
+        raise Skip("Extend TX is on: 18-64 MHz transmits (TX-41); turn it off on the radio")
     out = []
-    for f in (21.2, 27.185, 50.1):
+    for f in (19.0, 27.185, 60.0):
         k, runs, u, why = _probe(r, f, f"refusal {f:.3f}")
         if why:
             r.check(False, f"{f:.3f} MHz probed", why)
@@ -1175,19 +1172,6 @@ def refusal_band_edge(r):
         _refused(r, f"TX 143.995 ({f:.3f}{'' if off is None else f' {off:+.3f}'})", k, runs, u)
         out.append(f"{f:.3f}{'' if off is None else f'{off:+.3f}'}: {k.refused}")
     return "; ".join(out)
-
-
-@test("txb_refusal_125m_extend", {"SAFE-12.4": "all"}, 1, 0.0, 8)
-def refusal_125m_extend(r):
-    """Extend TX on, a remote key-up on 222.000 MHz: still refused "1.25 m locked", no carrier. Extend TX changes
-    only on the radio (`set 0 8 9 On` is refused over the link): a hand step, so the test skips unless it is on."""
-    r.home()
-    _need_extend(r)
-    k, runs, u, why = _probe(r, 222.0, "222.000 Extend TX on")
-    if why:
-        raise Skip(why)
-    _refused(r, "222.000 MHz with Extend TX on", k, runs, u, word="1.25 m")
-    return f"222.000 Extend TX on: {k.refused}"
 
 
 @test("txb_refusal_emergency_toast", {"LINK-20.9": "all"}, 2, 0.0, 12)
@@ -1853,14 +1837,10 @@ class FakeRadio(bench.FakeRadio):
         why = None
         if any(abs(f - x) < 1e-6 for x in self.leaky):
             why = None
-        elif f < 64:
-            why = "invalid: HF transmit: only 24.89-24.99 and 28.0-29.7 MHz"
         elif f >= PAST_TX:
             why = "invalid: the transmitter can't tune it"
         elif 143.9 <= f < 144.0 or 148.0 < f <= 148.1:
             why = "invalid: outside the band plan (the edge: the carrier only, decision 97)"
-        elif 200 <= f < 300 and not (abs(f - 243.0) <= 0.025):
-            why = "invalid: 1.25 m locked"
         else:
             why = self._refuse(f)
         if why:
@@ -1958,7 +1938,7 @@ def selftest(cfg, args, check, tmp):
     c2["results"] = os.path.join(tmp, "results-txb")
     clk = bench.FakeClock()
     r = FakeRadio(clk)
-    r.set[EXTEND_TX] = "On"  # the hand step (EXTEND_HAND) done before the run
+    # Extend TX off, as at power-on: refusals_hf runs (with it on, 18-64 MHz transmits, TX-41); 406.025 is left out.
     before = json.dumps(r.slots), dict(r.set), r.active
     a = args(build="selftest-txb", tests=None)
     ex, page, rig = run(c2, a, radio=r, sdr=FakeSdr(r, clk), clock=clk, threaded=False)

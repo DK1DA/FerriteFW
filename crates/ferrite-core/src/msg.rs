@@ -207,7 +207,7 @@ pub enum Param {
     TxTone,
     /// Transmit offset in 10 Hz units, signed (0 = simplex).
     Offset,
-    /// 0 low, 1 mid, 2 high. The Radio task caps 1.25 m at 0.25 W whatever this says.
+    /// 0 low, 1 mid, 2 high.
     Power,
     /// 0 off, 1 on: refuse transmit while the squelch is open (TX-21).
     BusyLock,
