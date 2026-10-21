@@ -17,6 +17,8 @@ pub struct Glyph4 {
 pub struct Font4 {
     pub line_h: u8,
     pub ascent: u8,
+    /// Each glyph's pixels run-length encoded as a [`Mask4`]'s (the big fonts), not two pixels per byte.
+    pub rle: bool,
     /// The characters, sorted; `glyphs[i]` draws `codes[i]`.
     pub codes: &'static [u16],
     pub glyphs: &'static [Glyph4],
@@ -76,27 +78,34 @@ impl<'a> MaskRows<'a> {
             self.pos += self.m.w as usize;
             return;
         }
-        let mut x = 0;
-        while x < w {
-            let Some(&t) = bits.get(self.pos) else {
-                out[x..w].fill(0);
-                return;
-            };
-            self.pos += 1;
-            match t >> 6 {
-                0 | 1 => {
-                    let n = ((t & 63) as usize + 1).min(w - x);
-                    out[x..x + n].fill(if t & 0x40 != 0 { 15 } else { 0 });
-                    x += n;
+        rle_row(bits, &mut self.pos, w, out);
+    }
+}
+
+/// One run-length encoded row (the format [`Mask4`] names) from `bits` at byte `pos` into out[..w], `pos` moved
+/// to the next row. Damaged data reads as empty pixels.
+pub fn rle_row(bits: &[u8], pos: &mut usize, w: usize, out: &mut [u8]) {
+    let nib = |k: usize| bits.get(k >> 1).map_or(0, |&b| if k & 1 == 0 { b >> 4 } else { b & 15 });
+    let mut x = 0;
+    while x < w {
+        let Some(&t) = bits.get(*pos) else {
+            out[x..w].fill(0);
+            return;
+        };
+        *pos += 1;
+        match t >> 6 {
+            0 | 1 => {
+                let n = ((t & 63) as usize + 1).min(w - x);
+                out[x..x + n].fill(if t & 0x40 != 0 { 15 } else { 0 });
+                x += n;
+            }
+            _ => {
+                let n = (t & 127) as usize + 1;
+                for i in 0..n.min(w - x) {
+                    out[x + i] = nib(*pos * 2 + i);
                 }
-                _ => {
-                    let n = (t & 127) as usize + 1;
-                    for i in 0..n.min(w - x) {
-                        out[x + i] = nib(self.pos * 2 + i);
-                    }
-                    self.pos += n.div_ceil(2);
-                    x += n.min(w - x);
-                }
+                *pos += n.div_ceil(2);
+                x += n.min(w - x);
             }
         }
     }

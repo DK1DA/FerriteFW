@@ -1,6 +1,6 @@
 //! Drawing straight to a panel (no frame buffer): fills, frames, 1-bit text, 4-bit anti-aliased text and
 //! masks. Every `Panel` gets these methods. Mirrors fw/drivers/gfx.c.
-use crate::font4::{Font4, Glyph4, Mask4, MaskRows};
+use crate::font4::{rle_row, Font4, Glyph4, Mask4, MaskRows};
 use crate::panel::{Panel, H, W};
 
 pub const fn rgb565(r: u8, g: u8, b: u8) -> u16 {
@@ -102,6 +102,12 @@ fn glyph4(f: &Font4, c: u32) -> &Glyph4 {
     f.glyph(c).filter(|g| g.adv != 0).or_else(|| f.glyph('?' as u32)).unwrap_or(&f.glyphs[0])
 }
 
+/// The widest glyph of a run-length encoded font (tools/fontgen.py checks it).
+const RLE_W: usize = 64;
+/// The characters of a line in a run-length encoded font that keep their place in their glyph's rows; any after
+/// them decode their glyph from the top for each row (slower, same pixels). The big fonts draw 16 at most.
+const RLE_CHARS: usize = 32;
+
 fn nib(bits: &[u8], k: usize) -> u8 {
     let b = bits[k >> 1];
     if k & 1 != 0 { b & 15 } else { b >> 4 }
@@ -115,7 +121,15 @@ pub fn text4_width(s: &[u8], f: &Font4) -> i32 {
 fn glyph_cols(f: &Font4, g: &Glyph4) -> Option<(i32, i32)> {
     let bits = &f.bits[g.off as usize..];
     let (w, h) = (g.w as usize, g.h as usize);
-    let lit = |i: usize| (0..h).any(|y| nib(bits, y * w + i) != 0);
+    let mut any = [0u8; RLE_W];
+    if f.rle {
+        let (mut row, mut pos) = ([0u8; RLE_W], 0);
+        for _ in 0..h {
+            rle_row(bits, &mut pos, w.min(RLE_W), &mut row);
+            any.iter_mut().zip(row).for_each(|(a, p)| *a |= p);
+        }
+    }
+    let lit = |i: usize| if f.rle { any.get(i).is_some_and(|&a| a != 0) } else { (0..h).any(|y| nib(bits, y * w + i) != 0) };
     let l = (0..w).find(|&i| lit(i))?;
     let r = (0..w).rev().find(|&i| lit(i))?;
     Some((l as i32, r as i32 + 1))
@@ -134,6 +148,60 @@ pub fn text4_ink(s: &[u8], f: &Font4) -> Option<(i32, i32)> {
         pen += g.adv as i32;
     }
     ink
+}
+
+/// Where each character of a line in a run-length font is in its glyph's rows (byte, rows decoded): rows are
+/// drawn top to bottom, so each glyph row is decoded once.
+#[derive(Default)]
+struct RleAt {
+    at: [u16; RLE_CHARS],
+    done: [u8; RLE_CHARS],
+}
+
+/// One pixel row of a line of text, the pen starting at x, into `line` (its pixels from x0 on): the strongest ink
+/// of the glyphs over each pixel, through `lut`. Not generic: the same code for every panel.
+#[allow(clippy::too_many_arguments)]
+fn text_row(line: &mut [u16], lut: &[u16; 16], s: &[u8], f: &Font4, x: i32, x0: i32, baseline: i32, row: i32, rle: &mut RleAt) {
+    let n = line.len();
+    let x1 = x0 + n as i32;
+    let mut cov = [0u8; W as usize];
+    let mut grow = [0u8; RLE_W];
+    let mut pen = x;
+    for (k, c) in Chars(s).enumerate() {
+        let g = glyph4(f, c);
+        let gy = row - (baseline + g.y as i32);
+        if gy >= 0 && gy < g.h as i32 && f.rle {
+            let (mut p, mut d) = if k < RLE_CHARS { (rle.at[k] as usize, rle.done[k] as i32) } else { (0, 0) };
+            let w = (g.w as usize).min(RLE_W);
+            while d <= gy {
+                rle_row(&f.bits[g.off as usize..], &mut p, w, &mut grow);
+                d += 1;
+            }
+            if k < RLE_CHARS {
+                (rle.at[k], rle.done[k]) = (p as u16, d as u8);
+            }
+            for (i, &v) in grow[..w].iter().enumerate() {
+                let px = pen + g.x as i32 + i as i32;
+                if px >= x0 && px < x1 {
+                    let slot = &mut cov[(px - x0) as usize];
+                    *slot = (*slot).max(v); // overlapping glyphs: strongest ink
+                }
+            }
+        } else if gy >= 0 && gy < g.h as i32 {
+            for i in 0..g.w as i32 {
+                let px = pen + g.x as i32 + i;
+                if px >= x0 && px < x1 {
+                    let v = nib(&f.bits[g.off as usize..], (gy * g.w as i32 + i) as usize);
+                    let slot = &mut cov[(px - x0) as usize];
+                    *slot = (*slot).max(v); // overlapping glyphs: strongest ink
+                }
+            }
+        }
+        pen += g.adv as i32;
+    }
+    for (px, &c) in line.iter_mut().zip(&cov[..n]) {
+        *px = lut[c as usize];
+    }
 }
 
 pub trait Gfx: Panel {
@@ -278,32 +346,13 @@ pub trait Gfx: Panel {
         if x1 <= x0 || y1 <= y0 {
             return w;
         }
-        let mut cov = [0u8; W as usize];
         let mut line = [0u16; W as usize];
         let n = (x1 - x0) as usize;
         self.window(x0, y0, x1 - 1, y1 - 1);
         self.text_hint(x0, y0, x1 - 1, y1 - 1, s);
+        let mut at = RleAt::default();
         for row in y0..y1 {
-            cov[..n].fill(0);
-            let mut pen = x;
-            for c in Chars(s) {
-                let g = glyph4(f, c);
-                let gy = row - (baseline + g.y as i32);
-                if gy >= 0 && gy < g.h as i32 {
-                    for i in 0..g.w as i32 {
-                        let px = pen + g.x as i32 + i;
-                        if px >= x0 && px < x1 {
-                            let v = nib(&f.bits[g.off as usize..], (gy * g.w as i32 + i) as usize);
-                            let slot = &mut cov[(px - x0) as usize];
-                            *slot = (*slot).max(v); // overlapping glyphs: strongest ink
-                        }
-                    }
-                }
-                pen += g.adv as i32;
-            }
-            for i in 0..n {
-                line[i] = lut[cov[i] as usize];
-            }
+            text_row(&mut line[..n], &lut, s, f, x, x0, baseline, row, &mut at);
             self.push_buf(&line[..n]);
         }
         w
@@ -385,6 +434,18 @@ mod tests {
         }
     }
 
+    /// One pixel of a glyph, decoded on its own: a run-length glyph from its top every time.
+    fn glyph_px(f: &Font4, g: &Glyph4, gx: i32, gy: i32) -> u8 {
+        if !f.rle {
+            return nib(&f.bits[g.off as usize..], (gy * g.w as i32 + gx) as usize);
+        }
+        let (mut row, mut pos) = ([0u8; RLE_W], 0);
+        for _ in 0..=gy {
+            rle_row(&f.bits[g.off as usize..], &mut pos, g.w as usize, &mut row);
+        }
+        row[gx as usize]
+    }
+
     /// Naive reference: per pixel, strongest ink of any glyph covering it, through blend.
     fn ref_pixel(px: i32, py: i32, x: i32, base: i32, codes: &[u32], f: &Font4, fg: u16, bg: u16) -> u16 {
         let (mut best, mut pen) = (0, x);
@@ -392,7 +453,7 @@ mod tests {
             let g = f.glyph(c).unwrap();
             let (gx, gy) = (px - (pen + g.x as i32), py - (base + g.y as i32));
             if gx >= 0 && gx < g.w as i32 && gy >= 0 && gy < g.h as i32 {
-                best = best.max(nib(&f.bits[g.off as usize..], (gy * g.w as i32 + gx) as usize));
+                best = best.max(glyph_px(f, g, gx, gy));
             }
             pen += g.adv as i32;
         }
@@ -403,26 +464,65 @@ mod tests {
     fn text_matches_reference() {
         let codes = [b'C' as u32, b'h' as u32, b' ' as u32, b'0' as u32, b'1' as u32, b'2' as u32, 0xB7, b'g' as u32, b'y' as u32];
         let s = "Ch 012\u{B7}gy".as_bytes(); // the UTF-8 middle dot draws its own glyph
+        text_like_reference(s, &codes, &UI_12B, 20);
+        // the run-length fonts (each character keeps its place in its glyph's rows), a line partly off the left
+        text_like_reference(s, &codes, &NAME_22, -9);
+        text_like_reference(s, &codes, &NAME_26, 3);
+        let d: [u32; 7] = core::array::from_fn(|i| b"146.520"[i] as u32);
+        text_like_reference(b"146.520", &d, &DIG_46, 1);
+        text_like_reference(b"146.520", &d, &DIG_28, 5);
+        let wm: [u32; 7] = core::array::from_fn(|i| b"FERRITE"[i] as u32);
+        text_like_reference(b"FERRITE", &wm, &WORD_40, 30);
+        // past the characters that keep their place: same pixels, decoded from the top
+        let long = [b'8'; RLE_CHARS + 3];
+        let lc = [b'8' as u32; RLE_CHARS + 3];
+        let adv = DIG_28.glyph(b'8' as u32).unwrap().adv as i32;
+        text_like_reference(&long, &lc, &DIG_28, 20 - RLE_CHARS as i32 * adv); // the last three on the screen
+        assert!(NAME_26.rle && DIG_46.rle && !UI_12.rle && !UI_15B.rle && !DIG_17.rle);
+        let mut fb = FrameBuffer::new();
+        fb.text4(0, 100, &long, &DIG_28, TEXT, BG); // off the right edge, past the cursors: no panic
+    }
+
+    /// The line drawn by text4 matches [`ref_pixel`] pixel for pixel, and paints only its line box.
+    fn text_like_reference(s: &[u8], codes: &[u32], f: &Font4, x: i32) {
         let mut fb = FrameBuffer::new();
         fb.px.fill(0x5555);
-        let (x, base) = (20, 100);
-        let w = fb.text4(x, base, s, &UI_12B, TEXT, SURFACE);
-        let want_w: i32 = codes.iter().map(|&c| UI_12B.glyph(c).unwrap().adv as i32).sum();
+        let base = 100;
+        let w = fb.text4(x, base, s, f, TEXT, SURFACE);
+        let want_w: i32 = codes.iter().map(|&c| f.glyph(c).unwrap().adv as i32).sum();
         assert_eq!(w, want_w);
-        assert_eq!(text4_width(s, &UI_12B), want_w);
-        let top = base - UI_12B.ascent as i32;
+        assert_eq!(text4_width(s, f), want_w);
+        let top = base - f.ascent as i32;
         let (mut bad, mut ink) = (0, 0);
-        for py in top..top + UI_12B.line_h as i32 {
-            for px in x..x + w {
-                let r = ref_pixel(px, py, x, base, &codes, &UI_12B, TEXT, SURFACE);
+        for py in top..top + f.line_h as i32 {
+            for px in x.max(0)..(x + w).min(W) {
+                let r = ref_pixel(px, py, x, base, codes, f, TEXT, SURFACE);
                 bad += (fb.at(px, py) != r) as u32;
                 ink += (r != SURFACE) as u32;
             }
         }
         assert_eq!(bad, 0, "pixels differ from the reference");
         assert!(ink > 50, "too little ink ({ink} px): glyphs missing?");
-        assert!(fb.at(x, top - 1) == 0x5555 && fb.at(x, top + UI_12B.line_h as i32) == 0x5555 && fb.at(x + w, base) == 0x5555,
-                "painted outside the line box");
+        let x0 = x.max(0);
+        assert!(fb.at(x0, top - 1) == 0x5555 && fb.at(x0, top + f.line_h as i32) == 0x5555, "painted outside the line box");
+        if x + w < W {
+            assert_eq!(fb.at(x + w, base), 0x5555, "painted outside the line box");
+        }
+    }
+
+    /// Each run-length glyph's rows end exactly where the next glyph starts: no glyph reads its neighbour's data.
+    #[test]
+    fn rle_glyphs_decode_whole() {
+        for f in [&NAME_26, &NAME_22, &DIG_46, &DIG_28, &WORD_40] {
+            for (i, g) in f.glyphs.iter().enumerate() {
+                let end = f.glyphs.get(i + 1).map_or(f.bits.len(), |n| n.off as usize);
+                let (mut row, mut pos) = ([0u8; RLE_W], 0);
+                for _ in 0..g.h {
+                    rle_row(&f.bits[g.off as usize..], &mut pos, g.w as usize, &mut row);
+                }
+                assert_eq!(g.off as usize + pos, end, "glyph {i}");
+            }
+        }
     }
 
     #[test]

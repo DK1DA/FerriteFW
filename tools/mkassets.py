@@ -56,6 +56,9 @@ FONT_LIST = [  # name, file, px, chars, tabular, use
     ("dig_17", NUM, 17, DIG, True, "watched slot last digits"),
     ("word_40", WORD, 40, WORDMARK, False, "FERRITE wordmark, boot screen"),
 ]
+# The big fonts, run-length encoded (as the logo; font4.rs decodes a glyph's rows in turn): 6.2 KB smaller. The 12
+# and 15 px fonts stay plain: their glyphs are mostly literal pixels and would grow (size review, Oct 20, 2026).
+RLE_FONTS = ("name_26", "name_22", "dig_46", "dig_28", "word_40")
 MASK_LIST = [  # name, size, shape, run-length encoded
     ("logo112_ring", 112, art.toroid_ring, True), ("logo112_wind", 112, art.toroid_wind, True),
     ("icon_lock", 14, art.lock, False), ("icon_gps", 12, art.gps, False), ("icon_bt", 11, art.bt, False),
@@ -112,8 +115,8 @@ def main():
         f = Font(os.path.join(FONTS, ttf), px, chars, tab)
         if name in DRAWN_IN:
             add_drawn(f)
-        rs.append(f.rust_source(name, SLOW))
-        total += f.size_bytes()
+        rs.append(f.rust_source(name, SLOW, rle if name in RLE_FONTS else None))
+        total += f.size_bytes(rle if name in RLE_FONTS else None)
     for name, size, shape, packed_rle in MASK_LIST:
         a = art.mask(size, shape)
         up = name.upper()
