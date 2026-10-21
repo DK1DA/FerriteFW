@@ -316,6 +316,14 @@ fn quoted(name: &[u8], out: &mut Line) {
     out.push(b"\"");
 }
 
+/// A line's start: `ch 12 "Name"`, `zone 2 "Repeaters"`, `preset 1 "2 m"` (`n` 0-based).
+#[inline(never)]
+fn head(what: &[u8], n: u16, name: &[u8], out: &mut Line) {
+    num(out, what, n as u32 + 1);
+    out.push(b" ");
+    quoted(name, out);
+}
+
 /// A channel or zone number as written, 1-based, to the radio's 0-based one.
 fn index(w: &[u8], max: u32, what: &str) -> Result<u32, Msg> {
     match number(w) {
@@ -407,6 +415,33 @@ fn tone_word(t: u16, out: &mut Line) {
     }
 }
 
+/// " tone=100.0", or " txtone=100.0 rxtone=off" when they differ: the channel and slot lines' tones.
+#[inline(never)]
+fn tones(tx: u16, rx: u16, out: &mut Line) {
+    if rx == tx {
+        out.push(b" tone=");
+    } else {
+        out.push(b" txtone=");
+        tone_word(tx, out);
+        out.push(b" rxtone=");
+    }
+    tone_word(rx, out);
+}
+
+/// " mode=NFM".
+#[inline(never)]
+fn mode_word(m: u8, out: &mut Line) {
+    out.push(b" mode=");
+    out.push(MODES[m as usize % MODES.len()].as_bytes());
+}
+
+/// " power=high".
+#[inline(never)]
+fn power_word(p: u8, out: &mut Line) {
+    out.push(b" power=");
+    out.push(POWERS[p as usize % 3].as_bytes());
+}
+
 fn tone(w: &[u8], what: &str) -> Result<u16, Msg> {
     if same(w, b"off") || same(w, b"none") {
         return Ok(0);
@@ -460,6 +495,18 @@ fn tone_arg(t: &mut Toks, what: &str) -> Result<u16, Msg> {
     let mut d = [b'D', 0, 0, 0, if m == 1 { b'N' } else { b'I' }];
     d[1..4].copy_from_slice(code);
     tone(&d, what).map_err(|_| bad())
+}
+
+/// " tx=146.52000" (split), or " offset=+0.60000".
+#[inline(never)]
+fn offset_kv(split: bool, o: i32, out: &mut Line) {
+    if split {
+        out.push(b" tx=");
+        out.push(mhz5(o.max(0) as Freq10).as_bytes());
+    } else {
+        out.push(b" offset=");
+        offset_word(o, out);
+    }
 }
 
 /// "simplex", "+0.60000", "-5.00000".
@@ -532,32 +579,17 @@ const TAIL_WORDS: [&str; 3] = ["global", "off", "on"];
 /// defaults. Every field `load` reads back is here, so a dump and a load give the same channel.
 fn ch_line<S: ChannelStore>(c: &Channel, st: &S, out: &mut Line) {
     let g = &c.cfg;
-    num(out, b"ch ", c.num as u32 + 1);
-    out.push(b" ");
-    quoted(c.name(), out);
+    head(b"ch ", c.num, c.name(), out);
     out.push(b" ");
     out.push(mhz5(c.rx).as_bytes());
     if g.split {
         // Split: TX is a frequency of its own (MENU 5's 4th choice)
-        out.push(b" offset=split tx=");
-        out.push(mhz5(g.offset.max(0) as Freq10).as_bytes());
-    } else {
-        out.push(b" offset=");
-        offset_word(g.offset, out);
+        out.push(b" offset=split");
     }
-    out.push(b" mode=");
-    out.push(MODES[g.mode as usize % MODES.len()].as_bytes());
-    if g.rx_tone == g.tx_tone {
-        out.push(b" tone=");
-        tone_word(g.tx_tone, out);
-    } else {
-        out.push(b" txtone=");
-        tone_word(g.tx_tone, out);
-        out.push(b" rxtone=");
-        tone_word(g.rx_tone, out);
-    }
-    out.push(b" power=");
-    out.push(POWERS[g.power as usize % 3].as_bytes());
+    offset_kv(g.split, g.offset, out);
+    mode_word(g.mode, out);
+    tones(g.tx_tone, g.rx_tone, out);
+    power_word(g.power, out);
     if c.zone != NO_ZONE && c.zone < st.zones() {
         num(out, b" zone=", c.zone as u32 + 1);
     }
@@ -852,9 +884,7 @@ fn secs(w: &[u8], max: u32, what: &str) -> Result<u8, Msg> {
 
 fn zone_line<S: ChannelStore>(z: u8, st: &S, out: &mut Line) {
     let c = st.data().zone_cfg(z);
-    num(out, b"zone ", z as u32 + 1);
-    out.push(b" ");
-    quoted(st.zone_label(z, b"", b"").as_bytes(), out);
+    head(b"zone ", z as u16, st.zone_label(z, b"", b"").as_bytes(), out);
     let o = |b: bool| if b { "on" } else { "off" };
     for (k, b) in [(" scan=", c.scan_all), (" shown=", c.shown), (" distance=", c.by_distance)] {
         out.push(k.as_bytes());
@@ -939,17 +969,14 @@ fn zone<S: ChannelStore>(st: &S, t: &mut Toks) -> Result<Done, Msg> {
 }
 
 fn preset_line(i: u8, p: &RangePreset, out: &mut Line) {
-    num(out, b"preset ", i as u32 + 1);
-    out.push(b" ");
-    quoted(p.name.as_bytes(), out);
+    head(b"preset ", i as u16, p.name.as_bytes(), out);
     out.push(b" ");
     out.push(mhz5(p.start).as_bytes());
     out.push(b" ");
     out.push(mhz5(p.end).as_bytes());
     out.push(b" step=");
     step_word(p.step, out);
-    out.push(b" mode=");
-    out.push(MODES[p.mode as usize % MODES.len()].as_bytes());
+    mode_word(p.mode, out);
     if p.resume != 0 {
         out.push(b" resume=");
         resume_word(p.resume, out);
@@ -2026,36 +2053,21 @@ pub fn slot_line<S: ChannelStore>(app: &App, st: &S, s: u8, out: &mut Line) {
     out.push(&[b'A' + s, if g.active { b'*' } else { b' ' }, b' ']);
     match g.channel {
         Some(n) => {
-            num(out, b"ch ", n as u32 + 1);
-            out.push(b" ");
-            if let Some((c, _)) = st.by_num(n) {
-                quoted(c.name(), out);
-                out.push(b" ");
+            match st.by_num(n) {
+                Some((c, _)) => head(b"ch ", n, c.name(), out),
+                None => num(out, b"ch ", n as u32 + 1),
             }
+            out.push(b" ");
         }
         None if g.aprs => out.push(b"aprs "),
         None => out.push(b"vfo "),
     }
     out.push(mhz5(g.freq).as_bytes());
-    out.push(b" mode=");
-    out.push(MODES[g.mode as usize % MODES.len()].as_bytes());
-    out.push(b" power=");
-    out.push(POWERS[g.power as usize % 3].as_bytes());
-    if g.rx_tone == g.tx_tone {
-        out.push(b" tone=");
-        tone_word(g.tx_tone, out);
-    } else {
-        out.push(b" txtone=");
-        tone_word(g.tx_tone, out);
-        out.push(b" rxtone=");
-        tone_word(g.rx_tone, out);
-    }
-    if g.split {
-        out.push(b" tx=");
-        out.push(mhz5(g.offset.max(0) as Freq10).as_bytes());
-    } else if g.offset != 0 {
-        out.push(b" offset=");
-        offset_word(g.offset, out);
+    mode_word(g.mode, out);
+    power_word(g.power, out);
+    tones(g.tx_tone, g.rx_tone, out);
+    if g.split || g.offset != 0 {
+        offset_kv(g.split, g.offset, out);
     }
     if g.scanning {
         out.push(b" scanning");
