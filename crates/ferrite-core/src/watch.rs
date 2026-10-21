@@ -10,6 +10,9 @@
 //!   (and the path) until it closes, muted or not, with no hold after; another slot's hold after its squelch
 //!   closes doesn't keep it from its turns; and a slot open on the priority slot's own frequency hands the chip
 //!   to it. Another slot already open on a different frequency keeps the chip as before.
+//! - Deferring (APRS-21.2): while the APRS slot ([`Cfg::aprs`]) is listened to, another slot on its frequency
+//!   takes no turns of its own: the APRS slot already listens there. Its squelch follows the APRS slot's, and
+//!   when it would be heard the APRS slot's chip plays ([`Out::defer`]).
 //! - Audio: the active slot's first; a watched slot only while the active one is closed or muted (WATCH-3). A
 //!   muted slot (quick mute, HOME-15) is never heard and never holds a shared chip past its dwell, so it blocks
 //!   no other slot; it still listens, so its squelch and S-meter carry on.
@@ -63,6 +66,9 @@ pub struct Cfg {
     pub held: u8,
     /// Slots with receive priority on their chip (APRS-21.1, decision 181: C while APRS mode or KISS hold it).
     pub prio: u8,
+    /// The APRS slot, a bit (C while APRS mode, KISS or beacons hold it): other slots on its frequency defer to it
+    /// (APRS-21.2).
+    pub aprs: u8,
     /// Slots running a range scan (SCAN-21): the active slot's keeps its chip from the other slots on it, and the
     /// receive path with it but for the other chip's short turns ([`SCAN_TURN_MS`]). A watched slot's scan takes
     /// its turns as before.
@@ -86,6 +92,10 @@ pub struct Out {
     pub hold: Option<u8>,
     /// The chip on a slot running a range scan (SCAN-21), for [`Hop`]'s turns.
     pub scan: Option<u8>,
+    /// Slots deferring to the APRS slot (APRS-21.2): no chip of their own, their squelch the APRS slot's.
+    pub defer: u8,
+    /// The slot they defer to.
+    pub defer_to: Option<u8>,
 }
 
 /// A slot's turn on a shared chip, or of the receive path on its chip: the active slot's, a priority slot's
@@ -186,10 +196,19 @@ impl Watch {
         self.open &= set;
         let prio = c.prio & set;
         out.prio = prio;
+        // APRS-21.2: slots on the listened APRS slot's frequency take no turns (a latched monitor keeps its own).
+        let to = (0..SLOTS as u8).find(|&x| c.aprs & set & 1 << x != 0);
+        let defer = to.map_or(0, |p| {
+            (0..SLOTS as u8)
+                .filter(|&s| s != p && set & !c.held & 1 << s != 0 && c.freq[s as usize] == c.freq[p as usize])
+                .fold(0u8, |m, s| m | 1 << s)
+        });
+        (out.defer, out.defer_to) = (defer, to.filter(|_| defer != 0));
+        let listen = set & !defer;
         for n in 0..2u8 {
             // SQL-14, WATCH-3.2: a latched monitor holds its slot open for the turn, as stock's squelch 0 never hops.
             let open = self.open | c.held & set;
-            let on_chip = |s: u8| set & 1 << s != 0 && band(c.freq[s as usize]).1 == n;
+            let on_chip = |s: u8| listen & 1 << s != 0 && band(c.freq[s as usize]).1 == n;
             // SCAN-21 (decision 189): a chip with a scanning slot stays on it; only a priority slot (APRS-21.1)
             // still takes its turns there.
             // Only the active slot's scan: a watched slot's scan keeps taking turns, never the active slot's chip.
@@ -232,12 +251,19 @@ impl Watch {
             }
             self.on[n as usize] = next;
         }
+        if let Some(p) = to {
+            // APRS-21.2: a deferring slot's squelch is the APRS slot's.
+            let open = (self.open >> p & 1) * defer;
+            self.open = self.open & !defer | open;
+        }
         out.chip = self.on;
         out.scan = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| s == active && c.scan & 1 << s != 0));
         let open = self.open | c.held & set;
         out.hold = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| prio & open & 1 << s != 0));
         let heard = |s: u8| open & 1 << s != 0 && c.muted & 1 << s == 0;
-        out.audio = if heard(active) { Some(active) } else { (0..SLOTS as u8).find(|&s| s != active && heard(s)) };
+        // APRS-21.2: a deferring slot heard plays the APRS slot's chip.
+        let via = |s: u8| if defer & 1 << s != 0 { to.unwrap_or(s) } else { s };
+        out.audio = if heard(active) { Some(active) } else { (0..SLOTS as u8).find(|&s| s != active && heard(s)) }.map(via);
         out
     }
 }
@@ -368,7 +394,7 @@ mod tests {
 
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {
-        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, scan: 0 }
+        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 }
     }
 
     /// WATCH-2, WATCH-17: slots sharing a chip take turns on it, 150 ms on the active slot and 70 ms on each
@@ -392,7 +418,7 @@ mod tests {
     #[test]
     fn band_crossing_takes_the_other_chip_at_once() {
         let mut w = Watch::new();
-        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0, held: 0, prio: 0, scan: 0 };
+        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
         assert_eq!(w.tick(0, &c, [false; 2], false).chip, [Some(0), None]);
         c.freq[0] = mhz(446) + 47_500;
         assert_eq!(w.tick(10, &c, [false; 2], false).chip, [None, Some(0)], "70 cm: chip 1 in the same turn");
@@ -600,7 +626,7 @@ mod tests {
     /// alternates the receive path, and A's squelch reads open throughout, also while chip 1 has the path.
     #[test]
     fn muted_slot_stays_open_across_the_hop() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, scan: 0 };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let mut path = None;
         let mut paths = [0u32; 2];
@@ -625,7 +651,7 @@ mod tests {
     /// Muted each hop.
     #[test]
     fn muted_slot_stays_open_through_the_chips_reacquire() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, scan: 0 };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let (mut path, mut got) = (None, 0u32);
         for t in (0..3_000u32).step_by(10) {
@@ -648,7 +674,7 @@ mod tests {
     /// the path stays on A's chip and B (the other chip) is never listened to, so it is never heard.
     #[test]
     fn monitored_active_slot_holds_the_path() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0, off: 0, held: 0b001, prio: 0, scan: 0 };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0, off: 0, held: 0b001, prio: 0, aprs: 0, scan: 0 };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let mut path = None;
         for t in (0..2_000u32).step_by(10) {
@@ -738,7 +764,7 @@ mod sim {
     }
 
     fn aprs(set: u8, prio: u8) -> Cfg {
-        Cfg { set, active: 0, freq: [A2M, B70, APRS], muted: 0, off: 0, held: 0, prio, scan: 0 }
+        Cfg { set, active: 0, freq: [A2M, B70, APRS], muted: 0, off: 0, held: 0, prio, aprs: 0, scan: 0 }
     }
 
     /// Decision 181's cause, and APRS-29 (beacons alone give C no priority): C without priority, sharing chip 0 with
@@ -801,6 +827,40 @@ mod sim {
         assert!(t - start <= 300 && t + held >= end, "caught at {t}, held {held}");
     }
 
+    /// APRS-21.2: with C the APRS slot ([`Cfg::aprs`]), A on the APRS frequency takes no turns: chip 0 is C's alone
+    /// and B's turns on chip 1 go on; a packet opening C opens A with it, and A heard plays C's chip (C muted or
+    /// not; A muted, nothing). Beacons alone (no priority) defer the same. A latched monitor, a pause (keyed) or no
+    /// APRS slot: A listens itself.
+    #[test]
+    fn a_slot_on_the_aprs_frequency_defers_to_c() {
+        let c = Cfg { freq: [APRS, B70, APRS], aprs: 0b100, ..aprs(0b111, 0b100) };
+        let st = run(&c, &[], settle(0b100), 2_000);
+        assert!(st.iter().all(|x| x.chip[0] != Some(0)), "A never has chip 0");
+        assert!(st.iter().any(|x| x.chip[1] == Some(1)), "B is still watched");
+        let (start, end) = (1_000, 2_200);
+        let st = run(&c, &[Carrier { freq: APRS, start, end }], settle(0b100), end + 500);
+        assert!(caught(&st, 2, start).is_some(), "C has the packet");
+        assert!(st.iter().all(|x| x.open & 1 == (x.open >> 2) & 1), "A's squelch is C's throughout");
+        assert!(st.iter().any(|x| x.open & 0b101 == 0b101));
+        let mut w = Watch::new();
+        let o = w.tick(0, &c, [false; 2], false);
+        assert_eq!((o.defer, o.defer_to, o.chip[0]), (0b001, Some(2), Some(2)));
+        let o = w.tick(10, &c, [true, false], false);
+        assert!(w.open(0) && w.open(2));
+        assert_eq!(o.audio, Some(2), "A heard: C's chip plays");
+        let o = w.tick(20, &Cfg { muted: 0b100, ..c }, [true, false], false);
+        assert_eq!(o.audio, Some(2), "C muted (packets off the speaker), A still heard through it");
+        let o = w.tick(30, &Cfg { muted: 0b101, ..c }, [true, false], false);
+        assert_eq!(o.audio, None, "A muted too: nothing");
+        assert_eq!(Watch::new().tick(0, &Cfg { prio: 0, ..c }, [false; 2], false).defer, 0b001, "beacons alone");
+        let o = Watch::new().tick(0, &Cfg { held: 0b001, ..c }, [false; 2], false);
+        assert_eq!((o.defer, o.chip[0]), (0, Some(0)), "A's monitor latched: A listens");
+        let o = Watch::new().tick(0, &c, [false; 2], true);
+        assert_eq!((o.defer, o.chip[0]), (0, Some(0)), "keyed: only the active slot");
+        let o = Watch::new().tick(0, &Cfg { aprs: 0, ..c }, [false; 2], false);
+        assert_eq!((o.defer, o.chip[0]), (0, Some(0)), "no APRS slot: an ordinary frequency");
+    }
+
     /// APRS-21.1, HOME-15: a muted priority slot still keeps its chip for the packet (its decoder listens), unheard.
     #[test]
     fn muted_aprs_slot_still_holds_the_packet() {
@@ -844,7 +904,7 @@ mod sim {
             (sc.fast, sc.resume) = (true, Resume::Drop);
             sc.start(0, 0);
             let (mut w, mut hop) = (Watch::new(), Hop::new());
-            let mut c = Cfg { set, active: 0, freq: [mhz(144), mhz(446) + 47_500, mhz(144) + 39_000], muted: 0, off: 0, held: 0, prio, scan };
+            let mut c = Cfg { set, active: 0, freq: [mhz(144), mhz(446) + 47_500, mhz(144) + 39_000], muted: 0, off: 0, held: 0, prio, aprs: 0, scan };
             let (mut started, mut ticked, mut steps, mut b, mut cturns) = (0u64, 0u64, 0u32, 0u32, 0u32);
             let (mut path, mut last_c) = (None, None);
             while ticked < 10_000 {

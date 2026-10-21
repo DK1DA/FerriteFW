@@ -83,9 +83,11 @@ pub fn ptt(app: &mut App, slot: u8) {
     if let Some(r) = ptt_refusal(app, slot) {
         return refuse(app, slot, r);
     }
-    if txplan::emergency(tx_freq(app, slot)) {
+    let emergency = txplan::emergency(tx_freq(app, slot));
+    if emergency || app.aprs_voice_gate(slot) {
+        // TX-3, APRS-21.3: the second PTT within 5 s transmits.
         app.radio.t0 = app.now.wrapping_add(EMERGENCY_MS);
-        app.screen = Screen::Emergency(Emergency { slot });
+        app.screen = Screen::Emergency(Emergency { slot, aprs: !emergency });
         return;
     }
     key(app, slot);
@@ -717,15 +719,17 @@ fn mhz_text(f: Freq10, b: &mut Buf<96>) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Emergency {
     pub slot: u8,
+    /// APRS-21.3: the APRS frequency's prompt (data only), not an emergency frequency's.
+    pub aprs: bool,
 }
 
 impl View for Emergency {
     fn name(self) -> &'static str {
-        "Emergency frequency"
+        if self.aprs { "APRS frequency" } else { "Emergency frequency" }
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(b"Distress"); // 8 or fewer (SBAR-5)
+        b.set(if self.aprs { b"APRS" as &[u8] } else { b"Distress" }); // 8 or fewer (SBAR-5)
     }
 
     fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
@@ -753,9 +757,15 @@ impl View for Emergency {
         let (y, h) = (80, 120);
         let f = tx_freq(app, self.slot);
         if app.dirty(1, hash(&f)) {
-            parts::dialog(lcd, y, h, b"Emergency frequency", AMBER);
             let mut a = Buf::<64>::new();
-            let _ = uwrite!(a, "{} MHz is kept for distress and rescue.", txt(w::freq3(f).as_bytes()));
+            if self.aprs {
+                // APRS-21.3: data only while C is the APRS slot.
+                parts::dialog(lcd, y, h, b"APRS frequency: data only", AMBER);
+                let _ = uwrite!(a, "{} MHz carries APRS packets; voice blocks them.", txt(w::freq3(f).as_bytes()));
+            } else {
+                parts::dialog(lcd, y, h, b"Emergency frequency", AMBER);
+                let _ = uwrite!(a, "{} MHz is kept for distress and rescue.", txt(w::freq3(f).as_bytes()));
+            }
             wrap(lcd, 19, 204, y + 45, 17, 2, a.as_bytes(), &UI_12, TEXT, SURFACE);
             w::field(lcd, 19, 204, y + 70, y + 92, y + 86, Align::Left, b"PTT again to transmit", &UI_12B, AMBER, SURFACE);
         }

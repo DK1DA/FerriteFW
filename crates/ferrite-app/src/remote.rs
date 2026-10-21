@@ -126,6 +126,11 @@ impl App {
             self.show_toast(b"No remote TX", b"emergency frequency", false);
             return Err("emergency frequency: only PTT on the radio, twice");
         }
+        // APRS-21.3: the APRS frequency on A or B is data only while C is the APRS slot: PTT on the radio, twice.
+        if self.aprs_voice_gate(s) {
+            self.show_toast(b"No remote TX", b"APRS frequency", false);
+            return Err("APRS frequency: data only: PTT on the radio, twice");
+        }
         // APRS-18: a PTT there sends or opens a message; remote PTT is voice only.
         if matches!(self.screen, Screen::Compose(_)) || self.aprs_slot(s) {
             return Err("APRS: no voice there");

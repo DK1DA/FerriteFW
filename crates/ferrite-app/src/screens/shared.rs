@@ -340,6 +340,8 @@ impl App {
             ("relay", AMBER)
         } else if self.monitor & 1 << s != 0 {
             ("MON", AMBER) // a latched monitor: squelch held open (decided Oct 6, 2026)
+        } else if self.defers_to_c(s) && !lv.squelch_open {
+            ("APRS on C", DIM) // APRS-21.2: C listens here; the card shows RX when C receives
         } else if !watched {
             ("off", DIM)
         } else if lv.heard_tone != 0 {

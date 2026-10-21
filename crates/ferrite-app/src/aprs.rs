@@ -367,6 +367,18 @@ impl App {
         s == APRS_SLOT && self.aprs_c()
     }
 
+    /// APRS-21.2: slot `s` (A or B) receives on the APRS frequency while C is the APRS slot, so it defers to C: no
+    /// turns of its own (the Radio task's watch), its card "APRS on C" until C receives.
+    pub fn defers_to_c(&self, s: u8) -> bool {
+        self.aprs_c() && s < APRS_SLOT && self.tuned_freq(s) == self.aprs_freq()
+    }
+
+    /// APRS-21.3: slot `s` (A or B) transmits on the APRS frequency while C is the APRS slot: voice there needs a
+    /// person's PTT twice; VOX and remote PTT never key it.
+    pub fn aprs_voice_gate(&self, s: u8) -> bool {
+        self.aprs_c() && s < APRS_SLOT && crate::screens::transmit::tx_freq(self, s) == self.aprs_freq()
+    }
+
     /// Why the APRS slot can't change (APRS-19, KISS-9, APRS-29): what holds it, nothing more (decision 181).
     pub(crate) fn aprs_holds(&self) -> &'static str {
         match self.aprs_holder() {

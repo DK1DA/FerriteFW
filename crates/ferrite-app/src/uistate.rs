@@ -427,7 +427,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         }
         Screen::Emergency(e) => {
             if let Some(l) = d.ln() {
-                l.push(b"emergency");
+                l.push(if e.aprs { b"aprs" as &[u8] } else { b"emergency" });
                 slot_word(l, e.slot);
             }
         }

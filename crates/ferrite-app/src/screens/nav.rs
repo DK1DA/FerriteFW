@@ -403,7 +403,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
             let why = transmit::refusal(app, a).unwrap_or(ferrite_core::txplan::Refusal::OutOfBand);
             Screen::TxRefused(transmit::TxRefused { why, slot: a })
         }
-        Dest::Emergency => Screen::Emergency(transmit::Emergency { slot: a }),
+        Dest::Emergency => Screen::Emergency(transmit::Emergency { slot: a, aprs: false }),
         Dest::Scan => Screen::Scan(scan::Scan { slot: a, list: false, sel: 0 }),
         Dest::BandScope => scope::open(app),
         Dest::ToneSearch => probe::open_tone(app),
