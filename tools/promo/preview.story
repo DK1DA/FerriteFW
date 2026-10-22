@@ -117,8 +117,8 @@ script:
 title: HF and SSB on a handheld
 layout: right
 left: The broadcast receiver doubles as an HF radio: AM, USB, LSB and CW below 30 MHz.
-right: Here, FT8 on 40 m in USB, with its own tuning screen.
-setup: press BACK; home; menu 0 3 4; wait 2700ms; type 7074; press OK; press STAR; wait 10500ms
+right: Here, 20 m voice in USB, with its own tuning screen.
+setup: press BACK; home; menu 0 3 4; wait 2700ms; type 14230; press OK; press STAR; wait 10500ms
 script:
   wait 1200ms
   knob 3
