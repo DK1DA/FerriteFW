@@ -409,7 +409,7 @@ impl Settings {
         term_colour: false,
         aprs_mode: false,
         predictive: true,
-        lpm: 0,
+        lpm: 2, // PWR-24.1: Auto by default (Alex, Oct 21, 2026)
         lpm_below: 20,
         spare_tokens: [0; 30],
         backlight: 5, // 60 s (15 s felt short on the radio, Oct 12, 2026)

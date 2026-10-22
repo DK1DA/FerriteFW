@@ -26,6 +26,7 @@ fn side_combo(t: &mut T, ms: u32) {
 #[test]
 fn on_and_off_restore_everything() {
     let mut t = T::new();
+    t.app.set.lpm = 0; // the default is Auto (PWR-24.1); these start from Off
     t.app.set.bt = true;
     t.app.set.gps_on = true;
     t.app.set_aprs_mode(true);
@@ -77,6 +78,7 @@ fn on_and_off_restore_everything() {
 #[test]
 fn side_keys_leave_only() {
     let mut t = T::new();
+    t.app.set.lpm = 0; // the default is Auto (PWR-24.1); these start from Off
     t.app.set.backlight = 0; // never dark: every key acts
     side_combo(&mut t, 1500);
     assert!(!t.app.low_power(), "never enters");
@@ -101,11 +103,12 @@ fn side_keys_leave_only() {
     assert_eq!(t.app.screen, Screen::Home, "neither key did its own thing (no counter, no scan)");
 }
 
-/// PWR-24.3: Auto enters below its level (once per crossing), leaves by itself at 80 %; left by the keys it
+/// PWR-24.3: Auto enters below its level (once per crossing), leaves by itself at 65 %; left by the keys it
 /// waits for the battery 10 points above its level; no reading yet does nothing.
 #[test]
 fn auto_follows_the_battery() {
     let mut t = T::new();
+    t.app.set.lpm = 0; // the default is Auto (PWR-24.1); these start from Off
     t.app.set.backlight = 0;
     t.app.set_lpm_mode(2);
     t.wait(200);
@@ -132,9 +135,12 @@ fn auto_follows_the_battery() {
     t.app.battery(19);
     t.wait(200);
     assert!(t.app.low_power(), "back above 30 and down again: a new crossing");
-    t.app.battery(80);
+    t.app.battery(64);
     t.wait(200);
-    assert!(!t.app.low_power(), "the charger: out at 80 %");
+    assert!(t.app.low_power(), "64 %: still in");
+    t.app.battery(65);
+    t.wait(200);
+    assert!(!t.app.low_power(), "the charger: out at 65 %");
     // 0 7 7 3's level.
     t.app.set.lpm_below = 40;
     t.app.battery(39);
@@ -145,9 +151,27 @@ fn auto_follows_the_battery() {
 /// PWR-24.1, PWR-24.3: the menu turns Off -> Auto -> On (Auto never passes On, which would enter at once and leave
 /// the menu); choosing Auto decides from the battery now, also coming back from On (Oct 21, 2026, on black: `set`
 /// stepped through On at 32 % and Auto then held the mode until 80 %).
+/// PWR-24.1, PWR-24.3: Auto at 20 % is the default; On by hand never leaves by itself (Alex: entered manually, "we
+/// dont auto exit it").
+#[test]
+fn on_by_hand_never_leaves_by_itself() {
+    let mut t = T::new();
+    t.app.set.lpm = 0;
+    t.app.battery(30);
+    t.wait(200);
+    t.app.set_lpm_mode(1);
+    assert!(t.app.low_power());
+    t.app.battery(100);
+    t.wait(200);
+    assert!(t.app.low_power(), "On by hand: no exit at 65 % or 100 %");
+    assert_eq!(crate::settings::Settings::DEFAULT.lpm, 2, "Auto by default");
+    assert_eq!(crate::settings::Settings::DEFAULT.lpm_below, 20, "at 20 %");
+}
+
 #[test]
 fn auto_is_chosen_without_passing_on() {
     let mut t = T::new();
+    t.app.set.lpm = 0; // the default is Auto (PWR-24.1); these start from Off
     t.app.battery(32);
     t.wait(200);
     assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], 1));

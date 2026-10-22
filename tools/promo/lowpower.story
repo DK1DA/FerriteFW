@@ -19,8 +19,6 @@ script:
   press DOWN
   wait 900ms
   knob 1
-  wait 700ms
-  knob 1
   wait 3500ms
 ---
 title: Or by itself
