@@ -212,6 +212,9 @@ impl App {
         if ver != STATE_VERSION || n as usize != SLOTS {
             return;
         }
+        // MODE-6.5: everything App::new queued for the Radio task goes again below; its copies would overflow the
+        // queue at power-on and push out the settings that matter (the active slot, the watch set, the APRS slot).
+        self.out.q = ferrite_core::cmdq::CmdRing::new();
         self.active.load(r);
         self.active %= SLOTS as u8;
         self.watch.load(r);
@@ -345,6 +348,22 @@ mod tests {
         assert!(c.0 <= 1024, "{} bytes", c.0);
     }
 
+    /// The last Active, Watch and AprsSlot the Radio task gets from the power-on burst (None: lost).
+    fn boot_cmds(a: &mut App) -> [Option<u8>; 3] {
+        let mut got = [None; 3];
+        while let Some(c) = a.pop_cmd() {
+            match c {
+                crate::RadioCmd::Active(x) => got[0] = Some(x),
+                crate::RadioCmd::Watch(x) => got[1] = Some(x),
+                crate::RadioCmd::AprsSlot(x) => got[2] = Some(x),
+                _ => {}
+            }
+        }
+        got
+    }
+
+    /// MODE-6.5: the power-on burst, App::new and then the saved state, fits the UI's queue: the Radio task gets the
+    /// saved active slot and watch set (until Oct 22, 2026 both were pushed out, and A stayed active underneath).
     #[test]
     fn app_state_round_trip() {
         let store = Sample::new();
@@ -361,6 +380,9 @@ mod tests {
         b.restore_state(&mut SliceSource(&v.0), &store);
         assert_eq!(b.active, 2);
         assert_eq!(b.watch, 2);
+        assert_eq!(boot_cmds(&mut b), [Some(2), Some(0b111), Some(0)], "MODE-6.5: active, watch, APRS slot");
+        assert_eq!(boot_cmds(&mut App::new(leak(), alert()))[0], Some(0), "first boot: App::new alone");
+
         assert_eq!(b.slots[0].vfo, 14_652_000);
         assert_eq!(b.slots[1].ch.map(|c| c.num), a.slots[1].ch.map(|c| c.num));
         assert!(!b.slots[1].vfo_mode);

@@ -105,7 +105,10 @@ impl View for Msgs {
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
             (Key::Menu, Short) if !self.open && m.is_some() => {
-                d.request(Op::MessageRead(self.cur.sel));
+                let unread = m.is_some_and(|m| m.inbound && m.state == MsgState::Unread);
+                if d.request(Op::MessageRead(self.cur.sel)) && unread {
+                    app.inbox = app.inbox.saturating_sub(1); // INBOX-7.1: its log entry read with it
+                }
                 app.screen = Screen::Msgs(Msgs { open: true, ..self });
             }
             (Key::Menu, Short) => {
@@ -123,7 +126,10 @@ impl View for Msgs {
     fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
         let cur = self.cur.step(d, store.data().messages(), ROWS2, &ALL);
         if self.open && cur.sel != self.cur.sel {
-            store.data().request(Op::MessageRead(cur.sel));
+            let unread = store.data().message(cur.sel).is_some_and(|m| m.inbound && m.state == MsgState::Unread);
+            if store.data().request(Op::MessageRead(cur.sel)) && unread {
+                app.inbox = app.inbox.saturating_sub(1); // INBOX-7.1
+            }
         }
         app.screen = Screen::Msgs(Msgs { cur, ..self });
     }

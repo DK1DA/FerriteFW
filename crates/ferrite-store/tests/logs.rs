@@ -503,3 +503,20 @@ fn power_cuts_leave_before_or_after() {
 fn r_idx(n: u32, len: u16) -> u16 {
     (n % len.max(1) as u32) as u16
 }
+
+/// INBOX-7.1: reading an unread message from someone marks its log entry read too (so the inbox count goes with
+/// it); another entry stays unread, and reading the message again leaves the log alone.
+#[test]
+fn reading_a_message_reads_its_log_entry() {
+    let s = mount(SimFlash::new());
+    let entry = |name: &[u8], text: &[u8]| Event { src: Src::Aprs, ago_s: 0, freq: 14_439_000, slot: 2, unread: true, id: 0, x: 0, y: 0, pos: None, name: Buf::from(name), text: Buf::from(text) };
+    s.log(&entry(b"VE7TES-7", b"other"));
+    s.message_to_us(b"VE7TES-7", b"hello", b"1");
+    s.log(&entry(b"VE7TES-7", b"hello"));
+    assert!(s.request(Op::MessageRead(0)));
+    assert_eq!(s.message(0).map(|m| m.state), Some(MsgState::Read));
+    assert_eq!((s.event(0).map(|e| e.unread), s.event(1).map(|e| e.unread)), (Some(false), Some(true)));
+    s.log(&entry(b"VE7TES-7", b"hello"));
+    assert!(s.request(Op::MessageRead(0)));
+    assert_eq!(s.event(0).map(|e| e.unread), Some(true), "already read: a later entry is left alone");
+}

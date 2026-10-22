@@ -1116,9 +1116,27 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 Some(seq) => self.submit(Job::Read { log: true, seq }),
                 None => false,
             },
-            Op::MessageRead(i) => match self.msgs.seq(i) {
-                Some(seq) => self.submit(Job::Read { log: false, seq }),
-                None => false,
+            // INBOX-7.1: an unread message from someone also marks its log entry read (the newest unread one with
+            // its sender and text, among the last 64).
+            Op::MessageRead(i) => match (self.msgs.seq(i), self.message(i)) {
+                (Some(seq), Some(m)) => {
+                    if !self.submit(Job::Read { log: false, seq }) {
+                        return Some(false);
+                    }
+                    let entry = (m.inbound && m.state == MsgState::Unread)
+                        .then(|| {
+                            (0..self.events.len().min(64)).find(|&j| {
+                                self.event(j).is_some_and(|e| e.unread && e.src == Src::Aprs && e.name.as_bytes() == m.peer.as_bytes() && e.text.as_bytes() == m.text.as_bytes())
+                            })
+                        })
+                        .flatten()
+                        .and_then(|j| self.events.seq(j));
+                    if let Some(seq) = entry {
+                        self.submit(Job::Read { log: true, seq });
+                    }
+                    true
+                }
+                _ => false,
             },
             Op::Draft(d) => {
                 self.draft.set(d);

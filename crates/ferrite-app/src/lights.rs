@@ -21,6 +21,10 @@ use crate::App;
 /// readable on the radio (Oct 12, 2026: the old 2 % was too dark); level 10 is full on.
 pub const BRIGHTNESS: [u16; 10] = [45, 65, 90, 125, 180, 250, 355, 500, 710, 1000];
 
+/// DISP-22.1: the keypad light's curve is the screen's scaled to this top (thousandths): half the power at every
+/// level (Alex, Oct 22, 2026; on the launch-defaults list).
+pub const KEYPAD_MAX: u16 = 500;
+
 /// `a` is at or after `b` (wrapping ms).
 fn after(a: u32, b: u32) -> bool {
     a.wrapping_sub(b) < 1 << 31
@@ -38,8 +42,8 @@ const TX_DARK: u8 = 16;
 const FLASH_MS: u32 = 80;
 const BEAT_MS: u32 = 5000;
 const UNREAD_MS: u32 = 2000;
-/// The second flash of the double one starts this long after the first.
-const SECOND_MS: u32 = 250;
+/// The unread pattern's flashes (red, green, red) start this far apart: a gap of a flash's length between them.
+const NEXT_FLASH_MS: u32 = 160;
 /// Auto power off warns this long before.
 const OFF_WARN_MS: u32 = 10_000;
 /// "On key press": the keypad stays lit this long after a key.
@@ -70,10 +74,11 @@ impl App {
     }
 
     /// The keypad light's PWM duty in thousandths (DISP-22): 0 while [`App::keypad_lit`] says off, else the same
-    /// level as the screen's (the theme's 0 7 4 2), lit or not, so one level dims both.
+    /// level as the screen's (the theme's 0 7 4 2), lit or not, so one level dims both, on its own lower curve
+    /// (DISP-22.1, [`KEYPAD_MAX`]).
     pub fn keypad_duty(&self) -> u16 {
         if self.keypad_lit() && !self.low_power() {
-            BRIGHTNESS[self.set.brightness() as usize - 1]
+            (BRIGHTNESS[self.set.brightness() as usize - 1] as u32 * KEYPAD_MAX as u32 / 1000) as u16
         } else {
             0
         }
@@ -113,16 +118,8 @@ impl App {
         if mode < 2 || !self.dark() {
             return Leds::default();
         }
-        // The heartbeat: where we are in its period, and whether a flash is on.
-        let (period, flashes) = if self.inbox > 0 { (UNREAD_MS, 2) } else { (BEAT_MS, 1) };
-        let t = self.now % period;
-        let on = t < FLASH_MS || (flashes == 2 && (SECOND_MS..SECOND_MS + FLASH_MS).contains(&t));
-        let next_ms = match t {
-            _ if t < FLASH_MS => FLASH_MS - t,
-            _ if flashes == 2 && t < SECOND_MS => SECOND_MS - t,
-            _ if flashes == 2 && t < SECOND_MS + FLASH_MS => SECOND_MS + FLASH_MS - t,
-            _ => period - t,
-        };
+        // The heartbeat: one flash in the battery's colour every 5 s, or, while something is unread (DISP-21.1), red,
+        // green, red one after another every 2 s (never both at once: they don't blend into a clear yellow).
         let (red, green) = if dev.battery_low || dev.battery_cutoff {
             (true, false)
         } else if dev.battery_pct > 80 {
@@ -130,7 +127,21 @@ impl App {
         } else {
             (true, true)
         };
-        Leds { red: on && red, green: on && green, next_ms }
+        let unread = [(true, false), (false, true), (true, false)];
+        let (period, flashes): (u32, &[(bool, bool)]) = if self.inbox > 0 { (UNREAD_MS, &unread) } else { (BEAT_MS, &[(red, green)][..]) };
+        let t = self.now % period;
+        let mut next_ms = period - t;
+        for (i, &(r, g)) in flashes.iter().enumerate() {
+            let start = i as u32 * NEXT_FLASH_MS;
+            if t < start {
+                next_ms = start - t;
+                break;
+            }
+            if t < start + FLASH_MS {
+                return Leds { red: r, green: g, next_ms: start + FLASH_MS - t };
+            }
+        }
+        Leds { red: false, green: false, next_ms }
     }
 
     /// A key or the knob while dark: light up; true when this input only woke the screen.

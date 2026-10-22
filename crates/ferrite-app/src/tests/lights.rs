@@ -36,7 +36,8 @@ fn dark_and_wake() {
     assert!(!t.app.dark());
 }
 
-/// LEDs: red TX, green RX; dark: the heartbeat in the battery's colour, double while something is unread.
+/// LEDs: red TX, green RX; dark: the heartbeat in the battery's colour; DISP-21.1: red, green, red while something is
+/// unread, one colour at a time.
 #[test]
 fn led_heartbeat() {
     let mut t = T::new();
@@ -74,7 +75,18 @@ fn led_heartbeat() {
     assert_eq!(count(&mut t, dev(50, false), 5000), (1, (true, true)), "yellow: both");
     assert_eq!(count(&mut t, dev(10, true), 5000), (1, (true, false)), "red at the low warning");
     t.app.inbox = 1;
-    assert_eq!(count(&mut t, dev(90, false), 2000).0, 2, "a double flash every 2 s while unread");
+    assert_eq!(count(&mut t, dev(90, false), 2000).0, 3, "three flashes every 2 s while unread");
+    let mut seen = std::vec::Vec::new();
+    for _ in 0..200 {
+        let l = t.app.leds(&t.live, &dev(50, false));
+        assert!(!(l.red && l.green), "never both at once");
+        if (l.red || l.green) && seen.last() != Some(&(l.red, l.green)) {
+            seen.push((l.red, l.green));
+        }
+        t.t += 10;
+        t.app.tick(t.t, &t.live, &store());
+    }
+    assert_eq!(seen, [(true, false), (false, true), (true, false)], "red, green, red");
     t.app.set.leds = 1;
     assert_eq!(count(&mut t, dev(90, false), 5000).0, 0, "RX and TX only: no heartbeat");
 }
@@ -233,27 +245,29 @@ fn brightness_levels() {
     assert_eq!(t.app.backlight_duty(), 0, "dark");
 }
 
-/// DISP-22: the keypad light, when lit, at the screen's level (night red's in night red); 0 when off, and lit at
-/// that level while the screen is dark with "always".
+/// DISP-22, DISP-22.1: the keypad light, when lit, at the screen's level (night red's in night red) on its half
+/// curve; 0 when off, and lit at that level while the screen is dark with "always".
 #[test]
 fn keypad_light_dims_with_the_screen() {
-    use crate::lights::BRIGHTNESS;
+    use crate::lights::{BRIGHTNESS, KEYPAD_MAX};
+    let half = |d: u16| (d as u32 * KEYPAD_MAX as u32 / 1000) as u16;
     let mut t = T::new();
     t.app.set.backlight = 3;
     t.app.set.keypad_light = 1;
-    assert_eq!(t.app.keypad_duty(), t.app.backlight_duty());
+    assert_eq!(t.app.keypad_duty(), half(t.app.backlight_duty()));
     assert!(crate::screens::groups::change(&mut t.app, &[7, 4, 2], -3));
-    assert_eq!((t.app.keypad_duty(), t.app.backlight_duty()), (BRIGHTNESS[3], BRIGHTNESS[3]));
+    assert_eq!((t.app.keypad_duty(), t.app.backlight_duty()), (half(BRIGHTNESS[3]), BRIGHTNESS[3]));
     t.app.set.theme = crate::settings::NIGHT_RED;
-    assert_eq!(t.app.keypad_duty(), BRIGHTNESS[t.app.set.brightness_night as usize - 1]);
+    assert_eq!(t.app.keypad_duty(), half(BRIGHTNESS[t.app.set.brightness_night as usize - 1]));
     t.app.set.theme = 0;
     t.app.set.keypad_light = 0;
     assert_eq!(t.app.keypad_duty(), 0, "off");
     t.app.set.keypad_light = 3;
     t.wait(16_000);
-    assert_eq!((t.app.backlight_duty(), t.app.keypad_duty()), (0, BRIGHTNESS[3]), "always: lit while the screen is dark");
+    assert_eq!((t.app.backlight_duty(), t.app.keypad_duty()), (0, half(BRIGHTNESS[3])), "always: lit while the screen is dark");
     t.app.set.keypad_light = 1;
     assert_eq!(t.app.keypad_duty(), 0, "with the screen: dark with it");
+    assert_eq!(half(1000), 500, "DISP-22.1: a 50 % top");
 }
 
 /// DISP-22: "on key press" lights the keypad for 5 s after any key, the one that woke the screen too.

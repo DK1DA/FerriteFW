@@ -141,7 +141,7 @@ fn knob_is_brightness() {
     open(&mut t);
     t.knob(1);
     assert_eq!(t.app.set.brightness, 8);
-    assert_eq!((t.app.backlight_duty(), t.app.keypad_duty()), (BRIGHTNESS[7], BRIGHTNESS[7]), "live, both lights");
+    assert_eq!((t.app.backlight_duty(), t.app.keypad_duty()), (BRIGHTNESS[7], (BRIGHTNESS[7] as u32 * crate::lights::KEYPAD_MAX as u32 / 1000) as u16), "live, both lights (DISP-22.1)");
     assert_eq!(shown(&t, 4), "8");
     for _ in 0..5 {
         t.knob(1);

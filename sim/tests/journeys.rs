@@ -237,13 +237,14 @@ fn message_and_led_double_flash() {
     let mut was = false;
     for _ in 0..100 {
         r.wait(20);
-        let (green, _) = r.sim.leds();
-        if green && !was {
+        let (green, red) = r.sim.leds();
+        assert!(!(green && red), "DISP-21.1: one LED at a time");
+        if (green || red) && !was {
             flashes += 1;
         }
-        was = green;
+        was = green || red;
     }
-    assert_eq!(flashes, 2, "a double flash every 2 s");
+    assert_eq!(flashes, 3, "red, green, red every 2 s (DISP-21.1)");
 }
 
 /// A SAME warning takes the full screen over home (WX-4, INBOX-2).

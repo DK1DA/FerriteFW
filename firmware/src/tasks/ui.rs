@@ -644,7 +644,8 @@ pub async fn task() {
                 TERM_WAKE.signal(()); // print the answer, or wait for it, on the next turn
             }
         }
-        if !bringup::ON.load(Relaxed) {
+        // TERM-28.1: only the bring-up build (no store) holds them; the normal build's cable log never does.
+        if !(cfg!(feature = "bringup") && bringup::ON.load(Relaxed)) {
             aprs.poll(&mut app, store, &live, now_ms());
             decode.poll(&mut app, store, &live);
         }

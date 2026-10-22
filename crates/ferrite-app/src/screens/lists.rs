@@ -537,13 +537,12 @@ pub fn place_text(m: u32, deg: u16, units: u8, b: &mut Buf<12>) {
     let _ = uwrite!(b, "{} {}", compass_name(deg), Txt(d.as_bytes()));
 }
 
-/// "now", "40 s", "12 min", "3 h", "1 h 20", "2 d".
+/// "0 s", "40 s", "12 min", "3 h", "1 h 20", "2 d" (never "now": it reads "now ago" beside "ago", Alex Oct 22).
 pub fn age_text(s: u32, b: &mut Buf<12>) {
     b.clear();
     let m = s / 60;
     let _ = match s {
-        0..=9 => uwrite!(b, "now"),
-        10..=59 => uwrite!(b, "{} s", s),
+        0..=59 => uwrite!(b, "{} s", s),
         60..=3599 => uwrite!(b, "{} min", m),
         _ if m < 24 * 60 && !m.is_multiple_of(60) && m < 10 * 60 => uwrite!(b, "{} h {}", m / 60, m % 60),
         _ if m < 24 * 60 => uwrite!(b, "{} h", m / 60),

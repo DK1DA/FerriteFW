@@ -942,3 +942,4 @@ mod sim {
         assert_eq!(rate(0b011, 0b010, 0).0, plain);
     }
 }
+
