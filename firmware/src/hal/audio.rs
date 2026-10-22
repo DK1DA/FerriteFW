@@ -144,6 +144,9 @@ pub fn capture_stop() {
     irq::disable(IRQ_ADC_DMA);
     modify(ch(DMA1, 1) + CH_CTRL, DMA_EN, 0);
     modify(ADC_CTRL2, ADC_CTRL2_OCTESEL_MASK | ADC_CTRL2_DMAEN, super::regs::ADC_CTRL2_OCTESEL_SW);
+    // PWR-23: the capture's timer and DMA unclocked until the next start (DMA1 serves only the capture).
+    modify(CRM_APB1EN, CRM_APB1_TMR4, 0);
+    modify(CRM_AHBEN, CRM_AHB_DMA1, 0);
 }
 
 /// DMA1 channel 1: a capture half is full.
@@ -183,13 +186,17 @@ pub fn play_start() {
     wr(TMR6 + TMR_CTRL1, TMR_CTRL1_CNTEN);
 }
 
-/// Playback off: PC12 low first, then the timer, DMA and DAC1's channel (mid-scale left on PA4).
+/// Playback off: PC12 low first, then the timer, DMA and DAC1's channel.
 pub fn play_stop() {
     MIC_INJECT.write(false);
     wr(TMR6 + TMR_CTRL1, 0);
     irq::disable(IRQ_DAC_DMA);
     modify(ch(DMA2, 3) + CH_CTRL, DMA_EN, 0);
-    modify(DAC_CTRL, DAC_CTRL_D1DMAEN | DAC_CTRL_TEN1, 0);
+    // PWR-23: DAC channel 1 off (it was left on at mid-scale); channel 2, the PA drive (`hal::pa`), untouched.
+    // DMA2 serves only the playback; TMR6 was stopped above (a beep starts it, clock included, again).
+    modify(DAC_CTRL, DAC_CTRL_D1DMAEN | DAC_CTRL_TEN1 | DAC_CTRL_EN1, 0);
+    modify(CRM_AHBEN, CRM_AHB_DMA2, 0);
+    modify(CRM_APB1EN, CRM_APB1_TMR6, 0);
 }
 
 /// DMA2 channel 3: a playback half has gone out and may be refilled.

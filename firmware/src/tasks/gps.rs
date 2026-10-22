@@ -48,6 +48,8 @@ const BAUD: u32 = 9600;
 const GPS_TX: crate::hal::gpio::Pin = pin(GPIOB, 10);
 /// How often the task looks: 960 bytes/s at most, and the UART's 1 KB ring holds a second.
 const POLL_MS: u64 = 50;
+/// PWR-23: the look's period while GPS is off.
+const OFF_POLL_MS: u64 = 500;
 /// The fix is published at most this often (the module sends once a second, in several sentences).
 const PUBLISH_MS: u32 = 500;
 
@@ -172,7 +174,9 @@ fn keep_gga(nmea: &Nmea, now: u32) {
 #[embassy_executor::task]
 pub async fn task() {
     GPS_PWR_N.write(true); // off until the first look below decides
-    uart::init(UART_GPS, BAUD);
+    // PWR-23: USART3 runs only while the module is powered; off, its pins float, so PB10 idling high doesn't
+    // feed the unpowered module through its RX pin.
+    uart::deinit(UART_GPS);
     let mut nmea = Nmea::new();
     let (tx, sky) = (POSITION.sender(), SKY.sender());
     tx.send(GpsFix::default());
@@ -229,11 +233,25 @@ pub async fn task() {
         }
         match out.pb10_low {
             Some(true) => GPS_TX.output(false, Mode::OutPp),
-            Some(false) => GPS_TX.output(true, Mode::AfPp),
+            // Back to the UART, or floating while the module is off (PWR-23).
+            Some(false) if power.powered && out.power != Some(false) => GPS_TX.output(true, Mode::AfPp),
+            Some(false) => GPS_TX.config(Mode::Analog),
             None => {}
         }
         let powered = power.powered;
         if let Some(want) = out.power {
+            // PWR-23: the port with the module; PB10 stays low if keyed.
+            if want {
+                uart::init(UART_GPS, BAUD);
+                if keyed {
+                    GPS_TX.output(false, Mode::OutPp);
+                }
+            } else {
+                uart::deinit(UART_GPS);
+                if keyed {
+                    GPS_TX.output(false, Mode::OutPp);
+                }
+            }
             GPS_PWR_N.write(!want);
             mgr.powered(now, want);
             crate::bringup::line(if want { b"gps: power on" } else { b"gps: power off" });
@@ -364,7 +382,9 @@ pub async fn task() {
                 sky_at = now;
             }
         }
-        Timer::after_millis(POLL_MS).await;
+        // PWR-23: every 50 ms while the module is on or wanted, every 500 ms while GPS is off (a key-up's PB10 goes
+        // low at once through `pb10_low_now`; the release waits for the next look).
+        Timer::after_millis(if power.powered || cfg.on { POLL_MS } else { OFF_POLL_MS }).await;
     }
 }
 

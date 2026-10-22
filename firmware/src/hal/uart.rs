@@ -87,14 +87,16 @@ pub fn flush(id: usize) {
     }
 }
 
-/// Off, TX pin back to an input so a powered-down module is not fed.
+/// Off: both pins analog so a powered-down module is not fed, and the port's clock gated (PWR-23).
 pub fn deinit(id: usize) {
     let u = &HW[id];
     irq::disable(u.irq);
     wr(u.base + USART_CTRL1, 0);
-    u.tx.config(Mode::InFloat);
-    u.rx.config(Mode::InFloat);
+    // Analog: no input buffer left on a floating pin.
+    u.tx.config(Mode::Analog);
+    u.rx.config(Mode::Analog);
     RX[id].clear();
+    modify(u.en_reg, u.en_bit, 0);
 }
 
 pub fn write(id: usize, data: &[u8]) {

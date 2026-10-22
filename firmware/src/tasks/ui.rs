@@ -163,6 +163,9 @@ fn own_frame<F: core::future::Future>(f: F) -> OwnFrame<F> {
     OwnFrame(f)
 }
 
+/// DISP-27: the ST7789's wait after sleep out before drawing, and between sleep in and sleep out.
+const PANEL_SLEEP_MS: u32 = 120;
+
 /// LINK-38: the shortest gap between two redraws driven by live changes alone (20 a second).
 const FRAME_MIN_MS: u32 = 50;
 
@@ -414,6 +417,8 @@ pub async fn task() {
     let mut down = 0u32;
     #[cfg(feature = "bench")]
     let mut bt_q: Option<BtQuery> = None;
+    // DISP-27: the panel asleep while the screen is dark, and when it last changed.
+    let (mut panel_asleep, mut panel_at) = (false, now_ms());
     // TERM-40: the display's bench state (the power bench); default is normal.
     #[cfg(feature = "bench")]
     let mut lcdb = ferrite_core::msg::LcdBench::default();
@@ -612,17 +617,7 @@ pub async fn task() {
                     }
                     #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Lcd(set) => {
-                        let new = lcdb.apply(set);
-                        if new.sleep && !lcdb.sleep {
-                            lcd.0.on(false);
-                            lcd.0.sleep(true);
-                        }
-                        if !new.sleep && lcdb.sleep {
-                            lcd.0.sleep(false);
-                            Timer::after_millis(120).await; // the panel's wait after sleep out
-                            lcd.0.on(true);
-                            app.redraw_all();
-                        }
+                        let new = lcdb.apply(set); // `sleep` goes through DISP-27's panel sleep below
                         if new.idle != lcdb.idle {
                             lcd.0.idle(new.idle);
                         }
@@ -716,12 +711,38 @@ pub async fn task() {
         // every step and each scan page redraw is ~14 KB (12-17 ms): back to back they left the Link task (same
         // executor) a turn only between draws, too little to answer the link or carry the cable log. Keys and the
         // knob still draw at once.
-        let since = now_ms().wrapping_sub(last_draw);
-        // TERM-40 (bench): a lower redraw cap, and none while the panel sleeps.
+        // DISP-27: the panel sleeps (display off, sleep in) while the screen is dark, and isn't drawn; it wakes
+        // (sleep out, its 120 ms, display on, a whole redraw) before the backlight comes back. The bench's
+        // `lcd sleep` (TERM-40) asks the same.
         #[cfg(feature = "bench")]
-        let (frame_min, asleep) = (if lcdb.fps == 0 { FRAME_MIN_MS } else { 1000 / lcdb.fps as u32 }, lcdb.sleep);
+        let want_sleep = app.backlight_duty() == 0 || lcdb.sleep;
         #[cfg(not(feature = "bench"))]
-        let (frame_min, asleep) = (FRAME_MIN_MS, false);
+        let want_sleep = app.backlight_duty() == 0;
+        if want_sleep != panel_asleep {
+            // The panel needs 120 ms between sleep in and sleep out, either way.
+            let gap = now_ms().wrapping_sub(panel_at);
+            if gap < PANEL_SLEEP_MS {
+                Timer::after_millis((PANEL_SLEEP_MS - gap) as u64).await;
+            }
+            if want_sleep {
+                lcd.0.on(false);
+                lcd.0.sleep(true);
+            } else {
+                lcd.0.sleep(false);
+                Timer::after_millis(PANEL_SLEEP_MS as u64).await;
+                lcd.0.on(true);
+                app.redraw_all();
+                urgent = true;
+            }
+            (panel_asleep, panel_at) = (want_sleep, now_ms());
+        }
+        let since = now_ms().wrapping_sub(last_draw);
+        // TERM-40 (bench): a lower redraw cap.
+        #[cfg(feature = "bench")]
+        let frame_min = if lcdb.fps == 0 { FRAME_MIN_MS } else { 1000 / lcdb.fps as u32 };
+        #[cfg(not(feature = "bench"))]
+        let frame_min = FRAME_MIN_MS;
+        let asleep = panel_asleep;
         let draw = !asleep && (urgent && frame_min == FRAME_MIN_MS || since >= frame_min);
         let (c0, b0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed));
         if draw {
@@ -749,7 +770,7 @@ pub async fn task() {
         // TERM-40 (bench): a fixed % over the settings', and dark while the panel sleeps.
         #[cfg(feature = "bench")]
         let (bl, keys) = (
-            if lcdb.sleep { 0 } else { lcdb.bl.map_or(app.backlight_duty(), |p| p as u16 * 10) },
+            if panel_asleep { 0 } else { lcdb.bl.map_or(app.backlight_duty(), |p| p as u16 * 10) },
             lcdb.keys.map_or(app.keypad_duty(), |p| p as u16 * 10),
         );
         backlight::set(bl); // DISP-16, DISP-23: 0 while dark

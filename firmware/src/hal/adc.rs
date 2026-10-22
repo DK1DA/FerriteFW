@@ -38,7 +38,7 @@ fn init_once() {
     wr(ADC_SPT1, 0x00FF_FFFF); // 239.5 cycles everywhere: high-impedance dividers
     wr(ADC_SPT2, 0x3FFF_FFFF); // and the sensor's 17 us minimum
     wr(ADC_OSQ1, 0); // one conversion per sequence
-    wr(ADC_CTRL2, ADC_CTRL2_ADCEN | ADC_CTRL2_ITSRVEN | ADC_CTRL2_OCTEN | ADC_CTRL2_OCTESEL_SW);
+    wr(ADC_CTRL2, ADC_CTRL2_ADCEN | ADC_CTRL2_OCTEN | ADC_CTRL2_OCTESEL_SW); // the sensors off: `sensors`
     time::delay_us(20); // power-up before calibration
     modify(ADC_CTRL2, 0, ADC_CTRL2_ADCALINIT);
     while rd(ADC_CTRL2) & ADC_CTRL2_ADCALINIT != 0 {}
@@ -50,6 +50,17 @@ fn init_once() {
 /// works the same while the audio capture owns the ordinary group (`super::audio`).
 pub fn read(ch: u32) -> u16 {
     super::audio::read_preempted(ch)
+}
+
+/// PWR-23: the temperature sensor and internal reference powered (ITSRVEN) only around their reads; their start-up
+/// time (10 us at most, datasheet) is waited on the way on.
+pub fn sensors(on: bool) {
+    if on {
+        modify(ADC_CTRL2, 0, ADC_CTRL2_ITSRVEN);
+        time::delay_us(10);
+    } else {
+        modify(ADC_CTRL2, ADC_CTRL2_ITSRVEN, 0);
+    }
 }
 
 /// Mean of n conversions.

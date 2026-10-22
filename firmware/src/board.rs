@@ -160,6 +160,11 @@ pub fn init() {
     BT_PWR.output(false, Mode::OutPp);
     pin(GPIOB, 10).config(Mode::InFloat);
     pin(GPIOA, 9).config(Mode::InFloat);
+    // PWR-23: no input left floating: PA4 (DAC1 audio) analog until its first use, as its users set it; PC7 and
+    // PC8 (never read, by stock either) pulled up as stock does.
+    pin(GPIOA, 4).config(Mode::Analog);
+    pin(GPIOC, 7).config(Mode::InPu);
+    pin(GPIOC, 8).config(Mode::InPu);
     // BK4829 data line idle as an input; the SI4732 bus idle high.
     BK_SDA.config(Mode::InPu);
     SI_SCL.config(Mode::InPu);

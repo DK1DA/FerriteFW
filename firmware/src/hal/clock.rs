@@ -87,6 +87,9 @@ pub fn init() {
     modify(CRM_CFG, CRM_CFG_SCLKSEL_MASK, 2);
     while rd(CRM_CFG) & CRM_CFG_SCLKSTS_MASK != 2 << 2 {}
     modify(CRM_MISC2, AUTO_STEP, 0);
+    // PWR-23: HICK, the internal 48 MHz oscillator, was only the clock until the switch: off (a reset, the
+    // bootloader's way in, turns it back on).
+    modify(CRM_CTRL, CRM_CTRL_HICKEN, 0);
 }
 
 /// True once `init` has run: SYSCLK from the PLL.

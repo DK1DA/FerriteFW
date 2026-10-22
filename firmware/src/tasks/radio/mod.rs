@@ -562,6 +562,7 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
         BroadcastCmd::Off => {
             if si.mode().is_some() {
                 si.power_down(d)?;
+                SI_RST.write(false); // PWR-23: held in reset while off, as after the boot probe
                 // BCR-20: leaving broadcast puts stock's radio state, PA7 = 1, PC5 = 0 (it stayed 0/0 after FM)
                 SI_IN[0].write(true);
                 SI_IN[1].write(false);

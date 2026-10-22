@@ -49,7 +49,7 @@ STATES = [
     ("save 1", ["bk save 300 500"]),
     ("save 2", ["bk save 180 700"]),
     ("save 3", ["bk save 180 800"]),
-    ("squeeze", ["lcd bl 30", "lcd keys 0", "lcd fps 1", "bk save 180 800"]),
+    ("low power state", ["lcd bl 30", "lcd keys 0", "lcd fps 1", "bk save 180 800"]),
     ("baseline again", []),
     ("rx signal", ["@rx"]),
     ("rx signal, low power set", ["lcd bl 30", "lcd keys 0", "lcd fps 1", "@rx"]),
