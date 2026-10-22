@@ -140,6 +140,8 @@ pub struct Beacon {
     pub waiting: bool,
     /// Seconds to the next timed beacon.
     pub next_s: Option<u32>,
+    /// APRS-36: the digipeater last heard repeating one of our frames (empty: none since power-on).
+    pub digi: Buf<10>,
 }
 
 /// The message being written: it lives with the APRS task's outgoing message (which holds it for retries),
@@ -157,6 +159,13 @@ pub enum WpSrc {
     Link,
     /// Typed as a grid square (GPS-21).
     Grid,
+}
+
+/// A saved station (APRS-37): its callsign and SSID as compose takes them, and a name.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Contact {
+    pub call: Buf<10>,
+    pub name: Buf<12>,
 }
 
 /// A waypoint (GPS-10).
@@ -359,6 +368,9 @@ pub enum Op {
     DtmfName(u8, Buf<10>),
     /// A waypoint typed as a grid square, at its centre, named with it (GPS-21).
     AddWaypoint(Pos, Buf<16>),
+    /// A contact added, or renamed by its callsign (APRS-37); refused when the book is full.
+    SaveContact(Contact),
+    DeleteContact(Buf<10>),
 }
 
 /// The records, read one at a time. Every method has a default (nothing there), so an owner that doesn't
@@ -419,6 +431,17 @@ pub trait Data {
     /// Quick message i as the owner wrote it (TEXT-7), kept with the APRS store; None: the factory text.
     fn quick(&self, _i: usize) -> Option<Buf<67>> {
         None
+    }
+
+    /// The contacts in callsign order (APRS-37), and the one with a callsign.
+    fn contacts(&self) -> u16 {
+        0
+    }
+    fn contact(&self, _i: u16) -> Option<Contact> {
+        None
+    }
+    fn contact_of(&self, call: &[u8]) -> Option<Contact> {
+        (0..self.contacts()).filter_map(|i| self.contact(i)).find(|c| c.call.as_bytes() == call)
     }
 
     fn waypoints(&self) -> u16 {

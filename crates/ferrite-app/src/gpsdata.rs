@@ -432,7 +432,7 @@ mod tests {
                 self.0
             }
             fn beacon(&self) -> crate::data::Beacon {
-                crate::data::Beacon { waiting: false, next_s: self.1 }
+                crate::data::Beacon { waiting: false, next_s: self.1, ..Default::default() }
             }
         }
         let mut app = crate::App::new(crate::tests::set(), crate::tests::alert());

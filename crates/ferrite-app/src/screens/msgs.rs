@@ -63,6 +63,13 @@ fn state_text(m: &Message, b: &mut Buf<16>) -> u16 {
     }
 }
 
+/// APRS-36: one of ours heard back, repeated by `by`: said once in a toast.
+pub fn digipeated(app: &mut App, by: &[u8]) {
+    let mut b = Buf::<16>::from(b"by ");
+    b.push(by);
+    app.show_toast(b"Digipeated", b.as_bytes(), false);
+}
+
 /// APRS-34: one of ours was rejected by `peer`: said in a toast (an ack only moves the state).
 pub fn rejected(app: &mut App, peer: &[u8]) {
     app.show_toast(b"Message rejected", peer, false);
@@ -233,21 +240,27 @@ pub struct Compose {
     pub pcase: u8,
     pub punct: u8,
     pub quick: u8,
-    /// [`DRAFT`], or the quick message being edited (TEXT-7).
+    /// [`DRAFT`], or the quick message being edited (TEXT-7). `quick` is also the address book's row while the
+    /// recipient is empty (APRS-38): the two lists are never up together.
     pub edit: u8,
-    /// The quick list is on screen (set when drawn: the hint bar has no store to ask).
-    pub list: bool,
+    /// [`LISTED`]: the quick list, or the address book (APRS-38), is on screen; [`SVC`]: the recipient is a
+    /// service (APRS-39: its format shown, multi-tap whatever TEXT-10's choice). Set when resolved and drawn: the
+    /// hint bar has no store to ask.
+    pub list: u8,
     /// The cursor (TEXT-12): how many characters of the message are after it; 0 at the end. Kept as the count
     /// after it, it stays put while the text before it changes.
     pub tail: u8,
 }
+
+const LISTED: u8 = 1;
+const SVC: u8 = 2;
 
 /// Not decided yet: the first key or draw puts the cursor on the text when the draft has a recipient.
 const UNSET: u8 = 255;
 
 impl Compose {
     pub fn new() -> Self {
-        Compose { field: UNSET, case: 0, key: 0, taps: 0, at: 0, pick: 0, pcase: 0, punct: 0, quick: 0, edit: DRAFT, list: false, tail: 0 }
+        Compose { field: UNSET, case: 0, key: 0, taps: 0, at: 0, pick: 0, pcase: 0, punct: 0, quick: 0, edit: DRAFT, list: 0, tail: 0 }
     }
 
     /// Quick message `i` in the editor (TEXT-7).
@@ -256,13 +269,25 @@ impl Compose {
     }
 
     fn resolved(self, store: &impl ChannelStore) -> Self {
-        if self.field != UNSET {
-            return self;
-        }
         let d = store.data().draft();
+        let svc = !self.quick_edit_on() && super::contacts::service(d.to.as_bytes()).is_some();
+        let list = self.list & LISTED | if svc { SVC } else { 0 };
+        if self.field != UNSET {
+            return Compose { list, ..self };
+        }
         let to_set = !d.to.is_empty();
         // a message already begun goes on in lower case; a new one (or after . ? !) starts with a capital
-        Compose { field: to_set as u8, case: if to_set { 0 } else { 1 }, pcase: next_case(d.text.as_bytes(), 2), ..self }
+        Compose { field: to_set as u8, case: if to_set { 0 } else { 1 }, pcase: next_case(d.text.as_bytes(), 2), list, ..self }
+    }
+
+    /// Predictive entry for this message: TEXT-10's choice, but never to a service (APRS-39).
+    fn pred(self, app: &App) -> bool {
+        app.set.predictive && self.list & SVC == 0
+    }
+
+    /// The address book is up (APRS-38): an empty recipient being typed.
+    pub(crate) fn book_up(self, store: &impl ChannelStore) -> bool {
+        self.field == 0 && !self.quick_edit_on() && store.data().draft().to.is_empty()
     }
 
     pub(crate) fn quick_edit_on(self) -> bool {
@@ -279,7 +304,7 @@ impl Compose {
         let keys = app.text;
         let head = text_of(store, me);
         let full = full_of(store, me);
-        let (word, _, drop) = if app.set.predictive && !keys.is_empty() { pending(keys.as_bytes(), head.as_bytes(), me) } else { (Buf::new(), true, 0) };
+        let (word, _, drop) = if me.pred(app) && !keys.is_empty() { pending(keys.as_bytes(), head.as_bytes(), me) } else { (Buf::new(), true, 0) };
         let mut c = Buf::<12>::new();
         let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX);
         let mut all = Buf::<84>::from(&head.as_bytes()[..head.len() - drop]);
@@ -529,7 +554,7 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
         return; // LINK-19: a message is a transmission
     }
     let mut s = c.resolved(store);
-    if s.field == 1 && app.set.predictive && !app.text.is_empty() {
+    if s.field == 1 && s.pred(app) && !app.text.is_empty() {
         let mut t = text_of(store, s);
         if !accept(app, &mut s, &mut t) {
             return; // it said why
@@ -572,10 +597,39 @@ impl View for Compose {
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         let mut s = self.resolved(store);
-        // TEXT-10: hold * switches predictive and multi-tap for message text; the choice is kept.
+        // APRS-38: the address book on an empty recipient.
+        if s.book_up(store) {
+            let d = store.data();
+            let b = super::contacts::Book::new(d);
+            let n = b.len();
+            let at = (s.quick as u16).min(n - 1);
+            let book = match (e.key, e.press) {
+                (Key::Up | Key::Down, Short | Repeat) => Some((at as i32 + if e.key == Key::Up { -1 } else { 1 }).rem_euclid(n as i32) as u16),
+                (Key::Left | Key::Right, Short | Repeat) => Some(b.jump(at, if e.key == Key::Left { -1 } else { 1 })),
+                (Key::Menu, Short) => {
+                    if let Some((_, call, _)) = b.row(d, at) {
+                        let mut to = Buf::<9>::new();
+                        to.set(call.as_bytes());
+                        d.request(Op::Draft(Draft { to, ..d.draft() }));
+                        app.screen = Screen::Compose(Compose { field: 1, case: 0, key: 0, tail: 0, quick: 0, ..s });
+                    }
+                    return;
+                }
+                _ => None,
+            };
+            if let Some(k) = book {
+                app.screen = Screen::Compose(Compose { quick: k as u8, ..s });
+                return;
+            }
+        }
+        // TEXT-10: hold * switches predictive and multi-tap for message text; the choice is kept. A message to a
+        // service stays in multi-tap (APRS-39).
+        if s.field == 1 && s.list & SVC != 0 && (e.key, e.press) == (Key::Star, Long) {
+            return app.show_toast("Multi-tap".as_bytes(), "for services".as_bytes(), false);
+        }
         if s.field == 1 && (e.key, e.press) == (Key::Star, Long) {
             let mut t = text_of(store, s);
-            if app.set.predictive && !accept(app, &mut s, &mut t) {
+            if s.pred(app) && !accept(app, &mut s, &mut t) {
                 app.text.clear();
             }
             put_text(store, s, t);
@@ -588,7 +642,7 @@ impl View for Compose {
         // TEXT-12: ◀▶ move the cursor in the message; a word being predicted goes in first.
         if s.field == 1 && matches!((e.key, e.press), (Key::Left | Key::Right, Short | Repeat)) {
             let mut t = text_of(store, s);
-            if app.set.predictive && !accept(app, &mut s, &mut t) {
+            if s.pred(app) && !accept(app, &mut s, &mut t) {
                 return;
             }
             put_text(store, s, t);
@@ -597,7 +651,7 @@ impl View for Compose {
             app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
             return;
         }
-        if s.field == 1 && app.set.predictive && s.pred_key(app, e, store) {
+        if s.field == 1 && s.pred(app) && s.pred_key(app, e, store) {
             return;
         }
         if let Screen::Compose(c) = app.screen {
@@ -684,7 +738,10 @@ impl View for Compose {
 
     fn knob(self, app: &mut App, d: i32, store: &impl ChannelStore) {
         let s = self.resolved(store);
-        if s.field == 1 && app.set.predictive {
+        if s.book_up(store) {
+            let n = super::contacts::Book::new(store.data()).len() as i32;
+            app.screen = Screen::Compose(Compose { quick: (s.quick as i32 + d).rem_euclid(n) as u8, ..s });
+        } else if s.field == 1 && s.pred(app) {
             s.pred_knob(app, d, store);
         }
     }
@@ -704,7 +761,7 @@ impl View for Compose {
             return me.render(app, lcd, cx);
         }
         app.page(lcd, 0u8);
-        let pred = app.set.predictive;
+        let pred = self.pred(app);
         let keys = app.text;
         let head = text_of(cx.store, self);
         let full = full_of(cx.store, self);
@@ -712,8 +769,9 @@ impl View for Compose {
         // a phrase's short form shows in place of the words it replaces (TEXT-4)
         let text = Buf::<67>::from(&head.as_bytes()[..head.len() - drop]);
         let quick_list = pred && self.field == 1 && full.is_empty() && keys.is_empty() && !self.quick_edit_on();
-        if quick_list != self.list {
-            app.screen = Screen::Compose(Compose { list: quick_list, ..self });
+        let listed = quick_list || self.book_up(cx.store);
+        if listed != (self.list & LISTED != 0) {
+            app.screen = Screen::Compose(Compose { list: self.list & SVC | listed as u8, ..self });
         }
         let pending_tap = self.key != 0;
         // the recipient, or which quick message this is
@@ -729,7 +787,13 @@ impl View for Compose {
                 field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending_tap && self.field == 0, "callsign-SSID".as_bytes());
             }
         }
-        if app.dirty(R_ROW, hash(&(full, self.tail, word, self.field, pending_tap && self.field == 1, quick_list, quick_list.then_some(self.quick)))) {
+        let book = self.book_up(cx.store).then(|| super::contacts::Book::new(cx.store.data()));
+        if let Some(b) = &book {
+            let (y, h) = (86, 120);
+            if app.dirty(R_ROW, hash(&(1u8, self.quick, cx.store.data().version()))) {
+                ferrite_ui::canvas::banded(lcd, 0, y, 240, h + 24, BG, |lcd| book_rows(lcd, cx.store.data(), b, self.quick as u16, y, h));
+            }
+        } else if app.dirty(R_ROW, hash(&(full, self.tail, word, self.field, pending_tap && self.field == 1, quick_list, quick_list.then_some(self.quick)))) {
             let (y, h) = (86, 120);
             ferrite_ui::canvas::banded(lcd, 0, y, 240, h + 24, BG, |lcd| {
                 lcd.text4(8, y + 12, if quick_list { "Quick messages".as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
@@ -757,7 +821,7 @@ impl View for Compose {
             });
         }
         let callsign = cx.store.data().callsign();
-        let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list, head);
+        let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list, head, self.list & SVC);
         if app.dirty(R_NOTE, hash(&strip)) {
             let y = 236;
             ferrite_ui::canvas::banded(lcd, 0, y, 240, 60, BG, |lcd| {
@@ -765,12 +829,19 @@ impl View for Compose {
                     candidate_strip(lcd, y + 2, keys.as_bytes(), head.as_bytes(), self);
                 } else {
                     let mut b = Buf::<40>::new();
-                    if pred && self.field == 1 {
+                    if let (Some(k), 1) = (super::contacts::service(d.to.as_bytes()), self.field) {
+                        // APRS-39: the service's format
+                        let _ = uwrite!(b, "Format: {}", super::contacts::SERVICES[k].2);
+                        lcd.text4(8, y + 13, b.as_bytes(), &UI_12, AMBER, BG);
+                        b.clear();
+                    } else if pred && self.field == 1 {
                         let _ = uwrite!(b, "Words: {}", PCASES[self.pcase as usize % 3]);
                     } else {
                         let _ = uwrite!(b, "Typing: {}", ["abc", "ABC", "123"][self.case as usize % 3]);
                     }
-                    lcd.text4(8, y + 13, b.as_bytes(), &UI_12, SUB, BG);
+                    if !b.is_empty() {
+                        lcd.text4(8, y + 13, b.as_bytes(), &UI_12, SUB, BG);
+                    }
                 }
                 match callsign {
                     Some(c) if !self.quick_edit_on() => {
@@ -790,12 +861,14 @@ impl View for Compose {
     }
 
     fn hints(self, app: &App) -> Hints {
-        let pred = app.set.predictive && self.field == 1;
-        if self.field == 0 {
+        let pred = self.pred(app) && self.field == 1;
+        if self.field == 0 && self.list & LISTED != 0 {
+            Hints::new(&[("Knob", "Pick"), ("OK", "Use"), (ARROWS_LR, "Group")]) // APRS-38
+        } else if self.field == 0 {
             Hints::new(&[("OK", "Next"), ("*", "Case"), ("BACK", "Delete")])
         } else if pred && !app.text.is_empty() {
             Hints::new(&[("Knob", "Word"), ("#", "Space"), ("Hold *", "Spell")]) // TEXT-11
-        } else if pred && self.list {
+        } else if pred && self.list & LISTED != 0 {
             Hints::new(&[("Knob", "Pick"), ("OK", "Insert"), ("BACK", "To")]) // TEXT-6
         } else if self.quick_edit_on() {
             Hints::new(&[("OK", "Keep"), ("Hold *", if pred { "Spell" } else { "Words" }), ("BACK", "Delete")])
@@ -803,6 +876,39 @@ impl View for Compose {
             Hints::new(&[("OK", "Send"), ("#", "Space"), ("Hold *", "Spell")])
         } else {
             Hints::new(&[("OK", "Send"), ("*", "Case"), ("Hold *", "Words")])
+        }
+    }
+}
+
+/// The address book on an empty recipient (APRS-38), in the message box's place: which group and where in it,
+/// then six rows (group, callsign, and a name, age or what a service does), the highlighted one in blue.
+fn book_rows(lcd: &mut impl Panel, d: &dyn crate::data::Data, b: &super::contacts::Book, sel: u16, y: i32, h: i32) {
+    const VIS: u16 = 6;
+    let n = b.len();
+    let sel = sel.min(n - 1);
+    let (g, from, len) = b.group(sel);
+    lcd.text4(8, y + 12, "Address book".as_bytes(), &UI_12, SUB, BG);
+    let mut c = Buf::<20>::new();
+    let _ = uwrite!(c, "{}/{} {}", sel - from + 1, len, super::contacts::GROUPS[g]);
+    let cw = text4_width(c.as_bytes(), &UI_12);
+    lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
+    lcd.fill_r(8, y + 18, 224, h, 2, FOCUS);
+    lcd.frame_r(8, y + 18, 224, h, 2, BLUE);
+    let top = sel.saturating_sub(VIS - 1).min(n.saturating_sub(VIS));
+    for (k, i) in (top..n).take(VIS as usize).enumerate() {
+        let Some((g, call, sub)) = b.row(d, i) else { continue };
+        let ry = y + 22 + k as i32 * 19;
+        let on = i == sel;
+        let (fg, dim, rb) = if on { (BLUE_FG, BLUE_FG, BLUE) } else { (TEXT, SUB, FOCUS) };
+        if on {
+            lcd.fill_r(10, ry, 220, 19, 1, BLUE);
+        }
+        lcd.text4(14, ry + 14, ["Saved", "Recent", "Heard", "Svc"][g].as_bytes(), &UI_12, dim, rb);
+        lcd.text4(64, ry + 14, call.as_bytes(), &UI_12B, fg, rb);
+        let cx = text4_width(call.as_bytes(), &UI_12B);
+        let sw = text4_width(sub.as_bytes(), &UI_12);
+        if 64 + cx + 8 + sw <= 226 {
+            lcd.text4(226 - sw, ry + 14, sub.as_bytes(), &UI_12, dim, rb);
         }
     }
 }

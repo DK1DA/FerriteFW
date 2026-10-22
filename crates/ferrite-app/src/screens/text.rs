@@ -47,6 +47,9 @@ pub enum TextFor {
     Clock,
     /// 0 5 6 2: a custom APRS path (APRS-26), capitals and digits, # for the comma.
     AprsPath,
+    /// A new contact's callsign, then a contact's name (APRS-37): the App keeps the callsign between them.
+    ContactCall,
+    ContactName,
 }
 
 /// What a text takes: any text, a channel name (the name set, CHAN-31), capitals and digits (a callsign, a grid
@@ -73,13 +76,16 @@ impl TextFor {
             TextFor::Capcode => "Pager capcode",
             TextFor::Clock => "Date and time",
             TextFor::AprsPath => "APRS path",
+            TextFor::ContactCall => "Contact callsign",
+            TextFor::ContactName => "Contact name",
         }
     }
 
     pub fn max(self) -> usize {
         match self {
             TextFor::Callsign => 10,
-            TextFor::Preset(_) => 12,
+            TextFor::Preset(_) | TextFor::ContactName => 12,
+            TextFor::ContactCall => 9,
             TextFor::DtmfName(_) => 10,
             TextFor::GridFixed | TextFor::GridWaypoint => 6,
             TextFor::Capcode => 7,
@@ -109,15 +115,17 @@ impl TextFor {
                 b
             }
             TextFor::AprsPath => Buf::from(app.aprs_custom_path()),
+            TextFor::ContactCall => Buf::from(app.contact_call.as_bytes()),
+            TextFor::ContactName => store.data().contact_of(app.contact_call.as_bytes()).map_or(Buf::new(), |c| Buf::from(c.name.as_bytes())),
         }
     }
 
     fn kind(self) -> Kind {
         match self {
-            TextFor::Callsign | TextFor::GridFixed | TextFor::GridWaypoint => Kind::Caps,
+            TextFor::Callsign | TextFor::GridFixed | TextFor::GridWaypoint | TextFor::ContactCall => Kind::Caps,
             TextFor::Capcode | TextFor::Clock => Kind::Digits,
             TextFor::AprsPath => Kind::Path,
-            TextFor::ChannelName | TextFor::Channel(_) | TextFor::SaveName => Kind::Name,
+            TextFor::ChannelName | TextFor::Channel(_) | TextFor::SaveName | TextFor::ContactName => Kind::Name,
             _ => Kind::Any,
         }
     }
@@ -328,6 +336,7 @@ impl View for Text {
 fn keep(to: TextFor, app: &mut App, store: &impl ChannelStore) {
     let t = app.text;
     match to {
+        TextFor::ContactCall | TextFor::ContactName => return super::contacts::typed(app, to, t.as_bytes(), store),
         TextFor::ChannelName => super::chedit::edit(app, |c| c.set_name(t.as_bytes())),
         TextFor::Channel(n) => {
             if let Some((mut c, _)) = store.by_num(n) {

@@ -132,6 +132,9 @@ impl Aprs {
                     msgs::rejected(app, peer.as_bytes()); // APRS-34
                 }
             }
+            if let Some(by) = rx.echo {
+                msgs::digipeated(app, by.as_bytes()); // APRS-36
+            }
             if rx.changed || rx.state.is_some() {
                 extra.changed();
             }

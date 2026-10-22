@@ -24,6 +24,16 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
+/// GPS-20: station `i`'s last position as a waypoint named with its callsign.
+pub(crate) fn save_waypoint(app: &mut App, d: &dyn Data, i: u16) {
+    match d.station(i) {
+        Some(s) if s.pos.is_some() && d.request(Op::SaveStation(i)) => app.show_toast(s.call.as_bytes(), b"saved as a waypoint", false),
+        Some(s) if s.pos.is_none() => app.show_toast(s.call.as_bytes(), b"has no position", false),
+        Some(s) => app.show_toast(s.call.as_bytes(), b"not saved", false),
+        None => {}
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Aprs {
     pub cur: Cursor,
@@ -35,7 +45,7 @@ const ALL: fn(u16) -> bool = |_| true;
 
 impl View for Aprs {
     fn options(self, app: &mut App) -> bool {
-        app.open_screen(Of::Heard.screen());
+        app.open_screen(if self.station { Of::Station } else { Of::Heard }.screen());
         true
     }
 
@@ -67,12 +77,7 @@ impl View for Aprs {
                     app.open(Dest::Compose);
                 }
             }
-            (Key::Hash, Short) if self.station => match st {
-                Some(s) if s.pos.is_some() && d.request(Op::SaveStation(self.cur.sel)) => app.show_toast(s.call.as_bytes(), b"saved as a waypoint", false),
-                Some(s) if s.pos.is_none() => app.show_toast(s.call.as_bytes(), b"has no position", false),
-                Some(s) => app.show_toast(s.call.as_bytes(), b"not saved", false),
-                None => {}
-            },
+            (Key::Hash, Short) if self.station => save_waypoint(app, d, self.cur.sel),
             (Key::Exit, Short) if self.station => app.screen = Screen::Aprs(Aprs { station: false, ..self }),
             (Key::Exit, Short) => app.back(),
             _ => {}

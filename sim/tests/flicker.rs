@@ -222,7 +222,8 @@ const BUDGET: &[(&str, u64)] = &[
     ("A13 Location codes", 37000),
     ("A14 DTMF dialer", 10000),
     ("A15 DTMF memories", 37000),
-    ("A16 Compose message", 138000),
+    // The address book on the empty recipient redraws when a message arrives (its Recent group; decision 226).
+    ("A16 Compose message", 146000),
     ("A16a Quick messages", 90000),
     ("A17 PIN entry", 10000),
     ("A18 Confirm", 10000),
@@ -246,6 +247,7 @@ const BUDGET: &[(&str, u64)] = &[
     ("C3 APRS heard", 90000),
     ("C4 APRS station", 293000),
     ("C5 APRS messages", 87000),
+    ("C5a Contacts", 9300),
     ("C6 APRS message", 306000),
     ("C8 Channel browser", 68000),
     // CHAN-27 (decision 155): each move redraws two lines and the preview (its header, four rows and footer, about

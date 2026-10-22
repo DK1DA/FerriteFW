@@ -306,6 +306,8 @@ pub mod what {
     pub const PRESET: u8 = 4;
     /// The APRS settings, one record (index 0; LINK-43): MENU 0 5's that aren't in the settings record.
     pub const APRS: u8 = 5;
+    /// An APRS contact, in callsign order (APRS-42): written by callsign whatever the index.
+    pub const CONTACT: u8 = 6;
 }
 
 /// The first byte of every answer.

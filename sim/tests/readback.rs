@@ -137,13 +137,19 @@ fn setup_summary_readback() {
     drawn(&mut r, "Region");
 }
 
-/// TEXT-5: compose's readback: the count against the 67 APRS allows, as drawn.
+/// TEXT-5: compose's readback: the count against the 67 APRS allows, as drawn; APRS-38: before that, the
+/// address book on the empty recipient, its highlighted callsign drawn, and OK taking it.
 #[test]
 fn compose_readback() {
     let mut r = Radio::new();
     r.menu("0 5 2").wait(300);
     r.press(common::key("HASH")).wait(300);
+    let b = line(&r, "book");
+    let sel = field(&b, "sel");
+    drawn(&mut r, &sel);
+    r.press(common::key("MENU")).wait(300);
     let l = line(&r, "compose");
+    assert_eq!(field(&l, "to"), sel, "{l}");
     let count = field(&l, "count");
     assert!(count.ends_with("/67"), "{l}");
     drawn(&mut r, &count);

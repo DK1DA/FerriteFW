@@ -182,7 +182,7 @@ impl AprsSim {
             Some(l) => (l.at_s + m as u32 * 60).saturating_sub(self.now_s()),
             None => 0,
         });
-        Beacon { waiting: self.waiting.get(), next_s: next_s.filter(|_| self.on_since.get().is_some()) }
+        Beacon { waiting: self.waiting.get(), next_s: next_s.filter(|_| self.on_since.get().is_some()), ..Beacon::default() }
     }
 
     /// A second of the APRS task: `on` is APRS mode, `relay_ok` whether slot C can transmit with the band

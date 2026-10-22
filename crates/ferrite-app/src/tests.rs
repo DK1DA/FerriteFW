@@ -145,8 +145,9 @@ fn ram_is_small() {
     // sent again when the setting's differs), 8 with padding, to 1440; the status bar as drawn holds the callsign
     // shown in the clock's place without a time (SBAR-2: 6 characters and a length), 16 with padding, to 1456;
     // Dry TX (TX-48: the switch, its bar mark, and 0 8 9's list's remembered row) 8 with padding, to 1464; each
-    // kept hit's stop start for its length (SCAN-23.1: 2 bytes, 4 with padding, x16), to 1528
-    assert!(n <= 1528, "App is {n} bytes");
+    // kept hit's stop start for its length (SCAN-23.1: 2 bytes, 4 with padding, x16), to 1528; the contact whose name
+    // is being typed (APRS-37: a callsign, 10 bytes), 16 with padding, to 1544
+    assert!(n <= 1544, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -642,7 +643,7 @@ fn every_destination_draws() {
         }
     }
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
-    assert_eq!(ids.len(), 62, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104)");
+    assert_eq!(ids.len(), 63, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104; C5a contacts: decision 226)");
 }
 
 mod group_a;
