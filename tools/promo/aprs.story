@@ -1,5 +1,5 @@
 # Ferrite APRS, recorded from the simulator (the firmware's own screens). Format: see preview.story.
-# The decoder numbers are docs/showcase/aprs-decoder.md's (Oct 21, 2026): copy them from there when they change,
+# The decoder numbers are docs/showcase/aprs-decoder.md's WA8LMF rows (Oct 21, 2026; the radio's receive path): copy them from there when they change,
 # never estimate them.
 
 kind: intro
@@ -134,9 +134,9 @@ script:
   wait 1500ms
 ---
 kind: intro
-title: 393 vs 353 packets
-left: On a 45-minute off-air recording, Ferrite's decoder (in 1.3 KB of RAM) against Dire Wolf with its default settings. 386 vs 367 on a second.
-seconds: 6
+title: 1,005 and 997 packets
+left: The WA8LMF TNC Test CD, tracks 1 and 2, through the radio's own receive path, in 1.3 KB of RAM. The KPC-3+ hardware TNC's published counts: 989 and 925.
+seconds: 7
 ---
 kind: outro
 title: ferritefw.dev
