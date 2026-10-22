@@ -275,6 +275,8 @@ pub struct App {
     /// this visit to the menu: going home forgets them, so the menu starts on row 1 again.
     pub(crate) group_rows: [u8; screens::groups::MEMO_BYTES],
     inbox: u8,
+    /// The event log's unread entries (INBOX-7): the log's own count, not the mail badge's (INBOX-3.1).
+    pub(crate) log_unread: u8,
     /// An unread alert (the bar's alert mark); [`ALERT_WAIT`]: one came in while the crossband repeater ran,
     /// shown as a banner, and its screen opens when the repeater stops (XB-19).
     alert: u8,
@@ -420,6 +422,7 @@ impl App {
             locked: false,
             group_rows: [0; screens::groups::MEMO_BYTES],
             inbox: 0,
+            log_unread: 0,
             alert: 0,
             vox_on: false,
             dry_tx: false,
@@ -758,14 +761,20 @@ impl App {
         if self.set.popups {
             self.notify(head, body, false);
         } else {
-            self.inbox = self.inbox.saturating_add(1);
+            self.log_unread = self.log_unread.saturating_add(1);
         }
     }
 
-    /// A message, decode or alert arrived: a toast and the inbox count (SBAR-6); an alert also opens the alert
-    /// screen, with `body` as its event and `head` as its originator.
-    pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
+    /// A message to us arrived (APRS-32): the mail badge's count (INBOX-3.1) and its log entry's, with a toast.
+    pub fn notify_message(&mut self, head: &[u8], body: &[u8]) {
         self.inbox = self.inbox.saturating_add(1);
+        self.notify(head, body, false);
+    }
+
+    /// A decode, arrival or alert was logged: a toast and the log's unread count (SBAR-6); an alert also opens the
+    /// alert screen, with `body` as its event and `head` as its originator.
+    pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
+        self.log_unread = self.log_unread.saturating_add(1);
         self.alert |= alert as u8 * ALERT_UNREAD;
         self.show_toast(head, body, true);
         if alert {
@@ -792,15 +801,17 @@ impl App {
 
     /// An alert with everything the decoder knows (WX-5): over any screen, flashing, until OK (WX-4, WX-6).
     pub fn raise_alert(&mut self, a: &screens::alert::AlertInfo) {
-        self.inbox = self.inbox.saturating_add(1);
+        self.log_unread = self.log_unread.saturating_add(1);
         self.alert |= ALERT_UNREAD;
         *self.alert_info = *a;
         self.open_alert();
     }
 
-    /// The inbox count at power on: the unread events the log kept (INBOX-3, INBOX-7).
-    pub fn set_inbox(&mut self, unread: u16) {
-        self.inbox = unread.min(255) as u8;
+    /// The counts at power on: unread messages to us (the mail badge, INBOX-3.1) and the log's unread entries
+    /// (INBOX-7).
+    pub fn set_inbox(&mut self, messages: u16, log: u16) {
+        self.inbox = messages.min(255) as u8;
+        self.log_unread = log.min(255) as u8;
     }
 
     /// A SAME header decoded on a slot (WX-4, WX-5): the alert screen over any screen, with its event, areas,
@@ -821,7 +832,7 @@ impl App {
             }
         }
         if same::is_test(&h.event) {
-            self.inbox = self.inbox.saturating_add(1);
+            self.log_unread = self.log_unread.saturating_add(1);
             self.show_toast(b"SAME test", name.as_bytes(), true);
             return false;
         }

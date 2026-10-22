@@ -135,7 +135,7 @@ fn menu_paths_reach_the_lists() {
 #[test]
 fn event_log_reads_filters_and_goes() {
     let mut t = T::new();
-    t.app.inbox = 3;
+    t.app.log_unread = 3;
     t.open(Dest::EventLog);
     let unread = |s: &Sample| (0..s.events()).filter(|&i| s.event(i).unwrap().unread).count();
     assert_eq!(unread(&t.s), 3);
@@ -143,7 +143,7 @@ fn event_log_reads_filters_and_goes() {
     t.tap(Key::Menu);
     assert_eq!(t.name(), "Event detail");
     assert_eq!(unread(&t.s), 2, "opening it reads it");
-    assert_eq!(t.app.inbox, 2);
+    assert_eq!(t.app.log_unread, 2);
     t.tap(Key::Exit);
     assert_eq!(t.name(), "Event log");
     // INBOX-9: filter by source; ▲▼ stay inside it

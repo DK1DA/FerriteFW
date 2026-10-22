@@ -135,6 +135,7 @@ impl Data for RadioData {
                 let d = self.draft.get();
                 self.aprs.send(d.to.as_bytes(), d.text.as_bytes());
             }
+            Op::BeaconNow if !crate::data::ax25_call_ok(self.callsign.get().as_bytes()) => return false, // SETUP-13
             Op::BeaconNow => self.aprs.beacon_now(),
             Op::AfterVoice => self.aprs.after_voice(),
             Op::ClearHeard => self.aprs.clear_heard(),
@@ -185,5 +186,17 @@ mod tests {
         let mut out = [0u8; crate::aprs_live::FRAME_MAX];
         let t = d.aprs.tick(0, crate::aprs_live::Sending::All, true, b"VE3XYZ", d.fix(), &d.cfg(), &mut out);
         assert_eq!(t.what, "Message");
+    }
+
+    /// SETUP-13.1: with a callsign over 6 (kept for CW ID, SETUP-13), "Beacon now" is refused up front, not
+    /// accepted and dropped by the APRS task; an SSID isn't counted.
+    #[test]
+    fn long_callsign_refuses_beacon_now() {
+        let d = RadioData::new();
+        d.set_callsign(b"VE7TEST-7");
+        assert!(!d.request(Op::BeaconNow));
+        d.set_callsign(b"VE7TES-7");
+        assert!(d.request(Op::BeaconNow));
+        assert!(!crate::data::ax25_call_ok(b"") && crate::data::ax25_call_ok(b"VE7TES") && !crate::data::ax25_call_ok(b"VE7TEST"));
     }
 }

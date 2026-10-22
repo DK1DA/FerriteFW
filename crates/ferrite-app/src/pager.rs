@@ -80,17 +80,17 @@ mod tests {
         t.app.set.pocsag_on = true;
         let mut live = LiveAll::default();
         live.slots[2].freq = 43_998_750;
-        let before = t.app.inbox;
+        let before = (t.app.inbox, t.app.log_unread);
         let e = t.app.pager_hit(&page(1_234_567, b"MEETING MOVED TO 1930"), &live).expect("logged");
         assert_eq!((e.id, e.x, e.y, e.slot, e.freq), (1_234_567, 1200, 3, 2, 43_998_750));
         assert_eq!(e.text.as_bytes(), b"MEETING MOVED TO 1930");
-        assert_eq!(t.app.inbox, before + 1);
+        assert_eq!((t.app.inbox, t.app.log_unread), (before.0, before.1 + 1), "INBOX-3.1: the log's count, not the mail badge's");
         t.app.set.pocsag_cap = 42;
         assert!(t.app.pager_hit(&page(1_234_567, b"NOT FOR US"), &live).is_none(), "filtered");
         assert!(t.app.pager_hit(&page(42, b""), &live).is_some_and(|e| e.text.as_bytes() == b"(tone only)"));
     }
 
-    /// DEC-7: with Popups (0 4 7) off a page still counts in the inbox and is logged, but shows no toast.
+    /// DEC-7: with Popups (0 4 7) off a page still counts in the log's unread and is logged, but shows no toast.
     #[test]
     fn popups_off_logs_without_a_toast() {
         let mut t = Harness { app: App::new(crate::tests::set(), crate::tests::alert()) };
@@ -98,9 +98,9 @@ mod tests {
         t.app.set.popups = false;
         let mut live = LiveAll::default();
         live.slots[0].freq = 43_998_750;
-        let before = t.app.inbox;
+        let before = (t.app.inbox, t.app.log_unread);
         assert!(t.app.pager_hit(&page(7, b"QUIET"), &live).is_some(), "still logged");
-        assert_eq!(t.app.inbox, before + 1);
+        assert_eq!((t.app.inbox, t.app.log_unread), (before.0, before.1 + 1), "INBOX-3.1: the log's count, not the mail badge's");
         assert!(t.app.toast.is_none(), "no toast with Popups off");
         t.app.set.popups = true;
         t.app.pager_hit(&page(7, b"LOUD"), &live);

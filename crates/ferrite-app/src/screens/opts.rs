@@ -189,11 +189,12 @@ impl View for Options {
                     app.back();
                     if store.data().request(op) {
                         if op == Op::ReadAll {
-                            app.inbox = 0;
+                            app.log_unread = 0; // the log's: the mail badge counts messages (INBOX-3.1)
                         }
                         app.show_toast(label.as_bytes(), b"done", false);
                     } else {
                         let why: &[u8] = match op {
+                            Op::BeaconNow if !app.set.callsign.as_bytes().is_empty() => b"callsign over 6", // SETUP-13.1
                             Op::BeaconNow => b"set a callsign first", // APRS-8
                             Op::MarkHere => b"needs a GPS fix",
                             _ => b"not possible now",

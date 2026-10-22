@@ -377,6 +377,12 @@ pub enum Op {
 
 /// The records, read one at a time. Every method has a default (nothing there), so an owner that doesn't
 /// exist yet costs nothing.
+/// SETUP-13: the callsign APRS sends as fits an AX.25 address: 1-6 characters before the SSID (a longer one, kept
+/// for CW ID, sends nothing, so beacons and messages are refused up front rather than queued and dropped).
+pub fn ax25_call_ok(call: &[u8]) -> bool {
+    (1..=crate::screens::transmit::AX25_CALL).contains(&call.split(|&c| c == b'-').next().map_or(0, <[u8]>::len))
+}
+
 pub trait Data {
     /// Changes whenever anything here changes: lists redraw only when it or their own position moved.
     fn version(&self) -> u32 {

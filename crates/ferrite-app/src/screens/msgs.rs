@@ -107,7 +107,8 @@ impl View for Msgs {
             (Key::Menu, Short) if !self.open && m.is_some() => {
                 let unread = m.is_some_and(|m| m.inbound && m.state == MsgState::Unread);
                 if d.request(Op::MessageRead(self.cur.sel)) && unread {
-                    app.inbox = app.inbox.saturating_sub(1); // INBOX-7.1: its log entry read with it
+                    // INBOX-3.1: one message fewer; INBOX-7.1: its log entry read with it.
+                    (app.inbox, app.log_unread) = (app.inbox.saturating_sub(1), app.log_unread.saturating_sub(1));
                 }
                 app.screen = Screen::Msgs(Msgs { open: true, ..self });
             }
@@ -128,7 +129,7 @@ impl View for Msgs {
         if self.open && cur.sel != self.cur.sel {
             let unread = store.data().message(cur.sel).is_some_and(|m| m.inbound && m.state == MsgState::Unread);
             if store.data().request(Op::MessageRead(cur.sel)) && unread {
-                app.inbox = app.inbox.saturating_sub(1); // INBOX-7.1
+                (app.inbox, app.log_unread) = (app.inbox.saturating_sub(1), app.log_unread.saturating_sub(1)); // INBOX-3.1, INBOX-7.1
             }
         }
         app.screen = Screen::Msgs(Msgs { cur, ..self });
@@ -580,6 +581,9 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     // APRS-8: nothing sends without a callsign.
     if data.callsign().is_none() {
         return app.show_toast("No callsign".as_bytes(), "MENU 0 8 7 1".as_bytes(), false);
+    }
+    if !data.callsign().is_some_and(|c| crate::data::ax25_call_ok(c.as_bytes())) {
+        return app.show_toast("Callsign over 6".as_bytes(), "no APRS".as_bytes(), false); // SETUP-13.1
     }
     let text = full_of(store, s);
     if d.to.is_empty() || text.is_empty() {

@@ -471,7 +471,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if found {
             app.restore_state(&mut ferrite_app::persist::SliceSource(&buf[..len]), self);
         }
-        app.set_inbox((0..self.events.len()).filter(|&i| self.event(i).is_some_and(|e| e.unread)).count() as u16);
+        // INBOX-3.1: the mail badge counts unread messages to us; the log keeps its own unread count.
+        let mail = (0..self.msgs.len()).filter(|&i| self.message(i).is_some_and(|m| m.inbound && m.state == MsgState::Unread)).count();
+        app.set_inbox(mail as u16, (0..self.events.len()).filter(|&i| self.event(i).is_some_and(|e| e.unread)).count() as u16);
         self.mark_saved(app);
         found
     }
@@ -1145,7 +1147,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::Send => {
                 let d = self.draft.get();
                 // APRS-8: a callsign to send as, someone to send to, something to say.
-                let ok = self.extra.callsign().is_some() && !d.to.is_empty() && !d.text.is_empty();
+                let ok = self.extra.callsign().is_some_and(|c| ferrite_app::data::ax25_call_ok(c.as_bytes())) && !d.to.is_empty() && !d.text.is_empty(); // SETUP-13
                 if ok && self.message_in(false, d.to.as_bytes(), d.text.as_bytes(), 0) {
                     // The APRS task tries it (the simulator's sends it from its own copy of the draft).
                     self.extra.request(Op::Draft(d));

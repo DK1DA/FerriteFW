@@ -79,7 +79,7 @@ impl View for Log {
             (Key::Left | Key::Right, Short | Repeat) => self.knob(app, if e.key == Key::Right { 1 } else { -1 }, store),
             (Key::Menu, Short) if !self.detail && sel.is_some() => {
                 d.request(Op::Read(self.cur.sel));
-                app.inbox = app.inbox.saturating_sub(sel.is_some_and(|e| e.unread) as u8);
+                app.log_unread = app.log_unread.saturating_sub(sel.is_some_and(|e| e.unread) as u8);
                 app.screen = Screen::Log(Log { detail: true, ..self });
             }
             // INBOX-10: Go

@@ -37,7 +37,7 @@ fn dark_and_wake() {
 }
 
 /// LEDs: red TX, green RX; dark: the heartbeat in the battery's colour; DISP-21.1: red, green, red while something is
-/// unread, one colour at a time.
+/// unread, one colour at a time; DISP-21.2: each flash 120 ms.
 #[test]
 fn led_heartbeat() {
     let mut t = T::new();
@@ -87,6 +87,13 @@ fn led_heartbeat() {
         t.app.tick(t.t, &t.live, &store());
     }
     assert_eq!(seen, [(true, false), (false, true), (true, false)], "red, green, red");
+    let lit = (0..200).filter(|_| {
+        let l = t.app.leds(&t.live, &dev(50, false));
+        t.t += 10;
+        t.app.tick(t.t, &t.live, &store());
+        l.red || l.green
+    });
+    assert_eq!(lit.count(), 36, "DISP-21.2: three 120 ms flashes in 2 s");
     t.app.set.leds = 1;
     assert_eq!(count(&mut t, dev(90, false), 5000).0, 0, "RX and TX only: no heartbeat");
 }

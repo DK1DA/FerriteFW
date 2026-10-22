@@ -920,7 +920,7 @@ impl SimCore {
         let live = self.live();
         let app = &mut self.app;
         match e {
-            Event::Message if live => app.notify(b"VE3KPW-9", b"On my way", false),
+            Event::Message if live => app.notify_message(b"VE3KPW-9", b"On my way"),
             Event::Alert if live => {
                 // The fake decoder's SAME warning now, as if heard on slot C (it also comes by itself 8 s after a
                 // slot settles on a weather channel).

@@ -170,8 +170,8 @@ pub(crate) fn group_value(app: &App, channels: u16, dev: &Device, i: usize) -> B
             let _ = uwrite!(v, "{} used", channels);
         }
         3 => v.set(b"Off"), // no decoder running (a short word: the name is long)
-        4 if app.inbox > 0 => {
-            let _ = uwrite!(v, "{} new", app.inbox);
+        4 if app.log_unread > 0 => {
+            let _ = uwrite!(v, "{} new", app.log_unread);
         }
         5 => match dev.gps {
             GpsState::Off => v.set(b"GPS off"),

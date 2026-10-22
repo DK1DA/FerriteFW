@@ -139,7 +139,7 @@ impl Aprs {
             }
             // APRS-32: a retry heard again after a power cycle is in the store already (acked all the same).
             if let Some((from, text)) = rx.inbound.filter(|(f, t)| !store.message_heard(f.as_bytes(), rx.inbound_id.as_bytes(), t.as_bytes())) {
-                app.notify(from.as_bytes(), text.as_bytes(), false);
+                app.notify_message(from.as_bytes(), text.as_bytes()); // INBOX-3.1
                 store.message_to_us(from.as_bytes(), text.as_bytes(), rx.inbound_id.as_bytes());
                 store.log(&log_event(app.aprs_freq(), from.as_bytes(), text.as_bytes())); // INBOX-6
             }

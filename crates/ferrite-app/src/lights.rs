@@ -39,11 +39,11 @@ const SWALLOW: u8 = 8;
 const TX_DARK: u8 = 16;
 
 /// A flash's length, and the two heartbeat periods.
-const FLASH_MS: u32 = 80;
+const FLASH_MS: u32 = 120; // DISP-21.2: 80 ms looked dim (Alex, Oct 22, 2026)
 const BEAT_MS: u32 = 5000;
 const UNREAD_MS: u32 = 2000;
 /// The unread pattern's flashes (red, green, red) start this far apart: a gap of a flash's length between them.
-const NEXT_FLASH_MS: u32 = 160;
+const NEXT_FLASH_MS: u32 = 240;
 /// Auto power off warns this long before.
 const OFF_WARN_MS: u32 = 10_000;
 /// "On key press": the keypad stays lit this long after a key.
@@ -128,7 +128,7 @@ impl App {
             (true, true)
         };
         let unread = [(true, false), (false, true), (true, false)];
-        let (period, flashes): (u32, &[(bool, bool)]) = if self.inbox > 0 { (UNREAD_MS, &unread) } else { (BEAT_MS, &[(red, green)][..]) };
+        let (period, flashes): (u32, &[(bool, bool)]) = if self.inbox > 0 || self.alert & crate::ALERT_UNREAD != 0 { (UNREAD_MS, &unread) } else { (BEAT_MS, &[(red, green)][..]) };
         let t = self.now % period;
         let mut next_ms = period - t;
         for (i, &(r, g)) in flashes.iter().enumerate() {

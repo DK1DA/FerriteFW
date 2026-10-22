@@ -1201,8 +1201,8 @@ impl Group {
                     [2, 1] => {
                         let _ = uwrite!(v, "{} channels", store.count());
                     }
-                    [4, 1] if app.inbox > 0 => {
-                        let _ = uwrite!(v, "{} new", app.inbox);
+                    [4, 1] if app.log_unread > 0 => {
+                        let _ = uwrite!(v, "{} new", app.log_unread);
                     }
                     [5, 4] => v.set(b"no callsign"),
                     _ => v.set(e.value().as_bytes()),

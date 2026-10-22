@@ -221,15 +221,15 @@ fn aprs_heard_list() {
     r.run("menu 0 5 1; expect screen \"APRS heard\"; expect text \"newest first\"; expect text \"VE3KPW-9\"");
 }
 
-/// A message arrives: a toast, the inbox count goes up, and with the screen dark the LED double-flashes every
-/// 2 s while it's unread (APRS-6, INBOX-1, decision 63's heartbeat).
+/// A message arrives: a toast, the inbox count (unread messages to us, INBOX-3.1) goes up, and with the screen dark
+/// the LEDs flash red, green, red every 2 s while it's unread (APRS-6, INBOX-1, DISP-21.1).
 #[test]
 fn message_and_led_double_flash() {
     let mut r = Radio::new();
-    r.run("menu 0 0; expect text \"Inbox 3 unread\"; home");
+    r.run("menu 0 0; expect text \"Inbox 1 unread\"; home");
     r.event(Event::Message);
     r.expect_text("VE3KPW-9");
-    r.run("menu 0 0; expect text \"Inbox 4 unread\"; home");
+    r.run("menu 0 0; expect text \"Inbox 2 unread\"; home");
     r.event(Event::ScreenOff).wait(500);
     assert!(r.sim.dark());
     // Over 2 s: two short green flashes 250 ms apart.
@@ -414,7 +414,7 @@ fn pocsag_page_with_popups() {
     r.run("menu 0 4 2 1; press OK; expect text \"Decode On\"");
     r.run("home; press SLOT; press VM; type 439987; press OK; wait 1s");
     r.run("wait 21s; expect text \"Pager\"");
-    r.run("menu 0 0; expect text \"Inbox 4 unread\"");
+    r.run("menu 0 0; expect text \"Inbox 1 unread\""); // INBOX-3.1: a page is the log's, not the mail badge's
 }
 
 /// Popups off: a page still goes to the inbox, but no toast shows (DEC-7).
@@ -427,7 +427,7 @@ fn pocsag_page_without_popups() {
         r.wait(1000);
         r.expect_no_text("Pager");
     }
-    r.run("menu 0 0; expect text \"Inbox 4 unread\"");
+    r.run("menu 0 0; expect text \"Inbox 1 unread\""); // INBOX-3.1
 }
 
 /// The crossband repeater refuses to start with both sides on one chip, and says why (XB-2).

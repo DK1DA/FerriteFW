@@ -165,7 +165,7 @@ fn main() {
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "status", scale);
     press(&mut app, Key::Exit, 100, &mut t);
-    app.notify(b"VE3KPW-9", b"On my way", false);
+    app.notify_message(b"VE3KPW-9", b"On my way");
     run(&mut app, &mut fb, t + 100, &mut t);
     save(&fb, "toast", scale);
     run(&mut app, &mut fb, t + 3500, &mut t); // the toast times out
