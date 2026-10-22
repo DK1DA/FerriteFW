@@ -4,7 +4,7 @@
 
 kind: intro
 title: Low Power Mode
-left: When the battery matters more than the features.
+left: When the battery matters more than features.
 seconds: 4
 music: music/chiptune3.wav
 ---
