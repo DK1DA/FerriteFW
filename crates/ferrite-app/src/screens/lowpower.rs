@@ -33,10 +33,24 @@ const LP_RED: u16 = rgb565(0xFF, 0x50, 0x50);
 const TOP_H: i32 = 26;
 const BOTTOM_Y: i32 = 294;
 const SIDE_W: i32 = 4;
-/// The meter: 8 blocks of 18 x 16, 4 apart (16 tall to read at the mode's dim backlight).
+/// The text column: 14 to 226.
+const X: i32 = 14;
+const W: i32 = 212;
+/// The rows (y): the head line's box and baseline, the frequency's box and baseline, the settings line's box and
+/// baseline, then the S-meter region (its text's baseline, the blocks' top). Each box is filled before it is
+/// drawn, and the frequency's and settings line's boxes meet, so the leaving box going leaves nothing behind.
+const HEAD: (i32, i32, i32) = (34, 64, 56);
+const FREQ: (i32, i32, i32) = (64, 130, 120);
+const INFO: (i32, i32, i32) = (130, 172, 158);
+const SUB: (i32, i32) = (172, 270);
+const SUB_BASE: i32 = 210;
+/// The meter: 8 blocks of 23 x 32, 4 apart, across the text column (big to read at the mode's dim backlight).
 const BLOCKS: i32 = 8;
-/// The leaving box (over the frequency and settings line).
-const BOX: (i32, i32, i32, i32) = (16, 92, 208, 66);
+const BLOCK: (i32, i32, i32) = (23, 32, 27); // width, height, pitch
+const METER_Y: i32 = 228;
+/// The leaving box: over the frequency and the settings line, inside their boxes (redrawn when it goes), the
+/// whole inside's width so no digit shows past it.
+const BOX: (i32, i32, i32, i32) = (8, 74, 224, 96);
 
 /// Low Power Mode's home, on the panel.
 pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
@@ -70,21 +84,22 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     let mut h = Buf::<32>::new();
     app.head_text(a, live, cx.store, &mut h);
     if app.dirty(R_HEAD, hash(&(&h, keyed, rx))) || drew {
-        lcd.fill(SIDE_W, 34, 240 - 2 * SIDE_W, 22, LP_BLACK);
-        let tag_w = if keyed || rx { 40 } else { 0 };
-        w::field(lcd, 14, 212 - tag_w, 36, 54, 50, Align::Left, w::fit(h.as_bytes(), &UI_12, 212 - tag_w), &UI_12, LP_SUB, LP_BLACK);
+        lcd.fill(SIDE_W, HEAD.0, 240 - 2 * SIDE_W, HEAD.1 - HEAD.0, LP_BLACK);
+        let tag_w = if keyed || rx { 44 } else { 0 };
+        let name = w::fit(h.as_bytes(), &UI_15B, W - tag_w);
+        w::field(lcd, X, W - tag_w, HEAD.0, HEAD.1, HEAD.2, Align::Left, name, &UI_15B, LP_SUB, LP_BLACK);
         if keyed {
-            filled_tag(lcd, 226, 37, b"TX", LP_RED);
+            filled_tag(lcd, X + W, HEAD.2, b"TX", LP_RED);
         } else if rx {
-            filled_tag(lcd, 226, 37, b"RX", LP_GREEN);
+            filled_tag(lcd, X + W, HEAD.2, b"RX", LP_GREEN);
         }
         drew = true;
     }
     // The frequency (the transmit one while keyed), big.
     let f = if keyed { app.tuned_cfg(a).tx_of(app.tuned_freq(a)) } else { app.shown_freq(a, live) };
     if app.dirty(R_FREQ, hash(&f)) || drew {
-        lcd.fill(SIDE_W, 58, 240 - 2 * SIDE_W, 70, LP_BLACK);
-        w::freq(lcd, 10, 232, 122, f, &DIG_46, &DIG_28, LP_TEXT, LP_SUB, LP_BLACK);
+        lcd.fill(SIDE_W, FREQ.0, 240 - 2 * SIDE_W, FREQ.1 - FREQ.0, LP_BLACK);
+        w::freq(lcd, 10, 232, FREQ.2, f, &DIG_46, &DIG_28, LP_TEXT, LP_SUB, LP_BLACK);
         drew = true;
     }
     // Mode, tone, shift, power.
@@ -106,7 +121,10 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         }
     }
     if app.dirty(R_INFO, hash(&line)) || drew {
-        w::field(lcd, 14, 212, 134, 156, 150, Align::Left, w::fit(line.as_bytes(), &UI_12, 212), &UI_12, LP_SUB, LP_BLACK);
+        // the strips either side of the text column too: the leaving box reaches into them
+        lcd.fill(SIDE_W, INFO.0, X - SIDE_W, INFO.1 - INFO.0, LP_BLACK);
+        lcd.fill(X + W, INFO.0, 240 - SIDE_W - X - W, INFO.1 - INFO.0, LP_BLACK);
+        w::field(lcd, X, W, INFO.0, INFO.1, INFO.2, Align::Left, line.as_bytes(), &UI_15B, LP_SUB, LP_BLACK);
         drew = true;
     }
     // RX: the S-meter's text and 8 blocks; TX: the time keyed; else Quiet and empty blocks.
@@ -114,7 +132,7 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     let lit = if rx { ((w::meter_level(rssi) as u32 * BLOCKS as u32).div_ceil(w::METER_SEGS as u32)) as i32 } else { 0 };
     let secs = if keyed { app.now.wrapping_sub(app.radio.t0) / 1000 } else { 0 };
     if app.dirty(R_SUB, hash(&(keyed, rx, lit, secs))) || drew {
-        lcd.fill(SIDE_W, 176, 240 - 2 * SIDE_W, 46, LP_BLACK);
+        lcd.fill(SIDE_W, SUB.0, 240 - 2 * SIDE_W, SUB.1 - SUB.0, LP_BLACK);
         let mut t = Buf::<8>::new();
         let (text, c) = if keyed {
             super::activity::mmss(secs, &mut t);
@@ -125,25 +143,23 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         } else {
             (b"Quiet".as_slice(), LP_DIM)
         };
-        w::field(lcd, 14, 120, 180, 198, 194, Align::Left, text, if keyed || rx { &UI_12B } else { &UI_12 }, c, LP_BLACK);
+        w::field(lcd, X, W, SUB.0, METER_Y - 4, SUB_BASE, Align::Left, text, &UI_15B, c, LP_BLACK);
         if !keyed {
+            let (bw, bh, pitch) = BLOCK;
             for i in 0..BLOCKS {
-                let x = 14 + i * 22;
+                let x = X + i * pitch;
                 if i < lit {
-                    lcd.fill(x, 204, 18, 16, LP_GREEN);
+                    lcd.fill(x, METER_Y, bw, bh, LP_GREEN);
                 } else {
-                    lcd.frame(x, 204, 18, 16, LP_EMPTY);
+                    lcd.frame(x, METER_Y, bw, bh, LP_EMPTY);
+                    lcd.frame(x + 1, METER_Y + 1, bw - 2, bh - 2, LP_EMPTY); // 2 px: one is lost at the dim backlight
                 }
             }
         }
         drew = true;
     }
-    // What's off. How to leave is said on entering and whenever something the mode refuses is tried (PWR-24.6),
-    // not here: a standing line was too loud (Alex, Oct 21, 2026).
-    if app.dirty(R_NOTE, 0x4C51) || drew {
-        w::field(lcd, 14, 212, 240, 258, 254, Align::Left, b"Scan, watch, APRS, GPS", &UI_12, LP_DIM, LP_BLACK);
-        w::field(lcd, 14, 212, 258, 276, 272, Align::Left, b"and Bluetooth are off.", &UI_12, LP_DIM, LP_BLACK);
-    }
+    // No standing note of what is off or how to leave: both are said on entering and whenever something the mode
+    // refuses is tried (PWR-24.6); the room went to bigger text (Alex, Oct 21, 2026).
     // The bottom band: home's own hints in black on amber, PTT Talk in the middle (Alex, Oct 21, 2026: the one VFO
     // is for talking; OK still opens the quick menu), a hint-bar toast covering it while it shows.
     let home = app.screen.hints(app);
@@ -175,10 +191,10 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
                 let (x, y, bw, bh) = BOX;
                 lcd.fill(x, y, bw, bh, LP_AMBER);
                 lcd.fill(x + 2, y + 2, bw - 4, bh - 4, LP_BLACK);
-                w::field(lcd, x + 12, bw - 24, y + 6, y + 24, y + 19, Align::Left, b"Leaving", &UI_12B, LP_AMBER, LP_BLACK);
-                w::field(lcd, x + 12, bw - 24, y + 24, y + 42, y + 37, Align::Left, b"Keep both held.", &UI_12, LP_TEXT, LP_BLACK);
-                lcd.fill(x + 12, y + 48, bw - 24, 6, LP_EMPTY);
-                lcd.fill(x + 12, y + 48, fill, 6, LP_AMBER);
+                w::field(lcd, x + 12, bw - 24, y + 10, y + 36, y + 32, Align::Left, b"Leaving", &UI_15B, LP_AMBER, LP_BLACK);
+                w::field(lcd, x + 12, bw - 24, y + 36, y + 62, y + 58, Align::Left, b"Keep both held.", &UI_15B, LP_TEXT, LP_BLACK);
+                lcd.fill(x + 12, y + 72, bw - 24, 10, LP_EMPTY);
+                lcd.fill(x + 12, y + 72, fill, 10, LP_AMBER);
             }
         }
         None => {
@@ -191,9 +207,10 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
     }
 }
 
-/// RX or TX in black on a filled block of its colour: an outline all but vanished at the mode's dim backlight.
-fn filled_tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16) {
-    let wd = ferrite_ui::gfx::text4_width(s, &UI_12B) + 10;
-    lcd.fill(x_right - wd, y, wd, 15, c);
-    w::field(lcd, x_right - wd, wd, y, y + 15, y + 12, Align::Center, s, &UI_12B, LP_BLACK, c);
+/// RX or TX in black on a filled block of its colour, on the head line's baseline: an outline all but vanished
+/// at the mode's dim backlight.
+fn filled_tag(lcd: &mut impl Panel, x_right: i32, baseline: i32, s: &[u8], c: u16) {
+    let wd = ferrite_ui::gfx::text4_width(s, &UI_15B) + 12;
+    let y = baseline - 16;
+    w::field(lcd, x_right - wd, wd, y, y + 20, baseline, Align::Center, s, &UI_15B, LP_BLACK, c);
 }
