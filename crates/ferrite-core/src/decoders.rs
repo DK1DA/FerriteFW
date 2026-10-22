@@ -53,8 +53,11 @@ impl Decoder {
             Decoder::Off => {}
             Decoder::Afsk(d) => {
                 block.iter().for_each(|&x| d.push(x, |f| found(Found::Frame(f))));
-                if let Some(b) = d.take_fx25() {
-                    found(Found::Fx25(&b));
+                // The demodulator's one block buffer: handed over (the DSP task copies it into APRS_RX's slot,
+                // which a plain frame's size already sets), then freed for the next tag.
+                if let Some(b) = d.pending_fx25() {
+                    found(Found::Fx25(b));
+                    d.release_fx25();
                 }
             }
             Decoder::Pocsag(d) => block.iter().for_each(|&x| d.push(x, |m| found(Found::Page(m)))),
