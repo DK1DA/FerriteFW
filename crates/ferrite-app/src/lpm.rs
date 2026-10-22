@@ -166,7 +166,7 @@ impl App {
 
     /// PWR-24.4: what the mode doesn't do (a scan, a mode screen) says so.
     pub(crate) fn lpm_refuse(&mut self) {
-        self.show_toast(b"Low Power Mode", b"not while it's on", false);
+        self.show_toast(b"Low Power Mode", b"hold SIDE1+2: off", false); // the way out, when it's wanted
     }
 
     /// PWR-24: Bluetooth on as 0 9 2 1 says, but never in the mode.

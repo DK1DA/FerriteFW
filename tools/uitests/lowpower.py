@@ -35,7 +35,7 @@ def low_power_keeps_one_vfo(t):
     t.set("0 7 7 2", "On")
     u = t.press("SIDE2", settle=0.3)
     t.eq((u.id, u.bar["scan"]), ("LowPower", 0), "SIDE2: no scan")
-    t.check(u.toast and "not while" in u.toast["body"], "refused, saying why", u.toast)
+    t.check(u.toast and "SIDE1+2" in u.toast["body"], "refused, naming the way out (PWR-24.6)", u.toast)
     f0 = float(u.active["freq"])
     u = t.knob(+1, settle=0.3)
     t.check(float(u.active["freq"]) != f0, "the knob still tunes", u.active["freq"])

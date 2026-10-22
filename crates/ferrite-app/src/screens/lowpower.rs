@@ -22,18 +22,18 @@ use ferrite_ui::widgets as w;
 /// The mode's own colours, the same in every theme (PWR-24.7).
 pub const LP_AMBER: u16 = rgb565(0xFF, 0xB0, 0x00);
 const LP_BLACK: u16 = 0;
-const LP_TEXT: u16 = rgb565(0xF2, 0xEF, 0xE6);
-const LP_SUB: u16 = rgb565(0xB9, 0xB3, 0xA3);
-const LP_DIM: u16 = rgb565(0x6F, 0x6A, 0x5E);
-const LP_EMPTY: u16 = rgb565(0x3A, 0x37, 0x2F);
-const LP_GREEN: u16 = rgb565(0x3D, 0xDC, 0x84);
-const LP_RED: u16 = rgb565(0xE5, 0x48, 0x4D);
+const LP_TEXT: u16 = rgb565(0xFF, 0xFF, 0xFF);
+const LP_SUB: u16 = rgb565(0xE8, 0xE4, 0xD8);
+const LP_DIM: u16 = rgb565(0xC8, 0xC2, 0xB2);
+const LP_EMPTY: u16 = rgb565(0x8A, 0x84, 0x74);
+const LP_GREEN: u16 = rgb565(0x4C, 0xFF, 0x8F);
+const LP_RED: u16 = rgb565(0xFF, 0x50, 0x50);
 
 /// The bands' heights, and the sides' width.
 const TOP_H: i32 = 26;
 const BOTTOM_Y: i32 = 294;
 const SIDE_W: i32 = 4;
-/// The meter: 8 blocks of 18 x 12, 4 apart.
+/// The meter: 8 blocks of 18 x 16, 4 apart (16 tall to read at the mode's dim backlight).
 const BLOCKS: i32 = 8;
 /// The leaving box (over the frequency and settings line).
 const BOX: (i32, i32, i32, i32) = (16, 92, 208, 66);
@@ -74,9 +74,9 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         let tag_w = if keyed || rx { 40 } else { 0 };
         w::field(lcd, 14, 212 - tag_w, 36, 54, 50, Align::Left, w::fit(h.as_bytes(), &UI_12, 212 - tag_w), &UI_12, LP_SUB, LP_BLACK);
         if keyed {
-            w::tag(lcd, 226, 37, b"TX", LP_RED, LP_BLACK);
+            filled_tag(lcd, 226, 37, b"TX", LP_RED);
         } else if rx {
-            w::tag(lcd, 226, 37, b"RX", LP_GREEN, LP_BLACK);
+            filled_tag(lcd, 226, 37, b"RX", LP_GREEN);
         }
         drew = true;
     }
@@ -130,19 +130,19 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
             for i in 0..BLOCKS {
                 let x = 14 + i * 22;
                 if i < lit {
-                    lcd.fill(x, 206, 18, 12, LP_GREEN);
+                    lcd.fill(x, 204, 18, 16, LP_GREEN);
                 } else {
-                    lcd.frame(x, 206, 18, 12, LP_EMPTY);
+                    lcd.frame(x, 204, 18, 16, LP_EMPTY);
                 }
             }
         }
         drew = true;
     }
-    // What's off, and how to leave.
+    // What's off. How to leave is said on entering and whenever something the mode refuses is tried (PWR-24.6),
+    // not here: a standing line was too loud (Alex, Oct 21, 2026).
     if app.dirty(R_NOTE, 0x4C51) || drew {
-        w::field(lcd, 14, 212, 232, 250, 246, Align::Left, b"Scan, watch, APRS, GPS", &UI_12, LP_DIM, LP_BLACK);
-        w::field(lcd, 14, 212, 250, 268, 264, Align::Left, b"and Bluetooth are off.", &UI_12, LP_DIM, LP_BLACK);
-        w::field(lcd, 14, 212, 272, 292, 287, Align::Left, b"Hold SIDE1 + SIDE2 to leave", &UI_12B, LP_AMBER, LP_BLACK);
+        w::field(lcd, 14, 212, 240, 258, 254, Align::Left, b"Scan, watch, APRS, GPS", &UI_12, LP_DIM, LP_BLACK);
+        w::field(lcd, 14, 212, 258, 276, 272, Align::Left, b"and Bluetooth are off.", &UI_12, LP_DIM, LP_BLACK);
     }
     // The bottom band: home's own hints in black on amber (a hint-bar toast covers it while it shows).
     let hints = app.screen.hints(app);
@@ -184,4 +184,11 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
             }
         }
     }
+}
+
+/// RX or TX in black on a filled block of its colour: an outline all but vanished at the mode's dim backlight.
+fn filled_tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16) {
+    let wd = ferrite_ui::gfx::text4_width(s, &UI_12B) + 10;
+    lcd.fill(x_right - wd, y, wd, 15, c);
+    w::field(lcd, x_right - wd, wd, y, y + 15, y + 12, Align::Center, s, &UI_12B, LP_BLACK, c);
 }
