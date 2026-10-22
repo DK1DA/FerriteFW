@@ -26,7 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dps150 import Dps150, T_ALL  # noqa: E402
 from ferrite_link import Radio  # noqa: E402
 
-# The display states of the low-power bench (ui-backlog, "Ultra low power mode"); each against the baseline.
+# The display states of the low-power bench (ui-backlog, "Ultra low power mode"); each against the baseline. Every
+# state starts from BASE, both lights held at 100 % over the settings', so the screen's timeout (which darkens both
+# after a minute) can't change a state halfway; later lines override it.
+BASE = ["lcd bl 100", "lcd keys 100"]
 STATES = [
     ("baseline", []),
     ("bl 30", ["lcd bl 30"]),
@@ -35,11 +38,11 @@ STATES = [
     ("fps 1", ["lcd fps 1"]),
     ("idle", ["lcd idle on"]),
     ("partial", ["lcd partial on"]),
-    ("panel asleep", ["lcd sleep on"]),
+    ("panel asleep", ["lcd sleep on", "lcd keys 0"]),
     ("low power set", ["lcd bl 30", "lcd keys 0", "lcd fps 1"]),
     ("baseline again", []),
     ("rx signal", ["@rx"]),
-    ("rx signal, bl 30", ["lcd bl 30", "@rx"]),
+    ("rx signal, low power set", ["lcd bl 30", "lcd keys 0", "lcd fps 1", "@rx"]),
 ]
 BURST_S, TAIL_S, REST_S = 4.5, 0.5, 15.0  # keyed, the carrier after KEY off, then the rest
 MEASURE = (1.0, 4.0)  # the part of each burst measured: after the squelch opens, before the unkey
@@ -62,8 +65,9 @@ def slot_freq(radio, slot):
     """A slot's frequency in Hz from `slot` (`A* ch 20 147.20000 MHz ...`); `slot` None: the active one."""
     for line in radio.cmd("slot").splitlines():
         w = line.split()
-        if len(w) > 3 and (w[0][0].lower() == slot if slot else w[0].endswith("*")):
-            return round(float(w[3]) * 1e6)
+        if w and (w[0][0].lower() == slot if slot else w[0].endswith("*")):
+            # `vfo 145.95000` or `ch 20 147.20000`: the first number with a point.
+            return round(float(next(x for x in w[1:] if "." in x and x.replace(".", "").isdigit())) * 1e6)
     raise SystemExit(f"no slot {slot or 'active'} in: {radio.cmd('slot')}")
 
 
@@ -147,7 +151,7 @@ def main():
         try:
             for name, lines in states:
                 r.cmd("lcd reset")
-                for line in lines:
+                for line in BASE + lines:
                     if line != "@rx":
                         r.cmd(line)
                 rx = "@rx" in lines
