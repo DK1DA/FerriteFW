@@ -120,6 +120,9 @@ const MESSAGES: [MsgRow; 5] = [
     (false, "VE3JLH", "73, thanks for the QSO", 10_800, MsgState::Failed),
 ];
 
+/// The sample contacts, in callsign order.
+const CONTACTS: [(&str, &str); 4] = [("VA3RTX", "Ron"), ("VA3ZZB-7", "Club net"), ("VE2GPA", "Gilles"), ("VE3KPW-9", "Mike")];
+
 const WAYPOINTS: [(&str, Pos, WpSrc); 5] = [
     ("Home", Pos { lat: 454_164_295, lon: -756_998_294 }, WpSrc::Marked),
     ("Club shack", Pos { lat: 454_089_577, lon: -756_588_789 }, WpSrc::Link),
@@ -205,6 +208,8 @@ pub struct Sample {
     wp_saved: Cell<Option<u16>>,
     /// A waypoint typed as a grid square (GPS-21): one, first in the list.
     wp_typed: Cell<Option<(Pos, Buf<16>)>>,
+    /// Contacts in callsign order (APRS-37); a few to start with, room for more.
+    contacts: Cell<[Option<Contact>; 12]>,
     skips_gone: Cell<u32>,
     /// KISS frames sent and heard (APRS-17's KISS card): the simulators' KISS port counts them.
     kiss: Cell<(u16, u16)>,
@@ -253,6 +258,13 @@ impl Sample {
             wp_marked: Cell::new(0),
             wp_saved: Cell::new(None),
             wp_typed: Cell::new(None),
+            contacts: Cell::new({
+                let mut c = [None; 12];
+                for (k, &(call, name)) in CONTACTS.iter().enumerate() {
+                    c[k] = Some(Contact { call: txt(call), name: txt(name) });
+                }
+                c
+            }),
             skips_gone: Cell::new(0),
             kiss: Cell::new((0, 0)),
             heard_cleared: Cell::new(false),
@@ -470,6 +482,13 @@ impl Data for Sample {
         self.kiss.get()
     }
 
+    fn contacts(&self) -> u16 {
+        self.contacts.get().iter().flatten().count() as u16
+    }
+    fn contact(&self, i: u16) -> Option<Contact> {
+        self.contacts.get().iter().flatten().nth(i as usize).copied()
+    }
+
     fn waypoints(&self) -> u16 {
         (0..WAYPOINTS.len() as u16 + self.marked()).filter(|&i| self.wp_gone.get() & 1 << i == 0).count() as u16
     }
@@ -683,6 +702,31 @@ impl Data for Sample {
                     }
                     None => false,
                 }
+            }
+            Op::SaveContact(c) => {
+                let mut all = self.contacts.get();
+                let mut v: [Option<Contact>; 13] = [None; 13];
+                let mut n = 0;
+                for x in all.iter().flatten().filter(|x| x.call != c.call) {
+                    v[n] = Some(*x);
+                    n += 1;
+                }
+                if n == all.len() {
+                    return false;
+                }
+                v[n] = Some(c);
+                v[..=n].sort_unstable_by(|a, b| a.as_ref().map(|x| x.call.as_bytes()).cmp(&b.as_ref().map(|x| x.call.as_bytes())));
+                all.copy_from_slice(&v[..12]);
+                self.contacts.set(all);
+                true
+            }
+            Op::DeleteContact(call) => {
+                let mut all = self.contacts.get();
+                let Some(k) = all.iter().position(|x| x.is_some_and(|x| x.call == call)) else { return false };
+                all[k..].rotate_left(1);
+                all[11] = None;
+                self.contacts.set(all);
+                true
             }
             Op::Draft(d) => {
                 self.draft.set(d);

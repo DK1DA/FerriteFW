@@ -10,6 +10,8 @@
 //! - [`Waypoints`]: up to 256 records of 32 bytes in WAYPOINTS, kept packed oldest first, so the list (newest
 //!   first) is the slots backwards. Adding programs the next slot; deleting moves the later ones down a slot,
 //!   sector by sector through the scratch sector (a cut can leave one waypoint twice, never lose one).
+//! - [`Contacts`]: up to 128 records of 32 bytes in CONTACTS, kept in callsign order ([`Packed`], as the
+//!   waypoints): saving one moves the later ones up a slot, last sector first.
 //! - The APRS settings and the quick messages: one record in two copies (APRS's first two sectors), kept like
 //!   the settings ([`crate::settings`]).
 //!
@@ -20,7 +22,7 @@
 use crate::io::Flash;
 use crate::{crc16, scratch, u16_at, u32_at, Nor, Result, SECTOR};
 use core::cell::Cell;
-use ferrite_app::data::{Event, Message, MsgState, Pos, Src, Waypoint, WpSrc};
+use ferrite_app::data::{Contact, Event, Message, MsgState, Pos, Src, Waypoint, WpSrc};
 use ferrite_ui::text::Buf;
 
 pub const REC: u32 = 128;
@@ -377,15 +379,18 @@ pub fn wp_decode(b: &[u8; WP_LEN as usize]) -> Option<Waypoint> {
     Some(Waypoint { name: text(&b[..16]), pos: Pos { lat: u32_at(b, 16) as i32, lon: u32_at(b, 20) as i32 }, src })
 }
 
-/// The waypoints, packed oldest first from slot 0.
-pub struct Waypoints {
+/// 32-byte records packed from slot 0 over whole sectors, 127 to a sector (the last 32 bytes stay free for the
+/// scratch footer); a record is held when its CRC-16 (bytes 30..32, over 0..30) is good. The waypoints keep them
+/// oldest first, the contacts in callsign order.
+pub struct Packed {
     start: u32,
+    max: u16,
     count: Cell<u16>,
 }
 
-impl Waypoints {
-    pub const fn new(start: u32) -> Self {
-        Waypoints { start, count: Cell::new(0) }
+impl Packed {
+    pub const fn new(start: u32, max: u16) -> Self {
+        Packed { start, max, count: Cell::new(0) }
     }
 
     fn addr(&self, slot: u16) -> u32 {
@@ -401,15 +406,23 @@ impl Waypoints {
         self.count.get() == 0
     }
 
-    /// Counts the packed waypoints, and blanks whatever follows them: a torn one (a cut add), or old data in the
+    pub fn full(&self) -> bool {
+        self.count.get() >= self.max
+    }
+
+    fn valid(b: &[u8; WP_LEN as usize]) -> bool {
+        *b != [0xFF; WP_LEN as usize] && crc16(&b[..30]) == u16_at(b, 30)
+    }
+
+    /// Counts the packed records, and blanks whatever follows them: a torn one (a cut add), or old data in the
     /// area (a chip that held something else there), so the next adds program erased bytes.
     pub async fn mount<N: Nor>(&self, f: &Flash<N>) -> Result {
         let n = {
             let mut b = [0u8; WP_LEN as usize];
             let mut n = 0u16;
-            while n < WP_MAX {
+            while n < self.max {
                 f.raw_read(self.addr(n), &mut b)?;
-                if wp_decode(&b).is_none() {
+                if !Self::valid(&b) {
                     break;
                 }
                 n += 1;
@@ -417,7 +430,7 @@ impl Waypoints {
             n
         };
         self.count.set(n);
-        let sectors = (WP_MAX as u32).div_ceil(WP_PER);
+        let sectors = (self.max as u32).div_ceil(WP_PER);
         for sec in 0..sectors {
             let base = self.start + sec * SECTOR;
             // The first slot of this sector that must be blank.
@@ -441,57 +454,198 @@ impl Waypoints {
         Ok(())
     }
 
-    /// Waypoint `i`, newest first.
-    pub fn get<N: Nor>(&self, f: &Flash<N>, i: u16) -> Option<Waypoint> {
-        let slot = self.count.get().checked_sub(1 + i)?;
+    /// The record in `slot`.
+    pub fn get<N: Nor>(&self, f: &Flash<N>, slot: u16) -> Option<[u8; WP_LEN as usize]> {
+        if slot >= self.count.get() {
+            return None;
+        }
         let mut b = [0u8; WP_LEN as usize];
         f.read(self.addr(slot), &mut b).ok()?;
-        wp_decode(&b)
+        Self::valid(&b).then_some(b)
     }
 
-    pub async fn add<N: Nor>(&self, f: &Flash<N>, w: &Waypoint) -> Result<bool> {
+    /// Puts `rec` in `slot` (0..=len): the later ones move up a slot, last sector first, so a cut can leave one
+    /// twice, never lose one.
+    pub async fn insert<N: Nor>(&self, f: &Flash<N>, slot: u16, rec: &[u8; WP_LEN as usize]) -> Result<bool> {
         let n = self.count.get();
-        if n >= WP_MAX {
+        if n >= self.max || slot > n {
             return Ok(false);
         }
-        f.program(self.addr(n), &wp_encode(w)).await?;
+        if slot == n {
+            f.program(self.addr(n), rec).await?;
+        } else {
+            for sec in (slot as u32 / WP_PER..=n as u32 / WP_PER).rev() {
+                self.shift(f, sec, slot, n + 1, Some(rec)).await?;
+            }
+        }
         self.count.set(n + 1);
         Ok(true)
     }
 
-    /// Deletes the newest waypoint equal to `w`: the later ones move down a slot.
-    pub async fn delete<N: Nor>(&self, f: &Flash<N>, w: &Waypoint) -> Result<bool> {
-        let n = self.count.get();
-        let Some(k) = (0..n).rev().find(|&s| {
-            let mut b = [0u8; WP_LEN as usize];
-            f.raw_read(self.addr(s), &mut b).is_ok() && wp_decode(&b).as_ref() == Some(w)
-        }) else {
+    /// Replaces the record in `slot` (one sector rewritten: before or after, whatever a cut).
+    pub async fn set<N: Nor>(&self, f: &Flash<N>, slot: u16, rec: &[u8; WP_LEN as usize]) -> Result<bool> {
+        if slot >= self.count.get() {
             return Ok(false);
-        };
-        let first = k as u32 / WP_PER;
-        let last = (n as u32 - 1) / WP_PER;
-        for sec in first..=last {
-            let base = self.start + sec * SECTOR;
-            scratch::rewrite(f, base, &|o, piece| {
-                for (r, chunk) in piece.chunks_mut(WP_LEN as usize).enumerate() {
-                    let slot = sec * WP_PER + (o / WP_LEN) + r as u32;
-                    if (o / WP_LEN) + (r as u32) >= WP_PER || slot < k as u32 || slot >= n as u32 {
-                        continue;
-                    }
-                    if slot + 1 < n as u32 {
-                        let _ = f.raw_read(self.addr(slot as u16 + 1), chunk);
-                    } else {
-                        chunk.fill(0xFF);
-                    }
+        }
+        let at = (slot as u32 % WP_PER * WP_LEN) as usize;
+        scratch::rewrite(f, self.start + slot as u32 / WP_PER * SECTOR, &|o, piece| {
+            for (i, x) in piece.iter_mut().enumerate() {
+                if let Some(&b) = (o as usize + i).checked_sub(at).and_then(|k| rec.get(k)) {
+                    *x = b;
                 }
-            })
-            .await?;
+            }
+        })
+        .await?;
+        Ok(true)
+    }
+
+    /// Takes the record out of `slot`: the later ones move down a slot, first sector first.
+    pub async fn remove<N: Nor>(&self, f: &Flash<N>, slot: u16) -> Result<bool> {
+        let n = self.count.get();
+        if slot >= n {
+            return Ok(false);
+        }
+        for sec in slot as u32 / WP_PER..=(n as u32 - 1) / WP_PER {
+            self.shift(f, sec, slot, n - 1, None).await?;
         }
         self.count.set(n - 1);
         Ok(true)
     }
 
+    /// Rewrites sector `sec` for a list of `len` records after an insert at `at` (`rec` Some: slot `at` gets it,
+    /// later slots the one below) or a removal at `at` (None: later slots take the one above).
+    async fn shift<N: Nor>(&self, f: &Flash<N>, sec: u32, at: u16, len: u16, rec: Option<&[u8; WP_LEN as usize]>) -> Result {
+        scratch::rewrite(f, self.start + sec * SECTOR, &|o, piece| {
+            for (r, chunk) in piece.chunks_mut(WP_LEN as usize).enumerate() {
+                let k = o / WP_LEN + r as u32;
+                let slot = sec * WP_PER + k;
+                if k >= WP_PER || slot < at as u32 {
+                    continue;
+                }
+                if slot >= len as u32 {
+                    chunk.fill(0xFF);
+                } else if let Some(rec) = rec {
+                    if slot == at as u32 {
+                        chunk.copy_from_slice(rec);
+                    } else {
+                        let _ = f.raw_read(self.addr(slot as u16 - 1), chunk);
+                    }
+                } else {
+                    let _ = f.raw_read(self.addr(slot as u16 + 1), chunk);
+                }
+            }
+        })
+        .await
+    }
+
     pub fn forget(&self) {
         self.count.set(0);
+    }
+}
+
+/// The waypoints, packed oldest first from slot 0.
+pub struct Waypoints(pub Packed);
+
+impl Waypoints {
+    pub const fn new(start: u32) -> Self {
+        Waypoints(Packed::new(start, WP_MAX))
+    }
+
+    pub fn len(&self) -> u16 {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub async fn mount<N: Nor>(&self, f: &Flash<N>) -> Result {
+        self.0.mount(f).await
+    }
+
+    /// Waypoint `i`, newest first.
+    pub fn get<N: Nor>(&self, f: &Flash<N>, i: u16) -> Option<Waypoint> {
+        wp_decode(&self.0.get(f, self.0.len().checked_sub(1 + i)?)?)
+    }
+
+    pub async fn add<N: Nor>(&self, f: &Flash<N>, w: &Waypoint) -> Result<bool> {
+        self.0.insert(f, self.0.len(), &wp_encode(w)).await
+    }
+
+    /// Deletes the newest waypoint equal to `w`: the later ones move down a slot.
+    pub async fn delete<N: Nor>(&self, f: &Flash<N>, w: &Waypoint) -> Result<bool> {
+        let n = self.0.len();
+        match (0..n).rev().find(|&s| self.0.get(f, s).and_then(|b| wp_decode(&b)).as_ref() == Some(w)) {
+            Some(k) => self.0.remove(f, k).await,
+            None => Ok(false),
+        }
+    }
+
+    pub fn forget(&self) {
+        self.0.forget();
+    }
+}
+
+// ---- contacts ----
+
+/// APRS-37.
+pub const CONTACT_MAX: u16 = 128;
+
+/// Callsign (10) · name (12) · 0xFF (8) · CRC-16 of the 30 bytes before (2).
+pub fn contact_encode(c: &Contact) -> [u8; WP_LEN as usize] {
+    let mut b = [0xFFu8; WP_LEN as usize];
+    b[..22].fill(0);
+    put(&mut b[..10], &c.call);
+    put(&mut b[10..22], &c.name);
+    let k = crc16(&b[..30]);
+    b[30..32].copy_from_slice(&k.to_le_bytes());
+    b
+}
+
+pub fn contact_decode(b: &[u8; WP_LEN as usize]) -> Contact {
+    Contact { call: text(&b[..10]), name: text(&b[10..22]) }
+}
+
+/// The contacts, packed in callsign order (APRS-37).
+pub struct Contacts(pub Packed);
+
+impl Contacts {
+    pub const fn new(start: u32) -> Self {
+        Contacts(Packed::new(start, CONTACT_MAX))
+    }
+
+    pub fn get<N: Nor>(&self, f: &Flash<N>, i: u16) -> Option<Contact> {
+        self.0.get(f, i).map(|b| contact_decode(&b))
+    }
+
+    /// Where `call` is (Ok) or would go (Err), by binary search.
+    pub fn find<N: Nor>(&self, f: &Flash<N>, call: &[u8]) -> core::result::Result<u16, u16> {
+        let (mut lo, mut hi) = (0u16, self.0.len());
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let Some(c) = self.get(f, mid) else { return Err(lo) };
+            match c.call.as_bytes().cmp(call) {
+                core::cmp::Ordering::Less => lo = mid + 1,
+                core::cmp::Ordering::Greater => hi = mid,
+                core::cmp::Ordering::Equal => return Ok(mid),
+            }
+        }
+        Err(lo)
+    }
+
+    /// Adds `c`, or renames the contact with its callsign.
+    pub async fn put<N: Nor>(&self, f: &Flash<N>, c: &Contact) -> Result<bool> {
+        match self.find(f, c.call.as_bytes()) {
+            Ok(k) if self.get(f, k).as_ref() == Some(c) => Ok(true),
+            Ok(k) => self.0.set(f, k, &contact_encode(c)).await,
+            Err(k) => self.0.insert(f, k, &contact_encode(c)).await,
+        }
+    }
+
+    pub async fn delete<N: Nor>(&self, f: &Flash<N>, call: &[u8]) -> Result<bool> {
+        match self.find(f, call) {
+            Ok(k) => self.0.remove(f, k).await,
+            Err(_) => Ok(false),
+        }
     }
 }

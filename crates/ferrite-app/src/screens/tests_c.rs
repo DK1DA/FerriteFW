@@ -1039,3 +1039,118 @@ fn fixed_position_from_the_gps_fix() {
     assert_eq!(t.app.beacon_fix(gps).unwrap().pos, crate::data::Pos { lat: 5, lon: 6 }, "no fixed position: the fix");
     assert_eq!(crate::screens::nav::menu0(&[5, 4, 5]), Some(Dest::PositionEntry));
 }
+
+/// APRS-38, APRS-39: an empty recipient lists saved, recent and heard callsigns and the services; ◀▶ go by
+/// group (wrapping), OK takes one; a service's message shows its format and stays in multi-tap.
+#[test]
+fn address_book_on_an_empty_recipient() {
+    let mut t = T::new();
+    t.open(Dest::Compose);
+    let row = |t: &T| {
+        let Screen::Compose(c) = t.app.screen else { panic!("not compose") };
+        let b = crate::screens::contacts::Book::new(t.s.data());
+        let (g, call, _) = b.row(t.s.data(), c.quick as u16).unwrap();
+        (crate::screens::contacts::GROUPS[g], std::string::String::from_utf8(call.as_bytes().to_vec()).unwrap())
+    };
+    assert_eq!(row(&t), ("Saved", "VA3RTX".into()), "contacts first, in callsign order");
+    t.tap(Key::Right);
+    assert_eq!(row(&t), ("Recent", "VE3JLH".into()), "saved ones aren't repeated as recent");
+    t.tap(Key::Right);
+    assert_eq!(row(&t).0, "Heard");
+    t.tap(Key::Left);
+    t.tap(Key::Left);
+    t.tap(Key::Left);
+    assert_eq!(row(&t), ("Services", "SMSGTE".into()), "wraps to the services");
+    t.tap(Key::Menu);
+    assert_eq!(t.s.draft().to.as_bytes(), b"SMSGTE");
+    t.tap(Key::Digit(4));
+    assert!(t.app.text.is_empty(), "multi-tap: no word predicted");
+    assert_eq!(text(&t), "g");
+    let Screen::Compose(c) = t.app.screen else { panic!() };
+    assert!(c.list & 2 != 0, "a service");
+    // BACK to an empty recipient brings the book back; a digit types a callsign instead.
+    t.tap(Key::Exit);
+    t.tap(Key::Up);
+    for _ in 0..6 {
+        t.tap(Key::Exit);
+    }
+    t.open(Dest::Compose);
+    t.tap(Key::Digit(8));
+    assert_eq!(t.s.draft().to.as_bytes(), b"T");
+}
+
+/// APRS-37, APRS-40: # on Contacts adds one (callsign, then name), its options rename and delete it.
+#[test]
+fn contacts_added_renamed_deleted() {
+    use ferrite_ui::text::Buf;
+    let mut t = T::new();
+    t.open(Dest::Contacts);
+    assert_eq!(t.name(), "Contacts");
+    t.tap(Key::Hash);
+    assert_eq!(t.name(), "Text entry");
+    t.app.text = Buf::from(b"ve3");
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "Text entry", "refused: not a callsign");
+    t.app.text = Buf::from(b"VE3ABC-5");
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "Text entry", "now its name");
+    t.app.text = Buf::from(b"Bob");
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "Contacts");
+    assert_eq!(t.s.contact_of(b"VE3ABC-5").unwrap().name.as_bytes(), b"Bob");
+    let k = (0..t.s.contacts()).find(|&i| t.s.contact(i).unwrap().call.as_bytes() == b"VE3ABC-5").unwrap();
+    assert_eq!(k, 3, "in callsign order");
+    for _ in 0..k {
+        t.tap(Key::Down);
+    }
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(1)); // Edit name
+    t.tap(Key::Menu);
+    assert_eq!(t.app.text.as_bytes(), b"Bob", "the name to change");
+    t.app.text = Buf::from(b"Robert");
+    t.tap(Key::Menu);
+    assert_eq!(t.s.contact_of(b"VE3ABC-5").unwrap().name.as_bytes(), b"Robert");
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(2)); // Delete, confirmed
+    t.tap(Key::Menu);
+    assert!(t.s.contact_of(b"VE3ABC-5").is_some(), "asks first");
+    t.tap(Key::Menu);
+    assert!(t.s.contact_of(b"VE3ABC-5").is_none());
+    // OK writes the selected one a message.
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "Compose message");
+}
+
+/// APRS-41: a station's options save it as a contact, its name typed.
+#[test]
+fn station_saved_as_contact() {
+    use ferrite_ui::text::Buf;
+    let mut t = T::new();
+    t.open(Dest::AprsHeard);
+    let call = t.s.station(2).unwrap().call;
+    t.tap(Key::Down);
+    t.tap(Key::Down);
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "APRS station");
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(2)); // Save contact
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "Text entry");
+    t.app.text = Buf::from(b"Digi");
+    t.tap(Key::Menu);
+    assert_eq!(t.name(), "APRS station");
+    assert_eq!(t.s.contact_of(call.as_bytes()).unwrap().name.as_bytes(), b"Digi");
+}
+
+/// GPS-36: the waypoints' options make the selected one the fixed position.
+#[test]
+fn waypoint_as_fixed_position() {
+    let mut t = T::new();
+    t.open(Dest::Waypoints);
+    t.tap(Key::Down);
+    let w = t.s.waypoint(1).unwrap();
+    t.hold(Key::Menu);
+    t.tap(Key::Digit(4));
+    t.tap(Key::Menu);
+    assert!(t.app.set.fixed_on && t.app.set.fixed == w.pos);
+}

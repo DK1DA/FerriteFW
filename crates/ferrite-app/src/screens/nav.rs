@@ -76,6 +76,8 @@ pub enum Dest {
     Compose,
     /// A16a: the quick messages, from the Messages options (TEXT-7).
     QuickMessages,
+    /// C5a: the contacts, from the Messages options (APRS-40).
+    Contacts,
     /// A17: PIN entry.
     Pin,
     /// A18: confirm a destructive action (MENU-23); MENU 0 9 8 2 reset.
@@ -205,6 +207,7 @@ impl Dest {
             DtmfMemories => ("DTMF memories", "17", "A15"),
             Compose => ("Compose message", "25", "A16"),
             QuickMessages => ("Quick messages", "7", "A16a"),
+            Contacts => ("Contacts", "25", "C5a"),
             Pin => ("PIN entry", "34", "A17"),
             Confirm => ("Confirm", "11", "A18"),
             ExtendTx => ("Extend TX warning", "15", "A19"),
@@ -293,11 +296,11 @@ impl Dest {
 }
 
 /// Every destination once (groups and lists by one example each), for tests and the screen inventory.
-pub const ALL: [Dest; 66] = {
+pub const ALL: [Dest; 67] = {
     use Dest::*;
     [
         Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
-        ZoneEdit, LocationCodes, DtmfDialer, DtmfMemories, Compose, QuickMessages, Pin, Confirm, ExtendTx, Setup, ShortcutMap,
+        ZoneEdit, LocationCodes, DtmfDialer, DtmfMemories, Compose, QuickMessages, Contacts, Pin, Confirm, ExtendTx, Setup, ShortcutMap,
         Transmit, TxRefused, Emergency, Scan, BandScope, FmBroadcast, HfMode, ToneSearch, Counter, Alert,
         Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage,
         Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, FmPresets, Quick,
@@ -422,6 +425,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
             Screen::Compose(super::msgs::Compose::new())
         }
         Dest::QuickMessages => Screen::QuickMsgs(super::msgs::QuickMsgs { cur: Default::default() }),
+        Dest::Contacts => Screen::Contacts(super::contacts::Contacts { cur: Default::default() }),
         Dest::GpsPosition => Screen::Gps(super::gps::Gps::new(super::gps::Page::Position)),
         Dest::Waypoints => Screen::Gps(super::gps::Gps::new(super::gps::Page::Waypoints)),
         Dest::WaypointGo => Screen::Gps(super::gps::Gps::new(super::gps::Page::Go)),

@@ -18,7 +18,7 @@
 //! `extra`: nothing on the radio for now, the sample data in the simulator.
 
 use crate::io::Flash;
-use crate::logs::{self, Ring, Waypoints};
+use crate::logs::{self, Contacts, Ring, Waypoints};
 use crate::records::*;
 use crate::settings::{self, FlashSource, MAX_PAYLOAD};
 use crate::{block, scratch, Crc32, Nor, NorError, Result, SECTOR};
@@ -30,7 +30,7 @@ use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
 use ferrite_core::freq::{mhz, Freq10};
-use ferrite_core::layout::{APRS, CHANNELS, EVENT_LOG, LAYOUT_HEADER, PRESETS, SCRATCH, SETTINGS, TRIMS, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, LAYOUT_HEADER, PRESETS, SCRATCH, SETTINGS, TRIMS, WAYPOINTS, ZONES};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
 
@@ -87,6 +87,8 @@ pub enum Job {
     Read { log: bool, seq: u32 },
     Waypoint(Waypoint),
     DeleteWaypoint(Waypoint),
+    Contact(Contact),
+    DeleteContact(Buf<10>),
     /// The APRS settings (kept in RAM since their last change) and the quick messages.
     AprsSave,
 }
@@ -133,6 +135,7 @@ pub struct FlashStore<N: Nor, D: Data> {
     events: Ring,
     msgs: Ring,
     wps: Waypoints,
+    contacts: Contacts,
     /// The APRS settings, and when they last changed while not yet written (saved like the settings).
     aprs: Cell<AprsCfg>,
     aprs_changed: Cell<Option<u32>>,
@@ -167,6 +170,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             events: Ring::new(EVENT_LOG.start, EVENT_LOG.end, logs::EVENT_END),
             msgs: Ring::new(APRS.start + 2 * SECTOR, APRS.end, logs::MSG_END),
             wps: Waypoints::new(WAYPOINTS.start),
+            contacts: Contacts::new(CONTACTS.start),
             aprs: Cell::new(AprsCfg::DEFAULT),
             aprs_changed: Cell::new(None),
             draft: Cell::new(Draft::default()),
@@ -214,6 +218,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.events.mount(&self.f).await?;
         self.msgs.mount(&self.f).await?;
         self.wps.mount(&self.f).await?;
+        self.contacts.0.mount(&self.f).await?;
         let t = [self.events.newest_time(&self.f), self.msgs.newest_time(&self.f)].into_iter().flatten().max();
         self.time0.set(t.map_or(TIME0, |t| t.saturating_add(1)).max(TIME0));
         if let Some(c) = settings::latest_of(&self.f, APRS_COPIES, APRS_PAYLOAD)? {
@@ -284,7 +289,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// A blank or foreign chip: every area erased, then the header (a cut before it formats again next time).
     async fn format(&self) -> Result {
-        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SCRATCH, APRS, EVENT_LOG, WAYPOINTS] {
+        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SCRATCH, APRS, EVENT_LOG, WAYPOINTS, CONTACTS] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase(s).await?;
@@ -403,6 +408,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             }
             Job::Waypoint(w) => self.wps.add(&self.f, &w).await.unwrap_or(false),
             Job::DeleteWaypoint(w) => self.wps.delete(&self.f, &w).await.unwrap_or(false),
+            Job::Contact(c) => self.contacts.put(&self.f, &c).await.unwrap_or(false),
+            Job::DeleteContact(c) => self.contacts.delete(&self.f, c.as_bytes()).await.unwrap_or(false),
             Job::AprsSave => self.aprs_save(None).await.is_ok(),
         };
         self.bump();
@@ -733,7 +740,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             z.set(EMPTY);
         }
         self.zones.set(0);
-        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS] {
+        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS, CONTACTS] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase_blanked(s).await?;
@@ -743,6 +750,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.events.forget();
         self.msgs.forget();
         self.wps.forget();
+        self.contacts.0.forget();
         self.aprs.set(AprsCfg::DEFAULT);
         self.aprs_changed.set(None);
         self.draft.set(Draft::default());
@@ -1085,6 +1093,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 Some(w) => self.submit(Job::DeleteWaypoint(w)),
                 None => false,
             },
+            // APRS-37: a new callsign needs room; a saved one is renamed.
+            Op::SaveContact(c) => (!self.contacts.0.full() || self.contacts.find(&self.f, c.call.as_bytes()).is_ok()) && self.submit(Job::Contact(c)),
+            Op::DeleteContact(c) => self.contacts.find(&self.f, c.as_bytes()).is_ok() && self.submit(Job::DeleteContact(c)),
             _ => return None,
         })
     }
@@ -1317,6 +1328,15 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
         let mut b = [0u8; QUICK_LEN];
         self.f.read(c.at + 4 + (i * QUICK_LEN) as u32, &mut b).ok()?;
         (b[0] != 0xFF).then(|| Buf::from(&b[1..1 + (b[0] as usize).min(67)]))
+    }
+    fn contacts(&self) -> u16 {
+        self.contacts.0.len()
+    }
+    fn contact(&self, i: u16) -> Option<Contact> {
+        self.contacts.get(&self.f, i)
+    }
+    fn contact_of(&self, call: &[u8]) -> Option<Contact> {
+        self.contacts.get(&self.f, self.contacts.find(&self.f, call).ok()?)
     }
     fn waypoints(&self) -> u16 {
         self.wps.len()

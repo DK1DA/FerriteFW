@@ -1648,3 +1648,32 @@ fn log_read_newest_first() {
     assert_eq!(pc.ask(msg::LOG_READ, &0u32.to_le_bytes()).1[6], 0);
     assert_eq!(pc.ask(msg::LOG_READ, &[1, 2]).0, Status::BadArg as u8);
 }
+
+/// APRS-42: the contacts read in callsign order as record 6, and are written by callsign: a new one added, a
+/// saved one renamed, flag bit 0 deletes; a bad callsign is refused with its reason.
+#[test]
+fn contacts_over_the_link() {
+    let mut pc = Pc::new(true);
+    let n = pc.st.data().contacts();
+    let (got, _) = pc.read_all(what::CONTACT, n);
+    assert_eq!(got.len(), n as usize);
+    assert_eq!(&got[0].1[..6], b"VA3RTX");
+    assert_eq!(got[0].1.len(), 23);
+    let rec = |call: &[u8], name: &[u8], flags: u8| {
+        let mut r = std::vec![0u8; 23];
+        r[..call.len()].copy_from_slice(call);
+        r[10..10 + name.len()].copy_from_slice(name);
+        r[22] = flags;
+        r
+    };
+    let (s, _) = pc.write_many(what::CONTACT, &[(0xFFFF, rec(b"VE3NEW", b"New one", 0)), (0xFFFF, rec(b"VA3RTX", b"Ronald", 0))]);
+    assert_eq!(s, 0);
+    assert_eq!(pc.st.data().contact_of(b"VE3NEW").unwrap().name.as_bytes(), b"New one");
+    assert_eq!(pc.st.data().contact_of(b"VA3RTX").unwrap().name.as_bytes(), b"Ronald");
+    assert_eq!(pc.st.data().contacts(), n + 1);
+    assert_eq!(pc.write_many(what::CONTACT, &[(0, rec(b"VE3NEW", b"", 1))]).0, 0);
+    assert!(pc.st.data().contact_of(b"VE3NEW").is_none());
+    let (s, a) = pc.write_many(what::CONTACT, &[(0, rec(b"ve3x", b"", 0))]);
+    assert_eq!(s, Status::Invalid as u8);
+    assert!(std::str::from_utf8(&a[1..]).unwrap().starts_with("callsign"));
+}

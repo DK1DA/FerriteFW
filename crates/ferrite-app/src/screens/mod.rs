@@ -48,6 +48,7 @@ pub mod activity;
 pub mod advanced;
 pub mod alert;
 pub mod aprs;
+pub mod contacts;
 pub mod browse;
 pub mod chedit;
 pub mod coming;
@@ -152,6 +153,7 @@ pub enum Screen {
     Msgs(msgs::Msgs),
     Compose(msgs::Compose),
     QuickMsgs(msgs::QuickMsgs),
+    Contacts(contacts::Contacts),
     Gps(gps::Gps),
     Browse(browse::Browse),
     Zones(zones::Zones),
@@ -208,6 +210,7 @@ macro_rules! each {
             Screen::Msgs($s) => $e,
             Screen::Compose($s) => $e,
             Screen::QuickMsgs($s) => $e,
+            Screen::Contacts($s) => $e,
             Screen::Gps($s) => $e,
             Screen::Browse($s) => $e,
             Screen::Zones($s) => $e,

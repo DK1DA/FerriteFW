@@ -65,6 +65,13 @@ impl<const N: usize> PartialEq for Buf<N> {
 
 impl<const N: usize> Eq for Buf<N> {}
 
+/// The text, for tests and asserts (never formatted on the radio).
+impl<const N: usize> core::fmt::Debug for Buf<N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(core::str::from_utf8(self.as_bytes()).unwrap_or("?"))
+    }
+}
+
 impl<const N: usize> core::hash::Hash for Buf<N> {
     fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
         self.as_bytes().hash(h);

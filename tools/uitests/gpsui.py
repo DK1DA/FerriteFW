@@ -151,8 +151,10 @@ def compose_stops_at_67(t):
     t.keys("MENU 0 5 2")
     u = t.keys("HASH")
     t.eq(u.id, "Compose", "# on the messages: compose")
+    to0 = (u["compose"] or {}).get("to", "")
     if (u["compose"] or {}).get("field") == 0:
-        u = t.keys("DOWN")
+        # an empty recipient shows the address book (APRS-38): OK takes its first callsign; else OK is Next
+        u = t.keys("OK")
     c = u["compose"]
     text0 = c["text"]
     n0 = int(c["count"].split("/")[0])
@@ -180,3 +182,8 @@ def compose_stops_at_67(t):
         u = t.ui()
         if (u["compose"] or {}).get("text") != text0:
             t.note(f"the draft left as {(u['compose'] or {}).get('text')!r}, was {text0!r}")
+        # the recipient the book gave, cleared again
+        if not to0 and (u["compose"] or {}).get("to"):
+            t.keys("UP")
+            for _ in range(len(u["compose"]["to"])):
+                t.keys("BACK", settle=0.02)

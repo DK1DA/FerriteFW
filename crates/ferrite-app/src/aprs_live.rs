@@ -121,6 +121,8 @@ pub struct Rx {
     pub state: Option<(Buf<10>, Buf<67>, MsgState)>,
     /// The heard list changed.
     pub changed: bool,
+    /// APRS-36: our own frame, heard back for the first time since we sent it, and the digipeater that sent it.
+    pub echo: Option<Buf<10>>,
 }
 
 /// What the APRS task may send (APRS-22, APRS-29).
@@ -222,6 +224,9 @@ pub struct AprsLive {
     fix_wait: Cell<Option<u32>>,
     on_since: Cell<Option<u32>>,
     now_s: Cell<u32>,
+    /// APRS-36: a frame of ours went out and hasn't been heard back yet; who repeated the last one heard back.
+    echo: Cell<bool>,
+    echo_by: Cell<Buf<10>>,
 }
 
 impl Default for AprsLive {
@@ -255,6 +260,8 @@ impl AprsLive {
             fix_wait: Cell::new(None),
             on_since: Cell::new(None),
             now_s: Cell::new(0),
+            echo: Cell::new(false),
+            echo_by: Cell::new(Buf::new()),
         }
     }
 
@@ -348,7 +355,7 @@ impl AprsLive {
             Some(l) => (l.at_s + m as u32 * 60).saturating_sub(self.now_s.get()),
             None => 0,
         });
-        Beacon { waiting: self.waiting.get(), next_s: next_s.filter(|_| self.on_since.get().is_some()) }
+        Beacon { waiting: self.waiting.get(), next_s: next_s.filter(|_| self.on_since.get().is_some()), digi: self.echo_by.get() }
     }
 
     // ---- receive ----
@@ -364,7 +371,19 @@ impl AprsLive {
         }
         let my = Address::from_text(me);
         if my.is_some_and(|m| f.src.same(&m)) {
-            return rx; // our own, digipeated back
+            // APRS-36: our own, digipeated back: the first time after a transmission, who repeated it
+            let used = || f.digis().iter().rev().filter(|d| d.repeated);
+            let station = used().find(|d| !d.call().starts_with(b"WIDE")).or_else(|| used().next());
+            if let Some(d) = station.filter(|_| self.echo.get()) {
+                let mut by = Buf::<10>::new();
+                d.emit(&mut |c| {
+                    by.push(&[c]);
+                });
+                self.echo.set(false);
+                self.echo_by.set(by);
+                rx.echo = Some(by);
+            }
+            return rx;
         }
         let dupe = self.dupe(&f, now_s);
         if cfg.digi_on() && !dupe {
@@ -784,6 +803,7 @@ impl AprsLive {
         }
         let dest = Address::from_text(TOCALL).unwrap_or(me);
         let len = Frame::new(me, dest, &path[..names.len().min(2)], info).and_then(|f| f.write(out)).unwrap_or(0);
+        self.echo.set(self.echo.get() || len > 0);
         Tick { len, what, ..t }
     }
 }
@@ -1007,6 +1027,24 @@ mod tests {
         let g = Frame::parse(&out[..t.len]).unwrap();
         assert_eq!(g.src.call(), b"VE3XYZ");
         assert!(g.info.len() <= INFO_MAX);
+    }
+
+    /// APRS-36: our own frame heard back isn't a station; the first one after a transmission names the
+    /// digipeater that repeated it, later ones say nothing until we send again.
+    #[test]
+    fn own_frames_heard_back_name_the_digipeater() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let me = b"VE3XYZ-7";
+        let (f, n) = frame(me, b"APFRT1", &[b"VE3RSB-1*", b"WIDE1*", b"WIDE2-1"], b"!4525.00N/07541.00W[");
+        assert!(a.receive(&f[..n], 10, me, &AprsCfg::DEFAULT).echo.is_none(), "nothing sent yet");
+        a.beacon_now();
+        assert_eq!(a.tick(20, Sending::All, true, me, Some(fix()), &AprsCfg::DEFAULT, &mut out).what, "Beacon");
+        let rx = a.receive(&f[..n], 21, me, &AprsCfg::DEFAULT);
+        assert_eq!(rx.echo.unwrap().as_bytes(), b"VE3RSB-1", "the last used entry that names a station");
+        assert!(a.receive(&f[..n], 22, me, &AprsCfg::DEFAULT).echo.is_none(), "once per transmission");
+        assert_eq!(a.stations(), 0, "not a station heard");
+        assert_eq!(a.beacon(&AprsCfg::DEFAULT).digi.as_bytes(), b"VE3RSB-1");
     }
 
     /// APRS-25: a frame's information field is at most 256 bytes: 256 is taken whole, 257 is dropped.

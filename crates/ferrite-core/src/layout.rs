@@ -22,8 +22,10 @@ pub const EVENT_LOG: Range<u32> = 0x04_B000..0x06_B000;
 pub const SSB_PATCH: Range<u32> = 0x06_B000..0x06_F000;
 pub const TRIMS: Range<u32> = 0x06_F000..0x07_0000;
 pub const WAYPOINTS: Range<u32> = 0x07_0000..0x07_4000;
-/// Free, held for the packet mailbox: 56 KB up to stock's record (and 4 KB after it, to 0x084000).
-pub const MAILBOX: Range<u32> = 0x07_4000..0x08_2000;
+/// APRS contacts (APRS-37): 128 in callsign order, 127 + 1 per sector.
+pub const CONTACTS: Range<u32> = 0x07_4000..0x07_6000;
+/// Free, held for the packet mailbox: 48 KB up to stock's record (and 4 KB after it, to 0x084000).
+pub const MAILBOX: Range<u32> = 0x07_6000..0x08_2000;
 /// Stock V0.29's record: left alone.
 pub const STOCK_RECORD: Range<u32> = 0x08_2000..0x08_3000;
 /// Stock's voice prompts: writable only after the owner has backed them up (a later, explicit unlock).
@@ -31,10 +33,10 @@ pub const PROMPTS: Range<u32> = 0x20_0000..0x30_0000;
 /// The bootloader reflashes the MCU from here if it finds its header: never written.
 pub const UPDATE_AREA: Range<u32> = 0x30_0000..0x40_0000;
 
-/// Everything Ferrite may erase or program, from the layout header to the end of the waypoints. Prompts are not
+/// Everything Ferrite may erase or program, from the layout header to the end of the contacts. Prompts are not
 /// in it until they have been backed up.
 #[allow(clippy::single_range_in_vec_init)] // a list: the prompts region joins it once backed up
-pub static WRITABLE: [Range<u32>; 1] = [LAYOUT_HEADER.start..WAYPOINTS.end];
+pub static WRITABLE: [Range<u32>; 1] = [LAYOUT_HEADER.start..CONTACTS.end];
 
 #[cfg(test)]
 mod tests {
@@ -55,7 +57,7 @@ mod tests {
 
     #[test]
     fn regions_tile_the_writable_range() {
-        let r = [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SCRATCH, APRS, EVENT_LOG, SSB_PATCH, TRIMS, WAYPOINTS];
+        let r = [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SCRATCH, APRS, EVENT_LOG, SSB_PATCH, TRIMS, WAYPOINTS, CONTACTS];
         for p in r.windows(2) {
             assert_eq!(p[0].end, p[1].start);
         }
@@ -63,8 +65,8 @@ mod tests {
             assert_eq!(x.start % 4096, 0, "sector aligned");
             assert_eq!(x.end % 4096, 0);
         }
-        assert_eq!(r[0].start..r[10].end, WRITABLE[0]);
-        assert_eq!(WAYPOINTS.end, MAILBOX.start);
+        assert_eq!(r[0].start..r[r.len() - 1].end, WRITABLE[0]);
+        assert_eq!(CONTACTS.end, MAILBOX.start);
         assert_eq!(MAILBOX.end, STOCK_RECORD.start);
         assert!(CHANNELS.len() / 4096 * 63 >= 1000, "1,000 channels at 63 per sector");
         assert_eq!(ZONES.len() / 4096 * 127, 254, "254 zones at 127 per sector");

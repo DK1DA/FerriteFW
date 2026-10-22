@@ -3,7 +3,7 @@
 //! a chip with old data in these areas, and power cuts at random points of every kind of write.
 
 use ferrite_app::aprs::AprsCfg;
-use ferrite_app::data::{Data, Draft, Event, Fix, Message, MsgState, Op, Pos, Src, Station, Sym, Waypoint, WpSrc};
+use ferrite_app::data::{Contact, Data, Draft, Event, Fix, Message, MsgState, Op, Pos, Src, Station, Sym, Waypoint, WpSrc};
 use ferrite_app::screens::alert::AlertInfo;
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
@@ -234,6 +234,38 @@ fn waypoints_list_newest_first_and_move_down_on_delete() {
     assert!(!s.add_waypoint(&wp(1001)) && !s.request(Op::MarkHere));
 }
 
+/// APRS-37: the contacts stay in callsign order across the sector boundary (127 to a sector), a saved callsign
+/// is renamed rather than added twice, deleting moves the later ones down, and the book holds 128.
+#[test]
+fn contacts_kept_in_callsign_order() {
+    let s = mount(SimFlash::new());
+    let c = |n: u32, name: &[u8]| {
+        let mut call = Buf::<10>::from(b"VE3");
+        for d in [n / 100, n / 10 % 10, n % 10] {
+            call.push(&[b'A' + d as u8]);
+        }
+        Contact { call, name: Buf::from(name) }
+    };
+    // Backwards, so every save goes in at the front and moves the rest up.
+    for n in (0..128).rev() {
+        assert!(s.request(Op::SaveContact(c(n, b"x"))), "contact {n}");
+    }
+    assert!(!s.request(Op::SaveContact(c(999, b"full"))), "128 at most");
+    assert!(s.request(Op::SaveContact(c(5, b"Renamed"))), "a saved one is renamed when full");
+    let s = cycle(s);
+    assert_eq!(s.contacts(), 128);
+    for n in 0..128u32 {
+        assert!(s.contact(n as u16).unwrap().call == c(n, b"").call, "slot {n}");
+    }
+    assert!(s.contact_of(c(5, b"").call.as_bytes()).unwrap().name.as_bytes() == b"Renamed");
+    assert!(s.request(Op::DeleteContact(c(0, b"").call)));
+    assert!(!s.request(Op::DeleteContact(c(0, b"").call)), "not there any more");
+    let s = cycle(s);
+    assert_eq!(s.contacts(), 127);
+    assert!(s.contact(0).unwrap().call == c(1, b"").call && s.contact(126).unwrap().call == c(127, b"").call);
+    assert!(s.contact_of(b"VE3ZZZ").is_none());
+}
+
 #[test]
 fn aprs_settings_wait_two_seconds_and_quick_messages_are_kept() {
     let s = mount(SimFlash::new());
@@ -264,12 +296,13 @@ fn the_reset_empties_them_all() {
     s.log(&ev(Src::Same, 1));
     s.message_in(true, b"A", b"B", 0);
     s.add_waypoint(&wp(1));
+    s.request(Op::SaveContact(Contact { call: Buf::from(b"VE3KPW"), name: Buf::new() }));
     s.request(Op::AprsCfg(AprsCfg { f5k: 1, beacon: 1, power: 1, ..AprsCfg::DEFAULT }));
     assert!(s.request(Op::Wipe));
-    assert_eq!((s.events(), s.messages(), s.waypoints()), (0, 0, 0));
+    assert_eq!((s.events(), s.messages(), s.waypoints(), s.contacts()), (0, 0, 0, 0));
     assert!(s.aprs_cfg() == AprsCfg::DEFAULT);
     let s = cycle(s);
-    assert_eq!((s.events(), s.messages(), s.waypoints()), (0, 0, 0));
+    assert_eq!((s.events(), s.messages(), s.waypoints(), s.contacts()), (0, 0, 0, 0));
 }
 
 /// A chip that held something else in these areas (a radio before Ferrite): mount clears the way.
@@ -315,6 +348,7 @@ struct Snap {
     events: Vec<(u32, bool)>,
     msgs: Vec<(Vec<u8>, MsgState)>,
     wps: Vec<Vec<u8>>,
+    contacts: Vec<Vec<u8>>,
     cfg: (u16, u8, u8),
     quick: Vec<Option<Vec<u8>>>,
 }
@@ -324,6 +358,7 @@ fn snap(s: &Store) -> Snap {
         events: (0..s.events()).map(|i| s.event(i).map_or((u32::MAX, false), |e| (e.id, e.unread))).collect(),
         msgs: (0..s.messages()).map(|i| s.message(i).map_or((vec![], MsgState::Failed), |m| (m.text.as_bytes().to_vec(), m.state))).collect(),
         wps: (0..s.waypoints()).map(|i| s.waypoint(i).map_or(vec![], |w| w.name.as_bytes().to_vec())).collect(),
+        contacts: (0..s.contacts()).map(|i| s.contact(i).map_or(vec![], |c| [c.call.as_bytes(), c.name.as_bytes()].concat())).collect(),
         cfg: {
             let c = s.aprs_cfg();
             (c.f5k, c.beacon, c.power)
@@ -378,7 +413,7 @@ fn power_cuts_leave_before_or_after() {
     let mut f = s.into_parts().0;
     let (mut old, mut new, mut dup) = (0, 0, 0);
     for i in 0..1500u32 {
-        let k = r.below(8);
+        let k = r.below(10);
         let n = 1000 + i;
         let (s, before, after) = cut_during(f, &mut r, &|s| match k {
             0 | 1 => {
@@ -399,6 +434,16 @@ fn power_cuts_leave_before_or_after() {
             6 => {
                 if s.waypoints() > 3 {
                     s.request(Op::DeleteWaypoint(r_idx(n, s.waypoints())));
+                }
+            }
+            // APRS-37: a contact saved, renamed or deleted, all through one sector's rewrite (or an append).
+            8 => {
+                let call = Buf::from(format!("VE{}", n % 40).as_bytes());
+                s.request(Op::SaveContact(Contact { call, name: Buf::from(format!("n{n}").as_bytes()) }));
+            }
+            9 => {
+                if s.contacts() > 2 {
+                    s.request(Op::DeleteContact(s.contact(r_idx(n, s.contacts())).unwrap().call));
                 }
             }
             _ => {
@@ -428,6 +473,9 @@ fn power_cuts_leave_before_or_after() {
             }
             if k == 7 {
                 ok = got.events == before.events && got.msgs == before.msgs && got.wps == before.wps;
+            }
+            if k == 7 && got.contacts != before.contacts {
+                ok = false;
             }
             assert!(
                 ok,

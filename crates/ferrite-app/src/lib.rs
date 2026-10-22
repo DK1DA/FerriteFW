@@ -368,6 +368,8 @@ pub struct App {
     /// The text being typed (A7): a channel name, a callsign; shared by the text entry and the forms that
     /// open it, as only one text is edited at a time.
     text: Buf<16>,
+    /// The contact whose name is being typed (APRS-37), between its callsign's entry and its name's.
+    contact_call: Buf<10>,
     /// Where BACK returns from screens opened with [`App::open`], newest last (MENU-24).
     back: [Option<Screen>; BACK_DEPTH],
     pub(crate) drawn: Drawn,
@@ -456,6 +458,7 @@ impl App {
             out: Outbox { q: ferrite_core::cmdq::CmdRing::new(), sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
             text: Buf::new(),
+            contact_call: Buf::new(),
             back: [None; BACK_DEPTH],
             near: screens::zones::NearCache::NONE,
             drawn: Drawn { screen: None, sbar: None, hash: [0; REGIONS], meter: [None; SLOTS], card: [0; SLOTS], cue: ferrite_ui::widgets::Cue { y: 0, h: 0, ty: 0, th: 0 }, popup_gone: false, qmenu_gone: false },

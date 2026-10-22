@@ -8,6 +8,7 @@
 use super::nav::Dest;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
+use super::contacts::Sel;
 use crate::data::Op;
 use crate::keys::{KeyEvent, Press};
 use crate::{App, Screen, MENU_TIMEOUT_MS};
@@ -30,6 +31,9 @@ pub enum Of {
     Channels,
     /// Home's APRS card (APRS-17).
     AprsCard,
+    /// A station's page (APRS-41) and the Contacts screen (APRS-40).
+    Station,
+    Contacts,
 }
 
 impl Of {
@@ -54,6 +58,8 @@ pub(crate) enum Act {
     Grid,
     /// The arrival alarm's next radius (GPS-12, 0 6 7): off, 50 m ... 1 km.
     Arrival,
+    /// On the station, contact or waypoint under the page; true asks first (MENU-23).
+    Sel(super::contacts::Sel, bool),
 }
 
 pub(crate) type Opt = (&'static str, Act, &'static str);
@@ -71,9 +77,10 @@ const HEARD: [Opt; 5] = [
     ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations come back as they are heard"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
 ];
-const MESSAGES: [Opt; 3] = [
+const MESSAGES: [Opt; 4] = [
     ("Write a message", Act::Open(Dest::Compose), "Recipient, then the text"),
     ("Quick messages", Act::Open(Dest::QuickMessages), "The nine shown on an empty message"),
+    ("Contacts", Act::Open(Dest::Contacts), "Saved stations and their names"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
 ];
 const GPS: [Opt; 3] = [
@@ -93,11 +100,22 @@ const APRS_CARD: [Opt; 4] = [
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
 ];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
-const WAYPOINTS: [Opt; 4] = [
+const WAYPOINTS: [Opt; 5] = [
     ("Mark here", Act::Do(&Op::MarkHere), "A waypoint at this fix"),
     ("Add a grid square", Act::Grid, "A waypoint at a square's centre: FN31pr"),
     ("Arrival alarm", Act::Arrival, "Off, 50 m to 1 km from the one you go to"),
+    ("Use as fixed position", Act::Sel(Sel::Fixed, false), "This waypoint, used when there's no fix"),
     ("GPS position", Act::Open(Dest::GpsPosition), "Fix, satellites, grid square"),
+];
+const STATION: [Opt; 3] = [
+    ("Message", Act::Sel(Sel::Message, false), "Write this station a message"),
+    ("Save contact", Act::Sel(Sel::Name, false), "Its callsign and a name; renames a saved one"),
+    ("Save waypoint", Act::Sel(Sel::Waypoint, false), "Its last position, named with its callsign"),
+];
+const CONTACTS: [Opt; 3] = [
+    ("Edit name", Act::Sel(Sel::Name, false), "Up to 12 characters"),
+    ("Delete", Act::Sel(Sel::Delete, true), "This contact goes; messages stay"),
+    ("Station", Act::Sel(Sel::Station, false), "Its page, when it is in the heard list"),
 ];
 
 pub(crate) fn rows(of: Of) -> &'static [Opt] {
@@ -110,6 +128,8 @@ pub(crate) fn rows(of: Of) -> &'static [Opt] {
         Of::Scope => &SCOPE,
         Of::Channels => &CHANNELS,
         Of::AprsCard => &APRS_CARD,
+        Of::Station => &STATION,
+        Of::Contacts => &CONTACTS,
     }
 }
 
@@ -124,6 +144,8 @@ pub(crate) fn title(of: Of) -> &'static [u8] {
         Of::Scope => b"Scope",
         Of::Channels => b"Channels",
         Of::AprsCard => b"APRS slot",
+        Of::Station => b"APRS station",
+        Of::Contacts => b"Contacts",
     }
 }
 
@@ -155,7 +177,11 @@ impl View for Options {
                 app.screen = Screen::Options(Options { row: d - 1, ..self })
             }
             (Key::Menu, Short) => match act {
-                Act::Confirm(_) if !self.confirm => app.screen = Screen::Options(Options { confirm: true, ..self }),
+                Act::Confirm(_) | Act::Sel(_, true) if !self.confirm => app.screen = Screen::Options(Options { confirm: true, ..self }),
+                Act::Sel(s, _) => {
+                    app.back();
+                    super::contacts::sel(app, s, store);
+                }
                 Act::Do(&op) | Act::Confirm(&op) => {
                     if matches!(op, Op::BeaconNow | Op::Send) && app.remote_tx_refused() {
                         return; // LINK-19: a beacon or message now is a transmission

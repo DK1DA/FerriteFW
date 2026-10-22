@@ -553,7 +553,7 @@ impl Session {
     /// assembled is dropped.
     fn write_many(&mut self, p: &[u8]) -> Status {
         let Some((&w, recs)) = p.split_first() else { return Status::BadArg };
-        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET) {
+        if !matches!(w, what::CHANNEL | what::ZONE | what::PRESET | what::CONTACT) {
             return Status::BadArg; // the settings are one record, larger than a frame: WRITE
         }
         let mut r = recs;
@@ -932,6 +932,16 @@ fn record<S: ChannelStore>(st: &S, w: u8, idx: u16, win: &mut Window) -> Status 
             Some(pr) => preset_save(&pr, win),
             None => return Status::NotFound,
         },
+        // APRS-42: callsign (10) and name (12), 0-padded, then the flags (0)
+        what::CONTACT => match st.data().contact(idx) {
+            Some(c) => {
+                let mut b = [0u8; 23];
+                b[..c.call.len()].copy_from_slice(c.call.as_bytes());
+                b[10..10 + c.name.len()].copy_from_slice(c.name.as_bytes());
+                win.put(&b);
+            }
+            None => return Status::NotFound,
+        },
         _ => return Status::BadArg,
     }
     Status::Ok
@@ -966,6 +976,7 @@ fn indexes<S: ChannelStore>(st: &S, w: u8) -> Option<u16> {
         what::CHANNEL => Some(MAX_CHANNELS),
         what::ZONE => Some(st.zones() as u16),
         what::PRESET => Some(st.data().presets() as u16),
+        what::CONTACT => Some(st.data().contacts()),
         _ => None,
     }
 }
@@ -976,6 +987,7 @@ fn held<S: ChannelStore>(st: &S, w: u8, i: u16) -> bool {
     match w {
         what::CHANNEL => st.zone_of(i).is_some(),
         what::ZONE => st.zone_name(i as u8).is_some(),
+        what::CONTACT => i < st.data().contacts(),
         _ => st.data().preset(i as u8).is_some(),
     }
 }
@@ -1185,6 +1197,32 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
             request(st, Op::PutPreset(idx as u8, p))
         }
         what::ZONE | what::PRESET => Status::NotFound,
+        // APRS-42: added or renamed by callsign (the index is ignored), deleted with flag bit 0
+        what::CONTACT => {
+            if rec.len() != 23 {
+                return Status::BadArg;
+            }
+            let call = &rec[..rec[..10].iter().position(|&c| c == 0).unwrap_or(10)];
+            if call.len() < 3 || call.len() > 9 || !call.iter().all(|&c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'-') {
+                return invalid(o, "callsign: capitals, digits and -, 3 to 9".as_bytes());
+            }
+            let call = Buf::<10>::from(call);
+            if rec[22] & 1 != 0 {
+                return if st.data().contact_of(call.as_bytes()).is_some() { request(st, Op::DeleteContact(call)) } else { Status::NotFound };
+            }
+            let mut name = Buf::<12>::new();
+            for &c in rec[10..22].iter().take_while(|&&c| c != 0) {
+                name.push(&[ferrite_core::name::map_name(c)]); // CHAN-31's set (decision 221)
+            }
+            let c = crate::data::Contact { call, name };
+            if st.data().contact_of(call.as_bytes()) == Some(c) {
+                return Status::Ok;
+            }
+            if st.data().contacts() >= crate::screens::contacts::CONTACT_MAX && st.data().contact_of(call.as_bytes()).is_none() {
+                return invalid(o, "128 contacts".as_bytes());
+            }
+            request(st, Op::SaveContact(c))
+        }
         _ => Status::Refused, // nothing else is written over the link (LINK-3)
     }
 }

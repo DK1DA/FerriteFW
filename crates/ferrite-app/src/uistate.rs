@@ -571,6 +571,25 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 kq(l, "text", text.as_bytes());
                 kn(l, "field", field as u32);
             }
+            // APRS-38: the address book on an empty recipient, its highlighted row and group
+            if c.book_up(cx.store) {
+                let data = cx.store.data();
+                let b = crate::screens::contacts::Book::new(data);
+                let at = (c.quick as u16).min(b.len() - 1);
+                if let (Some(l), Some((g, call, sub))) = (d.ln(), b.row(data, at)) {
+                    l.push(b"book");
+                    kq(l, "group", crate::screens::contacts::GROUPS[g].as_bytes());
+                    kq(l, "sel", call.as_bytes());
+                    kq(l, "sub", sub.as_bytes());
+                    kn(l, "rows", b.len() as u32);
+                }
+            }
+            if let Some(k) = crate::screens::contacts::service(cx.store.data().draft().to.as_bytes()) {
+                if let Some(l) = d.ln() {
+                    l.push(b"service");
+                    kq(l, "format", crate::screens::contacts::SERVICES[k].2.as_bytes());
+                }
+            }
         }
         Screen::Gps(g) if g.page == gps::Page::Position => {
             let p = gps::position_shown(app, cx.store.data(), cx.dev);
@@ -832,6 +851,10 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
         kq(l, "last", last.as_bytes());
         kq(l, "beacon", beacon.as_bytes());
         kn(l, "heard", data.stations() as u32);
+        let digi = data.beacon().digi;
+        if !digi.is_empty() {
+            kq(l, "digi", digi.as_bytes()); // APRS-36
+        }
         // APRS-17 (decision 181): what holds C, the beacon power, the beacon's countdown "m:ss" or why there is
         // none (`next`, only while automatic beacons are on); KISS's port and counts; beacons' bottom line.
         // Short, as the line holds 256 bytes and `last` may take 80.
@@ -933,6 +956,7 @@ pub fn id(s: Screen) -> &'static str {
         Screen::Msgs(_) => "Msgs",
         Screen::Compose(_) => "Compose",
         Screen::QuickMsgs(_) => "QuickMsgs",
+        Screen::Contacts(_) => "Contacts",
         Screen::Gps(_) => "Gps",
         Screen::Browse(_) => "Browse",
         Screen::Zones(_) => "Zones",
