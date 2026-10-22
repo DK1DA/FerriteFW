@@ -24,6 +24,8 @@ pub const FRAME: u32 = 20;
 pub struct Radio {
     pub sim: SimCore,
     pub t: u32,
+    /// Called with the simulator after every frame (the video recorder, `tools/promo`).
+    pub rec: Option<Box<dyn FnMut(&SimCore)>>,
 }
 
 impl Radio {
@@ -43,7 +45,7 @@ impl Radio {
         let mut sim = SimCore::with_flash(1, false, stored);
         sim.set_clock(1_791_400_000); // a fixed clock: Oct 8, 2026, 19:06 UTC
         sim.log_cmds(true);
-        let mut r = Radio { sim, t: 0 };
+        let mut r = Radio { sim, t: 0, rec: None };
         r.wait(3000);
         r
     }
@@ -54,6 +56,9 @@ impl Radio {
         while self.t < end {
             self.t += FRAME;
             self.sim.step(self.t);
+            if let Some(rec) = &mut self.rec {
+                rec(&self.sim);
+            }
         }
         self
     }

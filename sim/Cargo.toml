@@ -15,6 +15,11 @@ path = "src/lib.rs"
 name = "ferrite-sim"
 path = "src/main.rs"
 
+# Records the simulator for videos (tools/promo/mkvideo.py).
+[[bin]]
+name = "ferrite-sim-record"
+path = "src/bin/record.rs"
+
 [features]
 # The fake radio's answers to the terminal's bench commands (decision 151); the sims are user builds without it.
 bench = ["ferrite-core/bench", "ferrite-app/bench"]
