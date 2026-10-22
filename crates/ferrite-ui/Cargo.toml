@@ -2,6 +2,7 @@
 name = "ferrite-ui"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 repository.workspace = true
 publish.workspace = true
 description = "Ferrite's screens and drawing layer: 4-bit anti-aliased text and masks straight to any Panel (the ST7789, or a frame buffer on the PC)"

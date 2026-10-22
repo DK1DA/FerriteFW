@@ -2,6 +2,7 @@
 name = "ferrite-sim"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 repository.workspace = true
 publish.workspace = true
 description = "Ferrite's screens on the PC with the firmware's own drawing code: PNGs, or an interactive window"

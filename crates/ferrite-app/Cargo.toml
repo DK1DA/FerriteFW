@@ -2,6 +2,7 @@
 name = "ferrite-app"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 repository.workspace = true
 publish.workspace = true
 description = "Ferrite's UI state machine: keys and the radio's snapshot in, radio commands and screen redraws out; shared by the firmware's UI task and the simulator"

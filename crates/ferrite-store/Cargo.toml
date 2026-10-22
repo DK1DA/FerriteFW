@@ -2,6 +2,7 @@
 name = "ferrite-store"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 repository.workspace = true
 publish.workspace = true
 description = "Ferrite's SPI-flash store: a fixed memory map of settings (A/B), channel, zone and preset records, safe against a power cut at any byte"

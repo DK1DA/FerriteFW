@@ -2,6 +2,7 @@
 name = "ferrite-radio"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 repository.workspace = true
 publish.workspace = true
 description = "The firmware tasks' hardware steps apart from the MCU: the RF path plan carried out on the pins, the chips' set-ups (stock's register recipes), GPS and Bluetooth power; tested on the PC against a recording mock"

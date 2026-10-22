@@ -2,6 +2,7 @@
 name = "ferrite"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 repository.workspace = true
 publish.workspace = true
 description = "Ferrite firmware for the Radtel RT-950 Pro: start-up, the HAL, and the six tasks"
