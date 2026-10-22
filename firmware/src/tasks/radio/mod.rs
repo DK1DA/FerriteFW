@@ -868,6 +868,14 @@ pub async fn task() {
             Either4::Third(d) => {
                 let a = match d {
                     DebugReq::RxBoth(on) => r.rx_both(on).await,
+                    // TERM-41 (the power bench): Battery Save's cycle overridden or back to the level; activity.
+                    DebugReq::Save(set) => {
+                        if let Some(c) = set {
+                            let a = r.save.set_cycle(c, now_ms());
+                            r.apply(a).await;
+                        }
+                        DebugAns::Save { cycle: r.save.cycle(), level: ferrite_core::rxsleep::timing(r.save.level()), asleep: r.save.asleep() }
+                    }
                     d => r.debug(d),
                 };
                 DEBUG_ANS.send(a).await;

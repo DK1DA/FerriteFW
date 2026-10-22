@@ -1319,7 +1319,8 @@ pub fn writes(line: &[u8]) -> bool {
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
     let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
-    let shows = shows || same(c, b"bk") && rest == 1 && line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1).is_some_and(|w| same(w, b"settle"));
+    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save"));
+    let shows = shows || same(c, b"lcd") && rest == 0; // TERM-40, TERM-41: `lcd` and `bk save` alone show
     !(reads || shows)
 }
 
@@ -1556,11 +1557,12 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
 
 #[cfg(feature = "bench")]
 fn bk(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle";
+    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle; bk save";
     let chip = match t.word(USAGE)? {
         b"0" => 0,
         b"1" => 1,
         w if same(w, b"settle") => return settle(t),
+        w if same(w, b"save") => return bk_save(t),
         _ => return Err(msg!("{}", USAGE)),
     };
     let w = t.word(USAGE)?;
@@ -1623,6 +1625,47 @@ fn txtest(t: &mut Toks) -> Result<Done, Msg> {
         return Err(msg!("{}", USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::TxTest(ask))))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-41 (a bench test, the power bench): `bk save` shows Battery Save's cycle; `bk save lp` puts Low Power Mode's
+/// in place of the level's, `bk save ON OFF [HOLD_S [RECENT_S]]` any (ms, then seconds; hold and recent default
+/// 0), `bk save normal` gives the level back. RAM only.
+fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
+    use ferrite_core::rxsleep::{Cycle, LOW_POWER};
+    const USAGE: &str = "bk save [lp | normal | ON_MS OFF_MS [HOLD_S [RECENT_S]]]: on/off 10-5000 ms, hold and recent 0-3600 s";
+    let mut n = [None; 4];
+    let mut word = None;
+    for (i, slot) in n.iter_mut().enumerate() {
+        match t.next()? {
+            None => break,
+            Some(Tok::Word(w)) if i == 0 && (same(w, b"lp") || same(w, b"normal")) => {
+                word = Some(same(w, b"lp"));
+                break;
+            }
+            Some(Tok::Word(w)) => *slot = Some(number(w).ok_or_else(|| msg!("{}", USAGE))?),
+            _ => return Err(msg!("{}", USAGE)),
+        }
+    }
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    let set = match (word, n) {
+        (Some(true), _) => Some(Some(LOW_POWER)),
+        (Some(false), _) => Some(None),
+        (None, [None, ..]) => None,
+        (None, [Some(on), Some(off), hold, recent]) => {
+            let ms = |v: u32| (10..=5000).contains(&v);
+            let s = |v: Option<u32>| v.filter(|&v| v <= 3600).map(|v| v * 1000).ok_or_else(|| msg!("{}", USAGE));
+            if !ms(on) || !ms(off) {
+                return Err(msg!("{}", USAGE));
+            }
+            let (hold_ms, recent_ms) = (s(hold.or(Some(0)))?, s(recent.or(Some(0)))?);
+            Some(Some(Cycle { on_ms: on as u16, off_ms: off as u16, hold_ms, recent_ms }))
+        }
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    Ok(Done::Debug(Job::new(Kind::Save(set))))
 }
 
 #[cfg(feature = "bench")]

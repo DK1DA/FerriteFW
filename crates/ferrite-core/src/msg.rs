@@ -444,6 +444,10 @@ pub enum DebugReq {
     /// the GPS task sends it ([`crate::gpspower::GpsBench`]). `quiet`: a standby with NMEA off first and not on after.
     Gps { id: u8, arg: u16, quiet: bool },
     #[cfg(feature = "bench")]
+    /// TERM-41 (a bench test, the power bench): Battery Save's cycle overridden (`Some(Some)`), back to the level
+    /// (`Some(None)`), or only asked (`None`). The Radio task answers with [`DebugAns::Save`].
+    Save(Option<Option<crate::rxsleep::Cycle>>),
+    #[cfg(feature = "bench")]
     /// TERM-40 (a bench test, the power bench): one change to the display's bench state, or only ask. The UI task
     /// owns the panel and answers with [`DebugAns::Lcd`].
     Lcd(LcdSet),
@@ -551,6 +555,9 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// TERM-40: the display's bench state now.
     Lcd(LcdBench),
+    #[cfg(feature = "bench")]
+    /// TERM-41: the cycle in force: the override, or the level's on/off times (None: Battery Save off).
+    Save { cycle: Option<crate::rxsleep::Cycle>, level: Option<(u32, u32)>, asleep: bool },
     /// Not done, and why.
     Refused(&'static str),
 }

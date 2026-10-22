@@ -29,7 +29,9 @@ from ferrite_link import Radio  # noqa: E402
 # The display states of the low-power bench (ui-backlog, "Ultra low power mode"); each against the baseline. Every
 # state starts from BASE, both lights held at 100 % over the settings', so the screen's timeout (which darkens both
 # after a minute) can't change a state halfway; later lines override it.
-BASE = ["lcd bl 100", "lcd keys 100"]
+# Battery Save pinned at 300/300 (the first 30 minutes after activity, where the 120 and 240 MHz runs sat), so a
+# state can't cross into the level's own cycle halfway; the save states override it (TERM-41).
+BASE = ["lcd bl 100", "lcd keys 100", "bk save 300 300"]
 STATES = [
     ("baseline", []),
     ("bl 30", ["lcd bl 30"]),
@@ -43,6 +45,11 @@ STATES = [
     ("partial", ["lcd partial on"]),
     ("panel asleep", ["lcd sleep on", "lcd keys 0"]),
     ("low power set", ["lcd bl 30", "lcd keys 0", "lcd fps 1"]),
+    ("save ~off", ["bk save 5000 10"]),
+    ("save 1", ["bk save 300 500"]),
+    ("save 2", ["bk save 180 700"]),
+    ("save 3", ["bk save 180 800"]),
+    ("squeeze", ["lcd bl 30", "lcd keys 0", "lcd fps 1", "bk save 180 800"]),
     ("baseline again", []),
     ("rx signal", ["@rx"]),
     ("rx signal, low power set", ["lcd bl 30", "lcd keys 0", "lcd fps 1", "@rx"]),
@@ -170,6 +177,7 @@ def main():
                 print(f"  {m['mean_ma']:.1f} mA mean, {m['median_ma']:.1f} median ({m['min_ma']:.0f}-{m['max_ma']:.0f})")
         finally:
             r.cmd("lcd reset")
+            r.cmd("bk save normal")
             if tx:
                 tx.close()
     base = results[0][1]["mean_ma"] if results and results[0][0] == "baseline" else None

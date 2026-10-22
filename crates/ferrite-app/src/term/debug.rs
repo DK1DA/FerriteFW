@@ -71,6 +71,9 @@ pub enum Kind {
     /// `txtest [MODE [FILTERS] [LEVEL]]`: the transmit test signal for the next PTT key-up (TERM-33).
     TxTest(ferrite_core::txtest::Ask),
     #[cfg(feature = "bench")]
+    /// `bk save ...`: Battery Save's cycle (TERM-41).
+    Save(Option<Option<ferrite_core::rxsleep::Cycle>>),
+    #[cfg(feature = "bench")]
     /// `lcd ...`: the display's bench state (TERM-40).
     Lcd(ferrite_core::msg::LcdSet),
 }
@@ -156,6 +159,8 @@ impl Job {
             Kind::TxTest(a) => DebugReq::TxTest(a),
             #[cfg(feature = "bench")]
             Kind::Lcd(l) => DebugReq::Lcd(l),
+            #[cfg(feature = "bench")]
+            Kind::Save(c) => DebugReq::Save(c),
         })
     }
 
@@ -290,6 +295,17 @@ impl Job {
                 } else {
                     b"  rx one: only the receiving band's select on (PB0 or PE12), as normal"
                 });
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Save(_), DebugAns::Save { cycle, level, asleep }) => {
+                let now = if asleep { "asleep" } else { "awake" };
+                match (cycle, level) {
+                    (Some(c), _) => put!(out, "  bk save: {}/{} ms, hold {} s, then 300/300 for {} s (override), {} now", c.on_ms as u32, c.off_ms as u32, c.hold_ms / 1000, c.recent_ms / 1000, now),
+                    (None, Some((on, off))) => put!(out, "  bk save: the level's {}/{} ms, hold 10 s, then 300/300 for 30 min, {} now", on, off, now),
+                    (None, None) => put!(out, "  bk save: Battery Save off, {} now", now),
+                }
                 self.st = St::Over;
                 Step::Line
             }

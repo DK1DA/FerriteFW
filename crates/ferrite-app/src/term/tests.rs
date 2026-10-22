@@ -1258,6 +1258,8 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Settle(s) => DebugAns::Settle(s.unwrap_or(ferrite_core::settle::Settle::DEFAULT)),
         #[cfg(feature = "bench")]
+        DebugReq::Save(c) => DebugAns::Save { cycle: c.flatten(), level: Some((300, 500)), asleep: false },
+        #[cfg(feature = "bench")]
         DebugReq::Lcd(l) => DebugAns::Lcd(ferrite_core::msg::LcdBench { idle: true, ..Default::default() }.apply(l)),
         #[cfg(feature = "bench")]
         DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
@@ -1496,6 +1498,37 @@ fn debug_txtest_suite() {
     r.cmd("txtest suite");
     r.serve(4, |_| DebugAns::Refused("the suite runs 60 s: set the TX timeout (0 8 1 1) to 90 s or more first"));
     assert!(r.raw().contains("refused: the suite runs 60 s"), "{}", r.raw());
+}
+
+#[cfg(feature = "bench")]
+/// TERM-41: `bk save` asks Battery Save's cycle; `lp`, `normal` and ON OFF [HOLD [RECENT]] set it; out of range or
+/// extra words are refused before anything is sent; `bk save` and `lcd` alone only read (TERM-25).
+#[test]
+fn debug_bk_save() {
+    use ferrite_core::rxsleep::{Cycle, LOW_POWER};
+    let mut r = Rig::main();
+    r.cmd("bk save");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Save(None)]);
+    assert!(r.raw().contains("bk save: the level's 300/500 ms"), "{}", r.raw());
+    for (cmd, want) in [
+        ("bk save lp", Some(Some(LOW_POWER))),
+        ("bk save normal", Some(None)),
+        ("bk save 180 800", Some(Some(Cycle { on_ms: 180, off_ms: 800, hold_ms: 0, recent_ms: 0 }))),
+        ("BK SAVE 300 300 10 60", Some(Some(Cycle { on_ms: 300, off_ms: 300, hold_ms: 10_000, recent_ms: 60_000 }))),
+    ] {
+        r.send(b"\r");
+        r.cmd(cmd);
+        assert_eq!(r.serve(4, regs), vec![DebugReq::Save(want)], "{cmd}");
+    }
+    assert!(r.raw().contains("300/300 ms, hold 10 s, then 300/300 for 60 s (override)"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["bk save 5", "bk save 180", "bk save 180 9000", "bk save 180 800 4000", "bk save 1 2 3 4 5", "bk save lp 3"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("bk save ["), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+    assert!(!super::cmd::writes(b"bk save") && !super::cmd::writes(b"lcd"));
+    assert!(super::cmd::writes(b"bk save lp") && super::cmd::writes(b"lcd bl 30"));
 }
 
 #[cfg(feature = "bench")]

@@ -33,6 +33,22 @@ pub const HOLD_MS: u64 = 10_000;
 pub const RECENT_MS: u64 = 30 * 60_000;
 pub const RECENT: (u32, u32) = (300, 300);
 
+/// A cycle in place of the level's and stock's hold and recent window: Low Power Mode's ([`LOW_POWER`], the squeeze:
+/// level 3's cycle, a short hold, no 30-minute window) and the bench's (TERM-41).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cycle {
+    pub on_ms: u16,
+    pub off_ms: u16,
+    /// Fully on after activity.
+    pub hold_ms: u32,
+    /// Then [`RECENT`]'s cycle this long, before on/off.
+    pub recent_ms: u32,
+}
+
+/// Low Power Mode (Alex, Oct 21, 2026: "all about the squeeze"): level 3's 180/800 ms, 10 s fully on after
+/// activity, then 1 minute of 300/300 instead of 30, then level 3.
+pub const LOW_POWER: Cycle = Cycle { on_ms: 180, off_ms: 800, hold_ms: 10_000, recent_ms: 60_000 };
+
 /// What the Radio task must do to the chips now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -50,12 +66,32 @@ pub struct RxSleep {
     recent_until: u64,
     /// The squelch as last told ([`RxSleep::squelch`]): its opening and its closing are activity (SQL-8).
     sq: bool,
+    /// A cycle in place of the level's ([`Cycle`]).
+    cycle: Option<Cycle>,
 }
 
 impl RxSleep {
     /// Starts awake, as after activity.
     pub fn new(level: Level, now: u64) -> Self {
-        RxSleep { level, asleep: false, until: now + HOLD_MS, recent_until: now + HOLD_MS + RECENT_MS, sq: false }
+        RxSleep { level, asleep: false, until: now + HOLD_MS, recent_until: now + HOLD_MS + RECENT_MS, sq: false, cycle: None }
+    }
+
+    pub fn cycle(&self) -> Option<Cycle> {
+        self.cycle
+    }
+
+    /// A cycle in place of the level's, or back to the level (None); counts as activity.
+    pub fn set_cycle(&mut self, cycle: Option<Cycle>, now: u64) -> Action {
+        self.cycle = cycle;
+        self.activity(now)
+    }
+
+    /// The on/off times in force: the cycle's, or the level's (None: Off).
+    pub fn times(&self) -> Option<(u32, u32)> {
+        match self.cycle {
+            Some(c) => Some((c.on_ms as u32, c.off_ms as u32)),
+            None => timing(self.level),
+        }
     }
 
     pub fn level(&self) -> Level {
@@ -76,8 +112,9 @@ impl RxSleep {
     pub fn activity(&mut self, now: u64) -> Action {
         let was = self.asleep;
         self.asleep = false;
-        self.until = now + HOLD_MS;
-        self.recent_until = self.until + RECENT_MS;
+        let (hold, recent) = self.cycle.map_or((HOLD_MS, RECENT_MS), |c| (c.hold_ms as u64, c.recent_ms as u64));
+        self.until = now + hold;
+        self.recent_until = self.until + recent;
         if was { Action::Wake } else { Action::None }
     }
 
@@ -95,7 +132,7 @@ impl RxSleep {
 
     /// Call at least by [`RxSleep::deadline`]. `busy`: something needs the receiver on all the time.
     pub fn tick(&mut self, now: u64, busy: bool) -> Action {
-        let Some((on, off)) = timing(self.level) else {
+        let Some((on, off)) = self.times() else {
             return self.wake_if_asleep();
         };
         if busy {
@@ -126,7 +163,7 @@ impl RxSleep {
     /// 10 s after the last activity and wake the Radio task every 1 ms (decision 163). A caller that stops ticking
     /// (HF mode) must not wait on it either; the crossband repeater ticks it busy (XB-13), which keeps it ahead.
     pub fn deadline(&self) -> Option<u64> {
-        timing(self.level).map(|_| self.until)
+        self.times().map(|_| self.until)
     }
 }
 
@@ -209,6 +246,26 @@ mod tests {
         let mut s = RxSleep::new(Level::Off, 0);
         run(&mut s, 0, 3 * HOLD_MS, false);
         assert_eq!(s.deadline(), None);
+    }
+
+    /// Low Power Mode's squeeze and TERM-41: a cycle in place of the level's, with its own hold and a 1-minute recent
+    /// window, then level 3's 18 %; back to the level after.
+    #[test]
+    fn low_power_cycle_squeezes_sooner() {
+        let mut s = RxSleep::new(Level::L1, 0);
+        s.set_cycle(Some(LOW_POWER), 0);
+        assert_eq!(run(&mut s, 0, 10_000, false), 10_000, "the hold");
+        let a = run(&mut s, 10_000, 60_000, false);
+        assert!((29_000..=31_000).contains(&a), "1 min of 300/300: {a}");
+        let a = run(&mut s, 70_000, 98_000, false);
+        assert!((17_000..=19_000).contains(&a), "then 180/800: {a}");
+        let c = Cycle { on_ms: 100, off_ms: 900, hold_ms: 0, recent_ms: 0 };
+        s.set_cycle(Some(c), 200_000);
+        let a = run(&mut s, 200_000, 100_000, false);
+        assert!((9_000..=11_000).contains(&a), "any cycle: {a}");
+        s.set_cycle(None, 300_000);
+        assert_eq!(s.cycle(), None);
+        assert_eq!(run(&mut s, 300_000, HOLD_MS, false), HOLD_MS, "the level's hold again");
     }
 
     /// SQL-8: opening or closing the squelch holds the receiver on for 10 s; an open squelch (busy) keeps it awake.
