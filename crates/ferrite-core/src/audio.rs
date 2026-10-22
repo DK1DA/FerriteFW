@@ -2,8 +2,8 @@
 //! the firmware and the host tests so both run the same arithmetic.
 //!
 //! - **In:** ADC1 samples PA2 (the BK4829s' EARO) at [`ADC_HZ`], 12 bits unsigned. [`Decim`] takes away the DC
-//!   bias, low-passes and keeps every fourth sample: [`crate::decoders::RATE_HZ`] signed 16-bit, which is what
-//!   every decoder in the slot takes. Stock samples at 9.6 kHz with no filter (`analysis/audio_path.md`); 48 kHz
+//!   bias, low-passes and keeps every second sample: [`crate::decoders::RATE_HZ`] (24 kHz since Oct 22, 2026,
+//!   decision 240; 12 kHz before) signed 16-bit, which is what every decoder in the slot takes. Stock samples at 9.6 kHz with no filter (`analysis/audio_path.md`); 48 kHz
 //!   leaves room for the faster modes (POCSAG 2400, 4FSK) and the filter keeps what is above 6 kHz out.
 //! - **Out:** DAC1 (PA4) plays [`DAC_HZ`] samples of 12 bits into the transmitting BK4829's microphone input
 //!   (PC12 high, as stock: `analysis/audio_path.md`); [`to_dac`] maps a signed sample onto the DAC's range.
@@ -34,15 +34,15 @@ pub const BLOCK_OUT: usize = BLOCK_IN / DECIM;
 pub const BLOCK_DAC: usize = 128;
 
 const N_TAPS: usize = 31;
-/// The low-pass ahead of the 4:1 step: 31 taps (Kaiser-windowed sinc, beta 6, 5 kHz), Q15, summing to 1. Flat
+/// The low-pass ahead of the 2:1 step (4:1 until decision 240, the same taps): 31 taps (Kaiser-windowed sinc, beta 6, 5 kHz), Q15, summing to 1. Flat
 /// across AFSK's tones (1200 Hz +0.01 dB, 2200 Hz -0.04 dB: no tilt against the upper tone, which de-emphasised
-/// audio already lacks); what folds back onto the audio band (8.5 to 15.5 kHz) is 61 dB down or more. Until
+/// audio already lacks); what folds back onto the audio band is 61 dB down or more at 4:1 and over 90 dB at 2:1 (from 21-27 kHz). Until
 /// Oct 21, 2026: 15 taps, -1.1 dB at 2200 Hz and only 18 dB of fold-back rejection (WA8LMF track 2 through the
 /// radio's path: 992 -> 997 frames). A `static`: read per sample by the DSP task, and only named statics stay in
 /// the firmware's fast flash (unnamed constants go to the slow part: firmware/memory.x).
 static TAPS: [i32; N_TAPS] = [-4, 7, 46, 104, 135, 69, -150, -490, -788, -780, -199, 1070, 2877, 4799, 6275, 6826, 6275, 4799, 2877, 1070, -199, -780, -788, -490, -150, 69, 135, 104, 46, 7, -4];
 
-/// The ADC side: DC removal, the low-pass and the 4:1 step, one block at a time. 68 bytes.
+/// The ADC side: DC removal, the low-pass and the 2:1 step, one block at a time. 68 bytes.
 pub struct Decim {
     /// The last [`TAPS`] inputs, centred, as a ring.
     hist: [i16; N_TAPS],
@@ -64,7 +64,7 @@ impl Decim {
         Decim { hist: [0; N_TAPS], at: 0, phase: 0, dc_q16: 2048 << 16 }
     }
 
-    /// ADC counts (0-4095) in, decoder samples out through `out`, about one in four. The ADC's 12 bits become
+    /// ADC counts (0-4095) in, decoder samples out through `out`, one in two. The ADC's 12 bits become
     /// the top of a 16-bit sample (a full-scale swing is +-32767).
     #[inline]
     pub fn push(&mut self, adc: u16, mut out: impl FnMut(i16)) {
@@ -165,8 +165,11 @@ mod tests {
     #[test]
     fn decimator_passes_afsk_and_stops_aliases() {
         assert!(gain(1200.0) > 0.9 && gain(2200.0) > 0.85, "AFSK tones pass: {} {}", gain(1200.0), gain(2200.0));
-        assert!(gain(10_000.0) < 0.06, "10 kHz folds onto 2 kHz: kept out ({})", gain(10_000.0));
-        // One output per four inputs, and DC is gone.
+        // DSP-3: at 24 kHz (2:1) what folds onto AFSK's tones comes from 21-23 kHz; the filter's own rejection
+        // above its 5 kHz corner is checked at 10 kHz.
+        assert!(gain(10_000.0) < 0.06, "10 kHz kept out ({})", gain(10_000.0));
+        assert!(gain(22_000.0) < 0.001, "22 kHz folds onto 2 kHz: kept out ({})", gain(22_000.0));
+        // One output per two inputs, and DC is gone.
         let mut d = Decim::new();
         let mut n = 0;
         let mut last = 0;
@@ -176,7 +179,8 @@ mod tests {
                 last = s;
             });
         }
-        assert_eq!(n, 10_000);
+        assert_eq!(n, 40_000 / DECIM);
+        assert_eq!(DECIM, 2, "24 kHz from 48 kHz (decision 240)");
         assert!(last.abs() < 40, "DC removed: {last}");
     }
 

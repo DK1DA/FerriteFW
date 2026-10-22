@@ -1,7 +1,7 @@
 //! The radio's APRS receive path on recorded audio: the WA8LMF TNC Test CD (fetched into udigimodes with its
 //! `tools/fetch_aprs_testdata.sh`; never redistributed, so this test is ignored when it isn't there). The audio
-//! goes the way PA2's does on the radio: 48 kHz, 12-bit ADC counts around mid-scale (`audio::Decim`), the 4:1
-//! step, the decoder slot's AFSK demodulator at 12 kHz, then the APRS task's parser and heard list. Run with
+//! goes the way PA2's does on the radio: 48 kHz, 12-bit ADC counts around mid-scale (`audio::Decim`), the 2:1
+//! step, the decoder slot's AFSK demodulator at 24 kHz (decision 240), then the APRS task's parser and heard list. Run with
 //! `cargo test --release -p ferrite-app --test aprs_corpus -- --ignored --nocapture`.
 
 use ferrite_app::aprs::AprsCfg;
@@ -49,7 +49,7 @@ fn as_adc(s: &[i16], rate: u32, peak: i32) -> Vec<u16> {
 #[test]
 #[ignore]
 fn wa8lmf_through_the_radio_path() {
-    println!("\nWA8LMF TNC Test CD through the radio's path (48 kHz ADC, Decim, AFSK at 12 kHz, APRS task)");
+    println!("\nWA8LMF TNC Test CD through the radio's path (48 kHz ADC, Decim, AFSK at 24 kHz, APRS task)");
     for (track, peak) in [("track01", 1500), ("track01", 400), ("track02", 1500), ("track02", 400)] {
         let Some((s, rate)) = read_wav(&testdata(&format!("wa8lmf/{track}.wav"))) else {
             println!("{track}: not fetched, skipped");

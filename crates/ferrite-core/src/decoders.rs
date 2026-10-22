@@ -8,7 +8,7 @@ use uafsk::Demodulator as Afsk;
 use upocsag::Receiver as Pocsag;
 
 /// Audio rate the DSP task feeds the decoders.
-pub const RATE_HZ: u32 = 12_000;
+pub const RATE_HZ: u32 = 24_000;
 
 /// RAM the slot may take: FT8's or WSPR's footprint.
 pub const BUDGET: usize = 13 * 1024;
