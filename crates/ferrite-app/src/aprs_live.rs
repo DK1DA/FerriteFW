@@ -67,6 +67,8 @@ struct Heard {
     alt_m: Option<i32>,
     times: u16,
     comment: Buf<40>,
+    /// APRS-44: its last frame came as FX.25: the bytes corrected + 1 (0: plain AX.25).
+    fx25: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -290,7 +292,23 @@ impl AprsLive {
             comment: h.comment,
             msg: Buf::new(),
             msg_min: None,
+            fx25: h.fx25.checked_sub(1),
         })
+    }
+
+    /// APRS-44: the frame just given to [`AprsLive::receive`] (or heard plain already, a duplicate) came as FX.25
+    /// with `corrected` bytes repaired: its station says so (the station screen's Path row).
+    pub fn note_fx25(&self, frame: &[u8], corrected: u8) {
+        let Some(f) = Frame::parse(frame) else { return };
+        let mut call = Buf::<10>::new();
+        f.src.emit(&mut |c| {
+            call.push(&[c]);
+        });
+        if let Some(c) = self.heard.iter().find(|c| c.get().is_some_and(|o| o.call == call)) {
+            let mut h = c.get().unwrap();
+            h.fx25 = corrected.saturating_add(1);
+            c.set(Some(h));
+        }
     }
 
     pub fn clear_heard(&self) {
@@ -403,7 +421,7 @@ impl AprsLive {
                 via.push(&[c]);
             });
         }
-        let mut h = Heard { call, sym: Sym::Ht, pos: None, at_s: now_s, via, course: None, alt_m: None, times: 1, comment: Buf::new() };
+        let mut h = Heard { call, sym: Sym::Ht, pos: None, at_s: now_s, via, course: None, alt_m: None, times: 1, comment: Buf::new(), fx25: 0 };
         let mut dest = [0u8; 6];
         let dc = f.dest.call();
         dest[..dc.len()].copy_from_slice(dc);
@@ -998,6 +1016,23 @@ mod tests {
         assert_eq!(a.station(0).unwrap().times, 2);
         assert!(a.station(0).unwrap().pos.is_some(), "a status keeps the last position");
         assert_eq!(a.stations(), HEARD_MAX);
+    }
+
+    /// APRS-44: a frame that came as FX.25 marks its station with the bytes corrected (the station screen's Path
+    /// row); the station's next plain frame clears it. APRS-45: our own frames take 0 5 7 8's check bytes, a
+    /// digipeat none.
+    #[test]
+    fn fx25_heard_and_sent() {
+        let a = AprsLive::new();
+        let (f, n) = frame(b"VE3KPW-9", b"APRS", &[], b"!4525.51N/07554.20W>Mobile");
+        a.receive(&f[..n], 1, b"VE3XYZ", &AprsCfg::DEFAULT);
+        assert_eq!(a.station(0).unwrap().fx25, None);
+        a.note_fx25(&f[..n], 3);
+        assert_eq!(a.station(0).unwrap().fx25, Some(3));
+        a.receive(&f[..n], 40, b"VE3XYZ", &AprsCfg::DEFAULT);
+        assert_eq!(a.station(0).unwrap().fx25, None, "heard plain since");
+        let c = AprsCfg { fx25: 32, ..AprsCfg::DEFAULT };
+        assert_eq!((AprsCfg::DEFAULT.fx25, c.fx25_for("Beacon"), c.fx25_for("Message"), c.fx25_for("Digipeat")), (16, 32, 32, 0));
     }
 
     /// APRS-11: what we send is capped and identifies us as the protocol requires: the source address is our

@@ -217,6 +217,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
         Entry("Mute speaker|On|Mute packets on the speaker."),
         Entry("Ringer on message|On|Ring for a new message."),
         Entry("Heard popup|Off|A toast per station heard."),
+        Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
     ]),
     ((5, 8), &[
         Entry("Digipeat|Off|Relay others' packets."),
@@ -438,7 +439,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 73] = [
+static SETTINGS: [Setting; 74] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -466,6 +467,7 @@ static SETTINGS: [Setting; 73] = [
     field!([5, 6, 1], special),
     field!([5, 6, 2], special),
     field!([5, 7, 1], special), // MENU-31: typed as a frequency
+    field!([5, 7, 8], special), // APRS-45
     field!([5, 8, 1], special),
     field!([5, 8, 2], special),
     field!([5, 8, 3], special),
@@ -777,6 +779,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(crate::slot::mhz3(app.aprs_freq()).as_bytes());
             app.aprs_cfg().f5k != 0
         }
+        [5, 7, 8] => {
+            pick(b, &crate::aprs::FX25_NAMES, app.aprs_cfg().fx25_index());
+            app.aprs_cfg().fx25 != crate::aprs::FX25_DEFAULT
+        }
         // A group's row shows its list's first setting.
         [7, 4] => return wired(app, dev, &[7, 4, 1], b),
         [8, 2] => return wired(app, dev, &[8, 2, 1], b),
@@ -927,6 +933,10 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             app.set_aprs(crate::aprs::AprsCfg { digi: c.digi & 0x0F | w << 4, ..c });
         }
         [5, 7, 1] => app.step_aprs_freq(d),
+        [5, 7, 8] => {
+            let i = cycle(app.aprs_cfg().fx25_index(), d, crate::aprs::FX25_CHECKS.len());
+            app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_CHECKS[i as usize], ..app.aprs_cfg() })
+        }
         // 6.25 kHz steps across the VHF and UHF pager bands.
         [4, 2, 2] => s.pocsag_freq = (s.pocsag_freq as i64 + d as i64 * 625).clamp(13_600_000, 52_000_000) as ferrite_core::freq::Freq10,
         [7, 4, 2] => *s.brightness_mut() = (s.brightness() as i32 + d).clamp(1, 10) as u8, // DISP-16, DISP-23
@@ -997,6 +1007,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
         [5, 8, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
         [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
+        [5, 7, 8] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
         [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
         [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
         // # forgets the custom path; a path set to it goes back to the default (APRS-26)

@@ -1226,15 +1226,16 @@ dependencies = [
 [[package]]
 name = "uafsk"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=65cbe1fe68d6534d06f164c79d5c37103a22dfc5#65cbe1fe68d6534d06f164c79d5c37103a22dfc5"
+source = "git+https://github.com/infamy/udigimodes?rev=437d2d69d1e77f5cddc18e12bd9c23bcdab163d8#437d2d69d1e77f5cddc18e12bd9c23bcdab163d8"
 dependencies = [
  "udsp",
+ "ufx25",
 ]
 
 [[package]]
 name = "uaprs"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=65cbe1fe68d6534d06f164c79d5c37103a22dfc5#65cbe1fe68d6534d06f164c79d5c37103a22dfc5"
+source = "git+https://github.com/infamy/udigimodes?rev=437d2d69d1e77f5cddc18e12bd9c23bcdab163d8#437d2d69d1e77f5cddc18e12bd9c23bcdab163d8"
 dependencies = [
  "udsp",
 ]
@@ -1242,7 +1243,7 @@ dependencies = [
 [[package]]
 name = "udsc"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=65cbe1fe68d6534d06f164c79d5c37103a22dfc5#65cbe1fe68d6534d06f164c79d5c37103a22dfc5"
+source = "git+https://github.com/infamy/udigimodes?rev=437d2d69d1e77f5cddc18e12bd9c23bcdab163d8#437d2d69d1e77f5cddc18e12bd9c23bcdab163d8"
 dependencies = [
  "uafsk",
 ]
@@ -1250,7 +1251,7 @@ dependencies = [
 [[package]]
 name = "udsp"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=65cbe1fe68d6534d06f164c79d5c37103a22dfc5#65cbe1fe68d6534d06f164c79d5c37103a22dfc5"
+source = "git+https://github.com/infamy/udigimodes?rev=437d2d69d1e77f5cddc18e12bd9c23bcdab163d8#437d2d69d1e77f5cddc18e12bd9c23bcdab163d8"
 
 [[package]]
 name = "ufmt"
@@ -1280,6 +1281,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e87a2ed6b42ec5e28cc3b94c09982969e9227600b2e3dcbc1db927a84c06bd69"
 
 [[package]]
+name = "ufx25"
+version = "0.1.0"
+source = "git+https://github.com/infamy/udigimodes?rev=437d2d69d1e77f5cddc18e12bd9c23bcdab163d8#437d2d69d1e77f5cddc18e12bd9c23bcdab163d8"
+dependencies = [
+ "udsp",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1288,7 +1297,7 @@ checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
 [[package]]
 name = "upocsag"
 version = "0.1.0"
-source = "git+https://github.com/infamy/udigimodes?rev=65cbe1fe68d6534d06f164c79d5c37103a22dfc5#65cbe1fe68d6534d06f164c79d5c37103a22dfc5"
+source = "git+https://github.com/infamy/udigimodes?rev=437d2d69d1e77f5cddc18e12bd9c23bcdab163d8#437d2d69d1e77f5cddc18e12bd9c23bcdab163d8"
 
 [[package]]
 name = "uradio-bus"

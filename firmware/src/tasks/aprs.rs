@@ -17,7 +17,7 @@
 //! beacons alone go out, on C. Bluetooth KISS waits for roadmap 3d. The digipeater
 //! follows 0 5 8 (off by default, APRS-12, APRS-26).
 
-use super::dsp::{Frame, AFSK_DONE, AFSK_TX, APRS_RX};
+use super::dsp::{Frame, Heard, AFSK_DONE, AFSK_TX, APRS_RX};
 use crate::chan::DSP;
 use crate::store::Store;
 use ferrite_app::aprs_live::uaprs::kiss;
@@ -66,7 +66,7 @@ pub struct Aprs {
 impl Aprs {
     pub fn new() -> Self {
         let params = kiss::Params { tx_delay: TXDELAY_10MS, ..kiss::Params::default() };
-        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), clear: ClearWait::default(), seed: 0x2545_F491 }
+        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, fx25: 0, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), clear: ClearWait::default(), seed: 0x2545_F491 }
     }
 
     /// A byte from the KISS port, the cable or Bluetooth (KISS-6; TERM-2's route on the cable).
@@ -74,7 +74,7 @@ impl Aprs {
         let Some(r) = self.kiss.push(b) else { return };
         if let kiss::Command::Data(d) = self.params.apply(&r) {
             if self.kiss_q.is_none() && (17..=FRAME_MAX).contains(&d.len()) {
-                let mut f = Frame { len: d.len() as u16, txdelay_10ms: self.params.tx_delay, b: [0; FRAME_MAX] };
+                let mut f = Frame { len: d.len() as u16, txdelay_10ms: self.params.tx_delay, fx25: 0, b: [0; FRAME_MAX] };
                 f.b[..d.len()].copy_from_slice(d);
                 self.kiss_q = Some(f);
             }
@@ -109,17 +109,34 @@ impl Aprs {
             self.on = decode;
         }
         let now_s = now_ms / 1000;
-        // Frames heard (APRS-3, APRS-6).
-        while let Ok(f) = APRS_RX.try_receive() {
+        // Frames heard (APRS-3, APRS-6), and FX.25 blocks corrected here (APRS-44: 3 to 13 ms of this task's
+        // time, not the DSP task's).
+        while let Ok(h) = APRS_RX.try_receive() {
+            let mut block;
+            let (f, fx) = match h {
+                Heard::Frame(ref f) => (f.bytes(), None),
+                Heard::Fx25(b) => {
+                    block = b;
+                    let Some(d) = block.decode() else { continue };
+                    if d.duplicate {
+                        extra.aprs.note_fx25(d.frame, d.corrected); // heard plain already
+                        continue;
+                    }
+                    (d.frame, Some(d.corrected))
+                }
+            };
             if kiss_on {
                 extra.kiss_heard(); // APRS-17.2: the KISS card's count
                 let out = if kiss_cable { &crate::chan::TERM_OUT } else { &crate::chan::BT_OUT };
-                kiss::encode(0, f.bytes(), |b| {
+                kiss::encode(0, f, |b| {
                     out.put(b); // KISS-4; a full ring drops the rest of the frame
                 });
                 crate::chan::TERM_WAKE.signal(());
             }
-            let rx = extra.aprs.receive(f.bytes(), now_s, me.as_bytes(), &extra.cfg());
+            let rx = extra.aprs.receive(f, now_s, me.as_bytes(), &extra.cfg());
+            if let Some(n) = fx {
+                extra.aprs.note_fx25(f, n);
+            }
             // APRS-32: a retry heard again after a power cycle is in the store already (acked all the same).
             if let Some((from, text)) = rx.inbound.filter(|(f, t)| !store.message_heard(f.as_bytes(), rx.inbound_id.as_bytes(), t.as_bytes())) {
                 app.notify(from.as_bytes(), text.as_bytes(), false);
@@ -203,7 +220,8 @@ impl Aprs {
                     extra.changed();
                 }
                 if t.len > 0 {
-                    self.frame = Frame { len: t.len as u16, txdelay_10ms: self.params.tx_delay, b: [0; FRAME_MAX] };
+                    // APRS-45: our own frames as FX.25 when 0 5 7 8 says so (a digipeat goes out plain).
+                    self.frame = Frame { len: t.len as u16, txdelay_10ms: self.params.tx_delay, fx25: cfg.fx25_for(t.what), b: [0; FRAME_MAX] };
                     self.frame.b[..t.len].copy_from_slice(&out[..t.len]);
                     self.clear.start(now_ms);
                     self.tx = Tx::Clearing { what: t.what };

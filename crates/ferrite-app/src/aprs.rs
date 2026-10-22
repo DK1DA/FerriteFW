@@ -27,7 +27,7 @@ pub const APRS_SLOT: u8 = 2;
 /// few minutes on a busy frequency). The oldest heard goes when a new one comes; power off empties it.
 pub const HEARD_MAX: u16 = 20;
 
-/// The APRS settings kept with the APRS store (0 5 5 1, 0 5 5 3, 0 5 5 4, 0 5 6 1, 0 5 7 1, 0 5 8).
+/// The APRS settings kept with the APRS store (0 5 5 1, 0 5 5 3, 0 5 5 4, 0 5 6 1, 0 5 7 1, 0 5 7 8, 0 5 8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AprsCfg {
     /// The frequency in 5 kHz units; 0 = the region's (APRS-15).
@@ -50,7 +50,15 @@ pub struct AprsCfg {
     pub custom: [u8; CUSTOM_LEN],
     /// Our SSID (0 5 4 1, APRS-30): 0-15, sent after the callsign; 0 sends the bare callsign.
     pub ssid: u8,
+    /// FX.25 on transmit (0 5 7 8, APRS-45): check bytes, one of [`FX25_CHECKS`] (0 = off).
+    pub fx25: u8,
 }
+
+/// APRS-45: 0 5 7 8's choices (check bytes; 0 = off) and their names. 16 by default: Alex, decision 230 (a default
+/// to review before the first release).
+pub const FX25_CHECKS: [u8; 4] = [0, 16, 32, 64];
+pub const FX25_NAMES: [&str; 4] = ["Off", "16 bytes", "32 bytes", "64 bytes"];
+pub const FX25_DEFAULT: u8 = 16;
 
 /// APRS-30: the SSID by default (decision 191: a handheld), and what each number means by aprs.org's convention
 /// (aprs.org/aprs11/SSIDs.txt), shortened to fit the row.
@@ -78,7 +86,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {
@@ -111,6 +119,18 @@ impl AprsCfg {
     /// 0 5 6 1's name for the path in use.
     pub fn path_name(&self) -> &[u8] {
         if self.path == PATH_CUSTOM { self.custom_text() } else { PATHS[self.path as usize % PATHS.len()].0.as_bytes() }
+    }
+
+    /// APRS-45: FX.25 check bytes for a frame the APRS task sends (`what`, as [`crate::aprs_live::Tick`] names
+    /// it): 0 5 7 8's for our own frames (beacons, messages, acks, answers), 0 (plain AX.25) for a digipeat, which
+    /// goes out as it came.
+    pub fn fx25_for(&self, what: &str) -> u8 {
+        if what == "Digipeat" { 0 } else { self.fx25 }
+    }
+
+    /// 0 5 7 8's choice: an index into [`FX25_CHECKS`].
+    pub fn fx25_index(&self) -> u8 {
+        FX25_CHECKS.iter().position(|&c| c == self.fx25).unwrap_or(0) as u8
     }
 
     /// The digipeater is on (0 5 8 1).

@@ -23,7 +23,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as M;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
 use ferrite_app::aprs_live::FRAME_MAX;
-use ferrite_core::audio::{afsk_tx, to_dac, uafsk, Decim, BLOCK_DAC, BLOCK_IN, BLOCK_OUT};
+use ferrite_core::audio::{afsk_tx, to_dac, tx_bits, uafsk, Decim, TxBits, BLOCK_DAC, BLOCK_IN, BLOCK_OUT};
 use ferrite_core::decoders::{Decoder, Found, Page};
 use ferrite_core::msg::{DecoderKind, DspCmd};
 
@@ -33,6 +33,8 @@ pub struct Frame {
     pub len: u16,
     /// Transmit: the flags ahead of it, in 10 ms (KISS's TX delay; 30 = 300 ms, KISS-2's default).
     pub txdelay_10ms: u8,
+    /// Transmit: FX.25 check bytes (16, 32, 64), or 0 for plain AX.25 (APRS-45).
+    pub fx25: u8,
     pub b: [u8; FRAME_MAX],
 }
 
@@ -42,8 +44,15 @@ impl Frame {
     }
 }
 
-/// Frames heard, to the UI task's APRS task: two deep (a second frame waits while the first is read; 660 B).
-pub static APRS_RX: Channel<M, Frame, 2> = Channel::new();
+/// What the decoder heard, for the APRS task: a frame, or an FX.25 block for it to correct (APRS-44: 0.27 to 1.03
+/// M instructions, 3 to 13 ms at 120 MHz, too long for this task's 2 ms halves).
+pub enum Heard {
+    Frame(Frame),
+    Fx25(uafsk::Fx25Block),
+}
+
+/// Frames heard, to the UI task's APRS task: two deep (a second waits while the first is read; 672 B).
+pub static APRS_RX: Channel<M, Heard, 2> = Channel::new();
 /// A frame to send on the transmission the UI task just keyed, and its "sent" (true) or "not sent" (false).
 pub static AFSK_TX: Signal<M, Frame> = Signal::new();
 pub static AFSK_DONE: Signal<M, bool> = Signal::new();
@@ -119,9 +128,14 @@ pub async fn task() {
                 slot.push(&out[..n], |f| match f {
                     Found::Frame(b) => {
                         FRAMES.fetch_add(1, Relaxed);
-                        let mut fr = Frame { len: b.len().min(FRAME_MAX) as u16, txdelay_10ms: 0, b: [0; FRAME_MAX] };
+                        let mut fr = Frame { len: b.len().min(FRAME_MAX) as u16, txdelay_10ms: 0, fx25: 0, b: [0; FRAME_MAX] };
                         fr.b[..fr.len as usize].copy_from_slice(&b[..fr.len as usize]);
-                        if APRS_RX.try_send(fr).is_err() {
+                        if APRS_RX.try_send(Heard::Frame(fr)).is_err() {
+                            DROPPED.fetch_add(1, Relaxed);
+                        }
+                    }
+                    Found::Fx25(b) => {
+                        if APRS_RX.try_send(Heard::Fx25(*b)).is_err() {
                             DROPPED.fetch_add(1, Relaxed);
                         }
                     }
@@ -165,9 +179,11 @@ pub async fn task() {
 /// One frame out of DAC1: both halves filled, then each half refilled as it goes out; mid-scale after the last
 /// sample, and stopped once that has played too.
 async fn play(f: &Frame) {
-    // The TX delay's flags first: the transmitter's key-up fits in them.
-    let mut m = uafsk::Modulator::new(f.bytes(), afsk_tx(f.txdelay_10ms as u16 * 10));
-    let fill = |half: usize, m: &mut uafsk::Modulator| -> bool {
+    // The TX delay's flags first: the transmitter's key-up fits in them. FX.25 (APRS-45) when the frame asks for it.
+    let cfg = afsk_tx(f.txdelay_10ms as u16 * 10);
+    let mut enc = None;
+    let mut m = uafsk::Modulator::from_bits(tx_bits(f.bytes(), f.fx25, &cfg, &mut enc), cfg);
+    let fill = |half: usize, m: &mut uafsk::Modulator<TxBits>| -> bool {
         let mut more = true;
         for d in &audio::DAC_BUF[half * BLOCK_DAC..(half + 1) * BLOCK_DAC] {
             let s = if more { m.next() } else { None };

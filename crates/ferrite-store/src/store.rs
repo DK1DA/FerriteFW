@@ -98,12 +98,13 @@ pub enum Job {
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
 /// bytes), then the settings added later (path, digipeater, beacon after voice, the SSID: [`APRS_MORE`]), then
-/// the custom path (0 5 6 2, zero-padded: [`APRS_PATH`]). A record from before them is shorter and reads them as
-/// their defaults.
+/// the custom path (0 5 6 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 7 8, APRS-45:
+/// [`APRS_FX25`]). A record from before them is shorter and reads them as their defaults.
 const QUICK_LEN: usize = 68;
 const APRS_MORE: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
 const APRS_PATH: usize = APRS_MORE + 4;
-const APRS_PAYLOAD: usize = APRS_PATH + ferrite_app::aprs::CUSTOM_LEN;
+const APRS_FX25: usize = APRS_PATH + ferrite_app::aprs::CUSTOM_LEN;
+const APRS_PAYLOAD: usize = APRS_FX25 + 1;
 const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
 /// APRS-32: the stored messages [`FlashStore::message_heard`] looks through, newest first.
 pub const HEARD_CHECK: u16 = 16;
@@ -232,6 +233,13 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             self.f.raw_read(c.at, &mut b)?;
             let mut cfg = AprsCfg { f5k: crate::u16_at(&b, 0), beacon: b[2], power: b[3].min(2), ..AprsCfg::DEFAULT };
             if c.len as usize >= APRS_PAYLOAD {
+                let mut x = [0u8; 1];
+                self.f.raw_read(c.at + APRS_FX25 as u32, &mut x)?;
+                if ferrite_app::aprs::FX25_CHECKS.contains(&x[0]) {
+                    cfg.fx25 = x[0];
+                }
+            }
+            if c.len as usize >= APRS_FX25 {
                 let mut t = [0u8; ferrite_app::aprs::CUSTOM_LEN];
                 self.f.raw_read(c.at + APRS_PATH as u32, &mut t)?;
                 // kept only if it still checks (APRS-26); anything else reads as none
@@ -1082,7 +1090,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         p[..2].copy_from_slice(&c.f5k.to_le_bytes());
         (p[2], p[3]) = (c.beacon, c.power);
         (p[APRS_MORE], p[APRS_MORE + 1], p[APRS_MORE + 2], p[APRS_MORE + 3]) = (c.path, c.digi, c.after_voice as u8, c.ssid);
-        p[APRS_PATH..APRS_PAYLOAD].copy_from_slice(&c.custom);
+        p[APRS_PATH..APRS_FX25].copy_from_slice(&c.custom);
+        p[APRS_FX25] = c.fx25;
         for i in 0..ferrite_app::words::QUICK {
             let t = match q {
                 Some((k, t)) if k as usize == i => t,

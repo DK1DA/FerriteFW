@@ -229,13 +229,17 @@ const ROWS: [(&str, Val<Station>); 8] = [
     ("Path", |c, b| {
         let s = c.x;
         if s.via.is_empty() {
-            return text(b, b"direct");
+            b.push(b"direct");
         }
-        for (k, hop) in s.via.as_bytes().split(|&ch| ch == b',').enumerate() {
+        for (k, hop) in s.via.as_bytes().split(|&ch| ch == b',').filter(|h| !h.is_empty()).enumerate() {
             if k > 0 {
                 b.push(b", ");
             }
             b.push(hop);
+        }
+        // APRS-44: heard last as FX.25
+        if let Some(n) = s.fx25 {
+            let _ = uwrite!(b, " \u{b7} FX.25, {} fixed", n);
         }
         TEXT
     }),

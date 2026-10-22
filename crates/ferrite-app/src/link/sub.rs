@@ -23,8 +23,9 @@ use ferrite_core::liveview::{fnv, Track, DICT_VERSION, FNV0, MORE};
 use ferrite_core::msg::{Device, LiveAll};
 use ferrite_ui::text::Buf;
 
-/// The APRS record's length (LINK-43).
-pub const APRS_REC: usize = 8 + CUSTOM_LEN;
+/// The APRS record's length (LINK-43): eight bytes, the custom path, FX.25 on transmit (APRS-45). A record
+/// written without the last byte (Console before it) keeps the radio's FX.25 setting.
+pub const APRS_REC: usize = 8 + CUSTOM_LEN + 1;
 /// The newest messages watched for events.
 const WATCHED: usize = 4;
 
@@ -425,13 +426,14 @@ pub(super) fn aprs_record(app: &App, w: &mut Window) {
     w.put(&c.f5k.to_le_bytes());
     w.put(&[c.beacon, c.power, c.path, c.digi, c.after_voice as u8, c.ssid]);
     w.put(&c.custom);
+    w.put(&[c.fx25]);
 }
 
 /// A whole APRS record written (LINK-43): checked as MENU 0 5's editors check each value, then kept as they keep
 /// it (written back at the next tick, slot C retuned when it is the APRS slot). Nothing changes if any value is
 /// refused.
 pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
-    if rec.len() != APRS_REC {
+    if rec.len() != APRS_REC && rec.len() != APRS_REC - 1 {
         return Status::BadArg;
     }
     let invalid = |o: &mut Out, why: &str| {
@@ -439,12 +441,12 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
         Status::Invalid
     };
     let mut custom = [0u8; CUSTOM_LEN];
-    custom.copy_from_slice(&rec[8..]);
+    custom.copy_from_slice(&rec[8..8 + CUSTOM_LEN]);
     let n = custom.iter().position(|&b| b == 0).unwrap_or(CUSTOM_LEN);
     if custom[n..].iter().any(|&b| b != 0) || n > 0 && !path_ok(&custom[..n]) {
         return invalid(o, "custom path: one or two entries like WIDE2-2");
     }
-    let mut c = AprsCfg { f5k: u16::from_le_bytes([rec[0], rec[1]]), beacon: rec[2], power: rec[3], path: rec[4], digi: rec[5], after_voice: rec[6] == 1, custom, ssid: rec[7] };
+    let mut c = AprsCfg { f5k: u16::from_le_bytes([rec[0], rec[1]]), beacon: rec[2], power: rec[3], path: rec[4], digi: rec[5], after_voice: rec[6] == 1, custom, ssid: rec[7], fx25: rec.get(8 + CUSTOM_LEN).copied().unwrap_or(app.aprs_cfg().fx25) };
     if c.f5k != 0 {
         let f = c.f5k as u32 * 500;
         if !(F_MIN..=F_MAX).contains(&f) {
@@ -468,6 +470,9 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
     }
     if c.ssid > 15 {
         return invalid(o, "SSID: 0-15");
+    }
+    if !crate::aprs::FX25_CHECKS.contains(&c.fx25) {
+        return invalid(o, "FX.25: 0 (off), 16, 32 or 64 check bytes");
     }
     if c != app.aprs_cfg() {
         app.set_aprs(c);

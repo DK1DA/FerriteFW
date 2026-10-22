@@ -777,7 +777,8 @@ def aprs_cfg(rec):
     return {"freq_mhz": f5k * 0.005 if f5k else "region's", "beacon_mode": beacon & 0x7F, "beacon_paused": bool(beacon & 0x80),
             "power": ["low", "mid", "high"][power], "path": path, "digipeater": bool(digi & 1), "digi_mycall": bool(digi & 2),
             "digi_wait_s": digi >> 4 & 7, "beacon_after_voice": bool(after), "ssid": ssid,
-            "custom_path": rec[8:24].split(b"\x00")[0].decode("ascii", "replace")}
+            "custom_path": rec[8:24].split(b"\x00")[0].decode("ascii", "replace"),
+            "fx25_tx": (rec[24] if len(rec) > 24 else None)}  # APRS-45: check bytes, 0 = off
 
 
 # Live View (LINK-47, LINK-48; ferrite_core::liveview): the text dictionary, byte k (1-31) for entry k - 1.

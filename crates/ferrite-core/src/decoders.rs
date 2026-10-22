@@ -13,6 +13,7 @@ pub const RATE_HZ: u32 = 12_000;
 /// RAM the slot may take: FT8's or WSPR's footprint.
 pub const BUDGET: usize = 13 * 1024;
 
+#[allow(clippy::large_enum_variant)] // the slot is as large as its largest decoder by design
 pub enum Decoder {
     Off,
     /// APRS and other 1200-baud AFSK packet (uaprs parses the frames).
@@ -26,6 +27,9 @@ pub enum Decoder {
 /// What a decoder found, handed to the event bus.
 pub enum Found<'a> {
     Frame(&'a [u8]),
+    /// An FX.25 block, collected but not corrected (APRS-44): too slow for the DSP task, so the APRS task
+    /// corrects it ([`uafsk::Fx25Block::decode`]).
+    Fx25(&'a uafsk::Fx25Block),
     Page(&'a upocsag::Message<'a>),
     Call(&'a udsc::Call<'a>),
 }
@@ -47,7 +51,12 @@ impl Decoder {
     pub fn push(&mut self, block: &[i16], mut found: impl FnMut(Found)) {
         match self {
             Decoder::Off => {}
-            Decoder::Afsk(d) => block.iter().for_each(|&x| d.push(x, |f| found(Found::Frame(f)))),
+            Decoder::Afsk(d) => {
+                block.iter().for_each(|&x| d.push(x, |f| found(Found::Frame(f))));
+                if let Some(b) = d.take_fx25() {
+                    found(Found::Fx25(&b));
+                }
+            }
             Decoder::Pocsag(d) => block.iter().for_each(|&x| d.push(x, |m| found(Found::Page(m)))),
             Decoder::Dsc(d) => block.iter().for_each(|&x| d.push(x, |c| found(Found::Call(c)))),
         }

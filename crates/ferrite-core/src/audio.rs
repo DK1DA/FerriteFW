@@ -107,6 +107,38 @@ pub fn afsk_tx(txdelay_ms: u16) -> uafsk::TxConfig {
     uafsk::TxConfig { rate_hz: DAC_HZ, preamble: flags.max(1), postamble: 3, amp: AFSK_AMP }
 }
 
+/// The bits of one transmission (before NRZI): plain AX.25, or FX.25 (APRS-45) when asked for and the frame fits
+/// the code.
+pub enum TxBits<'a> {
+    Plain(uafsk::hdlc::Framer<'a>),
+    Fx25(uafsk::ufx25::Bits<'a>),
+}
+
+impl Iterator for TxBits<'_> {
+    type Item = u8;
+    #[inline]
+    fn next(&mut self) -> Option<u8> {
+        match self {
+            TxBits::Plain(b) => b.next(),
+            TxBits::Fx25(b) => b.next(),
+        }
+    }
+}
+
+/// APRS-45: `frame` (AX.25 without its FCS) as bits to send with `cfg`'s flags: wrapped in FX.25 with `check`
+/// check bytes (16, 32 or 64) into `enc`, or plain AX.25 for 0 or a frame too long for the code (`enc` None
+/// then). `enc` holds the block while it is sent (272 bytes).
+pub fn tx_bits<'a>(frame: &'a [u8], check: u8, cfg: &uafsk::TxConfig, enc: &'a mut Option<uafsk::ufx25::Encoder>) -> TxBits<'a> {
+    *enc = match check {
+        16 | 32 | 64 => uafsk::ufx25::Encoder::new(frame, check as usize).ok(),
+        _ => None,
+    };
+    match enc {
+        Some(e) => TxBits::Fx25(e.bits(cfg.preamble.max(4), cfg.postamble.max(2))),
+        None => TxBits::Plain(uafsk::hdlc::Framer::new(frame, cfg.preamble.max(1), cfg.postamble.max(1))),
+    }
+}
+
 const _: () = assert!(ADC_HZ.is_multiple_of(RATE_HZ) && BLOCK_IN.is_multiple_of(DECIM));
 
 #[cfg(test)]

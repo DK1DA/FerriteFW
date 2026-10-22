@@ -107,6 +107,8 @@ pub struct Station {
     /// The last message it sent us and the clock minute it came.
     pub msg: Buf<32>,
     pub msg_min: Option<u16>,
+    /// APRS-44: its last frame came as FX.25, with this many bytes corrected.
+    pub fx25: Option<u8>,
 }
 
 /// A message's state (APRS-6, APRS-13, APRS-34).

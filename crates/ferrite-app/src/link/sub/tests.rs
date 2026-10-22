@@ -121,7 +121,16 @@ fn aprs_settings_record() {
     let c = pc.app.aprs_cfg();
     assert_eq!((c.ssid, c.power, c.digi_on(), c.digi_wait_s(), c.custom_text(), c.path), (9, 2, true, 3, &b"WIDE2-2"[..], crate::aprs::PATH_CUSTOM));
     assert_eq!(pc.aprs_rec(), new);
-    let bad: [(usize, u8, &str); 6] = [(7, 16, "SSID"), (3, 3, "power"), (2, 40, "beacon"), (5, 0x61, "digipeater"), (8, b'w', "custom"), (4, 9, "path")];
+    // APRS-45: FX.25 on transmit, the last byte (16 by default); a record without it keeps the radio's.
+    assert_eq!(rec[APRS_REC - 1], crate::aprs::FX25_DEFAULT);
+    new[APRS_REC - 1] = 64;
+    assert_eq!(pc.aprs_write(&new).0, 0);
+    assert_eq!(pc.app.aprs_cfg().fx25, 64);
+    new[APRS_REC - 1] = 32;
+    assert_eq!(pc.aprs_write(&new[..APRS_REC - 1]).0, 0);
+    assert_eq!(pc.app.aprs_cfg().fx25, 64, "a short record keeps it");
+    new[APRS_REC - 1] = 64;
+    let bad: [(usize, u8, &str); 7] = [(7, 16, "SSID"), (3, 3, "power"), (2, 40, "beacon"), (5, 0x61, "digipeater"), (8, b'w', "custom"), (4, 9, "path"), (APRS_REC - 1, 20, "FX.25")];
     for (at, v, why) in bad {
         let mut b = new.clone();
         b[at] = v;

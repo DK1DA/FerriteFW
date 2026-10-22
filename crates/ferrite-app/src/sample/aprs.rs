@@ -158,6 +158,7 @@ impl AprsSim {
             comment: Buf::from(comment.as_bytes()),
             msg: Buf::new(),
             msg_min: None,
+            fx25: (k == 1).then_some(3),
         })
     }
 

@@ -487,6 +487,23 @@ fn path_digipeater_and_after_voice_settings() {
     assert!(a.s.aprs_cfg() == a.app.aprs_cfg());
 }
 
+/// APRS-45: 0 5 7 8, FX.25 on transmit: 16 check bytes by default (decision 230), then 32, 64 and Off; # puts it
+/// back; kept by the APRS store's owner.
+#[test]
+fn fx25_on_transmit_setting() {
+    use crate::screens::groups::{change, reset};
+    let mut a = A::new();
+    assert_eq!(a.app.aprs_cfg().fx25, 16);
+    for (d, want) in [(1, 32), (1, 64), (1, 0), (1, 16), (-1, 0)] {
+        change(&mut a.app, &[5, 7, 8], d);
+        assert_eq!(a.app.aprs_cfg().fx25, want);
+    }
+    a.tick();
+    assert_eq!(a.s.aprs_cfg().fx25, 0, "written back");
+    reset(&mut a.app, &[5, 7, 8]);
+    assert_eq!(a.app.aprs_cfg().fx25, 16);
+}
+
 /// APRS-27: with APRS mode and beacon after voice on, releasing PTT asks for a beacon; off, it doesn't.
 #[test]
 fn beacon_after_voice_on_release() {
