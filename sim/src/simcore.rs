@@ -580,6 +580,10 @@ impl SimCore {
             // As the firmware's GPS task: local time by 0 6 3's zone, `Z` when that is UTC (SBAR-2, GPS-8).
             let (min, utc) = ferrite_app::gpsdata::local_clock(secs as u32, app.settings().tz);
             (dev.clock_min, dev.utc) = (Some(min), utc);
+            // As the firmware's UI task: Low Power Mode's Auto (PWR-24.3) gets the battery once there is a reading.
+            if dev.battery_mv != 0 {
+                app.battery(dev.battery_pct);
+            }
             app.tick(now, &radio.live, store);
             while let Some(c) = app.pop_cmd() {
                 send(radio, c);

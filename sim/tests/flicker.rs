@@ -53,7 +53,7 @@ fn survey() -> BTreeMap<String, Tally> {
     let mut all = BTreeMap::new();
     let names: Vec<String> = jump_names().collect();
     for i in 0..names.len() {
-        let mut r = Radio::new();
+        let mut r = radio();
         r.sim.jump(i);
         r.wait(1000);
         r.sim.watch_passes(true);
@@ -61,7 +61,7 @@ fn survey() -> BTreeMap<String, Tally> {
         tally(&mut r, &mut all);
     }
     for layout in 0..3 {
-        let mut r = Radio::new();
+        let mut r = radio();
         for _ in 0..layout {
             r.event(Event::Layout);
         }
@@ -114,7 +114,7 @@ fn flicker_where() {
     let names: Vec<String> = jump_names().collect();
     let mut runs: Vec<(String, Radio)> = Vec::new();
     for layout in 0..3 {
-        let mut r = Radio::new();
+        let mut r = radio();
         for _ in 0..layout {
             r.event(Event::Layout);
         }
@@ -125,7 +125,7 @@ fn flicker_where() {
         if !pick.is_empty() && !n.to_lowercase().contains(&pick.to_lowercase()) {
             continue;
         }
-        let mut r = Radio::new();
+        let mut r = radio();
         r.sim.jump(i);
         runs.push((n.clone(), r));
     }
@@ -150,6 +150,15 @@ fn flicker_where() {
 }
 
 /// Each jump screen, then home in its three layouts: a radio showing it, named as the tables below name it.
+/// A radio with Low Power Mode off: the battery event in [`short`] drops to 15 %, which with Auto (the default,
+/// PWR-24.1) enters the mode, a whole other screen; this test measures each screen's own redraws.
+fn radio() -> Radio {
+    let mut r = Radio::new();
+    r.sim.app_mut().settings_mut().lpm = 0;
+    r.wait(3000); // the changed setting is saved 2 s later (its redraw isn't a screen's live update)
+    r
+}
+
 fn runs() -> impl Iterator<Item = (String, Radio)> {
     let mut names: Vec<String> = jump_names().collect();
     // a screen reached two ways (two settings groups) is named twice: the second "#2"
@@ -160,12 +169,12 @@ fn runs() -> impl Iterator<Item = (String, Radio)> {
         }
     }
     let screens = names.into_iter().enumerate().map(|(i, n)| {
-        let mut r = Radio::new();
+        let mut r = radio();
         r.sim.jump(i);
         (n, r)
     });
     let homes = (0..3).map(|layout| {
-        let mut r = Radio::new();
+        let mut r = radio();
         for _ in 0..layout {
             r.event(Event::Layout);
         }
@@ -174,7 +183,7 @@ fn runs() -> impl Iterator<Item = (String, Radio)> {
     });
     // BCR-26: home with slot A playing broadcast FM (RDS, signal, stereo, the slot muted and back).
     let bcast = core::iter::once_with(|| {
-        let mut r = Radio::new();
+        let mut r = radio();
         r.home();
         r.event(Event::FmStation);
         ("Home broadcast".to_string(), r)
@@ -282,7 +291,7 @@ const BUDGET: &[(&str, u64)] = &[
     ("Home layout 0", 1061000),
     ("Home layout 1", 10413000),
     ("Home layout 2", 1363000),
-    ("Home broadcast", 1000000),
+    ("Home broadcast", 1010000), // Oct 21, 2026: the test radio waits 3 s more (radio()), which moves the RDS text by 0.1 %
 ];
 
 /// DISP-25: no live update on any screen shows a pixel that is neither its old value nor its new one, and none
@@ -318,7 +327,7 @@ fn quick_menu_has_no_flicker() {
     use ferrite_core::keys::{PTT_A, PTT_B};
     let mut bad = Vec::new();
     for layout in 0..3 {
-        let mut r = Radio::new();
+        let mut r = radio();
         for _ in 0..layout {
             r.event(Event::Layout);
         }

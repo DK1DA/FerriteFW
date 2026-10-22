@@ -25,7 +25,7 @@ title: Or by itself
 layout: left
 left: Set it to Auto and it comes on below 10, 20, 30 or 40 % battery.
 right: It goes off again by itself on the charger.
-setup: down SIDE1; down SIDE2; wait 1300ms; up SIDE2; up SIDE1; wait 600ms; menu 0 7 7; press DOWN; knob 1; press BACK; press BACK; press BACK; home; wait 600ms
+setup: down SIDE1; down SIDE2; wait 1300ms; up SIDE2; up SIDE1; wait 600ms; menu 0 7 7 2; knob 1; press BACK; press BACK; press BACK; home; wait 600ms
 script:
   wait 1500ms
   event battery
