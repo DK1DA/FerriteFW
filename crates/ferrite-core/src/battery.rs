@@ -17,6 +17,9 @@ pub const KNOT_PCT: [u8; 7] = [0, 5, 15, 30, 45, 65, 100];
 pub const FULL_MV: u32 = 8100;
 /// The reading for [`FULL_MV`] on the 12-bit PA1 scale (48.2 mV per step of the reading >> 4).
 const FULL_RAW: u32 = FULL_MV * 160 / 482;
+/// PWR-22.2: the 65 % knot (t5) sits at least this far below full: some calibrations (both our radios' factory
+/// template, 0xAA: 8.19 V) put stock's full-icon threshold above where a full pack rests, which never read full.
+pub const T5_BELOW_FULL_MV: u32 = 150;
 /// A new reading is taken at most this often (the Radio task reads PA1 every 2 s).
 pub const SAMPLE_MS: u32 = 2_000;
 /// Held this long after an unkey: the pack recovers from the transmit sag.
@@ -31,6 +34,7 @@ pub fn percent(g: &Gauge, raw: u16) -> u8 {
     for (i, t) in g.0[..6].iter().enumerate() {
         x[i] = (*t as u32) << 4;
     }
+    x[5] = x[5].min((FULL_MV - T5_BELOW_FULL_MV) * 160 / 482);
     x[6] = FULL_RAW.max(x[5] + 16);
     if raw <= x[0] {
         return 0;
@@ -161,6 +165,25 @@ mod tests {
         let bad = Gauge([0x90, 0x90, 0x80, 0x93, 0x98, 0xA0, 0xBB]);
         for r in (0..4096).step_by(7) {
             assert!(percent(&bad, r) <= 100);
+        }
+    }
+
+    /// PWR-22.2: a calibration whose full-icon threshold (t5) is above where a full pack rests (both our radios'
+    /// template: 0xAA, 8.19 V) still reads a full pack, 8.14 V, as 100 % and four bars; t5 is capped at 7.95 V, and
+    /// the warning and cut-off stay on the calibrated thresholds.
+    #[test]
+    fn a_high_full_threshold_still_reads_full() {
+        let g = Gauge([0x7F, 0x85, 0x91, 0x9A, 0xA2, 0xAA, 0xFF]);
+        assert_eq!(percent(&g, raw_mv(8140)), 100);
+        assert_eq!(bars(percent(&g, raw_mv(8140))), 4);
+        assert_eq!(percent(&g, raw_mv(7950)), 65, "the capped t5");
+        assert!(percent(&g, raw_mv(7900)) < 65 && percent(&g, raw_mv(7900)) > 45);
+        assert_eq!(percent(&g, (0xA2u16) << 4), 45, "t4 as calibrated");
+        let mut last = 0;
+        for r in 1900..3000u16 {
+            let p = percent(&g, r);
+            assert!(p >= last, "{r}: {p} < {last}");
+            last = p;
         }
     }
 
