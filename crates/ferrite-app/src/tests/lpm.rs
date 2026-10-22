@@ -27,6 +27,7 @@ fn side_combo(t: &mut T, ms: u32) {
 fn on_and_off_restore_everything() {
     let mut t = T::new();
     t.app.set.bt = true;
+    t.app.set.gps_on = true;
     t.app.set_aprs_mode(true);
     t.app.set.pocsag_on = true;
     t.app.set.keypad_light = 3; // always

@@ -436,6 +436,7 @@ mod tests {
             }
         }
         let mut app = crate::App::new(crate::tests::set(), crate::tests::alert());
+        app.settings_mut().gps_on = true; // off by default (GPS-1.4)
         let timed = D(crate::aprs::AprsCfg { beacon: 2 + 3, ..crate::aprs::AprsCfg::DEFAULT }, Some(400)); // 10 minutes
         let d = demand(&app, &timed, false, 1000);
         assert_eq!(d, GpsDemand { on: true, watch: false, track: false, beacon_at: None, sky: false }, "APRS mode off: no beacon");
@@ -457,10 +458,11 @@ mod tests {
         assert!(!demand(&app, &smart, false, 0).on);
     }
 
+    /// GPS-1.4: off by default (decision 235); GPS-14: always on when on.
     #[test]
     fn settings_reach_the_gps() {
         let mut set = crate::settings::Settings::DEFAULT;
-        assert_eq!(cfg(&set), GpsCfg::DEFAULT, "on and always on by default (GPS-14)");
+        assert_eq!(cfg(&set), GpsCfg { on: false, ..GpsCfg::DEFAULT }, "off by default (GPS-1.4); always on when on (GPS-14)");
         assert_eq!(arrival_radius_m(&set), 0, "arrival alarm off by default");
         (set.gps_on, set.gps_rxtx, set.arrival) = (false, 2, 2);
         assert_eq!(cfg(&set), GpsCfg { on: false, rxtx: 2 });

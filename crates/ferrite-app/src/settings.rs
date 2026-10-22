@@ -433,7 +433,7 @@ impl Settings {
         dtmf_ms: 100,
         dtmf_delay: 30,
         cw_id: 0,
-        gps_on: true,
+        gps_on: false, // GPS-1.4: off by default, as stock (decision 235)
         gps_rxtx: 0,
         arrival: 0,
     };

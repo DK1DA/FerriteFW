@@ -162,9 +162,11 @@ const FM: [(u16, &str); 7] = [(8850, "CBC 1"), (9150, "CBC 2"), (9390, "CHEZ"), 
 /// HF recent, newest first: frequency and mode (as `Param::Mode`: 2 AM, 3 USB, 4 LSB, 5 CW).
 const HF: [(Freq10, u8); 6] = [(707_400, 3), (1_407_400, 3), (376_000, 4), (1_013_600, 3), (703_000, 5), (607_000, 2)];
 
-/// The sample radio's settings: the look review's callsign, Canada (as the mock-ups have it), HF recent.
+/// The sample radio's settings: the look review's callsign, Canada (as the mock-ups have it), HF recent, and GPS on
+/// (off by default since decision 235, GPS-1.4; the sample shows the position screens with a fix).
 pub fn settings() -> Settings {
     let mut s = Settings::DEFAULT;
+    s.gps_on = true;
     s.set_callsign(b"VA7FER");
     s.set_region(Some(ferrite_core::txplan::Region::Canada));
     s.setup_done = true;
