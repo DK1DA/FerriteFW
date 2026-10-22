@@ -58,8 +58,8 @@ script:
   wait 2500ms
 ---
 kind: intro
-title: 38 % less current in typical use
-left: About 23 hours becomes about 37 on the stock battery pack.
+title: 41 % less current in typical use
+left: About 23 hours becomes about 39 on the stock battery pack.
 seconds: 6
 ---
 kind: outro

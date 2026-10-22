@@ -77,6 +77,7 @@ MEASURE = (1.0, 4.0)  # the part of each burst measured: after the squelch opens
 
 
 def measure(d, seconds):
+    a = d.tally()
     rows, last, t0 = [], None, time.monotonic()
     while time.monotonic() - t0 < seconds:
         d.poll(0.1)
@@ -86,7 +87,13 @@ def measure(d, seconds):
         if t is not None and t != last:
             last = t
             rows.append((d.state["v"], d.state["i"]))
-    return summary(rows)
+    m = summary(rows)
+    b = d.tally()
+    if a and b and b[0] > a[0]:
+        # The supply's own tally over the span: the true mean, not ~2 readings a second of a 180/800 ms cycle.
+        hours = (b[0] - a[0]) / 3600
+        m["tally_ma"], m["tally_mw"] = (b[1] - a[1]) * 1000 / hours, (b[2] - a[2]) * 1000 / hours
+    return m
 
 
 def slot_freq(radio, slot):
@@ -180,7 +187,8 @@ def main():
                      f"radio's active slot on {slot_freq(r, None)}: tune them together first")
         w = csv.writer(f)
         if new:
-            w.writerow(["label", "state", "time", "samples", "volts", "mean_ma", "median_ma", "min_ma", "max_ma"])
+            w.writerow(["label", "state", "time", "samples", "volts", "mean_ma", "median_ma", "min_ma", "max_ma", "tally_ma", "tally_mw"])
+        d.metering()
         if "lcd:" not in (r.cmd("lcd") or ""):
             sys.exit("the radio has no lcd command: flash a bench build (tools/mkbtf.sh tx-bench)")
         try:
@@ -206,9 +214,11 @@ def main():
                 m = summary(measure_rx(d, tx, a.tx_slot, a.bursts)) if rx else measure(d, a.seconds)
                 results.append((name, m))
                 w.writerow([a.label, name, time.strftime("%Y-%m-%d %H:%M:%S"), m["n"], f"{m['volts']:.3f}",
-                            *(f"{m[k]:.1f}" for k in ("mean_ma", "median_ma", "min_ma", "max_ma"))])
+                            *(f"{m[k]:.1f}" for k in ("mean_ma", "median_ma", "min_ma", "max_ma")),
+                            *(f"{m[k]:.1f}" if k in m else "" for k in ("tally_ma", "tally_mw"))])
                 f.flush()
-                print(f"  {m['mean_ma']:.1f} mA mean, {m['median_ma']:.1f} median ({m['min_ma']:.0f}-{m['max_ma']:.0f})")
+                print(f"  {m['mean_ma']:.1f} mA mean, {m['median_ma']:.1f} median ({m['min_ma']:.0f}-{m['max_ma']:.0f})"
+                      + (f"; the supply's tally {m['tally_ma']:.1f} mA" if "tally_ma" in m else ""))
         finally:
             r.cmd("lcd reset")
             r.cmd("bk save normal")

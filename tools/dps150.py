@@ -24,6 +24,7 @@ import time
 import serial
 
 GET, SET, BAUD, SESSION = 0xA1, 0xB1, 0xB0, 0xC1
+T_METERING = 0xD8  # 1: the supply's own Ah/Wh tally runs (setting it starts it from zero)
 T_IN_V, T_VSET, T_ISET, T_OUT, T_AH, T_WH, T_OUTPUT_ON = 0xC0, 0xC1, 0xC2, 0xC3, 0xD9, 0xDA, 0xDB
 T_MODEL, T_HW, T_FW, T_ALL = 0xDE, 0xDF, 0xE0, 0xFF
 BAUDS = [9600, 19200, 38400, 57600, 115200]
@@ -105,12 +106,26 @@ class Dps150:
             st[{T_MODEL: "model", T_HW: "hw", T_FW: "fw"}[typ]] = d.decode("ascii", "replace").strip("\0 ")
         elif typ == T_ALL and len(d) >= 110:
             st.update(vin=f(0), vset=f(4), iset=f(8), v=f(12), i=f(16), p=f(20), temp=f(24), on=d[107] == 1,
-                      cv=d[109] == 1, t=time.monotonic())
+                      cv=d[109] == 1, t=time.monotonic(), ah=f(99), wh=f(103), tally_t=time.monotonic())
 
     def everything(self):
         self.get(T_ALL)
         self.poll(0.4)
         return self.state
+
+    def metering(self):
+        """Start the supply's own Ah/Wh tally from zero (it integrates far faster than our ~2 readings a second)."""
+        self.send(SET, T_METERING, [1])
+
+    def tally(self):
+        """(monotonic s, Ah, Wh) from a fresh status frame: the difference of two is the true mean over the span."""
+        self.state.pop("tally_t", None)
+        for _ in range(5):
+            self.get(T_ALL)
+            self.poll(0.3)
+            if "tally_t" in self.state:
+                return self.state["tally_t"], self.state["ah"], self.state["wh"]
+        return None
 
     def reading(self, stale=1.0):
         """The latest output V, I, P: from the supply's own stream, or asked for when it's older than `stale` s."""
