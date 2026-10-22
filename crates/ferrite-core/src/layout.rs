@@ -13,9 +13,9 @@ pub const CHANNELS: Range<u32> = 0x02_F000..0x03_F000;
 pub const ZONES: Range<u32> = 0x03_F000..0x04_1000;
 /// 16 range presets × 224 B in one sector.
 pub const PRESETS: Range<u32> = 0x04_1000..0x04_2000;
-/// The first scratch sector (before decision 227): read at mount only, to finish a rewrite a power cut stopped
-/// under an older firmware; otherwise unused. Rewrites go through [`SCRATCH_RING`].
-pub const SCRATCH: Range<u32> = 0x04_2000..0x04_3000;
+/// Free: the scratch sector before decision 227 (rewrites go through [`SCRATCH_RING`] now). Erased when a chip
+/// is formatted, otherwise not used.
+pub const SPARE: Range<u32> = 0x04_2000..0x04_3000;
 pub const APRS: Range<u32> = 0x04_3000..0x04_B000;
 pub const EVENT_LOG: Range<u32> = 0x04_B000..0x06_B000;
 /// Imported from the owner's stock firmware, never shipped.
@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn regions_tile_the_writable_range() {
-        let r = [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SCRATCH, APRS, EVENT_LOG, SSB_PATCH, TRIMS, WAYPOINTS, CONTACTS];
+        let r = [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SPARE, APRS, EVENT_LOG, SSB_PATCH, TRIMS, WAYPOINTS, CONTACTS];
         for p in r.windows(2) {
             assert_eq!(p[0].end, p[1].start);
         }

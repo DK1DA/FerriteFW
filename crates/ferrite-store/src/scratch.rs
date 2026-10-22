@@ -8,14 +8,14 @@
 //!
 //! The scratch sectors are a ring of 32 (`SCRATCH_RING`, decision 227), each rewrite taking the next, so each
 //! takes a 32nd of the erases one sector used to take; where the ring starts moves on every power-on. At mount,
-//! [`recover`] finds a valid footer in the ring (or in the first scratch sector an older firmware used) and
-//! finishes step 2 (it can be repeated any number of times), then erases that sector. A scratch sector a cut left
+//! [`recover`] finds a valid footer in the ring and finishes step 2 (it can be repeated any number of times),
+//! then erases that sector. A scratch sector a cut left
 //! half filled, without its footer, is erased when its turn comes. Every data sector leaves its last 32 bytes
 //! free, which is where the footer fits.
 
 use crate::io::Flash;
 use crate::{crc16, u16_at, u32_at, Crc32, Nor, Result, PAGE, SECTOR};
-use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, PRESETS, SCRATCH, SCRATCH_RING, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, PRESETS, SCRATCH_RING, WAYPOINTS, ZONES};
 
 /// The content a sector can hold; the footer sits after it in the scratch sector.
 pub const FOOTER_AT: u32 = SECTOR - 32;
@@ -67,9 +67,9 @@ fn data_sector(t: u32) -> bool {
 }
 
 /// Finishes a rewrite a power cut stopped (before anything else is read): any scratch sector with a valid footer
-/// is copied to its target if they differ, then erased. The first scratch sector is left erased, as before.
+/// is copied to its target if they differ, then erased.
 pub async fn recover<N: Nor>(f: &Flash<N>) -> Result {
-    for s in SCRATCH_RING.step_by(SECTOR as usize).chain([SCRATCH.start]) {
+    for s in SCRATCH_RING.step_by(SECTOR as usize) {
         let mut foot = [0u8; 14];
         f.raw_read(s + FOOTER_AT, &mut foot)?;
         let target = u32_at(&foot, 4);
@@ -80,7 +80,7 @@ pub async fn recover<N: Nor>(f: &Flash<N>) -> Result {
         if valid && !f.same(s, target, FOOTER_AT)? {
             copy_back(f, s, target).await?;
         }
-        if (valid || s == SCRATCH.start) && !f.blank(s, SECTOR)? {
+        if valid && !f.blank(s, SECTOR)? {
             f.erase(s).await?;
         }
     }

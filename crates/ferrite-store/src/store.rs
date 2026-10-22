@@ -30,7 +30,7 @@ use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
 use ferrite_core::freq::{mhz, Freq10};
-use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, LAYOUT_HEADER, PRESETS, SCRATCH, SETTINGS, TRIMS, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, LAYOUT_HEADER, PRESETS, SETTINGS, SPARE, TRIMS, WAYPOINTS, ZONES};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
 
@@ -295,7 +295,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// A blank or foreign chip: every area erased, then the header (a cut before it formats again next time).
     async fn format(&self) -> Result {
-        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SCRATCH, APRS, EVENT_LOG, WAYPOINTS, CONTACTS] {
+        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SPARE, APRS, EVENT_LOG, WAYPOINTS, CONTACTS] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase(s).await?;
