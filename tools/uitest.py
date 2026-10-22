@@ -333,6 +333,121 @@ def page_ids(names, mods=None):
 # ---- Running ----
 
 
+# ---- --auto: the tests what changed touches ----
+
+# (glob, test-name keywords or "module:NAME"/"page:NAME"/"full", why): every match adds. Paths in the ferrite checkout.
+# A firmware or app file no row names runs everything (the safe side); host-only files (tests, simulators, PC tools,
+# docs) run nothing but the smoke set.
+AREAS = [
+    ("firmware/src/tasks/ui.rs", ["backlight", "wake", "redraw", "dark", "light", "module:home"], "the UI task: drawing, lights"),
+    ("firmware/src/bus.rs", ["backlight", "wake", "redraw", "hint_bars"], "the display bus"),
+    ("firmware/src/display.rs", ["backlight", "wake", "redraw", "hint_bars"], "the display"),
+    ("drivers/st7789/*", ["backlight", "wake", "redraw", "hint_bars"], "the display driver"),
+    ("firmware/src/hal/backlight.rs", ["backlight", "light", "key_lock"], "the backlight"),
+    ("firmware/src/tasks/input.rs", ["module:keys", "knob"], "keys and the knob"),
+    ("drivers/keypad/*", ["module:keys", "knob"], "the keypad"),
+    ("firmware/src/tasks/gps.rs", ["module:gpsui", "gps", "nmea", "gga", "sky"], "GPS"),
+    ("crates/ferrite-core/src/gpspower.rs", ["module:gpsui", "gps", "nmea"], "GPS power"),
+    ("crates/ferrite-radio/src/gps.rs", ["gps", "nmea"], "GPS pins"),
+    ("drivers/nmea/*", ["module:gpsui", "gga", "sky"], "NMEA"),
+    ("firmware/src/hal/uart.rs", ["module:bluetooth", "module:linkproto", "gps", "nmea"], "the UARTs"),
+    ("firmware/src/tasks/link.rs", ["module:bluetooth", "module:linkproto"], "the link"),
+    ("crates/ferrite-app/src/link*", ["module:bluetooth", "module:linkproto"], "the link"),
+    ("firmware/src/hal/audio.rs", ["aprs", "kept_chips", "decod", "pocsag", "same"], "audio capture and playback"),
+    ("firmware/src/tasks/dsp.rs", ["aprs", "kept_chips", "decod", "pocsag", "same"], "DSP"),
+    ("firmware/src/tasks/aprs.rs", ["aprs"], "APRS"),
+    ("firmware/src/tasks/decode.rs", ["decod", "pocsag", "same"], "decoders"),
+    ("firmware/src/hal/adc.rs", ["about_rows", "battery", "temp", "vox"], "the ADC"),
+    ("firmware/src/hal/tone.rs", ["beep", "tone"], "beeps"),
+    ("firmware/src/tasks/radio/*", ["module:chips", "module:bcast", "module:squelch", "module:watch", "fm_", "broadcast"], "the Radio task"),
+    ("crates/ferrite-radio/*", ["module:chips", "module:squelch"], "chip recipes"),
+    ("drivers/bk4829/*", ["module:chips", "module:squelch", "module:watch"], "the BK4829"),
+    ("drivers/si4732/*", ["module:bcast", "fm_", "broadcast"], "the SI4732"),
+    ("crates/ferrite-core/src/rxsleep.rs", ["key_wakes_then_the_sleep", "battery_save", "watched_chips"], "Battery Save"),
+    ("firmware/src/hal/clock.rs", ["module:restart", "module:hostconfirm", "module:bluetooth", "module:linkproto"], "clocks"),
+    ("firmware/src/board.rs", ["module:restart", "module:hostconfirm"], "boot"),
+    ("firmware/src/main.rs", ["module:restart", "module:hostconfirm"], "boot"),
+    ("crates/ferrite-app/src/term/*", ["term", "module:limits"], "the terminal"),
+    ("crates/ferrite-app/src/screens/*", ["page:"], "a screen"),
+    ("tools/uitests/*", ["module:"], "UI tests"),
+    ("firmware/Cargo.toml", [], "features"),
+    ("tools/*", [], "PC tools"),
+    ("*/tests/*", [], "host tests"),
+    ("*/tests.rs", [], "host tests"),
+    ("*/tests_*.rs", [], "host tests"),
+    ("sim/*", [], "the simulator"),
+    ("sim-web/*", [], "the web simulator"),
+    ("crates/ferrite-checks/*", [], "rule checks"),
+    (".github/*", [], "CI"),
+    ("*.md", [], "docs"),
+]
+RULE_ID = re.compile(r"\b([A-Z]{2,6}-\d+(?:\.\d+)*)\b")
+
+
+def git(*args):
+    r = subprocess.run(["git", "-C", FERRITE, *args], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def last_ui_commit(results):
+    """The commit of the newest on-radio UI run (session.json, source radio)."""
+    best = None
+    for name in sorted(os.listdir(results)) if os.path.isdir(results) else []:
+        try:
+            m = json.load(open(os.path.join(results, name, "session.json")))
+        except (OSError, ValueError):
+            continue
+        if m.get("source") == "radio" and "ui" in (m.get("kinds") or []) and m.get("commit"):
+            best = m["commit"].rstrip("+")
+    return best
+
+
+def auto_select(tests, a):
+    """(tests, lines of why): the smoke set; tests checking a rule ID on a changed line (or its parent rule); each
+    changed file's area (AREAS); everything when a firmware/app file isn't in AREAS or there is no base."""
+    base = a.since or last_ui_commit(a.results)
+    why = []
+    if not base or git("cat-file", "-e", f"{base}^{{commit}}") is None:
+        return tests, [f"no base commit ({base or 'no earlier on-radio UI run'}): everything"]
+    files = sorted({f for f in ((git("diff", "--name-only", f"{base}..HEAD") or "") + (git("diff", "--name-only", "HEAD") or "")).splitlines() if f})
+    diff = (git("diff", "-U0", f"{base}..HEAD") or "") + (git("diff", "-U0", "HEAD") or "")
+    rules = set()
+    for line in diff.splitlines():
+        if line[:1] in "+-" and not line.startswith(("+++", "---")):
+            for r in RULE_ID.findall(line):
+                rules.add(r)
+                rules.add(r.split(".")[0])
+    picked = {f"{t.module}.{t.name}": "smoke" for t in tests if t.smoke}
+    full = []
+    for f in files:
+        rows = [(kw, w) for g, kw, w in AREAS if fnmatch.fnmatch(f, g)]
+        if not rows:
+            if f.startswith(("firmware/", "crates/", "drivers/")):
+                full.append(f)
+            continue
+        for kws, w in rows:
+            for kw in kws:
+                stem = os.path.splitext(os.path.basename(f))[0]
+                for t in tests:
+                    tid = f"{t.module}.{t.name}"
+                    hit = (kw == "page:" and stem in t.pages) or (kw == "module:" and t.module == stem) \
+                        or (kw.startswith("module:") and len(kw) > 7 and t.module == kw[7:]) \
+                        or (not kw.endswith(":") and not kw.startswith("module:") and kw.lower() in t.name.lower())
+                    if hit:
+                        picked.setdefault(tid, f"{w} ({f})")
+    for t in tests:
+        hit = [r for r in t.rules if r in rules or r.split(".")[0] in rules]
+        if hit:
+            picked.setdefault(f"{t.module}.{t.name}", "rules on changed lines: " + ", ".join(hit))
+    why.append(f"since {base}: {len(files)} files changed, {len(rules)} rule IDs on changed lines")
+    if full:
+        why.append("firmware/app files no area names, so everything: " + ", ".join(full[:8]) + (" ..." if len(full) > 8 else ""))
+        return tests, why
+    sel = [t for t in tests if f"{t.module}.{t.name}" in picked]
+    why += [f"  {k}: {v}" for k, v in sorted(picked.items())]
+    return sel, why
+
+
 def select(tests, a, sim):
     out = []
     pages = page_ids(a.page.split(",")) if getattr(a, "page", None) else None
@@ -800,6 +915,9 @@ def main_args(argv=None):
     ap.add_argument("--fix-pages", action="store_true", help="after the run: write the screens each test visited "
                     "into its pages= tag")
     ap.add_argument("--smoke", action="store_true", help="the smoke set only")
+    ap.add_argument("--auto", action="store_true", help="only the tests the changes since the last on-radio run "
+                    "touch: the smoke set, tests of rule IDs in the changed lines, and each changed area's tests")
+    ap.add_argument("--since", help="--auto: the commit to compare with (default: the last on-radio UI run's)")
     ap.add_argument("--slow", action="store_true", help="also the tests that wait on timers")
     ap.add_argument("--list", action="store_true", help="list the tests and the rules they check")
     ap.add_argument("--results", default=RESULTS, help="results root (default %(default)s)")
@@ -833,6 +951,10 @@ def main_args(argv=None):
 def main(argv=None):
     a = main_args(argv)
     tests = load_tests()
+    if a.auto:
+        tests, why = auto_select(tests, a)
+        for w in why:
+            say(w)
     if a.list:
         sel = select(tests, a, False)
         for t in sel:

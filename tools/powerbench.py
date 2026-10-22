@@ -54,6 +54,7 @@ STATES = [
     ("rx signal", ["@rx"]),
     ("rx signal, low power set", ["lcd bl 30", "lcd keys 0", "lcd fps 1", "@rx"]),
 ]
+APPROVED_HZ = (145_495_000, 446_475_000, 145_575_000)  # CLAUDE.md: the bench's keying frequencies
 BURST_S, TAIL_S, REST_S = 4.5, 0.5, 15.0  # keyed, the carrier after KEY off, then the rest
 MEASURE = (1.0, 4.0)  # the part of each burst measured: after the squelch opens, before the unkey
 
@@ -150,6 +151,11 @@ def main():
             sys.exit(f"the second radio is {tx.build}, not tx+dry: turn its Dry TX on")
         check_dry(tx)
     with Radio(a.radio) as r, Dps150(a.supply) as d, open(out, "a", newline="") as f:
+        # CLAUDE.md: PC keying only on the approved frequencies, Dry TX on (the 120-24 MHz runs of Oct 21 keyed
+        # 145.950 before this check existed).
+        if tx and slot_freq(tx, a.tx_slot) not in APPROVED_HZ:
+            sys.exit(f"the second radio's slot {a.tx_slot.upper()} is on {slot_freq(tx, a.tx_slot)} Hz: PC keying only on "
+                     f"{', '.join(f'{f / 1e6:.3f}' for f in APPROVED_HZ)} MHz")
         if tx and slot_freq(tx, a.tx_slot) != slot_freq(r, None):
             sys.exit(f"the second radio's slot {a.tx_slot.upper()} is on {slot_freq(tx, a.tx_slot)} Hz, the tested "
                      f"radio's active slot on {slot_freq(r, None)}: tune them together first")
