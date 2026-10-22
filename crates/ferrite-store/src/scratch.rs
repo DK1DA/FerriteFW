@@ -1,18 +1,21 @@
 //! Changing bytes that are already written: NOR can only clear bits, so the record's 4 KB sector is rewritten,
-//! through one scratch sector so that a power cut leaves the old sector or the new one, never half of each.
+//! through a scratch sector so that a power cut leaves the old sector or the new one, never half of each.
 //!
-//! 1. The scratch sector gets the sector's new content (its first [`FOOTER_AT`] bytes), then a footer: where it
+//! 1. A scratch sector gets the sector's new content (its first [`FOOTER_AT`] bytes), then a footer: where it
 //!    goes and the content's CRC. The footer goes last, so a cut before it leaves the target untouched.
 //! 2. The target is erased and the scratch copied into it.
 //! 3. The scratch sector is erased.
 //!
-//! At mount, [`recover`] finds a valid footer and finishes step 2 (it can be repeated any number of times),
-//! then erases the scratch sector. Every data sector leaves its last 32 bytes free, which is where the footer
-//! fits. Wear: each rewrite erases the scratch sector and the target once.
+//! The scratch sectors are a ring of 32 (`SCRATCH_RING`, decision 227), each rewrite taking the next, so each
+//! takes a 32nd of the erases one sector used to take; where the ring starts moves on every power-on. At mount,
+//! [`recover`] finds a valid footer in the ring (or in the first scratch sector an older firmware used) and
+//! finishes step 2 (it can be repeated any number of times), then erases that sector. A scratch sector a cut left
+//! half filled, without its footer, is erased when its turn comes. Every data sector leaves its last 32 bytes
+//! free, which is where the footer fits.
 
 use crate::io::Flash;
 use crate::{crc16, u16_at, u32_at, Crc32, Nor, Result, PAGE, SECTOR};
-use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, PRESETS, SCRATCH, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, PRESETS, SCRATCH, SCRATCH_RING, WAYPOINTS, ZONES};
 
 /// The content a sector can hold; the footer sits after it in the scratch sector.
 pub const FOOTER_AT: u32 = SECTOR - 32;
@@ -20,8 +23,9 @@ const MAGIC: u32 = 0x5243_5346; // "FSCR"
 
 /// Rewrites `target`'s sector: `edit(offset, bytes)` changes each piece of its current content.
 pub async fn rewrite<N: Nor>(f: &Flash<N>, target: u32, edit: &dyn Fn(u32, &mut [u8])) -> Result {
-    if !f.blank(SCRATCH.start, SECTOR)? {
-        f.erase(SCRATCH.start).await?;
+    let s = f.scratch_next();
+    if !f.blank(s, SECTOR)? {
+        f.erase(s).await?;
     }
     let mut crc = Crc32::new();
     {
@@ -33,7 +37,7 @@ pub async fn rewrite<N: Nor>(f: &Flash<N>, target: u32, edit: &dyn Fn(u32, &mut 
             f.raw_read(target + off, &mut buf[..n])?;
             edit(off, &mut buf[..n]);
             crc.update(&buf[..n]);
-            f.program(SCRATCH.start + off, &buf[..n]).await?;
+            f.program(s + off, &buf[..n]).await?;
             off += n as u32;
         }
     }
@@ -43,18 +47,18 @@ pub async fn rewrite<N: Nor>(f: &Flash<N>, target: u32, edit: &dyn Fn(u32, &mut 
     foot[8..12].copy_from_slice(&crc.get().to_le_bytes());
     let c = crc16(&foot[..12]);
     foot[12..14].copy_from_slice(&c.to_le_bytes());
-    f.program(SCRATCH.start + FOOTER_AT, &foot).await?;
+    f.program(s + FOOTER_AT, &foot).await?;
     // From here the scratch copy is the sector: readers see it while the target is erased and refilled.
-    f.redirect(target);
-    let r = copy_back(f, target).await;
+    f.redirect(target, s);
+    let r = copy_back(f, s, target).await;
     f.end_redirect();
     r?;
-    f.erase(SCRATCH.start).await
+    f.erase(s).await
 }
 
-async fn copy_back<N: Nor>(f: &Flash<N>, target: u32) -> Result {
+async fn copy_back<N: Nor>(f: &Flash<N>, from: u32, target: u32) -> Result {
     f.erase(target).await?;
-    f.copy(SCRATCH.start, target, FOOTER_AT).await
+    f.copy(from, target, FOOTER_AT).await
 }
 
 /// A sector the scratch copy may go to.
@@ -62,20 +66,23 @@ fn data_sector(t: u32) -> bool {
     t.is_multiple_of(SECTOR) && [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, WAYPOINTS, CONTACTS].iter().any(|r| r.contains(&t))
 }
 
-/// Finishes a rewrite a power cut stopped (before anything else is read), and leaves the scratch sector erased.
+/// Finishes a rewrite a power cut stopped (before anything else is read): any scratch sector with a valid footer
+/// is copied to its target if they differ, then erased. The first scratch sector is left erased, as before.
 pub async fn recover<N: Nor>(f: &Flash<N>) -> Result {
-    let mut foot = [0u8; 14];
-    f.raw_read(SCRATCH.start + FOOTER_AT, &mut foot)?;
-    let target = u32_at(&foot, 4);
-    let valid = u32_at(&foot, 0) == MAGIC
-        && u16_at(&foot, 12) == crc16(&foot[..12])
-        && data_sector(target)
-        && f.crc(SCRATCH.start, FOOTER_AT)? == u32_at(&foot, 8);
-    if valid && !f.same(SCRATCH.start, target, FOOTER_AT)? {
-        copy_back(f, target).await?;
-    }
-    if !f.blank(SCRATCH.start, SECTOR)? {
-        f.erase(SCRATCH.start).await?;
+    for s in SCRATCH_RING.step_by(SECTOR as usize).chain([SCRATCH.start]) {
+        let mut foot = [0u8; 14];
+        f.raw_read(s + FOOTER_AT, &mut foot)?;
+        let target = u32_at(&foot, 4);
+        let valid = u32_at(&foot, 0) == MAGIC
+            && u16_at(&foot, 12) == crc16(&foot[..12])
+            && data_sector(target)
+            && f.crc(s, FOOTER_AT)? == u32_at(&foot, 8);
+        if valid && !f.same(s, target, FOOTER_AT)? {
+            copy_back(f, s, target).await?;
+        }
+        if (valid || s == SCRATCH.start) && !f.blank(s, SECTOR)? {
+            f.erase(s).await?;
+        }
     }
     Ok(())
 }

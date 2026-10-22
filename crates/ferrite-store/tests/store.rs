@@ -652,3 +652,113 @@ fn calibration_crc_recorded_then_checked() {
     let s = mount(f);
     assert_eq!(ferrite_store::block(s.check_cal()), CalCrc::Changed);
 }
+
+/// Decision 227: channel writes queued for one sector go in one rewrite (one erase of the sector, one of a
+/// scratch sector), in queue order; a write to another sector stays queued in its place, and a job of another
+/// kind ends the run merged.
+#[test]
+fn queued_channel_writes_share_a_rewrite() {
+    use ferrite_core::layout::CHANNELS;
+    let s = mount(SimFlash::new());
+    for n in 0..70u16 {
+        assert!(s.apply(ChanWrite::Put { ch: channel(n, NO_ZONE, 14_600_000 + n as u32 * 1250, "Old", DEFAULT_CFG), from: None }));
+    }
+    let sector0 = (CHANNELS.start / 4096) as usize;
+    let before = s.nor().erases.clone();
+    s.set_deferred(true);
+    let put = |n: u16, rx: u32| ChanWrite::Put { ch: channel(n, NO_ZONE, rx, "New", DEFAULT_CFG), from: None };
+    assert!(s.apply(put(3, 14_500_000)));
+    assert!(s.apply(put(64, 14_510_000))); // sector 1: stays queued
+    assert!(s.apply(put(5, 14_520_000)));
+    assert!(s.apply(ChanWrite::Delete(7)));
+    assert!(s.apply(put(5, 14_530_000))); // the same channel again: the later one wins
+    assert!(s.request(Op::NewZone)); // another kind: ends the run
+    assert!(s.apply(put(9, 14_540_000)));
+    let mut runs = 0;
+    while let Some(j) = s.next_job() {
+        ferrite_store::block(s.run(j));
+        runs += 1;
+    }
+    let e = s.nor().erases.clone();
+    assert_eq!(e[sector0] - before[sector0], 2, "3, 5, 7 and 5 again in one rewrite; 9 after the other job in a second");
+    assert_eq!(e[sector0 + 1] - before[sector0 + 1], 1, "64 in its own");
+    assert_eq!(runs, 4, "the first put (with 5, 7, 5), 64, the other job, 9");
+    let rx = |n| s.by_num(n).map(|x| x.0.rx);
+    assert_eq!((rx(3), rx(5), rx(7), rx(9), rx(64)), (Some(14_500_000), Some(14_530_000), None, Some(14_540_000), Some(14_510_000)));
+    index_agrees(&s);
+    let s = mount(unmount(s));
+    assert_eq!(s.by_num(5).map(|x| x.0.rx), Some(14_530_000));
+}
+
+/// Decision 227: rewrites take the 32 scratch sectors in turn, so each takes a 32nd of the erases; the first
+/// scratch sector isn't used any more.
+#[test]
+fn rewrites_spread_over_the_scratch_ring() {
+    use ferrite_core::layout::{SCRATCH, SCRATCH_RING};
+    let s = mount(SimFlash::new());
+    assert!(s.apply(ChanWrite::Put { ch: channel(1, NO_ZONE, 14_600_000, "A", DEFAULT_CFG), from: None }));
+    let before = s.nor().erases.clone();
+    for i in 0..64u32 {
+        assert!(s.apply(ChanWrite::Put { ch: channel(1, NO_ZONE, 14_600_000 + (i + 1) * 1250, "A", DEFAULT_CFG), from: None }));
+    }
+    let e = s.nor().erases.clone();
+    let ring: Vec<u32> = (SCRATCH_RING.start / 4096..SCRATCH_RING.end / 4096).map(|k| e[k as usize] - before[k as usize]).collect();
+    assert!(ring.iter().all(|&n| n == 2), "{ring:?}");
+    assert_eq!(e[(SCRATCH.start / 4096) as usize], before[(SCRATCH.start / 4096) as usize]);
+}
+
+/// Decision 227: a rewrite a power cut stopped under the older firmware, in the first scratch sector, is still
+/// finished at mount.
+#[test]
+fn an_older_firmwares_cut_rewrite_is_finished() {
+    use ferrite_core::layout::{CHANNELS, SCRATCH};
+    let s = mount(SimFlash::new());
+    assert!(s.apply(ChanWrite::Put { ch: channel(2, NO_ZONE, 14_600_000, "Old", DEFAULT_CFG), from: None }));
+    // Build the new sector in the old scratch sector by hand: the same rewrite, its footer, the target erased.
+    assert!(s.apply(ChanWrite::Put { ch: channel(2, NO_ZONE, 14_700_000, "New", DEFAULT_CFG), from: None }));
+    let mut f = unmount(s);
+    let new: Vec<u8> = f.mem[CHANNELS.start as usize..CHANNELS.start as usize + 4064].to_vec();
+    let sc = SCRATCH.start as usize;
+    f.mem[sc..sc + 4064].copy_from_slice(&new);
+    let mut crc = ferrite_store::Crc32::new();
+    crc.update(&new);
+    let mut foot = [0u8; 14];
+    foot[..4].copy_from_slice(&0x5243_5346u32.to_le_bytes());
+    foot[4..8].copy_from_slice(&CHANNELS.start.to_le_bytes());
+    foot[8..12].copy_from_slice(&crc.get().to_le_bytes());
+    let c = ferrite_store::crc16(&foot[..12]);
+    foot[12..14].copy_from_slice(&c.to_le_bytes());
+    f.mem[sc + 4064..sc + 4078].copy_from_slice(&foot);
+    f.mem[CHANNELS.start as usize..CHANNELS.start as usize + 4096].fill(0xFF); // cut after the target's erase
+    let s = mount(f);
+    assert_eq!(s.by_num(2).map(|x| x.0.rx), Some(14_700_000));
+    assert!(s.nor().mem[sc..sc + 4096].iter().all(|&b| b == 0xFF), "the old scratch sector is left erased");
+}
+
+/// Decision 227: a merged rewrite is one rewrite: a power cut anywhere in it leaves all the queued channels as
+/// they were, or all as written.
+#[test]
+fn power_cuts_during_a_merged_rewrite() {
+    let mut r = Rng(0x2270_0001);
+    let s = mount(SimFlash::new());
+    for n in 0..20u16 {
+        assert!(s.apply(ChanWrite::Put { ch: channel(n, NO_ZONE, 14_600_000 + n as u32 * 1250, "Old", DEFAULT_CFG), from: None }));
+    }
+    let mut f = unmount(s);
+    for i in 0..300u32 {
+        let (s, before, after) = cut_during(f, &mut r, &|s| {
+            s.set_deferred(true);
+            for n in [2u16, 7, 11, 19] {
+                s.apply(ChanWrite::Put { ch: channel(n, NO_ZONE, 14_400_000 + i * 2500 + n as u32, "New", DEFAULT_CFG), from: None });
+            }
+            while let Some(j) = s.next_job() {
+                ferrite_store::block(s.run(j));
+            }
+            s.set_deferred(false);
+        });
+        let got = snap(&s);
+        assert!(got.chans == before.chans || got.chans == after.chans, "iteration {i}: neither before nor after");
+        index_agrees(&s);
+        f = unmount(s);
+    }
+}

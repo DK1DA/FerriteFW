@@ -13,8 +13,8 @@ pub const CHANNELS: Range<u32> = 0x02_F000..0x03_F000;
 pub const ZONES: Range<u32> = 0x03_F000..0x04_1000;
 /// 16 range presets × 224 B in one sector.
 pub const PRESETS: Range<u32> = 0x04_1000..0x04_2000;
-/// One sector: a data sector's new content while it is rewritten, with a footer saying where it goes
-/// (ferrite-store `scratch`). The free last bytes of every data sector are what make room for that footer.
+/// The first scratch sector (before decision 227): read at mount only, to finish a rewrite a power cut stopped
+/// under an older firmware; otherwise unused. Rewrites go through [`SCRATCH_RING`].
 pub const SCRATCH: Range<u32> = 0x04_2000..0x04_3000;
 pub const APRS: Range<u32> = 0x04_3000..0x04_B000;
 pub const EVENT_LOG: Range<u32> = 0x04_B000..0x06_B000;
@@ -28,15 +28,19 @@ pub const CONTACTS: Range<u32> = 0x07_4000..0x07_6000;
 pub const MAILBOX: Range<u32> = 0x07_6000..0x08_2000;
 /// Stock V0.29's record: left alone.
 pub const STOCK_RECORD: Range<u32> = 0x08_2000..0x08_3000;
+/// The scratch ring (decision 227): 32 sectors taking turns at holding a data sector's new content while it is
+/// rewritten, with a footer saying where it goes (ferrite-store `scratch`), so no one sector takes every
+/// rewrite's erase. The free last bytes of every data sector make room for that footer. At the top of the free
+/// space, out of the way of the records below and the prompts above.
+pub const SCRATCH_RING: Range<u32> = 0x1E_0000..0x20_0000;
 /// Stock's voice prompts: writable only after the owner has backed them up (a later, explicit unlock).
 pub const PROMPTS: Range<u32> = 0x20_0000..0x30_0000;
 /// The bootloader reflashes the MCU from here if it finds its header: never written.
 pub const UPDATE_AREA: Range<u32> = 0x30_0000..0x40_0000;
 
-/// Everything Ferrite may erase or program, from the layout header to the end of the contacts. Prompts are not
-/// in it until they have been backed up.
-#[allow(clippy::single_range_in_vec_init)] // a list: the prompts region joins it once backed up
-pub static WRITABLE: [Range<u32>; 1] = [LAYOUT_HEADER.start..CONTACTS.end];
+/// Everything Ferrite may erase or program: from the layout header to the end of the contacts, and the scratch
+/// ring. Prompts are not in it until they have been backed up.
+pub static WRITABLE: [Range<u32>; 2] = [LAYOUT_HEADER.start..CONTACTS.end, SCRATCH_RING];
 
 #[cfg(test)]
 mod tests {
@@ -66,6 +70,9 @@ mod tests {
             assert_eq!(x.end % 4096, 0);
         }
         assert_eq!(r[0].start..r[r.len() - 1].end, WRITABLE[0]);
+        assert_eq!(WRITABLE[1], SCRATCH_RING);
+        const { assert!(STOCK_RECORD.end <= SCRATCH_RING.start && SCRATCH_RING.end <= PROMPTS.start, "in the free space") };
+        assert_eq!(SCRATCH_RING.len() / 4096, 32);
         assert_eq!(CONTACTS.end, MAILBOX.start);
         assert_eq!(MAILBOX.end, STOCK_RECORD.start);
         assert!(CHANNELS.len() / 4096 * 63 >= 1000, "1,000 channels at 63 per sector");
