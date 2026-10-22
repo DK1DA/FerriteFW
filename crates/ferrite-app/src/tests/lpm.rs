@@ -54,6 +54,10 @@ fn on_and_off_restore_everything() {
     assert_eq!(t.app.screen, Screen::Home, "no broadcast");
     t.app.open(Dest::Crossband);
     assert_eq!(t.app.screen, Screen::Home, "no crossband (two VFOs)");
+    t.app.open(Dest::BandScope);
+    assert_eq!(t.app.screen, Screen::Home, "no band scope (a sweeping receiver)");
+    t.app.open(Dest::Counter);
+    assert_eq!(t.app.screen, Screen::Home, "no counter (a listening receiver)");
     t.app.open(Dest::Group(7));
     assert_ne!(t.app.screen, Screen::Home, "the menus stay");
     t.app.go_home();

@@ -1239,9 +1239,11 @@ impl App {
     /// Opens a screen by where it is in the manual ([`Dest`]), remembering this one for BACK. Screens not built
     /// yet open as a "coming" placeholder ([`screens::nav::enter`]).
     pub fn open(&mut self, dest: Dest) {
-        // PWR-24.4: Low Power Mode has no scan, broadcast, HF mode or crossband (two VFOs); menus, editing and the
-        // active slot's tools (scope, tone search, counter) stay.
-        if self.low_power() && matches!(dest, Dest::Scan | Dest::FmBroadcast | Dest::HfMode | Dest::Crossband) {
+        // PWR-24.4: Low Power Mode has no scan, band scope, counter, broadcast, HF mode or crossband (two VFOs):
+        // nothing that keeps a receiver sweeping or listening; menus, editing and tone search stay.
+        if self.low_power()
+            && matches!(dest, Dest::Scan | Dest::BandScope | Dest::Counter | Dest::FmBroadcast | Dest::HfMode | Dest::Crossband)
+        {
             return self.lpm_refuse();
         }
         // PIN-5: channel-only mode has no MENU 0 and no editing
