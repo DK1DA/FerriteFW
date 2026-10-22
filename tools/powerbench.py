@@ -55,6 +55,23 @@ STATES = [
     ("rx signal, low power set", ["lcd bl 30", "lcd keys 0", "lcd fps 1", "@rx"]),
 ]
 APPROVED_HZ = (145_495_000, 446_475_000, 145_575_000)  # CLAUDE.md: the bench's keying frequencies
+# `--suite lpm`: normal against Low Power Mode as a user runs them (PWR-24), from the factory defaults (brightness
+# 7, keypad light with the screen, watch A+B, GPS on, Bluetooth off, Battery Save 1). Battery Save is pinned at each
+# side's steady state (level 1's 300/500; the mode's 180/800), i.e. after its hold windows, so a 60 s state can't
+# straddle one. "@wake" presses BACK first (lights the screen); "@dark" waits the 5 s timeout out.
+LPM_SETUP = ["set 0 7 7 2 Off", "set 0 7 4 2 7", "set 0 7 4 5 With screen", "set 0 1 1 A+B", "set 0 6 1 On",
+             "set 0 9 2 1 Off", "set 0 7 7 1 Level 1"]
+LPM_RESTORE = ["set 0 7 7 2 Off", "bk save normal", "set 0 7 4 1 1 min"]
+NORMAL = ["set 0 7 7 2 Off", "bk save 300 500"]
+LOWPOWER = ["set 0 7 7 2 On", "bk save 180 800"]
+LPM_STATES = [
+    ("normal, screen lit", NORMAL + ["set 0 7 4 1 Never", "@wake"]),
+    ("normal, screen dark", NORMAL + ["set 0 7 4 1 5 s", "@dark"]),
+    ("low power, screen lit", LOWPOWER + ["set 0 7 4 1 Never", "@wake"]),
+    ("low power, screen dark", LOWPOWER + ["set 0 7 4 1 5 s", "@dark"]),
+    ("normal, receiving", NORMAL + ["set 0 7 4 1 Never", "@wake", "@rx"]),
+    ("low power, receiving", LOWPOWER + ["set 0 7 4 1 Never", "@wake", "@rx"]),
+]
 BURST_S, TAIL_S, REST_S = 4.5, 0.5, 15.0  # keyed, the carrier after KEY off, then the rest
 MEASURE = (1.0, 4.0)  # the part of each burst measured: after the squelch opens, before the unkey
 
@@ -131,9 +148,11 @@ def main():
     ap.add_argument("--tx", help="the second radio's port, keyed dry for the rx states")
     ap.add_argument("--tx-slot", choices=["a", "b", "c"])
     ap.add_argument("--bursts", type=int, default=8, help="key-ups per rx state")
+    ap.add_argument("--suite", choices=["display", "lpm"], default="display",
+                    help="display: the low-power bench's display states (default); lpm: normal against Low Power Mode")
     ap.add_argument("--note", help="the setup, for the record (volume, battery, antenna): target/power/notes.txt")
     a = ap.parse_args()
-    states = [s for s in STATES if not a.only or s[0] in a.only.split(";")]
+    states = [s for s in (LPM_STATES if a.suite == "lpm" else STATES) if not a.only or s[0] in a.only.split(";")]
     if not a.tx:
         states = [s for s in states if "@rx" not in s[1]]
     elif not a.tx_slot:
@@ -167,9 +186,18 @@ def main():
         try:
             for name, lines in states:
                 r.cmd("lcd reset")
-                for line in BASE + lines:
-                    if line != "@rx":
+                if a.suite == "lpm" and not results:
+                    for line in LPM_SETUP:
                         r.cmd(line)
+                for line in ([] if a.suite == "lpm" else BASE) + lines:
+                    if line == "@wake":
+                        r.press("BACK")
+                    elif line == "@dark":
+                        time.sleep(7)
+                    elif line != "@rx":
+                        out = r.cmd(line)
+                        if "invalid" in out or "refused" in out:
+                            sys.exit(f"{line}: {out.strip()}")
                 rx = "@rx" in lines
                 what = f"{a.bursts} dry bursts" if rx else f"{a.seconds:.0f} s"
                 print(f"{name}: settling {a.settle:.0f} s, then {what}", flush=True)
@@ -184,6 +212,9 @@ def main():
         finally:
             r.cmd("lcd reset")
             r.cmd("bk save normal")
+            if a.suite == "lpm":
+                for line in LPM_RESTORE:
+                    r.cmd(line)
             if tx:
                 tx.close()
     base = results[0][1]["mean_ma"] if results and results[0][0] == "baseline" else None
