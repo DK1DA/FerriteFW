@@ -322,6 +322,9 @@ pub enum Op {
     Read(u16),
     ReadAll,
     ClearLog,
+    /// APRS-46: every message to us read (and its log entry, INBOX-7.1); every message gone, both ways.
+    MessagesReadAll,
+    ClearMessages,
     /// Channels by number (CHAN-13: deleting happens only in the browser).
     DeleteChannel(u16),
     Skip(u16, bool),

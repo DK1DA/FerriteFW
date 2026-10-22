@@ -505,3 +505,17 @@ fn strip_beside_broadcast() {
     assert!(matches!(r.sim.radio().live.mode, ModeLive::Scope { centre, .. } if centre == mhz(146) + 52_000), "the strip sweeps around A");
     r.expect_text("-112k").expect_text("+112k").expect_no_text("SNR").expect_text("100.500");
 }
+
+/// APRS-46: the Messages options mark every message read (the mail badge empties, INBOX-3.1) and delete them all
+/// after a confirm.
+#[test]
+fn messages_mark_all_read_and_delete_all() {
+    let mut r = Radio::new();
+    r.run("menu 0 0; expect text \"Inbox 1 unread\"");
+    r.run("menu 0 5 2; hold OK; expect text \"Mark all read\"; press DOWN; press DOWN; press DOWN; press OK; wait 300ms");
+    r.run("menu 0 0; expect text \"Inbox Empty\"");
+    r.run("menu 0 5 2; wait 300ms; expect text \"VE3KPW-9\"");
+    r.run("menu 0 5 2; hold OK; press DOWN; press DOWN; press DOWN; press DOWN; press OK; wait 300ms; press OK; wait 300ms");
+    r.run("menu 0 5 2; wait 300ms");
+    r.expect_no_text("VE3KPW-9");
+}

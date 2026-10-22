@@ -61,6 +61,18 @@ pub fn bars(pct: u8) -> u8 {
     }
 }
 
+/// SBAR-9.1, DISP-21: the battery's colour by its level, for the bar's icon and the LED heartbeat alike: 0 green
+/// above 80 %, 1 yellow (amber) down to 31 %, 2 red at 30 % and below, or at the low warning or cut-off whatever
+/// the percentage says (Alex, Oct 22, 2026; decision 239).
+pub fn tier(pct: u8, low: bool) -> u8 {
+    match pct {
+        _ if low => 2,
+        p if p > 80 => 0,
+        p if p > 30 => 1,
+        _ => 2,
+    }
+}
+
 /// What the battery shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shown {
@@ -127,6 +139,14 @@ impl Battery {
 
 #[cfg(test)]
 mod tests {
+
+    /// SBAR-9.1: green above 80 %, amber down to 31 %, red at 30 % and below, and red at the low warning or
+    /// cut-off whatever the percentage.
+    #[test]
+    fn colour_tiers() {
+        assert_eq!([100, 81, 80, 31, 30, 0].map(|p| tier(p, false)), [0, 0, 1, 1, 2, 2]);
+        assert_eq!(tier(90, true), 2);
+    }
     use super::*;
 
     fn raw_mv(mv: u32) -> u16 {

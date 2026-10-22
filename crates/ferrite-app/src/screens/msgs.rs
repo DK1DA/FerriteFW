@@ -804,38 +804,54 @@ impl View for Compose {
                 field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending_tap && self.field == 0, "callsign-SSID".as_bytes());
             }
         }
-        let book = self.book_up(cx.store).then(|| super::contacts::Book::new(cx.store.data()));
-        if let Some(b) = &book {
-            let (y, h) = (86, 120);
-            if app.dirty(R_ROW, hash(&(1u8, self.quick, cx.store.data().version()))) {
-                ferrite_ui::canvas::banded(lcd, 0, y, 240, h + 24, BG, |lcd| book_rows(lcd, cx.store.data(), b, self.quick as u16, y, h));
+        let (y, h) = (86, 120);
+        let ver = cx.store.data().version();
+        if self.book_up(cx.store) {
+            // APRS-38, DISP-28: the book is built only when the pick or the data changed, and only the rows that
+            // changed repaint (it was rebuilt from flash and its whole box repainted on every pass and step).
+            if app.dirty(R_LIST_GATE, hash(&(1u8, self.quick, ver))) {
+                let b = super::contacts::Book::new(cx.store.data());
+                book_rows(app, lcd, cx.store.data(), &b, self.quick as u16, y, h, ver);
             }
-        } else if app.dirty(R_ROW, hash(&(full, self.tail, word, self.field, pending_tap && self.field == 1, quick_list, quick_list.then_some(self.quick)))) {
-            let (y, h) = (86, 120);
-            ferrite_ui::canvas::banded(lcd, 0, y, 240, h + 24, BG, |lcd| {
-                lcd.text4(8, y + 12, if quick_list { "Quick messages".as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
-                let mut c = Buf::<12>::new();
-                let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX); // TEXT-5
-                let cw = text4_width(c.as_bytes(), &UI_12);
-                lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
-                let focus = self.field == 1;
-                let bg = if focus { FOCUS } else { SURFACE };
-                lcd.fill_r(8, y + 18, 224, h, 2, bg);
-                lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
-                if quick_list {
-                    quick_rows(cx.store, lcd, y + 20, self.quick as usize, bg);
-                } else {
-                    let mut all = Buf::<84>::from(text.as_bytes());
-                    all.push(word.as_bytes());
-                    let at = all.len();
-                    all.push(&full.as_bytes()[head.len().min(full.len())..]);
-                    wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, all.as_bytes(), bg);
-                    if focus {
-                        let under = if !word.is_empty() { text4_width(word.as_bytes(), &UI_12) } else if pending_tap { 7 } else { 0 };
-                        caret(lcd, all.as_bytes(), at, 14, y + 22, 212, under, if matched { BLUE } else { AMBER });
+        } else {
+            app.forget(R_LIST_GATE, 1); // the book draws whole when it comes back
+            let focus = self.field == 1;
+            let bg = if focus { FOCUS } else { SURFACE };
+            let key = hash(&(full, self.tail, word, self.field, pending_tap && self.field == 1, quick_list));
+            // DISP-28: the quick list's box once; its rows below, each when it changes.
+            let boxed = app.dirty(R_LIST_BOX, if quick_list { hash(&(2u8, self.field)) } else { hash(&(9u8, key)) });
+            let full_box = boxed || !quick_list;
+            if app.dirty(R_ROW, key) || boxed {
+                ferrite_ui::canvas::banded(lcd, 0, y, 240, if full_box { h + 24 } else { 18 }, BG, |lcd| {
+                    lcd.text4(8, y + 12, if quick_list { "Quick messages".as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
+                    let mut c = Buf::<12>::new();
+                    let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX); // TEXT-5
+                    let cw = text4_width(c.as_bytes(), &UI_12);
+                    lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
+                    if !full_box {
+                        return;
                     }
-                }
-            });
+                    lcd.fill_r(8, y + 18, 224, h, 2, bg);
+                    lcd.frame_r(8, y + 18, 224, h, 2, if focus { BLUE } else { LINE });
+                    if !quick_list {
+                        let mut all = Buf::<84>::from(text.as_bytes());
+                        all.push(word.as_bytes());
+                        let at = all.len();
+                        all.push(&full.as_bytes()[head.len().min(full.len())..]);
+                        wrap_in(lcd, 14, y + 22, 212, y + 18 + h - 4, all.as_bytes(), bg);
+                        if focus {
+                            let under = if !word.is_empty() { text4_width(word.as_bytes(), &UI_12) } else if pending_tap { 7 } else { 0 };
+                            caret(lcd, all.as_bytes(), at, 14, y + 22, 212, under, if matched { BLUE } else { AMBER });
+                        }
+                    }
+                });
+            }
+            if full_box {
+                app.forget(R_LIST_ROW, LIST_VIS);
+            }
+            if quick_list {
+                quick_rows(app, cx.store, lcd, y + 20, self.quick as usize, bg, ver);
+            }
         }
         let callsign = cx.store.data().callsign();
         let strip = (pred, self.field, keys, self.pick, self.pcase, self.case, callsign, quick_list, head, self.list & SVC);
@@ -897,54 +913,84 @@ impl View for Compose {
     }
 }
 
+/// DISP-28: compose's lists repaint by row, as the channel list does: the header, the box, and each of the
+/// [`LIST_VIS`] rows in its own region.
+const R_LIST_BOX: usize = R_ROW + 1;
+const R_LIST_ROW: usize = R_ROW + 2;
+const R_LIST_GATE: usize = R_ROW + 2 + LIST_VIS;
+const LIST_VIS: usize = 6;
+
 /// The address book on an empty recipient (APRS-38), in the message box's place: which group and where in it,
 /// then six rows (group, callsign, and a name, age or what a service does), the highlighted one in blue.
-fn book_rows(lcd: &mut impl Panel, d: &dyn crate::data::Data, b: &super::contacts::Book, sel: u16, y: i32, h: i32) {
-    const VIS: u16 = 6;
+#[allow(clippy::too_many_arguments)]
+fn book_rows(app: &mut App, lcd: &mut impl Panel, d: &dyn crate::data::Data, b: &super::contacts::Book, sel: u16, y: i32, h: i32, ver: u32) {
     let n = b.len();
     let sel = sel.min(n - 1);
     let (g, from, len) = b.group(sel);
-    lcd.text4(8, y + 12, "Address book".as_bytes(), &UI_12, SUB, BG);
-    let mut c = Buf::<20>::new();
-    let _ = uwrite!(c, "{}/{} {}", sel - from + 1, len, super::contacts::GROUPS[g]);
-    let cw = text4_width(c.as_bytes(), &UI_12);
-    lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
-    lcd.fill_r(8, y + 18, 224, h, 2, FOCUS);
-    lcd.frame_r(8, y + 18, 224, h, 2, BLUE);
-    let top = sel.saturating_sub(VIS - 1).min(n.saturating_sub(VIS));
-    for (k, i) in (top..n).take(VIS as usize).enumerate() {
-        let Some((g, call, sub)) = b.row(d, i) else { continue };
-        let ry = y + 22 + k as i32 * 19;
+    if app.dirty(R_ROW, hash(&(3u8, sel, from, len, g))) {
+        ferrite_ui::canvas::banded(lcd, 0, y, 240, 18, BG, |lcd| {
+            lcd.text4(8, y + 12, "Address book".as_bytes(), &UI_12, SUB, BG);
+            let mut c = Buf::<20>::new();
+            let _ = uwrite!(c, "{}/{} {}", sel - from + 1, len, super::contacts::GROUPS[g]);
+            let cw = text4_width(c.as_bytes(), &UI_12);
+            lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
+        });
+    }
+    if app.dirty(R_LIST_BOX, hash(&3u8)) {
+        ferrite_ui::canvas::banded(lcd, 0, y + 18, 240, h + 6, BG, |lcd| {
+            lcd.fill_r(8, y + 18, 224, h, 2, FOCUS);
+            lcd.frame_r(8, y + 18, 224, h, 2, BLUE);
+        });
+        app.forget(R_LIST_ROW, LIST_VIS);
+    }
+    let vis = LIST_VIS as u16;
+    let top = sel.saturating_sub(vis - 1).min(n.saturating_sub(vis));
+    for k in 0..LIST_VIS {
+        let i = top + k as u16;
         let on = i == sel;
+        if !app.dirty(R_LIST_ROW + k, hash(&(i, on, ver, i < n))) {
+            continue;
+        }
+        let ry = y + 22 + k as i32 * 19;
         let (fg, dim, rb) = if on { (BLUE_FG, BLUE_FG, BLUE) } else { (TEXT, SUB, FOCUS) };
-        if on {
-            lcd.fill_r(10, ry, 220, 19, 1, BLUE);
-        }
-        lcd.text4(14, ry + 14, ["Saved", "Recent", "Heard", "Svc"][g].as_bytes(), &UI_12, dim, rb);
-        lcd.text4(64, ry + 14, call.as_bytes(), &UI_12B, fg, rb);
-        let cx = text4_width(call.as_bytes(), &UI_12B);
-        let sw = text4_width(sub.as_bytes(), &UI_12);
-        if 64 + cx + 8 + sw <= 226 {
-            lcd.text4(226 - sw, ry + 14, sub.as_bytes(), &UI_12, dim, rb);
-        }
+        ferrite_ui::canvas::banded(lcd, 10, ry, 220, 19, FOCUS, |lcd| {
+            let Some((g, call, sub)) = (i < n).then(|| b.row(d, i)).flatten() else { return };
+            if on {
+                lcd.fill_r(10, ry, 220, 19, 1, BLUE);
+            }
+            lcd.text4(14, ry + 14, ["Saved", "Recent", "Heard", "Svc"][g].as_bytes(), &UI_12, dim, rb);
+            lcd.text4(64, ry + 14, call.as_bytes(), &UI_12B, fg, rb);
+            let cx = text4_width(call.as_bytes(), &UI_12B);
+            let sw = text4_width(sub.as_bytes(), &UI_12);
+            if 64 + cx + 8 + sw <= 226 {
+                lcd.text4(226 - sw, ry + 14, sub.as_bytes(), &UI_12, dim, rb);
+            }
+        });
     }
 }
 
-/// The quick messages on an empty message (TEXT-6): the highlighted one in blue, scrolled to keep it in view.
-fn quick_rows(store: &impl ChannelStore, lcd: &mut impl Panel, y: i32, sel: usize, bg: u16) {
-    const VIS: usize = 6;
-    let top = sel.saturating_sub(VIS - 1).min(crate::words::QUICK - VIS);
-    for (k, i) in (top..crate::words::QUICK).take(VIS).enumerate() {
-        let ry = y + 2 + k as i32 * 19;
+/// The quick messages on an empty message (TEXT-6): the highlighted one in blue, scrolled to keep it in view; each
+/// row repaints only when it changes (DISP-28).
+#[allow(clippy::too_many_arguments)]
+fn quick_rows(app: &mut App, store: &impl ChannelStore, lcd: &mut impl Panel, y: i32, sel: usize, bg: u16, ver: u32) {
+    let top = sel.saturating_sub(LIST_VIS - 1).min(crate::words::QUICK - LIST_VIS);
+    for k in 0..LIST_VIS {
+        let i = top + k;
         let on = i == sel;
-        let (fg, rb) = if on { (BLUE_FG, BLUE) } else { (TEXT, bg) };
-        if on {
-            lcd.fill_r(10, ry, 220, 19, 1, BLUE);
+        if !app.dirty(R_LIST_ROW + k, hash(&(i, on, ver, bg))) {
+            continue;
         }
-        let mut n = Buf::<4>::new();
-        let _ = uwrite!(n, "{}", i + 1);
-        lcd.text4(16, ry + 14, n.as_bytes(), &UI_12, if on { BLUE_FG } else { SUB }, rb);
-        lcd.text4(32, ry + 14, w::fit(quick_text(store, i).as_bytes(), &UI_12, 192), &UI_12, fg, rb);
+        let ry = y + 2 + k as i32 * 19;
+        let (fg, rb) = if on { (BLUE_FG, BLUE) } else { (TEXT, bg) };
+        ferrite_ui::canvas::banded(lcd, 10, ry, 220, 19, bg, |lcd| {
+            if on {
+                lcd.fill_r(10, ry, 220, 19, 1, BLUE);
+            }
+            let mut n = Buf::<4>::new();
+            let _ = uwrite!(n, "{}", i + 1);
+            lcd.text4(16, ry + 14, n.as_bytes(), &UI_12, if on { BLUE_FG } else { SUB }, rb);
+            lcd.text4(32, ry + 14, w::fit(quick_text(store, i).as_bytes(), &UI_12, 192), &UI_12, fg, rb);
+        });
     }
 }
 

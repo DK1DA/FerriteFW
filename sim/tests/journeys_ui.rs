@@ -295,3 +295,29 @@ fn change_undo_and_save() {
     r.event(Event::PowerSwitch).wait(2000).event(Event::PowerSwitch).wait(4000);
     assert_eq!(sq(&r), before + 1, "kept across a power cycle");
 }
+
+/// DISP-28: a knob step in compose's address book and quick messages repaints about as much as one in the
+/// channel list (two rows and the position line), not the whole box (34,560 px a step until Oct 22, 2026).
+#[test]
+fn compose_lists_repaint_by_row() {
+    let per_step = |r: &mut Radio| {
+        r.wait(500);
+        r.sim.watch_passes(true);
+        r.sim.passes.clear();
+        for _ in 0..4 {
+            r.knob(1).wait(200);
+        }
+        let px: u64 = r.sim.passes.drain(..).map(|h| h.report.writes).sum();
+        r.sim.watch_passes(false);
+        px / 4
+    };
+    let mut r = Radio::new();
+    r.run("menu 0 2 1; wait 300ms");
+    let channels = per_step(&mut r);
+    let mut r = Radio::new();
+    r.run("menu 0 5 2; press HASH; wait 300ms; expect text \"Address book\"");
+    let book = per_step(&mut r);
+    r.run("press OK; wait 300ms; expect text \"Quick messages\"");
+    let quick = per_step(&mut r);
+    assert!(book <= channels * 5 / 4 && quick <= channels * 5 / 4, "book {book}, quick {quick}, channels {channels} px a step");
+}

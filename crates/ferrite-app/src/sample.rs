@@ -585,6 +585,16 @@ impl Data for Sample {
                 self.events_cleared.set(true);
                 true
             }
+            Op::MessagesReadAll => {
+                self.msgs_read.set(u32::MAX);
+                (0..self.sent_n()).for_each(|i| self.aprs.read(i));
+                true
+            }
+            Op::ClearMessages => {
+                self.msgs_gone.set(true);
+                self.aprs.clear_messages();
+                true
+            }
             Op::DeleteChannel(n) => self.slot_of(n).map(|c| c.set(None)).is_some(),
             Op::Skip(n, on) => edit(n, &|c| c.flags = if on { c.flags | FLAG_SKIP } else { c.flags & !FLAG_SKIP }),
             Op::Hide(n, on) => edit(n, &|c| c.flags = if on { c.flags | crate::chan::FLAG_HIDDEN } else { c.flags & !crate::chan::FLAG_HIDDEN }),

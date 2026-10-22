@@ -789,6 +789,8 @@ pub struct StatusBar {
     /// 0-4 bars.
     pub battery: u8,
     pub battery_low: bool,
+    /// SBAR-9.1: the fill's colour, `ferrite_core::battery::tier`'s (0 green, 1 amber, 2 red).
+    pub battery_tier: u8,
     pub battery_cutoff: bool,
     /// The cut-off blink's off phase.
     pub blink_off: bool,
@@ -807,8 +809,8 @@ impl StatusBar {
     }
 
     fn right_eq(&self, o: &Self) -> bool {
-        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_cutoff, self.blink_off, self.dry, self.lpm)
-            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_cutoff, o.blink_off, o.dry, o.lpm)
+        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_tier, self.battery_cutoff, self.blink_off, self.dry, self.lpm)
+            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_tier, o.battery_cutoff, o.blink_off, o.dry, o.lpm)
     }
 
     /// Draws what differs from `old` (everything with None).
@@ -894,8 +896,14 @@ impl StatusBar {
     fn draw_right(&self, lcd: &mut impl Panel) {
         lcd.fill(142, 0, 98, SBAR_H - 1, BG);
         // Battery at the right edge (SBAR-9): body 17 x 10 and a nub.
-        let c = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { SUB };
-        let fillc = if self.battery_cutoff { RED } else if self.battery_low { AMBER } else { BATT };
+        // SBAR-9.1: green above 80 %, amber to 31 %, red at 30 % and below; the outline red with it.
+        let c = if self.battery_cutoff || self.battery_tier >= 2 { RED } else { SUB };
+        let fillc = match self.battery_tier {
+            _ if self.battery_cutoff => RED,
+            0 => BATT,
+            1 => AMBER,
+            _ => RED,
+        };
         if !(self.battery_cutoff && self.blink_off) {
             lcd.frame_r(212, 5, 17, 10, 1, c);
             lcd.fill(229, 8, 2, 4, c);

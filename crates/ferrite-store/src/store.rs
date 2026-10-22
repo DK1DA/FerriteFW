@@ -929,7 +929,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::PutZone(z, ..) => z < MAX_ZONES && z <= self.zones.get(),
             Op::PutPreset(i, _) => self.preset_slot(i).is_some() || (i == self.presets() && self.presets() < MAX_PRESETS),
             Op::Dtmf(i, _) | Op::DtmfName(i, _) => i < DTMF_MEMS,
-            Op::Wipe | Op::ReadAll | Op::ClearLog => true,
+            Op::Wipe | Op::ReadAll | Op::ClearLog | Op::MessagesReadAll | Op::ClearMessages => true,
             Op::Quick(i, _) => (i as usize) < ferrite_app::words::QUICK,
             _ => return None,
         })
@@ -1007,6 +1007,23 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 Ok(())
             }
             Op::ClearLog => self.events.clear(&self.f).await,
+            // APRS-46, INBOX-7.1: each unread message to us read, and its log entry (among the last 64) with it.
+            Op::MessagesReadAll => {
+                for i in 0..self.msgs.len() {
+                    let Some(m) = self.message(i).filter(|m| m.inbound && m.state == MsgState::Unread) else { continue };
+                    if let Some(seq) = self.msgs.seq(i) {
+                        self.msgs.mark(&self.f, seq, 10, 0).await?;
+                    }
+                    let entry = (0..self.events.len().min(64)).find(|&j| {
+                        self.event(j).is_some_and(|e| e.unread && e.src == Src::Aprs && e.name.as_bytes() == m.peer.as_bytes() && e.text.as_bytes() == m.text.as_bytes())
+                    });
+                    if let Some(seq) = entry.and_then(|j| self.events.seq(j)) {
+                        self.events.mark(&self.f, seq, 10, 0).await?;
+                    }
+                }
+                Ok(())
+            }
+            Op::ClearMessages => self.msgs.clear(&self.f).await,
             Op::Quick(i, t) => self.aprs_save(Some((i, t))).await,
             _ => Ok(()),
         }

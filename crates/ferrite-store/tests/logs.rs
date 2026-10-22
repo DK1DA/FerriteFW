@@ -520,3 +520,22 @@ fn reading_a_message_reads_its_log_entry() {
     assert!(s.request(Op::MessageRead(0)));
     assert_eq!(s.event(0).map(|e| e.unread), Some(true), "already read: a later entry is left alone");
 }
+
+/// APRS-46: "Mark all read" reads every message to us and its log entry; "Delete all messages" empties the inbox
+/// and sent, and stays empty across a power cycle.
+#[test]
+fn messages_read_all_and_delete_all() {
+    let s = mount(SimFlash::new());
+    let entry = |name: &[u8], text: &[u8]| Event { src: Src::Aprs, ago_s: 0, freq: 14_439_000, slot: 2, unread: true, id: 0, x: 0, y: 0, pos: None, name: Buf::from(name), text: Buf::from(text) };
+    for (n, t) in [(&b"VE7GPL-7"[..], &b"one"[..]), (b"VA7IF-7", b"two")] {
+        s.message_to_us(n, t, b"1");
+        s.log(&entry(n, t));
+    }
+    s.message_in(false, b"VE7GPL-7", b"sent", 0);
+    assert!(s.request(Op::MessagesReadAll));
+    assert!((0..s.messages()).all(|i| s.message(i).is_some_and(|m| !m.inbound || m.state == MsgState::Read)));
+    assert!((0..s.events()).all(|i| s.event(i).is_some_and(|e| !e.unread)), "their log entries too");
+    assert!(s.request(Op::ClearMessages));
+    assert_eq!(s.messages(), 0);
+    assert_eq!(cycle(s).messages(), 0);
+}

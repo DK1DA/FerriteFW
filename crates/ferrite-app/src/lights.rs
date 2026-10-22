@@ -120,12 +120,11 @@ impl App {
         }
         // The heartbeat: one flash in the battery's colour every 5 s, or, while something is unread (DISP-21.1), red,
         // green, red one after another every 2 s (never both at once: they don't blend into a clear yellow).
-        let (red, green) = if dev.battery_low || dev.battery_cutoff {
-            (true, false)
-        } else if dev.battery_pct > 80 {
-            (false, true)
-        } else {
-            (true, true)
+        // SBAR-9.1's levels: green, yellow (both), red.
+        let (red, green) = match ferrite_core::battery::tier(dev.battery_pct, dev.battery_low || dev.battery_cutoff) {
+            0 => (false, true),
+            1 => (true, true),
+            _ => (true, false),
         };
         let unread = [(true, false), (false, true), (true, false)];
         let (period, flashes): (u32, &[(bool, bool)]) = if self.inbox > 0 || self.alert & crate::ALERT_UNREAD != 0 { (UNREAD_MS, &unread) } else { (BEAT_MS, &[(red, green)][..]) };

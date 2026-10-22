@@ -118,6 +118,11 @@ impl AprsSim {
         Some(Message { ago_s: self.now_s().saturating_sub(l.at_s), ..l.msg })
     }
 
+    /// Op::ClearMessages: every message goes.
+    pub fn clear_messages(&self) {
+        self.live.iter().for_each(|c| c.set(None));
+    }
+
     pub fn read(&self, i: u16) {
         if let Some(c) = self.live.get(i as usize) {
             if let Some(mut l) = c.get().filter(|l| l.msg.state == MsgState::Unread) {

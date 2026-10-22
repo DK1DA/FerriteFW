@@ -77,10 +77,12 @@ const HEARD: [Opt; 5] = [
     ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations come back as they are heard"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
 ];
-const MESSAGES: [Opt; 4] = [
+const MESSAGES: [Opt; 6] = [
     ("Write a message", Act::Open(Dest::Compose), "Recipient, then the text"),
     ("Quick messages", Act::Open(Dest::QuickMessages), "The nine shown on an empty message"),
     ("Contacts", Act::Open(Dest::Contacts), "Saved stations and their names"),
+    ("Mark all read", Act::Do(&Op::MessagesReadAll), "Clears the unread count"), // APRS-46
+    ("Delete all messages", Act::Confirm(&Op::ClearMessages), "Inbox and sent, unread ones too"), // APRS-46
     ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
 ];
 const GPS: [Opt; 3] = [
@@ -93,11 +95,12 @@ const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, s
 /// alone hold C) or its "Heard list" row (APRS mode, KISS).
 pub(crate) const APRS_ROW_BEACON_NOW: u8 = 0;
 pub(crate) const APRS_ROW_HEARD: u8 = 2;
-const APRS_CARD: [Opt; 4] = [
+const APRS_CARD: [Opt; 5] = [
     ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
     ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 5 1)"),
     ("Heard list", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
+    ("Event log", Act::Open(Dest::EventLog), "Everything decoded and logged"), // APRS-17.1
 ];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
 const WAYPOINTS: [Opt; 5] = [
@@ -188,8 +191,10 @@ impl View for Options {
                     }
                     app.back();
                     if store.data().request(op) {
-                        if op == Op::ReadAll {
-                            app.log_unread = 0; // the log's: the mail badge counts messages (INBOX-3.1)
+                        match op {
+                            Op::ReadAll => app.log_unread = 0, // the log's: the mail badge counts messages (INBOX-3.1)
+                            Op::MessagesReadAll | Op::ClearMessages => app.inbox = 0, // APRS-46
+                            _ => {}
                         }
                         app.show_toast(label.as_bytes(), b"done", false);
                     } else {

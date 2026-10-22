@@ -74,6 +74,7 @@ fn led_heartbeat() {
     assert_eq!(count(&mut t, dev(90, false), 5000), (1, (false, true)), "green above 80 %");
     assert_eq!(count(&mut t, dev(50, false), 5000), (1, (true, true)), "yellow: both");
     assert_eq!(count(&mut t, dev(10, true), 5000), (1, (true, false)), "red at the low warning");
+    assert_eq!(count(&mut t, dev(25, false), 5000), (1, (true, false)), "SBAR-9.1: red at 30 % and below");
     t.app.inbox = 1;
     assert_eq!(count(&mut t, dev(90, false), 2000).0, 3, "three flashes every 2 s while unread");
     let mut seen = std::vec::Vec::new();

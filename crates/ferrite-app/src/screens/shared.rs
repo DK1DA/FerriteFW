@@ -107,6 +107,11 @@ impl App {
         self.drawn.hash[r] != 0 && self.knob_busy()
     }
 
+    /// Regions `r..r + n` count as not drawn: they repaint on their next check (a box drawn over them).
+    pub(crate) fn forget(&mut self, r: usize, n: usize) {
+        self.drawn.hash[r..r + n].iter_mut().for_each(|h| *h = 0);
+    }
+
     /// True (and remembered) when region r's content differs from what is on screen.
     pub(crate) fn dirty(&mut self, r: usize, h: u32) -> bool {
         let d = self.drawn.hash[r] != h;
@@ -199,6 +204,7 @@ impl App {
             bt: dev.bt,
             battery: ferrite_core::battery::bars(dev.battery_pct), // SBAR-9: stock's bars, at the thresholds
             battery_low: dev.battery_low,
+            battery_tier: ferrite_core::battery::tier(dev.battery_pct, dev.battery_low || dev.battery_cutoff),
             battery_cutoff: dev.battery_cutoff,
             blink_off: dev.battery_cutoff && (self.now / 500) % 2 == 1,
             alerts_paused: hf && self.set.same_on(),
