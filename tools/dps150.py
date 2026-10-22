@@ -138,6 +138,7 @@ def log(d, seconds, csv=None):
         rows.append(row)
         if out:
             out.write("%.3f,%.4f,%.4f,%.4f\n" % row)
+            out.flush()  # every reading on disk as it comes (a stopped log keeps what it had)
     if out:
         out.close()
     if not rows:
