@@ -120,14 +120,22 @@ fn byte(b: u8) {
     // Each write is read back before the wait, so the strobe's low and high times have a floor whatever the
     // write buffer does (unrolled nops alone left the screen blank on the radio, Oct 12, 2026; 6 low / 4 high left grey specks
     // around redrawn boxes, so 10 / 8).
+    // Above 120 MHz (a `clock-*` bench build) the nops repeat, so the strobe never gets shorter than at 120.
     gpio::write_high_byte_clear(LCD_DATA_PORT, b, WR_LOW);
     gpio::sync(LCD_DATA_PORT);
-    // SAFETY: nops only.
-    unsafe { core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", options(nomem, nostack, preserves_flags)) };
+    for _ in 0..NOP_REPEAT {
+        // SAFETY: nops only.
+        unsafe { core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", options(nomem, nostack, preserves_flags)) };
+    }
     LCD_WR.set();
     gpio::sync(LCD_DATA_PORT);
-    unsafe { core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", options(nomem, nostack, preserves_flags)) };
+    for _ in 0..NOP_REPEAT {
+        unsafe { core::arch::asm!("nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", options(nomem, nostack, preserves_flags)) };
+    }
 }
+
+/// The LCD strobe's nops are counted at 120 MHz: once at that speed or below, more often above.
+const NOP_REPEAT: u32 = crate::hal::clock::SYSCLK_HZ.div_ceil(120_000_000);
 
 impl st7789::Bus8080 for Lcd {
     fn command(&mut self, cmd: u8) {

@@ -5,6 +5,8 @@
 #   tools/mkbtf.sh bringup    # target/ferrite-bringup.btf: no SPI flash writes, key test on a held key, cable log,
 #                             #   the bench commands
 #   tools/mkbtf.sh tx         # target/ferrite-tx.btf: the transmit build (a user build: no bench commands)
+#   tools/mkbtf.sh tx-bench clock-240   # any build at another fixed core clock (clock-96/144/192/240, power
+#                             #   bench): target/ferrite-txbench-240.btf
 #   tools/mkbtf.sh tx-bench   # target/ferrite-txbench.btf: the full-power transmit build with the bench commands
 #                             #   (txtest, bk, si, mem, gpio, rx, mic, bt, gps query/nmea/standby), starting every
 #                             #   power-on with Dry TX on (TX-48.1; decision 193 replaced the tx-dry build)
@@ -23,7 +25,14 @@ case "$1" in
     bringup) name=ferrite-bringup build="fw-bringup" ;;
     tx) name=ferrite-tx build="fw --features tx" ;;
     tx-bench) name=ferrite-txbench build="fw --features tx-bench" ;; # tx + bench, Dry TX on at power-on
-    *) echo "usage: $0 [bringup | tx | tx-bench]" >&2; exit 2 ;;
+    *) echo "usage: $0 [bringup | tx | tx-bench] [clock-96 | clock-144 | clock-192 | clock-240]" >&2; exit 2 ;;
+esac
+case "$2" in
+    "") ;;
+    clock-96|clock-144|clock-192|clock-240)
+        name="$name-${2#clock-}"
+        case "$build" in *--features*) build="$build,$2" ;; *) build="$build --features $2" ;; esac ;;
+    *) echo "unknown clock: $2" >&2; exit 2 ;;
 esac
 cargo $build
 # The fast-flash audit must pass: its last line, or the whole report and a stop when it fails.

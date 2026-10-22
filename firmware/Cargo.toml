@@ -31,6 +31,12 @@ bringup = ["bench"]
 # `rx both`, `mic`, the raw GPS sends and the Bluetooth queries. In the bring-up and tx-bench builds; the receive and
 # tx builds a user installs leave them out (their terminal says "not in this build").
 bench = ["ferrite-core/bench", "ferrite-app/bench", "ferrite-radio/bench"]
+# The core clock for the power bench (Oct 21, 2026): one fixed speed per image instead of stock's 120 MHz
+# (hal/clock.rs). `tools/mkbtf.sh tx-bench clock-240` builds target/ferrite-txbench-240.btf.
+clock-96 = []
+clock-144 = []
+clock-192 = []
+clock-240 = []
 
 [dependencies]
 ferrite-core.workspace = true
