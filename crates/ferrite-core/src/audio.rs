@@ -33,14 +33,16 @@ pub const BLOCK_OUT: usize = BLOCK_IN / DECIM;
 /// Each half of the DAC's DMA buffer: 2.7 ms at 48 kHz.
 pub const BLOCK_DAC: usize = 128;
 
-const N_TAPS: usize = 15;
-/// The low-pass ahead of the 4:1 step: 15 taps (Blackman-windowed sinc, 4.5 kHz), Q15, summing to 1. Flat to
-/// within 1.1 dB across AFSK's tones (1200 Hz -0.3 dB, 2200 Hz -1.1 dB); what folds back onto 0-3 kHz (9 to
-/// 15 kHz) is 25 dB down or more. A `static`: read per sample by the DSP task, and only named statics stay in
+const N_TAPS: usize = 31;
+/// The low-pass ahead of the 4:1 step: 31 taps (Kaiser-windowed sinc, beta 6, 5 kHz), Q15, summing to 1. Flat
+/// across AFSK's tones (1200 Hz +0.01 dB, 2200 Hz -0.04 dB: no tilt against the upper tone, which de-emphasised
+/// audio already lacks); what folds back onto the audio band (8.5 to 15.5 kHz) is 61 dB down or more. Until
+/// Oct 21, 2026: 15 taps, -1.1 dB at 2200 Hz and only 18 dB of fold-back rejection (WA8LMF track 2 through the
+/// radio's path: 992 -> 997 frames). A `static`: read per sample by the DSP task, and only named statics stay in
 /// the firmware's fast flash (unnamed constants go to the slow part: firmware/memory.x).
-static TAPS: [i32; N_TAPS] = [0, -15, 43, 515, 1849, 4063, 6299, 7260, 6299, 4063, 1849, 515, 43, -15, 0];
+static TAPS: [i32; N_TAPS] = [-4, 7, 46, 104, 135, 69, -150, -490, -788, -780, -199, 1070, 2877, 4799, 6275, 6826, 6275, 4799, 2877, 1070, -199, -780, -788, -490, -150, 69, 135, 104, 46, 7, -4];
 
-/// The ADC side: DC removal, the low-pass and the 4:1 step, one block at a time. 36 bytes.
+/// The ADC side: DC removal, the low-pass and the 4:1 step, one block at a time. 68 bytes.
 pub struct Decim {
     /// The last [`TAPS`] inputs, centred, as a ring.
     hist: [i16; N_TAPS],
