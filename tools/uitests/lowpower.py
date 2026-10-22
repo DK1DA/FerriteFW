@@ -10,7 +10,7 @@ def low_power_on_from_the_menu(t):
     LOW in the bar (`lpm=1`), Bluetooth and GPS shown off, the Status page saying so; Off puts it all back."""
     u = t.keys("MENU 0 7 7")
     t.eq(u.names()[:3], ["Battery Save", "Low Power Mode", "Auto below"], "0 7 7's list")
-    t.eq((u.row("Low Power Mode")["value"], u.row("Auto below")["value"]), ("Off", "20 %"), "the defaults")
+    t.eq((u.row("Low Power Mode")["value"], u.row("Auto below")["value"]), ("Auto", "20 %"), "the defaults (decision 236)")
     t.set("0 7 7 2", "On")
     u = t.ui(0.3)
     t.eq(u.id, "LowPower", "its own home on entering (PWR-24.7)")
