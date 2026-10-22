@@ -6,6 +6,7 @@
 #           the right of the screen) or left (all on the left)
 #   hold: seconds the last frame stays before the fade (default 1.5)
 #   setup: a script played before recording, not shown; script: recorded (the indented lines below it)
+#   keys: off hides the keys pressed (shown under the screen by default, as a tutorial)
 #   music: on any block, an audio file for the whole video (relative to this file), with a licence that allows
 #          it (note its source and licence in tools/promo/music/README.md); without one the video is silent
 # Scripts use the simulator harness's steps: press K, hold K, knob N, type 123, wait 2s, menu 0 5 1, home, event NAME.

@@ -91,6 +91,97 @@ def card(b, n, total, out):
     sys.exit(f"Chrome couldn't draw {out.name}")
 
 
+# Keys shown under the screen as they're pressed (Alex, Oct 21, 2026: it makes the videos tutorials) (a block's `keys: off` hides them): the harness's key names as on
+# the radio's keycaps.
+KEY_NAMES = {"OK": "MENU", "MENU": "MENU", "BACK": "BACK", "UP": "\u25b2", "DOWN": "\u25bc", "LEFT": "\u25c0",
+             "RIGHT": "\u25b6", "SLOT": "SLOT", "VM": "V/M", "STAR": "*", "HASH": "#", "SIDE1": "SIDE1",
+             "SIDE2": "SIDE2", "PTT": "PTT", "PTTB": "PTT B"}
+GROUP_S = 0.8   # presses closer than this share one chip
+LINGER_S = 1.2  # a chip stays this long after its last press
+
+
+def key_events(path):
+    """[(start_s, end_s, [(text, is_key)])] from a recording's NN.keys: presses close together share a chip;
+    keys held together (down ... up) are one chip ("hold SIDE1 + SIDE2") from the first down to the last up."""
+    if not path.exists():
+        return []
+    chips, cur, held, held_from = [], None, [], None
+
+    def flush():
+        nonlocal cur
+        if cur:
+            chips.append((cur[0], cur[1] + LINGER_S, cur[2]))
+            cur = None
+
+    def add(t, tokens):
+        nonlocal cur
+        if cur and t - cur[1] <= GROUP_S:
+            cur[1] = t
+            cur[2] += [(" ", False)] + tokens
+        else:
+            flush()
+            cur = [t, t, tokens]
+
+    for line in path.read_text().splitlines():
+        f, step = line.split("\t", 1)
+        t = int(f) / FPS
+        cmd, _, arg = step.partition(" ")
+        arg = arg.strip()
+        name = KEY_NAMES.get(arg, arg)
+        if cmd == "press":
+            add(t, [(name, True)])
+        elif cmd == "hold":
+            add(t, [("hold", False), (" ", False), (name, True)])
+        elif cmd == "type":
+            add(t, [x for c in arg for x in ((c, True), (" ", False))][:-1])
+        elif cmd == "menu":
+            add(t, [("MENU", True)] + [x for c in arg.split() for x in ((" ", False), (c, True))])
+        elif cmd == "knob":
+            n = int(arg)
+            add(t, [("knob", False), (" ", False), ((f"+{n}" if n > 0 else f"\u2212{-n}"), True)])
+        elif cmd == "down":
+            flush()
+            if not held:
+                held_from = t
+            held.append(name)
+        elif cmd == "up" and name in held:
+            held.remove(name)
+            if not held:
+                toks, names = [("hold", False), (" ", False)], held_names
+                for k, nm in enumerate(names):
+                    toks += ([(" + ", False)] if k else []) + [(nm, True)]
+                chips.append((held_from, t + LINGER_S, toks))
+        if cmd == "down":
+            held_names = list(held)
+    flush()
+    chips.sort()
+    # One chip at a time: each ends where the next begins.
+    return [(a, min(b, chips[k + 1][0]) if k + 1 < len(chips) else b, x) for k, (a, b, x) in enumerate(chips)]
+
+
+def chip_png(tokens, out):
+    """A row of keycaps (dark text on light caps) and words, on a dark rounded bar."""
+    from PIL import Image, ImageDraw, ImageFont
+    f = ImageFont.truetype(str(ROOT / "fonts" / "JetBrainsMono-Bold.ttf"), 30)
+    pad, cap_pad, h = 18, 10, 64
+    draw0 = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+    widths = [draw0.textlength(t, font=f) + (2 * cap_pad if k else 0) for t, k in tokens]
+    w = int(sum(widths) + 2 * pad)
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, w - 1, h - 1), 14, fill=(22, 26, 32, 235), outline=(70, 78, 90, 255), width=2)
+    x = pad
+    for (t, k), wd in zip(tokens, widths):
+        if k:
+            d.rounded_rectangle((x, 12, x + wd, h - 12), 7, fill=(236, 233, 225, 255))
+            d.text((x + cap_pad, h / 2), t, font=f, fill=(20, 22, 26, 255), anchor="lm")
+        else:
+            d.text((x, h / 2), t, font=f, fill=(201, 205, 211, 255), anchor="lm")
+        x += wd
+    im.save(out)
+    return w, h
+
+
 def ffmpeg(*args):
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True)
 
@@ -132,11 +223,19 @@ def main():
             x, y = SCREEN_AT[b.get("layout", "center")]
             hold = float(b.get("hold", HOLD))
             secs = raw.stat().st_size / (240 * 320 * 3) / FPS + hold
+            # The keys pressed, as chips under the screen (`keys: off` hides them).
+            chips = [] if b.get("keys", "on") == "off" else key_events(WORK / "frames" / f"{rec.index(i):02}.keys")
+            inputs, chain = [], f"[1]tpad=stop_mode=clone:stop_duration={hold},scale={240 * SCALE}:{320 * SCALE}:flags=neighbor[s];[0][s]overlay={x}:{y}:shortest=1[v0]"
+            for c, (t0, t1, toks) in enumerate(chips):
+                cp = WORK / f"chip{i:02}_{c:02}.png"
+                cw, _ = chip_png(toks, cp)
+                inputs += ["-loop", "1", "-framerate", str(FPS), "-i", str(cp)]
+                cx = x + SW // 2 - cw // 2
+                chain += f";[v{c}][{c + 2}]overlay={cx}:{y + SH + PAD + 26}:shortest=1:enable='between(t,{t0:.2f},{t1:.2f})'[v{c + 1}]"
+            chain += f";[v{len(chips)}]fade=t=in:st=0:d={FADE},fade=t=out:st={secs - FADE:.2f}:d={FADE},format=yuv420p"
             ffmpeg("-loop", "1", "-framerate", str(FPS), "-i", str(png),
                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "240x320", "-framerate", str(FPS), "-i", str(raw),
-                   "-filter_complex",
-                   f"[1]tpad=stop_mode=clone:stop_duration={hold},scale={240 * SCALE}:{320 * SCALE}:flags=neighbor[s];[0][s]overlay={x}:{y}:shortest=1,"
-                   f"fade=t=in:st=0:d={FADE},fade=t=out:st={secs - FADE:.2f}:d={FADE},format=yuv420p",
+                   *inputs, "-filter_complex", chain,
                    "-r", str(FPS), "-c:v", "libx264", "-crf", "12", "-tune", "animation", "-preset", "slow", str(clip))
         else:
             secs = float(b.get("seconds", "3"))

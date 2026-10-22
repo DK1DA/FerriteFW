@@ -1,6 +1,7 @@
 //! Records the simulator for a video (`tools/promo/mkvideo.py`): one sample radio, switched on, then for each
 //! segment a setup script (played, not recorded) and a script whose every frame (20 ms, 50 per second) is written
-//! as raw 240 x 320 RGB to `OUT_DIR/NN.rgb`. The radio carries on from one segment to the next.
+//! as raw 240 x 320 RGB to `OUT_DIR/NN.rgb`, and each script step with the frame it starts on to `OUT_DIR/NN.keys`
+//! ("FRAME<TAB>STEP" lines: the video draws the keys pressed). The radio carries on from one segment to the next.
 //!
 //!     ferrite-sim-record OUT_DIR SETUP1 SCRIPT1 [SETUP2 SCRIPT2 ...]
 //!
@@ -38,7 +39,13 @@ fn main() {
             w2.borrow_mut().write_all(&px).unwrap();
             *f2.borrow_mut() += 1;
         }));
-        r.run(&script);
+        // Step by step, so each step's first frame is known.
+        let mut keys = std::io::BufWriter::new(std::fs::File::create(out.join(format!("{k:02}.keys"))).unwrap());
+        for step in script.split([';', '\n']).map(str::trim).filter(|s| !s.is_empty()) {
+            writeln!(keys, "{}\t{step}", frames.borrow()).unwrap();
+            r.run(step);
+        }
+        keys.flush().unwrap();
         r.rec = None;
         w.borrow_mut().flush().unwrap();
         println!("{k:02}: {} frames", frames.borrow());

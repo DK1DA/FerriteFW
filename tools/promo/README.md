@@ -5,12 +5,14 @@ frame), each block gets a 1920 x 1080 card with its captions, and the blocks are
 
 ```sh
 tools/promo/music/fetch.sh                      # the music (once; not committed)
-python3 tools/promo/mkvideo.py                  # tools/promo/preview.story -> target/promo/preview.mp4
-python3 tools/promo/mkvideo.py my.story -o out.mp4
-python3 tools/promo/mkvideo.py --only 3         # just block 3, to tune its script
+../.venv/bin/python tools/promo/mkvideo.py                  # tools/promo/preview.story -> target/promo/preview.mp4
+../.venv/bin/python tools/promo/mkvideo.py my.story -o out.mp4
+../.venv/bin/python tools/promo/mkvideo.py --only 3         # just block 3, to tune its script
 ```
 
-Needs ffmpeg and Google Chrome (headless, for the cards). From `ferrite/`.
+Needs ffmpeg, Google Chrome (headless, for the cards) and Pillow (the key chips; in the project's `.venv`). From `ferrite/`.
+
+**Keys on screen:** every key the script presses shows under the radio's screen as it happens, as keycaps (`MENU 0 7 7`, `hold SLOT`, `knob +1`, `hold SIDE1 + SIDE2`): the videos double as tutorials for the manual. Presses less than 0.8 s apart share a chip; a chip stays 1.2 s. A block's `keys: off` hides them (for pure promo shots).
 
 ## Storyboard
 
