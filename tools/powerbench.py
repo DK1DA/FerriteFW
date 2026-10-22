@@ -35,6 +35,9 @@ STATES = [
     ("bl 30", ["lcd bl 30"]),
     ("bl 0", ["lcd bl 0"]),
     ("keys 0", ["lcd keys 0"]),
+    ("keys 60", ["lcd keys 60"]),
+    ("keys 30", ["lcd keys 30"]),
+    ("keys 15", ["lcd keys 15"]),
     ("fps 1", ["lcd fps 1"]),
     ("idle", ["lcd idle on"]),
     ("partial", ["lcd partial on"]),
@@ -132,7 +135,7 @@ def main():
     if a.note:
         with open(out.parent / "notes.txt", "a") as n:
             n.write(f"{time.strftime('%Y-%m-%d %H:%M')} {a.label}: {a.note}\n")
-    new = not out.exists()
+    new = not out.exists() or out.stat().st_size == 0
     results = []
     tx = Radio(a.tx) if a.tx else None
     if tx:
