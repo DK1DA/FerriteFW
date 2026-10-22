@@ -175,12 +175,19 @@ impl View for Msgs {
             if let Some(m) = data.message(i) {
                 let (mut time, mut st) = (Buf::<12>::new(), Buf::<16>::new());
                 let c = row(&m, &mut time, &mut st);
+                // APRS-43: a saved contact's name leads the line
+                let mut sub = Buf::<84>::new();
+                if let Some(k) = cx.store.data().contact_of(m.peer.as_bytes()) {
+                    sub.push(k.name.as_bytes());
+                    sub.push(" \u{b7} ".as_bytes());
+                }
+                sub.push(m.text.as_bytes());
                 let r2 = Row2 {
                     tag: if m.inbound { b"From" } else { b"To" },
                     title: m.peer.as_bytes(),
                     big: true,
                     right: time.as_bytes(),
-                    sub: m.text.as_bytes(),
+                    sub: sub.as_bytes(),
                     sub_right: st.as_bytes(),
                     sub_c: if matches!(m.state, MsgState::Failed | MsgState::Rejected) { c } else { 0 },
                     dot: m.state == MsgState::Unread,

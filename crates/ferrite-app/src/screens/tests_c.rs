@@ -1154,3 +1154,20 @@ fn waypoint_as_fixed_position() {
     t.tap(Key::Menu);
     assert!(t.app.set.fixed_on && t.app.set.fixed == w.pos);
 }
+
+/// APRS-43: a saved contact's name is found for its rows in Heard and Messages; one not saved has none.
+#[test]
+fn contact_names_in_rows() {
+    let t = T::new();
+    let d = t.s.data();
+    assert_eq!(d.contact_of(b"VE3KPW-9").unwrap().name.as_bytes(), b"Mike");
+    assert!(d.station(0).is_some_and(|s| s.call.as_bytes() == b"VE3KPW-9"), "the first heard station is a contact");
+    assert!(d.contact_of(b"VE3JLH").is_none());
+}
+
+/// SELF-10: About names the licence and the copyright holder.
+#[test]
+fn about_names_the_licence() {
+    let n = crate::screens::info::def(crate::screens::info::Page::About).note;
+    assert!(n.contains("Copyright 2026 Alex Harvey") && n.contains("PolyForm Noncommercial 1.0.0"), "{n}");
+}

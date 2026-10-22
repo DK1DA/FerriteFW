@@ -118,6 +118,10 @@ impl View for Aprs {
             if let Some(s) = data.station(i) {
                 let (mut dist, mut sub, mut age) = (Buf::<12>::new(), Buf::<40>::new(), Buf::<12>::new());
                 age_text(s.ago_s, &mut age);
+                // APRS-43: a saved contact's name leads the line
+                if let Some(c) = data.contact_of(s.call.as_bytes()) {
+                    let _ = uwrite!(sub, "{} \u{b7} ", Txt(c.name.as_bytes()));
+                }
                 let _ = uwrite!(sub, "{} \u{b7} ", Txt(age.as_bytes()));
                 let arrow = match (s.pos, fix) {
                     (Some(p), Some(f)) => {

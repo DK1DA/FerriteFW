@@ -281,7 +281,8 @@ pub(crate) fn def(p: Page) -> PageDef {
         Page::About => PageDef {
             title: "About",
             rows: &ABOUT,
-            note: "Updating: hold PF1 + PF2 while switching on, then use the web flasher.",
+            // SELF-10: the licence and the copyright holder, with the update hint.
+            note: "Copyright 2026 Alex Harvey. Free for any noncommercial use: PolyForm Noncommercial 1.0.0. To update, hold PF1 + PF2 while switching on.",
             hints: &[(ARROWS_LR, "System"), ("BACK", "Back")], // HELP-1: the page ▶ goes to
         },
         Page::System => PageDef {
