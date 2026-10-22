@@ -144,8 +144,13 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         w::field(lcd, 14, 212, 240, 258, 254, Align::Left, b"Scan, watch, APRS, GPS", &UI_12, LP_DIM, LP_BLACK);
         w::field(lcd, 14, 212, 258, 276, 272, Align::Left, b"and Bluetooth are off.", &UI_12, LP_DIM, LP_BLACK);
     }
-    // The bottom band: home's own hints in black on amber (a hint-bar toast covers it while it shows).
-    let hints = app.screen.hints(app);
+    // The bottom band: home's own hints in black on amber, PTT Talk in the middle (Alex, Oct 21, 2026: the one VFO
+    // is for talking; OK still opens the quick menu), a hint-bar toast covering it while it shows.
+    let home = app.screen.hints(app);
+    let hints = match home.as_slice() {
+        [first, _, last] => Hints::new(&[*first, ("PTT", "Talk"), *last]),
+        _ => home,
+    };
     let toast = app.toast_shown();
     if app.dirty(R_LINE, hash(&(hints.as_slice(), toast))) && !toast {
         lcd.fill(0, BOTTOM_Y, 240, 320 - BOTTOM_Y, LP_AMBER);
