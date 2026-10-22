@@ -360,6 +360,9 @@ pub struct App {
     /// The tone hint per slot (TSRCH-13, TSRCH-16): the tone word the Radio task heard, kept from the last tick
     /// for the quick settings' Tones row.
     pub(crate) heard: [u16; SLOTS],
+    /// PWR-24.8: the active slot's last reception: (slot, opened, closed (0 while open or never), peak dBm). RAM
+    /// only; Low Power Mode's home shows it.
+    pub(crate) last_rx: (u8, u32, u32, i16),
     /// Where each scanning slot is stopped on a hit (held there, through the resume wait); 0 when it isn't, or
     /// only passing a busy step. PTT transmits there (SCAN-19).
     scan_hit: [Freq10; SLOTS],
@@ -462,6 +465,7 @@ impl App {
             relay_mask: 0,
             scan_hit: [0; SLOTS],
             heard: [0; SLOTS],
+            last_rx: (0xFF, 0, 0, i16::MIN),
             monitor: 0,
             mute: 0,
             out: Outbox { q: ferrite_core::cmdq::CmdRing::new(), sync: 0, cur: NO_SLOT, step: 0 },
@@ -1089,6 +1093,18 @@ impl App {
             relay |= (s.relay as u8) << i;
             self.heard[i] = s.heard_tone;
             self.scan_hit[i] = if s.scanning && s.held { s.freq } else { 0 };
+        }
+        // PWR-24.8: the active slot's last reception, for Low Power Mode's home.
+        let a = self.active as usize;
+        if rx & 1 << a != 0 {
+            let r = live.slots[a].rssi;
+            if self.rx_mask & 1 << a == 0 || self.last_rx.0 != a as u8 || self.last_rx.2 != 0 {
+                self.last_rx = (a as u8, now, 0, r);
+            } else {
+                self.last_rx.3 = self.last_rx.3.max(r);
+            }
+        } else if self.last_rx.0 == a as u8 && self.last_rx.2 == 0 && self.last_rx.1 != 0 {
+            self.last_rx.2 = now.max(1);
         }
         // CHAN-25: Recent gets a channel when you tune to it (the active slot's), transmit on it, or a slot on it
         // opens squelch.

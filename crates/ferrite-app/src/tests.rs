@@ -148,8 +148,9 @@ fn ram_is_small() {
     // kept hit's stop start for its length (SCAN-23.1: 2 bytes, 4 with padding, x16), to 1528; the contact whose name
     // is being typed (APRS-37: a callsign, 10 bytes), 16 with padding, to 1544; Low Power Mode (PWR-24: its flags, the
     // battery % Auto looks at, the side keys' hold time, 0 7 7's new list's remembered row and the bar's mark), 8
-    // with padding, to 1552
-    assert!(n <= 1552, "App is {n} bytes");
+    // with padding, to 1552; its home's last reception (PWR-24.8: slot, opened, closed, peak: 11 bytes), 16 with
+    // padding, to 1568
+    assert!(n <= 1568, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");

@@ -48,6 +48,8 @@ const SUB_BASE: i32 = 210;
 const BLOCKS: i32 = 8;
 const BLOCK: (i32, i32, i32) = (23, 32, 27); // width, height, pitch
 const METER_Y: i32 = 228;
+/// PWR-24.8: the last-heard line's baseline, between the meter and the bottom band.
+const HEARD_BASE: i32 = 284;
 /// The leaving box: over the frequency and the settings line, inside their boxes (redrawn when it goes), the
 /// whole inside's width so no digit shows past it.
 const BOX: (i32, i32, i32, i32) = (8, 74, 224, 96);
@@ -158,6 +160,27 @@ pub(crate) fn render(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelSt
         }
         drew = true;
     }
+    // PWR-24.8: the last reception under the meter ("Heard 4 min ago · S7"), blank while one is on and before
+    // the first; redrawn as its age changes (every second for the first minute, then every minute).
+    let mut heard = Buf::<32>::new();
+    let (slot, _, to, peak) = app.last_rx;
+    if slot == a && to != 0 && !rx && !keyed {
+        let ago = app.now.wrapping_sub(to) / 1000;
+        let (n, unit) = match ago {
+            0..=59 => (ago, " s"),
+            60..=3599 => (ago / 60, " min"),
+            _ => (ago / 3600, " h"),
+        };
+        heard.push(b"Heard ");
+        push_num(&mut heard, n);
+        heard.push(unit.as_bytes());
+        heard.push(" ago \u{b7} ".as_bytes());
+        heard.push(w::s_text(peak).as_bytes());
+    }
+    if app.dirty(R_NOTE, hash(&heard)) || drew {
+        lcd.fill(SIDE_W, SUB.1, 240 - 2 * SIDE_W, BOTTOM_Y - SUB.1, LP_BLACK);
+        w::field(lcd, X, W, SUB.1, BOTTOM_Y - 4, HEARD_BASE, Align::Left, w::fit(heard.as_bytes(), &UI_15B, W), &UI_15B, LP_SUB, LP_BLACK);
+    }
     // No standing note of what is off or how to leave: both are said on entering and whenever something the mode
     // refuses is tried (PWR-24.6); the room went to bigger text (Alex, Oct 21, 2026).
     // The bottom band: home's own hints in black on amber, PTT Talk in the middle (Alex, Oct 21, 2026: the one VFO
@@ -213,4 +236,19 @@ fn filled_tag(lcd: &mut impl Panel, x_right: i32, baseline: i32, s: &[u8], c: u1
     let wd = ferrite_ui::gfx::text4_width(s, &UI_15B) + 12;
     let y = baseline - 16;
     w::field(lcd, x_right - wd, wd, y, y + 20, baseline, Align::Center, s, &UI_15B, LP_BLACK, c);
+}
+
+fn push_num(b: &mut Buf<32>, n: u32) {
+    let mut d = [0u8; 10];
+    let mut i = d.len();
+    let mut v = n;
+    loop {
+        i -= 1;
+        d[i] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    b.push(&d[i..]);
 }

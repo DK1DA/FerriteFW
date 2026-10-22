@@ -198,3 +198,30 @@ fn older_record_reads_off_and_twenty() {
     s.sanitize();
     assert_eq!((s.lpm, s.lpm_below), (0, 20));
 }
+
+/// PWR-24.8: the active slot's last reception (when it closed, how long, the peak), kept for Low Power Mode's home;
+/// another slot's reception doesn't replace it, and a new one on the active slot does.
+#[test]
+fn last_heard_is_kept() {
+    let mut t = T::new();
+    t.app.set.lpm = 0;
+    let a = t.app.active as usize;
+    assert_eq!(t.app.last_rx.2, 0, "nothing heard yet");
+    t.live.slots[a].squelch_open = true;
+    t.live.slots[a].rssi = -100;
+    t.wait(500);
+    t.live.slots[a].rssi = -80;
+    t.wait(1500);
+    t.live.slots[a].squelch_open = false;
+    t.wait(100);
+    let (slot, from, to, peak) = t.app.last_rx;
+    assert_eq!(slot as usize, a);
+    assert!(to > from && (1900..=2300).contains(&(to - from)), "about 2 s: {}", to - from);
+    assert_eq!(peak, -80, "the peak");
+    let other = (a + 1) % 3;
+    t.live.slots[other].squelch_open = true;
+    t.wait(500);
+    t.live.slots[other].squelch_open = false;
+    t.wait(100);
+    assert_eq!(t.app.last_rx.0 as usize, a, "another slot's reception doesn't replace it");
+}
