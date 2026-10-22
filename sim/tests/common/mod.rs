@@ -21,11 +21,14 @@ use ferrite_sim::simcore::{Event, SimCore, Stored};
 /// The step the harness advances time by, as a frame (ms).
 pub const FRAME: u32 = 20;
 
+/// A frame hook: the video recorder's.
+pub type Recorder = Box<dyn FnMut(&SimCore)>;
+
 pub struct Radio {
     pub sim: SimCore,
     pub t: u32,
     /// Called with the simulator after every frame (the video recorder, `tools/promo`).
-    pub rec: Option<Box<dyn FnMut(&SimCore)>>,
+    pub rec: Option<Recorder>,
 }
 
 impl Radio {
