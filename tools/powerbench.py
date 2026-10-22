@@ -195,9 +195,9 @@ def main():
                     elif line == "@dark":
                         time.sleep(7)
                     elif line != "@rx":
-                        out = r.cmd(line)
-                        if "invalid" in out or "refused" in out:
-                            sys.exit(f"{line}: {out.strip()}")
+                        said = r.cmd(line)
+                        if "invalid" in said or "refused" in said:
+                            sys.exit(f"{line}: {said.strip()}")
                 rx = "@rx" in lines
                 what = f"{a.bursts} dry bursts" if rx else f"{a.seconds:.0f} s"
                 print(f"{name}: settling {a.settle:.0f} s, then {what}", flush=True)
