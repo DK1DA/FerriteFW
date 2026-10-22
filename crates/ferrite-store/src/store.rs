@@ -69,6 +69,9 @@ pub enum Mounted {
     Failed,
 }
 
+/// A queued channel write taken into another's rewrite (decision 227): its number and record (None: deleted).
+type Merge = (u16, Option<[u8; CH_LEN]>);
+
 /// A write for the Storage task (the radio), or done at once (the simulator).
 #[derive(Clone, Copy)]
 pub enum Job {
@@ -195,6 +198,9 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     async fn mount_inner(&self) -> Result<Mounted> {
         scratch::recover(&self.f).await?;
+        // Decision 227: the scratch ring starts where the settings' save count says, a different place each
+        // power-on (they are saved at every power-off).
+        self.f.scratch_seed(settings::latest(&self.f)?.map_or(0, |c| c.count));
         if !self.header_ok()? {
             self.format().await?;
         }
@@ -625,15 +631,76 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     async fn splice(&self, addr: u32, new: Option<&[u8]>, len: u32) -> Result {
         let sector = addr - addr % SECTOR;
         let off = addr - sector;
+        // Decision 227: channel writes queued behind this one for the same sector go in the same rewrite.
+        let mut more = [None; QUEUE];
+        let n = if CHANNELS.contains(&sector) { self.take_merges(sector, &mut more)? } else { 0 };
         scratch::rewrite(&self.f, sector, &|o, piece| {
             for (i, b) in piece.iter_mut().enumerate() {
                 let a = o + i as u32;
                 if (off..off + len).contains(&a) {
                     *b = new.map_or(0xFF, |n| n[(a - off) as usize]);
                 }
+                for &(num, rec) in more[..n].iter().flatten() {
+                    let at = ch_addr(num) - sector;
+                    if (at..at + CH_LEN as u32).contains(&a) {
+                        *b = rec.map_or(0xFF, |r: [u8; CH_LEN]| r[(a - at) as usize]);
+                    }
+                }
             }
         })
-        .await
+        .await?;
+        for &(num, rec) in more[..n].iter().flatten() {
+            self.zmap[num as usize].set(rec.map_or(EMPTY, |r| zkey(r[18])));
+        }
+        Ok(())
+    }
+
+    /// Decision 227: takes the plain channel writes (a put that doesn't move a channel, or a delete) from the
+    /// front of the queue that land in `sector`, as the records they would write, in queue order; it stops at the
+    /// first job of another kind, so nothing is reordered past it. Writes to other sectors stay queued.
+    fn take_merges(&self, sector: u32, out: &mut [Option<Merge>; QUEUE]) -> Result<usize> {
+        let (head, queued) = (self.head.get() as usize, self.queued.get() as usize);
+        let mut jobs = self.jobs.borrow_mut();
+        let mut n = 0;
+        let mut kept = [None; QUEUE];
+        let mut k = 0;
+        let mut i = 0;
+        while i < queued {
+            let job = jobs[(head + i) % QUEUE];
+            let num = match job {
+                Some(Job::Write(ChanWrite::Put { ch, from: None })) => ch.num,
+                Some(Job::Write(ChanWrite::Delete(num))) => num,
+                _ => break,
+            };
+            if num < MAX_CHANNELS && ch_addr(num) - ch_addr(num) % SECTOR == sector {
+                // the record as it stands: a merged one before it, or the flash's
+                let cur = out[..n].iter().rev().flatten().find(|m| m.0 == num).map_or_else(|| self.raw_ch(num), |m| Ok(m.1.unwrap_or([0xFF; CH_LEN])))?;
+                let rec = match job {
+                    Some(Job::Write(ChanWrite::Put { ch, .. })) => Some(ch_encode(&ch, &cur)),
+                    _ => None,
+                };
+                out[n] = Some((num, rec));
+                n += 1;
+            } else {
+                kept[k] = job;
+                k += 1;
+            }
+            i += 1;
+        }
+        // The rest, after the run looked at, stays in order behind the jobs kept.
+        while i < queued {
+            kept[k] = jobs[(head + i) % QUEUE];
+            k += 1;
+            i += 1;
+        }
+        if n > 0 {
+            for (j, slot) in jobs.iter_mut().enumerate() {
+                *slot = if j < k { kept[j] } else { None };
+            }
+            self.head.set(0);
+            self.queued.set(k as u8);
+        }
+        Ok(n)
     }
 
     fn raw_ch(&self, num: u16) -> Result<[u8; CH_LEN]> {

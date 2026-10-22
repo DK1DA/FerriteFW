@@ -17,7 +17,7 @@ use ferrite_app::data::{Data, MsgState, Src};
 use ferrite_app::ports::{Port, Ports, To};
 use ferrite_app::sample::Sample;
 use ferrite_app::settings::Settings;
-use ferrite_core::layout::{LAYOUT_HEADER, WAYPOINTS};
+use ferrite_core::layout::{CONTACTS, LAYOUT_HEADER};
 use ferrite_store::sim::SimFlash;
 use ferrite_store::FlashStore;
 use ferrite_app::screens::nav::{self, Dest};
@@ -184,7 +184,7 @@ const CHECKS: [Check; 6] = [
 
 /// The simulated flash's saved part: from the layout header to the end of the waypoints (the event log, APRS
 /// messages and waypoints included).
-pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..WAYPOINTS.end;
+pub const FLASH_IMAGE: core::ops::Range<u32> = LAYOUT_HEADER.start..CONTACTS.end;
 
 /// What the flash holds at power on.
 pub enum Stored {

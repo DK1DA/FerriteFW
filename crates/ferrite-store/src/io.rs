@@ -4,12 +4,12 @@
 //! On the radio the UI reads channel records while the Storage task writes. Two windows would show it bytes
 //! that are neither old nor new, so reads look elsewhere for them:
 //! - a record programmed into erased bytes: the record itself, from RAM ([`Flash::program_record`]);
-//! - a sector being erased and copied back from the scratch sector: the scratch copy, or erased bytes when
+//! - a sector being erased and copied back from a scratch sector: the scratch copy, or erased bytes when
 //!   nothing comes back ([`Flash::redirect`]).
 
 use crate::{Crc32, Nor, Result, PAGE, SECTOR};
 use core::cell::{Cell, RefCell};
-use ferrite_core::layout::SCRATCH;
+use ferrite_core::layout::SCRATCH_RING;
 
 /// Pauses [`Flash::wait`] allows (each 1 ms on the radio).
 pub const WAIT_MAX: u32 = 3000;
@@ -19,8 +19,10 @@ const PEND_MAX: usize = 64;
 
 pub struct Flash<N: Nor> {
     nor: RefCell<N>,
-    /// This sector's reads come from the scratch sector (true) or read erased (false).
-    redirect: Cell<Option<(u32, bool)>>,
+    /// This sector's reads come from that scratch sector (Some) or read erased (None).
+    redirect: Cell<Option<(u32, Option<u32>)>>,
+    /// The scratch ring's next sector (decision 227).
+    scratch: Cell<u32>,
     /// A record being programmed in place, and its bytes.
     pending: Cell<Option<(u32, usize)>>,
     pend: RefCell<[u8; PEND_MAX]>,
@@ -28,7 +30,7 @@ pub struct Flash<N: Nor> {
 
 impl<N: Nor> Flash<N> {
     pub fn new(nor: N) -> Self {
-        Flash { nor: RefCell::new(nor), redirect: Cell::new(None), pending: Cell::new(None), pend: RefCell::new([0xFF; PEND_MAX]) }
+        Flash { nor: RefCell::new(nor), redirect: Cell::new(None), scratch: Cell::new(0), pending: Cell::new(None), pend: RefCell::new([0xFF; PEND_MAX]) }
     }
 
     pub fn into_inner(self) -> N {
@@ -42,8 +44,8 @@ impl<N: Nor> Flash<N> {
     /// What a reader should see at `addr` (`buf` stays inside one sector).
     pub fn read(&self, addr: u32, buf: &mut [u8]) -> Result {
         match self.redirect.get() {
-            Some((s, true)) if (s..s + SECTOR).contains(&addr) => self.raw_read(SCRATCH.start + addr - s, buf)?,
-            Some((s, false)) if (s..s + SECTOR).contains(&addr) => buf.fill(0xFF),
+            Some((s, Some(from))) if (s..s + SECTOR).contains(&addr) => self.raw_read(from + addr - s, buf)?,
+            Some((s, None)) if (s..s + SECTOR).contains(&addr) => buf.fill(0xFF),
             _ => self.raw_read(addr, buf)?,
         }
         if let Some((p, n)) = self.pending.get() {
@@ -130,7 +132,7 @@ impl<N: Nor> Flash<N> {
 
     /// Erases a sector that readers should see as erased from the start (settings reset).
     pub async fn erase_blanked(&self, addr: u32) -> Result {
-        self.redirect.set(Some((addr, false)));
+        self.redirect.set(Some((addr, None)));
         let r = self.erase(addr).await;
         self.redirect.set(None);
         r
@@ -145,9 +147,23 @@ impl<N: Nor> Flash<N> {
         r
     }
 
-    /// Reads of `sector` come from the scratch sector until [`Flash::end_redirect`].
-    pub fn redirect(&self, sector: u32) {
-        self.redirect.set(Some((sector, true)));
+    /// Reads of `sector` come from the scratch sector `from` until [`Flash::end_redirect`].
+    pub fn redirect(&self, sector: u32, from: u32) {
+        self.redirect.set(Some((sector, Some(from))));
+    }
+
+    /// The scratch ring's sector for the next rewrite; each rewrite takes the next one, wrapping.
+    pub fn scratch_next(&self) -> u32 {
+        let n = SCRATCH_RING.len() as u32 / SECTOR;
+        let k = self.scratch.get() % n;
+        self.scratch.set(k + 1);
+        SCRATCH_RING.start + k * SECTOR
+    }
+
+    /// Where the ring starts this power-on: a number that moves on between power-ons (the settings' save count),
+    /// so a power-on with few rewrites doesn't wear the first sectors.
+    pub fn scratch_seed(&self, n: u32) {
+        self.scratch.set(n % (SCRATCH_RING.len() as u32 / SECTOR));
     }
 
     pub fn end_redirect(&self) {
@@ -215,9 +231,9 @@ mod wait_tests {
     #[test]
     fn stuck_busy_fails_cleanly() {
         let f = Flash::new(Stuck { polls: 0 });
-        assert_eq!(block(f.erase(SCRATCH.start)), Err(NorError));
+        assert_eq!(block(f.erase(SCRATCH_RING.start)), Err(NorError));
         assert!(f.nor().polls > WAIT_MAX && f.nor().polls <= WAIT_MAX + 2);
         let f = Flash::new(Stuck { polls: 0 });
-        assert_eq!(block(f.program(SCRATCH.start, &[0u8; 16])), Err(NorError));
+        assert_eq!(block(f.program(SCRATCH_RING.start, &[0u8; 16])), Err(NorError));
     }
 }
