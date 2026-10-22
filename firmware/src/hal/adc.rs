@@ -22,11 +22,17 @@ pub fn init() {
     })
 }
 
+/// ADC clock = APB2 / 6 = 10 MHz, stock's (28 MHz max). At a slow bench clock (`super::clock`, APB2 at 20 MHz or
+/// less) / 2 instead, so a 252-cycle conversion still fits the audio capture's 104 us sample period.
+const ADCDIV: u32 = if super::clock::APB2_HZ <= 20_000_000 { 0b00 } else { 0b10 };
+const ADC_HZ: u32 = super::clock::APB2_HZ / if ADCDIV == 0 { 2 } else { 6 };
+const _: () = assert!(ADC_HZ <= 28_000_000 && 252 * 1_000_000 / ADC_HZ < 100);
+
 fn init_once() {
     for n in 0..3 {
         pin(GPIOA, n).config(Mode::Analog);
     }
-    modify(CRM_CFG, CRM_CFG_ADCDIV_MASK, 0b10 << 14); // ADC clock = APB2 / 6 = 10 MHz, stock's (28 MHz max)
+    modify(CRM_CFG, CRM_CFG_ADCDIV_MASK, ADCDIV << 14);
     modify(CRM_APB2EN, 0, CRM_APB2_ADC1);
     wr(ADC_CTRL1, 0);
     wr(ADC_SPT1, 0x00FF_FFFF); // 239.5 cycles everywhere: high-impedance dividers

@@ -3,14 +3,18 @@
 //! timers on either APB run at twice it, 120 MHz. Fixed for the life of the image (no runtime switching).
 //!
 //! For the power bench (Oct 21, 2026) an image can be built at another fixed speed with a `clock-*` feature
-//! (`clock-96`, `clock-144`, `clock-192`, `clock-240`). Above 120 MHz the APBs divide by 4, so at 240 MHz every
+//! (`clock-24`, `clock-48`, `clock-96`, `clock-144`, `clock-192`, `clock-240`). Above 120 MHz the APBs divide by 4, so at 240 MHz every
 //! peripheral and timer runs exactly as at 120 and only the core and AHB are faster. Every timing in the image
 //! follows the constants below; the const checks catch a speed whose dividers don't fit.
 use super::regs::*;
 use super::{modify, rd, wr};
 
-#[cfg(not(any(feature = "clock-96", feature = "clock-144", feature = "clock-192", feature = "clock-240")))]
+#[cfg(not(any(feature = "clock-24", feature = "clock-48", feature = "clock-96", feature = "clock-144", feature = "clock-192", feature = "clock-240")))]
 const MULT: u32 = 15;
+#[cfg(feature = "clock-24")]
+const MULT: u32 = 3;
+#[cfg(feature = "clock-48")]
+const MULT: u32 = 6;
 #[cfg(feature = "clock-96")]
 const MULT: u32 = 12;
 #[cfg(feature = "clock-144")]
@@ -39,7 +43,9 @@ const AUTO_STEP: u32 = 3 << 4;
 const PLL_CLEAR: u32 = 0x1FC0_FFFF;
 /// The multiplier code (RM 4.3.2): x2..x15 are 0..13, x17..x64 are 16..63.
 const PLL_CODE: u32 = if MULT <= 15 { MULT - 2 } else { MULT - 1 };
-const PLL_SET: u32 = 1 << 31 | 1 << 16 | (PLL_CODE & 0xF) << 18 | (PLL_CODE >> 4) << 29;
+/// PLLRANGE (bit 31): set above 72 MHz only.
+const PLL_RANGE: u32 = if SYSCLK_HZ > 72_000_000 { 1 << 31 } else { 0 };
+const PLL_SET: u32 = PLL_RANGE | 1 << 16 | (PLL_CODE & 0xF) << 18 | (PLL_CODE >> 4) << 29;
 const _: () = assert!(MULT != 15 || PLL_SET == 0x8035_0000); // stock's value at 120 MHz
 /// APB2 (bits 11-13) and APB1 (bits 8-10): 0b100 is /2, 0b101 /4; AHB stays /1.
 const APB_CODE: u32 = if APB_DIV == 4 { 0b101 } else { 0b100 };
