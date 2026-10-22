@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The power bench: the radio on the DPS-150, each state set over the link, its current logged.
 
-    tools/powerbench.py RADIO SUPPLY [--label 120MHz] [--seconds 60] [--settle 10] [--only NAME,...]
+    tools/powerbench.py RADIO SUPPLY [--label 120MHz] [--seconds 60] [--settle 10] [--only "NAME;..."]
     tools/powerbench.py /dev/cu.usbserial-142220 /dev/cu.usbmodem161E49AD74961 --label 240MHz
 
 RADIO is a ferrite_link port (cable, or ble:ID); SUPPLY the DPS-150's. With --tx PORT --tx-slot a|b|c, a second
@@ -119,13 +119,13 @@ def main():
     ap.add_argument("--label", default="run")
     ap.add_argument("--seconds", type=float, default=60)
     ap.add_argument("--settle", type=float, default=10)
-    ap.add_argument("--only", help="comma-separated state names")
+    ap.add_argument("--only", help="state names separated by ;")
     ap.add_argument("--tx", help="the second radio's port, keyed dry for the rx states")
     ap.add_argument("--tx-slot", choices=["a", "b", "c"])
     ap.add_argument("--bursts", type=int, default=8, help="key-ups per rx state")
     ap.add_argument("--note", help="the setup, for the record (volume, battery, antenna): target/power/notes.txt")
     a = ap.parse_args()
-    states = [s for s in STATES if not a.only or s[0] in a.only.split(",")]
+    states = [s for s in STATES if not a.only or s[0] in a.only.split(";")]
     if not a.tx:
         states = [s for s in states if "@rx" not in s[1]]
     elif not a.tx_slot:
