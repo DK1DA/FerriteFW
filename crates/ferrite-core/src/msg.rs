@@ -21,6 +21,8 @@ pub enum RadioCmd {
     BatterySave(crate::rxsleep::Level),
     /// A key or knob: counts as activity for receiver sleep.
     Activity,
+    /// Low Power Mode on or off (PWR-24): Battery Save runs [`crate::rxsleep::LOW_POWER`] in place of its level.
+    LowPower(bool),
     /// Broadcast receiver: FM in 10 kHz units, AM in kHz.
     Broadcast(BroadcastCmd),
     /// The slot playing broadcast FM (BCR-21), none = the FM screen's own: while the SI4732 plays FM no chip

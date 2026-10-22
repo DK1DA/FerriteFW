@@ -65,13 +65,14 @@ impl App {
         if self.dark() || self.lit & TX_DARK != 0 {
             return 0;
         }
-        BRIGHTNESS[self.set.brightness() as usize - 1]
+        let d = BRIGHTNESS[self.set.brightness() as usize - 1];
+        if self.low_power() { d.min(crate::lpm::LPM_BACKLIGHT) } else { d } // PWR-24.5
     }
 
     /// The keypad light's PWM duty in thousandths (DISP-22): 0 while [`App::keypad_lit`] says off, else the same
     /// level as the screen's (the theme's 0 7 4 2), lit or not, so one level dims both.
     pub fn keypad_duty(&self) -> u16 {
-        if self.keypad_lit() {
+        if self.keypad_lit() && !self.low_power() {
             BRIGHTNESS[self.set.brightness() as usize - 1]
         } else {
             0

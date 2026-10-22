@@ -256,6 +256,8 @@ impl App {
                 Screen::Scope(_) => Mode::Scope,
                 Screen::ToneSearch(_) => Mode::Tone,
                 Screen::Counter(_) => Mode::Counter,
+                // PWR-24.4: no broadcast, HF mode or crossband in Low Power Mode
+                Screen::Fm(_) | Screen::Hf(_) | Screen::Crossband(_) if self.low_power() => continue,
                 Screen::Fm(_) => Mode::Fm,
                 Screen::Hf(_) => Mode::Hf,
                 Screen::Crossband(_) if self.radio.xb_on => Mode::Xb,
@@ -263,8 +265,8 @@ impl App {
             };
             return if keyed && !matches!(m, Mode::Hf | Mode::Xb) { Mode::Off } else { m };
         }
-        if keyed {
-            return Mode::Off; // TX-24: the broadcast stops before the key-up and starts again after
+        if keyed || self.low_power() {
+            return Mode::Off; // TX-24: the broadcast stops before the key-up and starts again after; PWR-24.4
         }
         let rested = self.radio.seen_freq.is_some() && self.now.wrapping_sub(self.radio.freq_at) >= STRIP_REST_MS;
         if self.screen == Screen::Home && self.set.layout == 1 && rested && !self.strip_blocked() {

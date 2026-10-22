@@ -868,8 +868,11 @@ fn keep_protected(new: &mut Settings, old: &Settings) {
     new.setup_done = old.setup_done;
     new.cable_port = old.cable_port;
     new.kiss_port = old.kiss_port; // KISS-7: turning KISS on is the owner's consent, made on the radio
-    new.spare_tokens = [0; 32];
+    new.spare_tokens = [0; 30];
     new.spare_temp = 0;
+    // PWR-24: Low Power Mode and its Auto level sit in what was spare; a writer that doesn't know them (the
+    // Console so far) would zero them, so the radio's stay.
+    (new.lpm, new.lpm_below) = (old.lpm, old.lpm_below);
 }
 
 fn channel_save(c: &Channel, s: &mut dyn PSink) {

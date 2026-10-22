@@ -23,7 +23,7 @@ def quiet(t, watch="Off", bsave="Off"):
     restart (`t.put_back`)."""
     stopped = t.stop_scans()
     t.set("0 1 1", watch)
-    t.set("0 7 7", bsave)
+    t.set("0 7 7 1", bsave)
     return stopped
 
 

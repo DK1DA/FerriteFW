@@ -30,6 +30,7 @@ pub mod data;
 pub mod gpsdata;
 pub mod keys;
 pub mod lights;
+pub mod lpm;
 pub mod link;
 pub mod pager;
 pub mod persist;
@@ -282,6 +283,11 @@ pub struct App {
     /// Dry TX (TX-48, 0 8 9 2): the PA drive held at 0 on every key-up of a `tx` build. Not a setting: off at
     /// every power-on and never stored, changed only on the radio's own menu (never by the link or terminal).
     dry_tx: bool,
+    /// Low Power Mode's flags ([`lpm`]: in it, Auto held off, the side keys' hold), the battery % Auto looks at
+    /// (PWR-24) and when the side keys' hold began.
+    lpm: u8,
+    batt: u8,
+    lpm_at: u32,
     /// VOX's flags: [`VOX_REFUSED`], speech refused on an emergency frequency (TX-35: the toast once per burst);
     /// [`VOX_SENT`] and [`VOX_SCREEN`], whether the screen lets VOX sample as last sent to the Radio task (VOX-3,
     /// [`App::vox_screen`]). One byte: the App's RAM budget (`ram_is_small`).
@@ -414,6 +420,9 @@ impl App {
             alert: 0,
             vox_on: false,
             dry_tx: false,
+            lpm: 0,
+            batt: lpm::BATT_UNKNOWN,
+            lpm_at: 0,
             vox_bits: 0,
             remote: None,
             remote_ended: None,
@@ -962,6 +971,11 @@ impl App {
             self.keys.down(key, now);
             return;
         }
+        // PWR-24.4: SIDE1 + SIDE2 held in Low Power Mode leaves it; neither does its own thing meanwhile.
+        if self.lpm_combo_down(key, now) {
+            self.last_input = now;
+            return;
+        }
         // LINK-20: a person's PTT during a remote transmission ends it, and does nothing else until let go.
         if self.local_ptt_down(key, now, store) {
             return;
@@ -1010,6 +1024,7 @@ impl App {
 
     pub fn key_up(&mut self, key: Key, now: u32, store: &impl ChannelStore) {
         self.tick_keys(now, store);
+        self.lpm_combo_up(key);
         if self.local_ptt_up(key) {
             return; // LINK-20: the press that ended a remote transmission
         }
@@ -1064,6 +1079,7 @@ impl App {
         chanscan::feed(self, store);
         chanscan::answer(self, live, store);
         self.lights_tick(now, live);
+        self.lpm_tick(); // PWR-24
         let mut rx = 0;
         let mut scan = 0;
         let mut relay = 0;
@@ -1223,6 +1239,11 @@ impl App {
     /// Opens a screen by where it is in the manual ([`Dest`]), remembering this one for BACK. Screens not built
     /// yet open as a "coming" placeholder ([`screens::nav::enter`]).
     pub fn open(&mut self, dest: Dest) {
+        // PWR-24.4: Low Power Mode has no scan, broadcast, HF mode or crossband (two VFOs); menus, editing and the
+        // active slot's tools (scope, tone search, counter) stay.
+        if self.low_power() && matches!(dest, Dest::Scan | Dest::FmBroadcast | Dest::HfMode | Dest::Crossband) {
+            return self.lpm_refuse();
+        }
         // PIN-5: channel-only mode has no MENU 0 and no editing
         if matches!(dest, Dest::Advanced | Dest::Group(_) | Dest::Sub(..) | Dest::ChannelEdit | Dest::SaveChannel | Dest::AddRepeater | Dest::Quick)
             && self.chan_only_refuse()
@@ -1330,6 +1351,9 @@ impl App {
 
     /// The watched slots: Watch's, and C while it is the APRS slot (APRS-16, KISS-9).
     pub(crate) fn watch_mask(&self) -> u8 {
+        if self.low_power() {
+            return 0; // PWR-24.4: the active slot alone
+        }
         [0, 0b011, 0b111][self.watch as usize % 3] | (self.aprs_c() as u8) << aprs::APRS_SLOT
     }
 

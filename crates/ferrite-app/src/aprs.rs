@@ -327,26 +327,28 @@ impl Holder {
 impl App {
     /// APRS mode is on (0 5 3).
     pub fn aprs_on(&self) -> bool {
-        self.set.aprs_mode
+        self.set.aprs_mode && !self.low_power() // PWR-24: no APRS in Low Power Mode
     }
 
     /// APRS-22: without APRS mode, the active slot is on a channel flagged APRS, so what it receives is decoded
     /// (into the heard list and messages; nothing is sent: transmitting is APRS mode's).
     pub fn aprs_flag_decode(&self) -> bool {
         let s = self.slot(self.active());
-        !self.set.aprs_mode && !s.vfo_mode && s.ch.is_some_and(|c| c.flags & crate::chan::FLAG_APRS != 0)
+        !self.set.aprs_mode && !self.low_power() && !s.vfo_mode && s.ch.is_some_and(|c| c.flags & crate::chan::FLAG_APRS != 0)
     }
 
     /// Automatic beacons are on (0 5 5 1 timed, distance or smart; APRS-24): with APRS mode off they still hold C
     /// (APRS-29). Manual ("Beacon now" only) doesn't.
     pub fn beacons_on(&self) -> bool {
-        self.aprs.beacons_on()
+        self.aprs.beacons_on() && !self.low_power()
     }
 
     /// What holds slot C as the APRS slot, if anything: APRS mode (APRS-15), KISS (KISS-9: its frames go out
     /// there) or automatic beacons (APRS-29), in that precedence.
     pub fn aprs_holder(&self) -> Option<Holder> {
-        if self.set.aprs_mode {
+        if self.low_power() {
+            None // PWR-24: Low Power Mode holds nothing on C
+        } else if self.set.aprs_mode {
             Some(Holder::Mode)
         } else if self.set.kiss_on() {
             Some(Holder::Kiss)
@@ -365,7 +367,7 @@ impl App {
     /// C has receive priority on its chip (APRS-21.1, decision 181): APRS mode or KISS hold it. Beacons alone
     /// don't: C is then an ordinary watched slot.
     pub fn aprs_prio(&self) -> bool {
-        self.set.aprs_mode || self.set.kiss_on()
+        self.aprs_on() || self.kiss_on()
     }
 
     /// Slot `s` is the APRS slot now.
@@ -409,7 +411,7 @@ impl App {
     /// C becomes the APRS slot or goes back, or what holds it changes (APRS-15, APRS-16, KISS-9, APRS-29): it
     /// stops scanning, retunes, and is watched while it is, kept awake with priority while APRS mode or KISS hold
     /// it.
-    fn c_follow(&mut self) {
+    pub(crate) fn c_follow(&mut self) {
         self.c_settled();
         if self.scan_mask & 1 << APRS_SLOT != 0 {
             self.scan_mask &= !(1 << APRS_SLOT);
@@ -609,7 +611,7 @@ impl App {
         }
         if self.aprs_st & AFTER_VOICE != 0 {
             self.aprs_st &= !AFTER_VOICE;
-            if self.set.aprs_mode && self.aprs.after_voice {
+            if self.aprs_on() && self.aprs.after_voice {
                 data.request(crate::data::Op::AfterVoice);
             }
         }

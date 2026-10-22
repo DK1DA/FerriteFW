@@ -213,9 +213,14 @@ pub struct Settings {
     pub aprs_mode: bool,
     /// Message text is typed predictively (TEXT-10); hold \* switches, and the choice is kept for the next one.
     pub predictive: bool,
+    /// 0 7 7 2 (PWR-24): Low Power Mode, [`LPM_MODES`]: 0 off, 1 on, 2 auto; and 0 7 7 3, the battery % Auto
+    /// enters below (10, 20, 30 or 40). Two bytes taken from the spare below (decision 234): an older record has
+    /// zeros there, Off and (sanitized) 20 %.
+    pub lpm: u8,
+    pub lpm_below: u8,
     /// Unused, kept so the fields after it stay where older records have them: it held Bluetooth approval tokens
     /// until decision 104 (PIN only). Saved as zeros.
-    pub spare_tokens: [u8; 32],
+    pub spare_tokens: [u8; 30],
     /// 0 7 4 1: the screen goes dark after this ([`BACKLIGHT_TIMES`] index; 0 never).
     pub backlight: u8,
     /// 0 7 4 5: the keypad light ([`KEYPAD_LIGHTS`]).
@@ -298,6 +303,10 @@ pub const WAKE_ON: [&str; 3] = ["Keys", "Keys and RX", "Keys, RX and TX"];
 /// The night red theme's index in [`THEMES`] (DISP-23: its own brightness).
 pub const NIGHT_RED: u8 = 2;
 /// 0 7 4 5's values.
+/// 0 7 7 2 (PWR-24): Low Power Mode.
+pub const LPM_MODES: [&str; 3] = ["Off", "On", "Auto"];
+/// 0 7 7 3 (PWR-24.3): the battery % Auto enters below.
+pub const LPM_BELOW: [u8; 4] = [10, 20, 30, 40];
 pub const KEYPAD_LIGHTS: [&str; 4] = ["Off", "With screen", "On key press", "Always"];
 /// 0 7 6's values: the heartbeat is the dark-screen flash in the battery's colour. Short enough for the menu's
 /// value column and the terminal's `set` (24 characters).
@@ -400,7 +409,9 @@ impl Settings {
         term_colour: false,
         aprs_mode: false,
         predictive: true,
-        spare_tokens: [0; 32],
+        lpm: 0,
+        lpm_below: 20,
+        spare_tokens: [0; 30],
         backlight: 5, // 60 s (15 s felt short on the radio, Oct 12, 2026)
         keypad_light: 1,
         leds: 2,
@@ -443,6 +454,12 @@ impl Settings {
         }
         if !(1..=20).contains(&self.tx_timeout) {
             self.tx_timeout = Self::DEFAULT.tx_timeout;
+        }
+        if self.lpm as usize >= LPM_MODES.len() {
+            self.lpm = 0;
+        }
+        if !LPM_BELOW.contains(&self.lpm_below) {
+            self.lpm_below = Self::DEFAULT.lpm_below; // PWR-24.1: an older record's zero
         }
     }
 

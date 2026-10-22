@@ -370,7 +370,8 @@ impl View for Home {
 /// [`Home`]'s drawing, on the panel or in a band.
 fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
     // HOME-3: the other two layouts draw differently; the keys are the same.
-    match app.set.layout {
+    match app.home_layout() {
+        crate::lpm::HOME_LOW_POWER => return super::lowpower::render(app, lcd, cx), // PWR-24.7
         1 => return super::layouts::single(app, lcd, cx),
         2 => return super::layouts::activity(app, lcd, cx),
         _ => {}

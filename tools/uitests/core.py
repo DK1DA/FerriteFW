@@ -26,6 +26,9 @@ import time
 
 REGISTRY = []
 
+# Home's readback ids: home, and Low Power Mode's own home (PWR-24.7).
+HOMES = ("Home", "LowPower")
+
 # Settings a test never changes: they could transmit (VOX, beacon, digipeat, CW ID), take the cable away from the
 # link (cable port, KISS, cable log, terminal colour) or the radio off (auto power off), or need the radio's owner.
 UNSAFE = {"0 8 2 1", "0 5 5 1", "0 5 5 3", "0 5 8 1", "0 8 7 2", "0 9 2 4", "0 5 9 1", "0 9 2 6", "0 9 2 5",
@@ -270,11 +273,11 @@ class T:
             self.r.press("HASH", long=True)
         for _ in range(2):
             u = self.press("BACK", long=True)
-            if u.id == "Home" and not u.qmenu:
+            if u.id in HOMES and not u.qmenu:
                 return u
         for _ in range(4):
             u = self.press("BACK")
-        if u.id != "Home":
+        if u.id not in HOMES:
             self.fail(f"can't get home (on {u.id})")
         return u
 

@@ -119,7 +119,7 @@ const G7: [Entry; 9] = [
     Entry("Backlight|15 s|Timeout, brightness, wake."),
     Entry("Sounds|Beep on|Key beep, volume, alert tones."),
     Entry("LEDs|RX, TX and heartbeat|And a flash while the screen is dark."),
-    Entry("Battery Save|Level 1|Receiver sleep: longer life, slower."),
+    Entry("Power saving|Level 1|Battery Save, Low Power Mode."),
     Entry("Auto power off|Off|Off after a time without key or signal."),
     Entry("Menu timeout|30 s|An idle menu returns home."),
 ];
@@ -152,7 +152,7 @@ pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
     ((1, 2), &[
         Entry("Watched audio|Heard|Heard, muted, per slot."),
         Entry("Pause time|1 min|# on home pauses watch this long."),
@@ -248,6 +248,12 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 29] = [
         Entry("Beep volume|3|1-5."),
         Entry("Alert tones|On|Tones for alerts."),
         Entry("Arrival tone|On|A tone on reaching a waypoint."),
+    ]),
+    // PWR-24 (decision 234): 0 7 7 was Battery Save alone; Low Power Mode joined it.
+    ((7, 7), &[
+        Entry("Battery Save|Level 1|Receiver sleep: longer life, slower."),
+        Entry("Low Power Mode|Off|One VFO, everything else off. SIDE1+SIDE2 hold: leave."),
+        Entry("Auto below|20 %|Auto turns it on below this battery."),
     ]),
     ((8, 1), &[Entry("TX timeout|120 s|Transmit stops after this."), Entry("Pre-alert|10 s|Warning before the timeout.")]),
     ((8, 2), &[Entry("VOX|Off|Transmit when you talk."), Entry("Level|5|Higher needs a louder voice: 1 keys easiest."), Entry("Tail|2 s|Hang time after speech.")]),
@@ -432,7 +438,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 71] = [
+static SETTINGS: [Setting; 73] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -484,7 +490,9 @@ static SETTINGS: [Setting; 71] = [
     field!([7, 5, 3], alert_tones: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([7, 5, 4], arrival_tone: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([7, 6, 0], leds: u8, Kind::Pick(&LED_MODES), Nothing),
-    field!([7, 7, 0], special),
+    field!([7, 7, 1], special),
+    field!([7, 7, 2], special), // PWR-24: it acts (in or out) as it changes
+    field!([7, 7, 3], lpm_below: u8, Kind::Level(10, 40, 10, pct_text), Nothing),
     field!([7, 8, 0], auto_off: u8, Kind::Round(AUTO_OFF_TIMES.len() as u8, auto_off_text), Nothing),
     field!([8, 1, 1], tx_timeout: u8, Kind::Level(1, 20, 1, tx_timeout_text), TxTimeout),
     field!([8, 2, 1], vox: bool, Kind::Flip(&ON_OFF), Vox),
@@ -583,6 +591,10 @@ fn zone_text(v: u8, b: &mut Buf<24>) {
     b.set(t.as_bytes());
 }
 
+fn pct_text(v: u8, b: &mut Buf<24>) {
+    let _ = uwrite!(b, "{} %", v);
+}
+
 fn backlight_text(v: u8, b: &mut Buf<24>) {
     secs(b, BACKLIGHT_TIMES[v as usize % BACKLIGHT_TIMES.len()] as u32, "Never");
 }
@@ -674,11 +686,18 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             }
             s.pon != 1
         }
-        [7, 7] => {
+        [7, 7] | [7, 7, 1] => {
             let mut t = Buf::<16>::new();
             app.item_text(Item::BatterySave, true, &mut t);
             b.set(t.as_bytes());
             app.bsave != 1
+        }
+        [7, 7, 2] => {
+            pick(b, &LPM_MODES, s.lpm);
+            if s.lpm == 2 && app.low_power() {
+                b.push(b": on");
+            }
+            s.lpm != 0
         }
         [8, 7] | [8, 7, 1] => {
             b.set(if s.callsign.is_empty() { b"Empty".as_slice() } else { s.callsign.as_bytes() });
@@ -858,7 +877,11 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
             app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
         }
-        [7, 7] => app.change(Item::BatterySave, d),
+        [7, 7] | [7, 7, 1] => app.change(Item::BatterySave, d),
+        [7, 7, 2] => {
+            let m = cycle(s.lpm, d, LPM_MODES.len());
+            app.set_lpm_mode(m);
+        }
         [6, 6] => {
             // 24 h + GPS, 24 h, 12 h + GPS, 12 h
             let v = cycle(s.clock.min(1) * 2 + !s.clock_gps as u8, d, 4);
@@ -947,7 +970,8 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
     let s = &mut app.set;
     match p {
         [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
-        [7, 7] => app.change(Item::BatterySave, 1 - app.bsave as i32),
+        [7, 7] | [7, 7, 1] => app.change(Item::BatterySave, 1 - app.bsave as i32),
+        [7, 7, 2] => app.set_lpm_mode(d.lpm),
         [1, 5] => s.scan_resume = d.scan_resume,
         [8, 4] => {
             s.tone_level = d.tone_level;
@@ -1144,7 +1168,7 @@ impl Group {
             // MENU-22: a radio-wide setting changed here offers "* Undo" (the slot's own items keep theirs).
             let was = shown(app, p);
             // Dry TX (TX-48) isn't a setting: no undo either.
-            if change(app, p, d) && !matches!(p, [1, 1] | [7, 7] | [8, 9, 2]) && shown(app, p) != was {
+            if change(app, p, d) && !matches!(p, [1, 1] | [7, 7] | [7, 7, 1] | [7, 7, 2] | [8, 9, 2]) && shown(app, p) != was {
                 app.keep_set_undo(p, d, was);
             }
         }

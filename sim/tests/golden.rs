@@ -277,3 +277,24 @@ fn zones_page_matches_its_goldens() {
     failures.extend(check("zones-no-fix", &r.sim.screen_rgb()));
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// PWR-24.7: Low Power Mode's own home (0 7 7 2 On): quiet, receiving (B's fake carrier, B active), and the
+/// "Leaving" box half way through the SIDE1 + SIDE2 hold.
+#[test]
+fn low_power_home_matches_its_goldens() {
+    use ferrite_core::keys::Key;
+    let mut r = Radio::new();
+    r.home();
+    r.menu("0 7 7 2").knob(1).wait(6000); // the entering toast gone
+    let mut failures: Vec<String> = check("lowpower-quiet", &r.sim.screen_rgb()).into_iter().collect();
+    r.press(Key::Slot);
+    while !r.sim.radio().live.slots[1].squelch_open {
+        r.wait(20);
+    }
+    r.wait(1500);
+    failures.extend(check("lowpower-rx", &r.sim.screen_rgb()));
+    r.down(Key::Side(1)).down(Key::Side(2)).wait(500);
+    failures.extend(check("lowpower-leaving", &r.sim.screen_rgb()));
+    r.up(Key::Side(2)).up(Key::Side(1));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

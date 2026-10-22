@@ -104,6 +104,10 @@ const ROWS: [(&str, Val<()>); 20] = [
     }),
     ("Beacon", |c, b| if paused(c, b) { AMBER } else { on_off(b, false) }),
     ("Battery Save", |c, b| {
+        if c.app.low_power() {
+            b.set(b"Low Power Mode"); // PWR-24.6: its own cycle in place of the level
+            return TEXT;
+        }
         let mut t = Buf::<16>::new();
         c.app.item_text(Item::BatterySave, true, &mut t);
         b.set(t.as_bytes());

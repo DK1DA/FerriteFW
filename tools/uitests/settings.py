@@ -17,6 +17,9 @@ def unbuilt_group(t, path):
     return bool(u.toast and "comes next" in u.toast["body"])
 
 
+# Settings that act as they change and leave the list: 0 7 7 2 enters Low Power Mode and goes to its home
+# (PWR-24; lowpower.py tests it).
+ACTS = {"0 7 7 2"}
 # Settings typed or picked on a page of their own (OK opens them): the knob doesn't step them in the group.
 TYPED = {"0 4 2 2", "0 5 6 1", "0 5 6 2", "0 5 7 1", "0 5 8 2", "0 4 2 3"}
 
@@ -105,7 +108,7 @@ def walk(t, paths):
 
 def settings_group_test(g):
     def fn(t):
-        paths = [p for p in t.state.paths if p not in UNSAFE and p.startswith(f"0 {g} ")]
+        paths = [p for p in t.state.paths if p not in UNSAFE and p not in ACTS and p.startswith(f"0 {g} ")]
         t.check(paths, f"settings in MENU 0 {g}", len(paths))
         walk(t, paths)
     fn.__name__ = f"settings_0_{g}_reachable_and_live"

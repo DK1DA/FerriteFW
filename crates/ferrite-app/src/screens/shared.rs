@@ -195,7 +195,7 @@ impl App {
             // SBAR-2: the callsign stands in for a clock with no time source.
             call: if dev.clock_min.is_none() { Buf::from(self.set.callsign.as_bytes()) } else { Buf::new() },
             gps: dev.gps,
-            bt_on: self.set.bt, // SBAR-8
+            bt_on: self.bt_on(), // SBAR-8 (never in Low Power Mode, PWR-24)
             bt: dev.bt,
             battery: ferrite_core::battery::bars(dev.battery_pct), // SBAR-9: stock's bars, at the thresholds
             battery_low: dev.battery_low,
@@ -203,16 +203,30 @@ impl App {
             blink_off: dev.battery_cutoff && (self.now / 500) % 2 == 1,
             alerts_paused: hf && self.set.same_on(),
             dry: self.dry_tx(), // SBAR-22, TX-48
+            lpm: self.low_power(), // SBAR-24, PWR-24
         }
     }
 
     /// The hint bar, or the toast over it (HOME-9); a shortcut's popup leaves the hint bar alone.
+    /// A toast is up over the hint bar.
+    pub(crate) fn toast_shown(&self) -> bool {
+        self.toast.is_some_and(|t| !t.center)
+    }
+
+    /// Low Power Mode's home is up (PWR-24.7): it draws the whole screen, bands included.
+    pub(crate) fn lpm_home(&self) -> bool {
+        self.screen == crate::Screen::Home && self.low_power()
+    }
+
     pub(crate) fn render_hint(&mut self, lcd: &mut impl Panel) {
         if let Some(t) = self.toast.filter(|t| !t.center) {
             if self.dirty(R_HINT, hash(&(1u8, t.head, t.body, t.icon))) {
                 w::toast(lcd, t.head.as_bytes(), t.body.as_bytes(), t.icon);
             }
             return;
+        }
+        if self.lpm_home() {
+            return; // PWR-24.7: Low Power Mode's home draws its own band
         }
         let h = self.screen.hints(self);
         if self.dirty(R_HINT, hash(&(0u8, h.as_slice()))) {

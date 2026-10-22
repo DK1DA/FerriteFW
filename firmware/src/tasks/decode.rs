@@ -28,7 +28,7 @@ impl Decode {
 
     /// One turn of the UI task's loop.
     pub fn poll(&mut self, app: &mut App, store: &Store, live: &LiveAll) {
-        let same = app.settings().same_on();
+        let same = app.same_wanted(); // PWR-24: off in Low Power Mode
         if self.same != Some(same) && RADIO.try_send(RadioCmd::Same(same)).is_ok() {
             self.same = Some(same);
         }

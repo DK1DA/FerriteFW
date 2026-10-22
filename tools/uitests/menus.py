@@ -98,7 +98,7 @@ def fast_path_lands_where_slow_does(t):
 def row_names_match_the_settings_table(t):
     """The group rows for settings carry the same name `get` gives for their number (one table)."""
     checked = 0
-    for path in ("0 7 1", "0 7 2", "0 6 1", "0 6 4", "0 6 5", "0 8 3", "0 7 7"):
+    for path in ("0 7 1", "0 7 2", "0 6 1", "0 6 4", "0 6 5", "0 8 3", "0 7 7 1"):
         name, value, nd = t.get_full(path)
         t.home()
         u = t.keys("MENU " + path)

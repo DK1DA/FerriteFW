@@ -179,7 +179,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
     let sc = app.screen;
     if let Some(l) = d.ln() {
         l.push(b"screen ");
-        l.push(id(sc).as_bytes());
+        l.push(if app.lpm_home() { b"LowPower".as_slice() } else { id(sc).as_bytes() }); // PWR-24.7
         l.push(b" ");
         q(l, sc.name().as_bytes());
         let mut t = Buf::<10>::new();
@@ -195,6 +195,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         let _ = uwrite!(l, " active={}", letter(app.active) as char);
         keyed_remote_mode(app, cx.live, l);
         kn(l, "fm", app.radio.fm_on as u32);
+        kn(l, "leave", app.lpm_leave_progress().unwrap_or(0) as u32); // PWR-24.4: the SIDE1 + SIDE2 hold, thousandths
     }
     if let Some(l) = d.ln() {
         let b = app.status_bar(cx.live, cx.dev);
@@ -215,6 +216,7 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "low", b.battery_low as u32);
         kn(l, "cutoff", b.battery_cutoff as u32);
         kn(l, "dry", b.dry as u32); // TX-48, SBAR-22
+        kn(l, "lpm", b.lpm as u32); // PWR-24, SBAR-24
         match b.clock {
             Some(m) => {
                 let _ = uwrite!(l, " clock={}:{}{}", m / 60, (m % 60) / 10, m % 10);

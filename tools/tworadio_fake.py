@@ -31,7 +31,7 @@ DEFAULTS = {
     "0 1 1": ("Watch", "A+B"), "0 1 2 2": ("Pause time", "1 min"), "0 1 4": ("Scan target", "Current zone"),
     "0 1 5": ("Resume", "5 s"), "0 1 6 3": ("Scan inputs", "Off"), "0 1 6 4": ("Return to", "Start"),
     "0 1 6 5": ("Priority check", "Every 2 s"), "0 7 2": ("Home layout", "Watch"), "0 7 4 1": ("Timeout", "1 min"),
-    "0 7 4 4": ("Wake screen on", "Keys and RX"), "0 7 7": ("Battery Save", "Off"), "0 8 5 3": ("End tone", "Off"),
+    "0 7 4 4": ("Wake screen on", "Keys and RX"), "0 7 7 1": ("Battery Save", "Off"), "0 8 5 3": ("End tone", "Off"),
     "0 8 7 1": ("Callsign", "Empty"), "0 9 3 1": ("PIN lock", "Off"),
 }
 XB_TIMEOUTS = (30, 60, 120, 180, 300, 600)
@@ -864,7 +864,7 @@ class FakeFerrite:
         self.err(f"{w[0]}: no such command")
 
     def reg30(self):
-        lvl = self.set["0 7 7"]
+        lvl = self.set["0 7 7 1"]
         if lvl == "Off" or any(lv["open"] for lv in self.live) or any(self.scan):
             return 0xBFF1
         hold = max(self.last_key, self.last_sq) + 10.0
@@ -1345,7 +1345,7 @@ SETTINGS_USED = (("0 1 1", "Off"), ("0 1 1", "A+B"),
                  ("0 1 5", "Carrier drop"), ("0 1 5", "3 s"), ("0 1 5", "5 s"), ("0 1 5", "Stop on hit"),
                  ("0 1 6 3", "Off"), ("0 1 6 3", "On"), ("0 1 6 5", "Off"),
                  ("0 7 2", "Watch"), ("0 7 2", "Single + scope"), ("0 7 4 1", "5 s"), ("0 7 4 4", "Keys and RX"),
-                 ("0 7 4 4", "Keys, RX and TX"), ("0 7 4 4", "Keys"), ("0 7 7", "Level 1"), ("0 8 5 3", "Off"))
+                 ("0 7 4 4", "Keys, RX and TX"), ("0 7 4 4", "Keys"), ("0 7 7 1", "Level 1"), ("0 8 5 3", "Off"))
 
 
 def selftest_sim(a, tr):

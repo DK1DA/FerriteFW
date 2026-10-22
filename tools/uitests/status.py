@@ -3,7 +3,7 @@ import re
 
 from .core import test
 
-BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt_on", "bt", "battery", "low", "cutoff", "dry", "clock", "utc", "call"}  # dry: SBAR-22; bt_on: SBAR-8
+BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt_on", "bt", "battery", "low", "cutoff", "dry", "lpm", "clock", "utc", "call"}  # dry: SBAR-22; bt_on: SBAR-8; lpm: SBAR-24
 
 
 @test("SBAR-14", "PWR-8", "SBAR-10", pages=("Status",))
@@ -14,13 +14,13 @@ def status_page_lists_states(t):
     for name in ("Transmit", "Region", "Watch", "Scan", "Battery Save", "GPS", "Bluetooth", "Battery", "Key lock",
                  "VOX", "Weather alerts"):
         t.check(u.row(name) is not None, f"a {name} row", u.names())
-    t.eq(u.row("Battery Save")["value"], t.get("0 7 7"), "Battery Save follows the setting")
+    t.eq(u.row("Battery Save")["value"], t.get("0 7 7 1"), "Battery Save follows the setting")
     t.check(u.row("Transmit")["value"], "the transmit state in words", u.row("Transmit"))
     t.check(u.row("Battery")["value"].endswith("%"), "the battery as a percentage", u.row("Battery"))
-    t.set("0 7 7", "Off")
+    t.set("0 7 7 1", "Off")
     u = t.ui()
     t.eq(u.row("Battery Save")["value"], "Off", "Battery Save off: the row follows")
-    t.set("0 7 7", "Level 2")
+    t.set("0 7 7 1", "Level 2")
     u = t.ui()
     t.eq(u.row("Battery Save")["value"], "Level 2", "Level 2: the row follows")
     t.eq(set(u.bar) - {"args"}, BAR_KEYS, "the status bar carries nothing for it")

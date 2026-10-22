@@ -770,10 +770,10 @@ fn set_every_light_setting() {
 fn set_short_forms() {
     let mut r = Rig::main();
     for (cmd, says) in [
-        ("set 0 7 7 1", "0 7 7 Battery Save: Level 1"),
-        ("set 0 7 7 3", "0 7 7 Battery Save: Level 3"),
-        ("set 0 7 7 of", "0 7 7 Battery Save: Off"),
-        ("set 0 7 7 level 2", "0 7 7 Battery Save: Level 2"),
+        ("set 0 7 7 1 1", "0 7 7 1 Battery Save: Level 1"),
+        ("set 0 7 7 1 3", "0 7 7 1 Battery Save: Level 3"),
+        ("set 0 7 7 1 of", "0 7 7 1 Battery Save: Off"),
+        ("set 0 7 7 1 level 2", "0 7 7 1 Battery Save: Level 2"),
         ("set 0 7 1 night", "0 7 1 Theme: Night red"),
         ("set 0 7 4 2 1", "0 7 4 2 Brightness: 1"),
         ("set 0 7 4 1 1", "0 7 4 1 Timeout: 1 min"),
@@ -786,8 +786,8 @@ fn set_short_forms() {
     let (theme, bs) = (r.app.set.theme, r.app.bsave);
     for (cmd, says) in [
         ("set 0 7 1 d", "Theme: one of Night red, Cyberpunk, Dark, Daylight"),
-        ("set 0 7 7 level", "Battery Save: one of"),
-        ("set 0 7 7 4", "Battery Save: one of"),
+        ("set 0 7 7 1 level", "Battery Save: one of"),
+        ("set 0 7 7 1 4", "Battery Save: one of"),
         ("set 0 7 4 1 7", "Timeout: one of"),
     ] {
         r.cmd(cmd);

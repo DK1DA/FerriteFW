@@ -46,8 +46,9 @@ pub struct Cycle {
 }
 
 /// Low Power Mode (Alex, Oct 21, 2026: "all about the squeeze"): level 3's 180/800 ms, 10 s fully on after
-/// activity, then 1 minute of 300/300 instead of 30, then level 3.
-pub const LOW_POWER: Cycle = Cycle { on_ms: 180, off_ms: 800, hold_ms: 10_000, recent_ms: 60_000 };
+/// activity, then 1 minute of 300/300 instead of 30, then level 3. A named static: the Radio task reads it from
+/// interrupt context (slowcheck).
+pub static LOW_POWER: Cycle = Cycle { on_ms: 180, off_ms: 800, hold_ms: 10_000, recent_ms: 60_000 };
 
 /// What the Radio task must do to the chips now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

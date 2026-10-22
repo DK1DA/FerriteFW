@@ -295,6 +295,12 @@ pub fn s_text(dbm: i16) -> Buf<4> {
 
 /// One line of text with keys in bold: `key` (arrows as triangles), then `label`. Returns the width.
 pub fn key_label(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: &str, bg: u16, draw: bool) -> i32 {
+    key_label_in(lcd, x, baseline, key, label, (KEYS, SUB, bg), draw)
+}
+
+/// [`key_label`] in other colours: the key's, the label's and the background (Low Power Mode's amber band).
+#[allow(clippy::too_many_arguments)]
+pub fn key_label_in(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: &str, (kc, lc, bg): (u16, u16, u16), draw: bool) -> i32 {
     let (y0, y1) = (baseline - 13, baseline + 4);
     let mut px = x;
     for part in key.as_bytes().split_inclusive(|&c| (0x18..=0x1b).contains(&c)) {
@@ -303,7 +309,7 @@ pub fn key_label(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: 
             _ => (part, None),
         };
         if draw {
-            px += lcd.text4_rows(px, baseline, text, &UI_12B, KEYS, bg, y0, y1);
+            px += lcd.text4_rows(px, baseline, text, &UI_12B, kc, bg, y0, y1);
         } else {
             px += text4_width(text, &UI_12B);
         }
@@ -311,7 +317,7 @@ pub fn key_label(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: 
             if draw {
                 lcd.fill(px, y0, 7, y1 - y0, bg);
                 let dir = [0, 1, 3, 2][(c - 0x18) as usize];
-                lcd.tri(px, baseline - 7, 6, dir, KEYS);
+                lcd.tri(px, baseline - 7, 6, dir, kc);
             }
             px += 7;
         }
@@ -320,7 +326,7 @@ pub fn key_label(lcd: &mut impl Panel, x: i32, baseline: i32, key: &str, label: 
         if draw {
             lcd.fill(px, y0, 4, y1 - y0, bg);
             px += 4;
-            px += lcd.text4_rows(px, baseline, label.as_bytes(), &UI_12, SUB, bg, y0, y1);
+            px += lcd.text4_rows(px, baseline, label.as_bytes(), &UI_12, lc, bg, y0, y1);
         } else {
             px += 4 + text4_width(label.as_bytes(), &UI_12);
         }
@@ -790,6 +796,8 @@ pub struct StatusBar {
     pub alerts_paused: bool,
     /// Dry TX on (TX-48, SBAR-22): "DRY" left of the Bluetooth and GPS marks.
     pub dry: bool,
+    /// Low Power Mode (PWR-24, SBAR-24): "LOW" left of those.
+    pub lpm: bool,
 }
 
 impl StatusBar {
@@ -799,8 +807,8 @@ impl StatusBar {
     }
 
     fn right_eq(&self, o: &Self) -> bool {
-        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_cutoff, self.blink_off, self.dry)
-            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_cutoff, o.blink_off, o.dry)
+        (self.gps, self.bt_on, self.bt, self.battery, self.battery_low, self.battery_cutoff, self.blink_off, self.dry, self.lpm)
+            == (o.gps, o.bt_on, o.bt, o.battery, o.battery_low, o.battery_cutoff, o.blink_off, o.dry, o.lpm)
     }
 
     /// Draws what differs from `old` (everything with None).
@@ -919,6 +927,13 @@ impl StatusBar {
             x -= w + 4;
             field(lcd, x, w, 0, SBAR_H - 1, 14, Align::Left, b"DRY", &UI_12B, AMBER, BG);
         }
+        // SBAR-24: Low Power Mode in the battery's fill colour (a saving, not a warning). GPS and Bluetooth are off
+        // in it, so with DRY too it ends at 155 or so, inside the right half.
+        if self.lpm {
+            let w = text4_width(b"LOW", &UI_12B);
+            x -= w + 4;
+            field(lcd, x, w, 0, SBAR_H - 1, 14, Align::Left, b"LOW", &UI_12B, BATT, BG);
+        }
     }
 }
 
@@ -1008,6 +1023,28 @@ mod tests {
             // Turning it off redraws the right half only.
             off.draw(&mut b, Some(&on));
             assert!(b.px == a.px, "theme {t}: off again as before");
+        }
+        crate::theme::set(crate::theme::DARK);
+    }
+
+    /// SBAR-24, PWR-24: Low Power Mode's "LOW" sits left of the battery (GPS and Bluetooth are off in the mode),
+    /// inside the right half, with DRY beside it too, in every theme.
+    #[test]
+    fn status_bar_lpm_mark() {
+        for t in [crate::theme::DARK, crate::theme::DAYLIGHT, crate::theme::NIGHT_RED, crate::theme::CYBERPUNK] {
+            crate::theme::set(t);
+            let off = StatusBar { battery: 2, ..Default::default() };
+            for on in [StatusBar { lpm: true, ..off }, StatusBar { lpm: true, dry: true, ..off }] {
+                let (mut a, mut b) = (FrameBuffer::new(), FrameBuffer::new());
+                off.draw(&mut a, None);
+                on.draw(&mut b, None);
+                let diff: std::vec::Vec<(i32, i32)> =
+                    (0..SBAR_H).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| a.at(x, y) != b.at(x, y)).collect();
+                assert!(!diff.is_empty(), "theme {t}: LOW drawn");
+                assert!(diff.iter().all(|&(x, _)| (142..212).contains(&x)), "theme {t}: inside 142..212");
+                off.draw(&mut b, Some(&on));
+                assert!(b.px == a.px, "theme {t}: off again as before");
+            }
         }
         crate::theme::set(crate::theme::DARK);
     }

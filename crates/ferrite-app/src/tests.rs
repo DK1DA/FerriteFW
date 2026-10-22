@@ -146,8 +146,10 @@ fn ram_is_small() {
     // shown in the clock's place without a time (SBAR-2: 6 characters and a length), 16 with padding, to 1456;
     // Dry TX (TX-48: the switch, its bar mark, and 0 8 9's list's remembered row) 8 with padding, to 1464; each
     // kept hit's stop start for its length (SCAN-23.1: 2 bytes, 4 with padding, x16), to 1528; the contact whose name
-    // is being typed (APRS-37: a callsign, 10 bytes), 16 with padding, to 1544
-    assert!(n <= 1544, "App is {n} bytes");
+    // is being typed (APRS-37: a callsign, 10 bytes), 16 with padding, to 1544; Low Power Mode (PWR-24: its flags, the
+    // battery % Auto looks at, the side keys' hold time, 0 7 7's new list's remembered row and the bar's mark), 8
+    // with padding, to 1552
+    assert!(n <= 1552, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -1011,6 +1013,8 @@ fn literal_scanner() {
 mod radio_activity;
 mod bcast;
 mod lights;
+/// Low Power Mode (PWR-24).
+mod lpm;
 mod aprs;
 mod aprs_card;
 mod d64;

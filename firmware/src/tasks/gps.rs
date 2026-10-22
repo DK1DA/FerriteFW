@@ -432,7 +432,7 @@ impl GpsUi {
         g.tick(now);
         let set = app.settings();
         g.set_fixed(set.fixed_on.then_some(set.fixed));
-        let cfg = ferrite_app::gpsdata::cfg(set);
+        let cfg = app.gps_cfg(); // 0 6 1, off in Low Power Mode (PWR-24)
         if self.cfg != Some(cfg) {
             GPS_CFG.signal(cfg);
             self.cfg = Some(cfg);

@@ -16,8 +16,8 @@ impl App {
     /// The slot sitting on the pager frequency, if POCSAG is on (0 4 2 1).
     pub fn pager_slot(&self, live: &LiveAll) -> Option<u8> {
         let s = &self.set;
-        if !s.pocsag_on {
-            return None;
+        if !s.pocsag_on || self.low_power() {
+            return None; // PWR-24: no decoders in Low Power Mode
         }
         (0..SLOTS).find(|&i| live.slots[i].freq.abs_diff(s.pocsag_freq) <= NEAR).map(|i| i as u8)
     }

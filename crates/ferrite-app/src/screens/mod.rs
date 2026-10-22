@@ -69,6 +69,7 @@ pub mod layouts;
 pub mod link;
 pub(crate) mod lists;
 pub mod log;
+pub mod lowpower;
 pub mod msgs;
 pub mod nav;
 pub mod opts;
@@ -396,7 +397,7 @@ impl App {
             qmenu::unseen(self); // the quick menu's box went with the content: drawn again whole over the screen
         }
         self.note_device(dev);
-        if self.screen.bar() {
+        if self.screen.bar() && !self.lpm_home() {
             let sb = self.status_bar(live, dev);
             if self.drawn.sbar != Some(sb) {
                 sb.draw(lcd, self.drawn.sbar.as_ref());

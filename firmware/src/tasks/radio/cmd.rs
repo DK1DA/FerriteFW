@@ -125,6 +125,10 @@ impl Radio {
                 let a = self.save.set_level(level, now_ms());
                 self.apply(a).await;
             }
+            RadioCmd::LowPower(on) => {
+                let a = self.save.set_cycle(on.then_some(ferrite_core::rxsleep::LOW_POWER), now_ms());
+                self.apply(a).await;
+            }
             RadioCmd::Activity => {
                 let a = self.save.activity(now_ms());
                 self.apply(a).await;

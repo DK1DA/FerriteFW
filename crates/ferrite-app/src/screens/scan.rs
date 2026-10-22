@@ -42,6 +42,9 @@ pub fn side2(app: &mut App) {
         app.out.push(RadioCmd::Scan { slot: a, on: false });
         return;
     }
+    if app.low_power() {
+        return app.lpm_refuse(); // PWR-24.4
+    }
     app.radio.clear_hits();
     app.radio.hits_seen = 0;
     app.radio.zones = 0;

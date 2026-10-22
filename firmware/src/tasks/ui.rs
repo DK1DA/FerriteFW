@@ -166,6 +166,9 @@ fn own_frame<F: core::future::Future>(f: F) -> OwnFrame<F> {
 /// DISP-27: the ST7789's wait after sleep out before drawing, and between sleep in and sleep out.
 const PANEL_SLEEP_MS: u32 = 120;
 
+/// PWR-24.5: the shortest gap between redraws for live changes in Low Power Mode.
+const LPM_FRAME_MS: u32 = 1000;
+
 /// LINK-38: the shortest gap between two redraws driven by live changes alone (20 a second).
 const FRAME_MIN_MS: u32 = 50;
 
@@ -461,7 +464,7 @@ pub async fn task() {
         let (bt_forced, bt_busy) = (bt_q.as_ref().is_some_and(|q| q.forced), bt_q.is_some());
         #[cfg(not(feature = "bench"))]
         let (bt_forced, bt_busy) = (false, false);
-        BT_ON.store(app.settings().bt || bt_forced, Relaxed);
+        BT_ON.store(app.bt_on() || bt_forced, Relaxed); // PWR-24: off in Low Power Mode
         for (port, ring) in [(Port::Cable, &TERM_IN), (Port::Bt, &BT_IN)] {
             // While a `bt` query waits, the module's bytes are its answer, not a session's.
             let held = port == Port::Cable && bringup::ON.load(Relaxed) || port == Port::Bt && bt_busy;
@@ -484,6 +487,7 @@ pub async fn task() {
             let mv = ferrite_core::txcal::battery_mv(raw) as i32 + dev.selftest.battery_trim as i32 * 10;
             dev.battery_mv = mv.max(0) as u16;
             (dev.battery_pct, dev.battery_low, dev.battery_cutoff) = (s.pct, s.low, s.cutoff);
+            app.battery(s.pct); // PWR-24.3: Low Power Mode's Auto
             // The cable log (TERM-28): the battery every 10 s (no charger-detect input is known on this board):
             // the reading now, the averaged one the % comes from, and the %.
             if now_ms().wrapping_sub(bat_logged) >= 10_000 {
@@ -742,8 +746,11 @@ pub async fn task() {
         let frame_min = if lcdb.fps == 0 { FRAME_MIN_MS } else { 1000 / lcdb.fps as u32 };
         #[cfg(not(feature = "bench"))]
         let frame_min = FRAME_MIN_MS;
+        // PWR-24.5: Low Power Mode redraws live changes once a second (keys and the knob still at once).
+        let keys_wait = frame_min != FRAME_MIN_MS; // only the bench's cap holds keys back too (TERM-40)
+        let frame_min = if app.low_power() { frame_min.max(LPM_FRAME_MS) } else { frame_min };
         let asleep = panel_asleep;
-        let draw = !asleep && (urgent && frame_min == FRAME_MIN_MS || since >= frame_min);
+        let draw = !asleep && (urgent && !keys_wait || since >= frame_min);
         let (c0, b0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed));
         if draw {
             app.render(&mut lcd, &live, &dev, store);
