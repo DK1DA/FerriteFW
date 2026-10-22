@@ -2,7 +2,7 @@
 name = "w25q"
 version = "0.1.0"
 edition.workspace = true
-license = "MIT"
+license.workspace = true
 repository.workspace = true
 description = "W25Q SPI NOR flash driver: read, page program, sector erase without blocking, write protection by address range"
 

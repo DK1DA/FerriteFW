@@ -102,4 +102,4 @@ CI uses a `DEPS_TOKEN` secret for this.
 
 ## Licence
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md): free for any noncommercial use; selling Ferrite, shipping it on radios for sale or selling a service built on it needs a commercial licence. Copyright 2026 Alex Harvey. The chip drivers in `drivers/` are MIT (`drivers/LICENSE`).
+[PolyForm Noncommercial 1.0.0](LICENSE.md): free for any noncommercial use; selling Ferrite, shipping it on radios for sale or selling a service built on it needs a commercial licence. Copyright 2026 Alex Harvey; the chip drivers in `drivers/` too.

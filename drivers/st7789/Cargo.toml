@@ -2,7 +2,7 @@
 name = "st7789"
 version = "0.1.0"
 edition.workspace = true
-license = "MIT"
+license.workspace = true
 repository.workspace = true
 description = "ST7789 display driver over an 8080 8-bit parallel bus: start-up as awaitable steps, windows, pixel writes and fills, hardware scroll"
 

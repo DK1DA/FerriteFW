@@ -62,7 +62,7 @@ pub enum Source {
 impl<B: Bus> Bk4829<B> {
     /// Key the transmitter as stock does (0x0801E5CC with mode 2, TX audit F3): REG_30 0x0200 on a wide channel or
     /// 0 on a narrow one, about 50 us ([`TX_ON_GAP_US`], the bus's busy wait), then the transmit value (the 0-to-1
-    /// of bit 15 recalibrates the VCO). nicFW passes through 0x0200 too.
+    /// of bit 15 recalibrates the VCO).
     pub fn tx_on(&mut self, src: Source, wide: bool) {
         self.write(reg::POWER, if wide { 0x0200 } else { 0 });
         self.bus.delay_us(TX_ON_GAP_US);

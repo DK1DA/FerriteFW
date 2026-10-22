@@ -1,7 +1,7 @@
 Required Notice: Copyright 2026 Alex Harvey (https://ferritefw.dev)
 
-Ferrite is licensed under the PolyForm Noncommercial License 1.0.0, below: everything in this repository except
-`drivers/`, whose chip drivers keep their own licence (`drivers/LICENSE`).
+Ferrite is licensed under the PolyForm Noncommercial License 1.0.0, below: everything in this repository, the chip
+drivers in `drivers/` included.
 
 Using Ferrite commercially (selling it, shipping it on radios for sale, or selling a service built on it) needs a
 separate commercial licence from the copyright holder.

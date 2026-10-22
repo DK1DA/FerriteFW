@@ -33,4 +33,4 @@ Commits are AI-assisted.
 
 ## Licence
 
-MIT ([LICENSE](LICENSE)).
+[PolyForm Noncommercial 1.0.0](../LICENSE.md), as the rest of Ferrite.
