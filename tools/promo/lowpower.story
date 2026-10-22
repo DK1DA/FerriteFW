@@ -58,8 +58,8 @@ script:
   wait 2500ms
 ---
 kind: intro
-title: 46 % less current on standby
-left: About 27 hours becomes about 50 on a 2000 mAh pack (screen dark, squelch closed, measured on the bench).
+title: 41 % less current in typical use
+left: About 24 hours becomes about 41 on the stock battery pack.
 seconds: 6
 ---
 kind: outro
