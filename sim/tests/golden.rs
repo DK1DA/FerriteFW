@@ -285,7 +285,7 @@ fn low_power_home_matches_its_goldens() {
     use ferrite_core::keys::Key;
     let mut r = Radio::new();
     r.home();
-    r.menu("0 7 7 2").knob(1).wait(6000); // the entering toast gone
+    r.menu("0 7 7 2").knob(2).wait(6000); // Off, Auto, On (PWR-24.1); the entering toast gone
     let mut failures: Vec<String> = check("lowpower-quiet", &r.sim.screen_rgb()).into_iter().collect();
     r.press(Key::Slot);
     while !r.sim.radio().live.slots[1].squelch_open {

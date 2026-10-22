@@ -53,6 +53,11 @@ impl App {
     pub(crate) fn set_lpm_mode(&mut self, m: u8) {
         self.set.lpm = m % crate::settings::LPM_MODES.len() as u8;
         self.lpm &= !LPM_HOLD;
+        // PWR-24.3: choosing Auto decides from the battery now: in only below the level (from On at 32 % it
+        // leaves; it doesn't wait for 80 %).
+        if self.set.lpm == 2 && self.low_power() && self.batt != BATT_UNKNOWN && self.batt >= self.set.lpm_below {
+            self.lpm_leave(false);
+        }
         self.lpm_tick();
     }
 

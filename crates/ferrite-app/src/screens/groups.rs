@@ -879,8 +879,11 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         }
         [7, 7] | [7, 7, 1] => app.change(Item::BatterySave, d),
         [7, 7, 2] => {
-            let m = cycle(s.lpm, d, LPM_MODES.len());
-            app.set_lpm_mode(m);
+            // PWR-24.1: Off, Auto, On in turn (stored 0, 2, 1), so turning to Auto never passes On, which enters
+            // the mode at once and leaves the menu.
+            const ORDER: [u8; 3] = [0, 2, 1];
+            let i = ORDER.iter().position(|&m| m == s.lpm).unwrap_or(0) as u8;
+            app.set_lpm_mode(ORDER[cycle(i, d, LPM_MODES.len()) as usize]);
         }
         [6, 6] => {
             // 24 h + GPS, 24 h, 12 h + GPS, 12 h

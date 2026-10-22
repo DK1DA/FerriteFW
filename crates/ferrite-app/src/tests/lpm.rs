@@ -36,7 +36,7 @@ fn on_and_off_restore_everything() {
     t.cmds();
     let before = *t.app.set;
     t.open(Dest::Group(7));
-    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], 1));
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], -1)); // Off -> On (back: Off, Auto, On)
     assert!(t.app.low_power());
     assert_eq!(t.app.screen, Screen::Home, "home on entering");
     let c = t.cmds();
@@ -63,7 +63,7 @@ fn on_and_off_restore_everything() {
     assert_ne!(t.app.screen, Screen::Home, "the menus stay");
     t.app.go_home();
     // Off: as before.
-    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], -1));
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], 1)); // On -> Off
     assert!(!t.app.low_power());
     let c = t.cmds();
     assert!(c.contains(&RadioCmd::LowPower(false)), "{c:?}");
@@ -140,6 +140,28 @@ fn auto_follows_the_battery() {
     t.app.battery(39);
     t.wait(200);
     assert!(t.app.low_power());
+}
+
+/// PWR-24.1, PWR-24.3: the menu turns Off -> Auto -> On (Auto never passes On, which would enter at once and leave
+/// the menu); choosing Auto decides from the battery now, also coming back from On (Oct 21, 2026, on black: `set`
+/// stepped through On at 32 % and Auto then held the mode until 80 %).
+#[test]
+fn auto_is_chosen_without_passing_on() {
+    let mut t = T::new();
+    t.app.battery(32);
+    t.wait(200);
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], 1));
+    assert_eq!(t.app.set.lpm, 2, "Off, then Auto");
+    assert!(!t.app.low_power(), "32 % is above 20 %");
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], 1));
+    assert_eq!(t.app.set.lpm, 1, "then On");
+    assert!(t.app.low_power());
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], -1));
+    assert_eq!(t.app.set.lpm, 2, "back to Auto");
+    assert!(!t.app.low_power(), "Auto at 32 %: out");
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], 1));
+    assert!(crate::screens::groups::change(&mut t.app, &[7, 7, 2], 1));
+    assert_eq!(t.app.set.lpm, 0, "On, then Off");
 }
 
 /// PWR-24.1: an older record (zeros where the two bytes now are) loads as Off and 20 %.
