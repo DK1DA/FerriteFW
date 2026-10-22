@@ -1258,6 +1258,8 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Settle(s) => DebugAns::Settle(s.unwrap_or(ferrite_core::settle::Settle::DEFAULT)),
         #[cfg(feature = "bench")]
+        DebugReq::Lcd(l) => DebugAns::Lcd(ferrite_core::msg::LcdBench { idle: true, ..Default::default() }.apply(l)),
+        #[cfg(feature = "bench")]
         DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
         #[cfg(feature = "bench")]
         DebugReq::TxTest(ferrite_core::txtest::Ask::Set(a)) => DebugAns::TxTest(a),
@@ -1497,6 +1499,43 @@ fn debug_txtest_suite() {
 }
 
 #[cfg(feature = "bench")]
+/// TERM-40: `lcd` asks the display's bench state; each change is one request; bad words are refused before
+/// anything is sent.
+#[test]
+fn debug_lcd() {
+    use ferrite_core::msg::LcdSet;
+    let mut r = Rig::main();
+    r.cmd("lcd");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Lcd(LcdSet::Ask)]);
+    assert!(r.raw().contains("lcd: idle on, partial off, sleep off, fps normal, bl normal, keys normal"), "{}", r.raw());
+    for (cmd, want) in [
+        ("lcd bl 30", LcdSet::Bl(Some(30))),
+        ("lcd keys 0", LcdSet::Keys(Some(0))),
+        ("lcd bl normal", LcdSet::Bl(None)),
+        ("lcd fps 1", LcdSet::Fps(1)),
+        ("lcd fps 0", LcdSet::Fps(0)),
+        ("LCD IDLE OFF", LcdSet::Idle(false)),
+        ("lcd partial on", LcdSet::Partial(true)),
+        ("lcd sleep on", LcdSet::Sleep(true)),
+        ("lcd reset", LcdSet::Reset),
+    ] {
+        r.send(b"\r");
+        r.cmd(cmd);
+        assert_eq!(r.serve(4, regs), vec![DebugReq::Lcd(want)], "{cmd}");
+    }
+    r.send(b"\r");
+    r.cmd("lcd bl 30");
+    r.serve(4, regs);
+    assert!(r.raw().contains("bl 30"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["lcd bl 101", "lcd fps 21", "lcd idle maybe", "lcd bright 3", "lcd sleep", "lcd bl 3 4"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("lcd [idle"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+}
+
+#[cfg(feature = "bench")]
 /// TERM-31: `bk settle` asks the waits, `bk settle N` sets both to N ms, `bk settle W S` each; 0 is stock's; out of
 /// range or extra words are refused here, before anything is sent. `bk settle` alone is a read (TERM-25).
 #[test]
@@ -1732,12 +1771,12 @@ fn debug_no_answer_and_stop() {
 #[test]
 fn user_build_refuses_bench_commands() {
     let mut r = Rig::main();
-    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet"] {
+    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30"] {
         r.cmd(c);
         assert!(r.bottom().contains("not in this build: a bench build has it"), "{c}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{c}: nothing sent");
     }
-    assert_eq!(super::cmd::BENCH_ONLY.len(), 9);
+    assert_eq!(super::cmd::BENCH_ONLY.len(), 10);
     r.cmd("gps");
     assert_eq!(r.serve(4, regs), vec![DebugReq::Gga], "gps alone is every build's");
     r.send(b"\r");

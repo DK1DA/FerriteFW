@@ -33,7 +33,11 @@ pub trait Bus8080 {
 pub const SWRESET: u8 = 0x01;
 pub const SLPIN: u8 = 0x10;
 pub const SLPOUT: u8 = 0x11;
+pub const PTLON: u8 = 0x12;
 pub const NORON: u8 = 0x13;
+pub const PTLAR: u8 = 0x30;
+pub const IDMOFF: u8 = 0x38;
+pub const IDMON: u8 = 0x39;
 pub const INVOFF: u8 = 0x20;
 pub const INVON: u8 = 0x21;
 pub const DISPOFF: u8 = 0x28;
@@ -200,6 +204,23 @@ impl<B: Bus8080> St7789<B> {
     /// caller waits.
     pub fn sleep(&mut self, on: bool) {
         self.bus.command(if on { SLPIN } else { SLPOUT });
+    }
+
+    /// Idle mode: 8 colours (each channel's top bit), for lower power.
+    pub fn idle(&mut self, on: bool) {
+        self.bus.command(if on { IDMON } else { IDMOFF });
+    }
+
+    /// Partial mode on panel rows `first..=last` (memory rows; the rest show blank), or back to normal (`None`).
+    pub fn partial(&mut self, rows: Option<(u16, u16)>) {
+        match rows {
+            Some((a, b)) => {
+                self.bus.command(PTLAR);
+                self.bus.data(&[(a >> 8) as u8, a as u8, (b >> 8) as u8, b as u8]);
+                self.bus.command(PTLON);
+            }
+            None => self.bus.command(NORON),
+        }
     }
 
     pub fn release(self) -> B {

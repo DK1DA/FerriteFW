@@ -443,7 +443,66 @@ pub enum DebugReq {
     /// [`crate::gpspower::casic_refused`] has passed (CAS03 NMEA off or Ferrite's set (GPS-34), CAS06 queries, CAS12 standby);
     /// the GPS task sends it ([`crate::gpspower::GpsBench`]). `quiet`: a standby with NMEA off first and not on after.
     Gps { id: u8, arg: u16, quiet: bool },
+    #[cfg(feature = "bench")]
+    /// TERM-40 (a bench test, the power bench): one change to the display's bench state, or only ask. The UI task
+    /// owns the panel and answers with [`DebugAns::Lcd`].
+    Lcd(LcdSet),
 }
+
+/// TERM-40: a change to [`LcdBench`].
+#[cfg(feature = "bench")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LcdSet {
+    Ask,
+    /// Everything back to normal.
+    Reset,
+    /// The ST7789's idle mode (IDMON: 8 colours).
+    Idle(bool),
+    /// The ST7789's partial mode (PTLON) on rows [`LCD_PARTIAL`]; the rest blank.
+    Partial(bool),
+    /// The panel off and asleep (DISPOFF, SLPIN), no redraws, the backlight 0.
+    Sleep(bool),
+    /// Redraws at most this many a second (1 to 20); 0 normal (20, LINK-38).
+    Fps(u8),
+    /// The screen backlight at this %, or the settings' (None).
+    Bl(Option<u8>),
+    /// The keypad light at this %, or the settings' (None).
+    Keys(Option<u8>),
+}
+
+/// TERM-40: the display's bench state.
+#[cfg(feature = "bench")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LcdBench {
+    pub idle: bool,
+    pub partial: bool,
+    pub sleep: bool,
+    pub fps: u8,
+    pub bl: Option<u8>,
+    pub keys: Option<u8>,
+}
+
+#[cfg(feature = "bench")]
+impl LcdBench {
+    /// The state after `s`.
+    pub fn apply(mut self, s: LcdSet) -> Self {
+        match s {
+            LcdSet::Ask => {}
+            LcdSet::Reset => self = Self::default(),
+            LcdSet::Idle(on) => self.idle = on,
+            LcdSet::Partial(on) => self.partial = on,
+            LcdSet::Sleep(on) => self.sleep = on,
+            LcdSet::Fps(n) => self.fps = n.min(20),
+            LcdSet::Bl(p) => self.bl = p.map(|p| p.min(100)),
+            LcdSet::Keys(p) => self.keys = p.map(|p| p.min(100)),
+        }
+        self
+    }
+}
+
+/// TERM-40: the panel rows partial mode keeps (the mock-up's band, rows 80-239 of 320).
+#[cfg(feature = "bench")]
+pub const LCD_PARTIAL: (u16, u16) = (80, 239);
 
 /// The longest GGA sentence [`DebugAns::Gga`] carries: NMEA's 82 characters less CR LF.
 pub const GGA_MAX: usize = 80;
@@ -489,6 +548,9 @@ pub enum DebugAns {
     /// TERM-36: the CASIC sentence went to the module; the first TXT sentence it sent back within
     /// [`GPS_REPLY_MS`] (from `$` to the checksum), `n` 0 for none.
     GpsSent { data: [u8; GGA_MAX], n: u8 },
+    #[cfg(feature = "bench")]
+    /// TERM-40: the display's bench state now.
+    Lcd(LcdBench),
     /// Not done, and why.
     Refused(&'static str),
 }

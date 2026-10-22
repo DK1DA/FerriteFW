@@ -70,6 +70,9 @@ pub enum Kind {
     #[cfg(feature = "bench")]
     /// `txtest [MODE [FILTERS] [LEVEL]]`: the transmit test signal for the next PTT key-up (TERM-33).
     TxTest(ferrite_core::txtest::Ask),
+    #[cfg(feature = "bench")]
+    /// `lcd ...`: the display's bench state (TERM-40).
+    Lcd(ferrite_core::msg::LcdSet),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -151,6 +154,8 @@ impl Job {
             Kind::Mic => DebugReq::Mic,
             #[cfg(feature = "bench")]
             Kind::TxTest(a) => DebugReq::TxTest(a),
+            #[cfg(feature = "bench")]
+            Kind::Lcd(l) => DebugReq::Lcd(l),
         })
     }
 
@@ -285,6 +290,14 @@ impl Job {
                 } else {
                     b"  rx one: only the receiving band's select on (PB0 or PE12), as normal"
                 });
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Lcd(_), DebugAns::Lcd(l)) => {
+                let pct = |p: Option<u8>| p.map_or(Num(None), |p| Num(Some(p)));
+                put!(out, "  lcd: idle {}, partial {}, sleep {}, fps {}, bl {}, keys {}", onoff(l.idle), onoff(l.partial), onoff(l.sleep),
+                     if l.fps == 0 { Num(None) } else { Num(Some(l.fps)) }, pct(l.bl), pct(l.keys));
                 self.st = St::Over;
                 Step::Line
             }
@@ -531,4 +544,22 @@ fn mem_line(addr: u32, d: &[u8], words: bool, out: &mut Line) {
         out.push(&[if (0x20..0x7F).contains(&b) { b } else { b'.' }]);
     }
     out.push(b"|");
+}
+
+#[cfg(feature = "bench")]
+fn onoff(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
+}
+
+/// TERM-40: a number, or "normal" for the setting's own.
+#[cfg(feature = "bench")]
+struct Num(Option<u8>);
+#[cfg(feature = "bench")]
+impl From<Num> for super::cmd::Arg<'_> {
+    fn from(n: Num) -> Self {
+        match n.0 {
+            Some(n) => super::cmd::Arg::N(n as u32),
+            None => super::cmd::Arg::S("normal"),
+        }
+    }
 }

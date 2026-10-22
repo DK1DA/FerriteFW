@@ -1380,6 +1380,8 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"bt") => bt(&mut t),
         #[cfg(feature = "bench")]
         _ if same(c, b"rx") => rx(&mut t),
+        #[cfg(feature = "bench")]
+        _ if same(c, b"lcd") => lcd(&mut t),
         // TERM-38 (decision 151): a user build knows the bench commands by name only.
         #[cfg(not(feature = "bench"))]
         _ if BENCH_ONLY.iter().any(|b| same(c, b.as_bytes())) => Err(not_in_build(c)),
@@ -1510,7 +1512,7 @@ use super::debug::{BK_REGS, MEM_MAX};
 /// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-bench, the `bench` cargo feature). A receive
 /// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
 /// is in every build, its `query`, `nmea` and `standby` are the bench's.
-pub const BENCH_ONLY: [&str; 9] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "txtest"];
+pub const BENCH_ONLY: [&str; 10] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "txtest", "lcd"];
 
 /// TERM-38: what a user build says to a bench command.
 #[cfg(not(feature = "bench"))]
@@ -1621,6 +1623,43 @@ fn txtest(t: &mut Toks) -> Result<Done, Msg> {
         return Err(msg!("{}", USAGE));
     }
     Ok(Done::Debug(Job::new(Kind::TxTest(ask))))
+}
+
+#[cfg(feature = "bench")]
+/// TERM-40 (a bench test, the power bench): `lcd` shows the display's bench state; `lcd idle|partial|sleep on|off`,
+/// `lcd fps N` (1-20, 0 normal), `lcd bl N|normal`, `lcd keys N|normal` (percent) change one thing; `lcd reset`.
+fn lcd(t: &mut Toks) -> Result<Done, Msg> {
+    use ferrite_core::msg::LcdSet;
+    const USAGE: &str = "lcd [idle|partial|sleep on|off] [fps 0-20] [bl|keys 0-100|normal] [reset]";
+    let bad = || msg!("{}", USAGE);
+    fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, Msg> {
+        match t.next()? {
+            None => Ok(None),
+            Some(Tok::Word(w)) => Ok(Some(w)),
+            _ => Err(msg!("{}", USAGE)),
+        }
+    }
+    let Some(what) = word(t)? else { return Ok(Done::Debug(Job::new(Kind::Lcd(LcdSet::Ask)))) };
+    let set = if same(what, b"reset") {
+        LcdSet::Reset
+    } else {
+        let arg = word(t)?.ok_or_else(bad)?;
+        let on = || if same(arg, b"on") { Some(true) } else if same(arg, b"off") { Some(false) } else { None };
+        let pct = |max: u32| if same(arg, b"normal") { Some(None) } else { number(arg).filter(|&n| n <= max).map(|n| Some(n as u8)) };
+        match what {
+            _ if same(what, b"idle") => LcdSet::Idle(on().ok_or_else(bad)?),
+            _ if same(what, b"partial") => LcdSet::Partial(on().ok_or_else(bad)?),
+            _ if same(what, b"sleep") => LcdSet::Sleep(on().ok_or_else(bad)?),
+            _ if same(what, b"fps") => LcdSet::Fps(pct(20).ok_or_else(bad)?.unwrap_or(0)),
+            _ if same(what, b"bl") => LcdSet::Bl(pct(100).ok_or_else(bad)?),
+            _ if same(what, b"keys") => LcdSet::Keys(pct(100).ok_or_else(bad)?),
+            _ => return Err(bad()),
+        }
+    };
+    if t.next()?.is_some() {
+        return Err(bad());
+    }
+    Ok(Done::Debug(Job::new(Kind::Lcd(set))))
 }
 
 #[cfg(feature = "bench")]

@@ -414,6 +414,9 @@ pub async fn task() {
     let mut down = 0u32;
     #[cfg(feature = "bench")]
     let mut bt_q: Option<BtQuery> = None;
+    // TERM-40: the display's bench state (the power bench); default is normal.
+    #[cfg(feature = "bench")]
+    let mut lcdb = ferrite_core::msg::LcdBench::default();
     // The terminal over the cable (chapter 37): it reads and edits the same App, so it runs here.
     // ... and over Bluetooth (roadmap 3d): one terminal, held by one port at a time, and a link session on each
     // port (LINK-28). The link protocol on the cable (chapter 29) is trusted as the cable is (LINK-7); TERM-2
@@ -608,6 +611,28 @@ pub async fn task() {
                         }));
                     }
                     #[cfg(feature = "bench")]
+                    ferrite_core::msg::DebugReq::Lcd(set) => {
+                        let new = lcdb.apply(set);
+                        if new.sleep && !lcdb.sleep {
+                            lcd.0.on(false);
+                            lcd.0.sleep(true);
+                        }
+                        if !new.sleep && lcdb.sleep {
+                            lcd.0.sleep(false);
+                            Timer::after_millis(120).await; // the panel's wait after sleep out
+                            lcd.0.on(true);
+                            app.redraw_all();
+                        }
+                        if new.idle != lcdb.idle {
+                            lcd.0.idle(new.idle);
+                        }
+                        if new.partial != lcdb.partial {
+                            lcd.0.partial(new.partial.then_some(ferrite_core::msg::LCD_PARTIAL));
+                        }
+                        lcdb = new;
+                        ports.debug_answer(ferrite_core::msg::DebugAns::Lcd(lcdb));
+                    }
+                    #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Bt { text, n } => {
                         let forced = !app.settings().bt;
                         bt_q = Some(BtQuery { text, n, forced, sent: false, at: Instant::now(), buf: [0; 48], got: 0 });
@@ -692,7 +717,12 @@ pub async fn task() {
         // executor) a turn only between draws, too little to answer the link or carry the cable log. Keys and the
         // knob still draw at once.
         let since = now_ms().wrapping_sub(last_draw);
-        let draw = urgent || since >= FRAME_MIN_MS;
+        // TERM-40 (bench): a lower redraw cap, and none while the panel sleeps.
+        #[cfg(feature = "bench")]
+        let (frame_min, asleep) = (if lcdb.fps == 0 { FRAME_MIN_MS } else { 1000 / lcdb.fps as u32 }, lcdb.sleep);
+        #[cfg(not(feature = "bench"))]
+        let (frame_min, asleep) = (FRAME_MIN_MS, false);
+        let draw = !asleep && (urgent && frame_min == FRAME_MIN_MS || since >= frame_min);
         let (c0, b0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed));
         if draw {
             app.render(&mut lcd, &live, &dev, store);
@@ -714,14 +744,22 @@ pub async fn task() {
             }
         }
         // The lights (decision 63): screen and keypad, and the LEDs with their next change.
-        backlight::set(app.backlight_duty()); // DISP-16, DISP-23: 0 while dark
-        backlight::keypad(app.keypad_duty()); // DISP-22: the same level, 0 while off
+        #[cfg(not(feature = "bench"))]
+        let (bl, keys) = (app.backlight_duty(), app.keypad_duty());
+        // TERM-40 (bench): a fixed % over the settings', and dark while the panel sleeps.
+        #[cfg(feature = "bench")]
+        let (bl, keys) = (
+            if lcdb.sleep { 0 } else { lcdb.bl.map_or(app.backlight_duty(), |p| p as u16 * 10) },
+            lcdb.keys.map_or(app.keypad_duty(), |p| p as u16 * 10),
+        );
+        backlight::set(bl); // DISP-16, DISP-23: 0 while dark
+        backlight::keypad(keys); // DISP-22: the same level, 0 while off
         let leds = app.leds(&live, &dev);
         LED_RED.write(leds.red == LED_ACTIVE_HIGH);
         LED_GREEN.write(leds.green == LED_ACTIVE_HIGH);
         let mut period = if down != 0 || ports.busy() { TICK_HELD_MS } else { TICK_IDLE_MS };
-        if !draw {
-            period = period.min((FRAME_MIN_MS - since) as u64); // the frame held back, drawn on time
+        if !draw && !asleep {
+            period = period.min(frame_min.saturating_sub(since).max(1) as u64); // the frame held back, drawn on time
         }
         if leds.next_ms != 0 {
             period = period.min(leds.next_ms as u64);
