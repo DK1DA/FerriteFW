@@ -33,14 +33,22 @@ script:
 ---
 title: Still a radio
 layout: right
-left: Tune, change channels and edit the VFO as usual.
+left: Tune, change channels and edit the VFO or channel as usual.
 right: Receive and transmit on the one VFO, at any power.
 setup: wait 5500ms
 script:
   wait 800ms
   knob 3
   wait 1200ms
-  knob -2
+  hold SLOT
+  wait 1800ms
+  press RIGHT
+  wait 500ms
+  press RIGHT
+  wait 700ms
+  knob 1
+  wait 1500ms
+  press BACK
   wait 1500ms
 ---
 title: Out with one hold
