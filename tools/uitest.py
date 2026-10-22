@@ -339,37 +339,43 @@ def page_ids(names, mods=None):
 # A firmware or app file no row names runs everything (the safe side); host-only files (tests, simulators, PC tools,
 # docs) run nothing but the smoke set.
 AREAS = [
-    ("firmware/src/tasks/ui.rs", ["backlight", "wake", "redraw", "dark", "light", "module:home"], "the UI task: drawing, lights"),
+    ("firmware/src/tasks/ui.rs", ["backlight", "wake", "redraw", "dark", "brightness"], "the UI task: drawing, lights"),
     ("firmware/src/bus.rs", ["backlight", "wake", "redraw", "hint_bars"], "the display bus"),
     ("firmware/src/display.rs", ["backlight", "wake", "redraw", "hint_bars"], "the display"),
     ("drivers/st7789/*", ["backlight", "wake", "redraw", "hint_bars"], "the display driver"),
     ("firmware/src/hal/backlight.rs", ["backlight", "light", "key_lock"], "the backlight"),
     ("firmware/src/tasks/input.rs", ["module:keys", "knob"], "keys and the knob"),
     ("drivers/keypad/*", ["module:keys", "knob"], "the keypad"),
-    ("firmware/src/tasks/gps.rs", ["module:gpsui", "gps", "nmea", "gga", "sky"], "GPS"),
+    ("firmware/src/tasks/gps.rs", ["gps_off", "nmea", "gga", "sky_set", "gps_icon"], "GPS"),
     ("crates/ferrite-core/src/gpspower.rs", ["module:gpsui", "gps", "nmea"], "GPS power"),
     ("crates/ferrite-radio/src/gps.rs", ["gps", "nmea"], "GPS pins"),
     ("drivers/nmea/*", ["module:gpsui", "gga", "sky"], "NMEA"),
-    ("firmware/src/hal/uart.rs", ["module:bluetooth", "module:linkproto", "gps", "nmea"], "the UARTs"),
+    ("firmware/src/hal/uart.rs", ["gps_off", "nmea", "bt_terminal", "baud_switch", "one_request_in_flight"], "the UARTs"),
     ("firmware/src/tasks/link.rs", ["module:bluetooth", "module:linkproto"], "the link"),
-    ("crates/ferrite-app/src/link*", ["module:bluetooth", "module:linkproto"], "the link"),
     ("firmware/src/hal/audio.rs", ["aprs", "kept_chips", "decod", "pocsag", "same"], "audio capture and playback"),
     ("firmware/src/tasks/dsp.rs", ["aprs", "kept_chips", "decod", "pocsag", "same"], "DSP"),
     ("firmware/src/tasks/aprs.rs", ["aprs"], "APRS"),
     ("firmware/src/tasks/decode.rs", ["decod", "pocsag", "same"], "decoders"),
     ("firmware/src/hal/adc.rs", ["about_rows", "battery", "temp", "vox"], "the ADC"),
     ("firmware/src/hal/tone.rs", ["beep", "tone"], "beeps"),
-    ("firmware/src/tasks/radio/*", ["module:chips", "module:bcast", "module:squelch", "module:watch", "fm_", "broadcast"], "the Radio task"),
+    ("firmware/src/tasks/radio/*", ["battery_save", "si_input", "broadcast_never", "kept_chips", "amp_off", "relay_follows", "turns_on_a_shared"], "the Radio task"),
     ("crates/ferrite-radio/*", ["module:chips", "module:squelch"], "chip recipes"),
     ("drivers/bk4829/*", ["module:chips", "module:squelch", "module:watch"], "the BK4829"),
     ("drivers/si4732/*", ["module:bcast", "fm_", "broadcast"], "the SI4732"),
     ("crates/ferrite-core/src/rxsleep.rs", ["key_wakes_then_the_sleep", "battery_save", "watched_chips"], "Battery Save"),
-    ("firmware/src/hal/clock.rs", ["module:restart", "module:hostconfirm", "module:bluetooth", "module:linkproto"], "clocks"),
-    ("firmware/src/board.rs", ["module:restart", "module:hostconfirm"], "boot"),
-    ("firmware/src/main.rs", ["module:restart", "module:hostconfirm"], "boot"),
-    ("crates/ferrite-app/src/term/*", ["term", "module:limits"], "the terminal"),
+    ("firmware/src/hal/clock.rs", ["module:restart", "option_bytes", "baud_switch", "bt_terminal"], "clocks"),
+    ("firmware/src/board.rs", ["module:restart", "option_bytes"], "boot"),
+    ("firmware/src/main.rs", ["module:restart", "option_bytes"], "boot"),
     ("crates/ferrite-app/src/screens/*", ["page:"], "a screen"),
-    ("tools/uitests/*", ["module:"], "UI tests"),
+    ("tools/uitests/*", ["changed:"], "UI tests: the tests whose code changed"),
+    # The app, drawing and core logic run the same in the simulator: its full suite (`--sim auto`) covers them, so
+    # on the radio only the tests of the rules on their changed lines (above) and the smoke set run. Run the sim
+    # suite first.
+    ("crates/ferrite-app/*", [], "app logic (sim-covered)"),
+    ("crates/ferrite-ui/*", [], "drawing (sim-covered)"),
+    ("crates/ferrite-core/*", [], "core logic (sim-covered)"),
+    ("fonts/*", [], "fonts (sim-covered)"),
+    ("assets/*", [], "assets (sim-covered)"),
     ("firmware/Cargo.toml", [], "features"),
     ("tools/*", [], "PC tools"),
     ("*/tests/*", [], "host tests"),
@@ -402,6 +408,18 @@ def last_ui_commit(results):
     return best
 
 
+def changed_tests(base, path):
+    """The test functions a change to a test module touched: a new or edited `def`, or a hunk inside one (git's
+    hunk header names the function it falls in)."""
+    names = set()
+    diff = (git("diff", "-U0", f"{base}..HEAD", "--", path) or "") + (git("diff", "-U0", "HEAD", "--", path) or "")
+    for line in diff.splitlines():
+        m = re.match(r"^@@ .* @@\s*def (\w+)", line) or re.match(r"^\+\s*def (\w+)", line)
+        if m:
+            names.add(m.group(1))
+    return names
+
+
 def auto_select(tests, a):
     """(tests, lines of why): the smoke set; tests checking a rule ID on a changed line (or its parent rule); each
     changed file's area (AREAS); everything when a firmware/app file isn't in AREAS or there is no base."""
@@ -430,7 +448,7 @@ def auto_select(tests, a):
                 stem = os.path.splitext(os.path.basename(f))[0]
                 for t in tests:
                     tid = f"{t.module}.{t.name}"
-                    hit = (kw == "page:" and stem in t.pages) or (kw == "module:" and t.module == stem) \
+                    hit = (kw == "page:" and stem in t.pages) or (kw == "changed:" and t.module == stem and t.name in changed_tests(base, f)) \
                         or (kw.startswith("module:") and len(kw) > 7 and t.module == kw[7:]) \
                         or (not kw.endswith(":") and not kw.startswith("module:") and kw.lower() in t.name.lower())
                     if hit:
@@ -440,6 +458,8 @@ def auto_select(tests, a):
         if hit:
             picked.setdefault(f"{t.module}.{t.name}", "rules on changed lines: " + ", ".join(hit))
     why.append(f"since {base}: {len(files)} files changed, {len(rules)} rule IDs on changed lines")
+    if any(fnmatch.fnmatch(f, g) for f in files for g in ("crates/ferrite-app/*", "crates/ferrite-ui/*", "crates/ferrite-core/*")):
+        why.append("app/drawing/core changes count on the simulator's full suite (`--sim auto`) having passed on this commit")
     if full:
         why.append("firmware/app files no area names, so everything: " + ", ".join(full[:8]) + (" ..." if len(full) > 8 else ""))
         return tests, why
