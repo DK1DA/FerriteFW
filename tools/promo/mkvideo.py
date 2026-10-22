@@ -27,6 +27,8 @@ SCALE = 2
 SW, SH = 240 * SCALE, 320 * SCALE
 PAD = 36  # the bezel around the screen
 FADE = 0.4
+# Each radio block ends on its last frame for this long before the fade, so the viewer can read it (`hold:` per block).
+HOLD = 1.5
 # Where the screen goes, by the block's layout: captions on both sides (center), all on the right, or all on the left.
 SCREEN_AT = {"center": ((1920 - SW) // 2, 190), "right": (330, 190), "left": (1920 - 330 - SW, 190)}
 
@@ -73,7 +75,7 @@ def card(b, n, total, out):
         else:
             w = x - PAD - 120 - 160
             cols = f'<div class="col al" style="left:160px;width:{w}px">{title}{paras(b.get("left", ""))}{paras(b.get("right", ""))}</div>'
-        body = bezel + cols + '<div class="n">RT-950 PRO · SIMULATOR, THE FIRMWARE\'S OWN SCREENS · DRAFT</div>'
+        body = bezel + cols + '<div class="n">RT-950 PRO · SIMULATOR, THE FIRMWARE\'S OWN SCREENS</div>'
     page = (HERE / "card.html").read_text().replace("{{FONTS}}", "file://" + str(ROOT / "fonts")).replace("{{BODY}}", body)
     src = out.with_suffix(".html")
     src.write_text(page)
@@ -128,11 +130,12 @@ def main():
         if i in shows:
             raw = WORK / "frames" / f"{rec.index(i):02}.rgb"
             x, y = SCREEN_AT[b.get("layout", "center")]
-            secs = raw.stat().st_size / (240 * 320 * 3) / FPS
+            hold = float(b.get("hold", HOLD))
+            secs = raw.stat().st_size / (240 * 320 * 3) / FPS + hold
             ffmpeg("-loop", "1", "-framerate", str(FPS), "-i", str(png),
                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "240x320", "-framerate", str(FPS), "-i", str(raw),
                    "-filter_complex",
-                   f"[1]scale={240 * SCALE}:{320 * SCALE}:flags=neighbor[s];[0][s]overlay={x}:{y}:shortest=1,"
+                   f"[1]tpad=stop_mode=clone:stop_duration={hold},scale={240 * SCALE}:{320 * SCALE}:flags=neighbor[s];[0][s]overlay={x}:{y}:shortest=1,"
                    f"fade=t=in:st=0:d={FADE},fade=t=out:st={secs - FADE:.2f}:d={FADE},format=yuv420p",
                    "-r", str(FPS), "-c:v", "libx264", "-crf", "12", "-tune", "animation", "-preset", "slow", str(clip))
         else:
@@ -158,7 +161,7 @@ def main():
         return
     if not Path(music).is_absolute():
         music = str(Path(a.story).resolve().parent / music)
-    ffmpeg("-i", str(silent), "-i", music, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+    ffmpeg("-i", str(silent), "-stream_loop", "-1", "-i", music, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
            "-af", f"afade=t=in:d=0.5,afade=t=out:st={length - 2:.2f}:d=2", "-t", f"{length:.2f}", "-movflags", "+faststart", str(out))
     print(f"wrote {out}")
 

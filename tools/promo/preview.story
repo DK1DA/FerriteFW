@@ -4,6 +4,7 @@
 #   title, left, right: caption text (|| starts a new paragraph)
 #   layout: center (screen in the middle, left and right captions beside it; the default), right (all captions on
 #           the right of the screen) or left (all on the left)
+#   hold: seconds the last frame stays before the fade (default 1.5)
 #   setup: a script played before recording, not shown; script: recorded (the indented lines below it)
 #   music: on any block, an audio file for the whole video (relative to this file), with a licence that allows
 #          it (note its source and licence in tools/promo/music/README.md); without one the video is silent
@@ -12,8 +13,8 @@
 kind: intro
 title: Ferrite
 left: Firmware for the Radtel RT-950 Pro.
-seconds: 3.5
-music: music/partysector.ogg
+seconds: 4
+music: music/chiptune3.wav
 ---
 title: Three slots, one radio
 layout: center
@@ -127,5 +128,5 @@ script:
 ---
 kind: outro
 title: ferritefw.dev
-left: Free for any noncommercial use. Draft preview, from the simulator.
-seconds: 4
+left: Free and Source Included.
+seconds: 5
