@@ -4,7 +4,11 @@
     tools/powerbench.py RADIO SUPPLY [--label 120MHz] [--seconds 60] [--settle 10] [--only NAME,...]
     tools/powerbench.py /dev/cu.usbserial-142220 /dev/cu.usbmodem161E49AD74961 --label 240MHz
 
-RADIO is a ferrite_link port (cable, or ble:ID); SUPPLY the DPS-150's. Needs a bench build (the `lcd` command,
+RADIO is a ferrite_link port (cable, or ble:ID); SUPPLY the DPS-150's. With --tx PORT --tx-slot a|b|c, a second
+radio keys that slot in short bursts so the radio under test receives a signal (states marked rx): the second radio
+must say `tx+dry` with Dry TX on (TX-48), and its slot must be on the frequency of the tested radio's active slot.
+Bursts keep the bench's duty limit (5 s keyed counting the tail, a rest of three times it: 25 % of any window);
+only the keyed seconds are measured. Needs a bench build (the `lcd` command,
 TERM-40). Each state: `lcd reset`, the state's terminal lines, `--settle` seconds, then `--seconds` of readings.
 Prints a table of mA per state against the baseline, and appends every state to target/power/LABEL.csv.
 
@@ -34,7 +38,11 @@ STATES = [
     ("panel asleep", ["lcd sleep on"]),
     ("low power set", ["lcd bl 30", "lcd keys 0", "lcd fps 1"]),
     ("baseline again", []),
+    ("rx signal", ["@rx"]),
+    ("rx signal, bl 30", ["lcd bl 30", "@rx"]),
 ]
+BURST_S, TAIL_S, REST_S = 4.5, 0.5, 15.0  # keyed, the carrier after KEY off, then the rest
+MEASURE = (1.0, 4.0)  # the part of each burst measured: after the squelch opens, before the unkey
 
 
 def measure(d, seconds):
@@ -47,6 +55,49 @@ def measure(d, seconds):
         if t is not None and t != last:
             last = t
             rows.append((d.state["v"], d.state["i"]))
+    return summary(rows)
+
+
+def slot_freq(radio, slot):
+    """A slot's frequency in Hz from `slot` (`A* ch 20 147.20000 MHz ...`); `slot` None: the active one."""
+    for line in radio.cmd("slot").splitlines():
+        w = line.split()
+        if len(w) > 3 and (w[0][0].lower() == slot if slot else w[0].endswith("*")):
+            return round(float(w[3]) * 1e6)
+    raise SystemExit(f"no slot {slot or 'active'} in: {radio.cmd('slot')}")
+
+
+def check_dry(tx):
+    if "Dry TX: On" not in tx.cmd("get 0 8 9 2"):
+        sys.exit("the second radio's Dry TX is off: turn it on (set 0 8 9 2 on) before keying it")
+
+
+def measure_rx(d, tx, slot, bursts):
+    """`bursts` dry key-ups of the second radio; readings from inside each one's MEASURE window."""
+    import threading
+    from ferrite_link import remote_ptt
+    rows = []
+    for _ in range(bursts):
+        check_dry(tx)
+        th = threading.Thread(target=remote_ptt, args=(tx.link, BURST_S, slot))
+        th.start()
+        t0 = time.monotonic()
+        last = d.state.get("t")
+        while time.monotonic() - t0 < MEASURE[1]:
+            d.poll(0.1)
+            t = d.state.get("t")
+            if time.monotonic() - (t or 0) > 1.0:
+                d.get(T_ALL)
+            if t and t != last:
+                last = t
+                if t - t0 >= MEASURE[0]:
+                    rows.append((d.state["v"], d.state["i"]))
+        th.join()
+        time.sleep(REST_S)
+    return rows
+
+
+def summary(rows):
     if not rows:
         sys.exit("no readings from the supply")
     amps = [1000 * r[1] for r in rows]
@@ -62,13 +113,32 @@ def main():
     ap.add_argument("--seconds", type=float, default=60)
     ap.add_argument("--settle", type=float, default=10)
     ap.add_argument("--only", help="comma-separated state names")
+    ap.add_argument("--tx", help="the second radio's port, keyed dry for the rx states")
+    ap.add_argument("--tx-slot", choices=["a", "b", "c"])
+    ap.add_argument("--bursts", type=int, default=8, help="key-ups per rx state")
+    ap.add_argument("--note", help="the setup, for the record (volume, battery, antenna): target/power/notes.txt")
     a = ap.parse_args()
     states = [s for s in STATES if not a.only or s[0] in a.only.split(",")]
+    if not a.tx:
+        states = [s for s in states if "@rx" not in s[1]]
+    elif not a.tx_slot:
+        sys.exit("--tx needs --tx-slot")
     out = Path(__file__).resolve().parents[1] / "target" / "power" / f"{a.label}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
+    if a.note:
+        with open(out.parent / "notes.txt", "a") as n:
+            n.write(f"{time.strftime('%Y-%m-%d %H:%M')} {a.label}: {a.note}\n")
     new = not out.exists()
     results = []
+    tx = Radio(a.tx) if a.tx else None
+    if tx:
+        if tx.build != "tx+dry":
+            sys.exit(f"the second radio is {tx.build}, not tx+dry: turn its Dry TX on")
+        check_dry(tx)
     with Radio(a.radio) as r, Dps150(a.supply) as d, open(out, "a", newline="") as f:
+        if tx and slot_freq(tx, a.tx_slot) != slot_freq(r, None):
+            sys.exit(f"the second radio's slot {a.tx_slot.upper()} is on {slot_freq(tx, a.tx_slot)} Hz, the tested "
+                     f"radio's active slot on {slot_freq(r, None)}: tune them together first")
         w = csv.writer(f)
         if new:
             w.writerow(["label", "state", "time", "samples", "volts", "mean_ma", "median_ma", "min_ma", "max_ma"])
@@ -78,11 +148,14 @@ def main():
             for name, lines in states:
                 r.cmd("lcd reset")
                 for line in lines:
-                    r.cmd(line)
-                print(f"{name}: settling {a.settle:.0f} s, then {a.seconds:.0f} s", flush=True)
+                    if line != "@rx":
+                        r.cmd(line)
+                rx = "@rx" in lines
+                what = f"{a.bursts} dry bursts" if rx else f"{a.seconds:.0f} s"
+                print(f"{name}: settling {a.settle:.0f} s, then {what}", flush=True)
                 time.sleep(a.settle)
                 d.poll()
-                m = measure(d, a.seconds)
+                m = summary(measure_rx(d, tx, a.tx_slot, a.bursts)) if rx else measure(d, a.seconds)
                 results.append((name, m))
                 w.writerow([a.label, name, time.strftime("%Y-%m-%d %H:%M:%S"), m["n"], f"{m['volts']:.3f}",
                             *(f"{m[k]:.1f}" for k in ("mean_ma", "median_ma", "min_ma", "max_ma"))])
@@ -90,6 +163,8 @@ def main():
                 print(f"  {m['mean_ma']:.1f} mA mean, {m['median_ma']:.1f} median ({m['min_ma']:.0f}-{m['max_ma']:.0f})")
         finally:
             r.cmd("lcd reset")
+            if tx:
+                tx.close()
     base = results[0][1]["mean_ma"] if results and results[0][0] == "baseline" else None
     print(f"\n{a.label}: {results[0][1]['volts']:.2f} V" if results else "")
     print(f"{'state':16} {'mean mA':>8} {'median':>8} {'vs base':>8}")
