@@ -56,13 +56,13 @@ impl Entry {
 const BEEP_VOLS: [&str; 3] = ["Low", "Mid", "High"];
 const G1: [Entry; 8] = [
     Entry("Watch|A+B|Which slots are heard besides the active one."),
-    Entry("Watch behaviour|Heard|Watched audio and pause time."),
     Entry("Background job|Off|A zone scan or decoder on a watched slot."),
     Entry("Scan target|Current zone|What SIDE2 scans."),
     Entry("Resume|5 s|When a stopped scan moves on."),
-    Entry("Scan options|Up, 1 s|Direction, dwell, priority, inputs."),
+    Entry("Priority check|Every 2 s|Look at the priority channels."),
     Entry("Range presets|4 presets|Named ranges to scan."),
     Entry("Skip list|Empty|Frequencies * skipped in this scan."),
+    Entry("Advanced||Watched audio, pause time, direction, dwell."),
 ];
 const G2: [Entry; 5] = [
     Entry("Browse||Zones, all channels, nearby, recent."),
@@ -93,13 +93,13 @@ const G5: [Entry; 9] = [
     Entry("Heard||Stations heard, nearest first."),
     Entry("Messages||Messages sent to you and by you."),
     Entry("APRS mode|Off|Slot C becomes the APRS slot."),
+    Entry("Frequency|144.390|OK types it; # the region's."),
     Entry("My station|SSID 9|SSID, symbol, comment, position."),
     Entry("Beacon|Off|When to beacon: manual, timed, smart."),
-    Entry("Path|WIDE1-1,WIDE2-1|The digipeater path."),
-    Entry("Radio|144.390|APRS frequency, delays, levels."),
     Entry("Digipeat|Off|Relay others' packets."),
-    // 9 was KISS TNC alone; now the packet group (decision 77): KISS TNC moved to 0 5 9 1, the mailbox beside it.
+    // KISS TNC and the mailbox (decision 77).
     Entry("Packet||KISS TNC and the mailbox."),
+    Entry("Advanced||Path, delays, levels, FX.25."),
 ];
 const G6: [Entry; 9] = [
     Entry("GPS|On|The GPS receiver."),
@@ -123,49 +123,42 @@ const G7: [Entry; 9] = [
     Entry("Auto power off|Off|Off after a time without key or signal."),
     Entry("Menu timeout|30 s|An idle menu returns home."),
 ];
-const G8: [Entry; 9] = [
+const G8: [Entry; 8] = [
     Entry("Timeout|120 s|Transmit timeout and its pre-alert."),
     Entry("VOX|Off|Voice-operated transmit."),
     Entry("Mic gain|5|Higher is louder on air: 1-9."),
-    Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),
-    Entry("Tail elimination|Off|Squelch tail, end tone (roger beep)."),
+    Entry("End tone|Off|A short tone as you let go of PTT."),
     Entry("DTMF|100 ms|Dialer, memories, timing."),
     Entry("Callsign and ID|Empty|Your callsign, and CW ID."),
     Entry("Busy lockout default|Off|For new channels and the VFO."),
-    Entry("Extend TX|Off|Beyond the amateur bands; Dry TX."),
+    Entry("Advanced||Subtone level, tail, Extend TX, Dry TX."),
 ];
 const G9: [Entry; 9] = [
     Entry("Keys and lock|No auto lock|Auto lock, lock covers, key test, shortcuts."),
-    Entry("Connections|BT off|Bluetooth, approved devices, link."),
+    Entry("Connections|BT off|Bluetooth, link status, cable port."),
     Entry("PIN and lock|Off|PIN lock, channel-only mode, PIN."),
     Entry("Region|Not set|Your amateur bands and defaults."),
-    Entry("Receiver|Tail 150 ms|Advanced squelch, tail, discriminator."),
+    Entry("Squelch tail|150 ms|Audio after the signal drops."),
     Entry("SSB patch||USB, LSB and CW in HF mode."),
-    Entry("Calibration and trims||View calibration, trim crystal, battery."),
     Entry("Setup and reset||Run setup again, reset settings."),
     Entry("About||Version, identity, checks, battery."),
+    Entry("Advanced||Squelch, discriminator, calibration, debug."),
 ];
-
 /// The nine groups' items (MENU 0 1 to MENU 0 9).
 pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7, &G8, &G9];
 /// Short names for the status bar (up to 10 characters).
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
-    ((1, 2), &[
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 26] = [
+    ((1, 8), &[
         Entry("Watched audio|Heard|Heard, muted, per slot."),
         Entry("Pause time|1 min|# on home pauses watch this long."),
-    ]),
-    ((1, 6), &[
         Entry("Direction|Up|Scan up or down."),
         Entry("Dwell|1 s|Wait before resuming."),
         Entry("Scan inputs|Off|Also a channel's TX frequency."),
         Entry("Return to|Start|Where a stopped scan returns."),
-        Entry("Priority check|Every 2 s|Look at the priority channels."),
     ]),
-    // The FM screen's options (BCR-3): on the radio 0 3 1 opens the screen and its digits 1-5 reach these; the
-    // terminal lists them here (TERM-12).
     ((3, 1), &[
         Entry("Presets|Empty|20 stations."),
         Entry("Step|100 kHz|Tuning step."),
@@ -186,14 +179,20 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
         Entry("Frequency|439.9875|The pager channel, any baud; OK types it."),
         Entry("Capcode filter|None|Only this capcode: OK types it, # clears it."),
     ]),
-    ((4, 3), &[Entry("DSC|Off|Decode DSC on channel 70."), Entry("Own MMSI|None|Your MMSI, receive only.")]),
-    ((4, 4), &[Entry("AIS|Off|161.975 and 162.025, in turn."), Entry("Range filter|25 nm|Off, 5, 10, 25, 50 nm; needs a fix.")]),
+    ((4, 3), &[
+        Entry("DSC|Off|Decode DSC on channel 70."),
+        Entry("Own MMSI|None|Your MMSI, receive only."),
+    ]),
+    ((4, 4), &[
+        Entry("AIS|Off|161.975 and 162.025, in turn."),
+        Entry("Range filter|25 nm|Off, 5, 10, 25, 50 nm; needs a fix."),
+    ]),
     ((4, 8), &[
         Entry("SAME|On|Decode weather alerts."),
         Entry("Location codes|None|Up to 8 FIPS or CLC codes."),
         Entry("Channel|Auto|The weather channel to watch."),
     ]),
-    ((5, 4), &[
+    ((5, 5), &[
         Entry("SSID|7 Handheld|0-15 after your callsign."),
         Entry("Symbol|Car|Your map symbol."),
         Entry("Comment|Empty|Up to 40 characters."),
@@ -202,37 +201,35 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
         Entry("Ambiguity|Exact|Digits dropped from your position."),
         Entry("Mic-E status|En route|Status in Mic-E beacons."),
     ]),
-    ((5, 5), &[
+    ((5, 6), &[
         Entry("Mode|Off|Manual, timed, distance or smart."),
-        Entry("Smart settings|Standard|Rates, speeds, turn angle."),
         Entry("After voice TX|Off|Beacon after you talk."),
         Entry("Power|Low|Beacon and message power."),
     ]),
-    ((5, 6), &[Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."), Entry("Custom path|None|Your own path, like WIDE2-2: OK types it.")]),
     ((5, 7), &[
-        Entry("Frequency|144.390|OK types it; # the region's."),
-        Entry("TX delay|300 ms|Carrier before data."),
-        Entry("TX level|Mid|Modulation level."),
-        Entry("RX level|Auto|Decoder input level."),
-        Entry("Mute speaker|On|Mute packets on the speaker."),
-        Entry("Message sound|Mail|Sound for a message to you."),
-        Entry("Heard popup|Off|A toast per station heard."),
-        Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
-    ]),
-    ((5, 8), &[
         Entry("Digipeat|Off|Relay others' packets."),
         Entry("Aliases|WIDE1-1|WIDE1-1, and your call if chosen."),
         Entry("Wait|0 s|Delay before relaying, 0-5 s."),
     ]),
-    ((5, 9), &[
+    ((5, 8), &[
         Entry("KISS TNC|Off|Raw KISS on the cable or Bluetooth."),
         Entry("Mailbox|Off|Answer packet connects to your SSID."),
         Entry("Mailbox SSID|1|The SSID callers connect to."),
         Entry("Mailbox frequency|None|Where the mailbox listens."),
         Entry("Bulletins|On|Callers may post bulletins."),
     ]),
+    ((5, 9), &[
+        Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."),
+        Entry("Custom path|None|Your own path, like WIDE2-2: OK types it."),
+        Entry("Smart settings|Standard|Rates, speeds, turn angle."),
+        Entry("TX delay|300 ms|Carrier before data."),
+        Entry("TX level|Mid|Modulation level."),
+        Entry("RX level|Auto|Decoder input level."),
+        Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
+        Entry("Mute speaker|On|Mute packets on the speaker."),
+        Entry("Heard popup|Off|A toast per station heard."),
+    ]),
     ((7, 3), &[
-        // 1 was "Battery as": the bar shows an icon only, % and volts on Status (SBAR-19); S-meter took its row
         Entry("S-meter|Bars|Bars or dBm."),
         Entry("Power-on message|Callsign|Off, callsign or text."),
         Entry("Boot screen|Logo|Logo, or the owner card."),
@@ -249,30 +246,40 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
         Entry("Beep volume|3|1-5."),
         Entry("Alert tones|On|Tones for alerts."),
         Entry("Arrival tone|On|A tone on reaching a waypoint."),
+        Entry("Message sound|Mail|Sound for a message to you."),
     ]),
-    // PWR-24 (decision 234): 0 7 7 was Battery Save alone; Low Power Mode joined it.
     ((7, 7), &[
         Entry("Battery Save|Level 1|Receiver sleep: longer life, slower."),
         Entry("Low Power Mode|Off|One VFO, everything else off. SIDE1+SIDE2 hold: leave."),
         Entry("Auto below|20 %|Auto turns it on below this battery."),
     ]),
-    ((8, 1), &[Entry("TX timeout|120 s|Transmit stops after this."), Entry("Pre-alert|10 s|Warning before the timeout.")]),
-    ((8, 2), &[Entry("VOX|Off|Transmit when you talk."), Entry("Level|5|Higher needs a louder voice: 1 keys easiest."), Entry("Tail|2 s|Hang time after speech.")]),
-    ((8, 5), &[
-        Entry("Mode|Off|Receive, transmit or both."),
-        Entry("Phase|55 Hz|55 Hz or a phase shift."),
-        Entry("End tone|Off|A short tone as you let go of PTT."),
+    ((8, 1), &[
+        Entry("TX timeout|120 s|Transmit stops after this."),
+        Entry("Pre-alert|10 s|Warning before the timeout."),
     ]),
-    ((8, 6), &[
+    ((8, 2), &[
+        Entry("VOX|Off|Transmit when you talk."),
+        Entry("Level|5|Higher needs a louder voice: 1 keys easiest."),
+        Entry("Tail|2 s|Hang time after speech."),
+    ]),
+    ((8, 5), &[
         Entry("Dialer||Type and send DTMF."),
         Entry("Memories||16 stored sequences."),
         Entry("Speed|100 ms|Each tone and each gap."),
         Entry("Sidetone|On|Hear the digits you send."),
         Entry("First digit delay|300 ms|Wait after key-up so a repeater opens."),
     ]),
-    ((8, 7), &[Entry("Callsign|Empty|For APRS, CW ID, power-on message."), Entry("CW ID|Off|Send your callsign in CW.")]),
-    // TX-48: Dry TX is a switch for this power-on, not a stored setting; the radio's menu is its only way in.
-    ((8, 9), &[Entry("Extend TX|Off|Transmit beyond the amateur bands."), Entry("Dry TX|Off|Key with no RF out: bench tests.")]),
+    ((8, 6), &[
+        Entry("Callsign|Empty|For APRS, CW ID, power-on message."),
+        Entry("CW ID|Off|Send your callsign in CW."),
+    ]),
+    ((8, 8), &[
+        Entry("Subtone level|Normal|CTCSS/DCS strength: raise for a deaf repeater."),
+        Entry("Tail elimination|Off|Receive, transmit or both."),
+        Entry("Phase|55 Hz|55 Hz or a phase shift."),
+        Entry("Extend TX|Off|Transmit beyond the amateur bands."),
+        Entry("Dry TX|Off|Key with no RF out: bench tests."),
+    ]),
     ((9, 1), &[
         Entry("Auto lock|Off|Lock the keys after a time."),
         Entry("Lock covers|Keys|Keys, or keys and PTT."),
@@ -282,25 +289,26 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
     ((9, 2), &[
         Entry("Bluetooth|Off|The Bluetooth link to the web app."),
         Entry("Link status||Cable and Bluetooth now."),
-        Entry("Debug console|Off|Off, cable or Bluetooth."),
         Entry("Cable port|Auto|Link, terminal or KISS."),
-        Entry("Terminal colour|Off|ANSI colour on the cable terminal."),
-        Entry("Cable log|Off|Plain log on the cable at power on."),
     ]),
-    ((9, 3), &[Entry("PIN lock|Off|Ask for the PIN at power on, or unlock too."), Entry("Channel-only mode|Off|Hide VFO and editing."), Entry("Change PIN|None|Type a new PIN; the old one first.")]),
-    ((9, 5), &[
-        Entry("Advanced squelch||Thresholds per band."),
-        Entry("Squelch tail|150 ms|Audio after the signal drops."),
-        Entry("Discriminator mode|Off|Flat audio for decoders."),
+    ((9, 3), &[
+        Entry("PIN lock|Off|Ask for the PIN at power on, or unlock too."),
+        Entry("Channel-only mode|Off|Hide VFO and editing."),
+        Entry("Change PIN|None|Type a new PIN; the old one first."),
     ]),
     ((9, 7), &[
+        Entry("Run setup again||The first-boot questions."),
+        Entry("Reset||Everything but calibration."),
+    ]),
+    ((9, 9), &[
+        Entry("Advanced squelch||Thresholds per band."),
+        Entry("Discriminator mode|Off|Flat audio for decoders."),
         Entry("Calibration||The factory calibration, read only."),
         Entry("Crystal trim|0 ppm|Centre a known signal."),
         Entry("Battery reading trim|+0.00 V|Match the reading to a meter."),
-    ]),
-    ((9, 8), &[
-        Entry("Run setup again||The first-boot questions."),
-        Entry("Reset||Everything but calibration."),
+        Entry("Debug console|Off|Off, cable or Bluetooth."),
+        Entry("Cable log|Off|Plain log on the cable at power on."),
+        Entry("Terminal colour|Off|ANSI colour on the cable terminal."),
     ]),
 ];
 
@@ -368,8 +376,8 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
         [4, 8, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
-        [8, 9, 2] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
-        [8, 9, 2] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
+        [8, 8, 5] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
+        [8, 8, 5] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
         _ => None,
     }
 }
@@ -441,9 +449,9 @@ macro_rules! field {
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
 static SETTINGS: [Setting; 75] = [
     field!([1, 1, 0], special),
-    field!([1, 5, 0], special),
-    field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
-    field!([1, 6, 5], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
+    field!([1, 4, 0], special),
+    field!([1, 8, 5], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
+    field!([1, 5, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
     field!([3, 1, 2], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), Nothing),
     field!([3, 1, 3], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), Nothing),
     field!([3, 1, 4], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
@@ -459,20 +467,20 @@ static SETTINGS: [Setting; 75] = [
     field!([4, 7, 0], popups: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([4, 8, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([5, 3, 0], special),
-    field!([5, 4, 1], special), // APRS-30
-    field!([5, 4, 4], special), // APRS-31
-    field!([5, 5, 1], special),
-    field!([5, 5, 3], special),
-    field!([5, 5, 4], special),
+    field!([5, 5, 1], special), // APRS-30
+    field!([5, 5, 4], special), // APRS-31
     field!([5, 6, 1], special),
     field!([5, 6, 2], special),
-    field!([5, 7, 1], special), // MENU-31: typed as a frequency
-    field!([5, 7, 6], special), // APRS-6.1
-    field!([5, 7, 8], special), // APRS-45
-    field!([5, 8, 1], special),
-    field!([5, 8, 2], special),
-    field!([5, 8, 3], special),
-    field!([5, 9, 1], kiss_port: u8, Kind::Pick(&crate::settings::KISS_PORTS), Nothing),
+    field!([5, 6, 3], special),
+    field!([5, 9, 1], special),
+    field!([5, 9, 2], special),
+    field!([5, 4, 0], special), // MENU-31: typed as a frequency
+    field!([7, 5, 5], special), // APRS-6.1
+    field!([5, 9, 7], special), // APRS-45
+    field!([5, 7, 1], special),
+    field!([5, 7, 2], special),
+    field!([5, 7, 3], special),
+    field!([5, 8, 1], kiss_port: u8, Kind::Pick(&crate::settings::KISS_PORTS), Nothing),
     field!([6, 1, 0], gps_on: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing),
     field!([6, 4, 0], units: u8, Kind::Pick(&UNITS), Nothing),
@@ -502,21 +510,21 @@ static SETTINGS: [Setting; 75] = [
     field!([8, 2, 2], vox_level: u8, Kind::Level(1, 9, 1, vox_level_text), Vox),
     field!([8, 2, 3], vox_tail: u8, Kind::Round(VOX_TAILS.len() as u8, vox_tail_text), Vox),
     field!([8, 3, 0], mic_gain: u8, Kind::Level(1, 9, 1, vox_level_text), MicGain),
-    field!([8, 4, 0], special),
-    field!([8, 5, 1], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
-    field!([8, 5, 2], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
-    field!([8, 5, 3], end_tone: u8, Kind::Pick(&END_TONE_NAMES), SlotTones),
+    field!([8, 8, 1], special),
+    field!([8, 8, 2], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
+    field!([8, 8, 3], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
+    field!([8, 4, 0], end_tone: u8, Kind::Pick(&END_TONE_NAMES), SlotTones),
     // 50-200 ms in 10 ms steps (DTMF-3)
-    field!([8, 6, 3], dtmf_ms: u8, Kind::Level(50, 200, 10, dtmf_ms_text), TxTones),
-    field!([8, 6, 4], dtmf_sidetone: bool, Kind::Flip(&ON_OFF), TxTones),
+    field!([8, 5, 3], dtmf_ms: u8, Kind::Level(50, 200, 10, dtmf_ms_text), TxTones),
+    field!([8, 5, 4], dtmf_sidetone: bool, Kind::Flip(&ON_OFF), TxTones),
     // 0-1000 ms in 50 ms steps (DTMF-3)
-    field!([8, 6, 5], dtmf_delay: u8, Kind::Level(0, 100, 5, dtmf_delay_text), TxTones),
-    field!([8, 7, 2], cw_id: u8, Kind::Pick(&CW_ID_MODES), TxTones),
+    field!([8, 5, 5], dtmf_delay: u8, Kind::Level(0, 100, 5, dtmf_delay_text), TxTones),
+    field!([8, 6, 2], cw_id: u8, Kind::Pick(&CW_ID_MODES), TxTones),
     field!([9, 1, 1], auto_lock: u8, Kind::Round(AUTO_LOCK_TIMES.len() as u8, auto_lock_text), Nothing), // KEY-20
     field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([9, 2, 4], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
-    field!([9, 2, 5], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([9, 2, 6], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 2, 3], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
+    field!([9, 9, 8], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 9, 7], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
 ];
 
 fn row(p: &[u8]) -> Option<&'static Setting> {
@@ -535,7 +543,7 @@ pub(crate) const CW_ID_NO_CALL: &str = "set a callsign first";
 /// `set` (and so the link's `CMD`) gives the same reason instead of a bare "one of".
 pub(crate) fn refusal(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
-        [8, 7, 2] if app.set.callsign.as_bytes().is_empty() => Some(CW_ID_NO_CALL), // VOX-10
+        [8, 6, 2] if app.set.callsign.as_bytes().is_empty() => Some(CW_ID_NO_CALL), // VOX-10
         _ => None,
     }
 }
@@ -649,16 +657,16 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &WATCH_TEXT, app.watch);
             app.watch != 1
         }
-        [1, 5] => {
+        [1, 4] => {
             resume_text(b, s.scan_resume);
             s.scan_resume != Settings::DEFAULT.scan_resume
         }
-        // APRS-31: the beacon's position source; 0 5 4 5 is 0 6 9's fixed position
-        [5, 4, 4] => {
+        // APRS-31: the beacon's position source; 0 5 5 5 is 0 6 9's fixed position
+        [5, 5, 4] => {
             b.set(if s.aprs_fixed { b"Fixed" } else { b"GPS" });
             s.aprs_fixed
         }
-        [6, 9] | [5, 4, 5] => {
+        [6, 9] | [5, 5, 5] => {
             if s.fixed_on {
                 b.set(&super::lists::grid(s.fixed));
             } else {
@@ -702,15 +710,15 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             }
             s.lpm != 0
         }
-        [8, 7] | [8, 7, 1] => {
+        [8, 6] | [8, 6, 1] => {
             b.set(if s.callsign.is_empty() { b"Empty".as_slice() } else { s.callsign.as_bytes() });
             !s.callsign.is_empty()
         }
-        [8, 9] | [8, 9, 1] => {
+        [8, 8, 4] => {
             pick(b, &ON_OFF, s.extend_tx as u8);
             s.extend_tx
         }
-        [8, 9, 2] => {
+        [8, 8, 5] => {
             pick(b, &ON_OFF, app.dry_tx() as u8);
             app.dry_tx()
         }
@@ -722,7 +730,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(if dev.selftest.ssb_patch { b"Installed".as_slice() } else { b"Not installed" });
             false
         }
-        [9, 9] => {
+        [9, 8] => {
             b.set(VERSION.as_bytes());
             false
         }
@@ -735,56 +743,56 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ON_OFF, s.aprs_mode as u8);
             s.aprs_mode
         }
-        [5, 5, 1] => {
+        [5, 6, 1] => {
             app.beacon_mode_text(b);
             app.aprs_cfg().beacon != 0
         }
-        [5, 4, 1] => {
+        [5, 5, 1] => {
             // APRS-30: the number and its conventional name
             let n = app.aprs_cfg().ssid;
             let _ = uwrite!(b, "{} ", n);
             b.push(crate::aprs::SSID_NAMES[n as usize % 16].as_bytes());
             n != crate::aprs::SSID_DEFAULT
         }
-        [5, 5, 4] => {
+        [5, 6, 3] => {
             pick(b, &crate::aprs::POWERS, app.aprs_cfg().power);
             app.aprs_cfg().power != 0
         }
-        [5, 5, 3] => {
+        [5, 6, 2] => {
             pick(b, &ON_OFF, app.aprs_cfg().after_voice as u8);
             app.aprs_cfg().after_voice
         }
         // The group rows show their setting too (APRS-26).
-        [5, 6] | [5, 6, 1] => {
+        [5, 9, 1] => {
             b.set(app.aprs_cfg().path_name());
             app.aprs_cfg().path != crate::aprs::PATH_DEFAULT
         }
-        [5, 6, 2] => {
+        [5, 9, 2] => {
             let c = app.aprs_cfg();
             b.set(if c.custom_text().is_empty() { b"None".as_slice() } else { c.custom_text() });
             !c.custom_text().is_empty()
         }
-        [5, 8] | [5, 8, 1] => {
+        [5, 7] | [5, 7, 1] => {
             pick(b, &ON_OFF, app.aprs_cfg().digi_on() as u8);
             app.aprs_cfg().digi_on()
         }
-        [5, 8, 2] => {
+        [5, 7, 2] => {
             pick(b, &crate::aprs::DIGI_ALIASES, app.aprs_cfg().digi_mycall() as u8);
             app.aprs_cfg().digi_mycall()
         }
-        [5, 8, 3] => {
+        [5, 7, 3] => {
             let _ = uwrite!(b, "{} s", app.aprs_cfg().digi_wait_s());
             app.aprs_cfg().digi_wait_s() != 0
         }
-        [5, 7, 1] => {
+        [5, 4] => {
             b.set(crate::slot::mhz3(app.aprs_freq()).as_bytes());
             app.aprs_cfg().f5k != 0
         }
-        [5, 7, 6] => {
+        [7, 5, 5] => {
             pick(b, &ferrite_core::tonegen::CHIME_NAMES, app.aprs_cfg().sound);
             app.aprs_cfg().sound != ferrite_core::tonegen::CHIME_DEFAULT
         }
-        [5, 7, 8] => {
+        [5, 9, 7] => {
             pick(b, &crate::aprs::FX25_NAMES, app.aprs_cfg().fx25_index());
             app.aprs_cfg().fx25 != crate::aprs::FX25_DEFAULT
         }
@@ -831,16 +839,16 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(if dev.bt { b"BT connected".as_slice() } else if s.bt { b"BT on" } else { b"BT off" });
             s.bt
         }
-        [9, 7] | [9, 7, 1] => {
+        [9, 9, 3] => {
             b.set(cal_text(dev.selftest.cal).as_bytes());
             false
         }
-        // APRS-30: the address beacons send, callsign and 0 5 4 1's SSID (it said "-9" whatever the SSID)
-        [5, 4] if !s.callsign.is_empty() => {
+        // APRS-30: the address beacons send, callsign and 0 5 5 1's SSID (it said "-9" whatever the SSID)
+        [5, 5] if !s.callsign.is_empty() => {
             b.set(app.aprs_call().as_bytes());
             false
         }
-        [8, 4] => {
+        [8, 8, 1] => {
             pick(b, &crate::settings::TONE_LEVELS, s.tone_level);
             s.tone_level != 1
         }
@@ -856,7 +864,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(if s.pin_len > 0 { b"Set" } else { b"None" });
             s.pin_len > 0
         }
-        [9, 7, 3] => {
+        [9, 9, 5] => {
             let t = dev.selftest.battery_trim as i32;
             let _ = uwrite!(b, "{}{}.{} V", if t < 0 { "-" } else { "+" }, t.abs() / 100, ferrite_ui::text::Zero(t.unsigned_abs() % 100, 2));
             t != 0
@@ -883,8 +891,8 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
     match p {
         [1, 1] => app.change(Item::Watch, d),
         // 1-10 s, carrier drop, stop on hit (SCAN-5); the next scan takes it
-        [1, 5] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
-        [8, 4] => {
+        [1, 4] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
+        [8, 8, 1] => {
             s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
             app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
         }
@@ -921,30 +929,30 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             let on = !app.set.aprs_mode;
             app.set_aprs_mode(on); // APRS-15
         }
-        [5, 5, 1] => app.step_beacon(d),
-        [5, 4, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: cycle(app.aprs_cfg().ssid, d, 16), ..app.aprs_cfg() }),
-        [5, 4, 4] => s.aprs_fixed = !s.aprs_fixed,
-        [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
-        [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
-        [5, 6, 1] => {
+        [5, 6, 1] => app.step_beacon(d),
+        [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: cycle(app.aprs_cfg().ssid, d, 16), ..app.aprs_cfg() }),
+        [5, 5, 4] => s.aprs_fixed = !s.aprs_fixed,
+        [5, 6, 3] => app.set_aprs(crate::aprs::AprsCfg { power: cycle(app.aprs_cfg().power, d, 3), ..app.aprs_cfg() }),
+        [5, 6, 2] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
+        [5, 9, 1] => {
             let c = app.aprs_cfg();
             app.set_aprs(crate::aprs::AprsCfg { path: cycle(c.path, d, c.path_choices() as usize), ..c });
         }
-        [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
-        [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
-        [5, 8, 3] => {
+        [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
+        [5, 7, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
+        [5, 7, 3] => {
             let c = app.aprs_cfg();
             let w = cycle(c.digi_wait_s(), d, crate::aprs::DIGI_WAIT_MAX as usize + 1);
             app.set_aprs(crate::aprs::AprsCfg { digi: c.digi & 0x0F | w << 4, ..c });
         }
-        [5, 7, 1] => app.step_aprs_freq(d),
-        [5, 7, 6] => {
+        [5, 4] => app.step_aprs_freq(d),
+        [7, 5, 5] => {
             // APRS-6.1: each choice plays as it is picked
             let sound = cycle(app.aprs_cfg().sound, d, ferrite_core::tonegen::CHIMES.len());
             app.set_aprs(crate::aprs::AprsCfg { sound, ..app.aprs_cfg() });
             app.out.push(ferrite_core::msg::RadioCmd::Chime(sound));
         }
-        [5, 7, 8] => {
+        [5, 9, 7] => {
             let i = cycle(app.aprs_cfg().fx25_index(), d, crate::aprs::FX25_CHECKS.len());
             app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_CHECKS[i as usize], ..app.aprs_cfg() })
         }
@@ -953,11 +961,11 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [7, 4, 2] => *s.brightness_mut() = (s.brightness() as i32 + d).clamp(1, 10) as u8, // DISP-16, DISP-23
         [8, 2] => return change(app, &[8, 2, 1], d),
         // VOX-10: CW ID needs a callsign
-        [8, 7, 2] if s.callsign.as_bytes().is_empty() => app.show_toast(b"CW ID", CW_ID_NO_CALL.as_bytes(), false),
-        [8, 9] | [8, 9, 1] => set_extend(app, !app.set.extend_tx),
+        [8, 6, 2] if s.callsign.as_bytes().is_empty() => app.show_toast(b"CW ID", CW_ID_NO_CALL.as_bytes(), false),
+        [8, 8, 4] => set_extend(app, !app.set.extend_tx),
         // TX-48: the radio's own keys only, never the link's remote keys (also greyed for them).
-        [8, 9, 2] if !app.remote_in => app.set_dry_tx(!app.dry_tx()),
-        [8, 9, 2] => return false,
+        [8, 8, 5] if !app.remote_in => app.set_dry_tx(!app.dry_tx()),
+        [8, 8, 5] => return false,
         [9, 3, 2] if !s.chan_only => app.set_chan_only(), // PIN-5: leaving is hold #
         [9, 3] | [9, 3, 1] => {
             let m = cycle(s.pin_mode, d, PIN_MODES.len());
@@ -996,34 +1004,34 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
         [7, 7] | [7, 7, 1] => app.change(Item::BatterySave, 1 - app.bsave as i32),
         [7, 7, 2] => app.set_lpm_mode(d.lpm),
-        [1, 5] => s.scan_resume = d.scan_resume,
-        [8, 4] => {
+        [1, 4] => s.scan_resume = d.scan_resume,
+        [8, 8, 1] => {
             s.tone_level = d.tone_level;
             app.out.push(RadioCmd::ToneLevel(d.tone_level));
         }
-        [6, 9] | [5, 4, 5] => s.fixed_on = false,
-        [5, 4, 4] => s.aprs_fixed = false,
+        [6, 9] | [5, 5, 5] => s.fixed_on = false,
+        [5, 5, 4] => s.aprs_fixed = false,
         [6, 6] => (s.clock, s.clock_gps) = (d.clock, d.clock_gps),
-        [8, 9] | [8, 9, 1] => s.extend_tx = false,
-        [8, 9, 2] if !app.remote_in => app.set_dry_tx(false), // TX-48: # by the radio's own keys only
-        [8, 9, 2] => {}
+        [8, 8, 4] => s.extend_tx = false,
+        [8, 8, 5] if !app.remote_in => app.set_dry_tx(false), // TX-48: # by the radio's own keys only
+        [8, 8, 5] => {}
         [3, 2, 3] => s.scope_dwell = d.scope_dwell,
         [5, 3] if s.aprs_mode != d.aprs_mode => app.set_aprs_mode(d.aprs_mode),
-        [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
-        [5, 4, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: crate::aprs::SSID_DEFAULT, ..app.aprs_cfg() }),
-        [5, 5, 4] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
-        [5, 5, 3] => app.set_aprs(crate::aprs::AprsCfg { after_voice: false, ..app.aprs_cfg() }),
-        [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { path: crate::aprs::PATH_DEFAULT, ..app.aprs_cfg() }),
-        [5, 8, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
-        [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
-        [5, 8, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
-        [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
-        [5, 7, 6] => app.set_aprs(crate::aprs::AprsCfg { sound: ferrite_core::tonegen::CHIME_DEFAULT, ..app.aprs_cfg() }),
-        [5, 7, 8] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
+        [5, 6, 1] => app.set_aprs(crate::aprs::AprsCfg { beacon: 0, ..app.aprs_cfg() }),
+        [5, 5, 1] => app.set_aprs(crate::aprs::AprsCfg { ssid: crate::aprs::SSID_DEFAULT, ..app.aprs_cfg() }),
+        [5, 6, 3] => app.set_aprs(crate::aprs::AprsCfg { power: 0, ..app.aprs_cfg() }),
+        [5, 6, 2] => app.set_aprs(crate::aprs::AprsCfg { after_voice: false, ..app.aprs_cfg() }),
+        [5, 9, 1] => app.set_aprs(crate::aprs::AprsCfg { path: crate::aprs::PATH_DEFAULT, ..app.aprs_cfg() }),
+        [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
+        [5, 7, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
+        [5, 7, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
+        [5, 4] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
+        [7, 5, 5] => app.set_aprs(crate::aprs::AprsCfg { sound: ferrite_core::tonegen::CHIME_DEFAULT, ..app.aprs_cfg() }),
+        [5, 9, 7] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
         [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
         [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
         // # forgets the custom path; a path set to it goes back to the default (APRS-26)
-        [5, 6, 2] => {
+        [5, 9, 2] => {
             let c = app.aprs_cfg();
             let path = if c.path == crate::aprs::PATH_CUSTOM { crate::aprs::PATH_DEFAULT } else { c.path };
             app.set_aprs(crate::aprs::AprsCfg { custom: [0; crate::aprs::CUSTOM_LEN], path, ..c });
@@ -1194,7 +1202,7 @@ impl Group {
             // MENU-22: a radio-wide setting changed here offers "* Undo" (the slot's own items keep theirs).
             let was = shown(app, p);
             // Dry TX (TX-48) isn't a setting: no undo either.
-            if change(app, p, d) && !matches!(p, [1, 1] | [7, 7] | [7, 7, 1] | [7, 7, 2] | [8, 9, 2]) && shown(app, p) != was {
+            if change(app, p, d) && !matches!(p, [1, 1] | [7, 7] | [7, 7, 1] | [7, 7, 2] | [8, 8, 5]) && shown(app, p) != was {
                 app.keep_set_undo(p, d, was);
             }
         }
@@ -1216,7 +1224,7 @@ impl Group {
                     [4, 1] if app.log_unread > 0 => {
                         let _ = uwrite!(v, "{} new", app.log_unread);
                     }
-                    [5, 4] => v.set(b"no callsign"),
+                    [5, 5] => v.set(b"no callsign"),
                     _ => v.set(e.value().as_bytes()),
                 }
                 false
@@ -1259,7 +1267,7 @@ impl Group {
             return app.show_toast(self.items()[self.row as usize].name().as_bytes(), why.as_bytes(), false);
         }
         match p {
-            [8, 7, 1] => {
+            [8, 6, 1] => {
                 super::setup::callsign(app);
             }
             // OK on Text edits it (16 characters); the knob still picks off, callsign or text.
@@ -1280,12 +1288,12 @@ impl Group {
                 app.text = Buf::new();
                 app.open(Dest::Text(super::text::TextFor::Clock));
             }
-            [5, 6, 2] => {
+            [5, 9, 2] => {
                 app.text = Buf::from(app.aprs_custom_path());
                 app.open(Dest::Text(super::text::TextFor::AprsPath));
             }
             // MENU-31: a frequency setting opens the frequency entry box; the knob still steps it.
-            [5, 7, 1] => super::entry::open_setting(app, super::entry::FreqSet::Aprs),
+            [5, 4] => super::entry::open_setting(app, super::entry::FreqSet::Aprs),
             [4, 2, 2] => super::entry::open_setting(app, super::entry::FreqSet::Pager),
             _ => {
                 if let Some(d) = nav::menu0(p) {
@@ -1307,6 +1315,23 @@ impl Group {
 #[cfg(test)]
 mod shape_tests {
     use super::*;
+
+    /// MENU-32: a group's Advanced row is its last, and opens a list (no deeper levels below it).
+    #[test]
+    fn advanced_is_the_last_row() {
+        for (g, rows) in GROUP_ITEMS.iter().enumerate() {
+            let g = g as u8 + 1;
+            for (i, e) in rows.iter().enumerate() {
+                if e.name() == "Advanced" {
+                    assert_eq!(i + 1, rows.len(), "group {g}: Advanced is the last row");
+                    assert!(!items(g, i as u8 + 1).is_empty(), "group {g}: Advanced opens a list");
+                }
+            }
+        }
+        for g in [1u8, 5, 8, 9] {
+            assert_eq!(GROUP_ITEMS[g as usize - 1].last().unwrap().name(), "Advanced", "group {g}");
+        }
+    }
 
     /// MENU-3: at most 9 items per list, every list on one screen, and a group's third level is the deepest
     /// (MENU 0 g s i): sub-lists hang only off a group's own rows and have no sub-lists of their own.

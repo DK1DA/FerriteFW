@@ -109,7 +109,7 @@ impl View for Squelch {
         }
         if app.dirty(3, 1) {
             let mut b = Buf::<40>::new();
-            b.push(b"Per band: MENU 0 9 5 1");
+            b.push(b"Per band: MENU 0 9 9 1");
             parts::wrap(lcd, 8, 224, 240, 17, 1, b.as_bytes(), &UI_12, DIM, BG);
         }
     }

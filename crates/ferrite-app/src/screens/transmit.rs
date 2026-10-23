@@ -177,7 +177,7 @@ pub fn auto_tx(app: &mut App, slot: u8, what: &[u8]) -> bool {
         b"no callsign set"
     } else if app.set.callsign.as_bytes().split(|&c| c == b'-').next().map_or(0, <[u8]>::len) > AX25_CALL && what != b"KISS" {
         // SETUP-13: AX.25 carries 6; KISS frames carry the client's own addresses. An SSID typed into the callsign
-        // isn't counted: 0 5 4 1's replaces it (APRS-30).
+        // isn't counted: 0 5 5 1's replaces it (APRS-30).
         b"callsign over 6"
     } else if let Some(r) = refusal(app, slot) {
         short(r).as_bytes()
@@ -195,7 +195,7 @@ pub fn auto_tx(app: &mut App, slot: u8, what: &[u8]) -> bool {
 pub const AX25_CALL: usize = 6;
 
 /// APRS-7, APRS-20: a data transmission on `slot` (the APRS task's frame): an automatic one's checks (TX-35,
-/// [`auto_tx`]), then the plan and the data key-up at `power` (0 5 5 4). No screen opens (the card shows it).
+/// [`auto_tx`]), then the plan and the data key-up at `power` (0 5 6 3). No screen opens (the card shows it).
 /// True when it was asked for; the Radio task may still refuse ([`ferrite_core::msg::TxLive`]), and the caller
 /// unkeys with [`data_unkey`] once the frame is out.
 pub fn data_key(app: &mut App, slot: u8, power: u8, what: &[u8]) -> bool {
@@ -249,13 +249,13 @@ pub fn short(r: Refusal) -> &'static str {
 pub(crate) fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, Dest)> {
     match r {
         Refusal::OutOfBand if app.set.region().is_none() => Some(("MENU 0 9 4", "Region", Dest::Group(9))),
-        Refusal::OutOfBand => Some(("MENU 0 8 9", "Extend TX", Dest::Group(8))),
-        Refusal::NotCalibrated => Some(("MENU 0 9 7 1", "Calibration", Dest::Calibration)),
+        Refusal::OutOfBand => Some(("MENU 0 8 8", "Extend TX", Dest::Group(8))),
+        Refusal::NotCalibrated => Some(("MENU 0 9 9 3", "Calibration", Dest::Calibration)),
         Refusal::RxOnlyChannel => Some(("MENU 8", "Channel editor", Dest::ChannelEdit)),
-        Refusal::Busy => Some(("MENU 0 8 8", "Busy lockout", Dest::Group(8))),
+        Refusal::Busy => Some(("MENU 0 8 7", "Busy lockout", Dest::Group(8))),
         Refusal::Battery => Some(("#", "Status page", Dest::Status)),
-        Refusal::Locked | Refusal::RxOnlyBuild => Some(("MENU 0 9 9", "About", Dest::About)),
-        Refusal::NoCallsign => Some(("MENU 0 8 7 1", "Callsign", Dest::Setup)),
+        Refusal::Locked | Refusal::RxOnlyBuild => Some(("MENU 0 9 8", "About", Dest::About)),
+        Refusal::NoCallsign => Some(("MENU 0 8 6 1", "Callsign", Dest::Setup)),
         Refusal::RelayMismatch => Some(("MENU 5", "Offset", Dest::Value(Item::Offset))),
         Refusal::AmRxOnly => Some(("MENU 3", "Mode", Dest::Value(Item::Mode))),
         Refusal::InProgress

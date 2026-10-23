@@ -126,7 +126,7 @@ fn crossband_start_readback() {
 #[test]
 fn setup_summary_readback() {
     let mut r = Radio::new();
-    r.menu("0 9 8 1").wait(300);
+    r.menu("0 9 7 1").wait(300);
     assert!(line(&r, "setup").contains("page=1 of=8"), "{}", r.sim.readback());
     r.press(common::key("HASH")).wait(300);
     let rb = r.sim.readback();

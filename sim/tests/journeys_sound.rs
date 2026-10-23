@@ -35,6 +35,6 @@ fn alert_sounds_until_ok() {
 #[test]
 fn about_shows_version_and_build() {
     let mut r = Radio::new();
-    r.run("menu 0 9 9; wait 300ms; expect screen \"About\"");
+    r.run("menu 0 9 8; wait 300ms; expect screen \"About\"");
     r.expect_text(ferrite_core::VERSION).expect_text("0000000");
 }

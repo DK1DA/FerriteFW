@@ -270,7 +270,7 @@ const BUDGET: &[(&str, u64)] = &[
     ("C18 HF recent", 65000),
     ("C19 FM presets", 69000),
     ("D1 Quick", 75000),
-    ("D2 Advanced", 110000),
+    ("D2 More", 110000),
     ("D3 Settings group", 64000),
     ("D3 Settings list", 83000),
     ("D6 Status", 727000),

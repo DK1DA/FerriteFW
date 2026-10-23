@@ -245,7 +245,7 @@ fn main() {
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "home-edit-ch", scale);
     tap(&mut app, &mut t, &[Exit, Slot, Slot]);
-    press(&mut app, Menu, 800, &mut t); // MENU 0 9 8 2: reset asks first
+    press(&mut app, Menu, 800, &mut t); // MENU 0 9 7 2: reset asks first
     tap(&mut app, &mut t, &[D(9), D(8), D(2)]);
     run(&mut app, &mut fb, t, &mut t);
     save(&fb, "confirm", scale);

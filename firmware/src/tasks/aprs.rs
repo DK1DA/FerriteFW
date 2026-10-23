@@ -6,7 +6,7 @@
 //! 0. APRS-10, APRS-29 (decision 181): the frame waits for a clear moment on the APRS frequency (p-persistence on
 //!    C's squelch, [`ClearWait`]) for up to 5 s, else it isn't sent;
 //! 1. [`transmit::data_key`]: the automatic transmission's checks (TX-35, APRS-8, APRS-10), then the data key-up
-//!    at the APRS power (0 5 5 4, default Low);
+//!    at the APRS power (0 5 6 3, default Low);
 //! 2. once the Radio task says slot C is keyed, the frame to the DSP task ([`AFSK_TX`]), which plays it from the TX
 //!    delay's flags (the key-up's ramp fits in them);
 //! 3. when it's out ([`AFSK_DONE`]), the unkey. A key-up the Radio task refuses, or a frame that never finishes,
@@ -15,7 +15,7 @@
 //! The decoder runs while APRS mode is on (APRS-16), and without it while a slot on a channel flagged APRS is
 //! the active one (APRS-22: decode only, nothing sent). With APRS mode off and automatic beacons on (APRS-29),
 //! beacons alone go out, on C. Bluetooth KISS waits for roadmap 3d. The digipeater
-//! follows 0 5 8 (off by default, APRS-12, APRS-26).
+//! follows 0 5 7 (off by default, APRS-12, APRS-26).
 
 use super::dsp::{Frame, Heard, AFSK_DONE, AFSK_TX, APRS_RX};
 use crate::chan::DSP;
@@ -100,7 +100,7 @@ impl Aprs {
         let extra = &store.extra;
         let me = app.aprs_call(); // APRS-30: callsign and SSID
         extra.set_callsign(me.as_bytes());
-        // KISS-6: the cable (0 9 2 4 on KISS, or 0 5 9 1 on Cable) or Bluetooth (0 5 9 1, with Bluetooth on).
+        // KISS-6: the cable (0 9 2 3 on KISS, or 0 5 8 1 on Cable) or Bluetooth (0 5 8 1, with Bluetooth on).
         let kiss_cable = app.settings().kiss_on_cable();
         let kiss_on = app.kiss_on(); // PWR-24: none in Low Power Mode. KISS-9: C is the APRS slot meanwhile (`App::aprs_c`)
         let on = app.aprs_on();
@@ -220,7 +220,7 @@ impl Aprs {
                     extra.changed();
                 }
                 if t.len > 0 {
-                    // APRS-45: our own frames as FX.25 when 0 5 7 8 says so (a digipeat goes out plain).
+                    // APRS-45: our own frames as FX.25 when 0 5 9 7 says so (a digipeat goes out plain).
                     self.frame = Frame { len: t.len as u16, txdelay_10ms: self.params.tx_delay, fx25: cfg.fx25_for(t.what), b: [0; FRAME_MAX] };
                     self.frame.b[..t.len].copy_from_slice(&out[..t.len]);
                     self.clear.start(now_ms);

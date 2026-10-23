@@ -221,7 +221,7 @@ fn heard_list_fields() {
 #[test]
 fn kiss_off_by_default() {
     let mut r = Radio::new();
-    r.run("menu 0 5 9 1; expect text \"Off\"");
+    r.run("menu 0 5 8 1; expect text \"Off\"");
     assert_eq!(r.sim.app().settings().kiss_port, 0);
 }
 
@@ -256,7 +256,7 @@ fn channel_only_hides_vfo_and_editing() {
 #[test]
 fn menu_doesnt_interrupt() {
     let mut r = Radio::new();
-    r.run("menu 0 8 6");
+    r.run("menu 0 8 5");
     let mut heard = false;
     for _ in 0..1250 {
         r.wait(20); // 25 s: inside the menu's idle timeout (MENU-28)
@@ -294,20 +294,20 @@ fn power_levels_on_125m() {
     r.expect_text("TX power High");
 }
 
-/// CW ID (0 8 7 2): off, every 10 min or on unkey; the choice and the callsign go to the Radio task; with no
+/// CW ID (0 8 6 2): off, every 10 min or on unkey; the choice and the callsign go to the Radio task; with no
 /// callsign it stays off and says why (VOX-16).
 #[test]
 fn cw_id_setting() {
     let mut r = Radio::new();
     r.take_cmds();
-    r.run("menu 0 8 7; press 2; knob 1");
+    r.run("menu 0 8 6; press 2; knob 1");
     assert!(!r.has("CW ID Off"), "CW ID turned on");
     assert!(r.take_cmds().iter().any(|c| matches!(c, RadioCmd::CwCall { .. } | RadioCmd::TxTones { .. })), "sent to the radio");
     let mut b = Radio::blank();
     for _ in 0..8 {
         b.press(Key::Menu);
     }
-    b.run("menu 0 8 7; press 2; knob 1; expect text \"CW ID Off\"");
+    b.run("menu 0 8 6; press 2; knob 1; expect text \"CW ID Off\"");
     let t = b.text().to_lowercase();
     assert!(t.contains("callsign"), "says why:\n{t}");
 }

@@ -922,7 +922,7 @@ pub fn id(s: Screen) -> &'static str {
         Screen::Home => "Home",
         Screen::Edit(_) => "Edit",
         Screen::Quick(_) => "Quick",
-        Screen::Advanced(_) => "Advanced",
+        Screen::Advanced(_) => "More",
         Screen::Status(_) => "Status",
         Screen::Entry(_) => "Entry",
         Screen::ChEdit(_) => "ChEdit",

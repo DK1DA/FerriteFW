@@ -20,8 +20,8 @@ longest possible length, and logged after with the length the radio's status sho
 gain; everything this suite changes saved first and put back in `finally` (VOX off first of all).
 
 Key-ups the radio makes itself are watched over the link's compact status (LINK-19, `keyed=`): one longer than
-admitted is stopped at once (the tone killed, VOX off, KEY off). APRS and KISS key on the APRS frequency (0 5 7 1),
-which must read 145.495 (`get 0 5 7 1`) before any beacon or frame (and slot C over SLOT): left alone when it
+admitted is stopped at once (the tone killed, VOX off, KEY off). APRS and KISS key on the APRS frequency (0 5 4),
+which must read 145.495 (`get 0 5 4`) before any beacon or frame (and slot C over SLOT): left alone when it
 does, else typed by keys once (the terminal can't set it) and put back after, else the test says to set it by hand.
 They need a callsign of 6 characters at most (AX.25 carries 6, SETUP-13). KISS on makes C the APRS slot (KISS-9). HF transmit is never keyed: HF-22, HF-23's key-up
 and HF-25 need an HF test frequency approved first (a decision); only the refusals run.
@@ -58,10 +58,10 @@ import sdrsuite
 import sdrtx
 
 S = dict(
-    vox="0 8 2 1", vox_level="0 8 2 2", vox_tail="0 8 2 3", dtmf_speed="0 8 6 3",
-    dtmf_delay="0 8 6 5", aprs_mode="0 5 3", beacon_mode="0 5 5 1", after_voice="0 5 5 3",
-    beacon_power="0 5 5 4", aprs_freq="0 5 7 1", tx_delay="0 5 7 2", pos_source="0 5 4 4", fixed="0 5 4 5",
-    kiss="0 5 9 1", watch="0 1 1", gps_rxtx="0 6 8", bluetooth="0 9 2 1", end_tone=B.END_TONE, gps="0 6 1",
+    vox="0 8 2 1", vox_level="0 8 2 2", vox_tail="0 8 2 3", dtmf_speed="0 8 5 3",
+    dtmf_delay="0 8 5 5", aprs_mode="0 5 3", beacon_mode="0 5 6 1", after_voice="0 5 6 2",
+    beacon_power="0 5 6 3", aprs_freq="0 5 4", tx_delay="0 5 9 4", pos_source="0 5 5 4", fixed="0 5 5 5",
+    kiss="0 5 8 1", watch="0 1 1", gps_rxtx="0 6 8", bluetooth="0 9 2 1", end_tone=B.END_TONE, gps="0 6 1",
     bsave="0 7 7",
 )
 
@@ -78,14 +78,14 @@ DEFAULTS = {
     "vox_tail_tol_s": 0.35,
     "boot_hold_s": 5.0,  # VOX-3.3
     "vox_screens": [  # VOX-3.1: screens that hold VOX (keys from home; the readback id the screen must have)
-        ["MENU", "Quick"], ["MENU 0", "Advanced"], ["MENU 0 8 2", "Group"], ["1", "Entry"]],  # MENU 0: the full menu's id is Advanced
+        ["MENU", "Quick"], ["MENU 0", "More"], ["MENU 0 8 2", "Group"], ["1", "Entry"]],  # MENU 0: the full menu's id is More
     "dtmf_digits": "1593",
     "dtmf_runs": [[50, 0], [100, 300], [200, 1000]],  # (speed ms, first digit delay ms)
     "dtmf_ms_tol": 12,
     "dtmf_delay_tol": 60,
-    "dialer_keys": "MENU 0 8 6 1",  # opens the dialer (DTMF-13); digits, then MENU sends
+    "dialer_keys": "MENU 0 8 5 1",  # opens the dialer (DTMF-13); digits, then MENU sends
     "dialer_id": "Dtmf",  # the dialer's readback id
-    "aprs_freq_keys": "MENU 0 5 7 1",  # opens 0 5 7 1's entry; digits with STAR for the point, MENU takes it
+    "aprs_freq_keys": "MENU 0 5 4",  # opens 0 5 4's entry; digits with STAR for the point, MENU takes it
     "beacon_now_keys": "MENU 0 5 1 MENU:long",  # the heard list's options (MENU-25): row 1 is Beacon now
     "tx_delay_tol_ms": 60,
     "aprs_spacing_s": 30.0,
@@ -1214,7 +1214,7 @@ class Modes:
         self.home()
 
     def aprs_freq_ready(self):
-        """The APRS frequency (0 5 7 1) on 145.495. The terminal can't set it (`set` says it keeps its default) and
+        """The APRS frequency (0 5 4) on 145.495. The terminal can't set it (`set` says it keeps its default) and
         the entry by keys didn't take on the radio (the frequency picker in ui-backlog will fix it): left
         alone when it already reads 145.495 (the radios were left so), else the keys tried once, else a hand step."""
         def reads():
@@ -1227,7 +1227,7 @@ class Modes:
         self.type_freq(self.mc["aprs_freq_keys"], self.f_lo)
         now = reads()
         if now is None or abs(now - self.f_lo) > 1e-6:
-            raise Skip(f"the APRS frequency reads {now} after the keys {self.mc['aprs_freq_keys']!r}: set MENU 0 5 7 1 "
+            raise Skip(f"the APRS frequency reads {now} after the keys {self.mc['aprs_freq_keys']!r}: set MENU 0 5 4 "
                        f"to {self.f_lo:.3f} on the radio by hand, then run it again")
 
     def ax25_call(self, what):
@@ -1238,7 +1238,7 @@ class Modes:
             raise Skip(f"no callsign set ({what})")
         if len(call) > 6:
             raise Skip(f"the callsign {call} is over 6 characters: AX.25 carries 6 (SETUP-13); set a 6-character "
-                       "call at MENU 0 8 7 1 for the APRS and KISS tests")
+                       "call at MENU 0 8 6 1 for the APRS and KISS tests")
         return call
 
     def aprs_setup(self):
@@ -1248,7 +1248,7 @@ class Modes:
         if src.lower().startswith("fixed") and self.get(S["fixed"]).lower() == "none":
             raise Skip("position source Fixed with no fixed position")
         if src.lower().startswith("gps") and "fix" not in self.r.term("gps").lower():
-            raise Skip("no GPS fix and no fixed position: set 0 5 4 4 Fixed and 0 5 4 5 on the radio, or run by a window")
+            raise Skip("no GPS fix and no fixed position: set 0 5 5 4 Fixed and 0 5 5 5 on the radio, or run by a window")
         self.aprs_freq_ready()
         self.setv(S["beacon_mode"], "Off")
         self.setv(S["after_voice"], "Off")
@@ -1280,7 +1280,7 @@ class Modes:
 
     def t_aprs_beacon(self):
         """APRS-14.1, APRS-20: A active on 446.475, C (APRS) on 145.495; Beacon now: a frame on 145.495 (C's) from
-        our callsign, the TX delay (0 5 7 2) between the carrier and the first flag; beacon power Low."""
+        our callsign, the TX delay (0 5 9 4) between the carrier and the first flag; beacon power Low."""
         call = self.aprs_setup()
         self.tune("A", self.f_hi)
         self.gate("A", "aprs: A elsewhere")
@@ -1415,7 +1415,7 @@ class Modes:
                  + ("keyed" if keyed else "no key-up"))
 
     def t_kiss(self):
-        """KISS-2 (part), KISS-7 (part), KISS-9: KISS on Bluetooth (0 5 9 1; the cable stays the link): slot C is the
+        """KISS-2 (part), KISS-7 (part), KISS-9: KISS on Bluetooth (0 5 8 1; the cable stays the link): slot C is the
         APRS slot on the APRS frequency (145.495) without APRS mode; a frame from the PC goes out there with the TX
         delay its KISS command set; a second 6 s later goes out too (exempt from APRS-9's 30 s); the frames decode
         byte for byte. No PIN asked (none is sent). Each frame is its own capture, watched over the status (a data
@@ -1719,7 +1719,7 @@ class Modes:
     def restore_slots(self, notes):
         for L, v in self.slots_saved.items():
             if v.get("aprs"):
-                continue  # APRS mode's own slot: 0 5 3 and 0 5 7 1 are put back instead
+                continue  # APRS mode's own slot: 0 5 3 and 0 5 4 are put back instead
             if v["channel"] is not None:
                 notes.append(f"slot {L} was on channel {v['channel']}: press V/M on the radio if it shows its VFO")
                 continue
@@ -1747,9 +1747,9 @@ class Modes:
                 f = float(re.match(r"[\d.]+", self.saved["aprs_freq"]).group())
                 self.type_freq(self.mc["aprs_freq_keys"], f)
                 if self.get(S["aprs_freq"]) != self.saved["aprs_freq"]:
-                    notes.append(f"APRS frequency reads {self.get(S['aprs_freq'])}, was {self.saved['aprs_freq']}: set 0 5 7 1 on the radio")
+                    notes.append(f"APRS frequency reads {self.get(S['aprs_freq'])}, was {self.saved['aprs_freq']}: set 0 5 4 on the radio")
             except Exception as e:
-                notes.append(f"APRS frequency (0 5 7 1, was {self.saved['aprs_freq']}): {e}")
+                notes.append(f"APRS frequency (0 5 4, was {self.saved['aprs_freq']}): {e}")
         self.restore_slots(notes)
         with contextlib.suppress(Exception):
             self.home()
@@ -2147,9 +2147,9 @@ class FakeModesRadio(B.FakeRadio):
                 self.entry = k
             return
         if top == "Quick" and k == "0":
-            self.screen[-1], self.entry = "Advanced", ""  # the full menu's readback id
+            self.screen[-1], self.entry = "More", ""  # the full menu's readback id
             return
-        if top == "Advanced":
+        if top == "More":
             if k.isdigit():
                 self.entry += k
                 leaf = {"8 6 1": "Dtmf", "5 7 1": "FreqEdit", "3 4": "Hf", "5 1": "Heard"}.get(" ".join(self.entry))

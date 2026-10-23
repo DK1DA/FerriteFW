@@ -6,8 +6,8 @@
 //! The pages are data ([`PAGES`]: heading, text, what they ask); the drawing is the same few pieces for each.
 //! Setup draws its own top bar ("Setup 2 of 8" and the progress dashes) in place of the status bar.
 //!
-//! Runs on first boot ([`App::first_boot`], BOOT-12) and from MENU 0 9 8 1; the callsign page alone is also the
-//! callsign's editor (MENU 0 8 7 1).
+//! Runs on first boot ([`App::first_boot`], BOOT-12) and from MENU 0 9 7 1; the callsign page alone is also the
+//! callsign's editor (MENU 0 8 6 1).
 
 use super::groups::set_extend;
 use super::shared::*;
@@ -47,7 +47,7 @@ const PAGES: [(&str, &str, Ask); 8] = [
     ),
     (
         "Your callsign",
-        "For APRS, CW ID and the power-on message. May be left empty (MENU 0 8 7 1).",
+        "For APRS, CW ID and the power-on message. May be left empty (MENU 0 8 6 1).",
         Ask::Callsign,
     ),
     ("Region", "Where you may transmit, and defaults like weather alerts.", Ask::Region),
@@ -101,7 +101,7 @@ pub struct Setup {
     tap_at: u8,
 }
 
-/// The callsign: setup's callsign page on its own (SETUP-5: the same setting; MENU 0 8 7 1, and the fix for a
+/// The callsign: setup's callsign page on its own (SETUP-5: the same setting; MENU 0 8 6 1, and the fix for a
 /// transmit refused for no callsign). OK and BACK return to the screen it was opened from.
 pub(crate) fn callsign(app: &mut App) {
     app.open(super::nav::Dest::Setup);
@@ -109,7 +109,7 @@ pub(crate) fn callsign(app: &mut App) {
 }
 
 impl Setup {
-    /// From the start (MENU 0 9 8 1).
+    /// From the start (MENU 0 9 7 1).
     pub fn new(first: bool) -> Self {
         Setup { page: 0, row: 0, flags: if first { FIRST } else { 0 }, tap_key: 0, tap_n: 0, tap_at: 0 }
     }
@@ -500,7 +500,7 @@ fn summary(app: &App, n: u16) -> ([Buf<32>; 7], Buf<160>) {
     if s.callsign.is_empty() {
         note.push(b"No callsign: automatic transmissions stay off. ");
     }
-    note.push(b"Add channels with hold 9 on a VFO, or load them with the web app. Run setup again: MENU 0 9 8 1.");
+    note.push(b"Add channels with hold 9 on a VFO, or load them with the web app. Run setup again: MENU 0 9 7 1.");
     (v, note)
 }
 

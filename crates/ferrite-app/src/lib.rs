@@ -86,7 +86,7 @@ pub const ALERT_MS: u16 = 500;
 /// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
 pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
-/// Watch pause (0 1 2 2, default 1 min).
+/// Watch pause (0 1 8 2, default 1 min).
 pub const PAUSE_S: u16 = 60;
 /// After a transmission, watch waits this long with the active slot quiet, or until a key (WATCH-16; nicFW's 30 s).
 pub const TX_PAUSE_S: u16 = 30;
@@ -282,7 +282,7 @@ pub struct App {
     alert: u8,
     /// VOX keyed the active slot and holds it (VOX-13).
     vox_on: bool,
-    /// Dry TX (TX-48, 0 8 9 2): the PA drive held at 0 on every key-up of a `tx` build. Not a setting: off at
+    /// Dry TX (TX-48, 0 8 8 5): the PA drive held at 0 on every key-up of a `tx` build. Not a setting: off at
     /// every power-on and never stored, changed only on the radio's own menu (never by the link or terminal).
     dry_tx: bool,
     /// Low Power Mode's flags ([`lpm`]: in it, Auto held off, the side keys' hold), the battery % Auto looks at
@@ -1389,8 +1389,8 @@ impl App {
         [0, 0b011, 0b111][self.watch as usize % 3] | (self.aprs_c() as u8) << aprs::APRS_SLOT
     }
 
-    /// The radio-wide settings the Radio task keeps: scan inputs (0 1 6 3, SCAN-22) and the subtone level
-    /// (0 8 4, TONE-16).
+    /// The radio-wide settings the Radio task keeps: scan inputs (0 1 8 5, SCAN-22) and the subtone level
+    /// (0 8 8 1, TONE-16).
     pub(crate) fn send_radio_settings(&mut self) {
         self.out.push(RadioCmd::ScanTx(self.set.scan_tx));
         self.out.push(RadioCmd::ToneLevel(self.set.tone_level));
@@ -1426,7 +1426,7 @@ impl App {
         self.out.push(RadioCmd::DtmfTiming { ms: s.dtmf_ms.clamp(50, 200), delay_10ms: s.dtmf_delay.min(100) });
     }
 
-    /// Each slot's end tone and tail again (0 8 5 1 or 0 8 5 3 changed, or a channel's own; a slot's full sync
+    /// Each slot's end tone and tail again (0 8 8 2 or 0 8 4 changed, or a channel's own; a slot's full sync
     /// carries them too).
     pub(crate) fn send_slot_tones(&mut self) {
         for slot in 0..SLOTS as u8 {
@@ -1445,7 +1445,7 @@ impl App {
         let ch = self.slots[slot as usize % SLOTS].ch.filter(|_| !self.slots[slot as usize % SLOTS].vfo_mode);
         let end = match ch.map_or(0, |c| c.end_tone()) {
             0 => self.set.end_tone % 6,
-            e => e - 1, // Off, then the presets in 0 8 5 3's order
+            e => e - 1, // Off, then the presets in 0 8 4's order
         };
         let tail = match ch.map_or(0, |c| c.tail()) {
             0 => self.set.tail_mode & 3,
@@ -1574,7 +1574,7 @@ impl App {
     }
 
     /// Why an item can't be changed on the active slot right now (MENU-14, EDIT-7), if it can't.
-    /// APRS-31: the position a beacon sends: the fixed one (0 6 9) when 0 5 4 4 says so and one is set, else `gps`
+    /// APRS-31: the position a beacon sends: the fixed one (0 6 9) when 0 5 5 4 says so and one is set, else `gps`
     /// (the receiver's fix, which already falls back to the fixed position without one, GPS-3).
     pub fn beacon_fix(&self, gps: Option<data::Fix>) -> Option<data::Fix> {
         if self.set.aprs_fixed && self.set.fixed_on {
@@ -1612,7 +1612,7 @@ impl App {
         self.keep_undo();
         match item {
             Item::Power if self.aprs_slot(a) => {
-                let power = (self.aprs.power as i32 + d).rem_euclid(3) as u8; // APRS-19.1: 0 5 5 4
+                let power = (self.aprs.power as i32 + d).rem_euclid(3) as u8; // APRS-19.1: 0 5 6 3
                 self.set_aprs(aprs::AprsCfg { power, ..self.aprs });
             }
             Item::Watch => self.put_watch((self.watch as i32 + d).rem_euclid(3) as u8),

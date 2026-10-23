@@ -1,4 +1,4 @@
-//! The scan lists (manual chapter 14): range presets (MENU 0 1 7, up to 16; C12), one preset's editor (A11:
+//! The scan lists (manual chapter 14): range presets (MENU 0 1 6, up to 16; C12), one preset's editor (A11:
 //! name, start, end, step, mode, bandwidth, skips; SCAN-4, SCAN-10) and this scan's nuisance skips (MENU 0 1
 //! 8; SCAN-11; C13), which live in the Radio task's RAM for this scan only.
 
@@ -47,7 +47,7 @@ const ROWS: [(&str, &str); 7] = [
     ("End", "Knob 100 kHz, left and right 1 MHz"),
     ("Step", "The scan's step through the range"),
     ("Mode", "FM wide, NFM narrow or AM (VFO-20)"),
-    ("Resume", "Global follows MENU 0 1 5; or this range's own"),
+    ("Resume", "Global follows MENU 0 1 4; or this range's own"),
     ("Skips", "Never stopped on (up to 48); * on a hit adds"),
 ];
 
@@ -201,7 +201,7 @@ impl View for ScanLists {
                 let n = data.presets() as u16;
                 let mut l = Buf::<24>::new();
                 let _ = uwrite!(l, "{} of {} presets", n, PRESETS_MAX);
-                app.list_head(lcd, l.as_bytes(), b"MENU 0 1 7");
+                app.list_head(lcd, l.as_bytes(), b"MENU 0 1 6");
                 let rows = self.cur.rows(n, ROWS2, &ALL, |row, i| {
                     if let Some(p) = data.preset(i as u8) {
                         let (mut r, mut sub) = (Buf::<24>::new(), Buf::<40>::new());
@@ -224,7 +224,7 @@ impl View for ScanLists {
             }
             Page::Edit(row) => {
                 let Some(p) = data.preset(self.cur.sel as u8) else {
-                    return app.empty(lcd, b"No such preset", b"MENU 0 1 7 lists them");
+                    return app.empty(lcd, b"No such preset", b"MENU 0 1 6 lists them");
                 };
                 let mut r = Buf::<24>::new();
                 range_text(&p, &mut r);
@@ -263,7 +263,7 @@ impl View for ScanLists {
                 } else {
                     ROWS[row as usize].1.as_bytes()
                 };
-                app.help_box(lcd, 300 - 38, 34, text, b"MENU 0 1 7");
+                app.help_box(lcd, 300 - 38, 34, text, b"MENU 0 1 6");
             }
             Page::Skips => {
                 let n = data.skips();

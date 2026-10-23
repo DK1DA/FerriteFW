@@ -90,7 +90,7 @@ pub fn run(scale: u32) {
     s.run(500);
     use Key::Digit as D;
 
-    // MENU 0 5 3 on, timed beacons every 10 min (0 5 5 1), then a minute of traffic.
+    // MENU 0 5 3 on, timed beacons every 10 min (0 5 6 1), then a minute of traffic.
     s.keys(&[Key::Menu, D(0), D(5), D(3)]);
     s.app.knob(1, s.t, &s.store);
     s.press(Key::Exit, 800);

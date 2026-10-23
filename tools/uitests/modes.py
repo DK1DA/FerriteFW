@@ -138,7 +138,7 @@ def hf_am_above_30_mhz_is_chip_1(t):
         vfo.restore()
 
 
-@test("HF-12", pages=("Advanced", "Hf", "Home", "Recall"))
+@test("HF-12", pages=("More", "Hf", "Home", "Recall"))
 def hf_keys(t):
     """HF mode's keys: knob and ▲▼ tune by the step, SIDE2 + knob by 1 MHz, ◀▶ the next band, * the mode, digits
     a frequency (* point, OK enters), # the recent list, hold MENU the options (0 there the full menu); hold # stays
@@ -180,7 +180,7 @@ def hf_keys(t):
         t.eq([r["name"] for r in u.rows][:6], ["Step", "Bandwidth", "AGC", "LNA", "Fine tune", "Recent list"],
              "hold MENU: HF's options")
         u = t.keys("0")
-        t.eq(u.id, "Advanced", "0 there: the full menu")
+        t.eq(u.id, "More", "0 there: the full menu")
         t.home()
         u = t.press("HASH", long=True)
         t.eq(u.bar["lock"], 1, "hold #: key lock, as everywhere")

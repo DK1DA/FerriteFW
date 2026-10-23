@@ -80,7 +80,7 @@ def installed_image_matches_its_btf(t):
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     import btf
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     version = (u.row("Version") or {}).get("value", "")
     m = re.search(r"([0-9a-f]{7,})", version)
     t.need(m, f"About's version names no commit ({version!r})")

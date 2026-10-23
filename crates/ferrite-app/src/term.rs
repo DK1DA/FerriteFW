@@ -1050,7 +1050,7 @@ impl Term {
                 continue;
             }
             let mut h = Hash(0x811C_9DC5);
-            let colour = app.set.term_colour; // TERM-18, 0 9 2 5
+            let colour = app.set.term_colour; // TERM-18, 0 9 9 8
             self.row(r, &cx, &mut W { o: &mut h, col: 0, cols: self.cols as u16, rev: false, colour });
             let h = h.0 | 1;
             if h != self.hash[r as usize] {
@@ -1922,7 +1922,7 @@ fn flags(c: &Channel, app: &App, w: &mut W) {
 /// or the cable may not change them (the region: TERM-7; Dry TX, TX-48: the PC never decides whether a key-up has
 /// power).
 fn blocked(p: &[u8]) -> bool {
-    matches!(p, [9, 3] | [9, 3, 1] | [8, 9] | [8, 9, 1] | [8, 9, 2] | [9, 4])
+    matches!(p, [9, 3] | [9, 3, 1] | [8, 8, 4] | [8, 8, 5] | [9, 4])
 }
 
 /// The `i`-th piece of `t` cut at each `sep` (a page's hints and help lines).
@@ -1979,7 +1979,7 @@ fn chan_at<S: ChannelStore>(z: u8, i: u16, st: &S) -> Option<Channel> {
     if z == ALL { st.by_number(i) } else { st.zone_at(z, i) }
 }
 
-/// The cable port setting's names (0 9 2 4), for the radio's menu too.
+/// The cable port setting's names (0 9 2 3), for the radio's menu too.
 pub fn port_name(p: u8) -> &'static str {
     CABLE_PORTS[p as usize % CABLE_PORTS.len()]
 }
@@ -2032,7 +2032,7 @@ pub(crate) fn digits(mut n: u32, d: &mut [u8; 10]) -> &[u8] {
 }
 
 /// One row: text clipped to the width, columns counted (attributes take none), reverse video and bold only
-/// (TERM-1: plain VT100); with `colour` (TERM-18, setting 0 9 2 5), ANSI colours in their place: the top line
+/// (TERM-1: plain VT100); with `colour` (TERM-18, setting 0 9 9 8), ANSI colours in their place: the top line
 /// and the selection white on blue, headings cyan, warnings yellow.
 struct W<'a> {
     o: &'a mut dyn Out,

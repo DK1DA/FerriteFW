@@ -108,14 +108,14 @@ def keyup_refusals_by_case(t):
 def extend_tx(t, on):
     """Extend TX on (its warning, OK) or off, by keys (the simulator only: not a test's setting on the radio)."""
     t.home()
-    u = t.keys("MENU 0 8 9")
+    u = t.keys("MENU 0 8 8 4")
     if (u.sel["value"] == "On") == on:
         return
     u = t.knob(1)
     if u.id == "ExtendTx":  # the warning, the first time (SETUP-8): OK turns it on
         t.keys("MENU")
     t.home()
-    t.eq(t.get("0 8 9"), "On" if on else "Off", f"Extend TX {'on' if on else 'off'}")
+    t.eq(t.get("0 8 8 4"), "On" if on else "Off", f"Extend TX {'on' if on else 'off'}")
 
 
 @test("TX-35.5", needs=("keyup",), where="sim", pages=("ExtendTx", "Group", "Home"))

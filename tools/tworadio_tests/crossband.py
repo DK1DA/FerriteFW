@@ -114,7 +114,7 @@ def restore_grid(t, orig):
 def setup(t, hang="1.0 s", gate="On", ident="Off", timeout=None, txtones=("off", "off"), rxtones=("off", "off"),
           endtone="Off", watch="Off"):
     """The receiving radio as the repeater: A on 145.495 (side 1), B on 446.475 (side 2), each slot's own tones, the
-    end tone as asked (0 8 5 3: Off where a carrier's length is measured), the grid as asked, power Low and the
+    end tone as asked (0 8 4: Off where a carrier's length is measured), the grid as asked, power Low and the
     pre-flight checks passing. The grid is put back after the test (deferred)."""
     rx_quiet(t, watch=watch)
     # Each side read back as set (the line `slot` answers): a side that didn't take stops the test here, before
@@ -122,7 +122,7 @@ def setup(t, hang="1.0 s", gate="On", ident="Off", timeout=None, txtones=("off",
     for L, mhz, i in (("A", VHF, 0), ("B", UHF, 1)):
         line = t.rx.cmd(f"slot {L} vfo {mhz} fm low txtone {txtones[i]} rxtone {rxtones[i]} offset off")
         need_slot(t, t.rx, L, mhz, txtones[i], rxtones[i], line=line.strip(), what=f"the repeater's side {i + 1}")
-    t.rx.set("0 8 5 3", endtone)
+    t.rx.set("0 8 4", endtone)
     u = page(t)
     g = cells(u)
     want = (f"A {float(VHF):.5f}", f"B {float(UHF):.5f}")
@@ -372,7 +372,7 @@ def hang_and_carrier_hold_on_air(t):
 
 @test("XB-8", part=("XB-8",), keyups=(2,), relays=(0.8,), idle=10, sdr=True)
 def end_tone_on_the_output(t):
-    """The repeater's end tone (0 8 5 3) Beep, hang 0: at the pass's end the output carrier (446.475) carries the
+    """The repeater's end tone (0 8 4) Beep, hang 0: at the pass's end the output carrier (446.475) carries the
     1000 Hz beep before it drops, as the transmitting slot's end tone at an unkey (XB-8)."""
     setup(t, hang="0.0 s", endtone="Beep")
     start(t)
@@ -478,12 +478,12 @@ def a_pass_times_out(t):
 
 @test("XB-12", part=("XB-12",), keyups=(1, 1), relays=(7.0, 0.6), idle=20, sdr=True, long=True)
 def id_after_the_first_pass(t):
-    """The repeater's ID on (its callsign set on the radio, 0 8 7 1): the first pass ends with the callsign in CW
+    """The repeater's ID on (its callsign set on the radio, 0 8 6 1): the first pass ends with the callsign in CW
     (700 Hz elements on the output after the carrier's pass), Next ID then "CW in 10 min"; a second pass straight
     after has none. The ID after 10 minutes stays by hand. The pass with the ID is one long transmission (the duty
     limit's timeout exception)."""
-    call = t.rx.get("0 8 7 1")
-    t.need(call and call != "Empty", "the repeater's radio has no callsign (0 8 7 1, set on the radio)")
+    call = t.rx.get("0 8 6 1")
+    t.need(call and call != "Empty", "the repeater's radio has no callsign (0 8 6 1, set on the radio)")
     setup(t, hang="0.0 s", ident="CW 10 m")
     u = start(t)
     p = xb(u).get("passes", 0)

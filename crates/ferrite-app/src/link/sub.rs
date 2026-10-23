@@ -395,7 +395,7 @@ pub(super) fn msg_send<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, p: 
     }
     let d = st.data();
     if d.callsign().is_none() {
-        return invalid(o, "No callsign: MENU 0 8 7 1"); // APRS-8
+        return invalid(o, "No callsign: MENU 0 8 6 1"); // APRS-8
     }
     if !d.callsign().is_some_and(|c| crate::data::ax25_call_ok(c.as_bytes())) {
         return invalid(o, "Callsign over 6: APRS can't carry it"); // SETUP-13.1
@@ -456,7 +456,7 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
             return invalid(o, "frequency: APRS takes 64-300 MHz");
         }
         if f == region_freq(app.set.region()) {
-            c.f5k = 0; // the region's, kept as such (0 5 7 1)
+            c.f5k = 0; // the region's, kept as such (0 5 4)
         }
     }
     if c.beacon as usize & 0x7F >= BEACON_MODES {

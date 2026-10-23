@@ -10,7 +10,7 @@ LAYOUTS = ["Watch", "Single + scope", "Watch + activity"]
 @test("HOME-2", "KEY-5", smoke=True, pages=("Edit", "Entry", "Group", "Home", "Info", "Quick", "Scope", "Status"))
 def hold_back_goes_home(t):
     """Hold BACK goes home from a menu, a group, the Status page, entry, the scope and the editor."""
-    for seq in ("MENU", "MENU 0 7 4", "MENU 0 0", "1 4", "SLOT:long", "MENU 0 9 9 RIGHT RIGHT"):
+    for seq in ("MENU", "MENU 0 7 4", "MENU 0 0", "1 4", "SLOT:long", "MENU 0 9 8 RIGHT RIGHT"):
         t.home()
         u = t.keys(seq)
         t.check(u.id != "Home", f"{seq}: left home", u.id)

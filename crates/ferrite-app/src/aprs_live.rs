@@ -1,7 +1,7 @@
 //! The radio's APRS task logic (manual chapter 25, roadmap 5b-5d): AX.25 frames from the AFSK decoder in, frames
 //! for the modulator out. The heard list (APRS-3, APRS-4: RAM only), messages to us acked (APRS-6), ours tried
 //! on APRS-13's schedule until an ack, beacons by the beacon mode (APRS-24) and after voice (APRS-27), the
-//! fill-in digipeater (APRS-12, APRS-26: off unless asked), the path (0 5 6 1), APRS-9's 30 s spacing and
+//! fill-in digipeater (APRS-12, APRS-26: off unless asked), the path (0 5 9 1), APRS-9's 30 s spacing and
 //! APRS-20's wait for the band relay; a message heard again stored once (APRS-32), queries answered (APRS-33,
 //! APRS-35), rejections (APRS-34). Pure logic: the firmware's UI task feeds it frames and ticks it once a second
 //! (the store and the App are there); the host tests run the same code on recorded audio. The simulators keep
@@ -212,7 +212,7 @@ pub struct AprsLive {
     last_general: Cell<Option<u32>>,
     dupes: [Cell<(u16, u32)>; DUPES],
     dupe_at: Cell<u8>,
-    /// A frame to digipeat, waiting for its turn, and the second it may go (0 5 8 3's wait).
+    /// A frame to digipeat, waiting for its turn, and the second it may go (0 5 7 3's wait).
     digi: Cell<Option<([u8; FRAME_MAX], u16)>>,
     digi_at: Cell<u32>,
     last_digi: Cell<Option<u32>>,
@@ -379,7 +379,7 @@ impl AprsLive {
     // ---- receive ----
 
     /// A frame from the decoder. `me` is our callsign (empty: none set, nothing is acked or digipeated, APRS-8);
-    /// `cfg` has the digipeater's settings (0 5 8, off by default: APRS-12, APRS-26).
+    /// `cfg` has the digipeater's settings (0 5 7, off by default: APRS-12, APRS-26).
     pub fn receive(&self, frame: &[u8], now_s: u32, me: &[u8], cfg: &AprsCfg) -> Rx {
         self.now_s.set(now_s);
         let mut rx = Rx::default();
@@ -726,7 +726,7 @@ impl AprsLive {
         }
         if let Some((buf, len)) = self.digi.take() {
             if now_s < self.digi_at.get() {
-                self.digi.set(Some((buf, len))); // 0 5 8 3's wait
+                self.digi.set(Some((buf, len))); // 0 5 7 3's wait
             } else if self.last_digi.get().is_none_or(|l| now_s.wrapping_sub(l) >= DIGI_GAP_S) {
                 self.last_digi.set(Some(now_s));
                 out[..len as usize].copy_from_slice(&buf[..len as usize]);
@@ -812,7 +812,7 @@ impl AprsLive {
         t
     }
 
-    /// Our frame with 0 5 6 1's path (APRS-26).
+    /// Our frame with 0 5 9 1's path (APRS-26).
     fn framed(&self, me: Address, info: &[u8], what: &'static str, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX], t: Tick) -> Tick {
         let names = cfg.path();
         let mut path = [me; 2];
@@ -1019,7 +1019,7 @@ mod tests {
     }
 
     /// APRS-44: a frame that came as FX.25 marks its station with the bytes corrected (the station screen's Path
-    /// row); the station's next plain frame clears it. APRS-45: our own frames take 0 5 7 8's check bytes, a
+    /// row); the station's next plain frame clears it. APRS-45: our own frames take 0 5 9 7's check bytes, a
     /// digipeat none.
     #[test]
     fn fx25_heard_and_sent() {
@@ -1271,7 +1271,7 @@ mod tests {
         assert_eq!(a.tick(90, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
     }
 
-    /// APRS-26: our callsign as an alias when asked, and 0 5 8 3's wait before relaying.
+    /// APRS-26: our callsign as an alias when asked, and 0 5 7 3's wait before relaying.
     #[test]
     fn digipeater_mycall_alias_and_wait() {
         let a = AprsLive::new();
@@ -1288,7 +1288,7 @@ mod tests {
         assert!(Frame::parse(&out[..t.len]).unwrap().digis()[0].repeated);
     }
 
-    /// 0 5 6 1: the path our frames ask for.
+    /// 0 5 9 1: the path our frames ask for.
     #[test]
     fn path_setting() {
         let mut out = [0u8; FRAME_MAX];

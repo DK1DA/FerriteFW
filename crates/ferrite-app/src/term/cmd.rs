@@ -1033,7 +1033,7 @@ fn path(t: &mut Toks) -> Result<([u8; 3], usize), Msg> {
     p[0] = digit(t, 9)?;
     p[1] = digit(t, groups::items(p[0], 0).len())?;
     if SUBS.iter().any(|(q, _)| *q == (p[0], p[1])) {
-        // TX-48: 0 8 9 alone still names Extend TX, as before Dry TX joined it in a list (0 8 9 1, 0 8 9 2).
+        // TX-48: 0 8 8 alone still names Extend TX, as before Dry TX joined it in a list (0 8 8 4, 0 8 8 5).
         let n = groups::items(p[0], p[1]).len() as u32;
         let mut peek = *t;
         if (p[0], p[1]) == (8, 9) && !peek.word("").ok().and_then(number).is_some_and(|d| (1..=n).contains(&d)) {
@@ -1083,11 +1083,11 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     let (p, n) = path(t)?;
     let p = &p[..n];
     let name = path_name(p);
-    if p == [8, 9, 2] && app.radio.tx_built {
+    if p == [8, 8, 5] && app.radio.tx_built {
         // TX-48.2: the PC may turn Dry TX on (it only takes power away), never off.
         if same(t.rest(), b"on") {
             app.set_dry_tx(true);
-            return Ok(Done::Said(msg!("0 8 9 2 Dry TX: On")));
+            return Ok(Done::Said(msg!("0 8 8 5 Dry TX: On")));
         }
         return Err(msg!("Dry TX goes off only on the radio"));
     }
@@ -1100,7 +1100,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
     if let Some(why) = groups::greyed(app, p) {
         return Err(msg!("{}: {}", name, why));
     }
-    if p == [6, 9] || p == [5, 4, 5] {
+    if p == [6, 9] || p == [5, 5, 5] {
         // GPS-3, GPS-21: the fixed position typed (its altitude kept): degrees, a grid square, or none.
         let want = t.rest();
         match pos_val(want, name)? {
@@ -1141,12 +1141,12 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
             }
             app.set.pocsag_cap = v;
         }
-        [5, 6, 2] if same(want, b"none") => groups::reset(app, p),
+        [5, 9, 2] if same(want, b"none") => groups::reset(app, p),
         // MENU-31: a frequency setting typed in MHz, with the entry box's checks
-        [5, 7, 1] | [4, 2, 2] => {
-            let fs = if p == [5, 7, 1] { crate::screens::entry::FreqSet::Aprs } else { crate::screens::entry::FreqSet::Pager };
+        [5, 4] | [4, 2, 2] => {
+            let fs = if p == [5, 4] { crate::screens::entry::FreqSet::Aprs } else { crate::screens::entry::FreqSet::Pager };
             let f = ferrite_core::freq::parse(want).ok_or_else(|| msg!("{}: a frequency in MHz, e.g. 145.495", name))?;
-            let now = if p == [5, 7, 1] { app.aprs_freq() } else { app.set.pocsag_freq };
+            let now = if p == [5, 4] { app.aprs_freq() } else { app.set.pocsag_freq };
             // `get` and `dump` show 3 decimals: the value as shown is the value kept (439.987 stays 439.9875)
             if ferrite_ui::widgets::freq3(now).as_bytes() != want {
                 if let Err(why) = fs.set_setting(app, f) {
@@ -1154,7 +1154,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
                 }
             }
         }
-        [5, 6, 2] => {
+        [5, 9, 2] => {
             let mut up = Buf::<24>::new();
             for &c in want {
                 up.push(&[c.to_ascii_uppercase()]);
@@ -1166,7 +1166,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         }
         _ => {}
     }
-    if matches!(p, [4, 2, 3] | [5, 6, 2] | [5, 7, 1] | [4, 2, 2]) {
+    if matches!(p, [4, 2, 3] | [5, 9, 2] | [5, 4] | [4, 2, 2]) {
         let mut v = Buf::<24>::new();
         value(app, dev, p, &mut v);
         let mut m = Msg::new();
@@ -1915,7 +1915,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
             }
             1 if i as usize == settable + 1 => {
                 if let Some(c) = app.set.boot_callsign() {
-                    put!(out, "# 0 8 7 Callsign: {} (set on the radio)", Bytes(c));
+                    put!(out, "# 0 8 6 Callsign: {} (set on the radio)", Bytes(c));
                     return true;
                 }
             }
@@ -1928,7 +1928,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 return true;
             }
             3 if i == 0 => {
-                out.push("# Range presets (0 1 7)".as_bytes());
+                out.push("# Range presets (0 1 6)".as_bytes());
                 return true;
             }
             3 if i <= st.data().presets() as u16 => {

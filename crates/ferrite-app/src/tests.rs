@@ -144,7 +144,7 @@ fn ram_is_small() {
     // refusal beeps sent (SND-4, the readback's `beeps=`: a byte) and a hash of the callsign CW ID has (VOX-12: 4,
     // sent again when the setting's differs), 8 with padding, to 1440; the status bar as drawn holds the callsign
     // shown in the clock's place without a time (SBAR-2: 6 characters and a length), 16 with padding, to 1456;
-    // Dry TX (TX-48: the switch, its bar mark, and 0 8 9's list's remembered row) 8 with padding, to 1464; each
+    // Dry TX (TX-48: the switch, its bar mark, and 0 8 8's list's remembered row) 8 with padding, to 1464; each
     // kept hit's stop start for its length (SCAN-23.1: 2 bytes, 4 with padding, x16), to 1528; the contact whose name
     // is being typed (APRS-37: a callsign, 10 bytes), 16 with padding, to 1544; Low Power Mode (PWR-24: its flags, the
     // battery % Auto looks at, the side keys' hold time, 0 7 7's new list's remembered row and the bar's mark), 8
@@ -266,7 +266,7 @@ fn quick_settings() {
     assert_eq!(t.app.slot(0).cfg().squelch, 7);
     t.tap(Key::Hash); // MENU-18: default
     assert_eq!(t.app.slot(0).cfg().squelch, 4);
-    t.tap(Key::Up); // wraps to "0 Advanced"
+    t.tap(Key::Up); // wraps to "0 More"
     assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 9 }));
     t.tap(Key::Digit(7)); // MENU-5: digits pick
     assert_eq!(t.app.screen(), Screen::Quick(Quick { row: 6 }));
@@ -433,17 +433,17 @@ fn status_link_opens_its_setting_not_the_remembered_row() {
     assert_eq!(row(&t), (8, 2, 2), "by the menu: Tail, remembered");
 }
 
-/// TONE-16: MENU 0 8 4 is Subtone level itself, a single setting like Mic gain; the knob steps it (Low, Normal,
+/// TONE-16: MENU 0 8 8 1 is Subtone level itself, a single setting like Mic gain; the knob steps it (Low, Normal,
 /// High) and tells the Radio task. TONE-13.1: the tone burst is 1750 Hz only, no setting in the Transmit group.
 #[test]
 fn subtone_level_from_its_path() {
     use crate::screens::groups::Group;
     let mut t = T::new();
     t.hold(Key::Menu);
-    for d in [8, 4] {
+    for d in [8, 8, 1] {
         t.tap(Key::Digit(d));
     }
-    assert!(matches!(t.app.screen(), Screen::Group(Group { g: 8, sub: 0, row: 3 })), "{:?}", t.app.screen());
+    assert!(matches!(t.app.screen(), Screen::Group(Group { g: 8, sub: 8, row: 0 })), "{:?}", t.app.screen());
     t.cmds();
     t.knob(1);
     assert_eq!(t.app.set.tone_level, 2, "High");

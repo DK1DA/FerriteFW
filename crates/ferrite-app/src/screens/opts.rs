@@ -72,7 +72,7 @@ const LOG: [Opt; 3] = [
 ];
 const HEARD: [Opt; 5] = [
     ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
-    ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 5 1)"),
+    ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 6 1)"),
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
     ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations come back as they are heard"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
@@ -97,7 +97,7 @@ pub(crate) const APRS_ROW_BEACON_NOW: u8 = 0;
 pub(crate) const APRS_ROW_HEARD: u8 = 2;
 const APRS_CARD: [Opt; 5] = [
     ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
-    ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 5 1)"),
+    ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 6 1)"),
     ("Heard list", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
     ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
     ("Event log", Act::Open(Dest::EventLog), "Everything decoded and logged"), // APRS-17.1

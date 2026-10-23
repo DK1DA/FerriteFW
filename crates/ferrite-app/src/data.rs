@@ -208,7 +208,7 @@ pub struct Sat {
     pub azim: u16,
 }
 
-/// A scan range preset (MENU 0 1 7; SCAN-4, SCAN-10).
+/// A scan range preset (MENU 0 1 6; SCAN-4, SCAN-10).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RangePreset {
     pub name: Buf<12>,
@@ -221,7 +221,7 @@ pub struct RangePreset {
     pub narrow: bool,
     /// Frequencies never stopped on (up to 48).
     pub skips: u8,
-    /// 0 Global (0 1 5's rule), 1-10 s, 11 carrier drop, 12 stop on hit (SCAN-5, SCAN-24).
+    /// 0 Global (0 1 4's rule), 1-10 s, 11 carrier drop, 12 stop on hit (SCAN-5, SCAN-24).
     pub resume: u8,
 }
 
@@ -260,14 +260,14 @@ pub struct FmPreset {
     pub name: Buf<8>,
 }
 
-/// A DTMF memory (0 8 6 2, chapter 17): up to 16 symbols as nibbles, 0-9, A-D (10-13), * (14), # (15).
+/// A DTMF memory (0 8 5 2, chapter 17): up to 16 symbols as nibbles, 0-9, A-D (10-13), * (14), # (15).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Dtmf {
     pub len: u8,
     pub d: [u8; 8],
 }
 
-/// DTMF memories: 16 of up to 16 symbols (0 8 6 2).
+/// DTMF memories: 16 of up to 16 symbols (0 8 5 2).
 pub const DTMF_MEMS: u8 = 16;
 /// The DTMF symbols by nibble.
 pub const DTMF_CHARS: &[u8; 16] = b"0123456789ABCD*#";
@@ -415,7 +415,7 @@ pub trait Data {
     fn callsign(&self) -> Option<Buf<10>> {
         None
     }
-    /// The APRS settings kept with the APRS store (0 5 5 1, 0 5 5 4, 0 5 7 1).
+    /// The APRS settings kept with the APRS store (0 5 6 1, 0 5 6 3, 0 5 4).
     fn aprs_cfg(&self) -> AprsCfg {
         AprsCfg::DEFAULT
     }

@@ -4,15 +4,15 @@ import re
 from .core import test
 
 QUICK_ROWS = ["Squelch", "TX power", "Mode", "Tones", "Offset", "Step", "Watch", "Channel", "Battery Save",
-              "Advanced settings"]
+              "More"]
 GROUPS = ["Watch and scan", "Channels", "Tools", "Decoders and alerts", "APRS", "GPS and time",
           "Display, sound, power", "Transmit", "System"]
 CHIP_WORDS = re.compile(r"BK4829|SI4732|BT513|W25Q|AT32|ST7789", re.I)
 
 
-@test("MENU-1", "MENU-12", "KEY-9", smoke=True, pages=("Advanced", "Quick"))
+@test("MENU-1", "MENU-12", "KEY-9", smoke=True, pages=("More", "Quick"))
 def quick_settings_rows(t):
-    """MENU on home: quick settings, nine fixed rows for the active slot then 0 Advanced; numbers 1-9, 0."""
+    """MENU on home: quick settings, nine fixed rows for the active slot then 0 More; numbers 1-9, 0."""
     u = t.keys("MENU")
     t.eq(u.id, "Quick", "MENU on home opens")
     t.eq(u.names(), QUICK_ROWS, "the rows, in order")
@@ -21,21 +21,21 @@ def quick_settings_rows(t):
     t.eq(u.sel and u.sel["name"], "Squelch", "the first row selected")
     t.check(len(u.hints) <= 3, "at most three hint pairs", u.hints)
     u = t.keys("0")
-    t.eq(u.id, "Advanced", "0 in quick settings opens")
+    t.eq(u.id, "More", "0 in quick settings opens")
 
 
-@test("MENU-2", "MENU-4", "SBAR-13", smoke=True, pages=("Advanced", "Status"))
+@test("MENU-2", "MENU-4", "SBAR-13", smoke=True, pages=("More", "Status"))
 def advanced_groups(t):
-    """MENU 0 and hold MENU on home: Advanced, Recent and the nine task-named groups; MENU 0 0 is Status."""
+    """MENU 0 and hold MENU on home: More, Recent and the nine task-named groups; MENU 0 0 is Status."""
     u = t.keys("MENU 0")
-    t.eq(u.id, "Advanced", "MENU 0")
+    t.eq(u.id, "More", "MENU 0")
     t.check(u["recent"] is not None, "a Recent line", u.lines[:6])
     t.eq(u.names(), GROUPS, "the nine groups")
     t.eq([r["num"] for r in u.rows], list(range(1, 10)), "numbered 1-9")
     t.check(not any(CHIP_WORDS.search(n) for n in u.names()), "no group named by a chip", u.names())
     t.home()
     u = t.press("MENU", long=True)
-    t.eq(u.id, "Advanced", "hold MENU on home")
+    t.eq(u.id, "More", "hold MENU on home")
     t.home()
     u = t.keys("MENU 0 0")
     t.eq(u.id, "Status", "MENU 0 0")
@@ -64,16 +64,16 @@ def every_group_fits_and_names_its_path(t):
 
 @test("MENU-3", "MENU-5", pages=("Group",))
 def third_level_and_no_deeper(t):
-    """A group's third level (0 1 6 Scan options) opens by its digit; a digit inside it selects, never opens."""
-    u = t.keys("MENU 0 1 6")
-    t.eq(u.id, "Group", "MENU 0 1 6")
-    t.check(u["help"]["args"][0].startswith("MENU 0 1 6 "), "its rows are MENU 0 1 6 N", u["help"])
+    """A group's third level (0 1 8, Scan's Advanced) opens by its digit; a digit inside it selects, never opens."""
+    u = t.keys("MENU 0 1 8")
+    t.eq(u.id, "Group", "MENU 0 1 8")
+    t.check(u["help"]["args"][0].startswith("MENU 0 1 8 "), "its rows are MENU 0 1 8 N", u["help"])
     u = t.keys("3")
     t.eq(u.id, "Group", "a digit on a third-level row")
-    t.eq(u["help"]["args"][0], "MENU 0 1 6 3", "selects row 3 (no fourth level)")
+    t.eq(u["help"]["args"][0], "MENU 0 1 8 3", "selects row 3 (no fourth level)")
 
 
-@test("MENU-5", "MENU-6", pages=("Advanced", "Group", "Home", "Quick"))
+@test("MENU-5", "MENU-6", pages=("More", "Group", "Home", "Quick"))
 def fast_path_lands_where_slow_does(t):
     """MENU 0 7 1 typed at full speed and slowly lands on the same row; the same from another screen."""
     t.r.keys("MENU 0 7 1")
@@ -110,7 +110,7 @@ def row_names_match_the_settings_table(t):
     t.note(f"{checked} settings compared")
 
 
-@test("MENU-8", "MENU-22", pages=("Advanced", "Group", "Quick"))
+@test("MENU-8", "MENU-22", pages=("More", "Group", "Quick"))
 def recent_and_undo(t):
     """A change: the hint bar offers * Undo and * undoes it; a kept change shows in Recent."""
     before = t.get("0 7 5 2")
@@ -252,7 +252,7 @@ def change_takes_effect_and_is_kept(t):
     t.set("0 7 1", v0)
 
 
-@test("MENU-24", pages=("Advanced", "Group", "Home", "Quick", "Status"))
+@test("MENU-24", pages=("More", "Group", "Home", "Quick", "Status"))
 def back_keeps_the_place(t):
     """BACK goes back one level keeping the place; each group remembers its last item while you are in the menu
     (going home forgets it); hold BACK goes home."""
@@ -261,7 +261,7 @@ def back_keeps_the_place(t):
     u = t.keys("BACK")
     t.eq((u.title, u.sel and u.sel["name"]), ("Display", "Sounds"), "BACK: Display, on Sounds")
     u = t.keys("BACK")
-    t.eq((u.id, u.sel and u.sel["name"]), ("Advanced", "Display, sound, power"), "BACK: Advanced, on group 7")
+    t.eq((u.id, u.sel and u.sel["name"]), ("More", "Display, sound, power"), "BACK: More, on group 7")
     # Each group remembers its last item while you stay in the menu; going home forgets it.
     u = t.keys("7")
     t.eq((u.title, u.sel and u.sel["name"]), ("Display", "Sounds"), "7 again: Display, still on Sounds")
@@ -279,7 +279,7 @@ def back_keeps_the_place(t):
     t.eq((u.id, u.sel and u.sel["name"]), ("Status", "Watch"), "BACK: Status, on Watch")
 
 
-@test("MENU-25", pages=("Advanced", "Fm", "Options", "Scope", "Status"))
+@test("MENU-25", pages=("More", "Fm", "Options", "Scope", "Status"))
 def hold_menu_options(t):
     """Hold MENU on another screen opens its options (numbered, 0 the full menu), or "No options here"."""
     t.keys("MENU 0 0")
@@ -294,7 +294,7 @@ def hold_menu_options(t):
     t.check(nums[-1] == 0 and u.rows[-1]["name"] == "Full menu", "0 is the full menu", u.rows)
     t.eq(nums[:-1], list(range(1, len(nums))), "numbered rows")
     u = t.keys("0")
-    t.check(u.id in ("Advanced", "Quick"), "0 opens the full menu", u.id)
+    t.check(u.id in ("More", "Quick"), "0 opens the full menu", u.id)
     t.home()
     u = t.keys("MENU 0 3 1")
     t.eq(u.id, "Fm", "MENU 0 3 1 opens FM broadcast")

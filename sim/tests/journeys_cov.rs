@@ -222,7 +222,7 @@ fn reset_keeps_the_ssb_patch() {
     let patch = img[at..at + 1024].to_vec();
     let mut r = Radio::with(Stored::Image(img));
     assert_eq!(&r.sim.flash_image()[at..at + 1024], &patch[..], "the patch survives the mount");
-    r.run("menu 0 9 8 2; wait 300ms");
+    r.run("menu 0 9 7 2; wait 300ms");
     if !r.has("Reset the radio") {
         r.press(Key::Menu).wait(300);
     }

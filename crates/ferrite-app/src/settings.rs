@@ -92,9 +92,9 @@ pub const ON_OFF: [&str; 2] = ["Off", "On"];
 pub const POWER_ON: [&str; 3] = ["Off", "Callsign", "Text"];
 /// Boot screen (0 7 3 3).
 pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
-/// The cable port (0 9 2 4, TERM-2): auto picks from the first bytes; the others force one.
+/// The cable port (0 9 2 3, TERM-2): auto picks from the first bytes; the others force one.
 pub const CABLE_PORTS: [&str; 4] = ["Auto", "Link", "Terminal", "KISS"];
-/// 0 5 9 1's values (KISS-6): which port is the KISS TNC.
+/// 0 5 8 1's values (KISS-6): which port is the KISS TNC.
 pub const KISS_PORTS: [&str; 3] = ["Off", "Cable", "Bluetooth"];
 
 /// FM broadcast step (0 3 1 2) in 10 kHz units, and its names.
@@ -102,7 +102,7 @@ pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "20
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
-    /// 0 8 7 1, capitals (SETUP-12).
+    /// 0 8 6 1, capitals (SETUP-12).
     pub callsign: Text<10>,
     /// The owner card (SETUP-11): name, phone, e-mail. Entered on the radio only in setup page 4, then edited
     /// in the web app only; shown at boot when [`Settings::boot_card`] is on.
@@ -114,7 +114,7 @@ pub struct Settings {
     pub pon_text: Text<16>,
     /// 0 9 4: 0 = not chosen yet, else REGION_LIST[n - 1].
     pub region: u8,
-    /// 0 8 9, and whether its warning has been shown (shown once: SETUP-8).
+    /// 0 8 8, and whether its warning has been shown (shown once: SETUP-8).
     pub extend_tx: bool,
     pub extend_warned: bool,
     /// 0 6 5, an index into TIME_ZONES; 0 6 6 format and from GPS; 0 6 4.
@@ -134,9 +134,9 @@ pub struct Settings {
     pub pin_wait: u16,
     /// 0 9 2 1.
     pub bt: bool,
-    /// 0 9 2 4: what the cable carries, an index into [`CABLE_PORTS`] (TERM-2).
+    /// 0 9 2 3: what the cable carries, an index into [`CABLE_PORTS`] (TERM-2).
     pub cable_port: u8,
-    /// 0 5 9 1: the KISS TNC's port, an index into [`KISS_PORTS`] (KISS-6).
+    /// 0 5 8 1: the KISS TNC's port, an index into [`KISS_PORTS`] (KISS-6).
     pub kiss_port: u8,
     /// 0 4 8 1 (US and Canada only).
     pub same: bool,
@@ -172,7 +172,7 @@ pub struct Settings {
     pub tx_light: bool,
     /// 0 7 4 4 (DISP-15): what wakes the screen ([`WAKE_ON`]): 0 keys, 1 and receive, 2 and transmit.
     pub wake_on: u8,
-    /// Unused, kept so the record's length stays and a later field doesn't read an old value: it held 0 9 7 4's
+    /// Unused, kept so the record's length stays and a later field doesn't read an old value: it held 0 9 9 4's
     /// MCU temperature offset (SBAR-21) until decision 112 dropped it. Never read; whatever an older record left
     /// there has no effect.
     pub spare_temp: u8,
@@ -207,7 +207,7 @@ pub struct Settings {
     pub scope_line: u8,
     pub scope_wf: bool,
     pub scope_mode: u8,
-    /// 0 9 2 5: the cable terminal in ANSI colour (TERM-18); off, reverse video and bold only.
+    /// 0 9 9 8: the cable terminal in ANSI colour (TERM-18); off, reverse video and bold only.
     pub term_colour: bool,
     /// 0 5 3: APRS mode, slot C as the APRS slot (APRS-15 – APRS-22; the takeover itself comes in milestone 5).
     pub aprs_mode: bool,
@@ -231,7 +231,7 @@ pub struct Settings {
     pub auto_off: u8,
     /// 0 9 1 1: auto key lock (KEY-20, [`AUTO_LOCK_TIMES`] index; 0 off).
     pub auto_lock: u8,
-    /// 0 8 6 4: hear the DTMF digits sent, at beep volume.
+    /// 0 8 5 4: hear the DTMF digits sent, at beep volume.
     pub dtmf_sidetone: bool,
     /// 0 7 5 4: a tone on arriving at a waypoint.
     pub arrival_tone: bool,
@@ -239,33 +239,33 @@ pub struct Settings {
     pub show_hidden: bool,
     /// 0 9 3 2: channel-only mode (PIN-5): no V/M, MENU 0 or editing; hold # leaves it.
     pub chan_only: bool,
-    /// Cable log (0 9 2 6, TERM-28): the plain log on the cable in the normal build, until a byte arrives. Its
-    /// bit was Follow's (0 1 2 2, dropped in decision 81), so the saved flag bits after it keep their places.
+    /// Cable log (0 9 9 7, TERM-28): the plain log on the cable in the normal build, until a byte arrives. Its
+    /// bit was Follow's (0 1 8 2, dropped in decision 81), so the saved flag bits after it keep their places.
     pub cable_log: bool,
-    /// 0 5 4 4: APRS beacons send the fixed position even with a GPS fix (APRS-31; the bit was Follow return's,
+    /// 0 5 5 4: APRS beacons send the fixed position even with a GPS fix (APRS-31; the bit was Follow return's,
     /// dropped in decision 81, so an old record reads GPS).
     pub aprs_fixed: bool,
-    /// 0 1 6 3: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
+    /// 0 1 8 5: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
     /// split (SCAN-22).
     pub scan_tx: bool,
-    /// 0 8 4: the CTCSS/DCS level sent, around the calibration's ([`TONE_LEVELS`]; TONE-16).
+    /// 0 8 8 1: the CTCSS/DCS level sent, around the calibration's ([`TONE_LEVELS`]; TONE-16).
     pub tone_level: u8,
-    /// 0 1 5: the radio's resume rule (SCAN-5), as `scan::Resume::from_code`: 1-10 s, 11 carrier drop, 12 stop
+    /// 0 1 4: the radio's resume rule (SCAN-5), as `scan::Resume::from_code`: 1-10 s, 11 carrier drop, 12 stop
     /// on hit. Zones and range presets can have their own.
     pub scan_resume: u8,
-    /// 0 1 6 5: the priority check's interval, seconds; 0 off (SCAN-12).
+    /// 0 1 5: the priority check's interval, seconds; 0 off (SCAN-12).
     pub scan_prio: u8,
-    /// 0 8 5 1: tail elimination ([`TAIL_MODES`]: off, receive, transmit, both, as bits: 1 receive, 2 transmit).
+    /// 0 8 8 2: tail elimination ([`TAIL_MODES`]: off, receive, transmit, both, as bits: 1 receive, 2 transmit).
     pub tail_mode: u8,
-    /// 0 8 5 2: its phase ([`TAIL_PHASES`]: 55 Hz, 120°, 180°, 240°; the phases on CTCSS only, TONE-5).
+    /// 0 8 8 3: its phase ([`TAIL_PHASES`]: 55 Hz, 120°, 180°, 240°; the phases on CTCSS only, TONE-5).
     pub tail_phase: u8,
-    /// 0 8 5 3: the end tone ([`END_TONE_NAMES`]; 0 off), a channel's own over it (TONE-10).
+    /// 0 8 4: the end tone ([`END_TONE_NAMES`]; 0 off), a channel's own over it (TONE-10).
     pub end_tone: u8,
-    /// 0 8 6 3: DTMF speed, ms each tone and each gap (50-200, DTMF-3).
+    /// 0 8 5 3: DTMF speed, ms each tone and each gap (50-200, DTMF-3).
     pub dtmf_ms: u8,
-    /// 0 8 6 5: DTMF first digit delay in 10 ms (0-100: 0-1000 ms, DTMF-3).
+    /// 0 8 5 5: DTMF first digit delay in 10 ms (0-100: 0-1000 ms, DTMF-3).
     pub dtmf_delay: u8,
-    /// 0 8 7 2: CW ID ([`CW_ID_MODES`]: off, every 10 min, on unkey; VOX-12).
+    /// 0 8 6 2: CW ID ([`CW_ID_MODES`]: off, every 10 min, on unkey; VOX-12).
     pub cw_id: u8,
     /// 0 6 1: the GPS receiver on (GPS-1).
     pub gps_on: bool,
@@ -280,16 +280,16 @@ pub const GPS_RXTX: [&str; 4] = ["Always on", "Off on receive", "Off on transmit
 /// The arrival alarm's radii in metres (0 6 7, GPS-12): off, then 50 m to 1 km.
 pub const ARRIVAL_M: [u16; 6] = [0, 50, 100, 200, 500, 1000];
 
-/// 0 8 5 1's values: bit 0 receive, bit 1 transmit.
+/// 0 8 8 2's values: bit 0 receive, bit 1 transmit.
 pub const TAIL_MODES: [&str; 4] = ["Off", "Receive", "Transmit", "Both"];
-/// 0 8 5 2's values (TONE-5).
+/// 0 8 8 3's values (TONE-5).
 pub const TAIL_PHASES: [&str; 4] = ["55 Hz", "120\u{b0}", "180\u{b0}", "240\u{b0}"];
-/// 0 8 5 3's values (TONE-10), as `tonegen::END_TONES`.
+/// 0 8 4's values (TONE-10), as `tonegen::END_TONES`.
 pub const END_TONE_NAMES: [&str; 6] = ["Off", "Beep", "Two-tone up", "Two-tone down", "Chirp", "Quindar"];
-/// 0 8 7 2's values (VOX-12).
+/// 0 8 6 2's values (VOX-12).
 pub const CW_ID_MODES: [&str; 3] = ["Off", "Every 10 min", "On unkey"];
 
-/// 0 8 4's values (TONE-16).
+/// 0 8 8 1's values (TONE-16).
 /// 0 8 2 3's VOX tails, in 100 ms (VOX-5: 2 s by default, as nicFW's VOX Tail).
 pub const VOX_TAILS: [u8; 6] = [5, 10, 15, 20, 30, 50];
 /// 0 3 1 5's sleep times in minutes (BCR-5: off, 15-120 min).
@@ -328,12 +328,12 @@ pub const COORD_FORMATS: [&str; 4] = ["Decimal", "DDM", "DMS", "Grid square"];
 pub const SAME_CODES: usize = 8;
 
 impl Settings {
-    /// KISS-6: the cable carries raw KISS (0 9 2 4 on KISS, or 0 5 9 1 on Cable).
+    /// KISS-6: the cable carries raw KISS (0 9 2 3 on KISS, or 0 5 8 1 on Cable).
     pub fn kiss_on_cable(&self) -> bool {
         self.cable_port == 3 || self.kiss_port == 1
     }
 
-    /// KISS-5, KISS-6: Bluetooth carries raw KISS (0 5 9 1 on Bluetooth).
+    /// KISS-5, KISS-6: Bluetooth carries raw KISS (0 5 8 1 on Bluetooth).
     pub fn kiss_on_bt(&self) -> bool {
         self.kiss_port == 2
     }

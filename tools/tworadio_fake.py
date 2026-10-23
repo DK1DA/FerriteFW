@@ -28,11 +28,11 @@ import ferrite_link as fl
 BCAST_LO, BCAST_HI = 8_750_000, 10_800_000
 TX_BANDS = ((14_400_000, 14_800_000), (42_000_000, 45_000_000))
 DEFAULTS = {
-    "0 1 1": ("Watch", "A+B"), "0 1 2 2": ("Pause time", "1 min"), "0 1 4": ("Scan target", "Current zone"),
-    "0 1 5": ("Resume", "5 s"), "0 1 6 3": ("Scan inputs", "Off"), "0 1 6 4": ("Return to", "Start"),
-    "0 1 6 5": ("Priority check", "Every 2 s"), "0 7 2": ("Home layout", "Watch"), "0 7 4 1": ("Timeout", "1 min"),
-    "0 7 4 4": ("Wake screen on", "Keys and RX"), "0 7 7 1": ("Battery Save", "Off"), "0 8 5 3": ("End tone", "Off"),
-    "0 8 7 1": ("Callsign", "Empty"), "0 9 3 1": ("PIN lock", "Off"),
+    "0 1 1": ("Watch", "A+B"), "0 1 8 2": ("Pause time", "1 min"), "0 1 3": ("Scan target", "Current zone"),
+    "0 1 4": ("Resume", "5 s"), "0 1 8 5": ("Scan inputs", "Off"), "0 1 8 6": ("Return to", "Start"),
+    "0 1 5": ("Priority check", "Every 2 s"), "0 7 2": ("Home layout", "Watch"), "0 7 4 1": ("Timeout", "1 min"),
+    "0 7 4 4": ("Wake screen on", "Keys and RX"), "0 7 7 1": ("Battery Save", "Off"), "0 8 4": ("End tone", "Off"),
+    "0 8 6 1": ("Callsign", "Empty"), "0 9 3 1": ("PIN lock", "Off"),
 }
 XB_TIMEOUTS = (30, 60, 120, 180, 300, 600)
 XB_HANGS = (0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0)
@@ -245,7 +245,7 @@ class FakeFerrite:
         z = self.zones[zone - 1]["resume"] if zone and zone <= len(self.zones) else "radio"
         if z != "radio":
             return "carrier" if z == "carrier" else "stop" if z == "stop" else int(z.rstrip("s"))
-        g = self.set["0 1 5"]
+        g = self.set["0 1 4"]
         return "carrier" if g == "Carrier drop" else "stop" if g == "Stop on hit" else secs_of(g)
 
     def start_scan(self, i):
@@ -257,7 +257,7 @@ class FakeFerrite:
             c = self.channels[n]
             if not c["skip"]:
                 pos.append((c["freq"], n))
-            if self.set["0 1 6 3"] == "On" and c["offset"]:
+            if self.set["0 1 8 5"] == "On" and c["offset"]:
                 pos.append((c["freq"] + c["offset"], n))
         if not pos:
             return
@@ -420,7 +420,7 @@ class FakeFerrite:
 
     @property
     def callsign(self):
-        c = self.set["0 8 7 1"]
+        c = self.set["0 8 6 1"]
         return "" if c == "Empty" else c
 
     def port_word(self):
@@ -573,7 +573,7 @@ class FakeFerrite:
         hold = 0.5  # 400 ms carrier hold, the 100 ms unkey wait
         if c is not None and not cut and not timed_out:
             t = now
-            et = self.set["0 8 5 3"]
+            et = self.set["0 8 4"]
             if et != "Off":
                 c["endtone"], c["t_off"] = et, now
                 slug = dict(bench.ENDTONE_SETTINGS)[et]
@@ -673,16 +673,16 @@ class FakeFerrite:
         if sid == "Home":
             self.home_key(name)
         elif sid == "Quick" and name == "0":
-            self.stack.append(("Advanced", None))
-        elif sid == "Advanced" and name == "0":
+            self.stack.append(("More", None))
+        elif sid == "More" and name == "0":
             self.stack.append(("Status", None))
-        elif sid == "Advanced" and name == "3":
+        elif sid == "More" and name == "3":
             self.stack.append(("Tools", None))
         elif sid == "Tools" and name == "5":
             self.stack.append(("Crossband", dict(cell=0)))
         elif sid == "Tools" and name == "6":
             self.stack.append(("ToneSearch", dict(slot=self.active, found="", since=None, hits=[])))
-        elif sid == "Advanced" and name == "2":
+        elif sid == "More" and name == "2":
             self.stack.append(("Group", None))
         elif sid == "Group" and name == "3":
             self.stack.append(("Zones", dict(sel=0)))
@@ -769,8 +769,8 @@ class FakeFerrite:
                 self.toast = (f"{'ABC'[a]} muted", "\\* again unmutes", self.t + 2)
         elif name == "HASH":
             if any(self.live[i]["open"] and i != a and self.watched(i) for i in range(3)):
-                self.paused_until = self.t + (secs_of(self.set["0 1 2 2"]) or 60)
-                self.toast = ("Watch paused", self.set["0 1 2 2"], self.t + 2)
+                self.paused_until = self.t + (secs_of(self.set["0 1 8 2"]) or 60)
+                self.toast = ("Watch paused", self.set["0 1 8 2"], self.t + 2)
             else:
                 self.stack.append(("Status", None))
         elif name == "SIDE2":
@@ -837,7 +837,7 @@ class FakeFerrite:
                 self.err(f"{line}: not a setting here (fake)")
             if self.keyed:
                 self.err("transmitting")
-            if p in ("0 1 2 2", "0 1 4", "0 1 6 4"):  # as the firmware (Oct 14, 2026)
+            if p in ("0 1 8 2", "0 1 3", "0 1 8 6"):  # as the firmware (Oct 14, 2026)
                 self.err(f"{DEFAULTS[p][0]} can't be set yet")
             self.set[p] = line[len(f"set {p} "):].strip()
             return f"{p} {DEFAULTS[p][0]}: {self.set[p]}"
@@ -1069,7 +1069,7 @@ def world(bugs_rx=(), bugs_tx=(), ble_rx=False, build_tx="tx-dry", build_rx="tx-
     rx = FakeFerrite("clear", clk, air, spec="ble:fake" if ble_rx else None, build=build_rx, ble=ble_rx, bugs=bugs_rx)
     rx.slots[2]["freq"] = f10(100.5)  # C on a broadcast station (the audio probe)
     rx.vfo[2]["freq"] = f10(100.5)
-    rx.set["0 8 7 1"] = "VA3FAK"  # the repeater's ID (XB-12) needs the callsign set on the radio
+    rx.set["0 8 6 1"] = "VA3FAK"  # the repeater's ID (XB-12) needs the callsign set on the radio
     return clk, air, tx, rx
 
 
@@ -1342,10 +1342,10 @@ def selftest(a, tr):
 
 # Every setting the tests set, with each value they use (checked against a simulator's terminal).
 SETTINGS_USED = (("0 1 1", "Off"), ("0 1 1", "A+B"),
-                 ("0 1 5", "Carrier drop"), ("0 1 5", "3 s"), ("0 1 5", "5 s"), ("0 1 5", "Stop on hit"),
-                 ("0 1 6 3", "Off"), ("0 1 6 3", "On"), ("0 1 6 5", "Off"),
+                 ("0 1 4", "Carrier drop"), ("0 1 4", "3 s"), ("0 1 4", "5 s"), ("0 1 4", "Stop on hit"),
+                 ("0 1 8 5", "Off"), ("0 1 8 5", "On"), ("0 1 5", "Off"),
                  ("0 7 2", "Watch"), ("0 7 2", "Single + scope"), ("0 7 4 1", "5 s"), ("0 7 4 4", "Keys and RX"),
-                 ("0 7 4 4", "Keys, RX and TX"), ("0 7 4 4", "Keys"), ("0 7 7 1", "Level 1"), ("0 8 5 3", "Off"))
+                 ("0 7 4 4", "Keys, RX and TX"), ("0 7 4 4", "Keys"), ("0 7 7 1", "Level 1"), ("0 8 4", "Off"))
 
 
 def selftest_sim(a, tr):
@@ -1392,7 +1392,7 @@ def selftest_sim(a, tr):
             trc.rx_quiet(t, watch="A+B")
             ch = trc.Channels(t, trs.ZONE_CHANS, loose=((986, "TR BUSY", trc.VHF, "busy=on tone=100.0"),))
             res["busy"] = t.rx.cmd("ch 986")
-            for path, v in (("0 1 5", "Carrier drop"), ("0 1 6 3", "On")):
+            for path, v in (("0 1 4", "Carrier drop"), ("0 1 8 5", "On")):
                 t.rx.set(path, v)
             u = ch.enter("A", 981)
             res["entered"] = u.active.get("name")
@@ -1423,7 +1423,7 @@ def selftest_sim(a, tr):
                     res.setdefault("refused", []).append(str(e))
             trc.rx_broadcast(t, "C", required=False)  # the simulator's own signals on A and B keep it muted
             res["broadcast"] = t.rx.raw().cards["C"].get("kind")
-            res["defaults"] = [t.rx.get(p) for p in ("0 1 4", "0 1 6 4", "0 1 2 2")]
+            res["defaults"] = [t.rx.get(p) for p in ("0 1 3", "0 1 8 6", "0 1 8 2")]
             s = trc.status_page(t)
             res["status"] = (s.id, (s.row("Watch") or {}).get("value"))
             t.rx.home()

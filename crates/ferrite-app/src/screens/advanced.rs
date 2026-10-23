@@ -62,7 +62,7 @@ impl View for Advanced {
     }
 
     fn name(self) -> &'static str {
-        "Advanced"
+        "More"
     }
 
     fn mockup(self) -> Option<&'static str> {

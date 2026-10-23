@@ -348,7 +348,7 @@ pub enum Item {
     Reverse,
 }
 
-/// Quick settings, in order (MENU-1); row 9 is "0 Advanced settings".
+/// Quick settings, in order (MENU-1); row 9 is "0 More".
 pub const QUICK: [Item; 10] = [
     Item::Squelch,
     Item::Power,
@@ -388,7 +388,7 @@ impl Item {
             Item::Watch => "Watch",
             Item::Channel => "Channel",
             Item::BatterySave => "Battery Save",
-            Item::Advanced => "Advanced settings",
+            Item::Advanced => "More",
             Item::Mode => "Mode",
             Item::BusyLock => "Busy lock",
             Item::Reverse => "Reverse",

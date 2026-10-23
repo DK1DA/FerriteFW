@@ -86,7 +86,7 @@ fn aprs_mode_takes_slot_c() {
     assert!(c.contains(&RadioCmd::SlotParam { slot: 2, param: Param::Power, value: 0 }), "beacon power Low");
     assert!(c.contains(&RadioCmd::SlotParam { slot: 2, param: Param::Mode, value: 0 }), "FM");
     assert_eq!(a.app.slot(APRS_SLOT).freq(), own, "C's own VFO is kept aside");
-    // The region's frequency, and 0 5 7 1 over it.
+    // The region's frequency, and 0 5 4 over it.
     for (r, f) in [(Region::Uk, 14_480_000), (Region::Australia, 14_517_500), (Region::NewZealand, 14_457_500), (Region::Japan, 14_464_000)] {
         a.app.set.set_region(Some(r));
         assert_eq!(a.app.aprs_freq(), f);
@@ -147,7 +147,7 @@ fn kiss_on_makes_c_the_aprs_slot() {
     a.cmds();
     assert!(!a.app.aprs_slot(APRS_SLOT));
     a.app.set.bt = true;
-    a.app.set.kiss_port = 2; // 0 5 9 1 on Bluetooth
+    a.app.set.kiss_port = 2; // 0 5 8 1 on Bluetooth
     a.tick();
     assert!(a.app.aprs_slot(APRS_SLOT) && !a.app.aprs_on(), "C is the APRS slot, APRS mode still off");
     let c = a.cmds();
@@ -174,7 +174,7 @@ fn kiss_on_makes_c_the_aprs_slot() {
     let c = a.cmds();
     assert!(!a.app.aprs_slot(APRS_SLOT));
     assert!(c.contains(&RadioCmd::TuneSlot { slot: 2, freq: own }) && c.contains(&RadioCmd::Watch(0)), "{c:?}");
-    // The cable's KISS (0 9 2 4) does it too, and APRS mode keeps C when KISS goes off.
+    // The cable's KISS (0 9 2 3) does it too, and APRS mode keeps C when KISS goes off.
     a.app.set.kiss_port = 0;
     a.app.set.cable_port = 3;
     a.tick();
@@ -273,7 +273,7 @@ fn ptt_on_aprs_slot_composes_and_ptt_sends() {
     a.app.key_up(Key::Ptt(1), a.t + 100, &a.s);
 }
 
-/// Beacon mode, power and on/off (0 5 5 1, 0 5 5 4, APRS-17.1).
+/// Beacon mode, power and on/off (0 5 6 1, 0 5 6 3, APRS-17.1).
 #[test]
 fn beacon_settings() {
     let mut a = A::new();
@@ -323,7 +323,7 @@ fn aprs_shares_the_vhf_chip() {
     assert_eq!(a.app.aprs_shared(), None);
 }
 
-/// 0 5 5 1 steps through off, manual, the timed, distance and smart modes, and wraps (APRS-24).
+/// 0 5 6 1 steps through off, manual, the timed, distance and smart modes, and wraps (APRS-24).
 #[test]
 fn beacon_modes_in_order() {
     let mut a = A::new();
@@ -460,34 +460,34 @@ fn card_text() {
     a.app.render(&mut fb, &a.live, &dev, &a.s);
 }
 
-/// APRS-26, APRS-27: 0 5 5 3, 0 5 6 1 and 0 5 8 change the APRS settings, and # puts each back.
+/// APRS-26, APRS-27: 0 5 6 2, 0 5 9 1 and 0 5 7 change the APRS settings, and # puts each back.
 #[test]
 fn path_digipeater_and_after_voice_settings() {
     use crate::screens::groups::{change, reset};
     let mut a = A::new();
     assert_eq!(&*a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice(), b"WIDE2-1"]);
-    change(&mut a.app, &[5, 6, 1], 1);
+    change(&mut a.app, &[5, 9, 1], 1);
     assert!(a.app.aprs_cfg().path().is_empty(), "WIDE1-1,WIDE2-1 then None");
-    change(&mut a.app, &[5, 6, 1], 1);
+    change(&mut a.app, &[5, 9, 1], 1);
     assert_eq!(&*a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice()]);
-    reset(&mut a.app, &[5, 6, 1]);
+    reset(&mut a.app, &[5, 9, 1]);
     assert_eq!(a.app.aprs_cfg().path().len(), 2);
     assert!(!a.app.aprs_cfg().digi_on(), "APRS-12: off by default");
-    change(&mut a.app, &[5, 8, 1], 1);
-    change(&mut a.app, &[5, 8, 2], 1);
-    change(&mut a.app, &[5, 8, 3], -1);
+    change(&mut a.app, &[5, 7, 1], 1);
+    change(&mut a.app, &[5, 7, 2], 1);
+    change(&mut a.app, &[5, 7, 3], -1);
     let c = a.app.aprs_cfg();
     assert!(c.digi_on() && c.digi_mycall() && c.digi_wait_s() == 5);
-    reset(&mut a.app, &[5, 8, 3]);
+    reset(&mut a.app, &[5, 7, 3]);
     assert!(a.app.aprs_cfg().digi_on() && a.app.aprs_cfg().digi_wait_s() == 0);
-    change(&mut a.app, &[5, 5, 3], 1);
+    change(&mut a.app, &[5, 6, 2], 1);
     assert!(a.app.aprs_cfg().after_voice);
     // Kept by the APRS store's owner (written back at the next tick).
     a.tick();
     assert!(a.s.aprs_cfg() == a.app.aprs_cfg());
 }
 
-/// APRS-45: 0 5 7 8, FX.25 on transmit: 16 check bytes by default (decision 230), then 32, 64 and Off; # puts it
+/// APRS-45: 0 5 9 7, FX.25 on transmit: 16 check bytes by default (decision 230), then 32, 64 and Off; # puts it
 /// back; kept by the APRS store's owner.
 #[test]
 fn fx25_on_transmit_setting() {
@@ -495,12 +495,12 @@ fn fx25_on_transmit_setting() {
     let mut a = A::new();
     assert_eq!(a.app.aprs_cfg().fx25, 16);
     for (d, want) in [(1, 32), (1, 64), (1, 0), (1, 16), (-1, 0)] {
-        change(&mut a.app, &[5, 7, 8], d);
+        change(&mut a.app, &[5, 9, 7], d);
         assert_eq!(a.app.aprs_cfg().fx25, want);
     }
     a.tick();
     assert_eq!(a.s.aprs_cfg().fx25, 0, "written back");
-    reset(&mut a.app, &[5, 7, 8]);
+    reset(&mut a.app, &[5, 9, 7]);
     assert_eq!(a.app.aprs_cfg().fx25, 16);
 }
 
@@ -566,7 +566,7 @@ fn station_shows_its_last_message() {
     assert!(s.msg.is_empty());
 }
 
-/// APRS-26: 0 5 6 2's custom path: checked, kept, chosen at once, offered by 0 5 6 1 after the three, and # forgets
+/// APRS-26: 0 5 9 2's custom path: checked, kept, chosen at once, offered by 0 5 9 1 after the three, and # forgets
 /// it (the path going back to the default when it was in use).
 #[test]
 fn custom_path() {
@@ -584,13 +584,13 @@ fn custom_path() {
     let c = a.app.aprs_cfg();
     assert_eq!((c.path, &*c.path()), (PATH_CUSTOM, &[b"WIDE2-2".as_slice()][..]));
     assert_eq!(c.path_name(), b"WIDE2-2");
-    change(&mut a.app, &[5, 6, 1], 1);
+    change(&mut a.app, &[5, 9, 1], 1);
     assert_eq!(a.app.aprs_cfg().path, 0, "Custom then None: four choices");
-    change(&mut a.app, &[5, 6, 1], -1);
+    change(&mut a.app, &[5, 9, 1], -1);
     assert_eq!(a.app.aprs_cfg().path, PATH_CUSTOM);
     a.app.set_aprs_custom_path(b"WIDE1-1,WIDE2-2");
     assert_eq!(&*a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice(), b"WIDE2-2"]);
-    reset(&mut a.app, &[5, 6, 2]);
+    reset(&mut a.app, &[5, 9, 2]);
     let c = a.app.aprs_cfg();
     assert!(c.custom_text().is_empty());
     assert_eq!(c.path, PATH_DEFAULT, "forgetting the path in use goes back to the default");
@@ -618,7 +618,7 @@ fn long_callsign_refuses_aprs_not_kiss() {
     assert!(crate::screens::transmit::data_key(&mut a.app, APRS_SLOT, 0, b"Beacon"), "an SSID typed in isn't counted (APRS-30)");
 }
 
-/// APRS-19.1: on the APRS slot, Power (hold 2, the quick settings) is the APRS power (0 5 5 4): it changes the
+/// APRS-19.1: on the APRS slot, Power (hold 2, the quick settings) is the APRS power (0 5 6 3): it changes the
 /// beacon and message power and leaves C's own power for when C is given back.
 #[test]
 fn power_on_the_aprs_slot_is_the_aprs_power() {
@@ -639,10 +639,10 @@ fn power_on_the_aprs_slot_is_the_aprs_power() {
     assert_eq!(a.app.slot(APRS_SLOT).cfg().power, own, "C's own power untouched");
     a.mode(false);
     assert_eq!(a.app.slot(APRS_SLOT).cfg().power, own);
-    assert_eq!(a.app.aprs_cfg().power, 1, "kept as 0 5 5 4");
+    assert_eq!(a.app.aprs_cfg().power, 1, "kept as 0 5 6 3");
 }
 
-/// APRS-6.1: a message to you plays the message sound (0 5 7 6, Mail by default); Off plays nothing. The sound
+/// APRS-6.1: a message to you plays the message sound (0 7 5 5, Mail by default); Off plays nothing. The sound
 /// isn't for the log's other events.
 #[test]
 fn a_message_to_you_plays_the_message_sound() {

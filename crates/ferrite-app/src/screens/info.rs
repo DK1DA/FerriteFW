@@ -230,7 +230,7 @@ const CALIBRATION: [InfoRow; 3] = [
         CalState::Unknown => fixed(b, "Not checked", SUB),
         _ => fixed(b, "Matches", GREEN),
     }),
-    ("User trims", |_, b| fixed(b, "MENU 0 9 7", SUB)),
+    ("User trims", |_, b| fixed(b, "MENU 0 9 9", SUB)),
 ];
 
 const ADV_SQUELCH: [InfoRow; 3] = [

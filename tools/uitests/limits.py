@@ -147,43 +147,43 @@ def backlight_timeout_and_wake(t):
 
 @test("PWR-14", "CAL-18", pages=("Group", "Info"))
 def trims_are_clamped(t):
-    """The battery reading trim (0 9 7 3) stops at ±0.30 V and About's volts follow it; the crystal trim (0 9 7 2)
+    """The battery reading trim (0 9 9 5) stops at ±0.30 V and About's volts follow it; the crystal trim (0 9 9 4)
     at ±20 ppm. (Skipped while the trims "can't be set yet".)"""
-    ok, why = t.cmd_err("set 0 9 7 3 +0.00 V")
+    ok, why = t.cmd_err("set 0 9 9 5 +0.00 V")
     t.need(ok, f"the trims aren't settable yet: {why}")
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     v0 = float(u.row("Battery")["value"].split()[0])
-    hi = walk(t, "0 9 7 3", 40)
+    hi = walk(t, "0 9 9 5", 40)
     t.eq((hi[0], hi[-1]), ("-0.30 V", "+0.30 V"), "battery trim: -0.30 V to +0.30 V")
-    t.set("0 9 7 3", "+0.10 V")
+    t.set("0 9 9 5", "+0.10 V")
     t.home()
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     v1 = float(u.row("Battery")["value"].split()[0])
     t.check(abs(v1 - v0 - 0.10) <= 0.03, "About's volts follow the trim", (v0, v1))
-    t.set("0 9 7 3", "+0.00 V")
+    t.set("0 9 9 5", "+0.00 V")
     t.home()
-    ppm = walk(t, "0 9 7 2", 60)
+    ppm = walk(t, "0 9 9 4", 60)
     t.eq((ppm[0], ppm[-1]), ("-20 ppm", "+20 ppm"), "crystal trim: ±20 ppm")
-    t.set("0 9 7 2", "0 ppm")
+    t.set("0 9 9 4", "0 ppm")
 
 
 @test("CAL-17", pages=("Group",))
 def reset_trims_clears_only_trims(t):
     """"Reset trims" clears the trims only: every other setting (`dump`) as it was. (Skipped while the trims
     "can't be set yet".)"""
-    ok, why = t.cmd_err("set 0 9 7 3 +0.10 V")
+    ok, why = t.cmd_err("set 0 9 9 5 +0.10 V")
     t.need(ok, f"the trims aren't settable yet: {why}")
-    before = [x for x in t.cmd("dump").splitlines() if not x.startswith("#") and "0 9 7" not in x]
-    u = t.keys("MENU 0 9 7")
+    before = [x for x in t.cmd("dump").splitlines() if not x.startswith("#") and "0 9 9" not in x]
+    u = t.keys("MENU 0 9 9")
     names = u.names()
-    t.need("Reset trims" in names, f"no Reset trims row in 0 9 7 ({names})")
+    t.need("Reset trims" in names, f"no Reset trims row in 0 9 9 ({names})")
     i = names.index("Reset trims")
     t.keys(" ".join(["DOWN"] * i) + " MENU")
     u = t.ui()
     if u.id == "Confirm":
         t.keys("MENU")
-    t.eq(t.get("0 9 7 3"), "+0.00 V", "the battery trim cleared")
-    after = [x for x in t.cmd("dump").splitlines() if not x.startswith("#") and "0 9 7" not in x]
+    t.eq(t.get("0 9 9 5"), "+0.00 V", "the battery trim cleared")
+    after = [x for x in t.cmd("dump").splitlines() if not x.startswith("#") and "0 9 9" not in x]
     t.eq(after, before, "nothing else changed")
 
 
@@ -191,7 +191,7 @@ def reset_trims_clears_only_trims(t):
 def about_without_the_patch(t):
     """Without an SSB patch About says "Not installed", and the SSB patch page (0 9 6) says how to install it:
     the flasher's --ssb-from or the web app."""
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     t.need(u.row("SSB patch")["value"] != "Installed", "the SSB patch is installed (needs a radio without it)")
     t.eq(u.row("SSB patch")["value"], "Not installed", "About")
     t.home()
@@ -207,6 +207,6 @@ def about_explains_the_update_route(t):
     u = t.keys("MENU 0 9")
     t.check(not any("update" in n.lower() for n in u.names()), "System: no update row", u.names())
     t.home()
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     h = " ".join((u["help"] or {}).get("args", []))
     t.check("PF1 + PF2" in h and "switching on" in h, "About: the bootloader route", h)

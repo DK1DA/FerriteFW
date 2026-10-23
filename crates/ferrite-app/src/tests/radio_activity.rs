@@ -89,7 +89,7 @@ fn out_of_band_is_refused_with_the_fix() {
     ptt(&mut t, false);
     assert_eq!(refused(&t), Some(Refusal::OutOfBand), "stays until closed");
     t.tap(Key::Menu);
-    assert_eq!(t.app.screen().name(), Dest::Group(8).name(), "OK: MENU 0 8 (Extend TX is 0 8 9)");
+    assert_eq!(t.app.screen().name(), Dest::Group(8).name(), "OK: MENU 0 8 (Extend TX is 0 8 8)");
     t.hold(Key::Exit);
     // Extend TX on: allowed (the calibration windows are the Radio task's).
     t.app.set_region(Some(Region::Canada), true);
@@ -767,7 +767,7 @@ fn fonts_cover_group_b() {
     }
 }
 
-/// VOX-12, XB-12: a callsign typed on setup's callsign page (MENU 0 8 7 1) reaches the Radio task for CW ID at
+/// VOX-12, XB-12: a callsign typed on setup's callsign page (MENU 0 8 6 1) reaches the Radio task for CW ID at
 /// once (`CwCall`), as the text editor's does; before, it went only at power-on (the crossband CW ID sent nothing
 /// until a restart, Oct 15, 2026). Each change goes again; nothing changed, nothing sent.
 #[test]
@@ -1379,7 +1379,7 @@ fn alert_during_crossband_is_a_banner() {
 #[test]
 fn dialer_sends_then_unkeys() {
     let mut t = ready();
-    menu0(&mut t, &[8, 6, 1]);
+    menu0(&mut t, &[8, 5, 1]);
     for d in [1, 2, 3] {
         t.tap(Key::Digit(d));
     }
@@ -1404,7 +1404,7 @@ fn dialer_sends_then_unkeys() {
 fn transmit_tones_reach_the_radio() {
     let mut t = ready();
     t.app.set.callsign = crate::settings::Text::EMPTY;
-    menu0(&mut t, &[8, 7, 2]);
+    menu0(&mut t, &[8, 6, 2]);
     t.cmds();
     t.app.knob(1, t.t, &store());
     assert_eq!(t.app.set.cw_id, 0, "VOX-10: no callsign, no CW ID");
@@ -1414,7 +1414,7 @@ fn transmit_tones_reach_the_radio() {
     t.app.knob(1, t.t, &store());
     assert_eq!(t.app.set.cw_id, 1);
     assert!(t.cmds().contains(&RadioCmd::TxTones { phase: 0, cw: 1, sidetone: true }));
-    // 0 8 5 3: every slot's end tone follows (Beep = END_TONES[1]).
+    // 0 8 4: every slot's end tone follows (Beep = END_TONES[1]).
     t.app.set.end_tone = 1;
     t.app.send_slot_tones();
     let c = t.cmds();
@@ -2173,12 +2173,12 @@ fn bar_callsign_without_a_clock() {
 
 /// MENU-31: OK (or its digit) on a frequency setting opens the frequency entry box; the digits as on home, OK or a
 /// whole frequency keeps it and BACK returns to the list; a frequency outside the setting's range is refused with the
-/// digits left to fix. 0 5 7 1 (APRS) and 0 4 2 2 (pager); a range preset's edges the same way.
+/// digits left to fix. 0 5 4 (APRS) and 0 4 2 2 (pager); a range preset's edges the same way.
 #[test]
 fn frequency_settings_open_the_entry_box() {
     use crate::screens::entry::{EntryFor, FreqSet};
     let mut t = ready();
-    menu0(&mut t, &[5, 7, 1]);
+    menu0(&mut t, &[5, 4]);
     assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::Setting(FreqSet::Aprs)), "{:?}", t.app.screen());
     for d in [1, 4, 5, 4, 9, 5] {
         t.tap(Key::Digit(d));
@@ -2190,7 +2190,7 @@ fn frequency_settings_open_the_entry_box() {
     assert!(matches!(t.app.screen(), Screen::Group(_)), "back on the list: {:?}", t.app.screen());
     // out of range: refused, the entry stays with its digits
     t.hold(Key::Exit);
-    menu0(&mut t, &[5, 7, 1]);
+    menu0(&mut t, &[5, 4]);
     for d in [4, 4, 6] {
         t.tap(Key::Digit(d));
     }
@@ -2324,14 +2324,14 @@ fn passing_a_hit_is_not_a_stop() {
     assert_eq!(t.app.scan_hit[0], f, "held: stopped on it");
 }
 
-/// APRS-15.1: in 0 5 7 1's entry box, # with nothing typed puts the APRS frequency back on the region's.
+/// APRS-15.1: in 0 5 4's entry box, # with nothing typed puts the APRS frequency back on the region's.
 #[test]
 fn aprs_frequency_back_to_the_region() {
     use crate::screens::entry::{EntryFor, FreqSet};
     let mut t = ready();
     let region = t.app.aprs_freq();
     assert!(t.app.set_aprs_freq(mhz(145) + 49_500).is_ok());
-    menu0(&mut t, &[5, 7, 1]);
+    menu0(&mut t, &[5, 4]);
     assert!(matches!(t.app.screen(), Screen::Entry(e) if e.to == EntryFor::Setting(FreqSet::Aprs)));
     t.tap(Key::Hash);
     assert_eq!((t.app.aprs_freq(), t.app.aprs_cfg().f5k), (region, 0), "the region's again");
@@ -2339,7 +2339,7 @@ fn aprs_frequency_back_to_the_region() {
     assert!(t.app.toast.is_some_and(|x| x.head.as_bytes() == b"Region default"));
 }
 
-/// APRS-30: our APRS address is the callsign (without any SSID typed into it) and 0 5 4 1's SSID, 7 by
+/// APRS-30: our APRS address is the callsign (without any SSID typed into it) and 0 5 5 1's SSID, 7 by
 /// default (decision 191); 0 sends the bare callsign. The knob steps it, # puts back 7, the row names it.
 #[test]
 fn aprs_address_takes_the_ssid_setting() {
@@ -2352,13 +2352,13 @@ fn aprs_address_takes_the_ssid_setting() {
     assert_eq!(t.app.aprs_call().as_bytes(), b"VE3KPW");
     let dev = Default::default();
     let mut b = Buf::<24>::new();
-    crate::screens::groups::change(&mut t.app, &[5, 4, 1], -1);
+    crate::screens::groups::change(&mut t.app, &[5, 5, 1], -1);
     assert_eq!(t.app.aprs_cfg().ssid, 15, "the knob wraps");
-    assert_eq!(crate::screens::groups::wired(&t.app, &dev, &[5, 4, 1], &mut b), Some(true));
+    assert_eq!(crate::screens::groups::wired(&t.app, &dev, &[5, 5, 1], &mut b), Some(true));
     assert_eq!(b.as_bytes(), b"15 Generic");
-    // the 0 5 4 row in the APRS group shows the address beacons send (it said "-9" whatever the SSID)
+    // the 0 5 5 row in the APRS group shows the address beacons send (it said "-9" whatever the SSID)
     t.app.set_aprs(crate::aprs::AprsCfg { ssid: 7, ..t.app.aprs_cfg() });
-    crate::screens::groups::wired(&t.app, &dev, &[5, 4], &mut b);
+    crate::screens::groups::wired(&t.app, &dev, &[5, 5], &mut b);
     assert_eq!(b.as_bytes(), b"VE3KPW-7");
     t.app.set.set_callsign(b"");
     assert!(t.app.aprs_call().is_empty(), "no callsign, no address");

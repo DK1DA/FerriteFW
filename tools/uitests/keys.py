@@ -4,13 +4,13 @@ import time
 from .core import test
 
 # Screens to walk for the hint bar and the status bar's name (keys from home).
-WALK = ["MENU", "MENU 0", "MENU 0 1", "MENU 0 7", "MENU 0 7 5", "MENU 0 9 1", "MENU 0 0", "MENU 0 9 9",
-        "MENU 0 9 9 RIGHT", "MENU 0 9 9 RIGHT RIGHT", "MENU 0 9 9 RIGHT RIGHT RIGHT", "MENU 0 9 1 4", "1 4",
+WALK = ["MENU", "MENU 0", "MENU 0 1", "MENU 0 7", "MENU 0 7 5", "MENU 0 9 1", "MENU 0 0", "MENU 0 9 8",
+        "MENU 0 9 8 RIGHT", "MENU 0 9 8 RIGHT RIGHT", "MENU 0 9 8 RIGHT RIGHT RIGHT", "MENU 0 9 1 4", "1 4",
         "SLOT:long", "MENU 0 3 1", "MENU 0 3 5", "MENU 0 6 6 MENU", "MENU 4 MENU", "MENU MENU", "9:long",
         "1:long", "SIDE2:long", "VM:long"]
 
 
-@test("KEY-9", "SBAR-5", "MENU-16", pages=("Advanced", "Counter", "Crossband", "Edit", "Entry", "Fm", "Group", "Home", "Info", "Quick", "Save", "Scope", "Shortcut", "Status", "Text", "Tones", "Value", "Zones"))
+@test("KEY-9", "SBAR-5", "MENU-16", pages=("More", "Counter", "Crossband", "Edit", "Entry", "Fm", "Group", "Home", "Info", "Quick", "Save", "Scope", "Shortcut", "Status", "Text", "Tones", "Value", "Zones"))
 def hint_bars_and_names_fit(t):
     """Every screen walked: at most three hint pairs, the universal BACK last when shown; the status bar's
     screen name at most 8 characters (none on home); lists' hint bars name the knob."""
@@ -33,13 +33,13 @@ def hint_bars_and_names_fit(t):
     t.note("walked " + ", ".join(seen))
 
 
-@test("KEY-5", pages=("Advanced", "Entry", "Home", "Quick"))
+@test("KEY-5", pages=("More", "Entry", "Home", "Quick"))
 def back_is_one_level(t):
     """A short BACK goes back one level (on home it does nothing); in entry it deletes a digit first."""
     u = t.keys("BACK")
     t.eq(u.id, "Home", "BACK on home")
     u = t.keys("MENU 0")
-    t.eq(u.id, "Advanced", "quick, then 0")
+    t.eq(u.id, "More", "quick, then 0")
     u = t.keys("BACK")
     t.eq(u.id, "Quick", "BACK: back to quick settings (where it was opened from)")
     u = t.keys("BACK")
@@ -164,7 +164,7 @@ def side2_counter_and_big_steps(t):
     t.check(abs(float(t.ui(0.2).active["freq"]) - f0) < 1e-6, "and back", t.ui(0).active["freq"])
 
 
-@test("LINK-19", "KEY-3", "KEY-6", smoke=True, pages=("Advanced", "Entry", "Home", "Quick"))
+@test("LINK-19", "KEY-3", "KEY-6", smoke=True, pages=("More", "Entry", "Home", "Quick"))
 def remote_keys_and_readback(t):
     """The link's keys: every key name answers (`ui keys`), short and long presses and down/up apart reach the
     screens as the keypad's do; keys typed fast are all taken."""
@@ -183,4 +183,4 @@ def remote_keys_and_readback(t):
     t.r.down("MENU")
     time.sleep(0.9)
     t.r.up("MENU")
-    t.eq(t.ui().id, "Advanced", "MENU down and up 0.9 s apart: a long press")
+    t.eq(t.ui().id, "More", "MENU down and up 0.9 s apart: a long press")

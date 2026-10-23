@@ -102,10 +102,10 @@ def muted_active_slot_listens_and_lets_b_play(t):
 @test("WATCH-6", keyups=(4,), idle=68)
 def hash_pauses_watch_while_b_receives(t):
     """The other radio keys on the watched B: the hint bar says "# Pause"; # stays home, says so in a toast and the
-    Status page's Watch row reads paused. The pause (0 1 2 2, 1 min: not settable yet) then runs out by itself (B's
+    Status page's Watch row reads paused. The pause (0 1 8 2, 1 min: not settable yet) then runs out by itself (B's
     card no longer "paused") before the next test."""
     watch_setup(t)
-    pause = t.rx.get("0 1 2 2")
+    pause = t.rx.get("0 1 8 2")
     secs = {"30 s": 30, "1 min": 60, "5 min": 300}.get(pause, 300)
     tx_on(t, UHF)
     with t.key(4, "a carrier on the watched B"):

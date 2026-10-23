@@ -27,7 +27,7 @@ pub const APRS_SLOT: u8 = 2;
 /// few minutes on a busy frequency). The oldest heard goes when a new one comes; power off empties it.
 pub const HEARD_MAX: u16 = 20;
 
-/// The APRS settings kept with the APRS store (0 5 5 1, 0 5 5 3, 0 5 5 4, 0 5 6 1, 0 5 7 1, 0 5 7 8, 0 5 8).
+/// The APRS settings kept with the APRS store (0 5 6 1, 0 5 6 2, 0 5 6 3, 0 5 9 1, 0 5 4, 0 5 9 7, 0 5 7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AprsCfg {
     /// The frequency in 5 kHz units; 0 = the region's (APRS-15).
@@ -38,25 +38,25 @@ pub struct AprsCfg {
     pub beacon: u8,
     /// Beacon and message power: 0 low (APRS-20's default), 1 mid, 2 high.
     pub power: u8,
-    /// The path beacons and messages ask for (0 5 6 1): an index into [`PATHS`].
+    /// The path beacons and messages ask for (0 5 9 1): an index into [`PATHS`].
     pub path: u8,
-    /// The digipeater (0 5 8, APRS-12, APRS-26): bit 0 on, bit 1 our callsign as an alias too, bits 4-6 the wait
+    /// The digipeater (0 5 7, APRS-12, APRS-26): bit 0 on, bit 1 our callsign as an alias too, bits 4-6 the wait
     /// before relaying in seconds (0-5).
     pub digi: u8,
-    /// A beacon after each voice transmission (0 5 5 3, APRS-27).
+    /// A beacon after each voice transmission (0 5 6 2, APRS-27).
     pub after_voice: bool,
-    /// The custom path (0 5 6 2, APRS-26) as typed, like `WIDE1-1,WIDE2-2`, zero-padded; used when
+    /// The custom path (0 5 9 2, APRS-26) as typed, like `WIDE1-1,WIDE2-2`, zero-padded; used when
     /// [`AprsCfg::path`] is [`PATH_CUSTOM`]. Checked by [`path_ok`] before it is kept.
     pub custom: [u8; CUSTOM_LEN],
-    /// Our SSID (0 5 4 1, APRS-30): 0-15, sent after the callsign; 0 sends the bare callsign.
+    /// Our SSID (0 5 5 1, APRS-30): 0-15, sent after the callsign; 0 sends the bare callsign.
     pub ssid: u8,
-    /// FX.25 on transmit (0 5 7 8, APRS-45): check bytes, one of [`FX25_CHECKS`] (0 = off).
+    /// FX.25 on transmit (0 5 9 7, APRS-45): check bytes, one of [`FX25_CHECKS`] (0 = off).
     pub fx25: u8,
-    /// The message sound (0 5 7 6, APRS-6.1): an index into `tonegen::CHIMES` (0 off).
+    /// The message sound (0 7 5 5, APRS-6.1): an index into `tonegen::CHIMES` (0 off).
     pub sound: u8,
 }
 
-/// APRS-45: 0 5 7 8's choices (check bytes; 0 = off) and their names. 16 by default: Alex, decision 230 (a default
+/// APRS-45: 0 5 9 7's choices (check bytes; 0 = off) and their names. 16 by default: Alex, decision 230 (a default
 /// to review before the first release).
 pub const FX25_CHECKS: [u8; 4] = [0, 16, 32, 64];
 pub const FX25_NAMES: [&str; 4] = ["Off", "16 bytes", "32 bytes", "64 bytes"];
@@ -113,39 +113,39 @@ impl AprsCfg {
         &self.custom[..n]
     }
 
-    /// 0 5 6 1's choices: the [`PATHS`], and Custom once one is set.
+    /// 0 5 9 1's choices: the [`PATHS`], and Custom once one is set.
     pub fn path_choices(&self) -> u8 {
         PATHS.len() as u8 + !self.custom_text().is_empty() as u8
     }
 
-    /// 0 5 6 1's name for the path in use.
+    /// 0 5 9 1's name for the path in use.
     pub fn path_name(&self) -> &[u8] {
         if self.path == PATH_CUSTOM { self.custom_text() } else { PATHS[self.path as usize % PATHS.len()].0.as_bytes() }
     }
 
     /// APRS-45: FX.25 check bytes for a frame the APRS task sends (`what`, as [`crate::aprs_live::Tick`] names
-    /// it): 0 5 7 8's for our own frames (beacons, messages, acks, answers), 0 (plain AX.25) for a digipeat, which
+    /// it): 0 5 9 7's for our own frames (beacons, messages, acks, answers), 0 (plain AX.25) for a digipeat, which
     /// goes out as it came.
     pub fn fx25_for(&self, what: &str) -> u8 {
         if what == "Digipeat" { 0 } else { self.fx25 }
     }
 
-    /// 0 5 7 8's choice: an index into [`FX25_CHECKS`].
+    /// 0 5 9 7's choice: an index into [`FX25_CHECKS`].
     pub fn fx25_index(&self) -> u8 {
         FX25_CHECKS.iter().position(|&c| c == self.fx25).unwrap_or(0) as u8
     }
 
-    /// The digipeater is on (0 5 8 1).
+    /// The digipeater is on (0 5 7 1).
     pub fn digi_on(&self) -> bool {
         self.digi & DIGI_ON != 0
     }
 
-    /// The digipeater also relays frames that name our callsign (0 5 8 2).
+    /// The digipeater also relays frames that name our callsign (0 5 7 2).
     pub fn digi_mycall(&self) -> bool {
         self.digi & DIGI_MYCALL != 0
     }
 
-    /// Seconds the digipeater waits before relaying (0 5 8 3).
+    /// Seconds the digipeater waits before relaying (0 5 7 3).
     pub fn digi_wait_s(&self) -> u8 {
         (self.digi >> 4 & 7).min(DIGI_WAIT_MAX)
     }
@@ -177,12 +177,12 @@ impl AprsCfg {
     }
 }
 
-/// The paths offered (0 5 6 1, APRS-26): name and entries; the custom path (0 5 6 2) is [`PATH_CUSTOM`].
+/// The paths offered (0 5 9 1, APRS-26): name and entries; the custom path (0 5 9 2) is [`PATH_CUSTOM`].
 pub const PATHS: [(&str, &[&[u8]]); 3] = [("None", &[]), ("WIDE1-1", &[b"WIDE1-1"]), ("WIDE1-1,WIDE2-1", &[b"WIDE1-1", b"WIDE2-1"])];
-/// 0 5 6 1 on the custom path (0 5 6 2).
+/// 0 5 9 1 on the custom path (0 5 9 2).
 pub const PATH_CUSTOM: u8 = PATHS.len() as u8;
 
-/// A custom path (0 5 6 2, APRS-26) is one or two entries split by a comma, each a callsign or alias of 1-6
+/// A custom path (0 5 9 2, APRS-26) is one or two entries split by a comma, each a callsign or alias of 1-6
 /// capitals and digits with an optional -SSID of 1-15 (WIDE1-1, WIDE2-2, a club's call), and fits
 /// [`CUSTOM_LEN`].
 pub fn path_ok(t: &[u8]) -> bool {
@@ -208,14 +208,14 @@ pub const PATH_DEFAULT: u8 = 2;
 pub const DIGI_ON: u8 = 1;
 pub const DIGI_MYCALL: u8 = 2;
 pub const DIGI_WAIT_MAX: u8 = 5;
-/// 0 5 8 2's values.
+/// 0 5 7 2's values.
 pub const DIGI_ALIASES: [&str; 2] = ["WIDE1-1", "WIDE1-1, my call"];
 
 /// Bit 7 of [`AprsCfg::beacon`].
 const BEACON_PAUSED: u8 = 0x80;
-/// Timed beacons (0 5 5 1). APRS-9's 30 s floor is well under the shortest.
+/// Timed beacons (0 5 6 1). APRS-9's 30 s floor is well under the shortest.
 pub const BEACON_MINS: [u8; 8] = [1, 2, 5, 10, 15, 20, 30, 60];
-/// Distance beacons (0 5 5 1, APRS-24), in tenths of a kilometre: 0.1 to 10 km.
+/// Distance beacons (0 5 6 1, APRS-24), in tenths of a kilometre: 0.1 to 10 km.
 pub const BEACON_KM10: [u8; 7] = [1, 2, 5, 10, 20, 50, 100];
 const TIMED: usize = 2;
 const DISTANCE: usize = TIMED + BEACON_MINS.len();
@@ -295,7 +295,7 @@ pub fn region_freq(r: Option<Region>) -> Freq10 {
     mhz(144) + k * 100
 }
 
-/// The frequency's range on 0 5 7 1: chip 0's (APRS-21).
+/// The frequency's range on 0 5 4: chip 0's (APRS-21).
 pub(crate) const F_MIN: Freq10 = mhz(64);
 pub(crate) const F_MAX: Freq10 = mhz(300);
 
@@ -359,7 +359,7 @@ impl App {
         !self.set.aprs_mode && !self.low_power() && !s.vfo_mode && s.ch.is_some_and(|c| c.flags & crate::chan::FLAG_APRS != 0)
     }
 
-    /// Automatic beacons are on (0 5 5 1 timed, distance or smart; APRS-24): with APRS mode off they still hold C
+    /// Automatic beacons are on (0 5 6 1 timed, distance or smart; APRS-24): with APRS mode off they still hold C
     /// (APRS-29). Manual ("Beacon now" only) doesn't.
     pub fn beacons_on(&self) -> bool {
         self.aprs.beacons_on() && !self.low_power()
@@ -448,8 +448,8 @@ impl App {
         self.aprs
     }
 
-    /// The APRS frequency: 0 5 7 1, or the region's.
-    /// APRS-30: our APRS address: the callsign without any SSID typed into it, then 0 5 4 1's (none for 0).
+    /// The APRS frequency: 0 5 4, or the region's.
+    /// APRS-30: our APRS address: the callsign without any SSID typed into it, then 0 5 5 1's (none for 0).
     /// Empty without a callsign.
     pub fn aprs_call(&self) -> Buf<10> {
         let c = self.callsign();
@@ -509,12 +509,12 @@ impl App {
         }
     }
 
-    /// The custom path as typed (0 5 6 2).
+    /// The custom path as typed (0 5 9 2).
     pub fn aprs_custom_path(&self) -> &[u8] {
         self.aprs.custom_text()
     }
 
-    /// A custom path typed at 0 5 6 2, already checked by [`path_ok`]: kept and chosen (APRS-26).
+    /// A custom path typed at 0 5 9 2, already checked by [`path_ok`]: kept and chosen (APRS-26).
     pub(crate) fn set_aprs_custom_path(&mut self, t: &[u8]) {
         let mut c = self.aprs;
         c.custom = [0; CUSTOM_LEN];
@@ -523,13 +523,13 @@ impl App {
         self.set_aprs(c);
     }
 
-    /// 0 5 7 1 by the knob: 5 kHz steps from where it is, within chip 0's range.
+    /// 0 5 4 by the knob: 5 kHz steps from where it is, within chip 0's range.
     pub(crate) fn step_aprs_freq(&mut self, d: i32) {
         let f = (self.aprs_freq() as i64 + d as i64 * 500).clamp(F_MIN as i64, F_MAX as i64) as Freq10;
         let _ = self.set_aprs_freq(f); // clamped and on the grid already
     }
 
-    /// 0 5 7 1 typed (MENU-31, TERM-12): 64-300 MHz on the 5 kHz grid it is stored in; the region's own frequency
+    /// 0 5 4 typed (MENU-31, TERM-12): 64-300 MHz on the 5 kHz grid it is stored in; the region's own frequency
     /// is kept as "the region's" (f5k 0), as the knob does.
     pub(crate) fn set_aprs_freq(&mut self, f: Freq10) -> Result<(), &'static str> {
         if !(F_MIN..=F_MAX).contains(&f) {
@@ -543,7 +543,7 @@ impl App {
         Ok(())
     }
 
-    /// 0 5 5 1 by the knob.
+    /// 0 5 6 1 by the knob.
     pub(crate) fn step_beacon(&mut self, d: i32) {
         let m = (self.aprs.mode() as i32 + d).rem_euclid(BEACON_MODES as i32) as u8;
         self.set_aprs(AprsCfg { beacon: m, ..self.aprs });

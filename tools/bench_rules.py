@@ -40,7 +40,7 @@ RULE_TAGS = {
     "dcs_inverted": {"TONE-20.2": "all"},  # every code I decodes inverted, never normal
     "dcs_level": {"TONE-1.2": "part"},
     "dcs_typed": {"TONE-15": "part"},  # D000 and D777 typed go out
-    "endtone_steps": {"TONE-10.2": "all", "TONE-10.1": "part"},  # on a real unkey; 10.1: on a VFO 0 8 5 3 picks it
+    "endtone_steps": {"TONE-10.2": "all", "TONE-10.1": "part"},  # on a real unkey; 10.1: on a VFO 0 8 4 picks it
     "endtone_level": {"TONE-19.4": "all", "TONE-10.3": "part"},  # 10.3: against TONE-19.4; voice peak not measured
     "endtone_lead_in": {"TONE-10.4": "all"},  # silent lead-in, then full level from the first step's start
     "endtone_hold": {"TONE-10.5": "all", "TX-47.1": "part", "LINK-20.6": "part"},  # 400 ms carrier after the tone

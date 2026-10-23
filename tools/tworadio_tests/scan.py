@@ -4,7 +4,7 @@ SCAN-22; KEY-18).
 The zone (made for the test, removed after): TR 2M on 145.495 and TR 70CM on 446.475 (the approved frequencies,
 so a PTT on any hit transmits only there), two receive-only quiet channels, and TR RPT receiving 144.895 with a
 +0.6 MHz shift (its input is 145.495, SCAN-22). The scan starts on TR 2M (channel mode, SIDE2: the current zone,
-0 1 4). Settings for the test: scan inputs off, priority check off, the resume rule; scan target (Current zone) and
+0 1 3). Settings for the test: scan inputs off, priority check off, the resume rule; scan target (Current zone) and
 Return to (Start) at their defaults (not settable yet).
 """
 from .core import UHF, VHF, Channels, left, rx_quiet, state, stopped_at, test, tx_on
@@ -20,11 +20,11 @@ ZONE_CHANS = (
 
 def scan_fixture(t, resume="Carrier drop"):
     rx_quiet(t)
-    for path, want in (("0 1 4", "Current zone"), ("0 1 6 4", "Start")):  # not settable yet: their defaults
+    for path, want in (("0 1 3", "Current zone"), ("0 1 8 6", "Start")):  # not settable yet: their defaults
         got = t.rx.get(path)
         t.need(got == want, f"{path} is {got!r}, not {want!r}")
     ch = Channels(t, ZONE_CHANS)
-    for path, v in (("0 1 6 3", "Off"), ("0 1 6 5", "Off"), ("0 1 5", resume)):
+    for path, v in (("0 1 8 5", "Off"), ("0 1 5", "Off"), ("0 1 4", resume)):
         t.rx.set(path, v)
     t.defer(lambda: stop_scan(t))
     return ch
@@ -62,7 +62,7 @@ def dropped(t, ev, stop):
 
 @test("SCAN-5", "SCAN-20.2", keyups=(4, 4.5, 1.5, 3, 3), idle=40, fast=True)
 def resume_rules(t):
-    """Each resume rule (0 1 5), the other radio keyed on TR 2M: carrier drop: held while the carrier lasts, on 2 s
+    """Each resume rule (0 1 4), the other radio keyed on TR 2M: carrier drop: held while the carrier lasts, on 2 s
     after it drops (1.6 to 2.6 s); 3 s: on 3 s after the stop with the carrier still there; 5 s with the carrier
     gone after 1.5 s: on 2 s after the drop, before the 5 s (SCAN-20.2); stop on hit: the scan ends there; the
     zone's own rule (stop) beats the radio's (3 s)."""
@@ -81,7 +81,7 @@ def resume_rules(t):
         t.note(f"carrier drop: on {gt - ct:.2f} s after the drop")
         t.check(1.6 <= gt - ct <= 2.6, "on 2 s after the carrier drops", f"{gt - ct:.2f} s")
 
-    t.rx.set("0 1 5", "3 s")
+    t.rx.set("0 1 4", "3 s")
     start_scan(t, ch)
     with t.key(4.5, "resume: 3 s"):
         u, st = stopped_at(t, "A", VHF, 1.2)
@@ -96,7 +96,7 @@ def resume_rules(t):
             a, _ = t.poll(t.rx, lambda u: state(u, "A") == "RX", 1.0, light=True)
             t.check(a is not None, "and stops on the carrier again", state(t.rx.state(), "A"))
 
-    t.rx.set("0 1 5", "5 s")
+    t.rx.set("0 1 4", "5 s")
     start_scan(t, ch)
     with t.key(1.5, "resume: 5 s, a short carrier") as ev:
         u, st = stopped_at(t, "A", VHF, 1.3)
@@ -108,7 +108,7 @@ def resume_rules(t):
         t.check(1.6 <= gt - ct <= 2.6 and gt - st < 4.6, "on 2 s after the drop, before its 5 s",
                 f"{gt - ct:.2f} s after the drop, {gt - st:.2f} s after the stop")
 
-    t.rx.set("0 1 5", "Stop on hit")
+    t.rx.set("0 1 4", "Stop on hit")
     start_scan(t, ch)
     with t.key(3, "resume: stop on hit"):
         u, _ = stopped_at(t, "A", VHF, 2.0)
@@ -119,7 +119,7 @@ def resume_rules(t):
     t.check(all(u.cards["A"].get("scan") == 0 and u.cards["A"].get("name") == "TR 2M" for _, u in got),
             "and stays on TR 2M after the carrier", [u.cards["A"] for _, u in got[-1:]])
 
-    t.rx.set("0 1 5", "3 s")
+    t.rx.set("0 1 4", "3 s")
     ch.zone_rule("resume=stop")
     start_scan(t, ch)
     with t.key(3, "the zone's own rule: stop on hit"):
@@ -131,7 +131,7 @@ def resume_rules(t):
 
 @test("SCAN-22", keyups=(3, 3), idle=10)
 def scan_inputs_stop_on_a_repeater_input(t):
-    """TR 2M skipped, so 145.495 is only TR RPT's input (144.895 +0.6). Scan inputs off (0 1 6 3): the carrier on
+    """TR 2M skipped, so 145.495 is only TR RPT's input (144.895 +0.6). Scan inputs off (0 1 8 5): the carrier on
     145.495 never stops the scan; on: the scan stops on 145.495, the input of TR RPT."""
     ch = scan_fixture(t)
     t.rx.cmd("ch 981 skip on")
@@ -140,7 +140,7 @@ def scan_inputs_stop_on_a_repeater_input(t):
     with t.key(3, "scan inputs off"):
         u, _ = stopped_at(t, "A", VHF, 2.4)
         t.check(u is None, "scan inputs off: no stop on 145.495", u and u.cards["A"])
-    t.rx.set("0 1 6 3", "On")
+    t.rx.set("0 1 8 5", "On")
     start_scan(t, ch)
     with t.key(3, "scan inputs on"):
         u, _ = stopped_at(t, "A", VHF, 2.4)

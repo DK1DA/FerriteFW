@@ -23,12 +23,12 @@ fn toast_head(t: &T) -> std::string::String {
     t.app.toast.map(|x| std::string::String::from_utf8_lossy(x.head.as_bytes()).into_owned()).unwrap_or_default()
 }
 
-/// SETUP-1 to SETUP-5, SETUP-12: MENU 0 9 8 1 runs setup; the callsign is typed in capitals; # skips to the
+/// SETUP-1 to SETUP-5, SETUP-12: MENU 0 9 7 1 runs setup; the callsign is typed in capitals; # skips to the
 /// summary; OK starts the radio; every answer is the menu's setting.
 #[test]
 fn setup_runs_and_writes_settings() {
     let mut t = T::new();
-    menu0(&mut t, &[9, 8, 1]);
+    menu0(&mut t, &[9, 7, 1]);
     assert!(matches!(t.app.screen(), Screen::Setup(Setup { page: 0, .. })));
     t.tap(Key::Menu); // page 2: callsign
     // V A 7 F E R with multi-tap: 8 8 8 (V), 2 (A), * 7 * (digit), 3 3 3 (F), 3 3 (E), 7 7 7 (R)
@@ -74,16 +74,16 @@ fn setup_runs_and_writes_settings() {
     t.tap(Key::Menu); // OK: start
     assert_eq!(t.app.screen(), Screen::Home);
     assert!(t.app.settings().setup_done);
-    // MENU 0 8 7 1 shows the same callsign (SETUP-5), and opens setup's callsign page alone.
-    menu0(&mut t, &[8, 7]);
+    // MENU 0 8 6 1 shows the same callsign (SETUP-5), and opens setup's callsign page alone.
+    menu0(&mut t, &[8, 6]);
     let mut b = Buf::<24>::new();
     let dev = Device::default();
-    assert_eq!(crate::screens::groups::wired(&t.app, &dev, &[8, 7, 1], &mut b), Some(true));
+    assert_eq!(crate::screens::groups::wired(&t.app, &dev, &[8, 6, 1], &mut b), Some(true));
     assert_eq!(b.as_bytes(), b"VA7FER");
     t.tap(Key::Digit(1));
     assert!(matches!(t.app.screen(), Screen::Setup(Setup { page: 1, .. })));
     t.tap(Key::Menu);
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 7, row: 0 }), "OK returns to the list");
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 6, row: 0 }), "OK returns to the list");
 }
 
 /// BOOT-12: the first-boot hook opens setup, where BACK on the first page goes nowhere; defaults give a radio.
@@ -105,14 +105,14 @@ fn setup_at_first_boot() {
 #[test]
 fn extend_tx_warns_once() {
     let mut t = T::new();
-    menu0(&mut t, &[8]);
-    t.tap(Key::Digit(9)); // the list: Extend TX, Dry TX (TX-48)
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 9, row: 0 }));
+    menu0(&mut t, &[8, 8]); // Transmit's Advanced: Extend TX is 4, Dry TX 5 (TX-48)
+    t.tap(Key::Digit(4));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 8, row: 3 }));
     t.knob(1);
     assert!(matches!(t.app.screen(), Screen::ExtendTx(_)));
     t.tap(Key::Exit); // keep off
     assert!(!t.app.settings().extend_tx);
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 9, row: 0 }));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 8, row: 3 }));
     t.knob(1);
     t.tap(Key::Menu); // turn on
     assert!(t.app.settings().extend_tx);
@@ -122,7 +122,7 @@ fn extend_tx_warns_once() {
     assert!(matches!(t.app.screen(), Screen::Group(_)));
 }
 
-/// TX-48, SBAR-22: Dry TX (0 8 9 2) turns on and off on the radio's menu, at once (no warning), shows "DRY" in the
+/// TX-48, SBAR-22: Dry TX (0 8 8 5) turns on and off on the radio's menu, at once (no warning), shows "DRY" in the
 /// status bar and "Dry TX: no RF" on the Transmit screen's readback, has no undo, and is never stored: what is
 /// saved (settings and state) is the same on or off, and the next power-on starts with it off.
 #[test]
@@ -145,9 +145,9 @@ fn dry_tx_switch() {
     let before = save(&t);
     assert!(!t.app.dry_tx(), "off at power-on");
     assert!(!t.app.status_bar(&t.live, &dev).dry);
-    menu0(&mut t, &[8, 9]);
-    t.tap(Key::Digit(2));
-    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 9, row: 1 }));
+    menu0(&mut t, &[8, 8]);
+    t.tap(Key::Digit(5));
+    assert_eq!(t.app.screen(), Screen::Group(Group { g: 8, sub: 8, row: 4 }));
     t.knob(1);
     assert!(t.app.dry_tx(), "on, no warning");
     assert!(t.app.status_bar(&t.live, &dev).dry, "SBAR-22: DRY in the bar");
@@ -604,7 +604,7 @@ fn owner_card_from_setup_to_boot() {
     use ferrite_ui::boot::{self, BootInfo};
     let mut t = T::new();
     t.app.set.set_callsign(b"va7fer");
-    menu0(&mut t, &[9, 8, 1]);
+    menu0(&mut t, &[9, 7, 1]);
     for _ in 0..3 {
         t.tap(Key::Menu); // callsign, region, owner card
     }

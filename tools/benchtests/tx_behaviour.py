@@ -24,7 +24,7 @@ Safety, as bench.py's own (and through its code: Bench.check_build, Bench.gate, 
     off and the run stops;
   - keepalives every 0.5 s on their own thread; KEY off at each key-up's deadline from that thread whatever the
     test is doing, and in `finally` always, and at exit;
-  - Extend TX (0 8 9) changes only on the radio (the link can't set it): the 406.025 MHz refusal probe
+  - Extend TX (0 8 8) changes only on the radio (the link can't set it): the 406.025 MHz refusal probe
     runs only when it was turned on by hand before the run (EXTEND_HAND), else it is left out.
 Everything a test changes (slots A, B and C, settings, the key lock, `rx both`, txtest) is put back after it, and
 the whole radio checked against its snapshot at the end.
@@ -59,16 +59,16 @@ from bench import BenchError, SafetyError, TermError, mhz10  # noqa: E402
 SUITE = "tx-behaviour"
 VHF, UHF = 145.495, 446.475
 SPLIT_TX = 145.575  # VFO-16's same-band split: RX 145.495, TX here (approved Oct 15, 2026)
-CALLSIGN, CW_ID = "0 8 7 1", "0 8 7 2"
+CALLSIGN, CW_ID = "0 8 6 1", "0 8 6 2"
 CW_HZ, CW_DIT_S = 700, 0.060  # VOX-12: 700 Hz at 20 wpm (tonegen::CW_HZ, dit_ms(20))
 TONE_LEAD_S = 0.2  # tonegen::TONE_LEAD_MS: the silent lead-in before the end tone or the CW ID
 LEDS = "0 7 6"
 SCREEN_TIMEOUT, ON_TRANSMIT, WAKE_ON = "0 7 4 1", "0 7 4 3", "0 7 4 4"
 BATTERY_SAVE = "0 7 7"
-TRIM = "0 9 7 2"
+TRIM = "0 9 9 4"
 EXTEND_TX = bench.EXTEND_TX
-# Extend TX changes only on the radio, on its own screen (`set 0 8 9` is refused over the link): a hand step.
-EXTEND_HAND = "Extend TX is off: turn it on on the radio (MENU 0 8 9, its warning, OK) for this test, off after"
+# Extend TX changes only on the radio, on its own screen (`set 0 8 8` is refused over the link): a hand step.
+EXTEND_HAND = "Extend TX is off: turn it on on the radio (MENU 0 8 8, its warning, OK) for this test, off after"
 PAST_TX = 600.0  # tunable (receive reaches 630 MHz) but past every transmit range, Extend TX's included (TX-5)
 END_TONE = bench.END_TONE
 WAKE_VALUES = ["Keys", "Keys and RX", "Keys, RX and TX"]
@@ -1301,7 +1301,7 @@ def broadcast_muted_keyed(r):
 
 @test("txb_trim_follows", {"CAL-13": "part"}, 2, 5.0, 16)
 def trim_follows(r):
-    """Crystal trim (0 9 7 2) 0 then +2 ppm: the carrier moves by about 2 ppm of 145.495 MHz (291 Hz, ±30 %) and
+    """Crystal trim (0 9 9 4) 0 then +2 ppm: the carrier moves by about 2 ppm of 145.495 MHz (291 Hz, ±30 %) and
     REG_38/39 (the chip's frequency) change with it."""
     r.setup()
     got = {}
@@ -1360,12 +1360,12 @@ def _cw_s(call):
 
 @test("txb_cw_id", {"TX-26": "part", "TX-40": "part"}, 2, 1.0 + 0.35 + _cw_s(CW_CALL_EST) + 1.0 + 0.35, 40)
 def cw_id(r):
-    """CW ID every 10 min (0 8 7 2) with the radio's callsign (0 8 7 1) and the Beep end tone, after a restart
+    """CW ID every 10 min (0 8 6 2) with the radio's callsign (0 8 6 1) and the Beep end tone, after a restart
     (REBOOT, not keyed: the ID's timer starts at power-on). The first remote unkey: the end tone, then the
     callsign's 700 Hz elements (20 wpm), then the carrier drops (the 400 ms hold) with nothing after; the one key-up
     past the 5 s burst (the duty exception). A second key-up straight after: the end tone and no ID."""
     call = r.get(CALLSIGN)
-    r.need(call and call != "Empty", "no callsign on the radio (0 8 7 1)")
+    r.need(call and call != "Empty", "no callsign on the radio (0 8 6 1)")
     steps = cw_steps(call)
     els = sum(1 for on, _ in steps if on)
     cw_s = sum(s for _, s in steps)
@@ -1564,7 +1564,7 @@ def plan(cfg, a):
     bench.say("  save: slots A, B, C (their VFOs), the active slot, the end tone (set Off for the run)")
     if any(t["fn"] is cw_id for t in tests):
         bench.say("  cw_id restarts the radio first (REBOOT, never keyed; settings are saved before the restart, "
-                  "LINK-24.1), then sets 0 8 7 2 and the end tone and puts both back")
+                  "LINK-24.1), then sets 0 8 6 2 and the end tone and puts both back")
     for i, t in enumerate(tests, 1):
         rules = ", ".join(f"{k}{'' if v == 'all' else ' (part)'}" for k, v in t["rules"].items())
         bench.say(f" {i:2d}. {t['fn'].__name__} [{rules}]: {t['doc']} — {t['keyups']} key-up"
@@ -1588,7 +1588,7 @@ def plan(cfg, a):
 class FakeRadio(bench.FakeRadio):
     """bench's FakeRadio plus: the readback and remote keys (a few screens), `gpio`, `bk`, `mem32`, `si`, `gps
     query`, `rx both`, txtest's signals and filters, REBOOT and HELLO while keyed, keying a named slot, the crystal
-    trim, a split (`slot A split F`; split_to: a radio that stores another TX than asked), the CW ID (0 8 7 2's
+    trim, a split (`slot A split F`; split_to: a radio that stores another TX than asked), the CW ID (0 8 6 2's
     every 10 min from power-on, VOX-12) after the end tone. `bugs`: names of behaviours to break (the selftest's
     negative checks)."""
 
@@ -1797,12 +1797,12 @@ class FakeRadio(bench.FakeRadio):
         elif self.locked:
             return
         elif n == "BACK":
-            self.screen = {"Value": "Quick", "Quick": "Home", "Advanced": "Home", "Group": "Advanced",
+            self.screen = {"Value": "Quick", "Quick": "Home", "More": "Home", "Group": "More",
                            "Zones": "Group"}.get(self.screen, "Home")
         elif n == "MENU":
             self.screen = {"Home": "Quick", "Quick": "Value"}.get(self.screen, self.screen)
         elif n.isdigit():
-            self.screen = {"Quick": "Advanced" if n == "0" else "Value", "Advanced": "Group",
+            self.screen = {"Quick": "More" if n == "0" else "Value", "More": "Group",
                            "Group": "Zones"}.get(self.screen, self.screen)
         self.toast = None
 

@@ -115,7 +115,7 @@ fn aprs_heard_in_and_out() {
 #[test]
 fn menu_paths_reach_the_lists() {
     // MENU 0 5 2 from home: advanced, group 5, then 2 (MENU-5)
-    for (path, name) in [([5, 2], "APRS messages"), ([4, 1], "Event log"), ([2, 1], "Channel browser"), ([2, 3], "Zones"), ([1, 7], "Range presets"), ([1, 8], "Skip list"), ([6, 2], "GPS position"), ([6, 7], "Waypoints"), ([5, 1], "APRS heard")] {
+    for (path, name) in [([5, 2], "APRS messages"), ([4, 1], "Event log"), ([2, 1], "Channel browser"), ([2, 3], "Zones"), ([1, 6], "Range presets"), ([1, 7], "Skip list"), ([6, 2], "GPS position"), ([6, 7], "Waypoints"), ([5, 1], "APRS heard")] {
         let mut t = T::new();
         t.hold(Key::Menu);
         t.tap(Key::Digit(path[0]));
@@ -1008,8 +1008,8 @@ fn aprs_weather_station() {
 }
 
 /// GPS-35: the position editor's From GPS row keeps the current fix as the fixed position (position and altitude);
-/// with no fix, or only the fixed position standing in, it says so and changes nothing. APRS-31: 0 5 4 5 opens the
-/// same editor, and 0 5 4 4 (Fixed) makes beacons send it even with a fix.
+/// with no fix, or only the fixed position standing in, it says so and changes nothing. APRS-31: 0 5 5 5 opens the
+/// same editor, and 0 5 5 4 (Fixed) makes beacons send it even with a fix.
 #[test]
 fn fixed_position_from_the_gps_fix() {
     let mut t = T::new();
@@ -1037,7 +1037,7 @@ fn fixed_position_from_the_gps_fix() {
     assert_eq!((b.pos, b.age_s), (was, crate::gpsdata::FIXED_AGE), "Fixed: the fixed position, even with a fix");
     t.app.set.fixed_on = false;
     assert_eq!(t.app.beacon_fix(gps).unwrap().pos, crate::data::Pos { lat: 5, lon: 6 }, "no fixed position: the fix");
-    assert_eq!(crate::screens::nav::menu0(&[5, 4, 5]), Some(Dest::PositionEntry));
+    assert_eq!(crate::screens::nav::menu0(&[5, 5, 5]), Some(Dest::PositionEntry));
 }
 
 /// APRS-38, APRS-39: an empty recipient lists saved, recent and heard callsigns and the services; ◀▶ go by

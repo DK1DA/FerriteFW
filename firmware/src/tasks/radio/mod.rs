@@ -393,7 +393,7 @@ struct Tx {
     /// second PTT given.
     plan: Option<(Freq10, Region, bool, bool)>,
     /// The key-up now is a data one ([`RadioCmd::TransmitData`]: APRS) at this power level: no end tone or CW ID
-    /// after it (TONE-11), the APRS power (0 5 5 4) instead of the slot's.
+    /// after it (TONE-11), the APRS power (0 5 6 3) instead of the slot's.
     data: Option<u8>,
     /// TX-42: every PTT input has read released since boot.
     ptt: ferrite_radio::ptt::PttGuard,
@@ -409,8 +409,8 @@ struct Tx {
     end: [u8; 4],
     tail: [bool; 4],
     slot: u8,
-    /// 0 8 5 2's phase (0 55 Hz, 1-3 the CTCSS phase shifts), 0 8 7 2's CW ID (0 off, 1 every 10 min, 2 on unkey)
-    /// with the callsign (0 8 7 1; empty: no ID, VOX-10), 0 8 6 4's DTMF sidetone (DTMF-8).
+    /// 0 8 8 3's phase (0 55 Hz, 1-3 the CTCSS phase shifts), 0 8 6 2's CW ID (0 off, 1 every 10 min, 2 on unkey)
+    /// with the callsign (0 8 6 1; empty: no ID, VOX-10), 0 8 5 4's DTMF sidetone (DTMF-8).
     phase: u8,
     cw: u8,
     cw_call: [u8; 10],

@@ -745,7 +745,7 @@ const Ferrite = (() => {
       this.mtu = Math.max(23, Math.min(517, opts.mtu || 23));
       this.note = this.mtu - 3;
       this.screen = "Home"; this.sel = 0; this.sq = 4; this.keyed = false; this.pending = []; this.writes = [];
-      this.rows = ["Squelch", "TX power", "Mode", "Tones", "Offset", "Step", "Watch", "Channel", "Battery Save", "Advanced settings"];
+      this.rows = ["Squelch", "TX power", "Mode", "Tones", "Offset", "Step", "Watch", "Channel", "Battery Save", "More"];
     }
     async connect() { return this.mtu === 23 ? "fake radio" : `fake radio (MTU ${this.mtu})`; }
     async writeRaw(bytes) {

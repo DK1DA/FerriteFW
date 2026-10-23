@@ -68,9 +68,9 @@ pub enum Dest {
     ZoneEdit,
     /// A13: SAME location codes (MENU 0 4 8 2).
     LocationCodes,
-    /// A14: DTMF dialer (MENU 0 8 6 1).
+    /// A14: DTMF dialer (MENU 0 8 5 1).
     DtmfDialer,
-    /// A15: DTMF memories (MENU 0 8 6 2).
+    /// A15: DTMF memories (MENU 0 8 5 2).
     DtmfMemories,
     /// A16: APRS message compose.
     Compose,
@@ -80,11 +80,11 @@ pub enum Dest {
     Contacts,
     /// A17: PIN entry.
     Pin,
-    /// A18: confirm a destructive action (MENU-23); MENU 0 9 8 2 reset.
+    /// A18: confirm a destructive action (MENU-23); MENU 0 9 7 2 reset.
     Confirm,
     /// A19: the Extend TX warning.
     ExtendTx,
-    /// A20-A27: first-run setup, eight pages (MENU 0 9 8 1).
+    /// A20-A27: first-run setup, eight pages (MENU 0 9 7 1).
     Setup,
 
     // ---- B: radio activity ----
@@ -132,9 +132,9 @@ pub enum Dest {
     Browse,
     /// C11: zones (MENU 0 2 3).
     Zones,
-    /// C12: range presets (MENU 0 1 7).
+    /// C12: range presets (MENU 0 1 6).
     RangePresets,
-    /// C13: skip list (MENU 0 1 8).
+    /// C13: skip list (MENU 0 1 7).
     SkipList,
     /// C14: waypoints (MENU 0 6 7).
     Waypoints,
@@ -158,13 +158,13 @@ pub enum Dest {
     Sub(u8, u8),
     /// D6: the Status page (#, MENU 0 0).
     Status,
-    /// D7: About, battery, self-test (MENU 0 9 9).
+    /// D7: About, battery, self-test (MENU 0 9 8).
     About,
-    /// D8: calibration, read only (MENU 0 9 7 1).
+    /// D8: calibration, read only (MENU 0 9 9 3).
     Calibration,
     /// D9: key test (MENU 0 9 1 3).
     KeyTest,
-    /// D10: advanced squelch per band (MENU 0 9 5 1).
+    /// D10: advanced squelch per band (MENU 0 9 9 1).
     AdvSquelch,
     /// D15: SSB patch confirm at boot.
     SsbConfirm,
@@ -241,7 +241,7 @@ impl Dest {
             HfRecent => ("HF recent", "20a", "C18"),
             FmPresets => ("FM presets", "20", "C19"),
             Quick => ("Quick", "11", "D1"),
-            Advanced => ("Advanced", "11", "D2"),
+            Advanced => ("More", "11", "D2"),
             Group(_) => ("Settings group", "11", "D3"),
             Sub(..) => ("Settings list", "11", "D3"),
             Status => ("Status", "8", "D6"),
@@ -312,11 +312,10 @@ pub const ALL: [Dest; 67] = {
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 60] = [
-    (&[1, 2], Dest::Sub(1, 2)),
-    (&[1, 6], Dest::Sub(1, 6)),
-    (&[1, 7], Dest::RangePresets),
-    (&[1, 8], Dest::SkipList),
+pub const MENU0: [(&[u8], Dest); 56] = [
+    (&[1, 8], Dest::Sub(1, 8)),
+    (&[1, 6], Dest::RangePresets),
+    (&[1, 7], Dest::SkipList),
     (&[2, 1], Dest::Browse),
     (&[2, 2], Dest::AddRepeater),
     (&[2, 3], Dest::Zones),
@@ -335,28 +334,26 @@ pub const MENU0: [(&[u8], Dest); 60] = [
     (&[4, 8, 2], Dest::LocationCodes),
     (&[5, 1], Dest::AprsHeard),
     (&[5, 2], Dest::AprsMessages),
-    (&[5, 4], Dest::Sub(5, 4)),
     (&[5, 5], Dest::Sub(5, 5)),
     (&[5, 6], Dest::Sub(5, 6)),
+    (&[5, 9], Dest::Sub(5, 9)),
     (&[5, 7], Dest::Sub(5, 7)),
     (&[5, 8], Dest::Sub(5, 8)),
-    (&[5, 9], Dest::Sub(5, 9)),
     (&[6, 2], Dest::GpsPosition),
     (&[6, 7], Dest::Waypoints),
     (&[6, 9], Dest::PositionEntry),
-    (&[5, 4, 5], Dest::PositionEntry), // APRS-31: the same fixed position
+    (&[5, 5, 5], Dest::PositionEntry), // APRS-31: the same fixed position
     (&[7, 3], Dest::Sub(7, 3)),
     (&[7, 4], Dest::Sub(7, 4)),
     (&[7, 5], Dest::Sub(7, 5)),
     (&[7, 7], Dest::Sub(7, 7)), // Battery Save, Low Power Mode (PWR-24)
     (&[8, 1], Dest::Sub(8, 1)),
     (&[8, 2], Dest::Sub(8, 2)),
+    (&[8, 8], Dest::Sub(8, 8)), // Advanced: subtone level, tail, Extend TX, Dry TX (TX-48)
     (&[8, 5], Dest::Sub(8, 5)),
+    (&[8, 5, 1], Dest::DtmfDialer),
+    (&[8, 5, 2], Dest::DtmfMemories),
     (&[8, 6], Dest::Sub(8, 6)),
-    (&[8, 6, 1], Dest::DtmfDialer),
-    (&[8, 6, 2], Dest::DtmfMemories),
-    (&[8, 7], Dest::Sub(8, 7)),
-    (&[8, 9], Dest::Sub(8, 9)), // Extend TX, Dry TX (TX-48)
     (&[9, 1], Dest::Sub(9, 1)),
     (&[9, 1, 3], Dest::KeyTest),
     (&[9, 1, 4], Dest::ShortcutMap),
@@ -364,15 +361,14 @@ pub const MENU0: [(&[u8], Dest); 60] = [
     (&[9, 2], Dest::Sub(9, 2)),
     (&[9, 2, 2], Dest::LinkStatus),
     (&[9, 3], Dest::Sub(9, 3)),
-    (&[9, 5], Dest::Sub(9, 5)),
-    (&[9, 5, 1], Dest::AdvSquelch),
+    (&[9, 9], Dest::Sub(9, 9)),
+    (&[9, 9, 1], Dest::AdvSquelch),
     (&[9, 6], Dest::SsbPatch),
+    (&[9, 9, 3], Dest::Calibration),
     (&[9, 7], Dest::Sub(9, 7)),
-    (&[9, 7, 1], Dest::Calibration),
-    (&[9, 8], Dest::Sub(9, 8)),
-    (&[9, 8, 1], Dest::Setup),
-    (&[9, 8, 2], Dest::Confirm),
-    (&[9, 9], Dest::About),
+    (&[9, 7, 1], Dest::Setup),
+    (&[9, 7, 2], Dest::Confirm),
+    (&[9, 8], Dest::About),
 ];
 
 /// The screen at a MENU 0 path, if the path opens one.

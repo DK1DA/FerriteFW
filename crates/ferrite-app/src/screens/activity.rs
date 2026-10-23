@@ -198,7 +198,7 @@ impl RadioUi {
 }
 
 impl App {
-    /// Region (setup, MENU 0 9 4) and Extend TX (MENU 0 8 9), from outside (the simulator's samples, tests).
+    /// Region (setup, MENU 0 9 4) and Extend TX (MENU 0 8 8), from outside (the simulator's samples, tests).
     pub fn set_region(&mut self, r: Option<Region>, extend_tx: bool) {
         self.set.set_region(r);
         self.set.extend_tx = extend_tx;

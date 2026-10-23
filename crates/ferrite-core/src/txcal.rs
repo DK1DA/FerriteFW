@@ -93,7 +93,7 @@ pub fn valid_trim(b: &[u8]) -> i16 {
 
 /// CAL-12: the word REG_38/39 gets for tuning `f` with the crystal trim `k`, stock's formula exactly (0x0801DDD0):
 /// `f + (f / 100) * k / 435500`, a 64-bit product divided rounding toward zero. k = 0 is `f` itself. The user trim
-/// (MENU 0 9 7 2, not built yet) adds to k when it is.
+/// (MENU 0 9 9 4, not built yet) adds to k when it is.
 pub fn trimmed(f: Freq10, k: i16) -> Freq10 {
     (f as i64 + (f / 100) as i64 * k as i64 / 435_500) as Freq10
 }

@@ -501,7 +501,7 @@ fn confirm_reset() {
     t.tap(Key::Right); // squelch 5
     t.tap(Key::Exit);
     t.hold(Key::Menu);
-    t.digits("982");
+    t.digits("972");
     assert!(matches!(t.app.screen(), Screen::Confirm(c) if c.ask == Ask::Reset { armed: false }));
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Group(_)), "BACK: one level, to the menu the reset came from");

@@ -31,11 +31,11 @@ def info_and_terminal_over_the_link(t):
     chans, zones, presets, slen, region = struct.unpack("<HBBHB", rest[:7])
     call, tail = fl.text(rest[7:])
     t.eq(fl.build_name(tail), t.r.build, "INFO's build is HELLO's")
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     t.check(u.row("Version")["value"].startswith("v" + ver.lstrip("v")), "INFO's version is About's",
             (ver, u.row("Version")["value"]))
     t.check(slen > 16, "the settings record's size", slen)
-    t.eq(call, t.get("0 8 7 1") if call else "", "the callsign")
+    t.eq(call, t.get("0 8 6 1") if call else "", "the callsign")
     t.home()
     u = t.keys("MENU 0 7 1")
     t.eq(t.get("0 7 1"), u.sel["value"], "CMD get 0 7 1 is the menu's Theme")
@@ -50,8 +50,8 @@ def settings_write_keeps_protected_fields(t):
     radio's region and Extend TX whatever the record says (LINK-5); the original record written back restores it."""
     link = t.r.link
     rec = link.read(fl.SETTINGS, 0)
-    call0 = t.get("0 8 7 1")
-    region0, ext0 = t.get("0 9 4"), t.get("0 8 9")
+    call0 = t.get("0 8 6 1")
+    region0, ext0 = t.get("0 9 4"), t.get("0 8 8 4")
     # The record's first fields (persist.rs): callsign (10 bytes), owner (3 x 20), boot card, region, Extend TX.
     t.eq(rec[:10].rstrip(b"\x00").decode("ascii", "replace"), "" if call0 in ("None", "Empty") else call0,
          "the record starts with the callsign")
@@ -61,9 +61,9 @@ def settings_write_keeps_protected_fields(t):
     new[72] = 0 if rec[72] else 1
     try:
         link.write(fl.SETTINGS, 0, bytes(new))
-        t.eq(t.get("0 8 7 1"), "UT9ZZ", "the callsign written, in capitals")
+        t.eq(t.get("0 8 6 1"), "UT9ZZ", "the callsign written, in capitals")
         t.eq(t.get("0 9 4"), region0, "the region kept")
-        t.eq(t.get("0 8 9"), ext0, "Extend TX kept")
+        t.eq(t.get("0 8 8 4"), ext0, "Extend TX kept")
     finally:
         link.write(fl.SETTINGS, 0, rec)
-    t.eq(t.get("0 8 7 1"), call0, "the original record written back: the callsign as it was")
+    t.eq(t.get("0 8 6 1"), call0, "the original record written back: the callsign as it was")

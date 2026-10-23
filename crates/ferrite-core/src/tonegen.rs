@@ -7,7 +7,7 @@ use crate::freq::Freq10;
 /// One step of a tone sequence: Hz (0 = silence) and how long, ms.
 pub type Step = (u16, u16);
 
-/// The end tone choices (TONE-10), index as 0 8 5 3's list: 0 off.
+/// The end tone choices (TONE-10), index as 0 8 4's list: 0 off.
 pub const END_TONES: [&[Step]; 6] = [
     &[],
     &[(1000, 150)],                           // Beep
@@ -110,7 +110,7 @@ pub const TONE_LEAD_MS: u16 = 200;
 pub const TAIL_MS: u16 = 400;
 
 /// Which tail elimination a transmission ends with (TONE-5): stock's 55 Hz tone with no sub-tone (0x0801D078), the
-/// CTCSS phase shift on a CTCSS transmission when 0 8 5 2 picks one, the 134.4 Hz turn-off code on DCS.
+/// CTCSS phase shift on a CTCSS transmission when 0 8 8 3 picks one, the 134.4 Hz turn-off code on DCS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TailKind {
     Tone55,
@@ -118,7 +118,7 @@ pub enum TailKind {
     Shift(u8),
 }
 
-/// The tail for a transmission with this tone word (CHAN-3: bit 15 DCS) and 0 8 5 2's choice (0 55 Hz, 1-3 the
+/// The tail for a transmission with this tone word (CHAN-3: bit 15 DCS) and 0 8 8 3's choice (0 55 Hz, 1-3 the
 /// phase shifts): the phase is for CTCSS only.
 pub fn tail_kind(tx_tone: u16, phase: u8) -> TailKind {
     match tx_tone {
@@ -134,7 +134,7 @@ pub fn dtmf_seq_ms(digits: usize, ms: u16, delay_ms: u16) -> u32 {
     delay_ms as u32 + digits as u32 * 2 * ms as u32
 }
 
-/// APRS-6.1: the message sounds (0 5 7 6), notes as (Hz, ms); 0 Hz is a rest, 0 ms ends the sound. Played from
+/// APRS-6.1: the message sounds (0 7 5 5), notes as (Hz, ms); 0 Hz is a rest, 0 ms ends the sound. Played from
 /// DAC1 like the key beeps (SND-11), the amp on throughout. Index 0 is Off (no notes). One flat table, no slices:
 /// the Radio task reads it, so it sits in fast flash as one named static (slowcheck).
 pub static CHIMES: [[(u16, u16); 5]; 5] = [

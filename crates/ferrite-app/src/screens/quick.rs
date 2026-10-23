@@ -1,5 +1,5 @@
 //! Quick settings (MENU on home; manual chapter 11, MENU-1 and MENU-12 to MENU-22; MenuQuick mock-up): the
-//! active slot's nine settings and "0 Advanced". The knob or ◀▶ change the highlighted value live. On a slot in
+//! active slot's nine settings and "0 More". The knob or ◀▶ change the highlighted value live. On a slot in
 //! the broadcast band the rows are FM's own (presets, step, AGC, radio monitor, sleep timer: BCR-28).
 
 use super::advanced::Advanced;
@@ -21,7 +21,7 @@ use ufmt::uwrite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Quick {
-    /// The highlighted row, 0-9 (9 is "0 Advanced").
+    /// The highlighted row, 0-9 (9 is "0 More").
     pub row: u8,
 }
 
@@ -181,7 +181,7 @@ pub(crate) fn fm_rows(app: &App) -> bool {
     bcast(app)
 }
 
-/// FM's rows on a broadcast slot (BCR-28), then "0 Advanced".
+/// FM's rows on a broadcast slot (BCR-28), then "0 More".
 const FM_ROWS: u8 = fm::OPTIONS.len() as u8;
 
 /// The active slot is in the broadcast band: quick settings are FM's.
@@ -209,7 +209,7 @@ fn render_fm(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>, ro
             (fm::OPTIONS[i as usize].0, fm::option_text(app, cx.dev, i, &mut v))
         } else {
             v.set(b">");
-            ("Advanced", false)
+            ("More", false)
         };
         let r = Row { num: Some(if i < FM_ROWS { i + 1 } else { 0 }), name: name.as_bytes(), value: v.as_bytes(), dot, selected: i == row, grey: false };
         app.list_row(lcd, i as usize, 41 + 22 * i as i32, 22, &r);

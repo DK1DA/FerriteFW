@@ -36,7 +36,7 @@ def scope_opens_and_closes(t):
 def side2_starts_and_stops_a_scan(t):
     """SIDE2 starts a scan on the active slot (the scan screen names its keys: SIDE2 Stop), SIDE2 stops it; the
     slot line says scanning meanwhile; the target follows 0 1 4."""
-    target = t.get("0 1 4")
+    target = t.get("0 1 3")
     u = t.keys("SIDE2")
     u = t.ui(0.3)
     t.eq(u.id, "Scan", "SIDE2: the scan screen")
@@ -66,12 +66,12 @@ def clock_typed_by_hand(t):
     t.eq(u.sel and u.sel["name"], "Clock", "MENU 0 6 6")
     u = t.keys("MENU")
     t.eq(u.id, "Text", "OK: the clock typed by hand")
-    u = t.keys("2 0 2 6 0 2 3 0 1 2 0 0 MENU")
+    u = t.keys("2 0 2 6 0 2 3 0 1 8 0 0 MENU")
     t.check(u.id == "Text" or (u.toast and u.toast["head"]), "Feb 30 refused", (u.id, u.toast))
     t.check(u.toast is not None, "with a reason", u.toast)
     t.home()
     u = t.keys("MENU 0 6 6 MENU")
-    u = t.keys("2 0 2 6 1 0 1 4 1 2 3 4 MENU")
+    u = t.keys("2 0 2 6 1 0 1 3 1 2 3 4 MENU")
     t.check(u.id != "Text", "a good date is taken", (u.id, u.toast))
 
 
@@ -141,9 +141,9 @@ def link_records_round_trip(t):
 
 @test("SND-5", pages=("Group",))
 def end_tone_is_a_transmit_setting(t):
-    """The end tone is in the menus at 0 8 5 3 (Transmit) and in the channel editor's settings."""
-    name, value, _ = t.get_full("0 8 5 3")
-    t.eq(name, "End tone", "0 8 5 3")
-    u = t.keys("MENU 0 8 5 3")
-    t.eq((u.title, u.sel and u.sel["name"], u.sel and u.sel["value"]), ("Tail", "End tone", value),
-         "MENU 0 8 5 3 reaches it")
+    """The end tone is in the menus at 0 8 4 (Transmit) and in the channel editor's settings."""
+    name, value, _ = t.get_full("0 8 4")
+    t.eq(name, "End tone", "0 8 4")
+    u = t.keys("MENU 0 8 4")
+    t.eq((u.title, u.sel and u.sel["name"], u.sel and u.sel["value"]), ("Transmit", "End tone", value),
+         "MENU 0 8 4 reaches it")

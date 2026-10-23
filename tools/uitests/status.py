@@ -75,7 +75,7 @@ def battery_icon_status_about(t):
     u = t.keys("MENU 0 0")
     t.check(u.row("Battery")["value"].endswith("%"), "Status: %", u.row("Battery"))
     t.home()
-    u = t.keys("MENU 0 9 9 RIGHT")
+    u = t.keys("MENU 0 9 8 RIGHT")
     t.check(u.row("Battery")["value"].endswith("V"), "System: volts", u.row("Battery"))
     for path in ("MENU 0 7", "MENU 0 7 3"):
         t.home()
@@ -87,7 +87,7 @@ def battery_icon_status_about(t):
 def about_pages_go_round(t):
     """◀▶ on About go round its pages: About, System, Manual, Keys, Side+PTT, Holds, Menu nos, Self-test; the hint
     bar names the page ▶ goes to; every name fits 8 characters; BACK leaves."""
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     pages = [u]
     for _ in range(8):
         pages.append(t.keys("RIGHT"))
@@ -110,7 +110,7 @@ def about_pages_go_round(t):
 def about_rows(t):
     """About: version, MCU, the unique ID (one row, base32), SPI flash, calibration, the transmit state, self-test, SSB
     patch (installed or the path to install it); System (▶): CPU, RAM, stack free, MCU temp, battery, uptime."""
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     want = ["Version", "MCU", "ID", "SPI flash", "Calibration", "Transmit", "Self-test", "SSB patch"]
     t.eq(u.names(), want, "the About rows")
     t.check(re.fullmatch(r"(?:[0-9A-HJKMNP-TV-Z]{5} ){3}[0-9A-HJKMNP-TV-Z]{5}|Not read", u.row("ID")["value"] or ""),
@@ -149,7 +149,7 @@ def gps_icon_follows_the_fix(t):
 def transmit_lock_follows_the_checks(t):
     """Transmit is Ready only when the MCU and calibration checks pass (Self-test page), and About and Status say
     the same; the calibration page's CRC at install matches while it reads Valid, and a lock names its reason."""
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     tx = u.row("Transmit")["value"]
     cal = u.row("Calibration")["value"]
     u = t.keys("LEFT")
@@ -167,8 +167,8 @@ def transmit_lock_follows_the_checks(t):
     u = t.keys("MENU 0 0")
     t.eq(u.row("Transmit")["value"], tx, "Status says what About says")
     t.home()
-    u = t.keys("MENU 0 9 7 1 MENU")
-    t.eq(u.id, "Info", "OK on 0 9 7 1: the calibration page")
+    u = t.keys("MENU 0 9 9 3 MENU")
+    t.eq(u.id, "Info", "OK on 0 9 9 3: the calibration page")
     page = {r["name"]: r["value"] for r in u.rows}
     t.eq(page.get("Status"), cal, "its status is About's")
     if cal == "Valid":
@@ -180,7 +180,7 @@ def transmit_lock_follows_the_checks(t):
 def no_pending_update_on_a_clean_radio(t):
     """About on a radio with nothing at 0x300000: no "pending stock update" line; there is no update screen in
     the menus (System has no update row)."""
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     t.check(not any("pending" in (r["name"] + r["value"]).lower() or "update" in r["name"].lower() for r in u.rows),
             "no pending-update line", [(r["name"], r["value"]) for r in u.rows])
     t.home()

@@ -111,7 +111,7 @@ def knob_tunes_and_arrows_seek_the_broadcast_card(t):
     t.check(abs(mhz_of_slot(t, "A") - (f1 + khz / 1000)) < 1e-4, "the FM screen's knob tunes slot A", t.slot("A"))
 
 
-@test("BCR-7", pages=("Advanced", "Group"))
+@test("BCR-7", pages=("More", "Group"))
 def no_volume_setting(t):
     """The SI4732's volume is fixed (the knob on top is the volume): no volume setting in any menu group, only the
     beep volume (0 7 5 2)."""
@@ -126,5 +126,5 @@ def no_volume_setting(t):
     t.cmd("slot A vfo 98.1")
     u = t.home()
     u = t.press("MENU", long=True)
-    t.check(u.id in ("Advanced", "Options"), "hold MENU on a broadcast card", u.id)
+    t.check(u.id in ("More", "Options"), "hold MENU on a broadcast card", u.id)
     t.check(not any("volume" in r["name"].lower() for r in u.rows), "no volume there either", u.names())

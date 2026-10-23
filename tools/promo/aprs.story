@@ -53,7 +53,7 @@ script:
 title: Beacons
 layout: right
 left: Beacon now from the APRS card, or automatically.
-right: Timed, by distance or smart beaconing (0 5 5 1). || Beacons go out at their own power, Low by default.
+right: Timed, by distance or smart beaconing (0 5 6 1). || Beacons go out at their own power, Low by default.
 setup: home
 script:
   wait 800ms
@@ -61,7 +61,7 @@ script:
   wait 1500ms
   press OK
   wait 2500ms
-  menu 0 5 5 1
+  menu 0 5 6 1
   wait 1200ms
   knob 1
   wait 700ms
@@ -96,12 +96,12 @@ script:
 ---
 title: FX.25
 layout: right
-left: Forward error correction around each AX.25 frame, sent and received (0 5 7 8).
+left: Forward error correction around each AX.25 frame, sent and received (0 5 9 7).
 right: Plain AX.25 receivers still decode it; FX.25 receivers repair damaged bytes. || 16 check bytes by default.
 setup: home
 script:
   wait 800ms
-  menu 0 5 7 8
+  menu 0 5 9 7
   wait 1500ms
   knob 1
   wait 900ms

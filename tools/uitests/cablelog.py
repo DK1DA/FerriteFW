@@ -1,4 +1,4 @@
-"""Checks read from the cable log (0 9 2 6, TERM-28) while the keys and readback go over Bluetooth: the cable must
+"""Checks read from the cable log (0 9 9 7, TERM-28) while the keys and readback go over Bluetooth: the cable must
 carry no byte from the PC (the first one ends the log), so these run with
 
     tools/uitest.py --port ble:walkie-talkie --cablelog /dev/cu.usbserial-114220 --module cablelog

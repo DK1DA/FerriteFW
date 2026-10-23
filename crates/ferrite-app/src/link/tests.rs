@@ -905,14 +905,14 @@ impl Pc {
     }
 }
 
-/// TX-48: the link's remote keys reach 0 8 9 2 but never change Dry TX (OK, #), on or off; the bar's readback
+/// TX-48: the link's remote keys reach 0 8 8 5 but never change Dry TX (OK, #), on or off; the bar's readback
 /// says `dry=` either way.
 #[test]
 fn remote_keys_never_change_dry_tx() {
     let mut pc = Pc::new(true);
     pc.app.radio.tx_built = true;
-    pc.keys("MENU 0 8 9 2 OK");
-    assert_eq!(std::format!("{:?}", pc.app.screen()), "Group(Group { g: 8, sub: 9, row: 1 })", "on Dry TX's row");
+    pc.keys("MENU 0 8 8 5 OK");
+    assert_eq!(std::format!("{:?}", pc.app.screen()), "Group(Group { g: 8, sub: 8, row: 4 })", "on Dry TX's row");
     assert!(!pc.app.dry_tx(), "OK over the link: still off");
     assert!(pc.lines("bar")[0].contains(" dry=0"));
     pc.app.set_dry_tx(true);
@@ -951,7 +951,7 @@ fn remote_keys_drive_the_menus() {
     pc.keys("MENU");
     assert!(matches!(pc.app.screen(), Screen::Quick(_)));
     let rows = pc.lines("row");
-    assert_eq!(rows.len(), 10, "nine settings and 0 Advanced: {rows:?}");
+    assert_eq!(rows.len(), 10, "nine settings and 0 More: {rows:?}");
     assert!(rows[0].starts_with("row 1 \"Squelch\"") && rows[0].contains(" sel"), "{rows:?}");
     pc.keys("0 7");
     let ui = pc.ui();
@@ -1012,7 +1012,7 @@ fn remote_keys_never_transmit() {
     for c in [24u8, 25, 26] {
         assert_eq!(pc.ask(msg::KEY, &[c, key::SHORT]).0, Status::BadArg as u8);
     }
-    pc.keys("MENU 0 8 6 1");
+    pc.keys("MENU 0 8 5 1");
     assert!(matches!(pc.app.screen(), Screen::Dtmf(_)), "{:?}", pc.app.screen());
     pc.keys("1 2 3");
     pc.cmds();
@@ -1079,9 +1079,9 @@ fn ui_readback_screens() {
     pc.keys("MENU OK");
     let ui = pc.ui();
     assert!(ui.starts_with("screen Value") && ui.contains("value \"Squelch\" \""), "{ui}");
-    // A question: the zones list's delete asks; here the reset (MENU 0 9 8 2).
+    // A question: the zones list's delete asks; here the reset (MENU 0 9 7 2).
     pc.app.go_home();
-    pc.keys("MENU 0 9 8 2");
+    pc.keys("MENU 0 9 7 2");
     let ui = pc.ui();
     assert!(ui.starts_with("screen Confirm") && ui.contains("ask \"Reset the radio?\""), "{ui}");
     assert!(ui.contains("hints \"OK\" \"Next\" \"BACK\" \"Cancel\""), "{ui}");
@@ -1393,12 +1393,12 @@ fn settings_write_keeps_coord_format() {
 fn cw_id_without_callsign_says_why() {
     let mut pc = Pc::new(true);
     assert!(pc.app.set.callsign.as_bytes().is_empty());
-    let (s, a) = pc.ask(msg::CMD, b"set 0 8 7 2 On unkey");
+    let (s, a) = pc.ask(msg::CMD, b"set 0 8 6 2 On unkey");
     assert_eq!(s, Status::Invalid as u8);
     assert_eq!(std::str::from_utf8(&a).unwrap(), "CW ID: set a callsign first");
-    assert_eq!(pc.ask(msg::CMD, b"set 0 8 7 2 Off").0, 0, "Off is what it is");
+    assert_eq!(pc.ask(msg::CMD, b"set 0 8 6 2 Off").0, 0, "Off is what it is");
     pc.app.set.set_callsign(b"N0CALL");
-    assert_eq!(pc.ask(msg::CMD, b"set 0 8 7 2 On unkey").0, 0);
+    assert_eq!(pc.ask(msg::CMD, b"set 0 8 6 2 On unkey").0, 0);
     assert_eq!(pc.app.set.cw_id, 2);
 }
 

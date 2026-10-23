@@ -1,7 +1,7 @@
 """First-run setup by remote keys (chapter 4: SETUP-*) and the factory reset (BOOT-14, SAFE-9, SAFE-14), read
 back with setup's `setup` line, its rows and the summary's note.
 
-"Run setup again" (MENU 0 9 8 1) goes through every page with OK, keeping what the radio has. The reset wipes
+"Run setup again" (MENU 0 9 7 1) goes through every page with OK, keeping what the radio has. The reset wipes
 the settings, the PIN, channels, zones, presets, the home channel, messages, the event log and waypoints: on the
 radio it runs only with --with reset, and the test writes the `dump` back after (settings, zones, presets,
 channels, the home channel); messages, the log, waypoints and FM presets aren't in a dump and stay gone.
@@ -39,13 +39,13 @@ def ok_through(t, u, region=None):
 
 @test("SETUP-3", "SETUP-10", pages=("Home", "Setup"))
 def setup_again_ok_through(t):
-    """Run setup again (MENU 0 9 8 1): eight pages, OK on each keeps a working radio; the region page lists all
+    """Run setup again (MENU 0 9 7 1): eight pages, OK on each keeps a working radio; the region page lists all
     eight regions on one screen (and Extend TX after them); the summary shows the transmit state (region,
     Extend TX, callsign), the channels and how to add them; OK there goes home with every setting as it was."""
     before = [x for x in t.cmd("dump").splitlines() if not x.startswith("#")]
     region = t.get("0 9 4")
-    u = t.keys("MENU 0 9 8 1")
-    t.eq(u.id, "Setup", "MENU 0 9 8 1")
+    u = t.keys("MENU 0 9 7 1")
+    t.eq(u.id, "Setup", "MENU 0 9 7 1")
     t.eq((setup_line(u)["page"], setup_line(u)["of"]), (1, 8), "page 1 of 8")
     pages = []
     for _ in range(8):
@@ -67,7 +67,7 @@ def setup_again_ok_through(t):
          "the summary's rows")
     t.eq(rows["Region"], region, "the region")
     note = " ".join((u["help"] or {}).get("args", [])[1:])
-    t.check("Add channels" in note and "MENU 0 9 8 1" in note, "how to add channels, and how to run it again", note)
+    t.check("Add channels" in note and "MENU 0 9 7 1" in note, "how to add channels, and how to run it again", note)
     if rows["Callsign"] == "none":
         t.check("No callsign" in note, "no callsign: automatic transmissions stay off", note)
     u = t.keys("MENU")
@@ -78,10 +78,10 @@ def setup_again_ok_through(t):
 
 def about_rows(t):
     t.home()
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     a = {r["name"]: r["value"] for r in u.rows}
     t.home()
-    u = t.keys("MENU 0 9 7 1 MENU")
+    u = t.keys("MENU 0 9 9 3 MENU")
     a.update({"cal " + r["name"]: r["value"] for r in u.rows})
     t.home()
     u = t.keys("MENU 0 9 6 MENU")
@@ -150,7 +150,7 @@ def write_back(t, d0, tries=3):
 @test("BOOT-14.4", "BOOT-14.5", "SAFE-9.1", "SAFE-14.5", "SETUP-3", "PIN-8", needs=("reset",), pages=(
     "Confirm", "Group", "Home", "Info", "Setup"))
 def reset_then_setup(t):
-    """The reset (MENU 0 9 8 2: OK, hold # 3 s) by remote keys: setup's first page follows, with no region until
+    """The reset (MENU 0 9 7 2: OK, hold # 3 s) by remote keys: setup's first page follows, with no region until
     setup picks one (none chosen on the region page); VOX, KISS and the digipeater read off; calibration (Valid,
     the CRC at install matching) and the SSB patch (its state) as before. Setup is then run with the radio's
     region and the dump written back; the dump after matches the one before. The dump is saved to a file under
@@ -160,9 +160,9 @@ def reset_then_setup(t):
     path, lines = save_dump(t, d0)
     region = t.get("0 9 4")
     a0 = about_rows(t)
-    t.keys("MENU 0 9 8 2")
+    t.keys("MENU 0 9 7 2")
     u = t.ui()
-    t.eq(u.id, "Confirm", "MENU 0 9 8 2: the reset's question")
+    t.eq(u.id, "Confirm", "MENU 0 9 7 2: the reset's question")
     reset = False
     done = False
     try:
@@ -180,7 +180,7 @@ def reset_then_setup(t):
         u = t.wait(lambda u: u.id == "Setup", timeout=15, what="setup after the reset")
         t.eq(setup_line(u)["page"], 1, "setup's first page (BOOT-14.5)")
         t.check(t.get("0 9 4") in ("None", "Not set", "-", ""), "no region until setup picks one", t.get("0 9 4"))
-        for p, name in (("0 8 2 1", "VOX"), ("0 5 9 1", "KISS"), ("0 5 8 1", "digipeater")):
+        for p, name in (("0 8 2 1", "VOX"), ("0 5 8 1", "KISS"), ("0 5 7 1", "digipeater")):
             t.eq(t.get(p), "Off", f"{name} off after the reset (SAFE-14.5)")
         u = t.keys("MENU MENU")
         t.eq(setup_line(u)["head"], "Region", "the region page")
@@ -209,11 +209,11 @@ def reset_then_setup(t):
             continue
         ok, why = t.cmd_err(f"{kind} {n} delete")
         t.check(ok, f"{kind} {n} (seeded by the reset) deleted", why)
-    # Range presets have no terminal delete: by keys on the list (MENU 0 1 7), * then OK, the last first.
+    # Range presets have no terminal delete: by keys on the list (MENU 0 1 6), * then OK, the last first.
     presets = [int(x.split()[1]) for x in t.cmd("dump").splitlines() if x.startswith("preset ")]
     for kind, n in sorted((e for e in extra if e[0] == "preset"), key=lambda e: -int(e[1])):
         t.home()
-        t.keys("MENU 0 1 7")
+        t.keys("MENU 0 1 6")
         i = presets.index(int(n))
         u = t.keys(" ".join(["DOWN"] * i + ["STAR"]))
         t.eq(u.id, "Confirm", f"* on preset {n}: delete it?")

@@ -11,8 +11,8 @@
 //!   runs the same command lines on either port). The cable always wins: physical access (LINK-7), and the way
 //!   back if a phone left it open. Bluetooth takes it when the cable's terminal is closed; while the cable has
 //!   it, Bluetooth's terminal bytes are dropped. A link session never takes or blocks the terminal.
-//! - **KISS** needs neither, so it runs on its port alongside the other one (KISS-6): the cable by 0 9 2 4 on
-//!   KISS or 0 5 9 1 on Cable, Bluetooth by 0 5 9 1 on Bluetooth. Its bytes go back to the caller.
+//! - **KISS** needs neither, so it runs on its port alongside the other one (KISS-6): the cable by 0 9 2 3 on
+//!   KISS or 0 5 8 1 on Cable, Bluetooth by 0 5 8 1 on Bluetooth. Its bytes go back to the caller.
 //! - **Trust:** the cable is trusted (TERM-3, LINK-7). On Bluetooth, while the radio's PIN lock is on, the
 //!   terminal and the link each ask for the PIN first (LINK-30); `BAUD` never applies to it (LINK-15, LINK-25).
 //! - **A Bluetooth connection** ends when it has been quiet for [`BT_IDLE_MS`]: the module tells the radio

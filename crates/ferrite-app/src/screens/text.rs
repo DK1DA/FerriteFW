@@ -32,7 +32,7 @@ pub enum TextFor {
     Zone(u8),
     /// A range preset by index: its name in the preset editor (A11).
     Preset(u8),
-    /// 0 8 7 1 (SETUP-12).
+    /// 0 8 6 1 (SETUP-12).
     Callsign,
     /// 0 7 3 2's text, the boot screen's line (BOOT-9).
     PowerOn,
@@ -45,7 +45,7 @@ pub enum TextFor {
     Capcode,
     /// 0 6 6: the clock set by hand (GPS-23), 12 digits YYYYMMDDhhmm in local time.
     Clock,
-    /// 0 5 6 2: a custom APRS path (APRS-26), capitals and digits, # for the comma.
+    /// 0 5 9 2: a custom APRS path (APRS-26), capitals and digits, # for the comma.
     AprsPath,
     /// A new contact's callsign, then a contact's name (APRS-37): the App keeps the callsign between them.
     ContactCall,

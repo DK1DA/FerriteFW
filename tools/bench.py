@@ -24,9 +24,9 @@ each run's numbers stored, compared with the previous run of the same configurat
     tools/bench.py --auto --dry-plan --diff-files crates/ferrite-app/src/screens/home.rs   # a made-up change
 
 Per run (TERM-34, LINK-20, LINK-33, LINK-34; everything goes over the link, nothing through the keypad):
-  1. save slot A as it is (`slot A`; its VFO's if it is on a channel), the active slot, the end tone (0 8 5 3) and
+  1. save slot A as it is (`slot A`; its VFO's if it is on a channel), the active slot, the end tone (0 8 4) and
      the TX timeout (0 8 1 1);
-  2. `slot A vfo FREQ MODE low tone off`, `slot A active`, `set 0 8 5 3 Off`, the TX timeout raised to 120 s if it
+  2. `slot A vfo FREQ MODE low tone off`, `slot A active`, `set 0 8 4 Off`, the TX timeout raised to 120 s if it
      is under 90 s, `txtest suite`;
   3. start rtl_sdr, key over the link (LINK-20 keepalives every 0.5 s) for the suite's 60 s and the 1 kHz hold, unkey;
   4. after all the runs: everything put back (in `finally`, whatever happened), then each capture measured with
@@ -38,7 +38,7 @@ Safety gates: nothing is keyed unless all of these hold, checked right before ev
     string says so ("dry"/"TX DRY"), or --flash flashed an image with the "TX DRY" boot line in it in this same
     invocation. Firmware from before the build byte doesn't say it, so without one of these the bench refuses,
     unless --i-know-its-tx-dry is given (a warning is printed and recorded). A full-power `tx` build is accepted
-    only while it says tx+dry (Dry TX on, MENU 0 8 9 2, or --dry-on, which turns it on from the PC: TX-48.2; TX-48:
+    only while it says tx+dry (Dry TX on, MENU 0 8 8 5, or --dry-on, which turns it on from the PC: TX-48.2; TX-48:
     build byte 0x03, no bench bit): its bar must still
     say dry=1 before every KEY on, and what needs txtest (the suites, the AFSK level sweep) is skipped, said why;
   - the build transmits at all (`txtest` isn't refused as a receive-only build);
@@ -62,7 +62,7 @@ frequency (config sweeps.mhz, 145.495; --sweep-mhz 446.475), measured on the SDR
                  the radio accepts is unkeyed at once and fails); Extend TX must be off
   ctcss          every CTCSS tone of slot.rs and typed 60.0/260.0 Hz: frequency within 0.2 Hz, one deviation
   dcs            every DCS code, N and I, and typed D000N/D777I: decoded with its own polarity and never the other
-  endtones       each end tone (0 8 5 3), FM and NFM, on a real unkey: steps, levels (TONE-19.4), lead-in, hold
+  endtones       each end tone (0 8 4), FM and NFM, on a real unkey: steps, levels (TONE-19.4), lead-in, hold
   sublevel       Subtone level Low/Normal/High on 100.0 Hz and D023N: the deviation steps (TONE-16)
   afsk-level     `txtest afsk data L`, L 10-150 %: deviation in proportion (TERM-33.6)
 One tone per key-up: the slot's tone can't change while keyed (TX-22), so a burst holds one item. Each item's
@@ -125,9 +125,9 @@ import sdrsuite  # noqa: E402
 import sdrtx  # noqa: E402
 
 TX_TIMEOUT = "0 8 1 1"
-END_TONE = "0 8 5 3"
-SUBTONE_LEVEL = "0 8 4"
-EXTEND_TX = "0 8 9"
+END_TONE = "0 8 4"
+SUBTONE_LEVEL = "0 8 8 1"
+EXTEND_TX = "0 8 8 4"
 KEY_ANSWER_S = 0.6  # TX-43: a tx-dry build answers KEY on at once; a tx build holds it while keyed
 
 DEFAULTS = {
@@ -183,13 +183,13 @@ DEFAULTS = {
             219.0, 219.995, 220.0, 222.0, 223.5, 224.995, 225.0, 242.975, 243.0, 243.025, 243.05, 260.0, 300.0, 380.0,
             405.975, 406.0, 406.05, 406.1, 406.125, 406.15, 419.995, 420.0, 429.995, 440.0, 449.995, 450.0, 470.0,
             520.0, 900.0]},
-        # each end tone (0 8 5 3) on a real unkey, wide and NFM: steps, levels (TONE-19.4), lead-in, hold
+        # each end tone (0 8 4) on a real unkey, wide and NFM: steps, levels (TONE-19.4), lead-in, hold
         "endtones": {"key_s": 1.5, "modes": ["fm", "nfm"], "extra_tail_s": 0.5, "level_tol": 0.12,
                      # TX-47.2: 400 ms hold, PA drive 0, then the 100 ms unkey wait before the chip leaves transmit.
                      # On tx-dry the PA drive is 0 throughout, so the SDR sees the chip's leak to the chip's exit:
                      # 500 ms (measured 0.495-0.505 s on all 10 end tones, Oct 14, 2026).
                      "hold_s": 0.50, "hold_tol_s": 0.05},
-        # Subtone level (0 8 4) Low, Normal, High on a CTCSS tone and a DCS code (TONE-16)
+        # Subtone level (0 8 8 1) Low, Normal, High on a CTCSS tone and a DCS code (TONE-16)
         "sublevel": {"key_s": 2.0, "tones": ["100.0", "D023N"], "min_step": 0.05},
         # `txtest afsk data LEVEL` at each level (TERM-33.6): deviation in proportion up to 100 %, rising above
         "afsk-level": {"key_s": 3.0, "levels": [10, 25, 50, 75, 100, 125, 150], "tol": 0.05, "tol_hz": 30},
@@ -838,7 +838,7 @@ def says_tx_dry(version):
 
 SWEEP_NAMES = ["refusals-wide", "ctcss", "dcs", "endtones", "sublevel", "afsk-level"]
 SLOT_RS = os.path.join(FERRITE, "crates", "ferrite-app", "src", "slot.rs")
-# 0 8 5 3's choices (ferrite-app settings.rs END_TONE_NAMES) and their steps in END_TONES
+# 0 8 4's choices (ferrite-app settings.rs END_TONE_NAMES) and their steps in END_TONES
 ENDTONE_SETTINGS = [("Beep", "beep"), ("Two-tone up", "two-tone-up"), ("Two-tone down", "two-tone-down"),
                     ("Chirp", "chirp"), ("Quindar", "quindar")]
 TONE_19_4 = {800: 1100, 1000: 1450, 1500: 2300, 2475: 2560}  # Hz deviation at REG_40 0x43C, wide FM; NFM halves it
@@ -1160,7 +1160,7 @@ class Bench:
         self.out = log or say
         self.duty = DutyLimiter(cfg.get("duty"), self.clock, self.out)
         self.info = {}
-        self.extra_settings = []  # settings a sweep changes, saved and put back (0 8 4)
+        self.extra_settings = []  # settings a sweep changes, saved and put back (0 8 8 1)
 
     # -- gates --
     def gate(self, what, ok, detail=""):
@@ -1173,7 +1173,7 @@ class Bench:
         said = hello.get("build", "not given")
         if said == "tx" and getattr(self.a, "dry_on", False):
             # TX-48.2: the PC may turn Dry TX on (never off); the radio must then say tx+dry, checked below as usual.
-            self.radio.term("set 0 8 9 2 On")
+            self.radio.term("set 0 8 8 5 On")
             hello = self.radio.hello()
             said = hello.get("build", "not given")
             self.out(f"Dry TX turned on from the PC (--dry-on, TX-48.2): the radio now says {said}")
@@ -1181,7 +1181,7 @@ class Bench:
             # LINK-35 (decision 151): the radio names its build; a receive or full-power tx build is never keyed,
             # unless Dry TX is on (TX-48: it then says tx+dry; the tx-bench build starts so, TX-48.1).
             self.gate("tx-dry build", False, f"the radio says it runs a {said} build (LINK-35): turn Dry TX on on "
-                      "the radio (MENU 0 8 9 2; TX-48)" if said == "tx" else
+                      "the radio (MENU 0 8 8 5; TX-48)" if said == "tx" else
                       f"the radio says it runs a {said} build (LINK-35): flash a tx-bench image")
         if said == "tx+dry":
             # TX-48: Dry TX on. The tx-bench build (decision 193) has the bench commands too (the bench bit); a
@@ -1530,7 +1530,7 @@ class Bench:
         if name == "refusals-wide":
             ext = self.setting(EXTEND_TX)
             if ext.strip().lower() != "off":
-                return f"Extend TX (0 8 9) is {ext}: the band plan's refusals don't hold with it on"
+                return f"Extend TX (0 8 8) is {ext}: the band plan's refusals don't hold with it on"
         self.setup_slot(sc["mhz"], "fm")
         return None
 
@@ -2374,9 +2374,9 @@ def plan(cfg, a, runs):
                     "ctcss": f"`slot A vfo {sc['mhz']:.3f} fm low txtone T rxtone off`: the tone within "
                              f"{sc['ctcss']['tol_hz']} Hz, every tone at one deviation",
                     "dcs": f"`... txtone DnnnN|I`: the code decoded with its own polarity only",
-                    "endtones": "`set 0 8 5 3 X`, FM then NFM: on the unkey each step's Hz, ms and level (TONE-19.4), "
+                    "endtones": "`set 0 8 4 X`, FM then NFM: on the unkey each step's Hz, ms and level (TONE-19.4), "
                                 "the silent lead-in, the 400 ms hold",
-                    "sublevel": "`set 0 8 4 Low|Normal|High` on 100.0 and D023N: the deviation steps",
+                    "sublevel": "`set 0 8 8 1 Low|Normal|High` on 100.0 and D023N: the deviation steps",
                     "afsk-level": "`txtest afsk data L`: deviation in proportion to L"}[name]
             p.append(f"sweep {name}: {n} items ({items[0]['label']} ... {items[-1]['label']}"
                      + (f", --count {a.count}" if a.count is not None else "") + f"), key-ups of {key_s:g} s; {what}; "
@@ -2391,7 +2391,7 @@ def plan(cfg, a, runs):
              "printed); refusal probes " + ("rest too" if d["probes_rest"] else "don't wait") + "; every key-up "
              "logged in session.json (duty)")
     p.append("restore (finally, whatever happened): KEY off, `txtest off`, the slot's VFO (freq, mode, power, tones), "
-             "end tone, TX timeout" + (", 0 8 4" if any(n == "sublevel" for n, _ in sel) else "")
+             "end tone, TX timeout" + (", 0 8 8 1" if any(n == "sublevel" for n, _ in sel) else "")
              + ", the active slot; check the slot reads back as saved")
     p.append(f"analyse each capture (sdrsuite), store under {cfg['results']}/<date-time>_<build>/, compare with the newest "
              "earlier run of the same configuration, write summary.html")
@@ -2460,9 +2460,9 @@ class FakeRadio:
         if self.key:
             raise TermError(f"{line}: transmitting: nothing changes while keyed (TX-22)")
         w = line.split()
-        if line == "set 0 8 9 2 On" and self.build in ("tx", "tx+dry"):
+        if line == "set 0 8 8 5 On" and self.build in ("tx", "tx+dry"):
             self.build = "tx+dry"  # TX-48.2: on from the PC
-            return "0 8 9 2 Dry TX: On\n"
+            return "0 8 8 5 Dry TX: On\n"
         if w[0] == "ui":
             self.ui_reads += 1
             return f"screen Home \"Home\"\nbar lock=0 scan=0 bt=0 cutoff=0 dry={int(self.dry())}\n"
@@ -2597,7 +2597,7 @@ FAKE_SUB = dict(ctcss=800.0, dcs=700.0, ctcss_byte=0x40, dcs_byte=0x38)  # the f
 
 def fake_dev(sig, tt, rel_off, rng):
     """A fake key-up's deviation (Hz) at tt s after its key-up, KEY off at rel_off: the sub-tone at the fake's
-    calibration scaled by 0 8 4 (the byte +-0x0F CTCSS, +-0x14 DCS; `dcs_bug` sends a normal code inverted);
+    calibration scaled by 0 8 8 1 (the byte +-0x0F CTCSS, +-0x14 DCS; `dcs_bug` sends a normal code inverted);
     `txtest afsk data L` flags at L % of 3 kHz until KEY off, else a little room noise on the mic; after KEY off the
     end tone's steps after a 200 ms lead-in at TONE-19.4's levels; NFM halves it all."""
     out = np.zeros(len(tt))
@@ -3323,7 +3323,7 @@ def selftest_sweeps(cfg, args, check, tmp):
           and all(e["key_up"] and e["key_down"] for e in du["log"]), f"fullest {worst:.1f} s; rests {rests}; bursts {bursts}")
     check("sweeps: the rolling cap paused them", any(w["why"] == "window" for w in du["waits"]),
           f"{sum(w['why'] == 'window' for w in du['waits'])} pauses, {du['waited_s']:.0f} s")
-    check("sweeps: every KEY on has its KEY off; restored (slots, settings incl. 0 8 4, active slot)",
+    check("sweeps: every KEY on has its KEY off; restored (slots, settings incl. 0 8 8 1, active slot)",
           r.calls.count("KEY on") == r.calls.count("KEY off") and r.key is None
           and (json.dumps(r.slots), dict(r.set), r.active) == before, dict(r.set))
     check("sweeps.json written as it went", os.path.exists(os.path.join(sess, "sweeps.json")))
@@ -3429,7 +3429,7 @@ def selftest(a):
         b = Bench(cfg, args(runs="vhf-wide", dry_on=True), radio=r, sdr=FakeSdr(r, clk), clock=clk)
         b.check_build(r.hello(), r.info())
         check("gate: --dry-on turns Dry TX on (TX-48.2) and the tx+dry gate passes",
-              "set 0 8 9 2 On" in r.calls and r.build == "tx+dry" and b.live_dry, r.calls)
+              "set 0 8 8 5 On" in r.calls and r.build == "tx+dry" and b.live_dry, r.calls)
     except Exception as e:  # noqa: BLE001 - the selftest reports it
         check("gate: --dry-on turns Dry TX on (TX-48.2) and the tx+dry gate passes", False, str(e)[:120])
     r = gated("gate: Dry TX turned off on the radio before the key-up -> refused (TX-48)",
@@ -3643,7 +3643,7 @@ def main():
                     "row in docs/test-plan/*.md (tools/record_results.py; on-air runs only)")
     ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
     ap.add_argument("--kiss-ble", metavar="ble:NAME", help="with --suite modes-on-air: KISS frames over Bluetooth "
-                    "(0 5 9 1 Bluetooth while the test runs; the cable stays the link)")
+                    "(0 5 8 1 Bluetooth while the test runs; the cable stays the link)")
     ap.add_argument("--slow", action="store_true", help="with --suite modes-on-air: also GPS-33's 4-minute test")
     ap.add_argument("--no-audio", action="store_true", help="with --suite modes-on-air: no tone from the Mac's speaker")
     ap.add_argument("--rule-results", nargs="+", metavar="SESSION", help="(re)write bench/results.json for saved "

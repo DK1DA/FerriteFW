@@ -126,7 +126,7 @@ pub fn run(scale: u32) {
     s.save("group-9");
     s.menu0(&[9, 2]);
     s.save("list-9-2");
-    s.menu0(&[8, 9]);
+    s.menu0(&[8, 8]);
     s.app.knob(1, s.t, &store);
     s.save("extend-tx");
     s.home();
@@ -143,7 +143,7 @@ pub fn run(scale: u32) {
     s.keys(&[D(5), D(0), Key::Menu]);
 
     // About and the read-only pages.
-    s.menu0(&[9, 9]);
+    s.menu0(&[9, 8]);
     s.save("about");
     s.press(Key::Right, 80);
     s.save("about-selftest");
@@ -190,11 +190,11 @@ pub fn run(scale: u32) {
     s.keys(&[Key::Down, Key::Menu, D(0), D(5), D(3)]);
     s.save("location-codes");
     s.home();
-    s.menu0(&[8, 6, 1]);
+    s.menu0(&[8, 5, 1]);
     s.keys(&[D(1), D(2), D(3), Key::Hash]);
     s.save("dtmf-dialer");
     s.home();
-    s.menu0(&[8, 6, 2]);
+    s.menu0(&[8, 5, 2]);
     s.save("dtmf-memories");
     s.home();
 

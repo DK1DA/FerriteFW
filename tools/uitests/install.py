@@ -147,10 +147,10 @@ def flasher_checks_release_signatures(t):
 
 def readings(t):
     t.home()
-    u = t.keys("MENU 0 9 9")
+    u = t.keys("MENU 0 9 8")
     about = {r["name"]: r["value"] for r in u.rows}
     t.home()
-    u = t.keys("MENU 0 9 7 1 MENU")
+    u = t.keys("MENU 0 9 9 3 MENU")
     cal = {r["name"]: r["value"] for r in u.rows}
     t.home()
     return dict(dump=[x for x in t.cmd("dump").splitlines() if not x.startswith("#")],

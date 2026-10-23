@@ -1,5 +1,5 @@
 //! Confirm, shared by every destructive action (manual chapters 11, 10, 34 and 22; MENU-23, CHAN-12, CHAN-13,
-//! PIN-6, PIN-7, TSRCH-4): it names what goes and what is kept; OK confirms, BACK cancels. The reset (MENU 0 9 8
+//! PIN-6, PIN-7, TSRCH-4): it names what goes and what is kept; OK confirms, BACK cancels. The reset (MENU 0 9 7
 //! 2, or MENU held at power on: BOOT-14, PIN-6) is one, with the same deliberate steps both ways: what goes, OK,
 //! then hold # for 3 s. Other screens ask with [`ask`] (the browser's delete, the zones list, tone search's "TX
 //! too?").
@@ -30,7 +30,7 @@ pub enum Ask {
     DeleteChannel(u16),
     /// Delete a zone (CHAN-12).
     DeleteZone(u8),
-    /// Delete a range preset, by index (MENU 0 1 7).
+    /// Delete a range preset, by index (MENU 0 1 6).
     DeletePreset(u8),
     /// The tone hint's tone is the RX tone now: set it as the TX tone too (TSRCH-16, as tone search's TSRCH-4).
     ToneTx(u16),

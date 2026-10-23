@@ -506,10 +506,10 @@ fn settings_same_numbers_and_validation() {
     r.send(b"\x1b[C");
     assert_eq!(r.app.set.region, region);
     assert!(r.vt.has("Change this one on the radio"));
-    // 0 9 2 4: the cable port itself.
+    // 0 9 2 3: the cable port itself.
     r.send(b"\x1b[A\x1b[A\r");
     assert!(r.vt.has("Cable port"));
-    for _ in 0..3 {
+    for _ in 0..2 {
         r.send(b"\x1b[B");
     }
     r.send(b"\x1b[C");
@@ -712,12 +712,12 @@ fn command_line_set_and_get() {
     assert_eq!(r.app.set.pocsag_cap, 0);
     r.cmd("set 0 4 2 3 9999999");
     assert!(r.bottom().contains("a capcode up to 2097151"), "{}", r.bottom());
-    r.cmd("set 0 5 6 2 wide2-2");
+    r.cmd("set 0 5 9 2 wide2-2");
     assert_eq!(r.app.aprs_cfg().custom_text(), b"WIDE2-2");
     assert_eq!(r.app.aprs_cfg().path, crate::aprs::PATH_CUSTOM);
-    r.cmd("set 0 5 6 2 WIDE1-1,WIDE2-1,WIDE3-1");
+    r.cmd("set 0 5 9 2 WIDE1-1,WIDE2-1,WIDE3-1");
     assert!(r.bottom().contains("one or two entries"), "{}", r.bottom());
-    r.cmd("set 0 5 6 2 None");
+    r.cmd("set 0 5 9 2 None");
     assert!(r.app.aprs_cfg().custom_text().is_empty());
     r.cmd("set 0 4 7 off");
     assert!(!r.app.set.popups);
@@ -797,29 +797,29 @@ fn set_short_forms() {
 }
 
 /// TX-48, TX-48.2: `set` (typed, or a `term` line over the link) turns Dry TX on but never off, and `get` reads it;
-/// Extend TX stays radio-only; a bare 0 8 9 is still Extend TX; a receive-only build refuses it.
+/// Extend TX stays radio-only; a receive-only build refuses it.
 #[test]
 fn dry_tx_on_from_the_pc_never_off() {
     let mut r = Rig::main();
     r.app.radio.tx_built = true;
-    for c in ["set 0 8 9 2 Off", "set 0 8 9 1 On", "set 0 8 9 On"] {
+    for c in ["set 0 8 8 5 Off", "set 0 8 8 4 On"] {
         r.cmd(c);
         assert!(r.bottom().contains("only on the radio"), "{c}: {}", r.bottom());
         assert!(!r.app.dry_tx() && !r.app.set.extend_tx, "{c}");
     }
-    r.cmd("set 0 8 9 2 On");
+    r.cmd("set 0 8 8 5 On");
     assert!(r.bottom().contains("Dry TX: On"), "{}", r.bottom());
     assert!(r.app.dry_tx(), "on from the PC");
-    r.cmd("set 0 8 9 2 Off");
+    r.cmd("set 0 8 8 5 Off");
     assert!(r.bottom().contains("Dry TX goes off only on the radio"), "{}", r.bottom());
     assert!(r.app.dry_tx(), "still on");
-    r.cmd("get 0 8 9 2");
+    r.cmd("get 0 8 8 5");
     assert!(r.bottom().contains("Dry TX: On"), "{}", r.bottom());
-    r.cmd("get 0 8 9");
-    assert!(r.bottom().contains("0 8 9 Extend TX: Off"), "{}", r.bottom());
+    r.cmd("get 0 8 8 4");
+    assert!(r.bottom().contains("0 8 8 4 Extend TX: Off"), "{}", r.bottom());
     let mut rx = Rig::main();
     rx.app.radio.tx_built = false;
-    rx.cmd("set 0 8 9 2 On");
+    rx.cmd("set 0 8 8 5 On");
     assert!(!rx.app.dry_tx() && rx.bottom().contains("only on the radio"), "{}", rx.bottom());
 }
 
@@ -832,7 +832,7 @@ fn command_errors() {
         ("set 0 7 1 purple", "Theme: one of Dark, Daylight, Night red"),
         ("set 0 7 1", "set needs a value"),
         ("set 7 1 Dark", "a menu number from MENU"),
-        ("set 0 1 2 1 Heard", "can't be set yet"),
+        ("set 0 1 8 1 Heard", "can't be set yet"),
         ("set 0 9 4 EU", "changes only on the radio"),
         ("set 0 9 3 1 Off", "changes only on the radio"),
         ("frob", "frob: no such command"),
@@ -2035,12 +2035,12 @@ fn radio_editor_wins() {
     assert!(r.bottom().contains("open on the radio's menu"), "{}", r.bottom());
 }
 
-/// TERM-18: colour is off by default (reverse video and bold only); 0 9 2 5 turns it on.
+/// TERM-18: colour is off by default (reverse video and bold only); 0 9 9 8 turns it on.
 #[test]
 fn colour_is_optional() {
     let mut r = Rig::main();
     assert!(!r.raw().contains("\x1b[0;97;44m"));
-    r.cmd("set 0 9 2 5 On");
+    r.cmd("set 0 9 9 8 On");
     assert!(r.app.set.term_colour);
     r.send(b"\x0c");
     r.poll();
@@ -2266,10 +2266,10 @@ fn fixed_position_over_the_terminal() {
 #[test]
 fn set_frequency_settings() {
     let mut r = Rig::main();
-    r.cmd("set 0 5 7 1 145.495");
-    assert!(r.bottom().contains("0 5 7 1 Frequency: 145.495"), "{}", r.bottom());
+    r.cmd("set 0 5 4 145.495");
+    assert!(r.bottom().contains("0 5 4 Frequency: 145.495"), "{}", r.bottom());
     assert_eq!(r.app.aprs_freq(), ferrite_core::freq::mhz(145) + 49_500);
-    r.cmd("set 0 5 7 1 446.000");
+    r.cmd("set 0 5 4 446.000");
     assert!(r.bottom().contains("APRS takes 64-300 MHz"), "{}", r.bottom());
     assert_eq!(r.app.aprs_freq(), ferrite_core::freq::mhz(145) + 49_500, "a refusal changes nothing");
     r.cmd("set 0 4 2 2 439.9875");

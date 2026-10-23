@@ -47,11 +47,11 @@ pub enum EntryFor {
 /// with the same checks (TERM-12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FreqSet {
-    /// 0 5 7 1, the APRS frequency (64-300 MHz, 5 kHz steps).
+    /// 0 5 4, the APRS frequency (64-300 MHz, 5 kHz steps).
     Aprs,
     /// 0 4 2 2, the pager frequency (136-520 MHz).
     Pager,
-    /// A range preset's start or end (0 1 7, A11; 18-1300 MHz).
+    /// A range preset's start or end (0 1 6, A11; 18-1300 MHz).
     RangeStart(u8),
     RangeEnd(u8),
 }

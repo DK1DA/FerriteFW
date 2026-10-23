@@ -1,4 +1,4 @@
-//! Help inside About (MENU 0 9 9; chapter 36, HELP-1 to HELP-5): the pages ◀▶ reach, the manual's QR code, and the
+//! Help inside About (MENU 0 9 8; chapter 36, HELP-1 to HELP-5): the pages ◀▶ reach, the manual's QR code, and the
 //! key card's rows fitting one line each.
 
 use super::T;

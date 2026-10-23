@@ -9,10 +9,10 @@ def presets(t):
 
 
 def delete_preset(t, n):
-    """A range preset deleted by keys (the terminal has no delete): * on it in MENU 0 1 7, then OK."""
+    """A range preset deleted by keys (the terminal has no delete): * on it in MENU 0 1 6, then OK."""
     have = presets(t)
     t.home()
-    t.keys("MENU 0 1 7")
+    t.keys("MENU 0 1 6")
     u = t.keys(" ".join(["DOWN"] * have.index(n) + ["STAR"]))
     t.eq(u.id, "Confirm", f"* on preset {n}: delete it?")
     t.keys("MENU")
@@ -30,7 +30,7 @@ def preset_editor_refuses_a_span_across_64(t):
     t.cmd(f'preset {n} "UT 6 m" 60.0 64.0')
     try:
         t.home()
-        t.keys("MENU 0 1 7")
+        t.keys("MENU 0 1 6")
         u = t.keys(" ".join(["DOWN"] * (n - 1) + ["MENU"]))
         t.eq(u.id, "ScanLists", "OK on the preset: its editor")
         u = t.keys("DOWN DOWN")  # Name, Start, End

@@ -2,7 +2,7 @@
 //! followed without trusting the screen or the key map. The boot report, every raw key code, the knob, the
 //! receiver once a second, beeps, redraw times and a fault's address. The first byte from the PC ends the log and
 //! starts the terminal or link (chapter 37). Every build prints the boot report; after it the bring-up build keeps
-//! logging, the normal build only with Cable log on (0 9 2 6). A fault's report prints in every build.
+//! logging, the normal build only with Cable log on (0 9 9 7). A fault's report prints in every build.
 
 use crate::chan::{TERM_OUT, TERM_WAKE};
 use core::sync::atomic::{AtomicBool, Ordering::Relaxed};

@@ -18,7 +18,7 @@ manual's rules. The tests are in tools/uitests/*.py, each tagged with the rule I
                                                         #   CAPS: a factory reset, a local FM station, ...)
     tools/uitest.py --bt ble:walkie-talkie              # a Bluetooth link beside the cable (0 9 2 1 on): needs=("bt",)
     tools/uitest.py --port ble:walkie-talkie --cablelog /dev/cu.usbserial-114220   # keys over Bluetooth while the
-                                                        #   cable carries the cable log (0 9 2 6): needs=("cablelog",)
+                                                        #   cable carries the cable log (0 9 9 7): needs=("cablelog",)
     tools/uitest.py --flash before --module install     # around a flash (tools/flash.py): what the install and
     tools/uitest.py --flash after --module install      #   update checks compare (needs=("flash",))
 
@@ -952,7 +952,7 @@ def main_args(argv=None):
     ap.add_argument("--bt", help="a Bluetooth link beside the cable for needs=(\"bt\",) tests: ble:NAME (the radio's "
                     "0 9 2 1 on) or tcp:HOST:PORT (a simulator's --bt-tcp; --sim auto starts one)")
     ap.add_argument("--cablelog", metavar="PORT", help="the cable, read without a byte sent, for the cable log "
-                    "(0 9 2 6) while --port ble:... has the keys: needs=(\"cablelog\",) tests")
+                    "(0 9 9 7) while --port ble:... has the keys: needs=(\"cablelog\",) tests")
     ap.add_argument("--flash", choices=["before", "after"], help="the install and update checks around a flash: "
                     "`before` keeps what they compare (--flash-state), `after` compares (needs=(\"flash\",))")
     ap.add_argument("--flash-state", default=os.path.join(RESULTS, "flash-state.json"),

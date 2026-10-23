@@ -632,7 +632,7 @@ pub enum Route {
     Drop,
 }
 
-/// TERM-2: the cable port setting (0 9 2 4: auto, link, terminal, KISS) decides; in auto a link frame (its
+/// TERM-2: the cable port setting (0 9 2 3: auto, link, terminal, KISS) decides; in auto a link frame (its
 /// 0x00 delimiter: the web app sends one before its first frame) takes the port, and keeps it while frames
 /// keep coming ([`ACTIVE_MS`]); anything else is the terminal's, which starts on a typed Enter.
 pub fn route(cable_port: u8, link_active: bool, b: u8) -> Route {

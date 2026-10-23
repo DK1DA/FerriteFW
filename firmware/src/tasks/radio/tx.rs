@@ -283,7 +283,7 @@ impl Radio {
     }
 
     /// TONE-5: the tail at unkey, still keyed, for stock's 400 ms: the 55 Hz tone with no sub-tone, the phase
-    /// shift (0 8 5 2) on CTCSS, the 134.4 Hz turn-off code on DCS. The 55 Hz tone at the calibration's CTCSS byte
+    /// shift (0 8 8 3) on CTCSS, the 134.4 Hz turn-off code on DCS. The 55 Hz tone at the calibration's CTCSS byte
     /// (0xF210 byte 1), as stock (TX audit F7).
     pub(super) async fn tail_elim(&mut self) {
         let Some(n) = self.tx.chip.filter(|&n| self.has(n)) else { return };
@@ -351,7 +351,7 @@ impl Radio {
 
     /// While keyed (TONE-13, DTMF-7, DTMF-11): the tone burst or a DTMF symbol on the keyed chip, as stock sends any
     /// internal tone: the generator set, REG_30 to tone transmit (mode 4, 0xC3FA: the microphone off) and the
-    /// sidetone heard (DTMF-8, for DTMF as 0 8 6 4 says); both None goes back to
+    /// sidetone heard (DTMF-8, for DTMF as 0 8 5 4 says); both None goes back to
     /// the microphone (0xC1FE).
     pub(super) fn keyed_tone(&mut self, hz: Option<u16>, dtmf: Option<char>) {
         let Some(sel) = self.path.keyed() else { return };

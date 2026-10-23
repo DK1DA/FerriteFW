@@ -21,29 +21,29 @@ def unbuilt_group(t, path):
 # (PWR-24; lowpower.py tests it).
 ACTS = {"0 7 7 2"}
 # Settings typed or picked on a page of their own (OK opens them): the knob doesn't step them in the group.
-TYPED = {"0 4 2 2", "0 5 6 1", "0 5 6 2", "0 5 7 1", "0 5 8 2", "0 4 2 3"}
+TYPED = {"0 4 2 2", "0 5 9 1", "0 5 9 2", "0 5 4", "0 5 7 2", "0 4 2 3"}
 
 
 @test("MENU-31", "TERM-12", pages=("Entry", "Group"))
 def frequency_setting_typed(t):
-    """MENU 0 5 7 1 opens the frequency entry box; 1 4 5 4 9 5 types 145.495 and keeps it (back on the list);
-    446 is refused with its digits left; the terminal's `set 0 5 7 1` takes MHz too."""
-    old = t.get("0 5 7 1")
+    """MENU 0 5 4 opens the frequency entry box; 1 4 5 4 9 5 types 145.495 and keeps it (back on the list);
+    446 is refused with its digits left; the terminal's `set 0 5 4` takes MHz too."""
+    old = t.get("0 5 4")
     t.home()
-    u = t.keys("MENU 0 5 7 1")
+    u = t.keys("MENU 0 5 4")
     t.eq(u.id, "Entry", "the frequency entry box")
     u = t.keys("1 4 5 4 9 5", settle=0.3)
     if u.id == "Entry":
         u = t.keys("MENU", settle=0.3)
     t.eq(u.id, "Group", "kept: back on the list")
-    t.eq(t.get("0 5 7 1"), "145.495", "the setting has it")
+    t.eq(t.get("0 5 4"), "145.495", "the setting has it")
     t.home()
-    u = t.keys("MENU 0 5 7 1 4 4 6 MENU", settle=0.3)
+    u = t.keys("MENU 0 5 4 4 4 6 MENU", settle=0.3)
     t.eq(u.id, "Entry", "446 refused: still typing")
-    t.eq(t.get("0 5 7 1"), "145.495", "unchanged")
+    t.eq(t.get("0 5 4"), "145.495", "unchanged")
     t.home()
-    t.set("0 5 7 1", old)
-    t.eq(t.get("0 5 7 1"), old, "set puts it back")
+    t.set("0 5 4", old)
+    t.eq(t.get("0 5 4"), old, "set puts it back")
 
 
 GROUPS = "13456789"  # the settings table's top-level groups (MENU 0 G); one test each, so -j runs them side by side
@@ -130,32 +130,32 @@ def settings_in_other_groups_reachable_and_live(t):
 
 @test("TX-2", "SETUP-8", pages=("ExtendTx", "Group", "Status"))
 def extend_tx_warns_first_and_shows_on_status(t):
-    """Extend TX is off by default; turning it on (0 8 9) shows its warning first, where BACK keeps it off; its
+    """Extend TX is off by default; turning it on (0 8 8) shows its warning first, where BACK keeps it off; its
     state is on the Status page, never in the status bar. The test never turns it on: OK on the warning would mark
     it seen for good (a flag no `set` puts back), so only the warning and BACK are checked."""
-    name, v0, nd = t.get_full("0 8 9")
-    t.eq(name, "Extend TX", "0 8 9")
+    name, v0, nd = t.get_full("0 8 8 4")
+    t.eq(name, "Extend TX", "0 8 8 4")
     t.need(v0 == "Off", f"Extend TX is {v0} on this radio")
-    t.check(not nd, "off is the default", t.cmd("get 0 8 9"))
+    t.check(not nd, "off is the default", t.cmd("get 0 8 8 4"))
     u = t.keys("MENU 0 0")
     t.eq(u.row("Extend TX")["value"], "Off", "Status shows it")
     bar_keys = set(u.bar)
     t.home()
-    u = t.keys("MENU 0 8 9")
-    t.eq(u.sel and u.sel["name"], "Extend TX", "MENU 0 8 9")
+    u = t.keys("MENU 0 8 8 4")
+    t.eq(u.sel and u.sel["name"], "Extend TX", "MENU 0 8 8 4")
     u = t.knob(+1)
     if u.id != "ExtendTx":
         # Seen before on this radio (the flag persists): the knob turned it on; put it back off.
         t.eq(u.sel and u.sel["value"], "On", "warned before: the knob turns it on")
         u = t.knob(-1)
-        t.eq(t.get("0 8 9"), "Off", "and off again")
+        t.eq(t.get("0 8 8 4"), "Off", "and off again")
         t.need(False, "the warning was seen before on this radio (it shows once)")
     t.eq(u.hints, [("OK", "Turn on"), ("BACK", "Keep off")], "the warning: OK turns on, BACK keeps off")
-    t.eq(t.get("0 8 9"), "Off", "still off while the warning shows")
+    t.eq(t.get("0 8 8 4"), "Off", "still off while the warning shows")
     u = t.keys("BACK")
     t.eq((u.id, u.sel and u.sel["name"], u.sel and u.sel["value"]), ("Group", "Extend TX", "Off"),
          "BACK: back on the row, still off")
-    t.eq(t.get("0 8 9"), "Off", "the setting is off")
+    t.eq(t.get("0 8 8 4"), "Off", "the setting is off")
     t.home()
     u = t.keys("MENU 0 0")
     t.eq(set(u.bar), bar_keys, "the status bar has nothing for it")
@@ -163,16 +163,19 @@ def extend_tx_warns_first_and_shows_on_status(t):
 
 @test("TONE-9", pages=("Group", "Quick"))
 def tail_elimination_is_a_transmit_setting(t):
-    """Tail elimination lives in the Transmit group (0 8 5: mode, phase, end tone), receive-side muting beside it;
-    it is not a squelch option (0 9 5 Receiver and the quick settings have no tail elimination row)."""
-    u = t.keys("MENU 0 8 5")
-    t.eq(u.title, "Tail", "MENU 0 8 5: its own group")
-    t.check(u["help"]["args"][0].startswith("MENU 0 8 5 "), "its rows are MENU 0 8 5 N", u["help"])
+    """Tail elimination lives in the Transmit group: its mode and phase in Transmit's Advanced (0 8 8 2, 0 8 8 3;
+    MENU-32), the end tone a main row (0 8 4); it is not a squelch option (0 9 9, System's Advanced, and the quick
+    settings have no tail elimination row)."""
+    u = t.keys("MENU 0 8 8")
+    t.eq(u.title, "Advanced", "MENU 0 8 8: Transmit's Advanced")
+    t.check(u["help"]["args"][0].startswith("MENU 0 8 8 "), "its rows are MENU 0 8 8 N", u["help"])
     names = u.names()
-    t.check({"Mode", "Phase", "End tone"} <= set(names), "mode, phase and end tone", names)
+    t.check({"Tail elimination", "Phase"} <= set(names), "mode and phase", names)
     u = t.keys("BACK")
-    t.eq((u.title, u.sel and u.sel["name"]), ("Transmit", "Tail elimination"), "in the Transmit group")
-    for path in ("MENU 0 9 5", "MENU"):
+    t.eq((u.title, u.sel and u.sel["name"]), ("Transmit", "Advanced"), "in the Transmit group")
+    t.home()
+    t.check("End tone" in t.keys("MENU 0 8").names(), "the end tone is Transmit's own row", t.keys("MENU 0 8").names())
+    for path in ("MENU 0 9 9", "MENU"):
         t.home()
         u = t.keys(path)
         t.check(not any("tail elim" in n.lower() for n in u.names()), f"{path}: no tail elimination row", u.names())
@@ -180,11 +183,11 @@ def tail_elimination_is_a_transmit_setting(t):
 
 @test("SETUP-1", "SETUP-4", pages=("Group", "Setup"))
 def setup_runs_from_the_menu(t):
-    """MENU 0 9 8 1 runs setup: OK goes to the next page, BACK to the previous, BACK on the first page leaves it
+    """MENU 0 9 7 1 runs setup: OK goes to the next page, BACK to the previous, BACK on the first page leaves it
     with nothing changed (only the welcome page is passed: no answer is given)."""
-    call = t.get("0 8 7 1")
-    u = t.keys("MENU 0 9 8 1")
-    t.eq(u.id, "Setup", "MENU 0 9 8 1")
+    call = t.get("0 8 6 1")
+    u = t.keys("MENU 0 9 7 1")
+    t.eq(u.id, "Setup", "MENU 0 9 7 1")
     t.eq(u.hints, [("OK", "Next"), ("BACK", "Previous"), ("#", "Skip")], "OK next, BACK previous, # skips")
     f0 = u.state["frame"]
     u = t.keys("MENU")
@@ -194,4 +197,4 @@ def setup_runs_from_the_menu(t):
     t.eq(u.id, "Setup", "BACK: the previous page (the welcome)")
     u = t.keys("BACK")
     t.eq((u.id, u.sel and u.sel["name"]), ("Group", "Run setup again"), "BACK on the first page leaves setup")
-    t.eq(t.get("0 8 7 1"), call, "the callsign untouched")
+    t.eq(t.get("0 8 6 1"), call, "the callsign untouched")

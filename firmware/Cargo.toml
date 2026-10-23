@@ -17,7 +17,7 @@ bench = false
 # Transmit. Off until milestone 4: without it the build has no transmit code at all (the bk4829 crate's tx feature).
 tx = ["bk4829/tx", "ferrite-radio/tx"]
 # The bench radio's build (decision 193): the full-power transmit build with the bench commands, starting every
-# power-on with Dry TX on (TX-48.1: the PA drive held at 0 until turned off by hand at 0 8 9 2), so the SDR bench
+# power-on with Dry TX on (TX-48.1: the PA drive held at 0 until turned off by hand at 0 8 8 5), so the SDR bench
 # keys it dry and a real-power key-up is a deliberate step. Replaced the tx-dry build (the PA held at 0 at build
 # time). `cargo fw --features tx-bench`; `tools/mkbtf.sh tx-bench`.
 tx-bench = ["tx", "bench"]

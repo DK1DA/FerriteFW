@@ -198,7 +198,7 @@ fn tones() {
 #[test]
 fn dtmf_dialer() {
     let mut r = Radio::new();
-    r.run("menu 0 8 6 1; expect screen \"DTMF dialer\"; expect text \"Sends on slot A\"");
+    r.run("menu 0 8 5 1; expect screen \"DTMF dialer\"; expect text \"Sends on slot A\"");
     r.type_("123");
     r.expect_text("123");
 }
@@ -350,19 +350,19 @@ fn status_page() {
     assert!(!r.sim.screen_text().contains("MCU temperature"), "MCU temp is System's now");
 }
 
-/// Quick settings: MENU on home, nine rows for the active slot, 0 opens advanced (MENU-1).
+/// Quick settings: MENU on home, nine rows for the active slot, 0 opens More (MENU-1).
 #[test]
 fn quick_settings() {
     let mut r = Radio::new();
     r.run("press OK; expect screen \"Quick\"; expect text \"1 Squelch\"; expect text \"9 Battery Save\"");
-    r.run("type 0; expect screen \"Advanced\"; expect text \"9 System\"");
+    r.run("type 0; expect screen \"More\"; expect text \"9 System\"");
 }
 
 /// Hold BACK goes home from any screen (KEY-5).
 #[test]
 fn hold_back_goes_home() {
     let mut r = Radio::new();
-    r.run("menu 0 8 6 1; expect screen \"DTMF dialer\"; home; expect screen \"Home\"");
+    r.run("menu 0 8 5 1; expect screen \"DTMF dialer\"; home; expect screen \"Home\"");
 }
 
 /// A setting changed in the menu takes effect at once and reaches the radio: the active slot's TX power

@@ -125,7 +125,7 @@ fn aprs_card_mode() {
 fn aprs_card_kiss() {
     let mut a = A::new();
     a.app.set.bt = true;
-    a.app.set.kiss_port = 2; // 0 5 9 1 on Bluetooth
+    a.app.set.kiss_port = 2; // 0 5 8 1 on Bluetooth
     a.tick();
     a.s.kiss_frame(true);
     a.s.kiss_frame(false);

@@ -98,7 +98,7 @@ pub enum Job {
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
 /// bytes), then the settings added later (path, digipeater, beacon after voice, the SSID: [`APRS_MORE`]), then
-/// the custom path (0 5 6 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 7 8, APRS-45:
+/// the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 7, APRS-45:
 /// [`APRS_FX25`]). A record from before them is shorter and reads them as their defaults.
 const QUICK_LEN: usize = 68;
 const APRS_MORE: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
@@ -1228,7 +1228,7 @@ fn zkey(z: u8) -> u8 {
     if z < MAX_ZONES { z } else { NO_ZONE }
 }
 
-/// The range presets a first boot gets after setup, by region (`0 1 7`'s default: 2 m, 70 cm, airband, marine,
+/// The range presets a first boot gets after setup, by region (`0 1 6`'s default: 2 m, 70 cm, airband, marine,
 /// plus what the region has: weather, GMRS/FRS, 1.25 m, PMR446). Steps index `slot::STEPS`, modes `slot::MODES`.
 pub fn default_presets(r: Region) -> impl Iterator<Item = RangePreset> {
     use Region::*;

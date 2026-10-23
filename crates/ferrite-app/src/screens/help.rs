@@ -1,4 +1,4 @@
-//! Help, inside About (MENU 0 9 9; manual chapter 36, HELP-1 to HELP-5): the manual's QR code and the key card as
+//! Help, inside About (MENU 0 9 8; manual chapter 36, HELP-1 to HELP-5): the manual's QR code and the key card as
 //! pages, reached with ◀▶ like the self-test. Read only, rarely opened: the text lives in slow flash.
 
 use super::shared::*;
@@ -29,7 +29,7 @@ pub(crate) const HOME_KEYS: [Row; 15] = [
     ("V/M", "VFO or channel"),
     ("Hold V/M", "Zones"),
     ("MENU", "Quick settings"),
-    ("Hold MENU", "Advanced settings"),
+    ("Hold MENU", "More settings"),
     ("MENU 0", "Menu by number"),
     ("#", "Status; pause watch"),
     ("Hold #", "Key lock"),
@@ -69,7 +69,7 @@ pub(crate) const MENU_NOS: [Row; 14] = [
     ("0 5 2", "Messages"),
     ("0 7 2", "Home layout"),
     ("0 9 2 1", "Bluetooth"),
-    ("0 9 8 1", "Run setup again"),
+    ("0 9 7 1", "Run setup again"),
 ];
 
 /// One key | action line at baseline `b`, or a section heading when the key is empty.

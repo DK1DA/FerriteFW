@@ -9,7 +9,7 @@ A test is a function taking the context `t`, tagged with the manual rule IDs it 
         t.home()
         u = t.keys("MENU")              # keys, then the screen read back (a U)
         t.eq(u.id, "Quick", "MENU on home opens quick settings")
-        t.check(len(u.rows) == 10, "nine rows and Advanced", u.rows)
+        t.check(len(u.rows) == 10, "nine rows and More", u.rows)
 
 `where="radio"` marks a test the simulator can't model (it is skipped there); `slow=True` one that waits on a timer
 (run with --slow); `needs=` the build flavours or the things it needs (CAPS below: a bench build, a Bluetooth link,
@@ -31,7 +31,7 @@ HOMES = ("Home", "LowPower")
 
 # Settings a test never changes: they could transmit (VOX, beacon, digipeat, CW ID), take the cable away from the
 # link (cable port, KISS, cable log, terminal colour) or the radio off (auto power off), or need the radio's owner.
-UNSAFE = {"0 8 2 1", "0 5 5 1", "0 5 5 3", "0 5 8 1", "0 8 7 2", "0 9 2 4", "0 5 9 1", "0 9 2 6", "0 9 2 5",
+UNSAFE = {"0 8 2 1", "0 5 6 1", "0 5 6 2", "0 5 7 1", "0 8 6 2", "0 9 2 3", "0 5 8 1", "0 9 9 7", "0 9 9 8",
           "0 7 8", "0 9 2 1", "0 9 3 1", "0 9 3 2"}
 
 
@@ -48,7 +48,7 @@ CAPS = {
     "cablelog": (False, "keys over Bluetooth (--port ble:...) and the cable log on --cablelog PORT"),
     "flash": (False, "a flash around the run: --flash before, tools/flash.py, --flash after"),
     "first-install": (True, "--flash before marks a first install (a radio new to Ferrite or wiped): --with first-install"),
-    "reset": (True, "a factory reset (0 9 8 2) allowed: --with reset (the test reloads the dump after)"),
+    "reset": (True, "a factory reset (0 9 7 2) allowed: --with reset (the test reloads the dump after)"),
     "fm-station": (False, "a local FM station with RDS and stereo pilot: --with fm-station"),
     "signal": (False, "a signal to receive (a second radio or a strong local one): --with signal"),
     "fix": (True, "a GPS fix (the simulator has one): --with fix outdoors"),
@@ -496,20 +496,20 @@ class T:
             self._bt = None
 
     def cable_log(self):
-        """The cable log (0 9 2 6, TERM-28) read from --cablelog without a byte sent (the first byte would end it),
+        """The cable log (0 9 9 7, TERM-28) read from --cablelog without a byte sent (the first byte would end it),
         while the keys and readback go over Bluetooth (--port ble:...): turned on for the test, off after."""
         self.need(getattr(self.opts, "cablelog", None), "no --cablelog PORT")
         if getattr(self, "_log", None) is None:
             self._log = CableLog(self.opts.cablelog)
             # Off, then On: a byte on the cable ends the log (TERM-28) while the setting stays On, and setting On
             # again then changes nothing, so the log stayed silent (cablelog.gps_quiet_standby, Oct 15, 2026).
-            self.owner_set("0 9 2 6", "Off")
+            self.owner_set("0 9 9 7", "Off")
             time.sleep(0.3)
             t0 = time.time()
-            self.owner_set("0 9 2 6", "On")
+            self.owner_set("0 9 9 7", "On")
             # The receiver is logged once a second: a quiet log after 3 s is the cable, not the test's subject.
             self.need(self._log.wait(r".", t0, 3.0), f"no cable log lines on {self.opts.cablelog} within 3 s of "
-                      "0 9 2 6 On: is the cable on that port at 115200 and nothing else writing to it?")
+                      "0 9 9 7 On: is the cable on that port at 115200 and nothing else writing to it?")
         return self._log
 
     def end_test(self):
@@ -528,7 +528,7 @@ class T:
     def owner_set(self, path, value):
         """A setting UNSAFE keeps from tests (Bluetooth, the PIN lock), changed where the test needs it and put back
         after it whatever happens (the cable is never asked for the PIN: TERM-3). Only the settings named here."""
-        allowed = {"0 9 2 1": self.sim, "0 9 3 1": True, "0 9 3 3": True, "0 9 2 6": True}
+        allowed = {"0 9 2 1": self.sim, "0 9 3 1": True, "0 9 3 3": True, "0 9 9 7": True}
         if not allowed.get(path):
             raise Fail(f"{path} is never changed by a test here")
         if not hasattr(self, "_owner"):

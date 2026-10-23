@@ -6,7 +6,7 @@
 //! 60.0 to 260.0 Hz and any DCS code D000-D777.
 //!
 //! On a channel, ▲▼ go on to a second page: the channel's end tone and tail elimination (TONE-10, TONE-17;
-//! decision 86), each Global (the radio's, 0 8 5) or its own. The channel editor's grid has no room for them.
+//! decision 86), each Global (the radio's, 0 8 8) or its own. The channel editor's grid has no room for them.
 
 use super::forms::picker;
 use super::shared::*;
@@ -359,7 +359,7 @@ impl Tones {
             picker(lcd, 40, 122, 160, 5, 18, v as i32, n as i32, |i, b| b.set(if end { END_TONES[i as usize] } else { TAILS[i as usize] }.as_bytes()), BG);
         }
         if app.dirty(R_NOTE, hash(&1u8)) {
-            w::field(lcd, 8, 224, 216, 233, 229, Align::Center, b"Global: the radio's, MENU 0 8 5", &UI_12, DIM, BG);
+            w::field(lcd, 8, 224, 216, 233, 229, Align::Center, b"Global: the radio's, MENU 0 8 8", &UI_12, DIM, BG);
         }
         app.help_box(lcd, 250, 46, b"This channel's end tone and tail elimination.", b"MENU 4");
     }

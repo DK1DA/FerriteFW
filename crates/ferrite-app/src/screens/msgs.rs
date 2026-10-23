@@ -580,7 +580,7 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     let d = data.draft();
     // APRS-8: nothing sends without a callsign.
     if data.callsign().is_none() {
-        return app.show_toast("No callsign".as_bytes(), "MENU 0 8 7 1".as_bytes(), false);
+        return app.show_toast("No callsign".as_bytes(), "MENU 0 8 6 1".as_bytes(), false);
     }
     if !data.callsign().is_some_and(|c| crate::data::ax25_call_ok(c.as_bytes())) {
         return app.show_toast("Callsign over 6".as_bytes(), "no APRS".as_bytes(), false); // SETUP-13.1

@@ -69,7 +69,7 @@ pub struct Cfg {
     pub end_tone: bool,
     /// CW ID every 10 min (VOX-12).
     pub cw_id: bool,
-    /// CW ID at every unkey instead (0 8 7 2's "on unkey"; VOX-12).
+    /// CW ID at every unkey instead (0 8 6 2's "on unkey"; VOX-12).
     pub cw_each: bool,
     /// Tail elimination: a DCS turn-off code or the 55 Hz phase (TONE-9).
     pub tail: bool,

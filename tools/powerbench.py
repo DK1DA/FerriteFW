@@ -107,8 +107,8 @@ def slot_freq(radio, slot):
 
 
 def check_dry(tx):
-    if "Dry TX: On" not in tx.cmd("get 0 8 9 2"):
-        sys.exit("the second radio's Dry TX is off: turn it on (set 0 8 9 2 on) before keying it")
+    if "Dry TX: On" not in tx.cmd("get 0 8 8 5"):
+        sys.exit("the second radio's Dry TX is off: turn it on (set 0 8 8 5 on) before keying it")
 
 
 def measure_rx(d, tx, slot, bursts):

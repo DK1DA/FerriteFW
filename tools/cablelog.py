@@ -1,4 +1,4 @@
-"""Record the radio's cable log (Cable log on, 0 9 2 6) without sending a byte: any byte from the PC ends the log
+"""Record the radio's cable log (Cable log on, 0 9 9 7) without sending a byte: any byte from the PC ends the log
 until the radio restarts. Usage: cablelog.py SECONDS OUTFILE (appends). Port: FERRITE_PORT or /dev/cu.usbserial-114220."""
 import os, sys, time
 import serial

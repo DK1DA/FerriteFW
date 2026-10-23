@@ -41,7 +41,7 @@ Frames: COBS(type, seq, payload, CRC-16/CCITT-FALSE little-endian) then 0x00. Ea
 type | 0x80, the same seq, and a payload starting with a status byte.
 
 The cable carries the terminal or the link, one at a time (TERM-2; LINK-28 for the cable against Bluetooth). With
-0 9 2 4 Cable port on Auto (or Link) this tool takes it: it sends Ctrl-C first, which closes an open terminal (quit
+0 9 2 3 Cable port on Auto (or Link) this tool takes it: it sends Ctrl-C first, which closes an open terminal (quit
 term.py or any terminal program holding the serial device first: one program per device), then a 0x00, which gives
 the cable to the link. The link keeps it while frames come and lets go 10 s after the last; then Enter in a terminal
 program opens the terminal again. With Cable port on Terminal or KISS the link never answers.

@@ -1,6 +1,6 @@
 //! The simulator's APRS task: what the radio's APRS task will do with slot C in APRS mode, with made-up
 //! traffic. Stations are heard one by one, a message for us comes now and then (and is acked), our messages are
-//! tried on APRS-13's schedule until an ack comes, and beacons go out by the beacon mode (0 5 5 1) or Beacon now,
+//! tried on APRS-13's schedule until an ack comes, and beacons go out by the beacon mode (0 5 6 1) or Beacon now,
 //! waiting while the band relay is in the other state (APRS-20). A station we have heard acks our message on its
 //! second try; anyone else never does, so the message ends failed. Nothing here is in the firmware.
 

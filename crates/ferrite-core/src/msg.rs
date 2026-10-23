@@ -48,9 +48,9 @@ pub enum RadioCmd {
     /// Start or stop scanning in a slot.
     Scan { slot: u8, on: bool },
     /// Channel scans also listen on each channel's transmit frequency when it has a shift or split (SCAN-22,
-    /// 0 1 6 3; sent at start-up and when it changes).
+    /// 0 1 8 5; sent at start-up and when it changes).
     ScanTx(bool),
-    /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 4; sent at start-up and when
+    /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 8 1; sent at start-up and when
     /// it changes).
     ToneLevel(u8),
     /// The transmit timeout in seconds, 30-600 (TX-30, 0 8 1 1; sent at start-up and when it changes): the UI
@@ -77,7 +77,7 @@ pub enum RadioCmd {
     /// battery): a remote transmission whose keepalive stopped or whose link session closed or moved (LINK-20).
     TxCut { slot: u8 },
     /// A data key-up or unkey (APRS beacons, messages, acks, digipeats: APRS-7, APRS-20): as [`RadioCmd::Transmit`]
-    /// after the UI's checks, at `power` (0 low, 1 mid, 2 high: 0 5 5 4, default low), with no end tone or CW ID
+    /// after the UI's checks, at `power` (0 low, 1 mid, 2 high: 0 5 6 3, default low), with no end tone or CW ID
     /// after it (TONE-11). The DSP task plays the frame once it is keyed. Preceded by [`RadioCmd::TxPlan`].
     TransmitData { slot: u8, power: u8, on: bool },
     /// Sent just before each [`RadioCmd::Transmit`] key-up: the frequency the UI checked (offset, split and
@@ -93,15 +93,15 @@ pub enum RadioCmd {
     /// A channel scan's priority channel `k` (SCAN-12; 0xFFFF none).
     ScanPrio { slot: u8, k: u8, num: u16 },
     /// Start a channel scan on the slot at channel `from`, with the set just sent; `prio_s`: the priority look's
-    /// interval in seconds (0 1 6 5; 0 off).
+    /// interval in seconds (0 1 5; 0 off).
     ScanChans { slot: u8, from: u16, prio_s: u8 },
     /// The resume rule for the slot's next scan (SCAN-5, SCAN-24), as [`crate::scan::Resume::from_code`]:
-    /// already the zone's or the preset's own, or the radio's (0 1 5).
+    /// already the zone's or the preset's own, or the radio's (0 1 4).
     ScanResume { slot: u8, code: u8 },
     /// The answer to [`LiveAll::want`]: channel `num`'s receive frequency (0: there is no such channel now).
     ScanEntry { num: u16, rx: Freq10 },
     /// Channel `num`'s transmit frequency when it has a shift or split, after its [`RadioCmd::ScanEntry`]
-    /// (SCAN-22, only while 0 1 6 3 is on).
+    /// (SCAN-22, only while 0 1 8 5 is on).
     ScanEntryTx { num: u16, tx: Freq10 },
     /// While keyed: the tone burst (PTT + SIDE2) at 1750 Hz for as long as SIDE2 is held (TONE-13, TONE-13.1).
     ToneBurst { on: bool },
@@ -153,8 +153,8 @@ pub enum RadioCmd {
     Chime(u8),
     /// The crossband repeater: start with these settings, or stop (XB-14).
     Crossband(Option<XbCfg>),
-    /// The Transmit group's radio-wide tone settings (sent at start-up and when one changes): 0 8 5 2's tail
-    /// phase (0 55 Hz, 1-3 120°/180°/240°), 0 8 7 2's CW ID (0 off, 1 every 10 min, 2 on unkey) and 0 8 6 4's
+    /// The Transmit group's radio-wide tone settings (sent at start-up and when one changes): 0 8 8 3's tail
+    /// phase (0 55 Hz, 1-3 120°/180°/240°), 0 8 6 2's CW ID (0 off, 1 every 10 min, 2 on unkey) and 0 8 5 4's
     /// DTMF sidetone. A slot's end tone and tail come with it ([`Param::EndTone`], [`Param::Tail`]).
     TxTones { phase: u8, cw: u8, sidetone: bool },
     /// The callsign for CW ID, 5 bytes a chunk (chunk 0: bytes 0-4, 1: 5-9; 0 pads the end). Sent with
@@ -221,10 +221,10 @@ pub enum Param {
     Split,
     /// The clarifier: a receive-only offset in Hz, -2500 to 2500 (VFO-22); never moves the transmit frequency.
     Clarifier,
-    /// The end tone this slot sends (TONE-10, the channel's over 0 8 5 3 already resolved): an index into
+    /// The end tone this slot sends (TONE-10, the channel's over 0 8 4 already resolved): an index into
     /// `tonegen::END_TONES`, 0 off.
     EndTone,
-    /// Tail elimination on this slot (TONE-5 to TONE-7, the channel's over 0 8 5 1 already resolved): bit 0 on
+    /// Tail elimination on this slot (TONE-5 to TONE-7, the channel's over 0 8 8 2 already resolved): bit 0 on
     /// receive, bit 1 on transmit.
     Tail,
     /// 1: the slot is on a receive-only channel (CHAN-4): the Radio task refuses its key-ups too (TX audit F11).
@@ -803,7 +803,7 @@ pub struct SelfTest {
     pub si4732: bool,
     /// A verified SSB patch is in SPI flash (HF-20).
     pub ssb_patch: bool,
-    /// Battery reading trim in 10 mV (0 9 7 3).
+    /// Battery reading trim in 10 mV (0 9 9 5).
     pub battery_trim: i8,
     /// SELF-8: the MCU's 96-bit factory unique ID, lowest word first; zeros until read.
     pub uid: [u32; 3],

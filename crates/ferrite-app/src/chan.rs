@@ -40,9 +40,9 @@ pub struct Channel {
     pub tones: u8,
 }
 
-/// A channel's end tone choices (TONE-10): Global follows 0 8 5 3, the rest are its own.
+/// A channel's end tone choices (TONE-10): Global follows 0 8 4, the rest are its own.
 pub const END_TONES: [&str; 7] = ["Global", "Off", "Beep", "Two-tone up", "Two-tone down", "Chirp", "Quindar"];
-/// A channel's tail elimination (TONE-17): Global follows 0 8 5 1, Off never, On as 0 8 5 1's phase.
+/// A channel's tail elimination (TONE-17): Global follows 0 8 8 2, Off never, On as 0 8 8 2's phase.
 pub const TAILS: [&str; 3] = ["Global", "Off", "On"];
 
 /// Channel flags (CHAN-4): skipped by scans, APRS on this channel, never transmits.

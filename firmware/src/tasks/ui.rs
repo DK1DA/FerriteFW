@@ -357,7 +357,7 @@ pub async fn task() {
         (false, ferrite_store::store::Mounted::FirstBoot) => b"store: first boot (Ferrite's areas formatted)",
         (false, ferrite_store::store::Mounted::Failed) => b"store: FAILED (nothing is saved this power-on)",
     });
-    // TERM-28: after the boot report the normal build logs only with Cable log on (0 9 2 6); the bring-up build
+    // TERM-28: after the boot report the normal build logs only with Cable log on (0 9 9 7); the bring-up build
     // always. Either way the first byte from the PC ends it.
     let mut cable_log = cfg!(feature = "bringup") || set.cable_log;
     if !cable_log {
@@ -757,7 +757,7 @@ pub async fn task() {
             app.render(&mut lcd, &live, &dev, store);
             (last_draw, urgent) = (now_ms(), false);
         }
-        // Cable log turned on or off in the menu (0 9 2 6; the bring-up build ignores it: always on).
+        // Cable log turned on or off in the menu (0 9 9 7; the bring-up build ignores it: always on).
         if !cfg!(feature = "bringup") && app.settings().cable_log != cable_log {
             cable_log = app.settings().cable_log;
             bringup::ON.store(cable_log, Relaxed);
