@@ -223,8 +223,25 @@ pub const fn tick_count_safe(cnt: u16) -> bool {
     low >= 1 && low <= 0x7FFF - 16
 }
 
+/// PWR-24.9, PWR-24.10: in Low Power Mode, how long until the core may run at 24 MHz (0: now). It waits
+/// `settle_ms` after the mode comes on, and `boost_ms` after the last key or knob while the screen is lit (a dark
+/// screen drops at once). `on_for` and `since_input` are milliseconds.
+pub fn lpm_low_in(on_for: u32, since_input: u32, dark: bool, settle_ms: u32, boost_ms: u32) -> u32 {
+    let boost = if dark { 0 } else { boost_ms.saturating_sub(since_input) };
+    settle_ms.saturating_sub(on_for).max(boost)
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// PWR-24.10: a key or the knob holds full speed for the boost; the dark screen or the boost's end gives 24 MHz.
+    #[test]
+    fn lpm_boost_after_input() {
+        assert_eq!(lpm_low_in(500, 10_000, false, 1000, 3000), 500, "the mode settling first");
+        assert_eq!(lpm_low_in(5000, 1000, false, 1000, 3000), 2000, "a key a second ago: two seconds more");
+        assert_eq!(lpm_low_in(5000, 1000, true, 1000, 3000), 0, "dark: at once");
+        assert_eq!(lpm_low_in(5000, 3000, false, 1000, 3000), 0, "the boost over");
+    }
     use super::*;
 
     const NORMAL: Tree = Tree::new(15);

@@ -174,6 +174,10 @@ const LPM_FRAME_MS: u32 = 1000;
 /// the build's speed at once.
 const LPM_CLOCK_MS: u32 = 1000;
 
+/// PWR-24.10: after a key or the knob, Low Power Mode runs at the build's speed this long, so menus and the knob
+/// keep up; then 24 MHz again. The screen going dark ends it at once.
+const LPM_BOOST_MS: u32 = 3000;
+
 /// LINK-38: the shortest gap between two redraws driven by live changes alone (20 a second).
 const FRAME_MIN_MS: u32 = 50;
 
@@ -752,7 +756,8 @@ pub async fn task() {
         // in thread mode between awaits, nothing is mid-transfer (hal::clock::set_low). Before the draw, so the
         // whole redraw on leaving is at full speed. Transmit stays at 24 MHz.
         lpm_since = if app.low_power() { Some(lpm_since.unwrap_or(now_ms())) } else { None };
-        let lpm_wait = lpm_since.map(|t| LPM_CLOCK_MS.saturating_sub(now_ms().wrapping_sub(t)));
+        let since_input = now_ms().wrapping_sub(app.last_input());
+        let lpm_wait = lpm_since.map(|t| ferrite_core::clocktree::lpm_low_in(now_ms().wrapping_sub(t), since_input, panel_asleep, LPM_CLOCK_MS, LPM_BOOST_MS));
         if crate::hal::clock::set_low(lpm_wait == Some(0)) && bringup::ON.load(Relaxed) {
             let (mhz, us) = (crate::hal::clock::mhz(), crate::hal::clock::LAST_SWITCH_US.load(Relaxed));
             bringup::linef(|b| {
