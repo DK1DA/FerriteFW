@@ -790,6 +790,10 @@ impl App {
     pub fn notify_message(&mut self, head: &[u8], body: &[u8]) {
         self.inbox = self.inbox.saturating_add(1);
         self.notify(head, body, false);
+        // DISP-15.7: the APRS slot's packets don't wake the screen; a message to us does, as receive would.
+        if self.set.wake_on >= 1 {
+            self.seen = self.now;
+        }
         if self.aprs.sound != 0 {
             self.out.push(RadioCmd::Chime { sound: self.aprs.sound, level: self.set.msg_level() }); // APRS-6.1, APRS-6.2
         }

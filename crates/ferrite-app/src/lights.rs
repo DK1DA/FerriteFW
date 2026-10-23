@@ -191,7 +191,12 @@ impl App {
             self.awake = now;
             self.lit &= !WARNED;
         }
-        if rx && self.set.wake_on >= 1 || tx && (self.set.wake_on >= 2 || self.set.tx_light && !self.dark()) {
+        // DISP-15.7: the APRS slot (and a slot deferring to it) never wakes the screen: packets come every few
+        // seconds and would keep it lit; a message to us wakes it through its own popup.
+        let voice = live.slots.iter().enumerate().any(|(i, s)| {
+            s.squelch_open && !self.aprs_slot(i as u8) && !(i < crate::aprs::APRS_SLOT as usize && self.defers_to_c(i as u8))
+        });
+        if voice && self.set.wake_on >= 1 || tx && (self.set.wake_on >= 2 || self.set.tx_light && !self.dark()) {
             self.seen = now;
         }
         if tx && !self.set.tx_light {

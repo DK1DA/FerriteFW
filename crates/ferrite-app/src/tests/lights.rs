@@ -189,6 +189,29 @@ fn wake_screen_on() {
     assert!(!t.app.leds(&t.live, &dev(90, false)).green, "no receive LED for broadcast");
 }
 
+/// DISP-15.7: the APRS slot receiving leaves a dark screen dark (auto power off still counts it); a voice slot
+/// still wakes it.
+#[test]
+fn aprs_slot_never_wakes_the_screen() {
+    let mut t = T::new();
+    t.app.set.backlight = 3; // 15 s
+    t.app.set_aprs_mode(true);
+    t.wait(16_000);
+    assert!(t.app.dark());
+    t.live.slots[2].squelch_open = true;
+    t.wait(1_000);
+    assert!(t.app.dark(), "a packet on C: still dark");
+    t.live.slots[2].squelch_open = false;
+    t.app.notify_message(b"VA7IF", b"73");
+    t.wait(200);
+    assert!(!t.app.dark(), "a message to us wakes it");
+    t.wait(16_000);
+    assert!(t.app.dark());
+    t.live.slots[0].squelch_open = true;
+    t.wait(200);
+    assert!(!t.app.dark(), "voice on A wakes it");
+}
+
 /// DISP-15.6, PWR-17: with keys only waking the screen, a slot receiving still holds auto power off off.
 #[test]
 fn auto_off_counts_receive_whatever_wakes() {
