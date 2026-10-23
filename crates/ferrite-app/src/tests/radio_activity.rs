@@ -273,7 +273,7 @@ fn automatic_tx_refused_on_emergency() {
     assert!(t.app.toast.is_some_and(|x| x.body.as_bytes() == b"emergency frequency"));
 }
 
-/// TX-12.1: the level name only, 1.25 m too (TX-9: no cap).
+/// TX-12.1: the level name only, 1.25 m too (TX-9: always LOW there).
 #[test]
 fn power_level_names() {
     let mut t = ready();
@@ -802,14 +802,14 @@ fn no_callsign_fix_is_the_callsign_page() {
     assert_eq!(t.app.screen(), Screen::Home, "back where it was");
 }
 
-/// TX-9, TX-10.4, TX-10.5, TX-3 (decision 224: as stock): 1.25 m keys at the slot's level like any band; 243.0
+/// TX-9, TX-10.4, TX-10.5, TX-3 (decision 224: as stock): 1.25 m keys, Low whatever the slot's level (decision 260); 243.0
 /// MHz (Extend TX) takes the emergency double PTT; 6 m keys in the US, CB only with Extend TX (TX-4, TX-41).
 #[test]
 fn band_125m_and_hf_key_as_stock() {
     let mut t = ready();
     t.app.slots[0].cfg.power = 2;
     tune(&mut t, mhz(223) + 50_000);
-    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "HIGH", "the level, no cap");
+    assert_eq!(crate::screens::transmit::power_name(&t.app, 0), "LOW", "1.25 m keys Low, High chosen");
     t.cmds();
     ptt(&mut t, true);
     assert!(matches!(t.app.screen(), Screen::Transmit(_)), "{:?}", t.app.screen());
