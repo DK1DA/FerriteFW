@@ -275,7 +275,9 @@ impl View for Options {
             let mut p = Buf::<24>::new();
             p.set(title(self.of));
             p.push(b" MENU");
-            app.help_box(lcd, OPTS_HELP_Y, 46, help.as_bytes(), p.as_bytes());
+            // under the rows and "0 Full menu": six or seven rows push it down
+            let y = OPTS_HELP_Y.max(23 + 22 * (all.len() as i32 + 1) + 6);
+            app.help_box(lcd, y, 46, help.as_bytes(), p.as_bytes());
         }
     }
 
@@ -288,7 +290,7 @@ impl View for Options {
     }
 }
 
-/// Where an options page's help box goes (under five rows and "0 Full menu").
+/// Where an options page's help box goes (under five rows and "0 Full menu"; lower under more).
 pub(crate) const OPTS_HELP_Y: i32 = 140;
 
 /// An options page's rows, the one style (MENU-25): numbered 1-n with their values, the selected one
