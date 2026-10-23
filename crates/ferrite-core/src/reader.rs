@@ -31,6 +31,15 @@ pub const ACK_MS: u32 = 2000;
 pub const SYNC_MS: u32 = 3000;
 pub const TYPE_BLOCK: u8 = b'B';
 pub const TYPE_END: u8 = b'E';
+/// `fdumpz`'s frame: one [`ZCHUNK`] of the range, coded (BACKUP-9.6): a mode byte, then the data.
+pub const TYPE_ZBLOCK: u8 = b'Z';
+/// `fdumpz`'s chunk: 8 KB read, coded and sent as one frame.
+pub const ZCHUNK: usize = 8192;
+/// The coded chunk's room: the mode byte and the chunk raw (the coder falls back to raw when it can't do better).
+pub const ZBUF: usize = ZCHUNK + 1;
+pub const Z_RAW: u8 = 0;
+pub const Z_ERASED: u8 = 1;
+pub const Z_RLE: u8 = 2;
 pub const SYNC: [u8; 4] = *b"FDS1";
 pub const SYNC_OK: [u8; 4] = *b"FDOK";
 /// The console's rate, and `fdump`'s when none is given.
@@ -40,6 +49,7 @@ pub const FDUMP_BAUD: u32 = 500_000;
 /// The help text. Ferrite Console tells the reader image from others by its "fdump <addr> <len>" (READER_MARK).
 pub const HELP: &[u8] = b"sys | flash | flashcrc   (SPI flash, read only)\r\n\
 fdump <addr> <len> [baud]   (SPI flash, read only, binary: fw/tools/flashdump.py --fast)\r\n\
+fdumpz <addr> <len> [baud]  (as fdump, 8 KB chunks coded: erased, run-length or raw)\r\n\
 reader | reboot | off\r\n";
 
 // ---- CRC-32 ----
@@ -142,6 +152,109 @@ pub struct Stopped {
     pub why: &'static str,
 }
 
+/// BACKUP-9.6: a chunk coded into `out` (at least [`ZBUF`] long), the smallest of: [`Z_ERASED`] (every byte 0xFF, the
+/// mode byte alone), [`Z_RLE`] (PackBits: a control byte 0-127 is that plus one literal bytes, 128-255 is a run of
+/// that minus 125, 3 to 130, of the next byte) and [`Z_RAW`]. Returns the coded length.
+pub fn zcode(chunk: &[u8], out: &mut [u8]) -> usize {
+    if chunk.iter().all(|&b| b == 0xFF) {
+        out[0] = Z_ERASED;
+        return 1;
+    }
+    let raw = |out: &mut [u8]| {
+        out[0] = Z_RAW;
+        out[1..1 + chunk.len()].copy_from_slice(chunk);
+        1 + chunk.len()
+    };
+    let limit = chunk.len(); // coded must beat raw
+    let mut o = 1;
+    let mut i = 0;
+    let mut lit = 0usize; // start of the pending literal run
+    let mut lit_n = 0usize;
+    macro_rules! flush_lit {
+        () => {
+            while lit_n > 0 {
+                let n = lit_n.min(128);
+                if o + 1 + n > limit {
+                    return raw(out);
+                }
+                out[o] = (n - 1) as u8;
+                out[o + 1..o + 1 + n].copy_from_slice(&chunk[lit..lit + n]);
+                o += 1 + n;
+                lit += n;
+                lit_n -= n;
+            }
+        };
+    }
+    while i < chunk.len() {
+        let b = chunk[i];
+        let mut run = 1;
+        while i + run < chunk.len() && chunk[i + run] == b && run < 130 {
+            run += 1;
+        }
+        if run >= 3 {
+            flush_lit!();
+            if o + 2 > limit {
+                return raw(out);
+            }
+            out[o] = (run + 125) as u8;
+            out[o + 1] = b;
+            o += 2;
+            i += run;
+            lit = i;
+        } else {
+            if lit_n == 0 {
+                lit = i;
+            }
+            lit_n += 1;
+            i += 1;
+        }
+    }
+    flush_lit!();
+    out[0] = Z_RLE;
+    o
+}
+
+/// BACKUP-9.6: a coded chunk back into `out` (its length is the chunk's); false when it doesn't decode to exactly that.
+pub fn zdecode(coded: &[u8], out: &mut [u8]) -> bool {
+    let Some((&mode, data)) = coded.split_first() else { return false };
+    match mode {
+        Z_ERASED if data.is_empty() => {
+            out.fill(0xFF);
+            true
+        }
+        Z_RAW if data.len() == out.len() => {
+            out.copy_from_slice(data);
+            true
+        }
+        Z_RLE => {
+            let (mut i, mut o) = (0, 0);
+            while i < data.len() {
+                let c = data[i] as usize;
+                i += 1;
+                if c < 128 {
+                    let n = c + 1;
+                    if i + n > data.len() || o + n > out.len() {
+                        return false;
+                    }
+                    out[o..o + n].copy_from_slice(&data[i..i + n]);
+                    i += n;
+                    o += n;
+                } else {
+                    let n = c - 125;
+                    if i >= data.len() || o + n > out.len() {
+                        return false;
+                    }
+                    out[o..o + n].fill(data[i]);
+                    i += 1;
+                    o += n;
+                }
+            }
+            o == out.len()
+        }
+        _ => false,
+    }
+}
+
 /// Sends one frame until the host ACKs it: Some(true) ACK, Some(false) cancelled, None out of tries.
 fn send_frame(link: &mut impl Link, hdr: &[u8; HDR], data: &[u8], resends: &mut u32) -> Option<bool> {
     let crc = frame_crc(hdr, data);
@@ -171,6 +284,32 @@ pub fn fdump_run(
     buf: &mut [u8; BLOCK],
     addr: u32,
     len: u32,
+    read: impl FnMut(u32, &mut [u8]),
+    progress: impl FnMut(u32, u32) -> bool,
+) -> Result<Dumped, Stopped> {
+    dump(link, buf, None, addr, len, read, progress)
+}
+
+/// `fdumpz` (BACKUP-9.6): `fdump` with [`ZCHUNK`] chunks sent coded ([`zcode`]) as [`TYPE_ZBLOCK`] frames; the
+/// frames' CRC covers what goes over the cable, the end frame's CRC-32 the range as read, as `fdump`'s.
+pub fn fdumpz_run(
+    link: &mut impl Link,
+    buf: &mut [u8; ZCHUNK],
+    zbuf: &mut [u8; ZBUF],
+    addr: u32,
+    len: u32,
+    read: impl FnMut(u32, &mut [u8]),
+    progress: impl FnMut(u32, u32) -> bool,
+) -> Result<Dumped, Stopped> {
+    dump(link, buf, Some(zbuf), addr, len, read, progress)
+}
+
+fn dump(
+    link: &mut impl Link,
+    buf: &mut [u8],
+    mut zbuf: Option<&mut [u8; ZBUF]>,
+    addr: u32,
+    len: u32,
     mut read: impl FnMut(u32, &mut [u8]),
     mut progress: impl FnMut(u32, u32) -> bool,
 ) -> Result<Dumped, Stopped> {
@@ -193,10 +332,17 @@ pub fn fdump_run(
     link.clear_rx();
     let (mut done, mut resends, mut crc, mut blocks) = (0u32, 0u32, 0u32, 0u32);
     while done < len {
-        let n = (len - done).min(BLOCK as u32);
+        let n = (len - done).min(buf.len() as u32);
         let data = &mut buf[..n as usize];
         read(addr + done, data);
-        match send_frame(link, &header(TYPE_BLOCK, addr + done, n as u16), data, &mut resends) {
+        let sent = match zbuf.as_deref_mut() {
+            Some(z) => {
+                let c = zcode(data, z);
+                send_frame(link, &header(TYPE_ZBLOCK, addr + done, c as u16), &z[..c], &mut resends)
+            }
+            None => send_frame(link, &header(TYPE_BLOCK, addr + done, n as u16), data, &mut resends),
+        };
+        match sent {
             Some(true) => {}
             Some(false) => return Err(Stopped { at: addr + done, why: "cancelled by the host" }),
             None => return Err(Stopped { at: addr + done, why: "no acknowledgement" }),
@@ -299,6 +445,8 @@ pub enum Command {
     Flash,
     FlashCrc,
     Fdump { addr: u32, len: u32, baud: u32 },
+    /// `fdumpz`: as `fdump`, coded (BACKUP-9.6).
+    FdumpZ { addr: u32, len: u32, baud: u32 },
     Reader,
     Reboot,
     Off,
@@ -318,7 +466,7 @@ pub fn parse(line: &[u8]) -> Command {
         b"reader" => Command::Reader,
         b"reboot" => Command::Reboot,
         b"off" => Command::Off,
-        b"fdump" => {
+        b"fdump" | b"fdumpz" => {
             let (Some(addr), Some(len)) = (a[0].and_then(uint), a[1].and_then(uint)) else { return Command::Unknown };
             let baud = match a[2] {
                 None => FDUMP_BAUD,
@@ -327,7 +475,7 @@ pub fn parse(line: &[u8]) -> Command {
                     None => return Command::Empty, // hwtest: a bad rate is ignored silently
                 },
             };
-            Command::Fdump { addr, len, baud }
+            if cmd == b"fdumpz" { Command::FdumpZ { addr, len, baud } } else { Command::Fdump { addr, len, baud } }
         }
         _ => Command::Unknown,
     }
@@ -766,6 +914,33 @@ mod tests {
                 true
             },
         )
+    }
+
+    /// BACKUP-9.6: every coding round-trips, picks erased/RLE/raw by size, and never beats raw's room.
+    #[test]
+    fn zcode_round_trips() {
+        let mut cases: [[u8; ZCHUNK]; 5] = [[0xFF; ZCHUNK], [0; ZCHUNK], [0; ZCHUNK], [0; ZCHUNK], [0xFF; ZCHUNK]];
+        for (i, b) in cases[2].iter_mut().enumerate() {
+            *b = chip(i as u32); // noise: raw
+        }
+        for (i, b) in cases[3].iter_mut().enumerate() {
+            *b = if i % 300 < 200 { 0xFF } else { chip(i as u32) }; // mixed
+        }
+        cases[4][100] = 0x12; // one byte off erased
+        let modes = [Z_ERASED, Z_RLE, Z_RAW, Z_RLE, Z_RLE];
+        for (c, m) in cases.iter().zip(modes) {
+            let mut z = [0u8; ZBUF];
+            let n = zcode(c, &mut z);
+            assert_eq!(z[0], m);
+            assert!(n <= ZBUF);
+            let mut back = [0u8; ZCHUNK];
+            assert!(zdecode(&z[..n], &mut back));
+            assert_eq!(&back[..], &c[..]);
+        }
+        let mut back = [0u8; 10];
+        assert!(!zdecode(&[Z_RLE, 0x85, 0xAA], &mut back)); // 8 bytes, not 10
+        assert!(zdecode(&[Z_RLE, 0x87, 0xAA], &mut back) && back == [0xAA; 10]);
+        assert_eq!(parse(b"fdumpz 0 0x400000 460800"), Command::FdumpZ { addr: 0, len: 0x40_0000, baud: 460_800 });
     }
 
     /// BACKUP-9.5: a whole dump against a host like Console's: every byte, the end frame's CRC and count.

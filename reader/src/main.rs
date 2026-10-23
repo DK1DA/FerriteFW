@@ -137,9 +137,19 @@ impl Out for Cable {
 /// `fdump`'s view of the cable, at its own rate.
 struct Dump;
 
+/// Bytes between short pauses while a frame goes out. Sent with no gap at all (the polled loop at 120 MHz keeps the
+/// data register full), the CH340 on a Mac loses bursts of 3-14 bytes about once every 30 frames (Oct 22, black, at
+/// 460800 and 500000 alike: the frame comes up short and runs into the next one). hwtest, at 8 MHz, left a gap
+/// between bytes and never did.
+const PACE_BYTES: usize = 64;
+const PACE_US: u32 = 100;
+
 impl proto::Link for Dump {
     fn write(&mut self, b: &[u8]) {
-        uart::write(UART_CPS, b)
+        for chunk in b.chunks(PACE_BYTES) {
+            uart::write(UART_CPS, chunk);
+            time::delay_us(PACE_US);
+        }
     }
     fn getc(&mut self, ms: u32) -> Option<u8> {
         let t0 = now_ms();
@@ -217,6 +227,8 @@ struct Reader {
     crc: Option<Crc>,
     power: PowerSwitch,
     buf: [u8; proto::BLOCK],
+    zchunk: [u8; proto::ZCHUNK],
+    zbuf: [u8; proto::ZBUF],
 }
 
 impl Reader {
@@ -257,7 +269,8 @@ impl Reader {
             }
             Command::Flash => self.flash_info(),
             Command::FlashCrc => self.crc_start(),
-            Command::Fdump { addr, len, baud } => self.fdump(addr, len, baud),
+            Command::Fdump { addr, len, baud } => self.fdump(addr, len, baud, false),
+            Command::FdumpZ { addr, len, baud } => self.fdump(addr, len, baud, true),
             Command::Reader => {
                 self.backup_screen();
                 Cable.put(b"reader screen on\r\n");
@@ -337,7 +350,7 @@ impl Reader {
         }
     }
 
-    fn fdump(&mut self, addr: u32, len: u32, baud: u32) {
+    fn fdump(&mut self, addr: u32, len: u32, baud: u32, z: bool) {
         self.flash.probe();
         let chip = self.flash.bytes();
         if proto::fdump_refusal(&mut Cable, addr, len, chip) {
@@ -354,20 +367,19 @@ impl Reader {
         uart::flush(UART_CPS);
         uart::set_rate(UART_CPS, baud);
         uart::clear_rx(UART_CPS);
-        let Reader { lcd, flash, power, buf, .. } = self;
-        let r = proto::fdump_run(
-            &mut Dump,
-            buf,
-            addr,
-            len,
-            |a, d| flash.read(a, d),
-            |done, blocks| {
-                if blocks % 16 == 0 || done == len {
-                    ui::progress(lcd, Phase::Reading, done, len);
-                }
-                !power.off()
-            },
-        );
+        let Reader { lcd, flash, power, buf, zchunk, zbuf, .. } = self;
+        let mut progress = |done: u32, _blocks: u32| {
+            // Every 64 KB, and at the end.
+            if done % 0x10000 == 0 || done == len {
+                ui::progress(lcd, Phase::Reading, done, len);
+            }
+            !power.off()
+        };
+        let r = if z {
+            proto::fdumpz_run(&mut Dump, zchunk, zbuf, addr, len, |a, d| flash.read(a, d), &mut progress)
+        } else {
+            proto::fdump_run(&mut Dump, buf, addr, len, |a, d| flash.read(a, d), &mut progress)
+        };
         uart::flush(UART_CPS);
         uart::set_rate(UART_CPS, proto::CONSOLE_BAUD);
         // Console switches back 50-100 ms after the last ACK: the result line waits for it (hwtest's came at once,
@@ -378,6 +390,25 @@ impl Reader {
             Ok(d) => proto::fdump_end(&mut Cable, d.crc, len, d.blocks, d.resends, d.ms),
             Err(s) => proto::fdump_stopped(&mut Cable, s.at, s.why),
         }
+        // What the cable's receiver saw since start-up: line errors by kind, bytes the ring had no room for.
+        let (fe, ore) = uart::errors(UART_CPS);
+        let st = uart::stats(UART_CPS);
+        for (k, v) in [(&b"uart rx "[..], st.rx_bytes), (b" framing ", fe), (b" overrun ", ore), (b" ring dropped ", st.dropped as u32)] {
+            Cable.put(k);
+            let mut d = [0u8; 10];
+            let mut n = v;
+            let mut i = d.len();
+            loop {
+                i -= 1;
+                d[i] = b'0' + (n % 10) as u8;
+                n /= 10;
+                if n == 0 {
+                    break;
+                }
+            }
+            Cable.put(&d[i..]);
+        }
+        Cable.put(b"\r\n");
     }
 }
 
@@ -397,6 +428,8 @@ fn main() -> ! {
         crc: None,
         power: PowerSwitch::default(),
         buf: [0; proto::BLOCK],
+        zchunk: [0; proto::ZCHUNK],
+        zbuf: [0; proto::ZBUF],
     };
     Cable.put(b"\r\nFerrite reader ");
     Cable.put(ferrite_core::VERSION.as_bytes());
