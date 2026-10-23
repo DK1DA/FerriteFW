@@ -134,16 +134,37 @@ pub fn dtmf_seq_ms(digits: usize, ms: u16, delay_ms: u16) -> u32 {
     delay_ms as u32 + digits as u32 * 2 * ms as u32
 }
 
-/// APRS-6.1: the message sounds (0 7 5 5), notes as (Hz, ms); 0 Hz is a rest, 0 ms ends the sound. Played from
-/// DAC1 like the key beeps (SND-11), the amp on throughout. Index 0 is Off (no notes). One flat table, no slices:
-/// the Radio task reads it, so it sits in fast flash as one named static (slowcheck).
-pub static CHIMES: [[(u16, u16); 5]; 5] = [
-    [(0, 0); 5],
-    [(1568, 260), (0, 0), (0, 0), (0, 0), (0, 0)],               // Ding: one bright note (G6)
-    [(1047, 110), (1568, 230), (0, 0), (0, 0), (0, 0)],          // Mail: a rising fifth (C6, G6)
-    [(880, 150), (0, 40), (740, 260), (0, 0), (0, 0)],           // Uh-oh: a falling two-note phrase (A5, F#5)
-    [(1760, 60), (0, 40), (1760, 60), (0, 40), (2093, 110)],     // Pager: two chirps and a higher one
+/// APRS-6.1: the message sounds (0 7 5 5), steps as (Hz, ms); 0 Hz is a rest, 0 ms ends the sound. Played from
+/// DAC1 like the key beeps (SND-11), the amp on throughout, two steps louder than the beep volume. Index 0 is Off
+/// (no notes). One flat table, no slices: the Radio task reads it, so it sits in fast flash as one named static
+/// (slowcheck).
+pub static CHIMES: [[(u16, u16); CHIME_STEPS]; 5] = [
+    [(0, 0); CHIME_STEPS],
+    pad([(1568, 260)]),                                            // Ding: one bright note (G6)
+    pad([(1047, 110), (1568, 230)]),                               // Mail: a rising fifth (C6, G6)
+    // Uh-oh, after ICQ's spoken one: a short "uh" that lifts a little, a breath, then a longer "oh" that slides
+    // down about a fourth, in short steps (the DAC tone can't glide)
+    pad([(740, 45), (800, 80), (0, 70), (660, 60), (620, 55), (585, 55), (550, 60), (520, 90)]),
+    pad([(1760, 60), (0, 40), (1760, 60), (0, 40), (2093, 110)]), // Pager: two chirps and a higher one
 ];
+/// The most steps one sound has.
+pub const CHIME_STEPS: usize = 10;
+
+/// A sound's steps, the rest of its row ended (0 ms).
+const fn pad<const N: usize>(n: [(u16, u16); N]) -> [(u16, u16); CHIME_STEPS] {
+    let mut r = [(0, 0); CHIME_STEPS];
+    let mut i = 0;
+    while i < N {
+        r[i] = n[i];
+        i += 1;
+    }
+    r
+}
+
+/// APRS-6.1: a message sound plays this many DAC levels above the beep volume's (+6 dB each): Low 7, Mid 9, High 11
+/// (full scale).
+pub const CHIME_LOUDER: u8 = 2;
+
 pub const CHIME_NAMES: [&str; 5] = ["Off", "Ding", "Mail", "Uh-oh", "Pager"];
 /// Mail: Alex, Oct 22, 2026 (decision 241, a default to review before the first release).
 pub const CHIME_DEFAULT: u8 = 2;

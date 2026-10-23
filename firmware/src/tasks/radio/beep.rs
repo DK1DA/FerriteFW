@@ -73,7 +73,8 @@ impl Radio {
         if si_playing {
             let _ = self.si.mute(true, &mut BusyDelay);
         }
-        crate::hal::tone::start(notes[0].0.max(1) as u32, self.beep_level);
+        let level = (self.beep_level + tonegen::CHIME_LOUDER).min(11); // louder than a key beep
+        crate::hal::tone::start(notes[0].0.max(1) as u32, level);
         Timer::after_millis(30).await;
         if !playing {
             speaker(true);
@@ -82,7 +83,7 @@ impl Radio {
             if hz == 0 {
                 crate::hal::tone::stop();
             } else {
-                crate::hal::tone::start(hz as u32, self.beep_level);
+                crate::hal::tone::start(hz as u32, level);
             }
             Timer::after_millis(ms as u64).await;
         }
