@@ -139,7 +139,7 @@ class Dps150:
 def log(d, seconds, csv=None):
     out = open(csv, "w") if csv else None
     if out:
-        out.write("t_s,volts,amps,watts\n")
+        out.write("t_s,volts,amps,watts,on\n")
     rows, t0, last = [], time.monotonic(), None
     while time.monotonic() - t0 < seconds:
         d.poll(0.1)
@@ -149,10 +149,18 @@ def log(d, seconds, csv=None):
                 d.get(T_ALL)
             continue
         last = t
+        on = d.state.get("on")
+        if on is False:
+            # The output went off under the log (Oct 22: it did, mid-run, with nothing sent): say when and stop,
+            # rather than averaging zeros.
+            print(f"output OFF at {time.monotonic() - t0:.1f} s ({time.strftime('%H:%M:%S')}); log stopped")
+            if out:
+                out.write(f"{time.monotonic() - t0:.3f},0,0,0,0\n")
+            break
         row = (t - t0, d.state["v"], d.state["i"], d.state["p"])
         rows.append(row)
         if out:
-            out.write("%.3f,%.4f,%.4f,%.4f\n" % row)
+            out.write("%.3f,%.4f,%.4f,%.4f,1\n" % row)
             out.flush()  # every reading on disk as it comes (a stopped log keeps what it had)
     if out:
         out.close()
