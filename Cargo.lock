@@ -429,6 +429,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrite-reader"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "cortex-m-rt",
+ "critical-section",
+ "embassy-sync",
+ "embassy-time",
+ "embassy-time-driver",
+ "embassy-time-queue-utils",
+ "ferrite-core",
+ "ferrite-ui",
+ "st7789",
+ "ufmt",
+ "uradio-bus",
+ "w25q",
+]
+
+[[package]]
 name = "ferrite-sim"
 version = "0.1.0"
 dependencies = [

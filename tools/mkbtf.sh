@@ -10,6 +10,9 @@
 #   tools/mkbtf.sh tx-bench   # target/ferrite-txbench.btf: the full-power transmit build with the bench commands
 #                             #   (txtest, bk, si, mem, gpio, rx, mic, bt, gps query/nmea/standby), starting every
 #                             #   power-on with Dry TX on (TX-48.1; decision 193 replaced the tx-dry build)
+#   tools/mkbtf.sh reader     # target/ferrite-reader.btf: the read-only reader image Ferrite Console backs a radio
+#                             #   up with (reader/, decision 264; replaced fw/apps/hwtest's). All of it runs from the
+#                             #   zero-wait flash (reader/memory.x checks), so no fast-flash audit.
 #
 # The bench commands are the `bench` cargo feature (decision 151, TERM-38): the firmware's `bringup` and `tx-bench`
 # features turn it on (firmware/Cargo.toml). The receive and tx images leave them out; their terminal says "not in
@@ -20,12 +23,14 @@ set -e
 cd "$(dirname "$0")/.."
 name=ferrite
 build="fw"
+elf=ferrite
 case "$1" in
     "") ;;
     bringup) name=ferrite-bringup build="fw-bringup" ;;
     tx) name=ferrite-tx build="fw --features tx" ;;
     tx-bench) name=ferrite-txbench build="fw --features tx-bench" ;; # tx + bench, Dry TX on at power-on
-    *) echo "usage: $0 [bringup | tx | tx-bench] [clock-24 | clock-48 | clock-96 | clock-144 | clock-192 | clock-240]" >&2; exit 2 ;;
+    reader) name=ferrite-reader build="fw-reader" elf=ferrite-reader ;;
+    *) echo "usage: $0 [bringup | tx | tx-bench | reader] [clock-24 | clock-48 | clock-96 | clock-144 | clock-192 | clock-240]" >&2; exit 2 ;;
 esac
 case "$2" in
     "") ;;
@@ -34,12 +39,15 @@ case "$2" in
         case "$build" in *--features*) build="$build,$2" ;; *) build="$build --features $2" ;; esac ;;
     *) echo "unknown clock: $2" >&2; exit 2 ;;
 esac
+[ "$elf" = ferrite-reader ] && [ -n "$2" ] && { echo "the reader has no clock builds" >&2; exit 2; }
 cargo $build
-# The fast-flash audit must pass: its last line, or the whole report and a stop when it fails.
-check=$(python3 tools/slowcheck.py) || { echo "$check"; exit 1; }
-echo "$check" | tail -1
+if [ "$elf" = ferrite ]; then
+    # The fast-flash audit must pass: its last line, or the whole report and a stop when it fails.
+    check=$(python3 tools/slowcheck.py) || { echo "$check"; exit 1; }
+    echo "$check" | tail -1
+fi
 bin=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
-"$bin/llvm-objcopy" -O binary target/thumbv7em-none-eabihf/release/ferrite "target/$name.bin"
+"$bin/llvm-objcopy" -O binary "target/thumbv7em-none-eabihf/release/$elf" "target/$name.bin"
 python3 tools/btf.py pack "target/$name.bin" "target/$name.btf"
 python3 tools/flash.py --dry-run - "target/$name.btf"
 shasum -a 256 "target/$name.btf"

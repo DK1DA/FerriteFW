@@ -20,6 +20,7 @@ pub mod gfx;
 pub mod home;
 pub mod panel;
 pub mod qr;
+pub mod reader;
 pub mod theme;
 pub mod text;
 pub mod widgets;

@@ -3,7 +3,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use uradio_bus::mock::{MockDelay, MockSpi};
-use w25q::{Error, W25q, SECTOR};
+#[cfg(feature = "write")]
+use w25q::SECTOR;
+use w25q::{Error, W25q};
 
 /// A W25Q32 model: memory, write-enable latch, a busy countdown, and the commands the driver sends.
 struct Chip {
@@ -83,6 +85,7 @@ fn identifies_and_sizes() {
 }
 
 #[test]
+#[cfg(feature = "write")]
 fn program_splits_at_pages_and_reads_back() {
     let (mut f, chip, mut delay) = setup();
     let data: Vec<u8> = (0..700).map(|i| (i * 7) as u8).collect();
@@ -97,6 +100,7 @@ fn program_splits_at_pages_and_reads_back() {
 }
 
 #[test]
+#[cfg(feature = "write")]
 fn erase_without_blocking() {
     let (mut f, chip, mut delay) = setup();
     f.program(0x02F000, &[0, 1, 2], &mut delay).unwrap();
@@ -110,6 +114,7 @@ fn erase_without_blocking() {
 }
 
 #[test]
+#[cfg(feature = "write")]
 fn refuses_protected_and_bad_addresses() {
     let (mut f, chip, mut delay) = setup();
     // Factory calibration (0x00F000), stock data (0x000000), the bootloader area (0x300000): untouched.
@@ -127,9 +132,30 @@ fn refuses_protected_and_bad_addresses() {
 }
 
 #[test]
+#[cfg(feature = "write")]
 fn stuck_busy_times_out() {
     let (mut f, chip, mut delay) = setup();
     chip.borrow_mut().stuck = true;
     assert_eq!(f.erase(0x02C000, &mut delay), Err(Error::Timeout));
     assert!(delay.total_us >= 400_000, "waited its full limit");
+}
+
+/// The read-only build (no `write` feature, the reader image's, BACKUP-9.5): it says so, and reading the whole chip,
+/// its IDs and its status sends nothing but read opcodes (read 0x03, JEDEC 0x9F, unique ID 0x4B, status 0x05, wake 0xAB).
+#[test]
+fn read_only_build_sends_only_reads() {
+    let (mut f, chip, _) = setup();
+    assert_eq!(w25q::WRITES, cfg!(feature = "write"));
+    chip.borrow_mut().mem[0x00F000] = 0x5A;
+    let mut b = vec![0; 4096];
+    for a in (0..4u32 << 20).step_by(4096) {
+        f.read(a, &mut b).unwrap();
+    }
+    f.read(0x00F000, &mut b).unwrap();
+    assert_eq!(b[0], 0x5A);
+    f.jedec_id();
+    f.unique_id();
+    f.status();
+    assert_eq!(f.read(0x3FFFFF, &mut [0, 0]), Err(Error::OutOfRange));
+    assert!(f.release().txns.iter().all(|t| matches!(t.out[0], 0x03 | 0x9F | 0x4B | 0x05 | 0xAB)));
 }

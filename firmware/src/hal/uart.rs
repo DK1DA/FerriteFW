@@ -104,6 +104,18 @@ pub(super) fn retime(t: ferrite_core::clocktree::Tree) {
     }
 }
 
+/// A new rate for a port that is on, written with it on (turning it off could pull the TX pin low: a break on the
+/// cable). Call [`flush`] first; a byte arriving across the change may be lost. The reader image's `fdump`.
+pub fn set_rate(id: usize, baud: u32) {
+    wr(HW[id].base + USART_BAUDR, clock::tree().baudr(baud));
+    RATE[id].store(baud, Relaxed);
+}
+
+/// Drops what has come and not been taken.
+pub fn clear_rx(id: usize) {
+    RX[id].clear();
+}
+
 /// Off: both pins analog so a powered-down module is not fed, and the port's clock gated (PWR-23).
 pub fn deinit(id: usize) {
     let u = &HW[id];
