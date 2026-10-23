@@ -16,7 +16,7 @@
 //!   steps, DAC1 running throughout); None at the release stops it. Receiving pauses while it plays, as for AFSK.
 
 use crate::chan::DSP;
-use crate::hal::{adc, audio};
+use crate::hal::{adc, audio, clock};
 use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
 use embassy_futures::select::{select4, Either4};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as M;
@@ -62,6 +62,8 @@ pub static AFSK_DONE: Signal<M, bool> = Signal::new();
 /// seamlessly) or to stop (None, at the release).
 #[cfg(all(feature = "tx", feature = "bench"))]
 pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Gen>> = Signal::new();
+/// PWR-26.4: how often (in 2 ms capture halves) a capture running at 24 MHz asks again for the build's speed.
+const RECHECK_HALVES: u32 = 5_000;
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
 /// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
@@ -77,6 +79,7 @@ pub async fn task() {
     let mut capturing = false;
     // What each side asks for, and what runs (DEC-18).
     let (mut aprs, mut pager, mut running) = (DecoderKind::Off, false, DecoderKind::Off);
+    let mut halves = 0u32;
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
         #[cfg(all(feature = "tx", feature = "bench"))]
@@ -106,6 +109,7 @@ pub async fn task() {
                 };
                 let want = kind != DecoderKind::Off;
                 if want && !capturing {
+                    clock::for_audio().await; // PWR-26.4: the speed first, never under a running capture
                     adc::init();
                     dec = Decim::new();
                     audio::capture_start();
@@ -116,6 +120,16 @@ pub async fn task() {
             }
             Either4::First(DspCmd::Beep { .. }) => {} // beeps are the BK4829's (SND-11)
             Either4::Second(half) => {
+                // PWR-26.4: a capture that started at 24 MHz (the governor didn't answer in time) gets the build's
+                // speed: stopped, the speed asked for, started again; looked at every 10 s.
+                halves = halves.wrapping_add(1);
+                if halves.is_multiple_of(RECHECK_HALVES) && clock::is_low() && clock::AUDIO_RAISES.load(Relaxed) {
+                    audio::capture_stop();
+                    clock::for_audio().await;
+                    dec = Decim::new();
+                    audio::capture_start();
+                    continue;
+                }
                 let base = half as usize * BLOCK_IN;
                 let mut out = [0i16; BLOCK_OUT];
                 let mut n = 0;
@@ -159,6 +173,7 @@ pub async fn task() {
                 }
                 play_test(g).await;
                 if capturing {
+                    clock::for_audio().await;
                     dec = Decim::new();
                     audio::capture_start();
                 }
@@ -169,6 +184,7 @@ pub async fn task() {
                 }
                 play(&frame).await;
                 if capturing {
+                    clock::for_audio().await;
                     dec = Decim::new();
                     audio::capture_start();
                 }
@@ -195,6 +211,7 @@ async fn play(f: &Frame) {
         more
     };
     let mut more = fill(0, &mut m) && fill(1, &mut m);
+    clock::for_audio().await; // PWR-26.4
     audio::DAC_HALF.reset();
     audio::play_start();
     // After the modulator ends: one half of silence written, then wait for it to play.
@@ -230,6 +247,7 @@ async fn play_test(mut g: ferrite_core::txtest::Gen) {
     };
     fill(0, Some(&mut g));
     fill(1, Some(&mut g));
+    clock::for_audio().await; // PWR-26.4
     audio::DAC_HALF.reset();
     audio::play_start();
     loop {

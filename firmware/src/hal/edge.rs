@@ -12,7 +12,11 @@ use super::{irq, modify, rd, wr};
 pub const IRQ: u16 = 50;
 /// The count rate: 1200 Bd is exactly 1000 ticks.
 pub const TICK_HZ: u32 = 1_200_000;
-const _: () = assert!(super::clock::TMR_HZ.is_multiple_of(TICK_HZ) && TICK_HZ.is_multiple_of(1200));
+const _: () = assert!(
+    super::clock::NORMAL.tmr_hz().is_multiple_of(TICK_HZ)
+        && super::clock::LOW.tmr_hz().is_multiple_of(TICK_HZ)
+        && TICK_HZ.is_multiple_of(1200)
+);
 const CC1: u32 = 1 << 1;
 
 /// Counting from now, no compare armed, the interrupt at `prio`; returns the count.
@@ -20,7 +24,7 @@ pub fn start(prio: u8) -> u16 {
     modify(CRM_APB1EN, 0, CRM_APB1_TMR5);
     wr(TMR5 + TMR_CTRL1, 0);
     wr(TMR5 + TMR_IDEN, 0);
-    wr(TMR5 + TMR_DIV, super::clock::TMR_HZ / TICK_HZ - 1);
+    wr(TMR5 + TMR_DIV, super::clock::tree().tmr_div(TICK_HZ));
     wr(TMR5 + TMR_PR, 0xFFFF);
     wr(TMR5 + TMR_SWEVT, 1); // load DIV now
     wr(TMR5 + TMR_ISTS, 0); // the load set the overflow flag
@@ -58,4 +62,11 @@ pub fn stop() {
     wr(TMR5 + TMR_ISTS, 0);
     wr(NVIC_ICPR + 4 * (IRQ as u32 / 32), 1 << (IRQ % 32)); // nothing left pending for the next start
     modify(CRM_APB1EN, CRM_APB1_TMR5, 0);
+}
+
+/// PWR-24.9: running across a speed switch, it keeps counting at [`TICK_HZ`] (its count kept).
+pub(super) fn retime(t: ferrite_core::clocktree::Tree) {
+    if rd(CRM_APB1EN) & CRM_APB1_TMR5 != 0 {
+        super::time::retime_counter(TMR5, t.tmr_div(TICK_HZ));
+    }
 }

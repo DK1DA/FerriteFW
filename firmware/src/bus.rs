@@ -134,8 +134,9 @@ fn byte(b: u8) {
     }
 }
 
-/// The LCD strobe's nops are counted at 120 MHz: once at that speed or below, more often above.
-const NOP_REPEAT: u32 = crate::hal::clock::SYSCLK_HZ.div_ceil(120_000_000);
+/// The LCD strobe's nops are counted at 120 MHz: once at that speed or below, more often above. Counted for the
+/// build's speed, the fastest the core runs: at Low Power Mode's 24 MHz (PWR-24.9) the strobe is only longer.
+const NOP_REPEAT: u32 = crate::hal::clock::NORMAL.lcd_nops();
 
 impl st7789::Bus8080 for Lcd {
     fn command(&mut self, cmd: u8) {

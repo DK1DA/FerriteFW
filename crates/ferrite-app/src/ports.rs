@@ -77,6 +77,8 @@ pub struct Ports {
     /// When Bluetooth last sent a byte, and whether it has since the connection started.
     bt_last: u32,
     bt_seen: bool,
+    /// PWR-26.2: when the cable last sent a byte (None: never).
+    cable_last: Option<u32>,
     /// Bluetooth terminal bytes dropped while the cable held the terminal.
     pub dropped: u32,
     /// The debug request in flight: who asked, and when.
@@ -98,7 +100,7 @@ impl Ports {
     pub const fn new() -> Self {
         let mut bt = Session::new(false);
         bt.set_max_baud(0); // LINK-15: `BAUD` never applies to Bluetooth
-        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, dropped: 0, dbg: None, now: 0, ui: ferrite_core::liveview::Track::new(), ui_owner: None }
+        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, cable_last: None, dropped: 0, dbg: None, now: 0, ui: ferrite_core::liveview::Track::new(), ui_owner: None }
     }
 
     /// The fastest cable rate the caller's UART runs within 2 % (LINK-11).
@@ -139,6 +141,8 @@ impl Ports {
     pub fn route(&mut self, app: &App, port: Port, b: u8, now: u32) -> To {
         if port == Port::Bt {
             (self.bt_last, self.bt_seen) = (now, true);
+        } else {
+            self.cable_last = Some(now);
         }
         let kiss = match port {
             Port::Cable => app.set.kiss_on_cable(),
@@ -274,5 +278,15 @@ impl Ports {
     /// something within [`BT_IDLE_MS`] (the status bar's icon, SBAR).
     pub fn bt_connected(&self, app: &App, now: u32) -> bool {
         app.set.bt && self.bt_seen && now.wrapping_sub(self.bt_last) < BT_IDLE_MS
+    }
+
+    /// PWR-26.2: a live session, for the MCU clock: a link session active on either port (a frame within
+    /// `link::ACTIVE_MS`), or a byte (terminal, link or KISS) from the cable, or from a connected Bluetooth device,
+    /// within `clocktree::LINK_MS`.
+    pub fn live(&self, app: &App, now: u32) -> bool {
+        use ferrite_core::clocktree::LINK_MS;
+        self.links.iter().any(|l| l.active(now))
+            || self.cable_last.is_some_and(|t| now.wrapping_sub(t) < LINK_MS)
+            || self.bt_connected(app, now) && now.wrapping_sub(self.bt_last) < LINK_MS
     }
 }

@@ -14,6 +14,7 @@ pub mod acc;
 pub mod audio;
 pub mod battery;
 pub mod chipid;
+pub mod clocktree;
 pub mod cmdq;
 pub mod sha256;
 pub mod ssb;

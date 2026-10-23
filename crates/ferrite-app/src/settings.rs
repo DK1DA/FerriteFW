@@ -291,6 +291,9 @@ pub struct Settings {
     pub scan_return_hit: bool,
     /// 0 7 5 6: the message sound's own volume (`tonegen::CHIME_LEVELS`; APRS-6.2).
     pub msg_vol: u8,
+    /// 0 9 9 9: the MCU clock (PWR-26.5): false Dynamic (24 MHz at rest, the build's speed while something needs
+    /// it), true Fixed (always the build's speed, as before the governor).
+    pub mcu_fixed: bool,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -472,6 +475,7 @@ impl Settings {
         scan_down: false,
         scan_return_hit: false,
         msg_vol: 3,
+        mcu_fixed: false,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's

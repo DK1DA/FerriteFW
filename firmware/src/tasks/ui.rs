@@ -169,6 +169,15 @@ const PANEL_SLEEP_MS: u32 = 120;
 /// PWR-24.5: the shortest gap between redraws for live changes in Low Power Mode.
 const LPM_FRAME_MS: u32 = 1000;
 
+/// PWR-24.9: how long Low Power Mode has been on before the core drops to 24 MHz: the Radio and DSP tasks have
+/// stopped what the mode stops (decoders, capture, the second VFO), GPS and Bluetooth are off. Leaving goes back to
+/// the build's speed at once.
+const LPM_CLOCK_MS: u32 = 1000;
+
+/// PWR-24.10: after a key or the knob, Low Power Mode runs at the build's speed this long, so menus and the knob
+/// keep up; then 24 MHz again. The screen going dark ends it at once.
+const LPM_BOOST_MS: u32 = 3000;
+
 /// LINK-38: the shortest gap between two redraws driven by live changes alone (20 a second).
 const FRAME_MIN_MS: u32 = 50;
 
@@ -183,7 +192,7 @@ pub async fn task() {
     }
     let c0 = crate::hal::time::cycles();
     lcd.0.fill(0, 0, 240, 320, BG);
-    let fill_us = crate::hal::time::cycles().wrapping_sub(c0) / (crate::hal::clock::SYSCLK_HZ / 1_000_000);
+    let fill_us = crate::hal::time::cycles().wrapping_sub(c0) / crate::hal::clock::mhz();
     lcd.0.on(true);
     // The screen and keypad lights by PWM (DISP-22, DISP-23), full until the settings are read.
     backlight::init();
@@ -442,6 +451,10 @@ pub async fn task() {
     let mut held: Option<RadioCmd> = None;
     // LINK-38: when the screen was last drawn, and whether input since wants it drawn now.
     let (mut last_draw, mut urgent) = (0u32, true);
+    // PWR-24.9: since when Low Power Mode has been on (None: off).
+    let mut lpm_since: Option<u32> = None;
+    // PWR-26.3: when the governor last had a reason for the build's speed.
+    let mut clock_high_at = 0u32;
     loop {
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
@@ -741,6 +754,52 @@ pub async fn task() {
             }
             (panel_asleep, panel_at) = (want_sleep, now_ms());
         }
+        // PWR-24.9, PWR-26: the MCU clock. In Low Power Mode 24 MHz after LPM_CLOCK_MS (and the boost after
+        // input, PWR-24.10; transmit stays at 24 MHz); otherwise the governor: 24 MHz at rest, the build's speed
+        // while anything needs it (the App's reasons, a live link, audio) and a second after (PWR-26.3); Fixed
+        // (0 9 9 9) the build's speed always. Never while audio runs (PWR-26.4). Here, in thread mode between
+        // awaits, nothing is mid-transfer (hal::clock::set_low). Before the draw, so a redraw after a key is at
+        // full speed.
+        let now = now_ms();
+        lpm_since = if app.low_power() { Some(lpm_since.unwrap_or(now)) } else { None };
+        let since_input = now.wrapping_sub(app.last_input());
+        let lpm_wait = lpm_since.map(|t| ferrite_core::clocktree::lpm_low_in(now.wrapping_sub(t), since_input, panel_asleep, LPM_CLOCK_MS, LPM_BOOST_MS));
+        let fixed = app.settings().mcu_fixed;
+        let audio = crate::hal::audio::busy();
+        let mut why = app.clock_reasons(&live, now);
+        if ports.live(&app, now) {
+            why |= ferrite_core::clocktree::why::LINK;
+        }
+        if audio || crate::hal::clock::AUDIO_WAITING.load(Relaxed) != 0 {
+            why |= ferrite_core::clocktree::why::AUDIO;
+        }
+        if why != 0 {
+            clock_high_at = now;
+        }
+        crate::hal::clock::AUDIO_RAISES.store(!fixed && lpm_wait.is_none(), Relaxed);
+        let target = ferrite_core::clocktree::clock_target(fixed, lpm_wait, why, clock_high_at, now, audio);
+        if let Some(low) = target {
+            if crate::hal::clock::set_low(low) && bringup::ON.load(Relaxed) {
+                let (mhz, us) = (crate::hal::clock::mhz(), crate::hal::clock::LAST_SWITCH_US.load(Relaxed));
+                bringup::linef(|b| {
+                    let _ = ufmt::uwrite!(b, "clock: {} MHz (interrupts held {} us", mhz, us);
+                    for (i, n) in ferrite_core::clocktree::why::NAMES.iter().enumerate() {
+                        if why & 1 << i != 0 {
+                            b.push(b", ");
+                            b.push(n.as_bytes());
+                        }
+                    }
+                    b.push(b")");
+                });
+            }
+        }
+        // PWR-26.6: for System and the readback.
+        dev.mcu = ferrite_core::msg::McuClock {
+            mhz: crate::hal::clock::mhz() as u16,
+            switches: crate::hal::clock::SWITCHES.load(Relaxed),
+            held_us: crate::hal::clock::MAX_SWITCH_US.load(Relaxed),
+            why,
+        };
         let since = now_ms().wrapping_sub(last_draw);
         // TERM-40 (bench): a lower redraw cap.
         #[cfg(feature = "bench")]
@@ -764,7 +823,7 @@ pub async fn task() {
         }
         if bringup::ON.load(Relaxed) {
             // Redraw timing (Oct 12, 2026: large redraws were slow): total, and how many bytes went to the panel.
-            let us = crate::hal::time::cycles().wrapping_sub(c0) / (crate::hal::clock::SYSCLK_HZ / 1_000_000);
+            let us = crate::hal::time::cycles().wrapping_sub(c0) / crate::hal::clock::mhz();
             if us >= 5_000 {
                 let n = crate::bus::LCD_BYTES.load(Relaxed).wrapping_sub(b0);
                 bringup::linef(|b| {
@@ -792,6 +851,9 @@ pub async fn task() {
         }
         if leds.next_ms != 0 {
             period = period.min(leds.next_ms as u64);
+        }
+        if let Some(ms @ 1..) = lpm_wait {
+            period = period.min(ms as u64); // PWR-24.9: down to 24 MHz on time
         }
         if held.is_some() {
             period = period.min(10); // MODE-6: commands waiting for room on the Radio task's channel

@@ -165,7 +165,7 @@ fn uid_text(b: &mut Buf<40>, d: &Device) -> u16 {
 }
 
 /// SELF-9: the live numbers, on the page after About (they change; About's don't).
-const SYSTEM: [InfoRow; 6] = [
+const SYSTEM: [InfoRow; 7] = [
     // SELF-9.1: the share of the last 10 s the MCU was awake.
     ("CPU", |Ctx { dev: d, .. }, b| match d.cpu_pct {
         Some(p) => {
@@ -212,7 +212,27 @@ const SYSTEM: [InfoRow; 6] = [
         let _ = uwrite!(b, "{} h {} min", m / 60, m % 60);
         TEXT
     }),
+    // PWR-26.6: the MCU clock now and its switches since power on.
+    ("Clock", |Ctx { dev: d, .. }, b| {
+        if d.mcu.mhz == 0 {
+            return fixed(b, "Not measured", SUB);
+        }
+        let _ = uwrite!(b, "{} MHz \u{b7} ", d.mcu.mhz);
+        grouped(b, d.mcu.switches);
+        b.push(if d.mcu.switches == 1 { b" switch".as_slice() } else { b" switches" });
+        TEXT
+    }),
 ];
+
+/// PWR-26.6: a count with thousands commas: 1,234.
+fn grouped(b: &mut Buf<40>, n: u32) {
+    if n >= 1000 {
+        grouped(b, n / 1000);
+        let _ = uwrite!(b, ",{}{}{}", n / 100 % 10, n / 10 % 10, n % 10);
+    } else {
+        let _ = uwrite!(b, "{}", n);
+    }
+}
 
 const CHECKS: [InfoRow; 6] = [
     ("MCU", |Ctx { dev: d, .. }, b| check_row(0, d, b)),
@@ -288,7 +308,7 @@ pub(crate) fn def(p: Page) -> PageDef {
         Page::System => PageDef {
             title: "System",
             rows: &SYSTEM,
-            note: "Live: CPU is the share of the last 10 s the MCU was awake; RAM is the statics and the stack's peak since power-on.",
+            note: "Live: CPU is the share of the last 10 s the MCU was awake; RAM is the statics and the stack's peak since power-on; Clock is the MCU's speed now and its switches.",
             hints: &[(ARROWS_LR, "Manual"), ("BACK", "Back")],
         },
         Page::Checks => PageDef {
