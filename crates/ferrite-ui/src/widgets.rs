@@ -649,11 +649,9 @@ fn kv_now(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], valu
     lcd.text4_rows(8, base, label, &UI_12, lc, bg, y, y1);
     let mut v = fit(value, &UI_12, vw);
     if st.wrap && v.len() < value.len() {
-        // the second line from the last space, comma or dash past half way
-        let cut = match v.iter().rposition(|&ch| ch == b' ' || ch == b',' || ch == b'-') {
-            Some(p) if p > v.len() / 2 => p + 1,
-            _ => v.len(),
-        };
+        // the second line from the last space, comma or dash whose rest fits on it (a position's longitude stays
+        // whole: "48°59.530'N" over "123°49.249'W"), else from where the first line is full
+        let cut = kv_cut(value, v.len(), vw);
         lcd.text4_rows(vx, base + 17, fit(value[cut..].trim_ascii_start(), &UI_12, vw), &UI_12, vc, bg, y, y1);
         v = &value[..cut];
     }
@@ -662,6 +660,19 @@ fn kv_now(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], valu
     if st.line {
         lcd.fill(0, y1, 240, 1, LINE);
     }
+}
+
+/// A two-line kv value's break (APRS-5.1): after the last space, comma or dash in the first line's `first` bytes
+/// whose rest fits the second line, else where the first line is full.
+pub(crate) fn kv_cut(value: &[u8], first: usize, vw: i32) -> usize {
+    value[..first]
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|&(_, &ch)| ch == b' ' || ch == b',' || ch == b'-')
+        .map(|(p, _)| p + 1)
+        .find(|&p| text4_width(value[p..].trim_ascii_start(), &UI_12) <= vw)
+        .unwrap_or(first)
 }
 
 /// DISP-24: the scroll cue at the right edge of a list or table with more rows than fit: a 3 px track (LINE)
@@ -956,6 +967,18 @@ impl StatusBar {
 mod tests {
     use super::*;
     use crate::fb::FrameBuffer;
+
+    /// APRS-5.1: a position in degrees and minutes breaks between latitude and longitude, never inside one (a
+    /// lone "W" on the second line, found on the clear radio, Oct 22, 2026).
+    #[test]
+    fn two_line_value_breaks_between_words() {
+        let v = "48\u{b0}59.530'N 123\u{b0}49.249'W".as_bytes();
+        let vw = 232 - 104;
+        let first = fit(v, &UI_12, vw).len();
+        assert!(first < v.len(), "too long for one line, as on the radio");
+        let cut = kv_cut(v, first, vw);
+        assert_eq!(&v[cut..], "123\u{b0}49.249'W".as_bytes());
+    }
 
     #[test]
     fn meter_levels() {
