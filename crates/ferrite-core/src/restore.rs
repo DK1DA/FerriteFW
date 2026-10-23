@@ -6,7 +6,8 @@
 //! - Calibration ([`CALIBRATION`]) and the update area ([`UPDATE_AREA`]) are refused by [`allowed`] whatever the
 //!   ranges say, on top of the driver's own guard (SAFE-1, SAFE-2).
 //! - The PC's requests, each a `STOCK_RESTORE` frame whose payload starts with an op: [`START`] (the radio stops
-//!   and answers the chip size, the calibration sector's CRC-32 and the ranges), [`ERASE`] a 4 KB sector,
+//!   and answers the chip size, the calibration sector's CRC-32, the ranges and the MCU's unique ID: decision
+//!   263, appended so an older PC still reads what it knew), [`ERASE`] a 4 KB sector,
 //!   [`PROGRAM`] up to [`CHUNK`] bytes within one 256-byte page, [`CRC`] a range read back, [`FINISH`] (the radio
 //!   resets into the bootloader, saving nothing). Little-endian throughout.
 
@@ -24,8 +25,10 @@ pub const FINISH: u8 = 4;
 pub const CHUNK: usize = 128;
 pub const SECTOR: u32 = 4096;
 pub const PAGE: u32 = 256;
-/// The most ranges a `START` answer lists (9 bytes header, 8 a range, in one 240-byte payload).
+/// The most ranges a `START` answer lists (9 bytes header, 8 a range, 12 the ID, in one 240-byte payload).
 pub const MAX_RANGES: usize = 16;
+/// The MCU unique ID's bytes at the end of a `START` answer (decision 263).
+pub const UID_LEN: usize = 12;
 
 /// A request, its shape checked (not yet where it writes: [`check`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,9 +85,10 @@ pub fn check(op: &Op, ranges: &[Range<u32>], chip: u32) -> Result<(), Status> {
     }
 }
 
-/// The `START` answer after its status byte: chip size, calibration CRC-32, the range count, then each range's
-/// start and end. Its length.
-pub fn start_answer(chip: u32, cal_crc: u32, ranges: &[Range<u32>], out: &mut [u8]) -> usize {
+/// The `START` answer after its status byte: chip size, calibration CRC-32, the range count, each range's start
+/// and end, then the MCU's unique ID ([`crate::uid::bytes`]: the PC tells the backup is this radio's by it, as
+/// calibration can be the same on two radios, decision 263). Its length.
+pub fn start_answer(chip: u32, cal_crc: u32, ranges: &[Range<u32>], uid: [u32; 3], out: &mut [u8]) -> usize {
     let n = ranges.len().min(MAX_RANGES);
     out[..4].copy_from_slice(&chip.to_le_bytes());
     out[4..8].copy_from_slice(&cal_crc.to_le_bytes());
@@ -93,7 +97,9 @@ pub fn start_answer(chip: u32, cal_crc: u32, ranges: &[Range<u32>], out: &mut [u
         out[9 + 8 * i..13 + 8 * i].copy_from_slice(&r.start.to_le_bytes());
         out[13 + 8 * i..17 + 8 * i].copy_from_slice(&r.end.to_le_bytes());
     }
-    9 + 8 * n
+    let at = 9 + 8 * n;
+    out[at..at + UID_LEN].copy_from_slice(&crate::uid::bytes(uid));
+    at + UID_LEN
 }
 
 #[cfg(test)]
@@ -152,14 +158,17 @@ mod tests {
         assert_eq!(check(&Op::Crc(0, 0), w, 4 << 20), Err(Status::BadArg));
     }
 
+    /// BACKUP-7, LINK-8 (decision 263): the ranges, then the MCU's unique ID last, where an older PC stops reading.
     #[test]
     fn start_answer_layout() {
         let mut out = [0u8; 240];
-        let n = start_answer(4 << 20, 0x1234_5678, &WRITABLE, &mut out);
-        assert_eq!(n, 9 + 8 * WRITABLE.len());
+        let uid = [0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF];
+        let n = start_answer(4 << 20, 0x1234_5678, &WRITABLE, uid, &mut out);
+        assert_eq!(n, 9 + 8 * WRITABLE.len() + UID_LEN);
+        assert_eq!(&out[n - UID_LEN..n], &crate::uid::bytes(uid));
         assert_eq!(&out[..9], &[0, 0, 0x40, 0, 0x78, 0x56, 0x34, 0x12, WRITABLE.len() as u8]);
         assert_eq!(le32(&out[9..]), Some(WRITABLE[0].start));
         assert_eq!(le32(&out[13..]), Some(WRITABLE[0].end));
-        const { assert!(9 + 8 * MAX_RANGES < crate::link::MAX_PAYLOAD) };
+        const { assert!(1 + 9 + 8 * MAX_RANGES + UID_LEN <= crate::link::MAX_PAYLOAD) };
     }
 }

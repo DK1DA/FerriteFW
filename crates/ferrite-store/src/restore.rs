@@ -39,20 +39,28 @@ async fn crc<N: Nor>(nor: &mut N, addr: u32, len: u32) -> Result<u32> {
     Ok(c.get())
 }
 
-/// The `START` answer (status `Ok` first) into `out`: the chip, the calibration sector's CRC-32 (so the PC can tell
-/// the backup is this radio's) and the ranges. Its length.
-pub async fn start<N: Nor>(nor: &mut N, chip: u32, ranges: &[Range<u32>], out: &mut [u8]) -> usize {
+/// The `START` answer (status `Ok` first) into `out`: the chip, the calibration sector's CRC-32 (a sanity check:
+/// blank or damaged), the ranges and the MCU's unique ID `uid` (so the PC can tell the backup is this radio's,
+/// decision 263). Its length.
+pub async fn start<N: Nor>(nor: &mut N, chip: u32, ranges: &[Range<u32>], uid: [u32; 3], out: &mut [u8]) -> usize {
     let Ok(cal) = crc(nor, CALIBRATION.start, CALIBRATION.end - CALIBRATION.start).await else {
         out[0] = Status::Busy as u8;
         return 1;
     };
     out[0] = Status::Ok as u8;
-    1 + r::start_answer(chip, cal, ranges, &mut out[1..])
+    1 + r::start_answer(chip, cal, ranges, uid, &mut out[1..])
 }
 
 /// One request after `START`: carried out, its answer (status first) in `out`. `START` again answers as the first
 /// did.
-pub async fn serve<N: Nor>(nor: &mut N, chip: u32, ranges: &[Range<u32>], payload: &[u8], out: &mut [u8]) -> (usize, After) {
+pub async fn serve<N: Nor>(
+    nor: &mut N,
+    chip: u32,
+    ranges: &[Range<u32>],
+    uid: [u32; 3],
+    payload: &[u8],
+    out: &mut [u8],
+) -> (usize, After) {
     let Some(op) = r::parse(payload) else {
         out[0] = Status::BadArg as u8;
         return (1, After::Next);
@@ -62,7 +70,7 @@ pub async fn serve<N: Nor>(nor: &mut N, chip: u32, ranges: &[Range<u32>], payloa
         return (1, After::Next);
     }
     let done = match op {
-        Op::Start => return (start(nor, chip, ranges, out).await, After::Next),
+        Op::Start => return (start(nor, chip, ranges, uid, out).await, After::Next),
         Op::Finish => {
             out[0] = Status::Ok as u8;
             return (1, After::Reset);
@@ -97,9 +105,11 @@ mod tests {
     use ferrite_core::layout::{SETTINGS, UPDATE_AREA, WRITABLE};
     use std::vec::Vec;
 
+    const UID: [u32; 3] = [0x3F2A_91C0, 0x7D44_0123, 0x89AB_CDEF];
+
     fn ask(f: &mut SimFlash, p: &[u8]) -> (u8, Vec<u8>, After) {
         let mut out = [0u8; 240];
-        let (n, after) = block(serve(f, 4 << 20, &WRITABLE, p, &mut out));
+        let (n, after) = block(serve(f, 4 << 20, &WRITABLE, UID, p, &mut out));
         (out[0], out[1..n].to_vec(), after)
     }
 
@@ -110,8 +120,8 @@ mod tests {
         p
     }
 
-    /// BACKUP-7: a sector erased, programmed in chunks and read back; the START answer names calibration's CRC and
-    /// the ranges; FINISH resets.
+    /// BACKUP-7: a sector erased, programmed in chunks and read back; the START answer names calibration's CRC, the
+    /// ranges and the MCU's ID (decision 263); FINISH resets.
     #[test]
     fn restore_round_trip() {
         let mut f = SimFlash::new();
@@ -123,6 +133,8 @@ mod tests {
         c.update(&[0x5A; 4096]);
         assert_eq!(&a[4..8], &c.get().to_le_bytes());
         assert_eq!(a[8] as usize, WRITABLE.len());
+        assert_eq!(a.len(), 9 + 8 * WRITABLE.len() + r::UID_LEN);
+        assert_eq!(&a[a.len() - r::UID_LEN..], &ferrite_core::uid::bytes(UID));
 
         let at = SETTINGS.start;
         f.mem[at as usize..at as usize + 4096].fill(0x00);

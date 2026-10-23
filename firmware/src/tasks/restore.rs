@@ -41,9 +41,9 @@ pub async fn run(store: &'static Store, lcd: &mut impl Panel, seq: u8) -> ! {
         Timer::after_millis(10).await;
     }
     screen(lcd, b"Restoring stock data");
-    let (chip, ranges) = (store.nor().size(), store::WRITE_OK);
+    let (chip, ranges, uid) = (store.nor().size(), store::WRITE_OK, crate::hal::sys::uid());
     let mut ans = [0u8; MAX_PAYLOAD];
-    let n = start(&mut *store.nor(), chip, ranges, &mut ans).await;
+    let n = start(&mut *store.nor(), chip, ranges, uid, &mut ans).await;
     send(msg::STOCK_RESTORE, seq, &ans[..n]).await;
 
     let mut rx = [0u8; MAX_WIRE];
@@ -82,7 +82,7 @@ pub async fn run(store: &'static Store, lcd: &mut impl Panel, seq: u8) -> ! {
                 let mut p = [0u8; MAX_PAYLOAD];
                 let pl = f.payload.len();
                 p[..pl].copy_from_slice(f.payload);
-                let (n, after) = serve(&mut *store.nor(), chip, ranges, &p[..pl], &mut ans).await;
+                let (n, after) = serve(&mut *store.nor(), chip, ranges, uid, &p[..pl], &mut ans).await;
                 (ty, seq, n, after)
             }
         };
