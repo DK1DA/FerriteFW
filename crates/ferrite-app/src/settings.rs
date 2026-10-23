@@ -240,12 +240,12 @@ pub struct Settings {
     /// 0 9 3 2: channel-only mode (PIN-5): no V/M, MENU 0 or editing; hold # leaves it.
     pub chan_only: bool,
     /// Cable log (0 9 9 7, TERM-28): the plain log on the cable in the normal build, until a byte arrives. Its
-    /// bit was Follow's (0 1 8 2, dropped in decision 81), so the saved flag bits after it keep their places.
+    /// bit was Follow's (0 1 8 2 then, dropped in decision 81), so the saved flag bits after it keep their places.
     pub cable_log: bool,
     /// 0 5 5 4: APRS beacons send the fixed position even with a GPS fix (APRS-31; the bit was Follow return's,
     /// dropped in decision 81, so an old record reads GPS).
     pub aprs_fixed: bool,
-    /// 0 1 8 5: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
+    /// 0 1 8 3: channel scans also listen on each channel's input (its TX frequency) when it has a shift or
     /// split (SCAN-22).
     pub scan_tx: bool,
     /// 0 8 8 1: the CTCSS/DCS level sent, around the calibration's ([`TONE_LEVELS`]; TONE-16).
@@ -273,7 +273,32 @@ pub struct Settings {
     pub gps_rxtx: u8,
     /// 0 6 7's arrival alarm: an index into [`ARRIVAL_M`] (0 off; GPS-12).
     pub arrival: u8,
+    /// 0 7 9: an idle menu goes home after this ([`MENU_TIMEOUTS_S`]; 0 never; MENU-28).
+    pub menu_timeout: u8,
+    /// 0 1 8 1: how long # on home pauses watch ([`PAUSE_TIMES_S`]; WATCH-6).
+    pub pause_time: u8,
+    /// 0 9 1 2: the key lock covers PTT too (KEY-14, TX-18).
+    pub lock_ptt: bool,
+    /// 0 8 7: busy lockout for new channels and the VFOs (TX-21.1).
+    pub busy_default: bool,
+    /// 0 7 3 1: the cards' S-meter as dBm instead of bars (SQL-12.3).
+    pub smeter_dbm: bool,
+    /// 0 2 5: what a channel shows on home ([`CHANNEL_DISPLAY`]: name, number, frequency; CHAN-33).
+    pub ch_display: u8,
+    /// 0 1 8 2: frequency and channel scans start going down (SCAN-26).
+    pub scan_down: bool,
+    /// 0 1 8 4: a scan stopped by hand leaves the slot on its last hit instead of where it started (SCAN-6).
+    pub scan_return_hit: bool,
 }
+
+/// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
+pub const MENU_TIMEOUTS_S: [u8; 6] = [0, 10, 20, 30, 45, 60];
+pub const MENU_TIMEOUT_NAMES: [&str; 6] = ["Off", "10 s", "20 s", "30 s", "45 s", "60 s"];
+/// 0 1 8 1's choices, seconds (WATCH-6) and names. 1 min by default.
+pub const PAUSE_TIMES_S: [u16; 3] = [30, 60, 300];
+pub const PAUSE_TIME_NAMES: [&str; 3] = ["30 s", "1 min", "5 min"];
+/// 0 2 5's choices (CHAN-33).
+pub const CHANNEL_DISPLAY: [&str; 3] = ["Name", "Number", "Frequency"];
 
 /// 0 6 8's values (GPS-4, GPS-14).
 pub const GPS_RXTX: [&str; 4] = ["Always on", "Off on receive", "Off on transmit", "Off on both"];
@@ -436,6 +461,14 @@ impl Settings {
         gps_on: false, // GPS-1.4: off by default, as stock (decision 235)
         gps_rxtx: 0,
         arrival: 0,
+        menu_timeout: 3,
+        pause_time: 1,
+        lock_ptt: false,
+        busy_default: false,
+        smeter_dbm: false,
+        ch_display: 0,
+        scan_down: false,
+        scan_return_hit: false,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's
@@ -469,6 +502,17 @@ impl Settings {
     }
 
     /// 0 7 4 2: the brightness for the theme in use, 1-10 (DISP-23: night red keeps its own).
+    /// MENU-28: the menu timeout in ms, or none (0 7 9 Off).
+    pub fn menu_timeout_ms(&self) -> Option<u32> {
+        let s = MENU_TIMEOUTS_S[(self.menu_timeout as usize).min(MENU_TIMEOUTS_S.len() - 1)];
+        (s != 0).then_some(s as u32 * 1000)
+    }
+
+    /// WATCH-6: how long # pauses watch, seconds (0 1 8 1).
+    pub fn pause_s(&self) -> u16 {
+        PAUSE_TIMES_S[(self.pause_time as usize).min(PAUSE_TIMES_S.len() - 1)]
+    }
+
     pub fn brightness(&self) -> u8 {
         (if self.theme == NIGHT_RED { self.brightness_night } else { self.brightness }).clamp(1, 10)
     }

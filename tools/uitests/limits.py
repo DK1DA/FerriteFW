@@ -52,6 +52,7 @@ def s_meter_styles(t):
         seen.append(u.sel["value"])
         u = t.knob(1)
     t.eq(sorted(set(seen)), ["Bars", "dBm"], "only Bars and dBm")
+    t.home()
     for style in ("dBm", "Bars"):
         t.set("0 7 3 1", style)
         u = t.home()

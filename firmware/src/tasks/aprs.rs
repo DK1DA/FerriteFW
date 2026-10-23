@@ -66,7 +66,7 @@ pub struct Aprs {
 impl Aprs {
     pub fn new() -> Self {
         let params = kiss::Params { tx_delay: TXDELAY_10MS, ..kiss::Params::default() };
-        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, fx25: 0, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), clear: ClearWait::default(), seed: 0x2545_F491 }
+        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, fx25: 0, level: 1, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), clear: ClearWait::default(), seed: 0x2545_F491 }
     }
 
     /// A byte from the KISS port, the cable or Bluetooth (KISS-6; TERM-2's route on the cable).
@@ -74,7 +74,7 @@ impl Aprs {
         let Some(r) = self.kiss.push(b) else { return };
         if let kiss::Command::Data(d) = self.params.apply(&r) {
             if self.kiss_q.is_none() && (17..=FRAME_MAX).contains(&d.len()) {
-                let mut f = Frame { len: d.len() as u16, txdelay_10ms: self.params.tx_delay, fx25: 0, b: [0; FRAME_MAX] };
+                let mut f = Frame { len: d.len() as u16, txdelay_10ms: self.params.tx_delay, fx25: 0, level: 1, b: [0; FRAME_MAX] };
                 f.b[..d.len()].copy_from_slice(d);
                 self.kiss_q = Some(f);
             }
@@ -220,8 +220,9 @@ impl Aprs {
                     extra.changed();
                 }
                 if t.len > 0 {
-                    // APRS-45: our own frames as FX.25 when 0 5 9 7 says so (a digipeat goes out plain).
-                    self.frame = Frame { len: t.len as u16, txdelay_10ms: self.params.tx_delay, fx25: cfg.fx25_for(t.what), b: [0; FRAME_MAX] };
+                    // APRS-45: our own frames as FX.25 when 0 5 9 6 says so (a digipeat goes out plain).
+                    // APRS-48, APRS-49: 0 5 9 4's delay and 0 5 9 5's level for our own frames (KISS's frames keep the host's)
+                    self.frame = Frame { len: t.len as u16, txdelay_10ms: cfg.txdelay_10ms(), fx25: cfg.fx25_for(t.what), level: cfg.tx_level.min(2), b: [0; FRAME_MAX] };
                     self.frame.b[..t.len].copy_from_slice(&out[..t.len]);
                     self.clear.start(now_ms);
                     self.tx = Tx::Clearing { what: t.what };

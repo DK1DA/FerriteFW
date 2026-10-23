@@ -156,26 +156,40 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     for o in (0..SLOTS).filter(|&o| o != a as usize) {
         app.drawn.meter[o] = None;
     }
-    let old = app.drawn.meter[a as usize].filter(|&(_, o)| o == on).map(|(l, _)| l);
-    if app.drawn.meter[a as usize] != Some((lit, on)) {
-        w::meter(lcd, 8, 170, old, lit, col, BG);
-        app.drawn.meter[a as usize] = Some((lit, on));
+    // SQL-12.3: 0 7 3 1 dBm shows the level as a number over the meter and its scale.
+    let dbm = app.set.smeter_dbm && !bcast;
+    if dbm {
+        app.drawn.meter[a as usize] = None; // the bars come back whole
+        let t = w::dbm_text(lv.rssi);
+        if app.dirty(9, hash(&(&t, on, true))) {
+            w::field(lcd, 8, 226, 166, 196, 188, Align::Left, t.as_bytes(), &UI_15B, if on { GREEN } else { TEXT }, BG);
+        }
     }
-    let s = if bcast { Buf::new() } else { w::s_text(lv.rssi) };
-    if app.dirty(9, hash(&(s, bcast))) {
-        canvas::banded(lcd, 8, 178, 226, 18, BG, |lcd| {
-            if bcast {
-                for (i, t) in ["0", "10", "20", "30", "40", "50", "60"].iter().enumerate() {
-                    lcd.text4_rows(8 + i as i32 * 200 / 7, 192, t.as_bytes(), &UI_12, SUB, BG, 180, 196); // dBuV
-                }
-            } else {
-                for (i, t) in ["1", "3", "5", "7", "9", "+20", "+40"].iter().enumerate() {
-                    let x = 8 + [0, 20, 40, 60, 80, 120, 160][i];
-                    lcd.text4_rows(x, 192, t.as_bytes(), &UI_12, SUB, BG, 180, 196);
-                }
-                w::field(lcd, 208, 26, 178, 196, 192, Align::Right, s.as_bytes(), &UI_12B, TEXT, BG);
+    if !dbm {
+        let old = app.drawn.meter[a as usize].filter(|&(_, o)| o == on).map(|(l, _)| l);
+        if app.drawn.meter[a as usize] != Some((lit, on)) {
+            if old.is_none() {
+                canvas::banded(lcd, 8, 166, 226, 4, BG, |_| {}); // what the dBm number left above the bars
             }
-        });
+            w::meter(lcd, 8, 170, old, lit, col, BG);
+            app.drawn.meter[a as usize] = Some((lit, on));
+        }
+        let s = if bcast { Buf::new() } else { w::s_text(lv.rssi) };
+        if app.dirty(9, hash(&(s, bcast))) {
+            canvas::banded(lcd, 8, 178, 226, 18, BG, |lcd| {
+                if bcast {
+                    for (i, t) in ["0", "10", "20", "30", "40", "50", "60"].iter().enumerate() {
+                        lcd.text4_rows(8 + i as i32 * 200 / 7, 192, t.as_bytes(), &UI_12, SUB, BG, 180, 196); // dBuV
+                    }
+                } else {
+                    for (i, t) in ["1", "3", "5", "7", "9", "+20", "+40"].iter().enumerate() {
+                        let x = 8 + [0, 20, 40, 60, 80, 120, 160][i];
+                        lcd.text4_rows(x, 192, t.as_bytes(), &UI_12, SUB, BG, 180, 196);
+                    }
+                    w::field(lcd, 208, 26, 178, 196, 192, Align::Right, s.as_bytes(), &UI_12B, TEXT, BG);
+                }
+            });
+        }
     }
     // The scope strip (SCOPE strip from the sweep the tick keeps running).
     let (centre, bars) = match live.mode {

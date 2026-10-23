@@ -86,7 +86,7 @@ pub const ALERT_MS: u16 = 500;
 /// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
 pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
-/// Watch pause (0 1 8 2, default 1 min).
+/// Watch pause (0 1 8 1, default 1 min).
 pub const PAUSE_S: u16 = 60;
 /// After a transmission, watch waits this long with the active slot quiet, or until a key (WATCH-16; nicFW's 30 s).
 pub const TX_PAUSE_S: u16 = 30;
@@ -358,6 +358,8 @@ pub struct App {
     /// From the last snapshot: slots receiving, scanning, skipped by the relay rule.
     rx_mask: u8,
     scan_mask: u8,
+    /// SCAN-6: each slot's scan's last hit (0 none), for Return to "Last hit".
+    pub(crate) last_hit: [Freq10; SLOTS],
     relay_mask: u8,
     /// The tone hint per slot (TSRCH-13, TSRCH-16): the tone word the Radio task heard, kept from the last tick
     /// for the quick settings' Tones row.
@@ -465,6 +467,7 @@ impl App {
             clock_set: None,
             rx_mask: 0,
             scan_mask: 0,
+            last_hit: [0; SLOTS],
             relay_mask: 0,
             scan_hit: [0; SLOTS],
             heard: [0; SLOTS],
@@ -678,6 +681,21 @@ impl App {
         self.out.push(RadioCmd::Scan { slot, on: false });
         self.scan_mask &= !(1 << slot);
         let f = core::mem::take(&mut self.scan_hit[slot as usize]);
+        self.scan_move(slot, f, store);
+    }
+
+    /// SCAN-6: SIDE2 stops a scan; with Return to "Last hit" (0 1 8 4) the slot moves to the scan's last hit,
+    /// as a PTT on a hit does (SCAN-19); else it stays where the scan started.
+    pub(crate) fn stop_scan(&mut self, slot: u8, store: &impl ChannelStore) {
+        self.out.push(RadioCmd::Scan { slot, on: false });
+        let f = core::mem::take(&mut self.last_hit[slot as usize % SLOTS]);
+        if self.set.scan_return_hit {
+            self.scan_move(slot, f, store);
+        }
+    }
+
+    /// The slot to a scan's hit `f` (none: 0): its channel on a channel scan, else its VFO.
+    fn scan_move(&mut self, slot: u8, f: Freq10, store: &impl ChannelStore) {
         let s = self.slots[slot as usize];
         if f == 0 || s.on_channel() && s.ch.is_some_and(|c| c.rx == f) {
             return;
@@ -1023,6 +1041,10 @@ impl App {
             if self.ptt_block & screens::qmenu::ptt_bit(k) != 0 {
                 return;
             }
+            // KEY-14: with Lock covers "Keys and PTT" (0 9 1 2) a locked radio doesn't key either
+            if self.locked && self.set.lock_ptt {
+                return self.locked_toast();
+            }
             // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there. PTT B keys
             // slot B; PTT A and the side connector's key the active slot (decision 77, as nicFW).
             let s = self.ptt_target(k);
@@ -1107,6 +1129,9 @@ impl App {
             relay |= (s.relay as u8) << i;
             self.heard[i] = s.heard_tone;
             self.scan_hit[i] = if s.scanning && s.held { s.freq } else { 0 };
+            if self.scan_hit[i] != 0 {
+                self.last_hit[i] = self.scan_hit[i]; // SCAN-6
+            }
         }
         // PWR-24.8: the active slot's last reception, for Low Power Mode's home.
         let a = self.active as usize;
@@ -1161,7 +1186,9 @@ impl App {
             self.paused_until = Some(now.wrapping_add(TX_PAUSE_S as u32 * 1000));
             self.out.push(RadioCmd::PauseWatch(TX_PAUSE_S));
         }
-        if self.screen.timeout().is_some_and(|t| now.wrapping_sub(self.last_input) >= t) {
+        // MENU-28: a menu's timeout is 0 7 9's (Off never); other screens keep their own (EDIT-6)
+        let timeout = self.screen.timeout().and_then(|t| if t == MENU_TIMEOUT_MS { self.set.menu_timeout_ms() } else { Some(t) });
+        if timeout.is_some_and(|t| now.wrapping_sub(self.last_input) >= t) {
             self.go_home();
         }
         self.aprs_tick(store.data());
@@ -1326,6 +1353,17 @@ impl App {
     }
 
     /// The short refusal beep (SND-4, TEXT-5), from the BK4829's tone generator (SND-11).
+    /// TX-21.1: 0 8 7 changed: the three VFOs take the new busy lockout (channels keep their own).
+    pub(crate) fn set_busy_default(&mut self) {
+        let busy = self.set.busy_default as u8;
+        for a in 0..SLOTS as u8 {
+            self.slots[a as usize].cfg.busy = busy;
+            if !self.slots[a as usize].on_channel() {
+                self.send_slot(a);
+            }
+        }
+    }
+
     pub(crate) fn beep_refused(&mut self) {
         self.refusal_beeps = self.refusal_beeps.wrapping_add(1);
         self.out.push(RadioCmd::Beep { hz: REFUSED_HZ, ms: REFUSED_MS });
@@ -1389,7 +1427,7 @@ impl App {
         [0, 0b011, 0b111][self.watch as usize % 3] | (self.aprs_c() as u8) << aprs::APRS_SLOT
     }
 
-    /// The radio-wide settings the Radio task keeps: scan inputs (0 1 8 5, SCAN-22) and the subtone level
+    /// The radio-wide settings the Radio task keeps: scan inputs (0 1 8 3, SCAN-22) and the subtone level
     /// (0 8 8 1, TONE-16).
     pub(crate) fn send_radio_settings(&mut self) {
         self.out.push(RadioCmd::ScanTx(self.set.scan_tx));

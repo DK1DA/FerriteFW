@@ -48,7 +48,7 @@ pub enum RadioCmd {
     /// Start or stop scanning in a slot.
     Scan { slot: u8, on: bool },
     /// Channel scans also listen on each channel's transmit frequency when it has a shift or split (SCAN-22,
-    /// 0 1 8 5; sent at start-up and when it changes).
+    /// 0 1 8 3; sent at start-up and when it changes).
     ScanTx(bool),
     /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 8 1; sent at start-up and when
     /// it changes).
@@ -101,7 +101,7 @@ pub enum RadioCmd {
     /// The answer to [`LiveAll::want`]: channel `num`'s receive frequency (0: there is no such channel now).
     ScanEntry { num: u16, rx: Freq10 },
     /// Channel `num`'s transmit frequency when it has a shift or split, after its [`RadioCmd::ScanEntry`]
-    /// (SCAN-22, only while 0 1 8 5 is on).
+    /// (SCAN-22, only while 0 1 8 3 is on).
     ScanEntryTx { num: u16, tx: Freq10 },
     /// While keyed: the tone burst (PTT + SIDE2) at 1750 Hz for as long as SIDE2 is held (TONE-13, TONE-13.1).
     ToneBurst { on: bool },

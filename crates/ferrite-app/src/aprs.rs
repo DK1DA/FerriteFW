@@ -27,7 +27,7 @@ pub const APRS_SLOT: u8 = 2;
 /// few minutes on a busy frequency). The oldest heard goes when a new one comes; power off empties it.
 pub const HEARD_MAX: u16 = 20;
 
-/// The APRS settings kept with the APRS store (0 5 6 1, 0 5 6 2, 0 5 6 3, 0 5 9 1, 0 5 4, 0 5 9 7, 0 5 7).
+/// The APRS settings kept with the APRS store (0 5 6 1, 0 5 6 2, 0 5 6 3, 0 5 9 1, 0 5 4, 0 5 9 6, 0 5 7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AprsCfg {
     /// The frequency in 5 kHz units; 0 = the region's (APRS-15).
@@ -50,13 +50,53 @@ pub struct AprsCfg {
     pub custom: [u8; CUSTOM_LEN],
     /// Our SSID (0 5 5 1, APRS-30): 0-15, sent after the callsign; 0 sends the bare callsign.
     pub ssid: u8,
-    /// FX.25 on transmit (0 5 9 7, APRS-45): check bytes, one of [`FX25_CHECKS`] (0 = off).
+    /// FX.25 on transmit (0 5 9 6, APRS-45): check bytes, one of [`FX25_CHECKS`] (0 = off).
     pub fx25: u8,
     /// The message sound (0 7 5 5, APRS-6.1): an index into `tonegen::CHIMES` (0 off).
     pub sound: u8,
+    /// Our map symbol (0 5 5 2, APRS-47): an index into [`SYMBOLS`].
+    pub symbol: u8,
+    /// TX delay (0 5 9 4, APRS-48): flags before our own frames, in 10 ms (10-100: 100-1000 ms).
+    pub txdelay: u8,
+    /// TX level (0 5 9 5, APRS-49): 0 Low, 1 Mid, 2 High (`audio::AFSK_AMPS`).
+    pub tx_level: u8,
 }
 
-/// APRS-45: 0 5 9 7's choices (check bytes; 0 = off) and their names. 16 by default: Alex, decision 230 (a default
+/// APRS-47: the symbols 0 5 5 2 offers, as (name, table, code) in the primary table. Person by default, what the
+/// beacons always sent (a handheld's SSID 7).
+pub const SYMBOLS: [(&str, u8, u8); 10] = [
+    ("Person", b'/', b'['),
+    ("Car", b'/', b'>'),
+    ("Jeep", b'/', b'j'),
+    ("Truck", b'/', b'k'),
+    ("Van", b'/', b'v'),
+    ("RV", b'/', b'R'),
+    ("Motorcycle", b'/', b'<'),
+    ("Bicycle", b'/', b'b'),
+    ("House", b'/', b'-'),
+    ("Boat", b'/', b's'),
+];
+/// APRS-48: 0 5 9 4's range and default, in 10 ms.
+pub const TXDELAY_MIN: u8 = 10;
+pub const TXDELAY_MAX: u8 = 100;
+pub const TXDELAY_DEFAULT: u8 = 30;
+/// APRS-49: 0 5 9 5's names.
+pub const TX_LEVELS: [&str; 3] = ["Low", "Mid", "High"];
+
+impl AprsCfg {
+    /// APRS-47: the symbol's table and code.
+    pub fn symbol_chars(&self) -> (u8, u8) {
+        let (_, t, c) = SYMBOLS[self.symbol as usize % SYMBOLS.len()];
+        (t, c)
+    }
+
+    /// APRS-48: the TX delay in 10 ms, in range.
+    pub fn txdelay_10ms(&self) -> u8 {
+        self.txdelay.clamp(TXDELAY_MIN, TXDELAY_MAX)
+    }
+}
+
+/// APRS-45: 0 5 9 6's choices (check bytes; 0 = off) and their names. 16 by default: Alex, decision 230 (a default
 /// to review before the first release).
 pub const FX25_CHECKS: [u8; 4] = [0, 16, 32, 64];
 pub const FX25_NAMES: [&str; 4] = ["Off", "16 bytes", "32 bytes", "64 bytes"];
@@ -88,7 +128,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1 };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {
@@ -124,13 +164,13 @@ impl AprsCfg {
     }
 
     /// APRS-45: FX.25 check bytes for a frame the APRS task sends (`what`, as [`crate::aprs_live::Tick`] names
-    /// it): 0 5 9 7's for our own frames (beacons, messages, acks, answers), 0 (plain AX.25) for a digipeat, which
+    /// it): 0 5 9 6's for our own frames (beacons, messages, acks, answers), 0 (plain AX.25) for a digipeat, which
     /// goes out as it came.
     pub fn fx25_for(&self, what: &str) -> u8 {
         if what == "Digipeat" { 0 } else { self.fx25 }
     }
 
-    /// 0 5 9 7's choice: an index into [`FX25_CHECKS`].
+    /// 0 5 9 6's choice: an index into [`FX25_CHECKS`].
     pub fn fx25_index(&self) -> u8 {
         FX25_CHECKS.iter().position(|&c| c == self.fx25).unwrap_or(0) as u8
     }

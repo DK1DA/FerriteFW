@@ -449,7 +449,7 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
     if custom[n..].iter().any(|&b| b != 0) || n > 0 && !path_ok(&custom[..n]) {
         return invalid(o, "custom path: one or two entries like WIDE2-2");
     }
-    let mut c = AprsCfg { f5k: u16::from_le_bytes([rec[0], rec[1]]), beacon: rec[2], power: rec[3], path: rec[4], digi: rec[5], after_voice: rec[6] == 1, custom, ssid: rec[7], fx25: rec.get(8 + CUSTOM_LEN).copied().unwrap_or(app.aprs_cfg().fx25), sound: app.aprs_cfg().sound }; // the message sound (APRS-6.1) is not in the record yet: kept
+    let mut c = AprsCfg { f5k: u16::from_le_bytes([rec[0], rec[1]]), beacon: rec[2], power: rec[3], path: rec[4], digi: rec[5], after_voice: rec[6] == 1, custom, ssid: rec[7], fx25: rec.get(8 + CUSTOM_LEN).copied().unwrap_or(app.aprs_cfg().fx25), sound: app.aprs_cfg().sound, symbol: app.aprs_cfg().symbol, txdelay: app.aprs_cfg().txdelay, tx_level: app.aprs_cfg().tx_level }; // APRS-6.1, APRS-47 - APRS-49 aren't in the record yet: kept
     if c.f5k != 0 {
         let f = c.f5k as u32 * 500;
         if !(F_MIN..=F_MAX).contains(&f) {

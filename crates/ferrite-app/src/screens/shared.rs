@@ -319,9 +319,22 @@ impl App {
 
     /// The card's name: [`Self::chan_name`], or while a channel list scans the name of the channel it is on
     /// (HOME-4.1), read from the store as the scan screen's hits are.
+    /// CHAN-33: 0 2 5 shows a channel by its name (the default), its number ("CH 012") or, empty here, by its
+    /// frequency as a VFO is shown.
     pub(crate) fn card_name(&self, s: u8, live: &LiveAll, store: &impl ChannelStore) -> Buf<16> {
         let lv = &live.slots[s as usize];
-        if lv.scanning { num_name(lv.chan, store) } else { self.chan_name(s, live) }
+        let name = if lv.scanning { num_name(lv.chan, store) } else { self.chan_name(s, live) };
+        let sl = &self.slots[s as usize];
+        match self.set.ch_display {
+            1 if !name.is_empty() || sl.on_channel() && !lv.scanning && !self.aprs_slot(s) => {
+                let num = if lv.scanning { lv.chan.saturating_sub(1) } else { sl.ch.map_or(0, |c| c.num) };
+                let mut l = Buf::<32>::new();
+                crate::slot::chan_label(num, &mut l);
+                Buf::from(l.as_bytes())
+            }
+            2 => Buf::new(),
+            _ => name,
+        }
     }
 
     /// A channel scan's last hit by name (HOME-4.1); empty for a band scan or a channel without a name.

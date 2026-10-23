@@ -36,11 +36,10 @@ pub struct Scan {
 /// SIDE2 on home (SCAN-1): start a scan on the active slot and show it, or stop the one running. A slot on a
 /// channel scans its zone (and the zones added with digits) in the Radio task, which asks for the channels'
 /// frequencies as it goes ([`crate::chanscan`]); a VFO scans its band, with the radio's resume rule.
-pub fn side2(app: &mut App) {
+pub fn side2(app: &mut App, store: &impl ChannelStore) {
     let a = app.active;
     if app.scan_mask & 1 << a != 0 {
-        app.out.push(RadioCmd::Scan { slot: a, on: false });
-        return;
+        return app.stop_scan(a, store); // SCAN-6
     }
     if app.low_power() {
         return app.lpm_refuse(); // PWR-24.4
@@ -48,11 +47,15 @@ pub fn side2(app: &mut App) {
     app.radio.clear_hits();
     app.radio.hits_seen = 0;
     app.radio.zones = 0;
+    app.last_hit[a as usize] = 0;
     if app.slot(a).on_channel() {
         crate::chanscan::start(app, a);
     } else {
         app.out.push(RadioCmd::ScanResume { slot: a, code: crate::chanscan::preset_resume(app, 0) });
         app.out.push(RadioCmd::Scan { slot: a, on: true });
+    }
+    if app.set.scan_down {
+        app.out.push(RadioCmd::ScanDir { slot: a, up: false, resume: false }); // SCAN-26: 0 1 8 2
     }
     app.screen = crate::Screen::Scan(Scan { slot: a, list: false, sel: 0 });
 }
@@ -156,7 +159,7 @@ impl View for Scan {
                 app.screen = crate::Screen::Scan(Scan { list: true, sel: 0, ..self });
             }
             (Key::Side(2), Press::Short) => {
-                app.out.push(RadioCmd::Scan { slot: s, on: false });
+                app.stop_scan(s, store); // SCAN-6
                 app.go_home();
             }
             (Key::Star, Press::Short) => skip(app, s),

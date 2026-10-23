@@ -487,7 +487,7 @@ fn path_digipeater_and_after_voice_settings() {
     assert!(a.s.aprs_cfg() == a.app.aprs_cfg());
 }
 
-/// APRS-45: 0 5 9 7, FX.25 on transmit: 16 check bytes by default (decision 230), then 32, 64 and Off; # puts it
+/// APRS-45: 0 5 9 6, FX.25 on transmit: 16 check bytes by default (decision 230), then 32, 64 and Off; # puts it
 /// back; kept by the APRS store's owner.
 #[test]
 fn fx25_on_transmit_setting() {
@@ -495,12 +495,12 @@ fn fx25_on_transmit_setting() {
     let mut a = A::new();
     assert_eq!(a.app.aprs_cfg().fx25, 16);
     for (d, want) in [(1, 32), (1, 64), (1, 0), (1, 16), (-1, 0)] {
-        change(&mut a.app, &[5, 9, 7], d);
+        change(&mut a.app, &[5, 9, 6], d);
         assert_eq!(a.app.aprs_cfg().fx25, want);
     }
     a.tick();
     assert_eq!(a.s.aprs_cfg().fx25, 0, "written back");
-    reset(&mut a.app, &[5, 9, 7]);
+    reset(&mut a.app, &[5, 9, 6]);
     assert_eq!(a.app.aprs_cfg().fx25, 16);
 }
 

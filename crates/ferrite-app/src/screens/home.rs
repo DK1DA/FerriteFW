@@ -9,7 +9,7 @@ use crate::chan::ChannelStore;
 use crate::data::Data;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{self, band_near, card_tone, mode_chip, shift_chip, shift_text, BANDS, STEPS};
-use crate::{App, Screen, PAUSE_S};
+use crate::{App, Screen};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
 use ferrite_core::msg::{LiveAll, ModeLive, RadioCmd, SLOTS};
@@ -295,8 +295,9 @@ impl View for Home {
             (Key::Hash, Short) => {
                 if app.watched_rx() {
                     // HOME-10, WATCH-6
-                    app.paused_until = Some(app.now.wrapping_add(PAUSE_S as u32 * 1000));
-                    app.out.push(RadioCmd::PauseWatch(PAUSE_S));
+                    let pause = app.set.pause_s(); // 0 1 8 1
+                    app.paused_until = Some(app.now.wrapping_add(pause as u32 * 1000));
+                    app.out.push(RadioCmd::PauseWatch(pause));
                     app.show_toast(b"Watch paused", b"for 1 min", false);
                 } else {
                     app.screen = Screen::Status(super::status::Status { row: 0, from_menu: false });
@@ -304,7 +305,7 @@ impl View for Home {
             }
             (Key::Menu, Short) => app.screen = Screen::Quick(super::quick::Quick { row: 0 }), // MENU-1
             (Key::Menu, Long) => app.screen = Screen::Advanced(super::advanced::Advanced { row: 0, from_quick: false }), // MENU-2
-            (Key::Side(2), Short) => super::scan::side2(app), // SCAN-1
+            (Key::Side(2), Short) => super::scan::side2(app, store), // SCAN-1
             // KEY-22: SIDE2 held alone opens the frequency counter when it comes up; SIDE2 + knob or ▲▼ (big
             // steps) never does, whenever the knob turns.
             (Key::Side(2), LongUp) => app.open(Dest::Counter),
@@ -587,17 +588,30 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
             w::chip_slot(lcd, w::SLOT_SHIFT, cy, o.as_bytes(), TEXT, LINE, SURFACE);
             w::chip_slot(lcd, w::SLOT_POWER, cy, pw.as_bytes(), pc, LINE, SURFACE);
         }
-        // S-meter: only the segments that changed (HOME-6, HOME-7).
-        let lit = w::meter_level(lv.rssi);
-        let col = if lv.squelch_open { GREEN } else { DIM };
-        let old = app.drawn.meter[p].filter(|&(_, o)| o == lv.squelch_open).map(|(l, _)| l);
-        if app.drawn.meter[p] != Some((lit, lv.squelch_open)) {
-            w::meter(lcd, 14, y + 109, old, lit, col, SURFACE);
-            app.drawn.meter[p] = Some((lit, lv.squelch_open));
+        // SQL-12.3: 0 7 3 1 dBm shows the level as a number where the bars are.
+        let dbm = app.set.smeter_dbm;
+        let st = if dbm { w::dbm_text(lv.rssi) } else { Buf::<12>::from(w::s_text(lv.rssi).as_bytes()) };
+        if app.dirty(R_SUB + p, hash(&(&st, dbm, dbm && lv.squelch_open))) {
+            if dbm {
+                let c = if lv.squelch_open { GREEN } else { TEXT };
+                w::field(lcd, 14, 219, y + 103, y + 120, y + 117, Align::Left, st.as_bytes(), &UI_12B, c, SURFACE);
+                app.drawn.meter[p] = None; // the bars come back whole
+            } else {
+                if app.drawn.meter[p].is_none() {
+                    w::field(lcd, 14, 219, y + 103, y + 120, y + 117, Align::Left, b"", &UI_12B, TEXT, SURFACE);
+                }
+                w::field(lcd, 212, 21, y + 103, y + 120, y + 117, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
+            }
         }
-        let st = w::s_text(lv.rssi);
-        if app.dirty(R_SUB + p, hash(&st)) {
-            w::field(lcd, 212, 21, y + 103, y + 120, y + 117, Align::Right, st.as_bytes(), &UI_12B, TEXT, SURFACE);
+        // S-meter: only the segments that changed (HOME-6, HOME-7).
+        if !dbm {
+            let lit = w::meter_level(lv.rssi);
+            let col = if lv.squelch_open { GREEN } else { DIM };
+            let old = app.drawn.meter[p].filter(|&(_, o)| o == lv.squelch_open).map(|(l, _)| l);
+            if app.drawn.meter[p] != Some((lit, lv.squelch_open)) {
+                w::meter(lcd, 14, y + 109, old, lit, col, SURFACE);
+                app.drawn.meter[p] = Some((lit, lv.squelch_open));
+            }
         }
     } else {
         // Left: the name (channel) or the frequency; right: the frequency small (channel) or the scan's hits.

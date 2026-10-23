@@ -149,8 +149,8 @@ fn ram_is_small() {
     // is being typed (APRS-37: a callsign, 10 bytes), 16 with padding, to 1544; Low Power Mode (PWR-24: its flags, the
     // battery % Auto looks at, the side keys' hold time, 0 7 7's new list's remembered row and the bar's mark), 8
     // with padding, to 1552; its home's last reception (PWR-24.8: slot, opened, closed, peak: 11 bytes), 16 with
-    // padding, to 1568
-    assert!(n <= 1568, "App is {n} bytes");
+    // padding, to 1568; each slot's scan's last hit for Return to (SCAN-6: 3 x 4 bytes), 16 with padding, to 1584
+    assert!(n <= 1584, "App is {n} bytes");
     let s = core::mem::size_of::<crate::settings::Settings>();
     std::println!("Settings: {s} bytes");
     assert!(s <= 512, "Settings is {s} bytes");
@@ -1014,6 +1014,8 @@ fn literal_scanner() {
 mod radio_activity;
 mod bcast;
 mod lights;
+/// The settings wired in decision 243.
+mod wired;
 /// Low Power Mode (PWR-24).
 mod lpm;
 mod aprs;

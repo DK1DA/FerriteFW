@@ -890,7 +890,12 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
         // HOME-4.2: the chip as drawn, "No TX" where PTT can never transmit
         kq(l, "power", crate::screens::transmit::power_name(app, s).as_bytes());
     }
-    kq(l, "s", w::s_text(lv.rssi).as_bytes());
+    // SQL-12.3: the card's signal as drawn, S-units or dBm (0 7 3 1)
+    if app.set.smeter_dbm {
+        kq(l, "s", w::dbm_text(lv.rssi).as_bytes());
+    } else {
+        kq(l, "s", w::s_text(lv.rssi).as_bytes());
+    }
     kn(l, "meter", w::meter_level(lv.rssi) as u32);
     kn(l, "rx", lv.squelch_open as u32);
     kn(l, "scan", lv.scanning as u32);

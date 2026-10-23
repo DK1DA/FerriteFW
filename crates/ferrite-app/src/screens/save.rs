@@ -311,11 +311,11 @@ fn save(s: Save, app: &mut App, store: &impl ChannelStore) {
         Kind::Repeater => {
             let b = &BANDS[band_near(f)];
             let mut c = DEFAULT_CFG;
-            (c.mode, c.offset, c.tx_tone) = (b.mode, s.offset, s.tone);
+            (c.mode, c.offset, c.tx_tone, c.busy) = (b.mode, s.offset, s.tone, app.set.busy_default as u8); // TX-21.1
             c
         }
         // CHAN-26: the frequency and mode; HF mode keeps its own step, bandwidth and AGC
-        Kind::Hf => SlotCfg { mode: app.set.hf.mode, narrow: false, step: BANDS[band_near(f)].step, ..DEFAULT_CFG },
+        Kind::Hf => SlotCfg { mode: app.set.hf.mode, narrow: false, step: BANDS[band_near(f)].step, busy: app.set.busy_default as u8, ..DEFAULT_CFG },
         Kind::Vfo => app.slots[a].cfg,
     };
     let cfg = SlotCfg { squelch: SQ_GLOBAL, ..cfg }; // a new channel follows the slot's level (CHAN-14)

@@ -707,7 +707,7 @@ pub struct ChanScans {
     on: [bool; 3],
     /// Waiting for the frequency of the stop the scan is on: not ticked until it arrives.
     pending: [bool; 3],
-    /// SCAN-22 (0 1 8 5): channel scans walk [`WithTx`].
+    /// SCAN-22 (0 1 8 3): channel scans walk [`WithTx`].
     pub tx: bool,
 }
 

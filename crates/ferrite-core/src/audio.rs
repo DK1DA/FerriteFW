@@ -25,6 +25,9 @@ pub const DAC_HZ: u32 = 48_000;
 /// 71 % 3.03-3.09 kHz with twist -0.18 dB, so 5500 x 0.71. (In the voice set-up MIC AGC holds it near 4 kHz: 8000
 /// made 4.35 kHz, 5500 4.0 kHz.)
 pub const AFSK_AMP: i16 = 3_900;
+/// APRS-49: 0 5 9 5's levels around it (deviation is linear in the amplitude): Low about 2.5 kHz, Mid 3.0 kHz
+/// (`AFSK_AMP`), High about 3.5 kHz.
+pub const AFSK_AMPS: [i16; 3] = [3_250, AFSK_AMP, 4_550];
 
 /// Each half of the ADC's DMA buffer: 2 ms at 48 kHz. The DSP task gets 500 blocks a second of
 /// [`BLOCK_OUT`] decoder samples.
@@ -104,9 +107,14 @@ pub fn to_dac(s: i16) -> u16 {
 /// The AFSK settings for transmission at [`DAC_HZ`]: `txdelay_ms` of flags first (KISS's TX delay, 300 ms by
 /// default: KISS rules in chapter 26), so the transmitter is up before the frame.
 pub fn afsk_tx(txdelay_ms: u16) -> uafsk::TxConfig {
+    afsk_tx_at(txdelay_ms, 1)
+}
+
+/// [`afsk_tx`] at one of [`AFSK_AMPS`]' levels (APRS-49: 0 Low, 1 Mid, 2 High).
+pub fn afsk_tx_at(txdelay_ms: u16, level: u8) -> uafsk::TxConfig {
     // A flag is 8 bits at 1200 Bd: 6.67 ms.
     let flags = (txdelay_ms as u32 * 3).div_ceil(20) as u16;
-    uafsk::TxConfig { rate_hz: DAC_HZ, preamble: flags.max(1), postamble: 3, amp: AFSK_AMP }
+    uafsk::TxConfig { rate_hz: DAC_HZ, preamble: flags.max(1), postamble: 3, amp: AFSK_AMPS[level.min(2) as usize] }
 }
 
 /// The bits of one transmission (before NRZI): plain AX.25, or FX.25 (APRS-45) when asked for and the frame fits

@@ -20,11 +20,11 @@ ZONE_CHANS = (
 
 def scan_fixture(t, resume="Carrier drop"):
     rx_quiet(t)
-    for path, want in (("0 1 3", "Current zone"), ("0 1 8 6", "Start")):  # not settable yet: their defaults
+    for path, want in (("0 1 3", "Current zone"), ("0 1 8 4", "Start")):  # not settable yet: their defaults
         got = t.rx.get(path)
         t.need(got == want, f"{path} is {got!r}, not {want!r}")
     ch = Channels(t, ZONE_CHANS)
-    for path, v in (("0 1 8 5", "Off"), ("0 1 5", "Off"), ("0 1 4", resume)):
+    for path, v in (("0 1 8 3", "Off"), ("0 1 5", "Off"), ("0 1 4", resume)):
         t.rx.set(path, v)
     t.defer(lambda: stop_scan(t))
     return ch
@@ -131,7 +131,7 @@ def resume_rules(t):
 
 @test("SCAN-22", keyups=(3, 3), idle=10)
 def scan_inputs_stop_on_a_repeater_input(t):
-    """TR 2M skipped, so 145.495 is only TR RPT's input (144.895 +0.6). Scan inputs off (0 1 8 5): the carrier on
+    """TR 2M skipped, so 145.495 is only TR RPT's input (144.895 +0.6). Scan inputs off (0 1 8 3): the carrier on
     145.495 never stops the scan; on: the scan stops on 145.495, the input of TR RPT."""
     ch = scan_fixture(t)
     t.rx.cmd("ch 981 skip on")
@@ -140,7 +140,7 @@ def scan_inputs_stop_on_a_repeater_input(t):
     with t.key(3, "scan inputs off"):
         u, _ = stopped_at(t, "A", VHF, 2.4)
         t.check(u is None, "scan inputs off: no stop on 145.495", u and u.cards["A"])
-    t.rx.set("0 1 8 5", "On")
+    t.rx.set("0 1 8 3", "On")
     start_scan(t, ch)
     with t.key(3, "scan inputs on"):
         u, _ = stopped_at(t, "A", VHF, 2.4)

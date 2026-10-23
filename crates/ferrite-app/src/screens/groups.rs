@@ -62,7 +62,7 @@ const G1: [Entry; 8] = [
     Entry("Priority check|Every 2 s|Look at the priority channels."),
     Entry("Range presets|4 presets|Named ranges to scan."),
     Entry("Skip list|Empty|Frequencies * skipped in this scan."),
-    Entry("Advanced||Watched audio, pause time, direction, dwell."),
+    Entry("Advanced||Pause time, direction, scan inputs, return to."),
 ];
 const G2: [Entry; 5] = [
     Entry("Browse||Zones, all channels, nearby, recent."),
@@ -99,7 +99,7 @@ const G5: [Entry; 9] = [
     Entry("Digipeat|Off|Relay others' packets."),
     // KISS TNC and the mailbox (decision 77).
     Entry("Packet||KISS TNC and the mailbox."),
-    Entry("Advanced||Path, delays, levels, FX.25."),
+    Entry("Advanced||Path, TX delay and level, FX.25."),
 ];
 const G6: [Entry; 9] = [
     Entry("GPS|On|The GPS receiver."),
@@ -152,10 +152,8 @@ const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS"
 /// The third-level lists, by group and item.
 pub(crate) const SUBS: [((u8, u8), &[Entry]); 26] = [
     ((1, 8), &[
-        Entry("Watched audio|Heard|Heard, muted, per slot."),
         Entry("Pause time|1 min|# on home pauses watch this long."),
         Entry("Direction|Up|Scan up or down."),
-        Entry("Dwell|1 s|Wait before resuming."),
         Entry("Scan inputs|Off|Also a channel's TX frequency."),
         Entry("Return to|Start|Where a stopped scan returns."),
     ]),
@@ -194,7 +192,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 26] = [
     ]),
     ((5, 5), &[
         Entry("SSID|7 Handheld|0-15 after your callsign."),
-        Entry("Symbol|Car|Your map symbol."),
+        Entry("Symbol|Person|Your map symbol."),
         Entry("Comment|Empty|Up to 40 characters."),
         Entry("Position source|GPS|GPS, or always the fixed position."),
         Entry("Fixed position|None|Used without GPS."),
@@ -224,7 +222,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 26] = [
         Entry("Smart settings|Standard|Rates, speeds, turn angle."),
         Entry("TX delay|300 ms|Carrier before data."),
         Entry("TX level|Mid|Modulation level."),
-        Entry("RX level|Auto|Decoder input level."),
         Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
         Entry("Mute speaker|On|Mute packets on the speaker."),
         Entry("Heard popup|Off|A toast per station heard."),
@@ -393,6 +390,7 @@ enum Tell {
     TxTimeout,
     TxTones,
     SlotTones,
+    BusyDefault,
 }
 
 /// How a setting in [`SETTINGS`] shows, steps and resets.
@@ -447,11 +445,15 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 75] = [
+static SETTINGS: [Setting; 86] = [
     field!([1, 1, 0], special),
     field!([1, 4, 0], special),
-    field!([1, 8, 5], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
     field!([1, 5, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
+    field!([1, 8, 1], pause_time: u8, Kind::Pick(&crate::settings::PAUSE_TIME_NAMES), Nothing),
+    field!([1, 8, 2], scan_down: bool, Kind::Flip(&["Up", "Down"]), Nothing),
+    field!([1, 8, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
+    field!([1, 8, 4], scan_return_hit: bool, Kind::Flip(&["Start", "Last hit"]), Nothing),
+    field!([2, 5, 0], ch_display: u8, Kind::Pick(&crate::settings::CHANNEL_DISPLAY), Nothing),
     field!([3, 1, 2], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), Nothing),
     field!([3, 1, 3], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), Nothing),
     field!([3, 1, 4], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
@@ -467,20 +469,22 @@ static SETTINGS: [Setting; 75] = [
     field!([4, 7, 0], popups: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([4, 8, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([5, 3, 0], special),
+    field!([5, 4, 0], special), // MENU-31: typed as a frequency
     field!([5, 5, 1], special), // APRS-30
+    field!([5, 5, 2], special), // APRS-47: the symbol
     field!([5, 5, 4], special), // APRS-31
     field!([5, 6, 1], special),
     field!([5, 6, 2], special),
     field!([5, 6, 3], special),
-    field!([5, 9, 1], special),
-    field!([5, 9, 2], special),
-    field!([5, 4, 0], special), // MENU-31: typed as a frequency
-    field!([7, 5, 5], special), // APRS-6.1
-    field!([5, 9, 7], special), // APRS-45
     field!([5, 7, 1], special),
     field!([5, 7, 2], special),
     field!([5, 7, 3], special),
     field!([5, 8, 1], kiss_port: u8, Kind::Pick(&crate::settings::KISS_PORTS), Nothing),
+    field!([5, 9, 1], special),
+    field!([5, 9, 2], special),
+    field!([5, 9, 4], special), // APRS-48: TX delay
+    field!([5, 9, 5], special), // APRS-49: TX level
+    field!([5, 9, 6], special), // APRS-45
     field!([6, 1, 0], gps_on: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing),
     field!([6, 4, 0], units: u8, Kind::Pick(&UNITS), Nothing),
@@ -489,6 +493,7 @@ static SETTINGS: [Setting; 75] = [
     field!([6, 8, 0], gps_rxtx: u8, Kind::Pick(&GPS_RXTX), Nothing),
     field!([7, 1, 0], theme: u8, Kind::Pick(&THEMES), Nothing),
     field!([7, 2, 0], layout: u8, Kind::Pick(&LAYOUTS), Nothing),
+    field!([7, 3, 1], smeter_dbm: bool, Kind::Flip(&["Bars", "dBm"]), Nothing),
     field!([7, 3, 2], pon: u8, Kind::Pick(&POWER_ON), Nothing),
     field!([7, 3, 3], boot_card: bool, Kind::Flip(&BOOT_SCREENS), Nothing),
     field!([7, 4, 1], backlight: u8, Kind::Round(BACKLIGHT_TIMES.len() as u8, backlight_text), Nothing),
@@ -500,19 +505,18 @@ static SETTINGS: [Setting; 75] = [
     field!([7, 5, 2], beep_vol: u8, Kind::Level(1, 3, 1, beep_vol_text), BeepVol),
     field!([7, 5, 3], alert_tones: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([7, 5, 4], arrival_tone: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([7, 5, 5], special), // APRS-6.1
     field!([7, 6, 0], leds: u8, Kind::Pick(&LED_MODES), Nothing),
     field!([7, 7, 1], special),
     field!([7, 7, 2], special), // PWR-24: it acts (in or out) as it changes
     field!([7, 7, 3], lpm_below: u8, Kind::Level(10, 40, 10, pct_text), Nothing),
     field!([7, 8, 0], auto_off: u8, Kind::Round(AUTO_OFF_TIMES.len() as u8, auto_off_text), Nothing),
+    field!([7, 9, 0], menu_timeout: u8, Kind::Pick(&crate::settings::MENU_TIMEOUT_NAMES), Nothing),
     field!([8, 1, 1], tx_timeout: u8, Kind::Level(1, 20, 1, tx_timeout_text), TxTimeout),
     field!([8, 2, 1], vox: bool, Kind::Flip(&ON_OFF), Vox),
     field!([8, 2, 2], vox_level: u8, Kind::Level(1, 9, 1, vox_level_text), Vox),
     field!([8, 2, 3], vox_tail: u8, Kind::Round(VOX_TAILS.len() as u8, vox_tail_text), Vox),
     field!([8, 3, 0], mic_gain: u8, Kind::Level(1, 9, 1, vox_level_text), MicGain),
-    field!([8, 8, 1], special),
-    field!([8, 8, 2], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
-    field!([8, 8, 3], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
     field!([8, 4, 0], end_tone: u8, Kind::Pick(&END_TONE_NAMES), SlotTones),
     // 50-200 ms in 10 ms steps (DTMF-3)
     field!([8, 5, 3], dtmf_ms: u8, Kind::Level(50, 200, 10, dtmf_ms_text), TxTones),
@@ -520,11 +524,16 @@ static SETTINGS: [Setting; 75] = [
     // 0-1000 ms in 50 ms steps (DTMF-3)
     field!([8, 5, 5], dtmf_delay: u8, Kind::Level(0, 100, 5, dtmf_delay_text), TxTones),
     field!([8, 6, 2], cw_id: u8, Kind::Pick(&CW_ID_MODES), TxTones),
+    field!([8, 7, 0], busy_default: bool, Kind::Flip(&ON_OFF), BusyDefault),
+    field!([8, 8, 1], special),
+    field!([8, 8, 2], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
+    field!([8, 8, 3], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
     field!([9, 1, 1], auto_lock: u8, Kind::Round(AUTO_LOCK_TIMES.len() as u8, auto_lock_text), Nothing), // KEY-20
+    field!([9, 1, 2], lock_ptt: bool, Kind::Flip(&["Keys", "Keys and PTT"]), Nothing),
     field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 2, 3], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
-    field!([9, 9, 8], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 9, 7], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 9, 8], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
 ];
 
 fn row(p: &[u8]) -> Option<&'static Setting> {
@@ -563,6 +572,7 @@ fn tell(app: &mut App, t: Tell) {
         Tell::TxTimeout => app.out.push(RadioCmd::TxTimeout(app.set.tx_timeout_s() as u16)),
         Tell::TxTones => app.send_tx_tones(),
         Tell::SlotTones => app.send_slot_tones(),
+        Tell::BusyDefault => app.set_busy_default(),
     }
 }
 
@@ -792,7 +802,19 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &ferrite_core::tonegen::CHIME_NAMES, app.aprs_cfg().sound);
             app.aprs_cfg().sound != ferrite_core::tonegen::CHIME_DEFAULT
         }
-        [5, 9, 7] => {
+        [5, 5, 2] => {
+            pick(b, &crate::aprs::SYMBOLS.map(|s| s.0), app.aprs_cfg().symbol);
+            app.aprs_cfg().symbol != 0
+        }
+        [5, 9, 4] => {
+            let _ = uwrite!(b, "{} ms", app.aprs_cfg().txdelay_10ms() as u16 * 10);
+            app.aprs_cfg().txdelay_10ms() != crate::aprs::TXDELAY_DEFAULT
+        }
+        [5, 9, 5] => {
+            pick(b, &crate::aprs::TX_LEVELS, app.aprs_cfg().tx_level);
+            app.aprs_cfg().tx_level != 1
+        }
+        [5, 9, 6] => {
             pick(b, &crate::aprs::FX25_NAMES, app.aprs_cfg().fx25_index());
             app.aprs_cfg().fx25 != crate::aprs::FX25_DEFAULT
         }
@@ -952,7 +974,20 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             app.set_aprs(crate::aprs::AprsCfg { sound, ..app.aprs_cfg() });
             app.out.push(ferrite_core::msg::RadioCmd::Chime(sound));
         }
-        [5, 9, 7] => {
+        [5, 5, 2] => {
+            let symbol = cycle(app.aprs_cfg().symbol, d, crate::aprs::SYMBOLS.len());
+            app.set_aprs(crate::aprs::AprsCfg { symbol, ..app.aprs_cfg() })
+        }
+        [5, 9, 4] => {
+            let c = app.aprs_cfg();
+            let txdelay = (c.txdelay_10ms() as i32 + d * 5).clamp(crate::aprs::TXDELAY_MIN as i32, crate::aprs::TXDELAY_MAX as i32) as u8;
+            app.set_aprs(crate::aprs::AprsCfg { txdelay, ..c })
+        }
+        [5, 9, 5] => {
+            let tx_level = (app.aprs_cfg().tx_level as i32 + d).clamp(0, 2) as u8;
+            app.set_aprs(crate::aprs::AprsCfg { tx_level, ..app.aprs_cfg() })
+        }
+        [5, 9, 6] => {
             let i = cycle(app.aprs_cfg().fx25_index(), d, crate::aprs::FX25_CHECKS.len());
             app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_CHECKS[i as usize], ..app.aprs_cfg() })
         }
@@ -1027,7 +1062,10 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 7, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
         [5, 4] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
         [7, 5, 5] => app.set_aprs(crate::aprs::AprsCfg { sound: ferrite_core::tonegen::CHIME_DEFAULT, ..app.aprs_cfg() }),
-        [5, 9, 7] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
+        [5, 5, 2] => app.set_aprs(crate::aprs::AprsCfg { symbol: 0, ..app.aprs_cfg() }),
+        [5, 9, 4] => app.set_aprs(crate::aprs::AprsCfg { txdelay: crate::aprs::TXDELAY_DEFAULT, ..app.aprs_cfg() }),
+        [5, 9, 5] => app.set_aprs(crate::aprs::AprsCfg { tx_level: 1, ..app.aprs_cfg() }),
+        [5, 9, 6] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
         [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
         [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
         // # forgets the custom path; a path set to it goes back to the default (APRS-26)

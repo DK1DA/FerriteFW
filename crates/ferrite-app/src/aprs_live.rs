@@ -761,7 +761,7 @@ impl AprsLive {
         if all && auto_ok {
             if let Some(q) = self.query.take() {
                 let n = match q.answer {
-                    Answer::Position => fresh(fix, cfg).and_then(|f| position_info(&f, &mut info)),
+                    Answer::Position => fresh(fix, cfg).and_then(|f| position_info(&f, cfg, &mut info)),
                     Answer::Status => status_info(&mut info),
                     Answer::Text(b) => uaprs::build::message(q.to.as_bytes(), b.as_bytes(), None, &mut info),
                 };
@@ -773,7 +773,7 @@ impl AprsLive {
             if let Some(g) = self.general.get().filter(|g| now_s >= g.due_s) {
                 self.general.set(None);
                 let f = fresh(fix, cfg).filter(|f| g.foot.is_none_or(|(c, r)| within(c, (f.pos.lat / 10, f.pos.lon / 10), r)));
-                if let Some(n) = f.and_then(|f| position_info(&f, &mut info)) {
+                if let Some(n) = f.and_then(|f| position_info(&f, cfg, &mut info)) {
                     self.last_auto.set(Some(now_s));
                     self.last_general.set(Some(now_s));
                     return self.framed(my, &info[..n], "Query reply", cfg, out, t);
@@ -804,7 +804,7 @@ impl AprsLive {
             self.beacon_now.set(false);
             self.beacon_last.set(Some(LastBeacon::new(now_s, Some(f))));
             self.last_auto.set(Some(now_s));
-            if let Some(n) = position_info(&f, &mut info) {
+            if let Some(n) = position_info(&f, cfg, &mut info) {
                 t.changed = true;
                 return self.framed(my, &info[..n], "Beacon", cfg, out, t);
             }
@@ -834,12 +834,13 @@ fn fresh(fix: Option<Fix>, cfg: &AprsCfg) -> Option<Fix> {
 }
 
 /// Our position report: the beacon's, and a position query's answer (APRS-33).
-fn position_info(f: &Fix, info: &mut [u8]) -> Option<usize> {
+fn position_info(f: &Fix, cfg: &AprsCfg, info: &mut [u8]) -> Option<usize> {
+    let (table, code) = cfg.symbol_chars(); // APRS-47
     let r = uaprs::build::Report {
         lat: f.pos.lat / 10,
         lon: f.pos.lon / 10,
-        table: b'/',
-        code: b'[',
+        table,
+        code,
         course_speed: (f.speed_kmh > 0).then(|| (f.heading.clamp(1, 360), (f.speed_kmh as u32 * 1000 / 1852) as u16)),
         altitude: f.three_d.then_some(f.alt_m * 10_000 / 3048),
         messaging: true,
@@ -1019,7 +1020,7 @@ mod tests {
     }
 
     /// APRS-44: a frame that came as FX.25 marks its station with the bytes corrected (the station screen's Path
-    /// row); the station's next plain frame clears it. APRS-45: our own frames take 0 5 9 7's check bytes, a
+    /// row); the station's next plain frame clears it. APRS-45: our own frames take 0 5 9 6's check bytes, a
     /// digipeat none.
     #[test]
     fn fx25_heard_and_sent() {

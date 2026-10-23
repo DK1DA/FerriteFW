@@ -280,6 +280,13 @@ pub fn meter_level(dbm: i16) -> u8 {
     }
 }
 
+/// SQL-12.3: the level as a number, "-93 dBm".
+pub fn dbm_text(dbm: i16) -> Buf<12> {
+    let mut b = Buf::new();
+    let _ = ufmt::uwrite!(b, "{} dBm", dbm.clamp(-140, 20));
+    b
+}
+
 /// "S7", "S9", "+20".
 pub fn s_text(dbm: i16) -> Buf<4> {
     let mut b = Buf::new();

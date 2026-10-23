@@ -832,7 +832,7 @@ fn command_errors() {
         ("set 0 7 1 purple", "Theme: one of Dark, Daylight, Night red"),
         ("set 0 7 1", "set needs a value"),
         ("set 7 1 Dark", "a menu number from MENU"),
-        ("set 0 1 8 1 Heard", "can't be set yet"),
+        ("set 0 5 9 3 Standard", "can't be set yet"),
         ("set 0 9 4 EU", "changes only on the radio"),
         ("set 0 9 3 1 Off", "changes only on the radio"),
         ("frob", "frob: no such command"),

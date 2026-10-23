@@ -23,7 +23,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as M;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
 use ferrite_app::aprs_live::FRAME_MAX;
-use ferrite_core::audio::{afsk_tx, to_dac, tx_bits, uafsk, Decim, TxBits, BLOCK_DAC, BLOCK_IN, BLOCK_OUT};
+use ferrite_core::audio::{afsk_tx_at, to_dac, tx_bits, uafsk, Decim, TxBits, BLOCK_DAC, BLOCK_IN, BLOCK_OUT};
 use ferrite_core::decoders::{Decoder, Found, Page};
 use ferrite_core::msg::{DecoderKind, DspCmd};
 
@@ -35,6 +35,8 @@ pub struct Frame {
     pub txdelay_10ms: u8,
     /// Transmit: FX.25 check bytes (16, 32, 64), or 0 for plain AX.25 (APRS-45).
     pub fx25: u8,
+    /// Transmit: the AFSK level (APRS-49: 0 Low, 1 Mid, 2 High).
+    pub level: u8,
     pub b: [u8; FRAME_MAX],
 }
 
@@ -128,7 +130,7 @@ pub async fn task() {
                 slot.push(&out[..n], |f| match f {
                     Found::Frame(b) => {
                         FRAMES.fetch_add(1, Relaxed);
-                        let mut fr = Frame { len: b.len().min(FRAME_MAX) as u16, txdelay_10ms: 0, fx25: 0, b: [0; FRAME_MAX] };
+                        let mut fr = Frame { len: b.len().min(FRAME_MAX) as u16, txdelay_10ms: 0, fx25: 0, level: 1, b: [0; FRAME_MAX] };
                         fr.b[..fr.len as usize].copy_from_slice(&b[..fr.len as usize]);
                         if APRS_RX.try_send(Heard::Frame(fr)).is_err() {
                             DROPPED.fetch_add(1, Relaxed);
@@ -180,7 +182,7 @@ pub async fn task() {
 /// sample, and stopped once that has played too.
 async fn play(f: &Frame) {
     // The TX delay's flags first: the transmitter's key-up fits in them. FX.25 (APRS-45) when the frame asks for it.
-    let cfg = afsk_tx(f.txdelay_10ms as u16 * 10);
+    let cfg = afsk_tx_at(f.txdelay_10ms as u16 * 10, f.level);
     let mut enc = None;
     let mut m = uafsk::Modulator::from_bits(tx_bits(f.bytes(), f.fx25, &cfg, &mut enc), cfg);
     let fill = |half: usize, m: &mut uafsk::Modulator<TxBits>| -> bool {

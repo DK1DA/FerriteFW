@@ -98,14 +98,16 @@ pub enum Job {
 
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
 /// bytes), then the settings added later (path, digipeater, beacon after voice, the SSID: [`APRS_MORE`]), then
-/// the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 7, APRS-45:
+/// the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 6, APRS-45:
 /// [`APRS_FX25`]). A record from before them is shorter and reads them as their defaults.
 const QUICK_LEN: usize = 68;
 const APRS_MORE: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
 const APRS_PATH: usize = APRS_MORE + 4;
 const APRS_FX25: usize = APRS_PATH + ferrite_app::aprs::CUSTOM_LEN;
 const APRS_SOUND: usize = APRS_FX25 + 1;
-const APRS_PAYLOAD: usize = APRS_SOUND + 1;
+/// APRS-47 - APRS-49: symbol, TX delay, TX level (an older record reads their defaults).
+const APRS_SYMBOL: usize = APRS_SOUND + 1;
+const APRS_PAYLOAD: usize = APRS_SYMBOL + 3;
 const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
 /// APRS-32: the stored messages [`FlashStore::message_heard`] looks through, newest first.
 pub const HEARD_CHECK: u16 = 16;
@@ -240,11 +242,24 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                     cfg.fx25 = x[0];
                 }
             }
-            if c.len as usize >= APRS_PAYLOAD {
+            if c.len as usize > APRS_SOUND {
                 let mut x = [0u8; 1];
                 self.f.raw_read(c.at + APRS_SOUND as u32, &mut x)?;
                 if (x[0] as usize) < ferrite_core::tonegen::CHIMES.len() {
                     cfg.sound = x[0];
+                }
+            }
+            if c.len as usize >= APRS_PAYLOAD {
+                let mut x = [0u8; 3];
+                self.f.raw_read(c.at + APRS_SYMBOL as u32, &mut x)?;
+                if (x[0] as usize) < ferrite_app::aprs::SYMBOLS.len() {
+                    cfg.symbol = x[0];
+                }
+                if (ferrite_app::aprs::TXDELAY_MIN..=ferrite_app::aprs::TXDELAY_MAX).contains(&x[1]) {
+                    cfg.txdelay = x[1];
+                }
+                if x[2] <= 2 {
+                    cfg.tx_level = x[2];
                 }
             }
             if c.len as usize >= APRS_FX25 {
@@ -1120,6 +1135,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         p[APRS_PATH..APRS_FX25].copy_from_slice(&c.custom);
         p[APRS_FX25] = c.fx25;
         p[APRS_SOUND] = c.sound;
+        (p[APRS_SYMBOL], p[APRS_SYMBOL + 1], p[APRS_SYMBOL + 2]) = (c.symbol, c.txdelay, c.tx_level);
         for i in 0..ferrite_app::words::QUICK {
             let t = match q {
                 Some((k, t)) if k as usize == i => t,
