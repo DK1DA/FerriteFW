@@ -212,10 +212,22 @@ def watched_chips_follow_battery_save(t):
         t.put_back(stopped)
 
 
-@test("WATCH-17", needs=("bench",), where="radio", pages=("Home",))
+def turns(t, reset=False):
+    """WATCH-17.1 (`bk turns`, bench builds since decision 262): each slot's whole turns on a chip and their total
+    ms, as the Radio task timed them at each retune: {"A": (n, ms), ...}."""
+    line = "bk turns reset" if reset else "bk turns"
+    out = t.cmd(line)
+    got = {m.group(1): (int(m.group(2)), int(m.group(3))) for m in re.finditer(r"\b([ABC]) (\d+) (\d+) ms", out)}
+    if len(got) != 3:
+        t.fail(f"{line}: {out!r} (a build with bk turns, decision 262)")
+    return got
+
+
+@test("WATCH-17", "WATCH-17.1", needs=("bench",), where="radio", pages=("Home",))
 def turns_on_a_shared_chip(t):
-    """A and B both on chip 0 (146.55 and 147.00 MHz), watch A+B, Battery Save off, nothing heard: the chip's
-    frequency (REG_38) takes turns, about 150 ms on A (active) and 70 ms on B."""
+    """A and B both on chip 0 (146.55 and 147.00 MHz), watch A+B, Battery Save off, nothing heard: the Radio task's
+    own turn counts (`bk turns`, WATCH-17.1), read 6 s apart, give mean turns of 150 ms on A (active) and 70 ms on
+    B, each within 20 ms. Reading REG_38 over the link can't time them: one read takes about 160 ms."""
     t.bench()
     stopped = quiet(t, watch="A+B")
     try:
@@ -224,22 +236,18 @@ def turns_on_a_shared_chip(t):
         t.cmd("slot A active")
         t.home()
         time.sleep(1)
-        s = samples(lambda: t.bk(0, 0x38), 6)
-        runs, cur, start = [], None, None
-        for ts, v in s:
-            if v != cur:
-                if cur is not None:
-                    runs.append((cur, ts - start))
-                cur, start = v, ts
-        a_lo, b_lo = (14_655_000 & 0xFFFF), (14_700_000 & 0xFFFF)
-        a = [d for v, d in runs[1:] if v == a_lo]
-        b = [d for v, d in runs[1:] if v == b_lo]
-        t.check(len(a) >= 5 and len(b) >= 5, "both slots get turns", (len(a), len(b)))
-        ma, mb = statistics.median(a) * 1000, statistics.median(b) * 1000
-        rt = statistics.median(s[i + 1][0] - s[i][0] for i in range(len(s) - 1)) * 1000
-        t.note(f"turns: A {ma:.0f} ms, B {mb:.0f} ms (a read every {rt:.0f} ms)")
-        t.check(abs(ma - 150) <= max(40, 2 * rt), "about 150 ms on the active slot", ma)
-        t.check(abs(mb - 70) <= max(40, 2 * rt), "about 70 ms on the watched one", mb)
+        t0, s0 = turns(t, reset=True), time.time()
+        time.sleep(6)
+        t1, s1 = turns(t), time.time()
+        # After the reset the counts start at 0, so t1 is the difference; t0 (since boot) is only noted.
+        n = {s: t1[s][0] for s in "AB"}
+        mean = {s: t1[s][1] / n[s] if n[s] else 0.0 for s in "AB"}
+        busy = sum(t1[s][1] for s in "ABC") / ((s1 - s0) * 1000)
+        t.note(f"in {s1 - s0:.1f} s: A {n['A']} turns, mean {mean['A']:.1f} ms; B {n['B']} turns, mean {mean['B']:.1f} ms; "
+               f"C {t1['C'][0]}; chip 0 timed {busy:.0%} of the time (since boot before: A {t0['A']}, B {t0['B']})")
+        t.check(n["A"] >= 10 and n["B"] >= 10, "both slots get turns", n)
+        t.check(abs(mean["A"] - 150) <= 20, "150 ms turns on the active slot", round(mean["A"], 1))
+        t.check(abs(mean["B"] - 70) <= 20, "70 ms turns on the watched one", round(mean["B"], 1))
     finally:
         t.put_back(stopped)
 

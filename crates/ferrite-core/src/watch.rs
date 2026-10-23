@@ -387,10 +387,97 @@ impl Hop {
     }
 }
 
+/// WATCH-17.1 (decision 262): each slot's whole turns on a chip and the ms they lasted, since boot or a reset.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Turns {
+    pub n: [u32; SLOTS],
+    pub ms: [u32; SLOTS],
+}
+
+/// WATCH-17.1 (decision 262, a bench measure): the turns the chips actually took, fed by the Radio task where it
+/// retunes a chip (`tune_start`): a turn runs from the retune to a slot until the chip is retuned to another slot
+/// or put to sleep. A retune to the same slot (a new frequency) continues its turn; other owners (the scope, HF
+/// mode: slot numbers past [`SLOTS`]) only end one. Only whole turns count, so the mean of two reads' difference
+/// is exact whatever the reads' timing. The bench builds' (`bk turns`, 40 bytes).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TurnClock {
+    on: [Option<(u8, u32)>; 2],
+    t: Turns,
+}
+
+impl TurnClock {
+    pub const fn new() -> Self {
+        TurnClock { on: [None; 2], t: Turns { n: [0; SLOTS], ms: [0; SLOTS] } }
+    }
+
+    /// Chip `chip` retuned at `now` to `slot` (None: asleep).
+    pub fn tuned(&mut self, now: u32, chip: u8, slot: Option<u8>) {
+        let on = &mut self.on[chip as usize & 1];
+        if on.map(|(s, _)| s) == slot {
+            return;
+        }
+        if let Some((s, since)) = *on {
+            if (s as usize) < SLOTS {
+                self.t.n[s as usize] += 1;
+                self.t.ms[s as usize] += now.wrapping_sub(since);
+            }
+        }
+        *on = slot.map(|s| (s, now));
+    }
+
+    /// The counts so far; `reset` zeroes them after (a turn in progress still counts whole when it ends).
+    pub fn take(&mut self, reset: bool) -> Turns {
+        let t = self.t;
+        if reset {
+            self.t = Turns::default();
+        }
+        t
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::freq::mhz;
+
+    /// WATCH-17.1, WATCH-17: A (146.55, active) and B (147.00) both on chip 0, watch A+B, nothing heard, in the
+    /// Radio task's 10 ms ticks: the turn clock fed at each retune counts turns of 150 ms on A and 70 ms on B, C
+    /// none; the difference of two reads gives the same means, and a reset keeps the turn in progress whole.
+    #[test]
+    fn turn_clock_times_the_turns() {
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(146) + 55_000, mhz(147), mhz(446) + 10_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
+        let (mut w, mut clock) = (Watch::new(), TurnClock::new());
+        let mut run = |from: u32, to: u32, clock: &mut TurnClock| {
+            for t in (from..to).step_by(10) {
+                let out = w.tick(t, &c, [false; 2], false);
+                assert_eq!(out.chip[1], None, "B shares chip 0");
+                for n in 0..2u8 {
+                    clock.tuned(t, n, out.chip[n as usize]);
+                }
+            }
+        };
+        run(0, 2_000, &mut clock);
+        let t0 = clock.take(false);
+        run(2_000, 8_000, &mut clock);
+        let t1 = clock.take(true);
+        assert_eq!(t1.n[2], 0, "C isn't watched");
+        let mean = |s: usize| (t1.ms[s] - t0.ms[s]) / (t1.n[s] - t0.n[s]);
+        assert!(t1.n[0] - t0.n[0] >= 25 && t1.n[1] - t0.n[1] >= 25, "{t0:?} {t1:?}");
+        assert_eq!((mean(0), mean(1)), (ACTIVE_DWELL_MS, WATCHED_DWELL_MS));
+        assert_eq!(t1.ms[0] / t1.n[0], ACTIVE_DWELL_MS, "since boot too");
+        assert_eq!(clock.take(false), Turns::default(), "reset");
+        run(8_000, 8_500, &mut clock);
+        let t2 = clock.take(false);
+        assert!(t2.n[0] > 0 && t2.n[1] > 0);
+        assert_eq!((t2.ms[0] / t2.n[0], t2.ms[1] / t2.n[1]), (ACTIVE_DWELL_MS, WATCHED_DWELL_MS), "whole turns after a reset");
+        // A new frequency on the same slot continues its turn; sleep or another owner ends it.
+        let mut k = TurnClock::new();
+        k.tuned(0, 0, Some(0));
+        k.tuned(50, 0, Some(0));
+        k.tuned(100, 0, Some(9));
+        k.tuned(130, 0, None);
+        assert_eq!(k.take(false), Turns { n: [1, 0, 0], ms: [100, 0, 0] });
+    }
 
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {

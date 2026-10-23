@@ -76,6 +76,9 @@ pub enum Kind {
     #[cfg(feature = "bench")]
     /// `lcd ...`: the display's bench state (TERM-40).
     Lcd(ferrite_core::msg::LcdSet),
+    #[cfg(feature = "bench")]
+    /// `bk turns [reset]`: each slot's turns on a chip (WATCH-17.1).
+    Turns { reset: bool },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -161,6 +164,8 @@ impl Job {
             Kind::Lcd(l) => DebugReq::Lcd(l),
             #[cfg(feature = "bench")]
             Kind::Save(c) => DebugReq::Save(c),
+            #[cfg(feature = "bench")]
+            Kind::Turns { reset } => DebugReq::Turns { reset },
         })
     }
 
@@ -314,6 +319,18 @@ impl Job {
                 let pct = |p: Option<u8>| p.map_or(Num(None), |p| Num(Some(p)));
                 put!(out, "  lcd: idle {}, partial {}, sleep {}, fps {}, bl {}, keys {}", onoff(l.idle), onoff(l.partial), onoff(l.sleep),
                      if l.fps == 0 { Num(None) } else { Num(Some(l.fps)) }, pct(l.bl), pct(l.keys));
+                self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Turns { reset }, DebugAns::Turns(t)) => {
+                out.push(b"  bk turns:");
+                for (s, name) in ["A", "B", "C"].into_iter().enumerate() {
+                    put!(out, " {} {} {} ms{}", name, t.n[s], t.ms[s], if s < 2 { "," } else { "" });
+                }
+                if reset {
+                    out.push(b" (reset)");
+                }
                 self.st = St::Over;
                 Step::Line
             }

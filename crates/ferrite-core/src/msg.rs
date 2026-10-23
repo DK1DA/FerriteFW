@@ -456,6 +456,10 @@ pub enum DebugReq {
     /// TERM-40 (a bench test, the power bench): one change to the display's bench state, or only ask. The UI task
     /// owns the panel and answers with [`DebugAns::Lcd`].
     Lcd(LcdSet),
+    #[cfg(feature = "bench")]
+    /// WATCH-17.1 (decision 262, a bench measure): each slot's turns on a chip so far
+    /// ([`crate::watch::TurnClock`]), zeroed after if `reset`. The Radio task answers with [`DebugAns::Turns`].
+    Turns { reset: bool },
 }
 
 /// TERM-40: a change to [`LcdBench`].
@@ -563,6 +567,9 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// TERM-41: the cycle in force: the override, or the level's on/off times (None: Battery Save off).
     Save { cycle: Option<crate::rxsleep::Cycle>, level: Option<(u32, u32)>, asleep: bool },
+    #[cfg(feature = "bench")]
+    /// WATCH-17.1: each slot's whole turns and their ms, before any reset.
+    Turns(crate::watch::Turns),
     /// Not done, and why.
     Refused(&'static str),
 }
