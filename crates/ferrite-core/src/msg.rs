@@ -48,7 +48,7 @@ pub enum RadioCmd {
     /// Start or stop scanning in a slot.
     Scan { slot: u8, on: bool },
     /// Channel scans also listen on each channel's transmit frequency when it has a shift or split (SCAN-22,
-    /// 0 1 8 3; sent at start-up and when it changes).
+    /// 0 1 6 3; sent at start-up and when it changes).
     ScanTx(bool),
     /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 8 1; sent at start-up and when
     /// it changes).
@@ -93,15 +93,15 @@ pub enum RadioCmd {
     /// A channel scan's priority channel `k` (SCAN-12; 0xFFFF none).
     ScanPrio { slot: u8, k: u8, num: u16 },
     /// Start a channel scan on the slot at channel `from`, with the set just sent; `prio_s`: the priority look's
-    /// interval in seconds (0 1 5; 0 off).
+    /// interval in seconds (0 1 3; 0 off).
     ScanChans { slot: u8, from: u16, prio_s: u8 },
     /// The resume rule for the slot's next scan (SCAN-5, SCAN-24), as [`crate::scan::Resume::from_code`]:
-    /// already the zone's or the preset's own, or the radio's (0 1 4).
+    /// already the zone's or the preset's own, or the radio's (0 1 2).
     ScanResume { slot: u8, code: u8 },
     /// The answer to [`LiveAll::want`]: channel `num`'s receive frequency (0: there is no such channel now).
     ScanEntry { num: u16, rx: Freq10 },
     /// Channel `num`'s transmit frequency when it has a shift or split, after its [`RadioCmd::ScanEntry`]
-    /// (SCAN-22, only while 0 1 8 3 is on).
+    /// (SCAN-22, only while 0 1 6 3 is on).
     ScanEntryTx { num: u16, tx: Freq10 },
     /// While keyed: the tone burst (PTT + SIDE2) at 1750 Hz for as long as SIDE2 is held (TONE-13, TONE-13.1).
     ToneBurst { on: bool },
@@ -456,6 +456,10 @@ pub enum DebugReq {
     /// TERM-40 (a bench test, the power bench): one change to the display's bench state, or only ask. The UI task
     /// owns the panel and answers with [`DebugAns::Lcd`].
     Lcd(LcdSet),
+    #[cfg(feature = "bench")]
+    /// WATCH-17.1 (decision 262, a bench measure): each slot's turns on a chip so far
+    /// ([`crate::watch::TurnClock`]), zeroed after if `reset`. The Radio task answers with [`DebugAns::Turns`].
+    Turns { reset: bool },
 }
 
 /// TERM-40: a change to [`LcdBench`].
@@ -563,6 +567,9 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// TERM-41: the cycle in force: the override, or the level's on/off times (None: Battery Save off).
     Save { cycle: Option<crate::rxsleep::Cycle>, level: Option<(u32, u32)>, asleep: bool },
+    #[cfg(feature = "bench")]
+    /// WATCH-17.1: each slot's whole turns and their ms, before any reset.
+    Turns(crate::watch::Turns),
     /// Not done, and why.
     Refused(&'static str),
 }

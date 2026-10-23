@@ -177,7 +177,7 @@ fn vox_never_on_an_emergency_frequency() {
 #[test]
 fn broadcast_sleep_timer() {
     let mut t = T::new();
-    crate::screens::groups::change(&mut t.app, &[3, 1, 5], 1); // 15 min
+    crate::screens::groups::change(&mut t.app, &[3, 1, 4], 1); // 15 min
     t.open(Dest::FmBroadcast);
     assert_eq!(t.app.screen().name(), Dest::FmBroadcast.name());
     t.cmds();

@@ -321,7 +321,7 @@ impl App {
 
     /// The card's name: [`Self::chan_name`], or while a channel list scans the name of the channel it is on
     /// (HOME-4.1), read from the store as the scan screen's hits are.
-    /// CHAN-33: 0 2 5 shows a channel by its name (the default), its number ("CH 012") or, empty here, by its
+    /// CHAN-33: 0 2 4 shows a channel by its name (the default), its number ("CH 012") or, empty here, by its
     /// frequency as a VFO is shown.
     pub(crate) fn card_name(&self, s: u8, live: &LiveAll, store: &impl ChannelStore) -> Buf<16> {
         let lv = &live.slots[s as usize];

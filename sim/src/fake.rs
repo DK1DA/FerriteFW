@@ -862,6 +862,12 @@ impl FakeRadio {
                 DebugAns::TxTest(self.txtest)
             }
             #[cfg(feature = "bench")]
+            // WATCH-17.1: the simulator's turns aren't the chips' (it has none to retune).
+            DebugReq::Turns { .. } => DebugAns::Refused("the simulator has no chips to time: bk turns is the radio's"),
+            #[cfg(feature = "bench")]
+            // TERM-40, TERM-41: the power bench's switches are the radio's.
+            DebugReq::Save(_) | DebugReq::Lcd(_) => DebugAns::Refused("the power bench's switches are the radio's"),
+            #[cfg(feature = "bench")]
             DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; ferrite_core::vox::MIC_SAMPLES], 32_000)),
         }
     }

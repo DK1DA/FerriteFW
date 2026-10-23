@@ -1,7 +1,8 @@
 //! The channel browser (MENU 0 2 1; manual chapter 10, CHAN-10 to CHAN-15): pick a zone or a view (C8),
 //! its channels (C9), and a channel's actions (C10: edit, rename, move, renumber, copy to slot, skip, delete).
-//! Views are computed, never stored (CHAN-14): All by number, per band, Recent from the event log, Nearby by
-//! distance from the GPS fix (CHAN-15: empty without one). Channels are read from the store as rows are
+//! Views are computed, never stored (CHAN-14): All by number, per band (Broadcast is the saved FM stations the
+//! FM screen's OK opens, BCR-31), Recent from the event log, Nearby by distance from the GPS fix (CHAN-15: empty
+//! without one). Channels are read from the store as rows are
 //! drawn; the browser keeps only its position.
 //!
 //! Deleting asks first and names the channel (CHAN-13, MENU-23).
@@ -22,15 +23,20 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
-/// The views after the zones: All, four bands, Recent, Nearby.
-const VIEWS: [&str; 7] = ["All", "2 m", "70 cm", "Air", "Marine", "Recent", "Nearby"];
+/// The views after the zones: All, five bands, Recent, Nearby.
+const VIEWS: [&str; 8] = ["All", "2 m", "70 cm", "Air", "Marine", "Broadcast", "Recent", "Nearby"];
 const V_ALL: u8 = 1;
 /// The browser's `view` while picking one.
 pub const PICKER: u8 = 255;
-const V_RECENT: u8 = 6;
-const V_NEARBY: u8 = 7;
-/// The band views' edges (CHAN-14: "2 m, 70 cm, air, marine").
-const BAND_VIEWS: [(Freq10, Freq10); 4] = [(mhz(144), mhz(148)), (mhz(420), mhz(450)), (mhz(108), mhz(137)), (mhz(156), mhz(163))];
+/// The band views: 2 to this.
+const V_BANDS: u8 = 6;
+pub(crate) const V_BROADCAST: u8 = 6;
+const V_RECENT: u8 = 7;
+const V_NEARBY: u8 = 8;
+/// The band views' edges (CHAN-14: "2 m, 70 cm, air, marine"; BCR-31: broadcast FM, 76-108 MHz, the bands of every
+/// region, BCR-21).
+const BAND_VIEWS: [(Freq10, Freq10); 5] =
+    [(mhz(144), mhz(148)), (mhz(420), mhz(450)), (mhz(108), mhz(137)), (mhz(156), mhz(163)), (mhz(76), mhz(108) + 1)];
 /// Recent: up to ten channels (CHAN-25).
 const RECENT_MAX: u16 = crate::chan::RECENT_MAX as u16;
 
@@ -95,7 +101,7 @@ impl<S: ChannelStore> ViewOf<'_, S> {
 
     fn keep(&self, i: u16) -> bool {
         let band = match self.view {
-            2..=5 => {
+            2..=V_BANDS => {
                 let (lo, hi) = BAND_VIEWS[self.view as usize - 2];
                 self.store.by_number(i).is_some_and(|c| c.rx >= lo && c.rx < hi)
             }
@@ -146,7 +152,16 @@ impl<S: ChannelStore> ViewOf<'_, S> {
 
 /// The Nearby view (CHAN-15), opened from the zones page's Nearby row (CHAN-29).
 pub(crate) fn nearby_view(store: &impl ChannelStore, hidden: bool) -> Browse {
-    let mut b = Browse { view: V_NEARBY, ..Browse::new() };
+    opened(store, V_NEARBY, hidden)
+}
+
+/// BCR-31: the Broadcast view, the saved FM stations, opened by OK on the FM screen.
+pub(crate) fn broadcast_view(store: &impl ChannelStore, hidden: bool) -> Browse {
+    opened(store, V_BROADCAST, hidden)
+}
+
+fn opened(store: &impl ChannelStore, view: u8, hidden: bool) -> Browse {
+    let mut b = Browse { view, ..Browse::new() };
     let v = view_of(store, &b, hidden);
     b.cur = Cursor::first(v.n(), &|i| v.keep(i));
     b
@@ -207,6 +222,11 @@ impl View for Browse {
                 (s.view, s.zone) = if i < z { (0, i as u8) } else { (1 + (i - z) as u8, 0) };
                 let v = view_of(store, &s, app.set.show_hidden);
                 s.cur = Cursor::first(v.n(), &|i| v.keep(i));
+            }
+            // BCR-31: a saved station plays on the FM screen, as a preset did; its actions are in its zone and All
+            (Key::Menu, Short, Mode::List) if self.view == V_BROADCAST => {
+                let Some(c) = ch else { return };
+                return play(app, c);
             }
             (Key::Menu, Short, Mode::List) if ch.is_some() => s.mode = Mode::Actions(0),
             (Key::Menu, Short, Mode::Actions(a)) => {
@@ -330,7 +350,7 @@ impl View for Browse {
         }
         let mut name = Buf::<20>::new();
         name.set(if view == 0 { zone_name(store, self.zone) } else { Buf::from(VIEWS[view as usize - 1].as_bytes()) }.as_bytes());
-        let shown = if (2..=5).contains(&view) || !v.hidden { (0..n).filter(|&i| v.keep(i)).count() } else { n as usize };
+        let shown = if (2..=V_BANDS).contains(&view) || !v.hidden { (0..n).filter(|&i| v.keep(i)).count() } else { n as usize };
         let mut r = Buf::<24>::new();
         match view {
             V_NEARBY => r.set(b"nearest first"),
@@ -396,6 +416,7 @@ impl View for Browse {
                 V_NEARBY if data.fix().is_none() => (b"Needs a GPS fix", b"Nearby sorts by distance from it"),
                 V_NEARBY => (b"No channels with a position", b"The web app imports them"),
                 V_RECENT => (b"Nothing recent", b"Channels you tune to, use or hear"),
+                V_BROADCAST => (b"No stations saved", b"Hold 9 on a broadcast VFO saves one"),
                 _ => (b"No channels here", b"Hold 9 on a VFO to save one"),
             };
             app.empty(lcd, a, b);
@@ -410,6 +431,7 @@ impl View for Browse {
     fn hints(self, _: &App) -> Hints {
         match (self.view, self.mode) {
             (PICKER, _) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Open"), ("BACK", "Back")]),
+            (V_BROADCAST, Mode::List) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Listen"), ("BACK", "Views")]),
             (_, Mode::List) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Actions"), ("BACK", "Views")]),
             (_, Mode::Actions(_)) => Hints::new(&[(ARROWS_UD, "Move"), ("OK", "Do it"), ("BACK", "List")]),
             (_, Mode::Move(_)) => Hints::new(&[("Knob", "Zone"), ("OK", "Move"), ("BACK", "Cancel")]),
@@ -420,6 +442,21 @@ impl View for Browse {
 
 fn zone_name(store: &impl ChannelStore, z: u8) -> Buf<16> {
     store.zone_label(z, b"No zone", b"No zone")
+}
+
+/// BCR-31: a saved station into the broadcast receiver (the broadcast slot's while one plays, BCR-25), then the
+/// FM screen it was picked from (replaced, not opened again: one BACK leaves FM), or quick settings on a broadcast
+/// slot (BCR-28); from elsewhere, FM opens over it.
+fn play(app: &mut App, c: Channel) {
+    let f = (c.rx / 1000) as u16;
+    app.fm_set(f.clamp(super::fm::LO, super::fm::HI)); // the reconciler retunes (MODE-2)
+    app.back();
+    match app.screen {
+        Screen::Fm(f) => app.screen = Screen::Fm(super::fm::Fm { menu: false, ..f }),
+        Screen::Quick(_) => {}
+        _ => app.open(Dest::FmBroadcast),
+    }
+    app.show_toast(c.name(), b"", false);
 }
 
 /// The active slot onto the channel, at its place in its zone.
@@ -468,6 +505,7 @@ fn picker(app: &mut App, lcd: &mut impl Panel, store: &impl ChannelStore, cur: C
             V_ALL => b"Every channel, zoned or not",
             V_RECENT => b"Channels heard lately, from the event log",
             V_NEARBY => b"Channels with a position, nearest first",
+            V_BROADCAST => b"Saved FM stations: the FM screen's OK",
             _ => b"Every channel on this band",
         }
     };

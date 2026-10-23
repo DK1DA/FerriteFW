@@ -1,6 +1,6 @@
 //! Quick settings (MENU on home; manual chapter 11, MENU-1 and MENU-12 to MENU-22; MenuQuick mock-up): the
 //! active slot's nine settings and "0 More". The knob or ◀▶ change the highlighted value live. On a slot in
-//! the broadcast band the rows are FM's own (presets, step, AGC, radio monitor, sleep timer: BCR-28).
+//! the broadcast band the rows are FM's own (step, AGC, radio monitor, sleep timer: BCR-28).
 
 use super::advanced::Advanced;
 use super::fm;
@@ -46,9 +46,9 @@ impl View for Quick {
             match (e.key, e.press) {
                 (Key::Up, Short | Repeat) => app.screen = Screen::Quick(Quick { row: (row % n + n - 1) % n }),
                 (Key::Down, Short | Repeat) => app.screen = Screen::Quick(Quick { row: (row + 1) % n }),
-                (Key::Left | Key::Right, Short | Repeat) if row < FM_ROWS && row > 0 => fm::option_change(app, row, if e.key == Key::Right { 1 } else { -1 }),
+                (Key::Left | Key::Right, Short | Repeat) if row < FM_ROWS => fm::option_change(app, row, if e.key == Key::Right { 1 } else { -1 }),
                 (Key::Digit(0), Short) => to_advanced(app),
-                (Key::Digit(d @ 1..=5), Short) => app.screen = Screen::Quick(Quick { row: d - 1 }),
+                (Key::Digit(d @ 1..=FM_ROWS), Short) => app.screen = Screen::Quick(Quick { row: d - 1 }),
                 (Key::Menu, Short) if row >= FM_ROWS => to_advanced(app),
                 (Key::Menu, Short) => fm::option_change(app, row, 1),
                 (Key::Exit, Short) => app.back(),
@@ -84,7 +84,7 @@ impl View for Quick {
 
     fn knob(self, app: &mut App, d: i32, _: &impl ChannelStore) {
         if bcast(app) {
-            if self.row > 0 && self.row < FM_ROWS {
+            if self.row < FM_ROWS {
                 fm::option_change(app, self.row, d);
             }
             return;

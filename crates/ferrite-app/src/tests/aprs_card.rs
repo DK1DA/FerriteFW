@@ -242,3 +242,36 @@ fn kiss_suspends_the_radios_own_aprs() {
     assert!(a.app.aprs_on() && a.app.beacons_on(), "back as they were");
     assert_eq!(a.app.aprs_holder(), Some(Holder::Mode));
 }
+
+/// APRS-17.7, APRS-17.3, MENU-25 (decision 257): one APRS list in one order from the APRS slot and from the heard
+/// list (1 Messages, 2 Heard, 3 Beacon now, 4 Beacon on/off, 5 Event log, 6 Clear the heard list, 7 APRS settings);
+/// OK 1 on C reads the messages; hold MENU on C opens the same list on the same row as OK; a digit on a row that
+/// does something only moves to it.
+#[test]
+fn one_aprs_list_from_c_and_heard() {
+    use crate::screens::opts::{rows, Of};
+    let names: Vec<&str> = rows(Of::AprsCard).iter().map(|r| r.0).collect();
+    assert_eq!(names, ["Messages", "Heard", "Beacon now", "Beacon on/off", "Event log", "Clear the heard list", "APRS settings"]);
+    assert!(core::ptr::eq(rows(Of::AprsCard), rows(Of::Heard)), "one list");
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.tick();
+    a.c_active();
+    a.press(Key::Menu, 100);
+    a.press(Key::Digit(1), 100);
+    assert!(matches!(a.app.screen(), Screen::Msgs(_)), "OK 1: the messages, not {}", a.app.screen().name());
+    a.press(Key::Exit, 800);
+    a.press(Key::Menu, 800);
+    assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == Of::AprsCard && o.row == crate::screens::opts::APRS_ROW_HEARD), "hold MENU: as OK");
+    a.press(Key::Digit(3), 100);
+    assert!(matches!(a.app.screen(), Screen::Options(o) if o.row == 2), "3: on Beacon now, nothing sent");
+    // From the heard list: the same list; its Heard row returns to it.
+    a.press(Key::Digit(2), 100);
+    assert!(matches!(a.app.screen(), Screen::Aprs(_)), "2: the heard list");
+    a.press(Key::Menu, 800);
+    assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == Of::Heard));
+    a.press(Key::Digit(2), 100);
+    assert!(matches!(a.app.screen(), Screen::Aprs(_)));
+    a.press(Key::Exit, 100);
+    assert!(matches!(a.app.screen(), Screen::Home), "one BACK: no second heard list under it, {}", a.app.screen().name());
+}

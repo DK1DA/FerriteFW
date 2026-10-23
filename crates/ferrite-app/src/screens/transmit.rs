@@ -314,7 +314,8 @@ pub fn power_name(app: &App, slot: u8) -> &'static str {
         return "No TX";
     }
     let p = if slot < SLOTS as u8 { app.tuned_cfg(slot).power } else { 0 }; // the APRS power on the APRS slot (APRS-19.1)
-    ["LOW", "MID", "HIGH"][p as usize % 3]
+    // TX-9: 1.25 m keys Low whatever is chosen, and says so.
+    ["LOW", "MID", "HIGH"][ferrite_core::txcal::band_power(tx_freq(app, slot), p) as usize % 3]
 }
 
 impl View for Transmit {

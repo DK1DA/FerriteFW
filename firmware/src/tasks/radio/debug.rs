@@ -26,6 +26,8 @@ impl Radio {
                 }
                 DebugAns::Settle(self.settle)
             }
+            // WATCH-17.1 (decision 262): the turns the chips took, read and maybe zeroed.
+            DebugReq::Turns { reset } => DebugAns::Turns(self.turns.take(reset)),
             // TERM-32 (a bench test): PA0, the mic level tap VOX reads, at 8 kHz for 32 ms, to tell raw audio from an
             // envelope. Through the ADC's preempted group, as VOX; the Radio task waits through it.
             DebugReq::Mic => {

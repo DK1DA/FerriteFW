@@ -157,7 +157,7 @@ fn scope_redraws_little() {
 }
 
 /// FM broadcast: hold MENU opens its own options (BCR-3); ▲ tunes by the step, digits do nothing on the main
-/// screen but 1-5 (BCR-3), OK opens the presets (BCR-18); it tunes 64-108 MHz, wrapping at the ends (BCR-17); with radio monitor on, a
+/// screen but 1-4 (BCR-3), OK opens the saved stations, the browser's Broadcast view (BCR-18, BCR-31.2); it tunes 64-108 MHz, wrapping at the ends (BCR-17); with radio monitor on, a
 /// slot that opens interrupts it (BCR-4).
 #[test]
 fn broadcast() {
@@ -179,7 +179,7 @@ fn broadcast() {
         }
     }
     r.expect_text("broadcast paused");
-    r.run("press OK; expect screen \"FM presets\"; expect text \"of 20 used\"");
+    r.run("press OK; expect screen \"Channel browser\"; expect text \"Broadcast\"; expect text \"No stations saved\"");
 }
 
 /// Hold MENU in HF mode opens its options: step, bandwidth, AGC, LNA, fine tune and the recent list (HF-14).

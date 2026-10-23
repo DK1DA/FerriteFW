@@ -3,7 +3,7 @@ import re
 
 from .core import test
 
-BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt_on", "bt", "battery", "low", "cutoff", "dry", "lpm", "clock", "utc", "call"}  # dry: SBAR-22; bt_on: SBAR-8; lpm: SBAR-24
+BAR_KEYS = {"lock", "scan", "watch", "inbox", "alert", "gps", "bt_on", "bt", "battery", "low", "cutoff", "dry", "lpm", "clock", "utc", "call", "mcu", "switches", "held_us", "why"}  # dry: SBAR-22; bt_on: SBAR-8; lpm: SBAR-24; mcu ... why: PWR-26.6
 
 
 @test("SBAR-14", "PWR-8", "SBAR-10", pages=("Status",))
@@ -120,7 +120,7 @@ def about_rows(t):
     t.check(u.row("SSB patch")["value"], "the SSB patch state", u.row("SSB patch"))
     t.note(f"About: {[(r['name'], r['value']) for r in u.rows]}")
     u = t.keys("RIGHT")
-    t.eq(u.names(), ["CPU", "RAM", "Stack free", "MCU temp", "Battery", "Uptime"], "the System rows")
+    t.eq(u.names(), ["CPU", "RAM", "Stack free", "MCU temp", "Battery", "Uptime", "Clock"], "the System rows")
     t.note(f"System: {[(r['name'], r['value']) for r in u.rows]}")
 
 

@@ -44,7 +44,7 @@ fn step(app: &App, row: u8, d: i32) -> u8 {
 
 /// Advanced settings groups (MENU 0 1-9) and their help lines.
 pub(crate) const GROUPS: [(&str, &str); 9] = [
-    ("Watch and scan", "Watch, background jobs, scan, skip list."),
+    ("Watch and scan", "Watch, resume, priority, ranges, skips."),
     ("Channels", "Browse channels and zones, add a repeater."),
     ("Tools", "FM, scope, counter, HF, crossband, tones."),
     ("Decoders and alerts", "Event log, pagers, DSC, AIS, weather alerts."),

@@ -443,7 +443,6 @@ fn main() {
         ("range-preset", Dest::RangePresets, &[(Key::Down, 100), (Key::Down, 100), (Key::Menu, 100), (Key::Down, 100)]),
         ("skip-list", Dest::SkipList, &[]),
         ("hf-recent", Dest::HfRecent, &[]),
-        ("fm-presets", Dest::FmPresets, &[(Key::Down, 100)]),
         ("gps-position", Dest::GpsPosition, &[]),
         ("gps-satellites", Dest::GpsPosition, &[(Key::Right, 100)]),
         ("waypoints", Dest::Waypoints, &[(Key::Down, 100)]),

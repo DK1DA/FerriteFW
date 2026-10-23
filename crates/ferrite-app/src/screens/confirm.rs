@@ -30,7 +30,7 @@ pub enum Ask {
     DeleteChannel(u16),
     /// Delete a zone (CHAN-12).
     DeleteZone(u8),
-    /// Delete a range preset, by index (MENU 0 1 6).
+    /// Delete a range preset, by index (MENU 0 1 4).
     DeletePreset(u8),
     /// The tone hint's tone is the RX tone now: set it as the TX tone too (TSRCH-16, as tone search's TSRCH-4).
     ToneTx(u16),

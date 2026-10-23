@@ -70,13 +70,6 @@ const LOG: [Opt; 3] = [
     ("Clear the log", Act::Confirm(&Op::ClearLog), "Every event goes, unread ones too"),
     ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DSC, AIS, popups"),
 ];
-const HEARD: [Opt; 5] = [
-    ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
-    ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 6 1)"),
-    ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
-    ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations come back as they are heard"),
-    ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
-];
 const MESSAGES: [Opt; 6] = [
     ("Write a message", Act::Open(Dest::Compose), "Recipient, then the text"),
     ("Quick messages", Act::Open(Dest::QuickMessages), "The nine shown on an empty message"),
@@ -91,16 +84,19 @@ const GPS: [Opt; 3] = [
     ("GPS settings", Act::Open(Dest::Group(6)), "On or off, format, units, time zone"),
 ];
 const SCOPE: [Opt; 1] = [("Scope settings", Act::Open(Dest::Sub(3, 2)), "Bars, step, speed, trigger, waterfall")];
-/// APRS-17 (decision 181): OK on home with the APRS slot active opens this page on its "Beacon now" row (beacons
-/// alone hold C) or its "Heard list" row (APRS mode, KISS).
-pub(crate) const APRS_ROW_BEACON_NOW: u8 = 0;
-pub(crate) const APRS_ROW_HEARD: u8 = 2;
-const APRS_CARD: [Opt; 5] = [
+/// APRS-17.7 (decision 257): the one APRS list, the same from the APRS slot (OK or hold MENU on home) and from the
+/// heard list (hold MENU). OK on the APRS slot opens it on its "Heard" row (APRS mode, KISS) or its "Beacon now"
+/// row (beacons alone hold C); a digit opens a row that opens a screen (MENU-25), so OK 1 reads the messages.
+pub(crate) const APRS_ROW_HEARD: u8 = 1;
+pub(crate) const APRS_ROW_BEACON_NOW: u8 = 2;
+const APRS: [Opt; 7] = [
+    ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
+    ("Heard", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
     ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
     ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 6 1)"),
-    ("Heard list", Act::Open(Dest::AprsHeard), "Stations heard, newest first"),
-    ("Messages", Act::Open(Dest::AprsMessages), "Inbox, sent and compose"),
-    ("Event log", Act::Open(Dest::EventLog), "Everything decoded and logged"), // APRS-17.1
+    ("Event log", Act::Open(Dest::EventLog), "Everything decoded and logged"),
+    ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations come back as they are heard"),
+    ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
 ];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
 const WAYPOINTS: [Opt; 5] = [
@@ -124,13 +120,12 @@ const CONTACTS: [Opt; 3] = [
 pub(crate) fn rows(of: Of) -> &'static [Opt] {
     match of {
         Of::Log => &LOG,
-        Of::Heard => &HEARD,
+        Of::Heard | Of::AprsCard => &APRS,
         Of::Messages => &MESSAGES,
         Of::Gps => &GPS,
         Of::Waypoints => &WAYPOINTS,
         Of::Scope => &SCOPE,
         Of::Channels => &CHANNELS,
-        Of::AprsCard => &APRS_CARD,
         Of::Station => &STATION,
         Of::Contacts => &CONTACTS,
     }
@@ -174,10 +169,15 @@ impl View for Options {
         let (label, act, _) = all[self.row as usize % all.len()];
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) if !self.confirm => self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
-            // MENU-25: 0 the full menu; MENU-5: a digit picks its row.
+            // MENU-25: 0 the full menu; as in the menus (MENU-5) a digit picks its row and opens a row that opens a
+            // screen; a row that does something waits for OK.
             (Key::Digit(0), Short) if !self.confirm => app.open(Dest::Advanced),
             (Key::Digit(d), Short) if !self.confirm && (d as usize) <= all.len() => {
-                app.screen = Screen::Options(Options { row: d - 1, ..self })
+                let o = Options { row: d - 1, ..self };
+                app.screen = Screen::Options(o);
+                if matches!(all[d as usize - 1].1, Act::Open(_)) {
+                    o.key(app, KeyEvent { key: Key::Menu, press: Short }, store);
+                }
             }
             (Key::Menu, Short) => match act {
                 Act::Confirm(_) | Act::Sel(_, true) if !self.confirm => app.screen = Screen::Options(Options { confirm: true, ..self }),
@@ -213,7 +213,10 @@ impl View for Options {
                 }
                 Act::Open(d) => {
                     app.back();
-                    app.open(d);
+                    // the heard list's own row from the heard list: back to it, not a second one over it
+                    if !(d == Dest::AprsHeard && matches!(app.screen, Screen::Aprs(a) if !a.station)) {
+                        app.open(d);
+                    }
                 }
                 Act::Beacon => {
                     app.back();
@@ -272,7 +275,9 @@ impl View for Options {
             let mut p = Buf::<24>::new();
             p.set(title(self.of));
             p.push(b" MENU");
-            app.help_box(lcd, OPTS_HELP_Y, 46, help.as_bytes(), p.as_bytes());
+            // under the rows and "0 Full menu": six or seven rows push it down
+            let y = OPTS_HELP_Y.max(23 + 22 * (all.len() as i32 + 1) + 6);
+            app.help_box(lcd, y, 46, help.as_bytes(), p.as_bytes());
         }
     }
 
@@ -285,7 +290,7 @@ impl View for Options {
     }
 }
 
-/// Where an options page's help box goes (under five rows and "0 Full menu").
+/// Where an options page's help box goes (under five rows and "0 Full menu"; lower under more).
 pub(crate) const OPTS_HELP_Y: i32 = 140;
 
 /// An options page's rows, the one style (MENU-25): numbered 1-n with their values, the selected one

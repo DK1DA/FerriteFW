@@ -80,6 +80,8 @@ impl Radio {
             }
         }
         self.tuned[n as usize] = want;
+        #[cfg(feature = "bench")]
+        self.turns.tuned(now_ms() as u32, n, want.map(|(s, _)| s)); // WATCH-17.1: what the chip actually did
         if want.is_none() {
             self.maybe_awake &= !(1 << n);
             self.sq_regs[n as usize] = None; // written again on waking

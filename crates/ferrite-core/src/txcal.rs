@@ -243,7 +243,7 @@ impl TxCal {
     /// (0x00 or 0xFF, CAL-10): both radios' 200-300 MHz rows end at 260 MHz (entries 13-15 0xFF, which stock would
     /// send to the DAC as full drive) and their UHF rows at 520 MHz.
     pub fn dac(&self, f: Freq10, power: u8) -> Option<u8> {
-        let level = 2 - power.min(2) as usize; // stock's order: 0 is High
+        let level = 2 - band_power(f, power).min(2) as usize; // stock's order: 0 is High
         let mhz = f / 100_000;
         let p = &self.pa[level];
         let v = match mhz {
@@ -251,7 +251,7 @@ impl TxCal {
             400.. => p[UHF][((mhz - 400) / 10) as usize],
             350..=399 => p[R350][((mhz - 350) / 5) as usize],
             300..=349 => p[R350][0],
-            // CAL-14, TX-9: the 200-300 MHz PA path (1.25 m, and 243.0 MHz) at the chosen level, as stock.
+            // CAL-14, TX-9: the 200-300 MHz PA path (1.25 m, and 243.0 MHz), Low only (band_power).
             200..=299 => p[R200][(((mhz - 200) / 5) as usize).min(15)],
             130..=199 => p[VHF][(((mhz - 130) / 3) as usize).min(15)],
             18..=63 => self.hf[level][(((mhz - 15) / 5) as usize).min(11)],
@@ -259,6 +259,17 @@ impl TxCal {
             _ => return None,
         };
         (v != 0 && v != 0xFF).then_some(v)
+    }
+}
+
+/// TX-9: the level that actually keys on `f` for the chosen `power` (0 Low, 1 Mid, 2 High). On the 1.25 m PA path
+/// (200-300 MHz, 243.0 MHz included) it is always Low: Mid and High draw more current there for no more RF out, and
+/// only stress the finals (decision 260). Every other band keys at the chosen level.
+pub fn band_power(f: Freq10, power: u8) -> u8 {
+    if (200..300).contains(&(f / 100_000)) {
+        0
+    } else {
+        power
     }
 }
 
@@ -504,16 +515,23 @@ mod tests {
         assert_eq!(TxCal::read(&b).err(), Some(Fault::ToneGain));
     }
 
-    /// CAL-14, TX-9: the 1.25 m PA path (200-300 MHz, 243.0 MHz included) at the chosen level, as stock's lookup
-    /// ((MHz-200)/5 on the level's 200-300 row); a hole or a level out of order in its reached entries locks.
+    /// CAL-14, TX-9: the 1.25 m PA path (200-300 MHz, 243.0 MHz included) keys Low whatever level is chosen
+    /// (decision 260), from stock's lookup ((MHz-200)/5 on the Low 200-300 row); a hole or a level out of order in
+    /// its reached entries still locks.
     #[test]
-    fn band_125m_levels_as_stock() {
+    fn band_125m_low_only() {
         let c = TxCal::parse(&sector(GAUGE_DEFAULT)).unwrap();
         for (f, i) in [(mhz(223) + 50_000, 4), (mhz(243), 8), (mhz(259), 11)] {
-            assert_eq!(c.dac(f, 2), Some(curve(0, R200, i)), "{f}: High");
-            assert_eq!(c.dac(f, 1), Some(curve(1, R200, i)), "{f}: Mid");
-            assert_eq!(c.dac(f, 0), Some(curve(2, R200, i)), "{f}: Low");
+            for power in 0..3 {
+                assert_eq!(c.dac(f, power), Some(curve(2, R200, i)), "{f}: level {power} keys Low");
+            }
         }
+        assert_eq!(band_power(mhz(223), 2), 0);
+        assert_eq!(band_power(mhz(200), 2), 0, "200 MHz: Low");
+        assert_eq!(band_power(mhz(299) + 99_999, 2), 0, "the whole path");
+        assert_eq!(band_power(mhz(199) + 99_999, 2), 2, "below the path: as chosen");
+        assert_eq!(band_power(mhz(146), 2), 2, "2 m keeps the chosen level");
+        assert_eq!(band_power(mhz(446), 1), 1, "70 cm too");
         let mut b = sector(GAUGE_DEFAULT);
         b[0x80 + 0x10 * R200 + 4] = 0xFF;
         assert_eq!(TxCal::read(&b).err(), Some(Fault::PaCurve), "a hole in Low 200-300 at 220 MHz");
@@ -537,9 +555,9 @@ mod tests {
         assert_eq!(c.dac(mhz(146) + 52_000, 0), at(2, VHF, 5), "Low is stock's level 2");
         assert_eq!(c.dac(mhz(446), 1), at(1, UHF, 4), "UHF entry (446-400)/10 = 4, Mid");
         assert_eq!(c.dac(mhz(190), 2), at(0, VHF, 15), "175-200 MHz: entry 15");
-        assert_eq!(c.dac(mhz(223) + 50_000, 2), at(0, R200, 4), "1.25 m: High (CAL-14)");
+        assert_eq!(c.dac(mhz(223) + 50_000, 2), at(2, R200, 4), "1.25 m: High chosen keys Low (CAL-14, TX-9)");
         assert_eq!(c.dac(mhz(28) + 40_000, 2), Some(hf_curve(0, 2)), "10 m: HF entry (28-15)/5 = 2");
-        assert_eq!(c.dac(mhz(290), 2), at(0, R200, 15), "280-300: the row's last entry, not the next row");
+        assert_eq!(c.dac(mhz(290), 2), at(2, R200, 15), "280-300: the (Low) row's last entry, not the next row");
         assert_eq!(c.dac(mhz(559), 2), at(0, UHF, 15), "the UHF row's last entry");
         for f in [mhz(70), mhz(129) + 99_999, mhz(17) + 99_999, mhz(1), mhz(560), mhz(600)] {
             assert_eq!(c.dac(f, 2), None, "{f}: outside every row (stock: High VHF entry 0, or past the row)");

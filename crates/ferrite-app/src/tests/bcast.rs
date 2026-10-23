@@ -139,7 +139,7 @@ fn rds_text_rule() {
     assert_eq!(rds_text(b"CBC R1  ", &full).len(), 64, "all 64 characters");
 }
 
-/// BCR-25: on home the knob tunes a broadcast VFO by the FM step (0 3 1 2) and ◀▶ seek; the station sought is
+/// BCR-25: on home the knob tunes a broadcast VFO by the FM step (0 3 1 1) and ◀▶ seek; the station sought is
 /// taken into the slot as it lands.
 #[test]
 fn knob_steps_and_seek() {
@@ -166,8 +166,8 @@ fn knob_steps_and_seek() {
     assert!(!t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_650))), "not tuned again");
 }
 
-/// BCR-25, BCR-27: the FM screen (MENU 0 3 1) shows and tunes the broadcast slot; a preset recalls into it;
-/// MENU 0 3 1 2 still reaches the step.
+/// BCR-25, BCR-27: the FM screen (MENU 0 3 1) shows and tunes the broadcast slot; MENU 0 3 1 1 still reaches
+/// the step (decision 258: the presets row went).
 #[test]
 fn fm_screen_shares_the_slot() {
     let mut t = ready();
@@ -182,8 +182,8 @@ fn fm_screen_shares_the_slot() {
     assert!(t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_060))));
     t.hold(Key::Exit);
     assert_eq!(t.app.radio.mode, Mode::Fm, "home: the slot still plays");
-    menu0(&mut t, &[3, 1, 2]);
-    assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu && f.row == 1), "{:?}", t.app.screen());
+    menu0(&mut t, &[3, 1, 1]);
+    assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu && f.row == 0), "{:?}", t.app.screen());
     t.knob(1);
     assert_eq!(t.app.set.fm_step, 2);
 }
@@ -203,9 +203,9 @@ fn quick_settings_rows() {
     let mut t = ready();
     tune(&mut t, 0, FM1005);
     t.tap(Key::Menu);
-    t.tap(Key::Digit(3));
+    t.tap(Key::Digit(2));
     t.knob(1);
-    assert_eq!(t.app.set.fm_agc, 1, "row 3: AGC");
+    assert_eq!(t.app.set.fm_agc, 1, "row 2: AGC");
 }
 
 /// A stored FM AGC or clock value out of range (a bad record) must not overflow the menu's u8 arithmetic: the
@@ -215,7 +215,7 @@ fn out_of_range_agc_and_clock_do_not_overflow() {
     let mut t = ready();
     t.app.set.fm_agc = 200;
     t.app.set.clock = 200;
-    menu0(&mut t, &[3, 1, 3]);
+    menu0(&mut t, &[3, 1, 2]);
     t.knob(1);
     assert!(t.app.set.fm_agc <= crate::settings::AGC_MAX, "{}", t.app.set.fm_agc);
     menu0(&mut t, &[6, 6]);

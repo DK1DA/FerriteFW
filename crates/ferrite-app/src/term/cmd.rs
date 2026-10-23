@@ -1319,7 +1319,7 @@ pub fn writes(line: &[u8]) -> bool {
     // `bk settle` alone only shows the waits (TERM-31).
     let shows = shows || same(c, b"slot") && rest <= 1; // TERM-35: `slot`, `slot A`
     let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
-    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save"));
+    let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && same(w, b"turns"));
     let shows = shows || same(c, b"lcd") && rest == 0; // TERM-40, TERM-41: `lcd` and `bk save` alone show
     !(reads || shows)
 }
@@ -1557,12 +1557,13 @@ fn mem(t: &mut Toks, words: bool) -> Result<Done, Msg> {
 
 #[cfg(feature = "bench")]
 fn bk(t: &mut Toks) -> Result<Done, Msg> {
-    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle; bk save";
+    const USAGE: &str = "bk CHIP REG [VALUE], bk CHIP dump: chip 0 (VHF) or 1 (UHF and HF), hex register and value; bk settle; bk save; bk turns [reset]";
     let chip = match t.word(USAGE)? {
         b"0" => 0,
         b"1" => 1,
         w if same(w, b"settle") => return settle(t),
         w if same(w, b"save") => return bk_save(t),
+        w if same(w, b"turns") => return turns(t),
         _ => return Err(msg!("{}", USAGE)),
     };
     let w = t.word(USAGE)?;
@@ -1703,6 +1704,22 @@ fn lcd(t: &mut Toks) -> Result<Done, Msg> {
         return Err(bad());
     }
     Ok(Done::Debug(Job::new(Kind::Lcd(set))))
+}
+
+#[cfg(feature = "bench")]
+/// WATCH-17.1 (decision 262, a bench measure): `bk turns` shows each slot's whole turns on a chip and their total ms
+/// since boot or the last reset; `bk turns reset` shows them, then zeroes them.
+fn turns(t: &mut Toks) -> Result<Done, Msg> {
+    const USAGE: &str = "bk turns [reset]: each slot's turns on a chip and their ms";
+    let reset = match t.next()? {
+        None => false,
+        Some(Tok::Word(w)) if same(w, b"reset") => true,
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    Ok(Done::Debug(Job::new(Kind::Turns { reset })))
 }
 
 #[cfg(feature = "bench")]
@@ -1928,7 +1945,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 return true;
             }
             3 if i == 0 => {
-                out.push("# Range presets (0 1 6)".as_bytes());
+                out.push("# Range presets (0 1 4)".as_bytes());
                 return true;
             }
             3 if i <= st.data().presets() as u16 => {

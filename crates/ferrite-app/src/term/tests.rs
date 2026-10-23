@@ -701,7 +701,7 @@ fn command_line_set_and_get() {
     r.poll();
     assert!(!r.term.cmd);
     // Third-level numbers and values with spaces.
-    r.cmd("set 0 3 1 2 200 kHz");
+    r.cmd("set 0 3 1 1 200 kHz");
     assert_eq!(r.app.set.fm_step, 2);
     r.cmd("set 0 1 1 off");
     assert_eq!(r.app.watch, 0);
@@ -1260,6 +1260,8 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Save(c) => DebugAns::Save { cycle: c.flatten(), level: Some((300, 500)), asleep: false },
         #[cfg(feature = "bench")]
+        DebugReq::Turns { .. } => DebugAns::Turns(ferrite_core::watch::Turns { n: [27, 27, 0], ms: [4050, 1890, 0] }),
+        #[cfg(feature = "bench")]
         DebugReq::Lcd(l) => DebugAns::Lcd(ferrite_core::msg::LcdBench { idle: true, ..Default::default() }.apply(l)),
         #[cfg(feature = "bench")]
         DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
@@ -1596,6 +1598,28 @@ fn debug_bk_settle() {
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
     }
     assert!(!super::cmd::writes(b"bk settle") && super::cmd::writes(b"bk settle 2") && super::cmd::writes(b"bk 0 30"));
+}
+
+#[cfg(feature = "bench")]
+/// WATCH-17.1: `bk turns` reads each slot's turns and ms, `bk turns reset` reads then zeroes them; extra words are
+/// refused before anything is sent.
+#[test]
+fn debug_bk_turns() {
+    let mut r = Rig::main();
+    r.cmd("bk turns");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Turns { reset: false }]);
+    assert!(r.raw().contains("bk turns: A 27 4050 ms, B 27 1890 ms, C 0 0 ms"), "{}", r.raw());
+    r.send(b"\r");
+    r.cmd("bk turns reset");
+    assert!(!super::cmd::writes(b"bk turns"));
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Turns { reset: true }]);
+    assert!(r.raw().contains("C 0 0 ms (reset)"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["bk turns x", "bk turns reset now"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("bk turns [reset]"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
 }
 
 #[cfg(feature = "bench")]

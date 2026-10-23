@@ -91,7 +91,7 @@ fn fm_screen_readback() {
     assert!(!rds.is_empty(), "{l}");
     drawn(&mut r, &rds);
     r.hold(common::key("OK")).wait(300);
-    assert!(r.sim.readback().contains("row 2 \"Step\""), "{}", r.sim.readback());
+    assert!(r.sim.readback().contains("row 1 \"Step\""), "{}", r.sim.readback());
 }
 
 /// SCOPE-5: the band scope's readback counts the blank bars: across 64 MHz the bars past it stay blank.

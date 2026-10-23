@@ -241,6 +241,9 @@ struct Radio {
     maybe_awake: u8,
     /// PWR-21 (decision 119): the BK4829 settle waits, from the terminal (`bk settle`, TERM-31), RAM only.
     settle: Settle,
+    /// WATCH-17.1 (decision 262): the turns each chip took, timed at the retune (`tune_start`; `bk turns`).
+    #[cfg(feature = "bench")]
+    turns: ferrite_core::watch::TurnClock,
     /// When each chip's REG_37 supplies came on (ms), None while they are off: what is left of the wake settle
     /// counts from here, so a chip woken a tick early by the hop is tuned at once.
     woke: [Option<u32>; 2],
@@ -673,6 +676,8 @@ pub async fn task() {
         tuned: [None; 2],
         maybe_awake: 0,
         settle: Settle::DEFAULT,
+        #[cfg(feature = "bench")]
+        turns: ferrite_core::watch::TurnClock::new(),
         woke: [None; 2],
         ldo_kept: 0,
         keep: 0,

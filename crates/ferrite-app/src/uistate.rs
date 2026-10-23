@@ -463,7 +463,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         }
         Screen::Fm(_) => {
             if let Some(l) = d.ln() {
-                let f = fm::Fm::shown(app, cx.store.data(), cx.live);
+                let f = fm::Fm::shown(app, cx.live);
                 l.push(b"fm freq=");
                 l.push(f.freq.as_bytes());
                 kq(l, "title", f.title.as_bytes());
@@ -471,7 +471,6 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 kn(l, "dbuv", f.dbuv as u32);
                 kn(l, "snr", f.snr as u32);
                 kq(l, "rds", f.rds.as_bytes());
-                kq(l, "preset", f.preset.as_bytes());
                 kq(l, "monitor", f.monitor.as_bytes());
             }
         }

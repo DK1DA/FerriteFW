@@ -132,9 +132,9 @@ pub enum Dest {
     Browse,
     /// C11: zones (MENU 0 2 3).
     Zones,
-    /// C12: range presets (MENU 0 1 6).
+    /// C12: range presets (MENU 0 1 4).
     RangePresets,
-    /// C13: skip list (MENU 0 1 7).
+    /// C13: skip list (MENU 0 1 5).
     SkipList,
     /// C14: waypoints (MENU 0 6 7).
     Waypoints,
@@ -144,8 +144,6 @@ pub enum Dest {
     GpsPosition,
     /// C18: HF recent frequencies.
     HfRecent,
-    /// C19: FM presets (MENU 0 3 1 1).
-    FmPresets,
 
     // ---- D: system and modes ----
     /// D1: quick settings (MENU).
@@ -239,7 +237,6 @@ impl Dest {
             WaypointGo => ("Go to waypoint", "28", "C15"),
             GpsPosition => ("GPS position", "28", "C16"),
             HfRecent => ("HF recent", "20a", "C18"),
-            FmPresets => ("FM presets", "20", "C19"),
             Quick => ("Quick", "11", "D1"),
             Advanced => ("More", "11", "D2"),
             Group(_) => ("Settings group", "11", "D3"),
@@ -296,14 +293,14 @@ impl Dest {
 }
 
 /// Every destination once (groups and lists by one example each), for tests and the screen inventory.
-pub const ALL: [Dest; 67] = {
+pub const ALL: [Dest; 66] = {
     use Dest::*;
     [
         Entry(1), ChannelEdit, Value(Item::Squelch), Tones, Text(super::text::TextFor::Callsign), PositionEntry, SaveChannel, AddRepeater, RangePreset,
         ZoneEdit, LocationCodes, DtmfDialer, DtmfMemories, Compose, QuickMessages, Contacts, Pin, Confirm, ExtendTx, Setup, ShortcutMap,
         Transmit, TxRefused, Emergency, Scan, BandScope, FmBroadcast, HfMode, ToneSearch, Counter, Alert,
         Crossband, Squelch, EventLog, EventDetail, AprsHeard, AprsStation, AprsMessages, AprsMessage,
-        Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, FmPresets, Quick,
+        Browse, Zones, RangePresets, SkipList, Waypoints, WaypointGo, GpsPosition, HfRecent, Quick,
         Advanced, Group(5), Sub(9, 1), Status, About, Calibration, KeyTest, AdvSquelch, SsbConfirm, SsbPatch,
         LinkStatus, WriteProgress, PowerOff, EmptyBattery, Mailbox,
         Group(1), Sub(4, 2), Value(Item::Power),
@@ -313,13 +310,13 @@ pub const ALL: [Dest; 67] = {
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
 pub const MENU0: [(&[u8], Dest); 54] = [
-    (&[1, 8], Dest::Sub(1, 8)),
-    (&[1, 6], Dest::RangePresets),
-    (&[1, 7], Dest::SkipList),
+    (&[1, 6], Dest::Sub(1, 6)),
+    (&[1, 4], Dest::RangePresets),
+    (&[1, 5], Dest::SkipList),
     (&[2, 1], Dest::Browse),
     (&[2, 2], Dest::AddRepeater),
     (&[2, 3], Dest::Zones),
-    (&[3, 1], Dest::FmBroadcast), // BCR-1: the screen itself; its options hold 0 3 1 1-5
+    (&[3, 1], Dest::FmBroadcast), // BCR-1: the screen itself; its options hold 0 3 1 1-4
     (&[3, 2], Dest::Sub(3, 2)),
     (&[3, 2, 6], Dest::BandScope),
     (&[3, 3], Dest::Counter),
@@ -430,8 +427,7 @@ pub fn enter(dest: Dest, app: &mut App) -> Screen {
         Dest::RangePresets => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Presets)),
         Dest::RangePreset => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Edit(0))),
         Dest::SkipList => Screen::ScanLists(super::scanlists::ScanLists::new(super::scanlists::Page::Skips)),
-        Dest::HfRecent => Screen::Recall(super::recall::Recall { fm: false, cur: Default::default() }),
-        Dest::FmPresets => Screen::Recall(super::recall::Recall { fm: true, cur: Default::default() }),
+        Dest::HfRecent => Screen::Recall(super::recall::Recall { cur: Default::default() }),
         // D: system and modes
         // A group opened to a setting (the Status page, a shortcut) is on row 1; plain menu navigation brings
         // back the remembered row afterwards ([`super::groups::restore_row`], MENU-24).

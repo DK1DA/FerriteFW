@@ -54,21 +54,18 @@ impl Entry {
 
 /// SND-3: the beep volume (0 7 5 2), three DAC levels (decision 100).
 const BEEP_VOLS: [&str; 3] = ["Low", "Mid", "High"];
-const G1: [Entry; 8] = [
+const G1: [Entry; 6] = [
     Entry("Watch|A+B|Which slots are heard besides the active one."),
-    Entry("Background job|Off|A zone scan or decoder on a watched slot."),
-    Entry("Scan target|Current zone|What SIDE2 scans."),
     Entry("Resume|5 s|When a stopped scan moves on."),
     Entry("Priority check|Every 2 s|Look at the priority channels."),
     Entry("Range presets|4 presets|Named ranges to scan."),
     Entry("Skip list|Empty|Frequencies * skipped in this scan."),
     Entry("Advanced||Pause time, direction, scan inputs, return to."),
 ];
-const G2: [Entry; 5] = [
+const G2: [Entry; 4] = [
     Entry("Browse||Zones, all channels, nearby, recent."),
     Entry("Add repeater||Frequency, shift, tone, name."),
     Entry("Zones||Name, scan options, priority channels."),
-    Entry("Nearby|Off|Sort channels by distance."),
     Entry("Channel display|Name|Name, number or frequency on home."),
 ];
 const G3: [Entry; 6] = [
@@ -151,14 +148,13 @@ const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS"
 
 /// The third-level lists, by group and item.
 pub(crate) const SUBS: [((u8, u8), &[Entry]); 24] = [
-    ((1, 8), &[
+    ((1, 6), &[
         Entry("Pause time|1 min|# on home pauses watch this long."),
         Entry("Direction|Up|Scan up or down."),
         Entry("Scan inputs|Off|Also a channel's TX frequency."),
         Entry("Return to|Start|Where a stopped scan returns."),
     ]),
     ((3, 1), &[
-        Entry("Presets|Empty|20 stations."),
         Entry("Step|100 kHz|Tuning step."),
         Entry("AGC|Auto|Gain control."),
         Entry("Radio monitor|On|A slot opening interrupts the broadcast."),
@@ -440,17 +436,17 @@ macro_rules! field {
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
 static SETTINGS: [Setting; 88] = [
     field!([1, 1, 0], special),
-    field!([1, 4, 0], special),
-    field!([1, 5, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
-    field!([1, 8, 1], pause_time: u8, Kind::Pick(&crate::settings::PAUSE_TIME_NAMES), Nothing),
-    field!([1, 8, 2], scan_down: bool, Kind::Flip(&["Up", "Down"]), Nothing),
-    field!([1, 8, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
-    field!([1, 8, 4], scan_return_hit: bool, Kind::Flip(&["Start", "Last hit"]), Nothing),
-    field!([2, 5, 0], ch_display: u8, Kind::Pick(&crate::settings::CHANNEL_DISPLAY), Nothing),
-    field!([3, 1, 2], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), Nothing),
-    field!([3, 1, 3], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), Nothing),
-    field!([3, 1, 4], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([3, 1, 5], fm_sleep: u8, Kind::Round(SLEEP_TIMES.len() as u8, sleep_text), Nothing),
+    field!([1, 2, 0], special),
+    field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
+    field!([1, 6, 1], pause_time: u8, Kind::Pick(&crate::settings::PAUSE_TIME_NAMES), Nothing),
+    field!([1, 6, 2], scan_down: bool, Kind::Flip(&["Up", "Down"]), Nothing),
+    field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
+    field!([1, 6, 4], scan_return_hit: bool, Kind::Flip(&["Start", "Last hit"]), Nothing),
+    field!([2, 4, 0], ch_display: u8, Kind::Pick(&crate::settings::CHANNEL_DISPLAY), Nothing),
+    field!([3, 1, 1], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), Nothing),
+    field!([3, 1, 2], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), Nothing),
+    field!([3, 1, 3], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([3, 1, 4], fm_sleep: u8, Kind::Round(SLEEP_TIMES.len() as u8, sleep_text), Nothing),
     field!([3, 2, 1], scope_bars: u8, Kind::Round(SCOPE_BAR_COUNTS.len() as u8, bars_text), Nothing),
     field!([3, 2, 2], scope_step: u8, Kind::Round(crate::slot::STEPS.len() as u8, scope_step_text), Nothing),
     field!([3, 2, 3], special),
@@ -664,7 +660,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &WATCH_TEXT, app.watch);
             app.watch != 1
         }
-        [1, 4] => {
+        [1, 2] => {
             resume_text(b, s.scan_resume);
             s.scan_resume != Settings::DEFAULT.scan_resume
         }
@@ -910,7 +906,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
     match p {
         [1, 1] => app.change(Item::Watch, d),
         // 1-10 s, carrier drop, stop on hit (SCAN-5); the next scan takes it
-        [1, 4] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
+        [1, 2] => s.scan_resume = 1 + cycle(s.scan_resume.clamp(1, 12) - 1, d, 12),
         [8, 8, 1] => {
             s.tone_level = (s.tone_level as i32 + d).clamp(0, 2) as u8;
             app.out.push(RadioCmd::ToneLevel(app.set.tone_level));
@@ -1036,7 +1032,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [1, 1] => app.change(Item::Watch, 1 - app.watch as i32),
         [7, 7] | [7, 7, 1] => app.change(Item::BatterySave, 1 - app.bsave as i32),
         [7, 7, 2] => app.set_lpm_mode(d.lpm),
-        [1, 4] => s.scan_resume = d.scan_resume,
+        [1, 2] => s.scan_resume = d.scan_resume,
         [8, 8, 1] => {
             s.tone_level = d.tone_level;
             app.out.push(RadioCmd::ToneLevel(d.tone_level));
