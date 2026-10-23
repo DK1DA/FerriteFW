@@ -61,7 +61,7 @@ S = dict(
     vox="0 8 2 1", vox_level="0 8 2 2", vox_tail="0 8 2 3", dtmf_speed="0 8 5 3",
     dtmf_delay="0 8 5 5", aprs_mode="0 5 3", beacon_mode="0 5 6 1", after_voice="0 5 6 2",
     beacon_power="0 5 6 3", aprs_freq="0 5 4", tx_delay="0 5 9 4", pos_source="0 5 5 4", fixed="0 5 5 5",
-    kiss="0 5 8 1", watch="0 1 1", gps_rxtx="0 6 8", bluetooth="0 9 2 1", end_tone=B.END_TONE, gps="0 6 1",
+    kiss="0 5 8", watch="0 1 1", gps_rxtx="0 6 8", bluetooth="0 9 2 1", end_tone=B.END_TONE, gps="0 6 1",
     bsave="0 7 7",
 )
 
@@ -1415,7 +1415,7 @@ class Modes:
                  + ("keyed" if keyed else "no key-up"))
 
     def t_kiss(self):
-        """KISS-2 (part), KISS-7 (part), KISS-9: KISS on Bluetooth (0 5 8 1; the cable stays the link): slot C is the
+        """KISS-2 (part), KISS-7 (part), KISS-9: KISS on Bluetooth (0 5 8; the cable stays the link): slot C is the
         APRS slot on the APRS frequency (145.495) without APRS mode; a frame from the PC goes out there with the TX
         delay its KISS command set; a second 6 s later goes out too (exempt from APRS-9's 30 s); the frames decode
         byte for byte. No PIN asked (none is sent). Each frame is its own capture, watched over the status (a data

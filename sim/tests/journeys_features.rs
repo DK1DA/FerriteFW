@@ -221,7 +221,7 @@ fn heard_list_fields() {
 #[test]
 fn kiss_off_by_default() {
     let mut r = Radio::new();
-    r.run("menu 0 5 8 1; expect text \"Off\"");
+    r.run("menu 0 5 8; expect text \"Off\"");
     assert_eq!(r.sim.app().settings().kiss_port, 0);
 }
 

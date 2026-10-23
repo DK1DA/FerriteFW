@@ -312,7 +312,7 @@ pub const ALL: [Dest; 67] = {
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 56] = [
+pub const MENU0: [(&[u8], Dest); 55] = [
     (&[1, 8], Dest::Sub(1, 8)),
     (&[1, 6], Dest::RangePresets),
     (&[1, 7], Dest::SkipList),
@@ -338,7 +338,6 @@ pub const MENU0: [(&[u8], Dest); 56] = [
     (&[5, 6], Dest::Sub(5, 6)),
     (&[5, 9], Dest::Sub(5, 9)),
     (&[5, 7], Dest::Sub(5, 7)),
-    (&[5, 8], Dest::Sub(5, 8)),
     (&[6, 2], Dest::GpsPosition),
     (&[6, 7], Dest::Waypoints),
     (&[6, 9], Dest::PositionEntry),

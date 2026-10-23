@@ -3643,7 +3643,7 @@ def main():
                     "row in docs/test-plan/*.md (tools/record_results.py; on-air runs only)")
     ap.add_argument("--docs", default=os.path.join(ROOT, "docs"), help="the docs checkout for --record")
     ap.add_argument("--kiss-ble", metavar="ble:NAME", help="with --suite modes-on-air: KISS frames over Bluetooth "
-                    "(0 5 8 1 Bluetooth while the test runs; the cable stays the link)")
+                    "(0 5 8 Bluetooth while the test runs; the cable stays the link)")
     ap.add_argument("--slow", action="store_true", help="with --suite modes-on-air: also GPS-33's 4-minute test")
     ap.add_argument("--no-audio", action="store_true", help="with --suite modes-on-air: no tone from the Mac's speaker")
     ap.add_argument("--rule-results", nargs="+", metavar="SESSION", help="(re)write bench/results.json for saved "

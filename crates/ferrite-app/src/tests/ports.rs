@@ -154,7 +154,7 @@ fn the_cable_wins() {
     assert_eq!(r.p.owner(), Port::Bt, "free again: Bluetooth takes it");
 }
 
-/// KISS-6: with 0 5 8 1 on Bluetooth, Bluetooth's bytes are KISS while the cable keeps its terminal; on Cable,
+/// KISS-6: with 0 5 8 on Bluetooth, Bluetooth's bytes are KISS while the cable keeps its terminal; on Cable,
 /// the cable's are.
 #[test]
 fn kiss_beside_the_terminal() {

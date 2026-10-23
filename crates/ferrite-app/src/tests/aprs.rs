@@ -147,7 +147,7 @@ fn kiss_on_makes_c_the_aprs_slot() {
     a.cmds();
     assert!(!a.app.aprs_slot(APRS_SLOT));
     a.app.set.bt = true;
-    a.app.set.kiss_port = 2; // 0 5 8 1 on Bluetooth
+    a.app.set.kiss_port = 2; // 0 5 8 on Bluetooth
     a.tick();
     assert!(a.app.aprs_slot(APRS_SLOT) && !a.app.aprs_on(), "C is the APRS slot, APRS mode still off");
     let c = a.cmds();

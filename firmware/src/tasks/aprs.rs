@@ -100,7 +100,7 @@ impl Aprs {
         let extra = &store.extra;
         let me = app.aprs_call(); // APRS-30: callsign and SSID
         extra.set_callsign(me.as_bytes());
-        // KISS-6: the cable (0 9 2 3 on KISS, or 0 5 8 1 on Cable) or Bluetooth (0 5 8 1, with Bluetooth on).
+        // KISS-6: the cable (0 9 2 3 on KISS, or 0 5 8 on Cable) or Bluetooth (0 5 8, with Bluetooth on).
         let kiss_cable = app.settings().kiss_on_cable();
         let kiss_on = app.kiss_on(); // PWR-24: none in Low Power Mode. KISS-9: C is the APRS slot meanwhile (`App::aprs_c`)
         let on = app.aprs_on();

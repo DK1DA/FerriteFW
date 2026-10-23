@@ -97,8 +97,8 @@ const G5: [Entry; 9] = [
     Entry("My station|SSID 9|SSID, symbol, comment, position."),
     Entry("Beacon|Off|When to beacon: manual, timed, smart."),
     Entry("Digipeat|Off|Relay others' packets."),
-    // KISS TNC and the mailbox (decision 77).
-    Entry("Packet||KISS TNC and the mailbox."),
+    // The KISS TNC (the mailbox beside it waits until it is built, decision 245).
+    Entry("KISS TNC|Off|Raw KISS on the cable or Bluetooth."),
     Entry("Advanced||Path, TX delay and level, FX.25."),
 ];
 const G6: [Entry; 9] = [
@@ -150,7 +150,7 @@ pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 26] = [
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 25] = [
     ((1, 8), &[
         Entry("Pause time|1 min|# on home pauses watch this long."),
         Entry("Direction|Up|Scan up or down."),
@@ -208,13 +208,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 26] = [
         Entry("Digipeat|Off|Relay others' packets."),
         Entry("Aliases|WIDE1-1|WIDE1-1, and your call if chosen."),
         Entry("Wait|0 s|Delay before relaying, 0-5 s."),
-    ]),
-    ((5, 8), &[
-        Entry("KISS TNC|Off|Raw KISS on the cable or Bluetooth."),
-        Entry("Mailbox|Off|Answer packet connects to your SSID."),
-        Entry("Mailbox SSID|1|The SSID callers connect to."),
-        Entry("Mailbox frequency|None|Where the mailbox listens."),
-        Entry("Bulletins|On|Callers may post bulletins."),
     ]),
     ((5, 9), &[
         Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."),
@@ -481,7 +474,7 @@ static SETTINGS: [Setting; 87] = [
     field!([5, 7, 1], special),
     field!([5, 7, 2], special),
     field!([5, 7, 3], special),
-    field!([5, 8, 1], kiss_port: u8, Kind::Pick(&crate::settings::KISS_PORTS), Nothing),
+    field!([5, 8, 0], kiss_port: u8, Kind::Pick(&crate::settings::KISS_PORTS), Nothing),
     field!([5, 9, 1], special),
     field!([5, 9, 2], special),
     field!([5, 9, 4], special), // APRS-48: TX delay
