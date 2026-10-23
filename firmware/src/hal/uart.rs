@@ -111,6 +111,13 @@ pub fn set_rate(id: usize, baud: u32) {
     RATE[id].store(baud, Relaxed);
 }
 
+/// Two stop bits (true) or one on a port that is on (USART_CTRL2 STOPBN, bits 12-13): the reader's link tests.
+pub fn set_stop2(id: usize, two: bool) {
+    const USART_CTRL2: u32 = 0x10;
+    let a = HW[id].base + USART_CTRL2;
+    wr(a, (rd(a) & !(3 << 12)) | if two { 2 << 12 } else { 0 });
+}
+
 /// Drops what has come and not been taken.
 pub fn clear_rx(id: usize) {
     RX[id].clear();

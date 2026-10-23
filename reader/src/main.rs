@@ -141,14 +141,18 @@ struct Dump;
 /// data register full), the CH340 on a Mac loses bursts of 3-14 bytes about once every 30 frames (Oct 22, black, at
 /// 460800 and 500000 alike: the frame comes up short and runs into the next one). hwtest, at 8 MHz, left a gap
 /// between bytes and never did.
-const PACE_BYTES: usize = 64;
-const PACE_US: u32 = 100;
+static PACE_BYTES: AtomicU32 = AtomicU32::new(64);
+static PACE_US: AtomicU32 = AtomicU32::new(100);
+static STOP2: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 impl proto::Link for Dump {
     fn write(&mut self, b: &[u8]) {
-        for chunk in b.chunks(PACE_BYTES) {
+        let (n, us) = (PACE_BYTES.load(Relaxed).max(1) as usize, PACE_US.load(Relaxed));
+        for chunk in b.chunks(n) {
             uart::write(UART_CPS, chunk);
-            time::delay_us(PACE_US);
+            if us > 0 {
+                time::delay_us(us);
+            }
         }
     }
     fn getc(&mut self, ms: u32) -> Option<u8> {
@@ -271,6 +275,12 @@ impl Reader {
             Command::FlashCrc => self.crc_start(),
             Command::Fdump { addr, len, baud } => self.fdump(addr, len, baud, false),
             Command::FdumpZ { addr, len, baud } => self.fdump(addr, len, baud, true),
+            Command::Tune { bytes, us, stop2 } => {
+                PACE_BYTES.store(bytes, Relaxed);
+                PACE_US.store(us, Relaxed);
+                STOP2.store(stop2, Relaxed);
+                Cable.put(b"tune set\r\n");
+            }
             Command::Reader => {
                 self.backup_screen();
                 Cable.put(b"reader screen on\r\n");
@@ -366,6 +376,7 @@ impl Reader {
         proto::fdump_ready(&mut Cable, addr, len, baud, clock::mhz());
         uart::flush(UART_CPS);
         uart::set_rate(UART_CPS, baud);
+        uart::set_stop2(UART_CPS, STOP2.load(Relaxed));
         uart::clear_rx(UART_CPS);
         let Reader { lcd, flash, power, buf, zchunk, zbuf, .. } = self;
         let mut progress = |done: u32, _blocks: u32| {
@@ -381,6 +392,7 @@ impl Reader {
             proto::fdump_run(&mut Dump, buf, addr, len, |a, d| flash.read(a, d), &mut progress)
         };
         uart::flush(UART_CPS);
+        uart::set_stop2(UART_CPS, false);
         uart::set_rate(UART_CPS, proto::CONSOLE_BAUD);
         // Console switches back 50-100 ms after the last ACK: the result line waits for it (hwtest's came at once,
         // and Console then waited out its 3 s for a line it had missed).

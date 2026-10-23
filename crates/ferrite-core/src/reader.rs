@@ -448,6 +448,8 @@ pub enum Command {
     /// `fdumpz`: as `fdump`, coded (BACKUP-9.6).
     FdumpZ { addr: u32, len: u32, baud: u32 },
     Reader,
+    /// `tune <pace bytes> <pace us> <stop bits>`: the dump's pacing and stop bits, for link tests.
+    Tune { bytes: u32, us: u32, stop2: bool },
     Reboot,
     Off,
     Unknown,
@@ -464,6 +466,10 @@ pub fn parse(line: &[u8]) -> Command {
         b"flash" => Command::Flash,
         b"flashcrc" => Command::FlashCrc,
         b"reader" => Command::Reader,
+        b"tune" => match (a[0].and_then(uint), a[1].and_then(uint), a[2].and_then(uint)) {
+            (Some(bytes), Some(us), Some(stop)) => Command::Tune { bytes, us, stop2: stop == 2 },
+            _ => Command::Unknown,
+        },
         b"reboot" => Command::Reboot,
         b"off" => Command::Off,
         b"fdump" | b"fdumpz" => {
