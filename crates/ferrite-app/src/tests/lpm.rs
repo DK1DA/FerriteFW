@@ -103,7 +103,7 @@ fn side_keys_leave_only() {
     assert_eq!(t.app.screen, Screen::Home, "neither key did its own thing (no counter, no scan)");
 }
 
-/// PWR-24.3: Auto enters below its level (once per crossing), leaves by itself at 65 %; left by the keys it
+/// PWR-24.3: Auto enters below its level (once per crossing), leaves by itself at 80 %; left by the keys it
 /// waits for the battery 10 points above its level; no reading yet does nothing.
 #[test]
 fn auto_follows_the_battery() {
@@ -135,12 +135,12 @@ fn auto_follows_the_battery() {
     t.app.battery(19);
     t.wait(200);
     assert!(t.app.low_power(), "back above 30 and down again: a new crossing");
-    t.app.battery(64);
+    t.app.battery(79);
     t.wait(200);
-    assert!(t.app.low_power(), "64 %: still in");
-    t.app.battery(65);
+    assert!(t.app.low_power(), "79 %: still in");
+    t.app.battery(80);
     t.wait(200);
-    assert!(!t.app.low_power(), "the charger: out at 65 %");
+    assert!(!t.app.low_power(), "the charger: out at 80 %");
     // 0 7 7 3's level.
     t.app.set.lpm_below = 40;
     t.app.battery(39);
@@ -163,7 +163,7 @@ fn on_by_hand_never_leaves_by_itself() {
     assert!(t.app.low_power());
     t.app.battery(100);
     t.wait(200);
-    assert!(t.app.low_power(), "On by hand: no exit at 65 % or 100 %");
+    assert!(t.app.low_power(), "On by hand: no exit at 80 % or 100 %");
     assert_eq!(crate::settings::Settings::DEFAULT.lpm, 2, "Auto by default");
     assert_eq!(crate::settings::Settings::DEFAULT.lpm_below, 20, "at 20 %");
 }

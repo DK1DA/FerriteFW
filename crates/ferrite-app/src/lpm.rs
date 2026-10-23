@@ -29,7 +29,7 @@ pub(crate) const LPM_COMBO: u8 = 4;
 /// PWR-24.4: how long SIDE1 + SIDE2 are held to leave.
 pub const LPM_COMBO_MS: u32 = 1000;
 /// PWR-24.3: entered by Auto, it leaves by itself at this battery % (on the charger); On by hand never does.
-pub const AUTO_OFF_PCT: u8 = 65;
+pub const AUTO_OFF_PCT: u8 = 80;
 /// PWR-24.3: after leaving by the keys, Auto waits for the battery this far above its level.
 pub const AUTO_REARM: u8 = 10;
 /// PWR-24.5: the backlight's most in the mode, thousandths (the level table's nearest at or below 30 %).
