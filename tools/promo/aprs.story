@@ -1,6 +1,7 @@
 # Ferrite APRS, recorded from the simulator (the firmware's own screens). Format: see preview.story.
-# The decoder numbers are docs/showcase/aprs-decoder.md's WA8LMF rows (Oct 22, 2026: the radio's receive path at 24 kHz, decision 240): copy them from there when they change,
-# never estimate them.
+# The decoder numbers are docs/showcase/aprs-decoder.md's (Oct 22, 2026: the radio's receive path at 24 kHz, decision 240; Dire Wolf
+# on its default settings, named as such, since tuned A+ with bit fixing beats us off the air): copy them from there when they
+# change, never estimate them.
 
 kind: intro
 title: APRS on Ferrite
@@ -134,8 +135,13 @@ script:
   wait 1500ms
 ---
 kind: intro
+title: 411 packets, off the air
+left: 45 minutes of real APRS, through the radio's own receive path: 411 packets. Dire Wolf 1.8.1 on its default settings: 353. A second recording: 394 against 367. In about 1.7 KB of RAM.
+seconds: 7
+---
+kind: intro
 title: 1,011 and 1,007 packets
-left: The WA8LMF TNC Test CD, tracks 1 and 2, through the radio's own receive path, in about 1.7 KB of RAM. The KPC-3+ hardware TNC's published counts: 989 and 925.
+left: The WA8LMF TNC Test CD, tracks 1 and 2. Dire Wolf 1.8.1, default: 1,005 and 982. The best ESP32 decoder: 1,006 and 997. The KPC-3+ hardware TNC: 989 and 925.
 seconds: 7
 ---
 kind: outro

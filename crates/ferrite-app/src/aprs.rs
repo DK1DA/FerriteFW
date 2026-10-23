@@ -25,7 +25,7 @@ pub const APRS_SLOT: u8 = 2;
 
 /// APRS-4: the heard list holds this many stations, in the APRS task's RAM only (never flash: it changes every
 /// few minutes on a busy frequency). The oldest heard goes when a new one comes; power off empties it.
-pub const HEARD_MAX: u16 = 20;
+pub const HEARD_MAX: u16 = 50; // 20 until decision 246
 
 /// The APRS settings kept with the APRS store (0 5 6 1, 0 5 6 2, 0 5 6 3, 0 5 9 1, 0 5 4, 0 5 9 6, 0 5 7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -6,8 +6,8 @@
 It logs in read-only (passcode -1), turns each APRS-IS line (TNC2 text) back into an AX.25 UI frame (the original
 source, destination and RF path; APRS-IS's own path additions, q-constructs and TCPIP, dropped) and writes it as a
 KISS data frame to PORT, one every `--every` seconds at most (the newest waiting one; the rest are counted, not
-queued). Lines that can't be AX.25 (a callsign over 6 characters or not letters and digits, an SSID over 15, an
-empty body) are skipped.
+queued). Lines that can't be AX.25 (a letter SSID from a D-STAR gateway or a hotspot, a callsign over 6 characters)
+go out as third-party packets from --call, as an iGate sends them (--no-third-party skips them).
 
 For the bench only: the sending radio must be on its tx-bench build with Dry TX on (0 8 8 5) and its APRS
 frequency at 145.495 (0 5 4), its cable port on KISS (0 9 2 3), per the rules in CLAUDE.md. A frame from APRS-IS
@@ -59,6 +59,17 @@ def frame(line):
     return out + b"\x03\xf0" + body if 0 < len(body) <= 256 else None
 
 
+def third_party(line, call):
+    """A line that can't be AX.25 (a letter SSID: D-STAR ports, hotspots) as an iGate sends it: a frame from `call`
+    with the original header inside, `}SRC>DEST,TCPIP,CALL*:info` (APRS 1.0.1 chapter 17)."""
+    head, sep, info = line.partition(":")
+    if not sep or ">" not in head:
+        return None
+    src, _, rest = head.partition(">")
+    dest = rest.split(",")[0]
+    return frame(f"{call}>APZFRL:}}{src}>{dest},TCPIP,{call}*:{info}")
+
+
 def kiss(f):
     esc = f.replace(bytes([FESC]), bytes([FESC, TFESC])).replace(bytes([FEND]), bytes([FESC, TFEND]))
     return bytes([FEND, 0x00]) + esc + bytes([FEND])
@@ -72,6 +83,7 @@ def main():
     ap.add_argument("--server", default="rotate.aprs2.net")
     ap.add_argument("--every", type=float, default=10.0, help="seconds between frames, at least")
     ap.add_argument("--minutes", type=float, default=20.0)
+    ap.add_argument("--no-third-party", action="store_true", help="skip lines that can't be AX.25 instead of wrapping them")
     a = ap.parse_args()
     if a.every < 5:
         sys.exit("--every under 5 s: the radio's duty limit and the rules want gaps")
@@ -98,6 +110,8 @@ def main():
                     print(line)
                 continue
             f = frame(line)
+            if f is None and not a.no_third_party:
+                f = third_party(line, a.call.upper())
             if f is None:
                 skipped += 1
                 continue

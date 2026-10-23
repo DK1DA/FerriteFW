@@ -196,7 +196,7 @@ pub struct Tick {
     pub changed: bool,
 }
 
-/// The APRS task's state: about 3.5 KB on the radio (4.3 KB on a 64-bit PC, where text lengths are 8 bytes), most
+/// The APRS task's state: about 6.8 KB on the radio (8.4 KB on a 64-bit PC, where text lengths are 8 bytes), most
 /// of it the heard list ([`HEARD_MAX`] stations of about 110 bytes, each with its 40-character comment for
 /// APRS-23) and the digipeater's waiting frame.
 pub struct AprsLive {
@@ -998,14 +998,16 @@ mod tests {
     #[test]
     fn heard_list_newest_first_and_capped() {
         let a = AprsLive::new();
-        for i in 0..25u32 {
-            let call = std::format!("VE3A{}", (b'A' + i as u8) as char);
+        let n = HEARD_MAX as u32 + 5;
+        for i in 0..n {
+            let call = std::format!("VE3{}{}", (b'A' + (i / 26) as u8) as char, (b'A' + (i % 26) as u8) as char);
             let (f, n) = frame(call.as_bytes(), b"APRS", &[b"WIDE1-1*"], b"!4525.51N/07554.20W>Mobile");
             assert!(a.receive(&f[..n], i, b"VE3XYZ", &AprsCfg::DEFAULT).changed);
         }
         assert_eq!(a.stations(), HEARD_MAX);
         let s = a.station(0).unwrap();
-        assert_eq!(s.call.as_bytes(), b"VE3AY");
+        let last = n - 1;
+        assert_eq!(s.call.as_bytes(), std::format!("VE3{}{}", (b'A' + (last / 26) as u8) as char, (b'A' + (last % 26) as u8) as char).as_bytes());
         assert_eq!(s.sym, Sym::Car);
         assert!(s.pos.is_some_and(|p| (p.lat - 454_251_666).abs() < 200));
         assert_eq!(s.via.as_bytes(), b"WIDE1-1*");
@@ -1545,6 +1547,6 @@ mod tests {
     fn size() {
         let n = core::mem::size_of::<AprsLive>();
         std::println!("AprsLive: {n} B, heard entry {} B, out {} B", core::mem::size_of::<Option<Heard>>(), core::mem::size_of::<Option<Out>>());
-        assert!(n <= 4_400, "{n}");
+        assert!(n <= 8_500, "{n}"); // 50 stations (decision 246)
     }
 }
