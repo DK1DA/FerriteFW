@@ -223,7 +223,7 @@ def turns(t, reset=False):
     return got
 
 
-@test("WATCH-17", "WATCH-17.1", needs=("bench",), where="radio", pages=("Home",))
+@test("WATCH-17", "WATCH-17.1", needs=("bench",), where="radio", smoke=True, pages=("Home",))
 def turns_on_a_shared_chip(t):
     """A and B both on chip 0 (146.55 and 147.00 MHz), watch A+B, Battery Save off, nothing heard: the Radio task's
     own turn counts (`bk turns`, WATCH-17.1), read 6 s apart, give mean turns of 150 ms on A (active) and 70 ms on
