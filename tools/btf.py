@@ -112,9 +112,12 @@ def describe(img):
 
 def selftest(stock_dir=None):
     fails = 0
-    # The V0.27 key and its second expanded row, read off the stock file.
-    k = bytes.fromhex("7e807b1761a4ebc6fc3a8dd33752f305")
-    if expand(k)[16:32] != bytes.fromhex("fc01f62ec249d78d7e1dc6e99b29f982"):
+    # An arbitrary key (each stock file carries its own in its key block at 0x400): row r of the expansion is
+    # the key with bytes 0-7 rotated left r bits and bytes 8-15 rotated right r bits.
+    k = bytes.fromhex("0123456789abcdeffedcba9876543210")
+    rol = lambda b, r: ((b << r) | (b >> (8 - r))) & 0xFF
+    row1 = bytes(rol(b, 1) for b in k[:8]) + bytes(rol(b, 7) for b in k[8:])
+    if expand(k)[16:32] != row1:
         print("FAIL key expansion"); fails += 1
     img = bytearray(os.urandom(5000))
     img[0:8] = struct.pack("<II", 0x20018000, APP_BASE + 0x201)
