@@ -444,7 +444,7 @@ impl Path {
 
     /// Key-up on `tx` (a TX select; RX ones are taken as their TX twin), TX-23 and TX-24: PA 0, SI4732 away, mute,
     /// RX path clear, the TX path, the chip to TX with its read-back, the PA ramp. The relay never moves at key-up
-    /// (TX-37, as nicFW): a TX select that needs the other relay state is refused (TX audit F11; HF mode with the
+    /// (TX-37): a TX select that needs the other relay state is refused (TX audit F11; HF mode with the
     /// SI4732 on the antenna reached it). Both band receive selects held (SAFE-24): both cleared here, before the TX
     /// select; the hold stays asked for and the unkey sets both again.
     pub fn key_up(&mut self, tx: Sel, _now: u32, out: &mut Steps) -> Result<(), Blocked> {

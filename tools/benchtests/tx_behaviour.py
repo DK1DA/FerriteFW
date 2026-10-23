@@ -1159,7 +1159,7 @@ def refusal_640(r):
 
 @test("txb_refusal_band_edge", {"TX-6": "part"}, 2, 0.0, 12)
 def refusal_band_edge(r):
-    """The 144 MHz edge, checked on the final TX frequency, the carrier only (decision 97, as stock and nicFW; no
+    """The 144 MHz edge, checked on the final TX frequency, the carrier only (decision 97, as stock; no
     half-bandwidth margin): 143.995 simplex, and 144.600 with a -0.605 MHz shift (TX 143.995): refused, no carrier.
     (144.002 is inside the band and keys, as stock.)"""
     r.home()

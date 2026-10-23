@@ -118,7 +118,7 @@ pub enum Refusal {
     /// The crossband repeater is running (XB-14).
     Crossband,
     /// The TX frequency needs the band relay in the other state from RX (a split or shift across 64 MHz): the
-    /// relay is never switched at key-up (TX-37, as nicFW refuses it).
+    /// relay is never switched at key-up (TX-37).
     RelayMismatch,
     /// The slot is in AM: the BK4829 has no AM modulator (TX-20).
     AmRxOnly,
