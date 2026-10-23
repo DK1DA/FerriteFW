@@ -312,9 +312,9 @@ impl Default for Gauge {
 mod tests {
     use super::*;
 
-    /// The black radio's tuning block and TX windows (0xF210-0xF24F, `backups/blackradio/cal.bin`): 136-174,
-    /// 400-520, 200-260 and 330-400 MHz, all enabled; no crystal trim (byte 11 0xFF).
-    const BLACK_F210: [u8; 0x40] = [
+    /// The factory-default calibration's tuning block and TX windows (0xF210-0xF24F; identical on both test
+    /// radios): 136-174, 400-520, 200-260 and 330-400 MHz, all enabled; no crystal trim (byte 11 0xFF).
+    const FACTORY_F210: [u8; 0x40] = [
         0x37, 0x46, 0x3e, 0x1f, 0x1f, 0x28, 0x2a, 0x2a, 0x2a, 0x01, 0x08, 0xff, 0x00, 0x00, 0xff, 0xff, //
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, //
         0x01, 0x01, 0x36, 0x01, 0x74, 0x01, 0x04, 0x00, 0x05, 0x20, 0x01, 0x02, 0x00, 0x02, 0x60, 0xff, //
@@ -332,7 +332,7 @@ mod tests {
         (140 - l * 40 + i) as u8
     }
 
-    /// A sector with the curves above, the gauge given, and the black radio's tuning block and windows.
+    /// A sector with the curves above, the gauge given, and the factory-default tuning block and windows.
     fn sector(gauge: [u8; 7]) -> [u8; READ_LEN] {
         let mut b = [0x55u8; READ_LEN];
         for l in 0..3 {
@@ -347,7 +347,7 @@ mod tests {
         }
         b[BLANK_AT] = 0x00;
         b[GAUGE_AT..GAUGE_AT + 7].copy_from_slice(&gauge);
-        b[0x210..0x250].copy_from_slice(&BLACK_F210);
+        b[0x210..0x250].copy_from_slice(&FACTORY_F210);
         b
     }
 
@@ -368,7 +368,7 @@ mod tests {
     }
 
     /// TX-14, CAL-6, TX-15, CAL-7 (TX audit F8): the curves must rise Low < Mid < High at every reached entry (the
-    /// black radio's do, by 30 or more); the MCU check and the CRC since install gate the result.
+    /// factory-default curves do, by 30 or more); the MCU check and the CRC since install gate the result.
     #[test]
     fn level_order_mcu_and_crc() {
         let b = sector(GAUGE_DEFAULT);
@@ -391,7 +391,7 @@ mod tests {
     }
 
     /// CAL-11, TX-1.2, TX-14, TX-41: the windows as stock checks them (low <= f < high, whole MHz from BCD), the
-    /// black radio's four; 18-64 MHz as stock's HF work mode replaces them, whatever the sector's windows say.
+    /// factory default's four; 18-64 MHz as stock's HF work mode replaces them, whatever the sector's windows say.
     #[test]
     fn tx_windows_as_stock() {
         let c = TxCal::read(&sector(GAUGE_DEFAULT)).unwrap();
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn factory_trim_applies() {
         let b = sector(GAUGE_DEFAULT);
-        assert_eq!(factory_trim(&b), None, "the black radio: no marker");
+        assert_eq!(factory_trim(&b), None, "factory default: no marker");
         assert_eq!(TxCal::read(&b).unwrap().tx_word(mhz(446)), mhz(446));
         let mut b = sector(GAUGE_DEFAULT);
         b[TRIM_AT..TRIM_AT + 3].copy_from_slice(&[0xA0, 0x2C, 0xFF]); // k = -212, about -4.9 ppm
@@ -498,7 +498,7 @@ mod tests {
     }
 
     /// TONE-1.2, TONE-1.3, TONE-16, TONE-5, TX-14 (TX audit F7): the sub-tone's deviation from the calibration, the
-    /// black radio's 0x46 CTCSS and 0x3E DCS at Normal, stock's step for High, the same step down for Low, 7 bits at
+    /// factory default's 0x46 CTCSS and 0x3E DCS at Normal, stock's step for High, the same step down for Low, 7 bits at
     /// most; the tail takes the CTCSS byte. A byte over 0x7F locks transmit.
     #[test]
     fn subtone_deviation_from_the_calibration() {

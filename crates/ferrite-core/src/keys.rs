@@ -80,7 +80,7 @@ pub const MAP: [Option<Key>; CODES] = {
     m[18] = Some(Key::Digit(7));
     m[13] = Some(Key::Star);
     // PF1 and PF2, stock's codes 0 and 1 (`analysis/keypad.md`): SIDE1 and SIDE2 (decision 77; stock's PF1 is
-    // PTT C, nicFW's S1-S3 are PE2, PE5 and PA12).
+    // PTT C).
     m[0] = Some(Key::Side(1));
     m[1] = Some(Key::Side(2));
     m[CODE_PTT_A as usize] = Some(Key::Ptt(PTT_A));

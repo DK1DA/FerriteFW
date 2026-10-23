@@ -65,7 +65,7 @@ pub enum Step {
 /// stock), RGB.
 pub const MADCTL_RT950: u8 = 0xC0;
 
-/// The start-up sequence (datasheet order, stock's values): hardware reset, software reset, sleep out, 16-bit
+/// The start-up sequence (datasheet order, stock's register settings): hardware reset, software reset, sleep out, 16-bit
 /// colour, orientation, inversion on (IPS panel), normal mode. Display on is separate ([`St7789::on`]), so the
 /// caller can clear the screen first.
 pub const STARTUP: &[Step] = &[

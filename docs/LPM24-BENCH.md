@@ -4,7 +4,7 @@ On black, from `ferrite/` on branch `lpm-24mhz`. Rule: manual PWR-24.9, decision
 
 ## Setup
 - Build: `tools/mkbtf.sh tx-bench` (Dry TX on at power-on). For the 120 MHz comparison, main's tx-bench image.
-- Flash black (cable): `../.venv/bin/python tools/flash.py PORT target/ferrite-txbench.btf --backup ../backups/blackradio/flash.bin`.
+- Flash black (cable): `../.venv/bin/python tools/flash.py PORT target/ferrite-txbench.btf --backup BACKUP.bin`.
 - Power from the DPS-150P at 7.60 V: `../.venv/bin/python tools/dps150.py PORT set 7.6 2`, `on`.
 - Cable log on: `:set` 0 9 9 7 on (System > Advanced > Cable log), or `tools/cablelog.py SECONDS FILE` alongside.
 - The speed now: `mem32 40021004` (CRM_CFG): bits 18-21 = 1 (x3, 24 MHz) or 13 (x15, 120 MHz); bits 8-13 = 0 at 24 MHz (APBs /1), 0x24 at 120.
@@ -60,7 +60,7 @@ Same setup (black, `tx-bench`, the cable, the DPS at 7.60 V), Low Power Mode Off
 1. Each row above: the readback (or System's row for the rest states), and the cable log line `clock: N MHz (interrupts held U us, reasons)`. Note the largest U against `held_us=`.
 2. Soak: an hour of normal use (keys and menus every few minutes, a scan, two `uitest.py` runs, a Dry TX key-up every 10 min, an APRS mode spell with clear beaconing). Note `switches=` at the end (expect hundreds); no `*** FAULT`, no stuck key or knob step, the status bar clock against a phone's within a second.
 3. The watch's hops: watch on with A and B on one chip (`chips.turns_on_a_shared_chip`, the bench's watch test). Count hops per second from the cable log at 24 MHz (untouched) and at 120 (keep touching the knob, or 0 9 9 9 Fixed). Expect the same within 10 %; if 24 is slower, a watch reason goes in PWR-26.1.
-4. Bluetooth link at both speeds: `ferrite_link.py ble:E5A6A6FF-F37C-29A8-1864-A35DDD29EEAF ui` after 15 s idle (raised by the request) and back to back; `uitest.py` over Bluetooth. No timeouts; count retries (a byte lost at a switch-up).
+4. Bluetooth link at both speeds: `ferrite_link.py ble:RADIO-ID ui` after 15 s idle (raised by the request) and back to back; `uitest.py` over Bluetooth. No timeouts; count retries (a byte lost at a switch-up).
 5. The cable's bursts: a full `uitest.py` run on the radio after 15 s idle: none of the 2 s timeouts seen at a fixed 24 MHz.
 6. Audio (PWR-26.4): APRS mode on, clear sending a beacon every 30 s: every frame decoded; the log shows the 120 MHz switch before the capture and none while it runs. A Dry TX beacon decodes on the SDR.
 7. Current on the DPS (`dps150.py PORT log 70 --csv F`, drop the first 10 s), screen dark, no link traffic: Dynamic against Fixed (expect about 20 mA less, as in the mode); screen lit untouched; and with keys every 2 s (expect Fixed's).

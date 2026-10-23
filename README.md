@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><b>Open firmware for the Radtel RT-950 Pro</b>, in Rust on Embassy.</p>
+<p align="center"><b>Free firmware for the Radtel RT-950 Pro</b>, source public, in Rust on Embassy.</p>
 
 Ferrite replaces the RT-950 Pro's stock firmware with one that is open, RF-aware and transmits and receives on every band the radio is built for. Planned:
 

@@ -115,7 +115,7 @@ pub mod int {
     pub const FSK_SYNC: u16 = 1 << 1;
 }
 
-/// Stock's start-up writes, in its order (two halves around a read-modify-write of REG_40). REG_00 0x8000 then 0
+/// Stock's register settings at start-up, in its order (two halves around a read-modify-write of REG_40). REG_00 0x8000 then 0
 /// is a soft reset; REG_10-14 the AGC table; REG_3F the interrupts stock uses.
 const INIT_A: &[(u8, u16)] = &[
     (0x00, 0x8000), (0x00, 0x0000), (0x37, 0x9D1F), (0x13, 0x03DF), (0x12, 0x03DB), (0x11, 0x033A), (0x10, 0x0318),
@@ -132,7 +132,7 @@ const INIT_B: &[(u8, u16)] = &[
     (0x55, 0x3040),
 ];
 
-/// Stock's DTMF detector coefficients (REG_09, index in bits 15:12).
+/// Stock's register settings for the DTMF detector coefficients (REG_09, index in bits 15:12).
 const DTMF_COEFS: [u16; 16] = [
     0x006F, 0x106B, 0x2067, 0x3062, 0x4050, 0x5047, 0x603A, 0x702C, 0x8041, 0x9037, 0xA025, 0xB017, 0xC0E4, 0xD0CB,
     0xE0B5, 0xF09F,

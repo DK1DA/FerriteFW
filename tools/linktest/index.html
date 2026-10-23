@@ -185,7 +185,7 @@ async function connectBle() {
   }
   await listGatt(services);
   ctrlChar = chars[CTRL] || null;
-  // Data channel: FFE1 first, as stock's KISS(BLE) and nicFW's BTLE console use it; then FF32 (KDH's app), FFE2.
+  // Data channel: FFE1 first, as stock's KISS(BLE) uses it; then FF32 (KDH's app), FFE2.
   const candidates = Object.values(chars).filter(c => (c.properties.notify || c.properties.indicate) &&
     (c.properties.write || c.properties.writeWithoutResponse) && c.uuid !== CTRL);
   candidates.sort((a, b) => rank(a.uuid) - rank(b.uuid));

@@ -1,7 +1,7 @@
 //! # Ferrite
 //!
-//! Open firmware for the Radtel RT-950 Pro. This is the start-up and the wiring: the safe state before anything
-//! else, the vector table, three executors, and the six tasks (`tasks`), each the only owner of its hardware.
+//! Free firmware (source public) for the Radtel RT-950 Pro. This is the start-up and the wiring: the safe state
+//! before anything else, the vector table, three executors, and the six tasks (`tasks`), each the only owner of its hardware.
 //!
 //! | Executor | Priority | Tasks |
 //! | --- | --- | --- |

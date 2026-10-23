@@ -245,7 +245,7 @@ pub struct TxSetup {
 
 /// The transmitting chip's set-up before the path plan keys it (TX-23), in stock's order (TX start 0x0801EAF8,
 /// TX audit F1, F2, F7, F14): out of receive (REG_30 0, stock's 50 us), REG_47 0x6142 (stock's AF route while
-/// keyed; nicFW writes 0x6042), the TX frequency, REG_43 with it (0x3028 wide, 0x4008 narrow; 0x0801DE38-0x0801DE52:
+/// keyed), the TX frequency, REG_43 with it (0x3028 wide, 0x4008 narrow; 0x0801DE38-0x0801DE52:
 /// with one chip awake at a time, decision 111, a cross-band split's TX chip was last set for another slot, M7),
 /// the sub-tone with the calibration's deviation, the mic gain (REG_7D), then stock's REG_40 deviation
 /// (`(R & 0xF000) | 0x50A`). The chip keeps its last receive mode bits (REG_31 scrambler off).

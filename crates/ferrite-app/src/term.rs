@@ -1782,7 +1782,7 @@ fn splash<S: ChannelStore>(b: u8, cx: &Cx<S>, w: &mut W) {
             v.push(b"FERRITE ");
             v.push(version());
             w.bold(v.as_bytes());
-            w.s(" - open firmware for the RT-950 Pro".as_bytes());
+            w.s(" - free firmware for the RT-950 Pro".as_bytes());
         }
         4 => {
             w.at(2);

@@ -443,7 +443,7 @@ pub fn build(ty: u8, seq: u8, payload: &[u8], out: &mut [u8]) -> Option<usize> {
 
 /// Bluetooth's UART rate (LINK-25, decision 152): the BT513 module's resting rate, 9600 8N1. Stock V0.27 sends its
 /// KISS(BLE) frames to the module at 9600 (0x08016EEC: USART1 restarted at 0x2580 through 0x08023F68, the frame
-/// written, then back to 115200), and nicFW's build 08 runs USART1 at 9600; stock's own 115200 is for its CPS
+/// written, then back to 115200); stock's own 115200 is for its CPS
 /// programming (most likely the vendor's app sets the module to 115200 first: its FF31 handshake carries a rate byte).
 pub const BT_BAUD: u32 = 9_600;
 

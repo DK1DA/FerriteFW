@@ -268,7 +268,7 @@ fn auto_starts_on_enter_with_the_banner() {
     assert!(top.starts_with(" Ferrite 0.1.0") && top.contains("RT-950 Pro") && top.contains("cable 115200"), "{top}");
     assert!(top.ends_with("14:32"), "the clock at the far right: {top}");
     assert!(r.vt.rev[0].iter().all(|&v| v), "the top line is reverse video, full width");
-    assert!(r.vt.has("FERRITE 0.1.0 - open firmware for the RT-950 Pro"));
+    assert!(r.vt.has("FERRITE 0.1.0 - free firmware for the RT-950 Pro"));
     assert!(r.vt.has("Press Enter for the menu, ? for help"));
     assert!(r.vt.line(23).contains("Enter Menu"), "keys on the bottom line");
     // No ASCII art: nothing but the banner's three lines in the body.

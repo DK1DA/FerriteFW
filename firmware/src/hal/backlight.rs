@@ -1,7 +1,7 @@
 //! The screen's backlight (PC6) and the keypad light (PB3), each dimmed by PWM at the same 25 kHz (manual DISP-16,
 //! DISP-22, DISP-23). The UI task gives both the same duty, 0 7 4 2's level, so one brightness level dims both.
 //!
-//! nicFW dims PC6 with TMR3 channel 1 on its full remap (IOMUX_REMAP TMR3_MUX = 11). Ferrite's TMR3 is the Embassy
+//! PC6's timer functions are TMR8 channel 1 and, on TMR3's full remap, TMR3 channel 1. Ferrite's TMR3 is the Embassy
 //! time driver (its channel 1 is the alarm), so the screen's PWM comes from TMR8 channel 1 instead, PC6's own
 //! (unremapped) timer function on the AT32F403A (datasheet pin table: PC6 = TMR8_CH1; TMR3_CH1 only with the remap).
 //! PB3's only timer function is TMR2 channel 2 on TMR2's partial remap (RM_AT32F403A_407 V2.07, 7.4.2 IOMUX_REMAP

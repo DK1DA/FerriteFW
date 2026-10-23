@@ -1,4 +1,4 @@
-//! GPS (manual chapter 28, roadmap 5a): the ATGM336H on USART3 (PB11 in, 9600 baud, as stock and nicFW) and
+//! GPS (manual chapter 28, roadmap 5a): the ATGM336H on USART3 (PB11 in, 9600 baud, as stock) and
 //! its power on PA8 (low = on), which this task owns (decision 76).
 //!
 //! - **Power (GPS-1, GPS-4):** on or off with 0 6 1, and off around signals as 0 6 8 asks (the UI sends

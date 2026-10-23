@@ -137,8 +137,8 @@ mod tests {
     use super::*;
     use crate::freq::mhz;
 
-    /// The black radio's calibration sector (both radios' are identical, Oct 12, 2026), the tables stock reads.
-    fn black() -> SqCal {
+    /// The factory-default calibration sector (identical on both test radios, Oct 12, 2026), the tables stock reads.
+    fn factory() -> SqCal {
         let mut b = [0xFFu8; READ_LEN];
         let at = |b: &mut [u8; READ_LEN], o: usize, v: &[u8]| b[o..o + v.len()].copy_from_slice(v);
         at(&mut b, 0xC0, &[0x00, 0x59, 0x5B, 0x5D, 0x5F, 0x61, 0x63, 0x65, 0x67, 0x69]);
@@ -157,7 +157,7 @@ mod tests {
     /// stayed open.
     #[test]
     fn stock_thresholds() {
-        let c = black();
+        let c = factory();
         let at = |f, l| c.regs(f, l);
         assert_eq!(at(mhz(443) + 47_500, 4), (0x5955, 0x2827));
         assert_eq!(at(mhz(446), 4), (0x5955, 0x2827));
@@ -194,7 +194,7 @@ mod tests {
     /// none on both radios (marker 0xFF), none over 20 ppm (TX locks then, CAL-6).
     #[test]
     fn receive_trim() {
-        assert_eq!(black().rx_word(mhz(146) + 52_000), mhz(146) + 52_000, "both radios: no marker");
+        assert_eq!(factory().rx_word(mhz(146) + 52_000), mhz(146) + 52_000, "both radios: no marker");
         let mut b = [0x00u8; READ_LEN];
         b[0x21B..0x21E].copy_from_slice(&[0xA0, 0x64, 0x00]); // k = +100
         let c = SqCal::parse(&b);

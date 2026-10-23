@@ -427,7 +427,7 @@ mod tx {
         r.regs[0x52] = 0x0292;
         let mut bk = Bk4829::new(&mut r);
         bk.tail_tx(Some(Tail::Tone55 { dev: 0x46 }));
-        assert_eq!((r.regs[0x51], r.regs[0x07], r.regs[0x52]), (0x9046, 0x0471, 0x0292), "nicFW's and stock's 55 Hz");
+        assert_eq!((r.regs[0x51], r.regs[0x07], r.regs[0x52]), (0x9046, 0x0471, 0x0292), "stock's 55 Hz");
         let mut bk = Bk4829::new(&mut r);
         bk.tail_tx(Some(Tail::Shift { phase: 2 }));
         assert_eq!(r.regs[0x52], 0x8000 | 2 << 13 | 0x0292, "180 degrees");

@@ -20,9 +20,9 @@ The expanded key is 8 rows of 16: row r is the key with bytes 0-7 rotated left r
 bytes 8-15 rotated right r bits. The bootloader flashes file block n (n != 1) to
 0x08003000 + max(n - 1, 0) * 0x400 and checks nothing else about the image.
 
-Our images use an all-zero key (encryption becomes a no-op, as in nicsure's nicFW images) and are
-padded with 0xFF to whole 1 KB blocks, so they flash the same with Radtel's updater, nicsure's web
-flasher, Hertzz58's script and tools/flash.py.
+Our images use an all-zero key (the expanded key is then all zero, so encryption is a no-op) and are
+padded with 0xFF to whole 1 KB blocks, so they flash the same with Radtel's updater, Hertzz58's script
+and tools/flash.py.
 """
 import argparse
 import os
