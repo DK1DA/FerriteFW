@@ -642,20 +642,27 @@ fn power_on_the_aprs_slot_is_the_aprs_power() {
     assert_eq!(a.app.aprs_cfg().power, 1, "kept as 0 5 6 3");
 }
 
-/// APRS-6.1: a message to you plays the message sound (0 7 5 5, Mail by default); Off plays nothing. The sound
-/// isn't for the log's other events.
+/// APRS-6.1, APRS-6.2: a message to you plays the message sound (0 7 5 5, Packet by default) at its own volume
+/// (0 7 5 6, Max by default); Off plays nothing. The sound isn't for the log's other events.
 #[test]
 fn a_message_to_you_plays_the_message_sound() {
     use ferrite_core::tonegen::{CHIMES, CHIME_DEFAULT, CHIME_NAMES};
     let mut a = A::new();
-    assert_eq!(CHIME_NAMES[a.app.aprs_cfg().sound as usize], "Mail");
+    assert_eq!(CHIME_NAMES[a.app.aprs_cfg().sound as usize], "Packet", "decision 244");
     a.cmds();
     a.app.notify_message(b"VE7GPL", b"hello");
-    assert!(a.cmds().contains(&RadioCmd::Chime(CHIME_DEFAULT)));
+    assert!(a.cmds().contains(&RadioCmd::Chime { sound: CHIME_DEFAULT, level: 11 }), "APRS-6.2: Max by default");
     a.app.notify(b"Pager", b"a page", false);
-    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::Chime(_))), "only messages to you");
+    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::Chime { .. })), "only messages to you");
     a.app.set_aprs(AprsCfg { sound: 0, ..a.app.aprs_cfg() });
     a.app.notify_message(b"VE7GPL", b"again");
-    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::Chime(_))), "Off");
-    assert!(CHIMES[0][0].1 == 0 && CHIMES[1..].iter().all(|n| n[0].1 != 0 && n.iter().map(|x| x.1 as u32).sum::<u32>() <= 600), "short sounds");
+    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::Chime { .. })), "Off");
+    let ms = |i: usize| -> u32 {
+        if i == ferrite_core::tonegen::CHIME_PACKET as usize {
+            ferrite_core::tonegen::PACKET.iter().map(|p| p.1 as u32).sum::<u32>() * ferrite_core::tonegen::PACKET_REPEAT as u32
+        } else {
+            CHIMES[i].iter().map(|x| x.1 as u32).sum()
+        }
+    };
+    assert!(CHIMES[0][0].1 == 0 && (1..CHIMES.len()).all(|i| (100..=600).contains(&ms(i))), "short sounds");
 }

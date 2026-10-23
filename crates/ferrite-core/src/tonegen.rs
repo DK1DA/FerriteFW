@@ -138,15 +138,20 @@ pub fn dtmf_seq_ms(digits: usize, ms: u16, delay_ms: u16) -> u32 {
 /// DAC1 like the key beeps (SND-11), the amp on throughout, two steps louder than the beep volume. Index 0 is Off
 /// (no notes). One flat table, no slices: the Radio task reads it, so it sits in fast flash as one named static
 /// (slowcheck).
-pub static CHIMES: [[(u16, u16); CHIME_STEPS]; 5] = [
+pub static CHIMES: [[(u16, u16); CHIME_STEPS]; 6] = [
     [(0, 0); CHIME_STEPS],
-    pad([(1568, 260)]),                                            // Ding: one bright note (G6)
-    pad([(1047, 110), (1568, 230)]),                               // Mail: a rising fifth (C6, G6)
-    // Uh-oh, after ICQ's spoken one: a short "uh" that lifts a little, a breath, then a longer "oh" that slides
-    // down about a fourth, in short steps (the DAC tone can't glide)
-    pad([(740, 45), (800, 80), (0, 70), (660, 60), (620, 55), (585, 55), (550, 60), (520, 90)]),
-    pad([(1760, 60), (0, 40), (1760, 60), (0, 40), (2093, 110)]), // Pager: two chirps and a higher one
+    pad([(1568, 260)]),                                                                   // Ding: one bright note (G6)
+    pad([(1047, 110), (1568, 230)]),                                                      // Mail: a rising fifth (C6, G6)
+    [(0, 0); CHIME_STEPS],                                                                // Packet: [`PACKET`], not steps
+    pad([(2400, 45), (1700, 40), (3100, 35), (0, 25), (1900, 45), (2800, 35), (2200, 40), (3300, 70)]), // Droid
+    pad([(1760, 60), (0, 40), (1760, 60), (0, 40), (2093, 110)]),                        // Pager: two chirps, a higher one
 ];
+/// Packet's place in [`CHIMES`]: a short fake APRS burst, 1200 and 2200 Hz a bit or a few at a time.
+pub const CHIME_PACKET: u8 = 3;
+/// Packet's bits as (Hz, bits), played [`PACKET_REPEAT`] times; a bit is 1 ms (the timer's 0.5 ms ticks; AFSK's is
+/// 0.83 ms, which sounds the same).
+pub static PACKET: [(u16, u8); 8] = [(1200, 1), (2200, 2), (1200, 1), (2200, 3), (1200, 1), (2200, 2), (1200, 1), (2200, 1)];
+pub const PACKET_REPEAT: u8 = 18;
 /// The most steps one sound has.
 pub const CHIME_STEPS: usize = 10;
 
@@ -161,13 +166,14 @@ const fn pad<const N: usize>(n: [(u16, u16); N]) -> [(u16, u16); CHIME_STEPS] {
     r
 }
 
-/// APRS-6.1: a message sound plays this many DAC levels above the beep volume's (+6 dB each): Low 7, Mid 9, High 11
-/// (full scale).
-pub const CHIME_LOUDER: u8 = 2;
+/// APRS-6.1: 0 7 5 6's message volumes as DAC levels (+6 dB a step; 11 is the DAC's full swing), and names. Max
+/// by default: the volume knob after the amp's input still sets how loud it is (SND-2).
+pub const CHIME_LEVELS: [u8; 4] = [8, 9, 10, 11];
+pub const CHIME_VOLUMES: [&str; 4] = ["Low", "Mid", "High", "Max"];
 
-pub const CHIME_NAMES: [&str; 5] = ["Off", "Ding", "Mail", "Uh-oh", "Pager"];
-/// Mail: Alex, Oct 22, 2026 (decision 241, a default to review before the first release).
-pub const CHIME_DEFAULT: u8 = 2;
+pub const CHIME_NAMES: [&str; 6] = ["Off", "Ding", "Mail", "Packet", "Droid", "Pager"];
+/// Packet: Alex, Oct 22, 2026 ("default to packet"; decision 244, a default to review before the first release).
+pub const CHIME_DEFAULT: u8 = CHIME_PACKET;
 
 /// A local beep's length, clamped: the Radio task waits through it.
 pub const BEEP_MAX_MS: u16 = 1_000;

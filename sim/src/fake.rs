@@ -418,7 +418,7 @@ impl FakeRadio {
                 self.beeps += 1;
                 self.last_beep = (hz, ms);
             }
-            RadioCmd::Chime(i) if !self.live.tx.keyed => self.last_chime = i,
+            RadioCmd::Chime { sound, .. } if !self.live.tx.keyed => self.last_chime = sound,
             RadioCmd::BeepVol(v) => self.beep_vol = v,
             RadioCmd::Vox { level, tail } => self.vox = (level, tail),
             RadioCmd::VoxScreen(_) => {}

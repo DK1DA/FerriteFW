@@ -194,7 +194,7 @@ impl Radio {
             RadioCmd::Lease => {} // MODE-3: renewed above (`Lease::note`)
             RadioCmd::Same(on) => self.same_on = on,
             RadioCmd::Beep { hz, ms } => self.beep(hz, ms).await,
-            RadioCmd::Chime(i) => self.chime(i).await,
+            RadioCmd::Chime { sound, level } => self.chime(sound, level).await,
             #[cfg(feature = "tx")]
             RadioCmd::ToneBurst { on } => self.keyed_tone(if on { Some(1750) } else { None }, None),
             #[cfg(feature = "tx")]

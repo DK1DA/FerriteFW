@@ -243,7 +243,8 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 26] = [
         Entry("Beep volume|3|1-5."),
         Entry("Alert tones|On|Tones for alerts."),
         Entry("Arrival tone|On|A tone on reaching a waypoint."),
-        Entry("Message sound|Mail|Sound for a message to you."),
+        Entry("Message sound|Packet|Sound for a message to you."),
+        Entry("Message volume|Max|How loud the message sound is."),
     ]),
     ((7, 7), &[
         Entry("Battery Save|Level 1|Receiver sleep: longer life, slower."),
@@ -391,6 +392,7 @@ enum Tell {
     TxTones,
     SlotTones,
     BusyDefault,
+    MsgVol,
 }
 
 /// How a setting in [`SETTINGS`] shows, steps and resets.
@@ -445,7 +447,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 86] = [
+static SETTINGS: [Setting; 87] = [
     field!([1, 1, 0], special),
     field!([1, 4, 0], special),
     field!([1, 5, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -506,6 +508,7 @@ static SETTINGS: [Setting; 86] = [
     field!([7, 5, 3], alert_tones: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([7, 5, 4], arrival_tone: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([7, 5, 5], special), // APRS-6.1
+    field!([7, 5, 6], msg_vol: u8, Kind::Pick(&ferrite_core::tonegen::CHIME_VOLUMES), MsgVol),
     field!([7, 6, 0], leds: u8, Kind::Pick(&LED_MODES), Nothing),
     field!([7, 7, 1], special),
     field!([7, 7, 2], special), // PWR-24: it acts (in or out) as it changes
@@ -573,6 +576,8 @@ fn tell(app: &mut App, t: Tell) {
         Tell::TxTones => app.send_tx_tones(),
         Tell::SlotTones => app.send_slot_tones(),
         Tell::BusyDefault => app.set_busy_default(),
+        // APRS-6.2: the sound at its new volume, to hear it
+        Tell::MsgVol => app.out.push(RadioCmd::Chime { sound: app.aprs_cfg().sound.max(1), level: app.set.msg_level() }),
     }
 }
 
@@ -972,7 +977,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             // APRS-6.1: each choice plays as it is picked
             let sound = cycle(app.aprs_cfg().sound, d, ferrite_core::tonegen::CHIMES.len());
             app.set_aprs(crate::aprs::AprsCfg { sound, ..app.aprs_cfg() });
-            app.out.push(ferrite_core::msg::RadioCmd::Chime(sound));
+            app.out.push(ferrite_core::msg::RadioCmd::Chime { sound, level: app.set.msg_level() });
         }
         [5, 5, 2] => {
             let symbol = cycle(app.aprs_cfg().symbol, d, crate::aprs::SYMBOLS.len());

@@ -28,7 +28,7 @@ pub enum Class {
 /// What the command is for the queue.
 pub fn class(c: &RadioCmd) -> Class {
     match c {
-        RadioCmd::Activity | RadioCmd::Lease | RadioCmd::SweepHold | RadioCmd::Beep { .. } | RadioCmd::Chime(_) => Class::Drop,
+        RadioCmd::Activity | RadioCmd::Lease | RadioCmd::SweepHold | RadioCmd::Beep { .. } | RadioCmd::Chime { .. } => Class::Drop,
         _ if key(c).is_some() => Class::State,
         _ => Class::Keep,
     }

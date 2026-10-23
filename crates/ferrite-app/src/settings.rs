@@ -289,6 +289,8 @@ pub struct Settings {
     pub scan_down: bool,
     /// 0 1 8 4: a scan stopped by hand leaves the slot on its last hit instead of where it started (SCAN-6).
     pub scan_return_hit: bool,
+    /// 0 7 5 6: the message sound's own volume (`tonegen::CHIME_LEVELS`; APRS-6.2).
+    pub msg_vol: u8,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -469,6 +471,7 @@ impl Settings {
         ch_display: 0,
         scan_down: false,
         scan_return_hit: false,
+        msg_vol: 3,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's
@@ -511,6 +514,11 @@ impl Settings {
     /// WATCH-6: how long # pauses watch, seconds (0 1 8 1).
     pub fn pause_s(&self) -> u16 {
         PAUSE_TIMES_S[(self.pause_time as usize).min(PAUSE_TIMES_S.len() - 1)]
+    }
+
+    /// APRS-6.2: the message sound's DAC level.
+    pub fn msg_level(&self) -> u8 {
+        ferrite_core::tonegen::CHIME_LEVELS[(self.msg_vol as usize).min(3)]
     }
 
     pub fn brightness(&self) -> u8 {

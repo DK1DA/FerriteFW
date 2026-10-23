@@ -788,7 +788,7 @@ impl App {
         self.inbox = self.inbox.saturating_add(1);
         self.notify(head, body, false);
         if self.aprs.sound != 0 {
-            self.out.push(RadioCmd::Chime(self.aprs.sound)); // APRS-6.1
+            self.out.push(RadioCmd::Chime { sound: self.aprs.sound, level: self.set.msg_level() }); // APRS-6.1, APRS-6.2
         }
     }
 

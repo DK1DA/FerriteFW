@@ -149,8 +149,9 @@ pub enum RadioCmd {
     /// A short tone from the BK4829's tone generator to the speaker (SND-11), e.g. a key refused at a limit
     /// (TEXT-5).
     Beep { hz: u16, ms: u16 },
-    /// One of [`crate::tonegen::CHIMES`] to the speaker (APRS-6.1), even over received audio, as the alert tone.
-    Chime(u8),
+    /// One of [`crate::tonegen::CHIMES`] to the speaker at a DAC level (1-11; APRS-6.1, 0 7 5 6's), even over
+    /// received audio, as the alert tone.
+    Chime { sound: u8, level: u8 },
     /// The crossband repeater: start with these settings, or stop (XB-14).
     Crossband(Option<XbCfg>),
     /// The Transmit group's radio-wide tone settings (sent at start-up and when one changes): 0 8 8 3's tail
