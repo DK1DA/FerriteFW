@@ -195,12 +195,30 @@ fn aprs_card_beacon_and_mute() {
     let l = a.card_line();
     assert!(l.contains("head=\"APRS + Beacon \u{b7} VHF\""), "{l}");
     a.c_active();
-    a.press(Key::Star, 100);
-    a.wait(3500);
+    // APRS-15.1: APRS mode muted C as it came on
     let (y, _) = crate::screens::home::card(APRS_SLOT, a.app.active());
     let fb = a.fb();
     assert!(count(&fb, 120, y + 80, 106, 19, AMBER) > 20, "Muted, by the power");
     assert!(count(&fb, 34, y + 7, 120, 17, VIOLET) > 20, "the holder word still drawn");
+    a.press(Key::Star, 100); // \* hears it
+    a.wait(3500);
+    let fb = a.fb();
+    assert_eq!(count(&fb, 120, y + 80, 106, 19, AMBER), 0, "unmuted");
+}
+
+/// APRS-15.1: APRS mode on mutes C (decoded, not heard), off unmutes it; a radio powered up in APRS mode starts
+/// with C muted.
+#[test]
+fn aprs_mode_mutes_c() {
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    assert_eq!(a.app.mute & 1 << APRS_SLOT, 1 << APRS_SLOT);
+    a.app.set_aprs_mode(false);
+    assert_eq!(a.app.mute & 1 << APRS_SLOT, 0);
+    let set = crate::tests::set();
+    set.aprs_mode = true;
+    let app = App::new(set, crate::tests::alert());
+    assert_eq!(app.mute & 1 << APRS_SLOT, 1 << APRS_SLOT, "at power on");
 }
 
 /// KISS-10: KISS on suspends the radio's own APRS sending: APRS mode and automatic beacons wait (kept as set),

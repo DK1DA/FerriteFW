@@ -473,7 +473,7 @@ impl App {
             heard: [0; SLOTS],
             last_rx: (0xFF, 0, 0, i16::MIN),
             monitor: 0,
-            mute: 0,
+            mute: (set.aprs_mode as u8) << aprs::APRS_SLOT, // APRS-15.1: muted at power on in APRS mode
             out: Outbox { q: ferrite_core::cmdq::CmdRing::new(), sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
             text: Buf::new(),

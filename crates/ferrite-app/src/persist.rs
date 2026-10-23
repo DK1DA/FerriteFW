@@ -243,6 +243,9 @@ impl App {
         self.out.push(RadioCmd::Active(self.active));
         self.out.push(RadioCmd::Watch(self.watch_mask()));
         self.send_aprs_slot();
+        if self.mute != 0 {
+            self.out.push(RadioCmd::Mute(self.mute)); // APRS-15.1: C muted in APRS mode
+        }
         self.c_settled();
         self.send_radio_settings();
         self.out.push(RadioCmd::BatterySave(crate::level(self.bsave)));

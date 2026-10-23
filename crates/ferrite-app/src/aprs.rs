@@ -533,9 +533,15 @@ impl App {
     pub(crate) fn set_aprs_mode(&mut self, on: bool) {
         self.set.aprs_mode = on;
         self.c_follow();
+        // APRS-15.1: C starts muted in APRS mode (packets decoded, not heard; \* unmutes) and is heard again after
+        let m = if on { self.mute | 1 << APRS_SLOT } else { self.mute & !(1 << APRS_SLOT) };
+        if m != self.mute {
+            self.mute = m;
+            self.out.push(RadioCmd::Mute(m));
+        }
         if on {
             let mut f = Buf::<20>::new();
-            let _ = uwrite!(f, "C on {}", Txt(crate::slot::mhz3(self.aprs_freq()).as_bytes()));
+            let _ = uwrite!(f, "C on {}, muted", Txt(crate::slot::mhz3(self.aprs_freq()).as_bytes()));
             self.show_toast(b"APRS mode on", f.as_bytes(), false);
         } else if let Some(h) = self.aprs_holder() {
             let mut b = Buf::<24>::new();
