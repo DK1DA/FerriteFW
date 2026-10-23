@@ -251,8 +251,9 @@ impl View for Home {
                     let row = if app.aprs_holder() == Some(crate::aprs::Holder::Beacon) { super::opts::APRS_ROW_BEACON_NOW } else { super::opts::APRS_ROW_HEARD };
                     return app.open_screen(Screen::Options(super::opts::Options { of: super::opts::Of::AprsCard, row, confirm: false }));
                 }
-                // the shortcuts that don't touch the slot (scope, watch) still run
-                (Key::Digit(1 | 4), Long) => {}
+                // the shortcuts that don't touch the slot (scope, watch) still run, and power, which is the APRS
+                // power there (APRS-19.1)
+                (Key::Digit(1 | 2 | 4), Long) => {}
                 (Key::Up | Key::Down | Key::Left | Key::Right, Short | Repeat)
                 | (Key::Slot | Key::VfoMem | Key::Digit(_), Long)
                 | (Key::VfoMem | Key::Side(2) | Key::Digit(_), Short) => {

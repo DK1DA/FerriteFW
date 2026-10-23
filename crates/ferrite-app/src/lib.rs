@@ -1584,8 +1584,9 @@ impl App {
     pub fn greyed(&self, item: Item) -> Option<&'static str> {
         let s = &self.slots[self.active as usize];
         match item {
-            // APRS-19: nothing on the APRS slot changes
+            // APRS-19: nothing on the APRS slot changes but its power, which is the APRS power (APRS-19.1)
             Item::Watch | Item::BatterySave | Item::Channel | Item::Advanced => None,
+            Item::Power if self.aprs_slot(self.active) => None,
             _ if self.aprs_slot(self.active) => Some(self.aprs_holds()),
             Item::Step if s.on_channel() => Some("VFO only"), // VFO-8
             Item::Power if self.rx_only(self.active) => Some(chfield::Refusal::RxOnly.why()), // CHAN-4, EDIT-7
@@ -1607,6 +1608,10 @@ impl App {
         let a = self.active;
         self.keep_undo();
         match item {
+            Item::Power if self.aprs_slot(a) => {
+                let power = (self.aprs.power as i32 + d).rem_euclid(3) as u8; // APRS-19.1: 0 5 5 4
+                self.set_aprs(aprs::AprsCfg { power, ..self.aprs });
+            }
             Item::Watch => self.put_watch((self.watch as i32 + d).rem_euclid(3) as u8),
             Item::BatterySave => {
                 self.bsave = (self.bsave as i32 + d).rem_euclid(4) as u8;
@@ -1845,6 +1850,7 @@ impl App {
             }
             Item::Channel => b.set(if s.on_channel() { b"Edit" } else { b"Save as channel" }),
             Item::Advanced => b.set(b">"),
+            Item::Power if self.aprs_slot(self.active) => b.set(["Low", "Mid", "High"][self.aprs.power as usize % 3].as_bytes()),
             // A channel on Global: the level in use; "Global (4)" where there is room.
             Item::Squelch if s.cfg().squelch >= SQ_GLOBAL => {
                 b.clear();
@@ -1860,6 +1866,7 @@ impl App {
             Item::Watch => self.watch == 1,
             Item::BatterySave => self.bsave == 1,
             Item::Channel | Item::Advanced => true,
+            Item::Power if self.aprs_slot(self.active) => self.aprs.power == aprs::AprsCfg::DEFAULT.power,
             Item::Squelch if self.slots[self.active as usize].on_channel() => {
                 self.slots[self.active as usize].cfg().squelch >= SQ_GLOBAL
             }

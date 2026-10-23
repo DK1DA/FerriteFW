@@ -313,7 +313,7 @@ pub fn power_name(app: &App, slot: u8) -> &'static str {
     if tx_block(app, slot).is_some() {
         return "No TX";
     }
-    let p = if slot < SLOTS as u8 { app.slot(slot).cfg().power } else { 0 };
+    let p = if slot < SLOTS as u8 { app.tuned_cfg(slot).power } else { 0 }; // the APRS power on the APRS slot (APRS-19.1)
     ["LOW", "MID", "HIGH"][p as usize % 3]
 }
 

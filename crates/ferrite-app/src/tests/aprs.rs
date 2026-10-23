@@ -125,7 +125,7 @@ fn aprs_slot_is_locked() {
     assert!(matches!(a.app.screen(), Screen::Home), "no edit grid");
     a.app.knob(1, a.t, &a.s);
     assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::TuneSlot { .. } | RadioCmd::SlotParam { .. })), "nothing changed C");
-    assert!(a.app.greyed(Item::Power).is_some() && a.app.greyed(Item::Watch).is_none());
+    assert!(a.app.greyed(Item::Mode).is_some() && a.app.greyed(Item::Power).is_none() && a.app.greyed(Item::Watch).is_none());
     // Hold MENU on it: its options (APRS-17.1).
     a.press(Key::Menu, 800);
     assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == crate::screens::opts::Of::AprsCard));
@@ -158,7 +158,7 @@ fn kiss_on_makes_c_the_aprs_slot() {
     a.tap(Key::Slot);
     a.tap(Key::Slot);
     assert_eq!(a.app.active(), 2);
-    assert_eq!(a.app.greyed(Item::Power), Some("Slot C held by KISS"));
+    assert_eq!(a.app.greyed(Item::Mode), Some("Slot C held by KISS"));
     a.cmds();
     a.tap(Key::Up);
     assert!(a.app.toast_up());
@@ -179,7 +179,7 @@ fn kiss_on_makes_c_the_aprs_slot() {
     a.app.set.cable_port = 3;
     a.tick();
     assert!(a.app.aprs_slot(APRS_SLOT));
-    assert_eq!(a.app.greyed(Item::Power), Some("Slot C held by KISS"));
+    assert_eq!(a.app.greyed(Item::Mode), Some("Slot C held by KISS"));
     a.mode(true);
     a.app.set.cable_port = 0;
     a.tick();
@@ -212,7 +212,7 @@ fn beacons_alone_hold_c_without_priority() {
     a.tap(Key::Slot);
     a.tap(Key::Slot);
     assert_eq!(a.app.active(), 2);
-    assert_eq!(a.app.greyed(Item::Power), Some("Slot C held by beacons"));
+    assert_eq!(a.app.greyed(Item::Mode), Some("Slot C held by beacons"));
     a.cmds();
     a.tap(Key::Up);
     assert!(a.app.toast_up());
@@ -221,7 +221,7 @@ fn beacons_alone_hold_c_without_priority() {
     a.mode(true);
     assert_eq!(a.app.aprs_holder(), Some(Holder::Mode));
     assert!(a.cmds().contains(&RadioCmd::Awake(0b100)));
-    assert_eq!(a.app.greyed(Item::Power), Some("Slot C held by APRS mode"));
+    assert_eq!(a.app.greyed(Item::Mode), Some("Slot C held by APRS mode"));
     a.mode(false);
     assert_eq!(a.app.aprs_holder(), Some(Holder::Beacon));
     assert!(a.cmds().contains(&RadioCmd::Awake(0)));
@@ -616,4 +616,28 @@ fn long_callsign_refuses_aprs_not_kiss() {
     a.cmds();
     a.app.set_callsign(b"VE7TES-9");
     assert!(crate::screens::transmit::data_key(&mut a.app, APRS_SLOT, 0, b"Beacon"), "an SSID typed in isn't counted (APRS-30)");
+}
+
+/// APRS-19.1: on the APRS slot, Power (hold 2, the quick settings) is the APRS power (0 5 5 4): it changes the
+/// beacon and message power and leaves C's own power for when C is given back.
+#[test]
+fn power_on_the_aprs_slot_is_the_aprs_power() {
+    let mut a = A::new();
+    a.app.radio.tx_built = true;
+    let own = a.app.slot(APRS_SLOT).cfg().power;
+    a.mode(true);
+    a.tap(Key::Slot);
+    a.tap(Key::Slot);
+    assert_eq!(a.app.active(), 2);
+    assert_eq!(a.app.greyed(Item::Power), None, "not refused");
+    assert_eq!(a.app.greyed(Item::Mode), Some("Slot C held by APRS mode"), "the rest stays locked");
+    assert_eq!(a.app.aprs_cfg().power, 0, "Low by default (APRS-20)");
+    a.press(Key::Digit(2), 1200);
+    assert_eq!(a.app.aprs_cfg().power, 1, "hold 2: Mid");
+    assert_eq!(a.app.tuned_cfg(APRS_SLOT).power, 1, "what the radio gets");
+    assert_eq!(crate::screens::transmit::power_name(&a.app, APRS_SLOT), "MID");
+    assert_eq!(a.app.slot(APRS_SLOT).cfg().power, own, "C's own power untouched");
+    a.mode(false);
+    assert_eq!(a.app.slot(APRS_SLOT).cfg().power, own);
+    assert_eq!(a.app.aprs_cfg().power, 1, "kept as 0 5 5 4");
 }
