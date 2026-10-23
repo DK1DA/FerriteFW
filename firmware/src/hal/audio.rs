@@ -102,7 +102,7 @@ pub static ADC_LATE: AtomicU8 = AtomicU8::new(0);
 /// A timer's reload for `hz` from its clock (TMR4 and TMR6 are on APB1; with APB1 /2 they run at twice it, 120 MHz;
 /// stock's 9599.2 Hz is 120 MHz / 12501). Fits 16 bits down to 1.9 kHz.
 fn reload(hz: u32) -> u32 {
-    (clock::TMR_HZ + hz / 2) / hz
+    clock::tree().reload(hz)
 }
 
 /// Capture on: PA2 analog, TMR4 at the ADC rate, ADC1 on its trigger, DMA1 channel 1 circular. ADC1 must have
@@ -215,10 +215,23 @@ pub fn read_preempted(chan: u32) -> u16 {
     modify(ADC_CTRL2, 0, ADC_CTRL2_PCSWTRG);
     let start = super::time::cycles();
     while rd(ADC_STS) & ADC_STS_PCCE == 0 {
-        if super::time::cycles().wrapping_sub(start) > super::clock::SYSCLK_HZ {
+        if super::time::cycles().wrapping_sub(start) > super::clock::sysclk_hz() {
             return 0;
         }
     }
     modify(ADC_STS, ADC_STS_PCCE, 0);
     (rd(ADC_PDT1) & 0xFFF) as u16
+}
+
+/// PWR-24.9: the capture's and the playback's sample timers for the new tree, those that are running (interrupts
+/// are off). A beep on TMR6 is `super::tone`'s to re-time.
+pub(super) fn retime(t: ferrite_core::clocktree::Tree) {
+    if rd(CRM_APB1EN) & CRM_APB1_TMR4 != 0 && rd(TMR4 + TMR_CTRL1) & TMR_CTRL1_CNTEN != 0 {
+        let pr = t.reload(ADC_HZ);
+        wr(TMR4 + TMR_PR, pr - 1);
+        wr(TMR4 + TMR_C4DT, pr / 2);
+    }
+    if !super::tone::playing() && rd(CRM_APB1EN) & CRM_APB1_TMR6 != 0 && rd(TMR6 + TMR_CTRL1) & TMR_CTRL1_CNTEN != 0 {
+        wr(TMR6 + TMR_PR, t.reload(DAC_HZ) - 1);
+    }
 }

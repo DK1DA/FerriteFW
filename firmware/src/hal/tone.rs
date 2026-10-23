@@ -7,6 +7,8 @@ use super::{clock, modify, wr};
 use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 static ACTUAL_HZ: AtomicU32 = AtomicU32::new(0);
+/// What was asked for (hz, level), for a re-time at a speed switch (PWR-24.9).
+static ASKED: AtomicU32 = AtomicU32::new(0);
 
 /// Level 1-11: peak-to-peak = 2^(level+1) - 1 counts.
 pub fn start(hz: u32, level: u8) {
@@ -16,7 +18,8 @@ pub fn start(hz: u32, level: u8) {
     let level = level.clamp(1, 11) as u32;
     let amp = (1 << (level + 1)) - 1; // triangle peak, counts
     let trig = hz * 2 * amp; // DAC steps per second
-    let clk = clock::TMR_HZ; // TMR6 clock: APB1 /2, so twice APB1
+    let clk = clock::tmr_hz(); // TMR6's clock at the current speed (PWR-24.9)
+    ASKED.store(hz << 8 | level, Relaxed);
     let total = ((clk + trig / 2) / trig).max(2);
     let psc = (total - 1) / 65536 + 1; // a prescaler only when the period alone won't fit 16 bits
     let div = ((total + psc / 2) / psc).clamp(2, 65536);
@@ -38,6 +41,7 @@ pub fn start(hz: u32, level: u8) {
 }
 
 pub fn stop() {
+    ASKED.store(0, Relaxed);
     wr(TMR6 + TMR_CTRL1, 0);
     dac_reset();
     ACTUAL_HZ.store(0, Relaxed);
@@ -51,4 +55,17 @@ pub fn dac_reset() {
 /// 0 when off; the actual (rounded) frequency.
 pub fn hz() -> u32 {
     ACTUAL_HZ.load(Relaxed)
+}
+
+/// A tone is playing (TMR6 is the tone's, not the playback's).
+pub fn playing() -> bool {
+    ASKED.load(Relaxed) != 0
+}
+
+/// PWR-24.9: a tone playing across a speed switch starts again at the new speed (same pitch and level).
+pub(super) fn retime() {
+    let a = ASKED.load(Relaxed);
+    if a != 0 {
+        start(a >> 8, (a & 0xFF) as u8);
+    }
 }

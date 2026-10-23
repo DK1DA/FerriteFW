@@ -233,7 +233,7 @@ fn dictionary_is_small() {
 /// never uses the audio DAC's DMA path (`audio::`).
 #[test]
 fn tones_never_use_the_dac() {
-    only(files_using("firmware/src", "tone::"), &["firmware/src/board.rs", "firmware/src/bringup.rs", RADIO], "the DAC tone");
+    only(files_using("firmware/src", "tone::"), &["firmware/src/board.rs", "firmware/src/bringup.rs", "firmware/src/hal/clock.rs", "firmware/src/hal/audio.rs", RADIO], "the DAC tone");
     let tonegen = code(&root().join("crates/ferrite-core/src/tonegen.rs"));
     assert!(!tonegen.contains("hal::tone") && !tonegen.contains("audio::"), "tonegen must not use the DAC");
     let radio: String = rs_files(RADIO).iter().map(|p| code(p)).collect();

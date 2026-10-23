@@ -16,7 +16,6 @@ struct Hw {
     base: u32,
     en_reg: u32,
     en_bit: u32,
-    apb2: bool,
     irq: u16,
     tx: Pin,
     rx: Pin,
@@ -24,9 +23,9 @@ struct Hw {
 
 // A `static`: the receive interrupt reads it, and only named statics stay in the fast flash (memory.x).
 static HW: [Hw; UART_COUNT] = [
-    Hw { base: USART1, en_reg: CRM_APB2EN, en_bit: CRM_APB2_USART1, apb2: true, irq: irq::USART1, tx: pin(GPIOA, 9), rx: pin(GPIOA, 10) },
-    Hw { base: USART3, en_reg: CRM_APB1EN, en_bit: CRM_APB1_USART3, apb2: false, irq: irq::USART3, tx: pin(GPIOB, 10), rx: pin(GPIOB, 11) },
-    Hw { base: UART4, en_reg: CRM_APB1EN, en_bit: CRM_APB1_UART4, apb2: false, irq: irq::UART4, tx: pin(GPIOC, 10), rx: pin(GPIOC, 11) },
+    Hw { base: USART1, en_reg: CRM_APB2EN, en_bit: CRM_APB2_USART1, irq: irq::USART1, tx: pin(GPIOA, 9), rx: pin(GPIOA, 10) },
+    Hw { base: USART3, en_reg: CRM_APB1EN, en_bit: CRM_APB1_USART3, irq: irq::USART3, tx: pin(GPIOB, 10), rx: pin(GPIOB, 11) },
+    Hw { base: UART4, en_reg: CRM_APB1EN, en_bit: CRM_APB1_UART4, irq: irq::UART4, tx: pin(GPIOC, 10), rx: pin(GPIOC, 11) },
 ];
 
 static BUF_BT: [AtomicU8; 256] = [const { AtomicU8::new(0) }; 256];
@@ -51,8 +50,7 @@ pub fn init(id: usize, baud: u32) {
     RX[id].reset();
     u.tx.output(true, Mode::AfPp); // idle high before the peripheral takes the pin
     u.rx.config(Mode::InPu);
-    let clk = if u.apb2 { clock::APB2_HZ } else { clock::APB1_HZ };
-    wr(u.base + USART_BAUDR, (clk + baud / 2) / baud);
+    wr(u.base + USART_BAUDR, clock::tree().baudr(baud)); // both APBs alike (PWR-24.9)
     RATE[id].store(baud, Relaxed);
     rd(u.base + USART_STS);
     rd(u.base + USART_DT);
@@ -61,10 +59,10 @@ pub fn init(id: usize, baud: u32) {
 }
 
 /// Whether this port reaches `baud` within 2 % from its bus clock (the divisor is 16 at least).
-pub fn rate_ok(id: usize, baud: u32) -> bool {
-    let clk = if HW[id].apb2 { clock::APB2_HZ } else { clock::APB1_HZ };
-    let div = (clk + baud / 2) / baud;
-    div >= 16 && (clk / div).abs_diff(baud) * 50 <= baud
+/// Both APBs run alike, so the port doesn't matter; the check is at the current speed and at Low Power Mode's
+/// (PWR-24.9: a port set up now is re-timed for it).
+pub fn rate_ok(_id: usize, baud: u32) -> bool {
+    clock::tree().baud_ok(baud) && clock::LOW.baud_ok(baud)
 }
 
 /// SND-14: the TX pin a GPIO output held high, the UART still enabled (its receive works; what it shifts out
@@ -84,6 +82,25 @@ pub fn flush(id: usize) {
     let base = HW[id].base;
     if rd(base + USART_CTRL1) & USART_CTRL1_UEN != 0 {
         while rd(base + USART_STS) & USART_STS_TDC == 0 {}
+    }
+}
+
+/// Every port that is on, until its last byte has left (before a speed switch, PWR-24.9).
+pub fn flush_all() {
+    for id in 0..UART_COUNT {
+        flush(id);
+    }
+}
+
+/// PWR-24.9: each port that is on at its rate from the new tree (interrupts are off; nothing is being sent:
+/// [`flush_all`] came first). A byte arriving across the switch may be lost.
+pub(super) fn retime(t: ferrite_core::clocktree::Tree) {
+    for (id, u) in HW.iter().enumerate() {
+        let baud = RATE[id].load(Relaxed);
+        if baud != 0 && rd(u.base + USART_CTRL1) & USART_CTRL1_UEN != 0 {
+            // Written with the port on: turning it off for this could pull the TX pin low (a break on the cable).
+            wr(u.base + USART_BAUDR, t.baudr(baud));
+        }
     }
 }
 

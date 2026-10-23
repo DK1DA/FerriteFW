@@ -9,6 +9,8 @@
 //! - **Peripherals:** GPS and Bluetooth off (the cable link stays).
 //! - **Lights:** the backlight at most [`LPM_BACKLIGHT`], the keypad light off; live redraws once a second (the
 //!   firmware's UI task asks [`App::low_power`]).
+//! - **Core:** 24 MHz one second after entering, the build's speed at once on leaving (PWR-24.9: the firmware's UI
+//!   task switches, `hal::clock::set_low`).
 //!
 //! In by 0 7 7 2 On, or Auto below 0 7 7 3's battery % (once per crossing); out by holding SIDE1 + SIDE2 for
 //! [`LPM_COMBO_MS`] (never in), by 0 7 7 2 Off, or, entered by Auto, by itself at [`AUTO_OFF_PCT`] (the charger); On by hand never leaves by itself.
