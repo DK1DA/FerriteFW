@@ -370,7 +370,7 @@ impl Reader {
         let Reader { lcd, flash, power, buf, zchunk, zbuf, .. } = self;
         let mut progress = |done: u32, _blocks: u32| {
             // Every 64 KB, and at the end.
-            if done % 0x10000 == 0 || done == len {
+            if done.is_multiple_of(0x10000) || done == len {
                 ui::progress(lcd, Phase::Reading, done, len);
             }
             !power.off()
@@ -393,7 +393,7 @@ impl Reader {
         // What the cable's receiver saw since start-up: line errors by kind, bytes the ring had no room for.
         let (fe, ore) = uart::errors(UART_CPS);
         let st = uart::stats(UART_CPS);
-        for (k, v) in [(&b"uart rx "[..], st.rx_bytes), (b" framing ", fe), (b" overrun ", ore), (b" ring dropped ", st.dropped as u32)] {
+        for (k, v) in [(&b"uart rx "[..], st.rx_bytes), (b" framing ", fe), (b" overrun ", ore), (b" ring dropped ", st.dropped)] {
             Cable.put(k);
             let mut d = [0u8; 10];
             let mut n = v;
