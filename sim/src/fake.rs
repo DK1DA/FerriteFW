@@ -757,6 +757,7 @@ pub fn device_at(secs: u64) -> Device {
             battery_trim: 0,
         },
         link: LinkLive { cable: true, baud_100: 9216, write_pct: None },
+        mcu: Default::default(), // PWR-26.6: no MCU clock in the simulator ("Not measured", `mcu=0`)
     }
 }
 

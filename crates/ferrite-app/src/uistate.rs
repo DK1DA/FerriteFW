@@ -217,6 +217,13 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "cutoff", b.battery_cutoff as u32);
         kn(l, "dry", b.dry as u32); // TX-48, SBAR-22
         kn(l, "lpm", b.lpm as u32); // PWR-24, SBAR-24
+        // PWR-26.6: the MCU clock (MHz, 0 in the simulators), switches since power on, the longest interrupts-held
+        // time (us), and the governor's reasons (clocktree::why bits).
+        let m = cx.dev.mcu;
+        kn(l, "mcu", m.mhz as u32);
+        kn(l, "switches", m.switches);
+        kn(l, "held_us", m.held_us);
+        kn(l, "why", m.why as u32);
         match b.clock {
             Some(m) => {
                 let _ = uwrite!(l, " clock={}:{}{}", m / 60, (m % 60) / 10, m % 10);

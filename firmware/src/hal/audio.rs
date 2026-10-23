@@ -225,6 +225,12 @@ pub fn read_preempted(chan: u32) -> u16 {
 
 /// PWR-24.9: the capture's and the playback's sample timers for the new tree, those that are running (interrupts
 /// are off). A beep on TMR6 is `super::tone`'s to re-time.
+/// PWR-26.4: the capture (TMR4) or the playback or a beep (TMR6) is running: no speed switch now.
+pub fn busy() -> bool {
+    let on = |en: u32, tmr: u32| rd(CRM_APB1EN) & en != 0 && rd(tmr + TMR_CTRL1) & TMR_CTRL1_CNTEN != 0;
+    on(CRM_APB1_TMR4, TMR4) || on(CRM_APB1_TMR6, TMR6) || super::tone::playing()
+}
+
 pub(super) fn retime(t: ferrite_core::clocktree::Tree) {
     if rd(CRM_APB1EN) & CRM_APB1_TMR4 != 0 && rd(TMR4 + TMR_CTRL1) & TMR_CTRL1_CNTEN != 0 {
         let pr = t.reload(ADC_HZ);

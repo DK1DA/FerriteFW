@@ -296,6 +296,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 24] = [
         Entry("Debug console|Off|Off, cable or Bluetooth."),
         Entry("Cable log|Off|Plain log on the cable at power on."),
         Entry("Terminal colour|Off|ANSI colour on the cable terminal."),
+        Entry("MCU clock|Dynamic|Fast only while needed, or always."),
     ]),
 ];
 
@@ -437,7 +438,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 87] = [
+static SETTINGS: [Setting; 88] = [
     field!([1, 1, 0], special),
     field!([1, 4, 0], special),
     field!([1, 5, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -527,6 +528,7 @@ static SETTINGS: [Setting; 87] = [
     field!([9, 2, 3], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
     field!([9, 9, 7], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 9, 8], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 9, 9], mcu_fixed: bool, Kind::Flip(&["Dynamic", "Fixed"]), Nothing), // PWR-26.5
 ];
 
 fn row(p: &[u8]) -> Option<&'static Setting> {

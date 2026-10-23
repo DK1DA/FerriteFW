@@ -771,6 +771,21 @@ pub struct Device {
     pub bench: bool,
     pub selftest: SelfTest,
     pub link: LinkLive,
+    /// PWR-26.6: the MCU clock, for System and the readback.
+    pub mcu: McuClock,
+}
+
+/// PWR-26.6: the MCU clock now and the governor's counters since power on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct McuClock {
+    /// The core's speed now, MHz; 0 unknown (the simulators).
+    pub mhz: u16,
+    /// Speed switches since power on.
+    pub switches: u32,
+    /// The longest a switch has held interrupts off, microseconds.
+    pub held_us: u32,
+    /// Why it runs at the build's speed now (`clocktree::why` bits; 0 at rest).
+    pub why: u16,
 }
 
 /// Calibration status from the CAL checks (chapter 35).

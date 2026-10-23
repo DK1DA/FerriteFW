@@ -231,6 +231,62 @@ pub fn lpm_low_in(on_for: u32, since_input: u32, dark: bool, settle_ms: u32, boo
     settle_ms.saturating_sub(on_for).max(boost)
 }
 
+/// PWR-26 (decision 252): why the core runs at the build's speed outside Low Power Mode, one bit each. The App
+/// gathers the first six (`App::clock_reasons`), the firmware adds the link and audio ones.
+pub mod why {
+    /// PWR-26.1: a key or the knob within [`super::INPUT_MS`], the screen lit.
+    pub const INPUT: u16 = 1;
+    /// PWR-26.1: APRS mode, KISS, or a decoder wanted (AFSK, POCSAG, SAME).
+    pub const DECODE: u16 = 1 << 1;
+    /// PWR-26.1: a scan on any slot.
+    pub const SCAN: u16 = 1 << 2;
+    /// PWR-26.1: an exclusive mode: band scope, tone search, counter, FM broadcast, HF mode, crossband repeater.
+    pub const MODE: u16 = 1 << 3;
+    /// PWR-26.1: keyed, or the Transmit (or emergency) screen.
+    pub const TX: u16 = 1 << 4;
+    /// PWR-26.1: the alert screen.
+    pub const ALERT: u16 = 1 << 5;
+    /// PWR-26.1: a live link session on the cable or Bluetooth (PWR-26.2).
+    pub const LINK: u16 = 1 << 6;
+    /// PWR-26.4: audio capture or playback running, or about to start (a task waiting for the speed).
+    pub const AUDIO: u16 = 1 << 7;
+    /// Their names, bit 0 first (the cable log and the readback's `why`).
+    pub const NAMES: [&str; 8] = ["input", "decode", "scan", "mode", "tx", "alert", "link", "audio"];
+}
+
+/// PWR-26.1: a key or the knob keeps the build's speed this long (as Low Power Mode's boost, PWR-24.10).
+pub const INPUT_MS: u32 = 3000;
+/// PWR-26.3: the build's speed lasts at least this long after the last reason clears.
+pub const HOLD_MS: u32 = 1000;
+/// PWR-26.2: a byte from the cable or a connected Bluetooth device within this long makes the link live.
+pub const LINK_MS: u32 = 5000;
+
+/// PWR-26.3: the governor: 24 MHz (true) only with no reason now and none for [`HOLD_MS`]. `last_high_ms` is when
+/// a reason was last seen (the caller sets it to `now` whenever `reasons` isn't 0).
+pub fn governor(reasons: u16, last_high_ms: u32, now: u32) -> bool {
+    reasons == 0 && now.wrapping_sub(last_high_ms) >= HOLD_MS
+}
+
+/// PWR-26: the speed to switch to this turn: Some(true) 24 MHz, Some(false) the build's, None stay as it is.
+/// Audio running (`audio_busy`) never switches (PWR-26.4); Fixed (0 9 9 9) is the build's speed always (PWR-26.5);
+/// in Low Power Mode its own timing decides (`lpm_wait`, [`lpm_low_in`]: PWR-24.9, PWR-24.10); otherwise the
+/// governor.
+pub fn clock_target(fixed: bool, lpm_wait: Option<u32>, reasons: u16, last_high_ms: u32, now: u32, audio_busy: bool) -> Option<bool> {
+    if audio_busy {
+        return None;
+    }
+    Some(match (fixed, lpm_wait) {
+        (true, _) => false,
+        (false, Some(w)) => w == 0,
+        (false, None) => governor(reasons, last_high_ms, now),
+    })
+}
+
+/// PWR-26.1: the input reason: a key or the knob `since_input` ms ago, the screen lit.
+pub fn input_holds(since_input: u32, dark: bool) -> bool {
+    !dark && since_input < INPUT_MS
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -241,6 +297,41 @@ mod tests {
         assert_eq!(lpm_low_in(5000, 1000, false, 1000, 3000), 2000, "a key a second ago: two seconds more");
         assert_eq!(lpm_low_in(5000, 1000, true, 1000, 3000), 0, "dark: at once");
         assert_eq!(lpm_low_in(5000, 3000, false, 1000, 3000), 0, "the boost over");
+    }
+
+    /// PWR-26.3: no reason for a second gives 24 MHz; any reason, or one cleared under a second ago, keeps 120.
+    #[test]
+    fn governor_hysteresis() {
+        assert!(!governor(why::SCAN, 0, 10_000), "a reason now");
+        assert!(!governor(0, 10_000, 10_500), "cleared half a second ago");
+        assert!(governor(0, 10_000, 11_000), "cleared a second ago");
+        assert!(governor(0, u32::MAX - 100, 1_000), "across the ms counter's wrap");
+        assert!(!governor(0, u32::MAX - 100, 500), "across the wrap, under a second");
+    }
+
+    /// PWR-26.1: a key or the knob holds the speed for 3 s while the screen is lit; dark ends it.
+    #[test]
+    fn governor_input() {
+        assert!(input_holds(0, false) && input_holds(2_999, false));
+        assert!(!input_holds(3_000, false), "3 s on");
+        assert!(!input_holds(100, true), "dark screen");
+        assert_eq!(why::NAMES.len(), 8);
+        assert_eq!(why::AUDIO, 1 << (why::NAMES.len() - 1));
+    }
+
+    /// PWR-26.4: audio running never switches, whatever else wants; PWR-26.5: Fixed is the build's speed always;
+    /// PWR-24.9, PWR-26: Low Power Mode keeps its own timing; otherwise the governor.
+    #[test]
+    fn clock_target_order() {
+        assert_eq!(clock_target(false, None, 0, 0, 5_000, true), None, "audio: stay");
+        assert_eq!(clock_target(true, Some(0), 0, 0, 5_000, true), None, "audio, even Fixed");
+        assert_eq!(clock_target(true, Some(0), 0, 0, 5_000, false), Some(false), "Fixed: the build's, in the mode too");
+        assert_eq!(clock_target(true, None, 0, 0, 5_000, false), Some(false));
+        assert_eq!(clock_target(false, Some(0), why::LINK, 5_000, 5_000, false), Some(true), "the mode decides alone");
+        assert_eq!(clock_target(false, Some(200), 0, 0, 5_000, false), Some(false), "the mode settling or boosting");
+        assert_eq!(clock_target(false, None, 0, 0, 5_000, false), Some(true), "rest: 24 MHz");
+        assert_eq!(clock_target(false, None, why::DECODE, 5_000, 5_000, false), Some(false), "a reason: the build's");
+        assert_eq!(clock_target(false, None, 0, 4_500, 5_000, false), Some(false), "the hold");
     }
     use super::*;
 

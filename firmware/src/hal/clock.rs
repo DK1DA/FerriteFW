@@ -13,7 +13,7 @@
 //! are faster. Low Power Mode still drops to 24 MHz (at `clock-24` there is nothing to switch).
 use super::regs::*;
 use super::{modify, rd, wr};
-use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use ferrite_core::clocktree::{switch_steps, Elapsed, Step, Tree};
 
 #[cfg(not(any(feature = "clock-24", feature = "clock-48", feature = "clock-96", feature = "clock-144", feature = "clock-192", feature = "clock-240")))]
@@ -45,6 +45,13 @@ static CARRY_PS: AtomicU32 = AtomicU32::new(0);
 /// The last switch's time with interrupts held off, microseconds, and how many switches so far (the cable log).
 pub static LAST_SWITCH_US: AtomicU32 = AtomicU32::new(0);
 pub static SWITCHES: AtomicU32 = AtomicU32::new(0);
+/// PWR-26.6: the longest a switch has held interrupts off since power on, microseconds.
+pub static MAX_SWITCH_US: AtomicU32 = AtomicU32::new(0);
+/// PWR-26.4: tasks waiting for the build's speed before they start audio ([`for_audio`]); the UI task's governor
+/// counts it as a reason.
+pub static AUDIO_WAITING: AtomicU32 = AtomicU32::new(0);
+/// PWR-26.4: the governor would raise the speed for audio now (Dynamic, out of Low Power Mode); set by the UI task.
+pub static AUDIO_RAISES: AtomicBool = AtomicBool::new(false);
 
 /// The tree the core runs on now.
 #[inline]
@@ -216,8 +223,29 @@ fn switch(seen: u16, from: Tree, to: Tree) -> bool {
         + c2.wrapping_sub(c1) / (ferrite_core::clocktree::HEXT_HZ / 1_000_000)
         + super::time::cycles().wrapping_sub(c2) / to.mhz();
     LAST_SWITCH_US.store(us, Relaxed);
+    MAX_SWITCH_US.fetch_max(us, Relaxed);
     true
 }
+
+/// PWR-26.4: before a task starts the audio capture or playback: at 24 MHz, ask the UI task's governor for the
+/// build's speed and wait for it (the switch never happens while audio runs, so it must come first). Returns at
+/// once at the build's speed, in Low Power Mode or with Fixed (the governor won't raise it there), and after
+/// [`AUDIO_WAIT_MS`] whatever happened (audio then starts at 24 MHz; its timers follow the clock).
+pub async fn for_audio() {
+    if !is_low() || !AUDIO_RAISES.load(Relaxed) {
+        return;
+    }
+    AUDIO_WAITING.fetch_add(1, Relaxed);
+    crate::chan::TERM_WAKE.signal(()); // the UI task's next turn now
+    let t0 = embassy_time::Instant::now();
+    while is_low() && AUDIO_RAISES.load(Relaxed) && t0.elapsed() < embassy_time::Duration::from_millis(AUDIO_WAIT_MS) {
+        embassy_time::Timer::after_millis(2).await;
+    }
+    AUDIO_WAITING.fetch_sub(1, Relaxed);
+}
+
+/// PWR-26.4: [`for_audio`]'s longest wait: the UI task turns at least every 250 ms, a redraw at 24 MHz included.
+pub const AUDIO_WAIT_MS: u64 = 500;
 
 /// Everything clocked from the tree that is running, set again for `t` (interrupts are off). Things that are
 /// off pick up the new tree when they start (each reads [`tree`]).

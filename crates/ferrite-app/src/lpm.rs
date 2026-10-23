@@ -198,4 +198,36 @@ impl App {
     pub fn kiss_on(&self) -> bool {
         self.set.kiss_on() && !self.low_power()
     }
+
+    /// PWR-26.1: why the core should run at the build's speed now (`ferrite_core::clocktree::why` bits; the
+    /// firmware adds the link's and the audio's). `now` is the App's clock (ms).
+    pub fn clock_reasons(&self, live: &ferrite_core::msg::LiveAll, now: u32) -> u16 {
+        use crate::screens::Screen;
+        use ferrite_core::clocktree::{input_holds, why};
+        use ferrite_core::msg::ModeLive;
+        let mut r = 0;
+        if input_holds(now.wrapping_sub(self.last_input), self.backlight_duty() == 0) {
+            r |= why::INPUT;
+        }
+        // SAME only while a slot is on a weather channel (162.400-162.550 MHz, ferrite_radio::chip::WX): the
+        // Radio task arms the BK4829's FSK receiver only then. Two compares, not a range: a range literal here was
+        // merged with the Radio task's WX into a slow-flash constant (slowcheck).
+        let wx = live.slots.iter().any(|s| s.freq >= 16_240_000 && s.freq <= 16_255_000);
+        if self.aprs_on() || self.kiss_on() || self.aprs_flag_decode() || self.pager_wanted(live) || self.same_wanted() && wx {
+            r |= why::DECODE;
+        }
+        if live.slots.iter().any(|s| s.scanning) {
+            r |= why::SCAN;
+        }
+        if live.mode != ModeLive::Off {
+            r |= why::MODE;
+        }
+        if live.tx.keyed || self.radio.keyed.is_some() || matches!(self.screen, Screen::Transmit(_) | Screen::Emergency(_)) {
+            r |= why::TX;
+        }
+        if matches!(self.screen, Screen::Alert(_)) {
+            r |= why::ALERT;
+        }
+        r
+    }
 }

@@ -2422,6 +2422,63 @@ fn system_and_about_rows() {
     assert_eq!(show(Page::About, "ID", 0, &id), "R28JM FRR1S 27V4T WPTH0", "one row");
 }
 
+/// PWR-26.1: the App's reasons for the build's speed: a key (3 s), APRS mode, KISS, the pager and SAME decoders
+/// (SAME only on a weather channel), a scan, an exclusive mode, transmit and the Transmit screen; none at rest.
+#[test]
+fn clock_reasons() {
+    use ferrite_core::clocktree::why;
+    let mut t = ready();
+    t.wait(5_000);
+    let r = |t: &T| t.app.clock_reasons(&t.live, t.t);
+    assert_eq!(r(&t), 0, "rest");
+    t.tap(Key::Down);
+    assert_eq!(r(&t) & why::INPUT, why::INPUT, "a key");
+    t.wait(3_100);
+    assert_eq!(r(&t) & why::INPUT, 0, "3 s after it");
+    t.app.set.aprs_mode = true;
+    assert_eq!(r(&t), why::DECODE, "APRS mode");
+    t.app.set.aprs_mode = false;
+    t.app.set.pocsag_on = true;
+    t.live.slots[1].freq = t.app.set.pocsag_freq;
+    assert_eq!(r(&t), why::DECODE, "the pager decoder");
+    t.app.set.pocsag_on = false;
+    t.app.set.same = true;
+    assert!(t.app.same_wanted(), "alerts on in the US");
+    t.live.slots[1].freq = 16_240_000;
+    assert_eq!(r(&t), why::DECODE, "SAME on a weather channel");
+    t.live.slots[1].freq = 14_652_000;
+    assert_eq!(r(&t), 0, "SAME off the weather channels");
+    t.live.slots[0].scanning = true;
+    assert_eq!(r(&t), why::SCAN);
+    t.live.slots[0].scanning = false;
+    t.live.mode = ModeLive::Probe { freq: 0, rssi: 0, tone: 0 };
+    assert_eq!(r(&t), why::MODE);
+    t.live.mode = ModeLive::Off;
+    t.live.tx.keyed = true;
+    assert_eq!(r(&t) & why::TX, why::TX, "keyed");
+}
+
+/// PWR-26.6: System's Clock row: the speed and the switches since power on, with thousands commas.
+#[test]
+fn system_clock_row() {
+    use crate::screens::info::{def, Page};
+    let t = ready();
+    let show = |dev: &Device| {
+        let rows = def(Page::System).rows;
+        let i = rows.iter().position(|r| r.0 == "Clock").expect("the row");
+        let mut b = Buf::<40>::new();
+        (rows[i].1)(&crate::screens::table::Ctx { app: &t.app, live: &t.live, dev, x: &() }, &mut b);
+        String::from_utf8(b.as_bytes().to_vec()).unwrap()
+    };
+    assert_eq!(show(&Device::default()), "Not measured", "the simulators");
+    let mut d = Device { mcu: ferrite_core::msg::McuClock { mhz: 24, switches: 1_234, held_us: 180, why: 0 }, ..Default::default() };
+    assert_eq!(show(&d), "24 MHz \u{b7} 1,234 switches");
+    d.mcu = ferrite_core::msg::McuClock { mhz: 120, switches: 1, held_us: 180, why: 1 };
+    assert_eq!(show(&d), "120 MHz \u{b7} 1 switch");
+    d.mcu.switches = 1_002_003;
+    assert_eq!(show(&d), "120 MHz \u{b7} 1,002,003 switches");
+}
+
 /// TX-30.2: at the timeout the alert tone sounds once, a moment after the unkey (never while keyed).
 #[test]
 fn timeout_beeps_after_the_unkey() {

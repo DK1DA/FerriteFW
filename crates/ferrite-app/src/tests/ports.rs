@@ -299,3 +299,26 @@ fn one_remote_keyer() {
     assert_eq!(r.ask(Port::Bt, msg::KEY, &ptt(Ptt::Off)), 0);
     assert!(!r.app.remote_keyed(), "stopping is always allowed");
 }
+
+/// PWR-26.2: the link is live (the MCU at the build's speed) for 5 s after a terminal byte on the cable or from a
+/// connected Bluetooth device, and for link::ACTIVE_MS after a link frame; never without either.
+#[test]
+fn live_for_the_clock() {
+    let mut r = Rig::new();
+    assert!(!r.p.live(&r.app, r.now), "nothing yet");
+    r.send(Port::Cable, b"\x1b");
+    assert!(r.p.live(&r.app, r.now), "a cable byte");
+    r.now += 5_000;
+    assert!(!r.p.live(&r.app, r.now), "5 s later");
+    r.send(Port::Bt, b"\r");
+    assert!(r.p.live(&r.app, r.now), "a Bluetooth byte");
+    r.app.set.bt = false;
+    assert!(!r.p.live(&r.app, r.now), "Bluetooth off");
+    r.app.set.bt = true;
+    r.now += 6_000;
+    assert_eq!(r.ask(Port::Cable, msg::HELLO, &[]), Status::Ok as u8);
+    r.now += 6_000;
+    assert!(r.p.live(&r.app, r.now), "a link frame 6 s ago: the session still active");
+    r.now += crate::link::ACTIVE_MS;
+    assert!(!r.p.live(&r.app, r.now), "the session over");
+}
