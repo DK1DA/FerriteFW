@@ -1231,6 +1231,8 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
 }
 
 mod sub;
+/// LINK-43: the APRS record's length, for Ferrite Console (which reads its layout from this crate).
+pub use sub::APRS_REC;
 
 #[cfg(test)]
 mod tests;
