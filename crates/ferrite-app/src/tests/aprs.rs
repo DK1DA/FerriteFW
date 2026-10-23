@@ -641,3 +641,21 @@ fn power_on_the_aprs_slot_is_the_aprs_power() {
     assert_eq!(a.app.slot(APRS_SLOT).cfg().power, own);
     assert_eq!(a.app.aprs_cfg().power, 1, "kept as 0 5 5 4");
 }
+
+/// APRS-6.1: a message to you plays the message sound (0 5 7 6, Mail by default); Off plays nothing. The sound
+/// isn't for the log's other events.
+#[test]
+fn a_message_to_you_plays_the_message_sound() {
+    use ferrite_core::tonegen::{CHIMES, CHIME_DEFAULT, CHIME_NAMES};
+    let mut a = A::new();
+    assert_eq!(CHIME_NAMES[a.app.aprs_cfg().sound as usize], "Mail");
+    a.cmds();
+    a.app.notify_message(b"VE7GPL", b"hello");
+    assert!(a.cmds().contains(&RadioCmd::Chime(CHIME_DEFAULT)));
+    a.app.notify(b"Pager", b"a page", false);
+    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::Chime(_))), "only messages to you");
+    a.app.set_aprs(AprsCfg { sound: 0, ..a.app.aprs_cfg() });
+    a.app.notify_message(b"VE7GPL", b"again");
+    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::Chime(_))), "Off");
+    assert!(CHIMES[0][0].1 == 0 && CHIMES[1..].iter().all(|n| n[0].1 != 0 && n.iter().map(|x| x.1 as u32).sum::<u32>() <= 600), "short sounds");
+}

@@ -215,7 +215,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 30] = [
         Entry("TX level|Mid|Modulation level."),
         Entry("RX level|Auto|Decoder input level."),
         Entry("Mute speaker|On|Mute packets on the speaker."),
-        Entry("Ringer on message|On|Ring for a new message."),
+        Entry("Message sound|Mail|Sound for a message to you."),
         Entry("Heard popup|Off|A toast per station heard."),
         Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
     ]),
@@ -439,7 +439,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 74] = [
+static SETTINGS: [Setting; 75] = [
     field!([1, 1, 0], special),
     field!([1, 5, 0], special),
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
@@ -467,6 +467,7 @@ static SETTINGS: [Setting; 74] = [
     field!([5, 6, 1], special),
     field!([5, 6, 2], special),
     field!([5, 7, 1], special), // MENU-31: typed as a frequency
+    field!([5, 7, 6], special), // APRS-6.1
     field!([5, 7, 8], special), // APRS-45
     field!([5, 8, 1], special),
     field!([5, 8, 2], special),
@@ -779,6 +780,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(crate::slot::mhz3(app.aprs_freq()).as_bytes());
             app.aprs_cfg().f5k != 0
         }
+        [5, 7, 6] => {
+            pick(b, &ferrite_core::tonegen::CHIME_NAMES, app.aprs_cfg().sound);
+            app.aprs_cfg().sound != ferrite_core::tonegen::CHIME_DEFAULT
+        }
         [5, 7, 8] => {
             pick(b, &crate::aprs::FX25_NAMES, app.aprs_cfg().fx25_index());
             app.aprs_cfg().fx25 != crate::aprs::FX25_DEFAULT
@@ -933,6 +938,12 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             app.set_aprs(crate::aprs::AprsCfg { digi: c.digi & 0x0F | w << 4, ..c });
         }
         [5, 7, 1] => app.step_aprs_freq(d),
+        [5, 7, 6] => {
+            // APRS-6.1: each choice plays as it is picked
+            let sound = cycle(app.aprs_cfg().sound, d, ferrite_core::tonegen::CHIMES.len());
+            app.set_aprs(crate::aprs::AprsCfg { sound, ..app.aprs_cfg() });
+            app.out.push(ferrite_core::msg::RadioCmd::Chime(sound));
+        }
         [5, 7, 8] => {
             let i = cycle(app.aprs_cfg().fx25_index(), d, crate::aprs::FX25_CHECKS.len());
             app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_CHECKS[i as usize], ..app.aprs_cfg() })
@@ -1007,6 +1018,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 8, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & !crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
         [5, 8, 3] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi & 0x0F, ..app.aprs_cfg() }),
         [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
+        [5, 7, 6] => app.set_aprs(crate::aprs::AprsCfg { sound: ferrite_core::tonegen::CHIME_DEFAULT, ..app.aprs_cfg() }),
         [5, 7, 8] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
         [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
         [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,

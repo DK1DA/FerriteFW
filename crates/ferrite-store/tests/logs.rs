@@ -271,10 +271,10 @@ fn contacts_kept_in_callsign_order() {
 fn aprs_settings_wait_two_seconds_and_quick_messages_are_kept() {
     let s = mount(SimFlash::new());
     let a = app();
-    // APRS-26: the custom path is kept too, and chosen (path 3); APRS-30: and the SSID
+    // APRS-26: the custom path is kept too, and chosen (path 3); APRS-30: and the SSID; APRS-6.1: the message sound
     let mut custom = [0u8; ferrite_app::aprs::CUSTOM_LEN];
     custom[..7].copy_from_slice(b"WIDE2-2");
-    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32 };
+    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3 };
     s.autosave(1000, &a);
     assert!(s.request(Op::AprsCfg(cfg)));
     assert!(s.aprs_cfg() == cfg);

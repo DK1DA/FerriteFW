@@ -54,4 +54,49 @@ impl Radio {
         }
         log(b"beep hz ", hz as u32);
     }
+
+    /// APRS-6.1: a message sound, note by note from DAC1 with the amp on throughout (no amp click between notes).
+    /// It sounds over received audio as the alert tone does (SND-13): the chips' and the SI4732's audio are muted
+    /// under it and come back after. Never while keyed.
+    pub(super) async fn chime(&mut self, i: u8) {
+        let Some(notes) = tonegen::CHIMES.get(i as usize).filter(|n| n[0].1 != 0) else { return };
+        if self.path.keyed().is_some() {
+            return;
+        }
+        let playing = SPEAKER_ON.load(core::sync::atomic::Ordering::Relaxed);
+        for n in 0..2u8 {
+            if self.has(n) && self.tuned[n as usize].is_some() {
+                self.chip(n).af_out(AfOut::Mute);
+            }
+        }
+        let si_playing = playing && self.si.mode().is_some() && self.hf.map_or(self.si_heard, |h| h.si);
+        if si_playing {
+            let _ = self.si.mute(true, &mut BusyDelay);
+        }
+        crate::hal::tone::start(notes[0].0.max(1) as u32, self.beep_level);
+        Timer::after_millis(30).await;
+        if !playing {
+            speaker(true);
+        }
+        for &(hz, ms) in notes.iter().take_while(|n| n.1 != 0) {
+            if hz == 0 {
+                crate::hal::tone::stop();
+            } else {
+                crate::hal::tone::start(hz as u32, self.beep_level);
+            }
+            Timer::after_millis(ms as u64).await;
+        }
+        if !playing {
+            speaker(false);
+        }
+        Timer::after_millis(30).await;
+        crate::hal::tone::stop();
+        if si_playing {
+            let _ = self.si.mute(false, &mut BusyDelay);
+        }
+        if playing && self.hf.is_some_and(|h| !h.si) {
+            self.chip(1).af_out(AfOut::Normal);
+        }
+        log(b"chime ", i as u32);
+    }
 }

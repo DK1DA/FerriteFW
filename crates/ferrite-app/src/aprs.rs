@@ -52,6 +52,8 @@ pub struct AprsCfg {
     pub ssid: u8,
     /// FX.25 on transmit (0 5 7 8, APRS-45): check bytes, one of [`FX25_CHECKS`] (0 = off).
     pub fx25: u8,
+    /// The message sound (0 5 7 6, APRS-6.1): an index into `tonegen::CHIMES` (0 off).
+    pub sound: u8,
 }
 
 /// APRS-45: 0 5 7 8's choices (check bytes; 0 = off) and their names. 16 by default: Alex, decision 230 (a default
@@ -86,7 +88,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {

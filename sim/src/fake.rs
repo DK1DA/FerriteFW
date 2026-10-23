@@ -107,6 +107,8 @@ pub struct FakeRadio {
     /// Beeps asked for (SND-3, SND-6): how many, the last one's tone and length, and the volume (0 7 5 2).
     pub beeps: u32,
     pub last_beep: (u16, u16),
+    /// The last message sound asked for (APRS-6.1).
+    pub last_chime: u8,
     pub beep_vol: u8,
     /// VOX's level and tail as the UI sent them (0 8 2); the sims have no microphone, so `voice` is set by
     /// tests.
@@ -191,6 +193,7 @@ impl FakeRadio {
             hint: None,
             beeps: 0,
             last_beep: (0, 0),
+            last_chime: 0,
             beep_vol: 2,
             vox: (0, 0),
             watch: 0b111,
@@ -415,6 +418,7 @@ impl FakeRadio {
                 self.beeps += 1;
                 self.last_beep = (hz, ms);
             }
+            RadioCmd::Chime(i) if !self.live.tx.keyed => self.last_chime = i,
             RadioCmd::BeepVol(v) => self.beep_vol = v,
             RadioCmd::Vox { level, tail } => self.vox = (level, tail),
             RadioCmd::VoxScreen(_) => {}
