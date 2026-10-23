@@ -26,8 +26,8 @@ pub const DAC_HZ: u32 = 48_000;
 /// made 4.35 kHz, 5500 4.0 kHz.)
 pub const AFSK_AMP: i16 = 3_900;
 /// APRS-49: 0 5 9 5's levels around it (deviation is linear in the amplitude): Low about 2.5 kHz, Mid 3.0 kHz
-/// (`AFSK_AMP`), High about 3.5 kHz.
-pub const AFSK_AMPS: [i16; 3] = [3_250, AFSK_AMP, 4_550];
+/// (`AFSK_AMP`), High about 3.5 kHz. A named static: the DSP task reads it, so it sits in fast flash (slowcheck).
+pub static AFSK_AMPS: [i16; 3] = [3_250, AFSK_AMP, 4_550];
 
 /// Each half of the ADC's DMA buffer: 2 ms at 48 kHz. The DSP task gets 500 blocks a second of
 /// [`BLOCK_OUT`] decoder samples.
