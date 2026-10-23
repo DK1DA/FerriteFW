@@ -377,7 +377,7 @@ fn keys_through_the_nearby_row() {
     t.tap(Key::Down);
     assert!(t.zones().on_nearby(), "down from the last zone: Nearby");
     t.tap(Key::Menu);
-    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == 7), "OK: the Nearby view");
+    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == 8), "OK: the Nearby view");
     t.tap(Key::Exit);
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Zones(_)), "BACK returns: {}", t.app.screen().name());

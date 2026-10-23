@@ -64,13 +64,13 @@ def every_group_fits_and_names_its_path(t):
 
 @test("MENU-3", "MENU-5", pages=("Group",))
 def third_level_and_no_deeper(t):
-    """A group's third level (0 1 8, Scan's Advanced) opens by its digit; a digit inside it selects, never opens."""
-    u = t.keys("MENU 0 1 8")
-    t.eq(u.id, "Group", "MENU 0 1 8")
-    t.check(u["help"]["args"][0].startswith("MENU 0 1 8 "), "its rows are MENU 0 1 8 N", u["help"])
+    """A group's third level (0 1 6, Scan's Advanced) opens by its digit; a digit inside it selects, never opens."""
+    u = t.keys("MENU 0 1 6")
+    t.eq(u.id, "Group", "MENU 0 1 6")
+    t.check(u["help"]["args"][0].startswith("MENU 0 1 6 "), "its rows are MENU 0 1 6 N", u["help"])
     u = t.keys("3")
     t.eq(u.id, "Group", "a digit on a third-level row")
-    t.eq(u["help"]["args"][0], "MENU 0 1 8 3", "selects row 3 (no fourth level)")
+    t.eq(u["help"]["args"][0], "MENU 0 1 6 3", "selects row 3 (no fourth level)")
 
 
 @test("MENU-5", "MENU-6", pages=("More", "Group", "Home", "Quick"))

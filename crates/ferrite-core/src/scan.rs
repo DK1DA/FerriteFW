@@ -134,7 +134,7 @@ pub enum Resume {
 }
 
 impl Resume {
-    /// The settings' encoding (0 1 4, a zone's, a preset's): 1-10 seconds, 11 carrier drop, 12 stop on hit;
+    /// The settings' encoding (0 1 2, a zone's, a preset's): 1-10 seconds, 11 carrier drop, 12 stop on hit;
     /// anything else is 5 s.
     pub const fn from_code(c: u8) -> Resume {
         match c {
@@ -194,7 +194,7 @@ pub struct Scan {
     start: u16,
     up: bool,
     pub resume: Resume,
-    /// The priority look's interval (0 1 5; 0 = off).
+    /// The priority look's interval (0 1 3; 0 = off).
     pub prio_ms: u32,
     prio_at: u32,
     /// Looking at priority `k` since, coming back to `pos` after.
@@ -707,7 +707,7 @@ pub struct ChanScans {
     on: [bool; 3],
     /// Waiting for the frequency of the stop the scan is on: not ticked until it arrives.
     pending: [bool; 3],
-    /// SCAN-22 (0 1 8 3): channel scans walk [`WithTx`].
+    /// SCAN-22 (0 1 6 3): channel scans walk [`WithTx`].
     pub tx: bool,
 }
 

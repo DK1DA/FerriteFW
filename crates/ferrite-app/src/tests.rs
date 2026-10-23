@@ -454,7 +454,7 @@ fn subtone_level_from_its_path() {
     assert!(tx.iter().all(|e| !e.name().contains("burst")), "no tone burst setting");
 }
 
-/// MENU-6.1: before the first release a dropped item leaves no empty number: every group and list is filled
+/// MENU-6.1: before 1.0.0 a dropped item leaves no empty number: every group and list is filled
 /// from 1 with real items.
 #[test]
 fn menu_numbers_have_no_gaps() {
@@ -646,7 +646,7 @@ fn every_destination_draws() {
         }
     }
     let ids: std::collections::BTreeSet<_> = ALL.iter().map(|d| d.info().2).collect();
-    assert_eq!(ids.len(), 63, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104; C5a contacts: decision 226)");
+    assert_eq!(ids.len(), 62, "one inventory ID per destination (groups and lists share D3; B16 weather radio removed: decision 63; C7 sensor reader: decision 75; D18-D20 approvals: decision 104; C5a contacts: decision 226; C19 FM presets: decision 258)");
 }
 
 mod group_a;

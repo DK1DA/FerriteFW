@@ -2,7 +2,7 @@
 //!
 //! What the list screens read besides channels: the event log, APRS (heard, messages, the message being
 //! written), GPS (fix, satellites, waypoints), the scan lists (range presets, this scan's
-//! skips, zone options), FM presets and HF recent. Each comes from the task that owns it (the Storage task for
+//! skips, zone options) and HF recent. Each comes from the task that owns it (the Storage task for
 //! flash records, the APRS and GPS tasks for what lives in their RAM) and is read on demand, one record at a
 //! time, newest first where that applies: the App never holds a copy (CHAN-9, APRS-4, INBOX-6). Changes go
 //! back to the owner as requests ([`Op`]).
@@ -208,7 +208,7 @@ pub struct Sat {
     pub azim: u16,
 }
 
-/// A scan range preset (MENU 0 1 6; SCAN-4, SCAN-10).
+/// A scan range preset (MENU 0 1 4; SCAN-4, SCAN-10).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RangePreset {
     pub name: Buf<12>,
@@ -221,7 +221,7 @@ pub struct RangePreset {
     pub narrow: bool,
     /// Frequencies never stopped on (up to 48).
     pub skips: u8,
-    /// 0 Global (0 1 4's rule), 1-10 s, 11 carrier drop, 12 stop on hit (SCAN-5, SCAN-24).
+    /// 0 Global (0 1 2's rule), 1-10 s, 11 carrier drop, 12 stop on hit (SCAN-5, SCAN-24).
     pub resume: u8,
 }
 
@@ -251,14 +251,6 @@ pub struct ZoneCfg {
     pub pri: [Option<u16>; 2],
 }
 
-/// An FM broadcast preset.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FmPreset {
-    /// 10 kHz units: 10110 is 101.1 MHz.
-    pub freq: u16,
-    /// RDS name, when one was heard.
-    pub name: Buf<8>,
-}
 
 /// A DTMF memory (0 8 5 2, chapter 17): up to 16 symbols as nibbles, 0-9, A-D (10-13), * (14), # (15).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -497,13 +489,6 @@ pub trait Data {
     /// DTMF memory i's name (DTMF-12), empty when it has none.
     fn dtmf_name(&self, _i: u8) -> Buf<10> {
         Buf::new()
-    }
-
-    fn fm_presets(&self) -> u8 {
-        0
-    }
-    fn fm_preset(&self, _i: u8) -> Option<FmPreset> {
-        None
     }
 
     /// A change, to the record's owner.

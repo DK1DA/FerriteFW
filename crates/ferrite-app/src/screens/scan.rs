@@ -55,7 +55,7 @@ pub fn side2(app: &mut App, store: &impl ChannelStore) {
         app.out.push(RadioCmd::Scan { slot: a, on: true });
     }
     if app.set.scan_down {
-        app.out.push(RadioCmd::ScanDir { slot: a, up: false, resume: false }); // SCAN-26: 0 1 8 2
+        app.out.push(RadioCmd::ScanDir { slot: a, up: false, resume: false }); // SCAN-26: 0 1 6 2
     }
     app.screen = crate::Screen::Scan(Scan { slot: a, list: false, sel: 0 });
 }
@@ -287,7 +287,7 @@ impl View for Scan {
         let _ = uwrite!(hits, "{}", lv.hits);
         let mut skips = Buf::<28>::new();
         let _ = uwrite!(skips, "{}", lv.skips);
-        // SCAN-5: the zone's own rule over the radio's (0 1 4)
+        // SCAN-5: the zone's own rule over the radio's (0 1 2)
         let own = if sl.on_channel() && sl.zone != crate::chan::NO_ZONE { cx.store.data().zone_cfg(sl.zone).resume } else { 0 };
         let mut resume = Buf::<24>::new();
         super::groups::resume_text(&mut resume, ferrite_core::scan::Resume::code_over(own, app.set.scan_resume));

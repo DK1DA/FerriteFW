@@ -1928,7 +1928,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
                 return true;
             }
             3 if i == 0 => {
-                out.push("# Range presets (0 1 6)".as_bytes());
+                out.push("# Range presets (0 1 4)".as_bytes());
                 return true;
             }
             3 if i <= st.data().presets() as u16 => {

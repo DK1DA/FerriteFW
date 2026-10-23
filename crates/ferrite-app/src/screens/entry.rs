@@ -51,7 +51,7 @@ pub enum FreqSet {
     Aprs,
     /// 0 4 2 2, the pager frequency (136-520 MHz).
     Pager,
-    /// A range preset's start or end (0 1 6, A11; 18-1300 MHz).
+    /// A range preset's start or end (0 1 4, A11; 18-1300 MHz).
     RangeStart(u8),
     RangeEnd(u8),
 }

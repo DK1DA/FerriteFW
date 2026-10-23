@@ -8,7 +8,7 @@ from .core import test
 
 @test("BCR-1", pages=("Fm", "Group"))
 def fm_broadcast_screen(t):
-    """MENU 0 3 1 opens FM broadcast (◀▶ seek, OK presets); BACK leaves and the slots are as they were."""
+    """MENU 0 3 1 opens FM broadcast (◀▶ seek, OK the saved stations); BACK leaves and the slots are as they were."""
     before = [t.slot(L) for L in "AB"]
     u = t.keys("MENU 0 3 1")
     t.eq((u.id, u.title), ("Fm", "FM"), "MENU 0 3 1")
@@ -35,8 +35,7 @@ def scope_opens_and_closes(t):
 @test("SCAN-2", "KEY-18", "SBAR-11", pages=("Home", "Scan"))
 def side2_starts_and_stops_a_scan(t):
     """SIDE2 starts a scan on the active slot (the scan screen names its keys: SIDE2 Stop), SIDE2 stops it; the
-    slot line says scanning meanwhile; the target follows 0 1 4."""
-    target = t.get("0 1 3")
+    slot line says scanning meanwhile (the zone or the band: no target setting, MENU-33)."""
     u = t.keys("SIDE2")
     u = t.ui(0.3)
     t.eq(u.id, "Scan", "SIDE2: the scan screen")
@@ -44,7 +43,6 @@ def side2_starts_and_stops_a_scan(t):
     t.check("scanning" in t.slot("A"), "slot A scanning", t.slot("A"))
     u = t.keys("SIDE2")
     t.check("scanning" not in t.slot("A"), "stopped", t.slot("A"))
-    t.note(f"target {target}")
 
 
 @test("XB-2", "XB-3", pages=("Crossband", "Group"))

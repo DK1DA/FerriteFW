@@ -2,10 +2,10 @@
 //! RDS text, signal and SNR, stereo, and whether radio monitor is watching the slots (BCR-4). One FM state with
 //! home's broadcast slot ([`crate::bcast`]): while a slot plays broadcast this screen shows and tunes that slot.
 //!
-//! Keys (BCR-18): the knob or ▲▼ tune by the step, ◀▶ seek, OK the presets, 1 the presets and 2-5 the options at
-//! that row (so MENU 0 3 1 2 still reaches the step), hold MENU this screen's options (presets, step, AGC, radio
-//! monitor, sleep timer; 0 the full menu: BCR-3, MENU-25), BACK leaves, PTT leaves and transmits from home
-//! (BCR-16). The broadcast is an exclusive mode ([`super::activity::Mode::Fm`]): it stops when the screen goes
+//! Keys (BCR-18): the knob or ▲▼ tune by the step, ◀▶ seek, OK the saved stations (the channel browser's
+//! Broadcast view, BCR-31), 1-4 the options at that row (so MENU 0 3 1 1 still reaches the step), hold MENU this
+//! screen's options (step, AGC, radio monitor, sleep timer; 0 the full menu: BCR-3, MENU-25), BACK leaves, PTT
+//! leaves and transmits from home (BCR-16). The broadcast is an exclusive mode ([`super::activity::Mode::Fm`]): it stops when the screen goes
 //! home, by any route, unless a slot plays broadcast there.
 
 use super::nav::Dest;
@@ -29,35 +29,24 @@ use ufmt::uwrite;
 pub(crate) const LO: u16 = 6_400;
 pub(crate) const HI: u16 = 10_800;
 
-/// The options (BCR-3): label, help and the setting's menu path (0 3 1 1-5, kept for the terminal and muscle
+/// The options (BCR-3): label, help and the setting's menu path (0 3 1 1-4, kept for the terminal and muscle
 /// memory). Quick settings shows the same rows on a broadcast slot (BCR-28).
-pub(crate) const OPTIONS: [(&str, &str, &[u8]); 5] = [
-    ("Presets", "20 stations: OK picks one.", &[3, 1, 1]),
-    ("Step", "Tuning step: 50, 100 or 200 kHz.", &[3, 1, 2]),
-    ("AGC", "Automatic gain, or a fixed gain.", &[3, 1, 3]),
-    ("Radio monitor", "Slots keep watching; one opening interrupts.", &[3, 1, 4]),
-    ("Sleep timer", "End the broadcast after a time.", &[3, 1, 5]),
+pub(crate) const OPTIONS: [(&str, &str, &[u8]); 4] = [
+    ("Step", "Tuning step: 50, 100 or 200 kHz.", &[3, 1, 1]),
+    ("AGC", "Automatic gain, or a fixed gain.", &[3, 1, 2]),
+    ("Radio monitor", "Slots keep watching; one opening interrupts.", &[3, 1, 3]),
+    ("Sleep timer", "End the broadcast after a time.", &[3, 1, 4]),
 ];
 const ROWS: u8 = OPTIONS.len() as u8;
 
-/// An option's value text (the presets row: ">").
+/// An option's value text, and whether it differs from its default.
 pub(crate) fn option_text(app: &App, cx_dev: &ferrite_core::msg::Device, row: u8, b: &mut Buf<24>) -> bool {
-    match row {
-        0 => {
-            b.set(b">");
-            false
-        }
-        r => super::groups::wired(app, cx_dev, OPTIONS[r as usize % OPTIONS.len()].2, b).unwrap_or(false),
-    }
+    super::groups::wired(app, cx_dev, OPTIONS[row as usize % OPTIONS.len()].2, b).unwrap_or(false)
 }
 
-/// An option changed by the knob or ◀▶ (the presets row opens instead).
+/// An option changed by the knob or ◀▶.
 pub(crate) fn option_change(app: &mut App, row: u8, d: i32) {
-    if row == 0 {
-        app.open(Dest::FmPresets);
-    } else {
-        super::groups::change(app, OPTIONS[row as usize % OPTIONS.len()].2, d);
-    }
+    super::groups::change(app, OPTIONS[row as usize % OPTIONS.len()].2, d);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -109,14 +98,14 @@ impl View for Fm {
         b.set(b"FM");
     }
 
-    fn key(self, app: &mut App, e: KeyEvent, _: &impl ChannelStore) {
+    fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
         use Press::*;
         if self.menu {
             match (e.key, e.press) {
                 (Key::Up, Short | Repeat) => app.screen = Screen::Fm(Fm { row: (self.row + ROWS - 1) % ROWS, ..self }),
                 (Key::Down, Short | Repeat) => app.screen = Screen::Fm(Fm { row: (self.row + 1) % ROWS, ..self }),
                 (Key::Left | Key::Right, Short | Repeat) => option_change(app, self.row, if e.key == Key::Right { 1 } else { -1 }),
-                (Key::Digit(d @ 1..=5), Short) => app.screen = Screen::Fm(Fm { row: d - 1, ..self }),
+                (Key::Digit(d @ 1..=ROWS), Short) => app.screen = Screen::Fm(Fm { row: d - 1, ..self }),
                 (Key::Digit(0), Short) => app.open(Dest::Advanced), // MENU-25: 0 the full menu
                 (Key::Menu, Short) => option_change(app, self.row, 1),
                 (Key::Exit, Short) => app.screen = Screen::Fm(Fm { menu: false, ..self }),
@@ -127,9 +116,10 @@ impl View for Fm {
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => Fm::tune(app, if e.key == Key::Up { 1 } else { -1 }),
             (Key::Left | Key::Right, Short) => app.fm_seek(e.key == Key::Right),
-            (Key::Menu | Key::Digit(1), Short) => app.open(Dest::FmPresets), // OK: pick a station
-            // MENU 0 3 1 2-5 as before the screen took 0 3 1: the options at that row (BCR-3)
-            (Key::Digit(d @ 2..=5), Short) => app.screen = Screen::Fm(Fm { menu: true, row: d - 1, ..self }),
+            // BCR-31: OK the saved stations, the channel browser's Broadcast view
+            (Key::Menu, Short) => app.open_screen(Screen::Browse(super::browse::broadcast_view(store, app.set.show_hidden))),
+            // MENU 0 3 1 1-4 as before the screen took 0 3 1: the options at that row (BCR-3)
+            (Key::Digit(d @ 1..=ROWS), Short) => app.screen = Screen::Fm(Fm { menu: true, row: d - 1, ..self }),
             (Key::Exit, Short) => app.back(),
             _ => {}
         }
@@ -196,14 +186,12 @@ impl View for Fm {
             });
         }
         // RDS (BCR-26): the radio text, whole (it is shown once complete, BCR-30), wrapped; the station name only
-        // when there is no radio text; and the preset this frequency is stored in. Without RDS, no empty box.
+        // when there is no radio text. Without RDS, no empty box.
         let text = rds_text(&ps, &rt);
         let is_rt = !crate::bcast::trim(&rt).is_empty();
-        let pre = preset_text(cx.store.data(), f);
-        if app.dirty(R_INFO, hash(&(text, pre))) {
+        if app.dirty(R_INFO, hash(&text)) {
             ferrite_ui::canvas::banded(lcd, 0, 108, 240, 80, BG, |lcd| {
                 if text.is_empty() {
-                    w::field(lcd, 16, 208, 114, 136, 132, Align::Center, pre.as_bytes(), &UI_15B, TEXT, BG);
                     w::field(lcd, 16, 208, 138, 156, 152, Align::Center, b"No RDS", &UI_12, DIM, BG);
                 } else {
                     lcd.fill_r(8, 110, 224, 74, 2, SURFACE);
@@ -212,7 +200,6 @@ impl View for Fm {
                     } else {
                         w::field(lcd, 16, 208, 114, 136, 132, Align::Left, text, &UI_15B, TEXT, SURFACE);
                     }
-                    w::field(lcd, 16, 208, 166, 182, 178, Align::Left, pre.as_bytes(), &UI_12, DIM, SURFACE);
                 }
             });
         }
@@ -237,7 +224,7 @@ impl View for Fm {
         if self.menu {
             Hints::new(&[("Knob", "Change"), ("0", "Full menu"), ("BACK", "Back")])
         } else {
-            Hints::new(&[(ARROWS_LR, "Seek"), ("OK", "Presets"), ("BACK", "Back")]) // hold MENU: options, as everywhere
+            Hints::new(&[(ARROWS_LR, "Seek"), ("OK", "Stations"), ("BACK", "Back")]) // hold MENU: options, as everywhere
         }
     }
 }
@@ -250,19 +237,6 @@ fn title_text(app: &App) -> Buf<24> {
         let _ = uwrite!(title, " \u{b7} slot {}", w::LETTERS[s as usize % 3] as char);
     }
     title
-}
-
-/// The preset this frequency is stored in ("Preset 3 · CBC"), or nothing.
-fn preset_text(data: &dyn crate::data::Data, f: u16) -> Buf<24> {
-    let mut pre = Buf::<24>::new();
-    if let Some(i) = (0..super::recall::FM_PLACES as u8).find(|&i| data.fm_preset(i).is_some_and(|p| p.freq == f)) {
-        let _ = uwrite!(pre, "Preset {}", i + 1);
-        if let Some(p) = data.fm_preset(i).filter(|p| !p.name.is_empty()) {
-            pre.push(" \u{b7} ".as_bytes());
-            pre.push(p.name.as_bytes());
-        }
-    }
-    pre
 }
 
 /// Radio monitor's line (BCR-4), and whether a slot heard has paused the broadcast.
@@ -289,12 +263,11 @@ pub(crate) struct Shown {
     pub dbuv: u8,
     pub snr: u8,
     pub rds: Buf<64>,
-    pub preset: Buf<24>,
     pub monitor: Buf<40>,
 }
 
 impl Fm {
-    pub(crate) fn shown(app: &App, data: &dyn crate::data::Data, live: &LiveAll) -> Shown {
+    pub(crate) fn shown(app: &App, live: &LiveAll) -> Shown {
         let (ps, rt, rssi, snr, stereo) = match live.mode {
             ModeLive::Fm { ps, rt, rssi, snr, stereo, .. } if app.radio.fm_on => (ps, rt, rssi, snr, stereo),
             _ => ([b' '; 8], [0; 64], 0, 0, false),
@@ -309,7 +282,6 @@ impl Fm {
             dbuv: rssi,
             snr,
             rds: Buf::from(rds_text(&ps, &rt)),
-            preset: preset_text(data, f),
             monitor: monitor_text(app).0,
         }
     }

@@ -86,7 +86,7 @@ pub const ALERT_MS: u16 = 500;
 /// Edit in place ends after 8 s idle (EDIT-6); menus go home after the menu timeout (MENU-28, 0 7 9: 30 s).
 pub const EDIT_IDLE_MS: u32 = 8000;
 pub const MENU_TIMEOUT_MS: u32 = 30_000;
-/// Watch pause (0 1 8 1, default 1 min).
+/// Watch pause (0 1 6 1, default 1 min).
 pub const PAUSE_S: u16 = 60;
 /// After a transmission, watch waits this long with the active slot quiet, or until a key (WATCH-16; nicFW's 30 s).
 pub const TX_PAUSE_S: u16 = 30;
@@ -687,7 +687,7 @@ impl App {
         self.scan_move(slot, f, store);
     }
 
-    /// SCAN-6: SIDE2 stops a scan; with Return to "Last hit" (0 1 8 4) the slot moves to the scan's last hit,
+    /// SCAN-6: SIDE2 stops a scan; with Return to "Last hit" (0 1 6 4) the slot moves to the scan's last hit,
     /// as a PTT on a hit does (SCAN-19); else it stays where the scan started.
     pub(crate) fn stop_scan(&mut self, slot: u8, store: &impl ChannelStore) {
         self.out.push(RadioCmd::Scan { slot, on: false });
@@ -1439,7 +1439,7 @@ impl App {
         [0, 0b011, 0b111][self.watch as usize % 3] | (self.aprs_c() as u8) << aprs::APRS_SLOT
     }
 
-    /// The radio-wide settings the Radio task keeps: scan inputs (0 1 8 3, SCAN-22) and the subtone level
+    /// The radio-wide settings the Radio task keeps: scan inputs (0 1 6 3, SCAN-22) and the subtone level
     /// (0 8 8 1, TONE-16).
     pub(crate) fn send_radio_settings(&mut self) {
         self.out.push(RadioCmd::ScanTx(self.set.scan_tx));

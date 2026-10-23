@@ -53,13 +53,15 @@ script:
 ---
 title: Beacons
 layout: right
-left: Beacon now from the APRS card, or automatically.
+left: Beacon now from the APRS list (OK 3 OK on the APRS card), or automatically.
 right: Timed, by distance or smart beaconing (0 5 6 1). || Beacons go out at their own power, Low by default.
 setup: home
 script:
   wait 800ms
   hold OK
-  wait 1500ms
+  wait 1200ms
+  press 3
+  wait 900ms
   press OK
   wait 2500ms
   menu 0 5 6 1

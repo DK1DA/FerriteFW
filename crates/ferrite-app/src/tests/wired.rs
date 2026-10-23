@@ -20,7 +20,7 @@ fn menu_timeout_follows_its_setting() {
     assert!(matches!(t.app.screen(), Screen::Quick(_)), "Off: the menu stays");
 }
 
-/// WATCH-6: # pauses watch for 0 1 8 1's time.
+/// WATCH-6: # pauses watch for 0 1 6 1's time.
 #[test]
 fn pause_time_follows_its_setting() {
     let mut t = T::new();
@@ -76,7 +76,7 @@ fn smeter_as_dbm() {
     t.render(&mut fb);
 }
 
-/// CHAN-33: 0 2 5 shows a channel by its name, its number or its frequency (nothing in the name's place).
+/// CHAN-33: 0 2 4 shows a channel by its name, its number or its frequency (nothing in the name's place).
 #[test]
 fn channel_display() {
     let mut t = T::new();
@@ -94,7 +94,7 @@ fn channel_display() {
     assert!(t.app.card_name(0, &t.live, &s).is_empty(), "the frequency in its place");
 }
 
-/// SCAN-26, SCAN-6: Direction "Down" (0 1 8 2) starts the scan going down; Return to "Last hit" (0 1 8 4) leaves
+/// SCAN-26, SCAN-6: Direction "Down" (0 1 6 2) starts the scan going down; Return to "Last hit" (0 1 6 4) leaves
 /// a VFO on the scan's last hit when SIDE2 stops it, "Start" where it started.
 #[test]
 fn scan_direction_and_return() {

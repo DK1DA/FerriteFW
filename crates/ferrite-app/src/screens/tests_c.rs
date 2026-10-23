@@ -115,7 +115,7 @@ fn aprs_heard_in_and_out() {
 #[test]
 fn menu_paths_reach_the_lists() {
     // MENU 0 5 2 from home: advanced, group 5, then 2 (MENU-5)
-    for (path, name) in [([5, 2], "APRS messages"), ([4, 1], "Event log"), ([2, 1], "Channel browser"), ([2, 3], "Zones"), ([1, 6], "Range presets"), ([1, 7], "Skip list"), ([6, 2], "GPS position"), ([6, 7], "Waypoints"), ([5, 1], "APRS heard")] {
+    for (path, name) in [([5, 2], "APRS messages"), ([4, 1], "Event log"), ([2, 1], "Channel browser"), ([2, 3], "Zones"), ([1, 4], "Range presets"), ([1, 5], "Skip list"), ([6, 2], "GPS position"), ([6, 7], "Waypoints"), ([5, 1], "APRS heard")] {
         let mut t = T::new();
         t.hold(Key::Menu);
         t.tap(Key::Digit(path[0]));
@@ -124,12 +124,13 @@ fn menu_paths_reach_the_lists() {
         t.tap(Key::Exit);
         assert!(t.name().starts_with("Settings") || t.name() == "Settings group", "{path:?}: BACK returns to the group, not {}", t.name());
     }
+    // MENU 0 3 1 1: the FM screen's options on its first row, the step (BCR-3; decision 258)
     let mut t = T::new();
     t.hold(Key::Menu);
     t.tap(Key::Digit(3));
     t.tap(Key::Digit(1));
     t.tap(Key::Digit(1));
-    assert_eq!(t.name(), "FM presets", "MENU 0 3 1 1");
+    assert!(matches!(t.app.screen(), Screen::Fm(f) if f.menu && f.row == 0), "MENU 0 3 1 1: {}", t.name());
 }
 
 #[test]
@@ -239,10 +240,10 @@ fn browser_deletes_only_after_asking() {
 fn browser_views_and_copy_to_slot() {
     let mut t = T::new();
     t.open(Dest::Browse);
-    // the picker: six zones minus none, then All, bands, Recent, Nearby; Up wraps to Nearby
+    // the picker: six zones minus none, then All, bands, Broadcast, Recent, Nearby; Up wraps to Nearby
     t.tap(Key::Up);
     t.tap(Key::Menu);
-    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == 7));
+    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == 8));
     // CHAN-15: nearest first from the fix
     let Screen::Browse(b) = t.app.screen() else { panic!() };
     assert_eq!(b.cur.sel, 0);
@@ -446,10 +447,24 @@ fn skips_and_presets() {
     assert!(p.start < p.end);
 }
 
+/// Two saved stations, channels in the broadcast band (BCR-31): 88.5 in zone Local, 91.5 in no zone.
+fn stations(t: &T) {
+    use crate::chan::{channel, ChanWrite};
+    use crate::slot::DEFAULT_CFG;
+    use ferrite_core::freq::mhz;
+    t.s.apply(ChanWrite::Put { ch: channel(70, 0, mhz(88) + 50_000, "CBC 1", DEFAULT_CFG), from: None });
+    t.s.apply(ChanWrite::Put { ch: channel(71, NO_ZONE, mhz(91) + 50_000, "CBC 2", DEFAULT_CFG), from: None });
+}
+
+/// BCR-31.2, BCR-31.3: OK on the FM screen opens the channel browser's Broadcast view, every saved station in any zone;
+/// OK there plays one.
 #[test]
-fn fm_preset_tunes_the_broadcast_receiver() {
+fn fm_ok_opens_the_saved_stations_and_ok_plays_one() {
     let mut t = T::new();
-    t.open(Dest::FmPresets);
+    stations(&t);
+    t.open(Dest::FmBroadcast);
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == crate::screens::browse::V_BROADCAST), "{}", t.name());
     t.tap(Key::Down);
     t.cmds();
     t.tap(Key::Menu);
@@ -457,10 +472,11 @@ fn fm_preset_tunes_the_broadcast_receiver() {
     assert_eq!(t.name(), "FM broadcast");
 }
 
-/// BCR-25: with a slot playing broadcast, a preset recalls into that slot's VFO (one FM state).
+/// BCR-31.3, BCR-25: with a slot playing broadcast, a saved station plays in that slot's VFO (one FM state).
 #[test]
-fn fm_preset_recalls_into_the_broadcast_slot() {
+fn fm_station_plays_in_the_broadcast_slot() {
     let mut t = T::new();
+    stations(&t);
     t.app.set_vfo(1, 10_050_000);
     t.wait(100);
     assert_eq!(t.app.bcast_slot(), Some(1));
@@ -472,23 +488,20 @@ fn fm_preset_recalls_into_the_broadcast_slot() {
     assert!(t.cmds().contains(&RadioCmd::Broadcast(ferrite_core::msg::BroadcastCmd::Fm(9150))));
 }
 
-/// Picking a preset from the FM screen returns to that FM screen: one BACK leaves FM broadcast.
+/// BCR-31.3: a station picked from the FM screen returns to that FM screen: one BACK leaves FM broadcast.
 #[test]
-fn fm_preset_returns_to_the_same_fm_screen() {
+fn fm_station_returns_to_the_same_fm_screen() {
     let mut t = T::new();
     t.open(Dest::FmBroadcast); // BCR-1
-    assert_eq!(t.name(), "FM broadcast");
-    for options in [false, true] {
-        if options {
-            t.hold(Key::Menu); // the FM options: Presets is the first row (0 3 1 1)
-            t.tap(Key::Digit(1));
-        }
-        t.tap(Key::Menu);
-        assert_eq!(t.name(), "FM presets");
-        t.tap(Key::Down);
-        t.tap(Key::Menu);
-        assert!(matches!(t.app.screen(), Screen::Fm(f) if !f.menu));
-    }
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Browse(b) if b.view == crate::screens::browse::V_BROADCAST), "{}", t.name());
+    t.tap(Key::Exit);
+    t.tap(Key::Exit);
+    assert_eq!(t.name(), "FM broadcast", "BACK twice: the views, then FM");
+    stations(&t);
+    t.tap(Key::Menu);
+    t.tap(Key::Menu);
+    assert!(matches!(t.app.screen(), Screen::Fm(f) if !f.menu));
     t.tap(Key::Exit);
     assert!(matches!(t.app.screen(), Screen::Home), "one BACK leaves FM: {}", t.name());
 }
@@ -496,7 +509,7 @@ fn fm_preset_returns_to_the_same_fm_screen() {
 #[test]
 fn ptt_and_hold_back_from_every_list() {
     // Compose is the exception: PTT sends the message there (APRS-18; tests/aprs.rs).
-    for d in [Dest::EventLog, Dest::AprsHeard, Dest::AprsMessages, Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Waypoints, Dest::GpsPosition, Dest::HfRecent, Dest::FmPresets] {
+    for d in [Dest::EventLog, Dest::AprsHeard, Dest::AprsMessages, Dest::Browse, Dest::Zones, Dest::RangePresets, Dest::SkipList, Dest::Waypoints, Dest::GpsPosition, Dest::HfRecent] {
         let mut t = T::new();
         t.open(d);
         t.hold(Key::Exit);
@@ -574,7 +587,6 @@ fn hints_fit() {
         (Dest::GpsPosition, &[(Key::Right, 100)]),
         (Dest::Waypoints, &[(Key::Menu, 100)]),
         (Dest::HfRecent, &[]),
-        (Dest::FmPresets, &[]),
     ];
     for &(d, keys) in walks {
         t.open(d);
@@ -1170,4 +1182,23 @@ fn contact_names_in_rows() {
 fn about_names_the_licence() {
     let n = crate::screens::info::def(crate::screens::info::Page::About).note;
     assert!(n.contains("Copyright 2026 Alex Harvey") && n.contains("PolyForm Noncommercial 1.0.0"), "{n}");
+}
+
+/// MENU-33, MENU-6.1 (decisions 256, 259): no row says only "setting comes next": Background job, Scan target and the
+/// Nearby sort are out of the menu, and the rows after them closed up (0 1 2 Resume, 0 1 6 Advanced, 0 2 4
+/// Channel display); the FM presets row went too (decision 258: 0 3 1 1 is the step).
+#[test]
+fn stub_rows_are_out_of_the_menu() {
+    use crate::screens::groups::{items, GROUP_ITEMS, SUBS};
+    let all = GROUP_ITEMS.iter().flat_map(|g| g.iter()).chain(SUBS.iter().flat_map(|(_, l)| l.iter()));
+    for e in all {
+        assert!(!["Background job", "Scan target", "Nearby", "Presets"].contains(&e.name()), "{} is still a row", e.name());
+    }
+    assert_eq!(items(1, 0)[1].name(), "Resume");
+    assert_eq!(items(1, 0)[5].name(), "Advanced");
+    assert_eq!(items(1, 6)[0].name(), "Pause time");
+    assert_eq!(items(2, 0)[3].name(), "Channel display");
+    assert_eq!(items(3, 1)[0].name(), "Step");
+    assert_eq!(crate::screens::nav::menu0(&[1, 4]), Some(Dest::RangePresets));
+    assert_eq!(crate::screens::nav::menu0(&[1, 5]), Some(Dest::SkipList));
 }

@@ -302,7 +302,7 @@ def fm_back(t, freq):
     u = t.ui()
     if u.id != "Fm":
         u = t.keys("MENU 0 3 1")
-    step = t.get("0 3 1 2")
+    step = t.get("0 3 1 1")
     khz = float(step.split()[0])
     now = float(fm_line(u).get("freq", freq))
     n = round((float(freq) - now) * 1000 / khz)
@@ -434,10 +434,10 @@ def strip_beside_the_broadcast(t):
 def sleep_timer_ends_the_fm_screen_only(t):
     """The sleep timer at its shortest ends the FM screen's broadcast (home, a toast); a broadcast slot plays on
     past it until tuned out."""
-    u = t.keys("MENU 0 3 1 5")
-    t.eq(u.sel["name"], "Sleep timer", "MENU 0 3 1 5")
+    u = t.keys("MENU 0 3 1 4")
+    t.eq(u.sel["name"], "Sleep timer", "MENU 0 3 1 4")
     t.knob(1)
-    shortest = t.get("0 3 1 5")
+    shortest = t.get("0 3 1 4")
     t.note(f"sleep timer {shortest}")
     mins = float(shortest.split()[0])
     t.home()

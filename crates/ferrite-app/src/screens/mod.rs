@@ -439,7 +439,6 @@ pub(crate) fn short_title(name: &str) -> &str {
         "Extend TX" => "Extend",
         "Shortcut map" => "Shortcut",
         "HF recent" => "Recent",
-        "FM presets" => "Presets",
         "Calibrate" => "Trims",
         "SSB patch" => "SSB",
         "Add device" => "Device",

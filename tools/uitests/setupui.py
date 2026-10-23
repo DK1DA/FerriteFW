@@ -4,7 +4,7 @@ back with setup's `setup` line, its rows and the summary's note.
 "Run setup again" (MENU 0 9 7 1) goes through every page with OK, keeping what the radio has. The reset wipes
 the settings, the PIN, channels, zones, presets, the home channel, messages, the event log and waypoints: on the
 radio it runs only with --with reset, and the test writes the `dump` back after (settings, zones, presets,
-channels, the home channel); messages, the log, waypoints and FM presets aren't in a dump and stay gone.
+channels, the home channel); messages, the log and waypoints aren't in a dump and stay gone.
 """
 import datetime
 import os
@@ -209,11 +209,11 @@ def reset_then_setup(t):
             continue
         ok, why = t.cmd_err(f"{kind} {n} delete")
         t.check(ok, f"{kind} {n} (seeded by the reset) deleted", why)
-    # Range presets have no terminal delete: by keys on the list (MENU 0 1 6), * then OK, the last first.
+    # Range presets have no terminal delete: by keys on the list (MENU 0 1 4), * then OK, the last first.
     presets = [int(x.split()[1]) for x in t.cmd("dump").splitlines() if x.startswith("preset ")]
     for kind, n in sorted((e for e in extra if e[0] == "preset"), key=lambda e: -int(e[1])):
         t.home()
-        t.keys("MENU 0 1 6")
+        t.keys("MENU 0 1 4")
         i = presets.index(int(n))
         u = t.keys(" ".join(["DOWN"] * i + ["STAR"]))
         t.eq(u.id, "Confirm", f"* on preset {n}: delete it?")

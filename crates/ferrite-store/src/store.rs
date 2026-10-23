@@ -14,7 +14,7 @@
 //!
 //! The event log, the APRS messages, the APRS settings and quick messages, and the waypoints are kept here
 //! too ([`crate::logs`]); the message being written stays in RAM. What other tasks keep in their RAM (APRS
-//! heard, the beacon's state, the GPS fix and satellites, this scan's skips) and the FM presets come from
+//! heard, the beacon's state, the GPS fix and satellites, this scan's skips) come from
 //! `extra`: nothing on the radio for now, the sample data in the simulator.
 
 use crate::io::Flash;
@@ -1244,7 +1244,7 @@ fn zkey(z: u8) -> u8 {
     if z < MAX_ZONES { z } else { NO_ZONE }
 }
 
-/// The range presets a first boot gets after setup, by region (`0 1 6`'s default: 2 m, 70 cm, airband, marine,
+/// The range presets a first boot gets after setup, by region (`0 1 4`'s default: 2 m, 70 cm, airband, marine,
 /// plus what the region has: weather, GMRS/FRS, 1.25 m, PMR446). Steps index `slot::STEPS`, modes `slot::MODES`.
 pub fn default_presets(r: Region) -> impl Iterator<Item = RangePreset> {
     use Region::*;
@@ -1520,12 +1520,6 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
             return Buf::new();
         }
         dtmf_name_decode(&b).unwrap_or_default()
-    }
-    fn fm_presets(&self) -> u8 {
-        self.extra.fm_presets()
-    }
-    fn fm_preset(&self, i: u8) -> Option<FmPreset> {
-        self.extra.fm_preset(i)
     }
 
     fn busy(&self) -> bool {

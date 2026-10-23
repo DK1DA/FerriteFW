@@ -268,7 +268,6 @@ const BUDGET: &[(&str, u64)] = &[
     ("C15 Go to waypoint", 134000),
     ("C16 GPS position", 93000),
     ("C18 HF recent", 65000),
-    ("C19 FM presets", 69000),
     ("D1 Quick", 75000),
     ("D2 More", 110000),
     ("D3 Settings group", 64000),

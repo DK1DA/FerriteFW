@@ -1,5 +1,5 @@
 //! A radio's worth of sample records: channels in zones (some with positions), an event log, APRS stations
-//! and messages, a GPS fix with satellites, waypoints, range presets, FM presets and HF recent, all
+//! and messages, a GPS fix with satellites, waypoints, range presets and HF recent, all
 //! around Ottawa. The simulator and the host tests read them through the same traits the firmware's stores
 //! implement ([`ChannelStore`], [`Data`]); requests ([`Op`]) change them, so deleting, skipping or marking
 //! shows on screen. Host memory only: nothing here is linked into the firmware (it doesn't use it).
@@ -156,8 +156,6 @@ const PRESETS: [(&str, Freq10, Freq10, u8, u8, bool, u8); 4] = [
 ];
 
 const SKIPS: [Freq10; 3] = [mhz(146) + 94_000, mhz(147) + 15_000, mhz(145) + 29_000];
-
-const FM: [(u16, &str); 7] = [(8850, "CBC 1"), (9150, "CBC 2"), (9390, "CHEZ"), (10030, "MAJIC"), (10530, "KISS"), (10610, ""), (8930, "CKCU")];
 
 /// HF recent, newest first: frequency and mode (as `Param::Mode`: 2 AM, 3 USB, 4 LSB, 5 CW).
 const HF: [(Freq10, u8); 6] = [(707_400, 3), (1_407_400, 3), (376_000, 4), (1_013_600, 3), (703_000, 5), (607_000, 2)];
@@ -551,13 +549,6 @@ impl Data for Sample {
     }
     fn dtmf_name(&self, i: u8) -> Buf<10> {
         self.dtmf_names.get(i as usize).map_or(Buf::new(), |c| c.get())
-    }
-
-    fn fm_presets(&self) -> u8 {
-        FM.len() as u8
-    }
-    fn fm_preset(&self, i: u8) -> Option<FmPreset> {
-        FM.get(i as usize).map(|&(freq, n)| FmPreset { freq, name: txt(n) })
     }
 
     fn request(&self, op: Op) -> bool {
