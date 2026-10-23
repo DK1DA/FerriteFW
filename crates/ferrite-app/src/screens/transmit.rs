@@ -26,8 +26,8 @@ use ferrite_ui::text::Buf;
 use ferrite_ui::widgets as w;
 use ufmt::uwrite;
 
-/// The pre-alert (0 8 1 2, default 10 s) until the settings store holds it (TX-30); the timeout itself is 0 8 1 1
-/// (`Settings::tx_timeout_s`).
+/// TX-30.2: the timeout bar turns to its warning colour this long before the timeout (the pre-alert is the bar,
+/// decision 249); the timeout itself is 0 8 1 (`Settings::tx_timeout_s`).
 pub const PREALERT_S: u32 = 10;
 /// The emergency prompt waits this long for the second PTT (TX-3).
 pub const EMERGENCY_MS: u32 = 5000;
@@ -381,6 +381,7 @@ impl View for Transmit {
             app.ptt_released();
             app.back();
             app.show_toast(b"TX timeout", b"release PTT", false);
+            app.timeout_beep = app.now.wrapping_add(400).max(1); // TX-30.2: a beep once it is off
         }
     }
 

@@ -311,6 +311,8 @@ pub struct App {
     /// Refusal beeps sent since power-on (SND-4), wrapping: the refused screen's readback shows it (`beeps=`), as
     /// the 80 ms beep is too short to catch with `gpio` samples over the link.
     pub(crate) refusal_beeps: u8,
+    /// TX-30.2: when the timeout's beep is due (0 none): a moment after the unkey, the transmitter off.
+    pub(crate) timeout_beep: u32,
     /// A hash of the callsign the Radio task has for CW ID ([`App::send_tx_tones`]): [`App::tick`] sends it again
     /// whenever the setting's differs, whatever changed it (setup's callsign page typed into the setting and sent
     /// nothing: CW ID kept the old one until a restart, XB-12 on the radio, Oct 15, 2026).
@@ -440,6 +442,7 @@ impl App {
             rkeys: remote::RemoteKeys::default(),
             remote_in: false,
             refusal_beeps: 0,
+            timeout_beep: 0,
             cw_sent: 0,
             cmd_by: remote::BY_TERM,
             frames: 0,
@@ -1185,6 +1188,11 @@ impl App {
         if self.tx_pause && self.rx_mask & 1 << self.active != 0 && self.paused_until.is_some_and(|t| t.wrapping_sub(now) < (TX_PAUSE_S as u32 - 5) * 1000) {
             self.paused_until = Some(now.wrapping_add(TX_PAUSE_S as u32 * 1000));
             self.out.push(RadioCmd::PauseWatch(TX_PAUSE_S));
+        }
+        // TX-30.2: the timeout's beep, once the transmitter is off
+        if self.timeout_beep != 0 && after(now, self.timeout_beep) {
+            self.timeout_beep = 0;
+            self.out.push(RadioCmd::Beep { hz: ALERT_HZ, ms: ALERT_MS });
         }
         // MENU-28: a menu's timeout is 0 7 9's (Off never); other screens keep their own (EDIT-6)
         let timeout = self.screen.timeout().and_then(|t| if t == MENU_TIMEOUT_MS { self.set.menu_timeout_ms() } else { Some(t) });

@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(Settings { spare_temp: 0, ..b }, Settings::DEFAULT);
     }
 
-    /// The bytes saved after the spare: 0 8 3's mic gain, 0 8 1 1's timeout, then the eight settings wired in
+    /// The bytes saved after the spare: 0 8 3's mic gain, 0 8 1's timeout, then the eight settings wired in
     /// decision 243 (menu timeout to scan return), a byte each.
     const AFTER_SPARE: usize = 11;
 

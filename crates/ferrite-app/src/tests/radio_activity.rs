@@ -126,7 +126,7 @@ fn radio_refusal_shows() {
     assert_eq!(refused(&t), Some(Refusal::Locked));
 }
 
-/// TX-30.3: unkey at the timeout (0 8 1 1, 120 s by default), home with a toast.
+/// TX-30.3: unkey at the timeout (0 8 1, 120 s by default), home with a toast.
 #[test]
 fn timeout_unkeys() {
     let mut t = ready();
@@ -137,7 +137,7 @@ fn timeout_unkeys() {
     assert!(t.cmds().contains(&RadioCmd::Transmit { slot: 0, on: false }));
 }
 
-/// TX-30.3, TX-30.4 (TX audit F10): 0 8 1 1 sets the timeout the UI unkeys at, and goes to the Radio task for its
+/// TX-30.3, TX-30.4 (TX audit F10): 0 8 1 sets the timeout the UI unkeys at, and goes to the Radio task for its
 /// backstop.
 #[test]
 fn timeout_follows_the_setting() {
@@ -2420,4 +2420,25 @@ fn system_and_about_rows() {
     id.selftest.uid = [0x3F2A_91C0, 0x7D44_0E18, 0xA2B6_5C93];
     // SELF-8: the 96 bits as 20 base32 digits, one row of four groups of five
     assert_eq!(show(Page::About, "ID", 0, &id), "R28JM FRR1S 27V4T WPTH0", "one row");
+}
+
+/// TX-30.2: at the timeout the alert tone sounds once, a moment after the unkey (never while keyed).
+#[test]
+fn timeout_beeps_after_the_unkey() {
+    let mut t = T::new();
+    t.app.radio.tx_built = true;
+    t.app.set_region(Some(ferrite_core::txplan::Region::Us), false);
+    t.app.set.tx_timeout = 1; // 30 s
+    let s = store();
+    t.app.key_down(Key::PTT, t.t, &s);
+    assert!(matches!(t.app.screen(), Screen::Transmit(_)));
+    t.cmds();
+    t.wait(30_000);
+    let c = t.cmds();
+    assert!(!c.iter().any(|c| matches!(c, RadioCmd::Beep { hz: crate::ALERT_HZ, .. })) || t.app.radio.keyed.is_none());
+    t.wait(600);
+    let c = [c, t.cmds()].concat();
+    assert!(c.iter().any(|c| matches!(c, RadioCmd::Beep { hz: crate::ALERT_HZ, .. })), "the beep: {c:?}");
+    assert!(t.app.radio.keyed.is_none(), "unkeyed");
+    t.app.key_up(Key::PTT, t.t, &s);
 }

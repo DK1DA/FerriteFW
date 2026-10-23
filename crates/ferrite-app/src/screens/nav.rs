@@ -312,7 +312,7 @@ pub const ALL: [Dest; 67] = {
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 55] = [
+pub const MENU0: [(&[u8], Dest); 54] = [
     (&[1, 8], Dest::Sub(1, 8)),
     (&[1, 6], Dest::RangePresets),
     (&[1, 7], Dest::SkipList),
@@ -346,7 +346,6 @@ pub const MENU0: [(&[u8], Dest); 55] = [
     (&[7, 4], Dest::Sub(7, 4)),
     (&[7, 5], Dest::Sub(7, 5)),
     (&[7, 7], Dest::Sub(7, 7)), // Battery Save, Low Power Mode (PWR-24)
-    (&[8, 1], Dest::Sub(8, 1)),
     (&[8, 2], Dest::Sub(8, 2)),
     (&[8, 8], Dest::Sub(8, 8)), // Advanced: subtone level, tail, Extend TX, Dry TX (TX-48)
     (&[8, 5], Dest::Sub(8, 5)),

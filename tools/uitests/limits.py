@@ -21,8 +21,8 @@ def walk(t, path, steps, start_low=60):
 
 @test("TX-30.1", pages=("Group",))
 def tx_timeout_range(t):
-    """The TX timeout (0 8 1 1) is always on: 30 s to 600 s in 30 s steps, nothing under 30 s and no Off."""
-    seen = walk(t, "0 8 1 1", 21)
+    """The TX timeout (0 8 1) is always on: 30 s to 600 s in 30 s steps, nothing under 30 s and no Off."""
+    seen = walk(t, "0 8 1", 21)
     t.eq(seen[0], "30 s", "the lowest is 30 s")
     want = [f"{s} s" for s in range(30, 601, 30)]
     t.eq(seen[:20], want, "30 s steps up to 600 s")

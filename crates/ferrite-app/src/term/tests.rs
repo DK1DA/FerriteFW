@@ -1496,7 +1496,7 @@ fn debug_txtest_suite() {
         r.send(b"\r");
     }
     r.cmd("txtest suite");
-    r.serve(4, |_| DebugAns::Refused("the suite runs 60 s: set the TX timeout (0 8 1 1) to 90 s or more first"));
+    r.serve(4, |_| DebugAns::Refused("the suite runs 60 s: set the TX timeout (0 8 1) to 90 s or more first"));
     assert!(r.raw().contains("refused: the suite runs 60 s"), "{}", r.raw());
 }
 

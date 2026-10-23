@@ -49,7 +49,7 @@ impl Radio {
                 use ferrite_core::txtest::{Ask, Signal};
                 match ask {
                     Ask::Set(Some(a)) if a.signal == Signal::Suite && self.tx.timeout_s < ferrite_core::txsuite::TIMEOUT_MIN_S => {
-                        return DebugAns::Refused("the suite runs 60 s: set the TX timeout (0 8 1 1) to 90 s or more first");
+                        return DebugAns::Refused("the suite runs 60 s: set the TX timeout (0 8 1) to 90 s or more first");
                     }
                     Ask::Set(a) => {
                         self.tx.test = a;

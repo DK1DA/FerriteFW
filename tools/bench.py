@@ -25,7 +25,7 @@ each run's numbers stored, compared with the previous run of the same configurat
 
 Per run (TERM-34, LINK-20, LINK-33, LINK-34; everything goes over the link, nothing through the keypad):
   1. save slot A as it is (`slot A`; its VFO's if it is on a channel), the active slot, the end tone (0 8 4) and
-     the TX timeout (0 8 1 1);
+     the TX timeout (0 8 1);
   2. `slot A vfo FREQ MODE low tone off`, `slot A active`, `set 0 8 4 Off`, the TX timeout raised to 120 s if it
      is under 90 s, `txtest suite`;
   3. start rtl_sdr, key over the link (LINK-20 keepalives every 0.5 s) for the suite's 60 s and the 1 kHz hold, unkey;
@@ -124,7 +124,7 @@ import ferrite_link as fl  # noqa: E402
 import sdrsuite  # noqa: E402
 import sdrtx  # noqa: E402
 
-TX_TIMEOUT = "0 8 1 1"
+TX_TIMEOUT = "0 8 1"
 END_TONE = "0 8 4"
 SUBTONE_LEVEL = "0 8 8 1"
 EXTEND_TX = "0 8 8 4"
@@ -2473,7 +2473,7 @@ class FakeRadio:
                 raise TermError("txtest: the receive-only build has no transmit: txtest needs a tx or tx-dry build")
             if len(w) > 1 and w[1] == "suite":
                 if int(re.match(r"\d+", self.set[TX_TIMEOUT]).group()) < 90:
-                    raise TermError("txtest suite: the suite runs 60 s: set the TX timeout (0 8 1 1) to 90 s or more first")
+                    raise TermError("txtest suite: the suite runs 60 s: set the TX timeout (0 8 1) to 90 s or more first")
                 self.txtest = "suite"
             elif len(w) > 1 and w[1] == "afsk":
                 self.txtest = ("afsk", int(w[-1]) if w[-1].isdigit() else 100)

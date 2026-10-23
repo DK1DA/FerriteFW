@@ -124,7 +124,7 @@ const G7: [Entry; 9] = [
     Entry("Menu timeout|30 s|An idle menu returns home."),
 ];
 const G8: [Entry; 8] = [
-    Entry("Timeout|120 s|Transmit timeout and its pre-alert."),
+    Entry("Timeout|120 s|Transmit stops after this; a beep says so."),
     Entry("VOX|Off|Voice-operated transmit."),
     Entry("Mic gain|5|Higher is louder on air: 1-9."),
     Entry("End tone|Off|A short tone as you let go of PTT."),
@@ -150,7 +150,7 @@ pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 25] = [
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 24] = [
     ((1, 8), &[
         Entry("Pause time|1 min|# on home pauses watch this long."),
         Entry("Direction|Up|Scan up or down."),
@@ -243,10 +243,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 25] = [
         Entry("Battery Save|Level 1|Receiver sleep: longer life, slower."),
         Entry("Low Power Mode|Off|One VFO, everything else off. SIDE1+SIDE2 hold: leave."),
         Entry("Auto below|20 %|Auto turns it on below this battery."),
-    ]),
-    ((8, 1), &[
-        Entry("TX timeout|120 s|Transmit stops after this."),
-        Entry("Pre-alert|10 s|Warning before the timeout."),
     ]),
     ((8, 2), &[
         Entry("VOX|Off|Transmit when you talk."),
@@ -509,7 +505,7 @@ static SETTINGS: [Setting; 87] = [
     field!([7, 7, 3], lpm_below: u8, Kind::Level(10, 40, 10, pct_text), Nothing),
     field!([7, 8, 0], auto_off: u8, Kind::Round(AUTO_OFF_TIMES.len() as u8, auto_off_text), Nothing),
     field!([7, 9, 0], menu_timeout: u8, Kind::Pick(&crate::settings::MENU_TIMEOUT_NAMES), Nothing),
-    field!([8, 1, 1], tx_timeout: u8, Kind::Level(1, 20, 1, tx_timeout_text), TxTimeout),
+    field!([8, 1, 0], tx_timeout: u8, Kind::Level(1, 20, 1, tx_timeout_text), TxTimeout),
     field!([8, 2, 1], vox: bool, Kind::Flip(&ON_OFF), Vox),
     field!([8, 2, 2], vox_level: u8, Kind::Level(1, 9, 1, vox_level_text), Vox),
     field!([8, 2, 3], vox_tail: u8, Kind::Round(VOX_TAILS.len() as u8, vox_tail_text), Vox),

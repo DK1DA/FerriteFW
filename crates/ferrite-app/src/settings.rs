@@ -160,7 +160,7 @@ pub struct Settings {
     pub vox_tail: u8,
     /// 0 8 3 (VOX-15): Mic gain 1-9, 5 stock's default REG_7D.
     pub mic_gain: u8,
-    /// 0 8 1 1 (TX-30): the transmit timeout in 30 s steps, 1-20 (30-600 s; stock's TOT counts 30 s too).
+    /// 0 8 1 (TX-30): the transmit timeout in 30 s steps, 1-20 (30-600 s; stock's TOT counts 30 s too).
     pub tx_timeout: u8,
     /// 0 3 1 5 (BCR-5): the broadcast's sleep timer, an index into [`SLEEP_TIMES`] (0 off).
     pub fm_sleep: u8,
@@ -499,7 +499,7 @@ impl Settings {
         }
     }
 
-    /// TX-30: 0 8 1 1's timeout in seconds, 30-600.
+    /// TX-30: 0 8 1's timeout in seconds, 30-600.
     pub fn tx_timeout_s(&self) -> u32 {
         self.tx_timeout.clamp(1, 20) as u32 * 30
     }

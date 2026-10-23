@@ -53,7 +53,7 @@ pub enum RadioCmd {
     /// The CTCSS/DCS level sent: 0 low, 1 the calibration's, 2 high (TONE-16, 0 8 8 1; sent at start-up and when
     /// it changes).
     ToneLevel(u8),
-    /// The transmit timeout in seconds, 30-600 (TX-30, 0 8 1 1; sent at start-up and when it changes): the UI
+    /// The transmit timeout in seconds, 30-600 (TX-30, 0 8 1; sent at start-up and when it changes): the UI
     /// unkeys at it, the Radio task's sequencer 5 s later as the backstop.
     TxTimeout(u16),
     /// Mic gain 1-9 (VOX-15, 0 8 3; sent at start-up and when it changes): REG_7D at every voice key-up
