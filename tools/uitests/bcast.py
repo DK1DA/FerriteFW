@@ -114,10 +114,10 @@ def knob_tunes_and_arrows_seek_the_broadcast_card(t):
 @test("BCR-7", pages=("More", "Group"))
 def no_volume_setting(t):
     """The SI4732's volume is fixed (the knob on top is the volume): no volume setting in any menu group, only the
-    beep volume (0 7 5 2)."""
+    beep volume (0 7 5 2) and the message sound's (0 7 5 6, APRS-6.2): local sounds, not the radio's audio."""
     # Every setting the menus have is in `dump` (one table: MENU-7), with its name: the run's snapshot.
     found = sorted((p, n) for p, n in t.state.names.items() if "volume" in n.lower())
-    t.eq(found, [("0 7 5 2", "Beep volume")], "the only volume setting is the beep's")
+    t.eq(found, [("0 7 5 2", "Beep volume"), ("0 7 5 6", "Message volume")], "the only volume settings are the local sounds' (beep, message sound)")
     for g in range(1, 10):
         t.home()
         u = t.keys(f"MENU 0 {g}")

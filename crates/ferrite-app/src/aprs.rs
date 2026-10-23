@@ -389,7 +389,8 @@ impl Holder {
 impl App {
     /// APRS mode is on (0 5 3).
     pub fn aprs_on(&self) -> bool {
-        self.set.aprs_mode && !self.low_power() // PWR-24: no APRS in Low Power Mode
+        // PWR-24: no APRS in Low Power Mode. KISS-10: KISS on suspends it (the app does APRS; the setting is kept).
+        self.set.aprs_mode && !self.low_power() && !self.set.kiss_on()
     }
 
     /// APRS-22: without APRS mode, the active slot is on a channel flagged APRS, so what it receives is decoded
@@ -402,7 +403,12 @@ impl App {
     /// Automatic beacons are on (0 5 6 1 timed, distance or smart; APRS-24): with APRS mode off they still hold C
     /// (APRS-29). Manual ("Beacon now" only) doesn't.
     pub fn beacons_on(&self) -> bool {
-        self.aprs.beacons_on() && !self.low_power()
+        self.aprs.beacons_on() && !self.low_power() && !self.set.kiss_on() // KISS-10
+    }
+
+    /// KISS-10: why the radio won't send APRS of its own now (KISS on: the app sends), if so.
+    pub fn kiss_holds_aprs(&self) -> Option<&'static str> {
+        self.set.kiss_on().then_some("KISS on: the app sends")
     }
 
     /// What holds slot C as the APRS slot, if anything: APRS mode (APRS-15), KISS (KISS-9: its frames go out
@@ -410,10 +416,10 @@ impl App {
     pub fn aprs_holder(&self) -> Option<Holder> {
         if self.low_power() {
             None // PWR-24: Low Power Mode holds nothing on C
+        } else if self.set.kiss_on() {
+            Some(Holder::Kiss) // KISS-10: first, APRS mode and beacons wait while it is on
         } else if self.set.aprs_mode {
             Some(Holder::Mode)
-        } else if self.set.kiss_on() {
-            Some(Holder::Kiss)
         } else if self.beacons_on() {
             Some(Holder::Beacon)
         } else {

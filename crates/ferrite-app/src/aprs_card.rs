@@ -5,6 +5,7 @@
 //! | holder      | header         | right of the frequency          | bottom line, left                    |
 //! |-------------|----------------|---------------------------------|--------------------------------------|
 //! | APRS mode   | APRS Mode · VHF| "14 heard"                      | "Last VE7ABC-9 · 2 min"              |
+//! | (+ beacons) | APRS + Beacon ·| (APRS-17.5)                     |                                      |
 //! | KISS        | APRS KISS · VHF| "Bluetooth" or "Cable"          | "Sent 3 · Heard 14"                  |
 //! | Beacons     | APRS Beacon ·  | "next in" over "4:32", or why   | "Every 10 min · GPS fix"             |
 //!

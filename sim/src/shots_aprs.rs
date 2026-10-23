@@ -94,13 +94,20 @@ pub fn run(scale: u32) {
     s.keys(&[Key::Menu, D(0), D(5), D(3)]);
     s.app.knob(1, s.t, &s.store);
     s.press(Key::Exit, 800);
-    s.keys(&[Key::Menu, D(0), D(5), D(5), D(1)]);
+    s.keys(&[Key::Menu, D(0), D(5), D(6), D(1)]);
     s.app.knob(5, s.t, &s.store);
     s.press(Key::Exit, 800);
     s.run(62_000);
     s.save("aprsmode-card");
     s.keys(&[Key::Slot, Key::Slot]);
     s.save("aprsmode-card-big");
+    // APRS-17.6: \* mutes C; the card says so by the power, the header keeps "VHF shared"
+    s.press(Key::Star, 80);
+    s.save("aprsmode-card-muted-big");
+    s.keys(&[Key::Slot]);
+    s.save("aprsmode-card-muted");
+    s.keys(&[Key::Slot, Key::Slot]);
+    s.press(Key::Star, 80);
     s.press(Key::Up, 80);
     s.run(200);
     crate::save(&s.fb, "aprsmode-locked", scale); // APRS-19's toast

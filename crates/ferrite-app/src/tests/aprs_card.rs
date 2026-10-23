@@ -7,7 +7,7 @@ use crate::data::Data;
 use crate::sample::Sample;
 use ferrite_core::msg::Device;
 use ferrite_ui::fb::FrameBuffer;
-use ferrite_ui::gfx::VIOLET;
+use ferrite_ui::gfx::{AMBER, VIOLET};
 use std::format;
 use std::string::String;
 use std::vec::Vec;
@@ -181,4 +181,46 @@ fn aprs_card_beacon() {
     let k = a.app.aprs_card(&a.s).unwrap();
     assert_eq!(k.holder, Holder::Mode);
     assert!(!k.next.is_empty(), "beacons on beside APRS mode: next= still");
+}
+
+/// APRS-17.5: APRS mode with automatic beacons says both in the header, "APRS + Beacon", beside APRS-21's
+/// "VHF shared"; APRS-17.6: \* (quick mute) on the APRS card shows "Muted ·" by the power in amber, and the header
+/// keeps its state for the shared note.
+#[test]
+fn aprs_card_beacon_and_mute() {
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.app.set_aprs(AprsCfg { beacon: 5, ..a.app.aprs_cfg() }); // every 10 min
+    a.tick();
+    let l = a.card_line();
+    assert!(l.contains("head=\"APRS + Beacon \u{b7} VHF\""), "{l}");
+    a.c_active();
+    a.press(Key::Star, 100);
+    a.wait(3500);
+    let (y, _) = crate::screens::home::card(APRS_SLOT, a.app.active());
+    let fb = a.fb();
+    assert!(count(&fb, 120, y + 80, 106, 19, AMBER) > 20, "Muted, by the power");
+    assert!(count(&fb, 34, y + 7, 120, 17, VIOLET) > 20, "the holder word still drawn");
+}
+
+/// KISS-10: KISS on suspends the radio's own APRS sending: APRS mode and automatic beacons wait (kept as set),
+/// KISS holds C, 0 5 3 and 0 5 6 1 are greyed with why, and Beacon now and sending a message are refused.
+#[test]
+fn kiss_suspends_the_radios_own_aprs() {
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.app.set_aprs(AprsCfg { beacon: 5, ..a.app.aprs_cfg() });
+    a.tick();
+    assert!(a.app.aprs_on() && a.app.beacons_on());
+    a.app.set.kiss_port = 1; // the cable
+    a.tick();
+    assert!(!a.app.aprs_on() && !a.app.beacons_on(), "suspended");
+    assert!(a.app.set.aprs_mode && a.app.aprs_cfg().beacons_on(), "the settings kept");
+    assert_eq!(a.app.aprs_holder(), Some(Holder::Kiss));
+    assert_eq!(crate::screens::groups::greyed(&a.app, &[5, 3]), Some("KISS on: the app sends"));
+    assert_eq!(crate::screens::groups::greyed(&a.app, &[5, 6, 1]), Some("KISS on: the app sends"));
+    a.app.set.kiss_port = 0;
+    a.tick();
+    assert!(a.app.aprs_on() && a.app.beacons_on(), "back as they were");
+    assert_eq!(a.app.aprs_holder(), Some(Holder::Mode));
 }

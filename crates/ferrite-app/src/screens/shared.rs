@@ -280,8 +280,10 @@ impl App {
         let lv = &live.slots[s as usize];
         b.clear();
         if let Some(h) = self.aprs_holder().filter(|_| s == crate::aprs::APRS_SLOT) {
-            // APRS-17 (decision 181): what holds C, "APRS Mode", "APRS KISS", "APRS Beacon"
+            // APRS-17 (decision 181): what holds C, "APRS Mode", "APRS KISS", "APRS Beacon"; APRS-17.5: "APRS +
+            // Beacon" with automatic beacons beside APRS mode
             b.push(match h {
+                crate::aprs::Holder::Mode if self.beacons_on() => b"APRS + Beacon".as_slice(),
                 crate::aprs::Holder::Mode => b"APRS Mode".as_slice(),
                 crate::aprs::Holder::Kiss => b"APRS KISS",
                 crate::aprs::Holder::Beacon => b"APRS Beacon",

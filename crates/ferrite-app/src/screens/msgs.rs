@@ -567,6 +567,9 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     if app.remote_tx_refused() {
         return; // LINK-19: a message is a transmission
     }
+    if let Some(why) = app.kiss_holds_aprs() {
+        return app.show_toast(b"Not sent", why.as_bytes(), false); // KISS-10
+    }
     let mut s = c.resolved(store);
     if s.field == 1 && s.pred(app) && !app.text.is_empty() {
         let mut t = text_of(store, s);

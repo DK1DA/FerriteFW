@@ -189,6 +189,10 @@ impl View for Options {
                     if matches!(op, Op::BeaconNow | Op::Send) && app.remote_tx_refused() {
                         return; // LINK-19: a beacon or message now is a transmission
                     }
+                    if let Some(why) = app.kiss_holds_aprs().filter(|_| matches!(op, Op::BeaconNow | Op::Send)) {
+                        app.back();
+                        return app.show_toast(b"Not sent", why.as_bytes(), false); // KISS-10
+                    }
                     app.back();
                     if store.data().request(op) {
                         match op {

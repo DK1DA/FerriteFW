@@ -152,8 +152,16 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
     let Some(k) = app.aprs_card(data) else { return };
     let rc = if k.right_warn { AMBER } else if k.countdown { VIOLET } else { TEXT };
     let lc = if k.line_warn { AMBER } else { SUB };
-    let pw = k.power.as_bytes();
+    // APRS-17.6: a muted APRS slot says so beside the power, in amber
+    let muted = app.mute & 1 << s != 0;
+    let mut pwb = Buf::<16>::new();
+    if muted {
+        pwb.push("Muted \u{b7} ".as_bytes());
+    }
+    pwb.push(k.power.as_bytes());
+    let pw = pwb.as_bytes();
     let pw_w = text4_width(pw, &UI_12);
+    let pc = if muted { AMBER } else { SUB };
     app.drawn.meter[p] = None;
     if big {
         let mut beacon = Buf::<28>::new();
@@ -165,11 +173,11 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
             });
         }
         // The bottom line's facts, the power at the right.
-        if app.dirty(R_INFO + p, hash(&(&k.line, lc, pw))) {
+        if app.dirty(R_INFO + p, hash(&(&k.line, lc, pw, muted))) {
             lcd.fill(14, y + 80, 212, 19, SURFACE);
             let lw = 211 - pw_w - 8;
             w::field(lcd, 15, lw, y + 80, y + 98, y + 94, Align::Left, w::fit(k.line.as_bytes(), &UI_12, lw), &UI_12, lc, SURFACE);
-            w::field(lcd, 226 - pw_w, pw_w, y + 80, y + 98, y + 94, Align::Right, pw, &UI_12, SUB, SURFACE);
+            w::field(lcd, 226 - pw_w, pw_w, y + 80, y + 98, y + 94, Align::Right, pw, &UI_12, pc, SURFACE);
         }
         // The beacon row, the holder's fact at the right; with beacons alone, "Next beacon in" and the countdown.
         if k.holder == crate::aprs::Holder::Beacon && !waiting {
@@ -196,11 +204,11 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
                 }
             });
         }
-        if app.dirty(R_SUB + p, hash(&(&k.line, lc, pw))) {
+        if app.dirty(R_SUB + p, hash(&(&k.line, lc, pw, muted))) {
             ferrite_ui::canvas::banded(lcd, 15, y + 51, 211, 15, SURFACE, |lcd| {
                 let lw = 211 - pw_w - 8;
                 w::field(lcd, 15, lw, y + 51, y + 65, y + 61, Align::Left, w::fit(k.line.as_bytes(), &UI_12, lw), &UI_12, lc, SURFACE);
-                w::field(lcd, 226 - pw_w, pw_w, y + 51, y + 65, y + 61, Align::Right, pw, &UI_12, SUB, SURFACE);
+                w::field(lcd, 226 - pw_w, pw_w, y + 51, y + 65, y + 61, Align::Right, pw, &UI_12, pc, SURFACE);
             });
         }
     }
@@ -443,6 +451,13 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     let big = s == app.active;
     let lv = live.slots[s as usize];
     let (state, sc) = app.state(s, live);
+    // APRS-17.6: on the APRS card the mute shows by the power at the bottom right, so "VHF shared" keeps the
+    // header's right side
+    let (state, sc) = match state {
+        "Muted" if app.aprs_slot(s) => ("idle", SUB),
+        "RX muted" if app.aprs_slot(s) => ("RX", GREEN),
+        _ => (state, sc),
+    };
     let border = if big { BLUE } else if state == "RX" { GREEN } else { LINE };
     let aprs = app.aprs_slot(s);
     let kind = card_kind(app, s);
@@ -511,7 +526,8 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
         let hw = if wide { 226 - ww - 34 } else { (226 - 6 - head_right_w(big, state, &clr) - 34).max(120) };
         let sx = 34 + hw;
         let hb_ = head.as_bytes();
-        let split = hb_.iter().position(|&c| c == b' ').and_then(|i| hb_[i + 1..].iter().position(|&c| c == b' ').map(|j| i + 1 + j));
+        // the holder is what comes before " · " ("APRS Mode", "APRS + Beacon")
+        let split = hb_.windows(3).position(|w| w == " \u{b7}".as_bytes());
         if let Some(n) = split.filter(|_| aprs) {
             // APRS-17: the holder ("APRS Mode") bold in C's colour, " · VHF" as any header; with APRS-21's amber
             // "VHF shared" beside it the band goes, as that names it.
