@@ -259,6 +259,11 @@ impl Ports {
         self.links[1].take_reboot() || c
     }
 
+    /// `STOCK_RESTORE` accepted on the cable, once, with its seq (BACKUP-7, LINK-8; Bluetooth's session refuses it).
+    pub fn take_restore(&mut self) -> Option<u8> {
+        self.links[0].take_restore()
+    }
+
     /// The cable session's `HELLO`s (LINK-11: a new rate stays once one arrives at it).
     pub fn hellos(&self) -> u16 {
         self.links[0].hellos()

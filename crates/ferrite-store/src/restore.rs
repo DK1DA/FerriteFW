@@ -1,0 +1,156 @@
+//! The radio's side of `STOCK_RESTORE` (BACKUP-7, decision 261; the protocol is [`ferrite_core::restore`]): each
+//! request carried out on the chip and answered. Only inside `ranges` (the driver's own writable ranges), never
+//! calibration or the update area ([`ferrite_core::restore::allowed`]); the driver's guard refuses them as well.
+
+use crate::{Crc32, Nor, Result};
+use core::ops::Range;
+use ferrite_core::layout::CALIBRATION;
+use ferrite_core::link::Status;
+use ferrite_core::restore::{self as r, Op};
+
+/// What the caller does after sending the answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum After {
+    Next,
+    /// `FINISH`: reset into the bootloader, saving nothing.
+    Reset,
+}
+
+async fn wait<N: Nor>(nor: &mut N) -> Result {
+    while nor.busy()? {
+        N::pause().await;
+    }
+    Ok(())
+}
+
+async fn crc<N: Nor>(nor: &mut N, addr: u32, len: u32) -> Result<u32> {
+    let mut c = Crc32::new();
+    let mut buf = [0u8; 256];
+    let (mut at, end) = (addr, addr + len);
+    while at < end {
+        let n = ((end - at) as usize).min(buf.len());
+        nor.read(at, &mut buf[..n])?;
+        c.update(&buf[..n]);
+        at += n as u32;
+        if at % 0x4000 == 0 {
+            N::pause().await; // a long read lets the other tasks run
+        }
+    }
+    Ok(c.get())
+}
+
+/// The `START` answer (status `Ok` first) into `out`: the chip, the calibration sector's CRC-32 (so the PC can tell
+/// the backup is this radio's) and the ranges. Its length.
+pub async fn start<N: Nor>(nor: &mut N, chip: u32, ranges: &[Range<u32>], out: &mut [u8]) -> usize {
+    let Ok(cal) = crc(nor, CALIBRATION.start, CALIBRATION.end - CALIBRATION.start).await else {
+        out[0] = Status::Busy as u8;
+        return 1;
+    };
+    out[0] = Status::Ok as u8;
+    1 + r::start_answer(chip, cal, ranges, &mut out[1..])
+}
+
+/// One request after `START`: carried out, its answer (status first) in `out`. `START` again answers as the first
+/// did.
+pub async fn serve<N: Nor>(nor: &mut N, chip: u32, ranges: &[Range<u32>], payload: &[u8], out: &mut [u8]) -> (usize, After) {
+    let Some(op) = r::parse(payload) else {
+        out[0] = Status::BadArg as u8;
+        return (1, After::Next);
+    };
+    if let Err(s) = r::check(&op, ranges, chip) {
+        out[0] = s as u8;
+        return (1, After::Next);
+    }
+    let done = match op {
+        Op::Start => return (start(nor, chip, ranges, out).await, After::Next),
+        Op::Finish => {
+            out[0] = Status::Ok as u8;
+            return (1, After::Reset);
+        }
+        Op::Erase(a) => match nor.start_erase(a) {
+            Ok(()) => wait(nor).await,
+            e => e,
+        },
+        Op::Program(a, d) => match nor.start_program(a, d) {
+            Ok(()) => wait(nor).await,
+            e => e,
+        },
+        Op::Crc(a, n) => match crc(nor, a, n).await {
+            Ok(c) => {
+                out[0] = Status::Ok as u8;
+                out[1..5].copy_from_slice(&c.to_le_bytes());
+                return (5, After::Next);
+            }
+            Err(e) => Err(e),
+        },
+    };
+    // A driver refusal or a failed chip: `refused`, nothing more is tried for it.
+    out[0] = if done.is_ok() { Status::Ok } else { Status::Refused } as u8;
+    (1, After::Next)
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use crate::block;
+    use crate::sim::SimFlash;
+    use ferrite_core::layout::{SETTINGS, UPDATE_AREA, WRITABLE};
+    use std::vec::Vec;
+
+    fn ask(f: &mut SimFlash, p: &[u8]) -> (u8, Vec<u8>, After) {
+        let mut out = [0u8; 240];
+        let (n, after) = block(serve(f, 4 << 20, &WRITABLE, p, &mut out));
+        (out[0], out[1..n].to_vec(), after)
+    }
+
+    fn req(op: u8, addr: u32, rest: &[u8]) -> Vec<u8> {
+        let mut p = std::vec![op];
+        p.extend_from_slice(&addr.to_le_bytes());
+        p.extend_from_slice(rest);
+        p
+    }
+
+    /// BACKUP-7: a sector erased, programmed in chunks and read back; the START answer names calibration's CRC and
+    /// the ranges; FINISH resets.
+    #[test]
+    fn restore_round_trip() {
+        let mut f = SimFlash::new();
+        f.mem[0xF000..0x10000].fill(0x5A); // calibration: never written by the simulated chip, only read
+        let (s, a, _) = ask(&mut f, &[r::START]);
+        assert_eq!(s, 0);
+        assert_eq!(&a[..4], &(4u32 << 20).to_le_bytes());
+        let mut c = Crc32::new();
+        c.update(&[0x5A; 4096]);
+        assert_eq!(&a[4..8], &c.get().to_le_bytes());
+        assert_eq!(a[8] as usize, WRITABLE.len());
+
+        let at = SETTINGS.start;
+        f.mem[at as usize..at as usize + 4096].fill(0x00);
+        assert_eq!(ask(&mut f, &req(r::ERASE, at, &[])).0, 0);
+        assert!(f.mem[at as usize..at as usize + 4096].iter().all(|&b| b == 0xFF));
+        let data: Vec<u8> = (0..4096u32).map(|i| (i * 7 + 1) as u8).collect();
+        for k in (0..4096).step_by(r::CHUNK) {
+            assert_eq!(ask(&mut f, &req(r::PROGRAM, at + k as u32, &data[k..k + r::CHUNK])).0, 0);
+        }
+        assert_eq!(&f.mem[at as usize..at as usize + 4096], &data[..]);
+        let (s, a, _) = ask(&mut f, &req(r::CRC, at, &4096u32.to_le_bytes()));
+        let mut c = Crc32::new();
+        c.update(&data);
+        assert_eq!((s, a), (0, c.get().to_le_bytes().to_vec()));
+        assert_eq!(ask(&mut f, &[r::FINISH]).2, After::Reset);
+    }
+
+    /// BACKUP-7, LINK-4: calibration and the update area are refused before the chip is asked (the simulated chip
+    /// would panic on them), and so is stock's data outside Ferrite's ranges.
+    #[test]
+    fn restore_refuses_protected_ranges() {
+        let mut f = SimFlash::new();
+        for a in [CALIBRATION.start, 0, UPDATE_AREA.start, UPDATE_AREA.end - 4096] {
+            assert_eq!(ask(&mut f, &req(r::ERASE, a, &[])).0, Status::Refused as u8, "{a:#x}");
+            assert_eq!(ask(&mut f, &req(r::PROGRAM, a, &[0; 16])).0, Status::Refused as u8, "{a:#x}");
+        }
+        assert_eq!(ask(&mut f, &req(r::ERASE, SETTINGS.start + 1, &[])).0, Status::BadArg as u8);
+        assert_eq!(ask(&mut f, &[7]).0, Status::BadArg as u8);
+        assert_eq!(f.erases.iter().sum::<u32>(), 0, "nothing erased");
+    }
+}

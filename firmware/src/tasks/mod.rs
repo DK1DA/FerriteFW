@@ -8,6 +8,7 @@ pub mod gps;
 pub mod input;
 pub mod link;
 pub mod radio;
+pub mod restore;
 pub mod storage;
 pub mod ui;
 

@@ -552,6 +552,11 @@ pub async fn task() {
             if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)
             }
+            // BACKUP-7 (decision 261): the way back to stock has the cable from here until it resets.
+            if let Some(seq) = ports.take_restore() {
+                send_shutdown(&mut app, &mut held).await;
+                super::restore::run(store, &mut lcd, seq).await;
+            }
             if ports.take_reboot() {
                 // LINK-24: the radio quiet, everything written (at most 3 s), the answer out, then a system
                 // reset: the stock bootloader listens for the updater first, as after hwtest's `reboot`.

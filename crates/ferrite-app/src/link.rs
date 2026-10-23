@@ -64,6 +64,9 @@ pub struct Session {
     baud: Option<u32>,
     /// `REBOOT` was accepted: the caller restarts once the answer has gone (LINK-24).
     reboot: bool,
+    /// `STOCK_RESTORE`'s `START` was accepted (BACKUP-7, decision 261): its seq, for the caller, which answers it
+    /// once the radio has stopped and then serves the restore itself.
+    restore: Option<u8>,
     hellos: u16,
     /// Who this session is for remote PTT and keys: [`crate::remote::BY_CABLE`] (trusted) or [`crate::remote::BY_BT`].
     by: u8,
@@ -124,6 +127,7 @@ impl Session {
             max_baud: 115_200,
             baud: None,
             reboot: false,
+            restore: None,
             hellos: 0,
             by: if trusted { crate::remote::BY_CABLE } else { crate::remote::BY_BT },
             closed: None,
@@ -218,6 +222,12 @@ impl Session {
         core::mem::take(&mut self.reboot)
     }
 
+    /// `STOCK_RESTORE`'s `START` accepted, once, with its seq: the caller stops the radio, answers it and serves the
+    /// restore from then on ([`ferrite_core::restore`]); this session sent no answer.
+    pub fn take_restore(&mut self) -> Option<u8> {
+        self.restore.take()
+    }
+
     /// `HELLO`s handled so far.
     pub fn hellos(&self) -> u16 {
         self.hellos
@@ -261,6 +271,11 @@ impl Session {
                 p[..pl].copy_from_slice(f.payload);
                 (self.last, self.seen) = (now, true);
                 let len = self.handle(app, store, dev, live, now, ty, &p[..pl], &mut ans);
+                if ty == msg::STOCK_RESTORE && ans[0] == Status::Ok as u8 {
+                    self.restore = Some(seq); // the caller answers (BACKUP-7)
+                    (self.have, self.rn) = (false, 0);
+                    return;
+                }
                 match &mut self.many {
                     Some(m) => {
                         m.seq = seq;
@@ -349,6 +364,12 @@ impl Session {
                 self.reboot = true;
                 Status::Ok
             }
+            // BACKUP-7, LINK-8: the cable only, never while transmitting or while the other port writes; only `START`
+            // here (the rest go to the restore the caller runs once this is accepted).
+            msg::STOCK_RESTORE if self.by != crate::remote::BY_CABLE => Status::Refused,
+            msg::STOCK_RESTORE if app.radio.keyed.is_some() || live.tx.keyed || self.other_writing => Status::Busy,
+            msg::STOCK_RESTORE if p != [ferrite_core::restore::START] => Status::BadArg,
+            msg::STOCK_RESTORE => Status::Ok,
             msg::KEY => key(app, st, self.by, now, p, &mut o),
             msg::SLOT => slot(app, st, p, &mut o),
             msg::CMD => self.command(app, st, dev, live, p, &mut o),
