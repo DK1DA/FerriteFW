@@ -109,7 +109,9 @@ def installed_image_matches_its_btf(t):
 
 BUILT = {fl.HELLO, fl.INFO, fl.AUTH, fl.READ, fl.WRITE, fl.DELETE, fl.BEGIN, fl.END, fl.SLOT, fl.BAUD, fl.REBOOT,
          fl.KEY, fl.CMD, fl.MORE, fl.UI, fl.USED, fl.READ_MANY, fl.WRITE_MANY, fl.LOG_READ,
-         fl.SUBSCRIBE, fl.HEARD, fl.MSGS, fl.MSG_SEND}  # EVENT (0x51): radio to PC only
+         fl.SUBSCRIBE, fl.HEARD, fl.MSGS, fl.MSG_SEND,
+         0x60}  # EVENT (0x51): radio to PC only. 0x60 STOCK_RESTORE (decision 261): calibration and the update area
+                # are refused by ferrite_core::restore::allowed (host-tested), and it is cable only (refused here)
 
 
 @test("LINK-3", "SAFE-5", "TERM-8", pages=("Home",))

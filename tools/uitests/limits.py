@@ -88,7 +88,8 @@ def squelch_screen_floor(t):
 @test("TX-12.1", pages=("Home", "Quick"))
 def power_shows_level_names(t):
     """Power shows as its level name only: LOW, MID or HIGH on the cards and the quick menu's TX power row (no
-    watts), 1.25 m too (TX-9: no cap). Slot A made active first: the cards read are the active slot's (a run that
+    watts). On 1.25 m the card says LOW whatever is set (TX-9, decision 260) and the quick menu keeps the setting.
+    Slot A made active first: the cards read are the active slot's (a run that
     starts on B read B's LOW on 1.25 m)."""
     t.cmd("slot A vfo 146.52 active")
     for i in range(3):
@@ -103,7 +104,7 @@ def power_shows_level_names(t):
     t.cmd("slot A vfo 223.5 mid")
     u = t.home()
     # HOME-4.2: "No TX" where the region has no 1.25 m.
-    t.check(u.active["power"] in ("MID", "No TX"), "1.25 m: the level, or No TX outside the region's bands",
+    t.check(u.active["power"] in ("LOW", "No TX"), "1.25 m: LOW (TX-9), or No TX outside the region's bands",
             u.active["power"])
     u = t.keys("MENU")
     t.eq(u.row("TX power")["value"], "Mid", "and the quick menu says it")

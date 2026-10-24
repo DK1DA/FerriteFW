@@ -199,9 +199,9 @@ def hf_starts_on_low(t):
 
 @test("TX-9", "LINK-33", pages=("Quick",))
 def power_levels_on_125m(t):
-    """1.25 m: power is set like any band's, as stock (no cap since Oct 21, 2026): quick settings' TX power isn't
-    greyed, and `slot A high` (as the link's SLOT) goes in; the card shows HIGH, or No TX where the region has no
-    1.25 m (HOME-4.2)."""
+    """1.25 m: the setting is kept like any band's (quick settings' TX power isn't greyed, and `slot A high`, as the
+    link's SLOT, goes in), but the card shows LOW: 1.25 m transmits at Low only (TX-9, decision 260); or No TX
+    where the region has no 1.25 m (HOME-4.2)."""
     t.cmd("slot A vfo 223.5 low")
     u = t.keys("MENU")
     p = u.row("TX power")
@@ -210,7 +210,7 @@ def power_levels_on_125m(t):
     ok, why = t.cmd_err("slot A high")
     t.check(ok, "`slot A high` goes in", why)
     u = t.home()
-    t.check(u.active["power"] in ("HIGH", "No TX"), "the card: HIGH, or No TX outside the region's bands",
+    t.check(u.active["power"] in ("LOW", "No TX"), "the card: LOW (TX-9), or No TX outside the region's bands",
             u.active["power"])
     tune(t)
 
