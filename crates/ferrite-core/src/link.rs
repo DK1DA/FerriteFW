@@ -145,6 +145,9 @@ pub mod msg {
     /// Send an APRS message (LINK-45): to (length, text), the message (length, text); queued as the radio's
     /// compose queues it.
     pub const MSG_SEND: u8 = 0x54;
+    /// The way back to stock (BACKUP-7, LINK-4, LINK-8; [`crate::restore`]): the cable only. `START` stops the radio
+    /// and hands the cable to the restore until it resets; erase, program and CRC requests follow, then `FINISH`.
+    pub const STOCK_RESTORE: u8 = 0x60;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).

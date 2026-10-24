@@ -20,6 +20,7 @@
 pub mod io;
 pub mod logs;
 pub mod records;
+pub mod restore;
 pub mod scratch;
 pub mod settings;
 pub mod ssb;

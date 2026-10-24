@@ -1677,3 +1677,29 @@ fn contacts_over_the_link() {
     assert_eq!(s, Status::Invalid as u8);
     assert!(std::str::from_utf8(&a[1..]).unwrap().starts_with("callsign"));
 }
+
+/// BACKUP-7, LINK-8: STOCK_RESTORE's START on the cable is taken by the caller (no answer from the session); never
+/// on Bluetooth, while transmitting, or as any other op.
+#[test]
+fn stock_restore_start_on_the_cable_only() {
+    use ferrite_core::restore::{ERASE, START};
+    let mut pc = Pc::new(true);
+    pc.app.radio.keyed = Some(0);
+    assert_eq!(pc.ask(msg::STOCK_RESTORE, &[START]).0, Status::Busy as u8, "not while transmitting");
+    pc.app.radio.keyed = None;
+    assert_eq!(pc.ask(msg::STOCK_RESTORE, &[ERASE, 0, 0, 0, 0]).0, Status::BadArg as u8, "START first");
+    assert_eq!(pc.link.take_restore(), None);
+    pc.seq = 41;
+    let mut w = [0u8; MAX_WIRE];
+    let n = wire::build(msg::STOCK_RESTORE, 42, &[START], &mut w).unwrap();
+    pc.raw(&w[..n]);
+    let mut out = Wire(Vec::new());
+    pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now + 10, &mut out);
+    assert!(out.0.is_empty(), "the caller answers");
+    assert_eq!(pc.link.take_restore(), Some(42));
+    assert_eq!(pc.link.take_restore(), None, "once");
+    assert!(pc.link.ready(), "the port takes the next frame");
+    let mut bt = Pc::new(false);
+    assert_eq!(bt.ask(msg::STOCK_RESTORE, &[START]).0, Status::Refused as u8, "never over Bluetooth");
+    assert_eq!(bt.link.take_restore(), None);
+}

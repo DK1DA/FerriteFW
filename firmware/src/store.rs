@@ -40,9 +40,9 @@ const T_SUS_US: u32 = 20;
 
 /// Where writes may go: ferrite_core::layout::WRITABLE, or nowhere in the bring-up build.
 #[cfg(not(feature = "bringup"))]
-const WRITE_OK: &[core::ops::Range<u32>] = &WRITABLE;
+pub(crate) const WRITE_OK: &[core::ops::Range<u32>] = &WRITABLE;
 #[cfg(feature = "bringup")]
-const WRITE_OK: &[core::ops::Range<u32>] = &[];
+pub(crate) const WRITE_OK: &[core::ops::Range<u32>] = &[];
 
 /// The W25Q (None when it didn't answer at power on: nothing is stored this power-on).
 pub struct Chip {
@@ -53,6 +53,11 @@ pub struct Chip {
 }
 
 impl Chip {
+    /// The chip's size in bytes (0 when it didn't answer).
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
     fn command(spi: &mut Flash, op: u8) {
         spi.select(true);
         spi.transfer(op);

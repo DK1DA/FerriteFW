@@ -35,6 +35,7 @@ pub mod memmap;
 pub mod msg;
 pub mod name;
 pub mod path;
+pub mod restore;
 pub mod rxsleep;
 pub mod same;
 pub mod same_rx;
