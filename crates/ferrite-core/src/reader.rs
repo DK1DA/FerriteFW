@@ -45,15 +45,24 @@ pub const Z_DEFLATE: u8 = 4;
 /// [`deflate_fixed`]'s hash table of positions: 2^13 entries, 16 KB.
 pub const DEFLATE_HASH_BITS: u32 = 13;
 
-/// `fdumpz`'s working memory: the coded chunk and the encoder's hash table (about 32 KB).
+/// A whole `fdumpz` frame: header, mode byte and chunk at most, CRC.
+pub const ZFRAME: usize = HDR + ZBUF + 4;
+
+/// `fdumpz`'s working memory (about 48 KB): two whole frames, one on the cable while the next is coded into the
+/// other, and the encoder's hash table. The radio keeps it in static memory, so a frame being sent from the
+/// interrupt is never on a stack that moves on.
 pub struct ZWork {
-    pub out: [u8; ZBUF],
+    pub frames: [[u8; ZFRAME]; 2],
     pub head: [u16; 1 << DEFLATE_HASH_BITS],
 }
 
 impl ZWork {
     pub const fn new() -> Self {
-        Self { out: [0; ZBUF], head: [0; 1 << DEFLATE_HASH_BITS] }
+        Self { frames: [[0; ZFRAME]; 2], head: [0; 1 << DEFLATE_HASH_BITS] }
+    }
+    /// The first frame's coded chunk (mode byte first): what [`zcode`] wrote.
+    pub fn coded(&self) -> &[u8] {
+        &self.frames[0][HDR..]
     }
 }
 
@@ -152,6 +161,13 @@ impl Sync {
 /// The cable and a clock, as `fdump` needs them (the radio's UART4 and cycle counter; a scripted host in the tests).
 pub trait Link {
     fn write(&mut self, b: &[u8]);
+    /// Starts sending a whole frame and may return before it has gone ([`Link::sent`] waits): the caller leaves
+    /// `frame` alone until then. A plain write by default.
+    fn send(&mut self, frame: &[u8]) {
+        self.write(frame)
+    }
+    /// Waits until what [`Link::send`] started has gone.
+    fn sent(&mut self) {}
     /// The next byte within `ms`, or None.
     fn getc(&mut self, ms: u32) -> Option<u8>;
     /// Drops whatever has come and not been taken.
@@ -299,15 +315,20 @@ pub fn deflate_fixed(src: &[u8], out: &mut [u8], head: &mut [u16; 1 << DEFLATE_H
     if b.full { None } else { Some(b.o) }
 }
 
-/// BACKUP-9.6: a chunk coded into `z.out`, the smallest of: [`Z_ERASED`] (every byte 0xFF, the mode byte alone),
+/// BACKUP-9.6: a chunk coded into the first frame of `z`, the smallest of: [`Z_ERASED`] (every byte 0xFF, the mode byte alone),
 /// [`Z_DEFLATE`] and [`Z_RAW`]. Returns the coded length.
 pub fn zcode(chunk: &[u8], z: &mut ZWork) -> usize {
+    zcode_into(chunk, &mut z.frames[0][HDR..HDR + ZBUF], &mut z.head)
+}
+
+/// [`zcode`] into `out` (at least the chunk's length plus one).
+pub fn zcode_into(chunk: &[u8], out: &mut [u8], head: &mut [u16; 1 << DEFLATE_HASH_BITS]) -> usize {
     if chunk.iter().all(|&b| b == 0xFF) {
-        z.out[0] = Z_ERASED;
+        out[0] = Z_ERASED;
         return 1;
     }
-    let (mode, rest) = z.out.split_at_mut(1);
-    if let Some(k) = deflate_fixed(chunk, &mut rest[..chunk.len() - 1], &mut z.head) {
+    let (mode, rest) = out.split_at_mut(1);
+    if let Some(k) = deflate_fixed(chunk, &mut rest[..chunk.len() - 1], head) {
         mode[0] = Z_DEFLATE;
         return 1 + k;
     }
@@ -348,7 +369,7 @@ pub fn fdump_run(
     read: impl FnMut(u32, &mut [u8]),
     progress: impl FnMut(u32, u32) -> bool,
 ) -> Result<Dumped, Stopped> {
-    dump(link, buf, None, addr, len, read, progress)
+    dump(link, buf, addr, len, read, progress)
 }
 
 /// `fdumpz` (BACKUP-9.6): `fdump` with [`ZCHUNK`] chunks sent coded ([`zcode`]) as [`TYPE_ZBLOCK`] frames; the
@@ -356,25 +377,92 @@ pub fn fdump_run(
 pub fn fdumpz_run(
     link: &mut impl Link,
     buf: &mut [u8; ZCHUNK],
-    zbuf: &mut ZWork,
-    addr: u32,
-    len: u32,
-    read: impl FnMut(u32, &mut [u8]),
-    progress: impl FnMut(u32, u32) -> bool,
-) -> Result<Dumped, Stopped> {
-    dump(link, buf, Some(zbuf), addr, len, read, progress)
-}
-
-fn dump(
-    link: &mut impl Link,
-    buf: &mut [u8],
-    mut zbuf: Option<&mut ZWork>,
+    z: &mut ZWork,
     addr: u32,
     len: u32,
     mut read: impl FnMut(u32, &mut [u8]),
     mut progress: impl FnMut(u32, u32) -> bool,
 ) -> Result<Dumped, Stopped> {
     let t0 = link.ms();
+    handshake(link, addr, t0)?;
+    let (mut done, mut resends, mut crc, mut blocks) = (0u32, 0u32, 0u32, 0u32);
+    let ZWork { frames, head } = z;
+    let (fa, fb) = frames.split_at_mut(1);
+    let f = [&mut fa[0], &mut fb[0]];
+    if len > 0 {
+        // Chunk N goes out from one frame while chunk N+1 is read and coded into the other; N's frame is left
+        // alone until its ACK, so a resend sends it as it was.
+        let mut n = len.min(ZCHUNK as u32);
+        read(addr, &mut buf[..n as usize]);
+        crc = crc32(crc, &buf[..n as usize]);
+        let mut cur = 0;
+        let mut c = zframe(f[0], addr, &buf[..n as usize], head);
+        loop {
+            link.clear_rx();
+            link.send(&f[cur][..c]);
+            let next = done + n;
+            let (mut nn, mut nc) = (0, 0);
+            if next < len {
+                nn = (len - next).min(ZCHUNK as u32);
+                read(addr + next, &mut buf[..nn as usize]);
+                crc = crc32(crc, &buf[..nn as usize]);
+                nc = zframe(f[1 - cur], addr + next, &buf[..nn as usize], head);
+            }
+            link.sent();
+            match ack_or_resend(link, &f[cur][..c], &mut resends) {
+                Some(true) => {}
+                Some(false) => return Err(Stopped { at: addr + done, why: "cancelled by the host" }),
+                None => return Err(Stopped { at: addr + done, why: "no acknowledgement" }),
+            }
+            done = next;
+            blocks += 1;
+            if !progress(done, blocks) {
+                return Err(Stopped { at: addr + done, why: "the power switch is off" });
+            }
+            if done >= len {
+                break;
+            }
+            cur = 1 - cur;
+            n = nn;
+            c = nc;
+        }
+    }
+    let end = end_payload(addr, len, crc, resends);
+    if send_frame(link, &header(TYPE_END, addr, 16), &end, &mut resends) != Some(true) {
+        return Err(Stopped { at: addr + done, why: "end frame not acknowledged" });
+    }
+    Ok(Dumped { crc, blocks, resends, ms: link.ms().wrapping_sub(t0) })
+}
+
+/// A chunk coded into a whole frame (header, coded chunk, CRC); its length.
+fn zframe(frame: &mut [u8; ZFRAME], at: u32, data: &[u8], head: &mut [u16; 1 << DEFLATE_HASH_BITS]) -> usize {
+    let c = zcode_into(data, &mut frame[HDR..HDR + ZBUF], head);
+    frame[..HDR].copy_from_slice(&header(TYPE_ZBLOCK, at, c as u16));
+    let crc = frame_crc(&frame[..HDR], &frame[HDR..HDR + c]);
+    frame[HDR + c..HDR + c + 4].copy_from_slice(&crc);
+    HDR + c + 4
+}
+
+/// The ACK for a frame already sent, sending it again (whole, as it was) on a NAK or silence, as [`send_frame`].
+fn ack_or_resend(link: &mut impl Link, frame: &[u8], resends: &mut u32) -> Option<bool> {
+    for t in 0..TRIES {
+        if t > 0 {
+            *resends += 1;
+            link.clear_rx();
+            link.send(frame);
+            link.sent();
+        }
+        match link.getc(ACK_MS) {
+            Some(ACK) => return Some(true),
+            Some(CAN) => return Some(false),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The sync before the first frame: the host's FDS1 until FDOK.
+fn handshake(link: &mut impl Link, addr: u32, t0: u32) -> Result<(), Stopped> {
     let mut sync = Sync::default();
     let mut synced = false;
     while !synced && link.ms().wrapping_sub(t0) < SYNC_MS {
@@ -391,19 +479,25 @@ fn dump(
     link.write(&SYNC_OK);
     link.pause(20);
     link.clear_rx();
+    Ok(())
+}
+
+fn dump(
+    link: &mut impl Link,
+    buf: &mut [u8],
+    addr: u32,
+    len: u32,
+    mut read: impl FnMut(u32, &mut [u8]),
+    mut progress: impl FnMut(u32, u32) -> bool,
+) -> Result<Dumped, Stopped> {
+    let t0 = link.ms();
+    handshake(link, addr, t0)?;
     let (mut done, mut resends, mut crc, mut blocks) = (0u32, 0u32, 0u32, 0u32);
     while done < len {
         let n = (len - done).min(buf.len() as u32);
         let data = &mut buf[..n as usize];
         read(addr + done, data);
-        let sent = match zbuf.as_deref_mut() {
-            Some(z) => {
-                let c = zcode(data, z);
-                send_frame(link, &header(TYPE_ZBLOCK, addr + done, c as u16), &z.out[..c], &mut resends)
-            }
-            None => send_frame(link, &header(TYPE_BLOCK, addr + done, n as u16), data, &mut resends),
-        };
-        match sent {
+        match send_frame(link, &header(TYPE_BLOCK, addr + done, n as u16), data, &mut resends) {
             Some(true) => {}
             Some(false) => return Err(Stopped { at: addr + done, why: "cancelled by the host" }),
             None => return Err(Stopped { at: addr + done, why: "no acknowledgement" }),
@@ -875,6 +969,8 @@ mod tests {
         end: Option<[u8; 16]>,
         now: u32,
         clears: u32,
+        /// fdumpz: bytes still to come (an erased chunk carries no length of its own).
+        zlen: usize,
     }
 
     impl Host {
@@ -891,6 +987,7 @@ mod tests {
                 end: None,
                 now: 0,
                 clears: 0,
+                zlen: 0,
             }
         }
 
@@ -924,6 +1021,19 @@ mod tests {
                     let a = u32::from_le_bytes(frame[4..8].try_into().unwrap());
                     assert_eq!(a as usize, self.data.len(), "blocks in order, no repeats");
                     self.data.extend_from_slice(&frame[HDR..HDR + n]);
+                }
+                TYPE_ZBLOCK => {
+                    let a = u32::from_le_bytes(frame[4..8].try_into().unwrap());
+                    assert_eq!(a as usize, self.data.len(), "chunks in order, no repeats");
+                    let (mode, body) = (frame[HDR], &frame[HDR + 1..HDR + n]);
+                    let chunk = match mode {
+                        Z_RAW => body.to_vec(),
+                        Z_DEFLATE => miniz_oxide::inflate::decompress_to_vec(body).unwrap(),
+                        Z_ERASED => std::vec![0xFF; self.zlen.min(ZCHUNK)],
+                        m => panic!("mode {m}"),
+                    };
+                    self.zlen -= chunk.len();
+                    self.data.extend_from_slice(&chunk);
                 }
                 TYPE_END => self.end = Some(frame[HDR..HDR + 16].try_into().unwrap()),
                 t => panic!("frame type {t}"),
@@ -1007,12 +1117,12 @@ mod tests {
         let mut z = std::boxed::Box::new(ZWork::new());
         for (c, m) in cases.iter().zip(modes) {
             let n = zcode(c, &mut z);
-            assert_eq!(z.out[0], m);
+            assert_eq!(z.coded()[0], m);
             assert!(n <= ZBUF);
             let back = match m {
                 Z_ERASED => std::vec![0xFF; ZCHUNK],
-                Z_RAW => z.out[1..n].to_vec(),
-                _ => miniz_oxide::inflate::decompress_to_vec(&z.out[1..n]).unwrap(),
+                Z_RAW => z.coded()[1..n].to_vec(),
+                _ => miniz_oxide::inflate::decompress_to_vec(&z.coded()[1..n]).unwrap(),
             };
             assert_eq!(&back[..], &c[..]);
         }
@@ -1020,10 +1130,10 @@ mod tests {
         // Short and odd lengths: the end of a range.
         for len in [1usize, 2, 3, 4, 5, 259, 1000] {
             let n = zcode(&cases[3][..len], &mut z);
-            let back = match z.out[0] {
-                Z_RAW => z.out[1..n].to_vec(),
+            let back = match z.coded()[0] {
+                Z_RAW => z.coded()[1..n].to_vec(),
                 Z_ERASED => std::vec![0xFF; len],
-                _ => miniz_oxide::inflate::decompress_to_vec(&z.out[1..n]).unwrap(),
+                _ => miniz_oxide::inflate::decompress_to_vec(&z.coded()[1..n]).unwrap(),
             };
             assert_eq!(&back[..], &cases[3][..len]);
         }
@@ -1040,13 +1150,49 @@ mod tests {
         let (mut total, mut modes) = (0usize, [0usize; 5]);
         for c in img.chunks(ZCHUNK) {
             let n = zcode(c, &mut z);
-            modes[z.out[0] as usize] += 1;
-            if z.out[0] == Z_DEFLATE {
-                assert_eq!(miniz_oxide::inflate::decompress_to_vec(&z.out[1..n]).unwrap(), c);
+            modes[z.coded()[0] as usize] += 1;
+            if z.coded()[0] == Z_DEFLATE {
+                assert_eq!(miniz_oxide::inflate::decompress_to_vec(&z.coded()[1..n]).unwrap(), c);
             }
             total += n + HDR + 4;
         }
         std::println!("image {} KB -> {} KB on the cable; chunks raw {} erased {} deflate {}", img.len() / 1024, total / 1024, modes[0], modes[1], modes[4]);
+    }
+
+    /// BACKUP-9.6: every chunk of `fdumpz`, double buffered, reaches the host whole and in order.
+    #[test]
+    fn fdumpz_double_buffered_with_resends() {
+        // Erased, compressible and noisy chunks; a NAK on the second frame and silence on the fourth: each
+        // resend must be the frame as it was, though the next chunk was coded meanwhile.
+        let len = 4 * ZCHUNK as u32 + 777;
+        let byte = |a: u32| -> u8 {
+            match a / ZCHUNK as u32 {
+                0 => 0xFF,
+                1 => b"FERRITE "[a as usize % 8],
+                _ => chip(a),
+            }
+        };
+        let mut h = Host::new();
+        h.zlen = len as usize;
+        h.bad = std::vec![1];
+        h.silent = std::vec![3];
+        let mut buf = std::boxed::Box::new([0u8; ZCHUNK]);
+        let mut z = std::boxed::Box::new(ZWork::new());
+        let d = fdumpz_run(
+            &mut h,
+            &mut buf,
+            &mut z,
+            0,
+            len,
+            |a, d| d.iter_mut().enumerate().for_each(|(i, x)| *x = byte(a + i as u32)),
+            |_, _| true,
+        )
+        .unwrap();
+        let want: Vec<u8> = (0..len).map(byte).collect();
+        assert_eq!(h.data, want);
+        assert_eq!(d.crc, crc32(0, &want));
+        assert_eq!(d.resends, 2);
+        assert_eq!(d.blocks, 5);
     }
 
     /// BACKUP-9.5: a whole dump against a host like Console's: every byte, the end frame's CRC and count.

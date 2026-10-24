@@ -145,7 +145,24 @@ static PACE_BYTES: AtomicU32 = AtomicU32::new(64);
 static PACE_US: AtomicU32 = AtomicU32::new(100);
 static STOP2: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// Where `fdumpz`'s two frames live (static memory, set once at start-up): the only bytes sent from the interrupt.
+static ZFRAMES_FROM: AtomicU32 = AtomicU32::new(0);
+static ZFRAMES_TO: AtomicU32 = AtomicU32::new(0);
+
 impl proto::Link for Dump {
+    fn send(&mut self, frame: &[u8]) {
+        let (p, n) = (frame.as_ptr() as u32, frame.len() as u32);
+        if p >= ZFRAMES_FROM.load(Relaxed) && p + n <= ZFRAMES_TO.load(Relaxed) {
+            // SAFETY: inside the static frames, which live for the whole run; fdumpz leaves a frame alone from
+            // `send` until `sent` (and its ACK).
+            uart::send_async(UART_CPS, unsafe { core::slice::from_raw_parts(frame.as_ptr(), frame.len()) });
+        } else {
+            self.write(frame);
+        }
+    }
+    fn sent(&mut self) {
+        while uart::tx_busy(UART_CPS) {}
+    }
     fn write(&mut self, b: &[u8]) {
         let (n, us) = (PACE_BYTES.load(Relaxed).max(1) as usize, PACE_US.load(Relaxed));
         for chunk in b.chunks(n) {
@@ -231,8 +248,8 @@ struct Reader {
     crc: Option<Crc>,
     power: PowerSwitch,
     buf: [u8; proto::BLOCK],
-    zchunk: [u8; proto::ZCHUNK],
-    zbuf: proto::ZWork,
+    zchunk: &'static mut [u8; proto::ZCHUNK],
+    zbuf: &'static mut proto::ZWork,
 }
 
 impl Reader {
@@ -440,8 +457,21 @@ fn main() -> ! {
         crc: None,
         power: PowerSwitch::default(),
         buf: [0; proto::BLOCK],
-        zchunk: [0; proto::ZCHUNK],
-        zbuf: proto::ZWork::new(),
+        zchunk: {
+            static mut ZCHUNK: [u8; proto::ZCHUNK] = [0; proto::ZCHUNK];
+            // SAFETY: taken once, here.
+            unsafe { &mut *core::ptr::addr_of_mut!(ZCHUNK) }
+        },
+        zbuf: {
+            // Zeroed at start-up like any static (no 48 KB temporary on the stack, which singleton! would build).
+            static mut ZWORK: proto::ZWork = proto::ZWork::new();
+            // SAFETY: taken once, here, before anything else can reach it.
+            let z: &'static mut proto::ZWork = unsafe { &mut *core::ptr::addr_of_mut!(ZWORK) };
+            let from = z.frames.as_ptr() as u32;
+            ZFRAMES_FROM.store(from, Relaxed);
+            ZFRAMES_TO.store(from + core::mem::size_of_val(&z.frames) as u32, Relaxed);
+            z
+        },
     };
     Cable.put(b"\r\nFerrite reader ");
     Cable.put(ferrite_core::VERSION.as_bytes());
