@@ -1487,15 +1487,15 @@ fn clock_set_by_hand() {
     assert_eq!(t.app.take_clock_set(), None);
 }
 
-/// DEC-7: 0 4 7 Popups is a real setting, # puts it back on.
+/// DEC-7: 0 4 4 Popups is a real setting, # puts it back on.
 #[test]
 fn popups_setting() {
     use crate::screens::groups::{change, reset};
     let mut t = T::new();
     assert!(t.app.set.popups, "on by default");
-    change(&mut t.app, &[4, 7], 1);
+    change(&mut t.app, &[4, 4], 1);
     assert!(!t.app.set.popups);
-    reset(&mut t.app, &[4, 7]);
+    reset(&mut t.app, &[4, 4]);
     assert!(t.app.set.popups);
 }
 
@@ -2525,4 +2525,26 @@ fn aprs_mute_follows_the_setting_and_star() {
     t.tap(Key::Star);
     assert_ne!(t.app.mute & c, 0, "quick mute as any slot");
     assert!(t.app.set.aprs_mute, "the setting untouched without APRS mode");
+}
+
+/// DEC-6.1, LINK-19: DTMF heard on a slot takes its card's state word, in green ("DTMF 101#"), ahead of a tone
+/// hint; gone again when the Radio task clears it. 0 4 3 is on by default, off in Low Power Mode (DEC-6).
+#[test]
+fn card_shows_dtmf_heard() {
+    let mut t = T::new();
+    assert!(t.app.settings().dtmf_rx && t.app.dtmf_wanted());
+    t.live.slots[0].squelch_open = true;
+    t.live.slots[0].heard_tone = 885;
+    let mut d = ferrite_core::dtmfrx::Heard::NONE;
+    for c in [1, 0, 1, 15] {
+        d.push(c);
+    }
+    t.live.slots[0].dtmf = d;
+    t.wait(100);
+    let l = line_of(&t, "card A");
+    assert!(l.contains("state=\"DTMF\" hint=\"DTMF 101#\""), "{l}");
+    assert_eq!(t.app.state(0, &t.live).1, ferrite_ui::gfx::GREEN);
+    t.live.slots[0].dtmf = ferrite_core::dtmfrx::Heard::NONE;
+    t.wait(100);
+    assert!(line_of(&t, "card A").contains("hint=\"Heard 88.5\""));
 }

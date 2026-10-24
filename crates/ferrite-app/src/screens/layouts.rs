@@ -39,8 +39,7 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
     let (state, sc) = app.state(a, live);
     // TSRCH-13: a tone hint takes the state's place, in a wider field; so does a long state (BCR-15).
     let mut ht = Buf::<24>::new();
-    if state == "heard" {
-        heard_text(lv.heard_tone, app.slots[a as usize].cfg().rx_tone, &mut ht);
+    if wide_state(state, &lv, app.slots[a as usize].cfg().rx_tone, &mut ht) {
     } else if state.len() > 8 {
         ht.set(state.as_bytes());
     }
@@ -262,14 +261,14 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         if state == "RX" {
             stt.push(b" ");
             stt.push(w::s_text(lv.rssi).as_bytes());
-        } else if state == "heard" {
-            heard_text(lv.heard_tone, app.slots[s as usize].cfg().rx_tone, &mut stt); // TSRCH-13, in a wider field
+        } else {
+            wide_state(state, &lv, app.slots[s as usize].cfg().rx_tone, &mut stt); // TSRCH-13, DEC-6.1: in a wider field
         }
         if app.dirty(R_HEAD + p, hash(&(head, stt, active))) {
             w::badge(lcd, 14, y + 5, s, active, BG);
             let f = if state == "RX" { &UI_12B } else { &UI_12 };
             // HOME-4a: the state's own width (at least 40 px), so a zone name in the header has the rest
-            let sw = if state == "heard" || state.len() > 8 { (text4_width(stt.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { (text4_width(stt.as_bytes(), f) + 6).clamp(40, 72) };
+            let sw = if state == "heard" || state == "DTMF" || state.len() > 8 { (text4_width(stt.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { (text4_width(stt.as_bytes(), f) + 6).clamp(40, 72) };
             w::field(lcd, 34, 192 - sw, y + 4, y + 21, y + 17, Align::Left, w::fit(head.as_bytes(), &UI_12, 192 - sw), &UI_12, SUB, SURFACE);
             w::field(lcd, 226 - sw, sw, y + 4, y + 21, y + 17, Align::Right, stt.as_bytes(), f, sc, SURFACE);
         }

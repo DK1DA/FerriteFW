@@ -21,6 +21,7 @@ pub mod ssb;
 pub mod stuck;
 pub mod dcs;
 pub mod decoders;
+pub mod dtmfrx;
 pub mod freq;
 pub mod gps;
 pub mod gpspower;

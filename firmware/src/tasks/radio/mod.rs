@@ -81,6 +81,7 @@ mod debug;
 mod tune;
 mod tick;
 mod same;
+mod dtmf;
 mod bcast;
 mod hf;
 mod beep;
@@ -290,6 +291,10 @@ struct Radio {
     scope_cfg: (u8, u8, bool),
     /// SAME weather alerts (WX-4, DEC-19): on from the UI, and the BK4829 receiver's state.
     same_on: bool,
+    /// DEC-6: the DTMF detector wanted, what each chip was armed for, and each slot's digits.
+    dtmf_on: bool,
+    dtmf_key: [Option<(u8, Freq10)>; 2],
+    dtmf: [ferrite_core::dtmfrx::Track; SLOTS],
     same: SameRx,
     #[cfg(feature = "tx")]
     tx: Tx,
@@ -703,6 +708,9 @@ pub async fn task() {
         sweep_hold: SweepHold::new(),
         scope_cfg: (60, 100, false),
         same_on: false,
+        dtmf_on: false,
+        dtmf_key: [None; 2],
+        dtmf: [ferrite_core::dtmfrx::Track::NEW; SLOTS],
         same: SameRx { chip: None, at: None, armed: false, asm: Assembler::new(), repeats: Repeats::new() },
         #[cfg(feature = "tx")]
         tx: Tx {

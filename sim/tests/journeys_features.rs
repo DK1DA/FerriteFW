@@ -203,7 +203,7 @@ fn alerts_take_the_screen_messages_toast() {
 #[test]
 fn weather_channel_auto() {
     let mut r = Radio::new();
-    r.run("menu 0 4 8; expect text \"Auto\"");
+    r.run("menu 0 4 5; expect text \"Auto\"");
 }
 
 /// The heard list: newest first with callsign, distance, bearing and age; a station without a position shows a

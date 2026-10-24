@@ -183,9 +183,14 @@ impl App {
         c
     }
 
-    /// PWR-24: SAME alerts decoded (0 4 8 1, WX-3), never in the mode.
+    /// PWR-24: SAME alerts decoded (0 4 5 1, WX-3), never in the mode.
     pub fn same_wanted(&self) -> bool {
         self.set.same_on() && !self.low_power()
+    }
+
+    /// DEC-6: the DTMF detector (0 4 3), never in the mode.
+    pub fn dtmf_wanted(&self) -> bool {
+        self.set.dtmf_rx && !self.low_power()
     }
 
     /// PWR-24: KISS on (KISS-6), never in the mode.

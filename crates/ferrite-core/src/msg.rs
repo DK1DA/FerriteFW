@@ -135,9 +135,11 @@ pub enum RadioCmd {
     /// MODE-3: the UI still wants the exclusive mode running (sent at least every [`crate::lease::RENEW_MS`]
     /// while one runs); without it for [`crate::lease::WINDOW_MS`] the Radio task stops the mode itself.
     Lease,
-    /// SAME weather alerts on or off (0 4 8 1 and the region, WX-3): the BK4829's SAME receiver runs on the chip of
+    /// SAME weather alerts on or off (0 4 5 1 and the region, WX-3): the BK4829's SAME receiver runs on the chip of
     /// any slot tuned to a weather channel (DEC-19).
     Same(bool),
+    /// DEC-6: the BK4829's DTMF detector on (0 4 3).
+    DtmfRx(bool),
     /// HF mode: enter on a frequency and mode (as [`Param::Mode`]), retune, or leave (HF-3, HF-4). Entering
     /// powers the SI4732 up with the SSB patch and pauses watch, scan, decoders, jobs and beacons; leaving undoes
     /// all of it (HF-8). The receiver follows from frequency and mode (HF-10), and the relay from the receiver:
@@ -355,6 +357,8 @@ pub struct SlotLive {
     pub skips: u8,
     /// The tone hint (TSRCH-13): the tone word heard on a carrier the slot's tone squelch keeps shut, 0 none.
     pub heard_tone: u16,
+    /// DTMF heard on the slot (DEC-6.1): the digits its card shows for a while.
+    pub dtmf: crate::dtmfrx::Heard,
 }
 
 /// All three slots, published by the Radio task as one snapshot; [`Live`] stays the single-receiver view.
@@ -919,8 +923,9 @@ mod tests {
         // 0.45 KB more over the three copies than with 56 bars; accepted Oct 6, 2026).
         // The tone hint's heard tone (TSRCH-13: 2 bytes a slot, 4 with alignment) took it from 312 to 324; the stuck
         // PTT bits (SAFE-14.1, one byte, 4 with alignment) to 328; a scan's held flag and its step's and last hit's
-        // channel numbers (SCAN-19.1, HOME-4.1: 5 bytes a slot, 4 more with the padding, 22 in 24) to 340.
-        assert!(core::mem::size_of::<LiveAll>() <= 340, "{}", core::mem::size_of::<LiveAll>());
+        // channel numbers (SCAN-19.1, HOME-4.1: 5 bytes a slot, 4 more with the padding, 22 in 24) to 340; the
+        // DTMF heard (DEC-6.1: 7 bytes a slot, 12 digits a nibble each) to 364.
+        assert!(core::mem::size_of::<LiveAll>() <= 364, "{}", core::mem::size_of::<LiveAll>());
         // Each reader of the GPS watch keeps a copy of the fix; the sky list only the UI.
         assert!(core::mem::size_of::<GpsFix>() <= 32);
         assert!(core::mem::size_of::<GpsSky>() <= 81);

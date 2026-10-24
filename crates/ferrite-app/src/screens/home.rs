@@ -528,10 +528,8 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     }
     // TSRCH-13: a tone hint takes the state's place, in a wider field; so does a long state ("Watch off: relay",
     // BCR-15).
-    let heard = state == "heard";
     let mut ht = Buf::<24>::new();
-    if heard {
-        heard_text(lv.heard_tone, app.slots[s as usize].cfg().rx_tone, &mut ht);
+    if wide_state(state, &lv, app.slots[s as usize].cfg().rx_tone, &mut ht) {
     } else if state.len() > 8 {
         ht.set(state.as_bytes());
     }

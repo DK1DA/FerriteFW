@@ -778,7 +778,7 @@ impl App {
         self.clock_set.take()
     }
 
-    /// A decoder's hit (DEC-7): the inbox count, and a toast only while Popups (0 4 7) is on.
+    /// A decoder's hit (DEC-7): the inbox count, and a toast only while Popups (0 4 4) is on.
     pub fn notify_decode(&mut self, head: &[u8], body: &[u8]) {
         if self.set.popups {
             self.notify(head, body, false);

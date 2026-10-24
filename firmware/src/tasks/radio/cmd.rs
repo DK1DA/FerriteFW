@@ -193,6 +193,7 @@ impl Radio {
             RadioCmd::Counter(on) => self.counter(on),
             RadioCmd::Lease => {} // MODE-3: renewed above (`Lease::note`)
             RadioCmd::Same(on) => self.same_on = on,
+            RadioCmd::DtmfRx(on) => self.dtmf_on = on,
             RadioCmd::Beep { hz, ms } => self.beep(hz, ms).await,
             RadioCmd::Chime { sound, level } => self.chime(sound, level).await,
             #[cfg(feature = "tx")]

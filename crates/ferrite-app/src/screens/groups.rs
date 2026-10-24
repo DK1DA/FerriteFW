@@ -76,13 +76,10 @@ const G3: [Entry; 6] = [
     Entry("Crossband repeater||Repeat one slot's band on another's."),
     Entry("Tone search||Find the CTCSS or DCS in use."),
 ];
-const G4: [Entry; 8] = [
+const G4: [Entry; 5] = [
     Entry("Event log||Every decode and alert: the inbox."),
     Entry("POCSAG|439.9875|Pager frequency, baud, capcodes."),
-    Entry("DSC|Off|Marine distress calls, receive only."),
-    Entry("AIS|Off|Ships near you."),
-    Entry("Selcall, MDC1200|Off|Decode selcall and MDC1200 IDs."),
-    Entry("DTMF decode|Off|Show and log DTMF sequences."),
+    Entry("DTMF decode|On|DTMF digits heard, on the slot's card."),
     Entry("Popups|On|A 3 s toast for each decode."),
     Entry("Weather alerts|On|SAME, location codes, tone, channel."),
 ];
@@ -147,7 +144,7 @@ pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7
 const SHORT: [&str; 9] = ["Scan", "Channels", "Tools", "Decoders", "APRS", "GPS", "Display", "Transmit", "System"];
 
 /// The third-level lists, by group and item.
-pub(crate) const SUBS: [((u8, u8), &[Entry]); 24] = [
+pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ((1, 6), &[
         Entry("Pause time|1 min|# on home pauses watch this long."),
         Entry("Direction|Up|Scan up or down."),
@@ -173,15 +170,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 24] = [
         Entry("Frequency|439.9875|The pager channel, any baud; OK types it."),
         Entry("Capcode filter|None|Only this capcode: OK types it, # clears it."),
     ]),
-    ((4, 3), &[
-        Entry("DSC|Off|Decode DSC on channel 70."),
-        Entry("Own MMSI|None|Your MMSI, receive only."),
-    ]),
-    ((4, 4), &[
-        Entry("AIS|Off|161.975 and 162.025, in turn."),
-        Entry("Range filter|25 nm|Off, 5, 10, 25, 50 nm; needs a fix."),
-    ]),
-    ((4, 8), &[
+    ((4, 5), &[
         Entry("SAME|On|Decode weather alerts."),
         Entry("Location codes|None|Up to 8 FIPS or CLC codes."),
         Entry("Channel|Auto|The weather channel to watch."),
@@ -356,7 +345,7 @@ pub(crate) fn items(g: u8, sub: u8) -> &'static [Entry] {
 /// Why an item can't be used here, if it can't (MENU-14).
 pub(crate) fn greyed(app: &App, p: &[u8]) -> Option<&'static str> {
     match p {
-        [4, 8, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
+        [4, 5, ..] if !app.set.wx_region() => Some("US and Canada only"), // WX-3
         [5, 3] | [5, 6, 1] if app.set.kiss_on() => app.kiss_holds_aprs(), // KISS-10
         [8, 8, 5] if !app.radio.tx_built => Some("no transmit in this build"), // TX-48
         [8, 8, 5] if app.remote_in => Some("only with the radio's own keys"), // TX-48: never the link's (LINK-19)
@@ -432,7 +421,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 92] = [
+static SETTINGS: [Setting; 93] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -453,8 +442,9 @@ static SETTINGS: [Setting; 92] = [
     field!([4, 2, 1], pocsag_on: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([4, 2, 2], special),
     field!([4, 2, 3], special),
-    field!([4, 7, 0], popups: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([4, 8, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([4, 3, 0], dtmf_rx: bool, Kind::Flip(&ON_OFF), Nothing), // DEC-6
+    field!([4, 4, 0], popups: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([4, 5, 1], same: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([5, 3, 0], special),
     field!([5, 4, 0], special), // MENU-31: typed as a frequency
     field!([5, 5, 1], special), // APRS-30
@@ -680,7 +670,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             }
             s.fixed_on
         }
-        [4, 8, 2] => {
+        [4, 5, 2] => {
             let n = s.same_codes.iter().filter(|&&c| c != 0).count();
             if n == 0 {
                 b.set(b"None");

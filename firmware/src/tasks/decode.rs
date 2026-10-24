@@ -1,8 +1,10 @@
 //! The decoders' side of the UI task (manual chapters 23 and 27; roadmap 6b), beside the APRS task:
 //!
-//! - **SAME:** tells the Radio task whether weather alerts are on (0 4 8 1, US and Canada only: WX-3); its BK4829
+//! - **SAME:** tells the Radio task whether weather alerts are on (0 4 5 1, US and Canada only: WX-3); its BK4829
 //!   receiver then listens on any slot tuned to a weather channel (DEC-19). A header it decodes comes back on
 //!   `ALERTS`: the alert screen (WX-4) and an event log record (INBOX-6).
+//! - **DTMF:** tells the Radio task whether the BK4829's DTMF detector runs (0 4 3, DEC-6); the digits come back
+//!   in the live snapshot, for the slot's card.
 //! - **POCSAG:** asks the DSP task for the pager decoder while POCSAG is on and a slot sits on its frequency
 //!   (DEC-18: APRS's AFSK keeps the slot first); each page it decodes goes through the capcode filter into the
 //!   event log, the inbox and, with popups on, a toast (DEC-4, DEC-7).
@@ -19,11 +21,12 @@ pub struct Decode {
     /// What the Radio task and the DSP task were last told (None: not yet).
     same: Option<bool>,
     pager: Option<bool>,
+    dtmf: Option<bool>,
 }
 
 impl Decode {
     pub const fn new() -> Self {
-        Decode { same: None, pager: None }
+        Decode { same: None, pager: None, dtmf: None }
     }
 
     /// One turn of the UI task's loop.
@@ -31,6 +34,10 @@ impl Decode {
         let same = app.same_wanted(); // PWR-24: off in Low Power Mode
         if self.same != Some(same) && RADIO.try_send(RadioCmd::Same(same)).is_ok() {
             self.same = Some(same);
+        }
+        let dtmf = app.dtmf_wanted(); // DEC-6
+        if self.dtmf != Some(dtmf) && RADIO.try_send(RadioCmd::DtmfRx(dtmf)).is_ok() {
+            self.dtmf = Some(dtmf);
         }
         let pager = app.pager_wanted(live);
         if self.pager != Some(pager) && DSP.try_send(DspCmd::Pager(pager)).is_ok() {

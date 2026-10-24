@@ -90,7 +90,7 @@ mod tests {
         assert!(t.app.pager_hit(&page(42, b""), &live).is_some_and(|e| e.text.as_bytes() == b"(tone only)"));
     }
 
-    /// DEC-7: with Popups (0 4 7) off a page still counts in the log's unread and is logged, but shows no toast.
+    /// DEC-7: with Popups (0 4 4) off a page still counts in the log's unread and is logged, but shows no toast.
     #[test]
     fn popups_off_logs_without_a_toast() {
         let mut t = Harness { app: App::new(crate::tests::set(), crate::tests::alert()) };

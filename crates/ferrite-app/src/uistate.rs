@@ -838,10 +838,9 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
     kq(l, "head", head.as_bytes());
     let state = app.state(s, cx.live).0;
     kq(l, "state", state.as_bytes());
-    if state == "heard" {
-        // TSRCH-13: the tone hint as the card draws it ("Heard 88.5")
-        let mut h = Buf::<24>::new();
-        screens::shared::heard_text(lv.heard_tone, cfg.rx_tone, &mut h);
+    // TSRCH-13, DEC-6.1: the tone hint or the DTMF heard as the card draws it ("Heard 88.5", "DTMF 101#")
+    let mut h = Buf::<24>::new();
+    if screens::shared::wide_state(state, &lv, cfg.rx_tone, &mut h) {
         kq(l, "hint", h.as_bytes());
     }
     l.push(b" freq=");

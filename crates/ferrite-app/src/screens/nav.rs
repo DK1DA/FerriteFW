@@ -66,7 +66,7 @@ pub enum Dest {
     RangePreset,
     /// A12: one zone's settings.
     ZoneEdit,
-    /// A13: SAME location codes (MENU 0 4 8 2).
+    /// A13: SAME location codes (MENU 0 4 5 2).
     LocationCodes,
     /// A14: DTMF dialer (MENU 0 8 5 1).
     DtmfDialer,
@@ -309,7 +309,7 @@ pub const ALL: [Dest; 66] = {
 
 /// MENU 0 paths that open a screen or a third-level list (manual Appendix A). Every other path
 /// is a plain value, edited in its group's list.
-pub const MENU0: [(&[u8], Dest); 54] = [
+pub const MENU0: [(&[u8], Dest); 52] = [
     (&[1, 6], Dest::Sub(1, 6)),
     (&[1, 4], Dest::RangePresets),
     (&[1, 5], Dest::SkipList),
@@ -325,10 +325,8 @@ pub const MENU0: [(&[u8], Dest); 54] = [
     (&[3, 6], Dest::ToneSearch),
     (&[4, 1], Dest::EventLog),
     (&[4, 2], Dest::Sub(4, 2)),
-    (&[4, 3], Dest::Sub(4, 3)),
-    (&[4, 4], Dest::Sub(4, 4)),
-    (&[4, 8], Dest::Sub(4, 8)),
-    (&[4, 8, 2], Dest::LocationCodes),
+    (&[4, 5], Dest::Sub(4, 5)),
+    (&[4, 5, 2], Dest::LocationCodes),
     (&[5, 1], Dest::AprsHeard),
     (&[5, 2], Dest::AprsMessages),
     (&[5, 5], Dest::Sub(5, 5)),

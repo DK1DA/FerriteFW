@@ -379,6 +379,8 @@ impl App {
             ("APRS on C", DIM) // APRS-21.2: C listens here; the card shows RX when C receives
         } else if !watched {
             ("off", DIM)
+        } else if !lv.dtmf.is_empty() {
+            ("DTMF", GREEN) // DEC-6.1: the card shows "DTMF 101#" ([`wide_state`])
         } else if lv.heard_tone != 0 {
             ("heard", AMBER) // TSRCH-13: the card shows "Heard 88.5" ([`heard_text`])
         } else if lv.squelch_open {
@@ -397,6 +399,22 @@ impl App {
 /// polarity's code that sends the same bits (TONE-20.5: D023I is D047N), so both show, the one with the slot's
 /// own code number (`own`, its receive tone) first, else the normal one: "Heard D023I/D047N" on a D023N slot. At
 /// most 17 characters (120 px at UI_12), so a card's state field widens to fit it ([`HEARD_W`] at least).
+/// A state shown as text in a wider field: the tone hint (TSRCH-13) and the DTMF heard (DEC-6.1, "DTMF 101#"); false
+/// for the plain state words.
+pub(crate) fn wide_state(state: &str, lv: &ferrite_core::msg::SlotLive, own: u16, b: &mut Buf<24>) -> bool {
+    match state {
+        "heard" => heard_text(lv.heard_tone, own, b),
+        "DTMF" => {
+            b.set(b"DTMF ");
+            for i in 0..lv.dtmf.len() {
+                b.push(&[lv.dtmf.char(i)]);
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
 pub(crate) fn heard_text(t: u16, own: u16, b: &mut Buf<24>) {
     let mut tone = Buf::<16>::new();
     crate::slot::tone_text(t, &mut tone);

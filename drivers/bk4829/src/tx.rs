@@ -193,7 +193,7 @@ impl<B: Bus> Bk4829<B> {
     /// [`Bk4829::fsk_tx_end`]. Up to 128 words fit the FIFO at once.
     pub fn fsk_send(&mut self, f: &Fsk, words: &[u16]) {
         let c = self.fsk_ctrl(f);
-        self.write(reg::INT_EN, int::FSK_TX_DONE);
+        self.modify(reg::INT_EN, int::FSK_ALL, int::FSK_TX_DONE);
         self.write(reg::FSK_CTRL, c | 1 << 15);
         self.write(reg::FSK_CTRL, c);
         for &w in words {
@@ -202,10 +202,10 @@ impl<B: Bus> Bk4829<B> {
         self.write(reg::FSK_CTRL, c | 1 << 11);
     }
 
-    /// After the packet: interrupts cleared and off, transmit off in the modem.
+    /// After the packet: interrupts cleared, the modem's off (the others' bits stay), transmit off in the modem.
     pub fn fsk_tx_end(&mut self, f: &Fsk) {
         self.write(reg::INT, 0);
-        self.write(reg::INT_EN, 0);
+        self.modify(reg::INT_EN, int::FSK_ALL, 0);
         let c = self.fsk_ctrl(f);
         self.write(reg::FSK_CTRL, c);
     }

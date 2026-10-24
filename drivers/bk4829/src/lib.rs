@@ -113,6 +113,8 @@ pub mod int {
     pub const SQ_OPEN: u16 = 1 << 3;
     pub const SQ_CLOSE: u16 = 1 << 2;
     pub const FSK_SYNC: u16 = 1 << 1;
+    /// The FSK modem's own bits: [`Bk4829::fsk_rx`] and the transmit side set and clear only these.
+    pub const FSK_ALL: u16 = FSK_TX_DONE | FSK_FIFO_EMPTY | FSK_RX_DONE | FSK_FIFO_FULL | FSK_SYNC;
 }
 
 /// Stock's register settings at start-up, in its order (two halves around a read-modify-write of REG_40). REG_00 0x8000 then 0
@@ -468,7 +470,8 @@ impl<B: Bus> Bk4829<B> {
         }
     }
 
-    /// Which interrupts to raise (the [`int`] flags).
+    /// Which interrupts to raise (the [`int`] flags), all at once. The detectors ([`Bk4829::dtmf_rx`], the FSK
+    /// modem) switch only their own bits, so they can share a chip.
     pub fn interrupts_enable(&mut self, mask: Interrupts) {
         self.write(reg::INT_EN, mask);
     }
@@ -542,7 +545,8 @@ impl<B: Bus> Bk4829<B> {
         (ctcss, dcs)
     }
 
-    /// DTMF detection on or off (stock's coefficients and settings; the DTMF interrupt is enabled with it).
+    /// DTMF detection on or off (stock's coefficients and settings), with its interrupt bit alone: the others
+    /// stay as they were. REG_70 is the tone generator's too, so not while transmitting tones or FSK.
     pub fn dtmf_rx(&mut self, on: bool) {
         if on {
             for c in DTMF_COEFS {
@@ -550,16 +554,22 @@ impl<B: Bus> Bk4829<B> {
             }
             self.write(reg::DTMF, 0x87FF);
             self.write(reg::TONE, 0xC5C5);
-            self.write(reg::INT_EN, int::DTMF);
+            self.modify(reg::INT_EN, int::DTMF, int::DTMF);
         } else {
             self.modify(reg::DTMF, 0x0020, 0);
             self.write(reg::TONE, 0);
+            self.modify(reg::INT_EN, int::DTMF, 0);
         }
     }
 
     /// The last DTMF symbol received (after the DTMF interrupt).
     pub fn dtmf_code(&mut self) -> char {
-        b"0123456789ABCD*#"[(self.read(reg::DTMF_CODE) >> 8 & 15) as usize] as char
+        b"0123456789ABCD*#"[self.dtmf_index() as usize] as char
+    }
+
+    /// The same as its code, 0-15 in that order.
+    pub fn dtmf_index(&mut self) -> u8 {
+        (self.read(reg::DTMF_CODE) >> 8 & 15) as u8
     }
 
     /// Set up the FSK modem (not yet receiving or sending).
@@ -584,7 +594,7 @@ impl<B: Bus> Bk4829<B> {
         let c = self.fsk_ctrl(f);
         self.write(reg::FSK_CTRL, c | 1 << 14);
         self.write(reg::FSK_CTRL, c | 1 << 12);
-        self.write(reg::INT_EN, int::FSK_RX_DONE | int::FSK_FIFO_FULL | int::FSK_SYNC);
+        self.modify(reg::INT_EN, int::FSK_ALL, int::FSK_RX_DONE | int::FSK_FIFO_FULL | int::FSK_SYNC);
     }
 
     /// One word from the receive FIFO (on FIFO almost full: REG_5E bits 2:0 words; on done: the rest).

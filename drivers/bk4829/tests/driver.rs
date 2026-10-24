@@ -483,3 +483,27 @@ fn scan_reading_scale() {
     assert_eq!(bk4829::scan_dhz(1365), 670);
     assert_eq!(bk4829::scan_dhz(5101), 2503);
 }
+
+/// The detectors share REG_3F: DTMF, then the FSK modem receiving, then an FSK packet sent and ended, and the
+/// DTMF bit and the init table's bits are still there; DTMF off clears its bit alone.
+#[test]
+fn interrupt_bits_are_shared() {
+    let mut r = Regs::new();
+    r.regs[0x3F] = 0x07FE; // the init table's
+    let mut bk = Bk4829::new(&mut r);
+    bk.dtmf_rx(true);
+    bk.fsk_setup(&ffsk());
+    bk.fsk_rx(&ffsk());
+    bk.fsk_send(&ffsk(), &[0x1234]);
+    bk.fsk_tx_end(&ffsk());
+    bk.release();
+    assert_eq!(r.regs[0x3F], 0x07FE & !int::FSK_ALL | int::DTMF);
+    let mut bk = Bk4829::new(&mut r);
+    bk.fsk_rx(&ffsk());
+    bk.release();
+    assert_eq!(r.regs[0x3F] & int::DTMF, int::DTMF, "the modem keeps DTMF's bit");
+    let mut bk = Bk4829::new(&mut r);
+    bk.dtmf_rx(false);
+    bk.release();
+    assert_eq!(r.regs[0x3F], 0x07FE & !int::FSK_ALL | int::FSK_RX_DONE | int::FSK_FIFO_FULL | int::FSK_SYNC);
+}

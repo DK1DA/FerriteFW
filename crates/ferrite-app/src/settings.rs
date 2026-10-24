@@ -138,14 +138,14 @@ pub struct Settings {
     pub cable_port: u8,
     /// 0 5 8: the KISS TNC's port, an index into [`KISS_PORTS`] (KISS-6).
     pub kiss_port: u8,
-    /// 0 4 8 1 (US and Canada only).
+    /// 0 4 5 1 (US and Canada only).
     pub same: bool,
     /// 0 4 2 (DEC-4, DEC-18): the pager decoder on or off, its frequency, and the one capcode it keeps (0: every
     /// capcode).
     pub pocsag_on: bool,
     pub pocsag_freq: Freq10,
     pub pocsag_cap: u32,
-    /// 0 4 7 (DEC-7): a toast for each decoder hit (pages and the other decoders); off, they only go to the
+    /// 0 4 4 (DEC-7): a toast for each decoder hit (pages and the other decoders); off, they only go to the
     /// event log and the inbox count.
     pub popups: bool,
     /// 0 7 5 1-3 (SND-3, SND-6): key beep, beep volume (1-5, relative to voice: the knob scales both) and alert
@@ -195,7 +195,7 @@ pub struct Settings {
     pub fixed_on: bool,
     pub fixed: crate::data::Pos,
     pub fixed_alt: i16,
-    /// 0 4 8 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
+    /// 0 4 5 2: SAME location codes, six digits each (FIPS in the US, CLC in Canada); 0 = an empty place (WX-10).
     pub same_codes: [u32; SAME_CODES],
     /// Band scope (0 3 2): bars (an index into [`SCOPE_BAR_COUNTS`]), step (into the tuning step list), dwell
     /// per point in 0.1 ms (1-40), trigger action ([`SCOPE_TRIGGERS`]), the trigger line (0 none, 1-9: hold a
@@ -299,6 +299,8 @@ pub struct Settings {
     pub sq_chip: bool,
     /// 0 5 9 6: C starts muted in APRS mode (APRS-2, APRS-15.1); \* on C in APRS mode flips it.
     pub aprs_mute: bool,
+    /// 0 4 3 DTMF decode (DEC-6): the digits heard on a slot's card.
+    pub dtmf_rx: bool,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -483,6 +485,7 @@ impl Settings {
         mcu_fixed: false,
         sq_chip: false,
         aprs_mute: true,
+        dtmf_rx: true,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's

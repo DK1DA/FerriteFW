@@ -21,7 +21,7 @@ def unbuilt_group(t, path):
 # (PWR-24; lowpower.py tests it).
 ACTS = {"0 7 7 2"}
 # Settings typed or picked on a page of their own (OK opens them): the knob doesn't step them in the group.
-TYPED = {"0 4 2 2", "0 5 9 1", "0 5 9 2", "0 5 4", "0 5 7 2", "0 4 2 3"}
+TYPED = {"0 4 2 2", "0 5 9 1", "0 5 9 2", "0 5 4", "0 5 7 2", "0 4 2 3", "0 5 5 3"}
 
 
 @test("MENU-31", "TERM-12", pages=("Entry", "Group"))
@@ -67,7 +67,7 @@ def walk(t, paths):
                 continue
             misrouted.append(f"{path} -> {(u['help'] or {}).get('args', ['?'])[0]}")
             u = t.keys(p[3], settle=0.15)  # unbuilt_group left it on the opened group
-        if path in TYPED and u.id in ("Text", "Entry"):
+        if path in TYPED and u.id in ("Text", "Entry", "Compose"):  # 0 5 5 3: the comment in the compose editor (APRS-50)
             via.append(f"{path} {name} (typed)")
             continue
         if u.id != "Group":
