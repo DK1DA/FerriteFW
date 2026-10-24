@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "crates/ferrite-store", "crates/ferrite-checks", "crates/ferrite-radio", "firmware", "sim", "sim-web", "drivers/bus", "drivers/bk4829", "drivers/si4732", "drivers/st7789", "drivers/w25q", "drivers/keypad", "drivers/nmea"]
+members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "crates/ferrite-store", "crates/ferrite-checks", "crates/ferrite-radio", "firmware", "reader", "sim", "sim-web", "drivers/bus", "drivers/bk4829", "drivers/si4732", "drivers/st7789", "drivers/w25q", "drivers/keypad", "drivers/nmea"]
 # Plain `cargo test` / `cargo clippy` cover what runs on the PC; the firmware builds with `cargo fw` (radio only).
 default-members = ["crates/ferrite-core", "crates/ferrite-ui", "crates/ferrite-app", "crates/ferrite-store", "crates/ferrite-checks", "crates/ferrite-radio", "sim", "drivers/bus", "drivers/bk4829", "drivers/si4732", "drivers/st7789", "drivers/w25q", "drivers/keypad", "drivers/nmea"]
 
@@ -25,7 +25,7 @@ uradio-bus = { path = "drivers/bus" }
 bk4829 = { path = "drivers/bk4829" }
 si4732 = { path = "drivers/si4732" }
 st7789 = { path = "drivers/st7789" }
-w25q = { path = "drivers/w25q" }
+w25q = { path = "drivers/w25q", default-features = false } # read only unless a crate asks for "write"
 keypad = { path = "drivers/keypad" }
 uafsk = { git = "https://github.com/infamy/udigimodes", rev = "" }
 upocsag = { git = "https://github.com/infamy/udigimodes", rev = "" }

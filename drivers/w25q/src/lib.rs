@@ -8,6 +8,9 @@
 //!   reach, whatever the caller asks.
 //! - **Nothing blocks for long**: a sector erase takes up to 400 ms, so [`W25q::start_erase`] returns at once and
 //!   the caller polls [`W25q::busy`] (from an async timer, say). Page programs (under 3 ms) can wait in place.
+//! - **Read only without the `write` feature** (on by default): program, erase and the write enable they need, and
+//!   their opcodes, aren't compiled at all, so a build without it can't change the chip whatever its code does
+//!   (the reader image, decision 264). [`WRITES`] tells a dependant which build it got.
 
 #![no_std]
 
@@ -15,14 +18,21 @@ use core::ops::Range;
 use uradio_bus::{Delay, Spi};
 
 const READ: u8 = 0x03;
+#[cfg(feature = "write")]
 const PAGE_PROGRAM: u8 = 0x02;
+#[cfg(feature = "write")]
 const SECTOR_ERASE: u8 = 0x20;
+#[cfg(feature = "write")]
 const WRITE_ENABLE: u8 = 0x06;
 const READ_STATUS1: u8 = 0x05;
 const JEDEC_ID: u8 = 0x9F;
 const UNIQUE_ID: u8 = 0x4B;
 const POWER_DOWN: u8 = 0xB9;
 const RELEASE_POWER_DOWN: u8 = 0xAB;
+
+/// Whether this build can program and erase (the `write` feature). A read-only dependant asserts it false at
+/// compile time: `const _: () = assert!(!w25q::WRITES);`.
+pub const WRITES: bool = cfg!(feature = "write");
 
 /// Page and sector sizes.
 pub const PAGE: u32 = 256;
@@ -47,6 +57,7 @@ pub enum Error {
 pub struct W25q<S: Spi> {
     spi: S,
     size: u32,
+    #[cfg_attr(not(feature = "write"), allow(dead_code))]
     writable: &'static [Range<u32>],
 }
 
@@ -114,6 +125,7 @@ impl<S: Spi> W25q<S> {
         }
     }
 
+    #[cfg(feature = "write")]
     fn check_writable(&self, addr: u32, len: u32) -> Result<(), Error> {
         self.check(addr, len)?;
         let end = addr + len;
@@ -124,21 +136,28 @@ impl<S: Spi> W25q<S> {
         }
     }
 
-    /// Status register 1, bit 0: an erase or program is running.
-    pub fn busy(&mut self) -> bool {
+    /// Status register 1 (read: 0x05), as the reader's `flash` line shows it.
+    pub fn status(&mut self) -> u8 {
         self.spi.select(true);
         self.spi.transfer(READ_STATUS1);
         let s = self.spi.transfer(0);
         self.spi.select(false);
-        s & 1 != 0
+        s
     }
 
+    /// Status register 1, bit 0: an erase or program is running.
+    pub fn busy(&mut self) -> bool {
+        self.status() & 1 != 0
+    }
+
+    #[cfg(feature = "write")]
     fn write_enable(&mut self) {
         self.spi.select(true);
         self.spi.transfer(WRITE_ENABLE);
         self.spi.select(false);
     }
 
+    #[cfg(feature = "write")]
     /// Programs `data` at `addr` (bits only go from 1 to 0: erase first), split at page boundaries, waiting for
     /// each page (up to 3 ms).
     pub fn program(&mut self, addr: u32, data: &[u8], delay: &mut impl Delay) -> Result<(), Error> {
@@ -159,6 +178,7 @@ impl<S: Spi> W25q<S> {
         Ok(())
     }
 
+    #[cfg(feature = "write")]
     /// Starts erasing the 4 KB sector at `addr` and returns; poll [`W25q::busy`] (up to 400 ms).
     pub fn start_erase(&mut self, addr: u32) -> Result<(), Error> {
         if !addr.is_multiple_of(SECTOR) {
@@ -172,12 +192,14 @@ impl<S: Spi> W25q<S> {
         Ok(())
     }
 
+    #[cfg(feature = "write")]
     /// Erases a sector and waits for it (blocking: for tools and tests, not the radio's tasks).
     pub fn erase(&mut self, addr: u32, delay: &mut impl Delay) -> Result<(), Error> {
         self.start_erase(addr)?;
         self.wait(delay, 400_000)
     }
 
+    #[cfg(feature = "write")]
     fn wait(&mut self, delay: &mut impl Delay, max_us: u32) -> Result<(), Error> {
         let mut t = 0;
         while self.busy() {

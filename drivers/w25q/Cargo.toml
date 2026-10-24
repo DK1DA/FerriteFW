@@ -6,6 +6,12 @@ license.workspace = true
 repository.workspace = true
 description = "W25Q SPI NOR flash driver: read, page program, sector erase without blocking, write protection by address range"
 
+[features]
+default = ["write"]
+# Page program, sector erase and the write enable they need. Off, the driver only reads (the reader image,
+# decision 264: `default-features = false`); [`WRITES`] says which build this is, for a compile-time check.
+write = []
+
 [dependencies]
 uradio-bus = { path = "../bus" }
 

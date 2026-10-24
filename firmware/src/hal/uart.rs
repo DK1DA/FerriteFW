@@ -104,6 +104,25 @@ pub(super) fn retime(t: ferrite_core::clocktree::Tree) {
     }
 }
 
+/// A new rate for a port that is on, written with it on (turning it off could pull the TX pin low: a break on the
+/// cable). Call [`flush`] first; a byte arriving across the change may be lost. The reader image's `fdump`.
+pub fn set_rate(id: usize, baud: u32) {
+    wr(HW[id].base + USART_BAUDR, clock::tree().baudr(baud));
+    RATE[id].store(baud, Relaxed);
+}
+
+/// Two stop bits (true) or one on a port that is on (USART_CTRL2 STOPBN, bits 12-13): the reader's link tests.
+pub fn set_stop2(id: usize, two: bool) {
+    const USART_CTRL2: u32 = 0x10;
+    let a = HW[id].base + USART_CTRL2;
+    wr(a, (rd(a) & !(3 << 12)) | if two { 2 << 12 } else { 0 });
+}
+
+/// Drops what has come and not been taken.
+pub fn clear_rx(id: usize) {
+    RX[id].clear();
+}
+
 /// Off: both pins analog so a powered-down module is not fed, and the port's clock gated (PWR-23).
 pub fn deinit(id: usize) {
     let u = &HW[id];
@@ -163,10 +182,40 @@ pub fn stats(id: usize) -> UartStats {
     }
 }
 
+/// The bytes [`send_async`] has still to send: from, to (addresses).
+static TX_FROM: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
+static TX_TO: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
+
+/// Sends `data` from the interrupt, byte by byte, and returns at once (the reader's `fdumpz` compresses the next
+/// chunk meanwhile). Static data only; it must stay as it is until [`tx_busy`] says false: the caller's promise.
+pub fn send_async(id: usize, data: &'static [u8]) {
+    while tx_busy(id) {}
+    let base = HW[id].base;
+    TX_BYTES[id].fetch_add(data.len() as u32, Relaxed);
+    TX_FROM[id].store(data.as_ptr() as u32, Relaxed);
+    TX_TO[id].store(data.as_ptr() as u32 + data.len() as u32, Relaxed);
+    modify(base + USART_CTRL1, 0, USART_CTRL1_TDBEIEN);
+}
+
+/// A [`send_async`] still has bytes to hand to the port.
+pub fn tx_busy(id: usize) -> bool {
+    rd(HW[id].base + USART_CTRL1) & USART_CTRL1_TDBEIEN != 0
+}
+
 /// The interrupt handler of port `id`.
 pub fn isr(id: usize) {
     let base = HW[id].base;
     let sts = rd(base + USART_STS);
+    if rd(base + USART_CTRL1) & USART_CTRL1_TDBEIEN != 0 && sts & USART_STS_TDBE != 0 {
+        let from = TX_FROM[id].load(Relaxed);
+        if from < TX_TO[id].load(Relaxed) {
+            // SAFETY: send_async's caller keeps the bytes in place until tx_busy is false.
+            wr(base + USART_DT, unsafe { *(from as *const u8) } as u32);
+            TX_FROM[id].store(from + 1, Relaxed);
+        } else {
+            modify(base + USART_CTRL1, USART_CTRL1_TDBEIEN, 0);
+        }
+    }
     if sts & (USART_STS_RDBF | USART_STS_ERR) != 0 {
         let b = rd(base + USART_DT) as u8; // STS then DT read clears the flags
         if sts & USART_STS_ERR != 0 {

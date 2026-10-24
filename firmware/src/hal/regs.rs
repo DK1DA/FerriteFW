@@ -70,6 +70,7 @@ pub const USART_CTRL1_UEN: u32 = 1 << 13;
 pub const USART_CTRL1_TEN: u32 = 1 << 3;
 pub const USART_CTRL1_REN: u32 = 1 << 2;
 pub const USART_CTRL1_RDBFIEN: u32 = 1 << 5;
+pub const USART_CTRL1_TDBEIEN: u32 = 1 << 7;
 
 // Cortex-M4 core
 pub const SYST_CSR: u32 = 0xE000_E010;
