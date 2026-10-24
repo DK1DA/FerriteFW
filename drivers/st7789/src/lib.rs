@@ -26,6 +26,18 @@ pub trait Bus8080 {
         }
     }
 
+    /// Pixels (RGB565), high byte first. The default sends them through a small buffer; a bus that writes bytes
+    /// one at a time sends them straight from `px`.
+    fn pixels(&mut self, px: &[u16]) {
+        let mut buf = [0u8; 64];
+        for chunk in px.chunks(32) {
+            for (i, &c) in chunk.iter().enumerate() {
+                buf[2 * i..2 * i + 2].copy_from_slice(&c.to_be_bytes());
+            }
+            self.data(&buf[..2 * chunk.len()]);
+        }
+    }
+
     /// Hardware reset line: true = held in reset (low).
     fn reset(&mut self, active: bool);
 }
@@ -149,14 +161,7 @@ impl<B: Bus8080> St7789<B> {
 
     /// Pixels (RGB565) for the window, row by row; more may follow in later calls.
     pub fn pixels(&mut self, px: &[u16]) {
-        // Big-endian bytes, in chunks so the bus gets runs, not single bytes.
-        let mut buf = [0u8; 64];
-        for chunk in px.chunks(32) {
-            for (i, &c) in chunk.iter().enumerate() {
-                buf[2 * i..2 * i + 2].copy_from_slice(&c.to_be_bytes());
-            }
-            self.bus.data(&buf[..2 * chunk.len()]);
-        }
+        self.bus.pixels(px);
     }
 
     /// `count` pixels of one colour for the window (a drawing layer's runs of background).

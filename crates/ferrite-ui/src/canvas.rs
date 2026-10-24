@@ -405,8 +405,23 @@ impl<'a> Rd<'a> {
 /// Draw a recording ([`Rec`]) into `p`. Into a band (each primitive clips to its rows) a nested region is its
 /// background and drawing, as [`banded`] draws inside a canvas; onto the panel (`bands`) it goes in bands.
 fn replay(rec: &[u8], p: &mut dyn Panel, bands: bool, at: &mut RleCache) {
+    // Each band replays the whole recording: anything outside its rows is skipped here, before any work (a text's
+    // width, a fill's theming). Most of a SLOT redraw's 35 ms of replay went on that (Oct 23, 2026).
+    let (r0, r1) = p.rows();
+    let out = |a: i32, b: i32| b <= r0 || a >= r1;
     let mut r = Rd(rec);
     while let Some(op) = r.op() {
+        let skip = match op {
+            Op::Fill(_, y, _, h, _) | Op::Rounded(_, _, y, _, h, _, _) | Op::Band(_, y, _, h, _, _) => out(y, y + h),
+            Op::Text(_, baseline, _, f, _, _, y0, y1) => {
+                let top = baseline - f.ascent as i32;
+                out(y0.max(top), y1.min(top + f.line_h as i32))
+            }
+            Op::Mask(_, y, m1, ..) => out(y, y + m1.h as i32),
+        };
+        if skip {
+            continue;
+        }
         match op {
             Op::Fill(x, y, w, h, c) => {
                 let t0 = crate::prof::now();

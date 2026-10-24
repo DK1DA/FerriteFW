@@ -150,6 +150,15 @@ impl st7789::Bus8080 for Lcd {
             byte(b)
         }
     }
+    /// Straight from the pixels: copying them into a byte buffer first made a band's send about 0.4 us a byte
+    /// against a fill's 0.24 (Oct 23, 2026). The strobe is `byte`'s, unchanged.
+    fn pixels(&mut self, px: &[u16]) {
+        add_bytes(2 * px.len() as u32);
+        for &c in px {
+            byte((c >> 8) as u8);
+            byte(c as u8);
+        }
+    }
     fn repeat(&mut self, color: u16, count: u32) {
         let (hi, lo) = ((color >> 8) as u8, color as u8);
         add_bytes(count.wrapping_mul(2));
