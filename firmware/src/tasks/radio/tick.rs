@@ -166,8 +166,10 @@ impl Radio {
                 continue;
             }
             // SQL-18 (decision 269): the software squelch on FM, with the thresholds the chip was given; AM, or
-            // `sq chip`, keeps the chip's own decision.
-            let soft = (!ferrite_core::softsq::chip_decides() && !self.slots[s as usize].am).then_some(()).and(self.sq_regs[n as usize]);
+            // `sq chip`, keeps the chip's own decision, as does the APRS slot (SQL-18.4: a packet needs the chip's
+            // hold through a noisy reading and its tail; its quick close bought nothing on a muted slot).
+            let aprs = self.aprs_slots & 1 << s != 0;
+            let soft = (!ferrite_core::softsq::chip_decides() && !self.slots[s as usize].am && !aprs).then_some(()).and(self.sq_regs[n as usize]);
             let mut bk = self.chip(n);
             let (raw, st) = (bk.rssi(), bk.status());
             let noise = if soft.is_some() { bk.noise() } else { 0 };
@@ -221,7 +223,7 @@ impl Radio {
         }
         // SAME on a weather channel's chip (DEC-19), then DTMF on the others (DEC-6).
         self.same_tick(now);
-        self.dtmf_tick(now);
+        self.dtmf_tick(now, &sq);
         // 2. Scans step while their slot has a chip, on the answer from that chip. Before the watch turn, so the
         // turn gives a step to the other band that band's chip in this tick (decision 166): after it, as until Oct
         // 15, 2026, the old band's chip was tuned to the new frequency for a tick and the right one a tick late,
