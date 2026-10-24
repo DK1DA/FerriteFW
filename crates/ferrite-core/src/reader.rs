@@ -33,13 +33,35 @@ pub const TYPE_BLOCK: u8 = b'B';
 pub const TYPE_END: u8 = b'E';
 /// `fdumpz`'s frame: one [`ZCHUNK`] of the range, coded (BACKUP-9.6): a mode byte, then the data.
 pub const TYPE_ZBLOCK: u8 = b'Z';
-/// `fdumpz`'s chunk: 8 KB read, coded and sent as one frame.
-pub const ZCHUNK: usize = 8192;
+/// `fdumpz`'s chunk: 16 KB read, coded and sent as one frame (fewer frames, fewer waits for an ACK).
+pub const ZCHUNK: usize = 16384;
 /// The coded chunk's room: the mode byte and the chunk raw (the coder falls back to raw when it can't do better).
 pub const ZBUF: usize = ZCHUNK + 1;
 pub const Z_RAW: u8 = 0;
 pub const Z_ERASED: u8 = 1;
-pub const Z_RLE: u8 = 2;
+/// Raw DEFLATE (RFC 1951): one final block with the fixed Huffman codes. Every host inflates it with what it has
+/// (Python's zlib, a browser's `DecompressionStream("deflate-raw")`).
+pub const Z_DEFLATE: u8 = 4;
+/// [`deflate_fixed`]'s hash table of positions: 2^13 entries, 16 KB.
+pub const DEFLATE_HASH_BITS: u32 = 13;
+
+/// `fdumpz`'s working memory: the coded chunk and the encoder's hash table (about 32 KB).
+pub struct ZWork {
+    pub out: [u8; ZBUF],
+    pub head: [u16; 1 << DEFLATE_HASH_BITS],
+}
+
+impl ZWork {
+    pub const fn new() -> Self {
+        Self { out: [0; ZBUF], head: [0; 1 << DEFLATE_HASH_BITS] }
+    }
+}
+
+impl Default for ZWork {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 pub const SYNC: [u8; 4] = *b"FDS1";
 pub const SYNC_OK: [u8; 4] = *b"FDOK";
 /// The console's rate, and `fdump`'s when none is given.
@@ -155,107 +177,143 @@ pub struct Stopped {
     pub why: &'static str,
 }
 
-/// BACKUP-9.6: a chunk coded into `out` (at least [`ZBUF`] long), the smallest of: [`Z_ERASED`] (every byte 0xFF, the
-/// mode byte alone), [`Z_RLE`] (PackBits: a control byte 0-127 is that plus one literal bytes, 128-255 is a run of
-/// that minus 125, 3 to 130, of the next byte) and [`Z_RAW`]. Returns the coded length.
-pub fn zcode(chunk: &[u8], out: &mut [u8]) -> usize {
-    if chunk.iter().all(|&b| b == 0xFF) {
-        out[0] = Z_ERASED;
-        return 1;
-    }
-    let raw = |out: &mut [u8]| {
-        out[0] = Z_RAW;
-        out[1..1 + chunk.len()].copy_from_slice(chunk);
-        1 + chunk.len()
-    };
-    let limit = chunk.len(); // coded must beat raw
-    let mut o = 1;
-    let mut i = 0;
-    let mut lit = 0usize; // start of the pending literal run
-    let mut lit_n = 0usize;
-    macro_rules! flush_lit {
-        () => {
-            while lit_n > 0 {
-                let n = lit_n.min(128);
-                if o + 1 + n > limit {
-                    return raw(out);
-                }
-                out[o] = (n - 1) as u8;
-                out[o + 1..o + 1 + n].copy_from_slice(&chunk[lit..lit + n]);
-                o += 1 + n;
-                lit += n;
-                lit_n -= n;
-            }
-        };
-    }
-    while i < chunk.len() {
-        let b = chunk[i];
-        let mut run = 1;
-        while i + run < chunk.len() && chunk[i + run] == b && run < 130 {
-            run += 1;
-        }
-        if run >= 3 {
-            flush_lit!();
-            if o + 2 > limit {
-                return raw(out);
-            }
-            out[o] = (run + 125) as u8;
-            out[o + 1] = b;
-            o += 2;
-            i += run;
-            lit = i;
-        } else {
-            if lit_n == 0 {
-                lit = i;
-            }
-            lit_n += 1;
-            i += 1;
-        }
-    }
-    flush_lit!();
-    out[0] = Z_RLE;
-    o
+/// DEFLATE's bit order: values least significant bit first, Huffman codes most significant bit first.
+struct Bits<'a> {
+    out: &'a mut [u8],
+    o: usize,
+    acc: u32,
+    n: u32,
+    full: bool,
 }
 
-/// BACKUP-9.6: a coded chunk back into `out` (its length is the chunk's); false when it doesn't decode to exactly that.
-pub fn zdecode(coded: &[u8], out: &mut [u8]) -> bool {
-    let Some((&mode, data)) = coded.split_first() else { return false };
-    match mode {
-        Z_ERASED if data.is_empty() => {
-            out.fill(0xFF);
-            true
+impl Bits<'_> {
+    fn put(&mut self, v: u32, n: u32) {
+        self.acc |= v << self.n;
+        self.n += n;
+        while self.n >= 8 {
+            match self.out.get_mut(self.o) {
+                Some(b) => *b = self.acc as u8,
+                None => self.full = true,
+            }
+            self.o += 1;
+            self.acc >>= 8;
+            self.n -= 8;
         }
-        Z_RAW if data.len() == out.len() => {
-            out.copy_from_slice(data);
-            true
+    }
+    fn code(&mut self, code: u32, n: u32) {
+        self.put(code.reverse_bits() >> (32 - n), n)
+    }
+    /// The fixed literal/length code for `v` (0-287).
+    fn lit(&mut self, v: u32) {
+        match v {
+            0..=143 => self.code(0x30 + v, 8),
+            144..=255 => self.code(0x190 + v - 144, 9),
+            256..=279 => self.code(v - 256, 7),
+            _ => self.code(0xC0 + v - 280, 8),
         }
-        Z_RLE => {
-            let (mut i, mut o) = (0, 0);
-            while i < data.len() {
-                let c = data[i] as usize;
-                i += 1;
-                if c < 128 {
-                    let n = c + 1;
-                    if i + n > data.len() || o + n > out.len() {
-                        return false;
-                    }
-                    out[o..o + n].copy_from_slice(&data[i..i + n]);
-                    i += n;
-                    o += n;
-                } else {
-                    let n = c - 125;
-                    if i >= data.len() || o + n > out.len() {
-                        return false;
-                    }
-                    out[o..o + n].fill(data[i]);
+    }
+}
+
+const LEN_BASE: [u16; 29] =
+    [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+const LEN_EXTRA: [u8; 29] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+const DIST_BASE: [u16; 30] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
+    8193, 12289, 16385, 24577,
+];
+const DIST_EXTRA: [u8; 30] = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+
+/// The longest earlier match for `src[i..]` from the hash table (`i` entered into it): (length, distance), or
+/// (0, 0) under 3 bytes.
+fn find(src: &[u8], head: &mut [u16; 1 << DEFLATE_HASH_BITS], i: usize) -> (usize, usize) {
+    if i + 3 > src.len() {
+        return (0, 0);
+    }
+    let h = hash3(src, i);
+    let c = head[h];
+    head[h] = i as u16;
+    if c == u16::MAX {
+        return (0, 0);
+    }
+    let c = c as usize;
+    let max = (src.len() - i).min(258);
+    let mut l = 0;
+    while l < max && src[c + l] == src[i + l] {
+        l += 1;
+    }
+    if l >= 3 { (l, i - c) } else { (0, 0) }
+}
+
+fn hash3(src: &[u8], p: usize) -> usize {
+    let v = src[p] as u32 | (src[p + 1] as u32) << 8 | (src[p + 2] as u32) << 16;
+    (v.wrapping_mul(2_654_435_761) >> (32 - DEFLATE_HASH_BITS)) as usize
+}
+
+/// BACKUP-9.6: `src` (at most 64 KB) as raw DEFLATE, one final fixed-Huffman block, into `out`; None when it
+/// doesn't fit. Greedy matches from one hash table with one step of lazy matching (zlib's idea: a longer match one
+/// byte on wins).
+pub fn deflate_fixed(src: &[u8], out: &mut [u8], head: &mut [u16; 1 << DEFLATE_HASH_BITS]) -> Option<usize> {
+    head.fill(u16::MAX);
+    let mut b = Bits { out, o: 0, acc: 0, n: 0, full: false };
+    b.put(1, 1); // BFINAL
+    b.put(1, 2); // BTYPE 01: fixed Huffman codes
+    let n = src.len();
+    let mut i = 0;
+    let mut pending = None;
+    while i < n {
+        let (l, d) = pending.take().unwrap_or_else(|| find(src, head, i));
+        if l >= 3 {
+            if l < 32 && i + 1 < n {
+                let next = find(src, head, i + 1);
+                if next.0 > l {
+                    b.lit(src[i] as u32);
                     i += 1;
-                    o += n;
+                    pending = Some(next);
+                    continue;
                 }
             }
-            o == out.len()
+            let li = (0..29).rev().find(|&k| LEN_BASE[k] as usize <= l).unwrap_or(0);
+            b.lit(257 + li as u32);
+            b.put((l - LEN_BASE[li] as usize) as u32, LEN_EXTRA[li] as u32);
+            let di = (0..30).rev().find(|&k| DIST_BASE[k] as usize <= d).unwrap_or(0);
+            b.code(di as u32, 5);
+            b.put((d - DIST_BASE[di] as usize) as u32, DIST_EXTRA[di] as u32);
+            for p in i + 1..i + l {
+                if p + 3 <= n {
+                    head[hash3(src, p)] = p as u16;
+                }
+            }
+            i += l;
+        } else {
+            b.lit(src[i] as u32);
+            i += 1;
         }
-        _ => false,
+        if b.full {
+            return None;
+        }
     }
+    b.lit(256);
+    if b.n > 0 {
+        b.put(0, 8 - b.n);
+    }
+    if b.full { None } else { Some(b.o) }
+}
+
+/// BACKUP-9.6: a chunk coded into `z.out`, the smallest of: [`Z_ERASED`] (every byte 0xFF, the mode byte alone),
+/// [`Z_DEFLATE`] and [`Z_RAW`]. Returns the coded length.
+pub fn zcode(chunk: &[u8], z: &mut ZWork) -> usize {
+    if chunk.iter().all(|&b| b == 0xFF) {
+        z.out[0] = Z_ERASED;
+        return 1;
+    }
+    let (mode, rest) = z.out.split_at_mut(1);
+    if let Some(k) = deflate_fixed(chunk, &mut rest[..chunk.len() - 1], &mut z.head) {
+        mode[0] = Z_DEFLATE;
+        return 1 + k;
+    }
+    mode[0] = Z_RAW;
+    rest[..chunk.len()].copy_from_slice(chunk);
+    1 + chunk.len()
 }
 
 /// Sends one frame until the host ACKs it: Some(true) ACK, Some(false) cancelled, None out of tries.
@@ -298,7 +356,7 @@ pub fn fdump_run(
 pub fn fdumpz_run(
     link: &mut impl Link,
     buf: &mut [u8; ZCHUNK],
-    zbuf: &mut [u8; ZBUF],
+    zbuf: &mut ZWork,
     addr: u32,
     len: u32,
     read: impl FnMut(u32, &mut [u8]),
@@ -310,7 +368,7 @@ pub fn fdumpz_run(
 fn dump(
     link: &mut impl Link,
     buf: &mut [u8],
-    mut zbuf: Option<&mut [u8; ZBUF]>,
+    mut zbuf: Option<&mut ZWork>,
     addr: u32,
     len: u32,
     mut read: impl FnMut(u32, &mut [u8]),
@@ -341,7 +399,7 @@ fn dump(
         let sent = match zbuf.as_deref_mut() {
             Some(z) => {
                 let c = zcode(data, z);
-                send_frame(link, &header(TYPE_ZBLOCK, addr + done, c as u16), &z[..c], &mut resends)
+                send_frame(link, &header(TYPE_ZBLOCK, addr + done, c as u16), &z.out[..c], &mut resends)
             }
             None => send_frame(link, &header(TYPE_BLOCK, addr + done, n as u16), data, &mut resends),
         };
@@ -929,29 +987,66 @@ mod tests {
     /// BACKUP-9.6: every coding round-trips, picks erased/RLE/raw by size, and never beats raw's room.
     #[test]
     fn zcode_round_trips() {
-        let mut cases: [[u8; ZCHUNK]; 5] = [[0xFF; ZCHUNK], [0; ZCHUNK], [0; ZCHUNK], [0; ZCHUNK], [0xFF; ZCHUNK]];
-        for (i, b) in cases[2].iter_mut().enumerate() {
-            *b = chip(i as u32); // noise: raw
+        let mut text = [0u8; ZCHUNK];
+        for (i, b) in text.iter_mut().enumerate() {
+            *b = b"CQ CQ de VA7XYZ 146.520 FM "[i % 27] ^ ((i / 997) as u8 & 1);
+        }
+        let mut cases: [[u8; ZCHUNK]; 6] = [[0xFF; ZCHUNK], [0; ZCHUNK], [0; ZCHUNK], [0; ZCHUNK], [0xFF; ZCHUNK], text];
+        let mut x = 0x2545_F491u32;
+        for b in cases[2].iter_mut() {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            *b = x as u8; // noise: raw
         }
         for (i, b) in cases[3].iter_mut().enumerate() {
             *b = if i % 300 < 200 { 0xFF } else { chip(i as u32) }; // mixed
         }
         cases[4][100] = 0x12; // one byte off erased
-        let modes = [Z_ERASED, Z_RLE, Z_RAW, Z_RLE, Z_RLE];
+        let modes = [Z_ERASED, Z_DEFLATE, Z_RAW, Z_DEFLATE, Z_DEFLATE, Z_DEFLATE];
+        let mut z = std::boxed::Box::new(ZWork::new());
         for (c, m) in cases.iter().zip(modes) {
-            let mut z = [0u8; ZBUF];
             let n = zcode(c, &mut z);
-            assert_eq!(z[0], m);
+            assert_eq!(z.out[0], m);
             assert!(n <= ZBUF);
-            let mut back = [0u8; ZCHUNK];
-            assert!(zdecode(&z[..n], &mut back));
+            let back = match m {
+                Z_ERASED => std::vec![0xFF; ZCHUNK],
+                Z_RAW => z.out[1..n].to_vec(),
+                _ => miniz_oxide::inflate::decompress_to_vec(&z.out[1..n]).unwrap(),
+            };
             assert_eq!(&back[..], &c[..]);
         }
-        let mut back = [0u8; 10];
-        assert!(!zdecode(&[Z_RLE, 0x85, 0xAA], &mut back)); // 8 bytes, not 10
-        assert!(zdecode(&[Z_RLE, 0x87, 0xAA], &mut back) && back == [0xAA; 10]);
+        assert!(zcode(&text, &mut z) < 600);
+        // Short and odd lengths: the end of a range.
+        for len in [1usize, 2, 3, 4, 5, 259, 1000] {
+            let n = zcode(&cases[3][..len], &mut z);
+            let back = match z.out[0] {
+                Z_RAW => z.out[1..n].to_vec(),
+                Z_ERASED => std::vec![0xFF; len],
+                _ => miniz_oxide::inflate::decompress_to_vec(&z.out[1..n]).unwrap(),
+            };
+            assert_eq!(&back[..], &cases[3][..len]);
+        }
         assert_eq!(parse(b"fdumpz 0 0x400000 460800"), Command::FdumpZ { addr: 0, len: 0x40_0000, baud: 460_800 });
         assert_eq!(parse(b"fdumpz 0 0x1000"), Command::FdumpZ { addr: 0, len: 0x1000, baud: FDUMPZ_BAUD });
+    }
+
+    /// BACKUP-9.6: the coding on a real image (FERRITE_DUMP=path; does nothing without it). Every chunk inflates back.
+    #[test]
+    fn zcode_on_a_real_image() {
+        let Ok(path) = std::env::var("FERRITE_DUMP") else { return };
+        let img = std::fs::read(path).unwrap();
+        let mut z = std::boxed::Box::new(ZWork::new());
+        let (mut total, mut modes) = (0usize, [0usize; 5]);
+        for c in img.chunks(ZCHUNK) {
+            let n = zcode(c, &mut z);
+            modes[z.out[0] as usize] += 1;
+            if z.out[0] == Z_DEFLATE {
+                assert_eq!(miniz_oxide::inflate::decompress_to_vec(&z.out[1..n]).unwrap(), c);
+            }
+            total += n + HDR + 4;
+        }
+        std::println!("image {} KB -> {} KB on the cable; chunks raw {} erased {} deflate {}", img.len() / 1024, total / 1024, modes[0], modes[1], modes[4]);
     }
 
     /// BACKUP-9.5: a whole dump against a host like Console's: every byte, the end frame's CRC and count.

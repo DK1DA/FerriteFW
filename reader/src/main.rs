@@ -232,7 +232,7 @@ struct Reader {
     power: PowerSwitch,
     buf: [u8; proto::BLOCK],
     zchunk: [u8; proto::ZCHUNK],
-    zbuf: [u8; proto::ZBUF],
+    zbuf: proto::ZWork,
 }
 
 impl Reader {
@@ -441,7 +441,7 @@ fn main() -> ! {
         power: PowerSwitch::default(),
         buf: [0; proto::BLOCK],
         zchunk: [0; proto::ZCHUNK],
-        zbuf: [0; proto::ZBUF],
+        zbuf: proto::ZWork::new(),
     };
     Cable.put(b"\r\nFerrite reader ");
     Cable.put(ferrite_core::VERSION.as_bytes());
