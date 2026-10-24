@@ -649,7 +649,7 @@ mod bt_query_tests {
 }
 
 /// BK4829 REG_30 bits that turn on the transmitter: Tx DSP Enable (1) and PA Gain Enable (3), from the
-/// register table (`datasheets/md/bk4829_registers_table`).
+/// register table (`datasheets/rf/bk4829_registers_table`).
 pub const BK_REG30_TX_BITS: u16 = 1 << 1 | 1 << 3;
 
 /// Why a terminal write to a BK4829 register is refused, in every build (TERM-23): transmit goes only through

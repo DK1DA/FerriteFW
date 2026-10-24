@@ -11,7 +11,7 @@ dumps register by register (before and after a change, stock-like and ours, chip
 
 Capture the dump on the hwtest console right after power-on, before anything else runs: `bk 0` and `bk 1`
 (the image only reads the BK4829s, never writes them, so every register should still hold its reset value).
-Save each command's output to a file. Defaults come from datasheets/md/bk4829_registers_table/all.md
+Save each command's output to a file. Defaults come from datasheets/rf/bk4829_registers_table/all.md
 (DRT01-230606-C01 V1.0, section 2). Status, interrupt and RSSI registers change on their own, so a
 mismatch there means little; mismatches in configuration registers say the table is not this chip.
 Both read alignments of the dump are checked; the one that matches more registers is reported.
