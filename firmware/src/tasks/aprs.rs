@@ -72,8 +72,12 @@ impl Aprs {
     /// A byte from the KISS port, the cable or Bluetooth (KISS-6; TERM-2's route on the cable).
     pub fn kiss_in(&mut self, b: u8) {
         let Some(r) = self.kiss.push(b) else { return };
+        if !r.for_single_port() {
+            return; // KISS-11: one port, port 0
+        }
+        // KISS-11: the shortest AX.25 frame is two addresses and a control byte (15)
         if let kiss::Command::Data(d) = self.params.apply(&r) {
-            if self.kiss_q.is_none() && (17..=FRAME_MAX).contains(&d.len()) {
+            if self.kiss_q.is_none() && (15..=FRAME_MAX).contains(&d.len()) {
                 let mut f = Frame { len: d.len() as u16, txdelay_10ms: self.params.tx_delay, fx25: 0, level: 1, b: [0; FRAME_MAX] };
                 f.b[..d.len()].copy_from_slice(d);
                 self.kiss_q = Some(f);

@@ -9,7 +9,7 @@
 
 A rule is covered by an automated test when its ID (e.g. SCAN-21) appears in the test's /// doc comment, its
 attributes, its name or a comment inside its body. Ranges such as "SCAN-16 – SCAN-19" count every rule in them.
-Tests are #[test] functions in ferrite (crates, drivers, sim, sim-web, firmware) and the udigimodes crates; one
+Tests are #[test] functions in ferrite (crates, drivers, sim, sim-web, firmware, digimodes) and the udigimodes crates; one
 under sim/ or sim-web/ counts as a simulator test, the rest as host tests.
 
 The hand-kept steps live in docs/test-plan/<chapter>.md, one entry per rule:
@@ -358,8 +358,10 @@ def main():
         seen.add(r["id"])
     global ID_PAT
     ID_PAT = id_pattern({r["prefix"] for r in rules})
+    # ferrite/digimodes holds the decoders since Oct 23, 2026 (the source from then on); udigimodes is the parked
+    # library, still scanned for the rules its own tests name.
     roots = [FERRITE / "crates", FERRITE / "sim", FERRITE / "sim-web", FERRITE / "firmware", FERRITE / "drivers",
-             WORK / "udigimodes" / "crates"]
+             FERRITE / "digimodes", WORK / "udigimodes" / "crates"]
     tests = scan_tests(roots, ID_PAT)
     covered = {}
     for t in tests:

@@ -322,17 +322,19 @@ fn builder_courses_near_north_and_data_like_comments() {
     }
 }
 
+/// KISS-11: framing as the KISS spec: a bad byte after FESC is dropped, a frame cut off mid-escape too.
 #[test]
 fn kiss_escapes_and_full_buffer() {
     let mut d: kiss::Decoder<8> = kiss::Decoder::new();
     let mut got = Vec::new();
-    // A bad escape keeps its byte; FESC then FEND ends the frame mid-escape, so it is dropped.
+    // A bad escape drops its byte (the spec: "no action is taken"); FESC then FEND ends the frame mid-escape, so
+    // it is dropped.
     for b in [kiss::FEND, 0, 1, kiss::FESC, 0x42, 2, kiss::FEND, 0, kiss::FESC, kiss::FEND, 0, 7, kiss::FEND] {
         if let Some(r) = d.push(b) {
             got.push(r.data.to_vec());
         }
     }
-    assert_eq!(got, vec![vec![1, 0x42, 2], vec![7]]);
+    assert_eq!(got, vec![vec![1, 2], vec![7]]);
     // Exactly full is fine.
     let mut d: kiss::Decoder<4> = kiss::Decoder::new();
     let mut n = 0;
@@ -362,6 +364,7 @@ fn geo_far_and_polar() {
     check((80_000_000, 10_000_000), (88_000_000, 10_000_000), 889_559);
 }
 
+/// KISS-11: commands 1-6 and Return, p-persistence, full duplex never skipping the channel check, port 0 only.
 #[test]
 fn kiss_settings_and_channel_access() {
     use kiss::{Access, Command, Params, Received};
@@ -386,11 +389,14 @@ fn kiss_settings_and_channel_access() {
     assert!(!a.may_send(&p, 20, false, 128));
     assert!(!a.may_send(&p, 60, false, 0)); // slot is 50 ms
     assert!(a.may_send(&p, 70, false, 0));
-    // The channel going busy cancels the wait; full duplex ignores it all.
+    // The channel going busy cancels the wait; full duplex from the host changes nothing (half-duplex radio).
     assert!(!a.may_send(&p, 80, false, 200));
     assert!(!a.may_send(&p, 90, true, 0));
     assert!(a.may_send(&p, 95, false, 0));
-    assert!(a.may_send(&Params { full_duplex: true, ..p }, 100, true, 255));
+    assert!(!a.may_send(&Params { full_duplex: true, ..p }, 100, true, 0), "busy stays busy");
+    // A single-port TNC takes port 0 and Return only.
+    assert!(r(0, 0, b"x").for_single_port() && r(15, 15, &[]).for_single_port());
+    assert!(!r(1, 0, b"x").for_single_port() && !r(2, 1, &[30]).for_single_port());
     // Over many tries, P = 63 sends about a quarter of the time in free slots.
     let p = Params::default();
     let mut a = Access::default();

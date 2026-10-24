@@ -80,7 +80,9 @@ impl<const N: usize> Decoder<N> {
             match b {
                 TFEND => FEND,
                 TFESC => FESC,
-                b => b, // a protocol error; keep the byte, as most TNCs do
+                // The spec: any other byte after FESC "is an error; no action is taken and frame assembly
+                // continues". The byte is dropped.
+                _ => return None,
             }
         } else if b == FESC {
             self.escape = true;
@@ -109,13 +111,22 @@ pub struct Params {
     pub slot_time: u8,
     /// Time to keep transmitting after the data, 10 ms units (command 4, obsolete but sent by some hosts).
     pub tx_tail: u8,
-    /// Transmit without waiting for a clear channel (command 5).
+    /// Command 5, kept as sent. [`Access`] never acts on it: a half-duplex radio always listens before it
+    /// transmits.
     pub full_duplex: bool,
 }
 
 impl Default for Params {
     fn default() -> Self {
         Params { tx_delay: 50, persistence: 63, slot_time: 10, tx_tail: 0, full_duplex: false }
+    }
+}
+
+impl Received<'_> {
+    /// For a single-port TNC: port 0's frames, and Return (0xFF). The spec: "In systems with only one HDLC
+    /// port, it is by definition Port 0"; a frame for another port is ignored.
+    pub fn for_single_port(&self) -> bool {
+        self.port == 0 || (self.port == 15 && self.command == 15)
     }
 }
 
@@ -174,10 +185,9 @@ pub struct Access {
 impl Access {
     /// Call while a frame is waiting: may it be sent now? `now_ms` is any wrapping millisecond clock, `busy`
     /// the channel (the demodulator's carrier detect and the squelch), `random` a fresh random byte each call.
+    /// The host's full duplex (command 5) never skips the channel check: the radio is half duplex, and a frame
+    /// from an app is never sent over someone else's.
     pub fn may_send(&mut self, p: &Params, now_ms: u32, busy: bool, random: u8) -> bool {
-        if p.full_duplex {
-            return true;
-        }
         if busy {
             self.next = None;
             return false;
