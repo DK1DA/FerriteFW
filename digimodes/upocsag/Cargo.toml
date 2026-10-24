@@ -1,0 +1,15 @@
+[package]
+name = "upocsag"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+description = "POCSAG pager receiver for microcontrollers: 512/1200/2400 baud, BCH error correction, numeric and alphanumeric messages; integer only, no_std, no alloc"
+keywords = ["pocsag", "pager", "dapnet", "ham-radio", "no-std"]
+categories = ["embedded", "no-std"]
+
+[dependencies]
+
+[lints]
+workspace = true

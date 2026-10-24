@@ -1,0 +1,26 @@
+[package]
+name = "uaprs"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+description = "APRS for microcontrollers: AX.25 frames, APRS packet parsing and building, KISS, smart beaconing; no_std, no alloc, zero copy"
+keywords = ["aprs", "ax25", "kiss", "ham-radio", "no-std"]
+categories = ["embedded", "no-std", "parser-implementations"]
+
+[dependencies]
+udsp = { path = "../udsp", version = "0.1" }
+
+[features]
+default = ["nmea", "ultimeter"]
+# Raw GPS sentences ($GPRMC, $GPGGA, $GPGLL) as positions: about 1.6 KB of flash.
+nmea = []
+# Peet Bros Ultimeter ($ULTW) weather: about 0.6 KB.
+ultimeter = []
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

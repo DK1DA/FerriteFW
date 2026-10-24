@@ -35,9 +35,7 @@ Ferrite replaces the RT-950 Pro's stock firmware with one that is open, RF-aware
 | [`assets/logo/`](assets/logo) | The logo: the toroid mark, lockups for dark and light backgrounds, the app icon (`ferrite-icon.svg`, a simplified one for 16-48 px, PNGs 16-1024 and `favicon.ico`), the social preview |
 | [`fonts/`](fonts) | Atkinson Hyperlegible and Barlow Semi Condensed (OFL; licences beside them) |
 
-The chip drivers are in [`drivers/`](drivers) (BK4829, SI4732, ST7789, W25Q, keypad and NMEA; the uradio repo until Oct 13, 2026, history kept). The digital modes are a separate library, pinned by commit in `Cargo.toml`:
-
-- [udigimodes](https://github.com/infamy/udigimodes): AFSK/APRS, POCSAG, DSC, FT8/FT4 and WSPR.
+The chip drivers are in [`drivers/`](drivers) (BK4829, SI4732, ST7789, W25Q, keypad and NMEA; the uradio repo until Oct 13, 2026, history kept). The digital modes are in [`digimodes/`](digimodes): AFSK and FX.25, APRS, POCSAG, DSC and the DSP they share (from the udigimodes library until Oct 23, 2026).
 
 ## Tasks
 

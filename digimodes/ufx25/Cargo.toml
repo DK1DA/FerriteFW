@@ -1,0 +1,19 @@
+[package]
+name = "ufx25"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+description = "FX.25 forward error correction for AX.25 packet radio: Reed-Solomon over GF(2^8), streaming bit receiver and transmit bit iterator; no_std, no alloc, integer only"
+keywords = ["fx25", "ax25", "reed-solomon", "ham-radio", "no-std"]
+categories = ["embedded", "no-std"]
+
+[dependencies]
+udsp = { path = "../udsp", version = "0.1" }
+
+[dev-dependencies]
+uafsk = { path = "../uafsk", version = "0.1" }
+
+[lints]
+workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "udsc"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+description = "Marine VHF DSC (Digital Selective Calling, channel 70) receiver for microcontrollers: 1200-baud FSK, DX/RX diversity, ECC, ITU-R M.493 messages; integer only, no_std, no alloc"
+keywords = ["dsc", "marine", "gmdss", "vhf", "no-std"]
+categories = ["embedded", "no-std"]
+
+[dependencies]
+uafsk = { path = "../uafsk", version = "0.1" }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

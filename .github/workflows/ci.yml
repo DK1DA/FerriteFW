@@ -1,6 +1,6 @@
 name: ci
-# Paused: udigimodes is private, and the DEPS_TOKEN secret that reads them is not set up yet.
-# To turn CI back on, add the secret and restore the triggers:
+# Paused: CI moves to the local Forgejo (Oct 22, 2026). The digital modes are in digimodes/ now, so no token is
+# needed. To run it here again, restore the triggers:
 #   on: [push, pull_request]
 on: workflow_dispatch
 jobs:
@@ -8,8 +8,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # udigimodes is private: a token with read access to it (repository secret DEPS_TOKEN).
-      - run: git config --global url."https://x-access-token:${{ secrets.DEPS_TOKEN }}@github.com/".insteadOf "https://github.com/"
       # rust-toolchain.toml picks the pinned nightly and its components.
       - run: rustup show active-toolchain || rustup toolchain install
       - run: cargo test

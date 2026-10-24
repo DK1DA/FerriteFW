@@ -1,0 +1,17 @@
+[package]
+name = "uafsk"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+description = "1200-baud AFSK (Bell 202) packet modem for microcontrollers: HDLC frames in and out, integer only, no_std, no alloc"
+keywords = ["afsk", "aprs", "ax25", "ham-radio", "no-std"]
+categories = ["embedded", "no-std"]
+
+[dependencies]
+udsp = { path = "../udsp", version = "0.1" }
+ufx25 = { path = "../ufx25", version = "0.1" }
+
+[lints]
+workspace = true

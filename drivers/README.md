@@ -1,6 +1,6 @@
 # uradio
 
-**Drivers for the chips in a handheld radio**: written for [Ferrite](https://github.com/infamy/ferrite), an open
+**Drivers for the chips in a handheld radio**: written for [Ferrite](../README.md), an open
 firmware for the Radtel RT-950 Pro, and usable on anything with the same parts.
 
 | Crate | Chip | Status |

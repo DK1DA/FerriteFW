@@ -1,0 +1,21 @@
+[package]
+name = "udsp"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+description = "Integer DSP building blocks for microcontrollers: FFT, mixer and decimator, integer log, compile-time tables"
+keywords = ["dsp", "fft", "no-std", "embedded", "fixed-point"]
+categories = ["embedded", "no-std", "science"]
+
+[features]
+# Keep the plain kernels on an ARMv7E-M target (to compare against the DSP-instruction ones).
+plain = []
+# Run the packed kernels everywhere, with emulated instructions (to test them on the PC).
+packed = []
+
+[dependencies]
+
+[lints]
+workspace = true
