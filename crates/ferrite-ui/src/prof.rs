@@ -16,7 +16,13 @@ pub const COVER: usize = 4;
 /// Counts, not cycles: the big fonts' glyph rows decoded, and drawn.
 pub const ROWS_DECODED: usize = 5;
 pub const ROWS_DRAWN: usize = 6;
-pub const N: usize = 7;
+/// Recorded fills, rounded fills and frames replayed (into bands, or straight to the panel).
+pub const FILL: usize = 7;
+/// Each band's clear to its background and its send to the panel (the bus).
+pub const PUSH: usize = 8;
+/// Whole regions drawn in bands, everything in them included.
+pub const BANDS: usize = 9;
+pub const N: usize = 10;
 
 static P: [AtomicU32; N] = [const { AtomicU32::new(0) }; N];
 /// The cycle counter, a `fn() -> u32` (0: none).

@@ -408,9 +408,20 @@ fn replay(rec: &[u8], p: &mut dyn Panel, bands: bool, at: &mut RleCache) {
     let mut r = Rd(rec);
     while let Some(op) = r.op() {
         match op {
-            Op::Fill(x, y, w, h, c) => p.fill(x, y, w, h, c),
-            Op::Rounded(false, x, y, w, h, rad, c) => p.fill_r(x, y, w, h, rad, c),
-            Op::Rounded(true, x, y, w, h, rad, c) => p.frame_r(x, y, w, h, rad, c),
+            Op::Fill(x, y, w, h, c) => {
+                let t0 = crate::prof::now();
+                p.fill(x, y, w, h, c);
+                crate::prof::add(crate::prof::FILL, t0);
+            }
+            Op::Rounded(frame, x, y, w, h, rad, c) => {
+                let t0 = crate::prof::now();
+                if frame {
+                    p.frame_r(x, y, w, h, rad, c);
+                } else {
+                    p.fill_r(x, y, w, h, rad, c);
+                }
+                crate::prof::add(crate::prof::FILL, t0);
+            }
             Op::Text(x, baseline, s, f, fg, bg, y0, y1) => match at.get(f, s) {
                 Some(at) => {
                     p.text4_rows_at(x, baseline, s, f, fg, bg, y0, y1, at);
@@ -528,10 +539,13 @@ fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg
     let bg = crate::theme::map_bg(bg);
     let mut by = y;
     let mut at = RleCache::default();
+    let tb = crate::prof::now();
     while by < y + h {
         let bh = rows.min(y + h - by);
         let n = (w * bh) as usize;
+        let t0 = crate::prof::now();
         px[..n].fill(bg);
+        crate::prof::add(crate::prof::PUSH, t0);
         {
             let mut band = Band { buf: &mut px[..n], x, y: by, w, h: bh, win: (0, 0, 0, 0), cur: (0, 0), fwd: None, thru: false, mask: None };
             match &mut src {
@@ -542,10 +556,13 @@ fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg
                 }
             }
         }
+        let t0 = crate::prof::now();
         lcd.window(x, by, x + w - 1, by + bh - 1);
         lcd.push_buf(&px[..n]);
+        crate::prof::add(crate::prof::PUSH, t0);
         by += bh;
     }
+    crate::prof::add(crate::prof::BANDS, tb);
     if cfg!(feature = "std") {
         // the text hints: windows and hints to the panel, pixels nowhere
         let mut band = Band { buf: &mut [], x, y, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };

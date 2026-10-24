@@ -858,6 +858,9 @@ pub async fn task() {
                             t(ferrite_ui::prof::REC), t(ferrite_ui::prof::BIG), t(ferrite_ui::prof::TEXT), t(ferrite_ui::prof::MASK),
                             t(ferrite_ui::prof::COVER), p[ferrite_ui::prof::ROWS_DECODED], p[ferrite_ui::prof::ROWS_DRAWN]);
                     });
+                    bringup::linef(|b| {
+                        let _ = ufmt::uwrite!(b, "  prof2 /10ms: fill {} push {} bands {}", t(ferrite_ui::prof::FILL), t(ferrite_ui::prof::PUSH), t(ferrite_ui::prof::BANDS));
+                    });
                 }
             }
         }
