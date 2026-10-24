@@ -47,6 +47,14 @@ if [ "$elf" = ferrite ]; then
     echo "$check" | tail -1
 fi
 bin=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
+if [ "$elf" = ferrite-reader ]; then
+    # BACKUP-9.6: the reader's stack is what static memory leaves of the 96 KB. Too little and it faults at start-up,
+    # and a radio stuck there needs its battery pulled to reach the bootloader (Oct 23). Keep 20 KB at least.
+    used=$("$bin/llvm-size" -A "target/thumbv7em-none-eabihf/release/$elf" | awk '$1==".data"||$1==".bss"||$1==".uninit"{s+=$2} END{print s+0}')
+    left=$((96 * 1024 - used))
+    [ "$left" -ge $((20 * 1024)) ] || { echo "reader: static RAM $used bytes leaves $left for the stack (need 20480)" >&2; exit 1; }
+    echo "reader RAM: $used static, $left stack"
+fi
 "$bin/llvm-objcopy" -O binary "target/thumbv7em-none-eabihf/release/$elf" "target/$name.bin"
 python3 tools/btf.py pack "target/$name.bin" "target/$name.btf"
 python3 tools/flash.py --dry-run - "target/$name.btf"
