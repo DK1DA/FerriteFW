@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Build report for a release (Alex, Oct 23, 2026): one HTML page (and the same facts as JSON) beside each image.
+
+    python3 tools/buildreport.py tx                      # build ferrite-tx, run the host tests, write the report
+    python3 tools/buildreport.py tx --ui RESULTS.json    # with the sim UI tests' results (tools/uitest.py --sim)
+    python3 tools/buildreport.py tx --no-build --no-tests
+
+What it shows:
+  - the build: version, commit (and whether the tree had changes), toolchain, image size, CRC-32 and SHA-256;
+  - tests: host tests (workspace, and the drivers with their features), the sim UI tests from --ui (with the
+    commit they ran on), and tools/slowcheck.py;
+  - static RAM: .data and .bss against the 96 KB the MCU has, and what is left for the stack;
+  - MCU flash: the fast part (zero-wait, up to 256 KB from the chip's start) and the slow part, against the 948 KB
+    the bootloader leaves us;
+  - SPI flash: the map, read from crates/ferrite-core/src/layout.rs (each region, its size, who owns it, whether
+    Ferrite may write it).
+Output: target/build-report-<build>.html and .json. Needs arm-none-eabi-nm (as slowcheck.py).
+"""
+import argparse, datetime, hashlib, html, json, os, re, subprocess, sys, zlib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ELF = os.path.join(ROOT, "target/thumbv7em-none-eabihf/release/ferrite")
+LAYOUT = os.path.join(ROOT, "crates/ferrite-core/src/layout.rs")
+BUILDS = {"rx": ("", "ferrite"), "tx": ("tx", "ferrite-tx"), "tx-bench": ("tx-bench", "ferrite-txbench")}
+APP_BASE, APP_SIZE = 0x0800_3000, 948 * 1024  # firmware/memory.x
+FAST_END = 0x0804_0000  # zero-wait flash ends 256 KB into the chip (memory.x)
+RAM_BASE, RAM_SIZE = 0x2000_0000, 96 * 1024
+SPI_SIZE = 4 << 20
+DRIVERS = ["uradio-bus", "bk4829", "si4732", "st7789", "w25q", "keypad", "nmea"]
+
+
+def run(*a, check=True):
+    return subprocess.run(a, cwd=ROOT, capture_output=True, text=True, check=check)
+
+
+def kb(n):
+    return f"{n / 1024:.1f} KB"
+
+
+# ---- the build ------------------------------------------------------------------------------------------------------
+
+def build_info(build):
+    flavour, stem = BUILDS[build]
+    btf, bin_ = (os.path.join(ROOT, "target", stem + ext) for ext in (".btf", ".bin"))
+    img = open(bin_, "rb").read()
+    commit = run("git", "rev-parse", "--short", "HEAD").stdout.strip()
+    dirty = bool(run("git", "status", "--porcelain", "--", ".").stdout.strip())
+    version = re.search(r'^version = "([^"]+)"', open(os.path.join(ROOT, "Cargo.toml")).read(), re.M).group(1)
+    return dict(build=build, version=version, commit=commit, dirty=dirty,
+                date=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                rustc=run("rustc", "-V").stdout.strip(), image=os.path.basename(btf),
+                image_bytes=os.path.getsize(btf), crc32=f"{zlib.crc32(img):08X}",
+                sha256=hashlib.sha256(open(btf, "rb").read()).hexdigest())
+
+
+# ---- tests ----------------------------------------------------------------------------------------------------------
+
+def cargo_tests(*args):
+    out = run("cargo", "test", *args, check=False)
+    tot = dict(passed=0, failed=0, ignored=0)
+    for m in re.finditer(r"test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored", out.stdout + out.stderr):
+        for k, v in zip(tot, m.groups()):
+            tot[k] += int(v)
+    tot["ok"] = out.returncode == 0
+    return tot
+
+
+def ui_tests(path):
+    d = json.load(open(path))
+    rules = d.get("rules", {})
+    by = lambda r: sorted(k for k, v in rules.items() if v["result"] == r)
+    return dict(counts=d["counts"], commit=d.get("commit", "").split()[0], build=d.get("build"),
+                started=d.get("started"), rules_pass=len(by("pass")), rules_fail=by("fail"),
+                rules_xfail=by("xfail"))
+
+
+# ---- MCU flash and RAM ----------------------------------------------------------------------------------------------
+
+def elf_sizes():
+    syms = {}
+    for line in run("arm-none-eabi-nm", ELF).stdout.splitlines():
+        p = line.split()
+        if len(p) == 3:
+            syms[p[2]] = int(p[0], 16)
+    secs = {}
+    for line in run("arm-none-eabi-size", "-A", ELF).stdout.splitlines():
+        p = line.split()
+        if len(p) == 3 and p[0].startswith(".") and p[1].isdigit() and int(p[1]) and not p[0].startswith((".debug", ".comment", ".ARM")):
+            secs[p[0]] = int(p[1])
+    flash_secs = {k: v for k, v in secs.items() if k not in (".bss", ".uninit")}
+    image = sum(flash_secs.values())
+    fast = syms["__sslow_rodata"] - APP_BASE
+    data, bss = secs.get(".data", 0), secs.get(".bss", 0) + secs.get(".uninit", 0)
+    return dict(sections=secs, image=image, fast=fast, fast_budget=FAST_END - APP_BASE, slow=image - fast,
+                slow_budget=APP_SIZE - (FAST_END - APP_BASE), app_size=APP_SIZE,
+                ram_data=data, ram_bss=bss, ram_static=data + bss, ram_size=RAM_SIZE, ram_stack=RAM_SIZE - data - bss)
+
+
+# ---- SPI flash ------------------------------------------------------------------------------------------------------
+
+OWNER = {"CALIBRATION": "factory", "STOCK_RECORD": "stock", "PROMPTS": "stock", "UPDATE_AREA": "bootloader",
+         "SSB_PATCH": "owner's stock firmware", "SPARE": "free", "MAILBOX": "free"}
+
+
+def spi_map():
+    src = open(LAYOUT).read()
+    regions, doc = [], []
+    for line in src.splitlines():
+        s = line.strip()
+        if s.startswith("///"):
+            doc.append(s[3:].strip())
+            continue
+        m = re.match(r"pub const (\w+): Range<u32> = 0x([\w_]+)\.\.0x([\w_]+);", s)
+        if m:
+            a, b = (int(x.replace("_", ""), 16) for x in m.group(2, 3))
+            regions.append(dict(name=m.group(1), start=a, end=b, size=b - a, note=" ".join(doc)))
+        doc = [] if not s.startswith("///") else doc
+    w = re.search(r"pub static WRITABLE: \[Range<u32>; \d+\] = \[(.*?)\];", src, re.S).group(1)
+    writable = []
+    for part in w.split(","):
+        part = part.strip()
+        if ".." in part:
+            a, b = part.split("..")
+            writable.append((a.split(".")[0], b.split(".")[0]))  # LAYOUT_HEADER.start..CONTACTS.end
+        elif part:
+            writable.append((part, part))
+    names = [r["name"] for r in regions]
+    may = set()
+    for a, b in writable:
+        may.update(names[names.index(a):names.index(b) + 1])
+    for r in regions:
+        r["writable"] = r["name"] in may
+        r["owner"] = OWNER.get(r["name"], "Ferrite")
+    # the gaps: never written by Ferrite (stock's or empty)
+    out, at = [], 0
+    for r in sorted(regions, key=lambda r: r["start"]):
+        if r["start"] > at:
+            out.append(dict(name="(unmapped)", start=at, end=r["start"], size=r["start"] - at, note="not used by Ferrite",
+                            writable=False, owner="untouched"))
+        out.append(r)
+        at = r["end"]
+    if at < SPI_SIZE:
+        out.append(dict(name="(unmapped)", start=at, end=SPI_SIZE, size=SPI_SIZE - at, note="", writable=False,
+                        owner="untouched"))
+    ferrite = sum(r["size"] for r in out if r["writable"] and r["owner"] == "Ferrite")
+    return dict(regions=out, size=SPI_SIZE, ferrite_bytes=ferrite,
+                writable_bytes=sum(r["size"] for r in out if r["writable"]))
+
+
+# ---- the page -------------------------------------------------------------------------------------------------------
+
+CSS = """
+:root{--bg:#fbfaf7;--fg:#1d1b18;--muted:#6b665d;--line:#e3ded4;--card:#fff;--fast:#c2410c;--slow:#f0a46b;--free:#ece7dd;
+--ok:#15803d;--bad:#b91c1c;--ferrite:#c2410c;--stock:#64748b;--factory:#7c3aed;--boot:#0f766e;--freec:#d6d0c4}
+@media (prefers-color-scheme:dark){:root{--bg:#16140f;--fg:#ece8df;--muted:#a39d91;--line:#2f2b24;--card:#1e1b16;
+--free:#2a261f;--freec:#3a352c;color-scheme:dark}}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif;margin:0;padding:24px 16px}
+main{max-width:860px;margin:auto}h1{font-size:26px;margin:0 0 4px}h2{font-size:18px;margin:28px 0 8px}
+.sub{color:var(--muted)}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+td,th{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:600}
+td.n{text-align:right;white-space:nowrap}.wrap{overflow-x:auto}.bar{display:flex;height:22px;border-radius:4px;overflow:hidden;margin:8px 0;background:var(--free)}
+.bar i{display:block;height:100%}.ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.card b{display:block;font-size:22px}.key span{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 12px}
+code{font-size:13px}@media print{body{background:#fff;color:#000}}
+"""
+
+
+def bar(parts):
+    return '<div class="bar">' + "".join(f'<i style="width:{100 * f:.2f}%;background:var({c})" title="{html.escape(t)}"></i>'
+                                         for f, c, t in parts) + "</div>"
+
+
+def page(r):
+    b, t, m, s = r["build"], r["tests"], r["mcu"], r["spi"]
+    e = html.escape
+    res = lambda ok: '<span class="ok">pass</span>' if ok else '<span class="bad">FAIL</span>'
+    out = [f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+           f"<title>Ferrite {e(b['version'])} {e(b['build'])} build report</title><style>{CSS}</style><main>",
+           f"<h1>Ferrite {e(b['version'])}, {e(b['build'])} build</h1>",
+           f"<p class=sub>Commit <code>{e(b['commit'])}</code>{' (with uncommitted changes)' if b['dirty'] else ''} · "
+           f"{e(b['date'])} · {e(b['rustc'])}</p>",
+           "<div class=grid>",
+           f"<div class=card>Image<b>{kb(b['image_bytes'])}</b>{e(b['image'])}, CRC-32 {b['crc32']}</div>",
+           f"<div class=card>Fast flash<b>{100 * m['fast'] / m['fast_budget']:.0f} %</b>{kb(m['fast'])} of {kb(m['fast_budget'])}</div>",
+           f"<div class=card>Static RAM<b>{kb(m['ram_static'])}</b>{kb(m['ram_stack'])} left for the stack</div>"]
+    if t:
+        host = t["host"]
+        tot = host["passed"] + t["drivers"]["passed"] + (t["ui"]["counts"]["pass"] if t.get("ui") else 0)
+        bad = host["failed"] + t["drivers"]["failed"] + (t["ui"]["counts"]["fail"] + t["ui"]["counts"]["error"] if t.get("ui") else 0)
+        out.append(f"<div class=card>Tests<b class={'ok' if not bad else 'bad'}>{tot} pass</b>{bad} failed</div>")
+    out.append("</div>")
+    out.append(f"<p class=sub>SHA-256 <code>{b['sha256']}</code></p>")
+
+    if t:
+        out.append("<h2>Tests</h2><div class=wrap><table><tr><th>Suite</th><th class=n>Passed</th><th class=n>Failed</th><th class=n>Other</th><th>Result</th></tr>")
+        for name, x in (("Host tests (workspace)", t["host"]), ("Drivers, all features", t["drivers"])):
+            out.append(f"<tr><td>{name}</td><td class=n>{x['passed']}</td><td class=n>{x['failed']}</td>"
+                       f"<td class=n>{x['ignored']} ignored</td><td>{res(x['ok'] and not x['failed'])}</td></tr>")
+        if t.get("ui"):
+            u, c = t["ui"], t["ui"]["counts"]
+            same = u["commit"].startswith(b["commit"]) or b["commit"].startswith(u["commit"])
+            out.append(f"<tr><td>Sim UI tests ({e(u['build'] or '')}, commit <code>{e(u['commit'])}</code>"
+                       f"{'' if same else ', <span class=bad>not this commit</span>'})</td><td class=n>{c['pass']}</td>"
+                       f"<td class=n>{c['fail'] + c['error']}</td><td class=n>{c['skip']} skipped, {c['xfail']} known</td>"
+                       f"<td>{res(not c['fail'] and not c['error'])}</td></tr>")
+        out.append(f"<tr><td>Fast-flash check (slowcheck)</td><td class=n></td><td class=n></td><td class=n></td><td>{res(t['slowcheck'])}</td></tr>")
+        out.append("</table></div>")
+        if t.get("ui"):
+            u = t["ui"]
+            out.append(f"<p class=sub>Spec rules covered by the UI tests: {u['rules_pass']} pass"
+                       + (f"; failing: {e(', '.join(u['rules_fail']))}" if u["rules_fail"] else "")
+                       + (f"; known deviations: {e(', '.join(u['rules_xfail']))}" if u["rules_xfail"] else "") + ".</p>")
+
+    out.append("<h2>Static RAM</h2>")
+    out.append(bar([(m["ram_data"] / m["ram_size"], "--fast", ".data"), (m["ram_bss"] / m["ram_size"], "--slow", ".bss")]))
+    out.append(f"<div class=key><span style='background:var(--fast);margin-left:0'></span>.data {kb(m['ram_data'])}"
+               f"<span style='background:var(--slow)'></span>.bss {kb(m['ram_bss'])}"
+               f"<span style='background:var(--free)'></span>stack and free {kb(m['ram_stack'])} of {kb(m['ram_size'])}</div>")
+
+    out.append("<h2>MCU flash</h2>")
+    app = m["app_size"]
+    out.append(bar([(m["fast"] / app, "--fast", "fast used"), ((m["fast_budget"] - m["fast"]) / app, "--freec", "fast free"),
+                    (m["slow"] / app, "--slow", "slow used")]))
+    out.append(f"<div class=key><span style='background:var(--fast);margin-left:0'></span>fast {kb(m['fast'])} of {kb(m['fast_budget'])}"
+               f"<span style='background:var(--freec)'></span>fast free {kb(m['fast_budget'] - m['fast'])}"
+               f"<span style='background:var(--slow)'></span>slow {kb(m['slow'])} of {kb(m['slow_budget'])}"
+               f"<span style='background:var(--free)'></span>free {kb(app - m['image'])}</div>")
+    out.append("<div class=wrap><table><tr><th>Section</th><th class=n>Bytes</th><th>Where</th></tr>")
+    where = {".text": "fast", ".rodata": "fast", ".fast_ui": "fast (drawing)", ".vector_table": "fast", ".slow_text": "slow",
+             ".slow_rodata": "slow", ".data": "flash and RAM", ".bss": "RAM", ".uninit": "RAM"}
+    for k, v in m["sections"].items():
+        out.append(f"<tr><td><code>{e(k)}</code></td><td class=n>{v:,}</td><td>{where.get(k, 'fast')}</td></tr>")
+    out.append("</table></div>")
+
+    out.append("<h2>SPI flash (4 MB)</h2>")
+    col = {"Ferrite": "--ferrite", "stock": "--stock", "factory": "--factory", "bootloader": "--boot", "free": "--freec",
+           "owner's stock firmware": "--stock", "untouched": "--free"}
+    out.append(bar([(x["size"] / s["size"], col[x["owner"]], f"{x['name']} {kb(x['size'])}") for x in s["regions"]]))
+    out.append("<div class=key>" + "".join(f"<span style='background:var({c})'></span>{n}" for n, c in
+               (("Ferrite", "--ferrite"), ("stock", "--stock"), ("factory", "--factory"), ("bootloader", "--boot"),
+                ("held free", "--freec"), ("not used", "--free"))) + "</div>")
+    out.append(f"<p class=sub>Ferrite may write {kb(s['writable_bytes'])} ({kb(s['ferrite_bytes'])} of it in its own records);"
+               " the flash driver refuses everything else.</p>")
+    out.append("<div class=wrap><table><tr><th>Region</th><th>Start</th><th>End</th><th class=n>Size</th><th>Owner</th><th>Writes</th><th>Note</th></tr>")
+    for x in s["regions"]:
+        out.append(f"<tr><td>{e(x['name'])}</td><td><code>0x{x['start']:06X}</code></td><td><code>0x{x['end']:06X}</code></td>"
+                   f"<td class=n>{kb(x['size'])}</td><td>{e(x['owner'])}</td><td>{'yes' if x['writable'] else 'never'}</td>"
+                   f"<td>{e(x['note'])}</td></tr>")
+    out.append("</table></div></main>")
+    return "\n".join(out)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("build", choices=list(BUILDS))
+    ap.add_argument("--ui", metavar="RESULTS.json", help="the sim UI tests' results.json (tools/uitest.py --sim)")
+    ap.add_argument("--no-build", action="store_true", help="use the image as last built")
+    ap.add_argument("--no-tests", action="store_true", help="skip the host tests")
+    a = ap.parse_args()
+    if not a.no_build:
+        run("tools/mkbtf.sh", *([BUILDS[a.build][0]] if BUILDS[a.build][0] else []))
+    slow = run(sys.executable, "tools/slowcheck.py", check=False)
+    r = dict(build=build_info(a.build), mcu=elf_sizes(), spi=spi_map(), tests=None)
+    if not a.no_tests:
+        r["tests"] = dict(host=cargo_tests(), drivers=cargo_tests(*sum((["-p", d] for d in DRIVERS), []), "--all-features"),
+                          ui=ui_tests(a.ui) if a.ui else None, slowcheck=slow.returncode == 0)
+    stem = os.path.join(ROOT, "target", f"build-report-{a.build}")
+    open(stem + ".json", "w").write(json.dumps(r, indent=1))
+    open(stem + ".html", "w").write(page(r))
+    m = r["mcu"]
+    print(f"{stem}.html: {r['build']['image']} {r['build']['commit']}, fast {kb(m['fast'])}/{kb(m['fast_budget'])}, "
+          f"slow {kb(m['slow'])}, RAM {kb(m['ram_static'])}/{kb(m['ram_size'])}")
+
+
+if __name__ == "__main__":
+    main()
