@@ -1321,6 +1321,7 @@ pub fn writes(line: &[u8]) -> bool {
     let shows = shows || same(c, b"xb") && rest == 0; // XB-20: `xb` alone shows the state
     let shows = shows || same(c, b"bk") && rest == 1 && second.is_some_and(|w| same(w, b"settle") || same(w, b"save") || cfg!(feature = "bench") && same(w, b"turns"));
     let shows = shows || same(c, b"lcd") && rest == 0; // TERM-40, TERM-41: `lcd` and `bk save` alone show
+    let shows = shows || same(c, b"sq") && rest == 0; // SQL-18: `sq` alone shows who decides
     !(reads || shows)
 }
 
@@ -1365,6 +1366,7 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         _ if same(c, b"help") || c == b"?" => Ok(Done::List(List::Help)),
         _ if same(c, b"dump") => Ok(Done::Dump),
         _ if same(c, b"gps") => gps(&mut t),
+        _ if same(c, b"sq") => sq(&mut t),
         #[cfg(feature = "bench")]
         _ if same(c, b"mem") || same(c, b"mem32") => mem(&mut t, same(c, b"mem32")),
         #[cfg(feature = "bench")]
@@ -1667,6 +1669,27 @@ fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
         _ => return Err(msg!("{}", USAGE)),
     };
     Ok(Done::Debug(Job::new(Kind::Save(set))))
+}
+
+/// SQL-18 (decision 269): `sq` says who decides the squelch; `sq chip` gives it back to the chip (stock's way),
+/// `sq soft` to the Radio task's software squelch, the default. RAM only: software again at power-on. Every build,
+/// so the two can be compared on a daily radio.
+fn sq(t: &mut Toks) -> Result<Done, Msg> {
+    use ferrite_core::softsq::{chip_decides, set_chip_decides};
+    const USAGE: &str = "sq [soft|chip]: the squelch decided in software (the default) or by the chip";
+    let chip = match t.next()? {
+        None => None,
+        Some(Tok::Word(w)) if same(w, b"soft") => Some(false),
+        Some(Tok::Word(w)) if same(w, b"chip") => Some(true),
+        _ => return Err(msg!("{}", USAGE)),
+    };
+    if t.next()?.is_some() {
+        return Err(msg!("{}", USAGE));
+    }
+    if let Some(c) = chip {
+        set_chip_decides(c);
+    }
+    Ok(Done::Said(msg!("sq {}", if chip_decides() { "chip: the BK4829 decides, stock's way" } else { "soft: decided in software, SQL-18" })))
 }
 
 #[cfg(feature = "bench")]
@@ -2074,7 +2097,8 @@ const HELP: &str = concat!(
     "  load                   read a dump back: send the file, it ends at the line end\n",
     "  clear channels N       delete every channel (N: how many there are)\n",
     "  gps                    the GPS module's last GGA sentence, its age and heights\n",
-    "  xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it",
+    "  xb   xb start  xb stop the crossband repeater: its state; start it as its # does; stop it\n",
+    "  sq   sq soft  sq chip  who decides the squelch: software (the default) or the chip, to compare",
 );
 /// The lines in [`HELP`].
 const HELP_LINES: usize = {

@@ -42,6 +42,7 @@ pub mod same;
 pub mod same_rx;
 pub mod scan;
 pub mod settle;
+pub mod softsq;
 pub mod sqcal;
 pub mod sweephold;
 pub mod tonegen;

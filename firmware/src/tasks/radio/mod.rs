@@ -198,6 +198,9 @@ struct Radio {
     /// each chip was last given (REG_78, REG_4F), so a retune writes them only when they change.
     sqcal: ferrite_core::sqcal::SqCal,
     sq_regs: [Option<(u16, u16)>; 2],
+    /// SQL-18: each chip's software squelch, and the (slot, frequency) it is for (a retune starts it closed).
+    soft_sq: [ferrite_core::softsq::SoftSq; 2],
+    sq_key: [Option<(u8, Freq10)>; 2],
     /// SQL-17: each chip's squelch open delay as last written (true: 0, for a scan step or the strip's look; false:
     /// stock's 7); None after a sleep or a scope start, so the next look or tick writes it.
     open_fast: [Option<bool>; 2],
@@ -657,6 +660,8 @@ pub async fn task() {
         bat_at: None,
         sqcal: ferrite_core::sqcal::SqCal::DEFAULT,
         sq_regs: [None; 2],
+        soft_sq: [ferrite_core::softsq::SoftSq::DEFAULT; 2],
+        sq_key: [None; 2],
         open_fast: [None; 2],
         path: Path::new(),
         muted: false,

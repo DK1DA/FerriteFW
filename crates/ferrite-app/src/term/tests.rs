@@ -2324,3 +2324,23 @@ fn set_frequency_settings() {
     r.cmd("set 0 4 2 2 439.987"); // as `get` and `dump` show it: kept, not cut to 439.98700
     assert_eq!(r.app.set.pocsag_freq, ferrite_core::freq::mhz(439) + 98_750);
 }
+
+/// SQL-18.3 (decision 269): `sq` says who decides the squelch, `sq chip` and `sq soft` switch it (RAM only, nothing
+/// sent to the firmware), bad words are refused; software by default.
+#[test]
+fn sq_switches_who_decides() {
+    use ferrite_core::softsq::chip_decides;
+    let mut r = Rig::main();
+    assert!(!chip_decides(), "software by default");
+    for (cmd, chip, says) in [("sq", false, "sq soft"), ("sq chip", true, "sq chip"), ("SQ", true, "sq chip"), ("sq soft", false, "sq soft")] {
+        r.cmd(cmd);
+        assert_eq!(r.term.debug_req(), None, "{cmd}: nothing sent");
+        assert_eq!(chip_decides(), chip, "{cmd}");
+        assert!(r.bottom().contains(says), "{cmd}: {}", r.bottom());
+    }
+    for bad in ["sq maybe", "sq chip 2"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("sq [soft|chip]"), "{bad}: {}", r.bottom());
+        assert!(!chip_decides(), "{bad}: unchanged");
+    }
+}

@@ -165,11 +165,37 @@ impl Radio {
             if listening != Some(n) || s >= SLOTS as u8 {
                 continue;
             }
+            // SQL-18 (decision 269): the software squelch on FM, with the thresholds the chip was given; AM, or
+            // `sq chip`, keeps the chip's own decision.
+            let soft = (!ferrite_core::softsq::chip_decides() && !self.slots[s as usize].am).then_some(()).and(self.sq_regs[n as usize]);
             let mut bk = self.chip(n);
-            let (rssi, st) = (bk.rssi_dbm(), bk.status());
-            let open = st.squelch_open || self.slots[s as usize].sq == 0;
+            let (raw, st) = (bk.rssi(), bk.status());
+            let noise = if soft.is_some() { bk.noise() } else { 0 };
+            let rssi = raw as i16 / 2 - 160;
+            if self.sq_key[n as usize] != self.tuned[n as usize] {
+                // retuned: a fresh squelch, closed
+                (self.soft_sq[n as usize], self.sq_key[n as usize]) = (Default::default(), self.tuned[n as usize]);
+            }
+            let decided = match soft {
+                Some(regs) => {
+                    let fast = self.scans.get(s as usize).is_some_and(|sc| sc.listening()) || self.aprs_slots & 1 << s != 0;
+                    #[cfg(feature = "bench")]
+                    let was = self.soft_sq[n as usize].open();
+                    let now_open = self.soft_sq[n as usize].step(&ferrite_core::softsq::Limits::from_regs(regs), raw, noise, fast);
+                    #[cfg(feature = "bench")]
+                    if now_open != was {
+                        // the bench's check against the chip: each change, its readings, and what the chip said
+                        log(if now_open { b"sq open, noise " } else { b"sq shut, noise " }, noise as u32);
+                        log(b"  rssi dBm + 200: ", (rssi + 200).max(0) as u32);
+                        log(b"  chip says open: ", st.squelch_open as u32);
+                    }
+                    now_open
+                }
+                None => st.squelch_open,
+            };
+            let open = decided || self.slots[s as usize].sq == 0;
             let fl = &mut self.floor[n as usize];
-            if !st.squelch_open {
+            if !decided {
                 *fl += (rssi - *fl) / 8; // a slow average of the quiet RSSI
             }
             sq[n as usize] = open;
