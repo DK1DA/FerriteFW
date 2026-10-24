@@ -271,12 +271,12 @@ fn contacts_kept_in_callsign_order() {
 fn aprs_settings_wait_two_seconds_and_quick_messages_are_kept() {
     let s = mount(SimFlash::new());
     let a = app();
-    // APRS-26: the custom path is kept too, and chosen (path 3); APRS-30: and the SSID; APRS-6.1: the message sound; APRS-47 - APRS-49: symbol, TX delay, TX level; APRS-50, APRS-51: comment and ambiguity
+    // APRS-26: the custom path is kept too, and chosen (path 3); APRS-30: and the SSID; APRS-6.1: the message sound; APRS-47 - APRS-49: symbol, TX delay, TX level; APRS-50, APRS-51: comment and ambiguity; APRS-52.4: Mic-E
     let mut comment = [0u8; ferrite_app::aprs::COMMENT_LEN];
     comment.copy_from_slice(b"Ferrite on the trail, QRV 146.52 simplex");
     let mut custom = [0u8; ferrite_app::aprs::CUSTOM_LEN];
     custom[..7].copy_from_slice(b"WIDE2-2");
-    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3 };
+    let cfg = AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5 };
     s.autosave(1000, &a);
     assert!(s.request(Op::AprsCfg(cfg)));
     assert!(s.aprs_cfg() == cfg);

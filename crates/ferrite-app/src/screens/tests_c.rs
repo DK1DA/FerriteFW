@@ -965,6 +965,25 @@ fn ambiguity_steps() {
     assert_eq!(t.app.aprs_cfg().ambiguity, 0);
 }
 
+/// APRS-52.4: 0 5 5 7 steps Off, then Off duty to Priority (no Emergency), stopping at the ends; # resets it.
+#[test]
+fn mic_e_steps() {
+    use crate::screens::groups::{change, reset, wired};
+    let mut t = T::new();
+    let dev = Device::default();
+    let mut b = ferrite_ui::text::Buf::<24>::new();
+    assert_eq!(wired(&t.app, &dev, &[5, 5, 7], &mut b), Some(false));
+    assert_eq!(b.as_bytes(), b"Off");
+    change(&mut t.app, &[5, 5, 7], 2);
+    assert_eq!(wired(&t.app, &dev, &[5, 5, 7], &mut b), Some(true));
+    assert_eq!(b.as_bytes(), b"En route");
+    change(&mut t.app, &[5, 5, 7], 20);
+    wired(&t.app, &dev, &[5, 5, 7], &mut b);
+    assert_eq!((t.app.aprs_cfg().mic_e, b.as_bytes()), (7, &b"Priority"[..]));
+    reset(&mut t.app, &[5, 5, 7]);
+    assert_eq!(t.app.aprs_cfg().mic_e, 0);
+}
+
 /// SCAN-14: the range preset editor refuses an edge that would make the span cross 64 MHz (the band relay),
 /// keeping the editor open and the preset as it was (decided Oct 7, 2026).
 #[test]

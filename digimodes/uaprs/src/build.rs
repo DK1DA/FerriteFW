@@ -241,3 +241,86 @@ fn reply(kind: &[u8], addressee: &[u8], id: &[u8], out: &mut [u8]) -> Option<usi
     w.put(id)?;
     Some(w.len)
 }
+
+/// Mic-E's standard messages (APRS 1.0.1 chapter 10): the message bits A, B, C, by name.
+pub const MIC_E_OFF_DUTY: u8 = 0b111;
+pub const MIC_E_EN_ROUTE: u8 = 0b110;
+pub const MIC_E_IN_SERVICE: u8 = 0b101;
+pub const MIC_E_RETURNING: u8 = 0b100;
+pub const MIC_E_COMMITTED: u8 = 0b011;
+pub const MIC_E_SPECIAL: u8 = 0b010;
+pub const MIC_E_PRIORITY: u8 = 0b001;
+pub const MIC_E_EMERGENCY: u8 = 0b000;
+
+/// Degrees and hundredths of minutes, rounded, at most `max` degrees 59.99 minutes (179.99999 doesn't round to
+/// 180, which Mic-E can't send), then the last `amb` digits dropped (floored).
+fn deg_hmin(v: i32, max: u32, amb: u8) -> (u32, u32) {
+    let v = v.unsigned_abs();
+    let (mut deg, mut hmin) = (v / 1_000_000, ((v % 1_000_000) * 6 + 500) / 1000);
+    if hmin == 6000 {
+        (deg, hmin) = (deg + 1, 0);
+    }
+    if deg > max {
+        (deg, hmin) = (max, 5999);
+    }
+    let unit = [1, 10, 100, 1000, 10_000][amb as usize];
+    (deg, hmin / unit * unit)
+}
+
+/// A Mic-E report (APRS 1.0.1 chapter 10): the destination address's six characters to `dest` (latitude, the
+/// message bits, north/south, the longitude offset and east/west) and the information field to `out` (returning
+/// its length): `` ` `` (current GPS data), longitude, speed and course, symbol, then an altitude (`xxx}`, metres)
+/// when there is one, then the comment. `status` is a standard message, [`MIC_E_OFF_DUTY`] to
+/// [`MIC_E_EMERGENCY`]. [`Report::ambiguity`] blanks the latitude's trailing digits (the longitude's follow,
+/// and are sent floored); speed is capped at 799 knots; a course of 360 is north, 0 unknown. The
+/// timestamp and messaging flag aren't sent (Mic-E is always current and can take messages). A comment that a
+/// receiver would read as a radio type (`` ` `` `'` `>` `]` first) or an altitude (`xxx}` at its start) gets a
+/// space or two in front. Cross-checked against Daria Juniper's RustAPRS Mic-E encoder and decoder.
+pub fn mic_e(r: &Report, status: u8, dest: &mut [u8; 6], out: &mut [u8]) -> Option<usize> {
+    if status > 7 || r.lat.abs() > 90_000_000 || r.lon.abs() > 180_000_000 {
+        return None;
+    }
+    let amb = r.ambiguity.min(4);
+    let (lat_deg, lat_hmin) = deg_hmin(r.lat, 89, amb);
+    let (lon_deg, lon_hmin) = deg_hmin(r.lon, 179, amb);
+    let digits = [lat_deg / 10, lat_deg % 10, lat_hmin / 1000, lat_hmin / 100 % 10, lat_hmin / 10 % 10, lat_hmin % 10];
+    // Each character: a digit (0-9 for a 0 bit, P-Y for a 1), or for a blanked digit L (0) or Z (1).
+    let flags = (status as u32) << 3 | ((r.lat >= 0) as u32) << 2 | (!(10..100).contains(&lon_deg) as u32) << 1 | (r.lon < 0) as u32;
+    for (i, d) in dest.iter_mut().enumerate() {
+        let one = flags >> (5 - i) & 1 != 0;
+        *d = match (i >= 6 - amb as usize, one) {
+            (false, false) => b'0' + digits[i] as u8,
+            (false, true) => b'P' + digits[i] as u8,
+            (true, false) => b'L',
+            (true, true) => b'Z',
+        };
+    }
+    let mut w = W { out, len: 0 };
+    let lon_d = match lon_deg {
+        0..=9 => lon_deg + 118,
+        10..=99 => lon_deg + 28,
+        100..=109 => lon_deg + 8,
+        _ => lon_deg - 72,
+    };
+    let min = lon_hmin / 100;
+    let lon_m = if min < 10 { min + 88 } else { min + 28 };
+    let (course, speed) = r.course_speed.map_or((0, 0), |(c, s)| (if c > 360 { (c as u32 - 1) % 360 + 1 } else { c as u32 }, (s as u32).min(799)));
+    w.put(&[b'`', lon_d as u8, lon_m as u8, (lon_hmin % 100 + 28) as u8])?;
+    w.put(&[(speed / 10 + 28) as u8, (speed % 10 * 10 + course / 100 + 28) as u8, (course % 100 + 28) as u8])?;
+    w.put(&[r.code, r.table])?;
+    if let Some(ft) = r.altitude {
+        let m = (ft as i64 * 3048 + if ft < 0 { -5000 } else { 5000 }) / 10_000;
+        let v = (m + 10_000).clamp(0, 91 * 91 * 91 - 1) as u32;
+        w.put(&[(v / 8281) as u8 + 33, (v / 91 % 91) as u8 + 33, (v % 91) as u8 + 33, b'}'])?;
+    } else {
+        let alt = |s: &[u8]| s.get(3) == Some(&b'}') && s[..3].iter().all(|c| (33..=123).contains(c));
+        let c = r.comment;
+        if alt(c) {
+            w.put(b"  ")?;
+        } else if alt(c.get(1..).unwrap_or(&[])) || c.first().is_some_and(|f| b"`'>]".contains(f)) {
+            w.put(b" ")?;
+        }
+    }
+    w.put(r.comment)?;
+    Some(w.len)
+}

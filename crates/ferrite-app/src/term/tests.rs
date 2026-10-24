@@ -2335,3 +2335,17 @@ fn squelch_decided_by_0_9_5() {
     r.cmd("set 0 9 5 software");
     assert!(!r.app.settings().sq_chip, "{}", r.bottom());
 }
+
+/// APRS-52.4: 0 5 5 7 set and read by name from the terminal, two-word names included.
+#[test]
+fn mic_e_by_name() {
+    let mut r = Rig::main();
+    r.cmd("set 0 5 5 7 en route");
+    assert_eq!(r.app.aprs_cfg().mic_e, 2, "{}", r.bottom());
+    r.cmd("set 0 5 5 7 Priority");
+    assert_eq!(r.app.aprs_cfg().mic_e, 7);
+    r.cmd("get 0 5 5 7");
+    assert!(r.bottom().contains("Mic-E: Priority"), "{}", r.bottom());
+    r.cmd("set 0 5 5 7 off");
+    assert_eq!(r.app.aprs_cfg().mic_e, 0);
+}

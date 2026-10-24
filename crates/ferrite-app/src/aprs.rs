@@ -64,12 +64,17 @@ pub struct AprsCfg {
     pub comment: [u8; COMMENT_LEN],
     /// Position ambiguity (0 5 5 6, APRS-51): digits dropped from both coordinates, 0 (exact) to 4.
     pub ambiguity: u8,
+    /// Mic-E (0 5 5 7, APRS-52): 0 off (the uncompressed report), else the standard status sent, an index into
+    /// [`MIC_E_NAMES`] (Off duty to Priority; Emergency isn't offered).
+    pub mic_e: u8,
 }
 
 /// APRS-50: the comment's room.
 pub const COMMENT_LEN: usize = 40;
 /// APRS-51: 0 5 5 6's names, by the digits dropped.
 pub const AMBIGUITY_NAMES: [&str; 5] = ["Exact", "1 digit", "2 digits", "3 digits", "4 digits"];
+/// APRS-52: 0 5 5 7's names; the status's message bits are 8 minus its place (Off duty 111 to Priority 001).
+pub const MIC_E_NAMES: [&str; 8] = ["Off", "Off duty", "En route", "In service", "Returning", "Committed", "Special", "Priority"];
 
 /// APRS-47: the symbols 0 5 5 2 offers, as (name, table, code) in the primary table. Person by default, what the
 /// beacons always sent (a handheld's SSID 7).
@@ -137,7 +142,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0 };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0, mic_e: 0 };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {

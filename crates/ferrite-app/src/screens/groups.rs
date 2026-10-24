@@ -182,6 +182,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry("Position source|GPS|GPS, or always the fixed position."),
         Entry("Fixed position|None|Used without GPS."),
         Entry("Ambiguity|Exact|Digits dropped from your position."),
+        Entry("Mic-E|Off|Short beacons with a status."),
     ]),
     ((5, 6), &[
         Entry("Mode|Off|Manual, timed, distance or smart."),
@@ -421,7 +422,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 93] = [
+static SETTINGS: [Setting; 94] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -452,6 +453,7 @@ static SETTINGS: [Setting; 93] = [
     field!([5, 5, 3], special), // APRS-50: the comment
     field!([5, 5, 4], special), // APRS-31
     field!([5, 5, 6], special), // APRS-51: ambiguity
+    field!([5, 5, 7], special), // APRS-52: Mic-E
     field!([5, 6, 1], special),
     field!([5, 6, 2], special),
     field!([5, 6, 3], special),
@@ -810,6 +812,10 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &crate::aprs::AMBIGUITY_NAMES, app.aprs_cfg().ambiguity);
             app.aprs_cfg().ambiguity != 0
         }
+        [5, 5, 7] => {
+            pick(b, &crate::aprs::MIC_E_NAMES, app.aprs_cfg().mic_e);
+            app.aprs_cfg().mic_e != 0
+        }
         [5, 9, 3] => {
             let _ = uwrite!(b, "{} ms", app.aprs_cfg().txdelay_10ms() as u16 * 10);
             app.aprs_cfg().txdelay_10ms() != crate::aprs::TXDELAY_DEFAULT
@@ -987,6 +993,11 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             let ambiguity = (app.aprs_cfg().ambiguity as i32 + d).clamp(0, 4) as u8;
             app.set_aprs(crate::aprs::AprsCfg { ambiguity, ..app.aprs_cfg() })
         }
+        // APRS-52: Off, then the seven statuses, stopping at the ends
+        [5, 5, 7] => {
+            let mic_e = (app.aprs_cfg().mic_e as i32 + d).clamp(0, crate::aprs::MIC_E_NAMES.len() as i32 - 1) as u8;
+            app.set_aprs(crate::aprs::AprsCfg { mic_e, ..app.aprs_cfg() })
+        }
         [5, 9, 3] => {
             let c = app.aprs_cfg();
             let txdelay = (c.txdelay_10ms() as i32 + d * 5).clamp(crate::aprs::TXDELAY_MIN as i32, crate::aprs::TXDELAY_MAX as i32) as u8;
@@ -1074,6 +1085,7 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 5, 2] => app.set_aprs(crate::aprs::AprsCfg { symbol: 0, ..app.aprs_cfg() }),
         [5, 5, 3] => app.set_aprs_comment(b""),
         [5, 5, 6] => app.set_aprs(crate::aprs::AprsCfg { ambiguity: 0, ..app.aprs_cfg() }),
+        [5, 5, 7] => app.set_aprs(crate::aprs::AprsCfg { mic_e: 0, ..app.aprs_cfg() }),
         [5, 9, 3] => app.set_aprs(crate::aprs::AprsCfg { txdelay: crate::aprs::TXDELAY_DEFAULT, ..app.aprs_cfg() }),
         [5, 9, 4] => app.set_aprs(crate::aprs::AprsCfg { tx_level: 1, ..app.aprs_cfg() }),
         [5, 9, 5] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),

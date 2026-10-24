@@ -731,7 +731,7 @@ fn mic_e<'a>(dest: &[u8], b: &'a [u8]) -> Result<Packet<'a>, Error> {
     let hmin = lat_digits[2..].iter().fold(0i32, |v, &x| v * 10 + x as i32);
     let half = [0, 5, 50, 500, 3000][blanks as usize];
     let hmin = if blanks >= 4 { 3000 } else { hmin + half };
-    if deg > 89 || hmin >= 6000 {
+    if deg > 90 || (deg == 90 && hmin > 0) || hmin >= 6000 {
         return Err(Error::MicE);
     }
     let lat = deg * 1_000_000 + (hmin * 1000 + 3) / 6;

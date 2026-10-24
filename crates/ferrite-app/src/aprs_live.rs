@@ -52,7 +52,7 @@ const DIGI_GAP_S: u32 = 5;
 /// manager wakes the module for it), then is skipped until the next.
 const FIX_WAIT_S: u32 = 120;
 /// The destination ("tocall") that names the software: APZ is experimental, FER for Ferrite.
-const TOCALL: &[u8] = b"APZFER";
+const TOCALL: [u8; 6] = *b"APZFER";
 
 /// A station heard: what the heard list and the station screen show, about 110 bytes.
 #[derive(Clone, Copy)]
@@ -714,6 +714,8 @@ impl AprsLive {
         let Some(my) = Address::from_text(me).filter(|_| relay_ok) else { return t };
         let auto_ok = self.last_auto.get().is_none_or(|l| now_s.wrapping_sub(l) >= AUTO_GAP_S);
         let mut info = [0u8; INFO_MAX];
+        // The tocall, or a Mic-E report's latitude (APRS-52).
+        let mut dest = TOCALL;
         // Acks first (they're owed), then a digipeat, then ours, then the beacon: one transmission a second.
         // Beacons alone (APRS-29): only the beacon.
         let all = send == Sending::All;
@@ -721,7 +723,7 @@ impl AprsLive {
             let a = c.get().unwrap();
             c.set(None);
             if let Some(n) = uaprs::build::ack(a.peer.as_bytes(), a.id.as_bytes(), &mut info) {
-                return self.framed(my, &info[..n], "Ack", cfg, out, t);
+                return self.framed(my, &dest, &info[..n], "Ack", cfg, out, t);
             }
         }
         if let Some((buf, len)) = self.digi.take() {
@@ -755,28 +757,28 @@ impl AprsLive {
                 push_state(&mut t, (o.peer, o.text, MsgState::Retrying(o.tries)));
             }
             t.changed = true;
-            return self.framed(my, &info[..n], "Message", cfg, out, t);
+            return self.framed(my, &dest, &info[..n], "Message", cfg, out, t);
         }
         // APRS-33: a query's answer, an automatic transmission (APRS-9's spacing).
         if all && auto_ok {
             if let Some(q) = self.query.take() {
                 let n = match q.answer {
-                    Answer::Position => fresh(fix, cfg).and_then(|f| position_info(&f, cfg, &mut info)),
+                    Answer::Position => fresh(fix, cfg).and_then(|f| position_info(&f, cfg, &mut info, &mut dest)),
                     Answer::Status => status_info(&mut info),
                     Answer::Text(b) => uaprs::build::message(q.to.as_bytes(), b.as_bytes(), None, &mut info),
                 };
                 if let Some(n) = n {
                     self.last_auto.set(Some(now_s));
-                    return self.framed(my, &info[..n], "Query reply", cfg, out, t);
+                    return self.framed(my, &dest, &info[..n], "Query reply", cfg, out, t);
                 }
             }
             if let Some(g) = self.general.get().filter(|g| now_s >= g.due_s) {
                 self.general.set(None);
                 let f = fresh(fix, cfg).filter(|f| g.foot.is_none_or(|(c, r)| within(c, (f.pos.lat / 10, f.pos.lon / 10), r)));
-                if let Some(n) = f.and_then(|f| position_info(&f, cfg, &mut info)) {
+                if let Some(n) = f.and_then(|f| position_info(&f, cfg, &mut info, &mut dest)) {
                     self.last_auto.set(Some(now_s));
                     self.last_general.set(Some(now_s));
-                    return self.framed(my, &info[..n], "Query reply", cfg, out, t);
+                    return self.framed(my, &dest, &info[..n], "Query reply", cfg, out, t);
                 }
             }
         }
@@ -804,22 +806,22 @@ impl AprsLive {
             self.beacon_now.set(false);
             self.beacon_last.set(Some(LastBeacon::new(now_s, Some(f))));
             self.last_auto.set(Some(now_s));
-            if let Some(n) = position_info(&f, cfg, &mut info) {
+            if let Some(n) = position_info(&f, cfg, &mut info, &mut dest) {
                 t.changed = true;
-                return self.framed(my, &info[..n], "Beacon", cfg, out, t);
+                return self.framed(my, &dest, &info[..n], "Beacon", cfg, out, t);
             }
         }
         t
     }
 
     /// Our frame with 0 5 9 1's path (APRS-26).
-    fn framed(&self, me: Address, info: &[u8], what: &'static str, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX], t: Tick) -> Tick {
+    fn framed(&self, me: Address, dest: &[u8; 6], info: &[u8], what: &'static str, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX], t: Tick) -> Tick {
         let names = cfg.path();
         let mut path = [me; 2];
         for (a, n) in path.iter_mut().zip(names.iter()) {
             *a = Address::from_text(n).unwrap_or(me);
         }
-        let dest = Address::from_text(TOCALL).unwrap_or(me);
+        let dest = Address::from_text(dest).unwrap_or(me);
         let len = Frame::new(me, dest, &path[..names.len().min(2)], info).and_then(|f| f.write(out)).unwrap_or(0);
         self.echo.set(self.echo.get() || len > 0);
         Tick { len, what, ..t }
@@ -834,8 +836,8 @@ fn fresh(fix: Option<Fix>, cfg: &AprsCfg) -> Option<Fix> {
 }
 
 /// Our position report: the beacon's, and a position query's answer (APRS-33), with 0 5 5 3's comment and
-/// 0 5 5 6's ambiguity.
-fn position_info(f: &Fix, cfg: &AprsCfg, info: &mut [u8]) -> Option<usize> {
+/// 0 5 5 6's ambiguity; with 0 5 5 7 on, a Mic-E report (APRS-52), its latitude in `dest` in place of the tocall.
+fn position_info(f: &Fix, cfg: &AprsCfg, info: &mut [u8], dest: &mut [u8; 6]) -> Option<usize> {
     let (table, code) = cfg.symbol_chars(); // APRS-47
     let r = uaprs::build::Report {
         lat: f.pos.lat / 10,
@@ -849,7 +851,13 @@ fn position_info(f: &Fix, cfg: &AprsCfg, info: &mut [u8]) -> Option<usize> {
         comment: cfg.comment_text(), // APRS-50
         ambiguity: cfg.ambiguity,    // APRS-51: the uncompressed form carries it
     };
-    uaprs::build::position(&r, info)
+    if cfg.mic_e == 0 {
+        return uaprs::build::position(&r, info);
+    }
+    let mut d = [0u8; 6];
+    let n = uaprs::build::mic_e(&r, 8 - cfg.mic_e, &mut d, info)?;
+    *dest = d;
+    Some(n)
 }
 
 /// APRS-33: our status report, `>Ferrite v0.1.0` (no status text is set on the radio).
@@ -1395,9 +1403,9 @@ mod tests {
         let mut cfg = AprsCfg { beacon: 1, ambiguity: 2, ..AprsCfg::DEFAULT };
         cfg.comment[..13].copy_from_slice(b"Ferrite, 73!!");
         let mut info = [0u8; INFO_MAX];
-        let n = position_info(&fix(), &cfg, &mut info).unwrap();
+        let n = position_info(&fix(), &cfg, &mut info, &mut [0; 6]).unwrap();
         assert_eq!(&info[..n], b"=4525.  N/07541.  W[Ferrite, 73!!");
-        let n = position_info(&fix(), &AprsCfg::DEFAULT, &mut info).unwrap();
+        let n = position_info(&fix(), &AprsCfg::DEFAULT, &mut info, &mut [0; 6]).unwrap();
         assert_eq!(&info[..n], b"=4525.51N/07541.41W[");
         // the beacon itself, and the longest comment with course, speed and altitude: within the frame
         let a = AprsLive::new();
@@ -1408,8 +1416,65 @@ mod tests {
         assert!(Frame::parse(&out[..t.len]).unwrap().info.ends_with(b"[Ferrite, 73!!"));
         cfg.comment = [b'x'; crate::aprs::COMMENT_LEN];
         let moving = Fix { three_d: true, alt_m: 120, speed_kmh: 40, heading: 90, ..fix() };
-        let n = position_info(&moving, &cfg, &mut info).unwrap();
+        let n = position_info(&moving, &cfg, &mut info, &mut [0; 6]).unwrap();
         assert!(info[..n].ends_with(&[b'x'; 40]) && n < INFO_MAX);
+    }
+
+    /// APRS-52, APRS-52.1, APRS-52.2: with 0 5 5 7 on, the beacon and a position query's answer go out as Mic-E with that status: the
+    /// latitude in the destination in place of the tocall, our callsign, SSID and path as before, the comment and
+    /// ambiguity kept; a message and a status answer keep the tocall.
+    #[test]
+    fn mic_e_beacons_and_answers() {
+        let mut cfg = AprsCfg { beacon: 9, mic_e: 2, ambiguity: 1, ..AprsCfg::DEFAULT }; // En route
+        cfg.comment[..7].copy_from_slice(b"Ferrite");
+        let mut out = [0u8; FRAME_MAX];
+        let check = |out: &[u8], len: usize| {
+            let g = Frame::parse(&out[..len]).unwrap();
+            assert_eq!((g.src.call(), g.src.ssid, g.dest.ssid, g.digis().len()), (&b"VE3XYZ"[..], 7, 0, 2));
+            let Ok(uaprs::parse::Packet::Position { pos, mic_e: Some(m), comment, .. }) = uaprs::parse::parse(g.dest.call(), g.info) else { panic!("{:?}", g.info) };
+            assert_eq!((m.bits, m.custom, pos.ambiguity), (0b110, false, 1));
+            assert!((pos.lat - 45_425_200).abs() < 1000 && (pos.lon + 75_690_100).abs() < 1000, "{pos:?}");
+            assert!(comment.bytes().eq(b"Ferrite".iter().copied()));
+            std::vec::Vec::from(g.dest.call())
+        };
+        let a = AprsLive::new();
+        a.beacon_now();
+        let t = a.tick(0, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+        assert_eq!(t.what, "Beacon");
+        assert_eq!(check(&out, t.len), b"TU2U5Z"); // 45 25.5_ N, En route 110, +0, W
+        // a position query's answer: Mic-E too; a status query's: the tocall
+        for (q, mic_e) in [(&b"?APRSP"[..], true), (b"?APRSS", false)] {
+            let mut info = b":VE3XYZ-7 :".to_vec();
+            info.extend_from_slice(q);
+            let (f, n) = frame(b"VE3KPW-9", b"APDR16", &[b"WIDE1-1"], &info);
+            a.receive(&f[..n], 1000, b"VE3XYZ-7", &cfg);
+            let t = (1000..1100).map(|s| a.tick(s, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out)).find(|t| t.len > 0).unwrap();
+            assert_eq!(t.what, "Query reply");
+            if mic_e {
+                check(&out, t.len);
+            } else {
+                assert_eq!(Frame::parse(&out[..t.len]).unwrap().dest.call(), TOCALL);
+            }
+        }
+        assert!(a.send(b"VE3KPW-9", b"hi"));
+        let t = a.tick(2000, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+        assert_eq!((t.what, Frame::parse(&out[..t.len]).unwrap().dest.call()), ("Message", &TOCALL[..]));
+    }
+
+    /// APRS-52.3: a Mic-E comment that would read as a device type or an altitude goes out behind a space or two
+    /// and is read back as typed (`build::mic_e`'s own tests cover each case).
+    #[test]
+    fn mic_e_comment_protected() {
+        let mut info = [0u8; INFO_MAX];
+        for (c, pad) in [(&b"]Ferrite"[..], 1), (b"abc} here", 2), (b"Ferrite", 0)] {
+            let mut cfg = AprsCfg { mic_e: 1, ..AprsCfg::DEFAULT };
+            cfg.comment[..c.len()].copy_from_slice(c);
+            let mut dest = TOCALL;
+            let n = position_info(&fix(), &cfg, &mut info, &mut dest).unwrap();
+            assert_eq!(&info[9..n], [&b"  "[..pad], c].concat().as_slice());
+            let Ok(uaprs::parse::Packet::Position { pos, comment, .. }) = uaprs::parse::parse(&dest, &info[..n]) else { panic!() };
+            assert!(comment.bytes().eq(c.iter().copied()) && pos.altitude.is_none());
+        }
     }
 
     /// APRS-33: each directed query's answer, exactly: ?APRSP and ?APRS? our position, ?APRSS a status naming the
