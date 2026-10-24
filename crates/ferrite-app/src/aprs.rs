@@ -529,19 +529,28 @@ impl App {
         SlotCfg { mode: 0, narrow: false, power: self.aprs.power % 3, busy: 1, squelch: own.squelch, ..SlotCfg::default() }
     }
 
-    /// APRS mode on or off (0 5 3, APRS-15, APRS-16): C tunes to APRS and is watched, or goes back as it was.
-    pub(crate) fn set_aprs_mode(&mut self, on: bool) {
-        self.set.aprs_mode = on;
-        self.c_follow();
-        // APRS-15.1: C starts muted in APRS mode (packets decoded, not heard; \* unmutes) and is heard again after
+    /// APRS-2, APRS-15.1: C's quick mute follows 0 5 9 7 while APRS mode is on, and is off without it.
+    pub(crate) fn aprs_mute_sync(&mut self) {
+        let on = self.set.aprs_mode && self.set.aprs_mute;
         let m = if on { self.mute | 1 << APRS_SLOT } else { self.mute & !(1 << APRS_SLOT) };
         if m != self.mute {
             self.mute = m;
             self.out.push(RadioCmd::Mute(m));
         }
+    }
+
+    /// APRS mode on or off (0 5 3, APRS-15, APRS-16): C tunes to APRS and is watched, or goes back as it was.
+    pub(crate) fn set_aprs_mode(&mut self, on: bool) {
+        self.set.aprs_mode = on;
+        self.c_follow();
+        // APRS-15.1: C starts muted in APRS mode (packets decoded, not heard; \* unmutes) and is heard again after
+        self.aprs_mute_sync();
         if on {
             let mut f = Buf::<20>::new();
-            let _ = uwrite!(f, "C on {}, muted", Txt(crate::slot::mhz3(self.aprs_freq()).as_bytes()));
+            let _ = uwrite!(f, "C on {}", Txt(crate::slot::mhz3(self.aprs_freq()).as_bytes()));
+            if self.set.aprs_mute {
+                f.push(b", muted");
+            }
             self.show_toast(b"APRS mode on", f.as_bytes(), false);
         } else if let Some(h) = self.aprs_holder() {
             let mut b = Buf::<24>::new();

@@ -380,6 +380,7 @@ enum Tell {
     SlotTones,
     BusyDefault,
     MsgVol,
+    AprsMute,
 }
 
 /// How a setting in [`SETTINGS`] shows, steps and resets.
@@ -434,7 +435,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 89] = [
+static SETTINGS: [Setting; 90] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -474,6 +475,7 @@ static SETTINGS: [Setting; 89] = [
     field!([5, 9, 4], special), // APRS-48: TX delay
     field!([5, 9, 5], special), // APRS-49: TX level
     field!([5, 9, 6], special), // APRS-45
+    field!([5, 9, 7], aprs_mute: bool, Kind::Flip(&ON_OFF), AprsMute), // APRS-2
     field!([6, 1, 0], gps_on: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing),
     field!([6, 4, 0], units: u8, Kind::Pick(&UNITS), Nothing),
@@ -566,6 +568,7 @@ fn tell(app: &mut App, t: Tell) {
         Tell::SlotTones => app.send_slot_tones(),
         Tell::BusyDefault => app.set_busy_default(),
         // APRS-6.2: the sound at its new volume, to hear it
+        Tell::AprsMute => app.aprs_mute_sync(),
         Tell::MsgVol => app.out.push(RadioCmd::Chime { sound: app.aprs_cfg().sound.max(1), level: app.set.msg_level() }),
     }
 }

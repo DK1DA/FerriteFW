@@ -297,6 +297,8 @@ pub struct Settings {
     /// 0 9 5: who decides the squelch (SQL-18, decision 269): false the software squelch (the default), true the
     /// chip's own, stock's way.
     pub sq_chip: bool,
+    /// 0 5 9 7: C starts muted in APRS mode (APRS-2, APRS-15.1); \* on C in APRS mode flips it.
+    pub aprs_mute: bool,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -480,6 +482,7 @@ impl Settings {
         msg_vol: 3,
         mcu_fixed: false,
         sq_chip: false,
+        aprs_mute: true,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's
