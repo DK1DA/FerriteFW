@@ -181,7 +181,7 @@ def page(r):
            f"<p class=sub>Commit <code>{e(b['commit'])}</code>{' (with uncommitted changes)' if b['dirty'] else ''} · "
            f"{e(b['date'])} · {e(b['rustc'])}</p>",
            "<div class=grid>",
-           f"<div class=card>Image<b>{kb(b['image_bytes'])}</b>{e(b['image'])}, CRC-32 {b['crc32']}</div>",
+           f"<div class=card>Image<b>{kb(b['image_bytes'])}</b>{e(b['image'])}, image CRC-32 {b['crc32']} (as mkbtf.sh's first line)</div>",
            f"<div class=card>Fast flash<b>{100 * m['fast'] / m['fast_budget']:.0f} %</b>{kb(m['fast'])} of {kb(m['fast_budget'])}</div>",
            f"<div class=card>Static RAM<b>{kb(m['ram_static'])}</b>{kb(m['ram_stack'])} left for the stack</div>"]
     if t:
