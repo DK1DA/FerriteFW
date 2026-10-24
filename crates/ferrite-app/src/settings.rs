@@ -297,7 +297,7 @@ pub struct Settings {
     /// 0 9 5: who decides the squelch (SQL-18, decision 269): false the software squelch (the default), true the
     /// chip's own, stock's way.
     pub sq_chip: bool,
-    /// 0 5 9 7: C starts muted in APRS mode (APRS-2, APRS-15.1); \* on C in APRS mode flips it.
+    /// 0 5 9 6: C starts muted in APRS mode (APRS-2, APRS-15.1); \* on C in APRS mode flips it.
     pub aprs_mute: bool,
 }
 

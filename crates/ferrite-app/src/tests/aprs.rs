@@ -356,7 +356,7 @@ fn distance_beacons() {
     assert!(beacon_due(&c, last, 60, fix(here + 95_000, 40, 0)), "1.06 km on");
 }
 
-/// APRS-24: smart beacons with SmartBeaconing's standard values.
+/// APRS-24: smart beacons on the one curve (decision 271): parked 30 min, a walk every 500 m, 10 km/h on 3 min.
 #[test]
 fn smart_beacons() {
     let c = AprsCfg { beacon: SMART as u8, ..AprsCfg::DEFAULT };
@@ -365,6 +365,10 @@ fn smart_beacons() {
     let last = Some(LastBeacon::new(0, fix(here, 50, 90)));
     assert!(!beacon_due(&c, last, 300, fix(here, 2, 90)), "parked: 30 min");
     assert!(beacon_due(&c, last, 1800, fix(here, 2, 90)));
+    assert!(!beacon_due(&c, last, 350, fix(here, 5, 90)), "walking 5 km/h: every 6 min");
+    assert!(beacon_due(&c, last, 360, fix(here, 5, 90)));
+    assert!(!beacon_due(&c, last, 170, fix(here, 20, 90)), "a bike: 3 min");
+    assert!(beacon_due(&c, last, 180, fix(here, 20, 90)));
     assert!(!beacon_due(&c, last, 170, fix(here, 110, 90)), "fast: every 3 min");
     assert!(beacon_due(&c, last, 180, fix(here, 110, 90)));
     assert!(beacon_due(&c, last, 40, fix(here, 60, 180)), "a 90 degree turn after 30 s");
@@ -487,7 +491,7 @@ fn path_digipeater_and_after_voice_settings() {
     assert!(a.s.aprs_cfg() == a.app.aprs_cfg());
 }
 
-/// APRS-45: 0 5 9 6, FX.25 on transmit: 16 check bytes by default (decision 230), then 32, 64 and Off; # puts it
+/// APRS-45: 0 5 9 5, FX.25 on transmit: 16 check bytes by default (decision 230), then 32, 64 and Off; # puts it
 /// back; kept by the APRS store's owner.
 #[test]
 fn fx25_on_transmit_setting() {
@@ -495,12 +499,12 @@ fn fx25_on_transmit_setting() {
     let mut a = A::new();
     assert_eq!(a.app.aprs_cfg().fx25, 16);
     for (d, want) in [(1, 32), (1, 64), (1, 0), (1, 16), (-1, 0)] {
-        change(&mut a.app, &[5, 9, 6], d);
+        change(&mut a.app, &[5, 9, 5], d);
         assert_eq!(a.app.aprs_cfg().fx25, want);
     }
     a.tick();
     assert_eq!(a.s.aprs_cfg().fx25, 0, "written back");
-    reset(&mut a.app, &[5, 9, 6]);
+    reset(&mut a.app, &[5, 9, 5]);
     assert_eq!(a.app.aprs_cfg().fx25, 16);
 }
 

@@ -30,7 +30,7 @@ pub const BEACON_GRACE_MS: u32 = 120_000;
 /// Smart or distance beaconing: still this long after the last movement, back to the wakes (GPS-28).
 pub const STOPPED_MS: u32 = 180_000;
 /// Moving: at least this speed (SmartBeaconing's slow speed).
-pub const MOVING_KMH: u16 = 5;
+pub const MOVING_KMH: u16 = 3;
 /// Ephemeris refresh (GPS-29): this often, a wake stays on this long after its fix.
 pub const EPH_EVERY_MS: u32 = 30 * 60_000;
 pub const EPH_HOLD_MS: u32 = 60_000;

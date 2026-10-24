@@ -208,7 +208,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 24] = [
     ((5, 9), &[
         Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."),
         Entry("Custom path|None|Your own path, like WIDE2-2: OK types it."),
-        Entry("Smart Beaconing|Standard|Rates, speeds, turn angle."),
         Entry("TX delay|300 ms|Carrier before data."),
         Entry("TX level|Mid|Modulation level."),
         Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
@@ -471,10 +470,10 @@ static SETTINGS: [Setting; 90] = [
     field!([5, 8, 0], kiss_port: u8, Kind::Pick(&crate::settings::KISS_PORTS), Nothing),
     field!([5, 9, 1], special),
     field!([5, 9, 2], special),
-    field!([5, 9, 4], special), // APRS-48: TX delay
-    field!([5, 9, 5], special), // APRS-49: TX level
-    field!([5, 9, 6], special), // APRS-45
-    field!([5, 9, 7], aprs_mute: bool, Kind::Flip(&ON_OFF), AprsMute), // APRS-2
+    field!([5, 9, 3], special), // APRS-48: TX delay
+    field!([5, 9, 4], special), // APRS-49: TX level
+    field!([5, 9, 5], special), // APRS-45
+    field!([5, 9, 6], aprs_mute: bool, Kind::Flip(&ON_OFF), AprsMute), // APRS-2
     field!([6, 1, 0], gps_on: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing),
     field!([6, 4, 0], units: u8, Kind::Pick(&UNITS), Nothing),
@@ -802,15 +801,15 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &crate::aprs::SYMBOLS.map(|s| s.0), app.aprs_cfg().symbol);
             app.aprs_cfg().symbol != 0
         }
-        [5, 9, 4] => {
+        [5, 9, 3] => {
             let _ = uwrite!(b, "{} ms", app.aprs_cfg().txdelay_10ms() as u16 * 10);
             app.aprs_cfg().txdelay_10ms() != crate::aprs::TXDELAY_DEFAULT
         }
-        [5, 9, 5] => {
+        [5, 9, 4] => {
             pick(b, &crate::aprs::TX_LEVELS, app.aprs_cfg().tx_level);
             app.aprs_cfg().tx_level != 1
         }
-        [5, 9, 6] => {
+        [5, 9, 5] => {
             pick(b, &crate::aprs::FX25_NAMES, app.aprs_cfg().fx25_index());
             app.aprs_cfg().fx25 != crate::aprs::FX25_DEFAULT
         }
@@ -974,16 +973,16 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             let symbol = cycle(app.aprs_cfg().symbol, d, crate::aprs::SYMBOLS.len());
             app.set_aprs(crate::aprs::AprsCfg { symbol, ..app.aprs_cfg() })
         }
-        [5, 9, 4] => {
+        [5, 9, 3] => {
             let c = app.aprs_cfg();
             let txdelay = (c.txdelay_10ms() as i32 + d * 5).clamp(crate::aprs::TXDELAY_MIN as i32, crate::aprs::TXDELAY_MAX as i32) as u8;
             app.set_aprs(crate::aprs::AprsCfg { txdelay, ..c })
         }
-        [5, 9, 5] => {
+        [5, 9, 4] => {
             let tx_level = (app.aprs_cfg().tx_level as i32 + d).clamp(0, 2) as u8;
             app.set_aprs(crate::aprs::AprsCfg { tx_level, ..app.aprs_cfg() })
         }
-        [5, 9, 6] => {
+        [5, 9, 5] => {
             let i = cycle(app.aprs_cfg().fx25_index(), d, crate::aprs::FX25_CHECKS.len());
             app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_CHECKS[i as usize], ..app.aprs_cfg() })
         }
@@ -1059,9 +1058,9 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 4] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
         [7, 5, 5] => app.set_aprs(crate::aprs::AprsCfg { sound: ferrite_core::tonegen::CHIME_DEFAULT, ..app.aprs_cfg() }),
         [5, 5, 2] => app.set_aprs(crate::aprs::AprsCfg { symbol: 0, ..app.aprs_cfg() }),
-        [5, 9, 4] => app.set_aprs(crate::aprs::AprsCfg { txdelay: crate::aprs::TXDELAY_DEFAULT, ..app.aprs_cfg() }),
-        [5, 9, 5] => app.set_aprs(crate::aprs::AprsCfg { tx_level: 1, ..app.aprs_cfg() }),
-        [5, 9, 6] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
+        [5, 9, 3] => app.set_aprs(crate::aprs::AprsCfg { txdelay: crate::aprs::TXDELAY_DEFAULT, ..app.aprs_cfg() }),
+        [5, 9, 4] => app.set_aprs(crate::aprs::AprsCfg { tx_level: 1, ..app.aprs_cfg() }),
+        [5, 9, 5] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
         [4, 2, 2] => s.pocsag_freq = d.pocsag_freq,
         [4, 2, 3] => s.pocsag_cap = d.pocsag_cap,
         // # forgets the custom path; a path set to it goes back to the default (APRS-26)

@@ -2500,7 +2500,7 @@ fn timeout_beeps_after_the_unkey() {
     t.app.key_up(Key::PTT, t.t, &s);
 }
 
-/// APRS-2, APRS-15.1: 0 5 9 7 Mute speaker decides whether APRS mode mutes C; \* on C in APRS mode flips the
+/// APRS-2, APRS-15.1: 0 5 9 6 Mute speaker decides whether APRS mode mutes C; \* on C in APRS mode flips the
 /// setting, and the setting changed in the menu mutes or unmutes C at once. Without APRS mode \* on C is quick
 /// mute alone.
 #[test]
@@ -2517,7 +2517,7 @@ fn aprs_mute_follows_the_setting_and_star() {
     t.app.set_aprs_mode(false);
     t.app.set_aprs_mode(true);
     assert_eq!(t.app.mute & c, 0, "kept off: APRS mode comes back heard");
-    crate::screens::groups::change(&mut t.app, &[5, 9, 7], 1);
+    crate::screens::groups::change(&mut t.app, &[5, 9, 6], 1);
     assert!(t.app.set.aprs_mute);
     assert_ne!(t.app.mute & c, 0, "the menu mutes C at once");
     t.app.set_aprs_mode(false);

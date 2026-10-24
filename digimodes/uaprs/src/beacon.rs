@@ -1,7 +1,9 @@
 //! Smart beaconing (Tony Arnerich KD7TA and Steve Bragg KA9MVA, HamHUD): beacon often when moving fast or
 //! turning, rarely when slow or parked.
 
-/// Settings; the defaults are the common ones for a car.
+/// Settings. The defaults are one curve for a handheld, on foot to driving (decision 271): between the speeds the
+/// rate works out to a beacon every `fast_rate` x `fast_speed` (500 m), so a walk at 5 km/h beacons every 6 min
+/// and anything from 10 km/h every 3 min; the classic car values (100 km/h, under 5 km/h) left a walker at an hour.
 #[derive(Clone, Copy, Debug)]
 pub struct SmartBeacon {
     /// At or above this speed (km/h), beacon every `fast_rate` seconds.
@@ -20,9 +22,9 @@ pub struct SmartBeacon {
 impl Default for SmartBeacon {
     fn default() -> Self {
         SmartBeacon {
-            fast_speed: 100,
+            fast_speed: 10,
             fast_rate: 180,
-            slow_speed: 5,
+            slow_speed: 3,
             slow_rate: 1800,
             min_turn_angle: 28,
             turn_slope: 255,
@@ -53,7 +55,8 @@ impl Beaconer {
         } else if speed >= c.fast_speed {
             c.fast_rate
         } else {
-            (c.fast_rate as u64 * c.fast_speed as u64 / speed.max(1) as u64).min(u32::MAX as u64) as u32
+            // never slower than parked
+            (c.fast_rate as u64 * c.fast_speed as u64 / speed.max(1) as u64).min(c.slow_rate as u64) as u32
         };
         if since >= rate {
             return true;

@@ -27,7 +27,7 @@ pub const APRS_SLOT: u8 = 2;
 /// few minutes on a busy frequency). The oldest heard goes when a new one comes; power off empties it.
 pub const HEARD_MAX: u16 = 50; // 20 until decision 246
 
-/// The APRS settings kept with the APRS store (0 5 6 1, 0 5 6 2, 0 5 6 3, 0 5 9 1, 0 5 4, 0 5 9 6, 0 5 7).
+/// The APRS settings kept with the APRS store (0 5 6 1, 0 5 6 2, 0 5 6 3, 0 5 9 1, 0 5 4, 0 5 9 5, 0 5 7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AprsCfg {
     /// The frequency in 5 kHz units; 0 = the region's (APRS-15).
@@ -50,15 +50,15 @@ pub struct AprsCfg {
     pub custom: [u8; CUSTOM_LEN],
     /// Our SSID (0 5 5 1, APRS-30): 0-15, sent after the callsign; 0 sends the bare callsign.
     pub ssid: u8,
-    /// FX.25 on transmit (0 5 9 6, APRS-45): check bytes, one of [`FX25_CHECKS`] (0 = off).
+    /// FX.25 on transmit (0 5 9 5, APRS-45): check bytes, one of [`FX25_CHECKS`] (0 = off).
     pub fx25: u8,
     /// The message sound (0 7 5 5, APRS-6.1): an index into `tonegen::CHIMES` (0 off).
     pub sound: u8,
     /// Our map symbol (0 5 5 2, APRS-47): an index into [`SYMBOLS`].
     pub symbol: u8,
-    /// TX delay (0 5 9 4, APRS-48): flags before our own frames, in 10 ms (10-100: 100-1000 ms).
+    /// TX delay (0 5 9 3, APRS-48): flags before our own frames, in 10 ms (10-100: 100-1000 ms).
     pub txdelay: u8,
-    /// TX level (0 5 9 5, APRS-49): 0 Low, 1 Mid, 2 High (`audio::AFSK_AMPS`).
+    /// TX level (0 5 9 4, APRS-49): 0 Low, 1 Mid, 2 High (`audio::AFSK_AMPS`).
     pub tx_level: u8,
 }
 
@@ -76,11 +76,11 @@ pub const SYMBOLS: [(&str, u8, u8); 10] = [
     ("House", b'/', b'-'),
     ("Boat", b'/', b's'),
 ];
-/// APRS-48: 0 5 9 4's range and default, in 10 ms.
+/// APRS-48: 0 5 9 3's range and default, in 10 ms.
 pub const TXDELAY_MIN: u8 = 10;
 pub const TXDELAY_MAX: u8 = 100;
 pub const TXDELAY_DEFAULT: u8 = 30;
-/// APRS-49: 0 5 9 5's names.
+/// APRS-49: 0 5 9 4's names.
 pub const TX_LEVELS: [&str; 3] = ["Low", "Mid", "High"];
 
 impl AprsCfg {
@@ -96,7 +96,7 @@ impl AprsCfg {
     }
 }
 
-/// APRS-45: 0 5 9 6's choices (check bytes; 0 = off) and their names. 16 by default: Alex, decision 230 (a default
+/// APRS-45: 0 5 9 5's choices (check bytes; 0 = off) and their names. 16 by default: Alex, decision 230 (a default
 /// to review before the first release).
 pub const FX25_CHECKS: [u8; 4] = [0, 16, 32, 64];
 pub const FX25_NAMES: [&str; 4] = ["Off", "16 bytes", "32 bytes", "64 bytes"];
@@ -164,13 +164,13 @@ impl AprsCfg {
     }
 
     /// APRS-45: FX.25 check bytes for a frame the APRS task sends (`what`, as [`crate::aprs_live::Tick`] names
-    /// it): 0 5 9 6's for our own frames (beacons, messages, acks, answers), 0 (plain AX.25) for a digipeat, which
+    /// it): 0 5 9 5's for our own frames (beacons, messages, acks, answers), 0 (plain AX.25) for a digipeat, which
     /// goes out as it came.
     pub fn fx25_for(&self, what: &str) -> u8 {
         if what == "Digipeat" { 0 } else { self.fx25 }
     }
 
-    /// 0 5 9 6's choice: an index into [`FX25_CHECKS`].
+    /// 0 5 9 5's choice: an index into [`FX25_CHECKS`].
     pub fn fx25_index(&self) -> u8 {
         FX25_CHECKS.iter().position(|&c| c == self.fx25).unwrap_or(0) as u8
     }
@@ -301,8 +301,9 @@ impl LastBeacon {
 /// An automatic beacon is due (APRS-24), the first as soon as the mode allows:
 /// - timed: `every` minutes since the last;
 /// - distance: that far from where the last went, by the GPS; never without a fix;
-/// - smart: [`uaprs::beacon`]'s SmartBeaconing with its standard car values (fast 100 km/h every 3 min, slow
-///   under 5 km/h every 30 min, a turn of 28 degrees plus 255 / speed after 30 s); without a fix, the slow rate.
+/// - smart: [`uaprs::beacon`]'s SmartBeaconing on one curve from walking to driving (decision 271): 10 km/h and
+///   faster every 3 min, under 3 km/h every 30 min, between them every 500 m, a turn of 28 degrees plus
+///   255 / speed after 30 s; without a fix, the slow rate.
 pub fn beacon_due(c: &AprsCfg, last: Option<LastBeacon>, now_s: u32, fix: Option<Fix>) -> bool {
     if let Some(m) = c.every_min() {
         return last.is_none_or(|l| now_s.wrapping_sub(l.at_s) >= m as u32 * 60);
@@ -529,7 +530,7 @@ impl App {
         SlotCfg { mode: 0, narrow: false, power: self.aprs.power % 3, busy: 1, squelch: own.squelch, ..SlotCfg::default() }
     }
 
-    /// APRS-2, APRS-15.1: C's quick mute follows 0 5 9 7 while APRS mode is on, and is off without it.
+    /// APRS-2, APRS-15.1: C's quick mute follows 0 5 9 6 while APRS mode is on, and is off without it.
     pub(crate) fn aprs_mute_sync(&mut self) {
         let on = self.set.aprs_mode && self.set.aprs_mute;
         let m = if on { self.mute | 1 << APRS_SLOT } else { self.mute & !(1 << APRS_SLOT) };

@@ -60,7 +60,7 @@ import sdrtx
 S = dict(
     vox="0 8 2 1", vox_level="0 8 2 2", vox_tail="0 8 2 3", dtmf_speed="0 8 5 3",
     dtmf_delay="0 8 5 5", aprs_mode="0 5 3", beacon_mode="0 5 6 1", after_voice="0 5 6 2",
-    beacon_power="0 5 6 3", aprs_freq="0 5 4", tx_delay="0 5 9 4", pos_source="0 5 5 4", fixed="0 5 5 5",
+    beacon_power="0 5 6 3", aprs_freq="0 5 4", tx_delay="0 5 9 3", pos_source="0 5 5 4", fixed="0 5 5 5",
     kiss="0 5 8", watch="0 1 1", gps_rxtx="0 6 8", bluetooth="0 9 2 1", end_tone=B.END_TONE, gps="0 6 1",
     bsave="0 7 7",
 )
@@ -1280,7 +1280,7 @@ class Modes:
 
     def t_aprs_beacon(self):
         """APRS-14.1, APRS-20: A active on 446.475, C (APRS) on 145.495; Beacon now: a frame on 145.495 (C's) from
-        our callsign, the TX delay (0 5 9 4) between the carrier and the first flag; beacon power Low."""
+        our callsign, the TX delay (0 5 9 3) between the carrier and the first flag; beacon power Low."""
         call = self.aprs_setup()
         self.tune("A", self.f_hi)
         self.gate("A", "aprs: A elsewhere")

@@ -220,8 +220,8 @@ impl Aprs {
                     extra.changed();
                 }
                 if t.len > 0 {
-                    // APRS-45: our own frames as FX.25 when 0 5 9 6 says so (a digipeat goes out plain).
-                    // APRS-48, APRS-49: 0 5 9 4's delay and 0 5 9 5's level for our own frames (KISS's frames keep the host's)
+                    // APRS-45: our own frames as FX.25 when 0 5 9 5 says so (a digipeat goes out plain).
+                    // APRS-48, APRS-49: 0 5 9 3's delay and 0 5 9 4's level for our own frames (KISS's frames keep the host's)
                     self.frame = Frame { len: t.len as u16, txdelay_10ms: cfg.txdelay_10ms(), fx25: cfg.fx25_for(t.what), level: cfg.tx_level.min(2), b: [0; FRAME_MAX] };
                     self.frame.b[..t.len].copy_from_slice(&out[..t.len]);
                     self.clear.start(now_ms);

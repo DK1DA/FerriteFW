@@ -99,12 +99,12 @@ script:
 ---
 title: FX.25
 layout: right
-left: Forward error correction around each AX.25 frame, sent and received (0 5 9 6).
+left: Forward error correction around each AX.25 frame, sent and received (0 5 9 5).
 right: Plain AX.25 receivers still decode it; FX.25 receivers repair damaged bytes. || 16 check bytes by default.
 setup: home
 script:
   wait 800ms
-  menu 0 5 9 6
+  menu 0 5 9 5
   wait 1500ms
   knob 1
   wait 900ms

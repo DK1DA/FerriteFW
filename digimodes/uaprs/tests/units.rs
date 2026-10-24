@@ -153,9 +153,11 @@ fn smart_beacon() {
     // Parked: every 30 minutes.
     assert!(!b.due(1799, 0, 90));
     assert!(b.due(1800, 0, 90));
-    // Highway speed: every 3 minutes; half the fast speed: twice that.
+    // 10 km/h and over: every 3 minutes; half the fast speed (a walk): twice that; a slow amble capped at parked.
     assert!(b.due(180, 120, 90) && !b.due(179, 120, 90));
-    assert!(b.due(360, 50, 90) && !b.due(359, 50, 90));
+    assert!(b.due(180, 50, 90) && !b.due(179, 50, 90));
+    assert!(b.due(360, 5, 90) && !b.due(359, 5, 90));
+    assert!(b.due(600, 3, 90) && !b.due(599, 3, 90));
     // A turn: 28 + 255 / 50 = 33 degrees at 50 km/h, after 30 s.
     assert!(b.due(31, 50, 90 + 34) && !b.due(31, 50, 90 + 32) && !b.due(29, 50, 90 + 90));
     // Across north.

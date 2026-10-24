@@ -450,7 +450,7 @@ fn quick_mute(app: &mut App) {
     app.mute ^= 1 << a;
     app.out.push(RadioCmd::Mute(app.mute));
     if a == crate::aprs::APRS_SLOT && app.set.aprs_mode {
-        app.set.aprs_mute = app.mute & 1 << a != 0; // APRS-2: \* on C in APRS mode is 0 5 9 7
+        app.set.aprs_mute = app.mute & 1 << a != 0; // APRS-2: \* on C in APRS mode is 0 5 9 6
     }
     let mut t = Buf::<16>::new();
     t.set(b"Slot ");

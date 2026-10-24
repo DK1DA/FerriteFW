@@ -1022,7 +1022,7 @@ mod tests {
     }
 
     /// APRS-44: a frame that came as FX.25 marks its station with the bytes corrected (the station screen's Path
-    /// row); the station's next plain frame clears it. APRS-45: our own frames take 0 5 9 6's check bytes, a
+    /// row); the station's next plain frame clears it. APRS-45: our own frames take 0 5 9 5's check bytes, a
     /// digipeat none.
     #[test]
     fn fx25_heard_and_sent() {
