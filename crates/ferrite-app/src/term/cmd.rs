@@ -1671,10 +1671,11 @@ fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
 
 #[cfg(feature = "bench")]
 /// TERM-40 (a bench test, the power bench): `lcd` shows the display's bench state; `lcd idle|partial|sleep on|off`,
-/// `lcd fps N` (1-20, 0 normal), `lcd bl N|normal`, `lcd keys N|normal` (percent) change one thing; `lcd reset`.
+/// `lcd fps N` (1-20, 0 normal), `lcd bl N|normal`, `lcd keys N|normal` (percent) change one thing; `lcd reset`;
+/// `lcd bus` times a whole-screen fill.
 fn lcd(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::msg::LcdSet;
-    const USAGE: &str = "lcd [idle|partial|sleep on|off] [fps 0-20] [bl|keys 0-100|normal] [paint old|new] [reset]";
+    const USAGE: &str = "lcd [idle|partial|sleep on|off] [fps 0-20] [bl|keys 0-100|normal] [paint old|new] [bus] [reset]";
     let bad = || msg!("{}", USAGE);
     fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, Msg> {
         match t.next()? {
@@ -1704,6 +1705,8 @@ fn lcd(t: &mut Toks) -> Result<Done, Msg> {
     }
     let set = if same(what, b"reset") {
         LcdSet::Reset
+    } else if same(what, b"bus") {
+        LcdSet::Bus
     } else {
         let arg = word(t)?.ok_or_else(bad)?;
         let on = || if same(arg, b"on") { Some(true) } else if same(arg, b"off") { Some(false) } else { None };

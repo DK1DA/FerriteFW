@@ -639,7 +639,15 @@ pub async fn task() {
                     }
                     #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Lcd(set) => {
-                        let new = lcdb.apply(set); // `sleep` goes through DISP-27's panel sleep below
+                        let mut new = lcdb.apply(set); // `sleep` goes through DISP-27's panel sleep below
+                        if set == ferrite_core::msg::LcdSet::Bus && !panel_asleep {
+                            // The panel bus speed: the boot's timed fill again, at the clock draws run at now.
+                            let c0 = crate::hal::time::cycles();
+                            lcd.0.fill(0, 0, 240, 320, BG);
+                            let mhz = crate::hal::clock::mhz();
+                            new.bus = Some((crate::hal::time::cycles().wrapping_sub(c0) / mhz, mhz as u16));
+                            app.redraw_all();
+                        }
                         if new.idle != lcdb.idle {
                             lcd.0.idle(new.idle);
                         }

@@ -1553,6 +1553,7 @@ fn debug_lcd() {
         ("lcd partial on", LcdSet::Partial(true)),
         ("lcd sleep on", LcdSet::Sleep(true)),
         ("lcd reset", LcdSet::Reset),
+        ("lcd bus", LcdSet::Bus),
     ] {
         r.send(b"\r");
         r.cmd(cmd);
@@ -1563,7 +1564,7 @@ fn debug_lcd() {
     r.serve(4, regs);
     assert!(r.raw().contains("bl 30"), "{}", r.raw());
     r.send(b"\r");
-    for bad in ["lcd bl 101", "lcd fps 21", "lcd idle maybe", "lcd bright 3", "lcd sleep", "lcd bl 3 4"] {
+    for bad in ["lcd bl 101", "lcd fps 21", "lcd idle maybe", "lcd bright 3", "lcd sleep", "lcd bl 3 4", "lcd bus 2"] {
         r.cmd(bad);
         assert!(r.bottom().contains("lcd [idle"), "{bad}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");

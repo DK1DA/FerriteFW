@@ -481,6 +481,8 @@ pub enum LcdSet {
     Bl(Option<u8>),
     /// The keypad light at this %, or the settings' (None).
     Keys(Option<u8>),
+    /// Time one whole-screen fill (153,600 bytes) on the panel bus, then redraw; the answer carries it.
+    Bus,
 }
 
 /// TERM-40: the display's bench state.
@@ -493,6 +495,8 @@ pub struct LcdBench {
     pub fps: u8,
     pub bl: Option<u8>,
     pub keys: Option<u8>,
+    /// The last `lcd bus` (none yet: `None`): the whole-screen fill's microseconds and the MCU clock in MHz.
+    pub bus: Option<(u32, u16)>,
 }
 
 #[cfg(feature = "bench")]
@@ -508,6 +512,7 @@ impl LcdBench {
             LcdSet::Fps(n) => self.fps = n.min(20),
             LcdSet::Bl(p) => self.bl = p.map(|p| p.min(100)),
             LcdSet::Keys(p) => self.keys = p.map(|p| p.min(100)),
+            LcdSet::Bus => {} // the UI task fills in `bus`
         }
         self
     }

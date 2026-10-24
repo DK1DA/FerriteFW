@@ -319,6 +319,9 @@ impl Job {
                 let pct = |p: Option<u8>| p.map_or(Num(None), |p| Num(Some(p)));
                 put!(out, "  lcd: idle {}, partial {}, sleep {}, fps {}, bl {}, keys {}", onoff(l.idle), onoff(l.partial), onoff(l.sleep),
                      if l.fps == 0 { Num(None) } else { Num(Some(l.fps)) }, pct(l.bl), pct(l.keys));
+                if let Some((us, mhz)) = l.bus {
+                    put!(out, "; bus: full-screen fill {} us, {} ns a byte at {} MHz", us, us * 1000 / 153_600, mhz as u32);
+                }
                 self.st = St::Over;
                 Step::Line
             }
