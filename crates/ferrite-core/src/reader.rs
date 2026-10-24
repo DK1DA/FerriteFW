@@ -45,6 +45,9 @@ pub const SYNC_OK: [u8; 4] = *b"FDOK";
 /// The console's rate, and `fdump`'s when none is given.
 pub const CONSOLE_BAUD: u32 = 115_200;
 pub const FDUMP_BAUD: u32 = 500_000;
+/// `fdumpz`'s rate when none is given (BACKUP-9.6, decision 265): one fixed, safe rate. At 460800 sustained
+/// transfers lost bytes through a USB extension (black, Oct 23); safer beats a few seconds.
+pub const FDUMPZ_BAUD: u32 = 230_400;
 
 /// The help text. Ferrite Console tells the reader image from others by its "fdump <addr> <len>" (READER_MARK).
 pub const HELP: &[u8] = b"sys | flash | flashcrc   (SPI flash, read only)\r\n\
@@ -475,6 +478,7 @@ pub fn parse(line: &[u8]) -> Command {
         b"fdump" | b"fdumpz" => {
             let (Some(addr), Some(len)) = (a[0].and_then(uint), a[1].and_then(uint)) else { return Command::Unknown };
             let baud = match a[2] {
+                None if cmd == b"fdumpz" => FDUMPZ_BAUD,
                 None => FDUMP_BAUD,
                 Some(b) => match uint(b) {
                     Some(b) => b,
@@ -947,6 +951,7 @@ mod tests {
         assert!(!zdecode(&[Z_RLE, 0x85, 0xAA], &mut back)); // 8 bytes, not 10
         assert!(zdecode(&[Z_RLE, 0x87, 0xAA], &mut back) && back == [0xAA; 10]);
         assert_eq!(parse(b"fdumpz 0 0x400000 460800"), Command::FdumpZ { addr: 0, len: 0x40_0000, baud: 460_800 });
+        assert_eq!(parse(b"fdumpz 0 0x1000"), Command::FdumpZ { addr: 0, len: 0x1000, baud: FDUMPZ_BAUD });
     }
 
     /// BACKUP-9.5: a whole dump against a host like Console's: every byte, the end frame's CRC and count.
