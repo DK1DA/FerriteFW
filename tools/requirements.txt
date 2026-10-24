@@ -1,0 +1,3 @@
+# The tools that talk to a radio. flash.py, term.py, ferrite_link.py: the cable; ferrite_link.py ble:...: Bluetooth.
+pyserial>=3.5
+bleak>=0.22

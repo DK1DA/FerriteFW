@@ -51,46 +51,46 @@ announce what happened on one event bus (`firmware/src/chan.rs`, types in `ferri
 | Link | thread | Programming cable: the terminal (chapter 37) for now; the link protocol and KISS later |
 | GPS | thread | USART3, position and time |
 
-## Building
+## Getting started (developers)
 
-The toolchain is a pinned nightly (`rust-toolchain.toml`); rustup installs it on first use.
-
-```sh
-cargo test                      # logic and screens on the PC
-cargo sim                       # screens to target/sim/*.png
-cargo simw                      # the interactive simulator (keys are printed at start; resizing snaps to whole scales; --scale 2 for bigger)
-                                # its flash is kept in target/sim/flash.bin between runs; -- --fresh starts blank (setup)
-cargo simweb                    # the simulator as wasm: target/wasm32-unknown-unknown/wasm/ferrite_sim_web.wasm
-cargo fw                        # the image: target/thumbv7em-none-eabihf/release/ferrite
-cargo fw-clippy -- -D warnings
-```
-
-**The terminal** (manual chapter 37) runs in the simulator too: `cargo simw` opens a pseudo-terminal as the
-radio's cable and prints how to connect, for example `screen /dev/ttys006 115200`; press Enter in it. Where there
-is no pseudo-terminal, `cargo simw -- --term-tcp 7300`, then `stty raw -echo; nc 127.0.0.1 7300; stty sane`.
-`cargo run -p ferrite-sim -- --term-headless 60` runs the radio and its cable with no window (for scripts).
-
-To pack the image for the stock bootloader (build, slow-flash check, pack, dry run):
+You need git, [rustup](https://rustup.rs) and Python 3. The compiler is a pinned nightly (`rust-toolchain.toml`): rustup installs it, with its components and the radio's target, the first time you build. Everything else comes with the repo, the digital modes included (`digimodes/`).
 
 ```sh
-tools/mkbtf.sh            # target/ferrite.btf
-tools/mkbtf.sh bringup    # target/ferrite-bringup.btf: the first builds on a radio
-tools/mkbtf.sh tx-dry     # target/ferrite-txdry.btf: transmit with the PA drive held at 0 (the dry run)
-python3 tools/flash.py PORT target/ferrite-bringup.btf --backup flash.bin
+git clone <this repo> ferrite && cd ferrite
+cargo test                      # the logic, the screens and the decoders on the PC (the first run installs the toolchain)
+cargo simw                      # the radio in a window: keys are printed at start; -- --fresh starts at setup
+cargo sim                       # every screen to target/sim/*.png
 ```
 
-The bring-up build (`cargo fw-bringup`, feature `bringup`) never writes or erases the SPI flash and doesn't mount
-the store; a key pressed during the boot screen opens the key test; the cable prints a plain log at 115200 (boot
-report, raw key codes, the knob, the receiver, a fault's address) until a byte arrives. `flash.py` refuses a
-Ferrite image without a whole-chip backup taken with the hwtest image, and refuses a backup holding a pending
-update. The day-one order is `../docs/bringup.md`; debugging on the radio (cable log, the terminal's `:mem`, `:gpio`,
-`:bk`, `:si`, fault addresses, `tools/bkcheck.py --diff`) is `../docs/debugging.md`.
+Build an image for the radio:
 
-Transmit is built in milestone 4, after receive is proven on the radio. Until then it sits behind a feature: `cargo fw --features tx`
-adds it, and without the feature the build contains no transmit code at all, so bring-up builds cannot key the radio.
+```sh
+python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
+tools/mkbtf.sh tx               # target/ferrite-tx.btf: the user build (transmit, no bench commands)
+tools/mkbtf.sh tx-bench         # target/ferrite-txbench.btf: plus the bench commands, Dry TX on at power-on
+tools/mkbtf.sh reader           # target/ferrite-reader.btf: the read-only backup reader Ferrite Console loads
+```
 
-udigimodes is private for now. Cargo fetches it with git, so your git credentials must reach it.
-CI uses a `DEPS_TOKEN` secret for this.
+`mkbtf.sh` builds, checks what must sit in fast flash, packs the image for the stock bootloader and dry-runs it.
+
+Put it on a radio:
+
+- **Ferrite Console** (Chrome or Edge): the Install page backs the radio up first, then installs; Advanced › Ferrite image takes your own `.btf`. On a radio already on Ferrite, Firmware Update does the same.
+- **Or the cable tool:** `.venv/bin/python tools/flash.py PORT target/ferrite-tx.btf --backup backup.bin`. It refuses without a whole-chip backup file (take one with Console).
+
+Before a commit:
+
+```sh
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fw-clippy -- -D warnings          # the radio's build
+cargo fw-reader-clippy -- -D warnings   # the reader
+cargo test -p uradio-bus -p bk4829 -p si4732 -p st7789 -p w25q -p keypad -p nmea --all-features
+```
+
+**The terminal** (manual chapter 37) runs in the simulator too: `cargo simw` opens a pseudo-terminal as the radio's cable and prints how to connect, for example `screen /dev/ttys006 115200`; press Enter in it. Without a pseudo-terminal: `cargo simw -- --term-tcp 7300`, then `stty raw -echo; nc 127.0.0.1 7300; stty sane`. `cargo run -p ferrite-sim -- --term-headless 60` runs the radio and its cable with no window, for scripts.
+
+More: the spec (the manual) and the decisions are in the docs repo; debugging on the radio (the cable log, the terminal's bench commands, fault addresses) is its `debugging.md`.
 
 ## Safety
 
