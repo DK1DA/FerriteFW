@@ -208,12 +208,11 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 24] = [
     ((5, 9), &[
         Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."),
         Entry("Custom path|None|Your own path, like WIDE2-2: OK types it."),
-        Entry("Smart settings|Standard|Rates, speeds, turn angle."),
+        Entry("Smart Beaconing|Standard|Rates, speeds, turn angle."),
         Entry("TX delay|300 ms|Carrier before data."),
         Entry("TX level|Mid|Modulation level."),
         Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
         Entry("Mute speaker|On|Mute packets on the speaker."),
-        Entry("Heard popup|Off|A toast per station heard."),
     ]),
     ((7, 3), &[
         Entry("S-meter|Bars|Bars or dBm."),
