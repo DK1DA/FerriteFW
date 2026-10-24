@@ -411,3 +411,18 @@ fn kiss_settings_and_channel_access() {
     }
     assert!((800..1200).contains(&sent), "{sent} of {tries}");
 }
+
+/// KISS-12: hardware commands (command 6) never become data or settings: Mobilinkd's PTT test tones (0x07-0x09),
+/// a host's frequency set (0xEA) and save (0x2A) come back as `Hardware`, which the firmware ignores, and leave
+/// the TNC settings as they were.
+#[test]
+fn kiss_hardware_commands_do_nothing() {
+    use kiss::{Command, Params, Received};
+    let mut p = Params::default();
+    let before = p;
+    for sub in [&[0x07u8][..], &[0x08], &[0x09], &[0xEA, 0x08, 0xAA, 0x6B, 0x60], &[0x2A], &[0x28]] {
+        let r = Received { port: 0, command: 6, data: sub };
+        assert_eq!(p.apply(&r), Command::Hardware(sub));
+    }
+    assert_eq!(p, before);
+}

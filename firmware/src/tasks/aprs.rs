@@ -75,7 +75,8 @@ impl Aprs {
         if !r.for_single_port() {
             return; // KISS-11: one port, port 0
         }
-        // KISS-11: the shortest AX.25 frame is two addresses and a control byte (15)
+        // KISS-11: the shortest AX.25 frame is two addresses and a control byte (15). KISS-12: only data acts;
+        // settings change `params`, and hardware commands (PTT tests, a frequency set, a save) do nothing
         if let kiss::Command::Data(d) = self.params.apply(&r) {
             if self.kiss_q.is_none() && (15..=FRAME_MAX).contains(&d.len()) {
                 let mut f = Frame { len: d.len() as u16, txdelay_10ms: self.params.tx_delay, fx25: 0, level: 1, b: [0; FRAME_MAX] };
