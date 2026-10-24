@@ -44,6 +44,10 @@ pub struct Report<'a> {
     pub messaging: bool,
     pub timestamp: Option<Timestamp>,
     pub comment: &'a [u8],
+    /// Position ambiguity: 0 exact, 1-4 trailing digits of both latitude and longitude sent as spaces
+    /// (hundredths, tenths, then the minutes' units and tens). Uncompressed reports only: [`compressed`] has no
+    /// way to say it and ignores it.
+    pub ambiguity: u8,
 }
 
 fn timestamp(w: &mut W, t: Timestamp) -> Option<()> {
@@ -78,8 +82,8 @@ fn head(w: &mut W, r: &Report) -> Option<()> {
     }
 }
 
-/// Degrees and hundredths of minutes, rounded: `DDMM.hh` or `DDDMM.hh`.
-fn ddmm(w: &mut W, v: i32, width: usize) -> Option<()> {
+/// Degrees and hundredths of minutes, rounded: `DDMM.hh` or `DDDMM.hh`; the last `amb` digits (up to 4) blanked.
+fn ddmm(w: &mut W, v: i32, width: usize, amb: u8) -> Option<()> {
     let v = v.unsigned_abs();
     let mut deg = v / 1_000_000;
     let mut hmin = ((v % 1_000_000) * 6 + 500) / 1000;
@@ -90,7 +94,13 @@ fn ddmm(w: &mut W, v: i32, width: usize) -> Option<()> {
     w.num(deg, width)?;
     w.num(hmin / 100, 2)?;
     w.put(b".")?;
-    w.num(hmin % 100, 2)
+    w.num(hmin % 100, 2)?;
+    // From the end: hundredths, tenths, then (past the '.') the minutes' units and tens.
+    let end = w.len;
+    for &k in &[1usize, 2, 4, 5][..(amb as usize).min(4)] {
+        w.out[end - k] = b' ';
+    }
+    Some(())
 }
 
 fn tail(w: &mut W, r: &Report) -> Option<()> {
@@ -117,14 +127,15 @@ fn tail(w: &mut W, r: &Report) -> Option<()> {
     w.put(r.comment)
 }
 
-/// An uncompressed report: `!DDMM.hhN/DDDMM.hhW>CSE/SPD/A=nnnnnn comment`. Position to about 18 m.
+/// An uncompressed report: `!DDMM.hhN/DDDMM.hhW>CSE/SPD/A=nnnnnn comment`. Position to about 18 m, or less
+/// exact by [`Report::ambiguity`] (`4903.  N` for 2).
 pub fn position(r: &Report, out: &mut [u8]) -> Option<usize> {
     let mut w = W { out, len: 0 };
     head(&mut w, r)?;
-    ddmm(&mut w, r.lat, 2)?;
+    ddmm(&mut w, r.lat, 2, r.ambiguity)?;
     w.put(if r.lat >= 0 { b"N" } else { b"S" })?;
     w.put(&[r.table])?;
-    ddmm(&mut w, r.lon, 3)?;
+    ddmm(&mut w, r.lon, 3, r.ambiguity)?;
     w.put(if r.lon >= 0 { b"E" } else { b"W" })?;
     w.put(&[r.code])?;
     if let Some((c, s)) = r.course_speed {

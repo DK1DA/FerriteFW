@@ -193,7 +193,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 24] = [
         Entry("Position source|GPS|GPS, or always the fixed position."),
         Entry("Fixed position|None|Used without GPS."),
         Entry("Ambiguity|Exact|Digits dropped from your position."),
-        Entry("Mic-E status|En route|Status in Mic-E beacons."),
     ]),
     ((5, 6), &[
         Entry("Mode|Off|Manual, timed, distance or smart."),
@@ -433,7 +432,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 90] = [
+static SETTINGS: [Setting; 92] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -460,7 +459,9 @@ static SETTINGS: [Setting; 90] = [
     field!([5, 4, 0], special), // MENU-31: typed as a frequency
     field!([5, 5, 1], special), // APRS-30
     field!([5, 5, 2], special), // APRS-47: the symbol
+    field!([5, 5, 3], special), // APRS-50: the comment
     field!([5, 5, 4], special), // APRS-31
+    field!([5, 5, 6], special), // APRS-51: ambiguity
     field!([5, 6, 1], special),
     field!([5, 6, 2], special),
     field!([5, 6, 3], special),
@@ -801,6 +802,24 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             pick(b, &crate::aprs::SYMBOLS.map(|s| s.0), app.aprs_cfg().symbol);
             app.aprs_cfg().symbol != 0
         }
+        // APRS-50: the comment, its start when long
+        [5, 5, 3] => {
+            let c = app.aprs_cfg();
+            let t = c.comment_text();
+            match t.len() {
+                0 => b.set(b"Empty"),
+                1..=18 => b.set(t),
+                _ => {
+                    b.set(&t[..15]);
+                    b.push(b"...");
+                }
+            }
+            !t.is_empty()
+        }
+        [5, 5, 6] => {
+            pick(b, &crate::aprs::AMBIGUITY_NAMES, app.aprs_cfg().ambiguity);
+            app.aprs_cfg().ambiguity != 0
+        }
         [5, 9, 3] => {
             let _ = uwrite!(b, "{} ms", app.aprs_cfg().txdelay_10ms() as u16 * 10);
             app.aprs_cfg().txdelay_10ms() != crate::aprs::TXDELAY_DEFAULT
@@ -973,6 +992,11 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
             let symbol = cycle(app.aprs_cfg().symbol, d, crate::aprs::SYMBOLS.len());
             app.set_aprs(crate::aprs::AprsCfg { symbol, ..app.aprs_cfg() })
         }
+        // APRS-51: Exact, then 1-4 digits dropped, stopping at the ends
+        [5, 5, 6] => {
+            let ambiguity = (app.aprs_cfg().ambiguity as i32 + d).clamp(0, 4) as u8;
+            app.set_aprs(crate::aprs::AprsCfg { ambiguity, ..app.aprs_cfg() })
+        }
         [5, 9, 3] => {
             let c = app.aprs_cfg();
             let txdelay = (c.txdelay_10ms() as i32 + d * 5).clamp(crate::aprs::TXDELAY_MIN as i32, crate::aprs::TXDELAY_MAX as i32) as u8;
@@ -1058,6 +1082,8 @@ pub(crate) fn reset(app: &mut App, p: &[u8]) {
         [5, 4] => app.set_aprs(crate::aprs::AprsCfg { f5k: 0, ..app.aprs_cfg() }),
         [7, 5, 5] => app.set_aprs(crate::aprs::AprsCfg { sound: ferrite_core::tonegen::CHIME_DEFAULT, ..app.aprs_cfg() }),
         [5, 5, 2] => app.set_aprs(crate::aprs::AprsCfg { symbol: 0, ..app.aprs_cfg() }),
+        [5, 5, 3] => app.set_aprs_comment(b""),
+        [5, 5, 6] => app.set_aprs(crate::aprs::AprsCfg { ambiguity: 0, ..app.aprs_cfg() }),
         [5, 9, 3] => app.set_aprs(crate::aprs::AprsCfg { txdelay: crate::aprs::TXDELAY_DEFAULT, ..app.aprs_cfg() }),
         [5, 9, 4] => app.set_aprs(crate::aprs::AprsCfg { tx_level: 1, ..app.aprs_cfg() }),
         [5, 9, 5] => app.set_aprs(crate::aprs::AprsCfg { fx25: crate::aprs::FX25_DEFAULT, ..app.aprs_cfg() }),
@@ -1324,6 +1350,11 @@ impl Group {
             [5, 9, 2] => {
                 app.text = Buf::from(app.aprs_custom_path());
                 app.open(Dest::Text(super::text::TextFor::AprsPath));
+            }
+            // APRS-50: the comment in the message editor (40 characters, multi-tap or predictive)
+            [5, 5, 3] => {
+                app.text.clear();
+                app.open_screen(crate::Screen::Compose(super::msgs::Compose::comment_edit()));
             }
             // MENU-31: a frequency setting opens the frequency entry box; the knob still steps it.
             [5, 4] => super::entry::open_setting(app, super::entry::FreqSet::Aprs),

@@ -99,7 +99,8 @@ pub enum Job {
 /// The APRS record: the settings (4), the quick messages (each a length, 0xFF for the factory text, and 67
 /// bytes), then the settings added later (path, digipeater, beacon after voice, the SSID: [`APRS_MORE`]), then
 /// the custom path (0 5 9 2, zero-padded: [`APRS_PATH`]), then FX.25 on transmit (0 5 9 5, APRS-45:
-/// [`APRS_FX25`]). A record from before them is shorter and reads them as their defaults.
+/// [`APRS_FX25`]), the message sound, symbol, TX delay and level, then the comment and ambiguity
+/// ([`APRS_COMMENT`]). A record from before them is shorter and reads them as their defaults.
 const QUICK_LEN: usize = 68;
 const APRS_MORE: usize = 4 + ferrite_app::words::QUICK * QUICK_LEN;
 const APRS_PATH: usize = APRS_MORE + 4;
@@ -107,7 +108,10 @@ const APRS_FX25: usize = APRS_PATH + ferrite_app::aprs::CUSTOM_LEN;
 const APRS_SOUND: usize = APRS_FX25 + 1;
 /// APRS-47 - APRS-49: symbol, TX delay, TX level (an older record reads their defaults).
 const APRS_SYMBOL: usize = APRS_SOUND + 1;
-const APRS_PAYLOAD: usize = APRS_SYMBOL + 3;
+/// APRS-50, APRS-51: the comment (zero-padded) and the ambiguity (an older record reads none and exact).
+const APRS_COMMENT: usize = APRS_SYMBOL + 3;
+const APRS_AMBIG: usize = APRS_COMMENT + ferrite_app::aprs::COMMENT_LEN;
+const APRS_PAYLOAD: usize = APRS_AMBIG + 1;
 const APRS_COPIES: [u32; 2] = [APRS.start, APRS.start + SECTOR];
 /// APRS-32: the stored messages [`FlashStore::message_heard`] looks through, newest first.
 pub const HEARD_CHECK: u16 = 16;
@@ -250,6 +254,16 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 }
             }
             if c.len as usize >= APRS_PAYLOAD {
+                let mut t = [0u8; ferrite_app::aprs::COMMENT_LEN + 1];
+                self.f.raw_read(c.at + APRS_COMMENT as u32, &mut t)?;
+                // printable text up to the first zero; anything else reads as none
+                let n = t[..t.len() - 1].iter().position(|&b| b == 0).unwrap_or(t.len() - 1);
+                if t[..n].iter().all(|&b| (b' '..=b'~').contains(&b)) {
+                    cfg.comment[..n].copy_from_slice(&t[..n]);
+                }
+                cfg.ambiguity = if t[t.len() - 1] <= 4 { t[t.len() - 1] } else { 0 };
+            }
+            if c.len as usize >= APRS_COMMENT {
                 let mut x = [0u8; 3];
                 self.f.raw_read(c.at + APRS_SYMBOL as u32, &mut x)?;
                 if (x[0] as usize) < ferrite_app::aprs::SYMBOLS.len() {
@@ -1136,6 +1150,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         p[APRS_FX25] = c.fx25;
         p[APRS_SOUND] = c.sound;
         (p[APRS_SYMBOL], p[APRS_SYMBOL + 1], p[APRS_SYMBOL + 2]) = (c.symbol, c.txdelay, c.tx_level);
+        p[APRS_COMMENT..APRS_AMBIG].copy_from_slice(&c.comment);
+        p[APRS_AMBIG] = c.ambiguity;
         for i in 0..ferrite_app::words::QUICK {
             let t = match q {
                 Some((k, t)) if k as usize == i => t,

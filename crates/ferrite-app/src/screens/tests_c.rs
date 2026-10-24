@@ -909,6 +909,62 @@ fn quick_messages_edited() {
     assert!(t.s.quick(0).is_none());
 }
 
+/// APRS-50: 0 5 5 3 edits the comment in the message editor: kept as typed, up to 40 characters, the row
+/// shows it (its start when long), and an empty one is none.
+#[test]
+fn beacon_comment_edited() {
+    let mut t = T::new();
+    for k in [Key::Menu, Key::Digit(0), Key::Digit(5), Key::Digit(5), Key::Digit(3)] {
+        t.tap(k);
+    }
+    assert_eq!(t.name(), "Comment");
+    keys(&mut t, "home");
+    t.tap(Key::Hash);
+    t.tap(Key::Menu);
+    assert_ne!(t.name(), "Comment", "OK keeps it");
+    assert_eq!(t.app.aprs_cfg().comment_text(), b"Good ");
+    let dev = Device::default();
+    let mut b = ferrite_ui::text::Buf::<24>::new();
+    assert_eq!(crate::screens::groups::wired(&t.app, &dev, &[5, 5, 3], &mut b), Some(true));
+    assert_eq!(b.as_bytes(), b"Good ");
+    // 39 characters: one more digit goes in, the next is refused
+    t.app.set_aprs_comment(&[b'x'; 39]);
+    crate::screens::groups::wired(&t.app, &dev, &[5, 5, 3], &mut b);
+    assert_eq!(b.as_bytes(), b"xxxxxxxxxxxxxxx...", "its start");
+    t.tap(Key::Digit(3));
+    assert_eq!(t.name(), "Comment");
+    t.hold(Key::Digit(7));
+    t.hold(Key::Digit(3));
+    assert_eq!(t.app.aprs_cfg().comment_text().len(), 40);
+    assert!(t.app.aprs_cfg().comment_text().ends_with(b"x7"));
+    for _ in 0..40 {
+        t.tap(Key::Exit);
+    }
+    assert_eq!(t.name(), "Comment", "emptied, still open");
+    t.tap(Key::Menu);
+    assert!(t.app.aprs_cfg().comment_text().is_empty());
+    crate::screens::groups::wired(&t.app, &dev, &[5, 5, 3], &mut b);
+    assert_eq!(b.as_bytes(), b"Empty");
+}
+
+/// APRS-51: 0 5 5 6 steps Exact, then 1 to 4 digits, stopping at the ends; # resets it.
+#[test]
+fn ambiguity_steps() {
+    use crate::screens::groups::{change, reset, wired};
+    let mut t = T::new();
+    let dev = Device::default();
+    let mut b = ferrite_ui::text::Buf::<24>::new();
+    assert_eq!(wired(&t.app, &dev, &[5, 5, 6], &mut b), Some(false));
+    assert_eq!(b.as_bytes(), b"Exact");
+    change(&mut t.app, &[5, 5, 6], 2);
+    wired(&t.app, &dev, &[5, 5, 6], &mut b);
+    assert_eq!(b.as_bytes(), b"2 digits");
+    change(&mut t.app, &[5, 5, 6], 9);
+    assert_eq!(t.app.aprs_cfg().ambiguity, 4);
+    reset(&mut t.app, &[5, 5, 6]);
+    assert_eq!(t.app.aprs_cfg().ambiguity, 0);
+}
+
 /// SCAN-14: the range preset editor refuses an edge that would make the span cross 64 MHz (the band relay),
 /// keeping the editor open and the preset as it was (decided Oct 7, 2026).
 #[test]

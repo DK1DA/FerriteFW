@@ -1141,7 +1141,14 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
             }
             app.set.pocsag_cap = v;
         }
-        [5, 9, 2] if same(want, b"none") => groups::reset(app, p),
+        [5, 9, 2] | [5, 5, 3] if same(want, b"none") => groups::reset(app, p),
+        // APRS-50: the comment as written (a dump line's '#' starts its note, so none in it)
+        [5, 5, 3] => {
+            if want.len() > crate::aprs::COMMENT_LEN || !want.iter().all(|&c| (b' '..=b'~').contains(&c)) {
+                return Err(msg!("{}: up to 40 characters (no #), or None", name));
+            }
+            app.set_aprs_comment(want);
+        }
         // MENU-31: a frequency setting typed in MHz, with the entry box's checks
         [5, 4] | [4, 2, 2] => {
             let fs = if p == [5, 4] { crate::screens::entry::FreqSet::Aprs } else { crate::screens::entry::FreqSet::Pager };
@@ -1166,7 +1173,7 @@ fn set(app: &mut App, dev: &Device, t: &mut Toks) -> Result<Done, Msg> {
         }
         _ => {}
     }
-    if matches!(p, [4, 2, 3] | [5, 9, 2] | [5, 4] | [4, 2, 2]) {
+    if matches!(p, [4, 2, 3] | [5, 9, 2] | [5, 5, 3] | [5, 4] | [4, 2, 2]) {
         let mut v = Buf::<24>::new();
         value(app, dev, p, &mut v);
         let mut m = Msg::new();
@@ -1292,7 +1299,13 @@ fn set_line(app: &App, dev: &Device, p: &[u8], out: &mut Line) {
     out.push(b"set ");
     path_text(p, out);
     out.push(b" ");
-    out.push(v.as_bytes());
+    let c = app.aprs_cfg();
+    match p {
+        // APRS-50: the whole comment (the row shows its start)
+        [5, 5, 3] if !c.comment_text().is_empty() => out.push(c.comment_text()),
+        [5, 5, 3] => out.push(b"None"),
+        _ => out.push(v.as_bytes()),
+    }
     while out.len() < 32 {
         out.push(b" ");
     }

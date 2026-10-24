@@ -233,8 +233,9 @@ const TEXT_MAX: usize = 67;
 const PUNCT: &[u8] = b".,?!'/-";
 /// The case of the next predicted word (TEXT-2): Capital, CAPS, lower.
 const PCASES: [&str; 3] = ["Abc", "ABC", "abc"];
-/// Compose's text is the draft's, unless a quick message is being edited (TEXT-7).
+/// Compose's text is the draft's, unless a quick message is being edited (TEXT-7) or the comment (APRS-50).
 const DRAFT: u8 = 255;
+const COMMENT: u8 = 254;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Compose {
@@ -254,7 +255,7 @@ pub struct Compose {
     pub pcase: u8,
     pub punct: u8,
     pub quick: u8,
-    /// [`DRAFT`], or the quick message being edited (TEXT-7). `quick` is also the address book's row while the
+    /// [`DRAFT`], the quick message being edited (TEXT-7), or [`COMMENT`] (APRS-50). `quick` is also the address book's row while the
     /// recipient is empty (APRS-38): the two lists are never up together.
     pub edit: u8,
     /// [`LISTED`]: the quick list, or the address book (APRS-38), is on screen; [`SVC`]: the recipient is a
@@ -304,8 +305,23 @@ impl Compose {
         self.field == 0 && !self.quick_edit_on() && store.data().draft().to.is_empty()
     }
 
+    /// The editor holds a quick message or the comment (APRS-50), not the draft: no recipient, OK keeps it.
     pub(crate) fn quick_edit_on(self) -> bool {
-        (self.edit as usize) < crate::words::QUICK
+        self.edit != DRAFT
+    }
+
+    /// 0 5 5 3's comment in the editor (APRS-50).
+    pub fn comment_edit() -> Self {
+        Compose { field: 1, edit: COMMENT, ..Compose::new() }
+    }
+
+    fn comment_on(self) -> bool {
+        self.edit == COMMENT
+    }
+
+    /// The text's limit: 67 characters (TEXT-5), the comment's 40 (APRS-50).
+    fn max(self) -> usize {
+        if self.comment_on() { crate::aprs::COMMENT_LEN } else { TEXT_MAX }
     }
 }
 
@@ -316,11 +332,11 @@ impl Compose {
         let me = self.resolved(store);
         let d = store.data().draft();
         let keys = app.text;
-        let head = text_of(store, me);
-        let full = full_of(store, me);
+        let head = text_of(app, store, me);
+        let full = full_of(app, store, me);
         let (word, _, drop) = if me.pred(app) && !keys.is_empty() { pending(keys.as_bytes(), head.as_bytes(), me) } else { (Buf::new(), true, 0) };
         let mut c = Buf::<12>::new();
-        let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX);
+        let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), me.max());
         let mut all = Buf::<84>::from(&head.as_bytes()[..head.len() - drop]);
         all.push(word.as_bytes());
         all.push(&full.as_bytes()[head.len().min(full.len())..]);
@@ -334,24 +350,32 @@ pub(crate) fn quick_text(store: &impl ChannelStore, i: usize) -> Buf<67> {
     store.data().quick(i).unwrap_or_else(|| Buf::from(crate::words::quick(i)))
 }
 
-/// The text being composed: the draft's, or the quick message being edited.
-fn full_of(store: &impl ChannelStore, s: Compose) -> Buf<67> {
-    if s.quick_edit_on() { quick_text(store, s.edit as usize) } else { store.data().draft().text }
+/// The text being composed: the draft's, the quick message being edited, or the comment (APRS-50).
+fn full_of(app: &App, store: &impl ChannelStore, s: Compose) -> Buf<67> {
+    if s.comment_on() {
+        Buf::from(app.aprs_cfg().comment_text())
+    } else if s.quick_edit_on() {
+        quick_text(store, s.edit as usize)
+    } else {
+        store.data().draft().text
+    }
 }
 
 /// The text before the cursor (TEXT-12): what typing and deleting work on.
-fn text_of(store: &impl ChannelStore, s: Compose) -> Buf<67> {
-    let t = full_of(store, s);
+fn text_of(app: &App, store: &impl ChannelStore, s: Compose) -> Buf<67> {
+    let t = full_of(app, store, s);
     Buf::from(&t.as_bytes()[..t.len() - (s.tail as usize).min(t.len())])
 }
 
 /// The text before the cursor back in, with what was after the cursor after it.
-fn put_text(store: &impl ChannelStore, s: Compose, head: Buf<67>) {
-    let full = full_of(store, s);
+fn put_text(app: &mut App, store: &impl ChannelStore, s: Compose, head: Buf<67>) {
+    let full = full_of(app, store, s);
     let mut t = head;
     t.push(&full.as_bytes()[full.len() - (s.tail as usize).min(full.len())..]);
     let data = store.data();
-    if s.quick_edit_on() {
+    if s.comment_on() {
+        app.set_aprs_comment(t.as_bytes());
+    } else if s.quick_edit_on() {
         data.request(Op::Quick(s.edit, Some(t)));
     } else {
         data.request(Op::Draft(Draft { text: t, ..data.draft() }));
@@ -415,15 +439,19 @@ fn next_case(t: &[u8], pcase: u8) -> u8 {
     }
 }
 
-/// The 67-character limit (TEXT-5): a short beep, and why in a toast.
-fn refuse_full(app: &mut App) {
+/// The 67-character limit (TEXT-5), or the comment's 40 (APRS-50): a short beep, and why in a toast.
+fn refuse_full(app: &mut App, s: Compose) {
     app.beep_refused();
-    app.show_toast("67 characters".as_bytes(), "the APRS limit".as_bytes(), false);
+    if s.comment_on() {
+        app.show_toast("40 characters".as_bytes(), "the comment limit".as_bytes(), false);
+    } else {
+        app.show_toast("67 characters".as_bytes(), "the APRS limit".as_bytes(), false);
+    }
 }
 
-/// Room before the cursor: the 67 characters less what is after it.
+/// Room before the cursor: the 67 characters (the comment's 40) less what is after it.
 fn room(s: Compose) -> usize {
-    TEXT_MAX.saturating_sub(s.tail as usize)
+    s.max().saturating_sub(s.tail as usize)
 }
 
 /// The word in progress goes into the text (no space); false when it can't (no word, or no room).
@@ -438,7 +466,7 @@ fn accept(app: &mut App, s: &mut Compose, t: &mut Buf<67>) -> bool {
         return false;
     }
     if t.len() - drop + w.len() > room(*s) {
-        refuse_full(app);
+        refuse_full(app, *s);
         return false;
     }
     let head = *t;
@@ -455,13 +483,13 @@ impl Compose {
     fn pred_key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) -> bool {
         use Press::*;
         let mut s = self;
-        let mut t = text_of(store, s);
+        let mut t = text_of(app, store, s);
         let keys = app.text;
         let quick_list = t.is_empty() && s.tail == 0 && keys.is_empty() && !s.quick_edit_on();
         match (e.key, e.press) {
             (Key::Digit(d @ 2..=9), Short) => {
                 if t.len() + keys.len() + 1 > room(s) || keys.len() >= crate::words::WORD_MAX {
-                    refuse_full(app);
+                    refuse_full(app, s);
                     return true;
                 }
                 app.text.push(&[b'0' + d]);
@@ -474,7 +502,7 @@ impl Compose {
                     return true;
                 }
                 if t.len() + 1 > room(s) {
-                    refuse_full(app);
+                    refuse_full(app, s);
                     return true;
                 }
                 t.push(&[b'0' + d]);
@@ -492,7 +520,7 @@ impl Compose {
                         return true;
                     }
                     if t.len() + 1 > room(s) {
-                        refuse_full(app);
+                        refuse_full(app, s);
                         return true;
                     }
                     t.push(&PUNCT[..1]);
@@ -531,13 +559,13 @@ impl Compose {
                 if !accept(app, &mut s, &mut t) {
                     return true;
                 }
-                put_text(store, s, t);
+                put_text(app, store, s, t);
                 app.screen = Screen::Compose(s);
                 return false; // OK goes on to send (or keep the quick message)
             }
             _ => return false,
         }
-        put_text(store, s, t);
+        put_text(app, store, s, t);
         app.screen = Screen::Compose(s);
         true
     }
@@ -546,12 +574,12 @@ impl Compose {
     fn pred_knob(self, app: &mut App, d: i32, store: &impl ChannelStore) -> bool {
         let keys = app.text;
         if !keys.is_empty() {
-            let n = candidates(keys.as_bytes(), text_of(store, self).as_bytes()).max(1) as i32;
+            let n = candidates(keys.as_bytes(), text_of(app, store, self).as_bytes()).max(1) as i32;
             let pick = (self.pick as i32 + d).rem_euclid(n) as u8;
             app.screen = Screen::Compose(Compose { pick, ..self });
             return true;
         }
-        if full_of(store, self).is_empty() && !self.quick_edit_on() {
+        if full_of(app, store, self).is_empty() && !self.quick_edit_on() {
             let quick = (self.quick as i32 + d).rem_euclid(crate::words::QUICK as i32) as u8;
             app.screen = Screen::Compose(Compose { quick, ..self });
             return true;
@@ -572,11 +600,11 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     }
     let mut s = c.resolved(store);
     if s.field == 1 && s.pred(app) && !app.text.is_empty() {
-        let mut t = text_of(store, s);
+        let mut t = text_of(app, store, s);
         if !accept(app, &mut s, &mut t) {
             return; // it said why
         }
-        put_text(store, s, t);
+        put_text(app, store, s, t);
         app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
     }
     let data = store.data();
@@ -588,7 +616,7 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     if !data.callsign().is_some_and(|c| crate::data::ax25_call_ok(c.as_bytes())) {
         return app.show_toast("Callsign over 6".as_bytes(), "no APRS".as_bytes(), false); // SETUP-13.1
     }
-    let text = full_of(store, s);
+    let text = full_of(app, store, s);
     if d.to.is_empty() || text.is_empty() {
         return app.show_toast("Nothing to send".as_bytes(), if d.to.is_empty() { "add a recipient".as_bytes() } else { "write a message".as_bytes() }, false);
     }
@@ -602,7 +630,13 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
 
 impl View for Compose {
     fn name(self) -> &'static str {
-        if self.quick_edit_on() { "Quick message" } else { "Compose message" }
+        if self.comment_on() {
+            "Comment"
+        } else if self.quick_edit_on() {
+            "Quick message"
+        } else {
+            "Compose message"
+        }
     }
 
     /// ◀▶ move the cursor in the message (TEXT-12); ▲▼ and the knob stay on the words.
@@ -611,7 +645,13 @@ impl View for Compose {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(if self.quick_edit_on() { b"Quick" } else { b"Compose" });
+        b.set(if self.comment_on() {
+            b"Comment"
+        } else if self.quick_edit_on() {
+            b"Quick"
+        } else {
+            b"Compose"
+        });
     }
 
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
@@ -648,11 +688,11 @@ impl View for Compose {
             return app.show_toast("Multi-tap".as_bytes(), "for services".as_bytes(), false);
         }
         if s.field == 1 && (e.key, e.press) == (Key::Star, Long) {
-            let mut t = text_of(store, s);
+            let mut t = text_of(app, store, s);
             if s.pred(app) && !accept(app, &mut s, &mut t) {
                 app.text.clear();
             }
-            put_text(store, s, t);
+            put_text(app, store, s, t);
             app.set.predictive = !app.set.predictive;
             app.text.clear();
             app.show_toast(if app.set.predictive { "Predictive".as_bytes() } else { "Multi-tap".as_bytes() }, "hold * to switch".as_bytes(), false);
@@ -661,12 +701,12 @@ impl View for Compose {
         }
         // TEXT-12: ◀▶ move the cursor in the message; a word being predicted goes in first.
         if s.field == 1 && matches!((e.key, e.press), (Key::Left | Key::Right, Short | Repeat)) {
-            let mut t = text_of(store, s);
+            let mut t = text_of(app, store, s);
             if s.pred(app) && !accept(app, &mut s, &mut t) {
                 return;
             }
-            put_text(store, s, t);
-            let n = full_of(store, s).len() as u8;
+            put_text(app, store, s, t);
+            let n = full_of(app, store, s).len() as u8;
             s.tail = if e.key == Key::Left { (s.tail + 1).min(n) } else { s.tail.saturating_sub(1) };
             app.screen = Screen::Compose(Compose { key: 0, pick: 0, punct: 0, ..s });
             return;
@@ -682,7 +722,7 @@ impl View for Compose {
         let now = (app.now / 64) as u16;
         let to = s.field == 0;
         // the field being typed in, as one buffer
-        let mut cur: Buf<67> = if to { Buf::from(d.to.as_bytes()) } else { text_of(store, s) };
+        let mut cur: Buf<67> = if to { Buf::from(d.to.as_bytes()) } else { text_of(app, store, s) };
         let max = if to { TO_MAX } else { room(s) };
         match (e.key, e.press) {
             (Key::Digit(k), Short) => {
@@ -704,7 +744,7 @@ impl View for Compose {
                 } else if cur.len() < max {
                     cur.push(&[ch(s.taps)]);
                 } else if !to {
-                    refuse_full(app);
+                    refuse_full(app, s);
                 }
                 s.key = k + 1;
                 s.at = now;
@@ -742,6 +782,12 @@ impl View for Compose {
                 (s.key, s.tail) = (0, 0);
                 s.case = 0;
             }
+            // APRS-50: the comment as typed is kept; an empty one is none
+            (Key::Menu, Short) if s.comment_on() => {
+                app.back();
+                let gone = app.aprs_cfg().comment_text().is_empty();
+                return app.show_toast("Comment".as_bytes(), if gone { b"cleared" } else { b"kept" }, false);
+            }
             (Key::Menu, Short) if s.quick_edit_on() => {
                 app.back();
                 return app.show_toast("Quick message".as_bytes(), b"kept", false);
@@ -753,7 +799,7 @@ impl View for Compose {
             d.to.set(cur.as_bytes());
             data.request(Op::Draft(d));
         } else {
-            put_text(store, s, cur);
+            put_text(app, store, s, cur);
         }
         app.screen = Screen::Compose(s);
     }
@@ -785,8 +831,8 @@ impl View for Compose {
         app.page(lcd, 0u8);
         let pred = self.pred(app);
         let keys = app.text;
-        let head = text_of(cx.store, self);
-        let full = full_of(cx.store, self);
+        let head = text_of(app, cx.store, self);
+        let full = full_of(app, cx.store, self);
         let (word, matched, drop) = if pred && !keys.is_empty() { pending(keys.as_bytes(), head.as_bytes(), self) } else { (Buf::new(), true, 0) };
         // a phrase's short form shows in place of the words it replaces (TEXT-4)
         let text = Buf::<67>::from(&head.as_bytes()[..head.len() - drop]);
@@ -801,9 +847,14 @@ impl View for Compose {
             if self.quick_edit_on() {
                 ferrite_ui::canvas::banded(lcd, 0, 24, 240, 60, BG, |lcd| {
                     let mut b = Buf::<40>::new();
-                    let _ = uwrite!(b, "Quick message {}", self.edit + 1);
+                    if self.comment_on() {
+                        b.push(b"Beacon comment"); // APRS-50
+                    } else {
+                        let _ = uwrite!(b, "Quick message {}", self.edit + 1);
+                    }
                     lcd.text4(8, 36, b.as_bytes(), &UI_12B, TEXT, BG);
-                    lcd.text4(8, 56, "# in the list: the factory text again".as_bytes(), &UI_12, SUB, BG);
+                    let sub = if self.comment_on() { "After every position report" } else { "# in the list: the factory text again" };
+                    lcd.text4(8, 56, sub.as_bytes(), &UI_12, SUB, BG);
                 });
             } else {
                 field_box(lcd, 24, 34, b"To", d.to.as_bytes(), self.field == 0, pending_tap && self.field == 0, "callsign-SSID".as_bytes());
@@ -828,9 +879,16 @@ impl View for Compose {
             let full_box = boxed || !quick_list;
             if app.dirty(R_ROW, key) || boxed {
                 ferrite_ui::canvas::banded(lcd, 0, y, 240, if full_box { h + 24 } else { 18 }, BG, |lcd| {
-                    lcd.text4(8, y + 12, if quick_list { "Quick messages".as_bytes() } else { b"Message".as_slice() }, &UI_12, SUB, BG);
+                    let label = if quick_list {
+                        "Quick messages".as_bytes()
+                    } else if self.comment_on() {
+                        b"Comment".as_slice()
+                    } else {
+                        b"Message".as_slice()
+                    };
+                    lcd.text4(8, y + 12, label, &UI_12, SUB, BG);
                     let mut c = Buf::<12>::new();
-                    let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), TEXT_MAX); // TEXT-5
+                    let _ = uwrite!(c, "{}/{}", full.len() - drop + word.len(), self.max()); // TEXT-5, APRS-50
                     let cw = text4_width(c.as_bytes(), &UI_12);
                     lcd.text4(232 - cw, y + 12, c.as_bytes(), &UI_12, SUB, BG);
                     if !full_box {

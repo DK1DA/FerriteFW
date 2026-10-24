@@ -60,7 +60,16 @@ pub struct AprsCfg {
     pub txdelay: u8,
     /// TX level (0 5 9 4, APRS-49): 0 Low, 1 Mid, 2 High (`audio::AFSK_AMPS`).
     pub tx_level: u8,
+    /// The comment (0 5 5 3, APRS-50) sent at the end of every position report, zero-padded (empty: none).
+    pub comment: [u8; COMMENT_LEN],
+    /// Position ambiguity (0 5 5 6, APRS-51): digits dropped from both coordinates, 0 (exact) to 4.
+    pub ambiguity: u8,
 }
+
+/// APRS-50: the comment's room.
+pub const COMMENT_LEN: usize = 40;
+/// APRS-51: 0 5 5 6's names, by the digits dropped.
+pub const AMBIGUITY_NAMES: [&str; 5] = ["Exact", "1 digit", "2 digits", "3 digits", "4 digits"];
 
 /// APRS-47: the symbols 0 5 5 2 offers, as (name, table, code) in the primary table. Person by default, what the
 /// beacons always sent (a handheld's SSID 7).
@@ -128,7 +137,7 @@ impl<'a> core::ops::Deref for PathNames<'a> {
 }
 
 impl AprsCfg {
-    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1 };
+    pub const DEFAULT: AprsCfg = AprsCfg { f5k: 0, beacon: 0, power: 0, path: PATH_DEFAULT, digi: 0, after_voice: false, custom: [0; CUSTOM_LEN], ssid: SSID_DEFAULT, fx25: FX25_DEFAULT, sound: ferrite_core::tonegen::CHIME_DEFAULT, symbol: 0, txdelay: TXDELAY_DEFAULT, tx_level: 1, comment: [0; COMMENT_LEN], ambiguity: 0 };
 
     /// The path's entries: one of [`PATHS`], or the custom path split at its comma.
     pub fn path(&self) -> PathNames<'_> {
@@ -151,6 +160,12 @@ impl AprsCfg {
     pub fn custom_text(&self) -> &[u8] {
         let n = self.custom.iter().position(|&c| c == 0).unwrap_or(CUSTOM_LEN);
         &self.custom[..n]
+    }
+
+    /// The comment as typed (APRS-50; empty: none).
+    pub fn comment_text(&self) -> &[u8] {
+        let n = self.comment.iter().position(|&c| c == 0).unwrap_or(COMMENT_LEN);
+        &self.comment[..n]
     }
 
     /// 0 5 9 1's choices: the [`PATHS`], and Custom once one is set.
@@ -574,6 +589,15 @@ impl App {
         c.custom[..t.len().min(CUSTOM_LEN)].copy_from_slice(&t[..t.len().min(CUSTOM_LEN)]);
         c.path = PATH_CUSTOM;
         self.set_aprs(c);
+    }
+
+    /// The comment being typed (APRS-50): kept as it changes, written back at the next tick (the store waits
+    /// before saving); C isn't retuned for it.
+    pub(crate) fn set_aprs_comment(&mut self, t: &[u8]) {
+        let n = t.len().min(COMMENT_LEN);
+        self.aprs.comment = [0; COMMENT_LEN];
+        self.aprs.comment[..n].copy_from_slice(&t[..n]);
+        self.aprs_st |= DIRTY;
     }
 
     /// 0 5 4 by the knob: 5 kHz steps from where it is, within chip 0's range.

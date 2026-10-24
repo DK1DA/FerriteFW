@@ -102,6 +102,7 @@ fn build_positions_parse_back() {
                 messaging: true,
                 timestamp: ts,
                 comment: b"Ferrite test",
+                ambiguity: 0,
             };
             let mut buf = [0u8; 128];
             let n = build::position(&r, &mut buf).unwrap();
@@ -122,6 +123,35 @@ fn build_positions_parse_back() {
             assert_eq!(comment.bytes().collect::<Vec<_>>(), b"Ferrite test");
         }
     }
+}
+
+/// APRS-50: position ambiguity blanks the same trailing digits of latitude and longitude, and a receiver reads
+/// it back as such (the middle of the box).
+#[test]
+fn build_position_ambiguity() {
+    // 49 03.50 N, 072 01.75 W
+    let want = [
+        "=4903.50N/07201.75W[",
+        "=4903.5 N/07201.7 W[",
+        "=4903.  N/07201.  W[",
+        "=490 .  N/0720 .  W[",
+        "=49  .  N/072  .  W[",
+    ];
+    let mut buf = [0u8; 64];
+    for (amb, w) in want.iter().enumerate() {
+        let r = Report { lat: 49_058_333, lon: -72_029_167, table: b'/', code: b'[', course_speed: None, altitude: None, messaging: true, timestamp: None, comment: b"", ambiguity: amb as u8 };
+        let n = build::position(&r, &mut buf).unwrap();
+        assert_eq!(core::str::from_utf8(&buf[..n]).unwrap(), *w);
+        let Packet::Position { pos, .. } = reparse(&buf[..n]) else { panic!() };
+        assert_eq!(pos.ambiguity, amb as u8);
+        // within half the box the blanks leave (0.01, 0.1, 1, 10 minutes, then a degree) and the rounding
+        let box_ = [85, 920, 8_420, 83_420, 500_085][amb];
+        assert!((pos.lat - 49_058_333).abs() <= box_ && (pos.lon + 72_029_167).abs() <= box_, "{amb}: {pos:?}");
+    }
+    // more than 4 reads as 4
+    let r = Report { lat: 49_058_333, lon: -72_029_167, table: b'/', code: b'[', course_speed: None, altitude: None, messaging: true, timestamp: None, comment: b"", ambiguity: 9 };
+    let n = build::position(&r, &mut buf).unwrap();
+    assert_eq!(&buf[..n], want[4].as_bytes());
 }
 
 #[test]
@@ -271,7 +301,7 @@ fn dao_keeps_the_hemisphere_at_zero() {
 fn builder_courses_near_north_and_data_like_comments() {
     let mut buf = [0u8; 128];
     for course in [1u16, 2, 3, 357, 358, 359, 360] {
-        let r = Report { lat: 1, lon: 1, table: b'/', code: b'>', course_speed: Some((course, 20)), altitude: None, messaging: false, timestamp: None, comment: b"" };
+        let r = Report { lat: 1, lon: 1, table: b'/', code: b'>', course_speed: Some((course, 20)), altitude: None, messaging: false, timestamp: None, comment: b"", ambiguity: 0 };
         let n = build::compressed(&r, &mut buf).unwrap();
         let Packet::Position { pos, .. } = reparse(&buf[..n]) else { panic!() };
         // Within 2 degrees of north, compressed course reads back as "none" (c = 0); never as a range.
@@ -283,7 +313,7 @@ fn builder_courses_near_north_and_data_like_comments() {
     }
     for comment in [&b"123/045 hello"[..], b"RNG0050 ok", b"PHG5132 x", b"/slash first", b" space first"] {
         for (cs, alt) in [(None, None), (Some((90u16, 10u16)), None), (None, Some(100))] {
-            let r = Report { lat: 1, lon: 1, table: b'/', code: b'>', course_speed: cs, altitude: alt, messaging: false, timestamp: None, comment };
+            let r = Report { lat: 1, lon: 1, table: b'/', code: b'>', course_speed: cs, altitude: alt, messaging: false, timestamp: None, comment, ambiguity: 0 };
             let n = build::position(&r, &mut buf).unwrap();
             let Packet::Position { pos, comment: c, .. } = reparse(&buf[..n]) else { panic!() };
             assert_eq!(c.bytes().collect::<Vec<_>>(), comment.trim_ascii(), "{}", String::from_utf8_lossy(&buf[..n]));

@@ -833,7 +833,8 @@ fn fresh(fix: Option<Fix>, cfg: &AprsCfg) -> Option<Fix> {
     fix.filter(|f| f.age_s == crate::gpsdata::FIXED_AGE || f.age_s as u32 <= max_s)
 }
 
-/// Our position report: the beacon's, and a position query's answer (APRS-33).
+/// Our position report: the beacon's, and a position query's answer (APRS-33), with 0 5 5 3's comment and
+/// 0 5 5 6's ambiguity.
 fn position_info(f: &Fix, cfg: &AprsCfg, info: &mut [u8]) -> Option<usize> {
     let (table, code) = cfg.symbol_chars(); // APRS-47
     let r = uaprs::build::Report {
@@ -845,7 +846,8 @@ fn position_info(f: &Fix, cfg: &AprsCfg, info: &mut [u8]) -> Option<usize> {
         altitude: f.three_d.then_some(f.alt_m * 10_000 / 3048),
         messaging: true,
         timestamp: None,
-        comment: b"",
+        comment: cfg.comment_text(), // APRS-50
+        ambiguity: cfg.ambiguity,    // APRS-51: the uncompressed form carries it
     };
     uaprs::build::position(&r, info)
 }
@@ -1384,6 +1386,30 @@ mod tests {
             let t = a.tick(s, Sending::All, true, b"VE3XYZ-7", Some(fix()), &QUERIES, &mut out);
             (t.len > 0).then(|| (t.what, sent(&out, &t)))
         })
+    }
+
+    /// APRS-50, APRS-51: the comment ends every position report, the beacon's and a query's answer, and ambiguity
+    /// blanks the same digits of both coordinates; exact with none, as before.
+    #[test]
+    fn position_reports_carry_comment_and_ambiguity() {
+        let mut cfg = AprsCfg { beacon: 1, ambiguity: 2, ..AprsCfg::DEFAULT };
+        cfg.comment[..13].copy_from_slice(b"Ferrite, 73!!");
+        let mut info = [0u8; INFO_MAX];
+        let n = position_info(&fix(), &cfg, &mut info).unwrap();
+        assert_eq!(&info[..n], b"=4525.  N/07541.  W[Ferrite, 73!!");
+        let n = position_info(&fix(), &AprsCfg::DEFAULT, &mut info).unwrap();
+        assert_eq!(&info[..n], b"=4525.51N/07541.41W[");
+        // the beacon itself, and the longest comment with course, speed and altitude: within the frame
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        a.beacon_now();
+        let t = a.tick(0, Sending::All, true, b"VE3XYZ-7", Some(fix()), &cfg, &mut out);
+        assert_eq!(t.what, "Beacon");
+        assert!(Frame::parse(&out[..t.len]).unwrap().info.ends_with(b"[Ferrite, 73!!"));
+        cfg.comment = [b'x'; crate::aprs::COMMENT_LEN];
+        let moving = Fix { three_d: true, alt_m: 120, speed_kmh: 40, heading: 90, ..fix() };
+        let n = position_info(&moving, &cfg, &mut info).unwrap();
+        assert!(info[..n].ends_with(&[b'x'; 40]) && n < INFO_MAX);
     }
 
     /// APRS-33: each directed query's answer, exactly: ?APRSP and ?APRS? our position, ?APRSS a status naming the
