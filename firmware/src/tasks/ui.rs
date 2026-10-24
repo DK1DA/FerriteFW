@@ -183,6 +183,7 @@ const FRAME_MIN_MS: u32 = 50;
 
 #[embassy_executor::task]
 pub async fn task() {
+    ferrite_ui::prof::set_clock(crate::hal::time::cycles); // bench builds: the drawing profile
     let mut lcd = Screen::new();
     // Start-up as awaited steps (up to 150 ms each), then black, then the panel on.
     for &s in st7789::STARTUP {
@@ -825,6 +826,7 @@ pub async fn task() {
         let asleep = panel_asleep;
         let draw = !asleep && (urgent && !keys_wait || since >= frame_min);
         let (c0, b0, i0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed), crate::IRQ_CYCLES.load(Relaxed));
+        ferrite_ui::prof::take(); // bench builds: this draw's profile alone
         if draw {
             app.render(&mut lcd, &live, &dev, store);
             (last_draw, urgent) = (now_ms(), false);
@@ -845,6 +847,18 @@ pub async fn task() {
                 bringup::linef(|b| {
                     let _ = ufmt::uwrite!(b, "draw {} ms, {} KB to the panel, {}, interrupts {} ms, {} MHz", us / 1000, n / 1024, app.screen().name(), irq / 1000, mhz);
                 });
+                #[cfg(feature = "bench")]
+                {
+                    // the drawing profile (ferrite_ui::prof), in tenths of a ms; the bus is in text and masks
+                    // drawn straight to the panel, and alone in the bands
+                    let p = ferrite_ui::prof::take();
+                    let t = |i: usize| p[i] / (mhz * 100);
+                    bringup::linef(|b| {
+                        let _ = ufmt::uwrite!(b, "  prof /10ms: rec {} big {} text {} mask {} cover {}; rows {}/{}",
+                            t(ferrite_ui::prof::REC), t(ferrite_ui::prof::BIG), t(ferrite_ui::prof::TEXT), t(ferrite_ui::prof::MASK),
+                            t(ferrite_ui::prof::COVER), p[ferrite_ui::prof::ROWS_DECODED], p[ferrite_ui::prof::ROWS_DRAWN]);
+                    });
+                }
             }
         }
         // The lights (decision 63): screen and keypad, and the LEDs with their next change.

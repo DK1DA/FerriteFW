@@ -153,7 +153,8 @@ pub fn text4_ink(s: &[u8], f: &Font4) -> Option<(i32, i32)> {
 /// Where each character of a line in a run-length font is in its glyph's rows (byte, rows decoded): rows are
 /// drawn top to bottom, so each glyph row is decoded once.
 #[derive(Default)]
-struct RleAt {
+#[doc(hidden)]
+pub struct RleAt {
     at: [u16; RLE_CHARS],
     done: [u8; RLE_CHARS],
 }
@@ -173,6 +174,8 @@ fn text_row(line: &mut [u16], lut: &[u16; 16], s: &[u8], f: &Font4, x: i32, x0: 
         if gy >= 0 && gy < g.h as i32 && f.rle {
             let (mut p, mut d) = if k < RLE_CHARS { (rle.at[k] as usize, rle.done[k] as i32) } else { (0, 0) };
             let w = (g.w as usize).min(RLE_W);
+            crate::prof::count(crate::prof::ROWS_DECODED, (gy + 1 - d).max(0) as u32);
+            crate::prof::count(crate::prof::ROWS_DRAWN, 1);
             while d <= gy {
                 rle_row(&f.bits[g.off as usize..], &mut p, w, &mut grow);
                 d += 1;
@@ -346,6 +349,13 @@ pub trait Gfx: Panel {
     /// [`Gfx::text4`] painting only the rows of the line box inside `y0..y1`: a big font's box can overlap its
     /// neighbours.
     fn text4_rows(&mut self, x: i32, baseline: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16, y0: i32, y1: i32) -> i32 {
+        self.text4_rows_at(x, baseline, s, f, fg, bg, y0, y1, &mut RleAt::default())
+    }
+
+    /// [`Gfx::text4_rows`] continuing a run-length font's glyphs from `at` (a band below the last one drawn).
+    #[allow(clippy::too_many_arguments)]
+    #[doc(hidden)]
+    fn text4_rows_at(&mut self, x: i32, baseline: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16, y0: i32, y1: i32, at: &mut RleAt) -> i32 {
         let w = text4_width(s, f);
         if let Some(r) = self.rec() {
             r.text(x, baseline, s, f, fg, bg, y0, y1); // DISP-29
@@ -369,11 +379,12 @@ pub trait Gfx: Panel {
         let n = (x1 - x0) as usize;
         self.window(x0, y0, x1 - 1, y1 - 1);
         self.text_hint(x0, y0, x1 - 1, y1 - 1, s);
-        let mut at = RleAt::default();
+        let t0 = crate::prof::now();
         for row in y0..y1 {
-            text_row(&mut line[..n], &lut, s, f, x, x0, baseline, row, &mut at);
+            text_row(&mut line[..n], &lut, s, f, x, x0, baseline, row, at);
             self.push_buf(&line[..n]);
         }
+        crate::prof::add(if f.rle { crate::prof::BIG } else { crate::prof::TEXT }, t0);
         w
     }
 
@@ -410,6 +421,7 @@ pub trait Gfx: Panel {
         let (mut a1, mut a2) = ([0u8; 256], [0u8; 256]);
         let mut line = [0u16; W as usize];
         self.window(x0, y0, x1 - 1, y1 - 1);
+        let t0 = crate::prof::now();
         for row in y..y1 {
             // rows above the screen are decoded and dropped: runs only go forward
             r1.next_row(&mut a1);
@@ -429,6 +441,7 @@ pub trait Gfx: Panel {
             }
             self.push_buf(&line[..(x1 - x0) as usize]);
         }
+        crate::prof::add(crate::prof::MASK, t0);
     }
 }
 

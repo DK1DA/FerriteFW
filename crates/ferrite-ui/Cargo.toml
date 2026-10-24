@@ -10,6 +10,8 @@ description = "Ferrite's screens and drawing layer: 4-bit anti-aliased text and 
 [features]
 # The PC frame buffer (`fb`), for the simulator and snapshot tests.
 std = []
+# The drawing profile (`prof`): bench builds.
+prof = []
 
 [dependencies]
 ufmt.workspace = true

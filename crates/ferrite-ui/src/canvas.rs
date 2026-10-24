@@ -404,23 +404,55 @@ impl<'a> Rd<'a> {
 
 /// Draw a recording ([`Rec`]) into `p`. Into a band (each primitive clips to its rows) a nested region is its
 /// background and drawing, as [`banded`] draws inside a canvas; onto the panel (`bands`) it goes in bands.
-fn replay(rec: &[u8], p: &mut dyn Panel, bands: bool) {
+fn replay(rec: &[u8], p: &mut dyn Panel, bands: bool, at: &mut RleCache) {
     let mut r = Rd(rec);
     while let Some(op) = r.op() {
         match op {
             Op::Fill(x, y, w, h, c) => p.fill(x, y, w, h, c),
             Op::Rounded(false, x, y, w, h, rad, c) => p.fill_r(x, y, w, h, rad, c),
             Op::Rounded(true, x, y, w, h, rad, c) => p.frame_r(x, y, w, h, rad, c),
-            Op::Text(x, baseline, s, f, fg, bg, y0, y1) => {
-                p.text4_rows(x, baseline, s, f, fg, bg, y0, y1);
-            }
+            Op::Text(x, baseline, s, f, fg, bg, y0, y1) => match at.get(f, s) {
+                Some(at) => {
+                    p.text4_rows_at(x, baseline, s, f, fg, bg, y0, y1, at);
+                }
+                None => {
+                    p.text4_rows(x, baseline, s, f, fg, bg, y0, y1);
+                }
+            },
             Op::Mask(x, y, m1, c1, m2, bg) => p.mask4(x, y, m1, c1, m2, bg),
             Op::Band(x, y, w, h, bg, inner) if bands => band_rec(p, x, y, w, h, bg, inner),
             Op::Band(x, y, w, h, bg, inner) => {
                 p.fill(x, y, w, h, bg);
-                replay(inner, p, false);
+                replay(inner, p, false, at);
             }
         }
+    }
+}
+
+/// Texts in a run-length (big) font keep their place in their glyphs' rows from one band to the next: each band
+/// decoded every glyph from its top again, 1001 glyph rows for 255 drawn on a SLOT redraw (Oct 23, 2026). Keyed by
+/// where the text is in the recording; the bands go down the region, so the rows only move on.
+#[derive(Default)]
+struct RleCache {
+    keys: [usize; 4],
+    at: [crate::gfx::RleAt; 4],
+}
+
+impl RleCache {
+    fn get(&mut self, f: &Font4, s: &[u8]) -> Option<&mut crate::gfx::RleAt> {
+        if !f.rle {
+            return None;
+        }
+        let key = s.as_ptr() as usize;
+        let i = match self.keys.iter().position(|&k| k == key) {
+            Some(i) => i,
+            None => {
+                let i = self.keys.iter().position(|&k| k == 0)?; // full: decode from the top, as before
+                self.keys[i] = key;
+                i
+            }
+        };
+        Some(&mut self.at[i])
     }
 }
 
@@ -463,7 +495,9 @@ fn band_out<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, draw
     let mut rec = Rec { buf: bytes, n: 0, over: !single_pass(), pending: false };
     if !rec.over {
         ran();
+        let t0 = crate::prof::now();
         draw(&mut thru(&mut rec));
+        crate::prof::add(crate::prof::REC, t0);
     }
     let n = if rec.over { 0 } else { rec.n };
     let (head, px) = buf.split_at_mut(n.div_ceil(2));
@@ -493,6 +527,7 @@ fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg
     let rows = (px.len() as i32 / w).max(1);
     let bg = crate::theme::map_bg(bg);
     let mut by = y;
+    let mut at = RleCache::default();
     while by < y + h {
         let bh = rows.min(y + h - by);
         let n = (w * bh) as usize;
@@ -500,7 +535,7 @@ fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg
         {
             let mut band = Band { buf: &mut px[..n], x, y: by, w, h: bh, win: (0, 0, 0, 0), cur: (0, 0), fwd: None, thru: false, mask: None };
             match &mut src {
-                Src::Rec(r) => replay(r, &mut band, false),
+                Src::Rec(r) => replay(r, &mut band, false, &mut at),
                 Src::Draw(d) => {
                     ran();
                     d(&mut band)
@@ -515,7 +550,7 @@ fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg
         // the text hints: windows and hints to the panel, pixels nowhere
         let mut band = Band { buf: &mut [], x, y, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
         match &mut src {
-            Src::Rec(r) => replay(r, &mut band, false),
+            Src::Rec(r) => replay(r, &mut band, false, &mut RleCache::default()),
             Src::Draw(d) => d(&mut band),
         }
     }
@@ -539,14 +574,18 @@ pub fn fresh(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, bg: u16, draw:
     let mut buf = [0u8; BAND_PX * 2];
     let mut rec = Rec { buf: &mut buf, n: 0, over: false, pending: lcd.input_pending() };
     ran();
+    let t0 = crate::prof::now();
     draw(&mut thru(&mut rec));
+    crate::prof::add(crate::prof::REC, t0);
     let (n, over) = (rec.n, rec.over);
     if over {
         return false;
     }
     let rec = &buf[..n];
+    let t0 = crate::prof::now();
     cover(lcd, rec, x, y, w, h, bg);
-    replay(rec, lcd, true);
+    crate::prof::add(crate::prof::COVER, t0);
+    replay(rec, lcd, true, &mut RleCache::default());
     true
 }
 
@@ -570,10 +609,21 @@ fn cover(lcd: &mut dyn Panel, rec: &[u8], x: i32, y: i32, w: i32, h: i32, bg: u1
         let ch = COVER_ROWS.min(y1 - cy);
         let mut bits = [[0u32; WORDS]; COVER_ROWS as usize];
         let mut mark = |ax: i32, ay: i32, aw: i32, ah: i32| {
+            let (a, e) = (ax.max(x0), (ax + aw).min(x1));
+            if a >= e {
+                return;
+            }
+            // the columns a..e as whole words: a word at a time, not a bit (Oct 23, 2026: 32-55 ms a screen open)
+            let (wa, we) = (a as usize / 32, (e - 1) as usize / 32);
+            let (lo, hi) = (!0u32 << (a % 32), !0u32 >> (31 - (e - 1) % 32));
             for row in ay.max(cy)..(ay + ah).min(cy + ch) {
                 let b = &mut bits[(row - cy) as usize];
-                for c in ax.max(x0)..(ax + aw).min(x1) {
-                    b[c as usize / 32] |= 1 << (c % 32);
+                if wa == we {
+                    b[wa] |= lo & hi;
+                } else {
+                    b[wa] |= lo;
+                    b[wa + 1..we].fill(!0);
+                    b[we] |= hi;
                 }
             }
         };
@@ -602,14 +652,11 @@ fn cover(lcd: &mut dyn Panel, rec: &[u8], x: i32, y: i32, w: i32, h: i32, bg: u1
             let mut runs: [(i16, i16); 8] = [(0, 0); 8];
             let (mut n, mut c, mut many) = (0usize, x0, false);
             while c < x1 {
-                if b[c as usize / 32] & 1 << (c % 32) != 0 {
-                    c += 1;
-                    continue;
+                let s = next_bit(b, c, x1, false);
+                if s >= x1 {
+                    break;
                 }
-                let s = c;
-                while c < x1 && b[c as usize / 32] & 1 << (c % 32) == 0 {
-                    c += 1;
-                }
+                c = next_bit(b, s, x1, true);
                 if n < runs.len() {
                     runs[n] = (s as i16, (c - s) as i16);
                     n += 1;
@@ -626,6 +673,19 @@ fn cover(lcd: &mut dyn Panel, rec: &[u8], x: i32, y: i32, w: i32, h: i32, bg: u1
         cy += ch;
     }
     flush(lcd, &open[..nopen], since, y1);
+}
+
+/// The first column from `c` (before `end`) whose bit is `set`, or `end`: a word at a time.
+fn next_bit(b: &[u32], mut c: i32, end: i32, set: bool) -> i32 {
+    while c < end {
+        let w = b[c as usize / 32];
+        let m = if set { w } else { !w } >> (c % 32);
+        if m != 0 {
+            return (c + m.trailing_zeros() as i32).min(end);
+        }
+        c = (c / 32 + 1) * 32;
+    }
+    end
 }
 
 /// As [`banded`], for a shape drawn over what is already on screen (a popup with rounded corners): only the
