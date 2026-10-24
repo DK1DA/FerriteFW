@@ -55,7 +55,7 @@ pub fn demand(app: &crate::App, data: &dyn Data, alarm: bool, now_ms: u32) -> Gp
     let (mut track, mut beacon_at) = (false, None);
     if app.aprs_on() {
         let c = data.aprs_cfg();
-        track = c.smart() || c.every_m().is_some();
+        track = c.smart();
         // Due now or overdue (waiting for a fix, the relay or a callsign) holds nothing: the minute wakes bring the fix.
         beacon_at = data.beacon().next_s.filter(|&s| s > 0).map(|s| now_ms.wrapping_add(s.saturating_mul(1000)));
     }

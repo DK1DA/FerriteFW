@@ -262,8 +262,10 @@ impl View for Home {
                 // the shortcuts that don't touch the slot (scope, watch) still run, and power, which is the APRS
                 // power there (APRS-19.1)
                 (Key::Digit(1 | 2 | 4), Long) => {}
+                // APRS-17.8: hold V/M on the APRS slot sends a beacon (a hold, so a bump never transmits)
+                (Key::VfoMem, Long) => return super::opts::beacon_now(app, store),
                 (Key::Up | Key::Down | Key::Left | Key::Right, Short | Repeat)
-                | (Key::Slot | Key::VfoMem | Key::Digit(_), Long)
+                | (Key::Slot | Key::Digit(_), Long)
                 | (Key::VfoMem | Key::Side(2) | Key::Digit(_), Short) => {
                     app.aprs_refuse(app.active);
                     return;

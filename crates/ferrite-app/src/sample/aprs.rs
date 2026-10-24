@@ -142,6 +142,12 @@ impl AprsSim {
         self.beacon_now.set(true);
     }
 
+    /// A beacon asked for and not yet sent (tests).
+    #[cfg(test)]
+    pub fn beacon_asked(&self) -> bool {
+        self.beacon_now.get()
+    }
+
     /// New stations heard (not cleared), newest first.
     pub fn stations(&self) -> u16 {
         (self.heard.get() - self.heard_gone.get()) as u16

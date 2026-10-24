@@ -709,6 +709,8 @@ impl View for Compose {
                 s.key = k + 1;
                 s.at = now;
             }
+            // APRS-17.8: V/M sends a beacon; the draft stays as it is
+            (Key::VfoMem, Short) => return super::opts::beacon_now(app, store),
             (Key::Star, Short) => {
                 s.case = (s.case + 1) % 3;
                 s.key = 0;

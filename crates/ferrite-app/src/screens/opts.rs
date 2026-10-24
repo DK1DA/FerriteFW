@@ -185,6 +185,10 @@ impl View for Options {
                     app.back();
                     super::contacts::sel(app, s, store);
                 }
+                Act::Do(&Op::BeaconNow) => {
+                    app.back();
+                    beacon_now(app, store);
+                }
                 Act::Do(&op) | Act::Confirm(&op) => {
                     if matches!(op, Op::BeaconNow | Op::Send) && app.remote_tx_refused() {
                         return; // LINK-19: a beacon or message now is a transmission
@@ -304,4 +308,21 @@ pub(crate) fn options_page<'a>(app: &mut App, lcd: &mut impl Panel, rows: impl I
     }
     let r = Row { num: Some(0), name: b"Full menu", value: b">", dot: false, selected: false, grey: false };
     app.list_row(lcd, n, 23 + 22 * n as i32, 22, &r);
+}
+
+/// Beacon now (APRS-17.7, APRS-17.8): from the APRS list, hold V/M on the APRS card and V/M in compose. Refused while the link
+/// may not transmit (LINK-19) or KISS holds C (KISS-10); a refusal says why.
+pub(crate) fn beacon_now(app: &mut App, store: &impl ChannelStore) {
+    if app.remote_tx_refused() {
+        return;
+    }
+    if let Some(why) = app.kiss_holds_aprs() {
+        return app.show_toast(b"Not sent", why.as_bytes(), false);
+    }
+    if store.data().request(Op::BeaconNow) {
+        app.show_toast(b"Beacon now", b"done", false);
+    } else {
+        let why: &[u8] = if app.set.callsign.as_bytes().is_empty() { b"set a callsign first" } else { b"callsign over 6" };
+        app.show_toast(b"Beacon now", why, false);
+    }
 }

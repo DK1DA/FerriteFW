@@ -231,6 +231,12 @@ fn txt<const N: usize>(s: &str) -> Buf<N> {
 }
 
 impl Sample {
+    /// A beacon asked for (tests: APRS-17.8).
+    #[cfg(test)]
+    pub(crate) fn beacon_asked(&self) -> bool {
+        self.aprs.beacon_asked()
+    }
+
     pub fn new() -> Self {
         let zc = |z: usize| ZoneCfg { scan_all: z == 1, shown: z != 5, resume: if z == 3 { 11 } else { 0 }, dwell: 255, pri: [if z == 1 { Some(11) } else { None }, None], ..ZoneCfg::default() };
         Sample {

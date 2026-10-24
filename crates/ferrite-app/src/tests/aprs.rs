@@ -1,7 +1,7 @@
 //! APRS mode on slot C (APRS-13, APRS-15 to APRS-20), beacon modes (APRS-24) and the simulator's APRS task.
 
 use super::*;
-use crate::aprs::{beacon_due, AprsCfg, LastBeacon, APRS_SLOT, BEACON_MODES, SMART};
+use crate::aprs::{beacon_due, AprsCfg, LastBeacon, APRS_SLOT, BEACON_STEPS, SMART};
 use crate::data::{Fix, Pos};
 use crate::data::{Data, Draft, MsgState, Op};
 use crate::sample::Sample;
@@ -323,19 +323,25 @@ fn aprs_shares_the_vhf_chip() {
     assert_eq!(a.app.aprs_shared(), None);
 }
 
-/// 0 5 6 1 steps through off, manual, the timed, distance and smart modes, and wraps (APRS-24).
+/// 0 5 6 1 steps through off, manual, the timed modes and smart, and wraps (APRS-24, decision 272).
 #[test]
 fn beacon_modes_in_order() {
     let mut a = A::new();
     let mut seen = std::vec::Vec::new();
-    for _ in 0..BEACON_MODES {
+    for _ in 0..BEACON_STEPS {
         let mut b = Buf::<24>::new();
         a.app.beacon_mode_text(&mut b);
         seen.push(std::string::String::from_utf8(b.as_bytes().to_vec()).unwrap());
         a.app.step_beacon(1);
     }
     assert_eq!(seen[..3], ["Off", "Manual", "Every 1 min"]);
-    assert_eq!(seen[10..], ["Every 0.1 km", "Every 0.2 km", "Every 0.5 km", "Every 1 km", "Every 2 km", "Every 5 km", "Every 10 km", "Smart"]);
+    assert_eq!(seen[9..], ["Every 60 min", "Smart"]);
+    assert_eq!(a.app.aprs_cfg().mode(), 0, "wraps to off");
+    a.app.step_beacon(-1);
+    assert!(a.app.aprs_cfg().smart(), "and back to smart");
+    a.app.step_beacon(-1);
+    assert_eq!(a.app.aprs_cfg().every_min(), Some(60));
+    a.app.step_beacon(2);
     assert_eq!(a.app.aprs_cfg().mode(), 0, "wraps to off");
 }
 
@@ -343,24 +349,12 @@ fn fix(lat: i32, speed_kmh: u16, heading: u16) -> Option<Fix> {
     Some(Fix { pos: Pos { lat, lon: -794_000_000 }, three_d: true, alt_m: 0, speed_kmh, heading, hdop_x10: 9, used: 8, age_s: 1, utc_s: 0 })
 }
 
-/// APRS-24: distance beacons go once the GPS has moved that far from the last one, never without a fix.
-#[test]
-fn distance_beacons() {
-    let c = AprsCfg { beacon: 13, ..AprsCfg::DEFAULT }; // every 1 km
-    assert_eq!(c.every_m(), Some(1000));
-    let here = 437_000_000;
-    assert!(!beacon_due(&c, None, 0, None), "no fix, no distance beacon");
-    assert!(beacon_due(&c, None, 0, fix(here, 0, 0)), "the first with a fix");
-    let last = Some(LastBeacon::new(0, fix(here, 0, 0)));
-    assert!(!beacon_due(&c, last, 3600, fix(here + 80_000, 40, 0)), "0.9 km on: not yet, however long");
-    assert!(beacon_due(&c, last, 60, fix(here + 95_000, 40, 0)), "1.06 km on");
-}
-
 /// APRS-24: smart beacons on the one curve (decision 271): parked 30 min, a walk every 500 m, 10 km/h on 3 min.
 #[test]
 fn smart_beacons() {
     let c = AprsCfg { beacon: SMART as u8, ..AprsCfg::DEFAULT };
-    assert!(c.smart() && c.every_min().is_none() && c.every_m().is_none());
+    assert!(c.smart() && c.every_min().is_none());
+    assert!(AprsCfg { beacon: 13, ..AprsCfg::DEFAULT }.smart(), "a saved distance mode (decision 272) is smart");
     let here = 437_000_000;
     let last = Some(LastBeacon::new(0, fix(here, 50, 90)));
     assert!(!beacon_due(&c, last, 300, fix(here, 2, 90)), "parked: 30 min");
@@ -669,4 +663,32 @@ fn a_message_to_you_plays_the_message_sound() {
         }
     };
     assert!(CHIMES[0][0].1 == 0 && (1..CHIMES.len()).all(|i| (100..=600).contains(&ms(i))), "short sounds");
+}
+
+/// APRS-17.8: hold V/M on the APRS slot sends a beacon; a tap is refused as before (a bump never transmits).
+/// In compose V/M sends one and leaves the draft as it is.
+#[test]
+fn vm_beacons() {
+    let mut a = A::new();
+    a.mode(true);
+    a.app.set_callsign(b"VE7TES");
+    a.wait(200);
+    while a.app.active() != APRS_SLOT {
+        a.tap(Key::Slot);
+    }
+    a.wait(3500);
+    a.tap(Key::VfoMem);
+    assert!(!a.s.beacon_asked(), "a tap: refused");
+    a.press(Key::VfoMem, 800);
+    assert!(a.s.beacon_asked(), "hold V/M: a beacon");
+    let mut b = A::new();
+    b.mode(true);
+    b.app.set_callsign(b"VE7TES");
+    b.wait(200);
+    b.app.open(crate::screens::nav::Dest::Compose);
+    b.tap(Key::Digit(2));
+    b.tap(Key::VfoMem);
+    assert!(b.s.beacon_asked(), "V/M in compose");
+    assert!(matches!(b.app.screen(), Screen::Compose(_)), "still composing");
+    assert_eq!(b.s.draft().to.as_bytes(), b"A", "the draft kept");
 }

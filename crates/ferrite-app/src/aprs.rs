@@ -11,7 +11,7 @@
 //! simulator's engine ([`crate::sample::Sample::aprs_tick`]) alike.
 
 use crate::data::{Data, Fix, Pos};
-use crate::screens::lists::{age_text, dist_bearing, Txt};
+use crate::screens::lists::{age_text, Txt};
 use crate::slot::SlotCfg;
 use crate::App;
 use ferrite_core::freq::{mhz, needs_relay, Freq10};
@@ -32,8 +32,8 @@ pub const HEARD_MAX: u16 = 50; // 20 until decision 246
 pub struct AprsCfg {
     /// The frequency in 5 kHz units; 0 = the region's (APRS-15).
     pub f5k: u16,
-    /// Beacon mode: 0 off, 1 manual, then every [`BEACON_MINS`] minutes, every [`BEACON_KM10`] tenths of a
-    /// kilometre, and smart ([`SMART`]). Bit 7: off, the mode kept for "beacon on" (the heard list's and the APRS
+    /// Beacon mode: 0 off, 1 manual, then every [`BEACON_MINS`] minutes, and smart ([`SMART`]; 10-16 were the
+    /// distance modes, read as smart since decision 272). Bit 7: off, the mode kept for "beacon on" (the heard list's and the APRS
     /// card's options).
     pub beacon: u8,
     /// Beacon and message power: 0 low (APRS-20's default), 1 mid, 2 high.
@@ -200,17 +200,12 @@ impl AprsCfg {
         BEACON_MINS.get((self.mode() as usize).wrapping_sub(TIMED)).copied()
     }
 
-    /// Metres travelled between distance beacons; None in the other modes.
-    pub fn every_m(&self) -> Option<u32> {
-        BEACON_KM10.get((self.mode() as usize).wrapping_sub(DISTANCE)).map(|&k| k as u32 * 100)
-    }
-
-    /// Smart beaconing (APRS-24).
+    /// Smart beaconing (APRS-24), and a distance mode saved before decision 272.
     pub fn smart(&self) -> bool {
-        self.mode() as usize == SMART
+        (DROPPED..=SMART).contains(&(self.mode() as usize))
     }
 
-    /// Automatic beacons (timed, distance or smart; not manual or off): APRS-29's beacons alone, and APRS-33's
+    /// Automatic beacons (timed or smart; not manual or off): APRS-29's beacons alone, and APRS-33's
     /// query answers.
     pub fn beacons_on(&self) -> bool {
         self.mode() as usize >= TIMED
@@ -255,16 +250,17 @@ pub const DIGI_ALIASES: [&str; 2] = ["WIDE1-1", "WIDE1-1, my call"];
 const BEACON_PAUSED: u8 = 0x80;
 /// Timed beacons (0 5 6 1). APRS-9's 30 s floor is well under the shortest.
 pub const BEACON_MINS: [u8; 8] = [1, 2, 5, 10, 15, 20, 30, 60];
-/// Distance beacons (0 5 6 1, APRS-24), in tenths of a kilometre: 0.1 to 10 km.
-pub const BEACON_KM10: [u8; 7] = [1, 2, 5, 10, 20, 50, 100];
 const TIMED: usize = 2;
-const DISTANCE: usize = TIMED + BEACON_MINS.len();
-/// The smart mode's number, after the distance ones.
-pub const SMART: usize = DISTANCE + BEACON_KM10.len();
+/// 10-16 held the distance modes until decision 272 (dropped: Smart covers moving); a saved one is smart now.
+const DROPPED: usize = TIMED + BEACON_MINS.len();
+/// The smart mode's number, kept where it was saved.
+pub const SMART: usize = DROPPED + 7;
 /// Beacon on from "beacon on/off" with no mode chosen yet: every 10 minutes.
 const BEACON_ON: u8 = 5;
-/// Beacon modes in the menu: off, manual, timed, distance, smart.
+/// The highest saved mode number + 1 (the link's check).
 pub const BEACON_MODES: usize = SMART + 1;
+/// 0 5 6 1's steps: off, manual, the timed ones, smart.
+pub const BEACON_STEPS: usize = DROPPED + 1;
 pub const POWERS: [&str; 3] = ["Low", "Mid", "High"];
 
 /// A message is tried this often (APRS-13), the waits between tries, and after the last try how long an ack
@@ -300,17 +296,12 @@ impl LastBeacon {
 
 /// An automatic beacon is due (APRS-24), the first as soon as the mode allows:
 /// - timed: `every` minutes since the last;
-/// - distance: that far from where the last went, by the GPS; never without a fix;
 /// - smart: [`uaprs::beacon`]'s SmartBeaconing on one curve from walking to driving (decision 271): 10 km/h and
 ///   faster every 3 min, under 3 km/h every 30 min, between them every 500 m, a turn of 28 degrees plus
 ///   255 / speed after 30 s; without a fix, the slow rate.
 pub fn beacon_due(c: &AprsCfg, last: Option<LastBeacon>, now_s: u32, fix: Option<Fix>) -> bool {
     if let Some(m) = c.every_min() {
         return last.is_none_or(|l| now_s.wrapping_sub(l.at_s) >= m as u32 * 60);
-    }
-    if let Some(m) = c.every_m() {
-        let Some(f) = fix else { return false };
-        return last.is_none_or(|l| l.pos.is_none_or(|p| dist_bearing(p, f.pos).0 >= m));
     }
     if c.smart() {
         let mut b = uaprs::beacon::Beaconer::new(uaprs::beacon::SmartBeacon::default());
@@ -607,8 +598,10 @@ impl App {
 
     /// 0 5 6 1 by the knob.
     pub(crate) fn step_beacon(&mut self, d: i32) {
-        let m = (self.aprs.mode() as i32 + d).rem_euclid(BEACON_MODES as i32) as u8;
-        self.set_aprs(AprsCfg { beacon: m, ..self.aprs });
+        let at = if self.aprs.smart() { DROPPED } else { self.aprs.mode() as usize };
+        let i = (at as i32 + d).rem_euclid(BEACON_STEPS as i32) as usize;
+        let m = if i == DROPPED { SMART } else { i };
+        self.set_aprs(AprsCfg { beacon: m as u8, ..self.aprs });
     }
 
     /// "Beacon on/off" (APRS-17): off keeps the mode for turning it on again; on with none chosen is every 10 min.
@@ -617,7 +610,7 @@ impl App {
         let beacon = if self.aprs.mode() != 0 {
             b | BEACON_PAUSED
         } else if b & !BEACON_PAUSED != 0 {
-            b & !BEACON_PAUSED // the paused mode back, distance (10 km is 16) and smart (17) included
+            b & !BEACON_PAUSED // the paused mode back, smart (17) included
         } else {
             BEACON_ON
         };
@@ -627,17 +620,14 @@ impl App {
         self.show_toast(b"Beacon", t.as_bytes(), false);
     }
 
-    /// "Off", "Manual", "Every 10 min", "Every 0.5 km", "Smart".
+    /// "Off", "Manual", "Every 10 min", "Smart".
     pub(crate) fn beacon_mode_text<const N: usize>(&self, b: &mut Buf<N>) {
         b.clear();
         let c = self.aprs;
-        match (c.mode(), c.every_min(), c.every_m()) {
-            (0, ..) => b.set(b"Off"),
-            (_, Some(m), _) => {
+        match (c.mode(), c.every_min()) {
+            (0, _) => b.set(b"Off"),
+            (_, Some(m)) => {
                 let _ = uwrite!(b, "Every {} min", m);
-            }
-            (_, _, Some(m)) => {
-                let _ = uwrite!(b, "Every {} km", Km(m));
             }
             _ if c.smart() => b.set(b"Smart"),
             _ => b.set(b"Manual"),
@@ -706,8 +696,7 @@ impl App {
         self.aprs_st |= AFTER_VOICE;
     }
 
-    /// The APRS card's beacon line (APRS-17, APRS-20, APRS-24): "Beacon off", "Beacon manual", "Next beacon in 4 min",
-    /// "Beacon every 1 km", "Smart beacon",
+    /// The APRS card's beacon line (APRS-17, APRS-20, APRS-24): "Beacon off", "Beacon manual", "Next beacon in 4 min", "Smart beacon",
     /// "Beacon waiting: HF" while the active slot holds the relay in the HF state.
     pub(crate) fn beacon_text<const N: usize>(&self, data: &dyn Data, b: &mut Buf<N>) {
         b.clear();
@@ -721,9 +710,6 @@ impl App {
                 (0, _) => b.set(b"Beacon off"),
                 (1, _) => b.set(b"Beacon manual"),
                 _ if self.aprs.smart() => b.set(b"Smart beacon"),
-                (_, _) if let Some(m) = self.aprs.every_m() => {
-                    let _ = uwrite!(b, "Beacon every {} km", Km(m));
-                }
                 (_, Some(s)) if s < 60 => {
                     let _ = uwrite!(b, "Next beacon in {} s", s);
                 }
@@ -732,19 +718,6 @@ impl App {
                 }
                 (_, None) => b.set(b"Beacon soon"),
             }
-        }
-    }
-}
-
-/// Metres as kilometres with one decimal under 1 km: "0.5", "2".
-struct Km(u32);
-
-impl ufmt::uDisplay for Km {
-    fn fmt<W: ufmt::uWrite + ?Sized>(&self, f: &mut ufmt::Formatter<'_, W>) -> Result<(), W::Error> {
-        if self.0 < 1000 {
-            uwrite!(f, "0.{}", self.0 / 100)
-        } else {
-            uwrite!(f, "{}", self.0 / 1000)
         }
     }
 }
