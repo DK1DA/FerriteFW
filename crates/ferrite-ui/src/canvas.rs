@@ -486,7 +486,15 @@ impl RleCache {
 /// region in absolute coordinates, as it would on the panel (anything it leaves unpainted shows as `bg`). It runs
 /// once, recorded, and the recording is replayed into each band (DISP-29); a drawing too big to record runs once
 /// per band. On the host (`std`) a last pass hands the text hints to the panel, for the simulator's screen reading.
+#[inline]
 pub fn banded<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, mut draw: impl FnMut(&mut Band)) {
+    region(lcd, x, y, w, h, bg, &mut draw);
+}
+
+/// [`banded`]'s body, one copy for every caller: generic, it was copied into each call site, and DISP-29's recording
+/// branch made those copies 18 KB of slow flash (Oct 23, 2026).
+#[inline(never)]
+fn region(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, bg: u16, draw: &mut dyn FnMut(&mut Band)) {
     if w <= 0 || h <= 0 {
         return;
     }
@@ -503,7 +511,7 @@ pub fn banded<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, mu
         Gfx::fill(lcd, x, y, w, h, bg);
         return draw(&mut thru(lcd));
     }
-    band_out(lcd, x, y, w, h, bg, &mut draw);
+    band_out(lcd, x, y, w, h, bg, draw);
 }
 
 /// What a region's bands draw: its recording, or the drawing itself once per band.
@@ -514,7 +522,7 @@ enum Src<'a> {
 
 /// [`banded`]'s bands: the buffer, and the recording at its start, live in this frame alone.
 #[inline(never)]
-fn band_out<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, draw: &mut dyn FnMut(&mut Band)) {
+fn band_out(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, bg: u16, draw: &mut dyn FnMut(&mut Band)) {
     let mut buf = [0u16; BAND_PX];
     // SAFETY: the first REC_MAX_PX pixels as bytes (u8 has no alignment, and any bytes are valid u16s after).
     let bytes = unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), REC_MAX_PX * 2) };
@@ -722,19 +730,26 @@ fn next_bit(b: &[u32], mut c: i32, end: i32, set: bool) -> i32 {
 
 /// As [`banded`], for a shape drawn over what is already on screen (a popup with rounded corners): only the
 /// pixels `draw` paints go to the panel, a run at a time, so the rest keeps what was under it.
+#[inline]
 pub fn banded_over<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, mut draw: impl FnMut(&mut Band)) {
+    over(lcd, x, y, w, h, &mut draw);
+}
+
+/// [`banded_over`]'s body, one copy for every caller (as [`region`]).
+#[inline(never)]
+fn over(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, draw: &mut dyn FnMut(&mut Band)) {
     if w <= 0 || h <= 0 {
         return;
     }
     if lcd.offscreen() {
         return draw(&mut thru(lcd));
     }
-    band_over(lcd, x, y, w, h, &mut draw);
+    band_over(lcd, x, y, w, h, draw);
 }
 
 /// [`banded_over`]'s bands: the buffer and mask live in this frame alone.
 #[inline(never)]
-fn band_over<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, draw: &mut dyn FnMut(&mut Band)) {
+fn band_over(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, draw: &mut dyn FnMut(&mut Band)) {
     let w = w.min(BAND_PX as i32);
     let rows = (BAND_PX as i32 / w).max(1);
     let mut buf = [0u16; BAND_PX];
