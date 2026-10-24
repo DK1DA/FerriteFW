@@ -99,11 +99,14 @@ pub struct Out {
 }
 
 /// A slot's turn on a shared chip, or of the receive path on its chip: the active slot's, a priority slot's
-/// (APRS-21.1), or another watched one's.
-pub fn dwell(slot: Option<u8>, active: u8, prio: u8) -> u32 {
+/// (APRS-21.1), or another watched one's. `beside`: a priority slot has the other chip, so the active slot's turn
+/// is a watched one's (WATCH-17.2, decision 279) and the priority slot is never deaf longer than
+/// [`WATCHED_DWELL_MS`]; that chip stays tuned between turns (APRS-16), so the shorter turn costs no retune. Sharing
+/// the priority slot's chip, the active slot keeps [`ACTIVE_DWELL_MS`]: each turn there starts with a retune.
+pub fn dwell(slot: Option<u8>, active: u8, prio: u8, beside: bool) -> u32 {
     match slot {
         Some(s) if prio & 1 << s != 0 => PRIO_DWELL_MS,
-        Some(s) if s == active => ACTIVE_DWELL_MS,
+        Some(s) if s == active && !beside => ACTIVE_DWELL_MS,
         _ => WATCHED_DWELL_MS,
     }
 }
@@ -217,9 +220,10 @@ impl Watch {
             let cur = self.on[n as usize].filter(|&s| mine(s));
             // APRS-21.1: the priority slot sharing this chip, if any.
             let p = (0..SLOTS as u8).find(|&x| prio & 1 << x != 0 && mine(x));
-            if let Some(s) = cur.filter(|_| p.is_some() && !listened[n as usize]) {
-                // APRS-21.1: on a chip with a priority slot, turns count only while the chip has the receive path,
-                // so each is listened to whole (the Hop goes round this chip's slots, then to the other chip).
+            if let Some(s) = cur.filter(|_| prio != 0 && !listened[n as usize]) {
+                // APRS-21.1, WATCH-17.2: with a priority slot in the watch, turns on either chip count only while
+                // the chip has the receive path, so each is listened to whole (the Hop goes round this chip's
+                // slots, then to the other chip); a turn on the other chip doesn't run out while C has the path.
                 if open & 1 << s == 0 {
                     self.since[n as usize] = now;
                 }
@@ -237,7 +241,7 @@ impl Watch {
                 Some(s) if open & !c.muted & 1 << s != 0 => Some(s),
                 Some(s) if self.recent & !c.muted & 1 << s != 0 && p.is_none() => Some(s),
                 Some(s) => {
-                    if now.wrapping_sub(self.since[n as usize]) < dwell(Some(s), active, prio) {
+                    if now.wrapping_sub(self.since[n as usize]) < dwell(Some(s), active, prio, p.is_none() && prio & listen != 0) {
                         Some(s)
                     } else {
                         (1..=SLOTS as u8).map(|i| (s + i) % SLOTS as u8).find(|&x| mine(x))
@@ -310,6 +314,11 @@ impl BcastTurn {
 
 /// SCAN-21 (decision 189): chip `c`'s turn on the receive path while it scans and the other chip's slot has no
 /// priority: [`SCAN_TURN_MS`]. None otherwise (the ordinary dwell).
+/// WATCH-17.2: the other chip has a priority slot (the path's turn on chip `c` is the short one).
+fn beside(out: &Out, c: u8) -> bool {
+    out.chip[(c ^ 1) as usize].is_some_and(|x| out.prio & 1 << x != 0)
+}
+
 fn scan_dwell(out: &Out, c: u8) -> Option<u32> {
     let other = out.chip[(c ^ 1) as usize];
     (out.scan == Some(c) && !other.is_some_and(|s| out.prio & 1 << s != 0)).then_some(SCAN_TURN_MS)
@@ -359,7 +368,7 @@ impl Hop {
                             if s != self.slot && s.is_some_and(|x| out.prio & 1 << x != 0) {
                                 self.since = now; // the priority slot's turn on the path, whole
                             }
-                            let dwell = scan_dwell(out, c).unwrap_or_else(|| dwell(s, active, out.prio));
+                            let dwell = scan_dwell(out, c).unwrap_or_else(|| dwell(s, active, out.prio, beside(out, c)));
                             Some(if now.wrapping_sub(self.since) < dwell { c } else { c ^ 1 })
                         }
                     }
@@ -382,7 +391,7 @@ impl Hop {
         if out.chip.iter().any(Option::is_none) || out.hold.is_some() || out.audio.is_some_and(|s| out.chip.contains(&Some(s))) {
             return None;
         }
-        let dwell = scan_dwell(out, c).unwrap_or_else(|| dwell(out.chip[c as usize], active, out.prio));
+        let dwell = scan_dwell(out, c).unwrap_or_else(|| dwell(out.chip[c as usize], active, out.prio, beside(out, c)));
         (now.wrapping_sub(self.since).saturating_add(within) >= dwell).then_some(c ^ 1)
     }
 }
@@ -896,6 +905,37 @@ mod sim {
             if set & 2 != 0 {
                 assert!(st.iter().any(|x| x.path == Some(1)), "B still has its turns");
             }
+        }
+    }
+
+    /// WATCH-17.2 (decision 279): A (active) and B on 70 cm share chip 1, C APRS mode's on 2 m (chip 0). The path
+    /// turns on chip 1 are 70 ms, each a whole look for A, then B, with C's 100 ms between: C is never deaf longer
+    /// than 70 ms, so a frame is caught early in its flags wherever it starts. A and B (the software squelch: no
+    /// retune at a path turn, about 30 ms to read open) still catch a call in their turns and keep the path for it.
+    #[test]
+    fn aprs_beside_two_uhf_slots_is_never_deaf_long() {
+        const A70: Freq10 = mhz(446) + 49_500;
+        let c = Cfg { freq: [A70, B70, APRS], ..aprs(0b111, 0b100) };
+        let settle = |s: u8| if s == 2 { 40 } else { 30 };
+        let st = run(&c, &[], settle, 4_000);
+        let (mut gap, mut worst) = (0, 0);
+        for x in &st[50..] {
+            gap = if x.path == Some(0) { 0 } else { gap + 10 };
+            worst = worst.max(gap);
+        }
+        assert!(worst <= WATCHED_DWELL_MS, "C deaf for {worst} ms");
+        for s in [0u8, 1] {
+            assert!(st.iter().any(|x| x.path == Some(1) && x.chip[1] == Some(s)), "slot {s} gets path turns");
+        }
+        for start in (1_000..1_400).step_by(10) {
+            let end = start + 1_200;
+            let st = run(&c, &[Carrier { freq: APRS, start, end }], settle, end + 500);
+            let (t, held) = caught(&st, 2, start).unwrap_or_else(|| panic!("frame at {start} missed"));
+            assert!(t - start <= 120, "frame at {start} caught after {} ms", t - start);
+            assert!(t + held >= end, "frame at {start} held only to {}", t + held);
+            let st = run(&c, &[Carrier { freq: B70, start, end }], settle, end + 500);
+            let (t, held) = caught(&st, 1, start).unwrap_or_else(|| panic!("B's call at {start} missed"));
+            assert!(t - start <= 400 && t + held >= end, "B's call at {start}: caught {} ms in, held to {}", t - start, t + held);
         }
     }
 
