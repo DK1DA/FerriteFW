@@ -151,8 +151,7 @@ def backlight_timeout_and_wake(t):
 def trims_are_clamped(t):
     """The battery reading trim (0 9 9 5) stops at ±0.30 V and About's volts follow it; the crystal trim (0 9 9 4)
     at ±20 ppm. (Skipped while the trims "can't be set yet".)"""
-    ok, why = t.cmd_err("set 0 9 9 5 +0.00 V")
-    t.need(ok, f"the trims aren't settable yet: {why}")
+    t.need(False, "the trims left the menu until built (decision 276)")
     u = t.keys("MENU 0 9 8")
     v0 = float(u.row("Battery")["value"].split()[0])
     hi = walk(t, "0 9 9 5", 40)
@@ -173,8 +172,7 @@ def trims_are_clamped(t):
 def reset_trims_clears_only_trims(t):
     """"Reset trims" clears the trims only: every other setting (`dump`) as it was. (Skipped while the trims
     "can't be set yet".)"""
-    ok, why = t.cmd_err("set 0 9 9 5 +0.10 V")
-    t.need(ok, f"the trims aren't settable yet: {why}")
+    t.need(False, "the trims left the menu until built (decision 276)")
     before = [x for x in t.cmd("dump").splitlines() if not x.startswith("#") and "0 9 9" not in x]
     u = t.keys("MENU 0 9 9")
     names = u.names()

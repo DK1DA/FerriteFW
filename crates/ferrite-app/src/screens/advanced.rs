@@ -47,7 +47,7 @@ pub(crate) const GROUPS: [(&str, &str); 9] = [
     ("Watch and scan", "Watch, resume, priority, ranges, skips."),
     ("Channels", "Browse channels and zones, add a repeater."),
     ("Tools", "FM, scope, counter, HF, crossband, tones."),
-    ("Decoders and alerts", "Event log, pagers, DSC, AIS, weather alerts."),
+    ("Decoders and alerts", "Event log, pagers, DTMF, weather alerts."),
     ("APRS", "Heard, messages, beacons, your station."),
     ("GPS and time", "GPS, position, units, time zone, clock."),
     ("Display, sound, power", "Theme, layout, backlight, sounds, power."),

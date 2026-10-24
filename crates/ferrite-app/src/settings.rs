@@ -172,7 +172,7 @@ pub struct Settings {
     pub tx_light: bool,
     /// 0 7 4 4 (DISP-15): what wakes the screen ([`WAKE_ON`]): 0 keys, 1 and receive, 2 and transmit.
     pub wake_on: u8,
-    /// Unused, kept so the record's length stays and a later field doesn't read an old value: it held 0 9 9 4's
+    /// Unused, kept so the record's length stays and a later field doesn't read an old value: it held the old
     /// MCU temperature offset (SBAR-21) until decision 112 dropped it. Never read; whatever an older record left
     /// there has no effect.
     pub spare_temp: u8,
@@ -207,7 +207,7 @@ pub struct Settings {
     pub scope_line: u8,
     pub scope_wf: bool,
     pub scope_mode: u8,
-    /// 0 9 9 8: the cable terminal in ANSI colour (TERM-18); off, reverse video and bold only.
+    /// 0 9 9 4: the cable terminal in ANSI colour (TERM-18); off, reverse video and bold only.
     pub term_colour: bool,
     /// 0 5 3: APRS mode, slot C as the APRS slot (APRS-15 – APRS-22; the takeover itself comes in milestone 5).
     pub aprs_mode: bool,
@@ -239,7 +239,7 @@ pub struct Settings {
     pub show_hidden: bool,
     /// 0 9 3 2: channel-only mode (PIN-5): no V/M, MENU 0 or editing; hold # leaves it.
     pub chan_only: bool,
-    /// Cable log (0 9 9 7, TERM-28): the plain log on the cable in the normal build, until a byte arrives. Its
+    /// Cable log (0 9 9 3, TERM-28): the plain log on the cable in the normal build, until a byte arrives. Its
     /// bit was Follow's (0 1 6 2 then, dropped in decision 81), so the saved flag bits after it keep their places.
     pub cable_log: bool,
     /// 0 5 5 4: APRS beacons send the fixed position even with a GPS fix (APRS-31; the bit was Follow return's,
@@ -291,7 +291,7 @@ pub struct Settings {
     pub scan_return_hit: bool,
     /// 0 7 5 6: the message sound's own volume (`tonegen::CHIME_LEVELS`; APRS-6.2).
     pub msg_vol: u8,
-    /// 0 9 9 9: the MCU clock (PWR-26.5): false Dynamic (24 MHz at rest, the build's speed while something needs
+    /// 0 9 9 5: the MCU clock (PWR-26.5): false Dynamic (24 MHz at rest, the build's speed while something needs
     /// it), true Fixed (always the build's speed, as before the governor).
     pub mcu_fixed: bool,
     /// 0 9 5: who decides the squelch (SQL-18, decision 269): false the software squelch (the default), true the

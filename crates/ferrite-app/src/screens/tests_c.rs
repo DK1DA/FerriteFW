@@ -173,9 +173,9 @@ fn log_options_clear_after_asking() {
     assert_eq!(t.name(), "Options");
     t.tap(Key::Down);
     t.tap(Key::Menu); // "Clear the log": asks
-    assert_eq!(t.s.events(), 12);
+    assert_eq!(t.s.events(), 6);
     t.tap(Key::Exit); // keeps it
-    assert_eq!(t.s.events(), 12);
+    assert_eq!(t.s.events(), 6);
     t.tap(Key::Menu);
     t.tap(Key::Menu);
     assert_eq!(t.s.events(), 0);

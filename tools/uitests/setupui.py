@@ -81,7 +81,7 @@ def about_rows(t):
     u = t.keys("MENU 0 9 8")
     a = {r["name"]: r["value"] for r in u.rows}
     t.home()
-    u = t.keys("MENU 0 9 9 3 MENU")
+    u = t.keys("MENU 0 9 9 2 MENU")
     a.update({"cal " + r["name"]: r["value"] for r in u.rows})
     t.home()
     u = t.keys("MENU 0 9 6 MENU")

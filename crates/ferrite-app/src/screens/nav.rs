@@ -158,7 +158,7 @@ pub enum Dest {
     Status,
     /// D7: About, battery, self-test (MENU 0 9 8).
     About,
-    /// D8: calibration, read only (MENU 0 9 9 3).
+    /// D8: calibration, read only (MENU 0 9 9 2).
     Calibration,
     /// D9: key test (MENU 0 9 1 3).
     KeyTest,
@@ -357,7 +357,7 @@ pub const MENU0: [(&[u8], Dest); 52] = [
     (&[9, 9], Dest::Sub(9, 9)),
     (&[9, 9, 1], Dest::AdvSquelch),
     (&[9, 6], Dest::SsbPatch),
-    (&[9, 9, 3], Dest::Calibration),
+    (&[9, 9, 2], Dest::Calibration),
     (&[9, 7], Dest::Sub(9, 7)),
     (&[9, 7, 1], Dest::Setup),
     (&[9, 7, 2], Dest::Confirm),

@@ -65,7 +65,7 @@ TONE_LEAD_S = 0.2  # tonegen::TONE_LEAD_MS: the silent lead-in before the end to
 LEDS = "0 7 6"
 SCREEN_TIMEOUT, ON_TRANSMIT, WAKE_ON = "0 7 4 1", "0 7 4 3", "0 7 4 4"
 BATTERY_SAVE = "0 7 7"
-TRIM = "0 9 9 4"
+TRIM = "0 9 9 4"  # crystal trim: out of the menu until built (decision 276); 0 9 9 4 is now Terminal colour
 EXTEND_TX = bench.EXTEND_TX
 # Extend TX changes only on the radio, on its own screen (`set 0 8 8` is refused over the link): a hand step.
 EXTEND_HAND = "Extend TX is off: turn it on on the radio (MENU 0 8 8, its warning, OK) for this test, off after"
@@ -1302,7 +1302,8 @@ def broadcast_muted_keyed(r):
 @test("txb_trim_follows", {"CAL-13": "part"}, 2, 5.0, 16)
 def trim_follows(r):
     """Crystal trim (0 9 9 4) 0 then +2 ppm: the carrier moves by about 2 ppm of 145.495 MHz (291 Hz, ±30 %) and
-    REG_38/39 (the chip's frequency) change with it."""
+    REG_38/39 (the chip's frequency) change with it. The row left the menu until built (decision 276)."""
+    r.need(False, "crystal trim isn't built (decision 276)")
     r.setup()
     got = {}
     for v in ("0 ppm", "+2 ppm"):

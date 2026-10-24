@@ -835,7 +835,7 @@ pub struct SelfTest {
     pub si4732: bool,
     /// A verified SSB patch is in SPI flash (HF-20).
     pub ssb_patch: bool,
-    /// Battery reading trim in 10 mV (0 9 9 5).
+    /// Battery reading trim in 10 mV (not in the menu until built: decision 276).
     pub battery_trim: i8,
     /// SELF-8: the MCU's 96-bit factory unique ID, lowest word first; zeros until read.
     pub uid: [u32; 3],

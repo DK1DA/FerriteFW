@@ -81,7 +81,7 @@ const G4: [Entry; 5] = [
     Entry("POCSAG|439.9875|Pager frequency, baud, capcodes."),
     Entry("DTMF decode|On|DTMF digits heard, on the slot's card."),
     Entry("Popups|On|A 3 s toast for each decode."),
-    Entry("Weather alerts|On|SAME, location codes, tone, channel."),
+    Entry("Weather alerts|On|SAME and your location codes."),
 ];
 const G5: [Entry; 9] = [
     Entry("Heard||Stations heard, nearest first."),
@@ -136,7 +136,7 @@ const G9: [Entry; 9] = [
     Entry("SSB patch||USB, LSB and CW in HF mode."),
     Entry("Setup and reset||Run setup again, reset settings."),
     Entry("About||Version, identity, checks, battery."),
-    Entry("Advanced||Squelch, discriminator, calibration, debug."),
+    Entry("Advanced||Squelch, calibration, cable log, MCU clock."),
 ];
 /// The nine groups' items (MENU 0 1 to MENU 0 9).
 pub(crate) const GROUP_ITEMS: [&[Entry]; 9] = [&G1, &G2, &G3, &G4, &G5, &G6, &G7, &G8, &G9];
@@ -173,7 +173,6 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ((4, 5), &[
         Entry("SAME|On|Decode weather alerts."),
         Entry("Location codes|None|Up to 8 FIPS or CLC codes."),
-        Entry("Channel|Auto|The weather channel to watch."),
     ]),
     ((5, 5), &[
         Entry("SSID|7 Handheld|0-15 after your callsign."),
@@ -272,11 +271,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ]),
     ((9, 9), &[
         Entry("Advanced squelch||Thresholds per band."),
-        Entry("Discriminator mode|Off|Flat audio for decoders."),
         Entry("Calibration||The factory calibration, read only."),
-        Entry("Crystal trim|0 ppm|Centre a known signal."),
-        Entry("Battery reading trim|+0.00 V|Match the reading to a meter."),
-        Entry("Debug console|Off|Off, cable or Bluetooth."),
         Entry("Cable log|Off|Plain log on the cable at power on."),
         Entry("Terminal colour|Off|ANSI colour on the cable terminal."),
         Entry("MCU clock|Dynamic|Fast only while needed, or always."),
@@ -516,9 +511,9 @@ static SETTINGS: [Setting; 94] = [
     field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 2, 3], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
     field!([9, 5, 0], sq_chip: bool, Kind::Flip(&["Software", "Chip"]), Nothing), // SQL-18.3
-    field!([9, 9, 7], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([9, 9, 8], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
-    field!([9, 9, 9], mcu_fixed: bool, Kind::Flip(&["Dynamic", "Fixed"]), Nothing), // PWR-26.5
+    field!([9, 9, 3], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 9, 4], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
+    field!([9, 9, 5], mcu_fixed: bool, Kind::Flip(&["Dynamic", "Fixed"]), Nothing), // PWR-26.5
 ];
 
 fn row(p: &[u8]) -> Option<&'static Setting> {
@@ -871,7 +866,7 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
             b.set(if dev.bt { b"BT connected".as_slice() } else if s.bt { b"BT on" } else { b"BT off" });
             s.bt
         }
-        [9, 9, 3] => {
+        [9, 9, 2] => {
             b.set(cal_text(dev.selftest.cal).as_bytes());
             false
         }
@@ -895,11 +890,6 @@ pub(crate) fn wired(app: &App, dev: &Device, p: &[u8], b: &mut Buf<24>) -> Optio
         [9, 3, 3] => {
             b.set(if s.pin_len > 0 { b"Set" } else { b"None" });
             s.pin_len > 0
-        }
-        [9, 9, 5] => {
-            let t = dev.selftest.battery_trim as i32;
-            let _ = uwrite!(b, "{}{}.{} V", if t < 0 { "-" } else { "+" }, t.abs() / 100, ferrite_ui::text::Zero(t.unsigned_abs() % 100, 2));
-            t != 0
         }
         _ => {
             let r = row(p)?;

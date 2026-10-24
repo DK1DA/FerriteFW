@@ -167,8 +167,8 @@ def transmit_lock_follows_the_checks(t):
     u = t.keys("MENU 0 0")
     t.eq(u.row("Transmit")["value"], tx, "Status says what About says")
     t.home()
-    u = t.keys("MENU 0 9 9 3 MENU")
-    t.eq(u.id, "Info", "OK on 0 9 9 3: the calibration page")
+    u = t.keys("MENU 0 9 9 2 MENU")
+    t.eq(u.id, "Info", "OK on 0 9 9 2: the calibration page")
     page = {r["name"]: r["value"] for r in u.rows}
     t.eq(page.get("Status"), cal, "its status is About's")
     if cal == "Valid":

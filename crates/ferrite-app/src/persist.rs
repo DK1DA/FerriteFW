@@ -322,7 +322,7 @@ mod tests {
     }
 
     /// The bytes saved after the spare: 0 8 3's mic gain, 0 8 1's timeout, then the eight settings wired in
-    /// decision 243 (menu timeout to scan return), 0 7 5 6's message volume, 0 9 9 9's MCU clock (PWR-26.5) and 0 9
+    /// decision 243 (menu timeout to scan return), 0 7 5 6's message volume, 0 9 9 5's MCU clock (PWR-26.5) and 0 9
     /// 5's squelch (SQL-18.3), a byte each.
     const AFTER_SPARE: usize = 15;
 

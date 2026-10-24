@@ -95,19 +95,13 @@ const STATIONS: [StationRow; 11] = [
 
 // source, age s, frequency, slot, unread, id, x, y, position, name, text
 type EventRow = (Src, u32, Freq10, u8, bool, u32, u16, u16, Option<Pos>, &'static str, &'static str);
-const EVENTS: [EventRow; 12] = [
+const EVENTS: [EventRow; 6] = [
     (Src::Aprs, 120, mhz(144) + 39_000, 2, true, 0, 0, 0, None, "VE3KPW-9", "On my way"),
     (Src::Pocsag, 380, mhz(439) + 98_750, 2, true, 1_234_567, 1200, 3, None, "", "STN 4 RESPOND MVC HWY 417 EB AT KM 120"),
     (Src::Same, 840, mhz(162) + 55_000, 2, true, 0, 0, 0, None, "", "ZCZC-WXR-SVR-035001-035003+0045-2761410-KOTT/NWS-"),
-    (Src::Dsc, 1500, mhz(156) + 52_500, 2, false, 316_001_234, 0, 0, at(454_692_773, -756_789_607), "", "Routine call, ch 68"),
-    (Src::Ais, 1860, mhz(161) + 97_500, 2, false, 316_123_456, 245, 72, at(454_692_773, -756_789_607), "OTTAWA PRINCESS", ""),
-    (Src::Dtmf, 2400, mhz(146) + 52_000, 0, false, 0, 0, 0, None, "", "*1234#"),
     (Src::Pocsag, 2820, mhz(439) + 98_750, 2, false, 1_234_571, 1200, 0, None, "", "MEETING MOVED TO 1930"),
-    (Src::Selcall, 3120, mhz(155) + 22_000, 1, false, 1201, 0, 0, None, "MDC1200", "PTT ID"),
     (Src::Aprs, 4800, mhz(144) + 39_000, 2, false, 0, 0, 0, None, "VA3RTX", "Net at 8 tonight?"),
     (Src::Pocsag, 9000, mhz(439) + 98_750, 2, false, 1_234_570, 512, 0, None, "", "TEST PAGE 0900"),
-    (Src::Dsc, 14_400, mhz(156) + 52_500, 2, false, 3_160_099, 3, 0, at(453_100_000, -755_200_000), "", "Distress: flooding"),
-    (Src::Ais, 21_600, mhz(162) + 2_500, 2, false, 316_004_321, 90, 105, at(453_100_000, -755_200_000), "ALGOMA DISCOVERY", ""),
 ];
 
 // inbound, peer, text, age s, state

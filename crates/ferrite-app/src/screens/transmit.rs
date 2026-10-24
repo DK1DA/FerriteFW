@@ -250,7 +250,7 @@ pub(crate) fn fix(app: &App, r: Refusal) -> Option<(&'static str, &'static str, 
     match r {
         Refusal::OutOfBand if app.set.region().is_none() => Some(("MENU 0 9 4", "Region", Dest::Group(9))),
         Refusal::OutOfBand => Some(("MENU 0 8 8", "Extend TX", Dest::Group(8))),
-        Refusal::NotCalibrated => Some(("MENU 0 9 9 3", "Calibration", Dest::Calibration)),
+        Refusal::NotCalibrated => Some(("MENU 0 9 9 2", "Calibration", Dest::Calibration)),
         Refusal::RxOnlyChannel => Some(("MENU 8", "Channel editor", Dest::ChannelEdit)),
         Refusal::Busy => Some(("MENU 0 8 7", "Busy lockout", Dest::Group(8))),
         Refusal::Battery => Some(("#", "Status page", Dest::Status)),

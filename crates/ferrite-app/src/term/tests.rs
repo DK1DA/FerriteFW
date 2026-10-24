@@ -2080,12 +2080,12 @@ fn radio_editor_wins() {
     assert!(r.bottom().contains("open on the radio's menu"), "{}", r.bottom());
 }
 
-/// TERM-18: colour is off by default (reverse video and bold only); 0 9 9 8 turns it on.
+/// TERM-18: colour is off by default (reverse video and bold only); 0 9 9 4 turns it on.
 #[test]
 fn colour_is_optional() {
     let mut r = Rig::main();
     assert!(!r.raw().contains("\x1b[0;97;44m"));
-    r.cmd("set 0 9 9 8 On");
+    r.cmd("set 0 9 9 4 On");
     assert!(r.app.set.term_colour);
     r.send(b"\x0c");
     r.poll();

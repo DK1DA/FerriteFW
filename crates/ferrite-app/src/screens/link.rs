@@ -8,7 +8,6 @@ use super::table::{Ctx, Table, Val};
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::settings::ON_OFF;
 use crate::App;
 use ferrite_core::keys::Key;
 use ferrite_ui::gfx::*;
@@ -35,7 +34,7 @@ pub enum LinkAnswer {
     Cancelled,
 }
 
-const ROWS: [(&str, Val<()>); 5] = [
+const ROWS: [(&str, Val<()>); 4] = [
     ("Bluetooth", |Ctx { app: a, dev: d, .. }, b| {
         if d.bt {
             b.set(b"Connected");
@@ -65,10 +64,6 @@ const ROWS: [(&str, Val<()>); 5] = [
     // LINK-30: Bluetooth asks for the radio's PIN while the PIN lock is on.
     ("BT access", |Ctx { app: a, .. }, b| {
         b.set(if a.pin_required() { b"PIN".as_slice() } else { b"Open" });
-        TEXT
-    }),
-    ("Debug console", |_, b| {
-        b.set(ON_OFF[0].as_bytes());
         TEXT
     }),
 ];

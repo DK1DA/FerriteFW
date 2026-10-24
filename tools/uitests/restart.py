@@ -47,7 +47,7 @@ def restart_lands_home(t):
 def restart_checks_calibration(t):
     """At boot the calibration is checked (programmed, PA bytes, order, crystal trim, tone gains, TX windows, the CRC
     recorded at install): the boot report says "Calibration: ok" and "calibration crc: same as recorded", the
-    self-test page's Calibration check is OK and the calibration page (0 9 9 3) shows the parsed values."""
+    self-test page's Calibration check is OK and the calibration page (0 9 9 2) shows the parsed values."""
     t.need(t.get("0 9 3 1") == "Off", "a PIN lock is on: the restart asks for it")
     t.restart(capture=8)
     if not t.sim:
@@ -60,7 +60,7 @@ def restart_checks_calibration(t):
     checks = {r["name"]: r["value"] for r in u.rows}
     t.eq(checks.get("Calibration"), "OK", "the self-test page: calibration OK")
     t.home()
-    u = t.keys("MENU 0 9 9 3 MENU")
+    u = t.keys("MENU 0 9 9 2 MENU")
     page = {r["name"]: r["value"] for r in u.rows}
     t.eq(page.get("Status"), "Valid", "the calibration page: valid")
     t.eq(page.get("CRC at install"), "Matches", "the CRC recorded at install matches")

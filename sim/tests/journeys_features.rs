@@ -199,13 +199,6 @@ fn alerts_take_the_screen_messages_toast() {
     r.expect_screen("Alert");
 }
 
-/// The weather channel setting defaults to Auto, over the 162.400-162.550 MHz channels (WX-2).
-#[test]
-fn weather_channel_auto() {
-    let mut r = Radio::new();
-    r.run("menu 0 4 5; expect text \"Auto\"");
-}
-
 /// The heard list: newest first with callsign, distance, bearing and age; a station without a position shows a
 /// dash for its distance (APRS-3, APRS-5).
 #[test]

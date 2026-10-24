@@ -150,7 +150,7 @@ def readings(t):
     u = t.keys("MENU 0 9 8")
     about = {r["name"]: r["value"] for r in u.rows}
     t.home()
-    u = t.keys("MENU 0 9 9 3 MENU")
+    u = t.keys("MENU 0 9 9 2 MENU")
     cal = {r["name"]: r["value"] for r in u.rows}
     t.home()
     return dict(dump=[x for x in t.cmd("dump").splitlines() if not x.startswith("#")],
