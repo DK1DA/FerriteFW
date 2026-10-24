@@ -6,6 +6,8 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 description = "Ferrite's screens on the PC with the firmware's own drawing code: PNGs, or an interactive window"
+# `cargo sim` / `cargo simw` run the simulator, not the video recorder.
+default-run = "ferrite-sim"
 
 [lib]
 name = "ferrite_sim"
