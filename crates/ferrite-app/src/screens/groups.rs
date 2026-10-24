@@ -135,7 +135,7 @@ const G9: [Entry; 9] = [
     Entry("Connections|BT off|Bluetooth, link status, cable port."),
     Entry("PIN and lock|Off|PIN lock, channel-only mode, PIN."),
     Entry("Region|Not set|Your amateur bands and defaults."),
-    Entry("Squelch tail|150 ms|Audio after the signal drops."),
+    Entry("Squelch|Software|Decided in software, or by the chip as stock."),
     Entry("SSB patch||USB, LSB and CW in HF mode."),
     Entry("Setup and reset||Run setup again, reset settings."),
     Entry("About||Version, identity, checks, battery."),
@@ -434,7 +434,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 88] = [
+static SETTINGS: [Setting; 89] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -522,6 +522,7 @@ static SETTINGS: [Setting; 88] = [
     field!([9, 1, 2], lock_ptt: bool, Kind::Flip(&["Keys", "Keys and PTT"]), Nothing),
     field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 2, 3], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
+    field!([9, 5, 0], sq_chip: bool, Kind::Flip(&["Software", "Chip"]), Nothing), // SQL-18.3
     field!([9, 9, 7], cable_log: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 9, 8], term_colour: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 9, 9], mcu_fixed: bool, Kind::Flip(&["Dynamic", "Fixed"]), Nothing), // PWR-26.5

@@ -294,6 +294,9 @@ pub struct Settings {
     /// 0 9 9 9: the MCU clock (PWR-26.5): false Dynamic (24 MHz at rest, the build's speed while something needs
     /// it), true Fixed (always the build's speed, as before the governor).
     pub mcu_fixed: bool,
+    /// 0 9 5: who decides the squelch (SQL-18, decision 269): false the software squelch (the default), true the
+    /// chip's own, stock's way.
+    pub sq_chip: bool,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -476,6 +479,7 @@ impl Settings {
         scan_return_hit: false,
         msg_vol: 3,
         mcu_fixed: false,
+        sq_chip: false,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's

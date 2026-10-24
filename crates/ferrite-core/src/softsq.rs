@@ -5,12 +5,12 @@
 //! and the squelch shuts the moment the noise reaches the ceiling, which cuts that tail. The idea is the one nicFW's
 //! documentation describes (polling noise and RSSI instead of the chip's detection); the rules here are ours.
 //!
-//! `sq chip` in the terminal brings the chip's decision back to compare (RAM only; software at power-on).
+//! 0 9 5 (SQL-18.3) brings the chip's decision back: the UI task passes the setting on here each frame.
 use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 static CHIP: AtomicBool = AtomicBool::new(false);
 
-/// The chip decides (`sq chip`), not this module.
+/// The chip decides (0 9 5 Chip), not this module.
 pub fn chip_decides() -> bool {
     CHIP.load(Relaxed)
 }
@@ -155,7 +155,7 @@ mod tests {
         assert!(!s.open());
     }
 
-    /// SQL-18.3: `sq chip` is RAM only; software decides by default.
+    /// SQL-18.3: software decides until the setting says otherwise.
     #[test]
     fn software_by_default() {
         assert!(!chip_decides());

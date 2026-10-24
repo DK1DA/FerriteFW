@@ -255,7 +255,7 @@ const CALIBRATION: [InfoRow; 3] = [
 
 const ADV_SQUELCH: [InfoRow; 3] = [
     ("Thresholds", |_, b| fixed(b, "From calibration", SUB)),
-    ("Squelch tail", |_, b| fixed(b, "150 ms", TEXT)),
+    ("Decided by", |a, b| fixed(b, if a.app.settings().sq_chip { "The chip" } else { "Software" }, TEXT)), // SQL-18.3
     ("Levels", |_, b| fixed(b, "0-9 per slot", TEXT)),
 ];
 

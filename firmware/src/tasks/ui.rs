@@ -831,6 +831,8 @@ pub async fn task() {
             app.render(&mut lcd, &live, &dev, store);
             (last_draw, urgent) = (now_ms(), false);
         }
+        // SQL-18.3: who decides the squelch (0 9 5), for the Radio task's tick.
+        ferrite_core::softsq::set_chip_decides(app.settings().sq_chip);
         // Cable log turned on or off in the menu (0 9 9 7; the bring-up build ignores it: always on).
         if !cfg!(feature = "bringup") && app.settings().cable_log != cable_log {
             cable_log = app.settings().cable_log;
