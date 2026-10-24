@@ -7,6 +7,8 @@
 
 <p align="center"><b>Free firmware for the Radtel RT-950 Pro</b>, source public, in Rust on Embassy.</p>
 
+<p align="center">Help and questions: <a href="https://discord.gg/fYygBVD2Kx">the Ferrite Discord</a>.</p>
+
 Ferrite replaces the RT-950 Pro's stock firmware with one that is open, RF-aware and transmits and receives on every band the radio is built for. Planned:
 
 - Daily use as good as stock: FM voice transmit on every band and power level, repeaters and tones, three watch slots, scanning, APRS, GPS, the broadcast receiver.
