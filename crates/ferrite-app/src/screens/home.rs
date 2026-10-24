@@ -389,23 +389,30 @@ fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
     // The large card moved (SLOT): the gaps between cards moved too, so clear them and draw every card again;
     // otherwise slivers of the old large card stay behind (HOME-11). Only the gaps: each card paints its own
     // rectangle (clearing the whole area first was one of five passes over it, slow on the radio's bus).
-    // The gaps are drawn top to bottom with the cards, each just before the card under it, so the screen changes
-    // as one wipe: drawing every gap first cut the old large card in half with a dark line (on the radio, Oct 12,
-    // 2026).
+    // Each gap is drawn with the card under it, never all first: that cut the old large card in half with a dark
+    // line (on the radio, Oct 12, 2026).
     let gaps = app.dirty(R_NOTE, hash(&app.active));
     if gaps {
         app.drawn.hash[R_FRAME..=R_SUB + 2].fill(0);
         app.drawn.meter = [None; SLOTS];
     }
-    let mut top = 21;
-    for s in 0..SLOTS as u8 {
+    // DISP-29: after SLOT the new large card is drawn first, where the eye goes, then the others top to bottom.
+    let a = app.active.min(SLOTS as u8 - 1);
+    let order: [u8; SLOTS] = if gaps { [a, (a == 0) as u8, 2 - (a == 2) as u8] } else { [0, 1, 2] };
+    // The gap above a card (and its sides) with it: before a small card, after the large one, which goes first
+    // (before it, the gap would cut the old large card with a dark line).
+    let gap = |lcd: &mut canvas::Band, s: u8| {
+        let (y, h) = card(s, a);
+        let top = if s == 0 { 21 } else { card(s - 1, a).0 + card(s - 1, a).1 };
+        lcd.fill(0, top, 240, y - top, BG);
+        lcd.fill(0, y, 6, h, BG);
+        lcd.fill(234, y, 6, h, BG);
+    };
+    for s in order {
         let p = s as usize;
         let (y, h) = card(s, app.active);
-        if gaps {
-            lcd.fill(0, top, 240, y - top, BG);
-            lcd.fill(0, y, 6, h, BG);
-            lcd.fill(234, y, 6, h, BG);
-            top = y + h;
+        if gaps && s != a {
+            gap(lcd, s);
         }
         let geom = hash(&(s, y, h, card_kind(app, s))) | 1;
         if app.drawn.hash[R_FRAME + p] != 0 && app.drawn.card[p] == geom {
@@ -413,19 +420,26 @@ fn render(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>) {
             if s == app.active || !app.held(R_FRAME + p) {
                 draw_card(app, lcd, cx, s);
             }
-            continue;
+        } else {
+            // DISP-25: a card in a new place or size (SLOT moved the large card, a scan began) is drawn whole in
+            // bands, frame and content, so the panel goes from the old picture to the new with no blank card
+            // between. DISP-29: its drawing is recorded once and replayed into each band; only when the recording
+            // doesn't fit does it run per band, each band from the same state, the card's geometry too (without it
+            // every band after the first took the card as in place and drew only its border: a card changing kind
+            // kept the old margins, Oct 23, 2026).
+            let (hash0, meter0, card0) = (app.drawn.hash, app.drawn.meter, app.drawn.card);
+            canvas::banded(lcd, 6, y, 228, h, BG, |b| {
+                (app.drawn.hash, app.drawn.meter, app.drawn.card) = (hash0, meter0, card0);
+                draw_card(app, b, cx, s);
+            });
         }
-        // DISP-25: a card in a new place or size (SLOT moved the large card, a scan began) is drawn whole in
-        // bands, frame and content, so the panel goes from the old picture to the new with no blank card
-        // between. Each band runs the card's drawing afresh: what it has drawn is forgotten before each.
-        let (hash0, meter0) = (app.drawn.hash, app.drawn.meter);
-        canvas::banded(lcd, 6, y, 228, h, BG, |b| {
-            (app.drawn.hash, app.drawn.meter) = (hash0, meter0);
-            draw_card(app, b, cx, s);
-        });
+        if gaps && s == a {
+            gap(lcd, s);
+        }
     }
     if gaps {
-        lcd.fill(0, top, 240, 300 - top, BG);
+        let (y, h) = card(SLOTS as u8 - 1, a);
+        lcd.fill(0, y + h, 240, 300 - y - h, BG);
     }
 }
 

@@ -816,7 +816,7 @@ pub async fn task() {
         let frame_min = if app.low_power() { frame_min.max(LPM_FRAME_MS) } else { frame_min };
         let asleep = panel_asleep;
         let draw = !asleep && (urgent && !keys_wait || since >= frame_min);
-        let (c0, b0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed));
+        let (c0, b0, i0) = (crate::hal::time::cycles(), crate::bus::LCD_BYTES.load(Relaxed), crate::IRQ_CYCLES.load(Relaxed));
         if draw {
             app.render(&mut lcd, &live, &dev, store);
             (last_draw, urgent) = (now_ms(), false);
@@ -828,11 +828,14 @@ pub async fn task() {
         }
         if bringup::ON.load(Relaxed) {
             // Redraw timing (Oct 12, 2026: large redraws were slow): total, and how many bytes went to the panel.
-            let us = crate::hal::time::cycles().wrapping_sub(c0) / crate::hal::clock::mhz();
+            let mhz = crate::hal::clock::mhz();
+            let us = crate::hal::time::cycles().wrapping_sub(c0) / mhz;
             if us >= 5_000 {
                 let n = crate::bus::LCD_BYTES.load(Relaxed).wrapping_sub(b0);
+                // DISP-29: and how much of it the interrupt executors had, at which clock
+                let irq = crate::IRQ_CYCLES.load(Relaxed).wrapping_sub(i0) / mhz;
                 bringup::linef(|b| {
-                    let _ = ufmt::uwrite!(b, "draw {} ms, {} KB to the panel, {}", us / 1000, n / 1024, app.screen().name());
+                    let _ = ufmt::uwrite!(b, "draw {} ms, {} KB to the panel, {}, interrupts {} ms, {} MHz", us / 1000, n / 1024, app.screen().name(), irq / 1000, mhz);
                 });
             }
         }

@@ -390,7 +390,8 @@ impl App {
         let id = core::mem::discriminant(&self.screen);
         let cleared = self.drawn.screen != Some(id);
         if cleared {
-            lcd.fill(0, w::SBAR_H, 240, w::HINT_Y - w::SBAR_H, BG);
+            // DISP-29: the content area's background goes in with the screen's first drawing, where nothing else
+            // paints (below)
             self.drawn.hash = [0; shared::REGIONS];
             self.drawn.meter = [None; SLOTS];
             self.drawn.screen = Some(id);
@@ -407,13 +408,15 @@ impl App {
             self.drawn.sbar = None; // the screen draws its own; the status bar comes back whole
         }
         let popup_gone = self.drawn.popup_gone;
-        if popup_gone {
+        if popup_gone && !cleared {
             // The popup went: clear its box and let every region draw again over it.
             let (x, y, w_, h) = w::POPUP_BOX;
             lcd.fill(x, y, w_, h, BG);
             self.drawn.hash = [0; shared::REGIONS];
             self.drawn.meter = [None; SLOTS];
             self.drawn.popup_gone = false;
+        } else if popup_gone {
+            self.drawn.popup_gone = false; // the whole area is new anyway
         }
         let cx = Cx { live, dev, store };
         if self.drawn.qmenu_gone {
@@ -421,8 +424,21 @@ impl App {
         }
         // HOME-17: while the quick menu's box is up the screen under it waits, so nothing draws through the box
         // (DISP-25); a cleared screen (or one under a popup that just went) is drawn whole first, the box over it.
-        if cleared || popup_gone || !qmenu::frozen(self) {
-            self.screen.render(self, lcd, &cx);
+        if cleared {
+            // DISP-29: a new screen (or the panel woken) is drawn once, recorded, with the background only where its
+            // content doesn't paint: clearing the area first sent most pixels twice. A screen too big to record (or
+            // the bench's `lcd paint old`, TERM-40) clears and draws as before, from the state before the recording.
+            let before = self.drawn;
+            let screen = self.screen;
+            let (x, y, h) = (0, w::SBAR_H, w::HINT_Y - w::SBAR_H);
+            if !ferrite_ui::canvas::fresh(lcd, x, y, 240, h, BG, &mut |b| screen.render(self, b, &cx)) {
+                self.drawn = before;
+                lcd.fill(x, y, 240, h, BG);
+                self.screen.render(self, &mut ferrite_ui::canvas::direct(lcd), &cx);
+            }
+        } else if popup_gone || !qmenu::frozen(self) {
+            // through a band that passes straight on, so each screen's drawing is compiled once (as `fresh`'s)
+            self.screen.render(self, &mut ferrite_ui::canvas::direct(lcd), &cx);
         }
         self.render_hint(lcd);
         qmenu::draw(self, lcd);

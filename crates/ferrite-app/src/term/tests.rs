@@ -1571,6 +1571,27 @@ fn debug_lcd() {
 }
 
 #[cfg(feature = "bench")]
+/// TERM-40, DISP-29: `lcd paint old` brings back clear-then-paint (and each band drawing its region afresh), `lcd
+/// paint new` paints each pixel once, `lcd paint` says which; nothing goes to the firmware; bad words are refused.
+#[test]
+fn debug_lcd_paint() {
+    use ferrite_ui::canvas::single_pass;
+    let mut r = Rig::main();
+    assert!(single_pass(), "new by default");
+    for (cmd, on, says) in [("lcd paint old", false, "paint old"), ("lcd paint", false, "paint old"), ("LCD PAINT NEW", true, "paint new")] {
+        r.cmd(cmd);
+        assert_eq!(r.term.debug_req(), None, "{cmd}: nothing sent");
+        assert_eq!(single_pass(), on, "{cmd}: {}", r.raw());
+        assert!(r.bottom().contains(says), "{cmd}: {}", r.bottom());
+    }
+    for bad in ["lcd paint maybe", "lcd paint old 2"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("lcd [idle"), "{bad}: {}", r.bottom());
+        assert!(single_pass(), "{bad}: unchanged");
+    }
+}
+
+#[cfg(feature = "bench")]
 /// TERM-31: `bk settle` asks the waits, `bk settle N` sets both to N ms, `bk settle W S` each; 0 is stock's; out of
 /// range or extra words are refused here, before anything is sent. `bk settle` alone is a read (TERM-25).
 #[test]

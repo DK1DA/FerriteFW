@@ -228,6 +228,7 @@ impl Outbox {
 }
 
 /// What is on the screen now, so render can skip what hasn't changed.
+#[derive(Clone, Copy)]
 pub(crate) struct Drawn {
     /// Which screen the content area shows (its variant; a screen whose state changes keeps its page).
     pub screen: Option<core::mem::Discriminant<Screen>>,

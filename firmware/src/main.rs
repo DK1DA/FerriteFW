@@ -137,17 +137,28 @@ static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static DSP_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 static INPUT_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+/// Cycles spent in the interrupt executors' tasks (Radio, DSP, input), so the cable log's draw lines can tell
+/// drawing time from time the UI task was preempted (DISP-29; one executor preempting another counts twice).
+pub static IRQ_CYCLES: AtomicU32 = AtomicU32::new(0);
+
+#[inline(always)]
+fn counted(f: impl FnOnce()) {
+    let c0 = hal::time::cycles();
+    f();
+    IRQ_CYCLES.fetch_add(hal::time::cycles().wrapping_sub(c0), Relaxed);
+}
+
 extern "C" fn radio_irq() {
     // SAFETY: the executor's own interrupt handler, the only place it is polled.
-    unsafe { RADIO_EXECUTOR.on_interrupt() }
+    counted(|| unsafe { RADIO_EXECUTOR.on_interrupt() })
 }
 extern "C" fn dsp_irq() {
     // SAFETY: as above.
-    unsafe { DSP_EXECUTOR.on_interrupt() }
+    counted(|| unsafe { DSP_EXECUTOR.on_interrupt() })
 }
 extern "C" fn input_irq() {
     // SAFETY: as above.
-    unsafe { INPUT_EXECUTOR.on_interrupt() }
+    counted(|| unsafe { INPUT_EXECUTOR.on_interrupt() })
 }
 
 // With panic=immediate-abort a panic is an undefined instruction, so it arrives here as a HardFault.

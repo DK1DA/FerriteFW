@@ -76,6 +76,11 @@ SECTIONS
     /* the off-screen canvas's band (DISP-25): drawing into it is per-pixel work too */
     *(.text.*10ferrite_ui6canvas4Band*3gfx3Gfx*);
     *(.text.*10ferrite_ui6canvasNtB*4Band*);
+    /* DISP-29: a recorded region's replay into each band, the band loop and a new screen's background */
+    *(.text.*10ferrite_ui6canvas6replay*);
+    *(.text.*10ferrite_ui6canvas5bands*);
+    *(.text.*10ferrite_ui6canvas5cover*);
+    *(.text.*10ferrite_ui6canvasNtB*2Rd*);
     . = ALIGN(4);
     __efast_ui = .;
   } > FLASH

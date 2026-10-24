@@ -31,4 +31,9 @@ pub trait Panel {
     fn offscreen(&self) -> bool {
         false
     }
+    /// A canvas recording its drawing to replay into each band (DISP-29): the drawing primitives go there instead.
+    #[inline(always)]
+    fn rec(&mut self) -> Option<&mut dyn crate::canvas::Record> {
+        None
+    }
 }

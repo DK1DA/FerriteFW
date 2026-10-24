@@ -1674,7 +1674,7 @@ fn bk_save(t: &mut Toks) -> Result<Done, Msg> {
 /// `lcd fps N` (1-20, 0 normal), `lcd bl N|normal`, `lcd keys N|normal` (percent) change one thing; `lcd reset`.
 fn lcd(t: &mut Toks) -> Result<Done, Msg> {
     use ferrite_core::msg::LcdSet;
-    const USAGE: &str = "lcd [idle|partial|sleep on|off] [fps 0-20] [bl|keys 0-100|normal] [reset]";
+    const USAGE: &str = "lcd [idle|partial|sleep on|off] [fps 0-20] [bl|keys 0-100|normal] [paint old|new] [reset]";
     let bad = || msg!("{}", USAGE);
     fn word<'a>(t: &mut Toks<'a>) -> Result<Option<&'a [u8]>, Msg> {
         match t.next()? {
@@ -1684,6 +1684,24 @@ fn lcd(t: &mut Toks) -> Result<Done, Msg> {
         }
     }
     let Some(what) = word(t)? else { return Ok(Done::Debug(Job::new(Kind::Lcd(LcdSet::Ask)))) };
+    if same(what, b"paint") {
+        // DISP-29: `old` brings back clear-then-paint (a new screen cleared first, regions drawn once per band), to
+        // compare by eye; `new` (the default) paints each pixel once. RAM only, here in the terminal.
+        use ferrite_ui::canvas::{set_single_pass, single_pass};
+        let on = match word(t)? {
+            Some(a) if same(a, b"old") => Some(false),
+            Some(a) if same(a, b"new") => Some(true),
+            None => None,
+            Some(_) => return Err(bad()),
+        };
+        if t.next()?.is_some() {
+            return Err(bad());
+        }
+        if let Some(on) = on {
+            set_single_pass(on);
+        }
+        return Ok(Done::Said(msg!("paint {}", if single_pass() { "new: each pixel once" } else { "old: clear, then paint" })));
+    }
     let set = if same(what, b"reset") {
         LcdSet::Reset
     } else {

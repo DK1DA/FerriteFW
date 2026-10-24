@@ -206,6 +206,9 @@ fn text_row(line: &mut [u16], lut: &[u16; 16], s: &[u8], f: &Font4, x: i32, x0: 
 
 pub trait Gfx: Panel {
     fn fill(&mut self, mut x: i32, mut y: i32, mut w: i32, mut h: i32, c: u16) {
+        if let Some(r) = self.rec() {
+            return r.fill(x, y, w, h, c); // DISP-29
+        }
         if w > 2 && h > 2 && crate::theme::outlined(c) {
             // DISP-18: night red draws a dim fill as a red outline, black inside
             self.fill(x + 1, y + 1, w - 2, h - 2, BLACK);
@@ -220,7 +223,13 @@ pub trait Gfx: Panel {
             y = 0;
         }
         w = w.min(W - x);
-        h = h.min(H - y);
+        // DISP-29: only the rows the panel keeps (a band's): the rest would be dropped pixel by pixel
+        let (r0, r1) = self.rows();
+        if y < r0 {
+            h -= r0 - y;
+            y = r0;
+        }
+        h = h.min(H - y).min(r1 - y);
         if w <= 0 || h <= 0 {
             return;
         }
@@ -238,6 +247,9 @@ pub trait Gfx: Panel {
 
     /// Rounded 1 px outline, corner radius r (0 = square).
     fn frame_r(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, c: u16) {
+        if let Some(rec) = self.rec() {
+            return rec.rounded(true, x, y, w, h, r, c); // DISP-29
+        }
         if r <= 0 || w < 2 * r + 2 || h < 2 * r + 2 {
             return self.frame(x, y, w, h, c);
         }
@@ -266,6 +278,9 @@ pub trait Gfx: Panel {
 
     /// Filled rectangle with rounded corners (radius r).
     fn fill_r(&mut self, x: i32, y: i32, w: i32, h: i32, r: i32, c: u16) {
+        if let Some(rec) = self.rec() {
+            return rec.rounded(false, x, y, w, h, r, c); // DISP-29
+        }
         if w > 2 && h > 2 && crate::theme::outlined(c) {
             // DISP-18: an empty meter segment or a track in night red: a red outline, black inside
             self.fill_r(x + 1, y + 1, w - 2, h - 2, (r - 1).max(0), BLACK);
@@ -323,28 +338,32 @@ pub trait Gfx: Panel {
 
     /// 4-bit text (UTF-8; characters the font lacks show '?'). x is the pen start, baseline the baseline.
     /// Paints the whole line box, ink blended over bg, so redrawing a value needs no clear. Returns the advance.
-    fn text4(&mut self, x: i32, baseline: i32, s: &[u8], f: &Font4, fg: u16, bg: u16) -> i32 {
+    fn text4(&mut self, x: i32, baseline: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16) -> i32 {
         let top = baseline - f.ascent as i32;
         self.text4_rows(x, baseline, s, f, fg, bg, top, top + f.line_h as i32)
     }
 
     /// [`Gfx::text4`] painting only the rows of the line box inside `y0..y1`: a big font's box can overlap its
     /// neighbours.
-    fn text4_rows(&mut self, x: i32, baseline: i32, s: &[u8], f: &Font4, fg: u16, bg: u16, y0: i32, y1: i32) -> i32 {
-        // themed before blending, so the anti-aliasing runs between the colours actually shown
-        let bg = crate::theme::map_bg(bg);
-        let fg = crate::theme::ink_on(crate::theme::map(fg), bg); // DISP-18: black on night red's solid red
-        let mut lut = [0u16; 16];
-        for (a, v) in lut.iter_mut().enumerate() {
-            *v = blend(bg, fg, a as u8);
-        }
+    fn text4_rows(&mut self, x: i32, baseline: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16, y0: i32, y1: i32) -> i32 {
         let w = text4_width(s, f);
+        if let Some(r) = self.rec() {
+            r.text(x, baseline, s, f, fg, bg, y0, y1); // DISP-29
+            return w;
+        }
         let top = baseline - f.ascent as i32;
         let (x0, x1) = (x.max(0), (x + w).min(W));
         let (r0, r1) = self.rows();
         let (y0, y1) = (y0.max(top).max(r0), y1.min(top + f.line_h as i32).min(r1));
         if x1 <= x0 || y1 <= y0 {
             return w;
+        }
+        // themed before blending, so the anti-aliasing runs between the colours actually shown
+        let bg = crate::theme::map_bg(bg);
+        let fg = crate::theme::ink_on(crate::theme::map(fg), bg); // DISP-18: black on night red's solid red
+        let mut lut = [0u16; 16];
+        for (a, v) in lut.iter_mut().enumerate() {
+            *v = blend(bg, fg, a as u8);
         }
         let mut line = [0u16; W as usize];
         let n = (x1 - x0) as usize;
@@ -359,7 +378,7 @@ pub trait Gfx: Panel {
     }
 
     /// Left draws from x, Right ends at x, Center centres the visible ink on x.
-    fn text4_aligned(&mut self, x: i32, baseline: i32, align: Align, s: &[u8], f: &Font4, fg: u16, bg: u16) -> i32 {
+    fn text4_aligned(&mut self, x: i32, baseline: i32, align: Align, s: &[u8], f: &'static Font4, fg: u16, bg: u16) -> i32 {
         let w = text4_width(s, f);
         let x = match align {
             Align::Left => x,
@@ -371,7 +390,10 @@ pub trait Gfx: Panel {
 
     /// m1 in c1 over bg, then optionally m2 in c2 over that (the logo is a ring mask plus a windings mask, the
     /// same size). Masks decode a row at a time, plain or run-length encoded, straight into the panel.
-    fn mask4(&mut self, x: i32, y: i32, m1: &Mask4, c1: u16, m2: Option<(&Mask4, u16)>, bg: u16) {
+    fn mask4(&mut self, x: i32, y: i32, m1: &'static Mask4, c1: u16, m2: Option<(&'static Mask4, u16)>, bg: u16) {
+        if let Some(r) = self.rec() {
+            return r.mask(x, y, m1, c1, m2, bg); // DISP-29
+        }
         let (w, h) = (m1.w as i32, m1.h as i32);
         let (x0, x1) = (x.max(0), (x + w).min(W));
         let (y0, y1) = (y.max(0), (y + h).min(H));
@@ -486,7 +508,7 @@ mod tests {
     }
 
     /// The line drawn by text4 matches [`ref_pixel`] pixel for pixel, and paints only its line box.
-    fn text_like_reference(s: &[u8], codes: &[u32], f: &Font4, x: i32) {
+    fn text_like_reference(s: &[u8], codes: &[u32], f: &'static Font4, x: i32) {
         let mut fb = FrameBuffer::new();
         fb.px.fill(0x5555);
         let base = 100;

@@ -17,7 +17,7 @@ use ferrite_ui::widgets as w;
 
 /// Text wrapped on words into `lines` lines of `lh` pixels from y (the box x..x+w, y..y+lines*lh, cleared to
 /// bg). Returns the lines used.
-pub(crate) fn para(lcd: &mut impl Panel, x: i32, y: i32, w_: i32, lines: i32, lh: i32, text: &[u8], f: &Font4, fg: u16, bg: u16) -> i32 {
+pub(crate) fn para(lcd: &mut impl Panel, x: i32, y: i32, w_: i32, lines: i32, lh: i32, text: &[u8], f: &'static Font4, fg: u16, bg: u16) -> i32 {
     // in bands, so the old text never blanks before the new (DISP-25)
     let mut drawn = 0;
     ferrite_ui::canvas::banded(lcd, x, y, w_, lines * lh, bg, |lcd| {

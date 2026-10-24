@@ -31,7 +31,7 @@ pub fn segs(lcd: &mut impl Panel, x: i32, y: i32, n: u8, lit: u8, sw: i32, pitch
 
 /// Text wrapped on words into lines of `wd` pixels from baseline `y`, `lh` apart, at most `max` lines; each
 /// line's box painted. Returns the lines used.
-pub fn wrap(lcd: &mut impl Panel, x: i32, wd: i32, y: i32, lh: i32, max: i32, s: &[u8], f: &Font4, fg: u16, bg: u16) -> i32 {
+pub fn wrap(lcd: &mut impl Panel, x: i32, wd: i32, y: i32, lh: i32, max: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16) -> i32 {
     let (mut rest, mut n) = (s, 0);
     while !rest.is_empty() && n < max {
         let mut cut = rest.len();

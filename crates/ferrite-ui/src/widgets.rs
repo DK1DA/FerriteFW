@@ -55,7 +55,7 @@ pub fn field(
     baseline: i32,
     align: Align,
     s: &[u8],
-    f: &Font4,
+    f: &'static Font4,
     fg: u16,
     bg: u16,
 ) -> i32 {
@@ -187,8 +187,8 @@ pub fn freq(
     x_end: i32,
     baseline: i32,
     f: Freq10,
-    big: &Font4,
-    small: &Font4,
+    big: &'static Font4,
+    small: &'static Font4,
     fg: u16,
     fg_small: u16,
     bg: u16,
@@ -216,8 +216,8 @@ pub fn freq_centred(
     x_end: i32,
     baseline: i32,
     f: Freq10,
-    big: &Font4,
-    small: &Font4,
+    big: &'static Font4,
+    small: &'static Font4,
     fg: u16,
     fg_small: u16,
     bg: u16,
@@ -455,7 +455,7 @@ pub fn progress(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, pct: u8, c
 
 /// Text wrapped on words into lines `step` apart from `baseline`, in the box x..x+w, rows y0..y1; the rest of
 /// the box painted bg. Returns the lines used.
-pub fn wrap(lcd: &mut impl Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i32, step: i32, s: &[u8], f: &Font4, fg: u16, bg: u16) -> i32 {
+pub fn wrap(lcd: &mut impl Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i32, step: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16) -> i32 {
     let (mut rest, mut base, mut n) = (s, baseline, 0);
     let top = baseline - f.ascent as i32;
     lcd.fill(x, y0, w, top - y0, bg);

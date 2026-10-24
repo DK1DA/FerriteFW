@@ -8,6 +8,8 @@
 //! its own copy for its whole run, and a redraw nests several (render, the screen, a card, a widget: ~30 KB of
 //! stack measured on the radio, SBAR-23). The drawing runs once per band, so a taller region costs drawing time,
 //! not bus time.
+use crate::font4::{Font4, Mask4};
+use crate::gfx::Gfx;
 use crate::panel::Panel;
 
 /// Pixels in one band: 240 x 8.
@@ -134,6 +136,14 @@ impl Panel for Band<'_> {
             _ => false,
         }
     }
+
+    /// A canvas recording its region (DISP-29): what is drawn through this band goes into the recording.
+    fn rec(&mut self) -> Option<&mut dyn Record> {
+        match &mut self.fwd {
+            Some(p) if self.thru => p.rec(),
+            _ => None,
+        }
+    }
 }
 
 /// Inside another canvas's band: draw straight into it (a second band on the stack would cost 3.75 KB more).
@@ -149,44 +159,473 @@ pub fn direct(lcd: &mut dyn Panel) -> Band<'_> {
     thru(lcd)
 }
 
+/// `SINGLE_PASS`, DISP-29 on (the default): regions record their drawing once, and a new screen paints each pixel once. Off (the
+/// bench's `lcd paint old`, TERM-40): as before Oct 23, 2026, the drawing runs once per band and a new screen is
+/// cleared first, to compare the two by eye on the radio.
+#[cfg(not(feature = "std"))]
+static SINGLE_PASS: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+// On the host each test thread has its own, so a test comparing the two can't change another's drawing.
+#[cfg(feature = "std")]
+std::thread_local! {
+    static SINGLE_PASS: core::cell::Cell<bool> = const { core::cell::Cell::new(true) };
+}
+
+/// [`SINGLE_PASS`]: on (the default) or off (`lcd paint old`).
+pub fn single_pass() -> bool {
+    #[cfg(feature = "std")]
+    return SINGLE_PASS.with(|c| c.get());
+    #[cfg(not(feature = "std"))]
+    SINGLE_PASS.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_single_pass(on: bool) {
+    #[cfg(feature = "std")]
+    SINGLE_PASS.with(|c| c.set(on));
+    #[cfg(not(feature = "std"))]
+    SINGLE_PASS.store(on, core::sync::atomic::Ordering::Relaxed)
+}
+
+/// Host only: how many times a region's drawing code has run, recorded or per band, on this thread (DISP-29's
+/// tests count the slow-flash work by it).
+#[cfg(feature = "std")]
+pub fn draw_runs() -> u32 {
+    DRAW_RUNS.with(|c| c.get())
+}
+#[cfg(feature = "std")]
+std::thread_local! {
+    static DRAW_RUNS: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
+#[inline(always)]
+fn ran() {
+    #[cfg(feature = "std")]
+    DRAW_RUNS.with(|c| c.set(c.get() + 1));
+}
+
+/// The most of a band buffer a region's recording may take, in pixels (DISP-29): half, so a large home card (about
+/// 1 KB of recording) still leaves six rows a band.
+const REC_MAX_PX: usize = BAND_PX / 2;
+
+/// A region's drawing, recorded once and replayed (DISP-29). The drawing code above the primitives (a card's texts,
+/// hashes and layout, in the slow flash on the radio) then runs once per region, not once per band: a home card is
+/// 9 to 16 bands, and running it per band was most of a SLOT redraw's 140 ms (Oct 23, 2026). Only the primitives
+/// are recorded ([`crate::gfx::Gfx`]'s fill, rounded fill and frame, text and masks, and nested [`banded`]
+/// regions), with their arguments as given, so a replay draws exactly what the drawing would have: the same calls
+/// in the same order. A drawing that does not fit, or that writes pixels itself, is drawn as before.
+pub struct Rec<'a> {
+    buf: &'a mut [u8],
+    n: usize,
+    /// Something did not fit, or was not a primitive: draw per band instead.
+    over: bool,
+    /// The panel's [`Panel::input_pending`] as the recording began (a new screen's long drawing stops for input).
+    pending: bool,
+}
+
+/// Where the primitives go while a region records ([`Panel::rec`]).
+pub trait Record {
+    /// Append bytes; too many and the recording is given up.
+    fn put(&mut self, b: &[u8]);
+    /// Give the recording up.
+    fn fail(&mut self);
+}
+
+const OP_FILL: u8 = 0;
+const OP_FILL_R: u8 = 1;
+const OP_FRAME_R: u8 = 2;
+const OP_TEXT: u8 = 3;
+const OP_MASK: u8 = 4;
+/// A nested [`banded`] region (x, y, w, h, bg), its drawing up to the matching [`OP_END`].
+const OP_BAND: u8 = 5;
+const OP_END: u8 = 6;
+const PTR: usize = core::mem::size_of::<usize>();
+
+impl Record for Rec<'_> {
+    fn put(&mut self, b: &[u8]) {
+        if self.over || self.n + b.len() > self.buf.len() {
+            self.over = true;
+            return;
+        }
+        self.buf[self.n..self.n + b.len()].copy_from_slice(b);
+        self.n += b.len();
+    }
+    fn fail(&mut self) {
+        self.over = true;
+    }
+}
+
+impl dyn Record + '_ {
+    /// Coordinates as 16 bits: anything wider is not recorded.
+    fn put_i(&mut self, v: &[i32]) {
+        for &v in v {
+            match i16::try_from(v) {
+                Ok(v) => self.put(&v.to_le_bytes()),
+                Err(_) => self.fail(),
+            }
+        }
+    }
+
+    pub(crate) fn fill(&mut self, x: i32, y: i32, w: i32, h: i32, c: u16) {
+        self.put(&[OP_FILL]);
+        self.put_i(&[x, y, w, h]);
+        self.put(&c.to_le_bytes());
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rounded(&mut self, frame: bool, x: i32, y: i32, w: i32, h: i32, r: i32, c: u16) {
+        self.put(&[if frame { OP_FRAME_R } else { OP_FILL_R }]);
+        self.put_i(&[x, y, w, h, r]);
+        self.put(&c.to_le_bytes());
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn text(&mut self, x: i32, baseline: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16, y0: i32, y1: i32) {
+        let Ok(len) = u8::try_from(s.len()) else {
+            return self.fail();
+        };
+        self.put(&[OP_TEXT]);
+        self.put_i(&[x, baseline, y0.clamp(-32768, 32767), y1.clamp(-32768, 32767)]);
+        self.put(&fg.to_le_bytes());
+        self.put(&bg.to_le_bytes());
+        self.put(&(f as *const Font4 as usize).to_ne_bytes());
+        self.put(&[len]);
+        self.put(s);
+    }
+
+    pub(crate) fn mask(&mut self, x: i32, y: i32, m1: &'static Mask4, c1: u16, m2: Option<(&'static Mask4, u16)>, bg: u16) {
+        self.put(&[OP_MASK]);
+        self.put_i(&[x, y]);
+        self.put(&(m1 as *const Mask4 as usize).to_ne_bytes());
+        self.put(&c1.to_le_bytes());
+        let (p2, c2) = m2.map_or((0, 0), |(m, c)| (m as *const Mask4 as usize, c));
+        self.put(&p2.to_ne_bytes());
+        self.put(&c2.to_le_bytes());
+        self.put(&bg.to_le_bytes());
+    }
+
+    fn band(&mut self, x: i32, y: i32, w: i32, h: i32, bg: u16) {
+        self.put(&[OP_BAND]);
+        self.put_i(&[x, y, w, h]);
+        self.put(&bg.to_le_bytes());
+    }
+}
+
+/// Recording: the primitives come here through [`Panel::rec`]; anything that writes pixels itself can't be
+/// replayed.
+impl Panel for Rec<'_> {
+    fn window(&mut self, _: i32, _: i32, _: i32, _: i32) {
+        self.over = true;
+    }
+    fn push(&mut self, _: u16, _: u32) {
+        self.over = true;
+    }
+    fn push_buf(&mut self, _: &[u16]) {
+        self.over = true;
+    }
+    fn offscreen(&self) -> bool {
+        true
+    }
+    fn input_pending(&self) -> bool {
+        self.pending
+    }
+    fn rec(&mut self) -> Option<&mut dyn Record> {
+        Some(self)
+    }
+}
+
+/// One recorded primitive.
+enum Op<'a> {
+    Fill(i32, i32, i32, i32, u16),
+    Rounded(bool, i32, i32, i32, i32, i32, u16),
+    Text(i32, i32, &'a [u8], &'static Font4, u16, u16, i32, i32),
+    Mask(i32, i32, &'static Mask4, u16, Option<(&'static Mask4, u16)>, u16),
+    /// A nested region and its recording.
+    Band(i32, i32, i32, i32, u16, &'a [u8]),
+}
+
+/// Reads a recording back in order.
+struct Rd<'a>(&'a [u8]);
+impl<'a> Rd<'a> {
+    fn u8(&mut self) -> u8 {
+        let (&b, rest) = self.0.split_first().unwrap_or((&0, &[]));
+        self.0 = rest;
+        b
+    }
+    fn u16(&mut self) -> u16 {
+        u16::from_le_bytes([self.u8(), self.u8()])
+    }
+    fn i(&mut self) -> i32 {
+        self.u16() as i16 as i32
+    }
+    fn ptr(&mut self) -> usize {
+        let mut b = [0u8; PTR];
+        b.iter_mut().for_each(|v| *v = self.u8());
+        usize::from_ne_bytes(b)
+    }
+    fn bytes(&mut self, n: usize) -> &'a [u8] {
+        let (s, rest) = self.0.split_at(n.min(self.0.len()));
+        self.0 = rest;
+        s
+    }
+
+    /// The next primitive (None at the end, or at the end of a nested region).
+    fn op(&mut self) -> Option<Op<'a>> {
+        if self.0.is_empty() {
+            return None;
+        }
+        Some(match self.u8() {
+            OP_FILL => Op::Fill(self.i(), self.i(), self.i(), self.i(), self.u16()),
+            op @ (OP_FILL_R | OP_FRAME_R) => Op::Rounded(op == OP_FRAME_R, self.i(), self.i(), self.i(), self.i(), self.i(), self.u16()),
+            OP_TEXT => {
+                let (x, baseline, y0, y1, fg, bg) = (self.i(), self.i(), self.i(), self.i(), self.u16(), self.u16());
+                // SAFETY: recorded from a `&'static Font4` (`text` above).
+                let f = unsafe { &*(self.ptr() as *const Font4) };
+                let n = self.u8() as usize;
+                Op::Text(x, baseline, self.bytes(n), f, fg, bg, y0, y1)
+            }
+            OP_MASK => {
+                let (x, y) = (self.i(), self.i());
+                // SAFETY: both recorded from `&'static Mask4`s (`mask` above; 0: none).
+                let m1 = unsafe { &*(self.ptr() as *const Mask4) };
+                let (c1, p2, c2) = (self.u16(), self.ptr(), self.u16());
+                let m2 = (p2 != 0).then(|| (unsafe { &*(p2 as *const Mask4) }, c2));
+                Op::Mask(x, y, m1, c1, m2, self.u16())
+            }
+            OP_BAND => {
+                let (x, y, w, h, bg) = (self.i(), self.i(), self.i(), self.i(), self.u16());
+                let start = self.0;
+                while self.op().is_some() {}
+                let len = start.len() - self.0.len();
+                // the inner ops, without the OP_END just read
+                Op::Band(x, y, w, h, bg, &start[..len.saturating_sub(1)])
+            }
+            _ => return None,
+        })
+    }
+}
+
+/// Draw a recording ([`Rec`]) into `p`. Into a band (each primitive clips to its rows) a nested region is its
+/// background and drawing, as [`banded`] draws inside a canvas; onto the panel (`bands`) it goes in bands.
+fn replay(rec: &[u8], p: &mut dyn Panel, bands: bool) {
+    let mut r = Rd(rec);
+    while let Some(op) = r.op() {
+        match op {
+            Op::Fill(x, y, w, h, c) => p.fill(x, y, w, h, c),
+            Op::Rounded(false, x, y, w, h, rad, c) => p.fill_r(x, y, w, h, rad, c),
+            Op::Rounded(true, x, y, w, h, rad, c) => p.frame_r(x, y, w, h, rad, c),
+            Op::Text(x, baseline, s, f, fg, bg, y0, y1) => {
+                p.text4_rows(x, baseline, s, f, fg, bg, y0, y1);
+            }
+            Op::Mask(x, y, m1, c1, m2, bg) => p.mask4(x, y, m1, c1, m2, bg),
+            Op::Band(x, y, w, h, bg, inner) if bands => band_rec(p, x, y, w, h, bg, inner),
+            Op::Band(x, y, w, h, bg, inner) => {
+                p.fill(x, y, w, h, bg);
+                replay(inner, p, false);
+            }
+        }
+    }
+}
+
 /// Draw the region (x, y, w, h) with `draw`, band by band, each band sent to `lcd` once. `draw` paints the whole
-/// region in absolute coordinates, as it would on the panel (anything it leaves unpainted shows as `bg`). On the
-/// host (`std`) a last pass hands the text hints to the panel, for the simulator's screen reading.
+/// region in absolute coordinates, as it would on the panel (anything it leaves unpainted shows as `bg`). It runs
+/// once, recorded, and the recording is replayed into each band (DISP-29); a drawing too big to record runs once
+/// per band. On the host (`std`) a last pass hands the text hints to the panel, for the simulator's screen reading.
 pub fn banded<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, mut draw: impl FnMut(&mut Band)) {
     if w <= 0 || h <= 0 {
         return;
     }
+    if let Some(r) = lcd.rec() {
+        // inside a recording: the region, its drawing, its end (DISP-29)
+        r.band(x, y, w, h, bg);
+        draw(&mut thru(lcd));
+        if let Some(r) = lcd.rec() {
+            r.put(&[OP_END]);
+        }
+        return;
+    }
     if lcd.offscreen() {
-        crate::gfx::Gfx::fill(lcd, x, y, w, h, bg);
+        Gfx::fill(lcd, x, y, w, h, bg);
         return draw(&mut thru(lcd));
     }
     band_out(lcd, x, y, w, h, bg, &mut draw);
-    if cfg!(feature = "std") {
-        let mut band = Band { buf: &mut [], x, y, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
-        draw(&mut band);
+}
+
+/// What a region's bands draw: its recording, or the drawing itself once per band.
+enum Src<'a> {
+    Rec(&'a [u8]),
+    Draw(&'a mut dyn FnMut(&mut Band)),
+}
+
+/// [`banded`]'s bands: the buffer, and the recording at its start, live in this frame alone.
+#[inline(never)]
+fn band_out<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, draw: &mut dyn FnMut(&mut Band)) {
+    let mut buf = [0u16; BAND_PX];
+    // SAFETY: the first REC_MAX_PX pixels as bytes (u8 has no alignment, and any bytes are valid u16s after).
+    let bytes = unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), REC_MAX_PX * 2) };
+    let mut rec = Rec { buf: bytes, n: 0, over: !single_pass(), pending: false };
+    if !rec.over {
+        ran();
+        draw(&mut thru(&mut rec));
+    }
+    let n = if rec.over { 0 } else { rec.n };
+    let (head, px) = buf.split_at_mut(n.div_ceil(2));
+    if n > 0 {
+        // SAFETY: as above, the recording's bytes.
+        let rec = unsafe { core::slice::from_raw_parts(head.as_ptr().cast::<u8>(), n) };
+        bands(lcd, px, x, y, w, h, bg, Src::Rec(rec));
+    } else {
+        bands(lcd, px, x, y, w, h, bg, Src::Draw(draw));
     }
 }
 
-/// [`banded`]'s bands: the buffer lives in this frame alone.
+/// A recorded region onto the panel, in bands of its own.
 #[inline(never)]
-fn band_out<P: Panel>(lcd: &mut P, x: i32, y: i32, w: i32, h: i32, bg: u16, draw: &mut dyn FnMut(&mut Band)) {
-    let w = w.min(BAND_PX as i32);
-    let rows = (BAND_PX as i32 / w).max(1);
-    let bg = crate::theme::map_bg(bg);
+fn band_rec(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, bg: u16, rec: &[u8]) {
+    if w <= 0 || h <= 0 {
+        return;
+    }
     let mut buf = [0u16; BAND_PX];
+    bands(lcd, &mut buf, x, y, w, h, bg, Src::Rec(rec));
+}
+
+/// The region in bands of `px`, each sent to `lcd` once; on the host a last pass for the text hints.
+#[allow(clippy::too_many_arguments)]
+fn bands(lcd: &mut dyn Panel, px: &mut [u16], x: i32, y: i32, w: i32, h: i32, bg: u16, mut src: Src) {
+    let w = w.min(px.len() as i32);
+    let rows = (px.len() as i32 / w).max(1);
+    let bg = crate::theme::map_bg(bg);
     let mut by = y;
     while by < y + h {
         let bh = rows.min(y + h - by);
         let n = (w * bh) as usize;
-        buf[..n].fill(bg);
+        px[..n].fill(bg);
         {
-            let mut band = Band { buf: &mut buf[..n], x, y: by, w, h: bh, win: (0, 0, 0, 0), cur: (0, 0), fwd: None, thru: false, mask: None };
-            draw(&mut band);
+            let mut band = Band { buf: &mut px[..n], x, y: by, w, h: bh, win: (0, 0, 0, 0), cur: (0, 0), fwd: None, thru: false, mask: None };
+            match &mut src {
+                Src::Rec(r) => replay(r, &mut band, false),
+                Src::Draw(d) => {
+                    ran();
+                    d(&mut band)
+                }
+            }
         }
         lcd.window(x, by, x + w - 1, by + bh - 1);
-        lcd.push_buf(&buf[..n]);
+        lcd.push_buf(&px[..n]);
         by += bh;
     }
+    if cfg!(feature = "std") {
+        // the text hints: windows and hints to the panel, pixels nowhere
+        let mut band = Band { buf: &mut [], x, y, w: 0, h: 0, win: (0, 0, 0, 0), cur: (0, 0), fwd: Some(lcd), thru: false, mask: None };
+        match &mut src {
+            Src::Rec(r) => replay(r, &mut band, false),
+            Src::Draw(d) => d(&mut band),
+        }
+    }
+}
+
+/// Rows of the screen [`fresh`] works out its background for at a time.
+const COVER_ROWS: i32 = 16;
+
+/// A whole new screen in the region (x, y, w, h) over `bg` (a screen opened, the panel woken): DISP-29. `draw`
+/// paints the content as it would over a cleared region, recorded once; then `bg` goes only where no opaque
+/// primitive (a fill, a text's line box, a mask, a nested [`banded`] region) paints, and the recording is drawn
+/// over it, nested regions in bands. Clearing the region first sent most of its pixels twice: 263-281 KB for a
+/// 153 KB screen on every screen open (Oct 23, 2026). Returns false, having drawn nothing, when the drawing doesn't
+/// fit the recording (or writes pixels itself): the caller then puts back what the drawing changed and clears
+/// and draws as before.
+#[inline(never)]
+pub fn fresh(lcd: &mut dyn Panel, x: i32, y: i32, w: i32, h: i32, bg: u16, draw: &mut dyn FnMut(&mut Band)) -> bool {
+    if lcd.offscreen() || !single_pass() {
+        return false;
+    }
+    let mut buf = [0u8; BAND_PX * 2];
+    let mut rec = Rec { buf: &mut buf, n: 0, over: false, pending: lcd.input_pending() };
+    ran();
+    draw(&mut thru(&mut rec));
+    let (n, over) = (rec.n, rec.over);
+    if over {
+        return false;
+    }
+    let rec = &buf[..n];
+    cover(lcd, rec, x, y, w, h, bg);
+    replay(rec, lcd, true);
+    true
+}
+
+/// The background of [`fresh`]: `bg` wherever no opaque primitive of `rec` paints, rows of runs merged into
+/// rectangles while they repeat.
+#[inline(never)]
+fn cover(lcd: &mut dyn Panel, rec: &[u8], x: i32, y: i32, w: i32, h: i32, bg: u16) {
+    const WORDS: usize = (crate::panel::W as usize).div_ceil(32);
+    let (x0, x1) = (x.max(0), (x + w).min(crate::panel::W));
+    let (y0, y1) = (y.max(0), (y + h).min(crate::panel::H));
+    // runs not yet sent: (x, w) from row `since`, while every row since has had the same runs
+    let mut open: [(i16, i16); 8] = [(0, 0); 8];
+    let (mut nopen, mut since) = (0usize, y0);
+    let flush = |lcd: &mut dyn Panel, open: &[(i16, i16)], since: i32, to: i32| {
+        for &(rx, rw) in open {
+            lcd.fill(rx as i32, since, rw as i32, to - since, bg);
+        }
+    };
+    let mut cy = y0;
+    while cy < y1 {
+        let ch = COVER_ROWS.min(y1 - cy);
+        let mut bits = [[0u32; WORDS]; COVER_ROWS as usize];
+        let mut mark = |ax: i32, ay: i32, aw: i32, ah: i32| {
+            for row in ay.max(cy)..(ay + ah).min(cy + ch) {
+                let b = &mut bits[(row - cy) as usize];
+                for c in ax.max(x0)..(ax + aw).min(x1) {
+                    b[c as usize / 32] |= 1 << (c % 32);
+                }
+            }
+        };
+        let mut r = Rd(rec);
+        while let Some(op) = r.op() {
+            match op {
+                Op::Fill(ax, ay, aw, ah, _) | Op::Band(ax, ay, aw, ah, _, _) => mark(ax, ay, aw, ah),
+                Op::Rounded(false, ax, ay, aw, ah, rad, _) => {
+                    // the corners show what is under them: only the cross is opaque
+                    let rad = rad.min(aw / 2).min(ah / 2).max(0);
+                    mark(ax + rad, ay, aw - 2 * rad, ah);
+                    mark(ax, ay + rad, aw, ah - 2 * rad);
+                }
+                Op::Rounded(true, ..) => {}
+                Op::Text(tx, baseline, s, f, _, _, ty0, ty1) => {
+                    let top = baseline - f.ascent as i32;
+                    let (a, b) = (ty0.max(top), ty1.min(top + f.line_h as i32));
+                    mark(tx, a, crate::gfx::text4_width(s, f), b - a);
+                }
+                Op::Mask(mx, my, m1, ..) => mark(mx, my, m1.w as i32, m1.h as i32),
+            }
+        }
+        for (k, b) in bits[..ch as usize].iter().enumerate() {
+            let row = cy + k as i32;
+            // this row's uncovered runs
+            let mut runs: [(i16, i16); 8] = [(0, 0); 8];
+            let (mut n, mut c, mut many) = (0usize, x0, false);
+            while c < x1 {
+                if b[c as usize / 32] & 1 << (c % 32) != 0 {
+                    c += 1;
+                    continue;
+                }
+                let s = c;
+                while c < x1 && b[c as usize / 32] & 1 << (c % 32) == 0 {
+                    c += 1;
+                }
+                if n < runs.len() {
+                    runs[n] = (s as i16, (c - s) as i16);
+                    n += 1;
+                } else {
+                    many = true;
+                    lcd.fill(s, row, c - s, 1, bg);
+                }
+            }
+            if many || runs[..n] != open[..nopen] {
+                flush(lcd, &open[..nopen], since, row);
+                (open, nopen, since) = (runs, n, row);
+            }
+        }
+        cy += ch;
+    }
+    flush(lcd, &open[..nopen], since, y1);
 }
 
 /// As [`banded`], for a shape drawn over what is already on screen (a popup with rounded corners): only the
