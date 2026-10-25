@@ -56,6 +56,10 @@ impl Src {
 /// | AIS | MMSI | course (degrees), speed (0.1 kn) | vessel | |
 /// | DTMF | | | | the sequence |
 /// | Selcall | unit ID | | format | what it sent |
+/// An event's or message's `ago_s` when its time isn't known: stored before this power-on without a UTC clock,
+/// or read before the clock is UTC again (INBOX-6.1). Shown as "earlier", never as a guessed date.
+pub const AGO_UNKNOWN: u32 = u32::MAX;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Event {
     pub src: Src,

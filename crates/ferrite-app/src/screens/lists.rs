@@ -542,6 +542,7 @@ pub fn age_text(s: u32, b: &mut Buf<12>) {
     b.clear();
     let m = s / 60;
     let _ = match s {
+        crate::data::AGO_UNKNOWN => uwrite!(b, "earlier"), // INBOX-6.1
         0..=59 => uwrite!(b, "{} s", s),
         60..=3599 => uwrite!(b, "{} min", m),
         _ if m < 24 * 60 && !m.is_multiple_of(60) && m < 10 * 60 => uwrite!(b, "{} h {}", m / 60, m % 60),
@@ -550,10 +551,10 @@ pub fn age_text(s: u32, b: &mut Buf<12>) {
     };
 }
 
-/// The clock minute `ago_s` before `now_min` (minutes of the day), as "14:10".
+/// The clock minute `ago_s` before `now_min` (minutes of the day), as "14:10"; "--:--" without either (INBOX-6.1).
 pub fn clock_text(now_min: Option<u16>, ago_s: u32, b: &mut Buf<12>) {
     b.clear();
-    match now_min {
+    match now_min.filter(|_| ago_s != crate::data::AGO_UNKNOWN) {
         Some(n) => {
             let t = (n as i32 - (ago_s / 60) as i32).rem_euclid(1440);
             let _ = uwrite!(b, "{}:{}{}", t / 60, if t % 60 < 10 { "0" } else { "" }, t % 60);

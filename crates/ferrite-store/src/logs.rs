@@ -17,12 +17,14 @@
 //!
 //! Times are the store's own seconds ([`crate::FlashStore::set_time`]): UTC once a clock (GPS, or set by hand) is
 //! set; before that they count on from the newest record stored, so "ago" never runs backwards, but the time the
-//! radio was off isn't counted (there is no RTC: decision 76).
+//! radio was off isn't counted (there is no RTC: decision 76). So each record says whether its time was UTC
+//! ([`CLOCK`], INBOX-6.1): an age is given only when it is real, a UTC record read while the clock is UTC or a
+//! record from this power-on; any other is [`AGO_UNKNOWN`], never a guessed date.
 
 use crate::io::Flash;
 use crate::{crc16, scratch, u16_at, u32_at, Nor, Result, SECTOR};
 use core::cell::Cell;
-use ferrite_app::data::{Contact, Event, Message, MsgState, Pos, Src, Waypoint, WpSrc};
+use ferrite_app::data::{Contact, Event, Message, MsgState, Pos, Src, Waypoint, WpSrc, AGO_UNKNOWN};
 use ferrite_ui::text::Buf;
 
 pub const REC: u32 = 128;
@@ -34,6 +36,31 @@ const MAGIC: [u8; 2] = [0xE7, 0x01];
 const READ: usize = 10;
 const BODY: usize = 11;
 const CRC_AT: usize = 126;
+/// INBOX-6.1: 0 when the record was stamped with the clock UTC (GPS, or set by hand); erased (0xFF, and every
+/// record from before this byte) when not. Outside the CRC, in events and messages alike.
+pub const CLOCK: usize = 125;
+
+/// What a record's age is reckoned from (INBOX-6.1).
+#[derive(Clone, Copy)]
+pub struct Clock {
+    /// The store's seconds now.
+    pub now: u32,
+    /// The store's clock is UTC now.
+    pub utc: bool,
+    /// This power-on's own frame now: the clock at mount plus the uptime (what non-UTC stamps count in).
+    pub boot_now: u32,
+}
+
+impl Clock {
+    /// The age of a record stamped `t`, `utc` or not, from this power-on (`this_boot`) or not.
+    pub fn ago(self, t: u32, utc: bool, this_boot: bool) -> u32 {
+        match (utc, this_boot) {
+            (true, _) if self.utc => self.now.saturating_sub(t),
+            (false, true) => self.boot_now.saturating_sub(t),
+            _ => AGO_UNKNOWN,
+        }
+    }
+}
 
 /// A ring of 128-byte records over whole sectors.
 pub struct Ring {
@@ -43,11 +70,13 @@ pub struct Ring {
     body_end: usize,
     newest: Cell<Option<u32>>,
     oldest: Cell<u32>,
+    /// The first seq appended this power-on (INBOX-6.1).
+    boot: Cell<u32>,
 }
 
 impl Ring {
     pub const fn new(start: u32, end: u32, body_end: usize) -> Self {
-        Ring { start, sectors: (end - start) / SECTOR, body_end, newest: Cell::new(None), oldest: Cell::new(0) }
+        Ring { start, sectors: (end - start) / SECTOR, body_end, newest: Cell::new(None), oldest: Cell::new(0), boot: Cell::new(0) }
     }
 
     pub fn cap(&self) -> u32 {
@@ -131,6 +160,7 @@ impl Ring {
         }
         self.newest.set(newest);
         self.oldest.set(if newest.is_some() { oldest } else { 0 });
+        self.boot.set(newest.map_or(0, |n| n + 1));
         Ok(())
     }
 
@@ -140,6 +170,11 @@ impl Ring {
         let mut b = [0u8; REC as usize];
         f.read(self.addr(seq), &mut b).ok()?;
         self.valid(&b, seq).then_some(b)
+    }
+
+    /// The age of record `b` (INBOX-6.1).
+    pub fn ago(&self, b: &[u8; REC as usize], c: Clock) -> u32 {
+        c.ago(u32_at(b, 4), b[CLOCK] == 0, u32_at(b, 0) >= self.boot.get())
     }
 
     /// Record `i`'s sequence number, newest first.
@@ -217,6 +252,7 @@ impl Ring {
     pub fn forget(&self) {
         self.newest.set(None);
         self.oldest.set(0);
+        self.boot.set(0);
     }
 }
 
@@ -259,20 +295,22 @@ pub fn event_job(e: &Event) -> [u8; EVENT_JOB] {
     j
 }
 
-/// The record for a queued event, stamped `t`.
-pub fn event_rec(j: &[u8; EVENT_JOB], t: u32) -> [u8; REC as usize] {
+/// The record for a queued event, stamped `t`, with the clock UTC or not (INBOX-6.1).
+pub fn event_rec(j: &[u8; EVENT_JOB], t: u32, utc: bool) -> [u8; REC as usize] {
     let mut r = [0xFFu8; REC as usize];
     r[4..8].copy_from_slice(&t.to_le_bytes());
+    r[CLOCK] = if utc { 0 } else { 0xFF };
     r[READ] = j[0];
     r[BODY..EVENT_END].copy_from_slice(&j[1..]);
     r
 }
 
-pub fn event_decode(b: &[u8; REC as usize], now: u32) -> Event {
+/// Event record `b`, `ago_s` its age ([`Ring::ago`]).
+pub fn event_decode(b: &[u8; REC as usize], ago_s: u32) -> Event {
     let pos = (b[13] & 1 != 0).then(|| Pos { lat: u32_at(b, 26) as i32, lon: u32_at(b, 30) as i32 });
     Event {
         src: Src::ALL[(b[11] as usize).min(Src::ALL.len() - 1)],
-        ago_s: now.saturating_sub(u32_at(b, 4)),
+        ago_s,
         freq: u32_at(b, 14),
         slot: b[12],
         unread: b[READ] == 0xFF,
@@ -295,9 +333,10 @@ const TRIES: usize = 96;
 const FINAL: usize = 97;
 const NUMBER: core::ops::Range<usize> = 89..94;
 
-pub fn msg_rec(inbound: bool, peer: &Buf<10>, txt: &Buf<67>, id: &Buf<5>, t: u32) -> [u8; REC as usize] {
+pub fn msg_rec(inbound: bool, peer: &Buf<10>, txt: &Buf<67>, id: &Buf<5>, t: u32, utc: bool) -> [u8; REC as usize] {
     let mut r = [0xFFu8; REC as usize];
     r[4..8].copy_from_slice(&t.to_le_bytes());
+    r[CLOCK] = if utc { 0 } else { 0xFF };
     r[BODY..MSG_END].fill(0);
     r[11] = inbound as u8;
     put(&mut r[12..22], peer);
@@ -312,7 +351,8 @@ pub fn msg_same(b: &[u8; REC as usize], peer: &Buf<10>, id: &Buf<5>, txt: &Buf<6
     b[11] != 0 && !id.is_empty() && text::<5>(&b[NUMBER]) == *id && text::<10>(&b[12..22]) == *peer && text::<67>(&b[22..89]) == *txt
 }
 
-pub fn msg_decode(b: &[u8; REC as usize], now: u32) -> Message {
+/// Message record `b`, `ago_s` its age ([`Ring::ago`]).
+pub fn msg_decode(b: &[u8; REC as usize], ago_s: u32) -> Message {
     let inbound = b[11] != 0;
     let tries = (!b[TRIES]).count_ones() as u8;
     let state = if inbound {
@@ -328,7 +368,7 @@ pub fn msg_decode(b: &[u8; REC as usize], now: u32) -> Message {
     } else {
         MsgState::Pending
     };
-    Message { inbound, peer: text(&b[12..22]), text: text(&b[22..89]), ago_s: now.saturating_sub(u32_at(b, 4)), state }
+    Message { inbound, peer: text(&b[12..22]), text: text(&b[22..89]), ago_s, state }
 }
 
 /// The byte and value that move an outgoing message to `state` (bits only cleared).

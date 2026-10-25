@@ -1949,6 +1949,7 @@ fn mhz5(f: Freq10) -> Buf<12> {
 /// "12 s ago", "3 min ago", "2 h ago".
 fn ago(s: u32, b: &mut Buf<16>) {
     match s {
+        crate::data::AGO_UNKNOWN => put!(b, "earlier"), // INBOX-6.1
         0..=59 => put!(b, "{} s ago", s),
         60..=3599 => put!(b, "{} min ago", s / 60),
         _ => put!(b, "{} h ago", s / 3600),

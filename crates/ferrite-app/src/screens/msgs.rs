@@ -159,7 +159,7 @@ impl View for Msgs {
                 }
                 let mut b = Buf::<40>::new();
                 // The clock time is in the header: here how long ago, and for a sent message its state.
-                let y = app.kv(lcd, 0, 58, 0, &w::KV_DETAIL, b"Age", ferrite_ui::v!(b, "{} ago", Txt(age.as_bytes())), TEXT, false);
+                let y = app.kv(lcd, 0, 58, 0, &w::KV_DETAIL, b"Age", if m.ago_s == crate::data::AGO_UNKNOWN { &b"Before restart"[..] } else { ferrite_ui::v!(b, "{} ago", Txt(age.as_bytes())) }, TEXT, false);
                 let (l, v): (&[u8], &[u8]) = if m.inbound { (b"", b"") } else { (b"State", st.as_bytes()) };
                 app.kv(lcd, 1, y, 0, &w::KV_DETAIL, l, v, c, false);
                 if app.dirty(R_NOTE, hash(&m.text)) {

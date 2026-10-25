@@ -280,7 +280,7 @@ pub(crate) fn last_message(s: &mut crate::data::Station, data: &dyn crate::data:
     if let Some(m) = (0..n).filter_map(|i| data.message(i)).find(|m| m.inbound && m.peer.as_bytes().eq_ignore_ascii_case(s.call.as_bytes())) {
         let t = m.text.as_bytes();
         s.msg = Buf::from(&t[..t.len().min(32)]);
-        s.msg_min = clock_min.map(|c| (c as i32 - (m.ago_s / 60) as i32).rem_euclid(1440) as u16);
+        s.msg_min = clock_min.filter(|_| m.ago_s != crate::data::AGO_UNKNOWN).map(|c| (c as i32 - (m.ago_s / 60) as i32).rem_euclid(1440) as u16);
     }
 }
 

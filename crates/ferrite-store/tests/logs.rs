@@ -3,7 +3,7 @@
 //! a chip with old data in these areas, and power cuts at random points of every kind of write.
 
 use ferrite_app::aprs::AprsCfg;
-use ferrite_app::data::{Contact, Data, Draft, Event, Fix, Message, MsgState, Op, Pos, Src, Station, Sym, Waypoint, WpSrc};
+use ferrite_app::data::{Contact, Data, Draft, Event, Fix, Message, MsgState, Op, Pos, Src, Station, Sym, Waypoint, WpSrc, AGO_UNKNOWN};
 use ferrite_app::screens::alert::AlertInfo;
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
@@ -540,4 +540,41 @@ fn messages_read_all_and_delete_all() {
     assert!(s.request(Op::ClearMessages));
     assert_eq!(s.messages(), 0);
     assert_eq!(cycle(s).messages(), 0);
+}
+
+/// INBOX-6.1: a record's age is real or unknown, never a guessed date. Stamped this power-on, an event's and a
+/// message's ages stay right across the clock becoming UTC (GPS); after a power cycle, a record stamped without
+/// UTC (as every record from before INBOX-6.1) has no age, and one stamped in UTC gets its age back once the
+/// clock is UTC again.
+#[test]
+fn record_times_are_real_or_unknown() {
+    let a = app();
+    let s = mount(SimFlash::new());
+    s.autosave(10_000, &a);
+    assert!(s.log(&ev(Src::Pocsag, 1))); // no clock yet
+    assert!(s.message_in(true, b"VE3KPW-9", b"no clock", 0));
+    s.autosave(70_000, &a);
+    assert_eq!((s.event(0).unwrap().ago_s, s.message(0).unwrap().ago_s), (60, 60));
+    s.set_time(1_800_000_000); // GPS: UTC from here
+    assert_eq!(s.event(0).unwrap().ago_s, 60, "this power-on's record keeps its age when the clock jumps");
+    assert!(s.log(&ev(Src::Pocsag, 2)));
+    assert!(s.message_in(true, b"VE3KPW-9", b"with clock", 0));
+    s.autosave(100_000, &a);
+    assert_eq!((s.event(0).unwrap().ago_s, s.event(1).unwrap().ago_s), (30, 90));
+    assert_eq!((s.message(0).unwrap().ago_s, s.message(1).unwrap().ago_s), (30, 90));
+
+    // Power cycle, no GPS yet: neither has a real age.
+    let s = cycle(s);
+    assert_eq!((s.event(0).unwrap().ago_s, s.event(1).unwrap().ago_s), (AGO_UNKNOWN, AGO_UNKNOWN));
+    assert_eq!((s.message(0).unwrap().ago_s, s.message(1).unwrap().ago_s), (AGO_UNKNOWN, AGO_UNKNOWN));
+    // A record stored now, before GPS, has its age.
+    assert!(s.log(&ev(Src::Pocsag, 3)));
+    s.autosave(5_000, &a);
+    assert_eq!(s.event(0).unwrap().ago_s, 5);
+    // GPS again: the UTC record's age is back (stamped at 1_800_000_000); the old non-UTC one stays unknown;
+    // this power-on's keeps its own.
+    s.set_time(1_800_000_500);
+    assert_eq!(s.event(1).unwrap().ago_s, 500);
+    assert_eq!(s.event(2).unwrap().ago_s, AGO_UNKNOWN);
+    assert_eq!(s.event(0).unwrap().ago_s, 5);
 }

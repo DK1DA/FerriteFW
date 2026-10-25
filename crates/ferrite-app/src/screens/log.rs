@@ -59,7 +59,7 @@ impl View for Log {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(if self.detail { b"Event" } else { b"Event log" });
+        b.set(if self.detail { b"Event" } else { b"Events" }); // SBAR-5: 8 characters at most
     }
 
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {
@@ -373,7 +373,7 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
         mhz_text(e.freq, &mut f);
         add("Freq", f.as_bytes());
     }
-    add("Heard", ferrite_ui::v!(b, "{} ago", Txt(age.as_bytes()))); // the clock time is in the header
+    add("Heard", if e.ago_s == crate::data::AGO_UNKNOWN { &b"Before restart"[..] } else { ferrite_ui::v!(b, "{} ago", Txt(age.as_bytes())) }); // the clock time is in the header
     let mut y = 58;
     for (i, (label, v)) in rows.iter().enumerate().take(n) {
         let c = if i == 0 && is_distress(e) { RED } else { TEXT };

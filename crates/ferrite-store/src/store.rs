@@ -158,6 +158,9 @@ pub struct FlashStore<N: Nor, D: Data> {
     /// The store's clock: seconds at uptime 0, and the uptime the UI last gave.
     time0: Cell<u32>,
     now_ms: Cell<u32>,
+    /// The clock is UTC (GPS, or set by hand), and what it was at mount: this power-on's own frame (INBOX-6.1).
+    utc: Cell<bool>,
+    boot0: Cell<u32>,
 }
 
 impl<N: Nor, D: Data> FlashStore<N, D> {
@@ -190,6 +193,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             draft: Cell::new(Draft::default()),
             time0: Cell::new(TIME0),
             now_ms: Cell::new(0),
+            utc: Cell::new(false),
+            boot0: Cell::new(TIME0),
         }
     }
 
@@ -238,6 +243,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         self.contacts.0.mount(&self.f).await?;
         let t = [self.events.newest_time(&self.f), self.msgs.newest_time(&self.f)].into_iter().flatten().max();
         self.time0.set(t.map_or(TIME0, |t| t.saturating_add(1)).max(TIME0));
+        self.boot0.set(self.time0.get());
         if let Some(c) = settings::latest_of(&self.f, APRS_COPIES, APRS_PAYLOAD)? {
             let mut b = [0u8; 4];
             self.f.raw_read(c.at, &mut b)?;
@@ -455,11 +461,11 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Job::Op(op) => self.perform(op).await.is_ok(),
             Job::Save { crc, len, seed } => self.save_async(crc, len as usize, seed).await,
             Job::Log(j) => {
-                let mut r = logs::event_rec(&j, self.now_s());
+                let mut r = logs::event_rec(&j, self.now_s(), self.utc.get());
                 self.events.append(&self.f, &mut r).await.is_ok()
             }
             Job::Msg { inbound, peer, text, id, ago_s } => {
-                let mut r = logs::msg_rec(inbound, &peer, &text, &id, self.now_s().saturating_sub(ago_s));
+                let mut r = logs::msg_rec(inbound, &peer, &text, &id, self.now_s().saturating_sub(ago_s), self.utc.get());
                 self.msgs.append(&self.f, &mut r).await.is_ok()
             }
             Job::MsgState { peer, text, state } => self.msg_state_async(peer, text, state).await.is_ok(),
@@ -1088,7 +1094,13 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
     /// The clock is known (GPS, or set by hand): `secs` UTC now. Records stored from now on are stamped in UTC.
     pub fn set_time(&self, secs: u32) {
         self.time0.set(secs.wrapping_sub(self.now_ms.get() / 1000));
+        self.utc.set(true);
         self.bump();
+    }
+
+    /// What records' ages are reckoned from (INBOX-6.1).
+    fn clock(&self) -> logs::Clock {
+        logs::Clock { now: self.now_s(), utc: self.utc.get(), boot_now: self.boot0.get().wrapping_add(self.now_ms.get() / 1000) }
     }
 
     /// An event for the log (INBOX-6): a decoder's, an alert, a message. On the radio it is queued and stamped
@@ -1101,7 +1113,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         if self.deferred.get() {
             return self.submit(Job::Log(j));
         }
-        let mut r = logs::event_rec(&j, self.now_s().saturating_sub(e.ago_s));
+        let mut r = logs::event_rec(&j, self.now_s().saturating_sub(e.ago_s), self.utc.get());
         let ok = block(self.events.append(&self.f, &mut r)).is_ok();
         self.bump();
         ok
@@ -1456,7 +1468,7 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
         self.events.len()
     }
     fn event(&self, i: u16) -> Option<Event> {
-        self.events.read(&self.f, i).map(|b| logs::event_decode(&b, self.now_s()))
+        self.events.read(&self.f, i).map(|b| logs::event_decode(&b, self.events.ago(&b, self.clock())))
     }
     fn event_seq(&self, i: u16) -> Option<u32> {
         self.events.seq(i)
@@ -1480,7 +1492,7 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
         self.msgs.len()
     }
     fn message(&self, i: u16) -> Option<Message> {
-        self.msgs.read(&self.f, i).map(|b| logs::msg_decode(&b, self.now_s()))
+        self.msgs.read(&self.f, i).map(|b| logs::msg_decode(&b, self.msgs.ago(&b, self.clock())))
     }
     fn draft(&self) -> Draft {
         self.draft.get()
