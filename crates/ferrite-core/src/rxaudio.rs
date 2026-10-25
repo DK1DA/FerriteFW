@@ -103,8 +103,32 @@ pub struct Block {
 pub const HEAD: usize = 7;
 /// `AUDIO_DATA`'s flags.
 pub const SQ_OPEN: u8 = 1;
+/// What was heard is the broadcast receiver's (FM or AM broadcast, decision 290); the slot is the broadcast's.
+pub const BCAST: u8 = 2;
+/// What was heard is HF mode's (the SI4732); no slot.
+pub const HF: u8 = 4;
 /// No slot heard.
 pub const NO_SLOT: u8 = 0xFF;
+
+/// LINK-13.4, decision 290: what the receive audio carries now, as `slot | flags << 8` (an atomic's worth): the first
+/// slot whose squelch is open (a BK4829's audio; the SI4732 is muted under it, BCR-24), else the broadcast while it
+/// plays on its slot, else HF mode's receiver; else nothing ([`NO_SLOT`], no flags): keep-alives only.
+pub fn source(open: [bool; 3], bcast: Option<u8>, hf: bool) -> u16 {
+    let (slot, flags) = match open.iter().position(|&o| o) {
+        Some(s) => (s as u8, SQ_OPEN),
+        None => match bcast {
+            Some(s) => (s, SQ_OPEN | BCAST),
+            None if hf => (NO_SLOT, SQ_OPEN | HF),
+            None => (NO_SLOT, 0),
+        },
+    };
+    slot as u16 | (flags as u16) << 8
+}
+
+/// The slot and flags packed by [`source`]; audio goes while [`SQ_OPEN`] is set.
+pub fn unpack_source(v: u16) -> (u8, u8) {
+    (v as u8, (v >> 8) as u8)
+}
 
 /// An `AUDIO_DATA` payload into `out`: a block, or a keep-alive (`None`). Its length.
 pub fn put(seq: u16, slot: u8, flags: u8, blk: Option<&Block>, out: &mut [u8]) -> usize {
@@ -120,6 +144,14 @@ pub fn put(seq: u16, slot: u8, flags: u8, blk: Option<&Block>, out: &mut [u8]) -
         }
         None => HEAD,
     }
+}
+
+/// A whole `AUDIO_DATA` link frame into `w` (the wire bytes, framed as every link frame is): its length, or `None`
+/// if `w` is too small. The DSP task sends these itself (decision 290), so audio never waits for the UI task.
+pub fn frame(seq: u16, slot: u8, flags: u8, blk: Option<&Block>, w: &mut [u8]) -> Option<usize> {
+    let mut p = [0u8; HEAD + BLOCK_BYTES];
+    let n = put(seq, slot, flags, blk, &mut p);
+    crate::link::build(crate::link::msg::AUDIO_DATA, 0, &p[..n], w)
 }
 
 /// An `AUDIO_DATA` payload read back: seq, slot, flags, the state at its start, the codes (empty: a keep-alive).
@@ -186,6 +218,27 @@ mod tests {
     extern crate std;
     use super::*;
     use std::vec::Vec;
+
+    /// LINK-13.7, decision 290: a slot heard comes first, then the broadcast playing, then HF mode; else nothing.
+    #[test]
+    fn source_picks_what_is_heard() {
+        assert_eq!(unpack_source(source([false, true, true], Some(0), true)), (1, SQ_OPEN));
+        assert_eq!(unpack_source(source([false; 3], Some(0), false)), (0, SQ_OPEN | BCAST));
+        assert_eq!(unpack_source(source([false; 3], None, true)), (NO_SLOT, SQ_OPEN | HF));
+        assert_eq!(unpack_source(source([false; 3], None, false)), (NO_SLOT, 0));
+    }
+
+    /// LINK-13.6: `frame` (the DSP task's) makes the same wire frame as `put`'s payload framed by the link.
+    #[test]
+    fn frame_is_a_whole_link_frame() {
+        let mut w = [0u8; crate::link::MAX_WIRE];
+        let n = frame(7, 1, SQ_OPEN, None, &mut w).unwrap();
+        let mut p = [0u8; HEAD];
+        let k = put(7, 1, SQ_OPEN, None, &mut p);
+        let mut x = [0u8; crate::link::MAX_WIRE];
+        let m = crate::link::build(crate::link::msg::AUDIO_DATA, 0, &p[..k], &mut x).unwrap();
+        assert_eq!(&w[..n], &x[..m]);
+    }
 
     fn tone(hz: f64, n: usize, amp: f64) -> Vec<i16> {
         (0..n).map(|i| (amp * (2.0 * core::f64::consts::PI * hz * i as f64 / 24_000.0).sin()) as i16).collect()

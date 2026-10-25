@@ -66,14 +66,85 @@ pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Gen>> = Signal::new();
 const RECHECK_HALVES: u32 = 5_000;
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
-/// LINK-13.4: receive audio for the PC, a block every 32 ms while the cable's session listens; six deep (192 ms:
-/// the UI task takes them each pass, at most [`AUDIO_TICK_MS`] apart meanwhile, plus a pass's own drawing time).
-pub static AUDIO_BLOCKS: Channel<M, ferrite_core::rxaudio::Block, 6> = Channel::new();
-/// LINK-13.4: the UI task's longest wait between passes while listening.
-pub const AUDIO_TICK_MS: u64 = 60;
-/// LINK-13.4: blocks made, and dropped because the UI task hadn't taken the last six (the readback's `audio` line).
+/// LINK-13.4: blocks made; dropped (the queue below full: the cable's ring had no room for 192 ms); and the times
+/// a block waited (the ring full, or a thread-mode writer mid-frame). The readback's `audio` line.
 pub static AUDIO_MADE: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_DROPS: AtomicU32 = AtomicU32::new(0);
+pub static AUDIO_WAITS: AtomicU32 = AtomicU32::new(0);
+/// Decision 290: blocks waiting for room in `TERM_OUT`, at most this many (192 ms), each with what it was heard from.
+const AUDIO_QUEUE: usize = 6;
+/// A keep-alive this many blocks apart while nothing is heard (about 1 s, LINK-13.4).
+const KEEPALIVE_BLOCKS: u8 = 31;
+
+/// Decision 290: the DSP task's own sender of receive audio. Blocks are framed and put straight into the cable's
+/// output ring (its transmit interrupt sends them), never waiting for the UI task, whose redraws took longer than
+/// the old six-block hand-off held. A block waits here only while the ring is full or a thread-mode writer is
+/// mid-frame ([`crate::chan::TERM_OUT_LOCK`]).
+struct AudioOut {
+    q: [(ferrite_core::rxaudio::Block, u16); AUDIO_QUEUE],
+    head: u8,
+    n: u8,
+    seq: u16,
+    quiet: u8,
+}
+
+impl AudioOut {
+    fn new() -> Self {
+        let blank = ferrite_core::rxaudio::Block { start: Default::default(), codes: [0; ferrite_core::rxaudio::BLOCK_BYTES] };
+        AudioOut { q: [(blank, 0); AUDIO_QUEUE], head: 0, n: 0, seq: 0, quiet: 0 }
+    }
+
+    /// One whole frame into `TERM_OUT`, or nothing (`false`).
+    fn put(&mut self, src: u16, blk: Option<&ferrite_core::rxaudio::Block>) -> bool {
+        use crate::chan::{TERM_OUT, TERM_OUT_LOCK};
+        let (slot, flags) = ferrite_core::rxaudio::unpack_source(src);
+        let mut w = [0u8; ferrite_core::link::MAX_WIRE];
+        let Some(k) = ferrite_core::rxaudio::frame(self.seq, slot, flags, blk, &mut w) else { return false };
+        if crate::bringup::ON.load(Relaxed) || TERM_OUT_LOCK.load(core::sync::atomic::Ordering::SeqCst) || (TERM_OUT.room() as usize) < k {
+            return false;
+        }
+        for &b in &w[..k] {
+            TERM_OUT.put(b);
+        }
+        crate::hal::uart::tx_ring(crate::report::UART_CPS, &TERM_OUT);
+        self.seq = self.seq.wrapping_add(1);
+        true
+    }
+
+    /// A block made: queued if something is heard (the oldest dropped when full), a keep-alive about once a second
+    /// otherwise; then as many queued as fit go out.
+    fn block(&mut self, b: &ferrite_core::rxaudio::Block) {
+        let src = crate::chan::AUDIO_SRC.load(Relaxed);
+        if ferrite_core::rxaudio::unpack_source(src).1 & ferrite_core::rxaudio::SQ_OPEN != 0 {
+            if self.n as usize == AUDIO_QUEUE {
+                AUDIO_DROPS.fetch_add(1, Relaxed); // the oldest goes: the PC hears a gap
+                self.head = (self.head + 1) % AUDIO_QUEUE as u8;
+                self.n -= 1;
+            }
+            self.q[(self.head + self.n) as usize % AUDIO_QUEUE] = (*b, src);
+            self.n += 1;
+            self.quiet = 0;
+        } else {
+            self.quiet = self.quiet.saturating_add(1);
+            if self.quiet >= KEEPALIVE_BLOCKS && self.n == 0 && self.put(src, None) {
+                self.quiet = 0;
+            }
+        }
+        self.drain();
+    }
+
+    fn drain(&mut self) {
+        while self.n > 0 {
+            let (b, src) = self.q[self.head as usize];
+            if !self.put(src, Some(&b)) {
+                AUDIO_WAITS.fetch_add(1, Relaxed);
+                return;
+            }
+            self.head = (self.head + 1) % AUDIO_QUEUE as u8;
+            self.n -= 1;
+        }
+    }
+}
 /// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
 pub static FRAMES: AtomicU32 = AtomicU32::new(0);
 pub static DROPPED: AtomicU32 = AtomicU32::new(0);
@@ -90,6 +161,7 @@ pub async fn task() {
     // LINK-13.4: receive audio for the PC, coded from the same samples the decoder gets.
     let mut listen = false;
     let mut pack = ferrite_core::rxaudio::Packer::new();
+    let mut sender = AudioOut::new();
     let mut halves = 0u32;
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
@@ -105,6 +177,7 @@ pub async fn task() {
                     DspCmd::Audio(on) => {
                         if on && !listen {
                             pack = ferrite_core::rxaudio::Packer::new();
+                            sender = AudioOut::new();
                         }
                         listen = on;
                     }
@@ -161,9 +234,7 @@ pub async fn task() {
                     for &x in &out[..n] {
                         pack.push(x, |b| {
                             AUDIO_MADE.fetch_add(1, Relaxed);
-                            if AUDIO_BLOCKS.try_send(*b).is_err() {
-                                AUDIO_DROPS.fetch_add(1, Relaxed); // a full queue drops the newest: the PC hears a gap
-                            }
+                            sender.block(b);
                         });
                     }
                 }

@@ -29,8 +29,9 @@ impl Radio {
             // WATCH-17.1 (decision 262): the turns the chips took, read and maybe zeroed.
             DebugReq::Turns { reset } => DebugAns::Turns(self.turns.take(reset)),
             // TERM-32 (a bench test): PA0, the mic level tap VOX reads, at 8 kHz for 32 ms, to tell raw audio from an
-            // envelope. Through the ADC's preempted group, as VOX; the Radio task waits through it.
-            DebugReq::Mic => {
+            // envelope. Through the ADC's preempted group, as VOX; the Radio task waits through it. TERM-32.1 (`af`):
+            // PA2, the receive audio (both BK4829s summed, and the SI4732's: bench Oct 25, 2026, decision 290).
+            DebugReq::Mic(pa2) => {
                 use crate::hal::{adc, clock, time::cycles};
                 use ferrite_core::vox::{MicCapture, MIC_PERIOD_US, MIC_SAMPLES};
                 adc::init();
@@ -39,7 +40,7 @@ impl Radio {
                 let start = cycles();
                 for (i, v) in s.iter_mut().enumerate() {
                     while cycles().wrapping_sub(start) < i as u32 * per {}
-                    *v = adc::read(adc::CH_PA0);
+                    *v = adc::read(if pa2 { adc::CH_PA2 } else { adc::CH_PA0 });
                 }
                 let us = cycles().wrapping_sub(start) / clock::mhz();
                 DebugAns::Mic(MicCapture::from_samples(&s, us))

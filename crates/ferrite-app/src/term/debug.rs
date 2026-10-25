@@ -68,8 +68,9 @@ pub enum Kind {
     /// `bk settle [WAKE [SLEEP]]`: the BK4829 settle waits (TERM-31), set or asked.
     Settle(Option<ferrite_core::settle::Settle>),
     #[cfg(feature = "bench")]
-    /// `mic`: a burst of PA0 (the mic level tap) readings, summed up (TERM-32).
-    Mic,
+    /// `mic`: a burst of PA0 (the mic level tap) readings, summed up (TERM-32); `af` (`true`): PA2, the receive
+    /// audio (TERM-32.1).
+    Mic(bool),
     #[cfg(feature = "bench")]
     /// `txtest [MODE [FILTERS] [LEVEL]]`: the transmit test signal for the next PTT key-up (TERM-33).
     TxTest(ferrite_core::txtest::Ask),
@@ -162,7 +163,7 @@ impl Job {
             #[cfg(feature = "bench")]
             Kind::Settle(s) => DebugReq::Settle(s),
             #[cfg(feature = "bench")]
-            Kind::Mic => DebugReq::Mic,
+            Kind::Mic(pa2) => DebugReq::Mic(pa2),
             #[cfg(feature = "bench")]
             Kind::TxTest(a) => DebugReq::TxTest(a),
             #[cfg(feature = "bench")]
@@ -370,9 +371,9 @@ impl Job {
                 Step::Line
             }
             #[cfg(feature = "bench")]
-            (Kind::Mic, DebugAns::Mic(c)) => {
+            (Kind::Mic(pa2), DebugAns::Mic(c)) => {
                 match self.line {
-                    0 => put!(out, "  mic PA0: {} readings in {} us: min {}, max {}, mean {} (12-bit)", ferrite_core::vox::MIC_SAMPLES, c.us, c.min, c.max, c.mean),
+                    0 => put!(out, "  {}: {} readings in {} us: min {}, max {}, mean {} (12-bit)", if pa2 { "af PA2" } else { "mic PA0" }, ferrite_core::vox::MIC_SAMPLES, c.us, c.min, c.max, c.mean),
                     1 => put!(out, "  {} crossings of the mean: {} Hz if this is raw audio (a level or envelope barely crosses)", c.crossings, c.hz()),
                     _ => {
                         out.push(b"  first 16 (8-bit):");

@@ -1324,7 +1324,7 @@ pub fn writes(line: &[u8]) -> bool {
     let mut w = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty());
     let Some(c) = w.next() else { return false };
     let rest = w.count();
-    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"mic"].iter().any(|r| same(c, r));
+    let reads = [&b"get"[..], b"help", b"?", b"dump", b"mem", b"mem32", b"gpio", b"mic", b"af"].iter().any(|r| same(c, r));
     // TERM-36: `gps` and `gps query` only read; `gps standby` puts the module to sleep.
     let second = line.split(|b| b.is_ascii_whitespace()).filter(|x| !x.is_empty()).nth(1);
     let reads = reads || same(c, b"gps") && second.is_none_or(|w| same(w, b"query"));
@@ -1383,7 +1383,9 @@ pub fn run<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, line: &[u8], lo
         #[cfg(feature = "bench")]
         _ if same(c, b"gpio") => Ok(Done::Debug(Job::new(Kind::Gpio))),
         #[cfg(feature = "bench")]
-        _ if same(c, b"mic") => Ok(Done::Debug(Job::new(Kind::Mic))),
+        _ if same(c, b"mic") => Ok(Done::Debug(Job::new(Kind::Mic(false)))),
+        #[cfg(feature = "bench")]
+        _ if same(c, b"af") => Ok(Done::Debug(Job::new(Kind::Mic(true)))),
         #[cfg(feature = "bench")]
         _ if same(c, b"txtest") => txtest(&mut t),
         #[cfg(feature = "bench")]
@@ -1526,7 +1528,7 @@ use super::debug::{BK_REGS, MEM_MAX};
 /// TERM-38 (decision 151): the bench builds' commands (bring-up and tx-bench, the `bench` cargo feature). A receive
 /// or tx build compiles them out but knows their names, so it can say where they are; `gps` alone (the last fix)
 /// is in every build, its `query`, `nmea` and `standby` are the bench's.
-pub const BENCH_ONLY: [&str; 10] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "txtest", "lcd"];
+pub const BENCH_ONLY: [&str; 11] = ["mem", "mem32", "gpio", "bk", "si", "bt", "rx", "mic", "af", "txtest", "lcd"];
 
 /// TERM-38: what a user build says to a bench command.
 #[cfg(not(feature = "bench"))]

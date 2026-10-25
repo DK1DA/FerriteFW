@@ -108,6 +108,25 @@ static TERM_OUT_BUF: [AtomicU8; 1024] = [const { AtomicU8::new(0) }; 1024];
 pub static TERM_IN: Ring<'static> = Ring::new(&TERM_IN_BUF);
 pub static TERM_OUT: Ring<'static> = Ring::new(&TERM_OUT_BUF);
 pub static TERM_WAKE: Signal<M, ()> = Signal::new();
+/// Decision 290: a thread-mode task is writing link frames into `TERM_OUT`; the DSP task, which preempts it, puts
+/// its audio frames in only while this is clear, so a frame never lands inside another.
+pub static TERM_OUT_LOCK: AtomicBool = AtomicBool::new(false);
+/// LINK-13.4, decision 290: what the receive audio carries now (`ferrite_core::rxaudio::source`), set by the Radio
+/// task, read by the DSP task as it frames each block.
+pub static AUDIO_SRC: AtomicU16 = AtomicU16::new(0x00FF);
+
+/// The Radio task: what is heard now, into [`AUDIO_SRC`] (`ferrite_core::rxaudio::source`).
+pub fn heard_now(open: [bool; 3], bcast: Option<u8>, hf: bool) {
+    AUDIO_SRC.store(ferrite_core::rxaudio::source(open, bcast, hf), core::sync::atomic::Ordering::Relaxed);
+}
+
+/// Runs `f`, which writes into `TERM_OUT`, with [`TERM_OUT_LOCK`] held (thread-mode writers only).
+pub fn term_out_locked<R>(f: impl FnOnce() -> R) -> R {
+    TERM_OUT_LOCK.store(true, core::sync::atomic::Ordering::SeqCst);
+    let r = f();
+    TERM_OUT_LOCK.store(false, core::sync::atomic::Ordering::SeqCst);
+    r
+}
 
 /// The link protocol on the cable (manual chapter 29), between the UI task (which runs the session next to the
 /// App, as it runs the terminal) and the Link task (which owns UART4): a rate agreed by `BAUD`, to switch to once

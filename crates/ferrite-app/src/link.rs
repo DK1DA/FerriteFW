@@ -246,14 +246,13 @@ impl Session {
         self.audio
     }
 
-    /// LINK-13.4: one block of receive audio (or a keep-alive, `None`) pushed to this session, plain: never
+    /// LINK-13.4: one block of receive audio (or a keep-alive, `None`) pushed to this session (the simulator's way;
+    /// the radio's DSP task frames its own the same way, decision 290), plain: never
     /// through the compression block (LINK-51), so it goes straight to `out`. Dropped whole when there's no room
     /// (the cable's ring holds several; a lost block costs only itself).
     pub fn audio_out(&mut self, slot: u8, flags: u8, blk: Option<&ferrite_core::rxaudio::Block>, out: &mut impl Sink) -> bool {
-        let mut p = [0u8; ferrite_core::rxaudio::HEAD + ferrite_core::rxaudio::BLOCK_BYTES];
-        let n = ferrite_core::rxaudio::put(self.audio_seq, slot, flags, blk, &mut p);
         let mut w = [0u8; MAX_WIRE];
-        if let Some(k) = wire::build(msg::AUDIO_DATA, 0, &p[..n], &mut w) {
+        if let Some(k) = ferrite_core::rxaudio::frame(self.audio_seq, slot, flags, blk, &mut w) {
             if out.room() >= k {
                 out.put(&w[..k]);
                 self.audio_seq = self.audio_seq.wrapping_add(1);

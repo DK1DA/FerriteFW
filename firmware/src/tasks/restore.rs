@@ -28,6 +28,7 @@ async fn send(ty: u8, seq: u8, ans: &[u8]) {
     for &c in &w[..k] {
         TERM_OUT.put(c);
     }
+    crate::hal::uart::tx_ring(crate::report::UART_CPS, &TERM_OUT); // decision 290: the interrupt sends it
 }
 
 /// Serves the restore from the accepted `START` (its seq) on; never returns.

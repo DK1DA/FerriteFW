@@ -1265,7 +1265,7 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Lcd(l) => DebugAns::Lcd(ferrite_core::msg::LcdBench { idle: true, ..Default::default() }.apply(l)),
         #[cfg(feature = "bench")]
-        DebugReq::Mic => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
+        DebugReq::Mic(_) => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
         #[cfg(feature = "bench")]
         DebugReq::TxTest(ferrite_core::txtest::Ask::Set(a)) => DebugAns::TxTest(a),
         #[cfg(feature = "bench")]
@@ -1402,12 +1402,25 @@ fn debug_mic() {
     r.cmd("mic");
     let sine: Vec<u16> = (0..256).map(|i| (2048.0 + 600.0 * (i as f64 * core::f64::consts::TAU / 8.0 + 0.3).sin()) as u16).collect();
     let cap = MicCapture::from_samples(&sine, 32_000);
-    assert_eq!(r.serve(6, |_| DebugAns::Mic(cap)), vec![DebugReq::Mic]);
+    assert_eq!(r.serve(6, |_| DebugAns::Mic(cap)), vec![DebugReq::Mic(false)]);
     let raw = r.raw();
     assert!(raw.contains("mic PA0: 256 readings in 32000 us"), "{raw}");
     assert!(raw.contains(" Hz if this is raw audio"), "{raw}");
     assert!(raw.contains("first 16 (8-bit):"), "{raw}");
     assert!(!super::cmd::writes(b"mic"));
+}
+
+#[cfg(feature = "bench")]
+/// TERM-32.1: `af` is the same burst from PA2, the receive audio; it only reads.
+#[test]
+fn debug_af() {
+    use ferrite_core::vox::MicCapture;
+    let mut r = Rig::main();
+    r.cmd("af");
+    let cap = MicCapture::from_samples(&[1250; 256], 32_000);
+    assert_eq!(r.serve(6, |_| DebugAns::Mic(cap)), vec![DebugReq::Mic(true)]);
+    assert!(r.raw().contains("af PA2: 256 readings in 32000 us"), "{}", r.raw());
+    assert!(!super::cmd::writes(b"af"));
 }
 
 #[cfg(feature = "bench")]
@@ -1851,12 +1864,12 @@ fn debug_no_answer_and_stop() {
 #[test]
 fn user_build_refuses_bench_commands() {
     let mut r = Rig::main();
-    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30"] {
+    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30"] {
         r.cmd(c);
         assert!(r.bottom().contains("not in this build: a bench build has it"), "{c}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{c}: nothing sent");
     }
-    assert_eq!(super::cmd::BENCH_ONLY.len(), 10);
+    assert_eq!(super::cmd::BENCH_ONLY.len(), 11);
     r.cmd("gps");
     assert_eq!(r.serve(4, regs), vec![DebugReq::Gga], "gps alone is every build's");
     r.send(b"\r");

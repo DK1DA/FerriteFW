@@ -1,4 +1,5 @@
-//! Serial ports. Receive is interrupt driven into a ring; transmit is polled. Mirrors fw/hal/hal_uart.
+//! Serial ports. Receive is interrupt driven into a ring; transmit is polled, but for the cable's link, which the
+//! transmit interrupt drains from its ring ([`tx_ring`], decision 290). Mirrors fw/hal/hal_uart.
 //!   UART_BT   USART1 PA9/PA10   Bluetooth module
 //!   UART_GPS  USART3 PB10/PB11  GPS module
 //!   UART_CPS  UART4  PC10/PC11  programming cable (console)
@@ -7,7 +8,7 @@ use super::regs::*;
 use super::{clock, irq, modify, rd, wr};
 use crate::ring::Ring;
 use crate::report::{UartStats, UART_COUNT};
-use core::sync::atomic::{AtomicU32, AtomicU8, Ordering::Relaxed};
+use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8, Ordering::Relaxed};
 
 /// Above the time driver and the executors; the handlers only fill the rings.
 const PRIO: u8 = 3;
@@ -184,6 +185,38 @@ pub fn stats(id: usize) -> UartStats {
     }
 }
 
+/// The ring the transmit interrupt drains ([`tx_ring`]; null: [`send_async`]'s bytes, or polled writes).
+static TX_RING: [AtomicPtr<Ring<'static>>; UART_COUNT] = [const { AtomicPtr::new(core::ptr::null_mut()) }; UART_COUNT];
+/// Why nothing may leave now, a bit each ([`HOLD_LINK`], [`HOLD_KEYED`]): the interrupt stops at the next byte.
+static TX_HOLD: [AtomicU8; UART_COUNT] = [const { AtomicU8::new(0) }; UART_COUNT];
+/// The Link task's own reasons (TX-43 as it sees it, SND-14's speaker mic, a byte of its own to write).
+pub const HOLD_LINK: u8 = 1;
+/// TX-43 (decision 290): the Radio task holds the cable the moment it keys (without Dry TX).
+pub const HOLD_KEYED: u8 = 2;
+
+/// Decision 290: the transmit interrupt sends `ring` byte by byte until it is empty, so the port keeps sending while
+/// the thread-mode tasks are busy (the UI task's redraws took up to 200 ms, and LINK-13's audio waited behind them).
+/// Called again whenever bytes may be waiting: it only (re)arms the interrupt. Nothing goes while held ([`tx_hold`]).
+pub fn tx_ring(id: usize, ring: &'static Ring<'static>) {
+    let base = HW[id].base;
+    if rd(base + USART_CTRL1) & USART_CTRL1_UEN == 0 || TX_HOLD[id].load(Relaxed) != 0 || ring.count() == 0 {
+        return;
+    }
+    TX_RING[id].store(ring as *const Ring<'static> as *mut Ring<'static>, Relaxed);
+    modify(base + USART_CTRL1, 0, USART_CTRL1_TDBEIEN);
+}
+
+/// Held for `why` (`on`) or let go: while any reason holds, the transmit interrupt sends nothing more (the byte in
+/// the shift register finishes) until let go and [`tx_ring`] is called again.
+pub fn tx_hold(id: usize, why: u8, on: bool) {
+    if on {
+        TX_HOLD[id].fetch_or(why, Relaxed);
+        modify(HW[id].base + USART_CTRL1, USART_CTRL1_TDBEIEN, 0);
+    } else {
+        TX_HOLD[id].fetch_and(!why, Relaxed);
+    }
+}
+
 /// The bytes [`send_async`] has still to send: from, to (addresses).
 static TX_FROM: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
 static TX_TO: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
@@ -194,6 +227,7 @@ pub fn send_async(id: usize, data: &'static [u8]) {
     while tx_busy(id) {}
     let base = HW[id].base;
     TX_BYTES[id].fetch_add(data.len() as u32, Relaxed);
+    TX_RING[id].store(core::ptr::null_mut(), Relaxed);
     TX_FROM[id].store(data.as_ptr() as u32, Relaxed);
     TX_TO[id].store(data.as_ptr() as u32 + data.len() as u32, Relaxed);
     modify(base + USART_CTRL1, 0, USART_CTRL1_TDBEIEN);
@@ -209,6 +243,18 @@ pub fn isr(id: usize) {
     let base = HW[id].base;
     let sts = rd(base + USART_STS);
     if rd(base + USART_CTRL1) & USART_CTRL1_TDBEIEN != 0 && sts & USART_STS_TDBE != 0 {
+        let ring = TX_RING[id].load(Relaxed);
+        if !ring.is_null() {
+            // SAFETY: only `&'static Ring`s are stored ([`tx_ring`]).
+            // A held port takes nothing from the ring: what waits stays for later.
+            match if TX_HOLD[id].load(Relaxed) != 0 { None } else { unsafe { &*ring }.get() } {
+                Some(b) => {
+                    wr(base + USART_DT, b as u32);
+                    TX_BYTES[id].fetch_add(1, Relaxed);
+                }
+                None => modify(base + USART_CTRL1, USART_CTRL1_TDBEIEN, 0),
+            }
+        } else {
         let from = TX_FROM[id].load(Relaxed);
         if from < TX_TO[id].load(Relaxed) {
             // SAFETY: send_async's caller keeps the bytes in place until tx_busy is false.
@@ -216,6 +262,7 @@ pub fn isr(id: usize) {
             TX_FROM[id].store(from + 1, Relaxed);
         } else {
             modify(base + USART_CTRL1, USART_CTRL1_TDBEIEN, 0);
+        }
         }
     }
     if sts & (USART_STS_RDBF | USART_STS_ERR) != 0 {

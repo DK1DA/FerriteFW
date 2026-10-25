@@ -447,8 +447,8 @@ pub enum DebugReq {
     Settle(Option<crate::settle::Settle>),
     #[cfg(feature = "bench")]
     /// TERM-32 (a bench test): a burst of PA0 readings ([`crate::vox::MIC_SAMPLES`] at [`crate::vox::MIC_PERIOD_US`]),
-    /// summed up by the Radio task.
-    Mic,
+    /// summed up by the Radio task; `true`: PA2 instead, the receive audio the DSP task captures (TERM-32.1, `af`).
+    Mic(bool),
     #[cfg(feature = "bench")]
     /// TERM-33 (decision 132, a bench test): the transmit test signal for the next PTT key-up, armed, disarmed or
     /// only asked. The Radio task of a receive-only build refuses it.

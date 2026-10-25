@@ -327,6 +327,11 @@ const SEEK_POLL_MS: u32 = 20;
 const SEEK_MAX_MS: u32 = 15_000;
 /// A plain SI4732 tune, its power-up's ready: given up after this long (stock's tunes complete in under 100 ms).
 const SI_TUNE_MAX_MS: u64 = 500;
+/// BCR-7 (decision 290): the SI4732's own volume, 56 of 63. Its audio reaches PA2, the receive audio the DSP task
+/// captures, ahead of the analog knob; at stock's 63 it clipped there (bench, Oct 25, 2026: 61 still clipped, 59 at
+/// the edge, 57 clean), so 56 leaves a step of margin. A deliberate deviation from stock: broadcast's loudest level
+/// on the speaker is about 7 dB lower; the knob makes up for it.
+const SI_VOLUME: u8 = 56;
 
 /// The band scope sweeping (SCOPE-4, SCOPE-5): one chip, its audio off, one point per wait. As stock (V0.27
 /// 0x08023808 / 0x080235E8): the frequency (REG_38/39), REG_30 0x0200 then 0xBFF1 (the VCO recalibration), the
@@ -606,7 +611,7 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
             Timer::after_millis(5).await;
         }
         Timer::after_millis(500).await; // crystal
-        si.volume(63, d)?; // the volume knob is analog, after the chip
+        si.volume(SI_VOLUME, d)?; // BCR-7: the volume knob is analog, after the chip
         if mode == SiMode::Fm {
             let _ = si.rds_on(d); // BCR-2: station name and radio text
         }
@@ -907,6 +912,13 @@ pub async fn task() {
         let rx = snap.slots.iter().any(|s| s.squelch_open);
         let rf = if snap.tx.keyed { crate::chan::RF_BUSY_KEYED } else { 0 } | if rx { crate::chan::RF_BUSY_RX } else { 0 };
         crate::chan::RF_STATE.store(rf, core::sync::atomic::Ordering::Relaxed);
+        // TX-43: the cable's transmit interrupt (decision 290) stops while keyed, as the Link task's own check did.
+        let dry = crate::chan::DRY_TX.load(core::sync::atomic::Ordering::Relaxed);
+        crate::hal::uart::tx_hold(crate::report::UART_CPS, crate::hal::uart::HOLD_KEYED, snap.tx.keyed && !dry);
+        // LINK-13.4, decision 290: what the receive audio carries, for the DSP task: the first slot heard, else the
+        // broadcast while it plays (its audio reaches PA2 too), else HF mode's.
+        let open = core::array::from_fn(|i| snap.slots[i].squelch_open);
+        crate::chan::heard_now(open, r.bcast_slot.filter(|_| r.si_heard), r.hf.is_some());
         live.send_if_modified(|v| {
             let changed = *v != Some(snap);
             if changed {

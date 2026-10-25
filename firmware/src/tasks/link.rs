@@ -54,6 +54,8 @@ struct Port {
     cable: bool,
     /// Bluetooth's bursts and gaps (LINK-36; at 115200 LINK-36.1's); the cable's is never asked.
     pacer: BtPacer,
+    /// The cable's ring had bytes at the last turn (its interrupt sends them): the terminal is told when it empties.
+    waiting: bool,
 }
 
 impl Port {
@@ -78,19 +80,45 @@ impl Port {
         } else if !self.may_send() {
             // TX-43: flow control waits too; the receive rings still fill as before.
         } else if !self.held && waiting >= XOFF_AT {
-            uart::write(self.uart, &[XOFF]);
+            self.write_now(XOFF);
             self.held = true;
         } else if self.held && waiting <= XON_AT {
-            uart::write(self.uart, &[XON]);
+            self.write_now(XON);
             self.held = false;
         }
         got
     }
 
-    /// Up to [`CHUNK`] bytes out. True if any went. The cable asks before each byte: nothing goes while
-    /// keyed (TX-43), and the rest waits in the ring. Bluetooth sends no more than its burst has left, and nothing
-    /// in a gap (LINK-36): the gap is waited out by the loop's 1 ms turns, never in here.
+    /// One byte of its own (XON, XOFF) straight to the port, never into the middle of one the transmit interrupt
+    /// is writing: it holds the interrupt for that byte.
+    fn write_now(&mut self, b: u8) {
+        if self.cable {
+            uart::tx_hold(self.uart, uart::HOLD_LINK, true);
+            uart::write(self.uart, &[b]);
+            uart::tx_hold(self.uart, uart::HOLD_LINK, false);
+        } else {
+            uart::write(self.uart, &[b]);
+        }
+    }
+
+    /// Up to [`CHUNK`] bytes out. True if any went. Bluetooth sends no more than its burst has left, and nothing
+    /// in a gap (LINK-36): the gap is waited out by the loop's 1 ms turns, never in here. The cable's bytes go from
+    /// the transmit interrupt (decision 290), so they keep going while this executor is busy (a long redraw):
+    /// here it is only held or let go (TX-43, SND-14) and armed; false, as nothing went from here.
     fn send(&mut self) -> bool {
+        if self.cable {
+            let may = self.may_send();
+            uart::tx_hold(self.uart, uart::HOLD_LINK, !may);
+            if may {
+                uart::tx_ring(self.uart, self.tx);
+            }
+            let waiting = self.tx.count() > 0;
+            if self.waiting && !waiting {
+                TERM_WAKE.signal(()); // room again: the terminal may have rows waiting
+            }
+            self.waiting = waiting;
+            return false;
+        }
         let now = Instant::now().as_millis();
         let fast = !self.cable && uart::rate(self.uart) >= BT_FAST;
         let pace = BtPace::unpack(if fast { BT_PACE_FAST.load(Relaxed) } else { BT_PACE.load(Relaxed) });
@@ -126,6 +154,7 @@ fn spkmic() -> bool {
 /// without. Whatever was being sent has left first; what waits for the cable is dropped.
 fn cable_quiet(quiet: bool) {
     if quiet {
+        uart::tx_hold(UART_CPS, uart::HOLD_LINK, true);
         uart::flush(UART_CPS);
         uart::tx_pin_quiet(UART_CPS);
         TERM_OUT.clear();
@@ -174,8 +203,8 @@ fn bt_log_line(was: &UartStats, now: &UartStats) {
 #[embassy_executor::task]
 pub async fn task() {
     uart::init(UART_CPS, BAUD); // every boot starts at 115200 (LINK-10)
-    let mut cable = Port { uart: UART_CPS, rx: &TERM_IN, tx: &TERM_OUT, link: &LINK_ON, held: false, cable: true, pacer: BtPacer::default() };
-    let mut bt = Port { uart: UART_BT, rx: &BT_IN, tx: &BT_OUT, link: &BT_LINK_ON, held: false, cable: false, pacer: BtPacer::default() };
+    let mut cable = Port { uart: UART_CPS, rx: &TERM_IN, tx: &TERM_OUT, link: &LINK_ON, held: false, cable: true, pacer: BtPacer::default(), waiting: false };
+    let mut bt = Port { uart: UART_BT, rx: &BT_IN, tx: &BT_OUT, link: &BT_LINK_ON, held: false, cable: false, pacer: BtPacer::default(), waiting: false };
     // LINK-15.1: Bluetooth's new rate on probation (deadline, `HELLO`s then); LINK-25.2: its framing errors, and
     // when USART1 last swapped rates for them.
     let mut bt_probation: Option<(Instant, u16)> = None;

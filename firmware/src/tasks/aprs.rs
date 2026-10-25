@@ -145,9 +145,15 @@ impl Aprs {
             if kiss_on {
                 extra.kiss_heard(); // APRS-17.2: the KISS card's count
                 let out = if kiss_cable { &crate::chan::TERM_OUT } else { &crate::chan::BT_OUT };
-                kiss::encode(0, f, |b| {
-                    out.put(b); // KISS-4; a full ring drops the rest of the frame
+                // decision 290: held against the DSP task's audio frames, as every thread-mode writer of TERM_OUT
+                crate::chan::term_out_locked(|| {
+                    kiss::encode(0, f, |b| {
+                        out.put(b); // KISS-4; a full ring drops the rest of the frame
+                    })
                 });
+                if kiss_cable {
+                    crate::hal::uart::tx_ring(crate::report::UART_CPS, &crate::chan::TERM_OUT);
+                }
                 crate::chan::TERM_WAKE.signal(());
             }
             let rx = extra.aprs.receive(f, now_s, me.as_bytes(), &extra.cfg());
