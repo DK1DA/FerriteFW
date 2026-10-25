@@ -1118,7 +1118,8 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
                 crate::aprs::Holder::Mode => kn(l, "turn", app.now / crate::aprs_card::COUNT_FLIP_MS % 2),
             }
             if app.aprs_shared().is_some() {
-                kn(l, "shared", 1); // "VHF shared" in the header (APRS-17)
+                // "VHF: APRS" (1, APRS first) or "VHF: voice" (2, Voice first) in the header (APRS-17, WATCH-17.3)
+                kn(l, "shared", 1 + (app.settings().aprs_share != 0) as u32);
             }
         }
     }

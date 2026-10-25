@@ -188,7 +188,7 @@ fn aprs_card_beacon() {
 }
 
 /// APRS-17.5: APRS mode with automatic beacons says both in the header, "APRS + Beacon", beside APRS-21's
-/// "VHF shared"; APRS-17.6: \* (quick mute) on the APRS card shows "Muted ·" by the power in amber, and the header
+/// "VHF: APRS" (WATCH-17.3); APRS-17.6: \* (quick mute) on the APRS card shows "Muted ·" by the power in amber, and the header
 /// keeps its state for the shared note.
 #[test]
 fn aprs_card_beacon_and_mute() {

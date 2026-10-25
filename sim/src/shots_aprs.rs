@@ -101,7 +101,7 @@ pub fn run(scale: u32) {
     s.save("aprsmode-card");
     s.keys(&[Key::Slot, Key::Slot]);
     s.save("aprsmode-card-big");
-    // APRS-17.6: \* mutes C; the card says so by the power, the header keeps "VHF shared"
+    // APRS-17.6: \* mutes C; the card says so by the power, the header keeps "VHF: APRS"
     s.press(Key::Star, 80);
     s.save("aprsmode-card-muted-big");
     s.keys(&[Key::Slot]);

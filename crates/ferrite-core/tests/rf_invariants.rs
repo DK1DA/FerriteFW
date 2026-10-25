@@ -337,7 +337,7 @@ fn sizes() {
     assert_eq!(size_of::<Path>(), 48);
     assert_eq!(size_of::<Steps>(), 33);
     assert_eq!(size_of::<TxSeq>(), 36);
-    assert_eq!(size_of::<ferrite_core::watch::Watch>(), 44);
+    assert_eq!(size_of::<ferrite_core::watch::Watch>(), 48); // 46 + padding: WATCH-17.3's last look per chip
     assert_eq!(size_of::<ferrite_core::scan::Scan>(), 60);
     // The repeater: 168 bytes, 100 of them the running screen's XbLive (the 60-column strip); held only while
     // the repeater runs, in the Radio task's state.

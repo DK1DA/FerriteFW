@@ -96,6 +96,8 @@ pub const BOOT_SCREENS: [&str; 2] = ["Logo", "Owner card"];
 pub const CABLE_PORTS: [&str; 4] = ["Auto", "Link", "Terminal", "KISS"];
 /// 0 5 8's values (KISS-6): which port is the KISS TNC.
 pub const KISS_PORTS: [&str; 3] = ["Off", "Cable", "Bluetooth"];
+/// 0 5 9 7 (WATCH-17.3, decision 295): who wins a chip shared with the APRS slot. 0, the default, APRS first.
+pub const APRS_SHARE: [&str; 2] = ["APRS first", "Voice first"];
 
 /// FM broadcast step (0 3 1 1) in 10 kHz units, and its names.
 pub const FM_STEPS: [(u16, &str); 3] = [(5, "50 kHz"), (10, "100 kHz"), (20, "200 kHz")];
@@ -301,6 +303,9 @@ pub struct Settings {
     pub aprs_mute: bool,
     /// 0 4 3 DTMF decode (DEC-6): the digits heard on a slot's card.
     pub dtmf_rx: bool,
+    /// 0 5 9 7 (WATCH-17.3, decision 295): [`APRS_SHARE`]: 0 APRS first (APRS mode's C takes long turns on a chip
+    /// it shares, the other slots short looks), 1 Voice first (WATCH-17.2's turns).
+    pub aprs_share: u8,
 }
 
 /// 0 7 9's choices, seconds (0 never; MENU-28) and names. 30 s by default.
@@ -486,6 +491,7 @@ impl Settings {
         sq_chip: false,
         aprs_mute: true,
         dtmf_rx: true,
+        aprs_share: 0,
     };
 
     /// Values a stored or linked record may hold out of range, brought back in (load_settings, the link's

@@ -176,7 +176,7 @@ persist!(Settings {
     scope_dwell, scope_trig, scope_line, scope_wf, scope_mode, term_colour,
     aprs_mode, predictive,
     lpm, lpm_below, spare_tokens, backlight, keypad_light, leds, auto_off, auto_lock, dtmf_sidetone, arrival_tone,
-} bits { show_hidden, chan_only, cable_log, aprs_fixed, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp, mic_gain, tx_timeout, menu_timeout, pause_time, lock_ptt, busy_default, smeter_dbm, ch_display, scan_down, scan_return_hit, msg_vol, mcu_fixed, sq_chip, aprs_mute, dtmf_rx });
+} bits { show_hidden, chan_only, cable_log, aprs_fixed, scan_tx } then { pon, pon_text, tone_level, scan_resume, scan_prio, tail_mode, tail_phase, end_tone, dtmf_ms, dtmf_delay, cw_id, gps_on, gps_rxtx, arrival, kiss_port, pocsag_on, pocsag_freq, pocsag_cap, popups, key_beep, beep_vol, alert_tones, vox, vox_level, vox_tail, fm_sleep, brightness, brightness_night, tx_light, wake_on, spare_temp, mic_gain, tx_timeout, menu_timeout, pause_time, lock_ptt, busy_default, smeter_dbm, ch_display, scan_down, scan_return_hit, msg_vol, mcu_fixed, sq_chip, aprs_mute, dtmf_rx, aprs_share });
 
 /// The format of [`App::save_state`]; a reader of a different one keeps the defaults.
 pub const STATE_VERSION: u8 = 1;
@@ -322,9 +322,10 @@ mod tests {
     }
 
     /// The bytes saved after the spare: 0 8 3's mic gain, 0 8 1's timeout, then the eight settings wired in
-    /// decision 243 (menu timeout to scan return), 0 7 5 6's message volume, 0 9 9 5's MCU clock (PWR-26.5) and 0 9
-    /// 5's squelch (SQL-18.3), a byte each.
-    const AFTER_SPARE: usize = 15;
+    /// decision 243 (menu timeout to scan return), 0 7 5 6's message volume, 0 9 9 5's MCU clock (PWR-26.5), 0 9
+    /// 5's squelch (SQL-18.3), 0 5 9 6's APRS mute, 0 4 3's DTMF decode and 0 5 9 7's shared VHF (WATCH-17.3), a
+    /// byte each.
+    const AFTER_SPARE: usize = 16;
 
     /// VOX-15: a record from before 0 8 3 existed (it ends at the spare) loads with Mic gain at its default, 5.
     #[test]

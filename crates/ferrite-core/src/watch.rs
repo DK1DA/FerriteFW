@@ -26,6 +26,18 @@
 //! The timings marked "to confirm on the bench" in the manual (WATCH-17).
 
 use crate::freq::{band, Freq10};
+use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
+
+static VOICE_FIRST: AtomicBool = AtomicBool::new(false);
+
+/// WATCH-17.3 (decision 295): 0 5 9 7 is APRS first (the default); the UI task passes the setting on each frame.
+pub fn aprs_first() -> bool {
+    !VOICE_FIRST.load(Relaxed)
+}
+
+pub fn set_aprs_first(on: bool) {
+    VOICE_FIRST.store(!on, Relaxed);
+}
 use crate::msg::SLOTS;
 use crate::path::Sel;
 
@@ -39,6 +51,14 @@ pub const WATCHED_DWELL_MS: u32 = 70;
 /// after the retune (some 40 ms on the radio, decision 166) with margin; stock's whole turn is 90-110 ms
 /// (`analysis/watch.md`). With the active slot's 150 ms the cycle is 250 ms, inside an APRS frame's 300 ms of flags.
 pub const PRIO_DWELL_MS: u32 = 100;
+/// WATCH-17.3 (decision 295), APRS first: the priority slot's turn on a chip, or on the receive path, while the
+/// watch also has other slots. Long enough that a frame starting while another slot looks is caught early in its
+/// flags (a shared chip retunes for each look and settles some 40 ms, decision 166).
+pub const APRS_FIRST_MS: u32 = 400;
+/// WATCH-17.3: another slot's look between the priority slot's turns, APRS first: its settle (the software
+/// squelch, about 70-80 ms after a retune) and a reading or two, so a call that starts is still caught and then
+/// keeps the chip as any open slot does.
+pub const LOOK_MS: u32 = 100;
 /// SCAN-21 (decision 189): while a range scan runs, the receive path stays on its chip this long between the other
 /// chip's watched turns (each [`WATCHED_DWELL_MS`] or a priority slot's), so the fast pass keeps 30 steps a second
 /// and more while the other band is still watched.
@@ -73,6 +93,10 @@ pub struct Cfg {
     /// receive path with it but for the other chip's short turns ([`SCAN_TURN_MS`]). A watched slot's scan takes
     /// its turns as before.
     pub scan: u8,
+    /// WATCH-17.3 (decision 295): APRS first: a priority slot takes [`APRS_FIRST_MS`] turns and the others
+    /// [`LOOK_MS`] looks, the priority slot's turn after each look on a chip they share. Off: Voice first
+    /// (WATCH-17.2's turns).
+    pub first: bool,
 }
 
 /// What to do now.
@@ -96,6 +120,8 @@ pub struct Out {
     pub defer: u8,
     /// The slot they defer to.
     pub defer_to: Option<u8>,
+    /// WATCH-17.3: APRS first ([`Cfg::first`]), for [`Hop`]'s dwell.
+    pub first: bool,
 }
 
 /// A slot's turn on a shared chip, or of the receive path on its chip: the active slot's, a priority slot's
@@ -103,15 +129,20 @@ pub struct Out {
 /// is a watched one's (WATCH-17.2, decision 279) and the priority slot is never deaf longer than
 /// [`WATCHED_DWELL_MS`]; that chip stays tuned between turns (APRS-16), so the shorter turn costs no retune. Sharing
 /// the priority slot's chip, the active slot keeps [`ACTIVE_DWELL_MS`]: each turn there starts with a retune.
-pub fn dwell(slot: Option<u8>, active: u8, prio: u8, beside: bool) -> u32 {
+///
+/// WATCH-17.3 (decision 295): APRS first (`first`), with a priority slot in the watch, it takes [`APRS_FIRST_MS`]
+/// and every other slot [`LOOK_MS`], wherever they are.
+pub fn dwell(slot: Option<u8>, active: u8, prio: u8, beside: bool, first: bool) -> u32 {
     match slot {
+        Some(s) if first && prio & 1 << s != 0 => APRS_FIRST_MS,
+        Some(_) if first && prio != 0 => LOOK_MS,
         Some(s) if prio & 1 << s != 0 => PRIO_DWELL_MS,
         Some(s) if s == active && !beside => ACTIVE_DWELL_MS,
         _ => WATCHED_DWELL_MS,
     }
 }
 
-/// The engine (44 bytes).
+/// The engine (48 bytes).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Watch {
     on: [Option<u8>; 2],
@@ -125,6 +156,8 @@ pub struct Watch {
     /// Each chip listened to at the last turn, and since when (its [`REACQUIRE_MS`]).
     listening: [bool; 2],
     got: [u32; 2],
+    /// WATCH-17.3: the last slot other than the priority one that looked on each chip (APRS first goes on from it).
+    last: [u8; 2],
 }
 
 fn after(now: u32, t: u32) -> bool {
@@ -133,7 +166,7 @@ fn after(now: u32, t: u32) -> bool {
 
 impl Watch {
     pub const fn new() -> Self {
-        Watch { on: [None; 2], since: [0; 2], open: 0, closed_at: [0; SLOTS], recent: 0, pause_until: None, listening: [false; 2], got: [0; 2] }
+        Watch { on: [None; 2], since: [0; 2], open: 0, closed_at: [0; SLOTS], recent: 0, pause_until: None, listening: [false; 2], got: [0; 2], last: [0; 2] }
     }
 
     /// Pause for `secs` (WATCH-6, WATCH-16); 0 resumes now.
@@ -241,8 +274,17 @@ impl Watch {
                 Some(s) if open & !c.muted & 1 << s != 0 => Some(s),
                 Some(s) if self.recent & !c.muted & 1 << s != 0 && p.is_none() => Some(s),
                 Some(s) => {
-                    if now.wrapping_sub(self.since[n as usize]) < dwell(Some(s), active, prio, p.is_none() && prio & listen != 0) {
+                    if now.wrapping_sub(self.since[n as usize]) < dwell(Some(s), active, prio, p.is_none() && prio & listen != 0, c.first) {
                         Some(s)
+                    } else if let (true, Some(p)) = (c.first, p) {
+                        // WATCH-17.3: APRS first: the priority slot after every look; after its turn, the next slot
+                        // round from the last one that looked here.
+                        if s != p {
+                            Some(p)
+                        } else {
+                            let l = self.last[n as usize];
+                            (1..=SLOTS as u8).map(|i| (l + i) % SLOTS as u8).find(|&x| x != p && mine(x)).or(Some(p))
+                        }
                     } else {
                         (1..=SLOTS as u8).map(|i| (s + i) % SLOTS as u8).find(|&x| mine(x))
                     }
@@ -252,6 +294,9 @@ impl Watch {
             if next != self.on[n as usize] {
                 self.since[n as usize] = now;
                 self.got[n as usize] = now; // retuned to another slot: reacquiring
+                if let Some(x) = next.filter(|&x| prio & 1 << x == 0) {
+                    self.last[n as usize] = x;
+                }
             }
             self.on[n as usize] = next;
         }
@@ -261,6 +306,7 @@ impl Watch {
             self.open = self.open & !defer | open;
         }
         out.chip = self.on;
+        out.first = c.first;
         out.scan = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| s == active && c.scan & 1 << s != 0));
         let open = self.open | c.held & set;
         out.hold = (0..2u8).find(|&n| self.on[n as usize].is_some_and(|s| prio & open & 1 << s != 0));
@@ -368,7 +414,7 @@ impl Hop {
                             if s != self.slot && s.is_some_and(|x| out.prio & 1 << x != 0) {
                                 self.since = now; // the priority slot's turn on the path, whole
                             }
-                            let dwell = scan_dwell(out, c).unwrap_or_else(|| dwell(s, active, out.prio, beside(out, c)));
+                            let dwell = scan_dwell(out, c).unwrap_or_else(|| dwell(s, active, out.prio, beside(out, c), out.first));
                             Some(if now.wrapping_sub(self.since) < dwell { c } else { c ^ 1 })
                         }
                     }
@@ -391,7 +437,7 @@ impl Hop {
         if out.chip.iter().any(Option::is_none) || out.hold.is_some() || out.audio.is_some_and(|s| out.chip.contains(&Some(s))) {
             return None;
         }
-        let dwell = scan_dwell(out, c).unwrap_or_else(|| dwell(out.chip[c as usize], active, out.prio, beside(out, c)));
+        let dwell = scan_dwell(out, c).unwrap_or_else(|| dwell(out.chip[c as usize], active, out.prio, beside(out, c), out.first));
         (now.wrapping_sub(self.since).saturating_add(within) >= dwell).then_some(c ^ 1)
     }
 }
@@ -454,7 +500,7 @@ mod tests {
     /// none; the difference of two reads gives the same means, and a reset keeps the turn in progress whole.
     #[test]
     fn turn_clock_times_the_turns() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(146) + 55_000, mhz(147), mhz(446) + 10_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(146) + 55_000, mhz(147), mhz(446) + 10_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
         let (mut w, mut clock) = (Watch::new(), TurnClock::new());
         let mut run = |from: u32, to: u32, clock: &mut TurnClock| {
             for t in (from..to).step_by(10) {
@@ -490,7 +536,7 @@ mod tests {
 
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {
-        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 }
+        Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false }
     }
 
     /// WATCH-2, WATCH-17: slots sharing a chip take turns on it, 150 ms on the active slot and 70 ms on each
@@ -514,7 +560,7 @@ mod tests {
     #[test]
     fn band_crossing_takes_the_other_chip_at_once() {
         let mut w = Watch::new();
-        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
+        let mut c = Cfg { set: 0b001, active: 0, freq: [mhz(145) + 49_500, 0, 0], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
         assert_eq!(w.tick(0, &c, [false; 2], false).chip, [Some(0), None]);
         c.freq[0] = mhz(446) + 47_500;
         assert_eq!(w.tick(10, &c, [false; 2], false).chip, [None, Some(0)], "70 cm: chip 1 in the same turn");
@@ -722,7 +768,7 @@ mod tests {
     /// alternates the receive path, and A's squelch reads open throughout, also while chip 1 has the path.
     #[test]
     fn muted_slot_stays_open_across_the_hop() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let mut path = None;
         let mut paths = [0u32; 2];
@@ -747,7 +793,7 @@ mod tests {
     /// Muted each hop.
     #[test]
     fn muted_slot_stays_open_through_the_chips_reacquire() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0b001, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let (mut path, mut got) = (None, 0u32);
         for t in (0..3_000u32).step_by(10) {
@@ -770,7 +816,7 @@ mod tests {
     /// the path stays on A's chip and B (the other chip) is never listened to, so it is never heard.
     #[test]
     fn monitored_active_slot_holds_the_path() {
-        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0, off: 0, held: 0b001, prio: 0, aprs: 0, scan: 0 };
+        let c = Cfg { set: 0b011, active: 0, freq: [mhz(145) + 49_500, mhz(446) + 47_500, 0], muted: 0, off: 0, held: 0b001, prio: 0, aprs: 0, scan: 0, first: false };
         let (mut w, mut hop) = (Watch::new(), Hop::new());
         let mut path = None;
         for t in (0..2_000u32).step_by(10) {
@@ -860,7 +906,7 @@ mod sim {
     }
 
     fn aprs(set: u8, prio: u8) -> Cfg {
-        Cfg { set, active: 0, freq: [A2M, B70, APRS], muted: 0, off: 0, held: 0, prio, aprs: 0, scan: 0 }
+        Cfg { set, active: 0, freq: [A2M, B70, APRS], muted: 0, off: 0, held: 0, prio, aprs: 0, scan: 0, first: false }
     }
 
     /// Decision 181's cause, and APRS-29 (beacons alone give C no priority): C without priority, sharing chip 0 with
@@ -937,6 +983,64 @@ mod sim {
             let (t, held) = caught(&st, 1, start).unwrap_or_else(|| panic!("B's call at {start} missed"));
             assert!(t - start <= 400 && t + held >= end, "B's call at {start}: caught {} ms in, held to {}", t - start, t + held);
         }
+    }
+
+    /// WATCH-17.3 (decision 295): A (active) and B both on 2 m share chip 0 with APRS mode's C (Alex, Oct 25: "APRS
+    /// RX is terrible ... if i have VFO a or b on VHF"). Each turn there starts with a retune (C settles some 40 ms,
+    /// the software squelch's A and B about 80, as [`settle`]). Voice first (WATCH-17.2's turns: A 150, B 70, C 100)
+    /// leaves C deaf for long stretches; APRS first (C 400 ms after every 100 ms look) catches a frame early in its
+    /// flags wherever it starts, and A's and B's calls are still caught in their looks and then keep the chip.
+    #[test]
+    fn aprs_first_on_a_shared_vhf_chip() {
+        const B2M: Freq10 = mhz(146) + 94_000;
+        let mut worst_catch = [0u32; 2];
+        for (k, first) in [false, true].into_iter().enumerate() {
+            let c = Cfg { freq: [A2M, B2M, APRS], first, ..aprs(0b111, 0b100) };
+            let set = settle(0b100);
+            // C's share: ticks chip 0 is on C with the path and past its settle; and its longest deaf stretch.
+            let st = run(&c, &[], &set, 6_000);
+            let (mut since, mut prev, mut gap, mut worst, mut heard) = (0, None, 0, 0, 0);
+            for x in &st[50..] {
+                if x.chip[0] != prev {
+                    (since, prev) = (x.t, x.chip[0]);
+                }
+                let live = x.chip[0] == Some(2) && x.path == Some(0) && x.t >= since + 40;
+                heard += live as u32;
+                gap = if live { 0 } else { gap + 10 };
+                worst = worst.max(gap);
+            }
+            let share = heard * 100 / (st.len() as u32 - 50);
+            // A frame of 1.2 s starting anywhere in a second: when C reads it open.
+            let (mut sum, mut n, mut missed) = (0u32, 0u32, 0u32);
+            for start in (1_000..2_000).step_by(10) {
+                let end = start + 1_200;
+                let st = run(&c, &[Carrier { freq: APRS, start, end }], &set, end + 500);
+                match caught(&st, 2, start) {
+                    Some((t, held)) => {
+                        worst_catch[k] = worst_catch[k].max(t - start);
+                        sum += t - start;
+                        n += 1;
+                        assert!(t + held >= end, "first {first}: frame at {start} held only to {}", t + held);
+                    }
+                    None => missed += 1,
+                }
+            }
+            std::println!("first {first}: C hears {share}%, deaf up to {worst} ms; frames caught {n}/{}, mean {} ms, worst {} ms after the start", n + missed, sum / n.max(1), worst_catch[k]);
+            if first {
+                assert!(worst <= 2 * LOOK_MS, "APRS first: C deaf for {worst} ms");
+                assert!(worst_catch[k] <= 250, "APRS first: a frame caught {} ms in", worst_catch[k]);
+                // A's and B's calls (3 s) are still caught in their looks, and keep the chip to the end.
+                for (s, f) in [(0u8, A2M), (1, B2M)] {
+                    for start in (1_000..2_000).step_by(50) {
+                        let end = start + 3_000;
+                        let st = run(&c, &[Carrier { freq: f, start, end }], &set, end + 500);
+                        let (t, held) = caught(&st, s, start).unwrap_or_else(|| panic!("slot {s}'s call at {start} missed"));
+                        assert!(t - start <= 1_200 && t + held >= end, "slot {s}'s call at {start}: {} ms in, held to {}", t - start, t + held);
+                    }
+                }
+            }
+        }
+        assert!(worst_catch[1] < worst_catch[0], "APRS first catches sooner: {worst_catch:?}");
     }
 
     /// APRS-21.1: A on the APRS frequency itself (the two-radio run's set-up) opens on a packet in its own turn; without
@@ -1031,7 +1135,7 @@ mod sim {
             (sc.fast, sc.resume) = (true, Resume::Drop);
             sc.start(0, 0);
             let (mut w, mut hop) = (Watch::new(), Hop::new());
-            let mut c = Cfg { set, active: 0, freq: [mhz(144), mhz(446) + 47_500, mhz(144) + 39_000], muted: 0, off: 0, held: 0, prio, aprs: 0, scan };
+            let mut c = Cfg { set, active: 0, freq: [mhz(144), mhz(446) + 47_500, mhz(144) + 39_000], muted: 0, off: 0, held: 0, prio, aprs: 0, scan, first: false };
             let (mut started, mut ticked, mut steps, mut b, mut cturns) = (0u64, 0u64, 0u32, 0u32, 0u32);
             let (mut path, mut last_c) = (None, None);
             while ticked < 10_000 {

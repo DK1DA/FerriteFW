@@ -484,6 +484,7 @@ impl SimCore {
     /// the app's tick and redraw.
     pub fn step(&mut self, now_ms: u32) {
         self.now = now_ms;
+        ferrite_core::watch::set_aprs_first(self.app.settings().aprs_share == 0); // WATCH-17.3, as the UI task
         let now = now_ms;
         self.lcd.rects.clear();
         self.lcd.pixels = 0;

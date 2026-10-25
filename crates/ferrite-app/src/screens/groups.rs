@@ -200,6 +200,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry("TX level|Mid|Modulation level."),
         Entry("FX.25 on TX|16 bytes|Error correction on what you send."),
         Entry("Mute speaker|On|Mute packets on the speaker."),
+        Entry("Shared VHF|APRS first|When A or B shares C's VHF chip: APRS first gives C long turns and A and B short looks; Voice first gives A and B their usual turns, and C misses more packets."),
     ]),
     ((7, 3), &[
         Entry("S-meter|Bars|Bars or dBm."),
@@ -419,7 +420,7 @@ macro_rules! field {
 /// that change only on the radio: PIN, region, Extend TX), and for most of them all the menu needs. A new
 /// setting is one row here (and its field, default and place in `persist.rs`).
 #[cfg_attr(target_os = "none", link_section = ".slow_rodata")]
-static SETTINGS: [Setting; 94] = [
+static SETTINGS: [Setting; 95] = [
     field!([1, 1, 0], special),
     field!([1, 2, 0], special),
     field!([1, 3, 0], scan_prio: u8, Kind::Round(6, prio_text), Nothing),
@@ -464,6 +465,7 @@ static SETTINGS: [Setting; 94] = [
     field!([5, 9, 4], special), // APRS-49: TX level
     field!([5, 9, 5], special), // APRS-45
     field!([5, 9, 6], aprs_mute: bool, Kind::Flip(&ON_OFF), AprsMute), // APRS-2
+    field!([5, 9, 7], aprs_share: u8, Kind::Pick(&crate::settings::APRS_SHARE), Nothing), // WATCH-17.3
     field!([6, 1, 0], gps_on: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([6, 3, 0], coord_fmt: u8, Kind::Pick(&COORD_FORMATS), Nothing),
     field!([6, 4, 0], units: u8, Kind::Pick(&UNITS), Nothing),

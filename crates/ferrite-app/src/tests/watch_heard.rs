@@ -55,7 +55,7 @@ impl Radio {
             }
         }
         let freq = [0, 1, 2].map(|s| t.app.slot(s).freq());
-        let cfg = watch::Cfg { set: self.set, active: self.active, freq, muted: self.mute, off: 0, held: 0, prio: 0, aprs: 0, scan: 0 };
+        let cfg = watch::Cfg { set: self.set, active: self.active, freq, muted: self.mute, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false };
         let sq = self.on_chip.map(|o| o.is_some_and(|s| heard & 1 << s != 0));
         let out = self.w.tick(t.t, &cfg, sq, false);
         self.on_chip = out.chip;

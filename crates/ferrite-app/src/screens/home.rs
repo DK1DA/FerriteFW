@@ -481,7 +481,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     let big = s == app.active;
     let lv = live.slots[s as usize];
     let (state, sc) = app.state(s, live);
-    // APRS-17.6: on the APRS card the mute shows by the power at the bottom right, so "VHF shared" keeps the
+    // APRS-17.6: on the APRS card the mute shows by the power at the bottom right, so "VHF: APRS" (or "VHF: voice") keeps the
     // header's right side
     let (state, sc) = match state {
         "Muted" if app.aprs_slot(s) => ("idle", SUB),
@@ -529,11 +529,12 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     // Header rows: y+7..y+24 on the big card, y+5..y+22 on the compact ones (their digits start at y+25).
     let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 5, y + 18) };
     // Beside the state (left of an RX or MON tag): the clarifier (VFO-22), or on the APRS card that it takes
-    // turns on chip 0 with A or B, so a packet can be missed (APRS-21).
+    // turns on chip 0 with A or B, and who wins it (APRS-21, WATCH-17.3: "VHF: APRS" C takes long turns, "VHF:
+    // voice" A and B keep their usual turns and C can miss packets).
     let mut clr = Buf::<16>::new();
     let c = app.slots[s as usize].clar;
     if aprs && app.aprs_shared().is_some() {
-        clr.set(b"VHF shared");
+        clr.set(if app.settings().aprs_share == 0 { b"VHF: APRS" } else { b"VHF: voice" });
     } else if c != 0 && !lv.scanning {
         slot::clar_text(c, &mut clr);
     }
@@ -558,7 +559,7 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
         let split = hb_.windows(3).position(|w| w == " \u{b7}".as_bytes());
         if let Some(n) = split.filter(|_| aprs) {
             // APRS-17: the holder ("APRS Mode") bold in C's colour, " · VHF" as any header; with APRS-21's amber
-            // "VHF shared" beside it the band goes, as that names it.
+            // "VHF: APRS" or "VHF: voice" beside it the band goes, as that names it.
             let (word, rest) = hb_.split_at(n);
             let rest = if clr.is_empty() { rest } else { b"" };
             let ww0 = text4_width(word, &UI_12B).min(hw);
@@ -909,7 +910,7 @@ mod tests {
         for st in ["idle", "RX", "TX", "MON"] {
             assert!(need <= hw(false, st, b""), "compact card, {st}: {need} > {}", hw(false, st, b""));
         }
-        assert!(hw(true, "RX", b"VHF shared") >= 120 && hw(false, "idle", b"CLR +2.5") >= 120);
+        assert!(hw(true, "RX", b"VHF: voice") >= 120 && hw(false, "idle", b"CLR +2.5") >= 120);
         // the single + scope layout's header (26..232 beside the state)
         assert!(need <= (232 - 6 - super::head_right_w(true, "RX", &Buf::new()) - 26).max(140));
     }
