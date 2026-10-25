@@ -183,13 +183,19 @@ fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32
         if k.holder == crate::aprs::Holder::Beacon && !waiting {
             beacon.set(if k.countdown { b"Next beacon in" } else { b"Next beacon" });
         }
-        if app.dirty(R_SUB + p, hash(&(&beacon, &k.right, waiting, rc))) {
+        // APRS-17.2: APRS mode's two counts together, "14 heard · 3 /hr" (the small card takes them in turn).
+        let mut both = Buf::<24>::new();
+        let right = match k.counts {
+            Some((n, h)) => ferrite_ui::v!(both, "{} heard \u{b7} {} /hr", n, h),
+            None => k.right.as_bytes(),
+        };
+        if app.dirty(R_SUB + p, hash(&(&beacon, right, waiting, rc))) {
             lcd.fill(14, y + 102, 212, 20, SURFACE);
             let c = if waiting { AMBER } else { SUB };
-            let rw = text4_width(k.right.as_bytes(), &UI_12B).min(100);
+            let rw = text4_width(right, &UI_12B).min(120);
             let bw = 211 - rw - 8;
             w::field(lcd, 15, bw, y + 103, y + 120, y + 117, Align::Left, w::fit(beacon.as_bytes(), &UI_12, bw), &UI_12, c, SURFACE);
-            w::field(lcd, 226 - rw, rw, y + 103, y + 120, y + 117, Align::Right, k.right.as_bytes(), &UI_12B, rc, SURFACE);
+            w::field(lcd, 226 - rw, rw, y + 103, y + 120, y + 117, Align::Right, right, &UI_12B, rc, SURFACE);
         }
     } else {
         if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, &k.right, k.countdown, rc, 1u8)), true) {

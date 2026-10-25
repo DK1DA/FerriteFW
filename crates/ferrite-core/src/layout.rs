@@ -28,6 +28,9 @@ pub const CONTACTS: Range<u32> = 0x07_4000..0x07_6000;
 pub const MAILBOX: Range<u32> = 0x07_6000..0x08_2000;
 /// Stock V0.29's record: left alone.
 pub const STOCK_RECORD: Range<u32> = 0x08_2000..0x08_3000;
+/// The APRS heard list kept across restarts (APRS-4, decision 282): a ring of 248 station rows of 128 B, 31 to a
+/// sector. In the free space after the planned satellites (0x083000) and HF state (0x084000) sectors.
+pub const HEARD: Range<u32> = 0x08_5000..0x08_D000;
 /// The scratch ring (decision 227): 32 sectors taking turns at holding a data sector's new content while it is
 /// rewritten, with a footer saying where it goes (ferrite-store `scratch`), so no one sector takes every
 /// rewrite's erase. The free last bytes of every data sector make room for that footer. At the top of the free
@@ -38,9 +41,9 @@ pub const PROMPTS: Range<u32> = 0x20_0000..0x30_0000;
 /// The bootloader reflashes the MCU from here if it finds its header: never written.
 pub const UPDATE_AREA: Range<u32> = 0x30_0000..0x40_0000;
 
-/// Everything Ferrite may erase or program: from the layout header to the end of the contacts, and the scratch
-/// ring. Prompts are not in it until they have been backed up.
-pub static WRITABLE: [Range<u32>; 2] = [LAYOUT_HEADER.start..CONTACTS.end, SCRATCH_RING];
+/// Everything Ferrite may erase or program: from the layout header to the end of the contacts, the heard list
+/// and the scratch ring. Prompts are not in it until they have been backed up.
+pub static WRITABLE: [Range<u32>; 3] = [LAYOUT_HEADER.start..CONTACTS.end, HEARD, SCRATCH_RING];
 
 #[cfg(test)]
 mod tests {
@@ -70,7 +73,9 @@ mod tests {
             assert_eq!(x.end % 4096, 0);
         }
         assert_eq!(r[0].start..r[r.len() - 1].end, WRITABLE[0]);
-        assert_eq!(WRITABLE[1], SCRATCH_RING);
+        assert_eq!((WRITABLE[1].clone(), WRITABLE[2].clone()), (HEARD, SCRATCH_RING));
+        const { assert!(STOCK_RECORD.end + 2 * 4096 <= HEARD.start && HEARD.end <= SCRATCH_RING.start, "after satellites and HF state, in the free space") };
+        assert_eq!(HEARD.len() / 4096, 8);
         const { assert!(STOCK_RECORD.end <= SCRATCH_RING.start && SCRATCH_RING.end <= PROMPTS.start, "in the free space") };
         assert_eq!(SCRATCH_RING.len() / 4096, 32);
         assert_eq!(CONTACTS.end, MAILBOX.start);

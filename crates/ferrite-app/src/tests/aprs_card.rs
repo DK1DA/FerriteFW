@@ -100,9 +100,13 @@ fn aprs_card_mode() {
     a.tick();
     let k = a.app.aprs_card(&a.s).expect("C is the APRS slot");
     assert_eq!(k.holder, Holder::Mode);
-    assert_eq!(k.right.as_bytes(), format!("{} heard", a.s.stations()).as_bytes());
-    let st = a.s.station(0).expect("the sample has stations");
-    assert!(core::str::from_utf8(k.line.as_bytes()).unwrap().starts_with(&format!("Last {} \u{b7} ", core::str::from_utf8(st.call.as_bytes()).unwrap())));
+    // APRS-17.2 (decision 282): the sample's stations were heard before this power-on (as rows restored from
+    // flash, APRS-4): none count as heard since, those within the hour count per hour.
+    let hour = (0..a.s.stations()).filter_map(|i| a.s.station(i)).filter(|s| s.ago_s <= 3600).count() as u16;
+    assert!(hour > 0, "the sample has stations within the hour");
+    assert_eq!(k.counts, Some((0, hour)));
+    assert_eq!(k.right.as_bytes(), b"0 heard", "the small card's spot starts on the since-power-on count");
+    assert_eq!(k.line.as_bytes(), b"Nothing heard yet");
     assert_eq!(k.power, "LOW");
     assert!(k.next.is_empty(), "beacons off: no countdown");
     let l = a.card_line();
@@ -274,4 +278,34 @@ fn one_aprs_list_from_c_and_heard() {
     assert!(matches!(a.app.screen(), Screen::Aprs(_)));
     a.press(Key::Exit, 100);
     assert!(matches!(a.app.screen(), Screen::Home), "one BACK: no second heard list under it, {}", a.app.screen().name());
+}
+
+/// APRS-17.2 (decision 282, option C): the small card's one bold spot takes the two counts in turn, 5 s each,
+/// each with its own label; the large card shows both. The widest counts fit their places in pixels.
+#[test]
+fn aprs_card_counts_take_turns() {
+    use crate::aprs_card::COUNT_FLIP_MS;
+    use ferrite_ui::assets::UI_12B;
+    use ferrite_ui::gfx::text4_width;
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.tick();
+    let (_, hour) = a.app.aprs_card(&a.s).unwrap().counts.unwrap();
+    a.t = (a.t / COUNT_FLIP_MS + 1) * COUNT_FLIP_MS; // the next turn: odd
+    if (a.t / COUNT_FLIP_MS).is_multiple_of(2) {
+        a.t += COUNT_FLIP_MS;
+    }
+    a.tick();
+    assert_eq!(a.app.aprs_card(&a.s).unwrap().right.as_bytes(), format!("{hour} /hr").as_bytes());
+    a.t += COUNT_FLIP_MS;
+    a.tick();
+    assert_eq!(a.app.aprs_card(&a.s).unwrap().right.as_bytes(), b"0 heard");
+    let l = a.card_line();
+    assert!(l.contains(" heard=0") && l.contains(&format!(" hour={hour}")), "the readback carries both: {l}");
+    // The small card's spot is 96 px wide; the large card's beacon row gives the counts up to 120 px and keeps at
+    // least "Beacon off" beside them.
+    assert!(text4_width(b"50 heard", &UI_12B) <= 96 && text4_width(b"50 /hr", &UI_12B) <= 96);
+    let both = text4_width("50 heard \u{b7} 50 /hr".as_bytes(), &UI_12B);
+    assert!(both <= 120, "{both}");
+    assert!(text4_width(b"Beacon off", &ferrite_ui::assets::UI_12) <= 211 - both - 8);
 }

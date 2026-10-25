@@ -525,7 +525,7 @@ fn reads_during_a_queued_write_see_old_or_new() {
 /// stock's data below 0x02C000 or above the waypoints.
 #[test]
 fn power_cuts_during_the_first_format() {
-    use ferrite_core::layout::{CALIBRATION, SSB_PATCH, TRIMS, WRITABLE};
+    use ferrite_core::layout::{CALIBRATION, HEARD, SSB_PATCH, TRIMS, WRITABLE};
     let mut f = SimFlash::new();
     let mut r = Rng(11);
     for b in f.mem.iter_mut() {
@@ -540,7 +540,7 @@ fn power_cuts_during_the_first_format() {
         n
     };
     assert!(total > 10);
-    let kept = |a: usize| !WRITABLE[0].contains(&(a as u32)) || SSB_PATCH.contains(&(a as u32)) || TRIMS.contains(&(a as u32));
+    let kept = |a: usize| !(WRITABLE[0].contains(&(a as u32)) || HEARD.contains(&(a as u32))) || SSB_PATCH.contains(&(a as u32)) || TRIMS.contains(&(a as u32));
     for cut in [1, 2, total / 3, total / 2, total - 2, total - 1] {
         let mut g = f.clone();
         g.cut_at = Some(cut);

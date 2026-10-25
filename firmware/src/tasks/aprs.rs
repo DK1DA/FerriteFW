@@ -142,6 +142,10 @@ impl Aprs {
             if let Some(n) = fx {
                 extra.aprs.note_fx25(f, n);
             }
+            // APRS-4: the station's row, when its rule says one is due (the front of the heard list).
+            if let Some(s) = extra.aprs.station(0).filter(|_| rx.row) {
+                store.heard_row(&s);
+            }
             // APRS-32: a retry heard again after a power cycle is in the store already (acked all the same).
             if let Some((from, text)) = rx.inbound.filter(|(f, t)| !store.message_heard(f.as_bytes(), rx.inbound_id.as_bytes(), t.as_bytes())) {
                 app.notify_message(from.as_bytes(), text.as_bytes()); // INBOX-3.1

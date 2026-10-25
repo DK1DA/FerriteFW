@@ -24,7 +24,7 @@
 use crate::io::Flash;
 use crate::{crc16, scratch, u16_at, u32_at, Nor, Result, SECTOR};
 use core::cell::Cell;
-use ferrite_app::data::{Contact, Event, Message, MsgState, Pos, Src, Waypoint, WpSrc, AGO_UNKNOWN};
+use ferrite_app::data::{Contact, Event, Message, MsgState, Pos, Src, Station, Sym, Waypoint, WpSrc, AGO_UNKNOWN};
 use ferrite_ui::text::Buf;
 
 pub const REC: u32 = 128;
@@ -388,6 +388,72 @@ pub fn msg_state_byte(state: MsgState) -> Option<(usize, u8)> {
 pub fn msg_open(b: &[u8; REC as usize], peer: &Buf<10>, txt: &Buf<67>) -> bool {
     let m = msg_decode(b, 0);
     !m.inbound && m.peer == *peer && m.text == *txt && matches!(m.state, MsgState::Pending | MsgState::Retrying(_))
+}
+
+// ---- the heard list (APRS-4) ----
+
+/// Where a heard row's body ends: flags (11), call (12..22), symbol (22), position (23..31), course and speed
+/// (31..35), altitude (35..39), the digipeater (39..49), comment (49..89), times heard (89..91), FX.25 (91).
+pub const HEARD_END: usize = 92;
+/// What a queued row carries: the body (11..92).
+pub const HEARD_JOB: usize = HEARD_END - BODY;
+
+/// A station as the Storage task queues it ([`crate::store::Job::Heard`]): no seq or time yet.
+pub fn heard_job(s: &Station) -> [u8; HEARD_JOB] {
+    let mut r = [0u8; REC as usize];
+    r[11] = s.pos.is_some() as u8 | (s.course.is_some() as u8) << 1 | (s.alt_m.is_some() as u8) << 2 | (s.fx25.is_some() as u8) << 3;
+    put(&mut r[12..22], &s.call);
+    r[22] = s.sym as u8;
+    let p = s.pos.unwrap_or_default();
+    r[23..27].copy_from_slice(&p.lat.to_le_bytes());
+    r[27..31].copy_from_slice(&p.lon.to_le_bytes());
+    let (c, v) = s.course.unwrap_or_default();
+    r[31..33].copy_from_slice(&c.to_le_bytes());
+    r[33..35].copy_from_slice(&v.to_le_bytes());
+    r[35..39].copy_from_slice(&s.alt_m.unwrap_or(0).to_le_bytes());
+    // The station's via is the digipeater with a `*` (APRS-3): the call alone is kept.
+    let via = s.via.as_bytes();
+    put::<10>(&mut r[39..49], &Buf::from(via.strip_suffix(b"*").unwrap_or(via)));
+    put(&mut r[49..89], &s.comment);
+    r[89..91].copy_from_slice(&s.times.to_le_bytes());
+    r[91] = s.fx25.unwrap_or(0);
+    let mut j = [0u8; HEARD_JOB];
+    j.copy_from_slice(&r[BODY..HEARD_END]);
+    j
+}
+
+/// The record for a queued row, stamped `t`, with the clock UTC or not (INBOX-6.1).
+pub fn heard_rec(j: &[u8; HEARD_JOB], t: u32, utc: bool) -> [u8; REC as usize] {
+    let mut r = [0xFFu8; REC as usize];
+    r[4..8].copy_from_slice(&t.to_le_bytes());
+    r[BODY..HEARD_END].copy_from_slice(j);
+    r[CLOCK] = if utc { 0 } else { 0xFF };
+    r
+}
+
+/// Heard row `b`, `ago_s` its age ([`Ring::ago`]); the via marked used again.
+pub fn heard_decode(b: &[u8; REC as usize], ago_s: u32) -> Station {
+    let f = b[11];
+    let mut via = Buf::<24>::new();
+    let v = text::<10>(&b[39..49]);
+    if !v.is_empty() {
+        via.push(v.as_bytes());
+        via.push(b"*");
+    }
+    Station {
+        call: text(&b[12..22]),
+        sym: Sym::ALL[(b[22] as usize).min(Sym::ALL.len() - 1)],
+        pos: (f & 1 != 0).then(|| Pos { lat: u32_at(b, 23) as i32, lon: u32_at(b, 27) as i32 }),
+        ago_s,
+        via,
+        course: (f & 2 != 0).then(|| (u16_at(b, 31), u16_at(b, 33))),
+        alt_m: (f & 4 != 0).then(|| u32_at(b, 35) as i32),
+        times: u16_at(b, 89),
+        comment: text(&b[49..89]),
+        msg: Buf::new(),
+        msg_min: None,
+        fx25: (f & 8 != 0).then_some(b[91]),
+    }
 }
 
 // ---- waypoints ----

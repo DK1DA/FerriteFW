@@ -15,7 +15,7 @@
 
 use crate::io::Flash;
 use crate::{crc16, u16_at, u32_at, Crc32, Nor, Result, PAGE, SECTOR};
-use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, PRESETS, SCRATCH_RING, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, HEARD, PRESETS, SCRATCH_RING, WAYPOINTS, ZONES};
 
 /// The content a sector can hold; the footer sits after it in the scratch sector.
 pub const FOOTER_AT: u32 = SECTOR - 32;
@@ -63,7 +63,7 @@ async fn copy_back<N: Nor>(f: &Flash<N>, from: u32, target: u32) -> Result {
 
 /// A sector the scratch copy may go to.
 fn data_sector(t: u32) -> bool {
-    t.is_multiple_of(SECTOR) && [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, WAYPOINTS, CONTACTS].iter().any(|r| r.contains(&t))
+    t.is_multiple_of(SECTOR) && [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, WAYPOINTS, CONTACTS, HEARD].iter().any(|r| r.contains(&t))
 }
 
 /// Finishes a rewrite a power cut stopped (before anything else is read): any scratch sector with a valid footer

@@ -14,7 +14,7 @@
 //! ("Next beacon in 4 min", as before) and in the readback's `next=`; the small card keeps the holder's own fact.
 
 use crate::aprs::Holder;
-use crate::data::Data;
+use crate::data::{Data, Station};
 use crate::screens::lists::{age_text, Txt};
 use crate::App;
 use ferrite_ui::text::Buf;
@@ -38,7 +38,25 @@ pub struct AprsCard {
     /// The beacon's countdown "m:ss" or why there is none ("no fix", "waiting", "by GPS", "soon"); empty while
     /// automatic beacons are off. The readback's `next=`.
     pub next: Buf<16>,
+    /// APRS mode's two counts (APRS-17.2): stations heard since power-on and in the last hour. `right` holds one
+    /// of them in turn ([`COUNT_FLIP_MS`]) for the small card; the large card shows both.
+    pub counts: Option<(u16, u16)>,
 }
+
+/// APRS-17.2 (decision 282, option C): the card's two counts. "14 heard": heard since this power-on, so the
+/// stations restored from flash (APRS-4) don't count; "Last ..." names the newest of them.
+fn since_boot(s: &Station, up_s: u32) -> bool {
+    s.ago_s <= up_s
+}
+
+/// "3 /hr": heard in the last hour by real age (a row from before a restart counts once GPS time dates it;
+/// `AGO_UNKNOWN` never does).
+fn in_hour(s: &Station) -> bool {
+    s.ago_s <= 3600
+}
+
+/// APRS-17.2: the small card's one bold spot shows each count this long in turn.
+pub const COUNT_FLIP_MS: u32 = 5000;
 
 /// "4:32" from seconds.
 fn mmss(s: u32, b: &mut Buf<16>) {
@@ -47,6 +65,18 @@ fn mmss(s: u32, b: &mut Buf<16>) {
 }
 
 impl App {
+    /// APRS-17.2: the card's counts, since power-on and in the last hour ([`since_boot`], [`in_hour`]), and the
+    /// newest station heard since power-on; the readback's `heard=` and `hour=` too.
+    pub fn heard_counts(&self, data: &dyn Data) -> (u16, u16, Option<Station>) {
+        let up_s = self.now / 1000;
+        let (mut boot, mut hour) = (0u16, 0u16);
+        for s in (0..data.stations()).filter_map(|i| data.station(i)) {
+            boot += since_boot(&s, up_s) as u16;
+            hour += in_hour(&s) as u16;
+        }
+        (boot, hour, data.station(0).filter(|s| since_boot(s, up_s)))
+    }
+
     /// The APRS card's texts while slot C is the APRS slot (APRS-17); None otherwise.
     pub fn aprs_card(&self, data: &dyn Data) -> Option<AprsCard> {
         let holder = self.aprs_holder()?;
@@ -71,10 +101,17 @@ impl App {
         let mut right = Buf::<16>::new();
         let (mut countdown, mut right_warn) = (false, false);
         let mut line = Buf::<48>::new();
+        let mut counts = None;
         match holder {
             Holder::Mode => {
-                let _ = uwrite!(right, "{} heard", data.stations());
-                match data.station(0) {
+                let (n, h, last) = self.heard_counts(data);
+                counts = Some((n, h));
+                if (self.now / COUNT_FLIP_MS).is_multiple_of(2) {
+                    let _ = uwrite!(right, "{} heard", n);
+                } else {
+                    let _ = uwrite!(right, "{} /hr", h);
+                }
+                match last {
                     Some(s) => {
                         let mut a = Buf::<12>::new();
                         age_text(s.ago_s, &mut a);
@@ -109,6 +146,6 @@ impl App {
             line = Buf::from(b.as_bytes());
         }
         let power = ["LOW", "MID", "HIGH"][self.aprs_cfg().power as usize % 3];
-        Some(AprsCard { holder, right, countdown, right_warn, line_warn, line, power, next })
+        Some(AprsCard { holder, right, countdown, right_warn, line_warn, line, power, next, counts })
     }
 }

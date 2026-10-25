@@ -857,7 +857,9 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
         app.beacon_text(data, &mut beacon);
         kq(l, "last", last.as_bytes());
         kq(l, "beacon", beacon.as_bytes());
-        kn(l, "heard", data.stations() as u32);
+        let (boot, hour, _) = app.heard_counts(data);
+        kn(l, "heard", boot as u32); // APRS-17.2: the card's counts, since power-on and in the last hour
+        kn(l, "hour", hour as u32);
         let digi = data.beacon().digi;
         if !digi.is_empty() {
             kq(l, "digi", digi.as_bytes()); // APRS-36

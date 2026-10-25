@@ -30,7 +30,7 @@ use ferrite_app::persist::{Persist, Sink, Source};
 use ferrite_app::settings::Settings;
 use ferrite_app::App;
 use ferrite_core::freq::{mhz, Freq10};
-use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, LAYOUT_HEADER, PRESETS, SETTINGS, SPARE, TRIMS, WAYPOINTS, ZONES};
+use ferrite_core::layout::{APRS, CHANNELS, CONTACTS, EVENT_LOG, HEARD, LAYOUT_HEADER, PRESETS, SETTINGS, SPARE, TRIMS, WAYPOINTS, ZONES};
 use ferrite_core::txplan::Region;
 use ferrite_ui::text::Buf;
 
@@ -86,6 +86,8 @@ pub enum Job {
     Msg { inbound: bool, peer: Buf<10>, text: Buf<67>, id: Buf<5>, ago_s: u32 },
     /// Our message to `peer` with `text` moved on (tried again, acked, failed).
     MsgState { peer: Buf<10>, text: Buf<67>, state: MsgState },
+    /// A heard station's row (APRS-4, [`logs::heard_job`]), stamped when it is written.
+    Heard([u8; logs::HEARD_JOB]),
     /// Event (`log`) or message `seq` read.
     Read { log: bool, seq: u32 },
     Waypoint(Waypoint),
@@ -148,6 +150,8 @@ pub struct FlashStore<N: Nor, D: Data> {
     saving: Cell<bool>,
     events: Ring,
     msgs: Ring,
+    /// The heard list's rows (APRS-4).
+    heard: Ring,
     wps: Waypoints,
     contacts: Contacts,
     /// The APRS settings, and when they last changed while not yet written (saved like the settings).
@@ -186,6 +190,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             saving: Cell::new(false),
             events: Ring::new(EVENT_LOG.start, EVENT_LOG.end, logs::EVENT_END),
             msgs: Ring::new(APRS.start + 2 * SECTOR, APRS.end, logs::MSG_END),
+            heard: Ring::new(HEARD.start, HEARD.end, logs::HEARD_END),
             wps: Waypoints::new(WAYPOINTS.start),
             contacts: Contacts::new(CONTACTS.start),
             aprs: Cell::new(AprsCfg::DEFAULT),
@@ -239,9 +244,10 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
         self.events.mount(&self.f).await?;
         self.msgs.mount(&self.f).await?;
+        self.heard.mount(&self.f).await?;
         self.wps.mount(&self.f).await?;
         self.contacts.0.mount(&self.f).await?;
-        let t = [self.events.newest_time(&self.f), self.msgs.newest_time(&self.f)].into_iter().flatten().max();
+        let t = [self.events.newest_time(&self.f), self.msgs.newest_time(&self.f), self.heard.newest_time(&self.f)].into_iter().flatten().max();
         self.time0.set(t.map_or(TIME0, |t| t.saturating_add(1)).max(TIME0));
         self.boot0.set(self.time0.get());
         if let Some(c) = settings::latest_of(&self.f, APRS_COPIES, APRS_PAYLOAD)? {
@@ -356,7 +362,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// A blank or foreign chip: every area erased, then the header (a cut before it formats again next time).
     async fn format(&self) -> Result {
-        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SPARE, APRS, EVENT_LOG, WAYPOINTS, CONTACTS] {
+        for r in [LAYOUT_HEADER, SETTINGS, CHANNELS, ZONES, PRESETS, SPARE, APRS, EVENT_LOG, WAYPOINTS, CONTACTS, HEARD] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase(s).await?;
@@ -469,6 +475,10 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 self.msgs.append(&self.f, &mut r).await.is_ok()
             }
             Job::MsgState { peer, text, state } => self.msg_state_async(peer, text, state).await.is_ok(),
+            Job::Heard(j) => {
+                let mut r = logs::heard_rec(&j, self.now_s(), self.utc.get());
+                self.heard.append(&self.f, &mut r).await.is_ok()
+            }
             Job::Read { log, seq } => {
                 let ring = if log { &self.events } else { &self.msgs };
                 ring.mark(&self.f, seq, 10, 0).await.is_ok()
@@ -870,7 +880,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             z.set(EMPTY);
         }
         self.zones.set(0);
-        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS, CONTACTS] {
+        for r in [CHANNELS, ZONES, PRESETS, APRS, EVENT_LOG, TRIMS, WAYPOINTS, CONTACTS, HEARD] {
             for s in r.step_by(SECTOR as usize) {
                 if !self.f.blank(s, SECTOR)? {
                     self.f.erase_blanked(s).await?;
@@ -879,6 +889,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
         self.events.forget();
         self.msgs.forget();
+        self.heard.forget();
         self.wps.forget();
         self.contacts.0.forget();
         self.aprs.set(AprsCfg::DEFAULT);
@@ -982,7 +993,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Op::PutZone(z, ..) => z < MAX_ZONES && z <= self.zones.get(),
             Op::PutPreset(i, _) => self.preset_slot(i).is_some() || (i == self.presets() && self.presets() < MAX_PRESETS),
             Op::Dtmf(i, _) | Op::DtmfName(i, _) => i < DTMF_MEMS,
-            Op::Wipe | Op::ReadAll | Op::ClearLog | Op::MessagesReadAll | Op::ClearMessages => true,
+            Op::Wipe | Op::ReadAll | Op::ClearLog | Op::MessagesReadAll | Op::ClearMessages | Op::ClearHeard => true,
             Op::Quick(i, _) => (i as usize) < ferrite_app::words::QUICK,
             _ => return None,
         })
@@ -1060,6 +1071,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 Ok(())
             }
             Op::ClearLog => self.events.clear(&self.f).await,
+            Op::ClearHeard => self.heard.clear(&self.f).await, // APRS-4: the stored rows too
             // APRS-46, INBOX-7.1: each unread message to us read, and its log entry (among the last 64) with it.
             Op::MessagesReadAll => {
                 for i in 0..self.msgs.len() {
@@ -1117,6 +1129,39 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         let ok = block(self.events.append(&self.f, &mut r)).is_ok();
         self.bump();
         ok
+    }
+
+    /// APRS-4: a heard station's row, queued for the Storage task (which stamps it). When to write one is the
+    /// APRS task's (`AprsLive`'s row rule).
+    pub fn heard_row(&self, s: &Station) -> bool {
+        self.ok() && self.submit(Job::Heard(logs::heard_job(s)))
+    }
+
+    /// APRS-4: the stored heard list at power-on: the newest row of each station, newest first, at most `max`
+    /// stations, each with its age (INBOX-6.1: [`AGO_UNKNOWN`] when not real).
+    pub fn heard_rows(&self, max: usize, f: &mut dyn FnMut(Station)) {
+        let mut seen = [0u32; 64];
+        let mut n = 0;
+        let c = self.clock();
+        for i in 0..self.heard.len() {
+            if n >= max.min(seen.len()) {
+                break;
+            }
+            let Some(b) = self.heard.read(&self.f, i) else { continue };
+            let s = logs::heard_decode(&b, self.heard.ago(&b, c));
+            let key = s.call.as_bytes().iter().fold(0x811C_9DC5u32, |h, &x| (h ^ x as u32).wrapping_mul(0x0100_0193));
+            if s.call.is_empty() || seen[..n].contains(&key) {
+                continue;
+            }
+            seen[n] = key;
+            n += 1;
+            f(s);
+        }
+    }
+
+    /// The heard rows stored (the build report, tests).
+    pub fn heard_stored(&self) -> u16 {
+        self.heard.len()
     }
 
     /// An APRS message: for us (`inbound`, unread) or ours (pending, the APRS task tries it); `ago_s` dates it
@@ -1566,8 +1611,8 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
 
     fn request(&self, op: Op) -> bool {
-        if op == Op::Wipe {
-            self.extra.request(op); // its records go too
+        if matches!(op, Op::Wipe | Op::ClearHeard) {
+            self.extra.request(op); // its records go too (the heard list in RAM)
         }
         if let Some(ok) = self.request_kept(op) {
             if ok {

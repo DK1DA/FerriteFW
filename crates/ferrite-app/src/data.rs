@@ -89,6 +89,9 @@ pub enum Sym {
 }
 
 impl Sym {
+    /// In discriminant order (`Sym::ALL[s as usize] == s`): the heard rows' byte (APRS-4).
+    pub const ALL: [Sym; 8] = [Sym::Car, Sym::Home, Sym::Digi, Sym::Wx, Sym::Ht, Sym::IGate, Sym::Truck, Sym::Boat];
+
     pub fn name(self) -> &'static str {
         ["Car", "Home", "Digi", "WX", "HT", "iGate", "Truck", "Boat"][self as usize]
     }

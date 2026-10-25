@@ -578,3 +578,55 @@ fn record_times_are_real_or_unknown() {
     assert_eq!(s.event(2).unwrap().ago_s, AGO_UNKNOWN);
     assert_eq!(s.event(0).unwrap().ago_s, 5);
 }
+
+fn st(call: &[u8], comment: &[u8], times: u16) -> Station {
+    Station {
+        call: Buf::from(call),
+        sym: Sym::Car,
+        pos: Some(Pos { lat: 454_252_000, lon: -756_901_000 }),
+        ago_s: 0,
+        via: Buf::from(b"VE3RSB-1*".as_slice()),
+        course: Some((92, 54)),
+        alt_m: Some(-3),
+        times,
+        comment: Buf::from(comment),
+        msg: Buf::new(),
+        msg_min: None,
+        fx25: Some(4),
+    }
+}
+
+/// APRS-4, APRS-4.2, APRS-4.3: the heard list's rows survive a power cycle: the newest row of each station, newest first, every
+/// field back, the times heard too; ages unknown until the clock is UTC again (INBOX-6.1). Clearing the heard
+/// list and the reset erase them.
+#[test]
+fn heard_rows_survive_a_restart() {
+    let a = app();
+    let s = mount(SimFlash::new());
+    s.set_time(1_800_000_000);
+    assert!(s.heard_row(&st(b"VE3KPW-9", b"Mobile", 1)));
+    assert!(s.heard_row(&st(b"VA3RTX", b"Home", 4)));
+    s.autosave(30_000, &a);
+    assert!(s.heard_row(&st(b"VE3KPW-9", b"Moved", 6))); // its newer row
+    let s = cycle(s);
+    assert_eq!(s.heard_stored(), 3);
+    let mut got = vec![];
+    s.heard_rows(50, &mut |x| got.push(x));
+    assert_eq!(got.len(), 2, "one per station");
+    let want = Station { ago_s: AGO_UNKNOWN, ..st(b"VE3KPW-9", b"Moved", 6) };
+    assert!(got[0] == want, "every field back, the via marked used");
+    assert_eq!((got[1].call.as_bytes(), got[1].times, got[1].ago_s), (&b"VA3RTX"[..], 4, AGO_UNKNOWN));
+    s.set_time(1_800_000_600);
+    let mut ages = vec![];
+    s.heard_rows(50, &mut |x| ages.push(x.ago_s));
+    assert_eq!(ages, [570, 600], "UTC rows dated once GPS time is back");
+    let mut one = 0;
+    s.heard_rows(1, &mut |_| one += 1);
+    assert_eq!(one, 1, "at most max stations");
+    assert!(s.request(Op::ClearHeard));
+    assert_eq!(cycle(s).heard_stored(), 0, "clearing the heard list erases the rows");
+    let s = mount(SimFlash::new());
+    assert!(s.heard_row(&st(b"VE3KPW-9", b"Mobile", 1)));
+    assert!(s.request(Op::Wipe));
+    assert_eq!(cycle(s).heard_stored(), 0, "the reset erases them");
+}

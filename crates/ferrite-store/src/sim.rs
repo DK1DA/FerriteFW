@@ -6,11 +6,12 @@
 //! [`ferrite_core::layout::WRITABLE`] panics: calibration and the update area must never be touched.
 
 use crate::{Nor, NorError, Result, SECTOR};
-use ferrite_core::layout::{SCRATCH_RING, WRITABLE};
+use ferrite_core::layout::{HEARD, SCRATCH_RING, WRITABLE};
 
-/// The first 512 KB of the 4 MB chip, where everything Ferrite stores is, then the scratch ring (decision 227) in
-/// a window of its own: `mem` holds the two back to back ([`SimFlash::at`]); anything else is out of range here.
-pub const LOW: usize = 512 << 10;
+/// The chip up to the end of the heard list (564 KB of the 4 MB), where everything Ferrite stores is, then the
+/// scratch ring (decision 227) in a window of its own: `mem` holds the two back to back ([`SimFlash::at`]);
+/// anything else is out of range here.
+pub const LOW: usize = HEARD.end as usize;
 pub const SIZE: usize = LOW + (SCRATCH_RING.end - SCRATCH_RING.start) as usize;
 /// The whole chip, for the erase counts.
 const CHIP: usize = 4 << 20;
