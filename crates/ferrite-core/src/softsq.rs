@@ -19,9 +19,14 @@ pub fn set_chip_decides(on: bool) {
     CHIP.store(on, Relaxed);
 }
 
-/// Readings in a row that must pass to open on ordinary receive: 20 ms at the 10 ms tick, a short debounce in
-/// place of the chip's open delay. A scan step, priority look or the APRS slot opens on the first.
-pub const OPEN_READS: u8 = 2;
+/// Readings in a row that must pass to open on ordinary receive: 30 ms at the 10 ms tick, a short debounce in
+/// place of the chip's open delay (SQL-18.1). Three, not two (decision 293): on a band whose RSSI sits over the open
+/// threshold with nothing on air (black indoors on 446.500, Oct 25, 2026), only the noise test holds it shut, and a
+/// brief dip under it opened the squelch. A scan step or priority look opens on the first.
+pub const OPEN_READS: u8 = 3;
+/// SQL-18.2 (decision 293): open, the noise closes it at least this far over the open threshold. The chip's own
+/// ceiling is 1 over it, so a weak signal whose noise wobbled across opened and shut again and again.
+pub const NOISE_HYST: u8 = 3;
 /// Readings in a row with the RSSI under its close threshold (and the noise still under the ceiling) that close
 /// it: a weak, fading signal rides through a dip of 20 ms.
 pub const FADE_READS: u8 = 3;
@@ -66,7 +71,7 @@ impl SoftSq {
             if self.n >= if fast { 1 } else { OPEN_READS } {
                 (self.open, self.n) = (true, 0);
             }
-        } else if noise >= l.ceiling {
+        } else if noise >= l.ceiling.max(l.noise_open.saturating_add(NOISE_HYST)) {
             (self.open, self.n) = (false, 0); // the noise ceiling: shut at once, no tail
         } else if rssi < l.rssi_close {
             self.n = self.n.saturating_add(1);
@@ -102,10 +107,11 @@ mod tests {
         assert_eq!(Limits::from_regs((0x5955, 0x2827)), L);
     }
 
-    /// SQL-18.1: ordinary receive opens on the second reading in a row that passes; a scan step on the first.
+    /// SQL-18.1: ordinary receive opens on the third reading in a row that passes; a scan step on the first.
     #[test]
-    fn opens_after_two_readings_or_one_when_fast() {
+    fn opens_after_three_readings_or_one_when_fast() {
         let mut s = SoftSq::default();
+        assert!(!s.step(&L, SIG.0, SIG.1, false));
         assert!(!s.step(&L, SIG.0, SIG.1, false));
         assert!(s.step(&L, SIG.0, SIG.1, false));
         let mut f = SoftSq::default();
@@ -114,6 +120,12 @@ mod tests {
         let mut b = SoftSq::default();
         for r in [SIG, EMPTY, SIG, EMPTY, SIG, EMPTY] {
             assert!(!b.step(&L, r.0, r.1, false));
+        }
+        // decision 293: the band's RSSI over the open threshold with nothing on air, the noise dipping under it for
+        // two readings at a time: never opens
+        let mut d = SoftSq::default();
+        for n in [48, 39, 39, 47, 38, 39, 50, 39, 46] {
+            assert!(!d.step(&L, 0x74, n, false), "noise {n}");
         }
     }
 
@@ -131,13 +143,15 @@ mod tests {
         assert!(z.step(&L, 0x59, 0x27, true), "at the thresholds themselves");
     }
 
-    /// SQL-18.2: open, the noise reaching the ceiling shuts it on that reading: the carrier's gone, no tail.
+    /// SQL-18.2: open, the noise reaching the ceiling (at least NOISE_HYST over the open threshold, decision 293)
+    /// shuts it on that reading: the carrier's gone, no tail.
     #[test]
     fn the_ceiling_closes_at_once() {
         let mut s = SoftSq::default();
         s.step(&L, SIG.0, SIG.1, true);
-        assert!(s.step(&L, SIG.0, 0x27, false), "under the ceiling: stays");
-        assert!(!s.step(&L, SIG.0, 0x28, false), "at the ceiling, even with RSSI left");
+        assert!(s.step(&L, SIG.0, 0x28, false), "the chip's ceiling, 1 over: stays (a weak signal's wobble)");
+        assert!(s.step(&L, SIG.0, 0x29, false), "2 over: stays");
+        assert!(!s.step(&L, SIG.0, 0x2A, false), "3 over, even with RSSI left: shut");
     }
 
     /// SQL-18.2: a fading signal under the RSSI close threshold rides two readings and closes on the third; a
