@@ -1855,6 +1855,10 @@ fn bt(t: &mut Toks) -> Result<Done, Msg> {
     if same(w, b"stat") && t.clone().next()?.is_none() {
         return Ok(Done::Debug(Job::new(Kind::BtStat(0, None))));
     }
+    // `bt linkz`: the link codecs timed on the radio (decision 285, step 3)
+    if same(w, b"linkz") && t.clone().next()?.is_none() {
+        return Ok(Done::Debug(Job::new(Kind::Linkz)));
+    }
     // `bt pace B G`: LINK-36's bursts of B bytes and G ms gaps, in RAM until a restart (B 0: unpaced).
     if same(w, b"pace") {
         const PACE: &str = "bt pace B G: bursts of B bytes (0 to 255, 0: unpaced), G ms apart (0 to 1000)";

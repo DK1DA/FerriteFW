@@ -1251,6 +1251,8 @@ fn regs(r: DebugReq) -> DebugAns {
             DebugAns::Bt { data, n: 8 }
         }
         #[cfg(feature = "bench")]
+        DebugReq::Linkz => DebugAns::Linkz([0; 11]),
+        #[cfg(feature = "bench")]
         DebugReq::BtStat { baud, pace } => DebugAns::BtStat(ferrite_core::msg::BtStats { rx: 12, tx: 340, framing: 1, overrun: 0, dropped: 0, baud: if baud == 0 { 9600 } else { baud }, on: true, pace: pace.unwrap_or_default() }),
         #[cfg(feature = "bench")]
         DebugReq::RxBoth(on) => DebugAns::RxBoth(on.unwrap_or(false)),

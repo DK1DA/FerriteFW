@@ -53,6 +53,9 @@ pub enum Kind {
     /// `bt stat`, `bt baud N` (0: only ask), `bt pace B G`: USART1's counters, rate and pacing (TERM-27, LINK-36).
     BtStat(u32, Option<ferrite_core::link::BtPace>),
     #[cfg(feature = "bench")]
+    /// `bt linkz`: the link codecs timed (decision 285, step 3).
+    Linkz,
+    #[cfg(feature = "bench")]
     /// `rx both`, `rx one`, `rx`: the bench test's hold on both band receive selects (TERM-29), or ask.
     RxBoth(Option<bool>),
     /// `gps`: the GPS module's last GGA sentence and its two heights (TERM-30).
@@ -149,6 +152,8 @@ impl Job {
             Kind::Bt { text, n } => DebugReq::Bt { text, n },
             #[cfg(feature = "bench")]
             Kind::BtStat(baud, pace) => DebugReq::BtStat { baud, pace },
+            #[cfg(feature = "bench")]
+            Kind::Linkz => DebugReq::Linkz,
             #[cfg(feature = "bench")]
             Kind::RxBoth(on) => DebugReq::RxBoth(on),
             Kind::Gga => DebugReq::Gga,
@@ -277,6 +282,24 @@ impl Job {
                     }
                 }
                 self.st = St::Over;
+                Step::Line
+            }
+            #[cfg(feature = "bench")]
+            (Kind::Linkz, DebugAns::Linkz(v)) => {
+                let us = |c: u32, mhz: u32| c / mhz.max(1);
+                match self.line {
+                    0 => put!(out, "  linkz: {} B plain, {} MHz now; cycles, then us at 24 and 120 MHz", v[1], v[0]),
+                    k @ 1..=3 => {
+                        let i = 2 + (k as usize - 1) * 3;
+                        let name = ["T ", "L ", "LD"][k as usize - 1];
+                        put!(out, "  {} {} B, encode {} cyc ({} / {} us), decode {} cyc ({} / {} us)", name, v[i], v[i + 1], us(v[i + 1], 24), us(v[i + 1], 120), v[i + 2], us(v[i + 2], 24), us(v[i + 2], 120));
+                        if k == 3 {
+                            self.st = St::Over;
+                        }
+                    }
+                    _ => self.st = St::Over,
+                }
+                self.line += 1;
                 Step::Line
             }
             #[cfg(feature = "bench")]

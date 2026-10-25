@@ -832,6 +832,9 @@ impl FakeRadio {
             // TERM-27: a module that, like the radio's, says nothing back.
             DebugReq::Bt { .. } => DebugAns::Bt { data: [0; 48], n: 0 },
             #[cfg(feature = "bench")]
+            // `bt linkz`: no cycle counter in the simulator: the sizes only
+            DebugReq::Linkz => DebugAns::Linkz([0; 11]),
+            #[cfg(feature = "bench")]
             // TERM-27, LINK-36: the module off, at the default pace (or the one just set).
             DebugReq::BtStat { pace, .. } => DebugAns::BtStat(ferrite_core::msg::BtStats {
                 pace: pace.unwrap_or_default(),

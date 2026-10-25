@@ -29,6 +29,10 @@ pub mod keys;
 pub mod layout;
 pub mod lease;
 pub mod link;
+pub mod linkz;
+pub mod linkz_data;
+#[cfg(test)]
+mod linkz_vectors;
 pub mod liveview;
 pub mod mcutemp;
 #[cfg(feature = "bench")]

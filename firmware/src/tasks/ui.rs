@@ -623,6 +623,8 @@ pub async fn task() {
                     #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::Gps { id, arg, quiet } => crate::chan::GPS_SEND.signal((id, arg, quiet)),
                     #[cfg(feature = "bench")]
+                    ferrite_core::msg::DebugReq::Linkz => ports.debug_answer(ferrite_core::msg::DebugAns::Linkz(linkz_bench())),
+                    #[cfg(feature = "bench")]
                     ferrite_core::msg::DebugReq::BtStat { baud, pace } => {
                         if baud != 0 {
                             crate::chan::BT_RATE.store(baud, Relaxed); // the Link task restarts USART1 at it
@@ -1078,4 +1080,41 @@ fn ssb_bundle() -> Option<(ferrite_core::ssb::Patch, &'static [u8])> {
         }
     }
     None
+}
+
+/// Decision 285, step 3 (`bt linkz`): the link codecs over the sample frames, timed with the cycle counter. One codec
+/// at a time, its state on this frame's stack only while it runs (L's encoder is 3.5 KB).
+#[cfg(feature = "bench")]
+#[inline(never)]
+fn linkz_bench() -> [u32; 11] {
+    use ferrite_core::linkz::{t_decode, t_encode, LzDec, LzEnc};
+    use ferrite_core::linkz_data::SAMPLES;
+    let mut v = [0u32; 11];
+    v[0] = crate::hal::clock::mhz();
+    v[1] = SAMPLES.iter().map(|s| s.len() as u32).sum();
+    let (mut b, mut back) = ([0u8; 600], [0u8; 600]);
+    let (mut bytes, mut enc, mut dec) = (0u32, 0u32, 0u32);
+    for s in SAMPLES {
+        let c0 = crate::hal::time::cycles();
+        let n = t_encode(s, &mut b).unwrap_or(0);
+        let c1 = crate::hal::time::cycles();
+        let _ = t_decode(&b[..n], &mut back);
+        let c2 = crate::hal::time::cycles();
+        (bytes, enc, dec) = (bytes + n as u32, enc + c1.wrapping_sub(c0), dec + c2.wrapping_sub(c1));
+    }
+    (v[2], v[3], v[4]) = (bytes, enc, dec);
+    for (k, dict) in [(5, false), (8, true)] {
+        let (mut e, mut d) = (LzEnc::new(dict), LzDec::new(dict));
+        let (mut bytes, mut enc, mut dec) = (0u32, 0u32, 0u32);
+        for s in SAMPLES {
+            let c0 = crate::hal::time::cycles();
+            let n = e.encode(s, &mut b).unwrap_or(0);
+            let c1 = crate::hal::time::cycles();
+            let _ = d.decode(&b[..n], &mut back);
+            let c2 = crate::hal::time::cycles();
+            (bytes, enc, dec) = (bytes + n as u32, enc + c1.wrapping_sub(c0), dec + c2.wrapping_sub(c1));
+        }
+        (v[k], v[k + 1], v[k + 2]) = (bytes, enc, dec);
+    }
+    v
 }

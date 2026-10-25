@@ -429,6 +429,9 @@ pub enum DebugReq {
     /// Bluetooth pacing set to it first, in RAM (`bt pace B G`).
     BtStat { baud: u32, pace: Option<crate::link::BtPace> },
     #[cfg(feature = "bench")]
+    /// Decision 285, step 3: the link codecs timed on the radio's own clock over [`crate::linkz_data::SAMPLES`].
+    Linkz,
+    #[cfg(feature = "bench")]
     /// TERM-29, the bench test of decision 114: hold both band receive selects on (`Some(true)`), back to one
     /// (`Some(false)`), or only ask (`None`). The Radio task refuses while keyed, in HF mode and while the
     /// crossband repeater runs.
@@ -548,6 +551,10 @@ pub enum DebugAns {
     #[cfg(feature = "bench")]
     /// TERM-27: `bt stat`.
     BtStat(BtStats),
+    #[cfg(feature = "bench")]
+    /// `bt linkz`: the core clock (MHz), the samples' plain bytes, then for T, L and LD: bytes, encode cycles,
+    /// decode cycles.
+    Linkz([u32; 11]),
     #[cfg(feature = "bench")]
     /// TERM-29: whether both band receive selects are held on now.
     RxBoth(bool),
