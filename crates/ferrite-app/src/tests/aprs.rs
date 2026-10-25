@@ -582,13 +582,21 @@ fn custom_path() {
         assert!(!path_ok(bad), "{:?}", core::str::from_utf8(bad));
     }
     let mut a = A::new();
-    assert_eq!(a.app.aprs_cfg().path_choices(), 5, "no custom path: five choices");
+    // APRS-26: custom keeps value 3 (a radio set to it before APRSAT and ARISS were added still is); unset, it's skipped
+    assert!(!a.app.aprs_cfg().path_ok(PATH_CUSTOM), "no custom path: not a choice");
+    a.app.set_aprs(crate::aprs::AprsCfg { path: 2, ..a.app.aprs_cfg() });
+    change(&mut a.app, &[5, 9, 1], 1);
+    assert_eq!(a.app.aprs_cfg().path, 4, "WIDE1-1,WIDE2-1 then APRSAT, Custom skipped");
+    change(&mut a.app, &[5, 9, 1], 1);
+    assert_eq!(a.app.aprs_cfg().path, 5, "then ARISS");
+    change(&mut a.app, &[5, 9, 1], 1);
+    assert_eq!(a.app.aprs_cfg().path, 0, "then round to None");
     a.app.set_aprs_custom_path(b"WIDE2-2");
     let c = a.app.aprs_cfg();
     assert_eq!((c.path, &*c.path()), (PATH_CUSTOM, &[b"WIDE2-2".as_slice()][..]));
     assert_eq!(c.path_name(), b"WIDE2-2");
     change(&mut a.app, &[5, 9, 1], 1);
-    assert_eq!(a.app.aprs_cfg().path, 0, "Custom then None: six choices");
+    assert_eq!(a.app.aprs_cfg().path, 4, "Custom then APRSAT");
     change(&mut a.app, &[5, 9, 1], -1);
     assert_eq!(a.app.aprs_cfg().path, PATH_CUSTOM);
     a.app.set_aprs_custom_path(b"WIDE1-1,WIDE2-2");

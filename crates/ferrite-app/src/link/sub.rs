@@ -11,7 +11,7 @@
 //!   `HELLO`, a new connection) or when the session has sent nothing for [`ev::QUIET_MS`].
 
 use super::{Out, Session, Window};
-use crate::aprs::{path_ok, region_freq, AprsCfg, BEACON_MODES, CUSTOM_LEN, F_MAX, F_MIN, PATHS};
+use crate::aprs::{path_ok, region_freq, AprsCfg, BEACON_MODES, CUSTOM_LEN, F_MAX, F_MIN};
 use crate::chan::ChannelStore;
 use crate::data::{Draft, Message, MsgState, Op, Station};
 use crate::persist::Sink as PSink;
@@ -507,7 +507,7 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
     if c.power > 2 || rec[6] > 1 {
         return invalid(o, "power or beacon after voice out of range");
     }
-    if c.path >= c.path_choices() || (c.path as usize) > PATHS.len() {
+    if !c.path_ok(c.path) {
         return invalid(o, "path: none, WIDE1-1, WIDE1-1,WIDE2-1, APRSAT, ARISS, or custom once set");
     }
     if c.digi & !0x73 != 0 || c.digi >> 4 & 7 > crate::aprs::DIGI_WAIT_MAX {

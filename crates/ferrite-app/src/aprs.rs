@@ -173,9 +173,24 @@ impl AprsCfg {
         &self.comment[..n]
     }
 
-    /// 0 5 9 1's choices: the [`PATHS`], and Custom once one is set.
-    pub fn path_choices(&self) -> u8 {
-        PATHS.len() as u8 + !self.custom_text().is_empty() as u8
+    /// A stored path value 0 5 9 1 can hold: one of the [`PATHS`], and Custom only once one is set.
+    pub fn path_ok(&self, v: u8) -> bool {
+        (v as usize) < PATHS.len() && (v != PATH_CUSTOM || !self.custom_text().is_empty())
+    }
+
+    /// 0 5 9 1 stepped `d` places through the values it can hold, round the end.
+    pub fn path_step(&self, d: i32) -> u8 {
+        let n = PATHS.len() as i32;
+        let mut v = self.path as i32;
+        for _ in 0..d.unsigned_abs() {
+            for _ in 0..n {
+                v = (v + d.signum()).rem_euclid(n);
+                if self.path_ok(v as u8) {
+                    break;
+                }
+            }
+        }
+        v as u8
     }
 
     /// 0 5 9 1's name for the path in use.
@@ -232,17 +247,20 @@ impl AprsCfg {
     }
 }
 
-/// The paths offered (0 5 9 1, APRS-26): name and entries; the custom path (0 5 9 2) is [`PATH_CUSTOM`].
-pub const PATHS: [(&str, &[&[u8]]); 5] = [
+/// The paths offered (0 5 9 1, APRS-26), indexed by the stored value: name and entries. The custom path (0 5 9 2)
+/// keeps the value it has always had, [`PATH_CUSTOM`] (3), so a radio set to it before APRSAT and ARISS were added
+/// still is; its row here is a placeholder (its name and entries are the typed path's).
+pub const PATHS: [(&str, &[&[u8]]); 6] = [
     ("None", &[]),
     ("WIDE1-1", &[b"WIDE1-1"]),
     ("WIDE1-1,WIDE2-1", &[b"WIDE1-1", b"WIDE2-1"]),
+    ("", &[]),
     // APRS-26.1 (decision 292): the satellite and ISS digipeaters' aliases
     ("APRSAT", &[b"APRSAT"]),
     ("ARISS", &[b"ARISS"]),
 ];
 /// 0 5 9 1 on the custom path (0 5 9 2).
-pub const PATH_CUSTOM: u8 = PATHS.len() as u8;
+pub const PATH_CUSTOM: u8 = 3;
 
 /// A custom path (0 5 9 2, APRS-26) is one or two entries split by a comma, each a callsign or alias of 1-6
 /// capitals and digits with an optional -SSID of 1-15 (WIDE1-1, WIDE2-2, a club's call), and fits

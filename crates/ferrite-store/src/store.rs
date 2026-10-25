@@ -325,7 +325,8 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             if c.len as usize >= APRS_PATH {
                 let mut m = [0u8; 4];
                 self.f.raw_read(c.at + APRS_MORE as u32, &mut m)?;
-                cfg.path = if m[0] < cfg.path_choices() { m[0] } else { cfg.path };
+                // APRS-26: custom keeps its value 3 from before APRSAT and ARISS (4, 5); kept only with a custom path set
+                cfg.path = if cfg.path_ok(m[0]) { m[0] } else { cfg.path };
                 cfg.digi = m[1] & 0x73;
                 cfg.after_voice = m[2] == 1;
                 // APRS-30: the spare byte; erased (0xFF, a record from before it) reads as the default

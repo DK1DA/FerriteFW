@@ -961,7 +961,7 @@ pub(crate) fn change(app: &mut App, p: &[u8], d: i32) -> bool {
         [5, 6, 2] => app.set_aprs(crate::aprs::AprsCfg { after_voice: !app.aprs_cfg().after_voice, ..app.aprs_cfg() }),
         [5, 9, 1] => {
             let c = app.aprs_cfg();
-            app.set_aprs(crate::aprs::AprsCfg { path: cycle(c.path, d, c.path_choices() as usize), ..c });
+            app.set_aprs(crate::aprs::AprsCfg { path: c.path_step(d), ..c });
         }
         [5, 7, 1] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_ON, ..app.aprs_cfg() }),
         [5, 7, 2] => app.set_aprs(crate::aprs::AprsCfg { digi: app.aprs_cfg().digi ^ crate::aprs::DIGI_MYCALL, ..app.aprs_cfg() }),
