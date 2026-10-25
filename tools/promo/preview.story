@@ -1,4 +1,4 @@
-# Ferrite preview: seven features, recorded from the simulator (the firmware's own screens).
+# Ferrite preview: the main features, recorded from the simulator (the firmware's own screens).
 # Blocks are separated by lines of ---. Fields:
 #   kind: intro or outro for a title card (no radio), shown `seconds` long
 #   title, left, right: caption text (|| starts a new paragraph)
@@ -13,7 +13,7 @@
 
 kind: intro
 title: Ferrite
-left: Firmware for the Radtel RT-950 Pro.
+left: Free firmware for the Radtel RT-950 Pro, written from scratch.
 seconds: 4
 music: music/chiptune3.wav
 ---
@@ -95,7 +95,7 @@ script:
 title: Messages, without typing callsigns
 layout: center
 left: An empty recipient lists your contacts, recent conversations, stations heard and APRS services.
-right: Pick one, then write with predictive text on the keypad. || Acks and retries are handled for you.
+right: Pick one, then write with predictive text on the keypad. || Acks and retries are handled for you, and a message still trying can be stopped or sent again.
 setup: press BACK; home
 script:
   menu 0 5 2
@@ -115,11 +115,45 @@ script:
   press HASH
   wait 2500ms
 ---
-title: HF and SSB on a handheld
+title: APRS on slot C
+layout: left
+left: MENU 0 5 3 puts APRS mode on slot C, beside your two voice slots.
+right: The card counts the stations heard since power-on and in the last hour, and names the last one. || C gets the receive path every other turn, so packets aren't missed while A and B watch.
+setup: press BACK; home
+script:
+  wait 800ms
+  menu 0 5 3
+  wait 900ms
+  knob 1
+  wait 900ms
+  home
+  wait 1200ms
+  press SLOT
+  wait 300ms
+  press SLOT
+  wait 6500ms
+---
+title: Everything it heard, in one place
 layout: right
-left: The broadcast receiver doubles as an HF radio: AM, USB, LSB and CW below 30 MHz.
-right: Here, 20 m voice in USB, with its own tuning screen.
-setup: press BACK; home; menu 0 3 4; wait 2700ms; type 14230; press OK; press STAR; wait 10500ms
+left: The event log keeps every decode and alert, newest first, through a restart.
+right: Filter by source; open one for its details, or tune straight to it. || The heard list comes back after a restart too.
+setup: home
+script:
+  wait 800ms
+  menu 0 4 1
+  wait 2000ms
+  press RIGHT
+  wait 1200ms
+  press LEFT
+  wait 900ms
+  press OK
+  wait 2500ms
+---
+title: Shortwave on a handheld
+layout: right
+left: The broadcast receiver doubles as an HF receiver: AM on long wave, medium wave and shortwave.
+right: Its own tuning screen, with the signal and the station's band at a glance.
+setup: press BACK; home; menu 0 3 4; wait 2700ms; type 9580; press OK; wait 3000ms
 script:
   wait 1200ms
   knob 3
@@ -127,7 +161,12 @@ script:
   knob -3
   wait 2500ms
 ---
+kind: intro
+title: Ferrite Console
+left: Program the radio and watch it live from a browser, over the cable or Bluetooth. Channels, settings, APRS messages, the heard list on a map, and a backup before anything is installed.
+seconds: 6
+---
 kind: outro
 title: ferritefw.dev
-left: Free and Source Included.
+left: Free firmware, source public.
 seconds: 5
