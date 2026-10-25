@@ -270,6 +270,11 @@ impl View for Home {
                 (Key::Digit(1 | 2 | 4), Long) => {}
                 // APRS-17.8: hold V/M on the APRS slot sends a beacon (a hold, so a bump never transmits)
                 (Key::VfoMem, Long) => return super::opts::beacon_now(app, store),
+                // a tap says how (KISS holds C with no beacons: its refusal, below)
+                (Key::VfoMem, Short) if app.aprs_holder() != Some(crate::aprs::Holder::Kiss) => {
+                    app.show_toast(b"Hold V/M", b"to send a beacon", false);
+                    return;
+                }
                 (Key::Up | Key::Down | Key::Left | Key::Right, Short | Repeat)
                 | (Key::Slot | Key::Digit(_), Long)
                 | (Key::VfoMem | Key::Side(2) | Key::Digit(_), Short) => {

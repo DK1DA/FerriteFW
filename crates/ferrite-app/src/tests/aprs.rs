@@ -665,7 +665,8 @@ fn a_message_to_you_plays_the_message_sound() {
     assert!(CHIMES[0][0].1 == 0 && (1..CHIMES.len()).all(|i| (100..=600).contains(&ms(i))), "short sounds");
 }
 
-/// APRS-17.8: hold V/M on the APRS slot sends a beacon; a tap is refused as before (a bump never transmits).
+/// APRS-17.8: hold V/M on the APRS slot sends a beacon; a tap sends nothing (a bump never transmits) and says
+/// "Hold V/M to send a beacon".
 /// In compose V/M sends one and leaves the draft as it is.
 #[test]
 fn vm_beacons() {
@@ -678,7 +679,8 @@ fn vm_beacons() {
     }
     a.wait(3500);
     a.tap(Key::VfoMem);
-    assert!(!a.s.beacon_asked(), "a tap: refused");
+    assert!(!a.s.beacon_asked(), "a tap: no beacon");
+    assert_eq!(a.app.toast.map(|t| t.head), Some(Buf::from(&b"Hold V/M"[..])), "a tap: says how");
     a.press(Key::VfoMem, 800);
     assert!(a.s.beacon_asked(), "hold V/M: a beacon");
     let mut b = A::new();
