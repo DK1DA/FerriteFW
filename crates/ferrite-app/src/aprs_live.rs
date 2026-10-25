@@ -116,6 +116,8 @@ fn row_key(pos: Option<Pos>, comment: &Buf<40>) -> u16 {
 struct Out {
     peer: Buf<10>,
     text: Buf<67>,
+    /// The callsign it is sent as (APRS-13.4: empty until the first turn, which takes the current one).
+    from: Buf<10>,
     id: u8,
     tries: u8,
     next_s: u32,
@@ -179,6 +181,19 @@ pub enum Sending {
     Beacons,
     /// Everything: APRS mode on.
     All,
+}
+
+impl Sending {
+    /// APRS-10.1: whether a frame of this kind ([`Tick::what`]) may still go: everything with APRS mode, only
+    /// beacons with beacons alone, nothing otherwise. Checked again just before a waiting frame keys, so one
+    /// queued while APRS held C never keys after C is given back.
+    pub fn may_send(self, what: &str) -> bool {
+        match self {
+            Sending::All => true,
+            Sending::Beacons => what == "Beacon",
+            Sending::Nothing => false,
+        }
+    }
 }
 
 /// APRS-10, APRS-29 (decision 181): a frame waits for a clear moment on the APRS frequency (p-persistence on C's
@@ -272,6 +287,8 @@ pub struct AprsLive {
     /// APRS-36: a frame of ours went out and hasn't been heard back yet; who repeated the last one heard back.
     echo: Cell<bool>,
     echo_by: Cell<Buf<10>>,
+    /// What the last turn allowed (APRS-10.1): a frame heard is queued to digipeat only while everything may go.
+    sending: Cell<Sending>,
 }
 
 impl Default for AprsLive {
@@ -307,6 +324,7 @@ impl AprsLive {
             now_s: Cell::new(0),
             echo: Cell::new(false),
             echo_by: Cell::new(Buf::new()),
+            sending: Cell::new(Sending::Nothing),
         }
     }
 
@@ -391,10 +409,13 @@ impl AprsLive {
         self.heard.iter().for_each(|h| h.set(None));
     }
 
-    /// The reset (BOOT-14): the heard list, our messages being tried and the beacon timing go.
+    /// The reset (BOOT-14): the heard list, our messages being tried, everything waiting to go and the beacon
+    /// timing go (APRS-10.1).
     pub fn clear(&self) {
         self.clear_heard();
-        self.out.iter().for_each(|o| o.set(None));
+        self.clear_out();
+        self.beacon_now.set(false);
+        self.waiting.set(false);
         self.acks.iter().for_each(|a| a.set(None));
         self.query.set(None);
         self.general.set(None);
@@ -437,13 +458,31 @@ impl AprsLive {
 
     // ---- messages (APRS-6, APRS-13) ----
 
-    /// Our message (the store's Send): its first try at the next tick, exempt from APRS-9's spacing.
+    /// Our message (the store's Send): its first try at the next tick, exempt from APRS-9's spacing. False when
+    /// [`OUT`] are being tried already (APRS-13.3: the store checks [`AprsLive::room`] before it saves one).
     pub fn send(&self, to: &[u8], text: &[u8]) -> bool {
         let Some(slot) = self.out.iter().find(|o| o.get().is_none()) else { return false };
         let id = self.next_id.get();
         self.next_id.set(if id >= 99 { 1 } else { id + 1 });
-        slot.set(Some(Out { peer: Buf::from(to), text: Buf::from(text), id, tries: 0, next_s: self.now_s.get() }));
+        slot.set(Some(Out { peer: Buf::from(to), text: Buf::from(text), from: Buf::new(), id, tries: 0, next_s: self.now_s.get() }));
         true
+    }
+
+    /// APRS-13.3: room for one more of our messages.
+    pub fn room(&self) -> bool {
+        self.out.iter().any(|o| o.get().is_none())
+    }
+
+    /// APRS-13.1: our message to `to` with `text` is tried no more (stopped, or deleted). True when it was.
+    pub fn unqueue(&self, to: &[u8], text: &[u8]) -> bool {
+        let Some(c) = self.out.iter().find(|o| o.get().is_some_and(|o| o.peer.as_bytes() == to && o.text.as_bytes() == text)) else { return false };
+        c.set(None);
+        true
+    }
+
+    /// APRS-46: every message deleted: none of ours is tried any more.
+    pub fn clear_out(&self) {
+        self.out.iter().for_each(|o| o.set(None));
     }
 
     pub fn beacon_now(&self) {
@@ -492,7 +531,7 @@ impl AprsLive {
             return rx;
         }
         let dupe = self.dupe(&f, now_s);
-        if cfg.digi_on() && !dupe {
+        if cfg.digi_on() && !dupe && self.sending.get() == Sending::All {
             if let Some(m) = my {
                 if self.digipeat(&f, m, cfg.digi_mycall()) {
                     self.digi_at.set(now_s + cfg.digi_wait_s() as u32);
@@ -762,7 +801,12 @@ impl AprsLive {
     /// A frame to send is written to `out`; the caller keys slot C, plays it, unkeys.
     pub fn tick(&self, now_s: u32, send: Sending, relay_ok: bool, me: &[u8], fix: Option<Fix>, cfg: &AprsCfg, out: &mut [u8; FRAME_MAX]) -> Tick {
         self.now_s.set(now_s);
+        self.sending.set(send);
         let mut t = Tick::default();
+        // 0 5 7 1 turned off while a digipeat waits its turn: it doesn't go (APRS-10.1).
+        if !cfg.digi_on() {
+            self.digi.set(None);
+        }
         // APRS-33: queries are answered only in APRS mode with automatic beacons on, and not long after they came.
         if send != Sending::All || !cfg.beacons_on() {
             self.query.set(None);
@@ -780,9 +824,13 @@ impl AprsLive {
             self.digi.set(None);
         }
         if send == Sending::Nothing {
-            // Without APRS mode nothing is sent (APRS-22 only decodes): acks owed meanwhile are dropped, so
-            // turning the mode on later doesn't send stale ones.
+            // Without APRS mode nothing is sent (APRS-22 only decodes): everything owed or asked for meanwhile is
+            // dropped (acks, a digipeat, Beacon now, the beacon after voice), so turning the mode on later doesn't
+            // send stale ones (APRS-10.1). Our messages wait for it (LINK-45).
             self.acks.iter().for_each(|a| a.set(None));
+            self.digi.set(None);
+            self.beacon_now.set(false);
+            self.after_voice.set(false);
             self.on_since.set(None);
             self.fix_wait.set(None);
             t.changed = self.waiting.replace(false);
@@ -827,8 +875,23 @@ impl AprsLive {
             }
             // Over the rate: dropped, not delayed (the next station will carry it).
         }
+        // APRS-13.4: a message is sent as one callsign throughout, since its ack comes back to that one. The
+        // callsign changed since its first try: it ends as failed (one moved on per turn, as the store hears them).
+        let me_call = Buf::<10>::from(me);
         for c in self.out.iter().filter(|_| all) {
-            let Some(mut o) = c.get().filter(|o| o.tries < TRIES && now_s >= o.next_s) else { continue };
+            if let Some(mut o) = c.get() {
+                if o.from.is_empty() {
+                    o.from = me_call;
+                    c.set(Some(o));
+                } else if o.from != me_call && t.states.iter().any(|s| s.is_none()) {
+                    c.set(None);
+                    push_state(&mut t, (o.peer, o.text, MsgState::Failed));
+                    t.changed = true;
+                }
+            }
+        }
+        for c in self.out.iter().filter(|_| all) {
+            let Some(mut o) = c.get().filter(|o| o.tries < TRIES && now_s >= o.next_s && o.from == me_call) else { continue };
             if o.tries > 0 && !auto_ok {
                 continue;
             }
@@ -1356,23 +1419,124 @@ mod tests {
     fn digipeater_fills_in_once() {
         let a = AprsLive::new();
         let mut out = [0u8; FRAME_MAX];
+        a.tick(9, Sending::All, true, b"VE3XYZ", None, &DIGI, &mut out); // APRS mode on (APRS-10.1)
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b">Walking");
         a.receive(&f[..n], 10, b"VE3XYZ", &DIGI);
-        let t = a.tick(10, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
+        let t = a.tick(10, Sending::All, true, b"VE3XYZ", None, &DIGI, &mut out);
         assert_eq!(t.what, "Digipeat");
         let g = Frame::parse(&out[..t.len]).unwrap();
         assert!(g.digis()[0].repeated && g.digis()[0].call() == b"VE3XYZ");
         assert!(!g.digis()[1].repeated);
         // The same frame again within 30 s, or one already past WIDE1: not repeated.
         a.receive(&f[..n], 20, b"VE3XYZ", &DIGI);
-        assert_eq!(a.tick(20, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
+        assert_eq!(a.tick(20, Sending::All, true, b"VE3XYZ", None, &DIGI, &mut out).len, 0);
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1*", b"WIDE2-1"], b">Later");
         a.receive(&f[..n], 50, b"VE3XYZ", &DIGI);
-        assert_eq!(a.tick(50, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
+        assert_eq!(a.tick(50, Sending::All, true, b"VE3XYZ", None, &DIGI, &mut out).len, 0);
         // Off by default (APRS-12).
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b">Again");
         a.receive(&f[..n], 90, b"VE3XYZ", &AprsCfg::DEFAULT);
         assert_eq!(a.tick(90, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
+    }
+
+    /// APRS-10.1: with nothing allowed to send, everything waiting or asked for is dropped (a digipeat, Beacon
+    /// now, the beacon after voice; acks as before), and a frame heard meanwhile isn't queued to digipeat, so
+    /// turning APRS mode on later sends nothing stale. Our messages wait for it (LINK-45). A frame let go before
+    /// its turn is checked again ([`Sending::may_send`]).
+    #[test]
+    fn nothing_allowed_drops_what_waits() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let me = b"VE3XYZ";
+        a.tick(9, Sending::All, true, me, None, &DIGI, &mut out);
+        let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b">Walking");
+        let cfg = AprsCfg { digi: crate::aprs::DIGI_ON | 5 << 4, ..AprsCfg::DEFAULT }; // a 5 s wait
+        a.receive(&f[..n], 10, me, &cfg);
+        a.beacon_now();
+        a.after_voice();
+        assert!(a.send(b"VE3KPW", b"QSL"));
+        assert_eq!(a.tick(11, Sending::Nothing, true, me, Some(fix()), &cfg, &mut out).len, 0);
+        // Heard while nothing may go: not queued.
+        let (g, m) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1", b"WIDE2-1"], b">Later");
+        a.receive(&g[..m], 12, me, &cfg);
+        // APRS mode on again: our message goes, nothing else.
+        let mut sent = std::vec::Vec::new();
+        for s in 20..45 {
+            let t = a.tick(s, Sending::All, true, me, Some(fix()), &AprsCfg { beacon: 1, ..cfg }, &mut out);
+            if t.len > 0 {
+                sent.push(t.what);
+            }
+        }
+        assert_eq!(sent, ["Message"], "no digipeat, Beacon now or beacon after voice");
+        assert!(Sending::All.may_send("Digipeat") && Sending::Beacons.may_send("Beacon"));
+        assert!(!Sending::Beacons.may_send("Message") && !Sending::Nothing.may_send("Beacon"));
+    }
+
+    /// APRS-10.1: the digipeater turned off (0 5 7 1) while a frame waits its turn (0 5 7 3): it doesn't go.
+    #[test]
+    fn digipeat_waiting_goes_when_turned_off() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        let cfg = AprsCfg { digi: crate::aprs::DIGI_ON | 3 << 4, ..AprsCfg::DEFAULT };
+        a.tick(9, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out);
+        let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"WIDE1-1"], b">Walking");
+        a.receive(&f[..n], 10, b"VE3XYZ", &cfg);
+        assert_eq!(a.tick(11, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0);
+        assert_eq!(a.tick(14, Sending::All, true, b"VE3XYZ", None, &cfg, &mut out).len, 0, "dropped, not delayed");
+    }
+
+    /// APRS-13.1, APRS-13.3, APRS-46: four of ours are tried at once (a fifth is refused, never left pending);
+    /// one stopped or deleted is tried no more.
+    #[test]
+    fn messages_stop_and_room() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        for t in [&b"ONE"[..], b"TWO", b"THREE", b"FOUR"] {
+            assert!(a.room());
+            assert!(a.send(b"VE3KPW", t));
+        }
+        assert!(!a.room() && !a.send(b"VE3KPW", b"FIVE"), "a fifth refused");
+        assert!(a.unqueue(b"VE3KPW", b"ONE") && !a.unqueue(b"VE3KPW", b"ONE"));
+        assert!(a.room());
+        let mut texts = std::vec::Vec::new();
+        for s in 0..4 {
+            let t = a.tick(s, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out);
+            if t.what == "Message" {
+                let info = sent(&out, &t);
+                let body = &info[11..];
+                texts.push(std::string::String::from_utf8_lossy(&body[..body.iter().position(|&c| c == b'{').unwrap()]).into_owned());
+            }
+        }
+        assert_eq!(texts, ["TWO", "THREE", "FOUR"], "the stopped one isn't sent");
+        a.clear_out();
+        assert_eq!(a.tick(40, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).len, 0, "deleted: no retries");
+    }
+
+    /// APRS-13.4: a message is sent as one callsign; changed mid-retry (its ack would come to the old one), it
+    /// ends as failed rather than being retried as another station.
+    #[test]
+    fn callsign_change_ends_open_messages() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        assert!(a.send(b"VE3KPW", b"QSL"));
+        assert_eq!(a.tick(0, Sending::All, true, b"VE3XYZ", None, &AprsCfg::DEFAULT, &mut out).what, "Message");
+        let t = a.tick(31, Sending::All, true, b"VE3XYZ-7", None, &AprsCfg::DEFAULT, &mut out);
+        assert_eq!(t.len, 0, "not retried as VE3XYZ-7");
+        assert!(t.states.iter().flatten().any(|s| s.2 == MsgState::Failed));
+        assert!(a.room());
+    }
+
+    /// The reset (BOOT-14, APRS-10.1): nothing asked for survives it.
+    #[test]
+    fn reset_drops_everything_waiting() {
+        let a = AprsLive::new();
+        let mut out = [0u8; FRAME_MAX];
+        a.beacon_now();
+        a.after_voice();
+        assert!(a.send(b"VE3KPW", b"QSL"));
+        a.clear();
+        let cfg = AprsCfg { beacon: 1, ..AprsCfg::DEFAULT };
+        assert_eq!(a.tick(100, Sending::All, true, b"VE3XYZ", Some(fix()), &cfg, &mut out).len, 0);
     }
 
     /// APRS-26: our callsign as an alias when asked, and 0 5 7 3's wait before relaying.
@@ -1380,6 +1544,7 @@ mod tests {
     fn digipeater_mycall_alias_and_wait() {
         let a = AprsLive::new();
         let mut out = [0u8; FRAME_MAX];
+        a.tick(9, Sending::All, true, b"VE3XYZ", None, &DIGI, &mut out);
         let (f, n) = frame(b"VE3OCB-7", b"APRS", &[b"VE3XYZ", b"WIDE2-1"], b">To me");
         a.receive(&f[..n], 10, b"VE3XYZ", &DIGI);
         assert_eq!(a.tick(10, Sending::All, true, b"VE3XYZ", None, &DIGI, &mut out).len, 0, "my call isn't an alias by default");

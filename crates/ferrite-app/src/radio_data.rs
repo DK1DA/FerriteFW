@@ -115,6 +115,10 @@ impl Data for RadioData {
         self.draft.get()
     }
 
+    fn send_room(&self) -> bool {
+        self.aprs.room()
+    }
+
     fn fix(&self) -> Option<Fix> {
         self.gps.fix()
     }
@@ -133,8 +137,16 @@ impl Data for RadioData {
             // The store has saved it (pending); the APRS task tries it (APRS-13).
             Op::Send => {
                 let d = self.draft.get();
-                self.aprs.send(d.to.as_bytes(), d.text.as_bytes());
+                if !self.aprs.send(d.to.as_bytes(), d.text.as_bytes()) {
+                    return false; // APRS-13.3: four being tried already
+                }
             }
+            Op::Queue(to, text) if !self.aprs.send(to.as_bytes(), text.as_bytes()) => return false,
+            Op::Queue(..) => {}
+            Op::Unqueue(to, text) => {
+                self.aprs.unqueue(to.as_bytes(), text.as_bytes());
+            }
+            Op::ClearMessages => self.aprs.clear_out(), // APRS-46: deleted messages are tried no more
             Op::BeaconNow if !crate::data::ax25_call_ok(self.callsign.get().as_bytes()) => return false, // SETUP-13
             Op::BeaconNow => self.aprs.beacon_now(),
             Op::AfterVoice => self.aprs.after_voice(),

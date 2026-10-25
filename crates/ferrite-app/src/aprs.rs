@@ -444,6 +444,19 @@ impl App {
         self.aprs_holder().is_some()
     }
 
+    /// What the APRS task may send now (APRS-22, APRS-29, KISS-10): everything with APRS mode, beacons alone, or
+    /// nothing; [`crate::aprs_live::Sending::may_send`] checks a waiting frame against it again (APRS-10.1).
+    pub fn aprs_sending(&self) -> crate::aprs_live::Sending {
+        use crate::aprs_live::Sending;
+        if self.aprs_on() {
+            Sending::All
+        } else if self.beacons_on() {
+            Sending::Beacons
+        } else {
+            Sending::Nothing
+        }
+    }
+
     /// C has receive priority on its chip (APRS-21.1, decision 181): APRS mode or KISS hold it. Beacons alone
     /// don't: C is then an ordinary watched slot.
     pub fn aprs_prio(&self) -> bool {

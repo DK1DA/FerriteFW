@@ -77,6 +77,7 @@ fn state_byte(s: MsgState) -> (u8, u8) {
         MsgState::Retrying(n) => (4, n),
         MsgState::Failed => (5, 0),
         MsgState::Rejected => (6, 0), // APRS-34: a new value, so older readers see an unknown state
+        MsgState::Cancelled => (7, 0), // APRS-13.1, likewise
     }
 }
 
@@ -322,7 +323,7 @@ fn station_len(s: &Station) -> usize {
 }
 
 /// A message (LINK-44): flags (1 in, to us), state (0 unread, 1 read, 2 pending, 3 acked, 4 retrying, 5 failed,
-/// 6 rejected: APRS-34),
+/// 6 rejected: APRS-34, 7 cancelled: APRS-13.1),
 /// tries so far (retrying), age (u32 s), peer (length, text: from, or to), text (length, text).
 pub(super) fn message(o: &mut Out, m: &Message) {
     let (s, tries) = state_byte(m.state);
@@ -419,6 +420,29 @@ pub(super) fn msg_send<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, p: 
     app.show_toast(b"Message queued", call.as_bytes(), false);
     o.put(&[app.aprs_on() as u8]);
     Status::Ok
+}
+
+/// `MSG_STOP` (LINK-49): to and the text, as `MSG_SEND`'s; the newest of our messages to that station with that text
+/// still being tried stops, as the radio's own Stop sending does (APRS-13.1). `invalid` when none is being tried.
+pub(super) fn msg_stop<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    let Some((&n, rest)) = p.split_first() else { return Status::BadArg };
+    let Some(to) = rest.get(..n as usize) else { return Status::BadArg };
+    let Some((&m, rest)) = rest[n as usize..].split_first() else { return Status::BadArg };
+    let Some(text) = rest.get(..m as usize).filter(|_| rest.len() == m as usize) else { return Status::BadArg };
+    let d = st.data();
+    let open = (0..d.messages()).find(|&i| {
+        d.message(i).is_some_and(|x| {
+            !x.inbound && matches!(x.state, MsgState::Pending | MsgState::Retrying(_)) && x.peer.as_bytes().eq_ignore_ascii_case(to) && x.text.as_bytes() == text
+        })
+    });
+    match open {
+        Some(i) if d.request(Op::StopMessage(i)) => Status::Ok,
+        Some(_) => Status::Busy,
+        None => {
+            o.put(b"not being sent");
+            Status::Invalid
+        }
+    }
 }
 
 /// The APRS record as the link reads it (LINK-43): the frequency (u16, 5 kHz units, 0 the region's), beacon mode,

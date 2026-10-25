@@ -332,3 +332,17 @@ fn rejected_state_byte() {
     assert_eq!(state_byte(MsgState::Rejected), (6, 0));
     assert_eq!(state_byte(MsgState::Failed), (5, 0));
 }
+
+/// LINK-49, APRS-13.1: `MSG_STOP` stops one of ours still being tried, as the radio's Stop sending does: kept as
+/// cancelled; `invalid` when none to that station with that text is being tried; `bad argument` when malformed.
+#[test]
+fn message_stop() {
+    let mut pc = Pc::new(false);
+    assert_eq!(pc.ask(msg::MSG_SEND, &send_payload(b"VE3KPW-9", b"On my way")).0, 0);
+    let (s, a) = pc.ask(msg::MSG_STOP, &send_payload(b"ve3kpw-9", b"On my way"));
+    assert_eq!(s, 0, "{a:?}");
+    assert_eq!(pc.st.message(0).map(|m| m.state), Some(MsgState::Cancelled));
+    let (s, why) = pc.ask(msg::MSG_STOP, &send_payload(b"VE3KPW-9", b"On my way"));
+    assert_eq!((s, &why[..]), (Status::Invalid as u8, &b"not being sent"[..]));
+    assert_eq!(pc.ask(msg::MSG_STOP, &[3, b'A']).0, Status::BadArg as u8);
+}

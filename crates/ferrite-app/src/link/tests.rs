@@ -205,7 +205,7 @@ fn hello_and_info_give_the_build() {
 #[test]
 fn errors_are_answered() {
     let mut pc = Pc::new(true);
-    assert_eq!(pc.ask(0x55, &[]).0, Status::UnknownType as u8);
+    assert_eq!(pc.ask(0x5F, &[]).0, Status::UnknownType as u8);
     assert_eq!(pc.ask(msg::READ, &[2]).0, Status::BadArg as u8);
     let mut w = [0u8; MAX_WIRE];
     let n = wire::build(msg::INFO, 9, &[1, 2, 3], &mut w).unwrap();
@@ -1702,4 +1702,19 @@ fn stock_restore_start_on_the_cable_only() {
     let mut bt = Pc::new(false);
     assert_eq!(bt.ask(msg::STOCK_RESTORE, &[START]).0, Status::Refused as u8, "never over Bluetooth");
     assert_eq!(bt.link.take_restore(), None);
+}
+
+/// CHAN-12.1: a zone deleted over the link leaves no slot in it, as the radio's own delete does, so a later edit
+/// of the slot's channel doesn't write the old zone back.
+#[test]
+fn zone_deleted_over_the_link_leaves_no_slot_in_it() {
+    let mut pc = Pc::new(true);
+    assert!(pc.st.zones() > 0);
+    pc.app.slots[0].zone = 0;
+    if let Some(c) = &mut pc.app.slots[0].ch {
+        c.zone = 0;
+    }
+    assert_eq!(pc.ask(msg::DELETE, &[what::ZONE, 0, 0]).0, 0);
+    assert_eq!(pc.app.slots[0].zone, crate::chan::NO_ZONE);
+    assert!(pc.app.slots[0].ch.is_none_or(|c| c.zone == crate::chan::NO_ZONE));
 }

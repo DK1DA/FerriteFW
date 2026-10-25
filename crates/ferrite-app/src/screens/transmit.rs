@@ -199,6 +199,11 @@ pub const AX25_CALL: usize = 6;
 /// True when it was asked for; the Radio task may still refuse ([`ferrite_core::msg::TxLive`]), and the caller
 /// unkeys with [`data_unkey`] once the frame is out.
 pub fn data_key(app: &mut App, slot: u8, power: u8, what: &[u8]) -> bool {
+    // APRS-10.1: a data frame keys only while APRS mode, KISS or beacons hold C, so it goes on the APRS frequency,
+    // never on C's own channel given back meanwhile (refused quietly: the frame was dropped as it was let go).
+    if slot == crate::aprs::APRS_SLOT && !app.aprs_c() {
+        return false;
+    }
     if app.remote_tx_refused() || !auto_tx(app, slot, what) {
         return false;
     }

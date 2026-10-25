@@ -21,7 +21,7 @@ use super::dsp::{Frame, Heard, AFSK_DONE, AFSK_TX, APRS_RX};
 use crate::chan::DSP;
 use crate::store::Store;
 use ferrite_app::aprs_live::uaprs::kiss;
-use ferrite_app::aprs_live::{Clear, ClearWait, Sending, FRAME_MAX};
+use ferrite_app::aprs_live::{Clear, ClearWait, CLEAR_WAIT_MS, FRAME_MAX};
 use ferrite_app::data::{Data, Event, MsgState, Src};
 use ferrite_app::screens::{msgs, transmit};
 use ferrite_app::App;
@@ -58,6 +58,9 @@ pub struct Aprs {
     kiss: kiss::Decoder,
     params: kiss::Params,
     kiss_q: Option<Frame>,
+    /// KISS-13: a frame was queued since the last turn, and when (its 5 s to find a clear moment).
+    kiss_queued: bool,
+    kiss_at: u32,
     access: kiss::Access,
     clear: ClearWait,
     seed: u32,
@@ -66,7 +69,7 @@ pub struct Aprs {
 impl Aprs {
     pub fn new() -> Self {
         let params = kiss::Params { tx_delay: TXDELAY_10MS, ..kiss::Params::default() };
-        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, fx25: 0, level: 1, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, access: kiss::Access::default(), clear: ClearWait::default(), seed: 0x2545_F491 }
+        Aprs { on: false, last_s: u32::MAX, tx: Tx::Idle, frame: Frame { len: 0, txdelay_10ms: 0, fx25: 0, level: 1, b: [0; FRAME_MAX] }, kiss: kiss::Decoder::new(), params, kiss_q: None, kiss_queued: false, kiss_at: 0, access: kiss::Access::default(), clear: ClearWait::default(), seed: 0x2545_F491 }
     }
 
     /// A byte from the KISS port, the cable or Bluetooth (KISS-6; TERM-2's route on the cable).
@@ -82,6 +85,7 @@ impl Aprs {
                 let mut f = Frame { len: d.len() as u16, txdelay_10ms: self.params.tx_delay, fx25: 0, level: 1, b: [0; FRAME_MAX] };
                 f.b[..d.len()].copy_from_slice(d);
                 self.kiss_q = Some(f);
+                self.kiss_queued = true;
             }
         }
     }
@@ -109,7 +113,15 @@ impl Aprs {
         let kiss_cable = app.settings().kiss_on_cable();
         let kiss_on = app.kiss_on(); // PWR-24: none in Low Power Mode. KISS-9: C is the APRS slot meanwhile (`App::aprs_c`)
         let on = app.aprs_on();
+        let send = app.aprs_sending();
         let decode = on || kiss_on || app.aprs_flag_decode(); // APRS-22
+        // KISS-13: a client's frame doesn't outlive KISS (nor wait in Low Power Mode, PWR-24).
+        if !kiss_on {
+            self.kiss_q = None;
+        }
+        if core::mem::take(&mut self.kiss_queued) {
+            self.kiss_at = now_ms;
+        }
         if decode != self.on && DSP.try_send(DspCmd::Decoder(if decode { DecoderKind::Afsk } else { DecoderKind::Off })).is_ok() {
             self.on = decode;
         }
@@ -166,6 +178,9 @@ impl Aprs {
             }
         }
         match &self.tx {
+            // APRS-10.1: APRS mode or beacons turned off (or Low Power Mode, or KISS) while it waited: dropped,
+            // never keyed on C's own channel.
+            &Tx::Clearing { what } if !send.may_send(what) => self.tx = Tx::Idle,
             &Tx::Clearing { what } => {
                 let busy = live.slots[SLOT_C as usize].squelch_open;
                 let r = self.random();
@@ -198,6 +213,9 @@ impl Aprs {
                 }
             }
             // KISS-2: the app's frame, exempt from the 30 s spacing, once the channel is clear (p-persistence).
+            // KISS-13: a frame the channel stays busy for gives up after APRS-10's 5 s (the client resends as it
+            // sees fit), so it neither waits for ever nor holds back the frames after it.
+            Tx::Idle if kiss_on && self.kiss_q.is_some() && now_ms.wrapping_sub(self.kiss_at) >= CLEAR_WAIT_MS => self.kiss_q = None,
             Tx::Idle if kiss_on && self.kiss_q.is_some() => {
                 let busy = live.slots[SLOT_C as usize].squelch_open;
                 let r = self.random();
@@ -214,13 +232,6 @@ impl Aprs {
                 let relay_ok = txplan::relay_ok(app.tuned_freq(app.active()), app.aprs_freq());
                 let cfg = extra.cfg();
                 let mut out = [0u8; FRAME_MAX];
-                let send = if on {
-                    Sending::All
-                } else if app.beacons_on() {
-                    Sending::Beacons // APRS-29
-                } else {
-                    Sending::Nothing
-                };
                 let t = extra.aprs.tick(now_s, send, relay_ok, me.as_bytes(), app.beacon_fix(extra.fix()), &cfg, &mut out);
                 for (peer, text, st) in t.states.into_iter().flatten() {
                     store.message_state(peer.as_bytes(), text.as_bytes(), st);

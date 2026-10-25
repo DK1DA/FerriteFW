@@ -391,6 +391,7 @@ impl Session {
             msg::HEARD => sub::heard(st, p, &mut o),
             msg::MSGS => sub::msgs(st, p, &mut o),
             msg::MSG_SEND => sub::msg_send(app, st, dev, p, &mut o),
+            msg::MSG_STOP => sub::msg_stop(st, p, &mut o),
             _ => Status::UnknownType,
         };
         o.a[0] = s as u8;
@@ -636,7 +637,13 @@ impl Session {
                 app.delete_channel(idx, st);
                 Status::Ok
             }
-            what::ZONE if idx < st.zones() as u16 => request(st, Op::DeleteZone(idx as u8)),
+            what::ZONE if idx < st.zones() as u16 => {
+                let s = request(st, Op::DeleteZone(idx as u8));
+                if s == Status::Ok {
+                    app.zone_deleted(idx as u8); // CHAN-12.1, as the radio's own delete
+                }
+                s
+            }
             what::PRESET if idx < st.data().presets() as u16 => request(st, Op::DeletePreset(idx as u8)),
             what::ZONE | what::PRESET => Status::NotFound,
             _ => Status::BadArg,

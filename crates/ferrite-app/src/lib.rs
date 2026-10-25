@@ -652,6 +652,17 @@ impl App {
         }
     }
 
+    /// CHAN-12.1: zone `z` was deleted (on the radio or over the link): the slots in it, and their copies of its
+    /// channels, are in no zone now, so a later edit of the channel doesn't write the old zone back.
+    pub(crate) fn zone_deleted(&mut self, z: u8) {
+        for s in self.slots.iter_mut().filter(|s| s.zone == z) {
+            s.zone = chan::NO_ZONE;
+            if let Some(c) = &mut s.ch {
+                c.zone = chan::NO_ZONE;
+            }
+        }
+    }
+
     /// Deletes every channel (the reset's second step, PIN-6; the terminal's `clear channels`): every slot to VFO.
     pub(crate) fn erase_channels(&mut self) {
         self.write(ChanWrite::EraseAll);

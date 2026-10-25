@@ -244,6 +244,17 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
         }
         self.events.mount(&self.f).await?;
         self.msgs.mount(&self.f).await?;
+        // APRS-13.5: ours left open at power-off (their tries were in RAM) end as failed, so nothing stale goes out
+        // at power-on; Send again (APRS-13.2) sends one on purpose.
+        if let Some((at, v)) = logs::msg_state_byte(MsgState::Failed) {
+            for i in 0..self.msgs.len() {
+                if let (Some(seq), Some(b)) = (self.msgs.seq(i), self.msgs.read(&self.f, i)) {
+                    if logs::msg_is_open(&b) {
+                        self.msgs.mark(&self.f, seq, at, v).await?;
+                    }
+                }
+            }
+        }
         self.heard.mount(&self.f).await?;
         self.wps.mount(&self.f).await?;
         self.contacts.0.mount(&self.f).await?;
@@ -1270,10 +1281,27 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
                 self.draft.set(d);
                 true
             }
+            // APRS-13.1: ours being tried stops: the APRS task drops it, the record says cancelled.
+            Op::StopMessage(i) => match self.message(i) {
+                Some(m) if !m.inbound && matches!(m.state, MsgState::Pending | MsgState::Retrying(_)) => {
+                    self.extra.request(Op::Unqueue(m.peer, m.text));
+                    self.message_state(m.peer.as_bytes(), m.text.as_bytes(), MsgState::Cancelled)
+                }
+                _ => false,
+            },
+            // APRS-13.2: ours that failed or was cancelled goes again as a new message (the old one stays as it ended).
+            Op::ResendMessage(i) => match self.message(i) {
+                Some(m) if !m.inbound && matches!(m.state, MsgState::Failed | MsgState::Cancelled) => {
+                    let ok = self.extra.callsign().is_some_and(|c| ferrite_app::data::ax25_call_ok(c.as_bytes())) && self.extra.send_room();
+                    ok && self.message_in(false, m.peer.as_bytes(), m.text.as_bytes(), 0) && self.extra.request(Op::Queue(m.peer, m.text))
+                }
+                _ => false,
+            },
             Op::Send => {
                 let d = self.draft.get();
-                // APRS-8: a callsign to send as, someone to send to, something to say.
-                let ok = self.extra.callsign().is_some_and(|c| ferrite_app::data::ax25_call_ok(c.as_bytes())) && !d.to.is_empty() && !d.text.is_empty(); // SETUP-13
+                // APRS-8: a callsign to send as, someone to send to, something to say; APRS-13.3: room to try it
+                // (checked before it is saved, so none is left pending for ever).
+                let ok = self.extra.callsign().is_some_and(|c| ferrite_app::data::ax25_call_ok(c.as_bytes())) && !d.to.is_empty() && !d.text.is_empty() && self.extra.send_room(); // SETUP-13
                 if ok && self.message_in(false, d.to.as_bytes(), d.text.as_bytes(), 0) {
                     // The APRS task tries it (the simulator's sends it from its own copy of the draft).
                     self.extra.request(Op::Draft(d));
@@ -1542,6 +1570,9 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     fn draft(&self) -> Draft {
         self.draft.get()
     }
+    fn send_room(&self) -> bool {
+        self.extra.send_room()
+    }
     fn quick(&self, i: usize) -> Option<Buf<67>> {
         if i >= ferrite_app::words::QUICK || !self.ok() {
             return None;
@@ -1611,8 +1642,8 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     }
 
     fn request(&self, op: Op) -> bool {
-        if matches!(op, Op::Wipe | Op::ClearHeard) {
-            self.extra.request(op); // its records go too (the heard list in RAM)
+        if matches!(op, Op::Wipe | Op::ClearHeard | Op::ClearMessages) {
+            self.extra.request(op); // its records go too (the heard list in RAM; messages tried no more, APRS-46)
         }
         if let Some(ok) = self.request_kept(op) {
             if ok {

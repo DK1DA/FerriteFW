@@ -138,6 +138,22 @@ impl AprsSim {
         self.push(Live { msg, at_s: self.now_s(), tries: 0, next_s: self.now_s(), ack_s: None });
     }
 
+    /// APRS-13.1: ours being tried stops, cancelled.
+    pub fn stop(&self, i: u16) -> bool {
+        let Some(c) = self.live.get(i as usize) else { return false };
+        let Some(mut l) = c.get().filter(|l| !l.msg.inbound && matches!(l.msg.state, MsgState::Pending | MsgState::Retrying(_))) else { return false };
+        l.msg.state = MsgState::Cancelled;
+        c.set(Some(l));
+        true
+    }
+
+    /// APRS-13.2: ours that failed or was cancelled goes again, as a new message.
+    pub fn resend(&self, i: u16) -> bool {
+        let Some(l) = self.live.get(i as usize).and_then(Cell::get).filter(|l| !l.msg.inbound && matches!(l.msg.state, MsgState::Failed | MsgState::Cancelled)) else { return false };
+        self.send(l.msg.peer.as_bytes(), l.msg.text);
+        true
+    }
+
     pub fn beacon_now(&self) {
         self.beacon_now.set(true);
     }

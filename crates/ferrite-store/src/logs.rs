@@ -326,7 +326,7 @@ pub fn event_decode(b: &[u8; REC as usize], ago_s: u32) -> Event {
 // ---- APRS messages ----
 
 /// Where a message's body ends; 96 (tries, one bit cleared per try) and 97 (bit 0 cleared: acked, bit 1:
-/// failed, bit 2: rejected, APRS-34) are programmed later. A message to us keeps its sender's message number at
+/// failed, bit 2: rejected, APRS-34, bit 3: cancelled, APRS-13.1) are programmed later. A message to us keeps its sender's message number at
 /// 89..94 (zero-padded; all zero without one, as in records from before APRS-32).
 pub const MSG_END: usize = 96;
 const TRIES: usize = 96;
@@ -363,6 +363,8 @@ pub fn msg_decode(b: &[u8; REC as usize], ago_s: u32) -> Message {
         MsgState::Rejected
     } else if b[FINAL] & 2 == 0 {
         MsgState::Failed
+    } else if b[FINAL] & 8 == 0 {
+        MsgState::Cancelled // APRS-13.1
     } else if tries >= 2 {
         MsgState::Retrying(tries)
     } else {
@@ -377,6 +379,7 @@ pub fn msg_state_byte(state: MsgState) -> Option<(usize, u8)> {
         MsgState::Acked => Some((FINAL, !1)),
         MsgState::Failed => Some((FINAL, !2)),
         MsgState::Rejected => Some((FINAL, !4)),
+        MsgState::Cancelled => Some((FINAL, !8)),
         MsgState::Retrying(n) => Some((TRIES, 0xFFu8.checked_shl(n.min(8) as u32).unwrap_or(0))),
         MsgState::Pending => Some((TRIES, 0xFE)),
         MsgState::Read => Some((READ, 0)),
@@ -387,7 +390,13 @@ pub fn msg_state_byte(state: MsgState) -> Option<(usize, u8)> {
 /// Whether record `b` is our message to `peer` with `txt`, still waiting for its end.
 pub fn msg_open(b: &[u8; REC as usize], peer: &Buf<10>, txt: &Buf<67>) -> bool {
     let m = msg_decode(b, 0);
-    !m.inbound && m.peer == *peer && m.text == *txt && matches!(m.state, MsgState::Pending | MsgState::Retrying(_))
+    m.peer == *peer && m.text == *txt && msg_is_open(b)
+}
+
+/// Whether record `b` is one of ours still being tried (pending or retrying).
+pub fn msg_is_open(b: &[u8; REC as usize]) -> bool {
+    let m = msg_decode(b, 0);
+    !m.inbound && matches!(m.state, MsgState::Pending | MsgState::Retrying(_))
 }
 
 // ---- the heard list (APRS-4) ----

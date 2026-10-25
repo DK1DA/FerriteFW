@@ -34,6 +34,9 @@ pub enum Of {
     /// A station's page (APRS-41) and the Contacts screen (APRS-40).
     Station,
     Contacts,
+    /// One of our messages selected (APRS-13.1, APRS-13.2): being tried, or ended without an ack.
+    MsgSending,
+    MsgEnded,
 }
 
 impl Of {
@@ -60,6 +63,9 @@ pub(crate) enum Act {
     Arrival,
     /// On the station, contact or waypoint under the page; true asks first (MENU-23).
     Sel(super::contacts::Sel, bool),
+    /// On the message selected under the page: stop sending it (APRS-13.1), or send it again (APRS-13.2).
+    MsgStop,
+    MsgResend,
 }
 
 pub(crate) type Opt = (&'static str, Act, &'static str);
@@ -77,6 +83,25 @@ const MESSAGES: [Opt; 6] = [
     ("Mark all read", Act::Do(&Op::MessagesReadAll), "Clears the unread count"), // APRS-46
     ("Delete all messages", Act::Confirm(&Op::ClearMessages), "Inbox and sent, unread ones too"), // APRS-46
     ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
+];
+/// APRS-13.1, APRS-13.2: the messages' rows under one of ours that is being tried, or ended without an ack.
+const MSG_SENDING: [Opt; 7] = [
+    ("Stop sending", Act::MsgStop, "No more tries; it stays, cancelled"),
+    MESSAGES[0],
+    MESSAGES[1],
+    MESSAGES[2],
+    MESSAGES[3],
+    MESSAGES[4],
+    MESSAGES[5],
+];
+const MSG_ENDED: [Opt; 7] = [
+    ("Send again", Act::MsgResend, "As a new message, five new tries"),
+    MESSAGES[0],
+    MESSAGES[1],
+    MESSAGES[2],
+    MESSAGES[3],
+    MESSAGES[4],
+    MESSAGES[5],
 ];
 const GPS: [Opt; 3] = [
     ("Mark here", Act::Do(&Op::MarkHere), "A waypoint at this fix"),
@@ -122,6 +147,8 @@ pub(crate) fn rows(of: Of) -> &'static [Opt] {
         Of::Log => &LOG,
         Of::Heard | Of::AprsCard => &APRS,
         Of::Messages => &MESSAGES,
+        Of::MsgSending => &MSG_SENDING,
+        Of::MsgEnded => &MSG_ENDED,
         Of::Gps => &GPS,
         Of::Waypoints => &WAYPOINTS,
         Of::Scope => &SCOPE,
@@ -137,6 +164,7 @@ pub(crate) fn title(of: Of) -> &'static [u8] {
         Of::Log => b"Event log",
         Of::Heard => b"APRS heard",
         Of::Messages => b"APRS messages",
+        Of::MsgSending | Of::MsgEnded => b"APRS message",
         Of::Gps => b"GPS position",
         Of::Waypoints => b"Waypoints",
         Of::Scope => b"Scope",
@@ -189,6 +217,10 @@ impl View for Options {
                     app.back();
                     beacon_now(app, store);
                 }
+                Act::MsgStop | Act::MsgResend => {
+                    app.back();
+                    super::msgs::stop_or_resend(app, store, act == Act::MsgStop);
+                }
                 Act::Do(&op) | Act::Confirm(&op) => {
                     if matches!(op, Op::BeaconNow | Op::Send) && app.remote_tx_refused() {
                         return; // LINK-19: a beacon or message now is a transmission
@@ -200,8 +232,11 @@ impl View for Options {
                     app.back();
                     if store.data().request(op) {
                         match op {
-                            Op::ReadAll => app.log_unread = 0, // the log's: the mail badge counts messages (INBOX-3.1)
-                            Op::MessagesReadAll | Op::ClearMessages => app.inbox = 0, // APRS-46
+                            // the log's: the mail badge counts messages (INBOX-3.1); an emptied log has none new (INBOX-3.2)
+                            Op::ReadAll | Op::ClearLog => app.log_unread = 0,
+                            // INBOX-3.2: each message read takes its log entry with it (INBOX-7.1), as one read does
+                            Op::MessagesReadAll => (app.log_unread, app.inbox) = (app.log_unread.saturating_sub(app.inbox), 0),
+                            Op::ClearMessages => app.inbox = 0, // APRS-46
                             _ => {}
                         }
                         app.show_toast(label.as_bytes(), b"done", false);
@@ -318,6 +353,11 @@ pub(crate) fn beacon_now(app: &mut App, store: &impl ChannelStore) {
     }
     if let Some(why) = app.kiss_holds_aprs() {
         return app.show_toast(b"Not sent", why.as_bytes(), false);
+    }
+    // APRS-17.9: with neither APRS mode nor beacons holding C nothing may send, so the beacon isn't asked for
+    // (asked for, it would wait and go the moment either came on).
+    if app.aprs_holder().is_none() {
+        return app.show_toast(b"Not sent", b"APRS and beacons off", false);
     }
     if store.data().request(Op::BeaconNow) {
         app.show_toast(b"Beacon now", b"done", false);

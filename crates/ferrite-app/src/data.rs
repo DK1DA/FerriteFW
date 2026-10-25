@@ -130,6 +130,8 @@ pub enum MsgState {
     Failed,
     /// The recipient rejected it (APRS-34): ended at once, like an ack.
     Rejected,
+    /// Stopped by its sender before an ack (APRS-13.1): no more tries.
+    Cancelled,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -355,6 +357,14 @@ pub enum Op {
     Quick(u8, Option<Buf<67>>),
     /// Send the draft (APRS-7, APRS-8).
     Send,
+    /// APRS-13.1: our message i (as `MessageRead` counts) stops being tried and is kept as cancelled.
+    StopMessage(u16),
+    /// APRS-13.2: our failed or cancelled message i is queued again, as a new message with five new tries.
+    ResendMessage(u16),
+    /// To the APRS task (the store's, after saving): our message to `to` with this text is tried (APRS-13), or
+    /// tried no more (APRS-13.1).
+    Queue(Buf<10>, Buf<67>),
+    Unqueue(Buf<10>, Buf<67>),
     MessageRead(u16),
     BeaconNow,
     /// A voice transmission ended with beacon after voice on (APRS-27): a beacon when APRS-9's spacing allows.
@@ -437,6 +447,10 @@ pub trait Data {
     }
     fn draft(&self) -> Draft {
         Draft::default()
+    }
+    /// APRS-13.3: the APRS task has room for one more of our messages (it tries four at once).
+    fn send_room(&self) -> bool {
+        true
     }
     /// Quick message i as the owner wrote it (TEXT-7), kept with the APRS store; None: the factory text.
     fn quick(&self, _i: usize) -> Option<Buf<67>> {

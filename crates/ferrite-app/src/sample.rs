@@ -755,6 +755,9 @@ impl Data for Sample {
                 }
                 ok
             }
+            Op::StopMessage(i) => i < self.sent_n() && self.aprs.stop(i),
+            Op::ResendMessage(i) => i < self.sent_n() && self.aprs.resend(i),
+            Op::Queue(..) | Op::Unqueue(..) => false, // the store's, to the radio's APRS task
             Op::MessageRead(i) => match i.checked_sub(self.sent_n()) {
                 Some(k) => {
                     self.msgs_read.set(self.msgs_read.get() | 1 << k);

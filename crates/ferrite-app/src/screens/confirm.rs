@@ -8,7 +8,7 @@ use super::forms::para;
 use super::nav::Dest;
 use super::shared::*;
 use super::{Cx, Hints, View};
-use crate::chan::{ChanWrite, ChannelStore, NO_ZONE};
+use crate::chan::{ChanWrite, ChannelStore};
 use crate::data::Op;
 use crate::keys::{KeyEvent, Press};
 use crate::slot::{chan_label, tone_text};
@@ -119,12 +119,7 @@ impl View for Confirm {
                     if !store.data().request(Op::DeleteZone(z)) {
                         app.write(ChanWrite::DeleteZone(z));
                     }
-                    for s in app.slots.iter_mut().filter(|s| s.zone == z) {
-                        s.zone = NO_ZONE;
-                        if let Some(c) = &mut s.ch {
-                            c.zone = NO_ZONE;
-                        }
-                    }
+                    app.zone_deleted(z); // CHAN-12.1
                     app.show_toast(name.as_bytes(), b"deleted", false);
                     app.back();
                     if let Screen::Zones(_) = app.screen {

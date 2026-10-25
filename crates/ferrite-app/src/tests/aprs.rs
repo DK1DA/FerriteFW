@@ -694,3 +694,78 @@ fn vm_beacons() {
     assert!(matches!(b.app.screen(), Screen::Compose(_)), "still composing");
     assert_eq!(b.s.draft().to.as_bytes(), b"A", "the draft kept");
 }
+
+/// APRS-13.1, APRS-13.2: hold MENU on one of ours being tried offers Stop sending first; it ends as cancelled.
+/// On a cancelled (or failed) one Send again comes first: a new message, five new tries, the old one kept.
+#[test]
+fn stop_sending_and_send_again() {
+    use crate::screens::opts::Of;
+    let mut a = A::new();
+    a.mode(true);
+    a.app.set_callsign(b"VA7FER");
+    assert!(a.s.request(Op::Draft(Draft { to: Buf::from(&b"VE3KPW"[..]), text: Buf::from(&b"QSL"[..]) })));
+    assert!(a.s.request(Op::Send));
+    a.app.open(crate::screens::nav::Dest::AprsMessages);
+    a.tick();
+    a.press(Key::Menu, 800);
+    assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == Of::MsgSending), "Stop sending offered");
+    a.tap(Key::Menu);
+    assert_eq!(a.s.message(0).map(|m| m.state), Some(MsgState::Cancelled));
+    assert_eq!(a.app.toast.map(|t| t.head), Some(Buf::from(&b"Sending stopped"[..])));
+    a.press(Key::Menu, 800);
+    assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == Of::MsgEnded), "Send again offered");
+    a.tap(Key::Menu);
+    assert_eq!(a.s.message(0).map(|m| (m.state, m.peer)), Some((MsgState::Pending, Buf::from(&b"VE3KPW"[..]))), "a new one");
+    assert_eq!(a.s.message(1).map(|m| m.state), Some(MsgState::Cancelled), "the old one kept");
+    // A message to us has neither.
+    let k = (0..a.s.messages()).find(|&i| a.s.message(i).is_some_and(|m| m.inbound)).unwrap();
+    a.app.screen = Screen::Msgs(crate::screens::msgs::Msgs { cur: crate::screens::lists::Cursor { sel: k, top: 0 }, open: false });
+    a.press(Key::Menu, 800);
+    assert!(matches!(a.app.screen(), Screen::Options(o) if o.of == Of::Messages));
+}
+
+/// APRS-17.9: Beacon now with neither APRS mode nor beacons holding C says so and asks for nothing (asked for,
+/// it would go the moment either came on).
+#[test]
+fn beacon_now_refused_with_nothing_holding_c() {
+    let mut a = A::new();
+    a.app.set_callsign(b"VA7FER");
+    a.mode(false);
+    a.app.set_aprs(AprsCfg { beacon: 0, ..a.app.aprs_cfg() });
+    crate::screens::opts::beacon_now(&mut a.app, &a.s);
+    assert!(!a.s.beacon_asked(), "nothing asked for");
+    assert_eq!(a.app.toast.map(|t| t.body), Some(Buf::from(&b"APRS and beacons off"[..])));
+    a.mode(true);
+    crate::screens::opts::beacon_now(&mut a.app, &a.s);
+    assert!(a.s.beacon_asked(), "with APRS mode: asked for");
+}
+
+/// APRS-10.1: a data frame keys on C only while APRS mode, KISS or beacons hold it: never on C's own channel.
+#[test]
+fn data_frames_key_only_while_c_is_held() {
+    let mut a = A::new();
+    a.app.set_callsign(b"VA7FER");
+    a.mode(true);
+    a.mode(false);
+    a.cmds();
+    a.app.toast = None;
+    assert!(!a.app.aprs_c());
+    assert!(!crate::screens::transmit::data_key(&mut a.app, APRS_SLOT, 0, b"Beacon"), "given back: refused");
+    assert!(!a.cmds().iter().any(|c| matches!(c, RadioCmd::TransmitData { on: true, .. })), "nothing keyed");
+    assert!(a.app.toast.is_none(), "quietly: the frame was dropped as it was let go");
+    assert_eq!(a.app.aprs_sending(), crate::aprs_live::Sending::Nothing);
+}
+
+/// INBOX-3.2: an emptied log has nothing new; reading every message takes their log entries' count with it.
+#[test]
+fn log_counts_follow_clear_and_read_all() {
+    use crate::screens::opts::{Of, Options};
+    let mut a = A::new();
+    (a.app.inbox, a.app.log_unread) = (2, 5);
+    a.app.screen = Screen::Options(Options { of: Of::Messages, row: 3, confirm: false }); // Mark all read
+    a.tap(Key::Menu);
+    assert_eq!((a.app.inbox, a.app.log_unread), (0, 3));
+    a.app.screen = Screen::Options(Options { of: Of::Log, row: 1, confirm: true }); // Clear the log
+    a.tap(Key::Menu);
+    assert_eq!(a.app.log_unread, 0);
+}

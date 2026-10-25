@@ -134,20 +134,25 @@ fn messages_keep_their_state() {
     s.message_state(b"VA3RTX", b"Net at 8?", MsgState::Pending);
     s.message_state(b"VA3RTX", b"Net at 8?", MsgState::Retrying(2));
     assert_eq!(state(&s, 0), MsgState::Retrying(2));
+    s.message_state(b"VA3RTX", b"Net at 8?", MsgState::Acked);
     let s = cycle(s);
     assert_eq!(s.messages(), 2);
     let m: Message = s.message(1).unwrap();
     assert!(m.inbound && m.peer.as_bytes() == b"VE3KPW-9" && m.state == MsgState::Unread);
     assert!(s.request(Op::MessageRead(1)));
-    s.message_state(b"VA3RTX", b"Net at 8?", MsgState::Acked);
     let s = cycle(s);
     assert_eq!((state(&s, 0), state(&s, 1)), (MsgState::Acked, MsgState::Read));
     // An ended message isn't moved again.
     s.message_state(b"VA3RTX", b"Net at 8?", MsgState::Failed);
     assert_eq!(state(&s, 0), MsgState::Acked);
+    // APRS-13.5: one still being tried at power-off ends as failed at power-on (its tries were in RAM).
+    assert!(s.request(Op::Draft(Draft { to: Buf::from(b"VA3RTX"), text: Buf::from(b"Still there?") })) && s.request(Op::Send));
+    s.message_state(b"VA3RTX", b"Still there?", MsgState::Retrying(3));
+    let s = cycle(s);
+    assert_eq!(state(&s, 0), MsgState::Failed);
     // APRS-8: nothing to send, nothing saved.
     assert!(!s.request(Op::Send));
-    assert_eq!(s.messages(), 2);
+    assert_eq!(s.messages(), 3);
 }
 
 /// APRS-34: a rejected message stays rejected across a power cycle, told apart from failed, and nothing moves it
@@ -629,4 +634,45 @@ fn heard_rows_survive_a_restart() {
     assert!(s.heard_row(&st(b"VE3KPW-9", b"Mobile", 1)));
     assert!(s.request(Op::Wipe));
     assert_eq!(cycle(s).heard_stored(), 0, "the reset erases them");
+}
+
+/// APRS-13.1, APRS-13.2, APRS-13.3, APRS-13.5, APRS-46 with the radio's APRS task behind the store: Stop sending
+/// keeps the message as cancelled (across a power cycle) and the task tries it no more; Send again queues it as a
+/// new message; a fifth is refused before it is saved; "Delete all messages" stops every try; ours still open at
+/// power-off end as failed at power-on.
+#[test]
+fn messages_stop_resend_and_room() {
+    use ferrite_app::radio_data::RadioData;
+    let mount = |f: SimFlash| {
+        let d = RadioData::new();
+        d.set_callsign(b"VA7FER-9");
+        FlashStore::mount(f, d)
+    };
+    let send = |s: &FlashStore<SimFlash, RadioData>, t: &[u8]| s.request(Op::Draft(Draft { to: Buf::from(&b"VE3KPW"[..]), text: Buf::from(t) })) && s.request(Op::Send);
+    let s = mount(SimFlash::new());
+    for t in [&b"one"[..], b"two", b"three", b"four"] {
+        assert!(s.send_room() && send(&s, t));
+    }
+    assert!(!s.send_room());
+    assert!(!send(&s, b"five"), "a fifth refused");
+    assert_eq!(s.messages(), 4, "and not saved, so never left pending");
+    assert!(s.request(Op::StopMessage(3))); // "one", the oldest
+    assert_eq!(s.message(3).map(|m| m.state), Some(MsgState::Cancelled));
+    assert!(s.send_room(), "the task dropped it");
+    assert!(!s.request(Op::StopMessage(3)), "not being sent any more");
+    assert!(s.request(Op::ResendMessage(3)));
+    assert_eq!(s.message(0).map(|m| (m.text, m.state)), Some((Buf::from(&b"one"[..]), MsgState::Pending)));
+    assert_eq!(s.message(4).map(|m| m.state), Some(MsgState::Cancelled), "the stopped one kept");
+    assert!(!s.request(Op::ResendMessage(1)), "only failed or cancelled ones");
+    assert!(!s.send_room());
+    let (f, _) = s.into_parts();
+    let s = mount(f);
+    assert_eq!(s.message(4).map(|m| m.state), Some(MsgState::Cancelled), "kept across a power cycle");
+    assert!((0..4).all(|i| s.message(i).is_some_and(|m| m.state == MsgState::Failed)), "open ones failed at power-on (APRS-13.5)");
+    assert!(send(&s, b"six") && send(&s, b"seven"));
+    assert!(s.request(Op::ClearMessages));
+    assert!(s.send_room() && s.extra.aprs.room(), "deleted: tried no more");
+    for t in [&b"a"[..], b"b", b"c", b"d"] {
+        assert!(send(&s, t), "room for four again");
+    }
 }

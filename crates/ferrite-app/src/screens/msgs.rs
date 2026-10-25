@@ -60,6 +60,10 @@ fn state_text(m: &Message, b: &mut Buf<16>) -> u16 {
             b.set(b"rejected");
             RED
         }
+        MsgState::Cancelled => {
+            b.set(b"cancelled");
+            SUB
+        }
     }
 }
 
@@ -84,9 +88,40 @@ fn compose(app: &mut App, store: &impl ChannelStore, to: &[u8]) {
     app.open(Dest::Compose);
 }
 
+/// The message selected under the options page: stop sending it (APRS-13.1) or send it again (APRS-13.2), and say
+/// so. Sending again refuses as compose does (LINK-19, KISS-10, APRS-8, APRS-13.3).
+pub(crate) fn stop_or_resend(app: &mut App, store: &impl ChannelStore, stop: bool) {
+    let Screen::Msgs(s) = app.screen else { return };
+    let data = store.data();
+    let Some(m) = data.message(s.cur.sel) else { return };
+    if stop {
+        let ok = data.request(Op::StopMessage(s.cur.sel));
+        return app.show_toast(if ok { b"Sending stopped" } else { b"Not sending" }, m.peer.as_bytes(), false);
+    }
+    if app.remote_tx_refused() {
+        return;
+    }
+    if let Some(why) = app.kiss_holds_aprs() {
+        return app.show_toast(b"Not sent", why.as_bytes(), false);
+    }
+    if !data.callsign().is_some_and(|c| crate::data::ax25_call_ok(c.as_bytes())) {
+        return app.show_toast(b"Not sent", b"MENU 0 8 6 1", false); // APRS-8, SETUP-13.1
+    }
+    if !data.send_room() {
+        return app.show_toast(b"Not sent", b"4 messages sending", false);
+    }
+    if data.request(Op::ResendMessage(s.cur.sel)) {
+        // the new one is the newest: the list's first row
+        app.screen = Screen::Msgs(Msgs { cur: Cursor::default(), ..s });
+        app.show_toast(b"Message queued", m.peer.as_bytes(), false);
+    } else {
+        app.show_toast(b"Not sent", b"try again", false);
+    }
+}
+
 impl View for Msgs {
-    fn options(self, app: &mut App) -> bool {
-        app.open_screen(Of::Messages.screen());
+    /// Hold MENU: the messages' options, with Stop sending or Send again first on one of ours (APRS-13.1, 13.2).
+    fn own_hold_menu(self) -> bool {
         true
     }
 
@@ -104,6 +139,14 @@ impl View for Msgs {
         let m = d.message(self.cur.sel);
         match (e.key, e.press) {
             (Key::Up | Key::Down, Short | Repeat) => self.knob(app, if e.key == Key::Up { -1 } else { 1 }, store),
+            (Key::Menu, Long) => {
+                let of = match m.filter(|m| !m.inbound).map(|m| m.state) {
+                    Some(MsgState::Pending | MsgState::Retrying(_)) => Of::MsgSending,
+                    Some(MsgState::Failed | MsgState::Cancelled) => Of::MsgEnded,
+                    _ => Of::Messages,
+                };
+                app.open_screen(of.screen());
+            }
             (Key::Menu, Short) if !self.open && m.is_some() => {
                 let unread = m.is_some_and(|m| m.inbound && m.state == MsgState::Unread);
                 if d.request(Op::MessageRead(self.cur.sel)) && unread {
@@ -619,6 +662,10 @@ pub(crate) fn send(app: &mut App, store: &impl ChannelStore) {
     let text = full_of(app, store, s);
     if d.to.is_empty() || text.is_empty() {
         return app.show_toast("Nothing to send".as_bytes(), if d.to.is_empty() { "add a recipient".as_bytes() } else { "write a message".as_bytes() }, false);
+    }
+    if !data.send_room() {
+        // APRS-13.3: four being tried already; the draft stays for later
+        return app.show_toast(b"Not sent", b"4 messages sending", false);
     }
     if data.request(Op::Send) {
         app.back();
