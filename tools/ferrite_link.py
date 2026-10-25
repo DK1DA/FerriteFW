@@ -362,6 +362,8 @@ class Link:
                 _, down, n = self.lz
                 pl = bytes(f[2:-2])
                 if f[0] & 0x7F == Z:
+                    if len(pl) < 2:
+                        continue  # too short to be a coded frame: damaged on the way
                     if pl[1] != n[1] & 0xFF:
                         n[1] += 1
                         continue  # a frame lost on the way: this one can't be read (a new HELLO starts over)
