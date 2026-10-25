@@ -1159,6 +1159,28 @@ impl SimCore {
         out
     }
 
+    /// Bluetooth as if at its unlocked rate (LINK-25.1): the Live View's faster cap (LINK-19.5).
+    pub fn set_bt_fast(&mut self, fast: bool) {
+        self.ports.set_bt_fast(fast);
+    }
+
+    /// LINK-19.5: the readback with the screen's texts, as a session that asked for them gets it (`UI` what=3).
+    pub fn readback_texts(&mut self) -> String {
+        let (mut out, mut l, mut i) = (String::new(), ferrite_app::term::cmd::Line::new(), 0);
+        while ferrite_app::uistate::line_all(&mut self.app, &self.store, &self.dev, &self.radio.live, true, i, &mut l) {
+            out.push_str(&String::from_utf8_lossy(l.as_bytes()));
+            out.push('\n');
+            i += 1;
+        }
+        out
+    }
+
+    /// The App's bytes: a test that drawing the screen again for the readback changed nothing (LINK-19.5).
+    pub fn app_bytes(&self) -> Vec<u8> {
+        // SAFETY: reading the App's own bytes, no more; it is plain data (the comparison is only ever with itself).
+        unsafe { core::slice::from_raw_parts((&self.app as *const ferrite_app::App).cast::<u8>(), core::mem::size_of::<ferrite_app::App>()) }.to_vec()
+    }
+
     /// The screen alone, 240 x 320, 0xRRGGBB (not dimmed when dark): for the goldens.
     pub fn screen_rgb(&self) -> Vec<u32> {
         let mut v = Vec::with_capacity((W * H) as usize);

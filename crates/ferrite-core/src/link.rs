@@ -184,6 +184,8 @@ pub mod caps {
     pub const DELETE_MANY: u8 = 8;
     /// `AUDIO` (LINK-13.4): receive audio over this port (the cable only).
     pub const AUDIO: u8 = 16;
+    /// The readback with the screen as drawn (LINK-19.5): `UI` what=3, and `SUBSCRIBE`'s [`super::event::TEXTS`].
+    pub const TEXTS: u8 = 32;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -195,6 +197,9 @@ pub mod event {
     /// `SUBSCRIBE`'s flags bit: keep the Live View stream as it is (a keepalive); without it a UI subscription starts
     /// over with the whole state.
     pub const RENEW: u8 = 1;
+    /// `SUBSCRIBE`'s flags bit: the Live View carries the screen as drawn, its `t` lines (LINK-19.5); only from a
+    /// radio that says [`super::caps::TEXTS`].
+    pub const TEXTS: u8 = 2;
     /// Kinds: a station heard (the count, then the station as `HEARD` gives it).
     pub const HEARD: u8 = 1;
     /// A new message, in or out (the count, then the message as `MSGS` gives it).
@@ -209,6 +214,9 @@ pub mod event {
     /// Events' bytes a second at most, and the most saved up: Bluetooth leaves room for the answers in its ~280
     /// (LINK-36).
     pub const RATE_BT: u32 = 200;
+    /// Bluetooth at its unlocked 115200 (LINK-25.1): the module passes about 1.6 KB/s (research/ble-speed.md);
+    /// the events take 1 KB/s of it, the rest for the answers. The screen as drawn (LINK-19.5) needs it.
+    pub const RATE_BT_FAST: u32 = 1000;
     pub const RATE_CABLE: u32 = 4000;
     pub const BURST: u32 = 300;
     /// Events stop when the session has sent nothing for this long ([`super::msg::SUBSCRIBE`] with

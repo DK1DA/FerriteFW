@@ -17,6 +17,8 @@ struct Phone {
     events: usize,
     buf: Vec<u8>,
     answers: Vec<(u8, u8, Vec<u8>)>,
+    /// Subscribed with the screen as drawn (LINK-19.5).
+    texts: bool,
 }
 
 impl Lines for Phone {
@@ -92,7 +94,8 @@ impl Phone {
             t += 100;
             self.pump(r);
             if t % 5000 == 0 {
-                self.send(r, msg::SUBSCRIBE, &[ev::SUB_UI, 0, ev::RENEW]);
+                let flags = ev::RENEW | if self.texts { ev::TEXTS } else { 0 };
+                self.send(r, msg::SUBSCRIBE, &[ev::SUB_UI, 0, flags]);
             }
         }
         self.bytes as f32 * 1000.0 / ms as f32
@@ -111,10 +114,9 @@ impl Phone {
     }
 
     /// Whether the phone has what the radio's readback says now (the compact form).
-    fn in_step(&self, r: &Radio) -> bool {
-        let want: Vec<Vec<u8>> = r
-            .sim
-            .readback()
+    fn in_step(&self, r: &mut Radio) -> bool {
+        let text = if self.texts { r.sim.readback_texts() } else { r.sim.readback() };
+        let want: Vec<Vec<u8>> = text
             .lines()
             .take(liveview::LINES)
             .map(|l| {
@@ -129,15 +131,20 @@ impl Phone {
 
 /// A radio with Bluetooth on (0 9 2 1) and the cable's terminal closed, and a phone subscribed to the UI.
 fn subscribed() -> (Radio, Phone) {
+    subscribed_with(false)
+}
+
+/// As [`subscribed`], with the screen as drawn when `texts` (LINK-19.5).
+fn subscribed_with(texts: bool) -> (Radio, Phone) {
     let mut r = Radio::new();
     r.sim.term_feed(b"\r:set 0 9 2 1 On\r");
     r.wait(200);
     r.sim.term_feed(&[0x03]);
     r.wait(200);
     r.sim.term_take();
-    let mut ph = Phone::default();
+    let mut ph = Phone { texts, ..Phone::default() };
     assert_eq!(ph.ask(&mut r, msg::HELLO, &[PROTOCOL])[0], 0);
-    let a = ph.ask(&mut r, msg::SUBSCRIBE, &[ev::SUB_UI]);
+    let a = ph.ask(&mut r, msg::SUBSCRIBE, &[ev::SUB_UI, 0, if texts { ev::TEXTS } else { 0 }]);
     assert_eq!(a, [0, ev::SUB_UI, liveview::DICT_VERSION]);
     (r, ph)
 }
@@ -181,13 +188,13 @@ fn live_view_over_bluetooth() {
     r.press(key("OK"));
     let (mut ms, mut bytes) = (0, 0);
     (ph.bytes, ph.events) = (0, 0);
-    while !ph.in_step(&r) && ms < 10_000 {
+    while !ph.in_step(&mut r) && ms < 10_000 {
         r.wait(20);
         ms += 20;
         ph.pump(&mut r);
     }
     bytes += ph.bytes;
-    assert!(ph.in_step(&r), "the menu arrived");
+    assert!(ph.in_step(&mut r), "the menu arrived");
     println!(
         "Live View over Bluetooth: idle home {idle:.1} B/s ({idle_ev} updates in 60 s), C scanning the airband {scan_c:.1} B/s ({scan_c_ev} in 30 s), A scanning {scan:.1} B/s ({scan_ev} in 30 s), menu opened {bytes} B in {} events",
         ph.events
@@ -200,4 +207,44 @@ fn live_view_over_bluetooth() {
     r.press(key("BACK"));
     ph.watch(&mut r, 2000);
     assert_eq!(ph.events, 0);
+}
+
+/// LINK-19.5 over the simulator's Bluetooth: a Live View subscribed with the screen as drawn gets every `t` line and
+/// keeps in step with the texts readback; the bytes of a menu opened and of a row moved, with and without texts.
+/// The figures print with `--nocapture`.
+#[test]
+fn live_view_with_the_screen_as_drawn() {
+    let mut cost = Vec::new();
+    for texts in [false, true] {
+        let (mut r, mut ph) = subscribed_with(texts);
+        r.sim.set_bt_fast(texts); // the screen as drawn is for Bluetooth at 115200 (LINK-25.1)
+        ph.watch(&mut r, 2000);
+        assert!(ph.settle(&mut r), "home in step");
+        r.press(key("OK"));
+        let (mut ms, mut opened) = (0, 0);
+        (ph.bytes, ph.events) = (0, 0);
+        while !ph.in_step(&mut r) && ms < 10_000 {
+            r.wait(20);
+            ms += 20;
+            ph.pump(&mut r);
+        }
+        if !ph.in_step(&mut r) {
+            let want = if texts { r.sim.readback_texts() } else { r.sim.readback() };
+            let have: Vec<String> = ph.lines.iter().map(|l| String::from_utf8_lossy(l).into_owned()).collect();
+            panic!("the screen arrived (texts {texts}): {} lines here, {} wanted\nHAVE\n{}\nWANT\n{}", have.len(), want.lines().count(), have.join("\n"), want);
+        }
+        opened += ph.bytes;
+        if texts {
+            assert!(ph.lines.iter().any(|l| l.starts_with(b"t ")), "t lines arrived");
+        }
+        (ph.bytes, ph.events) = (0, 0);
+        r.press(key("DOWN"));
+        assert!(ph.settle(&mut r), "the row moved (texts {texts})");
+        let moved = ph.bytes;
+        cost.push((opened, ms, moved));
+    }
+    println!(
+        "Live View: the quick list opened {} B ({} ms), a row moved {} B; with the screen as drawn: {} B ({} ms), {} B",
+        cost[0].0, cost[0].1, cost[0].2, cost[1].0, cost[1].1, cost[1].2
+    );
 }

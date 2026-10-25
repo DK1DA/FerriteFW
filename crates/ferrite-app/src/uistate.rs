@@ -44,9 +44,204 @@ use ufmt::uwrite;
 /// Line `i` of the description into `out`; false past the last.
 pub fn line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &LiveAll, i: u16, out: &mut Line) -> bool {
     out.clear();
-    let mut d = Desc { want: i, n: 0, out, got: false };
+    let mut d = Desc { want: i, n: 0, out, got: false, bare: false };
     describe(app, &Cx { live, dev, store: st }, &mut d);
     d.got
+}
+
+/// LINK-19.5: line `i` of the readback with the screen as drawn when `texts`: the description without the screen's
+/// own lines (its rows, values, help: the drawing says them), then `t` lines (see [`Listener`]); as [`line`] without
+/// `texts`, and for home's default layout, which keeps its structured cards (its meters and card shapes aren't text).
+pub fn line_all<S: ChannelStore>(app: &mut App, st: &S, dev: &Device, live: &LiveAll, texts: bool, i: u16, out: &mut Line) -> bool {
+    // Home's default layout keeps its structured cards; its other two (HOME-3) and Low Power Mode's are sent as drawn
+    if !texts || matches!(app.screen, Screen::Home) && app.home_layout() == 0 && !app.lpm_home() {
+        return line(app, st, dev, live, i, out);
+    }
+    out.clear();
+    let mut d = Desc { want: i, n: 0, out, got: false, bare: true };
+    describe(app, &Cx { live, dev, store: st }, &mut d);
+    if d.got {
+        return true;
+    }
+    let base = d.n;
+    let mut d = Desc { want: i.wrapping_sub(base), n: 0, out: d.out, got: false, bare: true };
+    let mut l = Listener { d: &mut d, k: 0, row: None, open: false, on: false, style: (0, 0, 0), win: (0, 0, 0, 0), bg: ferrite_ui::theme::map_bg(ferrite_ui::gfx::BG) };
+    app.render_texts(&mut l, live, dev, st);
+    d.got
+}
+
+/// LINK-19.5: a `t` line holds one row of the screen: items whose top is inside its first full-height item's line
+/// box (give or take [`ROW_PX`]), and thin ones (an edge, a rule) wherever they are, up to about [`LINE_BYTES`]
+/// (Live View's LINE_ROOM). By row, so a change on one row (a selection moved) changes its line alone, not every
+/// line after it; by each item's exact length (worked out, not written), so the lines break in the same places
+/// whether or not this line is the one being written.
+const ROW_PX: i32 = 8;
+const LINE_BYTES: u32 = 225;
+/// An item this thin (a rule, a frame's edge) joins whatever line is open.
+const THIN_PX: i32 = 3;
+/// A fill smaller than this many pixels (a meter's segment, a dot) isn't sent.
+const RECT_MIN_PX: u32 = 64;
+
+/// LINK-19.5: the panel the screen is drawn again into for the readback: nothing is drawn, each text and each
+/// coloured fill is written, as it comes, into `t` lines by screen row ([`ROW_PX`]), in drawing order (a later one
+/// over an earlier one). A text: `x,y,w,h,font,fg,bg,"text"` (its line box, the font's [`font_id`], RGB565 in hex);
+/// a fill not in the screen's background colour: `x,y,w,h,colour`; an icon (a mask: a dot, a symbol) `x,y,w,h,colour,o`. A text's `bg` is `-` when it is the screen's. Nothing is kept but the one line being written.
+struct Listener<'a, 'b> {
+    d: &'a mut Desc<'b>,
+    /// The open line's estimated bytes, and its row (the top and bottom of its first full-height item; None before
+    /// one).
+    k: u32,
+    row: Option<(i32, i32)>,
+    open: bool,
+    on: bool,
+    style: (u8, u16, u16),
+    win: (i32, i32, i32, i32),
+    bg: u16,
+}
+
+impl Listener<'_, '_> {
+    /// The next item's place: its box (top `y`, height `h`) and estimated bytes `n`; a new line for another row, or
+    /// when this one is full. Some(the line) if it is the one wanted.
+    fn item(&mut self, y: i32, h: i32, n: u32) -> Option<&mut Line> {
+        let thin = h <= THIN_PX;
+        let same = match self.row {
+            _ if !self.open => false,
+            _ if thin => true,
+            None => true,
+            Some((t, b)) => y >= t - ROW_PX && y <= b.max(t + ROW_PX),
+        };
+        if !same || self.k + n > LINE_BYTES {
+            (self.row, self.k, self.open) = (None, 0, true);
+            self.on = self.d.ln().is_some();
+            if self.on {
+                self.d.out.push(b"t");
+            }
+        }
+        if !thin && self.row.is_none() {
+            self.row = Some((y, y + h));
+        }
+        self.k += n;
+        if self.on {
+            self.d.out.push(b" ");
+            Some(self.d.out)
+        } else {
+            None
+        }
+    }
+}
+
+impl Listener<'_, '_> {
+    /// A fill (LINK-19.5): an item when it is coloured and big enough. Out of line: the panel's methods are kept in
+    /// fast flash by name (memory.x), and this isn't per-pixel work.
+    #[inline(never)]
+    fn fill_item(&mut self, color: u16, count: u32) {
+        let (x0, y0, x1, y1) = self.win;
+        let (w, h) = ((x1 - x0 + 1).max(0) as u32, (y1 - y0 + 1).max(0) as u32);
+        if color == self.bg || count != w * h || count < RECT_MIN_PX {
+            return;
+        }
+        // ` x,y,w,h,cccc`
+        let n = 1 + digits(x0) + digits(y0) + digits(w as i32) + digits(h as i32) + 3 + 5;
+        if let Some(l) = self.item(y0, h as i32, n) {
+            let _ = uwrite!(l, "{},{},{},{},", x0, y0, w, h);
+            hex4(l, color);
+        }
+    }
+
+    /// An icon (LINK-19.5).
+    #[inline(never)]
+    fn icon_item(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: u16) {
+        let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
+        // ` x,y,w,h,cccc,o`
+        let n = 1 + digits(x0) + digits(y0) + digits(w) + digits(h) + 3 + 5 + 2;
+        if let Some(l) = self.item(y0, h, n) {
+            let _ = uwrite!(l, "{},{},{},{},", x0, y0, w, h);
+            hex4(l, c);
+            l.push(b",o");
+        }
+    }
+
+    /// A text (LINK-19.5).
+    #[inline(never)]
+    fn text_item(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, s: &[u8]) {
+        let (f, fg, bg) = self.style;
+        let own = bg == self.bg;
+        // ` x,y,w,h,f,ffff,bbbb,"text"` (the text as `q` writes it, escapes and all)
+        let n = 1 + digits(x0) + digits(y0) + digits(x1 - x0 + 1) + digits(y1 - y0 + 1) + digits(f as i32) + 5 + 4 + 1 + if own { 1 } else { 4 } + 1 + quoted_len(s);
+        if let Some(l) = self.item(y0, y1 - y0 + 1, n) {
+            let _ = uwrite!(l, "{},{},{},{},{},", x0, y0, x1 - x0 + 1, y1 - y0 + 1, f);
+            hex4(l, fg);
+            l.push(b",");
+            if own {
+                l.push(b"-"); // the screen's own background
+            } else {
+                hex4(l, bg);
+            }
+            l.push(b",");
+            q(l, s);
+        }
+    }
+}
+
+impl ferrite_ui::panel::Panel for Listener<'_, '_> {
+    fn window(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
+        self.win = (x0, y0, x1, y1);
+    }
+
+    fn push(&mut self, color: u16, count: u32) {
+        self.fill_item(color, count);
+    }
+
+    fn push_buf(&mut self, _px: &[u16]) {}
+
+    fn mask_hint(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: u16) {
+        self.icon_item(x0, y0, x1, y1, c);
+    }
+
+    fn text_style(&mut self, f: &'static ferrite_ui::font4::Font4, fg: u16, bg: u16) {
+        self.style = (font_id(f), fg, bg);
+    }
+
+    fn text_hint(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, s: &[u8]) {
+        self.text_item(x0, y0, x1, y1, s);
+    }
+
+    fn offscreen(&self) -> bool {
+        true // the screens' regions draw straight through, no bands (ferrite_ui::canvas)
+    }
+
+    fn text_only(&self) -> bool {
+        true
+    }
+}
+
+/// The digits of `n` written in decimal (a minus counted).
+fn digits(n: i32) -> u32 {
+    let (mut d, mut v) = (if n < 0 { 2 } else { 1 }, n.unsigned_abs() / 10);
+    while v > 0 {
+        (d, v) = (d + 1, v / 10);
+    }
+    d
+}
+
+/// The bytes [`q`] writes for `s`, quotes included.
+fn quoted_len(s: &[u8]) -> u32 {
+    2 + s.iter().map(|&c| if c == b'"' || c == b'\\' { 2 } else { 1 }).sum::<u32>()
+}
+
+/// RGB565 as four hex digits.
+fn hex4(l: &mut Line, c: u16) {
+    const H: &[u8; 16] = b"0123456789abcdef";
+    l.push(&[H[(c >> 12) as usize], H[(c >> 8 & 15) as usize], H[(c >> 4 & 15) as usize], H[(c & 15) as usize]]);
+}
+
+/// LINK-19.5: a font as the readback names it: 0 UI 12, 1 UI 12 bold, 2 UI 15 bold, 3 name 22, 4 name 26,
+/// 5 digits 17, 6 digits 26, 7 digits 28, 8 digits 46, 9 the wordmark 40; 15 another.
+#[inline(never)]
+fn font_id(f: &'static ferrite_ui::font4::Font4) -> u8 {
+    use ferrite_ui::assets::*;
+    let all: [&ferrite_ui::font4::Font4; 10] = [&UI_12, &UI_12B, &UI_15B, &NAME_22, &NAME_26, &DIG_17, &DIG_26, &DIG_28, &DIG_46, &WORD_40];
+    all.iter().position(|a| core::ptr::eq(*a, f)).map_or(15, |i| i as u8)
 }
 
 /// One line of the description is wanted: the others are counted, not written.
@@ -55,6 +250,8 @@ struct Desc<'a> {
     n: u16,
     out: &'a mut Line,
     got: bool,
+    /// Without the screen's own lines (LINK-19.5: the screen as drawn follows).
+    bare: bool,
 }
 
 impl Desc<'_> {
@@ -264,7 +461,9 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             }
         }
     }
-    body(app, cx, d);
+    if !d.bare {
+        body(app, cx, d);
+    }
     if let Some(l) = d.ln() {
         l.push(b"hints");
         for (k, v) in sc.hints(app).as_slice() {
@@ -877,7 +1076,11 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
         // the stations heard; C's own VFO (AM, say) is put aside meanwhile, so its chips would mislead.
         let data = cx.store.data();
         let mut last = Buf::<80>::new();
-        crate::aprs::last_text(data, &mut last);
+        match app.aprs_card(data).filter(|k| k.holder == crate::aprs::Holder::Mode) {
+            // LINK-19.4: APRS mode's bottom line as drawn (the last heard since power-on, APRS-17.2)
+            Some(k) => last.push(k.line.as_bytes()),
+            None => crate::aprs::last_text(data, &mut last),
+        }
         let mut beacon = Buf::<28>::new();
         app.beacon_text(data, &mut beacon);
         kq(l, "last", last.as_bytes());
@@ -907,7 +1110,11 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
                     kn(l, "frames", heard as u32);
                 }
                 crate::aprs::Holder::Beacon => kq(l, "line", k.line.as_bytes()),
-                crate::aprs::Holder::Mode => {}
+                // LINK-19.4: which count the small card shows now (APRS-17.2: "14 heard", 1 "3 /hr")
+                crate::aprs::Holder::Mode => kn(l, "turn", app.now / crate::aprs_card::COUNT_FLIP_MS % 2),
+            }
+            if app.aprs_shared().is_some() {
+                kn(l, "shared", 1); // "VHF shared" in the header (APRS-17)
             }
         }
     }

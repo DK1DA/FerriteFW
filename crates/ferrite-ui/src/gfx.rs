@@ -290,6 +290,13 @@ pub trait Gfx: Panel {
             return self.frame_r(x, y, w, h, r.min(w / 2).min(h / 2).max(0), c);
         }
         let r = r.min(w / 2).min(h / 2).max(0);
+        if self.text_only() && r > 0 {
+            // LINK-19.5: the listener takes a rounded fill whole: a dot as an icon, anything bigger as one fill
+            if w <= 12 && h <= 12 {
+                return self.mask_hint(x, y, x + w - 1, y + h - 1, crate::theme::map(c));
+            }
+            return self.fill(x, y, w, h, c);
+        }
         for dy in 0..r {
             // the circle's half-width at the middle of row dy, in half pixels: (2u)^2 <= (2r)^2 - (2r - 2dy - 1)^2
             let v = 2 * (r - dy) - 1;
@@ -378,7 +385,11 @@ pub trait Gfx: Panel {
         let mut line = [0u16; W as usize];
         let n = (x1 - x0) as usize;
         self.window(x0, y0, x1 - 1, y1 - 1);
+        self.text_style(f, fg, bg);
         self.text_hint(x0, y0, x1 - 1, y1 - 1, s);
+        if self.text_only() {
+            return w; // LINK-19.5: the listener reads the text; nothing to paint
+        }
         let t0 = crate::prof::now();
         for row in y0..y1 {
             text_row(&mut line[..n], &lut, s, f, x, x0, baseline, row, at);
@@ -421,6 +432,10 @@ pub trait Gfx: Panel {
         let (mut a1, mut a2) = ([0u8; 256], [0u8; 256]);
         let mut line = [0u16; W as usize];
         self.window(x0, y0, x1 - 1, y1 - 1);
+        self.mask_hint(x0, y0, x1 - 1, y1 - 1, c1);
+        if self.text_only() {
+            return; // LINK-19.5: the listener notes the icon; nothing to paint
+        }
         let t0 = crate::prof::now();
         for row in y..y1 {
             // rows above the screen are decoded and dropped: runs only go forward

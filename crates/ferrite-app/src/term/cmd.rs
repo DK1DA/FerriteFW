@@ -173,6 +173,8 @@ pub enum List {
     UiKeys,
     /// The compact status line (`ui status`, the link's `UI` what=2, LINK-19).
     UiStatus,
+    /// The readback with the screen as drawn after it (LINK-19.5, the link's `UI` what=3): the link only.
+    UiTexts,
 }
 
 // ---- Words ----
@@ -2025,7 +2027,7 @@ pub fn dump_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, p: &mut DumpP
 pub fn list_line<S: ChannelStore>(app: &App, st: &S, dev: &Device, live: &ferrite_core::msg::LiveAll, l: List, i: u16, out: &mut Line) -> bool {
     out.clear();
     match l {
-        List::Ui => crate::uistate::line(app, st, dev, live, i, out),
+        List::Ui | List::UiTexts => crate::uistate::line(app, st, dev, live, i, out), // the texts: the link's own
         List::UiKeys => crate::uistate::key_line(i, out),
         List::UiStatus if i == 0 => {
             crate::uistate::status_line(app, live, out);

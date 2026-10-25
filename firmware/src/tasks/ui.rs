@@ -554,6 +554,8 @@ pub async fn task() {
             // (LINK-1), on the port that holds them.
             // The cable's output waits while its log has it (TERM-28); Bluetooth's sessions run regardless.
             let cable_free = !bringup::ON.load(Relaxed);
+            // LINK-19.5: Bluetooth at its unlocked rate carries a faster Live View
+            ports.set_bt_fast(crate::hal::uart::rate(crate::report::UART_BT) >= ferrite_core::link::BT_FAST);
             // Decision 290: the DSP task, which preempts this one, puts its audio frames into TERM_OUT only while no
             // frame of the session's is half written.
             crate::chan::term_out_locked(|| ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT, cable_free), &mut Out(&BT_OUT, true)));

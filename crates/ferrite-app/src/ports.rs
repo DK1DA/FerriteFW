@@ -150,6 +150,11 @@ impl Ports {
         }
     }
 
+    /// Bluetooth runs at its unlocked rate now (LINK-25.1): the Live View's rate cap follows (LINK-19.5).
+    pub fn set_bt_fast(&mut self, fast: bool) {
+        self.links[1].fast = fast;
+    }
+
     /// The fastest cable rate the caller's UART runs within 2 % (LINK-11).
     pub fn set_cable_max_baud(&mut self, b: u32) {
         self.links[0].set_max_baud(b);

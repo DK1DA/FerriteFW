@@ -112,6 +112,25 @@ impl Panel for Band<'_> {
         }
     }
 
+    fn text_style(&mut self, f: &'static crate::font4::Font4, fg: u16, bg: u16) {
+        if let Some(p) = &mut self.fwd {
+            p.text_style(f, fg, bg);
+        }
+    }
+
+    fn mask_hint(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: u16) {
+        if let Some(p) = &mut self.fwd {
+            p.mask_hint(x0, y0, x1, y1, c);
+        }
+    }
+
+    fn text_only(&self) -> bool {
+        match &self.fwd {
+            Some(p) if self.thru => p.text_only(),
+            _ => false,
+        }
+    }
+
     /// The band's rows, so text outside them isn't drawn at all (every band runs the whole drawing); all of them
     /// on the pass for text hints.
     fn rows(&self) -> (i32, i32) {

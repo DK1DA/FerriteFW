@@ -35,7 +35,27 @@ fn json_str(s: &str) -> String {
 /// One screen: its name, what the firmware drew there (top to bottom) and the readback.
 fn entry(name: &str, r: &mut Radio) -> String {
     let texts: Vec<String> = r.sim.screen_texts().into_iter().map(|t| json_str(&t.s)).collect();
-    format!("{{\"name\":{},\"texts\":[{}],\"readback\":{}}}", json_str(name), texts.join(","), json_str(&r.sim.readback()))
+    // LINK-19.5: drawing the screen again for the texts changes nothing in the App
+    let before = r.sim.app_bytes();
+    let rt = r.sim.readback_texts();
+    assert!(r.sim.app_bytes() == before, "{name}: drawing the screen again for the readback changed the App");
+    // and every line fits Live View whole (LINK-48: a line is cut past LINE_ROOM coded bytes), within its lines
+    let n = rt.lines().count();
+    assert!(n <= 200, "{name}: {n} readback lines, Live View carries {}", ferrite_core::liveview::LINES);
+    for l in rt.lines() {
+        let mut c = [0u8; 256];
+        let k = ferrite_core::liveview::compact(l.as_bytes(), &mut c);
+        let e = ferrite_core::liveview::encoded_len(&c[..k]);
+        assert!(k == l.len() || l.starts_with("state"), "{name}: kept {k} of {} bytes, {e} coded: {l}", l.len());
+        assert!(e <= ferrite_core::liveview::LINE_ROOM, "{name}: a line Live View would cut ({e} coded bytes): {l}");
+    }
+    format!(
+        "{{\"name\":{},\"texts\":[{}],\"readback\":{},\"readback_texts\":{}}}",
+        json_str(name),
+        texts.join(","),
+        json_str(&r.sim.readback()),
+        json_str(&rt)
+    )
 }
 
 /// The states beyond the jump list: a fresh sample radio, then a script (`common::Radio::run`).

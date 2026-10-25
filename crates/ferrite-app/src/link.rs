@@ -46,6 +46,8 @@ pub struct Session {
     have: bool,
     /// The cable is trusted (LINK-7); a Bluetooth session gave the radio's PIN (LINK-30).
     trusted: bool,
+    /// Bluetooth at its unlocked rate (LINK-25.1): the events' rate cap is [`ferrite_core::link::event::RATE_BT_FAST`].
+    pub(crate) fast: bool,
     pin_ok: bool,
     /// When the last valid frame arrived, and whether one has.
     last: u32,
@@ -134,6 +136,7 @@ impl Session {
             overflow: false,
             have: false,
             trusted,
+            fast: false,
             pin_ok: false,
             last: 0,
             seen: false,
@@ -441,7 +444,7 @@ impl Session {
                 // UI: its first frame starts the readback, the rest go on from it (LINK-19's pages)
                 if s.p[4] == 0 {
                     s.p[4] = 1;
-                    self.run = Run::List([List::Ui, List::UiKeys, List::UiStatus][s.p[0].min(2) as usize], 0);
+                    self.run = Run::List([List::Ui, List::UiKeys, List::UiStatus, List::UiTexts][s.p[0].min(3) as usize], 0);
                 }
                 self.more(app, st, dev, live, &mut o);
                 (Status::Ok, o.a[1] == 1)
@@ -539,8 +542,8 @@ impl Session {
             // LINK-19: what the screen shows, as the terminal's `ui` (or `ui keys`) prints it.
             // what=2: the compact one-line status (`ui status`), for a slow link.
             msg::UI => match p.first().copied().unwrap_or(0) {
-                w @ (0..=2) => {
-                    self.run = Run::List([List::Ui, List::UiKeys, List::UiStatus][w as usize], 0);
+                w @ (0..=3) => {
+                    self.run = Run::List([List::Ui, List::UiKeys, List::UiStatus, List::UiTexts][w as usize], 0);
                     self.more(app, st, dev, live, &mut o);
                     Status::Ok
                 }
@@ -619,7 +622,7 @@ impl Session {
     }
 
     /// The running command's next whole lines, as many as fit: the "more" byte, then the text.
-    fn more<S: ChannelStore>(&mut self, app: &App, st: &S, dev: &Device, live: &LiveAll, o: &mut Out) {
+    fn more<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, o: &mut Out) {
         let flag = o.n;
         o.put(&[0]);
         let mut l = Line::new();
@@ -627,6 +630,11 @@ impl Session {
             let was = self.run;
             let got = match &mut self.run {
                 Run::Off => false,
+                Run::List(List::UiTexts, i) => {
+                    let g = crate::uistate::line_all(app, st, dev, live, true, *i, &mut l); // LINK-19.5
+                    *i += 1;
+                    g
+                }
                 Run::List(list, i) => {
                     let g = cmd::list_line(app, st, dev, live, *list, *i, &mut l);
                     *i += 1;
@@ -668,7 +676,7 @@ impl Session {
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
         let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio]); // LINK-35.2
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio | ferrite_core::link::caps::TEXTS]); // LINK-35.2
         Status::Ok
     }
 

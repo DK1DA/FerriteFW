@@ -188,7 +188,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable)");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | ferrite_core::link::caps::AUDIO | ferrite_core::link::caps::TEXTS], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked; AUDIO: the cable; TEXTS)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 7;
         let c = v + 1 + a[v] as usize;
@@ -888,7 +888,12 @@ impl Pc {
 
     /// `UI`: the whole text, over as many `MORE`s as it takes.
     fn ui(&mut self) -> std::string::String {
-        let (s, a) = self.ask(msg::UI, &[]);
+        self.ui_what(0)
+    }
+
+    /// `UI` with its what byte (3: with the screen as drawn, LINK-19.5).
+    fn ui_what(&mut self, w: u8) -> std::string::String {
+        let (s, a) = self.ask(msg::UI, &[w]);
         assert_eq!(s, 0);
         let mut all: std::string::String = text(&a[1..]).into();
         let mut more = a[0];
@@ -1315,7 +1320,7 @@ fn ui_status_line() {
     assert!(st.starts_with("st scr=Crossband ") && st.contains(" mode=xb ") && st.ends_with(" xb=1,1,3"), "{st}");
     status_matches_cards(&full, &st);
     assert!(full.contains("xb running=1 state=1 ") && full.contains(" passes=3 "), "{full}");
-    let (s, _) = pc.ask(msg::UI, &[3]);
+    let (s, _) = pc.ask(msg::UI, &[4]);
     assert_eq!(s, Status::BadArg as u8);
 }
 
@@ -1782,4 +1787,25 @@ fn stream_answers_back_to_back() {
     assert_eq!(f.payload[2..], ui[1..], "the first page is UI's");
     assert_eq!(pc.ask(msg::INFO, &[]).0, 0, "a new request is answered: the stream is over");
     assert_eq!(pc.ask(msg::STREAM, &[msg::WRITE_MANY]).0, Status::BadArg as u8);
+}
+
+/// LINK-19.5: `UI` what=3 gives the screen as drawn (`t` lines: its texts, with place, font and colours, its coloured
+/// fills and icons) in place of the screen's own lines, on a screen other than home's cards; what=0 never has them,
+/// and home's default layout sends none (its cards are structured).
+#[test]
+fn ui_texts_are_the_screen_as_drawn() {
+    let mut pc = Pc::new(true);
+    let home = pc.ui_what(3);
+    assert!(!home.lines().any(|l| l.starts_with("t ")), "home: cards, no t lines\n{home}");
+    pc.keys("MENU 0");
+    let plain = pc.ui();
+    let texts = pc.ui_what(3);
+    assert!(!plain.lines().any(|l| l.starts_with("t ")), "{plain}");
+    // the screen, state, bar and hints as what=0 gives them; the screen's own lines (its rows) left to the drawing
+    assert_eq!(texts.lines().next(), plain.lines().next(), "the screen line");
+    assert!(plain.lines().any(|l| l.starts_with("row ")) && !texts.lines().any(|l| l.starts_with("row ")), "{texts}");
+    assert!(texts.lines().any(|l| l.starts_with("hints ")), "{texts}");
+    let t: std::vec::Vec<&str> = texts.lines().filter(|l| l.starts_with("t ")).collect();
+    assert!(!t.is_empty(), "{texts}");
+    assert!(t.iter().any(|l| l.contains(",\"")), "texts with their place and style: {t:?}");
 }

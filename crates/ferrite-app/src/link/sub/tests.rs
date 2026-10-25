@@ -70,7 +70,7 @@ impl Pc {
         let end = self.now + ms;
         while self.now < end {
             self.now += 50;
-            self.link.events(&self.app, &self.st, &self.dev, &self.live, self.now, Some(&mut self.ui), &mut out);
+            self.link.events(&mut self.app, &self.st, &self.dev, &self.live, self.now, Some(&mut self.ui), &mut out);
         }
         out.0
             .split(|&b| b == 0)

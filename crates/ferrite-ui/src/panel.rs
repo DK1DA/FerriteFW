@@ -14,6 +14,20 @@ pub trait Panel {
     /// end-to-end tests, which read the screen as text. Panels ignore it (the radio's inlines to nothing).
     #[inline(always)]
     fn text_hint(&mut self, _x0: i32, _y0: i32, _x1: i32, _y1: i32, _s: &[u8]) {}
+    /// The font and colours of the text whose [`Panel::text_hint`] comes next (LINK-19.5: the readback's screen
+    /// texts). Panels ignore it.
+    #[inline(always)]
+    fn text_style(&mut self, _f: &'static crate::font4::Font4, _fg: u16, _bg: u16) {}
+    /// A mask (an icon, a dot) about to be drawn in the box (x0, y0)-(x1, y1) inclusive, in `c` (LINK-19.5's
+    /// listener: the screen as drawn). Panels ignore it.
+    #[inline(always)]
+    fn mask_hint(&mut self, _x0: i32, _y0: i32, _x1: i32, _y1: i32, _c: u16) {}
+    /// This panel only reads the texts (LINK-19.5's listener): the drawing stops after each text's hint, no glyph
+    /// is rasterised. Only the listener says so.
+    #[inline(always)]
+    fn text_only(&self) -> bool {
+        false
+    }
     /// The rows y0..y1 this panel keeps; drawing may skip the others. A band of an off-screen canvas keeps a few
     /// (canvas.rs); the panel itself keeps all, which compiles to nothing.
     #[inline(always)]

@@ -54,11 +54,13 @@ pub struct Sub {
     ui_input: u32,
     ui_more: bool,
     ui_start: bool,
+    /// The Live View carries the screen as drawn (LINK-19.5).
+    texts: bool,
 }
 
 impl Sub {
     pub const fn new() -> Self {
-        Sub { mask: 0, gap_ms: 0, budget: 0, at: 0, seq: 0, ver: 0, dirty: false, heard: 0, msgs: [(0, 0); WATCHED], msgs_n: 0, ui_at: 0, ui_frames: 0, ui_input: 0, ui_more: false, ui_start: false }
+        Sub { mask: 0, gap_ms: 0, budget: 0, at: 0, seq: 0, ver: 0, dirty: false, heard: 0, msgs: [(0, 0); WATCHED], msgs_n: 0, ui_at: 0, ui_frames: 0, ui_input: 0, ui_more: false, ui_start: false, texts: false }
     }
 }
 
@@ -109,7 +111,8 @@ impl Session {
     /// `SUBSCRIBE` (LINK-46): the mask, then optionally the UI's least gap (100 ms units) and flags.
     pub(super) fn subscribe<S: ChannelStore>(&mut self, st: &S, now: u32, p: &[u8], o: &mut Out) -> Status {
         let Some(&mask) = p.first().filter(|&&m| m & !(ev::SUB_HEARD | ev::SUB_MSGS | ev::SUB_UI) == 0) else { return Status::BadArg };
-        let renew = p.get(2).is_some_and(|f| f & ev::RENEW != 0) && mask == self.sub.mask;
+        let texts = p.get(2).is_some_and(|f| f & ev::TEXTS != 0);
+        let renew = p.get(2).is_some_and(|f| f & ev::RENEW != 0) && mask == self.sub.mask && texts == self.sub.texts;
         let gap = match p.get(1) {
             Some(&g) if g > 0 => g as u32 * 100,
             _ if self.trusted => ev::UI_GAP_CABLE_MS,
@@ -119,7 +122,7 @@ impl Session {
             let d = st.data();
             let (msgs, msgs_n) = watched(d);
             let ui_start = mask & ev::SUB_UI != 0;
-            self.sub = Sub { mask, gap_ms: gap, at: now, seq: self.sub.seq, ver: d.version(), heard: heard_sig(d), msgs, msgs_n, ui_at: now, ui_start, ..Sub::new() };
+            self.sub = Sub { mask, gap_ms: gap, at: now, seq: self.sub.seq, ver: d.version(), heard: heard_sig(d), msgs, msgs_n, ui_at: now, ui_start, texts, ..Sub::new() };
         }
         self.sub.gap_ms = gap;
         o.put(&[mask, DICT_VERSION]);
@@ -157,7 +160,7 @@ impl Session {
     /// session has it.
     #[allow(clippy::too_many_arguments)]
     #[inline(never)] // its buffers in its own frame, not stacked on the session's answer (SBAR-23)
-    pub fn events<S: ChannelStore>(&mut self, app: &App, st: &S, dev: &Device, live: &LiveAll, now: u32, ui: Option<&mut Track>, out: &mut impl Sink) {
+    pub fn events<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, now: u32, ui: Option<&mut Track>, out: &mut impl Sink) {
         if self.sub.mask == 0 {
             return;
         }
@@ -165,7 +168,7 @@ impl Session {
             self.unsubscribe(); // the PC went quiet: events stop (LINK-46)
             return;
         }
-        let rate = if self.trusted { ev::RATE_CABLE } else { ev::RATE_BT } as i32;
+        let rate = if self.by == crate::remote::BY_CABLE { ev::RATE_CABLE } else if self.fast { ev::RATE_BT_FAST } else { ev::RATE_BT } as i32;
         let dt = now.wrapping_sub(self.sub.at).min(10_000) as i32;
         self.sub.budget = (self.sub.budget + dt * rate).min(ev::BURST as i32 * 1000);
         self.sub.at = now;
@@ -218,10 +221,11 @@ impl Session {
             (self.sub.ui_at, self.sub.ui_frames, self.sub.ui_input) = (now, app.frames, app.last_input);
             let mut p = [0u8; MAX_PAYLOAD];
             p[0] = ev::UI;
+            let texts = self.sub.texts;
             let mut l = Line::new();
             let n = t.update(
                 |i, b| {
-                    crate::uistate::line(app, st, dev, live, i, &mut l).then(|| {
+                    crate::uistate::line_all(app, st, dev, live, texts, i, &mut l).then(|| {
                         b[..l.len()].copy_from_slice(l.as_bytes());
                         l.len()
                     })

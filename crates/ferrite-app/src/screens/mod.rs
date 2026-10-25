@@ -369,6 +369,21 @@ impl Screen {
 }
 
 impl App {
+    /// LINK-19.5: the screen's content drawn again, all of it, as a new screen draws it, into `lcd` (the readback's
+    /// text listener); what the drawing keeps of what is on the panel ([`crate::Drawn`]) is put back after, so the
+    /// panel's next render goes on as if this never ran. One copy: the screens draw through a [`ferrite_ui::canvas`]
+    /// band, as on the panel.
+    #[inline(never)]
+    pub(crate) fn render_texts<S: ChannelStore>(&mut self, lcd: &mut dyn Panel, live: &LiveAll, dev: &Device, store: &S) {
+        let before = self.drawn;
+        self.drawn.hash = [0; shared::REGIONS];
+        self.drawn.meter = [None; SLOTS];
+        let cx = Cx { live, dev, store };
+        let screen = self.screen;
+        screen.render(self, &mut ferrite_ui::canvas::direct(lcd), &cx);
+        self.drawn = before;
+    }
+
     /// Draws what changed since the last call: the status bar, the screen, then the hint bar or a toast.
     pub fn render(&mut self, lcd: &mut impl Panel, live: &LiveAll, dev: &Device, store: &impl ChannelStore) {
         // LINK-19's readback counts the redraws that changed something (what was drawn, as the regions record it).
