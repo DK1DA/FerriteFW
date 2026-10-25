@@ -95,6 +95,14 @@ impl Data for RadioData {
         self.aprs.station(i)
     }
 
+    fn row_of(&self, i: u16) -> Option<(u32, u8)> {
+        self.aprs.row_of(i)
+    }
+
+    fn row_stored(&self, call: &Buf<10>, seq: u32) {
+        self.aprs.row_stored(call, seq);
+    }
+
     fn callsign(&self) -> Option<Buf<10>> {
         Some(self.callsign.get()).filter(|c| !c.is_empty())
     }

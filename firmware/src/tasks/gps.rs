@@ -473,7 +473,7 @@ impl GpsUi {
                     store.set_time(u);
                     if self.store_time == 0 {
                         // APRS-4: the restored stations' rows stamped in UTC have real ages now (INBOX-6.1).
-                        store.heard_rows(ferrite_app::aprs::HEARD_MAX as usize, &mut |s| store.extra.aprs.restore(&s, now / 1000));
+                        store.heard_rows(ferrite_app::aprs::HEARD_MAX as usize, &mut |s, seq| store.extra.aprs.restore(&s, seq, now / 1000));
                     }
                     self.store_time = u;
                 }

@@ -225,7 +225,7 @@ pub async fn task() {
         own_frame(store.mount_async()).await;
         // APRS-4: the heard list from its stored rows (their times unknown until GPS time: the GPS task gives
         // them again then).
-        store.heard_rows(ferrite_app::aprs::HEARD_MAX as usize, &mut |s| store.extra.aprs.restore(&s, now_ms() / 1000));
+        store.heard_rows(ferrite_app::aprs::HEARD_MAX as usize, &mut |s, seq| store.extra.aprs.restore(&s, seq, now_ms() / 1000));
     }
     check(Source::Storage, CHECK_FLASH, flash.is_some());
     // Calibration present: the factory sector isn't blank (read only, CAL-1). Its CRC check comes with 1b.

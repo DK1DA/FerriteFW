@@ -440,6 +440,11 @@ pub fn heard_rec(j: &[u8; HEARD_JOB], t: u32, utc: bool) -> [u8; REC as usize] {
     r
 }
 
+/// Heard row `b`'s station callsign.
+pub fn heard_call(b: &[u8; REC as usize]) -> Buf<10> {
+    text(&b[12..22])
+}
+
 /// Heard row `b`, `ago_s` its age ([`Ring::ago`]); the via marked used again.
 pub fn heard_decode(b: &[u8; REC as usize], ago_s: u32) -> Station {
     let f = b[11];

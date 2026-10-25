@@ -616,17 +616,17 @@ fn heard_rows_survive_a_restart() {
     let s = cycle(s);
     assert_eq!(s.heard_stored(), 3);
     let mut got = vec![];
-    s.heard_rows(50, &mut |x| got.push(x));
+    s.heard_rows(50, &mut |x, _| got.push(x));
     assert_eq!(got.len(), 2, "one per station");
     let want = Station { ago_s: AGO_UNKNOWN, ..st(b"VE3KPW-9", b"Moved", 6) };
     assert!(got[0] == want, "every field back, the via marked used");
     assert_eq!((got[1].call.as_bytes(), got[1].times, got[1].ago_s), (&b"VA3RTX"[..], 4, AGO_UNKNOWN));
     s.set_time(1_800_000_600);
     let mut ages = vec![];
-    s.heard_rows(50, &mut |x| ages.push(x.ago_s));
+    s.heard_rows(50, &mut |x, _| ages.push(x.ago_s));
     assert_eq!(ages, [570, 600], "UTC rows dated once GPS time is back");
     let mut one = 0;
-    s.heard_rows(1, &mut |_| one += 1);
+    s.heard_rows(1, &mut |_, _| one += 1);
     assert_eq!(one, 1, "at most max stations");
     assert!(s.request(Op::ClearHeard));
     assert_eq!(cycle(s).heard_stored(), 0, "clearing the heard list erases the rows");
@@ -634,6 +634,26 @@ fn heard_rows_survive_a_restart() {
     assert!(s.heard_row(&st(b"VE3KPW-9", b"Mobile", 1)));
     assert!(s.request(Op::Wipe));
     assert_eq!(cycle(s).heard_stored(), 0, "the reset erases them");
+}
+
+/// APRS-4.5: the heard list keeps only its own fields in RAM for stations restored at power-on; the store fills
+/// the path, course, altitude, comment and FX.25 from each station's stored row when it is shown.
+#[test]
+fn heard_details_come_from_the_rows() {
+    use ferrite_app::radio_data::RadioData;
+    let s = FlashStore::mount(SimFlash::new(), RadioData::new());
+    s.set_time(1_800_000_000);
+    assert!(s.heard_row(&st(b"VE3KPW-9", b"Mobile", 1)));
+    assert!(s.heard_row(&st(b"VA3RTX", b"Home", 4)));
+    s.autosave(30_000, &app());
+    let s = FlashStore::mount(s.into_parts().0, RadioData::new());
+    s.heard_rows(50, &mut |x, seq| s.extra.aprs.restore(&x, seq, 0));
+    assert_eq!(s.extra.aprs.station(1).unwrap().comment.as_bytes(), b"", "RAM alone: no comment");
+    let got = Data::station(&s, 1).unwrap();
+    let want = Station { ago_s: AGO_UNKNOWN, ..st(b"VE3KPW-9", b"Mobile", 1) };
+    let k = |x: &Station| (x.call, x.via, x.course, x.alt_m, x.comment, x.fx25, x.times, x.ago_s, x.pos);
+    assert!(k(&got) == k(&want), "every field from the row: via {:?} course {:?} alt {:?} comment {:?} fx25 {:?} times {} pos {}", got.via.as_bytes(), got.course, got.alt_m, got.comment.as_bytes(), got.fx25, got.times, got.pos.is_some());
+    assert!(Data::station(&s, 0).unwrap().comment.as_bytes() == b"Home", "newest first");
 }
 
 /// APRS-13.1, APRS-13.2, APRS-13.3, APRS-13.5, APRS-46 with the radio's APRS task behind the store: Stop sending

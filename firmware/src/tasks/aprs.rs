@@ -154,8 +154,9 @@ impl Aprs {
             if let Some(n) = fx {
                 extra.aprs.note_fx25(f, n);
             }
-            // APRS-4: the station's row, when its rule says one is due (the front of the heard list).
-            if let Some(s) = extra.aprs.station(0).filter(|_| rx.row) {
+            // APRS-4: the station's row, when its rule says one is due (the front of the heard list); through the
+            // store, so details RAM no longer holds come from its last row (APRS-4.5).
+            if let Some(s) = ferrite_app::data::Data::station(store, 0).filter(|_| rx.row) {
                 store.heard_row(&s);
             }
             // APRS-32: a retry heard again after a power cycle is in the store already (acked all the same).

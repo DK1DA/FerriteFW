@@ -55,8 +55,9 @@ const EMPTY: u8 = 254;
 /// The weather zone's first channel record (WX-1): channels 991-997 as shown, out of the way of your own numbering.
 pub const WX_FIRST: u16 = 990;
 
-/// Writes waiting for the Storage task.
-const QUEUE: usize = 16;
+/// Writes waiting for the Storage task: 8 (decision 287; 16 took 1 KB more for a 1,000-channel overwrite of 22 s
+/// instead of 34 s).
+const QUEUE: usize = 8;
 
 /// What [`FlashStore::mount`] found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -492,7 +493,13 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             Job::MsgState { peer, text, state } => self.msg_state_async(peer, text, state).await.is_ok(),
             Job::Heard(j) => {
                 let mut r = logs::heard_rec(&j, self.now_s(), self.utc.get());
-                self.heard.append(&self.f, &mut r).await.is_ok()
+                match self.heard.append(&self.f, &mut r).await {
+                    Ok(seq) => {
+                        self.extra.row_stored(&logs::heard_call(&r), seq); // APRS-4.5: where its details are now
+                        true
+                    }
+                    Err(_) => false,
+                }
             }
             Job::Read { log, seq } => {
                 let ring = if log { &self.events } else { &self.msgs };
@@ -1154,7 +1161,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
 
     /// APRS-4: the stored heard list at power-on: the newest row of each station, newest first, at most `max`
     /// stations, each with its age (INBOX-6.1: [`AGO_UNKNOWN`] when not real).
-    pub fn heard_rows(&self, max: usize, f: &mut dyn FnMut(Station)) {
+    pub fn heard_rows(&self, max: usize, f: &mut dyn FnMut(Station, u32)) {
         let mut seen = [0u32; 64];
         let mut n = 0;
         let c = self.clock();
@@ -1162,7 +1169,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             if n >= max.min(seen.len()) {
                 break;
             }
-            let Some(b) = self.heard.read(&self.f, i) else { continue };
+            let (Some(b), Some(seq)) = (self.heard.read(&self.f, i), self.heard.seq(i)) else { continue };
             let s = logs::heard_decode(&b, self.heard.ago(&b, c));
             let key = s.call.as_bytes().iter().fold(0x811C_9DC5u32, |h, &x| (h ^ x as u32).wrapping_mul(0x0100_0193));
             if s.call.is_empty() || seen[..n].contains(&key) {
@@ -1170,7 +1177,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             }
             seen[n] = key;
             n += 1;
-            f(s);
+            f(s, seq);
         }
     }
 
@@ -1556,8 +1563,30 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
     fn stations(&self) -> u16 {
         self.extra.stations()
     }
+    /// APRS-4.5: the heard list keeps its stations' details in RAM only for the most recent; the rest come from
+    /// each station's last stored row (a 128-byte read).
     fn station(&self, i: u16) -> Option<Station> {
-        self.extra.station(i)
+        let mut s = self.extra.station(i)?;
+        let Some((seq, missing)) = self.extra.row_of(i) else { return Some(s) };
+        let Some(b) = self.heard.by_seq(&self.f, seq) else { return Some(s) };
+        let r = logs::heard_decode(&b, 0);
+        if r.call != s.call {
+            return Some(s);
+        }
+        use ferrite_app::aprs_live::{DET_COMMENT, DET_COURSE, DET_FX25, DET_VIA};
+        if missing & DET_VIA != 0 {
+            s.via = r.via;
+        }
+        if missing & DET_COURSE != 0 {
+            (s.course, s.alt_m) = (r.course, r.alt_m);
+        }
+        if missing & DET_COMMENT != 0 {
+            s.comment = r.comment;
+        }
+        if missing & DET_FX25 != 0 {
+            s.fx25 = r.fx25;
+        }
+        Some(s)
     }
     fn callsign(&self) -> Option<Buf<10>> {
         self.extra.callsign()

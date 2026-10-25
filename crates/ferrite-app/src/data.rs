@@ -421,6 +421,13 @@ pub trait Data {
     fn station(&self, _i: u16) -> Option<Station> {
         None
     }
+    /// APRS-4.5: station `i`'s stored row to fill what RAM doesn't hold: its seq and the fields to take
+    /// ([`crate::aprs_live::DET_VIA`] and the others). None: RAM has it all.
+    fn row_of(&self, _i: u16) -> Option<(u32, u8)> {
+        None
+    }
+    /// APRS-4.5: the store wrote `call`'s heard row as `seq`.
+    fn row_stored(&self, _call: &Buf<10>, _seq: u32) {}
     fn callsign(&self) -> Option<Buf<10>> {
         None
     }

@@ -1,5 +1,5 @@
 //! The radio's APRS task logic (manual chapter 25, roadmap 5b-5d): AX.25 frames from the AFSK decoder in, frames
-//! for the modulator out. The heard list (APRS-3, APRS-4: RAM only), messages to us acked (APRS-6), ours tried
+//! for the modulator out. The heard list (APRS-3, APRS-4: its details from flash but for the most recent, APRS-4.5), messages to us acked (APRS-6), ours tried
 //! on APRS-13's schedule until an ack, beacons by the beacon mode (APRS-24) and after voice (APRS-27), the
 //! fill-in digipeater (APRS-12, APRS-26: off unless asked), the path (0 5 9 1), APRS-9's 30 s spacing and
 //! APRS-20's wait for the band relay; a message heard again stored once (APRS-32), queries answered (APRS-33,
@@ -54,33 +54,57 @@ const FIX_WAIT_S: u32 = 120;
 /// The destination ("tocall") that names the software: APZ is experimental, FER for Ferrite.
 const TOCALL: [u8; 6] = *b"APZFER";
 
-/// A station heard: what the heard list and the station screen show, about 110 bytes.
+/// A station heard, as the heard list keeps it in RAM (APRS-4.5): what the list and its counts need. The rest
+/// (path, course, altitude, comment, FX.25) is in [`Det`] for the stations heard most recently, else in the
+/// station's last stored row, which the store reads from SPI flash when the station is shown ([`AprsLive::row_of`]).
 #[derive(Clone, Copy)]
 struct Heard {
     call: Buf<10>,
     sym: Sym,
     pos: Option<Pos>,
     at_s: u32,
+    times: u16,
+    /// APRS-4: the minute (seconds / 60, wrapping) its last stored row went this power-on ([`NO_ROW`]: not yet),
+    /// and that row's position and comment, hashed ([`row_key`]: one byte each).
+    row_at: u16,
+    row_key: u16,
+    /// The seq of its last stored row in the store's HEARD ring ([`NO_SEQ`]: none known).
+    seq: u32,
+    /// Heard this power-on ([`HEARD_NOW`]); its time unknown ([`HEARD_UNKNOWN`]: restored from a row whose age
+    /// the store doesn't know, INBOX-6.1); heard direct ([`HEARD_DIRECT`], APRS-33's ?APRSD).
+    flags: u8,
+}
+
+/// A station's details, for the stations heard most recently ([`DET`] of them, newest first; APRS-4.5): those
+/// its frames gave (`known`, a bit per field), the rest from its stored row.
+#[derive(Clone, Copy)]
+struct Det {
+    call: Buf<10>,
+    known: u8,
     /// The digipeater it came through (the last used one), empty when heard direct.
     via: Buf<10>,
     course: Option<(u16, u16)>,
     alt_m: Option<i32>,
-    times: u16,
     comment: Buf<40>,
     /// APRS-44: its last frame came as FX.25: the bytes corrected + 1 (0: plain AX.25).
     fx25: u8,
-    /// APRS-4: the minute (seconds / 60, wrapping) its last stored row went this power-on ([`NO_ROW`]: not yet),
-    /// and the position and comment in it.
-    row_at: u16,
-    row_key: u16,
-    /// Heard this power-on ([`HEARD_NOW`]); its time unknown ([`HEARD_UNKNOWN`]: restored from a row whose age
-    /// the store doesn't know, INBOX-6.1).
-    flags: u8,
 }
 
+/// [`Det::known`]'s bits, and [`AprsLive::row_of`]'s mask of the fields the stored row fills.
+pub const DET_VIA: u8 = 1;
+pub const DET_COURSE: u8 = 2;
+pub const DET_COMMENT: u8 = 4;
+pub const DET_FX25: u8 = 8;
+pub const DET_ALL: u8 = 15;
+
+/// APRS-4.5: the stations whose details stay in RAM (the rest are read from their rows).
+pub const DET: usize = 8;
+
 const NO_ROW: u16 = u16::MAX;
+const NO_SEQ: u32 = u32::MAX;
 const HEARD_NOW: u8 = 1;
 const HEARD_UNKNOWN: u8 = 2;
+const HEARD_DIRECT: u8 = 4;
 
 /// APRS-4: a station with a new position or comment gets a new row at most this often.
 pub const ROW_CHANGE_S: u32 = 10 * 60;
@@ -100,16 +124,21 @@ pub fn row_due(last: Option<u32>, changed: bool, now_s: u32) -> bool {
     }
 }
 
-/// What a row keeps track of, to tell a change (APRS-4): the position and the comment, hashed.
-fn row_key(pos: Option<Pos>, comment: &Buf<40>) -> u16 {
+/// What a row keeps track of, to tell a change (APRS-4): the position (high byte) and the comment (low byte),
+/// each hashed to a byte; the comment's byte is left as it was when the comment isn't known (`None`: not in RAM).
+fn row_key(pos: Option<Pos>, comment: Option<&Buf<40>>, old: u16) -> u16 {
+    let fnv = |b: &mut dyn Iterator<Item = u8>| {
+        let h = b.fold(0x811C_9DC5u32, |h, x| (h ^ x as u32).wrapping_mul(0x0100_0193));
+        (h ^ h >> 8 ^ h >> 16 ^ h >> 24) as u8
+    };
     let p = pos.map_or([0; 8], |p| {
         let mut b = [0; 8];
         b[..4].copy_from_slice(&p.lat.to_le_bytes());
         b[4..].copy_from_slice(&p.lon.to_le_bytes());
         b
     });
-    let h = comment.as_bytes().iter().chain(&p).fold(0x811C_9DC5u32, |h, &x| (h ^ x as u32).wrapping_mul(0x0100_0193));
-    (h ^ h >> 16) as u16
+    let c = comment.map_or(old as u8, |c| fnv(&mut c.as_bytes().iter().copied()));
+    (fnv(&mut p.iter().copied()) as u16) << 8 | c as u16
 }
 
 #[derive(Clone, Copy)]
@@ -254,11 +283,12 @@ pub struct Tick {
     pub changed: bool,
 }
 
-/// The APRS task's state: about 6.8 KB on the radio (8.4 KB on a 64-bit PC, where text lengths are 8 bytes), most
-/// of it the heard list ([`HEARD_MAX`] stations of about 110 bytes, each with its 40-character comment for
-/// APRS-23) and the digipeater's waiting frame.
+/// The APRS task's state: the heard list ([`HEARD_MAX`] stations of about 40 bytes, and the details of the
+/// [`DET`] heard most recently, APRS-4.5), our messages and acks, the digipeater's waiting frame.
 pub struct AprsLive {
     heard: [Cell<Option<Heard>>; HEARD_MAX as usize],
+    /// APRS-4.5: the details of the stations heard most recently, newest first.
+    det: [Cell<Option<Det>>; DET],
     out: [Cell<Option<Out>>; OUT],
     next_id: Cell<u8>,
     acks: [Cell<Option<AckDue>>; ACKS],
@@ -301,6 +331,7 @@ impl AprsLive {
     pub const fn new() -> Self {
         AprsLive {
             heard: [const { Cell::new(None) }; HEARD_MAX as usize],
+            det: [const { Cell::new(None) }; DET],
             out: [const { Cell::new(None) }; OUT],
             next_id: Cell::new(1),
             acks: [const { Cell::new(None) }; ACKS],
@@ -334,11 +365,15 @@ impl AprsLive {
         self.heard.iter().take_while(|h| h.get().is_some()).count() as u16
     }
 
+    /// Station `i` (newest first) as RAM has it: the fields [`AprsLive::row_of`] names are left empty for the
+    /// stored row to fill (the store's [`crate::data::Data::station`] does that).
     pub fn station(&self, i: u16) -> Option<Station> {
         let h = self.heard.get(i as usize)?.get()?;
+        let d = self.det_of(&h.call);
+        let known = d.map_or(0, |d| d.known);
         let mut via = Buf::<24>::new();
-        if !h.via.is_empty() {
-            via.push(h.via.as_bytes());
+        if let Some(d) = d.filter(|d| !d.via.is_empty()) {
+            via.push(d.via.as_bytes());
             via.push(b"*");
         }
         Some(Station {
@@ -347,14 +382,55 @@ impl AprsLive {
             pos: h.pos,
             ago_s: if h.flags & HEARD_UNKNOWN != 0 { AGO_UNKNOWN } else { self.now_s.get().wrapping_sub(h.at_s) },
             via,
-            course: h.course,
-            alt_m: h.alt_m,
+            course: d.filter(|_| known & DET_COURSE != 0).and_then(|d| d.course),
+            alt_m: d.filter(|_| known & DET_COURSE != 0).and_then(|d| d.alt_m),
             times: h.times,
-            comment: h.comment,
+            comment: d.filter(|_| known & DET_COMMENT != 0).map_or(Buf::new(), |d| d.comment),
             msg: Buf::new(),
             msg_min: None,
-            fx25: h.fx25.checked_sub(1),
+            fx25: d.filter(|_| known & DET_FX25 != 0).and_then(|d| d.fx25.checked_sub(1)),
         })
+    }
+
+    /// APRS-4.5: station `i`'s stored row to fill what RAM doesn't hold: its seq in the store's HEARD ring and
+    /// the fields to take from it ([`DET_VIA`] and the others). None when RAM has it all, or no row is known.
+    pub fn row_of(&self, i: u16) -> Option<(u32, u8)> {
+        let h = self.heard.get(i as usize)?.get()?;
+        let missing = DET_ALL & !self.det_of(&h.call).map_or(0, |d| d.known);
+        (missing != 0 && h.seq != NO_SEQ).then_some((h.seq, missing))
+    }
+
+    /// APRS-4.5: the store wrote `call`'s row as `seq`.
+    pub fn row_stored(&self, call: &Buf<10>, seq: u32) {
+        if let Some(c) = self.heard.iter().find(|c| c.get().is_some_and(|o| o.call == *call)) {
+            let mut h = c.get().unwrap();
+            h.seq = seq;
+            c.set(Some(h));
+        }
+    }
+
+    fn det_of(&self, call: &Buf<10>) -> Option<Det> {
+        self.det.iter().find_map(|d| d.get().filter(|d| d.call == *call))
+    }
+
+    /// A station's details to the front of [`AprsLive::det`] (the oldest dropped when full): the fields it
+    /// knows over the ones it had.
+    fn det_put(&self, mut d: Det) {
+        let old = self.det.iter().position(|c| c.get().is_some_and(|o| o.call == d.call));
+        if let Some(o) = old.and_then(|i| self.det[i].get()) {
+            if d.known & DET_COURSE == 0 && o.known & DET_COURSE != 0 {
+                (d.course, d.alt_m) = (o.course, o.alt_m);
+            }
+            if d.known & DET_COMMENT == 0 && o.known & DET_COMMENT != 0 {
+                d.comment = o.comment;
+            }
+            d.known |= o.known & (DET_COURSE | DET_COMMENT);
+        }
+        let end = old.unwrap_or(self.det.len() - 1);
+        for i in (1..=end).rev() {
+            self.det[i].set(self.det[i - 1].get());
+        }
+        self.det[0].set(Some(d));
     }
 
     /// APRS-44: the frame just given to [`AprsLive::receive`] (or heard plain already, a duplicate) came as FX.25
@@ -365,17 +441,17 @@ impl AprsLive {
         f.src.emit(&mut |c| {
             call.push(&[c]);
         });
-        if let Some(c) = self.heard.iter().find(|c| c.get().is_some_and(|o| o.call == call)) {
-            let mut h = c.get().unwrap();
-            h.fx25 = corrected.saturating_add(1);
-            c.set(Some(h));
+        if let Some(c) = self.det.iter().find(|c| c.get().is_some_and(|o| o.call == call)) {
+            let mut d = c.get().unwrap();
+            (d.fx25, d.known) = (corrected.saturating_add(1), d.known | DET_FX25);
+            c.set(Some(d));
         }
     }
 
     /// APRS-4: a station from the stored rows at power-on (newest first, so each goes after the ones before),
     /// with its age then (`AGO_UNKNOWN`: unknown); `now_s` is this clock's now. A station already listed (heard
     /// since, or given again once GPS time is known) only takes a known age in place of an unknown one.
-    pub fn restore(&self, s: &Station, now_s: u32) {
+    pub fn restore(&self, s: &Station, seq: u32, now_s: u32) {
         let known = s.ago_s != AGO_UNKNOWN;
         let at_s = now_s.wrapping_sub(if known { s.ago_s } else { 0 });
         if let Some(c) = self.heard.iter().find(|c| c.get().is_some_and(|o| o.call == s.call)) {
@@ -387,26 +463,23 @@ impl AprsLive {
             return;
         }
         let Some(c) = self.heard.iter().find(|c| c.get().is_none()) else { return };
-        let v = s.via.as_bytes();
+        let direct = if s.via.is_empty() { HEARD_DIRECT } else { 0 };
         c.set(Some(Heard {
             call: s.call,
             sym: s.sym,
             pos: s.pos,
             at_s,
-            via: Buf::from(v.strip_suffix(b"*").unwrap_or(v)),
-            course: s.course,
-            alt_m: s.alt_m,
             times: s.times,
-            comment: s.comment,
-            fx25: s.fx25.map_or(0, |n| n.saturating_add(1)),
             row_at: NO_ROW,
-            row_key: row_key(s.pos, &s.comment),
-            flags: if known { 0 } else { HEARD_UNKNOWN },
+            row_key: row_key(s.pos, Some(&s.comment), 0),
+            seq,
+            flags: direct | if known { 0 } else { HEARD_UNKNOWN },
         }));
     }
 
     pub fn clear_heard(&self) {
         self.heard.iter().for_each(|h| h.set(None));
+        self.det.iter().for_each(|d| d.set(None));
     }
 
     /// The reset (BOOT-14): the heard list, our messages being tried, everything waiting to go and the beacon
@@ -425,21 +498,20 @@ impl AprsLive {
         self.digi.set(None);
     }
 
-    /// A station heard now: to the front, its old entry (if any) gone, the oldest dropped when full. True when
-    /// it is due a stored row (APRS-4, [`row_due`]).
-    fn hear(&self, mut h: Heard) -> bool {
+    /// A station heard now (`h`, with the details its frame gave in `d`): to the front, its old entry (if any)
+    /// gone, the oldest dropped when full. True when it is due a stored row (APRS-4, [`row_due`]).
+    fn hear(&self, mut h: Heard, d: Det) -> bool {
         let old = self.heard.iter().position(|c| c.get().is_some_and(|o| o.call == h.call));
         if let Some(o) = old.and_then(|i| self.heard[i].get()) {
             h.times = o.times.saturating_add(1);
             if h.pos.is_none() {
-                (h.pos, h.course, h.alt_m, h.sym) = (o.pos, o.course, o.alt_m, o.sym);
+                (h.pos, h.sym) = (o.pos, o.sym);
             }
-            if h.comment.is_empty() {
-                h.comment = o.comment;
-            }
-            (h.row_at, h.row_key) = (o.row_at, o.row_key);
+            (h.row_at, h.row_key, h.seq) = (o.row_at, o.row_key, o.seq);
         }
-        let key = row_key(h.pos, &h.comment);
+        self.det_put(d);
+        let comment = self.det_of(&h.call).filter(|d| d.known & DET_COMMENT != 0).map(|d| d.comment);
+        let key = row_key(h.pos, comment.as_ref(), h.row_key);
         let now_min = (h.at_s / 60) as u16;
         // Minutes since its last row, kept in 16 bits (wrapping every 45 days; a row at minute 0xFFFF reads as none:
         // one row more).
@@ -548,7 +620,9 @@ impl AprsLive {
                 via.push(&[c]);
             });
         }
-        let mut h = Heard { call, sym: Sym::Ht, pos: None, at_s: now_s, via, course: None, alt_m: None, times: 1, comment: Buf::new(), fx25: 0, row_at: NO_ROW, row_key: 0, flags: HEARD_NOW };
+        let direct = if via.is_empty() { HEARD_DIRECT } else { 0 };
+        let mut h = Heard { call, sym: Sym::Ht, pos: None, at_s: now_s, times: 1, row_at: NO_ROW, row_key: 0, seq: NO_SEQ, flags: HEARD_NOW | direct };
+        let mut d = Det { call, known: DET_VIA | DET_FX25, via, course: None, alt_m: None, comment: Buf::new(), fx25: 0 };
         let mut dest = [0u8; 6];
         let dc = f.dest.call();
         dest[..dc.len()].copy_from_slice(dc);
@@ -556,36 +630,41 @@ impl AprsLive {
             Ok(Packet::Position { pos, comment, .. } | Packet::Object { pos, comment, .. } | Packet::Item { pos, comment, .. }) => {
                 h.pos = Some(Pos { lat: pos.lat.saturating_mul(10), lon: pos.lon.saturating_mul(10) });
                 h.sym = sym(pos.table, pos.code);
-                h.course = pos.course.map(|c| (c, pos.speed.map_or(0, |k| (k as u32 * 1852 / 1000) as u16)));
-                h.alt_m = pos.altitude.map(|ft| ft * 3048 / 10_000);
+                d.course = pos.course.map(|c| (c, pos.speed.map_or(0, |k| (k as u32 * 1852 / 1000) as u16)));
+                d.alt_m = pos.altitude.map(|ft| ft * 3048 / 10_000);
+                d.known |= DET_COURSE;
                 // APRS-23: a weather report's fields stay at the start of the comment for the station screen.
                 for b in comment.bytes().take(40) {
-                    h.comment.push(&[b]);
+                    d.comment.push(&[b]);
                 }
-                rx.row = self.hear(h);
+                if !d.comment.is_empty() {
+                    d.known |= DET_COMMENT;
+                }
+                rx.row = self.hear(h, d);
                 rx.changed = true;
             }
             Ok(Packet::Status { text, .. }) => {
-                h.comment = Buf::from(&text[..text.len().min(40)]);
-                rx.row = self.hear(h);
+                d.comment = Buf::from(&text[..text.len().min(40)]);
+                d.known |= if d.comment.is_empty() { 0 } else { DET_COMMENT };
+                rx.row = self.hear(h, d);
                 rx.changed = true;
             }
             Ok(Packet::Message(m)) => {
-                rx.row = self.hear(h);
+                rx.row = self.hear(h, d);
                 rx.changed = true;
                 if my.is_some_and(|me| Address::from_text(m.addressee).is_some_and(|a| a.same(&me))) {
                     self.to_us(&call, m, &f, dupe, now_s, &mut rx);
                 }
             }
             Ok(Packet::Other { kind: b'?', data }) => {
-                rx.row = self.hear(h);
+                rx.row = self.hear(h, d);
                 rx.changed = true;
                 if my.is_some() && !dupe {
                     self.general_query(data, &f, now_s);
                 }
             }
             Ok(_) | Err(_) => {
-                rx.row = self.hear(h);
+                rx.row = self.hear(h, d);
                 rx.changed = true;
             }
         }
@@ -667,7 +746,7 @@ impl AprsLive {
             Answer::Status
         } else if is(b"?APRSD") {
             b.push(b"Directs=");
-            for h in self.heard.iter().filter_map(|h| h.get()).filter(|h| h.via.is_empty()) {
+            for h in self.heard.iter().filter_map(|h| h.get()).filter(|h| h.flags & HEARD_DIRECT != 0) {
                 if b.len() + 1 + h.call.len() > 67 {
                     break;
                 }
@@ -1157,6 +1236,31 @@ mod tests {
 
     fn fix() -> Fix {
         Fix { pos: Pos { lat: 454_252_000, lon: -756_901_000 }, three_d: false, alt_m: 0, speed_kmh: 0, heading: 0, hdop_x10: 10, used: 8, age_s: 0, utc_s: 0 }
+    }
+
+    /// APRS-4.5: the details (path, course, altitude, comment, FX.25) stay in RAM for the stations heard most
+    /// recently; an older station's come from its stored row ([`AprsLive::row_of`] names the seq and fields), and
+    /// one with no row yet keeps what RAM has (its list fields).
+    #[test]
+    fn details_in_ram_for_the_recent_only() {
+        let a = AprsLive::new();
+        for i in 0..DET as u32 + 2 {
+            let call = std::format!("VE3A{}", (b'A' + i as u8) as char);
+            let (f, n) = frame(call.as_bytes(), b"APRS", &[b"WIDE1-1*"], b"!4525.51N/07554.20W>Mobile");
+            assert!(a.receive(&f[..n], i, b"VE3XYZ", &AprsCfg::DEFAULT).row, "first heard: a row due");
+            a.row_stored(&Buf::from(call.as_bytes()), 100 + i);
+        }
+        let old = DET as u16 + 1;
+        assert_eq!(a.row_of(0), None, "the newest: all in RAM");
+        assert_eq!(a.row_of(old), Some((100, DET_ALL)), "the oldest: from its row");
+        let s = a.station(old).unwrap();
+        assert!(s.pos.is_some() && s.sym == Sym::Car && s.times == 1, "the list's fields stay");
+        assert_eq!(s.comment.as_bytes(), b"", "the comment comes from the row");
+        // Heard again with a status: its comment is known again, its position kept, the rest still from the row.
+        let (f, n) = frame(b"VE3AA", b"APRS", &[], b">Parked");
+        a.receive(&f[..n], 60, b"VE3XYZ", &AprsCfg::DEFAULT);
+        assert_eq!(a.station(0).unwrap().comment.as_bytes(), b"Parked");
+        assert_eq!(a.row_of(0), Some((100, DET_COURSE)), "course and altitude from its row");
     }
 
     #[test]
@@ -1935,12 +2039,15 @@ mod tests {
             msg_min: None,
             fx25: None,
         };
-        a.restore(&old(b"VE3JLH", AGO_UNKNOWN), 50);
-        a.restore(&old(b"VA3RTX", AGO_UNKNOWN), 50); // heard since: left as it is
+        a.restore(&old(b"VE3JLH", AGO_UNKNOWN), 17, 50);
+        a.restore(&old(b"VA3RTX", AGO_UNKNOWN), 18, 50); // heard since: left as it is
         let s = a.station(1).unwrap();
-        assert_eq!((s.call.as_bytes(), s.ago_s, s.times, s.via.as_bytes(), s.alt_m), (&b"VE3JLH"[..], AGO_UNKNOWN, 7, &b"VE3RSB-1*"[..], Some(70)));
+        // APRS-4.5: RAM keeps the list's fields; the path, altitude and comment come from row 17 (the store reads it)
+        assert_eq!((s.call.as_bytes(), s.ago_s, s.times, s.via.as_bytes(), s.alt_m), (&b"VE3JLH"[..], AGO_UNKNOWN, 7, &b""[..], None));
+        assert_eq!(a.row_of(1), Some((17, DET_ALL)));
+        assert_eq!(a.row_of(0), None, "heard this power-on: its details in RAM");
         assert_eq!((a.stations(), a.station(0).unwrap().times), (2, 1));
-        a.restore(&old(b"VE3JLH", 4000), 50); // GPS time: its age is known now
+        a.restore(&old(b"VE3JLH", 4000), 17, 50); // GPS time: its age is known now
         assert_eq!(a.station(1).unwrap().ago_s, 4000);
         let (f, n) = frame(b"VE3JLH", b"APRS", &[], b">Back");
         assert!(a.receive(&f[..n], 70, b"VE3XYZ", &AprsCfg::DEFAULT).row, "its first row this power-on");
