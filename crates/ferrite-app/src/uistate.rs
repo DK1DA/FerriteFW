@@ -396,12 +396,16 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
     }
     // LINK-13.4: receive audio's blocks made, dropped in the radio's queue, and the times one waited for room in the
     // cable's ring (decision 290; once any).
-    if cx.dev.audio[0] != 0 {
+    // TERM-32.1, LINK-13.8 (decision 294): PA2's counts at a rail, the last second's peak and the stream's gain.
+    if cx.dev.audio[0] != 0 || cx.dev.audio[3] != 0 {
         if let Some(l) = d.ln() {
             l.push(b"audio");
             kn(l, "made", cx.dev.audio[0]);
             kn(l, "dropped", cx.dev.audio[1]);
             kn(l, "waits", cx.dev.audio[2]);
+            kn(l, "clips", cx.dev.audio[3]);
+            kn(l, "peak", cx.dev.audio[4]);
+            kn(l, "gain", cx.dev.audio[5]);
         }
     }
     if let Some(l) = d.ln() {

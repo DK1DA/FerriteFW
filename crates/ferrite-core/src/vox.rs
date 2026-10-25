@@ -104,6 +104,8 @@ pub struct MicCapture {
     pub us: u32,
     /// The first readings, 12 bits shifted down to 8.
     pub first: [u8; 16],
+    /// TERM-32.1 (decision 294): readings at a rail ([`crate::rxlevel::at_rail`]): clipped.
+    pub rails: u16,
 }
 
 #[cfg(feature = "bench")]
@@ -127,7 +129,8 @@ impl MicCapture {
         for (f, &v) in first.iter_mut().zip(s) {
             *f = (v >> 4) as u8;
         }
-        MicCapture { min: if s.is_empty() { 0 } else { min }, max, mean, crossings, us, first }
+        let rails = s.iter().filter(|&&v| crate::rxlevel::at_rail(v)).count() as u16;
+        MicCapture { min: if s.is_empty() { 0 } else { min }, max, mean, crossings, us, first, rails }
     }
 
     /// The frequency the crossings would mean for raw audio (two per cycle), Hz.

@@ -374,7 +374,7 @@ impl Job {
             (Kind::Mic(pa2), DebugAns::Mic(c)) => {
                 match self.line {
                     0 => put!(out, "  {}: {} readings in {} us: min {}, max {}, mean {} (12-bit)", if pa2 { "af PA2" } else { "mic PA0" }, ferrite_core::vox::MIC_SAMPLES, c.us, c.min, c.max, c.mean),
-                    1 => put!(out, "  {} crossings of the mean: {} Hz if this is raw audio (a level or envelope barely crosses)", c.crossings, c.hz()),
+                    1 => put!(out, "  {} crossings of the mean: {} Hz if this is raw audio (a level or envelope barely crosses); {} at a rail", c.crossings, c.hz(), c.rails),
                     _ => {
                         out.push(b"  first 16 (8-bit):");
                         for v in c.first {

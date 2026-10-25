@@ -71,6 +71,13 @@ pub static PAGES: Channel<M, Page, 2> = Channel::new();
 pub static AUDIO_MADE: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_DROPS: AtomicU32 = AtomicU32::new(0);
 pub static AUDIO_WAITS: AtomicU32 = AtomicU32::new(0);
+/// TERM-32.1 (decision 294): raw PA2 counts at a rail since power-on, the loudest sample of the last second (after
+/// the DC is taken off, full scale 32767), and the stream's gain (Q8, LINK-13.8). The readback's `audio` line.
+pub static AUDIO_CLIPS: AtomicU32 = AtomicU32::new(0);
+pub static AUDIO_PEAK: AtomicU32 = AtomicU32::new(0);
+pub static AUDIO_GAIN: AtomicU32 = AtomicU32::new(ferrite_core::rxlevel::UNITY as u32);
+/// The peak's window, in 2 ms capture halves: one second.
+const PEAK_HALVES: u32 = 500;
 /// Decision 290: blocks waiting for room in `TERM_OUT`, at most this many (192 ms), each with what it was heard from.
 const AUDIO_QUEUE: usize = 6;
 /// A keep-alive this many blocks apart while nothing is heard (about 1 s, LINK-13.4).
@@ -162,6 +169,9 @@ pub async fn task() {
     let mut listen = false;
     let mut pack = ferrite_core::rxaudio::Packer::new();
     let mut sender = AudioOut::new();
+    // LINK-13.8: the stream's gain, ahead of the coder only (the decoders take the samples as they are).
+    let mut agc = ferrite_core::rxlevel::Agc::new();
+    let mut peak = 0i32;
     let mut halves = 0u32;
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
@@ -178,6 +188,7 @@ pub async fn task() {
                         if on && !listen {
                             pack = ferrite_core::rxaudio::Packer::new();
                             sender = AudioOut::new();
+                            agc = ferrite_core::rxlevel::Agc::new();
                         }
                         listen = on;
                     }
@@ -222,16 +233,32 @@ pub async fn task() {
                 let base = half as usize * BLOCK_IN;
                 let mut out = [0i16; BLOCK_OUT];
                 let mut n = 0;
+                let mut clips = 0;
                 for s in &audio::ADC_BUF[base..base + BLOCK_IN] {
-                    dec.push(s.load(Relaxed), |x| {
+                    let s = s.load(Relaxed);
+                    clips += ferrite_core::rxlevel::at_rail(s) as u32; // TERM-32.1
+                    dec.push(s, |x| {
                         if n < BLOCK_OUT {
                             out[n] = x;
                             n += 1;
                         }
                     });
                 }
+                if clips != 0 {
+                    AUDIO_CLIPS.fetch_add(clips, Relaxed);
+                }
+                peak = out[..n].iter().fold(peak, |p, &x| p.max((x as i32).abs()));
+                if halves.is_multiple_of(PEAK_HALVES) {
+                    AUDIO_PEAK.store(peak as u32, Relaxed);
+                    peak = 0;
+                }
                 if listen {
-                    for &x in &out[..n] {
+                    // LINK-13.8: scaled for the PC only, held while nothing is heard
+                    let open = ferrite_core::rxaudio::unpack_source(crate::chan::AUDIO_SRC.load(Relaxed)).1 & ferrite_core::rxaudio::SQ_OPEN != 0;
+                    let mut y = out;
+                    agc.chunk(&mut y[..n], open);
+                    AUDIO_GAIN.store(agc.gain() as u32, Relaxed);
+                    for &x in &y[..n] {
                         pack.push(x, |b| {
                             AUDIO_MADE.fetch_add(1, Relaxed);
                             sender.block(b);

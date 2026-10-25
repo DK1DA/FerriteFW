@@ -840,8 +840,9 @@ pub struct Device {
     /// SELF-9.1: the share of the last 10 s the MCU was awake, %; None until the first 10 s.
     pub cpu_pct: Option<u8>,
     /// LINK-13.4: receive audio's blocks since power-on: made by the DSP task, dropped there (the queue full), and
-    /// dropped at the cable (no room to send); the readback's `audio` line, for the bench.
-    pub audio: [u32; 3],
+    /// the times one waited for room at the cable; then PA2's counts at a rail since power-on, the last second's
+    /// peak (0-32767) and the stream's gain (Q8) (TERM-32.1, LINK-13.8): the readback's `audio` line, for the bench.
+    pub audio: [u32; 6],
     /// A speaker mic is in the side connector (SND-12, [`crate::acc`]): the Status page shows it.
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).

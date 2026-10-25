@@ -43,6 +43,7 @@ pub mod path;
 pub mod reader;
 pub mod restore;
 pub mod rxaudio;
+pub mod rxlevel;
 pub mod rxsleep;
 pub mod same;
 pub mod same_rx;

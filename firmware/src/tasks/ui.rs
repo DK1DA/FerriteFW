@@ -569,8 +569,8 @@ pub async fn task() {
             }
             // Decision 290: the DSP task frames and sends the audio itself; here only its counters, for the readback.
             {
-                use crate::tasks::dsp::{AUDIO_DROPS, AUDIO_MADE, AUDIO_WAITS};
-                dev.audio = [AUDIO_MADE.load(Relaxed), AUDIO_DROPS.load(Relaxed), AUDIO_WAITS.load(Relaxed)];
+                use crate::tasks::dsp::{AUDIO_CLIPS, AUDIO_DROPS, AUDIO_GAIN, AUDIO_MADE, AUDIO_PEAK, AUDIO_WAITS};
+                dev.audio = [AUDIO_MADE.load(Relaxed), AUDIO_DROPS.load(Relaxed), AUDIO_WAITS.load(Relaxed), AUDIO_CLIPS.load(Relaxed), AUDIO_PEAK.load(Relaxed), AUDIO_GAIN.load(Relaxed)];
             }
             if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)
