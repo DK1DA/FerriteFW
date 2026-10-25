@@ -378,6 +378,10 @@ impl Sample {
 }
 
 impl ChannelStore for Sample {
+    fn queue_write(&self, w: ChanWrite) -> bool {
+        self.apply(w); // at once, as its writes always are
+        true
+    }
     fn recent(&self, r: u16) -> Option<u16> {
         self.recent.get(r)
     }

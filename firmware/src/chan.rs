@@ -129,10 +129,17 @@ pub static BT_IN: Ring<'static> = Ring::new(&BT_IN_BUF);
 pub static BT_OUT: Ring<'static> = Ring::new(&BT_OUT_BUF);
 pub static BT_ON: AtomicBool = AtomicBool::new(false);
 pub static BT_LINK_ON: AtomicBool = AtomicBool::new(false);
-/// USART1's rate (LINK-25): the module's resting 9600 ([`ferrite_core::link::BT_BAUD`]). A bench build's `bt baud N`
-/// changes it for this power-on (the MCU's side only: nothing is ever sent to the module to change its rate); the
-/// Link task restarts USART1 when it differs from the running one.
+/// USART1's rate (LINK-25): the module's resting 9600 ([`ferrite_core::link::BT_BAUD`]), back to it whenever the
+/// module is powered; 115200 once Bluetooth's `BAUD` has agreed it and a `HELLO` arrived at it (LINK-15.1: the host
+/// unlocks the module, the MCU never writes to it); the other rate after a framing error (LINK-25.2). A bench
+/// build's `bt baud N` sets it too. The Link task restarts USART1 when it differs from the running one.
 pub static BT_RATE: AtomicU32 = AtomicU32::new(ferrite_core::link::BT_BAUD);
+/// LINK-15.1: a rate agreed by Bluetooth's `BAUD`, to switch to once the answer has gone; Bluetooth's `HELLO`s.
+pub static BT_LINK_BAUD: Signal<M, u32> = Signal::new();
+pub static BT_HELLOS: AtomicU16 = AtomicU16::new(0);
+/// LINK-36.1: the bursts and gaps at 115200 ([`ferrite_core::link::BtPace::FAST`] packed); `bt pace B G` sets
+/// them while USART1 runs fast.
+pub static BT_PACE_FAST: AtomicU32 = AtomicU32::new(ferrite_core::link::BtPace::FAST.pack());
 /// LINK-36's Bluetooth pacing ([`ferrite_core::link::BtPace`] packed): bursts and gaps for the BT513. A bench
 /// build's `bt pace B G` changes it in RAM; the Link task reads it every turn.
 pub static BT_PACE: AtomicU32 = AtomicU32::new(ferrite_core::link::BtPace::DEFAULT.pack());

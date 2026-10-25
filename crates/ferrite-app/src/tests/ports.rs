@@ -169,16 +169,22 @@ fn kiss_beside_the_terminal() {
 }
 
 /// LINK-29: a Bluetooth connection quiet for BT_IDLE_MS is over: its terminal closes, its PIN ends, the cable has
-/// the terminal again, and turning Bluetooth off ends it at once; LINK-15: `BAUD` never applies to Bluetooth, whose
-/// rate is the module's 9600 (LINK-25).
+/// the terminal again, and turning Bluetooth off ends it at once; LINK-15.1: Bluetooth's `BAUD` takes only the
+/// module's two rates, 9600 (LINK-25) and the unlocked 115200, and never moves the cable.
 #[test]
 fn bluetooth_goes_quiet() {
     let mut r = Rig::new();
     assert_eq!(crate::ports::BT_BAUD, 9_600, "the module's resting rate (LINK-25)");
-    for rate in ferrite_core::link::RATES {
-        assert_eq!(r.ask(Port::Bt, msg::BAUD, &rate.to_le_bytes()), Status::Refused as u8, "{rate}: never on Bluetooth");
+    for rate in ferrite_core::link::RATES.into_iter().filter(|&x| x != 115_200) {
+        assert_eq!(r.ask(Port::Bt, msg::BAUD, &rate.to_le_bytes()), Status::Refused as u8, "{rate}: not a module rate");
     }
-    assert_eq!(r.p.take_baud(), None, "Bluetooth's rate never changes");
+    assert_eq!(r.ask(Port::Bt, msg::BAUD, &115_200u32.to_le_bytes()), 0, "the unlocked rate");
+    assert_eq!((r.p.take_bt_baud(), r.p.take_baud()), (Some(115_200), None), "Bluetooth's alone");
+    assert_eq!(r.ask(Port::Bt, msg::BAUD, &9_600u32.to_le_bytes()), 0, "back to the resting rate");
+    assert_eq!(r.p.take_bt_baud(), Some(9_600));
+    let h = r.p.bt_hellos();
+    assert_eq!(r.ask(Port::Bt, msg::HELLO, &[2, 0, 0, 0, 0, 0, 0, 0, 0]), 0);
+    assert_eq!(r.p.bt_hellos(), h.wrapping_add(1), "the proof a new rate holds");
     (r.app.set.pin, r.app.set.pin_len, r.app.set.pin_mode) = (2468, 4, 1);
     assert_eq!(r.ask(Port::Bt, msg::AUTH, b"2468"), 0);
     assert_eq!(r.ask(Port::Bt, msg::INFO, &[]), 0, "past the PIN");

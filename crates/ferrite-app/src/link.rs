@@ -80,6 +80,8 @@ pub struct Session {
     now: u32,
     /// A `WRITE_MANY` being applied (LINK-41).
     many: Option<Many>,
+    /// A `STREAM` under way (LINK-50).
+    stream: Option<Stream>,
     /// Events pushed to this session (LINK-46).
     sub: sub::Sub,
 }
@@ -87,6 +89,16 @@ pub struct Session {
 /// A `WRITE_MANY` under way (LINK-41): its records wait in `asm` (what's after the `what` byte), applied one a
 /// pass, as each may queue the one channel write the App holds; its answer goes when the last is applied or one
 /// is refused. Its frame's seq, `what`, the records' length, the next one's offset, and how many are done.
+/// A `STREAM` under way (LINK-50): the inner request's type and its payload for the next frame (where to go on
+/// from), and the `STREAM` request's seq.
+#[derive(Clone, Copy, Debug)]
+struct Stream {
+    ty: u8,
+    /// The next frame's seq: the request's, then one more each frame, so a frame lost on the way shows as a gap.
+    seq: u8,
+    p: [u8; 5],
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Many {
     seq: u8,
@@ -135,6 +147,7 @@ impl Session {
             run: Run::Off,
             now: 0,
             many: None,
+            stream: None,
             sub: sub::Sub::new(),
         }
     }
@@ -147,7 +160,7 @@ impl Session {
 
     /// The session starts over for a new connection on `trusted`'s port (the cable, or Bluetooth: [`crate::ports`],
     /// LINK-29): a frame half received, a PIN given and a running command go; so does a remote transmission it keyed
-    /// (LINK-20). `max_baud` is the port's (Bluetooth: 0, `BAUD` never applies: LINK-15).
+    /// (LINK-20). `max_baud` is the port's (Bluetooth: 0, its `BAUD` takes the module's two rates: LINK-15.1).
     pub fn set_port(&mut self, trusted: bool, max_baud: u32) {
         (self.rn, self.overflow, self.have) = (0, false, false);
         (self.trusted, self.pin_ok) = (trusted, false);
@@ -249,8 +262,23 @@ impl Session {
         }
         // `KEY` never waits for the store, nor for room for the largest answer: its answers are a few bytes, and on
         // the cable they wait in the send ring while keyed (TX-43), so keepalives must still be handled then.
+        if self.have {
+            self.stream = None; // LINK-50: any new request ends a stream
+        } else if self.stream.is_some() {
+            // as many frames as the port has room for (the cable's ring holds four), so a pass isn't a frame
+            while self.stream.is_some() && out.room() >= MAX_WIRE && !store.data().busy() {
+                self.last = now;
+                self.stream_frame(app, store, dev, live, out);
+            }
+            return;
+        }
         let key = self.many.is_none() && self.rn >= 2 && self.rx[0] >= 2 && self.rx[1] == msg::KEY;
-        if !self.have || !key && (out.room() < MAX_WIRE || app.write_pending() || store.data().busy()) {
+        // LINK-41.1: a `WRITE_MANY` waits only for room in the App's and the store's queues, so a frame's records
+        // reach the store together (and same-sector ones merge, decision 227); everything else waits for the store
+        // to be idle, so what it reads includes every write before it.
+        let many = self.many.is_some() || self.rn >= 2 && self.rx[0] >= 2 && self.rx[1] == msg::WRITE_MANY;
+        let waits = if many { !write_room(app, store, self.many.map_or(what::CHANNEL, |m| m.what)) } else { app.write_pending() || store.data().busy() };
+        if !self.have || !key && (out.room() < MAX_WIRE || waits) {
             return;
         }
         if self.many.is_some() {
@@ -270,6 +298,24 @@ impl Session {
                 let pl = f.payload.len();
                 p[..pl].copy_from_slice(f.payload);
                 (self.last, self.seen) = (now, true);
+                if ty == msg::STREAM {
+                    // LINK-50: its first frame now; the rest as the port has room (the top of `poll`)
+                    let inner = p[..pl].first().copied().unwrap_or(0);
+                    if !matches!(inner, msg::READ_MANY | msg::HEARD | msg::MSGS | msg::LOG_READ | msg::UI) || pl > 6 {
+                        ans[0] = Status::BadArg as u8;
+                        self.send(ty, seq, &ans[..1], out);
+                        return;
+                    }
+                    let mut sp = [0u8; 5];
+                    sp[..pl - 1].copy_from_slice(&p[1..pl]);
+                    if inner == msg::LOG_READ && pl < 5 {
+                        sp[..4].copy_from_slice(&u32::MAX.to_le_bytes()); // from the newest
+                    }
+                    (self.have, self.rn) = (false, 0);
+                    self.stream = Some(Stream { ty: inner, seq, p: sp });
+                    self.stream_frame(app, store, dev, live, out);
+                    return;
+                }
                 let len = self.handle(app, store, dev, live, now, ty, &p[..pl], &mut ans);
                 if ty == msg::STOCK_RESTORE && ans[0] == Status::Ok as u8 {
                     self.restore = Some(seq); // the caller answers (BACKUP-7)
@@ -281,7 +327,10 @@ impl Session {
                         m.seq = seq;
                         match self.many_step(app, store, &mut ans) {
                             Some(len) => (ty, seq, len),
-                            None => return, // more records: the next passes (LINK-41)
+                            None => {
+                                self.many_poll(app, store, now, out); // more records: as many as have room (LINK-41.1)
+                                return;
+                            }
                         }
                     }
                     None => (ty, seq, len),
@@ -293,6 +342,12 @@ impl Session {
 
     /// The answer out, and the port takes the next frame.
     fn send(&mut self, ty: u8, seq: u8, ans: &[u8], out: &mut impl Sink) {
+        Self::frame_out(ty, seq, ans, out);
+        (self.have, self.rn) = (false, 0);
+    }
+
+    /// A frame out, leaving what the port is receiving alone (a stream's frames, LINK-50).
+    fn frame_out(ty: u8, seq: u8, ans: &[u8], out: &mut impl Sink) {
         let mut w = [0u8; MAX_WIRE];
         if let Some(k) = wire::build(ty | wire::ANSWER, seq, ans, &mut w) {
             // Only a `KEY` answer can find too little room (the send ring full of them while keyed, TX-43): it is
@@ -301,7 +356,63 @@ impl Session {
                 out.put(&w[..k]);
             }
         }
-        (self.have, self.rn) = (false, 0);
+    }
+
+    /// LINK-50: the stream's next answer, framed `STREAM_MORE` while more follow, `STREAM` for the last.
+    fn stream_frame<S: ChannelStore>(&mut self, app: &mut App, st: &S, dev: &Device, live: &LiveAll, out: &mut impl Sink) {
+        let Some(mut s) = self.stream.take() else { return };
+        let mut ans = [0u8; MAX_PAYLOAD];
+        let mut o = Out { a: &mut ans, n: 1 };
+        let (status, more) = match s.ty {
+            msg::READ_MANY => {
+                let st_ = read_many(st, &s.p, &mut o);
+                let (first, end) = (le16(&s.p[1..]) as u32, le16(&s.p[1..]) as u32 + le16(&s.p[3..]) as u32);
+                let n = indexes(st, s.p[0]).unwrap_or(0) as u32;
+                let next = if st_ == Status::Ok { le16(&o.a[1..]) as u32 } else { first };
+                s.p[1..3].copy_from_slice(&(next as u16).to_le_bytes());
+                s.p[3..5].copy_from_slice(&(end.saturating_sub(next).min(u16::MAX as u32) as u16).to_le_bytes());
+                (st_, st_ == Status::Ok && next > first && next < end.min(n))
+            }
+            msg::HEARD => {
+                let (st_, next) = sub::heard_at(st, &s.p[..1], &mut o);
+                if let Some(i) = next {
+                    s.p[0] = i as u8;
+                }
+                (st_, next.is_some())
+            }
+            msg::MSGS => {
+                let (st_, next) = sub::msgs_at(st, &s.p[..2], &mut o);
+                if let Some(i) = next {
+                    s.p[..2].copy_from_slice(&i.to_le_bytes());
+                }
+                (st_, next.is_some())
+            }
+            msg::LOG_READ => {
+                let (st_, next) = log_read_at(st, &s.p, &mut o);
+                if let Some(b) = next {
+                    s.p[..4].copy_from_slice(&b.to_le_bytes());
+                }
+                (st_, next.is_some())
+            }
+            _ => {
+                // UI: its first frame starts the readback, the rest go on from it (LINK-19's pages)
+                if s.p[4] == 0 {
+                    s.p[4] = 1;
+                    self.run = Run::List([List::Ui, List::UiKeys, List::UiStatus][s.p[0].min(2) as usize], 0);
+                }
+                self.more(app, st, dev, live, &mut o);
+                (Status::Ok, o.a[1] == 1)
+            }
+        };
+        o.a[0] = status as u8;
+        if status != Status::Ok {
+            o.n = 1;
+        }
+        let n = o.n;
+        let more = more && status == Status::Ok;
+        Self::frame_out(if more { msg::STREAM_MORE } else { msg::STREAM }, s.seq, &ans[..n], out);
+        s.seq = s.seq.wrapping_add(1);
+        self.stream = more.then_some(s);
     }
 
     /// A `WRITE_MANY`'s next record (LINK-41), and its answer once the last is applied or one is refused.
@@ -309,8 +420,11 @@ impl Session {
         self.last = now;
         let seq = self.many.map_or(0, |m| m.seq);
         let mut ans = [0u8; MAX_PAYLOAD];
-        if let Some(len) = self.many_step(app, store, &mut ans) {
-            self.send(msg::WRITE_MANY, seq, &ans[..len], out);
+        while write_room(app, store, self.many.map_or(0, |m| m.what)) {
+            if let Some(len) = self.many_step(app, store, &mut ans) {
+                self.send(msg::WRITE_MANY, seq, &ans[..len], out);
+                return;
+            }
         }
     }
 
@@ -350,7 +464,9 @@ impl Session {
             msg::BAUD => match p.get(..4) {
                 Some(b) => {
                     let r = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-                    if wire::RATES.contains(&r) && r <= self.max_baud {
+                    // LINK-15.1: on Bluetooth, the module's two rates (the host unlocks the module after this answer)
+                    let ok = if self.trusted { wire::RATES.contains(&r) && r <= self.max_baud } else { wire::BT_RATES.contains(&r) };
+                    if ok {
                         self.baud = Some(r);
                         Status::Ok
                     } else {
@@ -493,6 +609,7 @@ impl Session {
         o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW]); // LINK-35.2
         Status::Ok
     }
 
@@ -1075,8 +1192,13 @@ fn read_many<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
 
 /// `LOG_READ` (LINK-42): the event log (INBOX-6) newest first, from below the sequence number `before`.
 fn log_read<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    log_read_at(st, p, o).0
+}
+
+/// [`log_read`], and for a stream (LINK-50) the `before` to go on from when older records are left.
+fn log_read_at<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, Option<u32>) {
     use ferrite_core::link::{LOG_FIXED, LOG_POS, LOG_UNREAD};
-    let Some(b) = p.get(..4) else { return Status::BadArg };
+    let Some(b) = p.get(..4) else { return (Status::BadArg, None) };
     let before = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
     let most = p.get(4).copied().filter(|&m| m > 0).unwrap_or(u8::MAX);
     let d = st.data();
@@ -1087,6 +1209,7 @@ fn log_read<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
     let count = o.n;
     o.put(&[0]);
     let (mut i, mut n) = (top.saturating_sub(before).min(kept as u32) as u16, 0u8);
+    let mut last = None;
     while i < kept && n < most {
         if let (Some(e), Some(seq)) = (d.event(i), d.event_seq(i)) {
             let (nm, tx) = (e.name.as_bytes(), e.text.as_bytes());
@@ -1109,11 +1232,19 @@ fn log_read<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
             o.text(nm);
             o.text(tx);
             n += 1;
+            last = Some(seq);
         }
         i += 1;
     }
     o.a[count] = n;
-    Status::Ok
+    (Status::Ok, last.filter(|_| i < kept))
+}
+
+/// LINK-41.1: room for one more record of a `WRITE_MANY` of `what`: the App holds no write, and for a channel the
+/// store's queue has room (behind channel writes only), for anything else the store is idle (a zone may need the
+/// one before it stored).
+fn write_room<S: ChannelStore>(app: &App, st: &S, what: u8) -> bool {
+    !app.write_pending() && if what == what::CHANNEL { st.data().write_room() > 0 } else { !st.data().busy() }
 }
 
 /// The settings record written (`WRITE`): the protected ones keep the radio's (LINK-5).
@@ -1172,7 +1303,7 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
                 return Status::Busy; // open in the radio's editor: the radio wins (TERM-17)
             }
             if st.get(idx) != Some(c) {
-                app.put_channel(c);
+                app.put_channel_queued(c, st);
             }
             Status::Ok
         }

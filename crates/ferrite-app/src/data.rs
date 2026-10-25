@@ -522,6 +522,11 @@ pub trait Data {
     fn busy(&self) -> bool {
         false
     }
+
+    /// How many more writes the store's queue takes now (LINK-41.1: a `WRITE_MANY` frame goes to it whole).
+    fn write_room(&self) -> usize {
+        if self.busy() { 0 } else { 8 }
+    }
 }
 
 /// Nothing stored.

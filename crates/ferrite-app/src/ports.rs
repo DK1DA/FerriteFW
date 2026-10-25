@@ -14,7 +14,7 @@
 //! - **KISS** needs neither, so it runs on its port alongside the other one (KISS-6): the cable by 0 9 2 3 on
 //!   KISS or 0 5 8 on Cable, Bluetooth by 0 5 8 on Bluetooth. Its bytes go back to the caller.
 //! - **Trust:** the cable is trusted (TERM-3, LINK-7). On Bluetooth, while the radio's PIN lock is on, the
-//!   terminal and the link each ask for the PIN first (LINK-30); `BAUD` never applies to it (LINK-15, LINK-25).
+//!   terminal and the link each ask for the PIN first (LINK-30); `BAUD` takes only its two rates (LINK-15.1, LINK-25).
 //! - **A Bluetooth connection** ends when it has been quiet for [`BT_IDLE_MS`]: the module tells the radio
 //!   nothing about connects (it is a transparent bridge, LINK-25), so silence is the only sign the phone left.
 //!   Its terminal closes, its link session starts over, and the PIN it gave ends with it.
@@ -99,7 +99,7 @@ impl Default for Ports {
 impl Ports {
     pub const fn new() -> Self {
         let mut bt = Session::new(false);
-        bt.set_max_baud(0); // LINK-15: `BAUD` never applies to Bluetooth
+        bt.set_max_baud(0); // LINK-15.1: Bluetooth's `BAUD` takes only the module's two rates
         Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, cable_last: None, dropped: 0, dbg: None, now: 0, ui: ferrite_core::liveview::Track::new(), ui_owner: None }
     }
 
@@ -247,10 +247,20 @@ impl Ports {
         }
     }
 
-    /// A rate agreed by the cable's `BAUD` for its UART, once (LINK-11); Bluetooth's never changes (LINK-15).
+    /// A rate agreed by the cable's `BAUD` for its UART, once (LINK-11).
     pub fn take_baud(&mut self) -> Option<u32> {
-        let _ = self.links[1].take_baud();
         self.links[0].take_baud()
+    }
+
+    /// A rate agreed by Bluetooth's `BAUD` (LINK-15.1: 9600 or 115200), once: USART1 switches after the answer has
+    /// gone, and goes back to 9600 unless a `HELLO` arrives at the new rate within 3 s.
+    pub fn take_bt_baud(&mut self) -> Option<u32> {
+        self.links[1].take_baud()
+    }
+
+    /// Bluetooth's session's `HELLO`s (LINK-15.1's proof).
+    pub fn bt_hellos(&self) -> u16 {
+        self.links[1].hellos()
     }
 
     /// `REBOOT` accepted on either port, once (LINK-24).

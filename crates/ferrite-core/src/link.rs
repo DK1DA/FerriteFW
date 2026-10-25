@@ -101,6 +101,16 @@ pub mod msg {
     /// length, record). Applied in order, each as a `WRITE` of it would be; the answer's first byte after the
     /// status is how many were applied (a refusal is the next one's).
     pub const WRITE_MANY: u8 = 0x18;
+    /// One request, its answers back to back (LINK-50, decision 285): the payload is another request's type
+    /// (`READ_MANY`, `HEARD`, `MSGS`, `LOG_READ` or `UI`) and its payload. The radio answers with that request's
+    /// answers in turn, each as its own frame, the first with this request's seq and each next one seq + 1 (so a
+    /// frame lost on the way shows as a gap, and the PC asks again from the last it has): [`STREAM_MORE`] (| ANSWER) while more follow,
+    /// `STREAM` (| ANSWER) for the last, each payload exactly the inner request's answer would be. Frames go only
+    /// while the port has room, so the stream is flow-controlled by the link itself; any new request from the PC
+    /// ends it. `bad argument` for another type. Only from radios that say [`caps::STREAM`] in `HELLO`.
+    pub const STREAM: u8 = 0x19;
+    /// A `STREAM` answer that more follow (radio to PC only, with [`super::ANSWER`]).
+    pub const STREAM_MORE: u8 = 0x1A;
     /// The event log, newest first (LINK-42): before (u32: records with a lower sequence number; 0xFFFFFFFF from
     /// the newest), then optionally the most to send (u8, 0: as many as fit). The answer: the next sequence number
     /// (u32), the records held (u16), how many follow (u8), then each ([`LOG_FIXED`] bytes, the position if it
@@ -151,6 +161,14 @@ pub mod msg {
     /// The way back to stock (BACKUP-7, LINK-4, LINK-8; [`crate::restore`]): the cable only. `START` stops the radio
     /// and hands the cable to the restore until it resets; erase, program and CRC requests follow, then `FINISH`.
     pub const STOCK_RESTORE: u8 = 0x60;
+}
+
+/// What a radio can do beyond protocol 2, the byte after `HELLO`'s build byte (LINK-35.2); absent: none.
+pub mod caps {
+    /// `STREAM` (LINK-50).
+    pub const STREAM: u8 = 1;
+    /// Two `WRITE_MANY` frames may be in flight (LINK-41.1): the receive rings hold a whole second frame.
+    pub const WINDOW: u8 = 2;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).
@@ -453,6 +471,20 @@ pub fn build(ty: u8, seq: u8, payload: &[u8], out: &mut [u8]) -> Option<usize> {
 /// programming (most likely the vendor's app sets the module to 115200 first: its FF31 handshake carries a rate byte).
 pub const BT_BAUD: u32 = 9_600;
 
+/// Bluetooth's fast rate (LINK-25.1, decision 285): the module's UART after the per-connection speed unlock (FF31,
+/// selector 02), which a host writes once the radio has agreed to `BAUD` 115200 on Bluetooth. The module keeps it
+/// across BLE connections and loses it when powered off (bench, Oct 24, 2026: `docs/research/ble-speed.md`).
+pub const BT_FAST: u32 = 115_200;
+
+/// The rates `BAUD` takes on Bluetooth (LINK-15.1): the module's resting rate and the unlocked one.
+pub const BT_RATES: [u32; 2] = [BT_BAUD, BT_FAST];
+
+/// LINK-25.2: the other Bluetooth rate, after a framing error says the module talks it (the radio restarted without
+/// the module losing power, or a module powered off and on behind the radio's back, or an unlock that didn't take).
+pub const fn bt_other_rate(rate: u32) -> u32 {
+    if rate == BT_FAST { BT_BAUD } else { BT_FAST }
+}
+
 /// Bluetooth transmit pacing (LINK-36, decision 156): bursts of `burst` bytes to the BT513, each followed by
 /// `gap_ms` quiet, counted from the burst's last byte handed to USART1. The module forwards what USART1 gives it as
 /// 20-byte BLE notifications, one or so per connection event (7.5-50 ms), so 9600 baud sent back to back (960 B/s)
@@ -470,6 +502,12 @@ impl BtPace {
     /// sends what piled up only after its UART has been quiet for between 30 and 40 ms, and then only the last
     /// notification's worth: 30 ms lost every UI readback on the bench, 40 ms lost none (LINK-36).
     pub const DEFAULT: BtPace = BtPace { burst: 20, gap_ms: 50 };
+    /// At [`BT_FAST`] (LINK-36.1): 160-byte bursts, 100 ms apart (about 1.6 KB/s). The module takes bursts of about
+    /// 160 bytes at 115200 but passes on only about 1.6 KB/s on average to a Mac (6-8 notifications every ~30 ms
+    /// interval, some intervals missed), and still forwards only after its UART has been quiet: 160 B every 50 ms
+    /// lost about 1 reply in 3, and a steady trickle of 20-byte pieces at 1.6 KB/s lost 7 of 10; 80 B / 50 ms and
+    /// 160 B / 100 ms passed 10 of 10 (bench, Oct 24, 2026).
+    pub const FAST: BtPace = BtPace { burst: 160, gap_ms: 100 };
     /// The longest gap `bt pace` takes.
     pub const MAX_GAP_MS: u16 = 1_000;
 
@@ -582,6 +620,21 @@ mod tests {
         assert_eq!(BtPace::DEFAULT.bytes_per_s(BT_BAUD), 282);
         assert_eq!(p.bytes_per_s(BT_BAUD), 393);
         assert_eq!(BtPace::new(20, 10).unwrap().bytes_per_s(BT_BAUD), 648);
+    }
+
+    /// LINK-36.1: the fast rate's bursts and gaps and the rate they allow; LINK-25.2's other rate; LINK-15.1's rates.
+    #[test]
+    fn bt_fast_rate() {
+        let p = BtPace::FAST;
+        assert_eq!((p.burst, p.gap_ms), (160, 100));
+        let mut s = BtPacer::default();
+        assert_eq!(s.allow(p, 0), 160, "an answer after a quiet spell: a whole burst at once");
+        s.sent(p, 160, 14);
+        assert_eq!(s.allow(p, 100), 0, "the gap");
+        assert_eq!(s.allow(p, 114), 160);
+        assert_eq!(p.bytes_per_s(BT_FAST), 1_406, "about 1.6 KB/s less the bursts' own 14 ms");
+        assert_eq!((bt_other_rate(BT_BAUD), bt_other_rate(BT_FAST)), (BT_FAST, BT_BAUD));
+        assert!(BT_RATES.contains(&BT_FAST) && BT_RATES.contains(&BT_BAUD));
     }
 
     #[test]

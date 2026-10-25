@@ -135,6 +135,12 @@ impl Channel {
 
 /// Where channels come from. Zone order is channel number (CHAN-10).
 pub trait ChannelStore {
+    /// LINK-41.1: a link's `WRITE_MANY` record straight into the store's own queue (several a pass, so same-sector
+    /// writes merge, decision 227), not through the App's one write; false if it has no room or no queue of its own
+    /// (the record then goes the App's way).
+    fn queue_write(&self, _w: ChanWrite) -> bool {
+        false
+    }
     /// How many zones exist (zone numbers 0..zones()).
     fn zones(&self) -> u8;
     /// A zone's name, None if it doesn't exist. By value: the firmware's store reads it from SPI flash.

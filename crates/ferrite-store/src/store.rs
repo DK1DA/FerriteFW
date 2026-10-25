@@ -56,7 +56,7 @@ const EMPTY: u8 = 254;
 pub const WX_FIRST: u16 = 990;
 
 /// Writes waiting for the Storage task.
-const QUEUE: usize = 8;
+const QUEUE: usize = 16;
 
 /// What [`FlashStore::mount`] found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +145,8 @@ pub struct FlashStore<N: Nor, D: Data> {
     head: Cell<u8>,
     queued: Cell<u8>,
     running: Cell<bool>,
+    /// The running job is a channel write (LINK-41.1: only those let a link's channel records queue behind them).
+    running_write: Cell<bool>,
     /// The settings and slots being saved, and whether a save is under way (the UI leaves the buffer alone).
     save_buf: RefCell<[u8; MAX_PAYLOAD]>,
     saving: Cell<bool>,
@@ -186,6 +188,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             head: Cell::new(0),
             queued: Cell::new(0),
             running: Cell::new(false),
+            running_write: Cell::new(false),
             save_buf: RefCell::new([0; MAX_PAYLOAD]),
             saving: Cell::new(false),
             events: Ring::new(EVENT_LOG.start, EVENT_LOG.end, logs::EVENT_END),
@@ -473,6 +476,7 @@ impl<N: Nor, D: Data> FlashStore<N, D> {
             return false;
         }
         self.running.set(true);
+        self.running_write.set(matches!(job, Job::Write(_)));
         let ok = match job {
             Job::Write(w) => self.apply_async(w).await.is_ok(),
             Job::Op(op) => self.perform(op).await.is_ok(),
@@ -1452,6 +1456,9 @@ impl Source for Limit<'_> {
 }
 
 impl<N: Nor, D: Data> ChannelStore for FlashStore<N, D> {
+    fn queue_write(&self, w: ChanWrite) -> bool {
+        self.apply(w)
+    }
     fn recent(&self, r: u16) -> Option<u16> {
         self.recent.get(r)
     }
@@ -1635,6 +1642,15 @@ impl<N: Nor, D: Data> Data for FlashStore<N, D> {
             return Buf::new();
         }
         dtmf_name_decode(&b).unwrap_or_default()
+    }
+
+    /// LINK-41.1: room for a link's channel records only while everything queued or running is a channel write (a
+    /// zone being created, say, must be stored before a channel that names it is checked).
+    fn write_room(&self) -> usize {
+        let (head, n) = (self.head.get() as usize, self.queued.get() as usize);
+        let jobs = self.jobs.borrow();
+        let others = (0..n).any(|i| !matches!(jobs[(head + i) % QUEUE], Some(Job::Write(_))));
+        if !self.ok() || others || self.running.get() && !self.running_write.get() { 0 } else { QUEUE - n }
     }
 
     fn busy(&self) -> bool {

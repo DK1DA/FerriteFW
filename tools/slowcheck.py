@@ -47,6 +47,11 @@ SLOW_TABLES = [
     (r"^<embassy_executor::raw::TaskStorage<ferrite::tasks::radio::", (0, 128),
      "the Radio task's start-up state: once at power-on"),
 ]
+# Constant tables that hold numbers only: never scanned for function pointers, since two neighbouring samples can
+# happen to look like one (Oct 24, 2026: two of udsp's sine values read as uaprs::build::message's address, a false
+# "slow call" from the DSP task that came and went with the layout).
+NUMBER_TABLES = re.compile(r"^udsp::trig::(SIN|COS)\b")
+
 # The tasks run by the interrupt executors (main.rs).
 IRQ_TASKS = re.compile(r"TaskStorage.*7ferrite5tasks(5radio|3dsp|5input)11___task_task.*4poll")
 
@@ -125,6 +130,11 @@ def main(elf, verbose):
     for s in ro_secs:
         marks.update((sec[s][0], sec[s][0] + sec[s][2]))
     marks = sorted(marks)
+    numbers = []  # (start, end) of NUMBER_TABLES
+    for l in run("arm-none-eabi-nm", "-S", "-C", elf).splitlines():
+        p = l.split(" ", 3)
+        if len(p) == 4 and NUMBER_TABLES.search(p[3]):
+            numbers.append((int(p[0], 16), int(p[0], 16) + int(p[1], 16)))
     def obj(a):
         i = bisect.bisect_right(marks, a)
         return marks[i - 1], (marks[i] if i < len(marks) else a + 4)
@@ -158,6 +168,8 @@ def main(elf, verbose):
         elif inside(v, ".slow_rodata"):
             reads[f].add((obj(v)[0], via, insn))
         elif inside(v, ".rodata"):
+            if any(n0 <= v < n1 for n0, n1 in numbers):
+                return  # samples, not pointers
             a0, a1 = obj(v)
             if (f, a0) in fast_ro_seen:
                 return

@@ -28,9 +28,11 @@ static HW: [Hw; UART_COUNT] = [
     Hw { base: UART4, en_reg: CRM_APB1EN, en_bit: CRM_APB1_UART4, irq: irq::UART4, tx: pin(GPIOC, 10), rx: pin(GPIOC, 11) },
 ];
 
-static BUF_BT: [AtomicU8; 256] = [const { AtomicU8::new(0) }; 256];
+// Bluetooth and the cable: room for a whole second link frame while the first is being applied (LINK-41.1: two
+// `WRITE_MANY` frames in flight; 256 + the port's 64-byte ring held 320 of the 498 bytes two frames take).
+static BUF_BT: [AtomicU8; 512] = [const { AtomicU8::new(0) }; 512];
 static BUF_GPS: [AtomicU8; 1024] = [const { AtomicU8::new(0) }; 1024];
-static BUF_CPS: [AtomicU8; 256] = [const { AtomicU8::new(0) }; 256];
+static BUF_CPS: [AtomicU8; 512] = [const { AtomicU8::new(0) }; 512];
 static RX: [Ring<'static>; UART_COUNT] = [Ring::new(&BUF_BT), Ring::new(&BUF_GPS), Ring::new(&BUF_CPS)];
 static RX_BYTES: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];
 static LINE_ERRORS: [AtomicU32; UART_COUNT] = [const { AtomicU32::new(0) }; UART_COUNT];

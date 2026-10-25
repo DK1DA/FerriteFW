@@ -601,8 +601,22 @@ impl App {
         self.put_channel_as(c, ChanWrite::PutPos { ch: c, pos });
     }
 
+    /// LINK-41.1: [`App::put_channel`] for a link's `WRITE_MANY`: straight into the store's queue when it takes it.
+    pub(crate) fn put_channel_queued(&mut self, c: chan::Channel, st: &impl chan::ChannelStore) {
+        if st.queue_write(ChanWrite::Put { ch: c, from: None }) {
+            self.channel_put(c);
+        } else {
+            self.put_channel(c);
+        }
+    }
+
     fn put_channel_as(&mut self, c: chan::Channel, w: ChanWrite) {
         self.write(w);
+        self.channel_put(c);
+    }
+
+    /// Slots on a channel just written take its new settings.
+    fn channel_put(&mut self, c: chan::Channel) {
         for i in 0..SLOTS {
             let s = &mut self.slots[i];
             if s.ch.is_some_and(|o| o.num == c.num) {

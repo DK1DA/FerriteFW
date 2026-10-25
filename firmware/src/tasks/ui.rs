@@ -556,6 +556,9 @@ pub async fn task() {
             if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)
             }
+            if let Some(r) = ports.take_bt_baud() {
+                crate::chan::BT_LINK_BAUD.signal(r); // LINK-15.1: Bluetooth's, likewise
+            }
             // BACKUP-7 (decision 261): the way back to stock has the cable from here until it resets.
             if let Some(seq) = ports.take_restore() {
                 send_shutdown(&mut app, &mut held).await;
@@ -575,6 +578,7 @@ pub async fn task() {
                 cortex_m::peripheral::SCB::sys_reset();
             }
             LINK_HELLOS.store(ports.hellos(), Relaxed);
+            crate::chan::BT_HELLOS.store(ports.bt_hellos(), Relaxed);
             LINK_ON.store(ports.link_on(Port::Cable, now_ms()), Relaxed);
             BT_LINK_ON.store(ports.link_on(Port::Bt, now_ms()), Relaxed);
             dev.bt = ports.bt_connected(&app, now_ms());
@@ -623,8 +627,10 @@ pub async fn task() {
                         if baud != 0 {
                             crate::chan::BT_RATE.store(baud, Relaxed); // the Link task restarts USART1 at it
                         }
+                        let fast = crate::hal::uart::rate(crate::report::UART_BT) >= ferrite_core::link::BT_FAST;
+                        let slot = if fast { &crate::chan::BT_PACE_FAST } else { &crate::chan::BT_PACE }; // LINK-36.1
                         if let Some(p) = pace {
-                            crate::chan::BT_PACE.store(p.pack(), Relaxed); // LINK-36: the Link task's next turn
+                            slot.store(p.pack(), Relaxed); // LINK-36: the Link task's next turn
                         }
                         let st = crate::hal::uart::stats(crate::report::UART_BT);
                         let (framing, overrun) = crate::hal::uart::errors(crate::report::UART_BT);
@@ -638,7 +644,7 @@ pub async fn task() {
                             dropped: st.dropped,
                             baud: rate,
                             on,
-                            pace: ferrite_core::link::BtPace::unpack(crate::chan::BT_PACE.load(Relaxed)),
+                            pace: ferrite_core::link::BtPace::unpack(slot.load(Relaxed)),
                         }));
                     }
                     #[cfg(feature = "bench")]

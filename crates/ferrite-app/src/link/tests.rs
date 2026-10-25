@@ -169,6 +169,7 @@ fn hello_and_info() {
 /// 3 tx with Dry TX on (TX-48), from the firmware's features (`Device::tx_built`) and the switch, with bit 7 set when
 /// the bench commands are in (`Device::bench`, TERM-38): the tx-bench build answers 0x83 from power-on (TX-48.1).
 /// 2 is the retired tx-dry build's (decision 193), still named for an older radio.
+/// LINK-35.2: HELLO ends with the capability byte (STREAM, the write window).
 #[test]
 fn hello_and_info_give_the_build() {
     use ferrite_core::link::build;
@@ -187,7 +188,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b], "HELLO, tx {tx} on {on} bench {bench}");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 7;
         let c = v + 1 + a[v] as usize;
@@ -1557,37 +1558,32 @@ fn write_many_channels() {
     assert_eq!(pc.ask(msg::WRITE_MANY, &[what::CHANNEL]).0, Status::BadArg as u8);
 }
 
-/// LINK-41, LINK-28: while a `WRITE_MANY` waits for the store, the port takes no other frame, and it counts as
-/// writing for the other port.
+/// LINK-41.1: a store that takes queued writes gets a `WRITE_MANY` frame's records in one pass, straight into its
+/// queue (the App's own write slot stays free), and the answer goes at once.
 #[test]
 fn write_many_holds_the_port() {
-    let mut pc = Pc::new(true);
-    let base = pc.st.free_num(600).unwrap();
-    let recs: Vec<(u16, Vec<u8>)> = (0..3).map(|k| (base + k, chan_rec(base + k, 43_500_000, b"HOLD"))).collect();
-    let mut p = std::vec![what::CHANNEL];
-    for (i, r) in &recs {
-        p.extend_from_slice(&i.to_le_bytes());
-        p.push(r.len() as u8);
-        p.extend_from_slice(r);
-    }
-    let mut w = [0u8; MAX_WIRE];
-    let n = wire::build(msg::WRITE_MANY, 9, &p, &mut w).unwrap();
-    pc.raw(&w[..n]);
-    let mut out = Wire(Vec::new());
-    pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now, &mut out);
-    assert!(out.0.is_empty() && !pc.link.ready() && pc.link.writing(), "one applied, two to go");
-    pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now, &mut out);
-    assert!(out.0.is_empty(), "the store hasn't taken the first yet");
-    for _ in 0..4 {
-        while let Some(wr) = pc.app.pop_write() {
-            pc.st.apply(wr);
+    {
+        // LINK-41.1: the sample store queues (applies) them at once: the answer comes from the first pass
+        let mut pc = Pc::new(true);
+        let base = pc.st.free_num(600).unwrap();
+        let mut p = std::vec![what::CHANNEL];
+        for k in 0..3u16 {
+            let r = chan_rec(base + k, 43_500_000, b"FAST");
+            p.extend_from_slice(&(base + k).to_le_bytes());
+            p.push(r.len() as u8);
+            p.extend_from_slice(&r);
         }
+        let mut w = [0u8; MAX_WIRE];
+        let n = wire::build(msg::WRITE_MANY, 8, &p, &mut w).unwrap();
+        pc.raw(&w[..n]);
+        let mut out = Wire(Vec::new());
         pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now, &mut out);
+        let k = out.0.len() - 1;
+        let f = wire::parse(&mut out.0[..k]).unwrap();
+        assert_eq!((f.ty, f.payload), (msg::WRITE_MANY | wire::ANSWER, &[0u8, 3][..]), "the whole frame in one pass");
+        assert!(pc.app.pop_write().is_none() && pc.st.get(base + 2).is_some(), "straight to the store");
+        assert!(pc.link.ready() && !pc.link.writing());
     }
-    let k = out.0.len() - 1;
-    let f = wire::parse(&mut out.0[..k]).unwrap();
-    assert_eq!((f.ty, f.seq, f.payload), (msg::WRITE_MANY | wire::ANSWER, 9, &[0u8, 3][..]));
-    assert!(pc.link.ready() && !pc.link.writing());
 }
 
 /// LINK-42, INBOX-6, INBOX-11: `LOG_READ` gives the event log newest first, in parts, from a sequence number, with
@@ -1717,4 +1713,73 @@ fn zone_deleted_over_the_link_leaves_no_slot_in_it() {
     assert_eq!(pc.ask(msg::DELETE, &[what::ZONE, 0, 0]).0, 0);
     assert_eq!(pc.app.slots[0].zone, crate::chan::NO_ZONE);
     assert!(pc.app.slots[0].ch.is_none_or(|c| c.zone == crate::chan::NO_ZONE));
+}
+
+/// LINK-50: `STREAM` answers an inner request's answers back to back (`STREAM_MORE` until the last, `STREAM`), the
+/// same answers that inner request asked again from where each left off would give; a new request ends it; another
+/// inner type is `bad argument`.
+#[test]
+fn stream_answers_back_to_back() {
+    let mut pc = Pc::new(true);
+    for k in 0..40u16 {
+        let num = pc.st.free_num(100 + k).unwrap();
+        let r = chan_rec(num, 43_500_000 + k as u32 * 2_500, b"STREAM");
+        let mut p = std::vec![what::CHANNEL];
+        p.extend_from_slice(&num.to_le_bytes());
+        p.push(r.len() as u8);
+        p.extend_from_slice(&r);
+        assert_eq!(pc.ask(msg::WRITE_MANY, &p).0, 0);
+    }
+    // the reference: READ_MANY asked again and again
+    let (mut refs, mut first) = (Vec::new(), 0u16);
+    loop {
+        let mut p = std::vec![what::CHANNEL];
+        p.extend_from_slice(&first.to_le_bytes());
+        p.extend_from_slice(&1000u16.to_le_bytes());
+        let (s, a) = pc.ask(msg::READ_MANY, &p);
+        assert_eq!(s, 0);
+        let next = u16::from_le_bytes([a[0], a[1]]);
+        refs.push(a);
+        if next <= first || next >= 1000 {
+            break;
+        }
+        first = next;
+    }
+    // one STREAM of it
+    let mut p = std::vec![msg::READ_MANY, what::CHANNEL];
+    p.extend_from_slice(&0u16.to_le_bytes());
+    p.extend_from_slice(&1000u16.to_le_bytes());
+    let mut w = [0u8; MAX_WIRE];
+    let n = wire::build(msg::STREAM, 77, &p, &mut w).unwrap();
+    pc.raw(&w[..n]);
+    let mut out = Wire(Vec::new());
+    for _ in 0..64 {
+        pc.now += 10;
+        pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now, &mut out);
+    }
+    let mut got = Vec::new();
+    for (k, f) in out.0.split_mut(|&b| b == 0).filter(|f| !f.is_empty()).enumerate() {
+        let f = wire::parse(f).unwrap();
+        assert_eq!(f.seq, 77u8.wrapping_add(k as u8), "numbered from the request's seq");
+        got.push((f.ty, f.payload[0], f.payload[1..].to_vec()));
+    }
+    assert!(got.len() > 1, "more than one frame");
+    let (last, more) = got.split_last().unwrap();
+    assert!(more.iter().all(|g| g.0 == msg::STREAM_MORE | wire::ANSWER) && last.0 == msg::STREAM | wire::ANSWER);
+    assert!(got.iter().all(|g| g.1 == 0));
+    let streamed: Vec<u8> = got.iter().flat_map(|g| g.2[2..].to_vec()).collect();
+    let asked: Vec<u8> = refs.iter().flat_map(|a| a[2..].to_vec()).collect();
+    assert_eq!(streamed, asked, "the same records");
+    // a UI readback streams too, and a new request ends a stream
+    let (s, ui) = pc.ask(msg::UI, &[]);
+    assert_eq!(s, 0);
+    let n = wire::build(msg::STREAM, 78, &[msg::UI], &mut w).unwrap();
+    pc.raw(&w[..n]);
+    let mut out = Wire(Vec::new());
+    pc.link.poll(&mut pc.app, &pc.st, &pc.dev, &LiveAll::default(), pc.now, &mut out);
+    let k = out.0.iter().position(|&b| b == 0).unwrap();
+    let f = wire::parse(&mut out.0[..k]).unwrap();
+    assert_eq!(f.payload[2..], ui[1..], "the first page is UI's");
+    assert_eq!(pc.ask(msg::INFO, &[]).0, 0, "a new request is answered: the stream is over");
+    assert_eq!(pc.ask(msg::STREAM, &[msg::WRITE_MANY]).0, Status::BadArg as u8);
 }

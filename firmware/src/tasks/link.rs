@@ -8,8 +8,8 @@
 
 use crate::board::BT_PWR;
 use ferrite_radio::bt::BtPower;
-use ferrite_core::link::{BtPace, BtPacer};
-use crate::chan::{BT_IN, BT_LINK_ON, BT_ON, BT_OUT, BT_PACE, BT_RATE, CABLE_BAUD, DRY_TX, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
+use ferrite_core::link::{bt_other_rate, BtPace, BtPacer, BT_BAUD, BT_FAST};
+use crate::chan::{BT_HELLOS, BT_IN, BT_LINK_BAUD, BT_LINK_ON, BT_ON, BT_OUT, BT_PACE, BT_PACE_FAST, BT_RATE, CABLE_BAUD, DRY_TX, LINK_BAUD, LINK_HELLOS, LINK_ON, RF_BUSY_KEYED, RF_STATE, TERM_IN, TERM_OUT, TERM_WAKE};
 use crate::hal::uart;
 use crate::report::{UART_BT, UART_CPS};
 use crate::ring::Ring;
@@ -22,7 +22,7 @@ const BAUD: u32 = 115_200;
 /// this executor keep running (TERM-4). With both ports sending, they take turns.
 const CHUNK: usize = 32;
 /// Software flow control for a terminal program sending a file (the terminal's `load`, TERM-13): XOFF once this
-/// many bytes wait (each UART's receive ring holds 256, so a slow sender still fits), XON again when it has
+/// many bytes wait (each UART's receive ring holds 512, so a slow sender still fits), XON again when it has
 /// drained.
 const XOFF_AT: u16 = 160;
 const XON_AT: u16 = 32;
@@ -30,6 +30,12 @@ const XOFF: u8 = 0x13;
 const XON: u8 = 0x11;
 /// A new rate stays only if a `HELLO` arrives at it within this long (LINK-11).
 const BAUD_PROOF: Duration = Duration::from_secs(1);
+/// LINK-15.1: Bluetooth's new rate stays only if a `HELLO` arrives at it within this long (the host writes the
+/// module's unlock after the answer, then a `HELLO`: a BLE write and its answer take about 150-400 ms).
+const BT_BAUD_PROOF: Duration = Duration::from_secs(3);
+/// LINK-25.2: framing errors this close together move USART1 to the other rate only once (a burst of garbage is
+/// many errors).
+const BT_SWAP_MS: u64 = 300;
 /// The module's power settles before its UART is used (stock starts USART1, then powers PB9 with no wait; a short
 /// wait costs nothing).
 const BT_POWER_MS: u64 = 20;
@@ -46,7 +52,7 @@ struct Port {
     held: bool,
     /// The cable: sends nothing while keyed (TX-43). Bluetooth: only what USART1 takes without waiting, paced.
     cable: bool,
-    /// Bluetooth's bursts and gaps (LINK-36); the cable's is never asked.
+    /// Bluetooth's bursts and gaps (LINK-36; at 115200 LINK-36.1's); the cable's is never asked.
     pacer: BtPacer,
 }
 
@@ -85,7 +91,9 @@ impl Port {
     /// keyed (TX-43), and the rest waits in the ring. Bluetooth sends no more than its burst has left, and nothing
     /// in a gap (LINK-36): the gap is waited out by the loop's 1 ms turns, never in here.
     fn send(&mut self) -> bool {
-        let (pace, now) = (BtPace::unpack(BT_PACE.load(Relaxed)), Instant::now().as_millis());
+        let now = Instant::now().as_millis();
+        let fast = !self.cable && uart::rate(self.uart) >= BT_FAST;
+        let pace = BtPace::unpack(if fast { BT_PACE_FAST.load(Relaxed) } else { BT_PACE.load(Relaxed) });
         let most = if self.cable { CHUNK } else { self.pacer.allow(pace, now).min(CHUNK) };
         let mut n = 0;
         while n < most {
@@ -127,12 +135,14 @@ fn cable_quiet(quiet: bool) {
     }
 }
 
-/// 0 9 2 1: the module powered (PB9, active high) and USART1 at its rate (9600, LINK-25), or both off with the TX
-/// pin let go so a powered-down module isn't fed (the MCU never configures the module).
+/// 0 9 2 1: the module powered (PB9, active high) and USART1 at its resting 9600 (LINK-25: a module just powered has
+/// lost any unlocked rate, LINK-25.1), or both off with the TX pin let go so a powered-down module isn't fed (the MCU
+/// never configures the module).
 fn bt_power(on: bool) {
     if on {
         BT_PWR.write(true);
-        uart::init(UART_BT, BT_RATE.load(Relaxed));
+        BT_RATE.store(BT_BAUD, Relaxed);
+        uart::init(UART_BT, BT_BAUD);
     } else {
         uart::deinit(UART_BT);
         BT_PWR.write(false);
@@ -166,6 +176,11 @@ pub async fn task() {
     uart::init(UART_CPS, BAUD); // every boot starts at 115200 (LINK-10)
     let mut cable = Port { uart: UART_CPS, rx: &TERM_IN, tx: &TERM_OUT, link: &LINK_ON, held: false, cable: true, pacer: BtPacer::default() };
     let mut bt = Port { uart: UART_BT, rx: &BT_IN, tx: &BT_OUT, link: &BT_LINK_ON, held: false, cable: false, pacer: BtPacer::default() };
+    // LINK-15.1: Bluetooth's new rate on probation (deadline, `HELLO`s then); LINK-25.2: its framing errors, and
+    // when USART1 last swapped rates for them.
+    let mut bt_probation: Option<(Instant, u16)> = None;
+    let mut bt_framing = uart::errors(UART_BT).0;
+    let mut bt_swapped = Instant::now();
     // 0 9 2 1 and PB9 (`ferrite_radio::bt`, host-tested).
     let mut bt_pw = BtPower::default();
     // Whose turn it is to send when both ports have bytes waiting.
@@ -191,6 +206,8 @@ pub async fn task() {
                 Timer::after_millis(BT_POWER_MS).await;
             }
             bt_power(want);
+            // LINK-25.2: a module powering up may garble a byte; no swap for it
+            (bt_swapped, bt_framing, bt_probation) = (Instant::now(), uart::errors(UART_BT).0, None);
         }
         // Decision 76: stock sets PB9 again after each transmission while Bluetooth is on.
         if out.reassert {
@@ -262,6 +279,36 @@ pub async fn task() {
                 }
                 CABLE_BAUD.store(BAUD, Relaxed);
                 probation = None;
+            }
+        }
+        if bt_on {
+            // LINK-15.1: Bluetooth's `BAUD`, once its answer has left USART1; back to 9600 without a `HELLO` at it.
+            if BT_OUT.count() == 0 && BT_LINK_BAUD.signaled() {
+                if let Some(rate) = BT_LINK_BAUD.try_take() {
+                    uart::flush(UART_BT);
+                    BT_RATE.store(rate, Relaxed);
+                    bt_probation = (rate != BT_BAUD).then(|| (Instant::now() + BT_BAUD_PROOF, BT_HELLOS.load(Relaxed)));
+                    bt_swapped = Instant::now();
+                }
+            }
+            if let Some((until, hellos)) = bt_probation {
+                if BT_HELLOS.load(Relaxed) != hellos {
+                    bt_probation = None;
+                } else if Instant::now() >= until {
+                    BT_RATE.store(BT_BAUD, Relaxed);
+                    bt_probation = None;
+                }
+            }
+            // LINK-25.2: a framing error says the module talks the other rate (an unlock that didn't take, a radio
+            // restarted while the module kept its rate): swap, at most once in a burst of errors.
+            let f = uart::errors(UART_BT).0;
+            if f != bt_framing {
+                bt_framing = f;
+                if bt_swapped.elapsed() >= Duration::from_millis(BT_SWAP_MS) {
+                    BT_RATE.store(bt_other_rate(uart::rate(UART_BT)), Relaxed);
+                    bt_probation = None;
+                    bt_swapped = Instant::now();
+                }
             }
         }
         let busy = TERM_OUT.count() > 0 && cable.may_send() || bt_on && BT_OUT.count() > 0;

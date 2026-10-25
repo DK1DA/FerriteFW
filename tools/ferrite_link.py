@@ -73,6 +73,7 @@ As a library (the test runner's):
         assert ui["screen"]["id"] == "Group" and ui["sel"]["name"] == "Theme"
 """
 import argparse
+import os
 import socket
 import struct
 import sys
@@ -82,6 +83,8 @@ PROTOCOL = 2
 HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD, MORE, UI = (
     0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32, 0x33)
 USED, READ_MANY, WRITE_MANY, LOG_READ = 0x15, 0x17, 0x18, 0x40  # LINK-39 - LINK-42
+STREAM, STREAM_MORE = 0x19, 0x1A  # LINK-50
+CAP_STREAM, CAP_WINDOW = 1, 2  # LINK-35.2: HELLO's caps byte, after the build byte
 LOG_SOURCES = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"]  # LINK-42's source byte
 SUBSCRIBE, EVENT, HEARD, MSGS, MSG_SEND, MSG_STOP = 0x50, 0x51, 0x52, 0x53, 0x54, 0x55  # LINK-43 - LINK-49
 SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
@@ -146,7 +149,8 @@ def cobs_decode(src):
     return bytes(out)
 
 
-BLE_DATA = "0000ffe1-0000-1000-8000-00805f9b34fb"  # FFE1: the BT513's transparent UART (FF31 never touched)
+BLE_DATA = "0000ffe1-0000-1000-8000-00805f9b34fb"  # FFE1: the BT513's transparent UART
+BLE_FF31 = "0000ff31-0000-1000-8000-00805f9b34fb"  # FF31: the module's control; only the speed unlock (LINK-15.1)
 BLE_CHUNK = 20  # the ATT payload of the default 23-byte MTU
 BLE_PACE = 0.025  # seconds between chunks: 800 B/s, under the module's 9600-baud UART (960 B/s)
 
@@ -222,7 +226,20 @@ class BlePort:
         return out
 
     def baud(self, rate):
-        pass  # Bluetooth's rate is the module's (LINK-15)
+        pass  # the module's UART rate is set by unlock(), not on this side (LINK-15.1)
+
+    def unlock(self):
+        """LINK-15.1: the module's per-connection speed unlock, the only FF31 write ever made (approved Oct 14, 2026):
+        `3F 3F 3F 3F`, selector `02` (115200), 15 random bytes, written with response (FF31 ignores a write without).
+        The module answers `!!!!` and 16 bytes on FFE1; they are dropped so they don't run into the next frame.
+        True if it answered."""
+        import os
+        self._run(self.client.write_gatt_char(BLE_FF31, bytes([0x3F] * 4 + [0x02]) + os.urandom(15), response=True))
+        end, got = time.time() + 1.5, b""
+        while time.time() < end and not (got.startswith(b"!!!!") and len(got) >= 20):
+            got += self.read()
+        self.buf.clear()
+        return got.startswith(b"!!!!")
 
     def close(self):
         try:
@@ -261,7 +278,10 @@ class StreamPort:
                 return self.sock.recv(4096)
             except socket.timeout:
                 return b""
-        return self.ser.read(4096)
+        # As soon as anything has come (pyserial's read(n) waits out the whole timeout for fewer than n bytes: every
+        # short answer cost 50 ms), then whatever else is already there.
+        got = self.ser.read(1)
+        return got + self.ser.read(self.ser.in_waiting) if got else got
 
     def baud(self, rate):
         if self.ser:
@@ -271,9 +291,19 @@ class StreamPort:
         (self.sock or self.ser).close()
 
 
+class StreamGap(Exception):
+    """LINK-50: a stream's frame didn't come (lost on the way, or none in time): `got` is what came before it."""
+
+    def __init__(self, got):
+        super().__init__(f"stream: a frame missing after {len(got)}")
+        self.got = got
+
+
 class Link:
     def __init__(self, port):
         self.p, self.seq = port, 0
+        self.caps = 0  # LINK-35.2, from the HELLO answer (note_hello)
+        self.window = 1  # LINK-41.1: WRITE_MANY frames in flight, 2 once HELLO says the radio takes them
         self.events = []  # EVENT frames (LINK-46) as they arrive: (event counter, payload)
         # Ctrl-C closes the terminal if it has the cable (TERM-2; nothing otherwise); its goodbye text is dropped.
         self.p.write(b"\x03")
@@ -317,6 +347,37 @@ class Link:
                 continue
             out.append((f[0], f[1], f[2], f[3:-2]))
         return out
+
+    def note_hello(self, hello):
+        """LINK-35.2: what the radio can do beyond protocol 2, from HELLO's answer (version text, build, caps)."""
+        rest = text(hello[3:])[1]
+        self.caps = rest[1] if len(rest) > 1 and not os.environ.get("FERRITE_NO_STREAM") else 0
+        self.window = int(os.environ.get("FERRITE_WINDOW", "2" if rest[1:2] and rest[1] & CAP_WINDOW else "1"))
+        return hello
+
+    def stream(self, ty, payload=b"", timeout=None):
+        """LINK-50: one STREAM of `ty`'s request: its answers' payloads (after the status) in order. Raises
+        RadioError on a refusal, TimeoutError if a frame doesn't come."""
+        if timeout is None:
+            timeout = 6.0 if getattr(self.p, "slow", False) else 2.0
+        seq = self.send(STREAM, bytes([ty]) + payload)
+        self.seq = (self.seq + 255) & 0xFF  # the stream's frames take the seqs after it: the next request skips them
+        out, end, want = [], time.time() + timeout, seq
+        while time.time() < end:
+            for t, s, status, rest in self.answers():
+                if t not in (STREAM | 0x80, STREAM_MORE | 0x80):
+                    continue
+                if s != want:
+                    raise StreamGap(out)  # a frame lost on the way: ask again from what came
+                if status != 0:
+                    raise RadioError(status, rest)
+                out.append(bytes(rest))
+                want = (want + 1) & 0xFF
+                end = time.time() + timeout
+                if t == STREAM | 0x80:
+                    self.seq = (want + 1) & 0xFF
+                    return out
+        raise StreamGap(out)
 
     def ask(self, ty, payload=b"", timeout=None, retry_pending=30):
         slow = getattr(self.p, "slow", False)
@@ -393,6 +454,28 @@ class Link:
         [(index, record)], and the requests it took."""
         if count is None:
             count = (1000 if what == CHANNEL else 256) - first
+        if self.caps & CAP_STREAM:
+            out, end, asks = [], first + count, 0
+            while first < end:
+                asks += 1
+                try:
+                    frames, done = self.stream(READ_MANY, struct.pack("<BHH", what, first, min(end - first, 0xFFFF))), True
+                except StreamGap as g:
+                    frames, done = g.got, False
+                    if asks > 8:
+                        raise
+                    time.sleep(0.3)  # what's still on its way is dropped with the gap
+                    self.answers()
+                for a in frames:
+                    first = max(first, struct.unpack("<H", a[:2])[0])
+                    r = a[2:]
+                    while r:
+                        i, n = struct.unpack("<HB", r[:3])
+                        out.append((i, bytes(r[3:3 + n])))
+                        r = r[3 + n:]
+                if done:
+                    break
+            return out, asks
         out, asks, end = [], 0, first + count
         while first < end:
             a = self.ok(READ_MANY, struct.pack("<BHH", what, first, min(end - first, 0xFFFF)))
@@ -409,24 +492,46 @@ class Link:
 
     def write_many(self, what, recs):
         """LINK-41: (index, record) pairs, as many as fit in one frame each; raises on a refusal with how many went."""
-        frame, sent = bytearray([what]), 0
-
-        def flush():
-            nonlocal sent
-            if len(frame) > 1:
-                s, rest = self.ask(WRITE_MANY, bytes(frame))
+        frames, frame = [], bytearray([what])
+        for i, rec in recs:
+            item = struct.pack("<HB", i, len(rec)) + rec
+            if len(frame) + len(item) > 240:
+                frames.append(bytes(frame))
+                frame = bytearray([what])
+            frame += item
+        if len(frame) > 1:
+            frames.append(bytes(frame))
+        if self.window <= 1:
+            sent = 0
+            for fr in frames:
+                s, rest = self.ask(WRITE_MANY, fr)
                 if s != 0:
                     done = rest[0] if rest and s in (7, 9, 10) else 0
                     sys.exit(f"WRITE_MANY: {sent + done} written, then {why(s, rest[1:])}")
                 sent += rest[0]
-            del frame[1:]
-
-        for i, rec in recs:
-            item = struct.pack("<HB", i, len(rec)) + rec
-            if len(frame) + len(item) > 240:
-                flush()
-            frame += item
-        flush()
+            return sent
+        # LINK-41.1: `window` frames in flight; the radio takes the next from its UART's ring as it answers each, so
+        # the store never waits for a round trip. In order: a refusal stops it (frames after it may have gone).
+        timeout = 8.0 if getattr(self.p, "slow", False) else 4.0
+        sent, flight, k = 0, [], 0
+        while k < len(frames) or flight:
+            while k < len(frames) and len(flight) < self.window:
+                flight.append(self.send(WRITE_MANY, frames[k]))
+                k += 1
+            end = time.time() + timeout
+            got = None
+            while got is None and time.time() < end:
+                for t, s, status, rest in self.answers():
+                    if t == WRITE_MANY | 0x80 and s == flight[0]:
+                        got = (status, rest)
+            if got is None:
+                raise TimeoutError(f"WRITE_MANY: no answer in {timeout:.0f} s after {sent} written")
+            s, rest = got
+            flight.pop(0)
+            if s != 0:
+                done = rest[0] if rest and s in (7, 9, 10) else 0
+                sys.exit(f"WRITE_MANY: {sent + done} written, then {why(s, rest[1:])}")
+            sent += rest[0]
         return sent
 
     def log(self, most=0):
@@ -605,11 +710,14 @@ class Radio:
     def __init__(self, port, pin=None, name=b"ferrite_link.py"):
         self.port = Port(port)
         self.link = Link(self.port)
-        hello = self.link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + name)
+        hello = self.link.note_hello(self.link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + name))
         if not hello[2]:
             if not pin:
                 raise RadioError(5)
             self._ok(AUTH, pin.encode("ascii"))
+        self.ble_rate = ble_fast(self.link, name)
+        if self.ble_rate and pin and not hello[2]:
+            self._ok(AUTH, pin.encode("ascii"))  # the proving HELLO started the session over
         rest = text(hello[3:])[1]
         self.build, self.bench = build_name(rest), build_bench(rest)
 
@@ -669,6 +777,13 @@ class Radio:
 
     def ui_text(self, what=0):
         """What the screen shows, as the radio's text (0 the state, 1 the key names)."""
+        if self.link.caps & CAP_STREAM:
+            for _ in range(3):
+                try:
+                    return "".join(a[1:].decode("utf-8", "replace") for a in self.link.stream(UI, bytes([what])))  # LINK-50
+                except StreamGap:
+                    time.sleep(0.3)
+                    self.link.answers()
         out, rest = [], self._ok(UI, bytes([what]))
         while True:
             out.append(rest[1:].decode("utf-8", "replace"))
@@ -968,8 +1083,32 @@ def uid_text(b):
     return " ".join(t[i:i + 5] for i in range(0, 20, 5))
 
 
+def ble_fast(link, name=b"ferrite_link.py"):
+    """LINK-15.1 (decision 285): over Bluetooth, ask the radio for 115200, unlock the module, prove it with a HELLO.
+    A radio from before answers `refused` and the link stays at 9600; if the unlock or the HELLO fails, the radio goes
+    back to 9600 by itself (3 s without a HELLO, or a framing error: LINK-25.2) and the HELLO is tried again there.
+    FERRITE_BLE_SLOW=1 skips it. Returns the rate in use."""
+    p = link.p
+    if not isinstance(p, BlePort) or os.environ.get("FERRITE_BLE_SLOW"):
+        return None
+    s, _ = link.ask(BAUD, struct.pack("<I", 115_200))
+    if s != 0:
+        return 9_600
+    time.sleep(0.15)  # the answer has left; the radio switches once its ring is empty
+    ok = p.unlock()
+    for _ in range(3):
+        try:
+            link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + name)
+            return 115_200 if ok else 9_600
+        except (TimeoutError, RadioError):
+            time.sleep(0.5)
+    link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + name)
+    return 9_600
+
+
 def run(link, a):
-    hello = link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + b"ferrite_link.py")
+    hello = link.note_hello(link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + b"ferrite_link.py"))
+    ble_fast(link)
     if not hello[2]:
         if not a.pin:
             sys.exit("the radio's PIN lock is on: give --pin (LINK-30)")

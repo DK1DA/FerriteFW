@@ -339,21 +339,33 @@ fn message_len(m: &Message) -> usize {
 
 /// `HEARD` (LINK-44): from index p[0]; the count, then as many stations as fit.
 pub(super) fn heard<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    heard_at(st, p, o).0
+}
+
+/// [`heard`], and for a stream (LINK-50) the index to go on from when stations are left.
+pub(super) fn heard_at<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, Option<u16>) {
     let d = st.data();
     let n = d.stations();
     o.put(&[n.min(255) as u8]);
-    for i in p.first().copied().unwrap_or(0) as u16..n {
+    let mut i = p.first().copied().unwrap_or(0) as u16;
+    while i < n {
         let Some(s) = d.station(i) else { break };
         if o.n + station_len(&s) > MAX_PAYLOAD {
             break;
         }
         station(o, &s);
+        i += 1;
     }
-    Status::Ok
+    (Status::Ok, Some(i).filter(|&i| i < n.min(255) && i > p.first().copied().unwrap_or(0) as u16))
 }
 
 /// `MSGS` (LINK-44): from index (u16); the count (u16), then as many messages as fit, newest first.
 pub(super) fn msgs<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
+    msgs_at(st, p, o).0
+}
+
+/// [`msgs`], and for a stream (LINK-50) the index to go on from when messages are left.
+pub(super) fn msgs_at<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> (Status, Option<u16>) {
     let d = st.data();
     let n = d.messages();
     o.put(&n.to_le_bytes());
@@ -361,14 +373,16 @@ pub(super) fn msgs<S: ChannelStore>(st: &S, p: &[u8], o: &mut Out) -> Status {
         [a, b, ..] => u16::from_le_bytes([*a, *b]),
         _ => 0,
     };
-    for i in from..n {
+    let mut i = from;
+    while i < n {
         let Some(m) = d.message(i) else { break };
         if o.n + message_len(&m) > MAX_PAYLOAD {
             break;
         }
         message(o, &m);
+        i += 1;
     }
-    Status::Ok
+    (Status::Ok, Some(i).filter(|&i| i < n && i > from))
 }
 
 /// `MSG_SEND` (LINK-45): to and the text, each a length and text; queued as the radio's compose queues it (the
