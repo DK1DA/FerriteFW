@@ -66,7 +66,7 @@ pub(crate) type Opt = (&'static str, Act, &'static str);
 
 /// The rows: label, action, help line.
 const LOG: [Opt; 3] = [
-    ("Mark all read", Act::Do(&Op::ReadAll), "Clears the inbox count"),
+    ("Mark all read", Act::Do(&Op::ReadAll), "Clears the log's new count"),
     ("Clear the log", Act::Confirm(&Op::ClearLog), "Every event goes, unread ones too"),
     ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DTMF, popups, weather"),
 ];

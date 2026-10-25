@@ -1,4 +1,4 @@
-//! The event log, the inbox (MENU 0 4 1; manual chapters 24 and 27, INBOX-6 to INBOX-10, MENU-26), and one
+//! The event log (MENU 0 4 1; manual chapters 24 and 27, INBOX-6 to INBOX-10, MENU-26), and one
 //! event's detail (C1, C2). Newest first, unread marked; ◀▶ filter by source with that source's unread count
 //! (INBOX-9); OK opens the detail and marks it read; # "Go" tunes the active slot to it (INBOX-10); hold MENU
 //! for the log's options (mark all read, clear, decoder settings).
@@ -59,7 +59,7 @@ impl View for Log {
     }
 
     fn title(self, _: &App, b: &mut Buf<10>) {
-        b.set(if self.detail { b"Event" } else { b"Inbox" });
+        b.set(if self.detail { b"Event" } else { b"Event log" });
     }
 
     fn key(self, app: &mut App, e: KeyEvent, store: &impl ChannelStore) {

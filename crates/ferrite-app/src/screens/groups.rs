@@ -77,7 +77,7 @@ const G3: [Entry; 6] = [
     Entry("Tone search||Find the CTCSS or DCS in use."),
 ];
 const G4: [Entry; 5] = [
-    Entry("Event log||Every decode and alert: the inbox."),
+    Entry("Event log||Every decode and alert."),
     Entry("POCSAG|439.9875|Pager frequency, baud, capcodes."),
     Entry("DTMF decode|On|DTMF digits heard, on the slot's card."),
     Entry("Popups|On|A 3 s toast for each decode."),

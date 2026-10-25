@@ -116,7 +116,7 @@ pub enum Dest {
     Squelch,
 
     // ---- C: lists and data ----
-    /// C1: the event log, the inbox (MENU 0 4 1).
+    /// C1: the event log (MENU 0 4 1).
     EventLog,
     /// C2: one event.
     EventDetail,
