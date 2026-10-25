@@ -88,6 +88,8 @@ pub struct Ports {
     /// one at a time, 1.4 KB).
     ui: ferrite_core::liveview::Track,
     ui_owner: Option<usize>,
+    /// LINK-51: the one compression block, for the first session that asks (2.6 KB of windows, 0.5 KB of frames).
+    z: link::z::Zip,
 }
 
 impl Default for Ports {
@@ -100,7 +102,7 @@ impl Ports {
     pub const fn new() -> Self {
         let mut bt = Session::new(false);
         bt.set_max_baud(0); // LINK-15.1: Bluetooth's `BAUD` takes only the module's two rates
-        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, cable_last: None, dropped: 0, dbg: None, now: 0, ui: ferrite_core::liveview::Track::new(), ui_owner: None }
+        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, cable_last: None, dropped: 0, dbg: None, now: 0, ui: ferrite_core::liveview::Track::new(), ui_owner: None, z: link::z::Zip::new() }
     }
 
     /// The fastest cable rate the caller's UART runs within 2 % (LINK-11).
@@ -173,6 +175,10 @@ impl Ports {
     pub fn feed<S: ChannelStore>(&mut self, app: &mut App, store: &S, to: To, b: u8, now: u32) {
         match to {
             To::Term => self.term.feed(app, b, now, store),
+            To::Link(p) if self.z.owner == Some(p.i()) => {
+                let s = &mut self.links[p.i()];
+                self.z.take(b, &mut |c| s.feed(c, now)); // LINK-51: decoded, then the session's as ever
+            }
             To::Link(p) => self.links[p.i()].feed(b, now),
             To::Kiss | To::Drop => {}
         }
@@ -199,8 +205,33 @@ impl Ports {
         let writing = [self.links[0].writing(), self.links[1].writing()];
         self.links[0].set_other_writing(writing[1]);
         self.links[1].set_other_writing(writing[0]);
-        self.links[0].poll(app, store, dev, live, now, cable);
-        self.links[1].poll(app, store, dev, live, now, bt);
+        // LINK-51: the block's owner gives it back when its session ends or goes quiet; it is free for whoever asks.
+        if let Some(o) = self.z.owner.filter(|&o| !self.links[o].lz || !self.links[o].active(now)) {
+            self.links[o].lz = false;
+            self.z.owner = None;
+            self.z.reset();
+        }
+        for i in 0..2 {
+            self.links[i].lz_free = self.z.owner.is_none_or(|o| o == i);
+        }
+        let z = &mut self.z;
+        if z.owner == Some(0) {
+            self.links[0].poll(app, store, dev, live, now, &mut link::z::ZOut { z, inner: cable });
+        } else {
+            self.links[0].poll(app, store, dev, live, now, cable);
+        }
+        let z = &mut self.z;
+        if z.owner == Some(1) {
+            self.links[1].poll(app, store, dev, live, now, &mut link::z::ZOut { z, inner: bt });
+        } else {
+            self.links[1].poll(app, store, dev, live, now, bt);
+        }
+        for i in 0..2 {
+            if self.links[i].lz && self.z.owner.is_none() {
+                self.z.owner = Some(i); // its HELLO answer has gone, plain: both ends start from here
+                self.z.reset();
+            }
+        }
         // LINK-46, LINK-47: events for subscribed sessions; the Live View to the newest subscription's port.
         for i in 0..2 {
             if self.links[i].ui_starting() && self.ui_owner != Some(i) {
@@ -216,8 +247,19 @@ impl Ports {
         let ui = &mut self.ui;
         let owner = self.ui_owner;
         let [c, b] = &mut self.links;
-        c.events(app, store, dev, live, now, if owner == Some(0) { Some(&mut *ui) } else { None }, cable);
-        b.events(app, store, dev, live, now, if owner == Some(1) { Some(ui) } else { None }, bt);
+        let z = &mut self.z;
+        let zo = z.owner;
+        if zo == Some(0) {
+            c.events(app, store, dev, live, now, if owner == Some(0) { Some(&mut *ui) } else { None }, &mut link::z::ZOut { z, inner: cable });
+        } else {
+            c.events(app, store, dev, live, now, if owner == Some(0) { Some(&mut *ui) } else { None }, cable);
+        }
+        let z = &mut self.z;
+        if zo == Some(1) {
+            b.events(app, store, dev, live, now, if owner == Some(1) { Some(ui) } else { None }, &mut link::z::ZOut { z, inner: bt });
+        } else {
+            b.events(app, store, dev, live, now, if owner == Some(1) { Some(ui) } else { None }, bt);
+        }
     }
 
     /// A debug command's next request for the firmware (TERM-21), from the terminal or from a command run over

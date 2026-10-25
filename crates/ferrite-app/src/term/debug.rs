@@ -289,11 +289,11 @@ impl Job {
                 let us = |c: u32, mhz: u32| c / mhz.max(1);
                 match self.line {
                     0 => put!(out, "  linkz: {} B plain, {} MHz now; cycles, then us at 24 and 120 MHz", v[1], v[0]),
-                    k @ 1..=3 => {
+                    k @ 1..=2 => {
                         let i = 2 + (k as usize - 1) * 3;
-                        let name = ["T ", "L ", "LD"][k as usize - 1];
+                        let name = ["down", "up  "][k as usize - 1];
                         put!(out, "  {} {} B, encode {} cyc ({} / {} us), decode {} cyc ({} / {} us)", name, v[i], v[i + 1], us(v[i + 1], 24), us(v[i + 1], 120), v[i + 2], us(v[i + 2], 24), us(v[i + 2], 120));
-                        if k == 3 {
+                        if k == 2 {
                             self.st = St::Over;
                         }
                     }

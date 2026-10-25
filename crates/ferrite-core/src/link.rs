@@ -169,6 +169,11 @@ pub mod caps {
     pub const STREAM: u8 = 1;
     /// Two `WRITE_MANY` frames may be in flight (LINK-41.1): the receive rings hold a whole second frame.
     pub const WINDOW: u8 = 2;
+    /// This session's frames are compressed from the `HELLO` answer on (LINK-51): set only when the `HELLO` asked
+    /// (bit 0 of its first reserved byte) and the radio's one compression block was free.
+    pub const LZ: u8 = 4;
+    /// `WRITE_MANY` deletes channels (a record of length 0, LINK-41.2).
+    pub const DELETE_MANY: u8 = 8;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).

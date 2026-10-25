@@ -552,8 +552,8 @@ pub enum DebugAns {
     /// TERM-27: `bt stat`.
     BtStat(BtStats),
     #[cfg(feature = "bench")]
-    /// `bt linkz`: the core clock (MHz), the samples' plain bytes, then for T, L and LD: bytes, encode cycles,
-    /// decode cycles.
+    /// `bt linkz` (LINK-51): the core clock (MHz), the samples' plain bytes, then for the radio-to-PC and PC-to-radio
+    /// windows: bytes, encode cycles, decode cycles (two values unused).
     Linkz([u32; 11]),
     #[cfg(feature = "bench")]
     /// TERM-29: whether both band receive selects are held on now.

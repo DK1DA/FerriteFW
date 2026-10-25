@@ -84,7 +84,8 @@ HELLO, INFO, AUTH, READ, WRITE, DELETE, BEGIN, END, SLOT, BAUD, REBOOT, KEY, CMD
     0x01, 0x02, 0x04, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x20, 0x21, 0x30, 0x31, 0x32, 0x33)
 USED, READ_MANY, WRITE_MANY, LOG_READ = 0x15, 0x17, 0x18, 0x40  # LINK-39 - LINK-42
 STREAM, STREAM_MORE = 0x19, 0x1A  # LINK-50
-CAP_STREAM, CAP_WINDOW = 1, 2  # LINK-35.2: HELLO's caps byte, after the build byte
+CAP_STREAM, CAP_WINDOW, CAP_LZ, CAP_DELETE_MANY = 1, 2, 4, 8  # LINK-35.2: HELLO's caps byte, after the build byte
+Z = 0x7D  # LINK-51: a compressed frame (| 0x80 for an answer): the inner type, the frame count, the coded payload
 LOG_SOURCES = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"]  # LINK-42's source byte
 SUBSCRIBE, EVENT, HEARD, MSGS, MSG_SEND, MSG_STOP = 0x50, 0x51, 0x52, 0x53, 0x54, 0x55  # LINK-43 - LINK-49
 SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
@@ -304,6 +305,9 @@ class Link:
         self.p, self.seq = port, 0
         self.caps = 0  # LINK-35.2, from the HELLO answer (note_hello)
         self.window = 1  # LINK-41.1: WRITE_MANY frames in flight, 2 once HELLO says the radio takes them
+        # LINK-51: compression, asked for in every HELLO (FERRITE_LZ=0: never), on when the answer grants it
+        self.want_lz = os.environ.get("FERRITE_LZ", "1") != "0"
+        self.lz = None  # (up encoder, down decoder, [up count, down count]) while on
         self.events = []  # EVENT frames (LINK-46) as they arrive: (event counter, payload)
         # Ctrl-C closes the terminal if it has the cable (TERM-2; nothing otherwise); its goodbye text is dropped.
         self.p.write(b"\x03")
@@ -321,6 +325,12 @@ class Link:
     def send(self, ty, payload=b""):
         """One request, not waiting for its answer; its seq."""
         self.seq = (self.seq + 1) & 0xFF
+        if self.lz and ty != HELLO:
+            up, _, n = self.lz
+            coded = up.encode(payload)  # the window takes it either way, as the radio's will
+            if len(coded) + 2 < len(payload):
+                ty, payload = Z, bytes([ty, n[0] & 0xFF]) + coded
+            n[0] += 1
         body = bytes([ty, self.seq]) + payload
         sync = b"\x00" if time.time() - self.sent_at >= self.QUIET_S else b""
         self.p.write(sync + cobs_encode(body + struct.pack("<H", crc16(body))) + b"\x00")
@@ -342,16 +352,36 @@ class Link:
                 continue  # terminal text, or a damaged frame
             if len(f) < 5 or crc16(f[:-2]) != struct.unpack("<H", f[-2:])[0]:
                 continue
+            if self.lz and f[0] != HELLO | 0x80:
+                _, down, n = self.lz
+                pl = bytes(f[2:-2])
+                if f[0] & 0x7F == Z:
+                    if pl[1] != n[1] & 0xFF:
+                        n[1] += 1
+                        continue  # a frame lost on the way: this one can't be read (a new HELLO starts over)
+                    plain = down.decode(pl[2:])
+                    n[1] += 1
+                    f = bytes([pl[0], f[1]]) + plain + b"\0\0"
+                else:
+                    down.seen(pl)
+                    n[1] += 1
             if f[0] == EVENT:  # pushed by the radio, not an answer (LINK-46): its type has no 0x80 bit
                 self.events.append((f[1], bytes(f[2:-2])))
                 continue
             out.append((f[0], f[1], f[2], f[3:-2]))
         return out
 
+    def hello(self, name=b"ferrite_link.py"):
+        """HELLO, asking for compression (LINK-51) unless FERRITE_LZ=0; the answer's caps noted."""
+        return self.note_hello(self.ok(HELLO, bytes([PROTOCOL, 1 if self.want_lz else 0]) + bytes(7) + name))
+
     def note_hello(self, hello):
         """LINK-35.2: what the radio can do beyond protocol 2, from HELLO's answer (version text, build, caps)."""
         rest = text(hello[3:])[1]
-        self.caps = rest[1] if len(rest) > 1 and not os.environ.get("FERRITE_NO_STREAM") else 0
+        caps = rest[1] if len(rest) > 1 else 0
+        self.caps = caps if not os.environ.get("FERRITE_NO_STREAM") else caps & ~CAP_STREAM
+        import linkz
+        self.lz = (linkz.Lz(linkz.UP), linkz.Lz(linkz.DOWN), [0, 0]) if caps & CAP_LZ else None
         self.window = int(os.environ.get("FERRITE_WINDOW", "2" if rest[1:2] and rest[1] & CAP_WINDOW else "1"))
         return hello
 
@@ -368,6 +398,7 @@ class Link:
                 if t not in (STREAM | 0x80, STREAM_MORE | 0x80):
                     continue
                 if s != want:
+                    self.resync()
                     raise StreamGap(out)  # a frame lost on the way: ask again from what came
                 if status != 0:
                     raise RadioError(status, rest)
@@ -377,7 +408,15 @@ class Link:
                 if t == STREAM | 0x80:
                     self.seq = (want + 1) & 0xFF
                     return out
+        self.resync()
         raise StreamGap(out)
+
+    def resync(self):
+        """LINK-51: after a lost frame, a HELLO starts both ends' windows over (while compression is on)."""
+        if self.lz is not None:
+            time.sleep(0.3)
+            self.answers()
+            self.hello()
 
     def ask(self, ty, payload=b"", timeout=None, retry_pending=30):
         slow = getattr(self.p, "slow", False)
@@ -398,11 +437,17 @@ class Link:
                             time.sleep(1)
                             pending = True
                             break
+                        if ty == HELLO and status == 0:
+                            self.note_hello(bytes(rest))  # LINK-51: whatever sent it, its answer says whether compression is on
                         return status, rest
             if not pending:
                 # A frame sent just after the radio restarted (or after 10 s of quiet) can go to the terminal (TERM-2):
                 # a read-only request with nothing back is sent once more after a 0x00 sync. Never a KEY, CMD, MORE
                 # or write: repeating those would act twice or skip a chunk.
+                if not resynced and self.lz is not None and ty != HELLO:
+                    resynced = True  # LINK-51: a lost frame leaves the windows apart: start them over, ask again
+                    self.resync()
+                    continue
                 if not resynced and ty in (HELLO, INFO, UI):
                     resynced = True
                     self.p.write(b"\x00")
@@ -513,19 +558,28 @@ class Link:
         # LINK-41.1: `window` frames in flight; the radio takes the next from its UART's ring as it answers each, so
         # the store never waits for a round trip. In order: a refusal stops it (frames after it may have gone).
         timeout = 8.0 if getattr(self.p, "slow", False) else 4.0
-        sent, flight, k = 0, [], 0
+        sent, flight, k, lost = 0, [], 0, 0
         while k < len(frames) or flight:
             while k < len(frames) and len(flight) < self.window:
-                flight.append(self.send(WRITE_MANY, frames[k]))
+                flight.append((self.send(WRITE_MANY, frames[k]), k))
                 k += 1
             end = time.time() + timeout
             got = None
             while got is None and time.time() < end:
                 for t, s, status, rest in self.answers():
-                    if t == WRITE_MANY | 0x80 and s == flight[0]:
+                    if t == WRITE_MANY | 0x80 and s == flight[0][0]:
                         got = (status, rest)
             if got is None:
-                raise TimeoutError(f"WRITE_MANY: no answer in {timeout:.0f} s after {sent} written")
+                # a frame or its answer lost on the way: start the windows over (LINK-51) and send again from the
+                # first frame not answered (writing a record again changes nothing)
+                lost += 1
+                if os.environ.get("FERRITE_DEBUG"):
+                    print(f"WRITE_MANY: no answer to frame {flight[0][1]} of {len(frames)}; again (lz counts {self.lz and self.lz[2]})", file=sys.stderr)
+                if lost > 3:
+                    raise TimeoutError(f"WRITE_MANY: no answer in {timeout:.0f} s after {sent} written")
+                k, flight = flight[0][1], []
+                self.resync()
+                continue
             s, rest = got
             flight.pop(0)
             if s != 0:
@@ -533,6 +587,15 @@ class Link:
                 sys.exit(f"WRITE_MANY: {sent + done} written, then {why(s, rest[1:])}")
             sent += rest[0]
         return sent
+
+    def delete_many(self, what, idxs):
+        """LINK-41.2: channels deleted several to a WRITE_MANY (records of length 0) when the radio says it can;
+        else one DELETE each. How many went."""
+        if what == CHANNEL and self.caps & CAP_DELETE_MANY:
+            return self.write_many(CHANNEL, [(i, b"") for i in idxs])
+        for i in idxs:
+            self.ok(DELETE, struct.pack("<BH", what, i))
+        return len(idxs)
 
     def log(self, most=0):
         """LINK-42: the event log newest first, `most` records (0: all): dicts."""
@@ -710,7 +773,7 @@ class Radio:
     def __init__(self, port, pin=None, name=b"ferrite_link.py"):
         self.port = Port(port)
         self.link = Link(self.port)
-        hello = self.link.note_hello(self.link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + name))
+        hello = self.link.hello(name)
         if not hello[2]:
             if not pin:
                 raise RadioError(5)
@@ -1098,16 +1161,16 @@ def ble_fast(link, name=b"ferrite_link.py"):
     ok = p.unlock()
     for _ in range(3):
         try:
-            link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + name)
+            link.hello(name)
             return 115_200 if ok else 9_600
         except (TimeoutError, RadioError):
             time.sleep(0.5)
-    link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + name)
+    link.hello(name)
     return 9_600
 
 
 def run(link, a):
-    hello = link.note_hello(link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + b"ferrite_link.py"))
+    hello = link.hello()
     ble_fast(link)
     if not hello[2]:
         if not a.pin:
@@ -1225,7 +1288,7 @@ def run(link, a):
         link.ok(BAUD, struct.pack("<I", rate))
         time.sleep(0.05)
         link.p.baud(rate)
-        link.ok(HELLO, bytes([PROTOCOL]) + bytes(8) + b"ferrite_link.py")  # within 1 s, or the radio goes back
+        link.hello()  # within 1 s, or the radio goes back
         print(f"now at {rate}")
     elif a.cmd == "aprs-cfg":
         rec = link.read(APRS, 0)

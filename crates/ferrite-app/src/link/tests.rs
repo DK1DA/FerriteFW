@@ -188,7 +188,7 @@ fn hello_and_info_give_the_build() {
         assert_eq!(build::dry(b), tx && on, "dry {b:#x}");
         let (_, a) = pc.ask(msg::HELLO, &[PROTOCOL]);
         let v = 4 + a[3] as usize;
-        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps");
+        assert_eq!(a[v..], [b, ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY], "HELLO, tx {tx} on {on} bench {bench}; LINK-35.2's caps (no LZ: not asked)");
         let (_, a) = pc.ask(msg::INFO, &[]);
         let v = 1 + a[0] as usize + 7;
         let c = v + 1 + a[v] as usize;
@@ -1465,7 +1465,7 @@ impl Pc {
 }
 
 /// A channel record for number `n` (0-based) at `mhz10` (10 Hz units), named `name`.
-fn chan_rec(n: u16, rx: u32, name: &[u8]) -> Vec<u8> {
+pub(crate) fn chan_rec(n: u16, rx: u32, name: &[u8]) -> Vec<u8> {
     let mut c = Channel { num: n, zone: NO_ZONE, rx, name: [0; 16], cfg: SlotCfg::default(), flags: 0, tones: 0 };
     c.set_name(name);
     let mut out = std::vec![0u8; 64];

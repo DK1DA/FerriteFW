@@ -654,6 +654,21 @@ impl App {
         if !store.data().request(data::Op::DeleteChannel(num)) {
             self.write(ChanWrite::Delete(num)); // a store whose records have no Data owner yet
         }
+        self.channel_gone(num);
+    }
+
+    /// LINK-41.2: [`App::delete_channel`] for a link's `WRITE_MANY`: straight into the store's queue, so deletes
+    /// in one sector share its rewrite (decision 227).
+    pub(crate) fn delete_channel_queued(&mut self, num: u16, store: &impl chan::ChannelStore) {
+        if store.queue_write(ChanWrite::Delete(num)) {
+            self.channel_gone(num);
+        } else {
+            self.delete_channel(num, store);
+        }
+    }
+
+    /// Slots on a deleted channel go to VFO, and it stops being the home channel (CHAN-13, CHAN-18).
+    fn channel_gone(&mut self, num: u16) {
         for s in 0..SLOTS {
             if self.slots[s].ch.is_some_and(|c| c.num == num) {
                 let sl = &mut self.slots[s];

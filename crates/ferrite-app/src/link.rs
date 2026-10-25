@@ -82,6 +82,10 @@ pub struct Session {
     many: Option<Many>,
     /// A `STREAM` under way (LINK-50).
     stream: Option<Stream>,
+    /// LINK-51: the shared compression block is free for this session (set by the ports before each poll), and
+    /// whether its last `HELLO` asked for it and got it.
+    pub lz_free: bool,
+    pub lz: bool,
     /// Events pushed to this session (LINK-46).
     sub: sub::Sub,
 }
@@ -148,6 +152,8 @@ impl Session {
             now: 0,
             many: None,
             stream: None,
+            lz_free: false,
+            lz: false,
             sub: sub::Sub::new(),
         }
     }
@@ -169,6 +175,7 @@ impl Session {
         self.by = if trusted { crate::remote::BY_CABLE } else { crate::remote::BY_BT };
         self.run = Run::Off;
         self.many = None;
+        self.lz = false; // LINK-51: the shared block goes back
         self.unsubscribe(); // LINK-46: events end with the connection
     }
 
@@ -604,12 +611,15 @@ impl Session {
     }
 
     /// `HELLO`: the protocol, the largest payload, and whether this session may go on (0: `AUTH` first).
-    fn hello(&mut self, app: &App, dev: &Device, _p: &[u8], o: &mut Out) -> Status {
+    fn hello(&mut self, app: &App, dev: &Device, p: &[u8], o: &mut Out) -> Status {
         self.hellos = self.hellos.wrapping_add(1);
+        // LINK-51: the first reserved byte's bit 0 asks for compression; granted while the shared block is free
+        self.lz = p.get(1).is_some_and(|b| b & 1 != 0) && self.lz_free;
         o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW]); // LINK-35.2
+        let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz]); // LINK-35.2
         Status::Ok
     }
 
@@ -1268,6 +1278,16 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
         Status::Invalid
     };
     match w {
+        what::CHANNEL if idx < MAX_CHANNELS && rec.is_empty() => {
+            // LINK-41.2: a record of length 0 deletes the channel (none there: nothing to do)
+            if crate::term::list::radio_channel(app) == Some(idx) {
+                return Status::Busy; // open in the radio's editor (TERM-17)
+            }
+            if st.get(idx).is_some() {
+                app.delete_channel_queued(idx, st);
+            }
+            Status::Ok
+        }
         what::CHANNEL if idx < MAX_CHANNELS => {
             let mut c = Channel { num: idx, zone: NO_ZONE, rx: 0, name: [0; 16], cfg: SlotCfg::default(), flags: 0, tones: 0 };
             let mut r = Rd { b: rec, n: 0 };
@@ -1390,8 +1410,9 @@ fn apply<S: ChannelStore>(app: &mut App, st: &S, w: u8, idx: u16, rec: &[u8], o:
 }
 
 mod sub;
+pub mod z;
 /// LINK-43: the APRS record's length, for Ferrite Console (which reads its layout from this crate).
 pub use sub::APRS_REC;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
