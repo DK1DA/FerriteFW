@@ -508,7 +508,7 @@ pub(super) fn aprs_apply(app: &mut App, rec: &[u8], o: &mut Out) -> Status {
         return invalid(o, "power or beacon after voice out of range");
     }
     if c.path >= c.path_choices() || (c.path as usize) > PATHS.len() {
-        return invalid(o, "path: none, WIDE1-1, WIDE1-1,WIDE2-1, or custom once set");
+        return invalid(o, "path: none, WIDE1-1, WIDE1-1,WIDE2-1, APRSAT, ARISS, or custom once set");
     }
     if c.digi & !0x73 != 0 || c.digi >> 4 & 7 > crate::aprs::DIGI_WAIT_MAX {
         return invalid(o, "digipeater out of range");

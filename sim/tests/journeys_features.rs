@@ -182,12 +182,14 @@ fn broadcast() {
     r.run("press OK; expect screen \"Channel browser\"; expect text \"Broadcast\"; expect text \"No stations saved\"");
 }
 
-/// Hold MENU in HF mode opens its options: step, bandwidth, AGC, LNA, fine tune and the recent list (HF-14).
+/// Hold MENU in HF mode opens its options: step, bandwidth, AGC and the recent list (HF-14); LNA and fine tune
+/// stay hidden until SSB is built (HF-35).
 #[test]
 fn hf_options() {
     let mut r = Radio::new();
     r.run("menu 0 3 4; wait 8s; expect screen \"HF mode\"");
-    r.run("hold OK; expect text \"Step\"; expect text \"Bandwidth\"; expect text \"AGC\"; expect text \"LNA\"");
+    r.run("hold OK; expect text \"Step\"; expect text \"Bandwidth\"; expect text \"AGC\"; expect text \"Recent list\"");
+    assert!(!r.text().contains("LNA") && !r.text().contains("Fine tune"), "HF-35: hidden until SSB");
 }
 
 /// A weather alert takes the screen; a message only shows a toast (WX-9).

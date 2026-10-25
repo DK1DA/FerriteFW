@@ -138,7 +138,7 @@ impl Radio {
             RadioCmd::Broadcast(b) => {
                 self.seek_cancel(); // a station, AM or off ends a seek
                 // Errors: the UI shows no station. The cable log (TERM-28) says what the SI4732 did.
-                let r = broadcast(&mut self.si, b).await;
+                let r = broadcast(&mut self.si, b, self.si_opts).await;
                 // BCR-2, BCR-5: FM's live report (frequency, signal, stereo, RDS) from here on; the tick polls it.
                 self.fm = match (b, &r) {
                     (BroadcastCmd::Off, _) | (BroadcastCmd::Am(_), _) | (_, Err(_)) => None,
@@ -165,6 +165,15 @@ impl Radio {
             RadioCmd::BcastSlot(s) => self.bcast_slot = s,
             RadioCmd::Hf { freq, mode, on } => self.hf(freq, mode, on).await,
             RadioCmd::HfSeek { up } => self.hf_seek(up),
+            RadioCmd::SiOpts(o) => {
+                // BCR-32, HF-35: kept for the next power-up, and applied now if the SI4732 runs
+                if o != self.si_opts {
+                    self.si_opts = o;
+                    if si_apply(&mut self.si, o).is_err() {
+                        log(b"si opts FAILED", 0);
+                    }
+                }
+            }
             RadioCmd::Shutdown => {
                 // TX-33: power off while keyed (a pass of the repeater too) unkeys first: PA drive 0, the chip out
                 // of transmit, the unkey wait, every select off, before any chip sleeps or the SI4732 is touched
@@ -183,7 +192,7 @@ impl Radio {
                     self.tune_chip(n, None).await;
                 }
                 self.seek_cancel();
-                let _ = broadcast(&mut self.si, BroadcastCmd::Off).await;
+                let _ = broadcast(&mut self.si, BroadcastCmd::Off, self.si_opts).await;
                 let mut s = Steps::default();
                 self.path.safe(now_ms() as u32, &mut s);
                 self.run(&s).await;

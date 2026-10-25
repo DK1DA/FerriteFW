@@ -12,7 +12,7 @@ impl Radio {
         self.seek_cancel(); // HF-31: a retune or off ends a seek
         if !on {
             if self.hf.take().is_some_and(|h| h.si) {
-                let _ = broadcast(&mut self.si, BroadcastCmd::Off).await;
+                let _ = broadcast(&mut self.si, BroadcastCmd::Off, self.si_opts).await;
             }
             self.tuned = [None; 2];
             self.live.mode = ModeLive::Off;
@@ -38,12 +38,12 @@ impl Radio {
         if si {
             // AM only until the SSB patch is imported (HF-24; the UI asks for AM without it).
             let khz = (freq / 100) as u16;
-            let ok = broadcast(&mut self.si, BroadcastCmd::Am(khz)).await.is_ok();
+            let ok = broadcast(&mut self.si, BroadcastCmd::Am(khz), self.si_opts).await.is_ok();
             log(if ok { b"hf si am ok, khz " } else { b"hf si FAILED, khz " }, khz as u32);
             speaker(ok && !self.muted);
         } else {
             if was.is_some_and(|h| h.si) {
-                let _ = broadcast(&mut self.si, BroadcastCmd::Off).await;
+                let _ = broadcast(&mut self.si, BroadcastCmd::Off, self.si_opts).await;
             }
             self.tune_chip(1, Some((HF_SLOT, freq))).await;
             self.chip(1).af_out(AfOut::Normal);
@@ -86,7 +86,13 @@ impl Radio {
         }
         let d = &mut BusyDelay;
         let (lo, hi) = HF_SEEK_KHZ;
-        if self.si.am_seek_band(lo, hi, d).and_then(|_| self.si.seek_start(up, false, d)).is_err() {
+        // HF-34, HF-35: the seek steps by the band's channel spacing (MW 9 or 10 kHz, LW 9, shortwave 5)
+        let space = self.si_opts.am_space(self.hf.map_or(0, |h| (h.freq / 100) as u16));
+        if self.si.am_seek_band(lo, hi, d)
+            .and_then(|_| self.si.set_property(si4732::prop::AM_SEEK_FREQ_SPACING, space, d))
+            .and_then(|_| self.si.seek_start(up, false, d))
+            .is_err()
+        {
             return;
         }
         let now = now_ms() as u32;
@@ -97,7 +103,7 @@ impl Radio {
     /// FM broadcast's seek (BCR-18), the same way: started here, polled by the tick.
     pub(super) async fn bcast_seek(&mut self, up: bool) {
         self.seek_cancel();
-        if self.hf.is_some() || broadcast(&mut self.si, BroadcastCmd::Seek { up }).await.is_err() {
+        if self.hf.is_some() || broadcast(&mut self.si, BroadcastCmd::Seek { up }, self.si_opts).await.is_err() {
             return log(b"si FAILED, cmd ", 3);
         }
         let now = now_ms() as u32;

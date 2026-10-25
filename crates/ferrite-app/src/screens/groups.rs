@@ -153,7 +153,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ]),
     ((3, 1), &[
         Entry("Step|100 kHz|Tuning step."),
-        Entry("AGC|Auto|Gain control."),
+        Entry("AGC|Auto|Auto, or a fixed gain: 1 the most, 10 the least."),
         Entry("Radio monitor|On|A slot opening interrupts the broadcast."),
         Entry("Sleep timer|Off|End the broadcast after a time."),
     ]),
@@ -184,7 +184,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry("Mic-E|Off|Short beacons with a status."),
     ]),
     ((5, 6), &[
-        Entry("Mode|Off|Manual, timed, distance or smart."),
+        Entry("Mode|Off|Manual, timed or smart."),
         Entry("After voice TX|Off|Beacon after you talk."),
         Entry("Power|Low|Beacon and message power."),
     ]),
@@ -194,7 +194,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
         Entry("Wait|0 s|Delay before relaying, 0-5 s."),
     ]),
     ((5, 9), &[
-        Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, or custom."),
+        Entry("Path|WIDE1-1,WIDE2-1|None, WIDE1-1, WIDE1-1,WIDE2-1, APRSAT, ARISS, or custom."),
         Entry("Custom path|None|Your own path, like WIDE2-2: OK types it."),
         Entry("TX delay|300 ms|Carrier before data."),
         Entry("TX level|Mid|Modulation level."),
@@ -363,6 +363,8 @@ enum Tell {
     BusyDefault,
     MsgVol,
     AprsMute,
+    /// BCR-32, HF-35: the SI4732's receive settings.
+    SiOpts,
 }
 
 /// How a setting in [`SETTINGS`] shows, steps and resets.
@@ -426,8 +428,8 @@ static SETTINGS: [Setting; 94] = [
     field!([1, 6, 3], scan_tx: bool, Kind::Flip(&ON_OFF), ScanTx),
     field!([1, 6, 4], scan_return_hit: bool, Kind::Flip(&["Start", "Last hit"]), Nothing),
     field!([2, 4, 0], ch_display: u8, Kind::Pick(&crate::settings::CHANNEL_DISPLAY), Nothing),
-    field!([3, 1, 1], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), Nothing),
-    field!([3, 1, 2], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), Nothing),
+    field!([3, 1, 1], fm_step: u8, Kind::Round(FM_STEPS.len() as u8, fm_step_text), SiOpts),
+    field!([3, 1, 2], fm_agc: u8, Kind::Round(crate::settings::AGC_MAX + 1, agc_text), SiOpts),
     field!([3, 1, 3], fm_monitor: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([3, 1, 4], fm_sleep: u8, Kind::Round(SLEEP_TIMES.len() as u8, sleep_text), Nothing),
     field!([3, 2, 1], scope_bars: u8, Kind::Round(SCOPE_BAR_COUNTS.len() as u8, bars_text), Nothing),
@@ -555,6 +557,7 @@ fn tell(app: &mut App, t: Tell) {
         Tell::BusyDefault => app.set_busy_default(),
         // APRS-6.2: the sound at its new volume, to hear it
         Tell::AprsMute => app.aprs_mute_sync(),
+        Tell::SiOpts => app.send_si_opts(),
         Tell::MsgVol => app.out.push(RadioCmd::Chime { sound: app.aprs_cfg().sound.max(1), level: app.set.msg_level() }),
     }
 }
@@ -1107,7 +1110,8 @@ pub(crate) fn agc_text(v: u8, b: &mut Buf<24>) {
         b.set(b"Auto");
     } else {
         b.clear();
-        let _ = uwrite!(b, "{} dB", (v.min(crate::settings::AGC_MAX) - 1) * 4);
+        // BCR-32, HF-35: a fixed gain index scaled to the chip's (FM 0-26, AM 0-37): 1 the most gain
+        let _ = uwrite!(b, "Fixed {}", v.min(crate::settings::AGC_MAX));
     }
 }
 

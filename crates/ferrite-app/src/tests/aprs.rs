@@ -458,14 +458,19 @@ fn card_text() {
     a.app.render(&mut fb, &a.live, &dev, &a.s);
 }
 
-/// APRS-26, APRS-27: 0 5 6 2, 0 5 9 1 and 0 5 7 change the APRS settings, and # puts each back.
+/// APRS-26, APRS-26.1, APRS-27: 0 5 6 2, 0 5 9 1 (with the APRSAT and ARISS presets) and 0 5 7 change the APRS
+/// settings, and # puts each back.
 #[test]
 fn path_digipeater_and_after_voice_settings() {
     use crate::screens::groups::{change, reset};
     let mut a = A::new();
     assert_eq!(&*a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice(), b"WIDE2-1"]);
     change(&mut a.app, &[5, 9, 1], 1);
-    assert!(a.app.aprs_cfg().path().is_empty(), "WIDE1-1,WIDE2-1 then None");
+    assert_eq!(&*a.app.aprs_cfg().path(), &[b"APRSAT".as_slice()], "APRS-26.1: WIDE1-1,WIDE2-1 then APRSAT");
+    change(&mut a.app, &[5, 9, 1], 1);
+    assert_eq!(&*a.app.aprs_cfg().path(), &[b"ARISS".as_slice()], "then ARISS");
+    change(&mut a.app, &[5, 9, 1], 1);
+    assert!(a.app.aprs_cfg().path().is_empty(), "then None");
     change(&mut a.app, &[5, 9, 1], 1);
     assert_eq!(&*a.app.aprs_cfg().path(), &[b"WIDE1-1".as_slice()]);
     reset(&mut a.app, &[5, 9, 1]);
@@ -564,7 +569,7 @@ fn station_shows_its_last_message() {
     assert!(s.msg.is_empty());
 }
 
-/// APRS-26: 0 5 9 2's custom path: checked, kept, chosen at once, offered by 0 5 9 1 after the three, and # forgets
+/// APRS-26: 0 5 9 2's custom path: checked, kept, chosen at once, offered by 0 5 9 1 after the presets, and # forgets
 /// it (the path going back to the default when it was in use).
 #[test]
 fn custom_path() {
@@ -577,13 +582,13 @@ fn custom_path() {
         assert!(!path_ok(bad), "{:?}", core::str::from_utf8(bad));
     }
     let mut a = A::new();
-    assert_eq!(a.app.aprs_cfg().path_choices(), 3, "no custom path: three choices");
+    assert_eq!(a.app.aprs_cfg().path_choices(), 5, "no custom path: five choices");
     a.app.set_aprs_custom_path(b"WIDE2-2");
     let c = a.app.aprs_cfg();
     assert_eq!((c.path, &*c.path()), (PATH_CUSTOM, &[b"WIDE2-2".as_slice()][..]));
     assert_eq!(c.path_name(), b"WIDE2-2");
     change(&mut a.app, &[5, 9, 1], 1);
-    assert_eq!(a.app.aprs_cfg().path, 0, "Custom then None: four choices");
+    assert_eq!(a.app.aprs_cfg().path, 0, "Custom then None: six choices");
     change(&mut a.app, &[5, 9, 1], -1);
     assert_eq!(a.app.aprs_cfg().path, PATH_CUSTOM);
     a.app.set_aprs_custom_path(b"WIDE1-1,WIDE2-2");

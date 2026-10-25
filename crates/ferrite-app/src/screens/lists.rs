@@ -47,6 +47,7 @@ impl App {
     /// is left alone.
     pub(crate) fn region_steps(&mut self) {
         use crate::slot::{band_near, band_step, BAND_125M, BAND_VHF, BANDS, STEP_5K};
+        self.send_si_opts(); // BCR-32: FM de-emphasis and band, MW spacing follow the region
         let region = self.set.region();
         for i in 0..self.slots.len() {
             let s = &mut self.slots[i];

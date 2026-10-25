@@ -45,6 +45,7 @@ pub mod prop {
     pub const SSB_BFO: u16 = 0x0100;
     pub const SSB_MODE: u16 = 0x0101;
     pub const FM_DEEMPHASIS: u16 = 0x1100;
+    pub const FM_CHANNEL_FILTER: u16 = 0x1102;
     pub const FM_SEEK_BAND_BOTTOM: u16 = 0x1400;
     pub const FM_SEEK_BAND_TOP: u16 = 0x1401;
     pub const FM_SEEK_FREQ_SPACING: u16 = 0x1402;
@@ -275,6 +276,13 @@ impl<B: I2c> Si4732<B> {
     /// SSB fine tuning, Hz.
     pub fn bfo(&mut self, hz: i16, delay: &mut impl Delay) -> Result<(), Error> {
         self.set_property(prop::SSB_BFO, hz as u16, delay)
+    }
+
+    /// The gain: FM_AGC_OVERRIDE or AM_AGC_OVERRIDE (also SSB's) with a fixed index (FM 0-26, AM 0-37: 0 the
+    /// most gain), or the AGC back on with None.
+    pub fn agc(&mut self, index: Option<u8>, delay: &mut impl Delay) -> Result<(), Error> {
+        let cmd = self.op(0x28)?;
+        self.command(&[cmd, index.is_some() as u8, index.unwrap_or(0)], &mut [], delay)
     }
 
     /// FM: RDS on (interrupt per group, up to 5 corrected errors per block).

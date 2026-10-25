@@ -51,7 +51,7 @@ use embassy_time::{Instant, Timer};
 use ferrite_core::freq::{self, mhz, Freq10};
 #[cfg(feature = "bench")]
 use ferrite_core::msg::{bk_write_refused, DebugAns, DebugReq};
-use ferrite_core::msg::{BroadcastCmd, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, Source, SLOTS};
+use ferrite_core::msg::{BroadcastCmd, Event, Kind, LiveAll, ModeLive, Param, RadioCmd, SameDecoded, SiOpts, Source, SLOTS};
 use ferrite_core::same_rx::{Assembler, Repeats, Step};
 #[cfg(feature = "bench")]
 use ferrite_core::path::Blocked;
@@ -221,6 +221,8 @@ struct Radio {
     si_used: bool,
     /// FM broadcast's receiver state for the live report (BCR-2, BCR-5).
     fm: Option<FmRx>,
+    /// The SI4732's receive settings from the UI (BCR-32, HF-35), applied at its power-up and on a change.
+    si_opts: SiOpts,
     /// BCR-6: the SI4732 is the source being heard (broadcast on, no slot heard); its hard mute follows this.
     si_heard: bool,
     /// BCR-24: the broadcast's turn on the speaker (back 2 s after a slot heard goes quiet).
@@ -572,7 +574,7 @@ struct FmRx {
 }
 
 /// Returns the frequency the receiver tuned to (FM 10 kHz units, AM kHz; 0 when switched off).
-async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4732::Error> {
+async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd, opts: SiOpts) -> Result<u16, si4732::Error> {
     let d = &mut BusyDelay;
     let (mode, freq) = match cmd {
         BroadcastCmd::Off => {
@@ -615,6 +617,7 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
         if mode == SiMode::Fm {
             let _ = si.rds_on(d); // BCR-2: station name and radio text
         }
+        si_apply(si, opts)?;
     }
     if let Some(f) = freq {
         si.tune_start(f, Sideband::Usb, d)?;
@@ -629,6 +632,33 @@ async fn broadcast(si: &mut Si4732<SiBus>, cmd: BroadcastCmd) -> Result<u16, si4
             return Err(si4732::Error::Timeout);
         }
         Timer::after_millis(10).await;
+    }
+}
+
+/// BCR-32, HF-35 (decision 292): the receive settings for the mode the SI4732 runs in. FM: de-emphasis by region
+/// (50 us outside the US and Canada), the channel filter automatic (the Si4732's default forces it wide), the seek
+/// band and spacing by region and step, the AGC or a fixed gain (0 3 1 2). AM: HF mode's bandwidth and AGC, and
+/// stock's AVC max gain (0x7800) with soft mute off (chapter 20a).
+fn si_apply(si: &mut Si4732<SiBus>, o: SiOpts) -> Result<(), si4732::Error> {
+    use si4732::prop;
+    let d = &mut BusyDelay;
+    match si.mode() {
+        Some(SiMode::Fm) => {
+            si.set_property(prop::FM_DEEMPHASIS, if o.flags & SiOpts::DEEMPH_50 != 0 { 1 } else { 2 }, d)?;
+            si.set_property(prop::FM_CHANNEL_FILTER, 0, d)?;
+            let (lo, hi) = o.fm_band();
+            si.set_property(prop::FM_SEEK_BAND_BOTTOM, lo, d)?;
+            si.set_property(prop::FM_SEEK_BAND_TOP, hi, d)?;
+            si.set_property(prop::FM_SEEK_FREQ_SPACING, o.fm_space(), d)?;
+            si.agc(SiOpts::agc_index(o.fm_agc, 26), d)
+        }
+        Some(_) => {
+            si.set_property(prop::AM_CHANNEL_FILTER, o.am_filter.min(3) as u16, d)?;
+            si.set_property(prop::AM_AVC_MAX_GAIN, 0x7800, d)?;
+            si.set_property(prop::AM_SOFT_MUTE_MAX_ATTENUATION, 0, d)?;
+            si.agc(SiOpts::agc_index(o.am_agc, 37), d)
+        }
+        None => Ok(()),
     }
 }
 
@@ -680,6 +710,7 @@ pub async fn task() {
         bturn: watch::BcastTurn::new(),
         bcast_slot: None,
         fm: None,
+        si_opts: SiOpts::default(),
         slots: [SlotRx::DEFAULT; SLOTS],
         active: 0,
         watch_set: 0,

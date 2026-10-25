@@ -1490,6 +1490,26 @@ impl App {
         self.out.push(RadioCmd::TxTimeout(self.set.tx_timeout_s() as u16));
         self.send_vox();
         self.send_tx_tones();
+        self.send_si_opts();
+    }
+
+    /// BCR-32, HF-35 (decision 292): the SI4732's receive settings to the Radio task: FM's AGC (0 3 1 2) and
+    /// seek step, HF mode's AGC and AM bandwidth, and what the region decides (FM de-emphasis and band, MW spacing).
+    pub(crate) fn send_si_opts(&mut self) {
+        use ferrite_core::msg::SiOpts;
+        use ferrite_core::txplan::Region;
+        let r = self.set.region();
+        let americas = matches!(r, Some(Region::Us | Region::Canada));
+        let mut flags = (self.set.fm_step.min(2)) << 4;
+        if !americas {
+            flags |= SiOpts::DEEMPH_50 | SiOpts::MW_9K;
+        }
+        if r == Some(Region::Japan) {
+            flags |= SiOpts::BAND_JAPAN;
+        }
+        let h = &self.set.hf;
+        let o = SiOpts { fm_agc: self.set.fm_agc, am_agc: h.agc, am_filter: h.am_filter(), flags };
+        self.out.push(RadioCmd::SiOpts(o));
     }
 
     /// VOX's level and tail to the Radio task (VOX-2, VOX-5, VOX-13; 0 8 2): level 0 when it is off.

@@ -19,7 +19,6 @@ use super::shared::*;
 use super::{Cx, Hints, View};
 use crate::chan::ChannelStore;
 use crate::keys::{KeyEvent, Press};
-use crate::settings::ON_OFF;
 use crate::{App, Screen};
 use ferrite_core::freq::{mhz, Freq10};
 use ferrite_core::keys::Key;
@@ -97,8 +96,7 @@ const STEP_NAMES: [[&str; 4]; 3] = [
 const BW_AM: [&str; 4] = ["6 kHz", "4 kHz", "3 kHz", "2 kHz"];
 const BW_SSB: [&str; 4] = ["3 kHz", "2.2 kHz", "1.2 kHz", "0.5 kHz"];
 const BW_FM: [&str; 2] = ["Wide", "Narrow"];
-/// Fine tune (BFO), Hz.
-const BFO_MAX: i16 = 2_000;
+/// Fine tune (BFO) steps, Hz (SSB, not built yet: HF-35).
 const BFO_STEP: i16 = 25;
 /// A frequency counts as used after 10 s (HF-28).
 const USED_MS: u32 = 10_000;
@@ -175,6 +173,11 @@ impl HfMem {
 
     fn step(&self) -> u32 {
         [STEPS_AM, STEPS_SSB, STEPS_FM][self.rx()][self.step as usize % 4]
+    }
+
+    /// HF-35: the SI4732's AM_CHANNEL_FILTER for the bandwidth ([`BW_AM`] is in its order: 6, 4, 3, 2 kHz).
+    pub(crate) fn am_filter(&self) -> u8 {
+        self.bw % 4
     }
 
     fn bw_text(&self) -> &'static str {
@@ -360,15 +363,15 @@ pub fn tune_recent(app: &mut App, f: Freq10, mode: u8) {
     tune_to(app, f, Some(mode));
 }
 
-/// The options (HF-14): name and help.
-const OPTIONS: [(&str, &str); 6] = [
-    ("Step", "Knob step: AM 1-10 kHz, SSB 10 Hz-1 kHz."),
+/// The options (HF-14): name and help. LNA and fine tune (BFO) are left out until SSB is built (HF-35).
+const OPTIONS: [(&str, &str); 4] = [
+    ("Step", "Knob step: AM 1-10 kHz."),
     ("Bandwidth", "The receiver's filter."),
-    ("AGC", "Automatic gain, or a fixed gain."),
-    ("LNA", "The preamp in the HF input."),
-    ("Fine tune", "BFO offset in USB, LSB and CW."),
+    ("AGC", "Auto, or a fixed gain: 1 the most, 10 the least."),
     ("Recent list", "The last 10 frequencies. # clears."),
 ];
+/// The recent list's row.
+const ROW_RECENT: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Hf {
@@ -416,29 +419,21 @@ impl Hf {
         match self.row {
             0 => h.step = cyc(h.step, 4),
             1 => h.bw = cyc(h.bw, if h.rx() == 2 { 2 } else { 4 }),
-            2 => h.agc = cyc(h.agc, 10),
-            3 => h.lna = !h.lna,
-            4 if h.ssb() => h.bfo = (h.bfo + d as i16 * BFO_STEP).clamp(-BFO_MAX, BFO_MAX),
-            4 => app.show_toast(b"Fine tune", b"USB, LSB and CW only", false),
+            2 => h.agc = cyc(h.agc, crate::settings::AGC_MAX as i32 + 1),
             _ => {}
         }
+        app.send_si_opts(); // HF-35: the bandwidth and AGC reach the SI4732
     }
 }
 
 /// The options page's values (HF-14), as drawn and read back.
-fn option_values(h: &HfMem) -> [Buf<24>; 6] {
-    let mut vals = [Buf::<24>::new(); 6];
+fn option_values(h: &HfMem) -> [Buf<24>; 4] {
+    let mut vals = [Buf::<24>::new(); 4];
     vals[0].set(STEP_NAMES[h.rx()][h.step as usize % 4].as_bytes());
     vals[1].set(h.bw_text().as_bytes());
     agc_text(h.agc, &mut vals[2]);
-    vals[3].set(ON_OFF[h.lna as usize].as_bytes());
-    if h.ssb() {
-        let _ = uwrite!(vals[4], "{}{} Hz", if h.bfo > 0 { "+" } else { "" }, h.bfo);
-    } else {
-        vals[4].set(b"SSB only");
-    }
     let n = h.recent.iter().filter(|&&r| r != 0).count();
-    let _ = uwrite!(vals[5], "{} >", n);
+    let _ = uwrite!(vals[3], "{} >", n);
     vals
 }
 
@@ -456,7 +451,7 @@ fn signal_text(chip1: bool, rssi: i16, snr: u8) -> Buf<24> {
 /// What HF mode shows (HF-15), for the UI readback (LINK-19): the same values its `render` draws.
 pub(crate) struct Shown {
     pub loading: Option<u8>,
-    pub menu: Option<(u8, [Buf<24>; 6])>,
+    pub menu: Option<(u8, [Buf<24>; 4])>,
     pub band: &'static str,
     pub rx: &'static str,
     pub mode: &'static str,
@@ -566,14 +561,14 @@ impl View for Hf {
         }
         if self.menu {
             match (e.key, e.press) {
-                (Key::Up, Short | Repeat) => Hf { row: (self.row + 5) % 6, ..self }.put(app),
-                (Key::Down, Short | Repeat) => Hf { row: (self.row + 1) % 6, ..self }.put(app),
+                (Key::Up, Short | Repeat) => Hf { row: (self.row + 3) % 4, ..self }.put(app),
+                (Key::Down, Short | Repeat) => Hf { row: (self.row + 1) % 4, ..self }.put(app),
                 (Key::Left | Key::Right, Short | Repeat) => self.option(app, if e.key == Key::Right { 1 } else { -1 }),
-                (Key::Digit(d @ 1..=6), Short) => Hf { row: d - 1, ..self }.put(app),
+                (Key::Digit(d @ 1..=4), Short) => Hf { row: d - 1, ..self }.put(app),
                 (Key::Digit(0), Short) => app.open(Dest::Advanced),
-                (Key::Menu, Short) if self.row == 5 => app.open(Dest::HfRecent),
+                (Key::Menu, Short) if self.row == ROW_RECENT => app.open(Dest::HfRecent),
                 (Key::Menu, Short) => self.option(app, 1),
-                (Key::Hash, Short) if self.row == 5 => {
+                (Key::Hash, Short) if self.row == ROW_RECENT => {
                     app.set.hf.recent = [0; RECENT];
                     app.show_toast(b"Recent list", b"cleared", false);
                 }
@@ -730,12 +725,12 @@ impl View for Hf {
         if self.menu {
             let vals = option_values(&h);
             for (i, ((name, _), v)) in OPTIONS.iter().zip(&vals).enumerate() {
-                let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: i as u8 == self.row, grey: i == 4 && !h.ssb() };
+                let r = Row { num: Some(i as u8 + 1), name: name.as_bytes(), value: v.as_bytes(), dot: false, selected: i as u8 == self.row, grey: false };
                 app.list_row(lcd, i, 23 + 22 * i as i32, 22, &r);
             }
             let r = Row { num: Some(0), name: b"Full menu", value: b">", dot: false, selected: false, grey: false };
             app.list_row(lcd, 6, 23 + 22 * 6, 22, &r);
-            app.help_box(lcd, 186, 46, OPTIONS[self.row as usize % 6].1.as_bytes(), b"HF MENU");
+            app.help_box(lcd, 186, 46, OPTIONS[self.row as usize % OPTIONS.len()].1.as_bytes(), b"HF MENU");
             return;
         }
         // Band and receiver (HF-15).

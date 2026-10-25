@@ -233,7 +233,14 @@ impl AprsCfg {
 }
 
 /// The paths offered (0 5 9 1, APRS-26): name and entries; the custom path (0 5 9 2) is [`PATH_CUSTOM`].
-pub const PATHS: [(&str, &[&[u8]]); 3] = [("None", &[]), ("WIDE1-1", &[b"WIDE1-1"]), ("WIDE1-1,WIDE2-1", &[b"WIDE1-1", b"WIDE2-1"])];
+pub const PATHS: [(&str, &[&[u8]]); 5] = [
+    ("None", &[]),
+    ("WIDE1-1", &[b"WIDE1-1"]),
+    ("WIDE1-1,WIDE2-1", &[b"WIDE1-1", b"WIDE2-1"]),
+    // APRS-26.1 (decision 292): the satellite and ISS digipeaters' aliases
+    ("APRSAT", &[b"APRSAT"]),
+    ("ARISS", &[b"ARISS"]),
+];
 /// 0 5 9 1 on the custom path (0 5 9 2).
 pub const PATH_CUSTOM: u8 = PATHS.len() as u8;
 
@@ -412,7 +419,7 @@ impl App {
         !self.set.aprs_mode && !self.low_power() && !s.vfo_mode && s.ch.is_some_and(|c| c.flags & crate::chan::FLAG_APRS != 0)
     }
 
-    /// Automatic beacons are on (0 5 6 1 timed, distance or smart; APRS-24): with APRS mode off they still hold C
+    /// Automatic beacons are on (0 5 6 1 timed or smart; APRS-24): with APRS mode off they still hold C
     /// (APRS-29). Manual ("Beacon now" only) doesn't.
     pub fn beacons_on(&self) -> bool {
         self.aprs.beacons_on() && !self.low_power() && !self.set.kiss_on() // KISS-10

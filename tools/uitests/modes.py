@@ -177,8 +177,8 @@ def hf_keys(t):
         u = t.keys("BACK")
         t.eq(u.id, "Hf", "BACK: HF mode again")
         u = t.press("MENU", long=True)
-        t.eq([r["name"] for r in u.rows][:6], ["Step", "Bandwidth", "AGC", "LNA", "Fine tune", "Recent list"],
-             "hold MENU: HF's options")
+        t.eq([r["name"] for r in u.rows][:4], ["Step", "Bandwidth", "AGC", "Recent list"],
+             "hold MENU: HF's options (LNA and fine tune hidden until SSB, HF-35)")
         u = t.keys("0")
         t.eq(u.id, "More", "0 there: the full menu")
         t.home()

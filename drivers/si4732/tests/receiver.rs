@@ -160,3 +160,22 @@ fn errors_and_timeouts() {
     assert_eq!(si.ready(), Err(Error::Nack));
     assert_eq!(si.revision(&mut MockDelay::default()).map(|r| r.0), Err(Error::Nack));
 }
+
+/// HF-35, BCR-32 (decision 292): the gain override is FM_AGC_OVERRIDE (0x28) in FM and AM_AGC_OVERRIDE (0x48) in
+/// AM, AGC off with the index, or AGC on.
+#[test]
+fn agc_override_by_mode() {
+    let mut si = Si4732::new(chip(0, 0, None), ADDR);
+    let mut d = MockDelay::default();
+    assert_eq!(si.agc(Some(3), &mut d), Err(Error::WrongMode));
+    si.power_up_start(Mode::Fm).unwrap();
+    si.agc(Some(26), &mut d).unwrap();
+    si.agc(None, &mut d).unwrap();
+    si.power_down(&mut d).unwrap();
+    si.power_up_start(Mode::Am).unwrap();
+    si.agc(Some(12), &mut d).unwrap();
+    let w = writes(&si.release().txns);
+    assert_eq!(w[1], vec![0x28, 1, 26], "FM_AGC_OVERRIDE, fixed index 26");
+    assert_eq!(w[2], vec![0x28, 0, 0], "FM AGC on");
+    assert_eq!(w[5], vec![0x48, 1, 12], "AM_AGC_OVERRIDE, fixed index 12");
+}

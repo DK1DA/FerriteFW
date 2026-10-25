@@ -145,6 +145,9 @@ pub enum RadioCmd {
     /// all of it (HF-8). The receiver follows from frequency and mode (HF-10), and the relay from the receiver:
     /// energised for chip 1, released for the SI4732 (HF-11).
     Hf { freq: Freq10, mode: u8, on: bool },
+    /// The SI4732's receive settings (BCR-32, HF-35; decision 292): applied when it powers up and whenever they
+    /// change while it runs.
+    SiOpts(SiOpts),
     /// HF mode: the SI4732's own seek, up or down from the frequency it is on (AM, below 30 MHz; HF-31). The
     /// frequency it stops on comes back in [`ModeLive::Hf`].
     HfSeek { up: bool },
@@ -700,6 +703,53 @@ pub enum ModeLive {
     Hf { freq: Freq10, rssi: i16, snr: u8, si4732: bool, loading: u8 },
     /// Crossband repeater.
     Xb(XbLive),
+}
+
+/// The SI4732's receive settings from the UI (BCR-32, HF-35; decision 292), packed to keep [`RadioCmd`] small.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SiOpts {
+    /// FM broadcast's AGC (0 3 1 2): 0 automatic, 1-10 a fixed gain, 1 the most.
+    pub fm_agc: u8,
+    /// HF mode's AGC (the same scale) on the SI4732's AM.
+    pub am_agc: u8,
+    /// HF mode's AM bandwidth: AM_CHANNEL_FILTER's AMCHFLT (0 = 6, 1 = 4, 2 = 3, 3 = 2 kHz).
+    pub am_filter: u8,
+    /// [`SiOpts::DEEMPH_50`], [`SiOpts::BAND_JAPAN`], [`SiOpts::MW_9K`], and the FM seek spacing in bits 4-5
+    /// (0 = 50, 1 = 100, 2 = 200 kHz).
+    pub flags: u8,
+}
+
+impl SiOpts {
+    /// FM de-emphasis 50 us (outside the US and Canada).
+    pub const DEEMPH_50: u8 = 1;
+    /// The FM broadcast band 76-95 MHz (region Japan) instead of 87.5-108.
+    pub const BAND_JAPAN: u8 = 2;
+    /// Medium wave channels 9 kHz apart (outside the Americas).
+    pub const MW_9K: u8 = 4;
+
+    /// The fixed-gain scale (1-10) to the chip's gain index: 1 is index 0 (the most gain), 10 the chip's top.
+    pub fn agc_index(v: u8, top: u8) -> Option<u8> {
+        (v != 0).then(|| ((v.min(10) - 1) as u16 * top as u16 / 9) as u8)
+    }
+
+    /// FM seek spacing in 10 kHz.
+    pub fn fm_space(self) -> u16 {
+        [5, 10, 20][(self.flags >> 4 & 3).min(2) as usize]
+    }
+
+    /// The FM seek band in 10 kHz.
+    pub fn fm_band(self) -> (u16, u16) {
+        if self.flags & Self::BAND_JAPAN != 0 { (7600, 9500) } else { (8750, 10800) }
+    }
+
+    /// The AM seek spacing (kHz) at `khz`: MW and LW 9 or 10 kHz, shortwave 5 kHz (HF-34).
+    pub fn am_space(self, khz: u16) -> u16 {
+        match khz {
+            _ if khz >= 1_800 => 5,
+            _ if khz < 520 || self.flags & Self::MW_9K != 0 => 9,
+            _ => 10,
+        }
+    }
 }
 
 /// The crossband repeater now.
