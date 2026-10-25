@@ -459,3 +459,45 @@ fn compression_first_come_first_served() {
     let (_, b) = r.ask_full(Port::Bt, msg::HELLO, &hello);
     assert!(b.last().is_some_and(|c| c & caps::LZ != 0), "Bluetooth gets it now");
 }
+
+/// LINK-13.4, LINK-13.5: receive audio to the PC: the cable only, never on by itself; while the cable's session
+/// listens, a block goes out with the slot heard while a squelch is open, else a keep-alive each second; a new
+/// `HELLO`, or the session going quiet, stops it.
+#[test]
+fn receive_audio_cable_only_and_opt_in() {
+    use ferrite_core::rxaudio::{self, Block, State, BLOCK_BYTES, NO_SLOT, SQ_OPEN};
+    let mut r = Rig::new();
+    assert_eq!(r.ask(Port::Cable, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
+    assert!(!r.p.audio_wanted(r.now), "off until asked");
+    assert_eq!(r.ask(Port::Bt, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
+    assert_eq!(r.ask(Port::Bt, msg::AUDIO, &[1]), Status::Refused as u8, "Bluetooth can't carry it");
+    let (s, rest) = r.ask_full(Port::Cable, msg::AUDIO, &[1]);
+    assert_eq!((s, rest), (0, std::vec![0x40, 0x1F, 0, 1]), "8000 Hz, 256 samples a block");
+    assert!(r.p.audio_wanted(r.now));
+    let blk = Block { start: State { pred: -5, index: 9 }, codes: [0x37; BLOCK_BYTES] };
+    let frames = |o: &mut Out| -> Vec<Vec<u8>> {
+        let mut v = Vec::new();
+        for raw in core::mem::take(&mut o.0).split(|&b| b == 0).filter(|f| !f.is_empty()) {
+            let mut raw = raw.to_vec();
+            let f = wire::parse(&mut raw).unwrap();
+            assert_eq!(f.ty, msg::AUDIO_DATA);
+            v.push(f.payload.to_vec());
+        }
+        v
+    };
+    let mut live = LiveAll::default();
+    r.p.audio(&blk, &live, r.now + 2000, &mut r.cable); // nothing heard: a keep-alive (the last went long ago)
+    r.p.audio(&blk, &live, r.now + 2100, &mut r.cable); // and not again within the second
+    let k = frames(&mut r.cable);
+    assert_eq!(k.len(), 1);
+    assert_eq!(rxaudio::get(&k[0]).map(|(_, slot, fl, _, codes)| (slot, fl, codes.len())), Some((NO_SLOT, 0, 0)));
+    live.slots[1].squelch_open = true;
+    r.p.audio(&blk, &live, r.now + 2132, &mut r.cable);
+    let b = frames(&mut r.cable);
+    let (seq, slot, fl, st, codes) = rxaudio::get(&b[0]).unwrap();
+    assert_eq!((seq, slot, fl, st, codes), (1, 1, SQ_OPEN, blk.start, &blk.codes[..]), "the block, slot B heard");
+    assert_eq!(r.ask(Port::Cable, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
+    assert!(!r.p.audio_wanted(r.now), "a HELLO ends it");
+    assert_eq!(r.ask(Port::Cable, msg::AUDIO, &[1]), 0);
+    assert!(!r.p.audio_wanted(r.now + link::ACTIVE_MS + 10), "a quiet session ends it");
+}

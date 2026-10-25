@@ -90,7 +90,14 @@ pub struct Ports {
     ui_owner: Option<usize>,
     /// LINK-51: the one compression block, for the first session that asks (2.6 KB of windows, 0.5 KB of frames).
     z: link::z::Zip,
+    /// LINK-13.4: when the last receive-audio frame (a block or a keep-alive) went, and blocks not sent for want of
+    /// room in the cable's send ring.
+    audio_at: u32,
+    audio_noroom: u32,
 }
+
+/// LINK-13.4: a keep-alive this often while nothing is heard (the PC knows the stream is still there).
+pub const AUDIO_KEEPALIVE_MS: u32 = 1_000;
 
 impl Default for Ports {
     fn default() -> Self {
@@ -102,7 +109,45 @@ impl Ports {
     pub const fn new() -> Self {
         let mut bt = Session::new(false);
         bt.set_max_baud(0); // LINK-15.1: Bluetooth's `BAUD` takes only the module's two rates
-        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, cable_last: None, dropped: 0, dbg: None, now: 0, ui: ferrite_core::liveview::Track::new(), ui_owner: None, z: link::z::Zip::new() }
+        Ports { term: Term::new(), links: [Session::new(true), bt], owner: Port::Cable, bt_last: 0, bt_seen: false, cable_last: None, dropped: 0, dbg: None, now: 0, ui: ferrite_core::liveview::Track::new(), ui_owner: None, z: link::z::Zip::new(), audio_at: 0, audio_noroom: 0 }
+    }
+
+    /// LINK-13.4: blocks not sent for want of room in the cable's send ring (the bench's readback).
+    pub fn audio_noroom(&self) -> u32 {
+        self.audio_noroom
+    }
+
+    /// LINK-13.4: the cable's session asked for receive audio (the caller's tick is short enough to take its blocks).
+    pub fn listening(&self) -> bool {
+        self.links[0].listening()
+    }
+
+    /// LINK-13.4, LINK-13.5: the cable's session listens to receive audio (asked for, and still active): the
+    /// caller runs the capture and hands its blocks to [`Ports::audio`] only while this holds.
+    pub fn audio_wanted(&mut self, now: u32) -> bool {
+        self.links[0].audio_on(now)
+    }
+
+    /// LINK-13.4: one 32 ms block of receive audio for the cable's session: sent while a slot's squelch is open
+    /// (with the slot heard), else only a keep-alive each [`AUDIO_KEEPALIVE_MS`]; nothing unless it listens.
+    pub fn audio(&mut self, blk: &ferrite_core::rxaudio::Block, live: &LiveAll, now: u32, cable: &mut impl Sink) {
+        use ferrite_core::rxaudio::{NO_SLOT, SQ_OPEN};
+        if !self.links[0].audio_on(now) {
+            return;
+        }
+        match live.slots.iter().position(|s| s.squelch_open) {
+            Some(slot) => {
+                if !self.links[0].audio_out(slot as u8, SQ_OPEN, Some(blk), cable) {
+                    self.audio_noroom += 1;
+                }
+                self.audio_at = now;
+            }
+            None if now.wrapping_sub(self.audio_at) >= AUDIO_KEEPALIVE_MS => {
+                self.links[0].audio_out(NO_SLOT, 0, None, cable);
+                self.audio_at = now;
+            }
+            None => {}
+        }
     }
 
     /// The fastest cable rate the caller's UART runs within 2 % (LINK-11).

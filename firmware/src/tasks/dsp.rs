@@ -66,6 +66,14 @@ pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Gen>> = Signal::new();
 const RECHECK_HALVES: u32 = 5_000;
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
 pub static PAGES: Channel<M, Page, 2> = Channel::new();
+/// LINK-13.4: receive audio for the PC, a block every 32 ms while the cable's session listens; six deep (192 ms:
+/// the UI task takes them each pass, at most [`AUDIO_TICK_MS`] apart meanwhile, plus a pass's own drawing time).
+pub static AUDIO_BLOCKS: Channel<M, ferrite_core::rxaudio::Block, 6> = Channel::new();
+/// LINK-13.4: the UI task's longest wait between passes while listening.
+pub const AUDIO_TICK_MS: u64 = 60;
+/// LINK-13.4: blocks made, and dropped because the UI task hadn't taken the last six (the readback's `audio` line).
+pub static AUDIO_MADE: AtomicU32 = AtomicU32::new(0);
+pub static AUDIO_DROPS: AtomicU32 = AtomicU32::new(0);
 /// Frames decoded and dropped (the UI hadn't taken the last two), for the bench.
 pub static FRAMES: AtomicU32 = AtomicU32::new(0);
 pub static DROPPED: AtomicU32 = AtomicU32::new(0);
@@ -79,6 +87,9 @@ pub async fn task() {
     let mut capturing = false;
     // What each side asks for, and what runs (DEC-18).
     let (mut aprs, mut pager, mut running) = (DecoderKind::Off, false, DecoderKind::Off);
+    // LINK-13.4: receive audio for the PC, coded from the same samples the decoder gets.
+    let mut listen = false;
+    let mut pack = ferrite_core::rxaudio::Packer::new();
     let mut halves = 0u32;
     loop {
         // TERM-33's signal only in a `tx` bench build: the others never wait on it, nor carry its generators.
@@ -87,27 +98,32 @@ pub async fn task() {
         #[cfg(not(all(feature = "tx", feature = "bench")))]
         let test = core::future::pending::<Option<core::convert::Infallible>>();
         match select4(DSP.receive(), audio::ADC_HALF.wait(), AFSK_TX.wait(), test).await {
-            Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_))) => {
+            Either4::First(cmd @ (DspCmd::Decoder(_) | DspCmd::Pager(_) | DspCmd::Audio(_))) => {
                 match cmd {
                     DspCmd::Decoder(k) => aprs = k,
                     DspCmd::Pager(on) => pager = on,
+                    DspCmd::Audio(on) => {
+                        if on && !listen {
+                            pack = ferrite_core::rxaudio::Packer::new();
+                        }
+                        listen = on;
+                    }
                     _ => {}
                 }
                 let kind = match (aprs, pager) {
                     (DecoderKind::Off, true) => DecoderKind::Pocsag,
                     (k, _) => k,
                 };
-                if kind == running {
-                    continue;
+                if kind != running {
+                    running = kind;
+                    slot = match kind {
+                        DecoderKind::Off => Decoder::Off,
+                        DecoderKind::Afsk => Decoder::afsk(),
+                        DecoderKind::Pocsag => Decoder::pocsag(),
+                        DecoderKind::Dsc => Decoder::dsc(),
+                    };
                 }
-                running = kind;
-                slot = match kind {
-                    DecoderKind::Off => Decoder::Off,
-                    DecoderKind::Afsk => Decoder::afsk(),
-                    DecoderKind::Pocsag => Decoder::pocsag(),
-                    DecoderKind::Dsc => Decoder::dsc(),
-                };
-                let want = kind != DecoderKind::Off;
+                let want = kind != DecoderKind::Off || listen;
                 if want && !capturing {
                     clock::for_audio().await; // PWR-26.4: the speed first, never under a running capture
                     adc::init();
@@ -140,6 +156,16 @@ pub async fn task() {
                             n += 1;
                         }
                     });
+                }
+                if listen {
+                    for &x in &out[..n] {
+                        pack.push(x, |b| {
+                            AUDIO_MADE.fetch_add(1, Relaxed);
+                            if AUDIO_BLOCKS.try_send(*b).is_err() {
+                                AUDIO_DROPS.fetch_add(1, Relaxed); // a full queue drops the newest: the PC hears a gap
+                            }
+                        });
+                    }
                 }
                 slot.push(&out[..n], |f| match f {
                     Found::Frame(b) => {

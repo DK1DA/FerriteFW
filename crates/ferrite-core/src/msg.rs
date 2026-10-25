@@ -266,6 +266,9 @@ pub enum DspCmd {
     /// The pager decoder wanted (POCSAG on and a slot on its frequency) or not. The slot runs one decoder:
     /// APRS's AFSK first, the pager decoder when APRS doesn't want it (DEC-18).
     Pager(bool),
+    /// LINK-13.4: receive audio wanted for the PC (the cable's session listens): the capture runs for it too, and
+    /// its blocks go to the UI task.
+    Audio(bool),
     Beep { hz: u16, ms: u16 },
 }
 
@@ -786,6 +789,9 @@ pub struct Device {
     pub ram_statics: u32,
     /// SELF-9.1: the share of the last 10 s the MCU was awake, %; None until the first 10 s.
     pub cpu_pct: Option<u8>,
+    /// LINK-13.4: receive audio's blocks since power-on: made by the DSP task, dropped there (the queue full), and
+    /// dropped at the cable (no room to send); the readback's `audio` line, for the bench.
+    pub audio: [u32; 3],
     /// A speaker mic is in the side connector (SND-12, [`crate::acc`]): the Status page shows it.
     pub spkmic: bool,
     /// This build can transmit (`--features tx`).

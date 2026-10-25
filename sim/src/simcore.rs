@@ -199,6 +199,10 @@ pub enum Stored {
 type Store = FlashStore<SimFlash, Sample>;
 
 pub struct SimCore {
+    /// LINK-13.4: the receive audio the simulator sends a listening cable session: a 440 Hz tone, coded as the
+    /// radio codes the BK4829s' audio (only while a slot's squelch is open), and the time its samples are made to.
+    audio: ferrite_core::rxaudio::Packer,
+    audio_ms: u32,
     app: App,
     store: Store,
     radio: FakeRadio,
@@ -356,6 +360,8 @@ impl SimCore {
         let face = Face::new(scale);
         let out = vec![0u32; face.w * face.h];
         let mut s = SimCore {
+            audio: ferrite_core::rxaudio::Packer::new(),
+            audio_ms: 0,
             app,
             store,
             radio,
@@ -616,6 +622,23 @@ impl SimCore {
             }
             dev.bt = self.ports.bt_connected(app, now);
             self.ports.poll(app, store, dev, &radio.live, now, &mut TermBuf(&mut self.term_out), &mut TermBuf(&mut self.bt_out));
+            // LINK-13.4: receive audio while the cable's session listens (the fake radio's: a tone)
+            if self.ports.audio_wanted(now) {
+                let mut blocks = std::vec::Vec::new();
+                while self.audio_ms < now {
+                    for k in 0..24u32 {
+                        let t = (self.audio_ms * 24 + k) as f32 / 24_000.0;
+                        let x = (8_000.0 * (2.0 * core::f32::consts::PI * 440.0 * t).sin()) as i16;
+                        self.audio.push(x, |b| blocks.push(*b));
+                    }
+                    self.audio_ms += 1;
+                }
+                for b in &blocks {
+                    self.ports.audio(b, &radio.live, now, &mut TermBuf(&mut self.term_out));
+                }
+            } else {
+                self.audio_ms = now;
+            }
             if let Some(r) = self.ports.debug_req() {
                 self.ports.debug_answer(radio.debug(r)); // TERM-21: the fake radio answers at once
             }

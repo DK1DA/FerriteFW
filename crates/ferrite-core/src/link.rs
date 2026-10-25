@@ -158,6 +158,14 @@ pub mod msg {
     /// Stop sending one of our APRS messages (LINK-49, APRS-13.1): to (length, text), the message (length, text);
     /// the newest of ours to that station with that text still being tried stops, kept as cancelled.
     pub const MSG_STOP: u8 = 0x55;
+    /// Receive audio to the PC (LINK-13.1, LINK-13.4): the cable only; payload one byte, 1 to listen, 0 to stop.
+    /// The answer carries the stream's rate (u16) and a block's samples (u16). Listening ends with the session
+    /// (a `HELLO`, the session going quiet, a new connection): never on by itself (LINK-13.5).
+    pub const AUDIO: u8 = 0x56;
+    /// A block of receive audio, pushed unasked while listening ([`crate::rxaudio`]): seq (u16), the slot heard
+    /// (0xFF none), flags (1: squelch open), the coder's state at the block's start (pred i16, index), then the
+    /// codes; with no codes, a keep-alive while nothing is heard. Never compressed (LINK-51), nor counted there.
+    pub const AUDIO_DATA: u8 = 0x57;
     /// The way back to stock (BACKUP-7, LINK-4, LINK-8; [`crate::restore`]): the cable only. `START` stops the radio
     /// and hands the cable to the restore until it resets; erase, program and CRC requests follow, then `FINISH`.
     pub const STOCK_RESTORE: u8 = 0x60;
@@ -174,6 +182,8 @@ pub mod caps {
     pub const LZ: u8 = 4;
     /// `WRITE_MANY` deletes channels (a record of length 0, LINK-41.2).
     pub const DELETE_MANY: u8 = 8;
+    /// `AUDIO` (LINK-13.4): receive audio over this port (the cable only).
+    pub const AUDIO: u8 = 16;
 }
 
 /// `SUBSCRIBE`'s mask and `EVENT`'s kinds (LINK-46, LINK-48).

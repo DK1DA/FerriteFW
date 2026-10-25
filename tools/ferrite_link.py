@@ -27,6 +27,7 @@ the radio's side is ferrite-core's link.rs and ferrite-app's link.rs).
     python3 tools/ferrite_link.py PORT msgs                       # APRS messages in and out, newest first (LINK-44)
     python3 tools/ferrite_link.py PORT msg-send CALL "TEXT"       # queue an APRS message as compose does (LINK-45)
     python3 tools/ferrite_link.py PORT subscribe [heard,msgs,ui] [--seconds N] [--screen]   # print pushed events
+    python3 tools/ferrite_link.py PORT audio [SECONDS [FILE.wav]]   # receive audio over the cable to a WAV (LINK-13.4)
     python3 tools/ferrite_link.py --pin 1234 PORT ...             # Bluetooth while a PIN lock is on (LINK-30)
 
 PORT is a serial device (the programming cable, 115200 8N1), tcp:HOST:PORT for the simulator
@@ -88,6 +89,7 @@ CAP_STREAM, CAP_WINDOW, CAP_LZ, CAP_DELETE_MANY = 1, 2, 4, 8  # LINK-35.2: HELLO
 Z = 0x7D  # LINK-51: a compressed frame (| 0x80 for an answer): the inner type, the frame count, the coded payload
 LOG_SOURCES = ["APRS", "Pager", "SAME", "DSC", "AIS", "DTMF", "Selcall", "GPS"]  # LINK-42's source byte
 SUBSCRIBE, EVENT, HEARD, MSGS, MSG_SEND, MSG_STOP = 0x50, 0x51, 0x52, 0x53, 0x54, 0x55  # LINK-43 - LINK-49
+AUDIO, AUDIO_DATA = 0x56, 0x57  # LINK-13.4: receive audio (the cable only)
 SETTINGS, CHANNEL, ZONE, PRESET, APRS = 1, 2, 3, 4, 5
 CONTACT = 6  # APRS-42
 ONE_FRAME = (CHANNEL, ZONE, PRESET, CONTACT)  # READ_MANY/WRITE_MANY only; READ/WRITE are for SETTINGS and APRS (LINK-21)
@@ -309,6 +311,7 @@ class Link:
         self.want_lz = os.environ.get("FERRITE_LZ", "1") != "0"
         self.lz = None  # (up encoder, down decoder, [up count, down count]) while on
         self.events = []  # EVENT frames (LINK-46) as they arrive: (event counter, payload)
+        self.audio = []  # AUDIO_DATA payloads (LINK-13.4) as they arrive
         # Ctrl-C closes the terminal if it has the cable (TERM-2; nothing otherwise); its goodbye text is dropped.
         self.p.write(b"\x03")
         time.sleep(0.3)
@@ -351,6 +354,9 @@ class Link:
             except ValueError:
                 continue  # terminal text, or a damaged frame
             if len(f) < 5 or crc16(f[:-2]) != struct.unpack("<H", f[-2:])[0]:
+                continue
+            if f[0] == AUDIO_DATA:  # LINK-13.4: pushed, plain, outside compression's window and count
+                self.audio.append(bytes(f[2:-2]))
                 continue
             if self.lz and f[0] != HELLO | 0x80:
                 _, down, n = self.lz
@@ -1113,6 +1119,79 @@ def main():
         port.close()
 
 
+# LINK-13.4: IMA ADPCM, as ferrite_core::rxaudio codes it (the standard tables)
+IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97,
+            107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724,
+            796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026,
+            4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500,
+            20350, 22385, 24623, 27086, 29794, 32767]
+IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8]
+
+
+def ima_decode(pred, index, codes):
+    """One AUDIO_DATA block's codes (two a byte, low nibble first) to 16-bit samples, from the block's own state."""
+    out = []
+    for b in codes:
+        for c in (b & 15, b >> 4):
+            step = IMA_STEP[index]
+            d = step >> 3
+            if c & 4:
+                d += step
+            if c & 2:
+                d += step >> 1
+            if c & 1:
+                d += step >> 2
+            pred = max(-32768, min(32767, pred - d if c & 8 else pred + d))
+            index = max(0, min(88, index + IMA_INDEX[c & 7]))
+            out.append(pred)
+    return out
+
+
+def audio(link, seconds, path):
+    """LINK-13.4: listen to the radio's receive audio over the cable for SECONDS into a WAV (8 kHz, 16-bit mono):
+    blocks while a squelch is open (silence for the gaps between, so the file keeps time), keep-alives otherwise."""
+    import wave
+    rest = link.ok(AUDIO, b"\x01")
+    rate, block = struct.unpack("<HH", rest[:4])
+    t0 = time.time()
+    samples, blocks, keep, lost, last_seq, nbytes, renew = [], 0, 0, 0, None, 0, t0
+    last_at = t0
+    try:
+        while time.time() - t0 < seconds:
+            link.answers()
+            while link.audio:
+                p = link.audio.pop(0)
+                nbytes += len(p) + 6
+                seq, slot, flags, pred = struct.unpack("<HBBh", p[:6])
+                if last_seq is not None and (seq - last_seq) & 0xFFFF > 1:
+                    lost += ((seq - last_seq) & 0xFFFF) - 1
+                last_seq = seq
+                now = time.time()
+                if len(p) == 7:
+                    keep += 1
+                    gap = int((now - last_at) * rate)  # nothing heard: silence of the right length
+                    samples.extend([0] * max(0, gap))
+                else:
+                    blocks += 1
+                    samples.extend(ima_decode(pred, p[6], p[7:]))
+                last_at = now
+            if time.time() - renew >= 3.0:
+                link.send(AUDIO, b"\x01")  # keeps the session active (LINK-13.5: a quiet one stops listening)
+                renew = time.time()
+            time.sleep(0.005)
+    finally:
+        link.ok(AUDIO, b"\x00")
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(struct.pack(f"<{len(samples)}h", *samples))
+    el = time.time() - t0
+    print(f"{blocks} blocks ({block} samples each), {keep} keep-alives, {lost} lost; {nbytes} bytes in {el:.1f} s "
+          f"({nbytes / el:.0f} B/s); {len(samples) / rate:.1f} s of audio to {path}")
+    return 0
+
+
 BENCH_BIT = 0x80  # LINK-35: bit 7 of the build byte marks a bench build (decision 151: tx-dry is 0x82)
 
 
@@ -1326,6 +1405,8 @@ def run(link, a):
     elif a.cmd == "subscribe":
         what = (a.args[0] if a.args else "heard,msgs,ui").split(",")
         return subscribe(link, what, a.seconds if a.seconds != 5.0 else 3600, a.screen)
+    elif a.cmd == "audio":
+        return audio(link, float(a.args[0]) if a.args else 10.0, a.args[1] if len(a.args) > 1 else "rx-audio.wav")
     elif a.cmd == "reboot":
         link.ok(REBOOT)  # LINK-24: answered, then the radio saves, goes quiet and resets into the bootloader
         print("restarting: the bootloader listens about 200 ms (run flash.py now, or it starts Ferrite again)")

@@ -197,6 +197,15 @@ fn describe<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
         kn(l, "fm", app.radio.fm_on as u32);
         kn(l, "leave", app.lpm_leave_progress().unwrap_or(0) as u32); // PWR-24.4: the SIDE1 + SIDE2 hold, thousandths
     }
+    // LINK-13.4: receive audio's blocks made, dropped in the radio's queue, and dropped at the cable (once any).
+    if cx.dev.audio[0] != 0 {
+        if let Some(l) = d.ln() {
+            l.push(b"audio");
+            kn(l, "made", cx.dev.audio[0]);
+            kn(l, "dropped", cx.dev.audio[1]);
+            kn(l, "noroom", cx.dev.audio[2]);
+        }
+    }
     if let Some(l) = d.ln() {
         let b = app.status_bar(cx.live, cx.dev);
         l.push(b"bar");

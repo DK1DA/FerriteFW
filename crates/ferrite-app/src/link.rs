@@ -88,6 +88,10 @@ pub struct Session {
     pub lz: bool,
     /// Events pushed to this session (LINK-46).
     sub: sub::Sub,
+    /// LINK-13.4: this session asked for receive audio (the cable only; never on by itself, LINK-13.5), and the
+    /// blocks' counter.
+    audio: bool,
+    audio_seq: u16,
 }
 
 /// A `WRITE_MANY` under way (LINK-41): its records wait in `asm` (what's after the `what` byte), applied one a
@@ -155,6 +159,8 @@ impl Session {
             lz_free: false,
             lz: false,
             sub: sub::Sub::new(),
+            audio: false,
+            audio_seq: 0,
         }
     }
 
@@ -176,6 +182,7 @@ impl Session {
         self.run = Run::Off;
         self.many = None;
         self.lz = false; // LINK-51: the shared block goes back
+        self.audio = false; // LINK-13.5: listening ends with the connection
         self.unsubscribe(); // LINK-46: events end with the connection
     }
 
@@ -224,6 +231,36 @@ impl Session {
     /// A frame or a sync arrived lately: the port belongs to the link (TERM-2).
     pub fn active(&self, now: u32) -> bool {
         self.seen && now.wrapping_sub(self.last) < ACTIVE_MS
+    }
+
+    /// LINK-13.4: this session asked for receive audio.
+    pub fn listening(&self) -> bool {
+        self.audio
+    }
+
+    /// LINK-13.4, LINK-13.5: this session listens: it asked, and it is still active (a quiet session stops it).
+    pub fn audio_on(&mut self, now: u32) -> bool {
+        if self.audio && !self.active(now) {
+            self.audio = false;
+        }
+        self.audio
+    }
+
+    /// LINK-13.4: one block of receive audio (or a keep-alive, `None`) pushed to this session, plain: never
+    /// through the compression block (LINK-51), so it goes straight to `out`. Dropped whole when there's no room
+    /// (the cable's ring holds several; a lost block costs only itself).
+    pub fn audio_out(&mut self, slot: u8, flags: u8, blk: Option<&ferrite_core::rxaudio::Block>, out: &mut impl Sink) -> bool {
+        let mut p = [0u8; ferrite_core::rxaudio::HEAD + ferrite_core::rxaudio::BLOCK_BYTES];
+        let n = ferrite_core::rxaudio::put(self.audio_seq, slot, flags, blk, &mut p);
+        let mut w = [0u8; MAX_WIRE];
+        if let Some(k) = wire::build(msg::AUDIO_DATA, 0, &p[..n], &mut w) {
+            if out.room() >= k {
+                out.put(&w[..k]);
+                self.audio_seq = self.audio_seq.wrapping_add(1);
+                return true;
+            }
+        }
+        false
     }
 
     /// The write session's progress, for the Device's `link.write_pct` (LINK-9).
@@ -515,6 +552,17 @@ impl Session {
             msg::MSGS => sub::msgs(st, p, &mut o),
             msg::MSG_SEND => sub::msg_send(app, st, dev, p, &mut o),
             msg::MSG_STOP => sub::msg_stop(st, p, &mut o),
+            // LINK-13.4: receive audio, the cable only (Bluetooth can't carry 4 KB/s, research/ble-speed.md)
+            msg::AUDIO if self.by != crate::remote::BY_CABLE => Status::Refused,
+            msg::AUDIO => match p.first() {
+                Some(&on @ (0 | 1)) => {
+                    self.audio = on == 1;
+                    o.put(&(ferrite_core::rxaudio::RATE_HZ as u16).to_le_bytes());
+                    o.put(&(ferrite_core::rxaudio::BLOCK as u16).to_le_bytes());
+                    Status::Ok
+                }
+                _ => Status::BadArg,
+            },
             _ => Status::UnknownType,
         };
         o.a[0] = s as u8;
@@ -615,11 +663,13 @@ impl Session {
         self.hellos = self.hellos.wrapping_add(1);
         // LINK-51: the first reserved byte's bit 0 asks for compression; granted while the shared block is free
         self.lz = p.get(1).is_some_and(|b| b & 1 != 0) && self.lz_free;
+        self.audio = false; // LINK-13.5: listening ends with the session
         o.put(&[PROTOCOL, MAX_PAYLOAD as u8, self.authorised(app) as u8]);
         o.text(VERSION.as_bytes());
         o.put(&[ferrite_core::link::build::of(dev.tx_built, app.dry_tx(), dev.bench)]); // LINK-35, TX-48
         let lz = if self.lz { ferrite_core::link::caps::LZ } else { 0 };
-        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz]); // LINK-35.2
+        let audio = if self.by == crate::remote::BY_CABLE { ferrite_core::link::caps::AUDIO } else { 0 };
+        o.put(&[ferrite_core::link::caps::STREAM | ferrite_core::link::caps::WINDOW | ferrite_core::link::caps::DELETE_MANY | lz | audio]); // LINK-35.2
         Status::Ok
     }
 

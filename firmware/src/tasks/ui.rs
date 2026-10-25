@@ -459,6 +459,8 @@ pub async fn task() {
     let mut lpm_since: Option<u32> = None;
     // PWR-26.3: when the governor last had a reason for the build's speed.
     let mut clock_high_at = 0u32;
+    // LINK-13.4: the DSP task codes receive audio for the PC (the cable's session listens).
+    let mut listening = false;
     loop {
         // Bring-up: the first byte from the PC ends the log; the terminal has the cable from then on.
         if bringup::ON.load(Relaxed) && TERM_IN.count() > 0 {
@@ -553,6 +555,22 @@ pub async fn task() {
             // The cable's output waits while its log has it (TERM-28); Bluetooth's sessions run regardless.
             let cable_free = !bringup::ON.load(Relaxed);
             ports.poll(&mut app, store, &dev, &live, now_ms(), &mut Out(&TERM_OUT, cable_free), &mut Out(&BT_OUT, true));
+            // LINK-13.4, LINK-13.5: receive audio only while the cable's session listens; its blocks to the cable.
+            let listen = ports.audio_wanted(now_ms());
+            if listen != listening && crate::chan::DSP.try_send(ferrite_core::msg::DspCmd::Audio(listen)).is_ok() {
+                listening = listen;
+            }
+            // A block waits in the DSP task's queue (192 ms) while the cable's send ring is full (it drains only
+            // between this task's passes: a long redraw holds it), rather than being dropped.
+            let mut cable = Out(&TERM_OUT, cable_free);
+            while cable.room() >= ferrite_core::link::MAX_WIRE {
+                let Ok(b) = crate::tasks::dsp::AUDIO_BLOCKS.try_receive() else { break };
+                ports.audio(&b, &live, now_ms(), &mut cable);
+            }
+            {
+                use crate::tasks::dsp::{AUDIO_DROPS, AUDIO_MADE};
+                dev.audio = [AUDIO_MADE.load(Relaxed), AUDIO_DROPS.load(Relaxed), ports.audio_noroom()];
+            }
             if let Some(r) = ports.take_baud() {
                 LINK_BAUD.signal(r); // the Link task switches once this answer has gone (LINK-11)
             }
@@ -906,6 +924,9 @@ pub async fn task() {
         }
         if aprs.busy() {
             period = period.min(20); // keying or playing an APRS frame: its unkey on time
+        }
+        if ports.listening() {
+            period = period.min(crate::tasks::dsp::AUDIO_TICK_MS); // LINK-13.4: the audio blocks taken on time
         }
         #[cfg(feature = "bench")]
         if bt_q.is_some() {
