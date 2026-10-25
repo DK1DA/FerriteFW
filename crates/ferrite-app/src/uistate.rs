@@ -450,10 +450,22 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
             }
         }
         Screen::Entry(e) => {
+            // LINK-19.4: what the entry screen draws: the digits, the slot and what they are for, the rows under them,
+            // the amber note and the help (the screen's own `Entry::info`, so the two can't differ).
+            let info = e.info(app, cx.store, cx.dev);
             if let Some(l) = d.ln() {
                 l.push(b"entry ");
                 q(l, &e.buf[..e.n as usize % (e.buf.len() + 1)]);
+                slot_word(l, app.active);
+                kq(l, "what", e.what());
+                if !info.note.is_empty() {
+                    kq(l, "note", info.note);
+                }
             }
+            for (label, v, _) in info.rows.iter().filter(|r| !r.0.is_empty()) {
+                row(d, 0, label, v.as_bytes(), false, false, false);
+            }
+            help(d, b"", e.tip());
         }
         Screen::Zones(z) => zones_lines(app, cx, z, d),
         Screen::Text(_) => {
@@ -855,6 +867,9 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
     l.push(b" freq=");
     mhz(l, app.shown_freq(s, cx.live));
     kq(l, "name", app.card_name(s, cx.live, cx.store).as_bytes());
+    if lv.hits > 0 {
+        kn(l, "hits", lv.hits as u32); // LINK-19.4: the scan's hits, as the card shows them ("4 hits")
+    }
     let kind = screens::home::card_kind(app, s);
     if kind == 1 {
         // APRS-17: the APRS card shows no mode, tone or shift chips, but the last heard and the beacon lines and

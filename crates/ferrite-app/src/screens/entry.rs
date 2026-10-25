@@ -432,15 +432,7 @@ impl View for Entry {
         if app.dirty(R_TOP, hash(&(a, self.to, self.typed()))) {
             ferrite_ui::canvas::banded(lcd, 0, 21, 240, 92, BG, |lcd| {
                 w::badge(lcd, 8, 26, a, true, BG);
-                let what: &[u8] = match self.to {
-                    EntryFor::Vfo => b"Frequency, MHz",
-                    EntryFor::Channel => b"Channel number",
-                    EntryFor::ChannelFreq => b"Channel frequency, MHz",
-                    EntryFor::Repeater => b"Repeater output, MHz",
-                    EntryFor::SplitTx => b"Split: TX frequency, MHz",
-                    EntryFor::ScopeCentre => b"Scope centre, MHz",
-                    EntryFor::Setting(fs) => fs.label(),
-                };
+                let what = self.what();
                 w::field(lcd, 28, 204, 24, 41, 37, Align::Left, what, &UI_12, SUB, BG);
                 // As home shows a frequency: MHz and three decimals big, the 10 Hz digits small, so the size never
                 // changes while typing (a digit lands in the size it will have on the card).
@@ -457,71 +449,14 @@ impl View for Entry {
                 lcd.fill(0, 112, 240, 1, LINE);
             });
         }
-        // The rows under it: what the digits mean.
-        let mut rows: [(&[u8], Buf<40>, u16); 4] = [(b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT)];
-        let mut note: &[u8] = b"";
-        if let EntryFor::Setting(fs) = self.to {
-            // MENU-31: what the setting holds now and what it takes; no band, step or transmit rows
-            rows[0].0 = b"Now";
-            match fs.current(app, cx.store) {
-                Some(f) => rows[0].1.set(w::freq3(f).as_bytes()),
-                None => rows[0].1.set(b"-"),
-            }
-            rows[1].0 = b"Takes";
-            rows[1].1.set(fs.takes().as_bytes());
-        } else if self.freq_mode() {
-            if let Some(f) = self.freq() {
-                // VFO-12: tuned exactly as typed; the step row says whether it sits on the step's grid.
-                rows[0].0 = b"Band";
-                rows[0].1.set(band_name(f).as_bytes());
-                rows[1].0 = b"Step";
-                let step = step_at(app, f);
-                let name = STEPS.iter().find(|s| s.0 == step).map_or("", |s| s.1);
-                rows[1].1.set(name.as_bytes());
-                rows[1].1.push(if f % step == 0 { b", on it" } else { b", off it" });
-                rows[2].0 = b"Transmit";
-                match refuse(f) {
-                    Some(why) => {
-                        rows[2].1.set(b"-");
-                        (rows[2].2, note) = (AMBER, why.as_bytes());
-                    }
-                    None => match tx_text(app, f, cx.dev.tx_built) {
-                        Ok(t) => (rows[2].1, rows[2].2) = (Buf::from(t.as_bytes()), GREEN),
-                        Err(t) => (rows[2].1, rows[2].2) = (Buf::from(t.as_bytes()), AMBER),
-                    },
-                }
-            }
-        } else if let Some(num) = self.number() {
-            rows[0].0 = b"Channel";
-            let mut l = Buf::<32>::new();
-            chan_label(num, &mut l);
-            rows[0].1.set(l.as_bytes());
-            rows[1].0 = b"Name";
-            match cx.store.by_num(num) {
-                Some((c, _)) => {
-                    rows[1].1.set(if c.name().is_empty() { b"(no name)" } else { c.name() });
-                    rows[2].0 = b"Zone";
-                    rows[2].1.set(cx.store.zone_label(c.zone, b"None", b"?").as_bytes());
-                    rows[3].0 = b"Frequency";
-                    rows[3].1.set(w::freq3(c.rx).as_bytes());
-                }
-                None => (rows[1].1, rows[1].2) = (Buf::from(b"empty"), AMBER),
-            }
-        } else if self.n > 0 {
-            note = b"Channels are 1 to 1000";
-        }
+        let Info { rows, note } = self.info(app, cx.store, cx.dev);
         for (i, (label, v, c)) in rows.iter().enumerate() {
             app.kv(lcd, i, 116 + 22 * i as i32, 22, &w::KV_STATUS, label, v.as_bytes(), *c, false);
         }
         if app.dirty(R_NOTE, hash(&note)) {
             para(lcd, 8, 210, 224, 2, 17, note, &UI_12, AMBER, BG);
         }
-        let tip: &[u8] = match self.to {
-            EntryFor::Vfo => b"After three digits the point comes by itself; * types it, and * again enters (52*525*).",
-            EntryFor::Channel => b"Type the channel number, then OK.",
-            EntryFor::SplitTx => b"Transmit here whatever RX is on. OK or * keeps it; BACK keeps the old shift.",
-            _ => b"* is the point, then * or OK keeps it. BACK deletes.",
-        };
+        let tip = self.tip();
         if app.dirty(R_HELP, hash(&tip)) {
             para(lcd, 8, 250, 224, 3, 15, tip, &UI_12, SUB, BG);
         }
@@ -644,5 +579,95 @@ fn commit(e: Entry, app: &mut App, store: &impl ChannelStore) {
             }
         }
         EntryFor::Channel | EntryFor::Setting(_) => {}
+    }
+}
+
+/// What the entry screen shows under the digits (LINK-19.4: drawn and read back alike).
+pub struct Info {
+    /// Up to four label, value and colour rows (an empty label: no row).
+    pub rows: [(&'static [u8], Buf<40>, u16); 4],
+    /// The amber note under them (empty: none).
+    pub note: &'static [u8],
+}
+
+impl Entry {
+    /// The header: what is being typed.
+    pub fn what(self) -> &'static [u8] {
+match self.to {
+            EntryFor::Vfo => b"Frequency, MHz",
+            EntryFor::Channel => b"Channel number",
+            EntryFor::ChannelFreq => b"Channel frequency, MHz",
+            EntryFor::Repeater => b"Repeater output, MHz",
+            EntryFor::SplitTx => b"Split: TX frequency, MHz",
+            EntryFor::ScopeCentre => b"Scope centre, MHz",
+            EntryFor::Setting(fs) => fs.label(),
+}
+    }
+
+    /// The rows and note for what is typed so far.
+    pub fn info(self, app: &App, store: &impl ChannelStore, dev: &ferrite_core::msg::Device) -> Info {
+            let mut rows: [(&'static [u8], Buf<40>, u16); 4] = [(b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT), (b"", Buf::new(), TEXT)];
+            let mut note: &'static [u8] = b"";
+            if let EntryFor::Setting(fs) = self.to {
+                // MENU-31: what the setting holds now and what it takes; no band, step or transmit rows
+                rows[0].0 = b"Now";
+                match fs.current(app, store) {
+                    Some(f) => rows[0].1.set(w::freq3(f).as_bytes()),
+                    None => rows[0].1.set(b"-"),
+                }
+                rows[1].0 = b"Takes";
+                rows[1].1.set(fs.takes().as_bytes());
+            } else if self.freq_mode() {
+                if let Some(f) = self.freq() {
+                    // VFO-12: tuned exactly as typed; the step row says whether it sits on the step's grid.
+                    rows[0].0 = b"Band";
+                    rows[0].1.set(band_name(f).as_bytes());
+                    rows[1].0 = b"Step";
+                    let step = step_at(app, f);
+                    let name = STEPS.iter().find(|s| s.0 == step).map_or("", |s| s.1);
+                    rows[1].1.set(name.as_bytes());
+                    rows[1].1.push(if f % step == 0 { b", on it" } else { b", off it" });
+                    rows[2].0 = b"Transmit";
+                    match refuse(f) {
+                        Some(why) => {
+                            rows[2].1.set(b"-");
+                            (rows[2].2, note) = (AMBER, why.as_bytes());
+                        }
+                        None => match tx_text(app, f, dev.tx_built) {
+                            Ok(t) => (rows[2].1, rows[2].2) = (Buf::from(t.as_bytes()), GREEN),
+                            Err(t) => (rows[2].1, rows[2].2) = (Buf::from(t.as_bytes()), AMBER),
+                        },
+                    }
+                }
+            } else if let Some(num) = self.number() {
+                rows[0].0 = b"Channel";
+                let mut l = Buf::<32>::new();
+                chan_label(num, &mut l);
+                rows[0].1.set(l.as_bytes());
+                rows[1].0 = b"Name";
+                match store.by_num(num) {
+                    Some((c, _)) => {
+                        rows[1].1.set(if c.name().is_empty() { b"(no name)" } else { c.name() });
+                        rows[2].0 = b"Zone";
+                        rows[2].1.set(store.zone_label(c.zone, b"None", b"?").as_bytes());
+                        rows[3].0 = b"Frequency";
+                        rows[3].1.set(w::freq3(c.rx).as_bytes());
+                    }
+                    None => (rows[1].1, rows[1].2) = (Buf::from(b"empty"), AMBER),
+                }
+            } else if self.n > 0 {
+                note = b"Channels are 1 to 1000";
+            }
+        Info { rows, note }
+    }
+
+    /// The help paragraph at the bottom.
+    pub fn tip(self) -> &'static [u8] {
+        match self.to {
+            EntryFor::Vfo => b"After three digits the point comes by itself; * types it, and * again enters (52*525*).",
+            EntryFor::Channel => b"Type the channel number, then OK.",
+            EntryFor::SplitTx => b"Transmit here whatever RX is on. OK or * keeps it; BACK keeps the old shift.",
+            _ => b"* is the point, then * or OK keeps it. BACK deletes.",
+        }
     }
 }

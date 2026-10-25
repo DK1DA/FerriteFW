@@ -276,6 +276,7 @@ fn event(s: &str) -> Event {
         "ssb" => Event::SsbPatch,
         "fm" => Event::FmStation,
         "spkmic" => Event::SpeakerMic,
+        "tonehint" => Event::ToneHint,
         _ => panic!("no event {s:?}"),
     }
 }
