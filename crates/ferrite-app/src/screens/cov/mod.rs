@@ -21,6 +21,7 @@ mod lowpower;
 mod msgs;
 mod posentry;
 mod samecodes;
+mod quick;
 mod scan;
 mod scope;
 mod setup;
