@@ -6,6 +6,8 @@
     python3 tools/buildreport.py tx --no-build --no-tests
 
 What it shows:
+  - code coverage: lines the host tests run (cargo llvm-cov), per crate; the headline counts only code that ships on
+    the radio (the simulators are listed but left out); the firmware crate runs only on the radio and isn't measured;
   - the build: version, commit (and whether the tree had changes), toolchain, image size, CRC-32 and SHA-256;
   - tests: host tests (workspace, and the drivers with their features), the sim UI tests from --ui (with the
     commit they ran on), and tools/slowcheck.py;
@@ -14,7 +16,8 @@ What it shows:
     the bootloader leaves us;
   - SPI flash: the map, read from crates/ferrite-core/src/layout.rs (each region, its size, who owns it, whether
     Ferrite may write it).
-Output: target/build-report-<build>.html and .json. Needs arm-none-eabi-nm (as slowcheck.py).
+Output: target/build-report-<build>.html and .json. Needs arm-none-eabi-nm (as slowcheck.py) and, for coverage,
+cargo-llvm-cov (`cargo install cargo-llvm-cov`; --no-coverage skips it, about 4 minutes).
 """
 import argparse, datetime, hashlib, html, json, os, re, subprocess, sys, zlib
 
@@ -72,6 +75,32 @@ def ui_tests(path):
     return dict(counts=d["counts"], commit=d.get("commit", "").split()[0], build=d.get("build"),
                 started=d.get("started"), rules_pass=len(by("pass")), rules_fail=by("fail"),
                 rules_xfail=by("xfail"))
+
+
+PC_ONLY = ("sim", "sim-web")  # host-only crates: listed, never in the headline
+
+
+def coverage():
+    """Line coverage of the host tests (the workspace, then the drivers with their features), per crate."""
+    run("cargo", "llvm-cov", "clean", "--workspace", check=False)
+    for args in ([], sum((["-p", d] for d in DRIVERS), []) + ["--all-features"]):
+        if run("cargo", "llvm-cov", "--no-report", *args, check=False).returncode:
+            return None
+    out = run("cargo", "llvm-cov", "report", "--json", "--summary-only", check=False)
+    if out.returncode:
+        return None
+    crates = {}
+    for f in json.loads(out.stdout)["data"][0]["files"]:
+        p = os.path.relpath(f["filename"], ROOT).split(os.sep)
+        if p[0].startswith(".."):
+            continue
+        name = p[1] if p[0] in ("crates", "drivers", "digimodes") else p[0]
+        c = crates.setdefault(name, dict(lines=0, covered=0))
+        c["lines"] += f["summary"]["lines"]["count"]
+        c["covered"] += f["summary"]["lines"]["covered"]
+    tot = lambda keep: (sum(c["lines"] for n, c in crates.items() if keep(n)), sum(c["covered"] for n, c in crates.items() if keep(n)))
+    radio, every = tot(lambda n: n not in PC_ONLY), tot(lambda n: True)
+    return dict(crates=crates, radio_lines=radio[0], radio_covered=radio[1], all_lines=every[0], all_covered=every[1])
 
 
 # ---- MCU flash and RAM ----------------------------------------------------------------------------------------------
@@ -189,6 +218,10 @@ def page(r):
         tot = host["passed"] + t["drivers"]["passed"] + (t["ui"]["counts"]["pass"] if t.get("ui") else 0)
         bad = host["failed"] + t["drivers"]["failed"] + (t["ui"]["counts"]["fail"] + t["ui"]["counts"]["error"] if t.get("ui") else 0)
         out.append(f"<div class=card>Tests<b class={'ok' if not bad else 'bad'}>{tot} pass</b>{bad} failed</div>")
+    cov = r.get("coverage")
+    if cov:
+        out.append(f"<div class=card>Code coverage<b>{100 * cov['radio_covered'] / cov['radio_lines']:.1f} %</b>"
+                   f"of the radio's host-tested lines</div>")
     out.append("</div>")
     out.append(f"<p class=sub>SHA-256 <code>{b['sha256']}</code></p>")
 
@@ -211,6 +244,20 @@ def page(r):
             out.append(f"<p class=sub>Spec rules covered by the UI tests: {u['rules_pass']} pass"
                        + (f"; failing: {e(', '.join(u['rules_fail']))}" if u["rules_fail"] else "")
                        + (f"; known deviations: {e(', '.join(u['rules_xfail']))}" if u["rules_xfail"] else "") + ".</p>")
+
+    if cov:
+        pct = lambda c, n: f"{100 * c / n:.1f} %" if n else "-"
+        out.append("<h2>Code coverage</h2>")
+        out.append(f"<p class=sub>Lines the host tests run (cargo llvm-cov): {cov['radio_covered']:,} of {cov['radio_lines']:,} "
+                   f"({pct(cov['radio_covered'], cov['radio_lines'])}) in code that ships on the radio; "
+                   f"{pct(cov['all_covered'], cov['all_lines'])} with the simulators. The firmware crate (Radio task, HAL) "
+                   "runs only on the radio and isn't measured: the sim UI and on-radio tests cover it.</p>")
+        out.append("<div class=wrap><table><tr><th>Crate</th><th class=n>Lines</th><th class=n>Not run</th><th class=n>Covered</th><th></th></tr>")
+        for n, c in sorted(cov["crates"].items(), key=lambda x: -x[1]["lines"]):
+            out.append(f"<tr><td>{e(n)}{' (PC only)' if n in PC_ONLY else ''}</td><td class=n>{c['lines']:,}</td>"
+                       f"<td class=n>{c['lines'] - c['covered']:,}</td><td class=n>{pct(c['covered'], c['lines'])}</td>"
+                       f"<td style='min-width:6rem'>{bar([(c['covered'] / c['lines'] if c['lines'] else 0, '--fast', 'covered')])}</td></tr>")
+        out.append("</table></div>")
 
     out.append("<h2>Static RAM</h2>")
     out.append(bar([(m["ram_data"] / m["ram_size"], "--fast", ".data"), (m["ram_bss"] / m["ram_size"], "--slow", ".bss")]))
@@ -257,6 +304,7 @@ def main():
     ap.add_argument("--ui", metavar="RESULTS.json", help="the sim UI tests' results.json (tools/uitest.py --sim)")
     ap.add_argument("--no-build", action="store_true", help="use the image as last built")
     ap.add_argument("--no-tests", action="store_true", help="skip the host tests")
+    ap.add_argument("--no-coverage", action="store_true", help="skip code coverage (cargo llvm-cov, about 4 minutes)")
     a = ap.parse_args()
     if not a.no_build:
         run("tools/mkbtf.sh", *([BUILDS[a.build][0]] if BUILDS[a.build][0] else []))
@@ -265,12 +313,17 @@ def main():
     if not a.no_tests:
         r["tests"] = dict(host=cargo_tests(), drivers=cargo_tests(*sum((["-p", d] for d in DRIVERS), []), "--all-features"),
                           ui=ui_tests(a.ui) if a.ui else None, slowcheck=slow.returncode == 0)
+    if not a.no_coverage:
+        r["coverage"] = coverage()
+        if r["coverage"] is None:
+            print("coverage: cargo llvm-cov failed or isn't installed (cargo install cargo-llvm-cov)", file=sys.stderr)
     stem = os.path.join(ROOT, "target", f"build-report-{a.build}")
     open(stem + ".json", "w").write(json.dumps(r, indent=1))
     open(stem + ".html", "w").write(page(r))
     m = r["mcu"]
     print(f"{stem}.html: {r['build']['image']} {r['build']['commit']}, fast {kb(m['fast'])}/{kb(m['fast_budget'])}, "
-          f"slow {kb(m['slow'])}, RAM {kb(m['ram_static'])}/{kb(m['ram_size'])}")
+          f"slow {kb(m['slow'])}, RAM {kb(m['ram_static'])}/{kb(m['ram_size'])}"
+          + (f", coverage {100 * r['coverage']['radio_covered'] / r['coverage']['radio_lines']:.1f} %" if r.get("coverage") else ""))
 
 
 if __name__ == "__main__":
