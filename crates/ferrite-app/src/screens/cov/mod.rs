@@ -13,6 +13,7 @@ use std::vec::Vec;
 
 mod chedit;
 mod coming;
+mod confirm;
 mod entry;
 mod gps;
 mod hf;
