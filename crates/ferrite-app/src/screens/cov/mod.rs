@@ -15,6 +15,7 @@ mod coming;
 mod hf;
 mod home;
 mod layouts;
+mod log;
 mod lowpower;
 mod msgs;
 mod posentry;
@@ -179,6 +180,24 @@ impl T {
         let mut rec = Texts(Vec::new());
         self.app.render_texts(&mut rec, &self.live, &self.dev, &self.s);
         rec.0.join(" ")
+    }
+
+    /// [`T::texts`] with another store (records the sample doesn't have).
+    pub fn texts_in(&mut self, store: &impl crate::chan::ChannelStore) -> String {
+        let mut rec = Texts(Vec::new());
+        self.app.render_texts(&mut rec, &self.live, &self.dev, store);
+        rec.0.join(" ")
+    }
+
+    /// A tap with another store, drawn with it.
+    pub fn tap_in(&mut self, k: Key, store: &impl crate::chan::ChannelStore) {
+        self.app.key_down(k, self.t, store);
+        self.t += 100;
+        self.app.tick(self.t, &self.live, store);
+        self.app.key_up(k, self.t, store);
+        self.t += 50;
+        self.app.tick(self.t, &self.live, store);
+        self.app.render(&mut self.fb, &self.live, &self.dev, store);
     }
 
     /// Asserts the screen draws `text` somewhere.

@@ -326,7 +326,11 @@ fn detail(app: &mut App, lcd: &mut impl Panel, e: &Event, cx: &Cx<impl ChannelSt
             if text4_width(s.event.as_bytes(), &UI_12B) > 124 {
                 add("Event", s.event.as_bytes());
             }
-            add("Areas", ferrite_ui::v!(b, "{} and {} more", Txt(s.first_area), s.areas.saturating_sub(1)));
+            if s.areas > 1 {
+                add("Areas", ferrite_ui::v!(b, "{} and {} more", Txt(s.first_area), s.areas - 1));
+            } else {
+                add("Areas", s.first_area); // one area: no "and 0 more"
+            }
             add("For", s.purge.as_bytes());
             add("Issued", s.issued.as_bytes());
             add("From", ferrite_ui::v!(b, "{} {}", s.org, Txt(s.sender)));
