@@ -1033,6 +1033,18 @@ mod tonehint;
 mod mute;
 /// The quick menu on hold \* (HOME-17).
 mod qmenu;
+/// The UI readback (LINK-19).
+mod uistate;
+/// The simulators' store.
+mod sample;
+/// The store traits' defaults, Recent and the small records.
+mod store;
+/// The App's channel bookkeeping and boot calls.
+mod app_api;
+/// Remote keys and PTT at their edges.
+mod remote_edges;
+/// The APRS card's text lines.
+mod aprs_text;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]
