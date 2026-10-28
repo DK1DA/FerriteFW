@@ -174,6 +174,11 @@ impl Radio {
         let tone = self.tx.tone[s];
         // The keyed slot's bandwidth (HF mode's NFM is its mode 1).
         let narrow = if slot < SLOTS as u8 { self.slots[s].narrow } else { self.hf.is_some_and(|h| h.mode == 1) };
+        // TX-49 (decision 306): DTMF detection (DEC-6) shares REG_70 with the tone generator; left armed, it went
+        // out as 1000 and 3300 Hz tones under every key-up (bench, Oct 27). Off on the keyed chip, always; the
+        // receive tick arms it again after the unkey's retune.
+        self.chip(n).dtmf_rx(false);
+        self.dtmf_key[n as usize] = None;
         let setup = self.tx_chip_setup(f, narrow, tone, data.is_some() || testing);
         radio_chip::tx_setup(&mut self.chip(n), &setup);
         // APRS-14 (decision 135): an APRS burst (a data key-up) goes out with the `data` TX audio set-up, as
