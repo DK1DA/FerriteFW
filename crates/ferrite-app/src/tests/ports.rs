@@ -501,3 +501,166 @@ fn receive_audio_cable_only_and_opt_in() {
     assert_eq!(r.ask(Port::Cable, msg::AUDIO, &[1]), 0);
     assert!(!r.p.audio_wanted(r.now + link::ACTIVE_MS + 10), "a quiet session ends it");
 }
+
+impl Rig {
+    /// One link request from `port`: the answer's status and the rest, from among whatever else the port sent
+    /// meanwhile (events, a terminal's redraw).
+    fn ask_any(&mut self, port: Port, ty: u8, payload: &[u8]) -> (u8, Vec<u8>) {
+        let mut w = [0u8; MAX_WIRE];
+        let n = wire::build(ty, 9, payload, &mut w).unwrap();
+        let mut f = std::vec![0u8];
+        f.extend_from_slice(&w[..n]);
+        self.send(port, &f);
+        let out = if port == Port::Bt { &mut self.bt } else { &mut self.cable };
+        let all = core::mem::take(&mut out.0);
+        for raw in all.split(|&b| b == 0).filter(|f| !f.is_empty()) {
+            let mut raw = raw.to_vec();
+            if let Ok(f) = wire::parse(&mut raw) {
+                if f.ty == ty | wire::ANSWER {
+                    return (f.payload[0], f.payload[1..].to_vec());
+                }
+            }
+        }
+        panic!("no answer to {ty} on {port:?}: {:?}", &all[all.len().saturating_sub(60)..]);
+    }
+}
+
+/// LINK-13.4: a block with no room in the cable's ring is dropped and counted; `listening` says the cable's
+/// session asked.
+#[test]
+fn receive_audio_without_room_is_counted() {
+    use ferrite_core::rxaudio::{Block, State, BLOCK_BYTES};
+    struct Full;
+    impl Sink for Full {
+        fn room(&self) -> usize {
+            0
+        }
+        fn put(&mut self, _: &[u8]) {
+            panic!("no room: nothing put");
+        }
+    }
+    let mut r = Rig::new();
+    assert!(!r.p.listening());
+    assert_eq!(r.ask(Port::Cable, msg::AUDIO, &[1]), 0);
+    assert!(r.p.listening());
+    let mut live = LiveAll::default();
+    live.slots[0].squelch_open = true;
+    let blk = Block { start: State { pred: 0, index: 0 }, codes: [0; BLOCK_BYTES] };
+    assert_eq!(r.p.audio_noroom(), 0);
+    r.p.audio(&blk, &live, r.now, &mut Full);
+    r.p.audio(&blk, &live, r.now + 32, &mut Full);
+    assert_eq!(r.p.audio_noroom(), 2);
+}
+
+/// TERM-21, LINK-34: one debug request in flight at a time, from the terminal or either session's `CMD`; its
+/// answer goes back to whoever asked.
+#[test]
+fn debug_requests_one_at_a_time() {
+    use ferrite_core::msg::{DebugAns, DebugReq, GGA_MAX};
+    let gga = || {
+        let mut data = [0u8; GGA_MAX];
+        let g = b"$GPGGA,1,4525.2950,N,07541.8600,W,1,09,0.9,71.2,M,-34.0,M,,*00";
+        data[..g.len()].copy_from_slice(g);
+        DebugAns::Gga { data, n: g.len() as u8, age_s: 4 }
+    };
+    let mut r = Rig::new();
+    r.send(Port::Cable, b"\r\r:gps\r");
+    assert_eq!(r.p.debug_req(), Some(DebugReq::Gga), "the terminal's");
+    assert_eq!(r.p.debug_req(), None, "one in flight");
+    r.cable.0.clear();
+    r.p.debug_answer(gga());
+    for _ in 0..4 {
+        r.poll();
+    }
+    assert!(std::string::String::from_utf8_lossy(&r.cable.0).contains("GGA, 4 s ago"), "to the terminal");
+    r.p.debug_answer(gga()); // nobody asking: dropped
+    r.send(Port::Cable, b"\r\x03"); // the terminal closes
+    assert_eq!(r.ask_any(Port::Bt, msg::CMD, b"gps").0, 0);
+    assert_eq!(r.p.debug_req(), Some(DebugReq::Gga), "Bluetooth's session's");
+    r.p.debug_answer(gga());
+    let (_, a) = r.ask_any(Port::Bt, msg::MORE, &[]);
+    assert!(std::string::String::from_utf8_lossy(&a).contains("GGA, 4 s ago"));
+    r.now += 3000;
+    r.cable.0.clear(); // the closed terminal's last words
+    assert_eq!(r.ask_any(Port::Cable, msg::CMD, b"gps").0, 0);
+    assert_eq!(r.p.debug_req(), Some(DebugReq::Gga), "the cable's session's");
+}
+
+/// LINK-24, BACKUP-7, LINK-9, LINK-15.1: what the ports hand the caller: a reboot asked on either port (once), the
+/// cable's HELLOs, a write session's progress from either.
+#[test]
+fn reboot_hellos_and_progress() {
+    let mut r = Rig::new();
+    assert!(!r.p.take_reboot());
+    assert_eq!(r.ask(Port::Bt, msg::REBOOT, &[]), 0);
+    assert!(r.p.take_reboot());
+    assert!(!r.p.take_reboot(), "once");
+    assert_eq!(r.p.take_restore(), None);
+    let h = r.p.hellos();
+    assert_eq!(r.ask(Port::Cable, msg::HELLO, &[wire::PROTOCOL, 0]), 0);
+    assert_eq!(r.p.hellos(), h + 1);
+    assert_eq!(r.p.progress(), None);
+    assert_eq!(r.ask(Port::Bt, msg::BEGIN, &4u16.to_le_bytes()), 0);
+    assert_eq!(r.p.progress(), Some(0));
+}
+
+/// LINK-11: the cable's `BAUD` stays within the rate its UART reaches.
+#[test]
+fn cable_baud_within_the_uart() {
+    let mut r = Rig::new();
+    r.p.set_cable_max_baud(230_400);
+    r.p.set_bt_fast(true);
+    assert_eq!(r.ask(Port::Cable, msg::BAUD, &460_800u32.to_le_bytes()), Status::Refused as u8);
+    assert_eq!(r.ask(Port::Cable, msg::BAUD, &230_400u32.to_le_bytes()), 0);
+    assert_eq!(r.p.take_baud(), Some(230_400));
+}
+
+/// TERM-4, TERM-13: a whole frame waiting for its answer holds its port (and only its port) until a poll answers.
+#[test]
+fn a_waiting_frame_holds_its_port() {
+    let mut r = Rig::new();
+    assert!(r.p.ready() && !r.p.busy());
+    let mut w = [0u8; MAX_WIRE];
+    let n = wire::build(msg::INFO, 1, &[], &mut w).unwrap();
+    for &b in [&[0u8][..], &w[..n]].concat().iter() {
+        let t = r.p.route(&r.app, Port::Bt, b, r.now);
+        r.p.feed(&mut r.app, &r.st, t, b, r.now);
+    }
+    assert!(!r.p.ready_for(Port::Bt));
+    assert!(r.p.ready_for(Port::Cable));
+    assert!(!r.p.ready() && r.p.busy());
+    r.poll();
+    assert!(r.p.ready_for(Port::Bt) && r.p.ready());
+}
+
+/// TERM-2, KISS-6: the cable port set to KISS (0 9 2 3): every cable byte is KISS's, none the terminal's.
+#[test]
+fn cable_port_kiss_drops_to_kiss() {
+    let mut r = Rig::new();
+    r.app.set.cable_port = 3;
+    assert_eq!(r.send(Port::Cable, b"\r:"), [To::Kiss; 2]);
+    assert!(!r.p.term.on());
+}
+
+/// LINK-47: one Live View at a time: the newest subscription's port has it and the other's ends.
+#[test]
+fn live_view_moves_to_the_newest_subscriber() {
+    use ferrite_core::link::event as ev;
+    let mut r = Rig::new();
+    assert_eq!(r.ask_any(Port::Cable, msg::SUBSCRIBE, &[ev::SUB_UI, 5]).0, 0);
+    for _ in 0..5 {
+        r.poll();
+    }
+    assert!(r.p.links[0].ui_wanted());
+    assert_eq!(r.ask_any(Port::Bt, msg::SUBSCRIBE, &[ev::SUB_UI, 5]).0, 0);
+    for _ in 0..5 {
+        r.poll();
+    }
+    assert!(r.p.links[1].ui_wanted());
+    assert!(!r.p.links[0].ui_wanted(), "the cable's ended");
+    assert_eq!(r.ask_any(Port::Bt, msg::SUBSCRIBE, &[0]).0, 0);
+    for _ in 0..3 {
+        r.poll();
+    }
+    assert!(!r.p.links[1].ui_wanted());
+}

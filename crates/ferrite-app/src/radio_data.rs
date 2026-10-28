@@ -219,4 +219,59 @@ mod tests {
         assert!(d.request(Op::BeaconNow));
         assert!(!crate::data::ax25_call_ok(b"") && crate::data::ax25_call_ok(b"VE7TES") && !crate::data::ax25_call_ok(b"VE7TEST"));
     }
+
+    /// APRS-17: the KISS counts, sent and heard; each moves the lists' version, as a callsign change does (and the
+    /// same callsign again doesn't).
+    #[test]
+    fn kiss_counts_and_version() {
+        let d = RadioData::default();
+        assert_eq!(d.callsign(), None, "no callsign yet");
+        let v = d.version();
+        d.kiss_sent();
+        d.kiss_heard();
+        d.kiss_heard();
+        assert_eq!(d.kiss_counts(), (1, 2));
+        assert_eq!(d.version(), v + 3);
+        d.set_callsign(b"VE3XYZ");
+        let v = d.version();
+        d.set_callsign(b"VE3XYZ");
+        assert_eq!(d.version(), v, "the same callsign: no change");
+    }
+
+    /// APRS-13, APRS-13.3, APRS-46: messages queued (four tried at once at most), one taken back, all cleared; the
+    /// heard list, the beacon and the APRS settings through the store's requests; Wipe puts the settings back; a
+    /// request that isn't the APRS side's is refused.
+    #[test]
+    fn requests() {
+        let d = RadioData::new();
+        d.set_callsign(b"VE3XYZ");
+        let to = Buf::<10>::from(&b"VE3KPW"[..]);
+        for i in 0..4u8 {
+            assert!(d.request(Op::Queue(to, Buf::from(&[b'a' + i][..]))), "{i}");
+        }
+        assert!(!d.aprs.room());
+        assert!(!d.request(Op::Queue(to, Buf::from(&b"e"[..]))), "APRS-13.3: four being tried already");
+        assert!(d.request(Op::Draft(Draft { to: Buf::from(&b"VE3KPW"[..]), text: Buf::from(&b"x"[..]) })));
+        assert!(!d.request(Op::Send), "APRS-13.3: the draft waits too");
+        assert!(d.request(Op::Unqueue(to, Buf::from(&b"a"[..]))));
+        assert!(d.send_room());
+        assert!(d.request(Op::ClearMessages));
+        let mut cfg = AprsCfg::DEFAULT;
+        cfg.power = 2;
+        assert!(d.request(Op::AprsCfg(cfg)));
+        assert_eq!(d.aprs_cfg(), cfg);
+        assert_eq!(d.cfg(), cfg);
+        assert!(d.request(Op::AfterVoice));
+        assert!(d.request(Op::ClearHeard));
+        assert_eq!(d.stations(), 0);
+        assert!(d.station(0).is_none());
+        assert_eq!(d.row_of(0), None);
+        d.row_stored(&Buf::from(&b"VE3AA"[..]), 1);
+        let _ = d.beacon();
+        assert!(d.request(Op::Wipe));
+        assert_eq!(d.aprs_cfg(), AprsCfg::DEFAULT);
+        assert!(!d.request(Op::ReadAll), "the log is the flash store's");
+        assert_eq!(d.sats(), 0);
+        assert!(d.sat(0).is_none());
+    }
 }
