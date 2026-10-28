@@ -377,6 +377,8 @@ pub struct LiveAll {
     pub tx: TxLive,
     /// WATCH-16.2: watched slots the watch leaves out now (a key-up, a relay cancel): the APRS card says "paused".
     pub dropped: u8,
+    /// SQL-19.4: the APRS slot's squelch counts since power-on (both chips).
+    pub aprs_sq: crate::aprssq::Counts,
     /// The one exclusive mode running, if any: scope, tone search, counter, FM broadcast, HF, crossband.
     pub mode: ModeLive,
     /// MODE-3: counts the exclusive modes the Radio task stopped itself because the UI's lease ran out; the UI
@@ -990,8 +992,9 @@ mod tests {
         // The tone hint's heard tone (TSRCH-13: 2 bytes a slot, 4 with alignment) took it from 312 to 324; the stuck
         // PTT bits (SAFE-14.1, one byte, 4 with alignment) to 328; a scan's held flag and its step's and last hit's
         // channel numbers (SCAN-19.1, HOME-4.1: 5 bytes a slot, 4 more with the padding, 22 in 24) to 340; the
-        // DTMF heard (DEC-6.1: 7 bytes a slot, 12 digits a nibble each) to 364.
-        assert!(core::mem::size_of::<LiveAll>() <= 364, "{}", core::mem::size_of::<LiveAll>());
+        // DTMF heard (DEC-6.1: 7 bytes a slot, 12 digits a nibble each) to 364; the slots the watch leaves out
+        // (WATCH-16.2) and the APRS squelch's counts (SQL-19.4) to 372.
+        assert!(core::mem::size_of::<LiveAll>() <= 372, "{}", core::mem::size_of::<LiveAll>());
         // Each reader of the GPS watch keeps a copy of the fix; the sky list only the UI.
         assert!(core::mem::size_of::<GpsFix>() <= 32);
         assert!(core::mem::size_of::<GpsSky>() <= 81);

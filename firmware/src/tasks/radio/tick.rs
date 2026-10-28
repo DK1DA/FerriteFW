@@ -177,6 +177,7 @@ impl Radio {
             if self.sq_key[n as usize] != self.tuned[n as usize] {
                 // retuned: a fresh squelch, closed
                 (self.soft_sq[n as usize], self.sq_key[n as usize]) = (Default::default(), self.tuned[n as usize]);
+                self.aprs_sq[n as usize].retuned(now); // SQL-19.2: settling
             }
             let decided = match soft {
                 Some(regs) => {
@@ -192,6 +193,15 @@ impl Radio {
                         log(b"  chip says open: ", st.squelch_open as u32);
                     }
                     now_open
+                }
+                // SQL-19: the APRS slot over the chip's decision: no spikes, nothing while the retune settles
+                None if aprs => {
+                    let (o, _ended) = self.aprs_sq[n as usize].step(now, st.squelch_open);
+                    #[cfg(feature = "bench")]
+                    if let Some(ms) = _ended {
+                        log(b"aprs sq open ms ", ms);
+                    }
+                    o
                 }
                 None => st.squelch_open,
             };
@@ -319,6 +329,9 @@ impl Radio {
         }
         self.bcast_audio(now, audio_chip.is_some());
         // 6. The snapshot.
+        let [a, b] = self.aprs_sq.map(|q| q.counts);
+        let add = |x: u16, y: u16| x.saturating_add(y);
+        self.live.aprs_sq = ferrite_core::aprssq::Counts { opens: add(a.opens, b.opens), short: add(a.short, b.short), spikes: add(a.spikes, b.spikes), settle: add(a.settle, b.settle) };
         let active_relay = Sel::rx(self.slots[self.active as usize].freq).relay();
         for (i, sl) in self.live.slots.iter_mut().enumerate() {
             let open = self.watcher.open(i as u8) || self.monitor & 1 << i != 0;
