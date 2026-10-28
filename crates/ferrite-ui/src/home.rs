@@ -72,4 +72,13 @@ mod tests {
         assert_eq!(fb.at(8 + meter_px(-90) - 1, 164), GREEN);
         assert_eq!(fb.at(8 + meter_px(-90), 164), LINE);
     }
+
+    /// Squelch closed: the meter blue and no "RX" at the right.
+    #[test]
+    fn squelch_closed() {
+        let mut fb = FrameBuffer::new();
+        draw(&mut fb, &Live { freq: freq::mhz(446) + 6_250, rssi: -110, squelch_open: false, ..Default::default() });
+        assert_eq!(fb.at(8, 164), BLUE);
+        assert!((175..190).all(|y| (200..240).all(|x| fb.at(x, y) == BG)), "no RX");
+    }
 }

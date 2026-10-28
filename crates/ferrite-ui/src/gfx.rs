@@ -647,4 +647,54 @@ mod tests {
         rows.next_row(&mut px);
         assert_eq!(px, [0; 8]);
     }
+
+    /// UTF-8 up to four bytes decodes; a character the font lacks, a stray byte or a cut sequence draws as '?'.
+    #[test]
+    fn utf8_and_missing_characters_draw_as_question_marks() {
+        let q = text4_width(b"?", &UI_12);
+        assert_eq!(Chars("é€😀".as_bytes()).collect::<std::vec::Vec<_>>(), ['é' as u32, '€' as u32, '😀' as u32]);
+        assert_eq!(Chars(&[0xFF, b'a', 0xE2, 0x82]).collect::<std::vec::Vec<_>>(), ['?' as u32, 'a' as u32, '?' as u32]);
+        assert_eq!(text4_width("😀".as_bytes(), &UI_12), q);
+    }
+
+    /// Left draws from x, Right ends at x, Center puts the ink's middle on x; text with no ink (spaces) centres
+    /// on its advance.
+    #[test]
+    fn aligned_text_lands_where_asked() {
+        let ink_cols = |fb: &FrameBuffer| {
+            let cols: std::vec::Vec<i32> = (0..240).filter(|&x| (80..100).any(|y| fb.at(x, y) != 0)).collect();
+            (cols[0], *cols.last().unwrap() + 1)
+        };
+        let s = b"Hi";
+        let (w, (l, r)) = (text4_width(s, &UI_12), text4_ink(s, &UI_12).unwrap());
+        for (k, x) in [(0, 50), (1, 150), (2, 120)] {
+            let align = || [Align::Left, Align::Right, Align::Center].into_iter().nth(k).unwrap();
+            let mut fb = FrameBuffer::new();
+            assert_eq!(fb.text4_aligned(x, 95, align(), s, &UI_12, 0xFFFF, 0), w);
+            let (a, b) = ink_cols(&fb);
+            match align() {
+                Align::Left => assert_eq!(a, 50 + l),
+                Align::Right => assert_eq!(b, 150 - w + r),
+                Align::Center => assert!((a + b - 240).abs() <= 1, "ink {a}..{b} centred on 120"),
+            }
+        }
+        assert_eq!(text4_ink(b"  ", &UI_12), None);
+    }
+
+    /// A fill partly off the top left keeps only what is on the panel; a mask wholly off it draws nothing; a line
+    /// goes either way along both axes.
+    #[test]
+    fn clipping_and_lines() {
+        let mut fb = FrameBuffer::new();
+        fb.fill(-5, -3, 10, 8, 0x1111);
+        assert_eq!((fb.at(4, 4), fb.at(5, 4), fb.at(4, 5)), (0x1111, 0, 0));
+        assert_eq!(fb.writes.iter().filter(|&&w| w > 0).count(), 25);
+        fb.mask4(-200, 10, &LOGO112_RING, 0xFFFF, None, 0);
+        fb.mask4(10, 400, &LOGO112_RING, 0xFFFF, None, 0);
+        assert_eq!(fb.writes.iter().filter(|&&w| w > 0).count(), 25, "masks off the panel draw nothing");
+        fb.line(20, 40, 10, 35, 0x2222);
+        fb.line(30, 50, 30, 40, 0x2222);
+        assert_eq!((fb.at(20, 40), fb.at(10, 35), fb.at(30, 45)), (0x2222, 0x2222, 0x2222));
+        assert_eq!((10..=20).filter(|&x| (35..=40).any(|y| fb.at(x, y) == 0x2222)).count(), 11, "a pixel in every column");
+    }
 }
