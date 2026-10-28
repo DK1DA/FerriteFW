@@ -59,5 +59,9 @@ mod tests {
         let mut b = [0u8; 28];
         let n = names(v >> EVER_SHIFT, &mut b);
         assert_eq!(&b[..n], b"PTT A + side PTT");
+        let mut short = [0u8; 8];
+        assert_eq!(names(v >> EVER_SHIFT, &mut short), 8, "cut at the room given");
+        assert_eq!(&short, b"PTT A + ");
+        assert_eq!(names(0, &mut b), 0);
     }
 }

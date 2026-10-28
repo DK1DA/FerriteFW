@@ -178,6 +178,7 @@ mod tests {
         for f in [mhz(146), mhz(446), mhz(118)] {
             assert_eq!(at(f, 0).0 >> 8, 0, "level 0: open threshold 0, always open");
         }
+        assert_eq!(at(mhz(10), 4), (0x0000, 0x2A29), "below 15 MHz: no table, always open");
     }
 
     /// SQL-16.4: a blank sector keeps stock's compiled-in tables.

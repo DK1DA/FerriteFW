@@ -350,4 +350,17 @@ mod tests {
         h.retuned();
         assert!(!h.probing());
     }
+
+    /// The chip tuned again ends a probe at once; when idle it changes nothing.
+    #[test]
+    fn retuned_ends_a_probe() {
+        let mut h = Hint::new();
+        h.retuned();
+        assert!(!h.probing());
+        h.tick(0, F, T100, true, false, true);
+        assert_eq!(h.tick(500, F, T100, true, false, true), Act::Start);
+        assert!(h.probing());
+        h.retuned();
+        assert!(!h.probing());
+    }
 }

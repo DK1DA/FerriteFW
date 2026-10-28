@@ -559,6 +559,8 @@ mod tests {
         assert_eq!(c.dac(mhz(28) + 40_000, 2), Some(hf_curve(0, 2)), "10 m: HF entry (28-15)/5 = 2");
         assert_eq!(c.dac(mhz(290), 2), at(2, R200, 15), "280-300: the (Low) row's last entry, not the next row");
         assert_eq!(c.dac(mhz(559), 2), at(0, UHF, 15), "the UHF row's last entry");
+        assert_eq!(c.dac(mhz(355), 2), at(0, R350, 1), "350-400: entry (355-350)/5 = 1");
+        assert_eq!(c.dac(mhz(320), 1), at(1, R350, 0), "300-350: the 350 MHz entry, not past the row");
         for f in [mhz(70), mhz(129) + 99_999, mhz(17) + 99_999, mhz(1), mhz(560), mhz(600)] {
             assert_eq!(c.dac(f, 2), None, "{f}: outside every row (stock: High VHF entry 0, or past the row)");
         }
