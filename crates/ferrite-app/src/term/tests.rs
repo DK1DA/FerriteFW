@@ -1265,6 +1265,10 @@ fn regs(r: DebugReq) -> DebugAns {
         #[cfg(feature = "bench")]
         DebugReq::Lcd(l) => DebugAns::Lcd(ferrite_core::msg::LcdBench { idle: true, ..Default::default() }.apply(l)),
         #[cfg(feature = "bench")]
+        DebugReq::RxAf(set) => DebugAns::RxAf(set.flatten()),
+        #[cfg(feature = "bench")]
+        DebugReq::Fsk(a) => DebugAns::Fsk(fsk_answer(a)),
+        #[cfg(feature = "bench")]
         DebugReq::Mic(_) => DebugAns::Mic(ferrite_core::vox::MicCapture::from_samples(&[0; 256], 32_000)),
         #[cfg(feature = "bench")]
         DebugReq::TxTest(ferrite_core::txtest::Ask::Set(a)) => DebugAns::TxTest(a),
@@ -1281,6 +1285,92 @@ fn regs(r: DebugReq) -> DebugAns {
             DebugAns::GpsSent { data, n: s.len() as u8 }
         }
     }
+}
+
+/// A made-up `fsk` answer: a receive run with two frames counted, the last frame 3's bytes; a transmit run armed.
+#[cfg(feature = "bench")]
+fn fsk_answer(a: ferrite_core::fskbench::Ask) -> ferrite_core::fskbench::Report {
+    use ferrite_core::fskbench::{payload, Ask, Report, Stats, LEN};
+    let off = Report { cfg: None, tx: None, armed: false, chip: None, stats: Stats::default() };
+    match a {
+        Ask::Show | Ask::Off => off,
+        Ask::Rx(cfg) => {
+            let stats = Stats { syncs: 3, frames: 2, crc_ok: 1, crc_bad: 1, clean: 1, last: payload(3), last_n: LEN as u8, last_counter: 3, ..Stats::default() };
+            Report { cfg: Some(cfg), chip: Some(0), stats, ..off }
+        }
+        Ask::Tx(cfg, n) => Report { cfg: Some(cfg), tx: Some(n), armed: true, ..off },
+    }
+}
+
+/// TERM-42: `bk rxaf` asks the receive AF filter override, `bk rxaf HEX` sets REG_2B bits 10:8 (no other bit), `bk
+/// rxaf off` ends it; anything else is refused before anything is sent; `bk rxaf` alone only reads (TERM-25).
+#[cfg(feature = "bench")]
+#[test]
+fn debug_bk_rxaf() {
+    let mut r = Rig::main();
+    r.cmd("bk rxaf");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::RxAf(None)]);
+    assert!(r.raw().contains("bk rxaf: off"), "{}", r.raw());
+    for (cmd, want) in [("bk rxaf 700", Some(Some(0x0700))), ("BK RXAF 0x400", Some(Some(0x0400))), ("bk rxaf 0", Some(Some(0))), ("bk rxaf off", Some(None))] {
+        r.send(b"\r");
+        r.cmd(cmd);
+        assert_eq!(r.serve(4, regs), vec![DebugReq::RxAf(want)], "{cmd}");
+    }
+    r.send(b"\r");
+    r.cmd("bk rxaf 700");
+    r.serve(4, regs);
+    assert!(r.raw().contains("REG_2B bits 10:8 = 0x0700 after every FM tune (HPF 300 Hz, LPF 3 kHz, de-emphasis off)"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["bk rxaf 800", "bk rxaf 701", "bk rxaf 700 1", "bk rxaf on"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("bk rxaf [HEX|off]"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+    assert!(!super::cmd::writes(b"bk rxaf") && super::cmd::writes(b"bk rxaf 700"));
+}
+
+/// TERM-43: `fsk` shows the run; `fsk rx SPEED [nocrc]` and `fsk tx SPEED N [nocrc]` start one, `fsk off` ends it; the
+/// speeds are 1200, 2400 (any plain FSK rate 300 to 9600), ffsk1800 and ffsk2400; a bad speed, count or word is
+/// refused before anything is sent; `fsk` alone only reads (TERM-25).
+#[cfg(feature = "bench")]
+#[test]
+fn debug_fsk() {
+    use ferrite_core::fskbench::{Ask, Cfg, Mode, Speed};
+    let sp = |mode, baud| Speed { mode, baud };
+    let mut r = Rig::main();
+    r.cmd("fsk");
+    assert_eq!(r.serve(4, regs), vec![DebugReq::Fsk(Ask::Show)]);
+    assert!(r.raw().contains("fsk: off"), "{}", r.raw());
+    for (cmd, want) in [
+        ("fsk rx 2400", Ask::Rx(Cfg { speed: sp(Mode::Fsk, 2400), crc: true })),
+        ("FSK RX ffsk2400 NOCRC", Ask::Rx(Cfg { speed: sp(Mode::Ffsk2400, 1200), crc: false })),
+        ("fsk rx 4800", Ask::Rx(Cfg { speed: sp(Mode::Fsk, 4800), crc: true })),
+        ("fsk tx ffsk1800 20", Ask::Tx(Cfg { speed: sp(Mode::Ffsk1800, 1200), crc: true }, 20)),
+        ("fsk tx 1200 999 nocrc", Ask::Tx(Cfg { speed: sp(Mode::Fsk, 1200), crc: false }, 999)),
+        ("fsk off", Ask::Off),
+    ] {
+        r.send(b"\r");
+        r.cmd(cmd);
+        assert_eq!(r.serve(6, regs), vec![DebugReq::Fsk(want)], "{cmd}");
+    }
+    r.send(b"\r");
+    r.cmd("fsk rx 4800");
+    r.serve(6, regs);
+    let raw = r.raw();
+    assert!(raw.contains("fsk rx 4800 (chip CRC on) (not a documented speed): chip 0 listening"), "{raw}");
+    assert!(raw.contains("syncs 3 (0 inverted), frames 2: chip CRC ok 1 bad 1; clean 1, short 0"), "{raw}");
+    assert!(raw.contains("last, #3 (32 bytes): 00 03 07 BE 2E"), "{raw}");
+    r.send(b"\r");
+    r.cmd("fsk tx 2400 20");
+    r.serve(6, regs);
+    assert!(r.raw().contains("fsk tx 2400 (chip CRC on): 0 of 20 frames sent, armed for the next PTT key-up (Dry TX on only)"), "{}", r.raw());
+    r.send(b"\r");
+    for bad in ["fsk rx", "fsk rx 299", "fsk rx 9601", "fsk rx ffsk", "fsk tx 2400", "fsk tx 2400 0", "fsk tx 2400 1000", "fsk rx 2400 crc", "fsk on", "fsk off 1"] {
+        r.cmd(bad);
+        assert!(r.bottom().contains("fsk [off], fsk rx SPEED"), "{bad}: {}", r.bottom());
+        assert_eq!(r.term.debug_req(), None, "{bad}: nothing sent");
+    }
+    assert!(!super::cmd::writes(b"fsk") && super::cmd::writes(b"fsk off") && super::cmd::writes(b"fsk rx 2400"));
 }
 
 #[cfg(feature = "bench")]
@@ -1864,12 +1954,12 @@ fn debug_no_answer_and_stop() {
 #[test]
 fn user_build_refuses_bench_commands() {
     let mut r = Rig::main();
-    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30"] {
+    for c in ["mem 20000000 16", "mem32 40010808", "gpio", "bk 0 30", "bk 1 47 6142", "bk 0 dump", "bk settle 2", "si 10 00", "bt AT+VERS?", "rx both", "rx", "mic", "af", "txtest suite", "txtest", "TXTEST 4fsk", "gps query 1", "gps nmea off", "gps standby 60 quiet", "lcd bl 30", "bk rxaf 700", "fsk", "fsk rx 2400", "fsk tx ffsk1800 5"] {
         r.cmd(c);
         assert!(r.bottom().contains("not in this build: a bench build has it"), "{c}: {}", r.bottom());
         assert_eq!(r.term.debug_req(), None, "{c}: nothing sent");
     }
-    assert_eq!(super::cmd::BENCH_ONLY.len(), 11);
+    assert_eq!(super::cmd::BENCH_ONLY.len(), 12);
     r.cmd("gps");
     assert_eq!(r.serve(4, regs), vec![DebugReq::Gga], "gps alone is every build's");
     r.send(b"\r");

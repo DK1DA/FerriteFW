@@ -28,6 +28,9 @@ impl Radio {
             }
             // WATCH-17.1 (decision 262): the turns the chips took, read and maybe zeroed.
             DebugReq::Turns { reset } => DebugAns::Turns(self.turns.take(reset)),
+            // TERM-42, TERM-43 (decision 305): the receive filter override and the FSK modem test.
+            DebugReq::RxAf(set) => self.rxaf_ask(set),
+            DebugReq::Fsk(a) => self.fsk_ask(a),
             // TERM-32 (a bench test): PA0, the mic level tap VOX reads, at 8 kHz for 32 ms, to tell raw audio from an
             // envelope. Through the ADC's preempted group, as VOX; the Radio task waits through it. TERM-32.1 (`af`):
             // PA2, the receive audio (both BK4829s summed, and the SI4732's: bench Oct 25, 2026, decision 290).
@@ -55,6 +58,9 @@ impl Radio {
                         return DebugAns::Refused("the suite runs 60 s: set the TX timeout (0 8 1) to 90 s or more first");
                     }
                     Ask::Set(a) => {
+                        if a.is_some() && self.fsk.as_ref().is_some_and(|r| r.tx_armed()) {
+                            self.fsk = None; // one test signal per key-up: the last armed
+                        }
                         self.tx.test = a;
                         log(b"txtest armed ", a.map_or(0, |a| a.signal as u32 + 1));
                     }

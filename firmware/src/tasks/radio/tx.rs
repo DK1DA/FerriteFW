@@ -119,8 +119,11 @@ impl Radio {
         // arming is used up only once the key-up is made.
         #[cfg(feature = "bench")]
         let test = if data.is_none() { self.tx.test } else { None };
+        // TERM-43: `fsk tx`'s frames armed, Dry TX still on: a data key-up as a test's.
         #[cfg(feature = "bench")]
-        let testing = test.is_some();
+        let fsk = data.is_none() && test.is_none() && self.fsk_tx_armed();
+        #[cfg(feature = "bench")]
+        let testing = test.is_some() || fsk;
         #[cfg(not(feature = "bench"))]
         let testing = false; // TERM-38: `txtest` is a bench build's
         // TX audit F11: the UI's refusals made again here from the Radio task's own state. HF mode: AM on chip 1
@@ -222,6 +225,10 @@ impl Radio {
             }
             log(b"txtest playing ", t.signal as u32 + 1);
         }
+        #[cfg(feature = "bench")]
+        if fsk {
+            self.fsk_key_up(n);
+        }
     }
 
     /// TERM-33: the test signal stopped (the DSP task puts DAC1 to mid-scale and PC12 low; `afsk-bk`'s timer
@@ -235,6 +242,7 @@ impl Radio {
                 crate::tasks::dsp::TXTEST.signal(None);
             }
             self.afsk_bk_stop();
+            self.fsk_tx_stop(); // TERM-43
         }
     }
 
@@ -251,6 +259,8 @@ impl Radio {
 
     /// While keyed: the sequencer's own unkeys (timeout backstop, duty limit, battery under load).
     pub(super) async fn tx_tick(&mut self, now: u32) {
+        #[cfg(feature = "bench")]
+        self.fsk_tx_poll(); // TERM-43: the next frame at each transmit-done flag
         let batt = self.battery_ok();
         // TX-12's mic meter: PA0, the mic-level tap stock's VOX reads (decision 76).
         self.live.tx.mic = tonegen::mic_percent(crate::hal::adc::read(crate::hal::adc::CH_PA0));

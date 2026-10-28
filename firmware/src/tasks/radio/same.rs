@@ -9,6 +9,11 @@ impl Radio {
     /// header's other two bursts). The modem is set up again whenever its chip retunes or wakes (Battery Save
     /// keeps its cycle, WX-11).
     pub(super) fn same_tick(&mut self, now: u32) {
+        // TERM-43: the bench's FSK modem test has the modem meanwhile; SAME sets up again after it.
+        #[cfg(feature = "bench")]
+        if self.fsk.is_some() {
+            return self.fsk_tick();
+        }
         let tuned = self.tuned;
         let wx = |n: u8| tuned[n as usize].filter(|&(s, f)| (s as usize) < SLOTS && WX.contains(&f));
         let chip = if self.same_on { (0..2u8).find(|&n| wx(n).is_some()) } else { None };
