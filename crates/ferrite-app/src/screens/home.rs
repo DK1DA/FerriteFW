@@ -141,94 +141,157 @@ fn bcast_card(app: &mut App, lcd: &mut impl Panel, live: &LiveAll, s: u8, y: i32
     }
 }
 
-/// APRS-17 (decision 181): slot C while it is the APRS slot is the APRS card ([`crate::aprs_card`]): the
-/// frequency, the holder's fact right of it (stations heard, the KISS port, the beacon's countdown), the bottom
-/// line (the last station, the KISS counts, the beacon's interval and position) and the beacon power. The large
-/// card adds the beacon row ("Next beacon in 4 min"; "Beacon waiting: HF" while the relay is the other way,
-/// APRS-20). Below the header, which names the holder.
+/// APRS-17 (decisions 181, 313): slot C while it is the APRS slot is the APRS card ([`crate::aprs_card`]), below the
+/// header, which names the holder. The large card (M3): the frequency at the compact size with the counts at its
+/// right, two station rows, our last beacon's fate, the beacon row with the power. The small card: the frequency with
+/// the holder's fact at its right, the bottom line with the power or the beacons' countdown.
 fn aprs_card(app: &mut App, lcd: &mut impl Panel, data: &dyn Data, s: u8, y: i32, big: bool) {
+    use crate::aprs::Holder;
     let p = s as usize;
     let f = app.aprs_freq();
     let Some(k) = app.aprs_card(data) else { return };
-    let rc = if k.right_warn { AMBER } else if k.countdown { VIOLET } else { TEXT };
-    let lc = if k.line_warn { AMBER } else { SUB };
-    // APRS-17.6: a muted APRS slot says so beside the power, in amber
-    let muted = app.mute & 1 << s != 0;
-    let mut pwb = Buf::<16>::new();
-    // APRS-17.2.1: with automatic beacons beside APRS mode or KISS, the small card's bottom right is the beacon's
-    // countdown ("next 4:32", or why it waits, in amber) in place of the power, which the large card keeps
-    let next_here = !big && k.holder != crate::aprs::Holder::Beacon && !k.next.is_empty();
-    // the header says "Muted" already: beside the countdown it would squeeze the last-heard line
-    if muted && !next_here {
-        pwb.push("Muted \u{b7} ".as_bytes());
-    }
-    if next_here {
-        if k.next_timed {
-            pwb.push(b"next ");
-        }
-        pwb.push(k.next.as_bytes());
-    } else {
-        pwb.push(k.power.as_bytes());
-    }
-    let pw = pwb.as_bytes();
-    let pw_w = text4_width(pw, &UI_12);
-    let pc = if next_here { if k.next_warn { AMBER } else { VIOLET } } else if muted { AMBER } else { SUB };
     app.drawn.meter[p] = None;
     if big {
-        let mut beacon = Buf::<28>::new();
-        app.beacon_text(data, &mut beacon);
-        let waiting = data.beacon().waiting;
-        if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, 1u8)), true) {
-            redraw_box!(clear, lcd, (15, y + 28, 211, 49, SURFACE), {
-                w::freq(lcd, 15, 226, y + 67, f, &DIG_46, &DIG_28, FREQ, SUB, SURFACE);
+        // APRS-17.2: the frequency at the compact cards' size, "3 heard · 11 /hr" at its right (" /hr" goes only
+        // when the two don't fit); KISS its port.
+        let fb = slot::mhz3(f);
+        let fw = text4_width(fb.as_bytes(), &DIG_26);
+        let (n, h) = k.counts.unwrap_or_default();
+        let mut hr = Buf::<16>::new();
+        let mut cnt = Buf::<16>::new();
+        if k.holder == Holder::Kiss {
+            cnt = k.right;
+        } else {
+            let _ = uwrite!(cnt, "{} heard", n);
+            let _ = uwrite!(hr, " \u{b7} {} /hr", h);
+        }
+        let cw = text4_width(cnt.as_bytes(), &UI_12B);
+        let mut hw = text4_width(hr.as_bytes(), &UI_12);
+        if 15 + fw + 8 + cw + hw > 226 {
+            (hr, hw) = (Buf::new(), 0);
+        }
+        if app.dirty(R_FREQ + p, hash(&(f, &cnt, &hr))) {
+            canvas::banded(lcd, 14, y + 26, 212, 25, SURFACE, |lcd| {
+                lcd.text4_rows(15, y + 47, fb.as_bytes(), &DIG_26, TEXT, SURFACE, y + 26, y + 51);
+                w::field(lcd, 226 - hw - cw, cw, y + 34, y + 51, y + 47, Align::Left, cnt.as_bytes(), &UI_12B, TEXT, SURFACE);
+                w::field(lcd, 226 - hw, hw, y + 34, y + 51, y + 47, Align::Left, hr.as_bytes(), &UI_12, SUB, SURFACE);
             });
         }
-        // The bottom line's facts, the power at the right.
-        if app.dirty(R_INFO + p, hash(&(&k.line, lc, pw, muted))) {
-            lcd.fill(14, y + 80, 212, 19, SURFACE);
-            let lw = 211 - pw_w - 8;
-            w::field(lcd, 15, lw, y + 80, y + 98, y + 94, Align::Left, w::fit(k.line.as_bytes(), &UI_12, lw), &UI_12, lc, SURFACE);
-            w::field(lcd, 226 - pw_w, pw_w, y + 80, y + 98, y + 94, Align::Right, pw, &UI_12, pc, SURFACE);
+        // APRS-17.2.2 – 17.2.4: the newest station, then unread messages or the next station; KISS its frames.
+        let msg = k.unread > 0;
+        let mut mt = Buf::<32>::new();
+        if msg {
+            let _ = uwrite!(mt, "{} new from {}", k.unread, crate::screens::lists::Txt(k.unread_from.as_bytes()));
         }
-        // The beacon row, the holder's fact at the right; with beacons alone, "Next beacon in" and the countdown.
-        if k.holder == crate::aprs::Holder::Beacon && !waiting {
-            beacon.set(if k.countdown { b"Next beacon in" } else { b"Next beacon" });
+        let kiss = k.holder == Holder::Kiss;
+        let first = if kiss { k.line.as_bytes() } else { app.nothing_heard(data).as_bytes() };
+        if app.dirty(R_INFO + p, hash(&(&k.rows[..2], k.rows_n.min(2), &mt, first))) {
+            canvas::banded(lcd, 14, y + 52, 212, 34, SURFACE, |lcd| {
+                if k.rows_n == 0 || kiss {
+                    w::field(lcd, 15, 211, y + 52, y + 69, y + 65, Align::Left, first, &UI_12, SUB, SURFACE);
+                } else {
+                    station_row(lcd, y + 52, &k.rows[0], true);
+                }
+                if msg {
+                    w::field(lcd, 15, 18, y + 69, y + 86, y + 82, Align::Left, b"", &UI_12, SUB, SURFACE);
+                    w::envelope(lcd, 15, y + 73, VIOLET);
+                    w::field(lcd, 33, 193, y + 69, y + 86, y + 82, Align::Left, w::fit(mt.as_bytes(), &UI_12, 193), &UI_12, VIOLET, SURFACE);
+                } else if k.rows_n > 1 && !kiss {
+                    station_row(lcd, y + 69, &k.rows[1], false);
+                }
+            });
         }
-        // APRS-17.2: APRS mode's two counts together, "14 heard · 3 /hr" (the small card takes them in turn).
-        let mut both = Buf::<24>::new();
-        let right = match k.counts {
-            Some((n, h)) => ferrite_ui::v!(both, "{} heard \u{b7} {} /hr", n, h),
-            None => k.right.as_bytes(),
+        // APRS-17.2.3: our last beacon's fate; before any beacon this power-on a third station (beacons alone: the
+        // interval and the position's source).
+        let third = if msg { 1 } else { 2 };
+        let (ft, fc) = if !k.fate.is_empty() && !kiss {
+            (k.fate.as_bytes(), if k.fate_warn { AMBER } else { SUB })
+        } else if k.holder == Holder::Beacon {
+            (k.line.as_bytes(), if k.line_warn { AMBER } else { SUB })
+        } else {
+            (&b""[..], SUB)
         };
-        if app.dirty(R_SUB + p, hash(&(&beacon, right, waiting, rc))) {
-            lcd.fill(14, y + 102, 212, 20, SURFACE);
-            let c = if waiting { AMBER } else { SUB };
-            let rw = text4_width(right, &UI_12B).min(120);
-            let bw = 211 - rw - 8;
-            w::field(lcd, 15, bw, y + 103, y + 120, y + 117, Align::Left, w::fit(beacon.as_bytes(), &UI_12, bw), &UI_12, c, SURFACE);
-            w::field(lcd, 226 - rw, rw, y + 103, y + 120, y + 117, Align::Right, right, &UI_12B, rc, SURFACE);
+        let row3 = (!kiss && k.holder != Holder::Beacon && ft.is_empty() && k.rows_n > third).then(|| k.rows[third as usize]);
+        // APRS-17.2.1, APRS-17.2.5: the beacon row, "no fix" in amber left of the power without a position.
+        let bc = if k.bottom_warn { AMBER } else { SUB };
+        if app.dirty(R_SUB + p, hash(&(ft, fc, &row3, &k.bottom, bc, k.fix_note, k.power))) {
+            canvas::banded(lcd, 14, y + 86, 212, 34, SURFACE, |lcd| {
+                match &row3 {
+                    Some(r) => station_row(lcd, y + 86, r, false),
+                    None => {
+                        w::field(lcd, 15, 211, y + 86, y + 103, y + 99, Align::Left, w::fit(ft, &UI_12, 211), &UI_12, fc, SURFACE);
+                    }
+                }
+                bottom_row(lcd, y + 103, k.bottom.as_bytes(), bc, k.fix_note, k.power);
+            });
         }
     } else {
+        let rc = if k.right_warn { AMBER } else if k.countdown { VIOLET } else { TEXT };
+        let lc = if k.line_warn { AMBER } else { SUB };
+        // APRS-17.2.1: with automatic beacons beside APRS mode or KISS, the small card's bottom right is the beacon's
+        // countdown ("Beacon in 5m", or why it waits, in amber) in place of the power, which the large card keeps
+        let next_here = k.holder != Holder::Beacon && !k.next.is_empty();
+        let mut pwb = Buf::<16>::new();
+        if next_here {
+            if k.next_timed {
+                pwb.push(if k.next.as_bytes() == b"soon" { b"Beacon ".as_slice() } else { b"Beacon in " });
+            }
+            pwb.push(k.soon.as_bytes());
+        } else {
+            pwb.push(k.power.as_bytes());
+        }
+        let pw = pwb.as_bytes();
+        let pw_w = text4_width(pw, &UI_12);
+        let pc = if next_here { if k.next_warn { AMBER } else { VIOLET } } else { SUB };
         if let Some(clear) = app.dirty_shape(R_FREQ + p, hash(&(f, &k.right, k.countdown, rc, 1u8)), true) {
             redraw_box!(clear, lcd, (15, y + 24, 211, 26, SURFACE), {
                 w::freq(lcd, 15, 130, y + 45, f, &DIG_26, &DIG_17, TEXT, SUB, SURFACE);
                 if k.countdown {
-                    // Two lines: a small "next in" over the countdown, bold, in C's colour.
-                    w::field(lcd, 150, 76, y + 24, y + 34, y + 33, Align::Right, b"next in", &UI_12, SUB, SURFACE);
+                    // Two lines: a small "Beacon in" over the countdown, bold, in C's colour.
+                    w::field(lcd, 150, 76, y + 24, y + 34, y + 33, Align::Right, b"Beacon in", &UI_12, SUB, SURFACE);
                     w::field(lcd, 150, 76, y + 34, y + 50, y + 48, Align::Right, k.right.as_bytes(), &UI_15B, rc, SURFACE);
                 } else {
                     w::field(lcd, 130, 96, y + 29, y + 47, y + 45, Align::Right, k.right.as_bytes(), &UI_12B, rc, SURFACE);
                 }
             });
         }
-        if app.dirty(R_SUB + p, hash(&(&k.line, lc, pw, pc, muted))) {
+        if app.dirty(R_SUB + p, hash(&(&k.line, lc, pw, pc))) {
             ferrite_ui::canvas::banded(lcd, 15, y + 51, 211, 15, SURFACE, |lcd| {
                 let lw = 211 - pw_w - 8;
-                w::field(lcd, 15, lw, y + 51, y + 65, y + 61, Align::Left, w::fit(k.line.as_bytes(), &UI_12, lw), &UI_12, lc, SURFACE);
+                // "Last " goes before the station's age would be clipped beside a countdown
+                let mut l = k.line.as_bytes();
+                if text4_width(l, &UI_12) > lw {
+                    l = l.strip_prefix(b"Last ").unwrap_or(l);
+                }
+                w::field(lcd, 15, lw, y + 51, y + 65, y + 61, Align::Left, w::fit(l, &UI_12, lw), &UI_12, lc, SURFACE);
                 w::field(lcd, 226 - pw_w, pw_w, y + 51, y + 65, y + 61, Align::Right, pw, &UI_12, pc, SURFACE);
             });
         }
     }
+}
+
+/// APRS-17.2.2: a station row of the large APRS card: the call (the newest bold), its age, and at the right the
+/// distance and bearing or "via digi".
+fn station_row(lcd: &mut impl Panel, y0: i32, r: &crate::aprs_card::Row, newest: bool) {
+    let (f, c) = if newest { (&UI_12B, TEXT) } else { (&UI_12, SUB) };
+    let b = y0 + 13;
+    w::field(lcd, 15, 85, y0, y0 + 17, b, Align::Left, w::fit(r.call.as_bytes(), f, 80), f, c, SURFACE);
+    w::field(lcd, 100, 52, y0, y0 + 17, b, Align::Left, r.age.as_bytes(), &UI_12, SUB, SURFACE);
+    w::field(lcd, 152, 74, y0, y0 + 17, b, Align::Right, w::fit(r.right.as_bytes(), &UI_12, 74), &UI_12, SUB, SURFACE);
+}
+
+/// APRS-17.2.1, APRS-17.2.5: the large APRS card's beacon row: the beacon's state, "no fix" (amber) without a
+/// position, the power at the right.
+fn bottom_row(lcd: &mut impl Panel, y0: i32, t: &[u8], c: u16, fix_note: bool, power: &str) {
+    let b = y0 + 13;
+    let pw = power.as_bytes();
+    let pw_w = text4_width(pw, &UI_12);
+    let nb: &[u8] = if fix_note { b"no fix" } else { b"" };
+    let nw = text4_width(nb, &UI_12);
+    let lw = 211 - pw_w - nw - 16;
+    w::field(lcd, 15, lw, y0, y0 + 17, b, Align::Left, w::fit(t, &UI_12, lw), &UI_12, c, SURFACE);
+    w::field(lcd, 15 + lw, 211 - lw - pw_w - 8, y0, y0 + 17, b, Align::Right, nb, &UI_12, AMBER, SURFACE);
+    w::field(lcd, 226 - pw_w, pw_w, y0, y0 + 17, b, Align::Right, pw, &UI_12, SUB, SURFACE);
 }
 
 impl View for Home {
@@ -391,7 +454,7 @@ impl View for Home {
         if app.aprs_slot(app.active) {
             // APRS-17 (decision 181): OK leads to the heard list, or with beacons alone to Beacon now; # pauses
             // watch while a watched slot is receiving (WATCH-6), else hold MENU is the APRS page.
-            let ok = if app.aprs_holder() == Some(crate::aprs::Holder::Beacon) { ("OK", "Beacon now") } else { ("OK", "Heard") };
+            let ok = if app.aprs_holder() == Some(crate::aprs::Holder::Beacon) { ("OK", "Send") } else { ("OK", "Heard") };
             let third = if app.watched_rx() { ("#", "Pause") } else { ("Hold MENU", "APRS") };
             return Hints::new(&[("SLOT", "A\u{b7}B\u{b7}C"), ok, third]);
         }
@@ -491,14 +554,8 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     let (y, h) = card(s, app.active);
     let big = s == app.active;
     let lv = live.slots[s as usize];
+    // APRS-17.6 (decision 313): the APRS card's state is every card's, Muted and RX muted included
     let (state, sc) = app.state(s, live);
-    // APRS-17.6: on the APRS card the mute shows by the power at the bottom right, so "VHF: APRS" (or "VHF: voice") keeps the
-    // header's right side
-    let (state, sc) = match state {
-        "Muted" if app.aprs_slot(s) => ("idle", SUB),
-        "RX muted" if app.aprs_slot(s) => ("RX", GREEN),
-        _ => (state, sc),
-    };
     let border = if state == "TX" { RED } else if big { BLUE } else if state == "RX" { GREEN } else { LINE };
     let aprs = app.aprs_slot(s);
     let kind = card_kind(app, s);
@@ -539,14 +596,22 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     }
     // Header rows: y+7..y+24 on the big card, y+5..y+22 on the compact ones (their digits start at y+25).
     let (hy, hb) = if big { (y + 7, y + 20) } else { (y + 5, y + 18) };
-    // Beside the state (left of an RX or MON tag): the clarifier (VFO-22), or on the APRS card that it takes
-    // turns on chip 0 with A or B, and who wins it (APRS-21, WATCH-17.3: "VHF: APRS" C takes long turns, "VHF:
-    // voice" A and B keep their usual turns and C can miss packets).
+    // Beside the state (left of an RX or MON tag): the clarifier (VFO-22), or on the APRS card while it takes turns
+    // on chip 0 with A or B, who wins it (APRS-21, WATCH-17.3: "APRS first" grey, "A·B first" amber), only where it
+    // fits beside the holder and the state (the state wins).
     let mut clr = Buf::<16>::new();
+    let mut clr_c = AMBER;
     let c = app.slots[s as usize].clar;
-    if aprs && app.aprs_shared().is_some() {
-        clr.set(if app.settings().aprs_share == 0 { b"VHF: APRS" } else { b"VHF: voice" });
-    } else if c != 0 && !lv.scanning {
+    let tagged = matches!(state, "RX" | "TX" | "MON" | "FM");
+    if let Some((t, ab)) = app.aprs_priority().filter(|_| aprs) {
+        clr.set(t.as_bytes());
+        clr_c = if ab { AMBER } else { SUB };
+        let hb_ = head.as_bytes();
+        let n = hb_.windows(3).position(|w| w == " \u{b7}".as_bytes()).unwrap_or(hb_.len());
+        if text4_width(&hb_[..n], &UI_12B) + 8 + head_right_w(big, state, &clr) > 192 {
+            clr.clear();
+        }
+    } else if c != 0 && !lv.scanning && (big && tagged || state == "idle") {
         slot::clar_text(c, &mut clr);
     }
     // TSRCH-13: a tone hint takes the state's place, in a wider field; so does a long state ("Watch off: relay",
@@ -558,19 +623,20 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
     }
     let wide = !ht.is_empty();
     let ww = if wide { (text4_width(ht.as_bytes(), &UI_12) + 2).max(HEARD_W) } else { 0 };
-    if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, &ht))) {
+    if app.dirty(R_HEAD + p, hash(&(s, head, state, big, clr, clr_c, &ht))) {
         w::badge(lcd, 14, hy + 1, s, big, BG);
         lcd.fill(28, hy, 6, 17, SURFACE);
         // HOME-4a: the header takes what the state beside it leaves (a 16-character zone name fits beside an idle
         // state or an RX tag), never less than 120 px; clipped at a character, never wrapped.
-        let hw = if wide { 226 - ww - 34 } else { (226 - 6 - head_right_w(big, state, &clr) - 34).max(120) };
+        // (the APRS card's holder is short, and its priority shows only where it fits beside it: no minimum)
+        let hw = if wide { 226 - ww - 34 } else { (226 - 6 - head_right_w(big, state, &clr) - 34).max(if aprs { 0 } else { 120 }) };
         let sx = 34 + hw;
         let hb_ = head.as_bytes();
-        // the holder is what comes before " · " ("APRS Mode", "APRS + Beacon")
+        // the holder is what comes before " · " ("APRS Mode", "APRS KISS")
         let split = hb_.windows(3).position(|w| w == " \u{b7}".as_bytes());
         if let Some(n) = split.filter(|_| aprs) {
-            // APRS-17: the holder ("APRS Mode") bold in C's colour, " · VHF" as any header; with APRS-21's amber
-            // "VHF: APRS" or "VHF: voice" beside it the band goes, as that names it.
+            // APRS-17: the holder ("APRS Mode") bold in C's colour, " · VHF" as any header; with APRS-21's
+            // "APRS first" or "A·B first" beside the state the band goes (decision 313).
             let (word, rest) = hb_.split_at(n);
             let rest = if clr.is_empty() { rest } else { b"" };
             let ww0 = text4_width(word, &UI_12B).min(hw);
@@ -587,20 +653,29 @@ fn draw_card(app: &mut App, lcd: &mut canvas::Band, cx: &Cx<impl ChannelStore>, 
             });
         } else if big {
             ferrite_ui::canvas::banded(lcd, sx, y + 6, 228 - sx, 18, SURFACE, |lcd| {
-                let tagged = matches!(state, "RX" | "TX" | "MON" | "FM");
-                if tagged {
+                // the state at the right (a tag, or its word; idle shows nothing), the clarifier or APRS priority left of it
+                let right = if tagged {
                     w::tag(lcd, 226, y + 7, state.as_bytes(), sc, SURFACE);
+                    194
                 } else if state != "idle" {
                     w::field(lcd, sx, 226 - sx, y + 7, y + 24, y + 20, Align::Right, state.as_bytes(), &UI_12, sc, SURFACE);
-                }
-                if !clr.is_empty() && (tagged || state == "idle") {
-                    let right = if tagged { 194 } else { 226 };
-                    w::field(lcd, sx, right - sx, y + 7, y + 24, y + 20, Align::Right, clr.as_bytes(), &UI_12, AMBER, SURFACE);
+                    226 - text4_width(state.as_bytes(), &UI_12) - 8
+                } else {
+                    226
+                };
+                if !clr.is_empty() {
+                    w::field(lcd, sx, right - sx, y + 7, y + 24, y + 20, Align::Right, clr.as_bytes(), &UI_12, clr_c, SURFACE);
                 }
             });
         } else {
-            let (t, c, f) = compact_state(state, &clr, sc);
-            w::field(lcd, sx, 226 - sx, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
+            let (t, c, f) = compact_state(state, &clr, sc, clr_c);
+            let tw = text4_width(t, f);
+            w::field(lcd, 226 - tw, tw, hy, hy + 17, hb, Align::Right, t, f, c, SURFACE);
+            // APRS-21: the priority left of a state that isn't idle (an idle compact card shows it in idle's place)
+            let note: &[u8] = if state != "idle" { clr.as_bytes() } else { b"" };
+            let gx = (226 - tw - 8).max(sx);
+            w::field(lcd, sx, gx - sx, hy, hy + 17, hb, Align::Right, note, &UI_12, clr_c, SURFACE);
+            lcd.fill(gx, hy, 226 - tw - gx, 17, SURFACE);
         }
     }
     if aprs {
@@ -824,24 +899,28 @@ pub(crate) fn copy_to_vfo(app: &mut App) {
     app.show_toast(b"Copied to VFO", b"V/M: channel", false);
 }
 
-/// A compact card's header state: the clarifier in amber when idle with one, else the state (RX in bold).
-fn compact_state<'a>(state: &'a str, clr: &'a Buf<16>, sc: u16) -> (&'a [u8], u16, &'static ferrite_ui::font4::Font4) {
+/// A compact card's header state: the clarifier (or APRS-21's priority) in its colour `cc` when idle with one, else the
+/// state (RX in bold).
+fn compact_state<'a>(state: &'a str, clr: &'a Buf<16>, sc: u16, cc: u16) -> (&'a [u8], u16, &'static ferrite_ui::font4::Font4) {
     let f = if matches!(state, "RX" | "TX") { &UI_12B } else { &UI_12 };
-    if state == "idle" && !clr.is_empty() { (clr.as_bytes(), AMBER, f) } else { (state.as_bytes(), sc, f) }
+    if state == "idle" && !clr.is_empty() { (clr.as_bytes(), cc, f) } else { (state.as_bytes(), sc, f) }
 }
 
 /// How wide the header's right side draws (HOME-4a): the state (a tag on the large card for RX, MON, FM; idle shows
 /// nothing there) and the clarifier or APRS note beside it, so the header can take the rest.
 pub(crate) fn head_right_w(big: bool, state: &str, clr: &Buf<16>) -> i32 {
-    if !big {
-        let (t, _, f) = compact_state(state, clr, 0);
-        return text4_width(t, f);
-    }
     let cw = if clr.is_empty() { 0 } else { text4_width(clr.as_bytes(), &UI_12) };
+    // the note beside a state word (the APRS priority, APRS-21): the word, 8 px, the note
+    let beside = |w: i32| if cw > 0 { w + 8 + cw } else { w };
+    if !big {
+        let (t, _, f) = compact_state(state, clr, 0, 0);
+        let w = text4_width(t, f);
+        return if state == "idle" { w } else { beside(w) };
+    }
     match state {
         "RX" | "TX" | "MON" | "FM" => (text4_width(state.as_bytes(), &UI_12B) + 10).max(if cw > 0 { 32 + cw } else { 0 }),
         "idle" => cw,
-        _ => text4_width(state.as_bytes(), &UI_12),
+        _ => beside(text4_width(state.as_bytes(), &UI_12)),
     }
 }
 
@@ -921,7 +1000,7 @@ mod tests {
         for st in ["idle", "RX", "TX", "MON"] {
             assert!(need <= hw(false, st, b""), "compact card, {st}: {need} > {}", hw(false, st, b""));
         }
-        assert!(hw(true, "RX", b"VHF: voice") >= 120 && hw(false, "idle", b"CLR +2.5") >= 120);
+        assert!(hw(true, "RX", "A\u{b7}B first".as_bytes()) >= 120 && hw(false, "idle", b"CLR +2.5") >= 120);
         // the single + scope layout's header (26..232 beside the state)
         assert!(need <= (232 - 6 - super::head_right_w(true, "RX", &Buf::new()) - 26).max(140));
     }

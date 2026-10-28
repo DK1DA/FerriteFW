@@ -449,7 +449,7 @@ fn card_text() {
     assert_eq!(b.as_bytes(), b"Beacon waiting: HF");
     a.s.aprs_tick(1, true, true);
     a.app.beacon_text(&a.s, &mut b);
-    assert!(b.as_bytes().starts_with(b"Next beacon in"), "{:?}", core::str::from_utf8(b.as_bytes()));
+    assert!(b.as_bytes().starts_with(b"Beacon in "), "{:?}", core::str::from_utf8(b.as_bytes()));
     let mut l = Buf::<80>::new();
     crate::aprs::last_text(&a.s, &mut l);
     assert!(l.as_bytes().starts_with(b"VE3KPW-9"), "{:?}", core::str::from_utf8(l.as_bytes()));

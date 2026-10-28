@@ -765,7 +765,7 @@ impl App {
         self.aprs_st |= AFTER_VOICE;
     }
 
-    /// The APRS card's beacon line (APRS-17, APRS-20, APRS-24): "Beacon off", "Beacon manual", "Next beacon in 4 min", "Smart beacon",
+    /// The APRS card's beacon line (APRS-17, APRS-20, APRS-24): "Beacon off", "Beacon manual", "Beacon in 4m", "Smart beacon",
     /// "Beacon waiting: HF" while the active slot holds the relay in the HF state.
     pub(crate) fn beacon_text<const N: usize>(&self, data: &dyn Data, b: &mut Buf<N>) {
         b.clear();
@@ -779,11 +779,10 @@ impl App {
                 (0, _) => b.set(b"Beacon off"),
                 (1, _) => b.set(b"Beacon manual"),
                 _ if self.aprs.smart() => b.set(b"Smart beacon"),
-                (_, Some(s)) if s < 60 => {
-                    let _ = uwrite!(b, "Next beacon in {} s", s);
-                }
+                // APRS-17.2.1 (decision 313): "Beacon in 5m", seconds in the last minute ("Beacon in 42s")
                 (_, Some(s)) => {
-                    let _ = uwrite!(b, "Next beacon in {} min", s.div_ceil(60));
+                    b.set(b"Beacon in ");
+                    crate::aprs_card::soon_text(s, b);
                 }
                 (_, None) => b.set(b"Beacon soon"),
             }
