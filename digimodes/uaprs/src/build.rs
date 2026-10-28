@@ -121,7 +121,10 @@ fn tail(w: &mut W, r: &Report) -> Option<()> {
     let extension = r.course_speed.is_none()
         && r.altitude.is_none()
         && crate::parse::extensions(&mut probe, r.comment).len() != r.comment.len();
-    if delimiter || extension {
+    // After a course/speed or an altitude, a space keeps the comment readable in a raw packet ("/A=000242 On
+    // the road"); the data fields are fixed width, so receivers read them the same either way (APRS-50).
+    let after_data = (r.course_speed.is_some() || r.altitude.is_some()) && !r.comment.is_empty();
+    if delimiter || extension || after_data {
         w.put(b" ")?;
     }
     w.put(r.comment)

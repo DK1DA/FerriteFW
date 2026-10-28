@@ -2004,14 +2004,14 @@ mod tests {
             std::string::String::from_utf8(info[POSITION_HEAD..n].to_vec()).unwrap()
         };
         let mut cfg = AprsCfg { beacon: 1, power: 2, telemetry: true, ..AprsCfg::DEFAULT };
-        // 20 characters: 16 + 20 + " 8.1V" is 41; " 24C" would make 45
+        // 20 characters: 16 + " " + 20 + " 8.1V" is 42; " 24C" would make 46
         cfg.comment[..20].copy_from_slice(&[b'x'; 20]);
-        assert_eq!(tail(&cfg, &moving, &mut info), std::format!("090/021/A=000393{} 8.1V", "x".repeat(20)));
+        assert_eq!(tail(&cfg, &moving, &mut info), std::format!("090/021/A=000393 {} 8.1V", "x".repeat(20)));
         // standing still: all three fit (20 + 13 = 33)
         assert_eq!(tail(&cfg, &fix(), &mut info), std::format!("{} 8.1V 24C 9W", "x".repeat(20)));
-        // 30 characters while moving: 46 already, none added, the comment as typed
+        // 30 characters while moving: 47 already, none added, the comment as typed
         cfg.comment[..30].copy_from_slice(&[b'x'; 30]);
-        assert_eq!(tail(&cfg, &moving, &mut info), std::format!("090/021/A=000393{}", "x".repeat(30)));
+        assert_eq!(tail(&cfg, &moving, &mut info), std::format!("090/021/A=000393 {}", "x".repeat(30)));
         // 34 standing still: " 8.1V" makes 39, " 24C" 43 (just fits), " 9W" 46 doesn't
         cfg.comment[..34].copy_from_slice(&[b'x'; 34]);
         assert_eq!(tail(&cfg, &fix(), &mut info), std::format!("{} 8.1V 24C", "x".repeat(34)));
