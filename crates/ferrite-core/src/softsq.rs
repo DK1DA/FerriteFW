@@ -174,4 +174,11 @@ mod tests {
     fn software_by_default() {
         assert!(!chip_decides());
     }
+
+    /// Only ever set false here: other tests read the shared flag as false (the default) at the same time.
+    #[test]
+    fn set_chip_decides_off() {
+        set_chip_decides(false);
+        assert!(!chip_decides());
+    }
 }

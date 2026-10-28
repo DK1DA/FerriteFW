@@ -147,4 +147,10 @@ mod tests {
         a.chunk(&mut tone(10), true);
         assert!(a.gain() > 3 * UNITY);
     }
+
+    #[test]
+    fn default_is_new() {
+        assert_eq!(Agc::default(), Agc::new());
+        assert_eq!(Agc::default().gain(), Agc::new().gain());
+    }
 }

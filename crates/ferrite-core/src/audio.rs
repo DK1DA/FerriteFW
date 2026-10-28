@@ -199,4 +199,28 @@ mod tests {
         assert_eq!(to_dac(i16::MIN), 0);
         assert_eq!(afsk_tx(300).preamble, 45);
     }
+
+    /// APRS-45: no FX.25 check bytes (0, or a count the code doesn't have) sends plain AX.25: the framer's bits,
+    /// flags first. A default decimator is a new one.
+    #[test]
+    fn plain_bits_and_default_decimator() {
+        let cfg = afsk_tx(300);
+        let frame = [0x82u8, 0xA0, 0x40, 0x61];
+        for check in [0, 8] {
+            let mut enc = None;
+            let bits: Vec<u8> = tx_bits(&frame, check, &cfg, &mut enc).collect();
+            assert!(enc.is_none());
+            assert_eq!(bits[..8], [0, 1, 1, 1, 1, 1, 1, 0], "a flag, LSB first");
+            let want: Vec<u8> = uafsk::hdlc::Framer::new(&frame, cfg.preamble.max(1), cfg.postamble.max(1)).collect();
+            assert_eq!(bits, want);
+        }
+        let (mut a, mut b) = (Decim::default(), Decim::new());
+        let (mut x, mut y) = (Vec::new(), Vec::new());
+        for n in 0..3_000u16 {
+            a.push(n % 4096, |s| x.push(s));
+            b.push(n % 4096, |s| y.push(s));
+        }
+        assert!(!x.is_empty());
+        assert_eq!(x, y);
+    }
 }

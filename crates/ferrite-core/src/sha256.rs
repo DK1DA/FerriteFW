@@ -122,4 +122,14 @@ mod tests {
         assert_eq!(hex(s.finish()), hex(sha256(&a)));
         assert_eq!(hex(sha256(&[b'x'; 64])), "7ce100971f64e7001e8fe5a51973ecdfe1ced42befe7ee8d5fd6219506b5393c");
     }
+
+    /// A default hasher is a fresh one: nothing fed is the empty message's hash; the SSB patch's hasher too.
+    #[test]
+    fn default_is_fresh() {
+        let empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert_eq!(hex(Sha256::default().finish()), empty);
+        let mut h = crate::ssb::hasher();
+        h.update(b"abc");
+        assert_eq!(h.finish(), sha256(b"abc"));
+    }
 }

@@ -313,4 +313,38 @@ mod tests {
         }
         assert!(s.pred.abs() < 64 && s.index == 0);
     }
+
+    /// LINK-13.4: a block's payload reads back as written (head, start state, codes); a keep-alive has no codes; a
+    /// payload shorter than the head is none; an index past the table's end is held to 88.
+    #[test]
+    fn payload_round_trips() {
+        let mut codes = [0u8; BLOCK_BYTES];
+        codes.iter_mut().enumerate().for_each(|(i, c)| *c = i as u8);
+        let blk = Block { start: State { pred: -1234, index: 40 }, codes };
+        let mut p = [0u8; HEAD + BLOCK_BYTES];
+        assert_eq!(put(0x0102, 2, SQ_OPEN, Some(&blk), &mut p), HEAD + BLOCK_BYTES);
+        assert_eq!(get(&p), Some((0x0102, 2, SQ_OPEN, blk.start, &codes[..])));
+        let n = put(9, NO_SLOT, 0, None, &mut p);
+        assert_eq!(get(&p[..n]), Some((9, NO_SLOT, 0, State::default(), &[][..])));
+        assert_eq!(get(&p[..HEAD - 1]), None);
+        p[6] = 200;
+        assert_eq!(get(&p[..HEAD]).unwrap().3.index, 88);
+        let mut w = [0u8; 8];
+        assert_eq!(frame(1, 0, 0, Some(&blk), &mut w), None, "too small for the wire");
+    }
+
+    /// Decoding stops at the room given (two samples a byte); a fresh packer starts from the zero state.
+    #[test]
+    fn decode_into_short_room() {
+        let mut out = [0i16; 3];
+        assert_eq!(decode(State::default(), &[0x77, 0x77], &mut out), 3);
+        assert!(out[0] > 0 && out[1] > out[0] && out[2] > out[1], "a rising run: {out:?}");
+        let mut v = Vec::new();
+        let mut p = Packer::default();
+        for _ in 0..3 * BLOCK {
+            p.push(0, |b| v.push(*b));
+        }
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].start, State::default());
+    }
 }

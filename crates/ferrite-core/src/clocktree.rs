@@ -458,4 +458,21 @@ mod tests {
         assert!(tick_count_safe(0x7FEF));
         assert!(!tick_count_safe(0x7FF0));
     }
+
+    /// The trees worked out at run time (the firmware's are consts): PLLMULT's code below and above x16 (RM
+    /// 4.3.2), PLLRANGE only above 72 MHz, the ADC at APB2 / 2 when APB2 is 20 MHz or less, else / 6.
+    #[test]
+    fn tree_fields() {
+        let x2 = Tree::new(2);
+        assert_eq!((x2.mhz(), x2.apb_hz(), x2.adc_div_code(), x2.adc_hz()), (16, 16_000_000, 0, 8_000_000));
+        assert_eq!(x2.pll_cfg(), 1 << 16, "x2 is code 0, no range bit");
+        let low = LOW;
+        assert_eq!((low.mhz(), low.adc_div_code(), low.adc_hz()), (24, 0b10, 4_000_000));
+        assert_eq!(low.pll_cfg(), 1 << 16 | 1 << 18);
+        let full = Tree::new(15);
+        assert_eq!(full.pll_cfg(), 1 << 31 | 1 << 16 | 13 << 18, "x15 is code 13");
+        let top = Tree::new(30);
+        assert_eq!(top.mhz(), 240);
+        assert_eq!(top.pll_cfg(), 1 << 31 | 1 << 16 | (29 & 0xF) << 18 | 1 << 29, "x30 is code 29");
+    }
 }

@@ -293,4 +293,17 @@ mod tests {
         assert!(BEEP_GAINS.windows(2).all(|w| w[0] < w[1]));
         assert_eq!((beep_gain(0), beep_gain(9)), (0x0B, 0x2D));
     }
+
+    /// Lower-case A-D send as upper case; a speed of 0 counts as 1 wpm (no division by zero); a chime row is its
+    /// notes, then ended (0 ms).
+    #[test]
+    fn small_helpers() {
+        assert_eq!(dtmf_symbol(b'a'), Some('A'));
+        assert_eq!(dtmf_symbol(b'd'), Some('D'));
+        assert_eq!(dtmf_symbol(b'e'), None);
+        assert_eq!(dit_ms(0), 1200);
+        let row = pad([(440, 10), (0, 5)]);
+        assert_eq!(&row[..3], &[(440, 10), (0, 5), (0, 0)]);
+        assert_eq!(CHIMES[2], pad([(1047, 110), (1568, 230)]));
+    }
 }

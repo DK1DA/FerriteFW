@@ -170,4 +170,26 @@ mod tests {
         assert_eq!(band(mhz(446)), (Band::Uhf, 1));
         assert!(selftest());
     }
+
+    /// VFO-21: 18-630 and 756-1300 MHz, both ends included; the gap and HF mode's range below aren't.
+    #[test]
+    fn receivable_ranges() {
+        for f in [mhz(18), mhz(146), mhz(630), mhz(756), mhz(1300)] {
+            assert!(receivable(f), "{f}");
+        }
+        for f in [mhz(18) - 1, mhz(630) + 1, mhz(700), mhz(756) - 1, mhz(1300) + 1, 0] {
+            assert!(!receivable(f), "{f}");
+        }
+        assert!(needs_relay(mhz(28)) && !needs_relay(mhz(146)));
+    }
+
+    /// Room for nothing writes nothing; more than four MHz digits is no frequency.
+    #[test]
+    fn format_and_parse_limits() {
+        assert_eq!(fmt(14_652_000, 0), "");
+        assert_eq!(fmt(14_652_000, 4), "146");
+        assert_eq!(fmt(130_000_000, 16), "1300.000 00");
+        assert_eq!(parse(b"12345.6"), None);
+        assert_eq!(parse(b"1300"), Some(130_000_000));
+    }
 }

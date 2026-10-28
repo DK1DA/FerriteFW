@@ -251,5 +251,6 @@ mod tests {
         assert_eq!(check(mhz(440), Region::NewZealand, false), Err(Refusal::OutOfBand));
         assert_eq!(check(mhz(147), Region::Australia, false), Ok(()));
         assert_eq!(nearest(mhz(1), Region::Other).name, "17 m", "below everything: the lowest band");
+        assert_eq!(b("x", 1, 2), TxBand { name: "x", lo: 1, hi: 2 });
     }
 }
