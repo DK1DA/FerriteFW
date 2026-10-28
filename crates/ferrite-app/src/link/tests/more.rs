@@ -145,14 +145,17 @@ fn write_many_cancelled() {
     assert!(pc.st.get(500).is_none());
 }
 
-/// LINK-13.4: `AUDIO` on the cable: on, then the session listens; a value other than 0 or 1 is a bad argument.
+/// LINK-13.4, LINK-13.9: `AUDIO` on the cable: on, then the session listens; the raw modes (2, 3) are a bench
+/// build's only and refused elsewhere; any other value is a bad argument.
 #[test]
 fn audio_on_and_bad() {
     let mut pc = Pc::new(true);
     assert!(!pc.link.listening());
     assert_eq!(pc.ask(msg::AUDIO, &[1]).0, 0);
     assert!(pc.link.listening());
-    assert_eq!(pc.ask(msg::AUDIO, &[2]).0, Status::BadArg as u8);
+    #[cfg(not(feature = "bench"))]
+    assert_eq!(pc.ask(msg::AUDIO, &[2]).0, Status::Refused as u8);
+    assert_eq!(pc.ask(msg::AUDIO, &[9]).0, Status::BadArg as u8);
     assert_eq!(pc.ask(msg::AUDIO, &[0]).0, 0);
     assert!(!pc.link.listening());
     assert_eq!(pc.ask(msg::BAUD, &[1, 2]).0, Status::BadArg as u8, "BAUD needs four bytes");
