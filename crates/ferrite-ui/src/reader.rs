@@ -116,4 +116,20 @@ mod tests {
         assert!((100..123).any(|y| (0..W).any(|x| fb.at(x, y) != crate::theme::map(BG))));
         assert!((250..262).any(|y| (0..W).any(|x| fb.at(x, y) != crate::theme::map(BG))));
     }
+
+    /// BACKUP-9.4: the waiting screen has no bar; the check at less than all stays blue with its percentage; a
+    /// total of 0 (nothing to read yet) leaves the screen as it is.
+    #[test]
+    fn waiting_then_checking() {
+        let mut fb = FrameBuffer::new();
+        waiting(&mut fb);
+        assert_eq!(fb.at(BAR_X + 10, BAR_Y + 4), crate::theme::map(BG), "no bar while waiting");
+        draw(&mut fb);
+        let before = fb.px.clone();
+        progress(&mut fb, Phase::Checking, 5, 0);
+        assert!(fb.px == before, "nothing to show yet");
+        progress(&mut fb, Phase::Checking, 3, 4);
+        assert_eq!(fb.at(BAR_X + BAR_W / 2, BAR_Y + 4), crate::theme::map(BLUE));
+        assert_eq!(fb.at(BAR_X + BAR_W - 1, BAR_Y + 4), crate::theme::map(LINE));
+    }
 }

@@ -276,6 +276,38 @@ mod tests {
         }
     }
 
+    /// The compile-time generator builder, run again at run time, gives the flash tables; its own field arithmetic
+    /// agrees with the table-driven one.
+    #[test]
+    fn const_builders_match_tables() {
+        assert_eq!(generator::<17>(), GEN16);
+        assert_eq!(generator::<33>(), GEN32);
+        assert_eq!(generator::<65>(), GEN64);
+        // (x + α)(x + α^2) = x^2 + (α + α^2) x + α^3 = x^2 + 6x + 8.
+        assert_eq!(generator::<3>(), [8, 6, 1]);
+        for a in 0..=255u8 {
+            for b in 0..=255u8 {
+                assert_eq!(const_mul(a, b), gf::mul(a, b), "{a} * {b}");
+            }
+        }
+        for e in 0..600 {
+            assert_eq!(const_pow(e), gf::pow(e), "α^{e}");
+        }
+    }
+
+    #[test]
+    fn code_sizes() {
+        assert_eq!(Rs::new(16).check(), 16);
+        assert_eq!(Rs::new(32).check(), 32);
+        assert_eq!(Rs::new(64).check(), 64);
+    }
+
+    #[test]
+    #[should_panic(expected = "16, 32 or 64")]
+    fn other_sizes_panic() {
+        Rs::new(8);
+    }
+
     #[test]
     fn random_errors() {
         let mut rng = Rng(0x1234_5678);

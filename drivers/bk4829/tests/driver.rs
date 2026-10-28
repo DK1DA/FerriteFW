@@ -486,6 +486,7 @@ fn scan_reading_scale() {
 
 /// The detectors share REG_3F: DTMF, then the FSK modem receiving, then an FSK packet sent and ended, and the
 /// DTMF bit and the init table's bits are still there; DTMF off clears its bit alone.
+#[cfg(feature = "tx")] // sends an FSK packet
 #[test]
 fn interrupt_bits_are_shared() {
     let mut r = Regs::new();
@@ -506,4 +507,87 @@ fn interrupt_bits_are_shared() {
     bk.dtmf_rx(false);
     bk.release();
     assert_eq!(r.regs[0x3F], 0x07FE & !int::FSK_ALL | int::FSK_RX_DONE | int::FSK_FIFO_FULL | int::FSK_SYNC);
+}
+
+/// Stock's receive audio level and the AF routes: REG_48 0xB2BF; REG_47 0x6042 with the route in bits 11:8 (a raw
+/// route keeps its low four bits).
+#[test]
+fn af_level_and_raw_route() {
+    let mut r = Regs::new();
+    let mut bk = Bk4829::new(&mut r);
+    bk.af_gain_rx();
+    bk.af_out(AfOut::Raw(0x13));
+    bk.af_out(AfOut::Tone);
+    bk.af_out(AfOut::Mute);
+    assert_eq!(r.writes, [(0x48, 0xB2BF), (0x47, 0x6342), (0x47, 0x6242), (0x47, 0x6042)]);
+}
+
+/// The meters read only their fields: noise REG_65 bits 6:0, glitches REG_63's low byte, RSSI REG_67 bits 8:0; the
+/// FSK FIFO word whole.
+#[test]
+fn meters_mask_their_fields() {
+    let mut r = Regs::new();
+    r.regs[0x65] = 0xFF85;
+    r.regs[0x63] = 0x1234;
+    r.regs[0x67] = 0xFE00 | (2 * 160); // 0 dBm, junk above bit 8
+    r.regs[0x5F] = 0xBEEF;
+    let mut bk = Bk4829::new(&mut r);
+    assert_eq!((bk.noise(), bk.glitch(), bk.rssi(), bk.rssi_dbm()), (5, 0x34, 320, 0));
+    assert_eq!(bk.fsk_read(), 0xBEEF);
+    // The packet's CRC result is REG_0B bit 4 (the DTMF code in bits 11:8 shares the register).
+    assert!(!bk.fsk_crc_ok());
+    bk.release();
+    r.regs[0x0B] = 0x0F10;
+    let mut bk = Bk4829::new(&mut r);
+    assert!(bk.fsk_crc_ok());
+    r.regs[0x0B] = 0x0FEF;
+    assert!(!Bk4829::new(&mut r).fsk_crc_ok());
+    assert!(r.writes.is_empty(), "reads only");
+}
+
+/// Sub-tone scan: REG_51 = 51 and CTC1 0x0AD7 (the 134.4 Hz bit rate); bit 15 of REG_68 or REG_69 set means that
+/// detector has nothing yet.
+#[test]
+fn subtone_scan_on_and_readings() {
+    let mut r = Regs::new();
+    let mut bk = Bk4829::new(&mut r);
+    bk.subtone_scan_on();
+    assert_eq!(bk.subtone_scan(), (Some(0), Some(0)));
+    assert_eq!(bk.release().writes, [(0x51, 51), (0x07, 0x0AD7)]);
+    r.regs[0x68] = 0x8000 | 1803;
+    r.regs[0x69] = 0x8813;
+    r.regs[0x6A] = 0x0763;
+    assert_eq!(Bk4829::new(&mut r).subtone_scan(), (None, None));
+    r.regs[0x68] = 1803;
+    r.regs[0x69] = 0x0813;
+    assert_eq!(Bk4829::new(&mut r).subtone_scan(), (Some(885), Some(0x813_763)));
+}
+
+/// A bus with no wait of its own: receive on still writes stock's two REG_30 values, back to back.
+#[test]
+fn bus_without_a_delay() {
+    struct Plain(Vec<(u8, u16)>);
+    impl Bus for Plain {
+        fn write(&mut self, reg: u8, value: u16) {
+            self.0.push((reg, value));
+        }
+        fn read(&mut self, _: u8) -> u16 {
+            0
+        }
+    }
+    let mut bk = Bk4829::new(Plain(Vec::new()));
+    bk.rx_on();
+    assert_eq!(bk.release().0[..2], [(0x30, 0x0200), (0x30, 0xBFF1)]);
+}
+
+/// The start of stock's TX set-up: REG_30 0, then the 50 us gap; sidetone off is the AF route muted.
+#[cfg(feature = "tx")]
+#[test]
+fn tx_start_and_sidetone_off() {
+    let mut r = Regs::new();
+    let mut bk = Bk4829::new(&mut r);
+    bk.tx_start();
+    bk.sidetone(true);
+    bk.sidetone(false);
+    assert_eq!(r.writes, [(0x30, 0), (0xFF, 50), (0x47, 0x6342), (0x47, 0x6042)]);
 }

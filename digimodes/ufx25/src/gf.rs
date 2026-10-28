@@ -92,4 +92,44 @@ mod tests {
             }
         }
     }
+
+    /// The table builders run again at run time give the flash tables, which match a plain shift-and-reduce
+    /// generation of the powers of α; the doubled half and the two wrap entries repeat the first.
+    #[test]
+    fn tables_match_their_builders() {
+        assert_eq!(build_exp(), EXP);
+        assert_eq!(build_log(), LOG);
+        let mut x: u16 = 1;
+        for i in 0..255 {
+            assert_eq!(EXP[i] as u16, x, "α^{i}");
+            assert_eq!(EXP[i + 255] as u16, x);
+            assert_eq!(LOG[x as usize] as usize, i);
+            x <<= 1;
+            if x & 0x100 != 0 {
+                x ^= POLY;
+            }
+        }
+        assert_eq!(x, 1, "α has order 255");
+        assert_eq!((EXP[510], EXP[511]), (EXP[0], EXP[1]));
+    }
+
+    #[test]
+    fn zero_and_powers() {
+        for v in 0..=255u8 {
+            assert_eq!(mul(0, v), 0);
+            assert_eq!(mul(v, 0), 0);
+            assert_eq!(mul_exp(0, v as usize), 0);
+            assert_eq!(mul_exp(v, 0), v);
+            assert_eq!(mul_exp(v, 1), mul(v, 2));
+        }
+        for b in 1..=255u8 {
+            assert_eq!(div(0, b), 0);
+            assert_eq!(div(b, b), 1);
+        }
+        // α^255 = 1 and α^8 = 0x1D (x^8 reduced by the field polynomial).
+        assert_eq!(pow(0), 1);
+        assert_eq!(pow(255), 1);
+        assert_eq!(pow(8), 0x1D);
+        assert_eq!(pow(1000), pow(1000 % 255));
+    }
 }

@@ -429,6 +429,81 @@ fn first_boot_after_setup_seeds_the_regions_presets() {
     assert_eq!(e[0].end, 14_600_000);
 }
 
+/// Writes past the last channel number fail; a zone deleted through the channel queue (CHAN-12) leaves its
+/// channels in no zone; an existing zone written again is renamed in place; 254 zones and 16 presets at most. The
+/// Storage task checks again what the screens checked: a renumber onto a channel stored meanwhile, or an edit of
+/// one deleted meanwhile, is refused and changes nothing.
+#[test]
+fn out_of_range_full_and_stale_requests() {
+    use ferrite_store::block;
+    use ferrite_store::store::Job;
+    let s = mount(SimFlash::new());
+    let c = |n: u16| channel(n, NO_ZONE, 14_652_000, "Ch", DEFAULT_CFG);
+    assert!(!s.apply(ChanWrite::Put { ch: c(MAX_CHANNELS), from: None }));
+    assert!(!s.apply(ChanWrite::PutPos { ch: c(MAX_CHANNELS), pos: None }));
+    assert!(!s.apply(ChanWrite::Delete(MAX_CHANNELS)));
+    assert!(s.add_zone(b"Local", &ZoneCfg::default()) && s.add_zone(b"Events", &ZoneCfg::default()));
+    assert!(s.apply(ChanWrite::Put { ch: channel(1, 0, 14_652_000, "One", DEFAULT_CFG), from: None }));
+    assert!(s.apply(ChanWrite::Put { ch: c(2), from: None }));
+    assert!(s.apply(ChanWrite::DeleteZone(0)));
+    assert_eq!((s.zones(), s.zone_of(1)), (2, Some(NO_ZONE)), "an earlier zone stays, empty; its channel in no zone");
+    assert!(s.request(Op::PutZone(1, Buf::from(b"Renamed"), ZoneCfg::default())));
+    assert_eq!((s.zones(), s.zone_name(1).unwrap().as_bytes()), (2, &b"Renamed"[..]));
+    while s.zones() < 254 {
+        assert!(s.add_zone(b"Z", &ZoneCfg::default()));
+    }
+    assert!(!s.add_zone(b"Z", &ZoneCfg::default()) && !s.request(Op::NewZone));
+    while s.presets() < 16 {
+        assert!(s.request(Op::NewPreset));
+    }
+    let p = RangePreset { name: Buf::from(b"P"), start: 14_400_000, end: 14_800_000, step: 10, mode: 0, narrow: true, skips: 0, resume: 0 };
+    assert!(!s.add_preset(&p) && !s.request(Op::NewPreset));
+    let before = (s.get(1), s.get(2));
+    assert!(!block(s.run(Job::Op(Op::Renumber(1, 2)))), "2 was stored meanwhile");
+    assert!(!block(s.run(Job::Op(Op::Skip(7, true)))), "7 is gone");
+    assert!((s.get(1), s.get(2)) == before);
+}
+
+/// CHAN-25: Recent lists the channels used, newest first, in RAM. The lookups the screens use: the next free
+/// number from a given one (wrapping past 999), a number's zone, a channel with its position.
+#[test]
+fn channel_lookups() {
+    let s = mount(SimFlash::new());
+    for n in [5u16, 6, 998, 999] {
+        assert!(s.queue_write(ChanWrite::Put { ch: channel(n, NO_ZONE, 14_652_000, "Ch", DEFAULT_CFG), from: None }));
+    }
+    assert!(s.add_zone(b"Local", &ZoneCfg::default()));
+    assert!(s.request(Op::Move(6, 0)));
+    assert_eq!((s.free_num(5), s.free_num(998), s.free_num(0)), (Some(7), Some(0), Some(0)));
+    assert_eq!((s.zone_of(5), s.zone_of(6), s.zone_of(7), s.zone_of(MAX_CHANNELS)), (Some(NO_ZONE), Some(0), None, None));
+    assert!(s.located(5).is_none() && s.located(7).is_none() && s.get(MAX_CHANNELS).is_none(), "no position, no channel");
+    assert!(s.apply(ChanWrite::PutPos { ch: s.get(5).unwrap(), pos: Some(ferrite_app::data::Pos { lat: 45, lon: -75 }) }));
+    assert!(s.located(5).is_some_and(|(c, p)| c.num == 5 && p.lat == 45 && p.lon == -75));
+    s.used(5);
+    s.used(998);
+    s.tuned(6);
+    assert_eq!((s.recent(0), s.recent(1), s.recent(2), s.recent(3)), (Some(6), Some(998), Some(5), None));
+}
+
+/// WX-1: a first boot that already has range presets (the simulator's sample radio) keeps its own after setup and
+/// gets no seeded ones, and with channels of its own no weather zone either; its channels stay as they were.
+#[test]
+fn first_boot_keeps_presets_and_channels_already_there() {
+    let s = mount(SimFlash::new());
+    let own = RangePreset { name: Buf::from(b"Mine"), start: 14_400_000, end: 14_600_000, step: 10, mode: 0, narrow: true, skips: 0, resume: 0 };
+    assert!(s.add_preset(&own));
+    let mine = channel(992, NO_ZONE, 14_652_000, "Simplex", DEFAULT_CFG);
+    assert!(s.apply(ChanWrite::Put { ch: mine, from: None }));
+    let mut a = app();
+    a.settings_mut().set_region(Some(ferrite_core::txplan::Region::Canada));
+    a.settings_mut().setup_done = true;
+    assert!(s.save(&a));
+    assert_eq!(s.mounted(), Mounted::Ok);
+    assert!(s.presets() == 1 && s.preset(0).unwrap().name.as_bytes() == b"Mine", "only its own preset");
+    assert!(s.get(992).unwrap() == mine, "a number in use left alone");
+    assert_eq!((s.zones(), s.count()), (0, 1), "no weather zone");
+}
+
 /// A flash that stays busy a few polls after each program and erase, and whose pause yields once: the store's
 /// writes take several polls, as on the radio, and the test reads in between, as the UI does.
 struct Slow {

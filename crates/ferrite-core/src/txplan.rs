@@ -230,4 +230,27 @@ mod tests {
         assert!(!relay_ok(mhz(28) + 40_000, mhz(146) + 52_000), "10 m RX, 2 m TX");
         assert!(relay_ok(mhz(28) + 40_000, mhz(29) + 60_000));
     }
+
+    /// WX-3: weather radio and SAME only in the US and Canada; every region has a name for the refused screen.
+    #[test]
+    fn region_names_and_weather() {
+        let names: std::vec::Vec<&str> = Region::ALL.iter().map(|r| r.name()).collect();
+        assert_eq!(names, ["the US", "Canada", "the UK", "Europe", "Australia", "New Zealand", "Japan", "this region"]);
+        let wx: std::vec::Vec<Region> = Region::ALL.into_iter().filter(|r| r.has_weather()).collect();
+        assert_eq!(wx, [Region::Us, Region::Canada]);
+    }
+
+    /// TX-1.1: each region's VHF/UHF plan, edges included at the bottom and excluded at the top.
+    #[test]
+    fn every_region_plan() {
+        let plan = |r| bands(r).iter().map(|b| (b.name, b.lo, b.hi)).collect::<std::vec::Vec<_>>();
+        assert_eq!(plan(Region::Australia), [("2 m", mhz(144), mhz(148)), ("70 cm", mhz(420), mhz(450))]);
+        assert_eq!(plan(Region::NewZealand), [("2 m", mhz(144), mhz(148)), ("70 cm", mhz(430), mhz(440))]);
+        assert_eq!(plan(Region::Other), [("2 m", mhz(144), mhz(146)), ("70 cm", mhz(430), mhz(440))]);
+        assert_eq!(check(mhz(430), Region::NewZealand, false), Ok(()));
+        assert_eq!(check(mhz(440), Region::NewZealand, false), Err(Refusal::OutOfBand));
+        assert_eq!(check(mhz(147), Region::Australia, false), Ok(()));
+        assert_eq!(nearest(mhz(1), Region::Other).name, "17 m", "below everything: the lowest band");
+        assert_eq!(b("x", 1, 2), TxBand { name: "x", lo: 1, hi: 2 });
+    }
 }

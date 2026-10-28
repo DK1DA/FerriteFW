@@ -291,4 +291,19 @@ mod tests {
         assert!(a < 5_000, "then the cycle again: {a}");
         assert_eq!(s.squelch(closed + HOLD_MS + 5_000, false), Action::None, "no change, no activity");
     }
+
+    /// Something busy (needing the receiver on throughout) wakes a sleeping receiver at once, mid off-phase.
+    #[test]
+    fn busy_wakes_a_sleeping_receiver() {
+        let mut s = RxSleep::new(Level::L2, 0);
+        assert_eq!(s.level(), Level::L2);
+        run(&mut s, 0, HOLD_MS + RECENT_MS + 1_000, false);
+        while !s.asleep() {
+            s.tick(s.deadline().unwrap(), false);
+        }
+        let t = s.deadline().unwrap() - 1;
+        assert_eq!(s.tick(t, true), Action::Wake);
+        assert!(!s.asleep());
+        assert_eq!(s.tick(t + 1, true), Action::None, "already awake");
+    }
 }

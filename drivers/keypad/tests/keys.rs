@@ -130,3 +130,59 @@ fn encoder_detents_and_glitches() {
     let s: i8 = [(false, true), (false, false), (false, true), (false, false)].iter().map(|&(a, b)| e.update(a, b)).sum();
     assert_eq!(s, 0);
 }
+
+/// A matrix with no ground row, an empty position (`NONE`) and a code past the 32-bit mask: those two are
+/// never reported, the rest are.
+#[test]
+fn no_ground_row_and_unused_positions() {
+    let b: B = Rc::new(RefCell::new(Board::default()));
+    let mut m: Matrix<Row, Col, Direct, 2, 2, 0> = Matrix::new(
+        core::array::from_fn(|r| Row(b.clone(), r)),
+        core::array::from_fn(|c| Col(b.clone(), c)),
+        [],
+        None,
+        [[3, NONE], [40, 31]],
+        [],
+        5,
+    );
+    let mut d = MockDelay::default();
+    b.borrow_mut().down = vec![(0, 0), (0, 1), (1, 0), (1, 1)];
+    assert_eq!(m.scan(&mut d), 1 << 3 | 1 << 31);
+    // A column grounded with no row driven: no ground-row table, so nothing is reported for it, and the column
+    // is still masked in every row.
+    b.borrow_mut().down = vec![(4, 0), (1, 1)];
+    assert_eq!(m.scan(&mut d), 1 << 31);
+    assert_eq!(d.total_us, 2 * 2 * 5);
+    assert!(b.borrow().driven.is_none());
+}
+
+/// Debounce 0 acts as 1 (the first scan counts); `down` follows the debounced state; with no long time and no
+/// repeat, a held key sends nothing more.
+#[test]
+fn zero_debounce_no_long_no_repeat() {
+    let mut k = Keys::new(0, 0, 0);
+    let mut ev = Vec::new();
+    assert_eq!(k.down(), 0);
+    k.tick(1 << 7, |e| ev.push(e));
+    assert_eq!(ev, vec![Event::Press(7)]);
+    assert_eq!(k.down(), 1 << 7);
+    for _ in 0..200 {
+        k.tick(1 << 7, |e| ev.push(e));
+    }
+    assert_eq!(ev, vec![Event::Press(7)]);
+    // A change of keys in one scan: the release comes before the press.
+    k.tick(1 << 2, |e| ev.push(e));
+    assert_eq!(ev[1..], [Event::Release(7), Event::Press(2)]);
+    assert_eq!(k.down(), 1 << 2);
+}
+
+/// Long press with no repeat: one Long, then quiet while held.
+#[test]
+fn long_press_without_repeat() {
+    let mut k = Keys::new(1, 5, 0);
+    let mut ev = Vec::new();
+    for _ in 0..50 {
+        k.tick(1 << 0, |e| ev.push(e));
+    }
+    assert_eq!(ev, vec![Event::Press(0), Event::Long(0)]);
+}

@@ -160,3 +160,26 @@ fn nobody_there() {
     assert_eq!(w.detect(&mut c0), None);
     assert_eq!(w.align(), Align::BeforeFall);
 }
+
+/// The driver's waits go to the wire's delay; one register write is 24 SCK periods of 2 x HALF_US plus the set-up
+/// half period (SCK near 100 kHz, as stock).
+#[test]
+fn waits_through_the_wire_delay() {
+    struct Count(u32);
+    impl Delay for Count {
+        fn delay_us(&mut self, us: u32) {
+            self.0 += us;
+        }
+    }
+    let (sim, w, mut c0, _) = bus(Align::BeforeFall);
+    c0.set(true);
+    let (sck, sda, NoDelay) = w.release();
+    let mut w = ThreeWire::new(sck, sda, Count(0));
+    w.chip(&mut c0).delay_us(50);
+    let (sck, sda, d) = w.release();
+    assert_eq!(d.0, 50);
+    let mut w = ThreeWire::new(sck, sda, Count(0));
+    w.chip(&mut c0).write(0x38, 0xBEEF);
+    assert_eq!(sim.borrow().chips[0].regs[0x38], 0xBEEF);
+    assert_eq!(w.release().2 .0, bk4829::wire::HALF_US * (1 + 2 * 24));
+}

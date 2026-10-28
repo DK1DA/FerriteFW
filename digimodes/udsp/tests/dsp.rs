@@ -184,3 +184,80 @@ fn integer_fft_full_scale_does_not_overflow() {
         }
     }
 }
+
+#[test]
+fn const_sin_cos_match_std() {
+    use udsp::trig::{ccos, csin};
+    // Reduction into [-pi, pi] first, so large and negative arguments stay as accurate as small ones.
+    let mut x = -40.0f64;
+    while x < 40.0 {
+        assert!((csin(x) - x.sin()).abs() < 1e-9, "sin {x}: {}", csin(x));
+        assert!((ccos(x) - x.cos()).abs() < 1e-9, "cos {x}: {}", ccos(x));
+        x += 0.173;
+    }
+    assert_eq!(csin(0.0), 0.0);
+}
+
+#[test]
+fn lowpass_taps_at_run_time() {
+    // The same design at run time and at compile time; symmetric, peaked in the middle, DC gain 1 (Q15).
+    static CONST: [i16; 31] = lowpass::<31>(0.125);
+    let taps = lowpass::<31>(0.125);
+    assert_eq!(taps, CONST);
+    for n in 0..31 {
+        assert_eq!(taps[n], taps[30 - n], "tap {n}");
+        assert!(taps[n] <= taps[15]);
+    }
+    let sum: i32 = taps.iter().map(|&t| t as i32).sum();
+    assert!((sum - 32767).abs() <= 16, "DC gain {sum}");
+    // Cutoff a quarter of Nyquist: the sinc's first zero is 4 taps from the middle, a negative lobe after it.
+    assert!(taps[11] == 0 && taps[19] == 0 && taps[9] < 0 && taps[21] < 0, "{taps:?}");
+    // An even length has no centre tap and is still symmetric.
+    let even = lowpass::<16>(0.2);
+    for n in 0..16 {
+        assert_eq!(even[n], even[15 - n]);
+    }
+}
+
+#[test]
+fn log2_exact_powers_and_zero() {
+    assert_eq!(log2_q8(0), 0);
+    assert_eq!(log2_q8(1), 0);
+    assert_eq!(log2_q8(2), 256);
+    assert_eq!(log2_q8(1 << 40), 40 << 8);
+    assert_eq!(log2_q8(u64::MAX), (64 << 8) - 1); // just under 64
+}
+
+#[test]
+fn reset_and_default_start_afresh() {
+    use udsp::fir::Decimator;
+    static TAPS: [i16; 32] = lowpass::<32>(0.05);
+    let input: Vec<i16> = (0..200).map(|i| ((i * 7919) % 20001 - 10000) as i16).collect();
+    let step = 0x1234_5678u32;
+    let fe_run = |fe: &mut FrontEnd<32>| input.iter().filter_map(|&x| fe.push(x, &TAPS, step, 4)).collect::<Vec<_>>();
+    let fresh = fe_run(&mut FrontEnd::new());
+    assert_eq!(fresh.len(), 50);
+    let mut fe = FrontEnd::<32>::default();
+    assert_eq!(fe_run(&mut fe), fresh);
+    // Mid-way through a decimation period and with history: reset forgets both.
+    fe.push(1234, &TAPS, step, 4);
+    fe.reset();
+    assert_eq!(fe_run(&mut fe), fresh);
+
+    let fir_run = |d: &mut Decimator<32>| input.iter().filter_map(|&x| d.push(x, &TAPS, 3)).collect::<Vec<_>>();
+    let fresh = fir_run(&mut Decimator::new());
+    assert_eq!(fresh.len(), 66);
+    let mut d = Decimator::<32>::default();
+    assert_eq!(fir_run(&mut d), fresh);
+    d.push(-5000, &TAPS, 3);
+    d.reset();
+    assert_eq!(fir_run(&mut d), fresh);
+}
+
+#[test]
+fn cycle_counter_on_the_pc() {
+    // No counter on the PC: the closure still runs, the count is 0.
+    let mut ran = false;
+    assert_eq!(udsp::arm::cycles(|| ran = true), 0);
+    assert!(ran);
+}

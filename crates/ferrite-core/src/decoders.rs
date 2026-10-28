@@ -164,4 +164,38 @@ mod tests {
         d.push(&[0; 1200], |_| hits += 1);
         assert_eq!(hits, 0, "silence decodes nothing");
     }
+
+    /// The other slots: Off takes audio and does nothing; DSC and AFSK decode nothing from silence.
+    #[test]
+    fn other_slots_on_silence() {
+        let mut hits = 0;
+        for mut d in [Decoder::Off, Decoder::dsc(), Decoder::afsk()] {
+            d.push(&[0; 2400], |_| hits += 1);
+        }
+        assert_eq!(hits, 0);
+    }
+
+    /// DEC-4: a text page longer than the event log's field keeps its first [`PAGE_TEXT`] characters.
+    #[test]
+    fn long_page_cut_to_the_field() {
+        extern crate std;
+        use std::vec::Vec;
+        let text: Vec<u8> = (0..90u8).map(|i| b'A' + i % 26).collect();
+        let mut words = Vec::new();
+        upocsag::encode::encode(42, 3, upocsag::encode::Content::Alpha(&text), |w| words.push(w));
+        let mut d: upocsag::decode::Decoder = upocsag::decode::Decoder::new();
+        d.baud = 1200;
+        let mut got = None;
+        for w in words {
+            if w == upocsag::SYNC {
+                d.sync();
+            } else {
+                d.word(w, |m| got = Some(Page::from(m)));
+            }
+        }
+        d.end(|m| got = got.or(Some(Page::from(m))));
+        let p = got.expect("decoded");
+        assert!(!p.numeric);
+        assert_eq!(p.text(), &text[..PAGE_TEXT]);
+    }
 }

@@ -55,3 +55,39 @@ fn full_text() {
     assert!(r.rt_complete());
     assert_eq!(r.text(), &t[..]);
 }
+
+/// 2B radio text: two characters per group, in block D; block C (the PI again in version B) is not text.
+#[test]
+fn version_b_text() {
+    let mut r = Rds::init();
+    r.feed(0xC201, 0x2801, 0xC201, chars(b"i!"), 0);
+    r.feed(0xC201, 0x2802, 0xC201, chars(b"\r "), 0);
+    assert!(!r.rt_complete());
+    // An uncorrectable block D: ignored (counted as a group, nothing taken).
+    r.feed(0xC201, 0x2800, 0xC201, chars(b"XX"), 0x03);
+    assert!(!r.rt_complete() && r.groups == 3);
+    r.feed(0xC201, 0x2800, 0xC201, chars(b"Hi"), 0);
+    assert!(r.rt_complete());
+    assert_eq!(r.text(), b"Hii!");
+}
+
+/// A bad block A keeps the last PI; a 2A group with a bad block C is dropped whole; control characters in radio
+/// text become spaces; other group types only count.
+#[test]
+fn bad_blocks_and_control_characters() {
+    let mut r = Rds::init();
+    r.feed(0xC201, 0x0000, 0, chars(b"AB"), 0);
+    r.feed(0x1234, 0x0001, 0, chars(b"CD"), 0xC0);
+    assert_eq!((r.pi, &r.ps[..4]), (0xC201, &b"ABCD"[..]));
+    r.feed(0xC201, 0x2000, chars(b"XX"), chars(b"XX"), 0x0C);
+    assert!(r.rt_seen == 0 && r.text().is_empty());
+    r.feed(0xC201, 0x2000, chars(b"A\x07"), chars(b"\x7FB"), 0);
+    assert_eq!(r.text(), b"A  B");
+    // 4A (clock time): counted, nothing else changes.
+    let before = r.groups;
+    r.feed(0xC201, 0x4000, 0x1234, 0x5678, 0);
+    assert_eq!((r.groups, r.text()), (before + 1, &b"A  B"[..]));
+    // The zeroed state (before any retune) has an empty name and no text.
+    let z = Rds::zeroed();
+    assert!(z.ps == [0; 8] && z.text().is_empty() && !z.ps_complete() && !z.rt_complete());
+}

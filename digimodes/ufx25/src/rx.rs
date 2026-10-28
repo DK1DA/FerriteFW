@@ -361,7 +361,7 @@ fn deframe(buf: &mut [u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Encoder;
+    use crate::{Encoder, FLAG};
 
     const FRAME: &[u8] = &[
         0x82, 0xA0, 0xA4, 0xA6, 0x40, 0x40, 0xE0, 0x9C, 0x60, 0x86, 0x82, 0x98, 0x98, 0xE1, 0x03, 0xF0, b'>', b'h',
@@ -521,5 +521,142 @@ mod tests {
             }
         }
         assert_eq!(found, 1);
+    }
+
+    /// A hunter and a shared collector driven by hand, as uafsk's demodulator does: the hunter reports the code
+    /// while the block goes by, the collector holds nothing until the block is complete, then holds it (corrected
+    /// in place by its own decode) until cleared.
+    #[test]
+    fn hunter_and_collector_by_hand() {
+        let mut enc = Encoder::new(FRAME, 16).unwrap();
+        let last = enc.block().len() - 1;
+        enc.block_mut()[last] ^= 0x42; // a check byte: the information part is overwritten by the frame
+        let mode = enc.mode();
+        let mut hunter = Hunter::default();
+        let mut col = Collector::default();
+        assert_eq!(hunter.following(), None);
+        assert_eq!(col.collecting(), None);
+        assert!(col.block().is_empty());
+        assert!(col.block_mut().is_empty());
+        assert!(col.decode().is_none());
+        // Not collecting: bits are ignored.
+        assert_eq!(col.push(1), None);
+        assert_eq!(col.bits(), 0);
+        let mut done = None;
+        let mut followed = false;
+        for b in enc.bits(4, 2) {
+            if let Some(tag) = hunter.push(b, DEFAULT_TAG_ERRORS) {
+                assert_eq!(tag, Tag { mode, errors: 0 });
+                col.start(tag);
+                continue;
+            }
+            if hunter.following().is_some() {
+                assert_eq!(hunter.following(), Some(mode));
+                followed = true;
+            }
+            if col.collecting().is_some() {
+                assert_eq!(col.collecting(), Some(mode));
+                assert!(col.block().is_empty(), "nothing held while collecting");
+            }
+            if let Some(m) = col.push(b) {
+                done = Some(m);
+            }
+        }
+        assert!(followed);
+        assert_eq!(done, Some(mode));
+        assert_eq!(hunter.following(), None, "hunting again after the block");
+        assert_eq!(col.bits(), mode.n as u16 * 8);
+        assert_eq!(col.mode(), Some(mode));
+        assert_eq!(col.collecting(), None);
+        assert_eq!(col.tag_errors(), 0);
+        assert_eq!(col.block(), enc.block());
+        // A complete block ignores further bits.
+        assert_eq!(col.push(1), None);
+        let d = col.decode().unwrap();
+        assert_eq!((d.frame, d.corrected, d.mode), (FRAME, 1, mode));
+        // Corrected in place, still held.
+        assert_eq!(col.block_mut()[last], enc.block()[last] ^ 0x42);
+        col.clear();
+        assert_eq!(col.mode(), None);
+        assert!(col.block().is_empty());
+    }
+
+    /// The receiver is busy from its tag to the end of the block, and its block can be corrected in place.
+    #[test]
+    fn receiver_busy_and_block_mut() {
+        let mut enc = Encoder::new(FRAME, 32).unwrap();
+        let last = enc.block().len() - 1;
+        enc.block_mut()[last] ^= 0xFF;
+        let mode = enc.mode();
+        let mut rx = Receiver::default();
+        assert!(!rx.busy());
+        assert!(rx.block().is_empty());
+        assert!(rx.block_mut().is_empty());
+        let (mut busy_bits, mut done) = (0usize, None);
+        for b in enc.bits(4, 2) {
+            if let Some(m) = rx.push_raw(b) {
+                done = Some(m);
+            }
+            if rx.busy() {
+                assert_eq!(rx.collecting(), Some(mode));
+                busy_bits += 1;
+            }
+        }
+        assert_eq!(done, Some(mode));
+        assert_eq!(busy_bits, mode.n as usize * 8, "busy from the tag's last bit until the block's last");
+        assert_eq!(rx.collecting(), None);
+        let d = decode(rx.block_mut(), mode, 0).unwrap();
+        assert_eq!((d.frame, d.corrected), (FRAME, 1));
+        assert_eq!(rx.block()[last], enc.block()[last] ^ 0xFF);
+    }
+
+    /// A block that is a valid codeword but holds no frame with a good FCS gives nothing: all zeros (no flag), and
+    /// flags around bytes that are not a frame, broken by a run of seven ones. The same layout with a real frame
+    /// and its FCS decodes.
+    #[test]
+    fn codeword_without_a_frame() {
+        let mode = MODES[3]; // 48 bytes, 32 information
+        let (n, k) = (mode.n as usize, mode.k as usize);
+        let rs = Rs::new(mode.check());
+        let mut zeros = [0u8; 48];
+        assert!(decode(&mut zeros[..n], mode, 0).is_none());
+        let mut block = [0u8; 48];
+        block[0] = FLAG;
+        for b in &mut block[1..20] {
+            *b = 0x11;
+        }
+        block[20] = 0xFE; // seven ones: abort
+        block[21] = FLAG;
+        rs.encode(&mut block[..n], k);
+        let clean = block;
+        assert!(decode(&mut block[..n], mode, 0).is_none());
+        assert_eq!(&block[k..n], &clean[k..n], "the codeword itself was fine");
+        // A frame with a good FCS between two flags, stuffed.
+        let body = &FRAME[..22];
+        let fcs = !crc16_x25_update(0xFFFF, body);
+        let mut bits = Vec::new();
+        let mut ones = 0;
+        for byte in body.iter().chain(&fcs.to_le_bytes()) {
+            for i in 0..8 {
+                let bit = (byte >> i) & 1;
+                bits.push(bit);
+                ones = if bit == 1 { ones + 1 } else { 0 };
+                if ones == 5 {
+                    bits.push(0);
+                    ones = 0;
+                }
+            }
+        }
+        bits.extend([0, 1, 1, 1, 1, 1, 1, 0]);
+        assert!(8 + bits.len() <= k * 8);
+        let mut block = [0u8; 48];
+        block[0] = FLAG;
+        for (i, b) in bits.iter().enumerate() {
+            block[(8 + i) / 8] |= b << ((8 + i) % 8);
+        }
+        rs.encode(&mut block[..n], k);
+        let d = decode(&mut block[..n], mode, 0).unwrap();
+        assert_eq!(d.frame, body);
+        assert_eq!(d.fcs, fcs);
     }
 }

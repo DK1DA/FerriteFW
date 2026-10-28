@@ -954,4 +954,24 @@ mod tests {
         assert_eq!(p.key_up_xb(Sel::HfRx, Sel::UhfTx, 0, &mut s), Err(Blocked::NeedsRelay));
         assert!(s.is_empty() && p.rx_now() == Rx::Bk(Sel::UhfRx));
     }
+
+    /// XB-6: a crossband key-up while keyed is refused; the drop, reopen and RX end do nothing out of their state;
+    /// an unkey with nothing keyed does nothing.
+    #[test]
+    fn crossband_out_of_turn() {
+        assert_eq!(Path::default().keyed(), None);
+        let (mut p, _) = plan(|p, s| p.rx(Rx::Bk(Sel::UhfRx), Cause::ActiveSlot, 0, s).unwrap());
+        let mut s = Steps::default();
+        p.xb_drop(&mut s);
+        p.xb_reopen(&mut s);
+        p.xb_rx_end(&mut s);
+        p.unkey(0, &mut s);
+        assert!(s.is_empty() && !p.keyed_xb(), "{:?}", s.as_slice());
+        p.key_up_xb(Sel::UhfRx, Sel::VhfTx, 0, &mut Steps::default()).unwrap();
+        let mut s = Steps::default();
+        assert_eq!(p.key_up_xb(Sel::UhfRx, Sel::VhfTx, 0, &mut s), Err(Blocked::Keyed));
+        p.xb_reopen(&mut s);
+        assert!(s.is_empty(), "already repeating");
+        assert!(p.keyed_xb());
+    }
 }

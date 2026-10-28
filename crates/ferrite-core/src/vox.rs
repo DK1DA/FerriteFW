@@ -173,9 +173,11 @@ mod tests {
         let t = threshold(5) << 4; // 12-bit, as PA0 reads
         assert!(!v.step(t - 1, 5, 2000, false, 6000), "below the threshold");
         assert!(v.step(t, 5, 2000, false, 6100), "at the threshold");
+        assert!(v.on(), "as the last step said");
         assert!(v.step(t - (HYSTERESIS << 4), 5, 2000, false, 6200), "hysteresis holds it");
         assert!(v.step(0, 5, 2000, false, 8100), "the tail");
         assert!(!v.step(0, 5, 2000, false, 8200), "2 s below: off");
+        assert!(!v.on());
     }
 
     /// VOX-1, VOX-3.2, VOX-3.3: off at level 0, during the first 5 s and while receiving.

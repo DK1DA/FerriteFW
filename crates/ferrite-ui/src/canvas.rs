@@ -839,4 +839,116 @@ mod tests {
             }
         }
     }
+
+    use crate::assets::{DIG_28, LOGO112_RING, LOGO112_WIND, NAME_22, UI_12};
+
+    /// A screen of noise: what a region is drawn over.
+    fn noisy() -> FrameBuffer {
+        let mut fb = FrameBuffer::new();
+        let px: std::vec::Vec<u16> = (0..240 * 320u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 16) as u16).collect();
+        fb.window(0, 0, 239, 319);
+        fb.push_buf(&px);
+        fb
+    }
+
+    fn assert_same(a: &FrameBuffer, b: &FrameBuffer, what: &str) {
+        for y in 0..320 {
+            for x in 0..240 {
+                assert_eq!(a.at(x, y), b.at(x, y), "{what}: ({x}, {y})");
+            }
+        }
+    }
+
+    /// `draw` in the region (0, 40, 240, 120) over `bg` through the bands, against clearing it and drawing on the
+    /// panel; how many times the drawing ran.
+    fn banded_vs_direct(what: &str, draw: &dyn Fn(&mut dyn Panel)) -> u32 {
+        let mut want = noisy();
+        Gfx::fill(&mut want as &mut dyn Panel, 0, 40, 240, 120, 0x0841);
+        draw(&mut want);
+        let mut fb = noisy();
+        let runs = core::cell::Cell::new(0);
+        banded(&mut fb, 0, 40, 240, 120, 0x0841, |b| {
+            runs.set(runs.get() + 1);
+            draw(b)
+        });
+        assert_same(&fb, &want, what);
+        runs.get()
+    }
+
+    /// DISP-29: a region records its drawing once and replays it into each band (two layers of a mask, rounded
+    /// fills and frames, more big-font texts than the decode cache keeps); one that can't be recorded (a coordinate
+    /// past 16 bits, a text over 255 bytes, pixels written straight) is drawn once per band instead. Both end as
+    /// the drawing would on the panel.
+    #[test]
+    fn recorded_or_not_a_region_draws_the_same() {
+        let shapes = |p: &mut dyn Panel| {
+            p.mask4(64, 40, &LOGO112_RING, 0xFFFF, Some((&LOGO112_WIND, 0x001F)), 0x0841);
+            p.fill_r(10, 60, 50, 40, 8, 0xF800);
+            p.frame_r(70, 60, 50, 40, 8, 0x07E0);
+            for (i, t) in [&b"12"[..], b"34", b"56", b"78", b"90"].iter().enumerate() {
+                p.text4(10 + 45 * i as i32, 150, t, &DIG_28, 0xFFFF, 0x0841);
+            }
+            p.text4(10, 110, b"Ferrite", &NAME_22, 0xFFE0, 0x0841);
+        };
+        assert_eq!(banded_vs_direct("recorded", &shapes), 1, "recorded once");
+        let long = [b'x'; 300];
+        let wide = |p: &mut dyn Panel| {
+            shapes(p);
+            p.fill(40_000, 50, 10, 10, 0xFFFF);
+        };
+        let text = |p: &mut dyn Panel| {
+            shapes(p);
+            p.text4(0, 140, &long, &UI_12, 0xFFFF, 0x0841);
+        };
+        let pixels = |p: &mut dyn Panel| {
+            shapes(p);
+            p.window(5, 45, 6, 46);
+            p.push(0x1234, 4);
+        };
+        for (what, d) in [("wide", &wide as &dyn Fn(&mut dyn Panel)), ("long text", &text), ("pixels", &pixels)] {
+            assert!(banded_vs_direct(what, d) > 2, "{what}: drawn per band");
+        }
+    }
+
+    /// DISP-29: a new screen's background goes only where nothing opaque is drawn, even with more gaps in a row than
+    /// it keeps runs for, and around a nested region; the result is what clearing first and drawing gives. A
+    /// drawing that writes pixels itself is refused, nothing drawn.
+    #[test]
+    fn a_fresh_screen_matches_clear_then_draw() {
+        let draw = |p: &mut dyn Panel| {
+            for i in 0..12 {
+                p.fill(5 + 19 * i, 30, 9, 20, 0xF800 + i as u16);
+            }
+            p.frame_r(20, 60, 100, 40, 6, 0x07E0);
+            p.fill_r(130, 60, 100, 40, 6, 0x001F);
+            p.text4(10, 130, b"Fresh", &UI_12, 0xFFFF, 0x0841);
+            p.mask4(64, 150, &LOGO112_RING, 0xFFFF, None, 0x0841);
+        };
+        let mut want = noisy();
+        Gfx::fill(&mut want as &mut dyn Panel, 0, 20, 240, 280, 0x0841);
+        draw(&mut want);
+        banded(&mut want, 30, 270, 100, 20, 0x2104, |b| b.fill(40, 275, 20, 10, 0xFFFF));
+        let mut fb = noisy();
+        assert!(fresh(&mut fb, 0, 20, 240, 280, 0x0841, &mut |b: &mut Band| {
+            draw(b);
+            banded(b, 30, 270, 100, 20, 0x2104, |b| b.fill(40, 275, 20, 10, 0xFFFF));
+        }));
+        assert_same(&fb, &want, "fresh");
+        let before = fb.px.clone();
+        assert!(!fresh(&mut fb, 0, 20, 240, 280, 0, &mut |b: &mut Band| {
+            b.window(0, 20, 0, 20);
+            b.push(1, 1);
+        }));
+        assert!(fb.px == before, "refused: nothing drawn");
+    }
+
+    /// An empty region draws nothing, banded or over.
+    #[test]
+    fn empty_regions_draw_nothing() {
+        let mut fb = FrameBuffer::new();
+        banded(&mut fb, 0, 0, 0, 10, 0xFFFF, |b| b.fill(0, 0, 10, 10, 0xFFFF));
+        banded(&mut fb, 0, 0, 10, -1, 0xFFFF, |b| b.fill(0, 0, 10, 10, 0xFFFF));
+        banded_over(&mut fb, 0, 0, 10, 0, |b| b.fill(0, 0, 10, 10, 0xFFFF));
+        assert!(fb.writes.iter().all(|&w| w == 0));
+    }
 }

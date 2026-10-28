@@ -158,4 +158,45 @@ mod tests {
             assert_eq!(parse(bad), None, "{:?}", core::str::from_utf8(bad));
         }
     }
+
+    /// Every field's own refusals: letters in a number, the wrong lengths, an hour or minute out of range, no
+    /// sender; a short originator or event.
+    #[test]
+    fn refuses_bad_fields() {
+        for bad in [
+            &b"WXR-TOR-03917A+0030-1591829-X"[..],
+            b"WXR-TOR-039173+00A0-1591829-X",
+            b"WXR-TOR-039173+003-1591829-X",
+            b"WXR-TOR-039173+0030-159182-X",
+            b"WXR-TOR-039173+0030-15A1829-X",
+            b"WXR-TOR-039173+0030-1592429-X",
+            b"WXR-TOR-039173+0030-1591829",
+            b"WX-TOR-039173+0030-1591829-X",
+            b"WXR-TO-039173+0030-1591829-X",
+            b"WXR-TOR--+0030-1591829-X",
+        ] {
+            assert_eq!(parse(bad), None, "{:?}", core::str::from_utf8(bad));
+        }
+    }
+
+    /// WX-5: more areas than are kept still count; a sender longer than 8 is cut; no trailing dash is fine.
+    #[test]
+    fn many_areas_and_a_long_sender() {
+        let h = parse(b"ZCZC-CIV-CEM-000001-000002-000003-000004-000005-000006+0100-0010000-LONGSENDER9").unwrap();
+        assert_eq!((h.n_areas, h.areas), (6, [1, 2, 3, 4]));
+        assert_eq!((h.purge_min, h.issued_day, h.issued_min), (60, 1, 0));
+        assert_eq!(&h.sender, b"LONGSEND");
+        assert_eq!(org_name(&h.org), "Civil authority");
+        assert_eq!(event_name(&h.event), Some("Civil emergency message"));
+    }
+
+    /// WX-5's originator names; an unknown code has none, an unknown event no name.
+    #[test]
+    fn names() {
+        let orgs = [b"WXR", b"CIV", b"EAS", b"PEP", b"XYZ"].map(org_name);
+        assert_eq!(orgs, ["Weather service", "Civil authority", "Broadcaster", "Primary entry", "Unknown"]);
+        assert_eq!(event_name(b"ZZZ"), None);
+        assert!(EVENTS.iter().all(|(c, n)| event_name(c) == Some(*n)), "every code finds its own name");
+        assert!(is_test(b"NPT") && is_test(b"DMO") && is_test(b"RMT"));
+    }
 }

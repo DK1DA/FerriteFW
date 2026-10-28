@@ -251,4 +251,32 @@ mod tests {
         let mut small = [0u8; 4];
         assert!(e.encode(SAMPLES[0], &mut small).is_none(), "too small: sent plain");
     }
+
+    /// LINK-51: a frame both ends have `seen` codes as matches into it; after both reset (a new session) they
+    /// still agree; a match cut short, a match before the start and an output too small don't decode.
+    #[test]
+    fn lz_reset_seen_and_bad_input() {
+        let (mut e, mut d) = (LzEnc::<UP>::default(), LzDec::<UP>::default());
+        let (mut b, mut back) = ([0u8; 600], [0u8; 600]);
+        let f = SAMPLES[0];
+        e.seen(f);
+        d.seen(f);
+        let n = e.encode(f, &mut b).unwrap();
+        assert!(n * 4 < f.len(), "a frame already seen is nearly all match: {n} of {}", f.len());
+        let m = d.decode(&b[..n], &mut back).unwrap();
+        assert_eq!(&back[..m], f);
+        e.reset();
+        d.reset();
+        let n = e.encode(f, &mut b).unwrap();
+        let m = d.decode(&b[..n], &mut back).unwrap();
+        assert_eq!(&back[..m], f, "in step again from an empty window");
+        assert!(LzDec::<UP>::new().decode(&[1, 5], &mut back).is_none(), "a match's second byte missing");
+        assert!(LzDec::<UP>::new().decode(&[0, b'a', b'b'], &mut [0u8; 1]).is_none(), "no room for a literal");
+        let mut d2 = LzDec::<UP>::new();
+        d2.seen(b"abcabc");
+        assert!(d2.clone().decode(&[1, 2, 0], &mut [0u8; 2]).is_none(), "no room for the match");
+        let mut out = [0u8; 3];
+        assert_eq!(d2.decode(&[1, 2, 0], &mut out), Some(3));
+        assert_eq!(&out, b"abc");
+    }
 }

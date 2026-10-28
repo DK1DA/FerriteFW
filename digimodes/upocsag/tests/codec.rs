@@ -294,3 +294,70 @@ fn rate_limits() {
 fn encode_rejects_bad_capcode() {
     encode(1 << 21, 0, Content::Tone, |_| {});
 }
+
+#[test]
+fn message_bits_and_data() {
+    // "AB" as 7-bit characters, least significant bit first, packed most significant bit first, padded to whole
+    // codewords; a message reports its bits as sent.
+    let mut d: Decoder = Decoder::default();
+    let mut seen = None;
+    for x in words(77, 3, Content::Alpha(b"AB")) {
+        if x == SYNC {
+            d.sync();
+        } else {
+            d.word(x, |m| seen = Some((m.bits(), m.data().to_vec(), m.alpha().take(2).collect::<Vec<u8>>())));
+        }
+    }
+    d.end(|m| seen = Some((m.bits(), m.data().to_vec(), m.alpha().take(2).collect())));
+    let (bits, data, alpha) = seen.expect("a message");
+    assert_eq!(bits % 20, 0, "whole codewords");
+    assert_eq!(data.len(), bits.div_ceil(8));
+    assert_eq!(alpha, b"AB");
+    // A = 1000001, B = 1000010, each sent least significant bit first: 1000001 0100001 ...
+    assert_eq!(data[0], 0b1000_0010);
+    assert_eq!(data[1] & 0b1111_1100, 0b1000_0100);
+}
+
+#[test]
+fn message_words_before_any_address_are_ignored() {
+    // Message codewords (good or beyond correction) before an address belong to a page this receiver missed.
+    let w = words(4321, 2, Content::Numeric(b"911"));
+    let mut d: Decoder = Decoder::new();
+    let mut out = Vec::new();
+    d.sync();
+    let stray = bch::encode(1 << 20 | 0x12345);
+    d.word(stray, |m| out.push(got(m)));
+    d.word(stray ^ 0x0700_0000, |m| out.push(got(m))); // three bits off: uncorrectable
+    d.end(|m| out.push(got(m)));
+    assert!(out.is_empty());
+    for x in w {
+        if x == SYNC {
+            d.sync();
+        } else {
+            d.word(x, |m| out.push(got(m)));
+        }
+    }
+    d.end(|m| out.push(got(m)));
+    assert_eq!(out.len(), 1);
+    assert_eq!((out[0].address, out[0].function, out[0].numeric.as_str(), out[0].errors), (4321, 2, "911", 0));
+}
+
+#[test]
+fn second_rate_locks_while_the_first_holds_the_decoder() {
+    // A 2400 baud page straight after a 512 baud one, its preamble cut to 64 bits: the 2400 channel finds sync
+    // while the 512 channel still holds the decoder (it lets go after two bad codewords). The first page is
+    // reported whole; the second only from a batch that starts after the 512 channel let go.
+    let mut rng = Rng(12);
+    let rate = 9600;
+    let w1 = words(100, 3, Content::Alpha(b"FIRST"));
+    let w2 = words(200, 3, Content::Alpha(b"SECOND PAGE, LONG ENOUGH TO RUN INTO A SECOND BATCH OF CODEWORDS"));
+    let a1 = audio(&w1, 512, rate, false, 0.0, 300.0, &mut rng);
+    let a2 = audio(&w2, 2400, rate, false, 0.0, 300.0, &mut rng);
+    let skip = rate as usize / 5 + (PREAMBLE_BITS - 64) * rate as usize / 2400;
+    let mut a = a1[..a1.len() - rate as usize / 5].to_vec();
+    a.extend(&a2[skip..]);
+    let g = receive(&a, rate);
+    assert_eq!((g[0].baud, g[0].address), (512, 100));
+    assert!(g[0].alpha.starts_with("FIRST"));
+    assert!(g[1..].iter().all(|m| m.baud == 2400 && m.address != 100), "{g:?}");
+}

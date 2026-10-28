@@ -256,6 +256,16 @@ fn si4732_input_pins() {
     let a = hw.at(|e| *e == Ev::Pin(Pin::SiIn(0), true)).unwrap();
     let b = hw.at(|e| *e == Ev::Pin(Pin::SiIn(1), false)).unwrap();
     assert!(a < b);
+    // Receiving through the SI4732 is what marks it used: leaving it afterwards sets 1/0.
+    let (mut path, mut hw) = (Path::new(), RecHw::new());
+    let mut s = Steps::default();
+    path.rx(Rx::Si, Cause::HfReceiver, 0, &mut s).unwrap();
+    block_on(run(&mut hw, &s));
+    assert!(hw.si_used && hw.at(|e| matches!(e, Ev::Pin(Pin::SiIn(_), _))).is_none(), "its own state comes with the start");
+    let mut s = Steps::default();
+    path.safe(0, &mut s);
+    block_on(run(&mut hw, &s));
+    assert!(hw.at(|e| *e == Ev::Pin(Pin::SiIn(0), true)).is_some() && hw.at(|e| *e == Ev::Pin(Pin::SiIn(1), false)).is_some());
 }
 
 /// BCR-19, PWR-6 (decision 113): Battery Save's sleep step during broadcast FM, on the pins: nothing at all (the

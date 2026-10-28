@@ -395,3 +395,122 @@ fn fx25_block_held_until_released() {
         }
     }
 }
+
+/// Each slicer's tone decisions from `Fsk::push`, NRZI-decoded into its own deframer.
+fn fsk_frames<const S: usize, const C: usize>(fsk: &mut uafsk::fsk::Fsk<S, C>, audio: &[i16]) -> Vec<(usize, Vec<u8>)> {
+    use uafsk::hdlc::Deframer;
+    let mut d: Vec<Deframer> = (0..S * C).map(|_| Deframer::default()).collect();
+    let mut prev = vec![false; S * C];
+    let mut out = Vec::new();
+    for &x in audio {
+        fsk.push(x, |i, mark| {
+            let bit = (mark == prev[i]) as u8;
+            prev[i] = mark;
+            if let Some(f) = d[i].push(bit) {
+                out.push((i, f.to_vec()));
+            }
+        });
+    }
+    out
+}
+
+#[test]
+fn every_slicer_and_chain_decodes() {
+    // Four slicers (the fourth on raw amplitudes) on two chains (the first high-passed, the second not): each of
+    // the eight decodes a clean frame on its own.
+    use uafsk::fsk::{Fsk, BELL202};
+    let mut rng = Rng(5);
+    let f = frame(&mut rng, 40);
+    let rate = 9600;
+    let mut audio: Vec<i16> = Modulator::new(&f, TxConfig { rate_hz: rate, ..TxConfig::default() }).collect();
+    audio.extend([0i16; 960]);
+    let mut fsk = Fsk::<4, 2>::new(uafsk::fsk::Config::new(rate), BELL202);
+    let got = fsk_frames(&mut fsk, &audio);
+    assert!(got.iter().all(|(_, g)| *g == f));
+    let mut who: Vec<usize> = got.iter().map(|(i, _)| *i).collect();
+    who.sort();
+    assert_eq!(who, (0..8).collect::<Vec<_>>());
+}
+
+#[test]
+fn loud_audio_at_48000() {
+    // Near full scale at 48000 samples/s: the tone levels outgrow the 32-bit fast path of the normaliser.
+    let mut rng = Rng(9);
+    let f = frame(&mut rng, 30);
+    let audio: Vec<i16> = Modulator::new(&f, TxConfig { rate_hz: 48_000, preamble: 20, postamble: 2, amp: 32000 }).chain([0; 4800]).collect();
+    assert_eq!(decode(&audio, 48_000, 3), vec![f]);
+}
+
+#[test]
+fn defaults() {
+    let t = TxConfig::default();
+    assert_eq!((t.rate_hz, t.preamble, t.postamble, t.amp), (9600, 30, 3, 16000));
+    // A demodulator with no block in hand: releasing is a no-op, nothing to take.
+    let mut d: Demodulator = Demodulator::new(Config::new(9600));
+    d.release_fx25();
+    assert!(d.pending_fx25().is_none() && d.take_fx25().is_none());
+}
+
+#[test]
+fn framer_ends_and_stays_ended() {
+    use uafsk::hdlc::Framer;
+    let mut fr = Framer::new(&[0x55; 20], 1, 1);
+    let n = fr.by_ref().count();
+    // 20 bytes plus FCS (no stuffing in 0x55; the FCS may stuff a bit or two) between two flags.
+    assert!((8 * 24..8 * 24 + 3).contains(&n), "{n} bits");
+    assert_eq!(fr.next(), None);
+    assert_eq!(fr.next(), None);
+}
+
+#[test]
+fn ax25_address_field_checks() {
+    use uafsk::hdlc::ax25_addresses_ok;
+    let addr = |call: &[u8; 6], last: bool| -> Vec<u8> {
+        let mut a: Vec<u8> = call.iter().map(|c| c << 1).collect();
+        a.push(0x60 | last as u8);
+        a
+    };
+    let two = [addr(b"APRS  ", false), addr(b"N0CALL", true)].concat();
+    assert!(ax25_addresses_ok(&two));
+    assert!(ax25_addresses_ok(&[two.clone(), vec![0x03, 0xF0]].concat()));
+    // One address only, cut short, a lower-case callsign, or an extension bit inside a callsign: not AX.25.
+    assert!(!ax25_addresses_ok(&addr(b"N0CALL", true)));
+    assert!(!ax25_addresses_ok(&two[..10]));
+    assert!(!ax25_addresses_ok(&[addr(b"aprs  ", false), addr(b"N0CALL", true)].concat()));
+    let mut odd = two.clone();
+    odd[2] |= 1;
+    assert!(!ax25_addresses_ok(&odd));
+    // Ten addresses (destination, source, eight digipeaters) is the most; an eleventh is too many.
+    let path = |n: usize| -> Vec<u8> { (0..n).flat_map(|i| addr(b"WIDE1 ", i == n - 1)).collect() };
+    assert!(ax25_addresses_ok(&path(10)));
+    assert!(!ax25_addresses_ok(&path(11)));
+}
+
+#[test]
+fn fx25_block_accessors() {
+    // The block handed out: its code, tag errors and bytes as received; decoding corrects it in place.
+    let mut rng = Rng(13);
+    let rate = 12_000;
+    let f = frame(&mut rng, 50);
+    let a = fx25_audio(&mut rng, &f, 32, 5, 300.0, rate);
+    let mut d: Box<Demodulator> = Box::new(Demodulator::new(Config::new(rate)));
+    let mut block = None;
+    for &x in &a {
+        d.push(x, |_| {});
+        if let Some(b) = d.take_fx25() {
+            block = Some(b);
+        }
+    }
+    let mut b = block.expect("an FX.25 block");
+    let enc = uafsk::ufx25::Encoder::new(&f, 32).unwrap();
+    assert_eq!(b.mode(), Some(enc.mode()));
+    assert_eq!(b.tag_errors(), 0);
+    assert_eq!(b.block().len(), enc.block().len());
+    let wrong = b.block().iter().zip(enc.block()).filter(|(x, y)| x != y).count();
+    assert_eq!(wrong, 5);
+    let fr = b.decode().unwrap();
+    assert_eq!((fr.frame, fr.corrected, fr.check), (&f[..], 5, 32));
+    // Corrected in place: the check bytes now match the encoder's.
+    let k = enc.mode().k as usize;
+    assert_eq!(&b.block()[k..], &enc.block()[k..]);
+}

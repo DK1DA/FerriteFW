@@ -193,4 +193,28 @@ mod tests {
         assert_eq!(l.expired(800), None);
         assert_eq!(l.expired(300 + WINDOW_MS), Some(Held::Counter));
     }
+
+    /// MODE-3: each mode's start command holds it and its stop command (what the Radio task sends when the lease
+    /// runs out) ends it; an accessory's command is the input task's, no renewal.
+    #[test]
+    fn every_mode_starts_and_stops() {
+        use crate::msg::XbCfg;
+        let starts = [
+            RadioCmd::Sweep { centre: 1, step: 1, on: true },
+            RadioCmd::Counter(true),
+            RadioCmd::Broadcast(BroadcastCmd::Fm(9_810)),
+            RadioCmd::Hf { freq: 1, mode: 0, on: true },
+            RadioCmd::Crossband(Some(XbCfg::DEFAULT)),
+            RadioCmd::ToneSearch { slot: 0, on: true },
+        ];
+        for (h, c) in HELD.into_iter().zip(starts) {
+            let mut l = Lease::new();
+            l.note(&c, 50);
+            assert_eq!((l.held(), l.deadline()), (Some(h), Some(50 + WINDOW_MS)), "{c:?}");
+            l.note(&RadioCmd::Accessory(true), 900);
+            assert_eq!(l.deadline(), Some(50 + WINDOW_MS), "not a renewal");
+            l.note(&h.stop_cmd(), 1_000);
+            assert_eq!(l.held(), None, "{:?}", h.stop_cmd());
+        }
+    }
 }

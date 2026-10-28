@@ -188,3 +188,76 @@ fn long_lines_and_full_text() {
     sync(&mut t, &mut pc, &screen.replacen("value 3\"", "value 33\"", 12));
     sync(&mut t, &mut pc, &screen.replacen("value 3\"", "v\"", 12));
 }
+
+/// LINK-47: a control byte goes as `?`; coding into too little room fails, decoding into it is cut.
+#[test]
+fn coding_edges() {
+    let mut e = [0u8; 8];
+    assert_eq!(encode(b"a\tb", &mut e), Some(3));
+    assert_eq!(&e[..3], b"a?b");
+    assert_eq!(encode(b"row card ", &mut [0u8; 1]), None);
+    let mut d = [0u8; 3];
+    assert_eq!(decode(&[1, b'x'], &mut d), 3);
+    assert_eq!(&d, b"row");
+}
+
+/// The sequence number the next event carries; an output without room for a whole line gets nothing (and the
+/// state still goes whole with the next event that has room).
+#[test]
+fn next_seq_and_no_room() {
+    let mut t = Track::default();
+    assert_eq!(t.next_seq(), 1);
+    assert!(ev(&mut t, HOME, HEAD + 2 + LINE_ROOM - 1).is_none());
+    let d = ev(&mut t, HOME, 240).unwrap();
+    assert_eq!((d[0], d[1] & FULL), (1, FULL));
+    assert_eq!(t.next_seq(), 2);
+}
+
+/// A TOKENS op is given up (the line goes whole) past 128 tokens, with a change past token 127, or when it
+/// doesn't fit its 256 bytes.
+#[test]
+fn tokens_op_gives_up() {
+    let mut op = [0u8; 256];
+    let many: Vec<u8> = (0..130).flat_map(|_| *b"a ").collect();
+    let mut changed = many.clone();
+    changed[0] = b'b';
+    assert_eq!(tokens_op(0, &many, &changed, &mut op), None, "130 tokens");
+    let mut late = many.clone();
+    late[2 * 129] = b'b';
+    assert_eq!(tokens_op(0, &many, &late, &mut op), None, "token 129 changed");
+    let old: Vec<u8> = (0..20).flat_map(|_| *b"x ").collect();
+    let new: Vec<u8> = (0..20).flat_map(|i| std::format!("{:z<20} ", i).into_bytes()).collect();
+    assert_eq!(tokens_op(0, &old, &new, &mut op), None, "20 changes of 20 bytes");
+    assert!(tokens_op(0, b"a b", b"a c", &mut op).is_some());
+}
+
+/// LINK-48: an event the client can't read asks for the whole state again: too short, a line past the count,
+/// an op cut short, an entry past the line's tokens, an unknown op; one that reads but doesn't match the check.
+#[test]
+fn apply_refuses_bad_events() {
+    let full = |ops: &[u8]| [&[1, FULL, 0, 0, 1][..], ops].concat();
+    for (ops, why) in [
+        (&[OP_LINE << 6 | 1][..], "line past the count"),
+        (&[OP_LINE << 6], "no length"),
+        (&[OP_LINE << 6, 5, b'a'], "text cut short"),
+        (&[OP_TOKENS << 6], "no token count"),
+        (&[OP_TOKENS << 6, 2], "no entry count"),
+        (&[OP_TOKENS << 6, 2, 1], "no entry"),
+        (&[OP_TOKENS << 6, 2, 1, 1, 5, b'x'], "entry text cut short"),
+        (&[OP_TOKENS << 6, 2, 1, 5, 1, b'x'], "entry past the tokens"),
+        (&[3 << 6], "no such op"),
+    ] {
+        assert_eq!(Pc::default().take(&full(ops)), Err(Resync::Bad), "{why}");
+    }
+    assert_eq!(Pc::default().take(&[1, FULL, 0, 0]), Err(Resync::Bad), "header cut short");
+    assert_eq!(Pc::default().take(&full(&[OP_LINE << 6, 1, b'x'])), Err(Resync::Check));
+    let mut pc = Pc::default();
+    let mut ev = full(&[OP_LINE << 6, 1, b'x']);
+    ev[1] |= MORE;
+    assert_eq!(pc.take(&ev), Ok(1), "more to come: not checked yet");
+    assert_eq!(pc.0, [b"x".to_vec()]);
+    // A token added to an empty line, by index.
+    let mut pc = Pc::default();
+    assert_eq!(pc.take(&[1, FULL | MORE, 0, 0, 1, OP_TOKENS << 6, 2, 1, 1, 1, b'y']), Ok(1));
+    assert_eq!(pc.0, [b" y".to_vec()]);
+}

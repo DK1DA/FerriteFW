@@ -266,4 +266,22 @@ mod tests {
         assert_eq!(night(TEXT), NIGHT_INK, "night red: text at full red");
         assert_eq!((night(SUB), night(DIM)), (NIGHT_INK, NIGHT_INK), "night red: secondary text too (DISP-18)");
     }
+
+    /// DISP-8 on the screens' own tints: text on the alert screen's ground and on the crossband "passing" card,
+    /// and the alert's tone on its ground, stay readable in every theme, and each theme gives the tints colours of
+    /// its own; a colour that isn't a token (the scope's waterfall) passes through cyberpunk as drawn.
+    #[test]
+    fn the_screens_tints_in_every_theme() {
+        for (name, f) in [("dark", (|c| c) as fn(u16) -> u16), ("daylight", day), ("cyberpunk", cyber)] {
+            for (fg, g) in [(TEXT, ALERT_BG), (TEXT, PASS_FILL), (TEXT, FOCUS), (SUB, SURFACE)] {
+                assert!(contrast(f(fg), f(g)) >= 4.5, "{name}: {fg:04x} on {g:04x} is {:.2}", contrast(f(fg), f(g)));
+            }
+            assert!(contrast(f(ALERT_TONE), f(ALERT_BG)) >= 3.0, "{name}: the alert's tone");
+        }
+        for f in [day as fn(u16) -> u16, cyber] {
+            assert!([ALERT_BG, ALERT_TONE, PASS_FILL, DIM, LINE, TOAST].iter().all(|&c| f(c) != c), "a colour of its own");
+        }
+        let other = rgb565(0x0F, 0x2A, 0x45);
+        assert_eq!(cyber(other), other);
+    }
 }

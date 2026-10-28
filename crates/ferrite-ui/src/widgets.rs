@@ -1112,4 +1112,88 @@ mod tests {
         // nothing escaped the screen's bands: the status bar rows were never touched
         assert!((0..240).all(|x| fb.at(x, 0) == 0x1234));
     }
+
+    /// SBAR-9.1: the battery's fill is green above 80 %, amber to 31 %, red at 30 % and below, the outline red with
+    /// it; at cut-off it is red and blinks (gone in the blink's off phase).
+    #[test]
+    fn status_bar_battery_colours() {
+        let bar = |tier: u8, cutoff: bool, blink_off: bool| {
+            let mut fb = FrameBuffer::new();
+            StatusBar { battery: 4, battery_tier: tier, battery_cutoff: cutoff, blink_off, ..Default::default() }.draw(&mut fb, None);
+            (fb.at(216, 9), fb.at(212, 10))
+        };
+        let m = crate::theme::map;
+        assert_eq!(bar(0, false, false), (m(BATT), m(SUB)));
+        assert_eq!(bar(1, false, false), (m(AMBER), m(SUB)));
+        assert_eq!(bar(2, false, false), (m(RED), m(RED)));
+        assert_eq!(bar(0, true, false), (m(RED), m(RED)));
+        assert_eq!(bar(0, true, true), (BG, BG), "the blink's off phase");
+    }
+
+    /// SBAR-2: the clock as hh:mm with Z when it is UTC; with no time, the callsign in its place.
+    #[test]
+    fn status_bar_clock_or_callsign() {
+        let field_px = |s: &StatusBar| {
+            let mut fb = FrameBuffer::new();
+            s.draw(&mut fb, None);
+            (0..SBAR_H - 1).flat_map(|y| (98..142).map(move |x| (x, y))).map(|(x, y)| fb.at(x, y)).collect::<std::vec::Vec<u16>>()
+        };
+        let local = field_px(&StatusBar { clock: Some(14 * 60 + 32), ..Default::default() });
+        let utc = field_px(&StatusBar { clock: Some(14 * 60 + 32), utc: true, ..Default::default() });
+        let call = field_px(&StatusBar { call: Buf::from(b"VA7FER"), ..Default::default() });
+        let none = field_px(&StatusBar::default());
+        assert!(none.iter().all(|&c| c == BG), "nothing without either");
+        assert!(local != none && utc != local && call != none && call != local);
+        let ink = |v: &[u16]| v.iter().filter(|&&c| c != BG).count();
+        assert!(ink(&utc) > ink(&local), "the Z added");
+    }
+
+    /// A tag is outlined in its colour; in night red it is filled (red, with black text: DISP-18).
+    #[test]
+    fn tags_fill_in_night_red() {
+        let mut fb = FrameBuffer::new();
+        let w = tag(&mut fb, 226, 32, b"RX", GREEN, SURFACE);
+        assert_eq!((fb.at(226 - w + 2, 34), fb.at(226 - w, 40)), (crate::theme::map(SURFACE), crate::theme::map(GREEN)));
+        crate::theme::set(crate::theme::NIGHT_RED);
+        let mut fb = FrameBuffer::new();
+        tag(&mut fb, 226, 32, b"RX", GREEN, SURFACE);
+        assert_eq!(fb.at(226 - w + 2, 34), crate::theme::NIGHT_INK, "filled red");
+        crate::theme::set(crate::theme::DARK);
+    }
+
+    /// A row of chips stops at the first that wouldn't fit (never a cut chip); the selected one has a blue outline.
+    #[test]
+    fn chips_stop_at_the_edge() {
+        let mut fb = FrameBuffer::new();
+        let items: [&[u8]; 4] = [b"One", b"Two", b"", b"Three hundred"];
+        chips_sel(&mut fb, 10, 50, 80, &items, Some(1), SURFACE);
+        let w0 = text4_width(b"One", &UI_12) + 10;
+        assert_eq!(fb.at(10 + w0 + 4, 58), crate::theme::map(BLUE), "the second chip's outline is blue");
+        assert!((50..67).all(|y| (10 + 80..240).all(|x| fb.at(x, y) == 0)), "nothing past the row's width");
+    }
+
+    /// HOME-9: a toast's head must fit beside its icon, and the body after it.
+    #[test]
+    fn toast_fit() {
+        assert!(toast_fits(b"VE3KPW-9", b"On my way", true));
+        assert!(toast_fits(b"VE3KPW-9", b"", true));
+        assert!(!toast_fits(&[b'W'; 40], b"", false), "a head too wide");
+        assert!(!toast_fits(b"VE3KPW-9", &[b'W'; 40], false), "a body too wide");
+        assert_eq!(dbm_text(-200).as_bytes(), b"-140 dBm");
+        assert_eq!(dbm_text(-93).as_bytes(), b"-93 dBm");
+    }
+
+    /// A word longer than the box is cut where the line is full (wrapped text, the menu's help box); the help box
+    /// keeps two lines at most.
+    #[test]
+    fn long_words_are_cut_at_the_box() {
+        let long = [b'M'; 60];
+        let mut fb = FrameBuffer::new();
+        let lines = wrap(&mut fb, 10, 100, 100, 160, 113, 15, &long, &UI_12, TEXT, BG);
+        assert!(lines >= 2, "{lines} lines");
+        assert!((100..160).all(|y| (110..240).all(|x| fb.at(x, y) == 0)), "nothing past the box");
+        let mut fb = FrameBuffer::new();
+        help_box(&mut fb, 200, 50, &long, b"MENU 1");
+        assert!((200..250).any(|y| (16..224).any(|x| fb.at(x, y) == crate::theme::map(TEXT))));
+    }
 }

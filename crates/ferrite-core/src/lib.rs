@@ -87,3 +87,18 @@ pub static BUILD_FIXED: core::sync::atomic::AtomicBool = core::sync::atomic::Ato
 pub fn build() -> &'static str {
     if BUILD_FIXED.load(core::sync::atomic::Ordering::Relaxed) { "0000000" } else { BUILD }
 }
+
+#[cfg(test)]
+mod build_tests {
+    use core::sync::atomic::Ordering::Relaxed;
+
+    /// SELF-5: the commit, or the fixed ID the screenshot tests set (nothing else in this crate reads it).
+    #[test]
+    fn build_id_or_fixed() {
+        assert_eq!(super::build(), super::BUILD);
+        super::BUILD_FIXED.store(true, Relaxed);
+        assert_eq!(super::build(), "0000000");
+        super::BUILD_FIXED.store(false, Relaxed);
+        assert_eq!(super::build(), super::BUILD);
+    }
+}

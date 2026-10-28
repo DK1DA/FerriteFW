@@ -67,3 +67,32 @@ pub fn count(i: usize, n: u32) {
 pub fn take() -> [u32; N] {
     core::array::from_fn(|i| P[i].swap(0, Relaxed))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cycles() -> u32 {
+        1_000
+    }
+
+    /// With the feature (bench builds), cycles since a start and counts are summed per stage until taken, then
+    /// start again from 0; without it the clock reads 0 and nothing is kept. (Other tests draw at the same time
+    /// and may add to the sums, never take from them.)
+    #[test]
+    fn stages_sum_until_taken() {
+        set_clock(cycles);
+        let t0 = now();
+        add(COVER, t0.wrapping_sub(7));
+        count(ROWS_DECODED, u32::MAX / 4);
+        count(ROWS_DECODED, 3);
+        let p = take();
+        if cfg!(feature = "prof") {
+            assert_eq!(t0, 1_000);
+            assert!(p[COVER] >= 7 && p[ROWS_DECODED] >= u32::MAX / 4 + 3);
+            assert!(take()[ROWS_DECODED] < u32::MAX / 4, "taking zeroes them");
+        } else {
+            assert_eq!((t0, p), (0, [0; N]));
+        }
+    }
+}

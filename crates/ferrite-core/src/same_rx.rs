@@ -269,4 +269,20 @@ mod tests {
         assert!(r.take(HDR, 100 + REPEAT_S + 5).is_some(), "the same text much later is new");
         assert!(r.take(b"ZCZC-WXR-TOR-03917", 900).is_none(), "doesn't parse");
     }
+
+    /// A default assembler is a new one: started, it takes a header whole.
+    #[test]
+    fn default_assembler_is_new() {
+        let mut a = Assembler::default();
+        a.start();
+        let mut step = Step::More;
+        for w in words(HDR, Orient::ALL[0]) {
+            step = a.push(w);
+            if step != Step::More {
+                break;
+            }
+        }
+        assert_eq!(step, Step::Done);
+        assert_eq!(a.text(), HDR);
+    }
 }

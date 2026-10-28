@@ -232,4 +232,41 @@ mod tests {
         assert!(b == Buf::default());
         assert_eq!(Buf::<0>::from(b"a").as_bytes(), b"");
     }
+
+    /// In test output a buffer shows as its text ('?' when it isn't UTF-8); equal buffers hash alike, whatever
+    /// their capacity left unwritten.
+    #[test]
+    fn debug_and_hash() {
+        use core::hash::{Hash, Hasher};
+        assert_eq!(std::format!("{:?} {:?}", Buf::<8>::from(b"VA7FER"), Buf::<4>::from(b"\xFFa")), "VA7FER ?");
+        let h = |b: &Buf<8>| {
+            let mut s = std::collections::hash_map::DefaultHasher::new();
+            b.hash(&mut s);
+            s.finish()
+        };
+        let mut a = Buf::<8>::from(b"abcdefgh");
+        a.set(b"xy");
+        assert_eq!(h(&a), h(&Buf::from(b"xy")));
+    }
+
+    /// A writer that fails (a full link buffer, say) stops each conversion at its first write.
+    #[test]
+    fn a_failing_writer_stops_each_conversion() {
+        struct Refuse(usize);
+        impl uWrite for Refuse {
+            type Error = ();
+            fn write_str(&mut self, _: &str) -> Result<(), ()> {
+                self.0 += 1;
+                Err(())
+            }
+        }
+        let mut w = Refuse(0);
+        assert!(ufmt::uwrite!(w, "{}", Zero(5, 3)).is_err());
+        assert!(ufmt::uwrite!(w, "{}", Wide(5, 3)).is_err());
+        assert!(ufmt::uwrite!(w, "{}", Plus(5)).is_err());
+        assert!(ufmt::uwrite!(w, "{}", Bytes(b"ab")).is_err());
+        assert!(ufmt::uwrite!(w, "{}", Left("ab", 4)).is_err());
+        assert!(ufmt::uwrite!(w, "{}", Right("ab", 4)).is_err());
+        assert_eq!(w.0, 6, "one write each, nothing after");
+    }
 }

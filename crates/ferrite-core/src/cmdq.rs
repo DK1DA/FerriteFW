@@ -201,4 +201,58 @@ mod tests {
         assert_eq!(class(&RadioCmd::Beep { hz: 1, ms: 1 }), Class::Drop);
         assert_ne!(key(&RadioCmd::SlotParam { slot: 2, param: Param::Mode, value: 0 }), key(&RadioCmd::SlotParam { slot: 1, param: Param::Mode, value: 0 }));
     }
+
+    /// MODE-6.2: every kind of setting has its own key, so only a newer one of the same kind replaces it.
+    #[test]
+    fn each_setting_its_own_key() {
+        let settings = [
+            RadioCmd::Tune(1),
+            RadioCmd::Squelch(1),
+            RadioCmd::BatterySave(crate::rxsleep::Level::L1),
+            RadioCmd::Active(1),
+            RadioCmd::Watch(1),
+            RadioCmd::Awake(1),
+            RadioCmd::ScanTx(true),
+            RadioCmd::BeepVol(1),
+            RadioCmd::Mute(1),
+            RadioCmd::BcastSlot(Some(1)),
+            RadioCmd::ScopeCfg { bars: 1, dwell: 1, strip: true },
+            RadioCmd::Same(true),
+            RadioCmd::AprsSlot(1),
+            RadioCmd::DtmfRx(true),
+            RadioCmd::TuneSlot { slot: 1, freq: 1 },
+            RadioCmd::SlotParam { slot: 1, param: Param::Power, value: 1 },
+        ];
+        let keys: Vec<u16> = settings.iter().map(|c| key(c).unwrap()).collect();
+        for (i, k) in keys.iter().enumerate() {
+            assert!(!keys[i + 1..].contains(k), "{:?} shares its key", settings[i]);
+            assert_eq!(class(&settings[i]), Class::State);
+        }
+        assert_eq!((key(&RadioCmd::Activity), key(&RadioCmd::SweepHold), key(&RadioCmd::Lease)), (Some(4), Some(13), Some(14)));
+        assert_eq!(class(&RadioCmd::SweepHold), Class::Drop);
+        assert_eq!(class(&RadioCmd::Chime { sound: 0, level: 0 }), Class::Drop);
+        // All of them queue side by side; a second round replaces each in place of none.
+        let mut r = CmdRing::<16>::default();
+        for c in settings {
+            assert_eq!(r.push(c), None);
+        }
+        assert_eq!(r.len(), 16);
+        assert_eq!(r.push(RadioCmd::Squelch(5)), None, "replaced its own kind, so room was made");
+        assert_eq!(r.len(), 16);
+        assert_eq!(drain(&mut r).last(), Some(&RadioCmd::Squelch(5)));
+    }
+
+    /// MODE-6.3: a ring full of Keep commands drops the oldest; an empty one pops nothing.
+    #[test]
+    fn full_of_keep_drops_the_oldest() {
+        let mut r = CmdRing::<2>::new();
+        assert!(r.is_empty() && r.capacity() == 2);
+        assert_eq!(r.pop(), None);
+        r.push(RadioCmd::Shutdown);
+        r.push(RadioCmd::Transmit { slot: 0, on: true });
+        assert!(!r.is_empty());
+        assert_eq!(r.push(RadioCmd::Transmit { slot: 0, on: false }), Some(RadioCmd::Shutdown));
+        assert_eq!(drain(&mut r), [RadioCmd::Transmit { slot: 0, on: true }, RadioCmd::Transmit { slot: 0, on: false }]);
+        assert!(r.is_empty());
+    }
 }

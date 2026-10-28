@@ -1303,4 +1303,290 @@ mod tests {
         assert_eq!(&tuned[..3], &[(1, f(6)), (1, f(20)), (1, f(5))]);
         assert!(tuned.iter().all(|&(_, fr)| fr != PENDING));
     }
+
+    /// Nothing to stop on.
+    struct Empty;
+    impl List for Empty {
+        fn len(&self) -> u16 {
+            0
+        }
+        fn at(&self, _i: u16) -> Option<Freq10> {
+            None
+        }
+    }
+
+    /// A list's defaults: no priority, no transmit side; a scan with no stop ends at its first step's end.
+    #[test]
+    fn empty_list_ends_the_scan() {
+        assert!(Empty.is_empty());
+        assert_eq!((Empty.at(0), Empty.priority(0), Empty.tx_at(0)), (None, None, None));
+        let r = Range { lo: mhz(146), hi: mhz(146), step: 1_250, skipped: &[] };
+        assert!(!r.is_empty());
+        assert_eq!((r.len(), r.priority(0), r.tx_at(0)), (1, None, None));
+        let mut s = Scan::default();
+        assert!(!s.running() && s.up() && s.resume == Resume::Time(5) && s.due().is_none());
+        s.start(0, 0);
+        assert_eq!(s.tick(&Empty, STEP_MS - 10, false), Out::default());
+        assert_eq!(s.tick(&Empty, STEP_MS, false), Out { tune: None, hit: None, ended: true });
+        assert!(!s.running());
+    }
+
+    /// SCAN-5: the settings' resume codes; anything out of range is the 5 s default.
+    #[test]
+    fn resume_codes() {
+        for c in 1..=10 {
+            assert_eq!(Resume::from_code(c), Resume::Time(c));
+        }
+        assert_eq!(Resume::from_code(12), Resume::Never);
+        for c in [0, 13, 255] {
+            assert_eq!(Resume::from_code(c), Resume::Time(5), "{c}");
+        }
+    }
+
+    /// SCAN-20.3: eight nuisance skips are held; a ninth \* still leaves the hit and counts, but the scan stops on
+    /// it again next time round.
+    #[test]
+    fn nuisance_skips_held_up_to_eight() {
+        let r = Range { lo: mhz(146), hi: mhz(146) + 11 * 1_250, step: 1_250, skipped: &[] };
+        let mut s = Scan { resume: Resume::Drop, ..Scan::new() };
+        s.start(0, 0);
+        let mut t = 0;
+        let mut hits = std::vec::Vec::new();
+        for _ in 0..12 {
+            t = walk(&mut s, &r, t, t + 50, |_| true);
+            assert!(s.on_hit());
+            hits.push(s.pos());
+            s.skip_once(&r, t);
+        }
+        assert_eq!(hits, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+        assert_eq!(s.skips, 12);
+        assert_eq!(s.pos(), 8, "0-7 held as skipped; 8 (the ninth) stopped on again");
+        // A skip off the only stop left: the scan ends.
+        let mut s = Scan { resume: Resume::Drop, ..Scan::new() };
+        let one = Range { lo: mhz(146), hi: mhz(146), step: 1_250, skipped: &[] };
+        s.start(0, 0);
+        let t = walk(&mut s, &one, 0, 50, |_| true);
+        assert!(s.on_hit());
+        assert!(s.skip_once(&one, t).ended && !s.running());
+        // Not on a hit: * and ▲▼ change nothing but the direction.
+        s.start(0, 0);
+        assert_eq!(s.skip_once(&r, 0), Out::default());
+        assert_eq!(s.dir(false, &r, 0), Out::default());
+        assert!(!s.up() && s.skips == 0 && s.pos() == 0);
+    }
+
+    /// Chans with a second priority channel (2).
+    struct TwoPrio;
+    impl List for TwoPrio {
+        fn len(&self) -> u16 {
+            10
+        }
+        fn at(&self, i: u16) -> Option<Freq10> {
+            Chans.at(i)
+        }
+        fn priority(&self, k: u8) -> Option<u16> {
+            [7, 2].get(k as usize).copied()
+        }
+    }
+
+    /// SCAN-12: from a step, the look goes through each priority channel a dwell each, then back to the step,
+    /// which listens a full step again; a priority channel that is the stop itself isn't looked at.
+    #[test]
+    fn priority_look_from_a_step() {
+        let mut s = Scan { prio_ms: 1_000, resume: Resume::Drop, ..Scan::new() };
+        s.start(0, 0);
+        walk(&mut s, &TwoPrio, 0, 1_000, |_| false);
+        let p = s.pos();
+        assert!(p != 7 && p != 2);
+        let mut tuned = std::vec::Vec::new();
+        let mut t = 1_000;
+        while tuned.len() < 3 {
+            if let Some(f) = s.tick(&TwoPrio, t, false).tune {
+                tuned.push((t, f));
+            }
+            t += 10;
+        }
+        let f = |i: u32| mhz(146) + i * 1_250;
+        assert_eq!(tuned, [(1_000, f(7)), (1_000 + PRIO_DWELL_MS, f(2)), (1_000 + 2 * PRIO_DWELL_MS, f(p as u32))]);
+        assert!(s.listening() && s.pos() == p && s.hits == 0);
+        // Back on the step for a full STEP_MS from its return.
+        assert_eq!(s.tick(&TwoPrio, t + STEP_MS - 30, false).tune, None);
+        assert!(s.tick(&TwoPrio, t + STEP_MS, false).tune.is_some());
+
+        // On a hit at the priority channel itself: no look at the interval.
+        let mut s = Scan { prio_ms: 1_000, resume: Resume::Drop, ..Scan::new() };
+        s.start(7, 0);
+        let t = walk(&mut s, &Chans, 0, 100, |p| p == 7);
+        assert!(s.on_hit() && s.pos() == 7);
+        let mut t = t;
+        while t < 2_100 {
+            assert_eq!(s.tick(&Chans, t, true).tune, None, "at {t}");
+            t += 10;
+        }
+        assert!(!s.listening());
+    }
+
+    /// The bitmap's edges: chunks and channel numbers past the end are ignored, a priority number past the end
+    /// is none.
+    #[test]
+    fn chan_set_edges() {
+        let mut a = ChanSet::default();
+        assert_eq!(a, ChanSet::new());
+        a.put_chunk(200, [0xFF; SET_CHUNK]);
+        a.set(MAX_CHANNELS, true);
+        assert_eq!(a.count(), 0);
+        assert!(!a.has(MAX_CHANNELS));
+        assert_eq!(a.chunk(200), [0; SET_CHUNK]);
+        assert_eq!(a.next_from(0, true), None, "an empty set");
+        a.put_chunk(24, [0xFF; SET_CHUNK]);
+        assert_eq!(a.count(), 40);
+        assert!(a.has(960) && a.has(999) && !a.has(959));
+        a.set_prio(0, 3);
+        a.set_prio(1, MAX_CHANNELS);
+        a.set_prio(PRIO_MAX as u8, 4);
+        assert_eq!((a.prio(0), a.prio(1), a.prio(2)), (Some(3), None, None));
+    }
+
+    /// A channel already cached is updated in place; a cache full of kept channels takes no new one.
+    #[test]
+    fn cache_updates_and_full_of_kept() {
+        let mut c = FreqCache::new();
+        c.put_rx(4, 100, &[]);
+        c.put_rx(4, 200, &[]);
+        assert_eq!(c.get(4), Some((200, 0)));
+        c.put_tx(9, 5);
+        assert_eq!(c.get(9), None, "a transmit side for a channel not cached is dropped");
+        let keep: std::vec::Vec<u16> = (0..CACHE as u16).collect();
+        let mut c = FreqCache::new();
+        for &n in &keep {
+            c.put_rx(n, 1_000 + n as u32, &keep);
+        }
+        c.put_rx(50, 2, &keep);
+        assert_eq!(c.get(50), None);
+        assert!(keep.iter().all(|&n| c.get(n) == Some((1_000 + n as u32, 0))));
+        c.clear();
+        assert_eq!(c, FreqCache::new());
+    }
+
+    /// What a channel scan asks for: nothing when stopped; the stop it is on, then a priority channel, then the
+    /// next stops; nothing when all it would look at is cached.
+    #[test]
+    fn want_order_and_none() {
+        let mut set = ChanSet::new();
+        for n in [5u16, 6, 900] {
+            set.set(n, true);
+        }
+        set.set_prio(0, 900);
+        let mut cache = FreqCache::new();
+        let mut s = Scan::new();
+        assert_eq!(want(&s, &set, &cache, false), None, "not running");
+        s.start(5, 0);
+        assert_eq!(want(&s, &set, &cache, false), Some(5));
+        cache.put_rx(5, 1, &[]);
+        assert_eq!(want(&s, &set, &cache, false), Some(900), "the priority channel before the next stop");
+        cache.put_rx(900, 1, &[]);
+        assert_eq!(want(&s, &set, &cache, false), Some(6));
+        cache.put_rx(6, 1, &[]);
+        assert_eq!(want(&s, &set, &cache, false), None, "round to where it is");
+        assert_eq!(keep(&s, &set, false), [5, 900, NO_WANT, NO_WANT, NO_WANT]);
+        // Walking WithTx: position 10 is channel 5.
+        s.start(10, 0);
+        assert_eq!((chan_at(&s, true), keep(&s, &set, true)[0]), (5, 5));
+        // A single stop: nothing ahead of it.
+        let mut one = ChanSet::new();
+        one.set(5, true);
+        s.start(5, 0);
+        assert_eq!(want(&s, &one, &cache, false), None);
+        // More stops than AHEAD, all cached: no further look.
+        let mut many = ChanSet::new();
+        let mut cache = FreqCache::new();
+        for n in 0..10u16 {
+            many.set(n, true);
+            cache.put_rx(n, 1, &[]);
+        }
+        many.set(500, true);
+        s.start(0, 0);
+        assert_eq!(want(&s, &many, &cache, false), None, "only AHEAD stops ahead are fetched");
+    }
+
+    /// SCAN-22 through the Radio task's walk: a shifted channel's input right after it, a priority as its
+    /// doubled position, and the transmit side arriving by its own command.
+    #[test]
+    fn chan_scans_walk_the_inputs() {
+        use crate::msg::RadioCmd as C;
+        let mut cs = ChanScans::default();
+        let mut scans = [Scan::new(); 3];
+        let mut set = ChanSet::new();
+        set.set(5, true);
+        set.set(6, true);
+        cs.cmd(&C::ScanTx(true), &mut scans, 0);
+        cs.cmd(&C::ScanSet { slot: 0, chunk: 0, bits: set.chunk(0) }, &mut scans, 0);
+        cs.cmd(&C::ScanPrio { slot: 0, k: 0, num: 6 }, &mut scans, 0);
+        cs.cmd(&C::ScanChans { slot: 0, from: 5, prio_s: 0 }, &mut scans, 0);
+        assert!(cs.tx && cs.is_on(0) && !cs.is_on(1));
+        assert_eq!((scans[0].pos(), cs.chan(&scans[0])), (10, 5));
+        let f = |n: u16| mhz(446) + n as u32 * 1_250;
+        assert_eq!(cs.want(&scans), Some(5));
+        assert_eq!(cs.cmd(&C::ScanEntry { num: 5, rx: f(5) }, &mut scans, 0), None, "not waited for");
+        assert_eq!(cs.want(&scans), Some(6));
+        cs.cmd(&C::ScanEntry { num: 6, rx: f(6) }, &mut scans, 0);
+        cs.cmd(&C::ScanEntryTx { num: 6, tx: f(6) + 60_000 }, &mut scans, 0);
+        assert_eq!(cs.want(&scans), None);
+        assert_eq!(cs.walk(0).len(), 2 * MAX_CHANNELS);
+        assert_eq!(cs.walk(0).priority(0), Some(12));
+        let mut tuned = std::vec::Vec::new();
+        let mut t = 0;
+        while tuned.len() < 3 {
+            if let Some(fr) = cs.tick(0, &mut scans[0], t, false).tune {
+                tuned.push(fr);
+            }
+            t += 10;
+        }
+        assert_eq!(tuned, [f(6), f(6) + 60_000, f(5)], "5 is simplex: no input of its own");
+        cs.tx = false;
+        assert_eq!(cs.walk(0).priority(0), Some(6));
+        assert_eq!(cs.cmd(&C::Tune(f(5)), &mut scans, t), None, "not a scan command");
+        cs.off(0);
+        assert!(!cs.is_on(0));
+        assert_eq!(cs.want(&scans), None);
+    }
+
+    /// A step onto a channel whose frequency hasn't arrived waits (not ticked) and tunes when it comes; * and
+    /// ▲▼ onto one wait the same way (SCAN-11, SCAN-16).
+    #[test]
+    fn chan_scan_waits_for_a_pending_stop() {
+        use crate::msg::RadioCmd as C;
+        let mut cs = ChanScans::new();
+        let mut scans = [Scan::new(); 3];
+        let mut set = ChanSet::new();
+        for n in [5u16, 6, 20] {
+            set.set(n, true);
+        }
+        cs.cmd(&C::ScanSet { slot: 2, chunk: 0, bits: set.chunk(0) }, &mut scans, 0);
+        cs.cmd(&C::ScanResume { slot: 2, code: 11 }, &mut scans, 0);
+        cs.cmd(&C::ScanChans { slot: 2, from: 5, prio_s: 0 }, &mut scans, 0);
+        let f = |n: u16| mhz(446) + n as u32 * 1_250;
+        assert_eq!(cs.tick(2, &mut scans[2], 0, false), Out::default());
+        assert_eq!(cs.tick(2, &mut scans[2], STEP_MS, false), Out::default(), "PENDING never reaches the chip");
+        assert_eq!(scans[2].pos(), 6);
+        assert_eq!(cs.tick(2, &mut scans[2], STEP_MS + 50, true), Out::default(), "not ticked while waiting");
+        assert!(!scans[2].on_hit());
+        assert_eq!(cs.cmd(&C::ScanEntry { num: 6, rx: f(6) }, &mut scans, 90), Some((2, f(6))));
+        let mut t = 100;
+        while !scans[2].on_hit() {
+            cs.tick(2, &mut scans[2], t, true);
+            t += 10;
+        }
+        assert!(t - 90 >= STEP_MS / 2, "a full listen from when it was tuned");
+        assert_eq!(cs.skip_once(2, &mut scans[2], t), Out::default());
+        assert_eq!((scans[2].pos(), scans[2].skips), (20, 1));
+        assert_eq!(cs.cmd(&C::ScanEntry { num: 20, rx: f(20) }, &mut scans, t), Some((2, f(20))));
+        while !scans[2].on_hit() {
+            t += 10;
+            cs.tick(2, &mut scans[2], t, true);
+        }
+        assert_eq!(cs.dir(2, &mut scans[2], false, t), Out::default());
+        assert_eq!(scans[2].pos(), 5, "down past 6, skipped for this scan");
+        assert_eq!(cs.cmd(&C::ScanEntry { num: 5, rx: f(5) }, &mut scans, t), Some((2, f(5))));
+    }
 }

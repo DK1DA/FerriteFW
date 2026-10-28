@@ -1724,3 +1724,112 @@ fn zone_name(b: &mut Buf<16>, z: u8) {
     }
     b.push(&[b'0' + (n % 10) as u8]);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::SimFlash;
+
+    type Store = FlashStore<SimFlash, NoData>;
+
+    /// Every APRS setting set to something other than its default.
+    fn full_cfg() -> AprsCfg {
+        let mut comment = [0u8; ferrite_app::aprs::COMMENT_LEN];
+        comment[..7].copy_from_slice(b"On foot");
+        let mut custom = [0u8; ferrite_app::aprs::CUSTOM_LEN];
+        custom[..7].copy_from_slice(b"WIDE2-2");
+        AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5 }
+    }
+
+    /// The APRS record's payload as it is stored for `cfg`.
+    fn aprs_payload(cfg: AprsCfg) -> Vec<u8> {
+        let s = Store::mount(SimFlash::new(), NoData);
+        assert!(s.request(Op::AprsCfg(cfg)));
+        assert!(block(s.run(Job::AprsSave)));
+        let c = settings::latest_of(&s.f, APRS_COPIES, APRS_PAYLOAD).unwrap().unwrap();
+        let mut p = vec![0u8; c.len as usize];
+        s.f.raw_read(c.at, &mut p).unwrap();
+        p
+    }
+
+    /// The APRS settings a mount reads from a record holding `p`.
+    fn mounted_with(p: &[u8]) -> AprsCfg {
+        let s = Store::mount(SimFlash::new(), NoData);
+        block(settings::save_to(&s.f, APRS_COPIES, p)).unwrap();
+        Store::mount(s.into_parts().0, NoData).aprs_cfg()
+    }
+
+    /// A record from before each later setting (shorter) reads those as their defaults and the rest as stored:
+    /// the path, digipeater, beacon after voice and SSID (APRS-26, APRS-30), the custom path, FX.25 (APRS-45), the
+    /// sound, the symbol, TX delay and level (APRS-47), the comment and ambiguity (APRS-51), Mic-E (APRS-52).
+    #[test]
+    fn an_older_aprs_record_reads_later_settings_as_defaults() {
+        let full = full_cfg();
+        let p = aprs_payload(full);
+        assert_eq!(p.len(), APRS_PAYLOAD);
+        assert!(mounted_with(&p) == full, "a whole record reads back");
+        let d = AprsCfg::DEFAULT;
+        for len in [APRS_MORE, APRS_PATH, APRS_FX25, APRS_SOUND, APRS_SYMBOL, APRS_COMMENT, APRS_MIC_E] {
+            let c = mounted_with(&p[..len]);
+            let pick = |kept: bool, f: &dyn Fn(&AprsCfg) -> u32| if kept { f(&full) } else { f(&d) };
+            assert_eq!((c.f5k, c.beacon, c.power), (full.f5k, full.beacon, full.power), "{len}: the first settings");
+            assert_eq!(c.ssid as u32, pick(len >= APRS_PATH, &|x| x.ssid as u32), "{len}: SSID");
+            assert_eq!(c.digi as u32, pick(len >= APRS_PATH, &|x| x.digi as u32), "{len}: digipeater");
+            assert_eq!(c.after_voice as u32, pick(len >= APRS_PATH, &|x| x.after_voice as u32), "{len}: after voice");
+            assert_eq!(c.custom == full.custom, len >= APRS_FX25, "{len}: custom path");
+            // custom (3) is chosen only once the custom path itself is stored
+            assert_eq!(c.path as u32, pick(len >= APRS_FX25, &|x| x.path as u32), "{len}: path");
+            assert_eq!(c.fx25 as u32, pick(len > APRS_FX25, &|x| x.fx25 as u32), "{len}: FX.25");
+            assert_eq!(c.sound as u32, pick(len > APRS_SOUND, &|x| x.sound as u32), "{len}: sound");
+            let sym = len >= APRS_COMMENT;
+            assert_eq!((c.symbol as u32, c.txdelay as u32, c.tx_level as u32), (pick(sym, &|x| x.symbol as u32), pick(sym, &|x| x.txdelay as u32), pick(sym, &|x| x.tx_level as u32)), "{len}: symbol");
+            assert_eq!((c.comment == full.comment, c.ambiguity as u32), (len >= APRS_MIC_E, pick(len >= APRS_MIC_E, &|x| x.ambiguity as u32)), "{len}: comment");
+            assert_eq!(c.mic_e, d.mic_e, "{len}: Mic-E");
+        }
+    }
+
+    /// A record whose later bytes are out of range (a damaged record, or a value a newer build added) reads each of
+    /// them as its default; the power is held to High, the digipeater to its own bits, the custom path kept only if
+    /// it still checks (APRS-26), the SSID 0-15 (APRS-30), the ambiguity 0-4 (APRS-51), and a comment only when it
+    /// is printable.
+    #[test]
+    fn a_damaged_aprs_record_reads_defaults() {
+        let mut p = aprs_payload(full_cfg());
+        p[3] = 9; // power
+        p[APRS_MORE..APRS_MORE + 4].copy_from_slice(&[9, 0xFF, 2, 16]); // path, digi, after voice, SSID
+        p[APRS_PATH..APRS_PATH + 3].copy_from_slice(b"!!!");
+        p[APRS_FX25] = 17;
+        p[APRS_SOUND] = 200;
+        p[APRS_SYMBOL..APRS_SYMBOL + 3].copy_from_slice(&[200, ferrite_app::aprs::TXDELAY_MAX + 1, 3]);
+        p[APRS_COMMENT] = 0x01;
+        p[APRS_AMBIG] = 5;
+        p[APRS_MIC_E] = 200;
+        let c = mounted_with(&p);
+        let d = AprsCfg::DEFAULT;
+        assert_eq!((c.f5k, c.beacon, c.power), (28_878, 3, 2));
+        assert_eq!((c.path, c.digi, c.after_voice, c.ssid), (d.path, 0x73, false, ferrite_app::aprs::SSID_DEFAULT));
+        assert!(c.custom == d.custom && c.comment == d.comment);
+        assert_eq!((c.fx25, c.sound, c.symbol, c.txdelay, c.tx_level, c.ambiguity, c.mic_e), (d.fx25, d.sound, d.symbol, d.txdelay, d.tx_level, 0, d.mic_e));
+    }
+
+    /// Zone names count from 1: "Zone 1", "Zone 10", "Zone 100", "Zone 254".
+    #[test]
+    fn new_zone_names() {
+        let mut b = Buf::<16>::new();
+        for (z, want) in [(0u8, &b"Zone 1"[..]), (9, b"Zone 10"), (99, b"Zone 100"), (253, b"Zone 254")] {
+            zone_name(&mut b, z);
+            assert_eq!(b.as_bytes(), want);
+        }
+    }
+
+    /// Settings that outgrow the save buffer are refused whole rather than written in part.
+    #[test]
+    fn a_payload_too_big_is_refused() {
+        let mut buf = [0u8; 4];
+        let mut s = SliceSink { buf: &mut buf, len: 0, over: false };
+        s.put(b"abc");
+        s.put(b"de");
+        assert!(s.over && s.len == 3);
+        assert_eq!(&buf[..3], b"abc");
+    }
+}

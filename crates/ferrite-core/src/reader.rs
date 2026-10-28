@@ -1264,4 +1264,96 @@ mod tests {
         assert_eq!(text(|o| dec(o, 0)), "0");
         assert_eq!(text(|o| dec(o, u32::MAX)), "4294967295");
     }
+
+    /// The table built at compile time is zlib's (its well-known entries), the same when built at run time.
+    #[test]
+    fn crc_table_is_zlibs() {
+        let t = table();
+        assert_eq!((t[0], t[1], t[128], t[255]), (0, 0x7707_3096, 0xEDB8_8320, 0x2D02_EF8D));
+        assert_eq!(t, CRC_TABLE);
+    }
+
+    /// The commands not in [`commands_parse_like_hwtest`]: help, off, the link test's `tune`, a bad rate.
+    #[test]
+    fn more_commands() {
+        assert_eq!(parse(b"help"), Command::Help);
+        assert_eq!(parse(b"?"), Command::Help);
+        assert_eq!(parse(b"off"), Command::Off);
+        assert_eq!(parse(b"\t "), Command::Empty);
+        assert_eq!(parse(b"tune 64 500 2"), Command::Tune { bytes: 64, us: 500, stop2: true });
+        assert_eq!(parse(b"tune 0x40 0 1"), Command::Tune { bytes: 64, us: 0, stop2: false });
+        assert_eq!(parse(b"tune 64 500"), Command::Unknown);
+        assert_eq!(parse(b"tune 64 x 2"), Command::Unknown);
+        assert_eq!(parse(b"fdump 0 16 fast"), Command::Empty, "hwtest ignores a bad rate silently");
+        assert_eq!(parse(b"fdumpz 0 16 0x"), Command::Empty);
+        assert_eq!(uint(b"99999999999"), None, "overflow on the multiply");
+        assert_eq!(uint(b"0x1G"), None);
+    }
+
+    /// BACKUP-9.6: a coded chunk never needs more than raw; DEFLATE gives up (None) when its room is too small.
+    #[test]
+    fn deflate_gives_up_when_full() {
+        let mut head = std::boxed::Box::new([0u16; 1 << DEFLATE_HASH_BITS]);
+        let noise: Vec<u8> = (0..200u32).map(chip).collect();
+        assert_eq!(deflate_fixed(&noise, &mut [0u8; 16], &mut head), None);
+        let n = deflate_fixed(&noise, &mut [0u8; 400], &mut head).unwrap();
+        assert!(n > 16 && n < 400);
+        // A long run fits in a few bytes, and no room at all is still None.
+        let mut out = [0u8; 16];
+        let k = deflate_fixed(&[0x41; 1000], &mut out, &mut head).unwrap();
+        assert_eq!(miniz_oxide::inflate::decompress_to_vec(&out[..k]).unwrap(), [0x41; 1000]);
+        assert_eq!(deflate_fixed(&[0x41; 1000], &mut [], &mut head), None);
+        let z = ZWork::default();
+        assert_eq!(z.coded().len(), ZBUF + 4);
+        assert!(z.coded().iter().all(|&b| b == 0));
+    }
+
+    /// `fdumpz` over the test host, the chip's bytes from [`chip`]; `go` is the power switch after each chunk.
+    fn runz(h: &mut Host, len: u32, mut go: impl FnMut(u32) -> bool) -> Result<Dumped, Stopped> {
+        h.zlen = len as usize;
+        let mut buf = std::boxed::Box::new([0u8; ZCHUNK]);
+        let mut z = std::boxed::Box::new(ZWork::new());
+        fdumpz_run(h, &mut buf, &mut z, 0, len, |a, d| d.iter_mut().enumerate().for_each(|(i, x)| *x = chip(a + i as u32)), |done, _| go(done))
+    }
+
+    /// BACKUP-9.6: `fdumpz` stops as `fdump` does: CAN, no sync, no ACK, the power switch, an end frame never
+    /// acknowledged; an empty range sends the end frame alone.
+    #[test]
+    fn fdumpz_stops() {
+        let len = 2 * ZCHUNK as u32;
+        let mut h = Host::new();
+        h.cancel_at = Some(1);
+        assert_eq!(runz(&mut h, len, |_| true), Err(Stopped { at: ZCHUNK as u32, why: "cancelled by the host" }));
+        let mut h = Host::new();
+        h.to_radio = b"FDS2".iter().copied().collect();
+        assert_eq!(runz(&mut h, len, |_| true), Err(Stopped { at: 0, why: "no sync from the host" }));
+        let mut h = Host::new();
+        h.silent = (0..TRIES).collect();
+        assert_eq!(runz(&mut h, len, |_| true), Err(Stopped { at: 0, why: "no acknowledgement" }));
+        assert_eq!(h.frames, TRIES, "sent once and resent TRIES - 1 times");
+        let mut h = Host::new();
+        assert_eq!(runz(&mut h, len, |_| false), Err(Stopped { at: ZCHUNK as u32, why: "the power switch is off" }));
+        assert!(h.end.is_none());
+        let mut h = Host::new();
+        h.silent = (1..=TRIES).collect();
+        assert_eq!(runz(&mut h, 100, |_| true), Err(Stopped { at: 100, why: "end frame not acknowledged" }));
+        assert_eq!(h.data, (0..100).map(chip).collect::<Vec<_>>());
+        let mut h = Host::new();
+        let d = runz(&mut h, 0, |_| true).unwrap();
+        assert_eq!((d.crc, d.blocks, d.resends), (0, 0, 0));
+        assert_eq!(h.end.unwrap(), end_payload(0, 0, 0, 0));
+    }
+
+    /// BACKUP-9.5: the power switch between blocks, and an end frame never acknowledged, stop `fdump` too.
+    #[test]
+    fn fdump_stops_at_the_end() {
+        let mut h = Host::new();
+        let mut buf = [0u8; BLOCK];
+        let r = fdump_run(&mut h, &mut buf, 0, 2 * BLOCK as u32, |_, d| d.fill(0), |_, _| false);
+        assert_eq!(r, Err(Stopped { at: BLOCK as u32, why: "the power switch is off" }));
+        let mut h = Host::new();
+        h.silent = (1..=TRIES).collect();
+        assert_eq!(run(&mut h, 0, 10), Err(Stopped { at: 10, why: "end frame not acknowledged" }));
+        assert_eq!(h.data, (0..10).map(chip).collect::<Vec<_>>());
+    }
 }

@@ -665,6 +665,46 @@ mod tests {
         assert!(BT_RATES.contains(&BT_FAST) && BT_RATES.contains(&BT_BAUD));
     }
 
+    /// LINK-35, TX-48: the build byte's transmit kind, Dry TX and bench bit, and the names the tools print.
+    #[test]
+    fn build_byte() {
+        assert_eq!(build::of(false, true, false), build::RECEIVE, "Dry TX counts only with transmit");
+        assert_eq!(build::of(true, false, false), build::TX);
+        assert_eq!(build::of(true, true, true), build::TX_DRY_ON | build::BENCH);
+        for (b, dry) in [(build::TX_DRY_ON | build::BENCH, true), (build::TX_DRY, true), (build::TX, false), (build::RECEIVE | build::BENCH, false)] {
+            assert_eq!(build::dry(b), dry, "{b:#x}");
+        }
+        assert!(build::bench(build::of(false, false, true)) && !build::bench(build::TX_DRY_ON));
+        let names = [build::RECEIVE, build::TX | build::BENCH, build::TX_DRY, build::TX_DRY_ON, 7].map(build::name);
+        assert_eq!(names, ["receive", "tx", "tx-dry", "tx+dry", "unknown"]);
+    }
+
+    /// COBS into too short a buffer fails wherever it writes; a zero code, or one past the end, doesn't decode;
+    /// frames too short or not COBS are refused with what could be read.
+    #[test]
+    fn short_buffers_and_bad_frames() {
+        assert_eq!(cobs_encode(&[0], &mut []), None);
+        assert_eq!(cobs_encode(&[1], &mut [0; 1]), None);
+        assert_eq!(cobs_encode(&[], &mut []), None);
+        assert_eq!(cobs_encode(&[7; 254], &mut [0; 255]), None, "the code after a full run");
+        assert_eq!(cobs_encode(&[7; 254], &mut [0; 256]), Some(256));
+        assert_eq!(cobs_decode(&mut [0, 1]), None);
+        assert_eq!(cobs_decode(&mut [5, 1]), None);
+        assert_eq!(parse(&mut [5, 1]).unwrap_err(), FrameError { ty: 0, seq: 0 });
+        let mut short = [0u8; 8];
+        let n = cobs_encode(&[9, 3, 1], &mut short).unwrap();
+        assert_eq!(parse(&mut short[..n]).unwrap_err(), FrameError { ty: 9, seq: 3 }, "3 bytes: no room for a CRC");
+        assert_eq!(build(1, 0, &[1, 2], &mut [0; 3]), None, "no room for the frame");
+        assert_eq!(build(1, 0, &[1, 2], &mut [0; 7]), None, "no room for the delimiter");
+        assert_eq!(build(1, 0, &[1, 2], &mut [0; 8]), Some(8));
+    }
+
+    #[test]
+    fn bt_pace_default_and_no_rate() {
+        assert_eq!(BtPace::default(), BtPace::DEFAULT);
+        assert_eq!(BtPace::DEFAULT.bytes_per_s(0), 0);
+    }
+
     #[test]
     fn crc_check_value() {
         assert_eq!(crc16(b"123456789"), 0x29B1, "CRC-16/CCITT-FALSE's check value");
