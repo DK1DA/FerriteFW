@@ -85,6 +85,16 @@ impl A {
     }
 }
 
+/// Pixels of text drawn in `c` on the card's surface, its blended edges too: each RGB565 channel between the
+/// surface's and `c`'s (the surface itself not counted).
+fn ink(fb: &FrameBuffer, x: i32, y: i32, w: i32, h: i32, c: u16) -> usize {
+    use ferrite_ui::gfx::SURFACE;
+    let ch = |v: u16| [v >> 11, (v >> 5) & 63, v & 31];
+    let (s, t) = (ch(SURFACE), ch(c));
+    let between = |p: u16| p != SURFACE && (0..3).all(|i| ch(p)[i] >= s[i].min(t[i]) && ch(p)[i] <= s[i].max(t[i]));
+    (x..x + w).flat_map(|px| (y..y + h).map(move |py| (px, py))).filter(|&(px, py)| between(fb.at(px, py))).count()
+}
+
 /// Pixels of `c` in the box.
 fn count(fb: &FrameBuffer, x: i32, y: i32, w: i32, h: i32, c: u16) -> usize {
     (x..x + w).flat_map(|px| (y..y + h).map(move |py| (px, py))).filter(|&(px, py)| fb.at(px, py) == c).count()
@@ -160,8 +170,10 @@ fn aprs_card_beacon() {
     // The simulated APRS task runs the beacon's timer (as the simulators do, once a second).
     a.s.aprs_tick(10, true, true);
     let k = a.app.aprs_card(&a.s).expect("beacons hold C");
-    assert!(k.countdown && k.right.as_bytes().contains(&b':'), "{:?}", core::str::from_utf8(k.right.as_bytes()));
-    assert_eq!(k.right.as_bytes(), k.next.as_bytes());
+    // APRS-17.2.1 (decision 313): the small card's countdown "Beacon in" over "10m" (whole minutes, rounded up);
+    // the readback's next= keeps m:ss
+    assert!(k.countdown && k.right.as_bytes().ends_with(b"m"), "{:?}", core::str::from_utf8(k.right.as_bytes()));
+    assert!(k.next.as_bytes().contains(&b':'));
     assert_eq!(k.line.as_bytes(), "Every 10 min \u{b7} GPS fix".as_bytes());
     let l = a.card_line();
     assert!(l.contains("head=\"APRS Beacon \u{b7} VHF\"") && l.contains("holder=beacon") && l.contains("next=\"") && l.contains("line=\"Every 10 min"), "{l}");
@@ -177,7 +189,11 @@ fn aprs_card_beacon() {
     let fb = a.fb();
     assert!(count(&fb, 150, y + 34, 76, 16, VIOLET) > 10, "the countdown in C's colour");
     a.c_active();
-    assert_eq!(a.hints()[1], ("OK", "Beacon now"));
+    // APRS-17.3 (decision 313): "OK Send" (from "Beacon now", which ran into "Hold MENU": 8 px between pairs)
+    assert_eq!(a.hints()[1], ("OK", "Send"));
+    let mut fb = FrameBuffer::new();
+    let w = ferrite_ui::widgets::hint_width(&mut fb, &a.hints());
+    assert!(w <= 224, "the hint bar's pairs with 8 px between them: {w}");
     a.press(Key::Menu, 100);
     assert!(matches!(a.app.screen(), Screen::Options(o) if o.row == crate::screens::opts::APRS_ROW_BEACON_NOW));
     a.press(Key::Exit, 100);
@@ -189,9 +205,9 @@ fn aprs_card_beacon() {
     assert!(!k.next.is_empty(), "beacons on beside APRS mode: next= still");
 }
 
-/// APRS-17.5: APRS mode with automatic beacons says both in the header, "APRS + Beacon", beside APRS-21's
-/// "VHF: APRS" (WATCH-17.3); APRS-17.6: \* (quick mute) on the APRS card shows "Muted ·" by the power in amber, and the header
-/// keeps its state for the shared note.
+/// APRS-17.5 (decision 313): APRS mode with automatic beacons is still "APRS Mode" in the header (the beacon row
+/// says the beacons are on); APRS-17.6: \* (quick mute) on the APRS card shows in the header's state as on every
+/// card ("Muted", amber), not by the power.
 #[test]
 fn aprs_card_beacon_and_mute() {
     let mut a = A::new();
@@ -199,17 +215,172 @@ fn aprs_card_beacon_and_mute() {
     a.app.set_aprs(AprsCfg { beacon: 5, ..a.app.aprs_cfg() }); // every 10 min
     a.tick();
     let l = a.card_line();
-    assert!(l.contains("head=\"APRS + Beacon \u{b7} VHF\""), "{l}");
+    assert!(l.contains("head=\"APRS Mode \u{b7} VHF\""), "{l}");
     a.c_active();
+    a.s.aprs_tick(10, true, true);
+    a.wait(1000);
     // APRS-15.1: APRS mode muted C as it came on
+    assert!(a.card_line().contains("state=\"Muted\""), "{}", a.card_line());
     let (y, _) = crate::screens::home::card(APRS_SLOT, a.app.active());
     let fb = a.fb();
-    assert!(count(&fb, 120, y + 80, 106, 19, AMBER) > 20, "Muted, by the power");
-    assert!(count(&fb, 34, y + 7, 120, 17, VIOLET) > 20, "the holder word still drawn");
+    assert!(count(&fb, 150, y + 7, 76, 17, AMBER) > 20, "Muted, in the header");
+    assert_eq!(count(&fb, 120, y + 103, 106, 17, AMBER), 0, "nothing amber by the power");
+    assert!(count(&fb, 34, y + 7, 60, 17, VIOLET) > 20, "the holder word still drawn");
     a.press(Key::Star, 100); // \* hears it
     a.wait(3500);
     let fb = a.fb();
-    assert_eq!(count(&fb, 120, y + 80, 106, 19, AMBER), 0, "unmuted");
+    assert_eq!(count(&fb, 150, y + 7, 76, 17, AMBER), 0, "unmuted");
+}
+
+/// The APRS card's slots: C active, A on 2 m and watched, so the two share the VHF chip (APRS-21).
+fn shared_c() -> A {
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.app.set_vfo(0, 14_652_000);
+    a.app.watch = 2; // A, B and C
+    a.tick();
+    a.c_active();
+    assert!(a.app.aprs_shared().is_some(), "A shares chip 0 with C");
+    a
+}
+
+fn aprs_line(a: &A) -> String {
+    let dev = Device::default();
+    let mut l = crate::term::cmd::Line::new();
+    (0..)
+        .map_while(|i| crate::uistate::line(&a.app, &a.s, &dev, &a.live, i, &mut l).then(|| String::from_utf8_lossy(l.as_bytes()).into_owned()))
+        .find(|l| l.starts_with("aprs_card"))
+        .expect("aprs_card line")
+}
+
+/// APRS-17.1, APRS-17.6, APRS-21, WATCH-17.3 (decision 313): the header's right is every card's state ("Muted"
+/// amber, the RX tag), with who wins the shared VHF chip beside it, "APRS first" grey or "A·B first" amber, and
+/// " · VHF" gone; where both don't fit ("RX muted") the state wins. The readback's `priority=`.
+#[test]
+fn aprs_card_header_priority() {
+    use ferrite_ui::gfx::SUB;
+    let mut a = shared_c();
+    let (y, _) = crate::screens::home::card(APRS_SLOT, a.app.active());
+    assert_eq!(a.app.aprs_priority(), Some(("APRS first", false)));
+    assert!(aprs_line(&a).contains("priority=\"APRS first\""), "{}", aprs_line(&a));
+    // muted (APRS-15.1): "APRS Mode", "APRS first" in grey, "Muted" in amber: all three fit
+    let fb = a.fb();
+    let muted_amber = ink(&fb, 186, y + 7, 40, 17, AMBER);
+    assert!(muted_amber > 20, "Muted");
+    assert!(ink(&fb, 100, y + 7, 85, 17, SUB) > 40 && count(&fb, 100, y + 7, 85, 17, AMBER) == 0, "APRS first beside it, grey");
+    // A·B first: amber
+    a.app.set.aprs_share = 1;
+    a.wait(200);
+    assert_eq!(a.app.aprs_priority(), Some(("A\u{b7}B first", true)));
+    assert!(aprs_line(&a).contains("priority=\"A\u{b7}B first\""));
+    let fb = a.fb();
+    assert!(count(&fb, 100, y + 7, 85, 17, AMBER) > 10, "A·B first in amber");
+    // RX muted: the state wins, the priority hides
+    a.live.slots[APRS_SLOT as usize].squelch_open = true;
+    a.wait(200);
+    assert!(a.card_line().contains("state=\"RX muted\""));
+    let fb = a.fb();
+    let rxm = ink(&fb, 100, y + 7, 126, 17, AMBER);
+    assert!(rxm > 20 && count(&fb, 100, y + 7, 60, 17, AMBER) == 0, "RX muted alone: {rxm}");
+    // unmuted, receiving: the RX tag in green with the priority beside it
+    a.live.slots[APRS_SLOT as usize].squelch_open = false;
+    a.app.set.aprs_share = 0;
+    a.press(Key::Star, 100);
+    a.live.slots[APRS_SLOT as usize].squelch_open = true;
+    a.wait(3500);
+    let fb = a.fb();
+    assert!(count(&fb, 190, y + 7, 36, 17, ferrite_ui::gfx::GREEN) > 20, "the RX tag");
+    assert!(ink(&fb, 100, y + 7, 90, 17, SUB) > 40, "APRS first beside the tag");
+    // C alone on its chip: no priority
+    a.app.set_vfo(0, 44_600_000);
+    a.wait(200);
+    assert!(a.app.aprs_priority().is_none() && !aprs_line(&a).contains("priority="));
+}
+
+/// APRS-17.2, APRS-17.2.2 – APRS-17.2.5 (decision 313; M3): the large card: "N heard · H /hr" right of the frequency,
+/// the two newest stations heard since power-on (call, age, distance and bearing or "via digi"), unread messages in
+/// the second row ("2 new from VE3KPW-9", C's colour) until read, our last beacon's fate, and without our own fix
+/// ages only and "no fix" in amber on the beacon row. The readback's `aprs_card` line.
+#[test]
+fn aprs_card_large_rows() {
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.tick();
+    a.c_active();
+    // 70 s of the simulated APRS task: four stations heard (VE3OTW-10 newest, with a position; VE3BTV without, via
+    // a digipeater) and a message for us
+    for s in 1..=70 {
+        a.s.aprs_tick(s, true, true);
+        a.wait(1000);
+    }
+    let k = a.app.aprs_card(&a.s).unwrap();
+    assert_eq!(k.counts.unwrap().0, 4);
+    assert_eq!(k.rows_n, 3);
+    assert_eq!(k.rows[0].call.as_bytes(), b"VE3OTW-10");
+    assert!(k.rows[0].right.as_bytes().ends_with(b"km N") || k.rows[0].right.as_bytes().contains(&b' '), "{:?}", core::str::from_utf8(k.rows[0].right.as_bytes()));
+    assert_eq!((k.rows[1].call.as_bytes(), k.rows[1].right.as_bytes()), (b"VE3BTV".as_slice(), b"via digi".as_slice()));
+    assert!(k.rows[0].age.as_bytes().ends_with(b" s"));
+    // the sample's unread message and the new one, both from VE3KPW-9
+    assert_eq!((k.unread, k.unread_from.as_bytes()), (2, b"VE3KPW-9".as_slice()));
+    // the sample's last beacon was repeated by VE3RSB-1
+    assert_eq!(k.fate.as_bytes(), b"Last beacon digi'd by VE3RSB-1");
+    assert!(!k.fate_warn && !k.nofix);
+    assert_eq!(k.bottom.as_bytes(), b"Beacon off");
+    let l = aprs_line(&a);
+    assert!(l.contains("r1=\"VE3OTW-10|") && l.contains("r2=\"VE3BTV|") && l.contains("|via digi\"") && l.contains("unread=2 from=\"VE3KPW-9\"") && l.contains("fate=\"Last beacon digi'd by VE3RSB-1\"") && l.contains("bottom=\"Beacon off\""), "{l}");
+    let (y, _) = crate::screens::home::card(APRS_SLOT, a.app.active());
+    let fb = a.fb();
+    assert!(count(&fb, 15, y + 69, 211, 17, VIOLET) > 40, "the unread row in C's colour");
+    assert!(count(&fb, 15, y + 52, 80, 17, ferrite_ui::gfx::TEXT) > 40, "the newest call, bold");
+    assert!(count(&fb, 130, y + 34, 96, 17, ferrite_ui::gfx::TEXT) > 30, "4 heard right of the frequency");
+    // read: the second station again
+    a.s.request(crate::data::Op::MessagesReadAll);
+    a.wait(200);
+    let fb = a.fb();
+    assert_eq!(count(&fb, 15, y + 69, 211, 17, VIOLET), 0, "read: no message row");
+    assert!(!aprs_line(&a).contains("unread="));
+    // APRS-17.2.5: no fix of our own: ages only, "no fix" in amber on the beacon row
+    a.s.fix.set(None);
+    a.wait(200);
+    let k = a.app.aprs_card(&a.s).unwrap();
+    assert!(k.nofix && k.fix_note && k.rows.iter().all(|r| r.right.is_empty()));
+    assert!(aprs_line(&a).contains(" nofix=1"));
+    let fb = a.fb();
+    assert!(ink(&fb, 140, y + 103, 60, 17, AMBER) > 20, "no fix by the power");
+    assert_eq!(ink(&fb, 152, y + 52, 74, 34, ferrite_ui::gfx::SUB), 0, "no distance column");
+}
+
+/// APRS-17.2.3: a beacon not heard back says so in amber after 30 s (just sent, its age); APRS-17.2.1: the beacon
+/// row counts down in whole minutes, then seconds.
+#[test]
+fn aprs_card_beacon_fate_and_countdown() {
+    let mut s = Buf::<16>::new();
+    crate::aprs_card::soon_text(272, &mut s);
+    assert_eq!(s.as_bytes(), b"5m");
+    s.clear();
+    crate::aprs_card::soon_text(60, &mut s);
+    assert_eq!(s.as_bytes(), b"1m");
+    s.clear();
+    crate::aprs_card::soon_text(42, &mut s);
+    assert_eq!(s.as_bytes(), b"42s");
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.app.set_aprs(AprsCfg { beacon: 5, ..a.app.aprs_cfg() }); // every 10 min
+    a.tick();
+    a.s.aprs_tick(1, true, true); // the first beacon goes at once; heard back 2 s on
+    let k = a.app.aprs_card(&a.s).unwrap();
+    assert!(k.bottom.as_bytes().starts_with(b"Beacon in ") && k.bottom.as_bytes().ends_with(b"m"), "{:?}", core::str::from_utf8(k.bottom.as_bytes()));
+    assert!(k.fate.as_bytes().starts_with(b"Last beacon ") && k.fate.as_bytes().ends_with(b" ago") && !k.fate_warn, "{:?}", core::str::from_utf8(k.fate.as_bytes()));
+    a.s.aprs_tick(3, true, true);
+    assert_eq!(a.app.aprs_card(&a.s).unwrap().fate.as_bytes(), b"Beacon digi'd by VE3OTW-10", "a long call drops Last");
+    // not heard back within 30 s: amber
+    let mut f = Buf::<40>::new();
+    let b = crate::data::SentBeacon { ago_s: 40, ..Default::default() };
+    assert!(crate::aprs_card::fate_text(&b, &mut f));
+    assert_eq!(f.as_bytes(), b"Last beacon not heard back");
+    let b = crate::data::SentBeacon { ago_s: 12, ..Default::default() };
+    assert!(!crate::aprs_card::fate_text(&b, &mut f));
+    assert_eq!(f.as_bytes(), b"Last beacon 12 s ago");
 }
 
 /// APRS-15.1: APRS mode on mutes C (decoded, not heard), off unmutes it; a radio powered up in APRS mode starts
@@ -314,12 +485,16 @@ fn aprs_card_counts_and_countdown() {
     let fb = a.fb();
     let want = if k.next_warn { AMBER } else { VIOLET };
     assert!(count(&fb, 140, y + 51, 86, 15, want) > 10, "the countdown drawn at the bottom right: {:?}", k.next.as_bytes());
-    // widths: the spot is 96 px; the bottom right leaves the last-heard line room
+    // widths: the spot is 96 px; beside "Beacon in 59m" the last-heard line keeps "VE7ABC-9 · 2 min" ("Last " goes)
     assert!(text4_width(b"50 heard", &UI_12B) <= 96);
-    assert!(text4_width(b"next 59:59", &UI_12) <= 72, "the countdown leaves the last-heard line ~130 px");
-    let both = text4_width("50 heard \u{b7} 50 /hr".as_bytes(), &UI_12B);
-    assert!(both <= 120, "{both}");
-    assert!(text4_width(b"Beacon off", &UI_12) <= 211 - both - 8);
+    let cd = text4_width(b"Beacon in 59m", &UI_12);
+    assert!(text4_width("VE7ABC-9 \u{b7} 2 min".as_bytes(), &UI_12) <= 211 - cd - 8);
+    // APRS-17.2: the large card's counts beside the frequency at the compact size: "12 heard · 9 /hr" fits, the
+    // widest "99 heard · 99 /hr" drops " /hr"
+    let f = text4_width(b"144.390", &ferrite_ui::assets::DIG_26);
+    let fits = |n: &str, h: &str| 15 + f + 8 + text4_width(n.as_bytes(), &UI_12B) + text4_width(h.as_bytes(), &UI_12) <= 226;
+    assert!(fits("12 heard", " \u{b7} 9 /hr") && fits("3 heard", " \u{b7} 11 /hr"));
+    assert!(!fits("99 heard", " \u{b7} 99 /hr") && fits("99 heard", ""));
 }
 
 /// HOME-18: an APRS key-up (a data key-up: no Transmit screen) shows on C's card as a red TX word and border,

@@ -75,6 +75,23 @@ impl Shot {
         }
         crate::save(&self.fb, name, self.scale);
     }
+
+    /// As [`Shot::save`] with C receiving (its squelch held open for the frame).
+    fn save_rx(&mut self, name: &str) {
+        self.run(40);
+        if self.app.toast_up() {
+            self.run(3100);
+        }
+        self.radio.live.slots[2].squelch_open = true;
+        for _ in 0..3 {
+            self.app.tick(self.t, &self.radio.live, &self.store);
+            self.app.render(&mut self.fb, &self.radio.live, &self.dev, &self.store);
+            self.t += 20;
+        }
+        crate::save(&self.fb, name, self.scale);
+        self.radio.live.slots[2].squelch_open = false;
+        self.run(40);
+    }
 }
 
 pub fn run(scale: u32) {
@@ -98,16 +115,35 @@ pub fn run(scale: u32) {
     s.app.knob(5, s.t, &s.store);
     s.press(Key::Exit, 800);
     s.run(62_000);
-    s.save("aprsmode-card");
-    s.keys(&[Key::Slot, Key::Slot]);
-    s.save("aprsmode-card-big");
-    // APRS-17.6: \* mutes C; the card says so by the power, the header keeps "VHF: APRS"
-    s.press(Key::Star, 80);
-    s.save("aprsmode-card-muted-big");
-    s.keys(&[Key::Slot]);
+    // APRS-17 (decision 313): the card in each header state, small and large. APRS mode muted C as it came on
+    // (APRS-15.1): "Muted" in the header like every card, "APRS first" beside it while A shares the VHF chip.
     s.save("aprsmode-card-muted");
-    s.keys(&[Key::Slot, Key::Slot]);
-    s.press(Key::Star, 80);
+    s.keys(&[Key::Slot, Key::Slot]); // C
+    s.save("aprsmode-card-muted-big");
+    s.save_rx("aprsmode-card-rxmuted-big"); // "RX muted": the state wins, the priority hides
+    s.press(Key::Star, 80); // \* hears it: idle shows nothing on the large card
+    s.save("aprsmode-card-big");
+    s.save_rx("aprsmode-card-rx-big");
+    // 0 5 9 7 A·B first: amber
+    s.app.settings_mut().aprs_share = 1;
+    s.run(200);
+    s.save("aprsmode-card-abfirst-big");
+    s.keys(&[Key::Slot]); // A
+    s.save("aprsmode-card-abfirst");
+    s.app.settings_mut().aprs_share = 0;
+    s.run(200);
+    s.save("aprsmode-card");
+    s.save_rx("aprsmode-card-rx");
+    s.keys(&[Key::Slot, Key::Slot]); // C
+    // APRS-17.2.4: the unread messages read: the second station again; APRS-17.2.5: no fix: ages only
+    s.store.request(Op::MessagesReadAll);
+    s.run(200);
+    s.save("aprsmode-card-read-big");
+    let fix = s.store.fix.replace(None);
+    s.run(1200);
+    s.save("aprsmode-card-nofix-big");
+    s.store.fix.set(fix);
+    s.run(1200);
     s.press(Key::Up, 80);
     s.run(200);
     crate::save(&s.fb, "aprsmode-locked", scale); // APRS-19's toast

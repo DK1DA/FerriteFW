@@ -705,6 +705,11 @@ fn command_line_set_and_get() {
     assert_eq!(r.app.set.fm_step, 2);
     r.cmd("set 0 1 1 off");
     assert_eq!(r.app.watch, 0);
+    // WATCH-17.3 (decision 313): "A·B first" typed with a full stop for its middle dot
+    r.cmd("set 0 5 9 7 A.B first");
+    assert_eq!(r.app.settings().aprs_share, 1, "{}", r.bottom());
+    r.cmd("set 0 5 9 7 APRS first");
+    assert_eq!(r.app.settings().aprs_share, 0, "{}", r.bottom());
     // Typed values: the pager capcode (DEC-4), the custom APRS path (APRS-26), Popups (DEC-7).
     r.cmd("set 0 4 2 3 1234567");
     assert_eq!(r.app.set.pocsag_cap, 1_234_567);

@@ -256,12 +256,14 @@ fn trim(s: &[u8]) -> &[u8] {
 
 /// Same letters, case and spaces aside ("night red" is "Night red", "12.5khz" is "12.5 kHz").
 fn same(a: &[u8], b: &[u8]) -> bool {
-    let mut x = a.iter().filter(|c| **c != b' ');
-    let mut y = b.iter().filter(|c| **c != b' ');
+    // spaces don't count, and a middle dot (UTF-8 C2 B7) reads as "." ("A·B first" is typed "A.B first")
+    let fold = |c: &u8| (*c != b' ' && *c != 0xC2).then_some(if *c == 0xB7 { b'.' } else { *c });
+    let mut x = a.iter().filter_map(fold);
+    let mut y = b.iter().filter_map(fold);
     loop {
         match (x.next(), y.next()) {
             (None, None) => return true,
-            (Some(p), Some(q)) if p.eq_ignore_ascii_case(q) => {}
+            (Some(p), Some(q)) if p.eq_ignore_ascii_case(&q) => {}
             _ => return false,
         }
     }

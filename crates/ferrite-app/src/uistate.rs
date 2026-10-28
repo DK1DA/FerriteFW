@@ -533,6 +533,7 @@ fn body<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
                 card(app, cx, s, d);
                 bcast_line(app, cx, s, d);
             }
+            aprs_card_line(app, cx, d);
             aprs_sq_line(app, cx, d);
         }
         Screen::Quick(qk) => {
@@ -1072,6 +1073,35 @@ fn slot_word(l: &mut Line, s: u8) {
 
 /// Home's card for slot `s`, as [`screens::home`] draws it (HOME-4): the header, the state, the frequency or
 /// the channel's name, the chips and the S-meter.
+/// APRS-17.4 (decision 313): the large APRS card's rows on their own line while C is the APRS slot: `aprs_card`
+/// with `priority=` (beside the state while C shares the VHF chip, APRS-21), `r1=` – `r3=` (the station rows as
+/// "call|age|distance"), `unread=` and `from=` (APRS-17.2.4), `fate=` (APRS-17.2.3), `bottom=` (the beacon row),
+/// `nofix=1` (APRS-17.2.5). The card line is near its room.
+fn aprs_card_line<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
+    let Some(k) = app.aprs_card(cx.store.data()) else { return };
+    let Some(l) = d.ln() else { return };
+    l.push(b"aprs_card");
+    if let Some((t, _)) = app.aprs_priority() {
+        kq(l, "priority", t.as_bytes());
+    }
+    for (i, r) in k.rows[..k.rows_n as usize].iter().enumerate() {
+        let mut b = Buf::<40>::new();
+        let _ = uwrite!(b, "{}|{}|{}", screens::lists::Txt(r.call.as_bytes()), screens::lists::Txt(r.age.as_bytes()), screens::lists::Txt(r.right.as_bytes()));
+        kq(l, ["r1", "r2", "r3"][i], b.as_bytes());
+    }
+    if k.unread > 0 {
+        kn(l, "unread", k.unread as u32);
+        kq(l, "from", k.unread_from.as_bytes());
+    }
+    if !k.fate.is_empty() {
+        kq(l, "fate", k.fate.as_bytes());
+    }
+    kq(l, "bottom", k.bottom.as_bytes());
+    if k.nofix {
+        kn(l, "nofix", 1);
+    }
+}
+
 /// SQL-19.4: `aprs_sq opens=N short=N spikes=N settle=N`, the APRS squelch's counts since power-on, on its own
 /// line (the card C line is near Live View's room), while C is the APRS slot.
 fn aprs_sq_line<S: ChannelStore>(app: &App, cx: &Cx<S>, d: &mut Desc) {
@@ -1153,7 +1183,7 @@ fn card<S: ChannelStore>(app: &App, cx: &Cx<S>, s: u8, d: &mut Desc) {
                 crate::aprs::Holder::Mode => kn(l, "turn", 0), // APRS-17.2.1: the small card no longer flips
             }
             if app.aprs_shared().is_some() {
-                // "VHF: APRS" (1, APRS first) or "VHF: voice" (2, Voice first) in the header (APRS-17, WATCH-17.3)
+                // 1 APRS first, 2 A·B first (APRS-21, WATCH-17.3; the header says which, `aprs_card priority=`)
                 kn(l, "shared", 1 + (app.settings().aprs_share != 0) as u32);
             }
         }
