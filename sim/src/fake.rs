@@ -717,7 +717,7 @@ const XB_PAST: [i8; XB_COLS] = [
     14, 20, 0, 0, 0, 0, 18, 22, 25, 24, 20, 16, 0, 0, 0, -12, -22, -16, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0,
 ];
 
-/// GPS fix with 9 satellites, 7.9 V; the clock from the PC's UTC time.
+/// GPS fix with 9 satellites, 7.7 V (what the radio reads, Alex Oct 27), the MCU at 24 C; the clock from the PC's UTC time.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn device() -> Device {
     device_at(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()))
@@ -732,11 +732,11 @@ pub fn device_at(secs: u64) -> Device {
         sats: 9,
         gps_phase: ferrite_core::gpspower::GpsPhase::Off,
         bt: false,
-        battery_mv: 7900,
+        battery_mv: 7700,
         battery_pct: 82,
         battery_low: false,
         battery_cutoff: false,
-        mcu_temp: Some(31),
+        mcu_temp: Some(24),
         // SBAR-23, SELF-9.1, SELF-9.2: sample numbers, as the radio's (the simulator has no stack to paint or idle to count)
         stack_free: 52_000,
         ram_statics: 30_272,

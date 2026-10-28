@@ -22,10 +22,12 @@ Blocks separated by `---` lines; the format is described at the top of `preview.
 - `layout`: `center` (captions both sides), `right` or `left` (all captions on that side).
 - `hold`: seconds the last frame stays before the fade (default 1.5).
 - `setup`: a script played before recording; `script`: the recorded one (indented lines).
-- `packet:`: what the radio sends but doesn't show (a beacon, in TNC2 text), drawn as a card under the captions from
-  `packet_at:` seconds into the block; `packet_mark:` is the part shown in violet, `packet_note:` the small label.
-  Copy it from the firmware's own output (a throwaway test calling the beacon builder with the sim's values), never
-  type it freehand.
+- `packet:`: what the radio sends but doesn't show (a beacon), as a card under the captions from `packet_at:` seconds
+  into the block: the sender, "position" and `packet_comment:` (the comment as a map or radio shows it), with the
+  `packet_mark:` part in violet, then the raw TNC2 line small and dim; `packet_note:` is the label. Copy both from
+  the firmware's own output (a throwaway test calling the beacon builder with the sim's values), never type them.
+- `key_gap:` (ms): a pause between key presses, so each keycap and the screen it leads to can be seen; `menu` and
+  `type` steps are played key by key. Set in any block it is the story's; a block can set its own.
 - `kind: intro` / `kind: outro`: title cards, `seconds` long.
 - `music`: an audio file, looped and faded to the video's length.
 

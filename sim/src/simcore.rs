@@ -993,7 +993,7 @@ impl SimCore {
                 self.battery = (self.battery + 1) % 3;
                 let d = &mut self.dev;
                 (d.battery_low, d.battery_cutoff, d.battery_pct, d.battery_mv) =
-                    [(false, false, 82, 7900), (true, false, 15, 7000), (true, true, 3, 6600)][self.battery];
+                    [(false, false, 82, 7700), (true, false, 15, 7000), (true, true, 3, 6600)][self.battery];
             }
             Event::PowerSwitch => self.power_switch(),
             Event::EmptyBattery if live => app.battery_empty(),

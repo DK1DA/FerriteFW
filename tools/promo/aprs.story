@@ -8,6 +8,7 @@ title: APRS on Ferrite
 left: Position, messages and a decoder that holds its own, on the radio itself.
 seconds: 4
 music: music/chiptune3.wav
+key_gap: 350
 ---
 title: APRS on slot C
 layout: right
@@ -70,18 +71,21 @@ script:
   wait 3500ms
 hold: 2.5
 # The packet as the firmware builds it for the sample radio (VA7FER, SSID 7, the default path and Person symbol,
-# the sample's 3D fix at 74 m, 7.9 V and 31 C from the simulator, Low = 0.5 W, comment "On the road"): printed by a
-# throwaway test calling aprs_live.rs's beacon (tick, position_info) with these inputs. Rebuild it the same way
-# when the format changes; never type it freehand.
-packet: VA7FER-7>APZFER,WIDE1-1,WIDE2-1:=4525.29N/07541.83W[/A=000242On the road 7.9V 31C 0.5W
-packet_mark: 7.9V 31C 0.5W
-packet_note: SENT ON AIR: THE BEACON'S PACKET (THE RADIO DOESN'T SHOW IT)
-packet_at: 6.4
+# the sample's 3D fix at 74 m, 7.7 V and 24 C from the simulator, Low = 0.5 W, comment "On the road"): printed by a
+# throwaway test calling aprs_live.rs's beacon (tick) with these inputs, and the comment as uaprs's parser reads it
+# back. Rebuild both the same way when the format changes; never type them freehand.
+packet: VA7FER-7>APZFER,WIDE1-1,WIDE2-1:=4525.29N/07541.83W[/A=000242On the road 7.7V 24C 0.5W
+packet_comment: On the road 7.7V 24C 0.5W
+packet_mark: 7.7V 24C 0.5W
+packet_note: THE BEACON, AS A MAP OR ANOTHER RADIO SHOWS IT
+packet_at: 8.6
 ---
 title: Messages
 layout: left
 left: OK 1 on the APRS card: your messages and where each stands, new, pending, acked, retrying or failed.
 right: # writes one. Predictive text, quick messages and punctuation on 1: Hello, see you!
+# Typing reads better quicker than menu steps.
+key_gap: 150
 setup: home
 script:
   wait 600ms

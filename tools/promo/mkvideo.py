@@ -186,41 +186,57 @@ def chip_png(tokens, out):
 
 
 def packet_png(b, out, width):
-    """A packet card (`packet:`): what the radio sends, which it doesn't show, drawn as TNC2 text in the radio's
-    colours: a small label (`packet_note:`), the addresses on one line, the information field under it with the
-    `packet_mark:` part in C's violet. Built from the firmware's own output (its tests), never typed freehand."""
+    """A packet card (`packet:`): what the radio sends, which it doesn't show, as a map or a receiving radio shows it:
+    the sender, "position" and the comment (`packet_comment:`, as a parser reads it) with the `packet_mark:` part
+    in C's violet; under it, small and dim, the raw TNC2 line. Copied from the firmware's own output, never typed."""
     from PIL import Image, ImageDraw, ImageFont
-    pkt, mark = b["packet"], b.get("packet_mark", "")
-    head, _, info = pkt.partition(":")
-    pad, size = 26, 26
-    f = ImageFont.truetype(str(ROOT / "fonts" / "JetBrainsMono-Regular.ttf"), size)
-    per = int((width - 2 * pad) // f.getlength("0"))
-    # The addresses on the first line, the information field under them, wrapped at a space where it must
-    # (monospace, so the marked part is a range of characters).
-    lines, rest, at = [], info, 0
-    while rest:
-        cut = len(rest) if len(rest) <= per else (rest.rfind(" ", 0, per + 1) + 1 or per)
-        lines.append((at, rest[:cut]))
-        at, rest = at + cut, rest[cut:]
-    m0 = info.find(mark) if mark else -1
-    m1 = m0 + len(mark)
-    small = ImageFont.truetype(str(ROOT / "fonts" / "JetBrainsMono-Bold.ttf"), 20)
-    lh = int(size * 1.5)
-    h = pad + 32 + (1 + len(lines)) * lh + pad - 8
+    pkt, mark, text = b["packet"], b.get("packet_mark", ""), b.get("packet_comment", "")
+    font = lambda w, n: ImageFont.truetype(str(ROOT / "fonts" / f"JetBrainsMono-{w}.ttf"), n)
+    label, big, bold, raw = font("Bold", 20), font("Regular", 34), font("Bold", 34), font("Regular", 15)
+    pad = 28
+    while raw.size > 11 and raw.getlength("raw: " + pkt) > width - 2 * pad:
+        raw = font("Regular", raw.size - 1)
+    h = pad + 30 + 2 * 50 + 34 + pad - 10
     im = Image.new("RGBA", (width, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     d.rounded_rectangle((0, 0, width - 1, h - 1), 16, fill=(11, 13, 16, 245), outline=(45, 52, 62, 255), width=2)
-    d.text((pad, pad - 4), b.get("packet_note", "SENT ON AIR"), font=small, fill=(110, 118, 128, 255))
-    y = pad + 32
-    d.text((pad, y), head + ":", font=f, fill=(150, 158, 168, 255))
-    cw = f.getlength("0")
-    for start, t in lines:
-        y += lh
-        for k, ch in enumerate(t):
-            on = m0 >= 0 and m0 <= start + k < m1
-            d.text((pad + k * cw, y), ch, font=f, fill=(167, 139, 250, 255) if on else (230, 232, 235, 255))
+    d.text((pad, pad - 4), b.get("packet_note", "SENT ON AIR"), font=label, fill=(110, 118, 128, 255))
+    y = pad + 34
+    call = pkt.split(">", 1)[0]
+    d.text((pad, y), call, font=bold, fill=(236, 238, 240, 255))
+    d.text((pad + bold.getlength(call), y), " \u00b7 position", font=big, fill=(150, 158, 168, 255))
+    y += 50
+    m0 = text.find(mark) if mark else -1
+    parts = [(text, None)] if m0 < 0 else [(text[:m0], None), (mark, 1), (text[m0 + len(mark):], None)]
+    x = pad
+    for t, on in parts:
+        d.text((x, y), t, font=big, fill=(167, 139, 250, 255) if on else (230, 232, 235, 255))
+        x += big.getlength(t)
+    y += 58
+    d.text((pad, y), "raw: " + pkt, font=raw, fill=(85, 92, 102, 255))
     im.save(out)
     return width, h
+
+
+def paced(script, gap):
+    """A script with `gap` ms between key presses (`key_gap:`), so each keycap and the screen it leads to can be
+    seen: `menu 0 5 6` and `type 123` become their presses, and a wait goes between two presses in a row. Under
+    0.8 s apart the presses still share one keycap chip."""
+    steps = []
+    for line in script.splitlines():
+        cmd, _, arg = line.strip().partition(" ")
+        if cmd == "menu":
+            steps += [("home", False), ("press OK", True)] + [(f"press {d}", True) for d in arg.split()]
+        elif cmd == "type":
+            steps += [(f"press {c}", True) for c in arg.strip()]
+        elif line.strip():
+            steps.append((line.strip(), cmd in ("press", "hold", "knob")))
+    out = []
+    for k, (st, key) in enumerate(steps):
+        out.append(st)
+        if key and k + 1 < len(steps) and steps[k + 1][1]:
+            out.append(f"wait {gap}ms")
+    return "\n".join(out) + "\n"
 
 
 def ffmpeg(*args):
@@ -240,6 +256,9 @@ def main():
     shows = [i for i, b in enumerate(blocks) if b.get("kind") not in ("intro", "outro")]
     picked = [a.only] if a.only is not None else list(range(len(blocks)))
 
+    # `key_gap:` (ms; any block sets the story's, a block can set its own): a pause between key presses.
+    story_gap = next((b["key_gap"] for b in blocks if b.get("key_gap")), "")
+
     # The recorder: one radio, every picked radio block's setup and script in turn.
     rec = [i for i in picked if i in shows]
     if rec:
@@ -248,7 +267,9 @@ def main():
         for i in rec:
             for part in ("setup", "script"):
                 f = WORK / f"{i:02}.{part}"
-                f.write_text(blocks[i].get(part, "").replace(";", "\n"))
+                text = blocks[i].get(part, "").replace(";", "\n")
+                gap = blocks[i].get("key_gap", story_gap)
+                f.write_text(paced(text, int(gap)) if part == "script" and gap else text)
                 args.append(str(f))
         subprocess.run([str(ROOT / "target" / "release" / "ferrite-sim-record"), *args], cwd=ROOT, check=True)
 
