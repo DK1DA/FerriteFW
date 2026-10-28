@@ -523,9 +523,9 @@ fn mic_e_custom_messages_and_bad_fields() {
     assert!(parse(b"S32UVT", info).is_ok());
     // Custom message bits (A-K in the first three characters); K is a custom 1 that also blanks its digit.
     let Ok(Packet::Position { mic_e, .. }) = parse(b"C32UVT", info) else { panic!() };
-    assert_eq!(mic_e, Some(MicEStatus { bits: 0b100, custom: true }));
+    assert_eq!(mic_e, Some(MicEStatus { bits: 0b100, custom: true, device: None }));
     let Ok(Packet::Position { pos, mic_e, .. }) = parse(b"A2KLLL", info) else { panic!() };
-    assert_eq!(mic_e, Some(MicEStatus { bits: 0b101, custom: true }));
+    assert_eq!(mic_e, Some(MicEStatus { bits: 0b101, custom: true, device: None }));
     assert_eq!((pos.ambiguity, pos.lat), (4, -2_500_000), "2 30 S, to the degree");
     for (dest, info, err) in [
         (&b"S32UVT"[..], &b"`(_fn\"O"[..], Error::Short),    // information field too short

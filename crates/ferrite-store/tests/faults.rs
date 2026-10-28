@@ -100,6 +100,7 @@ fn station(call: &[u8]) -> Station {
         course: None,
         alt_m: None,
         times: 1,
+        device: None,
         comment: Buf::from(b"QRV"),
         msg: Buf::new(),
         msg_min: None,

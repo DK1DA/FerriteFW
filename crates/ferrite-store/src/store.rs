@@ -1738,7 +1738,7 @@ mod tests {
         comment[..7].copy_from_slice(b"On foot");
         let mut custom = [0u8; ferrite_app::aprs::CUSTOM_LEN];
         custom[..7].copy_from_slice(b"WIDE2-2");
-        AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5 }
+        AprsCfg { f5k: 28_878, beacon: 3, power: 1, path: ferrite_app::aprs::PATH_CUSTOM, digi: 0x23, after_voice: true, custom, ssid: 9, fx25: 32, sound: 3, symbol: 4, txdelay: 45, tx_level: 2, comment, ambiguity: 3, mic_e: 5, telemetry: true }
     }
 
     /// The APRS record's payload as it is stored for `cfg`.
