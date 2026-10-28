@@ -429,6 +429,41 @@ fn first_boot_after_setup_seeds_the_regions_presets() {
     assert_eq!(e[0].end, 14_600_000);
 }
 
+/// Writes past the last channel number fail; a zone deleted through the channel queue (CHAN-12) leaves its
+/// channels in no zone; an existing zone written again is renamed in place; 254 zones and 16 presets at most. The
+/// Storage task checks again what the screens checked: a renumber onto a channel stored meanwhile, or an edit of
+/// one deleted meanwhile, is refused and changes nothing.
+#[test]
+fn out_of_range_full_and_stale_requests() {
+    use ferrite_store::block;
+    use ferrite_store::store::Job;
+    let s = mount(SimFlash::new());
+    let c = |n: u16| channel(n, NO_ZONE, 14_652_000, "Ch", DEFAULT_CFG);
+    assert!(!s.apply(ChanWrite::Put { ch: c(MAX_CHANNELS), from: None }));
+    assert!(!s.apply(ChanWrite::PutPos { ch: c(MAX_CHANNELS), pos: None }));
+    assert!(!s.apply(ChanWrite::Delete(MAX_CHANNELS)));
+    assert!(s.add_zone(b"Local", &ZoneCfg::default()) && s.add_zone(b"Events", &ZoneCfg::default()));
+    assert!(s.apply(ChanWrite::Put { ch: channel(1, 0, 14_652_000, "One", DEFAULT_CFG), from: None }));
+    assert!(s.apply(ChanWrite::Put { ch: c(2), from: None }));
+    assert!(s.apply(ChanWrite::DeleteZone(0)));
+    assert_eq!((s.zones(), s.zone_of(1)), (2, Some(NO_ZONE)), "an earlier zone stays, empty; its channel in no zone");
+    assert!(s.request(Op::PutZone(1, Buf::from(b"Renamed"), ZoneCfg::default())));
+    assert_eq!((s.zones(), s.zone_name(1).unwrap().as_bytes()), (2, &b"Renamed"[..]));
+    while s.zones() < 254 {
+        assert!(s.add_zone(b"Z", &ZoneCfg::default()));
+    }
+    assert!(!s.add_zone(b"Z", &ZoneCfg::default()) && !s.request(Op::NewZone));
+    while s.presets() < 16 {
+        assert!(s.request(Op::NewPreset));
+    }
+    let p = RangePreset { name: Buf::from(b"P"), start: 14_400_000, end: 14_800_000, step: 10, mode: 0, narrow: true, skips: 0, resume: 0 };
+    assert!(!s.add_preset(&p) && !s.request(Op::NewPreset));
+    let before = (s.get(1), s.get(2));
+    assert!(!block(s.run(Job::Op(Op::Renumber(1, 2)))), "2 was stored meanwhile");
+    assert!(!block(s.run(Job::Op(Op::Skip(7, true)))), "7 is gone");
+    assert!((s.get(1), s.get(2)) == before);
+}
+
 /// CHAN-25: Recent lists the channels used, newest first, in RAM. The lookups the screens use: the next free
 /// number from a given one (wrapping past 999), a number's zone, a channel with its position.
 #[test]
