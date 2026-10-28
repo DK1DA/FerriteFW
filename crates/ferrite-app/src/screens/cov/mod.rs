@@ -13,6 +13,7 @@ use std::vec::Vec;
 
 mod home;
 mod msgs;
+mod scan;
 mod setup;
 mod transmit;
 
