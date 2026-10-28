@@ -71,10 +71,13 @@ def card(b, n, total, out):
                     f'<div class="col" style="left:{x + SW + PAD + 80}px;width:{1920 - x - SW - PAD - 190}px">{paras(b.get("right", ""))}</div>')
         elif lay == "right":
             l = x + SW + PAD + 120
-            cols = f'<div class="col" style="left:{l}px;width:{1920 - l - 160}px">{title}{paras(b.get("left", ""))}{paras(b.get("right", ""))}</div>'
+            # A packet card (`packet:`) takes the column's bottom: the captions centre above it.
+            low = f"bottom:{1080 - (y + SH - 240)}px;" if b.get("packet") else ""
+            cols = f'<div class="col" style="{low}left:{l}px;width:{1920 - l - 160}px">{title}{paras(b.get("left", ""))}{paras(b.get("right", ""))}</div>'
         else:
             w = x - PAD - 120 - 160
-            cols = f'<div class="col al" style="left:160px;width:{w}px">{title}{paras(b.get("left", ""))}{paras(b.get("right", ""))}</div>'
+            low = f"bottom:{1080 - (y + SH - 240)}px;" if b.get("packet") else ""
+            cols = f'<div class="col al" style="{low}left:160px;width:{w}px">{title}{paras(b.get("left", ""))}{paras(b.get("right", ""))}</div>'
         body = bezel + cols + '<div class="n">RT-950 PRO · SIMULATOR, THE FIRMWARE\'S OWN SCREENS</div>'
     page = (HERE / "card.html").read_text().replace("{{FONTS}}", "file://" + str(ROOT / "fonts")).replace("{{BODY}}", body)
     src = out.with_suffix(".html")
@@ -182,6 +185,44 @@ def chip_png(tokens, out):
     return w, h
 
 
+def packet_png(b, out, width):
+    """A packet card (`packet:`): what the radio sends, which it doesn't show, drawn as TNC2 text in the radio's
+    colours: a small label (`packet_note:`), the addresses on one line, the information field under it with the
+    `packet_mark:` part in C's violet. Built from the firmware's own output (its tests), never typed freehand."""
+    from PIL import Image, ImageDraw, ImageFont
+    pkt, mark = b["packet"], b.get("packet_mark", "")
+    head, _, info = pkt.partition(":")
+    pad, size = 26, 26
+    f = ImageFont.truetype(str(ROOT / "fonts" / "JetBrainsMono-Regular.ttf"), size)
+    per = int((width - 2 * pad) // f.getlength("0"))
+    # The addresses on the first line, the information field under them, wrapped at a space where it must
+    # (monospace, so the marked part is a range of characters).
+    lines, rest, at = [], info, 0
+    while rest:
+        cut = len(rest) if len(rest) <= per else (rest.rfind(" ", 0, per + 1) + 1 or per)
+        lines.append((at, rest[:cut]))
+        at, rest = at + cut, rest[cut:]
+    m0 = info.find(mark) if mark else -1
+    m1 = m0 + len(mark)
+    small = ImageFont.truetype(str(ROOT / "fonts" / "JetBrainsMono-Bold.ttf"), 20)
+    lh = int(size * 1.5)
+    h = pad + 32 + (1 + len(lines)) * lh + pad - 8
+    im = Image.new("RGBA", (width, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, width - 1, h - 1), 16, fill=(11, 13, 16, 245), outline=(45, 52, 62, 255), width=2)
+    d.text((pad, pad - 4), b.get("packet_note", "SENT ON AIR"), font=small, fill=(110, 118, 128, 255))
+    y = pad + 32
+    d.text((pad, y), head + ":", font=f, fill=(150, 158, 168, 255))
+    cw = f.getlength("0")
+    for start, t in lines:
+        y += lh
+        for k, ch in enumerate(t):
+            on = m0 >= 0 and m0 <= start + k < m1
+            d.text((pad + k * cw, y), ch, font=f, fill=(167, 139, 250, 255) if on else (230, 232, 235, 255))
+    im.save(out)
+    return width, h
+
+
 def ffmpeg(*args):
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True)
 
@@ -232,7 +273,16 @@ def main():
                 inputs += ["-loop", "1", "-framerate", str(FPS), "-i", str(cp)]
                 cx = x + SW // 2 - cw // 2
                 chain += f";[v{c}][{c + 2}]overlay={cx}:{y + SH + PAD + 26}:shortest=1:enable='between(t,{t0:.2f},{t1:.2f})'[v{c + 1}]"
-            chain += f";[v{len(chips)}]fade=t=in:st=0:d={FADE},fade=t=out:st={secs - FADE:.2f}:d={FADE},format=yuv420p"
+            # A packet card (`packet:`) in the captions' column from `packet_at:` seconds on.
+            last = f"v{len(chips)}"
+            if b.get("packet"):
+                pp = WORK / f"packet{i:02}.png"
+                col = x + SW + PAD + 120 if b.get("layout") == "right" else 160
+                pw, ph = packet_png(b, pp, 1920 - col - 100 if b.get("layout") == "right" else x - PAD - 280)
+                inputs += ["-loop", "1", "-framerate", str(FPS), "-i", str(pp)]
+                chain += f";[{last}][{len(chips) + 2}]overlay={col}:{y + SH - ph}:shortest=1:enable='gte(t,{float(b.get('packet_at', 0)):.2f})'[vp]"
+                last = "vp"
+            chain += f";[{last}]fade=t=in:st=0:d={FADE},fade=t=out:st={secs - FADE:.2f}:d={FADE},format=yuv420p"
             ffmpeg("-loop", "1", "-framerate", str(FPS), "-i", str(png),
                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "240x320", "-framerate", str(FPS), "-i", str(raw),
                    *inputs, "-filter_complex", chain,

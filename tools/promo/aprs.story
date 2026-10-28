@@ -12,7 +12,7 @@ music: music/chiptune3.wav
 title: APRS on slot C
 layout: right
 left: MENU 0 5 3 puts APRS mode on slot C.
-right: A and B stay yours: listen, scan and talk as usual while C watches the APRS frequency.
+right: A and B stay yours: listen, scan and talk as usual while C watches the APRS frequency, on its small card.
 setup: home
 script:
   wait 1000ms
@@ -21,120 +21,110 @@ script:
   knob 1
   wait 900ms
   home
-  wait 3000ms
+  wait 2500ms
 ---
-title: Who's around
+title: The APRS card
 layout: left
-left: OK on the APRS card opens the heard list: callsign, distance, bearing and how they were heard.
-right: Open a station, hold MENU, and save its position as a waypoint.
-setup: wait 300ms
+left: SLOT to C and the card grows: stations heard, and in the last hour; the newest two with their age, distance and bearing.
+right: Unread messages take the second row. The header says Muted while packets are decoded, not heard, and who gets the VHF chip first.
+setup: wait 20s
 script:
   wait 800ms
   press SLOT
   wait 300ms
   press SLOT
-  wait 900ms
-  press OK
-  wait 700ms
-  press OK
-  wait 2200ms
-  press OK
-  wait 2200ms
-  hold OK
-  wait 1500ms
-  press DOWN
-  wait 400ms
-  press DOWN
-  wait 700ms
-  press OK
-  wait 2500ms
-  home
-  wait 600ms
+  wait 7000ms
+hold: 2
 ---
-title: Beacons
+title: Beacons, and who heard them
 layout: right
-left: Beacon now from the APRS list (OK 4 OK on the APRS card), or automatically.
-right: Timed, by distance or smart beaconing (0 5 6 1). || Beacons go out at their own power, Low by default.
-setup: home
+left: Every 5 minutes (0 5 6 1): the first goes at once, and the card counts down to the next. Beacon now is OK 4 OK.
+right: The card names the digipeater that repeated your last beacon; the Sent page (OK 3) lists your last 20 and who repeated each.
+setup: wait 300ms
 script:
-  wait 800ms
-  hold OK
-  wait 1200ms
-  press 4
-  wait 900ms
-  press OK
-  wait 2500ms
+  wait 600ms
   menu 0 5 6 1
+  wait 700ms
+  knob 4
+  wait 900ms
+  home
+  wait 3500ms
+  press OK
+  wait 300ms
+  press 3
+  wait 2500ms
+hold: 2
+---
+title: Telemetry in the comment
+layout: right
+left: 0 5 6 4 adds the battery, the radio's temperature and the beacon power in watts to the end of your comment.
+right: One ordinary position report that every map and radio shows as it is: no extra packets.
+setup: menu 0 5 5 3; type 66; press HASH; type 843; press HASH; type 7623; press OK; home
+script:
+  wait 600ms
+  menu 0 5 5
   wait 1200ms
+  menu 0 5 6 4
+  wait 600ms
   knob 1
-  wait 700ms
-  knob 1
-  wait 700ms
-  knob 1
-  wait 1500ms
+  wait 3500ms
+hold: 2.5
+# The packet as the firmware builds it for the sample radio (VA7FER, SSID 7, the default path and Person symbol,
+# the sample's 3D fix at 74 m, 7.9 V and 31 C from the simulator, Low = 0.5 W, comment "On the road"): printed by a
+# throwaway test calling aprs_live.rs's beacon (tick, position_info) with these inputs. Rebuild it the same way
+# when the format changes; never type it freehand.
+packet: VA7FER-7>APZFER,WIDE1-1,WIDE2-1:=4525.29N/07541.83W[/A=000242On the road 7.9V 31C 0.5W
+packet_mark: 7.9V 31C 0.5W
+packet_note: SENT ON AIR: THE BEACON'S PACKET (THE RADIO DOESN'T SHOW IT)
+packet_at: 6.4
 ---
 title: Messages
 layout: left
-left: An inbox, retries and acks, and an address book: saved contacts, recent and heard stations.
-right: Quick messages and predictive text on the keypad.
+left: OK 1 on the APRS card: your messages and where each stands, new, pending, acked, retrying or failed.
+right: # writes one. Predictive text, quick messages and punctuation on 1: Hello, see you!
 setup: home
 script:
-  wait 800ms
-  menu 0 5 2
-  wait 1500ms
+  wait 600ms
+  press OK
+  wait 300ms
+  press 1
+  wait 1800ms
   press HASH
-  wait 1500ms
-  knob 1
-  wait 600ms
-  knob 1
   wait 900ms
   press OK
-  wait 1500ms
-  knob 1
-  wait 600ms
-  knob 1
-  wait 1500ms
-  press OK
-  wait 2500ms
----
-title: FX.25
-layout: right
-left: Forward error correction around each AX.25 frame, sent and received (0 5 9 5).
-right: Plain AX.25 receivers still decode it; FX.25 receivers repair damaged bytes. || 16 check bytes by default.
-setup: home
-script:
-  wait 800ms
-  menu 0 5 9 5
-  wait 1500ms
-  knob 1
+  wait 700ms
+  type 43556
+  wait 300ms
+  press 1
+  press 1
+  wait 500ms
+  press HASH
+  type 733
+  press HASH
+  type 968
+  wait 300ms
+  press 1
+  press 1
+  press 1
+  press 1
   wait 900ms
-  knob -1
-  wait 2500ms
+  press PTT
+  wait 2200ms
+hold: 2
 ---
 title: And more
-layout: left
-left: A digipeater, and a KISS TNC over Bluetooth or the cable for phone and PC apps.
+layout: right
+left: Mic-E beacons with a status (0 5 5 7), FX.25 error correction (0 5 9 5), a digipeater, and a KISS TNC over Bluetooth or the cable.
 right: It answers station queries, and sends a beacon after you talk if you want one.
 setup: home
 script:
-  wait 800ms
-  menu 0 5
-  wait 1200ms
-  press DOWN
-  wait 1000ms
-  press DOWN
-  wait 1000ms
-  press DOWN
-  wait 1000ms
-  press DOWN
-  wait 1000ms
-  press DOWN
-  wait 1000ms
-  press DOWN
-  wait 1000ms
-  press DOWN
-  wait 1000ms
+  wait 600ms
+  menu 0 5 5 7
+  wait 700ms
+  knob 2
   wait 1500ms
+  menu 0 5 9
+  wait 2500ms
 ---
 kind: intro
 title: 411 packets, off the air
