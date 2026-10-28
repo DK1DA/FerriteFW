@@ -485,4 +485,41 @@ mod tests {
             assert_eq!(local_to_utc(t, east as u8), t - 3600, "UTC+1: local is an hour ahead");
         }
     }
+
+    /// GPS-18: the satellites page's list, from the GPS task's sky: used and BeiDou marks, azimuth in degrees;
+    /// none while the module is off; a new sky is a change the screens see, the same one again isn't.
+    #[test]
+    fn satellites() {
+        use ferrite_core::msg::{GpsSky, SkySat};
+        let g = GpsData::default();
+        let mut sky = GpsSky { n: 2, sat: [SkySat::default(); 16] };
+        sky.sat[0] = SkySat { prn: 5, snr: 40, elev: 60, azim_2: 90, flags: 1 };
+        sky.sat[1] = SkySat { prn: 21, snr: 0, elev: 10, azim_2: 170, flags: 2 };
+        let v = g.version();
+        g.set_sky(sky);
+        assert_eq!(g.version(), v + 1);
+        g.set_sky(sky);
+        assert_eq!(g.version(), v + 1, "the same sky: no change");
+        assert_eq!(g.sats(), 0, "the module off: none");
+        assert!(g.sat(0).is_none());
+        g.set_fix(GpsFix { on: true, ..GpsFix::default() });
+        assert_eq!(g.sats(), 2);
+        let s = g.sat(0).unwrap();
+        assert_eq!((s.prn, s.snr, s.used, s.beidou, s.elev, s.azim), (5, 40, true, false, 60, 180));
+        let s = g.sat(1).unwrap();
+        assert_eq!((s.used, s.beidou, s.azim), (false, true, 340));
+        assert!(g.sat(2).is_none());
+        assert!(g.raw().on);
+    }
+
+    /// GPS-12, GPS-28: the arrival alarm keeps the module awake only while it watches a waypoint with a radius.
+    #[test]
+    fn arrival_armed() {
+        let mut a = Arrival::default();
+        assert!(!a.armed(100));
+        a.target(Some((3, Pos { lat: 0, lon: 0 })));
+        assert!(a.armed(100));
+        assert!(!a.armed(0), "the alarm off");
+        assert_eq!(a.check(Pos { lat: 0, lon: 0 }, 0), None, "no radius: never fires");
+    }
 }

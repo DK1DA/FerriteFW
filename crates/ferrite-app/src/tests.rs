@@ -1043,6 +1043,8 @@ mod store;
 mod app_api;
 /// Remote keys and PTT at their edges.
 mod remote_edges;
+/// The APRS card's text lines.
+mod aprs_text;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]
