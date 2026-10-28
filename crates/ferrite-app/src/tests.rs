@@ -1033,6 +1033,10 @@ mod tonehint;
 mod mute;
 /// The quick menu on hold \* (HOME-17).
 mod qmenu;
+/// The UI readback (LINK-19).
+mod uistate;
+/// The simulators' store.
+mod sample;
 
 /// Group D's screens: setup, PIN, key test, link, FM broadcast, HF mode, alert, the menu's groups.
 #[path = "tests_d.rs"]
