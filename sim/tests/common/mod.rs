@@ -49,6 +49,7 @@ impl Radio {
         sim.set_clock(1_791_400_000); // a fixed clock: Oct 8, 2026, 19:06 UTC
         sim.log_cmds(true);
         let mut r = Radio { sim, t: 0, rec: None };
+        #[cfg(test)] // the tests, not the video recorder (tools/promo), which builds this file without clipcheck
         ferrite_ui::clipcheck::start(); // text cut off fails the test (Drop below)
         r.wait(3000);
         r
@@ -59,6 +60,7 @@ impl Radio {
         let end = self.t + ms;
         while self.t < end {
             self.t += FRAME;
+            #[cfg(test)]
             ferrite_ui::clipcheck::context(self.sim.screen_name());
             self.sim.step(self.t);
             if let Some(rec) = &mut self.rec {
@@ -228,6 +230,7 @@ impl Radio {
 
 /// No text the radio drew was cut off without a [`ferrite_ui::widgets::fit`] asking for it (ferrite-ui's
 /// `clipcheck`): every journey is also a check of the screens it passes through.
+#[cfg(test)]
 impl Drop for Radio {
     fn drop(&mut self) {
         let clips = ferrite_ui::clipcheck::take();
