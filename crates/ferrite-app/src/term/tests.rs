@@ -2369,3 +2369,5 @@ fn mic_e_by_name() {
 mod nav;
 /// The channel list at its edges (TERM-14).
 mod list_more;
+/// The command line's refusals and rare answers (TERM-12).
+mod cmd_more;
