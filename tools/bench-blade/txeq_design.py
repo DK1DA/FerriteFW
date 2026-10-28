@@ -1,35 +1,49 @@
 #!/usr/bin/env python3
-"""TERM-33.16 (decision 308): the TX pre-equalisers' design, from the bypass sweep of Oct 27, 2026 (black radio,
-REG_47<0> = 1: "bypass all AF TX filters"; docs/research/tx-response/audio-limits-oct27.html).
+"""TERM-33.16 (decisions 308, 310): the TX pre-equalisers' design, from the bypass sweep (black radio, Oct 27, 2026:
+REG_47<0> = 1, "bypass all AF TX filters", and the TX soft limiter off, REG_2F<7:5> = 000).
 
     txeq_design.py            # design both, print the checks and the report
     txeq_design.py --rust     # also print the Rust statics (crates/ferrite-core/src/txeq.rs)
 
-Two linear-phase FIRs at the DAC's 48 kHz, each inverting the measured curve (level against the 1 kHz sweep tone):
+Two linear-phase FIRs at the DAC's 48 kHz, each inverting the measured curve:
   - eq:  flat 100 Hz - 5 kHz, the boost rolling off above 5 kHz (none past ~7.5 kHz);
-  - eq8: flat 100 Hz - 8 kHz (the stretch: about +29 dB at 8 kHz), rolling off above.
-Both have exactly 0 dB at 1 kHz (Alex, Oct 27: an equalised 1 kHz tone comes out at the deviation the plain 1 kHz
-sweep tone gives), and pull the low end (+9 dB at 100 Hz) down to flat.
+  - eq8: flat 100 Hz - 8 kHz (about +30 dB at 8 kHz), rolling off above.
+The target (Alex, Oct 27): every tone at the deviation the plain `txtest sweep data` 1 kHz tone gets (3046 Hz at
+SWEEP_AMP). The bypass itself loses 6.8 dB against that at 1 kHz (1385 Hz, the same DAC level), so the chain's gain
+at 1 kHz must be +6.8 dB on top of the curve's inverse.
 
-The measured curve is smoothed first (a least-squares cubic in log frequency over 63 Hz-8 kHz): the step between
-800 Hz (+4.5) and 1 kHz (0) is likely a measurement step. The predicted residual is the measured points (not the
-smoothed curve) times the equaliser, so that step shows in it.
+What the first bench run (decision 308's design) taught (Oct 27, 2026):
+  - The first design's curve was taken with the soft limiter still on: +9 dB at 100 Hz and a 4.5 dB step between
+    800 Hz and 1 kHz. With the limiter off the curve is smooth and the low end is +14.5 dB (MEAS below).
+  - REG_7D's mic sensitivity works under the bypass exactly as the table says: `eq`'s 5.0 dB back-off won back by
+    +10 steps gave 1391 Hz against the plain bypass tone's 1385. The 6.8 dB the band was low is the bypass's own
+    loss, not a failed win-back.
+  - REG_40 is not linear: the tone generator's deviation against it (analysis/audio_path.md, wide, Oct 13) follows a
+    power law, deviation ~ REG_40^2.9 (REG40_PTS below). `eq8`'s 0xD77 was meant as +8.5 dB and is about +25 dB by
+    that law: the signal went far past the capture's +-20 kHz and read as noise. Only a small step past the measured
+    0x50A is used now, and only by `eq8`.
+The gain stages left after the bypass: REG_7D[5:0] (0.5 dB a step, the data key-up's 0x34 up to 0x3F: +5.5 dB)
+and REG_40. The rest comes from the DAC's swing: the plain tone uses 4000 of 32767 (18.3 dB of room).
 
 Each equaliser is fitted by weighted least squares on its zero-phase response (a cosine series), in amplitude with
-weights 1/target (relative error, so a dB fit), then the taps are rounded to Q-format. Reported per equaliser: taps,
-residual, boost, the headroom the boost costs for each test signal at full deviation (how far the generator backs
-off so the DAC never clips), how much the BK4829's gain stages win back, and the noise.
+weights 1/target (a dB fit), reweighted towards minimax over the measured points, then rounded to i16 taps with the
+largest shift that fits. Reported per equaliser: the residual, the boost, the gain stages, each test signal's DAC
+peak at levels 100 and 150 (where it saturates), and what that means for the target.
 Only numpy.
 """
 import sys
 import numpy as np
 
 FS = 48_000
-# The bypass sweep (third octaves, dB against the 1 kHz sweep tone).
+# The bypass sweep, the soft limiter off (third octaves, dB against its own 1 kHz tone; sdrtx.py's table, Oct 27).
 MEAS = np.array([
-    (50, 8.9), (63, 9.3), (80, 9.5), (100, 9.7), (125, 9.6), (160, 9.1), (200, 8.5), (250, 7.9), (315, 7.2),
-    (400, 6.4), (500, 5.7), (630, 5.1), (800, 4.5), (1000, 0.0), (1250, -1.9), (1600, -4.0), (2000, -6.1),
-    (2500, -8.2), (3150, -10.6), (4000, -13.8), (5000, -16.5), (6300, -21.4), (8000, -29.3)])
+    (50, 14.5), (63, 14.6), (80, 14.6), (100, 14.4), (125, 13.9), (160, 12.9), (200, 11.8), (250, 10.5), (315, 8.7),
+    (400, 7.0), (500, 5.4), (630, 3.7), (800, 1.8), (1000, 0.0), (1250, -1.9), (1600, -4.0), (2000, -6.1),
+    (2500, -8.2), (3150, -10.6), (4000, -13.4), (5000, -16.6), (6300, -21.4), (8000, -30.2)])
+# The bypass's loss at 1 kHz against the plain `data` sweep tone: 1385 against 3046 Hz at the same DAC level.
+BYPASS_LOSS_DB = 20 * np.log10(3046 / 1385)
+# REG_40's low 12 bits against the tone generator's deviation (wide, Hz; analysis/audio_path.md, Oct 13, 2026).
+REG40_PTS = np.array([(0x300, 1027), (0x387, 1574), (0x3E0, 1934), (0x43C, 2551), (0x4A0, 3344), (0x50A, 4290)])
 # The generators' nominal amplitudes (full scale 32767) and deviations (crates/ferrite-core/src/txtest.rs).
 SWEEP_AMP = 4000          # the sweep's tones: about 3.0 kHz deviation at 1 kHz in `data` (bench, Oct 27)
 DAC_FULL = 32767
@@ -37,10 +51,7 @@ LEVEL_MAX = 1.5           # the [10-150] level option's top
 
 
 def smooth(f):
-    """The measured curve, smoothed: a least-squares quintic in log2(f) through 63 Hz-8 kHz, held flat outside it.
-    It runs 2.2 dB under the 800 Hz point and 0.5 over the 1 kHz one: the step between them (and the same step in
-    the every-filter-off curve, but not in the data set-up's) can't be followed by any smooth response, and is
-    likely a measurement step; the bench sweep with the equaliser settles it."""
+    """The measured curve, smoothed: a least-squares quintic in log2(f) through 63 Hz-8 kHz, held flat outside it."""
     m = MEAS[MEAS[:, 0] >= 63]
     c = np.polyfit(np.log2(m[:, 0]), m[:, 1], 5)
     return np.polyval(c, np.log2(np.clip(f, 63, 8000)))
@@ -51,7 +62,7 @@ class Spec:
         self.name, self.top, self.roll_end, self.taps, self.cap_db = name, top, roll_end, taps, cap_db
 
 
-SPECS = [Spec("eq", 5000, 7500, 79, 18.0), Spec("eq8", 8000, 11000, 95, 30.0)]
+SPECS = [Spec("eq", 5000, 7500, 79, 18.0), Spec("eq8", 8000, 11000, 95, 31.0)]
 
 
 def target_db(f, s):
@@ -166,18 +177,20 @@ def g3ruh(n_bits):
 
 
 MIC_DATA = 0x34       # REG_7D[5:0] of a data key-up (crates/ferrite-core/src/vox.rs); 0.5 dB a step, 0x3F the top
-DEV_KEYUP = 0x50A     # REG_40[11:0] every key-up writes (drivers/bk4829/src/tx.rs TX_DEVIATION); 0xFFF the top
+DEV_KEYUP = 0x50A     # REG_40[11:0] every key-up writes (drivers/bk4829/src/tx.rs TX_DEVIATION)
 
 
-def levers(back):
-    """The back-off (dB) won back: REG_7D's mic sensitivity first (0.5 dB steps, up to 0x3F), then REG_40's
-    deviation (assumed linear; up to 0xFFF). Returns (mic steps, REG_40 value, the back-off actually used, dB):
-    the taps are scaled down by exactly what the two stages give back, so the 1 kHz tone's deviation is the plain
-    one's if both stages are as linear as the register tables say."""
-    steps = min(0x3F - MIC_DATA, int(np.ceil(back * 2 - 1e-9)))
-    rest = back - steps * 0.5
-    dev = DEV_KEYUP if rest <= 0 else min(0xFFF, int(np.ceil(DEV_KEYUP * 10 ** (rest / 20))))
-    return steps, dev, steps * 0.5 + 20 * np.log10(dev / DEV_KEYUP)
+def reg40_law():
+    """The power law through REG40_PTS: deviation = k * REG_40^p (a least-squares line in log-log)."""
+    p, lk = np.polyfit(np.log(REG40_PTS[:, 0]), np.log(REG40_PTS[:, 1]), 1)
+    return p, lk
+
+
+def reg40_for(db):
+    """REG_40 for `db` more deviation than DEV_KEYUP by the power law, and the dB it then gives (rounded value)."""
+    p, _ = reg40_law()
+    v = int(round(DEV_KEYUP * 10 ** (db / 20 / p)))
+    return v, 20 * p * np.log10(v / DEV_KEYUP)
 
 
 def signals():
@@ -193,73 +206,75 @@ def signals():
     }
 
 
+R40_MAX_DB = 3.0      # the most REG_40 is asked for past the measured 0x50A: the law is extrapolated there
+DATA = ("fsk 4800 rc (+-3 kHz)", "fsk 9600 rc (+-3 kHz)", "gmsk 9600 (h 0.5: +-2.4 kHz)", "g3ruh (9600 rc, +-3 kHz)")
+
+
 def main():
     rust = "--rust" in sys.argv
     pts, meas = MEAS[:, 0], MEAS[:, 1]
     sm = smooth(pts) - meas
-    print("the measured bypass curve, smoothed (quintic in log f): off the points by " +
-          " ".join(f"{int(f)}:{v:+.1f}" for f, v in zip(pts, sm) if abs(v) >= 0.5) + " (the rest within 0.5 dB)")
+    print(f"the bypass curve (limiter off), smoothed: within {np.max(np.abs(sm[pts >= 63])):.2f} dB of the points from 63 Hz")
+    p, _ = reg40_law()
+    fit = np.exp(np.polyval(np.polyfit(np.log(REG40_PTS[:, 0]), np.log(REG40_PTS[:, 1]), 1), np.log(REG40_PTS[:, 0])))
+    print(f"REG_40 law: deviation ~ REG_40^{p:.2f} (within {np.max(np.abs(20 * np.log10(fit / REG40_PTS[:, 1]))):.1f} dB of the six points); "
+          f"0xD77 by it: {20 * p * np.log10(0xD77 / DEV_KEYUP):+.0f} dB (decision 308's eq8 meant +8.5)")
+    print(f"the bypass's loss at 1 kHz against the plain data tone: {BYPASS_LOSS_DB:.1f} dB")
     sigs = signals()
     out = []
     for s in SPECS:
-        h = design(s)
-        h /= np.abs(np.sum(h * np.exp(-2j * np.pi * 1000 * np.arange(len(h)) / FS)))  # exactly 0 dB at 1 kHz
-        unit = h.copy()
+        unit = design(s)
+        unit /= np.abs(np.sum(unit * np.exp(-2j * np.pi * 1000 * np.arange(len(unit)) / FS)))  # 0 dB at 1 kHz
+        G = lambda f, h=unit: 20 * np.log10(np.abs(np.exp(-2j * np.pi * np.outer(np.atleast_1d(f), np.arange(len(h))) / FS) @ h))
         print(f"\n== {s.name}: flat 100 Hz-{s.top / 1000:g} kHz, {s.taps} taps (linear phase, {(s.taps - 1) / 2 / FS * 1000:.2f} ms delay)")
-        G = lambda f: 20 * np.log10(np.abs(np.exp(-2j * np.pi * np.outer(np.atleast_1d(f), np.arange(len(unit))) / FS) @ unit))
-        need = -smooth(np.array([float(s.top)]))[0]
-        print(f"  boost: {G(s.top)[0]:+.1f} dB at {s.top / 1000:g} kHz (the curve needs {need:+.1f}), {G(0.0)[0]:+.1f} dB at DC, 0.0 at 1 kHz")
+        print(f"  shape: {G(s.top)[0]:+.1f} dB at {s.top / 1000:g} kHz against 1 kHz (the curve needs {-smooth(s.top):+.1f}), {G(0.0)[0]:+.1f} dB at DC")
         band = (pts >= 100) & (pts <= s.top)
         r = meas[band] + G(pts[band])
-        inner = band & (pts != 630) & (pts != 800)
-        ri = meas[inner] + G(pts[inner])
-        print(f"  predicted residual (measured points x EQ, against the plain 1 kHz tone), 100 Hz-{s.top / 1000:g} kHz: "
-              f"{r.min():+.2f} to {r.max():+.2f} dB; without 630 and 800 Hz (the step): {ri.min():+.2f} to {ri.max():+.2f} dB")
+        print(f"  predicted, each tone against the plain data 1 kHz tone, 100 Hz-{s.top / 1000:g} kHz: {r.min():+.2f} to {r.max():+.2f} dB "
+              "(if REG_7D and REG_40 give what they are set for)")
         print("   " + " ".join(f"{int(f)}:{v:+.1f}" for f, v in zip(pts[band], r)))
         above = pts > s.top
         if above.any():
             print("   above the band:", " ".join(f"{int(f)}:{v:+.1f}" for f, v in zip(pts[above], meas[above] + G(pts[above]))))
-        fr = np.array([6000, 7000, 8000, 9000, 10000, 12000, 16000, 20000.0])
-        print("  EQ gain above:", " ".join(f"{f / 1000:g}k:{v:+.0f}" for f, v in zip(fr, G(fr))))
-        # Headroom: every test signal at its nominal deviation and the top level (150 %) through the unit-gain EQ.
-        peaks = {"sweep 50 Hz-8 kHz (its loudest tone)": SWEEP_AMP * 10 ** (np.max(G(pts)) / 20) * LEVEL_MAX}
-        for name, x in sigs.items():
-            peaks[name] = np.max(np.abs(np.convolve(x, unit)[len(unit):-len(unit)])) * LEVEL_MAX
-        worst = max(peaks.values())
-        back = max(0.0, 20 * np.log10(worst / DAC_FULL))
-        steps, dev, used = levers(back)
-        print(f"  headroom: peaks at the DAC at 150 % without a back-off (full scale {DAC_FULL}):")
-        for name, p in peaks.items():
-            print(f"    {name:40s} {p:7.0f}")
-        print(f"  back-off: {back:.1f} dB (the worst, {max(peaks, key=peaks.get)}); won back by REG_7D 0x{MIC_DATA:02X} -> 0x{MIC_DATA + steps:02X} "
-              f"({steps * 0.5:+.1f} dB) and REG_40 0x{DEV_KEYUP:03X} -> 0x{dev:03X} ({20 * np.log10(dev / DEV_KEYUP):+.1f} dB): {used:.1f} dB, "
-              + ("all of it" if used >= back - 1e-6 else f"short by {back - used:.1f} dB"))
-        h = unit * 10 ** (-used / 20)
+        # The gain stages: REG_7D to its top; REG_40 (eq8 only) the least that keeps the data signals at 100 % inside
+        # the DAC, at most R40_MAX_DB.
+        steps = 0x3F - MIC_DATA
+        peak = lambda h, x: np.max(np.abs(np.convolve(x, h)[len(h):-len(h)]))
+        sweep_f = pts.astype(float)
+        r40_db, r40 = 0.0, DEV_KEYUP
+        if s.name == "eq8":
+            while True:
+                d1 = BYPASS_LOSS_DB - steps * 0.5 - r40_db
+                h = unit * 10 ** (d1 / 20)
+                if max(peak(h, sigs[n]) for n in DATA) <= DAC_FULL or r40_db >= R40_MAX_DB:
+                    break
+                r40_db += 0.5
+            r40, r40_db = reg40_for(r40_db)
+        stage = steps * 0.5 + r40_db
+        d1 = BYPASS_LOSS_DB - stage
+        h = unit * 10 ** (d1 / 20)
+        print(f"  gain stages: REG_7D 0x{MIC_DATA:02X} -> 0x3F ({steps * 0.5:+.1f} dB, measured linear), REG_40 0x{DEV_KEYUP:03X} -> 0x{r40:03X} "
+              f"({r40_db:+.1f} dB by the law{', extrapolated past 0x50A' if r40 > DEV_KEYUP else ''}); the taps make the rest: {d1:+.1f} dB at 1 kHz")
+        print("  DAC peaks (full scale 32767), level 100 / 150:")
+        sw = SWEEP_AMP * 10 ** (np.max(G(sweep_f) + d1) / 20)
+        rows = [("sweep 50 Hz-8 kHz (its loudest tone)", sw)] + [(n, peak(h, x)) for n, x in sigs.items()]
+        for n, pk in rows:
+            flag = lambda v: "" if v <= DAC_FULL else f" (saturates by {20 * np.log10(v / DAC_FULL):.1f} dB)"
+            print(f"    {n:40s} {pk:7.0f}{flag(pk)} / {pk * 1.5:7.0f}{flag(pk * 1.5)}")
+        fits = 100 * min(1.0, DAC_FULL / sw)
+        print(f"  the sweep fits the DAC up to level {int(fits)} %")
         q, shift = quantise(h)
-        qg = lambda f: 20 * np.log10(np.abs(np.exp(-2j * np.pi * np.outer(np.atleast_1d(f), np.arange(len(q))) / FS) @ q) / (1 << shift))
-        print(f"  taps: Q{shift}, the back-off folded in: 1 kHz {qg(1000.0)[0]:+.2f} dB at the DAC, "
-              f"predicted 1 kHz level against the plain tone after the gain stages {qg(1000.0)[0] + used:+.2f} dB")
-        # Noise. The boost is digital, ahead of the DAC: the DAC's floor and the injection's are added after it and are
-        # not boosted by it. The gain stages that win the back-off back do raise both floors by `used` against the
-        # signal, at every frequency, so the cost is `used` dB of SNR; the injection network then shapes the DAC's
-        # floor like the signal's plain curve (falling above 1 kHz), so the top of the band is no noisier than 1 kHz.
-        tone = 20 * np.log10(SWEEP_AMP / DAC_FULL)
-        snr = 6.02 * 12 + 1.76 + tone + 10 * np.log10(24000 / s.top)
-        print(f"  noise: the 1 kHz tone at {tone:.1f} dBFS is {snr:.0f} dB over the DAC's 12-bit floor in 0-{s.top / 1000:g} kHz plain, "
-              f"{snr - used:.0f} dB with the back-off won back by the gain stages (the floor raised {used:.1f} dB)")
-        cpu = (s.taps + 1) // 2
-        print(f"  MCU: {cpu} multiply-accumulates a sample (symmetric taps), {cpu * FS / 1e6:.1f} M a second")
-        out.append((s, q, shift, steps, dev, used))
+        out.append((s, q, shift, steps, r40, stage, d1))
     print("\nCarson: audio to 8 kHz at 3 kHz deviation takes about 2 x (3 + 8) = 22 kHz of RF: a wide-channel (25 kHz) set-up only;"
           " to 5 kHz, 2 x (3 + 5) = 16 kHz.")
     if rust:
-        for s, q, shift, steps, dev, used in out:
+        for s, q, shift, steps, r40, stage, d1 in out:
             n = s.name.upper()
             print(f"\npub static {n}_TAPS: [i16; {s.taps}] = [")
             for i in range(0, s.taps, 16):
                 print("    " + ", ".join(str(v) for v in q[i:i + 16]) + ",")
             print("];")
-            print(f"// {n}: shift {shift}, mic steps {steps}, REG_40 0x{dev:03X}, back-off {used:.2f} dB")
+            print(f"// {n}: shift {shift}, mic steps {steps}, REG_40 0x{r40:03X}, stages {stage:.2f} dB, taps {d1:+.2f} dB at 1 kHz")
 
 
 main()

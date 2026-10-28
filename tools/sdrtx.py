@@ -386,6 +386,13 @@ def sweep(dev, fs, out_png=None):
     if not starts:
         print("  no 1 kHz marker: was `:txtest sweep` armed, and PTT held for a pass?")
         return None
+    # The pass before the first whole marker too, when its tones are in the capture: a capture started after the
+    # key-up (or trimmed at it) cuts the first marker short, and a key-up of about a pass then held only the tones
+    # after the second marker's start (TERM-33.16 bench, Oct 27).
+    before = starts[0] - int(fs * period)
+    if before + int(fs * (MARKER_S + GAP_S)) >= 0:
+        starts.insert(0, before)
+        print("  and the pass before the first marker (its marker cut short)")
     firsts = [s + int(fs * (MARKER_S + GAP_S)) for s in starts]
     fr, a = sweep_measure(dev, fs, firsts, TONE_S, GAP_S)
     return sweep_report(fr, a, out_png)
@@ -737,6 +744,13 @@ def selftest(out_dir):
     i80 = r["freqs"].index(8000)
     want = 20 * np.log10(np.abs(1j * 8000 / 300 / (1 + 1j * 8000 / 300) / (1 + 1j * 8000 / 3000)) / np.abs(1j * 1000 / 300 / (1 + 1j * 1000 / 300) / (1 + 1j * 1000 / 3000)))
     check("8 kHz within 0.1 dB of the filter", abs(r["db"][i80] - want) < 0.1, f"{r['db'][i80]:+.2f} vs {want:+.2f} dB")
+
+    print("== selftest sweep, the capture starting 0.3 s into the key-up, 12 s of it (the first marker cut short)")
+    x = gen_sweep(2)[int(0.3 * 48_000) : int(12.3 * 48_000)] * 3000
+    dev, fs, off = demod(to_iq(x, 48_000, 10, 200, rng, lead=0.5), 0, 12_000, quiet=True)
+    r = sweep(dev, fs)
+    check("every tone measured, from the pass before the one whole marker", r and r["freqs"] == SWEEP_HZ, r and len(r["freqs"]))
+    check("flat within 0.1 dB", r and max(abs(v) for v in r["db"]) < 0.1, r and f"{max(abs(v) for v in r['db']):.2f} dB")
 
     print("== selftest AFSK: mark 2500 Hz, space 2 dB hotter, 3 s")
     raw = to_iq(gen_afsk(3, 10 ** (2 / 20)) * 2500, 48_000, 10, 300, rng)

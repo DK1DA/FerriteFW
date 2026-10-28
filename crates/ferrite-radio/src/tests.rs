@@ -756,7 +756,7 @@ fn tx_test_filters_and_restore() {
 
 /// TERM-33.15, TERM-33.16: after the `data` set-up, `bypass` sets REG_47<0> on the key-up's 0x6142 and clears the
 /// soft limiter (REG_2F<7:5>, the de-emphasis gain <13:8> kept); an equaliser raises REG_7D's mic sensitivity by
-/// its steps (0x34 + 10 = 0x3E, ALC off kept; never past 0x3F) and sets REG_40's deviation field (top bits kept);
+/// its steps (0x34 + 11 = 0x3F, ALC off kept; never past it) and sets REG_40's deviation field (top bits kept);
 /// nothing else is written, and the restore puts the four back.
 #[cfg(feature = "bench")]
 #[test]
@@ -777,9 +777,9 @@ fn tx_test_extra_and_restore() {
         let bus = b.release();
         assert_eq!(bus.last(reg::AF_OUT), Some(if bypass { 0x6143 } else { 0x6142 }));
         assert_eq!(bus.last(0x2F), Some(if bypass { 0x9810 } else { 0x9890 }));
-        let mic = match eq { Eq::Off => 0x34, Eq::Eq => 0x3E, Eq::Eq8 => 0x3F };
+        let mic = match eq { Eq::Off => 0x34, Eq::Eq | Eq::Eq8 => 0x3F };
         assert_eq!(bus.last(reg::MIC), Some((r7d & !0x3F) | mic), "{eq:?}");
-        assert_eq!(bus.last(reg::DEVIATION), Some((r40 & 0xF000) | if eq == Eq::Eq8 { 0xD77 } else { 0x50A }));
+        assert_eq!(bus.last(reg::DEVIATION), Some((r40 & 0xF000) | if eq == Eq::Eq8 { 0x57A } else { 0x50A }));
         assert!(bus.writes[n..].iter().all(|w| [reg::AF_OUT, 0x2F, reg::MIC, reg::DEVIATION].contains(&w.0)), "{:?}", &bus.writes[n..]);
         let mut b = Bk4829::new(bus);
         chip::tx_test_extra_restore(&mut b, &was);

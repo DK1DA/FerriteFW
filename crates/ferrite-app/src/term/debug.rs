@@ -466,7 +466,8 @@ impl Job {
                     }
                     if a.eq != Eq::Off {
                         out.push(if a.bypass { b" " } else { b"  " });
-                        put!(out, "{}: flat 100 Hz-{} kHz, {} taps, back-off {}.{} dB won back by REG_7D +{} steps, REG_40 0x", a.eq.name(), a.eq.top_hz() / 1000, a.eq.taps().len(), a.eq.back_off_cdb() / 100, a.eq.back_off_cdb() / 10 % 10, a.eq.mic_steps());
+                        let g = a.eq.gain_1k_cdb();
+                        put!(out, "{}: flat 100 Hz-{} kHz, {} taps, {}{}.{} dB at 1 kHz; REG_7D 0x3F, REG_40 0x", a.eq.name(), a.eq.top_hz() / 1000, a.eq.taps().len(), if g < 0 { "-" } else { "+" }, g.unsigned_abs() / 100, g.unsigned_abs() / 10 % 10);
                         hex(a.eq.deviation() as u32, 3, out);
                         out.push(b";");
                     }

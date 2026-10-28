@@ -194,8 +194,8 @@ impl Radio {
         if let Some(f) = filters {
             self.tx.test_regs = Some((n, radio_chip::tx_test_filters(&mut self.chip(n), f)));
         }
-        // TERM-33.15, TERM-33.16: a test's `bypass` (REG_47<0>, the soft limiter off) and its equaliser's back-off
-        // won back (REG_7D, REG_40), over the set-up just made; put back at the unkey before it.
+        // TERM-33.15, TERM-33.16: a test's `bypass` (REG_47<0>, the soft limiter off) and its equaliser's gain
+        // stages (REG_7D, REG_40), over the set-up just made; put back at the unkey before it.
         #[cfg(feature = "bench")]
         if let Some(t) = test.filter(|t| filters.is_some() && (t.bypass || t.eq != ferrite_core::txeq::Eq::Off)) {
             let dev = (t.eq != ferrite_core::txeq::Eq::Off).then(|| t.eq.deviation());

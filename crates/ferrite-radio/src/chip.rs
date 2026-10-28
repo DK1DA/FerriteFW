@@ -484,8 +484,9 @@ pub struct ExtraRegs {
 
 /// TERM-33.15 and TERM-33.16, after [`tx_test_filters`] (the key-up's REG_47 0x6142 from [`tx_setup`], its REG_40
 /// and REG_7D 0x34 in place) and before the key-up: `bypass` sets REG_47<0> and turns the soft limiter off
-/// (REG_2F<7:5> = 000); an equaliser's back-off is won back by REG_7D's mic sensitivity (`mic_steps` 0.5 dB steps
-/// up, at most 0x3F) and REG_40's deviation field (`deviation`, the top four bits kept). Returns what was there.
+/// (REG_2F<7:5> = 000); an equaliser's level (the bypass's 6.8 dB loss, TERM-33.16) comes partly from REG_7D's
+/// mic sensitivity (`mic_steps` 0.5 dB steps up, at most 0x3F) and REG_40's deviation field (`deviation`, the top
+/// four bits kept). Returns what was there.
 #[cfg(all(feature = "tx", feature = "bench"))]
 pub fn tx_test_extra<B: Bus>(bk: &mut Bk4829<B>, bypass: bool, mic_steps: u8, deviation: Option<u16>) -> ExtraRegs {
     let was = ExtraRegs { r47: bk.read(bk4829::reg::AF_OUT), r2f: bk.read(0x2F), r40: bk.read(bk4829::reg::DEVIATION), r7d: bk.read(bk4829::reg::MIC) };

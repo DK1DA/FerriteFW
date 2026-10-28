@@ -1576,7 +1576,7 @@ fn debug_txtest() {
 /// TERM-33.15, TERM-33.16, TERM-33.17 (decision 308): `fsk BAUD [rc]`, `gmsk BAUD` and `g3ruh` arm the data
 /// signals (BAUD 300 to 9600, required for fsk and gmsk; `rc` fsk's only, before FILTERS); `bypass` and `eq`/`eq8`
 /// follow FILTERS in any order, once each, never with `voice`; LEVEL stays last. The armed answer names the baud,
-/// and a third line the bypass and the equaliser's back-off and gain stages.
+/// and a third line the bypass and the equaliser's 1 kHz gain and gain stages.
 #[test]
 fn debug_txtest_data() {
     use ferrite_core::txtest::{Arm, Ask, Eq, Filters, Signal};
@@ -1605,9 +1605,9 @@ fn debug_txtest_data() {
         assert!(raw.contains(&title), "{line}: {raw}");
         assert_eq!(raw.contains("bypass: all AF TX filters off (REG_47 0 = 1), soft limiter off"), arm.bypass, "{line}: {raw}");
         match arm.eq {
-            Eq::Eq => assert!(raw.contains("eq: flat 100 Hz-5 kHz, 79 taps, back-off 5.0 dB won back by REG_7D +10 steps, REG_40 0x50A"), "{raw}"),
-            Eq::Eq8 => assert!(raw.contains("eq8: flat 100 Hz-8 kHz, 95 taps, back-off 14.0 dB won back by REG_7D +11 steps, REG_40 0xD77"), "{raw}"),
-            Eq::Off => assert!(!raw.contains("taps, back-off"), "{raw}"),
+            Eq::Eq => assert!(raw.contains("eq: flat 100 Hz-5 kHz, 79 taps, +1.3 dB at 1 kHz; REG_7D 0x3F, REG_40 0x50A;"), "{raw}"),
+            Eq::Eq8 => assert!(raw.contains("eq8: flat 100 Hz-8 kHz, 95 taps, -0.6 dB at 1 kHz; REG_7D 0x3F, REG_40 0x57A;"), "{raw}"),
+            Eq::Off => assert!(!raw.contains(" taps, "), "{raw}"),
         }
         r.send(b"\r");
     }
