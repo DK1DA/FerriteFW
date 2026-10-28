@@ -283,6 +283,6 @@ mod tests {
             }
         }
         assert_eq!(step, Step::Done);
-        assert_eq!(a.text(), &HDR[..]);
+        assert_eq!(a.text(), HDR);
     }
 }
