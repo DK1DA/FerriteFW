@@ -403,7 +403,7 @@ pub fn msg_is_open(b: &[u8; REC as usize]) -> bool {
 
 /// Where a heard row's body ends: flags (11), call (12..22), symbol (22), position (23..31), course and speed
 /// (31..35), altitude (35..39), the digipeater (39..49), comment (49..89), times heard (89..91), FX.25 (91), the Mic-E
-/// device (92, 0xFF none: rows from before it read as none, APRS-5.2).
+/// device (92, 0xFF none, APRS-5.2; the CRC covers it, so rows written before it fail their check).
 pub const HEARD_END: usize = 93;
 /// What a queued row carries: the body (11..92).
 pub const HEARD_JOB: usize = HEARD_END - BODY;

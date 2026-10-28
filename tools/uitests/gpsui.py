@@ -169,7 +169,9 @@ def compose_stops_at_67(t):
             n = int(t.ui()["compose"]["count"].split("/")[0])
         u = t.ui()
         t.eq(u["compose"]["count"], "67/67", "full")
-        u = t.keys("2")
+        t.keys("2", settle=0)
+        # the radio's readback can come before the toast (a pass of the UI task): wait for it
+        u = t.wait(lambda u: u.toast is not None, timeout=1.0, what="the refusal's toast")
         t.eq(u.toast, {"head": "67 characters", "body": "the APRS limit"}, "the next key: refused, saying why")
         t.eq(u["compose"]["count"], "67/67", "and the count stays")
     finally:

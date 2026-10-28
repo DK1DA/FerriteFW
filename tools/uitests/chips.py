@@ -511,8 +511,9 @@ def swd_pins_never_remapped(t):
 
 @test("DISP-16.1", needs=("bench",), where="radio", pages=())
 def brightness_duty_table(t):
-    """Brightness 1-10 (0 7 4 2): the screen's PWM (TMR8 C1DT) and the keypad light's (TMR2 C2DT, 0 7 4 5 "with
-    the screen") read 216, 312, 432, 600, 864, 1200, 1704, 2400, 3408 and 4800 (4.5 % to 100 % of 4800)."""
+    """Brightness 1-10 (0 7 4 2): the screen's PWM (TMR8 C1DT) reads 216, 312, 432, 600, 864, 1200, 1704, 2400, 3408
+    and 4800 (4.5 % to 100 % of 4800); the keypad light's (TMR2 C2DT, 0 7 4 5 "with the screen") the same curve at
+    half (DISP-22.1: thousandths x 500 / 1000, then of 4800)."""
     t.bench()
     t.need(t.get("0 7 4 5") == "With screen", "the keypad light isn't 'with the screen'")
     want = [216, 312, 432, 600, 864, 1200, 1704, 2400, 3408, 4800]
@@ -524,7 +525,8 @@ def brightness_duty_table(t):
         got.append((t.mem32(0x40013434)[0] & 0xFFFF, t.mem32(0x40000038)[0] & 0xFFFF))
         t.keys("DOWN")
     t.eq([g[0] for g in got], want, "the screen's duty")
-    t.eq([g[1] for g in got], want, "the keypad light's")
+    curve = [45, 65, 90, 125, 180, 250, 355, 500, 710, 1000]  # lights::BRIGHTNESS, thousandths
+    t.eq([g[1] for g in got], [c * 500 // 1000 * 4800 // 1000 for c in curve], "the keypad light's (DISP-22.1)")
 
 
 @test("DISP-15.5", needs=("bench",), where="radio", slow=True, pages=("Home",))
