@@ -196,7 +196,7 @@ fn time_page_turns_each_row() {
     t.dev.gps = GpsState::Searching;
     t.tap(Key::Down); // wraps to the time zone
     t.reads("\"Time zone\"");
-    assert!(!t.drawn().contains(", GPS"), "no GPS fix: no GPS note");
+    t.hides(", GPS");
 }
 
 /// SETUP-5: the look page turns the home layout (with its previews) and the theme.

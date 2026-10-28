@@ -11,6 +11,7 @@ use ferrite_ui::fb::FrameBuffer;
 use std::string::String;
 use std::vec::Vec;
 
+mod home;
 mod setup;
 mod transmit;
 
@@ -163,41 +164,12 @@ impl T {
         self.readback().join("\n")
     }
 
-    /// The screen as drawn (LINK-19.5: its texts), in one string.
-    pub fn drawn(&mut self) -> String {
-        let mut l = crate::term::cmd::Line::new();
-        let mut v = Vec::new();
-        for i in 0.. {
-            if !crate::uistate::line_all(&mut self.app, &self.s, &self.dev, &self.live, true, i, &mut l) {
-                break;
-            }
-            v.push(String::from_utf8_lossy(l.as_bytes()).into_owned());
-        }
-        v.join("\n")
-    }
-
-    /// The texts drawn, in drawing order, joined by spaces (a wrapped paragraph reads as one).
+    /// The texts the screen draws, all of it drawn again (as LINK-19.5's readback does), in drawing order, joined
+    /// by spaces (a wrapped paragraph reads as one).
     pub fn texts(&mut self) -> String {
-        let d = self.drawn();
-        let mut out = Vec::new();
-        for l in d.lines().filter(|l| l.starts_with('t')) {
-            let mut it = l.chars();
-            while let Some(c) = it.next() {
-                if c != '"' {
-                    continue;
-                }
-                let mut s = String::new();
-                while let Some(c) = it.next() {
-                    match c {
-                        '\\' => s.extend(it.next()),
-                        '"' => break,
-                        c => s.push(c),
-                    }
-                }
-                out.push(s);
-            }
-        }
-        out.join(" ")
+        let mut rec = Texts(Vec::new());
+        self.app.render_texts(&mut rec, &self.live, &self.dev, &self.s);
+        rec.0.join(" ")
     }
 
     /// Asserts the screen draws `text` somewhere.
@@ -224,5 +196,23 @@ impl T {
     /// Pixels of colour `c` drawn between rows `y0` and `y1`.
     pub fn px(&self, y0: i32, y1: i32, c: u16) -> usize {
         (y0..y1).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| self.fb.at(x, y) == c).count()
+    }
+}
+
+/// A panel that keeps only the texts drawn on it.
+struct Texts(Vec<String>);
+
+impl ferrite_ui::panel::Panel for Texts {
+    fn window(&mut self, _: i32, _: i32, _: i32, _: i32) {}
+    fn push(&mut self, _: u16, _: u32) {}
+    fn push_buf(&mut self, _: &[u16]) {}
+    fn text_hint(&mut self, _: i32, _: i32, _: i32, _: i32, s: &[u8]) {
+        self.0.push(String::from_utf8_lossy(s).into_owned());
+    }
+    fn offscreen(&self) -> bool {
+        true
+    }
+    fn text_only(&self) -> bool {
+        true
     }
 }
