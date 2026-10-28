@@ -2367,3 +2367,5 @@ fn mic_e_by_name() {
 
 /// Keys and pages: escape sequences, the PIN prompt, the lists' movement keys, help per page.
 mod nav;
+/// The channel list at its edges (TERM-14).
+mod list_more;
