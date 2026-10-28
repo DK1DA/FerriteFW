@@ -481,4 +481,52 @@ mod tests {
         assert!(r.live.strip[XB_COLS - 1] < 0, "side 2 to 1 below the line");
         assert!(r.live.duty > 0 && r.live.busy_s >= 13);
     }
+
+    /// XB-2: why it won't start travels as a code in the snapshot (0 = running) and comes back with its text.
+    #[test]
+    fn stop_codes_round_trip() {
+        for s in [Stop::Hf, Stop::OneChip, Stop::Relay, Stop::NoTx] {
+            assert_eq!(Stop::from_code(s as u8), Some(s));
+        }
+        assert_eq!((Stop::from_code(0), Stop::from_code(5)), (None, None));
+        let texts = [Stop::Hf, Stop::OneChip, Stop::Relay, Stop::NoTx].map(Stop::text);
+        assert_eq!(
+            texts,
+            ["A side is on HF (needs the relay)", "Both sides on one chip", "Relay set for HF: leave HF first", "Receive-only build: no transmit"]
+        );
+    }
+
+    /// XB-14's hold flag; a refusal while ready takes no pass back; the input level is shown as given.
+    #[test]
+    fn held_flag_refused_when_ready_and_level() {
+        let mut r = Repeater::new(XbCfg::DEFAULT, 0);
+        assert!(!r.held());
+        r.hold(true, 100);
+        assert!(r.held() && r.from().is_none());
+        r.hold(false, 200);
+        assert!(!r.held());
+        r.refused(300);
+        assert_eq!((r.live.passes, r.live.state, r.from()), (0, 0, None));
+        assert!(r.live.reduced);
+        r.set_rssi(-80);
+        assert_eq!(r.live.rssi, -80);
+    }
+
+    /// The simulators' past: run time, passes, busy time, the strip and the CW ID's countdown, as the screen
+    /// shows them (XB-16, XB-17).
+    #[test]
+    fn demo_past_shows_on_the_next_tick() {
+        let now = 10_000_000;
+        let mut r = Repeater::new(XbCfg { flags: XbCfg::ID, ..XbCfg::DEFAULT }, now);
+        let mut strip = [0i8; XB_COLS];
+        strip[XB_COLS - 2] = 20;
+        strip[XB_COLS - 3] = -10;
+        r.demo_past(strip, 4_320, 12, 900);
+        assert_eq!(r.tick(now, [Some(false); 2]), None);
+        let x = r.live;
+        assert_eq!((x.run_s, x.passes, x.busy_s), (4_320, 12, 900));
+        assert_eq!((x.strip[XB_COLS - 2], x.strip[XB_COLS - 3]), (20, -10));
+        assert_eq!(x.duty, 5, "30 s busy in the last 10 minutes");
+        assert_eq!(x.next_id_s as u32, (ID_MS - 6 * 60_000) / 1000);
+    }
 }
