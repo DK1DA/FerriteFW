@@ -26,6 +26,7 @@ mod home;
 mod keytest;
 mod layouts;
 mod log;
+mod misc;
 mod lowpower;
 mod msgs;
 mod opts;
