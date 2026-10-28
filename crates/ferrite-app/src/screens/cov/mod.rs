@@ -17,6 +17,7 @@ mod entry;
 mod gps;
 mod hf;
 mod home;
+mod keytest;
 mod layouts;
 mod log;
 mod lowpower;
