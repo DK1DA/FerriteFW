@@ -645,7 +645,7 @@ pub fn bt_query_refused(t: &[u8]) -> Option<&'static str> {
     }
 }
 
-#[cfg(all(test, feature = "bench"))]
+#[cfg(test)]
 mod bt_query_tests {
     use super::bt_query_refused as r;
 
@@ -993,6 +993,76 @@ mod tests {
         // Each reader of the GPS watch keeps a copy of the fix; the sky list only the UI.
         assert!(core::mem::size_of::<GpsFix>() <= 32);
         assert!(core::mem::size_of::<GpsSky>() <= 81);
+    }
+
+    #[test]
+    fn event_starts_with_an_empty_payload() {
+        let e = Event::new(Kind::GpsFix, Source::Gps);
+        assert_eq!((e.kind, e.source, e.payload), (Kind::GpsFix, Source::Gps, [0; 12]));
+    }
+
+    /// BCR-32, HF-35: the fixed AGC scale maps 1 to index 0 (the most gain) and 10 to the chip's top; 0 is
+    /// automatic (no override).
+    #[test]
+    fn agc_scale_to_chip_index() {
+        assert_eq!(SiOpts::agc_index(0, 37), None);
+        assert_eq!(SiOpts::agc_index(1, 37), Some(0));
+        assert_eq!(SiOpts::agc_index(10, 37), Some(37));
+        assert_eq!(SiOpts::agc_index(10, 26), Some(26));
+        assert_eq!(SiOpts::agc_index(5, 26), Some(11));
+        assert_eq!(SiOpts::agc_index(200, 26), Some(26), "past 10 stays at the top");
+    }
+
+    /// BCR-32: the FM seek band (Japan 76-95 MHz) and spacing (50, 100, 200 kHz) from the packed flags.
+    #[test]
+    fn fm_seek_band_and_space() {
+        let o = |flags| SiOpts { flags, ..Default::default() };
+        assert_eq!(o(0).fm_band(), (8750, 10800));
+        assert_eq!(o(SiOpts::BAND_JAPAN).fm_band(), (7600, 9500));
+        assert_eq!(o(0).fm_space(), 5);
+        assert_eq!(o(1 << 4).fm_space(), 10);
+        assert_eq!(o(2 << 4).fm_space(), 20);
+        assert_eq!(o(3 << 4).fm_space(), 20, "the spare value clamps to 200 kHz");
+    }
+
+    /// HF-35: AM seek steps 9 kHz on LW, MW 10 kHz (9 kHz with MW_9K), 5 kHz on shortwave.
+    #[test]
+    fn am_seek_space() {
+        let am = SiOpts::default();
+        let eu = SiOpts { flags: SiOpts::MW_9K, ..Default::default() };
+        assert_eq!(am.am_space(198), 9);
+        assert_eq!(am.am_space(1_000), 10);
+        assert_eq!(eu.am_space(1_000), 9);
+        assert_eq!(am.am_space(1_800), 5);
+        assert_eq!(eu.am_space(9_400), 5);
+    }
+
+    #[test]
+    fn xb_live_default_level_is_the_floor() {
+        let x = XbLive::default();
+        assert_eq!((x.state, x.rssi, x.stopped, x.strip), (0, -127, 0, [0; XB_COLS]));
+    }
+
+    /// The channel a scan wants travels as its number plus 1, so the default (0) is none.
+    #[test]
+    fn wanted_channel_round_trips() {
+        let mut l = LiveAll::default();
+        assert_eq!(l.wanted(), None);
+        l.set_want(Some(0));
+        assert_eq!((l.want, l.wanted()), (1, Some(0)));
+        l.set_want(Some(41));
+        assert_eq!(l.wanted(), Some(41));
+        l.set_want(None);
+        assert_eq!((l.want, l.wanted()), (0, None));
+    }
+
+    #[test]
+    fn one_slot_as_live() {
+        let mut l = LiveAll { rx_asleep: true, chips: 5, ..Default::default() };
+        l.slots[1] = SlotLive { freq: 14_550_000, rssi: -90, squelch_open: true, ..Default::default() };
+        assert_eq!(l.live(1), Live { freq: 14_550_000, rssi: -90, squelch_open: true, rx_asleep: true, chips: 5 });
+        assert_eq!(l.live(1 + SLOTS), l.live(1), "the slot wraps");
+        assert_eq!(l.live(0).freq, 0);
     }
 }
 

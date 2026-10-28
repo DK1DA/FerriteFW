@@ -92,5 +92,25 @@ mod tests {
         assert_eq!(flash_vendor(0xEF4015), "Winbond");
         assert_eq!(flash_vendor(0x0B4016), "XTX");
         assert_eq!(flash_vendor(0xFF_FFFF), "?");
+        let vendors: std::vec::Vec<&str> =
+            [0xC8, 0x85, 0x68, 0x20, 0x5E, 0xA1, 0x1C, 0xC2, 0x9D].iter().map(|&v| flash_vendor(v << 16 | 0x4016)).collect();
+        assert_eq!(vendors, ["GigaDevice", "Puya", "Boya", "XMC", "Zbit", "Fudan", "EON", "Macronix", "ISSI"]);
+    }
+
+    /// Every Cortex-M3 and -M4 revision the table names, and the ones it doesn't.
+    #[test]
+    fn cpu_revisions() {
+        assert_eq!(cpu_name(0x410F_C240), Some("Cortex-M4 r0p0"));
+        assert_eq!(cpu_name(0x410F_C242), Some("Cortex-M4 r0p2"));
+        assert_eq!(cpu_name(0x410F_C243), Some("Cortex-M4"), "r0p3: not in the table");
+        assert_eq!(cpu_name(0x411F_C240), Some("Cortex-M4"), "r1p0");
+        assert_eq!(cpu_name(0x410F_C230), Some("Cortex-M3 r0p0"));
+        assert_eq!(cpu_name(0x410F_C231), Some("Cortex-M3"), "r0p1");
+        assert_eq!(cpu_name(0x411F_C230), Some("Cortex-M3 r1p0"));
+        assert_eq!(cpu_name(0x411F_C231), Some("Cortex-M3 r1p1"));
+        assert_eq!(cpu_name(0x411F_C232), Some("Cortex-M3"), "r1p2");
+        assert_eq!(cpu_name(0x412F_C230), Some("Cortex-M3 r2p0"));
+        assert_eq!(cpu_name(0x413F_C230), Some("Cortex-M3"), "r3p0");
+        assert_eq!(cpu_name(0x440F_C241), None, "not ARM's");
     }
 }
