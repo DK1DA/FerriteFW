@@ -211,7 +211,7 @@ impl View for ToneSearch {
         tone_text(c.tx_tone, &mut tx);
         let mut now = Buf::<40>::new();
         if self.ask_tx {
-            now.set(b"RX tone set. Set the TX tone too?");
+            now.set(b"RX set. Set the TX tone too?"); // 224 px: 32 characters
         } else {
             let _ = uwrite!(now, "Now: RX {} \u{b7} TX {}", or_none(&rx), or_none(&tx));
         }

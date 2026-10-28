@@ -26,6 +26,7 @@ mod msgs;
 mod opts;
 mod pin;
 mod posentry;
+mod probe;
 mod samecodes;
 mod save;
 mod quick;
