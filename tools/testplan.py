@@ -588,12 +588,12 @@ def parse_hand_checks(path):
         m = CHECK_HEAD.match(line)
         if m and not ENTRY.match(line):
             cur = out.setdefault(m.group(1), {"name": m.group(1), "session": "", "minutes": 0, "unattended": 0,
-                                              "setup": "", "do": ""})
+                                              "setup": "", "do": "", "release": "0.9"})
             continue
         if line.startswith("#"):
             cur = None
             continue
-        m = re.match(r"^(Session|Minutes|Unattended|Setup|Do):\s*(.*)$", line)
+        m = re.match(r"^(Session|Minutes|Unattended|Setup|Do|Release):\s*(.*)$", line)
         if cur is not None and m:
             k, v = m.group(1).lower(), m.group(2).strip()
             cur[k] = int(v) if k in ("minutes", "unattended") and v.isdigit() else v
@@ -722,7 +722,22 @@ def write_by_hand(docs, rules, entries):
                     "unknown hand checks: " + ", ".join(f"{r} → {n}" for r, n in unknown) if unknown else "",
                     "hands entries without a Hand check: " + ", ".join(without) if without else "",
                     "hand checks nothing points at: " + ", ".join(unused) if unused else "") if x) + ".", ""]
-    out += ["| # | Session | Checks | Rules to do | Minutes |", "| --- | --- | --- | --- | --- |"]
+    # The checks that protect alpha testers come first (Release: 0.8 in hand-checks.md; Alex, Oct 27); the rest are
+    # before 0.9. Sessions keep their order below; each 0.8 check is marked there too.
+    sess_no = {k: i for i, k in enumerate(order, 1)}
+    alpha = [c for c in checks.values() if c.get("release") == "0.8"]
+    if alpha:
+        a_live = [c for c in alpha if todo(c)]
+        out += [f"## For the 0.8 alpha: {n_of(len(a_live), 'check')} left of {len(alpha)}, about {mins(a_live)} min", "",
+                "The checks that protect alpha testers (transmit refusals and limits, switching off and on, recovery, "
+                "the low-battery cut-off, install and back to stock). Everything else below is before 0.9.", "",
+                "| Check | Session | Rules to do | Minutes | Done |", "| --- | --- | --- | --- | --- |"]
+        for c in alpha:
+            k = c["session"] if c["session"] in titles else "other"
+            out.append(f"| {c['name']} | [{titles.get(k, ('Other', ''))[0]}](#session-{sess_no.get(k, '')}) | "
+                       f"{len(todo(c))} | {c['minutes']} | {'✓' if not todo(c) else ''} |")
+        out.append("")
+    out += ["## Every session", "", "| # | Session | Checks | Rules to do | Minutes |", "| --- | --- | --- | --- | --- |"]
     for i, k in enumerate(order, 1):
         cs = by_session[k]
         title = titles.get(k, ("Other (no hand check)", ""))[0]
@@ -741,7 +756,8 @@ def write_by_hand(docs, rules, entries):
         for c in live:
             t = todo(c)
             done = [x for x in c["items"] if x not in t]
-            out += [f"### {c['name']}: {n_of(len(t), 'rule')}" + (f" (+{len(done)} passed)" if done else "")
+            out += [f"### {c['name']}" + (" (0.8)" if c.get("release") == "0.8" else "") + f": {n_of(len(t), 'rule')}"
+                    + (f" (+{len(done)} passed)" if done else "")
                     + f", {c['minutes']} min"
                     + (f" (+{c['unattended']} unattended)" if c["unattended"] else ""), ""]
             if c["setup"]:

@@ -87,7 +87,8 @@ def main():
         raise SystemExit(f"{' '.join(bad)}: not covered by {a.check} (it covers {' '.join(rules)})")
     day = datetime.date.fromisoformat(a.date) if a.date else datetime.date.today()
     date = day.strftime("%b %-d, %Y")
-    fw = (a.fw or newest_fw(a.results)).replace("|", "\\|")
+    # one line: a session's build text can hold a line break, which would split the table row
+    fw = " ".join((a.fw or newest_fw(a.results)).split()).replace("|", "\\|")
     stamp = day.strftime("%Y%m%d") + "-000000"
     rows, say = [], []
     for rid in rules:
