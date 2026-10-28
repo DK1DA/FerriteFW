@@ -212,6 +212,8 @@ def page(r):
            "<div class=grid>",
            f"<div class=card>Image<b>{kb(b['image_bytes'])}</b>{e(b['image'])}, image CRC-32 {b['crc32']} (as mkbtf.sh's first line)</div>",
            f"<div class=card>Fast flash<b>{100 * m['fast'] / m['fast_budget']:.0f} %</b>{kb(m['fast'])} of {kb(m['fast_budget'])}</div>",
+           f"<div class=card>Slow flash<b>{100 * m['slow'] / m['slow_budget']:.0f} %</b>{kb(m['slow'])} of {kb(m['slow_budget'])}</div>",
+           f"<div class=card>Total flash<b>{100 * m['image'] / m['app_size']:.0f} %</b>{kb(m['image'])} of {kb(m['app_size'])}</div>",
            f"<div class=card>Static RAM<b>{kb(m['ram_static'])}</b>{kb(m['ram_stack'])} left for the stack</div>"]
     if t:
         host = t["host"]
