@@ -133,14 +133,20 @@ def ssb_patch_bundle_layout(t):
         t.eq(set(os.listdir(d)), before, "no combined image written")
 
 
-@test("UPD-15", pages=(), xfail="flash.py checks no SHA-256 or minisign signature yet (releases carry none)")
+@test("UPD-15", pages=())
 def flasher_checks_release_signatures(t):
-    """A release file whose SHA-256 beside it doesn't match is refused by flash.py before flashing."""
+    """A release file whose SHA-256 beside it (FILE.sha256) doesn't match is refused by flash.py before flashing;
+    a matching one is taken. (The minisign signature isn't checked yet: releases carry none.)"""
     with tempfile.TemporaryDirectory() as d:
-        img = tmpfile(d, "ferrite.btf.bin", ferrite_image())
+        data = ferrite_image()
+        img = tmpfile(d, "ferrite.btf.bin", data)
+        good = tmpfile(d, "good.bin", backup())
         open(img + ".sha256", "w").write("0" * 64 + "  ferrite.btf.bin\n")
-        rc, out = flash("--dry-run", "-", img, "--backup", tmpfile(d, "good.bin", backup()))
-        t.check(rc != 0 and ("sha" in out.lower() or "signature" in out.lower()), "a mismatched checksum: refused", out)
+        rc, out = flash("--dry-run", "-", img, "--backup", good)
+        t.check(rc != 0 and "refusing" in out and "SHA-256" in out, "a mismatched checksum: refused", out)
+        open(img + ".sha256", "w").write(hashlib.sha256(data).hexdigest() + "  ferrite.btf.bin\n")
+        rc, out = flash("--dry-run", "-", img, "--backup", good)
+        t.check(rc == 0 and "SHA-256 matches" in out, "a matching checksum: taken (dry run)", out)
 
 
 # ---- Around a flash (--flash before / after) ----

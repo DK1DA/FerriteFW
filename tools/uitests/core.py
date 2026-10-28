@@ -11,9 +11,13 @@ A test is a function taking the context `t`, tagged with the manual rule IDs it 
         t.eq(u.id, "Quick", "MENU on home opens quick settings")
         t.check(len(u.rows) == 10, "nine rows and More", u.rows)
 
-`where="radio"` marks a test the simulator can't model (it is skipped there); `slow=True` one that waits on a timer
-(run with --slow); `needs=` the build flavours or the things it needs (CAPS below: a bench build, a Bluetooth link,
-a factory reset allowed, a flash around the run, ...), skipped (saying which) when the run doesn't have them. `pages=("Zones", "Browse")` names the screens the test visits (their readback ids, the `screen`
+`where="radio"` marks a test the simulator can't model: a simulator run doesn't collect it at all (nor one whose
+needs= has a CAPS entry the simulator never has: a bench build, the cable log, a flash), so radio-only tests never
+count as the simulator's skips (`--list` marks them). `slow=True` one that waits on a timer (on the radio only with
+--slow; the simulator always runs them, in parallel); `needs=` the build flavours or the things it needs (CAPS
+below: a bench build, a Bluetooth link, a factory reset allowed, a flash around the run, ...), skipped (saying
+which) when the run doesn't have them. `sim_args=("--no-ssb-patch",)`: the simulator state the test needs, given to
+a simulator started for it alone (--sim auto). `pages=("Zones", "Browse")` names the screens the test visits (their readback ids, the `screen`
 line's first word): `tools/uitest.py --page zones` runs the tests that visit a page, and `--check-pages` runs the
 tests and reports any whose tags differ from the screens they actually read back (readbacks inside `t.home()`
 don't count); `--fix-pages` writes what they visited into the tags. Safe by construction: the context has no PTT and the link's remote keys never transmit
@@ -49,11 +53,17 @@ CAPS = {
     "flash": (False, "a flash around the run: --flash before, tools/flash.py, --flash after"),
     "first-install": (True, "--flash before marks a first install (a radio new to Ferrite or wiped): --with first-install"),
     "reset": (True, "a factory reset (0 9 7 2) allowed: --with reset (the test reloads the dump after)"),
-    "fm-station": (False, "a local FM station with RDS and stereo pilot: --with fm-station"),
+    "fm-station": (True, "a local FM station with RDS and stereo pilot (the simulator has them): --with fm-station"),
     "signal": (False, "a signal to receive (a second radio or a strong local one): --with signal"),
     "fix": (True, "a GPS fix (the simulator has one): --with fix outdoors"),
     "pin": (True, "a PIN may be set by keys (it stays set, the lock off, after: Change PIN has no none): --with pin"),
 }
+
+
+def radio_only(tst):
+    """The simulator can never run this test: where="radio", or a need it never has (CAPS). A simulator run doesn't
+    collect it (not a skip)."""
+    return tst.where == "radio" or any(n in CAPS and not CAPS[n][0] for n in (tst.needs or ()))
 
 
 def unmet(needs, build, sim, bench, opts):
@@ -98,8 +108,9 @@ class Skip(Exception):
 
 
 class Test:
-    def __init__(self, fn, rules, where, slow, needs, smoke, xfail, pages):
+    def __init__(self, fn, rules, where, slow, needs, smoke, xfail, pages, sim_args=()):
         self.fn, self.rules, self.where, self.slow, self.needs, self.smoke = fn, list(rules), where, slow, needs, smoke
+        self.sim_args = tuple(sim_args or ())
         self.xfail = xfail
         self.pages = tuple(pages) if pages else ()
         self.name = fn.__name__
@@ -107,15 +118,16 @@ class Test:
         self.doc = (fn.__doc__ or "").strip().split("\n")[0]
 
 
-def test(*rules, where="both", slow=False, needs=None, smoke=False, xfail=None, pages=None):
+def test(*rules, where="both", slow=False, needs=None, smoke=False, xfail=None, pages=None, sim_args=None):
     """Register a test: the rule IDs it checks; where it runs (both, radio, sim); slow (waits on timers);
     needs: the build flavours it needs (("tx", "tx-dry") for a transmit build's screens), else any, and the CAPS
     it needs (("bench",), ("keyup",), ("bt",), ...); smoke: in
     the short set bench.py runs beside the SDR suite; xfail: a known deviation from the rule (the reason): a
     failure is reported as xfail (not a run failure, recorded ✗), a pass as xpass (fixed: drop the mark);
-    pages: the screens it visits, by readback id ("Home", "Quick", "Zones"), for --page."""
+    pages: the screens it visits, by readback id ("Home", "Quick", "Zones"), for --page; sim_args: the simulator's
+    command-line flags for the state it needs (--sim auto starts one with them for this test alone)."""
     def deco(fn):
-        REGISTRY.append(Test(fn, rules, where, slow, needs, smoke, xfail, pages))
+        REGISTRY.append(Test(fn, rules, where, slow, needs, smoke, xfail, pages, sim_args))
         return fn
     return deco
 

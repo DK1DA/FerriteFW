@@ -161,6 +161,22 @@ def check_backup(path):
     return errs, desc
 
 
+def check_sha256(path, data):
+    """UPD-15: a release file's SHA-256 beside it (FILE.sha256, `sha256sum` format) must match the file; no
+    checksum file, nothing to check. (The minisign signature isn't checked yet: releases carry none.)"""
+    import hashlib
+    side = path + ".sha256"
+    if not os.path.exists(side):
+        return []
+    want = (open(side).read().split() or [""])[0].lower()
+    got = hashlib.sha256(data).hexdigest()
+    if want != got:
+        return [f"{os.path.basename(path)}: its SHA-256 is {got[:16]}..., but {os.path.basename(side)} says "
+                f"{want[:16]}...: a corrupted or tampered download"]
+    print(f"{os.path.basename(path)}: SHA-256 matches {os.path.basename(side)}")
+    return []
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("port", help="serial port of the programming cable ('-' with --dry-run)")
@@ -178,6 +194,7 @@ def main():
     is_btf = a.file.upper().endswith(".BTF")
     img = btf.unpack(data)[0] if is_btf else data
     errs = btf.check_image(img, btf.BOOT_MAX if is_btf else btf.APP_MAX)
+    errs += check_sha256(a.file, data)
     if FERRITE_MARK in img:
         if a.backup:
             berrs, desc = check_backup(a.backup)

@@ -89,6 +89,10 @@ const ROWS: [(&str, Val<()>); 20] = [
         if paused(c, b) {
             return AMBER;
         }
+        if c.app.relay_mask != 0 {
+            b.set(b"Off: HF needs the relay"); // SBAR-17, WATCH-11.3
+            return TEXT;
+        }
         b.set(WATCH_TEXT[c.app.watch as usize % 3].as_bytes());
         if c.app.paused_until.is_some() {
             b.push(" \u{b7} paused".as_bytes());

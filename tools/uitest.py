@@ -12,7 +12,8 @@ manual's rules. The tests are in tools/uitests/*.py, each tagged with the rule I
     tools/uitest.py --sim auto --check-pages            # run all; report tests whose pages= tags differ from what
                                                         #   they visited (--fix-pages: write the tags from the run)
     tools/uitest.py --smoke                             # the short smoke set (bench.py runs it beside the SDR suite)
-    tools/uitest.py --slow                              # also the tests that wait on timers (menu timeout, auto lock)
+    tools/uitest.py --slow                              # on the radio, also the tests that wait on timers (menu
+                                                        #   timeout, auto lock); the simulator always runs them
     tools/uitest.py --record                            # write a result row per rule into docs/test-plan/*.md
     tools/uitest.py --with reset,fm-station             # also the tests that need these (needs=, uitests/core.py
                                                         #   CAPS: a factory reset, a local FM station, ...)
@@ -485,6 +486,8 @@ def select(tests, a, sim):
             continue
         if a.smoke and not t.smoke:
             continue
+        if sim and core.radio_only(t):
+            continue  # never the simulator's: not collected, so not a skip (--list marks them)
         out.append(t)
     return out
 
@@ -500,7 +503,7 @@ def run_one(r, state, tst, sim, build, a):
         res.update(result="skip", why="radio only: the simulator doesn't model it")
     elif tst.where == "sim" and not sim:
         res.update(result="skip", why="simulator only")
-    elif tst.slow and not a.slow:
+    elif tst.slow and not a.slow and not sim:
         res.update(result="skip", why="slow (waits on a timer): --slow")
     elif unmet:
         res.update(result="skip", why=unmet)
@@ -755,7 +758,7 @@ def free_port():
     return p
 
 
-def start_sim(secs=3600, quiet=True, build=True, ports=None):
+def start_sim(secs=3600, quiet=True, build=True, ports=None, extra=()):
     exe = os.path.join(FERRITE, "target", "debug", "ferrite-sim")
     if build:
         if not quiet:
@@ -764,7 +767,7 @@ def start_sim(secs=3600, quiet=True, build=True, ports=None):
         if b.returncode != 0 or not os.path.exists(exe):
             sys.exit("can't build the simulator")
     port, bt = ports or (free_port(), free_port())
-    p = subprocess.Popen([exe, "--term-headless", str(secs), "--term-tcp", str(port), "--bt-tcp", str(bt)],
+    p = subprocess.Popen([exe, "--term-headless", str(secs), "--term-tcp", str(port), "--bt-tcp", str(bt), *extra],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(50):
         try:
@@ -813,7 +816,7 @@ def run_parallel(a, sel):
     tmp = tempfile.mkdtemp(prefix="uitest-j-")
     order = {(t.module, t.name): i for i, t in enumerate(sel)}
     times = last_times()
-    queue = sorted(units(sel), key=lambda u: -sum(times.get((t.module, t.name), 5) for t in u))
+    queue = sorted(units(sel), key=lambda u: -sum(times.get((t.module, t.name), 40 if t.slow else 5) for t in u))
     total = len(queue)
     lock, done, procs = threading.Lock(), [], []
     b = subprocess.run(["cargo", "build", "-q", "-p", "ferrite-sim"], cwd=FERRITE)  # once, before the workers start
@@ -858,7 +861,18 @@ def run_parallel(a, sel):
                 u = queue.pop(0)
             k += 1
             tag = f"w{w}-{k}"
-            cmd = [sys.executable, os.path.abspath(__file__), "--sim", port, "--bt", bt,
+            extra = next((t.sim_args for t in u if t.sim_args), ())
+            own = None
+            if extra:
+                # The state the test needs (sim_args): a simulator of its own, for this unit alone.
+                try:
+                    own = start_sim(quiet=True, build=False, ports=ports(), extra=extra)
+                except BaseException as e:  # noqa: BLE001
+                    with lock:
+                        done.append((tag, [t.name for t in u], f"simulator {' '.join(extra)}: {e!r}"))
+                    continue
+            u_port, u_bt = (own[1], own[2]) if own else (port, bt)
+            cmd = [sys.executable, os.path.abspath(__file__), "--sim", u_port, "--bt", u_bt,
                    "--only", ",".join(f"{t.module}.{t.name}" for t in u),
                    "--session", os.path.join(tmp, tag), "--results", tmp]
             for flag, opt in (("page", "--page"), ("build", "--build"), ("commit", "--commit"),
@@ -868,7 +882,11 @@ def run_parallel(a, sel):
             for flag in ("smoke", "slow", "stop", "verbose"):
                 if getattr(a, flag, False):
                     cmd.append("--" + flag)
-            r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            try:
+                r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            finally:
+                if own:
+                    own[0].terminate()
             out = r.stdout + ("" if r.returncode in (0, 1) else f"\n(exit {r.returncode})")
             with lock:
                 done.append((tag, [t.name for t in u], out))
@@ -938,7 +956,8 @@ def main_args(argv=None):
     ap.add_argument("--auto", action="store_true", help="only the tests the changes since the last on-radio run "
                     "touch: the smoke set, tests of rule IDs in the changed lines, and each changed area's tests")
     ap.add_argument("--since", help="--auto: the commit to compare with (default: the last on-radio UI run's)")
-    ap.add_argument("--slow", action="store_true", help="also the tests that wait on timers")
+    ap.add_argument("--slow", action="store_true", help="also the tests that wait on timers (on the radio; the "
+                    "simulator always runs them)")
     ap.add_argument("--list", action="store_true", help="list the tests and the rules they check")
     ap.add_argument("--results", default=RESULTS, help="results root (default %(default)s)")
     ap.add_argument("--session", help="an existing session directory to write ui/ into")
@@ -978,7 +997,7 @@ def main(argv=None):
     if a.list:
         sel = select(tests, a, False)
         for t in sel:
-            say(f"{t.module}.{t.name:40s} {', '.join(t.rules)}{'  [radio only]' if t.where == 'radio' else ''}"
+            say(f"{t.module}.{t.name:40s} {', '.join(t.rules)}{'  [radio only]' if core.radio_only(t) else ''}"
                 f"{'  [slow]' if t.slow else ''}{'  [smoke]' if t.smoke else ''}"
                 f"  pages: {', '.join(t.pages) if t.pages else '(untagged)'}")
         ids = sorted({r for t in sel for r in t.rules}, key=rule_key)
@@ -994,11 +1013,13 @@ def main(argv=None):
             return 1
         return 0
     proc = None
-    port, sim = a.port, a.port.startswith("tcp:")
+    port, sim = a.port, a.port.startswith("tcp:") or bool(a.sim)
+    sel = select(tests, a, sim)
+    # --sim auto: in parallel simulators with -j N, and whenever a test needs a simulator of its own (sim_args).
+    parallel = a.sim == "auto" and (a.jobs > 1 or any(t.sim_args for t in sel))
     if a.sim:
-        sim = True
         if a.sim == "auto":
-            if a.jobs > 1:
+            if parallel:
                 port = "auto -j %d" % a.jobs
             else:
                 proc, port, sim_bt = start_sim(quiet=not a.verbose)
@@ -1007,9 +1028,12 @@ def main(argv=None):
             port = a.sim
     if a.record and sim:
         sys.exit("--record on the simulator: simulator runs are never recorded (the test plan holds radio results)")
-    sel = select(tests, a, sim)
+    if sim:
+        left_out = [t for t in select(tests, a, False) if core.radio_only(t)]
+        if left_out:
+            say(f"{len(left_out)} radio-only tests not collected on the simulator (`--list` marks them [radio only])")
     try:
-        summary = run_parallel(a, sel) if a.sim == "auto" and a.jobs > 1 else run(a, port, sim, sel)
+        summary = run_parallel(a, sel) if parallel else run(a, port, sim, sel)
     finally:
         if proc:
             proc.terminate()

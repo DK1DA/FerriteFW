@@ -2548,3 +2548,27 @@ fn card_shows_dtmf_heard() {
     t.wait(100);
     assert!(line_of(&t, "card A").contains("hint=\"Heard 88.5\""));
 }
+
+/// WATCH-11.2, WATCH-11.3, SBAR-17: when the relay cancels watch (the Radio task marks the watched slots that need
+/// the other relay state), a toast says so once, and the Status page's Watch row says why until watch resumes.
+#[test]
+fn relay_cancel_toast_and_status_row() {
+    let mut t = T::new();
+    t.app.set_watch(2);
+    t.wait(100);
+    t.app.toast = None;
+    t.live.slots[1].relay = true;
+    t.live.slots[2].relay = true;
+    t.wait(100);
+    let toast = t.app.toast.expect("a toast when the relay cancels watch");
+    assert_eq!((toast.head.as_bytes(), toast.body.as_bytes()), (&b"Watch off"[..], &b"HF needs the relay"[..]));
+    t.app.toast = None;
+    t.wait(100);
+    assert!(t.app.toast.is_none(), "said once, not every tick");
+    t.open(Dest::Status);
+    assert!(readback(&t).iter().any(|l| l.contains("Off: HF needs the relay")), "{:?}", readback(&t));
+    t.live.slots[1].relay = false;
+    t.live.slots[2].relay = false;
+    t.wait(100);
+    assert!(!readback(&t).iter().any(|l| l.contains("HF needs the relay")), "{:?}", readback(&t));
+}

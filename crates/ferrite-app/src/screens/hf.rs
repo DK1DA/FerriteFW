@@ -51,6 +51,8 @@ pub fn mode_name(m: u8) -> &'static str {
 
 /// Chip 1 takes over from 18 MHz (HF-9, HF-10).
 const CHIP1_FROM: Freq10 = mhz(18);
+/// The SI4732 tunes AM up to 30 MHz; above it chip 1 takes AM too (HF-9, HF-10).
+const SI_TOP: Freq10 = mhz(30);
 const TOP: Freq10 = mhz(64);
 const BOTTOM: Freq10 = 15_000; // 150 kHz
 
@@ -156,11 +158,12 @@ impl HfMem {
         matches!(self.mode, USB | LSB | CW)
     }
 
-    /// 0 SI4732 AM, 1 SI4732 SSB/CW, 2 chip 1 (HF-10).
+    /// 0 SI4732 AM, 1 SI4732 SSB/CW, 2 chip 1 (HF-10: FM from 18 MHz, and AM above the SI4732's 30 MHz, as the
+    /// Radio task tunes them).
     fn rx(&self) -> usize {
         if self.ssb() {
             1
-        } else if self.freq >= CHIP1_FROM && self.mode == FM {
+        } else if self.freq >= CHIP1_FROM && (self.mode == FM || self.freq > SI_TOP) {
             2
         } else {
             0
@@ -297,7 +300,7 @@ const SEEK_MS: u32 = 17_000;
 /// HF-31: seek is the SI4732's, in AM: below 30 MHz, not in SSB or CW (the patch has no seek).
 fn seek(app: &mut App, up: bool) {
     let h = app.set.hf;
-    if h.mode != AM || h.freq >= mhz(30) {
+    if h.mode != AM || h.freq >= SI_TOP {
         return app.show_toast(b"Seek", b"AM below 30 MHz only", false);
     }
     app.radio.hf_seeking = true;
@@ -852,5 +855,22 @@ mod band_list_tests {
         assert_eq!(khz(b("LW"), 2), 9);
         assert_eq!(STEPS_SSB[first_step(b("40 m"), 0) as usize], 10);
         assert_eq!(STEPS_AM[HfMem::DEFAULT.step as usize], 500);
+    }
+}
+
+#[cfg(test)]
+mod rx_tests {
+    use super::*;
+
+    /// HF-10: AM on 18-30 MHz is the SI4732's; above 30 MHz (6 m) chip 1's, as the Radio task tunes it; FM from
+    /// 18 MHz chip 1's; below 18 MHz the SI4732.
+    #[test]
+    fn am_above_30_mhz_is_chip_1() {
+        let at = |freq, mode| HfMem { freq, mode, ..HfMem::DEFAULT }.chip1();
+        assert!(!at(mhz(9), AM));
+        assert!(!at(2_718_500, AM), "CB AM: the SI4732");
+        assert!(!at(mhz(30), AM), "30 MHz is still the SI4732's");
+        assert!(at(5_040_000, AM), "6 m AM: chip 1");
+        assert!(at(2_718_500, FM));
     }
 }

@@ -100,8 +100,7 @@ def side1_tap_latches_monitor(t):
         t.put_back(stopped)
 
 
-@test("SQL-9.1", xfail="SIDE1 held alone does nothing: only the tap (monitor latch) and SIDE1 + knob/arrows are "
-                     "built (home.rs; sim, Oct 14, 2026)", pages=("Home",))
+@test("SQL-9.1", pages=("Home",))
 def side1_held_opens_while_held(t):
     """SIDE1 held: the squelch is open while it is held, and closes when it is let go."""
     stopped = quiet_slot(t)

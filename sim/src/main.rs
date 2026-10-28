@@ -51,6 +51,10 @@ fn main() {
         // No window: the radio and its cable only, for scripted terminal checks (`--term-tcp PORT` for TCP).
         let tcp = arg("--term-tcp").and_then(|s| s.parse::<u16>().ok());
         let mut sim = ferrite_sim::simcore::SimCore::new(1, false);
+        // `--no-ssb-patch`: a radio without the SSB patch (HF-20, SELF-6, INST-14; the UI tests' sim_args).
+        if args.iter().any(|a| a == "--no-ssb-patch") {
+            sim.device_mut().selftest.ssb_patch = false;
+        }
         let mut cable = match tcp {
             Some(p) => termport::Port::tcp(p),
             None => termport::Port::pty(),

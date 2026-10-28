@@ -40,7 +40,7 @@ def relay_cancels_watch(t):
         t.put_back(stopped)
 
 
-@test("WATCH-11.2", xfail="no toast when the relay cancels watch (sim, Oct 14, 2026)", pages=("Home", "Status"))
+@test("WATCH-11.2", pages=("Home", "Status"))
 def relay_cancel_toast(t):
     """The same retune: a toast "Watch off: HF needs the relay"."""
     stopped = t.stop_scans()
@@ -53,8 +53,7 @@ def relay_cancel_toast(t):
         t.put_back(stopped)
 
 
-@test("WATCH-11.3", "SBAR-17", xfail="the Status Watch row still reads the watch set (\"A+B+C\") when the relay "
-                                     "cancels watch (sim, Oct 14, 2026)", pages=("Home", "Status"))
+@test("WATCH-11.3", "SBAR-17", pages=("Home", "Status"))
 def relay_cancel_status_row(t):
     """The same retune: Status's Watch row "Off: HF needs the relay"."""
     stopped = t.stop_scans()
