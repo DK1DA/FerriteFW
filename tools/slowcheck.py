@@ -49,8 +49,10 @@ SLOW_TABLES = [
 ]
 # Constant tables that hold numbers only: never scanned for function pointers, since two neighbouring samples can
 # happen to look like one (Oct 24, 2026: two of udsp's sine values read as uaprs::build::message's address, a false
-# "slow call" from the DSP task that came and went with the layout).
-NUMBER_TABLES = re.compile(r"^udsp::trig::(SIN|COS)\b")
+# "slow call" from the DSP task that came and went with the layout). Oct 27, 2026: stuck::NAMES' bytes "TT", 4, 8
+# (the side PTT bit and its length) read as a .slow_rodata address once the txeq merge grew that part, a false slow
+# table; txtest's pulse-shape taps, a false pointer into .slow_text.
+NUMBER_TABLES = re.compile(r"^(udsp::trig::(SIN|COS)|ferrite_core::stuck::NAMES|ferrite_core::txtest::(RRC|GAUSS))\b")
 
 # The tasks run by the interrupt executors (main.rs).
 IRQ_TASKS = re.compile(r"TaskStorage.*7ferrite5tasks(5radio|3dsp|5input)11___task_task.*4poll")
@@ -269,6 +271,8 @@ def main(elf, verbose):
         a, off, size = sec[name]
         for i in range(0, size - 3, 4):
             v = struct.unpack_from("<I", data, off + i)[0]
+            if any(n0 <= a + i < n1 for n0, n1 in numbers):
+                continue  # samples, not pointers
             if v & 1 and lo <= v & ~1 < hi:
                 ptrs.add(f"{name} 0x{a + i:08x} (after {owner(a + i)[:60]}) -> {owner(v & ~1)[:80]}")
     for f, vs in lits.items():
