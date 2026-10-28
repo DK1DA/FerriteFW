@@ -1089,11 +1089,11 @@ impl App {
             if self.ptt_block & screens::qmenu::ptt_bit(k) != 0 {
                 return;
             }
-            // KEY-14: with Lock covers "Keys and PTT" (0 9 1 2) a locked radio doesn't key either
-            if self.locked && self.set.lock_ptt {
+            // KEY-14.3: with Lock covers "All" (0 9 1 2) a locked radio doesn't key either
+            if self.locked && self.set.lock() == settings::Lock::All {
                 return self.locked_toast();
             }
-            // KEY-7: from any screen; works locked too (KEY-14). Each screen says what PTT does there. PTT B keys
+            // KEY-7: from any screen; works locked too (KEY-14.1, KEY-14.2). Each screen says what PTT does there. PTT B keys
             // slot B; PTT A and the side connector's key the active slot (decision 77, as nicFW).
             let s = self.ptt_target(k);
             // APRS-18: in compose any PTT sends; a PTT that would key the APRS slot opens compose from any screen.
@@ -1133,7 +1133,7 @@ impl App {
         match self.keys.release(key, now) {
             Some(e) if e.press == Press::Short => self.on_key(e, store),
             // The release after a long press: only the screen hears it (the shortcut map runs its shortcut).
-            Some(e) if !self.locked => self.screen.key(self, e, store),
+            Some(e) if !self.locked || self.lock_sides() && matches!(e.key, Key::Side(_)) => self.screen.key(self, e, store),
             _ => {}
         }
         self.reconcile_mode(); // MODE-2: PTT up, or what the key did
@@ -1149,8 +1149,8 @@ impl App {
         self.pressed = now;
         self.out.push(RadioCmd::Activity);
         self.sweep_hold();
-        if self.locked && !self.side1_squelch() {
-            return self.locked_toast(); // KEY-14; SIDE1 + knob, the squelch, still works (SQL-11)
+        if self.locked && !(self.lock_sides() && self.side1_squelch()) {
+            return self.locked_toast(); // KEY-14; with the keypad's lock SIDE1 + knob, the squelch, works (SQL-11)
         }
         if screens::qmenu::knob(self, d as i32) {
             return; // HOME-17: brightness while the quick menu is up
@@ -1307,17 +1307,19 @@ impl App {
             }
             (Key::Hash, Long) => {
                 self.locked = !self.locked;
-                return self.show_toast(if self.locked { b"Keys locked" } else { b"Keys unlocked" }, b"", false);
+                return self.lock_toast();
             }
             _ => {}
         }
         if self.locked {
-            // KEY-14, SQL-11: PTT (through key_down/key_up), SIDE1 (monitor: the screen's own SIDE1) and SIDE1 +
-            // ▲▼ (squelch, as SIDE1 + knob: [`App::knob`]) still work; SIDE1 + ◀▶ (the clarifier, a retune) doesn't.
+            // KEY-14, SQL-11: PTT goes through key_down/key_up. The keypad's lock (KEY-14.1) lets the side keys
+            // through (SIDE1 monitor, SIDE2 scan and counter: the screen's own) and SIDE1 + ▲▼ (squelch, as SIDE1 +
+            // knob: [`App::knob`]); SIDE1 + ◀▶ (the clarifier, a retune) and SIDE2 + ▲▼ (a tuning step) stay locked.
+            let sides = self.lock_sides();
             match (e.key, e.press) {
                 (Key::Ptt(_), _) => {}
-                (Key::Side(1), _) => self.screen.key(self, e, store),
-                (Key::Up | Key::Down, Short | Repeat) if self.side1_squelch() => self.screen.key(self, e, store),
+                (Key::Side(_), _) if sides => self.screen.key(self, e, store),
+                (Key::Up | Key::Down, Short | Repeat) if sides && self.side1_squelch() => self.screen.key(self, e, store),
                 _ => self.locked_toast(),
             }
             return;
@@ -1396,7 +1398,27 @@ impl App {
         self.keys.is_held(Key::Side(1)) && matches!(self.screen, Screen::Home | Screen::Squelch(_))
     }
 
+    /// KEY-13: the lock's toast names what it covers, and whether PTT still works.
+    pub(crate) fn lock_toast(&mut self) {
+        let (head, body): (&[u8], &[u8]) = match (self.locked, self.set.lock()) {
+            (false, _) => (b"Keys unlocked", b""),
+            (true, settings::Lock::Keypad) => (b"Keypad locked", b"PTT, side keys work"),
+            (true, settings::Lock::AllButPtt) => (b"All keys locked", b"PTT works"),
+            (true, settings::Lock::All) => (b"All keys locked", b"PTT too"),
+        };
+        self.show_toast(head, body, false);
+    }
+
+    /// Locked with the keypad's lock (KEY-14.1): the side keys still work.
+    fn lock_sides(&self) -> bool {
+        self.set.lock() == settings::Lock::Keypad
+    }
+
     fn locked_toast(&mut self) {
+        // KEY-14.4: a side key held through a refused key or knob step gives nothing at its release either (SIDE2's
+        // scan, SIDE1's monitor), as a modifier that was used
+        self.keys.used(Key::Side(1));
+        self.keys.used(Key::Side(2));
         self.show_toast(b"Locked:", b"hold # to unlock", false); // KEY-14
     }
 

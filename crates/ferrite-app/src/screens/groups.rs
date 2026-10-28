@@ -252,7 +252,7 @@ pub(crate) const SUBS: [((u8, u8), &[Entry]); 22] = [
     ]),
     ((9, 1), &[
         Entry("Auto lock|Off|Lock the keys after a time."),
-        Entry("Lock covers|Keys|Keys, or keys and PTT."),
+        Entry("Lock covers|Keypad|Keypad, all but PTT, or all."),
         Entry("Key test||Each key's code, name and press."),
         Entry("Shortcuts||What holding each digit on home does."),
     ]),
@@ -511,7 +511,15 @@ static SETTINGS: [Setting; 95] = [
     field!([8, 8, 2], tail_mode: u8, Kind::Pick(&TAIL_MODES), SlotTones),
     field!([8, 8, 3], tail_phase: u8, Kind::Pick(&TAIL_PHASES), TxTones),
     field!([9, 1, 1], auto_lock: u8, Kind::Round(AUTO_LOCK_TIMES.len() as u8, auto_lock_text), Nothing), // KEY-20
-    field!([9, 1, 2], lock_ptt: bool, Kind::Flip(&["Keys", "Keys and PTT"]), Nothing),
+    // KEY-14: the menu's order isn't the stored byte's (an old "Keys and PTT" is 1, now All, last)
+    Setting {
+        path: [9, 1, 2],
+        term: true,
+        kind: Kind::Pick(&LOCK_MODES),
+        get: |s| Lock::index(s.lock_mode),
+        set: |s, v| s.lock_mode = Lock::stored(v),
+        tell: Tell::Nothing,
+    },
     field!([9, 2, 1], bt: bool, Kind::Flip(&ON_OFF), Nothing),
     field!([9, 2, 3], cable_port: u8, Kind::Pick(&CABLE_PORTS), Nothing),
     field!([9, 5, 0], sq_chip: bool, Kind::Flip(&["Software", "Chip"]), Nothing), // SQL-18.3

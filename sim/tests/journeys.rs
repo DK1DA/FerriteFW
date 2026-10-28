@@ -307,11 +307,11 @@ fn fm_broadcast() {
     r.run("menu 0 3 1; expect screen \"FM broadcast\"; expect text \"MHz\"; expect text \"Signal\"");
 }
 
-/// Hold # locks the keys and shows it; locked, OK does nothing; hold # unlocks (KEY-13, KEY-14).
+/// Hold # locks the keys and shows it; locked, OK does nothing; hold # unlocks (KEY-13, KEY-14.1, KEY-14.4).
 #[test]
 fn key_lock() {
     let mut r = Radio::new();
-    r.run("hold HASH; expect text \"Keys locked\"");
+    r.run("hold HASH; expect text \"Keypad locked\"");
     assert!(r.sim.app().locked());
     r.run("press OK; expect screen \"Home\"; expect text \"hold # to unlock\"");
     r.run("hold HASH; expect text \"Keys unlocked\"");
