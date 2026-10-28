@@ -203,4 +203,55 @@ mod tests {
         assert_eq!(r.flicker, 0, "{r:?}");
         assert_eq!(r.changed, 20);
     }
+
+    /// DISP-25: a pixel that showed two different values on the way flickers even when the second one is what it
+    /// ends with; the heat map counts flickering live passes only, until cleared. No pass begun: nothing to report.
+    #[test]
+    fn several_intermediate_values_and_the_heat_map() {
+        let mut fb = FrameBuffer::new();
+        assert!(fb.heat().is_none());
+        assert_eq!(fb.end_pass(true), PassReport::default());
+        fb.window(0, 0, 0, 0);
+        fb.push(5, 1);
+        for heat in [true, true, false] {
+            fb.begin_pass();
+            fb.window(0, 0, 0, 0);
+            fb.push_buf(&[1, 2, 3, 2]);
+            let r = fb.end_pass(heat);
+            assert_eq!((r.flicker, r.writes, r.changed), (1, 4, 1));
+            fb.window(0, 0, 0, 0);
+            fb.push(5, 1);
+        }
+        assert_eq!(fb.heat().unwrap()[0], 2, "two live passes");
+        fb.clear_heat();
+        assert!(fb.heat().unwrap().iter().all(|&h| h == 0));
+    }
+
+    /// A window past the right edge writes only what is on the panel, and the cursor wraps to the window's next
+    /// row as the ST7789's does.
+    #[test]
+    fn writes_off_the_panel_are_dropped() {
+        let mut fb = FrameBuffer::new();
+        fb.window(W - 2, 0, W + 1, 1);
+        fb.push(9, 8);
+        assert_eq!((fb.at(W - 2, 0), fb.at(W - 1, 0), fb.at(W - 2, 1), fb.at(W - 1, 1)), (9, 9, 9, 9));
+        assert_eq!(fb.writes.iter().map(|&w| w as u32).sum::<u32>(), 4);
+        assert_eq!(fb.at(0, 1), 0, "nothing wrapped onto the next row's start");
+    }
+
+    /// RGB565 to 8-bit RGB as the C simulator's .ppm files have it, and a .ppm written reads back.
+    #[test]
+    fn rgb_and_ppm_round_trip() {
+        let mut fb = FrameBuffer::new();
+        fb.window(0, 0, 1, 0);
+        fb.push_buf(&[0xFFFF, 0xF81F]);
+        assert_eq!(&fb.rgb()[..9], &[0xF8, 0xFC, 0xF8, 0xF8, 0x00, 0xF8, 0, 0, 0]);
+        let path = std::env::temp_dir().join(std::format!("ferrite-ui-fb-{}.ppm", std::process::id()));
+        fb.write_ppm(&path).unwrap();
+        assert_eq!(read_ppm(&path), Some(fb.rgb()));
+        std::fs::write(&path, b"P5\n1 1\n255\n\0").unwrap();
+        assert_eq!(read_ppm(&path), None, "another format");
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(read_ppm(&path), None, "no file");
+    }
 }

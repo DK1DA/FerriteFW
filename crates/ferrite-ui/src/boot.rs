@@ -144,3 +144,69 @@ fn card_static(lcd: &mut impl Panel, b: &BootInfo, o: &Owner) {
     lcd.text4(12, 277, b"FERRITE", &UI_12B, TEXT, BG);
     hint_bar(lcd, &[("Any key", "skip"), ("", "Set in the web app")]);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fb::FrameBuffer;
+
+    fn count(fb: &FrameBuffer, y0: i32, y1: i32, c: u16) -> usize {
+        (y0..y1).flat_map(|y| (0..240).map(move |x| (x, y))).filter(|&(x, y)| fb.at(x, y) == c).count()
+    }
+
+    fn info<'a>(owner: Option<Owner<'a>>, checks: &'a [Check]) -> BootInfo<'a> {
+        BootInfo { version: "v0.9.0", callsign: Some(b"va7fer"), line: Some(b"Hello"), owner, checks, note: None }
+    }
+
+    /// BOOT-10: a failed check names itself in red ("failed" when it has no value of its own) with "Any key:
+    /// continue" under it, on the logo screen even when the owner card is set.
+    #[test]
+    fn a_failed_check_shows_in_red_on_the_logo_screen() {
+        let owner = Owner { name: b"Alex", phone: b"", email: b"" };
+        let bad = [Check { label: "Flash", value: "", state: State::Fail }];
+        let b = info(Some(owner), &bad);
+        assert!(!shows_card(&b));
+        let mut fb = FrameBuffer::new();
+        draw(&mut fb, &b);
+        assert!(count(&fb, 276, 298, RED) > 50, "the check's line in red");
+        assert!((298..320).flat_map(|y| (0..240).map(move |x| (x, y))).any(|(x, y)| fb.at(x, y) != BG), "any key: continue");
+        assert!(count(&fb, 28, 140, BLUE) > 100, "the logo");
+    }
+
+    /// SETUP-11: the owner card with only a name has no contact block (no rule, no "If found"); with a phone or an
+    /// email it has. The callsign shows in capitals.
+    #[test]
+    fn the_owner_card_shows_contact_lines_only_when_set() {
+        let mut fb = FrameBuffer::new();
+        let ok = [Check { label: "Flash", value: "", state: State::Ok }];
+        let b = info(Some(Owner { name: b"Alex", phone: b"", email: b"" }), &ok);
+        assert!(shows_card(&b));
+        draw(&mut fb, &b);
+        assert_eq!(count(&fb, 113, 114, LINE), 0);
+        assert_eq!(count(&fb, 130, 190, TEXT) + count(&fb, 130, 190, SUB), 0, "no contact block");
+        draw(&mut fb, &info(Some(Owner { name: b"Alex", phone: b"", email: b"a@example.ca" }), &ok));
+        assert_eq!(count(&fb, 113, 114, LINE), COL as usize, "the rule over the contact block");
+        assert!(count(&fb, 150, 170, TEXT) > 50, "the email on the first contact line");
+        let mut up = [0u8; 16];
+        let n = upper(b"va7fer-9", &mut up);
+        assert_eq!(&up[..n], b"VA7FER-9");
+    }
+
+    /// BOOT-9: an update repaints only the status line (the logo stays as drawn: redrawing it flashed on the radio).
+    #[test]
+    fn an_update_leaves_the_logo_alone() {
+        let mut fb = FrameBuffer::new();
+        let pending = [Check { label: "GPS", value: "", state: State::Pending }];
+        let b = BootInfo { note: Some(b"Checking GPS"), ..info(None, &pending) };
+        draw(&mut fb, &b);
+        let before = fb.writes.clone();
+        update(&mut fb, &BootInfo { note: None, ..b });
+        for y in 0..270 {
+            for x in 0..240 {
+                let i = (y * 240 + x) as usize;
+                assert_eq!(fb.writes[i], before[i], "({x}, {y}) written again");
+            }
+        }
+        assert_eq!(count(&fb, 276, 298, SUB), 0, "the note cleared");
+    }
+}
