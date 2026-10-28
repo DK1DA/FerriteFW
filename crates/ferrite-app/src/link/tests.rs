@@ -1809,3 +1809,6 @@ fn ui_texts_are_the_screen_as_drawn() {
     assert!(!t.is_empty(), "{texts}");
     assert!(t.iter().any(|l| l.contains(",\"")), "texts with their place and style: {t:?}");
 }
+
+/// Zones, presets, deletes and contacts at their edges.
+mod more;

@@ -214,7 +214,7 @@ fn help_per_page() {
     assert!(r.vt.has(HELP_EDIT.lines().next().unwrap().trim_end()), "{}", r.vt.text());
 }
 
-/// TERM-1: Mail and TNC are placeholders that say so; Esc goes back.
+/// Mail and TNC (manual chapter 38) are placeholders that say so; Esc goes back.
 #[test]
 fn mail_and_tnc_pages() {
     for (key, name) in [(b'5', "Mail"), (b'6', "TNC")] {
@@ -229,7 +229,7 @@ fn mail_and_tnc_pages() {
     }
 }
 
-/// GPS-26 (TERM-11): the main menu's radio line says the GPS state and the power manager's phase.
+/// GPS-26: the main menu's radio line says the GPS state and the power manager's phase.
 #[test]
 fn main_menu_gps_line() {
     use ferrite_core::gpspower::GpsPhase;
@@ -338,7 +338,7 @@ fn monitor_nothing_yet_and_now() {
     assert!(r.vt.line(row).contains("RX"), "{}", r.vt.line(row));
 }
 
-/// TERM-11: the main menu's slot lines: a channel by number and name, a slot receiving with its signal, one
+/// The main menu's slot lines: a channel by number and name, a slot receiving with its signal, one
 /// scanning, the active one marked.
 #[test]
 fn main_menu_slot_lines() {
