@@ -16,6 +16,7 @@ mod hf;
 mod home;
 mod lowpower;
 mod msgs;
+mod posentry;
 mod scan;
 mod setup;
 mod transmit;
