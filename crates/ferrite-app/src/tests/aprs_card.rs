@@ -335,3 +335,18 @@ fn aprs_tx_shows_on_the_card() {
     assert!(!a.card_line().contains("state=\"TX\""));
     assert_eq!(red(&mut a), 0);
 }
+
+/// WATCH-16.2: while the watch leaves the APRS slot out (another slot keyed, a relay cancel), its card says
+/// "paused"; listening again, it doesn't.
+#[test]
+fn aprs_paused_shows_on_the_card() {
+    let mut a = A::new();
+    a.app.set_aprs_mode(true);
+    a.tick();
+    a.live.dropped = 1 << APRS_SLOT;
+    a.tick();
+    assert!(a.card_line().contains("state=\"paused\""), "{}", a.card_line());
+    a.live.dropped = 0;
+    a.tick();
+    assert!(!a.card_line().contains("state=\"paused\""));
+}

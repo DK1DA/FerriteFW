@@ -263,6 +263,7 @@ impl Radio {
         let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep, held: self.monitor, prio: self.kept(), aprs: self.aprs_slots, scan: self.range_scans(), first: watch::aprs_first() };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.turn(now, &cfg, sq, heard, keyed);
+        self.live.dropped = out.dropped;
         // 2a. The tone hint (TSRCH-12, TSRCH-15): on the chip listening, for the slot the watch holds for audio.
         self.hint_tick(now, listening, &sq, &toned, out.audio);
         // The channel the channel scans need next, for the UI to answer (LiveAll::want).

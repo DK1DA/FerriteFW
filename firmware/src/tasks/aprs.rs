@@ -179,6 +179,7 @@ impl Aprs {
             }
             if let Some(by) = rx.echo {
                 msgs::digipeated(app, by.as_bytes()); // APRS-36
+                store.log(&log_event(app.aprs_freq(), by.as_bytes(), b"digipeated our frame")); // APRS-36.1: findable later
             }
             if rx.changed || rx.state.is_some() {
                 extra.changed();

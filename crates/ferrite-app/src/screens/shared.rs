@@ -359,6 +359,10 @@ impl App {
         if live.tx.keyed && live.tx.slot == s && self.radio.keyed.is_none() {
             return ("TX", RED);
         }
+        // WATCH-16.2: APRS isn't listening (another slot transmits, a relay cancel): say so
+        if live.dropped & 1 << s != 0 && s == crate::aprs::APRS_SLOT && self.aprs_c() {
+            return ("paused", AMBER);
+        }
         // HOME-15: quick mute takes the state word, "RX muted" while it receives (the broadcast slot too).
         if self.mute & 1 << s != 0 && !self.relay_off(s) && !lv.relay {
             return if lv.squelch_open { ("RX muted", AMBER) } else { ("Muted", AMBER) };
@@ -391,8 +395,8 @@ impl App {
             ("RX", GREEN)
         } else if lv.scanning {
             ("scanning", SUB)
-        } else if self.paused_until.is_some() && s != self.active {
-            ("paused", SUB)
+        } else if self.paused_until.is_some() && s != self.active && !(s == crate::aprs::APRS_SLOT && self.aprs_c()) {
+            ("paused", SUB) // the APRS slot keeps listening through a pause (WATCH-16.1)
         } else {
             ("idle", SUB)
         }

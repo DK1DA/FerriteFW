@@ -122,6 +122,8 @@ pub struct Out {
     pub defer_to: Option<u8>,
     /// WATCH-17.3: APRS first ([`Cfg::first`]), for [`Hop`]'s dwell.
     pub first: bool,
+    /// WATCH-16.2: watched slots left out this tick by a key-up or a relay cancel (not by turns on a shared chip).
+    pub dropped: u8,
 }
 
 /// A slot's turn on a shared chip, or of the receive path on its chip: the active slot's, a priority slot's
@@ -218,6 +220,7 @@ impl Watch {
         let active = c.active % SLOTS as u8;
         let relay = |s: usize| Sel::rx(c.freq[s]).relay();
         let mut set = (c.set | 1 << active) & !c.off;
+        let watched = set;
         // The relay state the set is held to: the active slot's, or released when the active slot is off (BCR-15).
         let base = set & 1 << active != 0 && relay(active as usize);
         if (0..SLOTS).any(|s| set & 1 << s != 0 && relay(s) != base) {
@@ -226,9 +229,14 @@ impl Watch {
         if self.pause_until.is_some_and(|t| after(now, t)) {
             self.pause_until = None;
         }
-        if keyed || self.pause_until.is_some() {
+        if keyed {
             (set, out.paused) = (1 << active & !c.off, true);
+        } else if self.pause_until.is_some() {
+            // WATCH-16.1: the pause after a transmission (or #) keeps the APRS slot listening, so APRS isn't deaf
+            // for its 30 s
+            (set, out.paused) = ((1 << active | c.aprs & set) & !c.off, true);
         }
+        out.dropped = watched & !set;
         self.open &= set;
         let prio = c.prio & set;
         out.prio = prio;
@@ -537,6 +545,26 @@ mod tests {
     /// A on 2 m and C on airband share chip 0; B on 70 cm has chip 1.
     fn cfg() -> Cfg {
         Cfg { set: 0b111, active: 0, freq: [mhz(146) + 52_000, mhz(443) + 47_500, mhz(118) + 95_000], muted: 0, off: 0, held: 0, prio: 0, aprs: 0, scan: 0, first: false }
+    }
+
+    /// WATCH-16.1: a pause keeps the APRS slot listening, on its own chip or taking its turns beside the active
+    /// slot; while keyed only the active slot has a chip.
+    #[test]
+    fn pause_keeps_the_aprs_slot() {
+        for fc in [mhz(144) + 39_000, mhz(445)] {
+            let mut w = Watch::new();
+            let c = Cfg { set: 0b111, freq: [mhz(146) + 52_000, mhz(147), fc], aprs: 0b100, prio: 0b100, first: true, ..cfg() };
+            w.pause(0, 30);
+            let (mut on_b, mut on_c) = (0, 0);
+            for t in (0..10_000).step_by(10) {
+                let o = w.tick(t, &c, [false; 2], false);
+                assert!(o.paused);
+                on_b += o.chip.contains(&Some(1)) as u32;
+                on_c += o.chip.contains(&Some(2)) as u32;
+            }
+            assert!(on_c > 300 && on_b == 0, "C {on_c} ticks, B {on_b}");
+            assert!(!w.tick(10_000, &c, [false; 2], true).chip.contains(&Some(2)), "keyed: the active slot alone");
+        }
     }
 
     /// WATCH-2, WATCH-17: slots sharing a chip take turns on it, 150 ms on the active slot and 70 ms on each

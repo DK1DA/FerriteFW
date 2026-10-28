@@ -375,6 +375,8 @@ pub struct LiveAll {
     pub chips: u8,
     /// Transmit: keyed, or the Radio task's refusal.
     pub tx: TxLive,
+    /// WATCH-16.2: watched slots the watch leaves out now (a key-up, a relay cancel): the APRS card says "paused".
+    pub dropped: u8,
     /// The one exclusive mode running, if any: scope, tone search, counter, FM broadcast, HF, crossband.
     pub mode: ModeLive,
     /// MODE-3: counts the exclusive modes the Radio task stopped itself because the UI's lease ran out; the UI
