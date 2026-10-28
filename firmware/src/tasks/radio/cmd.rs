@@ -62,7 +62,14 @@ impl Radio {
             }
             RadioCmd::Watch(m) => self.watch_set = m,
             RadioCmd::Awake(m) => self.keep = m,
-            RadioCmd::AprsSlot(m) => self.aprs_slots = m,
+            RadioCmd::AprsSlot(m) => {
+                // APRS-55: a slot that gains or loses APRS retunes, for the receive set-up (the unkey retunes anyway).
+                let changed = self.aprs_slots ^ m;
+                self.aprs_slots = m;
+                if self.path.keyed().is_none() {
+                    (0..SLOTS as u8).filter(|s| changed & 1 << s != 0).for_each(|s| self.retune(s));
+                }
+            }
             RadioCmd::PauseWatch(secs) => self.watcher.pause(now, secs),
             RadioCmd::Scan { slot, on } => self.scan(slot, on),
             RadioCmd::ScanSkip { slot } => {

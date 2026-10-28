@@ -19,6 +19,9 @@ pub struct RxSetup {
     pub rx_tone: u16,
     /// Tail elimination on receive (TONE-6): with no receive tone, the 55 Hz tail mutes.
     pub rx_tail: bool,
+    /// APRS-55 (decision 309): the APRS slot's receive data set-up: an FM tune writes [`DATA_RX_AF`] into REG_2B.
+    /// REG_28's noise gate and REG_73's AFC are [`rx_data`]'s.
+    pub data: bool,
 }
 
 /// Tune a chip to receive with no settle wait (stock's order): [`wake`], then [`tune_rest`]. The Radio task does
@@ -36,9 +39,36 @@ pub fn tune_rest<B: Bus>(bk: &mut Bk4829<B>, s: &RxSetup) {
     bk.set_freq(s.freq * 10);
     bk.bandwidth(if s.narrow { Bandwidth::Narrow } else { Bandwidth::Wide });
     bk.demod(if s.am { Demod::Am } else { Demod::Fm });
+    if s.data && !s.am {
+        // APRS-55: over demod's FM REG_2B (0x0000), so no read.
+        bk.write(bk4829::reg::AF_FILTERS, DATA_RX_AF);
+    }
     subtone(bk, s.rx_tone, s.rx_tail);
     bk.af_gain_rx(); // REG_48 0xB2BF, stock's receive level (RX-* / SND-2: the knob is the volume)
     bk.rx_on();
+}
+
+/// APRS-55 (decision 309): REG_2B for the APRS slot's FM receive (1 = off): bit 10 the 300 Hz high-pass and bit 8
+/// de-emphasis. The 3 kHz low-pass (bit 9) stays on: the chip's fixed receive wall near 3.1 kHz is there either way,
+/// and the recorded-audio study (`ferrite-app/tests/rxaf_study.rs`) decoded the same with or without it.
+pub const DATA_RX_AF: u16 = 1 << 10 | 1 << 8;
+/// REG_28<8>: the receive AF noise gate, on from the start-up's 0x0B40; stock's flat mode 8 clears it.
+pub const NOISE_GATE: u16 = 1 << 8;
+/// REG_73<4>: AFC, 1 = off. Never written otherwise (reset 0x4682: on, at the widest range); stock's flat mode 8
+/// sets it.
+pub const AFC_OFF: u16 = 1 << 4;
+
+/// APRS-55 (decision 309): REG_28's noise gate off and REG_73's AFC off for the APRS slot's receive (`on`), both back
+/// on for any other; each register's other bits kept, and written only when the bit changes. The Radio task calls
+/// it after [`tune_rest`] when the chip's set-up changes kind (and again after the chip has slept).
+pub fn rx_data<B: Bus>(bk: &mut Bk4829<B>, on: bool) {
+    for (r, bit, set) in [(0x28, NOISE_GATE, !on), (0x73, AFC_OFF, on)] {
+        let v = bk.read(r);
+        let want = if set { v | bit } else { v & !bit };
+        if want != v {
+            bk.write(r, want);
+        }
+    }
 }
 
 /// A wait that lets the rest of the firmware run (the Radio task's `Timer::after_millis`; PWR-21's waits are a few

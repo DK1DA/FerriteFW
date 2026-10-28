@@ -209,6 +209,9 @@ struct Radio {
     /// SQL-17: each chip's squelch open delay as last written (true: 0, for a scan step or the strip's look; false:
     /// stock's 7); None after a sleep or a scope start, so the next look or tick writes it.
     open_fast: [Option<bool>; 2],
+    /// APRS-55 (decision 309): each chip's REG_28 noise gate and REG_73 AFC as last set (true: off, the APRS slot's
+    /// data set-up); None after a sleep, so the next tune writes them.
+    data_rx: [Option<bool>; 2],
     /// When the battery was last read (PWR-20).
     bat_at: Option<u32>,
     si: Si4732<SiBus>,
@@ -714,6 +717,7 @@ pub async fn task() {
         aprs_sq: [ferrite_core::aprssq::AprsSq::NEW; 2],
         sq_key: [None; 2],
         open_fast: [None; 2],
+        data_rx: [None; 2],
         path: Path::new(),
         muted: false,
         si_used: false,

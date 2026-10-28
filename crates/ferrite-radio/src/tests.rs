@@ -347,7 +347,7 @@ fn bk() -> Bk4829<RecBus> {
 #[test]
 fn tune_writes_stocks_am_and_fm() {
     let mut b = bk();
-    chip::tune(&mut b, &RxSetup { freq: mhz(118) + 95_000, narrow: false, am: true, rx_tone: 0, rx_tail: false });
+    chip::tune(&mut b, &RxSetup { freq: mhz(118) + 95_000, narrow: false, am: true, rx_tone: 0, rx_tail: false, data: false });
     let bus = b.release();
     assert_eq!((bus.last(0x42), bus.last(0x2A), bus.last(reg::AF_FILTERS)), (Some(0x6F5C), Some(0x7434), Some(0x0500)));
     assert_eq!(bus.regs[reg::FUNC2 as usize] & 1, 1, "REG_31 bit 0");
@@ -355,7 +355,7 @@ fn tune_writes_stocks_am_and_fm() {
     assert_eq!(bus.writes.last(), Some(&(reg::POWER, 0xBFF1)), "receive on last");
     assert!(bus.writes.iter().rposition(|w| w.0 == reg::AF_OUT).unwrap() < bus.writes.len() - 2, "muted first");
     let mut b = bk();
-    chip::tune(&mut b, &RxSetup { freq: VHF, narrow: true, am: false, rx_tone: 0, rx_tail: false });
+    chip::tune(&mut b, &RxSetup { freq: VHF, narrow: true, am: false, rx_tone: 0, rx_tail: false, data: false });
     let bus = b.release();
     assert_eq!((bus.last(0x42), bus.last(0x2A), bus.last(reg::AF_FILTERS)), (Some(0x6B5A), Some(0x7400), Some(0)));
     assert_eq!(bus.regs[reg::FUNC2 as usize] & 1, 0);
@@ -370,7 +370,7 @@ fn tune_writes_stocks_am_and_fm() {
 fn tune_writes_stocks_receive_level() {
     for (narrow, am, filter) in [(false, false, 0x3028), (true, false, 0x4008), (false, true, 0x3028)] {
         let mut b = bk();
-        chip::tune(&mut b, &RxSetup { freq: if am { mhz(118) + 95_000 } else { VHF }, narrow, am, rx_tone: 0, rx_tail: false });
+        chip::tune(&mut b, &RxSetup { freq: if am { mhz(118) + 95_000 } else { VHF }, narrow, am, rx_tone: 0, rx_tail: false, data: false });
         let bus = b.release();
         assert_eq!(bus.last(reg::AF_GAIN), Some(bk4829::AF_GAIN_RX), "REG_48 (narrow {narrow}, am {am})");
         assert_eq!(bk4829::AF_GAIN_RX, 0xB2BF);
@@ -385,7 +385,7 @@ fn tune_writes_stocks_receive_level() {
 fn tune_sets_the_subtone_detector() {
     let tuned = |rx_tone: u16, rx_tail: bool| {
         let mut b = bk();
-        chip::tune(&mut b, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone, rx_tail });
+        chip::tune(&mut b, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone, rx_tail, data: false });
         b.release()
     };
     assert_eq!(tuned(0, false).last(reg::SUBTONE), Some(0));
@@ -410,7 +410,7 @@ fn tone_probe_and_restore() {
     assert_eq!(bus.writes, [(reg::SUBTONE, 51), (reg::CTC, 0x0AD7)], "only the detector registers");
     for (rx_tone, rx_tail) in [(1000, false), (0x8000 | 0o23, false), (0x8000 | 0x4000 | 0o754, false), (0, false), (0, true)] {
         let mut t = bk();
-        chip::tune(&mut t, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone, rx_tail });
+        chip::tune(&mut t, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone, rx_tail, data: false });
         let tuned = t.release();
         let mut r = bk();
         chip::tone_probe(&mut r);
@@ -677,7 +677,7 @@ fn dcs_rx_polarity_is_stocks() {
     for (inverted, r51) in [(false, 0xA000 | 51), (true, 0x8000 | 51)] {
         let mut b = bk();
         let tone = 0x8000 | if inverted { 0x4000 } else { 0 } | 0o23;
-        chip::tune(&mut b, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone: tone, rx_tail: false });
+        chip::tune(&mut b, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone: tone, rx_tail: false, data: false });
         let bus = b.release();
         assert_eq!(bus.last(reg::SUBTONE), Some(r51), "inverted {inverted}");
         let at = bus.first(reg::SUBTONE).unwrap();
@@ -1041,7 +1041,7 @@ fn sleep_and_wake_as_stock() {
     let bus = b.release();
     assert_eq!(bus.writes, [(reg::POWER, 0), (reg::LDO, 0x1D00)]);
     let mut b = bk();
-    chip::tune(&mut b, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone: 0, rx_tail: false });
+    chip::tune(&mut b, &RxSetup { freq: VHF, narrow: false, am: false, rx_tone: 0, rx_tail: false, data: false });
     let bus = b.release();
     assert_eq!(bus.writes.first(), Some(&(reg::LDO, 0x9D1F)));
     assert_eq!(bus.writes.last(), Some(&(reg::POWER, 0xBFF1)));
@@ -1081,7 +1081,7 @@ impl Log {
     }
 }
 
-const RX: RxSetup = RxSetup { freq: VHF, narrow: false, am: false, rx_tone: 0, rx_tail: false };
+const RX: RxSetup = RxSetup { freq: VHF, narrow: false, am: false, rx_tone: 0, rx_tail: false, data: false };
 
 /// PWR-21.1, PWR-21.5 (decision 119): from sleep, REG_37's supplies on, the wake settle, then the receive set-up with
 /// the AF route muted before anything else and receive on (REG_30) last; the wake time is kept.
@@ -1219,12 +1219,48 @@ fn suite_steps_and_restore() {
     }
 }
 
+/// APRS-55, APRS-55.1, SQL-19.5 (decision 309): the APRS slot's FM tune turns the receive 300 Hz high-pass and de-emphasis off (REG_2B
+/// 0x0500: the 3 kHz low-pass stays on), and `rx_data` the noise gate (REG_28<8>) and AFC (REG_73<4> = 1) off, the
+/// registers' other bits kept; a voice slot's tune writes REG_2B 0 and puts both back, and nothing at all when they
+/// are already as voice wants them. AM never gets the data set-up.
+#[test]
+fn aprs_slot_tune_writes_the_data_rx_setup() {
+    let fresh = || {
+        let mut bus = RecBus::new();
+        (bus.regs[0x28], bus.regs[0x73]) = (0x0B40, 0x4682); // the start-up's REG_28, REG_73's reset value
+        Bk4829::new(bus)
+    };
+    let fm = |data| RxSetup { freq: mhz(144) + 39_000, narrow: false, am: false, rx_tone: 0, rx_tail: false, data };
+    let mut b = fresh();
+    chip::tune(&mut b, &fm(true));
+    chip::rx_data(&mut b, true);
+    let bus = b.release();
+    assert_eq!((bus.last(reg::AF_FILTERS), bus.last(0x28), bus.last(0x73)), (Some(0x0500), Some(0x0A40), Some(0x4692)));
+    // Back to a voice slot on the same chip: everything as before.
+    let mut b = Bk4829::new(bus);
+    chip::tune(&mut b, &fm(false));
+    chip::rx_data(&mut b, false);
+    let bus = b.release();
+    assert_eq!((bus.last(reg::AF_FILTERS), bus.regs[0x28], bus.regs[0x73]), (Some(0), 0x0B40, 0x4682));
+    // A voice tune on a chip already set for voice writes neither REG_28 nor REG_73.
+    let mut b = fresh();
+    chip::tune(&mut b, &fm(false));
+    chip::rx_data(&mut b, false);
+    let bus = b.release();
+    assert_eq!((bus.last(reg::AF_FILTERS), bus.last(0x28), bus.last(0x73)), (Some(0), None, None));
+    let mut b = fresh();
+    chip::tune(&mut b, &RxSetup { am: true, ..fm(true) });
+    let bus = b.release();
+    let r2b: Vec<u16> = bus.writes.iter().filter(|w| w.0 == reg::AF_FILTERS).map(|w| w.1).collect();
+    assert_eq!(r2b, [0x0500], "AM: stock's mode 6 only");
+}
+
 #[cfg(feature = "bench")]
 /// TERM-42: `bk rxaf` after an FM tune sets REG_2B bits 10:8 over the tune's 0x0000 and keeps the other bits.
 #[test]
 fn rx_af_override_after_fm_tune() {
     let mut b = bk();
-    chip::tune(&mut b, &RxSetup { freq: mhz(145) + 49_500, narrow: false, am: false, rx_tone: 0, rx_tail: false });
+    chip::tune(&mut b, &RxSetup { freq: mhz(145) + 49_500, narrow: false, am: false, rx_tone: 0, rx_tail: false, data: false });
     assert_eq!(b.read(reg::AF_FILTERS), 0x0000);
     b.write(reg::AF_FILTERS, 0x0005);
     chip::rx_af_override(&mut b, 0x0700);

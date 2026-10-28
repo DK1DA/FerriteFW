@@ -86,6 +86,7 @@ impl Radio {
             self.maybe_awake &= !(1 << n);
             self.sq_regs[n as usize] = None; // written again on waking
             self.open_fast[n as usize] = None; // SQL-17: likewise
+            self.data_rx[n as usize] = None; // APRS-55: likewise
             radio_chip::sleep_begin(&mut self.chip(n));
             // PWR-21.6: beside a broadcast the supplies stay on (no settle to wait: REG_37 isn't written).
             if BCAST_LDO_ON && self.woke[n as usize].is_some() && self.si.mode().is_some() && self.hf.is_none() {
@@ -124,9 +125,15 @@ impl Radio {
         };
         // Stock's modes 6 and 7, the sub-tone detector, muted until the audio decision (`ferrite_radio::chip`).
         // CAL-12: the chip tunes the word with the factory crystal trim; everything else keeps `f`.
-        let setup = RxSetup { freq: self.sqcal.rx_word(f), narrow: slot.narrow, am: slot.am, rx_tone: slot.rx_tone, rx_tail: slot.rx_tail };
+        // APRS-55: the APRS slot's FM receive gets the data set-up; any other tune puts the voice one back.
+        let data = (s as usize) < SLOTS && self.aprs_slots & 1 << s != 0 && !slot.am;
+        let setup = RxSetup { freq: self.sqcal.rx_word(f), narrow: slot.narrow, am: slot.am, rx_tone: slot.rx_tone, rx_tail: slot.rx_tail, data };
         radio_chip::tune_rest(&mut self.chip(n), &setup);
-        // TERM-42: the bench's receive AF filter override over the FM tune's REG_2B.
+        if self.data_rx[n as usize] != Some(data) {
+            radio_chip::rx_data(&mut self.chip(n), data);
+            self.data_rx[n as usize] = Some(data);
+        }
+        // TERM-42: the bench's receive AF filter override over the FM tune's REG_2B (APRS-55's bits too: it wins).
         #[cfg(feature = "bench")]
         if let Some(bits) = self.rxaf.filter(|_| !slot.am) {
             radio_chip::rx_af_override(&mut self.chip(n), bits);

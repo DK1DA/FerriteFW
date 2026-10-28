@@ -374,7 +374,7 @@ impl Job {
             #[cfg(feature = "bench")]
             (Kind::RxAf(_), DebugAns::RxAf(bits)) => {
                 match bits {
-                    None => out.push(b"  bk rxaf: off (each FM tune writes REG_2B 0x0000: the receive filters on)"),
+                    None => out.push(b"  bk rxaf: off (an FM tune writes REG_2B 0x0000, the APRS slot's 0x0500: APRS-55)"),
                     Some(b) => {
                         out.push(b"  bk rxaf: REG_2B bits 10:8 = 0x");
                         hex(b as u32, 4, out);
