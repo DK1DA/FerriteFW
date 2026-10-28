@@ -26,7 +26,7 @@ fn beacon_now() {
     t.wait(100);
     options(&mut t, Of::AprsCard);
     t.shows("APRS slot");
-    run(&mut t, 3);
+    run(&mut t, 4);
     assert!(t.s.beacon_asked());
     assert_eq!(t.toast(), "Beacon now / done");
     t.s.call.set(None);
@@ -48,7 +48,7 @@ fn beacon_switch() {
     t.wait(100);
     let before = t.app.aprs_cfg().beacon;
     options(&mut t, Of::Heard);
-    run(&mut t, 4);
+    run(&mut t, 5);
     assert_ne!(t.app.aprs_cfg().beacon, before);
 }
 
