@@ -34,6 +34,7 @@ mod samecodes;
 mod save;
 mod quick;
 mod scan;
+mod scanlists;
 mod scope;
 mod setup;
 mod status;
