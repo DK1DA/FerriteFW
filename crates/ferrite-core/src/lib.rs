@@ -59,6 +59,7 @@ pub mod tonegen;
 pub mod tonehint;
 pub mod tonesearch;
 pub mod txcal;
+pub mod txeq;
 pub mod txfilters;
 pub mod txplan;
 pub mod txseq;

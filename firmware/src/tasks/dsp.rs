@@ -59,9 +59,9 @@ pub static APRS_RX: Channel<M, Heard, 2> = Channel::new();
 pub static AFSK_TX: Signal<M, Frame> = Signal::new();
 pub static AFSK_DONE: Signal<M, bool> = Signal::new();
 /// TERM-33, TERM-34: the transmit test's generator to play now (Some, from the key-up; another Some takes over
-/// seamlessly) or to stop (None, at the release).
+/// seamlessly) or to stop (None, at the release), and the equaliser its samples go through (TERM-33.16).
 #[cfg(all(feature = "tx", feature = "bench"))]
-pub static TXTEST: Signal<M, Option<ferrite_core::txtest::Gen>> = Signal::new();
+pub static TXTEST: Signal<M, Option<(ferrite_core::txtest::Gen, ferrite_core::txeq::Eq)>> = Signal::new();
 /// PWR-26.4: how often (in 2 ms capture halves) a capture running at 24 MHz asks again for the build's speed.
 const RECHECK_HALVES: u32 = 5_000;
 /// Pages heard, to the UI task (DEC-7): two deep, 144 B.
@@ -291,11 +291,11 @@ pub async fn task() {
             #[cfg(not(all(feature = "tx", feature = "bench")))]
             Either4::Fourth(Some(never)) => match never {},
             #[cfg(all(feature = "tx", feature = "bench"))]
-            Either4::Fourth(Some(g)) => {
+            Either4::Fourth(Some((g, eq))) => {
                 if capturing {
                     audio::capture_stop();
                 }
-                play_test(g).await;
+                play_test(g, eq).await;
                 if capturing {
                     clock::for_audio().await;
                     dec = Decim::new();
@@ -355,13 +355,16 @@ async fn play(f: &Frame) {
 
 /// TERM-33, TERM-34: the test signal out of DAC1 until [`TXTEST`] says stop (None); a new generator (Some) takes
 /// over from the next half filled, DAC1 still running (the suite's steps). Each generator loops or ends in silence
-/// by itself. Then a half of silence, and stopped once that has played.
+/// by itself. Then a half of silence, and stopped once that has played. TERM-33.16: the samples through the
+/// equaliser asked for (its 380-byte delay line lives here, in the DSP task's future: bench builds only).
 #[cfg(all(feature = "tx", feature = "bench"))]
-async fn play_test(mut g: ferrite_core::txtest::Gen) {
-    let fill = |half: usize, g: Option<&mut ferrite_core::txtest::Gen>| match g {
+async fn play_test(mut g: ferrite_core::txtest::Gen, eq: ferrite_core::txeq::Eq) {
+    use ferrite_core::txeq::Fir;
+    let mut fir = Fir::new(eq);
+    let fill = |half: usize, g: Option<&mut ferrite_core::txtest::Gen>, fir: &mut Fir| match g {
         Some(g) => {
             for d in &audio::DAC_BUF[half * BLOCK_DAC..(half + 1) * BLOCK_DAC] {
-                d.store(to_dac(g.sample()), Relaxed);
+                d.store(to_dac(fir.run(g.sample())), Relaxed);
             }
         }
         None => {
@@ -370,23 +373,28 @@ async fn play_test(mut g: ferrite_core::txtest::Gen) {
             }
         }
     };
-    fill(0, Some(&mut g));
-    fill(1, Some(&mut g));
+    fill(0, Some(&mut g), &mut fir);
+    fill(1, Some(&mut g), &mut fir);
     clock::for_audio().await; // PWR-26.4
     audio::DAC_HALF.reset();
     audio::play_start();
     loop {
         use embassy_futures::select::{select, Either};
         match select(audio::DAC_HALF.wait(), TXTEST.wait()).await {
-            Either::First(half) => fill(half as usize, Some(&mut g)),
-            Either::Second(Some(next)) => g = next,
+            Either::First(half) => fill(half as usize, Some(&mut g), &mut fir),
+            Either::Second(Some((next, e))) => {
+                g = next;
+                if e != fir.eq() {
+                    fir = Fir::new(e);
+                }
+            }
             Either::Second(None) => break,
         }
     }
     // Both halves silent, so whichever plays next is mid-scale; then off.
     for _ in 0..2 {
         let half = audio::DAC_HALF.wait().await as usize;
-        fill(half, None);
+        fill(half, None, &mut fir);
     }
     audio::play_stop();
 }

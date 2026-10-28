@@ -67,7 +67,7 @@ impl Radio {
         }
         let dac = next.src.dac();
         if prev.map(|p| p.src.dac()) != Some(dac) {
-            crate::tasks::dsp::TXTEST.signal(Some(dac.gen()));
+            crate::tasks::dsp::TXTEST.signal(Some((dac.gen(), ferrite_core::txeq::Eq::Off)));
         }
         if txsuite::SECTION_START.contains(&(i as u8)) {
             log(b"txtest suite section ", txsuite::section(i) as u32);

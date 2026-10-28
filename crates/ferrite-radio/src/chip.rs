@@ -433,6 +433,55 @@ pub fn tx_test_restore<B: Bus>(bk: &mut Bk4829<B>, r: &TestRegs) {
     bk.write(0x50, r.r50);
 }
 
+/// REG_47<0>: bypass all AF TX filters (the register table; the BK4819 app note's "digital walkie-talkie" setting).
+/// With it the 3.1 kHz wall of the `data` set-up is gone (bench, Oct 27, 2026; TERM-33.15).
+#[cfg(all(feature = "tx", feature = "bench"))]
+pub const TX_AF_BYPASS: u16 = 1;
+/// REG_2F<7:5>: the TX soft limiter's factor, 000 = off (the register table; 100 at power-on, 0x9890). <13:8> is the
+/// receive de-emphasis gain: kept.
+#[cfg(all(feature = "tx", feature = "bench"))]
+pub const TX_LIMITER: u16 = 0b111 << 5;
+
+/// TERM-33.15, TERM-33.16: what `bypass` and `eq`/`eq8` changed on the keyed chip, for [`tx_test_extra_restore`].
+#[cfg(all(feature = "tx", feature = "bench"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtraRegs {
+    pub r47: u16,
+    pub r2f: u16,
+    pub r40: u16,
+    pub r7d: u16,
+}
+
+/// TERM-33.15 and TERM-33.16, after [`tx_test_filters`] (the key-up's REG_47 0x6142 from [`tx_setup`], its REG_40
+/// and REG_7D 0x34 in place) and before the key-up: `bypass` sets REG_47<0> and turns the soft limiter off
+/// (REG_2F<7:5> = 000); an equaliser's back-off is won back by REG_7D's mic sensitivity (`mic_steps` 0.5 dB steps
+/// up, at most 0x3F) and REG_40's deviation field (`deviation`, the top four bits kept). Returns what was there.
+#[cfg(all(feature = "tx", feature = "bench"))]
+pub fn tx_test_extra<B: Bus>(bk: &mut Bk4829<B>, bypass: bool, mic_steps: u8, deviation: Option<u16>) -> ExtraRegs {
+    let was = ExtraRegs { r47: bk.read(bk4829::reg::AF_OUT), r2f: bk.read(0x2F), r40: bk.read(bk4829::reg::DEVIATION), r7d: bk.read(bk4829::reg::MIC) };
+    if bypass {
+        bk.write(bk4829::reg::AF_OUT, was.r47 | TX_AF_BYPASS);
+        bk.write(0x2F, was.r2f & !TX_LIMITER);
+    }
+    if mic_steps > 0 {
+        let g = ((was.r7d & 0x3F) + mic_steps as u16).min(0x3F);
+        bk.write(bk4829::reg::MIC, (was.r7d & !0x3F) | g);
+    }
+    if let Some(d) = deviation.filter(|&d| d != was.r40 & 0x0FFF) {
+        bk.write(bk4829::reg::DEVIATION, (was.r40 & 0xF000) | (d & 0x0FFF));
+    }
+    was
+}
+
+/// At the unkey, before [`tx_test_restore`]: the registers [`tx_test_extra`] found.
+#[cfg(all(feature = "tx", feature = "bench"))]
+pub fn tx_test_extra_restore<B: Bus>(bk: &mut Bk4829<B>, r: &ExtraRegs) {
+    bk.write(bk4829::reg::AF_OUT, r.r47);
+    bk.write(0x2F, r.r2f);
+    bk.write(bk4829::reg::DEVIATION, r.r40);
+    bk.write(bk4829::reg::MIC, r.r7d);
+}
+
 /// TERM-33 `afsk-bk`, on the keyed chip after the key-up's plan: AFSK from the tone generator, as stock sends any
 /// internal tone while keyed (the end tone's path, [`bk4829::Bk4829::tone_tx`] after `tx_on(Tones)`): REG_30 to
 /// tone transmit through stock's step (0x0200 wide or 0 narrow, about 50 us, then 0xC3FA: the mic ADC off, so the

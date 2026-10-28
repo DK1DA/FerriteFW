@@ -1670,41 +1670,60 @@ fn fsk(t: &mut Toks) -> Result<Done, Msg> {
 /// [LEVEL]` arms MODE (4fsk, sweep, afsk) for the next PTT key-up with the BK4829's TX audio `voice`, `flat` or
 /// `data` (the default, as an APRS burst goes out) at LEVEL percent of the mode's nominal (10 to 150,
 /// default 100); `txtest afsk-bk [LEVEL]` the BK4829 tone generator's AFSK, which takes no filters word (decision
-/// 134); `txtest suite` every test in one key-up (TERM-34, decision 139), no other word. Anything else is refused
-/// here, before anything is sent.
+/// 134); `txtest suite` every test in one key-up (TERM-34, decision 139), no other word. Decision 308: `fsk BAUD
+/// [rc]`, `gmsk BAUD` (300 to 9600) and `g3ruh` (TERM-33.17), and after FILTERS, in any order, `bypass` (TERM-33.15)
+/// and `eq` or `eq8` (TERM-33.16), neither with `voice`; LEVEL always last. Anything else is refused here, before
+/// anything is sent.
 fn txtest(t: &mut Toks) -> Result<Done, Msg> {
-    use ferrite_core::txtest::{Arm, Ask, Filters, Signal, LEVEL_DEFAULT, LEVEL_MAX, LEVEL_MIN};
-    const USAGE: &str = "txtest 4fsk|sweep|afsk [voice|flat|data] [10-150 %], txtest afsk-bk [10-150 %], txtest suite, txtest off; txtest alone shows what is armed";
-    let level = |w: &[u8]| number(w).filter(|n| (LEVEL_MIN as u32..=LEVEL_MAX as u32).contains(n)).map(|n| n as u8).ok_or_else(|| msg!("{}", USAGE));
+    use ferrite_core::txtest::{Arm, Ask, Eq, Filters, Signal, BAUD_MAX, BAUD_MIN, LEVEL_MAX, LEVEL_MIN};
+    const USAGE: &str = "txtest 4fsk|sweep|afsk|fsk BAUD [rc]|gmsk BAUD|g3ruh [voice|flat|data] [bypass] [eq|eq8] [10-150 %], txtest afsk-bk [10-150 %], txtest suite, txtest off; txtest alone shows what is armed";
+    let usage = || msg!("{}", USAGE);
+    let level = |w: &[u8]| number(w).filter(|n| (LEVEL_MIN as u32..=LEVEL_MAX as u32).contains(n)).map(|n| n as u8).ok_or_else(usage);
     let ask = match t.next()? {
         None => Ask::Show,
         Some(Tok::Word(w)) if same(w, b"off") => Ask::Set(None),
         Some(Tok::Word(w)) => {
-            let signal = Signal::parse(w).ok_or_else(|| msg!("{}", USAGE))?;
-            let mut arm = Arm { signal, filters: signal.default_filters(), level: LEVEL_DEFAULT };
-            match t.next()? {
-                None => {}
-                Some(_) if !signal.takes_level() => return Err(msg!("{}", USAGE)),
-                Some(Tok::Word(f)) => match Filters::parse(f) {
-                    Some(_) if !signal.dac() => return Err(msg!("{}", USAGE)),
-                    Some(f) => {
-                        arm.filters = f;
-                        match t.next()? {
-                            None => {}
-                            Some(Tok::Word(l)) => arm.level = level(l)?,
-                            _ => return Err(msg!("{}", USAGE)),
-                        }
-                    }
-                    None => arm.level = level(f)?,
-                },
-                _ => return Err(msg!("{}", USAGE)),
+            let signal = Signal::parse(w).ok_or_else(usage)?;
+            let mut arm = Arm::new(signal);
+            if signal.takes_baud() {
+                arm.baud = match t.next()? {
+                    Some(Tok::Word(b)) => number(b).filter(|n| (BAUD_MIN as u32..=BAUD_MAX as u32).contains(n)).ok_or_else(usage)? as u16,
+                    _ => return Err(usage()),
+                };
+            }
+            let (mut filters, mut eq) = (false, false);
+            loop {
+                let w = match t.next()? {
+                    None => break,
+                    Some(Tok::Word(w)) if signal.takes_level() => w,
+                    _ => return Err(usage()),
+                };
+                if !signal.dac() {
+                    arm.level = level(w)?; // afsk-bk: LEVEL alone
+                    break;
+                }
+                if let Some(f) = Filters::parse(w).filter(|_| !filters && !arm.bypass && !eq) {
+                    (arm.filters, filters) = (f, true);
+                } else if same(w, b"rc") && signal == Signal::Fsk && !arm.shaped && !filters && !arm.bypass && !eq {
+                    arm.shaped = true;
+                } else if same(w, b"bypass") && !arm.bypass {
+                    arm.bypass = true;
+                } else if let Some(e) = Eq::parse(w).filter(|_| !eq) {
+                    (arm.eq, eq) = (e, true);
+                } else {
+                    arm.level = level(w)?; // LEVEL: the last word
+                    break;
+                }
+            }
+            if arm.filters == Filters::Voice && (arm.bypass || eq) {
+                return Err(usage());
             }
             Ask::Set(Some(arm))
         }
-        _ => return Err(msg!("{}", USAGE)),
+        _ => return Err(usage()),
     };
     if t.next()?.is_some() {
-        return Err(msg!("{}", USAGE));
+        return Err(usage());
     }
     Ok(Done::Debug(Job::new(Kind::TxTest(ask))))
 }
@@ -2194,6 +2213,9 @@ const HELP_BENCH: &str = concat!(
     "  txtest 4fsk|sweep|afsk [voice|flat|data] [10-150]   bench test: that signal\n",
     "                         at that % on the next PTT key-up until release (tx builds)\n",
     "  txtest afsk-bk [10-150]  the same AFSK flags from the BK4829's tone generator\n",
+    "  txtest fsk 2400 [rc]   PRBS9 NRZ at 300-9600 Bd, +-3 kHz; gmsk 4800: BT 0.5, h 0.5\n",
+    "  txtest g3ruh           9600 Bd packet's scrambled NRZ (txdata.py counts the errors)\n",
+    "  txtest sweep data bypass eq   REG_47 bypass, limiter off; eq flat to 5 kHz, eq8 8 kHz\n",
     "  txtest suite           every transmit test in one key-up, 60 s (sdrsuite.py)\n",
     "  bk rxaf 700   bk rxaf off   bench test: REG_2B 10:8 after every FM tune (RX filters)\n",
     "  fsk rx 2400 [nocrc]    bench test: the BK4829's FSK modem on the active slot; fsk, fsk off\n",
