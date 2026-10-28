@@ -17,6 +17,7 @@ mod msgs;
 mod scan;
 mod setup;
 mod transmit;
+mod xb;
 
 /// An app on the sample records, a clock, a quiet radio and a panel.
 pub(super) struct T {
