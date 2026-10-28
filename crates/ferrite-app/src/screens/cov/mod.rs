@@ -26,6 +26,7 @@ mod msgs;
 mod pin;
 mod posentry;
 mod samecodes;
+mod save;
 mod quick;
 mod scan;
 mod scope;
