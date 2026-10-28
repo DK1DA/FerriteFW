@@ -12,6 +12,7 @@ use std::string::String;
 use std::vec::Vec;
 
 mod home;
+mod msgs;
 mod setup;
 mod transmit;
 
