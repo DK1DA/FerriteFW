@@ -136,7 +136,7 @@ impl View for Alert {
             }
         }
         if app.dirty(R_HELP, hash(&self.silenced)) {
-            let (c, t): (u16, &[u8]) = if self.silenced { (SUB, "Tone off \u{b7} kept in the event log".as_bytes()) } else { (rgb565(0xF2, 0x8B, 0x8E), b"Tone sounding") };
+            let (c, t): (u16, &[u8]) = if self.silenced { (SUB, "Tone off \u{b7} in the event log".as_bytes()) } else { (rgb565(0xF2, 0x8B, 0x8E), b"Tone sounding") };
             w::bell(lcd, 16, 272, c, ALERT_BG, self.silenced);
             w::field(lcd, 32, 196, 268, 286, 282, Align::Left, t, &UI_12, c, ALERT_BG);
         }

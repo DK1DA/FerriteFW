@@ -39,5 +39,9 @@ minifb = "0.27"
 # The terminal's cable: a pseudo-terminal (openpty).
 libc = "0.2"
 
+# The end-to-end tests note text the drawing cut off (ferrite-ui's `clipcheck`; not in the sims or the radio).
+[dev-dependencies]
+ferrite-ui = { workspace = true, features = ["std", "clipcheck"] }
+
 [lints]
 workspace = true

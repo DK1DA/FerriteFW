@@ -44,8 +44,20 @@ pub fn fit<'a>(s: &'a [u8], f: &Font4, w: i32) -> &'a [u8] {
     &s[..end]
 }
 
+/// [`fit`] inside a widget: the text the caller gave is cut, which [`crate::clipcheck`] notes (a deliberate cut is
+/// fitted by the caller first).
+fn cut<'a>(s: &'a [u8], f: &Font4, w: i32) -> &'a [u8] {
+    let r = fit(s, f, w);
+    #[cfg(feature = "clipcheck")]
+    if r.len() < s.len() {
+        crate::clipcheck::note("cut", s, w, text4_width(s, f));
+    }
+    r
+}
+
 /// Text in the box x..x+w, y0..y1: aligned, cut to fit, the rest of the box painted bg. The workhorse for
 /// redrawing a value in place without clearing it first (no flicker).
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn field(
     lcd: &mut impl Panel,
     x: i32,
@@ -59,7 +71,8 @@ pub fn field(
     fg: u16,
     bg: u16,
 ) -> i32 {
-    let s = fit(s, f, w);
+    clip_site!();
+    let s = cut(s, f, w);
     let tw = text4_width(s, f);
     let tx = match align {
         Align::Left => x,
@@ -102,7 +115,9 @@ fn badge_now(lcd: &mut impl Panel, x: i32, y: i32, slot: u8, filled: bool, bg: u
 
 /// An outlined tag ("RX", "EDIT") ending at x_right; returns its width. Night red fills it, black text on solid
 /// red (DISP-18: a filled highlight, where the other themes have the outline's colour).
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn tag(lcd: &mut impl Panel, x_right: i32, y: i32, s: &[u8], c: u16, bg: u16) -> i32 {
+    clip_site!();
     // 15 px tall so the 9 px capitals sit 2 px from the top and bottom inside (DISP-19)
     let w = text4_width(s, &UI_12B) + 10;
     let x = x_right - w;
@@ -127,7 +142,9 @@ pub fn card_border(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, c: u16,
 }
 
 /// An outlined chip ("FM-N", "T 100.0"); returns its width.
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn chip(lcd: &mut impl Panel, x: i32, y: i32, s: &[u8], fg: u16, bg: u16) -> i32 {
+    clip_site!();
     let w = text4_width(s, &UI_12) + 10;
     field(lcd, x, w, y, y + 17, y + 13, Align::Center, s, &UI_12, fg, bg);
     lcd.frame_r(x, y, w, 17, 1, LINE);
@@ -145,7 +162,9 @@ pub const SLOT_POWER: (i32, i32) = (176, 50);
 
 /// A chip in a fixed slot (x, w) at y..y+17: the slot is cleared first, then a chip of the slot's full width when
 /// `s` isn't empty, so a shorter value never leaves pixels behind.
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn chip_slot(lcd: &mut impl Panel, slot: (i32, i32), y: i32, s: &[u8], fg: u16, frame: u16, bg: u16) {
+    clip_site!();
     crate::canvas::banded(lcd, slot.0, y, slot.1, 17, bg, |b| chip_slot_now(b, slot, y, s, fg, frame, bg));
 }
 
@@ -153,18 +172,22 @@ fn chip_slot_now(lcd: &mut impl Panel, slot: (i32, i32), y: i32, s: &[u8], fg: u
     let (x, w) = slot;
     lcd.fill(x, y, w, 17, bg);
     if !s.is_empty() {
-        field(lcd, x + 1, w - 2, y + 1, y + 16, y + 13, Align::Center, fit(s, &UI_12, w - 4), &UI_12, fg, bg);
+        field(lcd, x + 1, w - 2, y + 1, y + 16, y + 13, Align::Center, cut(s, &UI_12, w - 4), &UI_12, fg, bg);
         lcd.frame_r(x, y, w, 17, 1, frame);
     }
 }
 
 /// A row of chips in the box x..x+w, y..y+17.
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn chips(lcd: &mut impl Panel, x: i32, y: i32, w: i32, items: &[&[u8]], bg: u16) {
+    clip_site!();
     chips_sel(lcd, x, y, w, items, None, bg)
 }
 
 /// [`chips`] with one of them selected (accent text and outline): a row of choices such as MENU's Recent.
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn chips_sel(lcd: &mut impl Panel, x: i32, y: i32, w: i32, items: &[&[u8]], sel: Option<usize>, bg: u16) {
+    clip_site!();
     let mut cx = x;
     for (i, s) in items.iter().enumerate().filter(|(_, s)| !s.is_empty()) {
         if cx + text4_width(s, &UI_12) + 10 > x + w {
@@ -180,7 +203,8 @@ pub fn chips_sel(lcd: &mut impl Panel, x: i32, y: i32, w: i32, items: &[&[u8]], 
 }
 
 /// "146.520" in `big` and "00" in `small` on one baseline, painting only the digits' rows (the big font's line
-/// box would reach into its neighbours) and clearing to x_end. Returns where the text ends.
+/// box would reach into its neighbours) and clearing to x_end. The small digits (10 Hz) only where they end by
+/// x_end: 1000 MHz and up on home's big card leaves them out. Returns where the text ends.
 pub fn freq(
     lcd: &mut impl Panel,
     x: i32,
@@ -202,8 +226,10 @@ pub fn freq(
     let sx = x + w + 4;
     lcd.fill(x + w, y0, 4, y1 - y0, bg);
     let hs = digit_h(small);
-    lcd.fill(sx, y0, text4_width(&b[split + 1..n], small), h - hs, bg);
-    let ws = lcd.text4_rows(sx, baseline, &b[split + 1..n], small, fg_small, bg, baseline - hs, y1);
+    let tail = &b[split + 1..n];
+    let tail = if sx + text4_width(tail, small) <= x_end { tail } else { &[] };
+    lcd.fill(sx, y0, text4_width(tail, small), h - hs, bg);
+    let ws = lcd.text4_rows(sx, baseline, tail, small, fg_small, bg, baseline - hs, y1);
     lcd.fill(sx + ws, y0, x_end - sx - ws, y1 - y0, bg);
     sx + ws
 }
@@ -455,7 +481,9 @@ pub fn progress(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, pct: u8, c
 
 /// Text wrapped on words into lines `step` apart from `baseline`, in the box x..x+w, rows y0..y1; the rest of
 /// the box painted bg. Returns the lines used.
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn wrap(lcd: &mut impl Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i32, step: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16) -> i32 {
+    clip_site!();
     let (mut rest, mut base, mut n) = (s, baseline, 0);
     let top = baseline - f.ascent as i32;
     lcd.fill(x, y0, w, top - y0, bg);
@@ -483,6 +511,10 @@ pub fn wrap(lcd: &mut impl Panel, x: i32, w: i32, y0: i32, y1: i32, baseline: i3
         y = bottom;
         base += step;
     }
+    #[cfg(feature = "clipcheck")]
+    if !rest.is_empty() {
+        crate::clipcheck::note("lines", s, w * n, text4_width(s, f));
+    }
     n
 }
 
@@ -492,7 +524,9 @@ pub const POPUP_BOX: (i32, i32, i32, i32) = (24, 128, 192, 64);
 
 /// A hold-digit shortcut's popup in the middle of the content area (HOME-8): what ran, and under it the new
 /// value when it has one.
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn popup(lcd: &mut impl Panel, head: &[u8], body: &[u8]) {
+    clip_site!();
     let (x, _, w, _) = POPUP_BOX;
     let (y, h) = if body.is_empty() { (138, 44) } else { (128, 64) };
     // Off-screen: the box keeps whatever was under its rounded corners (DISP-25).
@@ -505,9 +539,9 @@ fn popup_now(lcd: &mut impl Panel, head: &[u8], body: &[u8]) {
     lcd.fill_r(x, y, w, h, 4, BLUE);
     lcd.fill_r(x + 1, y + 1, w - 2, h - 2, 3, TOAST);
     let hb = if body.is_empty() { y + 28 } else { y + 26 };
-    lcd.text4_aligned(120, hb, Align::Center, fit(head, &UI_15B, w - 16), &UI_15B, TEXT, TOAST);
+    lcd.text4_aligned(120, hb, Align::Center, cut(head, &UI_15B, w - 16), &UI_15B, TEXT, TOAST);
     if !body.is_empty() {
-        lcd.text4_aligned(120, y + 50, Align::Center, fit(body, &UI_12, w - 16), &UI_12, TEXT, TOAST);
+        lcd.text4_aligned(120, y + 50, Align::Center, cut(body, &UI_12, w - 16), &UI_12, TEXT, TOAST);
     }
 }
 
@@ -522,13 +556,26 @@ pub fn toast_fits(head: &[u8], body: &[u8], icon: bool) -> bool {
     body.is_empty() || text4_width(body, &UI_12) <= 232 - (x + hw + 7)
 }
 
+/// The room [`toast`] leaves its body after `head`, in pixels (0: none): to [`fit`] a body that isn't ours (a
+/// message, an alert's event) to it.
+pub fn toast_room(head: &[u8], icon: bool) -> i32 {
+    let x = if icon { 26 } else { 8 } + text4_width(head, &UI_12B);
+    if x < 225 {
+        232 - (x + 7)
+    } else {
+        0
+    }
+}
+
 /// Whether a shortcut popup's head and body fit their lines as [`popup`] lays them out (HOME-8).
 pub fn popup_fits(head: &[u8], body: &[u8]) -> bool {
     let w = POPUP_BOX.2 - 16;
     text4_width(head, &UI_15B) <= w && text4_width(body, &UI_12) <= w
 }
 
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn toast(lcd: &mut impl Panel, head: &[u8], body: &[u8], icon: bool) {
+    clip_site!();
     crate::canvas::banded(lcd, 0, HINT_Y, 240, 20, TOAST, |b| toast_now(b, head, body, icon));
 }
 
@@ -541,10 +588,10 @@ fn toast_now(lcd: &mut impl Panel, head: &[u8], body: &[u8], icon: bool) {
         x += 18;
     }
     let base = HINT_Y + 15;
-    x += lcd.text4_rows(x, base, fit(head, &UI_12B, 232 - x), &UI_12B, TEXT, TOAST, HINT_Y + 1, HINT_Y + 20);
+    x += lcd.text4_rows(x, base, cut(head, &UI_12B, 232 - x), &UI_12B, TEXT, TOAST, HINT_Y + 1, HINT_Y + 20);
     if !body.is_empty() && x < 225 {
-        x += 7;
-        lcd.text4_rows(x, base, fit(body, &UI_12, 232 - x), &UI_12, TEXT, TOAST, HINT_Y + 1, HINT_Y + 20);
+        x += if head.is_empty() { 0 } else { 7 }; // a body alone starts where a head would
+        lcd.text4_rows(x, base, cut(body, &UI_12, 232 - x), &UI_12, TEXT, TOAST, HINT_Y + 1, HINT_Y + 20);
     }
 }
 
@@ -559,7 +606,9 @@ pub struct Row<'a> {
     pub grey: bool,
 }
 
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn list_row(lcd: &mut impl Panel, y: i32, h: i32, r: &Row, cue: Cue) {
+    clip_site!();
     crate::canvas::banded(lcd, 0, y, 240, h, BG, |b| {
         list_row_now(b, y, h, r);
         cue.draw(b);
@@ -578,10 +627,10 @@ fn list_row_now(lcd: &mut impl Panel, y: i32, h: i32, r: &Row) {
         8
     };
     // The name keeps its room; the value gets the rest.
-    let name = fit(r.name, &UI_12, 232 - x - 40);
+    let name = cut(r.name, &UI_12, 232 - x - 40);
     let nw = field(lcd, x, text4_width(name, &UI_12), y, y + h, base, Align::Left, name, &UI_12, fg, bg);
     let x = x + nw;
-    let value = fit(r.value, &UI_12, 232 - x - if r.dot { 18 } else { 8 });
+    let value = cut(r.value, &UI_12, 232 - x - if r.dot { 18 } else { 8 });
     let vw = text4_width(value, &UI_12);
     let vx = 232 - vw;
     lcd.fill(x, y, vx - x, h, bg);
@@ -629,7 +678,9 @@ pub fn kv_h(st: &KvStyle, value: &[u8], h: i32) -> i32 {
 /// A label + value row from y, `h` tall ([`kv_h`]): the label in SUB at x = 8, the value in `vc`; all white on
 /// blue when selected. Paints the whole row.
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn kv(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], value: &[u8], vc: u16, selected: bool, cue: Cue) {
+    clip_site!();
     crate::canvas::banded(lcd, 0, y, 240, h, BG, |b| {
         kv_now(b, y, h, st, label, value, vc, selected);
         cue.draw(b);
@@ -648,12 +699,17 @@ fn kv_now(lcd: &mut impl Panel, y: i32, h: i32, st: &KvStyle, label: &[u8], valu
     lcd.fill(0, y, 240, y1 - y, bg);
     lcd.text4_rows(8, base, label, &UI_12, lc, bg, y, y1);
     let mut v = fit(value, &UI_12, vw);
+    // one line: the value cut to it (two: the first full, the second cut)
+    #[cfg(feature = "clipcheck")]
+    if !st.wrap && v.len() < value.len() {
+        crate::clipcheck::note("cut", value, vw, text4_width(value, &UI_12));
+    }
     if st.wrap && v.len() < value.len() {
         // the second line from the last space, comma or dash whose rest fits on it (a position's longitude stays
         // whole: "48°59.530'N" over "123°49.249'W"), else from where the first line is full
-        let cut = kv_cut(value, v.len(), vw);
-        lcd.text4_rows(vx, base + 17, fit(value[cut..].trim_ascii_start(), &UI_12, vw), &UI_12, vc, bg, y, y1);
-        v = &value[..cut];
+        let brk = kv_cut(value, v.len(), vw);
+        lcd.text4_rows(vx, base + 17, cut(value[brk..].trim_ascii_start(), &UI_12, vw), &UI_12, vc, bg, y, y1);
+        v = &value[..brk];
     }
     let x = if st.right { 232 - text4_width(v, &UI_12) } else { vx };
     lcd.text4_rows(x, base, v, &UI_12, vc, bg, y, y1);
@@ -716,7 +772,9 @@ pub fn scroll_cue(lcd: &mut impl Panel, cue: Cue) {
 }
 
 /// The help line at the foot of a menu (MENU-15): a rounded box, the text wrapped on words, then the path.
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn help_box(lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) {
+    clip_site!();
     crate::canvas::banded(lcd, 0, y, 240, h, BG, |b| help_box_now(b, y, h, text, path));
 }
 
@@ -752,11 +810,17 @@ fn help_box_now(lcd: &mut impl Panel, y: i32, h: i32, text: &[u8], path: &[u8]) 
         }
         line += 1;
     }
+    #[cfg(feature = "clipcheck")]
+    if !rest.is_empty() {
+        crate::clipcheck::note("lines", text, 2 * max, text4_width(text, &UI_12));
+    }
 }
 
 /// A setting in the edit grid: label above, value below; the focused one is blue with the knob mark.
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "clipcheck", track_caller)]
 pub fn edit_cell(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, label: &[u8], value: &[u8], focused: bool, grey: bool) {
+    clip_site!();
     crate::canvas::banded(lcd, x, y, w, h, BG, |b| edit_cell_now(b, x, y, w, h, label, value, focused, grey));
 }
 
@@ -770,7 +834,7 @@ fn edit_cell_now(lcd: &mut impl Panel, x: i32, y: i32, w: i32, h: i32, label: &[
     if focused && lw + 14 < w - 6 {
         knob_mark(lcd, x + 6 + lw + 4, y + 4, BLUE, bg);
     }
-    let v = fit(value, &UI_12, w - 10);
+    let v = cut(value, &UI_12, w - 10);
     lcd.text4_rows(x + 6, y + 26, v, &UI_12, if grey { DIM } else { TEXT }, bg, y + 15, y0 + h - 1);
     let y = y0;
     lcd.frame_r(x, y, w, h, 1, border);

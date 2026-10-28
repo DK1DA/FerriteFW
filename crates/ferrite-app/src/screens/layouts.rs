@@ -218,7 +218,8 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         let st = if st.len() > 9 { "relay" } else { st }; // "Watch off: relay" (BCR-15) in the line's room
         if !app.held(11 + i) && app.dirty(11 + i, hash(&(o, t, st))) {
             w::badge(lcd, 8, y + 2, o, false, BG);
-            w::field(lcd, 28, 140, y, y + 18, y + 14, Align::Left, t.as_bytes(), &UI_12, TEXT, BG);
+            // a long channel name cut on purpose, to the room the state leaves
+            w::field(lcd, 28, 140, y, y + 18, y + 14, Align::Left, w::fit(t.as_bytes(), &UI_12, 140), &UI_12, TEXT, BG);
             w::field(lcd, 168, 64, y, y + 18, y + 14, Align::Right, st.as_bytes(), &UI_12, c, BG); // "scanning" whole
         }
     }

@@ -134,8 +134,8 @@ impl View for Value {
         def.push(" \u{b7} ".as_bytes());
         def.push(match item {
             Item::Watch | Item::BatterySave => b"radio".as_slice(),
-            _ if app.slots[a as usize].on_channel() => b"this channel",
-            _ => b"this VFO",
+            _ if app.slots[a as usize].on_channel() => b"channel",
+            _ => b"VFO",
         });
         if app.dirty(R_NOTE, hash(&(item, def))) {
             ferrite_ui::canvas::banded(lcd, 0, 41, 240, BOX_H + 6, BG, |b| {

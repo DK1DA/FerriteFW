@@ -12,9 +12,19 @@
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
+/// A widget's call site for [`clipcheck`]'s notes (nothing without the `clipcheck` feature).
+macro_rules! clip_site {
+    () => {
+        #[cfg(feature = "clipcheck")]
+        let _site = crate::clipcheck::Site::new();
+    };
+}
+
 pub mod assets;
 pub mod boot;
 pub mod canvas;
+#[cfg(feature = "clipcheck")]
+pub mod clipcheck;
 pub mod font4;
 pub mod gfx;
 pub mod home;

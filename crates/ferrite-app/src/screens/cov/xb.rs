@@ -56,7 +56,7 @@ fn checks_squelch_and_shift() {
     t.shows("Can't start yet");
     t.tap(Key::Hash);
     assert!(!xb::running(&t.app));
-    assert_eq!(t.toast(), "Can't start: / Squelch is 0 on a side");
+    assert_eq!(t.toast(), " / Squelch is 0 on a side");
     t.app.slots[s1].cfg.squelch = 3;
     t.app.slots[s1].cfg.offset = 60_000;
     t.draw();

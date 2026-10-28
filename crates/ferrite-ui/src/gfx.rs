@@ -364,6 +364,10 @@ pub trait Gfx: Panel {
     #[doc(hidden)]
     fn text4_rows_at(&mut self, x: i32, baseline: i32, s: &[u8], f: &'static Font4, fg: u16, bg: u16, y0: i32, y1: i32, at: &mut RleAt) -> i32 {
         let w = text4_width(s, f);
+        #[cfg(feature = "clipcheck")]
+        if !s.is_empty() && (x < 0 || x + w > W) {
+            crate::clipcheck::note("screen", s, W - x.max(0), w);
+        }
         if let Some(r) = self.rec() {
             r.text(x, baseline, s, f, fg, bg, y0, y1); // DISP-29
             return w;

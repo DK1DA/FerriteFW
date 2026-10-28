@@ -84,7 +84,8 @@ fn trigger_listens() {
     }
     assert_eq!(sc(&t).listen, 3, "{:?}", sc(&t));
     t.reads("hints \"PTT\" \"Talk\" \"BACK\" \"Stop\" \"OK\" \"Go\"");
-    t.shows("10.0 ms \u{b7} Mon"); // the trigger named in the info line (its end clipped at 60 bars)
+    t.shows("60 bars \u{b7} 25k \u{b7} 10.0 ms \u{b7} Mon"); // the trigger named in the info line, all of it shown
+    t.hides("Monitor");
     assert!(t.px(50, 162, ferrite_ui::gfx::RED) > 0, "the trigger line and the bar over it red");
     sweep(&mut t, 7, 120, 4, true);
     assert!(sc(&t).heard);

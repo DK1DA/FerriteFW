@@ -12,6 +12,8 @@ description = "Ferrite's screens and drawing layer: 4-bit anti-aliased text and 
 std = []
 # The drawing profile (`prof`): bench builds.
 prof = []
+# Host tests: text the drawing cut off without being asked to ([`clipcheck`]); never in the radio's image.
+clipcheck = ["std"]
 
 [dependencies]
 ufmt.workspace = true

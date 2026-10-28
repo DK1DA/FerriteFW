@@ -73,7 +73,7 @@ pub(crate) type Opt = (&'static str, Act, &'static str);
 /// The rows: label, action, help line.
 const LOG: [Opt; 3] = [
     ("Mark all read", Act::Do(&Op::ReadAll), "Clears the log's new count"),
-    ("Clear the log", Act::Confirm(&Op::ClearLog), "Every event goes, unread ones too"),
+    ("Clear the log", Act::Confirm(&Op::ClearLog), "All events, unread ones too"),
     ("Decoder settings", Act::Open(Dest::Group(4)), "Pagers, DTMF, popups, weather"),
 ];
 const MESSAGES: [Opt; 6] = [
@@ -81,7 +81,7 @@ const MESSAGES: [Opt; 6] = [
     ("Quick messages", Act::Open(Dest::QuickMessages), "The nine shown on an empty message"),
     ("Contacts", Act::Open(Dest::Contacts), "Saved stations and their names"),
     ("Mark all read", Act::Do(&Op::MessagesReadAll), "Clears the unread count"), // APRS-46
-    ("Delete all messages", Act::Confirm(&Op::ClearMessages), "Inbox and sent, unread ones too"), // APRS-46
+    ("Delete all messages", Act::Confirm(&Op::ClearMessages), "Inbox and sent, unread too"), // APRS-46
     ("APRS settings", Act::Open(Dest::Group(5)), "Ringer, path, retries"),
 ];
 /// APRS-13.1, APRS-13.2: the messages' rows under one of ours that is being tried, or ended without an ack.
@@ -121,7 +121,7 @@ const APRS: [Opt; 8] = [
     ("Beacon now", Act::Do(&Op::BeaconNow), "Sends your position once (needs a callsign)"),
     ("Beacon on/off", Act::Beacon, "Automatic beacons, in their mode (0 5 6 1)"),
     ("Event log", Act::Open(Dest::EventLog), "Everything decoded and logged"),
-    ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations come back as they are heard"),
+    ("Clear the heard list", Act::Confirm(&Op::ClearHeard), "Stations return when heard"),
     ("APRS settings", Act::Open(Dest::Group(5)), "Beacon, path, symbol, frequency"),
 ];
 const CHANNELS: [Opt; 1] = [("Show hidden channels", Act::ShowHidden, "Hidden channels stay reachable by number")];
@@ -139,7 +139,7 @@ const STATION: [Opt; 3] = [
 ];
 const CONTACTS: [Opt; 3] = [
     ("Edit name", Act::Sel(Sel::Name, false), "Up to 12 characters"),
-    ("Delete", Act::Sel(Sel::Delete, true), "This contact goes; messages stay"),
+    ("Delete", Act::Sel(Sel::Delete, true), "Contact goes; messages stay"),
     ("Station", Act::Sel(Sel::Station, false), "Its page, when it is in the heard list"),
 ];
 

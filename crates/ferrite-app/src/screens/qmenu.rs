@@ -227,7 +227,7 @@ pub(crate) fn repaint<S: ChannelStore>(app: &mut App, lcd: &mut impl Panel, cx: 
     app.drawn.qmenu_gone = false;
     let (x, y, bw, bh) = BOX;
     let (hash0, meter0, card0, knob0) = (app.drawn.hash, app.drawn.meter, app.drawn.card, app.knob_at.take());
-    canvas::banded(lcd, x, y, bw, bh, BG, |b| {
+    canvas::banded_part(lcd, x, y, bw, bh, BG, |b| {
         // every band draws the whole of home afresh: what it drew is forgotten before each
         app.drawn.hash = [0; REGIONS];
         app.drawn.meter = [None; ferrite_core::msg::SLOTS];

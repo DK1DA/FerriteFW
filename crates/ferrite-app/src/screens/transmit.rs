@@ -521,7 +521,8 @@ impl View for Transmit {
                         t.push(" \u{b7} ".as_bytes());
                         t.push(band_name(sl.freq()).as_bytes());
                     }
-                    w::field(lcd, 32, 152, ry, ry + 17, ry + 13, Align::Left, t.as_bytes(), &UI_12, DIM, BG);
+                    // a long channel name cut on purpose, to the room the state leaves
+                    w::field(lcd, 32, 152, ry, ry + 17, ry + 13, Align::Left, w::fit(t.as_bytes(), &UI_12, 152), &UI_12, DIM, BG);
                     let watched = app.watch_mask() & 1 << o != 0;
                     let st: &[u8] = if watched { b"paused" } else { b"off" };
                     w::field(lcd, 184, 44, ry, ry + 17, ry + 13, Align::Right, st, &UI_12, DIM, BG);
