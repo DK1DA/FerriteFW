@@ -539,6 +539,24 @@ fn monitor_and_squelch_while_locked() {
     assert!(t.app.locked());
 }
 
+/// SQL-9.1: SIDE1 held alone opens the active slot's squelch while it is held and closes it at the release,
+/// without latching (no MON); SQL-9.2's tap still latches.
+#[test]
+fn side1_held_opens_while_held() {
+    let mut t = T::new();
+    let s = store();
+    t.cmds();
+    t.app.key_down(Key::Side(1), t.t, &s);
+    t.wait(1000);
+    assert!(t.cmds().contains(&RadioCmd::Monitor { slot: 0, on: true }), "held: open");
+    assert_eq!(t.app.monitor, 0, "not latched");
+    t.app.key_up(Key::Side(1), t.t, &s);
+    t.wait(100);
+    assert!(t.cmds().contains(&RadioCmd::Monitor { slot: 0, on: false }), "let go: closed");
+    t.tap(Key::Side(1));
+    assert_eq!(t.app.monitor, 1, "a tap latches");
+}
+
 #[test]
 fn side1_and_knob_set_squelch() {
     let mut t = T::new();

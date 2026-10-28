@@ -340,3 +340,21 @@ fn lease_drop_restarts_both() {
     assert!(c.contains(&RadioCmd::Broadcast(BroadcastCmd::Fm(10_050))) && c.iter().any(|c| matches!(c, RadioCmd::Sweep { on: true, .. })), "{c:?}");
     assert!(!c.contains(&RadioCmd::Broadcast(BroadcastCmd::Off)), "{c:?}");
 }
+
+/// BCR-29.4: the sleep timer (BCR-5) ends the FM screen's broadcast only: a broadcast slot plays on past it until
+/// it is tuned out.
+#[test]
+fn sleep_timer_leaves_a_broadcast_slot_playing() {
+    let mut t = ready();
+    crate::screens::groups::change(&mut t.app, &[3, 1, 4], 1); // 15 min
+    t.open(crate::screens::nav::Dest::FmBroadcast);
+    t.wait(15 * 60_000 + 1_000);
+    assert_eq!(t.app.screen(), Screen::Home, "the FM screen's broadcast ends at 15 min");
+    t.cmds();
+    tune(&mut t, 0, FM1005);
+    t.wait(16 * 60_000);
+    assert_eq!(t.app.bcast_slot(), Some(0), "the broadcast slot plays on past the sleep time");
+    assert!(!t.cmds().contains(&RadioCmd::Broadcast(BroadcastCmd::Off)));
+    let c = tune(&mut t, 0, TWO_M);
+    assert!(c.contains(&RadioCmd::Broadcast(BroadcastCmd::Off)), "tuned out: it ends");
+}

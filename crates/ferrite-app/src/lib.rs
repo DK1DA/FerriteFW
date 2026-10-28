@@ -375,6 +375,8 @@ pub struct App {
     scan_hit: [Freq10; SLOTS],
     /// Slots with monitor latched (SIDE1 tap): MON on the card.
     pub(crate) monitor: u8,
+    /// SQL-9.1: the slot (plus 1; 0 none) whose squelch SIDE1 held alone opened, closed when SIDE1 is let go.
+    pub(crate) mon_held: u8,
     /// Quick mute (\* on home, HOME-15): slots received but never heard, a bit per slot. RAM only.
     pub(crate) mute: u8,
     out: Outbox,
@@ -477,6 +479,7 @@ impl App {
             heard: [0; SLOTS],
             last_rx: (0xFF, 0, 0, i16::MIN),
             monitor: 0,
+            mon_held: 0,
             mute: ((set.aprs_mode && set.aprs_mute) as u8) << aprs::APRS_SLOT, // APRS-15.1: muted at power on in APRS mode
             out: Outbox { q: ferrite_core::cmdq::CmdRing::new(), sync: 0, cur: NO_SLOT, step: 0 },
             write: None,
@@ -1206,6 +1209,9 @@ impl App {
                 store.used(c.num);
             }
         }
+        if relay != 0 && self.relay_mask == 0 {
+            self.show_toast(b"Watch off", b"HF needs the relay", false); // WATCH-11.2
+        }
         (self.rx_mask, self.scan_mask, self.relay_mask) = (rx, scan, relay);
         if let Some(t) = self.toast.filter(|t| after(now, t.until)) {
             self.toast = None;
@@ -1284,6 +1290,14 @@ impl App {
             self.on_key(e, store);
             self.remote_in = was;
             self.reconcile_mode(); // MODE-2
+        }
+        // SQL-9.1: SIDE1 let go (or used as a modifier and let go): the held monitor closes, unless latched since.
+        if self.mon_held != 0 && !self.keys.is_held(Key::Side(1)) {
+            let slot = self.mon_held - 1;
+            self.mon_held = 0;
+            if self.monitor & 1 << slot == 0 {
+                self.out.push(RadioCmd::Monitor { slot, on: false });
+            }
         }
     }
 

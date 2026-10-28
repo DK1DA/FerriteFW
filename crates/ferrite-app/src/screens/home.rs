@@ -338,6 +338,11 @@ impl View for Home {
                 app.out.push(RadioCmd::Monitor { slot: a, on });
                 app.show_toast(b"Monitor", if on { b"on: tap SIDE1 again" } else { b"off" }, false);
             }
+            // SQL-9.1: held alone, the squelch is open while SIDE1 is held (App::tick_keys closes it at the release).
+            (Key::Side(1), Long) if app.monitor & 1 << app.active == 0 => {
+                app.mon_held = app.active + 1;
+                app.out.push(RadioCmd::Monitor { slot: app.active, on: true });
+            }
             // KEY-18, SCAN-11: on a scanning slot \* skips the hit, as on the scan screen; otherwise quick mute.
             (Key::Star, Short) if app.scan_mask & 1 << app.active != 0 => super::scan::skip(app, app.active),
             (Key::Star, Short) => quick_mute(app), // HOME-15

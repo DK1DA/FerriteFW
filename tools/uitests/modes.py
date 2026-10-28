@@ -124,8 +124,7 @@ def hf_receiver_follows_frequency_and_mode(t):
         vfo.restore()
 
 
-@test("HF-10", pages=("Hf",), xfail="AM on 30-64 MHz stays on the SI4732 (hf.rs HfMem::rx: chip 1 for FM only); the "
-      "SI4732 tunes to 30 MHz, and HF-9/HF-10 put AM 30-64 MHz on chip 1")
+@test("HF-10", pages=("Hf",))
 def hf_am_above_30_mhz_is_chip_1(t):
     """AM above 30 MHz (6 m) is chip 1's: the SI4732 stops at 30 MHz (HF-9: chip 1 takes 18-64 MHz, FM and AM;
     HF-10: AM uses the SI4732 on 18-30 MHz only)."""
@@ -189,8 +188,9 @@ def hf_keys(t):
         vfo.restore()
 
 
-@test("HF-12", pages=("Hf", "Squelch"), xfail="SIDE1 does nothing in HF mode (hf.rs has no SIDE1 key): no monitor or "
-      "squelch on chip 1")
+@test("HF-12", pages=("Hf", "Squelch"), xfail="SIDE1 does nothing in HF mode: chip 1 has no squelch there at all (the "
+      "Radio task's HF mode opens its audio unconditionally, firmware radio/hf.rs), so monitor and the squelch level "
+      "need building first")
 def hf_side1_on_chip_1(t):
     """SIDE1 in HF mode on chip 1: monitor, and with the knob the squelch (HF-12)."""
     vfo = HfVfo(t)
@@ -255,7 +255,7 @@ def hf_patch_load_back_cancels(t):
     t.eq(u.state["mode"], "off", "HF mode stopped")
 
 
-@test("INST-14", pages=("Group", "Hf"))
+@test("INST-14", pages=("Group", "Hf"), sim_args=("--no-ssb-patch",))
 def no_patch_no_ssb_modes(t):
     """Without the SSB patch HF mode offers no USB, LSB or CW: * cycles AM (and FM on chip 1's range) only; the
     rest works (tuning, bands)."""
@@ -430,10 +430,12 @@ def strip_beside_the_broadcast(t):
         t.put_back(stopped)
 
 
-@test("BCR-29.4", slow=True, pages=("Fm", "Home"))
+@test("BCR-29.4", where="radio", slow=True, pages=("Fm", "Home"))
 def sleep_timer_ends_the_fm_screen_only(t):
     """The sleep timer at its shortest ends the FM screen's broadcast (home, a toast); a broadcast slot plays on
-    past it until tuned out."""
+    past it until tuned out. Radio only: half an hour of wall clock, which the simulator would spend the same way;
+    the host test (ferrite-app tests::bcast::sleep_timer_leaves_a_broadcast_slot_playing) runs it on the simulated
+    clock."""
     u = t.keys("MENU 0 3 1 4")
     t.eq(u.sel["name"], "Sleep timer", "MENU 0 3 1 4")
     t.knob(1)
