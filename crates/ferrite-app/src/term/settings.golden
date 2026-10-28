@@ -1639,13 +1639,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 4 2_ Popups: one of Off, On
 :_ :set 0 4 4 10_ Popups: one of Off, On
 :_ :set 0 4 4 none_ Popups: one of Off, On
-:_ :set 0 4 5 1 xyzzy_ SAME: US and Canada only
-:_ :set 0 4 5 1 on_ SAME: US and Canada only
-:_ :set 0 4 5 1 off_ SAME: US and Canada only
-:_ :set 0 4 5 1 1_ SAME: US and Canada only
-:_ :set 0 4 5 1 2_ SAME: US and Canada only
-:_ :set 0 4 5 1 10_ SAME: US and Canada only
-:_ :set 0 4 5 1 none_ SAME: US and Canada only
+:_ :set 0 4 5 1 xyzzy_ SAME: US/Canada only
+:_ :set 0 4 5 1 on_ SAME: US/Canada only
+:_ :set 0 4 5 1 off_ SAME: US/Canada only
+:_ :set 0 4 5 1 1_ SAME: US/Canada only
+:_ :set 0 4 5 1 2_ SAME: US/Canada only
+:_ :set 0 4 5 1 10_ SAME: US/Canada only
+:_ :set 0 4 5 1 none_ SAME: US/Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_ 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_ 0 5 3 APRS mode: Off
@@ -3845,13 +3845,13 @@ Battery 7.9 V   GPS off   Bluetooth off   Battery Save 1 :_ :set 0 1 1 xyzzy_ Wa
 :_ :set 0 4 4 2_ Popups: one of Off, On
 :_ :set 0 4 4 10_ Popups: one of Off, On
 :_ :set 0 4 4 none_ Popups: one of Off, On
-:_ :set 0 4 5 1 xyzzy_ SAME: US and Canada only
-:_ :set 0 4 5 1 on_ SAME: US and Canada only
-:_ :set 0 4 5 1 off_ SAME: US and Canada only
-:_ :set 0 4 5 1 1_ SAME: US and Canada only
-:_ :set 0 4 5 1 2_ SAME: US and Canada only
-:_ :set 0 4 5 1 10_ SAME: US and Canada only
-:_ :set 0 4 5 1 none_ SAME: US and Canada only
+:_ :set 0 4 5 1 xyzzy_ SAME: US/Canada only
+:_ :set 0 4 5 1 on_ SAME: US/Canada only
+:_ :set 0 4 5 1 off_ SAME: US/Canada only
+:_ :set 0 4 5 1 1_ SAME: US/Canada only
+:_ :set 0 4 5 1 2_ SAME: US/Canada only
+:_ :set 0 4 5 1 10_ SAME: US/Canada only
+:_ :set 0 4 5 1 none_ SAME: US/Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_ 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_ 0 5 3 APRS mode: Off
@@ -6032,13 +6032,13 @@ A  VFO                   146.52000   FM-N              idle       active  B  VFO
 :_ :set 0 4 4 2_ Popups: one of Off, On
 :_ :set 0 4 4 10_ Popups: one of Off, On
 :_ :set 0 4 4 none_ Popups: one of Off, On
-:_ :set 0 4 5 1 xyzzy_ SAME: US and Canada only
-:_ :set 0 4 5 1 on_ SAME: US and Canada only
-:_ :set 0 4 5 1 off_ SAME: US and Canada only
-:_ :set 0 4 5 1 1_ SAME: US and Canada only
-:_ :set 0 4 5 1 2_ SAME: US and Canada only
-:_ :set 0 4 5 1 10_ SAME: US and Canada only
-:_ :set 0 4 5 1 none_ SAME: US and Canada only
+:_ :set 0 4 5 1 xyzzy_ SAME: US/Canada only
+:_ :set 0 4 5 1 on_ SAME: US/Canada only
+:_ :set 0 4 5 1 off_ SAME: US/Canada only
+:_ :set 0 4 5 1 1_ SAME: US/Canada only
+:_ :set 0 4 5 1 2_ SAME: US/Canada only
+:_ :set 0 4 5 1 10_ SAME: US/Canada only
+:_ :set 0 4 5 1 none_ SAME: US/Canada only
 :_ :set 0 5 3 xyzzy_ APRS mode: one of Off, On
 :_ :set 0 5 3 on_ 0 5 3 APRS mode: On
 :_ :set 0 5 3 off_ 0 5 3 APRS mode: Off

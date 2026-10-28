@@ -250,7 +250,7 @@ fn monitor_text(app: &App) -> (Buf<40>, bool) {
         let _ = uwrite!(m, "Slot {} heard: broadcast paused", w::LETTERS[s % 3] as char);
         return (m, true);
     } else {
-        m.set(b"Monitor: the slots keep watching");
+        m.set(b"Monitor: slots keep watching");
     }
     (m, false)
 }

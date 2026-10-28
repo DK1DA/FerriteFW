@@ -84,9 +84,9 @@ fn no_free_number() {
     t.app.screen = Screen::Save(s);
     t.draw();
     t.shows("none free");
-    t.shows("No free channel number: all 1000 are used.");
+    t.shows("No free number: all 1000 channels are used.");
     t.tap(Key::Menu);
-    assert_eq!(t.toast(), "Not saved: / No free channel number");
+    assert_eq!(t.toast(), "Not saved: / No free number");
 }
 
 /// CHAN-26: hold 9 in HF mode saves its frequency and mode.

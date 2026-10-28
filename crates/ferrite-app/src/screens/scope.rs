@@ -448,7 +448,8 @@ impl View for Scope {
         let _ = uwrite!(t, " \u{b7} {}.{} ms", d / 10, d % 10);
         if app.set.scope_trig != 0 {
             t.push(" \u{b7} ".as_bytes());
-            t.push(SCOPE_TRIGGERS[app.set.scope_trig as usize % 3].as_bytes());
+            // "Mon" for Monitor: the whole word doesn't fit beside "60 bars" (SCOPE-2).
+            t.push(match app.set.scope_trig % 3 { 1 => "Mon", i => SCOPE_TRIGGERS[i as usize] }.as_bytes());
         }
         if app.dirty(13, hash(&t)) {
             w::field(lcd, 8, 224, INFO_Y, INFO_Y + 17, INFO_Y + 13, Align::Left, t.as_bytes(), &UI_12, SUB, BG);

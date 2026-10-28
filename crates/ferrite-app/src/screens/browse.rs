@@ -415,8 +415,8 @@ impl View for Browse {
             let (a, b): (&[u8], &[u8]) = match view {
                 V_NEARBY if data.fix().is_none() => (b"Needs a GPS fix", b"Nearby sorts by distance from it"),
                 V_NEARBY => (b"No channels with a position", b"The web app imports them"),
-                V_RECENT => (b"Nothing recent", b"Channels you tune to, use or hear"),
-                V_BROADCAST => (b"No stations saved", b"Hold 9 on a broadcast VFO saves one"),
+                V_RECENT => (b"Nothing recent", b"Channels you tune, use or hear"),
+                V_BROADCAST => (b"No stations saved", b"Hold 9 on broadcast saves one"),
                 _ => (b"No channels here", b"Hold 9 on a VFO to save one"),
             };
             app.empty(lcd, a, b);

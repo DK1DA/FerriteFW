@@ -876,7 +876,10 @@ impl App {
     pub fn notify(&mut self, head: &[u8], body: &[u8], alert: bool) {
         self.log_unread = self.log_unread.saturating_add(1);
         self.alert |= alert as u8 * ALERT_UNREAD;
-        self.show_toast(head, body, true);
+        // a message's or an alert's own text, cut to the toast's line on purpose: the inbox, the log and the alert
+        // screen have it whole
+        use ferrite_ui::widgets as w;
+        self.show_toast(head, w::fit(body, &ferrite_ui::assets::UI_12, w::toast_room(head, true)), true);
         if alert {
             let mut a = screens::alert::AlertInfo::NONE;
             a.event.set(body);
@@ -892,7 +895,8 @@ impl App {
         if screens::xb::running(self) {
             self.alert |= ALERT_WAIT;
             let event = self.alert_info.event;
-            self.show_toast(b"ALERT", event.as_bytes(), true);
+            let room = ferrite_ui::widgets::toast_room(b"ALERT", true); // the event cut on purpose, as in notify
+            self.show_toast(b"ALERT", ferrite_ui::widgets::fit(event.as_bytes(), &ferrite_ui::assets::UI_12, room), true);
         } else {
             self.alert &= !ALERT_WAIT;
             self.open(Dest::Alert);

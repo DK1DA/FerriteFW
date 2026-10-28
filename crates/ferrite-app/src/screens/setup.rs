@@ -387,7 +387,7 @@ impl View for Setup {
                         w::field(lcd, 10, 120, 249, 267, 262, Align::Left, b"Extend TX", &UI_12, if sel { BLUE } else { TEXT }, bg);
                         w::field(lcd, 130, 100, 249, 267, 262, Align::Right, ON_OFF[ext as usize].as_bytes(), &UI_12, SUB, bg);
                     });
-                    w::wrap(lcd, 10, 220, 270, 300, 283, 15, b"On: transmit wherever the radio can, not only amateur bands. Warns first.", &UI_12, SUB, BG);
+                    w::wrap(lcd, 10, 220, 270, 300, 283, 15, b"On: transmit outside the amateur bands too. Warns first.", &UI_12, SUB, BG);
                 }
             }
             Ask::Owner => {

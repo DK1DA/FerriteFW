@@ -113,10 +113,12 @@ impl View for Quick {
             // MENU-13: whose settings these are.
             w::badge(lcd, 8, 23, a, true, BG);
             w::field(lcd, 22, 4, 21, 39, 35, Align::Left, b"", &UI_12, SUB, BG);
-            w::field(lcd, 26, 66, 21, 39, 35, Align::Left, head.as_bytes(), &UI_12, SUB, BG);
+            // a longer head ("VFO · 1.25 m") moves the frequency right: it has room to spare
+            let hw = ferrite_ui::gfx::text4_width(head.as_bytes(), &UI_12).max(66);
+            w::field(lcd, 26, hw, 21, 39, 35, Align::Left, head.as_bytes(), &UI_12, SUB, BG);
             let mut fb = [0u8; 16];
             let n = ferrite_core::freq::format(f, &mut fb);
-            w::field(lcd, 92, 108, 21, 39, 35, Align::Left, &fb[..n], &UI_12B, TEXT, BG);
+            w::field(lcd, 26 + hw, 174 - hw, 21, 39, 35, Align::Left, &fb[..n], &UI_12B, TEXT, BG);
             w::field(lcd, 200, 32, 21, 39, 35, Align::Right, m.as_bytes(), &UI_12, SUB, BG);
             lcd.fill(0, 40, 240, 1, LINE);
         }

@@ -180,7 +180,8 @@ pub fn chips_sel(lcd: &mut impl Panel, x: i32, y: i32, w: i32, items: &[&[u8]], 
 }
 
 /// "146.520" in `big` and "00" in `small` on one baseline, painting only the digits' rows (the big font's line
-/// box would reach into its neighbours) and clearing to x_end. Returns where the text ends.
+/// box would reach into its neighbours) and clearing to x_end. The small digits (10 Hz) only where they end by
+/// x_end: 1000 MHz and up on home's big card leaves them out. Returns where the text ends.
 pub fn freq(
     lcd: &mut impl Panel,
     x: i32,
@@ -202,8 +203,10 @@ pub fn freq(
     let sx = x + w + 4;
     lcd.fill(x + w, y0, 4, y1 - y0, bg);
     let hs = digit_h(small);
-    lcd.fill(sx, y0, text4_width(&b[split + 1..n], small), h - hs, bg);
-    let ws = lcd.text4_rows(sx, baseline, &b[split + 1..n], small, fg_small, bg, baseline - hs, y1);
+    let tail = &b[split + 1..n];
+    let tail = if sx + text4_width(tail, small) <= x_end { tail } else { &[] };
+    lcd.fill(sx, y0, text4_width(tail, small), h - hs, bg);
+    let ws = lcd.text4_rows(sx, baseline, tail, small, fg_small, bg, baseline - hs, y1);
     lcd.fill(sx + ws, y0, x_end - sx - ws, y1 - y0, bg);
     sx + ws
 }
@@ -522,6 +525,17 @@ pub fn toast_fits(head: &[u8], body: &[u8], icon: bool) -> bool {
     body.is_empty() || text4_width(body, &UI_12) <= 232 - (x + hw + 7)
 }
 
+/// The room [`toast`] leaves its body after `head`, in pixels (0: none): to [`fit`] a body that isn't ours (a
+/// message, an alert's event) to it.
+pub fn toast_room(head: &[u8], icon: bool) -> i32 {
+    let x = if icon { 26 } else { 8 } + text4_width(head, &UI_12B);
+    if x < 225 {
+        232 - (x + 7)
+    } else {
+        0
+    }
+}
+
 /// Whether a shortcut popup's head and body fit their lines as [`popup`] lays them out (HOME-8).
 pub fn popup_fits(head: &[u8], body: &[u8]) -> bool {
     let w = POPUP_BOX.2 - 16;
@@ -543,7 +557,7 @@ fn toast_now(lcd: &mut impl Panel, head: &[u8], body: &[u8], icon: bool) {
     let base = HINT_Y + 15;
     x += lcd.text4_rows(x, base, fit(head, &UI_12B, 232 - x), &UI_12B, TEXT, TOAST, HINT_Y + 1, HINT_Y + 20);
     if !body.is_empty() && x < 225 {
-        x += 7;
+        x += if head.is_empty() { 0 } else { 7 }; // a body alone starts where a head would
         lcd.text4_rows(x, base, fit(body, &UI_12, 232 - x), &UI_12, TEXT, TOAST, HINT_Y + 1, HINT_Y + 20);
     }
 }

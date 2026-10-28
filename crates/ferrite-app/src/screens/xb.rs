@@ -373,7 +373,8 @@ pub(crate) fn try_start(app: &mut App, by: u8) -> Result<(), Buf<40>> {
     let mut out = [(Check::Ok, Buf::new()); 4];
     // The battery line is a warning only; its level doesn't matter here.
     if let Some(i) = checks(app, 100, &mut out) {
-        app.show_toast(b"Can't start:", out[i].1.as_bytes(), false);
+        // the reason alone: after "Can't start:" most were cut (the page says "Can't start yet")
+        app.show_toast(b"", out[i].1.as_bytes(), false);
         return Err(out[i].1);
     }
     app.radio.xb_on = true; // MODE-2: the reconciler starts it
