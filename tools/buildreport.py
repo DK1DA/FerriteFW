@@ -259,6 +259,19 @@ def page(r):
                        f"<td style='min-width:6rem'>{bar([(c['covered'] / c['lines'] if c['lines'] else 0, '--fast', 'covered')])}</td></tr>")
         out.append("</table></div>")
 
+    hist = r.get("history") or []
+    if hist:
+        out.append("<h2>Image size by merge</h2><div class=wrap><table><tr><th>Date</th><th>Commit</th><th class=n>Image</th>"
+                   "<th class=n>Change</th><th class=n>Fast</th><th class=n>Slow</th></tr>")
+        prev = None
+        for h in hist:
+            ch = "" if prev is None else f"{(int(h['bytes']) - prev) / 1024:+.1f} KB"
+            out.append(f"<tr><td>{e(h['date'])}</td><td><code>{e(h['commit'])}</code></td><td class=n>{kb(int(h['bytes']))}</td>"
+                       f"<td class=n>{ch}</td><td class=n>{kb(int(h['fast']))}</td><td class=n>{kb(int(h['slow']))}</td></tr>")
+            prev = int(h["bytes"])
+        out.append("</table></div><p class=sub>From tools/size-history.tsv: each build on a clean main records itself "
+                   "(tools/sizelog.py, run by mkbtf.sh), which warns past 4 KB of growth.</p>")
+
     out.append("<h2>Static RAM</h2>")
     out.append(bar([(m["ram_data"] / m["ram_size"], "--fast", ".data"), (m["ram_bss"] / m["ram_size"], "--slow", ".bss")]))
     out.append(f"<div class=key><span style='background:var(--fast);margin-left:0'></span>.data {kb(m['ram_data'])}"
@@ -317,6 +330,11 @@ def main():
         r["coverage"] = coverage()
         if r["coverage"] is None:
             print("coverage: cargo llvm-cov failed or isn't installed (cargo install cargo-llvm-cov)", file=sys.stderr)
+    hist = os.path.join(ROOT, "tools/size-history.tsv")
+    if os.path.exists(hist):
+        keys = open(hist).readline().strip().split("\t")
+        r["history"] = [dict(zip(keys, l.split("\t"))) for l in open(hist).read().splitlines()[1:]
+                        if l.split("\t")[2:3] == [BUILDS[a.build][1]]][-15:]
     stem = os.path.join(ROOT, "target", f"build-report-{a.build}")
     open(stem + ".json", "w").write(json.dumps(r, indent=1))
     open(stem + ".html", "w").write(page(r))

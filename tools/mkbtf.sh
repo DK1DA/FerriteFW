@@ -59,3 +59,5 @@ fi
 python3 tools/btf.py pack "target/$name.bin" "target/$name.btf"
 python3 tools/flash.py --dry-run - "target/$name.btf"
 shasum -a 256 "target/$name.btf"
+# The size against the last recorded build; on a clean main it records this one (tools/size-history.tsv).
+if [ "$elf" = ferrite ]; then python3 tools/sizelog.py "$name"; fi
