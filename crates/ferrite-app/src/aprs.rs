@@ -533,6 +533,10 @@ impl App {
     /// it.
     pub(crate) fn c_follow(&mut self) {
         self.c_settled();
+        if self.aprs_c() && self.off & 1 << APRS_SLOT != 0 {
+            self.off &= !(1 << APRS_SLOT); // HOME-15.1: the APRS slot is never off
+            self.out.push(RadioCmd::SlotOff(self.off));
+        }
         if self.scan_mask & 1 << APRS_SLOT != 0 {
             self.scan_mask &= !(1 << APRS_SLOT);
             self.out.push(RadioCmd::Scan { slot: APRS_SLOT, on: false }); // C stops scanning to listen to APRS
@@ -709,7 +713,7 @@ impl App {
         if !self.aprs_c() || ferrite_core::freq::band(self.aprs_freq()).1 != 0 {
             return None;
         }
-        let listening = self.watch_mask() | 1 << self.active;
+        let listening = (self.watch_mask() | 1 << self.active) & !self.off; // HOME-15.1: an off slot shares nothing
         (0..APRS_SLOT).find(|&s| listening & 1 << s != 0 && ferrite_core::freq::band(self.tuned_freq(s)).1 == 0)
     }
 

@@ -270,7 +270,7 @@ impl Radio {
         }
         // 3. The watch turn, on the frequencies the scans just stepped to.
         let asleep = if self.save.asleep() { !self.kept() } else { 0 };
-        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep, held: self.monitor, prio: self.kept(), aprs: self.aprs_slots, scan: self.range_scans(), first: watch::aprs_first() };
+        let cfg = watch::Cfg { set: self.watch_set, active: self.active, freq: self.slots.map(|s| s.freq), muted: self.user_mute, off: self.bcast_off() | asleep | self.user_off, held: self.monitor, prio: self.kept(), aprs: self.aprs_slots, scan: self.range_scans(), first: watch::aprs_first() };
         let keyed = self.path.keyed().is_some();
         let out = self.watcher.turn(now, &cfg, sq, heard, keyed);
         self.live.dropped = out.dropped;
@@ -315,7 +315,7 @@ impl Radio {
         // 5. Audio (WATCH-3): the slot the engine picks, if its tone matches; a latched monitor on the active
         // slot opens it whatever it hears (SQL-2).
         let heard_chip = |s: u8| (0..2u8).find(|&n| self.tuned[n as usize].is_some_and(|(t, _)| t == s));
-        let monitor_active = self.monitor & !self.user_mute & 1 << self.active != 0; // HOME-15: muted, not heard
+        let monitor_active = self.monitor & !(self.user_mute | self.user_off) & 1 << self.active != 0; // HOME-15: muted or off, not heard
         let audio = if monitor_active { Some(self.active) } else { out.audio };
         let audio_chip = audio.and_then(heard_chip).filter(|&n| monitor_active || toned[n as usize]);
         // APRS-21.1, APRS-16: a priority slot holding its chip for a packet with nothing on the speaker (muted, or

@@ -8,9 +8,9 @@ fn mutes(t: &mut T) -> Vec<u8> {
     t.cmds().into_iter().filter_map(|c| if let RadioCmd::Mute(m) = c { Some(m) } else { None }).collect()
 }
 
-/// HOME-15: \* mutes the active slot and \* again unmutes it; the mask goes to the Radio task; the state word says
-/// Muted, or RX muted while it receives (its S-meter and squelch carry on); the mute stays with its slot across
-/// SLOT, each slot its own.
+/// HOME-15, HOME-15.1: \* mutes the active slot, \* again turns it off and a third \* on again; the mask goes to
+/// the Radio task; the state word says Muted, or RX muted while it receives (its S-meter and squelch carry on); the
+/// mute stays with its slot across SLOT, each slot its own.
 #[test]
 fn star_mutes_the_active_slot() {
     let mut t = T::new();
@@ -31,7 +31,10 @@ fn star_mutes_the_active_slot() {
     t.tap(Key::Slot);
     t.tap(Key::Slot);
     t.tap(Key::Star);
-    assert_eq!(mutes(&mut t), [0b010], "A unmuted, B still muted");
+    assert_eq!(mutes(&mut t), [0b010], "A off (no longer muted), B still muted");
+    assert_eq!(t.app.state(0, &t.live).0, "Off");
+    t.tap(Key::Star);
+    assert_eq!(mutes(&mut t), [0b010], "A on again");
     assert_eq!(t.app.state(0, &t.live).0, "RX");
 }
 

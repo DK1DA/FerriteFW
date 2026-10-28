@@ -286,7 +286,9 @@ class T:
         STAR on home)."""
         u = self.ui(0)
         if "muted" in str(u.active.get("state", "")).lower():
-            self.press("STAR")
+            u = self.press("STAR")  # HOME-15.1: muted, then off (but on the APRS slot), then on
+            if str(u.active.get("state", "")) == "Off":
+                self.press("STAR")
             return True
         return False
 

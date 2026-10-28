@@ -147,6 +147,8 @@ pub struct FakeRadio {
     aprs_slot: u8,
     /// Quick mute (HOME-15): slots still received, never heard.
     mute: u8,
+    /// Slots turned off (HOME-15.1): no chip, never heard.
+    slot_off: u8,
     fm: u16,
     /// The broadcast plays, tuned (or a seek landed) at this time (s): as [`Fake::Fm`], or beside home's strip
     /// (MODE-5), which then has the mode report.
@@ -218,6 +220,7 @@ impl FakeRadio {
             prio: 0,
             aprs_slot: 0,
             mute: 0,
+            slot_off: 0,
             fm: 9_810,
             fm_t0: None,
             bcast: None,
@@ -343,6 +346,7 @@ impl FakeRadio {
             }
             RadioCmd::Monitor { slot, on } => self.monitor = self.monitor & !(1 << slot) | (on as u8) << slot,
             RadioCmd::Mute(m) => self.mute = m,
+            RadioCmd::SlotOff(m) => self.slot_off = m,
             RadioCmd::ScanDir { slot, up, .. } => {
                 // SCAN-16: on a hit (or in its resume wait) the engine leaves it at once.
                 let now = self.ms();
@@ -652,12 +656,12 @@ impl FakeRadio {
             }
             _ => 0,
         };
-        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off, held: self.monitor, prio: self.prio, aprs: self.aprs_slot, scan: (0..3).filter(|&i| self.scans[i].running() && self.scans[i].fast).fold(0, |m, i| m | 1 << i) , first: watch::aprs_first() };
+        let cfg = watch::Cfg { set: self.watch, active: self.active, freq: self.live.slots.map(|s| s.freq), muted: self.mute, off: off | self.slot_off, held: self.monitor, prio: self.prio, aprs: self.aprs_slot, scan: (0..3).filter(|&i| self.scans[i].running() && self.scans[i].fast).fold(0, |m, i| m | 1 << i) , first: watch::aprs_first() };
         let out = self.watcher.tick(now, &cfg, sq, self.live.tx.keyed);
         // BCR-24: the broadcast plays while no slot is heard, and 2 s after one goes quiet; a muted broadcast slot
         // never plays (HOME-15).
-        let turn = self.bturn.tick(now, out.audio.is_some() || self.monitor & !self.mute & 1 << self.active != 0);
-        let bmuted = self.bcast.is_some_and(|b| self.mute & 1 << b != 0);
+        let turn = self.bturn.tick(now, out.audio.is_some() || self.monitor & !(self.mute | self.slot_off) & 1 << self.active != 0);
+        let bmuted = self.bcast.is_some_and(|b| (self.mute | self.slot_off) & 1 << b != 0);
         if let ModeLive::Fm { heard, .. } = &mut self.live.mode {
             *heard = turn && !bmuted;
         }

@@ -80,6 +80,9 @@ pub fn ptt(app: &mut App, slot: u8) {
     if app.radio.mode != super::activity::Mode::Xb {
         app.go_home();
     } // XB-14: while the repeater runs, PTT transmits on its own slot and the repeater carries on after
+    if slot < SLOTS as u8 && app.off_refuse(slot) {
+        return; // HOME-15.4: an off slot is turned on first (\*)
+    }
     if let Some(r) = ptt_refusal(app, slot) {
         return refuse(app, slot, r);
     }
@@ -143,6 +146,9 @@ fn key_as(app: &mut App, slot: u8, confirmed: bool) {
     // LINK-19 (safety): nothing a remote key does keys the transmitter; the last check before the key-up too.
     if app.remote_tx_refused() {
         return;
+    }
+    if slot < SLOTS as u8 && app.off_refuse(slot) {
+        return; // HOME-15.4: VOX, the dialer and a remote key-up too
     }
     if let Some(r) = ptt_refusal(app, slot) {
         return refuse(app, slot, r);

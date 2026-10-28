@@ -255,7 +255,8 @@ fn aprs_line(a: &A) -> String {
 
 /// APRS-17.1, APRS-17.6, APRS-21, WATCH-17.3 (decision 313): the header's right is every card's state ("Muted"
 /// amber, the RX tag), with who wins the shared VHF chip beside it, "APRS first" grey or "A·B first" amber, and
-/// " · VHF" gone; where both don't fit ("RX muted") the state wins. The readback's `priority=`.
+/// " · VHF" gone; where both don't fit (muted while receiving) the state wins. The readback's `priority=`.
+/// HOME-15.3: muted while receiving is "Muted" in amber with the green RX tag right of it.
 #[test]
 fn aprs_card_header_priority() {
     use ferrite_ui::gfx::SUB;
@@ -280,8 +281,10 @@ fn aprs_card_header_priority() {
     a.wait(200);
     assert!(a.card_line().contains("state=\"RX muted\""));
     let fb = a.fb();
-    let rxm = ink(&fb, 100, y + 7, 126, 17, AMBER);
-    assert!(rxm > 20 && count(&fb, 100, y + 7, 60, 17, AMBER) == 0, "RX muted alone: {rxm}");
+    let rxm = ink(&fb, 100, y + 7, 94, 17, AMBER);
+    assert!(rxm > 20 && count(&fb, 100, y + 7, 60, 17, AMBER) == 0, "Muted alone: {rxm}");
+    assert!(count(&fb, 196, y + 7, 30, 17, ferrite_ui::gfx::GREEN) > 20, "the RX tag right of Muted");
+    assert_eq!(count(&fb, 196, y + 7, 30, 17, AMBER), 0, "Muted stays left of the tag");
     // unmuted, receiving: the RX tag in green with the priority beside it
     a.live.slots[APRS_SLOT as usize].squelch_open = false;
     a.app.set.aprs_share = 0;

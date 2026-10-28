@@ -20,8 +20,9 @@
 //!   changes the active slot (WATCH-5; Follow was dropped, decision 81).
 //! - Paused (WATCH-6, WATCH-16, TX-34): while keyed and until [`Watch::pause`]'s time, only the active slot.
 //! - Cancelled (WATCH-11): when the watch set needs more than one relay state, only the active slot.
-//! - Off (BCR-23): slots no chip listens to at all, whatever the set says: the broadcast slot (the SI4732 has it)
-//!   and, while broadcast plays with the relay released, slots that need the relay (BCR-15).
+//! - Off (BCR-23, WATCH-2.1): slots no chip listens to at all, whatever the set says: a slot turned off with \*
+//!   (HOME-15.1), so its turns go to the others; the broadcast slot (the SI4732 has it); and, while broadcast plays
+//!   with the relay released, slots that need the relay (BCR-15).
 //!
 //! The timings marked "to confirm on the bench" in the manual (WATCH-17).
 
@@ -84,7 +85,8 @@ pub struct Cfg {
     pub freq: [Freq10; SLOTS],
     /// Slots not heard, the active one too: quick mute (HOME-15). They still listen.
     pub muted: u8,
-    /// Slots not listened to at all, the active one too (BCR-23).
+    /// Slots not listened to at all, the active one too: turned off (HOME-15.1, WATCH-2.1), the broadcast slot
+    /// (BCR-23).
     pub off: u8,
     /// Slots whose squelch is held open (a latched monitor, SQL-14).
     pub held: u8,
@@ -796,6 +798,34 @@ mod tests {
             let a = awake(&o, h.next(t, &o, 0), 0);
             assert!(!(a[0] && a[1]), "both awake at {t}");
             assert!(a[0] || a[1]);
+        }
+    }
+
+    /// WATCH-2.1, HOME-15.1: a slot turned off with \* takes no turns: A, B and C all on 2 m (one chip), B off: the
+    /// chip alternates A and C only, and B's carrier is never heard; A off as the active slot: B and C take the turns.
+    #[test]
+    fn turned_off_slots_take_no_turns() {
+        let f = [mhz(146) + 52_000, mhz(145) + 50_000, mhz(144) + 39_000];
+        for (off, want) in [(0b010u8, 0b101u8), (0b001, 0b110), (0b000, 0b111)] {
+            let c = Cfg { set: 0b111, freq: f, off, ..cfg() };
+            let (mut w, mut hop) = (Watch::new(), Hop::new());
+            let mut had = 0u8;
+            for t in (0..5_000u32).step_by(10) {
+                let o = w.tick(t, &c, [false; 2], false);
+                hop.next(t, &o, 0);
+                assert_eq!(o.chip[1], None, "nothing on 70 cm");
+                had |= o.chip[0].map_or(0, |s| 1 << s);
+                assert!(o.audio.is_none_or(|s| off & 1 << s == 0), "an off slot is never heard");
+            }
+            assert_eq!(had, want, "off {off:03b}: the slots that had the chip");
+        }
+        // B off with its squelch open: never on a chip, so never heard; A's audio as before
+        let c = Cfg { set: 0b011, freq: f, off: 0b010, ..cfg() };
+        let mut w = Watch::new();
+        for t in (0..1_000u32).step_by(10) {
+            let o = w.tick(t, &c, [true, false], false);
+            assert_ne!(o.audio, Some(1));
+            assert!(!w.open(1));
         }
     }
 

@@ -54,6 +54,10 @@ pub fn single(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>) {
         canvas::banded(lcd, 26 + hw, 22, 240 - 26 - hw, 20, BG, |lcd| {
             if !ht.is_empty() {
                 w::field(lcd, 232 - ww, ww, 22, 40, 36, Align::Right, ht.as_bytes(), &UI_12, sc, BG);
+            } else if state == "RX muted" {
+                // HOME-15.3: the RX tag, "Muted" left of it
+                w::tag(lcd, 232, 24, b"RX", GREEN, BG);
+                w::field(lcd, 26 + hw, 200 - 26 - hw, 22, 40, 36, Align::Right, b"Muted", &UI_12, sc, BG);
             } else if matches!(state, "RX" | "TX" | "MON" | "FM") {
                 w::tag(lcd, 232, 24, state.as_bytes(), sc, BG);
             } else if state != "idle" {
@@ -238,7 +242,7 @@ pub fn activity(app: &mut App, lcd: &mut impl Panel, cx: &Cx<impl ChannelStore>)
         if !active && app.held(R_FRAME + p) {
             continue;
         }
-        let border = if active { BLUE } else if state == "RX" { GREEN } else { LINE };
+        let border = if active { BLUE } else if matches!(state, "RX" | "RX muted") { GREEN } else { LINE }; // HOME-15.3
         let geom = hash(&(s, 2u8)) | 1;
         let drawn_before = app.drawn.hash[R_FRAME + p] != 0;
         if !app.dirty(R_FRAME + p, hash(&(s, border))) {

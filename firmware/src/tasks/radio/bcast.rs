@@ -14,7 +14,7 @@ impl Radio {
             self.ldo_release(); // PWR-21.6: the supplies kept on for the broadcast go off with it
         }
         let turn = self.bturn.tick(now, slot_heard);
-        let muted = self.bcast_slot.is_some_and(|b| self.user_mute & 1 << b != 0);
+        let muted = self.bcast_slot.is_some_and(|b| (self.user_mute | self.user_off) & 1 << b != 0); // HOME-15.1: off too
         let si_heard = broadcast && turn && !muted;
         if self.si_heard != si_heard {
             if broadcast {
