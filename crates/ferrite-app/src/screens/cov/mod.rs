@@ -22,6 +22,7 @@ mod fm;
 mod gps;
 mod groups;
 mod hf;
+mod info;
 mod home;
 mod keytest;
 mod layouts;
