@@ -23,6 +23,7 @@ mod layouts;
 mod log;
 mod lowpower;
 mod msgs;
+mod opts;
 mod pin;
 mod posentry;
 mod samecodes;
