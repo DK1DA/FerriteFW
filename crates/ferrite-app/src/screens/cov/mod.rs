@@ -12,6 +12,7 @@ use std::string::String;
 use std::vec::Vec;
 
 mod coming;
+mod entry;
 mod gps;
 mod hf;
 mod home;
